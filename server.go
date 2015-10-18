@@ -29,7 +29,7 @@ type Server struct {
 	// Per-connection buffer size for responses' writing.
 	WriteBufferSize int
 
-	// Logger. 
+	// Logger.
 	Logger Logger
 
 	serverName atomic.Value
