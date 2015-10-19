@@ -10,12 +10,84 @@ import (
 	"testing"
 )
 
-func TestResponseConnectionClose(t *testing.T) {
-	testResponseConnectionClose(t, true)
-	testResponseConnectionClose(t, false)
+func TestResponseHeaderSetGet(t *testing.T) {
+	h := &ResponseHeader{}
+	h.Set("foo", "bar")
+	h.Set("content-type", "aaa/bbb")
+	h.Set("connection", "close")
+	h.Set("content-length", "1234")
+	h.Set("Server", "aaaa")
+	h.Set("baz", "xxxxx")
+	h.Set("Transfer-Encoding", "chunked")
+
+	expectResponseHeaderGet(t, h, "Foo", "bar")
+	expectResponseHeaderGet(t, h, "Content-Type", "aaa/bbb")
+	expectResponseHeaderGet(t, h, "Connection", "close")
+	expectResponseHeaderGet(t, h, "seRVer", "aaaa")
+	expectResponseHeaderGet(t, h, "baz", "xxxxx")
+	expectResponseHeaderGet(t, h, "Transfer-Encoding", "")
+
+	if !bytes.Equal(h.ContentType, []byte("aaa/bbb")) {
+		t.Fatalf("Unexpected content-type %q. Expected %q", h.ContentType, "aaa/bbb")
+	}
+	if !bytes.Equal(h.Server, []byte("aaaa")) {
+		t.Fatalf("Unepxected Server %q. Expected %q", h.Server, "aaaa")
+	}
+	if h.ContentLength != 0 {
+		t.Fatalf("Unexpected content-length %d. Expected %d", h.ContentLength, 0)
+	}
+	if !h.ConnectionClose {
+		t.Fatalf("Unexpected Connection: close value %v. Expected %v", h.ConnectionClose, true)
+	}
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	err := h.Write(bw)
+	if err != nil {
+		t.Fatalf("Unexpected error when writing response header: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("Unexpected error when flushing response header: %s", err)
+	}
+
+	var h1 ResponseHeader
+	br := bufio.NewReader(w)
+	if err = h1.Read(br); err != nil {
+		t.Fatalf("Unexpected error when reading response header: %s", err)
+	}
+
+	if !bytes.Equal(h1.ContentType, h.ContentType) {
+		t.Fatalf("Unexpected content-type %q. Expected %q", h1.ContentType, h.ContentType)
+	}
+	if !bytes.Equal(h1.Server, h.Server) {
+		t.Fatalf("Unepxected Server %q. Expected %q", h1.Server, h.Server)
+	}
+	if h1.ContentLength != h.ContentLength {
+		t.Fatalf("Unexpected Content-Length %d. Expected %d", h1.ContentLength, h.ContentLength)
+	}
+	if h1.ConnectionClose != h.ConnectionClose {
+		t.Fatalf("unexpected connection: close %v. Expected %v", h1.ConnectionClose, h.ConnectionClose)
+	}
+
+	expectResponseHeaderGet(t, &h1, "Foo", "bar")
+	expectResponseHeaderGet(t, &h1, "Content-Type", "aaa/bbb")
+	expectResponseHeaderGet(t, &h1, "Connection", "close")
+	expectResponseHeaderGet(t, &h1, "seRVer", "aaaa")
+	expectResponseHeaderGet(t, &h1, "baz", "xxxxx")
 }
 
-func testResponseConnectionClose(t *testing.T, connectionClose bool) {
+func expectResponseHeaderGet(t *testing.T, h *ResponseHeader, key, expectedValue string) {
+	if h.Get(key) != expectedValue {
+		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.Get(key), expectedValue)
+	}
+}
+
+func TestResponseHeaderConnectionClose(t *testing.T) {
+	testResponseHeaderConnectionClose(t, true)
+	testResponseHeaderConnectionClose(t, false)
+}
+
+func testResponseHeaderConnectionClose(t *testing.T, connectionClose bool) {
 	h := &ResponseHeader{
 		ConnectionClose: connectionClose,
 	}

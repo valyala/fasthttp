@@ -47,6 +47,9 @@ type ResponseHeader struct {
 	ContentLength   int
 	Server          []byte
 	ConnectionClose bool
+
+	h     []argsKV
+	bufKV argsKV
 }
 
 type RequestHeader struct {
@@ -77,6 +80,8 @@ func (h *ResponseHeader) Clear() {
 	h.ContentType = h.ContentType[:0]
 	h.Server = h.Server[:0]
 	h.ConnectionClose = false
+
+	h.h = h.h[:0]
 }
 
 func (h *RequestHeader) Clear() {
@@ -87,6 +92,90 @@ func (h *RequestHeader) Clear() {
 	h.Referer = h.Referer[:0]
 	h.ContentType = h.ContentType[:0]
 	h.ContentLength = 0
+}
+
+func (h *ResponseHeader) Set(key, value string) {
+	h.bufKV.key = AppendBytesStr(h.bufKV.key[:0], key)
+	normalizeHeaderKey(h.bufKV.key)
+	k := h.bufKV.key
+
+	switch {
+	case bytes.Equal(strContentLength, k):
+		// skip Conent-Length setting, since it will be set automatically.
+		return
+	case bytes.Equal(strContentType, k):
+		h.ContentType = AppendBytesStr(h.ContentType[:0], value)
+		return
+	case bytes.Equal(strServer, k):
+		h.Server = AppendBytesStr(h.Server[:0], value)
+		return
+	case bytes.Equal(strConnection, k):
+		if EqualBytesStr(strClose, value) {
+			h.ConnectionClose = true
+		}
+		// skip other 'Connection' shit :)
+		return
+	case bytes.Equal(strTransferEncoding, k):
+		// skip Transfer-Encoding shit, since we control it ourselves
+		return
+	}
+
+	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
+	h.setBytes(k, h.bufKV.value)
+}
+
+func (h *ResponseHeader) setBytes(key, value []byte) {
+	n := len(h.h)
+	for i := 0; i < n; i++ {
+		kv := &h.h[i]
+		if bytes.Equal(kv.key, key) {
+			kv.value = append(kv.value[:0], value...)
+			return
+		}
+	}
+
+	if cap(h.h) > n {
+		h.h = h.h[:n+1]
+		kv := &h.h[n]
+		kv.key = append(kv.key[:0], key...)
+		kv.value = append(kv.value[:0], value...)
+		return
+	}
+
+	var kv argsKV
+	kv.key = append(kv.key, key...)
+	kv.value = append(kv.value, value...)
+	h.h = append(h.h, kv)
+}
+
+func (h *ResponseHeader) Peek(key string) []byte {
+	h.bufKV.key = AppendBytesStr(h.bufKV.key[:0], key)
+	normalizeHeaderKey(h.bufKV.key)
+	k := h.bufKV.key
+
+	switch {
+	case bytes.Equal(strContentType, k):
+		return h.ContentType
+	case bytes.Equal(strServer, k):
+		return h.Server
+	case bytes.Equal(strConnection, k):
+		if h.ConnectionClose {
+			return strClose
+		}
+		return nil
+	}
+
+	for i, n := 0, len(h.h); i < n; i++ {
+		kv := &h.h[i]
+		if bytes.Equal(k, kv.key) {
+			return kv.value
+		}
+	}
+	return nil
+}
+
+func (h *ResponseHeader) Get(key string) string {
+	return string(h.Peek(key))
 }
 
 func (h *ResponseHeader) Read(r *bufio.Reader) error {
@@ -227,6 +316,11 @@ func (h *ResponseHeader) Write(w *bufio.Writer) error {
 
 	if h.ConnectionClose {
 		writeHeaderLine(w, strConnection, strClose)
+	}
+
+	for i, n := 0, len(h.h); i < n; i++ {
+		kv := &h.h[i]
+		writeHeaderLine(w, kv.key, kv.value)
 	}
 
 	_, err := w.Write(strCRLF)
@@ -414,6 +508,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) ([]byte, error) {
 	for p.next() {
 		if bytes.Equal(p.key, strContentType) {
 			h.ContentType = append(h.ContentType[:0], p.value...)
+			continue
 		}
 		if bytes.Equal(p.key, strContentLength) && h.ContentLength != -1 {
 			h.ContentLength, err = parseContentLength(p.value)
@@ -423,16 +518,21 @@ func (h *ResponseHeader) parseHeaders(buf []byte) ([]byte, error) {
 				}
 				return nil, fmt.Errorf("cannot parse Content-Length %q: %s at %q", p.value, err, buf)
 			}
+			continue
 		}
 		if bytes.Equal(p.key, strTransferEncoding) && bytes.Equal(p.value, strChunked) {
 			h.ContentLength = -1
+			continue
 		}
 		if bytes.Equal(p.key, strServer) {
 			h.Server = append(h.Server[:0], p.value...)
+			continue
 		}
 		if bytes.Equal(p.key, strConnection) && bytes.Equal(p.value, strClose) {
 			h.ConnectionClose = true
+			continue
 		}
+		h.setBytes(p.key, p.value)
 	}
 	if p.err != nil {
 		return nil, p.err
@@ -456,15 +556,19 @@ func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 	for p.next() {
 		if bytes.Equal(p.key, strHost) {
 			h.Host = append(h.Host[:0], p.value...)
+			continue
 		}
 		if bytes.Equal(p.key, strUserAgent) {
 			h.UserAgent = append(h.UserAgent[:0], p.value...)
+			continue
 		}
 		if bytes.Equal(p.key, strReferer) {
 			h.Referer = append(h.Referer[:0], p.value...)
+			continue
 		}
 		if bytes.Equal(p.key, strContentType) {
 			h.ContentType = append(h.ContentType[:0], p.value...)
+			continue
 		}
 		if bytes.Equal(p.key, strContentLength) && h.ContentLength != -1 {
 			h.ContentLength, err = parseContentLength(p.value)
@@ -474,9 +578,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 				}
 				return nil, fmt.Errorf("cannot parse Content-Length %q: %s at %q", p.value, err, buf)
 			}
+			continue
 		}
 		if bytes.Equal(p.key, strTransferEncoding) && bytes.Equal(p.value, strChunked) {
 			h.ContentLength = -1
+			continue
 		}
 	}
 	if p.err != nil {
