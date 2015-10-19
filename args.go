@@ -24,7 +24,7 @@ func (a *Args) Len() int {
 }
 
 func (a *Args) Parse(s string) {
-	a.buf = CopyBytesStr(a.buf, s)
+	a.buf = AppendBytesStr(a.buf[:0], s)
 	a.ParseBytes(a.buf)
 }
 
@@ -89,7 +89,7 @@ func (a *Args) Del(key string) {
 }
 
 func (a *Args) Set(key, value string) {
-	a.buf = CopyBytesStr(a.buf, value)
+	a.buf = AppendBytesStr(a.buf[:0], value)
 	a.SetBytes(key, a.buf)
 }
 
@@ -106,13 +106,13 @@ func (a *Args) SetBytes(key string, value []byte) {
 	if cap(a.args) > n {
 		a.args = a.args[:n+1]
 		kv := &a.args[n]
-		kv.key = CopyBytesStr(kv.key, key)
+		kv.key = AppendBytesStr(kv.key[:0], key)
 		kv.value = append(kv.value[:0], value...)
 		return
 	}
 
 	var kv argsKV
-	kv.key = CopyBytesStr(kv.key, key)
+	kv.key = AppendBytesStr(kv.key, key)
 	kv.value = append(kv.value, value...)
 	a.args = append(a.args, kv)
 }
@@ -187,8 +187,7 @@ func EqualBytesStr(b []byte, s string) bool {
 	return true
 }
 
-func CopyBytesStr(dst []byte, src string) []byte {
-	dst = dst[:0]
+func AppendBytesStr(dst []byte, src string) []byte {
 	for i, n := 0, len(src); i < n; i++ {
 		dst = append(dst, src[i])
 	}
