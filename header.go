@@ -373,6 +373,8 @@ func statusLine(statusCode int) []byte {
 	switch statusCode {
 	case 200:
 		statusText = "OK"
+	case 304:
+		statusText = "Not Modified"
 	case 500:
 		statusText = "Internal server error"
 	}
