@@ -60,6 +60,9 @@ type RequestHeader struct {
 	Referer       []byte
 	ContentType   []byte
 	ContentLength int
+
+	h     []argsKV
+	bufKV argsKV
 }
 
 func (h *RequestHeader) IsMethodGet() bool {
@@ -92,12 +95,12 @@ func (h *RequestHeader) Clear() {
 	h.Referer = h.Referer[:0]
 	h.ContentType = h.ContentType[:0]
 	h.ContentLength = 0
+
+	h.h = h.h[:0]
 }
 
 func (h *ResponseHeader) Set(key, value string) {
-	h.bufKV.key = AppendBytesStr(h.bufKV.key[:0], key)
-	normalizeHeaderKey(h.bufKV.key)
-	k := h.bufKV.key
+	k := getKeyBytes(&h.bufKV, key)
 
 	switch {
 	case bytes.Equal(strContentLength, k):
@@ -116,42 +119,47 @@ func (h *ResponseHeader) Set(key, value string) {
 		// skip other 'Connection' shit :)
 		return
 	case bytes.Equal(strTransferEncoding, k):
-		// skip Transfer-Encoding shit, since we control it ourselves
+		// Transfer-Encoding is managed automatically.
 		return
 	}
 
 	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
-	h.setBytes(k, h.bufKV.value)
+	h.h = setKV(h.h, k, h.bufKV.value)
 }
 
-func (h *ResponseHeader) setBytes(key, value []byte) {
-	n := len(h.h)
-	for i := 0; i < n; i++ {
-		kv := &h.h[i]
-		if bytes.Equal(kv.key, key) {
-			kv.value = append(kv.value[:0], value...)
-			return
-		}
-	}
+func (h *RequestHeader) Set(key, value string) {
+	k := getKeyBytes(&h.bufKV, key)
 
-	if cap(h.h) > n {
-		h.h = h.h[:n+1]
-		kv := &h.h[n]
-		kv.key = append(kv.key[:0], key...)
-		kv.value = append(kv.value[:0], value...)
+	switch {
+	case bytes.Equal(strHost, k):
+		h.Host = AppendBytesStr(h.Host[:0], value)
+		return
+	case bytes.Equal(strUserAgent, k):
+		h.UserAgent = AppendBytesStr(h.UserAgent[:0], value)
+		return
+	case bytes.Equal(strReferer, k):
+		h.Referer = AppendBytesStr(h.Referer[:0], value)
+		return
+	case bytes.Equal(strContentType, k):
+		h.ContentType = AppendBytesStr(h.ContentType[:0], value)
+		return
+	case bytes.Equal(strContentLength, k):
+		// Content-Length is managed automatically.
+		return
+	case bytes.Equal(strTransferEncoding, k):
+		// Transfer-Encoding is managed automatically.
+		return
+	case bytes.Equal(strConnection, k):
+		// Connection is managed automatically.
 		return
 	}
 
-	var kv argsKV
-	kv.key = append(kv.key, key...)
-	kv.value = append(kv.value, value...)
-	h.h = append(h.h, kv)
+	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
+	h.h = setKV(h.h, k, h.bufKV.value)
 }
 
 func (h *ResponseHeader) Peek(key string) []byte {
-	h.bufKV.key = AppendBytesStr(h.bufKV.key[:0], key)
-	normalizeHeaderKey(h.bufKV.key)
-	k := h.bufKV.key
+	k := getKeyBytes(&h.bufKV, key)
 
 	switch {
 	case bytes.Equal(strContentType, k):
@@ -165,17 +173,38 @@ func (h *ResponseHeader) Peek(key string) []byte {
 		return nil
 	}
 
-	for i, n := 0, len(h.h); i < n; i++ {
-		kv := &h.h[i]
-		if bytes.Equal(k, kv.key) {
-			return kv.value
-		}
+	return peekKV(h.h, k)
+}
+
+func (h *RequestHeader) Peek(key string) []byte {
+	k := getKeyBytes(&h.bufKV, key)
+
+	switch {
+	case bytes.Equal(strHost, k):
+		return h.Host
+	case bytes.Equal(strUserAgent, k):
+		return h.UserAgent
+	case bytes.Equal(strReferer, k):
+		return h.Referer
+	case bytes.Equal(strContentType, k):
+		return h.ContentType
 	}
-	return nil
+
+	return peekKV(h.h, k)
 }
 
 func (h *ResponseHeader) Get(key string) string {
 	return string(h.Peek(key))
+}
+
+func (h *RequestHeader) Get(key string) string {
+	return string(h.Peek(key))
+}
+
+func getKeyBytes(kv *argsKV, key string) []byte {
+	kv.key = AppendBytesStr(kv.key[:0], key)
+	normalizeHeaderKey(kv.key)
+	return kv.key
 }
 
 func (h *ResponseHeader) Read(r *bufio.Reader) error {
@@ -396,6 +425,11 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 		writeContentLength(w, h.ContentLength)
 	}
 
+	for i, n := 0, len(h.h); i < n; i++ {
+		kv := &h.h[i]
+		writeHeaderLine(w, kv.key, kv.value)
+	}
+
 	_, err := w.Write(strCRLF)
 	return err
 }
@@ -532,7 +566,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) ([]byte, error) {
 			h.ConnectionClose = true
 			continue
 		}
-		h.setBytes(p.key, p.value)
+		h.h = setKV(h.h, p.key, p.value)
 	}
 	if p.err != nil {
 		return nil, p.err
@@ -584,6 +618,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 			h.ContentLength = -1
 			continue
 		}
+		h.h = setKV(h.h, p.key, p.value)
 	}
 	if p.err != nil {
 		return nil, p.err

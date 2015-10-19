@@ -6,8 +6,9 @@ import (
 )
 
 type Args struct {
-	args []argsKV
-	buf  []byte
+	args  []argsKV
+	bufKV argsKV
+	buf   []byte
 }
 
 type argsKV struct {
@@ -89,32 +90,47 @@ func (a *Args) Del(key string) {
 }
 
 func (a *Args) Set(key, value string) {
-	a.buf = AppendBytesStr(a.buf[:0], value)
-	a.SetBytes(key, a.buf)
+	a.bufKV.value = AppendBytesStr(a.bufKV.value[:0], value)
+	a.SetBytes(key, a.bufKV.value)
 }
 
 func (a *Args) SetBytes(key string, value []byte) {
-	n := len(a.args)
+	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
+	a.args = setKV(a.args, a.bufKV.key, value)
+}
+
+func setKV(h []argsKV, key, value []byte) []argsKV {
+	n := len(h)
 	for i := 0; i < n; i++ {
-		kv := &a.args[i]
-		if EqualBytesStr(kv.key, key) {
+		kv := &h[i]
+		if bytes.Equal(kv.key, key) {
 			kv.value = append(kv.value[:0], value...)
-			return
+			return h
 		}
 	}
 
-	if cap(a.args) > n {
-		a.args = a.args[:n+1]
-		kv := &a.args[n]
-		kv.key = AppendBytesStr(kv.key[:0], key)
+	if cap(h) > n {
+		h = h[:n+1]
+		kv := &h[n]
+		kv.key = append(kv.key[:0], key...)
 		kv.value = append(kv.value[:0], value...)
-		return
+		return h
 	}
 
 	var kv argsKV
-	kv.key = AppendBytesStr(kv.key, key)
+	kv.key = append(kv.key, key...)
 	kv.value = append(kv.value, value...)
-	a.args = append(a.args, kv)
+	return append(h, kv)
+}
+
+func peekKV(h []argsKV, k []byte) []byte {
+	for i, n := 0, len(h); i < n; i++ {
+		kv := &h[i]
+		if bytes.Equal(k, kv.key) {
+			return kv.value
+		}
+	}
+	return nil
 }
 
 func (a *Args) GetBytes(dst []byte, key string) []byte {
@@ -128,13 +144,8 @@ func (a *Args) Get(key string) string {
 }
 
 func (a *Args) Peek(key string) []byte {
-	for i, n := 0, len(a.args); i < n; i++ {
-		kv := &a.args[i]
-		if EqualBytesStr(kv.key, key) {
-			return kv.value
-		}
-	}
-	return nil
+	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
+	return peekKV(a.args, a.bufKV.key)
 }
 
 func (a *Args) Has(key string) bool {

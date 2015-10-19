@@ -10,6 +10,87 @@ import (
 	"testing"
 )
 
+func TestRequestHeaderSetGet(t *testing.T) {
+	h := &RequestHeader{
+		Method:     strPost,
+		RequestURI: []byte("/aa/bbb"),
+	}
+	h.Set("foo", "bar")
+	h.Set("host", "12345")
+	h.Set("content-type", "aaa/bbb")
+	h.Set("content-length", "1234")
+	h.Set("user-agent", "aaabbb")
+	h.Set("referer", "axcv")
+	h.Set("baz", "xxxxx")
+	h.Set("transfer-encoding", "chunked")
+
+	expectRequestHeaderGet(t, h, "Foo", "bar")
+	expectRequestHeaderGet(t, h, "Host", "12345")
+	expectRequestHeaderGet(t, h, "Content-Type", "aaa/bbb")
+	expectRequestHeaderGet(t, h, "Content-Length", "")
+	expectRequestHeaderGet(t, h, "USER-AGent", "aaabbb")
+	expectRequestHeaderGet(t, h, "Referer", "axcv")
+	expectRequestHeaderGet(t, h, "baz", "xxxxx")
+	expectRequestHeaderGet(t, h, "Transfer-Encoding", "")
+
+	if !bytes.Equal(h.Host, []byte("12345")) {
+		t.Fatalf("Unexpected host %q. Expected %q", h.Host, "12345")
+	}
+	if !bytes.Equal(h.ContentType, []byte("aaa/bbb")) {
+		t.Fatalf("Unexpected content-type %q. Expected %q", h.ContentType, "aaa/bbb")
+	}
+	if !bytes.Equal(h.UserAgent, []byte("aaabbb")) {
+		t.Fatalf("Unepxected Server %q. Expected %q", h.UserAgent, "aaabbb")
+	}
+	if !bytes.Equal(h.Referer, []byte("axcv")) {
+		t.Fatalf("Unexpected referer %q. Expected %q", h.Referer, "axcv")
+	}
+	if h.ContentLength != 0 {
+		t.Fatalf("Unexpected content-length %d. Expected %d", h.ContentLength, 0)
+	}
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	err := h.Write(bw)
+	if err != nil {
+		t.Fatalf("Unexpected error when writing request header: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("Unexpected error when flushing request header: %s", err)
+	}
+
+	var h1 RequestHeader
+	br := bufio.NewReader(w)
+	if err = h1.Read(br); err != nil {
+		t.Fatalf("Unexpected error when reading request header: %s", err)
+	}
+
+	if !bytes.Equal(h1.Host, h.Host) {
+		t.Fatalf("Unexpected host %q. Expected %q", h1.Host, h.Host)
+	}
+	if !bytes.Equal(h1.ContentType, h.ContentType) {
+		t.Fatalf("Unexpected content-type %q. Expected %q", h1.ContentType, h.ContentType)
+	}
+	if !bytes.Equal(h1.UserAgent, h.UserAgent) {
+		t.Fatalf("Unexpected user-agent %q. Expected %q", h1.UserAgent, h.UserAgent)
+	}
+	if !bytes.Equal(h1.Referer, h.Referer) {
+		t.Fatalf("Unepxected referer %q. Expected %q", h1.Referer, h.Referer)
+	}
+	if h1.ContentLength != h.ContentLength {
+		t.Fatalf("Unexpected Content-Length %d. Expected %d", h1.ContentLength, h.ContentLength)
+	}
+
+	expectRequestHeaderGet(t, &h1, "Foo", "bar")
+	expectRequestHeaderGet(t, &h1, "HOST", "12345")
+	expectRequestHeaderGet(t, &h1, "Content-Type", "aaa/bbb")
+	expectRequestHeaderGet(t, &h1, "Content-Length", "")
+	expectRequestHeaderGet(t, &h1, "USER-AGent", "aaabbb")
+	expectRequestHeaderGet(t, &h1, "Referer", "axcv")
+	expectRequestHeaderGet(t, &h1, "baz", "xxxxx")
+	expectRequestHeaderGet(t, &h1, "Transfer-Encoding", "")
+}
+
 func TestResponseHeaderSetGet(t *testing.T) {
 	h := &ResponseHeader{}
 	h.Set("foo", "bar")
@@ -23,6 +104,7 @@ func TestResponseHeaderSetGet(t *testing.T) {
 	expectResponseHeaderGet(t, h, "Foo", "bar")
 	expectResponseHeaderGet(t, h, "Content-Type", "aaa/bbb")
 	expectResponseHeaderGet(t, h, "Connection", "close")
+	expectResponseHeaderGet(t, h, "Content-Length", "")
 	expectResponseHeaderGet(t, h, "seRVer", "aaaa")
 	expectResponseHeaderGet(t, h, "baz", "xxxxx")
 	expectResponseHeaderGet(t, h, "Transfer-Encoding", "")
@@ -74,6 +156,12 @@ func TestResponseHeaderSetGet(t *testing.T) {
 	expectResponseHeaderGet(t, &h1, "Connection", "close")
 	expectResponseHeaderGet(t, &h1, "seRVer", "aaaa")
 	expectResponseHeaderGet(t, &h1, "baz", "xxxxx")
+}
+
+func expectRequestHeaderGet(t *testing.T, h *RequestHeader, key, expectedValue string) {
+	if h.Get(key) != expectedValue {
+		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.Get(key), expectedValue)
+	}
 }
 
 func expectResponseHeaderGet(t *testing.T, h *ResponseHeader, key, expectedValue string) {
