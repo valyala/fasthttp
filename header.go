@@ -110,6 +110,11 @@ func (h *ResponseHeader) set(key, value []byte) {
 	}
 }
 
+func (h *ResponseHeader) SetBytes(key string, value []byte) {
+	k := getHeaderKeyBytes(&h.bufKV, key)
+	h.set(k, value)
+}
+
 func (h *ResponseHeader) setStr(key []byte, value string) {
 	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
 	h.set(key, h.bufKV.value)
@@ -131,6 +136,11 @@ func (h *RequestHeader) set(key, value []byte) {
 	default:
 		h.h = setKV(h.h, key, value)
 	}
+}
+
+func (h *RequestHeader) SetBytes(key string, value []byte) {
+	k := getHeaderKeyBytes(&h.bufKV, key)
+	h.set(k, value)
 }
 
 func (h *ResponseHeader) Peek(key string) []byte {
