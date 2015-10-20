@@ -39,13 +39,13 @@ type Server struct {
 type RequestHandler func(ctx *ServerCtx)
 
 type ServerCtx struct {
-	Request  Request
-	Response Response
+	Request Request
 
 	// Unique id of the context.
 	// Used by ServerCtx.Logger().
 	ID uint64
 
+	resp   Response
 	logger ctxLogger
 	s      *Server
 	c      remoteAddrer
@@ -97,32 +97,24 @@ func (ctx *ServerCtx) RemoteIP() string {
 }
 
 func (ctx *ServerCtx) Error(msg string, statusCode int) {
-	resp := ctx.zeroResponse()
+	resp := ctx.Response()
+	resp.Clear()
 	resp.Header.StatusCode = statusCode
-	resp.Header.ContentType = append(resp.Header.ContentType, defaultContentType...)
+	resp.Header.set(strContentType, defaultContentType)
 	resp.Body = append(resp.Body, []byte(msg)...)
 }
 
 func (ctx *ServerCtx) Success(contentType string, body []byte) {
-	resp := ctx.zeroResponse()
-	resp.Header.ContentType = appendString(resp.Header.ContentType, contentType)
+	resp := ctx.Response()
+	resp.Header.setStr(strContentType, contentType)
 	resp.Body = append(resp.Body, body...)
 }
 
-func appendString(b []byte, s string) []byte {
-	for i, n := 0, len(s); i < n; i++ {
-		b = append(b, s[i])
-	}
-	return b
-}
-
-func (ctx *ServerCtx) zeroResponse() *Response {
+func (ctx *ServerCtx) Response() *Response {
 	if ctx.shadow != nil {
 		ctx = ctx.shadow
 	}
-	resp := &ctx.Response
-	resp.Clear()
-	return resp
+	return &ctx.resp
 }
 
 func (ctx *ServerCtx) Logger() Logger {
@@ -136,7 +128,7 @@ func (ctx *ServerCtx) Steal() {
 
 	shadow := *ctx
 	shadow.Request = Request{}
-	shadow.Response = Response{}
+	shadow.resp = Response{}
 	shadow.logger.ctx = &shadow
 	shadow.v = &shadow
 	ctx.shadow = &shadow
@@ -144,17 +136,16 @@ func (ctx *ServerCtx) Steal() {
 
 func (ctx *ServerCtx) writeResponse() error {
 	if ctx.shadow != nil {
-		panic("BUG: ServerCtx.writeResponse() shouldn't be called on shadow")
+		panic("BUG: ctx.shadow is not null")
 	}
-	resp := &ctx.Response
-	h := &resp.Header
-	serverOld := h.Server
+	h := &ctx.resp.Header
+	serverOld := h.peek(strServer)
 	if len(serverOld) == 0 {
-		h.Server = ctx.s.getServerName()
+		h.set(strServer, ctx.s.getServerName())
 	}
-	err := resp.Write(ctx.w)
+	err := ctx.resp.Write(ctx.w)
 	if len(serverOld) == 0 {
-		h.Server = serverOld
+		h.set(strServer, serverOld)
 	}
 	return err
 }
@@ -305,9 +296,9 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **ServerCtx) error {
 		if err = ctx.writeResponse(); err != nil {
 			break
 		}
-		connectionClose := ctx.Response.Header.ConnectionClose
+		connectionClose := ctx.resp.Header.ConnectionClose
 
-		ctx.Response.Clear()
+		ctx.resp.Clear()
 		trimBigBuffers(ctx)
 
 		if ctx.r.Buffered() == 0 || connectionClose {
@@ -329,8 +320,8 @@ func trimBigBuffers(ctx *ServerCtx) {
 	if cap(ctx.Request.Body) > bigBufferLimit {
 		ctx.Request.Body = nil
 	}
-	if cap(ctx.Response.Body) > bigBufferLimit {
-		ctx.Response.Body = nil
+	if cap(ctx.resp.Body) > bigBufferLimit {
+		ctx.resp.Body = nil
 	}
 }
 

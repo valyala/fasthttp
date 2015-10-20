@@ -33,7 +33,7 @@ func (req *Request) ParseURI() {
 	if req.parsedURI {
 		return
 	}
-	req.URI.Parse(req.Header.Host, req.Header.RequestURI)
+	req.URI.Parse(req.Header.peek(strHost), req.Header.RequestURI)
 	req.parsedURI = true
 }
 
@@ -45,9 +45,9 @@ func (req *Request) ParsePostArgs() error {
 	if !req.Header.IsMethodPost() {
 		return fmt.Errorf("Cannot parse POST args for %q request", req.Header.Method)
 	}
-	if !bytes.Equal(req.Header.ContentType, strPostArgsContentType) {
+	if !bytes.Equal(req.Header.peek(strContentType), strPostArgsContentType) {
 		return fmt.Errorf("Cannot parse POST args for %q Content-Type. Required %q Content-Type",
-			req.Header.ContentType, strPostArgsContentType)
+			req.Header.peek(strContentType), strPostArgsContentType)
 	}
 	req.PostArgs.ParseBytes(req.Body)
 	req.parsedPostArgs = true

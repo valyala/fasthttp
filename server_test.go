@@ -51,7 +51,7 @@ func TestServerSteal(t *testing.T) {
 func TestServerConnectionClose(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *ServerCtx) {
-			ctx.Response.Header.ConnectionClose = true
+			ctx.Response().Header.ConnectionClose = true
 		},
 	}
 
@@ -266,8 +266,8 @@ func TestServerConnError(t *testing.T) {
 	if resp.Header.ContentLength != 6 {
 		t.Fatalf("Unexpected Content-Length %d. Expected %d", resp.Header.ContentLength, 6)
 	}
-	if !bytes.Equal(resp.Header.ContentType, defaultContentType) {
-		t.Fatalf("Unexpected Content-Type %q. Expected %q", resp.Header.ContentType, defaultContentType)
+	if resp.Header.Get("Content-Type") != string(defaultContentType) {
+		t.Fatalf("Unexpected Content-Type %q. Expected %q", resp.Header.Get("Content-Type"), defaultContentType)
 	}
 	if !bytes.Equal(resp.Body, []byte("foobar")) {
 		t.Fatalf("Unexpected body %q. Expected %q", resp.Body, "foobar")
@@ -278,7 +278,7 @@ func TestServeConnSingleRequest(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *ServerCtx) {
 			h := &ctx.Request.Header
-			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI, h.Host)))
+			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI, h.Get("Host"))))
 		},
 	}
 
@@ -307,7 +307,7 @@ func TestServeConnMultiRequests(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *ServerCtx) {
 			h := &ctx.Request.Header
-			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI, h.Host)))
+			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI, h.Get("Host"))))
 		},
 	}
 

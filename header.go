@@ -43,9 +43,7 @@ var (
 
 type ResponseHeader struct {
 	StatusCode      int
-	ContentType     []byte
 	ContentLength   int
-	Server          []byte
 	ConnectionClose bool
 
 	h     []argsKV
@@ -55,10 +53,6 @@ type ResponseHeader struct {
 type RequestHeader struct {
 	Method        []byte
 	RequestURI    []byte
-	Host          []byte
-	UserAgent     []byte
-	Referer       []byte
-	ContentType   []byte
 	ContentLength int
 
 	h     []argsKV
@@ -80,8 +74,6 @@ func (h *RequestHeader) IsMethodHead() bool {
 func (h *ResponseHeader) Clear() {
 	h.StatusCode = 0
 	h.ContentLength = 0
-	h.ContentType = h.ContentType[:0]
-	h.Server = h.Server[:0]
 	h.ConnectionClose = false
 
 	h.h = h.h[:0]
@@ -90,107 +82,79 @@ func (h *ResponseHeader) Clear() {
 func (h *RequestHeader) Clear() {
 	h.Method = h.Method[:0]
 	h.RequestURI = h.RequestURI[:0]
-	h.Host = h.Host[:0]
-	h.UserAgent = h.UserAgent[:0]
-	h.Referer = h.Referer[:0]
-	h.ContentType = h.ContentType[:0]
 	h.ContentLength = 0
 
 	h.h = h.h[:0]
 }
 
 func (h *ResponseHeader) Set(key, value string) {
-	k := getKeyBytes(&h.bufKV, key)
+	initHeaderKV(&h.bufKV, key, value)
+	h.set(h.bufKV.key, h.bufKV.value)
+}
 
+func (h *ResponseHeader) set(key, value []byte) {
 	switch {
-	case bytes.Equal(strContentLength, k):
+	case bytes.Equal(strContentLength, key):
 		// skip Conent-Length setting, since it will be set automatically.
-		return
-	case bytes.Equal(strContentType, k):
-		h.ContentType = AppendBytesStr(h.ContentType[:0], value)
-		return
-	case bytes.Equal(strServer, k):
-		h.Server = AppendBytesStr(h.Server[:0], value)
-		return
-	case bytes.Equal(strConnection, k):
-		if EqualBytesStr(strClose, value) {
+	case bytes.Equal(strConnection, key):
+		if bytes.Equal(strClose, value) {
 			h.ConnectionClose = true
 		}
 		// skip other 'Connection' shit :)
-		return
-	case bytes.Equal(strTransferEncoding, k):
+	case bytes.Equal(strTransferEncoding, key):
 		// Transfer-Encoding is managed automatically.
-		return
+	case bytes.Equal(strDate, key):
+		// Date is managed automatically.
+	default:
+		h.h = setKV(h.h, key, value)
 	}
+}
 
+func (h *ResponseHeader) setStr(key []byte, value string) {
 	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
-	h.h = setKV(h.h, k, h.bufKV.value)
+	h.set(key, h.bufKV.value)
 }
 
 func (h *RequestHeader) Set(key, value string) {
-	k := getKeyBytes(&h.bufKV, key)
+	initHeaderKV(&h.bufKV, key, value)
+	h.set(h.bufKV.key, h.bufKV.value)
+}
 
+func (h *RequestHeader) set(key, value []byte) {
 	switch {
-	case bytes.Equal(strHost, k):
-		h.Host = AppendBytesStr(h.Host[:0], value)
-		return
-	case bytes.Equal(strUserAgent, k):
-		h.UserAgent = AppendBytesStr(h.UserAgent[:0], value)
-		return
-	case bytes.Equal(strReferer, k):
-		h.Referer = AppendBytesStr(h.Referer[:0], value)
-		return
-	case bytes.Equal(strContentType, k):
-		h.ContentType = AppendBytesStr(h.ContentType[:0], value)
-		return
-	case bytes.Equal(strContentLength, k):
+	case bytes.Equal(strContentLength, key):
 		// Content-Length is managed automatically.
-		return
-	case bytes.Equal(strTransferEncoding, k):
+	case bytes.Equal(strTransferEncoding, key):
 		// Transfer-Encoding is managed automatically.
-		return
-	case bytes.Equal(strConnection, k):
+	case bytes.Equal(strConnection, key):
 		// Connection is managed automatically.
-		return
+	default:
+		h.h = setKV(h.h, key, value)
 	}
-
-	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
-	h.h = setKV(h.h, k, h.bufKV.value)
 }
 
 func (h *ResponseHeader) Peek(key string) []byte {
-	k := getKeyBytes(&h.bufKV, key)
+	k := getHeaderKeyBytes(&h.bufKV, key)
+	return h.peek(k)
+}
 
-	switch {
-	case bytes.Equal(strContentType, k):
-		return h.ContentType
-	case bytes.Equal(strServer, k):
-		return h.Server
-	case bytes.Equal(strConnection, k):
+func (h *RequestHeader) Peek(key string) []byte {
+	k := getHeaderKeyBytes(&h.bufKV, key)
+	return h.peek(k)
+}
+
+func (h *ResponseHeader) peek(key []byte) []byte {
+	if bytes.Equal(strConnection, key) {
 		if h.ConnectionClose {
 			return strClose
 		}
 		return nil
 	}
-
-	return peekKV(h.h, k)
+	return peekKV(h.h, key)
 }
 
-func (h *RequestHeader) Peek(key string) []byte {
-	k := getKeyBytes(&h.bufKV, key)
-
-	switch {
-	case bytes.Equal(strHost, k):
-		return h.Host
-	case bytes.Equal(strUserAgent, k):
-		return h.UserAgent
-	case bytes.Equal(strReferer, k):
-		return h.Referer
-	case bytes.Equal(strContentType, k):
-		return h.ContentType
-	}
-
-	return peekKV(h.h, k)
+func (h *RequestHeader) peek(key []byte) []byte {
+	return peekKV(h.h, key)
 }
 
 func (h *ResponseHeader) Get(key string) string {
@@ -199,12 +163,6 @@ func (h *ResponseHeader) Get(key string) string {
 
 func (h *RequestHeader) Get(key string) string {
 	return string(h.Peek(key))
-}
-
-func getKeyBytes(kv *argsKV, key string) []byte {
-	kv.key = AppendBytesStr(kv.key[:0], key)
-	normalizeHeaderKey(kv.key)
-	return kv.key
 }
 
 func (h *ResponseHeader) Read(r *bufio.Reader) error {
@@ -325,14 +283,14 @@ func (h *ResponseHeader) Write(w *bufio.Writer) error {
 	}
 	w.Write(statusLine(statusCode))
 
-	server := h.Server
+	server := h.peek(strServer)
 	if len(server) == 0 {
 		server = defaultServerName
 	}
 	writeHeaderLine(w, strServer, server)
 	writeHeaderLine(w, strDate, serverDate.Load().([]byte))
 
-	contentType := h.ContentType
+	contentType := h.peek(strContentType)
 	if len(contentType) == 0 {
 		contentType = defaultContentType
 	}
@@ -349,7 +307,9 @@ func (h *ResponseHeader) Write(w *bufio.Writer) error {
 
 	for i, n := 0, len(h.h); i < n; i++ {
 		kv := &h.h[i]
-		writeHeaderLine(w, kv.key, kv.value)
+		if !bytes.Equal(strServer, kv.key) && !bytes.Equal(strContentType, kv.key) {
+			writeHeaderLine(w, kv.key, kv.value)
+		}
 	}
 
 	_, err := w.Write(strCRLF)
@@ -404,23 +364,18 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 	w.Write(strHTTP11)
 	w.Write(strCRLF)
 
-	if len(h.UserAgent) > 0 {
-		writeHeaderLine(w, strUserAgent, h.UserAgent)
-	}
-	if len(h.Referer) > 0 {
-		writeHeaderLine(w, strReferer, h.Referer)
-	}
-
-	if len(h.Host) == 0 {
+	host := h.peek(strHost)
+	if len(host) == 0 {
 		return fmt.Errorf("missing required Host header")
 	}
-	writeHeaderLine(w, strHost, h.Host)
+	writeHeaderLine(w, strHost, host)
 
 	if h.IsMethodPost() {
-		if len(h.ContentType) == 0 {
+		contentType := h.peek(strContentType)
+		if len(contentType) == 0 {
 			return fmt.Errorf("missing required Content-Type header for POST request")
 		}
-		writeHeaderLine(w, strContentType, h.ContentType)
+		writeHeaderLine(w, strContentType, contentType)
 		if h.ContentLength < 0 {
 			return fmt.Errorf("missing required Content-Length header for POST request")
 		}
@@ -429,7 +384,9 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 
 	for i, n := 0, len(h.h); i < n; i++ {
 		kv := &h.h[i]
-		writeHeaderLine(w, kv.key, kv.value)
+		if !bytes.Equal(strHost, kv.key) && !bytes.Equal(strContentType, kv.key) {
+			writeHeaderLine(w, kv.key, kv.value)
+		}
 	}
 
 	_, err := w.Write(strCRLF)
@@ -542,39 +499,34 @@ func (h *ResponseHeader) parseHeaders(buf []byte) ([]byte, error) {
 	p.init(buf)
 	var err error
 	for p.next() {
-		if bytes.Equal(p.key, strContentType) {
-			h.ContentType = append(h.ContentType[:0], p.value...)
-			continue
-		}
-		if bytes.Equal(p.key, strContentLength) && h.ContentLength != -1 {
-			h.ContentLength, err = parseContentLength(p.value)
-			if err != nil {
-				if isNeedMoreError(err) {
-					return nil, err
+		switch {
+		case bytes.Equal(p.key, strContentLength):
+			if h.ContentLength != -1 {
+				h.ContentLength, err = parseContentLength(p.value)
+				if err != nil {
+					if isNeedMoreError(err) {
+						return nil, err
+					}
+					return nil, fmt.Errorf("cannot parse Content-Length %q: %s at %q", p.value, err, buf)
 				}
-				return nil, fmt.Errorf("cannot parse Content-Length %q: %s at %q", p.value, err, buf)
 			}
-			continue
+		case bytes.Equal(p.key, strTransferEncoding):
+			if bytes.Equal(p.value, strChunked) {
+				h.ContentLength = -1
+			}
+		case bytes.Equal(p.key, strConnection):
+			if bytes.Equal(p.value, strClose) {
+				h.ConnectionClose = true
+			}
+		default:
+			h.h = setKV(h.h, p.key, p.value)
 		}
-		if bytes.Equal(p.key, strTransferEncoding) && bytes.Equal(p.value, strChunked) {
-			h.ContentLength = -1
-			continue
-		}
-		if bytes.Equal(p.key, strServer) {
-			h.Server = append(h.Server[:0], p.value...)
-			continue
-		}
-		if bytes.Equal(p.key, strConnection) && bytes.Equal(p.value, strClose) {
-			h.ConnectionClose = true
-			continue
-		}
-		h.h = setKV(h.h, p.key, p.value)
 	}
 	if p.err != nil {
 		return nil, p.err
 	}
 
-	if len(h.ContentType) == 0 {
+	if len(h.peek(strContentType)) == 0 {
 		return nil, fmt.Errorf("missing required Content-Type header in %q", buf)
 	}
 	if h.ContentLength == -2 {
@@ -590,47 +542,34 @@ func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 	p.init(buf)
 	var err error
 	for p.next() {
-		if bytes.Equal(p.key, strHost) {
-			h.Host = append(h.Host[:0], p.value...)
-			continue
-		}
-		if bytes.Equal(p.key, strUserAgent) {
-			h.UserAgent = append(h.UserAgent[:0], p.value...)
-			continue
-		}
-		if bytes.Equal(p.key, strReferer) {
-			h.Referer = append(h.Referer[:0], p.value...)
-			continue
-		}
-		if bytes.Equal(p.key, strContentType) {
-			h.ContentType = append(h.ContentType[:0], p.value...)
-			continue
-		}
-		if bytes.Equal(p.key, strContentLength) && h.ContentLength != -1 {
-			h.ContentLength, err = parseContentLength(p.value)
-			if err != nil {
-				if isNeedMoreError(err) {
-					return nil, err
+		switch {
+		case bytes.Equal(p.key, strContentLength):
+			if h.ContentLength != -1 {
+				h.ContentLength, err = parseContentLength(p.value)
+				if err != nil {
+					if isNeedMoreError(err) {
+						return nil, err
+					}
+					return nil, fmt.Errorf("cannot parse Content-Length %q: %s at %q", p.value, err, buf)
 				}
-				return nil, fmt.Errorf("cannot parse Content-Length %q: %s at %q", p.value, err, buf)
 			}
-			continue
+		case bytes.Equal(p.key, strTransferEncoding):
+			if bytes.Equal(p.value, strChunked) {
+				h.ContentLength = -1
+			}
+		default:
+			h.h = setKV(h.h, p.key, p.value)
 		}
-		if bytes.Equal(p.key, strTransferEncoding) && bytes.Equal(p.value, strChunked) {
-			h.ContentLength = -1
-			continue
-		}
-		h.h = setKV(h.h, p.key, p.value)
 	}
 	if p.err != nil {
 		return nil, p.err
 	}
 
-	if len(h.Host) == 0 {
+	if len(h.peek(strHost)) == 0 {
 		return nil, fmt.Errorf("missing required Host header in %q", buf)
 	}
 	if h.IsMethodPost() {
-		if len(h.ContentType) == 0 {
+		if len(h.peek(strContentType)) == 0 {
 			return nil, fmt.Errorf("missing Content-Type for POST header in %q", buf)
 		}
 		if h.ContentLength == -2 {
@@ -706,6 +645,17 @@ func nextLine(b []byte) ([]byte, []byte, error) {
 		n--
 	}
 	return b[:n], b[nNext+1:], nil
+}
+
+func initHeaderKV(kv *argsKV, key, value string) {
+	kv.key = getHeaderKeyBytes(kv, key)
+	kv.value = AppendBytesStr(kv.value[:0], value)
+}
+
+func getHeaderKeyBytes(kv *argsKV, key string) []byte {
+	kv.key = AppendBytesStr(kv.key[:0], key)
+	normalizeHeaderKey(kv.key)
+	return kv.key
 }
 
 func normalizeHeaderKey(b []byte) {
