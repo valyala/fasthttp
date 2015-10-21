@@ -49,6 +49,10 @@ type ServerCtx struct {
 	// Start time for the request processing.
 	Time time.Time
 
+	// Cache for arbitrary data, which may be used by RequestHandler.
+	// Cache contents may survive across requests.
+	Cache interface{}
+
 	logger ctxLogger
 	s      *Server
 	c      remoteAddrer
