@@ -42,8 +42,8 @@ func TestServerTimeoutError(t *testing.T) {
 	}
 
 	br := bufio.NewReader(&rw.w)
-	verifyResponse(t, br, 200, string(defaultContentType), "stolen ctx")
-	verifyResponse(t, br, 200, string(defaultContentType), "stolen ctx")
+	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "stolen ctx")
+	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "stolen ctx")
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
