@@ -43,9 +43,11 @@ type ServerCtx struct {
 	Request  Request
 	Response Response
 
-	// Unique id of the context.
-	// Used by ServerCtx.Logger().
+	// Unique id of the request.
 	ID uint64
+
+	// Start time for the request processing.
+	Time time.Time
 
 	logger ctxLogger
 	s      *Server
@@ -286,6 +288,8 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **ServerCtx) error {
 			}
 			break
 		}
+		ctx.ID++
+		ctx.Time = time.Now()
 		s.Handler(ctx)
 		shadow := atomic.LoadPointer(&ctx.shadow)
 		if shadow != nil {
@@ -308,7 +312,6 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **ServerCtx) error {
 				break
 			}
 		}
-		ctx.ID++
 	}
 	return err
 }
