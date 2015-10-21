@@ -11,15 +11,20 @@ import (
 	"time"
 )
 
-func TestServerSteal(t *testing.T) {
+func TestServerTimeoutError(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *ServerCtx) {
-			ctx.Steal()
-			ctx.Success("text/plain", []byte("Stolen ctx"))
+			go func() {
+				ctx.Success("aaa/bbb", []byte("xxxyyy"))
+				ctx.TimeoutError("ignore this", 1334)
+			}()
+			ctx.TimeoutError("stolen ctx", 200)
+			ctx.TimeoutError("should be ignored", 123)
 		},
 	}
 
 	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
 	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	ch := make(chan error)
@@ -37,7 +42,8 @@ func TestServerSteal(t *testing.T) {
 	}
 
 	br := bufio.NewReader(&rw.w)
-	verifyResponse(t, br, 200, "text/plain", "Stolen ctx")
+	verifyResponse(t, br, 200, string(defaultContentType), "stolen ctx")
+	verifyResponse(t, br, 200, string(defaultContentType), "stolen ctx")
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
@@ -51,7 +57,7 @@ func TestServerSteal(t *testing.T) {
 func TestServerConnectionClose(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *ServerCtx) {
-			ctx.Response().Header.ConnectionClose = true
+			ctx.Response.Header.ConnectionClose = true
 		},
 	}
 

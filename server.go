@@ -13,6 +13,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 type Server struct {
@@ -39,19 +40,19 @@ type Server struct {
 type RequestHandler func(ctx *ServerCtx)
 
 type ServerCtx struct {
-	Request Request
+	Request  Request
+	Response Response
 
 	// Unique id of the context.
 	// Used by ServerCtx.Logger().
 	ID uint64
 
-	resp   Response
 	logger ctxLogger
 	s      *Server
 	c      remoteAddrer
 	r      *bufio.Reader
 	w      *bufio.Writer
-	shadow *ServerCtx
+	shadow unsafe.Pointer
 
 	v interface{}
 }
@@ -97,7 +98,7 @@ func (ctx *ServerCtx) RemoteIP() string {
 }
 
 func (ctx *ServerCtx) Error(msg string, statusCode int) {
-	resp := ctx.Response()
+	resp := &ctx.Response
 	resp.Clear()
 	resp.Header.StatusCode = statusCode
 	resp.Header.set(strContentType, defaultContentType)
@@ -105,45 +106,42 @@ func (ctx *ServerCtx) Error(msg string, statusCode int) {
 }
 
 func (ctx *ServerCtx) Success(contentType string, body []byte) {
-	resp := ctx.Response()
+	resp := &ctx.Response
 	resp.Header.setStr(strContentType, contentType)
 	resp.Body = append(resp.Body, body...)
-}
-
-func (ctx *ServerCtx) Response() *Response {
-	if ctx.shadow != nil {
-		ctx = ctx.shadow
-	}
-	return &ctx.resp
 }
 
 func (ctx *ServerCtx) Logger() Logger {
 	return &ctx.logger
 }
 
-func (ctx *ServerCtx) Steal() {
-	if ctx.shadow != nil {
-		return
-	}
-
-	shadow := *ctx
+func (ctx *ServerCtx) TimeoutError(msg string, statusCode int) {
+	var shadow ServerCtx
 	shadow.Request = Request{}
-	shadow.resp = Response{}
+	shadow.Response = Response{}
 	shadow.logger.ctx = &shadow
 	shadow.v = &shadow
-	ctx.shadow = &shadow
+
+	shadow.s = ctx.s
+	shadow.c = ctx.c
+	shadow.r = ctx.r
+	shadow.w = ctx.w
+
+	if atomic.CompareAndSwapPointer(&ctx.shadow, nil, unsafe.Pointer(&shadow)) {
+		shadow.Error(msg, statusCode)
+	}
 }
 
 func (ctx *ServerCtx) writeResponse() error {
-	if ctx.shadow != nil {
-		panic("BUG: ctx.shadow is not null")
+	if atomic.LoadPointer(&ctx.shadow) != nil {
+		panic("BUG: cannot write response with shadow")
 	}
-	h := &ctx.resp.Header
+	h := &ctx.Response.Header
 	serverOld := h.peek(strServer)
 	if len(serverOld) == 0 {
 		h.set(strServer, ctx.s.getServerName())
 	}
-	err := ctx.resp.Write(ctx.w)
+	err := ctx.Response.Write(ctx.w)
 	if len(serverOld) == 0 {
 		h.set(strServer, serverOld)
 	}
@@ -289,16 +287,17 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **ServerCtx) error {
 			break
 		}
 		s.Handler(ctx)
-		if ctx.shadow != nil {
-			ctx = ctx.shadow
+		shadow := atomic.LoadPointer(&ctx.shadow)
+		if shadow != nil {
+			ctx = (*ServerCtx)(shadow)
 			*ctxP = ctx
 		}
 		if err = ctx.writeResponse(); err != nil {
 			break
 		}
-		connectionClose := ctx.resp.Header.ConnectionClose
+		connectionClose := ctx.Response.Header.ConnectionClose
 
-		ctx.resp.Clear()
+		ctx.Response.Clear()
 		trimBigBuffers(ctx)
 
 		if ctx.r.Buffered() == 0 || connectionClose {
@@ -320,8 +319,8 @@ func trimBigBuffers(ctx *ServerCtx) {
 	if cap(ctx.Request.Body) > bigBufferLimit {
 		ctx.Request.Body = nil
 	}
-	if cap(ctx.resp.Body) > bigBufferLimit {
-		ctx.resp.Body = nil
+	if cap(ctx.Response.Body) > bigBufferLimit {
+		ctx.Response.Body = nil
 	}
 }
 
@@ -366,7 +365,7 @@ func (s *Server) acquireCtx() *ServerCtx {
 }
 
 func (s *Server) releaseCtx(ctx *ServerCtx) {
-	if ctx.shadow != nil {
+	if atomic.LoadPointer(&ctx.shadow) != nil {
 		panic("BUG: cannot release ServerCtx with shadow")
 	}
 	ctx.c = nil

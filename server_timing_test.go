@@ -79,16 +79,20 @@ func BenchmarkNetHTTPServerPost10000ReqPerConn(b *testing.B) {
 	benchmarkNetHTTPServerPost(b, 10000)
 }
 
-func BenchmarkServerSteal(b *testing.B) {
+func BenchmarkServerTimeoutError(b *testing.B) {
 	requestsPerConn := 10
 	ch := make(chan struct{}, b.N)
 	n := uint32(0)
 	s := &Server{
 		Handler: func(ctx *ServerCtx) {
 			if atomic.AddUint32(&n, 1)&7 == 0 {
-				ctx.Steal()
+				ctx.TimeoutError("xxx", 321)
+				go func() {
+					ctx.Success("foobar", []byte("123"))
+				}()
+			} else {
+				ctx.Success("foobar", []byte("123"))
 			}
-			ctx.Error("foobar", 123)
 			registerServedRequest(b, ch)
 		},
 		Logger: log.New(ioutil.Discard, "", 0),
