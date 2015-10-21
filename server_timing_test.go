@@ -183,7 +183,14 @@ func newFakeListener(bytesPerConn int) *fakeListener {
 	return c
 }
 
-var fakeResponse = []byte("Hello, world!")
+var (
+	fakeResponse = []byte("Hello, world!")
+	getRequest   = "GET /foobar?baz HTTP/1.1\r\nHost: google.com\r\nUser-Agent: aaa/bbb/ccc/ddd/eee Firefox Chrome MSIE Opera\r\n" +
+		"Referer: http://xxx.com/aaa?bbb=ccc\r\n\r\n"
+	postRequest = fmt.Sprintf("POST /foobar?baz HTTP/1.1\r\nHost: google.com\r\nContent-Type: foo/bar\r\nContent-Length: %d\r\n"+
+		"User-Agent: Opera Chrome MSIE Firefox and other/1.2.34\r\nReferer: http://google.com/aaaa/bbb/ccc\r\n\r\n%s",
+		len(fakeResponse), fakeResponse)
+)
 
 func benchmarkServerGet(b *testing.B, requestsPerConn int) {
 	ch := make(chan struct{}, b.N)
@@ -197,8 +204,7 @@ func benchmarkServerGet(b *testing.B, requestsPerConn int) {
 		},
 		Logger: log.New(ioutil.Discard, "", 0),
 	}
-	req := "GET /foobar?baz HTTP/1.1\r\nHost: google.com\r\n\r\n"
-	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, req)
+	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, getRequest)
 	verifyRequestsServed(b, requestsSent, ch)
 }
 
@@ -214,8 +220,7 @@ func benchmarkNetHTTPServerGet(b *testing.B, requestsPerConn int) {
 			registerServedRequest(b, ch)
 		}),
 	}
-	req := "GET /foobar?baz HTTP/1.1\r\nHost: google.com\r\n\r\n"
-	requestsSent := benchmarkServer(b, s, requestsPerConn, req)
+	requestsSent := benchmarkServer(b, s, requestsPerConn, getRequest)
 	verifyRequestsServed(b, requestsSent, ch)
 }
 
@@ -235,9 +240,7 @@ func benchmarkServerPost(b *testing.B, requestsPerConn int) {
 		},
 		Logger: log.New(ioutil.Discard, "", 0),
 	}
-	req := fmt.Sprintf("POST /foobar?baz HTTP/1.1\r\nHost: google.com\r\nContent-Type: foo/bar\r\nContent-Length: %d\r\n\r\n%s",
-		len(fakeResponse), fakeResponse)
-	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, req)
+	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, postRequest)
 	verifyRequestsServed(b, requestsSent, ch)
 }
 
@@ -261,9 +264,7 @@ func benchmarkNetHTTPServerPost(b *testing.B, requestsPerConn int) {
 			registerServedRequest(b, ch)
 		}),
 	}
-	req := fmt.Sprintf("POST /foobar?baz HTTP/1.1\r\nHost: google.com\r\nContent-Type: foo/bar\r\nContent-Length: %d\r\n\r\n%s",
-		len(fakeResponse), fakeResponse)
-	requestsSent := benchmarkServer(b, s, requestsPerConn, req)
+	requestsSent := benchmarkServer(b, s, requestsPerConn, postRequest)
 	verifyRequestsServed(b, requestsSent, ch)
 }
 
