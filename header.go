@@ -289,7 +289,7 @@ func (h *ResponseHeader) Write(w *bufio.Writer) error {
 		return fmt.Errorf("response cannot have negative status code=%d", statusCode)
 	}
 	if statusCode == 0 {
-		statusCode = 200
+		statusCode = StatusOK
 	}
 	w.Write(statusLine(statusCode))
 
@@ -324,39 +324,6 @@ func (h *ResponseHeader) Write(w *bufio.Writer) error {
 
 	_, err := w.Write(strCRLF)
 	return err
-}
-
-var statusLines atomic.Value
-
-func init() {
-	statusLines.Store(make(map[int][]byte))
-}
-
-func statusLine(statusCode int) []byte {
-	m := statusLines.Load().(map[int][]byte)
-	h := m[statusCode]
-	if h != nil {
-		return h
-	}
-
-	statusText := "Error"
-	switch statusCode {
-	case 200:
-		statusText = "OK"
-	case 304:
-		statusText = "Not Modified"
-	case 500:
-		statusText = "Internal server error"
-	}
-
-	h = []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusText))
-	newM := make(map[int][]byte, len(m)+1)
-	for k, v := range m {
-		newM[k] = v
-	}
-	newM[statusCode] = h
-	statusLines.Store(newM)
-	return h
 }
 
 func (h *RequestHeader) Write(w *bufio.Writer) error {

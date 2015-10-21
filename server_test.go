@@ -16,10 +16,10 @@ func TestServerTimeoutError(t *testing.T) {
 		Handler: func(ctx *ServerCtx) {
 			go func() {
 				ctx.Success("aaa/bbb", []byte("xxxyyy"))
-				ctx.TimeoutError("ignore this", 1334)
+				ctx.TimeoutError("ignore this")
 			}()
-			ctx.TimeoutError("stolen ctx", 200)
-			ctx.TimeoutError("should be ignored", 123)
+			ctx.TimeoutError("stolen ctx")
+			ctx.TimeoutError("should be ignored")
 		},
 	}
 

@@ -86,7 +86,7 @@ func BenchmarkServerTimeoutError(b *testing.B) {
 	s := &Server{
 		Handler: func(ctx *ServerCtx) {
 			if atomic.AddUint32(&n, 1)&7 == 0 {
-				ctx.TimeoutError("xxx", 321)
+				ctx.TimeoutError("xxx")
 				go func() {
 					ctx.Success("foobar", []byte("123"))
 				}()
