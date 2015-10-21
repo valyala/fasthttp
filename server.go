@@ -250,7 +250,9 @@ func acceptConn(s *Server, ln net.Listener) (net.Conn, error) {
 				time.Sleep(time.Second)
 				continue
 			}
-			s.logger().Printf("Permanent error: %s", err)
+			if err != io.EOF {
+				s.logger().Printf("Permanent error: %s", err)
+			}
 			return nil, err
 		}
 		return c, nil

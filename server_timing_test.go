@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"net"
 	"net/http"
 	"runtime"
@@ -95,7 +94,6 @@ func BenchmarkServerTimeoutError(b *testing.B) {
 			}
 			registerServedRequest(b, ch)
 		},
-		Logger: log.New(ioutil.Discard, "", 0),
 	}
 	req := "GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n"
 	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, req)
@@ -202,7 +200,6 @@ func benchmarkServerGet(b *testing.B, requestsPerConn int) {
 			ctx.Success("text/plain", fakeResponse)
 			registerServedRequest(b, ch)
 		},
-		Logger: log.New(ioutil.Discard, "", 0),
 	}
 	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, getRequest)
 	verifyRequestsServed(b, requestsSent, ch)
@@ -238,7 +235,6 @@ func benchmarkServerPost(b *testing.B, requestsPerConn int) {
 			ctx.Success("text/plain", body)
 			registerServedRequest(b, ch)
 		},
-		Logger: log.New(ioutil.Discard, "", 0),
 	}
 	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, postRequest)
 	verifyRequestsServed(b, requestsSent, ch)
