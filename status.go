@@ -57,7 +57,7 @@ const (
 var (
 	statusLines atomic.Value
 
-	statusCodes = map[int]string{
+	statusMessages = map[int]string{
 		StatusContinue:           "Continue",
 		StatusSwitchingProtocols: "SwitchingProtocols",
 
@@ -106,10 +106,8 @@ var (
 	}
 )
 
-type StatusCode int
-
-func (n StatusCode) String() string {
-	s := statusCodes[int(n)]
+func StatusMessage(statusCode int) string {
+	s := statusMessages[statusCode]
 	if s == "" {
 		s = "Unknown Status Code"
 	}
@@ -127,7 +125,7 @@ func statusLine(statusCode int) []byte {
 		return h
 	}
 
-	statusText := StatusCode(statusCode).String()
+	statusText := StatusMessage(statusCode)
 
 	h = []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusText))
 	newM := make(map[int][]byte, len(m)+1)
