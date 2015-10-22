@@ -29,7 +29,7 @@ func TestArgsString(t *testing.T) {
 	testArgsString(t, &a, "foo=bar")
 	testArgsString(t, &a, "foo=bar&baz=sss")
 	testArgsString(t, &a, "")
-	testArgsString(t, &a, "f%20o=xxx%D0%BF%D1%80%D0%B8%D0%B2%D0%B5aaa&sdf=ss")
+	testArgsString(t, &a, "f%20o=x.x/x%D0%BF%D1%80%D0%B8%D0%B2%D0%B5aaa&sdf=ss")
 	testArgsString(t, &a, "=asdfsdf")
 }
 
