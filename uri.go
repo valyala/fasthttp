@@ -56,11 +56,11 @@ func (x *URI) Parse(host, uri []byte) {
 	n := bytes.IndexByte(b, '?')
 	if n < 0 {
 		x.PathOriginal = append(x.PathOriginal, b...)
-		x.Path = decodeArg(x.Path, b, false)
+		x.Path = normalizePath(x.Path, b)
 		return
 	}
 	x.PathOriginal = append(x.PathOriginal, b[:n]...)
-	x.Path = decodeArg(x.Path, x.PathOriginal, false)
+	x.Path = normalizePath(x.Path, x.PathOriginal)
 	b = b[n+1:]
 
 	n = bytes.IndexByte(b, '#')
@@ -70,6 +70,56 @@ func (x *URI) Parse(host, uri []byte) {
 	}
 
 	x.QueryString = append(x.QueryString, b...)
+}
+
+func normalizePath(dst, src []byte) []byte {
+	dst = decodeArg(dst, src, false)
+
+	// remove duplicate slashes
+	b := dst
+	bSize := len(b)
+	for {
+		n := bytes.Index(b, strSlashSlash)
+		if n < 0 {
+			break
+		}
+		b = b[n:]
+		copy(b, b[1:])
+		b = b[:len(b)-1]
+		bSize--
+	}
+	dst = dst[:bSize]
+
+	// remove /foo/../ parts
+	b = dst
+	for {
+		n := bytes.Index(b, strSlashDotDotSlash)
+		if n < 0 {
+			break
+		}
+		nn := bytes.LastIndexByte(b[:n], '/')
+		if nn < 0 {
+			nn = 0
+		}
+		n += len(strSlashDotDotSlash) - 1
+		copy(b[nn:], b[n:])
+		b = b[:len(b)-n+nn]
+	}
+
+	// remove trailing /foo/..
+	n := bytes.LastIndex(b, strSlashDotDot)
+	if n >= 0 && n+len(strSlashDotDot) == len(b) {
+		nn := bytes.LastIndexByte(b[:n], '/')
+		if nn < 0 {
+			return strSlash
+		}
+		b = b[:nn+1]
+	}
+
+	if len(b) == 0 {
+		return strSlash
+	}
+	return b
 }
 
 // Appends RequestURI to dst. RequestURI doesn't contain Scheme and Host.

@@ -5,6 +5,55 @@ import (
 	"testing"
 )
 
+func TestURIPathNormalize(t *testing.T) {
+	var u URI
+
+	// double slash
+	testURIPathNormalize(t, &u, "/aa//bb", "/aa/bb")
+
+	// triple slash
+	testURIPathNormalize(t, &u, "/x///y/", "/x/y/")
+
+	// multi slashes
+	testURIPathNormalize(t, &u, "/abc//de///fg////", "/abc/de/fg/")
+
+	// encoded slashes
+	testURIPathNormalize(t, &u, "/xxxx%2fyyy%2f%2F%2F", "/xxxx/yyy/")
+
+	// dotdot
+	testURIPathNormalize(t, &u, "/aaa/..", "/")
+
+	// dotdot with trailing slash
+	testURIPathNormalize(t, &u, "/xxx/yyy/../", "/xxx/")
+
+	// multi dotdots
+	testURIPathNormalize(t, &u, "/aaa/bbb/ccc/../../ddd", "/aaa/ddd")
+
+	// dotdots separated by other data
+	testURIPathNormalize(t, &u, "/a/b/../c/d/../e/..", "/a/c/")
+
+	// too many dotdots
+	testURIPathNormalize(t, &u, "/aaa/../../../../xxx", "/xxx")
+	testURIPathNormalize(t, &u, "/../../../../../..", "/")
+	testURIPathNormalize(t, &u, "/../../../../../../", "/")
+
+	// encoded dotdots
+	testURIPathNormalize(t, &u, "/aaa%2Fbbb%2F%2E.%2Fxxx", "/aaa/xxx")
+
+	// double slash with dotdots
+	testURIPathNormalize(t, &u, "/aaa////..//b", "/b")
+
+	// fake dotdot
+	testURIPathNormalize(t, &u, "/aaa/..bbb/ccc/..", "/aaa/..bbb/")
+}
+
+func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string) {
+	u.Parse(nil, []byte(requestURI))
+	if string(u.Path) != expectedPath {
+		t.Fatalf("Unexpected path %q. Expected %q. requestURI=%q", u.Path, expectedPath, requestURI)
+	}
+}
+
 func TestURIAppendBytes(t *testing.T) {
 	var args Args
 

@@ -16,12 +16,15 @@ var (
 )
 
 var (
-	strSlash           = []byte("/")
-	strCRLF            = []byte("\r\n")
-	strHTTP            = []byte("http")
-	strHTTP11          = []byte("HTTP/1.1")
-	strColonSlashSlash = []byte("://")
-	strColonSpace      = []byte(": ")
+	strSlash            = []byte("/")
+	strSlashSlash       = []byte("//")
+	strSlashDotDot      = []byte("/..")
+	strSlashDotDotSlash = []byte("/../")
+	strCRLF             = []byte("\r\n")
+	strHTTP             = []byte("http")
+	strHTTP11           = []byte("HTTP/1.1")
+	strColonSlashSlash  = []byte("://")
+	strColonSpace       = []byte(": ")
 
 	strGet  = []byte("GET")
 	strHead = []byte("HEAD")
