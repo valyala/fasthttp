@@ -143,13 +143,13 @@ func (ctx *ServerCtx) writeResponse() error {
 		panic("BUG: cannot write response with shadow")
 	}
 	h := &ctx.Response.Header
-	serverOld := h.peek(strServer)
+	serverOld := h.server
 	if len(serverOld) == 0 {
-		h.set(strServer, ctx.s.getServerName())
+		h.server = ctx.s.getServerName()
 	}
 	err := ctx.Response.Write(ctx.w)
 	if len(serverOld) == 0 {
-		h.set(strServer, serverOld)
+		h.server = serverOld
 	}
 	return err
 }
