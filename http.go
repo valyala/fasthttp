@@ -93,15 +93,16 @@ func (req *Request) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
 		ch <- req.Read(r)
 	}()
 
+	var err error
 	tc := acquireTimer(timeout)
 	select {
-	case err := <-ch:
-		releaseTimer(tc)
-		return err
+	case err = <-ch:
 	case <-tc.C:
 		req.timeoutCh = nil
-		return ErrReadTimeout
+		err = ErrReadTimeout
 	}
+	releaseTimer(tc)
+	return err
 }
 
 func (resp *Response) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
@@ -121,15 +122,16 @@ func (resp *Response) ReadTimeout(r *bufio.Reader, timeout time.Duration) error 
 		ch <- resp.Read(r)
 	}()
 
+	var err error
 	tc := acquireTimer(timeout)
 	select {
-	case err := <-ch:
-		releaseTimer(tc)
-		return err
+	case err = <-ch:
 	case <-tc.C:
 		resp.timeoutCh = nil
-		return ErrReadTimeout
+		err = ErrReadTimeout
 	}
+	releaseTimer(tc)
+	return err
 }
 
 func (req *Request) Read(r *bufio.Reader) error {
