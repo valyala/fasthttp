@@ -30,6 +30,11 @@ type Server struct {
 	// Per-connection buffer size for responses' writing.
 	WriteBufferSize int
 
+	// Maximum duration for full request reading (including body).
+	//
+	// By default request read timeout is unlimited.
+	RequestReadTimeout time.Duration
+
 	// Logger.
 	Logger Logger
 
@@ -136,22 +141,6 @@ func (ctx *RequestCtx) TimeoutError(msg string) {
 	if atomic.CompareAndSwapPointer(&ctx.shadow, nil, unsafe.Pointer(&shadow)) {
 		shadow.Error(msg, StatusRequestTimeout)
 	}
-}
-
-func (ctx *RequestCtx) writeResponse() error {
-	if atomic.LoadPointer(&ctx.shadow) != nil {
-		panic("BUG: cannot write response with shadow")
-	}
-	h := &ctx.Response.Header
-	serverOld := h.server
-	if len(serverOld) == 0 {
-		h.server = ctx.s.getServerName()
-	}
-	err := ctx.Response.Write(ctx.w)
-	if len(serverOld) == 0 {
-		h.server = serverOld
-	}
-	return err
 }
 
 const defaultConcurrency = 64 * 1024
@@ -288,7 +277,7 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **RequestCtx) error {
 	initRequestCtx(ctx, c)
 	var err error
 	for {
-		if err = ctx.Request.Read(ctx.r); err != nil {
+		if err = ctx.Request.ReadTimeout(ctx.r, s.RequestReadTimeout); err != nil {
 			if err == io.EOF {
 				err = nil
 			}
@@ -302,7 +291,7 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **RequestCtx) error {
 			ctx = (*RequestCtx)(shadow)
 			*ctxP = ctx
 		}
-		if err = ctx.writeResponse(); err != nil {
+		if err = writeResponse(ctx); err != nil {
 			break
 		}
 		connectionClose := ctx.Response.Header.ConnectionClose
@@ -318,6 +307,22 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **RequestCtx) error {
 				break
 			}
 		}
+	}
+	return err
+}
+
+func writeResponse(ctx *RequestCtx) error {
+	if atomic.LoadPointer(&ctx.shadow) != nil {
+		panic("BUG: cannot write response with shadow")
+	}
+	h := &ctx.Response.Header
+	serverOld := h.server
+	if len(serverOld) == 0 {
+		h.server = ctx.s.getServerName()
+	}
+	err := ctx.Response.Write(ctx.w)
+	if len(serverOld) == 0 {
+		h.server = serverOld
 	}
 	return err
 }

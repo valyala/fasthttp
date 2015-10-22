@@ -4,9 +4,75 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestResponseReadTimeout(t *testing.T) {
+	var resp Response
+
+	for i := 0; i < 5; i++ {
+		testResponseReadTimeoutError(t, &resp)
+	}
+
+	s := "HTTP/1.1 200 OK\r\nContent-Type: text/aaa\r\nContent-Length: 5\r\n\r\n12345"
+	r := bytes.NewBufferString(s)
+	rb := bufio.NewReader(r)
+	if err := resp.ReadTimeout(rb, 100*time.Millisecond); err != nil {
+		t.Fatalf("Unexpected error: %s", err)
+	}
+	verifyResponseHeader(t, &resp.Header, 200, 5, "text/aaa")
+
+	for i := 0; i < 5; i++ {
+		testResponseReadTimeoutError(t, &resp)
+	}
+}
+
+func TestRequestReadTimeout(t *testing.T) {
+	var req Request
+
+	for i := 0; i < 5; i++ {
+		testRequestReadTimeoutError(t, &req)
+	}
+
+	s := "GET /abc HTTP/1.1\r\nHost: google.com\r\n\r\n"
+	r := bytes.NewBufferString(s)
+	rb := bufio.NewReader(r)
+	if err := req.ReadTimeout(rb, 100*time.Millisecond); err != nil {
+		t.Fatalf("Unexpected error: %s", err)
+	}
+	verifyRequestHeader(t, &req.Header, 0, "/abc", "google.com", "", "")
+
+	for i := 0; i < 5; i++ {
+		testRequestReadTimeoutError(t, &req)
+	}
+}
+
+func testResponseReadTimeoutError(t *testing.T, resp *Response) {
+	r, _ := io.Pipe()
+	rb := bufio.NewReader(r)
+	err := resp.ReadTimeout(rb, 5*time.Millisecond)
+	if err == nil {
+		t.Fatalf("Expecting error")
+	}
+	if err != ErrReadTimeout {
+		t.Fatalf("Unexpected error: %s. Expecting %s", err, ErrReadTimeout)
+	}
+}
+
+func testRequestReadTimeoutError(t *testing.T, req *Request) {
+	r, _ := io.Pipe()
+	rb := bufio.NewReader(r)
+	err := req.ReadTimeout(rb, 5*time.Millisecond)
+	if err == nil {
+		t.Fatalf("Expecting error")
+	}
+	if err != ErrReadTimeout {
+		t.Fatalf("Unexpected error: %s. Expecting %s", err, ErrReadTimeout)
+	}
+}
 
 func TestRequestReadChunked(t *testing.T) {
 	var req Request

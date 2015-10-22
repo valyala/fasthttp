@@ -3,8 +3,10 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"time"
 )
 
 type Request struct {
@@ -18,6 +20,8 @@ type Request struct {
 	// PostArgs becomes available only after Request.ParsePostArgs() call.
 	PostArgs       Args
 	parsedPostArgs bool
+
+	timeoutCh chan error
 }
 
 type Response struct {
@@ -27,6 +31,8 @@ type Response struct {
 	// if set to true, Response.Read() skips reading body.
 	// Use it for HEAD requests.
 	SkipBody bool
+
+	timeoutCh chan error
 }
 
 func (req *Request) ParseURI() {
@@ -66,6 +72,64 @@ func (req *Request) Clear() {
 func (resp *Response) Clear() {
 	resp.Header.Clear()
 	resp.Body = resp.Body[:0]
+}
+
+var ErrReadTimeout = errors.New("read timeout")
+
+func (req *Request) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
+	if timeout <= 0 {
+		return req.Read(r)
+	}
+
+	ch := req.timeoutCh
+	if ch == nil {
+		ch = make(chan error, 1)
+		req.timeoutCh = ch
+	} else if len(ch) > 0 {
+		panic("BUG: Request.timeoutCh must be empty!")
+	}
+
+	go func() {
+		ch <- req.Read(r)
+	}()
+
+	tc := acquireTimer(timeout)
+	select {
+	case err := <-ch:
+		releaseTimer(tc)
+		return err
+	case <-tc.C:
+		req.timeoutCh = nil
+		return ErrReadTimeout
+	}
+}
+
+func (resp *Response) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
+	if timeout <= 0 {
+		return resp.Read(r)
+	}
+
+	ch := resp.timeoutCh
+	if ch == nil {
+		ch = make(chan error, 1)
+		resp.timeoutCh = ch
+	} else if len(ch) > 0 {
+		panic("BUG: Response.timeoutCh must be empty!")
+	}
+
+	go func() {
+		ch <- resp.Read(r)
+	}()
+
+	tc := acquireTimer(timeout)
+	select {
+	case err := <-ch:
+		releaseTimer(tc)
+		return err
+	case <-tc.C:
+		resp.timeoutCh = nil
+		return ErrReadTimeout
+	}
 }
 
 func (req *Request) Read(r *bufio.Reader) error {
