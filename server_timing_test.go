@@ -83,7 +83,7 @@ func BenchmarkServerTimeoutError(b *testing.B) {
 	ch := make(chan struct{}, b.N)
 	n := uint32(0)
 	s := &Server{
-		Handler: func(ctx *ServerCtx) {
+		Handler: func(ctx *RequestCtx) {
 			if atomic.AddUint32(&n, 1)&7 == 0 {
 				ctx.TimeoutError("xxx")
 				go func() {
@@ -193,7 +193,7 @@ var (
 func benchmarkServerGet(b *testing.B, requestsPerConn int) {
 	ch := make(chan struct{}, b.N)
 	s := &Server{
-		Handler: func(ctx *ServerCtx) {
+		Handler: func(ctx *RequestCtx) {
 			if !ctx.Request.Header.IsMethodGet() {
 				b.Fatalf("Unexpected request method: %s", ctx.Request.Header.Method)
 			}
@@ -224,7 +224,7 @@ func benchmarkNetHTTPServerGet(b *testing.B, requestsPerConn int) {
 func benchmarkServerPost(b *testing.B, requestsPerConn int) {
 	ch := make(chan struct{}, b.N)
 	s := &Server{
-		Handler: func(ctx *ServerCtx) {
+		Handler: func(ctx *RequestCtx) {
 			if !ctx.Request.Header.IsMethodPost() {
 				b.Fatalf("Unexpected request method: %s", ctx.Request.Header.Method)
 			}

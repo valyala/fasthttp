@@ -37,9 +37,9 @@ type Server struct {
 	ctxPool    sync.Pool
 }
 
-type RequestHandler func(ctx *ServerCtx)
+type RequestHandler func(ctx *RequestCtx)
 
-type ServerCtx struct {
+type RequestCtx struct {
 	Request  Request
 	Response Response
 
@@ -74,7 +74,7 @@ type Logger interface {
 var ctxLoggerLock sync.Mutex
 
 type ctxLogger struct {
-	ctx *ServerCtx
+	ctx *RequestCtx
 }
 
 func (cl *ctxLogger) Printf(format string, args ...interface{}) {
@@ -87,14 +87,14 @@ func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	ctxLoggerLock.Unlock()
 }
 
-func (ctx *ServerCtx) RemoteAddr() string {
+func (ctx *RequestCtx) RemoteAddr() string {
 	if ctx.c == nil {
 		return "unknown remote addr"
 	}
 	return ctx.c.RemoteAddr().String()
 }
 
-func (ctx *ServerCtx) RemoteIP() string {
+func (ctx *RequestCtx) RemoteIP() string {
 	addr := ctx.RemoteAddr()
 	n := strings.LastIndexByte(addr, ':')
 	if n < 0 {
@@ -103,7 +103,7 @@ func (ctx *ServerCtx) RemoteIP() string {
 	return addr[:n]
 }
 
-func (ctx *ServerCtx) Error(msg string, statusCode int) {
+func (ctx *RequestCtx) Error(msg string, statusCode int) {
 	resp := &ctx.Response
 	resp.Clear()
 	resp.Header.StatusCode = statusCode
@@ -111,18 +111,18 @@ func (ctx *ServerCtx) Error(msg string, statusCode int) {
 	resp.Body = append(resp.Body, []byte(msg)...)
 }
 
-func (ctx *ServerCtx) Success(contentType string, body []byte) {
+func (ctx *RequestCtx) Success(contentType string, body []byte) {
 	resp := &ctx.Response
 	resp.Header.setStr(strContentType, contentType)
 	resp.Body = append(resp.Body, body...)
 }
 
-func (ctx *ServerCtx) Logger() Logger {
+func (ctx *RequestCtx) Logger() Logger {
 	return &ctx.logger
 }
 
-func (ctx *ServerCtx) TimeoutError(msg string) {
-	var shadow ServerCtx
+func (ctx *RequestCtx) TimeoutError(msg string) {
+	var shadow RequestCtx
 	shadow.Request = Request{}
 	shadow.Response = Response{}
 	shadow.logger.ctx = &shadow
@@ -138,7 +138,7 @@ func (ctx *ServerCtx) TimeoutError(msg string) {
 	}
 }
 
-func (ctx *ServerCtx) writeResponse() error {
+func (ctx *RequestCtx) writeResponse() error {
 	if atomic.LoadPointer(&ctx.shadow) != nil {
 		panic("BUG: cannot write response with shadow")
 	}
@@ -259,7 +259,7 @@ func acceptConn(s *Server, ln net.Listener) (net.Conn, error) {
 	}
 }
 
-func serveConn(s *Server, c io.ReadWriter, ctx **ServerCtx) {
+func serveConn(s *Server, c io.ReadWriter, ctx **RequestCtx) {
 	if err := s.serveConn(c, ctx); err != nil {
 		if !strings.Contains(err.Error(), "connection reset by peer") {
 			s.logger().Printf("Error when serving network connection: %s", err)
@@ -283,9 +283,9 @@ func (s *Server) ServeConn(c io.ReadWriter) error {
 	return err
 }
 
-func (s *Server) serveConn(c io.ReadWriter, ctxP **ServerCtx) error {
+func (s *Server) serveConn(c io.ReadWriter, ctxP **RequestCtx) error {
 	ctx := *ctxP
-	initServerCtx(ctx, c)
+	initRequestCtx(ctx, c)
 	var err error
 	for {
 		if err = ctx.Request.Read(ctx.r); err != nil {
@@ -299,7 +299,7 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **ServerCtx) error {
 		s.Handler(ctx)
 		shadow := atomic.LoadPointer(&ctx.shadow)
 		if shadow != nil {
-			ctx = (*ServerCtx)(shadow)
+			ctx = (*RequestCtx)(shadow)
 			*ctxP = ctx
 		}
 		if err = ctx.writeResponse(); err != nil {
@@ -324,7 +324,7 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **ServerCtx) error {
 
 const bigBufferLimit = 16 * 1024
 
-func trimBigBuffers(ctx *ServerCtx) {
+func trimBigBuffers(ctx *RequestCtx) {
 	if cap(ctx.Request.Body) > bigBufferLimit {
 		ctx.Request.Body = nil
 	}
@@ -333,7 +333,7 @@ func trimBigBuffers(ctx *ServerCtx) {
 	}
 }
 
-func initServerCtx(ctx *ServerCtx, c io.ReadWriter) {
+func initRequestCtx(ctx *RequestCtx, c io.ReadWriter) {
 	if ctx.r == nil {
 		readBufferSize := ctx.s.ReadBufferSize
 		if readBufferSize <= 0 {
@@ -356,26 +356,26 @@ func initServerCtx(ctx *ServerCtx, c io.ReadWriter) {
 
 var globalCtxID uint64
 
-func (s *Server) acquireCtx() *ServerCtx {
+func (s *Server) acquireCtx() *RequestCtx {
 	v := s.ctxPool.Get()
-	var ctx *ServerCtx
+	var ctx *RequestCtx
 	if v == nil {
-		ctx = &ServerCtx{
+		ctx = &RequestCtx{
 			s: s,
 		}
 		ctx.logger.ctx = ctx
 		ctx.v = ctx
 		v = ctx
 	} else {
-		ctx = v.(*ServerCtx)
+		ctx = v.(*RequestCtx)
 	}
 	ctx.ID = (atomic.AddUint64(&globalCtxID, 1)) << 32
 	return ctx
 }
 
-func (s *Server) releaseCtx(ctx *ServerCtx) {
+func (s *Server) releaseCtx(ctx *RequestCtx) {
 	if atomic.LoadPointer(&ctx.shadow) != nil {
-		panic("BUG: cannot release ServerCtx with shadow")
+		panic("BUG: cannot release RequestCtx with shadow")
 	}
 	ctx.c = nil
 	s.ctxPool.Put(ctx.v)
