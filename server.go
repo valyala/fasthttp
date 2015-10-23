@@ -60,7 +60,7 @@ type RequestCtx struct {
 
 	logger ctxLogger
 	s      *Server
-	c      remoteAddrer
+	c      io.ReadWriter
 	r      *bufio.Reader
 	w      *bufio.Writer
 	shadow unsafe.Pointer
@@ -93,10 +93,11 @@ func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 }
 
 func (ctx *RequestCtx) RemoteAddr() string {
-	if ctx.c == nil {
+	x, ok := ctx.c.(remoteAddrer)
+	if !ok {
 		return "unknown remote addr"
 	}
-	return ctx.c.RemoteAddr().String()
+	return x.RemoteAddr().String()
 }
 
 func (ctx *RequestCtx) RemoteIP() string {
@@ -354,9 +355,7 @@ func initRequestCtx(ctx *RequestCtx, c io.ReadWriter) {
 		ctx.r.Reset(c)
 		ctx.w.Reset(c)
 	}
-	if conn, ok := c.(remoteAddrer); ok {
-		ctx.c = conn
-	}
+	ctx.c = c
 }
 
 var globalCtxID uint64
