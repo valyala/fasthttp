@@ -33,7 +33,12 @@ type Server struct {
 	// Maximum duration for full request reading (including body).
 	//
 	// By default request read timeout is unlimited.
-	RequestReadTimeout time.Duration
+	ReadTimeout time.Duration
+
+	// Maximum duration for full response writing (including body).
+	//
+	// By default response write timeout is unlimited.
+	WriteTimeout time.Duration
 
 	// Logger.
 	Logger Logger
@@ -70,6 +75,14 @@ type RequestCtx struct {
 
 type remoteAddrer interface {
 	RemoteAddr() net.Addr
+}
+
+type readDeadliner interface {
+	SetReadDeadline(time.Time) error
+}
+
+type writeDeadliner interface {
+	SetWriteDeadline(time.Time) error
 }
 
 type Logger interface {
@@ -276,9 +289,30 @@ func (s *Server) ServeConn(c io.ReadWriter) error {
 func (s *Server) serveConn(c io.ReadWriter, ctxP **RequestCtx) error {
 	ctx := *ctxP
 	initRequestCtx(ctx, c)
+
+	var rd readDeadliner
+	readTimeout := s.ReadTimeout
+	if readTimeout > 0 {
+		rd, _ = c.(readDeadliner)
+	}
+
+	var wd writeDeadliner
+	writeTimeout := s.WriteTimeout
+	if writeTimeout > 0 {
+		wd, _ = c.(writeDeadliner)
+	}
+
 	var err error
 	for {
-		if err = ctx.Request.ReadTimeout(ctx.r, s.RequestReadTimeout); err != nil {
+		if rd != nil {
+			if err = rd.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+				break
+			}
+			err = ctx.Request.Read(ctx.r)
+		} else {
+			err = ctx.Request.ReadTimeout(ctx.r, readTimeout)
+		}
+		if err != nil {
 			if err == io.EOF {
 				err = nil
 			}
@@ -291,6 +325,12 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **RequestCtx) error {
 		if shadow != nil {
 			ctx = (*RequestCtx)(shadow)
 			*ctxP = ctx
+		}
+
+		if wd != nil {
+			if err = wd.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+				break
+			}
 		}
 		if err = writeResponse(ctx); err != nil {
 			break

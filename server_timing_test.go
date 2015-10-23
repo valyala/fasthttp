@@ -78,22 +78,6 @@ func BenchmarkNetHTTPServerPost10000ReqPerConn(b *testing.B) {
 	benchmarkNetHTTPServerPost(b, 10000)
 }
 
-func BenchmarkServerGetRequestReadTimeout1ReqPerConn(b *testing.B) {
-	benchmarkServerGetRequestReadTimeout(b, 1)
-}
-
-func BenchmarkServerGetRequestReadTimeout2ReqPerConn(b *testing.B) {
-	benchmarkServerGetRequestReadTimeout(b, 2)
-}
-
-func BenchmarkServerGetRequestReadTimeout10ReqPerConn(b *testing.B) {
-	benchmarkServerGetRequestReadTimeout(b, 10)
-}
-
-func BenchmarkServerGetRequestReadTimeout10000ReqPerConn(b *testing.B) {
-	benchmarkServerGetRequestReadTimeout(b, 10000)
-}
-
 func BenchmarkServerTimeoutError(b *testing.B) {
 	requestsPerConn := 10
 	ch := make(chan struct{}, b.N)
@@ -150,6 +134,14 @@ func (c *fakeServerConn) RemoteAddr() net.Addr {
 func (c *fakeServerConn) Close() error {
 	c.nn = c.n
 	c.next <- struct{}{}
+	return nil
+}
+
+func (c *fakeServerConn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *fakeServerConn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
@@ -277,22 +269,6 @@ func benchmarkNetHTTPServerPost(b *testing.B, requestsPerConn int) {
 		}),
 	}
 	requestsSent := benchmarkServer(b, s, requestsPerConn, postRequest)
-	verifyRequestsServed(b, requestsSent, ch)
-}
-
-func benchmarkServerGetRequestReadTimeout(b *testing.B, requestsPerConn int) {
-	ch := make(chan struct{}, b.N)
-	s := &Server{
-		Handler: func(ctx *RequestCtx) {
-			if !ctx.Request.Header.IsMethodGet() {
-				b.Fatalf("Unexpected request method: %s", ctx.Request.Header.Method)
-			}
-			ctx.Success("text/plain", fakeResponse)
-			registerServedRequest(b, ch)
-		},
-		RequestReadTimeout: 5 * time.Second,
-	}
-	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, getRequest)
 	verifyRequestsServed(b, requestsSent, ch)
 }
 
