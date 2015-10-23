@@ -188,7 +188,6 @@ func testArgsHasNot(t *testing.T, a *Args, s string, unexpectedKeys ...string) {
 }
 
 func testArgsParse(t *testing.T, a *Args, s string, expectedLen int, expectedArgs ...string) {
-	var buf []byte
 	a.Parse(s)
 	if a.Len() != expectedLen {
 		t.Fatalf("Unexpected args len %d. Expected %d. s=%q", a.Len(), expectedLen, s)
@@ -197,7 +196,7 @@ func testArgsParse(t *testing.T, a *Args, s string, expectedLen int, expectedArg
 		tmp := strings.SplitN(xx, "=", 2)
 		k := tmp[0]
 		v := tmp[1]
-		buf = a.GetBytes(buf, k)
+		buf := a.Peek(k)
 		if string(buf) != v {
 			t.Fatalf("Unexpected value for key=%q: %q. Expected %q. s=%q", k, buf, v, s)
 		}

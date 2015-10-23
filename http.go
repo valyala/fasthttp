@@ -9,14 +9,22 @@ import (
 	"time"
 )
 
+// Request represents HTTP request.
+//
+// It is forbidden copying Request instances. Create new instances instead.
 type Request struct {
+	// Request header
 	Header RequestHeader
-	Body   []byte
 
+	// Request body
+	Body []byte
+
+	// Request URI.
 	// URI becomes available only after Request.ParseURI() call.
 	URI       URI
 	parsedURI bool
 
+	// Arguments sent in POST.
 	// PostArgs becomes available only after Request.ParsePostArgs() call.
 	PostArgs       Args
 	parsedPostArgs bool
@@ -25,11 +33,17 @@ type Request struct {
 	timeoutTimer *time.Timer
 }
 
+// Response represents HTTP response.
+//
+// It is forbidden copying Response instances. Create new instances instead.
 type Response struct {
+	// Response header
 	Header ResponseHeader
-	Body   []byte
 
-	// if set to true, Response.Read() skips reading body.
+	// Response body
+	Body []byte
+
+	// If set to true, Response.Read() skips reading body.
 	// Use it for HEAD requests.
 	SkipBody bool
 
@@ -37,6 +51,7 @@ type Response struct {
 	timeoutTimer *time.Timer
 }
 
+// ParseURI parses request uri and fills Request.URI.
 func (req *Request) ParseURI() {
 	if req.parsedURI {
 		return
@@ -45,6 +60,7 @@ func (req *Request) ParseURI() {
 	req.parsedURI = true
 }
 
+// ParsePostArgs parses args sent in POST body and fills Request.PostArgs.
 func (req *Request) ParsePostArgs() error {
 	if req.parsedPostArgs {
 		return nil
@@ -62,6 +78,7 @@ func (req *Request) ParsePostArgs() error {
 	return nil
 }
 
+// Clear clears request contents.
 func (req *Request) Clear() {
 	req.Header.Clear()
 	req.Body = req.Body[:0]
@@ -71,13 +88,21 @@ func (req *Request) Clear() {
 	req.parsedPostArgs = false
 }
 
+// Clear clears response contents.
 func (resp *Response) Clear() {
 	resp.Header.Clear()
 	resp.Body = resp.Body[:0]
 }
 
+// ErrReadTimeout may be returned from Request.ReadTimeout
+// or Response.ReadTimeout on timeout.
 var ErrReadTimeout = errors.New("read timeout")
 
+// ReadTimeout reads request (including body) from the given r during
+// the given timeout.
+//
+// If request couldn't be read during the given timeout,
+// it returns ErrReadTimeout.
 func (req *Request) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
 	if timeout <= 0 {
 		return req.Read(r)
@@ -107,6 +132,11 @@ func (req *Request) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
 	return err
 }
 
+// ReadTimeout reads response (including body) from the given r during
+// the given timeout.
+//
+// If response couldn't be read during the given timeout,
+// it returns ErrReadTimeout.
 func (resp *Response) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
 	if timeout <= 0 {
 		return resp.Read(r)
@@ -136,6 +166,7 @@ func (resp *Response) ReadTimeout(r *bufio.Reader, timeout time.Duration) error 
 	return err
 }
 
+// Read reads request (including body) from the given r.
 func (req *Request) Read(r *bufio.Reader) error {
 	req.Body = req.Body[:0]
 	req.URI.Clear()
@@ -159,6 +190,7 @@ func (req *Request) Read(r *bufio.Reader) error {
 	return nil
 }
 
+// Read reads response (including body) from the given r.
 func (resp *Response) Read(r *bufio.Reader) error {
 	resp.Body = resp.Body[:0]
 
@@ -190,6 +222,9 @@ func isSkipResponseBody(statusCode int) bool {
 	return statusCode == StatusNoContent || statusCode == StatusNotModified
 }
 
+// Write write request to w.
+//
+// Write doesn't flush request to w for performance reasons.
 func (req *Request) Write(w *bufio.Writer) error {
 	contentLengthOld := req.Header.ContentLength
 	req.Header.ContentLength = len(req.Body)
@@ -206,6 +241,9 @@ func (req *Request) Write(w *bufio.Writer) error {
 	return err
 }
 
+// Write writes response to w.
+//
+// Write doesn't flush response to w for performance reasons.
 func (resp *Response) Write(w *bufio.Writer) error {
 	contentLengthOld := resp.Header.ContentLength
 	resp.Header.ContentLength = len(resp.Body)

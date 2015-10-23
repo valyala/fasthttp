@@ -4,24 +4,46 @@ import (
 	"bytes"
 )
 
+// URI represents URI :) .
+//
+// It is forbidden copying URI instances. Create new instances instead.
 type URI struct {
 	// Full uri like {Scheme}://{Host}{Path}?{QueryString}#{Hash}
 	URI []byte
 
-	// Original Path passed to URI.Parse()
+	// Original path passed to URI.Parse()
 	PathOriginal []byte
 
-	Scheme      []byte
-	Host        []byte
-	Path        []byte
-	QueryString []byte
-	Hash        []byte
+	// Scheme part, i.e. http of http://aaa.com/foo/bar?baz=123#qwe .
+	//
+	// Scheme is always lowercased.
+	Scheme []byte
 
-	// Becomes available after URI.ParseQueryArgs() call
+	// Host part, i.e. aaa.com of http://aaa.com/foo/bar?baz=123#qwe .
+	//
+	// Host is always lowercased.
+	Host []byte
+
+	// Path part, i.e. /foo/bar of http://aaa.com/foo/bar?baz=123#qwe .
+	//
+	// Path is always urldecoded and normalized,
+	// i.e. '//f%20obar/baz/../zzz' becomes '/f obar/zzz'.
+	Path []byte
+
+	// Query string part, i.e. baz=123 of http://aaa.com/foo/bar?baz=123#qwe .
+	QueryString []byte
+
+	// Hash part, i.e. qwe of http://aaa.com/foo/bar?baz=123#qwe .
+	Hash []byte
+
+	// Parsed query string arguments.
+	//
+	// Becomes available after URI.ParseQueryArgs() call.
 	QueryArgs       Args
 	parsedQueryArgs bool
 }
 
+// Clear clears uri.
 func (x *URI) Clear() {
 	x.URI = x.URI[:0]
 	x.PathOriginal = x.PathOriginal[:0]
@@ -34,6 +56,9 @@ func (x *URI) Clear() {
 	x.parsedQueryArgs = false
 }
 
+// Parse initializes URI from the given host and uri.
+//
+// It is safe modifying host and uri buffers after the Parse call.
 func (x *URI) Parse(host, uri []byte) {
 	x.Clear()
 
@@ -122,7 +147,10 @@ func normalizePath(dst, src []byte) []byte {
 	return b
 }
 
-// Appends RequestURI to dst. RequestURI doesn't contain Scheme and Host.
+// AppendRequestURI appends RequestURI to dst and returns dst
+// (which may be newly allocated).
+//
+// Appended RequestURI doesn't contain Scheme and Host.
 func (x *URI) AppendRequestURI(dst []byte) []byte {
 	path := x.Path
 	if len(path) == 0 {
@@ -140,7 +168,7 @@ func (x *URI) AppendRequestURI(dst []byte) []byte {
 	return dst
 }
 
-// Appends URI to dst.
+// AppendBytes appends URI to dst and returns dst (with may be newly allocated).
 func (x *URI) AppendBytes(dst []byte) []byte {
 	startPos := len(dst)
 	scheme := x.Scheme
@@ -172,6 +200,7 @@ func splitHostUri(host, uri []byte) ([]byte, []byte, []byte) {
 	return scheme, uri[:n], uri[n:]
 }
 
+// ParseQueryArgs initializes QueryArgs by parsing QueryString.
 func (x *URI) ParseQueryArgs() {
 	if x.parsedQueryArgs {
 		return
