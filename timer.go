@@ -1,26 +1,20 @@
 package fasthttp
 
 import (
-	"sync"
 	"time"
 )
 
-var timerPool sync.Pool
-
-func acquireTimer(timeout time.Duration) *time.Timer {
-	tv := timerPool.Get()
-	if tv == nil {
+func initTimer(t *time.Timer, timeout time.Duration) *time.Timer {
+	if t == nil {
 		return time.NewTimer(timeout)
 	}
-
-	t := tv.(*time.Timer)
 	if t.Reset(timeout) {
-		panic("BUG: Active timer trapped into AcquireTimer()")
+		panic("BUG: active timer trapped into initTimer()")
 	}
 	return t
 }
 
-func releaseTimer(t *time.Timer) {
+func stopTimer(t *time.Timer) {
 	if !t.Stop() {
 		// Collect possibly added time from the channel
 		// if timer has been stopped and nobody collected its' value.
@@ -29,6 +23,4 @@ func releaseTimer(t *time.Timer) {
 		default:
 		}
 	}
-
-	timerPool.Put(t)
 }

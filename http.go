@@ -21,7 +21,8 @@ type Request struct {
 	PostArgs       Args
 	parsedPostArgs bool
 
-	timeoutCh chan error
+	timeoutCh    chan error
+	timeoutTimer *time.Timer
 }
 
 type Response struct {
@@ -32,7 +33,8 @@ type Response struct {
 	// Use it for HEAD requests.
 	SkipBody bool
 
-	timeoutCh chan error
+	timeoutCh    chan error
+	timeoutTimer *time.Timer
 }
 
 func (req *Request) ParseURI() {
@@ -94,14 +96,14 @@ func (req *Request) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
 	}()
 
 	var err error
-	tc := acquireTimer(timeout)
+	req.timeoutTimer = initTimer(req.timeoutTimer, timeout)
 	select {
 	case err = <-ch:
-	case <-tc.C:
+	case <-req.timeoutTimer.C:
 		req.timeoutCh = nil
 		err = ErrReadTimeout
 	}
-	releaseTimer(tc)
+	stopTimer(req.timeoutTimer)
 	return err
 }
 
@@ -123,14 +125,14 @@ func (resp *Response) ReadTimeout(r *bufio.Reader, timeout time.Duration) error 
 	}()
 
 	var err error
-	tc := acquireTimer(timeout)
+	resp.timeoutTimer = initTimer(resp.timeoutTimer, timeout)
 	select {
 	case err = <-ch:
-	case <-tc.C:
+	case <-resp.timeoutTimer.C:
 		resp.timeoutCh = nil
 		err = ErrReadTimeout
 	}
-	releaseTimer(tc)
+	stopTimer(resp.timeoutTimer)
 	return err
 }
 

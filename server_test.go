@@ -11,6 +11,65 @@ import (
 	"time"
 )
 
+func TestTimeoutHandlerSuccess(t *testing.T) {
+	h := func(ctx *RequestCtx) {
+		ctx.Success("aaa/bbb", []byte("real response"))
+	}
+	s := &Server{
+		Handler: TimeoutHandler(h, 100*time.Millisecond, "timeout!!!"),
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+}
+
+func TestTimeoutHandlerTimeout(t *testing.T) {
+	h := func(ctx *RequestCtx) {
+		time.Sleep(time.Second)
+		ctx.Success("aaa/bbb", []byte("this shouldn't pass to client because of timeout"))
+	}
+	s := &Server{
+		Handler: TimeoutHandler(h, 10*time.Millisecond, "timeout!!!"),
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "timeout!!!")
+}
+
 func TestServerTimeoutError(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
