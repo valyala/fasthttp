@@ -10,6 +10,25 @@ import (
 	"time"
 )
 
+func TestRound2(t *testing.T) {
+	testRound2(t, 0, 0)
+	testRound2(t, 1, 1)
+	testRound2(t, 2, 2)
+	testRound2(t, 3, 4)
+	testRound2(t, 4, 4)
+	testRound2(t, 5, 8)
+	testRound2(t, 7, 8)
+	testRound2(t, 8, 8)
+	testRound2(t, 9, 16)
+	testRound2(t, 0x10001, 0x20000)
+}
+
+func testRound2(t *testing.T, n, expectedRound2 int) {
+	if round2(n) != expectedRound2 {
+		t.Fatalf("Unexpected round2(%d)=%d. Expected %d", n, round2(n), expectedRound2)
+	}
+}
+
 func TestResponseReadTimeout(t *testing.T) {
 	resp := &Response{}
 
