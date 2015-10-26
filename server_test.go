@@ -75,7 +75,6 @@ func TestServerTimeoutError(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 			go func() {
 				ctx.Success("aaa/bbb", []byte("xxxyyy"))
-				ctx.TimeoutError("ignore this")
 			}()
 			ctx.TimeoutError("stolen ctx")
 			ctx.TimeoutError("should be ignored")
