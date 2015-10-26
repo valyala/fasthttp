@@ -1,7 +1,6 @@
 package fasthttp
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -14,71 +13,106 @@ import (
 	"time"
 )
 
+var defaultClientsCount = runtime.NumCPU()
+
 func BenchmarkServerGet1ReqPerConn(b *testing.B) {
-	benchmarkServerGet(b, 1)
+	benchmarkServerGet(b, defaultClientsCount, 1)
 }
 
 func BenchmarkServerGet2ReqPerConn(b *testing.B) {
-	benchmarkServerGet(b, 2)
+	benchmarkServerGet(b, defaultClientsCount, 2)
 }
 
 func BenchmarkServerGet10ReqPerConn(b *testing.B) {
-	benchmarkServerGet(b, 10)
+	benchmarkServerGet(b, defaultClientsCount, 10)
 }
 
 func BenchmarkServerGet10000ReqPerConn(b *testing.B) {
-	benchmarkServerGet(b, 10000)
+	benchmarkServerGet(b, defaultClientsCount, 10000)
 }
 
 func BenchmarkNetHTTPServerGet1ReqPerConn(b *testing.B) {
-	benchmarkNetHTTPServerGet(b, 1)
+	benchmarkNetHTTPServerGet(b, defaultClientsCount, 1)
 }
 
 func BenchmarkNetHTTPServerGet2ReqPerConn(b *testing.B) {
-	benchmarkNetHTTPServerGet(b, 2)
+	benchmarkNetHTTPServerGet(b, defaultClientsCount, 2)
 }
 
 func BenchmarkNetHTTPServerGet10ReqPerConn(b *testing.B) {
-	benchmarkNetHTTPServerGet(b, 10)
+	benchmarkNetHTTPServerGet(b, defaultClientsCount, 10)
 }
 
 func BenchmarkNetHTTPServerGet10000ReqPerConn(b *testing.B) {
-	benchmarkNetHTTPServerGet(b, 10000)
+	benchmarkNetHTTPServerGet(b, defaultClientsCount, 10000)
 }
 
 func BenchmarkServerPost1ReqPerConn(b *testing.B) {
-	benchmarkServerPost(b, 1)
+	benchmarkServerPost(b, defaultClientsCount, 1)
 }
 
 func BenchmarkServerPost2ReqPerConn(b *testing.B) {
-	benchmarkServerPost(b, 2)
+	benchmarkServerPost(b, defaultClientsCount, 2)
 }
 
 func BenchmarkServerPost10ReqPerConn(b *testing.B) {
-	benchmarkServerPost(b, 10)
+	benchmarkServerPost(b, defaultClientsCount, 10)
 }
 
-func BenchmarkServerPost10000ReqPerConn(b *testing.B) {
-	benchmarkServerPost(b, 10000)
+func BenchmarkServerPost10KReqPerConn(b *testing.B) {
+	benchmarkServerPost(b, defaultClientsCount, 10000)
 }
 
 func BenchmarkNetHTTPServerPost1ReqPerConn(b *testing.B) {
-	benchmarkNetHTTPServerPost(b, 1)
+	benchmarkNetHTTPServerPost(b, defaultClientsCount, 1)
 }
 
 func BenchmarkNetHTTPServerPost2ReqPerConn(b *testing.B) {
-	benchmarkNetHTTPServerPost(b, 2)
+	benchmarkNetHTTPServerPost(b, defaultClientsCount, 2)
 }
 
 func BenchmarkNetHTTPServerPost10ReqPerConn(b *testing.B) {
-	benchmarkNetHTTPServerPost(b, 10)
+	benchmarkNetHTTPServerPost(b, defaultClientsCount, 10)
 }
 
-func BenchmarkNetHTTPServerPost10000ReqPerConn(b *testing.B) {
-	benchmarkNetHTTPServerPost(b, 10000)
+func BenchmarkNetHTTPServerPost10KReqPerConn(b *testing.B) {
+	benchmarkNetHTTPServerPost(b, defaultClientsCount, 10000)
+}
+
+func BenchmarkServerGet1ReqPerConn1KClients(b *testing.B) {
+	benchmarkServerGet(b, 1000, 1)
+}
+
+func BenchmarkServerGet2ReqPerConn1KClients(b *testing.B) {
+	benchmarkServerGet(b, 1000, 2)
+}
+
+func BenchmarkServerGet10ReqPerConn1KClients(b *testing.B) {
+	benchmarkServerGet(b, 1000, 10)
+}
+
+func BenchmarkServerGet10KReqPerConn1KClients(b *testing.B) {
+	benchmarkServerGet(b, 1000, 10000)
+}
+
+func BenchmarkNetHTTPServerGet1ReqPerConn1KClients(b *testing.B) {
+	benchmarkNetHTTPServerGet(b, 1000, 1)
+}
+
+func BenchmarkNetHTTPServerGet2ReqPerConn1KClients(b *testing.B) {
+	benchmarkNetHTTPServerGet(b, 1000, 2)
+}
+
+func BenchmarkNetHTTPServerGet10ReqPerConn1KClients(b *testing.B) {
+	benchmarkNetHTTPServerGet(b, 1000, 10)
+}
+
+func BenchmarkNetHTTPServerGet10KReqPerConn1KClients(b *testing.B) {
+	benchmarkNetHTTPServerGet(b, 1000, 10000)
 }
 
 func BenchmarkServerTimeoutError(b *testing.B) {
+	clientsCount := 1
 	requestsPerConn := 10
 	ch := make(chan struct{}, b.N)
 	n := uint32(0)
@@ -96,44 +130,51 @@ func BenchmarkServerTimeoutError(b *testing.B) {
 		},
 	}
 	req := "GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n"
-	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, req)
-	verifyRequestsServed(b, requestsSent, ch)
+	benchmarkServer(b, &testServer{s, clientsCount}, clientsCount, requestsPerConn, req)
+	verifyRequestsServed(b, ch)
 }
 
 type fakeServerConn struct {
 	net.TCPConn
-
-	addr net.Addr
-	r    *io.PipeReader
-	n    int
-	nn   int
-	next chan struct{}
-	b    []byte
+	ln            *fakeListener
+	requestsCount int
+	closed        uint32
 }
 
 func (c *fakeServerConn) Read(b []byte) (int, error) {
-	if c.nn == 0 {
-		return 0, io.EOF
+	nn := 0
+	for len(b) > len(c.ln.request) {
+		if c.requestsCount == 0 {
+			if nn == 0 {
+				return 0, io.EOF
+			}
+			return nn, nil
+		}
+		n := copy(b, c.ln.request)
+		b = b[n:]
+		nn += n
+		c.requestsCount--
 	}
-	if len(b) > c.nn {
-		b = b[:c.nn]
+	if nn == 0 {
+		panic("server has too small buffer")
 	}
-	n, err := c.r.Read(b)
-	c.nn -= n
-	return n, err
+	return nn, nil
 }
 
 func (c *fakeServerConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
+var fakeAddr net.TCPAddr
+
 func (c *fakeServerConn) RemoteAddr() net.Addr {
-	return c.addr
+	return &fakeAddr
 }
 
 func (c *fakeServerConn) Close() error {
-	c.nn = c.n
-	c.next <- struct{}{}
+	if atomic.AddUint32(&c.closed, 1) == 1 {
+		c.ln.ch <- c
+	}
 	return nil
 }
 
@@ -146,22 +187,32 @@ func (c *fakeServerConn) SetWriteDeadline(t time.Time) error {
 }
 
 type fakeListener struct {
-	addr   net.TCPAddr
-	stop   chan struct{}
-	server fakeServerConn
-	client *bufio.Writer
-	w      *io.PipeWriter
-
-	v interface{}
+	requestsCount   int
+	requestsPerConn int
+	request         []byte
+	ch              chan *fakeServerConn
+	done            chan struct{}
 }
 
 func (ln *fakeListener) Accept() (net.Conn, error) {
-	select {
-	case <-ln.stop:
+	if ln.requestsCount == 0 {
+		for len(ln.ch) < cap(ln.ch) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		close(ln.done)
 		return nil, io.EOF
-	case <-ln.server.next:
-		return &ln.server, nil
 	}
+	requestsCount := ln.requestsPerConn
+	if requestsCount > ln.requestsCount {
+		requestsCount = ln.requestsCount
+	}
+	ln.requestsCount -= requestsCount
+
+	c := <-ln.ch
+	c.requestsCount = requestsCount
+	c.closed = 0
+
+	return c, nil
 }
 
 func (ln *fakeListener) Close() error {
@@ -169,24 +220,23 @@ func (ln *fakeListener) Close() error {
 }
 
 func (ln *fakeListener) Addr() net.Addr {
-	return &ln.addr
+	return &fakeAddr
 }
 
-func newFakeListener(bytesPerConn int) *fakeListener {
-	r, w := io.Pipe()
-	c := &fakeListener{
-		stop:   make(chan struct{}, 1),
-		w:      w,
-		client: bufio.NewWriter(w),
+func newFakeListener(requestsCount, clientsCount, requestsPerConn int, request string) *fakeListener {
+	ln := &fakeListener{
+		requestsCount:   requestsCount,
+		requestsPerConn: requestsPerConn,
+		request:         []byte(request),
+		ch:              make(chan *fakeServerConn, clientsCount),
+		done:            make(chan struct{}),
 	}
-	c.server.addr = &c.addr
-	c.server.r = r
-	c.server.n = bytesPerConn
-	c.server.nn = bytesPerConn
-	c.server.b = make([]byte, 1024)
-	c.server.next = make(chan struct{}, 1)
-	c.server.next <- struct{}{}
-	return c
+	for i := 0; i < clientsCount; i++ {
+		ln.ch <- &fakeServerConn{
+			ln: ln,
+		}
+	}
+	return ln
 }
 
 var (
@@ -198,7 +248,7 @@ var (
 		len(fakeResponse), fakeResponse)
 )
 
-func benchmarkServerGet(b *testing.B, requestsPerConn int) {
+func benchmarkServerGet(b *testing.B, clientsCount, requestsPerConn int) {
 	ch := make(chan struct{}, b.N)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
@@ -209,11 +259,11 @@ func benchmarkServerGet(b *testing.B, requestsPerConn int) {
 			registerServedRequest(b, ch)
 		},
 	}
-	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, getRequest)
-	verifyRequestsServed(b, requestsSent, ch)
+	benchmarkServer(b, &testServer{s, clientsCount}, clientsCount, requestsPerConn, getRequest)
+	verifyRequestsServed(b, ch)
 }
 
-func benchmarkNetHTTPServerGet(b *testing.B, requestsPerConn int) {
+func benchmarkNetHTTPServerGet(b *testing.B, clientsCount, requestsPerConn int) {
 	ch := make(chan struct{}, b.N)
 	s := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -225,11 +275,11 @@ func benchmarkNetHTTPServerGet(b *testing.B, requestsPerConn int) {
 			registerServedRequest(b, ch)
 		}),
 	}
-	requestsSent := benchmarkServer(b, s, requestsPerConn, getRequest)
-	verifyRequestsServed(b, requestsSent, ch)
+	benchmarkServer(b, s, clientsCount, requestsPerConn, getRequest)
+	verifyRequestsServed(b, ch)
 }
 
-func benchmarkServerPost(b *testing.B, requestsPerConn int) {
+func benchmarkServerPost(b *testing.B, clientsCount, requestsPerConn int) {
 	ch := make(chan struct{}, b.N)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
@@ -244,11 +294,11 @@ func benchmarkServerPost(b *testing.B, requestsPerConn int) {
 			registerServedRequest(b, ch)
 		},
 	}
-	requestsSent := benchmarkServer(b, &testServer{s}, requestsPerConn, postRequest)
-	verifyRequestsServed(b, requestsSent, ch)
+	benchmarkServer(b, &testServer{s, clientsCount}, clientsCount, requestsPerConn, postRequest)
+	verifyRequestsServed(b, ch)
 }
 
-func benchmarkNetHTTPServerPost(b *testing.B, requestsPerConn int) {
+func benchmarkNetHTTPServerPost(b *testing.B, clientsCount, requestsPerConn int) {
 	ch := make(chan struct{}, b.N)
 	s := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -268,8 +318,8 @@ func benchmarkNetHTTPServerPost(b *testing.B, requestsPerConn int) {
 			registerServedRequest(b, ch)
 		}),
 	}
-	requestsSent := benchmarkServer(b, s, requestsPerConn, postRequest)
-	verifyRequestsServed(b, requestsSent, ch)
+	benchmarkServer(b, s, clientsCount, requestsPerConn, postRequest)
+	verifyRequestsServed(b, ch)
 }
 
 func registerServedRequest(b *testing.B, ch chan<- struct{}) {
@@ -280,12 +330,13 @@ func registerServedRequest(b *testing.B, ch chan<- struct{}) {
 	}
 }
 
-func verifyRequestsServed(b *testing.B, requestsSent uint64, ch <-chan struct{}) {
-	requestsServed := uint64(0)
+func verifyRequestsServed(b *testing.B, ch <-chan struct{}) {
+	requestsServed := 0
 	for len(ch) > 0 {
 		<-ch
 		requestsServed++
 	}
+	requestsSent := b.N
 	for requestsServed < requestsSent {
 		select {
 		case <-ch:
@@ -302,45 +353,29 @@ type realServer interface {
 
 type testServer struct {
 	*Server
+	Concurrency int
 }
 
 func (s *testServer) Serve(ln net.Listener) error {
-	return s.Server.ServeConcurrency(ln, runtime.NumCPU())
+	if s.Concurrency < runtime.NumCPU() {
+		s.Concurrency = runtime.NumCPU()
+	}
+	return s.Server.ServeConcurrency(ln, s.Concurrency)
 }
 
-func benchmarkServer(b *testing.B, s realServer, requestsPerConn int, strRequest string) uint64 {
-	request := []byte(strRequest)
-	bytesPerConn := requestsPerConn * len(request)
+func benchmarkServer(b *testing.B, s realServer, clientsCount, requestsPerConn int, request string) {
+	ln := newFakeListener(b.N, clientsCount, requestsPerConn, request)
+	ch := make(chan struct{})
+	go func() {
+		s.Serve(ln)
+		ch <- struct{}{}
+	}()
 
-	requestsSent := uint64(0)
+	<-ln.done
 
-	b.RunParallel(func(pb *testing.PB) {
-		n := uint64(0)
-		ln := newFakeListener(bytesPerConn)
-		ch := make(chan struct{})
-		go func() {
-			s.Serve(ln)
-			ch <- struct{}{}
-		}()
-
-		for pb.Next() {
-			if _, err := ln.client.Write(request); err != nil {
-				b.Fatalf("unexpected error when sending request to conn: %s", err)
-			}
-			n++
-		}
-		if err := ln.client.Flush(); err != nil {
-			b.Fatalf("unexpected error when flushing data: %s", err)
-		}
-
-		ln.w.CloseWithError(io.EOF)
-		ln.stop <- struct{}{}
-		select {
-		case <-ch:
-		case <-time.After(500 * time.Millisecond):
-			b.Fatalf("Server.Serve() didn't stop")
-		}
-		atomic.AddUint64(&requestsSent, n)
-	})
-	return requestsSent
+	select {
+	case <-ch:
+	case <-time.After(10 * time.Second):
+		b.Fatalf("Server.Serve() didn't stop")
+	}
 }
