@@ -73,6 +73,15 @@ func TestURIAppendBytes(t *testing.T) {
 	args.Set("foo", "bar")
 	args.Set("xxx", "йух")
 	testURIAppendBytes(t, "", "xxx.com", "/тест123", "2er", &args, "http://xxx.com/%D1%82%D0%B5%D1%81%D1%82123?foo=bar&xxx=%D0%B9%D1%83%D1%85#2er")
+
+	// test with empty args and non-empty query string
+	var u URI
+	u.Parse([]byte("google.com"), []byte("/foo?bar=baz&baraz#qqqq"))
+	buf := u.AppendBytes(nil)
+	expectedURI := "http://google.com/foo?bar=baz&baraz#qqqq"
+	if string(buf) != expectedURI {
+		t.Fatalf("Unexpected URI: %q. Expected %q", buf, expectedURI)
+	}
 }
 
 func testURIAppendBytes(t *testing.T, scheme, host, path, hash string, args *Args, expectedURI string) {

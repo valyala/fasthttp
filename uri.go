@@ -160,6 +160,9 @@ func (x *URI) AppendRequestURI(dst []byte) []byte {
 	if x.QueryArgs.Len() > 0 {
 		dst = append(dst, '?')
 		dst = x.QueryArgs.AppendBytes(dst)
+	} else if len(x.QueryString) > 0 {
+		dst = append(dst, '?')
+		dst = append(dst, x.QueryString...)
 	}
 	if len(x.Hash) > 0 {
 		dst = append(dst, '#')
