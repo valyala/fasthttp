@@ -64,8 +64,9 @@ type Server struct {
 	ctxPool    sync.Pool
 }
 
-// TimeoutHandler returns StatusRequestTimeout error with the given msg
-// in the body to the client if h didn't return during the given duration.
+// TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
+// error with the given msg in the body to the client if h didn't return
+// during the given duration.
 func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) RequestHandler {
 	if timeout <= 0 {
 		return h
@@ -167,23 +168,28 @@ func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	ctxLoggerLock.Unlock()
 }
 
+var zeroIPAddr = &net.IPAddr{
+	IP: net.IPv4zero,
+}
+
 // RemoteAddr returns client address for the given request.
-func (ctx *RequestCtx) RemoteAddr() string {
+func (ctx *RequestCtx) RemoteAddr() net.Addr {
 	x, ok := ctx.c.(remoteAddrer)
 	if !ok {
-		return "unknown remote addr"
+		return zeroIPAddr
 	}
-	return x.RemoteAddr().String()
+	return x.RemoteAddr()
 }
 
 // RemoteIP returns client ip for the given request.
-func (ctx *RequestCtx) RemoteIP() string {
-	addr := ctx.RemoteAddr()
-	n := strings.LastIndexByte(addr, ':')
-	if n < 0 {
-		return addr
+//
+// Nil is returned if client ip cannot be determined.
+func (ctx *RequestCtx) RemoteIP() net.IP {
+	x, ok := ctx.RemoteAddr().(*net.TCPAddr)
+	if !ok {
+		return net.IPv4zero
 	}
-	return addr[:n]
+	return x.IP
 }
 
 // Error sets response status code to the given value and sets response body
