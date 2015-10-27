@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 )
 
-// stolen from net/http
+// HTTP status codes were stolen from net/http.
 const (
 	StatusContinue           = 100
 	StatusSwitchingProtocols = 101
@@ -106,6 +106,7 @@ var (
 	}
 )
 
+// StatusMessage returns HTTP status message for the given status code.
 func StatusMessage(statusCode int) string {
 	s := statusMessages[statusCode]
 	if s == "" {

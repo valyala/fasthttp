@@ -7,7 +7,8 @@ import (
 
 // Args represents query arguments.
 //
-// It is forbidden copying Args instances. Create new instances instead.
+// It is forbidden copying Args instances. Create new instances instead
+// and use CopyTo().
 type Args struct {
 	args  []argsKV
 	bufKV argsKV
@@ -19,9 +20,22 @@ type argsKV struct {
 	value []byte
 }
 
-// Clear clear query args.
+// Clear clears query args.
 func (a *Args) Clear() {
 	a.args = a.args[:0]
+}
+
+// CopyTo copies all args to dst.
+func (a *Args) CopyTo(dst *Args) {
+	dst.args = copyArgs(dst.args, a.args)
+}
+
+// VisitAll calls f for each existing arg.
+//
+// f must not retain references to key and value after returning.
+// Make key and/or value copies if you need storing them after returning.
+func (a *Args) VisitAll(f func(key, value []byte)) {
+	visitArgs(a.args, f)
 }
 
 // Len returns the number of query args.
@@ -37,7 +51,7 @@ func (a *Args) Parse(s string) {
 
 // ParseBytes parses the given b containing query args.
 //
-// It is safe modifying b buffer conntents after ParseBytes return.
+// It is safe modifying b buffer contents after ParseBytes return.
 func (a *Args) ParseBytes(b []byte) {
 	a.Clear()
 
@@ -73,8 +87,6 @@ func (a *Args) String() string {
 
 // AppendBytes appends query string to dst and returns dst
 // (which may be newly allocated).
-//
-// It is safe modifying dst buffer after AppendBytes returns.
 func (a *Args) AppendBytes(dst []byte) []byte {
 	for i, n := 0, len(a.args); i < n; i++ {
 		kv := &a.args[i]
@@ -92,64 +104,44 @@ func (a *Args) AppendBytes(dst []byte) []byte {
 
 // Del deletes argument with the given key from query args.
 func (a *Args) Del(key string) {
-	for i, n := 0, len(a.args); i < n; i++ {
-		kv := &a.args[i]
-		if EqualBytesStr(kv.key, key) {
-			tmp := *kv
-			copy(a.args[i:], a.args[i+1:])
-			a.args[n-1] = tmp
-			a.args = a.args[:n-1]
-			return
-		}
-	}
+	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
+	a.DelBytes(a.bufKV.key)
+}
+
+// DelBytes deletes argument with the given key from query args.
+//
+// It is safe modifying key buffer after DelBytes return.
+func (a *Args) DelBytes(key []byte) {
+	a.args = delArg(a.args, key)
 }
 
 // Set sets 'key=value' argument.
 func (a *Args) Set(key, value string) {
 	a.bufKV.value = AppendBytesStr(a.bufKV.value[:0], value)
-	a.SetBytes(key, a.bufKV.value)
+	a.SetBytesV(key, a.bufKV.value)
 }
 
-// SetBytes sets 'key=value' argument.
+// SetBytesK sets 'key=value' argument.
 //
-// It is safe modifying valye buffer after SetBytes() return.
-func (a *Args) SetBytes(key string, value []byte) {
+// It is safe modifying key buffer after SetBytesK return.
+func (a *Args) SetBytesK(key []byte, value string) {
+	a.bufKV.value = AppendBytesStr(a.bufKV.value[:0], value)
+	a.SetBytesKV(key, a.bufKV.value)
+}
+
+// SetBytesV sets 'key=value' argument.
+//
+// It is safe modifying value buffer after SetBytesV return.
+func (a *Args) SetBytesV(key string, value []byte) {
 	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
-	a.args = setKV(a.args, a.bufKV.key, value)
+	a.SetBytesKV(a.bufKV.key, value)
 }
 
-func setKV(h []argsKV, key, value []byte) []argsKV {
-	n := len(h)
-	for i := 0; i < n; i++ {
-		kv := &h[i]
-		if bytes.Equal(kv.key, key) {
-			kv.value = append(kv.value[:0], value...)
-			return h
-		}
-	}
-
-	if cap(h) > n {
-		h = h[:n+1]
-		kv := &h[n]
-		kv.key = append(kv.key[:0], key...)
-		kv.value = append(kv.value[:0], value...)
-		return h
-	}
-
-	var kv argsKV
-	kv.key = append(kv.key, key...)
-	kv.value = append(kv.value, value...)
-	return append(h, kv)
-}
-
-func peekKV(h []argsKV, k []byte) []byte {
-	for i, n := 0, len(h); i < n; i++ {
-		kv := &h[i]
-		if bytes.Equal(k, kv.key) {
-			return kv.value
-		}
-	}
-	return nil
+// SetBytesKV sets 'key=value' argument.
+//
+// It is safe modifying key and value buffers after SetBytesKV return.
+func (a *Args) SetBytesKV(key, value []byte) {
+	a.args = setArg(a.args, key, value)
 }
 
 // Get returns query arg value for the given key.
@@ -160,17 +152,39 @@ func (a *Args) Get(key string) string {
 	return string(a.Peek(key))
 }
 
+// GetBytes returns query arg value for the given key.
+//
+// Each GetBytes call allocates memory for returned string,
+// so consider using PeekBytes() instead.
+func (a *Args) GetBytes(key []byte) string {
+	return string(a.PeekBytes(key))
+}
+
 // Peek returns query arg value for the given key.
 //
 // Returned value is valid until the next Args call.
 func (a *Args) Peek(key string) []byte {
 	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
-	return peekKV(a.args, a.bufKV.key)
+	return a.PeekBytes(a.bufKV.key)
+}
+
+// PeekBytes returns query arg value for the given key.
+//
+// Returned value is valid until the next Args call.
+//
+// It is safe modifying key buffer after PeekBytes return.
+func (a *Args) PeekBytes(key []byte) []byte {
+	return peekArg(a.args, key)
 }
 
 // Has returns true if the given key exists in Args.
 func (a *Args) Has(key string) bool {
 	return a.Peek(key) != nil
+}
+
+// HasBytes returns true if the given key exists in Args.
+func (a *Args) HasBytes(key []byte) bool {
+	return a.PeekBytes(key) != nil
 }
 
 // ErrNoArgValue is returned when value with the given key is missing.
@@ -214,6 +228,77 @@ func (a *Args) GetUfloatOrZero(key string) float64 {
 		f = 0
 	}
 	return f
+}
+
+func visitArgs(args []argsKV, f func(k, v []byte)) {
+	for i, n := 0, len(args); i < n; i++ {
+		kv := &args[i]
+		f(kv.key, kv.value)
+	}
+}
+
+func copyArgs(dst, src []argsKV) []argsKV {
+	if cap(dst) < len(src) {
+		tmp := make([]argsKV, len(src))
+		copy(tmp, dst)
+		dst = tmp
+	}
+	n := len(src)
+	dst = dst[:n]
+	for i := 0; i < n; i++ {
+		dstKV := &dst[i]
+		srcKV := &src[i]
+		dstKV.key = append(dstKV.key[:0], srcKV.key...)
+		dstKV.value = append(dstKV.value[:0], srcKV.value...)
+	}
+	return dst
+}
+
+func delArg(args []argsKV, key []byte) []argsKV {
+	for i, n := 0, len(args); i < n; i++ {
+		kv := &args[i]
+		if bytes.Equal(kv.key, key) {
+			tmp := *kv
+			copy(args[i:], args[i+1:])
+			args[n-1] = tmp
+			return args[:n-1]
+		}
+	}
+	return args
+}
+
+func setArg(h []argsKV, key, value []byte) []argsKV {
+	n := len(h)
+	for i := 0; i < n; i++ {
+		kv := &h[i]
+		if bytes.Equal(kv.key, key) {
+			kv.value = append(kv.value[:0], value...)
+			return h
+		}
+	}
+
+	if cap(h) > n {
+		h = h[:n+1]
+		kv := &h[n]
+		kv.key = append(kv.key[:0], key...)
+		kv.value = append(kv.value[:0], value...)
+		return h
+	}
+
+	var kv argsKV
+	kv.key = append(kv.key, key...)
+	kv.value = append(kv.value, value...)
+	return append(h, kv)
+}
+
+func peekArg(h []argsKV, k []byte) []byte {
+	for i, n := 0, len(h); i < n; i++ {
+		kv := &h[i]
+		if bytes.Equal(k, kv.key) {
+			return kv.value
+		}
+	}
+	return nil
 }
 
 // EqualBytesStr returns true if string(b) == s.

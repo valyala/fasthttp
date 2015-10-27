@@ -6,6 +6,61 @@ import (
 	"testing"
 )
 
+func TestArgsCopyTo(t *testing.T) {
+	var a Args
+
+	// empty args
+	testCopyTo(t, &a)
+
+	a.Set("foo", "bar")
+	testCopyTo(t, &a)
+
+	a.Set("xxx", "yyy")
+	testCopyTo(t, &a)
+
+	a.Del("foo")
+	testCopyTo(t, &a)
+}
+
+func testCopyTo(t *testing.T, a *Args) {
+	keys := make(map[string]struct{})
+	a.VisitAll(func(k, v []byte) {
+		keys[string(k)] = struct{}{}
+	})
+
+	var b Args
+	a.CopyTo(&b)
+
+	b.VisitAll(func(k, v []byte) {
+		if _, ok := keys[string(k)]; !ok {
+			t.Fatalf("unexpected key %q after copying from %q", k, a.String())
+		}
+		delete(keys, string(k))
+	})
+	if len(keys) > 0 {
+		t.Fatalf("missing keys %#v after copying from %q", keys, a.String())
+	}
+}
+
+func TestArgsVisitAll(t *testing.T) {
+	var a Args
+	a.Set("foo", "bar")
+
+	i := 0
+	a.VisitAll(func(k, v []byte) {
+		if string(k) != "foo" {
+			t.Fatalf("unexpected key %q. Expected %q", k, "foo")
+		}
+		if string(v) != "bar" {
+			t.Fatalf("unexpected value %q. Expected %q", v, "bar")
+		}
+		i++
+	})
+	if i != 1 {
+		t.Fatalf("unexpected number of VisitAll calls: %d. Expected %d", i, 1)
+	}
+}
+
 func TestArgsStringCompose(t *testing.T) {
 	var a Args
 	a.Set("foo", "bar")
