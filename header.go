@@ -210,7 +210,7 @@ func (h *RequestHeader) DelBytes(key []byte) {
 // Set sets the given 'key: value' header.
 func (h *ResponseHeader) Set(key, value string) {
 	initHeaderKV(&h.bufKV, key, value)
-	h.set(h.bufKV.key, h.bufKV.value)
+	h.SetCanonical(h.bufKV.key, h.bufKV.value)
 }
 
 // SetBytesK sets the given 'key: value' header.
@@ -226,7 +226,7 @@ func (h *ResponseHeader) SetBytesK(key []byte, value string) {
 // It is safe modifying value buffer after SetBytesV return.
 func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 	k := getHeaderKeyBytes(&h.bufKV, key)
-	h.set(k, value)
+	h.SetCanonical(k, value)
 }
 
 // SetBytesKV sets the given 'key: value' header.
@@ -235,10 +235,14 @@ func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	normalizeHeaderKey(h.bufKV.key)
-	h.set(h.bufKV.key, value)
+	h.SetCanonical(h.bufKV.key, value)
 }
 
-func (h *ResponseHeader) set(key, value []byte) {
+// SetCanonical sets the given 'key: value' header assuming that
+// key is in canonical form.
+//
+// It is safe modifying key and value buffers after SetCanonical return.
+func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	switch {
 	case bytes.Equal(strContentType, key):
 		h.contentType = append(h.contentType[:0], value...)
@@ -263,7 +267,7 @@ func (h *ResponseHeader) set(key, value []byte) {
 // Set sets the given 'key: value' header.
 func (h *RequestHeader) Set(key, value string) {
 	initHeaderKV(&h.bufKV, key, value)
-	h.set(h.bufKV.key, h.bufKV.value)
+	h.SetCanonical(h.bufKV.key, h.bufKV.value)
 }
 
 // SetBytesK sets the given 'key: value' header.
@@ -279,7 +283,7 @@ func (h *RequestHeader) SetBytesK(key []byte, value string) {
 // It is safe modifying value buffer after SetBytesV return.
 func (h *RequestHeader) SetBytesV(key string, value []byte) {
 	k := getHeaderKeyBytes(&h.bufKV, key)
-	h.set(k, value)
+	h.SetCanonical(k, value)
 }
 
 // SetBytesKV sets the given 'key: value' header.
@@ -288,10 +292,14 @@ func (h *RequestHeader) SetBytesV(key string, value []byte) {
 func (h *RequestHeader) SetBytesKV(key, value []byte) {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	normalizeHeaderKey(h.bufKV.key)
-	h.set(h.bufKV.key, value)
+	h.SetCanonical(h.bufKV.key, value)
 }
 
-func (h *RequestHeader) set(key, value []byte) {
+// SetCanonical sets the given 'key: value' header assuming that
+// key is in canonical form.
+//
+// It is safe modifying key and value buffers after SetCanonical return.
+func (h *RequestHeader) SetCanonical(key, value []byte) {
 	switch {
 	case bytes.Equal(strHost, key):
 		h.host = append(h.host[:0], value...)

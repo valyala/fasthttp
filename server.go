@@ -194,7 +194,7 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 	resp := &ctx.Response
 	resp.Clear()
 	resp.Header.StatusCode = statusCode
-	resp.Header.set(strContentType, defaultContentType)
+	resp.Header.SetCanonical(strContentType, defaultContentType)
 	resp.Body = append(resp.Body, []byte(msg)...)
 }
 
