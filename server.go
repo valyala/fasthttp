@@ -418,6 +418,7 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **RequestCtx) error {
 		}
 		ctx.ID++
 		ctx.Time = time.Now()
+		ctx.Response.Clear()
 		s.Handler(ctx)
 		shadow := ctx.shadow
 		if shadow != nil {
@@ -435,7 +436,6 @@ func (s *Server) serveConn(c io.ReadWriter, ctxP **RequestCtx) error {
 		}
 		connectionClose := ctx.Response.Header.ConnectionClose
 
-		ctx.Response.Clear()
 		trimBigBuffers(ctx)
 
 		if ctx.r.Buffered() == 0 || connectionClose {
