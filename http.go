@@ -81,6 +81,10 @@ func (req *Request) ParsePostArgs() error {
 // Clear clears request contents.
 func (req *Request) Clear() {
 	req.Header.Clear()
+	req.clearSkipHeader()
+}
+
+func (req *Request) clearSkipHeader() {
 	req.Body = req.Body[:0]
 	req.URI.Clear()
 	req.parsedURI = false
@@ -91,6 +95,10 @@ func (req *Request) Clear() {
 // Clear clears response contents.
 func (resp *Response) Clear() {
 	resp.Header.Clear()
+	resp.clearSkipHeader()
+}
+
+func (resp *Response) clearSkipHeader() {
 	resp.Body = resp.Body[:0]
 }
 
@@ -170,12 +178,7 @@ func (resp *Response) ReadTimeout(r *bufio.Reader, timeout time.Duration) error 
 
 // Read reads request (including body) from the given r.
 func (req *Request) Read(r *bufio.Reader) error {
-	req.Body = req.Body[:0]
-	req.URI.Clear()
-	req.parsedURI = false
-	req.PostArgs.Clear()
-	req.parsedPostArgs = false
-
+	req.clearSkipHeader()
 	err := req.Header.Read(r)
 	if err != nil {
 		return err
@@ -194,8 +197,7 @@ func (req *Request) Read(r *bufio.Reader) error {
 
 // Read reads response (including body) from the given r.
 func (resp *Response) Read(r *bufio.Reader) error {
-	resp.Body = resp.Body[:0]
-
+	resp.clearSkipHeader()
 	err := resp.Header.Read(r)
 	if err != nil {
 		return err
