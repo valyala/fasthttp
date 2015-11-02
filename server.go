@@ -55,13 +55,20 @@ type Server struct {
 	// By default response write timeout is unlimited.
 	WriteTimeout time.Duration
 
+	// Maximum number of concurrent client connections allowed per IP.
+	//
+	// By default unlimited number of concurrent connections
+	// may be established to the server from a single IP address.
+	MaxConnsPerIP int
+
 	// Logger, which is used by ServerCtx.Logger().
 	//
 	// By default standard logger from log package is used.
 	Logger Logger
 
-	serverName atomic.Value
-	ctxPool    sync.Pool
+	perIPConnCounter perIPConnCounter
+	serverName       atomic.Value
+	ctxPool          sync.Pool
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -182,8 +189,6 @@ func (ctx *RequestCtx) RemoteAddr() net.Addr {
 }
 
 // RemoteIP returns client ip for the given request.
-//
-// Nil is returned if client ip cannot be determined.
 func (ctx *RequestCtx) RemoteIP() net.IP {
 	x, ok := ctx.RemoteAddr().(*net.TCPAddr)
 	if !ok {
@@ -261,8 +266,9 @@ func (s *Server) ServeConcurrency(ln net.Listener, concurrency int) error {
 	stopCh := make(chan struct{})
 	go connWorkersMonitor(s, ch, concurrency, stopCh)
 	var lastOverflowErrorTime time.Time
+	var lastPerIPErrorTime time.Time
 	for {
-		c, err := acceptConn(s, ln)
+		c, err := acceptConn(s, ln, &lastPerIPErrorTime)
 		if err != nil {
 			close(stopCh)
 			return err
@@ -271,7 +277,7 @@ func (s *Server) ServeConcurrency(ln net.Listener, concurrency int) error {
 		case ch <- c:
 		default:
 			c.Close()
-			if time.Since(lastOverflowErrorTime) > time.Second*10 {
+			if time.Since(lastOverflowErrorTime) > time.Minute {
 				s.logger().Printf("The incoming connection cannot be served, because all %d workers are busy. "+
 					"Try increasing concurrency in Server.ServeWorkers()", concurrency)
 				lastOverflowErrorTime = time.Now()
@@ -342,7 +348,8 @@ func connWorker(s *Server, ch <-chan net.Conn) {
 	}
 }
 
-func acceptConn(s *Server, ln net.Listener) (net.Conn, error) {
+func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.Conn, error) {
+	maxConnsPerIP := s.MaxConnsPerIP
 	for {
 		c, err := ln.Accept()
 		if err != nil {
@@ -355,6 +362,28 @@ func acceptConn(s *Server, ln net.Listener) (net.Conn, error) {
 				s.logger().Printf("Permanent error: %s", err)
 			}
 			return nil, err
+		}
+		if maxConnsPerIP > 0 {
+			ip := getUint32IP(c)
+			if ip == 0 {
+				return c, nil
+			}
+			n := s.perIPConnCounter.Register(ip)
+			if n > maxConnsPerIP {
+				if time.Since(*lastPerIPErrorTime) > time.Minute {
+					s.logger().Printf("Too many connections from ip %s: %d. MaxConnsPerIP=%d",
+						uint322ip(ip), n, maxConnsPerIP)
+					*lastPerIPErrorTime = time.Now()
+				}
+				c.Close()
+				s.perIPConnCounter.Unregister(ip)
+				continue
+			}
+			return &perIPConn{
+				Conn:             c,
+				ip:               ip,
+				perIPConnCounter: &s.perIPConnCounter,
+			}, nil
 		}
 		return c, nil
 	}

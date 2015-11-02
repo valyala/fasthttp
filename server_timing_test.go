@@ -111,6 +111,22 @@ func BenchmarkNetHTTPServerGet10KReqPerConn1KClients(b *testing.B) {
 	benchmarkNetHTTPServerGet(b, 1000, 10000)
 }
 
+func BenchmarkServerMaxConnsPerIP(b *testing.B) {
+	clientsCount := 1000
+	requestsPerConn := 10
+	ch := make(chan struct{}, b.N)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Success("foobar", []byte("123"))
+			registerServedRequest(b, ch)
+		},
+		MaxConnsPerIP: clientsCount * 2,
+	}
+	req := "GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n"
+	benchmarkServer(b, &testServer{s, clientsCount}, clientsCount, requestsPerConn, req)
+	verifyRequestsServed(b, ch)
+}
+
 func BenchmarkServerTimeoutError(b *testing.B) {
 	clientsCount := 1
 	requestsPerConn := 10
@@ -165,7 +181,10 @@ func (c *fakeServerConn) Write(b []byte) (int, error) {
 	return len(b), nil
 }
 
-var fakeAddr net.TCPAddr
+var fakeAddr = net.TCPAddr{
+	IP:   []byte{1, 2, 3, 4},
+	Port: 12345,
+}
 
 func (c *fakeServerConn) RemoteAddr() net.Addr {
 	return &fakeAddr
