@@ -567,6 +567,12 @@ func (s *Server) releaseCtx(ctx *RequestCtx) {
 		panic("BUG: cannot release RequestCtx with shadow")
 	}
 	ctx.c = nil
+	if ctx.r != nil {
+		ctx.r.Reset(nil)
+	}
+	if ctx.w != nil {
+		ctx.w.Reset(nil)
+	}
 	s.ctxPool.Put(ctx.v)
 }
 
