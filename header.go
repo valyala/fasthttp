@@ -54,6 +54,8 @@ type RequestHeader struct {
 
 	h     []argsKV
 	bufKV argsKV
+
+	cookies []argsKV
 }
 
 // IsMethodGet returns true if request method is GET.
@@ -93,6 +95,7 @@ func (h *RequestHeader) Clear() {
 	h.contentType = h.contentType[:0]
 
 	h.h = h.h[:0]
+	h.cookies = h.cookies[:0]
 }
 
 // CopyTo copies all the headers to dst.
@@ -227,6 +230,27 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	default:
 		h.h = setArg(h.h, key, value)
 	}
+}
+
+// SetCookie sets 'key: value' cookies.
+func (h *RequestHeader) SetCookie(key, value string) {
+	h.bufKV.key = AppendBytesStr(h.bufKV.key[:0], key)
+	h.SetCookieBytesK(h.bufKV.key, value)
+}
+
+// SetCookieBytesK sets 'key: value' cookies.
+//
+// It is safe modifying key buffer after SetCookieBytesK call.
+func (h *RequestHeader) SetCookieBytesK(key []byte, value string) {
+	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
+	h.SetCookieBytesKV(key, h.bufKV.value)
+}
+
+// SetCookieBytesKV sets 'key: value' cookies.
+//
+// It is safe modifying key and value buffers after SetCookieBytesKV call.
+func (h *RequestHeader) SetCookieBytesKV(key, value []byte) {
+	h.cookies = setArg(h.cookies, key, value)
 }
 
 // Set sets the given 'key: value' header.
@@ -569,6 +593,12 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 		}
 	}
 
+	n := len(h.cookies)
+	if n > 0 {
+		h.bufKV.value = appendCookieBytes(h.bufKV.value[:0], h.cookies)
+		writeHeaderLine(w, strCookie, h.bufKV.value)
+	}
+
 	_, err := w.Write(strCRLF)
 	return err
 }
@@ -731,6 +761,8 @@ func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 			if bytes.Equal(p.value, strChunked) {
 				h.ContentLength = -1
 			}
+		case bytes.Equal(p.key, strCookie):
+			h.cookies = parseCookies(h.cookies, p.value, &h.bufKV)
 		default:
 			h.h = setArg(h.h, p.key, p.value)
 		}
