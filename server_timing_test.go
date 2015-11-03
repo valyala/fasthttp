@@ -279,6 +279,9 @@ func benchmarkServerGet(b *testing.B, clientsCount, requestsPerConn int) {
 				b.Fatalf("Unexpected request method: %s", ctx.Request.Header.Method)
 			}
 			ctx.Success("text/plain", fakeResponse)
+			if requestsPerConn == 1 {
+				ctx.Response.Header.ConnectionClose = true
+			}
 			registerServedRequest(b, ch)
 		},
 	}
@@ -293,7 +296,11 @@ func benchmarkNetHTTPServerGet(b *testing.B, clientsCount, requestsPerConn int) 
 			if req.Method != "GET" {
 				b.Fatalf("Unexpected request method: %s", req.Method)
 			}
-			w.Header().Set("Content-Type", "text/plain")
+			h := w.Header()
+			h.Set("Content-Type", "text/plain")
+			if requestsPerConn == 1 {
+				h.Set("Connection", "close")
+			}
 			w.Write(fakeResponse)
 			registerServedRequest(b, ch)
 		}),
@@ -314,6 +321,9 @@ func benchmarkServerPost(b *testing.B, clientsCount, requestsPerConn int) {
 				b.Fatalf("Unexpected body %q. Expected %q", body, fakeResponse)
 			}
 			ctx.Success("text/plain", body)
+			if requestsPerConn == 1 {
+				ctx.Response.Header.ConnectionClose = true
+			}
 			registerServedRequest(b, ch)
 		},
 	}
@@ -336,7 +346,11 @@ func benchmarkNetHTTPServerPost(b *testing.B, clientsCount, requestsPerConn int)
 			if !bytes.Equal(body, fakeResponse) {
 				b.Fatalf("Unexpected body %q. Expected %q", body, fakeResponse)
 			}
-			w.Header().Set("Content-Type", "text/plain")
+			h := w.Header()
+			h.Set("Content-Type", "text/plain")
+			if requestsPerConn == 1 {
+				h.Set("Connection", "close")
+			}
 			w.Write(body)
 			registerServedRequest(b, ch)
 		}),
