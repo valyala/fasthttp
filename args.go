@@ -179,12 +179,13 @@ func (a *Args) PeekBytes(key []byte) []byte {
 
 // Has returns true if the given key exists in Args.
 func (a *Args) Has(key string) bool {
-	return a.Peek(key) != nil
+	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
+	return a.HasBytes(a.bufKV.key)
 }
 
 // HasBytes returns true if the given key exists in Args.
 func (a *Args) HasBytes(key []byte) bool {
-	return a.PeekBytes(key) != nil
+	return hasArg(a.args, key)
 }
 
 // ErrNoArgValue is returned when value with the given key is missing.
@@ -291,6 +292,16 @@ func setArg(h []argsKV, key, value []byte) []argsKV {
 	return append(h, kv)
 }
 
+func hasArg(h []argsKV, k []byte) bool {
+	for i, n := 0, len(h); i < n; i++ {
+		kv := &h[i]
+		if bytes.Equal(k, kv.key) {
+			return true
+		}
+	}
+	return false
+}
+
 func peekArg(h []argsKV, k []byte) []byte {
 	for i, n := 0, len(h); i < n; i++ {
 		kv := &h[i]
@@ -334,20 +345,12 @@ func (p *argsParser) Init(buf []byte) {
 }
 
 func (p *argsParser) Next(kv *argsKV) bool {
-	for {
-		if !p.next(kv) {
-			return false
-		}
+	for p.next(kv) {
 		if len(kv.key) > 0 || len(kv.value) > 0 {
-			if kv.key == nil {
-				kv.key = []byte{}
-			}
-			if kv.value == nil {
-				kv.value = []byte{}
-			}
 			return true
 		}
 	}
+	return false
 }
 
 func (p *argsParser) next(kv *argsKV) bool {
