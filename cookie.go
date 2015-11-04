@@ -7,8 +7,10 @@ import (
 func appendCookieBytes(dst []byte, cookies []argsKV) []byte {
 	for i, n := 0, len(cookies); i < n; i++ {
 		kv := &cookies[i]
-		dst = appendQuotedArg(dst, kv.key)
-		dst = append(dst, '=')
+		if len(kv.key) > 0 {
+			dst = appendQuotedArg(dst, kv.key)
+			dst = append(dst, '=')
+		}
 		dst = appendQuotedArg(dst, kv.value)
 		if i+1 < n {
 			dst = append(dst, ';', ' ')
