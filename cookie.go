@@ -21,7 +21,9 @@ func parseCookies(cookies []argsKV, src []byte, kv *argsKV) []argsKV {
 	var s cookieScanner
 	s.b = src
 	for s.next(kv) {
-		cookies = setArg(cookies, kv.key, kv.value)
+		if len(kv.key) > 0 || len(kv.value) > 0 {
+			cookies = setArg(cookies, kv.key, kv.value)
+		}
 	}
 	return cookies
 }

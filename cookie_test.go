@@ -6,19 +6,22 @@ import (
 )
 
 func TestParseCookies(t *testing.T) {
-	testParseCookies(t, "")
-	testParseCookies(t, "=")
-	testParseCookies(t, "=foo")
-	testParseCookies(t, "bar=")
-	testParseCookies(t, "%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82=a%20b%3Bc; s%20s=aaa")
+	testParseCookies(t, "", "")
+	testParseCookies(t, "=", "")
+	testParseCookies(t, "foo", "=foo")
+	testParseCookies(t, "=foo", "=foo")
+	testParseCookies(t, "bar=", "bar=")
+	testParseCookies(t, "xxx=aa;bb=c; d; ;;e=g", "xxx=aa; bb=c; =d; e=g")
+	testParseCookies(t, "a;b;c; d=1;d=2", "=c; d=2")
+	testParseCookies(t, "   %D0%B8%D0%B2%D0%B5%D1%82=a%20b%3Bc   ;s%20s=aaa  ", "%D0%B8%D0%B2%D0%B5%D1%82=a%20b%3Bc; s%20s=aaa")
 }
 
-func testParseCookies(t *testing.T, s string) {
+func testParseCookies(t *testing.T, s, expectedS string) {
 	var kv argsKV
 	cookies := parseCookies(nil, []byte(s), &kv)
 	ss := string(appendCookieBytes(nil, cookies))
-	if s != ss {
-		t.Fatalf("Unexpected cookies after parsing: %q. Expected %q. cookies=%#v", ss, s, cookies)
+	if ss != expectedS {
+		t.Fatalf("Unexpected cookies after parsing: %q. Expected %q. String to parse %q", ss, expectedS, s)
 	}
 }
 
