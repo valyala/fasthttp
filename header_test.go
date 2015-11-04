@@ -10,6 +10,44 @@ import (
 	"testing"
 )
 
+func TestRequestHeaderCookie(t *testing.T) {
+	var h RequestHeader
+	h.RequestURI = []byte("/foobar")
+	h.Set("Host", "foobar.com")
+
+	h.SetCookie("foo", "bar")
+	h.SetCookie("привет", "мир")
+
+	if h.GetCookie("foo") != "bar" {
+		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.GetCookie("foo"), "bar")
+	}
+	if h.GetCookie("привет") != "мир" {
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h.GetCookie("привет"), "мир")
+	}
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := h.Write(bw); err != nil {
+		t.Fatalf("Unexpected error: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("Unexpected error: %s", err)
+	}
+
+	var h1 RequestHeader
+	br := bufio.NewReader(w)
+	if err := h1.Read(br); err != nil {
+		t.Fatalf("Unexpected error: %s", err)
+	}
+
+	if h1.GetCookie("foo") != h.GetCookie("foo") {
+		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h1.GetCookie("foo"), h.GetCookie("foo"))
+	}
+	if h1.GetCookie("привет") != h.GetCookie("привет") {
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h1.GetCookie("привет"), h.GetCookie("привет"))
+	}
+}
+
 func TestRequestHeaderSetGet(t *testing.T) {
 	h := &RequestHeader{
 		Method:     strPost,

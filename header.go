@@ -370,6 +370,17 @@ func (h *RequestHeader) peek(key []byte) []byte {
 	}
 }
 
+// PeekCookie returns cookie for the given key.
+func (h *RequestHeader) PeekCookie(key string) []byte {
+	h.bufKV.key = AppendBytesStr(h.bufKV.key[:0], key)
+	return h.PeekCookieBytes(h.bufKV.key)
+}
+
+// PeekCookieBytes returns cookie for the given key.
+func (h *RequestHeader) PeekCookieBytes(key []byte) []byte {
+	return peekArg(h.cookies, key)
+}
+
 // Get returns header value for the given key.
 //
 // Get allocates memory on each call, so prefer using Peek instead.
@@ -396,6 +407,21 @@ func (h *RequestHeader) Get(key string) string {
 // GetBytes allocates memory on each call, so prefer using PeekBytes instead.
 func (h *RequestHeader) GetBytes(key []byte) string {
 	return string(h.PeekBytes(key))
+}
+
+// GetCookie returns cookie for the given key.
+//
+// GetCookie allocates memory on each call, so prefere using PeekCookie instead.
+func (h *RequestHeader) GetCookie(key string) string {
+	return string(h.PeekCookie(key))
+}
+
+// GetCookieBytes returns cookie for the given key.
+//
+// GetCookieBytes allocates memory on each call, so prefer using PeekCookieBytes
+// instead.
+func (h *RequestHeader) GetCookieBytes(key []byte) string {
+	return string(h.PeekCookieBytes(key))
 }
 
 // Read reads response header from r.
