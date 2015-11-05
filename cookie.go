@@ -209,5 +209,5 @@ func decodeCookieArg(dst, src []byte, decode bool) []byte {
 	if !decode {
 		return append(dst[:0], src...)
 	}
-	return decodeArg(dst[:0], src, true)
+	return decodeArg(dst, src, true)
 }

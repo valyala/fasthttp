@@ -365,15 +365,15 @@ func (p *argsParser) next(kv *argsKV) bool {
 		case '=':
 			if isKey {
 				isKey = false
-				kv.key = decodeArg(kv.key[:0], p.b[:i], true)
+				kv.key = decodeArg(kv.key, p.b[:i], true)
 				k = i + 1
 			}
 		case '&':
 			if isKey {
-				kv.key = decodeArg(kv.key[:0], p.b[:i], true)
+				kv.key = decodeArg(kv.key, p.b[:i], true)
 				kv.value = kv.value[:0]
 			} else {
-				kv.value = decodeArg(kv.value[:0], p.b[k:i], true)
+				kv.value = decodeArg(kv.value, p.b[k:i], true)
 			}
 			p.b = p.b[i+1:]
 			return true
@@ -381,16 +381,17 @@ func (p *argsParser) next(kv *argsKV) bool {
 	}
 
 	if isKey {
-		kv.key = decodeArg(kv.key[:0], p.b, true)
+		kv.key = decodeArg(kv.key, p.b, true)
 		kv.value = kv.value[:0]
 	} else {
-		kv.value = decodeArg(kv.value[:0], p.b[k:], true)
+		kv.value = decodeArg(kv.value, p.b[k:], true)
 	}
 	p.b = p.b[len(p.b):]
 	return true
 }
 
 func decodeArg(dst, src []byte, decodePlus bool) []byte {
+	dst = dst[:0]
 	for i, n := 0, len(src); i < n; i++ {
 		c := src[i]
 		switch c {
