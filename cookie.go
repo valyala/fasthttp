@@ -162,25 +162,31 @@ func (s *cookieScanner) next(kv *argsKV, decode bool) bool {
 		return false
 	}
 
-	var b []byte
-	n := bytes.IndexByte(s.b, ';')
-	if n < 0 {
-		b = s.b
-		s.b = s.b[len(s.b):]
-	} else {
-		b = s.b[:n]
-		s.b = s.b[n+1:]
+	isKey := true
+	k := 0
+	for i, c := range s.b {
+		switch c {
+		case '=':
+			if isKey {
+				isKey = false
+				kv.key = decodeCookieArg(kv.key[:0], s.b[:i], decode)
+				k = i + 1
+			}
+		case ';':
+			if isKey {
+				kv.key = kv.key[:0]
+			}
+			kv.value = decodeCookieArg(kv.value[:0], s.b[k:i], decode)
+			s.b = s.b[i+1:]
+			return true
+		}
 	}
 
-	n = bytes.IndexByte(b, '=')
-	if n < 0 {
+	if isKey {
 		kv.key = kv.key[:0]
-		kv.value = decodeCookieArg(kv.value[:0], b, decode)
-		return true
 	}
-
-	kv.key = decodeCookieArg(kv.key[:0], b[:n], decode)
-	kv.value = decodeCookieArg(kv.value[:0], b[n+1:], decode)
+	kv.value = decodeCookieArg(kv.value[:0], s.b[k:], decode)
+	s.b = s.b[len(s.b):]
 	return true
 }
 
