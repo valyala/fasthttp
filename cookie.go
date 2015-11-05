@@ -36,6 +36,7 @@ type Cookie struct {
 	Path []byte
 
 	bufKV argsKV
+	buf   []byte
 }
 
 var zeroTime time.Time
@@ -77,7 +78,15 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 var errNoCookies = errors.New("no cookies found")
 
 // Parse parses Set-Cookie header.
-func (c *Cookie) Parse(src []byte) error {
+func (c *Cookie) Parse(src string) error {
+	c.buf = AppendBytesStr(c.buf[:0], src)
+	return c.ParseBytes(c.buf)
+}
+
+// ParseBytes parses Set-Cookie header.
+//
+// It is safe modifying src buffer after function return.
+func (c *Cookie) ParseBytes(src []byte) error {
 	c.Clear()
 
 	var s cookieScanner

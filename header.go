@@ -142,7 +142,7 @@ func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
 //
 // Cookie name is passed in key and the whole Set-Cookie header value
 // is passed in value on each f invocation. Value may be parsed
-// with Cookie.Parse().
+// with Cookie.ParseBytes().
 //
 // f must not retain references to key and/or value after returning.
 func (h *ResponseHeader) VisitAllCookie(f func(key, value []byte)) {
@@ -458,7 +458,7 @@ func (h *ResponseHeader) GetCookie(cookie *Cookie) bool {
 	if v == nil {
 		return false
 	}
-	cookie.Parse(v)
+	cookie.ParseBytes(v)
 	return true
 }
 

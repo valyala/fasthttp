@@ -50,7 +50,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 
 	h.VisitAllCookie(func(key, value []byte) {
 		var cc Cookie
-		cc.Parse(value)
+		cc.ParseBytes(value)
 		if !bytes.Equal(key, cc.Key) {
 			t.Fatalf("Unexpected cookie key %q. Expected %q", key, cc.Key)
 		}

@@ -16,7 +16,7 @@ func TestCookieParse(t *testing.T) {
 
 func testCookieParse(t *testing.T, s, expectedS string) {
 	var c Cookie
-	if err := c.Parse([]byte(s)); err != nil {
+	if err := c.Parse(s); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 	result := string(c.AppendBytes(nil))
