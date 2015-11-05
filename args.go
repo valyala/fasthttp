@@ -358,24 +358,35 @@ func (p *argsParser) next(kv *argsKV) bool {
 		return false
 	}
 
-	n := bytes.IndexByte(p.b, '&')
-	var b []byte
-	if n < 0 {
-		b = p.b
-		p.b = p.b[len(p.b):]
-	} else {
-		b = p.b[:n]
-		p.b = p.b[n+1:]
+	isKey := true
+	k := 0
+	for i, c := range p.b {
+		switch c {
+		case '=':
+			if isKey {
+				isKey = false
+				kv.key = decodeArg(kv.key[:0], p.b[:i], true)
+				k = i + 1
+			}
+		case '&':
+			if isKey {
+				kv.key = decodeArg(kv.key[:0], p.b[:i], true)
+				kv.value = kv.value[:0]
+			} else {
+				kv.value = decodeArg(kv.value[:0], p.b[k:i], true)
+			}
+			p.b = p.b[i+1:]
+			return true
+		}
 	}
 
-	n = bytes.IndexByte(b, '=')
-	if n < 0 {
-		kv.key = decodeArg(kv.key[:0], b, true)
+	if isKey {
+		kv.key = decodeArg(kv.key[:0], p.b, true)
 		kv.value = kv.value[:0]
 	} else {
-		kv.key = decodeArg(kv.key[:0], b[:n], true)
-		kv.value = decodeArg(kv.value[:0], b[n+1:], true)
+		kv.value = decodeArg(kv.value[:0], p.b[k:], true)
 	}
+	p.b = p.b[len(p.b):]
 	return true
 }
 
