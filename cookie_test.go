@@ -58,13 +58,12 @@ func TestParseRequestCookies(t *testing.T) {
 	testParseRequestCookies(t, "=foo", "foo")
 	testParseRequestCookies(t, "bar=", "bar=")
 	testParseRequestCookies(t, "xxx=aa;bb=c; =d; ;;e=g", "xxx=aa; bb=c; d; e=g")
-	testParseRequestCookies(t, "a;b;c; d=1;d=2", "c; d=2")
+	testParseRequestCookies(t, "a;b;c; d=1;d=2", "a; b; c; d=1; d=2")
 	testParseRequestCookies(t, "   %D0%B8%D0%B2%D0%B5%D1%82=a%20b%3Bc   ;s%20s=aaa  ", "%D0%B8%D0%B2%D0%B5%D1%82=a%20b%3Bc; s%20s=aaa")
 }
 
 func testParseRequestCookies(t *testing.T, s, expectedS string) {
-	var kv argsKV
-	cookies := parseRequestCookies(nil, []byte(s), &kv)
+	cookies := parseRequestCookies(nil, []byte(s))
 	ss := string(appendRequestCookieBytes(nil, cookies))
 	if ss != expectedS {
 		t.Fatalf("Unexpected cookies after parsing: %q. Expected %q. String to parse %q", ss, expectedS, s)

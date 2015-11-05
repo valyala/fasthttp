@@ -763,42 +763,46 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (b []byte, err error) {
 func (h *ResponseHeader) parseHeaders(buf []byte) ([]byte, error) {
 	h.ContentLength = -2
 
-	var p headerParser
-	p.init(buf)
+	var s headerScanner
+	s.init(buf)
 	var err error
-	for p.next() {
+	var kv *argsKV
+	for s.next() {
 		switch {
-		case bytes.Equal(p.key, strContentType):
-			h.contentType = append(h.contentType[:0], p.value...)
-		case bytes.Equal(p.key, strServer):
-			h.server = append(h.server[:0], p.value...)
-		case bytes.Equal(p.key, strContentLength):
+		case bytes.Equal(s.key, strContentType):
+			h.contentType = append(h.contentType[:0], s.value...)
+		case bytes.Equal(s.key, strServer):
+			h.server = append(h.server[:0], s.value...)
+		case bytes.Equal(s.key, strContentLength):
 			if h.ContentLength != -1 {
-				h.ContentLength, err = parseContentLength(p.value)
+				h.ContentLength, err = parseContentLength(s.value)
 				if err != nil {
 					if err == errNeedMore {
 						return nil, err
 					}
-					return nil, fmt.Errorf("cannot parse Content-Length %q: %s at %q", p.value, err, buf)
+					return nil, fmt.Errorf("cannot parse Content-Length %q: %s at %q", s.value, err, buf)
 				}
 			}
-		case bytes.Equal(p.key, strTransferEncoding):
-			if bytes.Equal(p.value, strChunked) {
+		case bytes.Equal(s.key, strTransferEncoding):
+			if bytes.Equal(s.value, strChunked) {
 				h.ContentLength = -1
 			}
-		case bytes.Equal(p.key, strConnection):
-			if bytes.Equal(p.value, strClose) {
+		case bytes.Equal(s.key, strConnection):
+			if bytes.Equal(s.value, strClose) {
 				h.ConnectionClose = true
 			}
-		case bytes.Equal(p.key, strSetCookie):
-			h.bufKV.key = getCookieKey(h.bufKV.key, p.value)
-			h.cookies = setArg(h.cookies, h.bufKV.key, p.value)
+		case bytes.Equal(s.key, strSetCookie):
+			h.cookies, kv = allocArg(h.cookies)
+			kv.key = getCookieKey(kv.key, s.value)
+			kv.value = append(kv.value[:0], s.value...)
 		default:
-			h.h = setArg(h.h, p.key, p.value)
+			h.h, kv = allocArg(h.h)
+			kv.key = append(kv.key[:0], s.key...)
+			kv.value = append(kv.value[:0], s.value...)
 		}
 	}
-	if p.err != nil {
-		return nil, p.err
+	if s.err != nil {
+		return nil, s.err
 	}
 
 	if len(h.contentType) == 0 {
@@ -807,43 +811,46 @@ func (h *ResponseHeader) parseHeaders(buf []byte) ([]byte, error) {
 	if h.ContentLength == -2 {
 		return nil, fmt.Errorf("missing both Content-Length and Transfer-Encoding: chunked in %q", buf)
 	}
-	return p.b, nil
+	return s.b, nil
 }
 
 func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 	h.ContentLength = -2
 
-	var p headerParser
-	p.init(buf)
+	var s headerScanner
+	s.init(buf)
 	var err error
-	for p.next() {
+	var kv *argsKV
+	for s.next() {
 		switch {
-		case bytes.Equal(p.key, strHost):
-			h.host = append(h.host[:0], p.value...)
-		case bytes.Equal(p.key, strContentType):
-			h.contentType = append(h.contentType[:0], p.value...)
-		case bytes.Equal(p.key, strContentLength):
+		case bytes.Equal(s.key, strHost):
+			h.host = append(h.host[:0], s.value...)
+		case bytes.Equal(s.key, strContentType):
+			h.contentType = append(h.contentType[:0], s.value...)
+		case bytes.Equal(s.key, strContentLength):
 			if h.ContentLength != -1 {
-				h.ContentLength, err = parseContentLength(p.value)
+				h.ContentLength, err = parseContentLength(s.value)
 				if err != nil {
 					if err == errNeedMore {
 						return nil, err
 					}
-					return nil, fmt.Errorf("cannot parse Content-Length %q: %s at %q", p.value, err, buf)
+					return nil, fmt.Errorf("cannot parse Content-Length %q: %s at %q", s.value, err, buf)
 				}
 			}
-		case bytes.Equal(p.key, strTransferEncoding):
-			if bytes.Equal(p.value, strChunked) {
+		case bytes.Equal(s.key, strTransferEncoding):
+			if bytes.Equal(s.value, strChunked) {
 				h.ContentLength = -1
 			}
-		case bytes.Equal(p.key, strCookie):
-			h.cookies = parseRequestCookies(h.cookies, p.value, &h.bufKV)
+		case bytes.Equal(s.key, strCookie):
+			h.cookies = parseRequestCookies(h.cookies, s.value)
 		default:
-			h.h = setArg(h.h, p.key, p.value)
+			h.h, kv = allocArg(h.h)
+			kv.key = append(kv.key[:0], s.key...)
+			kv.value = append(kv.value[:0], s.value...)
 		}
 	}
-	if p.err != nil {
-		return nil, p.err
+	if s.err != nil {
+		return nil, s.err
 	}
 
 	if len(h.host) == 0 {
@@ -859,7 +866,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 	} else {
 		h.ContentLength = 0
 	}
-	return p.b, nil
+	return s.b, nil
 }
 
 func parseContentLength(b []byte) (int, error) {
@@ -873,7 +880,7 @@ func parseContentLength(b []byte) (int, error) {
 	return v, nil
 }
 
-type headerParser struct {
+type headerScanner struct {
 	headers []byte
 	b       []byte
 	key     []byte
@@ -882,37 +889,37 @@ type headerParser struct {
 	lineNum int
 }
 
-func (p *headerParser) init(headers []byte) {
-	p.headers = headers
-	p.b = headers
-	p.key = nil
-	p.value = nil
-	p.lineNum = 0
+func (s *headerScanner) init(headers []byte) {
+	s.headers = headers
+	s.b = headers
+	s.key = nil
+	s.value = nil
+	s.lineNum = 0
 }
 
-func (p *headerParser) next() bool {
+func (s *headerScanner) next() bool {
 	var b []byte
-	b, p.b, p.err = nextLine(p.b)
-	if p.err != nil {
+	b, s.b, s.err = nextLine(s.b)
+	if s.err != nil {
 		return false
 	}
 	if len(b) == 0 {
 		return false
 	}
 
-	p.lineNum++
+	s.lineNum++
 	n := bytes.IndexByte(b, ':')
 	if n < 0 {
-		p.err = fmt.Errorf("cannot find colon at line #%d in %q", p.lineNum, p.headers)
+		s.err = fmt.Errorf("cannot find colon at line #%d in %q", s.lineNum, s.headers)
 		return false
 	}
-	p.key = b[:n]
+	s.key = b[:n]
 	n++
-	normalizeHeaderKey(p.key)
+	normalizeHeaderKey(s.key)
 	for len(b) > n && b[n] == ' ' {
 		n++
 	}
-	p.value = b[n:]
+	s.value = b[n:]
 	return true
 }
 

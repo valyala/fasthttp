@@ -55,28 +55,17 @@ func (a *Args) Parse(s string) {
 func (a *Args) ParseBytes(b []byte) {
 	a.Clear()
 
-	var p argsParser
-	p.Init(b)
+	var s argsScanner
+	s.b = b
 
-	n := cap(a.args)
-	a.args = a.args[:n]
-	for i := 0; i < n; i++ {
-		kv := &a.args[i]
-		if !p.Next(kv) {
-			for j := 0; j < i; j++ {
-			}
-			a.args = a.args[:i]
-			return
+	var kv *argsKV
+	a.args, kv = allocArg(a.args)
+	for s.next(kv) {
+		if len(kv.key) > 0 || len(kv.value) > 0 {
+			a.args, kv = allocArg(a.args)
 		}
 	}
-
-	for {
-		var kv argsKV
-		if !p.Next(&kv) {
-			return
-		}
-		a.args = append(a.args, kv)
-	}
+	a.args = releaseArg(a.args)
 }
 
 // String returns string representation of query args.
@@ -292,6 +281,20 @@ func setArg(h []argsKV, key, value []byte) []argsKV {
 	return append(h, kv)
 }
 
+func allocArg(h []argsKV) ([]argsKV, *argsKV) {
+	n := len(h)
+	if cap(h) > n {
+		h = h[:n+1]
+	} else {
+		h = append(h, argsKV{})
+	}
+	return h, &h[n]
+}
+
+func releaseArg(h []argsKV) []argsKV {
+	return h[:len(h)-1]
+}
+
 func hasArg(h []argsKV, k []byte) bool {
 	for i, n := 0, len(h); i < n; i++ {
 		kv := &h[i]
@@ -336,57 +339,44 @@ func AppendBytesStr(dst []byte, src string) []byte {
 	return dst
 }
 
-type argsParser struct {
+type argsScanner struct {
 	b []byte
 }
 
-func (p *argsParser) Init(buf []byte) {
-	p.b = buf
-}
-
-func (p *argsParser) Next(kv *argsKV) bool {
-	for p.next(kv) {
-		if len(kv.key) > 0 || len(kv.value) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func (p *argsParser) next(kv *argsKV) bool {
-	if len(p.b) == 0 {
+func (s *argsScanner) next(kv *argsKV) bool {
+	if len(s.b) == 0 {
 		return false
 	}
 
 	isKey := true
 	k := 0
-	for i, c := range p.b {
+	for i, c := range s.b {
 		switch c {
 		case '=':
 			if isKey {
 				isKey = false
-				kv.key = decodeArg(kv.key, p.b[:i], true)
+				kv.key = decodeArg(kv.key, s.b[:i], true)
 				k = i + 1
 			}
 		case '&':
 			if isKey {
-				kv.key = decodeArg(kv.key, p.b[:i], true)
+				kv.key = decodeArg(kv.key, s.b[:i], true)
 				kv.value = kv.value[:0]
 			} else {
-				kv.value = decodeArg(kv.value, p.b[k:i], true)
+				kv.value = decodeArg(kv.value, s.b[k:i], true)
 			}
-			p.b = p.b[i+1:]
+			s.b = s.b[i+1:]
 			return true
 		}
 	}
 
 	if isKey {
-		kv.key = decodeArg(kv.key, p.b, true)
+		kv.key = decodeArg(kv.key, s.b, true)
 		kv.value = kv.value[:0]
 	} else {
-		kv.value = decodeArg(kv.value, p.b[k:], true)
+		kv.value = decodeArg(kv.value, s.b[k:], true)
 	}
-	p.b = p.b[len(p.b):]
+	s.b = s.b[len(s.b):]
 	return true
 }
 

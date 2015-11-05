@@ -151,15 +151,17 @@ func appendRequestCookieBytes(dst []byte, cookies []argsKV) []byte {
 	return dst
 }
 
-func parseRequestCookies(cookies []argsKV, src []byte, kv *argsKV) []argsKV {
+func parseRequestCookies(cookies []argsKV, src []byte) []argsKV {
 	var s cookieScanner
 	s.b = src
+	var kv *argsKV
+	cookies, kv = allocArg(cookies)
 	for s.next(kv, true) {
 		if len(kv.key) > 0 || len(kv.value) > 0 {
-			cookies = setArg(cookies, kv.key, kv.value)
+			cookies, kv = allocArg(cookies)
 		}
 	}
-	return cookies
+	return releaseArg(cookies)
 }
 
 type cookieScanner struct {
