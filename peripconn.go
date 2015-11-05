@@ -51,12 +51,16 @@ func (c *perIPConn) Close() error {
 }
 
 func getUint32IP(c net.Conn) uint32 {
+	return ip2uint32(getConnIP4(c))
+}
+
+func getConnIP4(c net.Conn) net.IP {
 	addr := c.RemoteAddr()
 	ipAddr, ok := addr.(*net.TCPAddr)
 	if !ok {
-		return 0
+		return net.IPv4zero
 	}
-	return ip2uint32(ipAddr.IP.To4())
+	return ipAddr.IP.To4()
 }
 
 func ip2uint32(ip net.IP) uint32 {
