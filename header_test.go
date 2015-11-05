@@ -10,6 +10,115 @@ import (
 	"testing"
 )
 
+func TestResponseHeaderCookie(t *testing.T) {
+	var h ResponseHeader
+	var c Cookie
+
+	c.Key = []byte("foobar")
+	c.Value = []byte("aaa")
+	h.SetCookie(&c)
+
+	c.Key = []byte("йцук")
+	c.Domain = []byte("foobar.com")
+	h.SetCookie(&c)
+
+	c.Clear()
+	c.Key = []byte("foobar")
+	if !h.GetCookie(&c) {
+		t.Fatalf("Cannot find cookie %q", c.Key)
+	}
+
+	var expectedC1 Cookie
+	expectedC1.Key = []byte("foobar")
+	expectedC1.Value = []byte("aaa")
+	if !equalCookie(&expectedC1, &c) {
+		t.Fatalf("unexpected cookie\n%#v\nExpected\n%#v\n", c, expectedC1)
+	}
+
+	c.Key = []byte("йцук")
+	if !h.GetCookie(&c) {
+		t.Fatalf("cannot find cookie %q", c.Key)
+	}
+
+	var expectedC2 Cookie
+	expectedC2.Key = []byte("йцук")
+	expectedC2.Value = []byte("aaa")
+	expectedC2.Domain = []byte("foobar.com")
+	if !equalCookie(&expectedC2, &c) {
+		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", c, expectedC2)
+	}
+
+	h.VisitAllCookie(func(key, value []byte) {
+		var cc Cookie
+		cc.Parse(value)
+		if !bytes.Equal(key, cc.Key) {
+			t.Fatalf("Unexpected cookie key %q. Expected %q", key, cc.Key)
+		}
+		switch {
+		case bytes.Equal(key, []byte("foobar")):
+			if !equalCookie(&expectedC1, &cc) {
+				t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", cc, expectedC1)
+			}
+		case bytes.Equal(key, []byte("йцук")):
+			if !equalCookie(&expectedC2, &cc) {
+				t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", cc, expectedC2)
+			}
+		default:
+			t.Fatalf("unexpected cookie key %q", key)
+		}
+	})
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := h.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	var h1 ResponseHeader
+	br := bufio.NewReader(w)
+	if err := h1.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	c.Key = []byte("foobar")
+	if !h1.GetCookie(&c) {
+		t.Fatalf("Cannot find cookie %q", c.Key)
+	}
+	if !equalCookie(&expectedC1, &c) {
+		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", c, expectedC1)
+	}
+
+	c.Key = []byte("йцук")
+	if !h1.GetCookie(&c) {
+		t.Fatalf("cannot find cookie %q", c.Key)
+	}
+	if !equalCookie(&expectedC2, &c) {
+		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", c, expectedC2)
+	}
+}
+
+func equalCookie(c1, c2 *Cookie) bool {
+	if !bytes.Equal(c1.Key, c2.Key) {
+		return false
+	}
+	if !bytes.Equal(c1.Value, c2.Value) {
+		return false
+	}
+	if !c1.Expire.Equal(c2.Expire) {
+		return false
+	}
+	if !bytes.Equal(c1.Domain, c2.Domain) {
+		return false
+	}
+	if !bytes.Equal(c1.Path, c2.Path) {
+		return false
+	}
+	return true
+}
+
 func TestRequestHeaderCookie(t *testing.T) {
 	var h RequestHeader
 	h.RequestURI = []byte("/foobar")

@@ -30,6 +30,11 @@ var (
 	strTransferEncoding = []byte("Transfer-Encoding")
 	strUserAgent        = []byte("User-Agent")
 	strCookie           = []byte("Cookie")
+	strSetCookie        = []byte("Set-Cookie")
+
+	strCookieExpires = []byte("expires")
+	strCookieDomain  = []byte("domain")
+	strCookiePath    = []byte("path")
 
 	strClose               = []byte("close")
 	strChunked             = []byte("chunked")

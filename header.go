@@ -31,6 +31,8 @@ type ResponseHeader struct {
 
 	h     []argsKV
 	bufKV argsKV
+
+	cookies []argsKV
 }
 
 // RequestHeader represents HTTP request header.
@@ -83,6 +85,7 @@ func (h *ResponseHeader) Clear() {
 	h.server = h.server[:0]
 
 	h.h = h.h[:0]
+	h.cookies = h.cookies[:0]
 }
 
 // Clear clears request header.
@@ -133,6 +136,17 @@ func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
 		f(strConnection, strClose)
 	}
 	visitArgs(h.h, f)
+}
+
+// VisitAllCookie calls f for each response cookie.
+//
+// Cookie name is passed in key and the whole Set-Cookie header value
+// is passed in value on each f invocation. Value may be parsed
+// with Cookie.Parse().
+//
+// f must not retain references to key and/or value after returning.
+func (h *ResponseHeader) VisitAllCookie(f func(key, value []byte)) {
+	visitArgs(h.cookies, f)
 }
 
 // VisitAll calls f for each header except Content-Length.
@@ -227,9 +241,19 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 		// Transfer-Encoding is managed automatically.
 	case bytes.Equal(strDate, key):
 		// Date is managed automatically.
+	case bytes.Equal(strSetCookie, key):
+		// Cookie must be managed via SetCookie.
 	default:
 		h.h = setArg(h.h, key, value)
 	}
+}
+
+// SetCookie sets the given response cookie.
+//
+// It is safe modifying cookie instance after the call.
+func (h *ResponseHeader) SetCookie(cookie *Cookie) {
+	h.bufKV.value = cookie.AppendBytes(h.bufKV.value[:0])
+	h.cookies = setArg(h.cookies, cookie.Key, h.bufKV.value)
 }
 
 // SetCookie sets 'key: value' cookies.
@@ -300,6 +324,8 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 		// Transfer-Encoding is managed automatically.
 	case bytes.Equal(strConnection, key):
 		// Connection is managed automatically.
+	case bytes.Equal(strCookie, key):
+		// Cookie must be managed via SetCookie.
 	default:
 		h.h = setArg(h.h, key, value)
 	}
@@ -422,6 +448,18 @@ func (h *RequestHeader) GetCookie(key string) string {
 // instead.
 func (h *RequestHeader) GetCookieBytes(key []byte) string {
 	return string(h.PeekCookieBytes(key))
+}
+
+// GetCookie fills cookie for the given cookie.Key.
+//
+// Returns false if cookie with the given cookie.Key is missing.
+func (h *ResponseHeader) GetCookie(cookie *Cookie) bool {
+	v := peekArg(h.cookies, cookie.Key)
+	if v == nil {
+		return false
+	}
+	cookie.Parse(v)
+	return true
 }
 
 // Read reads response header from r.
@@ -574,6 +612,14 @@ func (h *ResponseHeader) Write(w *bufio.Writer) error {
 		}
 	}
 
+	n := len(h.cookies)
+	if n > 0 {
+		for i := 0; i < n; i++ {
+			kv := &h.cookies[i]
+			writeHeaderLine(w, strSetCookie, kv.value)
+		}
+	}
+
 	_, err := w.Write(strCRLF)
 	return err
 }
@@ -621,7 +667,7 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 
 	n := len(h.cookies)
 	if n > 0 {
-		h.bufKV.value = appendCookieBytes(h.bufKV.value[:0], h.cookies)
+		h.bufKV.value = appendRequestCookieBytes(h.bufKV.value[:0], h.cookies)
 		writeHeaderLine(w, strCookie, h.bufKV.value)
 	}
 
@@ -744,6 +790,9 @@ func (h *ResponseHeader) parseHeaders(buf []byte) ([]byte, error) {
 			if bytes.Equal(p.value, strClose) {
 				h.ConnectionClose = true
 			}
+		case bytes.Equal(p.key, strSetCookie):
+			h.bufKV.key = getCookieKey(h.bufKV.key, p.value)
+			h.cookies = setArg(h.cookies, h.bufKV.key, p.value)
 		default:
 			h.h = setArg(h.h, p.key, p.value)
 		}
@@ -788,7 +837,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 				h.ContentLength = -1
 			}
 		case bytes.Equal(p.key, strCookie):
-			h.cookies = parseCookies(h.cookies, p.value, &h.bufKV)
+			h.cookies = parseRequestCookies(h.cookies, p.value, &h.bufKV)
 		default:
 			h.h = setArg(h.h, p.key, p.value)
 		}
