@@ -133,7 +133,7 @@ func getCookieKey(dst, src []byte) []byte {
 	if n >= 0 {
 		src = src[:n]
 	}
-	return decodeCookieArg(dst[:0], src, true)
+	return decodeCookieArg(dst, src, true)
 }
 
 func appendRequestCookieBytes(dst []byte, cookies []argsKV) []byte {
@@ -178,14 +178,14 @@ func (s *cookieScanner) next(kv *argsKV, decode bool) bool {
 		case '=':
 			if isKey {
 				isKey = false
-				kv.key = decodeCookieArg(kv.key[:0], s.b[:i], decode)
+				kv.key = decodeCookieArg(kv.key, s.b[:i], decode)
 				k = i + 1
 			}
 		case ';':
 			if isKey {
 				kv.key = kv.key[:0]
 			}
-			kv.value = decodeCookieArg(kv.value[:0], s.b[k:i], decode)
+			kv.value = decodeCookieArg(kv.value, s.b[k:i], decode)
 			s.b = s.b[i+1:]
 			return true
 		}
@@ -194,7 +194,7 @@ func (s *cookieScanner) next(kv *argsKV, decode bool) bool {
 	if isKey {
 		kv.key = kv.key[:0]
 	}
-	kv.value = decodeCookieArg(kv.value[:0], s.b[k:], decode)
+	kv.value = decodeCookieArg(kv.value, s.b[k:], decode)
 	s.b = s.b[len(s.b):]
 	return true
 }
@@ -207,7 +207,7 @@ func decodeCookieArg(dst, src []byte, decode bool) []byte {
 		src = src[:len(src)-1]
 	}
 	if !decode {
-		return append(dst, src...)
+		return append(dst[:0], src...)
 	}
-	return decodeArg(dst, src, true)
+	return decodeArg(dst[:0], src, true)
 }
