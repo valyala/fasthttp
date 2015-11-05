@@ -98,7 +98,7 @@ func (c *Cookie) Parse(src []byte) error {
 		switch {
 		case bytes.Equal(strCookieExpires, kv.key):
 			v := unsafeBytesToStr(kv.value)
-			exptime, err := time.Parse(time.RFC1123, v)
+			exptime, err := time.ParseInLocation(time.RFC1123, v, gmtLocation)
 			if err != nil {
 				return err
 			}
