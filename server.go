@@ -195,7 +195,8 @@ func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	ctx := cl.ctx
 	req := &ctx.Request
 	req.ParseURI()
-	ctx.s.logger().Printf("#%016X - %s - %s %s - %s", ctx.ID, ctx.RemoteAddr(), req.Header.Method, req.URI.URI, s)
+	ctx.s.logger().Printf("%.3f #%016X - %s - %s %s - %s",
+		time.Since(ctx.Time).Seconds(), ctx.ID, ctx.RemoteAddr(), req.Header.Method, req.URI.URI, s)
 	ctxLoggerLock.Unlock()
 }
 
@@ -375,7 +376,7 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 				continue
 			}
 			if err != io.EOF {
-				s.logger().Printf("Permanent error: %s", err)
+				s.logger().Printf("Permanent error when accepting new connections: %s", err)
 			}
 			return nil, err
 		}

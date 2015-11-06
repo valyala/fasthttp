@@ -230,10 +230,10 @@ func TestServerLogger(t *testing.T) {
 	verifyResponse(t, br, 200, "text/html", "requestURI=/foo1, body=\"\", remoteAddr=1.2.3.4:8765")
 	verifyResponse(t, br, 200, "text/html", "requestURI=/foo2, body=\"abcde\", remoteAddr=1.2.3.4:8765")
 
-	expectedLogOut := `#0000000100000001 - 1.2.3.4:8765 - GET http://google.com/foo1 - begin
-#0000000100000001 - 1.2.3.4:8765 - GET http://google.com/foo1 - end
-#0000000100000002 - 1.2.3.4:8765 - POST http://aaa.com/foo2 - begin
-#0000000100000002 - 1.2.3.4:8765 - POST http://aaa.com/foo2 - end
+	expectedLogOut := `0.000 #0000000100000001 - 1.2.3.4:8765 - GET http://google.com/foo1 - begin
+0.000 #0000000100000001 - 1.2.3.4:8765 - GET http://google.com/foo1 - end
+0.000 #0000000100000002 - 1.2.3.4:8765 - POST http://aaa.com/foo2 - begin
+0.000 #0000000100000002 - 1.2.3.4:8765 - POST http://aaa.com/foo2 - end
 `
 	if cl.out != expectedLogOut {
 		t.Fatalf("Unexpected logger output: %q. Expected %q", cl.out, expectedLogOut)
