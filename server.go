@@ -469,12 +469,14 @@ func (s *Server) serveConn(c io.ReadWriteCloser) error {
 	var prevReadTime time.Time
 
 	var err error
+	var currentTime time.Time
 	for {
+		currentTime = time.Now()
 		ctx.ID++
-		ctx.Time = time.Now()
+		ctx.Time = currentTime
 
 		if rd != nil {
-			if err = rd.SetReadDeadline(ctx.Time.Add(readTimeout)); err != nil {
+			if err = rd.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
 				break
 			}
 			if dt < time.Second || br != nil {
@@ -532,7 +534,7 @@ func (s *Server) serveConn(c io.ReadWriteCloser) error {
 			break
 		}
 
-		currentTime := time.Now()
+		currentTime = time.Now()
 		dt = currentTime.Sub(prevReadTime)
 		prevReadTime = currentTime
 
