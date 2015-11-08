@@ -304,6 +304,9 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	if req1.Header.Get("Host") != host {
 		t.Fatalf("Unexpected host: %q. Expected %q", req1.Header.Get("Host"), host)
 	}
+	if len(userAgent) == 0 {
+		userAgent = string(defaultUserAgent)
+	}
 	if req1.Header.Get("User-Agent") != userAgent {
 		t.Fatalf("Unexpected user-agent: %q. Expected %q", req1.Header.Get("User-Agent"), userAgent)
 	}
