@@ -71,8 +71,8 @@ type Server struct {
 	serverName       atomic.Value
 
 	ctxPool     sync.Pool
-	readersPool sync.Pool
-	writersPool sync.Pool
+	readerPool sync.Pool
+	writerPool sync.Pool
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -669,7 +669,7 @@ func acquireByteReader(ctx *RequestCtx) (*RequestCtx, *bufio.Reader, error) {
 }
 
 func acquireReader(ctx *RequestCtx) *bufio.Reader {
-	v := ctx.s.readersPool.Get()
+	v := ctx.s.readerPool.Get()
 	if v == nil {
 		n := ctx.s.ReadBufferSize
 		if n <= 0 {
@@ -684,11 +684,11 @@ func acquireReader(ctx *RequestCtx) *bufio.Reader {
 
 func releaseReader(ctx *RequestCtx, r *bufio.Reader) {
 	r.Reset(nil)
-	ctx.s.readersPool.Put(r)
+	ctx.s.readerPool.Put(r)
 }
 
 func acquireWriter(ctx *RequestCtx) *bufio.Writer {
-	v := ctx.s.writersPool.Get()
+	v := ctx.s.writerPool.Get()
 	if v == nil {
 		n := ctx.s.WriteBufferSize
 		if n <= 0 {
@@ -703,7 +703,7 @@ func acquireWriter(ctx *RequestCtx) *bufio.Writer {
 
 func releaseWriter(ctx *RequestCtx, w *bufio.Writer) {
 	w.Reset(nil)
-	ctx.s.writersPool.Put(w)
+	ctx.s.writerPool.Put(w)
 }
 
 var globalCtxID uint64
