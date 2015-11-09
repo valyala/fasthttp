@@ -70,7 +70,7 @@ type Server struct {
 	perIPConnCounter perIPConnCounter
 	serverName       atomic.Value
 
-	ctxPool     sync.Pool
+	ctxPool    sync.Pool
 	readerPool sync.Pool
 	writerPool sync.Pool
 }
