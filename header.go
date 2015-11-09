@@ -105,6 +105,7 @@ func (h *RequestHeader) Clear() {
 
 // CopyTo copies all the headers to dst.
 func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
+	dst.Clear()
 	dst.StatusCode = h.StatusCode
 	dst.ContentLength = h.ContentLength
 	dst.ConnectionClose = h.ConnectionClose
@@ -115,6 +116,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 
 // CopyTo copies all the headers to dst.
 func (h *RequestHeader) CopyTo(dst *RequestHeader) {
+	dst.Clear()
 	dst.Method = append(dst.Method[:0], h.Method...)
 	dst.RequestURI = append(dst.RequestURI[:0], h.RequestURI...)
 	dst.ContentLength = h.ContentLength
