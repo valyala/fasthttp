@@ -231,7 +231,7 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 	resp.Clear()
 	resp.Header.StatusCode = statusCode
 	resp.Header.SetCanonical(strContentType, defaultContentType)
-	resp.Body = append(resp.Body, []byte(msg)...)
+	resp.Body = AppendBytesStr(resp.Body[:0], msg)
 }
 
 // Success sets response Content-Type and body to the given values.
