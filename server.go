@@ -592,6 +592,11 @@ func (s *Server) serveConn(c io.ReadWriteCloser) error {
 	return err
 }
 
+// TimeoutErrMsg returns last error message set via TimeoutError call.
+func (ctx *RequestCtx) TimeoutErrMsg() string {
+	return ctx.timeoutErrMsg
+}
+
 func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 	if len(ctx.timeoutErrMsg) > 0 {
 		panic("BUG: cannot write timed out response")
