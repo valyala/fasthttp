@@ -265,14 +265,15 @@ func (ctx *RequestCtx) TimeoutError(msg string) {
 	ctx.timeoutErrMsg = msg
 }
 
-const defaultConcurrency = 64 * 1024
+// Default concurrency used by Server.Serve().
+const DefaultConcurrency = 64 * 1024
 
 // Serve serves incoming connections from the given listener.
 //
 // Serve blocks until the given listener returns permanent error.
 // This error is returned from Serve.
 func (s *Server) Serve(ln net.Listener) error {
-	return s.ServeConcurrency(ln, defaultConcurrency)
+	return s.ServeConcurrency(ln, DefaultConcurrency)
 }
 
 // ServeConcurrency serves incoming connections from the given listener.
