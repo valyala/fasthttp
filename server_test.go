@@ -11,6 +11,23 @@ import (
 	"time"
 )
 
+func TestRequestCtxInit(t *testing.T) {
+	var ctx RequestCtx
+	var logger customLogger
+	globalCtxID = 0x123456
+	ctx.Init(&ctx.Request, zeroIPAddr, &logger)
+	ip := ctx.RemoteIP()
+	if !ip.IsUnspecified() {
+		t.Fatalf("unexpected ip for bare RequestCtx: %q. Expected 0.0.0.0", ip)
+	}
+	ctx.Logger().Printf("foo bar %d", 10)
+
+	expectedLog := "0.000 #0012345700000000 - 0.0.0.0 -  http:// - foo bar 10\n"
+	if logger.out != expectedLog {
+		t.Fatalf("Unexpected log output: %q. Expected %q", logger.out, expectedLog)
+	}
+}
+
 func TestTimeoutHandlerSuccess(t *testing.T) {
 	h := func(ctx *RequestCtx) {
 		ctx.Success("aaa/bbb", []byte("real response"))
