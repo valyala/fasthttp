@@ -413,11 +413,7 @@ func wrapPerIPConn(s *Server, c net.Conn) net.Conn {
 		s.perIPConnCounter.Unregister(ip)
 		return nil
 	}
-	return &perIPConn{
-		Conn:             c,
-		ip:               ip,
-		perIPConnCounter: &s.perIPConnCounter,
-	}
+	return acquirePerIPConn(c, ip, &s.perIPConnCounter)
 }
 
 var defaultLogger = Logger(log.New(os.Stderr, "", log.LstdFlags))

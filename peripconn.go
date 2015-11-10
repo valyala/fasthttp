@@ -42,11 +42,35 @@ type perIPConn struct {
 
 	ip               uint32
 	perIPConnCounter *perIPConnCounter
+
+	v interface{}
 }
+
+func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) *perIPConn {
+	v := perIPConnPool.Get()
+	if v == nil {
+		v = &perIPConn{}
+	}
+	c := v.(*perIPConn)
+	c.Conn = conn
+	c.ip = ip
+	c.perIPConnCounter = counter
+	c.v = v
+	return c
+}
+
+func releasePerIPConn(c *perIPConn) {
+	c.Conn = nil
+	c.perIPConnCounter = nil
+	perIPConnPool.Put(c.v)
+}
+
+var perIPConnPool sync.Pool
 
 func (c *perIPConn) Close() error {
 	err := c.Conn.Close()
 	c.perIPConnCounter.Unregister(c.ip)
+	releasePerIPConn(c)
 	return err
 }
 
