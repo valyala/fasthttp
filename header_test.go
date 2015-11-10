@@ -10,6 +10,95 @@ import (
 	"testing"
 )
 
+func TestResponseHeaderVisitAll(t *testing.T) {
+	var h ResponseHeader
+
+	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 123\r\nSet-Cookie: aa=bb; path=/foo/bar\r\nSet-Cookie: ccc\r\n\r\n")
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("Unepxected error: %s", err)
+	}
+
+	contentTypeCount := 0
+	cookieCount := 0
+	h.VisitAll(func(key, value []byte) {
+		k := string(key)
+		v := string(value)
+		switch k {
+		case "Content-Type":
+			if v != h.Get(k) {
+				t.Fatalf("Unexpected content-type: %q. Expected %q", v, h.Get(k))
+			}
+			contentTypeCount++
+		case "Set-Cookie":
+			if cookieCount == 0 && v != "aa=bb; path=/foo/bar" {
+				t.Fatalf("unexpected cookie header: %q. Expected %q", v, "aa=bb; path=/foo/bar")
+			}
+			if cookieCount == 1 && v != "ccc" {
+				t.Fatalf("unexpected cookie header: %q. Expected %q", v, "ccc")
+			}
+			cookieCount++
+		default:
+			t.Fatalf("unexpected header %q=%q", k, v)
+		}
+	})
+	if contentTypeCount != 1 {
+		t.Fatalf("unexpected number of content-type headers: %d. Expected 1", contentTypeCount)
+	}
+	if cookieCount != 2 {
+		t.Fatalf("unexpected number of cookie header: %d. Expected 2", cookieCount)
+	}
+}
+
+func TestRequestHeaderVisitAll(t *testing.T) {
+	var h RequestHeader
+
+	r := bytes.NewBufferString("GET / HTTP/1.1\r\nHost: aa.com\r\nXX: YYY\r\nXX: ZZ\r\nCookie: a=b; c=d\r\n\r\n")
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("Unexpected error: %s", err)
+	}
+
+	hostCount := 0
+	xxCount := 0
+	cookieCount := 0
+	h.VisitAll(func(key, value []byte) {
+		k := string(key)
+		v := string(value)
+		switch k {
+		case "Host":
+			if v != h.Get(k) {
+				t.Fatalf("Unexpected host value %q. Expected %q", v, h.Get(k))
+			}
+			hostCount++
+		case "Xx":
+			if xxCount == 0 && v != "YYY" {
+				t.Fatalf("Unexpected value %q. Expected %q", v, "YYY")
+			}
+			if xxCount == 1 && v != "ZZ" {
+				t.Fatalf("Unexpected value %q. Expected %q", v, "ZZ")
+			}
+			xxCount++
+		case "Cookie":
+			if v != "a=b; c=d" {
+				t.Fatalf("Unexpected cookie %q. Expected %q", v, "a=b; c=d")
+			}
+			cookieCount++
+		default:
+			t.Fatalf("Unepxected header %q=%q", k, v)
+		}
+	})
+	if hostCount != 1 {
+		t.Fatalf("Unepxected number of host headers detected %d. Expected 1", hostCount)
+	}
+	if xxCount != 2 {
+		t.Fatalf("Unexpected number of xx headers detected %d. Expected 2", xxCount)
+	}
+	if cookieCount != 1 {
+		t.Fatalf("Unexpected number of cookie headers %d. Expected 1", cookieCount)
+	}
+}
+
 func TestResponseHeaderCookie(t *testing.T) {
 	var h ResponseHeader
 	var c Cookie
