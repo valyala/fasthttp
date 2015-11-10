@@ -69,7 +69,7 @@ func (req *Request) CopyTo(dst *Request) {
 // CopyTo copies resp contents to dst.
 func (resp *Response) CopyTo(dst *Response) {
 	dst.Clear()
-	resp.Header.CopyTo(&resp.Header)
+	resp.Header.CopyTo(&dst.Header)
 	dst.Body = append(dst.Body[:0], resp.Body...)
 	dst.SkipBody = resp.SkipBody
 }
