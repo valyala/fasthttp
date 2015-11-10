@@ -18,7 +18,7 @@ import (
 
 // RequestHandler must process incoming requests.
 //
-// ResponseHandler must call ctx.TimeoutError() before return
+// RequestHandler must call ctx.TimeoutError() before return
 // if it keeps references to ctx and/or its' members after the return.
 type RequestHandler func(ctx *RequestCtx)
 
@@ -62,7 +62,7 @@ type Server struct {
 	// may be established to the server from a single IP address.
 	MaxConnsPerIP int
 
-	// Logger, which is used by ServerCtx.Logger().
+	// Logger, which is used by RequestCtx.Logger().
 	//
 	// By default standard logger from log package is used.
 	Logger Logger
