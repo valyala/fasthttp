@@ -10,6 +10,50 @@ import (
 	"testing"
 )
 
+func TestResponseHeaderCopyTo(t *testing.T) {
+	var h ResponseHeader
+
+	h.Set("Set-Cookie", "foo=bar")
+	h.Set("Content-Type", "foobar")
+	h.Set("AAA-BBB", "aaaa")
+
+	var h1 ResponseHeader
+	h.CopyTo(&h1)
+	if h1.Get("Set-cookie") != h.Get("Set-Cookie") {
+		t.Fatalf("unexpected cookie %q. Expected %q", h1.Get("set-cookie"), h.Get("set-cookie"))
+	}
+	if h1.Get("Content-Type") != h.Get("Content-Type") {
+		t.Fatalf("unexpected content-type %q. Expected %q", h1.Get("content-type"), h.Get("content-type"))
+	}
+	if h1.Get("aaa-bbb") != h.Get("AAA-BBB") {
+		t.Fatalf("unexpected aaa-bbb %q. Expected %q", h1.Get("aaa-bbb"), h.Get("aaa-bbb"))
+	}
+}
+
+func TestRequestHeaderCopyTo(t *testing.T) {
+	var h RequestHeader
+
+	h.Set("Cookie", "aa=bb; cc=dd")
+	h.Set("Content-Type", "foobar")
+	h.Set("Host", "aaaa")
+	h.Set("aaaxxx", "123")
+
+	var h1 RequestHeader
+	h.CopyTo(&h1)
+	if h1.Get("cookie") != h.Get("Cookie") {
+		t.Fatalf("unexpected cookie after copying: %q. Expected %q", h1.Get("cookie"), h.Get("cookie"))
+	}
+	if h1.Get("content-type") != h.Get("Content-Type") {
+		t.Fatalf("unexpected content-type %q. Expected %q", h1.Get("content-type"), h.Get("content-type"))
+	}
+	if h1.Get("host") != h.Get("host") {
+		t.Fatalf("unexpected host %q. Expected %q", h1.Get("host"), h.Get("host"))
+	}
+	if h1.Get("aaaxxx") != h.Get("aaaxxx") {
+		t.Fatalf("unexpected aaaxxx %q. Expected %q", h1.Get("aaaxxx"), h.Get("aaaxxx"))
+	}
+}
+
 func TestRequestHeaderSetCookie(t *testing.T) {
 	var h RequestHeader
 
