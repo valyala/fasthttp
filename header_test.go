@@ -10,6 +10,53 @@ import (
 	"testing"
 )
 
+func TestRequestHeaderSetCookie(t *testing.T) {
+	var h RequestHeader
+
+	h.Set("Cookie", "foo=bar; baz=aaa")
+	h.Set("cOOkie", "xx=yyy")
+
+	if h.GetCookie("foo") != "bar" {
+		t.Fatalf("Unexpected cookie %q. Expecting %q", h.GetCookie("foo"), "bar")
+	}
+	if h.GetCookie("baz") != "aaa" {
+		t.Fatalf("Unexpected cookie %q. Expecting %q", h.GetCookie("baz"), "aaa")
+	}
+	if h.GetCookie("xx") != "yyy" {
+		t.Fatalf("unexpected cookie %q. Expecting %q", h.GetCookie("xx"), "yyy")
+	}
+}
+
+func TestResponseHeaderSetCookie(t *testing.T) {
+	var h ResponseHeader
+
+	h.Set("set-cookie", "foo=bar; path=/aa/bb; domain=aaa.com")
+	h.Set("Set-Cookie", "aaaaa=bxx")
+
+	var c Cookie
+	c.Key = []byte("foo")
+	if !h.GetCookie(&c) {
+		t.Fatalf("cannot obtain %q cookie", c.Key)
+	}
+	if string(c.Value) != "bar" {
+		t.Fatalf("unexpected cookie value %q. Expected %q", c.Value, "bar")
+	}
+	if string(c.Path) != "/aa/bb" {
+		t.Fatalf("unexpected cookie path %q. Expected %q", c.Path, "/aa/bb")
+	}
+	if string(c.Domain) != "aaa.com" {
+		t.Fatalf("unexpected cookie domain %q. Expected %q", c.Domain, "aaa.com")
+	}
+
+	c.Key = []byte("aaaaa")
+	if !h.GetCookie(&c) {
+		t.Fatalf("cannot obtain %q cookie", c.Key)
+	}
+	if string(c.Value) != "bxx" {
+		t.Fatalf("unexpected cookie value %q. Expecting %q", c.Value, "bxx")
+	}
+}
+
 func TestResponseHeaderVisitAll(t *testing.T) {
 	var h ResponseHeader
 

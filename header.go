@@ -282,7 +282,10 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	case bytes.Equal(strDate, key):
 		// Date is managed automatically.
 	case bytes.Equal(strSetCookie, key):
-		// Cookie must be managed via SetCookie.
+		var kv *argsKV
+		h.cookies, kv = allocArg(h.cookies)
+		kv.key = getCookieKey(kv.key, value)
+		kv.value = append(kv.value[:0], value...)
 	default:
 		h.h = setArg(h.h, key, value)
 	}
@@ -367,7 +370,7 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 	case bytes.Equal(strConnection, key):
 		// Connection is managed automatically.
 	case bytes.Equal(strCookie, key):
-		// Cookie must be managed via SetCookie.
+		h.cookies = parseRequestCookies(h.cookies, value)
 	default:
 		h.h = setArg(h.h, key, value)
 	}
