@@ -302,9 +302,23 @@ func (s *Server) ServeConcurrency(ln net.Listener, concurrency int) error {
 		s:               s,
 		maxWorkersCount: concurrency,
 	}
+	stopCh := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-stopCh:
+				return
+			default:
+				time.Sleep(time.Second)
+			}
+			wp.clean()
+		}
+	}()
+
 	for {
 		if c, err = acceptConn(s, ln, &lastPerIPErrorTime); err != nil {
 			wp.stop()
+			close(stopCh)
 			return err
 		}
 		for attempts := 4; attempts > 0; attempts-- {
@@ -346,7 +360,7 @@ type workerChan struct {
 }
 
 func (wp *workerPool) stop() {
-	// Stop all the workers waiting for incoming connections
+	// Stop all the workers waiting for incoming connections.
 	// Do not wait for busy workers - they will stop after
 	// serving the connection and noticing wp.mustStop = true.
 	wp.lock.Lock()
@@ -358,14 +372,11 @@ func (wp *workerPool) stop() {
 	wp.lock.Unlock()
 }
 
-func (wp *workerPool) tryServe(c net.Conn) bool {
-	var ch *workerChan
-	createWorker := false
-
+func (wp *workerPool) clean() {
+	// Clean least recently used workers if they didn't serve connections
+	// for more than one second.
 	wp.lock.Lock()
 	chans := wp.ready
-
-	// stop workers, which didn't work for more than one second.
 	for len(chans) > 1 && time.Since(chans[0].t) > time.Second {
 		chans[0].ch <- nil
 		copy(chans, chans[1:])
@@ -373,7 +384,15 @@ func (wp *workerPool) tryServe(c net.Conn) bool {
 		wp.ready = chans
 		wp.workersCount--
 	}
+	wp.lock.Unlock()
+}
 
+func (wp *workerPool) tryServe(c net.Conn) bool {
+	var ch *workerChan
+	createWorker := false
+
+	wp.lock.Lock()
+	chans := wp.ready
 	n := len(chans) - 1
 	if n < 0 {
 		if wp.workersCount < wp.maxWorkersCount {
@@ -384,7 +403,6 @@ func (wp *workerPool) tryServe(c net.Conn) bool {
 		ch = chans[n]
 		wp.ready = chans[:n]
 	}
-
 	wp.lock.Unlock()
 
 	if ch == nil {
