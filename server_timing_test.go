@@ -397,7 +397,7 @@ func (s *testServer) Serve(ln net.Listener) error {
 	if s.Concurrency < runtime.NumCPU() {
 		s.Concurrency = runtime.NumCPU()
 	}
-	return s.Server.ServeConcurrency(ln, s.Concurrency)
+	return s.Server.ServeConcurrency(ln, s.Concurrency*16)
 }
 
 func benchmarkServer(b *testing.B, s realServer, clientsCount, requestsPerConn int, request string) {
