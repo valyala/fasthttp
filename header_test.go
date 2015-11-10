@@ -19,6 +19,9 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 		t.Fatalf("Unepxected error: %s", err)
 	}
 
+	if h.Len() != 3 {
+		t.Fatalf("Unexpected number of headers: %d. Expected 3", h.Len())
+	}
 	contentTypeCount := 0
 	cookieCount := 0
 	h.VisitAll(func(key, value []byte) {
@@ -59,6 +62,9 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 		t.Fatalf("Unexpected error: %s", err)
 	}
 
+	if h.Len() != 4 {
+		t.Fatalf("Unexpected number of header: %d. Expected 4", h.Len())
+	}
 	hostCount := 0
 	xxCount := 0
 	cookieCount := 0

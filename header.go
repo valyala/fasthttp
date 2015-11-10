@@ -76,6 +76,38 @@ func (h *RequestHeader) IsMethodHead() bool {
 	return bytes.Equal(h.Method, strHead)
 }
 
+// Len returns the number of headers set, not counting Content-Length,
+// i.e. the number of times f is called in VisitAll.
+func (h *ResponseHeader) Len() int {
+	n := len(h.h) + len(h.cookies)
+	if len(h.contentType) > 0 {
+		n++
+	}
+	if len(h.server) > 0 {
+		n++
+	}
+	return n
+}
+
+// Len returns the number of headers set, not counting Content-Length,
+// i.e. the number of times f is called in VisitAll.
+func (h *RequestHeader) Len() int {
+	n := len(h.h)
+	if len(h.cookies) > 0 {
+		n++
+	}
+	if len(h.host) > 0 {
+		n++
+	}
+	if len(h.contentType) > 0 {
+		n++
+	}
+	if len(h.userAgent) > 0 {
+		n++
+	}
+	return n
+}
+
 // Clear clears response header.
 func (h *ResponseHeader) Clear() {
 	h.StatusCode = 0
