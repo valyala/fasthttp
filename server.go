@@ -128,7 +128,7 @@ type RequestCtx struct {
 
 	logger ctxLogger
 	s      *Server
-	c      io.ReadWriteCloser
+	c      net.Conn
 	fbr    firstByteReader
 
 	timeoutErrMsg string
@@ -139,7 +139,7 @@ type RequestCtx struct {
 }
 
 type firstByteReader struct {
-	c        io.ReadWriteCloser
+	c        net.Conn
 	ch       byte
 	byteRead bool
 }
@@ -157,18 +157,6 @@ func (r *firstByteReader) Read(b []byte) (int, error) {
 	}
 	n, err := r.c.Read(b)
 	return n + nn, err
-}
-
-type remoteAddrer interface {
-	RemoteAddr() net.Addr
-}
-
-type readDeadliner interface {
-	SetReadDeadline(time.Time) error
-}
-
-type writeDeadliner interface {
-	SetWriteDeadline(time.Time) error
 }
 
 // Logger is used for logging formatted messages.
@@ -195,26 +183,26 @@ func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	ctxLoggerLock.Unlock()
 }
 
-var zeroIPAddr = &net.IPAddr{
+var zeroTCPAddr = &net.TCPAddr{
 	IP: net.IPv4zero,
 }
 
 // RemoteAddr returns client address for the given request.
+//
+// Always returns non-nil result.
 func (ctx *RequestCtx) RemoteAddr() net.Addr {
-	x, ok := ctx.c.(remoteAddrer)
-	if !ok {
-		return zeroIPAddr
+	addr := ctx.c.RemoteAddr()
+	if addr == nil {
+		return zeroTCPAddr
 	}
-	return x.RemoteAddr()
+	return addr
 }
 
 // RemoteIP returns client ip for the given request.
+//
+// Always returns non-nil result.
 func (ctx *RequestCtx) RemoteIP() net.IP {
-	addr := ctx.RemoteAddr()
-	if addr == nil {
-		return net.IPv4zero
-	}
-	x, ok := addr.(*net.TCPAddr)
+	x, ok := ctx.RemoteAddr().(*net.TCPAddr)
 	if !ok {
 		return net.IPv4zero
 	}
@@ -397,10 +385,9 @@ var ErrPerIPConnLimit = errors.New("too many connections per ip")
 // to the client. Otherwise requests' processing may hang.
 //
 // ServeConn closes c before returning.
-func (s *Server) ServeConn(c io.ReadWriteCloser) error {
-	conn, ok := c.(net.Conn)
-	if ok {
-		pic := wrapPerIPConn(s, conn)
+func (s *Server) ServeConn(c net.Conn) error {
+	if s.MaxConnsPerIP > 0 {
+		pic := wrapPerIPConn(s, c)
 		if pic == nil {
 			c.Close()
 			return ErrPerIPConnLimit
@@ -410,18 +397,9 @@ func (s *Server) ServeConn(c io.ReadWriteCloser) error {
 	return s.serveConn(c)
 }
 
-func (s *Server) serveConn(c io.ReadWriteCloser) error {
-	var rd readDeadliner
+func (s *Server) serveConn(c net.Conn) error {
 	readTimeout := s.ReadTimeout
-	if readTimeout > 0 {
-		rd, _ = c.(readDeadliner)
-	}
-
-	var wd writeDeadliner
 	writeTimeout := s.WriteTimeout
-	if writeTimeout > 0 {
-		wd, _ = c.(writeDeadliner)
-	}
 
 	ctx := s.acquireCtx(c)
 	var br *bufio.Reader
@@ -438,57 +416,27 @@ func (s *Server) serveConn(c io.ReadWriteCloser) error {
 		ctx.ID++
 		ctx.Time = currentTime
 
-		if rd != nil {
-			if err = rd.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
+		if readTimeout > 0 {
+			if err = c.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
 				break
 			}
-			if dt < time.Second || br != nil {
-				if br == nil {
-					br = acquireReader(ctx)
-				}
+		}
+		if dt < time.Second || br != nil {
+			if br == nil {
+				br = acquireReader(ctx)
+			}
+			err = ctx.Request.Read(br)
+			if br.Buffered() == 0 || err != nil {
+				releaseReader(ctx, br)
+				br = nil
+			}
+		} else {
+			ctx, br, err = acquireByteReader(ctx)
+			if err == nil {
 				err = ctx.Request.Read(br)
 				if br.Buffered() == 0 || err != nil {
 					releaseReader(ctx, br)
 					br = nil
-				}
-			} else {
-				ctx, br, err = acquireByteReader(ctx)
-				if err == nil {
-					err = ctx.Request.Read(br)
-					if br.Buffered() == 0 || err != nil {
-						releaseReader(ctx, br)
-						br = nil
-					}
-				}
-			}
-		} else {
-			if dt < time.Second || br != nil {
-				if br == nil {
-					br = acquireReader(ctx)
-				}
-				if err = ctx.Request.ReadTimeout(br, readTimeout); err == ErrReadTimeout {
-					// ctx.Request and br cannot be used after ErrReadTimeout.
-					ctx = s.acquireCtx(c)
-					br = nil
-					break
-				}
-				if br.Buffered() == 0 {
-					releaseReader(ctx, br)
-					br = nil
-				}
-			} else {
-				ctx, br, err = acquireByteReader(ctx)
-				if err == nil {
-					if err = ctx.Request.ReadTimeout(br, readTimeout); err == ErrReadTimeout {
-						// ctx.Request and br cannot be used after ErrReadTimeout.
-						ctx = s.acquireCtx(c)
-						br = nil
-						break
-					}
-					if br.Buffered() == 0 || err != nil {
-						releaseReader(ctx, br)
-						br = nil
-					}
 				}
 			}
 		}
@@ -512,8 +460,8 @@ func (s *Server) serveConn(c io.ReadWriteCloser) error {
 			ctx.Error(errMsg, StatusRequestTimeout)
 		}
 
-		if wd != nil {
-			if err = wd.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+		if writeTimeout > 0 {
+			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
 				break
 			}
 		}
@@ -663,7 +611,7 @@ func releaseWriter(ctx *RequestCtx, w *bufio.Writer) {
 
 var globalCtxID uint64
 
-func (s *Server) acquireCtx(c io.ReadWriteCloser) *RequestCtx {
+func (s *Server) acquireCtx(c net.Conn) *RequestCtx {
 	v := s.ctxPool.Get()
 	var ctx *RequestCtx
 	if v == nil {
@@ -687,7 +635,7 @@ func (s *Server) acquireCtx(c io.ReadWriteCloser) *RequestCtx {
 // This function is intended for custom Server implementations.
 func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	if remoteAddr == nil {
-		remoteAddr = zeroIPAddr
+		remoteAddr = zeroTCPAddr
 	}
 	ctx.c = &fakeAddrer{
 		addr: remoteAddr,
@@ -705,6 +653,7 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 var fakeServer Server
 
 type fakeAddrer struct {
+	net.Conn
 	addr net.Addr
 }
 

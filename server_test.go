@@ -15,14 +15,14 @@ func TestRequestCtxInit(t *testing.T) {
 	var ctx RequestCtx
 	var logger customLogger
 	globalCtxID = 0x123456
-	ctx.Init(&ctx.Request, zeroIPAddr, &logger)
+	ctx.Init(&ctx.Request, zeroTCPAddr, &logger)
 	ip := ctx.RemoteIP()
 	if !ip.IsUnspecified() {
 		t.Fatalf("unexpected ip for bare RequestCtx: %q. Expected 0.0.0.0", ip)
 	}
 	ctx.Logger().Printf("foo bar %d", 10)
 
-	expectedLog := "0.000 #0012345700000000 - 0.0.0.0 -  http:// - foo bar 10\n"
+	expectedLog := "0.000 #0012345700000000 - 0.0.0.0:0 -  http:// - foo bar 10\n"
 	if logger.out != expectedLog {
 		t.Fatalf("Unexpected log output: %q. Expected %q", logger.out, expectedLog)
 	}
@@ -296,6 +296,7 @@ func TestServerRemoteAddr(t *testing.T) {
 }
 
 type readWriterRemoteAddr struct {
+	net.Conn
 	rw   io.ReadWriteCloser
 	addr net.Addr
 }
@@ -431,6 +432,7 @@ func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expec
 }
 
 type readWriter struct {
+	net.Conn
 	r bytes.Buffer
 	w bytes.Buffer
 }
@@ -445,4 +447,8 @@ func (rw *readWriter) Read(b []byte) (int, error) {
 
 func (rw *readWriter) Write(b []byte) (int, error) {
 	return rw.w.Write(b)
+}
+
+func (rw *readWriter) RemoteAddr() net.Addr {
+	return zeroTCPAddr
 }

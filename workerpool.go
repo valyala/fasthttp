@@ -1,7 +1,6 @@
 package fasthttp
 
 import (
-	"io"
 	"net"
 	"runtime/debug"
 	"sync"
@@ -14,7 +13,7 @@ import (
 type workerPool struct {
 	// Function for serving incoming connections.
 	// It must close c before returning.
-	WorkerFunc func(c io.ReadWriteCloser) error
+	WorkerFunc func(c net.Conn) error
 
 	// Maximum number of workers to create.
 	MaxWorkersCount int
