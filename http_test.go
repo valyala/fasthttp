@@ -109,8 +109,8 @@ func testResponseReadTimeoutError(t *testing.T, resp **Response) {
 	if err == nil {
 		t.Fatalf("Expecting error")
 	}
-	if err != ErrReadTimeout {
-		t.Fatalf("Unexpected error: %s. Expecting %s", err, ErrReadTimeout)
+	if err != ErrTimeout {
+		t.Fatalf("Unexpected error: %s. Expecting %s", err, ErrTimeout)
 	}
 	*resp = &Response{}
 }
@@ -122,8 +122,8 @@ func testRequestReadTimeoutError(t *testing.T, req **Request) {
 	if err == nil {
 		t.Fatalf("Expecting error")
 	}
-	if err != ErrReadTimeout {
-		t.Fatalf("Unexpected error: %s. Expecting %s", err, ErrReadTimeout)
+	if err != ErrTimeout {
+		t.Fatalf("Unexpected error: %s. Expecting %s", err, ErrTimeout)
 	}
 	*req = &Request{}
 }

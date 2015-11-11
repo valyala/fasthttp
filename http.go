@@ -142,16 +142,16 @@ func (resp *Response) clearSkipHeader() {
 	resp.BodyStream = nil
 }
 
-// ErrReadTimeout may be returned by Request.ReadTimeout
-// or Response.ReadTimeout on timeout.
-var ErrReadTimeout = errors.New("read timeout")
+// ErrTimeout may be returned by Request.ReadTimeout,
+// Response.ReadTimeout or HostClient.DoTimeout on timeout.
+var ErrTimeout = errors.New("timeout")
 
 // ReadTimeout reads request (including body) from the given r during
 // the given timeout.
 //
 // If request couldn't be read during the given timeout,
-// ErrReadTimeout is returned.
-// Request can no longer be used after ErrReadTimeout error.
+// ErrTimeout is returned.
+// Request can no longer be used after ErrTimeout error.
 func (req *Request) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
 	if timeout <= 0 {
 		return req.Read(r)
@@ -175,7 +175,7 @@ func (req *Request) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
 	case err = <-ch:
 	case <-req.timeoutTimer.C:
 		req.timeoutCh = nil
-		err = ErrReadTimeout
+		err = ErrTimeout
 	}
 	stopTimer(req.timeoutTimer)
 	return err
@@ -185,8 +185,8 @@ func (req *Request) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
 // the given timeout.
 //
 // If response couldn't be read during the given timeout,
-// ErrReadTimeout is returned.
-// Request can no longer be used after ErrReadTimeout error.
+// ErrTimeout is returned.
+// Request can no longer be used after ErrTimeout error.
 func (resp *Response) ReadTimeout(r *bufio.Reader, timeout time.Duration) error {
 	if timeout <= 0 {
 		return resp.Read(r)
@@ -210,7 +210,7 @@ func (resp *Response) ReadTimeout(r *bufio.Reader, timeout time.Duration) error 
 	case err = <-ch:
 	case <-resp.timeoutTimer.C:
 		resp.timeoutCh = nil
-		err = ErrReadTimeout
+		err = ErrTimeout
 	}
 	stopTimer(resp.timeoutTimer)
 	return err
