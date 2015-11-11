@@ -63,16 +63,6 @@ type Client struct {
 func (c *Client) Do(req *Request, resp *Response) error {
 	req.ParseURI()
 	host := req.URI.Host
-	if len(req.Header.PeekBytes(strHost)) == 0 {
-		req.Header.SetCanonical(strHost, host)
-	}
-	if len(host) == 0 {
-		return fmt.Errorf("Host must be non-empty. Set it via RequestHeader.Set() or via RequestHeader.RequestURI")
-	}
-	if !bytes.Equal(req.URI.Scheme, strHTTP) {
-		return fmt.Errorf("unsupported protocol %q. Currently only http is supported", req.URI.Scheme)
-	}
-	req.Header.RequestURI = req.URI.AppendRequestURI(req.Header.RequestURI[:0])
 
 	startCleaner := false
 
@@ -200,6 +190,19 @@ type clientConn struct {
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	c.LastUseTime = time.Now()
 
+	req.ParseURI()
+	host := req.URI.Host
+	if len(req.Header.PeekBytes(strHost)) == 0 {
+		req.Header.SetCanonical(strHost, host)
+	}
+	if len(host) == 0 {
+		return fmt.Errorf("Host must be non-empty. Set it via RequestHeader.Set() or via RequestHeader.RequestURI")
+	}
+	if !bytes.Equal(req.URI.Scheme, strHTTP) {
+		return fmt.Errorf("unsupported protocol %q. Currently only http is supported", req.URI.Scheme)
+	}
+	req.Header.RequestURI = req.URI.AppendRequestURI(req.Header.RequestURI[:0])
+
 	cc, err := c.acquireConn()
 	if err != nil {
 		return err
@@ -226,7 +229,12 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		return err
 	}
 	c.releaseReader(br)
-	c.releaseConn(cc)
+
+	if resp.Header.ConnectionClose {
+		c.closeConn(cc)
+	} else {
+		c.releaseConn(cc)
+	}
 	return err
 }
 
