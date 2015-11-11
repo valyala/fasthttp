@@ -60,7 +60,7 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 	dst = appendQuotedArg(dst, c.Value)
 
 	if !c.Expire.IsZero() {
-		c.bufKV.value = c.Expire.In(gmtLocation).AppendFormat(c.bufKV.value[:0], time.RFC1123)
+		c.bufKV.value = AppendHTTPDate(c.bufKV.value[:0], c.Expire)
 		dst = append(dst, ';', ' ')
 		dst = append(dst, strCookieExpires...)
 		dst = append(dst, '=')

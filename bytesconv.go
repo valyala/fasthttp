@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -34,12 +35,27 @@ var (
 			panic("Unsupported architecture :)")
 		}
 	}()
+
+	gmtLocation = func() *time.Location {
+		x, err := time.LoadLocation("GMT")
+		if err != nil {
+			panic(fmt.Sprintf("cannot load GMT location: %s", err))
+		}
+		return x
+	}()
 )
 
-func parseUint(b []byte) (int, error) {
-	v, n, err := parseUintBuf(b)
-	if n != len(b) {
-		return -1, fmt.Errorf("only %b bytes out of %d bytes exhausted when parsing int %q", n, len(b), b)
+// AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
+// to dst and returns dst (which may be newly allocated).
+func AppendHTTPDate(dst []byte, date time.Time) []byte {
+	return date.In(gmtLocation).AppendFormat(dst, time.RFC1123)
+}
+
+// ParseUint parses uint from buf.
+func ParseUint(buf []byte) (int, error) {
+	v, n, err := parseUintBuf(buf)
+	if n != len(buf) {
+		return -1, fmt.Errorf("only %b bytes out of %d bytes exhausted when parsing int %q", n, len(buf), buf)
 	}
 	return v, err
 }
@@ -67,7 +83,8 @@ func parseUintBuf(b []byte) (int, int, error) {
 	return v, n, nil
 }
 
-func parseUfloat(buf []byte) (float64, error) {
+// ParseUfloat parses unsigned float from buf.
+func ParseUfloat(buf []byte) (float64, error) {
 	if len(buf) == 0 {
 		return -1, fmt.Errorf("empty float number")
 	}
@@ -99,7 +116,7 @@ func parseUfloat(buf []byte) (float64, error) {
 				default:
 					minus = 1
 				}
-				vv, err := parseUint(b)
+				vv, err := ParseUint(b)
 				if err != nil {
 					return -1, fmt.Errorf("cannot parse exponent part of %q: %s", buf, err)
 				}

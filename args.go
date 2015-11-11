@@ -186,7 +186,7 @@ func (a *Args) GetUint(key string) (int, error) {
 	if len(value) == 0 {
 		return -1, ErrNoArgValue
 	}
-	return parseUint(value)
+	return ParseUint(value)
 }
 
 // GetUintOrZero returns uint value for the given key.
@@ -206,7 +206,7 @@ func (a *Args) GetUfloat(key string) (float64, error) {
 	if len(value) == 0 {
 		return -1, ErrNoArgValue
 	}
-	return parseUfloat(value)
+	return ParseUfloat(value)
 }
 
 // GetUfloatOrZero returns ufloat value for the given key.
