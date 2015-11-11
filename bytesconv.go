@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"math"
 	"sync"
 	"time"
@@ -135,19 +136,17 @@ func ParseUfloat(buf []byte) (float64, error) {
 func readHexInt(r *bufio.Reader) (int, error) {
 	n := 0
 	i := 0
-	var k byte
+	var k int
 	for {
 		c, err := r.ReadByte()
 		if err != nil {
+			if err == io.EOF && i > 0 {
+				return n, nil
+			}
 			return -1, err
 		}
-		if c >= '0' && c <= '9' {
-			k = c - '0'
-		} else if c >= 'a' && c <= 'f' {
-			k = 10 + c - 'a'
-		} else if c >= 'A' && c <= 'F' {
-			k = 10 + c - 'A'
-		} else {
+		k = hexbyte2int(c)
+		if k < 0 {
 			if i == 0 {
 				return -1, fmt.Errorf("cannot read hex num from empty string")
 			}
@@ -157,7 +156,7 @@ func readHexInt(r *bufio.Reader) (int, error) {
 		if i >= maxHexIntChars {
 			return -1, fmt.Errorf("cannot read hex num with more than %d digits", maxHexIntChars)
 		}
-		n = n*16 + int(k)
+		n = (n << 4) | k
 		i++
 	}
 }
@@ -176,9 +175,8 @@ func writeInt(w *bufio.Writer, n int) error {
 	buf := v.([]byte)
 	i := len(buf) - 1
 	for {
-		v := byte(n % 10)
+		buf[i] = '0' + byte(n%10)
 		n /= 10
-		buf[i] = '0' + v
 		if n == 0 {
 			break
 		}
@@ -187,6 +185,50 @@ func writeInt(w *bufio.Writer, n int) error {
 	_, err := w.Write(buf[i:])
 	intBufPool.Put(v)
 	return err
+}
+
+func writeHexInt(w *bufio.Writer, n int) error {
+	if n < 0 {
+		panic("BUG: int must be positive")
+	}
+
+	v := intBufPool.Get()
+	if v == nil {
+		v = make([]byte, maxIntChars+8)
+	}
+	buf := v.([]byte)
+	i := len(buf) - 1
+	for {
+		buf[i] = int2hexbyte(n & 0xf)
+		n >>= 4
+		if n == 0 {
+			break
+		}
+		i--
+	}
+	_, err := w.Write(buf[i:])
+	intBufPool.Put(v)
+	return err
+}
+
+func int2hexbyte(n int) byte {
+	if n < 10 {
+		return '0' + byte(n)
+	}
+	return 'a' + byte(n) - 10
+}
+
+func hexbyte2int(c byte) int {
+	if c >= '0' && c <= '9' {
+		return int(c - '0')
+	}
+	if c >= 'a' && c <= 'f' {
+		return int(c - 'a' + 10)
+	}
+	if c >= 'A' && c <= 'F' {
+		return int(c - 'A' + 10)
+	}
+	return -1
 }
 
 const toLower = 'a' - 'A'

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 )
 
@@ -17,7 +18,7 @@ type Request struct {
 	// Request header
 	Header RequestHeader
 
-	// Request body
+	// Request body.
 	Body []byte
 
 	// Request URI.
@@ -42,8 +43,23 @@ type Response struct {
 	// Response header
 	Header ResponseHeader
 
-	// Response body
+	// Response body.
+	//
+	// Either Body or BodyStream may be set, but not both.
 	Body []byte
+
+	// Response body stream.
+	//
+	// BodyStream may be set instead of Body for performance reasons only.
+	//
+	// BodyStream is read by Response.Write() until error or io.EOF.
+	// Response.Write() calls BodyStream.Close() if such method is present
+	// after BodyStream.Read() returns error or io.EOF.
+	//
+	// Either BodyStream or Body may be set, but not both.
+	//
+	// Response.Read() never sets BodyStream - it sets only Body.
+	BodyStream io.Reader
 
 	// If set to true, Response.Read() skips reading body.
 	// Use it for HEAD requests.
@@ -66,7 +82,7 @@ func (req *Request) CopyTo(dst *Request) {
 	}
 }
 
-// CopyTo copies resp contents to dst.
+// CopyTo copies resp contents to dst except of BodyStream.
 func (resp *Response) CopyTo(dst *Response) {
 	dst.Clear()
 	resp.Header.CopyTo(&dst.Header)
@@ -123,6 +139,7 @@ func (resp *Response) Clear() {
 
 func (resp *Response) clearSkipHeader() {
 	resp.Body = resp.Body[:0]
+	resp.BodyStream = nil
 }
 
 // ErrReadTimeout may be returned by Request.ReadTimeout
@@ -272,16 +289,70 @@ func (req *Request) Write(w *bufio.Writer) error {
 //
 // Write doesn't flush response to w for performance reasons.
 func (resp *Response) Write(w *bufio.Writer) error {
-	contentLengthOld := resp.Header.ContentLength
-	resp.Header.ContentLength = len(resp.Body)
-	err := resp.Header.Write(w)
-	resp.Header.ContentLength = contentLengthOld
-	if err != nil {
-		return err
+	var err error
+	if resp.BodyStream != nil {
+		resp.Header.ContentLength = -1
+		if err = resp.Header.Write(w); err != nil {
+			return err
+		}
+		if err = writeBodyChunked(w, resp.BodyStream); err != nil {
+			return err
+		}
+		if bsc, ok := resp.BodyStream.(io.Closer); ok {
+			err = bsc.Close()
+		}
+	} else {
+		resp.Header.ContentLength = len(resp.Body)
+		if err = resp.Header.Write(w); err != nil {
+			return err
+		}
+		_, err = w.Write(resp.Body)
 	}
-	_, err = w.Write(resp.Body)
 	return err
 }
+
+func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
+	vbuf := copyBufPool.Get()
+	if vbuf == nil {
+		vbuf = make([]byte, 4096)
+	}
+	buf := vbuf.([]byte)
+
+	var err error
+	var n int
+	for {
+		n, err = r.Read(buf)
+		if n == 0 {
+			if err == nil {
+				panic("BUG: io.Reader returned 0, nil")
+			}
+			if err == io.EOF {
+				if err = writeChunk(w, buf[:0]); err != nil {
+					break
+				}
+				err = nil
+			}
+			break
+		}
+		if err = writeChunk(w, buf[:n]); err != nil {
+			break
+		}
+	}
+
+	copyBufPool.Put(vbuf)
+	return err
+}
+
+func writeChunk(w *bufio.Writer, b []byte) error {
+	n := len(b)
+	writeHexInt(w, n)
+	w.Write(strCRLF)
+	w.Write(b)
+	_, err := w.Write(strCRLF)
+	return err
+}
+
+var copyBufPool sync.Pool
 
 func readBody(r *bufio.Reader, contentLength int, b []byte) ([]byte, error) {
 	b = b[:0]
@@ -330,7 +401,7 @@ func readBodyFixedSize(r *bufio.Reader, n int, buf []byte) ([]byte, error) {
 
 func readBodyChunked(r *bufio.Reader, b []byte) ([]byte, error) {
 	if len(b) > 0 {
-		panic("Expected zero-length buffer")
+		panic("BUG: expected zero-length buffer")
 	}
 
 	strCRLFLen := len(strCRLF)

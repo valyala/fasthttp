@@ -1,9 +1,73 @@
 package fasthttp
 
 import (
+	"bufio"
+	"bytes"
 	"testing"
 	"time"
 )
+
+func TestWriteHexInt(t *testing.T) {
+	testWriteHexInt(t, 0, "0")
+	testWriteHexInt(t, 1, "1")
+	testWriteHexInt(t, 0x123, "123")
+	testWriteHexInt(t, 0x7fffffff, "7fffffff")
+}
+
+func testWriteHexInt(t *testing.T, n int, expectedS string) {
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	if err := writeHexInt(bw, n); err != nil {
+		t.Fatalf("unexpected error when writing hex %x: %s", n, err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error when flushing hex %x: %s", n, err)
+	}
+	s := string(w.Bytes())
+	if s != expectedS {
+		t.Fatalf("unexpected hex after writing %q. Expected %q", s, expectedS)
+	}
+}
+
+func TestReadHexIntError(t *testing.T) {
+	testReadHexIntError(t, "")
+	testReadHexIntError(t, "ZZZ")
+	testReadHexIntError(t, "-123")
+	testReadHexIntError(t, "+434")
+}
+
+func testReadHexIntError(t *testing.T, s string) {
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	n, err := readHexInt(br)
+	if err == nil {
+		t.Fatalf("expecting error when reading hex int %q", s)
+	}
+	if n >= 0 {
+		t.Fatalf("unexpected hex value read %d for hex int %q. must be negative", n, s)
+	}
+}
+
+func TestReadHexIntSuccess(t *testing.T) {
+	testReadHexIntSuccess(t, "0", 0)
+	testReadHexIntSuccess(t, "fF", 0xff)
+	testReadHexIntSuccess(t, "00abc", 0xabc)
+	testReadHexIntSuccess(t, "7fffffff", 0x7fffffff)
+	testReadHexIntSuccess(t, "000", 0)
+	testReadHexIntSuccess(t, "1234ZZZ", 0x1234)
+}
+
+func testReadHexIntSuccess(t *testing.T, s string, expectedN int) {
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	n, err := readHexInt(br)
+	if err != nil {
+		t.Fatalf("unexpected error: %s. s=%q", err, s)
+	}
+	if n != expectedN {
+		t.Fatalf("unexpected hex int %d. Expected %d. s=%q", n, expectedN, s)
+	}
+}
 
 func TestAppendHTTPDate(t *testing.T) {
 	d := time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)

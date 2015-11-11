@@ -637,9 +637,10 @@ func (h *ResponseHeader) Write(w *bufio.Writer) error {
 	writeHeaderLine(w, strContentType, contentType)
 
 	if h.ContentLength < 0 {
-		return fmt.Errorf("missing required Content-Length header")
+		writeHeaderLine(w, strTransferEncoding, strChunked)
+	} else {
+		writeContentLength(w, h.ContentLength)
 	}
-	writeContentLength(w, h.ContentLength)
 
 	if h.ConnectionClose {
 		writeHeaderLine(w, strConnection, strClose)
@@ -697,9 +698,10 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 		}
 		writeHeaderLine(w, strContentType, contentType)
 		if h.ContentLength < 0 {
-			return fmt.Errorf("missing required Content-Length header for POST request")
+			writeHeaderLine(w, strTransferEncoding, strChunked)
+		} else {
+			writeContentLength(w, h.ContentLength)
 		}
-		writeContentLength(w, h.ContentLength)
 	}
 
 	for i, n := 0, len(h.h); i < n; i++ {

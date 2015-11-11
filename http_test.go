@@ -10,6 +10,39 @@ import (
 	"time"
 )
 
+func TestResponseBodyStream(t *testing.T) {
+	testResponseBodyStream(t, "")
+
+	body := "foobar baz aaa bbb ccc"
+	testResponseBodyStream(t, body)
+
+	body = string(createFixedBody(10001))
+	testResponseBodyStream(t, body)
+}
+
+func testResponseBodyStream(t *testing.T, body string) {
+	var resp Response
+	resp.BodyStream = bytes.NewBufferString(body)
+
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	if err := resp.Write(bw); err != nil {
+		t.Fatalf("unexpected error when writing response: %s. body=%q", err, body)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error when flushing response: %s. body=%q", err, body)
+	}
+
+	var resp1 Response
+	br := bufio.NewReader(&w)
+	if err := resp1.Read(br); err != nil {
+		t.Fatalf("unexpected error when reading response: %s. body=%q", err, body)
+	}
+	if string(resp1.Body) != body {
+		t.Fatalf("unexpected body %q. Expecting %q", resp1.Body, body)
+	}
+}
+
 func TestRound2(t *testing.T) {
 	testRound2(t, 0, 0)
 	testRound2(t, 1, 1)
