@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"os"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -300,22 +299,15 @@ func (s *Server) ServeConcurrency(ln net.Listener, concurrency int) error {
 			wp.Stop()
 			return err
 		}
-		for attempts := 4; attempts > 0; attempts-- {
-			if wp.TryServe(c) {
-				c = nil
-				break
-			}
-			runtime.Gosched()
-		}
-		if c != nil {
+		if !wp.Serve(c) {
 			c.Close()
-			c = nil
 			if time.Since(lastOverflowErrorTime) > time.Minute {
 				s.logger().Printf("The incoming connection cannot be served, because all %d workers are busy. "+
 					"Try increasing concurrency in Server.ServeConcurrency()", concurrency)
 				lastOverflowErrorTime = time.Now()
 			}
 		}
+		c = nil
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 // in FIFO order, i.e. the most recently stopped worker will serve the next
 // incoming connection.
 type workerPool struct {
-	// Function for serving incoming connections.
+	// Function for serving server connections.
 	// It must close c before returning.
 	WorkerFunc func(c net.Conn) error
 
@@ -88,7 +88,16 @@ func (wp *workerPool) clean() {
 	wp.lock.Unlock()
 }
 
-func (wp *workerPool) TryServe(c net.Conn) bool {
+func (wp *workerPool) Serve(c net.Conn) bool {
+	ch := wp.getCh()
+	if ch == nil {
+		return false
+	}
+	ch.ch <- c
+	return true
+}
+
+func (wp *workerPool) getCh() *workerChan {
 	var ch *workerChan
 	createWorker := false
 
@@ -108,7 +117,7 @@ func (wp *workerPool) TryServe(c net.Conn) bool {
 
 	if ch == nil {
 		if !createWorker {
-			return false
+			return nil
 		}
 		vch := workerChanPool.Get()
 		if vch == nil {
@@ -122,8 +131,7 @@ func (wp *workerPool) TryServe(c net.Conn) bool {
 			workerChanPool.Put(vch)
 		}()
 	}
-	ch.ch <- c
-	return true
+	return ch
 }
 
 func (wp *workerPool) release(ch *workerChan) bool {
