@@ -24,6 +24,16 @@ func Do(req *Request, resp *Response) error {
 	return defaultClient.Do(req, resp)
 }
 
+// Get fetches url contents into dst.
+func Get(dst []byte, url string) (statusCode int, body []byte, err error) {
+	return defaultClient.Get(dst, url)
+}
+
+// GetBytes fetches url contents into dst.
+func GetBytes(dst, url []byte) (statusCode int, body []byte, err error) {
+	return defaultClient.GetBytes(dst, url)
+}
+
 var defaultClient Client
 
 // Client implements http client.
@@ -51,6 +61,40 @@ type Client struct {
 
 	mLock sync.Mutex
 	m     map[string]*HostClient
+}
+
+// Get fetches url contents into dst.
+func (c *Client) Get(dst []byte, url string) (statusCode int, body []byte, err error) {
+	v := urlBufPool.Get()
+	if v == nil {
+		v = make([]byte, 1024)
+	}
+	buf := v.([]byte)
+	buf = AppendBytesStr(buf[:0], url)
+	statusCode, body, err = c.GetBytes(dst, buf)
+	urlBufPool.Put(v)
+	return statusCode, body, err
+}
+
+// GetBytes fetches url contents into dst.
+func (c *Client) GetBytes(dst, url []byte) (statusCode int, body []byte, err error) {
+	req := acquireRequest()
+	req.Header.RequestURI = url
+	req.ParseURI()
+
+	resp := acquireResponse()
+	resp.Body = dst
+	if err = c.Do(req, resp); err != nil {
+		return 0, nil, err
+	}
+	statusCode = resp.Header.StatusCode
+	body = resp.Body
+	resp.Body = nil
+	releaseResponse(resp)
+
+	req.Header.RequestURI = nil
+	releaseRequest(req)
+	return statusCode, body, err
 }
 
 // Do performs the given http request and fills the given http response.
@@ -178,6 +222,73 @@ type clientConn struct {
 	t time.Time
 	c net.Conn
 	v interface{}
+}
+
+// Get fetches url contents into dst.
+func (c *HostClient) Get(dst []byte, url string) (statusCode int, body []byte, err error) {
+	v := urlBufPool.Get()
+	if v == nil {
+		v = make([]byte, 1024)
+	}
+	buf := v.([]byte)
+	buf = AppendBytesStr(buf[:0], url)
+	statusCode, body, err = c.GetBytes(dst, buf)
+	urlBufPool.Put(v)
+	return statusCode, body, err
+}
+
+var urlBufPool sync.Pool
+
+// GetBytes fetches url contents into dst.
+func (c *HostClient) GetBytes(dst, url []byte) (statusCode int, body []byte, err error) {
+	req := acquireRequest()
+	req.Header.RequestURI = url
+	req.ParseURI()
+
+	resp := acquireResponse()
+	resp.Body = dst
+	if err = c.Do(req, resp); err != nil {
+		return 0, nil, err
+	}
+	statusCode = resp.Header.StatusCode
+	body = resp.Body
+	resp.Body = nil
+	releaseResponse(resp)
+
+	req.Header.RequestURI = nil
+	releaseRequest(req)
+	return statusCode, body, err
+}
+
+var (
+	requestPool  sync.Pool
+	responsePool sync.Pool
+)
+
+func acquireRequest() *Request {
+	v := requestPool.Get()
+	if v == nil {
+		return &Request{}
+	}
+	return v.(*Request)
+}
+
+func releaseRequest(req *Request) {
+	req.Clear()
+	requestPool.Put(req)
+}
+
+func acquireResponse() *Response {
+	v := responsePool.Get()
+	if v == nil {
+		return &Response{}
+	}
+	return v.(*Response)
+}
+
+func releaseResponse(resp *Response) {
+	resp.Clear()
+	responsePool.Put(resp)
 }
 
 // Do performs the given http request and sets the corresponding response.
