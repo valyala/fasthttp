@@ -671,10 +671,12 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 	}
 	w.Write(method)
 	w.WriteByte(' ')
-	if len(h.RequestURI) == 0 {
-		return fmt.Errorf("missing required RequestURI")
+
+	requestURI := h.RequestURI
+	if len(requestURI) == 0 {
+		requestURI = strSlash
 	}
-	w.Write(h.RequestURI)
+	w.Write(requestURI)
 	w.WriteByte(' ')
 	w.Write(strHTTP11)
 	w.Write(strCRLF)

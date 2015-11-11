@@ -126,6 +126,9 @@ func TestRequestSuccess(t *testing.T) {
 
 	// POST method with body
 	testRequestSuccess(t, "POST", "/bbb", "aaa.com", "Chrome aaa", "post body", "POST")
+
+	// only host is set
+	testRequestSuccess(t, "", "", "gooble.com", "", "", "GET")
 }
 
 func TestResponseSuccess(t *testing.T) {
@@ -191,9 +194,6 @@ func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, 
 }
 
 func TestRequestWriteError(t *testing.T) {
-	// no requestURI
-	testRequestWriteError(t, "", "", "gooble.com", "", "")
-
 	// no host
 	testRequestWriteError(t, "", "/foo/bar", "", "", "")
 
@@ -262,6 +262,9 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	}
 	if !bytes.Equal(req1.Header.Method, []byte(expectedMethod)) {
 		t.Fatalf("Unexpected method: %q. Expected %q", req1.Header.Method, expectedMethod)
+	}
+	if len(requestURI) == 0 {
+		requestURI = "/"
 	}
 	if !bytes.Equal(req1.Header.RequestURI, []byte(requestURI)) {
 		t.Fatalf("Unexpected RequestURI: %q. Expected %q", req1.Header.RequestURI, requestURI)
