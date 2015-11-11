@@ -239,9 +239,15 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 //
 // Success calls are ignored after TimeoutError call.
 func (ctx *RequestCtx) Success(contentType string, body []byte) {
-	resp := &ctx.Response
-	resp.Header.SetBytesK(strContentType, contentType)
-	resp.Body = append(resp.Body, body...)
+	ctx.Response.Header.SetBytesK(strContentType, contentType)
+	ctx.SetResponseBody(body)
+}
+
+// SetResponseBody sets response body to the given value.
+//
+// It is safe modifying body buffer after the function return.
+func (ctx *RequestCtx) SetResponseBody(body []byte) {
+	ctx.Response.Body = append(ctx.Response.Body[:0], body...)
 }
 
 // Logger returns logger, which may be used for logging arbitrary
