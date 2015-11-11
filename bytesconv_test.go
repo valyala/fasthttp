@@ -2,7 +2,27 @@ package fasthttp
 
 import (
 	"testing"
+	"time"
 )
+
+func TestAppendHTTPDate(t *testing.T) {
+	d := time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)
+	s := string(AppendHTTPDate(nil, d))
+	expectedS := "Tue, 10 Nov 2009 23:00:00 GMT"
+	if s != expectedS {
+		t.Fatalf("unexpected date %q. Expecting %q", s, expectedS)
+	}
+
+	b := []byte("prefix")
+	s = string(AppendHTTPDate(b, d))
+	if s[:len(b)] != string(b) {
+		t.Fatalf("unexpected prefix %q. Expecting %q", s[:len(b)], b)
+	}
+	s = s[len(b):]
+	if s != expectedS {
+		t.Fatalf("unexpected date %q. Expecting %q", s, expectedS)
+	}
+}
 
 func TestParseUintSuccess(t *testing.T) {
 	testParseUintSuccess(t, "0", 0)
