@@ -138,6 +138,7 @@ func (wp *workerPool) release(ch *workerChan) bool {
 	ch.t = time.Now()
 	wp.lock.Lock()
 	if wp.mustStop {
+		wp.lock.Unlock()
 		return false
 	}
 	wp.ready = append(wp.ready, ch)
