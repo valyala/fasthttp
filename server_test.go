@@ -22,7 +22,7 @@ func TestRequestCtxInit(t *testing.T) {
 	}
 	ctx.Logger().Printf("foo bar %d", 10)
 
-	expectedLog := "0.000 #0012345700000000 - 0.0.0.0:0 -  http:// - foo bar 10\n"
+	expectedLog := "0.000 #0012345700000000 - 0.0.0.0:0<->0.0.0.0:0 -  http:// - foo bar 10\n"
 	if logger.out != expectedLog {
 		t.Fatalf("Unexpected log output: %q. Expected %q", logger.out, expectedLog)
 	}
@@ -247,10 +247,10 @@ func TestServerLogger(t *testing.T) {
 	verifyResponse(t, br, 200, "text/html", "requestURI=/foo1, body=\"\", remoteAddr=1.2.3.4:8765")
 	verifyResponse(t, br, 200, "text/html", "requestURI=/foo2, body=\"abcde\", remoteAddr=1.2.3.4:8765")
 
-	expectedLogOut := `0.000 #0000000100000001 - 1.2.3.4:8765 - GET http://google.com/foo1 - begin
-0.000 #0000000100000001 - 1.2.3.4:8765 - GET http://google.com/foo1 - end
-0.000 #0000000100000002 - 1.2.3.4:8765 - POST http://aaa.com/foo2 - begin
-0.000 #0000000100000002 - 1.2.3.4:8765 - POST http://aaa.com/foo2 - end
+	expectedLogOut := `0.000 #0000000100000001 - 1.2.3.4:8765<->1.2.3.4:8765 - GET http://google.com/foo1 - begin
+0.000 #0000000100000001 - 1.2.3.4:8765<->1.2.3.4:8765 - GET http://google.com/foo1 - end
+0.000 #0000000100000002 - 1.2.3.4:8765<->1.2.3.4:8765 - POST http://aaa.com/foo2 - begin
+0.000 #0000000100000002 - 1.2.3.4:8765<->1.2.3.4:8765 - POST http://aaa.com/foo2 - end
 `
 	if cl.out != expectedLogOut {
 		t.Fatalf("Unexpected logger output: %q. Expected %q", cl.out, expectedLogOut)
@@ -314,6 +314,10 @@ func (rw *readWriterRemoteAddr) Write(b []byte) (int, error) {
 }
 
 func (rw *readWriterRemoteAddr) RemoteAddr() net.Addr {
+	return rw.addr
+}
+
+func (rw *readWriterRemoteAddr) LocalAddr() net.Addr {
 	return rw.addr
 }
 
@@ -450,5 +454,9 @@ func (rw *readWriter) Write(b []byte) (int, error) {
 }
 
 func (rw *readWriter) RemoteAddr() net.Addr {
+	return zeroTCPAddr
+}
+
+func (rw *readWriter) LocalAddr() net.Addr {
 	return zeroTCPAddr
 }

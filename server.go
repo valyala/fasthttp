@@ -178,8 +178,8 @@ func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	ctx := cl.ctx
 	req := &ctx.Request
 	req.ParseURI()
-	cl.logger.Printf("%.3f #%016X - %s - %s %s - %s",
-		time.Since(ctx.Time).Seconds(), ctx.ID, ctx.RemoteAddr(), req.Header.Method, req.URI.URI, s)
+	cl.logger.Printf("%.3f #%016X - %s<->%s - %s %s - %s",
+		time.Since(ctx.Time).Seconds(), ctx.ID, ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method, req.URI.URI, s)
 	ctxLoggerLock.Unlock()
 }
 
@@ -192,6 +192,17 @@ var zeroTCPAddr = &net.TCPAddr{
 // Always returns non-nil result.
 func (ctx *RequestCtx) RemoteAddr() net.Addr {
 	addr := ctx.c.RemoteAddr()
+	if addr == nil {
+		return zeroTCPAddr
+	}
+	return addr
+}
+
+// LocalAddr returns server address for the given request.
+//
+// Always returns non-nil result.
+func (ctx *RequestCtx) LocalAddr() net.Addr {
+	addr := ctx.c.LocalAddr()
 	if addr == nil {
 		return zeroTCPAddr
 	}
@@ -653,6 +664,10 @@ type fakeAddrer struct {
 }
 
 func (fa *fakeAddrer) RemoteAddr() net.Addr {
+	return fa.addr
+}
+
+func (fa *fakeAddrer) LocalAddr() net.Addr {
 	return fa.addr
 }
 
