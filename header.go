@@ -795,7 +795,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (b []byte, err error) {
 	b = b[n+1:]
 
 	// parse requestURI
-	n = bytes.IndexByte(b, ' ')
+	n = bytes.LastIndexByte(b, ' ')
 	if n < 0 {
 		n = len(b)
 	} else if n == 0 {
