@@ -13,6 +13,7 @@ var (
 	strSlashDotDotSlash = []byte("/../")
 	strCRLF             = []byte("\r\n")
 	strHTTP             = []byte("http")
+	strHTTPS            = []byte("https")
 	strHTTP11           = []byte("HTTP/1.1")
 	strColonSlashSlash  = []byte("://")
 	strColonSpace       = []byte(": ")

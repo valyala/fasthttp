@@ -1,13 +1,32 @@
 package fasthttp
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestClientHTTPSConcurrent(t *testing.T) {
+	addr := "127.0.0.1:56793"
+	s := startEchoServerTLS(t, "tcp", addr)
+	defer s.Stop()
+
+	addr = "https://" + addr
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			testClientGet(t, &defaultClient, addr, 3000)
+		}()
+	}
+	wg.Wait()
+}
 
 func TestClientManyServers(t *testing.T) {
 	var addrs []string
@@ -21,7 +40,7 @@ func TestClientManyServers(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
-		addr := addrs[i]
+		addr := "http://" + addrs[i]
 		go func() {
 			defer wg.Done()
 			testClientGet(t, &defaultClient, addr, 3000)
@@ -35,6 +54,7 @@ func TestClientGet(t *testing.T) {
 	s := startEchoServer(t, "tcp", addr)
 	defer s.Stop()
 
+	addr = "http://" + addr
 	testClientGet(t, &defaultClient, addr, 100)
 }
 
@@ -43,6 +63,7 @@ func TestClientGetConcurrent(t *testing.T) {
 	s := startEchoServer(t, "tcp", addr)
 	defer s.Stop()
 
+	addr = "http://" + addr
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -83,7 +104,7 @@ func TestHostClientGetConcurrent(t *testing.T) {
 func testClientGet(t *testing.T, c clientGetter, addr string, n int) {
 	var buf []byte
 	for i := 0; i < n; i++ {
-		uri := fmt.Sprintf("http://%s/foo/%d?bar=baz", addr, i)
+		uri := fmt.Sprintf("%s/foo/%d?bar=baz", addr, i)
 		statusCode, body, err := c.Get(buf, uri)
 		buf = body
 		if err != nil {
@@ -92,14 +113,18 @@ func testClientGet(t *testing.T, c clientGetter, addr string, n int) {
 		if statusCode != StatusOK {
 			t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
 		}
-		if string(body) != uri {
-			t.Fatalf("unexpected uri %q. Expecting %q", body, uri)
+		resultURI := string(body)
+		if strings.HasPrefix(uri, "https") {
+			resultURI = uri[:5] + resultURI[4:]
+		}
+		if resultURI != uri {
+			t.Fatalf("unexpected uri %q. Expecting %q", resultURI, uri)
 		}
 	}
 }
 
 func testHostClientGet(t *testing.T, c *HostClient, n int) {
-	testClientGet(t, c, "google.com", n)
+	testClientGet(t, c, "http://google.com", n)
 }
 
 type clientGetter interface {
@@ -131,12 +156,38 @@ func (s *testEchoServer) Stop() {
 	}
 }
 
+func startEchoServerTLS(t *testing.T, network, addr string) *testEchoServer {
+	return startEchoServerExt(t, network, addr, true)
+}
+
 func startEchoServer(t *testing.T, network, addr string) *testEchoServer {
-	os.Remove(addr)
-	ln, err := net.Listen(network, addr)
+	return startEchoServerExt(t, network, addr, false)
+}
+
+func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEchoServer {
+	if network == "unix" {
+		os.Remove(addr)
+	}
+	var ln net.Listener
+	var err error
+	if isTLS {
+		certFile := "./ssl-cert-snakeoil.pem"
+		keyFile := "./ssl-cert-snakeoil.key"
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			t.Fatalf("Cannot load TLS certificate: %s", err)
+		}
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+		ln, err = tls.Listen(network, addr, tlsConfig)
+	} else {
+		ln, err = net.Listen(network, addr)
+	}
 	if err != nil {
 		t.Fatalf("cannot listen %q: %s", addr, err)
 	}
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.Request.ParseURI()
