@@ -151,7 +151,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 				t := time.Now()
 				c.mLock.Lock()
 				for k, v := range c.m {
-					if t.Sub(v.LastUseTime) > time.Minute {
+					if t.Sub(v.LastUseTime()) > time.Minute {
 						delete(c.m, k)
 					}
 				}
@@ -217,10 +217,8 @@ type HostClient struct {
 	// Default logger from log package is used if not set.
 	Logger Logger
 
-	// Last time the client was used.
-	LastUseTime time.Time
-
-	clientName atomic.Value
+	clientName  atomic.Value
+	lastUseTime atomic.Value
 
 	connsLock  sync.Mutex
 	connsCount int
@@ -241,6 +239,15 @@ type clientConn struct {
 	t time.Time
 	c net.Conn
 	v interface{}
+}
+
+// LastUseTime returns time the client was last used
+func (c *HostClient) LastUseTime() time.Time {
+	v := c.lastUseTime.Load()
+	if v == nil {
+		return time.Time{}
+	}
+	return v.(time.Time)
 }
 
 // Get fetches url contents into dst.
@@ -318,7 +325,7 @@ func releaseResponse(resp *Response) {
 // ErrNoFreeConns is returned if all HostClient.MaxConns connections
 // to the host are busy.
 func (c *HostClient) Do(req *Request, resp *Response) error {
-	c.LastUseTime = time.Now()
+	c.lastUseTime.Store(time.Now())
 
 	req.ParseURI()
 	host := req.URI.Host
@@ -378,7 +385,7 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 
 // ErrNoFreeConns is returned when no free connections available
 // to the given host.
-var ErrNoFreeConns = errors.New("no free connections to host")
+var ErrNoFreeConns = errors.New("no free connections available to host")
 
 func (c *HostClient) acquireConn() (*clientConn, error) {
 	var cc *clientConn
