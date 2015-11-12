@@ -38,6 +38,11 @@ var defaultClient Client
 
 // Client implements http client.
 type Client struct {
+	// Client name. Used in User-Agent request header.
+	//
+	// Default client name is used if not set.
+	Name string
+
 	// Maximum number of connections per each host which may be established.
 	//
 	// DefaultMaxConnsPerHost is used if not set.
@@ -118,6 +123,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	if hc == nil {
 		hc = &HostClient{
 			Addr:            string(host),
+			Name:            c.Name,
 			MaxConns:        c.MaxConnsPerHost,
 			ReadBufferSize:  c.ReadBufferSize,
 			WriteBufferSize: c.WriteBufferSize,
@@ -174,6 +180,9 @@ type HostClient struct {
 	// HTTP server host address.
 	Addr string
 
+	// Client name. Used in User-Agent request header.
+	Name string
+
 	// Callback for establishing new connection to the host.
 	//
 	// TCP dialer is used if not set.
@@ -202,6 +211,8 @@ type HostClient struct {
 
 	// Last time the client was used.
 	LastUseTime time.Time
+
+	clientName atomic.Value
 
 	connsLock  sync.Mutex
 	connsCount int
@@ -314,6 +325,11 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	}
 	req.Header.RequestURI = req.URI.AppendRequestURI(req.Header.RequestURI[:0])
 
+	userAgentOld := req.Header.userAgent
+	if len(userAgentOld) == 0 {
+		req.Header.userAgent = c.getClientName()
+	}
+
 	cc, err := c.acquireConn()
 	if err != nil {
 		return err
@@ -321,7 +337,13 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	conn := cc.c
 
 	bw := c.acquireWriter(conn)
-	if err = req.Write(bw); err != nil {
+	err = req.Write(bw)
+
+	if len(userAgentOld) == 0 {
+		req.Header.userAgent = userAgentOld
+	}
+
+	if err != nil {
 		c.releaseWriter(bw)
 		c.closeConn(cc)
 		return err
@@ -564,4 +586,19 @@ func resolveTCPAddrs(addr string) ([]net.TCPAddr, error) {
 		addrs[i].Port = port
 	}
 	return addrs, nil
+}
+
+func (c *HostClient) getClientName() []byte {
+	v := c.clientName.Load()
+	var clientName []byte
+	if v == nil {
+		clientName = []byte(c.Name)
+		if len(clientName) == 0 {
+			clientName = defaultUserAgent
+		}
+		c.clientName.Store(clientName)
+	} else {
+		clientName = v.([]byte)
+	}
+	return clientName
 }
