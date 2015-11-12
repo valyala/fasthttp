@@ -9,6 +9,27 @@ import (
 	"time"
 )
 
+func TestClientManyServers(t *testing.T) {
+	var addrs []string
+	for i := 0; i < 10; i++ {
+		addr := fmt.Sprintf("127.0.0.1:%d", 56904+i)
+		s := startEchoServer(t, "tcp", addr)
+		defer s.Stop()
+		addrs = append(addrs, addr)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		addr := addrs[i]
+		go func() {
+			defer wg.Done()
+			testClientGet(t, &defaultClient, addr, 3000)
+		}()
+	}
+	wg.Wait()
+}
+
 func TestClientGet(t *testing.T) {
 	addr := "127.0.0.1:56789"
 	s := startEchoServer(t, "tcp", addr)
