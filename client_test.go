@@ -9,20 +9,44 @@ import (
 	"time"
 )
 
+func TestClientGet(t *testing.T) {
+	addr := "127.0.0.1:56789"
+	s := startEchoServer(t, "tcp", addr)
+	defer s.Stop()
+
+	testClientGet(t, &defaultClient, addr, 100)
+}
+
+func TestClientGetConcurrent(t *testing.T) {
+	addr := "127.0.0.1:56780"
+	s := startEchoServer(t, "tcp", addr)
+	defer s.Stop()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			testClientGet(t, &defaultClient, addr, 3000)
+		}()
+	}
+	wg.Wait()
+}
+
 func TestHostClientGet(t *testing.T) {
 	addr := "./TestHostClientGet.unix"
-	s := startEchoServer(t, addr)
+	s := startEchoServer(t, "unix", addr)
 	defer s.Stop()
-	c := createUnixClient(t, addr)
+	c := createEchoClient(t, "unix", addr)
 
 	testHostClientGet(t, c, 100)
 }
 
 func TestHostClientGetConcurrent(t *testing.T) {
 	addr := "./TestHostClientGetConcurrent.unix"
-	s := startEchoServer(t, addr)
+	s := startEchoServer(t, "unix", addr)
 	defer s.Stop()
-	c := createUnixClient(t, addr)
+	c := createEchoClient(t, "unix", addr)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -35,10 +59,10 @@ func TestHostClientGetConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-func testHostClientGet(t *testing.T, c *HostClient, n int) {
+func testClientGet(t *testing.T, c clientGetter, addr string, n int) {
 	var buf []byte
 	for i := 0; i < n; i++ {
-		uri := fmt.Sprintf("http://google.com/foo/%d?bar=baz", i)
+		uri := fmt.Sprintf("http://%s/foo/%d?bar=baz", addr, i)
 		statusCode, body, err := c.Get(buf, uri)
 		buf = body
 		if err != nil {
@@ -53,11 +77,19 @@ func testHostClientGet(t *testing.T, c *HostClient, n int) {
 	}
 }
 
-func createUnixClient(t *testing.T, addr string) *HostClient {
+func testHostClientGet(t *testing.T, c *HostClient, n int) {
+	testClientGet(t, c, "google.com", n)
+}
+
+type clientGetter interface {
+	Get(dst []byte, uri string) (int, []byte, error)
+}
+
+func createEchoClient(t *testing.T, network, addr string) *HostClient {
 	return &HostClient{
 		Addr: addr,
 		Dial: func(addr string) (net.Conn, error) {
-			return net.Dial("unix", addr)
+			return net.Dial(network, addr)
 		},
 	}
 }
@@ -78,9 +110,9 @@ func (s *testEchoServer) Stop() {
 	}
 }
 
-func startEchoServer(t *testing.T, addr string) *testEchoServer {
+func startEchoServer(t *testing.T, network, addr string) *testEchoServer {
 	os.Remove(addr)
-	ln, err := net.Listen("unix", addr)
+	ln, err := net.Listen(network, addr)
 	if err != nil {
 		t.Fatalf("cannot listen %q: %s", addr, err)
 	}

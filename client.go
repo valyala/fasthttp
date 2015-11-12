@@ -447,10 +447,11 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 		}()
 	}
 
-	if c.Dial == nil {
-		c.Dial = c.defaultDial
+	dial := c.Dial
+	if dial == nil {
+		dial = c.defaultDial
 	}
-	conn, err := c.Dial(c.Addr)
+	conn, err := dial(c.Addr)
 	if err != nil {
 		c.decConnsCount()
 		return nil, err
