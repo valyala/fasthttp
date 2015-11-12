@@ -386,7 +386,12 @@ func (s *Server) ServeConn(c net.Conn) error {
 		}
 		c = pic
 	}
-	return s.serveConn(c)
+	err := s.serveConn(c)
+	err1 := c.Close()
+	if err == nil {
+		err = err1
+	}
+	return err
 }
 
 func (s *Server) serveConn(c net.Conn) error {
@@ -487,11 +492,6 @@ func (s *Server) serveConn(c net.Conn) error {
 		releaseWriter(ctx, bw)
 	}
 	s.releaseCtx(ctx)
-
-	err1 := c.Close()
-	if err == nil {
-		err = err1
-	}
 	return err
 }
 

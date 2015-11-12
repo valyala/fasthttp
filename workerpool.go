@@ -12,7 +12,7 @@ import (
 // incoming connection.
 type workerPool struct {
 	// Function for serving server connections.
-	// It must close c before returning.
+	// It must leave c unclosed.
 	WorkerFunc func(c net.Conn) error
 
 	// Maximum number of workers to create.
@@ -164,6 +164,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 		if err = wp.WorkerFunc(c); err != nil {
 			wp.Logger.Printf("error when serving connection %q<->%q: %s", c.LocalAddr(), c.RemoteAddr(), err)
 		}
+		c.Close()
 		c = nil
 
 		if !wp.release(ch) {
