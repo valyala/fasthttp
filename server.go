@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bufio"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -275,6 +276,33 @@ func (ctx *RequestCtx) Logger() Logger {
 // references to ctx and/or its members in other goroutines.
 func (ctx *RequestCtx) TimeoutError(msg string) {
 	ctx.timeoutErrMsg = msg
+}
+
+// ListenAndServe serves HTTP requests from the given TCP addr.
+func (s *Server) ListenAndServe(addr string) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln)
+}
+
+// ListenAndServeTLS serves HTTPS requests from the given TCP addr.
+//
+// certFile and keyFile are paths to TLS certificate and key files.
+func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return err
+	}
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+	ln, err := tls.Listen("tcp", addr, tlsConfig)
+	if err != nil {
+		return err
+	}
+	return s.Serve(ln)
 }
 
 // Default concurrency used by Server.Serve().
