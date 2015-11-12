@@ -47,9 +47,14 @@ type Response struct {
 	//
 	// BodyStream may be set instead of Body for performance reasons only.
 	//
-	// BodyStream is read by Response.Write() until error or io.EOF.
-	// Response.Write() calls BodyStream.Close() if such method is present
-	// after BodyStream.Read() returns error or io.EOF.
+	// BodyStream is read by Response.Write() until one of the following
+	// events occur:
+	// - Response.ContentLength bytes read if it is greater than 0.
+	// - error or io.EOF is returned from BodyStream if Response.ContentLength
+	// is 0 or negative.
+	//
+	// Response.Write() calls BodyStream.Close() (io.Closer) if such method
+	// is present after finishing reading BodyStream.
 	//
 	// Either BodyStream or Body may be set, but not both.
 	//
@@ -209,23 +214,33 @@ func (req *Request) Write(w *bufio.Writer) error {
 func (resp *Response) Write(w *bufio.Writer) error {
 	var err error
 	if resp.BodyStream != nil {
-		resp.Header.ContentLength = -1
-		if err = resp.Header.Write(w); err != nil {
-			return err
-		}
-		if err = writeBodyChunked(w, resp.BodyStream); err != nil {
-			return err
+		if resp.Header.ContentLength > 0 {
+			if err = resp.Header.Write(w); err != nil {
+				return err
+			}
+			if err = writeBodyFixedSize(w, resp.BodyStream, resp.Header.ContentLength); err != nil {
+				return err
+			}
+		} else {
+			resp.Header.ContentLength = -1
+			if err = resp.Header.Write(w); err != nil {
+				return err
+			}
+			if err = writeBodyChunked(w, resp.BodyStream); err != nil {
+				return err
+			}
 		}
 		if bsc, ok := resp.BodyStream.(io.Closer); ok {
 			err = bsc.Close()
 		}
-	} else {
-		resp.Header.ContentLength = len(resp.Body)
-		if err = resp.Header.Write(w); err != nil {
-			return err
-		}
-		_, err = w.Write(resp.Body)
+		return err
 	}
+
+	resp.Header.ContentLength = len(resp.Body)
+	if err = resp.Header.Write(w); err != nil {
+		return err
+	}
+	_, err = w.Write(resp.Body)
 	return err
 }
 
@@ -258,6 +273,34 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	}
 
 	copyBufPool.Put(vbuf)
+	return err
+}
+
+var limitReaderPool sync.Pool
+
+func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int) error {
+	vbuf := copyBufPool.Get()
+	if vbuf == nil {
+		vbuf = make([]byte, 4096)
+	}
+	buf := vbuf.([]byte)
+
+	vlr := limitReaderPool.Get()
+	if vlr == nil {
+		vlr = &io.LimitedReader{}
+	}
+	lr := vlr.(*io.LimitedReader)
+	lr.R = r
+	lr.N = int64(size)
+
+	n, err := io.CopyBuffer(w, lr, buf)
+
+	limitReaderPool.Put(vlr)
+	copyBufPool.Put(vbuf)
+
+	if n != int64(size) && err == nil {
+		err = fmt.Errorf("read %d bytes from BodyStream instead of %d bytes", n, size)
+	}
 	return err
 }
 

@@ -8,19 +8,28 @@ import (
 	"testing"
 )
 
-func TestResponseBodyStream(t *testing.T) {
-	testResponseBodyStream(t, "")
-
-	body := "foobar baz aaa bbb ccc"
-	testResponseBodyStream(t, body)
-
-	body = string(createFixedBody(10001))
-	testResponseBodyStream(t, body)
+func TestResponseBodyStreamFixedSize(t *testing.T) {
+	testResponseBodyStream(t, "a", false)
+	testResponseBodyStream(t, string(createFixedBody(4097)), false)
+	testResponseBodyStream(t, string(createFixedBody(100500)), false)
 }
 
-func testResponseBodyStream(t *testing.T, body string) {
+func TestResponseBodyStreamChunked(t *testing.T) {
+	testResponseBodyStream(t, "", true)
+
+	body := "foobar baz aaa bbb ccc"
+	testResponseBodyStream(t, body, true)
+
+	body = string(createFixedBody(10001))
+	testResponseBodyStream(t, body, true)
+}
+
+func testResponseBodyStream(t *testing.T, body string, chunked bool) {
 	var resp Response
 	resp.BodyStream = bytes.NewBufferString(body)
+	if !chunked {
+		resp.Header.ContentLength = len(body)
+	}
 
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
