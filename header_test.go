@@ -10,6 +10,56 @@ import (
 	"testing"
 )
 
+func TestResponseHeaderHTTPVer(t *testing.T) {
+	// non-http/1.1
+	testResponseHeaderHTTPVer(t, "HTTP/1.0 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
+	testResponseHeaderHTTPVer(t, "HTTP/0.9 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
+	testResponseHeaderHTTPVer(t, "foobar 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
+
+	// http/1.1
+	testResponseHeaderHTTPVer(t, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", false)
+}
+
+func TestRequestHeaderHTTPVer(t *testing.T) {
+	// non-http/1.1
+	testRequestHeaderHTTPVer(t, "GET / HTTP/1.0\r\nHost: aa.com\r\n\r\n", true)
+	testRequestHeaderHTTPVer(t, "GET / HTTP/0.9\r\nHost: aa.com\r\n\r\n", true)
+	testRequestHeaderHTTPVer(t, "GET / foobar\r\nHost: aa.com\r\n\r\n", true)
+
+	// empty http version
+	testRequestHeaderHTTPVer(t, "GET /\r\nHost: aaa.com\r\n\r\n", true)
+	testRequestHeaderHTTPVer(t, "GET / \r\nHost: aaa.com\r\n\r\n", true)
+
+	// http/1.1
+	testRequestHeaderHTTPVer(t, "GET / HTTP/1.1\r\nHost: a.com\r\n\r\n", false)
+}
+
+func testResponseHeaderHTTPVer(t *testing.T, s string, connectionClose bool) {
+	var h ResponseHeader
+
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s. response=%q", err, s)
+	}
+	if h.ConnectionClose != connectionClose {
+		t.Fatalf("unexpected connectionClose %v. Expecting %v. response=%q", h.ConnectionClose, connectionClose, s)
+	}
+}
+
+func testRequestHeaderHTTPVer(t *testing.T, s string, connectionClose bool) {
+	var h RequestHeader
+
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s. request=%q", err, s)
+	}
+	if h.ConnectionClose != connectionClose {
+		t.Fatalf("unexpected connectionClose %v. Expecting %v. request=%q", h.ConnectionClose, connectionClose, s)
+	}
+}
+
 func TestResponseHeaderCopyTo(t *testing.T) {
 	var h ResponseHeader
 
@@ -719,13 +769,16 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	// ancient http protocol
 	testRequestHeaderReadSuccess(t, h, "GET /bar HTTP/1.0\r\nHost: gole\r\n\r\npppp",
 		0, "/bar", "gole", "", "", "pppp")
-	if h.ConnectionClose {
-		t.Fatalf("unexpected connection: close header")
+	if !h.ConnectionClose {
+		t.Fatalf("expecting connectionClose for ancient http protocol")
 	}
 
 	// complex headers with body
 	testRequestHeaderReadSuccess(t, h, "GET /aabar HTTP/1.1\r\nAAA: bbb\r\nHost: ole.com\r\nAA: bb\r\n\r\nzzz",
 		0, "/aabar", "ole.com", "", "", "zzz")
+	if h.ConnectionClose {
+		t.Fatalf("unexpected connection: close")
+	}
 
 	// lf instead of crlf
 	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\nHost: google.com\n\n",

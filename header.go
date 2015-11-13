@@ -781,10 +781,14 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (b []byte, err error) {
 		}
 	}
 
-	// skip protocol
+	// parse protocol
 	n := bytes.IndexByte(b, ' ')
 	if n < 0 {
 		return nil, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
+	}
+	if !bytes.Equal(b[:n], strHTTP11) {
+		// Non-http/1.1 response. Close connection after it.
+		h.ConnectionClose = true
 	}
 	b = b[n+1:]
 
@@ -819,9 +823,14 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (b []byte, err error) {
 	// parse requestURI
 	n = bytes.LastIndexByte(b, ' ')
 	if n < 0 {
+		// no http protocol found. Close connection after the request.
+		h.ConnectionClose = true
 		n = len(b)
 	} else if n == 0 {
 		return nil, fmt.Errorf("RequestURI cannot be empty in %q", buf)
+	} else if !bytes.Equal(b[n+1:], strHTTP11) {
+		// non-http/1.1 protocol. Close connection after the request.
+		h.ConnectionClose = true
 	}
 	h.RequestURI = append(h.RequestURI[:0], b[:n]...)
 
