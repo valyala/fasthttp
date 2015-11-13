@@ -256,6 +256,21 @@ var zeroTCPAddr = &net.TCPAddr{
 	IP: net.IPv4zero,
 }
 
+// IsGet returns true if request method is GET.
+func (ctx *RequestCtx) IsGet() bool {
+	return ctx.Request.Header.IsMethodGet()
+}
+
+// IsPost returns true if request method is POST.
+func (ctx *RequestCtx) IsPost() bool {
+	return ctx.Request.Header.IsMethodPost()
+}
+
+// IsHead returns true if request method is HEAD.
+func (ctx *RequestCtx) IsHead() bool {
+	return ctx.Request.Header.IsMethodHead()
+}
+
 // RemoteAddr returns client address for the given request.
 //
 // Always returns non-nil result.
