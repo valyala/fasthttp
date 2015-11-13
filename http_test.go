@@ -83,7 +83,7 @@ func TestRequestReadChunked(t *testing.T) {
 	if string(req.Body) != expectedBody {
 		t.Fatalf("Unexpected body %q. Expected %q", req.Body, expectedBody)
 	}
-	verifyRequestHeader(t, &req.Header, -1, "/foo", "google.com", "", "aa/bb")
+	verifyRequestHeader(t, &req.Header, 8, "/foo", "google.com", "", "aa/bb")
 	verifyTrailer(t, rb, "trail")
 }
 
@@ -119,6 +119,7 @@ func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBod
 	verifyTrailer(t, rb, expectedTrailer)
 
 	// verify that ordinal response is read after null-body response
+	resp.SkipBody = false
 	testResponseReadSuccess(t, resp, "HTTP/1.1 300 OK\r\nContent-Length: 5\r\nContent-Type: bar\r\n\r\n56789aaa",
 		300, 5, "bar", "56789", "aaa")
 }
@@ -313,11 +314,11 @@ func TestResponseReadSuccess(t *testing.T) {
 
 	// chunked response
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nqwer\r\n2\r\nty\r\n0\r\n\r\nzzzzz",
-		200, -1, "text/html", "qwerty", "zzzzz")
+		200, 6, "text/html", "qwerty", "zzzzz")
 
 	// zero chunked response
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\nzzz",
-		200, -1, "text/html", "", "zzz")
+		200, 0, "text/html", "", "zzz")
 }
 
 func TestResponseReadError(t *testing.T) {

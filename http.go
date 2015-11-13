@@ -154,6 +154,7 @@ func (req *Request) Read(r *bufio.Reader) error {
 			return err
 		}
 		req.Body = body
+		req.Header.ContentLength = len(req.Body)
 	}
 	return nil
 }
@@ -166,17 +167,15 @@ func (resp *Response) Read(r *bufio.Reader) error {
 		return err
 	}
 
-	if isSkipResponseBody(resp.Header.StatusCode) || resp.SkipBody {
-		resp.SkipBody = false
-		return nil
+	if !isSkipResponseBody(resp.Header.StatusCode) && !resp.SkipBody {
+		body, err := readBody(r, resp.Header.ContentLength, resp.Body)
+		if err != nil {
+			resp.Clear()
+			return err
+		}
+		resp.Body = body
+		resp.Header.ContentLength = len(resp.Body)
 	}
-
-	body, err := readBody(r, resp.Header.ContentLength, resp.Body)
-	if err != nil {
-		resp.Clear()
-		return err
-	}
-	resp.Body = body
 	return nil
 }
 
