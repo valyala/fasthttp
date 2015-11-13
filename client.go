@@ -52,6 +52,16 @@ type Client struct {
 	// Default client name is used if not set.
 	Name string
 
+	// Callback for establishing new connections to hosts.
+	//
+	// Default TCP dialer is used if not set.
+	Dial DialFunc
+
+	// TLS config for https connections.
+	//
+	// Default TLS config is used if not set.
+	TLSConfig *tls.Config
+
 	// Maximum number of connections per each host which may be established.
 	//
 	// DefaultMaxConnsPerHost is used if not set.
@@ -107,9 +117,9 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	req.ParseURI()
 	host := req.URI.Host
 
-	isHTTPS := false
+	isTLS := false
 	if bytes.Equal(req.URI.Scheme, strHTTPS) {
-		isHTTPS = true
+		isTLS = true
 	} else if !bytes.Equal(req.URI.Scheme, strHTTP) {
 		return fmt.Errorf("unsupported protocol %q. http and https are supported", req.URI.Scheme)
 	}
@@ -118,12 +128,12 @@ func (c *Client) Do(req *Request, resp *Response) error {
 
 	c.mLock.Lock()
 	m := c.m
-	if isHTTPS {
+	if isTLS {
 		m = c.ms
 	}
 	if m == nil {
 		m = make(map[string]*HostClient)
-		if isHTTPS {
+		if isTLS {
 			c.ms = m
 		} else {
 			c.m = m
@@ -134,15 +144,15 @@ func (c *Client) Do(req *Request, resp *Response) error {
 		hc = &HostClient{
 			Addr:            string(host),
 			Name:            c.Name,
+			Dial:            c.Dial,
+			TLSConfig:       c.TLSConfig,
 			MaxConns:        c.MaxConnsPerHost,
 			ReadBufferSize:  c.ReadBufferSize,
 			WriteBufferSize: c.WriteBufferSize,
 			Logger:          c.Logger,
 		}
-		if isHTTPS {
-			hc.Dial = hc.dialHTTPS
-		} else {
-			hc.Dial = hc.dialHTTP
+		if isTLS {
+			hc.IsTLS = true
 		}
 		m[hc.Addr] = hc
 		if len(m) == 1 {
@@ -184,7 +194,14 @@ const DefaultMaxConnsPerHost = 100
 
 // DialFunc must establish connection to addr.
 //
-// HostClient.Addr is passed as addr to DialFunc.
+// There is no need in establishing TLS (SSL) connection for https urls.
+// The client automatically converts connection to TLS if required.
+//
+// Host and optionally port part of url is passed as addr to DialFunc.
+// Example addr values:
+// - foobar.com       for http://foobar.com/aaa/bb
+// - foobar.com       for https://foobar.com/aaa/bb
+// - foobar.com:8080  for http://foobar.com:8080/aaa/bb
 type DialFunc func(addr string) (net.Conn, error)
 
 // HostClient is a single-host http client. It can make http requests
@@ -200,11 +217,14 @@ type HostClient struct {
 
 	// Callback for establishing new connection to the host.
 	//
-	// TCP dialer is used if not set.
+	// Default TCP dialer is used if not set.
 	Dial DialFunc
 
 	// Optional TLS config.
 	TLSConfig *tls.Config
+
+	// Whether to use TLS (aka SSL or HTTPS) for host connections.
+	IsTLS bool
 
 	// Maximum number of connections to the host which may be established.
 	//
@@ -485,11 +505,7 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 		}()
 	}
 
-	dial := c.Dial
-	if dial == nil {
-		dial = c.dialHTTP
-	}
-	conn, err := dial(c.Addr)
+	conn, err := c.dialHost()
 	if err != nil {
 		c.decConnsCount()
 		return nil, err
@@ -576,35 +592,38 @@ func (c *HostClient) releaseReader(br *bufio.Reader) {
 
 var dnsCacheDuration = time.Minute
 
-func (c *HostClient) dialHTTPS(addr string) (net.Conn, error) {
-	tcpAddr, err := c.getTCPAddr(addr, true)
-	if err != nil {
-		return nil, err
-	}
-	conn, err := net.DialTCP("tcp4", nil, tcpAddr)
-	if err != nil {
-		return nil, err
-	}
-	tlsConfig := c.TLSConfig
-	if tlsConfig == nil {
-		tlsConfig = defaultTLSConfig
-	}
-	return tls.Client(conn, tlsConfig), nil
-}
-
 var defaultTLSConfig = &tls.Config{
 	InsecureSkipVerify: true,
 }
 
-func (c *HostClient) dialHTTP(addr string) (net.Conn, error) {
-	tcpAddr, err := c.getTCPAddr(addr, false)
+func (c *HostClient) dialHost() (net.Conn, error) {
+	dial := c.Dial
+	if dial == nil {
+		dial = c.defaultDialFunc
+	}
+	conn, err := dial(c.Addr)
+	if err != nil {
+		return nil, err
+	}
+	if c.IsTLS {
+		tlsConfig := c.TLSConfig
+		if tlsConfig == nil {
+			tlsConfig = defaultTLSConfig
+		}
+		conn = tls.Client(conn, tlsConfig)
+	}
+	return conn, nil
+}
+
+func (c *HostClient) defaultDialFunc(addr string) (net.Conn, error) {
+	tcpAddr, err := c.getTCPAddr(addr)
 	if err != nil {
 		return nil, err
 	}
 	return net.DialTCP("tcp4", nil, tcpAddr)
 }
 
-func (c *HostClient) getTCPAddr(addr string, isTLS bool) (*net.TCPAddr, error) {
+func (c *HostClient) getTCPAddr(addr string) (*net.TCPAddr, error) {
 	c.tcpAddrsLock.Lock()
 	tcpAddrs := c.tcpAddrs
 	if tcpAddrs != nil && !c.tcpAddrsPending && time.Since(c.tcpAddrsResolveTime) > dnsCacheDuration {
@@ -615,7 +634,7 @@ func (c *HostClient) getTCPAddr(addr string, isTLS bool) (*net.TCPAddr, error) {
 
 	if tcpAddrs == nil {
 		var err error
-		if tcpAddrs, err = resolveTCPAddrs(addr, isTLS); err != nil {
+		if tcpAddrs, err = resolveTCPAddrs(addr, c.IsTLS); err != nil {
 			c.tcpAddrsLock.Lock()
 			c.tcpAddrsPending = false
 			c.tcpAddrsLock.Unlock()
