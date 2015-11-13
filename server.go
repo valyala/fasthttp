@@ -256,6 +256,50 @@ var zeroTCPAddr = &net.TCPAddr{
 	IP: net.IPv4zero,
 }
 
+// RequestURI returns RequestURI.
+//
+// This uri is valid until returning from RequestHandler.
+func (ctx *RequestCtx) RequestURI() []byte {
+	return ctx.Request.Header.RequestURI
+}
+
+// Path returns requested path.
+//
+// The path is valid until returning from RequestHandler.
+func (ctx *RequestCtx) Path() []byte {
+	ctx.Request.ParseURI()
+	return ctx.Request.URI.Path
+}
+
+// Host returns requested host.
+//
+// The host is valid until returning from RequestHandler.
+func (ctx *RequestCtx) Host() []byte {
+	ctx.Request.ParseURI()
+	return ctx.Request.URI.Host
+}
+
+// QueryArgs returns query arguments from RequestURI.
+//
+// It doesn't return POST'ed arguments - use PostArge() for this.
+//
+// Returned arguments are valid until returning from RequestHandler.
+func (ctx *RequestCtx) QueryArgs() *Args {
+	ctx.Request.ParseURI()
+	ctx.Request.URI.ParseQueryArgs()
+	return &ctx.Request.URI.QueryArgs
+}
+
+// PostArgs returns POST arguments.
+//
+// It doesn't return query arguments from RequestURI - use QueryArgs for this.
+//
+// Returned arguments are valid until returning from RequestHandler.
+func (ctx *RequestCtx) PostArgs() *Args {
+	ctx.Request.ParsePostArgs()
+	return &ctx.Request.PostArgs
+}
+
 // IsGet returns true if request method is GET.
 func (ctx *RequestCtx) IsGet() bool {
 	return ctx.Request.Header.IsMethodGet()
