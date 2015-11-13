@@ -15,6 +15,74 @@ import (
 	"time"
 )
 
+// ServeConn serves HTTP requests from the given connection
+// using the given handler.
+//
+// ServeConn returns nil if all requests from the c are successfully served.
+// It returns non-nil error otherwise.
+//
+// Connection c must immediately propagate all the data passed to Write()
+// to the client. Otherwise requests' processing may hang.
+//
+// ServeConn closes c before returning.
+//
+// ServeConn uses default Server settings. Use Server.ServeConn
+// for custom server tuning.
+func ServeConn(c net.Conn, handler RequestHandler) error {
+	v := serverPool.Get()
+	if v == nil {
+		v = &Server{}
+	}
+	s := v.(*Server)
+	s.Handler = handler
+	err := s.ServeConn(c)
+	s.Handler = nil
+	serverPool.Put(v)
+	return err
+}
+
+var serverPool sync.Pool
+
+// Serve serves incoming connections from the given listener
+// using the given handler.
+//
+// Serve blocks until the given listener returns permanent error.
+//
+// Serve uses default Server settings. Use Server.Serve
+// for custom server tuning.
+func Serve(ln net.Listener, handler RequestHandler) error {
+	s := &Server{
+		Handler: handler,
+	}
+	return s.Serve(ln)
+}
+
+// ListenAndServe serves HTTP requests from the given TCP addr
+// using the given handler.
+//
+// ListenAndServe uses default Server settings. Use Server.ListenAndServe
+// for custom server tuning.
+func ListenAndServe(addr string, handler RequestHandler) error {
+	s := &Server{
+		Handler: handler,
+	}
+	return s.ListenAndServe(addr)
+}
+
+// ListenAndServeTLS serves HTTPS requests from the given TCP addr
+// using the given handler.
+//
+// certFile and keyFile are paths to TLS certificate and key files.
+//
+// ListenAndServeTLS uses default Server settings. Use Server.ListenAndServeTLS
+// for custom server tuning.
+func ListenAndServeTLS(addr, certFile, keyFile string, handler RequestHandler) error {
+	s := &Server{
+		Handler: handler,
+	}
+	return s.ListenAndServeTLS(addr, certFile, keyFile)
+}
+
 // RequestHandler must process incoming requests.
 //
 // RequestHandler must call ctx.TimeoutError() before return
@@ -309,6 +377,9 @@ func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
 const DefaultConcurrency = 256 * 1024
 
 // Serve serves incoming connections from the given listener.
+//
+// Serve may handle DefaultConcurrency concurrent connections.
+// Use ServeConcurrency for handling another number of concurrent connections.
 //
 // Serve blocks until the given listener returns permanent error.
 func (s *Server) Serve(ln net.Listener) error {
