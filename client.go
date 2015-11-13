@@ -320,13 +320,7 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 }
 
 func doRequest(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
-	v := urlBufPool.Get()
-	if v == nil {
-		v = make([]byte, 1024)
-	}
-	buf := v.([]byte)
-	buf = AppendBytesStr(buf[:0], url)
-	req.Header.RequestURI = buf
+	req.SetRequestURI(url)
 
 	resp := acquireResponse()
 	resp.Body = dst
@@ -338,15 +332,10 @@ func doRequest(req *Request, dst []byte, url string, c clientDoer) (statusCode i
 	resp.Body = nil
 	releaseResponse(resp)
 
-	req.Header.RequestURI = nil
-	urlBufPool.Put(v)
-
 	return statusCode, body, err
 }
 
 var (
-	urlBufPool sync.Pool
-
 	requestPool  sync.Pool
 	responsePool sync.Pool
 )
@@ -392,7 +381,10 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	if len(req.Header.host) == 0 {
 		req.Header.host = append(req.Header.host[:0], host...)
 	}
-	req.Header.RequestURI = req.URI.AppendRequestURI(req.Header.RequestURI[:0])
+
+	req.Header.clientBuf = req.URI.AppendRequestURI(req.Header.clientBuf[:0])
+	requestURIOld := req.Header.RequestURI
+	req.Header.RequestURI = req.Header.clientBuf
 
 	userAgentOld := req.Header.userAgent
 	if len(userAgentOld) == 0 {
@@ -401,6 +393,10 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 
 	cc, err := c.acquireConn()
 	if err != nil {
+		req.Header.RequestURI = requestURIOld
+		if len(userAgentOld) == 0 {
+			req.Header.userAgent = userAgentOld
+		}
 		return err
 	}
 	conn := cc.c
@@ -408,6 +404,7 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	bw := c.acquireWriter(conn)
 	err = req.Write(bw)
 
+	req.Header.RequestURI = requestURIOld
 	if len(userAgentOld) == 0 {
 		req.Header.userAgent = userAgentOld
 	}

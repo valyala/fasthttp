@@ -65,6 +65,9 @@ type RequestHeader struct {
 	bufKV argsKV
 
 	cookies []argsKV
+
+	// aux buffer for Client.
+	clientBuf []byte
 }
 
 // IsMethodGet returns true if request method is GET.

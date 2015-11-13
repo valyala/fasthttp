@@ -1,13 +1,93 @@
 package fasthttp
 
 import (
+	"bytes"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+type fakeClientConn struct {
+	net.Conn
+	s []byte
+	n int
+	v interface{}
+}
+
+func (c *fakeClientConn) Write(b []byte) (int, error) {
+	return len(b), nil
+}
+
+func (c *fakeClientConn) Read(b []byte) (int, error) {
+	n := 0
+	for len(b) > 0 {
+		if c.n == len(c.s) {
+			c.n = 0
+			return n, nil
+		}
+		n = copy(b, c.s[c.n:])
+		c.n += n
+		b = b[n:]
+	}
+	return n, nil
+}
+
+func (c *fakeClientConn) Close() error {
+	releaseFakeServerConn(c)
+	return nil
+}
+
+func releaseFakeServerConn(c *fakeClientConn) {
+	c.n = 0
+	fakeClientConnPool.Put(c.v)
+}
+
+func acquireFakeServerConn(s []byte) *fakeClientConn {
+	v := fakeClientConnPool.Get()
+	if v == nil {
+		c := &fakeClientConn{
+			s: s,
+		}
+		c.v = c
+		return c
+	}
+	return v.(*fakeClientConn)
+}
+
+var fakeClientConnPool sync.Pool
+
+func BenchmarkClientGetFastServer(b *testing.B) {
+	body := []byte("012345678912")
+	s := []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body))
+	requestURI := []byte("http://foobar.com/aaa/bbb")
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return acquireFakeServerConn(s), nil
+		},
+	}
+
+	b.RunParallel(func(pb *testing.PB) {
+		var req Request
+		var resp Response
+		req.Header.RequestURI = requestURI
+		for pb.Next() {
+			if err := c.Do(&req, &resp); err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if resp.Header.StatusCode != StatusOK {
+				b.Fatalf("unexpected status code: %d", resp.Header.StatusCode)
+			}
+			if !bytes.Equal(resp.Body, body) {
+				b.Fatalf("unexpected response body: %q. Expected %q", resp.Body, body)
+			}
+		}
+	})
+}
 
 func fasthttpEchoHandler(ctx *RequestCtx) {
 	ctx.Success("text/plain", ctx.Request.Header.RequestURI)
