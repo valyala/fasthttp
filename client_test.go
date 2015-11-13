@@ -12,14 +12,21 @@ import (
 )
 
 func TestClientHTTPSConcurrent(t *testing.T) {
-	addr := "127.0.0.1:56793"
-	s := startEchoServerTLS(t, "tcp", addr)
-	defer s.Stop()
+	addrHTTP := "127.0.0.1:56793"
+	sHTTP := startEchoServer(t, "tcp", addrHTTP)
+	defer sHTTP.Stop()
 
-	addr = "https://" + addr
+	addrHTTPS := "127.0.0.1:56794"
+	sHTTPS := startEchoServerTLS(t, "tcp", addrHTTPS)
+	defer sHTTPS.Stop()
+
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
+		addr := "http://" + addrHTTP
+		if i&1 != 0 {
+			addr = "https://" + addrHTTPS
+		}
 		go func() {
 			defer wg.Done()
 			testClientGet(t, &defaultClient, addr, 3000)
