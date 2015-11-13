@@ -30,13 +30,17 @@ func Do(req *Request, resp *Response) error {
 }
 
 // Get fetches url contents into dst.
+//
+// Use Do for request customization.
 func Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return defaultClient.Get(dst, url)
 }
 
-// GetBytes fetches url contents into dst.
-func GetBytes(dst, url []byte) (statusCode int, body []byte, err error) {
-	return defaultClient.GetBytes(dst, url)
+// Post sends POST request to the given url with the given POST arguments.
+//
+// Use Do for request customization.
+func Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
+	return defaultClient.Post(dst, url, postArgs)
 }
 
 var defaultClient Client
@@ -75,37 +79,17 @@ type Client struct {
 }
 
 // Get fetches url contents into dst.
+//
+// Use Do for request customization.
 func (c *Client) Get(dst []byte, url string) (statusCode int, body []byte, err error) {
-	v := urlBufPool.Get()
-	if v == nil {
-		v = make([]byte, 1024)
-	}
-	buf := v.([]byte)
-	buf = AppendBytesStr(buf[:0], url)
-	statusCode, body, err = c.GetBytes(dst, buf)
-	urlBufPool.Put(v)
-	return statusCode, body, err
+	return clientGetURL(dst, url, c)
 }
 
-// GetBytes fetches url contents into dst.
-func (c *Client) GetBytes(dst, url []byte) (statusCode int, body []byte, err error) {
-	req := acquireRequest()
-	req.Header.RequestURI = url
-	req.ParseURI()
-
-	resp := acquireResponse()
-	resp.Body = dst
-	if err = c.Do(req, resp); err != nil {
-		return 0, nil, err
-	}
-	statusCode = resp.Header.StatusCode
-	body = resp.Body
-	resp.Body = nil
-	releaseResponse(resp)
-
-	req.Header.RequestURI = nil
-	releaseRequest(req)
-	return statusCode, body, err
+// Post sends POST request to the given url with the given POST arguments.
+//
+// Use Do for request customization.
+func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
+	return clientPostURL(dst, url, postArgs, c)
 }
 
 // Do performs the given http request and fills the given http response.
@@ -277,25 +261,55 @@ func (c *HostClient) LastUseTime() time.Time {
 }
 
 // Get fetches url contents into dst.
+//
+// Use Do for request customization.
 func (c *HostClient) Get(dst []byte, url string) (statusCode int, body []byte, err error) {
+	return clientGetURL(dst, url, c)
+}
+
+// Post sends POST request to the given url with the given POST arguments.
+//
+// Use Do for request customization.
+func (c *HostClient) Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
+	return clientPostURL(dst, url, postArgs, c)
+}
+
+type clientDoer interface {
+	Do(req *Request, resp *Response) error
+}
+
+func clientGetURL(dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
+	req := acquireRequest()
+
+	statusCode, body, err = doRequest(req, dst, url, c)
+
+	releaseRequest(req)
+	return statusCode, body, err
+}
+
+func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (statusCode int, body []byte, err error) {
+	req := acquireRequest()
+	req.Header.Method = strPost
+	req.Header.contentType = strPostArgsContentType
+	req.Body = postArgs.AppendBytes(req.Body[:0])
+
+	statusCode, body, err = doRequest(req, dst, url, c)
+
+	req.Header.Method = nil
+	req.Header.contentType = nil
+	// there is no need in req.Body = nil, since Body belongs to req.
+	releaseRequest(req)
+	return statusCode, body, err
+}
+
+func doRequest(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
 	v := urlBufPool.Get()
 	if v == nil {
 		v = make([]byte, 1024)
 	}
 	buf := v.([]byte)
 	buf = AppendBytesStr(buf[:0], url)
-	statusCode, body, err = c.GetBytes(dst, buf)
-	urlBufPool.Put(v)
-	return statusCode, body, err
-}
-
-var urlBufPool sync.Pool
-
-// GetBytes fetches url contents into dst.
-func (c *HostClient) GetBytes(dst, url []byte) (statusCode int, body []byte, err error) {
-	req := acquireRequest()
-	req.Header.RequestURI = url
-	req.ParseURI()
+	req.Header.RequestURI = buf
 
 	resp := acquireResponse()
 	resp.Body = dst
@@ -308,11 +322,14 @@ func (c *HostClient) GetBytes(dst, url []byte) (statusCode int, body []byte, err
 	releaseResponse(resp)
 
 	req.Header.RequestURI = nil
-	releaseRequest(req)
+	urlBufPool.Put(v)
+
 	return statusCode, body, err
 }
 
 var (
+	urlBufPool sync.Pool
+
 	requestPool  sync.Pool
 	responsePool sync.Pool
 )

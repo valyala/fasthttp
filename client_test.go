@@ -30,6 +30,7 @@ func TestClientHTTPSConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			testClientGet(t, &defaultClient, addr, 3000)
+			testClientPost(t, &defaultClient, addr, 1000)
 		}()
 	}
 	wg.Wait()
@@ -51,6 +52,7 @@ func TestClientManyServers(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			testClientGet(t, &defaultClient, addr, 3000)
+			testClientPost(t, &defaultClient, addr, 1000)
 		}()
 	}
 	wg.Wait()
@@ -65,7 +67,16 @@ func TestClientGet(t *testing.T) {
 	testClientGet(t, &defaultClient, addr, 100)
 }
 
-func TestClientGetConcurrent(t *testing.T) {
+func TestClientPost(t *testing.T) {
+	addr := "127.0.0.1:56798"
+	s := startEchoServer(t, "tcp", addr)
+	defer s.Stop()
+
+	addr = "http://" + addr
+	testClientPost(t, &defaultClient, addr, 100)
+}
+
+func TestClientConcurrent(t *testing.T) {
 	addr := "127.0.0.1:56780"
 	s := startEchoServer(t, "tcp", addr)
 	defer s.Stop()
@@ -77,6 +88,7 @@ func TestClientGetConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			testClientGet(t, &defaultClient, addr, 3000)
+			testClientPost(t, &defaultClient, addr, 1000)
 		}()
 	}
 	wg.Wait()
@@ -91,8 +103,17 @@ func TestHostClientGet(t *testing.T) {
 	testHostClientGet(t, c, 100)
 }
 
-func TestHostClientGetConcurrent(t *testing.T) {
-	addr := "./TestHostClientGetConcurrent.unix"
+func TestHostClientPost(t *testing.T) {
+	addr := "./TestHostClientPost.unix"
+	s := startEchoServer(t, "unix", addr)
+	defer s.Stop()
+	c := createEchoClient(t, "unix", addr)
+
+	testHostClientPost(t, c, 100)
+}
+
+func TestHostClientConcurrent(t *testing.T) {
+	addr := "./TestHostClientConcurrent.unix"
 	s := startEchoServer(t, "unix", addr)
 	defer s.Stop()
 	c := createEchoClient(t, "unix", addr)
@@ -103,6 +124,7 @@ func TestHostClientGetConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			testHostClientGet(t, c, 3000)
+			testHostClientPost(t, c, 1000)
 		}()
 	}
 	wg.Wait()
@@ -130,8 +152,39 @@ func testClientGet(t *testing.T, c clientGetter, addr string, n int) {
 	}
 }
 
+func testClientPost(t *testing.T, c clientPoster, addr string, n int) {
+	var buf []byte
+	var args Args
+	for i := 0; i < n; i++ {
+		uri := fmt.Sprintf("%s/foo/%d?bar=baz", addr, i)
+		args.Set("xx", fmt.Sprintf("yy%d", i))
+		args.Set("zzz", fmt.Sprintf("qwe_%d", i))
+		argsS := args.String()
+		statusCode, body, err := c.Post(buf, uri, &args)
+		buf = body
+		if err != nil {
+			t.Fatalf("unexpected error when doing http request: %s", err)
+		}
+		if statusCode != StatusOK {
+			t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+		}
+		s := string(body)
+		if s != argsS {
+			t.Fatalf("unexpected response %q. Expecting %q", s, argsS)
+		}
+	}
+}
+
 func testHostClientGet(t *testing.T, c *HostClient, n int) {
 	testClientGet(t, c, "http://google.com", n)
+}
+
+func testHostClientPost(t *testing.T, c *HostClient, n int) {
+	testClientPost(t, c, "http://post-host.com", n)
+}
+
+type clientPoster interface {
+	Post(dst []byte, uri string, postArgs *Args) (int, []byte, error)
 }
 
 type clientGetter interface {
@@ -198,7 +251,14 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.Request.ParseURI()
-			ctx.Success("text/plain", ctx.Request.URI.URI)
+			if ctx.IsGet() {
+				ctx.Success("text/plain", ctx.Request.URI.URI)
+			} else if ctx.IsPost() {
+				if err := ctx.Request.ParsePostArgs(); err != nil {
+					t.Fatalf("cannot parse post arguments: %s", err)
+				}
+				ctx.SetResponseBody(ctx.Request.Body)
+			}
 		},
 	}
 	ch := make(chan struct{})
