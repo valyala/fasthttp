@@ -10,6 +10,20 @@ import (
 	"testing"
 )
 
+func TestRequestHeaderEmptyMethod(t *testing.T) {
+	var h RequestHeader
+
+	if !h.IsMethodGet() {
+		t.Fatalf("empty method must be equivalent to GET")
+	}
+	if h.IsMethodPost() {
+		t.Fatalf("empty method cannot be POST")
+	}
+	if h.IsMethodHead() {
+		t.Fatalf("empty method cannot be HEAD")
+	}
+}
+
 func TestResponseHeaderHTTPVer(t *testing.T) {
 	// non-http/1.1
 	testResponseHeaderHTTPVer(t, "HTTP/1.0 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)

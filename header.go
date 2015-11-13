@@ -69,7 +69,7 @@ type RequestHeader struct {
 
 // IsMethodGet returns true if request method is GET.
 func (h *RequestHeader) IsMethodGet() bool {
-	return bytes.Equal(h.Method, strGet)
+	return bytes.Equal(h.Method, strGet) || len(h.Method) == 0
 }
 
 // IsMethodPost returns true if request methos is POST.
