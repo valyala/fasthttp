@@ -418,10 +418,11 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 	c.connsLock.Lock()
 	n := len(c.conns)
 	if n == 0 {
-		if c.MaxConns <= 0 {
-			c.MaxConns = DefaultMaxConnsPerHost
+		maxConns := c.MaxConns
+		if maxConns <= 0 {
+			maxConns = DefaultMaxConnsPerHost
 		}
-		if c.connsCount < c.MaxConns {
+		if c.connsCount < maxConns {
 			c.connsCount++
 			createConn = true
 		}
