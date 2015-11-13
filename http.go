@@ -66,6 +66,18 @@ type Response struct {
 	SkipBody bool
 }
 
+// SetRequestURI sets RequestURI.
+func (req *Request) SetRequestURI(requestURI string) {
+	req.Header.RequestURI = AppendBytesStr(req.Header.RequestURI[:0], requestURI)
+}
+
+// SetRequestURIBytes sets RequestURI.
+//
+// It is safe using requestURI buffer after the function return.
+func (req *Request) SetRequestURIBytes(requestURI []byte) {
+	req.Header.RequestURI = append(req.Header.RequestURI[:0], requestURI...)
+}
+
 // CopyTo copies req contents to dst.
 func (req *Request) CopyTo(dst *Request) {
 	dst.Clear()
