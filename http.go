@@ -148,12 +148,11 @@ func (req *Request) Read(r *bufio.Reader) error {
 	}
 
 	if req.Header.IsMethodPost() {
-		body, err := readBody(r, req.Header.ContentLength, req.Body)
+		req.Body, err = readBody(r, req.Header.ContentLength, req.Body)
 		if err != nil {
 			req.Clear()
 			return err
 		}
-		req.Body = body
 		req.Header.ContentLength = len(req.Body)
 	}
 	return nil
@@ -168,12 +167,11 @@ func (resp *Response) Read(r *bufio.Reader) error {
 	}
 
 	if !isSkipResponseBody(resp.Header.StatusCode) && !resp.SkipBody {
-		body, err := readBody(r, resp.Header.ContentLength, resp.Body)
+		resp.Body, err = readBody(r, resp.Header.ContentLength, resp.Body)
 		if err != nil {
 			resp.Clear()
 			return err
 		}
-		resp.Body = body
 		resp.Header.ContentLength = len(resp.Body)
 	}
 	return nil
@@ -314,53 +312,77 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 
 var copyBufPool sync.Pool
 
-func readBody(r *bufio.Reader, contentLength int, b []byte) ([]byte, error) {
-	b = b[:0]
+func readBody(r *bufio.Reader, contentLength int, dst []byte) ([]byte, error) {
+	dst = dst[:0]
 	if contentLength >= 0 {
-		return readBodyFixedSize(r, contentLength, b)
+		return appendBodyFixedSize(r, dst, contentLength)
 	}
-	return readBodyChunked(r, b)
+	if contentLength == -1 {
+		return readBodyChunked(r, dst)
+	}
+	return readBodyIdentity(r, dst)
 }
 
-func readBodyFixedSize(r *bufio.Reader, n int, buf []byte) ([]byte, error) {
+func readBodyIdentity(r *bufio.Reader, dst []byte) ([]byte, error) {
+	dst = dst[:cap(dst)]
+	if len(dst) == 0 {
+		dst = make([]byte, 1024)
+	}
+	offset := 0
+	for {
+		nn, err := r.Read(dst[offset:])
+		if nn <= 0 {
+			if err != nil {
+				if err == io.EOF {
+					return dst[:offset], nil
+				}
+				return dst[:offset], err
+			}
+			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
+		}
+		offset += nn
+		if len(dst) == offset {
+			b := make([]byte, round2(2*offset))
+			copy(b, dst)
+			dst = b
+		}
+	}
+}
+
+func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	if n == 0 {
-		return buf, nil
+		return dst, nil
 	}
 
-	bufLen := len(buf)
-	bufCap := bufLen + n
-	if cap(buf) < bufCap {
-		b := make([]byte, bufLen, round2(bufCap))
-		copy(b, buf)
-		buf = b
+	offset := len(dst)
+	dstLen := offset + n
+	if cap(dst) < dstLen {
+		b := make([]byte, round2(dstLen))
+		copy(b, dst)
+		dst = b
 	}
-	buf = buf[:bufCap]
-	b := buf[bufLen:]
+	dst = dst[:dstLen]
 
 	for {
-		nn, err := r.Read(b)
+		nn, err := r.Read(dst[offset:])
 		if nn <= 0 {
 			if err != nil {
 				if err == io.EOF {
 					err = io.ErrUnexpectedEOF
 				}
-				return nil, err
+				return dst[:offset], err
 			}
-			panic(fmt.Sprintf("BUF: bufio.Read() returned (%d, nil)", nn))
+			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
 		}
-		if nn == n {
-			return buf, nil
+		offset += nn
+		if offset == dstLen {
+			return dst, nil
 		}
-		if nn > n {
-			panic(fmt.Sprintf("BUF: read more than requested: %d vs %d", nn, n))
-		}
-		n -= nn
-		b = b[nn:]
 	}
 }
 
-func readBodyChunked(r *bufio.Reader, b []byte) ([]byte, error) {
-	if len(b) > 0 {
+func readBodyChunked(r *bufio.Reader, dst []byte) ([]byte, error) {
+	if len(dst) > 0 {
 		panic("BUG: expected zero-length buffer")
 	}
 
@@ -368,18 +390,18 @@ func readBodyChunked(r *bufio.Reader, b []byte) ([]byte, error) {
 	for {
 		chunkSize, err := parseChunkSize(r)
 		if err != nil {
-			return nil, err
+			return dst, err
 		}
-		b, err = readBodyFixedSize(r, chunkSize+strCRLFLen, b)
+		dst, err = appendBodyFixedSize(r, dst, chunkSize+strCRLFLen)
 		if err != nil {
-			return nil, err
+			return dst, err
 		}
-		if !bytes.Equal(b[len(b)-strCRLFLen:], strCRLF) {
-			return nil, fmt.Errorf("cannot find crlf at the end of chunk")
+		if !bytes.Equal(dst[len(dst)-strCRLFLen:], strCRLF) {
+			return dst, fmt.Errorf("cannot find crlf at the end of chunk")
 		}
-		b = b[:len(b)-strCRLFLen]
+		dst = dst[:len(dst)-strCRLFLen]
 		if chunkSize == 0 {
-			return b, nil
+			return dst, nil
 		}
 	}
 }

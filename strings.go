@@ -40,5 +40,6 @@ var (
 
 	strClose               = []byte("close")
 	strChunked             = []byte("chunked")
+	strIdentity            = []byte("identity")
 	strPostArgsContentType = []byte("application/x-www-form-urlencoded")
 )

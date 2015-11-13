@@ -312,9 +312,26 @@ func TestResponseReadSuccess(t *testing.T) {
 	testResponseReadSuccess(t, resp, "HTTP/1.1 300 OK\r\nContent-Length: 5\r\nContent-Type: bar\r\n\r\n56789aaa",
 		300, 5, "bar", "56789", "aaa")
 
+	// no conent-length ('identity' transfer-encoding)
+	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: foobar\r\n\r\nzxxc",
+		200, 4, "foobar", "zxxc", "")
+
+	// explicitly stated 'Transfer-Encoding: identity'
+	testResponseReadSuccess(t, resp, "HTTP/1.1 234 ss\r\nContent-Type: xxx\r\n\r\nxag",
+		234, 3, "xxx", "xag", "")
+
+	// big 'identity' response
+	body := string(createFixedBody(100500))
+	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\n\r\n"+body,
+		200, 100500, "aa", body, "")
+
 	// chunked response
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nqwer\r\n2\r\nty\r\n0\r\n\r\nzzzzz",
 		200, 6, "text/html", "qwerty", "zzzzz")
+
+	// chunked response with non-chunked Transfer-Encoding.
+	testResponseReadSuccess(t, resp, "HTTP/1.1 230 OK\r\nContent-Type: text\r\nTransfer-Encoding: aaabbb\r\n\r\n2\r\ner\r\n2\r\nty\r\n0\r\n\r\nwe",
+		230, 4, "text", "erty", "we")
 
 	// zero chunked response
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\nzzz",
