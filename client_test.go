@@ -12,6 +12,68 @@ import (
 	"time"
 )
 
+func TestClientDoTimeout(t *testing.T) {
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return &readTimeoutConn{t: time.Second}, nil
+		},
+	}
+
+	testClientDoTimeout(t, c, 100)
+}
+
+func TestClientDoTimeoutConcurrent(t *testing.T) {
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return &readTimeoutConn{t: time.Second}, nil
+		},
+		MaxConnsPerHost: 1000,
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			testClientDoTimeout(t, c, 100)
+		}()
+	}
+	wg.Wait()
+}
+
+func testClientDoTimeout(t *testing.T, c *Client, n int) {
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://foobar.com/baz")
+	for i := 0; i < 20; i++ {
+		err := c.DoTimeout(&req, &resp, time.Millisecond)
+		if err == nil {
+			t.Fatalf("expecting error")
+		}
+		if err != ErrTimeout {
+			t.Fatalf("unexpected error: %s. Expecting %s", err, ErrTimeout)
+		}
+	}
+}
+
+type readTimeoutConn struct {
+	net.Conn
+	t time.Duration
+}
+
+func (r *readTimeoutConn) Read(p []byte) (int, error) {
+	time.Sleep(r.t)
+	return 0, io.EOF
+}
+
+func (r *readTimeoutConn) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (r *readTimeoutConn) Close() error {
+	return nil
+}
+
 func TestClientIdempotentRequest(t *testing.T) {
 	dialsCount := 0
 	c := &Client{

@@ -32,6 +32,22 @@ func Do(req *Request, resp *Response) error {
 	return defaultClient.Do(req, resp)
 }
 
+// DoTimeout performs the given request and waits for response during
+// the given timeout duration.
+//
+// Request must contain at least non-zero RequestURI with full url (including
+// scheme and host) or non-zero Host header + RequestURI.
+//
+// Client determines the server to be requested in the following order:
+// - from RequestURI if it contains full url with scheme and host;
+// - from Host header otherwise.
+//
+// ErrTimeout is returned if the response wasn't returned during
+// the given timeout.
+func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
+	return defaultClient.DoTimeout(req, resp, timeout)
+}
+
 // Get fetches url contents into dst.
 //
 // Use Do for request customization.
@@ -107,6 +123,22 @@ func (c *Client) Get(dst []byte, url string) (statusCode int, body []byte, err e
 // Use Do for request customization.
 func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
 	return clientPostURL(dst, url, postArgs, c)
+}
+
+// DoTimeout performs the given request and waits for response during
+// the given timeout duration.
+//
+// Request must contain at least non-zero RequestURI with full url (including
+// scheme and host) or non-zero Host header + RequestURI.
+//
+// Client determines the server to be requested in the following order:
+// - from RequestURI if it contains full url with scheme and host;
+// - from Host header otherwise.
+//
+// ErrTimeout is returned if the response wasn't returned during
+// the given timeout.
+func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
+	return clientDoTimeout(req, resp, timeout, c)
 }
 
 // Do performs the given http request and fills the given http response.
@@ -379,6 +411,68 @@ func releaseResponse(resp *Response) {
 	responsePool.Put(resp)
 }
 
+// DoTimeout performs the given request and waits for response during
+// the given timeout duration.
+//
+// Request must contain at least non-zero RequestURI with full url (including
+// scheme and host) or non-zero Host header + RequestURI.
+//
+// ErrTimeout is returned if the response wasn't returned during
+// the given timeout.
+func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
+	return clientDoTimeout(req, resp, timeout, c)
+}
+
+func clientDoTimeout(req *Request, resp *Response, timeout time.Duration, c clientDoer) error {
+	var ch chan error
+	chv := errorChPool.Get()
+	if chv == nil {
+		ch = make(chan error, 1)
+	} else {
+		ch = chv.(chan error)
+	}
+
+	// make req and resp copies, since on timeout they no longer
+	// may accessed.
+	reqCopy := acquireRequest()
+	req.CopyTo(reqCopy)
+	respCopy := acquireResponse()
+
+	go func() {
+		ch <- c.Do(reqCopy, respCopy)
+	}()
+
+	var tc *time.Timer
+	tcv := timerPool.Get()
+	if tcv == nil {
+		tc = time.NewTimer(timeout)
+	} else {
+		tc = tcv.(*time.Timer)
+		initTimer(tc, timeout)
+	}
+
+	var err error
+	select {
+	case err = <-ch:
+		resp.CopyTo(respCopy)
+		releaseResponse(respCopy)
+		releaseRequest(reqCopy)
+		errorChPool.Put(chv)
+	case <-tc.C:
+		err = ErrTimeout
+	}
+
+	stopTimer(tc)
+	timerPool.Put(tcv)
+
+	return err
+}
+
+var (
+	errorChPool sync.Pool
+	timerPool   sync.Pool
+)
+
 // Do performs the given http request and sets the corresponding response.
 //
 // Request must contain at least non-zero RequestURI with full url (including
@@ -463,9 +557,14 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 	return false, err
 }
 
-// ErrNoFreeConns is returned when no free connections available
-// to the given host.
-var ErrNoFreeConns = errors.New("no free connections available to host")
+var (
+	// ErrNoFreeConns is returned when no free connections available
+	// to the given host.
+	ErrNoFreeConns = errors.New("no free connections available to host")
+
+	// ErrTimeout is returned from timed out calls.
+	ErrTimeout = errors.New("timeout")
+)
 
 func (c *HostClient) acquireConn(newConn bool) (*clientConn, error) {
 	var cc *clientConn
