@@ -99,11 +99,11 @@ func testArgsString(t *testing.T, a *Args, s string) {
 func TestArgsSetGetDel(t *testing.T) {
 	var a Args
 
-	if a.Get("foo") != "" {
-		t.Fatalf("Unexpected value: %q", a.Get("foo"))
+	if len(a.Peek("foo")) > 0 {
+		t.Fatalf("Unexpected value: %q", a.Peek("foo"))
 	}
-	if a.Get("") != "" {
-		t.Fatalf("Unexpected value: %q", a.Get(""))
+	if len(a.Peek("")) > 0 {
+		t.Fatalf("Unexpected value: %q", a.Peek(""))
 	}
 	a.Del("xxx")
 
@@ -112,51 +112,51 @@ func TestArgsSetGetDel(t *testing.T) {
 			k := fmt.Sprintf("foo%d", i)
 			v := fmt.Sprintf("bar_%d", i)
 			a.Set(k, v)
-			if a.Get(k) != v {
-				t.Fatalf("Unexpected value: %q. Expected %q", a.Get(k), v)
+			if string(a.Peek(k)) != v {
+				t.Fatalf("Unexpected value: %q. Expected %q", a.Peek(k), v)
 			}
 		}
 	}
 	for i := 0; i < 10; i++ {
 		k := fmt.Sprintf("foo%d", i)
 		v := fmt.Sprintf("bar_%d", i)
-		if a.Get(k) != v {
-			t.Fatalf("Unexpected value: %q. Expected %q", a.Get(k), v)
+		if string(a.Peek(k)) != v {
+			t.Fatalf("Unexpected value: %q. Expected %q", a.Peek(k), v)
 		}
 		a.Del(k)
-		if a.Get(k) != "" {
-			t.Fatalf("Unexpected value: %q. Expected %q", a.Get(k), "")
+		if string(a.Peek(k)) != "" {
+			t.Fatalf("Unexpected value: %q. Expected %q", a.Peek(k), "")
 		}
 	}
 
 	a.Parse("aaa=xxx&bb=aa")
-	if a.Get("foo0") != "" {
-		t.Fatalf("Unepxected value %q", a.Get("foo0"))
+	if string(a.Peek("foo0")) != "" {
+		t.Fatalf("Unepxected value %q", a.Peek("foo0"))
 	}
-	if a.Get("aaa") != "xxx" {
-		t.Fatalf("Unexpected value %q. Expected %q", a.Get("aaa"), "xxx")
+	if string(a.Peek("aaa")) != "xxx" {
+		t.Fatalf("Unexpected value %q. Expected %q", a.Peek("aaa"), "xxx")
 	}
-	if a.Get("bb") != "aa" {
-		t.Fatalf("Unexpected value %q. Expected %q", a.Get("bb"), "aa")
+	if string(a.Peek("bb")) != "aa" {
+		t.Fatalf("Unexpected value %q. Expected %q", a.Peek("bb"), "aa")
 	}
 
 	for i := 0; i < 10; i++ {
 		k := fmt.Sprintf("xx%d", i)
 		v := fmt.Sprintf("yy%d", i)
 		a.Set(k, v)
-		if a.Get(k) != v {
-			t.Fatalf("Unexpected value: %q. Expected %q", a.Get(k), v)
+		if string(a.Peek(k)) != v {
+			t.Fatalf("Unexpected value: %q. Expected %q", a.Peek(k), v)
 		}
 	}
 	for i := 5; i < 10; i++ {
 		k := fmt.Sprintf("xx%d", i)
 		v := fmt.Sprintf("yy%d", i)
-		if a.Get(k) != v {
-			t.Fatalf("Unexpected value: %q. Expected %q", a.Get(k), v)
+		if string(a.Peek(k)) != v {
+			t.Fatalf("Unexpected value: %q. Expected %q", a.Peek(k), v)
 		}
 		a.Del(k)
-		if a.Get(k) != "" {
-			t.Fatalf("Unexpected value: %q. Expected %q", a.Get(k), "")
+		if string(a.Peek(k)) != "" {
+			t.Fatalf("Unexpected value: %q. Expected %q", a.Peek(k), "")
 		}
 	}
 }

@@ -119,14 +119,14 @@ func TestResponseHeaderCopyTo(t *testing.T) {
 
 	var h1 ResponseHeader
 	h.CopyTo(&h1)
-	if h1.Get("Set-cookie") != h.Get("Set-Cookie") {
-		t.Fatalf("unexpected cookie %q. Expected %q", h1.Get("set-cookie"), h.Get("set-cookie"))
+	if !bytes.Equal(h1.Peek("Set-cookie"), h.Peek("Set-Cookie")) {
+		t.Fatalf("unexpected cookie %q. Expected %q", h1.Peek("set-cookie"), h.Peek("set-cookie"))
 	}
-	if h1.Get("Content-Type") != h.Get("Content-Type") {
-		t.Fatalf("unexpected content-type %q. Expected %q", h1.Get("content-type"), h.Get("content-type"))
+	if !bytes.Equal(h1.Peek("Content-Type"), h.Peek("Content-Type")) {
+		t.Fatalf("unexpected content-type %q. Expected %q", h1.Peek("content-type"), h.Peek("content-type"))
 	}
-	if h1.Get("aaa-bbb") != h.Get("AAA-BBB") {
-		t.Fatalf("unexpected aaa-bbb %q. Expected %q", h1.Get("aaa-bbb"), h.Get("aaa-bbb"))
+	if !bytes.Equal(h1.Peek("aaa-bbb"), h.Peek("AAA-BBB")) {
+		t.Fatalf("unexpected aaa-bbb %q. Expected %q", h1.Peek("aaa-bbb"), h.Peek("aaa-bbb"))
 	}
 }
 
@@ -140,17 +140,17 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 
 	var h1 RequestHeader
 	h.CopyTo(&h1)
-	if h1.Get("cookie") != h.Get("Cookie") {
-		t.Fatalf("unexpected cookie after copying: %q. Expected %q", h1.Get("cookie"), h.Get("cookie"))
+	if !bytes.Equal(h1.Peek("cookie"), h.Peek("Cookie")) {
+		t.Fatalf("unexpected cookie after copying: %q. Expected %q", h1.Peek("cookie"), h.Peek("cookie"))
 	}
-	if h1.Get("content-type") != h.Get("Content-Type") {
-		t.Fatalf("unexpected content-type %q. Expected %q", h1.Get("content-type"), h.Get("content-type"))
+	if !bytes.Equal(h1.Peek("content-type"), h.Peek("Content-Type")) {
+		t.Fatalf("unexpected content-type %q. Expected %q", h1.Peek("content-type"), h.Peek("content-type"))
 	}
-	if h1.Get("host") != h.Get("host") {
-		t.Fatalf("unexpected host %q. Expected %q", h1.Get("host"), h.Get("host"))
+	if !bytes.Equal(h1.Peek("host"), h.Peek("host")) {
+		t.Fatalf("unexpected host %q. Expected %q", h1.Peek("host"), h.Peek("host"))
 	}
-	if h1.Get("aaaxxx") != h.Get("aaaxxx") {
-		t.Fatalf("unexpected aaaxxx %q. Expected %q", h1.Get("aaaxxx"), h.Get("aaaxxx"))
+	if !bytes.Equal(h1.Peek("aaaxxx"), h.Peek("aaaxxx")) {
+		t.Fatalf("unexpected aaaxxx %q. Expected %q", h1.Peek("aaaxxx"), h.Peek("aaaxxx"))
 	}
 }
 
@@ -181,8 +181,8 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 	if !h1.ConnectionClose {
 		t.Fatalf("unexpected connection: close value: %v", h1.ConnectionClose)
 	}
-	if h1.Get("Connection") != "close" {
-		t.Fatalf("unexpected connection value: %q. Expecting %q", h.Get("Connection"), "close")
+	if string(h1.Peek("Connection")) != "close" {
+		t.Fatalf("unexpected connection value: %q. Expecting %q", h.Peek("Connection"), "close")
 	}
 }
 
@@ -192,14 +192,14 @@ func TestRequestHeaderSetCookie(t *testing.T) {
 	h.Set("Cookie", "foo=bar; baz=aaa")
 	h.Set("cOOkie", "xx=yyy")
 
-	if h.GetCookie("foo") != "bar" {
-		t.Fatalf("Unexpected cookie %q. Expecting %q", h.GetCookie("foo"), "bar")
+	if string(h.PeekCookie("foo")) != "bar" {
+		t.Fatalf("Unexpected cookie %q. Expecting %q", h.PeekCookie("foo"), "bar")
 	}
-	if h.GetCookie("baz") != "aaa" {
-		t.Fatalf("Unexpected cookie %q. Expecting %q", h.GetCookie("baz"), "aaa")
+	if string(h.PeekCookie("baz")) != "aaa" {
+		t.Fatalf("Unexpected cookie %q. Expecting %q", h.PeekCookie("baz"), "aaa")
 	}
-	if h.GetCookie("xx") != "yyy" {
-		t.Fatalf("unexpected cookie %q. Expecting %q", h.GetCookie("xx"), "yyy")
+	if string(h.PeekCookie("xx")) != "yyy" {
+		t.Fatalf("unexpected cookie %q. Expecting %q", h.PeekCookie("xx"), "yyy")
 	}
 }
 
@@ -252,8 +252,8 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 		v := string(value)
 		switch k {
 		case "Content-Type":
-			if v != h.Get(k) {
-				t.Fatalf("Unexpected content-type: %q. Expected %q", v, h.Get(k))
+			if v != string(h.Peek(k)) {
+				t.Fatalf("Unexpected content-type: %q. Expected %q", v, h.Peek(k))
 			}
 			contentTypeCount++
 		case "Set-Cookie":
@@ -296,8 +296,8 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 		v := string(value)
 		switch k {
 		case "Host":
-			if v != h.Get(k) {
-				t.Fatalf("Unexpected host value %q. Expected %q", v, h.Get(k))
+			if v != string(h.Peek(k)) {
+				t.Fatalf("Unexpected host value %q. Expected %q", v, h.Peek(k))
 			}
 			hostCount++
 		case "Xx":
@@ -445,11 +445,11 @@ func TestRequestHeaderCookie(t *testing.T) {
 	h.SetCookie("foo", "bar")
 	h.SetCookie("привет", "мир")
 
-	if h.GetCookie("foo") != "bar" {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.GetCookie("foo"), "bar")
+	if string(h.PeekCookie("foo")) != "bar" {
+		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.PeekCookie("foo"), "bar")
 	}
-	if h.GetCookie("привет") != "мир" {
-		t.Fatalf("Unexpected cookie value %q. Expected %q", h.GetCookie("привет"), "мир")
+	if string(h.PeekCookie("привет")) != "мир" {
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h.PeekCookie("привет"), "мир")
 	}
 
 	w := &bytes.Buffer{}
@@ -467,11 +467,11 @@ func TestRequestHeaderCookie(t *testing.T) {
 		t.Fatalf("Unexpected error: %s", err)
 	}
 
-	if h1.GetCookie("foo") != h.GetCookie("foo") {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h1.GetCookie("foo"), h.GetCookie("foo"))
+	if !bytes.Equal(h1.PeekCookie("foo"), h.PeekCookie("foo")) {
+		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h1.PeekCookie("foo"), h.PeekCookie("foo"))
 	}
-	if h1.GetCookie("привет") != h.GetCookie("привет") {
-		t.Fatalf("Unexpected cookie value %q. Expected %q", h1.GetCookie("привет"), h.GetCookie("привет"))
+	if !bytes.Equal(h1.PeekCookie("привет"), h.PeekCookie("привет")) {
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h1.PeekCookie("привет"), h.PeekCookie("привет"))
 	}
 }
 
@@ -596,14 +596,14 @@ func TestResponseHeaderSetGet(t *testing.T) {
 }
 
 func expectRequestHeaderGet(t *testing.T, h *RequestHeader, key, expectedValue string) {
-	if h.Get(key) != expectedValue {
-		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.Get(key), expectedValue)
+	if string(h.Peek(key)) != expectedValue {
+		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.Peek(key), expectedValue)
 	}
 }
 
 func expectResponseHeaderGet(t *testing.T, h *ResponseHeader, key, expectedValue string) {
-	if h.Get(key) != expectedValue {
-		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.Get(key), expectedValue)
+	if string(h.Peek(key)) != expectedValue {
+		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.Peek(key), expectedValue)
 	}
 }
 
@@ -1028,8 +1028,8 @@ func verifyResponseHeader(t *testing.T, h *ResponseHeader, expectedStatusCode, e
 	if h.ContentLength != expectedContentLength {
 		t.Fatalf("Unexpected content length %d. Expected %d", h.ContentLength, expectedContentLength)
 	}
-	if h.Get("Content-Type") != expectedContentType {
-		t.Fatalf("Unexpected content type %q. Expected %q", h.Get("Content-Type"), expectedContentType)
+	if string(h.Peek("Content-Type")) != expectedContentType {
+		t.Fatalf("Unexpected content type %q. Expected %q", h.Peek("Content-Type"), expectedContentType)
 	}
 }
 
@@ -1041,14 +1041,14 @@ func verifyRequestHeader(t *testing.T, h *RequestHeader, expectedContentLength i
 	if string(h.RequestURI()) != expectedRequestURI {
 		t.Fatalf("Unexpected RequestURI %q. Expected %q", h.RequestURI(), expectedRequestURI)
 	}
-	if h.Get("Host") != expectedHost {
-		t.Fatalf("Unexpected host %q. Expected %q", h.Get("Host"), expectedHost)
+	if string(h.Peek("Host")) != expectedHost {
+		t.Fatalf("Unexpected host %q. Expected %q", h.Peek("Host"), expectedHost)
 	}
-	if h.Get("Referer") != expectedReferer {
-		t.Fatalf("Unexpected referer %q. Expected %q", h.Get("Referer"), expectedReferer)
+	if string(h.Peek("Referer")) != expectedReferer {
+		t.Fatalf("Unexpected referer %q. Expected %q", h.Peek("Referer"), expectedReferer)
 	}
-	if h.Get("Content-Type") != expectedContentType {
-		t.Fatalf("Unexpected content-type %q. Expected %q", h.Get("Content-Type"), expectedContentType)
+	if string(h.Peek("Content-Type")) != expectedContentType {
+		t.Fatalf("Unexpected content-type %q. Expected %q", h.Peek("Content-Type"), expectedContentType)
 	}
 }
 

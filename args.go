@@ -133,22 +133,6 @@ func (a *Args) SetBytesKV(key, value []byte) {
 	a.args = setArg(a.args, key, value)
 }
 
-// Get returns query arg value for the given key.
-//
-// Each Get call allocates memory for returned string,
-// so consider using Peek() instead.
-func (a *Args) Get(key string) string {
-	return string(a.Peek(key))
-}
-
-// GetBytes returns query arg value for the given key.
-//
-// Each GetBytes call allocates memory for returned string,
-// so consider using PeekBytes() instead.
-func (a *Args) GetBytes(key []byte) string {
-	return string(a.PeekBytes(key))
-}
-
 // Peek returns query arg value for the given key.
 //
 // Returned value is valid until the next Args call.

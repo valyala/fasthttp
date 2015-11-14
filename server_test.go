@@ -356,8 +356,8 @@ func TestServerConnError(t *testing.T) {
 	if resp.Header.ContentLength != 6 {
 		t.Fatalf("Unexpected Content-Length %d. Expected %d", resp.Header.ContentLength, 6)
 	}
-	if resp.Header.Get("Content-Type") != string(defaultContentType) {
-		t.Fatalf("Unexpected Content-Type %q. Expected %q", resp.Header.Get("Content-Type"), defaultContentType)
+	if !bytes.Equal(resp.Header.Peek("Content-Type"), defaultContentType) {
+		t.Fatalf("Unexpected Content-Type %q. Expected %q", resp.Header.Peek("Content-Type"), defaultContentType)
 	}
 	if !bytes.Equal(resp.Body, []byte("foobar")) {
 		t.Fatalf("Unexpected body %q. Expected %q", resp.Body, "foobar")
@@ -368,7 +368,7 @@ func TestServeConnSingleRequest(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
-			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Get("Host"))))
+			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Peek("Host"))))
 		},
 	}
 
@@ -397,7 +397,7 @@ func TestServeConnMultiRequests(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
-			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Get("Host"))))
+			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Peek("Host"))))
 		},
 	}
 

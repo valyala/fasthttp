@@ -25,7 +25,7 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	if err := req1.Read(br); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
-	if req1.Header.Host() != "google.com" {
+	if string(req1.Header.Host()) != "google.com" {
 		t.Fatalf("unexpected host: %q. Expecting %q", req1.Header.Host(), "google.com")
 	}
 	if string(req.Header.RequestURI()) != "/foo/bar?baz=aaa" {
@@ -226,11 +226,11 @@ func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, 
 	if resp1.Header.ContentLength != len(body) {
 		t.Fatalf("Unexpected content-length: %d. Expected %d", resp1.Header.ContentLength, len(body))
 	}
-	if resp1.Header.Get("Content-Type") != expectedContentType {
-		t.Fatalf("Unexpected content-type: %q. Expected %q", resp1.Header.Get("Content-Type"), expectedContentType)
+	if string(resp1.Header.Peek("Content-Type")) != expectedContentType {
+		t.Fatalf("Unexpected content-type: %q. Expected %q", resp1.Header.Peek("Content-Type"), expectedContentType)
 	}
-	if resp1.Header.Get("Server") != expectedServerName {
-		t.Fatalf("Unexpected server: %q. Expected %q", resp1.Header.Get("Server"), expectedServerName)
+	if string(resp1.Header.Peek("Server")) != expectedServerName {
+		t.Fatalf("Unexpected server: %q. Expected %q", resp1.Header.Peek("Server"), expectedServerName)
 	}
 	if !bytes.Equal(resp1.Body, []byte(body)) {
 		t.Fatalf("Unexpected body: %q. Expected %q", resp1.Body, body)
@@ -304,7 +304,7 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	if err = req1.Read(br); err != nil {
 		t.Fatalf("Unexpected error when calling Request.Read(): %s", err)
 	}
-	if req1.Header.Method() != expectedMethod {
+	if string(req1.Header.Method()) != expectedMethod {
 		t.Fatalf("Unexpected method: %q. Expected %q", req1.Header.Method(), expectedMethod)
 	}
 	if len(requestURI) == 0 {
@@ -313,21 +313,21 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	if string(req1.Header.RequestURI()) != requestURI {
 		t.Fatalf("Unexpected RequestURI: %q. Expected %q", req1.Header.RequestURI(), requestURI)
 	}
-	if req1.Header.Get("Host") != host {
-		t.Fatalf("Unexpected host: %q. Expected %q", req1.Header.Get("Host"), host)
+	if string(req1.Header.Peek("Host")) != host {
+		t.Fatalf("Unexpected host: %q. Expected %q", req1.Header.Peek("Host"), host)
 	}
 	if len(userAgent) == 0 {
 		userAgent = string(defaultUserAgent)
 	}
-	if req1.Header.Get("User-Agent") != userAgent {
-		t.Fatalf("Unexpected user-agent: %q. Expected %q", req1.Header.Get("User-Agent"), userAgent)
+	if string(req1.Header.Peek("User-Agent")) != userAgent {
+		t.Fatalf("Unexpected user-agent: %q. Expected %q", req1.Header.Peek("User-Agent"), userAgent)
 	}
 	if !bytes.Equal(req1.Body, []byte(body)) {
 		t.Fatalf("Unexpected body: %q. Expected %q", req1.Body, body)
 	}
 
-	if method == "POST" && req1.Header.Get("Content-Type") != contentType {
-		t.Fatalf("Unexpected content-type: %q. Expected %q", req1.Header.Get("Content-Type"), contentType)
+	if method == "POST" && string(req1.Header.Peek("Content-Type")) != contentType {
+		t.Fatalf("Unexpected content-type: %q. Expected %q", req1.Header.Peek("Content-Type"), contentType)
 	}
 }
 
@@ -533,7 +533,7 @@ func testRequestParsePostArgsSuccess(t *testing.T, req *Request, s string, expec
 		tmp := strings.SplitN(x, "=", 2)
 		k := tmp[0]
 		v := tmp[1]
-		vv := req.PostArgs.Get(k)
+		vv := string(req.PostArgs.Peek(k))
 		if vv != v {
 			t.Fatalf("Unexpected value for key %q: %q. Expected %q for %q", k, vv, v, s)
 		}
