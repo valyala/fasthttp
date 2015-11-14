@@ -60,7 +60,8 @@ type RequestHeader struct {
 	h     []argsKV
 	bufKV argsKV
 
-	cookies []argsKV
+	cookies          []argsKV
+	cookiesCollected bool
 }
 
 // ContentType returns Content-Type header value.
@@ -229,6 +230,7 @@ func (h *RequestHeader) Clear() {
 
 	h.h = h.h[:0]
 	h.cookies = h.cookies[:0]
+	h.cookiesCollected = false
 }
 
 // CopyTo copies all the headers to dst.
@@ -255,6 +257,7 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.userAgent = append(dst.userAgent[:0], h.userAgent...)
 	dst.h = copyArgs(dst.h, h.h)
 	dst.cookies = copyArgs(dst.cookies, h.cookies)
+	dst.cookiesCollected = h.cookiesCollected
 }
 
 // VisitAll calls f for each header except Content-Length.
@@ -294,6 +297,7 @@ func (h *ResponseHeader) VisitAllCookie(f func(key, value []byte)) {
 //
 // f must not retain references to key and/or value after returning.
 func (h *RequestHeader) VisitAllCookie(f func(key, value []byte)) {
+	h.collectCookies()
 	visitArgs(h.cookies, f)
 }
 
@@ -311,6 +315,8 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 	if len(h.userAgent) > 0 {
 		f(strUserAgent, h.userAgent)
 	}
+
+	h.collectCookies()
 	if len(h.cookies) > 0 {
 		h.bufKV.value = appendRequestCookieBytes(h.bufKV.value[:0], h.cookies)
 		f(strCookie, h.bufKV.value)
@@ -435,6 +441,7 @@ func (h *RequestHeader) SetCookieBytesK(key []byte, value string) {
 //
 // It is safe modifying key and value buffers after SetCookieBytesKV call.
 func (h *RequestHeader) SetCookieBytesKV(key, value []byte) {
+	h.collectCookies()
 	h.cookies = setArg(h.cookies, key, value)
 }
 
@@ -493,6 +500,7 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 	case bytes.Equal(strConnection, key):
 		// Connection is managed automatically.
 	case bytes.Equal(strCookie, key):
+		h.collectCookies()
 		h.cookies = parseRequestCookies(h.cookies, value)
 	default:
 		h.h = setArg(h.h, key, value)
@@ -573,11 +581,13 @@ func (h *RequestHeader) peek(key []byte) []byte {
 
 // PeekCookie returns cookie for the given key.
 func (h *RequestHeader) PeekCookie(key string) []byte {
+	h.collectCookies()
 	return peekArgStr(h.cookies, key)
 }
 
 // PeekCookieBytes returns cookie for the given key.
 func (h *RequestHeader) PeekCookieBytes(key []byte) []byte {
+	h.collectCookies()
 	return peekArgBytes(h.cookies, key)
 }
 
@@ -789,6 +799,7 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 		writeHeaderLine(w, kv.key, kv.value)
 	}
 
+	h.collectCookies()
 	n := len(h.cookies)
 	if n > 0 {
 		h.bufKV.value = appendRequestCookieBytes(h.bufKV.value[:0], h.cookies)
@@ -986,8 +997,6 @@ func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 			if bytes.Equal(s.value, strClose) {
 				h.ConnectionClose = true
 			}
-		case bytes.Equal(s.key, strCookie):
-			h.cookies = parseRequestCookies(h.cookies, s.value)
 		default:
 			h.h, kv = allocArg(h.h)
 			kv.key = append(kv.key[:0], s.key...)
@@ -1012,6 +1021,26 @@ func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 		h.ContentLength = 0
 	}
 	return s.b, nil
+}
+
+func (h *RequestHeader) collectCookies() {
+	if h.cookiesCollected {
+		return
+	}
+
+	for i, n := 0, len(h.h); i < n; i++ {
+		kv := &h.h[i]
+		if bytes.Equal(kv.key, strCookie) {
+			h.cookies = parseRequestCookies(h.cookies, kv.value)
+			tmp := *kv
+			copy(h.h[i:], h.h[i+1:])
+			n--
+			i--
+			h.h[n] = tmp
+			h.h = h.h[:n]
+		}
+	}
+	h.cookiesCollected = true
 }
 
 func parseContentLength(b []byte) (int, error) {
