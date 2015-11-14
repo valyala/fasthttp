@@ -104,6 +104,11 @@ type Server struct {
 	// Default server name is used if left blank.
 	Name string
 
+	// The maximum number of concurrent connections the server may serve.
+	//
+	// DefaultConcurrency is used if not set.
+	Concurrency int
+
 	// Per-connection buffer size for requests' reading.
 	// This also limits the maximum header size.
 	//
@@ -136,6 +141,7 @@ type Server struct {
 	// By default standard logger from log package is used.
 	Logger Logger
 
+	concurrency      uint32
 	perIPConnCounter perIPConnCounter
 	serverName       atomic.Value
 
@@ -432,7 +438,7 @@ func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
 	return s.Serve(ln)
 }
 
-// Default concurrency used by Server.Serve().
+// Default maximum number of concurrent connections the Server may serve.
 const DefaultConcurrency = 256 * 1024
 
 // Serve serves incoming connections from the given listener.
@@ -442,22 +448,15 @@ const DefaultConcurrency = 256 * 1024
 //
 // Serve blocks until the given listener returns permanent error.
 func (s *Server) Serve(ln net.Listener) error {
-	return s.ServeConcurrency(ln, DefaultConcurrency)
-}
-
-// ServeConcurrency serves incoming connections from the given listener.
-// It may serve maximum concurrency simultaneous connections.
-//
-// ServeConcurrency blocks until the given listener returns permanent error.
-func (s *Server) ServeConcurrency(ln net.Listener, concurrency int) error {
 	var lastOverflowErrorTime time.Time
 	var lastPerIPErrorTime time.Time
 	var c net.Conn
 	var err error
 
+	maxWorkersCount := s.getConcurrency()
 	wp := &workerPool{
 		WorkerFunc:      s.serveConn,
-		MaxWorkersCount: concurrency,
+		MaxWorkersCount: maxWorkersCount,
 		Logger:          s.logger(),
 	}
 	wp.Start()
@@ -473,8 +472,8 @@ func (s *Server) ServeConcurrency(ln net.Listener, concurrency int) error {
 		if !wp.Serve(c) {
 			c.Close()
 			if time.Since(lastOverflowErrorTime) > time.Minute {
-				s.logger().Printf("The incoming connection cannot be served, because all %d workers are busy. "+
-					"Try increasing concurrency in Server.ServeConcurrency()", concurrency)
+				s.logger().Printf("The incoming connection cannot be served, because %d concurrent connections are served. "+
+					"Try increasing Server.Concurrency", maxWorkersCount)
 				lastOverflowErrorTime = time.Now()
 			}
 		}
@@ -536,9 +535,15 @@ func (s *Server) logger() Logger {
 	return defaultLogger
 }
 
-// ErrPerIPConnLimit may be returned from ServeConn if the number of connections
-// per ip exceeds Server.MaxConnsPerIP.
-var ErrPerIPConnLimit = errors.New("too many connections per ip")
+var (
+	// ErrPerIPConnLimit may be returned from ServeConn if the number of connections
+	// per ip exceeds Server.MaxConnsPerIP.
+	ErrPerIPConnLimit = errors.New("too many connections per ip")
+
+	// ErrConcurrencyLimit may be returned from ServeConn if the number
+	// of concurrenty served connections exceeds Server.Concurrency.
+	ErrConcurrencyLimit = errors.New("canot serve the connection because Server.Concurrency concurrent connections are served")
+)
 
 // ServeConn serves HTTP requests from the given connection.
 //
@@ -558,12 +563,31 @@ func (s *Server) ServeConn(c net.Conn) error {
 		}
 		c = pic
 	}
+
+	n := atomic.AddUint32(&s.concurrency, 1)
+	if n > uint32(s.getConcurrency()) {
+		atomic.AddUint32(&s.concurrency, ^uint32(0))
+		c.Close()
+		return ErrConcurrencyLimit
+	}
+
 	err := s.serveConn(c)
+
+	atomic.AddUint32(&s.concurrency, ^uint32(0))
+
 	err1 := c.Close()
 	if err == nil {
 		err = err1
 	}
 	return err
+}
+
+func (s *Server) getConcurrency() int {
+	n := s.Concurrency
+	if n <= 0 {
+		n = DefaultConcurrency
+	}
+	return n
 }
 
 func (s *Server) serveConn(c net.Conn) error {

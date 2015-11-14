@@ -121,9 +121,10 @@ func BenchmarkServerMaxConnsPerIP(b *testing.B) {
 			registerServedRequest(b, ch)
 		},
 		MaxConnsPerIP: clientsCount * 2,
+		Concurrency:   16 * clientsCount,
 	}
 	req := "GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n"
-	benchmarkServer(b, &testServer{s, clientsCount}, clientsCount, requestsPerConn, req)
+	benchmarkServer(b, s, clientsCount, requestsPerConn, req)
 	verifyRequestsServed(b, ch)
 }
 
@@ -144,9 +145,10 @@ func BenchmarkServerTimeoutError(b *testing.B) {
 			}
 			registerServedRequest(b, ch)
 		},
+		Concurrency: 16 * clientsCount,
 	}
 	req := "GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n"
-	benchmarkServer(b, &testServer{s, clientsCount}, clientsCount, requestsPerConn, req)
+	benchmarkServer(b, s, clientsCount, requestsPerConn, req)
 	verifyRequestsServed(b, ch)
 }
 
@@ -284,8 +286,9 @@ func benchmarkServerGet(b *testing.B, clientsCount, requestsPerConn int) {
 			}
 			registerServedRequest(b, ch)
 		},
+		Concurrency: 16 * clientsCount,
 	}
-	benchmarkServer(b, &testServer{s, clientsCount}, clientsCount, requestsPerConn, getRequest)
+	benchmarkServer(b, s, clientsCount, requestsPerConn, getRequest)
 	verifyRequestsServed(b, ch)
 }
 
@@ -326,8 +329,9 @@ func benchmarkServerPost(b *testing.B, clientsCount, requestsPerConn int) {
 			}
 			registerServedRequest(b, ch)
 		},
+		Concurrency: 16 * clientsCount,
 	}
-	benchmarkServer(b, &testServer{s, clientsCount}, clientsCount, requestsPerConn, postRequest)
+	benchmarkServer(b, s, clientsCount, requestsPerConn, postRequest)
 	verifyRequestsServed(b, ch)
 }
 
@@ -386,18 +390,6 @@ func verifyRequestsServed(b *testing.B, ch <-chan struct{}) {
 
 type realServer interface {
 	Serve(ln net.Listener) error
-}
-
-type testServer struct {
-	*Server
-	Concurrency int
-}
-
-func (s *testServer) Serve(ln net.Listener) error {
-	if s.Concurrency < runtime.NumCPU() {
-		s.Concurrency = runtime.NumCPU()
-	}
-	return s.Server.ServeConcurrency(ln, s.Concurrency*16)
 }
 
 func benchmarkServer(b *testing.B, s realServer, clientsCount, requestsPerConn int, request string) {
