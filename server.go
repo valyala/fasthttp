@@ -676,8 +676,6 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 		connectionClose = ctx.Request.Header.ConnectionClose || ctx.Response.Header.ConnectionClose
 
-		trimBigBuffers(ctx)
-
 		if br == nil || connectionClose {
 			err = bw.Flush()
 			releaseWriter(ctx, bw)
@@ -720,17 +718,6 @@ func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 		h.server = serverOld
 	}
 	return err
-}
-
-const bigBufferLimit = 16 * 1024
-
-func trimBigBuffers(ctx *RequestCtx) {
-	if cap(ctx.Request.Body) > bigBufferLimit {
-		ctx.Request.Body = nil
-	}
-	if cap(ctx.Response.Body) > bigBufferLimit {
-		ctx.Response.Body = nil
-	}
 }
 
 const (
