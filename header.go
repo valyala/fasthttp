@@ -70,6 +70,105 @@ type RequestHeader struct {
 	clientBuf []byte
 }
 
+// ContentType returns Content-Type header value.
+//
+// This function allocates memory on each call, so consider
+// using ContentTypeBytes instead.
+func (h *ResponseHeader) ContentType() string {
+	return string(h.ContentTypeBytes())
+}
+
+// ContentTypeBytes returns Content-Type header value.
+func (h *ResponseHeader) ContentTypeBytes() []byte {
+	return h.contentType
+}
+
+// SetContentType sets Content-Type header value.
+func (h *ResponseHeader) SetContentType(contentType string) {
+	h.contentType = AppendBytesStr(h.contentType[:0], contentType)
+}
+
+// SetContentTypeBytes sets Content-Type header value.
+//
+// It is safe modifying contentType buffer after function return.
+func (h *ResponseHeader) SetContentTypeBytes(contentType []byte) {
+	h.contentType = append(h.contentType[:0], contentType...)
+}
+
+// ContentType returns Content-Type header value.
+//
+// This function allocates memory on each call, so consider
+// using ContentTypeBytes instead.
+func (h *RequestHeader) ContentType() string {
+	return string(h.ContentTypeBytes())
+}
+
+// ContentTypeBytes returns Content-Type header value.
+func (h *RequestHeader) ContentTypeBytes() []byte {
+	return h.contentType
+}
+
+// SetContentType sets Content-Type header value.
+func (h *RequestHeader) SetContentType(contentType string) {
+	h.contentType = AppendBytesStr(h.contentType[:0], contentType)
+}
+
+// SetContentTypeBytes sets Content-Type header value.
+//
+// It is safe modifying contentType buffer after function return.
+func (h *RequestHeader) SetContentTypeBytes(contentType []byte) {
+	h.contentType = append(h.contentType[:0], contentType...)
+}
+
+// Host returns Host header value.
+//
+// This function allocates memory on each call, so consider using HostBytes.
+func (h *RequestHeader) Host() string {
+	return string(h.HostBytes())
+}
+
+// HostBytes returns Host header value.
+func (h *RequestHeader) HostBytes() []byte {
+	return h.host
+}
+
+// SetHost sets Host header value.
+func (h *RequestHeader) SetHost(host string) {
+	h.host = AppendBytesStr(h.host[:0], host)
+}
+
+// SetHostBytes sets Host header value.
+//
+// It is safe modifying host buffer after function return.
+func (h *RequestHeader) SetHostBytes(host []byte) {
+	h.host = append(h.host[:0], host...)
+}
+
+// UserAgent returns User-Agent header value.
+//
+// This function allocates memory on each call, so consider
+// using UserAgentBytes.
+func (h *RequestHeader) UserAgent() string {
+	return string(h.UserAgentBytes())
+}
+
+// UserAgentBytes returns User-Agent header value.
+func (h *RequestHeader) UserAgentBytes() []byte {
+	return h.userAgent
+}
+
+// SetUserAgent sets User-Agent header value.
+func (h *RequestHeader) SetUserAgent(userAgent string) {
+	h.userAgent = AppendBytesStr(h.userAgent[:0], userAgent)
+}
+
+// SetUserAgentBytes sets User-Agent header value.
+//
+// It is safe modifying userAgent buffer after function return.
+func (h *RequestHeader) SetUserAgentBytes(userAgent []byte) {
+	h.userAgent = append(h.userAgent[:0], userAgent...)
+}
+
 // IsMethodGet returns true if request method is GET.
 func (h *RequestHeader) IsMethodGet() bool {
 	return bytes.Equal(h.Method, strGet) || len(h.Method) == 0
