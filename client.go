@@ -20,6 +20,8 @@ import (
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
 //
+// Response is ignored if resp is nil.
+//
 // Client determines the server to be requested in the following order:
 // - from RequestURI if it contains full url with scheme and host;
 // - from Host header otherwise.
@@ -38,6 +40,8 @@ func Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 }
 
 // Post sends POST request to the given url with the given POST arguments.
+//
+// Empty POST body is sent if postArgs is nil.
 //
 // Use Do for request customization.
 func Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
@@ -98,6 +102,8 @@ func (c *Client) Get(dst []byte, url string) (statusCode int, body []byte, err e
 
 // Post sends POST request to the given url with the given POST arguments.
 //
+// Empty POST body is sent if postArgs is nil.
+//
 // Use Do for request customization.
 func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
 	return clientPostURL(dst, url, postArgs, c)
@@ -107,6 +113,8 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
+//
+// Response is ignored if resp is nil.
 //
 // Client determines the server to be requested in the following order:
 // - from RequestURI if it contains full url with scheme and host;
@@ -289,6 +297,8 @@ func (c *HostClient) Get(dst []byte, url string) (statusCode int, body []byte, e
 
 // Post sends POST request to the given url with the given POST arguments.
 //
+// Empty POST body is sent if postArgs is nil.
+//
 // Use Do for request customization.
 func (c *HostClient) Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
 	return clientPostURL(dst, url, postArgs, c)
@@ -311,7 +321,9 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 	req := acquireRequest()
 	req.Header.SetMethodBytes(strPost)
 	req.Header.SetContentTypeBytes(strPostArgsContentType)
-	req.Body = postArgs.AppendBytes(req.Body[:0])
+	if postArgs != nil {
+		req.Body = postArgs.AppendBytes(req.Body[:0])
+	}
 
 	statusCode, body, err = doRequest(req, dst, url, c)
 
@@ -323,13 +335,14 @@ func doRequest(req *Request, dst []byte, url string, c clientDoer) (statusCode i
 	req.SetRequestURI(url)
 
 	resp := acquireResponse()
+	oldBody := resp.Body
 	resp.Body = dst
 	if err = c.Do(req, resp); err != nil {
 		return 0, nil, err
 	}
 	statusCode = resp.Header.StatusCode
 	body = resp.Body
-	resp.Body = nil
+	resp.Body = oldBody
 	releaseResponse(resp)
 
 	return statusCode, body, err
@@ -371,6 +384,8 @@ func releaseResponse(resp *Response) {
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
 //
+// Response is ignored if resp is nil.
+//
 // ErrNoFreeConns is returned if all HostClient.MaxConns connections
 // to the host are busy.
 func (c *HostClient) Do(req *Request, resp *Response) error {
@@ -382,6 +397,10 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 }
 
 func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error) {
+	if req == nil {
+		panic("BUG: req cannot be nil")
+	}
+
 	atomic.StoreUint64(&c.lastUseTime, uint64(time.Now().Unix()))
 
 	cc, err := c.acquireConn(newConn)
@@ -412,8 +431,17 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 	}
 	c.releaseWriter(bw)
 
+	nilResp := false
+	if resp == nil {
+		nilResp = true
+		resp = acquireResponse()
+	}
+
 	br := c.acquireReader(conn)
 	if err = resp.Read(br); err != nil {
+		if nilResp {
+			releaseResponse(resp)
+		}
 		c.releaseReader(br)
 		c.closeConn(cc)
 		if err == io.EOF {
@@ -427,6 +455,10 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 		c.closeConn(cc)
 	} else {
 		c.releaseConn(cc)
+	}
+
+	if nilResp {
+		releaseResponse(resp)
 	}
 	return false, err
 }

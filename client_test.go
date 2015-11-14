@@ -42,6 +42,20 @@ func TestClientIdempotentRequest(t *testing.T) {
 	if string(body) != "0123456" {
 		t.Fatalf("unexpected body: %q. Expecting %q", body, "0123456")
 	}
+
+	var args Args
+
+	dialsCount = 0
+	statusCode, body, err = c.Post(nil, "http://foobar/a/b", &args)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+
+	dialsCount = 0
+	statusCode, body, err = c.Post(nil, "http://foobar/a/b", nil)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
 }
 
 type readErrorConn struct {
