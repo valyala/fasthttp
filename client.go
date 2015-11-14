@@ -306,15 +306,12 @@ func clientGetURL(dst []byte, url string, c clientDoer) (statusCode int, body []
 
 func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (statusCode int, body []byte, err error) {
 	req := acquireRequest()
-	req.Header.Method = strPost
-	req.Header.contentType = strPostArgsContentType
+	req.Header.SetMethodBytes(strPost)
+	req.Header.SetContentTypeBytes(strPostArgsContentType)
 	req.Body = postArgs.AppendBytes(req.Body[:0])
 
 	statusCode, body, err = doRequest(req, dst, url, c)
 
-	req.Header.Method = nil
-	req.Header.contentType = nil
-	// there is no need in req.Body = nil, since Body belongs to req.
 	releaseRequest(req)
 	return statusCode, body, err
 }
@@ -376,35 +373,18 @@ func releaseResponse(resp *Response) {
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	atomic.StoreUint64(&c.lastUseTime, uint64(time.Now().Unix()))
 
-	req.ParseURI()
-	host := req.URI.Host
-	if len(req.Header.host) == 0 {
-		req.Header.host = append(req.Header.host[:0], host...)
+	cc, err := c.acquireConn()
+	if err != nil {
+		return err
 	}
-
-	req.Header.clientBuf = req.URI.AppendRequestURI(req.Header.clientBuf[:0])
-	requestURIOld := req.Header.RequestURI
-	req.Header.RequestURI = req.Header.clientBuf
+	conn := cc.c
 
 	userAgentOld := req.Header.userAgent
 	if len(userAgentOld) == 0 {
 		req.Header.userAgent = c.getClientName()
 	}
-
-	cc, err := c.acquireConn()
-	if err != nil {
-		req.Header.RequestURI = requestURIOld
-		if len(userAgentOld) == 0 {
-			req.Header.userAgent = userAgentOld
-		}
-		return err
-	}
-	conn := cc.c
-
 	bw := c.acquireWriter(conn)
 	err = req.Write(bw)
-
-	req.Header.RequestURI = requestURIOld
 	if len(userAgentOld) == 0 {
 		req.Header.userAgent = userAgentOld
 	}

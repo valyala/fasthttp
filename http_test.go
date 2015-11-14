@@ -8,6 +8,40 @@ import (
 	"testing"
 )
 
+func TestRequestWriteRequestURINoHost(t *testing.T) {
+	var req Request
+	req.Header.RequestURI = []byte("http://google.com/foo/bar?baz=aaa")
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	if err := req.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexepcted error: %s", err)
+	}
+
+	var req1 Request
+	br := bufio.NewReader(&w)
+	if err := req1.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if req1.Header.Host() != "google.com" {
+		t.Fatalf("unexpected host: %q. Expecting %q", req1.Header.Host(), "google.com")
+	}
+	if string(req.Header.RequestURI) != "/foo/bar?baz=aaa" {
+		t.Fatalf("unexpected requestURI: %q. Expecting %q", req.Header.RequestURI, "/foo/bar?baz=aaa")
+	}
+
+	// verify that Request.Write returns error on non-absolute RequestURI
+	req.Clear()
+	req.Header.RequestURI = []byte("/foo/bar")
+	w.Reset()
+	bw.Reset(&w)
+	if err := req.Write(bw); err == nil {
+		t.Fatalf("expecting error")
+	}
+}
+
 func TestResponseBodyStreamFixedSize(t *testing.T) {
 	testResponseBodyStream(t, "a", false)
 	testResponseBodyStream(t, string(createFixedBody(4097)), false)
@@ -227,7 +261,7 @@ func TestResponseWriteError(t *testing.T) {
 func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, body string) {
 	var req Request
 
-	req.Header.Method = []byte(method)
+	req.Header.SetMethod(method)
 	req.Header.RequestURI = []byte(requestURI)
 	req.Header.Set("Host", host)
 	req.Header.Set("User-Agent", userAgent)
@@ -244,7 +278,7 @@ func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, bo
 func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body, expectedMethod string) {
 	var req Request
 
-	req.Header.Method = []byte(method)
+	req.Header.SetMethod(method)
 	req.Header.RequestURI = []byte(requestURI)
 	req.Header.Set("Host", host)
 	req.Header.Set("User-Agent", userAgent)
@@ -270,8 +304,8 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	if err = req1.Read(br); err != nil {
 		t.Fatalf("Unexpected error when calling Request.Read(): %s", err)
 	}
-	if !bytes.Equal(req1.Header.Method, []byte(expectedMethod)) {
-		t.Fatalf("Unexpected method: %q. Expected %q", req1.Header.Method, expectedMethod)
+	if req1.Header.Method() != expectedMethod {
+		t.Fatalf("Unexpected method: %q. Expected %q", req1.Header.Method(), expectedMethod)
 	}
 	if len(requestURI) == 0 {
 		requestURI = "/"

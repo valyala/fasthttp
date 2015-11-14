@@ -42,8 +42,6 @@ type ResponseHeader struct {
 // It is forbidden copying RequestHeader instances.
 // Create new instances instead and use CopyTo.
 type RequestHeader struct {
-	// Request method (e.g. 'GET', 'POST', etc.).
-	Method []byte
 
 	// Request URI read from the first request line.
 	RequestURI []byte
@@ -57,6 +55,7 @@ type RequestHeader struct {
 	// Set to true if request contains 'Connection: close' header.
 	ConnectionClose bool
 
+	method      []byte
 	host        []byte
 	contentType []byte
 	userAgent   []byte
@@ -65,9 +64,6 @@ type RequestHeader struct {
 	bufKV argsKV
 
 	cookies []argsKV
-
-	// aux buffer for Client.
-	clientBuf []byte
 }
 
 // ContentType returns Content-Type header value.
@@ -169,19 +165,46 @@ func (h *RequestHeader) SetUserAgentBytes(userAgent []byte) {
 	h.userAgent = append(h.userAgent[:0], userAgent...)
 }
 
-// IsMethodGet returns true if request method is GET.
-func (h *RequestHeader) IsMethodGet() bool {
-	return bytes.Equal(h.Method, strGet) || len(h.Method) == 0
+// Method returns HTTP request method.
+//
+// Method allocates memory on each call, so consider using MethodBytes.
+func (h *RequestHeader) Method() string {
+	return string(h.MethodBytes())
 }
 
-// IsMethodPost returns true if request methos is POST.
-func (h *RequestHeader) IsMethodPost() bool {
-	return bytes.Equal(h.Method, strPost)
+// MethodBytes returns HTTP request method.
+func (h *RequestHeader) MethodBytes() []byte {
+	if len(h.method) == 0 {
+		return strGet
+	}
+	return h.method
 }
 
-// IsMethodHead returns true if request method is HEAD.
-func (h *RequestHeader) IsMethodHead() bool {
-	return bytes.Equal(h.Method, strHead)
+// SetMethod sets HTTP request method.
+func (h *RequestHeader) SetMethod(method string) {
+	h.method = AppendBytesStr(h.method, method)
+}
+
+// SetMethod sets HTTP request method.
+//
+// It is safe modifying method buffer after function return.
+func (h *RequestHeader) SetMethodBytes(method []byte) {
+	h.method = append(h.method[:0], method...)
+}
+
+// IsGet returns true if request method is GET.
+func (h *RequestHeader) IsGet() bool {
+	return bytes.Equal(h.MethodBytes(), strGet)
+}
+
+// IsPost returns true if request methos is POST.
+func (h *RequestHeader) IsPost() bool {
+	return bytes.Equal(h.MethodBytes(), strPost)
+}
+
+// IsHead returns true if request method is HEAD.
+func (h *RequestHeader) IsHead() bool {
+	return bytes.Equal(h.MethodBytes(), strHead)
 }
 
 // Len returns the number of headers set, not counting Content-Length,
@@ -215,11 +238,11 @@ func (h *ResponseHeader) Clear() {
 
 // Clear clears request header.
 func (h *RequestHeader) Clear() {
-	h.Method = h.Method[:0]
 	h.RequestURI = h.RequestURI[:0]
 	h.ContentLength = 0
 	h.ConnectionClose = false
 
+	h.method = h.method[:0]
 	h.host = h.host[:0]
 	h.contentType = h.contentType[:0]
 	h.userAgent = h.userAgent[:0]
@@ -243,10 +266,10 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 // CopyTo copies all the headers to dst.
 func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.Clear()
-	dst.Method = append(dst.Method[:0], h.Method...)
 	dst.RequestURI = append(dst.RequestURI[:0], h.RequestURI...)
 	dst.ContentLength = h.ContentLength
 	dst.ConnectionClose = h.ConnectionClose
+	dst.method = append(dst.method[:0], h.method...)
 	dst.host = append(dst.host[:0], h.host...)
 	dst.contentType = append(dst.contentType[:0], h.contentType...)
 	dst.userAgent = append(dst.userAgent[:0], h.userAgent...)
@@ -784,7 +807,7 @@ func (h *ResponseHeader) Write(w *bufio.Writer) error {
 
 // Write writes request header to w.
 func (h *RequestHeader) Write(w *bufio.Writer) error {
-	method := h.Method
+	method := h.method
 	if len(method) == 0 {
 		method = strGet
 	}
@@ -812,7 +835,7 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 	}
 	writeHeaderLine(w, strHost, host)
 
-	if h.IsMethodPost() {
+	if h.IsPost() {
 		contentType := h.contentType
 		if len(contentType) == 0 {
 			return fmt.Errorf("missing required Content-Type header for POST request")
@@ -918,7 +941,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (b []byte, err error) {
 	if n <= 0 {
 		return nil, fmt.Errorf("cannot find http request method in %q", buf)
 	}
-	h.Method = append(h.Method[:0], b[:n]...)
+	h.method = append(h.method[:0], b[:n]...)
 	b = b[n+1:]
 
 	// parse requestURI
@@ -1042,7 +1065,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) ([]byte, error) {
 	if len(h.host) == 0 {
 		return nil, fmt.Errorf("missing required Host header in %q", buf)
 	}
-	if h.IsMethodPost() {
+	if h.IsPost() {
 		if len(h.contentType) == 0 {
 			return nil, fmt.Errorf("missing Content-Type for POST header in %q", buf)
 		}

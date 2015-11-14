@@ -22,7 +22,7 @@ func TestRequestCtxInit(t *testing.T) {
 	}
 	ctx.Logger().Printf("foo bar %d", 10)
 
-	expectedLog := "0.000 #0012345700000000 - 0.0.0.0:0<->0.0.0.0:0 -  http:// - foo bar 10\n"
+	expectedLog := "0.000 #0012345700000000 - 0.0.0.0:0<->0.0.0.0:0 - GET http:// - foo bar 10\n"
 	if logger.out != expectedLog {
 		t.Fatalf("Unexpected log output: %q. Expected %q", logger.out, expectedLog)
 	}

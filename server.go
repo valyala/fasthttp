@@ -254,7 +254,7 @@ func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	req := &ctx.Request
 	req.ParseURI()
 	cl.logger.Printf("%.3f #%016X - %s<->%s - %s %s - %s",
-		time.Since(ctx.Time).Seconds(), ctx.ID, ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method, req.URI.URI, s)
+		time.Since(ctx.Time).Seconds(), ctx.ID, ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.MethodBytes(), req.URI.URI, s)
 	ctxLoggerLock.Unlock()
 }
 
@@ -308,17 +308,31 @@ func (ctx *RequestCtx) PostArgs() *Args {
 
 // IsGet returns true if request method is GET.
 func (ctx *RequestCtx) IsGet() bool {
-	return ctx.Request.Header.IsMethodGet()
+	return ctx.Request.Header.IsGet()
 }
 
 // IsPost returns true if request method is POST.
 func (ctx *RequestCtx) IsPost() bool {
-	return ctx.Request.Header.IsMethodPost()
+	return ctx.Request.Header.IsPost()
+}
+
+// Method returns request method.
+//
+// This function allocates memory on each call, so consider using MethodBytes.
+func (ctx *RequestCtx) Method() string {
+	return ctx.Request.Header.Method()
+}
+
+// MethodBytes return request method.
+//
+// Returned value is valid until returning from RequestHandler.
+func (ctx *RequestCtx) MethodBytes() []byte {
+	return ctx.Request.Header.MethodBytes()
 }
 
 // IsHead returns true if request method is HEAD.
 func (ctx *RequestCtx) IsHead() bool {
-	return ctx.Request.Header.IsMethodHead()
+	return ctx.Request.Header.IsHead()
 }
 
 // RemoteAddr returns client address for the given request.

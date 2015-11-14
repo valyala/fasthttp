@@ -277,8 +277,8 @@ func benchmarkServerGet(b *testing.B, clientsCount, requestsPerConn int) {
 	ch := make(chan struct{}, b.N)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			if !ctx.Request.Header.IsMethodGet() {
-				b.Fatalf("Unexpected request method: %s", ctx.Request.Header.Method)
+			if !ctx.IsGet() {
+				b.Fatalf("Unexpected request method: %s", ctx.Method())
 			}
 			ctx.Success("text/plain", fakeResponse)
 			if requestsPerConn == 1 {
@@ -316,8 +316,8 @@ func benchmarkServerPost(b *testing.B, clientsCount, requestsPerConn int) {
 	ch := make(chan struct{}, b.N)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			if !ctx.Request.Header.IsMethodPost() {
-				b.Fatalf("Unexpected request method: %s", ctx.Request.Header.Method)
+			if !ctx.IsPost() {
+				b.Fatalf("Unexpected request method: %s", ctx.Method())
 			}
 			body := ctx.Request.Body
 			if !bytes.Equal(body, fakeResponse) {
