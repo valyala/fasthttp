@@ -10,6 +10,42 @@ import (
 	"testing"
 )
 
+func TestResponseHeaderFirstByteReadEOF(t *testing.T) {
+	var h ResponseHeader
+
+	r := &errorReader{fmt.Errorf("non-eof error")}
+	br := bufio.NewReader(r)
+	err := h.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err != io.EOF {
+		t.Fatalf("unexpected error %s. Expecting %s", err, io.EOF)
+	}
+}
+
+func TestRequestHeaderFirstByteReadEOF(t *testing.T) {
+	var h RequestHeader
+
+	r := &errorReader{fmt.Errorf("non-eof error")}
+	br := bufio.NewReader(r)
+	err := h.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err != io.EOF {
+		t.Fatalf("unexpected error %s. Expecting %s", err, io.EOF)
+	}
+}
+
+type errorReader struct {
+	err error
+}
+
+func (r *errorReader) Read(p []byte) (int, error) {
+	return 0, r.err
+}
+
 func TestRequestHeaderEmptyMethod(t *testing.T) {
 	var h RequestHeader
 
