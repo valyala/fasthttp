@@ -503,6 +503,9 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 			}
 			return nil, io.EOF
 		}
+		if c == nil {
+			panic("BUG: net.Listener returned (nil, nil)")
+		}
 		if s.MaxConnsPerIP > 0 {
 			pic := wrapPerIPConn(s, c)
 			if pic == nil {
