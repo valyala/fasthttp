@@ -210,7 +210,7 @@ func TestServerLogger(t *testing.T) {
 			h := &ctx.Request.Header
 			logger.Printf("begin")
 			ctx.Success("text/html", []byte(fmt.Sprintf("requestURI=%s, body=%q, remoteAddr=%s",
-				h.RequestURI, ctx.Request.Body, ctx.RemoteAddr())))
+				h.RequestURI(), ctx.Request.Body, ctx.RemoteAddr())))
 			logger.Printf("end")
 		},
 		Logger: cl,
@@ -262,7 +262,7 @@ func TestServerRemoteAddr(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
 			ctx.Success("text/html", []byte(fmt.Sprintf("requestURI=%s, remoteAddr=%s, remoteIP=%s",
-				h.RequestURI, ctx.RemoteAddr(), ctx.RemoteIP())))
+				h.RequestURI(), ctx.RemoteAddr(), ctx.RemoteIP())))
 		},
 	}
 
@@ -368,7 +368,7 @@ func TestServeConnSingleRequest(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
-			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI, h.Get("Host"))))
+			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Get("Host"))))
 		},
 	}
 
@@ -397,7 +397,7 @@ func TestServeConnMultiRequests(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
-			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI, h.Get("Host"))))
+			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Get("Host"))))
 		},
 	}
 

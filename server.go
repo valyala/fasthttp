@@ -266,7 +266,7 @@ var zeroTCPAddr = &net.TCPAddr{
 //
 // This uri is valid until returning from RequestHandler.
 func (ctx *RequestCtx) RequestURI() []byte {
-	return ctx.Request.Header.RequestURI
+	return ctx.Request.Header.RequestURI()
 }
 
 // Path returns requested path.

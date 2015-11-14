@@ -10,7 +10,7 @@ import (
 
 func TestRequestWriteRequestURINoHost(t *testing.T) {
 	var req Request
-	req.Header.RequestURI = []byte("http://google.com/foo/bar?baz=aaa")
+	req.Header.SetRequestURI("http://google.com/foo/bar?baz=aaa")
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
 	if err := req.Write(bw); err != nil {
@@ -28,13 +28,13 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	if req1.Header.Host() != "google.com" {
 		t.Fatalf("unexpected host: %q. Expecting %q", req1.Header.Host(), "google.com")
 	}
-	if string(req.Header.RequestURI) != "/foo/bar?baz=aaa" {
-		t.Fatalf("unexpected requestURI: %q. Expecting %q", req.Header.RequestURI, "/foo/bar?baz=aaa")
+	if string(req.Header.RequestURI()) != "/foo/bar?baz=aaa" {
+		t.Fatalf("unexpected requestURI: %q. Expecting %q", req.Header.RequestURI(), "/foo/bar?baz=aaa")
 	}
 
 	// verify that Request.Write returns error on non-absolute RequestURI
 	req.Clear()
-	req.Header.RequestURI = []byte("/foo/bar")
+	req.Header.SetRequestURI("/foo/bar")
 	w.Reset()
 	bw.Reset(&w)
 	if err := req.Write(bw); err == nil {
@@ -262,7 +262,7 @@ func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, bo
 	var req Request
 
 	req.Header.SetMethod(method)
-	req.Header.RequestURI = []byte(requestURI)
+	req.Header.SetRequestURI(requestURI)
 	req.Header.Set("Host", host)
 	req.Header.Set("User-Agent", userAgent)
 	req.Body = []byte(body)
@@ -279,7 +279,7 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	var req Request
 
 	req.Header.SetMethod(method)
-	req.Header.RequestURI = []byte(requestURI)
+	req.Header.SetRequestURI(requestURI)
 	req.Header.Set("Host", host)
 	req.Header.Set("User-Agent", userAgent)
 	req.Body = []byte(body)
@@ -310,8 +310,8 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	if len(requestURI) == 0 {
 		requestURI = "/"
 	}
-	if !bytes.Equal(req1.Header.RequestURI, []byte(requestURI)) {
-		t.Fatalf("Unexpected RequestURI: %q. Expected %q", req1.Header.RequestURI, requestURI)
+	if string(req1.Header.RequestURI()) != requestURI {
+		t.Fatalf("Unexpected RequestURI: %q. Expected %q", req1.Header.RequestURI(), requestURI)
 	}
 	if req1.Header.Get("Host") != host {
 		t.Fatalf("Unexpected host: %q. Expected %q", req1.Header.Get("Host"), host)
@@ -465,7 +465,7 @@ func TestRequestParseURI(t *testing.T) {
 
 	var req Request
 	req.Header.Set("Host", host)
-	req.Header.RequestURI = []byte(requestURI)
+	req.Header.SetRequestURI(requestURI)
 
 	req.ParseURI()
 

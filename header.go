@@ -42,10 +42,6 @@ type ResponseHeader struct {
 // It is forbidden copying RequestHeader instances.
 // Create new instances instead and use CopyTo.
 type RequestHeader struct {
-
-	// Request URI read from the first request line.
-	RequestURI []byte
-
 	// Request content length read from Content-Length header.
 	//
 	// It may be negative:
@@ -56,6 +52,7 @@ type RequestHeader struct {
 	ConnectionClose bool
 
 	method      []byte
+	requestURI  []byte
 	host        []byte
 	contentType []byte
 	userAgent   []byte
@@ -192,6 +189,27 @@ func (h *RequestHeader) SetMethodBytes(method []byte) {
 	h.method = append(h.method[:0], method...)
 }
 
+// RequestURI returns RequestURI from the first HTTP request line.
+func (h *RequestHeader) RequestURI() []byte {
+	return h.requestURI
+}
+
+// SetRequestURI sets RequestURI for the first HTTP request line.
+// RequestURI must be properly encoded.
+// Use URI.AppendRequestURI for constructing proper RequestURI if unsure.
+func (h *RequestHeader) SetRequestURI(requestURI string) {
+	h.requestURI = AppendBytesStr(h.requestURI, requestURI)
+}
+
+// SetRequestURI sets RequestURI for the first HTTP request line.
+// RequestURI must be properly encoded.
+// Use URI.AppendRequestURI for constructing proper RequestURI if unsure.
+//
+// It is safe modifying requestURI buffer after function return.
+func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
+	h.requestURI = append(h.requestURI[:0], requestURI...)
+}
+
 // IsGet returns true if request method is GET.
 func (h *RequestHeader) IsGet() bool {
 	return bytes.Equal(h.MethodBytes(), strGet)
@@ -238,11 +256,11 @@ func (h *ResponseHeader) Clear() {
 
 // Clear clears request header.
 func (h *RequestHeader) Clear() {
-	h.RequestURI = h.RequestURI[:0]
 	h.ContentLength = 0
 	h.ConnectionClose = false
 
 	h.method = h.method[:0]
+	h.requestURI = h.requestURI[:0]
 	h.host = h.host[:0]
 	h.contentType = h.contentType[:0]
 	h.userAgent = h.userAgent[:0]
@@ -266,10 +284,10 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 // CopyTo copies all the headers to dst.
 func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.Clear()
-	dst.RequestURI = append(dst.RequestURI[:0], h.RequestURI...)
 	dst.ContentLength = h.ContentLength
 	dst.ConnectionClose = h.ConnectionClose
 	dst.method = append(dst.method[:0], h.method...)
+	dst.requestURI = append(dst.requestURI[:0], h.requestURI...)
 	dst.host = append(dst.host[:0], h.host...)
 	dst.contentType = append(dst.contentType[:0], h.contentType...)
 	dst.userAgent = append(dst.userAgent[:0], h.userAgent...)
@@ -814,7 +832,7 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 	w.Write(method)
 	w.WriteByte(' ')
 
-	requestURI := h.RequestURI
+	requestURI := h.requestURI
 	if len(requestURI) == 0 {
 		requestURI = strSlash
 	}
@@ -956,7 +974,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (b []byte, err error) {
 		// non-http/1.1 protocol. Close connection after the request.
 		h.ConnectionClose = true
 	}
-	h.RequestURI = append(h.RequestURI[:0], b[:n]...)
+	h.requestURI = append(h.requestURI[:0], b[:n]...)
 
 	return bNext, nil
 }

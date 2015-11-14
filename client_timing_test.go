@@ -82,7 +82,7 @@ func BenchmarkClientGetFastServer(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var req Request
 		var resp Response
-		req.Header.RequestURI = []byte(fmt.Sprintf("http://foobar%d.com/aaa/bbb", atomic.AddUint32(&nn, 1)))
+		req.Header.SetRequestURI(fmt.Sprintf("http://foobar%d.com/aaa/bbb", atomic.AddUint32(&nn, 1)))
 		for pb.Next() {
 			if err := c.Do(&req, &resp); err != nil {
 				b.Fatalf("unexpected error: %s", err)
@@ -135,7 +135,7 @@ func BenchmarkNetHTTPClientGetFastServer(b *testing.B) {
 }
 
 func fasthttpEchoHandler(ctx *RequestCtx) {
-	ctx.Success("text/plain", ctx.Request.Header.RequestURI)
+	ctx.Success("text/plain", ctx.RequestURI())
 }
 
 func nethttpEchoHandler(w http.ResponseWriter, r *http.Request) {

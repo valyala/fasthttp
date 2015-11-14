@@ -439,7 +439,7 @@ func equalCookie(c1, c2 *Cookie) bool {
 
 func TestRequestHeaderCookie(t *testing.T) {
 	var h RequestHeader
-	h.RequestURI = []byte("/foobar")
+	h.SetRequestURI("/foobar")
 	h.Set("Host", "foobar.com")
 
 	h.SetCookie("foo", "bar")
@@ -476,9 +476,8 @@ func TestRequestHeaderCookie(t *testing.T) {
 }
 
 func TestRequestHeaderSetGet(t *testing.T) {
-	h := &RequestHeader{
-		RequestURI: []byte("/aa/bbb"),
-	}
+	h := &RequestHeader{}
+	h.SetRequestURI("/aa/bbb")
 	h.SetMethod("POST")
 	h.Set("foo", "bar")
 	h.Set("host", "12345")
@@ -1039,8 +1038,8 @@ func verifyRequestHeader(t *testing.T, h *RequestHeader, expectedContentLength i
 	if h.ContentLength != expectedContentLength {
 		t.Fatalf("Unexpected Content-Length %d. Expected %d", h.ContentLength, expectedContentLength)
 	}
-	if !bytes.Equal(h.RequestURI, []byte(expectedRequestURI)) {
-		t.Fatalf("Unexpected RequestURI %q. Expected %q", h.RequestURI, expectedRequestURI)
+	if string(h.RequestURI()) != expectedRequestURI {
+		t.Fatalf("Unexpected RequestURI %q. Expected %q", h.RequestURI(), expectedRequestURI)
 	}
 	if h.Get("Host") != expectedHost {
 		t.Fatalf("Unexpected host %q. Expected %q", h.Get("Host"), expectedHost)
