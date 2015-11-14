@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -10,6 +11,77 @@ import (
 	"testing"
 	"time"
 )
+
+func TestClientIdempotentRequest(t *testing.T) {
+	dialsCount := 0
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			switch dialsCount {
+			case 0:
+				dialsCount++
+				return &readErrorConn{}, nil
+			case 1:
+				dialsCount++
+				return &singleReadConn{
+					s: "HTTP/1.1 345 OK\r\nContent-Type: foobar\r\nContent-Length: 7\r\n\r\n0123456",
+				}, nil
+			default:
+				t.Fatalf("unexpected number of dials: %d", dialsCount)
+			}
+			panic("unreachable")
+		},
+	}
+
+	statusCode, body, err := c.Get(nil, "http://foobar/a/b")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if statusCode != 345 {
+		t.Fatalf("unexpected status code: %d. Expecting 345", statusCode)
+	}
+	if string(body) != "0123456" {
+		t.Fatalf("unexpected body: %q. Expecting %q", body, "0123456")
+	}
+}
+
+type readErrorConn struct {
+	net.Conn
+}
+
+func (r *readErrorConn) Read(p []byte) (int, error) {
+	return 0, fmt.Errorf("error!!!")
+}
+
+func (r *readErrorConn) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (r *readErrorConn) Close() error {
+	return nil
+}
+
+type singleReadConn struct {
+	net.Conn
+	s string
+	n int
+}
+
+func (r *singleReadConn) Read(p []byte) (int, error) {
+	if len(r.s) == r.n {
+		return 0, io.EOF
+	}
+	n := copy(p, []byte(r.s[r.n:]))
+	r.n += n
+	return n, nil
+}
+
+func (r *singleReadConn) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (r *singleReadConn) Close() error {
+	return nil
+}
 
 func TestClientHTTPSConcurrent(t *testing.T) {
 	addrHTTP := "127.0.0.1:56793"

@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -162,30 +163,32 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	c.mLock.Unlock()
 
 	if startCleaner {
-		go func() {
-			mustStop := false
-			for {
-				t := time.Now()
-				c.mLock.Lock()
-				for k, v := range m {
-					if t.Sub(v.LastUseTime()) > time.Minute {
-						delete(m, k)
-					}
-				}
-				if len(m) == 0 {
-					mustStop = true
-				}
-				c.mLock.Unlock()
-
-				if mustStop {
-					break
-				}
-				time.Sleep(10 * time.Second)
-			}
-		}()
+		go c.mCleaner(m)
 	}
 
 	return hc.Do(req, resp)
+}
+
+func (c *Client) mCleaner(m map[string]*HostClient) {
+	mustStop := false
+	for {
+		t := time.Now()
+		c.mLock.Lock()
+		for k, v := range m {
+			if t.Sub(v.LastUseTime()) > time.Minute {
+				delete(m, k)
+			}
+		}
+		if len(m) == 0 {
+			mustStop = true
+		}
+		c.mLock.Unlock()
+
+		if mustStop {
+			break
+		}
+		time.Sleep(10 * time.Second)
+	}
 }
 
 // Maximum number of concurrent connections http client can establish per host
@@ -371,11 +374,19 @@ func releaseResponse(resp *Response) {
 // ErrNoFreeConns is returned if all HostClient.MaxConns connections
 // to the host are busy.
 func (c *HostClient) Do(req *Request, resp *Response) error {
+	retry, err := c.do(req, resp, false)
+	if err != nil && retry && (req.Header.IsGet() || req.Header.IsHead()) {
+		_, err = c.do(req, resp, true)
+	}
+	return err
+}
+
+func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error) {
 	atomic.StoreUint64(&c.lastUseTime, uint64(time.Now().Unix()))
 
-	cc, err := c.acquireConn()
+	cc, err := c.acquireConn(newConn)
 	if err != nil {
-		return err
+		return false, err
 	}
 	conn := cc.c
 
@@ -392,12 +403,12 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	if err != nil {
 		c.releaseWriter(bw)
 		c.closeConn(cc)
-		return err
+		return false, err
 	}
 	if err = bw.Flush(); err != nil {
 		c.releaseWriter(bw)
 		c.closeConn(cc)
-		return err
+		return true, err
 	}
 	c.releaseWriter(bw)
 
@@ -405,7 +416,10 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	if err = resp.Read(br); err != nil {
 		c.releaseReader(br)
 		c.closeConn(cc)
-		return err
+		if err == io.EOF {
+			return true, err
+		}
+		return false, err
 	}
 	c.releaseReader(br)
 
@@ -414,21 +428,21 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	} else {
 		c.releaseConn(cc)
 	}
-	return err
+	return false, err
 }
 
 // ErrNoFreeConns is returned when no free connections available
 // to the given host.
 var ErrNoFreeConns = errors.New("no free connections available to host")
 
-func (c *HostClient) acquireConn() (*clientConn, error) {
+func (c *HostClient) acquireConn(newConn bool) (*clientConn, error) {
 	var cc *clientConn
 	createConn := false
 	startCleaner := false
 
 	c.connsLock.Lock()
 	n := len(c.conns)
-	if n == 0 {
+	if n == 0 || newConn {
 		maxConns := c.MaxConns
 		if maxConns <= 0 {
 			maxConns = DefaultMaxConnsPerHost
@@ -454,41 +468,43 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 		return nil, ErrNoFreeConns
 	}
 
-	if startCleaner {
-		go func() {
-			mustStop := false
-			for {
-				t := time.Now()
-				c.connsLock.Lock()
-				for len(c.conns) > 0 && t.Sub(c.conns[0].t) > 10*time.Second {
-					cc := c.conns[0]
-					c.connsCount--
-					cc.c.Close()
-					releaseClientConn(cc)
-
-					copy(c.conns, c.conns[1:])
-					c.conns = c.conns[:len(c.conns)-1]
-				}
-				if len(c.conns) == 0 {
-					mustStop = true
-				}
-				c.connsLock.Unlock()
-
-				if mustStop {
-					break
-				}
-				time.Sleep(time.Second)
-			}
-		}()
-	}
-
 	conn, err := c.dialHost()
 	if err != nil {
 		c.decConnsCount()
 		return nil, err
 	}
 	cc = acquireClientConn(conn)
+
+	if startCleaner {
+		go c.connsCleaner()
+	}
 	return cc, nil
+}
+
+func (c *HostClient) connsCleaner() {
+	mustStop := false
+	for {
+		t := time.Now()
+		c.connsLock.Lock()
+		for len(c.conns) > 0 && t.Sub(c.conns[0].t) > 10*time.Second {
+			cc := c.conns[0]
+			c.connsCount--
+			cc.c.Close()
+			releaseClientConn(cc)
+
+			copy(c.conns, c.conns[1:])
+			c.conns = c.conns[:len(c.conns)-1]
+		}
+		if c.connsCount == 0 {
+			mustStop = true
+		}
+		c.connsLock.Unlock()
+
+		if mustStop {
+			break
+		}
+		time.Sleep(time.Second)
+	}
 }
 
 func (c *HostClient) closeConn(cc *clientConn) {
@@ -512,7 +528,9 @@ func acquireClientConn(conn net.Conn) *clientConn {
 		cc.v = cc
 		return cc
 	}
-	return v.(*clientConn)
+	cc := v.(*clientConn)
+	cc.c = conn
+	return cc
 }
 
 func releaseClientConn(cc *clientConn) {
@@ -581,6 +599,9 @@ func (c *HostClient) dialHost() (net.Conn, error) {
 	conn, err := dial(c.Addr)
 	if err != nil {
 		return nil, err
+	}
+	if conn == nil {
+		panic("BUG: DialFunc returned (nil, nil)")
 	}
 	if c.IsTLS {
 		tlsConfig := c.TLSConfig
