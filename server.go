@@ -293,7 +293,7 @@ func (ctx *RequestCtx) Host() []byte {
 //
 // Returned arguments are valid until returning from RequestHandler.
 func (ctx *RequestCtx) QueryArgs() *Args {
-	return &ctx.URI().QueryArgs
+	return ctx.URI().QueryArgs()
 }
 
 // PostArgs returns POST arguments.

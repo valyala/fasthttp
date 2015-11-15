@@ -33,10 +33,7 @@ type URI struct {
 	// Hash part, i.e. qwe of http://aaa.com/foo/bar?baz=123#qwe .
 	Hash []byte
 
-	// Parsed query string arguments.
-	//
-	// Becomes available after URI.ParseQueryArgs() call.
-	QueryArgs       Args
+	queryArgs       Args
 	parsedQueryArgs bool
 
 	fullURI []byte
@@ -50,7 +47,7 @@ func (x *URI) Clear() {
 	x.Path = x.Path[:0]
 	x.QueryString = x.QueryString[:0]
 	x.Hash = x.Hash[:0]
-	x.QueryArgs.Clear()
+	x.queryArgs.Clear()
 	x.parsedQueryArgs = false
 
 	x.fullURI = x.fullURI[:0]
@@ -152,9 +149,9 @@ func (x *URI) AppendRequestURI(dst []byte) []byte {
 		path = strSlash
 	}
 	dst = appendQuotedArg(dst, path)
-	if x.QueryArgs.Len() > 0 {
+	if x.queryArgs.Len() > 0 {
 		dst = append(dst, '?')
-		dst = x.QueryArgs.AppendBytes(dst)
+		dst = x.queryArgs.AppendBytes(dst)
 	} else if len(x.QueryString) > 0 {
 		dst = append(dst, '?')
 		dst = append(dst, x.QueryString...)
@@ -198,11 +195,16 @@ func splitHostUri(host, uri []byte) ([]byte, []byte, []byte) {
 	return scheme, uri[:n], uri[n:]
 }
 
-// ParseQueryArgs initializes QueryArgs by parsing QueryString.
-func (x *URI) ParseQueryArgs() {
+// Returns query args.
+func (x *URI) QueryArgs() *Args {
+	x.parseQueryArgs()
+	return &x.queryArgs
+}
+
+func (x *URI) parseQueryArgs() {
 	if x.parsedQueryArgs {
 		return
 	}
-	x.QueryArgs.ParseBytes(x.QueryString)
+	x.queryArgs.ParseBytes(x.QueryString)
 	x.parsedQueryArgs = true
 }

@@ -91,7 +91,7 @@ func testURIFullURI(t *testing.T, scheme, host, path, hash string, args *Args, e
 	u.Host = []byte(host)
 	u.Path = []byte(path)
 	u.Hash = []byte(hash)
-	u.QueryArgs = *args
+	args.CopyTo(u.QueryArgs())
 
 	uri := u.FullURI()
 	if string(uri) != expectedURI {
