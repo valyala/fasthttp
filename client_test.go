@@ -398,14 +398,10 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			ctx.Request.ParseURI()
 			if ctx.IsGet() {
-				ctx.Success("text/plain", ctx.Request.URI.URI)
+				ctx.Success("text/plain", ctx.URI().FullURI())
 			} else if ctx.IsPost() {
-				if err := ctx.Request.ParsePostArgs(); err != nil {
-					t.Fatalf("cannot parse post arguments: %s", err)
-				}
-				ctx.SetResponseBody(ctx.Request.Body)
+				ctx.SetResponseBody(ctx.PostArgs().AppendBytes(nil))
 			}
 		},
 	}

@@ -19,14 +19,10 @@ type Request struct {
 	// Request body.
 	Body []byte
 
-	// Request URI.
-	// URI becomes available only after Request.ParseURI() call.
-	URI       URI
+	uri       URI
 	parsedURI bool
 
-	// Arguments sent in POST.
-	// PostArgs becomes available only after Request.ParsePostArgs() call.
-	PostArgs       Args
+	postArgs       Args
 	parsedPostArgs bool
 }
 
@@ -84,10 +80,10 @@ func (req *Request) CopyTo(dst *Request) {
 	req.Header.CopyTo(&dst.Header)
 	dst.Body = append(dst.Body[:0], req.Body...)
 	if req.parsedURI {
-		dst.ParseURI()
+		dst.parseURI()
 	}
 	if req.parsedPostArgs {
-		dst.ParsePostArgs()
+		dst.parsePostArgs()
 	}
 }
 
@@ -99,31 +95,41 @@ func (resp *Response) CopyTo(dst *Response) {
 	dst.SkipBody = resp.SkipBody
 }
 
-// ParseURI parses request uri and fills Request.URI.
-func (req *Request) ParseURI() {
+// URI returns request URI
+func (req *Request) URI() *URI {
+	req.parseURI()
+	return &req.uri
+}
+
+func (req *Request) parseURI() {
 	if req.parsedURI {
 		return
 	}
-	req.URI.Parse(req.Header.host, req.Header.requestURI)
 	req.parsedURI = true
+
+	req.uri.Parse(req.Header.host, req.Header.requestURI)
 }
 
-// ParsePostArgs parses args sent in POST body and fills Request.PostArgs.
-func (req *Request) ParsePostArgs() error {
+// PostArgs returns POST arguments.
+func (req *Request) PostArgs() *Args {
+	req.parsePostArgs()
+	return &req.postArgs
+}
+
+func (req *Request) parsePostArgs() {
 	if req.parsedPostArgs {
-		return nil
+		return
 	}
+	req.parsedPostArgs = true
 
 	if !req.Header.IsPost() {
-		return fmt.Errorf("Cannot parse POST args for %q request", req.Header.method)
+		return
 	}
 	if !bytes.Equal(req.Header.contentType, strPostArgsContentType) {
-		return fmt.Errorf("Cannot parse POST args for %q Content-Type. Required %q Content-Type",
-			req.Header.contentType, strPostArgsContentType)
+		return
 	}
-	req.PostArgs.ParseBytes(req.Body)
-	req.parsedPostArgs = true
-	return nil
+	req.postArgs.ParseBytes(req.Body)
+	return
 }
 
 // Clear clears request contents.
@@ -134,9 +140,9 @@ func (req *Request) Clear() {
 
 func (req *Request) clearSkipHeader() {
 	req.Body = req.Body[:0]
-	req.URI.Clear()
+	req.uri.Clear()
 	req.parsedURI = false
-	req.PostArgs.Clear()
+	req.postArgs.Clear()
 	req.parsedPostArgs = false
 }
 
@@ -203,9 +209,9 @@ func isSkipResponseBody(statusCode int) bool {
 // Write doesn't flush request to w for performance reasons.
 func (req *Request) Write(w *bufio.Writer) error {
 	if len(req.Header.host) == 0 {
-		req.ParseURI()
-		req.Header.SetHostBytes(req.URI.Host)
-		req.Header.requestURI = req.URI.AppendRequestURI(req.Header.requestURI[:0])
+		uri := req.URI()
+		req.Header.SetHostBytes(uri.Host)
+		req.Header.requestURI = uri.AppendRequestURI(req.Header.requestURI[:0])
 	}
 	req.Header.ContentLength = len(req.Body)
 	err := req.Header.Write(w)

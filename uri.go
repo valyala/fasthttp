@@ -8,9 +8,6 @@ import (
 //
 // It is forbidden copying URI instances. Create new instances instead.
 type URI struct {
-	// Full uri like {Scheme}://{Host}{Path}?{QueryString}#{Hash}
-	URI []byte
-
 	// Original path passed to URI.Parse()
 	PathOriginal []byte
 
@@ -41,11 +38,12 @@ type URI struct {
 	// Becomes available after URI.ParseQueryArgs() call.
 	QueryArgs       Args
 	parsedQueryArgs bool
+
+	fullURI []byte
 }
 
 // Clear clears uri.
 func (x *URI) Clear() {
-	x.URI = x.URI[:0]
 	x.PathOriginal = x.PathOriginal[:0]
 	x.Scheme = x.Scheme[:0]
 	x.Host = x.Host[:0]
@@ -54,6 +52,8 @@ func (x *URI) Clear() {
 	x.Hash = x.Hash[:0]
 	x.QueryArgs.Clear()
 	x.parsedQueryArgs = false
+
+	x.fullURI = x.fullURI[:0]
 }
 
 // Parse initializes URI from the given host and uri.
@@ -67,15 +67,6 @@ func (x *URI) Parse(host, uri []byte) {
 	lowercaseBytes(x.Scheme)
 	x.Host = append(x.Host, host...)
 	lowercaseBytes(x.Host)
-
-	x.URI = append(x.URI, x.Scheme...)
-	lowercaseBytes(x.URI)
-	x.URI = append(x.URI, strColonSlashSlash...)
-	x.URI = append(x.URI, x.Host...)
-	if len(uri) > 0 && uri[0] != '/' {
-		x.URI = append(x.URI, '/')
-	}
-	x.URI = append(x.URI, uri...)
 
 	b := uri
 	n := bytes.IndexByte(b, '?')
@@ -98,7 +89,14 @@ func (x *URI) Parse(host, uri []byte) {
 }
 
 func normalizePath(dst, src []byte) []byte {
-	dst = decodeArg(dst, src, false)
+	dst = dst[:0]
+
+	// add leading slash
+	if len(src) == 0 || src[0] != '/' {
+		dst = append(dst, '/')
+	}
+
+	dst = decodeArgAppend(dst, src, false)
 
 	// remove duplicate slashes
 	b := dst
@@ -141,9 +139,6 @@ func normalizePath(dst, src []byte) []byte {
 		b = b[:nn+1]
 	}
 
-	if len(b) == 0 {
-		return strSlash
-	}
 	return b
 }
 
@@ -171,18 +166,18 @@ func (x *URI) AppendRequestURI(dst []byte) []byte {
 	return dst
 }
 
-// AppendBytes appends URI to dst and returns dst (with may be newly allocated).
-func (x *URI) AppendBytes(dst []byte) []byte {
-	startPos := len(dst)
+// FullURI returns full uri in the form {Scheme}://{Host}{RequestURI}#{Hash}.
+func (x *URI) FullURI() []byte {
 	scheme := x.Scheme
 	if len(scheme) == 0 {
 		scheme = strHTTP
 	}
-	dst = append(dst, scheme...)
+	dst := append(x.fullURI[:0], scheme...)
 	dst = append(dst, strColonSlashSlash...)
 	dst = append(dst, x.Host...)
-	lowercaseBytes(dst[startPos:])
-	return x.AppendRequestURI(dst)
+	lowercaseBytes(dst)
+	x.fullURI = x.AppendRequestURI(dst)
+	return x.fullURI
 }
 
 func splitHostUri(host, uri []byte) ([]byte, []byte, []byte) {

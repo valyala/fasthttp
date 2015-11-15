@@ -155,14 +155,14 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
 // to the requested host are busy.
 func (c *Client) Do(req *Request, resp *Response) error {
-	req.ParseURI()
-	host := req.URI.Host
+	uri := req.URI()
+	host := uri.Host
 
 	isTLS := false
-	if bytes.Equal(req.URI.Scheme, strHTTPS) {
+	if bytes.Equal(uri.Scheme, strHTTPS) {
 		isTLS = true
-	} else if !bytes.Equal(req.URI.Scheme, strHTTP) {
-		return fmt.Errorf("unsupported protocol %q. http and https are supported", req.URI.Scheme)
+	} else if !bytes.Equal(uri.Scheme, strHTTP) {
+		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme)
 	}
 
 	startCleaner := false
