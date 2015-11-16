@@ -401,7 +401,7 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 //
 // Success calls are ignored after TimeoutError call.
 func (ctx *RequestCtx) Success(contentType string, body []byte) {
-	ctx.SetContentTypeBytes(contentType)
+	ctx.SetContentType(contentType)
 	ctx.SetResponseBody(body)
 }
 
