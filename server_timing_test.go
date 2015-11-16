@@ -283,7 +283,7 @@ func benchmarkServerGet(b *testing.B, clientsCount, requestsPerConn int) {
 			}
 			ctx.Success("text/plain", fakeResponse)
 			if requestsPerConn == 1 {
-				ctx.Response.Header.ConnectionClose = true
+				ctx.SetConnectionClose()
 			}
 			registerServedRequest(b, ch)
 		},
@@ -326,7 +326,7 @@ func benchmarkServerPost(b *testing.B, clientsCount, requestsPerConn int) {
 			}
 			ctx.Success("text/plain", body)
 			if requestsPerConn == 1 {
-				ctx.Response.Header.ConnectionClose = true
+				ctx.SetConnectionClose()
 			}
 			registerServedRequest(b, ch)
 		},

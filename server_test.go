@@ -132,7 +132,7 @@ func TestServerTimeoutError(t *testing.T) {
 func TestServerConnectionClose(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			ctx.Response.Header.ConnectionClose = true
+			ctx.SetConnectionClose()
 		},
 	}
 

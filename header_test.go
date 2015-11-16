@@ -92,8 +92,8 @@ func testResponseHeaderHTTPVer(t *testing.T, s string, connectionClose bool) {
 	if err := h.Read(br); err != nil {
 		t.Fatalf("unexpected error: %s. response=%q", err, s)
 	}
-	if h.ConnectionClose != connectionClose {
-		t.Fatalf("unexpected connectionClose %v. Expecting %v. response=%q", h.ConnectionClose, connectionClose, s)
+	if h.ConnectionClose() != connectionClose {
+		t.Fatalf("unexpected connectionClose %v. Expecting %v. response=%q", h.ConnectionClose(), connectionClose, s)
 	}
 }
 
@@ -105,8 +105,8 @@ func testRequestHeaderHTTPVer(t *testing.T, s string, connectionClose bool) {
 	if err := h.Read(br); err != nil {
 		t.Fatalf("unexpected error: %s. request=%q", err, s)
 	}
-	if h.ConnectionClose != connectionClose {
-		t.Fatalf("unexpected connectionClose %v. Expecting %v. request=%q", h.ConnectionClose, connectionClose, s)
+	if h.ConnectionClose() != connectionClose {
+		t.Fatalf("unexpected connectionClose %v. Expecting %v. request=%q", h.ConnectionClose(), connectionClose, s)
 	}
 }
 
@@ -159,7 +159,7 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 
 	h.Set("Connection", "close")
 	h.Set("Host", "foobar")
-	if !h.ConnectionClose {
+	if !h.ConnectionClose() {
 		t.Fatalf("connection: close not set")
 	}
 
@@ -178,8 +178,8 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 		t.Fatalf("error when reading request header: %s", err)
 	}
 
-	if !h1.ConnectionClose {
-		t.Fatalf("unexpected connection: close value: %v", h1.ConnectionClose)
+	if !h1.ConnectionClose() {
+		t.Fatalf("unexpected connection: close value: %v", h1.ConnectionClose())
 	}
 	if string(h1.Peek("Connection")) != "close" {
 		t.Fatalf("unexpected connection value: %q. Expecting %q", h.Peek("Connection"), "close")
@@ -507,7 +507,7 @@ func TestRequestHeaderSetGet(t *testing.T) {
 	expectRequestHeaderGet(t, h, "baz", "xxxxx")
 	expectRequestHeaderGet(t, h, "Transfer-Encoding", "")
 	expectRequestHeaderGet(t, h, "connecTION", "close")
-	if !h.ConnectionClose {
+	if !h.ConnectionClose() {
 		t.Fatalf("unset connection: close")
 	}
 
@@ -544,7 +544,7 @@ func TestRequestHeaderSetGet(t *testing.T) {
 	expectRequestHeaderGet(t, &h1, "baz", "xxxxx")
 	expectRequestHeaderGet(t, &h1, "Transfer-Encoding", "")
 	expectRequestHeaderGet(t, &h1, "Connection", "close")
-	if !h1.ConnectionClose {
+	if !h1.ConnectionClose() {
 		t.Fatalf("unset connection: close")
 	}
 }
@@ -570,8 +570,8 @@ func TestResponseHeaderSetGet(t *testing.T) {
 	if h.ContentLength() != 1234 {
 		t.Fatalf("Unexpected content-length %d. Expected %d", h.ContentLength(), 1234)
 	}
-	if !h.ConnectionClose {
-		t.Fatalf("Unexpected Connection: close value %v. Expected %v", h.ConnectionClose, true)
+	if !h.ConnectionClose() {
+		t.Fatalf("Unexpected Connection: close value %v. Expected %v", h.ConnectionClose(), true)
 	}
 
 	w := &bytes.Buffer{}
@@ -593,8 +593,8 @@ func TestResponseHeaderSetGet(t *testing.T) {
 	if h1.ContentLength() != h.ContentLength() {
 		t.Fatalf("Unexpected Content-Length %d. Expected %d", h1.ContentLength(), h.ContentLength())
 	}
-	if h1.ConnectionClose != h.ConnectionClose {
-		t.Fatalf("unexpected connection: close %v. Expected %v", h1.ConnectionClose, h.ConnectionClose)
+	if h1.ConnectionClose() != h.ConnectionClose() {
+		t.Fatalf("unexpected connection: close %v. Expected %v", h1.ConnectionClose(), h.ConnectionClose())
 	}
 
 	expectResponseHeaderGet(t, &h1, "Foo", "bar")
@@ -622,8 +622,9 @@ func TestResponseHeaderConnectionClose(t *testing.T) {
 }
 
 func testResponseHeaderConnectionClose(t *testing.T, connectionClose bool) {
-	h := &ResponseHeader{
-		ConnectionClose: connectionClose,
+	h := &ResponseHeader{}
+	if connectionClose {
+		h.SetConnectionClose()
 	}
 	h.SetContentLength(123)
 
@@ -643,8 +644,8 @@ func testResponseHeaderConnectionClose(t *testing.T, connectionClose bool) {
 	if err != nil {
 		t.Fatalf("Unexpected error when reading response header: %s", err)
 	}
-	if h1.ConnectionClose != h.ConnectionClose {
-		t.Fatalf("Unexpected value for ConnectionClose: %v. Expected %v", h1.ConnectionClose, h.ConnectionClose)
+	if h1.ConnectionClose() != h.ConnectionClose() {
+		t.Fatalf("Unexpected value for ConnectionClose: %v. Expected %v", h1.ConnectionClose(), h.ConnectionClose())
 	}
 }
 
@@ -731,21 +732,21 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	// straight order of content-length and content-type
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n\r\n",
 		200, 123, "text/html", "")
-	if h.ConnectionClose {
+	if h.ConnectionClose() {
 		t.Fatalf("unexpected connection: close")
 	}
 
 	// reverse order of content-length and content-type
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 202 OK\r\nContent-Type: text/plain; encoding=utf-8\r\nContent-Length: 543\r\nConnection: close\r\n\r\n",
 		202, 543, "text/plain; encoding=utf-8", "")
-	if !h.ConnectionClose {
+	if !h.ConnectionClose() {
 		t.Fatalf("expecting connection: close")
 	}
 
 	// tranfer-encoding: chunked
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 505 Internal error\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n",
 		505, -1, "text/html", "")
-	if h.ConnectionClose {
+	if h.ConnectionClose() {
 		t.Fatalf("unexpected connection: close")
 	}
 
@@ -807,14 +808,14 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	// blank lines before the first line
 	testResponseHeaderReadSuccess(t, h, "\r\nHTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 0\r\n\r\nsss",
 		200, 0, "aa", "sss")
-	if h.ConnectionClose {
+	if h.ConnectionClose() {
 		t.Fatalf("unexpected connection: close")
 	}
 
 	// no content-length (identity transfer-encoding)
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Type: foo/bar\r\n\r\nabcdefg",
 		200, -2, "foo/bar", "abcdefg")
-	if !h.ConnectionClose {
+	if !h.ConnectionClose() {
 		t.Fatalf("expecting connection: close for identity response")
 	}
 }
@@ -825,28 +826,28 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	// simple headers
 	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\nHost: google.com\r\n\r\n",
 		0, "/foo/bar", "google.com", "", "", "")
-	if h.ConnectionClose {
+	if h.ConnectionClose() {
 		t.Fatalf("unexpected connection: close header")
 	}
 
 	// simple headers with body
 	testRequestHeaderReadSuccess(t, h, "GET /a/bar HTTP/1.1\r\nHost: gole.com\r\nconneCTION: close\r\n\r\nfoobar",
 		0, "/a/bar", "gole.com", "", "", "foobar")
-	if !h.ConnectionClose {
+	if !h.ConnectionClose() {
 		t.Fatalf("connection: close unset")
 	}
 
 	// ancient http protocol
 	testRequestHeaderReadSuccess(t, h, "GET /bar HTTP/1.0\r\nHost: gole\r\n\r\npppp",
 		0, "/bar", "gole", "", "", "pppp")
-	if !h.ConnectionClose {
+	if !h.ConnectionClose() {
 		t.Fatalf("expecting connectionClose for ancient http protocol")
 	}
 
 	// complex headers with body
 	testRequestHeaderReadSuccess(t, h, "GET /aabar HTTP/1.1\r\nAAA: bbb\r\nHost: ole.com\r\nAA: bb\r\n\r\nzzz",
 		0, "/aabar", "ole.com", "", "", "zzz")
-	if h.ConnectionClose {
+	if h.ConnectionClose() {
 		t.Fatalf("unexpected connection: close")
 	}
 

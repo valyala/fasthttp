@@ -545,7 +545,7 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 	}
 	c.releaseReader(br)
 
-	if req.Header.ConnectionClose || resp.Header.ConnectionClose {
+	if req.Header.ConnectionClose() || resp.Header.ConnectionClose() {
 		c.closeConn(cc)
 	} else {
 		c.releaseConn(cc)
