@@ -107,7 +107,7 @@ func (req *Request) parseURI() {
 	}
 	req.parsedURI = true
 
-	req.uri.Parse(req.Header.host, req.Header.RequestURI())
+	req.uri.Parse(req.Header.Host(), req.Header.RequestURI())
 }
 
 // PostArgs returns POST arguments.
@@ -208,7 +208,7 @@ func isSkipResponseBody(statusCode int) bool {
 //
 // Write doesn't flush request to w for performance reasons.
 func (req *Request) Write(w *bufio.Writer) error {
-	if len(req.Header.host) == 0 {
+	if len(req.Header.Host()) == 0 {
 		uri := req.URI()
 		req.Header.SetHostBytes(uri.Host)
 		req.Header.SetRequestURIBytes(uri.RequestURI())
