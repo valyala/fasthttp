@@ -503,7 +503,7 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 	}
 	conn := cc.c
 
-	userAgentOld := req.Header.userAgent
+	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
 		req.Header.userAgent = c.getClientName()
 	}
