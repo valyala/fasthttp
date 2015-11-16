@@ -62,7 +62,7 @@ func testResponseBodyStream(t *testing.T, body string, chunked bool) {
 	var resp Response
 	resp.BodyStream = bytes.NewBufferString(body)
 	if !chunked {
-		resp.Header.ContentLength = len(body)
+		resp.Header.SetContentLength(len(body))
 	}
 
 	var w bytes.Buffer
@@ -223,8 +223,8 @@ func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, 
 	if resp1.Header.StatusCode != expectedStatusCode {
 		t.Fatalf("Unexpected status code: %d. Expected %d", resp1.Header.StatusCode, expectedStatusCode)
 	}
-	if resp1.Header.ContentLength != len(body) {
-		t.Fatalf("Unexpected content-length: %d. Expected %d", resp1.Header.ContentLength, len(body))
+	if resp1.Header.ContentLength() != len(body) {
+		t.Fatalf("Unexpected content-length: %d. Expected %d", resp1.Header.ContentLength(), len(body))
 	}
 	if string(resp1.Header.Peek("Content-Type")) != expectedContentType {
 		t.Fatalf("Unexpected content-type: %q. Expected %q", resp1.Header.Peek("Content-Type"), expectedContentType)

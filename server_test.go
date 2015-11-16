@@ -353,8 +353,8 @@ func TestServerConnError(t *testing.T) {
 	if resp.Header.StatusCode != 423 {
 		t.Fatalf("Unexpected status code %d. Expected %d", resp.Header.StatusCode, 423)
 	}
-	if resp.Header.ContentLength != 6 {
-		t.Fatalf("Unexpected Content-Length %d. Expected %d", resp.Header.ContentLength, 6)
+	if resp.Header.ContentLength() != 6 {
+		t.Fatalf("Unexpected Content-Length %d. Expected %d", resp.Header.ContentLength(), 6)
 	}
 	if !bytes.Equal(resp.Header.Peek("Content-Type"), defaultContentType) {
 		t.Fatalf("Unexpected Content-Type %q. Expected %q", resp.Header.Peek("Content-Type"), defaultContentType)

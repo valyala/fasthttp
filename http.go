@@ -166,12 +166,12 @@ func (req *Request) Read(r *bufio.Reader) error {
 	}
 
 	if req.Header.IsPost() {
-		req.Body, err = readBody(r, req.Header.ContentLength, req.Body)
+		req.Body, err = readBody(r, req.Header.ContentLength(), req.Body)
 		if err != nil {
 			req.Clear()
 			return err
 		}
-		req.Header.ContentLength = len(req.Body)
+		req.Header.SetContentLength(len(req.Body))
 	}
 	return nil
 }
@@ -185,12 +185,12 @@ func (resp *Response) Read(r *bufio.Reader) error {
 	}
 
 	if !isSkipResponseBody(resp.Header.StatusCode) && !resp.SkipBody {
-		resp.Body, err = readBody(r, resp.Header.ContentLength, resp.Body)
+		resp.Body, err = readBody(r, resp.Header.ContentLength(), resp.Body)
 		if err != nil {
 			resp.Clear()
 			return err
 		}
-		resp.Header.ContentLength = len(resp.Body)
+		resp.Header.SetContentLength(len(resp.Body))
 	}
 	return nil
 }
@@ -213,7 +213,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 		req.Header.SetHostBytes(uri.Host)
 		req.Header.SetRequestURIBytes(uri.RequestURI())
 	}
-	req.Header.ContentLength = len(req.Body)
+	req.Header.SetContentLength(len(req.Body))
 	err := req.Header.Write(w)
 	if err != nil {
 		return err
@@ -232,15 +232,16 @@ func (req *Request) Write(w *bufio.Writer) error {
 func (resp *Response) Write(w *bufio.Writer) error {
 	var err error
 	if resp.BodyStream != nil {
-		if resp.Header.ContentLength > 0 {
+		contentLength := resp.Header.ContentLength()
+		if contentLength > 0 {
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
-			if err = writeBodyFixedSize(w, resp.BodyStream, resp.Header.ContentLength); err != nil {
+			if err = writeBodyFixedSize(w, resp.BodyStream, contentLength); err != nil {
 				return err
 			}
 		} else {
-			resp.Header.ContentLength = -1
+			resp.Header.SetContentLength(-1)
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
@@ -254,7 +255,7 @@ func (resp *Response) Write(w *bufio.Writer) error {
 		return err
 	}
 
-	resp.Header.ContentLength = len(resp.Body)
+	resp.Header.SetContentLength(len(resp.Body))
 	if err = resp.Header.Write(w); err != nil {
 		return err
 	}

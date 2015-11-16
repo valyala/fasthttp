@@ -52,6 +52,32 @@ func AppendHTTPDate(dst []byte, date time.Time) []byte {
 	return date.In(gmtLocation).AppendFormat(dst, time.RFC1123)
 }
 
+// AppendUint appends n to dst and returns dst (which may be newly allocated).
+func AppendUint(dst []byte, n int) []byte {
+	if n < 0 {
+		panic("BUG: int must be positive")
+	}
+
+	v := uintBufPool.Get()
+	if v == nil {
+		v = make([]byte, maxIntChars+8)
+	}
+	buf := v.([]byte)
+	i := len(buf) - 1
+	for {
+		buf[i] = '0' + byte(n%10)
+		n /= 10
+		if n == 0 {
+			break
+		}
+		i--
+	}
+
+	dst = append(dst, buf[i:]...)
+	uintBufPool.Put(v)
+	return dst
+}
+
 // ParseUint parses uint from buf.
 func ParseUint(buf []byte) (int, error) {
 	v, n, err := parseUintBuf(buf)
@@ -161,38 +187,14 @@ func readHexInt(r *bufio.Reader) (int, error) {
 	}
 }
 
-var intBufPool sync.Pool
-
-func writeInt(w *bufio.Writer, n int) error {
-	if n < 0 {
-		panic("BUG: int must be positive")
-	}
-
-	v := intBufPool.Get()
-	if v == nil {
-		v = make([]byte, maxIntChars+8)
-	}
-	buf := v.([]byte)
-	i := len(buf) - 1
-	for {
-		buf[i] = '0' + byte(n%10)
-		n /= 10
-		if n == 0 {
-			break
-		}
-		i--
-	}
-	_, err := w.Write(buf[i:])
-	intBufPool.Put(v)
-	return err
-}
+var uintBufPool sync.Pool
 
 func writeHexInt(w *bufio.Writer, n int) error {
 	if n < 0 {
 		panic("BUG: int must be positive")
 	}
 
-	v := intBufPool.Get()
+	v := uintBufPool.Get()
 	if v == nil {
 		v = make([]byte, maxIntChars+8)
 	}
@@ -207,7 +209,7 @@ func writeHexInt(w *bufio.Writer, n int) error {
 		i--
 	}
 	_, err := w.Write(buf[i:])
-	intBufPool.Put(v)
+	uintBufPool.Put(v)
 	return err
 }
 
