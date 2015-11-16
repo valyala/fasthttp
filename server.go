@@ -267,6 +267,23 @@ func (ctx *RequestCtx) SetConnectionClose() {
 	ctx.Request.Header.SetConnectionClose()
 }
 
+// SetStatusCode sets response status code.
+func (ctx *RequestCtx) SetStatusCode(statusCode int) {
+	ctx.Response.Header.StatusCode = statusCode
+}
+
+// SetContentType sets response Content-Type.
+func (ctx *RequestCtx) SetContentType(contentType string) {
+	ctx.Response.Header.SetContentType(contentType)
+}
+
+// SetContentTypeBytes sets response Content-Type.
+//
+// It is safe modifying contentType buffer after function return.
+func (ctx *RequestCtx) SetContentTypeBytes(contentType []byte) {
+	ctx.Response.Header.SetContentTypeBytes(contentType)
+}
+
 // RequestURI returns RequestURI.
 //
 // This uri is valid until returning from RequestHandler.
@@ -374,7 +391,7 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 	resp := &ctx.Response
 	resp.Clear()
 	resp.Header.StatusCode = statusCode
-	resp.Header.SetCanonical(strContentType, defaultContentType)
+	resp.Header.SetContentTypeBytes(defaultContentType)
 	resp.Body = AppendBytesStr(resp.Body[:0], msg)
 }
 
@@ -384,7 +401,7 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 //
 // Success calls are ignored after TimeoutError call.
 func (ctx *RequestCtx) Success(contentType string, body []byte) {
-	ctx.Response.Header.SetBytesK(strContentType, contentType)
+	ctx.SetContentTypeBytes(contentType)
 	ctx.SetResponseBody(body)
 }
 
