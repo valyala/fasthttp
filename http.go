@@ -74,6 +74,11 @@ func (req *Request) SetRequestURIBytes(requestURI []byte) {
 	req.Header.SetRequestURIBytes(requestURI)
 }
 
+// StatusCode returns response's status code.
+func (resp *Response) StatusCode() int {
+	return resp.Header.StatusCode
+}
+
 // CopyTo copies req contents to dst.
 func (req *Request) CopyTo(dst *Request) {
 	dst.Clear()
