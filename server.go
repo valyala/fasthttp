@@ -708,7 +708,7 @@ func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 		panic("BUG: cannot write timed out response")
 	}
 	h := &ctx.Response.Header
-	serverOld := h.server
+	serverOld := h.Server()
 	if len(serverOld) == 0 {
 		h.server = ctx.s.getServerName()
 	}

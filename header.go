@@ -81,6 +81,23 @@ func (h *ResponseHeader) SetContentTypeBytes(contentType []byte) {
 	h.contentType = append(h.contentType[:0], contentType...)
 }
 
+// Server returns Server header value.
+func (h *ResponseHeader) Server() []byte {
+	return h.server
+}
+
+// SetServer sets Server header value.
+func (h *ResponseHeader) SetServer(server string) {
+	h.server = AppendBytesStr(h.server[:0], server)
+}
+
+// SetServerBytes sets Server header value.
+//
+// It is safe modifying server buffer after function return.
+func (h *ResponseHeader) SetServerBytes(server []byte) {
+	h.server = append(h.server[:0], server...)
+}
+
 // ContentType returns Content-Type header value.
 func (h *RequestHeader) ContentType() []byte {
 	return h.contentType
@@ -265,11 +282,13 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 // f must not retain references to key and/or value after returning.
 // Copy key and/or value contents before returning if you need retaining them.
 func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
-	if len(h.ContentType()) > 0 {
-		f(strContentType, h.ContentType())
+	contentType := h.ContentType()
+	if len(contentType) > 0 {
+		f(strContentType, contentType)
 	}
-	if len(h.server) > 0 {
-		f(strServer, h.server)
+	server := h.Server()
+	if len(server) > 0 {
+		f(strServer, server)
 	}
 	if len(h.cookies) > 0 {
 		visitArgs(h.cookies, func(k, v []byte) {
@@ -309,8 +328,9 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 	if len(h.host) > 0 {
 		f(strHost, h.host)
 	}
-	if len(h.ContentType()) > 0 {
-		f(strContentType, h.ContentType())
+	contentType := h.ContentType()
+	if len(contentType) > 0 {
+		f(strContentType, contentType)
 	}
 	if len(h.userAgent) > 0 {
 		f(strUserAgent, h.userAgent)
@@ -393,7 +413,7 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	case bytes.Equal(strContentType, key):
 		h.SetContentTypeBytes(value)
 	case bytes.Equal(strServer, key):
-		h.server = append(h.server[:0], value...)
+		h.SetServerBytes(value)
 	case bytes.Equal(strContentLength, key):
 		// skip Conent-Length setting, since it will be set automatically.
 	case bytes.Equal(strConnection, key):
@@ -550,7 +570,7 @@ func (h *ResponseHeader) peek(key []byte) []byte {
 	case bytes.Equal(strContentType, key):
 		return h.ContentType()
 	case bytes.Equal(strServer, key):
-		return h.server
+		return h.Server()
 	case bytes.Equal(strConnection, key):
 		if h.ConnectionClose {
 			return strClose
@@ -711,7 +731,7 @@ func (h *ResponseHeader) Write(w *bufio.Writer) error {
 	}
 	w.Write(statusLine(statusCode))
 
-	server := h.server
+	server := h.Server()
 	if len(server) == 0 {
 		server = defaultServerName
 	}
@@ -921,7 +941,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) ([]byte, error) {
 		case bytes.Equal(s.key, strContentType):
 			h.SetContentTypeBytes(s.value)
 		case bytes.Equal(s.key, strServer):
-			h.server = append(h.server[:0], s.value...)
+			h.SetServerBytes(s.value)
 		case bytes.Equal(s.key, strContentLength):
 			if h.ContentLength != -1 {
 				h.ContentLength, err = parseContentLength(s.value)
