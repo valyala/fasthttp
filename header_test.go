@@ -818,6 +818,22 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	if !h.ConnectionClose() {
 		t.Fatalf("expecting connection: close for identity response")
 	}
+
+	// non-numeric content-length
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: faaa\r\nContent-Type: text/html\r\n\r\nfoobar",
+		200, -2, "text/html", "foobar")
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 201 OK\r\nContent-Length: 123aa\r\nContent-Type: text/ht\r\n\r\naaa",
+		201, -2, "text/ht", "aaa")
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: aa124\r\nContent-Type: html\r\n\r\nxx",
+		200, -2, "html", "xx")
+
+	// no content-type
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\r\nContent-Length: 123\r\n\r\nfoiaaa",
+		400, 123, string(defaultContentType), "foiaaa")
+
+	// no headers
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\n\r\naaaabbb",
+		200, 0, string(defaultContentType), "aaaabbb")
 }
 
 func TestRequestHeaderReadSuccess(t *testing.T) {
@@ -922,12 +938,41 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	// request uri with spaces
 	testRequestHeaderReadSuccess(t, h, "GET /foo/ bar baz HTTP/1.1\r\nHost: aa.com\r\n\r\nxxx",
 		0, "/foo/ bar baz", "aa.com", "", "", "xxx")
+
+	// no host
+	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\nFOObar: assdfd\r\n\r\naaa",
+		0, "/foo/bar", "", "", "", "aaa")
+
+	// no host, no headers
+	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\n\r\nfoobar",
+		0, "/foo/bar", "", "", "", "foobar")
+
+	// post with invalid content-length
+	testRequestHeaderReadSuccess(t, h, "POST /a HTTP/1.1\r\nHost: bb\r\nContent-Type: aa\r\nContent-Length: dff\r\n\r\nqwerty",
+		-2, "/a", "bb", "", "aa", "qwerty")
+
+	// post without content-length and content-type
+	testRequestHeaderReadSuccess(t, h, "POST /aaa HTTP/1.1\r\nHost: aaa.com\r\n\r\nzxc",
+		-2, "/aaa", "aaa.com", "", "", "zxc")
+
+	// post without content-type
+	testRequestHeaderReadSuccess(t, h, "POST /abc HTTP/1.1\r\nHost: aa.com\r\nContent-Length: 123\r\n\r\npoiuy",
+		123, "/abc", "aa.com", "", "", "poiuy")
+
+	// post without content-length
+	testRequestHeaderReadSuccess(t, h, "POST /abc HTTP/1.1\r\nHost: aa.com\r\nContent-Type: adv\r\n\r\n123456",
+		-2, "/abc", "aa.com", "", "adv", "123456")
+
+	// invalid method
+	testRequestHeaderReadSuccess(t, h, "POST /foo/bar HTTP/1.1\r\nHost: google.com\r\n\r\nmnbv",
+		-2, "/foo/bar", "google.com", "", "", "mnbv")
 }
 
 func TestResponseHeaderReadError(t *testing.T) {
 	h := &ResponseHeader{}
 
 	// incorrect first line
+	testResponseHeaderReadError(t, h, "")
 	testResponseHeaderReadError(t, h, "fo")
 	testResponseHeaderReadError(t, h, "foobarbaz")
 	testResponseHeaderReadError(t, h, "HTTP/1.1")
@@ -941,46 +986,22 @@ func TestResponseHeaderReadError(t *testing.T) {
 
 	// no headers
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\n")
-	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\n\r\n")
 
 	// no trailing crlf
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n")
-
-	// non-numeric content-length
-	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: faaa\r\nContent-Type: text/html\r\n\r\n")
-	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 123aa\r\nContent-Type: text/html\r\n\r\n")
-	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: aa124\r\nContent-Type: text/html\r\n\r\n")
-
-	// no content-type
-	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 123\r\n\r\n")
 }
 
 func TestRequestHeaderReadError(t *testing.T) {
 	h := &RequestHeader{}
 
-	// invalid method
-	testRequestHeaderReadError(t, h, "POST /foo/bar HTTP/1.1\r\nHost: google.com\r\n\r\n")
+	// incorrect first line
+	testRequestHeaderReadError(t, h, "")
+	testRequestHeaderReadError(t, h, "fo")
+	testRequestHeaderReadError(t, h, "GET ")
+	testRequestHeaderReadError(t, h, "GET / HTTP/1.1\r")
 
 	// missing RequestURI
 	testRequestHeaderReadError(t, h, "GET  HTTP/1.1\r\nHost: google.com\r\n\r\n")
-
-	// no host
-	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\nFOObar: assdfd\r\n\r\naaa")
-
-	// no host, no headers
-	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\n\r\nfoobar")
-
-	// post with invalid content-length
-	testRequestHeaderReadError(t, h, "POST /a HTTP/1.1\r\nHost: bb\r\nContent-Type: aa\r\nContent-Length: dff\r\n\r\n")
-
-	// post without content-length and content-type
-	testRequestHeaderReadError(t, h, "POST /aaa HTTP/1.1\r\nHost: aaa.com\r\n\r\n")
-
-	// post without content-type
-	testRequestHeaderReadError(t, h, "POST /abc HTTP/1.1\r\nHost: aa.com\r\nContent-Length: 123\r\n\r\n")
-
-	// post without content-length
-	testRequestHeaderReadError(t, h, "POST /abc HTTP/1.1\r\nHost: aa.com\r\nContent-Type: adv\r\n\r\n")
 }
 
 func testResponseHeaderReadError(t *testing.T, h *ResponseHeader, headers string) {
