@@ -27,7 +27,7 @@ func BenchmarkServerGet10ReqPerConn(b *testing.B) {
 	benchmarkServerGet(b, defaultClientsCount, 10)
 }
 
-func BenchmarkServerGet10000ReqPerConn(b *testing.B) {
+func BenchmarkServerGet10KReqPerConn(b *testing.B) {
 	benchmarkServerGet(b, defaultClientsCount, 10000)
 }
 
