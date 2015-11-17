@@ -63,38 +63,34 @@ type RequestHeader struct {
 
 // ConnectionClose returns true if 'Connection: close' header is set.
 func (h *ResponseHeader) ConnectionClose() bool {
-	if !h.rawHeadersParsed {
-		if h.ContentLength() == -2 {
-			return true
-		}
-		if bytes.Equal(peekRawHeader(h.rawHeaders, strConnection), strClose) {
-			return true
-		}
-		// h.parseRawHeaders() isn't called for performance reasons.
-	}
+	h.parseRawHeaders()
 	return h.connectionClose
 }
 
 // SetConnectionClose sets 'Connection: close' header.
 func (h *ResponseHeader) SetConnectionClose() {
-	h.parseRawHeaders()
+	// h.parseRawHeaders() isn't called for performance reasons.
 	h.connectionClose = true
 }
 
 // ConnectionClose returns true if 'Connection: close' header is set.
 func (h *RequestHeader) ConnectionClose() bool {
+	// h.parseRawHeaders() isn't called for performance reasons.
 	if !h.rawHeadersParsed {
-		if bytes.Equal(peekRawHeader(h.rawHeaders, strConnection), strClose) {
+		if h.connectionClose {
 			return true
 		}
-		// h.parseRawHeaders() isn't called for performance reasons.
+		if hasRawHeader(h.rawHeaders, strConnectionClose) {
+			h.connectionClose = true
+			return true
+		}
 	}
 	return h.connectionClose
 }
 
 // SetConnectionClose sets 'Connection: close' header.
 func (h *RequestHeader) SetConnectionClose() {
-	h.parseRawHeaders()
+	// h.parseRawHeaders() isn't called for performance reasons.
 	h.connectionClose = true
 }
 
@@ -104,28 +100,7 @@ func (h *RequestHeader) SetConnectionClose() {
 // -1 means Transfer-Encoding: chunked.
 // -2 means Transfer-Encoding: identity.
 func (h *ResponseHeader) ContentLength() int {
-	if !h.rawHeadersParsed {
-		if h.contentLength < 0 || len(h.contentLengthBytes) > 0 {
-			return h.contentLength
-		}
-		value := peekRawHeader(h.rawHeaders, strTransferEncoding)
-		if len(value) > 0 {
-			if bytes.Equal(value, strIdentity) {
-				h.connectionClose = true
-				h.contentLength = -2
-				return h.contentLength
-			}
-			h.contentLength = -1
-			return h.contentLength
-		}
-		value = peekRawHeader(h.rawHeaders, strContentLength)
-		if contentLength, err := parseContentLength(value); err == nil {
-			h.contentLength = contentLength
-			h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
-			return contentLength
-		}
-		h.parseRawHeaders()
-	}
+	h.parseRawHeaders()
 	return h.contentLength
 }
 
@@ -156,60 +131,11 @@ func (h *ResponseHeader) SetContentLength(contentLength int) {
 // It may be negative:
 // -1 means Transfer-Encoding: chunked.
 func (h *RequestHeader) ContentLength() int {
-	if h.IsGet() || h.IsHead() {
+	if !h.IsPost() {
 		return 0
 	}
-	if !h.rawHeadersParsed {
-		if h.contentLength < 0 || len(h.contentLengthBytes) > 0 {
-			return h.contentLength
-		}
-		value := peekRawHeader(h.rawHeaders, strTransferEncoding)
-		if len(value) > 0 {
-			h.contentLength = -1
-			return h.contentLength
-		}
-		value = peekRawHeader(h.rawHeaders, strContentLength)
-		if contentLength, err := parseContentLength(value); err == nil {
-			h.contentLength = contentLength
-			h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
-			return contentLength
-		}
-		h.parseRawHeaders()
-	}
+	h.parseRawHeaders()
 	return h.contentLength
-}
-
-func peekRawHeader(buf, key []byte) []byte {
-	n := bytes.Index(buf, key)
-	if n < 0 {
-		return nil
-	}
-	if n > 0 && buf[n-1] != '\n' {
-		return nil
-	}
-	buf = buf[n+len(key):]
-	if len(buf) == 0 {
-		return nil
-	}
-	if buf[0] != ':' {
-		return nil
-	}
-	n = 1
-	for len(buf) > n && buf[n] == ' ' {
-		n++
-	}
-	buf = buf[n:]
-	n = bytes.IndexByte(buf, '\n')
-	if n < 0 {
-		return nil
-	}
-	if n > 0 && buf[n-1] == '\r' {
-		n--
-	}
-	for n > 0 && buf[n-1] == ' ' {
-		n--
-	}
-	return buf[:n]
 }
 
 // SetContentLength sets Content-Length header value.
@@ -1076,6 +1002,7 @@ func (h *ResponseHeader) parse(buf []byte) (int, error) {
 		return 0, err
 	}
 	h.rawHeaders = rawHeaders
+
 	return m + n, nil
 }
 
@@ -1089,6 +1016,7 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 		return 0, err
 	}
 	h.rawHeaders = rawHeaders
+
 	return m + n, nil
 }
 
@@ -1158,6 +1086,28 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	h.requestURI = append(h.requestURI[:0], b[:n]...)
 
 	return len(buf) - len(bNext), nil
+}
+
+func hasRawHeader(buf, s []byte) bool {
+	n := bytes.Index(buf, s)
+	if n < 0 {
+		return false
+	}
+	if n > 0 && buf[n-1] != '\n' {
+		return false
+	}
+	n += len(s)
+	if n >= len(buf) {
+		return false
+	}
+	switch buf[n] {
+	case '\r':
+		return len(buf) > n+1 && buf[n+1] == '\n'
+	case '\n':
+		return true
+	default:
+		return false
+	}
 }
 
 func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
