@@ -166,6 +166,51 @@ func TestServerConnectionClose(t *testing.T) {
 	}
 }
 
+func TestServerRequestNumAndTime(t *testing.T) {
+	n := uint64(0)
+	var connT time.Time
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			n++
+			if ctx.ServeConnRequestNum() != n {
+				t.Fatalf("unexpected request number: %d. Expecting %d", ctx.ServeConnRequestNum(), n)
+			}
+			if connT.IsZero() {
+				connT = ctx.ServeConnTime()
+			}
+			if ctx.ServeConnTime() != connT {
+				t.Fatalf("unexpected serve conn time: %s. Expecting %s", ctx.ServeConnTime(), connT)
+			}
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo1 HTTP/1.1\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("GET /bar HTTP/1.1\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("GET /baz HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	if n != 3 {
+		t.Fatalf("unexpected number of requests served: %d. Expecting %d", n, 3)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, 200, string(defaultContentType), "")
+}
+
 func TestServerEmptyResponse(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
