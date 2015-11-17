@@ -136,6 +136,14 @@ type Server struct {
 	// may be established to the server from a single IP address.
 	MaxConnsPerIP int
 
+	// Maximum number of requests served per connection.
+	//
+	// The server closes connection after the last request.
+	// 'Connection: close' header is added to the last request.
+	//
+	// By default unlimited number of requests served per connection.
+	MaxRequestsPerConn int
+
 	// Logger, which is used by RequestCtx.Logger().
 	//
 	// By default standard logger from log package is used.
@@ -653,9 +661,6 @@ func (s *Server) getConcurrency() int {
 }
 
 func (s *Server) serveConn(c net.Conn) error {
-	readTimeout := s.ReadTimeout
-	writeTimeout := s.WriteTimeout
-
 	currentTime := time.Now()
 
 	ctx := s.acquireCtx(c)
@@ -674,8 +679,8 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.serveConnRequestNum++
 		ctx.time = currentTime
 
-		if readTimeout > 0 {
-			if err = c.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
+		if s.ReadTimeout > 0 {
+			if err = c.SetReadDeadline(currentTime.Add(s.ReadTimeout)); err != nil {
 				break
 			}
 		}
@@ -718,8 +723,8 @@ func (s *Server) serveConn(c net.Conn) error {
 			ctx.Error(errMsg, StatusRequestTimeout)
 		}
 
-		if writeTimeout > 0 {
-			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+		if s.WriteTimeout > 0 {
+			if err = c.SetWriteDeadline(time.Now().Add(s.WriteTimeout)); err != nil {
 				break
 			}
 		}
@@ -729,7 +734,11 @@ func (s *Server) serveConn(c net.Conn) error {
 		if err = writeResponse(ctx, bw); err != nil {
 			break
 		}
-		connectionClose = ctx.Response.Header.ConnectionClose() || ctx.Request.Header.ConnectionClose()
+		if s.MaxRequestsPerConn > 0 && ctx.serveConnRequestNum >= uint64(s.MaxRequestsPerConn) {
+			connectionClose = true
+		} else {
+			connectionClose = ctx.Response.Header.ConnectionClose() || ctx.Request.Header.ConnectionClose()
+		}
 
 		if br == nil || connectionClose {
 			err = bw.Flush()
