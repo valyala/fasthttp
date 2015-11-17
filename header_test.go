@@ -10,6 +10,33 @@ import (
 	"testing"
 )
 
+func TestPeekRawHeader(t *testing.T) {
+	// empty header
+	testPeekRawHeader(t, "", "Foo-Bar", "")
+
+	// different case
+	testPeekRawHeader(t, "Content-Length: 3443\r\n", "content-length", "")
+
+	// no trailing crlf
+	testPeekRawHeader(t, "Content-Length: 234", "Content-Length", "")
+
+	// single header
+	testPeekRawHeader(t, "Content-Length: 12345\r\n", "Content-Length", "12345")
+
+	// multiple headers
+	testPeekRawHeader(t, "Host: foobar\r\nContent-Length: 434\r\nFoo: bar\r\n\r\n", "Content-Length", "434")
+
+	// lf without cr
+	testPeekRawHeader(t, "Foo: bar\nConnection: close\nAaa: bbb\ncc: ddd\n", "Connection", "close")
+}
+
+func testPeekRawHeader(t *testing.T, rawHeaders, key, expectedValue string) {
+	v := peekRawHeader([]byte(rawHeaders), []byte(key))
+	if string(v) != expectedValue {
+		t.Fatalf("unexpected raw headers value %q. Expected %q. key %q, rawHeaders %q", v, expectedValue, key, rawHeaders)
+	}
+}
+
 func TestResponseHeaderFirstByteReadEOF(t *testing.T) {
 	var h ResponseHeader
 
@@ -784,7 +811,7 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 
 	// duplicate content-length
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 456\r\nContent-Type: foo/bar\r\nContent-Length: 321\r\n\r\n",
-		200, 321, "foo/bar", "")
+		200, 456, "foo/bar", "")
 
 	// duplicate content-type
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 234\r\nContent-Type: foo/bar\r\nContent-Type: baz/bar\r\n\r\n",
@@ -909,7 +936,7 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 
 	// post with duplicate content-length
 	testRequestHeaderReadSuccess(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nContent-Type: s\r\nContent-Length: 13\r\nContent-Length: 1\r\n\r\n",
-		1, "/xx", "aa", "", "s", "")
+		13, "/xx", "aa", "", "s", "")
 
 	// non-post with content-type
 	testRequestHeaderReadSuccess(t, h, "GET /aaa HTTP/1.1\r\nHost: bbb.com\r\nContent-Type: aaab\r\n\r\n",
