@@ -1279,26 +1279,42 @@ type headerScanner struct {
 }
 
 func (s *headerScanner) next() bool {
-	var b []byte
-	b, s.b, s.err = nextLine(s.b)
-	if s.err != nil {
+	bLen := len(s.b)
+	if bLen >= 2 && s.b[0] == '\r' && s.b[1] == '\n' {
+		s.b = s.b[2:]
 		return false
 	}
-	if len(b) == 0 {
+	if bLen >= 1 && s.b[0] == '\n' {
+		s.b = s.b[1:]
 		return false
 	}
-
-	n := bytes.IndexByte(b, ':')
+	n := bytes.IndexByte(s.b, ':')
 	if n < 0 {
+		s.err = errNeedMore
 		return false
 	}
-	s.key = b[:n]
-	n++
+	s.key = s.b[:n]
 	normalizeHeaderKey(s.key)
-	for len(b) > n && b[n] == ' ' {
+	n++
+	for len(s.b) > n && s.b[n] == ' ' {
 		n++
 	}
-	s.value = b[n:]
+	s.b = s.b[n:]
+	n = bytes.IndexByte(s.b, '\n')
+	if n < 0 {
+		s.err = errNeedMore
+		return false
+	}
+	s.value = s.b[:n]
+	s.b = s.b[n+1:]
+
+	if n > 0 && s.value[n-1] == '\r' {
+		n--
+	}
+	for n > 0 && s.value[n-1] == ' ' {
+		n--
+	}
+	s.value = s.value[:n]
 	return true
 }
 
