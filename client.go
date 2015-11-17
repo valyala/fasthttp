@@ -23,8 +23,9 @@ import (
 // Response is ignored if resp is nil.
 //
 // Client determines the server to be requested in the following order:
-// - from RequestURI if it contains full url with scheme and host;
-// - from Host header otherwise.
+//
+//   - from RequestURI if it contains full url with scheme and host;
+//   - from Host header otherwise.
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
 // to the requested host are busy.
@@ -39,8 +40,9 @@ func Do(req *Request, resp *Response) error {
 // scheme and host) or non-zero Host header + RequestURI.
 //
 // Client determines the server to be requested in the following order:
-// - from RequestURI if it contains full url with scheme and host;
-// - from Host header otherwise.
+//
+//   - from RequestURI if it contains full url with scheme and host;
+//   - from Host header otherwise.
 //
 // ErrTimeout is returned if the response wasn't returned during
 // the given timeout.
@@ -132,8 +134,9 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 // scheme and host) or non-zero Host header + RequestURI.
 //
 // Client determines the server to be requested in the following order:
-// - from RequestURI if it contains full url with scheme and host;
-// - from Host header otherwise.
+//
+//   - from RequestURI if it contains full url with scheme and host;
+//   - from Host header otherwise.
 //
 // ErrTimeout is returned if the response wasn't returned during
 // the given timeout.
@@ -149,8 +152,9 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // Response is ignored if resp is nil.
 //
 // Client determines the server to be requested in the following order:
-// - from RequestURI if it contains full url with scheme and host;
-// - from Host header otherwise.
+//
+//   - from RequestURI if it contains full url with scheme and host;
+//   - from Host header otherwise.
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
 // to the requested host are busy.
@@ -242,9 +246,10 @@ const DefaultMaxConnsPerHost = 100
 //
 // Host and optionally port part of url is passed as addr to DialFunc.
 // Example addr values:
-// - foobar.com       for http://foobar.com/aaa/bb
-// - foobar.com       for https://foobar.com/aaa/bb
-// - foobar.com:8080  for http://foobar.com:8080/aaa/bb
+//
+//   - foobar.com       for http://foobar.com/aaa/bb
+//   - foobar.com       for https://foobar.com/aaa/bb
+//   - foobar.com:8080  for http://foobar.com:8080/aaa/bb
 type DialFunc func(addr string) (net.Conn, error)
 
 // HostClient is a single-host http client. It can make http requests

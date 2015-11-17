@@ -45,9 +45,10 @@ type Response struct {
 	//
 	// BodyStream is read by Response.Write() until one of the following
 	// events occur:
-	// - Response.ContentLength bytes read if it is greater than 0.
-	// - error or io.EOF is returned from BodyStream if Response.ContentLength
-	// is 0 or negative.
+	//
+	//   - Response.ContentLength bytes read if it is greater than 0.
+	//   - error or io.EOF is returned from BodyStream if Response.ContentLength
+	//     is 0 or negative.
 	//
 	// Response.Write() calls BodyStream.Close() (io.Closer) if such method
 	// is present after finishing reading BodyStream.
