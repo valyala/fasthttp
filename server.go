@@ -704,7 +704,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		if err = writeResponse(ctx, bw); err != nil {
 			break
 		}
-		connectionClose = ctx.Request.Header.ConnectionClose() || ctx.Response.Header.ConnectionClose()
+		connectionClose = ctx.Response.Header.ConnectionClose() || ctx.Request.Header.ConnectionClose()
 
 		if br == nil || connectionClose {
 			err = bw.Flush()
