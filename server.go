@@ -308,7 +308,7 @@ func (ctx *RequestCtx) URI() *URI {
 //
 // The referer is valid until returning from RequestHandler.
 func (ctx *RequestCtx) Referer() []byte {
-	return ctx.Request.Header.PeekBytes(strReferer)
+	return ctx.Request.Header.Referer()
 }
 
 // Path returns requested path.
