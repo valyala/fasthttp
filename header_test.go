@@ -860,7 +860,7 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 
 	// no headers
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\n\r\naaaabbb",
-		200, 0, string(defaultContentType), "aaaabbb")
+		200, -2, string(defaultContentType), "aaaabbb")
 }
 
 func TestRequestHeaderReadSuccess(t *testing.T) {
