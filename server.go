@@ -195,8 +195,7 @@ type RequestCtx struct {
 	// Outgoing response.
 	Response Response
 
-	// Unique id of the request.
-	ID uint64
+	id uint64
 
 	time time.Time
 
@@ -252,12 +251,17 @@ func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	ctx := cl.ctx
 	req := &ctx.Request
 	cl.logger.Printf("%.3f #%016X - %s<->%s - %s %s - %s",
-		time.Since(ctx.Time()).Seconds(), ctx.ID, ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method(), ctx.URI().FullURI(), s)
+		time.Since(ctx.Time()).Seconds(), ctx.ID(), ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method(), ctx.URI().FullURI(), s)
 	ctxLoggerLock.Unlock()
 }
 
 var zeroTCPAddr = &net.TCPAddr{
 	IP: net.IPv4zero,
+}
+
+// ID returns unique ID of the request.
+func (ctx *RequestCtx) ID() uint64 {
+	return ctx.id
 }
 
 // Time returns RequestHandler call time.
@@ -642,7 +646,7 @@ func (s *Server) serveConn(c net.Conn) error {
 	var errMsg string
 	for {
 		currentTime = time.Now()
-		ctx.ID++
+		ctx.id++
 		ctx.time = currentTime
 
 		if readTimeout > 0 {
@@ -889,7 +893,7 @@ func (fa *fakeAddrer) Close() error {
 }
 
 func (ctx *RequestCtx) initID() {
-	ctx.ID = (atomic.AddUint64(&globalCtxID, 1)) << 32
+	ctx.id = (atomic.AddUint64(&globalCtxID, 1)) << 32
 }
 
 func (s *Server) releaseCtx(ctx *RequestCtx) {
