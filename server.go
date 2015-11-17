@@ -198,8 +198,7 @@ type RequestCtx struct {
 	// Unique id of the request.
 	ID uint64
 
-	// Start time for the request processing.
-	Time time.Time
+	time time.Time
 
 	logger ctxLogger
 	s      *Server
@@ -253,12 +252,17 @@ func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	ctx := cl.ctx
 	req := &ctx.Request
 	cl.logger.Printf("%.3f #%016X - %s<->%s - %s %s - %s",
-		time.Since(ctx.Time).Seconds(), ctx.ID, ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method(), ctx.URI().FullURI(), s)
+		time.Since(ctx.Time()).Seconds(), ctx.ID, ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method(), ctx.URI().FullURI(), s)
 	ctxLoggerLock.Unlock()
 }
 
 var zeroTCPAddr = &net.TCPAddr{
 	IP: net.IPv4zero,
+}
+
+// Time returns RequestHandler call time.
+func (ctx *RequestCtx) Time() time.Time {
+	return ctx.time
 }
 
 // SetConnectionClose sets 'Connection: close' response header and closes
@@ -639,7 +643,7 @@ func (s *Server) serveConn(c net.Conn) error {
 	for {
 		currentTime = time.Now()
 		ctx.ID++
-		ctx.Time = currentTime
+		ctx.time = currentTime
 
 		if readTimeout > 0 {
 			if err = c.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
@@ -676,7 +680,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		dt = currentTime.Sub(prevReadTime)
 		prevReadTime = currentTime
 
-		ctx.Time = currentTime
+		ctx.time = currentTime
 		ctx.Response.Clear()
 		s.Handler(ctx)
 		errMsg = ctx.timeoutErrMsg
@@ -854,7 +858,7 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	ctx.initID()
 	req.CopyTo(&ctx.Request)
 	ctx.Response.Clear()
-	ctx.Time = time.Now()
+	ctx.time = time.Now()
 }
 
 var fakeServer Server
