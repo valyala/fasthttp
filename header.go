@@ -985,10 +985,11 @@ func (h *ResponseHeader) parse(buf []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, err := h.readRawHeaders(buf[m:])
+	rawHeaders, n, err := readRawHeaders(h.rawHeaders, buf[m:])
 	if err != nil {
 		return 0, err
 	}
+	h.rawHeaders = rawHeaders
 	return m + n, nil
 }
 
@@ -997,10 +998,11 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, err := h.readRawHeaders(buf[m:])
+	rawHeaders, n, err := readRawHeaders(h.rawHeaders, buf[m:])
 	if err != nil {
 		return 0, err
 	}
+	h.rawHeaders = rawHeaders
 	return m + n, nil
 }
 
@@ -1072,15 +1074,15 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	return len(buf) - len(bNext), nil
 }
 
-func (h *ResponseHeader) readRawHeaders(buf []byte) (int, error) {
+func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
+	dst = dst[:0]
 	n := bytes.IndexByte(buf, '\n')
 	if n < 0 {
-		return 0, errNeedMore
+		return nil, 0, errNeedMore
 	}
 	if (n == 1 && buf[0] == '\r') || n == 0 {
 		// empty headers
-		h.rawHeaders = h.rawHeaders[:0]
-		return n + 1, nil
+		return dst, n + 1, nil
 	}
 
 	n++
@@ -1090,42 +1092,13 @@ func (h *ResponseHeader) readRawHeaders(buf []byte) (int, error) {
 		b = b[m:]
 		m = bytes.IndexByte(b, '\n')
 		if m < 0 {
-			return 0, errNeedMore
+			return nil, 0, errNeedMore
 		}
 		m++
 		n += m
 		if (m == 2 && b[0] == '\r') || m == 1 {
-			h.rawHeaders = append(h.rawHeaders[:0], buf[:n]...)
-			return n, nil
-		}
-	}
-}
-
-func (h *RequestHeader) readRawHeaders(buf []byte) (int, error) {
-	n := bytes.IndexByte(buf, '\n')
-	if n < 0 {
-		return 0, errNeedMore
-	}
-	if (n == 1 && buf[0] == '\r') || n == 0 {
-		// empty headers
-		h.rawHeaders = h.rawHeaders[:0]
-		return n + 1, nil
-	}
-
-	n++
-	b := buf
-	m := n
-	for {
-		b = b[m:]
-		m = bytes.IndexByte(b, '\n')
-		if m < 0 {
-			return 0, errNeedMore
-		}
-		m++
-		n += m
-		if (m == 2 && b[0] == '\r') || m == 1 {
-			h.rawHeaders = append(h.rawHeaders[:0], buf[:n]...)
-			return n, nil
+			dst = append(dst, buf[:n]...)
+			return dst, n, nil
 		}
 	}
 }
