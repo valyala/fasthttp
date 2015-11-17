@@ -115,9 +115,10 @@ func BenchmarkServerMaxConnsPerIP(b *testing.B) {
 	clientsCount := 1000
 	requestsPerConn := 10
 	ch := make(chan struct{}, b.N)
+	responseBody := []byte("123")
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			ctx.Success("foobar", []byte("123"))
+			ctx.Success("foobar", responseBody)
 			registerServedRequest(b, ch)
 		},
 		MaxConnsPerIP: clientsCount * 2,
@@ -133,15 +134,16 @@ func BenchmarkServerTimeoutError(b *testing.B) {
 	requestsPerConn := 10
 	ch := make(chan struct{}, b.N)
 	n := uint32(0)
+	responseBody := []byte("123")
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			if atomic.AddUint32(&n, 1)&7 == 0 {
 				ctx.TimeoutError("xxx")
 				go func() {
-					ctx.Success("foobar", []byte("123"))
+					ctx.Success("foobar", responseBody)
 				}()
 			} else {
-				ctx.Success("foobar", []byte("123"))
+				ctx.Success("foobar", responseBody)
 			}
 			registerServedRequest(b, ch)
 		},
