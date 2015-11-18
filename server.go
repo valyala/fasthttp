@@ -450,6 +450,12 @@ func (ctx *RequestCtx) SetBody(body []byte) {
 	ctx.Response.SetBody(body)
 }
 
+// Write writes p into response body.
+func (ctx *RequestCtx) Write(p []byte) (int, error) {
+	ctx.Response.body = append(ctx.Response.body, p...)
+	return len(p), nil
+}
+
 // PostBody returns POST request body.
 //
 // The returned value is valid until RequestHandler return.
