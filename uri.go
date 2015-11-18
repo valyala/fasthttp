@@ -40,15 +40,15 @@ type URI struct {
 	requestURI []byte
 }
 
-// Clear clears uri.
-func (x *URI) Clear() {
+// Reset clears uri.
+func (x *URI) Reset() {
 	x.PathOriginal = x.PathOriginal[:0]
 	x.Scheme = x.Scheme[:0]
 	x.Host = x.Host[:0]
 	x.Path = x.Path[:0]
 	x.QueryString = x.QueryString[:0]
 	x.Hash = x.Hash[:0]
-	x.queryArgs.Clear()
+	x.queryArgs.Reset()
 	x.parsedQueryArgs = false
 
 	x.fullURI = x.fullURI[:0]
@@ -59,7 +59,7 @@ func (x *URI) Clear() {
 //
 // It is safe modifying host and uri buffers after the Parse call.
 func (x *URI) Parse(host, uri []byte) {
-	x.Clear()
+	x.Reset()
 
 	scheme, host, uri := splitHostUri(host, uri)
 	x.Scheme = append(x.Scheme, scheme...)

@@ -20,8 +20,8 @@ type argsKV struct {
 	value []byte
 }
 
-// Clear clears query args.
-func (a *Args) Clear() {
+// Reset clears query args.
+func (a *Args) Reset() {
 	a.args = a.args[:0]
 }
 
@@ -53,7 +53,7 @@ func (a *Args) Parse(s string) {
 //
 // It is safe modifying b buffer contents after ParseBytes return.
 func (a *Args) ParseBytes(b []byte) {
-	a.Clear()
+	a.Reset()
 
 	var s argsScanner
 	s.b = b

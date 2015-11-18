@@ -376,7 +376,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 	c.Domain = []byte("foobar.com")
 	h.SetCookie(&c)
 
-	c.Clear()
+	c.Reset()
 	c.Key = []byte("foobar")
 	if !h.GetCookie(&c) {
 		t.Fatalf("Cannot find cookie %q", c.Key)

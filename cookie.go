@@ -41,8 +41,8 @@ type Cookie struct {
 
 var zeroTime time.Time
 
-// Clear clears the cookie.
-func (c *Cookie) Clear() {
+// Reset clears the cookie.
+func (c *Cookie) Reset() {
 	c.Key = c.Key[:0]
 	c.Value = c.Value[:0]
 	c.Expire = zeroTime
@@ -87,7 +87,7 @@ func (c *Cookie) Parse(src string) error {
 //
 // It is safe modifying src buffer after function return.
 func (c *Cookie) ParseBytes(src []byte) error {
-	c.Clear()
+	c.Reset()
 
 	var s cookieScanner
 	s.b = src

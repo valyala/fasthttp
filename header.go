@@ -337,8 +337,8 @@ func (h *RequestHeader) Len() int {
 	return n
 }
 
-// Clear clears response header.
-func (h *ResponseHeader) Clear() {
+// Reset clears response header.
+func (h *ResponseHeader) Reset() {
 	h.StatusCode = 0
 	h.connectionClose = false
 
@@ -352,8 +352,8 @@ func (h *ResponseHeader) Clear() {
 	h.cookies = h.cookies[:0]
 }
 
-// Clear clears request header.
-func (h *RequestHeader) Clear() {
+// Reset clears request header.
+func (h *RequestHeader) Reset() {
 	h.connectionClose = false
 
 	h.contentLength = 0
@@ -375,7 +375,7 @@ func (h *RequestHeader) Clear() {
 
 // CopyTo copies all the headers to dst.
 func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
-	dst.Clear()
+	dst.Reset()
 	dst.StatusCode = h.StatusCode
 	dst.connectionClose = h.connectionClose
 	dst.contentLength = h.contentLength
@@ -388,7 +388,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 
 // CopyTo copies all the headers to dst.
 func (h *RequestHeader) CopyTo(dst *RequestHeader) {
-	dst.Clear()
+	dst.Reset()
 	dst.connectionClose = h.connectionClose
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes[:0], h.contentLengthBytes...)
@@ -786,7 +786,7 @@ func (h *ResponseHeader) Read(r *bufio.Reader) error {
 			return nil
 		}
 		if err != errNeedMore {
-			h.Clear()
+			h.Reset()
 			return err
 		}
 		n = r.Buffered() + 1
@@ -794,7 +794,7 @@ func (h *ResponseHeader) Read(r *bufio.Reader) error {
 }
 
 func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
-	h.Clear()
+	h.Reset()
 	b, err := r.Peek(n)
 	if len(b) == 0 {
 		// treat all errors on the first byte read as EOF
@@ -825,7 +825,7 @@ func (h *RequestHeader) Read(r *bufio.Reader) error {
 			return nil
 		}
 		if err != errNeedMore {
-			h.Clear()
+			h.Reset()
 			return err
 		}
 		n = r.Buffered() + 1
@@ -833,7 +833,7 @@ func (h *RequestHeader) Read(r *bufio.Reader) error {
 }
 
 func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
-	h.Clear()
+	h.Reset()
 	b, err := r.Peek(n)
 	if len(b) == 0 {
 		// treat all errors on the first byte read as EOF

@@ -427,7 +427,7 @@ func (ctx *RequestCtx) RemoteIP() net.IP {
 // Error calls are ignored after TimeoutError call.
 func (ctx *RequestCtx) Error(msg string, statusCode int) {
 	resp := &ctx.Response
-	resp.Clear()
+	resp.Reset()
 	resp.Header.StatusCode = statusCode
 	resp.Header.SetContentTypeBytes(defaultContentType)
 	resp.body = AppendBytesStr(resp.body[:0], msg)
@@ -741,7 +741,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		prevReadTime = currentTime
 
 		ctx.time = currentTime
-		ctx.Response.Clear()
+		ctx.Response.Reset()
 		s.Handler(ctx)
 		errMsg = ctx.timeoutErrMsg
 		if len(errMsg) > 0 {
@@ -923,7 +923,7 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	ctx.s = &fakeServer
 	ctx.initID()
 	req.CopyTo(&ctx.Request)
-	ctx.Response.Clear()
+	ctx.Response.Reset()
 	ctx.serveConnRequestNum = 0
 	ctx.serveConnTime = time.Now()
 	ctx.time = ctx.serveConnTime

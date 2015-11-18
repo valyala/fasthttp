@@ -55,7 +55,7 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	}
 
 	// verify that Request.Write returns error on non-absolute RequestURI
-	req.Clear()
+	req.Reset()
 	req.Header.SetRequestURI("/foo/bar")
 	w.Reset()
 	bw.Reset(&w)
