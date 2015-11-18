@@ -78,6 +78,38 @@ func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
 	resp.Header.SetContentLength(bodySize)
 }
 
+// BodyWriter returns writer for populating response body.
+func (resp *Response) BodyWriter() io.Writer {
+	return responseBodyWriter{
+		Response: resp,
+	}
+}
+
+// BodyWriter returns writer for populating request body.
+func (req *Request) BodyWriter() io.Writer {
+	return requestBodyWriter{
+		Request: req,
+	}
+}
+
+type responseBodyWriter struct {
+	*Response
+}
+
+func (w responseBodyWriter) Write(p []byte) (int, error) {
+	w.Response.body = append(w.body, p...)
+	return len(p), nil
+}
+
+type requestBodyWriter struct {
+	*Request
+}
+
+func (w requestBodyWriter) Write(p []byte) (int, error) {
+	w.Request.body = append(w.body, p...)
+	return len(p), nil
+}
+
 // Body returns response body.
 func (resp *Response) Body() []byte {
 	return resp.body

@@ -8,6 +8,28 @@ import (
 	"testing"
 )
 
+func TestRequestBodyWriter(t *testing.T) {
+	var r Request
+	w := r.BodyWriter()
+	for i := 0; i < 10; i++ {
+		fmt.Fprintf(w, "%d", i)
+	}
+	if string(r.Body()) != "0123456789" {
+		t.Fatalf("unexpected body %q. Expecting %q", r.Body(), "0123456789")
+	}
+}
+
+func TestResponseBodyWriter(t *testing.T) {
+	var r Response
+	w := r.BodyWriter()
+	for i := 0; i < 10; i++ {
+		fmt.Fprintf(w, "%d", i)
+	}
+	if string(r.Body()) != "0123456789" {
+		t.Fatalf("unexpected body %q. Expecting %q", r.Body(), "0123456789")
+	}
+}
+
 func TestRequestWriteRequestURINoHost(t *testing.T) {
 	var req Request
 	req.Header.SetRequestURI("http://google.com/foo/bar?baz=aaa")
