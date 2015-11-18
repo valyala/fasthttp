@@ -359,7 +359,7 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 	req.Header.SetMethodBytes(strPost)
 	req.Header.SetContentTypeBytes(strPostArgsContentType)
 	if postArgs != nil {
-		req.Body = postArgs.AppendBytes(req.Body[:0])
+		req.body = postArgs.AppendBytes(req.body[:0])
 	}
 
 	statusCode, body, err = doRequest(req, dst, url, c)
@@ -372,14 +372,14 @@ func doRequest(req *Request, dst []byte, url string, c clientDoer) (statusCode i
 	req.SetRequestURI(url)
 
 	resp := acquireResponse()
-	oldBody := resp.Body
-	resp.Body = dst
+	oldBody := resp.body
+	resp.body = dst
 	if err = c.Do(req, resp); err != nil {
 		return 0, nil, err
 	}
 	statusCode = resp.Header.StatusCode
-	body = resp.Body
-	resp.Body = oldBody
+	body = resp.body
+	resp.body = oldBody
 	releaseResponse(resp)
 
 	return statusCode, body, err

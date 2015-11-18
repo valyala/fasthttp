@@ -430,7 +430,7 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 	resp.Clear()
 	resp.Header.StatusCode = statusCode
 	resp.Header.SetContentTypeBytes(defaultContentType)
-	resp.Body = AppendBytesStr(resp.Body[:0], msg)
+	resp.body = AppendBytesStr(resp.body[:0], msg)
 }
 
 // Success sets response Content-Type and body to the given values.
@@ -448,6 +448,13 @@ func (ctx *RequestCtx) Success(contentType string, body []byte) {
 // It is safe modifying body buffer after the function return.
 func (ctx *RequestCtx) SetBody(body []byte) {
 	ctx.Response.SetBody(body)
+}
+
+// PostBody returns POST request body.
+//
+// The returned value is valid until RequestHandler return.
+func (ctx *RequestCtx) PostBody() []byte {
+	return ctx.Request.Body()
 }
 
 // SetBodyStream sets response body stream and, optionally body size.

@@ -322,7 +322,7 @@ func benchmarkServerPost(b *testing.B, clientsCount, requestsPerConn int) {
 			if !ctx.IsPost() {
 				b.Fatalf("Unexpected request method: %s", ctx.Method())
 			}
-			body := ctx.Request.Body
+			body := ctx.Request.Body()
 			if !bytes.Equal(body, fakeResponse) {
 				b.Fatalf("Unexpected body %q. Expected %q", body, fakeResponse)
 			}

@@ -80,8 +80,8 @@ func testSetResponseBodyStream(t *testing.T, body string, chunked bool) {
 	if err := resp1.Read(br); err != nil {
 		t.Fatalf("unexpected error when reading response: %s. body=%q", err, body)
 	}
-	if string(resp1.Body) != body {
-		t.Fatalf("unexpected body %q. Expecting %q", resp1.Body, body)
+	if string(resp1.Body()) != body {
+		t.Fatalf("unexpected body %q. Expecting %q", resp1.Body(), body)
 	}
 }
 
@@ -115,8 +115,8 @@ func TestRequestReadChunked(t *testing.T) {
 		t.Fatalf("Unexpected error when reading chunked request: %s", err)
 	}
 	expectedBody := "abc12345"
-	if string(req.Body) != expectedBody {
-		t.Fatalf("Unexpected body %q. Expected %q", req.Body, expectedBody)
+	if string(req.Body()) != expectedBody {
+		t.Fatalf("Unexpected body %q. Expected %q", req.Body(), expectedBody)
 	}
 	verifyRequestHeader(t, &req.Header, 8, "/foo", "google.com", "", "aa/bb")
 	verifyTrailer(t, rb, "trail")
@@ -147,8 +147,8 @@ func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBod
 	if err != nil {
 		t.Fatalf("Unexpected error when reading response without body: %s. response=%q", err, s)
 	}
-	if len(resp.Body) != 0 {
-		t.Fatalf("Unexpected response body %q. Expected %q. response=%q", resp.Body, "", s)
+	if len(resp.Body()) != 0 {
+		t.Fatalf("Unexpected response body %q. Expected %q. response=%q", resp.Body(), "", s)
 	}
 	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContentType)
 	verifyTrailer(t, rb, expectedTrailer)
@@ -204,7 +204,7 @@ func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, 
 	resp.Header.StatusCode = statusCode
 	resp.Header.Set("Content-Type", contentType)
 	resp.Header.Set("Server", serverName)
-	resp.Body = []byte(body)
+	resp.SetBody([]byte(body))
 
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
@@ -233,8 +233,8 @@ func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, 
 	if string(resp1.Header.Peek("Server")) != expectedServerName {
 		t.Fatalf("Unexpected server: %q. Expected %q", resp1.Header.Peek("Server"), expectedServerName)
 	}
-	if !bytes.Equal(resp1.Body, []byte(body)) {
-		t.Fatalf("Unexpected body: %q. Expected %q", resp1.Body, body)
+	if !bytes.Equal(resp1.Body(), []byte(body)) {
+		t.Fatalf("Unexpected body: %q. Expected %q", resp1.Body(), body)
 	}
 }
 
@@ -266,7 +266,7 @@ func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, bo
 	req.Header.SetRequestURI(requestURI)
 	req.Header.Set("Host", host)
 	req.Header.Set("User-Agent", userAgent)
-	req.Body = []byte(body)
+	req.SetBody([]byte(body))
 
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
@@ -283,7 +283,7 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	req.Header.SetRequestURI(requestURI)
 	req.Header.Set("Host", host)
 	req.Header.Set("User-Agent", userAgent)
-	req.Body = []byte(body)
+	req.SetBody([]byte(body))
 
 	contentType := "foobar"
 	if method == "POST" {
@@ -323,8 +323,8 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	if string(req1.Header.Peek("User-Agent")) != userAgent {
 		t.Fatalf("Unexpected user-agent: %q. Expected %q", req1.Header.Peek("User-Agent"), userAgent)
 	}
-	if !bytes.Equal(req1.Body, []byte(body)) {
-		t.Fatalf("Unexpected body: %q. Expected %q", req1.Body, body)
+	if !bytes.Equal(req1.Body(), []byte(body)) {
+		t.Fatalf("Unexpected body: %q. Expected %q", req1.Body(), body)
 	}
 
 	if method == "POST" && string(req1.Header.Peek("Content-Type")) != contentType {
@@ -412,8 +412,8 @@ func testResponseReadSuccess(t *testing.T, resp *Response, response string, expe
 	}
 
 	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContenType)
-	if !bytes.Equal(resp.Body, []byte(expectedBody)) {
-		t.Fatalf("Unexpected body %q. Expected %q", resp.Body, []byte(expectedBody))
+	if !bytes.Equal(resp.Body(), []byte(expectedBody)) {
+		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), []byte(expectedBody))
 	}
 	verifyTrailer(t, rb, expectedTrailer)
 }

@@ -255,7 +255,7 @@ func TestServerLogger(t *testing.T) {
 			h := &ctx.Request.Header
 			logger.Printf("begin")
 			ctx.Success("text/html", []byte(fmt.Sprintf("requestURI=%s, body=%q, remoteAddr=%s",
-				h.RequestURI(), ctx.Request.Body, ctx.RemoteAddr())))
+				h.RequestURI(), ctx.Request.Body(), ctx.RemoteAddr())))
 			logger.Printf("end")
 		},
 		Logger: cl,
@@ -404,8 +404,8 @@ func TestServerConnError(t *testing.T) {
 	if !bytes.Equal(resp.Header.Peek("Content-Type"), defaultContentType) {
 		t.Fatalf("Unexpected Content-Type %q. Expected %q", resp.Header.Peek("Content-Type"), defaultContentType)
 	}
-	if !bytes.Equal(resp.Body, []byte("foobar")) {
-		t.Fatalf("Unexpected body %q. Expected %q", resp.Body, "foobar")
+	if !bytes.Equal(resp.Body(), []byte("foobar")) {
+		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), "foobar")
 	}
 }
 
@@ -474,10 +474,10 @@ func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expec
 		t.Fatalf("Unexpected error when parsing response: %s", err)
 	}
 
-	if !bytes.Equal(resp.Body, []byte(expectedBody)) {
-		t.Fatalf("Unexpected body %q. Expected %q", resp.Body, []byte(expectedBody))
+	if !bytes.Equal(resp.Body(), []byte(expectedBody)) {
+		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), []byte(expectedBody))
 	}
-	verifyResponseHeader(t, &resp.Header, expectedStatusCode, len(resp.Body), expectedContentType)
+	verifyResponseHeader(t, &resp.Header, expectedStatusCode, len(resp.Body()), expectedContentType)
 }
 
 type readWriter struct {
