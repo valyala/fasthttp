@@ -56,9 +56,14 @@ func (req *Request) SetRequestURIBytes(requestURI []byte) {
 	req.Header.SetRequestURIBytes(requestURI)
 }
 
-// StatusCode returns response's status code.
+// StatusCode returns response status code.
 func (resp *Response) StatusCode() int {
 	return resp.Header.StatusCode
+}
+
+// SetStatusCode sets response status code.
+func (resp *Response) SetStatusCode(statusCode int) {
+	resp.Header.StatusCode = statusCode
 }
 
 // SetBodyStream sets response body stream and, optionally body size.

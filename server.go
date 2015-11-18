@@ -300,7 +300,7 @@ func (ctx *RequestCtx) SetConnectionClose() {
 
 // SetStatusCode sets response status code.
 func (ctx *RequestCtx) SetStatusCode(statusCode int) {
-	ctx.Response.Header.StatusCode = statusCode
+	ctx.Response.SetStatusCode(statusCode)
 }
 
 // SetContentType sets response Content-Type.
