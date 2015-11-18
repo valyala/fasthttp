@@ -35,28 +35,9 @@ type Response struct {
 	Header ResponseHeader
 
 	// Response body.
-	//
-	// Either Body or BodyStream may be set, but not both.
 	Body []byte
 
-	// Response body stream.
-	//
-	// BodyStream may be set instead of Body for performance reasons only.
-	//
-	// BodyStream is read by Response.Write() until one of the following
-	// events occur:
-	//
-	//   - Response.ContentLength bytes read if it is greater than 0.
-	//   - error or io.EOF is returned from BodyStream if Response.ContentLength
-	//     is 0 or negative.
-	//
-	// Response.Write() calls BodyStream.Close() (io.Closer) if such method
-	// is present after finishing reading BodyStream.
-	//
-	// Either BodyStream or Body may be set, but not both.
-	//
-	// Client and Response.Read() never sets BodyStream - it sets only Body.
-	BodyStream io.Reader
+	bodyStream io.Reader
 
 	// If set to true, Response.Read() skips reading body.
 	// Use it for HEAD requests.
@@ -78,6 +59,27 @@ func (req *Request) SetRequestURIBytes(requestURI []byte) {
 // StatusCode returns response's status code.
 func (resp *Response) StatusCode() int {
 	return resp.Header.StatusCode
+}
+
+// SetBodyStream sets response body stream and, optionally body size.
+//
+// If bodySize is >= 0, then bodySize bytes are read from bodyStream
+// and used as response body.
+//
+// If bodySize < 0, then bodyStream is read until io.EOF.
+//
+// bodyStream.Close() is called after finishing reading all body data
+// if it implements io.Closer.
+func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
+	resp.bodyStream = bodyStream
+	resp.Header.SetContentLength(bodySize)
+}
+
+// SetBody sets response body.
+//
+// It is safe modifying body buffer after function return.
+func (resp *Response) SetBody(body []byte) {
+	resp.Body = append(resp.Body[:0], body...)
 }
 
 // CopyTo copies req contents to dst.
@@ -160,7 +162,7 @@ func (resp *Response) Clear() {
 
 func (resp *Response) clearSkipHeader() {
 	resp.Body = resp.Body[:0]
-	resp.BodyStream = nil
+	resp.bodyStream = nil
 }
 
 // Read reads request (including body) from the given r.
@@ -237,13 +239,13 @@ func (req *Request) Write(w *bufio.Writer) error {
 // Write doesn't flush response to w for performance reasons.
 func (resp *Response) Write(w *bufio.Writer) error {
 	var err error
-	if resp.BodyStream != nil {
+	if resp.bodyStream != nil {
 		contentLength := resp.Header.ContentLength()
-		if contentLength > 0 {
+		if contentLength >= 0 {
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
-			if err = writeBodyFixedSize(w, resp.BodyStream, contentLength); err != nil {
+			if err = writeBodyFixedSize(w, resp.bodyStream, contentLength); err != nil {
 				return err
 			}
 		} else {
@@ -251,11 +253,11 @@ func (resp *Response) Write(w *bufio.Writer) error {
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
-			if err = writeBodyChunked(w, resp.BodyStream); err != nil {
+			if err = writeBodyChunked(w, resp.bodyStream); err != nil {
 				return err
 			}
 		}
-		if bsc, ok := resp.BodyStream.(io.Closer); ok {
+		if bsc, ok := resp.bodyStream.(io.Closer); ok {
 			err = bsc.Close()
 		}
 		return err

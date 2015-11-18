@@ -447,7 +447,20 @@ func (ctx *RequestCtx) Success(contentType string, body []byte) {
 //
 // It is safe modifying body buffer after the function return.
 func (ctx *RequestCtx) SetBody(body []byte) {
-	ctx.Response.Body = append(ctx.Response.Body[:0], body...)
+	ctx.Response.SetBody(body)
+}
+
+// SetBodyStream sets response body stream and, optionally body size.
+//
+// bodyStream.Close() will be called after finishing reading all body data
+// if it implements io.Closer.
+//
+// If bodySize is >= 0, then bodySize bytes are read from bodyStream
+// and used as response body.
+//
+// If bodySize < 0, then bodyStream is read until io.EOF.
+func (ctx *RequestCtx) SetBodyStream(bodyStream io.Reader, bodySize int) {
+	ctx.Response.SetBodyStream(bodyStream, bodySize)
 }
 
 // Logger returns logger, which may be used for logging arbitrary

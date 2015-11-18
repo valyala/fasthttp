@@ -42,28 +42,29 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	}
 }
 
-func TestResponseBodyStreamFixedSize(t *testing.T) {
-	testResponseBodyStream(t, "a", false)
-	testResponseBodyStream(t, string(createFixedBody(4097)), false)
-	testResponseBodyStream(t, string(createFixedBody(100500)), false)
+func TestSetResponseBodyStreamFixedSize(t *testing.T) {
+	testSetResponseBodyStream(t, "a", false)
+	testSetResponseBodyStream(t, string(createFixedBody(4097)), false)
+	testSetResponseBodyStream(t, string(createFixedBody(100500)), false)
 }
 
-func TestResponseBodyStreamChunked(t *testing.T) {
-	testResponseBodyStream(t, "", true)
+func TestSetResponseBodyStreamChunked(t *testing.T) {
+	testSetResponseBodyStream(t, "", true)
 
 	body := "foobar baz aaa bbb ccc"
-	testResponseBodyStream(t, body, true)
+	testSetResponseBodyStream(t, body, true)
 
 	body = string(createFixedBody(10001))
-	testResponseBodyStream(t, body, true)
+	testSetResponseBodyStream(t, body, true)
 }
 
-func testResponseBodyStream(t *testing.T, body string, chunked bool) {
+func testSetResponseBodyStream(t *testing.T, body string, chunked bool) {
 	var resp Response
-	resp.BodyStream = bytes.NewBufferString(body)
-	if !chunked {
-		resp.Header.SetContentLength(len(body))
+	bodySize := len(body)
+	if chunked {
+		bodySize = -1
 	}
+	resp.SetBodyStream(bytes.NewBufferString(body), bodySize)
 
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
