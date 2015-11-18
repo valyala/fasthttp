@@ -187,7 +187,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	hc := m[string(host)]
 	if hc == nil {
 		hc = &HostClient{
-			Addr:            string(host),
+			Addr:            addMissingPort(string(host), isTLS),
 			Name:            c.Name,
 			Dial:            c.Dial,
 			TLSConfig:       c.TLSConfig,
@@ -241,15 +241,16 @@ const DefaultMaxConnsPerHost = 100
 
 // DialFunc must establish connection to addr.
 //
-// There is no need in establishing TLS (SSL) connection for https urls.
-// The client automatically converts connection to TLS if required.
+// There is no need in establishing TLS (SSL) connection for https.
+// The client automatically converts connection to TLS
+// if HostClient.IsTLS is set.
 //
-// Host and optionally port part of url is passed as addr to DialFunc.
-// Example addr values:
+// TCP address passed to DialFunc always contain host and port.
+// Example TCP addr values:
 //
-//   - foobar.com       for http://foobar.com/aaa/bb
-//   - foobar.com       for https://foobar.com/aaa/bb
-//   - foobar.com:8080  for http://foobar.com:8080/aaa/bb
+//   - foobar.com:80
+//   - foobar.com:443
+//   - foobar.com:8080
 type DialFunc func(addr string) (net.Conn, error)
 
 // HostClient is a single-host http client. It can make http requests
@@ -257,7 +258,13 @@ type DialFunc func(addr string) (net.Conn, error)
 //
 // It is forbidden copying HostClient instances.
 type HostClient struct {
-	// HTTP server host address.
+	// HTTP server host address, which is passed to Dial.
+	//
+	// The address MUST contain port if it is TCP. For example,
+	//
+	//    - foobar.com:80
+	//    - foobar.com:443
+	//    - foobar.com:8080
 	Addr string
 
 	// Client name. Used in User-Agent request header.
@@ -268,11 +275,11 @@ type HostClient struct {
 	// Default TCP dialer is used if not set.
 	Dial DialFunc
 
-	// Optional TLS config.
-	TLSConfig *tls.Config
-
 	// Whether to use TLS (aka SSL or HTTPS) for host connections.
 	IsTLS bool
+
+	// Optional TLS config.
+	TLSConfig *tls.Config
 
 	// Maximum number of connections to the host which may be established.
 	//
@@ -768,7 +775,7 @@ func (c *HostClient) getTCPAddr(addr string) (*net.TCPAddr, error) {
 
 	if tcpAddrs == nil {
 		var err error
-		if tcpAddrs, err = resolveTCPAddrs(addr, c.IsTLS); err != nil {
+		if tcpAddrs, err = resolveTCPAddrs(addr); err != nil {
 			c.tcpAddrsLock.Lock()
 			c.tcpAddrsPending = false
 			c.tcpAddrsLock.Unlock()
@@ -791,22 +798,26 @@ func (c *HostClient) getTCPAddr(addr string) (*net.TCPAddr, error) {
 	return tcpAddr, nil
 }
 
-func resolveTCPAddrs(addr string, isTLS bool) ([]net.TCPAddr, error) {
-	host := addr
+func addMissingPort(addr string, isTLS bool) string {
+	n := strings.Index(addr, ":")
+	if n >= 0 {
+		return addr
+	}
 	port := 80
 	if isTLS {
 		port = 443
 	}
-	n := strings.Index(addr, ":")
-	if n >= 0 {
-		h, portS, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-		host = h
-		if port, err = strconv.Atoi(portS); err != nil {
-			return nil, err
-		}
+	return fmt.Sprintf("%s:%d", addr, port)
+}
+
+func resolveTCPAddrs(addr string) ([]net.TCPAddr, error) {
+	host, portS, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(portS)
+	if err != nil {
+		return nil, err
 	}
 
 	ips, err := net.LookupIP(host)
@@ -814,7 +825,7 @@ func resolveTCPAddrs(addr string, isTLS bool) ([]net.TCPAddr, error) {
 		return nil, err
 	}
 
-	n = len(ips)
+	n := len(ips)
 	addrs := make([]net.TCPAddr, n)
 	for i := 0; i < n; i++ {
 		addrs[i].IP = ips[i]
