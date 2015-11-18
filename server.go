@@ -440,13 +440,13 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 // Success calls are ignored after TimeoutError call.
 func (ctx *RequestCtx) Success(contentType string, body []byte) {
 	ctx.SetContentType(contentType)
-	ctx.SetResponseBody(body)
+	ctx.SetBody(body)
 }
 
-// SetResponseBody sets response body to the given value.
+// SetBody sets response body to the given value.
 //
 // It is safe modifying body buffer after the function return.
-func (ctx *RequestCtx) SetResponseBody(body []byte) {
+func (ctx *RequestCtx) SetBody(body []byte) {
 	ctx.Response.Body = append(ctx.Response.Body[:0], body...)
 }
 

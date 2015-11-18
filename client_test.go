@@ -401,7 +401,7 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 			if ctx.IsGet() {
 				ctx.Success("text/plain", ctx.URI().FullURI())
 			} else if ctx.IsPost() {
-				ctx.SetResponseBody(ctx.PostArgs().AppendBytes(nil))
+				ctx.SetBody(ctx.PostArgs().AppendBytes(nil))
 			}
 		},
 	}
