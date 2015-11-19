@@ -17,6 +17,7 @@ type Request struct {
 	Header RequestHeader
 
 	body []byte
+	w    requestBodyWriter
 
 	uri       URI
 	parsedURI bool
@@ -34,6 +35,7 @@ type Response struct {
 	Header ResponseHeader
 
 	body []byte
+	w    responseBodyWriter
 
 	bodyStream io.Reader
 
@@ -100,33 +102,31 @@ func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
 
 // BodyWriter returns writer for populating response body.
 func (resp *Response) BodyWriter() io.Writer {
-	return responseBodyWriter{
-		Response: resp,
-	}
+	resp.w.r = resp
+	return &resp.w
 }
 
 // BodyWriter returns writer for populating request body.
 func (req *Request) BodyWriter() io.Writer {
-	return requestBodyWriter{
-		Request: req,
-	}
+	req.w.r = req
+	return &req.w
 }
 
 type responseBodyWriter struct {
-	*Response
+	r *Response
 }
 
-func (w responseBodyWriter) Write(p []byte) (int, error) {
-	w.Response.body = append(w.body, p...)
+func (w *responseBodyWriter) Write(p []byte) (int, error) {
+	w.r.body = append(w.r.body, p...)
 	return len(p), nil
 }
 
 type requestBodyWriter struct {
-	*Request
+	r *Request
 }
 
-func (w requestBodyWriter) Write(p []byte) (int, error) {
-	w.Request.body = append(w.body, p...)
+func (w *requestBodyWriter) Write(p []byte) (int, error) {
+	w.r.body = append(w.r.body, p...)
 	return len(p), nil
 }
 
