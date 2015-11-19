@@ -160,7 +160,7 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // to the requested host are busy.
 func (c *Client) Do(req *Request, resp *Response) error {
 	uri := req.URI()
-	host := uri.Host
+	host := uri.Host()
 
 	isTLS := false
 	if bytes.Equal(uri.Scheme, strHTTPS) {

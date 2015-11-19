@@ -491,8 +491,8 @@ func TestRequestURI(t *testing.T) {
 	req.Header.SetRequestURI(requestURI)
 
 	uri := req.URI()
-	if string(uri.Host) != host {
-		t.Fatalf("Unexpected host %q. Expected %q", uri.Host, host)
+	if string(uri.Host()) != host {
+		t.Fatalf("Unexpected host %q. Expected %q", uri.Host(), host)
 	}
 	if string(uri.PathOriginal) != expectedPathOriginal {
 		t.Fatalf("Unexpected source path %q. Expected %q", uri.PathOriginal, expectedPathOriginal)

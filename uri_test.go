@@ -88,7 +88,7 @@ func testURIFullURI(t *testing.T, scheme, host, path, hash string, args *Args, e
 	var u URI
 
 	u.Scheme = []byte(scheme)
-	u.Host = []byte(host)
+	u.host = []byte(host)
 	u.Path = []byte(path)
 	u.Hash = []byte(hash)
 	args.CopyTo(u.QueryArgs())
@@ -164,8 +164,8 @@ func testURIParse(t *testing.T, u *URI, host, uri,
 	if !bytes.Equal(u.FullURI(), []byte(expectedURI)) {
 		t.Fatalf("Unexpected uri %q. Expected %q. host=%q, uri=%q", u.FullURI(), expectedURI, host, uri)
 	}
-	if !bytes.Equal(u.Host, []byte(expectedHost)) {
-		t.Fatalf("Unexpected host %q. Expected %q. host=%q, uri=%q", u.Host, expectedHost, host, uri)
+	if !bytes.Equal(u.Host(), []byte(expectedHost)) {
+		t.Fatalf("Unexpected host %q. Expected %q. host=%q, uri=%q", u.Host(), expectedHost, host, uri)
 	}
 	if !bytes.Equal(u.PathOriginal, []byte(expectedPathOriginal)) {
 		t.Fatalf("Unexpected original path %q. Expected %q. host=%q, uri=%q", u.PathOriginal, expectedPathOriginal, host, uri)

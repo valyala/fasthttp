@@ -187,7 +187,7 @@ func (req *Request) parseURI() {
 	}
 	req.parsedURI = true
 
-	req.uri.Parse(req.Header.Host(), req.Header.RequestURI())
+	req.uri.parseQuick(req.Header.RequestURI(), &req.Header)
 }
 
 // PostArgs returns POST arguments.
@@ -290,7 +290,7 @@ func isSkipResponseBody(statusCode int) bool {
 func (req *Request) Write(w *bufio.Writer) error {
 	if len(req.Header.Host()) == 0 {
 		uri := req.URI()
-		req.Header.SetHostBytes(uri.Host)
+		req.Header.SetHostBytes(uri.Host())
 		req.Header.SetRequestURIBytes(uri.RequestURI())
 	}
 	req.Header.SetContentLength(len(req.body))

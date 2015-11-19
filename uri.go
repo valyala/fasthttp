@@ -16,11 +16,6 @@ type URI struct {
 	// Scheme is always lowercased.
 	Scheme []byte
 
-	// Host part, i.e. aaa.com of http://aaa.com/foo/bar?baz=123#qwe .
-	//
-	// Host is always lowercased.
-	Host []byte
-
 	// Path part, i.e. /foo/bar of http://aaa.com/foo/bar?baz=123#qwe .
 	//
 	// Path is always urldecoded and normalized,
@@ -33,39 +28,66 @@ type URI struct {
 	// Hash part, i.e. qwe of http://aaa.com/foo/bar?baz=123#qwe .
 	Hash []byte
 
+	host []byte
+
 	queryArgs       Args
 	parsedQueryArgs bool
 
 	fullURI    []byte
 	requestURI []byte
+
+	h *RequestHeader
 }
 
 // Reset clears uri.
 func (x *URI) Reset() {
 	x.PathOriginal = x.PathOriginal[:0]
 	x.Scheme = x.Scheme[:0]
-	x.Host = x.Host[:0]
 	x.Path = x.Path[:0]
 	x.QueryString = x.QueryString[:0]
 	x.Hash = x.Hash[:0]
+
+	x.host = x.host[:0]
 	x.queryArgs.Reset()
 	x.parsedQueryArgs = false
 
 	x.fullURI = x.fullURI[:0]
 	x.requestURI = x.requestURI[:0]
+	x.h = nil
+}
+
+// Host returns host part, i.e. aaa.com of http://aaa.com/foo/bar?baz=123#qwe .
+//
+// Host is always lowercased.
+func (x *URI) Host() []byte {
+	if len(x.host) == 0 && x.h != nil {
+		x.host = append(x.host[:0], x.h.Host()...)
+		lowercaseBytes(x.host)
+		x.h = nil
+	}
+	return x.host
 }
 
 // Parse initializes URI from the given host and uri.
 //
 // It is safe modifying host and uri buffers after the Parse call.
 func (x *URI) Parse(host, uri []byte) {
+	x.parse(host, uri, nil)
+}
+
+func (x *URI) parseQuick(uri []byte, h *RequestHeader) {
+	x.parse(nil, uri, h)
+}
+
+func (x *URI) parse(host, uri []byte, h *RequestHeader) {
 	x.Reset()
+	x.h = h
 
 	scheme, host, uri := splitHostUri(host, uri)
 	x.Scheme = append(x.Scheme, scheme...)
 	lowercaseBytes(x.Scheme)
-	x.Host = append(x.Host, host...)
-	lowercaseBytes(x.Host)
+	x.host = append(x.host, host...)
+	lowercaseBytes(x.host)
 
 	b := uri
 	n := bytes.IndexByte(b, '?')
@@ -172,7 +194,7 @@ func (x *URI) FullURI() []byte {
 	}
 	dst := append(x.fullURI[:0], scheme...)
 	dst = append(dst, strColonSlashSlash...)
-	dst = append(dst, x.Host...)
+	dst = append(dst, x.Host()...)
 	lowercaseBytes(dst)
 	x.fullURI = append(dst, x.RequestURI()...)
 	return x.fullURI

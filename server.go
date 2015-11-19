@@ -345,7 +345,7 @@ func (ctx *RequestCtx) Path() []byte {
 //
 // The host is valid until returning from RequestHandler.
 func (ctx *RequestCtx) Host() []byte {
-	return ctx.URI().Host
+	return ctx.URI().Host()
 }
 
 // QueryArgs returns query arguments from RequestURI.
