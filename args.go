@@ -172,6 +172,18 @@ func (a *Args) GetUint(key string) (int, error) {
 	return ParseUint(value)
 }
 
+// SetUint sets uint value for the given key.
+func (a *Args) SetUint(key string, value int) {
+	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
+	a.SetUintBytes(a.bufKV.key, value)
+}
+
+// SetUintBytes sets uint value for the given key.
+func (a *Args) SetUintBytes(key []byte, value int) {
+	a.bufKV.value = AppendUint(a.bufKV.value[:0], value)
+	a.SetBytesKV(key, a.bufKV.value)
+}
+
 // GetUintOrZero returns uint value for the given key.
 //
 // Zero (0) is returned on error.

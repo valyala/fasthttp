@@ -6,6 +6,39 @@ import (
 	"testing"
 )
 
+func TestArgsUint(t *testing.T) {
+	var a Args
+	a.SetUint("foo", 123)
+	a.SetUint("bar", 0)
+	a.SetUint("aaaa", 34566)
+
+	expectedS := "foo=123&bar=0&aaaa=34566"
+	s := string(a.AppendBytes(nil))
+	if s != expectedS {
+		t.Fatalf("unexpected args %q. Expecting %q", s, expectedS)
+	}
+
+	if a.GetUintOrZero("foo") != 123 {
+		t.Fatalf("unexpected arg value %d. Expecting %d", a.GetUintOrZero("foo"), 123)
+	}
+	if a.GetUintOrZero("bar") != 0 {
+		t.Fatalf("unexpected arg value %d. Expecting %d", a.GetUintOrZero("bar"), 0)
+	}
+	if a.GetUintOrZero("aaaa") != 34566 {
+		t.Fatalf("unexpected arg value %d. Expecting %d", a.GetUintOrZero("aaaa"), 34566)
+	}
+
+	if string(a.Peek("foo")) != "123" {
+		t.Fatalf("unexpected arg value %q. Expecting %q", a.Peek("foo"), "123")
+	}
+	if string(a.Peek("bar")) != "0" {
+		t.Fatalf("unexpected arg value %q. Expecting %q", a.Peek("bar"), "0")
+	}
+	if string(a.Peek("aaaa")) != "34566" {
+		t.Fatalf("unexpected arg value %q. Expecting %q", a.Peek("aaaa"), "34566")
+	}
+}
+
 func TestArgsCopyTo(t *testing.T) {
 	var a Args
 
