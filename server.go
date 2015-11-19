@@ -295,7 +295,7 @@ func (ctx *RequestCtx) ServeConnRequestNum() uint64 {
 // SetConnectionClose sets 'Connection: close' response header and closes
 // connection after the RequestHandler returns.
 func (ctx *RequestCtx) SetConnectionClose() {
-	ctx.Request.Header.SetConnectionClose()
+	ctx.Response.Header.SetConnectionClose()
 }
 
 // SetStatusCode sets response status code.
@@ -748,6 +748,9 @@ func (s *Server) serveConn(c net.Conn) error {
 			ctx = s.acquireCtx(c)
 			ctx.Error(errMsg, StatusRequestTimeout)
 		}
+		if s.MaxRequestsPerConn > 0 && ctx.serveConnRequestNum >= uint64(s.MaxRequestsPerConn) {
+			ctx.SetConnectionClose()
+		}
 
 		if s.WriteTimeout > 0 {
 			if err = c.SetWriteDeadline(time.Now().Add(s.WriteTimeout)); err != nil {
@@ -760,11 +763,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		if err = writeResponse(ctx, bw); err != nil {
 			break
 		}
-		if s.MaxRequestsPerConn > 0 && ctx.serveConnRequestNum >= uint64(s.MaxRequestsPerConn) {
-			connectionClose = true
-		} else {
-			connectionClose = ctx.Response.Header.ConnectionClose() || ctx.Request.Header.ConnectionClose()
-		}
+		connectionClose = ctx.Response.Header.ConnectionClose() || ctx.Request.Header.ConnectionClose()
 
 		if br == nil || connectionClose {
 			err = bw.Flush()

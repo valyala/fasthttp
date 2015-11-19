@@ -64,6 +64,26 @@ func (resp *Response) SetStatusCode(statusCode int) {
 	resp.Header.SetStatusCode(statusCode)
 }
 
+// ConnectionClose returns true if 'Connection: close' header is set.
+func (resp *Response) ConnectionClose() bool {
+	return resp.Header.ConnectionClose()
+}
+
+// SetConnectionClose sets 'Connection: close' header.
+func (resp *Response) SetConnectionClose() {
+	resp.Header.SetConnectionClose()
+}
+
+// ConnectionClose returns true if 'Connection: close' header is set.
+func (req *Request) ConnectionClose() bool {
+	return req.Header.ConnectionClose()
+}
+
+// SetConnectionClose sets 'Connection: close' header.
+func (req *Request) SetConnectionClose() {
+	req.Header.SetConnectionClose()
+}
+
 // SetBodyStream sets response body stream and, optionally body size.
 //
 // If bodySize is >= 0, then bodySize bytes are read from bodyStream
