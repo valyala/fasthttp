@@ -75,6 +75,19 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 	return dst
 }
 
+// Cookie returns cookie representation.
+//
+// The returned value is valid until the next call to Cookie methods.
+func (c *Cookie) Cookie() []byte {
+	c.buf = c.AppendBytes(c.buf[:0])
+	return c.buf
+}
+
+// String returns cookie representation.
+func (c *Cookie) String() string {
+	return string(c.Cookie())
+}
+
 var errNoCookies = errors.New("no cookies found")
 
 // Parse parses Set-Cookie header.

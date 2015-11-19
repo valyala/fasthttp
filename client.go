@@ -366,7 +366,7 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 	req.Header.SetMethodBytes(strPost)
 	req.Header.SetContentTypeBytes(strPostArgsContentType)
 	if postArgs != nil {
-		req.body = postArgs.AppendBytes(req.body[:0])
+		postArgs.WriteTo(req.BodyWriter())
 	}
 
 	statusCode, body, err = doRequest(req, dst, url, c)

@@ -141,7 +141,7 @@ func normalizePath(dst, src []byte) []byte {
 	return b
 }
 
-// RequestURI returns RequestURI - i.e. URI withous Scheme and Host.
+// RequestURI returns RequestURI - i.e. URI without Scheme and Host.
 func (x *URI) RequestURI() []byte {
 	path := x.Path
 	if len(path) == 0 {
@@ -176,6 +176,11 @@ func (x *URI) FullURI() []byte {
 	lowercaseBytes(dst)
 	x.fullURI = append(dst, x.RequestURI()...)
 	return x.fullURI
+}
+
+// String returns full uri.
+func (x *URI) String() string {
+	return string(x.FullURI())
 }
 
 func splitHostUri(host, uri []byte) ([]byte, []byte, []byte) {

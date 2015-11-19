@@ -1,10 +1,31 @@
 package fasthttp
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 	"testing"
 )
+
+func TestArgsWriteTo(t *testing.T) {
+	s := "foo=bar&baz=123&aaa=bbb"
+
+	var a Args
+	a.Parse(s)
+
+	var w bytes.Buffer
+	n, err := a.WriteTo(&w)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if n != int64(len(s)) {
+		t.Fatalf("unexpected n: %d. Expecting %d", n, len(s))
+	}
+	result := string(w.Bytes())
+	if result != s {
+		t.Fatalf("unexpected result %q. Expecting %q", result, s)
+	}
+}
 
 func TestArgsUint(t *testing.T) {
 	var a Args
@@ -13,7 +34,7 @@ func TestArgsUint(t *testing.T) {
 	a.SetUint("aaaa", 34566)
 
 	expectedS := "foo=123&bar=0&aaaa=34566"
-	s := string(a.AppendBytes(nil))
+	s := string(a.QueryString())
 	if s != expectedS {
 		t.Fatalf("unexpected args %q. Expecting %q", s, expectedS)
 	}

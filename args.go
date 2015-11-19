@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bytes"
 	"errors"
+	"io"
 )
 
 // Args represents query arguments.
@@ -70,8 +71,15 @@ func (a *Args) ParseBytes(b []byte) {
 
 // String returns string representation of query args.
 func (a *Args) String() string {
+	return string(a.QueryString())
+}
+
+// QueryString returns query string for the args.
+//
+// The returned value is valid until the next call to Args methods.
+func (a *Args) QueryString() []byte {
 	a.buf = a.AppendBytes(a.buf[:0])
-	return string(a.buf)
+	return a.buf
 }
 
 // AppendBytes appends query string to dst and returns dst
@@ -89,6 +97,14 @@ func (a *Args) AppendBytes(dst []byte) []byte {
 		}
 	}
 	return dst
+}
+
+// WriteTo writes query string to w.
+//
+// WriteTo implements io.WriterTo.
+func (a *Args) WriteTo(w io.Writer) (int64, error) {
+	n, err := w.Write(a.QueryString())
+	return int64(n), err
 }
 
 // Del deletes argument with the given key from query args.
