@@ -10,30 +10,30 @@ import (
 	"testing"
 )
 
-func TestHasRawHeader(t *testing.T) {
+func TestPeekRawHeader(t *testing.T) {
 	// empty header
-	testHasRawHeader(t, "", "Foo-Bar", false)
+	testPeekRawHeader(t, "", "Foo-Bar", "")
 
 	// different case
-	testHasRawHeader(t, "Content-Length: 3443\r\n", "content-length: 3443", false)
+	testPeekRawHeader(t, "Content-Length: 3443\r\n", "content-length", "")
 
 	// no trailing crlf
-	testHasRawHeader(t, "Content-Length: 234", "Content-Length: 234", false)
+	testPeekRawHeader(t, "Content-Length: 234", "Content-Length", "")
 
 	// single header
-	testHasRawHeader(t, "Content-Length: 12345\r\n", "Content-Length: 12345", true)
+	testPeekRawHeader(t, "Content-Length: 12345\r\n", "Content-Length", "12345")
 
 	// multiple headers
-	testHasRawHeader(t, "Host: foobar\r\nContent-Length: 434\r\nFoo: bar\r\n\r\n", "Content-Length: 434", true)
+	testPeekRawHeader(t, "Host: foobar\r\nContent-Length: 434\r\nFoo: bar\r\n\r\n", "Content-Length", "434")
 
 	// lf without cr
-	testHasRawHeader(t, "Foo: bar\nConnection: close\nAaa: bbb\ncc: ddd\n", "Connection: close", true)
+	testPeekRawHeader(t, "Foo: bar\nConnection: close\nAaa: bbb\ncc: ddd\n", "Connection", "close")
 }
 
-func testHasRawHeader(t *testing.T, rawHeaders, s string, expectedValue bool) {
-	v := hasRawHeader([]byte(rawHeaders), []byte(s))
-	if v != expectedValue {
-		t.Fatalf("unexpected raw headers value %v. Expected %v. s %q, rawHeaders %q", v, expectedValue, s, rawHeaders)
+func testPeekRawHeader(t *testing.T, rawHeaders, key string, expectedValue string) {
+	v := peekRawHeader([]byte(rawHeaders), []byte(key))
+	if string(v) != expectedValue {
+		t.Fatalf("unexpected raw headers value %q. Expected %q. key %q, rawHeaders %q", v, expectedValue, key, rawHeaders)
 	}
 }
 
@@ -205,8 +205,8 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 		t.Fatalf("error when reading request header: %s", err)
 	}
 
-	if !h1.ConnectionClose() {
-		t.Fatalf("unexpected connection: close value: %v", h1.ConnectionClose())
+	if !h1.ConnectionCloseReal() {
+		t.Fatalf("unexpected connection: close value: %v", h1.ConnectionCloseReal())
 	}
 	if string(h1.Peek("Connection")) != "close" {
 		t.Fatalf("unexpected connection value: %q. Expecting %q", h.Peek("Connection"), "close")

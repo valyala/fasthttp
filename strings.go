@@ -23,7 +23,6 @@ var (
 	strPost = []byte("POST")
 
 	strConnection       = []byte("Connection")
-	strConnectionClose  = []byte("Connection: close")
 	strContentLength    = []byte("Content-Length")
 	strContentType      = []byte("Content-Type")
 	strDate             = []byte("Date")

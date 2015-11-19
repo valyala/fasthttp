@@ -80,15 +80,17 @@ func (h *ResponseHeader) SetConnectionClose() {
 // ConnectionClose returns true if 'Connection: close' header is set.
 func (h *RequestHeader) ConnectionClose() bool {
 	// h.parseRawHeaders() isn't called for performance reasons.
-	if !h.rawHeadersParsed {
-		if h.connectionClose {
-			return true
-		}
-		if hasRawHeader(h.rawHeaders, strConnectionClose) {
-			h.connectionClose = true
-			return true
-		}
-	}
+	// Use ConnectionCloseReal for triggering raw headers parsing.
+	return h.connectionClose
+}
+
+// ConnectionCloseReal returns true if 'Connection: close' header is set.
+//
+// This method tirgger full (slow) request headers' parsing
+// unlike ConnectionClose, so use it only if you really want determining
+// whether 'Connection: close' header is really set on the wire.
+func (h *RequestHeader) ConnectionCloseReal() bool {
+	h.parseRawHeaders()
 	return h.connectionClose
 }
 
@@ -215,6 +217,19 @@ func (h *RequestHeader) SetContentTypeBytes(contentType []byte) {
 
 // Host returns Host header value.
 func (h *RequestHeader) Host() []byte {
+	if len(h.host) > 0 {
+		return h.host
+	}
+	if !h.rawHeadersParsed {
+		// fast path without employing full headers parsing.
+		host := peekRawHeader(h.rawHeaders, strHost)
+		if len(host) > 0 {
+			h.host = append(h.host[:0], host...)
+			return h.host
+		}
+	}
+
+	// slow path.
 	h.parseRawHeaders()
 	return h.host
 }
@@ -1095,26 +1110,35 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	return len(buf) - len(bNext), nil
 }
 
-func hasRawHeader(buf, s []byte) bool {
-	n := bytes.Index(buf, s)
+func peekRawHeader(buf, key []byte) []byte {
+	n := bytes.Index(buf, key)
 	if n < 0 {
-		return false
+		return nil
 	}
 	if n > 0 && buf[n-1] != '\n' {
-		return false
+		return nil
 	}
-	n += len(s)
+	n += len(key)
 	if n >= len(buf) {
-		return false
+		return nil
 	}
-	switch buf[n] {
-	case '\r':
-		return len(buf) > n+1 && buf[n+1] == '\n'
-	case '\n':
-		return true
-	default:
-		return false
+	if buf[n] != ':' {
+		return nil
 	}
+	n++
+	if buf[n] != ' ' {
+		return nil
+	}
+	n++
+	buf = buf[n:]
+	n = bytes.IndexByte(buf, '\n')
+	if n < 0 {
+		return nil
+	}
+	if n > 0 && buf[n-1] == '\r' {
+		n--
+	}
+	return buf[:n]
 }
 
 func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
