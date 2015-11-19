@@ -56,12 +56,12 @@ func (req *Request) SetRequestURIBytes(requestURI []byte) {
 
 // StatusCode returns response status code.
 func (resp *Response) StatusCode() int {
-	return resp.Header.StatusCode
+	return resp.Header.StatusCode()
 }
 
 // SetStatusCode sets response status code.
 func (resp *Response) SetStatusCode(statusCode int) {
-	resp.Header.StatusCode = statusCode
+	resp.Header.SetStatusCode(statusCode)
 }
 
 // SetBodyStream sets response body stream and, optionally body size.
@@ -244,7 +244,7 @@ func (resp *Response) Read(r *bufio.Reader) error {
 		return err
 	}
 
-	if !isSkipResponseBody(resp.Header.StatusCode) && !resp.SkipBody {
+	if !isSkipResponseBody(resp.Header.StatusCode()) && !resp.SkipBody {
 		resp.body, err = readBody(r, resp.Header.ContentLength(), resp.body)
 		if err != nil {
 			resp.Reset()

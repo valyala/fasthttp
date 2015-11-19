@@ -223,7 +223,7 @@ func TestResponseSuccess(t *testing.T) {
 func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, body string,
 	expectedStatusCode int, expectedContentType, expectedServerName string) {
 	var resp Response
-	resp.Header.StatusCode = statusCode
+	resp.SetStatusCode(statusCode)
 	resp.Header.Set("Content-Type", contentType)
 	resp.Header.Set("Server", serverName)
 	resp.SetBody([]byte(body))
@@ -243,8 +243,8 @@ func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, 
 	if err = resp1.Read(br); err != nil {
 		t.Fatalf("Unexpected error when calling Response.Read(): %s", err)
 	}
-	if resp1.Header.StatusCode != expectedStatusCode {
-		t.Fatalf("Unexpected status code: %d. Expected %d", resp1.Header.StatusCode, expectedStatusCode)
+	if resp1.StatusCode() != expectedStatusCode {
+		t.Fatalf("Unexpected status code: %d. Expected %d", resp1.StatusCode(), expectedStatusCode)
 	}
 	if resp1.Header.ContentLength() != len(body) {
 		t.Fatalf("Unexpected content-length: %d. Expected %d", resp1.Header.ContentLength(), len(body))
@@ -272,7 +272,7 @@ func TestResponseWriteError(t *testing.T) {
 	var resp Response
 
 	// negative statusCode
-	resp.Header.StatusCode = -1234
+	resp.SetStatusCode(-1234)
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
 	err := resp.Write(bw)

@@ -395,8 +395,8 @@ func TestServerConnError(t *testing.T) {
 	if err := resp.Read(br); err != nil {
 		t.Fatalf("Unexpected error when reading response: %s", err)
 	}
-	if resp.Header.StatusCode != 423 {
-		t.Fatalf("Unexpected status code %d. Expected %d", resp.Header.StatusCode, 423)
+	if resp.Header.StatusCode() != 423 {
+		t.Fatalf("Unexpected status code %d. Expected %d", resp.Header.StatusCode(), 423)
 	}
 	if resp.Header.ContentLength() != 6 {
 		t.Fatalf("Unexpected Content-Length %d. Expected %d", resp.Header.ContentLength(), 6)

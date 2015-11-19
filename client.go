@@ -384,7 +384,7 @@ func doRequest(req *Request, dst []byte, url string, c clientDoer) (statusCode i
 	if err = c.Do(req, resp); err != nil {
 		return 0, nil, err
 	}
-	statusCode = resp.Header.StatusCode
+	statusCode = resp.Header.StatusCode()
 	body = resp.body
 	resp.body = oldBody
 	releaseResponse(resp)

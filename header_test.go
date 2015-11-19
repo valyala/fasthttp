@@ -1082,8 +1082,8 @@ func testRequestHeaderReadSuccess(t *testing.T, h *RequestHeader, headers string
 }
 
 func verifyResponseHeader(t *testing.T, h *ResponseHeader, expectedStatusCode, expectedContentLength int, expectedContentType string) {
-	if h.StatusCode != expectedStatusCode {
-		t.Fatalf("Unexpected status code %d. Expected %d", h.StatusCode, expectedStatusCode)
+	if h.StatusCode() != expectedStatusCode {
+		t.Fatalf("Unexpected status code %d. Expected %d", h.StatusCode(), expectedStatusCode)
 	}
 	if h.ContentLength() != expectedContentLength {
 		t.Fatalf("Unexpected content length %d. Expected %d", h.ContentLength(), expectedContentLength)

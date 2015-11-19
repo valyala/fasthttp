@@ -87,8 +87,8 @@ func BenchmarkClientGetFastServer(b *testing.B) {
 			if err := c.Do(&req, &resp); err != nil {
 				b.Fatalf("unexpected error: %s", err)
 			}
-			if resp.Header.StatusCode != StatusOK {
-				b.Fatalf("unexpected status code: %d", resp.Header.StatusCode)
+			if resp.Header.StatusCode() != StatusOK {
+				b.Fatalf("unexpected status code: %d", resp.Header.StatusCode())
 			}
 			if !bytes.Equal(resp.Body(), body) {
 				b.Fatalf("unexpected response body: %q. Expected %q", resp.Body(), body)
