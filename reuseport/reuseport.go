@@ -3,7 +3,7 @@
 // SO_REUSEPORT allows linear scaling server performance on multi-CPU servers.
 // See https://www.nginx.com/blog/socket-sharding-nginx-release-1-9-1/ for more details :)
 //
-// Package reuseport is based on https://github.com/kavu/go_reuseport .
+// The package is based on https://github.com/kavu/go_reuseport .
 package reuseport
 
 import (
@@ -41,12 +41,12 @@ func (e *ErrNoReusePort) Error() string {
 	return fmt.Sprintf("The OS doesn't support SO_REUSEPORT: %s", e.err)
 }
 
-// NewListener returns TCP listener with SO_REUSEPORT option set.
+// Listen returns TCP listener with SO_REUSEPORT option set.
 //
 // Only tcp4 network is supported.
 //
 // ErrNoReusePort error is returned if the system doesn't support SO_REUSEPORT.
-func NewListener(network, addr string) (l net.Listener, err error) {
+func Listen(network, addr string) (l net.Listener, err error) {
 	var (
 		soType, fd int
 		file       *os.File

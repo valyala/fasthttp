@@ -17,7 +17,7 @@ func TestNewListener(t *testing.T) {
 	doneCh := make(chan struct{}, serversCount)
 
 	for i := 0; i < serversCount; i++ {
-		ln, err := NewListener("tcp4", addr)
+		ln, err := Listen("tcp4", addr)
 		if err != nil {
 			t.Fatalf("cannot create listener %d: %s", i, err)
 		}
