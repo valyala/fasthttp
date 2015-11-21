@@ -10,6 +10,51 @@ import (
 	"testing"
 )
 
+func TestRequestHeaderProxyWithCookie(t *testing.T) {
+	// Proxy request header (read it, then write it without touching any headers).
+	var h RequestHeader
+	r := bytes.NewBufferString("GET /foo HTTP/1.1\r\nFoo: bar\r\nHost: aaa.com\r\nCookie: foo=bar; bazzz=aaaaaaa; x=y\r\nCookie: aqqqqq=123\r\n\r\n")
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := h.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	var h1 RequestHeader
+	br.Reset(w)
+	if err := h1.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if string(h1.RequestURI()) != "/foo" {
+		t.Fatalf("unexpected requestURI: %q. Expecting %q", h1.RequestURI(), "/foo")
+	}
+	if string(h1.Host()) != "aaa.com" {
+		t.Fatalf("unexpected host: %q. Expecting %q", h1.Host(), "aaa.com")
+	}
+	if string(h1.Peek("Foo")) != "bar" {
+		t.Fatalf("unexpected Foo: %q. Expecting %q", h1.Peek("Foo"), "bar")
+	}
+	if string(h1.PeekCookie("foo")) != "bar" {
+		t.Fatalf("unexpected coookie foo=%q. Expecting %q", h1.PeekCookie("foo"), "bar")
+	}
+	if string(h1.PeekCookie("bazzz")) != "aaaaaaa" {
+		t.Fatalf("unexpected cookie bazzz=%q. Expecting %q", h1.PeekCookie("bazzz"), "aaaaaaa")
+	}
+	if string(h1.PeekCookie("x")) != "y" {
+		t.Fatalf("unexpected cookie x=%q. Expecting %q", h1.PeekCookie("x"), "y")
+	}
+	if string(h1.PeekCookie("aqqqqq")) != "123" {
+		t.Fatalf("unexpected cookie aqqqqq=%q. Expecting %q", h1.PeekCookie("aqqqqq"), "123")
+	}
+}
+
 func TestPeekRawHeader(t *testing.T) {
 	// empty header
 	testPeekRawHeader(t, "", "Foo-Bar", "")

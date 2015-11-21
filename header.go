@@ -943,7 +943,7 @@ func (h *ResponseHeader) Write(w *bufio.Writer) error {
 
 // Write writes request header to w.
 func (h *RequestHeader) Write(w *bufio.Writer) error {
-	h.parseRawHeaders()
+	// there is no need in h.parseRawHeaders() here - raw headers are specially handled below.
 	method := h.Method()
 	w.Write(method)
 	w.WriteByte(' ')
@@ -953,6 +953,11 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 	w.WriteByte(' ')
 	w.Write(strHTTP11)
 	w.Write(strCRLF)
+
+	if !h.rawHeadersParsed && len(h.rawHeaders) > 0 {
+		_, err := w.Write(h.rawHeaders)
+		return err
+	}
 
 	userAgent := h.UserAgent()
 	if len(userAgent) == 0 {
@@ -983,7 +988,8 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 		writeHeaderLine(w, kv.key, kv.value)
 	}
 
-	h.collectCookies()
+	// there is no need in h.collectCookies() here, since if cookies aren't collected yet,
+	// they all are located in h.h.
 	n := len(h.cookies)
 	if n > 0 {
 		h.bufKV.value = appendRequestCookieBytes(h.bufKV.value[:0], h.cookies)
