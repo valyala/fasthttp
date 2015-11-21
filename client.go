@@ -199,7 +199,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 		if isTLS {
 			hc.IsTLS = true
 		}
-		m[hc.Addr] = hc
+		m[string(host)] = hc
 		if len(m) == 1 {
 			startCleaner = true
 		}
@@ -583,8 +583,9 @@ func (c *HostClient) acquireConn(newConn bool) (*clientConn, error) {
 	createConn := false
 	startCleaner := false
 
+	var n int
 	c.connsLock.Lock()
-	n := len(c.conns)
+	n = len(c.conns)
 	if n == 0 || newConn {
 		maxConns := c.MaxConns
 		if maxConns <= 0 {
