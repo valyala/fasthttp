@@ -536,9 +536,6 @@ const DefaultConcurrency = 256 * 1024
 
 // Serve serves incoming connections from the given listener.
 //
-// Serve may handle DefaultConcurrency concurrent connections.
-// Use ServeConcurrency for handling another number of concurrent connections.
-//
 // Serve blocks until the given listener returns permanent error.
 func (s *Server) Serve(ln net.Listener) error {
 	var lastOverflowErrorTime time.Time
