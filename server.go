@@ -205,8 +205,8 @@ type RequestCtx struct {
 
 	id uint64
 
-	serveConnRequestNum uint64
-	serveConnTime       time.Time
+	connRequestNum uint64
+	connTime       time.Time
 
 	time             time.Time
 	lastReadDuration time.Duration
@@ -281,16 +281,16 @@ func (ctx *RequestCtx) Time() time.Time {
 	return ctx.time
 }
 
-// ServeConnTime returns the time server starts serving the connection
+// ConnTime returns the time server starts serving the connection
 // the current request came from.
-func (ctx *RequestCtx) ServeConnTime() time.Time {
-	return ctx.serveConnTime
+func (ctx *RequestCtx) ConnTime() time.Time {
+	return ctx.connTime
 }
 
-// ServeConnRequestNum returns request sequence number
+// ConnRequestNum returns request sequence number
 // for the current connection.
-func (ctx *RequestCtx) ServeConnRequestNum() uint64 {
-	return ctx.serveConnRequestNum
+func (ctx *RequestCtx) ConnRequestNum() uint64 {
+	return ctx.connRequestNum
 }
 
 // SetConnectionClose sets 'Connection: close' response header and closes
@@ -688,8 +688,8 @@ func (s *Server) serveConn(c net.Conn) error {
 	currentTime := time.Now()
 
 	ctx := s.acquireCtx(c)
-	ctx.serveConnRequestNum = 0
-	ctx.serveConnTime = currentTime
+	ctx.connRequestNum = 0
+	ctx.connTime = currentTime
 	var br *bufio.Reader
 	var bw *bufio.Writer
 
@@ -698,7 +698,7 @@ func (s *Server) serveConn(c net.Conn) error {
 	var errMsg string
 	for {
 		ctx.id++
-		ctx.serveConnRequestNum++
+		ctx.connRequestNum++
 		ctx.time = currentTime
 
 		if s.ReadTimeout > 0 {
@@ -744,7 +744,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			ctx = s.acquireCtx(c)
 			ctx.Error(errMsg, StatusRequestTimeout)
 		}
-		if s.MaxRequestsPerConn > 0 && ctx.serveConnRequestNum >= uint64(s.MaxRequestsPerConn) {
+		if s.MaxRequestsPerConn > 0 && ctx.connRequestNum >= uint64(s.MaxRequestsPerConn) {
 			ctx.SetConnectionClose()
 		}
 
@@ -919,9 +919,9 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	ctx.initID()
 	req.CopyTo(&ctx.Request)
 	ctx.Response.Reset()
-	ctx.serveConnRequestNum = 0
-	ctx.serveConnTime = time.Now()
-	ctx.time = ctx.serveConnTime
+	ctx.connRequestNum = 0
+	ctx.connTime = time.Now()
+	ctx.time = ctx.connTime
 }
 
 var fakeServer Server

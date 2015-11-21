@@ -215,14 +215,14 @@ func TestServerRequestNumAndTime(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			n++
-			if ctx.ServeConnRequestNum() != n {
-				t.Fatalf("unexpected request number: %d. Expecting %d", ctx.ServeConnRequestNum(), n)
+			if ctx.ConnRequestNum() != n {
+				t.Fatalf("unexpected request number: %d. Expecting %d", ctx.ConnRequestNum(), n)
 			}
 			if connT.IsZero() {
-				connT = ctx.ServeConnTime()
+				connT = ctx.ConnTime()
 			}
-			if ctx.ServeConnTime() != connT {
-				t.Fatalf("unexpected serve conn time: %s. Expecting %s", ctx.ServeConnTime(), connT)
+			if ctx.ConnTime() != connT {
+				t.Fatalf("unexpected serve conn time: %s. Expecting %s", ctx.ConnTime(), connT)
 			}
 		},
 	}
