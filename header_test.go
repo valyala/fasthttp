@@ -41,17 +41,17 @@ func TestRequestHeaderProxyWithCookie(t *testing.T) {
 	if string(h1.Peek("Foo")) != "bar" {
 		t.Fatalf("unexpected Foo: %q. Expecting %q", h1.Peek("Foo"), "bar")
 	}
-	if string(h1.PeekCookie("foo")) != "bar" {
-		t.Fatalf("unexpected coookie foo=%q. Expecting %q", h1.PeekCookie("foo"), "bar")
+	if string(h1.Cookie("foo")) != "bar" {
+		t.Fatalf("unexpected coookie foo=%q. Expecting %q", h1.Cookie("foo"), "bar")
 	}
-	if string(h1.PeekCookie("bazzz")) != "aaaaaaa" {
-		t.Fatalf("unexpected cookie bazzz=%q. Expecting %q", h1.PeekCookie("bazzz"), "aaaaaaa")
+	if string(h1.Cookie("bazzz")) != "aaaaaaa" {
+		t.Fatalf("unexpected cookie bazzz=%q. Expecting %q", h1.Cookie("bazzz"), "aaaaaaa")
 	}
-	if string(h1.PeekCookie("x")) != "y" {
-		t.Fatalf("unexpected cookie x=%q. Expecting %q", h1.PeekCookie("x"), "y")
+	if string(h1.Cookie("x")) != "y" {
+		t.Fatalf("unexpected cookie x=%q. Expecting %q", h1.Cookie("x"), "y")
 	}
-	if string(h1.PeekCookie("aqqqqq")) != "123" {
-		t.Fatalf("unexpected cookie aqqqqq=%q. Expecting %q", h1.PeekCookie("aqqqqq"), "123")
+	if string(h1.Cookie("aqqqqq")) != "123" {
+		t.Fatalf("unexpected cookie aqqqqq=%q. Expecting %q", h1.Cookie("aqqqqq"), "123")
 	}
 }
 
@@ -264,14 +264,14 @@ func TestRequestHeaderSetCookie(t *testing.T) {
 	h.Set("Cookie", "foo=bar; baz=aaa")
 	h.Set("cOOkie", "xx=yyy")
 
-	if string(h.PeekCookie("foo")) != "bar" {
-		t.Fatalf("Unexpected cookie %q. Expecting %q", h.PeekCookie("foo"), "bar")
+	if string(h.Cookie("foo")) != "bar" {
+		t.Fatalf("Unexpected cookie %q. Expecting %q", h.Cookie("foo"), "bar")
 	}
-	if string(h.PeekCookie("baz")) != "aaa" {
-		t.Fatalf("Unexpected cookie %q. Expecting %q", h.PeekCookie("baz"), "aaa")
+	if string(h.Cookie("baz")) != "aaa" {
+		t.Fatalf("Unexpected cookie %q. Expecting %q", h.Cookie("baz"), "aaa")
 	}
-	if string(h.PeekCookie("xx")) != "yyy" {
-		t.Fatalf("unexpected cookie %q. Expecting %q", h.PeekCookie("xx"), "yyy")
+	if string(h.Cookie("xx")) != "yyy" {
+		t.Fatalf("unexpected cookie %q. Expecting %q", h.Cookie("xx"), "yyy")
 	}
 }
 
@@ -283,7 +283,7 @@ func TestResponseHeaderSetCookie(t *testing.T) {
 
 	var c Cookie
 	c.Key = []byte("foo")
-	if !h.GetCookie(&c) {
+	if !h.Cookie(&c) {
 		t.Fatalf("cannot obtain %q cookie", c.Key)
 	}
 	if string(c.Value) != "bar" {
@@ -297,7 +297,7 @@ func TestResponseHeaderSetCookie(t *testing.T) {
 	}
 
 	c.Key = []byte("aaaaa")
-	if !h.GetCookie(&c) {
+	if !h.Cookie(&c) {
 		t.Fatalf("cannot obtain %q cookie", c.Key)
 	}
 	if string(c.Value) != "bxx" {
@@ -423,7 +423,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 
 	c.Reset()
 	c.Key = []byte("foobar")
-	if !h.GetCookie(&c) {
+	if !h.Cookie(&c) {
 		t.Fatalf("Cannot find cookie %q", c.Key)
 	}
 
@@ -435,7 +435,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 	}
 
 	c.Key = []byte("йцук")
-	if !h.GetCookie(&c) {
+	if !h.Cookie(&c) {
 		t.Fatalf("cannot find cookie %q", c.Key)
 	}
 
@@ -483,7 +483,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 	}
 
 	c.Key = []byte("foobar")
-	if !h1.GetCookie(&c) {
+	if !h1.Cookie(&c) {
 		t.Fatalf("Cannot find cookie %q", c.Key)
 	}
 	if !equalCookie(&expectedC1, &c) {
@@ -491,7 +491,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 	}
 
 	c.Key = []byte("йцук")
-	if !h1.GetCookie(&c) {
+	if !h1.Cookie(&c) {
 		t.Fatalf("cannot find cookie %q", c.Key)
 	}
 	if !equalCookie(&expectedC2, &c) {
@@ -526,11 +526,11 @@ func TestRequestHeaderCookie(t *testing.T) {
 	h.SetCookie("foo", "bar")
 	h.SetCookie("привет", "мир")
 
-	if string(h.PeekCookie("foo")) != "bar" {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.PeekCookie("foo"), "bar")
+	if string(h.Cookie("foo")) != "bar" {
+		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.Cookie("foo"), "bar")
 	}
-	if string(h.PeekCookie("привет")) != "мир" {
-		t.Fatalf("Unexpected cookie value %q. Expected %q", h.PeekCookie("привет"), "мир")
+	if string(h.Cookie("привет")) != "мир" {
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h.Cookie("привет"), "мир")
 	}
 
 	w := &bytes.Buffer{}
@@ -548,11 +548,11 @@ func TestRequestHeaderCookie(t *testing.T) {
 		t.Fatalf("Unexpected error: %s", err)
 	}
 
-	if !bytes.Equal(h1.PeekCookie("foo"), h.PeekCookie("foo")) {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h1.PeekCookie("foo"), h.PeekCookie("foo"))
+	if !bytes.Equal(h1.Cookie("foo"), h.Cookie("foo")) {
+		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h1.Cookie("foo"), h.Cookie("foo"))
 	}
-	if !bytes.Equal(h1.PeekCookie("привет"), h.PeekCookie("привет")) {
-		t.Fatalf("Unexpected cookie value %q. Expected %q", h1.PeekCookie("привет"), h.PeekCookie("привет"))
+	if !bytes.Equal(h1.Cookie("привет"), h.Cookie("привет")) {
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h1.Cookie("привет"), h.Cookie("привет"))
 	}
 }
 

@@ -774,24 +774,24 @@ func (h *RequestHeader) peek(key []byte) []byte {
 	}
 }
 
-// PeekCookie returns cookie for the given key.
-func (h *RequestHeader) PeekCookie(key string) []byte {
+// Cookie returns cookie for the given key.
+func (h *RequestHeader) Cookie(key string) []byte {
 	h.parseRawHeaders()
 	h.collectCookies()
 	return peekArgStr(h.cookies, key)
 }
 
-// PeekCookieBytes returns cookie for the given key.
-func (h *RequestHeader) PeekCookieBytes(key []byte) []byte {
+// CookieBytes returns cookie for the given key.
+func (h *RequestHeader) CookieBytes(key []byte) []byte {
 	h.parseRawHeaders()
 	h.collectCookies()
 	return peekArgBytes(h.cookies, key)
 }
 
-// GetCookie fills cookie for the given cookie.Key.
+// Cookie fills cookie for the given cookie.Key.
 //
 // Returns false if cookie with the given cookie.Key is missing.
-func (h *ResponseHeader) GetCookie(cookie *Cookie) bool {
+func (h *ResponseHeader) Cookie(cookie *Cookie) bool {
 	v := peekArgBytes(h.cookies, cookie.Key)
 	if v == nil {
 		return false
