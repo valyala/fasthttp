@@ -817,6 +817,7 @@ var bytePool sync.Pool
 func acquireByteReader(ctx *RequestCtx) (*RequestCtx, *bufio.Reader, error) {
 	s := ctx.s
 	c := ctx.c
+	t := ctx.time
 	s.releaseCtx(ctx)
 
 	v := bytePool.Get()
@@ -828,6 +829,7 @@ func acquireByteReader(ctx *RequestCtx) (*RequestCtx, *bufio.Reader, error) {
 	ch := b[0]
 	bytePool.Put(v)
 	ctx = s.acquireCtx(c)
+	ctx.time = t
 	if err != nil {
 		return ctx, nil, err
 	}
