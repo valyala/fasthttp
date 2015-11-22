@@ -43,7 +43,7 @@ func BenchmarkNetHTTPServerGet10ReqPerConn(b *testing.B) {
 	benchmarkNetHTTPServerGet(b, defaultClientsCount, 10)
 }
 
-func BenchmarkNetHTTPServerGet10000ReqPerConn(b *testing.B) {
+func BenchmarkNetHTTPServerGet10KReqPerConn(b *testing.B) {
 	benchmarkNetHTTPServerGet(b, defaultClientsCount, 10000)
 }
 
