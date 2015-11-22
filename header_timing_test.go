@@ -58,6 +58,41 @@ func BenchmarkResponseHeaderRead(b *testing.B) {
 	})
 }
 
+func BenchmarkRequestHeaderWrite(b *testing.B) {
+	b.RunParallel(func (pb *testing.PB) {
+		var h RequestHeader
+		h.SetRequestURI("/foo/bar")
+		h.SetHost("foobar.com")
+		h.SetUserAgent("aaa.bbb")
+		h.SetReferer("http://google.com/aaa/bbb")
+		var w bytes.Buffer
+		for pb.Next() {
+			if _, err := h.WriteTo(&w); err != nil {
+				b.Fatalf("unexpected error when writing header: %s", err)
+			}
+			w.Reset()
+		}
+	})
+}
+
+func BenchmarkResponseHeaderWrite(b *testing.B) {
+	b.RunParallel(func (pb *testing.PB) {
+		var h ResponseHeader
+		h.SetStatusCode(200)
+		h.SetContentType("text/html")
+		h.SetContentLength(1256)
+		h.SetServer("aaa 1/2.3")
+		h.Set("Test", "1.2.3")
+		var w bytes.Buffer
+		for pb.Next() {
+			if _, err := h.WriteTo(&w); err != nil {
+				b.Fatalf("unexpected error when writing header: %s", err)
+			}
+			w.Reset()
+		}
+	})
+}
+
 func BenchmarkRequestHeaderPeekBytesCanonical(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var h RequestHeader
