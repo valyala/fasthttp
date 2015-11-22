@@ -263,3 +263,58 @@ func lowercaseBytes(b []byte) {
 func unsafeBytesToStr(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
+
+func unhex(c byte) int {
+	if c >= '0' && c <= '9' {
+		return int(c - '0')
+	}
+	if c >= 'a' && c <= 'f' {
+		return 10 + int(c-'a')
+	}
+	if c >= 'A' && c <= 'F' {
+		return 10 + int(c-'A')
+	}
+	return -1
+}
+
+func appendQuotedArg(dst, v []byte) []byte {
+	for _, c := range v {
+		if c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '/' || c == '.' {
+			dst = append(dst, c)
+		} else {
+			dst = append(dst, '%', hexChar(c>>4), hexChar(c&15))
+		}
+	}
+	return dst
+}
+
+func hexChar(c byte) byte {
+	if c < 10 {
+		return '0' + c
+	}
+	return c - 10 + 'A'
+}
+
+// EqualBytesStr returns true if string(b) == s.
+//
+// It doesn't allocate memory unlike string(b) do.
+func EqualBytesStr(b []byte, s string) bool {
+	if len(s) != len(b) {
+		return false
+	}
+	for i, n := 0, len(s); i < n; i++ {
+		if s[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// AppendBytesStr appends src to dst and returns dst
+// (which may be newly allocated).
+func AppendBytesStr(dst []byte, src string) []byte {
+	for i, n := 0, len(src); i < n; i++ {
+		dst = append(dst, src[i])
+	}
+	return dst
+}
