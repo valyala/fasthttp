@@ -1,6 +1,9 @@
 # fasthttp
 Fast HTTP for Go
 
+Currently fasthttp is successfully used in a production serving up to 1M
+concurrent keep-alive connections doing 50K qps from a single server.
+
 [Documentation](https://godoc.org/github.com/valyala/fasthttp)
 
 # HTTP server performance comparison with [net/http](https://golang.org/pkg/net/http/).
