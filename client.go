@@ -159,10 +159,11 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	host := uri.Host()
 
 	isTLS := false
-	if bytes.Equal(uri.Scheme, strHTTPS) {
+	scheme := uri.Scheme()
+	if bytes.Equal(scheme, strHTTPS) {
 		isTLS = true
-	} else if !bytes.Equal(uri.Scheme, strHTTP) {
-		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme)
+	} else if !bytes.Equal(scheme, strHTTP) {
+		return fmt.Errorf("unsupported protocol %q. http and https are supported", scheme)
 	}
 
 	startCleaner := false

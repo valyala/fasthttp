@@ -49,8 +49,8 @@ func TestURIPathNormalize(t *testing.T) {
 
 func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string) {
 	u.Parse(nil, []byte(requestURI))
-	if string(u.Path) != expectedPath {
-		t.Fatalf("Unexpected path %q. Expected %q. requestURI=%q", u.Path, expectedPath, requestURI)
+	if string(u.Path()) != expectedPath {
+		t.Fatalf("Unexpected path %q. Expected %q. requestURI=%q", u.Path(), expectedPath, requestURI)
 	}
 }
 
@@ -87,10 +87,10 @@ func TestURIFullURI(t *testing.T) {
 func testURIFullURI(t *testing.T, scheme, host, path, hash string, args *Args, expectedURI string) {
 	var u URI
 
-	u.Scheme = []byte(scheme)
+	u.SetScheme(scheme)
 	u.host = []byte(host)
-	u.Path = []byte(path)
-	u.Hash = []byte(hash)
+	u.SetPath(path)
+	u.SetHash(hash)
 	args.CopyTo(u.QueryArgs())
 
 	uri := u.FullURI()
@@ -102,7 +102,7 @@ func testURIFullURI(t *testing.T, scheme, host, path, hash string, args *Args, e
 func TestURIParseNilHost(t *testing.T) {
 	testURIParseScheme(t, "http://google.com/foo?bar#baz", "http")
 	testURIParseScheme(t, "HTtP://google.com/", "http")
-	testURIParseScheme(t, "://google.com/", "")
+	testURIParseScheme(t, "://google.com/", "http")
 	testURIParseScheme(t, "fTP://aaa.com", "ftp")
 	testURIParseScheme(t, "httPS://aaa.com", "https")
 }
@@ -110,8 +110,8 @@ func TestURIParseNilHost(t *testing.T) {
 func testURIParseScheme(t *testing.T, uri, expectedScheme string) {
 	var u URI
 	u.Parse(nil, []byte(uri))
-	if string(u.Scheme) != expectedScheme {
-		t.Fatalf("Unexpected scheme %q. Expected %q for uri %q", u.Scheme, expectedScheme, uri)
+	if string(u.Scheme()) != expectedScheme {
+		t.Fatalf("Unexpected scheme %q. Expected %q for uri %q", u.Scheme(), expectedScheme, uri)
 	}
 }
 
@@ -167,16 +167,16 @@ func testURIParse(t *testing.T, u *URI, host, uri,
 	if !bytes.Equal(u.Host(), []byte(expectedHost)) {
 		t.Fatalf("Unexpected host %q. Expected %q. host=%q, uri=%q", u.Host(), expectedHost, host, uri)
 	}
-	if !bytes.Equal(u.PathOriginal, []byte(expectedPathOriginal)) {
-		t.Fatalf("Unexpected original path %q. Expected %q. host=%q, uri=%q", u.PathOriginal, expectedPathOriginal, host, uri)
+	if !bytes.Equal(u.PathOriginal(), []byte(expectedPathOriginal)) {
+		t.Fatalf("Unexpected original path %q. Expected %q. host=%q, uri=%q", u.PathOriginal(), expectedPathOriginal, host, uri)
 	}
-	if !bytes.Equal(u.Path, []byte(expectedPath)) {
-		t.Fatalf("Unexpected path %q. Expected %q. host=%q, uri=%q", u.Path, expectedPath, host, uri)
+	if !bytes.Equal(u.Path(), []byte(expectedPath)) {
+		t.Fatalf("Unexpected path %q. Expected %q. host=%q, uri=%q", u.Path(), expectedPath, host, uri)
 	}
-	if !bytes.Equal(u.QueryString, []byte(expectedArgs)) {
-		t.Fatalf("Unexpected args %q. Expected %q. host=%q, uri=%q", u.QueryString, expectedArgs, host, uri)
+	if !bytes.Equal(u.QueryString(), []byte(expectedArgs)) {
+		t.Fatalf("Unexpected args %q. Expected %q. host=%q, uri=%q", u.QueryString(), expectedArgs, host, uri)
 	}
-	if !bytes.Equal(u.Hash, []byte(expectedHash)) {
-		t.Fatalf("Unexpected hash %q. Expected %q. host=%q, uri=%q", u.Hash, expectedHash, host, uri)
+	if !bytes.Equal(u.Hash(), []byte(expectedHash)) {
+		t.Fatalf("Unexpected hash %q. Expected %q. host=%q, uri=%q", u.Hash(), expectedHash, host, uri)
 	}
 }

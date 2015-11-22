@@ -9,27 +9,12 @@ import (
 //
 // It is forbidden copying URI instances. Create new instances instead.
 type URI struct {
-	// Original path passed to URI.Parse()
-	PathOriginal []byte
-
-	// Scheme part, i.e. http of http://aaa.com/foo/bar?baz=123#qwe .
-	//
-	// Scheme is always lowercased.
-	Scheme []byte
-
-	// Path part, i.e. /foo/bar of http://aaa.com/foo/bar?baz=123#qwe .
-	//
-	// Path is always urldecoded and normalized,
-	// i.e. '//f%20obar/baz/../zzz' becomes '/f obar/zzz'.
-	Path []byte
-
-	// Query string part, i.e. baz=123 of http://aaa.com/foo/bar?baz=123#qwe .
-	QueryString []byte
-
-	// Hash part, i.e. qwe of http://aaa.com/foo/bar?baz=123#qwe .
-	Hash []byte
-
-	host []byte
+	pathOriginal []byte
+	scheme       []byte
+	path         []byte
+	queryString  []byte
+	hash         []byte
+	host         []byte
 
 	queryArgs       Args
 	parsedQueryArgs bool
@@ -40,13 +25,106 @@ type URI struct {
 	h *RequestHeader
 }
 
+// Hash returns URI hash, i.e. qwe of http://aaa.com/foo/bar?baz=123#qwe .
+//
+// The returned value is valid until the next URI method call.
+func (x *URI) Hash() []byte {
+	return x.hash
+}
+
+// SetHash sets URI hash.
+func (x *URI) SetHash(hash string) {
+	x.hash = AppendBytesStr(x.hash[:0], hash)
+}
+
+// SetHashBytes sets URI hash.
+func (x *URI) SetHashBytes(hash []byte) {
+	x.hash = append(x.hash[:0], hash...)
+}
+
+// QueryString returns URI query string,
+// i.e. baz=123 of http://aaa.com/foo/bar?baz=123#qwe .
+//
+// The returned value is valid until the next URI method call.
+func (x *URI) QueryString() []byte {
+	return x.queryString
+}
+
+// SetQueryString sets URI query string.
+func (x *URI) SetQueryString(queryString string) {
+	x.queryString = AppendBytesStr(x.queryString[:0], queryString)
+}
+
+// SetQueryStringBytes sets URI query string.
+func (x *URI) SetQueryStringBytes(queryString []byte) {
+	x.queryString = append(x.queryString[:0], queryString...)
+}
+
+// Path returns URI path, i.e. /foo/bar of http://aaa.com/foo/bar?baz=123#qwe .
+//
+// The returned path is always urldecoded and normalized,
+// i.e. '//f%20obar/baz/../zzz' becomes '/f obar/zzz'.
+//
+// The returned value is valid until the next URI method call.
+func (x *URI) Path() []byte {
+	path := x.path
+	if len(path) == 0 {
+		path = strSlash
+	}
+	return path
+}
+
+// SetPath sets URI path.
+func (x *URI) SetPath(path string) {
+	x.pathOriginal = AppendBytesStr(x.pathOriginal, path)
+	x.path = normalizePath(x.path, x.pathOriginal)
+}
+
+// SetPathBytes sets URI path.
+func (x *URI) SetPathBytes(path []byte) {
+	x.pathOriginal = append(x.pathOriginal[:0], path...)
+	x.path = normalizePath(x.path, x.pathOriginal)
+}
+
+// PathOriginal returns the original path from requestURI passed to URI.Parse().
+//
+// The returned value is valid until the next URI method call.
+func (x *URI) PathOriginal() []byte {
+	return x.pathOriginal
+}
+
+// Scheme returns URI scheme, i.e. http of http://aaa.com/foo/bar?baz=123#qwe .
+//
+// Returned scheme is always lowercased.
+//
+// The returned value is valid until the next URI method call.
+func (x *URI) Scheme() []byte {
+	scheme := x.scheme
+	if len(scheme) == 0 {
+		scheme = strHTTP
+	}
+	return scheme
+}
+
+// SetScheme sets URI scheme, i.e. http, https, ftp, etc.
+func (x *URI) SetScheme(scheme string) {
+	x.scheme = AppendBytesStr(x.scheme[:0], scheme)
+	lowercaseBytes(x.scheme)
+}
+
+// SetScheme sets URI scheme, i.e. http, https, ftp, etc.
+func (x *URI) SetSchemeBytes(scheme []byte) {
+	x.scheme = append(x.scheme[:0], scheme...)
+	lowercaseBytes(x.scheme)
+}
+
 // Reset clears uri.
 func (x *URI) Reset() {
-	x.PathOriginal = x.PathOriginal[:0]
-	x.Scheme = x.Scheme[:0]
-	x.Path = x.Path[:0]
-	x.QueryString = x.QueryString[:0]
-	x.Hash = x.Hash[:0]
+	x.pathOriginal = x.pathOriginal[:0]
+	x.scheme = x.scheme[:0]
+	x.path = x.path[:0]
+	x.queryString = x.queryString[:0]
+	x.hash = x.hash[:0]
 
 	x.host = x.host[:0]
 	x.queryArgs.Reset()
@@ -83,29 +161,29 @@ func (x *URI) parse(host, uri []byte, h *RequestHeader) {
 	x.h = h
 
 	scheme, host, uri := splitHostUri(host, uri)
-	x.Scheme = append(x.Scheme, scheme...)
-	lowercaseBytes(x.Scheme)
+	x.scheme = append(x.scheme, scheme...)
+	lowercaseBytes(x.scheme)
 	x.host = append(x.host, host...)
 	lowercaseBytes(x.host)
 
 	b := uri
 	n := bytes.IndexByte(b, '?')
 	if n < 0 {
-		x.PathOriginal = append(x.PathOriginal, b...)
-		x.Path = normalizePath(x.Path, b)
+		x.pathOriginal = append(x.pathOriginal, b...)
+		x.path = normalizePath(x.path, b)
 		return
 	}
-	x.PathOriginal = append(x.PathOriginal, b[:n]...)
-	x.Path = normalizePath(x.Path, x.PathOriginal)
+	x.pathOriginal = append(x.pathOriginal, b[:n]...)
+	x.path = normalizePath(x.path, x.pathOriginal)
 	b = b[n+1:]
 
 	n = bytes.IndexByte(b, '#')
 	if n >= 0 {
-		x.Hash = append(x.Hash, b[n+1:]...)
+		x.hash = append(x.hash, b[n+1:]...)
 		b = b[:n]
 	}
 
-	x.QueryString = append(x.QueryString, b...)
+	x.queryString = append(x.queryString, b...)
 }
 
 func normalizePath(dst, src []byte) []byte {
@@ -164,22 +242,17 @@ func normalizePath(dst, src []byte) []byte {
 
 // RequestURI returns RequestURI - i.e. URI without Scheme and Host.
 func (x *URI) RequestURI() []byte {
-	path := x.Path
-	if len(path) == 0 {
-		path = strSlash
-	}
-
-	dst := appendQuotedArg(x.requestURI[:0], path)
+	dst := appendQuotedArg(x.requestURI[:0], x.Path())
 	if x.queryArgs.Len() > 0 {
 		dst = append(dst, '?')
 		dst = x.queryArgs.AppendBytes(dst)
-	} else if len(x.QueryString) > 0 {
+	} else if len(x.queryString) > 0 {
 		dst = append(dst, '?')
-		dst = append(dst, x.QueryString...)
+		dst = append(dst, x.queryString...)
 	}
-	if len(x.Hash) > 0 {
+	if len(x.hash) > 0 {
 		dst = append(dst, '#')
-		dst = append(dst, x.Hash...)
+		dst = append(dst, x.hash...)
 	}
 	x.requestURI = dst
 	return x.requestURI
@@ -194,11 +267,7 @@ func (x *URI) FullURI() []byte {
 // AppendBytes appends full uri to dst and returns dst
 // (which may be newly allocated).
 func (x *URI) AppendBytes(dst []byte) []byte {
-	scheme := x.Scheme
-	if len(scheme) == 0 {
-		scheme = strHTTP
-	}
-	dst = append(dst, scheme...)
+	dst = append(dst, x.Scheme()...)
 	dst = append(dst, strColonSlashSlash...)
 	dst = append(dst, x.Host()...)
 	lowercaseBytes(dst)
@@ -246,6 +315,6 @@ func (x *URI) parseQueryArgs() {
 	if x.parsedQueryArgs {
 		return
 	}
-	x.queryArgs.ParseBytes(x.QueryString)
+	x.queryArgs.ParseBytes(x.queryString)
 	x.parsedQueryArgs = true
 }

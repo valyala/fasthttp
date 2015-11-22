@@ -481,17 +481,17 @@ func TestRequestURI(t *testing.T) {
 	if string(uri.Host()) != host {
 		t.Fatalf("Unexpected host %q. Expected %q", uri.Host(), host)
 	}
-	if string(uri.PathOriginal) != expectedPathOriginal {
-		t.Fatalf("Unexpected source path %q. Expected %q", uri.PathOriginal, expectedPathOriginal)
+	if string(uri.PathOriginal()) != expectedPathOriginal {
+		t.Fatalf("Unexpected source path %q. Expected %q", uri.PathOriginal(), expectedPathOriginal)
 	}
-	if string(uri.Path) != expectedPath {
-		t.Fatalf("Unexpected path %q. Expected %q", uri.Path, expectedPath)
+	if string(uri.Path()) != expectedPath {
+		t.Fatalf("Unexpected path %q. Expected %q", uri.Path(), expectedPath)
 	}
-	if string(uri.QueryString) != expectedQueryString {
-		t.Fatalf("Unexpected query string %q. Expected %q", uri.QueryString, expectedQueryString)
+	if string(uri.QueryString()) != expectedQueryString {
+		t.Fatalf("Unexpected query string %q. Expected %q", uri.QueryString(), expectedQueryString)
 	}
-	if string(uri.Hash) != expectedHash {
-		t.Fatalf("Unexpected hash %q. Expected %q", uri.Hash, expectedHash)
+	if string(uri.Hash()) != expectedHash {
+		t.Fatalf("Unexpected hash %q. Expected %q", uri.Hash(), expectedHash)
 	}
 }
 
