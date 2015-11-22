@@ -70,7 +70,7 @@ BenchmarkServerGet10ReqPerConn1KClients-4        	 3000000	       404 ns/op	    
 BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	       0 B/op	       0 allocs/op
 ```
 
-# Performance optimization tips for multi-core systems.
+# Performance optimization tips for multi-core systems
 
     * Use [reuseport](https://godoc.org/github.com/valyala/fasthttp/reuseport) listener.
     * Run a separate server instance per CPU core with GOMAXPROCS=1.
