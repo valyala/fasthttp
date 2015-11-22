@@ -235,7 +235,7 @@ func (c *Client) mCleaner(m map[string]*HostClient) {
 	}
 }
 
-// Maximum number of concurrent connections http client can establish per host
+// Maximum number of concurrent connections http client may establish per host
 // by default.
 const DefaultMaxConnsPerHost = 100
 
@@ -436,6 +436,29 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 }
 
 func clientDoTimeout(req *Request, resp *Response, timeout time.Duration, c clientDoer) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := clientDoTimeoutFreeConn(req, resp, timeout, c)
+		if err != ErrNoFreeConns {
+			return err
+		}
+		timeout = -time.Since(deadline)
+		if timeout <= 0 {
+			return ErrTimeout
+		}
+		sleepTime := 100 * time.Millisecond
+		if sleepTime > timeout {
+			sleepTime = timeout
+		}
+		time.Sleep(sleepTime)
+		timeout = -time.Since(deadline)
+		if timeout <= 0 {
+			return ErrTimeout
+		}
+	}
+}
+
+func clientDoTimeoutFreeConn(req *Request, resp *Response, timeout time.Duration, c clientDoer) error {
 	var ch chan error
 	chv := errorChPool.Get()
 	if chv == nil {
