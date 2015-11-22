@@ -3,14 +3,13 @@ Package fasthttp provides fast HTTP server and client API.
 
 Fasthttp provides the following features:
 
-    * Optimized for speed. Fasthttp is faster than standard net/http package.
+    * Optimized for speed. Easily handles more than 100K qps and more than 1M
+      concurrent keep-alive connections on modern hardware.
     * Optimized for low memory usage.
-    * Easily handles more than 1M concurrent keep-alive connections on modern
-      hardware.
     * Server supports requests' pipelining. Multiple requests may be read from
       a single network packet and multiple responses may be sent in a single
       network packet. This may be useful for highly loaded REST services.
-    * Server is packed with the following anti-DoS limits:
+    * Server provides the following anti-DoS limits:
 
         * The number of concurrent connections.
         * The number of concurrent connections per client IP.
@@ -18,8 +17,9 @@ Fasthttp provides the following features:
         * Request read timeout.
         * Response write timeout.
         * Maximum request header size.
+        * Maximum request execution time.
 
-    * A lot of useful info is exposed to request handler:
+    * A lot of additional useful info is exposed to request handler:
 
         * Server and client address.
         * Per-request logger.
@@ -29,7 +29,8 @@ Fasthttp provides the following features:
         * Request sequence number for the current connection.
 
     * Client supports automatic retry on idempotent requests' failure.
-    * It is quite easy building custom (and fast) client and server
-      implementations using fasthttp API.
+    * Fasthttp API is designed with the ability to extend existing client
+      and server implementations or to write custom client and server
+      implementations from scratch.
 */
 package fasthttp
