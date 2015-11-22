@@ -59,7 +59,7 @@ func BenchmarkResponseHeaderRead(b *testing.B) {
 }
 
 func BenchmarkRequestHeaderWrite(b *testing.B) {
-	b.RunParallel(func (pb *testing.PB) {
+	b.RunParallel(func(pb *testing.PB) {
 		var h RequestHeader
 		h.SetRequestURI("/foo/bar")
 		h.SetHost("foobar.com")
@@ -76,7 +76,7 @@ func BenchmarkRequestHeaderWrite(b *testing.B) {
 }
 
 func BenchmarkResponseHeaderWrite(b *testing.B) {
-	b.RunParallel(func (pb *testing.PB) {
+	b.RunParallel(func(pb *testing.PB) {
 		var h ResponseHeader
 		h.SetStatusCode(200)
 		h.SetContentType("text/html")
