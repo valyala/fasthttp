@@ -69,8 +69,6 @@ func (x *URI) Host() []byte {
 }
 
 // Parse initializes URI from the given host and uri.
-//
-// It is safe modifying host and uri buffers after the Parse call.
 func (x *URI) Parse(host, uri []byte) {
 	x.parse(host, uri, nil)
 }

@@ -86,7 +86,7 @@ func (h *RequestHeader) ConnectionClose() bool {
 
 // ConnectionCloseReal returns true if 'Connection: close' header is set.
 //
-// This method tirgger full (slow) request headers' parsing
+// This method triggers full (slow) request headers' parsing
 // unlike ConnectionClose, so use it only if you really want determining
 // whether 'Connection: close' header is really set on the wire.
 func (h *RequestHeader) ConnectionCloseReal() bool {
@@ -172,8 +172,6 @@ func (h *ResponseHeader) SetContentType(contentType string) {
 }
 
 // SetContentTypeBytes sets Content-Type header value.
-//
-// It is safe modifying contentType buffer after function return.
 func (h *ResponseHeader) SetContentTypeBytes(contentType []byte) {
 	h.contentType = append(h.contentType[:0], contentType...)
 }
@@ -189,8 +187,6 @@ func (h *ResponseHeader) SetServer(server string) {
 }
 
 // SetServerBytes sets Server header value.
-//
-// It is safe modifying server buffer after function return.
 func (h *ResponseHeader) SetServerBytes(server []byte) {
 	h.server = append(h.server[:0], server...)
 }
@@ -208,8 +204,6 @@ func (h *RequestHeader) SetContentType(contentType string) {
 }
 
 // SetContentTypeBytes sets Content-Type header value.
-//
-// It is safe modifying contentType buffer after function return.
 func (h *RequestHeader) SetContentTypeBytes(contentType []byte) {
 	h.parseRawHeaders()
 	h.contentType = append(h.contentType[:0], contentType...)
@@ -241,8 +235,6 @@ func (h *RequestHeader) SetHost(host string) {
 }
 
 // SetHostBytes sets Host header value.
-//
-// It is safe modifying host buffer after function return.
 func (h *RequestHeader) SetHostBytes(host []byte) {
 	h.parseRawHeaders()
 	h.host = append(h.host[:0], host...)
@@ -261,8 +253,6 @@ func (h *RequestHeader) SetUserAgent(userAgent string) {
 }
 
 // SetUserAgentBytes sets User-Agent header value.
-//
-// It is safe modifying userAgent buffer after function return.
 func (h *RequestHeader) SetUserAgentBytes(userAgent []byte) {
 	h.parseRawHeaders()
 	h.userAgent = append(h.userAgent[:0], userAgent...)
@@ -279,8 +269,6 @@ func (h *RequestHeader) SetReferer(referer string) {
 }
 
 // SetRefererBytes sets Referer header value.
-//
-// It is safe modifying referer buffer after function return.
 func (h *RequestHeader) SetRefererBytes(referer []byte) {
 	h.SetCanonical(strReferer, referer)
 }
@@ -299,8 +287,6 @@ func (h *RequestHeader) SetMethod(method string) {
 }
 
 // SetMethod sets HTTP request method.
-//
-// It is safe modifying method buffer after function return.
 func (h *RequestHeader) SetMethodBytes(method []byte) {
 	h.method = append(h.method[:0], method...)
 }
@@ -324,8 +310,6 @@ func (h *RequestHeader) SetRequestURI(requestURI string) {
 // SetRequestURI sets RequestURI for the first HTTP request line.
 // RequestURI must be properly encoded.
 // Use URI.RequestURI for constructing proper RequestURI if unsure.
-//
-// It is safe modifying requestURI buffer after function return.
 func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
 	h.requestURI = append(h.requestURI[:0], requestURI...)
 }
@@ -543,24 +527,18 @@ func (h *ResponseHeader) Set(key, value string) {
 }
 
 // SetBytesK sets the given 'key: value' header.
-//
-// It is safe modifying key buffer after SetBytesK return.
 func (h *ResponseHeader) SetBytesK(key []byte, value string) {
 	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
 	h.SetBytesKV(key, h.bufKV.value)
 }
 
 // SetBytesV sets the given 'key: value' header.
-//
-// It is safe modifying value buffer after SetBytesV return.
 func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 	k := getHeaderKeyBytes(&h.bufKV, key)
 	h.SetCanonical(k, value)
 }
 
 // SetBytesKV sets the given 'key: value' header.
-//
-// It is safe modifying key and value buffers after SetBytesKV return.
 func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	normalizeHeaderKey(h.bufKV.key)
@@ -569,8 +547,6 @@ func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 
 // SetCanonical sets the given 'key: value' header assuming that
 // key is in canonical form.
-//
-// It is safe modifying key and value buffers after SetCanonical return.
 func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	switch {
 	case bytes.Equal(strContentType, key):
@@ -602,8 +578,6 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 }
 
 // SetCookie sets the given response cookie.
-//
-// It is safe modifying cookie instance after the call.
 func (h *ResponseHeader) SetCookie(cookie *Cookie) {
 	h.cookies = setArg(h.cookies, cookie.Key, cookie.Cookie())
 }
@@ -615,16 +589,12 @@ func (h *RequestHeader) SetCookie(key, value string) {
 }
 
 // SetCookieBytesK sets 'key: value' cookies.
-//
-// It is safe modifying key buffer after SetCookieBytesK call.
 func (h *RequestHeader) SetCookieBytesK(key []byte, value string) {
 	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
 	h.SetCookieBytesKV(key, h.bufKV.value)
 }
 
 // SetCookieBytesKV sets 'key: value' cookies.
-//
-// It is safe modifying key and value buffers after SetCookieBytesKV call.
 func (h *RequestHeader) SetCookieBytesKV(key, value []byte) {
 	h.parseRawHeaders()
 	h.collectCookies()
@@ -638,24 +608,18 @@ func (h *RequestHeader) Set(key, value string) {
 }
 
 // SetBytesK sets the given 'key: value' header.
-//
-// It is safe modifying key buffer after SetBytesK return.
 func (h *RequestHeader) SetBytesK(key []byte, value string) {
 	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
 	h.SetBytesKV(key, h.bufKV.value)
 }
 
 // SetBytesV sets the given 'key: value' header.
-//
-// It is safe modifying value buffer after SetBytesV return.
 func (h *RequestHeader) SetBytesV(key string, value []byte) {
 	k := getHeaderKeyBytes(&h.bufKV, key)
 	h.SetCanonical(k, value)
 }
 
 // SetBytesKV sets the given 'key: value' header.
-//
-// It is safe modifying key and value buffers after SetBytesKV return.
 func (h *RequestHeader) SetBytesKV(key, value []byte) {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	normalizeHeaderKey(h.bufKV.key)
@@ -664,8 +628,6 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 
 // SetCanonical sets the given 'key: value' header assuming that
 // key is in canonical form.
-//
-// It is safe modifying key and value buffers after SetCanonical return.
 func (h *RequestHeader) SetCanonical(key, value []byte) {
 	h.parseRawHeaders()
 	switch {

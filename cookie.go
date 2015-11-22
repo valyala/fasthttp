@@ -106,8 +106,6 @@ func (c *Cookie) Parse(src string) error {
 }
 
 // ParseBytes parses Set-Cookie header.
-//
-// It is safe modifying src buffer after function return.
 func (c *Cookie) ParseBytes(src []byte) error {
 	c.Reset()
 

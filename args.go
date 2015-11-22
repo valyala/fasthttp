@@ -51,8 +51,6 @@ func (a *Args) Parse(s string) {
 }
 
 // ParseBytes parses the given b containing query args.
-//
-// It is safe modifying b buffer contents after ParseBytes return.
 func (a *Args) ParseBytes(b []byte) {
 	a.Reset()
 
@@ -114,8 +112,6 @@ func (a *Args) Del(key string) {
 }
 
 // DelBytes deletes argument with the given key from query args.
-//
-// It is safe modifying key buffer after DelBytes return.
 func (a *Args) DelBytes(key []byte) {
 	a.args = delArg(a.args, key)
 }
@@ -127,24 +123,18 @@ func (a *Args) Set(key, value string) {
 }
 
 // SetBytesK sets 'key=value' argument.
-//
-// It is safe modifying key buffer after SetBytesK return.
 func (a *Args) SetBytesK(key []byte, value string) {
 	a.bufKV.value = AppendBytesStr(a.bufKV.value[:0], value)
 	a.SetBytesKV(key, a.bufKV.value)
 }
 
 // SetBytesV sets 'key=value' argument.
-//
-// It is safe modifying value buffer after SetBytesV return.
 func (a *Args) SetBytesV(key string, value []byte) {
 	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
 	a.SetBytesKV(a.bufKV.key, value)
 }
 
 // SetBytesKV sets 'key=value' argument.
-//
-// It is safe modifying key and value buffers after SetBytesKV return.
 func (a *Args) SetBytesKV(key, value []byte) {
 	a.args = setArg(a.args, key, value)
 }
@@ -159,8 +149,6 @@ func (a *Args) Peek(key string) []byte {
 // PeekBytes returns query arg value for the given key.
 //
 // Returned value is valid until the next Args call.
-//
-// It is safe modifying key buffer after PeekBytes return.
 func (a *Args) PeekBytes(key []byte) []byte {
 	return peekArgBytes(a.args, key)
 }
@@ -176,8 +164,8 @@ func (a *Args) HasBytes(key []byte) bool {
 	return hasArg(a.args, key)
 }
 
-// ErrNoArgValue is returned when value with the given key is missing.
-var ErrNoArgValue = errors.New("No value for the given key")
+// ErrNoArgValue is returned when Args value with the given key is missing.
+var ErrNoArgValue = errors.New("no Args value for the given key")
 
 // GetUint returns uint value for the given key.
 func (a *Args) GetUint(key string) (int, error) {

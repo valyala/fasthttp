@@ -25,9 +25,6 @@ import (
 // to the client. Otherwise requests' processing may hang.
 //
 // ServeConn closes c before returning.
-//
-// ServeConn uses default Server settings. Use Server.ServeConn
-// for custom server tuning.
 func ServeConn(c net.Conn, handler RequestHandler) error {
 	v := serverPool.Get()
 	if v == nil {
@@ -47,9 +44,6 @@ var serverPool sync.Pool
 // using the given handler.
 //
 // Serve blocks until the given listener returns permanent error.
-//
-// Serve uses default Server settings. Use Server.Serve
-// for custom server tuning.
 func Serve(ln net.Listener, handler RequestHandler) error {
 	s := &Server{
 		Handler: handler,
@@ -59,9 +53,6 @@ func Serve(ln net.Listener, handler RequestHandler) error {
 
 // ListenAndServe serves HTTP requests from the given TCP addr
 // using the given handler.
-//
-// ListenAndServe uses default Server settings. Use Server.ListenAndServe
-// for custom server tuning.
 func ListenAndServe(addr string, handler RequestHandler) error {
 	s := &Server{
 		Handler: handler,
@@ -73,9 +64,6 @@ func ListenAndServe(addr string, handler RequestHandler) error {
 // using the given handler.
 //
 // certFile and keyFile are paths to TLS certificate and key files.
-//
-// ListenAndServeTLS uses default Server settings. Use Server.ListenAndServeTLS
-// for custom server tuning.
 func ListenAndServeTLS(addr, certFile, keyFile string, handler RequestHandler) error {
 	s := &Server{
 		Handler: handler,
@@ -85,7 +73,7 @@ func ListenAndServeTLS(addr, certFile, keyFile string, handler RequestHandler) e
 
 // RequestHandler must process incoming requests.
 //
-// RequestHandler must call ctx.TimeoutError() before return
+// RequestHandler must call ctx.TimeoutError() before returning
 // if it keeps references to ctx and/or its' members after the return.
 // Consider wrapping RequestHandler into TimeoutHandler if response time
 // must be limited.
@@ -159,8 +147,8 @@ type Server struct {
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
-// error with the given msg in the body to the client if h didn't return
-// during the given duration.
+// error with the given msg to the client if h didn't return during
+// the given duration.
 func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) RequestHandler {
 	if timeout <= 0 {
 		return h
@@ -193,9 +181,9 @@ func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) Request
 // RequestHandler should avoid holding references to incoming RequestCtx and/or
 // its' members after the return.
 // If holding RequestCtx references after the return is unavoidable
-// (for instance, ctx is passed to a separate goroutine and we cannot control
-// ctx lifetime in this goroutine), then the RequestHandler MUST call
-// ctx.TimeoutError() before return.
+// (for instance, ctx is passed to a separate goroutine and ctx lifetime cannot
+// be controlled), then the RequestHandler MUST call ctx.TimeoutError()
+// before return.
 type RequestCtx struct {
 	// Incoming request.
 	Request Request
@@ -325,6 +313,8 @@ func (ctx *RequestCtx) RequestURI() []byte {
 }
 
 // URI returns requested uri.
+//
+// The uri is valid until returning from RequestHandler.
 func (ctx *RequestCtx) URI() *URI {
 	return ctx.Request.URI()
 }
@@ -425,8 +415,6 @@ func (ctx *RequestCtx) RemoteIP() net.IP {
 
 // Error sets response status code to the given value and sets response body
 // to the given message.
-//
-// Error calls are ignored after TimeoutError call.
 func (ctx *RequestCtx) Error(msg string, statusCode int) {
 	resp := &ctx.Response
 	resp.Reset()
@@ -436,18 +424,12 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 }
 
 // Success sets response Content-Type and body to the given values.
-//
-// It is safe modifying body buffer after the Success() call.
-//
-// Success calls are ignored after TimeoutError call.
 func (ctx *RequestCtx) Success(contentType string, body []byte) {
 	ctx.SetContentType(contentType)
 	ctx.SetBody(body)
 }
 
 // SetBody sets response body to the given value.
-//
-// It is safe modifying body buffer after the function return.
 func (ctx *RequestCtx) SetBody(body []byte) {
 	ctx.Response.SetBody(body)
 }
@@ -482,9 +464,13 @@ func (ctx *RequestCtx) SetBodyStream(bodyStream io.Reader, bodySize int) {
 // request-specific messages inside RequestHandler.
 //
 // Each message logged via returned logger contains request-specific information
-// such as request id, remote address, request method and request url.
+// such as request id, request duration, local address, remote address,
+// request method and request url.
 //
-// It is safe re-using returned logger for logging multiple messages.
+// It is safe re-using returned logger for logging multiple messages
+// for the current request.
+//
+// The returned logger is valid until returning from RequestHandler.
 func (ctx *RequestCtx) Logger() Logger {
 	if ctx.logger.ctx == nil {
 		ctx.logger.ctx = ctx
@@ -790,6 +776,8 @@ func (s *Server) serveConn(c net.Conn) error {
 }
 
 // TimeoutErrMsg returns last error message set via TimeoutError call.
+//
+// This function is intended for custom server implementations.
 func (ctx *RequestCtx) TimeoutErrMsg() string {
 	return ctx.timeoutErrMsg
 }

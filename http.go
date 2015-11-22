@@ -51,8 +51,6 @@ func (req *Request) SetRequestURI(requestURI string) {
 }
 
 // SetRequestURIBytes sets RequestURI.
-//
-// It is safe using requestURI buffer after the function return.
 func (req *Request) SetRequestURIBytes(requestURI []byte) {
 	req.Header.SetRequestURIBytes(requestURI)
 }
@@ -137,8 +135,6 @@ func (resp *Response) Body() []byte {
 }
 
 // SetBody sets response body.
-//
-// It is safe modifying body buffer after function return.
 func (resp *Response) SetBody(body []byte) {
 	resp.body = append(resp.body[:0], body...)
 }
@@ -149,8 +145,6 @@ func (req *Request) Body() []byte {
 }
 
 // SetBody sets request body.
-//
-// It is safe modifying body buffer after function return.
 func (req *Request) SetBody(body []byte) {
 	req.body = append(req.body[:0], body...)
 }
@@ -287,7 +281,7 @@ func isSkipResponseBody(statusCode int) bool {
 
 var errRequestHostRequired = errors.New("Missing required Host header in request")
 
-// Write write request to w.
+// Write writes request to w.
 //
 // Write doesn't flush request to w for performance reasons.
 func (req *Request) Write(w *bufio.Writer) error {

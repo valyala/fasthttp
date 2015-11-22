@@ -50,18 +50,16 @@ func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return defaultClient.DoTimeout(req, resp, timeout)
 }
 
-// Get fetches url contents into dst.
-//
-// Use Do for request customization.
+// Get fetches url contents into dst and returns it as body.
 func Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return defaultClient.Get(dst, url)
 }
 
 // Post sends POST request to the given url with the given POST arguments.
 //
-// Empty POST body is sent if postArgs is nil.
+// Response body is written to dst, which is returned as body.
 //
-// Use Do for request customization.
+// Empty POST body is sent if postArgs is nil.
 func Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
 	return defaultClient.Post(dst, url, postArgs)
 }
@@ -111,18 +109,16 @@ type Client struct {
 	ms    map[string]*HostClient
 }
 
-// Get fetches url contents into dst.
-//
-// Use Do for request customization.
+// Get fetches url contents into dst and returns it as body.
 func (c *Client) Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return clientGetURL(dst, url, c)
 }
 
 // Post sends POST request to the given url with the given POST arguments.
 //
-// Empty POST body is sent if postArgs is nil.
+// Response body is written to dst, which is returned as body.
 //
-// Use Do for request customization.
+// Empty POST body is sent if postArgs is nil.
 func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
 	return clientPostURL(dst, url, postArgs, c)
 }
@@ -245,7 +241,7 @@ const DefaultMaxConnsPerHost = 100
 // The client automatically converts connection to TLS
 // if HostClient.IsTLS is set.
 //
-// TCP address passed to DialFunc always contain host and port.
+// TCP address passed to DialFunc always contains host and port.
 // Example TCP addr values:
 //
 //   - foobar.com:80
@@ -332,18 +328,16 @@ func (c *HostClient) LastUseTime() time.Time {
 	return time.Unix(int64(n), 0)
 }
 
-// Get fetches url contents into dst.
-//
-// Use Do for request customization.
+// Get fetches url contents into dst and returns it as body.
 func (c *HostClient) Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return clientGetURL(dst, url, c)
 }
 
 // Post sends POST request to the given url with the given POST arguments.
 //
-// Empty POST body is sent if postArgs is nil.
+// Response body is written to dst, which is returned as body.
 //
-// Use Do for request customization.
+// Empty POST body is sent if postArgs is nil.
 func (c *HostClient) Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
 	return clientPostURL(dst, url, postArgs, c)
 }
