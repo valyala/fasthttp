@@ -344,6 +344,28 @@ func (resp *Response) Write(w *bufio.Writer) error {
 	return err
 }
 
+// String returns request representation.
+//
+// Use Write instead of String for performance-critical code.
+func (req *Request) String() string {
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	req.Write(bw)
+	bw.Flush()
+	return string(w.Bytes())
+}
+
+// String returns response representation.
+//
+// Use Write instead of String for performance-critical code.
+func (resp *Response) String() string {
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	resp.Write(bw)
+	bw.Flush()
+	return string(w.Bytes())
+}
+
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	vbuf := copyBufPool.Get()
 	if vbuf == nil {
