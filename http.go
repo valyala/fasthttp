@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -284,13 +285,19 @@ func isSkipResponseBody(statusCode int) bool {
 	return statusCode == StatusNoContent || statusCode == StatusNotModified
 }
 
+var errRequestHostRequired = errors.New("Missing required Host header in request")
+
 // Write write request to w.
 //
 // Write doesn't flush request to w for performance reasons.
 func (req *Request) Write(w *bufio.Writer) error {
 	if len(req.Header.Host()) == 0 {
 		uri := req.URI()
-		req.Header.SetHostBytes(uri.Host())
+		host := uri.Host()
+		if len(host) == 0 {
+			return errRequestHostRequired
+		}
+		req.Header.SetHostBytes(host)
 		req.Header.SetRequestURIBytes(uri.RequestURI())
 	}
 	req.Header.SetContentLength(len(req.body))

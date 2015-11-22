@@ -268,19 +268,6 @@ func TestRequestWriteError(t *testing.T) {
 	testRequestWriteError(t, "GET", "/foo/bar", "aaa.com", "", "foobar")
 }
 
-func TestResponseWriteError(t *testing.T) {
-	var resp Response
-
-	// negative statusCode
-	resp.SetStatusCode(-1234)
-	w := &bytes.Buffer{}
-	bw := bufio.NewWriter(w)
-	err := resp.Write(bw)
-	if err == nil {
-		t.Fatalf("Expecting error when writing response=%#v", resp)
-	}
-}
-
 func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, body string) {
 	var req Request
 

@@ -897,118 +897,168 @@ func refreshServerDate() {
 
 // Write writes response header to w.
 func (h *ResponseHeader) Write(w *bufio.Writer) error {
+	_, err := w.Write(h.Header())
+	return err
+}
+
+// WriteTo writes response header to w.
+//
+// WriteTo implements io.WriterTo interface.
+func (h *ResponseHeader) WriteTo(w io.Writer) (int64, error) {
+	n, err := w.Write(h.Header())
+	return int64(n), err
+}
+
+// Header returns response header representation.
+//
+// The returned value is valid until the next call to ResponseHeader methods.
+func (h *ResponseHeader) Header() []byte {
+	h.bufKV.value = h.AppendBytes(h.bufKV.value[:0])
+	return h.bufKV.value
+}
+
+// String returns response header representation.
+func (h *ResponseHeader) String() string {
+	return string(h.Header())
+}
+
+// AppendBytes appends response header representation to dst and returns dst
+// (which may be newly allocated).
+func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	statusCode := h.StatusCode()
 	if statusCode < 0 {
-		return fmt.Errorf("response cannot have negative status code=%d", statusCode)
+		statusCode = StatusOK
 	}
 	if statusCode == 0 {
 		statusCode = StatusOK
 	}
-	w.Write(statusLine(statusCode))
+	dst = append(dst, statusLine(statusCode)...)
 
 	server := h.Server()
 	if len(server) == 0 {
 		server = defaultServerName
 	}
-	writeHeaderLine(w, strServer, server)
-	writeHeaderLine(w, strDate, serverDate.Load().([]byte))
+	dst = appendHeaderLine(dst, strServer, server)
+	dst = appendHeaderLine(dst, strDate, serverDate.Load().([]byte))
 
-	contentType := h.ContentType()
-	writeHeaderLine(w, strContentType, contentType)
+	dst = appendHeaderLine(dst, strContentType, h.ContentType())
 
 	if len(h.contentLengthBytes) > 0 {
-		writeHeaderLine(w, strContentLength, h.contentLengthBytes)
+		dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
 	}
 
 	for i, n := 0, len(h.h); i < n; i++ {
 		kv := &h.h[i]
-		writeHeaderLine(w, kv.key, kv.value)
+		dst = appendHeaderLine(dst, kv.key, kv.value)
 	}
 
 	n := len(h.cookies)
 	if n > 0 {
 		for i := 0; i < n; i++ {
 			kv := &h.cookies[i]
-			writeHeaderLine(w, strSetCookie, kv.value)
+			dst = appendHeaderLine(dst, strSetCookie, kv.value)
 		}
 	}
 
 	if h.ConnectionClose() {
-		writeHeaderLine(w, strConnection, strClose)
+		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
-	_, err := w.Write(strCRLF)
-	return err
+	return append(dst, strCRLF...)
 }
 
 // Write writes request header to w.
 func (h *RequestHeader) Write(w *bufio.Writer) error {
-	// there is no need in h.parseRawHeaders() here - raw headers are specially handled below.
-	method := h.Method()
-	w.Write(method)
-	w.WriteByte(' ')
+	_, err := w.Write(h.Header())
+	return err
+}
 
-	requestURI := h.RequestURI()
-	w.Write(requestURI)
-	w.WriteByte(' ')
-	w.Write(strHTTP11)
-	w.Write(strCRLF)
+// WriteTo writes request header to w.
+//
+// WriteTo implements io.WriterTo interface.
+func (h *RequestHeader) WriteTo(w io.Writer) (int64, error) {
+	n, err := w.Write(h.Header())
+	return int64(n), err
+}
+
+// Header returns request header representation.
+//
+// The returned representation is valid until the next call to RequestHeader methods.
+func (h *RequestHeader) Header() []byte {
+	h.bufKV.value = h.AppendBytes(h.bufKV.value[:0])
+	return h.bufKV.value
+}
+
+// String returns request header representation.
+func (h *RequestHeader) String() string {
+	return string(h.Header())
+}
+
+// AppendBytes appends request header representation to dst and returns dst
+// (which may be newly allocated).
+func (h *RequestHeader) AppendBytes(dst []byte) []byte {
+	// there is no need in h.parseRawHeaders() here - raw headers are specially handled below.
+	dst = append(dst, h.Method()...)
+	dst = append(dst, ' ')
+	dst = append(dst, h.RequestURI()...)
+	dst = append(dst, ' ')
+	dst = append(dst, strHTTP11...)
+	dst = append(dst, strCRLF...)
 
 	if !h.rawHeadersParsed && len(h.rawHeaders) > 0 {
-		_, err := w.Write(h.rawHeaders)
-		return err
+		return append(dst, h.rawHeaders...)
 	}
 
 	userAgent := h.UserAgent()
 	if len(userAgent) == 0 {
 		userAgent = defaultUserAgent
 	}
-	writeHeaderLine(w, strUserAgent, userAgent)
+	dst = appendHeaderLine(dst, strUserAgent, userAgent)
 
 	host := h.Host()
-	if len(host) == 0 {
-		return fmt.Errorf("missing required Host header")
+	if len(host) > 0 {
+		dst = appendHeaderLine(dst, strHost, host)
 	}
-	writeHeaderLine(w, strHost, host)
 
 	if h.IsPost() {
 		contentType := h.ContentType()
 		if len(contentType) == 0 {
-			return fmt.Errorf("missing required Content-Type header for POST request")
+			contentType = strPostArgsContentType
 		}
-		writeHeaderLine(w, strContentType, contentType)
+		dst = appendHeaderLine(dst, strContentType, contentType)
 
 		if len(h.contentLengthBytes) > 0 {
-			writeHeaderLine(w, strContentLength, h.contentLengthBytes)
+			dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
 		}
 	}
 
 	for i, n := 0, len(h.h); i < n; i++ {
 		kv := &h.h[i]
-		writeHeaderLine(w, kv.key, kv.value)
+		dst = appendHeaderLine(dst, kv.key, kv.value)
 	}
 
 	// there is no need in h.collectCookies() here, since if cookies aren't collected yet,
 	// they all are located in h.h.
 	n := len(h.cookies)
 	if n > 0 {
-		h.bufKV.value = appendRequestCookieBytes(h.bufKV.value[:0], h.cookies)
-		writeHeaderLine(w, strCookie, h.bufKV.value)
+		dst = append(dst, strCookie...)
+		dst = append(dst, strColonSpace...)
+		dst = appendRequestCookieBytes(dst, h.cookies)
+		dst = append(dst, strCRLF...)
 	}
 
 	if h.ConnectionClose() {
-		writeHeaderLine(w, strConnection, strClose)
+		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
-	_, err := w.Write(strCRLF)
-	return err
+	return append(dst, strCRLF...)
 }
 
-func writeHeaderLine(w *bufio.Writer, key, value []byte) {
-	w.Write(key)
-	w.Write(strColonSpace)
-	w.Write(value)
-	w.Write(strCRLF)
+func appendHeaderLine(dst, key, value []byte) []byte {
+	dst = append(dst, key...)
+	dst = append(dst, strColonSpace...)
+	dst = append(dst, value...)
+	return append(dst, strCRLF...)
 }
 
 func (h *ResponseHeader) parse(buf []byte) (int, error) {
