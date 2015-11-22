@@ -1,5 +1,5 @@
 # fasthttp
-Fast HTTP for Go
+Fast HTTP implementation for Go.
 
 Currently fasthttp is successfully used in a production serving up to 1M
 concurrent keep-alive connections doing 50K qps from a single server.
