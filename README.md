@@ -6,7 +6,7 @@ concurrent keep-alive connections doing 50K qps from a single server.
 
 [Documentation](https://godoc.org/github.com/valyala/fasthttp)
 
-# HTTP server performance comparison with [net/http](https://golang.org/pkg/net/http/).
+# HTTP server performance comparison with [net/http](https://golang.org/pkg/net/http/)
 
 In short, fasthttp is up to 10 times faster than net/http. Below are benchmark results.
 
@@ -70,3 +70,10 @@ BenchmarkServerGet10ReqPerConn1KClients-4        	 3000000	       404 ns/op	    
 BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	       0 B/op	       0 allocs/op
 ```
 
+# Performance optimization tips for multi-core systems.
+
+    * Use [reuseport](https://godoc.org/github.com/valyala/fasthttp/reuseport) listener.
+    * Run a separate server instance per CPU core with GOMAXPROCS=1.
+    * Attach each server instance to a separate CPU core using [taskset](http://linux.die.net/man/1/taskset).
+    * Ensure the interrupts of multiqueue network card are evenly distributed between CPU cores.
+      See [this article](https://blog.cloudflare.com/how-to-achieve-low-latency/) for details.
