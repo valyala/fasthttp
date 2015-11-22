@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"io"
 )
 
 // URI represents URI :) .
@@ -186,16 +187,30 @@ func (x *URI) RequestURI() []byte {
 
 // FullURI returns full uri in the form {Scheme}://{Host}{RequestURI}#{Hash}.
 func (x *URI) FullURI() []byte {
+	x.fullURI = x.AppendBytes(x.fullURI[:0])
+	return x.fullURI
+}
+
+// AppendBytes appends full uri to dst and returns dst
+// (which may be newly allocated).
+func (x *URI) AppendBytes(dst []byte) []byte {
 	scheme := x.Scheme
 	if len(scheme) == 0 {
 		scheme = strHTTP
 	}
-	dst := append(x.fullURI[:0], scheme...)
+	dst = append(dst, scheme...)
 	dst = append(dst, strColonSlashSlash...)
 	dst = append(dst, x.Host()...)
 	lowercaseBytes(dst)
-	x.fullURI = append(dst, x.RequestURI()...)
-	return x.fullURI
+	return append(dst, x.RequestURI()...)
+}
+
+// WriteTo writes full uri to w.
+//
+// WriteTo implements io.WriterTo interface.
+func (x *URI) WriteTo(w io.Writer) (int64, error) {
+	n, err := w.Write(x.FullURI())
+	return int64(n), err
 }
 
 // String returns full uri.
