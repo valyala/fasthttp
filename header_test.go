@@ -282,26 +282,26 @@ func TestResponseHeaderSetCookie(t *testing.T) {
 	h.Set("Set-Cookie", "aaaaa=bxx")
 
 	var c Cookie
-	c.Key = []byte("foo")
+	c.SetKey("foo")
 	if !h.Cookie(&c) {
-		t.Fatalf("cannot obtain %q cookie", c.Key)
+		t.Fatalf("cannot obtain %q cookie", c.Key())
 	}
-	if string(c.Value) != "bar" {
-		t.Fatalf("unexpected cookie value %q. Expected %q", c.Value, "bar")
+	if string(c.Value()) != "bar" {
+		t.Fatalf("unexpected cookie value %q. Expected %q", c.Value(), "bar")
 	}
-	if string(c.Path) != "/aa/bb" {
-		t.Fatalf("unexpected cookie path %q. Expected %q", c.Path, "/aa/bb")
+	if string(c.Path()) != "/aa/bb" {
+		t.Fatalf("unexpected cookie path %q. Expected %q", c.Path(), "/aa/bb")
 	}
-	if string(c.Domain) != "aaa.com" {
-		t.Fatalf("unexpected cookie domain %q. Expected %q", c.Domain, "aaa.com")
+	if string(c.Domain()) != "aaa.com" {
+		t.Fatalf("unexpected cookie domain %q. Expected %q", c.Domain(), "aaa.com")
 	}
 
-	c.Key = []byte("aaaaa")
+	c.SetKey("aaaaa")
 	if !h.Cookie(&c) {
-		t.Fatalf("cannot obtain %q cookie", c.Key)
+		t.Fatalf("cannot obtain %q cookie", c.Key())
 	}
-	if string(c.Value) != "bxx" {
-		t.Fatalf("unexpected cookie value %q. Expecting %q", c.Value, "bxx")
+	if string(c.Value()) != "bxx" {
+		t.Fatalf("unexpected cookie value %q. Expecting %q", c.Value(), "bxx")
 	}
 }
 
@@ -413,36 +413,36 @@ func TestResponseHeaderCookie(t *testing.T) {
 	var h ResponseHeader
 	var c Cookie
 
-	c.Key = []byte("foobar")
-	c.Value = []byte("aaa")
+	c.SetKey("foobar")
+	c.SetValue("aaa")
 	h.SetCookie(&c)
 
-	c.Key = []byte("йцук")
-	c.Domain = []byte("foobar.com")
+	c.SetKey("йцук")
+	c.SetDomain("foobar.com")
 	h.SetCookie(&c)
 
 	c.Reset()
-	c.Key = []byte("foobar")
+	c.SetKey("foobar")
 	if !h.Cookie(&c) {
-		t.Fatalf("Cannot find cookie %q", c.Key)
+		t.Fatalf("Cannot find cookie %q", c.Key())
 	}
 
 	var expectedC1 Cookie
-	expectedC1.Key = []byte("foobar")
-	expectedC1.Value = []byte("aaa")
+	expectedC1.SetKey("foobar")
+	expectedC1.SetValue("aaa")
 	if !equalCookie(&expectedC1, &c) {
 		t.Fatalf("unexpected cookie\n%#v\nExpected\n%#v\n", c, expectedC1)
 	}
 
-	c.Key = []byte("йцук")
+	c.SetKey("йцук")
 	if !h.Cookie(&c) {
-		t.Fatalf("cannot find cookie %q", c.Key)
+		t.Fatalf("cannot find cookie %q", c.Key())
 	}
 
 	var expectedC2 Cookie
-	expectedC2.Key = []byte("йцук")
-	expectedC2.Value = []byte("aaa")
-	expectedC2.Domain = []byte("foobar.com")
+	expectedC2.SetKey("йцук")
+	expectedC2.SetValue("aaa")
+	expectedC2.SetDomain("foobar.com")
 	if !equalCookie(&expectedC2, &c) {
 		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", c, expectedC2)
 	}
@@ -450,8 +450,8 @@ func TestResponseHeaderCookie(t *testing.T) {
 	h.VisitAllCookie(func(key, value []byte) {
 		var cc Cookie
 		cc.ParseBytes(value)
-		if !bytes.Equal(key, cc.Key) {
-			t.Fatalf("Unexpected cookie key %q. Expected %q", key, cc.Key)
+		if !bytes.Equal(key, cc.Key()) {
+			t.Fatalf("Unexpected cookie key %q. Expected %q", key, cc.Key())
 		}
 		switch {
 		case bytes.Equal(key, []byte("foobar")):
@@ -482,17 +482,17 @@ func TestResponseHeaderCookie(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	c.Key = []byte("foobar")
+	c.SetKey("foobar")
 	if !h1.Cookie(&c) {
-		t.Fatalf("Cannot find cookie %q", c.Key)
+		t.Fatalf("Cannot find cookie %q", c.Key())
 	}
 	if !equalCookie(&expectedC1, &c) {
 		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", c, expectedC1)
 	}
 
-	c.Key = []byte("йцук")
+	c.SetKey("йцук")
 	if !h1.Cookie(&c) {
-		t.Fatalf("cannot find cookie %q", c.Key)
+		t.Fatalf("cannot find cookie %q", c.Key())
 	}
 	if !equalCookie(&expectedC2, &c) {
 		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", c, expectedC2)
@@ -500,19 +500,19 @@ func TestResponseHeaderCookie(t *testing.T) {
 }
 
 func equalCookie(c1, c2 *Cookie) bool {
-	if !bytes.Equal(c1.Key, c2.Key) {
+	if !bytes.Equal(c1.Key(), c2.Key()) {
 		return false
 	}
-	if !bytes.Equal(c1.Value, c2.Value) {
+	if !bytes.Equal(c1.Value(), c2.Value()) {
 		return false
 	}
-	if !c1.Expire.Equal(c2.Expire) {
+	if !c1.Expire().Equal(c2.Expire()) {
 		return false
 	}
-	if !bytes.Equal(c1.Domain, c2.Domain) {
+	if !bytes.Equal(c1.Domain(), c2.Domain()) {
 		return false
 	}
-	if !bytes.Equal(c1.Path, c2.Path) {
+	if !bytes.Equal(c1.Path(), c2.Path()) {
 		return false
 	}
 	return true

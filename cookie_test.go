@@ -32,19 +32,19 @@ func TestCookieAppendBytes(t *testing.T) {
 	testCookieAppendBytes(t, c, "foo", "", "foo=")
 	testCookieAppendBytes(t, c, "ффф", "12 лодлы", "%D1%84%D1%84%D1%84=12%20%D0%BB%D0%BE%D0%B4%D0%BB%D1%8B")
 
-	c.Domain = []byte("foobar.com")
+	c.SetDomain("foobar.com")
 	testCookieAppendBytes(t, c, "a", "b", "a=b; domain=foobar.com")
 
-	c.Path = []byte("/a/b")
+	c.SetPath("/a/b")
 	testCookieAppendBytes(t, c, "aa", "bb", "aa=bb; domain=foobar.com; path=/a/b")
 
-	c.Expire = CookieExpireDelete
+	c.SetExpire(CookieExpireDelete)
 	testCookieAppendBytes(t, c, "xxx", "yyy", "xxx=yyy; expires=Tue, 10 Nov 2009 23:00:00 GMT; domain=foobar.com; path=/a/b")
 }
 
 func testCookieAppendBytes(t *testing.T, c *Cookie, key, value, expectedS string) {
-	c.Key = []byte(key)
-	c.Value = []byte(value)
+	c.SetKey(key)
+	c.SetValue(value)
 	result := string(c.AppendBytes(nil))
 	if result != expectedS {
 		t.Fatalf("Unexpected cookie %q. Expected %q", result, expectedS)

@@ -579,7 +579,7 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 
 // SetCookie sets the given response cookie.
 func (h *ResponseHeader) SetCookie(cookie *Cookie) {
-	h.cookies = setArg(h.cookies, cookie.Key, cookie.Cookie())
+	h.cookies = setArg(h.cookies, cookie.Key(), cookie.Cookie())
 }
 
 // SetCookie sets 'key: value' cookies.
@@ -754,7 +754,7 @@ func (h *RequestHeader) CookieBytes(key []byte) []byte {
 //
 // Returns false if cookie with the given cookie.Key is missing.
 func (h *ResponseHeader) Cookie(cookie *Cookie) bool {
-	v := peekArgBytes(h.cookies, cookie.Key)
+	v := peekArgBytes(h.cookies, cookie.Key())
 	if v == nil {
 		return false
 	}

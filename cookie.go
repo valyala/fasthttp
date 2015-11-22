@@ -7,71 +7,147 @@ import (
 	"time"
 )
 
-// CookieExpireDelete may be set on Cookie.Expire for expiring the given cookie.
-var CookieExpireDelete = time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)
+var zeroTime time.Time
+
+var (
+	// CookieExpireDelete may be set on Cookie.Expire for expiring the given cookie.
+	CookieExpireDelete = time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)
+
+	// CookieExpireUnlimited indicates that the cookie doesn't expire.
+	CookieExpireUnlimited = zeroTime
+)
 
 // Cookie represents HTTP response cookie.
 type Cookie struct {
-	// Key is cookie name.
-	Key []byte
-
-	// Value is cookie value.
-	Value []byte
-
-	// Expiration time for the cookie.
-	//
-	// Set expiration time to CookieExpireDelete for expiring (deleting)
-	// the cookie on the client.
-	//
-	// By default cookie lifetime is limited by browser session.
-	Expire time.Time
-
-	// Domain for the cookie.
-	//
-	// By default cookie is set to the current domain.
-	Domain []byte
-
-	// Path for the cookie.
-	//
-	// By default cookie is set to the current page only.
-	Path []byte
+	key    []byte
+	value  []byte
+	expire time.Time
+	domain []byte
+	path   []byte
 
 	bufKV argsKV
 	buf   []byte
 }
 
-var zeroTime time.Time
+// Path returns cookie path.
+func (c *Cookie) Path() []byte {
+	return c.path
+}
+
+// SetPath sets cookie path.
+func (c *Cookie) SetPath(path string) {
+	c.buf = AppendBytesStr(c.buf[:0], path)
+	c.path = normalizePath(c.path, c.buf)
+}
+
+// SetPathBytes sets cookie path.
+func (c *Cookie) SetPathBytes(path []byte) {
+	c.buf = append(c.buf[:0], path...)
+	c.path = normalizePath(c.path, c.buf)
+}
+
+// Domain returns cookie domain.
+//
+// The returned domain is valid until the next Cookie modification method call.
+func (c *Cookie) Domain() []byte {
+	return c.domain
+}
+
+// SetDomain sets cookie domain.
+func (c *Cookie) SetDomain(domain string) {
+	c.domain = AppendBytesStr(c.domain[:0], domain)
+}
+
+// SetDomain
+func (c *Cookie) SetDomainBytes(domain []byte) {
+	c.domain = append(c.domain[:0], domain...)
+}
+
+// Expire returns cookie expiration time.
+//
+// CookieExpireUnlimited is returned if cookie doesn't expire
+func (c *Cookie) Expire() time.Time {
+	expire := c.expire
+	if expire.IsZero() {
+		expire = CookieExpireUnlimited
+	}
+	return expire
+}
+
+// SetExpire sets cookie expiration time.
+//
+// Set expiration time to CookieExpireDelete for expiring (deleting)
+// the cookie on the client.
+//
+// By default cookie lifetime is limited by browser session.
+func (c *Cookie) SetExpire(expire time.Time) {
+	c.expire = expire
+}
+
+// Value returns cookie value.
+//
+// The returned value is valid until the next Cookie modification method call.
+func (c *Cookie) Value() []byte {
+	return c.value
+}
+
+// SetValue sets cookie value.
+func (c *Cookie) SetValue(value string) {
+	c.value = AppendBytesStr(c.value[:0], value)
+}
+
+// SetValueBytes sets cookie value.
+func (c *Cookie) SetValueBytes(value []byte) {
+	c.value = append(c.value[:0], value...)
+}
+
+// Key returns cookie name.
+//
+// The returned value is valid until the next Cookie modification method call.
+func (c *Cookie) Key() []byte {
+	return c.key
+}
+
+// SetKey sets cookie name.
+func (c *Cookie) SetKey(key string) {
+	c.key = AppendBytesStr(c.key[:0], key)
+}
+
+// SetKeyBytes sets cookie name.
+func (c *Cookie) SetKeyBytes(key []byte) {
+	c.key = append(c.key[:0], key...)
+}
 
 // Reset clears the cookie.
 func (c *Cookie) Reset() {
-	c.Key = c.Key[:0]
-	c.Value = c.Value[:0]
-	c.Expire = zeroTime
-	c.Domain = c.Domain[:0]
-	c.Path = c.Path[:0]
+	c.key = c.key[:0]
+	c.value = c.value[:0]
+	c.expire = zeroTime
+	c.domain = c.domain[:0]
+	c.path = c.path[:0]
 }
 
 // AppendBytes appends cookie representation to dst and returns dst
 // (maybe newly allocated).
 func (c *Cookie) AppendBytes(dst []byte) []byte {
-	if len(c.Key) > 0 {
-		dst = appendQuotedArg(dst, c.Key)
+	if len(c.key) > 0 {
+		dst = appendQuotedArg(dst, c.key)
 		dst = append(dst, '=')
 	}
-	dst = appendQuotedArg(dst, c.Value)
+	dst = appendQuotedArg(dst, c.value)
 
-	if !c.Expire.IsZero() {
-		c.bufKV.value = AppendHTTPDate(c.bufKV.value[:0], c.Expire)
+	if !c.expire.IsZero() {
+		c.bufKV.value = AppendHTTPDate(c.bufKV.value[:0], c.expire)
 		dst = append(dst, ';', ' ')
 		dst = append(dst, strCookieExpires...)
 		dst = append(dst, '=')
 		dst = append(dst, c.bufKV.value...)
 	}
-	if len(c.Domain) > 0 {
-		dst = appendCookiePart(dst, strCookieDomain, c.Domain)
+	if len(c.domain) > 0 {
+		dst = appendCookiePart(dst, strCookieDomain, c.domain)
 	}
-	if len(c.Path) > 0 {
-		dst = appendCookiePart(dst, strCookiePath, c.Path)
+	if len(c.path) > 0 {
+		dst = appendCookiePart(dst, strCookiePath, c.path)
 	}
 	return dst
 }
@@ -117,8 +193,8 @@ func (c *Cookie) ParseBytes(src []byte) error {
 		return errNoCookies
 	}
 
-	c.Key = append(c.Key[:0], kv.key...)
-	c.Value = append(c.Value[:0], kv.value...)
+	c.key = append(c.key[:0], kv.key...)
+	c.value = append(c.value[:0], kv.value...)
 
 	for s.next(kv, false) {
 		if len(kv.key) == 0 && len(kv.value) == 0 {
@@ -131,11 +207,11 @@ func (c *Cookie) ParseBytes(src []byte) error {
 			if err != nil {
 				return err
 			}
-			c.Expire = exptime
+			c.expire = exptime
 		case bytes.Equal(strCookieDomain, kv.key):
-			c.Domain = append(c.Domain[:0], kv.value...)
+			c.domain = append(c.domain[:0], kv.value...)
 		case bytes.Equal(strCookiePath, kv.key):
-			c.Path = append(c.Path[:0], kv.value...)
+			c.path = append(c.path[:0], kv.value...)
 		}
 	}
 	return nil
