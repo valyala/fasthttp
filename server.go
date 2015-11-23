@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -227,7 +228,39 @@ type RequestCtx struct {
 	timeoutCh     chan struct{}
 	timeoutTimer  *time.Timer
 
+	hijackHandler HijackHandler
+
 	v interface{}
+}
+
+// HijackHandler must process the hijacked connection c.
+type HijackHandler func(c io.ReadWriter)
+
+// Hijack registers the given handler for connection hijacking.
+//
+// The handler is called after returning from RequestHandler
+// and sending http response. The current connection is passed
+// to the handler.
+//
+// The server skips calling the handler in the following cases:
+//
+//     * 'Connection: close' header exists in either request or response.
+//     * Unexpected error during writing response to the connection.
+//
+// The server no longer processes requests from hijacked connections.
+// Server limits such as Concurrency, ReadTimeout, WriteTimeout, etc.
+// aren't applied to hijacked connections.
+//
+// The handler must not retain references to ctx members.
+//
+// Arbitrary 'Connection: Upgrade' protocols may be implemented
+// with HijackHandler. For instance,
+//
+//     * WebSocket ( https://en.wikipedia.org/wiki/WebSocket )
+//     * HTTP/2.0 ( https://en.wikipedia.org/wiki/HTTP/2 )
+//
+func (ctx *RequestCtx) Hijack(handler HijackHandler) {
+	ctx.hijackHandler = handler
 }
 
 type firstByteReader struct {
@@ -678,12 +711,18 @@ func (s *Server) ServeConn(c net.Conn) error {
 
 	atomic.AddUint32(&s.concurrency, ^uint32(0))
 
-	err1 := c.Close()
-	if err == nil {
-		err = err1
+	if err != errHijacked {
+		err1 := c.Close()
+		if err == nil {
+			err = err1
+		}
+	} else {
+		err = nil
 	}
 	return err
 }
+
+var errHijacked = errors.New("connection has been hijacked")
 
 func (s *Server) getConcurrency() int {
 	n := s.Concurrency
@@ -733,7 +772,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 			err = ctx.Request.Read(br)
 			if br.Buffered() == 0 || err != nil {
-				releaseReader(ctx, br)
+				releaseReader(s, br)
 				br = nil
 			}
 		} else {
@@ -741,7 +780,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			if err == nil {
 				err = ctx.Request.Read(br)
 				if br.Buffered() == 0 || err != nil {
-					releaseReader(ctx, br)
+					releaseReader(s, br)
 					br = nil
 				}
 			}
@@ -799,7 +838,7 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		if br == nil || connectionClose {
 			err = bw.Flush()
-			releaseWriter(ctx, bw)
+			releaseWriter(s, bw)
 			bw = nil
 			if err != nil {
 				break
@@ -809,17 +848,85 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
+		if ctx.hijackHandler != nil {
+			if br == nil {
+				br = acquireReader(ctx)
+			}
+			if bw != nil {
+				err = bw.Flush()
+				releaseWriter(s, bw)
+				bw = nil
+				if err != nil {
+					break
+				}
+			}
+			c.SetReadDeadline(zeroTime)
+			c.SetWriteDeadline(zeroTime)
+			go hijackConnHandler(br, c, ctx.s, ctx.hijackHandler)
+			br = nil
+			err = errHijacked
+			break
+		}
+
 		currentTime = time.Now()
 	}
 
 	if br != nil {
-		releaseReader(ctx, br)
+		releaseReader(s, br)
 	}
 	if bw != nil {
-		releaseWriter(ctx, bw)
+		releaseWriter(s, bw)
 	}
 	s.releaseCtx(ctx)
 	return err
+}
+
+func hijackConnHandler(br *bufio.Reader, c net.Conn, s *Server, h HijackHandler) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger().Printf("panic on hijacked conn: %s\nStack trace:\n%s", r, debug.Stack())
+		}
+	}()
+
+	hjc := acquireHijackConn(br, c)
+	h(hjc)
+	releaseReader(s, br)
+	c.Close()
+	releaseHijackConn(hjc)
+}
+
+func acquireHijackConn(br *bufio.Reader, c net.Conn) *hijackConn {
+	v := hijackConnPool.Get()
+	if v == nil {
+		v = &hijackConn{}
+	}
+	hjc := v.(*hijackConn)
+	hjc.r = br
+	hjc.c = c
+	hjc.v = v
+	return hjc
+}
+
+func releaseHijackConn(hjc *hijackConn) {
+	hjc.r = nil
+	hjc.c = nil
+	hijackConnPool.Put(hjc.v)
+}
+
+var hijackConnPool sync.Pool
+
+type hijackConn struct {
+	r *bufio.Reader
+	c net.Conn
+	v interface{}
+}
+
+func (c hijackConn) Read(p []byte) (int, error) {
+	return c.r.Read(p)
+}
+
+func (c hijackConn) Write(p []byte) (int, error) {
+	return c.c.Write(p)
 }
 
 // TimeoutErrMsg returns last error message set via TimeoutError call.
@@ -904,9 +1011,9 @@ func acquireReader(ctx *RequestCtx) *bufio.Reader {
 	return r
 }
 
-func releaseReader(ctx *RequestCtx, r *bufio.Reader) {
+func releaseReader(s *Server, r *bufio.Reader) {
 	r.Reset(nil)
-	ctx.s.readerPool.Put(r)
+	s.readerPool.Put(r)
 }
 
 func acquireWriter(ctx *RequestCtx) *bufio.Writer {
@@ -923,9 +1030,9 @@ func acquireWriter(ctx *RequestCtx) *bufio.Writer {
 	return w
 }
 
-func releaseWriter(ctx *RequestCtx, w *bufio.Writer) {
+func releaseWriter(s *Server, w *bufio.Writer) {
 	w.Reset(nil)
-	ctx.s.writerPool.Put(w)
+	s.writerPool.Put(w)
 }
 
 var globalCtxID uint64

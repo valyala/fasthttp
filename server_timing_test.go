@@ -111,6 +111,53 @@ func BenchmarkNetHTTPServerGet10KReqPerConn1KClients(b *testing.B) {
 	benchmarkNetHTTPServerGet(b, 1000, 10000)
 }
 
+func BenchmarkServerHijack(b *testing.B) {
+	clientsCount := 1000
+	requestsPerConn := 10000
+	ch := make(chan struct{}, b.N)
+	responseBody := []byte("123")
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Hijack(func(c io.ReadWriter) {
+				// emulate server loop :)
+				conn := &fakeNetConn{
+					c: c,
+				}
+				err := ServeConn(conn, func(ctx *RequestCtx) {
+					ctx.Success("foobar", responseBody)
+					registerServedRequest(b, ch)
+				})
+				if err != nil {
+					b.Fatalf("error when serving connection")
+				}
+			})
+			ctx.Success("foobar", responseBody)
+			registerServedRequest(b, ch)
+		},
+		Concurrency: 16 * clientsCount,
+	}
+	req := "GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n"
+	benchmarkServer(b, s, clientsCount, requestsPerConn, req)
+	verifyRequestsServed(b, ch)
+}
+
+type fakeNetConn struct {
+	net.Conn
+	c io.ReadWriter
+}
+
+func (c *fakeNetConn) Read(p []byte) (int, error) {
+	return c.c.Read(p)
+}
+
+func (c *fakeNetConn) Write(p []byte) (int, error) {
+	return c.c.Write(p)
+}
+
+func (c *fakeNetConn) Close() error {
+	return nil
+}
+
 func BenchmarkServerMaxConnsPerIP(b *testing.B) {
 	clientsCount := 1000
 	requestsPerConn := 10

@@ -11,6 +11,75 @@ import (
 	"time"
 )
 
+func TestRequestCtxHijack(t *testing.T) {
+	hijackStartCh := make(chan struct{})
+	hijackStopCh := make(chan struct{})
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Hijack(func(c io.ReadWriter) {
+				<-hijackStartCh
+
+				b := make([]byte, 1)
+				// ping-pong echo via hijacked conn
+				for {
+					n, err := c.Read(b)
+					if n != 1 {
+						if err == io.EOF {
+							close(hijackStopCh)
+							return
+						}
+						if err != nil {
+							t.Fatalf("unexpected error: %s", err)
+						}
+						t.Fatalf("unexpected number of bytes read: %d. Expecting 1", n)
+					}
+					if _, err = c.Write(b); err != nil {
+						t.Fatalf("unexpected error when writing data: %s", err)
+					}
+				}
+			})
+			ctx.Success("foo/bar", []byte("hijack it!"))
+		},
+	}
+
+	hijackedString := "foobar baz hijacked!!!"
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString(hijackedString)
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusOK, "foo/bar", "hijack it!")
+
+	close(hijackStartCh)
+	select {
+	case <-hijackStopCh:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	data, err := ioutil.ReadAll(br)
+	if err != nil {
+		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+	}
+	if string(data) != hijackedString {
+		t.Fatalf("Unexpected data read after the first response %q. Expecting %q", data, hijackedString)
+	}
+}
+
 func TestRequestCtxInit(t *testing.T) {
 	var ctx RequestCtx
 	var logger customLogger
