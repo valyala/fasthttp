@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -441,7 +442,7 @@ func clientDoTimeout(req *Request, resp *Response, timeout time.Duration, c clie
 		if timeout <= 0 {
 			return ErrTimeout
 		}
-		sleepTime := 100 * time.Millisecond
+		sleepTime := (10 + time.Duration(rand.Intn(100))) * time.Millisecond
 		if sleepTime > timeout {
 			sleepTime = timeout
 		}
