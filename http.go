@@ -346,24 +346,36 @@ func (resp *Response) Write(w *bufio.Writer) error {
 
 // String returns request representation.
 //
+// Returns error message instead of request representation on error.
+//
 // Use Write instead of String for performance-critical code.
 func (req *Request) String() string {
-	var w bytes.Buffer
-	bw := bufio.NewWriter(&w)
-	req.Write(bw)
-	bw.Flush()
-	return string(w.Bytes())
+	return getHTTPString(req)
 }
 
 // String returns response representation.
 //
+// Returns error message instead of response representation on error.
+//
 // Use Write instead of String for performance-critical code.
 func (resp *Response) String() string {
+	return getHTTPString(resp)
+}
+
+func getHTTPString(hw httpWriter) string {
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
-	resp.Write(bw)
-	bw.Flush()
+	if err := hw.Write(bw); err != nil {
+		return err.Error()
+	}
+	if err := bw.Flush(); err != nil {
+		return err.Error()
+	}
 	return string(w.Bytes())
+}
+
+type httpWriter interface {
+	Write(w *bufio.Writer) error
 }
 
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
