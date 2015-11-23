@@ -713,7 +713,7 @@ func (s *Server) serveConn(c net.Conn) error {
 				br = nil
 			}
 		} else {
-			ctx, br, err = acquireByteReader(ctx)
+			br, err = acquireByteReader(&ctx)
 			if err == nil {
 				err = ctx.Request.Read(br)
 				if br.Buffered() == 0 || err != nil {
@@ -815,11 +815,17 @@ const (
 
 var bytePool sync.Pool
 
-func acquireByteReader(ctx *RequestCtx) (*RequestCtx, *bufio.Reader, error) {
+func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
+	ctx := *ctxP
 	s := ctx.s
 	c := ctx.c
 	t := ctx.time
 	s.releaseCtx(ctx)
+
+	// Make GC happy, so it could garbage collect ctx
+	// while we waiting for the next request.
+	ctx = nil
+	*ctxP = nil
 
 	v := bytePool.Get()
 	if v == nil {
@@ -831,8 +837,9 @@ func acquireByteReader(ctx *RequestCtx) (*RequestCtx, *bufio.Reader, error) {
 	bytePool.Put(v)
 	ctx = s.acquireCtx(c)
 	ctx.time = t
+	*ctxP = ctx
 	if err != nil {
-		return ctx, nil, err
+		return nil, err
 	}
 	if n != 1 {
 		panic("BUG: Reader must return at least one byte")
@@ -843,7 +850,7 @@ func acquireByteReader(ctx *RequestCtx) (*RequestCtx, *bufio.Reader, error) {
 	ctx.fbr.byteRead = false
 	r := acquireReader(ctx)
 	r.Reset(&ctx.fbr)
-	return ctx, r, nil
+	return r, nil
 }
 
 func acquireReader(ctx *RequestCtx) *bufio.Reader {
