@@ -162,8 +162,11 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 		if c == nil {
 			break
 		}
-		if err = wp.WorkerFunc(c); err != nil && !strings.Contains(err.Error(), "broken pipe") {
-			wp.Logger.Printf("error when serving connection %q<->%q: %s", c.LocalAddr(), c.RemoteAddr(), err)
+		if err = wp.WorkerFunc(c); err != nil {
+			errStr := err.Error()
+			if !strings.Contains(errStr, "broken pipe") && !strings.Contains(errStr, "reset by peer") {
+				wp.Logger.Printf("error when serving connection %q<->%q: %s", c.LocalAddr(), c.RemoteAddr(), err)
+			}
 		}
 		c.Close()
 		c = nil
