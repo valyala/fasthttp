@@ -309,12 +309,3 @@ func EqualBytesStr(b []byte, s string) bool {
 	}
 	return true
 }
-
-// AppendBytesStr appends src to dst and returns dst
-// (which may be newly allocated).
-func AppendBytesStr(dst []byte, src string) []byte {
-	for i, n := 0, len(src); i < n; i++ {
-		dst = append(dst, src[i])
-	}
-	return dst
-}

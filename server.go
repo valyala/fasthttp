@@ -430,7 +430,7 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 	resp.Reset()
 	resp.SetStatusCode(statusCode)
 	resp.Header.SetContentTypeBytes(defaultContentType)
-	resp.body = AppendBytesStr(resp.body[:0], msg)
+	resp.body = append(resp.body[:0], msg...)
 }
 
 // Success sets response Content-Type and body to the given values.

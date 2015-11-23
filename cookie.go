@@ -36,7 +36,7 @@ func (c *Cookie) Path() []byte {
 
 // SetPath sets cookie path.
 func (c *Cookie) SetPath(path string) {
-	c.buf = AppendBytesStr(c.buf[:0], path)
+	c.buf = append(c.buf[:0], path...)
 	c.path = normalizePath(c.path, c.buf)
 }
 
@@ -55,7 +55,7 @@ func (c *Cookie) Domain() []byte {
 
 // SetDomain sets cookie domain.
 func (c *Cookie) SetDomain(domain string) {
-	c.domain = AppendBytesStr(c.domain[:0], domain)
+	c.domain = append(c.domain[:0], domain...)
 }
 
 // SetDomain
@@ -93,7 +93,7 @@ func (c *Cookie) Value() []byte {
 
 // SetValue sets cookie value.
 func (c *Cookie) SetValue(value string) {
-	c.value = AppendBytesStr(c.value[:0], value)
+	c.value = append(c.value[:0], value...)
 }
 
 // SetValueBytes sets cookie value.
@@ -110,7 +110,7 @@ func (c *Cookie) Key() []byte {
 
 // SetKey sets cookie name.
 func (c *Cookie) SetKey(key string) {
-	c.key = AppendBytesStr(c.key[:0], key)
+	c.key = append(c.key[:0], key...)
 }
 
 // SetKeyBytes sets cookie name.
@@ -177,7 +177,7 @@ var errNoCookies = errors.New("no cookies found")
 
 // Parse parses Set-Cookie header.
 func (c *Cookie) Parse(src string) error {
-	c.buf = AppendBytesStr(c.buf[:0], src)
+	c.buf = append(c.buf[:0], src...)
 	return c.ParseBytes(c.buf)
 }
 
