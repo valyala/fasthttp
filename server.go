@@ -132,6 +132,14 @@ type Server struct {
 	// By default unlimited number of requests served per connection.
 	MaxRequestsPerConn int
 
+	// Maximum keep-alive connection lifetime.
+	//
+	// The server closes keep-alive connection after its' lifetime
+	// expiration.
+	//
+	// By default keep-alive connection lifetime is unlimited.
+	MaxKeepaliveDuration time.Duration
+
 	// Aggressively reduces memory usage at the cost of higher CPU usage
 	// if set to true.
 	//
@@ -681,6 +689,10 @@ func (s *Server) getConcurrency() int {
 	return n
 }
 
+// ErrKeepaliveTimeout is returned from ServeConn
+// if the connection lifetime exceeds MaxKeepaliveDuration.
+var ErrKeepaliveTimeout = errors.New("MaxKeepaliveDuration exceeded")
+
 func (s *Server) serveConn(c net.Conn) error {
 	currentTime := time.Now()
 	connTime := currentTime
@@ -698,11 +710,23 @@ func (s *Server) serveConn(c net.Conn) error {
 		connRequestNum++
 		ctx.time = currentTime
 
-		if s.ReadTimeout > 0 {
-			if err = c.SetReadDeadline(currentTime.Add(s.ReadTimeout)); err != nil {
+		if s.ReadTimeout > 0 || s.MaxKeepaliveDuration > 0 {
+			readTimeout := s.ReadTimeout
+			if s.MaxKeepaliveDuration > 0 {
+				connTimeout := s.MaxKeepaliveDuration - currentTime.Sub(connTime)
+				if connTimeout <= 0 {
+					err = ErrKeepaliveTimeout
+					break
+				}
+				if connTimeout < readTimeout {
+					readTimeout = connTimeout
+				}
+			}
+			if err = c.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
 				break
 			}
 		}
+
 		if !(s.ReduceMemoryUsage || ctx.lastReadDuration > time.Second) || br != nil {
 			if br == nil {
 				br = acquireReader(ctx)
@@ -747,8 +771,21 @@ func (s *Server) serveConn(c net.Conn) error {
 			ctx.SetConnectionClose()
 		}
 
-		if s.WriteTimeout > 0 {
-			if err = c.SetWriteDeadline(time.Now().Add(s.WriteTimeout)); err != nil {
+		if s.WriteTimeout > 0 || s.MaxKeepaliveDuration > 0 {
+			writeTimeout := s.WriteTimeout
+			if s.MaxKeepaliveDuration > 0 {
+				connTimeout := s.MaxKeepaliveDuration - time.Since(connTime)
+				if connTimeout <= 0 {
+					// MaxKeepAliveDuration exceeded, but let's try sending response anyway
+					// in 100ms with 'Connection: close' header.
+					ctx.SetConnectionClose()
+					connTimeout = 100 * time.Millisecond
+				}
+				if connTimeout < writeTimeout {
+					writeTimeout = connTimeout
+				}
+			}
+			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
 				break
 			}
 		}

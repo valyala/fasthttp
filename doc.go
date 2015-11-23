@@ -18,6 +18,7 @@ Fasthttp provides the following features:
         * Response write timeout.
         * Maximum request header size.
         * Maximum request execution time.
+        * Maximum keep-alive connection lifetime.
 
     * A lot of additional useful info is exposed to request handler:
 
