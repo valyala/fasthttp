@@ -136,8 +136,8 @@ type Server struct {
 	// if set to true.
 	//
 	// Try enabling this option only if the server consumes too much memory
-	// serving mostly idle keep-alive connections. This may reduce memory
-	// usage by up to 50%.
+	// serving mostly idle keep-alive connections (more than 1M concurrent
+	// connections). This may reduce memory usage by up to 50%.
 	//
 	// Aggressive memory usage reduction is disabled by default.
 	ReduceMemoryUsage bool
