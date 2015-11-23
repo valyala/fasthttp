@@ -642,6 +642,10 @@ var (
 	// ErrConcurrencyLimit may be returned from ServeConn if the number
 	// of concurrenty served connections exceeds Server.Concurrency.
 	ErrConcurrencyLimit = errors.New("canot serve the connection because Server.Concurrency concurrent connections are served")
+
+	// ErrKeepaliveTimeout is returned from ServeConn
+	// if the connection lifetime exceeds MaxKeepaliveDuration.
+	ErrKeepaliveTimeout = errors.New("MaxKeepaliveDuration exceeded")
 )
 
 // ServeConn serves HTTP requests from the given connection.
@@ -688,10 +692,6 @@ func (s *Server) getConcurrency() int {
 	}
 	return n
 }
-
-// ErrKeepaliveTimeout is returned from ServeConn
-// if the connection lifetime exceeds MaxKeepaliveDuration.
-var ErrKeepaliveTimeout = errors.New("MaxKeepaliveDuration exceeded")
 
 func (s *Server) serveConn(c net.Conn) error {
 	currentTime := time.Now()
