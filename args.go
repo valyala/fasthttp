@@ -46,7 +46,7 @@ func (a *Args) Len() int {
 
 // Parse parses the given string containing query args.
 func (a *Args) Parse(s string) {
-	a.buf = AppendBytesStr(a.buf[:0], s)
+	a.buf = append(a.buf[:0], s...)
 	a.ParseBytes(a.buf)
 }
 
@@ -107,7 +107,7 @@ func (a *Args) WriteTo(w io.Writer) (int64, error) {
 
 // Del deletes argument with the given key from query args.
 func (a *Args) Del(key string) {
-	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
+	a.bufKV.key = append(a.bufKV.key[:0], key...)
 	a.DelBytes(a.bufKV.key)
 }
 
@@ -118,19 +118,19 @@ func (a *Args) DelBytes(key []byte) {
 
 // Set sets 'key=value' argument.
 func (a *Args) Set(key, value string) {
-	a.bufKV.value = AppendBytesStr(a.bufKV.value[:0], value)
+	a.bufKV.value = append(a.bufKV.value[:0], value...)
 	a.SetBytesV(key, a.bufKV.value)
 }
 
 // SetBytesK sets 'key=value' argument.
 func (a *Args) SetBytesK(key []byte, value string) {
-	a.bufKV.value = AppendBytesStr(a.bufKV.value[:0], value)
+	a.bufKV.value = append(a.bufKV.value[:0], value...)
 	a.SetBytesKV(key, a.bufKV.value)
 }
 
 // SetBytesV sets 'key=value' argument.
 func (a *Args) SetBytesV(key string, value []byte) {
-	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
+	a.bufKV.key = append(a.bufKV.key[:0], key...)
 	a.SetBytesKV(a.bufKV.key, value)
 }
 
@@ -155,7 +155,7 @@ func (a *Args) PeekBytes(key []byte) []byte {
 
 // Has returns true if the given key exists in Args.
 func (a *Args) Has(key string) bool {
-	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
+	a.bufKV.key = append(a.bufKV.key[:0], key...)
 	return a.HasBytes(a.bufKV.key)
 }
 
@@ -178,7 +178,7 @@ func (a *Args) GetUint(key string) (int, error) {
 
 // SetUint sets uint value for the given key.
 func (a *Args) SetUint(key string, value int) {
-	a.bufKV.key = AppendBytesStr(a.bufKV.key[:0], key)
+	a.bufKV.key = append(a.bufKV.key[:0], key...)
 	a.SetUintBytes(a.bufKV.key, value)
 }
 

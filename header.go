@@ -168,7 +168,7 @@ func (h *ResponseHeader) ContentType() []byte {
 
 // SetContentType sets Content-Type header value.
 func (h *ResponseHeader) SetContentType(contentType string) {
-	h.contentType = AppendBytesStr(h.contentType[:0], contentType)
+	h.contentType = append(h.contentType[:0], contentType...)
 }
 
 // SetContentTypeBytes sets Content-Type header value.
@@ -183,7 +183,7 @@ func (h *ResponseHeader) Server() []byte {
 
 // SetServer sets Server header value.
 func (h *ResponseHeader) SetServer(server string) {
-	h.server = AppendBytesStr(h.server[:0], server)
+	h.server = append(h.server[:0], server...)
 }
 
 // SetServerBytes sets Server header value.
@@ -200,7 +200,7 @@ func (h *RequestHeader) ContentType() []byte {
 // SetContentType sets Content-Type header value.
 func (h *RequestHeader) SetContentType(contentType string) {
 	h.parseRawHeaders()
-	h.contentType = AppendBytesStr(h.contentType[:0], contentType)
+	h.contentType = append(h.contentType[:0], contentType...)
 }
 
 // SetContentTypeBytes sets Content-Type header value.
@@ -231,7 +231,7 @@ func (h *RequestHeader) Host() []byte {
 // SetHost sets Host header value.
 func (h *RequestHeader) SetHost(host string) {
 	h.parseRawHeaders()
-	h.host = AppendBytesStr(h.host[:0], host)
+	h.host = append(h.host[:0], host...)
 }
 
 // SetHostBytes sets Host header value.
@@ -249,7 +249,7 @@ func (h *RequestHeader) UserAgent() []byte {
 // SetUserAgent sets User-Agent header value.
 func (h *RequestHeader) SetUserAgent(userAgent string) {
 	h.parseRawHeaders()
-	h.userAgent = AppendBytesStr(h.userAgent[:0], userAgent)
+	h.userAgent = append(h.userAgent[:0], userAgent...)
 }
 
 // SetUserAgentBytes sets User-Agent header value.
@@ -283,7 +283,7 @@ func (h *RequestHeader) Method() []byte {
 
 // SetMethod sets HTTP request method.
 func (h *RequestHeader) SetMethod(method string) {
-	h.method = AppendBytesStr(h.method, method)
+	h.method = append(h.method, method...)
 }
 
 // SetMethod sets HTTP request method.
@@ -304,7 +304,7 @@ func (h *RequestHeader) RequestURI() []byte {
 // RequestURI must be properly encoded.
 // Use URI.RequestURI for constructing proper RequestURI if unsure.
 func (h *RequestHeader) SetRequestURI(requestURI string) {
-	h.requestURI = AppendBytesStr(h.requestURI, requestURI)
+	h.requestURI = append(h.requestURI, requestURI...)
 }
 
 // SetRequestURI sets RequestURI for the first HTTP request line.
@@ -528,7 +528,7 @@ func (h *ResponseHeader) Set(key, value string) {
 
 // SetBytesK sets the given 'key: value' header.
 func (h *ResponseHeader) SetBytesK(key []byte, value string) {
-	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
+	h.bufKV.value = append(h.bufKV.value[:0], value...)
 	h.SetBytesKV(key, h.bufKV.value)
 }
 
@@ -584,13 +584,13 @@ func (h *ResponseHeader) SetCookie(cookie *Cookie) {
 
 // SetCookie sets 'key: value' cookies.
 func (h *RequestHeader) SetCookie(key, value string) {
-	h.bufKV.key = AppendBytesStr(h.bufKV.key[:0], key)
+	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	h.SetCookieBytesK(h.bufKV.key, value)
 }
 
 // SetCookieBytesK sets 'key: value' cookies.
 func (h *RequestHeader) SetCookieBytesK(key []byte, value string) {
-	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
+	h.bufKV.value = append(h.bufKV.value[:0], value...)
 	h.SetCookieBytesKV(key, h.bufKV.value)
 }
 
@@ -609,7 +609,7 @@ func (h *RequestHeader) Set(key, value string) {
 
 // SetBytesK sets the given 'key: value' header.
 func (h *RequestHeader) SetBytesK(key []byte, value string) {
-	h.bufKV.value = AppendBytesStr(h.bufKV.value[:0], value)
+	h.bufKV.value = append(h.bufKV.value[:0], value...)
 	h.SetBytesKV(key, h.bufKV.value)
 }
 
@@ -1399,11 +1399,11 @@ func nextLine(b []byte) ([]byte, []byte, error) {
 
 func initHeaderKV(kv *argsKV, key, value string) {
 	kv.key = getHeaderKeyBytes(kv, key)
-	kv.value = AppendBytesStr(kv.value[:0], value)
+	kv.value = append(kv.value[:0], value...)
 }
 
 func getHeaderKeyBytes(kv *argsKV, key string) []byte {
-	kv.key = AppendBytesStr(kv.key[:0], key)
+	kv.key = append(kv.key[:0], key...)
 	normalizeHeaderKey(kv.key)
 	return kv.key
 }
