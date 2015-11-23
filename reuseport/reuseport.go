@@ -1,4 +1,4 @@
-// Package provides TCP net.Listener with SO_REUSEPORT support.
+// Package reuseport provides TCP net.Listener with SO_REUSEPORT support.
 //
 // SO_REUSEPORT allows linear scaling server performance on multi-CPU servers.
 // See https://www.nginx.com/blog/socket-sharding-nginx-release-1-9-1/ for more details :)
