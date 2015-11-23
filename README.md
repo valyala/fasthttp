@@ -91,3 +91,4 @@ BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	    
   in production.
   `go tool pprof --alloc_objects your-program mem.pprof` usually gives better
   insights for optimization than `go tool pprof your-program cpu.pprof`.
+* Write [tests and benchmarks](https://golang.org/pkg/testing/) for hot paths.
