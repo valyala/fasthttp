@@ -852,12 +852,16 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 
 		if ctx.hijackHandler != nil {
+			h := ctx.hijackHandler
 			var hjr io.Reader
 			hjr = c
 			if br != nil {
 				if br.Buffered() > 0 {
 					hjr = br
 					br = nil
+
+					// br may point to ctx.fbr, so do not return ctx into pool.
+					ctx = s.acquireCtx(c)
 				}
 			}
 			if bw != nil {
@@ -870,7 +874,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 			c.SetReadDeadline(zeroTime)
 			c.SetWriteDeadline(zeroTime)
-			go hijackConnHandler(hjr, c, ctx.s, ctx.hijackHandler)
+			go hijackConnHandler(hjr, c, s, h)
 			err = errHijacked
 			break
 		}
