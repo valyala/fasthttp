@@ -36,3 +36,15 @@ func BenchmarkLowercaseBytesMixed(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkEqualBytesStr(b *testing.B) {
+	s := "foobarbaraz"
+	bs := []byte(s)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if !EqualBytesStr(bs, s) {
+				b.Fatalf("unexpected result: %q != %q", bs, s)
+			}
+		}
+	})
+}

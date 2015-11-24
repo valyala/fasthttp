@@ -297,17 +297,10 @@ func hexChar(c byte) byte {
 
 // EqualBytesStr returns true if string(b) == s.
 //
-// It doesn't allocate memory unlike string(b) do.
+// This function has no performance benefits comparing to string(b) == s.
+// It is left here for backwards compatilbility only.
 func EqualBytesStr(b []byte, s string) bool {
-	if len(s) != len(b) {
-		return false
-	}
-	for i, n := 0, len(s); i < n; i++ {
-		if s[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	return string(b) == s
 }
 
 // AppendBytesStr appends src to dst and returns dst
