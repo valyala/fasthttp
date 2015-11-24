@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"sync"
 	"time"
 	"unsafe"
@@ -255,13 +256,26 @@ func lowercaseBytes(b []byte) {
 	}
 }
 
-// Converts byte slice to a string without memory allocation.
+// unsafeBytesToStr converts byte slice to a string without memory allocation.
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
 //
 // Note it may break if string and/or slice header will change
 // in the future go versions.
 func unsafeBytesToStr(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
+}
+
+// unsafeStrToBytes converts string to byte slice without memory allocation.
+//
+// The returned byte slice may be read until references to the original s exist.
+func unsafeStrToBytes(s string) []byte {
+	sh := (*reflect.StringHeader)(unsafe.Pointer(&s))
+	bh := reflect.SliceHeader{
+		Data: sh.Data,
+		Len:  sh.Len,
+		Cap:  sh.Len,
+	}
+	return *(*[]byte)(unsafe.Pointer(&bh))
 }
 
 func unhex(c byte) int {
@@ -306,8 +320,8 @@ func EqualBytesStr(b []byte, s string) bool {
 // AppendBytesStr appends src to dst and returns dst
 // (which may be newly allocated).
 func AppendBytesStr(dst []byte, src string) []byte {
-	for i, n := 0, len(src); i < n; i++ {
-		dst = append(dst, src[i])
-	}
-	return dst
+	// The following code is equivalent to
+	//     return append(dst, []byte(src)...)
+	// but it is 1.5x faster in Go1.5. I don't know why :)
+	return append(dst, unsafeStrToBytes(src)...)
 }
