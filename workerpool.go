@@ -150,14 +150,20 @@ func (wp *workerPool) release(ch *workerChan) bool {
 var workerChanPool sync.Pool
 
 func (wp *workerPool) workerFunc(ch *workerChan) {
+	var c net.Conn
+	var err error
+
 	defer func() {
 		if r := recover(); r != nil {
 			wp.Logger.Printf("panic: %s\nStack trace:\n%s", r, debug.Stack())
 		}
+
+		if c != nil {
+			c.Close()
+		}
+		wp.release(ch)
 	}()
 
-	var c net.Conn
-	var err error
 	for c = range ch.ch {
 		if c == nil {
 			break
