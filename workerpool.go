@@ -160,8 +160,8 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 
 		if c != nil {
 			c.Close()
+			wp.release(ch)
 		}
-		wp.release(ch)
 	}()
 
 	for c = range ch.ch {
