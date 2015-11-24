@@ -454,6 +454,10 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 }
 
 func clientDoTimeout(req *Request, resp *Response, timeout time.Duration, c clientDoer) error {
+	if timeout <= 0 {
+		return ErrTimeout
+	}
+
 	deadline := time.Now().Add(timeout)
 	for {
 		err := clientDoTimeoutFreeConn(req, resp, timeout, c)
