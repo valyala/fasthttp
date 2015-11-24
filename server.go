@@ -808,6 +808,10 @@ func (s *Server) serveConn(c net.Conn) error {
 		if len(errMsg) > 0 {
 			ctx = s.acquireCtx(c)
 			ctx.Error(errMsg, StatusRequestTimeout)
+			if br != nil {
+				// Close connection, since br may be attached to the old ctx via ctx.fbr.
+				ctx.SetConnectionClose()
+			}
 		}
 		if s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn) {
 			ctx.SetConnectionClose()

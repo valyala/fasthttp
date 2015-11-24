@@ -157,8 +157,8 @@ func BenchmarkServerMaxConnsPerIP(b *testing.B) {
 }
 
 func BenchmarkServerTimeoutError(b *testing.B) {
-	clientsCount := 1
-	requestsPerConn := 10
+	clientsCount := 10
+	requestsPerConn := 1
 	ch := make(chan struct{}, b.N)
 	n := uint32(0)
 	responseBody := []byte("123")
