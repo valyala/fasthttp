@@ -10,6 +10,62 @@ import (
 	"testing"
 )
 
+func TestResponseHeaderConnectionUpgrade(t *testing.T) {
+	var h ResponseHeader
+
+	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nConnection: Upgrade, HTTP2-Settings\r\n\r\n")
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !h.ConnectionUpgrade() {
+		t.Fatalf("missing connection: upgrade")
+	}
+	if string(h.Peek("Connection")) != "Upgrade, HTTP2-Settings" {
+		t.Fatalf("Unexpected Connection %q. Expecting %q", h.Peek("Connection"), "Upgrade, HTTP2-Settings")
+	}
+
+	r = bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n")
+	br = bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if h.ConnectionUpgrade() {
+		t.Fatalf("unexpected connection: upgrade")
+	}
+	if string(h.Peek("Connection")) != "" {
+		t.Fatalf("unexpected Connection header: %q", h.Peek("Connection"))
+	}
+}
+
+func TestRequestHeaderConnectionUpgrade(t *testing.T) {
+	var h RequestHeader
+
+	r := bytes.NewBufferString("GET /foobar HTTP/1.1\r\nConnection: Upgrade, HTTP2-Settings\r\nHost: foobar.com\r\n\r\n")
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !h.ConnectionUpgrade() {
+		t.Fatalf("missing connection: upgrade")
+	}
+	if string(h.Peek("Connection")) != "Upgrade, HTTP2-Settings" {
+		t.Fatalf("Unexpected Connection %q. Expecting %q", h.Peek("Connection"), "Upgrade, HTTP2-Settings")
+	}
+
+	r = bytes.NewBufferString("GET /foobar HTTP/1.1\r\nHost: foobar.com\r\n\r\n")
+	br = bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if h.ConnectionUpgrade() {
+		t.Fatalf("unexpected connection: upgrade")
+	}
+	if string(h.Peek("Connection")) != "" {
+		t.Fatalf("unexpected Connection header: %q", h.Peek("Connection"))
+	}
+}
+
 func TestRequestHeaderProxyWithCookie(t *testing.T) {
 	// Proxy request header (read it, then write it without touching any headers).
 	var h RequestHeader

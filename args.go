@@ -280,6 +280,14 @@ func setArg(h []argsKV, key, value []byte) []argsKV {
 	return append(h, kv)
 }
 
+func appendArg(args []argsKV, key, value []byte) []argsKV {
+	var kv *argsKV
+	args, kv = allocArg(args)
+	kv.key = append(kv.key[:0], key...)
+	kv.value = append(kv.value[:0], value...)
+	return args
+}
+
 func allocArg(h []argsKV) ([]argsKV, *argsKV) {
 	n := len(h)
 	if cap(h) > n {
