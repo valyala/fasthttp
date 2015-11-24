@@ -16,7 +16,7 @@ func TestRequestCtxHijack(t *testing.T) {
 	hijackStopCh := make(chan struct{})
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			ctx.Hijack(func(c io.ReadWriter) {
+			ctx.Hijack(func(c net.Conn) {
 				<-hijackStartCh
 
 				b := make([]byte, 1)

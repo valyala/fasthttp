@@ -118,12 +118,9 @@ func BenchmarkServerHijack(b *testing.B) {
 	responseBody := []byte("123")
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			ctx.Hijack(func(c io.ReadWriter) {
+			ctx.Hijack(func(c net.Conn) {
 				// emulate server loop :)
-				conn := &fakeNetConn{
-					c: c,
-				}
-				err := ServeConn(conn, func(ctx *RequestCtx) {
+				err := ServeConn(c, func(ctx *RequestCtx) {
 					ctx.Success("foobar", responseBody)
 					registerServedRequest(b, ch)
 				})
@@ -139,23 +136,6 @@ func BenchmarkServerHijack(b *testing.B) {
 	req := "GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n"
 	benchmarkServer(b, s, clientsCount, requestsPerConn, req)
 	verifyRequestsServed(b, ch)
-}
-
-type fakeNetConn struct {
-	net.Conn
-	c io.ReadWriter
-}
-
-func (c *fakeNetConn) Read(p []byte) (int, error) {
-	return c.c.Read(p)
-}
-
-func (c *fakeNetConn) Write(p []byte) (int, error) {
-	return c.c.Write(p)
-}
-
-func (c *fakeNetConn) Close() error {
-	return nil
 }
 
 func BenchmarkServerMaxConnsPerIP(b *testing.B) {

@@ -234,13 +234,16 @@ type RequestCtx struct {
 }
 
 // HijackHandler must process the hijacked connection c.
-type HijackHandler func(c io.ReadWriter)
+//
+// The connection c is automatically closed after returning from HijackHandler.
+type HijackHandler func(c net.Conn)
 
 // Hijack registers the given handler for connection hijacking.
 //
 // The handler is called after returning from RequestHandler
 // and sending http response. The current connection is passed
-// to the handler.
+// to the handler. The connection is automatically closed after
+// returning from the handler.
 //
 // The server skips calling the handler in the following cases:
 //
@@ -849,8 +852,13 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 
 		if ctx.hijackHandler != nil {
-			if br == nil {
-				br = acquireReader(ctx)
+			var hjr io.Reader
+			hjr = c
+			if br != nil {
+				if br.Buffered() > 0 {
+					hjr = br
+					br = nil
+				}
 			}
 			if bw != nil {
 				err = bw.Flush()
@@ -862,8 +870,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 			c.SetReadDeadline(zeroTime)
 			c.SetWriteDeadline(zeroTime)
-			go hijackConnHandler(br, c, ctx.s, ctx.hijackHandler)
-			br = nil
+			go hijackConnHandler(hjr, c, ctx.s, ctx.hijackHandler)
 			err = errHijacked
 			break
 		}
@@ -881,43 +888,47 @@ func (s *Server) serveConn(c net.Conn) error {
 	return err
 }
 
-func hijackConnHandler(br *bufio.Reader, c net.Conn, s *Server, h HijackHandler) {
+func hijackConnHandler(r io.Reader, c net.Conn, s *Server, h HijackHandler) {
+	hjc := acquireHijackConn(r, c)
+
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger().Printf("panic on hijacked conn: %s\nStack trace:\n%s", r, debug.Stack())
 		}
+
+		if br, ok := r.(*bufio.Reader); ok {
+			releaseReader(s, br)
+		}
+		c.Close()
+		releaseHijackConn(hjc)
 	}()
 
-	hjc := acquireHijackConn(br, c)
 	h(hjc)
-	releaseReader(s, br)
-	c.Close()
-	releaseHijackConn(hjc)
 }
 
-func acquireHijackConn(br *bufio.Reader, c net.Conn) *hijackConn {
+func acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
 	v := hijackConnPool.Get()
 	if v == nil {
 		v = &hijackConn{}
 	}
 	hjc := v.(*hijackConn)
-	hjc.r = br
-	hjc.c = c
+	hjc.Conn = c
+	hjc.r = r
 	hjc.v = v
 	return hjc
 }
 
 func releaseHijackConn(hjc *hijackConn) {
+	hjc.Conn = nil
 	hjc.r = nil
-	hjc.c = nil
 	hijackConnPool.Put(hjc.v)
 }
 
 var hijackConnPool sync.Pool
 
 type hijackConn struct {
-	r *bufio.Reader
-	c net.Conn
+	net.Conn
+	r io.Reader
 	v interface{}
 }
 
@@ -925,8 +936,9 @@ func (c hijackConn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-func (c hijackConn) Write(p []byte) (int, error) {
-	return c.c.Write(p)
+func (c hijackConn) Close() error {
+	// hijacked conn is closed in hijackConnHandler.
+	return nil
 }
 
 // TimeoutErrMsg returns last error message set via TimeoutError call.
