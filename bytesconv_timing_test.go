@@ -48,3 +48,13 @@ func BenchmarkEqualBytesStr(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkAppendBytesStr(b *testing.B) {
+	s := "foobarbazbaraz"
+	b.RunParallel(func(pb *testing.PB) {
+		var dst []byte
+		for pb.Next() {
+			dst = AppendBytesStr(dst[:0], s)
+		}
+	})
+}
