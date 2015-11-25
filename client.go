@@ -949,7 +949,7 @@ func (c *HostClient) defaultDialFunc(addr string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return net.DialTCP("tcp4", nil, tcpAddr)
+	return net.DialTCP("tcp", nil, tcpAddr)
 }
 
 func (c *HostClient) getTCPAddr(addr string) (*net.TCPAddr, error) {
