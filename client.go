@@ -1038,14 +1038,16 @@ func resolveTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, error) {
 	}
 
 	n := len(ips)
-	addrs := make([]net.TCPAddr, n)
+	addrs := make([]net.TCPAddr, 0, n)
 	for i := 0; i < n; i++ {
 		ip := ips[i]
 		if !dualStack && ip.To4() == nil {
 			continue
 		}
-		addrs[i].IP = ip
-		addrs[i].Port = port
+		addrs = append(addrs, net.TCPAddr{
+			IP:   ip,
+			Port: port,
+		})
 	}
 	return addrs, nil
 }
