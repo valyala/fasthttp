@@ -12,17 +12,43 @@ import (
 	"time"
 )
 
-func TestClientDoTimeout(t *testing.T) {
+func TestClientGetTimeoutSuccess(t *testing.T) {
+	addr := "127.0.0.1:56889"
+	s := startEchoServer(t, "tcp", addr)
+	defer s.Stop()
+
+	addr = "http://" + addr
+	testClientGetTimeoutSuccess(t, &defaultClient, addr, 100)
+}
+
+func TestClientGetTimeoutSuccessConcurrent(t *testing.T) {
+	addr := "127.0.0.1:56989"
+	s := startEchoServer(t, "tcp", addr)
+	defer s.Stop()
+
+	addr = "http://" + addr
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			testClientGetTimeoutSuccess(t, &defaultClient, addr, 100)
+		}()
+	}
+	wg.Wait()
+}
+
+func TestClientGetTimeoutError(t *testing.T) {
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
 			return &readTimeoutConn{t: time.Second}, nil
 		},
 	}
 
-	testClientDoTimeout(t, c, 100)
+	testClientGetTimeoutError(t, c, 100)
 }
 
-func TestClientDoTimeoutConcurrent(t *testing.T) {
+func TestClientGetTimeoutErrorConcurrent(t *testing.T) {
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
 			return &readTimeoutConn{t: time.Second}, nil
@@ -35,23 +61,71 @@ func TestClientDoTimeoutConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			testClientDoTimeout(t, c, 100)
+			testClientGetTimeoutError(t, c, 100)
 		}()
 	}
 	wg.Wait()
 }
 
-func testClientDoTimeout(t *testing.T, c *Client, n int) {
+func TestClientDoTimeoutError(t *testing.T) {
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return &readTimeoutConn{t: time.Second}, nil
+		},
+	}
+
+	testClientDoTimeoutError(t, c, 100)
+}
+
+func TestClientDoTimeoutErrorConcurrent(t *testing.T) {
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return &readTimeoutConn{t: time.Second}, nil
+		},
+		MaxConnsPerHost: 1000,
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			testClientDoTimeoutError(t, c, 100)
+		}()
+	}
+	wg.Wait()
+}
+
+func testClientDoTimeoutError(t *testing.T, c *Client, n int) {
 	var req Request
 	var resp Response
 	req.SetRequestURI("http://foobar.com/baz")
-	for i := 0; i < 20; i++ {
+	for i := 0; i < n; i++ {
 		err := c.DoTimeout(&req, &resp, time.Millisecond)
 		if err == nil {
 			t.Fatalf("expecting error")
 		}
 		if err != ErrTimeout {
 			t.Fatalf("unexpected error: %s. Expecting %s", err, ErrTimeout)
+		}
+	}
+}
+
+func testClientGetTimeoutError(t *testing.T, c *Client, n int) {
+	buf := make([]byte, 10)
+	for i := 0; i < n; i++ {
+		statusCode, body, err := c.GetTimeout(buf, "http://foobar.com/baz", time.Millisecond)
+		if err == nil {
+			t.Fatalf("expecting error")
+		}
+		if err != ErrTimeout {
+			t.Fatalf("unexpected error: %s. Expecting %s", err, ErrTimeout)
+		}
+		if statusCode != 0 {
+			t.Fatalf("unexpected statusCode=%d. Expecting %d", statusCode, 0)
+		}
+		if body == nil {
+			t.Fatalf("body must be non-nil")
 		}
 	}
 }
@@ -225,7 +299,7 @@ func TestClientPost(t *testing.T) {
 }
 
 func TestClientConcurrent(t *testing.T) {
-	addr := "127.0.0.1:56780"
+	addr := "127.0.0.1:55780"
 	s := startEchoServer(t, "tcp", addr)
 	defer s.Stop()
 
@@ -283,6 +357,28 @@ func testClientGet(t *testing.T, c clientGetter, addr string, n int) {
 	for i := 0; i < n; i++ {
 		uri := fmt.Sprintf("%s/foo/%d?bar=baz", addr, i)
 		statusCode, body, err := c.Get(buf, uri)
+		buf = body
+		if err != nil {
+			t.Fatalf("unexpected error when doing http request: %s", err)
+		}
+		if statusCode != StatusOK {
+			t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+		}
+		resultURI := string(body)
+		if strings.HasPrefix(uri, "https") {
+			resultURI = uri[:5] + resultURI[4:]
+		}
+		if resultURI != uri {
+			t.Fatalf("unexpected uri %q. Expecting %q", resultURI, uri)
+		}
+	}
+}
+
+func testClientGetTimeoutSuccess(t *testing.T, c *Client, addr string, n int) {
+	var buf []byte
+	for i := 0; i < n; i++ {
+		uri := fmt.Sprintf("%s/foo/%d?bar=baz", addr, i)
+		statusCode, body, err := c.GetTimeout(buf, uri, time.Second)
 		buf = body
 		if err != nil {
 			t.Fatalf("unexpected error when doing http request: %s", err)
