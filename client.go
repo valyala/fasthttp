@@ -93,6 +93,15 @@ type Client struct {
 	// Default TCP dialer is used if not set.
 	Dial DialFunc
 
+	// Attempt to connect to both ipv4 and ipv6 addresses if set to true.
+	//
+	// This option is used only if default TCP dialer is used,
+	// i.e. if Dial is blank.
+	//
+	// By default client connects only to ipv4 addresses,
+	// since unfortunately ipv6 remains broken in many networks worldwide :)
+	DialDualStack bool
+
 	// TLS config for https connections.
 	//
 	// Default TLS config is used if not set.
@@ -226,6 +235,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			Addr:            addMissingPort(string(host), isTLS),
 			Name:            c.Name,
 			Dial:            c.Dial,
+			DialDualStack:   c.DialDualStack,
 			TLSConfig:       c.TLSConfig,
 			MaxConns:        c.MaxConnsPerHost,
 			ReadBufferSize:  c.ReadBufferSize,
@@ -312,6 +322,16 @@ type HostClient struct {
 	//
 	// Default TCP dialer is used if not set.
 	Dial DialFunc
+
+	// Attempt to connect to both ipv4 and ipv6 host addresses
+	// if set to true.
+	//
+	// This option is used only if default TCP dialer is used,
+	// i.e. if Dial is blank.
+	//
+	// By default client connects only to ipv4 addresses,
+	// since unfortunately ipv6 remains broken in many networks worldwide :)
+	DialDualStack bool
 
 	// Whether to use TLS (aka SSL or HTTPS) for host connections.
 	IsTLS bool
@@ -949,7 +969,11 @@ func (c *HostClient) defaultDialFunc(addr string) (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return net.DialTCP("tcp", nil, tcpAddr)
+	network := "tcp4"
+	if c.DialDualStack {
+		network = "tcp"
+	}
+	return net.DialTCP(network, nil, tcpAddr)
 }
 
 func (c *HostClient) getTCPAddr(addr string) (*net.TCPAddr, error) {
@@ -963,7 +987,7 @@ func (c *HostClient) getTCPAddr(addr string) (*net.TCPAddr, error) {
 
 	if tcpAddrs == nil {
 		var err error
-		if tcpAddrs, err = resolveTCPAddrs(addr); err != nil {
+		if tcpAddrs, err = resolveTCPAddrs(addr, c.DialDualStack); err != nil {
 			c.tcpAddrsLock.Lock()
 			c.tcpAddrsPending = false
 			c.tcpAddrsLock.Unlock()
@@ -998,7 +1022,7 @@ func addMissingPort(addr string, isTLS bool) string {
 	return fmt.Sprintf("%s:%d", addr, port)
 }
 
-func resolveTCPAddrs(addr string) ([]net.TCPAddr, error) {
+func resolveTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, error) {
 	host, portS, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -1016,7 +1040,11 @@ func resolveTCPAddrs(addr string) ([]net.TCPAddr, error) {
 	n := len(ips)
 	addrs := make([]net.TCPAddr, n)
 	for i := 0; i < n; i++ {
-		addrs[i].IP = ips[i]
+		ip := ips[i]
+		if !dualStack && ip.To4() == nil {
+			continue
+		}
+		addrs[i].IP = ip
 		addrs[i].Port = port
 	}
 	return addrs, nil
