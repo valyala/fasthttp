@@ -12,7 +12,7 @@ func TestRequestString(t *testing.T) {
 	var r Request
 	r.SetRequestURI("http://foobar.com/aaa")
 	s := r.String()
-	expectedS := "GET /aaa HTTP/1.1\r\nUser-Agent: fasthttp client\r\nHost: foobar.com\r\n\r\n"
+	expectedS := "GET /aaa HTTP/1.1\r\nUser-Agent: fasthttp\r\nHost: foobar.com\r\n\r\n"
 	if s != expectedS {
 		t.Fatalf("unexpected request: %q. Expecting %q", s, expectedS)
 	}
