@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -240,19 +241,28 @@ func (c *fakeServerConn) SetWriteDeadline(t time.Time) error {
 }
 
 type fakeListener struct {
+	lock            sync.Mutex
 	requestsCount   int
 	requestsPerConn int
 	request         []byte
 	ch              chan *fakeServerConn
 	done            chan struct{}
+	closed bool
 }
 
 func (ln *fakeListener) Accept() (net.Conn, error) {
+	ln.lock.Lock()
 	if ln.requestsCount == 0 {
+		ln.lock.Unlock()
 		for len(ln.ch) < cap(ln.ch) {
 			time.Sleep(10 * time.Millisecond)
 		}
-		close(ln.done)
+		ln.lock.Lock()
+		if !ln.closed {
+			close(ln.done)
+			ln.closed = true
+		}
+		ln.lock.Unlock()
 		return nil, io.EOF
 	}
 	requestsCount := ln.requestsPerConn
@@ -260,6 +270,7 @@ func (ln *fakeListener) Accept() (net.Conn, error) {
 		requestsCount = ln.requestsCount
 	}
 	ln.requestsCount -= requestsCount
+	ln.lock.Unlock()
 
 	c := <-ln.ch
 	c.requestsCount = requestsCount
