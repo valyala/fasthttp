@@ -247,7 +247,7 @@ type fakeListener struct {
 	request         []byte
 	ch              chan *fakeServerConn
 	done            chan struct{}
-	closed bool
+	closed          bool
 }
 
 func (ln *fakeListener) Accept() (net.Conn, error) {
