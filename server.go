@@ -860,13 +860,11 @@ func (s *Server) serveConn(c net.Conn) error {
 			var hjr io.Reader
 			hjr = c
 			if br != nil {
-				if br.Buffered() > 0 {
-					hjr = br
-					br = nil
+				hjr = br
+				br = nil
 
-					// br may point to ctx.fbr, so do not return ctx into pool.
-					ctx = s.acquireCtx(c)
-				}
+				// br may point to ctx.fbr, so do not return ctx into pool.
+				ctx = s.acquireCtx(c)
 			}
 			if bw != nil {
 				err = bw.Flush()
