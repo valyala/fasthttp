@@ -43,4 +43,6 @@ var (
 	strChunked             = []byte("chunked")
 	strIdentity            = []byte("identity")
 	strPostArgsContentType = []byte("application/x-www-form-urlencoded")
+	strMultipartFormData   = []byte("multipart/form-data")
+	strBoundary            = []byte("boundary")
 )

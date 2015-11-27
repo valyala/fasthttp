@@ -4,9 +4,68 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"mime/multipart"
 	"strings"
 	"testing"
 )
+
+func TestRequestMultipartForm(t *testing.T) {
+	var w bytes.Buffer
+	mw := multipart.NewWriter(&w)
+	for i := 0; i < 10; i++ {
+		k := fmt.Sprintf("key_%d", i)
+		v := fmt.Sprintf("value_%d", i)
+		if err := mw.WriteField(k, v); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+	}
+	boundary := mw.Boundary()
+	if err := mw.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	formData := w.Bytes()
+	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=%s\r\nContent-Length: %d\r\n\r\n%s",
+		boundary, len(formData), formData)
+
+	var req Request
+
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	if err := req.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	f, err := req.MultipartForm()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	defer f.RemoveAll()
+
+	if len(f.File) > 0 {
+		t.Fatalf("unexpected files found in the multipart form: %d", len(f.File))
+	}
+
+	if len(f.Value) != 10 {
+		t.Fatalf("unexpected number of values found: %d. Expecting %d", len(f.Value), 10)
+	}
+
+	for k, vv := range f.Value {
+		if len(vv) != 1 {
+			t.Fatalf("unexpected number of values found for key=%q: %d. Expecting 1", k, len(vv))
+		}
+		if !strings.HasPrefix(k, "key_") {
+			t.Fatalf("unexpected key prefix=%q. Expecting %q", k, "key_")
+		}
+		v := vv[0]
+		if !strings.HasPrefix(v, "value_") {
+			t.Fatalf("unexpected value prefix=%q. expecting %q", v, "value_")
+		}
+		if k[len("key_"):] != v[len("value_"):] {
+			t.Fatalf("key and value suffixes don't match: %q vs %q", k, v)
+		}
+	}
+}
 
 func TestResponseReadLimitBody(t *testing.T) {
 	// response with content-length

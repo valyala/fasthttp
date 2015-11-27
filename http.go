@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"sync"
 )
 
@@ -205,6 +206,35 @@ func (req *Request) parsePostArgs() {
 	}
 	req.postArgs.ParseBytes(req.body)
 	return
+}
+
+// ErrNoMultipartForm means that the request's Content-Type
+// isn't 'multipart/form-data'.
+var ErrNoMultipartForm = errors.New("request has no multipart/form-data Content-Type")
+
+// MultipartForm returns requests's multipart form.
+//
+// Returns ErrNoMultipartForm if request's content-type
+// isn't 'multipart/form-data'.
+//
+// The caller must call RemoveAll on the returned form in order to remove
+// all temporary files associated with the returned form.
+func (req *Request) MultipartForm() (*multipart.Form, error) {
+	// Do not care about memory allocations here, since they are tiny
+	// compared to multipart data (aka multi-MB files) usually sent
+	// in multipart/form-data requests.
+
+	b := req.Header.MultipartFormBoundary()
+	if len(b) == 0 {
+		return nil, ErrNoMultipartForm
+	}
+
+	r := multipart.NewReader(bytes.NewBuffer(req.body), string(b))
+	f, err := r.ReadForm(1024 * 1024)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
 }
 
 // Reset clears request contents.

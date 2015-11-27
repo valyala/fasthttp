@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net"
 	"os"
 	"runtime/debug"
@@ -429,6 +430,17 @@ func (ctx *RequestCtx) QueryArgs() *Args {
 // Returned arguments are valid until returning from RequestHandler.
 func (ctx *RequestCtx) PostArgs() *Args {
 	return ctx.Request.PostArgs()
+}
+
+// MultipartForm returns requests's multipart form.
+//
+// Returns ErrNoMultipartForm if request's content-type
+// isn't 'multipart/form-data'.
+//
+// The caller must call RemoveAll on the returned form in order to remove
+// all temporary files associated with the returned form.
+func (ctx *RequestCtx) MultipartForm() (*multipart.Form, error) {
+	return ctx.Request.MultipartForm()
 }
 
 // IsGet returns true if request method is GET.
