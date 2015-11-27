@@ -92,3 +92,45 @@ BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	    
 * Avoid conversion between []byte and string, since this may result in memory
   allocation+copy. Fasthttp API provides functions for both []byte and string -
   use these functions instead of converting manually between []byte and string.
+* Verify your tests and production code under
+  [race detector](https://golang.org/doc/articles/race_detector.html) on a regular basis.
+
+
+# FAQ
+
+* Q: Why creating yet another http package instead of optimizing net/http?
+  A: Because net/http API limits many optimization opportunities.
+  For example:
+  * net/http request lifetime isn't limited by request handler execution
+    time. So the server creates new request object per each request instead
+    of reusing existing object like fasthttp do.
+  * net/http headers are stored in a `map[string][]string`. So the server
+    must parse all the headers, convert them from `[]byte` to `string` and put
+    them into the map before calling user-provided request handler.
+    This all requires unnesessary memory allocations avoided by fasthttp.
+  * net/http client API requires creating new response object for each request.
+
+* Q: Why fasthttp API is incompatible with net/http?
+  A: Because net/http API limits many optimization opportunities. See the answer
+  above for more details. Also certain net/http API parts are suboptimal
+  for use:
+  * Compare [net/http connection hijacking](https://golang.org/pkg/net/http/#Hijacker)
+    with [fasthttp connection hijacking](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack).
+  * Compare [net/http Request.Body reading](https://golang.org/pkg/net/http/#Request)
+    with [fasthttp request body reading](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostBody).
+
+* Q: Why fasthttp doesn't support HTTP/2.0 and WebSockets?
+  A: There are plans for adding HTTP/2.0 and WebSockets support in the future.
+  In the mean time, third parties may use [RequestCtx.Hijack](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack)
+  for implementing these goodies.
+
+* Q: Are there known net/http advantages comparing to fasthttp?
+  A: Yes:
+  * net/http supports [multipart/form-data](https://www.ietf.org/rfc/rfc2388.txt)
+    while fasthttp doesn't support this yet.
+  * net/http supports request body streaming, while fasthttp doesn't support
+    this yet.
+  * net/http supports [HTTP/2.0 starting from go1.6](https://http2.golang.org/).
+  * net/http API is stable, while fasthttp API may change at any time.
+  * Many existing web frameworks and request routers are built on top
+    of net/http.
