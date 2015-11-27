@@ -1,3 +1,6 @@
 - Example tests.
 - Load balancing client for multiple upstream hosts.
 - Client with requests' pipelining support.
+- WebSockets. See https://tools.ietf.org/html/rfc6455 .
+- HTTP/2.0. See https://tools.ietf.org/html/rfc7540 .
+- Uploaded files' parsing support (aka multipart/form-data). See http://tools.ietf.org/html/rfc1867 .
