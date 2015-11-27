@@ -212,6 +212,8 @@ func (req *Request) parsePostArgs() {
 // isn't 'multipart/form-data'.
 var ErrNoMultipartForm = errors.New("request has no multipart/form-data Content-Type")
 
+const maxInmemoryFileSize = 16 * 1024 * 1024
+
 // MultipartForm returns requests's multipart form.
 //
 // Returns ErrNoMultipartForm if request's content-type
@@ -230,7 +232,7 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 	}
 
 	r := multipart.NewReader(bytes.NewBuffer(req.body), string(b))
-	f, err := r.ReadForm(1024 * 1024)
+	f, err := r.ReadForm(maxInmemoryFileSize)
 	if err != nil {
 		return nil, err
 	}
