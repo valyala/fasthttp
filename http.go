@@ -234,6 +234,14 @@ func (resp *Response) clearSkipHeader() {
 
 // Read reads request (including body) from the given r.
 func (req *Request) Read(r *bufio.Reader) error {
+	return req.ReadLimitBody(r, 0)
+}
+
+// ReadLimitBody reads request from the given r, limiting the body size.
+//
+// If maxBodySize > 0 and the body size exceeds maxBodySize,
+// then ErrBodyTooLarge is returned.
+func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	req.clearSkipHeader()
 	err := req.Header.Read(r)
 	if err != nil {
@@ -241,7 +249,7 @@ func (req *Request) Read(r *bufio.Reader) error {
 	}
 
 	if req.Header.IsPost() {
-		req.body, err = readBody(r, req.Header.ContentLength(), req.body)
+		req.body, err = readBody(r, req.Header.ContentLength(), maxBodySize, req.body)
 		if err != nil {
 			req.Reset()
 			return err
@@ -253,6 +261,14 @@ func (req *Request) Read(r *bufio.Reader) error {
 
 // Read reads response (including body) from the given r.
 func (resp *Response) Read(r *bufio.Reader) error {
+	return resp.ReadLimitBody(r, 0)
+}
+
+// ReadLimitBody reads response from the given r, limiting the body size.
+//
+// If maxBodySize > 0 and the body size exceeds maxBodySize,
+// then ErrBodyTooLarge is returned.
+func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	resp.clearSkipHeader()
 	err := resp.Header.Read(r)
 	if err != nil {
@@ -260,7 +276,7 @@ func (resp *Response) Read(r *bufio.Reader) error {
 	}
 
 	if !isSkipResponseBody(resp.Header.StatusCode()) && !resp.SkipBody {
-		resp.body, err = readBody(r, resp.Header.ContentLength(), resp.body)
+		resp.body, err = readBody(r, resp.Header.ContentLength(), maxBodySize, resp.body)
 		if err != nil {
 			resp.Reset()
 			return err
@@ -449,18 +465,25 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 
 var copyBufPool sync.Pool
 
-func readBody(r *bufio.Reader, contentLength int, dst []byte) ([]byte, error) {
+// ErrBodyTooLarge is returned if either request or response body exceeds
+// the given limit.
+var ErrBodyTooLarge = errors.New("body size exceeds the given limit")
+
+func readBody(r *bufio.Reader, contentLength int, maxBodySize int, dst []byte) ([]byte, error) {
 	dst = dst[:0]
 	if contentLength >= 0 {
+		if maxBodySize > 0 && contentLength > maxBodySize {
+			return dst, ErrBodyTooLarge
+		}
 		return appendBodyFixedSize(r, dst, contentLength)
 	}
 	if contentLength == -1 {
-		return readBodyChunked(r, dst)
+		return readBodyChunked(r, maxBodySize, dst)
 	}
-	return readBodyIdentity(r, dst)
+	return readBodyIdentity(r, maxBodySize, dst)
 }
 
-func readBodyIdentity(r *bufio.Reader, dst []byte) ([]byte, error) {
+func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
 	dst = dst[:cap(dst)]
 	if len(dst) == 0 {
 		dst = make([]byte, 1024)
@@ -478,8 +501,15 @@ func readBodyIdentity(r *bufio.Reader, dst []byte) ([]byte, error) {
 			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
 		}
 		offset += nn
+		if maxBodySize > 0 && offset > maxBodySize {
+			return dst[:offset], ErrBodyTooLarge
+		}
 		if len(dst) == offset {
-			b := make([]byte, round2(2*offset))
+			n := round2(2 * offset)
+			if maxBodySize > 0 && n > maxBodySize {
+				n = maxBodySize + 1
+			}
+			b := make([]byte, n)
 			copy(b, dst)
 			dst = b
 		}
@@ -518,7 +548,7 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	}
 }
 
-func readBodyChunked(r *bufio.Reader, dst []byte) ([]byte, error) {
+func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
 	if len(dst) > 0 {
 		panic("BUG: expected zero-length buffer")
 	}
@@ -528,6 +558,9 @@ func readBodyChunked(r *bufio.Reader, dst []byte) ([]byte, error) {
 		chunkSize, err := parseChunkSize(r)
 		if err != nil {
 			return dst, err
+		}
+		if maxBodySize > 0 && len(dst)+chunkSize > maxBodySize {
+			return dst, ErrBodyTooLarge
 		}
 		dst, err = appendBodyFixedSize(r, dst, chunkSize+strCRLFLen)
 		if err != nil {

@@ -82,6 +82,9 @@ type RequestHandler func(ctx *RequestCtx)
 
 // Server implements HTTP server.
 //
+// Default Server settings should satisfy the majority of Server users.
+// Adjust Server settings only if you really understand the consequences.
+//
 // It is forbidden copying Server instances. Create new Server instances
 // instead.
 type Server struct {
@@ -140,6 +143,14 @@ type Server struct {
 	//
 	// By default keep-alive connection lifetime is unlimited.
 	MaxKeepaliveDuration time.Duration
+
+	// Maximum request body size.
+	//
+	// The server closes incoming connection if this limit is greater than 0
+	// and the request body size exceeds the limit.
+	//
+	// By default request body size is unlimited.
+	MaxRequestBodySize int
 
 	// Aggressively reduces memory usage at the cost of higher CPU usage
 	// if set to true.
@@ -781,7 +792,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			if br == nil {
 				br = acquireReader(ctx)
 			}
-			err = ctx.Request.Read(br)
+			err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize)
 			if br.Buffered() == 0 || err != nil {
 				releaseReader(s, br)
 				br = nil
@@ -789,7 +800,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		} else {
 			br, err = acquireByteReader(&ctx)
 			if err == nil {
-				err = ctx.Request.Read(br)
+				err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize)
 				if br.Buffered() == 0 || err != nil {
 					releaseReader(s, br)
 					br = nil

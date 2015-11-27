@@ -133,6 +133,14 @@ type Client struct {
 	// By default request write timeout is unlimited.
 	WriteTimeout time.Duration
 
+	// Maximum response body size.
+	//
+	// The client returns ErrBodyTooLarge if this limit is greater than 0
+	// and response body is greater than the limit.
+	//
+	// By default response body size is unlimited.
+	MaxResponseBodySize int
+
 	// Logger is used for error logging.
 	//
 	// Default logger from log package is used if not set.
@@ -232,17 +240,18 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	hc := m[string(host)]
 	if hc == nil {
 		hc = &HostClient{
-			Addr:            addMissingPort(string(host), isTLS),
-			Name:            c.Name,
-			Dial:            c.Dial,
-			DialDualStack:   c.DialDualStack,
-			TLSConfig:       c.TLSConfig,
-			MaxConns:        c.MaxConnsPerHost,
-			ReadBufferSize:  c.ReadBufferSize,
-			WriteBufferSize: c.WriteBufferSize,
-			ReadTimeout:     c.ReadTimeout,
-			WriteTimeout:    c.WriteTimeout,
-			Logger:          c.Logger,
+			Addr:                addMissingPort(string(host), isTLS),
+			Name:                c.Name,
+			Dial:                c.Dial,
+			DialDualStack:       c.DialDualStack,
+			TLSConfig:           c.TLSConfig,
+			MaxConns:            c.MaxConnsPerHost,
+			ReadBufferSize:      c.ReadBufferSize,
+			WriteBufferSize:     c.WriteBufferSize,
+			ReadTimeout:         c.ReadTimeout,
+			WriteTimeout:        c.WriteTimeout,
+			MaxResponseBodySize: c.MaxResponseBodySize,
+			Logger:              c.Logger,
 		}
 		if isTLS {
 			hc.IsTLS = true
@@ -364,6 +373,14 @@ type HostClient struct {
 	//
 	// By default request write timeout is unlimited.
 	WriteTimeout time.Duration
+
+	// Maximum response body size.
+	//
+	// The client returns ErrBodyTooLarge if this limit is greater than 0
+	// and response body is greater than the limit.
+	//
+	// By default response body size is unlimited.
+	MaxResponseBodySize int
 
 	// Logger is used for error logging.
 	//
@@ -759,7 +776,7 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 	}
 
 	br := c.acquireReader(conn)
-	if err = resp.Read(br); err != nil {
+	if err = resp.ReadLimitBody(br, c.MaxResponseBodySize); err != nil {
 		if nilResp {
 			releaseResponse(resp)
 		}

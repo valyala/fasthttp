@@ -18,6 +18,7 @@ Fasthttp provides the following features:
         * Request read timeout.
         * Response write timeout.
         * Maximum request header size.
+        * Maximum request body size.
         * Maximum request execution time.
         * Maximum keep-alive connection lifetime.
 
