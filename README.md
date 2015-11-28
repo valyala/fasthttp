@@ -115,9 +115,9 @@ BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	    
   above for more details. Also certain net/http API parts are suboptimal
   for use:
   * Compare [net/http connection hijacking](https://golang.org/pkg/net/http/#Hijacker)
-    with [fasthttp connection hijacking](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack).
+    to [fasthttp connection hijacking](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack).
   * Compare [net/http Request.Body reading](https://golang.org/pkg/net/http/#Request)
-    with [fasthttp request body reading](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostBody).
+    to [fasthttp request body reading](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostBody).
 
 * Q: Why fasthttp doesn't support HTTP/2.0 and WebSockets?
   A: There are plans for adding HTTP/2.0 and WebSockets support in the future.
