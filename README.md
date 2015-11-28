@@ -58,6 +58,7 @@ BenchmarkNetHTTPServerGet10KReqPerConn1KClients-4	  500000	      2350 ns/op	    
 
 fasthttp:
 ```
+$ GOMAXPROCS=4 go test -bench=kServerGet -benchmem
 PASS
 BenchmarkServerGet1ReqPerConn-4           	 1000000	      1038 ns/op	       0 B/op	       0 allocs/op
 BenchmarkServerGet2ReqPerConn-4           	 2000000	       764 ns/op	       0 B/op	       0 allocs/op
