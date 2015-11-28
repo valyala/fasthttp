@@ -517,6 +517,57 @@ func (ctx *RequestCtx) Success(contentType string, body []byte) {
 	ctx.SetBody(body)
 }
 
+// Redirect sets 'Location: uri' response header and sets the given statusCode.
+//
+// statusCode must have one of the following values:
+//
+//    * StatusMovedPermanently (301)
+//    * StatusFound (302)
+//    * StatusSeeOther (303)
+//
+// All other statusCode values are replaced by StatusFound (302).
+//
+// The redirect uri may be either absolute or relative to the current
+// request uri.
+func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
+	var u URI
+	ctx.URI().CopyTo(&u)
+	u.Update(uri)
+	ctx.redirect(u.FullURI(), statusCode)
+}
+
+// Redirect sets 'Location: uri' response header and sets the given statusCode.
+//
+// statusCode must have one of the following values:
+//
+//    * StatusMovedPermanently (301)
+//    * StatusFound (302)
+//    * StatusSeeOther (303)
+//
+// All other statusCode values are replaced by StatusFound (302).
+//
+// The redirect uri may be either absolute or relative to the current
+// request uri.
+func (ctx *RequestCtx) RedirectBytes(uri []byte, statusCode int) {
+	var u URI
+	ctx.URI().CopyTo(&u)
+	u.UpdateBytes(uri)
+	ctx.redirect(u.FullURI(), statusCode)
+}
+
+func (ctx *RequestCtx) redirect(uri []byte, statusCode int) {
+	ctx.Response.Header.SetCanonical(strLocation, uri)
+	statusCode = getRedirectStatusCode(statusCode)
+	ctx.Response.SetStatusCode(statusCode)
+}
+
+func getRedirectStatusCode(statusCode int) int {
+	if statusCode == StatusMovedPermanently || statusCode == StatusFound || statusCode == StatusSeeOther {
+		return statusCode
+	}
+	return StatusFound
+}
+
 // SetBody sets response body to the given value.
 func (ctx *RequestCtx) SetBody(body []byte) {
 	ctx.Response.SetBody(body)

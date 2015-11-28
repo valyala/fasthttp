@@ -441,7 +441,7 @@ type clientDoer interface {
 func clientGetURL(dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
 	req := acquireRequest()
 
-	statusCode, body, err = doRequest(req, dst, url, c)
+	statusCode, body, err = doRequestFollowRedirects(req, dst, url, c)
 
 	releaseRequest(req)
 	return statusCode, body, err
@@ -498,7 +498,7 @@ func clientGetURLTimeoutFreeConn(dst []byte, url string, timeout time.Duration, 
 	// concurrent requests, since timed out requests on client side
 	// usually continue execution on the host.
 	go func() {
-		statusCodeCopy, bodyCopy, errCopy := doRequest(req, dst, url, c)
+		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirects(req, dst, url, c)
 		ch <- clientURLResponse{
 			statusCode: statusCodeCopy,
 			body:       bodyCopy,
@@ -542,27 +542,63 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 		postArgs.WriteTo(req.BodyWriter())
 	}
 
-	statusCode, body, err = doRequest(req, dst, url, c)
+	statusCode, body, err = doRequestFollowRedirects(req, dst, url, c)
 
 	releaseRequest(req)
 	return statusCode, body, err
 }
 
-func doRequest(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
-	req.SetRequestURI(url)
+var (
+	errMissingLocation  = errors.New("missing Location header for http redirect")
+	errTooManyRedirects = errors.New("too many redirects detected when doing the request")
+)
 
+const maxRedirectsCount = 16
+
+func doRequestFollowRedirects(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
 	resp := acquireResponse()
 	oldBody := resp.body
 	resp.body = dst
-	if err = c.Do(req, resp); err != nil {
-		return 0, dst, err
+
+	redirectsCount := 0
+	for {
+		req.parsedURI = false
+		req.Header.host = req.Header.host[:0]
+		req.SetRequestURI(url)
+
+		if err = c.Do(req, resp); err != nil {
+			break
+		}
+		statusCode = resp.Header.StatusCode()
+		if statusCode != StatusMovedPermanently && statusCode != StatusFound && statusCode != StatusSeeOther {
+			break
+		}
+
+		redirectsCount++
+		if redirectsCount > maxRedirectsCount {
+			err = errTooManyRedirects
+			break
+		}
+		location := resp.Header.peek(strLocation)
+		if len(location) == 0 {
+			err = errMissingLocation
+			break
+		}
+		url = getRedirectURL(url, location)
 	}
-	statusCode = resp.Header.StatusCode()
+
 	body = resp.body
 	resp.body = oldBody
 	releaseResponse(resp)
 
 	return statusCode, body, err
+}
+
+func getRedirectURL(baseURL string, location []byte) string {
+	var u URI
+	u.Parse(nil, []byte(baseURL))
+	u.UpdateBytes(location)
+	return u.String()
 }
 
 var (

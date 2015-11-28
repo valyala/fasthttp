@@ -33,6 +33,7 @@ var (
 	strUserAgent        = []byte("User-Agent")
 	strCookie           = []byte("Cookie")
 	strSetCookie        = []byte("Set-Cookie")
+	strLocation         = []byte("Location")
 
 	strCookieExpires = []byte("expires")
 	strCookieDomain  = []byte("domain")

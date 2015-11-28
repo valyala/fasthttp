@@ -12,6 +12,61 @@ import (
 	"time"
 )
 
+func TestClientFollowRedirects(t *testing.T) {
+	addr := "127.0.0.1:55234"
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if EqualBytesStr(ctx.Path(), "/foo") {
+				u := ctx.URI()
+				u.Update("/bar")
+				ctx.Redirect(u.String(), StatusFound)
+			} else {
+				ctx.Success("text/plain", ctx.Path())
+			}
+		},
+	}
+	ln, err := net.Listen("tcp4", addr)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	uri := fmt.Sprintf("http://%s/foo", addr)
+	for i := 0; i < 10; i++ {
+		statusCode, body, err := Get(nil, uri)
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if statusCode != StatusOK {
+			t.Fatalf("unexpected status code: %d", statusCode)
+		}
+		if string(body) != "/bar" {
+			t.Fatalf("unexpected response %q. Expecting %q", body, "/bar")
+		}
+	}
+
+	uri = fmt.Sprintf("http://%s/aaab/sss", addr)
+	for i := 0; i < 10; i++ {
+		statusCode, body, err := Get(nil, uri)
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if statusCode != StatusOK {
+			t.Fatalf("unexpected status code: %d", statusCode)
+		}
+		if string(body) != "/aaab/sss" {
+			t.Fatalf("unexpected response %q. Expecting %q", body, "/aaab/sss")
+		}
+	}
+}
+
 func TestClientGetTimeoutSuccess(t *testing.T) {
 	addr := "127.0.0.1:56889"
 	s := startEchoServer(t, "tcp", addr)
@@ -251,8 +306,8 @@ func TestClientHTTPSConcurrent(t *testing.T) {
 		}
 		go func() {
 			defer wg.Done()
-			testClientGet(t, &defaultClient, addr, 3000)
-			testClientPost(t, &defaultClient, addr, 1000)
+			testClientGet(t, &defaultClient, addr, 300)
+			testClientPost(t, &defaultClient, addr, 100)
 		}()
 	}
 	wg.Wait()
@@ -309,8 +364,8 @@ func TestClientConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			testClientGet(t, &defaultClient, addr, 3000)
-			testClientPost(t, &defaultClient, addr, 1000)
+			testClientGet(t, &defaultClient, addr, 300)
+			testClientPost(t, &defaultClient, addr, 100)
 		}()
 	}
 	wg.Wait()
@@ -345,8 +400,8 @@ func TestHostClientConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			testHostClientGet(t, c, 3000)
-			testHostClientPost(t, c, 1000)
+			testHostClientGet(t, c, 300)
+			testHostClientPost(t, c, 100)
 		}()
 	}
 	wg.Wait()
