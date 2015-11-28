@@ -120,13 +120,13 @@ BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	    
     to [fasthttp request body reading](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostBody).
 
 * *Why fasthttp doesn't support HTTP/2.0 and WebSockets?*
-  A: There are [plans](TODO) for adding HTTP/2.0 and WebSockets support
+  There are [plans](TODO) for adding HTTP/2.0 and WebSockets support
   in the future.
   In the mean time, third parties may use [RequestCtx.Hijack](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack)
   for implementing these goodies.
 
 * *Are there known net/http advantages comparing to fasthttp?*
-  A: Yes:
+  Yes:
   * net/http supports [HTTP/2.0 starting from go1.6](https://http2.golang.org/).
   * net/http API is stable, while fasthttp API may change at any time.
   * net/http handles more HTTP corner cases.
