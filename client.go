@@ -377,7 +377,7 @@ type HostClient struct {
 	MaxResponseBodySize int
 
 	clientName  atomic.Value
-	lastUseTime uint64
+	lastUseTime uint32
 
 	connsLock  sync.Mutex
 	connsCount int
@@ -400,10 +400,12 @@ type clientConn struct {
 	v interface{}
 }
 
+var startTimeUnix = time.Now().Unix()
+
 // LastUseTime returns time the client was last used
 func (c *HostClient) LastUseTime() time.Time {
-	n := atomic.LoadUint64(&c.lastUseTime)
-	return time.Unix(int64(n), 0)
+	n := atomic.LoadUint32(&c.lastUseTime)
+	return time.Unix(startTimeUnix+int64(n), 0)
 }
 
 // Get appends url contents to dst and returns it as body.
@@ -750,7 +752,7 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 		panic("BUG: req cannot be nil")
 	}
 
-	atomic.StoreUint64(&c.lastUseTime, uint64(time.Now().Unix()))
+	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix))
 
 	cc, err := c.acquireConn(newConn)
 	if err != nil {
