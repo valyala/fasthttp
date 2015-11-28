@@ -143,3 +143,7 @@ BenchmarkServerGet10KReqPerConn1KClients-4	 5000000	       342 ns/op	       0 B/
 
   Go1.5+. Older versions won't be supported, since their standard package
   [miss useful functions](https://github.com/valyala/fasthttp/issues/5).
+
+* *Please provide real benchmark data and sever information*
+
+  See [this issue](https://github.com/valyala/fasthttp/issues/4).
