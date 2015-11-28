@@ -138,6 +138,7 @@ BenchmarkServerGet10KReqPerConn1KClients-4	 5000000	       342 ns/op	       0 B/
     wider user base.
   * Many existing web frameworks and request routers are built on top
     of net/http.
+  * net/http works on go older than 1.5.
 
 * *Which GO versions are supported by fasthttp?*
 
