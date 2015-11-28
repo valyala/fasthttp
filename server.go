@@ -1144,21 +1144,20 @@ func releaseWriter(s *Server, w *bufio.Writer) {
 	s.writerPool.Put(w)
 }
 
-var globalCtxID uint64
-
 func (s *Server) acquireCtx(c net.Conn) *RequestCtx {
 	v := s.ctxPool.Get()
 	var ctx *RequestCtx
 	if v == nil {
 		ctx = &RequestCtx{
 			s: s,
+			c: c,
 		}
+		ctx.initID()
 		ctx.v = ctx
-		v = ctx
-	} else {
-		ctx = v.(*RequestCtx)
+		return ctx
 	}
-	ctx.initID()
+
+	ctx = v.(*RequestCtx)
 	ctx.c = c
 	return ctx
 }
@@ -1213,6 +1212,8 @@ func (fa *fakeAddrer) Write(p []byte) (int, error) {
 func (fa *fakeAddrer) Close() error {
 	panic("BUG: unexpected Close call")
 }
+
+var globalCtxID uint64
 
 func (ctx *RequestCtx) initID() {
 	ctx.id = (atomic.AddUint64(&globalCtxID, 1)) << 32
