@@ -99,18 +99,20 @@ BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	    
 # FAQ
 
 * *Why creating yet another http package instead of optimizing net/http?*
+
   Because net/http API limits many optimization opportunities.
   For example:
-  * net/http request lifetime isn't limited by request handler execution
-    time. So the server creates new request object per each request instead
-    of reusing existing object like fasthttp do.
+  * net/http Request object lifetime isn't limited by request handler execution
+    time. So the server must create new request object per each request instead
+    of reusing existing objects like fasthttp do.
   * net/http headers are stored in a `map[string][]string`. So the server
     must parse all the headers, convert them from `[]byte` to `string` and put
     them into the map before calling user-provided request handler.
     This all requires unnesessary memory allocations avoided by fasthttp.
-  * net/http client API requires creating new response object for each request.
+  * net/http client API requires creating new response object per each request.
 
 * *Why fasthttp API is incompatible with net/http?*
+
   Because net/http API limits many optimization opportunities. See the answer
   above for more details. Also certain net/http API parts are suboptimal
   for use:
@@ -120,12 +122,14 @@ BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	    
     to [fasthttp request body reading](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostBody).
 
 * *Why fasthttp doesn't support HTTP/2.0 and WebSockets?*
+
   There are [plans](TODO) for adding HTTP/2.0 and WebSockets support
   in the future.
   In the mean time, third parties may use [RequestCtx.Hijack](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack)
   for implementing these goodies.
 
 * *Are there known net/http advantages comparing to fasthttp?*
+
   Yes:
   * net/http supports [HTTP/2.0 starting from go1.6](https://http2.golang.org/).
   * net/http API is stable, while fasthttp API may change at any time.
