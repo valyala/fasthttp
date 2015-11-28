@@ -4,6 +4,20 @@ import (
 	"testing"
 )
 
+func BenchmarkAppendUint(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		var buf []byte
+		i := 0
+		for pb.Next() {
+			buf = AppendUint(buf[:0], i)
+			i++
+			if i > 0x7fffffff {
+				i = 0
+			}
+		}
+	})
+}
+
 func BenchmarkLowercaseBytesNoop(b *testing.B) {
 	src := []byte("foobarbaz_lowercased_all")
 	b.RunParallel(func(pb *testing.PB) {
