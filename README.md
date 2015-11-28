@@ -87,7 +87,7 @@ BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	    
 * [Profile your program](http://blog.golang.org/profiling-go-programs)
   in production.
   `go tool pprof --alloc_objects your-program mem.pprof` usually gives better
-  insights for optimization than `go tool pprof your-program cpu.pprof`.
+  insights for optimization opportunities than `go tool pprof your-program cpu.pprof`.
 * Write [tests and benchmarks](https://golang.org/pkg/testing/) for hot paths.
 * Avoid conversion between []byte and string, since this may result in memory
   allocation+copy. Fasthttp API provides functions for both []byte and string -
