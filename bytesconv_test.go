@@ -48,15 +48,6 @@ func testReadHexIntError(t *testing.T, s string) {
 	}
 }
 
-func TestReadHexIntSuccess(t *testing.T) {
-	testReadHexIntSuccess(t, "0", 0)
-	testReadHexIntSuccess(t, "fF", 0xff)
-	testReadHexIntSuccess(t, "00abc", 0xabc)
-	testReadHexIntSuccess(t, "7fffffff", 0x7fffffff)
-	testReadHexIntSuccess(t, "000", 0)
-	testReadHexIntSuccess(t, "1234ZZZ", 0x1234)
-}
-
 func testReadHexIntSuccess(t *testing.T, s string, expectedN int) {
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
@@ -86,12 +77,6 @@ func TestAppendHTTPDate(t *testing.T) {
 	if s != expectedS {
 		t.Fatalf("unexpected date %q. Expecting %q", s, expectedS)
 	}
-}
-
-func TestParseUintSuccess(t *testing.T) {
-	testParseUintSuccess(t, "0", 0)
-	testParseUintSuccess(t, "123", 123)
-	testParseUintSuccess(t, "123456789012345678", 123456789012345678)
 }
 
 func TestParseUintError(t *testing.T) {

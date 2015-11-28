@@ -10,41 +10,13 @@ import (
 	"unsafe"
 )
 
-var (
-	maxIntChars = func() int {
-		switch ^uint(0) {
-		case 0xffffffff:
-			// 32 bit
-			return 9
-		case 0xffffffffffffffff:
-			// 64 bit
-			return 18
-		default:
-			panic("Unsupported architecture :)")
-		}
-	}()
-
-	maxHexIntChars = func() int {
-		switch ^uint(0) {
-		case 0xffffffff:
-			// 32 bit
-			return 7
-		case 0xffffffffffffffff:
-			// 64 bit
-			return 15
-		default:
-			panic("Unsupported architecture :)")
-		}
-	}()
-
-	gmtLocation = func() *time.Location {
-		x, err := time.LoadLocation("GMT")
-		if err != nil {
-			panic(fmt.Sprintf("cannot load GMT location: %s", err))
-		}
-		return x
-	}()
-)
+var gmtLocation = func() *time.Location {
+	x, err := time.LoadLocation("GMT")
+	if err != nil {
+		panic(fmt.Sprintf("cannot load GMT location: %s", err))
+	}
+	return x
+}()
 
 // AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
 // to dst and returns dst (which may be newly allocated).
