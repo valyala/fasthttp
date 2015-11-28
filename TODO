@@ -1,4 +1,5 @@
 - Example tests.
+- "Switching from net/http" documentation section (thanks to Klaus Post for the idea).
 - Load balancing client for multiple upstream hosts.
 - Client with requests' pipelining support.
 - WebSockets. See https://tools.ietf.org/html/rfc6455 .
