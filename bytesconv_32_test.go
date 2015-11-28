@@ -6,6 +6,12 @@ import (
 	"testing"
 )
 
+func TestAppendUint(t *testing.T) {
+	testAppendUint(t, 0)
+	testAppendUint(t, 123)
+	testAppendUint(t, 0x7fffffff)
+}
+
 func TestReadHexIntSuccess(t *testing.T) {
 	testReadHexIntSuccess(t, "0", 0)
 	testReadHexIntSuccess(t, "fF", 0xff)

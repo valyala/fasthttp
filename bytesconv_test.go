@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -12,6 +13,14 @@ func TestWriteHexInt(t *testing.T) {
 	testWriteHexInt(t, 1, "1")
 	testWriteHexInt(t, 0x123, "123")
 	testWriteHexInt(t, 0x7fffffff, "7fffffff")
+}
+
+func testAppendUint(t *testing.T, n int) {
+	expectedS := fmt.Sprintf("%d", n)
+	s := AppendUint(nil, n)
+	if string(s) != expectedS {
+		t.Fatalf("unexpected uint %q. Expecting %q. n=%d", s, expectedS, n)
+	}
 }
 
 func testWriteHexInt(t *testing.T, n int, expectedS string) {

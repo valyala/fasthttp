@@ -30,11 +30,8 @@ func AppendUint(dst []byte, n int) []byte {
 		panic("BUG: int must be positive")
 	}
 
-	v := uintBufPool.Get()
-	if v == nil {
-		v = make([]byte, maxIntChars+8)
-	}
-	buf := v.([]byte)
+	var b [20]byte
+	buf := b[:]
 	i := len(buf) - 1
 	for {
 		buf[i] = '0' + byte(n%10)
@@ -46,7 +43,6 @@ func AppendUint(dst []byte, n int) []byte {
 	}
 
 	dst = append(dst, buf[i:]...)
-	uintBufPool.Put(v)
 	return dst
 }
 
