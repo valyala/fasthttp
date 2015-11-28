@@ -354,7 +354,7 @@ func (h *RequestHeader) RequestURI() []byte {
 // RequestURI must be properly encoded.
 // Use URI.RequestURI for constructing proper RequestURI if unsure.
 func (h *RequestHeader) SetRequestURI(requestURI string) {
-	h.requestURI = AppendBytesStr(h.requestURI, requestURI)
+	h.requestURI = AppendBytesStr(h.requestURI[:0], requestURI)
 }
 
 // SetRequestURI sets RequestURI for the first HTTP request line.
