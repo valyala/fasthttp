@@ -72,11 +72,6 @@ func Listen(network, addr string) (l net.Listener, err error) {
 		return nil, &ErrNoReusePort{err}
 	}
 
-	if err = setTCPDeferAccept(fd); err != nil {
-		syscall.Close(fd)
-		return nil, err
-	}
-
 	if err = syscall.Bind(fd, sockaddr); err != nil {
 		syscall.Close(fd)
 		return nil, err
