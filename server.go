@@ -839,13 +839,8 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.Response.Reset()
 		s.Handler(ctx)
 
-		if ctx.Request.multipartForm != nil {
-			// Remove temporary files, which may be uploaded during the request.
-			// Do not check for error, since these files may be deleted or moved
-			// to new places by RequestHandler.
-			ctx.Request.multipartForm.RemoveAll()
-			ctx.Request.multipartForm = nil
-		}
+		// Remove temporary files, which may be uploaded during the request.
+		ctx.Request.RemoveMultipartFormFiles()
 
 		errMsg = ctx.timeoutErrMsg
 		if len(errMsg) > 0 {
