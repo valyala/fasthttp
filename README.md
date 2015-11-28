@@ -126,9 +126,10 @@ BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	    
 
 * Q: Are there known net/http advantages comparing to fasthttp?
   A: Yes:
-  * net/http supports request body streaming, while fasthttp doesn't support
-    this yet.
   * net/http supports [HTTP/2.0 starting from go1.6](https://http2.golang.org/).
   * net/http API is stable, while fasthttp API may change at any time.
+  * net/http handles more HTTP corner cases.
+  * net/http should contain less bugs, since it is used and tested by much
+    wider user base.
   * Many existing web frameworks and request routers are built on top
     of net/http.
