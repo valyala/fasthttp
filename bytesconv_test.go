@@ -8,13 +8,6 @@ import (
 	"time"
 )
 
-func TestWriteHexInt(t *testing.T) {
-	testWriteHexInt(t, 0, "0")
-	testWriteHexInt(t, 1, "1")
-	testWriteHexInt(t, 0x123, "123")
-	testWriteHexInt(t, 0x7fffffff, "7fffffff")
-}
-
 func testAppendUint(t *testing.T, n int) {
 	expectedS := fmt.Sprintf("%d", n)
 	s := AppendUint(nil, n)

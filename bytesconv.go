@@ -155,16 +155,16 @@ func readHexInt(r *bufio.Reader) (int, error) {
 	}
 }
 
-var uintBufPool sync.Pool
+var hexIntBufPool sync.Pool
 
 func writeHexInt(w *bufio.Writer, n int) error {
 	if n < 0 {
 		panic("BUG: int must be positive")
 	}
 
-	v := uintBufPool.Get()
+	v := hexIntBufPool.Get()
 	if v == nil {
-		v = make([]byte, maxIntChars+8)
+		v = make([]byte, maxHexIntChars+1)
 	}
 	buf := v.([]byte)
 	i := len(buf) - 1
@@ -177,7 +177,7 @@ func writeHexInt(w *bufio.Writer, n int) error {
 		i--
 	}
 	_, err := w.Write(buf[i:])
-	uintBufPool.Put(v)
+	hexIntBufPool.Put(v)
 	return err
 }
 

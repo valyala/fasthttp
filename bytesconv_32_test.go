@@ -6,6 +6,13 @@ import (
 	"testing"
 )
 
+func TestWriteHexInt(t *testing.T) {
+	testWriteHexInt(t, 0, "0")
+	testWriteHexInt(t, 1, "1")
+	testWriteHexInt(t, 0x123, "123")
+	testWriteHexInt(t, 0x7fffffff, "7fffffff")
+}
+
 func TestAppendUint(t *testing.T) {
 	testAppendUint(t, 0)
 	testAppendUint(t, 123)
