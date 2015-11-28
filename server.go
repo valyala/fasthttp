@@ -437,8 +437,11 @@ func (ctx *RequestCtx) PostArgs() *Args {
 // Returns ErrNoMultipartForm if request's content-type
 // isn't 'multipart/form-data'.
 //
-// The caller must call RemoveAll on the returned form in order to remove
-// all temporary files associated with the returned form.
+// All uploaded temporary files are automatically deleted after
+// returning from RequestHandler. Either move or copy uploaded files
+// into new place if you want retaining them.
+//
+// Returned form is valid until returning from RequestHandler.
 func (ctx *RequestCtx) MultipartForm() (*multipart.Form, error) {
 	return ctx.Request.MultipartForm()
 }
@@ -835,6 +838,15 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.time = currentTime
 		ctx.Response.Reset()
 		s.Handler(ctx)
+
+		if ctx.Request.multipartForm != nil {
+			// Remove temporary files, which may be uploaded during the request.
+			// Do not check for error, since these files may be deleted or moved
+			// to new places by RequestHandler.
+			ctx.Request.multipartForm.RemoveAll()
+			ctx.Request.multipartForm = nil
+		}
+
 		errMsg = ctx.timeoutErrMsg
 		if len(errMsg) > 0 {
 			ctx = s.acquireCtx(c)
