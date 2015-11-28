@@ -138,3 +138,8 @@ BenchmarkServerGet10KReqPerConn1KClients-4	 5000000	       342 ns/op	       0 B/
     wider user base.
   * Many existing web frameworks and request routers are built on top
     of net/http.
+
+* *Which GO versions are supported by fasthttp?*
+
+  Go1.5+. Older versions won't be supported, since their standard package
+  [miss useful functions](https://github.com/valyala/fasthttp/issues/5).
