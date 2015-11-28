@@ -278,7 +278,7 @@ func EqualBytesStr(b []byte, s string) bool {
 // AppendBytesStr appends src to dst and returns dst
 // (which may be newly allocated).
 //
-// This function has no performance benefits comparint to append(dst, src...).
+// This function has no performance benefits comparing to append(dst, src...).
 // It is left here for backwards compatibility only.
 func AppendBytesStr(dst []byte, src string) []byte {
 	return append(dst, src...)
