@@ -7,7 +7,8 @@ import (
 
 // URI represents URI :) .
 //
-// It is forbidden copying URI instances. Create new instances instead.
+// It is forbidden copying URI instances. Create new instance and use CopyTo
+// instead.
 type URI struct {
 	pathOriginal []byte
 	scheme       []byte
@@ -23,6 +24,22 @@ type URI struct {
 	requestURI []byte
 
 	h *RequestHeader
+}
+
+// CopyTo copies uri contents to dst.
+func (x *URI) CopyTo(dst *URI) {
+	dst.pathOriginal = append(dst.pathOriginal[:0], x.pathOriginal...)
+	dst.scheme = append(dst.scheme[:0], x.scheme...)
+	dst.path = append(dst.path[:0], x.path...)
+	dst.queryString = append(dst.queryString[:0], x.queryString...)
+	dst.hash = append(dst.hash[:0], x.hash...)
+	dst.host = append(dst.host[:0], x.host...)
+
+	dst.parsedQueryArgs = false
+
+	// fullURI and requestURI shouldn't be copied, since they are created
+	// from scratch on each FullURI() and RequestURI() call.
+	dst.h = x.h
 }
 
 // Hash returns URI hash, i.e. qwe of http://aaa.com/foo/bar?baz=123#qwe .
@@ -53,11 +70,13 @@ func (x *URI) QueryString() []byte {
 // SetQueryString sets URI query string.
 func (x *URI) SetQueryString(queryString string) {
 	x.queryString = AppendBytesStr(x.queryString[:0], queryString)
+	x.parsedQueryArgs = false
 }
 
 // SetQueryStringBytes sets URI query string.
 func (x *URI) SetQueryStringBytes(queryString []byte) {
 	x.queryString = append(x.queryString[:0], queryString...)
+	x.parsedQueryArgs = false
 }
 
 // Path returns URI path, i.e. /foo/bar of http://aaa.com/foo/bar?baz=123#qwe .
@@ -130,8 +149,12 @@ func (x *URI) Reset() {
 	x.queryArgs.Reset()
 	x.parsedQueryArgs = false
 
-	x.fullURI = x.fullURI[:0]
-	x.requestURI = x.requestURI[:0]
+	// There is no need in x.fullURI = x.fullURI[:0], since full uri
+	// is calucalted on each call to FullURI().
+
+	// There is no need in x.requestURI = x.requestURI[:0], since requestURI
+	// is calculated on each call to RequestURI().
+
 	x.h = nil
 }
 
@@ -145,6 +168,18 @@ func (x *URI) Host() []byte {
 		x.h = nil
 	}
 	return x.host
+}
+
+// SetHost sets host for the uri.
+func (x *URI) SetHost(host string) {
+	x.host = AppendBytesStr(x.host[:0], host)
+	lowercaseBytes(x.host)
+}
+
+// SetHostBytes sets host for the uri.
+func (x *URI) SetHostBytes(host []byte) {
+	x.host = append(x.host[:0], host...)
+	lowercaseBytes(x.host)
 }
 
 // Parse initializes URI from the given host and uri.
@@ -258,6 +293,73 @@ func (x *URI) RequestURI() []byte {
 	return x.requestURI
 }
 
+// Update updates uri.
+//
+// The following newURI types are accepted:
+//
+//     * Absolute, i.e. http://foobar.com/aaa/bb?cc . In this case the original
+//       uri is replaced by newURI.
+//     * Missing host, i.e. /aaa/bb?cc . In this case only RequestURI part
+//       of the original uri is replaced.
+//     * Relative path, i.e.  xx?yy=abc . In this case the original RequestURI
+//       is updated according to the new relative path.
+func (x *URI) Update(newURI string) {
+	x.fullURI = AppendBytesStr(x.fullURI[:0], newURI)
+	x.UpdateBytes(x.fullURI)
+}
+
+// UpdateBytes updates uri.
+//
+// The following newURI types are accepted:
+//
+//     * Absolute, i.e. http://foobar.com/aaa/bb?cc . In this case the original
+//       uri is replaced by newURI.
+//     * Missing host, i.e. /aaa/bb?cc . In this case only RequestURI part
+//       of the original uri is replaced.
+//     * Relative path, i.e.  xx?yy=abc . In this case the original RequestURI
+//       is updated according to the new relative path.
+func (x *URI) UpdateBytes(newURI []byte) {
+	x.requestURI = x.updateBytes(newURI, x.requestURI)
+}
+
+func (x *URI) updateBytes(newURI, buf []byte) []byte {
+	if len(newURI) == 0 {
+		return buf
+	}
+	if newURI[0] == '/' {
+		// uri without host
+		buf = x.appendSchemeHost(buf[:0])
+		buf = append(buf, newURI...)
+		x.Parse(nil, buf)
+		return buf
+	}
+
+	n := bytes.Index(newURI, strColonSlashSlash)
+	if n >= 0 {
+		// absolute uri
+		x.Parse(nil, newURI)
+		return buf
+	}
+
+	// relative path
+	if newURI[0] == '?' {
+		// query string only update
+		x.SetQueryStringBytes(newURI[1:])
+		return buf
+	}
+
+	path := x.Path()
+	n = bytes.LastIndexByte(path, '/')
+	if n < 0 {
+		panic("BUG: path must contain at least one slash")
+	}
+	buf = x.appendSchemeHost(buf[:0])
+	buf = appendQuotedArg(buf, path[:n+1])
+	buf = append(buf, newURI...)
+	x.Parse(nil, buf)
+	return buf
+}
+
 // FullURI returns full uri in the form {Scheme}://{Host}{RequestURI}#{Hash}.
 func (x *URI) FullURI() []byte {
 	x.fullURI = x.AppendBytes(x.fullURI[:0])
@@ -267,11 +369,14 @@ func (x *URI) FullURI() []byte {
 // AppendBytes appends full uri to dst and returns dst
 // (which may be newly allocated).
 func (x *URI) AppendBytes(dst []byte) []byte {
+	dst = x.appendSchemeHost(dst)
+	return append(dst, x.RequestURI()...)
+}
+
+func (x *URI) appendSchemeHost(dst []byte) []byte {
 	dst = append(dst, x.Scheme()...)
 	dst = append(dst, strColonSlashSlash...)
-	dst = append(dst, x.Host()...)
-	lowercaseBytes(dst)
-	return append(dst, x.RequestURI()...)
+	return append(dst, x.Host()...)
 }
 
 // WriteTo writes full uri to w.

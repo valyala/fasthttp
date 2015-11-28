@@ -5,6 +5,32 @@ import (
 	"testing"
 )
 
+func TestURIUpdate(t *testing.T) {
+	// full uri
+	testURIUpdate(t, "http://foo.bar/baz?aaa=22#aaa", "https://aa.com/bb", "https://aa.com/bb")
+
+	// empty uri
+	testURIUpdate(t, "http://aaa.com/aaa.html?234=234#add", "", "http://aaa.com/aaa.html?234=234#add")
+
+	// request uri
+	testURIUpdate(t, "ftp://aaa/xxx/yyy?aaa=bb#aa", "/boo/bar?xx", "ftp://aaa/boo/bar?xx")
+
+	// relative uri
+	testURIUpdate(t, "http://foo.bar/baz/xxx.html?aaa=22#aaa", "bb.html?xx=12#pp", "http://foo.bar/baz/bb.html?xx=12#pp")
+	testURIUpdate(t, "http://xx/a/b/c/d", "../qwe/p?zx=34", "http://xx/a/b/qwe/p?zx=34")
+	testURIUpdate(t, "https://qqq/aaa.html?foo=bar", "?baz=434&aaa", "https://qqq/aaa.html?baz=434&aaa")
+}
+
+func testURIUpdate(t *testing.T, base, update, result string) {
+	var u URI
+	u.Parse(nil, []byte(base))
+	u.Update(update)
+	s := u.String()
+	if s != result {
+		t.Fatalf("unexpected result %q. Expecting %q. base=%q, update=%q", s, result, base, update)
+	}
+}
+
 func TestURIPathNormalize(t *testing.T) {
 	var u URI
 
@@ -88,7 +114,7 @@ func testURIFullURI(t *testing.T, scheme, host, path, hash string, args *Args, e
 	var u URI
 
 	u.SetScheme(scheme)
-	u.host = []byte(host)
+	u.SetHost(host)
 	u.SetPath(path)
 	u.SetHash(hash)
 	args.CopyTo(u.QueryArgs())
