@@ -141,11 +141,6 @@ type Client struct {
 	// By default response body size is unlimited.
 	MaxResponseBodySize int
 
-	// Logger is used for error logging.
-	//
-	// Default logger from log package is used if not set.
-	Logger Logger
-
 	mLock sync.Mutex
 	m     map[string]*HostClient
 	ms    map[string]*HostClient
@@ -251,7 +246,6 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			ReadTimeout:         c.ReadTimeout,
 			WriteTimeout:        c.WriteTimeout,
 			MaxResponseBodySize: c.MaxResponseBodySize,
-			Logger:              c.Logger,
 		}
 		if isTLS {
 			hc.IsTLS = true
@@ -381,11 +375,6 @@ type HostClient struct {
 	//
 	// By default response body size is unlimited.
 	MaxResponseBodySize int
-
-	// Logger is used for error logging.
-	//
-	// Default logger from log package is used if not set.
-	Logger Logger
 
 	clientName  atomic.Value
 	lastUseTime uint64
