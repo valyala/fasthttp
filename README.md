@@ -81,8 +81,8 @@ BenchmarkServerGet10KReqPerConn1KClients-4       	 5000000	       359 ns/op	    
 
 # Fasthttp best practicies
 
-* Do not allocate objects and buffers - just reuse them as much as possible.
-  Fasthttp API design encourages this.
+* Do not allocate objects and `[]byte` buffers - just reuse them as much
+  as possible. Fasthttp API design encourages this.
 * [sync.Pool](https://golang.org/pkg/sync/#Pool) is your best friend.
 * [Profile your program](http://blog.golang.org/profiling-go-programs)
   in production.
