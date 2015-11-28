@@ -1,8 +1,27 @@
 package fasthttp
 
 import (
+	"bufio"
+	"bytes"
 	"testing"
 )
+
+func BenchmarkWriteHexInt(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		var w bytes.Buffer
+		bw := bufio.NewWriter(&w)
+		i := 0
+		for pb.Next() {
+			writeHexInt(bw, i)
+			i++
+			if i > 0x7fffffff {
+				i = 0
+			}
+			w.Reset()
+			bw.Reset(&w)
+		}
+	})
+}
 
 func BenchmarkAppendUint(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
