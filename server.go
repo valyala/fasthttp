@@ -219,9 +219,13 @@ func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) Request
 // before return.
 type RequestCtx struct {
 	// Incoming request.
+	//
+	// Copying Request by value is forbidden. Use pointer to Request instead.
 	Request Request
 
 	// Outgoing response.
+	//
+	// Copying Response by value is forbidden. Use pointer to Response instead.
 	Response Response
 
 	id uint64

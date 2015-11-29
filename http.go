@@ -16,6 +16,8 @@ import (
 // and use CopyTo() instead.
 type Request struct {
 	// Request header
+	//
+	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header RequestHeader
 
 	body []byte
@@ -36,6 +38,8 @@ type Request struct {
 // and use CopyTo() instead.
 type Response struct {
 	// Response header
+	//
+	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header ResponseHeader
 
 	body []byte
