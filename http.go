@@ -157,12 +157,13 @@ func (req *Request) CopyTo(dst *Request) {
 	dst.Reset()
 	req.Header.CopyTo(&dst.Header)
 	dst.body = append(dst.body[:0], req.body...)
-	if req.parsedURI {
-		dst.parseURI()
-	}
-	if req.parsedPostArgs {
-		dst.parsePostArgs()
-	}
+
+	req.uri.CopyTo(&dst.uri)
+	dst.parsedURI = req.parsedURI
+
+	req.postArgs.CopyTo(&dst.postArgs)
+	dst.parsedPostArgs = req.parsedPostArgs
+
 	// do not copy multipartForm - it will be automatically
 	// re-created on the first call to MultipartForm.
 }
