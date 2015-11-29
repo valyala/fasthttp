@@ -10,6 +10,92 @@ import (
 	"testing"
 )
 
+func TestRequestMultipartFormBoundary(t *testing.T) {
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar\r\n\r\n", "foobar")
+
+	// incorrect content-type
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: foo/bar\r\n\r\n", "")
+
+	// empty boundary
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\r\n\r\n", "")
+
+	// missing boundary
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data\r\n\r\n", "")
+
+	// boundary after other content-type params
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data;   foo=bar;   boundary=--aaabb  \r\n\r\n", "--aaabb")
+}
+
+func testRequestMultipartFormBoundary(t *testing.T, s, boundary string) {
+	var h RequestHeader
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s. s=%q, boundary=%q", err, s, boundary)
+	}
+
+	b := h.MultipartFormBoundary()
+	if string(b) != boundary {
+		t.Fatalf("unexpected boundary %q. Expecting %q. s=%q", b, boundary, s)
+	}
+}
+
+func TestResponseHeaderConnectionUpgrade(t *testing.T) {
+	var h ResponseHeader
+
+	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nConnection: Upgrade, HTTP2-Settings\r\n\r\n")
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !h.ConnectionUpgrade() {
+		t.Fatalf("missing connection: upgrade")
+	}
+	if string(h.Peek("Connection")) != "Upgrade, HTTP2-Settings" {
+		t.Fatalf("Unexpected Connection %q. Expecting %q", h.Peek("Connection"), "Upgrade, HTTP2-Settings")
+	}
+
+	r = bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n")
+	br = bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if h.ConnectionUpgrade() {
+		t.Fatalf("unexpected connection: upgrade")
+	}
+	if string(h.Peek("Connection")) != "" {
+		t.Fatalf("unexpected Connection header: %q", h.Peek("Connection"))
+	}
+}
+
+func TestRequestHeaderConnectionUpgrade(t *testing.T) {
+	var h RequestHeader
+
+	r := bytes.NewBufferString("GET /foobar HTTP/1.1\r\nConnection: Upgrade, HTTP2-Settings\r\nHost: foobar.com\r\n\r\n")
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !h.ConnectionUpgrade() {
+		t.Fatalf("missing connection: upgrade")
+	}
+	if string(h.Peek("Connection")) != "Upgrade, HTTP2-Settings" {
+		t.Fatalf("Unexpected Connection %q. Expecting %q", h.Peek("Connection"), "Upgrade, HTTP2-Settings")
+	}
+
+	r = bytes.NewBufferString("GET /foobar HTTP/1.1\r\nHost: foobar.com\r\n\r\n")
+	br = bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if h.ConnectionUpgrade() {
+		t.Fatalf("unexpected connection: upgrade")
+	}
+	if string(h.Peek("Connection")) != "" {
+		t.Fatalf("unexpected Connection header: %q", h.Peek("Connection"))
+	}
+}
+
 func TestRequestHeaderProxyWithCookie(t *testing.T) {
 	// Proxy request header (read it, then write it without touching any headers).
 	var h RequestHeader

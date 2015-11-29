@@ -6,6 +6,7 @@ Fasthttp provides the following features:
     * Optimized for speed. Easily handles more than 100K qps and more than 1M
       concurrent keep-alive connections on modern hardware.
     * Optimized for low memory usage.
+    * Easy 'Connection: Upgrade' support via RequestCtx.Hijack.
     * Server supports requests' pipelining. Multiple requests may be read from
       a single network packet and multiple responses may be sent in a single
       network packet. This may be useful for highly loaded REST services.
@@ -17,6 +18,7 @@ Fasthttp provides the following features:
         * Request read timeout.
         * Response write timeout.
         * Maximum request header size.
+        * Maximum request body size.
         * Maximum request execution time.
         * Maximum keep-alive connection lifetime.
 

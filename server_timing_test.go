@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -118,12 +119,9 @@ func BenchmarkServerHijack(b *testing.B) {
 	responseBody := []byte("123")
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			ctx.Hijack(func(c io.ReadWriter) {
+			ctx.Hijack(func(c net.Conn) {
 				// emulate server loop :)
-				conn := &fakeNetConn{
-					c: c,
-				}
-				err := ServeConn(conn, func(ctx *RequestCtx) {
+				err := ServeConn(c, func(ctx *RequestCtx) {
 					ctx.Success("foobar", responseBody)
 					registerServedRequest(b, ch)
 				})
@@ -139,23 +137,6 @@ func BenchmarkServerHijack(b *testing.B) {
 	req := "GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n"
 	benchmarkServer(b, s, clientsCount, requestsPerConn, req)
 	verifyRequestsServed(b, ch)
-}
-
-type fakeNetConn struct {
-	net.Conn
-	c io.ReadWriter
-}
-
-func (c *fakeNetConn) Read(p []byte) (int, error) {
-	return c.c.Read(p)
-}
-
-func (c *fakeNetConn) Write(p []byte) (int, error) {
-	return c.c.Write(p)
-}
-
-func (c *fakeNetConn) Close() error {
-	return nil
 }
 
 func BenchmarkServerMaxConnsPerIP(b *testing.B) {
@@ -177,8 +158,8 @@ func BenchmarkServerMaxConnsPerIP(b *testing.B) {
 }
 
 func BenchmarkServerTimeoutError(b *testing.B) {
-	clientsCount := 1
-	requestsPerConn := 10
+	clientsCount := 10
+	requestsPerConn := 1
 	ch := make(chan struct{}, b.N)
 	n := uint32(0)
 	responseBody := []byte("123")
@@ -260,19 +241,28 @@ func (c *fakeServerConn) SetWriteDeadline(t time.Time) error {
 }
 
 type fakeListener struct {
+	lock            sync.Mutex
 	requestsCount   int
 	requestsPerConn int
 	request         []byte
 	ch              chan *fakeServerConn
 	done            chan struct{}
+	closed          bool
 }
 
 func (ln *fakeListener) Accept() (net.Conn, error) {
+	ln.lock.Lock()
 	if ln.requestsCount == 0 {
+		ln.lock.Unlock()
 		for len(ln.ch) < cap(ln.ch) {
 			time.Sleep(10 * time.Millisecond)
 		}
-		close(ln.done)
+		ln.lock.Lock()
+		if !ln.closed {
+			close(ln.done)
+			ln.closed = true
+		}
+		ln.lock.Unlock()
 		return nil, io.EOF
 	}
 	requestsCount := ln.requestsPerConn
@@ -280,6 +270,7 @@ func (ln *fakeListener) Accept() (net.Conn, error) {
 		requestsCount = ln.requestsCount
 	}
 	ln.requestsCount -= requestsCount
+	ln.lock.Unlock()
 
 	c := <-ln.ch
 	c.requestsCount = requestsCount

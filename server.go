@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net"
 	"os"
 	"runtime/debug"
@@ -82,6 +83,9 @@ type RequestHandler func(ctx *RequestCtx)
 
 // Server implements HTTP server.
 //
+// Default Server settings should satisfy the majority of Server users.
+// Adjust Server settings only if you really understand the consequences.
+//
 // It is forbidden copying Server instances. Create new Server instances
 // instead.
 type Server struct {
@@ -141,6 +145,14 @@ type Server struct {
 	// By default keep-alive connection lifetime is unlimited.
 	MaxKeepaliveDuration time.Duration
 
+	// Maximum request body size.
+	//
+	// The server closes incoming connection if this limit is greater than 0
+	// and the request body size exceeds the limit.
+	//
+	// By default request body size is unlimited.
+	MaxRequestBodySize int
+
 	// Aggressively reduces memory usage at the cost of higher CPU usage
 	// if set to true.
 	//
@@ -160,9 +172,11 @@ type Server struct {
 	perIPConnCounter perIPConnCounter
 	serverName       atomic.Value
 
-	ctxPool    sync.Pool
-	readerPool sync.Pool
-	writerPool sync.Pool
+	ctxPool        sync.Pool
+	readerPool     sync.Pool
+	writerPool     sync.Pool
+	hijackConnPool sync.Pool
+	bytePool       sync.Pool
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -234,20 +248,23 @@ type RequestCtx struct {
 }
 
 // HijackHandler must process the hijacked connection c.
-type HijackHandler func(c io.ReadWriter)
+//
+// The connection c is automatically closed after returning from HijackHandler.
+type HijackHandler func(c net.Conn)
 
 // Hijack registers the given handler for connection hijacking.
 //
 // The handler is called after returning from RequestHandler
 // and sending http response. The current connection is passed
-// to the handler.
+// to the handler. The connection is automatically closed after
+// returning from the handler.
 //
 // The server skips calling the handler in the following cases:
 //
 //     * 'Connection: close' header exists in either request or response.
-//     * Unexpected error during writing response to the connection.
+//     * Unexpected error during response writing to the connection.
 //
-// The server no longer processes requests from hijacked connections.
+// The server stops processing requests from hijacked connections.
 // Server limits such as Concurrency, ReadTimeout, WriteTimeout, etc.
 // aren't applied to hijacked connections.
 //
@@ -261,6 +278,14 @@ type HijackHandler func(c io.ReadWriter)
 //
 func (ctx *RequestCtx) Hijack(handler HijackHandler) {
 	ctx.hijackHandler = handler
+}
+
+// IsTLS returns true if the underlying connection is tls.Conn.
+//
+// tls.Conn is an encrypted connection (aka SSL, HTTPS).
+func (ctx *RequestCtx) IsTLS() bool {
+	_, ok := ctx.c.(*tls.Conn)
+	return ok
 }
 
 type firstByteReader struct {
@@ -299,11 +324,11 @@ type ctxLogger struct {
 
 func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	ctxLoggerLock.Lock()
-	s := fmt.Sprintf(format, args...)
+	msg := fmt.Sprintf(format, args...)
 	ctx := cl.ctx
 	req := &ctx.Request
 	cl.logger.Printf("%.3f #%016X - %s<->%s - %s %s - %s",
-		time.Since(ctx.Time()).Seconds(), ctx.ID(), ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method(), ctx.URI().FullURI(), s)
+		time.Since(ctx.Time()).Seconds(), ctx.ID(), ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method(), ctx.URI().FullURI(), msg)
 	ctxLoggerLock.Unlock()
 }
 
@@ -409,6 +434,20 @@ func (ctx *RequestCtx) PostArgs() *Args {
 	return ctx.Request.PostArgs()
 }
 
+// MultipartForm returns requests's multipart form.
+//
+// Returns ErrNoMultipartForm if request's content-type
+// isn't 'multipart/form-data'.
+//
+// All uploaded temporary files are automatically deleted after
+// returning from RequestHandler. Either move or copy uploaded files
+// into new place if you want retaining them.
+//
+// Returned form is valid until returning from RequestHandler.
+func (ctx *RequestCtx) MultipartForm() (*multipart.Form, error) {
+	return ctx.Request.MultipartForm()
+}
+
 // IsGet returns true if request method is GET.
 func (ctx *RequestCtx) IsGet() bool {
 	return ctx.Request.Header.IsGet()
@@ -478,6 +517,57 @@ func (ctx *RequestCtx) Error(msg string, statusCode int) {
 func (ctx *RequestCtx) Success(contentType string, body []byte) {
 	ctx.SetContentType(contentType)
 	ctx.SetBody(body)
+}
+
+// Redirect sets 'Location: uri' response header and sets the given statusCode.
+//
+// statusCode must have one of the following values:
+//
+//    * StatusMovedPermanently (301)
+//    * StatusFound (302)
+//    * StatusSeeOther (303)
+//
+// All other statusCode values are replaced by StatusFound (302).
+//
+// The redirect uri may be either absolute or relative to the current
+// request uri.
+func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
+	var u URI
+	ctx.URI().CopyTo(&u)
+	u.Update(uri)
+	ctx.redirect(u.FullURI(), statusCode)
+}
+
+// Redirect sets 'Location: uri' response header and sets the given statusCode.
+//
+// statusCode must have one of the following values:
+//
+//    * StatusMovedPermanently (301)
+//    * StatusFound (302)
+//    * StatusSeeOther (303)
+//
+// All other statusCode values are replaced by StatusFound (302).
+//
+// The redirect uri may be either absolute or relative to the current
+// request uri.
+func (ctx *RequestCtx) RedirectBytes(uri []byte, statusCode int) {
+	var u URI
+	ctx.URI().CopyTo(&u)
+	u.UpdateBytes(uri)
+	ctx.redirect(u.FullURI(), statusCode)
+}
+
+func (ctx *RequestCtx) redirect(uri []byte, statusCode int) {
+	ctx.Response.Header.SetCanonical(strLocation, uri)
+	statusCode = getRedirectStatusCode(statusCode)
+	ctx.Response.SetStatusCode(statusCode)
+}
+
+func getRedirectStatusCode(statusCode int) int {
+	if statusCode == StatusMovedPermanently || statusCode == StatusFound || statusCode == StatusSeeOther {
+		return statusCode
+	}
+	return StatusFound
 }
 
 // SetBody sets response body to the given value.
@@ -770,7 +860,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			if br == nil {
 				br = acquireReader(ctx)
 			}
-			err = ctx.Request.Read(br)
+			err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize)
 			if br.Buffered() == 0 || err != nil {
 				releaseReader(s, br)
 				br = nil
@@ -778,7 +868,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		} else {
 			br, err = acquireByteReader(&ctx)
 			if err == nil {
-				err = ctx.Request.Read(br)
+				err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize)
 				if br.Buffered() == 0 || err != nil {
 					releaseReader(s, br)
 					br = nil
@@ -801,10 +891,18 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.time = currentTime
 		ctx.Response.Reset()
 		s.Handler(ctx)
+
+		// Remove temporary files, which may be uploaded during the request.
+		ctx.Request.RemoveMultipartFormFiles()
+
 		errMsg = ctx.timeoutErrMsg
 		if len(errMsg) > 0 {
 			ctx = s.acquireCtx(c)
 			ctx.Error(errMsg, StatusRequestTimeout)
+			if br != nil {
+				// Close connection, since br may be attached to the old ctx via ctx.fbr.
+				ctx.SetConnectionClose()
+			}
 		}
 		if s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn) {
 			ctx.SetConnectionClose()
@@ -849,8 +947,15 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 
 		if ctx.hijackHandler != nil {
-			if br == nil {
-				br = acquireReader(ctx)
+			h := ctx.hijackHandler
+			var hjr io.Reader
+			hjr = c
+			if br != nil {
+				hjr = br
+				br = nil
+
+				// br may point to ctx.fbr, so do not return ctx into pool.
+				ctx = s.acquireCtx(c)
 			}
 			if bw != nil {
 				err = bw.Flush()
@@ -862,8 +967,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 			c.SetReadDeadline(zeroTime)
 			c.SetWriteDeadline(zeroTime)
-			go hijackConnHandler(br, c, ctx.s, ctx.hijackHandler)
-			br = nil
+			go hijackConnHandler(hjr, c, s, h)
 			err = errHijacked
 			break
 		}
@@ -881,43 +985,49 @@ func (s *Server) serveConn(c net.Conn) error {
 	return err
 }
 
-func hijackConnHandler(br *bufio.Reader, c net.Conn, s *Server, h HijackHandler) {
+func hijackConnHandler(r io.Reader, c net.Conn, s *Server, h HijackHandler) {
+	hjc := s.acquireHijackConn(r, c)
+
 	defer func() {
 		if r := recover(); r != nil {
 			s.logger().Printf("panic on hijacked conn: %s\nStack trace:\n%s", r, debug.Stack())
 		}
+
+		if br, ok := r.(*bufio.Reader); ok {
+			releaseReader(s, br)
+		}
+		c.Close()
+		s.releaseHijackConn(hjc)
 	}()
 
-	hjc := acquireHijackConn(br, c)
 	h(hjc)
-	releaseReader(s, br)
-	c.Close()
-	releaseHijackConn(hjc)
 }
 
-func acquireHijackConn(br *bufio.Reader, c net.Conn) *hijackConn {
-	v := hijackConnPool.Get()
+func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
+	v := s.hijackConnPool.Get()
 	if v == nil {
-		v = &hijackConn{}
+		hjc := &hijackConn{
+			Conn: c,
+			r:    r,
+		}
+		hjc.v = hjc
+		return hjc
 	}
 	hjc := v.(*hijackConn)
-	hjc.r = br
-	hjc.c = c
-	hjc.v = v
+	hjc.Conn = c
+	hjc.r = r
 	return hjc
 }
 
-func releaseHijackConn(hjc *hijackConn) {
+func (s *Server) releaseHijackConn(hjc *hijackConn) {
+	hjc.Conn = nil
 	hjc.r = nil
-	hjc.c = nil
-	hijackConnPool.Put(hjc.v)
+	s.hijackConnPool.Put(hjc.v)
 }
 
-var hijackConnPool sync.Pool
-
 type hijackConn struct {
-	r *bufio.Reader
-	c net.Conn
+	net.Conn
+	r io.Reader
 	v interface{}
 }
 
@@ -925,8 +1035,9 @@ func (c hijackConn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-func (c hijackConn) Write(p []byte) (int, error) {
-	return c.c.Write(p)
+func (c hijackConn) Close() error {
+	// hijacked conn is closed in hijackConnHandler.
+	return nil
 }
 
 // TimeoutErrMsg returns last error message set via TimeoutError call.
@@ -957,8 +1068,6 @@ const (
 	defaultWriteBufferSize = 4096
 )
 
-var bytePool sync.Pool
-
 func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
 	ctx := *ctxP
 	s := ctx.s
@@ -971,14 +1080,14 @@ func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
 	ctx = nil
 	*ctxP = nil
 
-	v := bytePool.Get()
+	v := s.bytePool.Get()
 	if v == nil {
 		v = make([]byte, 1)
 	}
 	b := v.([]byte)
 	n, err := c.Read(b)
 	ch := b[0]
-	bytePool.Put(v)
+	s.bytePool.Put(v)
 	ctx = s.acquireCtx(c)
 	ctx.time = t
 	*ctxP = ctx
@@ -1035,21 +1144,20 @@ func releaseWriter(s *Server, w *bufio.Writer) {
 	s.writerPool.Put(w)
 }
 
-var globalCtxID uint64
-
 func (s *Server) acquireCtx(c net.Conn) *RequestCtx {
 	v := s.ctxPool.Get()
 	var ctx *RequestCtx
 	if v == nil {
 		ctx = &RequestCtx{
 			s: s,
+			c: c,
 		}
+		ctx.initID()
 		ctx.v = ctx
-		v = ctx
-	} else {
-		ctx = v.(*RequestCtx)
+		return ctx
 	}
-	ctx.initID()
+
+	ctx = v.(*RequestCtx)
 	ctx.c = c
 	return ctx
 }
@@ -1104,6 +1212,8 @@ func (fa *fakeAddrer) Write(p []byte) (int, error) {
 func (fa *fakeAddrer) Close() error {
 	panic("BUG: unexpected Close call")
 }
+
+var globalCtxID uint64
 
 func (ctx *RequestCtx) initID() {
 	ctx.id = (atomic.AddUint64(&globalCtxID, 1)) << 32

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"sync"
 )
 
@@ -25,6 +26,8 @@ type Request struct {
 
 	postArgs       Args
 	parsedPostArgs bool
+
+	multipartForm *multipart.Form
 }
 
 // Response represents HTTP response.
@@ -160,6 +163,8 @@ func (req *Request) CopyTo(dst *Request) {
 	if req.parsedPostArgs {
 		dst.parsePostArgs()
 	}
+	// do not copy multipartForm - it will be automatically
+	// re-created on the first call to MultipartForm.
 }
 
 // CopyTo copies resp contents to dst except of BodyStream.
@@ -207,6 +212,47 @@ func (req *Request) parsePostArgs() {
 	return
 }
 
+// ErrNoMultipartForm means that the request's Content-Type
+// isn't 'multipart/form-data'.
+var ErrNoMultipartForm = errors.New("request has no multipart/form-data Content-Type")
+
+// MultipartForm returns requests's multipart form.
+//
+// Returns ErrNoMultipartForm if request's content-type
+// isn't 'multipart/form-data'.
+func (req *Request) MultipartForm() (*multipart.Form, error) {
+	if req.multipartForm != nil {
+		return req.multipartForm, nil
+	}
+
+	boundary := req.Header.MultipartFormBoundary()
+	if len(boundary) == 0 {
+		return nil, ErrNoMultipartForm
+	}
+	f, err := readMultipartFormBody(bytes.NewReader(req.body), boundary, 0, len(req.body))
+	if err != nil {
+		return nil, err
+	}
+	req.multipartForm = f
+	return f, nil
+}
+
+func readMultipartFormBody(r io.Reader, boundary []byte, maxBodySize, maxInMemoryFileSize int) (*multipart.Form, error) {
+	// Do not care about memory allocations here, since they are tiny
+	// compared to multipart data (aka multi-MB files) usually sent
+	// in multipart/form-data requests.
+
+	if maxBodySize > 0 {
+		r = io.LimitReader(r, int64(maxBodySize))
+	}
+	mr := multipart.NewReader(r, string(boundary))
+	f, err := mr.ReadForm(int64(maxInMemoryFileSize))
+	if err != nil {
+		return nil, fmt.Errorf("cannot read multipart/form-data body: %s", err)
+	}
+	return f, nil
+}
+
 // Reset clears request contents.
 func (req *Request) Reset() {
 	req.Header.Reset()
@@ -219,6 +265,18 @@ func (req *Request) clearSkipHeader() {
 	req.parsedURI = false
 	req.postArgs.Reset()
 	req.parsedPostArgs = false
+	req.RemoveMultipartFormFiles()
+}
+
+// RemoveMultipartFormFiles removes multipart/form-data temporary files
+// associated with the request.
+func (req *Request) RemoveMultipartFormFiles() {
+	if req.multipartForm != nil {
+		// Do not check for error, since these files may be deleted or moved
+		// to new places by user code.
+		req.multipartForm.RemoveAll()
+		req.multipartForm = nil
+	}
 }
 
 // Reset clears response contents.
@@ -233,7 +291,25 @@ func (resp *Response) clearSkipHeader() {
 }
 
 // Read reads request (including body) from the given r.
+//
+// RemoveMultipartFormFiles or Reset must be called after
+// reading multipart/form-data request in order to delete temporarily
+// uploaded files.
 func (req *Request) Read(r *bufio.Reader) error {
+	return req.ReadLimitBody(r, 0)
+}
+
+const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
+
+// ReadLimitBody reads request from the given r, limiting the body size.
+//
+// If maxBodySize > 0 and the body size exceeds maxBodySize,
+// then ErrBodyTooLarge is returned.
+//
+// RemoveMultipartFormFiles or Reset must be called after
+// reading multipart/form-data request in order to delete temporarily
+// uploaded files.
+func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	req.clearSkipHeader()
 	err := req.Header.Read(r)
 	if err != nil {
@@ -241,7 +317,22 @@ func (req *Request) Read(r *bufio.Reader) error {
 	}
 
 	if req.Header.IsPost() {
-		req.body, err = readBody(r, req.Header.ContentLength(), req.body)
+		contentLength := req.Header.ContentLength()
+		if contentLength > 0 {
+			// Pre-read multipart form data of known length.
+			// This way we limit memory usage for large file uploads, since their contents
+			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
+			boundary := req.Header.MultipartFormBoundary()
+			if len(boundary) > 0 {
+				req.multipartForm, err = readMultipartFormBody(r, boundary, maxBodySize, defaultMaxInMemoryFileSize)
+				if err != nil {
+					req.Reset()
+				}
+				return err
+			}
+		}
+
+		req.body, err = readBody(r, contentLength, maxBodySize, req.body)
 		if err != nil {
 			req.Reset()
 			return err
@@ -253,6 +344,14 @@ func (req *Request) Read(r *bufio.Reader) error {
 
 // Read reads response (including body) from the given r.
 func (resp *Response) Read(r *bufio.Reader) error {
+	return resp.ReadLimitBody(r, 0)
+}
+
+// ReadLimitBody reads response from the given r, limiting the body size.
+//
+// If maxBodySize > 0 and the body size exceeds maxBodySize,
+// then ErrBodyTooLarge is returned.
+func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	resp.clearSkipHeader()
 	err := resp.Header.Read(r)
 	if err != nil {
@@ -260,7 +359,7 @@ func (resp *Response) Read(r *bufio.Reader) error {
 	}
 
 	if !isSkipResponseBody(resp.Header.StatusCode()) && !resp.SkipBody {
-		resp.body, err = readBody(r, resp.Header.ContentLength(), resp.body)
+		resp.body, err = readBody(r, resp.Header.ContentLength(), maxBodySize, resp.body)
 		if err != nil {
 			resp.Reset()
 			return err
@@ -449,18 +548,25 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 
 var copyBufPool sync.Pool
 
-func readBody(r *bufio.Reader, contentLength int, dst []byte) ([]byte, error) {
+// ErrBodyTooLarge is returned if either request or response body exceeds
+// the given limit.
+var ErrBodyTooLarge = errors.New("body size exceeds the given limit")
+
+func readBody(r *bufio.Reader, contentLength int, maxBodySize int, dst []byte) ([]byte, error) {
 	dst = dst[:0]
 	if contentLength >= 0 {
+		if maxBodySize > 0 && contentLength > maxBodySize {
+			return dst, ErrBodyTooLarge
+		}
 		return appendBodyFixedSize(r, dst, contentLength)
 	}
 	if contentLength == -1 {
-		return readBodyChunked(r, dst)
+		return readBodyChunked(r, maxBodySize, dst)
 	}
-	return readBodyIdentity(r, dst)
+	return readBodyIdentity(r, maxBodySize, dst)
 }
 
-func readBodyIdentity(r *bufio.Reader, dst []byte) ([]byte, error) {
+func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
 	dst = dst[:cap(dst)]
 	if len(dst) == 0 {
 		dst = make([]byte, 1024)
@@ -478,8 +584,15 @@ func readBodyIdentity(r *bufio.Reader, dst []byte) ([]byte, error) {
 			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
 		}
 		offset += nn
+		if maxBodySize > 0 && offset > maxBodySize {
+			return dst[:offset], ErrBodyTooLarge
+		}
 		if len(dst) == offset {
-			b := make([]byte, round2(2*offset))
+			n := round2(2 * offset)
+			if maxBodySize > 0 && n > maxBodySize {
+				n = maxBodySize + 1
+			}
+			b := make([]byte, n)
 			copy(b, dst)
 			dst = b
 		}
@@ -518,7 +631,7 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	}
 }
 
-func readBodyChunked(r *bufio.Reader, dst []byte) ([]byte, error) {
+func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
 	if len(dst) > 0 {
 		panic("BUG: expected zero-length buffer")
 	}
@@ -528,6 +641,9 @@ func readBodyChunked(r *bufio.Reader, dst []byte) ([]byte, error) {
 		chunkSize, err := parseChunkSize(r)
 		if err != nil {
 			return dst, err
+		}
+		if maxBodySize > 0 && len(dst)+chunkSize > maxBodySize {
+			return dst, ErrBodyTooLarge
 		}
 		dst, err = appendBodyFixedSize(r, dst, chunkSize+strCRLFLen)
 		if err != nil {

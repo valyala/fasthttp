@@ -1,8 +1,8 @@
 package fasthttp
 
 var (
-	defaultServerName  = []byte("fasthttp server")
-	defaultUserAgent   = []byte("fasthttp client")
+	defaultServerName  = []byte("fasthttp")
+	defaultUserAgent   = []byte("fasthttp")
 	defaultContentType = []byte("text/plain")
 )
 
@@ -33,13 +33,17 @@ var (
 	strUserAgent        = []byte("User-Agent")
 	strCookie           = []byte("Cookie")
 	strSetCookie        = []byte("Set-Cookie")
+	strLocation         = []byte("Location")
 
 	strCookieExpires = []byte("expires")
 	strCookieDomain  = []byte("domain")
 	strCookiePath    = []byte("path")
 
 	strClose               = []byte("close")
+	strUpgrade             = []byte("Upgrade")
 	strChunked             = []byte("chunked")
 	strIdentity            = []byte("identity")
 	strPostArgsContentType = []byte("application/x-www-form-urlencoded")
+	strMultipartFormData   = []byte("multipart/form-data")
+	strBoundary            = []byte("boundary")
 )

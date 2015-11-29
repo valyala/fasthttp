@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"net"
+	"runtime"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -98,6 +99,20 @@ func (wp *workerPool) Serve(c net.Conn) bool {
 	return true
 }
 
+var workerChanCap = func() int {
+	// Use blocking workerChan if GOMAXPROCS=1.
+	// This immediately switches Serve to WorkerFunc, which results
+	// in higher performance (under go1.5 at least).
+	if runtime.GOMAXPROCS(0) == 1 {
+		return 0
+	}
+
+	// Use non-blocking workerChan if GOMAXPROCS>1,
+	// since otherwise the Serve caller (Acceptor) may lag accepting
+	// new connections if WorkerFunc is CPU-bound.
+	return 1
+}()
+
 func (wp *workerPool) getCh() *workerChan {
 	var ch *workerChan
 	createWorker := false
@@ -123,7 +138,7 @@ func (wp *workerPool) getCh() *workerChan {
 		vch := workerChanPool.Get()
 		if vch == nil {
 			vch = &workerChan{
-				ch: make(chan net.Conn, 1),
+				ch: make(chan net.Conn, workerChanCap),
 			}
 		}
 		ch = vch.(*workerChan)
@@ -150,14 +165,20 @@ func (wp *workerPool) release(ch *workerChan) bool {
 var workerChanPool sync.Pool
 
 func (wp *workerPool) workerFunc(ch *workerChan) {
+	var c net.Conn
+	var err error
+
 	defer func() {
 		if r := recover(); r != nil {
 			wp.Logger.Printf("panic: %s\nStack trace:\n%s", r, debug.Stack())
 		}
+
+		if c != nil {
+			c.Close()
+			wp.release(ch)
+		}
 	}()
 
-	var c net.Conn
-	var err error
 	for c = range ch.ch {
 		if c == nil {
 			break

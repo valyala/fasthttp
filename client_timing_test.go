@@ -69,7 +69,37 @@ func acquireFakeServerConn(s []byte) *fakeClientConn {
 
 var fakeClientConnPool sync.Pool
 
-func BenchmarkClientGetFastServer(b *testing.B) {
+func BenchmarkClientGetTimeoutFastServer(b *testing.B) {
+	body := []byte("123456789099")
+	s := []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body))
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return acquireFakeServerConn(s), nil
+		},
+	}
+
+	nn := uint32(0)
+	b.RunParallel(func(pb *testing.PB) {
+		url := fmt.Sprintf("http://foobar%d.com/aaa/bbb", atomic.AddUint32(&nn, 1))
+		var statusCode int
+		var bodyBuf []byte
+		var err error
+		for pb.Next() {
+			statusCode, bodyBuf, err = c.GetTimeout(bodyBuf[:0], url, time.Second)
+			if err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if statusCode != StatusOK {
+				b.Fatalf("unexpected status code: %d", statusCode)
+			}
+			if !bytes.Equal(bodyBuf, body) {
+				b.Fatalf("unexpected response body: %q. Expected %q", bodyBuf, body)
+			}
+		}
+	})
+}
+
+func BenchmarkClientDoFastServer(b *testing.B) {
 	body := []byte("012345678912")
 	s := []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body))
 	c := &Client{
@@ -97,7 +127,7 @@ func BenchmarkClientGetFastServer(b *testing.B) {
 	})
 }
 
-func BenchmarkNetHTTPClientGetFastServer(b *testing.B) {
+func BenchmarkNetHTTPClientDoFastServer(b *testing.B) {
 	body := []byte("012345678912")
 	s := []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body))
 	c := &http.Client{

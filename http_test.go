@@ -4,15 +4,147 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"mime/multipart"
 	"strings"
 	"testing"
 )
+
+func TestRequestMultipartForm(t *testing.T) {
+	var w bytes.Buffer
+	mw := multipart.NewWriter(&w)
+	for i := 0; i < 10; i++ {
+		k := fmt.Sprintf("key_%d", i)
+		v := fmt.Sprintf("value_%d", i)
+		if err := mw.WriteField(k, v); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+	}
+	boundary := mw.Boundary()
+	if err := mw.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	formData := w.Bytes()
+	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=%s\r\nContent-Length: %d\r\n\r\n%s",
+		boundary, len(formData), formData)
+
+	var req Request
+
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	if err := req.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	f, err := req.MultipartForm()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	defer f.RemoveAll()
+
+	if len(f.File) > 0 {
+		t.Fatalf("unexpected files found in the multipart form: %d", len(f.File))
+	}
+
+	if len(f.Value) != 10 {
+		t.Fatalf("unexpected number of values found: %d. Expecting %d", len(f.Value), 10)
+	}
+
+	for k, vv := range f.Value {
+		if len(vv) != 1 {
+			t.Fatalf("unexpected number of values found for key=%q: %d. Expecting 1", k, len(vv))
+		}
+		if !strings.HasPrefix(k, "key_") {
+			t.Fatalf("unexpected key prefix=%q. Expecting %q", k, "key_")
+		}
+		v := vv[0]
+		if !strings.HasPrefix(v, "value_") {
+			t.Fatalf("unexpected value prefix=%q. expecting %q", v, "value_")
+		}
+		if k[len("key_"):] != v[len("value_"):] {
+			t.Fatalf("key and value suffixes don't match: %q vs %q", k, v)
+		}
+	}
+}
+
+func TestResponseReadLimitBody(t *testing.T) {
+	// response with content-length
+	testResponseReadLimitBodySuccess(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 10\r\n\r\n9876543210", 10)
+	testResponseReadLimitBodySuccess(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 10\r\n\r\n9876543210", 100)
+	testResponseReadLimitBodyError(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 10\r\n\r\n9876543210", 9)
+
+	// chunked response
+	testResponseReadLimitBodySuccess(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 9)
+	testResponseReadLimitBodySuccess(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 100)
+	testResponseReadLimitBodyError(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 2)
+
+	// identity response
+	testResponseReadLimitBodySuccess(t, "HTTP/1.1 400 OK\r\nContent-Type: aa\r\n\r\n123456", 6)
+	testResponseReadLimitBodySuccess(t, "HTTP/1.1 400 OK\r\nContent-Type: aa\r\n\r\n123456", 106)
+	testResponseReadLimitBodyError(t, "HTTP/1.1 400 OK\r\nContent-Type: aa\r\n\r\n123456", 5)
+}
+
+func TestRequestReadLimitBody(t *testing.T) {
+	// request with content-length
+	testRequestReadLimitBodySuccess(t, "POST /foo HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 9\r\nContent-Type: aaa\r\n\r\n123456789", 9)
+	testRequestReadLimitBodySuccess(t, "POST /foo HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 9\r\nContent-Type: aaa\r\n\r\n123456789", 92)
+	testRequestReadLimitBodyError(t, "POST /foo HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 9\r\nContent-Type: aaa\r\n\r\n123456789", 5)
+
+	// chunked request
+	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 9)
+	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 999)
+	testRequestReadLimitBodyError(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 8)
+}
+
+func testResponseReadLimitBodyError(t *testing.T, s string, maxBodySize int) {
+	var req Response
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	err := req.ReadLimitBody(br, maxBodySize)
+	if err == nil {
+		t.Fatalf("expecting error. s=%q, maxBodySize=%d", s, maxBodySize)
+	}
+	if err != ErrBodyTooLarge {
+		t.Fatalf("unexpected error: %s. Expecting %s. s=%q, maxBodySize=%d", err, ErrBodyTooLarge, s, maxBodySize)
+	}
+}
+
+func testResponseReadLimitBodySuccess(t *testing.T, s string, maxBodySize int) {
+	var req Response
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	if err := req.ReadLimitBody(br, maxBodySize); err != nil {
+		t.Fatalf("unexpected error: %s. s=%q, maxBodySize=%d", err, s, maxBodySize)
+	}
+}
+
+func testRequestReadLimitBodyError(t *testing.T, s string, maxBodySize int) {
+	var req Request
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	err := req.ReadLimitBody(br, maxBodySize)
+	if err == nil {
+		t.Fatalf("expecting error. s=%q, maxBodySize=%d", s, maxBodySize)
+	}
+	if err != ErrBodyTooLarge {
+		t.Fatalf("unexpected error: %s. Expecting %s. s=%q, maxBodySize=%d", err, ErrBodyTooLarge, s, maxBodySize)
+	}
+}
+
+func testRequestReadLimitBodySuccess(t *testing.T, s string, maxBodySize int) {
+	var req Request
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	if err := req.ReadLimitBody(br, maxBodySize); err != nil {
+		t.Fatalf("unexpected error: %s. s=%q, maxBodySize=%d", err, s, maxBodySize)
+	}
+}
 
 func TestRequestString(t *testing.T) {
 	var r Request
 	r.SetRequestURI("http://foobar.com/aaa")
 	s := r.String()
-	expectedS := "GET /aaa HTTP/1.1\r\nUser-Agent: fasthttp client\r\nHost: foobar.com\r\n\r\n"
+	expectedS := "GET /aaa HTTP/1.1\r\nUser-Agent: fasthttp\r\nHost: foobar.com\r\n\r\n"
 	if s != expectedS {
 		t.Fatalf("unexpected request: %q. Expecting %q", s, expectedS)
 	}
@@ -567,7 +699,7 @@ func testReadBodyChunked(t *testing.T, b []byte, bodySize int) {
 
 	r := bytes.NewBuffer(chunkedBody)
 	br := bufio.NewReader(r)
-	b, err := readBody(br, -1, nil)
+	b, err := readBody(br, -1, 0, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error for bodySize=%d: %s. body=%q, chunkedBody=%q", bodySize, err, body, chunkedBody)
 	}
@@ -584,7 +716,7 @@ func testReadBodyFixedSize(t *testing.T, b []byte, bodySize int) {
 
 	r := bytes.NewBuffer(bodyWithTrailer)
 	br := bufio.NewReader(r)
-	b, err := readBody(br, bodySize, nil)
+	b, err := readBody(br, bodySize, 0, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error in ReadResponseBody(%d): %s", bodySize, err)
 	}

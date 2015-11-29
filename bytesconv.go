@@ -12,41 +12,13 @@ import (
 	"unsafe"
 )
 
-var (
-	maxIntChars = func() int {
-		switch ^uint(0) {
-		case 0xffffffff:
-			// 32 bit
-			return 9
-		case 0xffffffffffffffff:
-			// 64 bit
-			return 18
-		default:
-			panic("Unsupported architecture :)")
-		}
-	}()
-
-	maxHexIntChars = func() int {
-		switch ^uint(0) {
-		case 0xffffffff:
-			// 32 bit
-			return 7
-		case 0xffffffffffffffff:
-			// 64 bit
-			return 15
-		default:
-			panic("Unsupported architecture :)")
-		}
-	}()
-
-	gmtLocation = func() *time.Location {
-		x, err := time.LoadLocation("GMT")
-		if err != nil {
-			panic(fmt.Sprintf("cannot load GMT location: %s", err))
-		}
-		return x
-	}()
-)
+var gmtLocation = func() *time.Location {
+	x, err := time.LoadLocation("GMT")
+	if err != nil {
+		panic(fmt.Sprintf("cannot load GMT location: %s", err))
+	}
+	return x
+}()
 
 // AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
 // to dst and returns dst (which may be newly allocated).
@@ -201,16 +173,16 @@ func readHexInt(r *bufio.Reader) (int, error) {
 	}
 }
 
-var uintBufPool sync.Pool
+var hexIntBufPool sync.Pool
 
 func writeHexInt(w *bufio.Writer, n int) error {
 	if n < 0 {
 		panic("BUG: int must be positive")
 	}
 
-	v := uintBufPool.Get()
+	v := hexIntBufPool.Get()
 	if v == nil {
-		v = make([]byte, maxIntChars+8)
+		v = make([]byte, maxHexIntChars+1)
 	}
 	buf := v.([]byte)
 	i := len(buf) - 1
@@ -223,7 +195,7 @@ func writeHexInt(w *bufio.Writer, n int) error {
 		i--
 	}
 	_, err := w.Write(buf[i:])
-	uintBufPool.Put(v)
+	hexIntBufPool.Put(v)
 	return err
 }
 
@@ -269,7 +241,7 @@ func lowercaseBytes(b []byte) {
 	}
 }
 
-// Converts byte slice to a string without memory allocation.
+// unsafeBytesToStr converts byte slice to a string without memory allocation.
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
 //
 // Note it may break if string and/or slice header will change
@@ -311,7 +283,8 @@ func hexChar(c byte) byte {
 
 // EqualBytesStr returns true if string(b) == s.
 //
-// It doesn't allocate memory unlike string(b) do.
+// This function has no performance benefits comparing to string(b) == s.
+// It is left here for backwards compatibility only.
 func EqualBytesStr(b []byte, s string) bool {
 	return len(s) == len(b) &&
 		bytes.Equal(b, toBytes(s))
@@ -319,11 +292,11 @@ func EqualBytesStr(b []byte, s string) bool {
 
 // AppendBytesStr appends src to dst and returns dst
 // (which may be newly allocated).
+//
+// This function has no performance benefits comparing to append(dst, src...).
+// It is left here for backwards compatibility only.
 func AppendBytesStr(dst []byte, src string) []byte {
-	for i, n := 0, len(src); i < n; i++ {
-		dst = append(dst, src[i])
-	}
-	return dst
+	return append(dst, src...)
 }
 
 // toBytes swaps a string's header to a slice header.
