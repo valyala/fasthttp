@@ -3,7 +3,9 @@ package fasthttp
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
+	"time"
 )
 
 func ExampleListenAndServe() {
@@ -112,6 +114,37 @@ func ExampleRequestCtx_Hijack() {
 			fmt.Fprintf(ctx, "Root directory requested")
 		default:
 			fmt.Fprintf(ctx, "Requested path is %q", path)
+		}
+	}
+
+	if err := ListenAndServe(":80", requestHandler); err != nil {
+		log.Fatalf("error in ListenAndServe: %s", err)
+	}
+}
+
+func ExampleRequestCtx_TimeoutError() {
+	requestHandler := func(ctx *RequestCtx) {
+		// Emulate long-running task, which touches ctx.
+		doneCh := make(chan struct{})
+		go func() {
+			workDuration := time.Millisecond * time.Duration(rand.Intn(2000))
+			time.Sleep(workDuration)
+
+			fmt.Fprintf(ctx, "ctx has been accessed by long-running task\n")
+			fmt.Fprintf(ctx, "The reuqestHandler may be finished by this time.\n")
+
+			close(doneCh)
+		}()
+
+		select {
+		case <-doneCh:
+			fmt.Fprintf(ctx, "The task has been finished in less than a second")
+		case <-time.After(time.Second):
+			// Since the long-running task is still running and may access ctx,
+			// we must call TimeoutError before returning from requestHandler.
+			//
+			// Otherwise our program will suffer from data races.
+			ctx.TimeoutError("Timeout!")
 		}
 	}
 
