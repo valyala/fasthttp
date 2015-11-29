@@ -126,6 +126,44 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 }
 
+func TestServerGetOnly(t *testing.T) {
+	h := func(ctx *RequestCtx) {
+		if !ctx.IsGet() {
+			t.Fatalf("non-get request: %q", ctx.Method())
+		}
+		ctx.Success("foo/bar", []byte("success"))
+	}
+	s := &Server{
+		Handler: h,
+		GetOnly: true,
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: google.com\r\nContent-Length: 5\r\nContent-Type: aaa\r\n\r\n12345")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err == nil {
+			t.Fatalf("expecting error")
+		}
+		if err != errGetOnly {
+			t.Fatalf("Unexpected error from serveConn: %s. Expecting %s", err, errGetOnly)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	resp := rw.w.Bytes()
+	if len(resp) > 0 {
+		t.Fatalf("unexpected response %q. Expecting zero", resp)
+	}
+}
+
 func TestTimeoutHandlerTimeout(t *testing.T) {
 	h := func(ctx *RequestCtx) {
 		time.Sleep(time.Second)

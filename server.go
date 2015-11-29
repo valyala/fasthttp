@@ -163,6 +163,15 @@ type Server struct {
 	// Aggressive memory usage reduction is disabled by default.
 	ReduceMemoryUsage bool
 
+	// Rejects all non-GET requests if set to true.
+	//
+	// This option is useful as anti-DoS protection for servers
+	// accepting only GET requests. When set the request size is limited
+	// by ReadBufferSize.
+	//
+	// Server accepts all the requests by default.
+	GetOnly bool
+
 	// Logger, which is used by RequestCtx.Logger().
 	//
 	// By default standard logger from log package is used.
@@ -869,7 +878,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			if br == nil {
 				br = acquireReader(ctx)
 			}
-			err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize)
+			err = ctx.Request.readLimitBody(br, s.MaxRequestBodySize, s.GetOnly)
 			if br.Buffered() == 0 || err != nil {
 				releaseReader(s, br)
 				br = nil

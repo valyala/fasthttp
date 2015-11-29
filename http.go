@@ -42,14 +42,14 @@ type Response struct {
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header ResponseHeader
 
+	// Response.Read() skips reading body if set to true.
+	// Use it for HEAD requests.
+	SkipBody bool
+
 	body []byte
 	w    responseBodyWriter
 
 	bodyStream io.Reader
-
-	// If set to true, Response.Read() skips reading body.
-	// Use it for HEAD requests.
-	SkipBody bool
 }
 
 // SetRequestURI sets RequestURI.
@@ -307,6 +307,8 @@ func (req *Request) Read(r *bufio.Reader) error {
 
 const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
 
+var errGetOnly = errors.New("non-GET request received")
+
 // ReadLimitBody reads request from the given r, limiting the body size.
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
@@ -316,10 +318,17 @@ const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
 // reading multipart/form-data request in order to delete temporarily
 // uploaded files.
 func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
+	return req.readLimitBody(r, maxBodySize, false)
+}
+
+func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool) error {
 	req.clearSkipHeader()
 	err := req.Header.Read(r)
 	if err != nil {
 		return err
+	}
+	if getOnly && !req.Header.IsGet() {
+		return errGetOnly
 	}
 
 	if req.Header.IsPost() || req.Header.IsPut() {
