@@ -288,6 +288,7 @@ func (req *Request) RemoveMultipartFormFiles() {
 func (resp *Response) Reset() {
 	resp.Header.Reset()
 	resp.clearSkipHeader()
+	resp.SkipBody = false
 }
 
 func (resp *Response) clearSkipHeader() {
