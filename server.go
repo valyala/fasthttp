@@ -458,6 +458,11 @@ func (ctx *RequestCtx) IsPost() bool {
 	return ctx.Request.Header.IsPost()
 }
 
+// IsPut returns true if request method is PUT.
+func (ctx *RequestCtx) IsPut() bool {
+	return ctx.Request.Header.IsPut()
+}
+
 // Method return request method.
 //
 // Returned value is valid until returning from RequestHandler.
