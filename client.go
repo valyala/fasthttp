@@ -239,6 +239,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			Name:                c.Name,
 			Dial:                c.Dial,
 			DialDualStack:       c.DialDualStack,
+			IsTLS:               isTLS,
 			TLSConfig:           c.TLSConfig,
 			MaxConns:            c.MaxConnsPerHost,
 			ReadBufferSize:      c.ReadBufferSize,
@@ -246,9 +247,6 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			ReadTimeout:         c.ReadTimeout,
 			WriteTimeout:        c.WriteTimeout,
 			MaxResponseBodySize: c.MaxResponseBodySize,
-		}
-		if isTLS {
-			hc.IsTLS = true
 		}
 		m[string(host)] = hc
 		if len(m) == 1 {
