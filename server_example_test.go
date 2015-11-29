@@ -81,3 +81,41 @@ func ExampleServer() {
 		log.Fatalf("error in ListenAndServe: %s", err)
 	}
 }
+
+func ExampleRequestCtx_Hijack() {
+	// hijackHandler is called on hijacked connection.
+	hijackHandler := func(c net.Conn) {
+		fmt.Fprintf(c, "This message is sent over a hijacked connection to the client %d\n", c.RemoteAddr())
+		fmt.Fprintf(c, "Send me something and I'll echo it to you\n")
+		var buf [1]byte
+		for {
+			if _, err := c.Read(buf[:]); err != nil {
+				log.Printf("error when reading from hijacked connection: %s", err)
+				return
+			}
+			fmt.Fprintf(c, "You sent me %q. Waiting for new data\n", buf[:])
+		}
+	}
+
+	// requestHandler is called for each incoming request.
+	requestHandler := func(ctx *RequestCtx) {
+		path := ctx.Path()
+		switch {
+		case string(path) == "/hijack":
+			// Note that the connection is hijacked only after
+			// returning from requestHandler and sending http response.
+			ctx.Hijack(hijackHandler)
+
+			// The connection will be hijacked after sending this response.
+			fmt.Fprintf(ctx, "Hijacked the connection!")
+		case string(path) == "/":
+			fmt.Fprintf(ctx, "Root directory requested")
+		default:
+			fmt.Fprintf(ctx, "Requested path is %q", path)
+		}
+	}
+
+	if err := ListenAndServe(":80", requestHandler); err != nil {
+		log.Fatalf("error in ListenAndServe: %s", err)
+	}
+}
