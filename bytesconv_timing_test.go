@@ -23,6 +23,21 @@ func BenchmarkWriteHexInt(b *testing.B) {
 	})
 }
 
+func BenchmarkParseUint(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		buf := []byte("1234567")
+		for pb.Next() {
+			n, err := ParseUint(buf)
+			if err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if n != 1234567 {
+				b.Fatalf("unexpected result: %d. Expecting %s", n, buf)
+			}
+		}
+	})
+}
+
 func BenchmarkAppendUint(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var buf []byte
