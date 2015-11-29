@@ -146,7 +146,7 @@ func (h *ResponseHeader) SetContentLength(contentLength int) {
 // It may be negative:
 // -1 means Transfer-Encoding: chunked.
 func (h *RequestHeader) ContentLength() int {
-	if !h.IsPost() {
+	if !h.IsPost() && !h.IsPut() {
 		return 0
 	}
 	h.parseRawHeaders()
@@ -372,6 +372,11 @@ func (h *RequestHeader) IsGet() bool {
 // IsPost returns true if request methos is POST.
 func (h *RequestHeader) IsPost() bool {
 	return bytes.Equal(h.Method(), strPost)
+}
+
+// IsPut returns true if request method is PUT.
+func (h *RequestHeader) IsPut() bool {
+	return bytes.Equal(h.Method(), strPut)
 }
 
 // IsHead returns true if request method is HEAD.
@@ -1033,7 +1038,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	}
 
 	contentType := h.ContentType()
-	if h.IsPost() {
+	if h.IsPost() || h.IsPut() {
 		if len(contentType) == 0 {
 			contentType = strPostArgsContentType
 		}
@@ -1094,7 +1099,7 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 	}
 
 	var n int
-	if h.IsPost() {
+	if h.IsPost() || h.IsPut() {
 		n, err = h.parseHeaders(buf[m:])
 		if err != nil {
 			return 0, err
@@ -1340,7 +1345,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	if h.contentLength < 0 {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}
-	if !h.IsPost() {
+	if !h.IsPost() && !h.IsPut() {
 		h.contentLength = 0
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}

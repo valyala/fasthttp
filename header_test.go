@@ -1124,6 +1124,10 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	// invalid method
 	testRequestHeaderReadSuccess(t, h, "POST /foo/bar HTTP/1.1\r\nHost: google.com\r\n\r\nmnbv",
 		-2, "/foo/bar", "google.com", "", "", "mnbv")
+
+	// put request
+	testRequestHeaderReadSuccess(t, h, "PUT /faa HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 123\r\nContent-Type: aaa\r\n\r\nxwwere",
+		123, "/faa", "aaa.com", "", "aaa", "xwwere")
 }
 
 func TestResponseHeaderReadError(t *testing.T) {
