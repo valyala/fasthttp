@@ -741,10 +741,14 @@ var (
 // to the host are busy.
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	retry, err := c.do(req, resp, false)
-	if err != nil && retry && (req.Header.IsGet() || req.Header.IsHead()) {
+	if err != nil && retry && isIdempotent(req) {
 		_, err = c.do(req, resp, true)
 	}
 	return err
+}
+
+func isIdempotent(req *Request) bool {
+	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut()
 }
 
 func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error) {
