@@ -188,6 +188,13 @@ func int2hexbyte(n int) byte {
 	return 'a' + byte(n) - 10
 }
 
+func hexCharUpper(c byte) byte {
+	if c < 10 {
+		return '0' + c
+	}
+	return c - 10 + 'A'
+}
+
 func hexbyte2int(c byte) int {
 	if c >= '0' && c <= '9' {
 		return int(c - '0')
@@ -237,17 +244,10 @@ func appendQuotedArg(dst, v []byte) []byte {
 		if c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '/' || c == '.' {
 			dst = append(dst, c)
 		} else {
-			dst = append(dst, '%', hexChar(c>>4), hexChar(c&15))
+			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
 		}
 	}
 	return dst
-}
-
-func hexChar(c byte) byte {
-	if c < 10 {
-		return '0' + c
-	}
-	return c - 10 + 'A'
 }
 
 // EqualBytesStr returns true if string(b) == s.
