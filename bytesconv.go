@@ -2,11 +2,9 @@ package fasthttp
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"math"
-	"reflect"
 	"sync"
 	"time"
 	"unsafe"
@@ -280,8 +278,7 @@ func appendQuotedArg(dst, v []byte) []byte {
 // This function has no performance benefits comparing to string(b) == s.
 // It is left here for backwards compatibility only.
 func EqualBytesStr(b []byte, s string) bool {
-	return len(s) == len(b) &&
-		bytes.Equal(b, toBytes(s))
+	return string(b) == s
 }
 
 // AppendBytesStr appends src to dst and returns dst
@@ -291,15 +288,4 @@ func EqualBytesStr(b []byte, s string) bool {
 // It is left here for backwards compatibility only.
 func AppendBytesStr(dst []byte, src string) []byte {
 	return append(dst, src...)
-}
-
-// toBytes swaps a string's header to a slice header.
-func toBytes(s string) []byte {
-	str := *(*reflect.StringHeader)(unsafe.Pointer(&s))
-	ret := reflect.SliceHeader{
-		Data: str.Data,
-		Len:  str.Len,
-		Cap:  str.Len,
-	}
-	return *(*[]byte)(unsafe.Pointer(&ret))
 }
