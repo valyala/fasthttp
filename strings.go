@@ -21,6 +21,7 @@ var (
 	strGet  = []byte("GET")
 	strHead = []byte("HEAD")
 	strPost = []byte("POST")
+	strPut  = []byte("PUT")
 
 	strConnection       = []byte("Connection")
 	strContentLength    = []byte("Content-Length")

@@ -206,17 +206,31 @@ func int2hexbyte(n int) byte {
 	return 'a' + byte(n) - 10
 }
 
+func hexCharUpper(c byte) byte {
+	if c < 10 {
+		return '0' + c
+	}
+	return c - 10 + 'A'
+}
+
+var hex2intTable = func() []byte {
+	b := make([]byte, 255)
+	for i := byte(0); i < 255; i++ {
+		c := byte(0)
+		if i >= '0' && i <= '9' {
+			c = 1 + i - '0'
+		} else if i >= 'a' && i <= 'f' {
+			c = 1 + i - 'a' + 10
+		} else if i >= 'A' && i <= 'F' {
+			c = 1 + i - 'A' + 10
+		}
+		b[i] = c
+	}
+	return b
+}()
+
 func hexbyte2int(c byte) int {
-	if c >= '0' && c <= '9' {
-		return int(c - '0')
-	}
-	if c >= 'a' && c <= 'f' {
-		return int(c - 'a' + 10)
-	}
-	if c >= 'A' && c <= 'F' {
-		return int(c - 'A' + 10)
-	}
-	return -1
+	return int(hex2intTable[c]) - 1
 }
 
 const toLower = 'a' - 'A'
@@ -250,35 +264,15 @@ func unsafeBytesToStr(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 
-func unhex(c byte) int {
-	if c >= '0' && c <= '9' {
-		return int(c - '0')
-	}
-	if c >= 'a' && c <= 'f' {
-		return 10 + int(c-'a')
-	}
-	if c >= 'A' && c <= 'F' {
-		return 10 + int(c-'A')
-	}
-	return -1
-}
-
 func appendQuotedArg(dst, v []byte) []byte {
 	for _, c := range v {
 		if c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '/' || c == '.' {
 			dst = append(dst, c)
 		} else {
-			dst = append(dst, '%', hexChar(c>>4), hexChar(c&15))
+			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
 		}
 	}
 	return dst
-}
-
-func hexChar(c byte) byte {
-	if c < 10 {
-		return '0' + c
-	}
-	return c - 10 + 'A'
 }
 
 // EqualBytesStr returns true if string(b) == s.

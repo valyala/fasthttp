@@ -6,6 +6,30 @@ import (
 	"testing"
 )
 
+func BenchmarkInt2HexByte(b *testing.B) {
+	buf := []int{1, 0xf, 2, 0xd, 3, 0xe, 4, 0xa, 5, 0xb, 6, 0xc, 7, 0xf, 0, 0xf, 6, 0xd, 9, 8, 4, 0x5}
+	b.RunParallel(func(pb *testing.PB) {
+		var n int
+		for pb.Next() {
+			for _, n = range buf {
+				int2hexbyte(n)
+			}
+		}
+	})
+}
+
+func BenchmarkHexByte2Int(b *testing.B) {
+	buf := []byte("0A1B2c3d4E5F6C7a8D9ab7cd03ef")
+	b.RunParallel(func(pb *testing.PB) {
+		var c byte
+		for pb.Next() {
+			for _, c = range buf {
+				hexbyte2int(c)
+			}
+		}
+	})
+}
+
 func BenchmarkWriteHexInt(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var w bytes.Buffer
@@ -19,6 +43,21 @@ func BenchmarkWriteHexInt(b *testing.B) {
 			}
 			w.Reset()
 			bw.Reset(&w)
+		}
+	})
+}
+
+func BenchmarkParseUint(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		buf := []byte("1234567")
+		for pb.Next() {
+			n, err := ParseUint(buf)
+			if err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if n != 1234567 {
+				b.Fatalf("unexpected result: %d. Expecting %s", n, buf)
+			}
 		}
 	})
 }

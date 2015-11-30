@@ -163,6 +163,15 @@ type Server struct {
 	// Aggressive memory usage reduction is disabled by default.
 	ReduceMemoryUsage bool
 
+	// Rejects all non-GET requests if set to true.
+	//
+	// This option is useful as anti-DoS protection for servers
+	// accepting only GET requests. When set the request size is limited
+	// by ReadBufferSize.
+	//
+	// Server accepts all the requests by default.
+	GetOnly bool
+
 	// Logger, which is used by RequestCtx.Logger().
 	//
 	// By default standard logger from log package is used.
@@ -219,9 +228,13 @@ func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) Request
 // before return.
 type RequestCtx struct {
 	// Incoming request.
+	//
+	// Copying Request by value is forbidden. Use pointer to Request instead.
 	Request Request
 
 	// Outgoing response.
+	//
+	// Copying Response by value is forbidden. Use pointer to Response instead.
 	Response Response
 
 	id uint64
@@ -456,6 +469,11 @@ func (ctx *RequestCtx) IsGet() bool {
 // IsPost returns true if request method is POST.
 func (ctx *RequestCtx) IsPost() bool {
 	return ctx.Request.Header.IsPost()
+}
+
+// IsPut returns true if request method is PUT.
+func (ctx *RequestCtx) IsPut() bool {
+	return ctx.Request.Header.IsPut()
 }
 
 // Method return request method.
@@ -834,6 +852,7 @@ func (s *Server) serveConn(c net.Conn) error {
 	var err error
 	var connectionClose bool
 	var errMsg string
+	var hijackHandler HijackHandler
 	for {
 		ctx.id++
 		connRequestNum++
@@ -860,7 +879,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			if br == nil {
 				br = acquireReader(ctx)
 			}
-			err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize)
+			err = ctx.Request.readLimitBody(br, s.MaxRequestBodySize, s.GetOnly)
 			if br.Buffered() == 0 || err != nil {
 				releaseReader(s, br)
 				br = nil
@@ -891,6 +910,9 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.time = currentTime
 		ctx.Response.Reset()
 		s.Handler(ctx)
+
+		hijackHandler = ctx.hijackHandler
+		ctx.hijackHandler = nil
 
 		// Remove temporary files, which may be uploaded during the request.
 		ctx.Request.RemoveMultipartFormFiles()
@@ -946,8 +968,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
-		if ctx.hijackHandler != nil {
-			h := ctx.hijackHandler
+		if hijackHandler != nil {
 			var hjr io.Reader
 			hjr = c
 			if br != nil {
@@ -967,7 +988,8 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 			c.SetReadDeadline(zeroTime)
 			c.SetWriteDeadline(zeroTime)
-			go hijackConnHandler(hjr, c, s, h)
+			go hijackConnHandler(hjr, c, s, hijackHandler)
+			hijackHandler = nil
 			err = errHijacked
 			break
 		}

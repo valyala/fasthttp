@@ -336,6 +336,9 @@ func TestRequestSuccess(t *testing.T) {
 	// POST method with body
 	testRequestSuccess(t, "POST", "/bbb", "aaa.com", "Chrome aaa", "post body", "POST")
 
+	// PUT method with body
+	testRequestSuccess(t, "PUT", "/aa/bb", "a.com", "ome aaa", "put body", "PUT")
+
 	// only host is set
 	testRequestSuccess(t, "", "", "gooble.com", "", "", "GET")
 }

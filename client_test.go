@@ -40,7 +40,7 @@ func TestClientFollowRedirects(t *testing.T) {
 
 	uri := fmt.Sprintf("http://%s/foo", addr)
 	for i := 0; i < 10; i++ {
-		statusCode, body, err := Get(nil, uri)
+		statusCode, body, err := GetTimeout(nil, uri, time.Second)
 		if err != nil {
 			t.Fatalf("unexpected error: %s", err)
 		}

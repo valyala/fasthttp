@@ -239,6 +239,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			Name:                c.Name,
 			Dial:                c.Dial,
 			DialDualStack:       c.DialDualStack,
+			IsTLS:               isTLS,
 			TLSConfig:           c.TLSConfig,
 			MaxConns:            c.MaxConnsPerHost,
 			ReadBufferSize:      c.ReadBufferSize,
@@ -246,9 +247,6 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			ReadTimeout:         c.ReadTimeout,
 			WriteTimeout:        c.WriteTimeout,
 			MaxResponseBodySize: c.MaxResponseBodySize,
-		}
-		if isTLS {
-			hc.IsTLS = true
 		}
 		m[string(host)] = hc
 		if len(m) == 1 {
@@ -311,7 +309,8 @@ type DialFunc func(addr string) (net.Conn, error)
 type HostClient struct {
 	// HTTP server host address, which is passed to Dial.
 	//
-	// The address MUST contain port if it is TCP. For example,
+	// The address may contain port if default dialer is used.
+	// For example,
 	//
 	//    - foobar.com:80
 	//    - foobar.com:443
@@ -741,10 +740,14 @@ var (
 // to the host are busy.
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	retry, err := c.do(req, resp, false)
-	if err != nil && retry && (req.Header.IsGet() || req.Header.IsHead()) {
+	if err != nil && retry && isIdempotent(req) {
 		_, err = c.do(req, resp, true)
 	}
 	return err
+}
+
+func isIdempotent(req *Request) bool {
+	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut()
 }
 
 func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error) {
@@ -895,8 +898,10 @@ func (c *HostClient) connsCleaner() {
 			cc.c.Close()
 			releaseClientConn(cc)
 
-			copy(c.conns, c.conns[1:])
-			c.conns = c.conns[:len(c.conns)-1]
+			// Do not copy(c.conns, c.conns[1:]), since this may be
+			// quite slow for multi-million conns count.
+			// Just move c.conns one position ahead.
+			c.conns = c.conns[1:]
 		}
 		if c.connsCount == 0 {
 			mustStop = true
@@ -1029,6 +1034,8 @@ func (c *HostClient) defaultDialFunc(addr string) (net.Conn, error) {
 }
 
 func (c *HostClient) getTCPAddr(addr string) (*net.TCPAddr, error) {
+	addr = addMissingPort(addr, c.IsTLS)
+
 	c.tcpAddrsLock.Lock()
 	tcpAddrs := c.tcpAddrs
 	if tcpAddrs != nil && !c.tcpAddrsPending && time.Since(c.tcpAddrsResolveTime) > dnsCacheDuration {

@@ -28,6 +28,7 @@ type URI struct {
 
 // CopyTo copies uri contents to dst.
 func (x *URI) CopyTo(dst *URI) {
+	dst.Reset()
 	dst.pathOriginal = append(dst.pathOriginal[:0], x.pathOriginal...)
 	dst.scheme = append(dst.scheme[:0], x.scheme...)
 	dst.path = append(dst.path[:0], x.path...)

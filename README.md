@@ -148,3 +148,10 @@ BenchmarkServerGet10KReqPerConn1KClients-4	 5000000	       342 ns/op	       0 B/
 * *Please provide real benchmark data and sever information*
 
   See [this issue](https://github.com/valyala/fasthttp/issues/4).
+
+* *Are there plans to add request routing to fasthttp?*
+
+  There are no plans to add request routing into fasthttp. I believe request
+  routing must be implemented in a separate package(s) like
+  [httprouter](https://github.com/julienschmidt/httprouter).
+  See [this issue](https://github.com/valyala/fasthttp/issues/8) for more info.

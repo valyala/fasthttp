@@ -16,6 +16,8 @@ import (
 // and use CopyTo() instead.
 type Request struct {
 	// Request header
+	//
+	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header RequestHeader
 
 	body []byte
@@ -36,16 +38,18 @@ type Request struct {
 // and use CopyTo() instead.
 type Response struct {
 	// Response header
+	//
+	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header ResponseHeader
+
+	// Response.Read() skips reading body if set to true.
+	// Use it for HEAD requests.
+	SkipBody bool
 
 	body []byte
 	w    responseBodyWriter
 
 	bodyStream io.Reader
-
-	// If set to true, Response.Read() skips reading body.
-	// Use it for HEAD requests.
-	SkipBody bool
 }
 
 // SetRequestURI sets RequestURI.
@@ -157,12 +161,13 @@ func (req *Request) CopyTo(dst *Request) {
 	dst.Reset()
 	req.Header.CopyTo(&dst.Header)
 	dst.body = append(dst.body[:0], req.body...)
-	if req.parsedURI {
-		dst.parseURI()
-	}
-	if req.parsedPostArgs {
-		dst.parsePostArgs()
-	}
+
+	req.uri.CopyTo(&dst.uri)
+	dst.parsedURI = req.parsedURI
+
+	req.postArgs.CopyTo(&dst.postArgs)
+	dst.parsedPostArgs = req.parsedPostArgs
+
 	// do not copy multipartForm - it will be automatically
 	// re-created on the first call to MultipartForm.
 }
@@ -283,6 +288,7 @@ func (req *Request) RemoveMultipartFormFiles() {
 func (resp *Response) Reset() {
 	resp.Header.Reset()
 	resp.clearSkipHeader()
+	resp.SkipBody = false
 }
 
 func (resp *Response) clearSkipHeader() {
@@ -301,6 +307,8 @@ func (req *Request) Read(r *bufio.Reader) error {
 
 const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
 
+var errGetOnly = errors.New("non-GET request received")
+
 // ReadLimitBody reads request from the given r, limiting the body size.
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
@@ -310,13 +318,20 @@ const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
 // reading multipart/form-data request in order to delete temporarily
 // uploaded files.
 func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
+	return req.readLimitBody(r, maxBodySize, false)
+}
+
+func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool) error {
 	req.clearSkipHeader()
 	err := req.Header.Read(r)
 	if err != nil {
 		return err
 	}
+	if getOnly && !req.Header.IsGet() {
+		return errGetOnly
+	}
 
-	if req.Header.IsPost() {
+	if req.Header.IsPost() || req.Header.IsPut() {
 		contentLength := req.Header.ContentLength()
 		if contentLength > 0 {
 			// Pre-read multipart form data of known length.
@@ -398,7 +413,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	if err != nil {
 		return err
 	}
-	if req.Header.IsPost() {
+	if req.Header.IsPost() || req.Header.IsPut() {
 		_, err = w.Write(req.body)
 	} else if len(req.body) > 0 {
 		return fmt.Errorf("Non-zero body for non-POST request. body=%q", req.body)

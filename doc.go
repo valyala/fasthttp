@@ -21,6 +21,7 @@ Fasthttp provides the following features:
         * Maximum request body size.
         * Maximum request execution time.
         * Maximum keep-alive connection lifetime.
+        * Early filtering out non-GET requests.
 
     * A lot of additional useful info is exposed to request handler:
 
