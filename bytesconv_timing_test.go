@@ -11,9 +11,9 @@ func BenchmarkInt2HexByte(b *testing.B) {
 		var i int
 		for pb.Next() {
 			i = 16
-			for i >= 0 {
-				int2hexbyte(i)
+			for i > 0 {
 				i--
+				int2hexbyte(i)
 			}
 		}
 	})
