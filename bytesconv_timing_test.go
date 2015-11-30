@@ -6,6 +6,19 @@ import (
 	"testing"
 )
 
+func BenchmarkInt2HexByte(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		var i int
+		for pb.Next() {
+			i = 16
+			for i >= 0 {
+				int2hexbyte(i)
+				i--
+			}
+		}
+	})
+}
+
 func BenchmarkHexByte2Int(b *testing.B) {
 	buf := []byte("0123456789abcdefABCDEF")
 	b.RunParallel(func(pb *testing.PB) {
