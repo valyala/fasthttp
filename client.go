@@ -897,8 +897,10 @@ func (c *HostClient) connsCleaner() {
 			cc.c.Close()
 			releaseClientConn(cc)
 
-			copy(c.conns, c.conns[1:])
-			c.conns = c.conns[:len(c.conns)-1]
+			// Do not copy(c.conns, c.conns[1:]), since this may be
+			// quite slow for multi-million conns count.
+			// Just move c.conns one position ahead.
+			c.conns = c.conns[1:]
 		}
 		if c.connsCount == 0 {
 			mustStop = true

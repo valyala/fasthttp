@@ -81,12 +81,16 @@ func (wp *workerPool) clean() {
 	wp.lock.Lock()
 	chans := wp.ready
 	for len(chans) > 1 && time.Since(chans[0].t) > time.Second {
+		// notify the worker to stop.
 		chans[0].ch <- nil
-		copy(chans, chans[1:])
-		chans = chans[:len(chans)-1]
-		wp.ready = chans
+
+		// do not do copy(chans, chans[1:]), since this may be quite slow
+		// for multi-million concurrent connections. Just move chans
+		// pointer one position ahead.
+		chans = chans[1:]
 		wp.workersCount--
 	}
+	wp.ready = chans
 	wp.lock.Unlock()
 }
 
