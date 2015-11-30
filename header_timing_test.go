@@ -119,3 +119,28 @@ func BenchmarkRequestHeaderPeekBytesNonCanonical(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkNormalizeHeaderKeyCommonCase(b *testing.B) {
+	src := []byte("User-Agent-Host-Content-Type-Content-Length-Server")
+	benchmarkNormalizeHeaderKey(b, src)
+}
+
+func BenchmarkNormalizeHeaderKeyLowercase(b *testing.B) {
+	src := []byte("user-agent-host-content-type-content-length-server")
+	benchmarkNormalizeHeaderKey(b, src)
+}
+
+func BenchmarkNormalizeHeaderKeyUppercase(b *testing.B) {
+	src := []byte("USER-AGENT-HOST-CONTENT-TYPE-CONTENT-LENGTH-SERVER")
+	benchmarkNormalizeHeaderKey(b, src)
+}
+
+func benchmarkNormalizeHeaderKey(b *testing.B, src []byte) {
+	b.RunParallel(func(pb *testing.PB) {
+		buf := make([]byte, len(src))
+		for pb.Next() {
+			copy(buf, src)
+			normalizeHeaderKey(buf)
+		}
+	})
+}
