@@ -6,6 +6,18 @@ import (
 	"testing"
 )
 
+func BenchmarkHexByte2Int(b *testing.B) {
+	buf := []byte("0123456789abcdefABCDEF")
+	b.RunParallel(func(pb *testing.PB) {
+		var c byte
+		for pb.Next() {
+			for _, c = range buf {
+				hexbyte2int(c)
+			}
+		}
+	})
+}
+
 func BenchmarkWriteHexInt(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var w bytes.Buffer
