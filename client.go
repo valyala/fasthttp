@@ -309,7 +309,8 @@ type DialFunc func(addr string) (net.Conn, error)
 type HostClient struct {
 	// HTTP server host address, which is passed to Dial.
 	//
-	// The address MUST contain port if it is TCP. For example,
+	// The address may contain port if default dialer is used.
+	// For example,
 	//
 	//    - foobar.com:80
 	//    - foobar.com:443
@@ -1033,6 +1034,8 @@ func (c *HostClient) defaultDialFunc(addr string) (net.Conn, error) {
 }
 
 func (c *HostClient) getTCPAddr(addr string) (*net.TCPAddr, error) {
+	addr = addMissingPort(addr, c.IsTLS)
+
 	c.tcpAddrsLock.Lock()
 	tcpAddrs := c.tcpAddrs
 	if tcpAddrs != nil && !c.tcpAddrsPending && time.Since(c.tcpAddrsResolveTime) > dnsCacheDuration {
