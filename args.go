@@ -391,8 +391,8 @@ func decodeArgAppend(dst, src []byte, decodePlus bool) []byte {
 			if i+2 >= n {
 				return append(dst, src[i:]...)
 			}
-			x1 := unhex(src[i+1])
-			x2 := unhex(src[i+2])
+			x1 := hexbyte2int(src[i+1])
+			x2 := hexbyte2int(src[i+2])
 			if x1 < 0 || x2 < 0 {
 				dst = append(dst, c)
 			} else {
