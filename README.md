@@ -193,7 +193,7 @@ Carefully inspect all the net/http request handlers converted to fasthttp whethe
 they retain references to RequestCtx or to its' members after returning.
 RequestCtx provides the following _band aids_ for this case:
 
-  * Wrap RequestHandler in [TimeoutHandler](https://godoc.org/github.com/valyala/fasthttp#TimeoutHandler).
+  * Wrap RequestHandler into [TimeoutHandler](https://godoc.org/github.com/valyala/fasthttp#TimeoutHandler).
   * Call [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
   before returning from RequestHandler if there are references to RequestCtx or to its' members.
   See [the example](https://godoc.org/github.com/valyala/fasthttp#example-RequestCtx-TimeoutError)
