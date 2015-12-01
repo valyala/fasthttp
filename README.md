@@ -149,11 +149,11 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
 
   * All the pseudocode below assumes w, r and ctx have these types:
   ```go
-var (
-	w http.ResponseWriter
-	r *http.Request
-	ctx *fasthttp.RequestCtx
-)
+	var (
+		w http.ResponseWriter
+		r *http.Request
+		ctx *fasthttp.RequestCtx
+	)
 ```
   * r.Body -> [ctx.PostBody()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostBody)
   * r.URL.Path -> [ctx.Path()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Path)
