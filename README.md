@@ -174,7 +174,7 @@ var (
   * w.Header() -> [ctx.Response.Header](https://godoc.org/github.com/valyala/fasthttp#ResponseHeader)
   * w.Write() -> [ctx.Write()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Write),
   [ctx.SetBody()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetBody),
-  [ctx.SetBodyStream](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetBodyStream)
+  [ctx.SetBodyStream()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetBodyStream)
   * w.WriteHeader() -> [ctx.SetStatusCode()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetStatusCode) +
   [ctx.Response.Header](https://godoc.org/github.com/valyala/fasthttp#ResponseHeader) +
   [ctx.Write()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Write)
