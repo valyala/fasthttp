@@ -1,0 +1,13 @@
+language: go
+
+go:
+  - 1.5.1
+  - tip
+
+env:
+  - GOOS=linux GOARCH=amd64
+  - GOOS=linux GOARCH=x86
+  - GOOS=linux GOARCH=arm
+  - GOOS=darwin GOARCH=amd64
+  - GOOS=darwin GOARCH=x86
+  - GOOS=darwin GOARCH=arm
