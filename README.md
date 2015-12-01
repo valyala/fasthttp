@@ -149,7 +149,7 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
 
   * All the pseudocode below assumes w, r and ctx have these types:
   ```go
-var {
+var (
 	w http.ResponseWriter
 	r *http.Request
 	ctx *fasthttp.RequestCtx
