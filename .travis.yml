@@ -6,8 +6,14 @@ go:
 
 env:
   - GOOS=linux GOARCH=amd64
-  - GOOS=linux GOARCH=x86
+  - GOOS=linux GOARCH=386
   - GOOS=linux GOARCH=arm
+  - GOOS=linux GOARCH=arm64
+  - GOOS=linux GOARCH=ppc64
   - GOOS=darwin GOARCH=amd64
-  - GOOS=darwin GOARCH=x86
+  - GOOS=darwin GOARCH=386
   - GOOS=darwin GOARCH=arm
+  - GOOS=darwin GOARCH=arm64
+  - GOOS=freebsd GOARCH=amd64
+  - GOOS=freebsd GOARCH=386
+  - GOOS=freebsd GOARCH=arm
