@@ -4,16 +4,22 @@ go:
   - 1.5.1
   - tip
 
+# The following snippet has been stolen
+# from https://github.com/travis-ci/travis-ci/issues/2517#issuecomment-48725040
 env:
-  - GOOS=linux GOARCH=amd64
-  - GOOS=linux GOARCH=386
-  - GOOS=linux GOARCH=arm
-  - GOOS=linux GOARCH=arm64
-  - GOOS=linux GOARCH=ppc64
-  - GOOS=darwin GOARCH=amd64
-  - GOOS=darwin GOARCH=386
-  - GOOS=darwin GOARCH=arm
-  - GOOS=darwin GOARCH=arm64
-  - GOOS=freebsd GOARCH=amd64
-  - GOOS=freebsd GOARCH=386
-  - GOOS=freebsd GOARCH=arm
+  - BUILD_GOOS=linux BUILD_GOARCH=amd64
+  - BUILD_GOOS=linux BUILD_GOARCH=386
+  - BUILD_GOOS=linux BUILD_GOARCH=arm
+  - BUILD_GOOS=linux BUILD_GOARCH=arm64
+  - BUILD_GOOS=linux BUILD_GOARCH=ppc64
+  - BUILD_GOOS=darwin BUILD_GOARCH=amd64
+  - BUILD_GOOS=darwin BUILD_GOARCH=386
+  - BUILD_GOOS=darwin BUILD_GOARCH=arm
+  - BUILD_GOOS=darwin BUILD_GOARCH=arm64
+  - BUILD_GOOS=freebsd BUILD_GOARCH=amd64
+  - BUILD_GOOS=freebsd BUILD_GOARCH=386
+  - BUILD_GOOS=freebsd BUILD_GOARCH=arm
+
+script:
+  - gvm cross $BUILD_GOOS $BUILD_GOARCH
+  - GOOS=$BUILD_GOOS GOARCH=$BUILD_GOARCH go test ./...
