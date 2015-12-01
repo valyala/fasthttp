@@ -147,15 +147,14 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
 
 * net/http -> fasthttp conversion cheat sheet:
 
-```go
-// all the pseudocode below assumes w, r and ctx have these types
-var (
+  * All the pseudocode below assumes w, r and ctx have these types:
+  ```go
+var {
 	w http.ResponseWriter
 	r *http.Request
 	ctx *fasthttp.RequestCtx
 )
 ```
-
   * r.Body -> [ctx.Request.Body()](https://godoc.org/github.com/valyala/fasthttp#Request.Body)
   * r.URL.Path -> [ctx.Path()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Path)
   * r.URL -> [ctx.URI()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.URI)
