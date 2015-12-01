@@ -147,7 +147,7 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
 
 * net/http -> fasthttp conversion cheat sheet:
 
-```
+```go
 // all the pseudocode below assumes w, r and ctx have these types
 var (
 	w http.ResponseWriter
@@ -186,16 +186,16 @@ var (
   like in net/http.
 
 * *VERY IMPORTANT NOTE* Fasthttp diallows holding references
-to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx) or its'
+to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx) or to its'
 members after returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
 Otherwise [data races](http://blog.golang.org/race-detector) are unevitable.
 Carefully inspect all the net/http request handlers converted to fasthttp whether
-they retain references to RequestCtx or its' members after returning.
+they retain references to RequestCtx or to its' members after returning.
 RequestCtx provides the following _band aids_ for this case:
 
   * Wrap RequestHandler in [TimeoutHandler](https://godoc.org/github.com/valyala/fasthttp#TimeoutHandler).
   * Call [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
-  before returning from RequestHandler if there are references to RequestCtx or its' members.
+  before returning from RequestHandler if there are references to RequestCtx or to its' members.
   See [the example](https://godoc.org/github.com/valyala/fasthttp#example-RequestCtx-TimeoutError)
   for more details.
 
