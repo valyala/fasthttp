@@ -87,6 +87,7 @@ func (wp *workerPool) clean() {
 		// do not do copy(chans, chans[1:]), since this may be quite slow
 		// for multi-million concurrent connections. Just move chans
 		// pointer one position ahead.
+		chans[0] = nil
 		chans = chans[1:]
 		wp.workersCount--
 	}

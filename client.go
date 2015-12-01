@@ -901,6 +901,7 @@ func (c *HostClient) connsCleaner() {
 			// Do not copy(c.conns, c.conns[1:]), since this may be
 			// quite slow for multi-million conns count.
 			// Just move c.conns one position ahead.
+			c.conns[0] = nil
 			c.conns = c.conns[1:]
 		}
 		if c.connsCount == 0 {
