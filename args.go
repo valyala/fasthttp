@@ -381,13 +381,7 @@ func decodeArg(dst, src []byte, decodePlus bool) []byte {
 func decodeArgAppend(dst, src []byte, decodePlus bool) []byte {
 	for i, n := 0, len(src); i < n; i++ {
 		c := src[i]
-		switch c {
-		case '+':
-			if decodePlus {
-				c = ' '
-			}
-			dst = append(dst, c)
-		case '%':
+		if c == '%' {
 			if i+2 >= n {
 				return append(dst, src[i:]...)
 			}
@@ -399,7 +393,9 @@ func decodeArgAppend(dst, src []byte, decodePlus bool) []byte {
 				dst = append(dst, byte(x1<<4|x2))
 				i += 2
 			}
-		default:
+		} else if decodePlus && c == '+' {
+			dst = append(dst, ' ')
+		} else {
 			dst = append(dst, c)
 		}
 	}
