@@ -276,7 +276,7 @@ RequestCtx provides the following _band aids_ for this case:
 Use brilliant tool - [race detector](http://blog.golang.org/race-detector) -
 for detecting and eliminating data races in your program. If you detected
 data race related to fasthttp in your program, then there is high probability
-your forgot calling [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
+you forgot calling [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
 before returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
 
 * Blind switching from net/http to fasthttp won't give you performance boost.
