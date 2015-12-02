@@ -251,7 +251,7 @@ fastttp.ListenAndServe(":80", m)
   * w.(http.Hijacker).Hijack() -> [ctx.Hijack()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack)
   * http.Error() -> [ctx.Error()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Error)
 
-* *VERY IMPORTANT!* Fasthttp diallows holding references
+* *VERY IMPORTANT!* Fasthttp disallows holding references
 to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx) or to its'
 members after returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
 Otherwise [data races](http://blog.golang.org/race-detector) are unevitable.
@@ -270,6 +270,12 @@ for detecting and eliminating data races in your program. If you detected
 data race related to fasthttp in your program, then there is high probability
 your forgot calling [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
 before returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
+
+* Blind switching from net/http to fasthttp won't give you performance boost.
+While fasthttp is optimized for speed, its' performance may be easily saturated
+by slow [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
+So [profile](http://blog.golang.org/profiling-go-programs) and optimize your
+code after switching to fasthttp.
 
 
 # Performance optimization tips for multi-core systems
