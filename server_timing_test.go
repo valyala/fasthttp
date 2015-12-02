@@ -80,36 +80,36 @@ func BenchmarkNetHTTPServerPost10KReqPerConn(b *testing.B) {
 	benchmarkNetHTTPServerPost(b, defaultClientsCount, 10000)
 }
 
-func BenchmarkServerGet1ReqPerConn1KClients(b *testing.B) {
-	benchmarkServerGet(b, 1000, 1)
+func BenchmarkServerGet1ReqPerConn10KClients(b *testing.B) {
+	benchmarkServerGet(b, 10000, 1)
 }
 
-func BenchmarkServerGet2ReqPerConn1KClients(b *testing.B) {
-	benchmarkServerGet(b, 1000, 2)
+func BenchmarkServerGet2ReqPerConn10KClients(b *testing.B) {
+	benchmarkServerGet(b, 10000, 2)
 }
 
-func BenchmarkServerGet10ReqPerConn1KClients(b *testing.B) {
-	benchmarkServerGet(b, 1000, 10)
+func BenchmarkServerGet10ReqPerConn10KClients(b *testing.B) {
+	benchmarkServerGet(b, 10000, 10)
 }
 
-func BenchmarkServerGet10KReqPerConn1KClients(b *testing.B) {
-	benchmarkServerGet(b, 1000, 10000)
+func BenchmarkServerGet100ReqPerConn10KClients(b *testing.B) {
+	benchmarkServerGet(b, 10000, 100)
 }
 
-func BenchmarkNetHTTPServerGet1ReqPerConn1KClients(b *testing.B) {
-	benchmarkNetHTTPServerGet(b, 1000, 1)
+func BenchmarkNetHTTPServerGet1ReqPerConn10KClients(b *testing.B) {
+	benchmarkNetHTTPServerGet(b, 10000, 1)
 }
 
-func BenchmarkNetHTTPServerGet2ReqPerConn1KClients(b *testing.B) {
-	benchmarkNetHTTPServerGet(b, 1000, 2)
+func BenchmarkNetHTTPServerGet2ReqPerConn10KClients(b *testing.B) {
+	benchmarkNetHTTPServerGet(b, 10000, 2)
 }
 
-func BenchmarkNetHTTPServerGet10ReqPerConn1KClients(b *testing.B) {
-	benchmarkNetHTTPServerGet(b, 1000, 10)
+func BenchmarkNetHTTPServerGet10ReqPerConn10KClients(b *testing.B) {
+	benchmarkNetHTTPServerGet(b, 10000, 10)
 }
 
-func BenchmarkNetHTTPServerGet10KReqPerConn1KClients(b *testing.B) {
-	benchmarkNetHTTPServerGet(b, 1000, 10000)
+func BenchmarkNetHTTPServerGet100ReqPerConn10KClients(b *testing.B) {
+	benchmarkNetHTTPServerGet(b, 10000, 100)
 }
 
 func BenchmarkServerHijack(b *testing.B) {
