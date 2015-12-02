@@ -133,16 +133,81 @@ requestHandler := func(w http.ResponseWriter, r *http.Request) {
 ```go
 // the corresponding fasthttp request handler
 requestHandler := func(ctx *fasthttp.RequestCtx) {
-	path := ctx.Path()
-	switch {
-	case string(path) == "/foo":
+	switch string(ctx.Path()) {
+	case "/foo":
 		fooHandler(ctx)
-	case string(path) == "/bar":
+	case "/bar":
 		barHandler(ctx)
 	default:
 		ctx.Error("Unsupported path", fasthttp.StatusNotFound)
 	}
 }
+```
+
+* Fasthttp allows setting response headers and writing response body
+in arbitray order. There is no 'headers first, then body' restriction
+like in net/http. The following code is valid for fasthttp:
+```go
+requestHandler := func(ctx *fasthttp.RequestCtx) {
+	// set some headers and status code first
+	ctx.SetContentType("foo/bar")
+	ctx.SetStatusCode(fasthttp.StatusOK)
+
+	// then write the first part of body
+	fmt.Fprintf(ctx, "this is the first part of body\n")
+
+	// then set more headers
+	ctx.Response.Header.Set("Foo-Bar", "baz")
+
+	// then write more body
+	fmt.Fprintf(ctx, "this is the second part of body\n")
+
+	// then override already written body
+	ctx.SetBody([]byte("this is completely new body contents"))
+
+	// then update status code
+	ctx.SetStatusCode(fasthttp.StatusNotFound)
+
+	// basically, anything may be updated many times before
+	// returning from RequestHandler.
+	//
+	// Unlike net/http fasthttp doesn't put response to the wire until
+	// returning from RequestHandler.
+}
+```
+
+* Fasthttp doesn't provide [ServeMux](https://golang.org/pkg/net/http/#ServeMux),
+since I believe third-party request routers like [httprouter](https://github.com/julienschmidt/httprouter)
+must be used instead. Net/http code with simple ServeMux is trivially converted
+to fasthttp code:
+
+```go
+// net/http code
+
+m := &http.ServeMux{}
+m.HandleFunc("/foo", fooHandlerFunc)
+m.HandleFunc("/bar", barHandlerFunc)
+m.Handle("/baz", bazHandler)
+
+http.ListenAndServe(":80", m)
+```
+
+```go
+// the corresponding fasthttp code
+m := func(ctx *fasthttp.RequestCtx) {
+	switch string(ctx.Path()) {
+	case "/foo":
+		fooHandlerFunc(ctx)
+	case "/bar":
+		barHandlerFunc(ctx)
+	case "/baz":
+		bazHandler.HandlerFunc(ctx)
+	default:
+		ctx.Error("not found", fasthttp.StatusNotFound)
+	}
+}
+
+fastttp.ListenAndServe(":80", m)
 ```
 
 * net/http -> fasthttp conversion table:
@@ -183,28 +248,8 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
   * w.WriteHeader() -> [ctx.SetStatusCode()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetStatusCode)
   * w.(http.Hijacker).Hijack() -> [ctx.Hijack()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack)
   * http.Error() -> [ctx.Error()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Error)
-  * Fasthttp allows setting response headers and writing response body
-  in arbitray order. There is no 'headers first, then body' restriction
-  like in net/http. The following code is valid for fasthttp:
-  ```go
-	// set some headers and status code first
-	ctx.SetContentType("foo/bar")
-	ctx.SetStatusCode(fasthttp.StatusOK)
 
-	// then write the first part of body
-	fmt.Fprintf(ctx, "this is the first part of body\n")
-
-	// then set more headers
-	ctx.Response.Header.Set("Foo-Bar", "baz")
-
-	// then write more body
-	fmt.Fprintf(ctx, "this is the second part of body\n")
-
-	// we can override already written body at any moment
-	ctx.SetBody([]byte("this is completely new body contents"))
-  ```
-
-* *VERY IMPORTANT NOTE* Fasthttp diallows holding references
+* *VERY IMPORTANT!* Fasthttp diallows holding references
 to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx) or to its'
 members after returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
 Otherwise [data races](http://blog.golang.org/race-detector) are unevitable.
@@ -219,7 +264,10 @@ RequestCtx provides the following _band aids_ for this case:
   for more details.
 
 Use brilliant tool - [race detector](http://blog.golang.org/race-detector) -
-for detecting and eliminating data races in your program.
+for detecting and eliminating data races in your program. If you detected
+data race related to fasthttp in your program, then there is high probability
+your forgot calling [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
+before returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
 
 
 # Performance optimization tips for multi-core systems
@@ -307,3 +355,15 @@ for detecting and eliminating data races in your program.
   routing must be implemented in a separate package(s) like
   [httprouter](https://github.com/julienschmidt/httprouter).
   See [this issue](https://github.com/valyala/fasthttp/issues/8) for more info.
+
+* *I detected data race in fasthttp!*
+
+  Cool! [File a bug](https://github.com/valyala/fasthttp/issues/new). But before
+  doing this check the following in your code:
+
+  * Make sure there are no references to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx)
+  or to its' members after returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
+  * Make sure you call [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
+  before returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler)
+  if there are references to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx)
+  or to its' members, which may be accessed by other goroutines.
