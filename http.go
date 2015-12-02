@@ -146,6 +146,11 @@ func (resp *Response) SetBody(body []byte) {
 	resp.body = append(resp.body[:0], body...)
 }
 
+// ResetBody resets response body.
+func (resp *Response) ResetBody() {
+	resp.body = resp.body[:0]
+}
+
 // Body returns request body.
 func (req *Request) Body() []byte {
 	return req.body
@@ -154,6 +159,11 @@ func (req *Request) Body() []byte {
 // SetBody sets request body.
 func (req *Request) SetBody(body []byte) {
 	req.body = append(req.body[:0], body...)
+}
+
+// ResetBody resets request body.
+func (req *Request) ResetBody() {
+	req.body = req.body[:0]
 }
 
 // CopyTo copies req contents to dst.

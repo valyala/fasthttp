@@ -593,6 +593,11 @@ func (ctx *RequestCtx) SetBody(body []byte) {
 	ctx.Response.SetBody(body)
 }
 
+// ResetBody resets response body contents.
+func (ctx *RequestCtx) ResetBody() {
+	ctx.Response.ResetBody()
+}
+
 // Write writes p into response body.
 func (ctx *RequestCtx) Write(p []byte) (int, error) {
 	ctx.Response.body = append(ctx.Response.body, p...)
