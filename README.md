@@ -145,7 +145,7 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
 }
 ```
 
-* net/http -> fasthttp conversion cheat sheet:
+* net/http -> fasthttp conversion table:
 
   * All the pseudocode below assumes w, r and ctx have these types:
   ```go
@@ -154,7 +154,7 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
 		r *http.Request
 		ctx *fasthttp.RequestCtx
 	)
-```
+  ```
   * r.Body -> [ctx.PostBody()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.PostBody)
   * r.URL.Path -> [ctx.Path()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Path)
   * r.URL -> [ctx.URI()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.URI)
@@ -175,17 +175,34 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
   * r.UserAgent() -> [ctx.Request.Header.UserAgent()](https://godoc.org/github.com/valyala/fasthttp#RequestHeader.UserAgent)
   * w.Header() -> [ctx.Response.Header](https://godoc.org/github.com/valyala/fasthttp#ResponseHeader)
   * w.Header().Set() -> [ctx.Response.Header.Set()](https://godoc.org/github.com/valyala/fasthttp#ResponseHeader.Set)
+  * w.Header().Set("Content-Type") -> [ctx.SetContentType()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetContentType)
+  * w.Header().Set("Set-Cookie") -> [ctx.Response.Header.SetCookie](https://godoc.org/github.com/valyala/fasthttp#ResponseHeader.SetCookie)
   * w.Write() -> [ctx.Write()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Write),
   [ctx.SetBody()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetBody),
   [ctx.SetBodyStream()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetBodyStream)
-  * w.WriteHeader() -> [ctx.SetStatusCode()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetStatusCode) +
-  [ctx.Response.Header](https://godoc.org/github.com/valyala/fasthttp#ResponseHeader) +
-  [ctx.Write()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Write)
-  * w.Hijack() -> [ctx.Hijack()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack)
+  * w.WriteHeader() -> [ctx.SetStatusCode()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SetStatusCode)
+  * w.(http.Hijacker).Hijack() -> [ctx.Hijack()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack)
   * http.Error() -> [ctx.Error()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Error)
   * Fasthttp allows setting response headers and writing response body
   in arbitray order. There is no 'headers first, then body' restriction
-  like in net/http.
+  like in net/http. The following code is valid for fasthttp:
+  ```go
+	// set some headers and status code first
+	ctx.SetContentType("foo/bar")
+	ctx.SetStatusCode(fasthttp.StatusOK)
+
+	// then write the first part of body
+	fmt.Fprintf(ctx, "this is the first part of body\n")
+
+	// then set more headers
+	ctx.Response.Header.Set("Foo-Bar", "baz")
+
+	// then write more body
+	fmt.Fprintf(ctx, "this is the second part of body\n")
+
+	// we can override already written body at any moment
+	ctx.SetBody([]byte("this is completely new body contents"))
+  ```
 
 * *VERY IMPORTANT NOTE* Fasthttp diallows holding references
 to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx) or to its'
