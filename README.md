@@ -8,6 +8,8 @@ concurrent keep-alive connections doing 100K qps from a single server.
 
 [Examples](https://godoc.org/github.com/valyala/fasthttp#pkg-examples)
 
+[Switching from net/http to fasthttp](#switching-from-nethttp-to-fasthttp)
+
 # HTTP server performance comparison with [net/http](https://golang.org/pkg/net/http/)
 
 In short, fasthttp is up to 10 times faster than net/http. Below are benchmark results.
@@ -72,7 +74,7 @@ BenchmarkServerGet10ReqPerConn1KClients-4 	 3000000	       440 ns/op	       0 B/
 BenchmarkServerGet10KReqPerConn1KClients-4	 5000000	       342 ns/op	       0 B/op	       0 allocs/op
 ```
 
-# Switching from [net/http](https://golang.org/pkg/net/http/) to fasthttp
+# Switching from net/http to fasthttp
 
 Unfortunately, fasthttp doesn't provide API identical to net/http.
 See the [FAQ](#faq) for details.
