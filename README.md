@@ -329,7 +329,7 @@ copy(dst, src)  // this is legal code
 (len(src) == 0)  // is true
 ```
 
-So throw away nil checks for []byte buffers from you code. For example,
+So throw away nil checks for `[]byte` buffers from you code. For example,
 ```go
 srcLen := 0
 if src != nil {
@@ -343,12 +343,12 @@ becomes
 srcLen := len(src)
 ```
 
-* String may be appended to []byte buffer with append
+* String may be appended to `[]byte` buffer with `append`
 ```go
 dst = append(dst, "foobar"...)
 ```
 
-* All fasthttp functions accept nil []byte buffer
+* All fasthttp functions accept nil `[]byte` buffer
 ```go
 statusCode, body, err := fasthttp.Get(nil, "http://google.com/")
 uintBuf := fasthttp.AppendUint(nil, 1234)
