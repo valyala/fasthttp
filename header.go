@@ -1465,19 +1465,16 @@ func getHeaderKeyBytes(kv *argsKV, key string) []byte {
 }
 
 func normalizeHeaderKey(b []byte) {
-	n := len(b)
 	up := true
-	for i := 0; i < n; i++ {
-		switch b[i] {
-		case '-':
+	for i, c := range b {
+		switch {
+		case c == '-':
 			up = true
+		case up:
+			up = false
+			b[i] = uppercaseByte(c)
 		default:
-			if up {
-				up = false
-				uppercaseByte(&b[i])
-			} else {
-				lowercaseByte(&b[i])
-			}
+			b[i] = lowercaseByte(c)
 		}
 	}
 }

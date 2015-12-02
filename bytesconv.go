@@ -30,20 +30,38 @@ func AppendUint(dst []byte, n int) []byte {
 		panic("BUG: int must be positive")
 	}
 
-	var b [20]byte
-	buf := b[:]
-	i := len(buf) - 1
-	for {
-		buf[i] = '0' + byte(n%10)
-		n /= 10
-		if n == 0 {
-			break
+	u := uint64(n)
+	var a [64]byte
+	i := 64
+
+	// compiler converts to a multiply and shift.
+	if ^uintptr(0)>>32 == 0 {
+		for u > uint64(^uintptr(0)) {
+			q := u / 1e9
+			us := uintptr(u - q*1e9) // us % 1e9 fits into a uintptr
+			for j := 9; j > 0; j-- {
+				i--
+				qs := us / 10
+				a[i] = byte(us - qs*10 + '0')
+				us = qs
+			}
+			u = q
 		}
-		i--
 	}
 
-	dst = append(dst, buf[i:]...)
-	return dst
+	// u guaranteed to fit into a uintptr
+	us := uintptr(u)
+	for us >= 10 {
+		i--
+		q := us / 10
+		a[i] = byte(us - q*10 + '0')
+		us = q
+	}
+	// u < 10
+	i--
+	a[i] = byte(us + '0')
+
+	return append(dst, a[i:]...)
 }
 
 // ParseUint parses uint from buf.
@@ -56,13 +74,11 @@ func ParseUint(buf []byte) (int, error) {
 }
 
 func parseUintBuf(b []byte) (int, int, error) {
-	n := len(b)
-	if n == 0 {
+	if len(b) == 0 {
 		return -1, 0, fmt.Errorf("empty integer")
 	}
 	v := 0
-	for i := 0; i < n; i++ {
-		c := b[i]
+	for i, c := range b {
 		k := c - '0'
 		if k > 9 {
 			if i == 0 {
@@ -75,7 +91,7 @@ func parseUintBuf(b []byte) (int, int, error) {
 		}
 		v = 10*v + int(k)
 	}
-	return v, n, nil
+	return v, len(b), nil
 }
 
 // ParseUfloat parses unsigned float from buf.
@@ -217,23 +233,23 @@ func hexbyte2int(c byte) int {
 
 const toLower = 'a' - 'A'
 
-func uppercaseByte(p *byte) {
-	c := *p
+func uppercaseByte(c byte) byte {
 	if c >= 'a' && c <= 'z' {
-		*p = c - toLower
+		return c - toLower
 	}
+	return c
 }
 
-func lowercaseByte(p *byte) {
-	c := *p
+func lowercaseByte(c byte) byte {
 	if c >= 'A' && c <= 'Z' {
-		*p = c + toLower
+		return c + toLower
 	}
+	return c
 }
 
 func lowercaseBytes(b []byte) {
-	for i, n := 0, len(b); i < n; i++ {
-		lowercaseByte(&b[i])
+	for i, c := range b {
+		b[i] = lowercaseByte(c)
 	}
 }
 
