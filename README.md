@@ -10,6 +10,12 @@ concurrent keep-alive connections doing 100K qps from a single server.
 
 [Switching from net/http to fasthttp](#switching-from-nethttp-to-fasthttp)
 
+[Fasthttp best practicies](#fasthttp-best-practicies)
+
+[Tricks with byte buffers](#tricks-with-byte-buffers)
+
+[FAQ](#faq)
+
 # HTTP server performance comparison with [net/http](https://golang.org/pkg/net/http/)
 
 In short, fasthttp is up to 10 times faster than net/http. Below are benchmark results.
