@@ -26,60 +26,60 @@ GOMAXPROCS=1
 
 net/http:
 ```
-$ GOMAXPROCS=1 go test -bench=NetHTTPServerGet -benchmem
+$ GOMAXPROCS=1 go test -bench=NetHTTPServerGet -benchmem -benchtime=5s
 PASS
-BenchmarkNetHTTPServerGet1ReqPerConn           	   50000	     21057 ns/op	    2409 B/op	      30 allocs/op
-BenchmarkNetHTTPServerGet2ReqPerConn           	  100000	     13772 ns/op	    2373 B/op	      24 allocs/op
-BenchmarkNetHTTPServerGet10ReqPerConn          	  200000	      8511 ns/op	    2102 B/op	      19 allocs/op
-BenchmarkNetHTTPServerGet10KReqPerConn         	  200000	      7501 ns/op	    2034 B/op	      18 allocs/op
-BenchmarkNetHTTPServerGet1ReqPerConn1KClients  	  100000	     22480 ns/op	    2734 B/op	      30 allocs/op
-BenchmarkNetHTTPServerGet2ReqPerConn1KClients  	  100000	     15380 ns/op	    2555 B/op	      24 allocs/op
-BenchmarkNetHTTPServerGet10ReqPerConn1KClients 	  100000	     11185 ns/op	    2759 B/op	      19 allocs/op
-BenchmarkNetHTTPServerGet10KReqPerConn1KClients	  200000	      7989 ns/op	    2034 B/op	      18 allocs/op
+BenchmarkNetHTTPServerGet1ReqPerConn            	  300000	     21236 ns/op	    2404 B/op	      30 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn            	  500000	     14634 ns/op	    2371 B/op	      24 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn           	 1000000	      9447 ns/op	    2101 B/op	      19 allocs/op
+BenchmarkNetHTTPServerGet10KReqPerConn          	 1000000	      7939 ns/op	    2033 B/op	      18 allocs/op
+BenchmarkNetHTTPServerGet1ReqPerConn10KClients  	  300000	     30291 ns/op	    4589 B/op	      31 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn10KClients  	  500000	     23199 ns/op	    3581 B/op	      25 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn10KClients 	  500000	     13270 ns/op	    2621 B/op	      19 allocs/op
+BenchmarkNetHTTPServerGet100ReqPerConn10KClients	  500000	     11412 ns/op	    2119 B/op	      18 allocs/op
 ```
 
 fasthttp:
 ```
-$ GOMAXPROCS=1 go test -bench=kServerGet -benchmem
+$ GOMAXPROCS=1 go test -bench=kServerGet -benchmem -benchtime=5s
 PASS
-BenchmarkServerGet1ReqPerConn           	 1000000	      2395 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet2ReqPerConn           	 1000000	      1897 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10ReqPerConn          	 1000000	      1285 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10KReqPerConn         	 1000000	      1110 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet1ReqPerConn1KClients  	 1000000	      2186 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet2ReqPerConn1KClients  	 1000000	      1902 ns/op	       1 B/op	       0 allocs/op
-BenchmarkServerGet10ReqPerConn1KClients 	 1000000	      1343 ns/op	       1 B/op	       0 allocs/op
-BenchmarkServerGet10KReqPerConn1KClients	 1000000	      1124 ns/op	       1 B/op	       0 allocs/op
+BenchmarkServerGet1ReqPerConn            	 3000000	      2341 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet2ReqPerConn            	 5000000	      1799 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10ReqPerConn           	 5000000	      1239 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10KReqPerConn          	10000000	      1090 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet1ReqPerConn10KClients  	 3000000	      2860 ns/op	       4 B/op	       0 allocs/op
+BenchmarkServerGet2ReqPerConn10KClients  	 3000000	      1992 ns/op	       1 B/op	       0 allocs/op
+BenchmarkServerGet10ReqPerConn10KClients 	 5000000	      1297 ns/op	       1 B/op	       0 allocs/op
+BenchmarkServerGet100ReqPerConn10KClients	10000000	      1264 ns/op	       9 B/op	       0 allocs/op
 ```
 
 GOMAXPROCS=4
 
 net/http:
 ```
-$ GOMAXPROCS=4 go test -bench=NetHTTPServerGet -benchmem
+$ GOMAXPROCS=4 go test -bench=NetHTTPServerGet -benchmem -benchtime=5s
 PASS
-BenchmarkNetHTTPServerGet1ReqPerConn-4           	  200000	      6207 ns/op	    2434 B/op	      30 allocs/op
-BenchmarkNetHTTPServerGet2ReqPerConn-4           	  300000	      4158 ns/op	    2398 B/op	      24 allocs/op
-BenchmarkNetHTTPServerGet10ReqPerConn-4          	  500000	      2603 ns/op	    2119 B/op	      19 allocs/op
-BenchmarkNetHTTPServerGet10KReqPerConn-4         	 1000000	      2225 ns/op	    2037 B/op	      18 allocs/op
-BenchmarkNetHTTPServerGet1ReqPerConn1KClients-4  	  200000	      5972 ns/op	    2496 B/op	      30 allocs/op
-BenchmarkNetHTTPServerGet2ReqPerConn1KClients-4  	  300000	      4309 ns/op	    2461 B/op	      24 allocs/op
-BenchmarkNetHTTPServerGet10ReqPerConn1KClients-4 	  500000	      3787 ns/op	    2533 B/op	      19 allocs/op
-BenchmarkNetHTTPServerGet10KReqPerConn1KClients-4	  500000	      2350 ns/op	    2037 B/op	      18 allocs/op
+BenchmarkNetHTTPServerGet1ReqPerConn-4            	 1000000	      5545 ns/op	    2433 B/op	      30 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn-4            	 2000000	      4147 ns/op	    2398 B/op	      24 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn-4           	 3000000	      2628 ns/op	    2118 B/op	      19 allocs/op
+BenchmarkNetHTTPServerGet10KReqPerConn-4          	 3000000	      2304 ns/op	    2037 B/op	      18 allocs/op
+BenchmarkNetHTTPServerGet1ReqPerConn10KClients-4  	 1000000	      7327 ns/op	    3561 B/op	      30 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn10KClients-4  	 1000000	      5952 ns/op	    3073 B/op	      24 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn10KClients-4 	 2000000	      4345 ns/op	    2530 B/op	      19 allocs/op
+BenchmarkNetHTTPServerGet100ReqPerConn10KClients-4	 2000000	      3866 ns/op	    2132 B/op	      18 allocs/op
 ```
 
 fasthttp:
 ```
-$ GOMAXPROCS=4 go test -bench=kServerGet -benchmem
+$ GOMAXPROCS=4 go test -bench=kServerGet -benchmem -benchtime=5s
 PASS
-BenchmarkServerGet1ReqPerConn-4           	 1000000	      1038 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet2ReqPerConn-4           	 2000000	       764 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10ReqPerConn-4          	 3000000	       388 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10KReqPerConn-4         	 5000000	       334 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet1ReqPerConn1KClients-4  	 1000000	      1123 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet2ReqPerConn1KClients-4  	 2000000	       759 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10ReqPerConn1KClients-4 	 3000000	       440 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10KReqPerConn1KClients-4	 5000000	       342 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet1ReqPerConn-4            	10000000	      1053 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet2ReqPerConn-4            	10000000	       685 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10ReqPerConn-4           	20000000	       393 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10KReqPerConn-4          	20000000	       338 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet1ReqPerConn10KClients-4  	10000000	      1033 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet2ReqPerConn10KClients-4  	10000000	       668 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10ReqPerConn10KClients-4 	20000000	       393 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet100ReqPerConn10KClients-4	20000000	       384 ns/op	       4 B/op	       0 allocs/op
 ```
 
 # Switching from net/http to fasthttp
