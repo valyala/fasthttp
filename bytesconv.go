@@ -32,15 +32,16 @@ func AppendUint(dst []byte, n int) []byte {
 
 	var b [20]byte
 	buf := b[:]
-	i := len(buf) - 1
-	for {
-		buf[i] = '0' + byte(n%10)
-		n /= 10
-		if n == 0 {
-			break
-		}
+	i := len(buf)
+	var q int
+	for n >= 10 {
 		i--
+		q = n / 10
+		buf[i] = '0' + byte(n-q*10)
+		n = q
 	}
+	i--
+	buf[i] = '0' + byte(n)
 
 	dst = append(dst, buf[i:]...)
 	return dst
