@@ -344,7 +344,7 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 		return errGetOnly
 	}
 
-	if req.Header.IsPost() || req.Header.IsPut() {
+	if !req.Header.noBody() {
 		contentLength := req.Header.ContentLength()
 		if contentLength > 0 {
 			// Pre-read multipart form data of known length.
@@ -426,7 +426,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	if err != nil {
 		return err
 	}
-	if req.Header.IsPost() || req.Header.IsPut() {
+	if !req.Header.noBody() {
 		_, err = w.Write(req.body)
 	} else if len(req.body) > 0 {
 		return fmt.Errorf("Non-zero body for non-POST request. body=%q", req.body)
