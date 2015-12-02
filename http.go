@@ -102,6 +102,7 @@ func (req *Request) SetConnectionClose() {
 // bodyStream.Close() is called after finishing reading all body data
 // if it implements io.Closer.
 func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
+	resp.body = resp.body[:0]
 	resp.bodyStream = bodyStream
 	resp.Header.SetContentLength(bodySize)
 }
