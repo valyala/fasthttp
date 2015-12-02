@@ -390,13 +390,13 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
 
   Yes:
   * net/http supports [HTTP/2.0 starting from go1.6](https://http2.golang.org/).
-  * net/http API is stable, while fasthttp API may change at any time.
+  * net/http API is stable, while fasthttp API constantly evolves.
   * net/http handles more HTTP corner cases.
   * net/http should contain less bugs, since it is used and tested by much
-    wider user base.
+    wider audience.
   * Many existing web frameworks and request routers are built on top
     of net/http.
-  * net/http works on go older than 1.5.
+  * net/http works on Go older than 1.5.
 
 * *Which GO versions are supported by fasthttp?*
 
