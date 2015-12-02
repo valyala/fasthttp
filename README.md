@@ -308,8 +308,8 @@ code after switching to fasthttp.
 
 The following tricks are used by fasthttp. Use them in your code too.
 
+* Standard Go functions accept nil buffers
 ```go
-// Standard Go functions accept nil buffer:
 var (
 	// both buffers are uninitialized
 	dst []byte
@@ -319,11 +319,29 @@ dst = append(dst, src...)  // this is legal code
 copy(dst, src)  // this is legal code
 (string(src) == "")  // is true
 (len(src) == 0)  // is true
+```
 
-// strings may be appended to []byte buffer with append:
+So throw away nil checks for []byte buffers from you code. For example,
+```go
+srcLen := 0
+if src != nil {
+	srcLen = len(src)
+}
+```
+
+becomes
+
+```go
+srcLen := len(src)
+```
+
+* String may be appended to []byte buffer with append
+```go
 dst = append(dst, "foobar"...)
+```
 
-// All fasthttp functions accept nil []byte buffer:
+* All fasthttp functions accept nil []byte buffer
+```go
 statusCode, body, err := fasthttp.Get(nil, "http://google.com/")
 uintBuf := fasthttp.AppendUint(nil, 1234)
 ```
