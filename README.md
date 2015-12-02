@@ -304,6 +304,30 @@ code after switching to fasthttp.
   [race detector](https://golang.org/doc/articles/race_detector.html) on a regular basis.
 
 
+# Tricks with `[]byte` buffers
+
+The following tricks are used by fasthttp. Use them in your code too.
+
+```go
+// Standard Go functions accept nil buffer:
+var (
+	// both buffers are uninitialized
+	dst []byte
+	src []byte
+)
+dst = append(dst, src...)  // this is legal code
+copy(dst, src)  // this is legal code
+(string(src) == "")  // is true
+(len(src) == 0)  // is true
+
+// strings may be appended to []byte buffer with append:
+dst = append(dst, "foobar"...)
+
+// All fasthttp functions accept nil []byte buffer:
+statusCode, body, err := fasthttp.Get(nil, "http://google.com/")
+uintBuf := fasthttp.AppendUint(nil, 1234)
+```
+
 # FAQ
 
 * *Why creating yet another http package instead of optimizing net/http?*
