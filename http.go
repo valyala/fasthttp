@@ -143,11 +143,13 @@ func (resp *Response) Body() []byte {
 
 // SetBody sets response body.
 func (resp *Response) SetBody(body []byte) {
+	resp.bodyStream = nil
 	resp.body = append(resp.body[:0], body...)
 }
 
 // ResetBody resets response body.
 func (resp *Response) ResetBody() {
+	resp.bodyStream = nil
 	resp.body = resp.body[:0]
 }
 
