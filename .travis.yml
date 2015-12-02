@@ -3,16 +3,14 @@ language: go
 go:
   - tip
 
-env:
-  - GOOS=linux GOARCH=amd64
-  - GOOS=linux GOARCH=386
-  - GOOS=linux GOARCH=arm
-  - GOOS=linux GOARCH=arm64
-  - GOOS=linux GOARCH=ppc64
-  - GOOS=darwin GOARCH=amd64
-  - GOOS=darwin GOARCH=386
-  - GOOS=darwin GOARCH=arm
-  - GOOS=darwin GOARCH=arm64
-  - GOOS=freebsd GOARCH=amd64
-  - GOOS=freebsd GOARCH=386
-  - GOOS=freebsd GOARCH=arm
+before_install:
+  - go get github.com/mitchellh/gox
+
+script:
+  # build test for supported platforms
+  - gox -os="linux"
+  - gox -os="darwin"
+  - gox -os="freebsd"
+
+  # run tests on a standard platform
+  - go test -v ./...
