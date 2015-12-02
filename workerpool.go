@@ -79,19 +79,21 @@ func (wp *workerPool) clean() {
 	// Clean least recently used workers if they didn't serve connections
 	// for more than one second.
 	wp.lock.Lock()
-	chans := wp.ready
-	for len(chans) > 1 && time.Since(chans[0].t) > time.Second {
+	ready := wp.ready
+	for len(ready) > 1 && time.Since(ready[0].t) > 10*time.Second {
 		// notify the worker to stop.
-		chans[0].ch <- nil
+		ready[0].ch <- nil
 
-		// do not do copy(chans, chans[1:]), since this may be quite slow
-		// for multi-million concurrent connections. Just move chans
-		// pointer one position ahead.
-		chans[0] = nil
-		chans = chans[1:]
+		ready = ready[1:]
 		wp.workersCount--
 	}
-	wp.ready = chans
+	if len(ready) < len(wp.ready) {
+		copy(wp.ready, ready)
+		for i := len(ready); i < len(wp.ready); i++ {
+			wp.ready[i] = nil
+		}
+		wp.ready = wp.ready[:len(ready)]
+	}
 	wp.lock.Unlock()
 }
 
@@ -123,16 +125,16 @@ func (wp *workerPool) getCh() *workerChan {
 	createWorker := false
 
 	wp.lock.Lock()
-	chans := wp.ready
-	n := len(chans) - 1
+	ready := wp.ready
+	n := len(ready) - 1
 	if n < 0 {
 		if wp.workersCount < wp.MaxWorkersCount {
 			createWorker = true
 			wp.workersCount++
 		}
 	} else {
-		ch = chans[n]
-		wp.ready = chans[:n]
+		ch = ready[n]
+		wp.ready = ready[:n]
 	}
 	wp.lock.Unlock()
 

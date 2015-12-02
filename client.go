@@ -892,17 +892,20 @@ func (c *HostClient) connsCleaner() {
 	for {
 		t := time.Now()
 		c.connsLock.Lock()
-		for len(c.conns) > 0 && t.Sub(c.conns[0].t) > 10*time.Second {
-			cc := c.conns[0]
+		conns := c.conns
+		for len(conns) > 0 && t.Sub(conns[0].t) > 10*time.Second {
+			cc := conns[0]
 			c.connsCount--
 			cc.c.Close()
 			releaseClientConn(cc)
-
-			// Do not copy(c.conns, c.conns[1:]), since this may be
-			// quite slow for multi-million conns count.
-			// Just move c.conns one position ahead.
-			c.conns[0] = nil
-			c.conns = c.conns[1:]
+			conns = conns[1:]
+		}
+		if len(conns) < len(c.conns) {
+			copy(c.conns, conns)
+			for i := len(conns); i < len(c.conns); i++ {
+				c.conns[i] = nil
+			}
+			c.conns = c.conns[:len(conns)]
 		}
 		if c.connsCount == 0 {
 			mustStop = true
