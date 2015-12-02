@@ -20,7 +20,7 @@ concurrent keep-alive connections doing 100K qps from a single server.
 
 # HTTP server performance comparison with [net/http](https://golang.org/pkg/net/http/)
 
-In short, fasthttp is up to 10 times faster than net/http. Below are benchmark results.
+In short, fasthttp server is up to 10 times faster than net/http. Below are benchmark results.
 
 GOMAXPROCS=1
 
@@ -80,6 +80,46 @@ BenchmarkServerGet1ReqPerConn10KClients-4  	10000000	      1033 ns/op	       0 B
 BenchmarkServerGet2ReqPerConn10KClients-4  	10000000	       668 ns/op	       0 B/op	       0 allocs/op
 BenchmarkServerGet10ReqPerConn10KClients-4 	20000000	       393 ns/op	       0 B/op	       0 allocs/op
 BenchmarkServerGet100ReqPerConn10KClients-4	20000000	       384 ns/op	       4 B/op	       0 allocs/op
+```
+
+# HTTP client comparison with net/http
+
+In short, fasthttp client is up to 10 times faster than net/http. Below are benchmark results.
+
+GOMAXPROCS=1
+
+net/http:
+```
+$ GOMAXPROCS=1 go test -bench='HTTPClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
+PASS
+BenchmarkNetHTTPClientDoFastServer	  500000	     17535 ns/op	    2624 B/op	      38 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd 	  200000	     56593 ns/op	    5012 B/op	      59 allocs/op
+```
+
+fasthttp:
+```
+$ GOMAXPROCS=1 go test -bench='kClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
+PASS
+BenchmarkClientDoFastServer	 5000000	      1420 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd 	  500000	     17912 ns/op	       0 B/op	       0 allocs/op
+```
+
+GOMAXPROCS=4
+
+net/http:
+```
+$ GOMAXPROCS=4 go test -bench='HTTPClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
+PASS
+BenchmarkNetHTTPClientDoFastServer-4	 1000000	      5795 ns/op	    2626 B/op	      38 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd-4 	  500000	     19304 ns/op	    5953 B/op	      62 allocs/op
+```
+
+fasthttp:
+```
+$ GOMAXPROCS=4 go test -bench='kClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
+PASS
+BenchmarkClientDoFastServer-4	20000000	       443 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd-4 	 1000000	      5954 ns/op	       0 B/op	       0 allocs/op
 ```
 
 # Switching from net/http to fasthttp
