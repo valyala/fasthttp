@@ -20,6 +20,9 @@ var (
 // Cookie represents HTTP response cookie.
 //
 // Do not copy Cookie obects. Create new obect and use CopyTo instead.
+//
+// It is unsafe modifying/reading Cookie instance from concurrently
+// running goroutines.
 type Cookie struct {
 	key    []byte
 	value  []byte

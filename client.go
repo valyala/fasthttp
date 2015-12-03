@@ -82,6 +82,10 @@ func Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, 
 var defaultClient Client
 
 // Client implements http client.
+//
+// Copying Client by value is prohibited. Create new instance instead.
+//
+// It is safe calling Client methods from concurrently running goroutines.
 type Client struct {
 	// Client name. Used in User-Agent request header.
 	//
@@ -305,7 +309,9 @@ type DialFunc func(addr string) (net.Conn, error)
 // HostClient is a single-host http client. It can make http requests
 // to the given Addr only.
 //
-// It is forbidden copying HostClient instances.
+// It is forbidden copying HostClient instances. Create new instances instead.
+//
+// It is safe calling HostClient methods from concurrently running goroutines.
 type HostClient struct {
 	// HTTP server host address, which is passed to Dial.
 	//

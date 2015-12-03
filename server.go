@@ -88,6 +88,8 @@ type RequestHandler func(ctx *RequestCtx)
 //
 // It is forbidden copying Server instances. Create new Server instances
 // instead.
+//
+// It is safe to call Server methods from concurrently running goroutines.
 type Server struct {
 	// Handler for processing incoming requests.
 	Handler RequestHandler
@@ -226,6 +228,9 @@ func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) Request
 // (for instance, ctx is passed to a separate goroutine and ctx lifetime cannot
 // be controlled), then the RequestHandler MUST call ctx.TimeoutError()
 // before return.
+//
+// It is unsafe modifying/reading RequestCtx instance from concurrently
+// running goroutines.
 type RequestCtx struct {
 	// Incoming request.
 	//

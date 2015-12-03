@@ -14,6 +14,9 @@ import (
 //
 // It is forbidden copying ResponseHeader instances.
 // Create new instances instead and use CopyTo.
+//
+// It is unsafe modifying/reading ResponseHeader instance from concurrently
+// running goroutines.
 type ResponseHeader struct {
 	statusCode int
 
@@ -35,6 +38,9 @@ type ResponseHeader struct {
 //
 // It is forbidden copying RequestHeader instances.
 // Create new instances instead and use CopyTo.
+//
+// It is unsafe modifying/reading RequestHeader instance from concurrently
+// running goroutines.
 type RequestHeader struct {
 	connectionClose bool
 
