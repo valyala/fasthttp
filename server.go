@@ -230,7 +230,8 @@ func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) Request
 // before return.
 //
 // It is unsafe modifying/reading RequestCtx instance from concurrently
-// running goroutines.
+// running goroutines. The only exception is TimeoutError, which may be called
+// when other goroutines access RequestCtx.
 type RequestCtx struct {
 	// Incoming request.
 	//
