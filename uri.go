@@ -263,6 +263,17 @@ func normalizePath(dst, src []byte) []byte {
 		b = b[:len(b)-n+nn]
 	}
 
+	// remove /./ parts
+	for {
+		n := bytes.Index(b, strSlashDotSlash)
+		if n < 0 {
+			break
+		}
+		nn := n + len(strSlashDotSlash) - 1
+		copy(b[n:], b[nn:])
+		b = b[:len(b)-nn+n]
+	}
+
 	// remove trailing /foo/..
 	n := bytes.LastIndex(b, strSlashDotDot)
 	if n >= 0 && n+len(strSlashDotDot) == len(b) {

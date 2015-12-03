@@ -71,6 +71,11 @@ func TestURIPathNormalize(t *testing.T) {
 
 	// fake dotdot
 	testURIPathNormalize(t, &u, "/aaa/..bbb/ccc/..", "/aaa/..bbb/")
+
+	// single dot
+	testURIPathNormalize(t, &u, "/a/./b/././c/./d.html", "/a/b/c/d.html")
+	testURIPathNormalize(t, &u, "./foo/", "/foo/")
+	testURIPathNormalize(t, &u, "./../.././../../aaa/bbb/../../../././../", "/")
 }
 
 func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string) {

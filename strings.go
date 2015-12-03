@@ -10,6 +10,7 @@ var (
 	strSlash            = []byte("/")
 	strSlashSlash       = []byte("//")
 	strSlashDotDot      = []byte("/..")
+	strSlashDotSlash    = []byte("/./")
 	strSlashDotDotSlash = []byte("/../")
 	strCRLF             = []byte("\r\n")
 	strHTTP             = []byte("http")
