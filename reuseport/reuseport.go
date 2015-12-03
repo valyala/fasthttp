@@ -1,3 +1,5 @@
+// +build linux darwin dragonfly freebsd netbsd openbsd
+
 // Package reuseport provides TCP net.Listener with SO_REUSEPORT support.
 //
 // SO_REUSEPORT allows linear scaling server performance on multi-CPU servers.
