@@ -1,8 +1,8 @@
 # fasthttp
 Fast HTTP implementation for Go.
 
-Currently fasthttp is successfully used in a production serving up to 1M
-concurrent keep-alive connections doing 100K qps from a single server.
+Currently fasthttp is successfully used in a production serving 100K rps from 1M
+concurrent keep-alive connections on a single server.
 
 [![Build Status](https://travis-ci.org/valyala/fasthttp.svg)](https://travis-ci.org/valyala/fasthttp)
 
