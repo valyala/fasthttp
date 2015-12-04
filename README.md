@@ -8,7 +8,9 @@ concurrent keep-alive connections on a single server.
 
 [Documentation](https://godoc.org/github.com/valyala/fasthttp)
 
-[Examples](https://godoc.org/github.com/valyala/fasthttp#pkg-examples)
+[Examples from docs](https://godoc.org/github.com/valyala/fasthttp#pkg-examples)
+
+[Code examples](examples)
 
 [Switching from net/http to fasthttp](#switching-from-nethttp-to-fasthttp)
 
