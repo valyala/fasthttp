@@ -197,7 +197,7 @@ func createDirIndex(base *URI, filePath string) (*fsFile, error) {
 	fmt.Fprintf(w, "<h1>%s</h1>", basePathEscaped)
 	fmt.Fprintf(w, "<ul>")
 
-	if len(basePathEscaped) > 0 {
+	if len(basePathEscaped) > 1 {
 		fmt.Fprintf(w, `<li><a href="..">..</a></li>`)
 	}
 
