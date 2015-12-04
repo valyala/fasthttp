@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"io/ioutil"
 	"os"
+	"sort"
 	"testing"
+	"time"
 )
 
-func TestFSHandler(t *testing.T) {
+func TestFSHandlerSingleThread(t *testing.T) {
 	requestHandler := FSHandler(".", 0)
-	var ctx RequestCtx
-	var req Request
-	ctx.Init(&req, nil, defaultLogger)
 
 	f, err := os.Open(".")
 	if err != nil {
@@ -23,44 +22,92 @@ func TestFSHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read dirnames in cwd: %s", err)
 	}
+	sort.Sort(sort.StringSlice(filenames))
 
 	for i := 0; i < 3; i++ {
-		filesTested := 0
-		for _, name := range filenames {
-			if f, err = os.Open(name); err != nil {
-				t.Fatalf("cannot open file %q: %s", name, err)
-			}
-			stat, err := f.Stat()
-			if err != nil {
-				t.Fatalf("cannot get file stat %q: %s", name, err)
-			}
-			if stat.IsDir() {
-				f.Close()
-				continue
-			}
-			data, err := ioutil.ReadAll(f)
-			f.Close()
-			if err != nil {
-				t.Fatalf("cannot read file contents %q: %s", name, err)
-			}
+		fsHandlerTest(t, requestHandler, filenames)
+	}
+}
 
-			ctx.URI().Update(name)
-			requestHandler(&ctx)
-			body, err := ioutil.ReadAll(ctx.Response.bodyStream)
-			if err != nil {
-				t.Fatalf("error when reading response body stream: %s", err)
+func TestFSHandlerConcurrent(t *testing.T) {
+	requestHandler := FSHandler(".", 0)
+
+	f, err := os.Open(".")
+	if err != nil {
+		t.Fatalf("cannot open cwd: %s", err)
+	}
+
+	filenames, err := f.Readdirnames(0)
+	f.Close()
+	if err != nil {
+		t.Fatalf("cannot read dirnames in cwd: %s", err)
+	}
+	sort.Sort(sort.StringSlice(filenames))
+
+	concurrency := 10
+	ch := make(chan struct{}, concurrency)
+	for j := 0; j < concurrency; j++ {
+		go func() {
+			for i := 0; i < 3; i++ {
+				fsHandlerTest(t, requestHandler, filenames)
 			}
-			if !bytes.Equal(body, data) {
-				t.Fatalf("unexpected body returned: %q. Expecting %q", body, data)
-			}
-			filesTested++
-			if filesTested >= 10 {
-				break
-			}
+			ch <- struct{}{}
+		}()
+	}
+
+	for j := 0; j < concurrency; j++ {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
 		}
 	}
 }
 
+func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []string) {
+	var ctx RequestCtx
+	var req Request
+	ctx.Init(&req, nil, defaultLogger)
+	ctx.Request.Header.SetHost("foobar.com")
+
+	filesTested := 0
+	for _, name := range filenames {
+		f, err := os.Open(name)
+		if err != nil {
+			t.Fatalf("cannot open file %q: %s", name, err)
+		}
+		stat, err := f.Stat()
+		if err != nil {
+			t.Fatalf("cannot get file stat %q: %s", name, err)
+		}
+		if stat.IsDir() {
+			f.Close()
+			continue
+		}
+		data, err := ioutil.ReadAll(f)
+		f.Close()
+		if err != nil {
+			t.Fatalf("cannot read file contents %q: %s", name, err)
+		}
+
+		ctx.URI().Update(name)
+		requestHandler(&ctx)
+		if ctx.Response.bodyStream == nil {
+			t.Fatalf("response body stream must be non-empty")
+		}
+		body, err := ioutil.ReadAll(ctx.Response.bodyStream)
+		if err != nil {
+			t.Fatalf("error when reading response body stream: %s", err)
+		}
+		if !bytes.Equal(body, data) {
+			t.Fatalf("unexpected body returned: %q. Expecting %q", body, data)
+		}
+		filesTested++
+		if filesTested >= 10 {
+			break
+		}
+	}
+}
 func TestStripPathSlashes(t *testing.T) {
 	testStripPathSlashes(t, "", 0, "")
 	testStripPathSlashes(t, "", 10, "")

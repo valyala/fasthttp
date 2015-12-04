@@ -16,7 +16,7 @@ import (
 
 // FSHandlerCacheDuration is the duration for caching open file handles
 // by FSHandler.
-const FSHandlerCacheDuration = 10 * time.Second
+const FSHandlerCacheDuration = 5 * time.Second
 
 // FSHandler returns request handler serving static files from
 // the given root folder.
@@ -69,65 +69,80 @@ type fsHandler struct {
 	root         string
 	stripSlashes int
 	cache        map[string]*fsFile
+	pendingFiles []*fsFile
 	cacheLock    sync.Mutex
+
+	fileReaderPool sync.Pool
 }
 
 type fsFile struct {
+	h             *fsHandler
 	f             *os.File
 	dirIndex      []byte
 	contentType   string
 	contentLength int
-	t             time.Time
+
+	t            time.Time
+	readersCount int
 }
 
-func (ff *fsFile) Reader() io.Reader {
-	v := fsFileReaderPool.Get()
+func (ff *fsFile) Reader(incrementReaders bool) io.Reader {
+	if incrementReaders {
+		ff.h.cacheLock.Lock()
+		ff.readersCount++
+		ff.h.cacheLock.Unlock()
+	}
+
+	v := ff.h.fileReaderPool.Get()
 	if v == nil {
 		r := &fsFileReader{
-			f:        ff.f,
-			dirIndex: ff.dirIndex,
+			ff: ff,
 		}
 		r.v = r
 		return r
 	}
 	r := v.(*fsFileReader)
-	r.f = ff.f
-	r.dirIndex = ff.dirIndex
 	if r.offset > 0 {
 		panic("BUG: fsFileReader with non-nil offset found in the pool")
 	}
+
 	return r
 }
 
-var fsFileReaderPool sync.Pool
-
 type fsFileReader struct {
-	f        *os.File
-	dirIndex []byte
-	offset   int64
+	ff     *fsFile
+	offset int64
 
 	v interface{}
 }
 
 func (r *fsFileReader) Close() error {
-	r.f = nil
-	r.dirIndex = nil
+	ff := r.ff
+
+	ff.h.cacheLock.Lock()
+	ff.readersCount--
+	if ff.readersCount < 0 {
+		panic("BUG: negative fsFile.readersCount!")
+	}
+	ff.h.cacheLock.Unlock()
+
+	r.ff = nil
 	r.offset = 0
-	fsFileReaderPool.Put(r.v)
+	ff.h.fileReaderPool.Put(r.v)
 	return nil
 }
 
 func (r *fsFileReader) Read(p []byte) (int, error) {
-	if r.f != nil {
-		n, err := r.f.ReadAt(p, r.offset)
+	if r.ff.f != nil {
+		n, err := r.ff.f.ReadAt(p, r.offset)
 		r.offset += int64(n)
 		return n, err
 	}
 
-	if r.offset == int64(len(r.dirIndex)) {
+	if r.offset == int64(len(r.ff.dirIndex)) {
 		return 0, io.EOF
 	}
-	n := copy(p, r.dirIndex[r.offset:])
+	n := copy(p, r.ff.dirIndex[r.offset:])
 	r.offset += int64(n)
 	return n, nil
 }
@@ -135,14 +150,34 @@ func (r *fsFileReader) Read(p []byte) (int, error) {
 func (h *fsHandler) cleanCache() {
 	t := time.Now()
 	h.cacheLock.Lock()
-	for k, v := range h.cache {
-		if t.Sub(v.t) > FSHandlerCacheDuration {
-			if v.f != nil {
-				v.f.Close()
+
+	// Close files which couldn't be closed before due to non-zero
+	// readers count.
+	var pendingFiles []*fsFile
+	for _, ff := range h.pendingFiles {
+		if ff.readersCount > 0 {
+			pendingFiles = append(pendingFiles, ff)
+		} else {
+			ff.f.Close()
+		}
+	}
+	h.pendingFiles = pendingFiles
+
+	// Close stale file handles.
+	for k, ff := range h.cache {
+		if t.Sub(ff.t) > FSHandlerCacheDuration {
+			if ff.readersCount > 0 {
+				// There are pending readers on stale file handle,
+				// so we cannot close it. Put it into pendingFiles
+				// so it will be closed later.
+				h.pendingFiles = append(h.pendingFiles, ff)
+			} else if ff.f != nil {
+				ff.f.Close()
 			}
 			delete(h.cache, k)
 		}
 	}
+
 	h.cacheLock.Unlock()
 }
 
@@ -156,16 +191,22 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		return
 	}
 
+	incrementReaders := true
+
 	h.cacheLock.Lock()
 	ff, ok := h.cache[string(path)]
+	if ok {
+		ff.readersCount++
+		incrementReaders = false
+	}
 	h.cacheLock.Unlock()
 
 	if !ok {
 		filePath := h.root + string(path)
 		var err error
-		ff, err = openFSFile(filePath)
+		ff, err = h.openFSFile(filePath)
 		if err == errDirIndexRequired {
-			ff, err = createDirIndex(ctx.URI(), filePath)
+			ff, err = h.createDirIndex(ctx.URI(), filePath)
 			if err != nil {
 				ctx.Logger().Printf("Cannot create index for directory %q: %s", filePath, err)
 				ctx.Error("Cannot create directory index", StatusNotFound)
@@ -182,13 +223,13 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		h.cacheLock.Unlock()
 	}
 
-	ctx.SetBodyStream(ff.Reader(), ff.contentLength)
+	ctx.SetBodyStream(ff.Reader(incrementReaders), ff.contentLength)
 	ctx.SetContentType(ff.contentType)
 }
 
 var errDirIndexRequired = errors.New("directory index required")
 
-func createDirIndex(base *URI, filePath string) (*fsFile, error) {
+func (h *fsHandler) createDirIndex(base *URI, filePath string) (*fsFile, error) {
 	var buf bytes.Buffer
 	w := &buf
 
@@ -226,6 +267,7 @@ func createDirIndex(base *URI, filePath string) (*fsFile, error) {
 	dirIndex := w.Bytes()
 
 	ff := &fsFile{
+		h:             h,
 		dirIndex:      dirIndex,
 		contentType:   "text/html",
 		contentLength: len(dirIndex),
@@ -233,7 +275,7 @@ func createDirIndex(base *URI, filePath string) (*fsFile, error) {
 	return ff, nil
 }
 
-func openFSFile(filePath string) (*fsFile, error) {
+func (h *fsHandler) openFSFile(filePath string) (*fsFile, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -249,7 +291,7 @@ func openFSFile(filePath string) (*fsFile, error) {
 		f.Close()
 
 		indexPath := filePath + "/index.html"
-		ff, err := openFSFile(indexPath)
+		ff, err := h.openFSFile(indexPath)
 		if err == nil {
 			return ff, nil
 		}
@@ -270,6 +312,7 @@ func openFSFile(filePath string) (*fsFile, error) {
 	contentType := mime.TypeByExtension(ext)
 
 	ff := &fsFile{
+		h:             h,
 		f:             f,
 		contentType:   contentType,
 		contentLength: contentLength,
