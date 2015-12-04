@@ -102,6 +102,7 @@ func (ff *fsFile) Reader(incrementReaders bool) io.Reader {
 		return r
 	}
 	r := v.(*fsFileReader)
+	r.ff = ff
 	if r.offset > 0 {
 		panic("BUG: fsFileReader with non-nil offset found in the pool")
 	}
