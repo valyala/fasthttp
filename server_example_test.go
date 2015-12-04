@@ -143,9 +143,30 @@ func ExampleRequestCtx_TimeoutError() {
 			// Since the long-running task is still running and may access ctx,
 			// we must call TimeoutError before returning from requestHandler.
 			//
-			// Otherwise our program will suffer from data races.
+			// Otherwise the program will suffer from data races.
 			ctx.TimeoutError("Timeout!")
 		}
+	}
+
+	if err := ListenAndServe(":80", requestHandler); err != nil {
+		log.Fatalf("error in ListenAndServe: %s", err)
+	}
+}
+
+func ExampleRequestCtx_Logger() {
+	requestHandler := func(ctx *RequestCtx) {
+		if string(ctx.Path()) == "/top-secret" {
+			ctx.Logger().Printf("Alarm! Alien intrusion detected!")
+			ctx.Error("Access denied!", StatusForbidden)
+			return
+		}
+
+		// Logger may be cached in local variables.
+		logger := ctx.Logger()
+
+		logger.Printf("Good request from User-Agent %q", ctx.Request.Header.UserAgent())
+		fmt.Fprintf(ctx, "Good request to %q", ctx.Path())
+		logger.Printf("Multiple log messages may be written during a single request")
 	}
 
 	if err := ListenAndServe(":80", requestHandler); err != nil {
