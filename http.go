@@ -543,8 +543,28 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	return err
 }
 
+var limitReaderPool sync.Pool
+
 func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int) error {
-	n, err := copyZeroAlloc(w, r)
+	vbuf := copyBufPool.Get()
+	if vbuf == nil {
+		vbuf = make([]byte, 4096)
+	}
+	buf := vbuf.([]byte)
+
+	vlr := limitReaderPool.Get()
+	if vlr == nil {
+		vlr = &io.LimitedReader{}
+	}
+	lr := vlr.(*io.LimitedReader)
+	lr.R = r
+	lr.N = int64(size)
+
+	n, err := io.CopyBuffer(w, lr, buf)
+
+	limitReaderPool.Put(vlr)
+	copyBufPool.Put(vbuf)
+
 	if n != int64(size) && err == nil {
 		err = fmt.Errorf("read %d bytes from BodyStream instead of %d bytes", n, size)
 	}
@@ -558,17 +578,6 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 	w.Write(b)
 	_, err := w.Write(strCRLF)
 	return err
-}
-
-func copyZeroAlloc(dst io.Writer, src io.Reader) (int64, error) {
-	vbuf := copyBufPool.Get()
-	if vbuf == nil {
-		vbuf = make([]byte, 4096)
-	}
-	buf := vbuf.([]byte)
-	n, err := io.CopyBuffer(dst, src, buf)
-	copyBufPool.Put(vbuf)
-	return n, err
 }
 
 var copyBufPool sync.Pool

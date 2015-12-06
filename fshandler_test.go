@@ -91,7 +91,6 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 		}
 
 		ctx.URI().Update(name)
-		ctx.Response.Reset()
 		requestHandler(&ctx)
 		if ctx.Response.bodyStream == nil {
 			t.Fatalf("response body stream must be non-empty")
@@ -108,23 +107,7 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 			break
 		}
 	}
-
-	// verify index
-	ctx.URI().Update("/")
-	ctx.Response.Reset()
-	requestHandler(&ctx)
-	if ctx.Response.bodyStream == nil {
-		t.Fatalf("response body stream must be non-empty")
-	}
-	body, err := ioutil.ReadAll(ctx.Response.bodyStream)
-	if err != nil {
-		t.Fatalf("error when reading response body stream: %s", err)
-	}
-	if len(body) == 0 {
-		t.Fatalf("empty index file")
-	}
 }
-
 func TestStripPathSlashes(t *testing.T) {
 	testStripPathSlashes(t, "", 0, "")
 	testStripPathSlashes(t, "", 10, "")
