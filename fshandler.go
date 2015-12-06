@@ -42,7 +42,7 @@ func FSHandler(root string, stripSlashes int) RequestHandler {
 		root = root[:len(root)-1]
 	}
 
-	// serve files from the current working directory
+	// serve files from the current working directory if root is empty
 	if len(root) == 0 {
 		root = "."
 	}
@@ -110,6 +110,12 @@ func (ff *fsFile) Reader(incrementReaders bool) io.Reader {
 	return r
 }
 
+func (ff *fsFile) Release() {
+	if ff.f != nil {
+		ff.f.Close()
+	}
+}
+
 type fsFileReader struct {
 	ff     *fsFile
 	offset int64
@@ -159,7 +165,7 @@ func (h *fsHandler) cleanCache() {
 		if ff.readersCount > 0 {
 			pendingFiles = append(pendingFiles, ff)
 		} else {
-			ff.f.Close()
+			ff.Release()
 		}
 	}
 	h.pendingFiles = pendingFiles
@@ -172,8 +178,8 @@ func (h *fsHandler) cleanCache() {
 				// so we cannot close it. Put it into pendingFiles
 				// so it will be closed later.
 				h.pendingFiles = append(h.pendingFiles, ff)
-			} else if ff.f != nil {
-				ff.f.Close()
+			} else {
+				ff.Release()
 			}
 			delete(h.cache, k)
 		}
@@ -203,7 +209,8 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	h.cacheLock.Unlock()
 
 	if !ok {
-		filePath := h.root + string(path)
+		pathStr := string(path)
+		filePath := h.root + pathStr
 		var err error
 		ff, err = h.openFSFile(filePath)
 		if err == errDirIndexRequired {
@@ -220,8 +227,19 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 
 		h.cacheLock.Lock()
-		h.cache[string(path)] = ff
+		ff1, ok := h.cache[pathStr]
+		if !ok {
+			h.cache[pathStr] = ff
+		}
 		h.cacheLock.Unlock()
+
+		if ok {
+			// The file has been already opened by another
+			// goroutine, so close the current file and use
+			// the file opened by another goroutine instead.
+			ff.Release()
+			ff = ff1
+		}
 	}
 
 	ctx.SetBodyStream(ff.Reader(incrementReaders), ff.contentLength)
