@@ -562,17 +562,16 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 
 func copyZeroAlloc(dst io.Writer, src io.Reader) (int64, error) {
 	vbuf := copyBufPool.Get()
+	if vbuf == nil {
+		vbuf = make([]byte, 4096)
+	}
 	buf := vbuf.([]byte)
 	n, err := io.CopyBuffer(dst, src, buf)
 	copyBufPool.Put(vbuf)
 	return n, err
 }
 
-var copyBufPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, 4096)
-	},
-}
+var copyBufPool sync.Pool
 
 // ErrBodyTooLarge is returned if either request or response body exceeds
 // the given limit.
