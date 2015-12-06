@@ -164,12 +164,11 @@ func (r *fsFileReader) WriteTo(w io.Writer) (int64, error) {
 	ff := r.ff
 
 	var err error
-	var n int
 	if ff.f != nil {
 		pv := copyBufPool.Get()
 		p := pv.([]byte)
 		for err == nil {
-			n, err = ff.f.ReadAt(p, r.offset)
+			n, err := ff.f.ReadAt(p, r.offset)
 			r.offset += int64(n)
 		}
 		copyBufPool.Put(pv)
@@ -177,6 +176,7 @@ func (r *fsFileReader) WriteTo(w io.Writer) (int64, error) {
 			err = nil
 		}
 	} else {
+		var n int
 		n, err = w.Write(ff.dirIndex)
 		r.offset = int64(n)
 	}
