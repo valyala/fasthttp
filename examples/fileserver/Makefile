@@ -1,5 +1,6 @@
 fileserver: clean
-	go build -o fileserver
+	go get -u github.com/valyala/fasthttp
+	go build
 
 clean:
 	rm -f fileserver
