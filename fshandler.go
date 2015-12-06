@@ -165,7 +165,16 @@ func (r *fsFileReader) WriteTo(w io.Writer) (int64, error) {
 
 	var err error
 	if ff.f != nil {
-		r.offset, err = copyZeroAlloc(w, ff.f)
+		pv := copyBufPool.Get()
+		p := pv.([]byte)
+		for err == nil {
+			n, err := ff.f.ReadAt(p, r.offset)
+			r.offset += int64(n)
+		}
+		copyBufPool.Put(pv)
+		if err == io.EOF {
+			err = nil
+		}
 	} else {
 		var n int
 		n, err = w.Write(ff.dirIndex)
