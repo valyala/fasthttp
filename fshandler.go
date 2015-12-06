@@ -140,18 +140,38 @@ func (r *fsFileReader) Close() error {
 }
 
 func (r *fsFileReader) Read(p []byte) (int, error) {
-	if r.ff.f != nil {
-		n, err := r.ff.f.ReadAt(p, r.offset)
+	ff := r.ff
+
+	if ff.f != nil {
+		n, err := ff.f.ReadAt(p, r.offset)
 		r.offset += int64(n)
 		return n, err
 	}
 
-	if r.offset == int64(len(r.ff.dirIndex)) {
+	if r.offset == int64(len(ff.dirIndex)) {
 		return 0, io.EOF
 	}
-	n := copy(p, r.ff.dirIndex[r.offset:])
+	n := copy(p, ff.dirIndex[r.offset:])
 	r.offset += int64(n)
 	return n, nil
+}
+
+func (r *fsFileReader) WriteTo(w io.Writer) (int64, error) {
+	if r.offset != 0 {
+		panic("BUG: WriteTo must not be called after Read")
+	}
+
+	ff := r.ff
+
+	var err error
+	if ff.f != nil {
+		r.offset, err = copyZeroAlloc(w, ff.f)
+	} else {
+		var n int
+		n, err = w.Write(ff.dirIndex)
+		r.offset = int64(n)
+	}
+	return r.offset, err
 }
 
 func (h *fsHandler) cleanCache() {
