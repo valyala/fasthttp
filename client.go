@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/rand"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1007,22 +1008,16 @@ var defaultTLSConfig = &tls.Config{
 
 func (c *HostClient) dialHost() (net.Conn, error) {
 	dial := c.Dial
+	addr := c.Addr
 	if dial == nil {
-		if c.IsTLS {
-			if c.DialDualStack {
-				dial = DialTLSDualStack
-			} else {
-				dial = DialTLS
-			}
+		if c.DialDualStack {
+			dial = DialDualStack
 		} else {
-			if c.DialDualStack {
-				dial = DialDualStack
-			} else {
-				dial = Dial
-			}
+			dial = Dial
 		}
+		addr = addMissingPort(addr, c.IsTLS)
 	}
-	conn, err := dial(c.Addr)
+	conn, err := dial(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -1052,4 +1047,16 @@ func (c *HostClient) getClientName() []byte {
 		clientName = v.([]byte)
 	}
 	return clientName
+}
+
+func addMissingPort(addr string, isTLS bool) string {
+	n := strings.Index(addr, ":")
+	if n >= 0 {
+		return addr
+	}
+	port := 80
+	if isTLS {
+		port = 443
+	}
+	return fmt.Sprintf("%s:%d", addr, port)
 }

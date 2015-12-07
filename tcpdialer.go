@@ -1,10 +1,8 @@
 package fasthttp
 
 import (
-	"fmt"
 	"net"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -18,44 +16,20 @@ import (
 // For instance, per-host counters and/or limits may be implemented
 // by such wrappers.
 //
-// The addr passed to dial func may contain port. Example addr values:
+// The addr passed to dial func must contain port. Example addr values:
 //
-//     * google.com
 //     * foobar.baz:443
 //     * foo.bar:80
 //     * aaa.com:8080
-//
-// Default port is appended to the addr if port is missing:
-//
-//     * ':80' if Dial is used
-//     * ':443' if DialTLS is used
 var (
 	// Dial dials the given addr using tcp4.
-	// '80' port is used if port is missing in the addr passed to the func.
 	Dial = DialFunc((&tcpDialer{}).NewDial())
 
-	// DialTLS dials the given addr using tcp4.
-	// '443' port is used if port is missing in the addr passed to the func.
-	DialTLS = DialFunc((&tcpDialer{IsTLS: true}).NewDial())
-
 	// DialDualStack dials the given addr using both tcp4 and tcp6.
-	// '80' port is used if port is missing in the addr passed to the func.
 	DialDualStack = DialFunc((&tcpDialer{DualStack: true}).NewDial())
-
-	// DialTLSDualStack dials the given addr using both tcp4 and tcp6.
-	// '443' port is used if port is missing in the addr passed to the func.
-	DialTLSDualStack = DialFunc((&tcpDialer{IsTLS: true, DualStack: true}).NewDial())
 )
 
-// tcpDialer implements default TCP dialer for the Client and HostClient.
-//
-// tcpDialer instance copying is forbiddent. Create new instance instead.
 type tcpDialer struct {
-	// Appends ':80' to the addr with missing port in Dial if set to false.
-	// Appends ':443' to the addr with missing port in Dial if set to true.
-	IsTLS bool
-
-	// Set to true if you want simultaneously dialing tcp4 and tcp6.
 	DualStack bool
 
 	tcpAddrsLock sync.Mutex
@@ -110,8 +84,6 @@ func (d *tcpDialer) tcpAddrsClean() {
 }
 
 func (d *tcpDialer) getTCPAddr(addr string) (*net.TCPAddr, error) {
-	addr = addMissingPort(addr, d.IsTLS)
-
 	d.tcpAddrsLock.Lock()
 	e := d.tcpAddrsMap[addr]
 	if e != nil && !e.pending && time.Since(e.resolveTime) > tcpAddrsCacheDuration {
@@ -149,18 +121,6 @@ func (d *tcpDialer) getTCPAddr(addr string) (*net.TCPAddr, error) {
 		tcpAddr = &e.addrs[n%uint32(n)]
 	}
 	return tcpAddr, nil
-}
-
-func addMissingPort(addr string, isTLS bool) string {
-	n := strings.Index(addr, ":")
-	if n >= 0 {
-		return addr
-	}
-	port := 80
-	if isTLS {
-		port = 443
-	}
-	return fmt.Sprintf("%s:%d", addr, port)
 }
 
 func resolveTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, error) {
