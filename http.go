@@ -513,9 +513,6 @@ type httpWriter interface {
 
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	vbuf := copyBufPool.Get()
-	if vbuf == nil {
-		vbuf = make([]byte, 4096)
-	}
 	buf := vbuf.([]byte)
 
 	var err error
@@ -545,9 +542,6 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 
 func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int) error {
 	vbuf := copyBufPool.Get()
-	if vbuf == nil {
-		vbuf = make([]byte, 4096)
-	}
 	buf := vbuf.([]byte)
 
 	n, err := io.CopyBuffer(w, r, buf)
@@ -560,6 +554,12 @@ func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int) error {
 	return err
 }
 
+var copyBufPool = sync.Pool{
+	New: func() interface{} {
+		return make([]byte, 4096)
+	},
+}
+
 func writeChunk(w *bufio.Writer, b []byte) error {
 	n := len(b)
 	writeHexInt(w, n)
@@ -568,8 +568,6 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 	_, err := w.Write(strCRLF)
 	return err
 }
-
-var copyBufPool sync.Pool
 
 // ErrBodyTooLarge is returned if either request or response body exceeds
 // the given limit.
