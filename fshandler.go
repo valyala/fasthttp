@@ -334,7 +334,7 @@ func (h *fsHandler) createDirIndex(base *URI, filePath string) (*fsFile, error) 
 		if !fi.IsDir() {
 			auxStr = fmt.Sprintf("file, %d bytes", fi.Size())
 		}
-		fmt.Fprintf(w, `<li><a href="%s">%s, %s, last modified %s</a></li>`,
+		fmt.Fprintf(w, `<li><a href="%s">%s</a>, %s, last modified %s</li>`,
 			pathEscaped, html.EscapeString(name), auxStr, fi.ModTime())
 	}
 
