@@ -124,7 +124,7 @@ func (ff *fsFile) smallFileReader() io.Reader {
 	return r
 }
 
-const maxSmallFileSize = 4096
+const maxSmallFileSize = 2*4096
 
 func (ff *fsFile) isBig() bool {
 	return ff.contentLength > maxSmallFileSize && len(ff.dirIndex) == 0
