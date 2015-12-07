@@ -194,15 +194,12 @@ func (r *bigFileReader) WriteTo(w io.Writer) (int64, error) {
 	if rf, ok := w.(io.ReaderFrom); ok {
 		// This is a hack for triggering sendfile path in bufio.Writer:
 		// the buffer must be empty before calling ReadFrom.
-		var n int
 		if bw, ok := w.(*bufio.Writer); ok && bw.Buffered() > 0 {
-			n = bw.Buffered()
 			if err := bw.Flush(); err != nil {
 				return 0, err
 			}
 		}
-		nn, err := rf.ReadFrom(r.f)
-		return nn + int64(n), err
+		return rf.ReadFrom(r.f)
 	}
 
 	// slow path
