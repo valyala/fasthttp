@@ -18,7 +18,7 @@ import (
 // For instance, per-host counters and/or limits may be implemented
 // by such wrappers.
 //
-// The addr paseed to dial func may contain port. Example addr values:
+// The addr passed to dial func may contain port. Example addr values:
 //
 //     * google.com
 //     * foobar.baz:443
