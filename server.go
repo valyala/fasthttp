@@ -62,6 +62,19 @@ func ListenAndServe(addr string, handler RequestHandler) error {
 	return s.ListenAndServe(addr)
 }
 
+// ListenAndServeUNIX serves HTTP requests from the given UNIX addr
+// using the given handler.
+//
+// The function deletes existing file at addr before starting serving.
+//
+// The server sets the given file mode for the UNIX addr.
+func ListenAndServeUNIX(addr string, mode os.FileMode, handler RequestHandler) error {
+	s := &Server{
+		Handler: handler,
+	}
+	return s.ListenAndServeUNIX(addr, mode)
+}
+
 // ListenAndServeTLS serves HTTPS requests from the given TCP addr
 // using the given handler.
 //
@@ -699,6 +712,25 @@ func (s *Server) ListenAndServe(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
+	}
+	return s.Serve(ln)
+}
+
+// ListenAndServeUNIX serves HTTP requests from the given UNIX addr.
+//
+// The function deletes existing file at addr before starting serving.
+//
+// The server sets the given file mode for the UNIX addr.
+func (s *Server) ListenAndServeUNIX(addr string, mode os.FileMode) error {
+	if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("unexpected error when trying to remove unix socket file %q: %s", addr, err)
+	}
+	ln, err := net.Listen("unix", addr)
+	if err != nil {
+		return err
+	}
+	if err = os.Chmod(addr, mode); err != nil {
+		return fmt.Errorf("cannot chmod %#o for %q: %s", mode, addr, err)
 	}
 	return s.Serve(ln)
 }
