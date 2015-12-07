@@ -543,8 +543,6 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	return err
 }
 
-var limitReaderPool sync.Pool
-
 func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int) error {
 	vbuf := copyBufPool.Get()
 	if vbuf == nil {
@@ -552,17 +550,8 @@ func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int) error {
 	}
 	buf := vbuf.([]byte)
 
-	vlr := limitReaderPool.Get()
-	if vlr == nil {
-		vlr = &io.LimitedReader{}
-	}
-	lr := vlr.(*io.LimitedReader)
-	lr.R = r
-	lr.N = int64(size)
+	n, err := io.CopyBuffer(w, r, buf)
 
-	n, err := io.CopyBuffer(w, lr, buf)
-
-	limitReaderPool.Put(vlr)
 	copyBufPool.Put(vbuf)
 
 	if n != int64(size) && err == nil {
