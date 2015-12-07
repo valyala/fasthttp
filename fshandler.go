@@ -90,7 +90,7 @@ type fsFile struct {
 	bigFilesLock sync.Mutex
 }
 
-func (ff *fsFile) Reader(incrementReaders bool) io.Reader {
+func (ff *fsFile) Reader(incrementReaders bool) (io.Reader, error) {
 	if incrementReaders {
 		ff.h.cacheLock.Lock()
 		ff.readersCount++
@@ -98,9 +98,13 @@ func (ff *fsFile) Reader(incrementReaders bool) io.Reader {
 	}
 
 	if ff.isBig() {
-		return ff.bigFileReader()
+		r, err := ff.bigFileReader()
+		if err != nil && incrementReaders {
+			ff.decReadersCount()
+		}
+		return r, err
 	}
-	return ff.smallFileReader()
+	return ff.smallFileReader(), nil
 }
 
 func (ff *fsFile) smallFileReader() io.Reader {
@@ -126,7 +130,7 @@ func (ff *fsFile) isBig() bool {
 	return ff.contentLength > maxSmallFileSize && len(ff.dirIndex) == 0
 }
 
-func (ff *fsFile) bigFileReader() io.Reader {
+func (ff *fsFile) bigFileReader() (io.Reader, error) {
 	if ff.f == nil {
 		panic("BUG: ff.f must be non-nil in bigFileReader")
 	}
@@ -142,17 +146,17 @@ func (ff *fsFile) bigFileReader() io.Reader {
 	ff.bigFilesLock.Unlock()
 
 	if r != nil {
-		return r
+		return r, nil
 	}
 
 	f, err := os.Open(ff.f.Name())
 	if err != nil {
-		panic(fmt.Sprintf("BUG: cannot open already opened file %s: %s", ff.f.Name(), err))
+		return nil, fmt.Errorf("cannot open already opened file: %s", err)
 	}
 	return &bigFileReader{
 		f:  f,
 		ff: ff,
-	}
+	}, nil
 }
 
 func (ff *fsFile) Release() {
@@ -385,7 +389,14 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	ctx.SetBodyStream(ff.Reader(incrementReaders), ff.contentLength)
+	r, err := ff.Reader(incrementReaders)
+	if err != nil {
+		ctx.Logger().Printf("cannot obtain file reader for path=%q: %s", path, err)
+		ctx.Error("Internal Server Error", StatusInternalServerError)
+		return
+	}
+
+	ctx.SetBodyStream(r, ff.contentLength)
 	ctx.SetContentType(ff.contentType)
 }
 
