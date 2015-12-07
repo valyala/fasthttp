@@ -235,10 +235,11 @@ type fsSmallFileReader struct {
 }
 
 func (r *fsSmallFileReader) Close() error {
-	r.ff.decReadersCount()
+	ff := r.ff
+	ff.decReadersCount()
 	r.ff = nil
 	r.offset = 0
-	r.ff.h.smallFileReaderPool.Put(r.v)
+	ff.h.smallFileReaderPool.Put(r.v)
 	return nil
 }
 
