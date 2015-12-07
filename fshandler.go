@@ -324,6 +324,7 @@ func (h *fsHandler) createDirIndex(base *URI, filePath string) (*fsFile, error) 
 
 	var u URI
 	base.CopyTo(&u)
+	u.Update(string(u.Path()) + "/")
 
 	sort.Sort(sort.StringSlice(filenames))
 	for _, name := range filenames {
