@@ -9,8 +9,6 @@ import (
 	"io"
 	"math/rand"
 	"net"
-	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -94,7 +92,7 @@ type Client struct {
 
 	// Callback for establishing new connections to hosts.
 	//
-	// Default TCP dialer is used if not set.
+	// Default TCPDialer is used if not set.
 	Dial DialFunc
 
 	// Attempt to connect to both ipv4 and ipv6 addresses if set to true.
@@ -328,7 +326,7 @@ type HostClient struct {
 
 	// Callback for establishing new connection to the host.
 	//
-	// Default TCP dialer is used if not set.
+	// Default TCPDialer is used if not set.
 	Dial DialFunc
 
 	// Attempt to connect to both ipv4 and ipv6 host addresses
@@ -1003,8 +1001,6 @@ func (c *HostClient) releaseReader(br *bufio.Reader) {
 	c.readerPool.Put(br)
 }
 
-var dnsCacheDuration = time.Minute
-
 var defaultTLSConfig = &tls.Config{
 	InsecureSkipVerify: true,
 }
@@ -1012,7 +1008,19 @@ var defaultTLSConfig = &tls.Config{
 func (c *HostClient) dialHost() (net.Conn, error) {
 	dial := c.Dial
 	if dial == nil {
-		dial = c.defaultDialFunc
+		if c.IsTLS {
+			if c.DialDualStack {
+				dial = DialTLSDualStack
+			} else {
+				dial = DialTLS
+			}
+		} else {
+			if c.DialDualStack {
+				dial = DialDualStack
+			} else {
+				dial = Dial
+			}
+		}
 	}
 	conn, err := dial(c.Addr)
 	if err != nil {
@@ -1029,96 +1037,6 @@ func (c *HostClient) dialHost() (net.Conn, error) {
 		conn = tls.Client(conn, tlsConfig)
 	}
 	return conn, nil
-}
-
-func (c *HostClient) defaultDialFunc(addr string) (net.Conn, error) {
-	tcpAddr, err := c.getTCPAddr(addr)
-	if err != nil {
-		return nil, err
-	}
-	network := "tcp4"
-	if c.DialDualStack {
-		network = "tcp"
-	}
-	return net.DialTCP(network, nil, tcpAddr)
-}
-
-func (c *HostClient) getTCPAddr(addr string) (*net.TCPAddr, error) {
-	addr = addMissingPort(addr, c.IsTLS)
-
-	c.tcpAddrsLock.Lock()
-	tcpAddrs := c.tcpAddrs
-	if tcpAddrs != nil && !c.tcpAddrsPending && time.Since(c.tcpAddrsResolveTime) > dnsCacheDuration {
-		c.tcpAddrsPending = true
-		tcpAddrs = nil
-	}
-	c.tcpAddrsLock.Unlock()
-
-	if tcpAddrs == nil {
-		var err error
-		if tcpAddrs, err = resolveTCPAddrs(addr, c.DialDualStack); err != nil {
-			c.tcpAddrsLock.Lock()
-			c.tcpAddrsPending = false
-			c.tcpAddrsLock.Unlock()
-			return nil, err
-		}
-
-		c.tcpAddrsLock.Lock()
-		c.tcpAddrs = tcpAddrs
-		c.tcpAddrsResolveTime = time.Now()
-		c.tcpAddrsPending = false
-		c.tcpAddrsLock.Unlock()
-	}
-
-	tcpAddr := &tcpAddrs[0]
-	n := len(tcpAddrs)
-	if n > 1 {
-		n := atomic.AddUint32(&c.tcpAddrsIdx, 1)
-		tcpAddr = &tcpAddrs[n%uint32(n)]
-	}
-	return tcpAddr, nil
-}
-
-func addMissingPort(addr string, isTLS bool) string {
-	n := strings.Index(addr, ":")
-	if n >= 0 {
-		return addr
-	}
-	port := 80
-	if isTLS {
-		port = 443
-	}
-	return fmt.Sprintf("%s:%d", addr, port)
-}
-
-func resolveTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, error) {
-	host, portS, err := net.SplitHostPort(addr)
-	if err != nil {
-		return nil, err
-	}
-	port, err := strconv.Atoi(portS)
-	if err != nil {
-		return nil, err
-	}
-
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return nil, err
-	}
-
-	n := len(ips)
-	addrs := make([]net.TCPAddr, 0, n)
-	for i := 0; i < n; i++ {
-		ip := ips[i]
-		if !dualStack && ip.To4() == nil {
-			continue
-		}
-		addrs = append(addrs, net.TCPAddr{
-			IP:   ip,
-			Port: port,
-		})
-	}
-	return addrs, nil
 }
 
 func (c *HostClient) getClientName() []byte {
