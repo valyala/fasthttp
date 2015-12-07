@@ -308,10 +308,18 @@ func (h *fsHandler) createDirIndex(base *URI, filePath string) (*fsFile, error) 
 		return nil, err
 	}
 
-	filenames, err := f.Readdirnames(0)
+	fileinfos, err := f.Readdir(0)
 	f.Close()
 	if err != nil {
 		return nil, err
+	}
+
+	fm := make(map[string]os.FileInfo, len(fileinfos))
+	var filenames []string
+	for _, fi := range fileinfos {
+		name := fi.Name()
+		fm[name] = fi
+		filenames = append(filenames, name)
 	}
 
 	var u URI
@@ -321,7 +329,13 @@ func (h *fsHandler) createDirIndex(base *URI, filePath string) (*fsFile, error) 
 	for _, name := range filenames {
 		u.Update(name)
 		pathEscaped := html.EscapeString(string(u.Path()))
-		fmt.Fprintf(w, `<li><a href="%s">%s</a></li>`, pathEscaped, html.EscapeString(name))
+		fi := fm[name]
+		auxStr := "dir"
+		if !fi.IsDir() {
+			auxStr = fmt.Sprintf("file, %d bytes", fi.Size())
+		}
+		fmt.Fprintf(w, `<li><a href="%s">%s, %s, last modified %s</a></li>`,
+			pathEscaped, html.EscapeString(name), auxStr, fi.ModTime())
 	}
 
 	fmt.Fprintf(w, "</ul></body></html>")
