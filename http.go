@@ -541,17 +541,19 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 }
 
 func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int) error {
-	vbuf := copyBufPool.Get()
-	buf := vbuf.([]byte)
-
-	n, err := io.CopyBuffer(w, r, buf)
-
-	copyBufPool.Put(vbuf)
-
+	n, err := copyZeroAlloc(w, r)
 	if n != int64(size) && err == nil {
 		err = fmt.Errorf("read %d bytes from BodyStream instead of %d bytes", n, size)
 	}
 	return err
+}
+
+func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
+	vbuf := copyBufPool.Get()
+	buf := vbuf.([]byte)
+	n, err := io.CopyBuffer(w, r, buf)
+	copyBufPool.Put(vbuf)
+	return n, err
 }
 
 var copyBufPool = sync.Pool{
