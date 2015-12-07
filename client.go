@@ -28,7 +28,7 @@ import (
 //   - from RequestURI if it contains full url with scheme and host;
 //   - from Host header otherwise.
 //
-// ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
+// ErrNoFreeConns is returned if all DefaultMaxConnsPerHost connections
 // to the requested host are busy.
 func Do(req *Request, resp *Response) error {
 	return defaultClient.Do(req, resp)
