@@ -156,6 +156,46 @@ func (r *fsFileReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+func (r *fsFileReader) WriteTo(w io.Writer) (int64, error) {
+	if r.offset != 0 {
+		panic("BUG: non-zero offset! Read() mustn't be called before WriteTo()")
+	}
+
+	ff := r.ff
+
+	var n int
+	var err error
+	if ff.f != nil {
+		if rf, ok := w.(io.ReaderFrom); ok {
+			return rf.ReadFrom(r)
+		}
+
+		bufv := copyBufPool.Get()
+		buf := bufv.([]byte)
+		for err != nil {
+			n, err = ff.f.ReadAt(buf, r.offset)
+			nw, errw := w.Write(buf[:n])
+			r.offset += int64(nw)
+			if errw == nil && nw != n {
+				panic("BUG: Write(p) returned (n, nil), where n != len(p)")
+			}
+			if err == nil {
+				err = errw
+			}
+		}
+		copyBufPool.Put(bufv)
+
+		if err == io.EOF {
+			err = nil
+		}
+		return r.offset, err
+	}
+
+	n, err = w.Write(ff.dirIndex)
+	r.offset += int64(n)
+	return r.offset, err
+}
+
 func (h *fsHandler) cleanCache() {
 	t := time.Now()
 	h.cacheLock.Lock()
