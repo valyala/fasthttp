@@ -1,4 +1,4 @@
-- Example tests.
+- SessionClient with referer and cookies support.
 - Load balancing client for multiple upstream hosts.
 - Client with requests' pipelining support.
 - WebSockets. See https://tools.ietf.org/html/rfc6455 .
