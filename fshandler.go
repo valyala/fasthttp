@@ -14,6 +14,76 @@ import (
 	"time"
 )
 
+// PathRewriteFunc must return new request path based on arbitrary ctx
+// info such as ctx.Path().
+//
+// Path rewriter is used in FS for translating the current request
+// to the local filesystem path relative to FS.Root.
+//
+// The returned path may refer to ctx members. For example, ctx.Path().
+type PathRewriteFunc func(ctx *RequestCtx) []byte
+
+// NewPathSlashesStripper returns path rewriter, which strips slashesCount
+// leading slashes from the path.
+//
+// Examples:
+//
+//   * slashesCount = 0, original path: "/foo/bar", result: "/foo/bar"
+//   * slashesCount = 1, original path: "/foo/bar", result: "/bar"
+//   * slashesCount = 2, original path: "/foo/bar", result: ""
+//
+// The returned path rewriter may be used as FS.PathRewrite .
+func NewPathSlashesStripper(slashesCount int) PathRewriteFunc {
+	return func(ctx *RequestCtx) []byte {
+		return stripLeadingSlashes(ctx.Path(), slashesCount)
+	}
+}
+
+// NewPathPrefixStripper returns path rewriter, which removes prefixSize bytes
+// from the path prefix.
+//
+// Examples:
+//
+//   * prefixSize = 0, original path: "/foo/bar", result: "/foo/bar"
+//   * prefixSize = 3, original path: "/foo/bar", result: "o/bar"
+//   * prefixSize = 7, original path: "/foo/bar", result: "r"
+//
+// The returned path rewriter may be used as FS.PathRewrite .
+func NewPathPrefixStripper(prefixSize int) PathRewriteFunc {
+	return func(ctx *RequestCtx) []byte {
+		path := ctx.Path()
+		if len(path) >= prefixSize {
+			path = path[prefixSize:]
+		}
+		return path
+	}
+}
+
+// FS represents settings for request handler serving static files
+// from the local filesystem.
+type FS struct {
+	// Path to the root directory to serve files from.
+	Root string
+
+	// Index pages for directories without index.html are automatically
+	// generated if set.
+	//
+	// By default index pages aren't generated.
+	GenerateIndexPages bool
+
+	// Path rewriting function.
+	//
+	// By default request path is not modified.
+	PathRewrite PathRewriteFunc
+
+	// The duration for files' caching.
+	//
+	// FSHandlerCacheDuration is used by default.
+	CacheDuration time.Duration
+
+	started bool
+}
+
 // FSHandlerCacheDuration is the duration for caching open file handles
 // by FSHandler.
 const FSHandlerCacheDuration = 5 * time.Second
@@ -29,14 +99,43 @@ const FSHandlerCacheDuration = 5 * time.Second
 //   * stripSlashes = 1, original path: "/foo/bar", result: "/bar"
 //   * stripSlashes = 2, original path: "/foo/bar", result: ""
 //
-// FSHandler caches requested file handles for FSHandlerCacheDuration.
+// The returned request handler automatically generates index pages
+// for directories without index.html.
+//
+// The returned handler caches requested file handles
+// for FSHandlerCacheDuration.
 // Make sure your program has enough 'max open files' limit aka
 // 'ulimit -n' if root folder contains many files.
 //
-// Do not create multiple FSHandler instances for the same (root, stripSlashes)
-// arguments - just reuse a single instance. Otherwise goroutine leak
-// will occur.
+// Do not create multiple request handler instances for the same
+// (root, stripSlashes) arguments - just reuse a single instance.
+// Otherwise goroutine leak will occur.
 func FSHandler(root string, stripSlashes int) RequestHandler {
+	fs := &FS{
+		Root:               root,
+		GenerateIndexPages: true,
+		PathRewrite:        NewPathSlashesStripper(stripSlashes),
+	}
+	return fs.NewRequestHandler()
+}
+
+// NewRequestHandler returns new request handler with the given FS settings.
+//
+// The returned handler caches requested file handles
+// for FS.CacheDuration.
+// Make sure your program has enough 'max open files' limit aka
+// 'ulimit -n' if FS.Root folder contains many files.
+//
+// Do not create multiple request handlers from a single FS instance -
+// just reuse a single request handler.
+func (fs *FS) NewRequestHandler() RequestHandler {
+	if fs.started {
+		panic("BUG: NewRequestHandler() cannot be called multiple times for the same FS instance")
+	}
+	fs.started = true
+
+	root := fs.Root
+
 	// strip trailing slashes from the root path
 	for len(root) > 0 && root[len(root)-1] == '/' {
 		root = root[:len(root)-1]
@@ -47,27 +146,41 @@ func FSHandler(root string, stripSlashes int) RequestHandler {
 		root = "."
 	}
 
-	if stripSlashes < 0 {
-		stripSlashes = 0
+	cacheDuration := fs.CacheDuration
+	if cacheDuration <= 0 {
+		cacheDuration = FSHandlerCacheDuration
+	}
+
+	pathRewrite := fs.PathRewrite
+	if pathRewrite == nil {
+		// This stripper strips only trailing slashes.
+		pathRewrite = NewPathSlashesStripper(0)
 	}
 
 	h := &fsHandler{
-		root:         root,
-		stripSlashes: stripSlashes,
-		cache:        make(map[string]*fsFile),
+		root:               root,
+		pathRewrite:        pathRewrite,
+		generateIndexPages: fs.GenerateIndexPages,
+		cacheDuration:      cacheDuration,
+		cache:              make(map[string]*fsFile),
 	}
+
 	go func() {
 		for {
-			time.Sleep(FSHandlerCacheDuration / 2)
+			time.Sleep(cacheDuration / 2)
 			h.cleanCache()
 		}
 	}()
+
 	return h.handleRequest
 }
 
 type fsHandler struct {
-	root         string
-	stripSlashes int
+	root               string
+	pathRewrite        PathRewriteFunc
+	generateIndexPages bool
+	cacheDuration      time.Duration
+
 	cache        map[string]*fsFile
 	pendingFiles []*fsFile
 	cacheLock    sync.Mutex
@@ -312,7 +425,7 @@ func (h *fsHandler) cleanCache() {
 
 	// Close stale file handles.
 	for k, ff := range h.cache {
-		if t.Sub(ff.t) > FSHandlerCacheDuration {
+		if t.Sub(ff.t) > h.cacheDuration {
 			if ff.readersCount > 0 {
 				// There are pending readers on stale file handle,
 				// so we cannot close it. Put it into pendingFiles
@@ -329,8 +442,8 @@ func (h *fsHandler) cleanCache() {
 }
 
 func (h *fsHandler) handleRequest(ctx *RequestCtx) {
-	path := ctx.Path()
-	path = stripPathSlashes(path, h.stripSlashes)
+	path := h.pathRewrite(ctx)
+	path = stripTrailingSlashes(path)
 
 	if n := bytes.IndexByte(path, 0); n >= 0 {
 		ctx.Logger().Printf("cannot serve path with nil byte at position %d: %q", n, path)
@@ -354,6 +467,11 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		var err error
 		ff, err = h.openFSFile(filePath)
 		if err == errDirIndexRequired {
+			if !h.generateIndexPages {
+				ctx.Logger().Printf("An attempt to access directory without index page. Directory %q", filePath)
+				ctx.Error("Directory index is forbidden", StatusForbidden)
+				return
+			}
 			ff, err = h.createDirIndex(ctx.URI(), filePath)
 			if err != nil {
 				ctx.Logger().Printf("Cannot create index for directory %q: %s", filePath, err)
@@ -501,8 +619,7 @@ func (h *fsHandler) openFSFile(filePath string) (*fsFile, error) {
 	return ff, nil
 }
 
-func stripPathSlashes(path []byte, stripSlashes int) []byte {
-	// strip leading slashes
+func stripLeadingSlashes(path []byte, stripSlashes int) []byte {
 	for stripSlashes > 0 && len(path) > 0 {
 		if path[0] != '/' {
 			panic("BUG: path must start with slash")
@@ -515,12 +632,13 @@ func stripPathSlashes(path []byte, stripSlashes int) []byte {
 		path = path[n+1:]
 		stripSlashes--
 	}
+	return path
+}
 
-	// strip trailing slashes
+func stripTrailingSlashes(path []byte) []byte {
 	for len(path) > 0 && path[len(path)-1] == '/' {
 		path = path[:len(path)-1]
 	}
-
 	return path
 }
 

@@ -143,7 +143,8 @@ func TestStripPathSlashes(t *testing.T) {
 }
 
 func testStripPathSlashes(t *testing.T, path string, stripSlashes int, expectedPath string) {
-	s := stripPathSlashes([]byte(path), stripSlashes)
+	s := stripLeadingSlashes([]byte(path), stripSlashes)
+	s = stripTrailingSlashes(s)
 	if string(s) != expectedPath {
 		t.Fatalf("unexpected path after stripping %q with stripSlashes=%d: %q. Expecting %q", path, stripSlashes, s, expectedPath)
 	}
