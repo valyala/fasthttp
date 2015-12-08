@@ -550,8 +550,23 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	return err
 }
 
+var limitedReaderPool = sync.Pool{
+	New: func() interface{} {
+		return &io.LimitedReader{}
+	},
+}
+
 func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int) error {
+	lrv := limitedReaderPool.Get()
+	lr := lrv.(*io.LimitedReader)
+	lr.R = r
+	lr.N = int64(size)
+
 	n, err := copyZeroAlloc(w, r)
+
+	lr.R = nil
+	limitedReaderPool.Put(lrv)
+
 	if n != int64(size) && err == nil {
 		err = fmt.Errorf("read %d bytes from BodyStream instead of %d bytes", n, size)
 	}
