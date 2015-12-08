@@ -562,7 +562,7 @@ func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int) error {
 	lr.R = r
 	lr.N = int64(size)
 
-	n, err := copyZeroAlloc(w, r)
+	n, err := copyZeroAlloc(w, lr)
 
 	lr.R = nil
 	limitedReaderPool.Put(lrv)
