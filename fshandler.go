@@ -153,7 +153,6 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 
 	pathRewrite := fs.PathRewrite
 	if pathRewrite == nil {
-		// This stripper strips only trailing slashes.
 		pathRewrite = NewPathSlashesStripper(0)
 	}
 
