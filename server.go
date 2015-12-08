@@ -649,6 +649,30 @@ func (ctx *RequestCtx) ResetBody() {
 	ctx.Response.ResetBody()
 }
 
+// SendFile sends local file contents from given path as response body.
+//
+// Note that SendFile doesn't set Content-Type for the response body,
+// so set it yourself with SetContentType() before returning
+// from RequestHandler.
+func (ctx *RequestCtx) SendFile(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	statInfo, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return err
+	}
+	size64 := statInfo.Size()
+	size := int(size64)
+	if int64(size) != size64 {
+		size = -1
+	}
+	ctx.SetBodyStream(f, size)
+	return nil
+}
+
 // Write writes p into response body.
 func (ctx *RequestCtx) Write(p []byte) (int, error) {
 	ctx.Response.body = append(ctx.Response.body, p...)

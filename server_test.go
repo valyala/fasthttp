@@ -7,9 +7,50 @@ import (
 	"io"
 	"io/ioutil"
 	"net"
+	"os"
 	"testing"
 	"time"
 )
+
+func TestRequestCtxSendFile(t *testing.T) {
+	var ctx RequestCtx
+	var req Request
+	ctx.Init(&req, nil, nil)
+
+	filePath := "./server_test.go"
+	if err := ctx.SendFile(filePath); err != nil {
+		t.Fatalf("error in SendFile: %s", err)
+	}
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := ctx.Response.Write(bw); err != nil {
+		t.Fatalf("error when writing response: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("error when flushing response: %s", err)
+	}
+
+	var resp Response
+	br := bufio.NewReader(w)
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("error when reading response: %s", err)
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		t.Fatalf("cannot open file: %s", err)
+	}
+	body, err := ioutil.ReadAll(f)
+	f.Close()
+	if err != nil {
+		t.Fatalf("error when reading file: %s", err)
+	}
+
+	if !bytes.Equal(resp.Body(), body) {
+		t.Fatalf("unexpected response body: %q. Expecting %q", resp.Body(), body)
+	}
+}
 
 func TestRequestCtxHijack(t *testing.T) {
 	hijackStartCh := make(chan struct{})
