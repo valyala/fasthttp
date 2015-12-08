@@ -664,11 +664,11 @@ func (ctx *RequestCtx) PostBody() []byte {
 
 // SetBodyStream sets response body stream and, optionally body size.
 //
-// bodyStream.Close() will be called after finishing reading all body data
+// bodyStream.Close() is called after finishing reading all body data
 // if it implements io.Closer.
 //
-// If bodySize is >= 0, then bodySize bytes are read from bodyStream
-// and used as response body.
+// If bodySize is >= 0, then bodySize bytes must be provided by bodyStream
+// before returning io.EOF.
 //
 // If bodySize < 0, then bodyStream is read until io.EOF.
 func (ctx *RequestCtx) SetBodyStream(bodyStream io.Reader, bodySize int) {

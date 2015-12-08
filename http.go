@@ -100,8 +100,8 @@ func (req *Request) SetConnectionClose() {
 
 // SetBodyStream sets response body stream and, optionally body size.
 //
-// If bodySize is >= 0, then bodySize bytes are read from bodyStream
-// and used as response body.
+// If bodySize is >= 0, then the bodyStream must provide exactly bodySize bytes
+// before returning io.EOF.
 //
 // If bodySize < 0, then bodyStream is read until io.EOF.
 //
@@ -559,12 +559,6 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	return err
 }
 
-var limitedReaderPool = sync.Pool{
-	New: func() interface{} {
-		return &io.LimitedReader{}
-	},
-}
-
 func limitedReaderSize(r io.Reader) int64 {
 	lr, ok := r.(*io.LimitedReader)
 	if !ok {
@@ -576,26 +570,23 @@ func limitedReaderSize(r io.Reader) int64 {
 func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
 	if size > maxSmallFileSize {
 		// w buffer must be empty for triggering
-		// sendfile path in bufio.Writer.
+		// sendfile path in bufio.Writer.ReadFrom.
 		if err := w.Flush(); err != nil {
 			return err
 		}
 	}
 
-	var lrv interface{}
+	// Unwrap a single limited reader for triggering sendfile path
+	// in net.TCPConn.ReadFrom.
 	lr, ok := r.(*io.LimitedReader)
-	if !ok || lr.N > size {
-		lrv = limitedReaderPool.Get()
-		lr = lrv.(*io.LimitedReader)
-		lr.R = r
-		lr.N = size
+	if ok {
+		r = lr.R
 	}
 
-	n, err := copyZeroAlloc(w, lr)
+	n, err := copyZeroAlloc(w, r)
 
-	if !ok {
-		lr.R = nil
-		limitedReaderPool.Put(lrv)
+	if ok {
+		lr.N -= n
 	}
 
 	if n != size && err == nil {
