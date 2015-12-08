@@ -8,26 +8,44 @@ import (
 	"time"
 )
 
-// TCP dialers used by client.
+var (
+	dial          = (&tcpDialer{}).NewDial()
+	dialDualStack = (&tcpDialer{DualStack: true}).NewDial()
+)
+
+// Dial dials the given TCP addr using tcp4.
 //
-// These dialers are intended for custom code wrapping before passing
+// This dialer is intended for custom code wrapping before passing
 // to Client.Dial or HostClient.Dial.
 //
 // For instance, per-host counters and/or limits may be implemented
 // by such wrappers.
 //
-// The addr passed to dial func must contain port. Example addr values:
+// The addr passed to the function must contain port. Example addr values:
 //
 //     * foobar.baz:443
 //     * foo.bar:80
 //     * aaa.com:8080
-var (
-	// Dial dials the given addr using tcp4.
-	Dial = DialFunc((&tcpDialer{}).NewDial())
+func Dial(addr string) (net.Conn, error) {
+	return dial(addr)
+}
 
-	// DialDualStack dials the given addr using both tcp4 and tcp6.
-	DialDualStack = DialFunc((&tcpDialer{DualStack: true}).NewDial())
-)
+// DialDualStack dials the given TCP addr using both tcp4 and tcp6.
+//
+// This dialer is intended for custom code wrapping before passing
+// to Client.Dial or HostClient.Dial.
+//
+// For instance, per-host counters and/or limits may be implemented
+// by such wrappers.
+//
+// The addr passed to the function must contain port. Example addr values:
+//
+//     * foobar.baz:443
+//     * foo.bar:80
+//     * aaa.com:8080
+func DialDualStack(addr string) (net.Conn, error) {
+	return dialDualStack(addr)
+}
 
 type tcpDialer struct {
 	DualStack bool
