@@ -649,7 +649,7 @@ func (ctx *RequestCtx) ResetBody() {
 	ctx.Response.ResetBody()
 }
 
-// SendFile sends local file contents from given path as response body.
+// SendFile sends local file contents from the given path as response body.
 //
 // Note that SendFile doesn't set Content-Type for the response body,
 // so set it yourself with SetContentType() before returning
