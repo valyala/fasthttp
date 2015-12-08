@@ -1,7 +1,6 @@
 package fasthttp
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -124,6 +123,7 @@ func (ff *fsFile) smallFileReader() io.Reader {
 	return r
 }
 
+// files bigger than this size are sent with sendfile
 const maxSmallFileSize = 2 * 4096
 
 func (ff *fsFile) isBig() bool {
@@ -194,15 +194,8 @@ func (r *bigFileReader) Read(p []byte) (int, error) {
 }
 
 func (r *bigFileReader) WriteTo(w io.Writer) (int64, error) {
-	// fast path
 	if rf, ok := w.(io.ReaderFrom); ok {
-		// This is a hack for triggering sendfile path in bufio.Writer:
-		// the buffer must be empty before calling ReadFrom.
-		if bw, ok := w.(*bufio.Writer); ok && bw.Buffered() > 0 {
-			if err := bw.Flush(); err != nil {
-				return 0, err
-			}
-		}
+		// fast path. Senfile must be triggered
 		return rf.ReadFrom(r.f)
 	}
 

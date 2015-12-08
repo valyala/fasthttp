@@ -452,6 +452,13 @@ func (resp *Response) Write(w *bufio.Writer) error {
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
+			if contentLength > maxSmallFileSize {
+				// w buffer must be empty for triggering
+				// sendfile path in bufio.Writer.
+				if err = w.Flush(); err != nil {
+					return err
+				}
+			}
 			if err = writeBodyFixedSize(w, resp.bodyStream, contentLength); err != nil {
 				return err
 			}
