@@ -109,6 +109,7 @@ func (req *Request) SetConnectionClose() {
 // if it implements io.Closer.
 func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
 	resp.body = resp.body[:0]
+	resp.closeBodyStream()
 	resp.bodyStream = bodyStream
 	resp.Header.SetContentLength(bodySize)
 }
@@ -150,13 +151,13 @@ func (resp *Response) Body() []byte {
 
 // SetBody sets response body.
 func (resp *Response) SetBody(body []byte) {
-	resp.bodyStream = nil
+	resp.closeBodyStream()
 	resp.body = append(resp.body[:0], body...)
 }
 
 // ResetBody resets response body.
 func (resp *Response) ResetBody() {
-	resp.bodyStream = nil
+	resp.closeBodyStream()
 	resp.body = resp.body[:0]
 }
 
@@ -311,8 +312,8 @@ func (resp *Response) Reset() {
 }
 
 func (resp *Response) clearSkipHeader() {
+	resp.closeBodyStream()
 	resp.body = resp.body[:0]
-	resp.bodyStream = nil
 }
 
 // Read reads request (including body) from the given r.
@@ -463,10 +464,7 @@ func (resp *Response) Write(w *bufio.Writer) error {
 				return err
 			}
 		}
-		if bsc, ok := resp.bodyStream.(io.Closer); ok {
-			err = bsc.Close()
-		}
-		return err
+		return resp.closeBodyStream()
 	}
 
 	resp.Header.SetContentLength(len(resp.body))
@@ -474,6 +472,18 @@ func (resp *Response) Write(w *bufio.Writer) error {
 		return err
 	}
 	_, err = w.Write(resp.body)
+	return err
+}
+
+func (resp *Response) closeBodyStream() error {
+	if resp.bodyStream == nil {
+		return nil
+	}
+	var err error
+	if bsc, ok := resp.bodyStream.(io.Closer); ok {
+		err = bsc.Close()
+	}
+	resp.bodyStream = nil
 	return err
 }
 
