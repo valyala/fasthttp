@@ -448,18 +448,20 @@ func (resp *Response) Write(w *bufio.Writer) error {
 	var err error
 	if resp.bodyStream != nil {
 		contentLength := resp.Header.ContentLength()
+		if contentLength < 0 {
+			lrSize := limitedReaderSize(resp.bodyStream)
+			if lrSize >= 0 {
+				contentLength = int(lrSize)
+				if int64(contentLength) != lrSize {
+					contentLength = -1
+				}
+			}
+		}
 		if contentLength >= 0 {
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
-			if contentLength > maxSmallFileSize {
-				// w buffer must be empty for triggering
-				// sendfile path in bufio.Writer.
-				if err = w.Flush(); err != nil {
-					return err
-				}
-			}
-			if err = writeBodyFixedSize(w, resp.bodyStream, contentLength); err != nil {
+			if err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength)); err != nil {
 				return err
 			}
 		} else {
@@ -563,19 +565,41 @@ var limitedReaderPool = sync.Pool{
 	},
 }
 
-func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int) error {
-	lrv := limitedReaderPool.Get()
-	lr := lrv.(*io.LimitedReader)
-	lr.R = r
-	lr.N = int64(size)
+func limitedReaderSize(r io.Reader) int64 {
+	lr, ok := r.(*io.LimitedReader)
+	if !ok {
+		return -1
+	}
+	return lr.N
+}
+
+func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
+	if size > maxSmallFileSize {
+		// w buffer must be empty for triggering
+		// sendfile path in bufio.Writer.
+		if err := w.Flush(); err != nil {
+			return err
+		}
+	}
+
+	var lrv interface{}
+	lr, ok := r.(*io.LimitedReader)
+	if !ok || lr.N > size {
+		lrv = limitedReaderPool.Get()
+		lr = lrv.(*io.LimitedReader)
+		lr.R = r
+		lr.N = size
+	}
 
 	n, err := copyZeroAlloc(w, lr)
 
-	lr.R = nil
-	limitedReaderPool.Put(lrv)
+	if !ok {
+		lr.R = nil
+		limitedReaderPool.Put(lrv)
+	}
 
-	if n != int64(size) && err == nil {
-		err = fmt.Errorf("read %d bytes from BodyStream instead of %d bytes", n, size)
+	if n != size && err == nil {
+		err = fmt.Errorf("copied %d bytes from response body stream instead of %d bytes", n, size)
 	}
 	return err
 }
