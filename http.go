@@ -139,7 +139,24 @@ func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
 	resp.Header.SetContentLength(bodySize)
 }
 
+// SetBodyStreamWriter registers the given sw for populating response body.
+//
+// This function may be used in the following cases:
+//
+//     * if response body is too big (more than 10MB).
+//     * if response body is streamed from slow external sources.
+//     * if response body must be streamed to the client in chunks
+//     (aka `http server push`).
+func (resp *Response) SetBodyStreamWriter(sw StreamWriter) {
+	sr := NewStreamReader(sw)
+	resp.SetBodyStream(sr, -1)
+}
+
 // BodyWriter returns writer for populating response body.
+//
+// If used inside RequestHandler, the returned writer must not be used
+// after returning from RequestHandler. Use RequestCtx.Write
+// or SetBodyStreamWriter in this case.
 func (resp *Response) BodyWriter() io.Writer {
 	resp.w.r = resp
 	return &resp.w

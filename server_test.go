@@ -12,10 +12,38 @@ import (
 	"time"
 )
 
+func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
+	var ctx RequestCtx
+	var req Request
+	ctx.Init(&req, nil, defaultLogger)
+
+	ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
+		fmt.Fprintf(w, "body writer line 1\n")
+		if err := w.Flush(); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		fmt.Fprintf(w, "body writer line 2\n")
+	})
+
+	s := ctx.Response.String()
+
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Error when reading response: %s", err)
+	}
+
+	body := string(resp.Body())
+	expectedBody := "body writer line 1\nbody writer line 2\n"
+	if body != expectedBody {
+		t.Fatalf("unexpected body: %q. Expecting %q", body, expectedBody)
+	}
+}
+
 func TestRequestCtxSendFile(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
-	ctx.Init(&req, nil, nil)
+	ctx.Init(&req, nil, defaultLogger)
 
 	filePath := "./server_test.go"
 	if err := ctx.SendFile(filePath); err != nil {
