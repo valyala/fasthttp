@@ -36,6 +36,8 @@ var (
 	strCookie           = []byte("Cookie")
 	strSetCookie        = []byte("Set-Cookie")
 	strLocation         = []byte("Location")
+	strIfModifiedSince  = []byte("If-Modified-Since")
+	strLastModified     = []byte("Last-Modified")
 
 	strCookieExpires = []byte("expires")
 	strCookieDomain  = []byte("domain")

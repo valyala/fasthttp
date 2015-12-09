@@ -40,6 +40,108 @@ func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
 	}
 }
 
+func TestRequestCtxIfModifiedSince(t *testing.T) {
+	var ctx RequestCtx
+	var req Request
+	ctx.Init(&req, nil, defaultLogger)
+
+	lastModified := time.Now().Add(-time.Hour)
+
+	if !ctx.IfModifiedSince(lastModified) {
+		t.Fatalf("IfModifiedSince must return true for non-existing If-Modified-Since header")
+	}
+
+	ctx.Request.Header.Set("If-Modified-Since", string(AppendHTTPDate(nil, lastModified)))
+
+	if ctx.IfModifiedSince(lastModified) {
+		t.Fatalf("If-Modified-Since current time must return false")
+	}
+
+	past := lastModified.Add(-time.Hour)
+	if ctx.IfModifiedSince(past) {
+		t.Fatalf("If-Modified-Since past time must return false")
+	}
+
+	future := lastModified.Add(time.Hour)
+	if !ctx.IfModifiedSince(future) {
+		t.Fatalf("If-Modified-Since future time must return true")
+	}
+}
+
+func TestRequestCtxSendFileNotModified(t *testing.T) {
+	var ctx RequestCtx
+	var req Request
+	ctx.Init(&req, nil, defaultLogger)
+
+	filePath := "./server_test.go"
+	lastModified, err := fsLastModified(filePath)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	ctx.Request.Header.Set("If-Modified-Since", string(AppendHTTPDate(nil, lastModified)))
+
+	if err := ctx.SendFile(filePath); err != nil {
+		t.Fatalf("error in SendFile: %s", err)
+	}
+
+	s := ctx.Response.String()
+
+	var resp Response
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("error when reading response: %s", err)
+	}
+	if resp.StatusCode() != StatusNotModified {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotModified)
+	}
+	if len(resp.Body()) > 0 {
+		t.Fatalf("unexpected non-zero response body: %q", resp.Body())
+	}
+}
+
+func TestRequestCtxSendFileModified(t *testing.T) {
+	var ctx RequestCtx
+	var req Request
+	ctx.Init(&req, nil, defaultLogger)
+
+	filePath := "./server_test.go"
+	lastModified, err := fsLastModified(filePath)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	lastModified = lastModified.Add(-time.Hour)
+	ctx.Request.Header.Set("If-Modified-Since", string(AppendHTTPDate(nil, lastModified)))
+
+	if err := ctx.SendFile(filePath); err != nil {
+		t.Fatalf("error in SendFile: %s", err)
+	}
+
+	s := ctx.Response.String()
+
+	var resp Response
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("error when reading response: %s", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		t.Fatalf("cannot open file: %s", err)
+	}
+	body, err := ioutil.ReadAll(f)
+	f.Close()
+	if err != nil {
+		t.Fatalf("error when reading file: %s", err)
+	}
+
+	if !bytes.Equal(resp.Body(), body) {
+		t.Fatalf("unexpected response body: %q. Expecting %q", resp.Body(), body)
+	}
+}
+
 func TestRequestCtxSendFile(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
@@ -63,6 +165,9 @@ func TestRequestCtxSendFile(t *testing.T) {
 	br := bufio.NewReader(w)
 	if err := resp.Read(br); err != nil {
 		t.Fatalf("error when reading response: %s", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 	}
 
 	f, err := os.Open(filePath)

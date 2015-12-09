@@ -664,7 +664,43 @@ func (ctx *RequestCtx) ResetBody() {
 // so set it yourself with SetContentType() before returning
 // from RequestHandler.
 func (ctx *RequestCtx) SendFile(path string) error {
+	ifModStr := ctx.Request.Header.peek(strIfModifiedSince)
+	if len(ifModStr) > 0 {
+		if ifMod, err := ParseHTTPDate(ifModStr); err == nil {
+			lastMod, err := fsLastModified(path)
+			if err != nil {
+				return err
+			}
+			if !ifMod.Before(lastMod) {
+				ctx.NotModified()
+				return nil
+			}
+		}
+	}
 	return ctx.Response.SendFile(path)
+}
+
+// IfModifiedSince returns true if lastModified exceeds 'If-Modified-Since'
+// value from the request header.
+//
+// The function returns true also 'If-Modified-Since' request header is missing.
+func (ctx *RequestCtx) IfModifiedSince(lastModified time.Time) bool {
+	ifModStr := ctx.Request.Header.peek(strIfModifiedSince)
+	if len(ifModStr) == 0 {
+		return true
+	}
+	ifMod, err := ParseHTTPDate(ifModStr)
+	if err != nil {
+		return true
+	}
+	lastModified = lastModified.Truncate(time.Second)
+	return ifMod.Before(lastModified)
+}
+
+// NotModified resets response and sets '304 Not Modified' response status code.
+func (ctx *RequestCtx) NotModified() {
+	ctx.Response.Reset()
+	ctx.SetStatusCode(StatusNotModified)
 }
 
 // Write writes p into response body.

@@ -24,6 +24,11 @@ func AppendHTTPDate(dst []byte, date time.Time) []byte {
 	return date.In(gmtLocation).AppendFormat(dst, time.RFC1123)
 }
 
+// ParseHTTPDate parses HTTP-compliant (RFC1123) date.
+func ParseHTTPDate(date []byte) (time.Time, error) {
+	return time.Parse(time.RFC1123, unsafeBytesToStr(date))
+}
+
 // AppendUint appends n to dst and returns dst (which may be newly allocated).
 func AppendUint(dst []byte, n int) []byte {
 	if n < 0 {

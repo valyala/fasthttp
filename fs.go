@@ -194,6 +194,9 @@ type fsFile struct {
 	contentType   string
 	contentLength int
 
+	lastModified    time.Time
+	lastModifiedStr []byte
+
 	t            time.Time
 	readersCount int
 
@@ -493,6 +496,11 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
+	if !ctx.IfModifiedSince(ff.lastModified) {
+		ctx.NotModified()
+		return
+	}
+
 	r, err := ff.NewReader()
 	if err != nil {
 		ctx.Logger().Printf("cannot obtain file reader for path=%q: %s", path, err)
@@ -500,6 +508,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		return
 	}
 
+	ctx.Response.Header.SetCanonical(strLastModified, ff.lastModifiedStr)
 	ctx.SetBodyStream(r, ff.contentLength)
 	ctx.SetContentType(ff.contentType)
 }
@@ -558,11 +567,14 @@ func (h *fsHandler) createDirIndex(base *URI, filePath string) (*fsFile, error) 
 	fmt.Fprintf(w, "</ul></body></html>")
 	dirIndex := w.Bytes()
 
+	lastModified := time.Now()
 	ff := &fsFile{
-		h:             h,
-		dirIndex:      dirIndex,
-		contentType:   "text/html",
-		contentLength: len(dirIndex),
+		h:               h,
+		dirIndex:        dirIndex,
+		contentType:     "text/html",
+		contentLength:   len(dirIndex),
+		lastModified:    lastModified,
+		lastModifiedStr: AppendHTTPDate(nil, lastModified),
 	}
 	return ff, nil
 }
@@ -573,13 +585,13 @@ func (h *fsHandler) openFSFile(filePath string) (*fsFile, error) {
 		return nil, err
 	}
 
-	stat, err := f.Stat()
+	fileStat, err := f.Stat()
 	if err != nil {
 		f.Close()
 		return nil, err
 	}
 
-	if stat.IsDir() {
+	if fileStat.IsDir() {
 		f.Close()
 
 		indexPath := filePath + "/index.html"
@@ -593,7 +605,7 @@ func (h *fsHandler) openFSFile(filePath string) (*fsFile, error) {
 		return nil, errDirIndexRequired
 	}
 
-	n := stat.Size()
+	n := fileStat.Size()
 	contentLength := int(n)
 	if n != int64(contentLength) {
 		f.Close()
@@ -603,11 +615,14 @@ func (h *fsHandler) openFSFile(filePath string) (*fsFile, error) {
 	ext := fileExtension(filePath)
 	contentType := mime.TypeByExtension(ext)
 
+	lastModified := fileStat.ModTime()
 	ff := &fsFile{
-		h:             h,
-		f:             f,
-		contentType:   contentType,
-		contentLength: contentLength,
+		h:               h,
+		f:               f,
+		contentType:     contentType,
+		contentLength:   contentLength,
+		lastModified:    lastModified,
+		lastModifiedStr: AppendHTTPDate(nil, lastModified),
 	}
 	return ff, nil
 }
@@ -641,4 +656,17 @@ func fileExtension(path string) string {
 		return ""
 	}
 	return path[n:]
+}
+
+func fsLastModified(path string) (time.Time, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return zeroTime, err
+	}
+	fileInfo, err := f.Stat()
+	f.Close()
+	if err != nil {
+		return zeroTime, err
+	}
+	return fileInfo.ModTime().In(gmtLocation).Truncate(time.Second), nil
 }

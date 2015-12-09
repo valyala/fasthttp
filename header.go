@@ -73,6 +73,12 @@ func (h *ResponseHeader) SetStatusCode(statusCode int) {
 	h.statusCode = statusCode
 }
 
+// SetLastModified sets 'Last-Modified' header to the given value.
+func (h *ResponseHeader) SetLastModified(t time.Time) {
+	h.bufKV.value = AppendHTTPDate(h.bufKV.value[:0], t)
+	h.SetCanonical(strLastModified, h.bufKV.value)
+}
+
 // ConnectionClose returns true if 'Connection: close' header is set.
 func (h *ResponseHeader) ConnectionClose() bool {
 	return h.connectionClose

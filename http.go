@@ -109,16 +109,18 @@ func (resp *Response) SendFile(path string) error {
 	if err != nil {
 		return err
 	}
-	statInfo, err := f.Stat()
+	fileInfo, err := f.Stat()
 	if err != nil {
 		f.Close()
 		return err
 	}
-	size64 := statInfo.Size()
+	size64 := fileInfo.Size()
 	size := int(size64)
 	if int64(size) != size64 {
 		size = -1
 	}
+
+	resp.Header.SetLastModified(fileInfo.ModTime())
 	resp.SetBodyStream(f, size)
 	return nil
 }
