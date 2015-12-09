@@ -689,6 +689,8 @@ func (ctx *RequestCtx) PostBody() []byte {
 // before returning io.EOF.
 //
 // If bodySize < 0, then bodyStream is read until io.EOF.
+//
+// See also SetBodyStreamWriter.
 func (ctx *RequestCtx) SetBodyStream(bodyStream io.Reader, bodySize int) {
 	ctx.Response.SetBodyStream(bodyStream, bodySize)
 }

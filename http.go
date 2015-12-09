@@ -132,6 +132,8 @@ func (resp *Response) SendFile(path string) error {
 //
 // bodyStream.Close() is called after finishing reading all body data
 // if it implements io.Closer.
+//
+// See also SetBodyStreamWriter.
 func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
 	resp.body = resp.body[:0]
 	resp.closeBodyStream()
