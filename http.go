@@ -131,7 +131,7 @@ type responseBodyWriter struct {
 }
 
 func (w *responseBodyWriter) Write(p []byte) (int, error) {
-	w.r.body = append(w.r.body, p...)
+	w.r.AppendBody(p)
 	return len(p), nil
 }
 
@@ -140,7 +140,7 @@ type requestBodyWriter struct {
 }
 
 func (w *requestBodyWriter) Write(p []byte) (int, error) {
-	w.r.body = append(w.r.body, p...)
+	w.r.AppendBody(p)
 	return len(p), nil
 }
 
@@ -149,10 +149,22 @@ func (resp *Response) Body() []byte {
 	return resp.body
 }
 
+// AppendBody appends p to response body.
+func (resp *Response) AppendBody(p []byte) {
+	resp.closeBodyStream()
+	resp.body = append(resp.body, p...)
+}
+
 // SetBody sets response body.
 func (resp *Response) SetBody(body []byte) {
 	resp.closeBodyStream()
 	resp.body = append(resp.body[:0], body...)
+}
+
+// SetBodyString sets response body.
+func (resp *Response) SetBodyString(body string) {
+	resp.closeBodyStream()
+	resp.body = AppendBytesStr(resp.body[:0], body)
 }
 
 // ResetBody resets response body.
@@ -166,9 +178,19 @@ func (req *Request) Body() []byte {
 	return req.body
 }
 
+// AppendBody appends p to request body.
+func (req *Request) AppendBody(p []byte) {
+	req.body = append(req.body, p...)
+}
+
 // SetBody sets request body.
 func (req *Request) SetBody(body []byte) {
 	req.body = append(req.body[:0], body...)
+}
+
+// SetBodyString sets request body.
+func (req *Request) SetBodyString(body string) {
+	req.body = AppendBytesStr(req.body[:0], body)
 }
 
 // ResetBody resets request body.
@@ -192,7 +214,7 @@ func (req *Request) CopyTo(dst *Request) {
 	// re-created on the first call to MultipartForm.
 }
 
-// CopyTo copies resp contents to dst except of BodyStream.
+// CopyTo copies resp contents to dst except of body stream.
 func (resp *Response) CopyTo(dst *Response) {
 	dst.Reset()
 	resp.Header.CopyTo(&dst.Header)
@@ -281,10 +303,10 @@ func readMultipartFormBody(r io.Reader, boundary []byte, maxBodySize, maxInMemor
 // Reset clears request contents.
 func (req *Request) Reset() {
 	req.Header.Reset()
-	req.clearSkipHeader()
+	req.resetSkipHeader()
 }
 
-func (req *Request) clearSkipHeader() {
+func (req *Request) resetSkipHeader() {
 	req.body = req.body[:0]
 	req.uri.Reset()
 	req.parsedURI = false
@@ -307,11 +329,11 @@ func (req *Request) RemoveMultipartFormFiles() {
 // Reset clears response contents.
 func (resp *Response) Reset() {
 	resp.Header.Reset()
-	resp.clearSkipHeader()
+	resp.resetSkipHeader()
 	resp.SkipBody = false
 }
 
-func (resp *Response) clearSkipHeader() {
+func (resp *Response) resetSkipHeader() {
 	resp.closeBodyStream()
 	resp.body = resp.body[:0]
 }
@@ -342,7 +364,7 @@ func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 }
 
 func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool) error {
-	req.clearSkipHeader()
+	req.resetSkipHeader()
 	err := req.Header.Read(r)
 	if err != nil {
 		return err
@@ -387,7 +409,7 @@ func (resp *Response) Read(r *bufio.Reader) error {
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
 func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
-	resp.clearSkipHeader()
+	resp.resetSkipHeader()
 	err := resp.Header.Read(r)
 	if err != nil {
 		return err
