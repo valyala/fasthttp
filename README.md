@@ -368,10 +368,15 @@ var (
 	dst []byte
 	src []byte
 )
-dst = append(dst, src...)  // this is legal code
-copy(dst, src)  // this is legal code
-(string(src) == "")  // is true
-(len(src) == 0)  // is true
+dst = append(dst, src...)  // is legal if dst is nil and src is nil
+copy(dst, src)  // is legal if dst is nil and src is nil
+(string(src) == "")  // is true if src is nil
+(len(src) == 0)  // is true if src is nil
+
+// this for loop doesn't panic if src is nil
+for i, ch := range src {
+	doSomething(i, ch)
+}
 ```
 
 So throw away nil checks for `[]byte` buffers from you code. For example,
@@ -391,6 +396,13 @@ srcLen := len(src)
 * String may be appended to `[]byte` buffer with `append`
 ```go
 dst = append(dst, "foobar"...)
+```
+
+* `[]byte` buffer may be extended to its' capacity.
+```go
+buf := make([]byte, 100)
+a := buf[:10]  // len(a) == 10, cap(a) == 100.
+b := a[:100]  // is valid, since cap(a) == 100.
 ```
 
 * All fasthttp functions accept nil `[]byte` buffer
