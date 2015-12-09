@@ -201,16 +201,10 @@ type fsFile struct {
 	bigFilesLock sync.Mutex
 }
 
-func (ff *fsFile) Reader(incrementReaders bool) (io.Reader, error) {
-	if incrementReaders {
-		ff.h.cacheLock.Lock()
-		ff.readersCount++
-		ff.h.cacheLock.Unlock()
-	}
-
+func (ff *fsFile) NewReader() (io.Reader, error) {
 	if ff.isBig() {
 		r, err := ff.bigFileReader()
-		if err != nil && incrementReaders {
+		if err != nil {
 			ff.decReadersCount()
 		}
 		return r, err
@@ -450,13 +444,10 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		return
 	}
 
-	incrementReaders := true
-
 	h.cacheLock.Lock()
 	ff, ok := h.cache[string(path)]
 	if ok {
 		ff.readersCount++
-		incrementReaders = false
 	}
 	h.cacheLock.Unlock()
 
@@ -487,6 +478,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ff1, ok := h.cache[pathStr]
 		if !ok {
 			h.cache[pathStr] = ff
+			ff.readersCount++
+		} else {
+			ff1.readersCount++
 		}
 		h.cacheLock.Unlock()
 
@@ -499,7 +493,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	r, err := ff.Reader(incrementReaders)
+	r, err := ff.NewReader()
 	if err != nil {
 		ctx.Logger().Printf("cannot obtain file reader for path=%q: %s", path, err)
 		ctx.Error("Internal Server Error", StatusInternalServerError)
