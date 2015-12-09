@@ -21,7 +21,7 @@ type StreamWriter func(w *bufio.Writer)
 //
 // The returned reader may be passed to Response.SetBodyStream.
 //
-// See also Response.SetBodyWriter.
+// See also Response.SetBodyStreamWriter.
 func NewStreamReader(sw StreamWriter) io.Reader {
 	pr, pw := io.Pipe()
 
