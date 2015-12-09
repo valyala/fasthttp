@@ -466,6 +466,11 @@ func (ctx *RequestCtx) Referer() []byte {
 	return ctx.Request.Header.Referer()
 }
 
+// UserAgent returns User-Agent header value from the request.
+func (ctx *RequestCtx) UserAgent() []byte {
+	return ctx.Request.Header.UserAgent()
+}
+
 // Path returns requested path.
 //
 // The path is valid until returning from RequestHandler.
