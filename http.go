@@ -526,6 +526,7 @@ func (resp *Response) Write(w *bufio.Writer) error {
 			}
 		}
 		if contentLength >= 0 {
+			resp.Header.SetContentLength(contentLength)
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
