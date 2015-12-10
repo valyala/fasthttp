@@ -12,6 +12,71 @@ import (
 	"time"
 )
 
+func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.0\r\nConnection: keep-alive\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("GET /bar HTTP/1.0\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("GET /this/shouldnt/be/served HTTP/1.0\r\nHost: google.com\r\n\r\n")
+
+	requestsServed := 0
+
+	ch := make(chan struct{})
+	go func() {
+		err := ServeConn(rw, func(ctx *RequestCtx) {
+			requestsServed++
+			ctx.SuccessString("aaa/bbb", "foobar")
+		})
+		if err != nil {
+			t.Fatalf("unexpected error in ServeConn: %s", err)
+		}
+		close(ch)
+	}()
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	br := bufio.NewReader(&rw.w)
+
+	var resp Response
+
+	// verify the first response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Unexpected error when parsing response: %s", err)
+	}
+	if string(resp.Header.Peek("Connection")) != "keep-alive" {
+		t.Fatalf("unexpected Connection header %q. Expecting %q", resp.Header.Peek("Connection"), "keep-alive")
+	}
+	if resp.Header.ConnectionClose() {
+		t.Fatalf("unexpected Connection: close")
+	}
+
+	// verify the second response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Unexpected error when parsing response: %s", err)
+	}
+	if string(resp.Header.Peek("Connection")) != "close" {
+		t.Fatalf("unexpected Connection header %q. Expecting %q", resp.Header.Peek("Connection"), "close")
+	}
+	if !resp.Header.ConnectionClose() {
+		t.Fatalf("expecting Connection: close")
+	}
+
+	data, err := ioutil.ReadAll(br)
+	if err != nil {
+		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("Unexpected data read after responses %q", data)
+	}
+
+	if requestsServed != 2 {
+		t.Fatalf("unexpected number of requests served: %d. Expecting 2", requestsServed)
+	}
+}
+
 func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
