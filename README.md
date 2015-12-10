@@ -304,6 +304,8 @@ fastttp.ListenAndServe(":80", m)
   * http.FileServer() -> [fasthttp.FSHandler()](https://godoc.org/github.com/valyala/fasthttp#FSHandler),
   [fasthttp.FS](https://godoc.org/github.com/valyala/fasthttp#FS)
   * http.ServeFile() -> [ctx.SendFile()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.SendFile)
+  * http.Redirect() -> [ctx.Redirect()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Redirect)
+  * http.NotFound() -> [ctx.NotFound()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.NotFound)
 
 * *VERY IMPORTANT!* Fasthttp disallows holding references
 to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx) or to its'

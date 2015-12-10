@@ -709,6 +709,13 @@ func (ctx *RequestCtx) NotModified() {
 	ctx.SetStatusCode(StatusNotModified)
 }
 
+// NotFound resets response and sets '404 Not Found' response status code.
+func (ctx *RequestCtx) NotFound() {
+	ctx.Response.Reset()
+	ctx.SetStatusCode(StatusNotFound)
+	ctx.SetBodyString("404 Page not found")
+}
+
 // Write writes p into response body.
 func (ctx *RequestCtx) Write(p []byte) (int, error) {
 	ctx.Response.AppendBody(p)
