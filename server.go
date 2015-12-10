@@ -1106,9 +1106,10 @@ func (s *Server) serveConn(c net.Conn) error {
 		connectionClose = ctx.Response.Header.ConnectionClose() || ctx.Request.Header.ConnectionClose()
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
-		}
-		if !connectionClose && !ctx.Request.Header.IsHTTP11() {
-			// set 'Connection: keep-alive' response header for non-HTTP/1.1 request.
+		} else if !ctx.Request.Header.IsHTTP11() {
+			// Set 'Connection: keep-alive' response header for non-HTTP/1.1 request.
+			// There is no need in setting this header for http/1.1, since in http/1.1
+			// connections are keep-alive by default.
 			ctx.Response.Header.SetCanonical(strConnection, strKeepAlive)
 		}
 
