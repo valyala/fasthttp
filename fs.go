@@ -497,6 +497,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	}
 
 	if !ctx.IfModifiedSince(ff.lastModified) {
+		ff.decReadersCount()
 		ctx.NotModified()
 		return
 	}
