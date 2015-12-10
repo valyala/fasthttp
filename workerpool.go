@@ -10,8 +10,10 @@ import (
 )
 
 // workerPool serves incoming connections via a pool of workers
-// in FIFO order, i.e. the most recently stopped worker will serve the next
+// in FILO order, i.e. the most recently stopped worker will serve the next
 // incoming connection.
+//
+// Such a scheme keeps CPU caches hot (in theory).
 type workerPool struct {
 	// Function for serving server connections.
 	// It must leave c unclosed.
