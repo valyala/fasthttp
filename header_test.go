@@ -992,6 +992,29 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	// no headers
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\n\r\naaaabbb",
 		200, -2, string(defaultContentType), "aaaabbb")
+	if !h.IsHTTP11() {
+		t.Fatalf("expecting http/1.1 protocol")
+	}
+
+	// ancient http protocol
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.0 203 OK\r\nContent-Length: 123\r\nContent-Type: foobar\r\n\r\naaa",
+		203, 123, "foobar", "aaa")
+	if h.IsHTTP11() {
+		t.Fatalf("ancient protocol must be non-http/1.1")
+	}
+	if !h.ConnectionClose() {
+		t.Fatalf("expecting connection: close for ancient protocol")
+	}
+
+	// ancient http protocol with 'Connection: keep-alive' header.
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.0 403 aa\r\nContent-Length: 0\r\nContent-Type: 2\r\nConnection: Keep-Alive\r\n\r\nww",
+		403, 0, "2", "ww")
+	if h.IsHTTP11() {
+		t.Fatalf("ancient protocol must be non-http/1.1")
+	}
+	if h.ConnectionClose() {
+		t.Fatalf("expecting connection: keep-alive for ancient protocol")
+	}
 }
 
 func TestRequestHeaderReadSuccess(t *testing.T) {
@@ -1014,13 +1037,29 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	// ancient http protocol
 	testRequestHeaderReadSuccess(t, h, "GET /bar HTTP/1.0\r\nHost: gole\r\n\r\npppp",
 		0, "/bar", "gole", "", "", "pppp")
+	if h.IsHTTP11() {
+		t.Fatalf("ancient http protocol cannot be http/1.1")
+	}
 	if !h.ConnectionClose() {
 		t.Fatalf("expecting connectionClose for ancient http protocol")
+	}
+
+	// ancient http protocol with 'Connection: keep-alive' header
+	testRequestHeaderReadSuccess(t, h, "GET /aa HTTP/1.0\r\nHost: bb\r\nConnection: keep-alive\r\n\r\nxxx",
+		0, "/aa", "bb", "", "", "xxx")
+	if h.IsHTTP11() {
+		t.Fatalf("ancient http protocol cannot be http/1.1")
+	}
+	if h.ConnectionClose() {
+		t.Fatalf("unexpected 'connection: close' for ancient http protocol")
 	}
 
 	// complex headers with body
 	testRequestHeaderReadSuccess(t, h, "GET /aabar HTTP/1.1\r\nAAA: bbb\r\nHost: ole.com\r\nAA: bb\r\n\r\nzzz",
 		0, "/aabar", "ole.com", "", "", "zzz")
+	if !h.IsHTTP11() {
+		t.Fatalf("expecting http/1.1 protocol")
+	}
 	if h.ConnectionClose() {
 		t.Fatalf("unexpected connection: close")
 	}

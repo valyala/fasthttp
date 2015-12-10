@@ -20,6 +20,7 @@ import (
 type ResponseHeader struct {
 	statusCode int
 
+	noHTTP11        bool
 	connectionClose bool
 
 	contentLength      int
@@ -42,6 +43,7 @@ type ResponseHeader struct {
 // It is unsafe modifying/reading RequestHeader instance from concurrently
 // running goroutines.
 type RequestHeader struct {
+	noHTTP11        bool
 	connectionClose bool
 
 	contentLength      int
@@ -396,6 +398,16 @@ func (h *RequestHeader) IsHead() bool {
 	return bytes.Equal(h.Method(), strHead)
 }
 
+// IsHTTP11 returns true if the request is HTTP/1.1.
+func (h *RequestHeader) IsHTTP11() bool {
+	return !h.noHTTP11
+}
+
+// IsHTTP11 returns true if the response is HTTP/1.1.
+func (h *ResponseHeader) IsHTTP11() bool {
+	return !h.noHTTP11
+}
+
 // Len returns the number of headers set,
 // i.e. the number of times f is called in VisitAll.
 func (h *ResponseHeader) Len() int {
@@ -414,6 +426,7 @@ func (h *RequestHeader) Len() int {
 
 // Reset clears response header.
 func (h *ResponseHeader) Reset() {
+	h.noHTTP11 = false
 	h.statusCode = 0
 	h.connectionClose = false
 
@@ -429,6 +442,7 @@ func (h *ResponseHeader) Reset() {
 
 // Reset clears request header.
 func (h *RequestHeader) Reset() {
+	h.noHTTP11 = false
 	h.connectionClose = false
 
 	h.contentLength = 0
@@ -451,6 +465,7 @@ func (h *RequestHeader) Reset() {
 // CopyTo copies all the headers to dst.
 func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.Reset()
+	dst.noHTTP11 = h.noHTTP11
 	dst.statusCode = h.statusCode
 	dst.connectionClose = h.connectionClose
 	dst.contentLength = h.contentLength
@@ -464,6 +479,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 // CopyTo copies all the headers to dst.
 func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.Reset()
+	dst.noHTTP11 = h.noHTTP11
 	dst.connectionClose = h.connectionClose
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes[:0], h.contentLengthBytes...)
@@ -1115,7 +1131,7 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 	}
 
 	var n int
-	if !h.noBody() {
+	if !h.noBody() || h.noHTTP11 {
 		n, err = h.parseHeaders(buf[m:])
 		if err != nil {
 			return 0, err
@@ -1147,10 +1163,7 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	if n < 0 {
 		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
-	if !bytes.Equal(b[:n], strHTTP11) {
-		// Non-http/1.1 response. Close connection after it.
-		h.connectionClose = true
-	}
+	h.noHTTP11 = !bytes.Equal(b[:n], strHTTP11)
 	b = b[n+1:]
 
 	// parse status code
@@ -1186,14 +1199,12 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	// parse requestURI
 	n = bytes.LastIndexByte(b, ' ')
 	if n < 0 {
-		// no http protocol found. Close connection after the request.
-		h.connectionClose = true
+		h.noHTTP11 = true
 		n = len(b)
 	} else if n == 0 {
 		return 0, fmt.Errorf("RequestURI cannot be empty in %q", buf)
 	} else if !bytes.Equal(b[n+1:], strHTTP11) {
-		// non-http/1.1 protocol. Close connection after the request.
-		h.connectionClose = true
+		h.noHTTP11 = true
 	}
 	h.requestURI = append(h.requestURI[:0], b[:n]...)
 
@@ -1313,6 +1324,12 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 		h.h = setArg(h.h, strTransferEncoding, strIdentity)
 		h.connectionClose = true
 	}
+	if h.noHTTP11 && !h.connectionClose {
+		// close connection for non-http/1.1 response unless 'Connection: keep-alive' is set.
+		v := peekArgBytes(h.h, strConnection)
+		h.connectionClose = !bytes.Equal(v, strKeepAlive) && !bytes.Equal(v, strKeepAliveCamelCase)
+	}
+
 	return len(buf) - len(s.b), nil
 }
 
@@ -1365,6 +1382,12 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 		h.contentLength = 0
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}
+	if h.noHTTP11 && !h.connectionClose {
+		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
+		v := peekArgBytes(h.h, strConnection)
+		h.connectionClose = !bytes.Equal(v, strKeepAlive) && !bytes.Equal(v, strKeepAliveCamelCase)
+	}
+
 	return len(buf) - len(s.b), nil
 }
 

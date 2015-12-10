@@ -44,6 +44,8 @@ var (
 	strCookiePath    = []byte("path")
 
 	strClose               = []byte("close")
+	strKeepAlive           = []byte("keep-alive")
+	strKeepAliveCamelCase  = []byte("Keep-Alive")
 	strUpgrade             = []byte("Upgrade")
 	strChunked             = []byte("chunked")
 	strIdentity            = []byte("identity")
