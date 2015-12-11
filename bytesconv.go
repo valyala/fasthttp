@@ -2,9 +2,11 @@ package fasthttp
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"sync"
 	"time"
 	"unsafe"
@@ -17,6 +19,62 @@ var gmtLocation = func() *time.Location {
 	}
 	return x
 }()
+
+// AppendIPv4 appends string representation of the given ip v4 to dst
+// and returns the result (which may be newly allocated).
+func AppendIPv4(dst []byte, ip net.IP) []byte {
+	ip = ip.To4()
+	if ip == nil {
+		return append(dst, "non-v4 ip passed to AppendIPv4"...)
+	}
+
+	dst = AppendUint(dst, int(ip[0]))
+	for i := 1; i < 4; i++ {
+		dst = append(dst, '.')
+		dst = AppendUint(dst, int(ip[i]))
+	}
+	return dst
+}
+
+// ParseIPv4 parses ip address from ipStr into dst and returns dst
+// (which may be newly allocated).
+func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
+	if len(dst) < net.IPv4len {
+		dst = make([]byte, net.IPv4len)
+	}
+	copy(dst, net.IPv4zero)
+	dst = dst.To4()
+	if dst == nil {
+		panic("BUG: dst must not be nil")
+	}
+
+	b := ipStr
+	for i := 0; i < 3; i++ {
+		n := bytes.IndexByte(b, '.')
+		if n < 0 {
+			return dst, fmt.Errorf("cannot find dot in ipStr %q", ipStr)
+		}
+		v, err := ParseUint(b[:n])
+		if err != nil {
+			return dst, fmt.Errorf("cannot parse ipStr %q: %s", ipStr, err)
+		}
+		if v > 255 {
+			return dst, fmt.Errorf("cannot parse ipStr %q: ip part cannot exceed 255: parsed %d", ipStr, v)
+		}
+		dst[i] = byte(v)
+		b = b[n+1:]
+	}
+	v, err := ParseUint(b)
+	if err != nil {
+		return dst, fmt.Errorf("cannot parse ipStr %q: %s", ipStr, err)
+	}
+	if v > 255 {
+		return dst, fmt.Errorf("cannot parse ipStr %q: ip part cannot exceed 255: parsed %d", ipStr, v)
+	}
+	dst[3] = byte(v)
+
+	return dst, nil
+}
 
 // AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
 // to dst and returns dst (which may be newly allocated).

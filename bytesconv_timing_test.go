@@ -3,8 +3,33 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"net"
 	"testing"
 )
+
+func BenchmarkParseIPv4(b *testing.B) {
+	ipStr := []byte("123.145.167.189")
+	b.RunParallel(func(pb *testing.PB) {
+		var ip net.IP
+		var err error
+		for pb.Next() {
+			ip, err = ParseIPv4(ip, ipStr)
+			if err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+		}
+	})
+}
+
+func BenchmarkAppendIPv4(b *testing.B) {
+	ip := net.ParseIP("123.145.167.189")
+	b.RunParallel(func(pb *testing.PB) {
+		var buf []byte
+		for pb.Next() {
+			buf = AppendIPv4(buf[:0], ip)
+		}
+	})
+}
 
 func BenchmarkInt2HexByte(b *testing.B) {
 	buf := []int{1, 0xf, 2, 0xd, 3, 0xe, 4, 0xa, 5, 0xb, 6, 0xc, 7, 0xf, 0, 0xf, 6, 0xd, 9, 8, 4, 0x5}

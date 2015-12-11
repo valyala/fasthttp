@@ -4,9 +4,69 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 )
+
+func TestParseIPv4(t *testing.T) {
+	testParseIPv4(t, "0.0.0.0", true)
+	testParseIPv4(t, "255.255.255.255", true)
+	testParseIPv4(t, "123.45.67.89", true)
+
+	// ipv6 shouldn't work
+	testParseIPv4(t, "2001:4860:0:2001::68", false)
+
+	// invalid ip
+	testParseIPv4(t, "foobar", false)
+	testParseIPv4(t, "1.2.3", false)
+	testParseIPv4(t, "123.456.789.11", false)
+}
+
+func testParseIPv4(t *testing.T, ipStr string, isValid bool) {
+	ip, err := ParseIPv4(nil, []byte(ipStr))
+	if isValid {
+		if err != nil {
+			t.Fatalf("unexpected error when parsing ip %q: %s", ipStr, err)
+		}
+		s := string(AppendIPv4(nil, ip))
+		if s != ipStr {
+			t.Fatalf("unexpected ip parsed %q. Expecting %q", s, ipStr)
+		}
+	} else {
+		if err == nil {
+			t.Fatalf("expecting error when parsing ip %q", ipStr)
+		}
+	}
+}
+
+func TestAppendIPv4(t *testing.T) {
+	testAppendIPv4(t, "0.0.0.0", true)
+	testAppendIPv4(t, "127.0.0.1", true)
+	testAppendIPv4(t, "8.8.8.8", true)
+	testAppendIPv4(t, "123.45.67.89", true)
+
+	// ipv6 shouldn't work
+	testAppendIPv4(t, "2001:4860:0:2001::68", false)
+}
+
+func testAppendIPv4(t *testing.T, ipStr string, isValid bool) {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		t.Fatalf("cannot parse ip %q", ipStr)
+	}
+	s := string(AppendIPv4(nil, ip))
+	if isValid {
+		if s != ipStr {
+			t.Fatalf("unepxected ip %q. Expecting %q", s, ipStr)
+		}
+	} else {
+		ipStr = "non-v4 ip passed to AppendIPv4"
+		if s != ipStr {
+			t.Fatalf("unexpected ip %q. Expecting %q", s, ipStr)
+		}
+	}
+}
 
 func testAppendUint(t *testing.T, n int) {
 	expectedS := fmt.Sprintf("%d", n)
