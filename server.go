@@ -256,7 +256,7 @@ type RequestCtx struct {
 	// Copying Response by value is forbidden. Use pointer to Response instead.
 	Response Response
 
-	userValues map[string]interface{}
+	userValues userData
 
 	id uint64
 
@@ -317,31 +317,38 @@ func (ctx *RequestCtx) Hijack(handler HijackHandler) {
 // SetUserValue stores the given value (arbitrary object)
 // under the given key in ctx.
 //
-// The value stored in ctx may be obtained by UserValue().
+// The value stored in ctx may be obtained by UserValue*.
 //
 // This functionality may be useful for passing arbitrary values between
 // functions involved in request processing.
 //
 // All the values stored in ctx are deleted after returning from RequestHandler.
 func (ctx *RequestCtx) SetUserValue(key string, value interface{}) {
-	if ctx.userValues == nil {
-		ctx.userValues = make(map[string]interface{}, 1)
-	}
-	ctx.userValues[key] = value
+	ctx.userValues.Set(key, value)
 }
 
-// UserValue returns the value stored via SetUserValue under the given key.
+// SetUserValueBytes stores the given value (arbitrary object)
+// under the given key in ctx.
+//
+// The value stored in ctx may be obtained by UserValue*.
+//
+// This functionality may be useful for passing arbitrary values between
+// functions involved in request processing.
+//
+// All the values stored in ctx are deleted after returning from RequestHandler.
+func (ctx *RequestCtx) SetUserValueBytes(key []byte, value interface{}) {
+	ctx.userValues.SetBytes(key, value)
+}
+
+// UserValue returns the value stored via SetUserValue* under the given key.
 func (ctx *RequestCtx) UserValue(key string) interface{} {
-	if ctx.userValues == nil {
-		return nil
-	}
-	return ctx.userValues[key]
+	return ctx.userValues.Get(key)
 }
 
-func (ctx *RequestCtx) resetUserValues() {
-	for k := range ctx.userValues {
-		delete(ctx.userValues, k)
-	}
+// UserValueBytes returns the value stored via SetUserValue*
+// under the given key.
+func (ctx *RequestCtx) UserValueBytes(key []byte) interface{} {
+	return ctx.userValues.GetBytes(key)
 }
 
 // IsTLS returns true if the underlying connection is tls.Conn.
@@ -1073,7 +1080,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		hijackHandler = ctx.hijackHandler
 		ctx.hijackHandler = nil
 
-		ctx.resetUserValues()
+		ctx.userValues.Reset()
 
 		// Remove temporary files, which may be uploaded during the request.
 		ctx.Request.RemoveMultipartFormFiles()
