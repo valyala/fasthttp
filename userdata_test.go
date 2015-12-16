@@ -36,6 +36,6 @@ func testUserDataGet(t *testing.T, u *userData, key []byte, value interface{}) {
 		t.Fatalf("cannot obtain value for key=%q", key)
 	}
 	if !reflect.DeepEqual(v, value) {
-		t.Fatalf("unexpected value for key=%q: %d. Expecting %d", v, value)
+		t.Fatalf("unexpected value for key=%q: %d. Expecting %d", key, v, value)
 	}
 }
