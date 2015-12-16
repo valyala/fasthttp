@@ -488,7 +488,7 @@ type clientURLResponse struct {
 
 func clientGetURLTimeoutFreeConn(dst []byte, url string, timeout time.Duration, c clientDoer) (statusCode int, body []byte, err error) {
 	var ch chan clientURLResponse
-	chv := errorChPool.Get()
+	chv := clientURLResponseChPool.Get()
 	if chv == nil {
 		chv = make(chan clientURLResponse, 1)
 	}
@@ -525,7 +525,7 @@ func clientGetURLTimeoutFreeConn(dst []byte, url string, timeout time.Duration, 
 	select {
 	case resp := <-ch:
 		releaseRequest(req)
-		errorChPool.Put(chv)
+		clientURLResponseChPool.Put(chv)
 		statusCode = resp.statusCode
 		body = resp.body
 		err = resp.err
@@ -539,6 +539,8 @@ func clientGetURLTimeoutFreeConn(dst []byte, url string, timeout time.Duration, 
 
 	return statusCode, body, err
 }
+
+var clientURLResponseChPool sync.Pool
 
 func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (statusCode int, body []byte, err error) {
 	req := acquireRequest()

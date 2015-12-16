@@ -93,6 +93,32 @@ func TestClientGetTimeoutSuccessConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+func TestClientDoTimeoutSuccess(t *testing.T) {
+	addr := "127.0.0.1:63897"
+	s := startEchoServer(t, "tcp", addr)
+	defer s.Stop()
+
+	addr = "http://" + addr
+	testClientDoTimeoutSuccess(t, &defaultClient, addr, 100)
+}
+
+func TestClientDoTimeoutSuccessConcurrent(t *testing.T) {
+	addr := "127.0.0.1:63898"
+	s := startEchoServer(t, "tcp", addr)
+	defer s.Stop()
+
+	addr = "http://" + addr
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			testClientDoTimeoutSuccess(t, &defaultClient, addr, 100)
+		}()
+	}
+	wg.Wait()
+}
+
 func TestClientGetTimeoutError(t *testing.T) {
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
@@ -420,6 +446,29 @@ func testClientGet(t *testing.T, c clientGetter, addr string, n int) {
 			t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
 		}
 		resultURI := string(body)
+		if strings.HasPrefix(uri, "https") {
+			resultURI = uri[:5] + resultURI[4:]
+		}
+		if resultURI != uri {
+			t.Fatalf("unexpected uri %q. Expecting %q", resultURI, uri)
+		}
+	}
+}
+
+func testClientDoTimeoutSuccess(t *testing.T, c *Client, addr string, n int) {
+	var req Request
+	var resp Response
+
+	for i := 0; i < n; i++ {
+		uri := fmt.Sprintf("%s/foo/%d?bar=baz", addr, i)
+		req.SetRequestURI(uri)
+		if err := c.DoTimeout(&req, &resp, time.Second); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+		}
+		resultURI := string(resp.Body())
 		if strings.HasPrefix(uri, "https") {
 			resultURI = uri[:5] + resultURI[4:]
 		}
