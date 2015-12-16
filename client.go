@@ -715,7 +715,7 @@ func clientDoTimeoutFreeConn(req *Request, resp *Response, timeout time.Duration
 	var err error
 	select {
 	case err = <-ch:
-		resp.CopyTo(respCopy)
+		respCopy.CopyTo(resp)
 		releaseResponse(respCopy)
 		releaseRequest(reqCopy)
 		errorChPool.Put(chv)
