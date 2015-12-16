@@ -473,7 +473,9 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   There are no plans to add request routing into fasthttp. I believe request
   routing must be implemented in a separate package(s) like
   [httprouter](https://github.com/julienschmidt/httprouter).
-  See [this issue](https://github.com/valyala/fasthttp/issues/8) for more info.
+  Try [fasthttrouter](https://github.com/buaazp/fasthttprouter),
+  [httprouter](https://github.com/julienschmidt/httprouter) fork for fasthttp.
+  See also [this issue](https://github.com/valyala/fasthttp/issues/8) for more info.
 
 * *I detected data race in fasthttp!*
 
