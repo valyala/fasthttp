@@ -272,9 +272,10 @@ type RequestCtx struct {
 	c      net.Conn
 	fbr    firstByteReader
 
-	timeoutErrMsg string
-	timeoutCh     chan struct{}
-	timeoutTimer  *time.Timer
+	timeoutErrMsg     string
+	timeoutStatusCode int
+	timeoutCh         chan struct{}
+	timeoutTimer      *time.Timer
 
 	hijackHandler HijackHandler
 
@@ -793,9 +794,21 @@ func (ctx *RequestCtx) Logger() Logger {
 // All response modifications after TimeoutError call are ignored.
 //
 // TimeoutError MUST be called before returning from RequestHandler if there are
-// references to ctx and/or its members in other goroutines.
+// references to ctx and/or its members in other goroutines remain.
 func (ctx *RequestCtx) TimeoutError(msg string) {
+	ctx.TimeoutErrorWithCode(msg, StatusRequestTimeout)
+}
+
+// TimeoutErrorWithCode sets response body to msg and response status
+// code to statusCode.
+//
+// All response modifications after TimeoutErrorWithCode call are ignored.
+//
+// TimeoutErrorWithCode MUST be called before returning from RequestHandler
+// if there are references to ctx and/or its members in other goroutines remain.
+func (ctx *RequestCtx) TimeoutErrorWithCode(msg string, statusCode int) {
 	ctx.timeoutErrMsg = msg
+	ctx.timeoutStatusCode = statusCode
 }
 
 // ListenAndServe serves HTTP requests from the given TCP addr.
@@ -1087,8 +1100,9 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		errMsg = ctx.timeoutErrMsg
 		if len(errMsg) > 0 {
+			statusCode := ctx.timeoutStatusCode
 			ctx = s.acquireCtx(c)
-			ctx.Error(errMsg, StatusRequestTimeout)
+			ctx.Error(errMsg, statusCode)
 			if br != nil {
 				// Close connection, since br may be attached to the old ctx via ctx.fbr.
 				ctx.SetConnectionClose()
