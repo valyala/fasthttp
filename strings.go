@@ -3,7 +3,7 @@ package fasthttp
 var (
 	defaultServerName  = []byte("fasthttp")
 	defaultUserAgent   = []byte("fasthttp")
-	defaultContentType = []byte("text/plain")
+	defaultContentType = []byte("text/plain; charset=utf-8")
 )
 
 var (
