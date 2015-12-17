@@ -433,6 +433,56 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "timeout!!!")
 }
 
+func TestServerTimeoutErrorWithResponse(t *testing.T) {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			go func() {
+				ctx.Success("aaa/bbb", []byte("xxxyyy"))
+			}()
+
+			var resp Response
+
+			resp.SetStatusCode(123)
+			resp.SetBodyString("foobar. Should be ignored")
+			ctx.TimeoutErrorWithResponse(&resp)
+
+			resp.SetStatusCode(456)
+			resp.SetBodyString("stolen ctx")
+			resp.Header.SetContentType("foo/bar")
+			ctx.TimeoutErrorWithResponse(&resp)
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, 456, "foo/bar", "stolen ctx")
+
+	data, err := ioutil.ReadAll(br)
+	if err != nil {
+		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("Unexpected data read after the first response %q. Expecting %q", data, "")
+	}
+}
+
 func TestServerTimeoutErrorWithCode(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {

@@ -272,10 +272,9 @@ type RequestCtx struct {
 	c      net.Conn
 	fbr    firstByteReader
 
-	timeoutErrMsg     string
-	timeoutStatusCode int
-	timeoutCh         chan struct{}
-	timeoutTimer      *time.Timer
+	timeoutResponse *Response
+	timeoutCh       chan struct{}
+	timeoutTimer    *time.Timer
 
 	hijackHandler HijackHandler
 
@@ -807,8 +806,23 @@ func (ctx *RequestCtx) TimeoutError(msg string) {
 // TimeoutErrorWithCode MUST be called before returning from RequestHandler
 // if there are references to ctx and/or its members in other goroutines remain.
 func (ctx *RequestCtx) TimeoutErrorWithCode(msg string, statusCode int) {
-	ctx.timeoutErrMsg = msg
-	ctx.timeoutStatusCode = statusCode
+	var resp Response
+	resp.SetStatusCode(statusCode)
+	resp.SetBodyString(msg)
+	ctx.TimeoutErrorWithResponse(&resp)
+}
+
+// TimeoutErrorWithResponse marks the ctx as timed out and sends the given
+// response to the client.
+//
+// All ctx modifications after TimeoutErrorWithResponse call are ignored.
+//
+// TimeoutErrorWithResponse MUST be called before returning from RequestHandler
+// if there are references to ctx and/or its members in other goroutines remain.
+func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
+	respCopy := &Response{}
+	resp.CopyTo(respCopy)
+	ctx.timeoutResponse = respCopy
 }
 
 // ListenAndServe serves HTTP requests from the given TCP addr.
@@ -1030,7 +1044,7 @@ func (s *Server) serveConn(c net.Conn) error {
 
 	var err error
 	var connectionClose bool
-	var errMsg string
+	var timeoutResponse *Response
 	var hijackHandler HijackHandler
 	for {
 		ctx.id++
@@ -1098,11 +1112,10 @@ func (s *Server) serveConn(c net.Conn) error {
 		// Remove temporary files, which may be uploaded during the request.
 		ctx.Request.RemoveMultipartFormFiles()
 
-		errMsg = ctx.timeoutErrMsg
-		if len(errMsg) > 0 {
-			statusCode := ctx.timeoutStatusCode
+		timeoutResponse = ctx.timeoutResponse
+		if timeoutResponse != nil {
 			ctx = s.acquireCtx(c)
-			ctx.Error(errMsg, statusCode)
+			timeoutResponse.CopyTo(&ctx.Response)
 			if br != nil {
 				// Close connection, since br may be attached to the old ctx via ctx.fbr.
 				ctx.SetConnectionClose()
@@ -1254,15 +1267,16 @@ func (c hijackConn) Close() error {
 	return nil
 }
 
-// TimeoutErrMsg returns last error message set via TimeoutError call.
+// LastTimeoutErrorResponse returns the last timeout response set
+// via TimeoutError* call.
 //
 // This function is intended for custom server implementations.
-func (ctx *RequestCtx) TimeoutErrMsg() string {
-	return ctx.timeoutErrMsg
+func (ctx *RequestCtx) LastTimeoutErrorResponse() *Response {
+	return ctx.timeoutResponse
 }
 
 func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
-	if len(ctx.timeoutErrMsg) > 0 {
+	if ctx.timeoutResponse != nil {
 		panic("BUG: cannot write timed out response")
 	}
 	h := &ctx.Response.Header
@@ -1434,7 +1448,7 @@ func (ctx *RequestCtx) initID() {
 }
 
 func (s *Server) releaseCtx(ctx *RequestCtx) {
-	if len(ctx.timeoutErrMsg) > 0 {
+	if ctx.timeoutResponse != nil {
 		panic("BUG: cannot release timed out RequestCtx")
 	}
 	ctx.c = nil
