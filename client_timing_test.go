@@ -201,7 +201,7 @@ func BenchmarkClientGetEndToEnd(b *testing.B) {
 			if statusCode != StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
 			}
-			if !EqualBytesStr(body, requestURI) {
+			if string(body) != requestURI {
 				b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)
 			}
 			buf = body
@@ -249,7 +249,7 @@ func BenchmarkNetHTTPClientGetEndToEnd(b *testing.B) {
 			if err != nil {
 				b.Fatalf("unexpected error when reading response body: %s", err)
 			}
-			if !EqualBytesStr(body, requestURI) {
+			if string(body) != requestURI {
 				b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)
 			}
 		}

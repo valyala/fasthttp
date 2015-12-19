@@ -328,7 +328,7 @@ func peekArgBytes(h []argsKV, k []byte) []byte {
 func peekArgStr(h []argsKV, k string) []byte {
 	for i, n := 0, len(h); i < n; i++ {
 		kv := &h[i]
-		if EqualBytesStr(kv.key, k) {
+		if string(kv.key) == k {
 			return kv.value
 		}
 	}

@@ -16,7 +16,7 @@ func TestClientFollowRedirects(t *testing.T) {
 	addr := "127.0.0.1:55234"
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			if EqualBytesStr(ctx.Path(), "/foo") {
+			if string(ctx.Path()) == "/foo" {
 				u := ctx.URI()
 				u.Update("/bar")
 				ctx.Redirect(u.String(), StatusFound)

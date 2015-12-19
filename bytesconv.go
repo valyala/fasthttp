@@ -324,6 +324,8 @@ func appendQuotedArg(dst, v []byte) []byte {
 //
 // This function has no performance benefits comparing to string(b) == s.
 // It is left here for backwards compatibility only.
+//
+// This function is deperecated and may be deleted soon.
 func EqualBytesStr(b []byte, s string) bool {
 	return string(b) == s
 }
