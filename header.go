@@ -967,8 +967,8 @@ func (h *ResponseHeader) String() string {
 	return string(h.Header())
 }
 
-// AppendBytes appends response header representation to dst and returns dst
-// (which may be newly allocated).
+// AppendBytes appends response header representation to dst and returns
+// the extended dst.
 func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	statusCode := h.StatusCode()
 	if statusCode < 0 {
@@ -1039,8 +1039,8 @@ func (h *RequestHeader) String() string {
 	return string(h.Header())
 }
 
-// AppendBytes appends request header representation to dst and returns dst
-// (which may be newly allocated).
+// AppendBytes appends request header representation to dst and returns
+// the extended dst.
 func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	// there is no need in h.parseRawHeaders() here - raw headers are specially handled below.
 	dst = append(dst, h.Method()...)

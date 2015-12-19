@@ -84,8 +84,7 @@ func (a *Args) QueryString() []byte {
 	return a.buf
 }
 
-// AppendBytes appends query string to dst and returns dst
-// (which may be newly allocated).
+// AppendBytes appends query string to dst and returns the extended dst.
 func (a *Args) AppendBytes(dst []byte) []byte {
 	for i, n := 0, len(a.args); i < n; i++ {
 		kv := &a.args[i]

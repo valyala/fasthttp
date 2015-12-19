@@ -21,7 +21,7 @@ var gmtLocation = func() *time.Location {
 }()
 
 // AppendIPv4 appends string representation of the given ip v4 to dst
-// and returns the result (which may be newly allocated).
+// and returns the extended dst.
 func AppendIPv4(dst []byte, ip net.IP) []byte {
 	ip = ip.To4()
 	if ip == nil {
@@ -36,8 +36,7 @@ func AppendIPv4(dst []byte, ip net.IP) []byte {
 	return dst
 }
 
-// ParseIPv4 parses ip address from ipStr into dst and returns dst
-// (which may be newly allocated).
+// ParseIPv4 parses ip address from ipStr into dst and returns the extended dst.
 func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	if len(dst) < net.IPv4len {
 		dst = make([]byte, net.IPv4len)
@@ -77,7 +76,7 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 }
 
 // AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
-// to dst and returns dst (which may be newly allocated).
+// to dst and returns the extended dst.
 func AppendHTTPDate(dst []byte, date time.Time) []byte {
 	return date.In(gmtLocation).AppendFormat(dst, time.RFC1123)
 }
@@ -87,7 +86,7 @@ func ParseHTTPDate(date []byte) (time.Time, error) {
 	return time.Parse(time.RFC1123, unsafeBytesToStr(date))
 }
 
-// AppendUint appends n to dst and returns dst (which may be newly allocated).
+// AppendUint appends n to dst and returns the extended dst.
 func AppendUint(dst []byte, n int) []byte {
 	if n < 0 {
 		panic("BUG: int must be positive")
@@ -329,8 +328,7 @@ func EqualBytesStr(b []byte, s string) bool {
 	return string(b) == s
 }
 
-// AppendBytesStr appends src to dst and returns dst
-// (which may be newly allocated).
+// AppendBytesStr appends src to dst and returns the extended dst.
 //
 // This function has no performance benefits comparing to append(dst, src...).
 // It is left here for backwards compatibility only.

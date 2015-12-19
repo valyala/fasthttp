@@ -142,8 +142,8 @@ func (c *Cookie) Reset() {
 	c.path = c.path[:0]
 }
 
-// AppendBytes appends cookie representation to dst and returns dst
-// (maybe newly allocated).
+// AppendBytes appends cookie representation to dst and returns
+// the extended dst.
 func (c *Cookie) AppendBytes(dst []byte) []byte {
 	if len(c.key) > 0 {
 		dst = appendQuotedArg(dst, c.key)

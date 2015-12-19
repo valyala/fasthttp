@@ -378,8 +378,7 @@ func (x *URI) FullURI() []byte {
 	return x.fullURI
 }
 
-// AppendBytes appends full uri to dst and returns dst
-// (which may be newly allocated).
+// AppendBytes appends full uri to dst and returns the extended dst.
 func (x *URI) AppendBytes(dst []byte) []byte {
 	dst = x.appendSchemeHost(dst)
 	return append(dst, x.RequestURI()...)
