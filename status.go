@@ -45,13 +45,17 @@ const (
 	StatusRequestedRangeNotSatisfiable = 416
 	StatusExpectationFailed            = 417
 	StatusTeapot                       = 418
+	StatusPreconditionRequired         = 428
+	StatusTooManyRequests              = 429
+	StatusRequestHeaderFieldsTooLarge  = 431
 
-	StatusInternalServerError     = 500
-	StatusNotImplemented          = 501
-	StatusBadGateway              = 502
-	StatusServiceUnavailable      = 503
-	StatusGatewayTimeout          = 504
-	StatusHTTPVersionNotSupported = 505
+	StatusInternalServerError           = 500
+	StatusNotImplemented                = 501
+	StatusBadGateway                    = 502
+	StatusServiceUnavailable            = 503
+	StatusGatewayTimeout                = 504
+	StatusHTTPVersionNotSupported       = 505
+	StatusNetworkAuthenticationRequired = 511
 )
 
 var (
