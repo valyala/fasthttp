@@ -29,6 +29,9 @@ import (
 //
 // ErrNoFreeConns is returned if all DefaultMaxConnsPerHost connections
 // to the requested host are busy.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
 func Do(req *Request, resp *Response) error {
 	return defaultClient.Do(req, resp)
 }
@@ -46,6 +49,9 @@ func Do(req *Request, resp *Response) error {
 //
 // ErrTimeout is returned if the response wasn't returned during
 // the given timeout.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
 func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return defaultClient.DoTimeout(req, resp, timeout)
 }
@@ -190,6 +196,9 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 //
 // ErrTimeout is returned if the response wasn't returned during
 // the given timeout.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
 func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return clientDoTimeout(req, resp, timeout, c)
 }
@@ -208,6 +217,9 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
 // to the requested host are busy.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
 	uri := req.URI()
 	host := uri.Host()
@@ -445,11 +457,11 @@ type clientDoer interface {
 }
 
 func clientGetURL(dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
-	req := acquireRequest()
+	req := AcquireRequest()
 
 	statusCode, body, err = doRequestFollowRedirects(req, dst, url, c)
 
-	releaseRequest(req)
+	ReleaseRequest(req)
 	return statusCode, body, err
 }
 
@@ -494,7 +506,7 @@ func clientGetURLTimeoutFreeConn(dst []byte, url string, timeout time.Duration, 
 	}
 	ch = chv.(chan clientURLResponse)
 
-	req := acquireRequest()
+	req := AcquireRequest()
 
 	// Note that the request continues execution on ErrTimeout until
 	// client-specific ReadTimeout exceeds. This helps limiting load
@@ -524,7 +536,7 @@ func clientGetURLTimeoutFreeConn(dst []byte, url string, timeout time.Duration, 
 
 	select {
 	case resp := <-ch:
-		releaseRequest(req)
+		ReleaseRequest(req)
 		clientURLResponseChPool.Put(chv)
 		statusCode = resp.statusCode
 		body = resp.body
@@ -543,7 +555,7 @@ func clientGetURLTimeoutFreeConn(dst []byte, url string, timeout time.Duration, 
 var clientURLResponseChPool sync.Pool
 
 func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (statusCode int, body []byte, err error) {
-	req := acquireRequest()
+	req := AcquireRequest()
 	req.Header.SetMethodBytes(strPost)
 	req.Header.SetContentTypeBytes(strPostArgsContentType)
 	if postArgs != nil {
@@ -552,7 +564,7 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 
 	statusCode, body, err = doRequestFollowRedirects(req, dst, url, c)
 
-	releaseRequest(req)
+	ReleaseRequest(req)
 	return statusCode, body, err
 }
 
@@ -564,7 +576,7 @@ var (
 const maxRedirectsCount = 16
 
 func doRequestFollowRedirects(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
-	resp := acquireResponse()
+	resp := AcquireResponse()
 	oldBody := resp.body
 	resp.body = dst
 
@@ -597,7 +609,7 @@ func doRequestFollowRedirects(req *Request, dst []byte, url string, c clientDoer
 
 	body = resp.body
 	resp.body = oldBody
-	releaseResponse(resp)
+	ReleaseResponse(resp)
 
 	return statusCode, body, err
 }
@@ -614,7 +626,12 @@ var (
 	responsePool sync.Pool
 )
 
-func acquireRequest() *Request {
+// AcquireRequest returns an empty Request instance from request pool.
+//
+// The returned Request instance may be passed to ReleaseRequest when it is
+// no longer needed. This allows Request recycling, reduces GC pressure
+// and usually improves performance.
+func AcquireRequest() *Request {
 	v := requestPool.Get()
 	if v == nil {
 		return &Request{}
@@ -622,12 +639,21 @@ func acquireRequest() *Request {
 	return v.(*Request)
 }
 
-func releaseRequest(req *Request) {
+// ReleaseRequest returns req acquired via AcquireRequest to request pool.
+//
+// It is forbidden accessing req and/or its' members after returning
+// it to request pool.
+func ReleaseRequest(req *Request) {
 	req.Reset()
 	requestPool.Put(req)
 }
 
-func acquireResponse() *Response {
+// AcquireResponse returns an empty Response instance from response pool.
+//
+// the returned Response instance may be passed to ReleaseResponse when it is
+// no longer needed. This allows Response recycling, reduces GC pressure
+// and usually improves performance.
+func AcquireResponse() *Response {
 	v := responsePool.Get()
 	if v == nil {
 		return &Response{}
@@ -635,7 +661,11 @@ func acquireResponse() *Response {
 	return v.(*Response)
 }
 
-func releaseResponse(resp *Response) {
+// ReleaseResponse return resp acquired via AcquireResponse to response pool.
+//
+// It is forbidden accessing resp and/or its' members after returning
+// it to response pool.
+func ReleaseResponse(resp *Response) {
 	resp.Reset()
 	responsePool.Put(resp)
 }
@@ -648,6 +678,9 @@ func releaseResponse(resp *Response) {
 //
 // ErrTimeout is returned if the response wasn't returned during
 // the given timeout.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
 func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return clientDoTimeout(req, resp, timeout, c)
 }
@@ -689,9 +722,9 @@ func clientDoTimeoutFreeConn(req *Request, resp *Response, timeout time.Duration
 
 	// Make req and resp copies, since on timeout they no longer
 	// may be accessed.
-	reqCopy := acquireRequest()
+	reqCopy := AcquireRequest()
 	req.CopyTo(reqCopy)
-	respCopy := acquireResponse()
+	respCopy := AcquireResponse()
 
 	// Note that the request continues execution on ErrTimeout until
 	// client-specific ReadTimeout exceeds. This helps limiting load
@@ -718,8 +751,8 @@ func clientDoTimeoutFreeConn(req *Request, resp *Response, timeout time.Duration
 	select {
 	case err = <-ch:
 		respCopy.CopyTo(resp)
-		releaseResponse(respCopy)
-		releaseRequest(reqCopy)
+		ReleaseResponse(respCopy)
+		ReleaseRequest(reqCopy)
 		errorChPool.Put(chv)
 	case <-tc.C:
 		err = ErrTimeout
@@ -745,6 +778,9 @@ var (
 //
 // ErrNoFreeConns is returned if all HostClient.MaxConns connections
 // to the host are busy.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	retry, err := c.do(req, resp, false)
 	if err != nil && retry && isIdempotent(req) {
@@ -802,7 +838,7 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 	nilResp := false
 	if resp == nil {
 		nilResp = true
-		resp = acquireResponse()
+		resp = AcquireResponse()
 	}
 
 	if c.ReadTimeout > 0 {
@@ -815,7 +851,7 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 	br := c.acquireReader(conn)
 	if err = resp.ReadLimitBody(br, c.MaxResponseBodySize); err != nil {
 		if nilResp {
-			releaseResponse(resp)
+			ReleaseResponse(resp)
 		}
 		c.releaseReader(br)
 		c.closeConn(cc)
@@ -833,7 +869,7 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 	}
 
 	if nilResp {
-		releaseResponse(resp)
+		ReleaseResponse(resp)
 	}
 	return false, err
 }
