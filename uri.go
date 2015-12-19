@@ -52,7 +52,7 @@ func (x *URI) Hash() []byte {
 
 // SetHash sets URI hash.
 func (x *URI) SetHash(hash string) {
-	x.hash = AppendBytesStr(x.hash[:0], hash)
+	x.hash = append(x.hash[:0], hash...)
 }
 
 // SetHashBytes sets URI hash.
@@ -70,7 +70,7 @@ func (x *URI) QueryString() []byte {
 
 // SetQueryString sets URI query string.
 func (x *URI) SetQueryString(queryString string) {
-	x.queryString = AppendBytesStr(x.queryString[:0], queryString)
+	x.queryString = append(x.queryString[:0], queryString...)
 	x.parsedQueryArgs = false
 }
 
@@ -96,7 +96,7 @@ func (x *URI) Path() []byte {
 
 // SetPath sets URI path.
 func (x *URI) SetPath(path string) {
-	x.pathOriginal = AppendBytesStr(x.pathOriginal, path)
+	x.pathOriginal = append(x.pathOriginal, path...)
 	x.path = normalizePath(x.path, x.pathOriginal)
 }
 
@@ -128,7 +128,7 @@ func (x *URI) Scheme() []byte {
 
 // SetScheme sets URI scheme, i.e. http, https, ftp, etc.
 func (x *URI) SetScheme(scheme string) {
-	x.scheme = AppendBytesStr(x.scheme[:0], scheme)
+	x.scheme = append(x.scheme[:0], scheme...)
 	lowercaseBytes(x.scheme)
 }
 
@@ -173,7 +173,7 @@ func (x *URI) Host() []byte {
 
 // SetHost sets host for the uri.
 func (x *URI) SetHost(host string) {
-	x.host = AppendBytesStr(x.host[:0], host)
+	x.host = append(x.host[:0], host...)
 	lowercaseBytes(x.host)
 }
 
@@ -316,7 +316,7 @@ func (x *URI) RequestURI() []byte {
 //     * Relative path, i.e.  xx?yy=abc . In this case the original RequestURI
 //       is updated according to the new relative path.
 func (x *URI) Update(newURI string) {
-	x.fullURI = AppendBytesStr(x.fullURI[:0], newURI)
+	x.fullURI = append(x.fullURI[:0], newURI...)
 	x.UpdateBytes(x.fullURI)
 }
 

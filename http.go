@@ -210,7 +210,7 @@ func (resp *Response) SetBody(body []byte) {
 // SetBodyString sets response body.
 func (resp *Response) SetBodyString(body string) {
 	resp.closeBodyStream()
-	resp.body = AppendBytesStr(resp.body[:0], body)
+	resp.body = append(resp.body[:0], body...)
 }
 
 // ResetBody resets response body.
@@ -236,7 +236,7 @@ func (req *Request) SetBody(body []byte) {
 
 // SetBodyString sets request body.
 func (req *Request) SetBodyString(body string) {
-	req.body = AppendBytesStr(req.body[:0], body)
+	req.body = append(req.body[:0], body...)
 }
 
 // ResetBody resets request body.
