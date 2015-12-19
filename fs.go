@@ -572,7 +572,7 @@ func (h *fsHandler) createDirIndex(base *URI, filePath string) (*fsFile, error) 
 	ff := &fsFile{
 		h:               h,
 		dirIndex:        dirIndex,
-		contentType:     "text/html",
+		contentType:     "text/html; charset=utf-8",
 		contentLength:   len(dirIndex),
 		lastModified:    lastModified,
 		lastModifiedStr: AppendHTTPDate(nil, lastModified),
