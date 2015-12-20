@@ -612,6 +612,7 @@ func (ctx *RequestCtx) SuccessString(contentType, body string) {
 //    * StatusMovedPermanently (301)
 //    * StatusFound (302)
 //    * StatusSeeOther (303)
+//    * StatusTemporaryRedirect (307)
 //
 // All other statusCode values are replaced by StatusFound (302).
 //
@@ -631,6 +632,7 @@ func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
 //    * StatusMovedPermanently (301)
 //    * StatusFound (302)
 //    * StatusSeeOther (303)
+//    * StatusTemporaryRedirect (307)
 //
 // All other statusCode values are replaced by StatusFound (302).
 //
