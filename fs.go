@@ -564,7 +564,7 @@ func (h *fsHandler) createDirIndex(base *URI, filePath string) (*fsFile, error) 
 			className = "file"
 		}
 		fmt.Fprintf(w, `<li><a href="%s" class="%s">%s</a>, %s, last modified %s</li>`,
-			pathEscaped, className, html.EscapeString(name), auxStr, fi.ModTime())
+			pathEscaped, className, html.EscapeString(name), auxStr, fsModTime(fi.ModTime()))
 	}
 
 	fmt.Fprintf(w, "</ul></body></html>")
@@ -671,5 +671,9 @@ func fsLastModified(path string) (time.Time, error) {
 	if err != nil {
 		return zeroTime, err
 	}
-	return fileInfo.ModTime().In(gmtLocation).Truncate(time.Second), nil
+	return fsModTime(fileInfo.ModTime()), nil
+}
+
+func fsModTime(t time.Time) time.Time {
+	return t.In(gmtLocation).Truncate(time.Second)
 }
