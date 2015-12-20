@@ -528,7 +528,7 @@ func (h *fsHandler) createDirIndex(base *URI, filePath string) (*fsFile, error) 
 	if len(basePathEscaped) > 1 {
 		var parentURI URI
 		base.CopyTo(&parentURI)
-		parentURI.Update("..")
+		parentURI.Update(string(base.Path()) + "/..")
 		parentPathEscaped := html.EscapeString(string(parentURI.Path()))
 		fmt.Fprintf(w, `<li><a href="%s" class="dir">..</a></li>`, parentPathEscaped)
 	}
