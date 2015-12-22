@@ -7,7 +7,7 @@ import (
 
 func TestURIPathEscape(t *testing.T) {
 	testURIPathEscape(t, "/foo/bar", "/foo/bar")
-	testURIPathEscape(t, "/foo=b:ar,b.c&q", "/foo=b:ar,b.c&q")
+	testURIPathEscape(t, "/f_o-o=b:ar,b.c&q", "/f_o-o=b:ar,b.c&q")
 	testURIPathEscape(t, "/aa?bb.тест~qq", "/aa%3Fbb.%D1%82%D0%B5%D1%81%D1%82~qq")
 }
 

@@ -10,7 +10,7 @@ import (
 func TestArgsEscape(t *testing.T) {
 	testArgsEscape(t, "foo", "bar", "foo=bar")
 	testArgsEscape(t, "f.o,1:2/4", "~`!@#$%^&*()_-=+\\|/[]{};:'\"<>,./?",
-		"f.o,1:2/4=%7E%60%21%40%23%24%25%5E%26%2A%28%29%5F%2D%3D%2B%5C%7C/%5B%5D%7B%7D%3B:%27%22%3C%3E,./%3F")
+		"f.o,1:2/4=%7E%60%21%40%23%24%25%5E%26%2A%28%29_-%3D%2B%5C%7C/%5B%5D%7B%7D%3B:%27%22%3C%3E,./%3F")
 }
 
 func testArgsEscape(t *testing.T, k, v, expectedS string) {
