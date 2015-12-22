@@ -289,7 +289,7 @@ func normalizePath(dst, src []byte) []byte {
 
 // RequestURI returns RequestURI - i.e. URI without Scheme and Host.
 func (x *URI) RequestURI() []byte {
-	dst := appendQuotedArg(x.requestURI[:0], x.Path())
+	dst := appendQuotedPath(x.requestURI[:0], x.Path())
 	if x.queryArgs.Len() > 0 {
 		dst = append(dst, '?')
 		dst = x.queryArgs.AppendBytes(dst)
@@ -366,7 +366,7 @@ func (x *URI) updateBytes(newURI, buf []byte) []byte {
 		panic("BUG: path must contain at least one slash")
 	}
 	buf = x.appendSchemeHost(buf[:0])
-	buf = appendQuotedArg(buf, path[:n+1])
+	buf = appendQuotedPath(buf, path[:n+1])
 	buf = append(buf, newURI...)
 	x.Parse(nil, buf)
 	return buf
@@ -433,4 +433,16 @@ func (x *URI) parseQueryArgs() {
 	}
 	x.queryArgs.ParseBytes(x.queryString)
 	x.parsedQueryArgs = true
+}
+
+func appendQuotedPath(dst, v []byte) []byte {
+	for _, c := range v {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '/' || c == '.' || c == ',' || c == '=' || c == ':' || c == '&' || c == '~' {
+			dst = append(dst, c)
+		} else {
+			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
+		}
+	}
+	return dst
 }

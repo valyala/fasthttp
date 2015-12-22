@@ -7,6 +7,21 @@ import (
 	"testing"
 )
 
+func TestArgsEscape(t *testing.T) {
+	testArgsEscape(t, "foo", "bar", "foo=bar")
+	testArgsEscape(t, "f.o,1:2/4", "~`!@#$%^&*()_-=+\\|/[]{};:'\"<>,./?",
+		"f.o,1:2/4=%7E%60%21%40%23%24%25%5E%26%2A%28%29%5F%2D%3D%2B%5C%7C/%5B%5D%7B%7D%3B:%27%22%3C%3E,./%3F")
+}
+
+func testArgsEscape(t *testing.T, k, v, expectedS string) {
+	var a Args
+	a.Set(k, v)
+	s := a.String()
+	if s != expectedS {
+		t.Fatalf("unexpected args %q. Expecting %q. k=%q, v=%q", s, expectedS, k, v)
+	}
+}
+
 func TestArgsWriteTo(t *testing.T) {
 	s := "foo=bar&baz=123&aaa=bbb"
 
@@ -256,6 +271,9 @@ func TestArgsParse(t *testing.T) {
 
 	// invalid percent encoding
 	testArgsParse(t, &a, "f%=x&qw%z=d%0k%20p&%%20=%%%20x", 3, "f%=x", "qw%z=d%0k p", "% =%% x")
+
+	// special chars
+	testArgsParse(t, &a, "a.b,c:d/e=f.g,h:i/q", 1, "a.b,c:d/e=f.g,h:i/q")
 }
 
 func TestArgsHas(t *testing.T) {

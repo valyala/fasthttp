@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+func TestURIPathEscape(t *testing.T) {
+	testURIPathEscape(t, "/foo/bar", "/foo/bar")
+	testURIPathEscape(t, "/foo=b:ar,b.c&q", "/foo=b:ar,b.c&q")
+	testURIPathEscape(t, "/aa?bb.тест~qq", "/aa%3Fbb.%D1%82%D0%B5%D1%81%D1%82~qq")
+}
+
+func testURIPathEscape(t *testing.T, path, expectedRequestURI string) {
+	var u URI
+	u.SetPath(path)
+	requestURI := u.RequestURI()
+	if string(requestURI) != expectedRequestURI {
+		t.Fatalf("unexpected requestURI %q. Expecting %q. path %q", requestURI, expectedRequestURI, path)
+	}
+}
+
 func TestURIUpdate(t *testing.T) {
 	// full uri
 	testURIUpdate(t, "http://foo.bar/baz?aaa=22#aaa", "https://aa.com/bb", "https://aa.com/bb")
