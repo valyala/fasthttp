@@ -413,7 +413,6 @@ type HostClient struct {
 type clientConn struct {
 	t time.Time
 	c net.Conn
-	v interface{}
 }
 
 var startTimeUnix = time.Now().Unix()
@@ -980,7 +979,6 @@ func acquireClientConn(conn net.Conn) *clientConn {
 		cc := &clientConn{
 			c: conn,
 		}
-		cc.v = cc
 		return cc
 	}
 	cc := v.(*clientConn)
@@ -990,7 +988,7 @@ func acquireClientConn(conn net.Conn) *clientConn {
 
 func releaseClientConn(cc *clientConn) {
 	cc.c = nil
-	clientConnPool.Put(cc.v)
+	clientConnPool.Put(cc)
 }
 
 var clientConnPool sync.Pool

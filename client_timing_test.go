@@ -18,7 +18,6 @@ type fakeClientConn struct {
 	s  []byte
 	n  int
 	ch chan struct{}
-	v  interface{}
 }
 
 func (c *fakeClientConn) Write(b []byte) (int, error) {
@@ -51,7 +50,7 @@ func (c *fakeClientConn) Close() error {
 
 func releaseFakeServerConn(c *fakeClientConn) {
 	c.n = 0
-	fakeClientConnPool.Put(c.v)
+	fakeClientConnPool.Put(c)
 }
 
 func acquireFakeServerConn(s []byte) *fakeClientConn {
@@ -61,7 +60,6 @@ func acquireFakeServerConn(s []byte) *fakeClientConn {
 			s:  s,
 			ch: make(chan struct{}, 1),
 		}
-		c.v = c
 		return c
 	}
 	return v.(*fakeClientConn)

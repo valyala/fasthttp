@@ -221,7 +221,6 @@ func (ff *fsFile) smallFileReader() io.Reader {
 		r := &fsSmallFileReader{
 			ff: ff,
 		}
-		r.v = r
 		return r
 	}
 	r := v.(*fsSmallFileReader)
@@ -333,8 +332,6 @@ func (r *bigFileReader) Close() error {
 type fsSmallFileReader struct {
 	ff     *fsFile
 	offset int64
-
-	v interface{}
 }
 
 func (r *fsSmallFileReader) Close() error {
@@ -342,7 +339,7 @@ func (r *fsSmallFileReader) Close() error {
 	ff.decReadersCount()
 	r.ff = nil
 	r.offset = 0
-	ff.h.smallFileReaderPool.Put(r.v)
+	ff.h.smallFileReaderPool.Put(r)
 	return nil
 }
 

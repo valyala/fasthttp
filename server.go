@@ -277,8 +277,6 @@ type RequestCtx struct {
 	timeoutTimer    *time.Timer
 
 	hijackHandler HijackHandler
-
-	v interface{}
 }
 
 // HijackHandler must process the hijacked connection c.
@@ -1240,7 +1238,6 @@ func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
 			Conn: c,
 			r:    r,
 		}
-		hjc.v = hjc
 		return hjc
 	}
 	hjc := v.(*hijackConn)
@@ -1252,13 +1249,12 @@ func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
 func (s *Server) releaseHijackConn(hjc *hijackConn) {
 	hjc.Conn = nil
 	hjc.r = nil
-	s.hijackConnPool.Put(hjc.v)
+	s.hijackConnPool.Put(hjc)
 }
 
 type hijackConn struct {
 	net.Conn
 	r io.Reader
-	v interface{}
 }
 
 func (c hijackConn) Read(p []byte) (int, error) {
@@ -1384,7 +1380,6 @@ func (s *Server) acquireCtx(c net.Conn) *RequestCtx {
 			c: c,
 		}
 		ctx.initID()
-		ctx.v = ctx
 		return ctx
 	}
 
@@ -1456,7 +1451,7 @@ func (s *Server) releaseCtx(ctx *RequestCtx) {
 	}
 	ctx.c = nil
 	ctx.fbr.c = nil
-	s.ctxPool.Put(ctx.v)
+	s.ctxPool.Put(ctx)
 }
 
 func (s *Server) getServerName() []byte {
