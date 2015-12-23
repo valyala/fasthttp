@@ -311,8 +311,9 @@ func unsafeBytesToStr(b []byte) string {
 
 func appendQuotedArg(dst, v []byte) []byte {
 	for _, c := range v {
+		// See http://www.w3.org/TR/html5/forms.html#form-submission-algorithm
 		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-			c == '/' || c == '.' || c == ',' || c == ':' || c == '-' || c == '_' {
+			c == '*' || c == '-' || c == '.' || c == '_' {
 			dst = append(dst, c)
 		} else {
 			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
