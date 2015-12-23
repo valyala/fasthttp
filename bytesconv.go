@@ -321,6 +321,18 @@ func appendQuotedArg(dst, v []byte) []byte {
 	return dst
 }
 
+func appendQuotedPath(dst, v []byte) []byte {
+	for _, c := range v {
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			c == '/' || c == '.' || c == ',' || c == '=' || c == ':' || c == '&' || c == '~' || c == '-' || c == '_' {
+			dst = append(dst, c)
+		} else {
+			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
+		}
+	}
+	return dst
+}
+
 // EqualBytesStr returns true if string(b) == s.
 //
 // This function has no performance benefits comparing to string(b) == s.

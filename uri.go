@@ -434,15 +434,3 @@ func (x *URI) parseQueryArgs() {
 	x.queryArgs.ParseBytes(x.queryString)
 	x.parsedQueryArgs = true
 }
-
-func appendQuotedPath(dst, v []byte) []byte {
-	for _, c := range v {
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-			c == '/' || c == '.' || c == ',' || c == '=' || c == ':' || c == '&' || c == '~' || c == '-' || c == '_' {
-			dst = append(dst, c)
-		} else {
-			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
-		}
-	}
-	return dst
-}
