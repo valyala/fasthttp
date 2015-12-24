@@ -9,6 +9,17 @@ import (
 	"testing"
 )
 
+func TestRequestCtxWriteString(t *testing.T) {
+	var ctx RequestCtx
+	ctx.WriteString("foo")
+	ctx.WriteString("bar")
+
+	s := ctx.Response.Body()
+	if string(s) != "foobar" {
+		t.Fatalf("unexpected response body %q. Expecting %q", s, "foobar")
+	}
+}
+
 func TestRequestMultipartForm(t *testing.T) {
 	var w bytes.Buffer
 	mw := multipart.NewWriter(&w)
