@@ -188,10 +188,10 @@ type Server struct {
 	GetOnly bool
 
 	// On100Continue Handler a header Expect: 100-continue
-	// 
+	//
 	// Per HTTP/1.1 on a Put or Post request the client
-  // can provide a header tag which indicates the client
-  // wants an OK from the server before sending the body.
+	// can provide a header tag which indicates the client
+	// wants an OK from the server before sending the body.
 	// By default we'll OK all requests with 100-contunue.
 	On100Continue func(req *Request) bool
 
