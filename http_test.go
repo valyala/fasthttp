@@ -94,9 +94,26 @@ func TestOn100Continue(t *testing.T){
 
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
-	if err := req.Read(br,continueBuffer,func(req *Request) bool {  return true } ); err != nil {
+	if err := req.Read(br, continueBuffer, func(req *Request) bool {  return true } ); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
+
+	if(bytes.Compare(continueBuffer.Bytes(), []byte("HTTP/1.1 100 Continue\r\n\r\n"))!=0){
+		t.Fatalf("Expected 100 continue response on expect header, instead got: %s", continueBuffer.String())
+	}
+
+	continueBuffer.Reset()
+
+	r = bytes.NewBufferString(s)
+	br = bufio.NewReader(r)
+	if err := req.Read(br, continueBuffer, func(req *Request) bool {  return false} ); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if(bytes.Compare(continueBuffer.Bytes(), []byte("HTTP/1.1 417 Expectation Failed\r\n\r\n"))!=0){
+		t.Fatalf("Expected 471 expectation fail, instead got: %s", continueBuffer.String())
+	}
+
 }
 
 
