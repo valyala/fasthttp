@@ -1081,7 +1081,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			if br == nil {
 				br = acquireReader(ctx)
 			}
-			err = ctx.Request.readLimitBody(br, s.MaxRequestBodySize, s.GetOnly, ctx, s.On100Continue)
+			err = ctx.Request.readLimitBody(br, s.MaxRequestBodySize, s.GetOnly, ctx.c, s.On100Continue)
 			if br.Buffered() == 0 || err != nil {
 				releaseReader(s, br)
 				br = nil
@@ -1089,7 +1089,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		} else {
 			br, err = acquireByteReader(&ctx)
 			if err == nil {
-				err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize, ctx, s.On100Continue)
+				err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize, ctx.c, s.On100Continue)
 				if br.Buffered() == 0 || err != nil {
 					releaseReader(s, br)
 					br = nil

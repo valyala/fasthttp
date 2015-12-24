@@ -389,8 +389,8 @@ func (resp *Response) resetSkipHeader() {
 // RemoveMultipartFormFiles or Reset must be called after
 // reading multipart/form-data request in order to delete temporarily
 // uploaded files.
-func (req *Request) Read(r *bufio.Reader, ctx *RequestCtx, on100Continue func(req *Request) bool) error {
-	return req.ReadLimitBody(r, 0, ctx, on100Continue)
+func (req *Request) Read(r *bufio.Reader, w io.Writer, on100Continue func(req *Request) bool) error {
+	return req.ReadLimitBody(r, 0, w, on100Continue)
 }
 
 const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
@@ -405,11 +405,11 @@ var errGetOnly = errors.New("non-GET request received")
 // RemoveMultipartFormFiles or Reset must be called after
 // reading multipart/form-data request in order to delete temporarily
 // uploaded files.
-func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int, ctx *RequestCtx, on100Continue func(req *Request) bool) error {
-	return req.readLimitBody(r, maxBodySize, false, ctx, on100Continue)
+func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int,w io.Writer, on100Continue func(req *Request) bool) error {
+	return req.readLimitBody(r, maxBodySize, false, w, on100Continue)
 }
 
-func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool, ctx *RequestCtx, on100Continue func(req *Request) bool) error {
+func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool, w io.Writer, on100Continue func(req *Request) bool) error {
 	req.resetSkipHeader()
 	err := req.Header.Read(r)
 	if err != nil {
@@ -428,12 +428,12 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 				lowercaseBytes(expect)
 				if(bytes.Compare(expect,[]byte("100-continue"))==0){
 					if(on100Continue==nil || on100Continue(req)){
-						ctx.c.Write([]byte("HTTP/1.1 100 Continue\r\n\r\n"))
+						w.Write([]byte("HTTP/1.1 100 Continue\r\n\r\n"))
 					} else {
-						ctx.c.Write([]byte("HTTP/1.1 417 Expectation Failed\r\n\r\n"))
+						w.Write([]byte("HTTP/1.1 417 Expectation Failed\r\n\r\n"))
 					}
 				} else {
-					ctx.c.Write([]byte("HTTP/1.1 417 Expectation Failed\r\n\r\n"))
+					w.Write([]byte("HTTP/1.1 417 Expectation Failed\r\n\r\n"))
 				}
 			}
 
