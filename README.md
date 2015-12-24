@@ -373,10 +373,11 @@ var (
 	dst []byte
 	src []byte
 )
-dst = append(dst, src...)  // is legal if dst is nil and src is nil
-copy(dst, src)  // is legal if dst is nil and src is nil
+dst = append(dst, src...)  // is legal if dst is nil and/or src is nil
+copy(dst, src)  // is legal if dst is nil and/or src is nil
 (string(src) == "")  // is true if src is nil
 (len(src) == 0)  // is true if src is nil
+src = src[:0]  // works like a charm with nil src
 
 // this for loop doesn't panic if src is nil
 for i, ch := range src {
