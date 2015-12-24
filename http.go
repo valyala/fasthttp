@@ -389,8 +389,8 @@ func (resp *Response) resetSkipHeader() {
 // RemoveMultipartFormFiles or Reset must be called after
 // reading multipart/form-data request in order to delete temporarily
 // uploaded files.
-func (req *Request) Read(r *bufio.Reader) error {
-	return req.ReadLimitBody(r, 0)
+func (req *Request) Read(r *bufio.Reader, ctx *RequestCtx, on100Continue func(req *Request) bool) error {
+	return req.ReadLimitBody(r, 0, ctx, on100Continue)
 }
 
 const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
@@ -405,11 +405,11 @@ var errGetOnly = errors.New("non-GET request received")
 // RemoveMultipartFormFiles or Reset must be called after
 // reading multipart/form-data request in order to delete temporarily
 // uploaded files.
-func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
-	return req.readLimitBody(r, maxBodySize, false)
+func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int, ctx *RequestCtx, on100Continue func(req *Request) bool) error {
+	return req.readLimitBody(r, maxBodySize, false, ctx, on100Continue)
 }
 
-func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool) error {
+func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool, ctx *RequestCtx, on100Continue func(req *Request) bool) error {
 	req.resetSkipHeader()
 	err := req.Header.Read(r)
 	if err != nil {
@@ -422,11 +422,33 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 	if !req.Header.noBody() {
 		contentLength := req.Header.ContentLength()
 		if contentLength > 0 {
+			// See http://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html for 100-Continue behavior
+			expect:=req.Header.Peek("Expect")
+			if(len(expect)>0){
+				lowercaseBytes(expect)
+				if(bytes.Compare(expect,[]byte("100-continue"))==0){
+					if(on100Continue==nil || on100Continue(req)){
+						ctx.c.Write([]byte("HTTP/1.1 100 Continue\r\n\r\n"))
+					} else {
+						ctx.c.Write([]byte("HTTP/1.1 417 Expectation Failed\r\n\r\n"))
+					}
+				} else {
+					ctx.c.Write([]byte("HTTP/1.1 417 Expectation Failed\r\n\r\n"))
+				}
+			}
+
+
 			// Pre-read multipart form data of known length.
 			// This way we limit memory usage for large file uploads, since their contents
 			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
 			boundary := req.Header.MultipartFormBoundary()
 			if len(boundary) > 0 {
+				if(contentLength>0){
+					//We were stalling on waiting for an ending CRLF, RFC2616/4.1 "an HTTP/1.1 client must not preface or follow request with an extra CRLF"
+					//which was causing curl to hang waiting on a post request
+					maxBodySize=contentLength
+				}
+
 				req.multipartForm, err = readMultipartFormBody(r, boundary, maxBodySize, defaultMaxInMemoryFileSize)
 				if err != nil {
 					req.Reset()
