@@ -446,7 +446,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   There are [plans](TODO) for adding HTTP/2.0 and WebSockets support
   in the future.
   In the mean time, third parties may use [RequestCtx.Hijack](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack)
-  for implementing these goodies.
+  for implementing these goodies. See [the first third-party websocket implementation on the top of fasthttp](https://github.com/leavengood/websocket).
 
 * *Are there known net/http advantages comparing to fasthttp?*
 
