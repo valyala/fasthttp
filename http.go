@@ -201,6 +201,12 @@ func (resp *Response) AppendBody(p []byte) {
 	resp.body = append(resp.body, p...)
 }
 
+// AppendBodyString appends s to response body.
+func (resp *Response) AppendBodyString(s string) {
+	resp.closeBodyStream()
+	resp.body = append(resp.body, s...)
+}
+
 // SetBody sets response body.
 func (resp *Response) SetBody(body []byte) {
 	resp.closeBodyStream()
@@ -227,6 +233,11 @@ func (req *Request) Body() []byte {
 // AppendBody appends p to request body.
 func (req *Request) AppendBody(p []byte) {
 	req.body = append(req.body, p...)
+}
+
+// AppendBodyString appends s to request body.
+func (req *Request) AppendBodyString(s string) {
+	req.body = append(req.body, s...)
 }
 
 // SetBody sets request body.

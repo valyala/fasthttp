@@ -738,6 +738,12 @@ func (ctx *RequestCtx) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// WriteString appends s to response body.
+func (ctx *RequestCtx) WriteString(s string) (int, error) {
+	ctx.Response.AppendBodyString(s)
+	return len(s), nil
+}
+
 // PostBody returns POST request body.
 //
 // The returned value is valid until RequestHandler return.

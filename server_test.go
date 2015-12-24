@@ -12,6 +12,29 @@ import (
 	"time"
 )
 
+func TestRequestCtxWriteString(t *testing.T) {
+	var ctx RequestCtx
+	n, err := ctx.WriteString("foo")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if n != 3 {
+		t.Fatalf("unexpected n %d. Expecting 3", n)
+	}
+	n, err = ctx.WriteString("привет")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if n != 12 {
+		t.Fatalf("unexpected n=%d. Expecting 12", n)
+	}
+
+	s := ctx.Response.Body()
+	if string(s) != "fooпривет" {
+		t.Fatalf("unexpected response body %q. Expecting %q", s, "fooпривет")
+	}
+}
+
 func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 	rw := &readWriter{}
 	rw.r.WriteString("GET /foo HTTP/1.0\r\nConnection: keep-alive\r\nHost: google.com\r\n\r\n")
