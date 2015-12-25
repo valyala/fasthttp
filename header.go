@@ -45,6 +45,7 @@ type ResponseHeader struct {
 type RequestHeader struct {
 	noHTTP11        bool
 	connectionClose bool
+	isGet           bool
 
 	contentLength      int
 	contentLengthBytes []byte
@@ -380,7 +381,11 @@ func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
 
 // IsGet returns true if request method is GET.
 func (h *RequestHeader) IsGet() bool {
-	return bytes.Equal(h.Method(), strGet)
+	// Optimize fast path for GET requests.
+	if !h.isGet {
+		h.isGet = bytes.Equal(h.Method(), strGet)
+	}
+	return h.isGet
 }
 
 // IsPost returns true if request methos is POST.
@@ -469,6 +474,7 @@ func (h *ResponseHeader) Reset() {
 func (h *RequestHeader) Reset() {
 	h.noHTTP11 = false
 	h.connectionClose = false
+	h.isGet = false
 
 	h.contentLength = 0
 	h.contentLengthBytes = h.contentLengthBytes[:0]
