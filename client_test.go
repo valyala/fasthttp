@@ -354,8 +354,8 @@ func TestClientManyServers(t *testing.T) {
 		addr := "http://" + addrs[i]
 		go func() {
 			defer wg.Done()
-			testClientGet(t, &defaultClient, addr, 3000)
-			testClientPost(t, &defaultClient, addr, 1000)
+			testClientGet(t, &defaultClient, addr, 300)
+			testClientPost(t, &defaultClient, addr, 100)
 		}()
 	}
 	wg.Wait()
