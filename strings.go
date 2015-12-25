@@ -32,6 +32,7 @@ var (
 	strReferer          = []byte("Referer")
 	strServer           = []byte("Server")
 	strTransferEncoding = []byte("Transfer-Encoding")
+	strContentEncoding  = []byte("Content-Encoding")
 	strUserAgent        = []byte("User-Agent")
 	strCookie           = []byte("Cookie")
 	strSetCookie        = []byte("Set-Cookie")
@@ -44,6 +45,8 @@ var (
 	strCookiePath    = []byte("path")
 
 	strClose               = []byte("close")
+	strGzip                = []byte("gzip")
+	strDeflate             = []byte("deflate")
 	strKeepAlive           = []byte("keep-alive")
 	strKeepAliveCamelCase  = []byte("Keep-Alive")
 	strUpgrade             = []byte("Upgrade")

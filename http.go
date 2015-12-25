@@ -3,9 +3,12 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"compress/flate"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"mime/multipart"
 	"os"
 	"sync"
@@ -193,6 +196,45 @@ func (w *requestBodyWriter) Write(p []byte) (int, error) {
 // Body returns response body.
 func (resp *Response) Body() []byte {
 	return resp.body
+}
+
+// BodyGunzip returns un-gzipped body data.
+//
+// This method may be used if the response header contains
+// 'Content-Encoding: gzip' for reading un-gzipped response body.
+// Use Body for reading gzipped response body.
+func (resp *Response) BodyGunzip() ([]byte, error) {
+	// Do not care about memory allocations here,
+	// since gzip is slow and generates a lot of memory allocations
+	// by itself.
+	r, err := gzip.NewReader(bytes.NewBuffer(resp.body))
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// BodyInflate returns un-deflated body data.
+//
+// This method may be used if the response header contains
+// 'Content-Encoding: deflate' for reading un-deflated response body.
+// Use Body for reading deflated response body.
+func (resp *Response) BodyInflate() ([]byte, error) {
+	// Do not care about memory allocations here,
+	// since flate is slow and generates a lot of memory allocations
+	// by itself.
+	r := flate.NewReader(bytes.NewBuffer(resp.body))
+	defer r.Close()
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }
 
 // AppendBody appends p to response body.
@@ -518,6 +560,102 @@ func (req *Request) Write(w *bufio.Writer) error {
 		return fmt.Errorf("Non-zero body for non-POST request. body=%q", req.body)
 	}
 	return err
+}
+
+// WriteGzip writes response with gzipped body to w.
+//
+// The method sets 'Content-Encoding: gzip' header.
+//
+// WriteGzip doesn't flush response to w for performance reasons.
+func (resp *Response) WriteGzip(w *bufio.Writer) error {
+	return resp.WriteGzipLevel(w, gzip.DefaultCompression)
+}
+
+// WriteGzipLevel writes response with gzipped body to w.
+//
+// Level is compression level. See available levels in encoding/gzip package.
+//
+// The method sets 'Content-Encoding: gzip' header.
+//
+// WriteGzipLevel doesn't flush response to w for performance reasons.
+func (resp *Response) WriteGzipLevel(w *bufio.Writer, level int) error {
+	// Do not care about memory allocations here, since gzip is slow
+	// and allocates a lot of memory by itself.
+	if resp.bodyStream != nil {
+		bs := resp.bodyStream
+		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
+			zw := newGzipWriter(sw, level)
+			defer zw.Close()
+			io.Copy(zw, bs)
+		})
+	} else {
+		var buf bytes.Buffer
+		zw := newGzipWriter(&buf, level)
+		if _, err := zw.Write(resp.body); err != nil {
+			return err
+		}
+		zw.Close()
+		resp.body = buf.Bytes()
+	}
+
+	resp.Header.SetCanonical(strContentEncoding, strGzip)
+	return resp.Write(w)
+}
+
+// WriteDeflate writes response with deflated body to w.
+//
+// The method sets 'Content-Encoding: deflate' header.
+//
+// WriteDeflate doesn't flush response to w for performance reasons.
+func (resp *Response) WriteDeflate(w *bufio.Writer) error {
+	return resp.WriteDeflateLevel(w, flate.DefaultCompression)
+}
+
+// WriteDeflateLevel writes response with deflated body to w.
+//
+// Level is compression level. See available levels in encoding/flate package.
+//
+// The method sets 'Content-Encoding: deflate' header.
+//
+// WriteDeflateLevel doesn't flush response to w for performance reasons.
+func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
+	// Do not care about memory allocations here, since flate is slow
+	// and allocates a lot of memory by itself.
+	if resp.bodyStream != nil {
+		bs := resp.bodyStream
+		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
+			zw := newDeflateWriter(sw, level)
+			defer zw.Close()
+			io.Copy(zw, bs)
+		})
+	} else {
+		var buf bytes.Buffer
+		zw := newDeflateWriter(&buf, level)
+		if _, err := zw.Write(resp.body); err != nil {
+			return err
+		}
+		zw.Close()
+		resp.body = buf.Bytes()
+	}
+
+	resp.Header.SetCanonical(strContentEncoding, strDeflate)
+	return resp.Write(w)
+}
+
+func newDeflateWriter(w io.Writer, level int) *flate.Writer {
+	zw, err := flate.NewWriter(w, level)
+	if err != nil {
+		panic(fmt.Sprintf("BUG: flate.NewWriter(%d) returns non-nil error: %s", level, err))
+	}
+	return zw
+}
+
+func newGzipWriter(w io.Writer, level int) *gzip.Writer {
+	zw, err := gzip.NewWriterLevel(w, level)
+	if err != nil {
+		panic(fmt.Sprintf("BUG: gzip.NewWriter(%d) returns non-nil error: %s", level, err))
+	}
+	return zw
 }
 
 // Write writes response to w.

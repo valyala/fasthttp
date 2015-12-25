@@ -9,6 +9,116 @@ import (
 	"testing"
 )
 
+func TestResponseGzipStream(t *testing.T) {
+	var r Response
+	r.SetBodyStreamWriter(func(w *bufio.Writer) {
+		fmt.Fprintf(w, "foo")
+		w.Flush()
+		w.Write([]byte("barbaz"))
+		w.Flush()
+		fmt.Fprintf(w, "1234")
+		if err := w.Flush(); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+	})
+	testResponseGzipExt(t, &r, "foobarbaz1234")
+}
+
+func TestResponseDeflateStream(t *testing.T) {
+	var r Response
+	r.SetBodyStreamWriter(func(w *bufio.Writer) {
+		w.Write([]byte("foo"))
+		w.Flush()
+		fmt.Fprintf(w, "barbaz")
+		w.Flush()
+		w.Write([]byte("1234"))
+		if err := w.Flush(); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+	})
+	testResponseDeflateExt(t, &r, "foobarbaz1234")
+}
+
+func TestResponseDeflate(t *testing.T) {
+	testResponseDeflate(t, "")
+	testResponseDeflate(t, "abdasdfsdaa")
+	testResponseDeflate(t, "asoiowqoieroqweiruqwoierqo")
+}
+
+func TestResponseGzip(t *testing.T) {
+	testResponseGzip(t, "")
+	testResponseGzip(t, "foobarbaz")
+	testResponseGzip(t, "abasdwqpweoweporweprowepr")
+}
+
+func testResponseDeflate(t *testing.T, s string) {
+	var r Response
+	r.SetBodyString(s)
+	testResponseDeflateExt(t, &r, s)
+}
+
+func testResponseDeflateExt(t *testing.T, r *Response, s string) {
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := r.WriteDeflate(bw); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	var r1 Response
+	br := bufio.NewReader(&buf)
+	if err := r1.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	ce := r1.Header.Peek("Content-Encoding")
+	if string(ce) != "deflate" {
+		t.Fatalf("unexpected Content-Encoding %q. Expecting %q", ce, "deflate")
+	}
+	body, err := r1.BodyInflate()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if string(body) != s {
+		t.Fatalf("unexpected body %q. Expecting %q", body, s)
+	}
+}
+
+func testResponseGzip(t *testing.T, s string) {
+	var r Response
+	r.SetBodyString(s)
+	testResponseGzipExt(t, &r, s)
+}
+
+func testResponseGzipExt(t *testing.T, r *Response, s string) {
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := r.WriteGzip(bw); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	var r1 Response
+	br := bufio.NewReader(&buf)
+	if err := r1.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	ce := r1.Header.Peek("Content-Encoding")
+	if string(ce) != "gzip" {
+		t.Fatalf("unexpected Content-Encoding %q. Expecting %q", ce, "gzip")
+	}
+	body, err := r1.BodyGunzip()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if string(body) != s {
+		t.Fatalf("unexpected body %q. Expecting %q", body, s)
+	}
+}
+
 func TestRequestMultipartForm(t *testing.T) {
 	var w bytes.Buffer
 	mw := multipart.NewWriter(&w)
