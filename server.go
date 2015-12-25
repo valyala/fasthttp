@@ -187,6 +187,14 @@ type Server struct {
 	// Server accepts all the requests by default.
 	GetOnly bool
 
+	// On100Continue Handler a header Expect: 100-continue
+	//
+	// Per HTTP/1.1 on a Put or Post request the client
+	// can provide a header tag which indicates the client
+	// wants an OK from the server before sending the body.
+	// By default we'll OK all requests with 100-contunue.
+	On100Continue func(req *Request) bool
+
 	// Logger, which is used by RequestCtx.Logger().
 	//
 	// By default standard logger from log package is used.
@@ -1107,7 +1115,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			if br == nil {
 				br = acquireReader(ctx)
 			}
-			err = ctx.Request.readLimitBody(br, s.MaxRequestBodySize, s.GetOnly)
+			err = ctx.Request.readLimitBody(br, s.MaxRequestBodySize, s.GetOnly, ctx.c, s.On100Continue)
 			if br.Buffered() == 0 || err != nil {
 				releaseReader(s, br)
 				br = nil
@@ -1115,7 +1123,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		} else {
 			br, err = acquireByteReader(&ctx)
 			if err == nil {
-				err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize)
+				err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize, ctx.c, s.On100Continue)
 				if br.Buffered() == 0 || err != nil {
 					releaseReader(s, br)
 					br = nil

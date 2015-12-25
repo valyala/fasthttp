@@ -142,7 +142,7 @@ func TestRequestMultipartForm(t *testing.T) {
 
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
-	if err := req.Read(br); err != nil {
+	if err := req.Read(br, nil, nil); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
@@ -175,6 +175,52 @@ func TestRequestMultipartForm(t *testing.T) {
 			t.Fatalf("key and value suffixes don't match: %q vs %q", k, v)
 		}
 	}
+}
+
+func TestOn100Continue(t *testing.T) {
+	var w bytes.Buffer
+	mw := multipart.NewWriter(&w)
+	for i := 0; i < 10; i++ {
+		k := fmt.Sprintf("key_%d", i)
+		v := fmt.Sprintf("value_%d", i)
+		if err := mw.WriteField(k, v); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+	}
+	boundary := mw.Boundary()
+	if err := mw.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	formData := w.Bytes()
+	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=%s\r\nExpect: 100-Continue\r\nContent-Length: %d\r\n\r\n%s",
+		boundary, len(formData), formData)
+
+	var req Request
+
+	continueBuffer := &bytes.Buffer{}
+
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	if err := req.Read(br, continueBuffer, func(req *Request) bool { return true }); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if bytes.Compare(continueBuffer.Bytes(), []byte("HTTP/1.1 100 Continue\r\n\r\n")) != 0 {
+		t.Fatalf("Expected 100 continue response on expect header, instead got: %s", continueBuffer.String())
+	}
+
+	continueBuffer.Reset()
+
+	r = bytes.NewBufferString(s)
+	br = bufio.NewReader(r)
+	if err := req.Read(br, continueBuffer, func(req *Request) bool { return false }); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if bytes.Compare(continueBuffer.Bytes(), []byte("HTTP/1.1 417 Expectation Failed\r\n\r\n")) != 0 {
+		t.Fatalf("Expected 471 expectation fail, instead got: %s", continueBuffer.String())
+	}
+
 }
 
 func TestResponseReadLimitBody(t *testing.T) {
@@ -232,7 +278,7 @@ func testRequestReadLimitBodyError(t *testing.T, s string, maxBodySize int) {
 	var req Request
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
-	err := req.ReadLimitBody(br, maxBodySize)
+	err := req.ReadLimitBody(br, maxBodySize, nil, nil)
 	if err == nil {
 		t.Fatalf("expecting error. s=%q, maxBodySize=%d", s, maxBodySize)
 	}
@@ -245,7 +291,7 @@ func testRequestReadLimitBodySuccess(t *testing.T, s string, maxBodySize int) {
 	var req Request
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
-	if err := req.ReadLimitBody(br, maxBodySize); err != nil {
+	if err := req.ReadLimitBody(br, maxBodySize, nil, nil); err != nil {
 		t.Fatalf("unexpected error: %s. s=%q, maxBodySize=%d", err, s, maxBodySize)
 	}
 }
@@ -296,7 +342,7 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 
 	var req1 Request
 	br := bufio.NewReader(&w)
-	if err := req1.Read(br); err != nil {
+	if err := req1.Read(br, nil, nil); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 	if string(req1.Header.Host()) != "google.com" {
@@ -384,7 +430,7 @@ func TestRequestReadChunked(t *testing.T) {
 	s := "POST /foo HTTP/1.1\r\nHost: google.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa/bb\r\n\r\n3\r\nabc\r\n5\r\n12345\r\n0\r\n\r\ntrail"
 	r := bytes.NewBufferString(s)
 	rb := bufio.NewReader(r)
-	err := req.Read(rb)
+	err := req.Read(rb, nil, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading chunked request: %s", err)
 	}
@@ -566,7 +612,7 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 
 	var req1 Request
 	br := bufio.NewReader(w)
-	if err = req1.Read(br); err != nil {
+	if err = req1.Read(br, nil, nil); err != nil {
 		t.Fatalf("Unexpected error when calling Request.Read(): %s", err)
 	}
 	if string(req1.Header.Method()) != expectedMethod {
@@ -771,7 +817,7 @@ func TestRequestPostArgsError(t *testing.T) {
 func testRequestPostArgsError(t *testing.T, req *Request, s string) {
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
-	err := req.Read(br)
+	err := req.Read(br, nil, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading %q: %s", s, err)
 	}
@@ -784,7 +830,7 @@ func testRequestPostArgsError(t *testing.T, req *Request, s string) {
 func testRequestPostArgsSuccess(t *testing.T, req *Request, s string, expectedArgsLen int, expectedArgs ...string) {
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
-	err := req.Read(br)
+	err := req.Read(br, nil, nil)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading %q: %s", s, err)
 	}
