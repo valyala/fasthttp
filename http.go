@@ -568,17 +568,65 @@ func (req *Request) Write(w *bufio.Writer) error {
 //
 // WriteGzip doesn't flush response to w for performance reasons.
 func (resp *Response) WriteGzip(w *bufio.Writer) error {
-	return resp.WriteGzipLevel(w, gzip.DefaultCompression)
+	return resp.WriteGzipLevel(w, CompressDefaultCompression)
 }
 
 // WriteGzipLevel writes response with gzipped body to w.
 //
-// Level is compression level. See available levels in encoding/gzip package.
+// Level is the desired compression level:
+//
+//     * CompressNoCompression
+//     * CompressBestSpeed
+//     * CompressBestCompression
+//     * CompressDefaultCompression
 //
 // The method sets 'Content-Encoding: gzip' header.
 //
 // WriteGzipLevel doesn't flush response to w for performance reasons.
 func (resp *Response) WriteGzipLevel(w *bufio.Writer, level int) error {
+	if err := resp.gzipBody(level); err != nil {
+		return err
+	}
+	return resp.Write(w)
+}
+
+// WriteDeflate writes response with deflated body to w.
+//
+// The method sets 'Content-Encoding: deflate' header.
+//
+// WriteDeflate doesn't flush response to w for performance reasons.
+func (resp *Response) WriteDeflate(w *bufio.Writer) error {
+	return resp.WriteDeflateLevel(w, CompressDefaultCompression)
+}
+
+// WriteDeflateLevel writes response with deflated body to w.
+//
+// Level is the desired compression level:
+//
+//     * CompressNoCompression
+//     * CompressBestSpeed
+//     * CompressBestCompression
+//     * CompressDefaultCompression
+//
+// The method sets 'Content-Encoding: deflate' header.
+//
+// WriteDeflateLevel doesn't flush response to w for performance reasons.
+func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
+	if err := resp.deflateBody(level); err != nil {
+		return err
+	}
+	return resp.Write(w)
+}
+
+// Supported compression levels.
+const (
+	CompressNoCompression      = flate.NoCompression
+	CompressBestSpeed          = flate.BestSpeed
+	CompressBestCompression    = flate.BestCompression
+	CompressDefaultCompression = flate.DefaultCompression
+)
+
+func (resp *Response) gzipBody(level int) error {
 	// Do not care about memory allocations here, since gzip is slow
 	// and allocates a lot of memory by itself.
 	if resp.bodyStream != nil {
@@ -597,28 +645,11 @@ func (resp *Response) WriteGzipLevel(w *bufio.Writer, level int) error {
 		zw.Close()
 		resp.body = buf.Bytes()
 	}
-
 	resp.Header.SetCanonical(strContentEncoding, strGzip)
-	return resp.Write(w)
+	return nil
 }
 
-// WriteDeflate writes response with deflated body to w.
-//
-// The method sets 'Content-Encoding: deflate' header.
-//
-// WriteDeflate doesn't flush response to w for performance reasons.
-func (resp *Response) WriteDeflate(w *bufio.Writer) error {
-	return resp.WriteDeflateLevel(w, flate.DefaultCompression)
-}
-
-// WriteDeflateLevel writes response with deflated body to w.
-//
-// Level is compression level. See available levels in encoding/flate package.
-//
-// The method sets 'Content-Encoding: deflate' header.
-//
-// WriteDeflateLevel doesn't flush response to w for performance reasons.
-func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
+func (resp *Response) deflateBody(level int) error {
 	// Do not care about memory allocations here, since flate is slow
 	// and allocates a lot of memory by itself.
 	if resp.bodyStream != nil {
@@ -637,9 +668,8 @@ func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
 		zw.Close()
 		resp.body = buf.Bytes()
 	}
-
 	resp.Header.SetCanonical(strContentEncoding, strDeflate)
-	return resp.Write(w)
+	return nil
 }
 
 func newDeflateWriter(w io.Writer, level int) *flate.Writer {

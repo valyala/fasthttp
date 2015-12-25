@@ -12,6 +12,78 @@ import (
 	"time"
 )
 
+func TestCompressHandler(t *testing.T) {
+	expectedBody := "foo/bar/baz"
+	h := CompressHandler(func(ctx *RequestCtx) {
+		ctx.Write([]byte(expectedBody))
+	})
+
+	var ctx RequestCtx
+	var resp Response
+
+	// verify uncompressed response
+	h(&ctx)
+	s := ctx.Response.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	ce := resp.Header.Peek("Content-Encoding")
+	if string(ce) != "" {
+		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
+	}
+	body := resp.Body()
+	if string(body) != expectedBody {
+		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
+	}
+
+	// verify gzip-compressed response
+	ctx.Request.Reset()
+	ctx.Response.Reset()
+	ctx.Request.Header.Set("Accept-Encoding", "gzip, deflate, sdhc")
+
+	h(&ctx)
+	s = ctx.Response.String()
+	br = bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	ce = resp.Header.Peek("Content-Encoding")
+	if string(ce) != "gzip" {
+		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "gzip")
+	}
+	body, err := resp.BodyGunzip()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if string(body) != expectedBody {
+		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
+	}
+
+	// verify deflate-compressed response
+	ctx.Request.Reset()
+	ctx.Response.Reset()
+	ctx.Request.Header.Set("Accept-Encoding", "foobar, deflate, sdhc")
+
+	h(&ctx)
+	s = ctx.Response.String()
+	br = bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	ce = resp.Header.Peek("Content-Encoding")
+	if string(ce) != "deflate" {
+		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "deflate")
+	}
+	body, err = resp.BodyInflate()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if string(body) != expectedBody {
+		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
+	}
+}
+
 func TestRequestCtxWriteString(t *testing.T) {
 	var ctx RequestCtx
 	n, err := ctx.WriteString("foo")

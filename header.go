@@ -408,6 +408,31 @@ func (h *ResponseHeader) IsHTTP11() bool {
 	return !h.noHTTP11
 }
 
+// HasAcceptEncoding returns true if the header contains
+// the given Accept-Encoding value.
+func (h *RequestHeader) HasAcceptEncoding(acceptEncoding string) bool {
+	h.bufKV.value = append(h.bufKV.value[:0], acceptEncoding...)
+	return h.HasAcceptEncodingBytes(h.bufKV.value)
+}
+
+// HasAcceptEncodingBytes returns true if the header contains
+// the given Accept-Encoding value.
+func (h *RequestHeader) HasAcceptEncodingBytes(acceptEncoding []byte) bool {
+	ae := h.peek(strAcceptEncoding)
+	n := bytes.Index(ae, acceptEncoding)
+	if n < 0 {
+		return false
+	}
+	b := ae[n+len(acceptEncoding):]
+	if len(b) > 0 && b[0] != ',' {
+		return false
+	}
+	if n == 0 {
+		return true
+	}
+	return ae[n-1] == ' '
+}
+
 // Len returns the number of headers set,
 // i.e. the number of times f is called in VisitAll.
 func (h *ResponseHeader) Len() int {

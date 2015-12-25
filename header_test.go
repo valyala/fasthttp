@@ -10,6 +10,31 @@ import (
 	"testing"
 )
 
+func TestRequestHeaderHasAcceptEncoding(t *testing.T) {
+	testRequestHeaderHasAcceptEncoding(t, "", "gzip", false)
+	testRequestHeaderHasAcceptEncoding(t, "gzip", "sdhc", false)
+	testRequestHeaderHasAcceptEncoding(t, "deflate", "deflate", true)
+	testRequestHeaderHasAcceptEncoding(t, "gzip, deflate, sdhc", "gzi", false)
+	testRequestHeaderHasAcceptEncoding(t, "gzip, deflate, sdhc", "dhc", false)
+	testRequestHeaderHasAcceptEncoding(t, "gzip, deflate, sdhc", "sdh", false)
+	testRequestHeaderHasAcceptEncoding(t, "gzip, deflate, sdhc", "zip", false)
+	testRequestHeaderHasAcceptEncoding(t, "gzip, deflate, sdhc", "flat", false)
+	testRequestHeaderHasAcceptEncoding(t, "gzip, deflate, sdhc", "flate", false)
+	testRequestHeaderHasAcceptEncoding(t, "gzip, deflate, sdhc", "def", false)
+	testRequestHeaderHasAcceptEncoding(t, "gzip, deflate, sdhc", "gzip", true)
+	testRequestHeaderHasAcceptEncoding(t, "gzip, deflate, sdhc", "deflate", true)
+	testRequestHeaderHasAcceptEncoding(t, "gzip, deflate, sdhc", "sdhc", true)
+}
+
+func testRequestHeaderHasAcceptEncoding(t *testing.T, ae, v string, resultExpected bool) {
+	var h RequestHeader
+	h.Set("Accept-Encoding", ae)
+	result := h.HasAcceptEncoding(v)
+	if result != resultExpected {
+		t.Fatalf("unexpected result in HasAcceptEncoding(%q, %q): %v. Expecting %v", ae, v, result, resultExpected)
+	}
+}
+
 func TestRequestMultipartFormBoundary(t *testing.T) {
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar\r\n\r\n", "foobar")
 

@@ -33,6 +33,7 @@ var (
 	strServer           = []byte("Server")
 	strTransferEncoding = []byte("Transfer-Encoding")
 	strContentEncoding  = []byte("Content-Encoding")
+	strAcceptEncoding   = []byte("Accept-Encoding")
 	strUserAgent        = []byte("User-Agent")
 	strCookie           = []byte("Cookie")
 	strSetCookie        = []byte("Set-Cookie")
