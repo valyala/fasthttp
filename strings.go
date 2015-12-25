@@ -19,11 +19,14 @@ var (
 	strColonSlashSlash  = []byte("://")
 	strColonSpace       = []byte(": ")
 
+	strResponseContinue = []byte("HTTP/1.1 100 Continue\r\n\r\n")
+
 	strGet  = []byte("GET")
 	strHead = []byte("HEAD")
 	strPost = []byte("POST")
 	strPut  = []byte("PUT")
 
+	strExpect           = []byte("Expect")
 	strConnection       = []byte("Connection")
 	strContentLength    = []byte("Content-Length")
 	strContentType      = []byte("Content-Type")
@@ -53,6 +56,7 @@ var (
 	strUpgrade             = []byte("Upgrade")
 	strChunked             = []byte("chunked")
 	strIdentity            = []byte("identity")
+	str100Continue         = []byte("100-continue")
 	strPostArgsContentType = []byte("application/x-www-form-urlencoded")
 	strMultipartFormData   = []byte("multipart/form-data")
 	strBoundary            = []byte("boundary")

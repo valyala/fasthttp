@@ -442,6 +442,14 @@ func (resp *Response) resetSkipHeader() {
 // RemoveMultipartFormFiles or Reset must be called after
 // reading multipart/form-data request in order to delete temporarily
 // uploaded files.
+//
+// If MayContinue returns true, the caller must:
+//
+//     - Either send StatusExpectationFailed response if request headers don't
+//       satisfy the caller.
+//     - Or send StatusContinue response before reading request body
+//       with ContinueReadBody.
+//     - Or close the connection.
 func (req *Request) Read(r *bufio.Reader) error {
 	return req.ReadLimitBody(r, 0)
 }
@@ -458,6 +466,14 @@ var errGetOnly = errors.New("non-GET request received")
 // RemoveMultipartFormFiles or Reset must be called after
 // reading multipart/form-data request in order to delete temporarily
 // uploaded files.
+//
+// If MayContinue returns true, the caller must:
+//
+//     - Either send StatusExpectationFailed response if request headers don't
+//       satisfy the caller.
+//     - Or send StatusContinue response before reading request body
+//       with ContinueReadBody.
+//     - Or close the connection.
 func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	return req.readLimitBody(r, maxBodySize, false)
 }
@@ -472,29 +488,64 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 		return errGetOnly
 	}
 
-	if !req.Header.noBody() {
-		contentLength := req.Header.ContentLength()
-		if contentLength > 0 {
-			// Pre-read multipart form data of known length.
-			// This way we limit memory usage for large file uploads, since their contents
-			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-			boundary := req.Header.MultipartFormBoundary()
-			if len(boundary) > 0 {
-				req.multipartForm, err = readMultipartFormBody(r, boundary, maxBodySize, defaultMaxInMemoryFileSize)
-				if err != nil {
-					req.Reset()
-				}
-				return err
-			}
-		}
+	if req.Header.noBody() {
+		return nil
+	}
 
-		req.body, err = readBody(r, contentLength, maxBodySize, req.body)
-		if err != nil {
-			req.Reset()
+	if req.MayContinue() {
+		// 'Expect: 100-continue' header found. Let the caller deciding
+		// whether to read request body or
+		// to return StatusExpectationFailed.
+		return nil
+	}
+
+	return req.ContinueReadBody(r, maxBodySize)
+}
+
+// MayContinue returns true if the request contains
+// 'Expect: 100-continue' header.
+//
+// The caller must do one of the following actions if MayContinue returns true:
+//
+//     - Either send StatusExpectationFailed response if request headers don't
+//       satisfy the caller.
+//     - Or send StatusContinue response before reading request body
+//       with ContinueReadBody.
+//     - Or close the connection.
+func (req *Request) MayContinue() bool {
+	return bytes.Equal(req.Header.peek(strExpect), str100Continue)
+}
+
+// ContinueReadBody reads request body if request header contains
+// 'Expect: 100-continue'.
+//
+// The caller must send StatusContinue response before calling this method.
+//
+// If maxBodySize > 0 and the body size exceeds maxBodySize,
+// then ErrBodyTooLarge is returned.
+func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
+	var err error
+	contentLength := req.Header.ContentLength()
+	if contentLength > 0 {
+		// Pre-read multipart form data of known length.
+		// This way we limit memory usage for large file uploads, since their contents
+		// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
+		boundary := req.Header.MultipartFormBoundary()
+		if len(boundary) > 0 {
+			req.multipartForm, err = readMultipartFormBody(r, boundary, maxBodySize, defaultMaxInMemoryFileSize)
+			if err != nil {
+				req.Reset()
+			}
 			return err
 		}
-		req.Header.SetContentLength(len(req.body))
 	}
+
+	req.body, err = readBody(r, contentLength, maxBodySize, req.body)
+	if err != nil {
+		req.Reset()
+		return err
+	}
+	req.Header.SetContentLength(len(req.body))
 	return nil
 }
 
@@ -512,6 +563,12 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	err := resp.Header.Read(r)
 	if err != nil {
 		return err
+	}
+	if resp.Header.StatusCode() == StatusContinue {
+		// Read the next response according to http://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html .
+		if err = resp.Header.Read(r); err != nil {
+			return err
+		}
 	}
 
 	if !isSkipResponseBody(resp.Header.StatusCode()) && !resp.SkipBody {

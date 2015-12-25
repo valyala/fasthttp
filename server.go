@@ -1107,19 +1107,15 @@ func (s *Server) serveConn(c net.Conn) error {
 			if br == nil {
 				br = acquireReader(ctx)
 			}
+		} else {
+			br, err = acquireByteReader(&ctx)
+		}
+
+		if err == nil {
 			err = ctx.Request.readLimitBody(br, s.MaxRequestBodySize, s.GetOnly)
 			if br.Buffered() == 0 || err != nil {
 				releaseReader(s, br)
 				br = nil
-			}
-		} else {
-			br, err = acquireByteReader(&ctx)
-			if err == nil {
-				err = ctx.Request.ReadLimitBody(br, s.MaxRequestBodySize)
-				if br.Buffered() == 0 || err != nil {
-					releaseReader(s, br)
-					br = nil
-				}
 			}
 		}
 
@@ -1131,6 +1127,35 @@ func (s *Server) serveConn(c net.Conn) error {
 				err = nil
 			}
 			break
+		}
+
+		// 'Expect: 100-continue' request handling.
+		// See http://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html for details.
+		if !ctx.Request.Header.noBody() && ctx.Request.MayContinue() {
+			// Send 'HTTP/1.1 100 Continue' response.
+			if bw == nil {
+				bw = acquireWriter(ctx)
+			}
+			bw.Write(strResponseContinue)
+			err = bw.Flush()
+			releaseWriter(s, bw)
+			bw = nil
+			if err != nil {
+				break
+			}
+
+			// Read request body.
+			if br == nil {
+				br = acquireReader(ctx)
+			}
+			err = ctx.Request.ContinueReadBody(br, s.MaxRequestBodySize)
+			if br.Buffered() == 0 || err != nil {
+				releaseReader(s, br)
+				br = nil
+			}
+			if err != nil {
+				break
+			}
 		}
 
 		ctx.connRequestNum = connRequestNum

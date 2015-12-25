@@ -4,10 +4,57 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"mime/multipart"
 	"strings"
 	"testing"
 )
+
+func TestRequestContinueReadBody(t *testing.T) {
+	s := "PUT /foo/bar HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: foo/bar\r\n\r\nabcdef4343"
+	br := bufio.NewReader(bytes.NewBufferString(s))
+
+	var r Request
+	if err := r.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !r.MayContinue() {
+		t.Fatalf("MayContinue must return true")
+	}
+
+	if err := r.ContinueReadBody(br, 0); err != nil {
+		t.Fatalf("error when reading request body: %s", err)
+	}
+	body := r.Body()
+	if string(body) != "abcde" {
+		t.Fatalf("unexpected body %q. Expecting %q", body, "abcde")
+	}
+
+	tail, err := ioutil.ReadAll(br)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if string(tail) != "f4343" {
+		t.Fatalf("unexpected tail %q. Expecting %q", tail, "f4343")
+	}
+}
+
+func TestRequestMayContinue(t *testing.T) {
+	var r Request
+	if r.MayContinue() {
+		t.Fatalf("MayContinue on empty request must return false")
+	}
+
+	r.Header.Set("Expect", "123sdfds")
+	if r.MayContinue() {
+		t.Fatalf("MayContinue on invalid Expect header must return false")
+	}
+
+	r.Header.Set("Expect", "100-continue")
+	if !r.MayContinue() {
+		t.Fatalf("MayContinue on 'Expect: 100-continue' header must return true")
+	}
+}
 
 func TestResponseGzipStream(t *testing.T) {
 	var r Response
@@ -405,11 +452,15 @@ func TestResponseReadWithoutBody(t *testing.T) {
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 204 Foo Bar\r\nContent-Type: aab\r\nTransfer-Encoding: chunked\r\n\r\n123\r\nss", false,
 		204, -1, "aab", "123\r\nss")
 
-	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 100 AAA\r\nContent-Type: xxx\r\nContent-Length: 3434\r\n\r\naaaa", false,
-		100, 3434, "xxx", "aaaa")
+	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 123 AAA\r\nContent-Type: xxx\r\nContent-Length: 3434\r\n\r\naaaa", false,
+		123, 3434, "xxx", "aaaa")
 
 	testResponseReadWithoutBody(t, &resp, "HTTP 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 123\r\n\r\nxxxx", true,
 		200, 123, "text/xml", "xxxx")
+
+	// '100 Continue' must be skipped.
+	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 100 Continue\r\nFoo-bar: baz\r\n\r\nHTTP/1.1 329 aaa\r\nContent-Type: qwe\r\nContent-Length: 894\r\n\r\nfoobar", true,
+		329, 894, "qwe", "foobar")
 }
 
 func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBody bool,

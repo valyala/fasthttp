@@ -12,6 +12,47 @@ import (
 	"time"
 )
 
+func TestServerExpect100Continue(t *testing.T) {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if !ctx.IsPost() {
+				t.Fatalf("unexpected method %q. Expecting POST", ctx.Method())
+			}
+			if string(ctx.Path()) != "/foo" {
+				t.Fatalf("unexpected path %q. Expecting %q", ctx.Path(), "/foo")
+			}
+			ct := ctx.Request.Header.ContentType()
+			if string(ct) != "a/b" {
+				t.Fatalf("unexpectected content-type: %q. Expecting %q", ct, "a/b")
+			}
+			if string(ctx.PostBody()) != "12345" {
+				t.Fatalf("unexpected body: %q. Expecting %q", ctx.PostBody(), "12345")
+			}
+			ctx.WriteString("foobar")
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusOK, string(defaultContentType), "foobar")
+}
+
 func TestCompressHandler(t *testing.T) {
 	expectedBody := "foo/bar/baz"
 	h := CompressHandler(func(ctx *RequestCtx) {
