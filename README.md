@@ -14,7 +14,7 @@ concurrent keep-alive connections on a single server.
 
 [Switching from net/http to fasthttp](#switching-from-nethttp-to-fasthttp)
 
-[Fasthttp best practicies](#fasthttp-best-practicies)
+[Fasthttp best practices](#fasthttp-best-practices)
 
 [Tricks with byte buffers](#tricks-with-byte-buffers)
 
@@ -312,7 +312,7 @@ fastttp.ListenAndServe(":80", m)
 * *VERY IMPORTANT!* Fasthttp disallows holding references
 to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx) or to its'
 members after returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
-Otherwise [data races](http://blog.golang.org/race-detector) are unevitable.
+Otherwise [data races](http://blog.golang.org/race-detector) are inevitable.
 Carefully inspect all the net/http request handlers converted to fasthttp whether
 they retain references to RequestCtx or to its' members after returning.
 RequestCtx provides the following _band aids_ for this case:
@@ -345,7 +345,7 @@ code after switching to fasthttp.
   See [this article](https://blog.cloudflare.com/how-to-achieve-low-latency/) for details.
 
 
-# Fasthttp best practicies
+# Fasthttp best practices
 
 * Do not allocate objects and `[]byte` buffers - just reuse them as much
   as possible. Fasthttp API design encourages this.
