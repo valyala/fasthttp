@@ -3,8 +3,6 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
-	"compress/flate"
-	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
@@ -207,12 +205,13 @@ func (resp *Response) BodyGunzip() ([]byte, error) {
 	// Do not care about memory allocations here,
 	// since gzip is slow and generates a lot of memory allocations
 	// by itself.
-	r, err := gzip.NewReader(bytes.NewBuffer(resp.body))
+	r := bytes.NewBuffer(resp.body)
+	zr, err := acquireGzipReader(r)
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
-	b, err := ioutil.ReadAll(r)
+	b, err := ioutil.ReadAll(zr)
+	releaseGzipReader(zr)
 	if err != nil {
 		return nil, err
 	}
@@ -228,9 +227,13 @@ func (resp *Response) BodyInflate() ([]byte, error) {
 	// Do not care about memory allocations here,
 	// since flate is slow and generates a lot of memory allocations
 	// by itself.
-	r := flate.NewReader(bytes.NewBuffer(resp.body))
-	defer r.Close()
-	b, err := ioutil.ReadAll(r)
+	r := bytes.NewBuffer(resp.body)
+	zr, err := acquireFlateReader(r)
+	if err != nil {
+		return nil, err
+	}
+	b, err := ioutil.ReadAll(zr)
+	releaseFlateReader(zr)
 	if err != nil {
 		return nil, err
 	}
@@ -675,31 +678,24 @@ func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
 	return resp.Write(w)
 }
 
-// Supported compression levels.
-const (
-	CompressNoCompression      = flate.NoCompression
-	CompressBestSpeed          = flate.BestSpeed
-	CompressBestCompression    = flate.BestCompression
-	CompressDefaultCompression = flate.DefaultCompression
-)
-
 func (resp *Response) gzipBody(level int) error {
 	// Do not care about memory allocations here, since gzip is slow
 	// and allocates a lot of memory by itself.
 	if resp.bodyStream != nil {
 		bs := resp.bodyStream
 		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
-			zw := newGzipWriter(sw, level)
-			defer zw.Close()
+			zw := acquireGzipWriter(sw, level)
 			io.Copy(zw, bs)
+			releaseGzipWriter(zw)
 		})
 	} else {
 		var buf bytes.Buffer
-		zw := newGzipWriter(&buf, level)
-		if _, err := zw.Write(resp.body); err != nil {
+		zw := acquireGzipWriter(&buf, level)
+		_, err := zw.Write(resp.body)
+		releaseGzipWriter(zw)
+		if err != nil {
 			return err
 		}
-		zw.Close()
 		resp.body = buf.Bytes()
 	}
 	resp.Header.SetCanonical(strContentEncoding, strGzip)
@@ -712,37 +708,22 @@ func (resp *Response) deflateBody(level int) error {
 	if resp.bodyStream != nil {
 		bs := resp.bodyStream
 		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
-			zw := newDeflateWriter(sw, level)
-			defer zw.Close()
+			zw := acquireFlateWriter(sw, level)
 			io.Copy(zw, bs)
+			releaseFlateWriter(zw)
 		})
 	} else {
 		var buf bytes.Buffer
-		zw := newDeflateWriter(&buf, level)
-		if _, err := zw.Write(resp.body); err != nil {
+		zw := acquireFlateWriter(&buf, level)
+		_, err := zw.Write(resp.body)
+		releaseFlateWriter(zw)
+		if err != nil {
 			return err
 		}
-		zw.Close()
 		resp.body = buf.Bytes()
 	}
 	resp.Header.SetCanonical(strContentEncoding, strDeflate)
 	return nil
-}
-
-func newDeflateWriter(w io.Writer, level int) *flate.Writer {
-	zw, err := flate.NewWriter(w, level)
-	if err != nil {
-		panic(fmt.Sprintf("BUG: flate.NewWriter(%d) returns non-nil error: %s", level, err))
-	}
-	return zw
-}
-
-func newGzipWriter(w io.Writer, level int) *gzip.Writer {
-	zw, err := gzip.NewWriterLevel(w, level)
-	if err != nil {
-		panic(fmt.Sprintf("BUG: gzip.NewWriter(%d) returns non-nil error: %s", level, err))
-	}
-	return zw
 }
 
 // Write writes response to w.
