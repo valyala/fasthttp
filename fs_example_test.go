@@ -14,7 +14,7 @@ func ExampleFS() {
 		// Generate index pages if client requests directory contents.
 		GenerateIndexPages: true,
 
-		// Enable transparent compression to converve traffic.
+		// Enable transparent compression to save network traffic.
 		Compress: true,
 	}
 
