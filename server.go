@@ -1459,9 +1459,10 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	ctx.c = &fakeAddrer{
 		addr: remoteAddr,
 	}
-	if logger != nil {
-		ctx.logger.logger = logger
+	if logger == nil {
+		logger = defaultLogger
 	}
+	ctx.logger.logger = logger
 	ctx.s = &fakeServer
 	ctx.initID()
 	req.CopyTo(&ctx.Request)
