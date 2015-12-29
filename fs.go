@@ -513,6 +513,12 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		filePath := h.root + pathStr
 		var err error
 		ff, err = h.openFSFile(filePath, mustCompress)
+		if mustCompress && err == errNoCreatePermission {
+			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
+				"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
+			mustCompress = false
+			ff, err = h.openFSFile(filePath, mustCompress)
+		}
 		if err == errDirIndexRequired {
 			ff, err = h.openIndexFile(ctx, filePath, mustCompress)
 			if err != nil {
@@ -586,7 +592,10 @@ func (h *fsHandler) openIndexFile(ctx *RequestCtx, dirPath string, mustCompress 
 	return h.createDirIndex(ctx.URI(), dirPath, mustCompress)
 }
 
-var errDirIndexRequired = errors.New("directory index required")
+var (
+	errDirIndexRequired   = errors.New("directory index required")
+	errNoCreatePermission = errors.New("no 'create file' permissions")
+)
 
 func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool) (*fsFile, error) {
 	var buf bytes.Buffer
@@ -725,13 +734,11 @@ func (h *fsHandler) compressFileNolock(f *os.File, fileInfo os.FileInfo, filePat
 	tmpFilePath := compressedFilePath + ".tmp"
 	zf, err := os.Create(tmpFilePath)
 	if err != nil {
+		f.Close()
 		if !os.IsPermission(err) {
-			f.Close()
 			return nil, fmt.Errorf("cannot create temporary file %q: %s", tmpFilePath, err)
 		}
-
-		// No permission for compressed file creation. Just return uncompressed file
-		return h.newFSFile(f, fileInfo, false)
+		return nil, errNoCreatePermission
 	}
 
 	zw := acquireGzipWriter(zf, CompressDefaultCompression)
