@@ -1,13 +1,124 @@
 package fasthttp
 
 import (
+	"bufio"
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"sort"
 	"testing"
 	"time"
 )
+
+func TestFSCompressConcurrent(t *testing.T) {
+	fs := &FS{
+		Root:               ".",
+		GenerateIndexPages: true,
+		Compress:           true,
+	}
+	h := fs.NewRequestHandler()
+
+	concurrency := 4
+	ch := make(chan struct{}, concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			for j := 0; j < 10; j++ {
+				testFSCompress(t, h, "/fs.go")
+				testFSCompress(t, h, "/")
+				testFSCompress(t, h, "/README.md")
+			}
+			ch <- struct{}{}
+		}()
+	}
+
+	for i := 0; i < concurrency; i++ {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+}
+
+func TestFSCompressSingleThread(t *testing.T) {
+	fs := &FS{
+		Root:               ".",
+		GenerateIndexPages: true,
+		Compress:           true,
+	}
+	h := fs.NewRequestHandler()
+
+	testFSCompress(t, h, "/fs.go")
+	testFSCompress(t, h, "/")
+	testFSCompress(t, h, "/README.md")
+}
+
+func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, nil)
+
+	// request uncompressed file
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI(filePath)
+	h(&ctx)
+
+	var resp Response
+	s := ctx.Response.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s. filePath=%q", err, filePath)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
+	}
+	ce := resp.Header.Peek("Content-Encoding")
+	if string(ce) != "" {
+		t.Fatalf("unexpected content-encoding %q. Expecting empty string. filePath=%q", ce, filePath)
+	}
+	body := string(resp.Body())
+
+	// request compressed file
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI(filePath)
+	ctx.Request.Header.Set("Accept-Encoding", "gzip")
+	h(&ctx)
+	s = ctx.Response.String()
+	br = bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s. filePath=%q", err, filePath)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
+	}
+	ce = resp.Header.Peek("Content-Encoding")
+	if string(ce) != "gzip" {
+		t.Fatalf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "gzip", filePath)
+	}
+	zbody, err := resp.BodyGunzip()
+	if err != nil {
+		t.Fatalf("unexpected error when gunzipping response body: %s. filePath=%q", err, filePath)
+	}
+	if string(zbody) != body {
+		t.Fatalf("unexpected body %q. Expected %q. FilePath=%q", zbody, body, filePath)
+	}
+}
+
+func TestFileLock(t *testing.T) {
+	for i := 0; i < 10; i++ {
+		filePath := fmt.Sprintf("foo/bar/%d.jpg", i)
+		lock := getFileLock(filePath)
+		lock.Lock()
+		lock.Unlock()
+	}
+
+	for i := 0; i < 10; i++ {
+		filePath := fmt.Sprintf("foo/bar/%d.jpg", i)
+		lock := getFileLock(filePath)
+		lock.Lock()
+		lock.Unlock()
+	}
+}
 
 func TestFSHandlerSingleThread(t *testing.T) {
 	requestHandler := FSHandler(".", 0)
@@ -151,15 +262,21 @@ func testStripPathSlashes(t *testing.T, path string, stripSlashes int, expectedP
 }
 
 func TestFileExtension(t *testing.T) {
-	testFileExtension(t, "foo.bar", ".bar")
-	testFileExtension(t, "foobar", "")
-	testFileExtension(t, "foo.bar.baz", ".baz")
-	testFileExtension(t, "", "")
-	testFileExtension(t, "/a/b/c.d/efg.jpg", ".jpg")
+	testFileExtension(t, "foo.bar", false, ".bar")
+	testFileExtension(t, "foobar", false, "")
+	testFileExtension(t, "foo.bar.baz", false, ".baz")
+	testFileExtension(t, "", false, "")
+	testFileExtension(t, "/a/b/c.d/efg.jpg", false, ".jpg")
+
+	testFileExtension(t, "foo.bar", true, ".bar")
+	testFileExtension(t, "foobar.fasthttp.gz", true, "")
+	testFileExtension(t, "foo.bar.baz.fasthttp.gz", true, ".baz")
+	testFileExtension(t, "", true, "")
+	testFileExtension(t, "/a/b/c.d/efg.jpg.fasthttp.gz", true, ".jpg")
 }
 
-func testFileExtension(t *testing.T, path, expectedExt string) {
-	ext := fileExtension(path)
+func testFileExtension(t *testing.T, path string, compressed bool, expectedExt string) {
+	ext := fileExtension(path, compressed)
 	if ext != expectedExt {
 		t.Fatalf("unexpected file extension for file %q: %q. Expecting %q", path, ext, expectedExt)
 	}
