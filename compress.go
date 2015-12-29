@@ -89,7 +89,6 @@ func acquireGzipWriter(w io.Writer, level int) *gzipWriter {
 
 func releaseGzipWriter(zw *gzipWriter) {
 	zw.Close()
-	zw.Reset(nil)
 	zw.p.Put(zw)
 }
 
@@ -133,7 +132,6 @@ func acquireFlateWriter(w io.Writer, level int) *flateWriter {
 
 func releaseFlateWriter(zw *flateWriter) {
 	zw.Close()
-	zw.Reset(nil)
 	zw.p.Put(zw)
 }
 

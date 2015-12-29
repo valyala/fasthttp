@@ -26,12 +26,11 @@ func NewStreamReader(sw StreamWriter) io.Reader {
 	pr, pw := io.Pipe()
 
 	var bw *bufio.Writer
-	bwv := streamWriterBufPool.Get()
-	if bwv == nil {
+	v := streamWriterBufPool.Get()
+	if v == nil {
 		bw = bufio.NewWriter(pw)
-		bwv = bw
 	} else {
-		bw = bwv.(*bufio.Writer)
+		bw = v.(*bufio.Writer)
 		bw.Reset(pw)
 	}
 
@@ -46,8 +45,7 @@ func NewStreamReader(sw StreamWriter) io.Reader {
 		bw.Flush()
 		pw.Close()
 
-		bw.Reset(nil)
-		streamWriterBufPool.Put(bwv)
+		streamWriterBufPool.Put(bw)
 	}()
 
 	return pr

@@ -1407,7 +1407,6 @@ func acquireReader(ctx *RequestCtx) *bufio.Reader {
 }
 
 func releaseReader(s *Server, r *bufio.Reader) {
-	r.Reset(nil)
 	s.readerPool.Put(r)
 }
 
@@ -1426,7 +1425,6 @@ func acquireWriter(ctx *RequestCtx) *bufio.Writer {
 }
 
 func releaseWriter(s *Server, w *bufio.Writer) {
-	w.Reset(nil)
 	s.writerPool.Put(w)
 }
 

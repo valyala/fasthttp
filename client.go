@@ -1015,7 +1015,6 @@ func (c *HostClient) acquireWriter(conn net.Conn) *bufio.Writer {
 }
 
 func (c *HostClient) releaseWriter(bw *bufio.Writer) {
-	bw.Reset(nil)
 	c.writerPool.Put(bw)
 }
 
@@ -1034,7 +1033,6 @@ func (c *HostClient) acquireReader(conn net.Conn) *bufio.Reader {
 }
 
 func (c *HostClient) releaseReader(br *bufio.Reader) {
-	br.Reset(nil)
 	c.readerPool.Put(br)
 }
 
