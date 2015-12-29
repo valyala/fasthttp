@@ -171,7 +171,23 @@ func nethttpEchoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(r.RequestURI))
 }
 
-func BenchmarkClientGetEndToEnd(b *testing.B) {
+func BenchmarkClientGetEndToEnd1(b *testing.B) {
+	benchmarkClientGetEndToEnd(b, 1)
+}
+
+func BenchmarkClientGetEndToEnd10(b *testing.B) {
+	benchmarkClientGetEndToEnd(b, 10)
+}
+
+func BenchmarkClientGetEndToEnd100(b *testing.B) {
+	benchmarkClientGetEndToEnd(b, 100)
+}
+
+func BenchmarkClientGetEndToEnd1000(b *testing.B) {
+	benchmarkClientGetEndToEnd(b, 1000)
+}
+
+func benchmarkClientGetEndToEnd(b *testing.B, parallelism int) {
 	addr := "127.0.0.1:8543"
 
 	ln, err := net.Listen("tcp4", addr)
@@ -189,6 +205,7 @@ func BenchmarkClientGetEndToEnd(b *testing.B) {
 
 	requestURI := "/foo/bar?baz=123"
 	url := "http://" + addr + requestURI
+	b.SetParallelism(parallelism)
 	b.RunParallel(func(pb *testing.PB) {
 		var buf []byte
 		for pb.Next() {
@@ -214,7 +231,23 @@ func BenchmarkClientGetEndToEnd(b *testing.B) {
 	}
 }
 
-func BenchmarkNetHTTPClientGetEndToEnd(b *testing.B) {
+func BenchmarkNetHTTPClientGetEndToEnd1(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEnd(b, 1)
+}
+
+func BenchmarkNetHTTPClientGetEndToEnd10(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEnd(b, 10)
+}
+
+func BenchmarkNetHTTPClientGetEndToEnd100(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEnd(b, 100)
+}
+
+func BenchmarkNetHTTPClientGetEndToEnd1000(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEnd(b, 1000)
+}
+
+func benchmarkNetHTTPClientGetEndToEnd(b *testing.B, parallelism int) {
 	addr := "127.0.0.1:8542"
 
 	ln, err := net.Listen("tcp4", addr)
@@ -233,6 +266,7 @@ func BenchmarkNetHTTPClientGetEndToEnd(b *testing.B) {
 
 	requestURI := "/foo/bar?baz=123"
 	url := "http://" + addr + requestURI
+	b.SetParallelism(parallelism)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			resp, err := http.Get(url)
