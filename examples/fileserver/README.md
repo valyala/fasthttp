@@ -1,6 +1,8 @@
 # Static file server example
 
-Serves files from the given directory.
+* Serves files from the given directory.
+* Supports transparent response compression.
+* Generates directory index pages.
 
 # How to build
 
@@ -11,6 +13,7 @@ make
 # How to run
 
 ```
+./fileserver -h
 ./fileserver -addr=tcp.addr.to.listen:to -dir=/path/to/directory/to/serve
 ```
 
