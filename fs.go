@@ -2,10 +2,12 @@ package fasthttp
 
 import (
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"html"
 	"io"
+	"io/ioutil"
 	"mime"
 	"net/http"
 	"os"
@@ -841,12 +843,11 @@ func (h *fsHandler) newFSFile(f *os.File, fileInfo os.FileInfo, compressed bool)
 	ext := fileExtension(fileInfo.Name(), compressed)
 	contentType := mime.TypeByExtension(ext)
 	if len(contentType) == 0 {
-		data := make([]byte, 512)
-		n, err := f.ReadAt(data, 0)
-		if err != nil && err != io.EOF {
+		data, err := readFileHeader(f, compressed)
+		if err != nil {
 			return nil, fmt.Errorf("cannot read header of the file %q: %s", f.Name(), err)
 		}
-		contentType = http.DetectContentType(data[:n])
+		contentType = http.DetectContentType(data)
 	}
 
 	lastModified := fileInfo.ModTime()
@@ -862,6 +863,31 @@ func (h *fsHandler) newFSFile(f *os.File, fileInfo os.FileInfo, compressed bool)
 		t: time.Now(),
 	}
 	return ff, nil
+}
+
+func readFileHeader(f *os.File, compressed bool) ([]byte, error) {
+	r := io.Reader(f)
+	var zr *gzip.Reader
+	if compressed {
+		var err error
+		if zr, err = acquireGzipReader(f); err != nil {
+			return nil, err
+		}
+		r = zr
+	}
+
+	lr := &io.LimitedReader{
+		R: r,
+		N: 512,
+	}
+	data, err := ioutil.ReadAll(lr)
+	f.Seek(0, 0)
+
+	if zr != nil {
+		releaseGzipReader(zr)
+	}
+
+	return data, err
 }
 
 func stripLeadingSlashes(path []byte, stripSlashes int) []byte {
