@@ -1,6 +1,8 @@
 # HelloWorld server example
 
-Displays various request info.
+* Displays various request info.
+* Sets response headers and cookies.
+* Supports transparent compression.
 
 # How to build
 

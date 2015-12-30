@@ -8,12 +8,20 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-var addr = flag.String("addr", ":8080", "TCP address to listen to")
+var (
+	addr     = flag.String("addr", ":8080", "TCP address to listen to")
+	compress = flag.Bool("compress", false, "Whether to enable transparent response compression")
+)
 
 func main() {
 	flag.Parse()
 
-	if err := fasthttp.ListenAndServe(*addr, requestHandler); err != nil {
+	h := requestHandler
+	if *compress {
+		h = fasthttp.CompressHandler(h)
+	}
+
+	if err := fasthttp.ListenAndServe(*addr, h); err != nil {
 		log.Fatalf("Error in ListenAndServe: %s", err)
 	}
 }
@@ -35,4 +43,13 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 	fmt.Fprintf(ctx, "Raw request is:\n---CUT---\n%s\n---CUT---", &ctx.Request)
 
 	ctx.SetContentType("text/plain; charset=utf8")
+
+	// Set arbitrary headers
+	ctx.Response.Header.Set("X-My-Header", "my-header-value")
+
+	// Set cookies
+	var c fasthttp.Cookie
+	c.SetKey("cookie-name")
+	c.SetValue("cookie-value")
+	ctx.Response.Header.SetCookie(&c)
 }
