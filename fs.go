@@ -80,6 +80,10 @@ type FS struct {
 	// Index pages for directories without files matching IndexNames
 	// are automatically generated if set.
 	//
+	// Directory index generation may be quite slow for directories
+	// with many files (more than 1K), so it is discouraged enabling
+	// index pages' generation for such directories.
+	//
 	// By default index pages aren't generated.
 	GenerateIndexPages bool
 
@@ -628,6 +632,10 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 	var filenames []string
 	for _, fi := range fileinfos {
 		name := fi.Name()
+		if strings.HasSuffix(name, FSCompressedFileSuffix) {
+			// Do not show compressed files on index page.
+			continue
+		}
 		fm[name] = fi
 		filenames = append(filenames, name)
 	}
@@ -699,7 +707,7 @@ func (h *fsHandler) compressAndOpenFSFile(filePath string) (*fsFile, error) {
 		return nil, errDirIndexRequired
 	}
 
-	if !isFileCompressible(f, fsMinCompressRatio) {
+	if strings.HasSuffix(filePath, FSCompressedFileSuffix) || !isFileCompressible(f, fsMinCompressRatio) {
 		return h.newFSFile(f, fileInfo, false)
 	}
 
