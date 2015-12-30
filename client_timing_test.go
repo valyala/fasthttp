@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -183,10 +184,6 @@ func BenchmarkClientGetEndToEnd100(b *testing.B) {
 	benchmarkClientGetEndToEnd(b, 100)
 }
 
-func BenchmarkClientGetEndToEnd1000(b *testing.B) {
-	benchmarkClientGetEndToEnd(b, 1000)
-}
-
 func benchmarkClientGetEndToEnd(b *testing.B, parallelism int) {
 	addr := "127.0.0.1:8543"
 
@@ -203,13 +200,17 @@ func benchmarkClientGetEndToEnd(b *testing.B, parallelism int) {
 		close(ch)
 	}()
 
+	c := &Client{
+		MaxConnsPerHost: runtime.GOMAXPROCS(-1) * parallelism,
+	}
+
 	requestURI := "/foo/bar?baz=123"
 	url := "http://" + addr + requestURI
 	b.SetParallelism(parallelism)
 	b.RunParallel(func(pb *testing.PB) {
 		var buf []byte
 		for pb.Next() {
-			statusCode, body, err := Get(buf, url)
+			statusCode, body, err := c.Get(buf, url)
 			if err != nil {
 				b.Fatalf("unexpected error: %s", err)
 			}
@@ -241,10 +242,6 @@ func BenchmarkNetHTTPClientGetEndToEnd10(b *testing.B) {
 
 func BenchmarkNetHTTPClientGetEndToEnd100(b *testing.B) {
 	benchmarkNetHTTPClientGetEndToEnd(b, 100)
-}
-
-func BenchmarkNetHTTPClientGetEndToEnd1000(b *testing.B) {
-	benchmarkNetHTTPClientGetEndToEnd(b, 1000)
 }
 
 func benchmarkNetHTTPClientGetEndToEnd(b *testing.B, parallelism int) {
