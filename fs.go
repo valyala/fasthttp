@@ -212,7 +212,6 @@ type fsHandler struct {
 
 	cache           map[string]*fsFile
 	compressedCache map[string]*fsFile
-	pendingFiles    []*fsFile
 	cacheLock       sync.Mutex
 
 	smallFileReaderPool sync.Pool
