@@ -7,6 +7,7 @@ import (
 	"html"
 	"io"
 	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -836,8 +837,17 @@ func (h *fsHandler) newFSFile(f *os.File, fileInfo os.FileInfo, compressed bool)
 		return nil, fmt.Errorf("too big file: %d bytes", n)
 	}
 
+	// detect content-type
 	ext := fileExtension(fileInfo.Name(), compressed)
 	contentType := mime.TypeByExtension(ext)
+	if len(contentType) == 0 {
+		data := make([]byte, 512)
+		n, err := f.ReadAt(data, 0)
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("cannot read header of the file %q: %s", f.Name(), err)
+		}
+		contentType = http.DetectContentType(data[:n])
+	}
 
 	lastModified := fileInfo.ModTime()
 	ff := &fsFile{
