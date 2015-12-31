@@ -1204,7 +1204,7 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 		h.rawHeadersParsed = true
 	} else {
 		var rawHeaders []byte
-		rawHeaders, n, err = readRawHeaders(h.rawHeaders, buf[m:])
+		rawHeaders, n, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
 		if err != nil {
 			return 0, err
 		}
@@ -1308,7 +1308,6 @@ func peekRawHeader(buf, key []byte) []byte {
 }
 
 func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
-	dst = dst[:0]
 	n := bytes.IndexByte(buf, '\n')
 	if n < 0 {
 		return nil, 0, errNeedMore
