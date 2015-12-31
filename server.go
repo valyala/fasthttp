@@ -829,6 +829,9 @@ func (ctx *RequestCtx) Logger() Logger {
 //
 // TimeoutError MUST be called before returning from RequestHandler if there are
 // references to ctx and/or its members in other goroutines remain.
+//
+// Usage of this function is discouraged. Prefer eliminating ctx references
+// from pending goroutines instead of using this function.
 func (ctx *RequestCtx) TimeoutError(msg string) {
 	ctx.TimeoutErrorWithCode(msg, StatusRequestTimeout)
 }
@@ -840,6 +843,9 @@ func (ctx *RequestCtx) TimeoutError(msg string) {
 //
 // TimeoutErrorWithCode MUST be called before returning from RequestHandler
 // if there are references to ctx and/or its members in other goroutines remain.
+//
+// Usage of this function is discouraged. Prefer eliminating ctx references
+// from pending goroutines instead of using this function.
 func (ctx *RequestCtx) TimeoutErrorWithCode(msg string, statusCode int) {
 	var resp Response
 	resp.SetStatusCode(statusCode)
@@ -854,6 +860,9 @@ func (ctx *RequestCtx) TimeoutErrorWithCode(msg string, statusCode int) {
 //
 // TimeoutErrorWithResponse MUST be called before returning from RequestHandler
 // if there are references to ctx and/or its members in other goroutines remain.
+//
+// Usage of this function is discouraged. Prefer eliminating ctx references
+// from pending goroutines instead of using this function.
 func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 	respCopy := &Response{}
 	resp.CopyTo(respCopy)
