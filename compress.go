@@ -108,13 +108,26 @@ var gzipWriterPoolMap = func() map[int]*sync.Pool {
 	return m
 }()
 
-// AppendGzipBytes appends gzipped src to dst and returns the resulting dst.
-func AppendGzipBytes(dst, src []byte) []byte {
+// AppendGzipBytesLevel appends gzipped src to dst using the given
+// compression level and returns the resulting dst.
+//
+// Supported compression levels are:
+//
+//    * CompressNoCompression
+//    * CompressBestSpeed
+//    * CompressBestCompression
+//    * CompressDefaultCompression
+func AppendGzipBytesLevel(dst, src []byte, level int) []byte {
 	w := &byteSliceWriter{dst}
-	zw := acquireGzipWriter(w, CompressDefaultCompression)
+	zw := acquireGzipWriter(w, level)
 	zw.Write(src)
 	releaseGzipWriter(zw)
 	return w.b
+}
+
+// AppendGzipBytes appends gzipped src to dst and returns the resulting dst.
+func AppendGzipBytes(dst, src []byte) []byte {
+	return AppendGzipBytesLevel(dst, src, CompressDefaultCompression)
 }
 
 // AppendGunzipBytes append gunzipped src to dst and returns the resulting dst.
