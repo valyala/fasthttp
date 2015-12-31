@@ -10,6 +10,37 @@ import (
 	"testing"
 )
 
+func TestRequestReadGzippedBody(t *testing.T) {
+	var r Request
+
+	bodyOriginal := "foo bar baz compress me better!"
+	body := AppendGzipBytes(nil, []byte(bodyOriginal))
+	s := fmt.Sprintf("POST /foobar HTTP/1.1\r\nContent-Type: foo/bar\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s",
+		len(body), body)
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := r.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if string(r.Header.Peek("Content-Encoding")) != "gzip" {
+		t.Fatalf("unexpected content-encoding: %q. Expecting %q", r.Header.Peek("Content-Encoding"))
+	}
+	if r.Header.ContentLength() != len(body) {
+		t.Fatalf("unexpected content-length: %d. Expecting %d", r.Header.ContentLength(), len(body))
+	}
+	if string(r.Body()) != string(body) {
+		t.Fatalf("unexpected body: %q. Expecting %q", r.Body(), body)
+	}
+
+	bodyGunzipped, err := AppendGunzipBytes(nil, r.Body())
+	if err != nil {
+		t.Fatalf("unexpected error when uncompressing data: %s", err)
+	}
+	if string(bodyGunzipped) != bodyOriginal {
+		t.Fatalf("unexpected uncompressed body %q. Expecting %q", bodyGunzipped, bodyOriginal)
+	}
+}
+
 func TestRequestReadPostNoBody(t *testing.T) {
 	var r Request
 
@@ -27,6 +58,9 @@ func TestRequestReadPostNoBody(t *testing.T) {
 	}
 	if len(r.Body()) != 0 {
 		t.Fatalf("unexpected body found %q. Expecting empty body", r.Body())
+	}
+	if r.Header.ContentLength() != 0 {
+		t.Fatalf("unexpected content-length: %d. Expecting 0", r.Header.ContentLength())
 	}
 
 	tail, err := ioutil.ReadAll(br)
