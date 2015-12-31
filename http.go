@@ -34,7 +34,8 @@ type Request struct {
 	postArgs       Args
 	parsedPostArgs bool
 
-	multipartForm *multipart.Form
+	multipartForm         *multipart.Form
+	multipartFormBoundary string
 }
 
 // Response represents HTTP response.
@@ -272,31 +273,43 @@ func (resp *Response) ResetBody() {
 
 // Body returns request body.
 func (req *Request) Body() []byte {
+	if req.multipartForm != nil && len(req.body) == 0 {
+		body, err := marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
+		if err != nil {
+			return []byte(err.Error())
+		}
+		return body
+	}
 	return req.body
 }
 
 // AppendBody appends p to request body.
 func (req *Request) AppendBody(p []byte) {
+	req.RemoveMultipartFormFiles()
 	req.body = append(req.body, p...)
 }
 
 // AppendBodyString appends s to request body.
 func (req *Request) AppendBodyString(s string) {
+	req.RemoveMultipartFormFiles()
 	req.body = append(req.body, s...)
 }
 
 // SetBody sets request body.
 func (req *Request) SetBody(body []byte) {
+	req.RemoveMultipartFormFiles()
 	req.body = append(req.body[:0], body...)
 }
 
 // SetBodyString sets request body.
 func (req *Request) SetBodyString(body string) {
+	req.RemoveMultipartFormFiles()
 	req.body = append(req.body[:0], body...)
 }
 
 // ResetBody resets request body.
 func (req *Request) ResetBody() {
+	req.RemoveMultipartFormFiles()
 	req.body = req.body[:0]
 }
 
@@ -304,7 +317,7 @@ func (req *Request) ResetBody() {
 func (req *Request) CopyTo(dst *Request) {
 	dst.Reset()
 	req.Header.CopyTo(&dst.Header)
-	dst.body = append(dst.body[:0], req.body...)
+	dst.body = append(dst.body[:0], req.Body()...)
 
 	req.uri.CopyTo(&dst.uri)
 	dst.parsedURI = req.parsedURI
@@ -367,18 +380,21 @@ var ErrNoMultipartForm = errors.New("request has no multipart/form-data Content-
 
 // MultipartForm returns requests's multipart form.
 //
-// Returns ErrNoMultipartForm if request's content-type
+// Returns ErrNoMultipartForm if request's Content-Type
 // isn't 'multipart/form-data'.
+//
+// RemoveMultipartFormFiles must be called after returned multipart form
+// is processed.
 func (req *Request) MultipartForm() (*multipart.Form, error) {
 	if req.multipartForm != nil {
 		return req.multipartForm, nil
 	}
 
-	boundary := req.Header.MultipartFormBoundary()
-	if len(boundary) == 0 {
+	req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
+	if len(req.multipartFormBoundary) == 0 {
 		return nil, ErrNoMultipartForm
 	}
-	f, err := readMultipartFormBody(bytes.NewReader(req.body), boundary, 0, len(req.body))
+	f, err := readMultipartForm(bytes.NewReader(req.body), req.multipartFormBoundary, 0, len(req.body))
 	if err != nil {
 		return nil, err
 	}
@@ -386,7 +402,57 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 	return f, nil
 }
 
-func readMultipartFormBody(r io.Reader, boundary []byte, maxBodySize, maxInMemoryFileSize int) (*multipart.Form, error) {
+func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
+	// Do not care about memory allocations here, since multipart
+	// form processing is slooow.
+	var buf bytes.Buffer
+
+	if len(boundary) == 0 {
+		panic("BUG: form boundary cannot be empty")
+	}
+
+	mw := multipart.NewWriter(&buf)
+	if err := mw.SetBoundary(boundary); err != nil {
+		return nil, fmt.Errorf("cannot use form boundary %q: %s", boundary, err)
+	}
+
+	// marshal values
+	for k, vv := range f.Value {
+		for _, v := range vv {
+			if err := mw.WriteField(k, v); err != nil {
+				return nil, fmt.Errorf("cannot write form field %q value %q: %s", k, v, err)
+			}
+		}
+	}
+
+	// marshal files
+	for k, fvv := range f.File {
+		for _, fv := range fvv {
+			vw, err := mw.CreateFormFile(k, fv.Filename)
+			if err != nil {
+				return nil, fmt.Errorf("cannot create form file %q (%q): %s", k, fv.Filename, err)
+			}
+			fh, err := fv.Open()
+			if err != nil {
+				return nil, fmt.Errorf("cannot open form file %q (%q): %s", k, fv.Filename, err)
+			}
+			if _, err = io.Copy(vw, fh); err != nil {
+				return nil, fmt.Errorf("error when copying form file %q (%q): %s", k, fv.Filename, err)
+			}
+			if err = fh.Close(); err != nil {
+				return nil, fmt.Errorf("cannot close form file %q (%q): %s", k, fv.Filename, err)
+			}
+		}
+	}
+
+	if err := mw.Close(); err != nil {
+		return nil, fmt.Errorf("error when closing multipart form writer: %s", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+func readMultipartForm(r io.Reader, boundary string, maxBodySize, maxInMemoryFileSize int) (*multipart.Form, error) {
 	// Do not care about memory allocations here, since they are tiny
 	// compared to multipart data (aka multi-MB files) usually sent
 	// in multipart/form-data requests.
@@ -394,7 +460,7 @@ func readMultipartFormBody(r io.Reader, boundary []byte, maxBodySize, maxInMemor
 	if maxBodySize > 0 {
 		r = io.LimitReader(r, int64(maxBodySize))
 	}
-	mr := multipart.NewReader(r, string(boundary))
+	mr := multipart.NewReader(r, boundary)
 	f, err := mr.ReadForm(int64(maxInMemoryFileSize))
 	if err != nil {
 		return nil, fmt.Errorf("cannot read multipart/form-data body: %s", err)
@@ -426,6 +492,7 @@ func (req *Request) RemoveMultipartFormFiles() {
 		req.multipartForm.RemoveAll()
 		req.multipartForm = nil
 	}
+	req.multipartFormBoundary = ""
 }
 
 // Reset clears response contents.
@@ -533,9 +600,9 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
 		// Pre-read multipart form data of known length.
 		// This way we limit memory usage for large file uploads, since their contents
 		// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-		boundary := req.Header.MultipartFormBoundary()
-		if len(boundary) > 0 {
-			req.multipartForm, err = readMultipartFormBody(r, boundary, maxBodySize, defaultMaxInMemoryFileSize)
+		req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
+		if len(req.multipartFormBoundary) > 0 {
+			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, maxBodySize, defaultMaxInMemoryFileSize)
 			if err != nil {
 				req.Reset()
 			}
@@ -618,15 +685,25 @@ func (req *Request) Write(w *bufio.Writer) error {
 		req.Header.SetHostBytes(host)
 		req.Header.SetRequestURIBytes(uri.RequestURI())
 	}
-	req.Header.SetContentLength(len(req.body))
-	err := req.Header.Write(w)
-	if err != nil {
+
+	body := req.body
+	var err error
+	if req.multipartForm != nil && len(req.body) == 0 {
+		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
+		if err != nil {
+			return fmt.Errorf("error when marshaling multipart form: %s", err)
+		}
+		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
+	}
+
+	req.Header.SetContentLength(len(body))
+	if err = req.Header.Write(w); err != nil {
 		return err
 	}
 	if !req.Header.noBody() {
-		_, err = w.Write(req.body)
-	} else if len(req.body) > 0 {
-		return fmt.Errorf("Non-zero body for non-POST request. body=%q", req.body)
+		_, err = w.Write(body)
+	} else if len(body) > 0 {
+		return fmt.Errorf("Non-zero body for non-POST request. body=%q", body)
 	}
 	return err
 }
