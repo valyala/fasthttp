@@ -108,6 +108,50 @@ var gzipWriterPoolMap = func() map[int]*sync.Pool {
 	return m
 }()
 
+// AppendGzipBytes appends gzipped src to dst and returns the resulting dst.
+func AppendGzipBytes(dst, src []byte) []byte {
+	w := &byteSliceWriter{dst}
+	zw := acquireGzipWriter(w, CompressDefaultCompression)
+	zw.Write(src)
+	releaseGzipWriter(zw)
+	return w.b
+}
+
+// AppendGunzipBytes append gunzipped src to dst and returns the resulting dst.
+func AppendGunzipBytes(dst, src []byte) ([]byte, error) {
+	r := &byteSliceReader{src}
+	zr, err := acquireGzipReader(r)
+	if err != nil {
+		return dst, err
+	}
+	w := &byteSliceWriter{dst}
+	_, err = io.Copy(w, zr)
+	releaseGzipReader(zr)
+	return w.b, err
+}
+
+type byteSliceWriter struct {
+	b []byte
+}
+
+func (w *byteSliceWriter) Write(p []byte) (int, error) {
+	w.b = append(w.b, p...)
+	return len(p), nil
+}
+
+type byteSliceReader struct {
+	b []byte
+}
+
+func (r *byteSliceReader) Read(p []byte) (int, error) {
+	if len(r.b) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, r.b)
+	r.b = r.b[n:]
+	return n, nil
+}
+
 func acquireFlateWriter(w io.Writer, level int) *flateWriter {
 	p := flateWriterPoolMap[level]
 	if p == nil {

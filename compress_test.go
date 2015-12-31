@@ -6,6 +6,32 @@ import (
 	"testing"
 )
 
+func TestGzipBytes(t *testing.T) {
+	testGzipBytes(t, "")
+	testGzipBytes(t, "foobar")
+	testGzipBytes(t, "выфаодлодл одлфываыв sd2 k34")
+}
+
+func testGzipBytes(t *testing.T, s string) {
+	prefix := []byte("foobar")
+	gzippedS := AppendGzipBytes(prefix, []byte(s))
+	if !bytes.Equal(gzippedS[:len(prefix)], prefix) {
+		t.Fatalf("unexpected prefix when compressing %q: %q. Expecting %q", s, gzippedS[:len(prefix)], prefix)
+	}
+
+	gunzippedS, err := AppendGunzipBytes(prefix, gzippedS[len(prefix):])
+	if err != nil {
+		t.Fatalf("unexpected error when uncompressing %q: %s", s, err)
+	}
+	if !bytes.Equal(gunzippedS[:len(prefix)], prefix) {
+		t.Fatalf("unexpected prefix when uncompressing %q: %q. Expecting %q", s, gunzippedS[:len(prefix)], prefix)
+	}
+	gunzippedS = gunzippedS[len(prefix):]
+	if string(gunzippedS) != s {
+		t.Fatalf("unexpected uncompressed string %q. Expecting %q", gunzippedS, s)
+	}
+}
+
 func TestGzipCompress(t *testing.T) {
 	testGzipCompress(t, "")
 	testGzipCompress(t, "foobar")
