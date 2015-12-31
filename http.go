@@ -543,6 +543,15 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
 		}
 	}
 
+	if contentLength == -2 {
+		// identity body has no sense for http requests, since
+		// the end of body is determined by connection close.
+		// So just ignore request body for requests without
+		// 'Content-Length' and 'Transfer-Encoding' headers.
+		req.Header.SetContentLength(0)
+		return nil
+	}
+
 	req.body, err = readBody(r, contentLength, maxBodySize, req.body)
 	if err != nil {
 		req.Reset()

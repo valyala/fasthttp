@@ -10,6 +10,34 @@ import (
 	"testing"
 )
 
+func TestRequestReadPostNoBody(t *testing.T) {
+	var r Request
+
+	s := "POST /foo/bar HTTP/1.1\r\nContent-Type: aaa/bbb\r\n\r\naaaa"
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := r.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if string(r.Header.RequestURI()) != "/foo/bar" {
+		t.Fatalf("unexpected request uri %q. Expecting %q", r.Header.RequestURI(), "/foo/bar")
+	}
+	if string(r.Header.ContentType()) != "aaa/bbb" {
+		t.Fatalf("unexpected content-type %q. Expecting %q", r.Header.ContentType(), "aaa/bbb")
+	}
+	if len(r.Body()) != 0 {
+		t.Fatalf("unexpected body found %q. Expecting empty body", r.Body())
+	}
+
+	tail, err := ioutil.ReadAll(br)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if string(tail) != "aaaa" {
+		t.Fatalf("unexpected tail %q. Expecting %q", tail, "aaaa")
+	}
+}
+
 func TestRequestContinueReadBody(t *testing.T) {
 	s := "PUT /foo/bar HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: foo/bar\r\n\r\nabcdef4343"
 	br := bufio.NewReader(bytes.NewBufferString(s))
