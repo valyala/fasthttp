@@ -49,6 +49,13 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 
 	// boundary after other content-type params
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data;   foo=bar;   boundary=--aaabb  \r\n\r\n", "--aaabb")
+
+	var h RequestHeader
+	h.SetMultipartFormBoundary("foobarbaz")
+	b := h.MultipartFormBoundary()
+	if string(b) != "foobarbaz" {
+		t.Fatalf("unexpected boundary %q. Expecting %q", b, "foobarbaz")
+	}
 }
 
 func testRequestMultipartFormBoundary(t *testing.T, s, boundary string) {
