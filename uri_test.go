@@ -5,6 +5,23 @@ import (
 	"testing"
 )
 
+func TestLastPathSegment(t *testing.T) {
+	testLastPathSegment(t, "", "")
+	testLastPathSegment(t, "/", "")
+	testLastPathSegment(t, "/foo/bar/", "")
+	testLastPathSegment(t, "/foobar.js", "foobar.js")
+	testLastPathSegment(t, "/foo/bar/baz.html", "baz.html")
+}
+
+func testLastPathSegment(t *testing.T, path, expectedSegment string) {
+	var u URI
+	u.SetPath(path)
+	segment := u.LastPathSegment()
+	if string(segment) != expectedSegment {
+		t.Fatalf("unexpected last path segment for path %q: %q. Expecting %q", path, segment, expectedSegment)
+	}
+}
+
 func TestURIPathEscape(t *testing.T) {
 	testURIPathEscape(t, "/foo/bar", "/foo/bar")
 	testURIPathEscape(t, "/f_o-o=b:ar,b.c&q", "/f_o-o=b:ar,b.c&q")

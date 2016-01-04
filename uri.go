@@ -305,6 +305,22 @@ func (x *URI) RequestURI() []byte {
 	return x.requestURI
 }
 
+// LastPathSegment returns the last part of uri path after '/'.
+//
+// Examples:
+//
+//    * For /foo/bar/baz.html path returns baz.html.
+//    * For /foo/bar/ returns empty byte slice.
+//    * For /foobar.js returns foobar.js.
+func (x *URI) LastPathSegment() []byte {
+	path := x.Path()
+	n := bytes.LastIndexByte(path, '/')
+	if n < 0 {
+		return path
+	}
+	return path[n+1:]
+}
+
 // Update updates uri.
 //
 // The following newURI types are accepted:

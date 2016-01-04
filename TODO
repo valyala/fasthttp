@@ -1,4 +1,3 @@
-- Add URI.Base
 - Skip Content-Type for empty responses.
 - Add WriteGzip, WriteGunzip
 - Do not parse multipart forms if content-encoding is grip or deflate.
