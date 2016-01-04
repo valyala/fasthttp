@@ -1,5 +1,3 @@
-- Add WriteGzip, WriteGunzip
-
 - SessionClient with referer and cookies support.
 - Load balancing client for multiple upstream hosts.
 - Client with requests' pipelining support.

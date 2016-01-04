@@ -119,10 +119,30 @@ var gzipWriterPoolMap = func() map[int]*sync.Pool {
 //    * CompressDefaultCompression
 func AppendGzipBytesLevel(dst, src []byte, level int) []byte {
 	w := &byteSliceWriter{dst}
-	zw := acquireGzipWriter(w, level)
-	zw.Write(src)
-	releaseGzipWriter(zw)
+	WriteGzipLevel(w, src, level)
 	return w.b
+}
+
+// WriteGzip writes gzipped p to w using the given compression level
+// and returns the number of compressed bytes written to w.
+//
+// Supported compression levels are:
+//
+//    * CompressNoCompression
+//    * CompressBestSpeed
+//    * CompressBestCompression
+//    * CompressDefaultCompression
+func WriteGzipLevel(w io.Writer, p []byte, level int) (int, error) {
+	zw := acquireGzipWriter(w, level)
+	n, err := zw.Write(p)
+	releaseGzipWriter(zw)
+	return n, err
+}
+
+// WriteGzipLevel writes gzipped p to w and returns the number of compressed
+// bytes written to w.
+func WriteGzip(w io.Writer, p []byte) (int, error) {
+	return WriteGzipLevel(w, p, CompressDefaultCompression)
 }
 
 // AppendGzipBytes appends gzipped src to dst and returns the resulting dst.
@@ -130,16 +150,27 @@ func AppendGzipBytes(dst, src []byte) []byte {
 	return AppendGzipBytesLevel(dst, src, CompressDefaultCompression)
 }
 
-// AppendGunzipBytes append gunzipped src to dst and returns the resulting dst.
-func AppendGunzipBytes(dst, src []byte) ([]byte, error) {
-	r := &byteSliceReader{src}
+// WriteGunzip writes ungzipped p to w and returns the number of uncompressed
+// bytes written to w.
+func WriteGunzip(w io.Writer, p []byte) (int, error) {
+	r := &byteSliceReader{p}
 	zr, err := acquireGzipReader(r)
 	if err != nil {
-		return dst, err
+		return 0, err
 	}
-	w := &byteSliceWriter{dst}
-	_, err = io.Copy(w, zr)
+	n, err := io.Copy(w, zr)
 	releaseGzipReader(zr)
+	nn := int(n)
+	if int64(nn) != n {
+		return 0, fmt.Errorf("too much data gunzipped: %d", n)
+	}
+	return nn, err
+}
+
+// AppendGunzipBytes append gunzipped src to dst and returns the resulting dst.
+func AppendGunzipBytes(dst, src []byte) ([]byte, error) {
+	w := &byteSliceWriter{dst}
+	_, err := WriteGunzip(w, src)
 	return w.b, err
 }
 
