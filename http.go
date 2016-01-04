@@ -394,7 +394,20 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 	if len(req.multipartFormBoundary) == 0 {
 		return nil, ErrNoMultipartForm
 	}
-	f, err := readMultipartForm(bytes.NewReader(req.body), req.multipartFormBoundary, 0, len(req.body))
+
+	ce := req.Header.peek(strContentEncoding)
+	body := req.body
+	if bytes.Equal(ce, strGzip) {
+		// Do not care about memory usage here.
+		var err error
+		if body, err = AppendGunzipBytes(nil, body); err != nil {
+			return nil, fmt.Errorf("cannot gunzip request body: %s", err)
+		}
+	} else if len(ce) > 0 {
+		return nil, fmt.Errorf("unsupported Content-Encoding: %q", ce)
+	}
+
+	f, err := readMultipartForm(bytes.NewReader(body), req.multipartFormBoundary, 0, len(body))
 	if err != nil {
 		return nil, err
 	}
@@ -601,7 +614,7 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
 		// This way we limit memory usage for large file uploads, since their contents
 		// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
 		req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-		if len(req.multipartFormBoundary) > 0 {
+		if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
 			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, maxBodySize, defaultMaxInMemoryFileSize)
 			if err != nil {
 				req.Reset()

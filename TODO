@@ -1,8 +1,4 @@
-- Skip Content-Type for empty responses.
 - Add WriteGzip, WriteGunzip
-- Do not parse multipart forms if content-encoding is grip or deflate.
-- Close multipart files during marshalling.
-
 
 - SessionClient with referer and cookies support.
 - Load balancing client for multiple upstream hosts.
