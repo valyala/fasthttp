@@ -3,8 +3,42 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"fmt"
+	"strings"
 	"testing"
 )
+
+func TestIssue28ResponseWithoutBodyNoContentType(t *testing.T) {
+	var r Response
+
+	// Empty response without content-type
+	s := r.String()
+	if strings.Contains(s, "Content-Type") {
+		t.Fatalf("unexpected Content-Type found in response header with empty body: %q", s)
+	}
+
+	// Explicitly set content-type
+	r.Header.SetContentType("foo/bar")
+	s = r.String()
+	if !strings.Contains(s, "Content-Type: foo/bar\r\n") {
+		t.Fatalf("missing explicitly set content-type for empty response: %q", s)
+	}
+
+	// Non-empty response.
+	r.Reset()
+	r.SetBodyString("foobar")
+	s = r.String()
+	if !strings.Contains(s, fmt.Sprintf("Content-Type: %s\r\n", defaultContentType)) {
+		t.Fatalf("missing default content-type for non-empty response: %q", s)
+	}
+
+	// Non-empty response with custom content-type.
+	r.Header.SetContentType("aaa/bbb")
+	s = r.String()
+	if !strings.Contains(s, "Content-Type: aaa/bbb\r\n") {
+		t.Fatalf("missing custom content-type: %q", s)
+	}
+}
 
 func TestIssue6RequestHeaderSetContentType(t *testing.T) {
 	testIssue6RequestHeaderSetContentType(t, "GET")
