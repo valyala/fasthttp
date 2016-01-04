@@ -938,7 +938,7 @@ func fsLastModified(path string) (time.Time, error) {
 }
 
 func fsModTime(t time.Time) time.Time {
-	return t.In(gmtLocation).Truncate(time.Second)
+	return t.In(time.UTC).Truncate(time.Second)
 }
 
 var (

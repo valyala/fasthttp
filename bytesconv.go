@@ -12,14 +12,6 @@ import (
 	"unsafe"
 )
 
-var gmtLocation = func() *time.Location {
-	x, err := time.LoadLocation("GMT")
-	if err != nil {
-		panic(fmt.Sprintf("cannot load GMT location: %s", err))
-	}
-	return x
-}()
-
 // AppendIPv4 appends string representation of the given ip v4 to dst
 // and returns the extended dst.
 func AppendIPv4(dst []byte, ip net.IP) []byte {
@@ -78,7 +70,9 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 // AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
 // to dst and returns the extended dst.
 func AppendHTTPDate(dst []byte, date time.Time) []byte {
-	return date.In(gmtLocation).AppendFormat(dst, time.RFC1123)
+	dst = date.In(time.UTC).AppendFormat(dst, time.RFC1123)
+	copy(dst[len(dst)-3:], strGMT)
+	return dst
 }
 
 // ParseHTTPDate parses HTTP-compliant (RFC1123) date.

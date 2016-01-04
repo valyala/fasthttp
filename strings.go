@@ -18,6 +18,7 @@ var (
 	strHTTP11           = []byte("HTTP/1.1")
 	strColonSlashSlash  = []byte("://")
 	strColonSpace       = []byte(": ")
+	strGMT              = []byte("GMT")
 
 	strResponseContinue = []byte("HTTP/1.1 100 Continue\r\n\r\n")
 
