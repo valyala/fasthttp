@@ -12,6 +12,28 @@ import (
 	"time"
 )
 
+func TestRequestCtxUserValue(t *testing.T) {
+	var ctx RequestCtx
+
+	for i := 0; i < 5; i++ {
+		k := fmt.Sprintf("key-%d", i)
+		ctx.SetUserValue(k, i)
+	}
+	for i := 5; i < 10; i++ {
+		k := fmt.Sprintf("key-%d", i)
+		ctx.SetUserValueBytes([]byte(k), i)
+	}
+
+	for i := 0; i < 10; i++ {
+		k := fmt.Sprintf("key-%d", i)
+		v := ctx.UserValue(k)
+		n, ok := v.(int)
+		if !ok || n != i {
+			t.Fatalf("unexpected value obtained for key %q: %v. Expecting %d", k, v, i)
+		}
+	}
+}
+
 func TestServerExpect100Continue(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
