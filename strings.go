@@ -44,6 +44,9 @@ var (
 	strLocation         = []byte("Location")
 	strIfModifiedSince  = []byte("If-Modified-Since")
 	strLastModified     = []byte("Last-Modified")
+	strAcceptRanges     = []byte("Accept-Ranges")
+	strRange            = []byte("Range")
+	strContentRange     = []byte("Content-Range")
 
 	strCookieExpires = []byte("expires")
 	strCookieDomain  = []byte("domain")
@@ -61,4 +64,5 @@ var (
 	strPostArgsContentType = []byte("application/x-www-form-urlencoded")
 	strMultipartFormData   = []byte("multipart/form-data")
 	strBoundary            = []byte("boundary")
+	strBytes               = []byte("bytes")
 )

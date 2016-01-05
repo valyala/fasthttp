@@ -66,6 +66,46 @@ type RequestHeader struct {
 	rawHeadersParsed bool
 }
 
+// SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
+// header.
+func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
+	b := h.bufKV.value
+	b = append(b, strBytes...)
+	b = append(b, ' ')
+	b = AppendUint(b, startPos)
+	b = append(b, '-')
+	b = AppendUint(b, endPos)
+	b = append(b, '/')
+	b = AppendUint(b, contentLength)
+	h.bufKV.value = b
+
+	h.SetCanonical(strContentRange, h.bufKV.value)
+}
+
+// SetByteRange sets 'Range: bytes=startPos-endPos' header.
+//
+//     * If startPos is negative, then 'bytes=-startPos' value is set.
+//     * If endPos is negative, then 'bytes=startPos-' value is set.
+func (h *RequestHeader) SetByteRange(startPos, endPos int) {
+	h.parseRawHeaders()
+
+	b := h.bufKV.value
+	b = append(b, strBytes...)
+	b = append(b, '=')
+	if startPos >= 0 {
+		b = AppendUint(b, startPos)
+	} else {
+		endPos = -startPos
+	}
+	b = append(b, '-')
+	if endPos >= 0 {
+		b = AppendUint(b, endPos)
+	}
+	h.bufKV.value = b
+
+	h.SetCanonical(strRange, h.bufKV.value)
+}
+
 // StatusCode returns response status code.
 func (h *ResponseHeader) StatusCode() int {
 	return h.statusCode

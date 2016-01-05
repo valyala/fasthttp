@@ -10,6 +10,36 @@ import (
 	"testing"
 )
 
+func TestRequestSetByteRange(t *testing.T) {
+	testRequestSetByteRange(t, 0, 10, "bytes=0-10")
+	testRequestSetByteRange(t, 123, -1, "bytes=123-")
+	testRequestSetByteRange(t, -234, 58349, "bytes=-234")
+}
+
+func testRequestSetByteRange(t *testing.T, startPos, endPos int, expectedV string) {
+	var h RequestHeader
+	h.SetByteRange(startPos, endPos)
+	v := h.Peek("Range")
+	if string(v) != expectedV {
+		t.Fatalf("unexpected range: %q. Expecting %q. startPos=%d, endPos=%d", v, expectedV, startPos, endPos)
+	}
+}
+
+func TestResponseSetContentRange(t *testing.T) {
+	testResponseSetContentRange(t, 0, 0, 1, "bytes 0-0/1")
+	testResponseSetContentRange(t, 123, 456, 789, "bytes 123-456/789")
+}
+
+func testResponseSetContentRange(t *testing.T, startPos, endPos, contentLength int, expectedV string) {
+	var h ResponseHeader
+	h.SetContentRange(startPos, endPos, contentLength)
+	v := h.Peek("Content-Range")
+	if string(v) != expectedV {
+		t.Fatalf("unexpected content-range: %q. Expecting %q. startPos=%d, endPos=%d, contentLength=%d",
+			v, expectedV, startPos, endPos, contentLength)
+	}
+}
+
 func TestRequestHeaderHasAcceptEncoding(t *testing.T) {
 	testRequestHeaderHasAcceptEncoding(t, "", "gzip", false)
 	testRequestHeaderHasAcceptEncoding(t, "gzip", "sdhc", false)
