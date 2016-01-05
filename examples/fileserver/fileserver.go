@@ -10,6 +10,7 @@ import (
 
 var (
 	addr               = flag.String("addr", ":8080", "TCP address to listen to")
+	byteRange          = flag.Bool("byteRange", false, "Enables byte range requests if set to true")
 	compress           = flag.Bool("compress", false, "Enables transparent response compression if set to true")
 	dir                = flag.String("dir", "/usr/share/nginx/html", "Directory to serve static files from")
 	generateIndexPages = flag.Bool("generateIndexPages", true, "Whether to generate directory index pages")
@@ -23,6 +24,7 @@ func main() {
 		IndexNames:         []string{"index.html"},
 		GenerateIndexPages: *generateIndexPages,
 		Compress:           *compress,
+		AcceptByteRange:    *byteRange,
 	}
 	h := fs.NewRequestHandler()
 

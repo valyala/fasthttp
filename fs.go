@@ -435,10 +435,6 @@ func (r *fsSmallFileReader) Read(p []byte) (int, error) {
 }
 
 func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
-	if r.startPos != 0 {
-		panic("BUG: non-zero startPos! Read() mustn't be called before WriteTo()")
-	}
-
 	ff := r.ff
 
 	var n int
