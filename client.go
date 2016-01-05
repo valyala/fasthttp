@@ -847,6 +847,10 @@ func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error
 		}
 	}
 
+	if !req.Header.IsGet() && req.Header.IsHead() {
+		resp.SkipBody = true
+	}
+
 	br := c.acquireReader(conn)
 	if err = resp.ReadLimitBody(br, c.MaxResponseBodySize); err != nil {
 		if nilResp {

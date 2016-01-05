@@ -60,7 +60,23 @@ func TestServerHeadRequest(t *testing.T) {
 	}
 
 	br := bufio.NewReader(&rw.w)
-	verifyResponse(t, br, StatusOK, "aaa/bbb", "")
+	var resp Response
+	resp.SkipBody = true
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Unexpected error when parsing response: %s", err)
+	}
+	if resp.Header.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.Header.StatusCode(), StatusOK)
+	}
+	if len(resp.Body()) > 0 {
+		t.Fatalf("Unexpected non-zero body %q", resp.Body())
+	}
+	if resp.Header.ContentLength() != 24 {
+		t.Fatalf("unexpected content-length %d. Expecting %d", resp.Header.ContentLength(), 24)
+	}
+	if string(resp.Header.ContentType()) != "aaa/bbb" {
+		t.Fatalf("unexpected content-type %q. Expecting %q", resp.Header.ContentType(), "aaa/bbb")
+	}
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {

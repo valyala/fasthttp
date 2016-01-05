@@ -1174,7 +1174,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		s.Handler(ctx)
 
 		if !ctx.IsGet() && ctx.IsHead() {
-			ctx.ResetBody()
+			ctx.Response.SkipBody = true
 		}
 
 		hijackHandler = ctx.hijackHandler

@@ -10,6 +10,23 @@ import (
 	"testing"
 )
 
+func TestResponseSkipBody(t *testing.T) {
+	var r Response
+
+	r.SkipBody = true
+	r.SetBodyString("foobar")
+	s := r.String()
+	if strings.Contains(s, "\r\n\r\nfoobar") {
+		t.Fatalf("unexpected non-zero body in request %q", s)
+	}
+	if !strings.Contains(s, "Content-Length: 6\r\n") {
+		t.Fatalf("unexpected content-length in request %q", s)
+	}
+	if !strings.Contains(s, "Content-Type: ") {
+		t.Fatalf("unexpected content-type in request %q", s)
+	}
+}
+
 func TestRequestNoContentLength(t *testing.T) {
 	var r Request
 

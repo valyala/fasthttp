@@ -52,7 +52,10 @@ type Response struct {
 	Header ResponseHeader
 
 	// Response.Read() skips reading body if set to true.
-	// Use it for HEAD requests.
+	// Use it for reading HEAD responses.
+	//
+	// Response.Write() skips writing body if set to true.
+	// Use it for writing HEAD responses.
 	SkipBody bool
 
 	body []byte
@@ -857,16 +860,20 @@ func (resp *Response) Write(w *bufio.Writer) error {
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
-			if err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength)); err != nil {
-				return err
+			if !resp.SkipBody {
+				if err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength)); err != nil {
+					return err
+				}
 			}
 		} else {
 			resp.Header.SetContentLength(-1)
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
-			if err = writeBodyChunked(w, resp.bodyStream); err != nil {
-				return err
+			if !resp.SkipBody {
+				if err = writeBodyChunked(w, resp.bodyStream); err != nil {
+					return err
+				}
 			}
 		}
 		return resp.closeBodyStream()
@@ -876,7 +883,9 @@ func (resp *Response) Write(w *bufio.Writer) error {
 	if err = resp.Header.Write(w); err != nil {
 		return err
 	}
-	_, err = w.Write(resp.body)
+	if !resp.SkipBody {
+		_, err = w.Write(resp.body)
+	}
 	return err
 }
 
