@@ -69,7 +69,7 @@ type RequestHeader struct {
 // SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
 // header.
 func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
-	b := h.bufKV.value
+	b := h.bufKV.value[:0]
 	b = append(b, strBytes...)
 	b = append(b, ' ')
 	b = AppendUint(b, startPos)
@@ -89,7 +89,7 @@ func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
 func (h *RequestHeader) SetByteRange(startPos, endPos int) {
 	h.parseRawHeaders()
 
-	b := h.bufKV.value
+	b := h.bufKV.value[:0]
 	b = append(b, strBytes...)
 	b = append(b, '=')
 	if startPos >= 0 {
@@ -281,7 +281,7 @@ func (h *RequestHeader) SetContentTypeBytes(contentType []byte) {
 func (h *RequestHeader) SetMultipartFormBoundary(boundary string) {
 	h.parseRawHeaders()
 
-	b := h.bufKV.value
+	b := h.bufKV.value[:0]
 	b = append(b, strMultipartFormData...)
 	b = append(b, ';', ' ')
 	b = append(b, strBoundary...)
@@ -298,7 +298,7 @@ func (h *RequestHeader) SetMultipartFormBoundary(boundary string) {
 func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
 	h.parseRawHeaders()
 
-	b := h.bufKV.value
+	b := h.bufKV.value[:0]
 	b = append(b, strMultipartFormData...)
 	b = append(b, ';', ' ')
 	b = append(b, strBoundary...)
