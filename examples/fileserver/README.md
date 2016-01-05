@@ -2,6 +2,7 @@
 
 * Serves files from the given directory.
 * Supports transparent response compression.
+* Supports byte range responses.
 * Generates directory index pages.
 
 # How to build
