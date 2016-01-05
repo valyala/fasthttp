@@ -10,6 +10,25 @@ import (
 	"testing"
 )
 
+func TestRequestNoContentLength(t *testing.T) {
+	var r Request
+
+	r.Header.SetMethod("HEAD")
+	r.Header.SetHost("foobar")
+
+	s := r.String()
+	if strings.Contains(s, "Content-Length: ") {
+		t.Fatalf("unexpected content-length in HEAD request %q", s)
+	}
+
+	r.Header.SetMethod("POST")
+	fmt.Fprintf(r.BodyWriter(), "foobar body")
+	s = r.String()
+	if !strings.Contains(s, "Content-Length: ") {
+		t.Fatalf("missing content-length header in non-GET request %q", s)
+	}
+}
+
 func TestRequestReadGzippedBody(t *testing.T) {
 	var r Request
 
