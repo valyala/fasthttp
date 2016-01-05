@@ -869,7 +869,9 @@ func (resp *Response) Write(w *bufio.Writer) error {
 		return resp.closeBodyStream()
 	}
 
-	resp.Header.SetContentLength(len(resp.body))
+	if resp.Header.contentLength == 0 {
+		resp.Header.SetContentLength(len(resp.body))
+	}
 	if err = resp.Header.Write(w); err != nil {
 		return err
 	}
