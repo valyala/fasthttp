@@ -1173,6 +1173,10 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.Response.Reset()
 		s.Handler(ctx)
 
+		if !ctx.IsGet() && ctx.IsHead() {
+			ctx.ResetBody()
+		}
+
 		hijackHandler = ctx.hijackHandler
 		ctx.hijackHandler = nil
 

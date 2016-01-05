@@ -34,6 +34,43 @@ func TestRequestCtxUserValue(t *testing.T) {
 	}
 }
 
+func TestServerHeadRequest(t *testing.T) {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			fmt.Fprintf(ctx, "Request method is %q", ctx.Method())
+			ctx.SetContentType("aaa/bbb")
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("HEAD /foobar HTTP/1.1\r\nHost: aaa.com\r\n\r\n")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusOK, "aaa/bbb", "")
+
+	data, err := ioutil.ReadAll(br)
+	if err != nil {
+		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+	}
+	if len(data) > 0 {
+		t.Fatalf("unexpected remaining data %q", data)
+	}
+}
+
 func TestServerExpect100Continue(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
@@ -73,6 +110,14 @@ func TestServerExpect100Continue(t *testing.T) {
 
 	br := bufio.NewReader(&rw.w)
 	verifyResponse(t, br, StatusOK, string(defaultContentType), "foobar")
+
+	data, err := ioutil.ReadAll(br)
+	if err != nil {
+		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+	}
+	if len(data) > 0 {
+		t.Fatalf("unexpected remaining data %q", data)
+	}
 }
 
 func TestCompressHandler(t *testing.T) {
