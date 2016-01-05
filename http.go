@@ -416,24 +416,32 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 }
 
 func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := WriteMultipartForm(&buf, f, boundary); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// WriteMultipartForm writes the given multipart form f with the given
+// boundary to w.
+func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	// Do not care about memory allocations here, since multipart
 	// form processing is slooow.
-	var buf bytes.Buffer
-
 	if len(boundary) == 0 {
 		panic("BUG: form boundary cannot be empty")
 	}
 
-	mw := multipart.NewWriter(&buf)
+	mw := multipart.NewWriter(w)
 	if err := mw.SetBoundary(boundary); err != nil {
-		return nil, fmt.Errorf("cannot use form boundary %q: %s", boundary, err)
+		return fmt.Errorf("cannot use form boundary %q: %s", boundary, err)
 	}
 
 	// marshal values
 	for k, vv := range f.Value {
 		for _, v := range vv {
 			if err := mw.WriteField(k, v); err != nil {
-				return nil, fmt.Errorf("cannot write form field %q value %q: %s", k, v, err)
+				return fmt.Errorf("cannot write form field %q value %q: %s", k, v, err)
 			}
 		}
 	}
@@ -443,26 +451,26 @@ func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
 		for _, fv := range fvv {
 			vw, err := mw.CreateFormFile(k, fv.Filename)
 			if err != nil {
-				return nil, fmt.Errorf("cannot create form file %q (%q): %s", k, fv.Filename, err)
+				return fmt.Errorf("cannot create form file %q (%q): %s", k, fv.Filename, err)
 			}
 			fh, err := fv.Open()
 			if err != nil {
-				return nil, fmt.Errorf("cannot open form file %q (%q): %s", k, fv.Filename, err)
+				return fmt.Errorf("cannot open form file %q (%q): %s", k, fv.Filename, err)
 			}
 			if _, err = io.Copy(vw, fh); err != nil {
-				return nil, fmt.Errorf("error when copying form file %q (%q): %s", k, fv.Filename, err)
+				return fmt.Errorf("error when copying form file %q (%q): %s", k, fv.Filename, err)
 			}
 			if err = fh.Close(); err != nil {
-				return nil, fmt.Errorf("cannot close form file %q (%q): %s", k, fv.Filename, err)
+				return fmt.Errorf("cannot close form file %q (%q): %s", k, fv.Filename, err)
 			}
 		}
 	}
 
 	if err := mw.Close(); err != nil {
-		return nil, fmt.Errorf("error when closing multipart form writer: %s", err)
+		return fmt.Errorf("error when closing multipart form writer: %s", err)
 	}
 
-	return buf.Bytes(), nil
+	return nil
 }
 
 func readMultipartForm(r io.Reader, boundary string, maxBodySize, maxInMemoryFileSize int) (*multipart.Form, error) {
