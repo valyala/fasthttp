@@ -181,6 +181,9 @@ func (h *ResponseHeader) ContentLength() int {
 // -1 means Transfer-Encoding: chunked.
 // -2 means Transfer-Encoding: identity.
 func (h *ResponseHeader) SetContentLength(contentLength int) {
+	if h.mustSkipContentLength() {
+		return
+	}
 	h.contentLength = contentLength
 	if contentLength >= 0 {
 		h.contentLengthBytes = AppendUint(h.contentLengthBytes[:0], contentLength)
@@ -194,6 +197,20 @@ func (h *ResponseHeader) SetContentLength(contentLength int) {
 		}
 		h.h = setArg(h.h, strTransferEncoding, value)
 	}
+}
+
+func (h *ResponseHeader) mustSkipContentLength() bool {
+	// From http/1.1 specs:
+	// All 1xx (informational), 204 (no content), and 304 (not modified) responses MUST NOT include a message-body
+	statusCode := h.StatusCode()
+
+	// Fast path.
+	if statusCode < 100 || statusCode == StatusOK {
+		return false
+	}
+
+	// Slow path.
+	return statusCode == StatusNotModified || statusCode == StatusNoContent || statusCode < 200
 }
 
 // ContentLength returns Content-Length header value.

@@ -13,17 +13,47 @@ import (
 func TestResponseSkipBody(t *testing.T) {
 	var r Response
 
-	r.SkipBody = true
+	// set StatusNotModified
+	r.Header.SetStatusCode(StatusNotModified)
 	r.SetBodyString("foobar")
 	s := r.String()
 	if strings.Contains(s, "\r\n\r\nfoobar") {
-		t.Fatalf("unexpected non-zero body in request %q", s)
+		t.Fatalf("unexpected non-zero body in response %q", s)
+	}
+	if strings.Contains(s, "Content-Length: ") {
+		t.Fatalf("unexpected content-length in response %q", s)
+	}
+	if strings.Contains(s, "Content-Type: ") {
+		t.Fatalf("unexpected content-type in response %q", s)
+	}
+
+	// set StatusNoContent
+	r.Header.SetStatusCode(StatusNoContent)
+	r.SetBodyString("foobar")
+	s = r.String()
+	if strings.Contains(s, "\r\n\r\nfoobar") {
+		t.Fatalf("unexpected non-zero body in response %q", s)
+	}
+	if strings.Contains(s, "Content-Length: ") {
+		t.Fatalf("unexpected content-length in response %q", s)
+	}
+	if strings.Contains(s, "Content-Type: ") {
+		t.Fatalf("unexpected content-type in response %q", s)
+	}
+
+	// explicitly skip body
+	r.Header.SetStatusCode(StatusOK)
+	r.SkipBody = true
+	r.SetBodyString("foobar")
+	s = r.String()
+	if strings.Contains(s, "\r\n\r\nfoobar") {
+		t.Fatalf("unexpected non-zero body in response %q", s)
 	}
 	if !strings.Contains(s, "Content-Length: 6\r\n") {
-		t.Fatalf("unexpected content-length in request %q", s)
+		t.Fatalf("unexpected content-length in response %q", s)
 	}
 	if !strings.Contains(s, "Content-Type: ") {
-		t.Fatalf("unexpected content-type in request %q", s)
+		t.Fatalf("expecting content-type in response %q", s)
 	}
 }
 

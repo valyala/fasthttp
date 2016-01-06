@@ -674,7 +674,7 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		}
 	}
 
-	if !isSkipResponseBody(resp.Header.StatusCode()) && !resp.SkipBody {
+	if !resp.mustSkipBody() {
 		resp.body, err = readBody(r, resp.Header.ContentLength(), maxBodySize, resp.body)
 		if err != nil {
 			resp.Reset()
@@ -685,13 +685,8 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	return nil
 }
 
-func isSkipResponseBody(statusCode int) bool {
-	// From http/1.1 specs:
-	// All 1xx (informational), 204 (no content), and 304 (not modified) responses MUST NOT include a message-body
-	if statusCode >= 100 && statusCode < 200 {
-		return true
-	}
-	return statusCode == StatusNoContent || statusCode == StatusNotModified
+func (resp *Response) mustSkipBody() bool {
+	return resp.SkipBody || resp.Header.mustSkipContentLength()
 }
 
 var errRequestHostRequired = errors.New("Missing required Host header in request")
@@ -844,6 +839,8 @@ func (resp *Response) deflateBody(level int) error {
 // Write doesn't flush response to w for performance reasons.
 func (resp *Response) Write(w *bufio.Writer) error {
 	var err error
+	sendBody := !resp.mustSkipBody()
+
 	if resp.bodyStream != nil {
 		contentLength := resp.Header.ContentLength()
 		if contentLength < 0 {
@@ -860,7 +857,7 @@ func (resp *Response) Write(w *bufio.Writer) error {
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
-			if !resp.SkipBody {
+			if sendBody {
 				if err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength)); err != nil {
 					return err
 				}
@@ -870,7 +867,7 @@ func (resp *Response) Write(w *bufio.Writer) error {
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
-			if !resp.SkipBody {
+			if sendBody {
 				if err = writeBodyChunked(w, resp.bodyStream); err != nil {
 					return err
 				}
@@ -883,7 +880,7 @@ func (resp *Response) Write(w *bufio.Writer) error {
 	if err = resp.Header.Write(w); err != nil {
 		return err
 	}
-	if !resp.SkipBody {
+	if sendBody {
 		_, err = w.Write(resp.body)
 	}
 	return err
