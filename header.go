@@ -234,7 +234,7 @@ func (h *ResponseHeader) ContentType() []byte {
 
 // SetContentType sets Content-Type header value.
 func (h *ResponseHeader) SetContentType(contentType string) {
-	h.contentType = append(h.contentType[:0], contentType...)
+	h.contentType = []byte(contentType)
 }
 
 // SetContentTypeBytes sets Content-Type header value.
@@ -249,7 +249,7 @@ func (h *ResponseHeader) Server() []byte {
 
 // SetServer sets Server header value.
 func (h *ResponseHeader) SetServer(server string) {
-	h.server = append(h.server[:0], server...)
+	h.server = []byte(server)
 }
 
 // SetServerBytes sets Server header value.
@@ -266,7 +266,7 @@ func (h *RequestHeader) ContentType() []byte {
 // SetContentType sets Content-Type header value.
 func (h *RequestHeader) SetContentType(contentType string) {
 	h.parseRawHeaders()
-	h.contentType = append(h.contentType[:0], contentType...)
+	h.contentType = []byte(contentType)
 }
 
 // SetContentTypeBytes sets Content-Type header value.
@@ -370,7 +370,7 @@ func (h *RequestHeader) Host() []byte {
 // SetHost sets Host header value.
 func (h *RequestHeader) SetHost(host string) {
 	h.parseRawHeaders()
-	h.host = append(h.host[:0], host...)
+	h.host = []byte(host)
 }
 
 // SetHostBytes sets Host header value.
@@ -388,7 +388,7 @@ func (h *RequestHeader) UserAgent() []byte {
 // SetUserAgent sets User-Agent header value.
 func (h *RequestHeader) SetUserAgent(userAgent string) {
 	h.parseRawHeaders()
-	h.userAgent = append(h.userAgent[:0], userAgent...)
+	h.userAgent = []byte(userAgent)
 }
 
 // SetUserAgentBytes sets User-Agent header value.
@@ -422,7 +422,7 @@ func (h *RequestHeader) Method() []byte {
 
 // SetMethod sets HTTP request method.
 func (h *RequestHeader) SetMethod(method string) {
-	h.method = append(h.method, method...)
+	h.method = []byte(method)
 }
 
 // SetMethod sets HTTP request method.
@@ -443,7 +443,7 @@ func (h *RequestHeader) RequestURI() []byte {
 // RequestURI must be properly encoded.
 // Use URI.RequestURI for constructing proper RequestURI if unsure.
 func (h *RequestHeader) SetRequestURI(requestURI string) {
-	h.requestURI = append(h.requestURI[:0], requestURI...)
+	h.requestURI = []byte(requestURI)
 }
 
 // SetRequestURI sets RequestURI for the first HTTP request line.
