@@ -128,6 +128,9 @@ BenchmarkClientGetEndToEnd-4 	 1000000	      5954 ns/op	       0 B/op	       0 a
 
 Unfortunately, fasthttp doesn't provide API identical to net/http.
 See the [FAQ](#faq) for details.
+There is [net/http -> fasthttp handler converter](https://github.com/valyala/fasthttp/tree/master/fasthttpadaptor),
+but it is advisable writing fasthttp request handlers by hands for gaining
+all the fasthttp advantages (especially high performance :) ).
 
 Important points:
 
