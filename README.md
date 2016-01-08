@@ -200,7 +200,7 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
 ```
 
 * Fasthttp allows setting response headers and writing response body
-in arbitray order. There is no 'headers first, then body' restriction
+in arbitrary order. There is no 'headers first, then body' restriction
 like in net/http. The following code is valid for fasthttp:
 ```go
 requestHandler := func(ctx *fasthttp.RequestCtx) {
