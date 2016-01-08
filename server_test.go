@@ -235,7 +235,7 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 	rw := &readWriter{}
 	rw.r.WriteString("GET /foo HTTP/1.0\r\nConnection: keep-alive\r\nHost: google.com\r\n\r\n")
 	rw.r.WriteString("GET /bar HTTP/1.0\r\nHost: google.com\r\n\r\n")
-	rw.r.WriteString("GET /this/shouldnt/be/served HTTP/1.0\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("GET /must/be/ignored HTTP/1.0\r\nHost: google.com\r\n\r\n")
 
 	requestsServed := 0
 
@@ -666,7 +666,8 @@ func TestServerTimeoutErrorWithResponse(t *testing.T) {
 			ctx.TimeoutErrorWithResponse(&resp)
 
 			resp.SetStatusCode(456)
-			resp.SetBodyString("stolen ctx")
+			resp.ResetBody()
+			fmt.Fprintf(resp.BodyWriter(), "path=%s", ctx.Path())
 			resp.Header.SetContentType("foo/bar")
 			ctx.TimeoutErrorWithResponse(&resp)
 		},
@@ -674,7 +675,7 @@ func TestServerTimeoutErrorWithResponse(t *testing.T) {
 
 	rw := &readWriter{}
 	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
-	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("GET /bar HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	ch := make(chan error)
 	go func() {
@@ -691,7 +692,7 @@ func TestServerTimeoutErrorWithResponse(t *testing.T) {
 	}
 
 	br := bufio.NewReader(&rw.w)
-	verifyResponse(t, br, 456, "foo/bar", "stolen ctx")
+	verifyResponse(t, br, 456, "foo/bar", "path=/foo")
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
@@ -881,7 +882,7 @@ func TestServerConnectionClose(t *testing.T) {
 
 	rw := &readWriter{}
 	rw.r.WriteString("GET /foo1 HTTP/1.1\r\nHost: google.com\r\n\r\n")
-	rw.r.WriteString("GET /bar HTTP/1.1\r\nHost: aaa.com\r\n\r\n")
+	rw.r.WriteString("GET /must/be/ignored HTTP/1.1\r\nHost: aaa.com\r\n\r\n")
 
 	ch := make(chan error)
 	go func() {
@@ -898,7 +899,14 @@ func TestServerConnectionClose(t *testing.T) {
 	}
 
 	br := bufio.NewReader(&rw.w)
-	verifyResponse(t, br, 200, string(defaultContentType), "")
+	var resp Response
+
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Unexpected error when parsing response: %s", err)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatalf("expecting Connection: close header")
+	}
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
