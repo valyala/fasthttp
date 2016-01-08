@@ -33,6 +33,7 @@ func main() {
 
 	// Start HTTP server.
 	if len(*addr) > 0 {
+		log.Printf("Starting HTTP server on %q", *addr)
 		go func() {
 			if err := fasthttp.ListenAndServe(*addr, h); err != nil {
 				log.Fatalf("error in ListenAndServe: %s", err)
@@ -42,12 +43,15 @@ func main() {
 
 	// Start HTTPS server.
 	if len(*addrTLS) > 0 {
+		log.Printf("Starting HTTPS server on %q", *addrTLS)
 		go func() {
 			if err := fasthttp.ListenAndServeTLS(*addrTLS, *certFile, *keyFile, h); err != nil {
 				log.Fatalf("error in ListenAndServeTLS: %s", err)
 			}
 		}()
 	}
+
+	log.Printf("Serving files from directory %q", *dir)
 
 	// Wait forever.
 	select {}
