@@ -132,6 +132,14 @@ func (h *ResponseHeader) SetConnectionClose() {
 	h.connectionClose = true
 }
 
+// ResetConnectionClose clears 'Connection: close' header if it exists.
+func (h *ResponseHeader) ResetConnectionClose() {
+	if h.connectionClose {
+		h.connectionClose = false
+		h.h = delArg(h.h, strConnection)
+	}
+}
+
 // ConnectionClose returns true if 'Connection: close' header is set.
 func (h *RequestHeader) ConnectionClose() bool {
 	// h.parseRawHeaders() isn't called for performance reasons.
@@ -153,6 +161,15 @@ func (h *RequestHeader) ConnectionCloseReal() bool {
 func (h *RequestHeader) SetConnectionClose() {
 	// h.parseRawHeaders() isn't called for performance reasons.
 	h.connectionClose = true
+}
+
+// ResetConnectionClose clears 'Connection: close' header if it exists.
+func (h *RequestHeader) ResetConnectionClose() {
+	h.parseRawHeaders()
+	if h.connectionClose {
+		h.connectionClose = false
+		h.h = delArg(h.h, strConnection)
+	}
 }
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
@@ -772,6 +789,7 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 		if bytes.Equal(strClose, value) {
 			h.SetConnectionClose()
 		} else {
+			h.ResetConnectionClose()
 			h.h = setArg(h.h, key, value)
 		}
 	case bytes.Equal(strTransferEncoding, key):
@@ -855,6 +873,7 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 		if bytes.Equal(strClose, value) {
 			h.SetConnectionClose()
 		} else {
+			h.ResetConnectionClose()
 			h.h = setArg(h.h, key, value)
 		}
 	case bytes.Equal(strTransferEncoding, key):
@@ -1432,6 +1451,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			if bytes.Equal(s.value, strClose) {
 				h.connectionClose = true
 			} else {
+				h.connectionClose = false
 				h.h = appendArg(h.h, s.key, s.value)
 			}
 		default:
@@ -1490,6 +1510,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 			if bytes.Equal(s.value, strClose) {
 				h.connectionClose = true
 			} else {
+				h.connectionClose = false
 				h.h = appendArg(h.h, s.key, s.value)
 			}
 		default:
