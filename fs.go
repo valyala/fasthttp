@@ -822,7 +822,7 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 	return ff, nil
 }
 
-const fsMinCompressRatio = 0.9
+const fsMinCompressRatio = 0.8
 
 func (h *fsHandler) compressAndOpenFSFile(filePath string) (*fsFile, error) {
 	f, err := os.Open(filePath)
