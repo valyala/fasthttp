@@ -991,18 +991,37 @@ func (s *Server) ListenAndServeUNIX(addr string, mode os.FileMode) error {
 //
 // certFile and keyFile are paths to TLS certificate and key files.
 func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
+	}
+	lnTLS, err := newTLSListener(ln, certFile, keyFile)
+	if err != nil {
+		return err
+	}
+	return s.Serve(lnTLS)
+}
+
+// ServeTLS serves HTTPS requests from the given listener.
+//
+// certFile and keyFile are paths to TLS certificate and key files.
+func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
+	lnTLS, err := newTLSListener(ln, certFile, keyFile)
+	if err != nil {
+		return err
+	}
+	return s.Serve(lnTLS)
+}
+
+func newTLSListener(ln net.Listener, certFile, keyFile string) (net.Listener, error) {
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return nil, err
 	}
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
-	ln, err := tls.Listen("tcp", addr, tlsConfig)
-	if err != nil {
-		return err
-	}
-	return s.Serve(ln)
+	return tls.NewListener(ln, tlsConfig), nil
 }
 
 // Default maximum number of concurrent connections the Server may serve.
