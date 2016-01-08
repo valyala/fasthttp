@@ -523,6 +523,8 @@ func (ctx *RequestCtx) Host() []byte {
 // It doesn't return POST'ed arguments - use PostArge() for this.
 //
 // Returned arguments are valid until returning from RequestHandler.
+//
+// See also PostArgs, FormValue and FormFile.
 func (ctx *RequestCtx) QueryArgs() *Args {
 	return ctx.URI().QueryArgs()
 }
@@ -532,6 +534,8 @@ func (ctx *RequestCtx) QueryArgs() *Args {
 // It doesn't return query arguments from RequestURI - use QueryArgs for this.
 //
 // Returned arguments are valid until returning from RequestHandler.
+//
+// See also QueryArgs, FormValue and FormFile.
 func (ctx *RequestCtx) PostArgs() *Args {
 	return ctx.Request.PostArgs()
 }
@@ -545,9 +549,95 @@ func (ctx *RequestCtx) PostArgs() *Args {
 // returning from RequestHandler. Either move or copy uploaded files
 // into new place if you want retaining them.
 //
-// Returned form is valid until returning from RequestHandler.
+// Use SaveMultipartFile function for permanently saving uploaded file.
+//
+// The returned form is valid until returning from RequestHandler.
+//
+// See also FormFile and FormValue.
 func (ctx *RequestCtx) MultipartForm() (*multipart.Form, error) {
 	return ctx.Request.MultipartForm()
+}
+
+// FormFile returns uploaded file associated with the given multipart form key.
+//
+// The file is automatically deleted after returning from RequestHandler,
+// so either move or copy uploaded file into new place if you want retaining it.
+//
+// Use SaveMultipartFile function for permanently saving uploaded file.
+//
+// The returned file header is valid until returning from RequestHandler.
+func (ctx *RequestCtx) FormFile(key string) (*multipart.FileHeader, error) {
+	mf, err := ctx.MultipartForm()
+	if err != nil {
+		return nil, err
+	}
+	if mf.File == nil {
+		return nil, err
+	}
+	fhh := mf.File[key]
+	if fhh == nil {
+		return nil, ErrMissingFile
+	}
+	return fhh[0], nil
+}
+
+// ErrMissingFile may be returned from FormFile when the is no uploaded file
+// associated with the given multipart form key.
+var ErrMissingFile = errors.New("there is no uploaded file associated with the given key")
+
+// SaveMultipartFile saves multipart file fh under the given filename path.
+func SaveMultipartFile(fh *multipart.FileHeader, path string) error {
+	f, err := fh.Open()
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	if ff, ok := f.(*os.File); ok {
+		return os.Rename(ff.Name(), path)
+	}
+
+	ff, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer ff.Close()
+	_, err = io.Copy(ff, f)
+	return err
+}
+
+// FormValue returns form value associated with the given key.
+//
+// The value is searched in the following places:
+//
+//   * Query string.
+//   * POST or PUT body.
+//
+// There are more fine-grained methods for obtaining form values:
+//
+//   * QueryArgs for obtaining values from query string.
+//   * PostArgs for obtaining values from POST or PUT body.
+//   * MultipartForm for obtaining values from multipart form.
+//   * FormFile for obtaining uploaded files.
+//
+// The returned value is valid until returning from RequestHandler.
+func (ctx *RequestCtx) FormValue(key string) []byte {
+	v := ctx.QueryArgs().Peek(key)
+	if len(v) > 0 {
+		return v
+	}
+	v = ctx.PostArgs().Peek(key)
+	if len(v) > 0 {
+		return v
+	}
+	mf, err := ctx.MultipartForm()
+	if err == nil && mf.Value != nil {
+		vv := mf.Value[key]
+		if len(vv) > 0 {
+			return []byte(vv[0])
+		}
+	}
+	return nil
 }
 
 // IsGet returns true if request method is GET.

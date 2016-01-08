@@ -12,6 +12,29 @@ import (
 	"time"
 )
 
+func TestRequestCtxFormValue(t *testing.T) {
+	var ctx RequestCtx
+	var req Request
+	req.SetRequestURI("/foo/bar?baz=123&aaa=bbb")
+	req.SetBodyString("qqq=port&mmm=sddd")
+	req.Header.SetContentType("application/x-www-form-urlencoded")
+
+	ctx.Init(&req, nil, nil)
+
+	v := ctx.FormValue("baz")
+	if string(v) != "123" {
+		t.Fatalf("unexpected value %q. Expecting %q", v, "123")
+	}
+	v = ctx.FormValue("mmm")
+	if string(v) != "sddd" {
+		t.Fatalf("unexpected value %q. Expecting %q", v, "sddd")
+	}
+	v = ctx.FormValue("aaaasdfsdf")
+	if len(v) > 0 {
+		t.Fatalf("unexpected value for unknown key %q", v)
+	}
+}
+
 func TestRequestCtxUserValue(t *testing.T) {
 	var ctx RequestCtx
 
