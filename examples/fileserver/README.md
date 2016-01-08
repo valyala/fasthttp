@@ -4,6 +4,7 @@
 * Supports transparent response compression.
 * Supports byte range responses.
 * Generates directory index pages.
+* Supports TLS (aka SSL or HTTPS).
 
 # How to build
 
