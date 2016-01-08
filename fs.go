@@ -822,7 +822,10 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 	return ff, nil
 }
 
-const fsMinCompressRatio = 0.8
+const (
+	fsMinCompressRatio = 0.8
+	fsMaxCompressibleFileSize = 8*1024*1024
+)
 
 func (h *fsHandler) compressAndOpenFSFile(filePath string) (*fsFile, error) {
 	f, err := os.Open(filePath)
@@ -841,7 +844,9 @@ func (h *fsHandler) compressAndOpenFSFile(filePath string) (*fsFile, error) {
 		return nil, errDirIndexRequired
 	}
 
-	if strings.HasSuffix(filePath, FSCompressedFileSuffix) || !isFileCompressible(f, fsMinCompressRatio) {
+	if strings.HasSuffix(filePath, FSCompressedFileSuffix) ||
+		fileInfo.Size() > fsMaxCompressibleFileSize ||
+		!isFileCompressible(f, fsMinCompressRatio) {
 		return h.newFSFile(f, fileInfo, false)
 	}
 
