@@ -995,11 +995,7 @@ func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
 	if err != nil {
 		return err
 	}
-	lnTLS, err := newTLSListener(ln, certFile, keyFile)
-	if err != nil {
-		return err
-	}
-	return s.Serve(lnTLS)
+	return s.ServeTLS(ln, certFile, keyFile)
 }
 
 // ServeTLS serves HTTPS requests from the given listener.
@@ -1016,7 +1012,7 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 func newTLSListener(ln net.Listener, certFile, keyFile string) (net.Listener, error) {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %s", certFile, keyFile, err)
 	}
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
