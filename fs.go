@@ -823,8 +823,8 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 }
 
 const (
-	fsMinCompressRatio = 0.8
-	fsMaxCompressibleFileSize = 8*1024*1024
+	fsMinCompressRatio        = 0.8
+	fsMaxCompressibleFileSize = 8 * 1024 * 1024
 )
 
 func (h *fsHandler) compressAndOpenFSFile(filePath string) (*fsFile, error) {
