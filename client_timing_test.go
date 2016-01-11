@@ -105,6 +105,7 @@ func BenchmarkClientDoFastServer(b *testing.B) {
 		Dial: func(addr string) (net.Conn, error) {
 			return acquireFakeServerConn(s), nil
 		},
+		MaxConnsPerHost: runtime.GOMAXPROCS(-1),
 	}
 
 	nn := uint32(0)
@@ -134,6 +135,7 @@ func BenchmarkNetHTTPClientDoFastServer(b *testing.B) {
 			Dial: func(network, addr string) (net.Conn, error) {
 				return acquireFakeServerConn(s), nil
 			},
+			MaxIdleConnsPerHost: runtime.GOMAXPROCS(-1),
 		},
 	}
 
@@ -172,19 +174,19 @@ func nethttpEchoHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(r.RequestURI))
 }
 
-func BenchmarkClientGetEndToEnd1(b *testing.B) {
-	benchmarkClientGetEndToEnd(b, 1)
+func BenchmarkClientGetEndToEnd1TCP(b *testing.B) {
+	benchmarkClientGetEndToEndTCP(b, 1)
 }
 
-func BenchmarkClientGetEndToEnd10(b *testing.B) {
-	benchmarkClientGetEndToEnd(b, 10)
+func BenchmarkClientGetEndToEnd10TCP(b *testing.B) {
+	benchmarkClientGetEndToEndTCP(b, 10)
 }
 
-func BenchmarkClientGetEndToEnd100(b *testing.B) {
-	benchmarkClientGetEndToEnd(b, 100)
+func BenchmarkClientGetEndToEnd100TCP(b *testing.B) {
+	benchmarkClientGetEndToEndTCP(b, 100)
 }
 
-func benchmarkClientGetEndToEnd(b *testing.B, parallelism int) {
+func benchmarkClientGetEndToEndTCP(b *testing.B, parallelism int) {
 	addr := "127.0.0.1:8543"
 
 	ln, err := net.Listen("tcp4", addr)
@@ -232,19 +234,19 @@ func benchmarkClientGetEndToEnd(b *testing.B, parallelism int) {
 	}
 }
 
-func BenchmarkNetHTTPClientGetEndToEnd1(b *testing.B) {
-	benchmarkNetHTTPClientGetEndToEnd(b, 1)
+func BenchmarkNetHTTPClientGetEndToEnd1TCP(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndTCP(b, 1)
 }
 
-func BenchmarkNetHTTPClientGetEndToEnd10(b *testing.B) {
-	benchmarkNetHTTPClientGetEndToEnd(b, 10)
+func BenchmarkNetHTTPClientGetEndToEnd10TCP(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndTCP(b, 10)
 }
 
-func BenchmarkNetHTTPClientGetEndToEnd100(b *testing.B) {
-	benchmarkNetHTTPClientGetEndToEnd(b, 100)
+func BenchmarkNetHTTPClientGetEndToEnd100TCP(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndTCP(b, 100)
 }
 
-func benchmarkNetHTTPClientGetEndToEnd(b *testing.B, parallelism int) {
+func benchmarkNetHTTPClientGetEndToEndTCP(b *testing.B, parallelism int) {
 	addr := "127.0.0.1:8542"
 
 	ln, err := net.Listen("tcp4", addr)
@@ -261,12 +263,18 @@ func benchmarkNetHTTPClientGetEndToEnd(b *testing.B, parallelism int) {
 		close(ch)
 	}()
 
+	c := &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
+		},
+	}
+
 	requestURI := "/foo/bar?baz=123"
 	url := "http://" + addr + requestURI
 	b.SetParallelism(parallelism)
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			resp, err := http.Get(url)
+			resp, err := c.Get(url)
 			if err != nil {
 				b.Fatalf("unexpected error: %s", err)
 			}
@@ -290,4 +298,185 @@ func benchmarkNetHTTPClientGetEndToEnd(b *testing.B, parallelism int) {
 	case <-time.After(time.Second):
 		b.Fatalf("server wasn't stopped")
 	}
+}
+
+func BenchmarkClientGetEndToEnd1Inmemory(b *testing.B) {
+	benchmarkClientGetEndToEndInmemory(b, 1)
+}
+
+func BenchmarkClientGetEndToEnd10Inmemory(b *testing.B) {
+	benchmarkClientGetEndToEndInmemory(b, 10)
+}
+
+func BenchmarkClientGetEndToEnd100Inmemory(b *testing.B) {
+	benchmarkClientGetEndToEndInmemory(b, 100)
+}
+
+func BenchmarkClientGetEndToEnd1000Inmemory(b *testing.B) {
+	benchmarkClientGetEndToEndInmemory(b, 1000)
+}
+
+func benchmarkClientGetEndToEndInmemory(b *testing.B, parallelism int) {
+	ln := newInmemoryListener()
+
+	ch := make(chan struct{})
+	go func() {
+		if err := Serve(ln, fasthttpEchoHandler); err != nil {
+			b.Fatalf("error when serving requests: %s", err)
+		}
+		close(ch)
+	}()
+
+	c := &Client{
+		MaxConnsPerHost: runtime.GOMAXPROCS(-1) * parallelism,
+		Dial:            func(addr string) (net.Conn, error) { return ln.Dial("inmemory", addr) },
+	}
+
+	requestURI := "/foo/bar?baz=123"
+	url := "http://unused.host" + requestURI
+	b.SetParallelism(parallelism)
+	b.RunParallel(func(pb *testing.PB) {
+		var buf []byte
+		for pb.Next() {
+			statusCode, body, err := c.Get(buf, url)
+			if err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if statusCode != StatusOK {
+				b.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+			}
+			if string(body) != requestURI {
+				b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)
+			}
+			buf = body
+		}
+	})
+
+	ln.Close()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		b.Fatalf("server wasn't stopped")
+	}
+}
+
+func BenchmarkNetHTTPClientGetEndToEnd1Inmemory(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndInmemory(b, 1)
+}
+
+func BenchmarkNetHTTPClientGetEndToEnd10Inmemory(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndInmemory(b, 10)
+}
+
+func BenchmarkNetHTTPClientGetEndToEnd100Inmemory(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndInmemory(b, 100)
+}
+
+func BenchmarkNetHTTPClientGetEndToEnd1000Inmemory(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndInmemory(b, 1000)
+}
+
+func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
+	ln := newInmemoryListener()
+
+	ch := make(chan struct{})
+	go func() {
+		if err := http.Serve(ln, http.HandlerFunc(nethttpEchoHandler)); err != nil && !strings.Contains(
+			err.Error(), "use of closed network connection") {
+			b.Fatalf("error when serving requests: %s", err)
+		}
+		close(ch)
+	}()
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			Dial:                ln.Dial,
+			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
+		},
+	}
+
+	requestURI := "/foo/bar?baz=123"
+	url := "http://unused.host" + requestURI
+	b.SetParallelism(parallelism)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			resp, err := c.Get(url)
+			if err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
+			}
+			body, err := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				b.Fatalf("unexpected error when reading response body: %s", err)
+			}
+			if string(body) != requestURI {
+				b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)
+			}
+		}
+	})
+
+	ln.Close()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		b.Fatalf("server wasn't stopped")
+	}
+}
+
+type inmemoryListener struct {
+	lock   sync.Mutex
+	closed bool
+	conns  chan net.Conn
+}
+
+func newInmemoryListener() *inmemoryListener {
+	return &inmemoryListener{
+		conns: make(chan net.Conn),
+	}
+}
+
+func (ln *inmemoryListener) Accept() (net.Conn, error) {
+	c, ok := <-ln.conns
+	if !ok {
+		return nil, fmt.Errorf("inmemoryListener is already closed: use of closed network connection")
+	}
+	return c, nil
+}
+
+func (ln *inmemoryListener) Close() error {
+	ln.lock.Lock()
+	if !ln.closed {
+		close(ln.conns)
+		ln.closed = true
+	}
+	ln.lock.Unlock()
+	return nil
+}
+
+func (ln *inmemoryListener) Addr() net.Addr {
+	return &net.UnixAddr{
+		Name: "inmemoryListener",
+		Net:  "memory",
+	}
+}
+
+func (ln *inmemoryListener) Dial(network, addr string) (net.Conn, error) {
+	cConn, sConn := net.Pipe()
+	ln.lock.Lock()
+	if !ln.closed {
+		ln.conns <- sConn
+	} else {
+		sConn.Close()
+		cConn.Close()
+		cConn = nil
+	}
+	ln.lock.Unlock()
+
+	if cConn == nil {
+		return nil, fmt.Errorf("inmemoryListener is already closed")
+	}
+	return cConn, nil
 }
