@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 type fakeClientConn struct {
@@ -317,7 +319,7 @@ func BenchmarkClientGetEndToEnd1000Inmemory(b *testing.B) {
 }
 
 func benchmarkClientGetEndToEndInmemory(b *testing.B, parallelism int) {
-	ln := newInmemoryListener()
+	ln := fasthttputil.NewInmemoryListener()
 
 	ch := make(chan struct{})
 	go func() {
@@ -329,7 +331,7 @@ func benchmarkClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 
 	c := &Client{
 		MaxConnsPerHost: runtime.GOMAXPROCS(-1) * parallelism,
-		Dial:            func(addr string) (net.Conn, error) { return ln.Dial("inmemory", addr) },
+		Dial:            func(addr string) (net.Conn, error) { return ln.Dial() },
 	}
 
 	requestURI := "/foo/bar?baz=123"
@@ -377,7 +379,7 @@ func BenchmarkNetHTTPClientGetEndToEnd1000Inmemory(b *testing.B) {
 }
 
 func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
-	ln := newInmemoryListener()
+	ln := fasthttputil.NewInmemoryListener()
 
 	ch := make(chan struct{})
 	go func() {
@@ -390,7 +392,7 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial:                ln.Dial,
+			Dial:                func(_, _ string) { return ln.Dial() },
 			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
 		},
 	}
@@ -424,59 +426,4 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 	case <-time.After(time.Second):
 		b.Fatalf("server wasn't stopped")
 	}
-}
-
-type inmemoryListener struct {
-	lock   sync.Mutex
-	closed bool
-	conns  chan net.Conn
-}
-
-func newInmemoryListener() *inmemoryListener {
-	return &inmemoryListener{
-		conns: make(chan net.Conn),
-	}
-}
-
-func (ln *inmemoryListener) Accept() (net.Conn, error) {
-	c, ok := <-ln.conns
-	if !ok {
-		return nil, fmt.Errorf("inmemoryListener is already closed: use of closed network connection")
-	}
-	return c, nil
-}
-
-func (ln *inmemoryListener) Close() error {
-	ln.lock.Lock()
-	if !ln.closed {
-		close(ln.conns)
-		ln.closed = true
-	}
-	ln.lock.Unlock()
-	return nil
-}
-
-func (ln *inmemoryListener) Addr() net.Addr {
-	return &net.UnixAddr{
-		Name: "inmemoryListener",
-		Net:  "memory",
-	}
-}
-
-func (ln *inmemoryListener) Dial(network, addr string) (net.Conn, error) {
-	cConn, sConn := net.Pipe()
-	ln.lock.Lock()
-	if !ln.closed {
-		ln.conns <- sConn
-	} else {
-		sConn.Close()
-		cConn.Close()
-		cConn = nil
-	}
-	ln.lock.Unlock()
-
-	if cConn == nil {
-		return nil, fmt.Errorf("inmemoryListener is already closed")
-	}
-	return cConn, nil
 }
