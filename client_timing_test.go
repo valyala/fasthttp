@@ -392,7 +392,7 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial:                func(_, _ string) { return ln.Dial() },
+			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
 			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
 		},
 	}
