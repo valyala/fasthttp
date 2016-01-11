@@ -69,7 +69,7 @@ func Listen(network, addr string) (l net.Listener, err error) {
 		return nil, err
 	}
 
-	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, reusePort, 1); err != nil {
+	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, SO_REUSEPORT, 1); err != nil {
 		syscall.Close(fd)
 		return nil, &ErrNoReusePort{err}
 	}

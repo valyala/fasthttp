@@ -2,4 +2,4 @@
 
 package reuseport
 
-var reusePort = 0x0F
+const SO_REUSEPORT = 0x0F
