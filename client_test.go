@@ -10,7 +10,67 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/valyala/fasthttp/fasthttputil"
 )
+
+func TestHostClientMultipleAddrs(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Write(ctx.Host())
+			ctx.SetConnectionClose()
+		},
+	}
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	dialsCount := make(map[string]int)
+	c := &HostClient{
+		Addr: "foo,bar,baz",
+		Dial: func(addr string) (net.Conn, error) {
+			dialsCount[addr]++
+			return ln.Dial()
+		},
+	}
+
+	for i := 0; i < 9; i++ {
+		statusCode, body, err := c.Get(nil, "http://foobar/baz/aaa?bbb=ddd")
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if statusCode != StatusOK {
+			t.Fatalf("unexpected status code %d. Expecting %d", statusCode, StatusOK)
+		}
+		if string(body) != "foobar" {
+			t.Fatalf("unexpected body %q. Expecting %q", body, "foobar")
+		}
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if len(dialsCount) != 3 {
+		t.Fatalf("unexpected dialsCount size %d. Expecting 3", len(dialsCount))
+	}
+	for _, k := range []string{"foo", "bar", "baz"} {
+		if dialsCount[k] != 3 {
+			t.Fatalf("unexpected dialsCount for %q. Expecting 3", k)
+		}
+	}
+}
 
 func TestClientFollowRedirects(t *testing.T) {
 	addr := "127.0.0.1:55234"
