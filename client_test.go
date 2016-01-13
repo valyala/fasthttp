@@ -8,11 +8,68 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
+
+func TestHostClientMaxConnDuration(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	connectionCloseCount := uint32(0)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("abcd")
+			if ctx.Request.Header.ConnectionCloseReal() {
+				atomic.AddUint32(&connectionCloseCount, 1)
+			}
+		},
+	}
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConnDuration: 10 * time.Millisecond,
+	}
+
+	for i := 0; i < 5; i++ {
+		statusCode, body, err := c.Get(nil, "http://aaaa.com/bbb/cc")
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if statusCode != StatusOK {
+			t.Fatalf("unexpected status code %d. Expecting %d", statusCode, StatusOK)
+		}
+		if string(body) != "abcd" {
+			t.Fatalf("unexpected body %q. Expecting %q", body, "abcd")
+		}
+		time.Sleep(c.MaxConnDuration)
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if connectionCloseCount == 0 {
+		t.Fatalf("expecting at least one 'Connection: close' request header")
+	}
+}
 
 func TestHostClientMultipleAddrs(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
