@@ -107,7 +107,7 @@ func AppendUint(dst []byte, n int) []byte {
 func ParseUint(buf []byte) (int, error) {
 	v, n, err := parseUintBuf(buf)
 	if n != len(buf) {
-		return -1, fmt.Errorf("only %b bytes out of %d bytes exhausted when parsing int %q", n, len(buf), buf)
+		return -1, fmt.Errorf("only %d bytes out of %d bytes exhausted when parsing int %q", n, len(buf), buf)
 	}
 	return v, err
 }
