@@ -88,10 +88,10 @@ func (a *Args) QueryString() []byte {
 func (a *Args) AppendBytes(dst []byte) []byte {
 	for i, n := 0, len(a.args); i < n; i++ {
 		kv := &a.args[i]
-		dst = appendQuotedArg(dst, kv.key)
+		dst = AppendQuotedArg(dst, kv.key)
 		if len(kv.value) > 0 {
 			dst = append(dst, '=')
-			dst = appendQuotedArg(dst, kv.value)
+			dst = AppendQuotedArg(dst, kv.value)
 		}
 		if i+1 < n {
 			dst = append(dst, '&')

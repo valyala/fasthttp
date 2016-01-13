@@ -303,8 +303,9 @@ func unsafeBytesToStr(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 
-func appendQuotedArg(dst, v []byte) []byte {
-	for _, c := range v {
+// AppendQuotedArg appends url-encoded src to dst and returns appended dst.
+func AppendQuotedArg(dst, src []byte) []byte {
+	for _, c := range src {
 		// See http://www.w3.org/TR/html5/forms.html#form-submission-algorithm
 		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
 			c == '*' || c == '-' || c == '.' || c == '_' {
@@ -316,8 +317,8 @@ func appendQuotedArg(dst, v []byte) []byte {
 	return dst
 }
 
-func appendQuotedPath(dst, v []byte) []byte {
-	for _, c := range v {
+func appendQuotedPath(dst, src []byte) []byte {
+	for _, c := range src {
 		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
 			c == '/' || c == '.' || c == ',' || c == '=' || c == ':' || c == '&' || c == '~' || c == '-' || c == '_' {
 			dst = append(dst, c)

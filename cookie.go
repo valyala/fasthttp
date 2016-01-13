@@ -146,10 +146,10 @@ func (c *Cookie) Reset() {
 // the extended dst.
 func (c *Cookie) AppendBytes(dst []byte) []byte {
 	if len(c.key) > 0 {
-		dst = appendQuotedArg(dst, c.key)
+		dst = AppendQuotedArg(dst, c.key)
 		dst = append(dst, '=')
 	}
-	dst = appendQuotedArg(dst, c.value)
+	dst = AppendQuotedArg(dst, c.value)
 
 	if !c.expire.IsZero() {
 		c.bufKV.value = AppendHTTPDate(c.bufKV.value[:0], c.expire)
@@ -251,10 +251,10 @@ func appendRequestCookieBytes(dst []byte, cookies []argsKV) []byte {
 	for i, n := 0, len(cookies); i < n; i++ {
 		kv := &cookies[i]
 		if len(kv.key) > 0 {
-			dst = appendQuotedArg(dst, kv.key)
+			dst = AppendQuotedArg(dst, kv.key)
 			dst = append(dst, '=')
 		}
-		dst = appendQuotedArg(dst, kv.value)
+		dst = AppendQuotedArg(dst, kv.value)
 		if i+1 < n {
 			dst = append(dst, ';', ' ')
 		}
