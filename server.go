@@ -473,7 +473,7 @@ func (ctx *RequestCtx) ConnRequestNum() uint64 {
 // SetConnectionClose sets 'Connection: close' response header and closes
 // connection after the RequestHandler returns.
 func (ctx *RequestCtx) SetConnectionClose() {
-	ctx.Response.Header.SetConnectionClose()
+	ctx.Response.SetConnectionClose()
 }
 
 // SetStatusCode sets response status code.
@@ -1337,7 +1337,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
-		connectionClose = ctx.Response.Header.ConnectionClose() || ctx.Request.Header.ConnectionClose()
+		connectionClose = ctx.Response.ConnectionClose() || ctx.Request.ConnectionClose()
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
 		} else if !ctx.Request.Header.IsHTTP11() {
