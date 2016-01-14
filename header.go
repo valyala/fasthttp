@@ -1466,7 +1466,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	if h.contentLength < 0 {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}
-	if h.contentLength == -2 && !h.ConnectionUpgrade() {
+	if h.contentLength == -2 && !h.ConnectionUpgrade() && !h.mustSkipContentLength() {
 		h.h = setArg(h.h, strTransferEncoding, strIdentity)
 		h.connectionClose = true
 	}

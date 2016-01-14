@@ -1032,6 +1032,27 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 		t.Fatalf("unexpected connection: close")
 	}
 
+	// no content-length (informational responses)
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 101 OK\r\n\r\n",
+		101, -2, "text/plain; charset=utf-8", "")
+	if h.ConnectionClose() {
+		t.Fatalf("expecting connection: keep-alive for informational response")
+	}
+
+	// no content-length (no-content responses)
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 204 OK\r\n\r\n",
+		204, -2, "text/plain; charset=utf-8", "")
+	if h.ConnectionClose() {
+		t.Fatalf("expecting connection: keep-alive for no-content response")
+	}
+
+	// no content-length (not-modified responses)
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 304 OK\r\n\r\n",
+		304, -2, "text/plain; charset=utf-8", "")
+	if h.ConnectionClose() {
+		t.Fatalf("expecting connection: keep-alive for not-modified response")
+	}
+
 	// no content-length (identity transfer-encoding)
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Type: foo/bar\r\n\r\nabcdefg",
 		200, -2, "foo/bar", "abcdefg")
