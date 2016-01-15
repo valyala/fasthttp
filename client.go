@@ -787,9 +787,9 @@ var (
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) Do(req *Request, resp *Response) error {
-	retry, err := c.do(req, resp, false)
+	retry, err := c.do(req, resp)
 	if err != nil && retry && isIdempotent(req) {
-		_, err = c.do(req, resp, true)
+		_, err = c.do(req, resp)
 	}
 	return err
 }
@@ -798,14 +798,14 @@ func isIdempotent(req *Request) bool {
 	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut()
 }
 
-func (c *HostClient) do(req *Request, resp *Response, newConn bool) (bool, error) {
+func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 	if req == nil {
 		panic("BUG: req cannot be nil")
 	}
 
 	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix))
 
-	cc, err := c.acquireConn(newConn)
+	cc, err := c.acquireConn()
 	if err != nil {
 		return false, err
 	}
@@ -902,7 +902,7 @@ var (
 	ErrTimeout = errors.New("timeout")
 )
 
-func (c *HostClient) acquireConn(newConn bool) (*clientConn, error) {
+func (c *HostClient) acquireConn() (*clientConn, error) {
 	var cc *clientConn
 	createConn := false
 	startCleaner := false
@@ -910,7 +910,7 @@ func (c *HostClient) acquireConn(newConn bool) (*clientConn, error) {
 	var n int
 	c.connsLock.Lock()
 	n = len(c.conns)
-	if n == 0 || newConn {
+	if n == 0 {
 		maxConns := c.MaxConns
 		if maxConns <= 0 {
 			maxConns = DefaultMaxConnsPerHost
