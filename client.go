@@ -814,7 +814,7 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 	if c.WriteTimeout > 0 {
 		if err = conn.SetWriteDeadline(time.Now().Add(c.WriteTimeout)); err != nil {
 			c.closeConn(cc)
-			return false, err
+			return true, err
 		}
 	}
 
@@ -838,12 +838,10 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 		req.Header.ResetConnectionClose()
 	}
 
-	if err != nil {
-		c.releaseWriter(bw)
-		c.closeConn(cc)
-		return false, err
+	if err == nil {
+		err = bw.Flush()
 	}
-	if err = bw.Flush(); err != nil {
+	if err != nil {
 		c.releaseWriter(bw)
 		c.closeConn(cc)
 		return true, err
@@ -858,8 +856,11 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 
 	if c.ReadTimeout > 0 {
 		if err = conn.SetReadDeadline(time.Now().Add(c.ReadTimeout)); err != nil {
+			if nilResp {
+				ReleaseResponse(resp)
+			}
 			c.closeConn(cc)
-			return false, err
+			return true, err
 		}
 	}
 
