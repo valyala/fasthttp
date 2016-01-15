@@ -1084,16 +1084,15 @@ func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
 		// It looks like c.addrs isn't initialized yet.
 		n = 1
 	}
+
+	startTime := time.Now()
 	for n > 0 {
 		conn, err = c.dialHost()
 		if err == nil {
 			return conn, nil
 		}
-		if err == ErrDialTimeout {
-			// The function already has been blocked for DefaultDialTimeout,
-			// so let's return the error to the caller instead of waiting
-			// for unspecified time during dialing the remaining hosts.
-			return nil, err
+		if time.Since(startTime) > DefaultDialTimeout {
+			return nil, ErrDialTimeout
 		}
 		n--
 	}
