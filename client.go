@@ -937,7 +937,7 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 		return nil, ErrNoFreeConns
 	}
 
-	conn, err := c.dialHost()
+	conn, err := c.dialHostHard()
 	if err != nil {
 		c.decConnsCount()
 		return nil, err
@@ -1071,6 +1071,27 @@ func (c *HostClient) nextAddr() string {
 	}
 	c.addrsLock.Unlock()
 	return addr
+}
+
+func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
+	// attempt to dial all the available hosts before giving up.
+
+	c.addrsLock.Lock()
+	n := len(c.addrs)
+	c.addrsLock.Unlock()
+
+	if n == 0 {
+		// It looks like c.addrs isn't initialized yet.
+		n = 1
+	}
+	for n > 0 {
+		conn, err = c.dialHost()
+		if err == nil {
+			return conn, nil
+		}
+		n--
+	}
+	return nil, err
 }
 
 func (c *HostClient) dialHost() (net.Conn, error) {
