@@ -1,6 +1,7 @@
 package fasthttp
 
 import (
+	"errors"
 	"net"
 	"strconv"
 	"sync"
@@ -14,6 +15,15 @@ var (
 )
 
 // Dial dials the given TCP addr using tcp4.
+//
+// This function has the following additional features comparing to net.Dial:
+//
+//   * It reduces load on DNS resolver by caching resolved TCP addressed
+//     for one minute.
+//   * It uses real round-robin if the given addr is resolved to multiple
+//     TCP addresses.
+//   * It returns ErrDialTimeout if connection cannot be established during
+//     DefaultDialTimeout seconds.
 //
 // This dialer is intended for custom code wrapping before passing
 // to Client.Dial or HostClient.Dial.
@@ -31,6 +41,15 @@ func Dial(addr string) (net.Conn, error) {
 }
 
 // DialDualStack dials the given TCP addr using both tcp4 and tcp6.
+//
+// This function has the following additional features comparing to net.Dial:
+//
+//   * It reduces load on DNS resolver by caching resolved TCP addressed
+//     for one minute.
+//   * It uses real round-robin if the given addr is resolved to multiple
+//     TCP addresses.
+//   * It returns ErrDialTimeout if connection cannot be established during
+//     DefaultDialTimeout seconds.
 //
 // This dialer is intended for custom code wrapping before passing
 // to Client.Dial or HostClient.Dial.
@@ -71,9 +90,32 @@ func (d *tcpDialer) NewDial() DialFunc {
 		if d.DualStack {
 			network = "tcp"
 		}
-		return net.DialTCP(network, nil, tcpAddr)
+		ch := make(chan dialResult, 1)
+		go func() {
+			var dr dialResult
+			dr.conn, dr.err = net.DialTCP(network, nil, tcpAddr)
+			ch <- dr
+		}()
+		select {
+		case dr := <-ch:
+			return dr.conn, dr.err
+		case <-time.After(DefaultDialTimeout):
+			return nil, ErrDialTimeout
+		}
 	}
 }
+
+type dialResult struct {
+	conn net.Conn
+	err  error
+}
+
+// ErrDialTimeout is returned when TCP dialing is timed out.
+var ErrDialTimeout = errors.New("dialing to the given TCP address timed out")
+
+// DefaultDialTimeout is timeout used by Dial and DialDualStack
+// for establishing TCP connections.
+const DefaultDialTimeout = 10 * time.Second
 
 type tcpAddrEntry struct {
 	addrs    []net.TCPAddr
@@ -83,7 +125,7 @@ type tcpAddrEntry struct {
 	pending     bool
 }
 
-var tcpAddrsCacheDuration = time.Minute
+const tcpAddrsCacheDuration = time.Minute
 
 func (d *tcpDialer) tcpAddrsClean() {
 	expireDuration := 2 * tcpAddrsCacheDuration
