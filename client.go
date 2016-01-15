@@ -1089,6 +1089,12 @@ func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
 		if err == nil {
 			return conn, nil
 		}
+		if err == ErrDialTimeout {
+			// The function already has been blocked for DefaultDialTimeout,
+			// so let's return the error to the caller instead of waiting
+			// for unspecified time during dialing the remaining hosts.
+			return nil, err
+		}
 		n--
 	}
 	return nil, err
