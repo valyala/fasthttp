@@ -37,8 +37,6 @@ func (ln *InmemoryListener) Accept() (net.Conn, error) {
 }
 
 // Close implements net.Listener's Close.
-//
-// It is safe calling
 func (ln *InmemoryListener) Close() error {
 	var err error
 
