@@ -22,7 +22,7 @@ func TestHostClientMaxConnDuration(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.WriteString("abcd")
-			if ctx.Request.Header.ConnectionCloseReal() {
+			if ctx.Request.ConnectionClose() {
 				atomic.AddUint32(&connectionCloseCount, 1)
 			}
 		},

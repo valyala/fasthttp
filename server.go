@@ -1337,7 +1337,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
-		connectionClose = ctx.Response.ConnectionClose() || ctx.Request.ConnectionClose()
+		connectionClose = ctx.Response.ConnectionClose() || ctx.Request.Header.connectionCloseFast()
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
 		} else if !ctx.Request.Header.IsHTTP11() {

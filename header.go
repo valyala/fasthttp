@@ -142,18 +142,13 @@ func (h *ResponseHeader) ResetConnectionClose() {
 
 // ConnectionClose returns true if 'Connection: close' header is set.
 func (h *RequestHeader) ConnectionClose() bool {
-	// h.parseRawHeaders() isn't called for performance reasons.
-	// Use ConnectionCloseReal for triggering raw headers parsing.
+	h.parseRawHeaders()
 	return h.connectionClose
 }
 
-// ConnectionCloseReal returns true if 'Connection: close' header is set.
-//
-// This method triggers full (slow) request headers' parsing
-// unlike ConnectionClose, so use it only if you really want determining
-// whether 'Connection: close' header is really set on the wire.
-func (h *RequestHeader) ConnectionCloseReal() bool {
-	h.parseRawHeaders()
+func (h *RequestHeader) connectionCloseFast() bool {
+	// h.parseRawHeaders() isn't called for performance reasons.
+	// Use ConnectionClose for triggering raw headers parsing.
 	return h.connectionClose
 }
 

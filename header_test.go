@@ -419,8 +419,8 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 		t.Fatalf("error when reading request header: %s", err)
 	}
 
-	if !h1.ConnectionCloseReal() {
-		t.Fatalf("unexpected connection: close value: %v", h1.ConnectionCloseReal())
+	if !h1.ConnectionClose() {
+		t.Fatalf("unexpected connection: close value: %v", h1.ConnectionClose())
 	}
 	if string(h1.Peek("Connection")) != "close" {
 		t.Fatalf("unexpected connection value: %q. Expecting %q", h.Peek("Connection"), "close")
