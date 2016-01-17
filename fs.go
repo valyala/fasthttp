@@ -18,6 +18,59 @@ import (
 	"time"
 )
 
+// ServeFileUncompressed returns HTTP response containing file contents
+// from the given path.
+//
+// Directory contents is returned if path points to directory.
+//
+// ServeFile may be used for saving network traffic when serving files
+// with good compression ratio.
+//
+// See also RequestCtx.SendFile.
+func ServeFileUncompressed(ctx *RequestCtx, path string) {
+	ctx.Request.Header.DelBytes(strAcceptEncoding)
+	ServeFile(ctx, path)
+}
+
+// ServeFile returns HTTP response containing compressed file contents
+// from the given path.
+//
+// HTTP response may contain uncompressed file contents in the following cases:
+//
+//   * Missing 'Accept-Encoding: gzip' request header.
+//   * No write access to directory containing the file.
+//
+// Directory contents is returned if path points to directory.
+//
+// Use ServeFileUncompressed is you don't need serving compressed file contents.
+//
+// See also RequestCtx.SendFile.
+func ServeFile(ctx *RequestCtx, path string) {
+	rootFSOnce.Do(func() {
+		rootFSHandler = rootFS.NewRequestHandler()
+	})
+	if len(path) == 0 || path[0] != '/' {
+		// extend relative path to absolute path
+		var err error
+		if path, err = filepath.Abs(path); err != nil {
+			ctx.Logger().Printf("cannot resolve path %q to absolute file path: %s", path, err)
+		}
+	}
+	ctx.Request.SetRequestURI(path)
+	rootFSHandler(ctx)
+}
+
+var (
+	rootFSOnce sync.Once
+	rootFS     = &FS{
+		Root:               "/",
+		GenerateIndexPages: true,
+		Compress:           true,
+		AcceptByteRange:    true,
+	}
+	rootFSHandler RequestHandler
+)
+
 // PathRewriteFunc must return new request path based on arbitrary ctx
 // info such as ctx.Path().
 //
@@ -178,14 +231,14 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 
 	root := fs.Root
 
-	// strip trailing slashes from the root path
-	for len(root) > 0 && root[len(root)-1] == '/' {
-		root = root[:len(root)-1]
-	}
-
 	// serve files from the current working directory if root is empty
 	if len(root) == 0 {
 		root = "."
+	}
+
+	// strip trailing slashes from the root path
+	for len(root) > 0 && root[len(root)-1] == '/' {
+		root = root[:len(root)-1]
 	}
 
 	cacheDuration := fs.CacheDuration

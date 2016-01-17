@@ -810,6 +810,8 @@ func (ctx *RequestCtx) ResetBody() {
 // Note that SendFile doesn't set Content-Type for the response body,
 // so set it yourself with SetContentType() before returning
 // from RequestHandler.
+//
+// See also ServeFile, FSHandler and FS.
 func (ctx *RequestCtx) SendFile(path string) error {
 	ifModStr := ctx.Request.Header.peek(strIfModifiedSince)
 	if len(ifModStr) > 0 {
