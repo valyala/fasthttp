@@ -852,7 +852,6 @@ func (resp *Response) Write(w *bufio.Writer) error {
 			}
 		}
 		if contentLength >= 0 {
-			resp.Header.SetContentLength(contentLength)
 			if err = resp.Header.Write(w); err != nil {
 				return err
 			}
@@ -875,7 +874,10 @@ func (resp *Response) Write(w *bufio.Writer) error {
 		return resp.closeBodyStream()
 	}
 
-	resp.Header.SetContentLength(len(resp.body))
+	bodyLen := len(resp.body)
+	if sendBody || bodyLen > 0 {
+		resp.Header.SetContentLength(bodyLen)
+	}
 	if err = resp.Header.Write(w); err != nil {
 		return err
 	}

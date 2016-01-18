@@ -50,7 +50,7 @@ func TestResponseSkipBody(t *testing.T) {
 		t.Fatalf("unexpected non-zero body in response %q", s)
 	}
 	if !strings.Contains(s, "Content-Length: 6\r\n") {
-		t.Fatalf("unexpected content-length in response %q", s)
+		t.Fatalf("expecting content-length in response %q", s)
 	}
 	if !strings.Contains(s, "Content-Type: ") {
 		t.Fatalf("expecting content-type in response %q", s)

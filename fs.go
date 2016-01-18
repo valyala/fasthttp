@@ -695,7 +695,19 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	}
 
 	hdr.SetCanonical(strLastModified, ff.lastModifiedStr)
-	ctx.SetBodyStream(r, contentLength)
+	if !ctx.IsHead() {
+		ctx.SetBodyStream(r, contentLength)
+	} else {
+		ctx.Response.Header.SetContentLength(contentLength)
+		ctx.Response.SkipBody = true
+		if rc, ok := r.(io.Closer); ok {
+			if err := rc.Close(); err != nil {
+				ctx.Logger().Printf("cannot close file reader: %s", err)
+				ctx.Error("Internal Server Error", StatusInternalServerError)
+				return
+			}
+		}
+	}
 	ctx.SetContentType(ff.contentType)
 	ctx.SetStatusCode(statusCode)
 }

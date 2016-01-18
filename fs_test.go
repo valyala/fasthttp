@@ -12,7 +12,44 @@ import (
 	"time"
 )
 
-func TestFSServeFileCompressed(t *testing.T) {
+func TestServeFileHead(t *testing.T) {
+	var ctx RequestCtx
+	var req Request
+	req.Header.SetMethod("HEAD")
+	req.SetRequestURI("http://foobar.com/baz")
+	ctx.Init(&req, nil, nil)
+
+	ServeFile(&ctx, "fs.go")
+
+	var resp Response
+	resp.SkipBody = true
+	s := ctx.Response.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	ce := resp.Header.Peek("Content-Encoding")
+	if len(ce) > 0 {
+		t.Fatalf("Unexpected 'Content-Encoding' %q", ce)
+	}
+
+	body := resp.Body()
+	if len(body) > 0 {
+		t.Fatalf("unexpected response body %q. Expecting empty body", body)
+	}
+
+	expectedBody, err := getFileContents("/fs.go")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	contentLength := resp.Header.ContentLength()
+	if contentLength != len(expectedBody) {
+		t.Fatalf("unexpected Content-Length: %d. expecting %d", contentLength, len(expectedBody))
+	}
+}
+
+func TestServeFileCompressed(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
 	req.SetRequestURI("http://foobar.com/baz")
@@ -46,7 +83,7 @@ func TestFSServeFileCompressed(t *testing.T) {
 	}
 }
 
-func TestFSServeFileUncompressed(t *testing.T) {
+func TestServeFileUncompressed(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
 	req.SetRequestURI("http://foobar.com/baz")

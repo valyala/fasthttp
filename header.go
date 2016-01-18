@@ -503,6 +503,10 @@ func (h *RequestHeader) IsPut() bool {
 
 // IsHead returns true if request method is HEAD.
 func (h *RequestHeader) IsHead() bool {
+	// Fast path
+	if h.isGet {
+		return false
+	}
 	return bytes.Equal(h.Method(), strHead)
 }
 
