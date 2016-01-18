@@ -183,7 +183,7 @@ func (d *tcpDialer) NewDial(timeout time.Duration) DialFunc {
 				return conn, nil
 			}
 			timeout -= time.Since(startTime)
-			if timeout < 0 {
+			if timeout <= 0 {
 				return nil, ErrDialTimeout
 			}
 			idx++
