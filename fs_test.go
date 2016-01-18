@@ -28,8 +28,9 @@ func TestFSServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	if string(resp.Header.Peek("Content-Encoding")) != "gzip" {
-		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", resp.Header.Peek("Content-Encoding"), "gzip")
+	ce := resp.Header.Peek("Content-Encoding")
+	if string(ce) != "gzip" {
+		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "gzip")
 	}
 
 	body, err := resp.BodyGunzip()
@@ -49,6 +50,7 @@ func TestFSServeFileUncompressed(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
 	req.SetRequestURI("http://foobar.com/baz")
+	req.Header.Set("Accept-Encoding", "gzip")
 	ctx.Init(&req, nil, nil)
 
 	ServeFileUncompressed(&ctx, "fs.go")
@@ -58,6 +60,11 @@ func TestFSServeFileUncompressed(t *testing.T) {
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
 		t.Fatalf("unexpected error: %s", err)
+	}
+
+	ce := resp.Header.Peek("Content-Encoding")
+	if len(ce) > 0 {
+		t.Fatalf("Unexpected 'Content-Encoding' %q", ce)
 	}
 
 	body := resp.Body()
