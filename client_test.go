@@ -397,7 +397,7 @@ type readErrorConn struct {
 }
 
 func (r *readErrorConn) Read(p []byte) (int, error) {
-	return 0, fmt.Errorf("error!!!")
+	return 0, fmt.Errorf("error")
 }
 
 func (r *readErrorConn) Write(p []byte) (int, error) {

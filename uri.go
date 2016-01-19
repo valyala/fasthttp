@@ -132,7 +132,7 @@ func (x *URI) SetScheme(scheme string) {
 	lowercaseBytes(x.scheme)
 }
 
-// SetScheme sets URI scheme, i.e. http, https, ftp, etc.
+// SetSchemeBytes sets URI scheme, i.e. http, https, ftp, etc.
 func (x *URI) SetSchemeBytes(scheme []byte) {
 	x.scheme = append(x.scheme[:0], scheme...)
 	lowercaseBytes(x.scheme)
@@ -196,7 +196,7 @@ func (x *URI) parse(host, uri []byte, h *RequestHeader) {
 	x.Reset()
 	x.h = h
 
-	scheme, host, uri := splitHostUri(host, uri)
+	scheme, host, uri := splitHostURI(host, uri)
 	x.scheme = append(x.scheme, scheme...)
 	lowercaseBytes(x.scheme)
 	x.host = append(x.host, host...)
@@ -419,7 +419,7 @@ func (x *URI) String() string {
 	return string(x.FullURI())
 }
 
-func splitHostUri(host, uri []byte) ([]byte, []byte, []byte) {
+func splitHostURI(host, uri []byte) ([]byte, []byte, []byte) {
 	n := bytes.Index(uri, strColonSlashSlash)
 	if n < 0 {
 		return strHTTP, host, uri
@@ -437,7 +437,7 @@ func splitHostUri(host, uri []byte) ([]byte, []byte, []byte) {
 	return scheme, uri[:n], uri[n:]
 }
 
-// Returns query args.
+// QueryArgs returns query args.
 func (x *URI) QueryArgs() *Args {
 	x.parseQueryArgs()
 	return &x.queryArgs

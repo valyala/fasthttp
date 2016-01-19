@@ -454,7 +454,7 @@ func (h *RequestHeader) SetMethod(method string) {
 	h.method = append(h.method, method...)
 }
 
-// SetMethod sets HTTP request method.
+// SetMethodBytes sets HTTP request method.
 func (h *RequestHeader) SetMethodBytes(method []byte) {
 	h.method = append(h.method[:0], method...)
 }
@@ -475,7 +475,7 @@ func (h *RequestHeader) SetRequestURI(requestURI string) {
 	h.requestURI = append(h.requestURI[:0], requestURI...)
 }
 
-// SetRequestURI sets RequestURI for the first HTTP request line.
+// SetRequestURIBytes sets RequestURI for the first HTTP request line.
 // RequestURI must be properly encoded.
 // Use URI.RequestURI for constructing proper RequestURI if unsure.
 func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
@@ -1347,7 +1347,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		h.noHTTP11 = true
 		n = len(b)
 	} else if n == 0 {
-		return 0, fmt.Errorf("RequestURI cannot be empty in %q", buf)
+		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
 	} else if !bytes.Equal(b[n+1:], strHTTP11) {
 		h.noHTTP11 = true
 	}
@@ -1574,7 +1574,7 @@ func parseContentLength(b []byte) (int, error) {
 		return -1, err
 	}
 	if n != len(b) {
-		return -1, fmt.Errorf("Non-numeric chars at the end of Content-Length")
+		return -1, fmt.Errorf("non-numeric chars at the end of Content-Length")
 	}
 	return v, nil
 }

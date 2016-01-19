@@ -688,7 +688,7 @@ func (resp *Response) mustSkipBody() bool {
 	return resp.SkipBody || resp.Header.mustSkipContentLength()
 }
 
-var errRequestHostRequired = errors.New("Missing required Host header in request")
+var errRequestHostRequired = errors.New("missing required Host header in request")
 
 // Write writes request to w.
 //
@@ -724,7 +724,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	if hasBody {
 		_, err = w.Write(body)
 	} else if len(body) > 0 {
-		return fmt.Errorf("Non-zero body for non-POST request. body=%q", body)
+		return fmt.Errorf("non-zero body for non-POST request. body=%q", body)
 	}
 	return err
 }
