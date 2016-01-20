@@ -698,8 +698,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	if !ctx.IsHead() {
 		ctx.SetBodyStream(r, contentLength)
 	} else {
-		ctx.Response.Header.SetContentLength(contentLength)
+		ctx.Response.ResetBody()
 		ctx.Response.SkipBody = true
+		ctx.Response.Header.SetContentLength(contentLength)
 		if rc, ok := r.(io.Closer); ok {
 			if err := rc.Close(); err != nil {
 				ctx.Logger().Printf("cannot close file reader: %s", err)
