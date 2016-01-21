@@ -690,6 +690,79 @@ func (resp *Response) mustSkipBody() bool {
 
 var errRequestHostRequired = errors.New("missing required Host header in request")
 
+// WriteTo writes request to w. It implements io.WriterTo.
+func (req *Request) WriteTo(w io.Writer) (int64, error) {
+	return writeBufio(req, w)
+}
+
+// WriteTo writes response to w. It implements io.WriterTo.
+func (resp *Response) WriteTo(w io.Writer) (int64, error) {
+	return writeBufio(resp, w)
+}
+
+func writeBufio(hw httpWriter, w io.Writer) (int64, error) {
+	sw := acquireStatsWriter(w)
+	bw := acquireBufioWriter(sw)
+	err1 := hw.Write(bw)
+	err2 := bw.Flush()
+	releaseBufioWriter(bw)
+	n := sw.bytesWritten
+	releaseStatsWriter(sw)
+
+	err := err1
+	if err == nil {
+		err = err2
+	}
+	return n, err
+}
+
+type statsWriter struct {
+	w            io.Writer
+	bytesWritten int64
+}
+
+func (w *statsWriter) Write(p []byte) (int, error) {
+	n, err := w.w.Write(p)
+	w.bytesWritten += int64(n)
+	return n, err
+}
+
+func acquireStatsWriter(w io.Writer) *statsWriter {
+	v := statsWriterPool.Get()
+	if v == nil {
+		return &statsWriter{
+			w: w,
+		}
+	}
+	sw := v.(*statsWriter)
+	sw.w = w
+	return sw
+}
+
+func releaseStatsWriter(sw *statsWriter) {
+	sw.w = nil
+	sw.bytesWritten = 0
+	statsWriterPool.Put(sw)
+}
+
+var statsWriterPool sync.Pool
+
+func acquireBufioWriter(w io.Writer) *bufio.Writer {
+	v := bufioWriterPool.Get()
+	if v == nil {
+		return bufio.NewWriter(w)
+	}
+	bw := v.(*bufio.Writer)
+	bw.Reset(w)
+	return bw
+}
+
+func releaseBufioWriter(bw *bufio.Writer) {
+	bufioWriterPool.Put(bw)
+}
+
+var bufioWriterPool sync.Pool
+
 // Write writes request to w.
 //
 // Write doesn't flush request to w for performance reasons.

@@ -10,6 +10,44 @@ import (
 	"testing"
 )
 
+func TestResponseWriteTo(t *testing.T) {
+	var r Response
+
+	r.SetBodyString("foobar")
+
+	s := r.String()
+	var buf bytes.Buffer
+	n, err := r.WriteTo(&buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if n != int64(len(s)) {
+		t.Fatalf("unexpected response length %d. Expecting %d", n, len(s))
+	}
+	if string(buf.Bytes()) != s {
+		t.Fatalf("unexpected response %q. Expecting %q", buf.Bytes(), s)
+	}
+}
+
+func TestRequestWriteTo(t *testing.T) {
+	var r Request
+
+	r.SetRequestURI("http://foobar.com/aaa/bbb")
+
+	s := r.String()
+	var buf bytes.Buffer
+	n, err := r.WriteTo(&buf)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if n != int64(len(s)) {
+		t.Fatalf("unexpected request length %d. Expecting %d", n, len(s))
+	}
+	if string(buf.Bytes()) != s {
+		t.Fatalf("unexpected request %q. Expecting %q", buf.Bytes(), s)
+	}
+}
+
 func TestResponseSkipBody(t *testing.T) {
 	var r Response
 
