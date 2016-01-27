@@ -26,7 +26,7 @@ import (
 // Connection c must immediately propagate all the data passed to Write()
 // to the client. Otherwise requests' processing may hang.
 //
-// ServeConn closes c before returning.
+// ServeConn closes c before returning unless Hijack is called.
 func ServeConn(c net.Conn, handler RequestHandler) error {
 	v := serverPool.Get()
 	if v == nil {
@@ -1082,6 +1082,9 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 	for {
 		c, err := ln.Accept()
 		if err != nil {
+			if c != nil {
+				panic("BUG: net.Listener returned non-nil conn and non-nil error")
+			}
 			if netErr, ok := err.(net.Error); ok && netErr.Temporary() {
 				s.logger().Printf("Temporary error when accepting new connections: %s", netErr)
 				time.Sleep(time.Second)
@@ -1157,7 +1160,7 @@ var (
 // Connection c must immediately propagate all the data passed to Write()
 // to the client. Otherwise requests' processing may hang.
 //
-// ServeConn closes c before returning.
+// ServeConn closes c before returning unless Hijack is called.
 func (s *Server) ServeConn(c net.Conn) error {
 	if s.MaxConnsPerIP > 0 {
 		pic := wrapPerIPConn(s, c)
