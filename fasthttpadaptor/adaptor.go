@@ -5,6 +5,7 @@ package fasthttpadaptor
 import (
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/valyala/fasthttp"
 )
@@ -65,6 +66,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		})
 		r.Header = hdr
 		r.Body = &netHTTPBody{body}
+		// After Go1.5 http.ServeMux uses URL field to get the path for
+		// request routing purposes.
+		r.URL = &url.URL{Path: string(ctx.Path())}
 
 		var w netHTTPResponseWriter
 		h.ServeHTTP(&w, &r)
