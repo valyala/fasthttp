@@ -66,9 +66,13 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		})
 		r.Header = hdr
 		r.Body = &netHTTPBody{body}
-		// After Go1.5 http.ServeMux uses URL field to get the path for
-		// request routing purposes.
-		r.URL = &url.URL{Path: string(ctx.Path())}
+		rURL, err := url.ParseRequestURI(r.RequestURI)
+		if err != nil {
+			ctx.Logger().Printf("cannot parse requestURI %q: %s", r.RequestURI, err)
+			ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
+			return
+		}
+		r.URL = rURL
 
 		var w netHTTPResponseWriter
 		h.ServeHTTP(&w, &r)

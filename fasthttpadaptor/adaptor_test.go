@@ -5,6 +5,8 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"net/url"
+	"reflect"
 	"testing"
 
 	"github.com/valyala/fasthttp"
@@ -24,6 +26,10 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		"Foo-Bar":         "baz",
 		"Abc":             "defg",
 		"XXX-Remote-Addr": "123.43.4543.345",
+	}
+	expectedURL, err := url.ParseRequestURI(expectedRequestURI)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
 	}
 
 	callsCount := 0
@@ -60,6 +66,9 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		}
 		if string(body) != expectedBody {
 			t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
+		}
+		if !reflect.DeepEqual(r.URL, expectedURL) {
+			t.Fatalf("unexpected URL: %#v. Expecting %#v", r.URL, expectedURL)
 		}
 
 		for k, expectedV := range expectedHeader {
