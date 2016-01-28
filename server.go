@@ -26,7 +26,7 @@ import (
 // Connection c must immediately propagate all the data passed to Write()
 // to the client. Otherwise requests' processing may hang.
 //
-// ServeConn closes c before returning unless Hijack is called.
+// ServeConn closes c before returning.
 func ServeConn(c net.Conn, handler RequestHandler) error {
 	v := serverPool.Get()
 	if v == nil {
@@ -1160,7 +1160,7 @@ var (
 // Connection c must immediately propagate all the data passed to Write()
 // to the client. Otherwise requests' processing may hang.
 //
-// ServeConn closes c before returning unless Hijack is called.
+// ServeConn closes c before returning.
 func (s *Server) ServeConn(c net.Conn) error {
 	if s.MaxConnsPerIP > 0 {
 		pic := wrapPerIPConn(s, c)
