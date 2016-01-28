@@ -5,6 +5,7 @@ package fasthttpadaptor
 import (
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/valyala/fasthttp"
 )
