@@ -471,29 +471,14 @@ func clientGetURL(dst []byte, url string, c clientDoer) (statusCode int, body []
 }
 
 func clientGetURLTimeout(dst []byte, url string, timeout time.Duration, c clientDoer) (statusCode int, body []byte, err error) {
-	if timeout <= 0 {
-		return 0, dst, ErrTimeout
-	}
-
 	deadline := time.Now().Add(timeout)
 	for {
-		statusCode, body, err = clientGetURLTimeoutFreeConn(dst, url, timeout, c)
+		statusCode, body, err = clientGetURLTimeoutFreeConn(dst, url, deadline, c)
 		if err != ErrNoFreeConns {
 			return statusCode, body, err
 		}
-		timeout = -time.Since(deadline)
-		if timeout <= 0 {
-			return 0, dst, ErrTimeout
-		}
 		sleepTime := (10 + time.Duration(rand.Intn(100))) * time.Millisecond
-		if sleepTime > timeout {
-			sleepTime = timeout
-		}
 		time.Sleep(sleepTime)
-		timeout = -time.Since(deadline)
-		if timeout <= 0 {
-			return 0, dst, ErrTimeout
-		}
 	}
 }
 
@@ -503,7 +488,12 @@ type clientURLResponse struct {
 	err        error
 }
 
-func clientGetURLTimeoutFreeConn(dst []byte, url string, timeout time.Duration, c clientDoer) (statusCode int, body []byte, err error) {
+func clientGetURLTimeoutFreeConn(dst []byte, url string, deadline time.Time, c clientDoer) (statusCode int, body []byte, err error) {
+	timeout := -time.Since(deadline)
+	if timeout <= 0 {
+		return 0, dst, ErrTimeout
+	}
+
 	var ch chan clientURLResponse
 	chv := clientURLResponseChPool.Get()
 	if chv == nil {
@@ -691,33 +681,23 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 }
 
 func clientDoTimeout(req *Request, resp *Response, timeout time.Duration, c clientDoer) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := clientDoTimeoutFreeConn(req, resp, deadline, c)
+		if err != ErrNoFreeConns {
+			return err
+		}
+		sleepTime := (10 + time.Duration(rand.Intn(100))) * time.Millisecond
+		time.Sleep(sleepTime)
+	}
+}
+
+func clientDoTimeoutFreeConn(req *Request, resp *Response, deadline time.Time, c clientDoer) error {
+	timeout := -time.Since(deadline)
 	if timeout <= 0 {
 		return ErrTimeout
 	}
 
-	deadline := time.Now().Add(timeout)
-	for {
-		err := clientDoTimeoutFreeConn(req, resp, timeout, c)
-		if err != ErrNoFreeConns {
-			return err
-		}
-		timeout = -time.Since(deadline)
-		if timeout <= 0 {
-			return ErrTimeout
-		}
-		sleepTime := (10 + time.Duration(rand.Intn(100))) * time.Millisecond
-		if sleepTime > timeout {
-			sleepTime = timeout
-		}
-		time.Sleep(sleepTime)
-		timeout = -time.Since(deadline)
-		if timeout <= 0 {
-			return ErrTimeout
-		}
-	}
-}
-
-func clientDoTimeoutFreeConn(req *Request, resp *Response, timeout time.Duration, c clientDoer) error {
 	var ch chan error
 	chv := errorChPool.Get()
 	if chv == nil {
@@ -1085,14 +1065,18 @@ func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
 		n = 1
 	}
 
-	startTime := time.Now()
+	timeout := c.ReadTimeout + c.WriteTimeout
+	if timeout <= 0 {
+		timeout = DefaultDialTimeout
+	}
+	deadline := time.Now().Add(timeout)
 	for n > 0 {
 		conn, err = c.dialHost()
 		if err == nil {
 			return conn, nil
 		}
-		if time.Since(startTime) > DefaultDialTimeout {
-			return nil, ErrDialTimeout
+		if time.Since(deadline) >= 0 {
+			break
 		}
 		n--
 	}
