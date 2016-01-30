@@ -347,6 +347,7 @@ code after switching to fasthttp.
 * Pin each server instance to a separate CPU core using [taskset](http://linux.die.net/man/1/taskset).
 * Ensure the interrupts of multiqueue network card are evenly distributed between CPU cores.
   See [this article](https://blog.cloudflare.com/how-to-achieve-low-latency/) for details.
+* Use Go 1.6 as it provides some considerable performance improvements.
 
 
 # Fasthttp best practices
@@ -433,7 +434,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   * net/http headers are stored in a `map[string][]string`. So the server
     must parse all the headers, convert them from `[]byte` to `string` and put
     them into the map before calling user-provided request handler.
-    This all requires unnesessary memory allocations avoided by fasthttp.
+    This all requires unnecessary memory allocations avoided by fasthttp.
   * net/http client API requires creating new response object per each request.
 
 * *Why fasthttp API is incompatible with net/http?*
