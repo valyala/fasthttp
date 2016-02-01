@@ -465,6 +465,13 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     of net/http.
   * net/http works on Go older than 1.5.
 
+* Why fasthttp API prefers returning `[]byte` instead of `string`?
+
+  Because `[]byte` to `string` conversion isn't free - it requires memory
+  allocation and copy. Feel free wrapping returned `[]byte` result into
+  `string()` if you prefer working with strings instead of byte slices.
+  But be aware that this has non-zero overhead.
+
 * *Which GO versions are supported by fasthttp?*
 
   Go1.5+. Older versions won't be supported, since their standard package
