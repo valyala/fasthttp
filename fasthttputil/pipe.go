@@ -14,30 +14,27 @@ func newPipeConns() *pipeConns {
 	pc.c1.w = make(chan *byteBuffer, 1024)
 	pc.c2.r = pc.c1.w
 	pc.c2.w = pc.c1.r
-	pc.c1.parent = pc
-	pc.c2.parent = pc
 	return pc
 }
 
 type pipeConns struct {
-	c1     pipeConn
-	c2     pipeConn
-	lock   sync.RWMutex
-	closed bool
+	c1 pipeConn
+	c2 pipeConn
 }
 
 type pipeConn struct {
-	parent *pipeConns
 	r      chan *byteBuffer
 	w      chan *byteBuffer
 	b      *byteBuffer
 	bb     []byte
+	lock   sync.RWMutex
+	closed bool
 }
 
 func (c *pipeConn) Write(p []byte) (int, error) {
-	c.parent.lock.RLock()
-	if c.parent.closed {
-		c.parent.lock.RUnlock()
+	c.lock.RLock()
+	if c.closed {
+		c.lock.RUnlock()
 		return 0, errors.New("connection closed")
 	}
 
@@ -45,22 +42,15 @@ func (c *pipeConn) Write(p []byte) (int, error) {
 	b.b = append(b.b[:0], p...)
 	c.w <- b
 
-	c.parent.lock.RUnlock()
+	c.lock.RUnlock()
 	return len(p), nil
 }
 
 func (c *pipeConn) Read(p []byte) (int, error) {
-	c.parent.lock.RLock()
-	if c.parent.closed {
-		c.parent.lock.RUnlock()
-		return 0, errors.New("connection closed")
-	}
-
 	if len(c.bb) == 0 {
 		releaseByteBuffer(c.b)
 		b, ok := <-c.r
 		if !ok {
-			c.parent.lock.RUnlock()
 			return 0, io.EOF
 		}
 		c.b = b
@@ -69,22 +59,20 @@ func (c *pipeConn) Read(p []byte) (int, error) {
 	n := copy(p, c.bb)
 	c.bb = c.bb[n:]
 
-	c.parent.lock.RUnlock()
 	return n, nil
 }
 
 func (c *pipeConn) Close() error {
 	var err error
 
-	c.parent.lock.Lock()
-	if !c.parent.closed {
-		close(c.r)
+	c.lock.Lock()
+	if !c.closed {
 		close(c.w)
-		c.parent.closed = true
+		c.closed = true
 	} else {
 		err = errors.New("already closed")
 	}
-	c.parent.lock.Unlock()
+	c.lock.Unlock()
 
 	return err
 }
