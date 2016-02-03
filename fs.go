@@ -170,7 +170,8 @@ type FS struct {
 	// FSHandlerCacheDuration is used by default.
 	CacheDuration time.Duration
 
-	started bool
+	once sync.Once
+	h    RequestHandler
 }
 
 // FS adds this suffix to the original file names when trying to store
@@ -224,11 +225,11 @@ func FSHandler(root string, stripSlashes int) RequestHandler {
 // Do not create multiple request handlers from a single FS instance -
 // just reuse a single request handler.
 func (fs *FS) NewRequestHandler() RequestHandler {
-	if fs.started {
-		panic("BUG: NewRequestHandler() cannot be called multiple times for the same FS instance")
-	}
-	fs.started = true
+	fs.once.Do(fs.initRequestHandler)
+	return fs.h
+}
 
+func (fs *FS) initRequestHandler() {
 	root := fs.Root
 
 	// serve files from the current working directory if root is empty
@@ -266,7 +267,7 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 		}
 	}()
 
-	return h.handleRequest
+	fs.h = h.handleRequest
 }
 
 type fsHandler struct {
