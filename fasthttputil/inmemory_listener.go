@@ -64,7 +64,8 @@ func (ln *InmemoryListener) Addr() net.Addr {
 //
 // It is safe calling Dial from concurrently running goroutines.
 func (ln *InmemoryListener) Dial() (net.Conn, error) {
-	cConn, sConn := net.Pipe()
+	pc := newPipeConns()
+	cConn, sConn := &pc.c1, &pc.c2
 	ln.lock.Lock()
 	if !ln.closed {
 		ln.conns <- sConn
