@@ -14,6 +14,8 @@ func newPipeConns() *pipeConns {
 	pc.c1.w = make(chan *byteBuffer, 1024)
 	pc.c2.r = pc.c1.w
 	pc.c2.w = pc.c1.r
+	pc.c1.parent = pc
+	pc.c2.parent = pc
 	return pc
 }
 
@@ -29,6 +31,7 @@ type pipeConn struct {
 	bb     []byte
 	lock   sync.RWMutex
 	closed bool
+	parent *pipeConns
 }
 
 func (c *pipeConn) Write(p []byte) (int, error) {
@@ -49,6 +52,7 @@ func (c *pipeConn) Write(p []byte) (int, error) {
 func (c *pipeConn) Read(p []byte) (int, error) {
 	if len(c.bb) == 0 {
 		releaseByteBuffer(c.b)
+		c.b = nil
 		b, ok := <-c.r
 		if !ok {
 			return 0, io.EOF
@@ -63,18 +67,16 @@ func (c *pipeConn) Read(p []byte) (int, error) {
 }
 
 func (c *pipeConn) Close() error {
-	var err error
-
 	c.lock.Lock()
 	if !c.closed {
 		close(c.w)
 		c.closed = true
-	} else {
-		err = errors.New("already closed")
+		c.lock.Unlock()
+		freeBuffers(c.parent)
+		return nil
 	}
 	c.lock.Unlock()
-
-	return err
+	return errors.New("already closed")
 }
 
 func (p *pipeConn) LocalAddr() net.Addr {
@@ -125,4 +127,25 @@ var byteBufferPool = &sync.Pool{
 	New: func() interface{} {
 		return &byteBuffer{}
 	},
+}
+
+func freeBuffers(pc *pipeConns) {
+	pc.c1.lock.RLock()
+	pc.c2.lock.RLock()
+
+	mustFree := pc.c1.closed && pc.c2.closed
+
+	pc.c1.lock.RUnlock()
+	pc.c2.lock.RUnlock()
+
+	if mustFree {
+		freeBufs(pc.c1.r)
+		freeBufs(pc.c2.r)
+	}
+}
+
+func freeBufs(ch chan *byteBuffer) {
+	for b := range ch {
+		releaseByteBuffer(b)
+	}
 }
