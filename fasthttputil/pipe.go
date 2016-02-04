@@ -181,11 +181,19 @@ func (c *pipeConn) release() {
 
 	if !c.rclosed {
 		c.rclosed = true
+		for b := range c.r.ch {
+			releaseByteBuffer(b)
+			if b == nil {
+				break
+			}
+		}
+	}
+	if c.r != nil {
 		releasePipeChan(c.r)
+		c.r = nil
+		c.w = nil
 	}
 
-	c.r = nil
-	c.w = nil
 	c.rlock.Unlock()
 }
 
@@ -248,11 +256,8 @@ func acquirePipeChan() *pipeChan {
 }
 
 func releasePipeChan(ch *pipeChan) {
-	for b := range ch.ch {
-		releaseByteBuffer(b)
-		if b == nil {
-			break
-		}
+	if len(ch.ch) > 0 {
+		panic("BUG: non-empty pipeChan released")
 	}
 	pipeChanPool.Put(ch)
 }
