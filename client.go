@@ -1037,6 +1037,7 @@ func (c *HostClient) releaseReader(br *bufio.Reader) {
 
 var defaultTLSConfig = &tls.Config{
 	InsecureSkipVerify: true,
+	ClientSessionCache: tls.NewLRUClientSessionCache(0),
 }
 
 func (c *HostClient) nextAddr() string {
