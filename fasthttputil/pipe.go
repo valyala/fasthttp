@@ -91,7 +91,7 @@ func (c *pipeConn) Write(p []byte) (int, error) {
 	if c.wclosed {
 		c.wlock.Unlock()
 		releaseByteBuffer(b)
-		return 0, errors.New("connection closed for writing")
+		return 0, errConnectionClosed
 	}
 	c.w.ch <- b
 	c.wlock.Unlock()
@@ -155,13 +155,16 @@ func (c *pipeConn) read(p []byte, mayBlock bool) (int, error) {
 	return n, nil
 }
 
-var errWouldBlock = errors.New("would block")
+var (
+	errWouldBlock       = errors.New("would block")
+	errConnectionClosed = errors.New("connection closed")
+)
 
 func (c *pipeConn) Close() error {
 	c.wlock.Lock()
 	if c.wclosed {
 		c.wlock.Unlock()
-		return errors.New("connection already closed")
+		return errConnectionClosed
 	}
 
 	c.wclosed = true
