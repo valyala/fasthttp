@@ -46,6 +46,7 @@ type pipeConn struct {
 	b  *byteBuffer
 	bb []byte
 
+	rlock   sync.Mutex
 	rclosed bool
 
 	wlock   sync.Mutex
@@ -79,7 +80,6 @@ func (c *pipeConn) Read(p []byte) (int, error) {
 		if err != nil {
 			if !mayBlock && err == errWouldBlock {
 				err = nil
-			} else {
 			}
 			return nn, err
 		}
@@ -95,7 +95,9 @@ func (c *pipeConn) read(p []byte, mayBlock bool) (int, error) {
 		releaseByteBuffer(c.b)
 		c.b = nil
 
+		c.rlock.Lock()
 		if c.rclosed {
+			c.rlock.Unlock()
 			return 0, io.EOF
 		}
 
@@ -105,14 +107,18 @@ func (c *pipeConn) read(p []byte, mayBlock bool) (int, error) {
 			select {
 			case c.b = <-c.r.ch:
 			default:
+				c.rlock.Unlock()
 				return 0, errWouldBlock
 			}
 		}
 
 		if c.b == nil {
 			c.rclosed = true
+			c.rlock.Unlock()
 			return 0, io.EOF
 		}
+		c.rlock.Unlock()
+
 		c.bb = c.b.b
 	}
 	n := copy(p, c.bb)
@@ -134,13 +140,20 @@ func (c *pipeConn) Close() error {
 }
 
 func (c *pipeConn) release() {
+	c.rlock.Lock()
+
 	releaseByteBuffer(c.b)
-	releasePipeChan(c.r)
+	c.b = nil
+	c.bb = nil
+
+	if !c.rclosed {
+		c.rclosed = true
+		releasePipeChan(c.r)
+	}
 
 	c.r = nil
 	c.w = nil
-	c.b = nil
-	c.bb = nil
+	c.rlock.Unlock()
 }
 
 func (p *pipeConn) LocalAddr() net.Addr {
@@ -204,6 +217,9 @@ func acquirePipeChan() *pipeChan {
 func releasePipeChan(ch *pipeChan) {
 	for b := range ch.ch {
 		releaseByteBuffer(b)
+		if b == nil {
+			break
+		}
 	}
 	pipeChanPool.Put(ch)
 }
