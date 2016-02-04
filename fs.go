@@ -77,6 +77,9 @@ var (
 // Path rewriter is used in FS for translating the current request
 // to the local filesystem path relative to FS.Root.
 //
+// The returned path must not contain '/../' substrings due to security reasons,
+// since such paths may refer files outside FS.Root.
+//
 // The returned path may refer to ctx members. For example, ctx.Path().
 type PathRewriteFunc func(ctx *RequestCtx) []byte
 
@@ -590,6 +593,11 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	if n := bytes.IndexByte(path, 0); n >= 0 {
 		ctx.Logger().Printf("cannot serve path with nil byte at position %d: %q", n, path)
 		ctx.Error("Are you a hacker?", StatusBadRequest)
+		return
+	}
+	if n := bytes.Index(path, strSlashDotDotSlash); n >= 0 {
+		ctx.Logger().Printf("cannot serve path with '/../' at position %d due to security reasons: %q", n, path)
+		ctx.Error("Internal Server Error", StatusInternalServerError)
 		return
 	}
 
