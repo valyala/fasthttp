@@ -159,10 +159,13 @@ var errWouldBlock = errors.New("would block")
 
 func (c *pipeConn) Close() error {
 	c.wlock.Lock()
-	if !c.wclosed {
-		c.wclosed = true
-		c.w.ch <- nil
+	if c.wclosed {
+		c.wlock.Unlock()
+		return errors.New("connection already closed")
 	}
+
+	c.wclosed = true
+	c.w.ch <- nil
 	c.wlock.Unlock()
 
 	c.pc.release()
