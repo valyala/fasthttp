@@ -246,7 +246,9 @@ func releaseByteBuffer(b *byteBuffer) {
 
 var byteBufferPool = &sync.Pool{
 	New: func() interface{} {
-		return &byteBuffer{}
+		return &byteBuffer{
+			b: make([]byte, 1024),
+		}
 	},
 }
 
