@@ -12,6 +12,45 @@ import (
 	"time"
 )
 
+func TestNewVHostPathRewriter(t *testing.T) {
+	var ctx RequestCtx
+	var req Request
+	req.Header.SetHost("foobar.com")
+	req.SetRequestURI("/foo/bar/baz")
+	ctx.Init(&req, nil, nil)
+
+	f := NewVHostPathRewriter(0)
+	path := f(&ctx)
+	expectedPath := "/foobar.com/foo/bar/baz"
+	if string(path) != expectedPath {
+		t.Fatalf("unexpected path %q. Expecting %q", path, expectedPath)
+	}
+
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI("https://aaa.bbb.cc/one/two/three/four?asdf=dsf")
+	f = NewVHostPathRewriter(2)
+	path = f(&ctx)
+	expectedPath = "/aaa.bbb.cc/three/four"
+	if string(path) != expectedPath {
+		t.Fatalf("unexpected path %q. Expecting %q", path, expectedPath)
+	}
+}
+
+func TestNewVHostPathRewriterMaliciousHost(t *testing.T) {
+	var ctx RequestCtx
+	var req Request
+	req.Header.SetHost("/../../../etc/passwd")
+	req.SetRequestURI("/foo/bar/baz")
+	ctx.Init(&req, nil, nil)
+
+	f := NewVHostPathRewriter(0)
+	path := f(&ctx)
+	expectedPath := "/invalid-host/foo/bar/baz"
+	if string(path) != expectedPath {
+		t.Fatalf("unexpected path %q. Expecting %q", path, expectedPath)
+	}
+}
+
 func TestServeFileHead(t *testing.T) {
 	var ctx RequestCtx
 	var req Request

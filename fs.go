@@ -83,6 +83,38 @@ var (
 // The returned path may refer to ctx members. For example, ctx.Path().
 type PathRewriteFunc func(ctx *RequestCtx) []byte
 
+// NewVHostPathRewriter returns path rewriter, which strips slashesCount
+// leading slashes from the path and prepends the path with request's host,
+// thus simplifying virtual hosting for static files.
+//
+// Examples:
+//
+//   * host=foobar.com, slashesCount=0, original path="/foo/bar".
+//     Resulting path: "/foobar.com/foo/bar"
+//
+//   * host=img.aaa.com, slashesCount=1, original path="/images/123/456.jpg"
+//     Resulting path: "/img.aaa.com/123/456.jpg"
+//
+func NewVHostPathRewriter(slashesCount int) PathRewriteFunc {
+	return func(ctx *RequestCtx) []byte {
+		path := stripLeadingSlashes(ctx.Path(), slashesCount)
+		host := ctx.Host()
+		if n := bytes.IndexByte(host, '/'); n >= 0 {
+			host = nil
+		}
+		if len(host) == 0 {
+			host = strInvalidHost
+		}
+		newPath := make([]byte, len(path)+len(host)+1)
+		newPath[0] = '/'
+		copy(newPath[1:], host)
+		copy(newPath[1+len(host):], path)
+		return newPath
+	}
+}
+
+var strInvalidHost = []byte("invalid-host")
+
 // NewPathSlashesStripper returns path rewriter, which strips slashesCount
 // leading slashes from the path.
 //
