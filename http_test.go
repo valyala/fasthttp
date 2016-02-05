@@ -22,6 +22,16 @@ func TestRequestReadEOF(t *testing.T) {
 	if err != io.EOF {
 		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
 	}
+
+	// incomplete request mustn't return io.EOF
+	br = bufio.NewReader(bytes.NewBufferString("POST / HTTP/1.1\r\nContent-Type: aa\r\nContent-Length: 1234\r\n\r\nIncomplete body"))
+	err = r.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err == io.EOF {
+		t.Fatalf("expecting non-EOF error")
+	}
 }
 
 func TestResponseReadEOF(t *testing.T) {
@@ -34,6 +44,16 @@ func TestResponseReadEOF(t *testing.T) {
 	}
 	if err != io.EOF {
 		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+	}
+
+	// incomplete response mustn't return io.EOF
+	br = bufio.NewReader(bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\nIncomplete body"))
+	err = r.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err == io.EOF {
+		t.Fatalf("expecting non-EOF error")
 	}
 }
 
