@@ -359,7 +359,9 @@ func (ctx *RequestCtx) Hijack(handler HijackHandler) {
 // This functionality may be useful for passing arbitrary values between
 // functions involved in request processing.
 //
-// All the values stored in ctx are deleted after returning from RequestHandler.
+// All the values are removed from ctx after returning from the top
+// RequestHandler. Additionally, Close method is called on each value
+// implementing io.Closer before removing the value from ctx.
 func (ctx *RequestCtx) SetUserValue(key string, value interface{}) {
 	ctx.userValues.Set(key, value)
 }

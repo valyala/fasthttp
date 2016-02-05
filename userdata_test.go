@@ -39,3 +39,36 @@ func testUserDataGet(t *testing.T, u *userData, key []byte, value interface{}) {
 		t.Fatalf("unexpected value for key=%q: %d. Expecting %d", key, v, value)
 	}
 }
+
+func TestUserDataValueClose(t *testing.T) {
+	var u userData
+
+	closeCalls := 0
+
+	// store values implementing io.Closer
+	for i := 0; i < 5; i++ {
+		key := fmt.Sprintf("key_%d", i)
+		u.Set(key, &closerValue{&closeCalls})
+	}
+
+	// store values without io.Closer
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("key_noclose_%d", i)
+		u.Set(key, i)
+	}
+
+	u.Reset()
+
+	if closeCalls != 5 {
+		t.Fatalf("unexpected number of Close calls: %d. Expecting 10", closeCalls)
+	}
+}
+
+type closerValue struct {
+	closeCalls *int
+}
+
+func (cv *closerValue) Close() error {
+	(*cv.closeCalls)++
+	return nil
+}
