@@ -771,6 +771,9 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	if err != nil && retry && isIdempotent(req) {
 		_, err = c.do(req, resp)
 	}
+	if err == io.EOF {
+		err = ErrConnectionClosed
+	}
 	return err
 }
 
@@ -881,6 +884,16 @@ var (
 
 	// ErrTimeout is returned from timed out calls.
 	ErrTimeout = errors.New("timeout")
+
+	// ErrConnectionClosed may be returned from client methods if the server
+	// closes connection before returning the first response byte.
+	//
+	// If you see this error, then either fix the server by returning
+	// 'Connection: close' response header before closing the connection
+	// or add 'Connection: close' request header before sending requests
+	// to broken server.
+	ErrConnectionClosed = errors.New("the server closed connection before returning the first response byte. " +
+		"Make sure the server returns 'Connection: close' response header before closing the connection")
 )
 
 func (c *HostClient) acquireConn() (*clientConn, error) {
