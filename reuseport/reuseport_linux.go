@@ -2,4 +2,4 @@
 
 package reuseport
 
-const SO_REUSEPORT = 0x0F
+const soReusePort = 0x0F

@@ -158,6 +158,7 @@ func (c *pipeConn) read(p []byte, mayBlock bool) (int, error) {
 var (
 	errWouldBlock       = errors.New("would block")
 	errConnectionClosed = errors.New("connection closed")
+	errNoDeadlines      = errors.New("deadline not supported")
 )
 
 func (c *pipeConn) Close() error {
@@ -200,24 +201,24 @@ func (c *pipeConn) release() {
 	c.rlock.Unlock()
 }
 
-func (p *pipeConn) LocalAddr() net.Addr {
+func (c *pipeConn) LocalAddr() net.Addr {
 	return pipeAddr(0)
 }
 
-func (p *pipeConn) RemoteAddr() net.Addr {
+func (c *pipeConn) RemoteAddr() net.Addr {
 	return pipeAddr(0)
 }
 
-func (p *pipeConn) SetDeadline(t time.Time) error {
-	return errors.New("deadline not supported")
+func (c *pipeConn) SetDeadline(t time.Time) error {
+	return errNoDeadlines
 }
 
-func (p *pipeConn) SetReadDeadline(t time.Time) error {
-	return p.SetDeadline(t)
+func (c *pipeConn) SetReadDeadline(t time.Time) error {
+	return c.SetDeadline(t)
 }
 
-func (p *pipeConn) SetWriteDeadline(t time.Time) error {
-	return p.SetDeadline(t)
+func (c *pipeConn) SetWriteDeadline(t time.Time) error {
+	return c.SetDeadline(t)
 }
 
 type pipeAddr int
