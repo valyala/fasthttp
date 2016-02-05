@@ -10,7 +10,7 @@ import (
 	"log"
 
 	"github.com/valyala/fasthttp"
-	"github.com/valyala/fasthttp/fasthttputil/expvarhandler"
+	"github.com/valyala/fasthttp/expvarhandler"
 )
 
 var (
