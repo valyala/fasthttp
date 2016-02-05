@@ -10,6 +10,32 @@ import (
 	"testing"
 )
 
+func TestRequestHeaderReadEOF(t *testing.T) {
+	var r RequestHeader
+
+	br := bufio.NewReader(&bytes.Buffer{})
+	err := r.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err != io.EOF {
+		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+	}
+}
+
+func TestResponseHeaderReadEOF(t *testing.T) {
+	var r ResponseHeader
+
+	br := bufio.NewReader(&bytes.Buffer{})
+	err := r.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err != io.EOF {
+		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+	}
+}
+
 func TestResponseHeaderOldVersion(t *testing.T) {
 	var h ResponseHeader
 

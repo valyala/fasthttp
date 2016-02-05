@@ -543,6 +543,8 @@ func (resp *Response) resetSkipHeader() {
 //     - Or send StatusContinue response before reading request body
 //       with ContinueReadBody.
 //     - Or close the connection.
+//
+// io.EOF is returned if r is closed before reading the first header byte.
 func (req *Request) Read(r *bufio.Reader) error {
 	return req.ReadLimitBody(r, 0)
 }
@@ -567,6 +569,8 @@ var errGetOnly = errors.New("non-GET request received")
 //     - Or send StatusContinue response before reading request body
 //       with ContinueReadBody.
 //     - Or close the connection.
+//
+// io.EOF is returned if r is closed before reading the first header byte.
 func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	return req.readLimitBody(r, maxBodySize, false)
 }
@@ -652,6 +656,8 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
 }
 
 // Read reads response (including body) from the given r.
+//
+// io.EOF is returned if r is closed before reading the first header byte.
 func (resp *Response) Read(r *bufio.Reader) error {
 	return resp.ReadLimitBody(r, 0)
 }
@@ -660,6 +666,8 @@ func (resp *Response) Read(r *bufio.Reader) error {
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
+//
+// io.EOF is returned if r is closed before reading the first header byte.
 func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	resp.resetSkipHeader()
 	err := resp.Header.Read(r)

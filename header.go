@@ -986,6 +986,8 @@ func (h *ResponseHeader) Cookie(cookie *Cookie) bool {
 }
 
 // Read reads response header from r.
+//
+// io.EOF is returned if r is closed before reading the first header byte.
 func (h *ResponseHeader) Read(r *bufio.Reader) error {
 	n := 1
 	for {
@@ -1025,6 +1027,8 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 }
 
 // Read reads request header from r.
+//
+// io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) Read(r *bufio.Reader) error {
 	n := 1
 	for {

@@ -4,11 +4,38 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"mime/multipart"
 	"strings"
 	"testing"
 )
+
+func TestRequestReadEOF(t *testing.T) {
+	var r Request
+
+	br := bufio.NewReader(&bytes.Buffer{})
+	err := r.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err != io.EOF {
+		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+	}
+}
+
+func TestResponseReadEOF(t *testing.T) {
+	var r Response
+
+	br := bufio.NewReader(&bytes.Buffer{})
+	err := r.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err != io.EOF {
+		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+	}
+}
 
 func TestResponseWriteTo(t *testing.T) {
 	var r Response
