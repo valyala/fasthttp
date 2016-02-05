@@ -339,6 +339,8 @@ by slow [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHa
 So [profile](http://blog.golang.org/profiling-go-programs) and optimize your
 code after switching to fasthttp.
 
+* See also [fasthttputil package](https://godoc.org/github.com/valyala/fasthttp/fasthttputil).
+
 
 # Performance optimization tips for multi-core systems
 
