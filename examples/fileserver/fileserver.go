@@ -10,7 +10,7 @@ import (
 	"log"
 
 	"github.com/valyala/fasthttp"
-	"github.com/valyala/fasthttp/fasthttputil"
+	"github.com/valyala/fasthttp/fasthttputil/expvarhandler"
 )
 
 var (
@@ -51,7 +51,7 @@ func main() {
 	requestHandler := func(ctx *fasthttp.RequestCtx) {
 		switch string(ctx.Path()) {
 		case "/stats":
-			fasthttputil.ExpvarHandler(ctx)
+			expvarhandler.ExpvarHandler(ctx)
 		default:
 			fsHandler(ctx)
 			updateFSCounters(ctx)

@@ -1,4 +1,4 @@
-package fasthttputil
+package expvarhandler
 
 import (
 	"encoding/json"
