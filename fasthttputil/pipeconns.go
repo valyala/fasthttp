@@ -28,7 +28,7 @@ func NewPipeConns() *PipeConns {
 //
 // PipeConns must be created by calling NewPipeConns.
 //
-// PipeConns have the following additional features comparing to connections
+// PipeConns has the following additional features comparing to connections
 // returned from net.Pipe():
 //
 //   * It is faster.
