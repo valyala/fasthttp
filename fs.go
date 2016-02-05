@@ -105,15 +105,39 @@ func NewVHostPathRewriter(slashesCount int) PathRewriteFunc {
 		if len(host) == 0 {
 			host = strInvalidHost
 		}
-		newPath := make([]byte, len(path)+len(host)+1)
-		newPath[0] = '/'
-		copy(newPath[1:], host)
-		copy(newPath[1+len(host):], path)
-		return newPath
+		b := acquireByteBuffer()
+		b.b = append(b.b, '/')
+		b.b = append(b.b, host...)
+		b.b = append(b.b, path...)
+		ctx.URI().SetPathBytes(b.b)
+		releaseByteBuffer(b)
+
+		return ctx.Path()
 	}
 }
 
 var strInvalidHost = []byte("invalid-host")
+
+func acquireByteBuffer() *byteBuffer {
+	return byteBufferPool.Get().(*byteBuffer)
+}
+
+func releaseByteBuffer(b *byteBuffer) {
+	b.b = b.b[:0]
+	byteBufferPool.Put(b)
+}
+
+var byteBufferPool = &sync.Pool{
+	New: func() interface{} {
+		return &byteBuffer{
+			b: make([]byte, 0, 128),
+		}
+	},
+}
+
+type byteBuffer struct {
+	b []byte
+}
 
 // NewPathSlashesStripper returns path rewriter, which strips slashesCount
 // leading slashes from the path.
