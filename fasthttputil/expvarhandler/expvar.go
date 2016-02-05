@@ -1,3 +1,5 @@
+// Package expvarhandler provides fasthttp-compatible request handler
+// serving expvars.
 package expvarhandler
 
 import (
