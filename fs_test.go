@@ -258,6 +258,15 @@ func TestParseByteRangeSuccess(t *testing.T) {
 	testParseByteRangeSuccess(t, "bytes=123-", 456, 123, 455)
 	testParseByteRangeSuccess(t, "bytes=-1", 1, 0, 0)
 	testParseByteRangeSuccess(t, "bytes=-123", 456, 333, 455)
+
+	// End position exceeding content-length. It should be updated to content-length-1.
+	// See https://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.35
+	testParseByteRangeSuccess(t, "bytes=1-2345", 234, 1, 233)
+	testParseByteRangeSuccess(t, "bytes=0-2345", 2345, 0, 2344)
+
+	// Start position overflow. Whole range must be returned.
+	// See https://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.35
+	testParseByteRangeSuccess(t, "bytes=-567", 56, 0, 55)
 }
 
 func testParseByteRangeSuccess(t *testing.T, v string, contentLength, startPos, endPos int) {
@@ -292,10 +301,7 @@ func TestParseByteRangeError(t *testing.T) {
 	testParseByteRangeError(t, "bytes=1-2,4-6", 123)
 
 	// byte range exceeding contentLength
-	testParseByteRangeError(t, "bytes=1-2345", 234)
-	testParseByteRangeError(t, "bytes=1-2345", 2345)
 	testParseByteRangeError(t, "bytes=123-", 12)
-	testParseByteRangeError(t, "bytes=-567", 56)
 
 	// startPos exceeding endPos
 	testParseByteRangeError(t, "bytes=123-34", 1234)

@@ -789,27 +789,24 @@ type byteRangeUpdater interface {
 	UpdateByteRange(startPos, endPos int) error
 }
 
-var (
-	errUnsupportedRangeUnits = errors.New("unsupported range units")
-	errInvalidByteRange      = errors.New("invalid byte range")
-)
-
 // ParseByteRange parses 'Range: bytes=...' header value.
+//
+// It follows https://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.35 .
 func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, err error) {
 	b := byteRange
 	if !bytes.HasPrefix(b, strBytes) {
-		return 0, 0, errUnsupportedRangeUnits
+		return 0, 0, fmt.Errorf("unsupported range units: %q. Expecting %q", byteRange, strBytes)
 	}
 
 	b = b[len(strBytes):]
 	if len(b) == 0 || b[0] != '=' {
-		return 0, 0, errInvalidByteRange
+		return 0, 0, fmt.Errorf("missing byte range in %q", byteRange)
 	}
 	b = b[1:]
 
 	n := bytes.IndexByte(b, '-')
 	if n < 0 {
-		return 0, 0, errInvalidByteRange
+		return 0, 0, fmt.Errorf("missing the end position of byte range in %q", byteRange)
 	}
 
 	if n == 0 {
@@ -819,7 +816,7 @@ func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, 
 		}
 		startPos := contentLength - v
 		if startPos < 0 {
-			return 0, 0, errInvalidByteRange
+			startPos = 0
 		}
 		return startPos, contentLength - 1, nil
 	}
@@ -828,7 +825,7 @@ func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, 
 		return 0, 0, err
 	}
 	if startPos >= contentLength {
-		return 0, 0, errInvalidByteRange
+		return 0, 0, fmt.Errorf("the start position of byte range cannot exceed %d. byte range %q", contentLength-1, byteRange)
 	}
 
 	b = b[n+1:]
@@ -840,10 +837,10 @@ func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, 
 		return 0, 0, err
 	}
 	if endPos >= contentLength {
-		return 0, 0, errInvalidByteRange
+		endPos = contentLength - 1
 	}
 	if endPos < startPos {
-		return 0, 0, errInvalidByteRange
+		return 0, 0, fmt.Errorf("the start position of byte range cannot exceed the end position. byte range %q", byteRange)
 	}
 	return startPos, endPos, nil
 }
