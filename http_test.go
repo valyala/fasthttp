@@ -11,6 +11,76 @@ import (
 	"testing"
 )
 
+func TestRequestBodyWriteToPlain(t *testing.T) {
+	var r Request
+
+	expectedS := "foobarbaz"
+	r.AppendBodyString(expectedS)
+
+	testBodyWriteTo(t, &r, expectedS, true)
+}
+
+func TestResponseBodyWriteToPlain(t *testing.T) {
+	var r Response
+
+	expectedS := "foobarbaz"
+	r.AppendBodyString(expectedS)
+
+	testBodyWriteTo(t, &r, expectedS, true)
+}
+
+func TestResponseBodyWriteToStream(t *testing.T) {
+	var r Response
+
+	expectedS := "aaabbbccc"
+	buf := bytes.NewBufferString(expectedS)
+	r.SetBodyStream(buf, len(expectedS))
+
+	testBodyWriteTo(t, &r, expectedS, false)
+}
+
+func TestRequestBodyWriteToMultipart(t *testing.T) {
+	expectedS := "--foobar\r\nContent-Disposition: form-data; name=\"key_0\"\r\n\r\nvalue_0\r\n--foobar--\r\n"
+	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=foobar\r\nContent-Length: %d\r\n\r\n%s",
+		len(expectedS), expectedS)
+
+	var r Request
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := r.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	testBodyWriteTo(t, &r, expectedS, true)
+}
+
+type bodyWriterTo interface {
+	BodyWriteTo(io.Writer) error
+	Body() []byte
+}
+
+func testBodyWriteTo(t *testing.T, bw bodyWriterTo, expectedS string, isRetainedBody bool) {
+	var buf bytes.Buffer
+	if err := bw.BodyWriteTo(&buf); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	s := buf.Bytes()
+	if string(s) != expectedS {
+		t.Fatalf("unexpected result %q. Expecting %q", s, expectedS)
+	}
+
+	body := bw.Body()
+	if isRetainedBody {
+		if string(body) != expectedS {
+			t.Fatalf("unexpected body %q. Expecting %q", body, expectedS)
+		}
+	} else {
+		if len(body) > 0 {
+			t.Fatalf("unexpected non-zero body after BodyWriteTo: %q", body)
+		}
+	}
+}
+
 func TestRequestReadEOF(t *testing.T) {
 	var r Request
 

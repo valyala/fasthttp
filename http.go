@@ -246,6 +246,17 @@ func (resp *Response) BodyInflate() ([]byte, error) {
 	return b, nil
 }
 
+// BodyWriteTo writes response body to w.
+func (resp *Response) BodyWriteTo(w io.Writer) error {
+	if resp.bodyStream != nil {
+		_, err := io.Copy(w, resp.bodyStream)
+		resp.closeBodyStream()
+		return err
+	}
+	_, err := w.Write(resp.body)
+	return err
+}
+
 // AppendBody appends p to response body.
 func (resp *Response) AppendBody(p []byte) {
 	resp.closeBodyStream()
@@ -278,7 +289,7 @@ func (resp *Response) ResetBody() {
 
 // Body returns request body.
 func (req *Request) Body() []byte {
-	if req.multipartForm != nil && len(req.body) == 0 {
+	if req.onlyMultipartForm() {
 		body, err := marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
 		if err != nil {
 			return []byte(err.Error())
@@ -286,6 +297,15 @@ func (req *Request) Body() []byte {
 		return body
 	}
 	return req.body
+}
+
+// BodyWriteTo writes request body to w.
+func (req *Request) BodyWriteTo(w io.Writer) error {
+	if req.onlyMultipartForm() {
+		return WriteMultipartForm(w, req.multipartForm, req.multipartFormBoundary)
+	}
+	_, err := w.Write(req.body)
+	return err
 }
 
 // AppendBody appends p to request body.
@@ -771,6 +791,10 @@ func releaseBufioWriter(bw *bufio.Writer) {
 
 var bufioWriterPool sync.Pool
 
+func (req *Request) onlyMultipartForm() bool {
+	return req.multipartForm != nil && len(req.body) == 0
+}
+
 // Write writes request to w.
 //
 // Write doesn't flush request to w for performance reasons.
@@ -787,7 +811,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 
 	body := req.body
 	var err error
-	if req.multipartForm != nil && len(req.body) == 0 {
+	if req.onlyMultipartForm() {
 		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
 		if err != nil {
 			return fmt.Errorf("error when marshaling multipart form: %s", err)
