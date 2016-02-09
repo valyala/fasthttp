@@ -52,6 +52,7 @@ func TestURIUpdate(t *testing.T) {
 	testURIUpdate(t, "http://xx/a/b/c/d", "../qwe/p?zx=34", "http://xx/a/b/qwe/p?zx=34")
 	testURIUpdate(t, "https://qqq/aaa.html?foo=bar", "?baz=434&aaa", "https://qqq/aaa.html?baz=434&aaa")
 	testURIUpdate(t, "http://foo.bar/baz", "~a/%20b=c,тест?йцу=ке", "http://foo.bar/~a/%20b=c,%D1%82%D0%B5%D1%81%D1%82?йцу=ке")
+	testURIUpdate(t, "http://foo.bar/baz", "/qwe#fragment", "http://foo.bar/qwe#fragment")
 }
 
 func testURIUpdate(t *testing.T, base, update, result string) {
