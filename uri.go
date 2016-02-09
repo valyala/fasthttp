@@ -212,7 +212,7 @@ func (x *URI) parse(host, uri []byte, h *RequestHeader) {
 
 	if queryIndex < 0 && fragmentIndex < 0 {
 		x.pathOriginal = append(x.pathOriginal, b...)
-		x.path = normalizePath(x.path, b)
+		x.path = normalizePath(x.path, x.pathOriginal)
 		return
 	}
 
@@ -225,19 +225,16 @@ func (x *URI) parse(host, uri []byte, h *RequestHeader) {
 			x.queryString = append(x.queryString, b[queryIndex+1:]...)
 		} else {
 			x.queryString = append(x.queryString, b[queryIndex+1:fragmentIndex]...)
+			x.hash = append(x.hash, b[fragmentIndex+1:]...)
 		}
+		return
 	}
 
-	if fragmentIndex >= 0 {
-		if queryIndex < 0 {
-			// Path is up to the start of fragment. Unless a query was before it
-			x.pathOriginal = append(x.pathOriginal, b[:fragmentIndex]...)
-			x.path = normalizePath(x.path, x.pathOriginal)
-		}
-
-		x.hash = append(x.hash, b[fragmentIndex+1:]...)
-		b = b[:fragmentIndex]
-	}
+	// fragmentIndex >= 0 && queryIndex < 0
+	// Path is up to the start of fragment
+	x.pathOriginal = append(x.pathOriginal, b[:fragmentIndex]...)
+	x.path = normalizePath(x.path, x.pathOriginal)
+	x.hash = append(x.hash, b[fragmentIndex+1:]...)
 }
 
 func normalizePath(dst, src []byte) []byte {
