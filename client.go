@@ -56,6 +56,26 @@ func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return defaultClient.DoTimeout(req, resp, timeout)
 }
 
+// DoDeadline performs the given request and waits for response until
+// the given deadline.
+//
+// Request must contain at least non-zero RequestURI with full url (including
+// scheme and host) or non-zero Host header + RequestURI.
+//
+// Client determines the server to be requested in the following order:
+//
+//   - from RequestURI if it contains full url with scheme and host;
+//   - from Host header otherwise.
+//
+// ErrTimeout is returned if the response wasn't returned until
+// the given deadline.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
+func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
+	return defaultClient.DoDeadline(req, resp, deadline)
+}
+
 // Get appends url contents to dst and returns it as body.
 //
 // New body buffer is allocated if dst is nil.
@@ -71,6 +91,16 @@ func Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 // during the given timeout.
 func GetTimeout(dst []byte, url string, timeout time.Duration) (statusCode int, body []byte, err error) {
 	return defaultClient.GetTimeout(dst, url, timeout)
+}
+
+// GetDeadline appends url contents to dst and returns it as body.
+//
+// New body buffer is allocated if dst is nil.
+//
+// ErrTimeout error is returned if url contents couldn't be fetched
+// until the given deadline.
+func GetDeadline(dst []byte, url string, deadline time.Time) (statusCode int, body []byte, err error) {
+	return defaultClient.GetDeadline(dst, url, deadline)
 }
 
 // Post sends POST request to the given url with the given POST arguments.
@@ -172,6 +202,16 @@ func (c *Client) GetTimeout(dst []byte, url string, timeout time.Duration) (stat
 	return clientGetURLTimeout(dst, url, timeout, c)
 }
 
+// GetDeadline appends url contents to dst and returns it as body.
+//
+// New body buffer is allocated if dst is nil.
+//
+// ErrTimeout error is returned if url contents couldn't be fetched
+// until the given deadline.
+func (c *Client) GetDeadline(dst []byte, url string, deadline time.Time) (statusCode int, body []byte, err error) {
+	return clientGetURLDeadline(dst, url, deadline, c)
+}
+
 // Post sends POST request to the given url with the given POST arguments.
 //
 // Response body is appended to dst, which is returned as body.
@@ -201,6 +241,26 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return clientDoTimeout(req, resp, timeout, c)
+}
+
+// DoDeadline performs the given request and waits for response until
+// the given deadline.
+//
+// Request must contain at least non-zero RequestURI with full url (including
+// scheme and host) or non-zero Host header + RequestURI.
+//
+// Client determines the server to be requested in the following order:
+//
+//   - from RequestURI if it contains full url with scheme and host;
+//   - from Host header otherwise.
+//
+// ErrTimeout is returned if the response wasn't returned until
+// the given deadline.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
+func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
+	return clientDoDeadline(req, resp, deadline, c)
 }
 
 // Do performs the given http request and fills the given http response.
@@ -446,6 +506,16 @@ func (c *HostClient) GetTimeout(dst []byte, url string, timeout time.Duration) (
 	return clientGetURLTimeout(dst, url, timeout, c)
 }
 
+// GetDeadline appends url contents to dst and returns it as body.
+//
+// New body buffer is allocated if dst is nil.
+//
+// ErrTimeout error is returned if url contents couldn't be fetched
+// until the given deadline.
+func (c *HostClient) GetDeadline(dst []byte, url string, deadline time.Time) (statusCode int, body []byte, err error) {
+	return clientGetURLDeadline(dst, url, deadline, c)
+}
+
 // Post sends POST request to the given url with the given POST arguments.
 //
 // Response body is appended to dst, which is returned as body.
@@ -472,8 +542,12 @@ func clientGetURL(dst []byte, url string, c clientDoer) (statusCode int, body []
 
 func clientGetURLTimeout(dst []byte, url string, timeout time.Duration, c clientDoer) (statusCode int, body []byte, err error) {
 	deadline := time.Now().Add(timeout)
+	return clientGetURLDeadline(dst, url, deadline, c)
+}
+
+func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDoer) (statusCode int, body []byte, err error) {
 	for {
-		statusCode, body, err = clientGetURLTimeoutFreeConn(dst, url, deadline, c)
+		statusCode, body, err = clientGetURLDeadlineFreeConn(dst, url, deadline, c)
 		if err != ErrNoFreeConns {
 			return statusCode, body, err
 		}
@@ -488,7 +562,7 @@ type clientURLResponse struct {
 	err        error
 }
 
-func clientGetURLTimeoutFreeConn(dst []byte, url string, deadline time.Time, c clientDoer) (statusCode int, body []byte, err error) {
+func clientGetURLDeadlineFreeConn(dst []byte, url string, deadline time.Time, c clientDoer) (statusCode int, body []byte, err error) {
 	timeout := -time.Since(deadline)
 	if timeout <= 0 {
 		return 0, dst, ErrTimeout
@@ -645,7 +719,7 @@ func ReleaseRequest(req *Request) {
 
 // AcquireResponse returns an empty Response instance from response pool.
 //
-// the returned Response instance may be passed to ReleaseResponse when it is
+// The returned Response instance may be passed to ReleaseResponse when it is
 // no longer needed. This allows Response recycling, reduces GC pressure
 // and usually improves performance.
 func AcquireResponse() *Response {
@@ -680,10 +754,29 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 	return clientDoTimeout(req, resp, timeout, c)
 }
 
+// DoDeadline performs the given request and waits for response until
+// the given deadline.
+//
+// Request must contain at least non-zero RequestURI with full url (including
+// scheme and host) or non-zero Host header + RequestURI.
+//
+// ErrTimeout is returned if the response wasn't returned until
+// the given deadline.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
+func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
+	return clientDoDeadline(req, resp, deadline, c)
+}
+
 func clientDoTimeout(req *Request, resp *Response, timeout time.Duration, c clientDoer) error {
 	deadline := time.Now().Add(timeout)
+	return clientDoDeadline(req, resp, deadline, c)
+}
+
+func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c clientDoer) error {
 	for {
-		err := clientDoTimeoutFreeConn(req, resp, deadline, c)
+		err := clientDoDeadlineFreeConn(req, resp, deadline, c)
 		if err != ErrNoFreeConns {
 			return err
 		}
@@ -692,7 +785,7 @@ func clientDoTimeout(req *Request, resp *Response, timeout time.Duration, c clie
 	}
 }
 
-func clientDoTimeoutFreeConn(req *Request, resp *Response, deadline time.Time, c clientDoer) error {
+func clientDoDeadlineFreeConn(req *Request, resp *Response, deadline time.Time, c clientDoer) error {
 	timeout := -time.Since(deadline)
 	if timeout <= 0 {
 		return ErrTimeout
