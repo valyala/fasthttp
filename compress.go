@@ -2,13 +2,14 @@ package fasthttp
 
 import (
 	"bytes"
-	"compress/flate"
-	"compress/gzip"
-	"compress/zlib"
 	"fmt"
 	"io"
 	"os"
 	"sync"
+
+	"github.com/klauspost/compress/flate"
+	"github.com/klauspost/compress/gzip"
+	"github.com/klauspost/compress/zlib"
 )
 
 // Supported compression levels.
