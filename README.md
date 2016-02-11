@@ -308,7 +308,7 @@ fastttp.ListenAndServe(":80", m)
   * http.Error() -> [ctx.Error()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Error)
   * http.FileServer() -> [fasthttp.FSHandler()](https://godoc.org/github.com/valyala/fasthttp#FSHandler),
   [fasthttp.FS](https://godoc.org/github.com/valyala/fasthttp#FS)
-  * http.ServeFile() -> [ctx.ServeFile()](https://godoc.org/github.com/valyala/fasthttp#ServeFile)
+  * http.ServeFile() -> [fasthttp.ServeFile()](https://godoc.org/github.com/valyala/fasthttp#ServeFile)
   * http.Redirect() -> [ctx.Redirect()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Redirect)
   * http.NotFound() -> [ctx.NotFound()](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.NotFound)
   * http.StripPrefix() -> [fasthttp.PathRewriteFunc](https://godoc.org/github.com/valyala/fasthttp#PathRewriteFunc)
@@ -339,7 +339,9 @@ by slow [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHa
 So [profile](http://blog.golang.org/profiling-go-programs) and optimize your
 code after switching to fasthttp.
 
-* See also [fasthttputil package](https://godoc.org/github.com/valyala/fasthttp/fasthttputil).
+* See also [fasthttputil](https://godoc.org/github.com/valyala/fasthttp/fasthttputil),
+[fasthttpadaptor](https://godoc.org/github.com/valyala/fasthttp/fasthttpadaptor) and
+[expvarhandler](https://godoc.org/github.com/valyala/fasthttp/expvarhandler).
 
 
 # Performance optimization tips for multi-core systems
