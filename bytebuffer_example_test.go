@@ -17,7 +17,7 @@ func ExampleByteBuffer() {
 		b.B = append(b.B, ">"...)
 		ctx.Response.Header.SetBytesV("Your-IP", b.B)
 
-		fmt.Fprintf(ctx, "Check response headers - they must contain 'Your-IP: %s", b.B)
+		fmt.Fprintf(ctx, "Check response headers - they must contain 'Your-IP: %s'", b.B)
 
 		// It is safe to release byte buffer now, since it is
 		// no longer used.
