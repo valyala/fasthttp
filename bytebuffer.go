@@ -16,7 +16,16 @@ const (
 //
 // Use AcquireByteBuffer for obtaining an empty byte buffer.
 type ByteBuffer struct {
+
+	// B is a byte buffer to use in append-like workloads.
+	// See example code for details.
 	B []byte
+}
+
+// Write implements io.Writer - it appends p to ByteBuffer.B
+func (b *ByteBuffer) Write(p []byte) (int, error) {
+	b.B = append(b.B, p...)
+	return len(p), nil
 }
 
 // AcquireByteBuffer returns an empty byte buffer from the pool.

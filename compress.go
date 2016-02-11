@@ -1,7 +1,6 @@
 package fasthttp
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -248,8 +247,8 @@ func isFileCompressible(f *os.File, minCompressRatio float64) bool {
 	// Try compressing the first 4kb of of the file
 	// and see if it can be compressed by more than
 	// the given minCompressRatio.
-	var buf bytes.Buffer
-	zw := acquireGzipWriter(&buf, CompressDefaultCompression)
+	b := AcquireByteBuffer()
+	zw := acquireGzipWriter(b, CompressDefaultCompression)
 	lr := &io.LimitedReader{
 		R: f,
 		N: 4096,
@@ -262,6 +261,7 @@ func isFileCompressible(f *os.File, minCompressRatio float64) bool {
 	}
 
 	n := 4096 - lr.N
-	zn := len(buf.Bytes())
+	zn := len(b.B)
+	ReleaseByteBuffer(b)
 	return float64(zn) < float64(n)*minCompressRatio
 }
