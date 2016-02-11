@@ -901,14 +901,19 @@ func (resp *Response) gzipBody(level int) error {
 			releaseGzipWriter(zw)
 		})
 	} else {
-		var buf bytes.Buffer
-		zw := acquireGzipWriter(&buf, level)
+		w := AcquireByteBuffer()
+		zw := acquireGzipWriter(w, level)
 		_, err := zw.Write(resp.body)
 		releaseGzipWriter(zw)
 		if err != nil {
 			return err
 		}
-		resp.body = buf.Bytes()
+
+		// Hack: swap resp.body with w.B and release w.
+		b := resp.body
+		resp.body = w.B
+		w.B = b
+		ReleaseByteBuffer(w)
 	}
 	resp.Header.SetCanonical(strContentEncoding, strGzip)
 	return nil
@@ -925,14 +930,19 @@ func (resp *Response) deflateBody(level int) error {
 			releaseFlateWriter(zw)
 		})
 	} else {
-		var buf bytes.Buffer
-		zw := acquireFlateWriter(&buf, level)
+		w := AcquireByteBuffer()
+		zw := acquireFlateWriter(w, level)
 		_, err := zw.Write(resp.body)
 		releaseFlateWriter(zw)
 		if err != nil {
 			return err
 		}
-		resp.body = buf.Bytes()
+
+		// Hack: swap resp.body with w.B and release w.
+		b := resp.body
+		resp.body = w.B
+		w.B = b
+		ReleaseByteBuffer(w)
 	}
 	resp.Header.SetCanonical(strContentEncoding, strDeflate)
 	return nil
@@ -1023,15 +1033,17 @@ func (resp *Response) String() string {
 }
 
 func getHTTPString(hw httpWriter) string {
-	var w bytes.Buffer
-	bw := bufio.NewWriter(&w)
+	w := AcquireByteBuffer()
+	bw := bufio.NewWriter(w)
 	if err := hw.Write(bw); err != nil {
 		return err.Error()
 	}
 	if err := bw.Flush(); err != nil {
 		return err.Error()
 	}
-	return string(w.Bytes())
+	s := string(w.B)
+	ReleaseByteBuffer(w)
+	return s
 }
 
 type httpWriter interface {
