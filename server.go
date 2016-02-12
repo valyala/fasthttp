@@ -321,6 +321,8 @@ type RequestCtx struct {
 // HijackHandler must process the hijacked connection c.
 //
 // The connection c is automatically closed after returning from HijackHandler.
+//
+// The connection c must not be used after returning from the handler.
 type HijackHandler func(c net.Conn)
 
 // Hijack registers the given handler for connection hijacking.
