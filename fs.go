@@ -850,7 +850,7 @@ var (
 )
 
 func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool) (*fsFile, error) {
-	w := &bytes.Buffer{}
+	w := &ByteBuffer{}
 
 	basePathEscaped := html.EscapeString(string(base.Path()))
 	fmt.Fprintf(w, "<html><head><title>%s</title><style>.dir { font-weight: bold }</style></head><body>", basePathEscaped)
@@ -910,9 +910,9 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 	fmt.Fprintf(w, "</ul></body></html>")
 
 	if mustCompress {
-		var zbuf bytes.Buffer
+		var zbuf ByteBuffer
 		zw := acquireGzipWriter(&zbuf, CompressDefaultCompression)
-		_, err = io.Copy(zw, w)
+		_, err = zw.Write(w.B)
 		releaseGzipWriter(zw)
 		if err != nil {
 			return nil, fmt.Errorf("error when compressing automatically generated index for directory %q: %s", dirPath, err)
@@ -920,7 +920,7 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 		w = &zbuf
 	}
 
-	dirIndex := w.Bytes()
+	dirIndex := w.B
 	lastModified := time.Now()
 	ff := &fsFile{
 		h:               h,

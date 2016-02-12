@@ -65,7 +65,7 @@ func BenchmarkRequestHeaderWrite(b *testing.B) {
 		h.SetHost("foobar.com")
 		h.SetUserAgent("aaa.bbb")
 		h.SetReferer("http://google.com/aaa/bbb")
-		var w bytes.Buffer
+		var w ByteBuffer
 		for pb.Next() {
 			if _, err := h.WriteTo(&w); err != nil {
 				b.Fatalf("unexpected error when writing header: %s", err)
@@ -83,7 +83,7 @@ func BenchmarkResponseHeaderWrite(b *testing.B) {
 		h.SetContentLength(1256)
 		h.SetServer("aaa 1/2.3")
 		h.Set("Test", "1.2.3")
-		var w bytes.Buffer
+		var w ByteBuffer
 		for pb.Next() {
 			if _, err := h.WriteTo(&w); err != nil {
 				b.Fatalf("unexpected error when writing header: %s", err)
