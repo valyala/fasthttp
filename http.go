@@ -438,11 +438,11 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 }
 
 func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
-	var buf bytes.Buffer
+	var buf ByteBuffer
 	if err := WriteMultipartForm(&buf, f, boundary); err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+	return buf.B, nil
 }
 
 // WriteMultipartForm writes the given multipart form f with the given
