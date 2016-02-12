@@ -1,7 +1,6 @@
 package fasthttp
 
 import (
-	"bytes"
 	"fmt"
 	"strings"
 	"testing"
@@ -28,7 +27,7 @@ func TestArgsWriteTo(t *testing.T) {
 	var a Args
 	a.Parse(s)
 
-	var w bytes.Buffer
+	var w ByteBuffer
 	n, err := a.WriteTo(&w)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
@@ -36,7 +35,7 @@ func TestArgsWriteTo(t *testing.T) {
 	if n != int64(len(s)) {
 		t.Fatalf("unexpected n: %d. Expecting %d", n, len(s))
 	}
-	result := string(w.Bytes())
+	result := string(w.B)
 	if result != s {
 		t.Fatalf("unexpected result %q. Expecting %q", result, s)
 	}

@@ -59,12 +59,12 @@ type bodyWriterTo interface {
 }
 
 func testBodyWriteTo(t *testing.T, bw bodyWriterTo, expectedS string, isRetainedBody bool) {
-	var buf bytes.Buffer
+	var buf ByteBuffer
 	if err := bw.BodyWriteTo(&buf); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	s := buf.Bytes()
+	s := buf.B
 	if string(s) != expectedS {
 		t.Fatalf("unexpected result %q. Expecting %q", s, expectedS)
 	}
@@ -133,7 +133,7 @@ func TestResponseWriteTo(t *testing.T) {
 	r.SetBodyString("foobar")
 
 	s := r.String()
-	var buf bytes.Buffer
+	var buf ByteBuffer
 	n, err := r.WriteTo(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
@@ -141,8 +141,8 @@ func TestResponseWriteTo(t *testing.T) {
 	if n != int64(len(s)) {
 		t.Fatalf("unexpected response length %d. Expecting %d", n, len(s))
 	}
-	if string(buf.Bytes()) != s {
-		t.Fatalf("unexpected response %q. Expecting %q", buf.Bytes(), s)
+	if string(buf.B) != s {
+		t.Fatalf("unexpected response %q. Expecting %q", buf.B, s)
 	}
 }
 
@@ -152,7 +152,7 @@ func TestRequestWriteTo(t *testing.T) {
 	r.SetRequestURI("http://foobar.com/aaa/bbb")
 
 	s := r.String()
-	var buf bytes.Buffer
+	var buf ByteBuffer
 	n, err := r.WriteTo(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
@@ -160,8 +160,8 @@ func TestRequestWriteTo(t *testing.T) {
 	if n != int64(len(s)) {
 		t.Fatalf("unexpected request length %d. Expecting %d", n, len(s))
 	}
-	if string(buf.Bytes()) != s {
-		t.Fatalf("unexpected request %q. Expecting %q", buf.Bytes(), s)
+	if string(buf.B) != s {
+		t.Fatalf("unexpected request %q. Expecting %q", buf.B, s)
 	}
 }
 
@@ -891,7 +891,7 @@ func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, bo
 	req.Header.Set("User-Agent", userAgent)
 	req.SetBody([]byte(body))
 
-	w := &bytes.Buffer{}
+	w := &ByteBuffer{}
 	bw := bufio.NewWriter(w)
 	err := req.Write(bw)
 	if err == nil {

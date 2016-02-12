@@ -77,7 +77,7 @@ func testAppendUint(t *testing.T, n int) {
 }
 
 func testWriteHexInt(t *testing.T, n int, expectedS string) {
-	var w bytes.Buffer
+	var w ByteBuffer
 	bw := bufio.NewWriter(&w)
 	if err := writeHexInt(bw, n); err != nil {
 		t.Fatalf("unexpected error when writing hex %x: %s", n, err)
@@ -85,7 +85,7 @@ func testWriteHexInt(t *testing.T, n int, expectedS string) {
 	if err := bw.Flush(); err != nil {
 		t.Fatalf("unexpected error when flushing hex %x: %s", n, err)
 	}
-	s := string(w.Bytes())
+	s := string(w.B)
 	if s != expectedS {
 		t.Fatalf("unexpected hex after writing %q. Expected %q", s, expectedS)
 	}
