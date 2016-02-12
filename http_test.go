@@ -671,10 +671,26 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	}
 }
 
+func TestSetRequestBodyStreamFixedSize(t *testing.T) {
+	testSetRequestBodyStream(t, "a", false)
+	testSetRequestBodyStream(t, string(createFixedBody(4097)), false)
+	testSetRequestBodyStream(t, string(createFixedBody(100500)), false)
+}
+
 func TestSetResponseBodyStreamFixedSize(t *testing.T) {
 	testSetResponseBodyStream(t, "a", false)
 	testSetResponseBodyStream(t, string(createFixedBody(4097)), false)
 	testSetResponseBodyStream(t, string(createFixedBody(100500)), false)
+}
+
+func TestSetRequestBodyStreamChunked(t *testing.T) {
+	testSetRequestBodyStream(t, "", true)
+
+	body := "foobar baz aaa bbb ccc"
+	testSetRequestBodyStream(t, body, true)
+
+	body = string(createFixedBody(10001))
+	testSetRequestBodyStream(t, body, true)
 }
 
 func TestSetResponseBodyStreamChunked(t *testing.T) {
@@ -685,6 +701,36 @@ func TestSetResponseBodyStreamChunked(t *testing.T) {
 
 	body = string(createFixedBody(10001))
 	testSetResponseBodyStream(t, body, true)
+}
+
+func testSetRequestBodyStream(t *testing.T, body string, chunked bool) {
+	var req Request
+	req.Header.SetHost("foobar.com")
+	req.Header.SetMethod("POST")
+
+	bodySize := len(body)
+	if chunked {
+		bodySize = -1
+	}
+	req.SetBodyStream(bytes.NewBufferString(body), bodySize)
+
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	if err := req.Write(bw); err != nil {
+		t.Fatalf("unexpected error when writing request: %s. body=%q", err, body)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error when flushing request: %s. body=%q", err, body)
+	}
+
+	var req1 Request
+	br := bufio.NewReader(&w)
+	if err := req1.Read(br); err != nil {
+		t.Fatalf("unexpected error when reading request: %s. body=%q", err, body)
+	}
+	if string(req1.Body()) != body {
+		t.Fatalf("unexpected body %q. Expecting %q", req1.Body(), body)
+	}
 }
 
 func testSetResponseBodyStream(t *testing.T, body string, chunked bool) {
