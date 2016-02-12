@@ -1051,7 +1051,8 @@ func newTLSListener(ln net.Listener, certFile, keyFile string) (net.Listener, er
 	return tls.NewListener(ln, tlsConfig), nil
 }
 
-// Default maximum number of concurrent connections the Server may serve.
+// DefaultConcurrency is the maximum number of concurrent connections
+// the Server may serve by default (i.e. if Server.Concurrency isn't set).
 const DefaultConcurrency = 256 * 1024
 
 // Serve serves incoming connections from the given listener.

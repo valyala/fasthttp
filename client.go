@@ -359,8 +359,9 @@ func (c *Client) mCleaner(m map[string]*HostClient) {
 	}
 }
 
-// Maximum number of concurrent connections http client may establish per host
-// by default.
+// DefaultMaxConnsPerHost is the maximum number of concurrent connections
+// http client may establish per host by default (i.e. if
+// Client.MaxConnsPerHost isn't set).
 const DefaultMaxConnsPerHost = 512
 
 // DialFunc must establish connection to addr.
