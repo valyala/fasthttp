@@ -632,7 +632,7 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) error {
 		return err
 	}
 	defer ff.Close()
-	_, err = io.Copy(ff, f)
+	_, err = copyZeroAlloc(ff, f)
 	return err
 }
 

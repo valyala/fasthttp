@@ -1003,7 +1003,7 @@ func (h *fsHandler) compressFileNolock(f *os.File, fileInfo os.FileInfo, filePat
 	}
 
 	zw := acquireGzipWriter(zf, CompressDefaultCompression)
-	_, err = io.Copy(zw, f)
+	_, err = copyZeroAlloc(zw, f)
 	if err1 := zw.Flush(); err == nil {
 		err = err1
 	}

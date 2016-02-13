@@ -240,7 +240,7 @@ func (w *requestBodyWriter) Write(p []byte) (int, error) {
 func (resp *Response) Body() []byte {
 	if resp.bodyStream != nil {
 		var w ByteBuffer
-		_, err := io.Copy(&w, resp.bodyStream)
+		_, err := copyZeroAlloc(&w, resp.bodyStream)
 		resp.closeBodyStream()
 		if err != nil {
 			return []byte(err.Error())
@@ -297,7 +297,7 @@ func (resp *Response) BodyInflate() ([]byte, error) {
 // BodyWriteTo writes request body to w.
 func (req *Request) BodyWriteTo(w io.Writer) error {
 	if req.bodyStream != nil {
-		_, err := io.Copy(w, req.bodyStream)
+		_, err := copyZeroAlloc(w, req.bodyStream)
 		req.closeBodyStream()
 		return err
 	}
@@ -311,7 +311,7 @@ func (req *Request) BodyWriteTo(w io.Writer) error {
 // BodyWriteTo writes response body to w.
 func (resp *Response) BodyWriteTo(w io.Writer) error {
 	if resp.bodyStream != nil {
-		_, err := io.Copy(w, resp.bodyStream)
+		_, err := copyZeroAlloc(w, resp.bodyStream)
 		resp.closeBodyStream()
 		return err
 	}
@@ -353,7 +353,7 @@ func (resp *Response) ResetBody() {
 func (req *Request) Body() []byte {
 	if req.bodyStream != nil {
 		var w ByteBuffer
-		_, err := io.Copy(&w, req.bodyStream)
+		_, err := copyZeroAlloc(&w, req.bodyStream)
 		req.closeBodyStream()
 		if err != nil {
 			return []byte(err.Error())
@@ -546,7 +546,7 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 			if err != nil {
 				return fmt.Errorf("cannot open form file %q (%q): %s", k, fv.Filename, err)
 			}
-			if _, err = io.Copy(vw, fh); err != nil {
+			if _, err = copyZeroAlloc(vw, fh); err != nil {
 				return fmt.Errorf("error when copying form file %q (%q): %s", k, fv.Filename, err)
 			}
 			if err = fh.Close(); err != nil {
@@ -969,7 +969,7 @@ func (resp *Response) gzipBody(level int) error {
 		bs := resp.bodyStream
 		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
 			zw := acquireGzipWriter(sw, level)
-			io.Copy(zw, bs)
+			copyZeroAlloc(zw, bs)
 			releaseGzipWriter(zw)
 		})
 	} else {
@@ -998,7 +998,7 @@ func (resp *Response) deflateBody(level int) error {
 		bs := resp.bodyStream
 		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
 			zw := acquireFlateWriter(sw, level)
-			io.Copy(zw, bs)
+			copyZeroAlloc(zw, bs)
 			releaseFlateWriter(zw)
 		})
 	} else {

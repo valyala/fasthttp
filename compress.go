@@ -162,7 +162,7 @@ func WriteGunzip(w io.Writer, p []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, err := io.Copy(w, zr)
+	n, err := copyZeroAlloc(w, zr)
 	releaseGzipReader(zr)
 	nn := int(n)
 	if int64(nn) != n {
@@ -253,7 +253,7 @@ func isFileCompressible(f *os.File, minCompressRatio float64) bool {
 		R: f,
 		N: 4096,
 	}
-	_, err := io.Copy(zw, lr)
+	_, err := copyZeroAlloc(zw, lr)
 	releaseGzipWriter(zw)
 	f.Seek(0, 0)
 	if err != nil {
