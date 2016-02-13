@@ -11,6 +11,32 @@ import (
 	"testing"
 )
 
+func TestRequestBodyStreamMultipleBodyCalls(t *testing.T) {
+	var r Request
+
+	s := "foobar baz abc"
+	r.SetBodyStream(bytes.NewBufferString(s), len(s))
+	for i := 0; i < 10; i++ {
+		body := r.Body()
+		if string(body) != s {
+			t.Fatalf("unexpected body %q. Expecting %q. iteration %d", body, s, i)
+		}
+	}
+}
+
+func TestResponseBodyStreamMultipleBodyCalls(t *testing.T) {
+	var r Response
+
+	s := "foobar baz abc"
+	r.SetBodyStream(bytes.NewBufferString(s), len(s))
+	for i := 0; i < 10; i++ {
+		body := r.Body()
+		if string(body) != s {
+			t.Fatalf("unexpected body %q. Expecting %q. iteration %d", body, s, i)
+		}
+	}
+}
+
 func TestRequestBodyWriteToPlain(t *testing.T) {
 	var r Request
 

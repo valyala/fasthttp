@@ -243,9 +243,10 @@ func (resp *Response) Body() []byte {
 		_, err := copyZeroAlloc(&w, resp.bodyStream)
 		resp.closeBodyStream()
 		if err != nil {
-			return []byte(err.Error())
+			resp.body = append(resp.body[:0], err.Error()...)
+		} else {
+			resp.body = append(resp.body[:0], w.B...)
 		}
-		return w.B
 	}
 	return resp.body
 }
@@ -356,11 +357,11 @@ func (req *Request) Body() []byte {
 		_, err := copyZeroAlloc(&w, req.bodyStream)
 		req.closeBodyStream()
 		if err != nil {
-			return []byte(err.Error())
+			req.body = append(req.body[:0], err.Error()...)
+		} else {
+			req.body = append(req.body[:0], w.B...)
 		}
-		return w.B
-	}
-	if req.onlyMultipartForm() {
+	} else if req.onlyMultipartForm() {
 		body, err := marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
 		if err != nil {
 			return []byte(err.Error())
