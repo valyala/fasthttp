@@ -1250,7 +1250,7 @@ func (s *Server) serveConn(c net.Conn) error {
 				}
 			}
 			if err = c.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
-				break
+				panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", readTimeout, err))
 			}
 		}
 
@@ -1312,7 +1312,6 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.connRequestNum = connRequestNum
 		ctx.connTime = connTime
 		ctx.time = currentTime
-		ctx.Response.Reset()
 		s.Handler(ctx)
 
 		if !ctx.IsGet() && ctx.IsHead() {
@@ -1355,7 +1354,7 @@ func (s *Server) serveConn(c net.Conn) error {
 				}
 			}
 			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-				break
+				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", writeTimeout, err))
 			}
 		}
 
@@ -1501,6 +1500,7 @@ func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 	if len(serverOld) == 0 {
 		h.server = serverOld
 	}
+	ctx.Response.Reset()
 	return err
 }
 
