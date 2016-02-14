@@ -406,11 +406,11 @@ func (req *Request) ResetBody() {
 	req.body = req.body[:0]
 }
 
-// CopyTo copies req contents to dst.
+// CopyTo copies req contents to dst except of body stream.
 func (req *Request) CopyTo(dst *Request) {
 	dst.Reset()
 	req.Header.CopyTo(&dst.Header)
-	dst.body = append(dst.body[:0], req.Body()...)
+	dst.body = append(dst.body[:0], req.body...)
 
 	req.uri.CopyTo(&dst.uri)
 	dst.parsedURI = req.parsedURI
