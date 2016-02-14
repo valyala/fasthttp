@@ -911,7 +911,8 @@ func (req *Request) Write(w *bufio.Writer) error {
 
 // WriteGzip writes response with gzipped body to w.
 //
-// The method sets 'Content-Encoding: gzip' header.
+// The method gzips response body and sets 'Content-Encoding: gzip'
+// header before writing response to w.
 //
 // WriteGzip doesn't flush response to w for performance reasons.
 func (resp *Response) WriteGzip(w *bufio.Writer) error {
@@ -927,7 +928,8 @@ func (resp *Response) WriteGzip(w *bufio.Writer) error {
 //     * CompressBestCompression
 //     * CompressDefaultCompression
 //
-// The method sets 'Content-Encoding: gzip' header.
+// The method gzips response body and sets 'Content-Encoding: gzip'
+// header before writing response to w.
 //
 // WriteGzipLevel doesn't flush response to w for performance reasons.
 func (resp *Response) WriteGzipLevel(w *bufio.Writer, level int) error {
@@ -939,7 +941,8 @@ func (resp *Response) WriteGzipLevel(w *bufio.Writer, level int) error {
 
 // WriteDeflate writes response with deflated body to w.
 //
-// The method sets 'Content-Encoding: deflate' header.
+// The method deflates response body and sets 'Content-Encoding: deflate'
+// header before writing response to w.
 //
 // WriteDeflate doesn't flush response to w for performance reasons.
 func (resp *Response) WriteDeflate(w *bufio.Writer) error {
@@ -955,7 +958,8 @@ func (resp *Response) WriteDeflate(w *bufio.Writer) error {
 //     * CompressBestCompression
 //     * CompressDefaultCompression
 //
-// The method sets 'Content-Encoding: deflate' header.
+// The method deflates response body and sets 'Content-Encoding: deflate'
+// header before writing response to w.
 //
 // WriteDeflateLevel doesn't flush response to w for performance reasons.
 func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
