@@ -1230,6 +1230,7 @@ func (s *Server) serveConn(c net.Conn) error {
 
 	var err error
 	var connectionClose bool
+	var isHTTP11 bool
 	var timeoutResponse *Response
 	var hijackHandler HijackHandler
 	for {
@@ -1314,17 +1315,17 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.time = currentTime
 		s.Handler(ctx)
 
+		connectionClose = ctx.Request.Header.connectionCloseFast()
+		isHTTP11 = ctx.Request.Header.IsHTTP11()
 		if !ctx.IsGet() && ctx.IsHead() {
 			ctx.Response.SkipBody = true
 		}
+		ctx.Request.Reset()
 
 		hijackHandler = ctx.hijackHandler
 		ctx.hijackHandler = nil
 
 		ctx.userValues.Reset()
-
-		// Remove temporary files, which may be uploaded during the request.
-		ctx.Request.RemoveMultipartFormFiles()
 
 		timeoutResponse = ctx.timeoutResponse
 		if timeoutResponse != nil {
@@ -1358,10 +1359,10 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
-		connectionClose = ctx.Response.ConnectionClose() || ctx.Request.Header.connectionCloseFast()
+		connectionClose = connectionClose || ctx.Response.ConnectionClose()
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
-		} else if !ctx.Request.Header.IsHTTP11() {
+		} else if !isHTTP11 {
 			// Set 'Connection: keep-alive' response header for non-HTTP/1.1 request.
 			// There is no need in setting this header for http/1.1, since in http/1.1
 			// connections are keep-alive by default.
