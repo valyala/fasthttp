@@ -156,6 +156,22 @@ func (a *Args) PeekBytes(key []byte) []byte {
 	return peekArgBytes(a.args, key)
 }
 
+// PeekMulti returns all the arg values for the given key.
+func (a *Args) PeekMulti(key string) [][]byte {
+	var values [][]byte
+	a.VisitAll(func(k, v []byte) {
+		if string(k) == key {
+			values = append(values, v)
+		}
+	})
+	return values
+}
+
+// PeekMultiBytes returns all the arg values for the given key.
+func (a *Args) PeekMultiBytes(key []byte) [][]byte {
+	return a.PeekMulti(unsafeBytesToStr(key))
+}
+
 // Has returns true if the given key exists in Args.
 func (a *Args) Has(key string) bool {
 	a.bufKV.key = append(a.bufKV.key[:0], key...)

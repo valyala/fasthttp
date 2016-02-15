@@ -2,9 +2,36 @@ package fasthttp
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestPeekMulti(t *testing.T) {
+	var a Args
+	a.Parse("foo=123&bar=121&foo=321&foo=&barz=sdf")
+
+	vv := a.PeekMulti("foo")
+	expectedVV := [][]byte{
+		[]byte("123"),
+		[]byte("321"),
+		[]byte(nil),
+	}
+	if !reflect.DeepEqual(vv, expectedVV) {
+		t.Fatalf("unexpected vv\n%#v\nExpecting\n%#v\n", vv, expectedVV)
+	}
+
+	vv = a.PeekMulti("aaaa")
+	if len(vv) > 0 {
+		t.Fatalf("expecting empty result for non-existing key. Got %#v", vv)
+	}
+
+	vv = a.PeekMulti("bar")
+	expectedVV = [][]byte{[]byte("121")}
+	if !reflect.DeepEqual(vv, expectedVV) {
+		t.Fatalf("unexpected vv\n%#v\nExpecting\n%#v\n", vv, expectedVV)
+	}
+}
 
 func TestArgsEscape(t *testing.T) {
 	testArgsEscape(t, "foo", "bar", "foo=bar")
