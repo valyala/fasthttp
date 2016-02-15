@@ -2,9 +2,42 @@ package fasthttp
 
 import (
 	"bufio"
+	"html"
 	"net"
 	"testing"
 )
+
+func BenchmarkAppendHTMLEscape(b *testing.B) {
+	sOrig := "<b>foobarbazxxxyyyzzz</b>"
+	sExpected := string(AppendHTMLEscape(nil, sOrig))
+	b.RunParallel(func(pb *testing.PB) {
+		var buf []byte
+		for pb.Next() {
+			for i := 0; i < 10; i++ {
+				buf = AppendHTMLEscape(buf[:0], sOrig)
+				if string(buf) != sExpected {
+					b.Fatalf("unexpected escaped string: %s. Expecting %s", buf, sExpected)
+				}
+			}
+		}
+	})
+}
+
+func BenchmarkHTMLEscapeString(b *testing.B) {
+	sOrig := "<b>foobarbazxxxyyyzzz</b>"
+	sExpected := html.EscapeString(sOrig)
+	b.RunParallel(func(pb *testing.PB) {
+		var s string
+		for pb.Next() {
+			for i := 0; i < 10; i++ {
+				s = html.EscapeString(sOrig)
+				if s != sExpected {
+					b.Fatalf("unexpected escaped string: %s. Expecting %s", s, sExpected)
+				}
+			}
+		}
+	})
+}
 
 func BenchmarkParseIPv4(b *testing.B) {
 	ipStr := []byte("123.145.167.189")

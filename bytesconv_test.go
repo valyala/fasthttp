@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+func TestAppendHTMLEscape(t *testing.T) {
+	testAppendHTMLEscape(t, "", "")
+	testAppendHTMLEscape(t, "<", "&lt;")
+	testAppendHTMLEscape(t, "a", "a")
+	testAppendHTMLEscape(t, `><"''`, "&gt;&lt;&quot;&#39;&#39;")
+	testAppendHTMLEscape(t, "fo<b x='ss'>a</b>xxx", "fo&lt;b x=&#39;ss&#39;&gt;a&lt;/b&gt;xxx")
+}
+
+func testAppendHTMLEscape(t *testing.T, s, expectedS string) {
+	buf := AppendHTMLEscapeBytes(nil, []byte(s))
+	if string(buf) != expectedS {
+		t.Fatalf("unexpected html-escaped string %q. Expecting %q. Original string %q", buf, expectedS, s)
+	}
+}
+
 func TestParseIPv4(t *testing.T) {
 	testParseIPv4(t, "0.0.0.0", true)
 	testParseIPv4(t, "255.255.255.255", true)

@@ -12,6 +12,37 @@ import (
 	"unsafe"
 )
 
+// AppendHTMLEscape appends html-escaped s to dst and returns the extended dst.
+func AppendHTMLEscape(dst []byte, s string) []byte {
+	var prev int
+	var sub string
+	for i, n := 0, len(s); i < n; i++ {
+		sub = ""
+		switch s[i] {
+		case '<':
+			sub = "&lt;"
+		case '>':
+			sub = "&gt;"
+		case '"':
+			sub = "&quot;"
+		case '\'':
+			sub = "&#39;"
+		}
+		if len(sub) > 0 {
+			dst = append(dst, s[prev:i]...)
+			dst = append(dst, sub...)
+			prev = i + 1
+		}
+	}
+	return append(dst, s[prev:]...)
+}
+
+// AppendHTMLEscapeBytes appends html-escaped s to dst and returns
+// the extended dst.
+func AppendHTMLEscapeBytes(dst, s []byte) []byte {
+	return AppendHTMLEscape(dst, unsafeBytesToStr(s))
+}
+
 // AppendIPv4 appends string representation of the given ip v4 to dst
 // and returns the extended dst.
 func AppendIPv4(dst []byte, ip net.IP) []byte {
