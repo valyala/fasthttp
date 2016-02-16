@@ -10,6 +10,86 @@ import (
 	"testing"
 )
 
+func TestResponseHeaderTrailingCRLFSuccess(t *testing.T) {
+	trailingCRLF := "\r\n\r\n\r\n"
+	s := "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 123\r\n\r\n" + trailingCRLF
+
+	var r ResponseHeader
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := r.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// try reading the trailing CRLF. It must return EOF
+	err := r.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err != io.EOF {
+		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+	}
+}
+
+func TestResponseHeaderTrailingCRLFError(t *testing.T) {
+	trailingCRLF := "\r\nerror\r\n\r\n"
+	s := "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 123\r\n\r\n" + trailingCRLF
+
+	var r ResponseHeader
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := r.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// try reading the trailing CRLF. It must return EOF
+	err := r.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err == io.EOF {
+		t.Fatalf("unexpected error: %s", err)
+	}
+}
+
+func TestRequestHeaderTrailingCRLFSuccess(t *testing.T) {
+	trailingCRLF := "\r\n\r\n\r\n"
+	s := "GET / HTTP/1.1\r\nHost: aaa.com\r\n\r\n" + trailingCRLF
+
+	var r RequestHeader
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := r.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// try reading the trailing CRLF. It must return EOF
+	err := r.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err != io.EOF {
+		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+	}
+}
+
+func TestRequestHeaderTrailingCRLFError(t *testing.T) {
+	trailingCRLF := "\r\nerror\r\n\r\n"
+	s := "GET / HTTP/1.1\r\nHost: aaa.com\r\n\r\n" + trailingCRLF
+
+	var r RequestHeader
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := r.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// try reading the trailing CRLF. It must return EOF
+	err := r.Read(br)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+	if err == io.EOF {
+		t.Fatalf("unexpected error: %s", err)
+	}
+}
+
 func TestRequestHeaderReadEOF(t *testing.T) {
 	var r RequestHeader
 
