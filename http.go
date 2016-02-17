@@ -15,10 +15,9 @@ import (
 // Request represents HTTP request.
 //
 // It is forbidden copying Request instances. Create new instances
-// and use CopyTo() instead.
+// and use CopyTo instead.
 //
-// It is unsafe modifying/reading Request instance from concurrently
-// running goroutines.
+// Request instance MUST NOT be used from concurrently running goroutines.
 type Request struct {
 	// Request header
 	//
@@ -43,10 +42,9 @@ type Request struct {
 // Response represents HTTP response.
 //
 // It is forbidden copying Response instances. Create new instances
-// and use CopyTo() instead.
+// and use CopyTo instead.
 //
-// It is unsafe modifying/reading Response instance from concurrently
-// running goroutines.
+// Response instance MUST NOT be used from concurrently running goroutines.
 type Response struct {
 	// Response header
 	//

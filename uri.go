@@ -9,6 +9,8 @@ import (
 //
 // It is forbidden copying URI instances. Create new instance and use CopyTo
 // instead.
+//
+// URI instance MUST NOT be used from concurrently running goroutines.
 type URI struct {
 	pathOriginal []byte
 	scheme       []byte

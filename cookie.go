@@ -21,8 +21,7 @@ var (
 //
 // Do not copy Cookie objects. Create new object and use CopyTo instead.
 //
-// It is unsafe modifying/reading Cookie instance from concurrently
-// running goroutines.
+// Cookie instance MUST NOT be used from concurrently running goroutines.
 type Cookie struct {
 	key    []byte
 	value  []byte

@@ -282,8 +282,8 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 // before return.
 //
 // It is unsafe modifying/reading RequestCtx instance from concurrently
-// running goroutines. The only exception is TimeoutError, which may be called
-// when other goroutines access RequestCtx.
+// running goroutines. The only exception is TimeoutError*, which may be called
+// while other goroutines accessing RequestCtx.
 type RequestCtx struct {
 	// Incoming request.
 	//

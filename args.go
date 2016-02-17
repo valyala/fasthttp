@@ -11,8 +11,7 @@ import (
 // It is forbidden copying Args instances. Create new instances instead
 // and use CopyTo().
 //
-// It is unsafe modifying/reading Args instance from concurrently
-// running goroutines.
+// Args instance MUST NOT be used from concurrently running goroutines.
 type Args struct {
 	args  []argsKV
 	bufKV argsKV
