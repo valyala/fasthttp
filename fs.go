@@ -1175,7 +1175,8 @@ func fileExtension(path string, compressed bool) string {
 	return path[n:]
 }
 
-func fsLastModified(path string) (time.Time, error) {
+// FileLastModified returns last modified time for the file.
+func FileLastModified(path string) (time.Time, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return zeroTime, err

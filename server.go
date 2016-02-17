@@ -823,26 +823,13 @@ func (ctx *RequestCtx) ResetBody() {
 
 // SendFile sends local file contents from the given path as response body.
 //
-// Note that SendFile doesn't set Content-Type for the response body,
-// so set it yourself with SetContentType() before returning
-// from RequestHandler.
+// This is a shortcut to ServeFile(ctx, path).
+//
+// SendFile logs all the errors via ctx.Logger.
 //
 // See also ServeFile, FSHandler and FS.
-func (ctx *RequestCtx) SendFile(path string) error {
-	ifModStr := ctx.Request.Header.peek(strIfModifiedSince)
-	if len(ifModStr) > 0 {
-		if ifMod, err := ParseHTTPDate(ifModStr); err == nil {
-			lastMod, err := fsLastModified(path)
-			if err != nil {
-				return err
-			}
-			if !ifMod.Before(lastMod) {
-				ctx.NotModified()
-				return nil
-			}
-		}
-	}
-	return ctx.Response.SendFile(path)
+func (ctx *RequestCtx) SendFile(path string) {
+	ServeFile(ctx, path)
 }
 
 // IfModifiedSince returns true if lastModified exceeds 'If-Modified-Since'

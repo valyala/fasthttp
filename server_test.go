@@ -381,15 +381,13 @@ func TestRequestCtxSendFileNotModified(t *testing.T) {
 	ctx.Init(&req, nil, defaultLogger)
 
 	filePath := "./server_test.go"
-	lastModified, err := fsLastModified(filePath)
+	lastModified, err := FileLastModified(filePath)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 	ctx.Request.Header.Set("If-Modified-Since", string(AppendHTTPDate(nil, lastModified)))
 
-	if err := ctx.SendFile(filePath); err != nil {
-		t.Fatalf("error in SendFile: %s", err)
-	}
+	ctx.SendFile(filePath)
 
 	s := ctx.Response.String()
 
@@ -412,16 +410,14 @@ func TestRequestCtxSendFileModified(t *testing.T) {
 	ctx.Init(&req, nil, defaultLogger)
 
 	filePath := "./server_test.go"
-	lastModified, err := fsLastModified(filePath)
+	lastModified, err := FileLastModified(filePath)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 	lastModified = lastModified.Add(-time.Hour)
 	ctx.Request.Header.Set("If-Modified-Since", string(AppendHTTPDate(nil, lastModified)))
 
-	if err := ctx.SendFile(filePath); err != nil {
-		t.Fatalf("error in SendFile: %s", err)
-	}
+	ctx.SendFile(filePath)
 
 	s := ctx.Response.String()
 
@@ -455,9 +451,7 @@ func TestRequestCtxSendFile(t *testing.T) {
 	ctx.Init(&req, nil, defaultLogger)
 
 	filePath := "./server_test.go"
-	if err := ctx.SendFile(filePath); err != nil {
-		t.Fatalf("error in SendFile: %s", err)
-	}
+	ctx.SendFile(filePath)
 
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
