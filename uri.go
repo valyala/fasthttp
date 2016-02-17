@@ -17,9 +17,9 @@ func AcquireURI() *URI {
 //
 // The released URI mustn't be used after releasing it, otherwise data races
 // may occur.
-func ReleaseURI(x *URI) {
-	x.Reset()
-	uriPool.Put(x)
+func ReleaseURI(u *URI) {
+	u.Reset()
+	uriPool.Put(u)
 }
 
 var uriPool = &sync.Pool{
@@ -52,57 +52,57 @@ type URI struct {
 }
 
 // CopyTo copies uri contents to dst.
-func (x *URI) CopyTo(dst *URI) {
+func (u *URI) CopyTo(dst *URI) {
 	dst.Reset()
-	dst.pathOriginal = append(dst.pathOriginal[:0], x.pathOriginal...)
-	dst.scheme = append(dst.scheme[:0], x.scheme...)
-	dst.path = append(dst.path[:0], x.path...)
-	dst.queryString = append(dst.queryString[:0], x.queryString...)
-	dst.hash = append(dst.hash[:0], x.hash...)
-	dst.host = append(dst.host[:0], x.host...)
+	dst.pathOriginal = append(dst.pathOriginal[:0], u.pathOriginal...)
+	dst.scheme = append(dst.scheme[:0], u.scheme...)
+	dst.path = append(dst.path[:0], u.path...)
+	dst.queryString = append(dst.queryString[:0], u.queryString...)
+	dst.hash = append(dst.hash[:0], u.hash...)
+	dst.host = append(dst.host[:0], u.host...)
 
 	dst.parsedQueryArgs = false
 
 	// fullURI and requestURI shouldn't be copied, since they are created
 	// from scratch on each FullURI() and RequestURI() call.
-	dst.h = x.h
+	dst.h = u.h
 }
 
 // Hash returns URI hash, i.e. qwe of http://aaa.com/foo/bar?baz=123#qwe .
 //
 // The returned value is valid until the next URI method call.
-func (x *URI) Hash() []byte {
-	return x.hash
+func (u *URI) Hash() []byte {
+	return u.hash
 }
 
 // SetHash sets URI hash.
-func (x *URI) SetHash(hash string) {
-	x.hash = append(x.hash[:0], hash...)
+func (u *URI) SetHash(hash string) {
+	u.hash = append(u.hash[:0], hash...)
 }
 
 // SetHashBytes sets URI hash.
-func (x *URI) SetHashBytes(hash []byte) {
-	x.hash = append(x.hash[:0], hash...)
+func (u *URI) SetHashBytes(hash []byte) {
+	u.hash = append(u.hash[:0], hash...)
 }
 
 // QueryString returns URI query string,
 // i.e. baz=123 of http://aaa.com/foo/bar?baz=123#qwe .
 //
 // The returned value is valid until the next URI method call.
-func (x *URI) QueryString() []byte {
-	return x.queryString
+func (u *URI) QueryString() []byte {
+	return u.queryString
 }
 
 // SetQueryString sets URI query string.
-func (x *URI) SetQueryString(queryString string) {
-	x.queryString = append(x.queryString[:0], queryString...)
-	x.parsedQueryArgs = false
+func (u *URI) SetQueryString(queryString string) {
+	u.queryString = append(u.queryString[:0], queryString...)
+	u.parsedQueryArgs = false
 }
 
 // SetQueryStringBytes sets URI query string.
-func (x *URI) SetQueryStringBytes(queryString []byte) {
-	x.queryString = append(x.queryString[:0], queryString...)
-	x.parsedQueryArgs = false
+func (u *URI) SetQueryStringBytes(queryString []byte) {
+	u.queryString = append(u.queryString[:0], queryString...)
+	u.parsedQueryArgs = false
 }
 
 // Path returns URI path, i.e. /foo/bar of http://aaa.com/foo/bar?baz=123#qwe .
@@ -111,8 +111,8 @@ func (x *URI) SetQueryStringBytes(queryString []byte) {
 // i.e. '//f%20obar/baz/../zzz' becomes '/f obar/zzz'.
 //
 // The returned value is valid until the next URI method call.
-func (x *URI) Path() []byte {
-	path := x.path
+func (u *URI) Path() []byte {
+	path := u.path
 	if len(path) == 0 {
 		path = strSlash
 	}
@@ -120,22 +120,22 @@ func (x *URI) Path() []byte {
 }
 
 // SetPath sets URI path.
-func (x *URI) SetPath(path string) {
-	x.pathOriginal = append(x.pathOriginal, path...)
-	x.path = normalizePath(x.path, x.pathOriginal)
+func (u *URI) SetPath(path string) {
+	u.pathOriginal = append(u.pathOriginal, path...)
+	u.path = normalizePath(u.path, u.pathOriginal)
 }
 
 // SetPathBytes sets URI path.
-func (x *URI) SetPathBytes(path []byte) {
-	x.pathOriginal = append(x.pathOriginal[:0], path...)
-	x.path = normalizePath(x.path, x.pathOriginal)
+func (u *URI) SetPathBytes(path []byte) {
+	u.pathOriginal = append(u.pathOriginal[:0], path...)
+	u.path = normalizePath(u.path, u.pathOriginal)
 }
 
 // PathOriginal returns the original path from requestURI passed to URI.Parse().
 //
 // The returned value is valid until the next URI method call.
-func (x *URI) PathOriginal() []byte {
-	return x.pathOriginal
+func (u *URI) PathOriginal() []byte {
+	return u.pathOriginal
 }
 
 // Scheme returns URI scheme, i.e. http of http://aaa.com/foo/bar?baz=123#qwe .
@@ -143,8 +143,8 @@ func (x *URI) PathOriginal() []byte {
 // Returned scheme is always lowercased.
 //
 // The returned value is valid until the next URI method call.
-func (x *URI) Scheme() []byte {
-	scheme := x.scheme
+func (u *URI) Scheme() []byte {
+	scheme := u.scheme
 	if len(scheme) == 0 {
 		scheme = strHTTP
 	}
@@ -152,80 +152,80 @@ func (x *URI) Scheme() []byte {
 }
 
 // SetScheme sets URI scheme, i.e. http, https, ftp, etc.
-func (x *URI) SetScheme(scheme string) {
-	x.scheme = append(x.scheme[:0], scheme...)
-	lowercaseBytes(x.scheme)
+func (u *URI) SetScheme(scheme string) {
+	u.scheme = append(u.scheme[:0], scheme...)
+	lowercaseBytes(u.scheme)
 }
 
 // SetSchemeBytes sets URI scheme, i.e. http, https, ftp, etc.
-func (x *URI) SetSchemeBytes(scheme []byte) {
-	x.scheme = append(x.scheme[:0], scheme...)
-	lowercaseBytes(x.scheme)
+func (u *URI) SetSchemeBytes(scheme []byte) {
+	u.scheme = append(u.scheme[:0], scheme...)
+	lowercaseBytes(u.scheme)
 }
 
 // Reset clears uri.
-func (x *URI) Reset() {
-	x.pathOriginal = x.pathOriginal[:0]
-	x.scheme = x.scheme[:0]
-	x.path = x.path[:0]
-	x.queryString = x.queryString[:0]
-	x.hash = x.hash[:0]
+func (u *URI) Reset() {
+	u.pathOriginal = u.pathOriginal[:0]
+	u.scheme = u.scheme[:0]
+	u.path = u.path[:0]
+	u.queryString = u.queryString[:0]
+	u.hash = u.hash[:0]
 
-	x.host = x.host[:0]
-	x.queryArgs.Reset()
-	x.parsedQueryArgs = false
+	u.host = u.host[:0]
+	u.queryArgs.Reset()
+	u.parsedQueryArgs = false
 
-	// There is no need in x.fullURI = x.fullURI[:0], since full uri
+	// There is no need in u.fullURI = u.fullURI[:0], since full uri
 	// is calucalted on each call to FullURI().
 
-	// There is no need in x.requestURI = x.requestURI[:0], since requestURI
+	// There is no need in u.requestURI = u.requestURI[:0], since requestURI
 	// is calculated on each call to RequestURI().
 
-	x.h = nil
+	u.h = nil
 }
 
 // Host returns host part, i.e. aaa.com of http://aaa.com/foo/bar?baz=123#qwe .
 //
 // Host is always lowercased.
-func (x *URI) Host() []byte {
-	if len(x.host) == 0 && x.h != nil {
-		x.host = append(x.host[:0], x.h.Host()...)
-		lowercaseBytes(x.host)
-		x.h = nil
+func (u *URI) Host() []byte {
+	if len(u.host) == 0 && u.h != nil {
+		u.host = append(u.host[:0], u.h.Host()...)
+		lowercaseBytes(u.host)
+		u.h = nil
 	}
-	return x.host
+	return u.host
 }
 
 // SetHost sets host for the uri.
-func (x *URI) SetHost(host string) {
-	x.host = append(x.host[:0], host...)
-	lowercaseBytes(x.host)
+func (u *URI) SetHost(host string) {
+	u.host = append(u.host[:0], host...)
+	lowercaseBytes(u.host)
 }
 
 // SetHostBytes sets host for the uri.
-func (x *URI) SetHostBytes(host []byte) {
-	x.host = append(x.host[:0], host...)
-	lowercaseBytes(x.host)
+func (u *URI) SetHostBytes(host []byte) {
+	u.host = append(u.host[:0], host...)
+	lowercaseBytes(u.host)
 }
 
 // Parse initializes URI from the given host and uri.
-func (x *URI) Parse(host, uri []byte) {
-	x.parse(host, uri, nil)
+func (u *URI) Parse(host, uri []byte) {
+	u.parse(host, uri, nil)
 }
 
-func (x *URI) parseQuick(uri []byte, h *RequestHeader) {
-	x.parse(nil, uri, h)
+func (u *URI) parseQuick(uri []byte, h *RequestHeader) {
+	u.parse(nil, uri, h)
 }
 
-func (x *URI) parse(host, uri []byte, h *RequestHeader) {
-	x.Reset()
-	x.h = h
+func (u *URI) parse(host, uri []byte, h *RequestHeader) {
+	u.Reset()
+	u.h = h
 
 	scheme, host, uri := splitHostURI(host, uri)
-	x.scheme = append(x.scheme, scheme...)
-	lowercaseBytes(x.scheme)
-	x.host = append(x.host, host...)
-	lowercaseBytes(x.host)
+	u.scheme = append(u.scheme, scheme...)
+	lowercaseBytes(u.scheme)
+	u.host = append(u.host, host...)
+	lowercaseBytes(u.host)
 
 	b := uri
 	queryIndex := bytes.IndexByte(b, '?')
@@ -236,30 +236,30 @@ func (x *URI) parse(host, uri []byte, h *RequestHeader) {
 	}
 
 	if queryIndex < 0 && fragmentIndex < 0 {
-		x.pathOriginal = append(x.pathOriginal, b...)
-		x.path = normalizePath(x.path, x.pathOriginal)
+		u.pathOriginal = append(u.pathOriginal, b...)
+		u.path = normalizePath(u.path, u.pathOriginal)
 		return
 	}
 
 	if queryIndex >= 0 {
 		// Path is everything up to the start of the query
-		x.pathOriginal = append(x.pathOriginal, b[:queryIndex]...)
-		x.path = normalizePath(x.path, x.pathOriginal)
+		u.pathOriginal = append(u.pathOriginal, b[:queryIndex]...)
+		u.path = normalizePath(u.path, u.pathOriginal)
 
 		if fragmentIndex < 0 {
-			x.queryString = append(x.queryString, b[queryIndex+1:]...)
+			u.queryString = append(u.queryString, b[queryIndex+1:]...)
 		} else {
-			x.queryString = append(x.queryString, b[queryIndex+1:fragmentIndex]...)
-			x.hash = append(x.hash, b[fragmentIndex+1:]...)
+			u.queryString = append(u.queryString, b[queryIndex+1:fragmentIndex]...)
+			u.hash = append(u.hash, b[fragmentIndex+1:]...)
 		}
 		return
 	}
 
 	// fragmentIndex >= 0 && queryIndex < 0
 	// Path is up to the start of fragment
-	x.pathOriginal = append(x.pathOriginal, b[:fragmentIndex]...)
-	x.path = normalizePath(x.path, x.pathOriginal)
-	x.hash = append(x.hash, b[fragmentIndex+1:]...)
+	u.pathOriginal = append(u.pathOriginal, b[:fragmentIndex]...)
+	u.path = normalizePath(u.path, u.pathOriginal)
+	u.hash = append(u.hash, b[fragmentIndex+1:]...)
 }
 
 func normalizePath(dst, src []byte) []byte {
@@ -328,21 +328,21 @@ func normalizePath(dst, src []byte) []byte {
 }
 
 // RequestURI returns RequestURI - i.e. URI without Scheme and Host.
-func (x *URI) RequestURI() []byte {
-	dst := appendQuotedPath(x.requestURI[:0], x.Path())
-	if x.queryArgs.Len() > 0 {
+func (u *URI) RequestURI() []byte {
+	dst := appendQuotedPath(u.requestURI[:0], u.Path())
+	if u.queryArgs.Len() > 0 {
 		dst = append(dst, '?')
-		dst = x.queryArgs.AppendBytes(dst)
-	} else if len(x.queryString) > 0 {
+		dst = u.queryArgs.AppendBytes(dst)
+	} else if len(u.queryString) > 0 {
 		dst = append(dst, '?')
-		dst = append(dst, x.queryString...)
+		dst = append(dst, u.queryString...)
 	}
-	if len(x.hash) > 0 {
+	if len(u.hash) > 0 {
 		dst = append(dst, '#')
-		dst = append(dst, x.hash...)
+		dst = append(dst, u.hash...)
 	}
-	x.requestURI = dst
-	return x.requestURI
+	u.requestURI = dst
+	return u.requestURI
 }
 
 // LastPathSegment returns the last part of uri path after '/'.
@@ -352,8 +352,8 @@ func (x *URI) RequestURI() []byte {
 //    * For /foo/bar/baz.html path returns baz.html.
 //    * For /foo/bar/ returns empty byte slice.
 //    * For /foobar.js returns foobar.js.
-func (x *URI) LastPathSegment() []byte {
-	path := x.Path()
+func (u *URI) LastPathSegment() []byte {
+	path := u.Path()
 	n := bytes.LastIndexByte(path, '/')
 	if n < 0 {
 		return path
@@ -371,9 +371,9 @@ func (x *URI) LastPathSegment() []byte {
 //       of the original uri is replaced.
 //     * Relative path, i.e.  xx?yy=abc . In this case the original RequestURI
 //       is updated according to the new relative path.
-func (x *URI) Update(newURI string) {
-	x.fullURI = append(x.fullURI[:0], newURI...)
-	x.UpdateBytes(x.fullURI)
+func (u *URI) Update(newURI string) {
+	u.fullURI = append(u.fullURI[:0], newURI...)
+	u.UpdateBytes(u.fullURI)
 }
 
 // UpdateBytes updates uri.
@@ -386,77 +386,77 @@ func (x *URI) Update(newURI string) {
 //       of the original uri is replaced.
 //     * Relative path, i.e.  xx?yy=abc . In this case the original RequestURI
 //       is updated according to the new relative path.
-func (x *URI) UpdateBytes(newURI []byte) {
-	x.requestURI = x.updateBytes(newURI, x.requestURI)
+func (u *URI) UpdateBytes(newURI []byte) {
+	u.requestURI = u.updateBytes(newURI, u.requestURI)
 }
 
-func (x *URI) updateBytes(newURI, buf []byte) []byte {
+func (u *URI) updateBytes(newURI, buf []byte) []byte {
 	if len(newURI) == 0 {
 		return buf
 	}
 	if newURI[0] == '/' {
 		// uri without host
-		buf = x.appendSchemeHost(buf[:0])
+		buf = u.appendSchemeHost(buf[:0])
 		buf = append(buf, newURI...)
-		x.Parse(nil, buf)
+		u.Parse(nil, buf)
 		return buf
 	}
 
 	n := bytes.Index(newURI, strColonSlashSlash)
 	if n >= 0 {
 		// absolute uri
-		x.Parse(nil, newURI)
+		u.Parse(nil, newURI)
 		return buf
 	}
 
 	// relative path
 	if newURI[0] == '?' {
 		// query string only update
-		x.SetQueryStringBytes(newURI[1:])
+		u.SetQueryStringBytes(newURI[1:])
 		return buf
 	}
 
-	path := x.Path()
+	path := u.Path()
 	n = bytes.LastIndexByte(path, '/')
 	if n < 0 {
 		panic("BUG: path must contain at least one slash")
 	}
-	buf = x.appendSchemeHost(buf[:0])
+	buf = u.appendSchemeHost(buf[:0])
 	buf = appendQuotedPath(buf, path[:n+1])
 	buf = append(buf, newURI...)
-	x.Parse(nil, buf)
+	u.Parse(nil, buf)
 	return buf
 }
 
 // FullURI returns full uri in the form {Scheme}://{Host}{RequestURI}#{Hash}.
-func (x *URI) FullURI() []byte {
-	x.fullURI = x.AppendBytes(x.fullURI[:0])
-	return x.fullURI
+func (u *URI) FullURI() []byte {
+	u.fullURI = u.AppendBytes(u.fullURI[:0])
+	return u.fullURI
 }
 
 // AppendBytes appends full uri to dst and returns the extended dst.
-func (x *URI) AppendBytes(dst []byte) []byte {
-	dst = x.appendSchemeHost(dst)
-	return append(dst, x.RequestURI()...)
+func (u *URI) AppendBytes(dst []byte) []byte {
+	dst = u.appendSchemeHost(dst)
+	return append(dst, u.RequestURI()...)
 }
 
-func (x *URI) appendSchemeHost(dst []byte) []byte {
-	dst = append(dst, x.Scheme()...)
+func (u *URI) appendSchemeHost(dst []byte) []byte {
+	dst = append(dst, u.Scheme()...)
 	dst = append(dst, strColonSlashSlash...)
-	return append(dst, x.Host()...)
+	return append(dst, u.Host()...)
 }
 
 // WriteTo writes full uri to w.
 //
 // WriteTo implements io.WriterTo interface.
-func (x *URI) WriteTo(w io.Writer) (int64, error) {
-	n, err := w.Write(x.FullURI())
+func (u *URI) WriteTo(w io.Writer) (int64, error) {
+	n, err := w.Write(u.FullURI())
 	return int64(n), err
 }
 
 // String returns full uri.
-func (x *URI) String() string {
-	return string(x.FullURI())
+func (u *URI) String() string {
+	return string(u.FullURI())
 }
 
 func splitHostURI(host, uri []byte) ([]byte, []byte, []byte) {
@@ -478,15 +478,15 @@ func splitHostURI(host, uri []byte) ([]byte, []byte, []byte) {
 }
 
 // QueryArgs returns query args.
-func (x *URI) QueryArgs() *Args {
-	x.parseQueryArgs()
-	return &x.queryArgs
+func (u *URI) QueryArgs() *Args {
+	u.parseQueryArgs()
+	return &u.queryArgs
 }
 
-func (x *URI) parseQueryArgs() {
-	if x.parsedQueryArgs {
+func (u *URI) parseQueryArgs() {
+	if u.parsedQueryArgs {
 		return
 	}
-	x.queryArgs.ParseBytes(x.queryString)
-	x.parsedQueryArgs = true
+	u.queryArgs.ParseBytes(u.queryString)
+	u.parsedQueryArgs = true
 }
