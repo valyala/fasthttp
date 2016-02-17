@@ -2,18 +2,59 @@ package fasthttp
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
+	"time"
 )
 
-func TestLastPathSegment(t *testing.T) {
-	testLastPathSegment(t, "", "")
-	testLastPathSegment(t, "/", "")
-	testLastPathSegment(t, "/foo/bar/", "")
-	testLastPathSegment(t, "/foobar.js", "foobar.js")
-	testLastPathSegment(t, "/foo/bar/baz.html", "baz.html")
+func TestURIAcquireReleaseSequential(t *testing.T) {
+	testURIAcquireRelease(t)
 }
 
-func testLastPathSegment(t *testing.T, path, expectedSegment string) {
+func TestURIAcquireReleaseConcurrent(t *testing.T) {
+	ch := make(chan struct{})
+	for i := 0; i < 10; i++ {
+		go func() {
+			testURIAcquireRelease(t)
+			ch <- struct{}{}
+		}()
+	}
+
+	for i := 0; i < 10; i++ {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+}
+
+func testURIAcquireRelease(t *testing.T) {
+	for i := 0; i < 10; i++ {
+		u := AcquireURI()
+		host := fmt.Sprintf("host.%d.com", i*23)
+		path := fmt.Sprintf("/foo/%d/bar", i*17)
+		queryArgs := "?foo=bar&baz=aass"
+		u.Parse([]byte(host), []byte(path+queryArgs))
+		if string(u.Host()) != host {
+			t.Fatalf("unexpected host %q. Expecting %q", u.Host(), host)
+		}
+		if string(u.Path()) != path {
+			t.Fatalf("unexpected path %q. Expecting %q", u.Path(), path)
+		}
+		ReleaseURI(u)
+	}
+}
+
+func TestURILastPathSegment(t *testing.T) {
+	testURILastPathSegment(t, "", "")
+	testURILastPathSegment(t, "/", "")
+	testURILastPathSegment(t, "/foo/bar/", "")
+	testURILastPathSegment(t, "/foobar.js", "foobar.js")
+	testURILastPathSegment(t, "/foo/bar/baz.html", "baz.html")
+}
+
+func testURILastPathSegment(t *testing.T, path, expectedSegment string) {
 	var u URI
 	u.SetPath(path)
 	segment := u.LastPathSegment()
