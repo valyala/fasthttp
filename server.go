@@ -810,6 +810,8 @@ func getRedirectStatusCode(statusCode int) int {
 }
 
 // SetBody sets response body to the given value.
+//
+// It is safe re-using body argument after the function returns.
 func (ctx *RequestCtx) SetBody(body []byte) {
 	ctx.Response.SetBody(body)
 }

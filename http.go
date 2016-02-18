@@ -319,6 +319,8 @@ func (resp *Response) BodyWriteTo(w io.Writer) error {
 }
 
 // AppendBody appends p to response body.
+//
+// It is safe re-using p after the function returns.
 func (resp *Response) AppendBody(p []byte) {
 	resp.closeBodyStream()
 	resp.body = append(resp.body, p...)
@@ -331,6 +333,8 @@ func (resp *Response) AppendBodyString(s string) {
 }
 
 // SetBody sets response body.
+//
+// It is safe re-using body argument after the function returns.
 func (resp *Response) SetBody(body []byte) {
 	resp.closeBodyStream()
 	resp.body = append(resp.body[:0], body...)
@@ -370,6 +374,8 @@ func (req *Request) Body() []byte {
 }
 
 // AppendBody appends p to request body.
+//
+// It is safe re-using p after the function returns.
 func (req *Request) AppendBody(p []byte) {
 	req.RemoveMultipartFormFiles()
 	req.closeBodyStream()
@@ -384,6 +390,8 @@ func (req *Request) AppendBodyString(s string) {
 }
 
 // SetBody sets request body.
+//
+// It is safe re-using body argument after the function returns.
 func (req *Request) SetBody(body []byte) {
 	req.RemoveMultipartFormFiles()
 	req.closeBodyStream()
