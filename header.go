@@ -1011,6 +1011,9 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 		if n == 1 || err == io.EOF {
 			return io.EOF
 		}
+		if err == bufio.ErrBufferFull {
+			err = bufferFullError(r)
+		}
 		return fmt.Errorf("error when reading response headers: %s", err)
 	}
 	isEOF := (err != nil)
@@ -1060,6 +1063,9 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		if n == 1 || err == io.EOF {
 			return io.EOF
 		}
+		if err == bufio.ErrBufferFull {
+			err = bufferFullError(r)
+		}
 		return fmt.Errorf("error when reading request headers: %s", err)
 	}
 	isEOF := (err != nil)
@@ -1081,6 +1087,15 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 	}
 	mustDiscard(r, headersLen)
 	return nil
+}
+
+func bufferFullError(r *bufio.Reader) error {
+	n := r.Buffered()
+	b, err := r.Peek(n)
+	if err != nil {
+		panic(fmt.Sprintf("BUG: unexpected error returned from bufio.Reader.Peek(Buffered()): %s", err))
+	}
+	return fmt.Errorf("headers exceed %d bytes. Increase ReadBufferSize. buf=%q", n, b)
 }
 
 func isOnlyCRLF(b []byte) bool {
