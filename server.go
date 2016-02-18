@@ -131,6 +131,9 @@ type Server struct {
 	// Per-connection buffer size for requests' reading.
 	// This also limits the maximum header size.
 	//
+	// Increase this buffer if your clients send multi-KB RequestURIs
+	// and/or multi-KB headers (for example, BIG cookies).
+	//
 	// Default buffer size is used if 0.
 	ReadBufferSize int
 
