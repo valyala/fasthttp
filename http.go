@@ -251,24 +251,29 @@ func (resp *Response) Body() []byte {
 
 // BodyGunzip returns un-gzipped body data.
 //
+// This method may be used if the request header contains
+// 'Content-Encoding: gzip' for reading un-gzipped body.
+// Use Body for reading gzipped request body.
+func (req *Request) BodyGunzip() ([]byte, error) {
+	return gunzipData(req.Body())
+}
+
+// BodyGunzip returns un-gzipped body data.
+//
 // This method may be used if the response header contains
-// 'Content-Encoding: gzip' for reading un-gzipped response body.
+// 'Content-Encoding: gzip' for reading un-gzipped body.
 // Use Body for reading gzipped response body.
 func (resp *Response) BodyGunzip() ([]byte, error) {
-	// Do not care about memory allocations here,
-	// since gzip is slow and generates a lot of memory allocations
-	// by itself.
-	r := bytes.NewBuffer(resp.body)
-	zr, err := acquireGzipReader(r)
+	return gunzipData(resp.Body())
+}
+
+func gunzipData(p []byte) ([]byte, error) {
+	var bb ByteBuffer
+	_, err := WriteGunzip(&bb, p)
 	if err != nil {
 		return nil, err
 	}
-	b, err := ioutil.ReadAll(zr)
-	releaseGzipReader(zr)
-	if err != nil {
-		return nil, err
-	}
-	return b, nil
+	return bb.B, nil
 }
 
 // BodyInflate returns un-deflated body data.
