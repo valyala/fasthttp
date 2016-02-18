@@ -585,7 +585,7 @@ func (req *Request) Reset() {
 
 func (req *Request) resetSkipHeader() {
 	req.closeBodyStream()
-	req.body = req.body[:0]
+	req.body = reuseBody(req.body)
 	req.uri.Reset()
 	req.parsedURI = false
 	req.postArgs.Reset()
@@ -614,8 +614,23 @@ func (resp *Response) Reset() {
 
 func (resp *Response) resetSkipHeader() {
 	resp.closeBodyStream()
-	resp.body = resp.body[:0]
+	resp.body = reuseBody(resp.body)
 }
+
+func reuseBody(body []byte) []byte {
+	if cap(body) > maxReuseBodyCap {
+		return nil
+	}
+	return body[:0]
+}
+
+// maxReuseBodyLen is the maximum request and response body buffer capacity,
+// which may be reused.
+//
+// Body is thrown to GC if its' capacity exceeds this limit.
+//
+// This limits memory waste and memory fragmentation when re-using body buffers.
+const maxReuseBodyCap = 8 * 1024
 
 // Read reads request (including body) from the given r.
 //
