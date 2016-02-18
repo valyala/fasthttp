@@ -1031,7 +1031,8 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 				return io.EOF
 			}
 		}
-		return fmt.Errorf("error when reading response headers: %s. buf=%q", err, b)
+		bStart, bEnd := bufferStartEnd(b)
+		return fmt.Errorf("error when reading response headers: %s. buf=%q...%q", err, bStart, bEnd)
 	}
 	mustDiscard(r, headersLen)
 	return nil
@@ -1083,7 +1084,8 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 				return io.EOF
 			}
 		}
-		return fmt.Errorf("error when reading request headers: %s. buf=%q", err, b)
+		bStart, bEnd := bufferStartEnd(b)
+		return fmt.Errorf("error when reading request headers: %s. buf=%q...%q", err, bStart, bEnd)
 	}
 	mustDiscard(r, headersLen)
 	return nil
@@ -1095,7 +1097,19 @@ func bufferFullError(r *bufio.Reader) error {
 	if err != nil {
 		panic(fmt.Sprintf("BUG: unexpected error returned from bufio.Reader.Peek(Buffered()): %s", err))
 	}
-	return fmt.Errorf("headers exceed %d bytes. Increase ReadBufferSize. buf=%q", n, b)
+	bStart, bEnd := bufferStartEnd(b)
+	return fmt.Errorf("headers exceed %d bytes. Increase ReadBufferSize. buf=%q...%q", n, bStart, bEnd)
+}
+
+func bufferStartEnd(b []byte) ([]byte, []byte) {
+	n := len(b)
+	start := 200
+	end := n - start
+	if start >= end {
+		start = n
+		end = n
+	}
+	return b[:start], b[end:]
 }
 
 func isOnlyCRLF(b []byte) bool {
