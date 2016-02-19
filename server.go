@@ -778,10 +778,11 @@ func (ctx *RequestCtx) SuccessString(contentType, body string) {
 // The redirect uri may be either absolute or relative to the current
 // request uri.
 func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
-	var u URI
-	ctx.URI().CopyTo(&u)
+	u := AcquireURI()
+	ctx.URI().CopyTo(u)
 	u.Update(uri)
 	ctx.redirect(u.FullURI(), statusCode)
+	ReleaseURI(u)
 }
 
 // RedirectBytes sets 'Location: uri' response header and sets
@@ -799,10 +800,8 @@ func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
 // The redirect uri may be either absolute or relative to the current
 // request uri.
 func (ctx *RequestCtx) RedirectBytes(uri []byte, statusCode int) {
-	var u URI
-	ctx.URI().CopyTo(&u)
-	u.UpdateBytes(uri)
-	ctx.redirect(u.FullURI(), statusCode)
+	s := unsafeBytesToStr(uri)
+	ctx.Redirect(s, statusCode)
 }
 
 func (ctx *RequestCtx) redirect(uri []byte, statusCode int) {
