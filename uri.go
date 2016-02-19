@@ -122,7 +122,7 @@ func (u *URI) Path() []byte {
 
 // SetPath sets URI path.
 func (u *URI) SetPath(path string) {
-	u.pathOriginal = append(u.pathOriginal, path...)
+	u.pathOriginal = append(u.pathOriginal[:0], path...)
 	u.path = normalizePath(u.path, u.pathOriginal)
 }
 

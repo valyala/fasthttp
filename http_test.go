@@ -11,6 +11,28 @@ import (
 	"testing"
 )
 
+func TestRequestUpdateURI(t *testing.T) {
+	var r Request
+	r.Header.SetHost("aaa.bbb")
+	r.SetRequestURI("/lkjkl/kjl")
+
+	// Modify request uri and host via URI() object and make sure
+	// the requestURI and Host header are properly updated
+	u := r.URI()
+	u.SetPath("/123/432.html")
+	u.SetHost("foobar.com")
+	a := u.QueryArgs()
+	a.Set("aaa", "bcse")
+
+	s := r.String()
+	if !strings.HasPrefix(s, "GET /123/432.html?aaa=bcse") {
+		t.Fatalf("cannot find %q in %q", "GET /123/432.html?aaa=bcse", s)
+	}
+	if strings.Index(s, "\r\nHost: foobar.com\r\n") < 0 {
+		t.Fatalf("cannot find %q in %q", "\r\nHost: foobar.com\r\n", s)
+	}
+}
+
 func TestRequestBodyStreamMultipleBodyCalls(t *testing.T) {
 	var r Request
 
