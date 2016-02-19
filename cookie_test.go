@@ -3,7 +3,66 @@ package fasthttp
 import (
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestCookieAcquireReleaseSequential(t *testing.T) {
+	testCookieAcquireRelease(t)
+}
+
+func TestCookieAcquireReleaseConcurrent(t *testing.T) {
+	ch := make(chan struct{}, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			testCookieAcquireRelease(t)
+			ch <- struct{}{}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+}
+
+func testCookieAcquireRelease(t *testing.T) {
+	c := AcquireCookie()
+
+	key := "foo"
+	c.SetKey(key)
+
+	value := "bar"
+	c.SetValue(value)
+
+	domain := "foo.bar.com"
+	c.SetDomain(domain)
+
+	path := "/foi/bar/aaa"
+	c.SetPath(path)
+
+	s := c.String()
+	c.Reset()
+	if err := c.Parse(s); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if string(c.Key()) != key {
+		t.Fatalf("unexpected cookie name %q. Expecting %q", c.Key(), key)
+	}
+	if string(c.Value()) != value {
+		t.Fatalf("unexpected cookie value %q. Expecting %q", c.Value(), value)
+	}
+	if string(c.Domain()) != domain {
+		t.Fatalf("unexpected domain %q. Expecting %q", c.Domain(), domain)
+	}
+	if string(c.Path()) != path {
+		t.Fatalf("unexpected path %q. Expecting %q", c.Path(), path)
+	}
+
+	ReleaseCookie(c)
+}
 
 func TestCookieParse(t *testing.T) {
 	testCookieParse(t, "foo", "foo")

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"sync"
 	"time"
 )
 
@@ -16,6 +17,29 @@ var (
 	// CookieExpireUnlimited indicates that the cookie doesn't expire.
 	CookieExpireUnlimited = zeroTime
 )
+
+// AcquireCookie returns an empty Cookie object from the pool.
+//
+// The returned object may be returned back to the pool with ReleaseCookie.
+// This allows reducing GC load.
+func AcquireCookie() *Cookie {
+	return cookiePool.Get().(*Cookie)
+}
+
+// ReleaseCookie returns the Cookie object acquired with AcquireCookie back
+// to the pool.
+//
+// Do not access released Cookie object, otherwise data races may occur.
+func ReleaseCookie(c *Cookie) {
+	c.Reset()
+	cookiePool.Put(c)
+}
+
+var cookiePool = &sync.Pool{
+	New: func() interface{} {
+		return &Cookie{}
+	},
+}
 
 // Cookie represents HTTP response cookie.
 //
