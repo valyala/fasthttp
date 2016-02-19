@@ -133,11 +133,16 @@ func TestClientFollowRedirects(t *testing.T) {
 	addr := "127.0.0.1:55234"
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			if string(ctx.Path()) == "/foo" {
+			switch string(ctx.Path()) {
+			case "/foo":
+				u := ctx.URI()
+				u.Update("/xy?z=wer")
+				ctx.Redirect(u.String(), StatusFound)
+			case "/xy":
 				u := ctx.URI()
 				u.Update("/bar")
 				ctx.Redirect(u.String(), StatusFound)
-			} else {
+			default:
 				ctx.Success("text/plain", ctx.Path())
 			}
 		},

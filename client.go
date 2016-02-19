@@ -685,10 +685,12 @@ func doRequestFollowRedirects(req *Request, dst []byte, url string, c clientDoer
 }
 
 func getRedirectURL(baseURL string, location []byte) string {
-	var u URI
-	u.Parse(nil, []byte(baseURL))
+	u := AcquireURI()
+	u.Update(baseURL)
 	u.UpdateBytes(location)
-	return u.String()
+	redirectURL := u.String()
+	ReleaseURI(u)
+	return redirectURL
 }
 
 var (
