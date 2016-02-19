@@ -62,7 +62,8 @@ func (u *URI) CopyTo(dst *URI) {
 	dst.hash = append(dst.hash[:0], u.hash...)
 	dst.host = append(dst.host[:0], u.host...)
 
-	dst.parsedQueryArgs = false
+	u.queryArgs.CopyTo(&dst.queryArgs)
+	dst.parsedQueryArgs = u.parsedQueryArgs
 
 	// fullURI and requestURI shouldn't be copied, since they are created
 	// from scratch on each FullURI() and RequestURI() call.

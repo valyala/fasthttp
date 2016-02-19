@@ -7,6 +7,20 @@ import (
 	"time"
 )
 
+func TestURICopyToQueryArgs(t *testing.T) {
+	var u URI
+	a := u.QueryArgs()
+	a.Set("foo", "bar")
+
+	var u1 URI
+	u.CopyTo(&u1)
+	a1 := u1.QueryArgs()
+
+	if string(a1.Peek("foo")) != "bar" {
+		t.Fatalf("unexpected query args value %q. Expecting %q", a1.Peek("foo"), "bar")
+	}
+}
+
 func TestURIAcquireReleaseSequential(t *testing.T) {
 	testURIAcquireRelease(t)
 }
