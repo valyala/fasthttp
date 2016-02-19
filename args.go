@@ -4,7 +4,30 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"sync"
 )
+
+// AcquireArgs returns an empty Args object from the pool.
+//
+// The returned Args may be returned to the pool with ReleaseArgs
+// when no longer needed. This allows reducing GC load.
+func AcquireArgs() *Args {
+	return argsPool.Get().(*Args)
+}
+
+// ReleaseArgs returns the object acquired via AquireArgs to the pool.
+//
+// Do not access the released Args object, otherwise data races may occur.
+func ReleaseArgs(a *Args) {
+	a.Reset()
+	argsPool.Put(a)
+}
+
+var argsPool = &sync.Pool{
+	New: func() interface{} {
+		return &Args{}
+	},
+}
 
 // Args represents query arguments.
 //

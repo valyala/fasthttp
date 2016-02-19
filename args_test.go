@@ -5,9 +5,56 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestPeekMulti(t *testing.T) {
+func TestArgsAcquireReleaseSequential(t *testing.T) {
+	testArgsAcquireRelease(t)
+}
+
+func TestArgsAcquireReleaseConcurrent(t *testing.T) {
+	ch := make(chan struct{}, 10)
+	for i := 0; i < 10; i++ {
+		go func() {
+			testArgsAcquireRelease(t)
+			ch <- struct{}{}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+}
+
+func testArgsAcquireRelease(t *testing.T) {
+	a := AcquireArgs()
+
+	for i := 0; i < 10; i++ {
+		k := fmt.Sprintf("key_%d", i)
+		v := fmt.Sprintf("value_%d", i*3+123)
+		a.Set(k, v)
+	}
+
+	s := a.String()
+	a.Reset()
+	a.Parse(s)
+
+	for i := 0; i < 10; i++ {
+		k := fmt.Sprintf("key_%d", i)
+		expectedV := fmt.Sprintf("value_%d", i*3+123)
+		v := a.Peek(k)
+		if string(v) != expectedV {
+			t.Fatalf("unexpected value %q for key %q. Expecting %q", v, k, expectedV)
+		}
+	}
+
+	ReleaseArgs(a)
+}
+
+func TestArgsPeekMulti(t *testing.T) {
 	var a Args
 	a.Parse("foo=123&bar=121&foo=321&foo=&barz=sdf")
 

@@ -12,7 +12,7 @@ func TestURIAcquireReleaseSequential(t *testing.T) {
 }
 
 func TestURIAcquireReleaseConcurrent(t *testing.T) {
-	ch := make(chan struct{})
+	ch := make(chan struct{}, 10)
 	for i := 0; i < 10; i++ {
 		go func() {
 			testURIAcquireRelease(t)

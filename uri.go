@@ -9,6 +9,7 @@ import (
 // AcquireURI returns an empty URI instance from the pool.
 //
 // Release the URI with ReleaseURI after the URI is no longer needed.
+// This allows reducing GC load.
 func AcquireURI() *URI {
 	return uriPool.Get().(*URI)
 }
