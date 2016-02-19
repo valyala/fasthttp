@@ -201,6 +201,16 @@ type Server struct {
 	// Server accepts all the requests by default.
 	GetOnly bool
 
+	// Logs all errors, including the most frequent
+	// 'connection reset by peer', 'broken pipe' and 'connection timeout'
+	// errors. Such errors are common in production serving real-world
+	// clients.
+	//
+	// By default the most frequent errors such as
+	// 'connection reset by peer', 'broken pipe' and 'connection timeout'
+	// are suppressed in order to limit output log traffic.
+	LogAllErrors bool
+
 	// Logger, which is used by RequestCtx.Logger().
 	//
 	// By default standard logger from log package is used.
@@ -1062,6 +1072,7 @@ func (s *Server) Serve(ln net.Listener) error {
 	wp := &workerPool{
 		WorkerFunc:      s.serveConn,
 		MaxWorkersCount: maxWorkersCount,
+		LogAllErrors:    s.LogAllErrors,
 		Logger:          s.logger(),
 	}
 	wp.Start()
