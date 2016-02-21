@@ -326,7 +326,7 @@ func TestFSCompressConcurrent(t *testing.T) {
 	ch := make(chan struct{}, concurrency)
 	for i := 0; i < concurrency; i++ {
 		go func() {
-			for j := 0; j < 10; j++ {
+			for j := 0; j < 5; j++ {
 				testFSCompress(t, h, "/fs.go")
 				testFSCompress(t, h, "/")
 				testFSCompress(t, h, "/README.md")

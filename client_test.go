@@ -454,8 +454,8 @@ func TestClientHTTPSConcurrent(t *testing.T) {
 		}
 		go func() {
 			defer wg.Done()
-			testClientGet(t, &defaultClient, addr, 300)
-			testClientPost(t, &defaultClient, addr, 100)
+			testClientGet(t, &defaultClient, addr, 30)
+			testClientPost(t, &defaultClient, addr, 10)
 		}()
 	}
 	wg.Wait()
@@ -512,8 +512,8 @@ func TestClientConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			testClientGet(t, &defaultClient, addr, 300)
-			testClientPost(t, &defaultClient, addr, 100)
+			testClientGet(t, &defaultClient, addr, 30)
+			testClientPost(t, &defaultClient, addr, 10)
 		}()
 	}
 	wg.Wait()
@@ -548,8 +548,8 @@ func TestHostClientConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			testHostClientGet(t, c, 300)
-			testHostClientPost(t, c, 100)
+			testHostClientGet(t, c, 30)
+			testHostClientPost(t, c, 10)
 		}()
 	}
 	wg.Wait()
