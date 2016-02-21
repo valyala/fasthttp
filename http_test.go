@@ -11,6 +11,34 @@ import (
 	"testing"
 )
 
+func TestRequestRequestURI(t *testing.T) {
+	var r Request
+
+	// Set request uri via SetRequestURI()
+	uri := "/foo/bar?baz"
+	r.SetRequestURI(uri)
+	if string(r.RequestURI()) != uri {
+		t.Fatalf("unexpected request uri %q. Expecting %q", r.RequestURI(), uri)
+	}
+
+	// Set request uri via Request.URI().Update()
+	r.Reset()
+	uri = "/aa/bbb?ccc=sdfsdf"
+	r.URI().Update(uri)
+	if string(r.RequestURI()) != uri {
+		t.Fatalf("unexpected request uri %q. Expecting %q", r.RequestURI(), uri)
+	}
+
+	// update query args in the request uri
+	qa := r.URI().QueryArgs()
+	qa.Reset()
+	qa.Set("foo", "bar")
+	uri = "/aa/bbb?foo=bar"
+	if string(r.RequestURI()) != uri {
+		t.Fatalf("unexpected request uri %q. Expecting %q", r.RequestURI(), uri)
+	}
+}
+
 func TestRequestUpdateURI(t *testing.T) {
 	var r Request
 	r.Header.SetHost("aaa.bbb")

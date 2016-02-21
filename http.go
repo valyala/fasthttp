@@ -76,6 +76,15 @@ func (req *Request) SetRequestURIBytes(requestURI []byte) {
 	req.parsedURI = false
 }
 
+// RequestURI returns request's URI.
+func (req *Request) RequestURI() []byte {
+	if req.parsedURI {
+		requestURI := req.uri.RequestURI()
+		req.SetRequestURIBytes(requestURI)
+	}
+	return req.Header.RequestURI()
+}
+
 // StatusCode returns response status code.
 func (resp *Response) StatusCode() int {
 	return resp.Header.StatusCode()
