@@ -10,7 +10,136 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/valyala/fasthttp/fasthttputil"
 )
+
+func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	ch := make(chan struct{})
+	go func() {
+		Serve(ln, func(ctx *RequestCtx) {
+			if string(ctx.Path()) == "/close" {
+				ctx.SetConnectionClose()
+			}
+		})
+		close(ch)
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	_, err = fmt.Fprintf(conn, "%s", "GET / HTTP/1.0\r\nHost: aaa\r\nConnection: keep-alive\r\n\r\n")
+	if err != nil {
+		t.Fatalf("error when writing request: %s", err)
+	}
+	_, err = fmt.Fprintf(conn, "%s", "GET /close HTTP/1.0\r\nHost: aaa\r\nConnection: keep-alive\r\n\r\n")
+	if err != nil {
+		t.Fatalf("error when writing request: %s", err)
+	}
+
+	br := bufio.NewReader(conn)
+	var resp Response
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("error when reading response: %s", err)
+	}
+	if resp.ConnectionClose() {
+		t.Fatalf("response mustn't have 'Connection: close' header")
+	}
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("error when reading response: %s", err)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatalf("response must have 'Connection: close' header")
+	}
+
+	tailCh := make(chan struct{})
+	go func() {
+		tail, err := ioutil.ReadAll(br)
+		if err != nil {
+			t.Fatalf("error when reading tail: %s", err)
+		}
+		if len(tail) > 0 {
+			t.Fatalf("unexpected non-zero tail %q", tail)
+		}
+		close(tailCh)
+	}()
+
+	select {
+	case <-tailCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout when reading tail")
+	}
+
+	if err = ln.Close(); err != nil {
+		t.Fatalf("error when closing listener: %s", err)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout when waiting for the server to stop")
+	}
+}
+
+func TestServerHTTP10ConnectionClose(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	ch := make(chan struct{})
+	go func() {
+		Serve(ln, func(ctx *RequestCtx) {})
+		close(ch)
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	_, err = fmt.Fprintf(conn, "%s", "GET / HTTP/1.0\r\nHost: aaa\r\n\r\n")
+	if err != nil {
+		t.Fatalf("error when writing request: %s", err)
+	}
+
+	br := bufio.NewReader(conn)
+	var resp Response
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("error when reading response: %s", err)
+	}
+
+	if !resp.ConnectionClose() {
+		t.Fatalf("HTTP1.0 response must have 'Connection: close' header")
+	}
+
+	tailCh := make(chan struct{})
+	go func() {
+		tail, err := ioutil.ReadAll(br)
+		if err != nil {
+			t.Fatalf("error when reading tail: %s", err)
+		}
+		if len(tail) > 0 {
+			t.Fatalf("unexpected non-zero tail %q", tail)
+		}
+		close(tailCh)
+	}()
+
+	select {
+	case <-tailCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout when reading tail")
+	}
+
+	if err = ln.Close(); err != nil {
+		t.Fatalf("error when closing listener: %s", err)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout when waiting for the server to stop")
+	}
+}
 
 func TestRequestCtxFormValue(t *testing.T) {
 	var ctx RequestCtx

@@ -18,6 +18,9 @@ func TestRequestHeaderHTTP10ConnectionClose(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
+	if !h.connectionCloseFast() {
+		t.Fatalf("expecting 'Connection: close' request header")
+	}
 	if !h.ConnectionClose() {
 		t.Fatalf("expecting 'Connection: close' request header")
 	}
