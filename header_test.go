@@ -10,6 +10,32 @@ import (
 	"testing"
 )
 
+func TestRequestHeaderHTTP10ConnectionClose(t *testing.T) {
+	s := "GET / HTTP/1.0\r\nHost: foobar\r\n\r\n"
+	var h RequestHeader
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if !h.ConnectionClose() {
+		t.Fatalf("expecting 'Connection: close' request header")
+	}
+}
+
+func TestRequestHeaderHTTP10ConnectionKeepAlive(t *testing.T) {
+	s := "GET / HTTP/1.0\r\nHost: foobar\r\nConnection: keep-alive\r\n\r\n"
+	var h RequestHeader
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if h.ConnectionClose() {
+		t.Fatalf("unexpected 'Connection: close' request header")
+	}
+}
+
 func TestBufferStartEnd(t *testing.T) {
 	testBufferStartEnd(t, "", "", "")
 	testBufferStartEnd(t, "foobar", "foobar", "")
