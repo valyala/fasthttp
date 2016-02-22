@@ -1312,13 +1312,14 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
+		connectionClose = ctx.Request.Header.connectionCloseFast()
+		isHTTP11 = ctx.Request.Header.IsHTTP11()
+
 		ctx.connRequestNum = connRequestNum
 		ctx.connTime = connTime
 		ctx.time = currentTime
 		s.Handler(ctx)
 
-		connectionClose = ctx.Request.Header.connectionCloseFast()
-		isHTTP11 = ctx.Request.Header.IsHTTP11()
 		if !ctx.IsGet() && ctx.IsHead() {
 			ctx.Response.SkipBody = true
 		}

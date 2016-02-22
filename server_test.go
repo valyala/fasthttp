@@ -89,7 +89,16 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 
 	ch := make(chan struct{})
 	go func() {
-		Serve(ln, func(ctx *RequestCtx) {})
+		Serve(ln, func(ctx *RequestCtx) {
+			// The server must close the connection irregardless
+			// of request and response state set inside request
+			// handler, since the HTTP/1.0 request
+			// had no 'Connection: keep-alive' header.
+			ctx.Request.Header.ResetConnectionClose()
+			ctx.Request.Header.Set("Connection", "keep-alive")
+			ctx.Response.Header.ResetConnectionClose()
+			ctx.Response.Header.Set("Connection", "keep-alive")
+		})
 		close(ch)
 	}()
 
