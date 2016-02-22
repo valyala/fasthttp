@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime/multipart"
 	"os"
 	"sync"
@@ -285,26 +284,31 @@ func gunzipData(p []byte) ([]byte, error) {
 	return bb.B, nil
 }
 
-// BodyInflate returns un-deflated body data.
+// BodyInflate returns inflated body data.
 //
 // This method may be used if the response header contains
-// 'Content-Encoding: deflate' for reading un-deflated response body.
+// 'Content-Encoding: deflate' for reading inflated request body.
+// Use Body for reading deflated request body.
+func (resp *Request) BodyInflate() ([]byte, error) {
+	return inflateData(resp.Body())
+}
+
+// BodyInflate returns inflated body data.
+//
+// This method may be used if the response header contains
+// 'Content-Encoding: deflate' for reading inflated response body.
 // Use Body for reading deflated response body.
 func (resp *Response) BodyInflate() ([]byte, error) {
-	// Do not care about memory allocations here,
-	// since flate is slow and generates a lot of memory allocations
-	// by itself.
-	r := bytes.NewBuffer(resp.body)
-	zr, err := acquireFlateReader(r)
+	return inflateData(resp.Body())
+}
+
+func inflateData(p []byte) ([]byte, error) {
+	var bb ByteBuffer
+	_, err := WriteInflate(&bb, p)
 	if err != nil {
 		return nil, err
 	}
-	b, err := ioutil.ReadAll(zr)
-	releaseFlateReader(zr)
-	if err != nil {
-		return nil, err
-	}
-	return b, nil
+	return bb.B, nil
 }
 
 // BodyWriteTo writes request body to w.

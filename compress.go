@@ -171,6 +171,23 @@ func WriteGunzip(w io.Writer, p []byte) (int, error) {
 	return nn, err
 }
 
+// WriteInflate writes inflated p to w and returns the number of uncompressed
+// bytes written to w.
+func WriteInflate(w io.Writer, p []byte) (int, error) {
+	r := &byteSliceReader{p}
+	zr, err := acquireFlateReader(r)
+	if err != nil {
+		return 0, err
+	}
+	n, err := copyZeroAlloc(w, zr)
+	releaseFlateReader(zr)
+	nn := int(n)
+	if int64(nn) != n {
+		return 0, fmt.Errorf("too much data inflated: %d", n)
+	}
+	return nn, err
+}
+
 // AppendGunzipBytes append gunzipped src to dst and returns the resulting dst.
 func AppendGunzipBytes(dst, src []byte) ([]byte, error) {
 	w := &byteSliceWriter{dst}
