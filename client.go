@@ -547,12 +547,13 @@ func clientGetURLTimeout(dst []byte, url string, timeout time.Duration, c client
 }
 
 func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDoer) (statusCode int, body []byte, err error) {
+	var sleepTime time.Duration
 	for {
 		statusCode, body, err = clientGetURLDeadlineFreeConn(dst, url, deadline, c)
 		if err != ErrNoFreeConns {
 			return statusCode, body, err
 		}
-		sleepTime := (10 + time.Duration(rand.Intn(100))) * time.Millisecond
+		sleepTime = updateSleepTime(sleepTime, deadline)
 		time.Sleep(sleepTime)
 	}
 }
@@ -778,14 +779,34 @@ func clientDoTimeout(req *Request, resp *Response, timeout time.Duration, c clie
 }
 
 func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c clientDoer) error {
+	var sleepTime time.Duration
 	for {
 		err := clientDoDeadlineFreeConn(req, resp, deadline, c)
 		if err != ErrNoFreeConns {
 			return err
 		}
-		sleepTime := (10 + time.Duration(rand.Intn(100))) * time.Millisecond
+		sleepTime = updateSleepTime(sleepTime, deadline)
 		time.Sleep(sleepTime)
 	}
+}
+
+func updateSleepTime(prevTime time.Duration, deadline time.Time) time.Duration {
+	sleepTime := prevTime * 2
+	if sleepTime == 0 {
+		sleepTime = (10 + time.Duration(rand.Intn(40))) * time.Millisecond
+	}
+
+	remainingTime := deadline.Sub(time.Now())
+	if sleepTime >= remainingTime {
+		// Just sleep for the remaining time and then time out.
+		// This should save CPU time for real work by other goroutines.
+		sleepTime = remainingTime + 10*time.Millisecond
+		if sleepTime < 0 {
+			sleepTime = 10 * time.Millisecond
+		}
+	}
+
+	return sleepTime
 }
 
 func clientDoDeadlineFreeConn(req *Request, resp *Response, deadline time.Time, c clientDoer) error {
