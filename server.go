@@ -134,20 +134,23 @@ type Server struct {
 	// Increase this buffer if your clients send multi-KB RequestURIs
 	// and/or multi-KB headers (for example, BIG cookies).
 	//
-	// Default buffer size is used if 0.
+	// Default buffer size is used if not set.
 	ReadBufferSize int
 
 	// Per-connection buffer size for responses' writing.
 	//
-	// Default buffer size is used if 0.
+	// Default buffer size is used if not set.
 	WriteBufferSize int
 
-	// Maximum duration for full request reading (including body).
+	// Maximum duration for reading the full request (including body).
+	//
+	// This also limits the maximum duration for idle keep-alive
+	// connections.
 	//
 	// By default request read timeout is unlimited.
 	ReadTimeout time.Duration
 
-	// Maximum duration for full response writing (including body).
+	// Maximum duration for writing the full response (including body).
 	//
 	// By default response write timeout is unlimited.
 	WriteTimeout time.Duration
@@ -161,9 +164,9 @@ type Server struct {
 	// Maximum number of requests served per connection.
 	//
 	// The server closes connection after the last request.
-	// 'Connection: close' header is added to the last request.
+	// 'Connection: close' header is added to the last response.
 	//
-	// By default unlimited number of requests served per connection.
+	// By default unlimited number of requests may be served per connection.
 	MaxRequestsPerConn int
 
 	// Maximum keep-alive connection lifetime.
@@ -171,13 +174,15 @@ type Server struct {
 	// The server closes keep-alive connection after its' lifetime
 	// expiration.
 	//
+	// See also ReadTimeout for limiting the duration of idle keep-alive
+	// connections.
+	//
 	// By default keep-alive connection lifetime is unlimited.
 	MaxKeepaliveDuration time.Duration
 
 	// Maximum request body size.
 	//
-	// The server closes incoming connection if this limit is greater than 0
-	// and the request body size exceeds the limit.
+	// The server rejects requests with bodies exceeding this limit.
 	//
 	// By default request body size is unlimited.
 	MaxRequestBodySize int
@@ -195,8 +200,8 @@ type Server struct {
 	// Rejects all non-GET requests if set to true.
 	//
 	// This option is useful as anti-DoS protection for servers
-	// accepting only GET requests. When set the request size is limited
-	// by ReadBufferSize.
+	// accepting only GET requests. The request size is limited
+	// by ReadBufferSize if GetOnly is set.
 	//
 	// Server accepts all the requests by default.
 	GetOnly bool
