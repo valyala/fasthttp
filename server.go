@@ -1542,7 +1542,9 @@ func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
 	ctx.time = t
 	*ctxP = ctx
 	if err != nil {
-		return nil, err
+		// Treat all errors as EOF on unsuccessful read
+		// of the first request byte.
+		return nil, io.EOF
 	}
 	if n != 1 {
 		panic("BUG: Reader must return at least one byte")

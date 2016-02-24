@@ -14,16 +14,122 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestServerReduceMemoryUsageSerial(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler:           func(ctx *RequestCtx) {},
+		ReduceMemoryUsage: true,
+	}
+
+	ch := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(ch)
+	}()
+
+	testServerRequests(t, ln)
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("error when closing listener: %s", err)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout when waiting for the server to stop")
+	}
+}
+
+func TestServerReduceMemoryUsageConcurrent(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler:           func(ctx *RequestCtx) {},
+		ReduceMemoryUsage: true,
+	}
+
+	ch := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(ch)
+	}()
+
+	gCh := make(chan struct{})
+	for i := 0; i < 10; i++ {
+		go func() {
+			testServerRequests(t, ln)
+			gCh <- struct{}{}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		select {
+		case <-gCh:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout on goroutine %d", i)
+		}
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("error when closing listener: %s", err)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout when waiting for the server to stop")
+	}
+}
+
+func testServerRequests(t *testing.T, ln *fasthttputil.InmemoryListener) {
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	br := bufio.NewReader(conn)
+	var resp Response
+	for i := 0; i < 10; i++ {
+		if _, err = fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: aaa\r\n\r\n"); err != nil {
+			t.Fatalf("unexpected error on iteration %d: %s", i, err)
+		}
+
+		respCh := make(chan struct{})
+		go func() {
+			if err = resp.Read(br); err != nil {
+				t.Fatalf("unexpected error when reading response on iteration %d: %s", i, err)
+			}
+			close(respCh)
+		}()
+		select {
+		case <-respCh:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout on iteration %d", i)
+		}
+	}
+
+	if err = conn.Close(); err != nil {
+		t.Fatalf("error when closing the connection: %s", err)
+	}
+}
+
 func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
 	ch := make(chan struct{})
 	go func() {
-		Serve(ln, func(ctx *RequestCtx) {
+		err := Serve(ln, func(ctx *RequestCtx) {
 			if string(ctx.Path()) == "/close" {
 				ctx.SetConnectionClose()
 			}
 		})
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
 		close(ch)
 	}()
 
@@ -73,6 +179,10 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 		t.Fatalf("timeout when reading tail")
 	}
 
+	if err = conn.Close(); err != nil {
+		t.Fatalf("error when closing the connection: %s", err)
+	}
+
 	if err = ln.Close(); err != nil {
 		t.Fatalf("error when closing listener: %s", err)
 	}
@@ -89,7 +199,7 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 
 	ch := make(chan struct{})
 	go func() {
-		Serve(ln, func(ctx *RequestCtx) {
+		err := Serve(ln, func(ctx *RequestCtx) {
 			// The server must close the connection irregardless
 			// of request and response state set inside request
 			// handler, since the HTTP/1.0 request
@@ -99,6 +209,9 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 			ctx.Response.Header.ResetConnectionClose()
 			ctx.Response.Header.Set("Connection", "keep-alive")
 		})
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
 		close(ch)
 	}()
 
@@ -137,6 +250,10 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 	case <-tailCh:
 	case <-time.After(time.Second):
 		t.Fatalf("timeout when reading tail")
+	}
+
+	if err = conn.Close(); err != nil {
+		t.Fatalf("error when closing the connection: %s", err)
 	}
 
 	if err = ln.Close(); err != nil {
