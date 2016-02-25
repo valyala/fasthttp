@@ -257,6 +257,7 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
 
 * Fasthttp doesn't provide [ServeMux](https://golang.org/pkg/net/http/#ServeMux),
 since I believe third-party request routers like
+[fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) and
 [fasthttprouter](https://github.com/buaazp/fasthttprouter) must be used instead,
 Net/http code with simple ServeMux is trivially converted
 to fasthttp code:
@@ -514,9 +515,8 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
 
   There are no plans to add request routing into fasthttp. I believe request
   routing must be implemented in a separate package(s) like
-  [httprouter](https://github.com/julienschmidt/httprouter).
-  Try [fasthttprouter](https://github.com/buaazp/fasthttprouter),
-  httprouter fork for fasthttp.
+  [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) and
+  [fasthttprouter](https://github.com/buaazp/fasthttprouter).
   See also [this issue](https://github.com/valyala/fasthttp/issues/8) for more info.
 
 * *I detected data race in fasthttp!*
