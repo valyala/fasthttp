@@ -216,6 +216,24 @@ type Server struct {
 	// are suppressed in order to limit output log traffic.
 	LogAllErrors bool
 
+	// Header names are passed as-is without normalization
+	// if this option is set.
+	//
+	// Disabled header names' normalization may be useful only for proxying
+	// incoming requests to other servers expecting case-sensitive
+	// header names. See https://github.com/valyala/fasthttp/issues/57
+	// for details.
+	//
+	// By default request and response header names are normalized, i.e.
+	// The first letter and the first letters following dashes
+	// are uppercased, while all the other letters are lowercased.
+	// Examples:
+	//
+	//     * HOST -> Host
+	//     * content-type -> Content-Type
+	//     * cONTENT-lenGTH -> Content-Length
+	DisableHeaderNamesNormalizing bool
+
 	// Logger, which is used by RequestCtx.Logger().
 	//
 	// By default standard logger from log package is used.
@@ -1271,6 +1289,10 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 
 		if err == nil {
+			if s.DisableHeaderNamesNormalizing {
+				ctx.Request.Header.DisableNormalizing()
+				ctx.Response.Header.DisableNormalizing()
+			}
 			err = ctx.Request.readLimitBody(br, s.MaxRequestBodySize, s.GetOnly)
 			if br.Buffered() == 0 || err != nil {
 				releaseReader(s, br)

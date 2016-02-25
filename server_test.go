@@ -8,11 +8,67 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
+
+func TestServerDisableHeaderNamesNormalizing(t *testing.T) {
+	headerName := "CASE-senSITive-HEAder-NAME"
+	headerNameLower := strings.ToLower(headerName)
+	headerValue := "foobar baz"
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			hv := ctx.Request.Header.Peek(headerName)
+			if string(hv) != headerValue {
+				t.Fatalf("unexpected header value for %q: %q. Expecting %q", headerName, hv, headerValue)
+			}
+			hv = ctx.Request.Header.Peek(headerNameLower)
+			if len(hv) > 0 {
+				t.Fatalf("unexpected header value for %q: %q. Expecting empty value", headerNameLower, hv)
+			}
+			ctx.Response.Header.Set(headerName, headerValue)
+			ctx.WriteString("ok")
+			ctx.SetContentType("aaa")
+		},
+		DisableHeaderNamesNormalizing: true,
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString(fmt.Sprintf("GET / HTTP/1.1\r\n%s: %s\r\nHost: google.com\r\n\r\n", headerName, headerValue))
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	br := bufio.NewReader(&rw.w)
+	var resp Response
+	resp.Header.DisableNormalizing()
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	hv := resp.Header.Peek(headerName)
+	if string(hv) != headerValue {
+		t.Fatalf("unexpected header value for %q: %q. Expecting %q", headerName, hv, headerValue)
+	}
+	hv = resp.Header.Peek(headerNameLower)
+	if len(hv) > 0 {
+		t.Fatalf("unexpected header value for %q: %q. Expecting empty value", headerNameLower, hv)
+	}
+}
 
 func TestServerReduceMemoryUsageSerial(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()

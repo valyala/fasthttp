@@ -140,7 +140,7 @@ func benchmarkNormalizeHeaderKey(b *testing.B, src []byte) {
 		buf := make([]byte, len(src))
 		for pb.Next() {
 			copy(buf, src)
-			normalizeHeaderKey(buf)
+			normalizeHeaderKey(buf, false)
 		}
 	})
 }
