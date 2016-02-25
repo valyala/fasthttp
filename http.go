@@ -289,8 +289,8 @@ func gunzipData(p []byte) ([]byte, error) {
 // This method may be used if the response header contains
 // 'Content-Encoding: deflate' for reading inflated request body.
 // Use Body for reading deflated request body.
-func (resp *Request) BodyInflate() ([]byte, error) {
-	return inflateData(resp.Body())
+func (req *Request) BodyInflate() ([]byte, error) {
+	return inflateData(req.Body())
 }
 
 // BodyInflate returns inflated body data.
