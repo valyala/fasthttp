@@ -1786,6 +1786,36 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 	}
 }
 
+// AppendNormalizedHeaderKey appends normalized header key (name) to dst
+// and returns the resulting dst.
+//
+// Normalized header key starts with uppercase letter. The first letters
+// after dashes are also uppercased. All the other letters are lowercased.
+// Examples:
+//
+//   * coNTENT-TYPe -> Content-Type
+//   * HOST -> Host
+//   * foo-bar-baz -> Foo-Bar-Baz
+func AppendNormalizedHeaderKey(dst []byte, key string) []byte {
+	dst = append(dst, key...)
+	normalizeHeaderKey(dst[len(dst)-len(key):], false)
+	return dst
+}
+
+// AppendNormalizedHeaderKeyBytes appends normalized header key (name) to dst
+// and returns the resulting dst.
+//
+// Normalized header key starts with uppercase letter. The first letters
+// after dashes are also uppercased. All the other letters are lowercased.
+// Examples:
+//
+//   * coNTENT-TYPe -> Content-Type
+//   * HOST -> Host
+//   * foo-bar-baz -> Foo-Bar-Baz
+func AppendNormalizedHeaderKeyBytes(dst, key []byte) []byte {
+	return AppendNormalizedHeaderKey(dst, unsafeBytesToStr(key))
+}
+
 var errNeedMore = errors.New("need more data: cannot find trailing lf")
 
 func mustPeekBuffered(r *bufio.Reader) []byte {

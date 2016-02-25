@@ -10,6 +10,21 @@ import (
 	"testing"
 )
 
+func TestAppendNormalizedHeaderKeyBytes(t *testing.T) {
+	testAppendNormalizedHeaderKeyBytes(t, "", "")
+	testAppendNormalizedHeaderKeyBytes(t, "Content-Type", "Content-Type")
+	testAppendNormalizedHeaderKeyBytes(t, "foO-bAr-BAZ", "Foo-Bar-Baz")
+}
+
+func testAppendNormalizedHeaderKeyBytes(t *testing.T, key, expectedKey string) {
+	buf := []byte("foobar")
+	result := AppendNormalizedHeaderKeyBytes(buf, []byte(key))
+	normalizedKey := result[len(buf):]
+	if string(normalizedKey) != expectedKey {
+		t.Fatalf("unexpected normalized key %q. Expecting %q", normalizedKey, expectedKey)
+	}
+}
+
 func TestRequestHeaderHTTP10ConnectionClose(t *testing.T) {
 	s := "GET / HTTP/1.0\r\nHost: foobar\r\n\r\n"
 	var h RequestHeader
