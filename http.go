@@ -651,7 +651,7 @@ func reuseBody(body []byte) []byte {
 
 	bodyCap := cap(body)
 	bodyLen := len(body)
-	if bodyLen > 0 && ((bodyCap-bodyLen)>>3) > bodyLen {
+	if bodyLen > 0 && bodyCap > 8192 && ((bodyCap-bodyLen)>>3) > bodyLen {
 		return nil
 	}
 	return body[:0]
