@@ -462,19 +462,20 @@ func benchmarkClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
 	url := "http://unused.host" + requestURI
 	b.SetParallelism(parallelism)
 	b.RunParallel(func(pb *testing.PB) {
-		var buf []byte
+		var req Request
+		req.SetRequestURI(url)
+		var resp Response
 		for pb.Next() {
-			statusCode, body, err := c.GetTimeout(buf, url, time.Second)
-			if err != nil {
+			if err := c.DoTimeout(&req, &resp, 5*time.Second); err != nil {
 				b.Fatalf("unexpected error: %s", err)
 			}
-			if statusCode != StatusOK {
-				b.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+			if resp.StatusCode() != StatusOK {
+				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 			}
+			body := resp.Body()
 			if !bytes.Equal(bigResponse, body) {
 				b.Fatalf("unexpected response %q. Expecting %q", body, bigResponse)
 			}
-			buf = body
 		}
 	})
 
@@ -516,15 +517,19 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
 			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
 		},
-		Timeout: time.Second,
+		Timeout: 5*time.Second,
 	}
 
 	requestURI := "/foo/bar?baz=123"
 	url := "http://unused.host" + requestURI
 	b.SetParallelism(parallelism)
 	b.RunParallel(func(pb *testing.PB) {
+		req, err := http.NewRequest("GET", url, nil)
+		if err != nil {
+			b.Fatalf("unexpected error: %s", err)
+		}
 		for pb.Next() {
-			resp, err := c.Get(url)
+			resp, err := c.Do(req)
 			if err != nil {
 				b.Fatalf("unexpected error: %s", err)
 			}
