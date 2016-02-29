@@ -86,6 +86,8 @@ func ServeFile(ctx *RequestCtx, path string) {
 		var err error
 		if path, err = filepath.Abs(path); err != nil {
 			ctx.Logger().Printf("cannot resolve path %q to absolute file path: %s", path, err)
+			ctx.Error("Internal Server Error", StatusInternalServerError)
+			return
 		}
 	}
 	ctx.Request.SetRequestURI(path)
