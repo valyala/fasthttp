@@ -427,3 +427,124 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 		b.Fatalf("server wasn't stopped")
 	}
 }
+
+func BenchmarkClientEndToEndBigResponse1Inmemory(b *testing.B) {
+	benchmarkClientEndToEndBigResponseInmemory(b, 1)
+}
+
+func BenchmarkClientEndToEndBigResponse10Inmemory(b *testing.B) {
+	benchmarkClientEndToEndBigResponseInmemory(b, 10)
+}
+
+func benchmarkClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
+	bigResponse := createFixedBody(1024 * 1024)
+	h := func(ctx *RequestCtx) {
+		ctx.SetContentType("text/plain")
+		ctx.Write(bigResponse)
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	ch := make(chan struct{})
+	go func() {
+		if err := Serve(ln, h); err != nil {
+			b.Fatalf("error when serving requests: %s", err)
+		}
+		close(ch)
+	}()
+
+	c := &Client{
+		MaxConnsPerHost: runtime.GOMAXPROCS(-1) * parallelism,
+		Dial:            func(addr string) (net.Conn, error) { return ln.Dial() },
+	}
+
+	requestURI := "/foo/bar?baz=123"
+	url := "http://unused.host" + requestURI
+	b.SetParallelism(parallelism)
+	b.RunParallel(func(pb *testing.PB) {
+		var buf []byte
+		for pb.Next() {
+			statusCode, body, err := c.Get(buf, url)
+			if err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if statusCode != StatusOK {
+				b.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+			}
+			if !bytes.Equal(bigResponse, body) {
+				b.Fatalf("unexpected response %q. Expecting %q", body, bigResponse)
+			}
+			buf = body
+		}
+	})
+
+	ln.Close()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		b.Fatalf("server wasn't stopped")
+	}
+}
+
+func BenchmarkNetHTTPClientEndToEndBigResponse1Inmemory(b *testing.B) {
+	benchmarkNetHTTPClientEndToEndBigResponseInmemory(b, 1)
+}
+
+func BenchmarkNetHTTPClientEndToEndBigResponse10Inmemory(b *testing.B) {
+	benchmarkNetHTTPClientEndToEndBigResponseInmemory(b, 10)
+}
+
+func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
+	bigResponse := createFixedBody(1024 * 1024)
+	h := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write(bigResponse)
+	}
+	ln := fasthttputil.NewInmemoryListener()
+
+	ch := make(chan struct{})
+	go func() {
+		if err := http.Serve(ln, http.HandlerFunc(h)); err != nil && !strings.Contains(
+			err.Error(), "use of closed network connection") {
+			b.Fatalf("error when serving requests: %s", err)
+		}
+		close(ch)
+	}()
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
+			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
+		},
+	}
+
+	requestURI := "/foo/bar?baz=123"
+	url := "http://unused.host" + requestURI
+	b.SetParallelism(parallelism)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			resp, err := c.Get(url)
+			if err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
+			}
+			body, err := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				b.Fatalf("unexpected error when reading response body: %s", err)
+			}
+			if !bytes.Equal(bigResponse, body) {
+				b.Fatalf("unexpected response %q. Expecting %q", body, bigResponse)
+			}
+		}
+	})
+
+	ln.Close()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		b.Fatalf("server wasn't stopped")
+	}
+}
