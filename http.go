@@ -645,15 +645,15 @@ func (resp *Response) resetSkipHeader() {
 }
 
 func reuseBody(body []byte) []byte {
-	// Reuse body buffer only if its' capacity has been used for
-	// at least 1/7 of the full capacity during the last usage.
-	// This should reduce memory fragmentation in the long run.
-
-	bodyCap := cap(body)
-	bodyLen := len(body)
-	if bodyLen > 0 && bodyCap > 8192 && ((bodyCap-bodyLen)>>3) > bodyLen {
-		return nil
-	}
+	// Production monitoring shows that it is very difficult to create
+	// an optimal strategy for body buffer re-use for real-world loads.
+	//
+	// For instance, the strategy 'throw away big buffers, while re-use
+	// small buffers' fails when small and large responses are equally
+	// distributed.
+	//
+	// So just re-use all body buffers irregardless of their sizes
+	// in the hope sync.Pool+GC finds out an optimal strategy :)
 	return body[:0]
 }
 
