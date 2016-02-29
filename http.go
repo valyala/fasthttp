@@ -645,19 +645,17 @@ func (resp *Response) resetSkipHeader() {
 }
 
 func reuseBody(body []byte) []byte {
-	if cap(body) > maxReuseBodyCap {
+	// Reuse body buffer only if its' capacity has been used for
+	// at least 1/7 of the full capacity during the last usage.
+	// This should reduce memory fragmentation in the long run.
+
+	bodyCap := cap(body)
+	bodyLen := len(body)
+	if bodyLen > 0 && ((bodyCap-bodyLen)>>3) > bodyLen {
 		return nil
 	}
 	return body[:0]
 }
-
-// maxReuseBodyLen is the maximum request and response body buffer capacity,
-// which may be reused.
-//
-// Body is thrown to GC if its' capacity exceeds this limit.
-//
-// This limits memory waste and memory fragmentation when re-using body buffers.
-const maxReuseBodyCap = 8 * 1024
 
 // Read reads request (including body) from the given r.
 //
