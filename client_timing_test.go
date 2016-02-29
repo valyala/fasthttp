@@ -464,7 +464,7 @@ func benchmarkClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
 	b.RunParallel(func(pb *testing.PB) {
 		var buf []byte
 		for pb.Next() {
-			statusCode, body, err := c.Get(buf, url)
+			statusCode, body, err := c.GetTimeout(buf, url, time.Second)
 			if err != nil {
 				b.Fatalf("unexpected error: %s", err)
 			}
@@ -516,6 +516,7 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
 			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
 		},
+		Timeout: time.Second,
 	}
 
 	requestURI := "/foo/bar?baz=123"
