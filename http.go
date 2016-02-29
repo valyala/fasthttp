@@ -433,9 +433,13 @@ func (req *Request) ResetBody() {
 
 // CopyTo copies req contents to dst except of body stream.
 func (req *Request) CopyTo(dst *Request) {
+	req.copyToSkipBody(dst)
+	dst.body = append(dst.body[:0], req.body...)
+}
+
+func (req *Request) copyToSkipBody(dst *Request) {
 	dst.Reset()
 	req.Header.CopyTo(&dst.Header)
-	dst.body = append(dst.body[:0], req.body...)
 
 	req.uri.CopyTo(&dst.uri)
 	dst.parsedURI = req.parsedURI
@@ -449,10 +453,24 @@ func (req *Request) CopyTo(dst *Request) {
 
 // CopyTo copies resp contents to dst except of body stream.
 func (resp *Response) CopyTo(dst *Response) {
+	resp.copyToSkipBody(dst)
+	dst.body = append(dst.body[:0], resp.body...)
+}
+
+func (resp *Response) copyToSkipBody(dst *Response) {
 	dst.Reset()
 	resp.Header.CopyTo(&dst.Header)
-	dst.body = append(dst.body[:0], resp.body...)
 	dst.SkipBody = resp.SkipBody
+}
+
+func swapRequestBody(a, b *Request) {
+	a.body, b.body = b.body, a.body
+	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
+}
+
+func swapResponseBody(a, b *Response) {
+	a.body, b.body = b.body, a.body
+	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
 }
 
 // URI returns request URI

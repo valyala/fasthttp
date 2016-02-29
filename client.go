@@ -862,7 +862,8 @@ func clientDoDeadlineFreeConn(req *Request, resp *Response, deadline time.Time, 
 	// Make req and resp copies, since on timeout they no longer
 	// may be accessed.
 	reqCopy := AcquireRequest()
-	req.CopyTo(reqCopy)
+	req.copyToSkipBody(reqCopy)
+	swapRequestBody(req, reqCopy)
 	respCopy := AcquireResponse()
 
 	// Note that the request continues execution on ErrTimeout until
@@ -889,7 +890,8 @@ func clientDoDeadlineFreeConn(req *Request, resp *Response, deadline time.Time, 
 	var err error
 	select {
 	case err = <-ch:
-		respCopy.CopyTo(resp)
+		respCopy.copyToSkipBody(resp)
+		swapResponseBody(resp, respCopy)
 		ReleaseResponse(respCopy)
 		ReleaseRequest(reqCopy)
 		errorChPool.Put(chv)
