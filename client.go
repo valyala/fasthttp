@@ -180,6 +180,24 @@ type Client struct {
 	// By default response body size is unlimited.
 	MaxResponseBodySize int
 
+	// Header names are passed as-is without normalization
+	// if this option is set.
+	//
+	// Disabled header names' normalization may be useful only for proxying
+	// responses to other clients expecting case-sensitive
+	// header names. See https://github.com/valyala/fasthttp/issues/57
+	// for details.
+	//
+	// By default request and response header names are normalized, i.e.
+	// The first letter and the first letters following dashes
+	// are uppercased, while all the other letters are lowercased.
+	// Examples:
+	//
+	//     * HOST -> Host
+	//     * content-type -> Content-Type
+	//     * cONTENT-lenGTH -> Content-Length
+	DisableHeaderNamesNormalizing bool
+
 	mLock sync.Mutex
 	m     map[string]*HostClient
 	ms    map[string]*HostClient
@@ -310,18 +328,19 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	hc := m[string(host)]
 	if hc == nil {
 		hc = &HostClient{
-			Addr:                addMissingPort(string(host), isTLS),
-			Name:                c.Name,
-			Dial:                c.Dial,
-			DialDualStack:       c.DialDualStack,
-			IsTLS:               isTLS,
-			TLSConfig:           c.TLSConfig,
-			MaxConns:            c.MaxConnsPerHost,
-			ReadBufferSize:      c.ReadBufferSize,
-			WriteBufferSize:     c.WriteBufferSize,
-			ReadTimeout:         c.ReadTimeout,
-			WriteTimeout:        c.WriteTimeout,
-			MaxResponseBodySize: c.MaxResponseBodySize,
+			Addr:                          addMissingPort(string(host), isTLS),
+			Name:                          c.Name,
+			Dial:                          c.Dial,
+			DialDualStack:                 c.DialDualStack,
+			IsTLS:                         isTLS,
+			TLSConfig:                     c.TLSConfig,
+			MaxConns:                      c.MaxConnsPerHost,
+			ReadBufferSize:                c.ReadBufferSize,
+			WriteBufferSize:               c.WriteBufferSize,
+			ReadTimeout:                   c.ReadTimeout,
+			WriteTimeout:                  c.WriteTimeout,
+			MaxResponseBodySize:           c.MaxResponseBodySize,
+			DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
 		}
 		m[string(host)] = hc
 		if len(m) == 1 {
@@ -460,6 +479,24 @@ type HostClient struct {
 	//
 	// By default response body size is unlimited.
 	MaxResponseBodySize int
+
+	// Header names are passed as-is without normalization
+	// if this option is set.
+	//
+	// Disabled header names' normalization may be useful only for proxying
+	// responses to other clients expecting case-sensitive
+	// header names. See https://github.com/valyala/fasthttp/issues/57
+	// for details.
+	//
+	// By default request and response header names are normalized, i.e.
+	// The first letter and the first letters following dashes
+	// are uppercased, while all the other letters are lowercased.
+	// Examples:
+	//
+	//     * HOST -> Host
+	//     * content-type -> Content-Type
+	//     * cONTENT-lenGTH -> Content-Length
+	DisableHeaderNamesNormalizing bool
 
 	clientName  atomic.Value
 	lastUseTime uint32
@@ -966,6 +1003,9 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 
 	if !req.Header.IsGet() && req.Header.IsHead() {
 		resp.SkipBody = true
+	}
+	if c.DisableHeaderNamesNormalizing {
+		resp.Header.DisableNormalizing()
 	}
 
 	br := c.acquireReader(conn)
