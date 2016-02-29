@@ -19,6 +19,19 @@ import (
 	"github.com/klauspost/compress/gzip"
 )
 
+// ServeFileBytesUncompressed returns HTTP response containing file contents
+// from the given path.
+//
+// Directory contents is returned if path points to directory.
+//
+// ServeFileBytes may be used for saving network traffic when serving files
+// with good compression ratio.
+//
+// See also RequestCtx.SendFileBytes.
+func ServeFileBytesUncompressed(ctx *RequestCtx, path []byte) {
+	ServeFileUncompressed(ctx, unsafeBytesToStr(path))
+}
+
 // ServeFileUncompressed returns HTTP response containing file contents
 // from the given path.
 //
@@ -31,6 +44,24 @@ import (
 func ServeFileUncompressed(ctx *RequestCtx, path string) {
 	ctx.Request.Header.DelBytes(strAcceptEncoding)
 	ServeFile(ctx, path)
+}
+
+// ServeFileBytes returns HTTP response containing compressed file contents
+// from the given path.
+//
+// HTTP response may contain uncompressed file contents in the following cases:
+//
+//   * Missing 'Accept-Encoding: gzip' request header.
+//   * No write access to directory containing the file.
+//
+// Directory contents is returned if path points to directory.
+//
+// Use ServeFileBytesUncompressed is you don't need serving compressed
+// file contents.
+//
+// See also RequestCtx.SendFileBytes.
+func ServeFileBytes(ctx *RequestCtx, path []byte) {
+	ServeFile(ctx, unsafeBytesToStr(path))
 }
 
 // ServeFile returns HTTP response containing compressed file contents

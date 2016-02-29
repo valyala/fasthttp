@@ -869,6 +869,17 @@ func (ctx *RequestCtx) SendFile(path string) {
 	ServeFile(ctx, path)
 }
 
+// SendFileBytes sends local file contents from the given path as response body.
+//
+// This is a shortcut to ServeFileBytes(ctx, path).
+//
+// SendFileBytes logs all the errors via ctx.Logger.
+//
+// See also ServeFileBytes, FSHandler and FS.
+func (ctx *RequestCtx) SendFileBytes(path []byte) {
+	ServeFileBytes(ctx, path)
+}
+
 // IfModifiedSince returns true if lastModified exceeds 'If-Modified-Since'
 // value from the request header.
 //
