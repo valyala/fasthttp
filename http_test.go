@@ -14,7 +14,7 @@ import (
 func TestRequestReadMultipartFormWithFile(t *testing.T) {
 	s := `POST /upload HTTP/1.1
 Host: localhost:10000
-Content-Length: 531
+Content-Length: 521
 Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryJwfATyF8tmxSJnLg
 
 ------WebKitFormBoundaryJwfATyF8tmxSJnLg
