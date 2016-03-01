@@ -9,7 +9,30 @@ import (
 	"time"
 )
 
-func TestPipeConnsCloseWhileReadWrite(t *testing.T) {
+func TestPipeConnsCloseWhileReadWriteConcurrent(t *testing.T) {
+	concurrency := 10
+	ch := make(chan struct{}, concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			testPipeConnsCloseWhileReadWriteSerial(t)
+			ch <- struct{}{}
+		}()
+	}
+
+	for i := 0; i < concurrency; i++ {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+}
+
+func TestPipeConnsCloseWhileReadWriteSerial(t *testing.T) {
+	testPipeConnsCloseWhileReadWriteSerial(t)
+}
+
+func testPipeConnsCloseWhileReadWriteSerial(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		testPipeConnsCloseWhileReadWrite(t)
 	}
