@@ -540,7 +540,7 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 		return nil, fmt.Errorf("unsupported Content-Encoding: %q", ce)
 	}
 
-	f, err := readMultipartForm(bytes.NewReader(body), req.multipartFormBoundary, 0, len(body))
+	f, err := readMultipartForm(bytes.NewReader(body), req.multipartFormBoundary, len(body), len(body))
 	if err != nil {
 		return nil, err
 	}
@@ -606,15 +606,16 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	return nil
 }
 
-func readMultipartForm(r io.Reader, boundary string, maxBodySize, maxInMemoryFileSize int) (*multipart.Form, error) {
+func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize int) (*multipart.Form, error) {
 	// Do not care about memory allocations here, since they are tiny
 	// compared to multipart data (aka multi-MB files) usually sent
 	// in multipart/form-data requests.
 
-	if maxBodySize > 0 {
-		r = io.LimitReader(r, int64(maxBodySize))
+	if size <= 0 {
+		panic(fmt.Sprintf("BUG: form size must be greater than 0. Given %d", size))
 	}
-	mr := multipart.NewReader(r, boundary)
+	lr := io.LimitReader(r, int64(size))
+	mr := multipart.NewReader(lr, boundary)
 	f, err := mr.ReadForm(int64(maxInMemoryFileSize))
 	if err != nil {
 		return nil, fmt.Errorf("cannot read multipart/form-data body: %s", err)
@@ -769,12 +770,16 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
 	var err error
 	contentLength := req.Header.ContentLength()
 	if contentLength > 0 {
+		if maxBodySize > 0 && contentLength > maxBodySize {
+			return ErrBodyTooLarge
+		}
+
 		// Pre-read multipart form data of known length.
 		// This way we limit memory usage for large file uploads, since their contents
 		// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
 		req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
 		if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
-			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, maxBodySize, defaultMaxInMemoryFileSize)
+			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
 			if err != nil {
 				req.Reset()
 			}

@@ -15,6 +15,118 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestServerMultipartFormDataRequest(t *testing.T) {
+	reqS := `POST /upload HTTP/1.1
+Host: qwerty.com
+Content-Length: 520
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryJwfATyF8tmxSJnLg
+
+------WebKitFormBoundaryJwfATyF8tmxSJnLg
+Content-Disposition: form-data; name="f1"
+
+value1
+------WebKitFormBoundaryJwfATyF8tmxSJnLg
+Content-Disposition: form-data; name="fileaaa"; filename="TODO"
+Content-Type: application/octet-stream
+
+- SessionClient with referer and cookies support.
+- Client with requests' pipelining support.
+- ProxyHandler similar to FSHandler.
+- WebSockets. See https://tools.ietf.org/html/rfc6455 .
+- HTTP/2.0. See https://tools.ietf.org/html/rfc7540 .
+
+------WebKitFormBoundaryJwfATyF8tmxSJnLg--
+
+GET / HTTP/1.1
+Host: asbd
+Connection: close
+
+`
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/upload":
+				f, err := ctx.MultipartForm()
+				if err != nil {
+					t.Fatalf("unexpected error: %s", err)
+				}
+				if len(f.Value) != 1 {
+					t.Fatalf("unexpected values %d. Expecting %d", len(f.Value), 1)
+				}
+				if len(f.File) != 1 {
+					t.Fatalf("unexpected file values %d. Expecting %d", len(f.File), 1)
+				}
+				ctx.Redirect("/", StatusSeeOther)
+			default:
+				ctx.WriteString("non-upload")
+			}
+		},
+	}
+
+	ch := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(ch)
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if _, err = conn.Write([]byte(reqS)); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	var resp Response
+	br := bufio.NewReader(conn)
+	respCh := make(chan struct{})
+	go func() {
+		if err := resp.Read(br); err != nil {
+			t.Fatalf("error when reading response: %s", err)
+		}
+		if resp.StatusCode() != StatusSeeOther {
+			t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusSeeOther)
+		}
+		loc := resp.Header.Peek("Location")
+		if string(loc) != "http://qwerty.com/" {
+			t.Fatalf("unexpected location %q. Expecting %q", loc, "http://qwerty.com/")
+		}
+
+		if err := resp.Read(br); err != nil {
+			t.Fatalf("error when reading the second response: %s", err)
+		}
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+		}
+		body := resp.Body()
+		if string(body) != "non-upload" {
+			t.Fatalf("unexpected body %q. Expecting %q", body, "non-upload")
+		}
+		close(respCh)
+	}()
+
+	select {
+	case <-respCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("error when closing listener: %s", err)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout when waiting for the server to stop")
+	}
+}
+
 func TestServerDisableHeaderNamesNormalizing(t *testing.T) {
 	headerName := "CASE-senSITive-HEAder-NAME"
 	headerNameLower := strings.ToLower(headerName)
