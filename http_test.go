@@ -11,6 +11,89 @@ import (
 	"testing"
 )
 
+func TestRequestReadMultipartFormWithFile(t *testing.T) {
+	s := `POST /upload HTTP/1.1
+Host: localhost:10000
+Content-Length: 531
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryJwfATyF8tmxSJnLg
+
+------WebKitFormBoundaryJwfATyF8tmxSJnLg
+Content-Disposition: form-data; name="f1"
+
+value1
+------WebKitFormBoundaryJwfATyF8tmxSJnLg
+Content-Disposition: form-data; name="fileaaa"; filename="TODO"
+Content-Type: application/octet-stream
+
+- SessionClient with referer and cookies support.
+- Client with requests' pipelining support.
+- ProxyHandler similar to FSHandler.
+- WebSockets. See https://tools.ietf.org/html/rfc6455 .
+- HTTP/2.0. See https://tools.ietf.org/html/rfc7540 .
+
+------WebKitFormBoundaryJwfATyF8tmxSJnLg--
+tailfoobar`
+
+	br := bufio.NewReader(bytes.NewBufferString(s))
+
+	var r Request
+	if err := r.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	tail, err := ioutil.ReadAll(br)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if string(tail) != "tailfoobar" {
+		t.Fatalf("unexpected tail %q. Expecting %q", tail, "tailfoobar")
+	}
+
+	f, err := r.MultipartForm()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	defer r.RemoveMultipartFormFiles()
+
+	// verify values
+	if len(f.Value) != 1 {
+		t.Fatalf("unexpected number of values in multipart form: %d. Expecting 1", len(f.Value))
+	}
+	for k, vv := range f.Value {
+		if k != "f1" {
+			t.Fatalf("unexpected value name %q. Expecting %q", k, "f1")
+		}
+		if len(vv) != 1 {
+			t.Fatalf("unexpected number of values %d. Expecting 1", len(vv))
+		}
+		v := vv[0]
+		if v != "value1" {
+			t.Fatalf("unexpected value %q. Expecting %q", v, "value1")
+		}
+	}
+
+	// verify files
+	if len(f.File) != 1 {
+		t.Fatalf("unexpected number of file values in multipart form: %d. Expecting 1", len(f.File))
+	}
+	for k, vv := range f.File {
+		if k != "fileaaa" {
+			t.Fatalf("unexpected file value name %q. Expecting %q", k, "fileaaa")
+		}
+		if len(vv) != 1 {
+			t.Fatalf("unexpected number of file values %d. Expecting 1", len(vv))
+		}
+		v := vv[0]
+		if v.Filename != "TODO" {
+			t.Fatalf("unexpected filename %q. Expecting %q", v.Filename, "TODO")
+		}
+		ct := v.Header.Get("Content-Type")
+		if ct != "application/octet-stream" {
+			t.Fatalf("unexpected content-type %q. Expecting %q", ct, "application/octet-stream")
+		}
+	}
+}
+
 func TestRequestRequestURI(t *testing.T) {
 	var r Request
 
@@ -579,7 +662,7 @@ func testRequestMultipartForm(t *testing.T, boundary string, formData []byte, pa
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
-	defer f.RemoveAll()
+	defer req.RemoveMultipartFormFiles()
 
 	if len(f.File) > 0 {
 		t.Fatalf("unexpected files found in the multipart form: %d", len(f.File))
