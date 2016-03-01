@@ -120,10 +120,11 @@ func (c *pipeConn) Read(p []byte) (int, error) {
 
 func (c *pipeConn) read(p []byte, mayBlock bool) (int, error) {
 	if len(c.bb) == 0 {
+		c.rlock.Lock()
+
 		releaseByteBuffer(c.b)
 		c.b = nil
 
-		c.rlock.Lock()
 		if c.rclosed {
 			c.rlock.Unlock()
 			return 0, io.EOF
@@ -145,9 +146,8 @@ func (c *pipeConn) read(p []byte, mayBlock bool) (int, error) {
 			c.rlock.Unlock()
 			return 0, io.EOF
 		}
-		c.rlock.Unlock()
-
 		c.bb = c.b.b
+		c.rlock.Unlock()
 	}
 	n := copy(p, c.bb)
 	c.bb = c.bb[n:]
@@ -181,7 +181,6 @@ func (c *pipeConn) release() {
 
 	releaseByteBuffer(c.b)
 	c.b = nil
-	c.bb = nil
 
 	if !c.rclosed {
 		c.rclosed = true
