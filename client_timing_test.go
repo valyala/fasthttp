@@ -517,7 +517,7 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
 			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
 		},
-		Timeout: 5*time.Second,
+		Timeout: 5 * time.Second,
 	}
 
 	requestURI := "/foo/bar?baz=123"
