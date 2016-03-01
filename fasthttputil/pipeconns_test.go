@@ -10,7 +10,7 @@ import (
 )
 
 func TestPipeConnsCloseWhileReadWriteConcurrent(t *testing.T) {
-	concurrency := 10
+	concurrency := 4
 	ch := make(chan struct{}, concurrency)
 	for i := 0; i < concurrency; i++ {
 		go func() {
@@ -22,7 +22,7 @@ func TestPipeConnsCloseWhileReadWriteConcurrent(t *testing.T) {
 	for i := 0; i < concurrency; i++ {
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(3*time.Second):
 			t.Fatalf("timeout")
 		}
 	}
