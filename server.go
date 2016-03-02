@@ -64,6 +64,17 @@ func ServeTLS(ln net.Listener, certFile, keyFile string, handler RequestHandler)
 	return s.ServeTLS(ln, certFile, keyFile)
 }
 
+// ServeTLSEmbed serves HTTPS requests from the given net.Listener
+// using the given handler.
+//
+// certData and keyData must contain valid TLS certificate and key data.
+func ServeTLSEmbed(ln net.Listener, certData, keyData []byte, handler RequestHandler) error {
+	s := &Server{
+		Handler: handler,
+	}
+	return s.ServeTLSEmbed(ln, certData, keyData)
+}
+
 // ListenAndServe serves HTTP requests from the given TCP addr
 // using the given handler.
 func ListenAndServe(addr string, handler RequestHandler) error {
@@ -95,6 +106,17 @@ func ListenAndServeTLS(addr, certFile, keyFile string, handler RequestHandler) e
 		Handler: handler,
 	}
 	return s.ListenAndServeTLS(addr, certFile, keyFile)
+}
+
+// ListenAndServeTLSEmbed serves HTTPS requests from the given TCP addr
+// using the given handler.
+//
+// certData and keyData must contain valid TLS certificate and key data.
+func ListenAndServeTLSEmbed(addr string, certData, keyData []byte, handler RequestHandler) error {
+	s := &Server{
+		Handler: handler,
+	}
+	return s.ListenAndServeTLSEmbed(addr, certData, keyData)
 }
 
 // RequestHandler must process incoming requests.
@@ -1066,6 +1088,17 @@ func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
 	return s.ServeTLS(ln, certFile, keyFile)
 }
 
+// ListenAndServeTLSEmbed serves HTTPS requests from the given TCP addr.
+//
+// certData and keyData must contain valid TLS certificate and key data.
+func (s *Server) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) error {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	return s.ServeTLSEmbed(ln, certData, keyData)
+}
+
 // ServeTLS serves HTTPS requests from the given listener.
 //
 // certFile and keyFile are paths to TLS certificate and key files.
@@ -1077,15 +1110,39 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	return s.Serve(lnTLS)
 }
 
+// ServeTLSEmbed serves HTTPS requests from the given listener.
+//
+// certData and keyData must contain valid TLS certificate and key data.
+func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error {
+	lnTLS, err := newTLSListenerEmbed(ln, certData, keyData)
+	if err != nil {
+		return err
+	}
+	return s.Serve(lnTLS)
+}
+
 func newTLSListener(ln net.Listener, certFile, keyFile string) (net.Listener, error) {
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return nil, fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %s", certFile, keyFile, err)
 	}
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
+	return newCertListener(ln, &cert), nil
+}
+
+func newTLSListenerEmbed(ln net.Listener, certData, keyData []byte) (net.Listener, error) {
+	cert, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		return nil, fmt.Errorf("cannot load TLS key pair from the provided certData(%d) and keyData(%d): %s",
+			len(certData), len(keyData), err)
 	}
-	return tls.NewListener(ln, tlsConfig), nil
+	return newCertListener(ln, &cert), nil
+}
+
+func newCertListener(ln net.Listener, cert *tls.Certificate) net.Listener {
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{*cert},
+	}
+	return tls.NewListener(ln, tlsConfig)
 }
 
 // DefaultConcurrency is the maximum number of concurrent connections

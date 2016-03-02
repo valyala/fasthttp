@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -14,6 +15,78 @@ import (
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
+
+func TestServerServeTLSEmbed(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	certFile := "./ssl-cert-snakeoil.pem"
+	keyFile := "./ssl-cert-snakeoil.key"
+
+	certData, err := ioutil.ReadFile(certFile)
+	if err != nil {
+		t.Fatalf("unexpected error when reading %q: %s", certFile, err)
+	}
+	keyData, err := ioutil.ReadFile(keyFile)
+	if err != nil {
+		t.Fatalf("unexpected error when reading %q: %s", keyFile, err)
+	}
+
+	// start the server
+	ch := make(chan struct{})
+	go func() {
+		err := ServeTLSEmbed(ln, certData, keyData, func(ctx *RequestCtx) {
+			ctx.WriteString("success")
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(ch)
+	}()
+
+	// establish connection to the server
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	tlsConn := tls.Client(conn, &tls.Config{
+		InsecureSkipVerify: true,
+	})
+
+	// send request
+	if _, err = tlsConn.Write([]byte("GET / HTTP/1.1\r\nHost: aaa\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// read response
+	respCh := make(chan struct{})
+	go func() {
+		br := bufio.NewReader(tlsConn)
+		var resp Response
+		if err := resp.Read(br); err != nil {
+			t.Fatalf("unexpected error")
+		}
+		body := resp.Body()
+		if string(body) != "success" {
+			t.Fatalf("unexpected response body %q. Expecting %q", body, "success")
+		}
+		close(respCh)
+	}()
+	select {
+	case <-respCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	// close the server
+	if err = ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
 
 func TestServerMultipartFormDataRequest(t *testing.T) {
 	reqS := `POST /upload HTTP/1.1
