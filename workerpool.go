@@ -77,12 +77,14 @@ func (wp *workerPool) Stop() {
 	wp.lock.Unlock()
 }
 
+const maxIdleWorkerDuration = 10 * time.Second
+
 func (wp *workerPool) clean() {
 	// Clean least recently used workers if they didn't serve connections
-	// for more than one second.
+	// for more than maxIdleWorkerDuration.
 	wp.lock.Lock()
 	ready := wp.ready
-	for len(ready) > 1 && time.Since(ready[0].t) > 10*time.Second {
+	for len(ready) > 1 && time.Since(ready[0].t) > maxIdleWorkerDuration {
 		// notify the worker to stop.
 		ready[0].ch <- nil
 
