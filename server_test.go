@@ -132,6 +132,10 @@ Connection: close
 				if len(f.File) != 1 {
 					t.Fatalf("unexpected file values %d. Expecting %d", len(f.File), 1)
 				}
+				fv := ctx.FormValue("f1")
+				if string(fv) != "value1" {
+					t.Fatalf("unexpected form value: %q. Expecting %q", fv, "value1")
+				}
 				ctx.Redirect("/", StatusSeeOther)
 			default:
 				ctx.WriteString("non-upload")
