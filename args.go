@@ -40,7 +40,7 @@ type Args struct {
 	bufKV argsKV
 	buf   []byte
 
-	noCopy
+	noCopy noCopy
 }
 
 type argsKV struct {

@@ -38,7 +38,7 @@ type Request struct {
 	parsedURI      bool
 	parsedPostArgs bool
 
-	noCopy
+	noCopy noCopy
 }
 
 // Response represents HTTP response.
@@ -65,7 +65,7 @@ type Response struct {
 	// Use it for writing HEAD responses.
 	SkipBody bool
 
-	noCopy
+	noCopy noCopy
 }
 
 // SetRequestURI sets RequestURI.

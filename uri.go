@@ -51,7 +51,7 @@ type URI struct {
 
 	h *RequestHeader
 
-	noCopy
+	noCopy noCopy
 }
 
 // CopyTo copies uri contents to dst.

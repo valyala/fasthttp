@@ -271,7 +271,7 @@ type Server struct {
 	hijackConnPool sync.Pool
 	bytePool       sync.Pool
 
-	noCopy
+	noCopy noCopy
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -377,7 +377,7 @@ type RequestCtx struct {
 
 	hijackHandler HijackHandler
 
-	noCopy
+	noCopy noCopy
 }
 
 // HijackHandler must process the hijacked connection c.

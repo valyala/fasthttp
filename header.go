@@ -34,7 +34,7 @@ type ResponseHeader struct {
 
 	cookies []argsKV
 
-	noCopy
+	noCopy noCopy
 }
 
 // RequestHeader represents HTTP request header.
@@ -71,7 +71,7 @@ type RequestHeader struct {
 
 	rawHeaders []byte
 
-	noCopy
+	noCopy noCopy
 }
 
 // SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'

@@ -202,7 +202,7 @@ type Client struct {
 	m     map[string]*HostClient
 	ms    map[string]*HostClient
 
-	noCopy
+	noCopy noCopy
 }
 
 // Get appends url contents to dst and returns it as body.
@@ -514,7 +514,7 @@ type HostClient struct {
 	readerPool sync.Pool
 	writerPool sync.Pool
 
-	noCopy
+	noCopy noCopy
 }
 
 type clientConn struct {
