@@ -39,6 +39,8 @@ type Args struct {
 	args  []argsKV
 	bufKV argsKV
 	buf   []byte
+
+	noCopy
 }
 
 type argsKV struct {

@@ -55,6 +55,8 @@ type Cookie struct {
 
 	bufKV argsKV
 	buf   []byte
+
+	noCopy
 }
 
 // CopyTo copies src cookie to c.
