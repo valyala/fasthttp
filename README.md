@@ -174,31 +174,31 @@ instead of objects implementing [Handler interface](https://golang.org/pkg/net/h
 Fortunately, it is easy to pass bound struct methods to fasthttp:
 
   ```go
-type MyHandler struct {
-	foobar string
-}
+  type MyHandler struct {
+  	foobar string
+  }
 
-// request handler in net/http style, i.e. method bound to MyHandler struct.
-func (h *MyHandler) HandleFastHTTP(ctx *fasthttp.RequestCtx) {
-	// notice that we may access MyHandler properties here - see h.foobar.
-	fmt.Fprintf(ctx, "Hello, world! Requested path is %q. Foobar is %q",
-		ctx.Path(), h.foobar)
-}
+  // request handler in net/http style, i.e. method bound to MyHandler struct.
+  func (h *MyHandler) HandleFastHTTP(ctx *fasthttp.RequestCtx) {
+  	// notice that we may access MyHandler properties here - see h.foobar.
+  	fmt.Fprintf(ctx, "Hello, world! Requested path is %q. Foobar is %q",
+  		ctx.Path(), h.foobar)
+  }
 
-// request handler in fasthttp style, i.e. just plain function.
-func fastHTTPHandler(ctx *fasthttp.RequestCtx) {
-	fmt.Fprintf(ctx, "Hi there! RequestURI is %q", ctx.RequestURI())
-}
+  // request handler in fasthttp style, i.e. just plain function.
+  func fastHTTPHandler(ctx *fasthttp.RequestCtx) {
+  	fmt.Fprintf(ctx, "Hi there! RequestURI is %q", ctx.RequestURI())
+  }
 
-// pass bound struct method to fasthttp
-myHandler := &MyHandler{
-	foobar: "foobar",
-}
-fasthttp.ListenAndServe(":8080", myHandler.HandleFastHTTP)
+  // pass bound struct method to fasthttp
+  myHandler := &MyHandler{
+  	foobar: "foobar",
+  }
+  fasthttp.ListenAndServe(":8080", myHandler.HandleFastHTTP)
 
-// pass plain function to fasthttp
-fasthttp.ListenAndServe(":8081", fastHTTPHandler)
-```
+  // pass plain function to fasthttp
+  fasthttp.ListenAndServe(":8081", fastHTTPHandler)
+  ```
 
 * The [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler)
 accepts only one argument - [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx).
@@ -207,65 +207,65 @@ and response writing. Below is an example of a simple request handler conversion
 from net/http to fasthttp.
 
   ```go
-// net/http request handler
-requestHandler := func(w http.ResponseWriter, r *http.Request) {
-	switch r.URL.Path {
-	case "/foo":
-		fooHandler(w, r)
-	case "/bar":
-		barHandler(w, r)
-	default:
-		http.Error(w, "Unsupported path", http.StatusNotFound)
-	}
-}
-```
+  // net/http request handler
+  requestHandler := func(w http.ResponseWriter, r *http.Request) {
+  	switch r.URL.Path {
+  	case "/foo":
+  		fooHandler(w, r)
+  	case "/bar":
+  		barHandler(w, r)
+  	default:
+  		http.Error(w, "Unsupported path", http.StatusNotFound)
+  	}
+  }
+  ```
 
   ```go
-// the corresponding fasthttp request handler
-requestHandler := func(ctx *fasthttp.RequestCtx) {
-	switch string(ctx.Path()) {
-	case "/foo":
-		fooHandler(ctx)
-	case "/bar":
-		barHandler(ctx)
-	default:
-		ctx.Error("Unsupported path", fasthttp.StatusNotFound)
-	}
-}
-```
+  // the corresponding fasthttp request handler
+  requestHandler := func(ctx *fasthttp.RequestCtx) {
+  	switch string(ctx.Path()) {
+  	case "/foo":
+  		fooHandler(ctx)
+  	case "/bar":
+  		barHandler(ctx)
+  	default:
+  		ctx.Error("Unsupported path", fasthttp.StatusNotFound)
+  	}
+  }
+  ```
 
 * Fasthttp allows setting response headers and writing response body
 in arbitrary order. There is no 'headers first, then body' restriction
 like in net/http. The following code is valid for fasthttp:
 
   ```go
-requestHandler := func(ctx *fasthttp.RequestCtx) {
-	// set some headers and status code first
-	ctx.SetContentType("foo/bar")
-	ctx.SetStatusCode(fasthttp.StatusOK)
+  requestHandler := func(ctx *fasthttp.RequestCtx) {
+  	// set some headers and status code first
+  	ctx.SetContentType("foo/bar")
+  	ctx.SetStatusCode(fasthttp.StatusOK)
 
-	// then write the first part of body
-	fmt.Fprintf(ctx, "this is the first part of body\n")
+  	// then write the first part of body
+  	fmt.Fprintf(ctx, "this is the first part of body\n")
 
-	// then set more headers
-	ctx.Response.Header.Set("Foo-Bar", "baz")
+  	// then set more headers
+  	ctx.Response.Header.Set("Foo-Bar", "baz")
 
-	// then write more body
-	fmt.Fprintf(ctx, "this is the second part of body\n")
+  	// then write more body
+  	fmt.Fprintf(ctx, "this is the second part of body\n")
 
-	// then override already written body
-	ctx.SetBody([]byte("this is completely new body contents"))
+  	// then override already written body
+  	ctx.SetBody([]byte("this is completely new body contents"))
 
-	// then update status code
-	ctx.SetStatusCode(fasthttp.StatusNotFound)
+  	// then update status code
+  	ctx.SetStatusCode(fasthttp.StatusNotFound)
 
-	// basically, anything may be updated many times before
-	// returning from RequestHandler.
-	//
-	// Unlike net/http fasthttp doesn't put response to the wire until
-	// returning from RequestHandler.
-}
-```
+  	// basically, anything may be updated many times before
+  	// returning from RequestHandler.
+  	//
+  	// Unlike net/http fasthttp doesn't put response to the wire until
+  	// returning from RequestHandler.
+  }
+  ```
 
 * Fasthttp doesn't provide [ServeMux](https://golang.org/pkg/net/http/#ServeMux),
 but there are more powerful third-party routers with fasthttp support exist:
@@ -277,33 +277,33 @@ but there are more powerful third-party routers with fasthttp support exist:
   Net/http code with simple ServeMux is trivially converted to fasthttp code:
 
   ```go
-// net/http code
+  // net/http code
 
-m := &http.ServeMux{}
-m.HandleFunc("/foo", fooHandlerFunc)
-m.HandleFunc("/bar", barHandlerFunc)
-m.Handle("/baz", bazHandler)
+  m := &http.ServeMux{}
+  m.HandleFunc("/foo", fooHandlerFunc)
+  m.HandleFunc("/bar", barHandlerFunc)
+  m.Handle("/baz", bazHandler)
 
-http.ListenAndServe(":80", m)
-```
+  http.ListenAndServe(":80", m)
+  ```
 
   ```go
-// the corresponding fasthttp code
-m := func(ctx *fasthttp.RequestCtx) {
-	switch string(ctx.Path()) {
-	case "/foo":
-		fooHandlerFunc(ctx)
-	case "/bar":
-		barHandlerFunc(ctx)
-	case "/baz":
-		bazHandler.HandlerFunc(ctx)
-	default:
-		ctx.Error("not found", fasthttp.StatusNotFound)
-	}
-}
+  // the corresponding fasthttp code
+  m := func(ctx *fasthttp.RequestCtx) {
+  	switch string(ctx.Path()) {
+  	case "/foo":
+  		fooHandlerFunc(ctx)
+  	case "/bar":
+  		barHandlerFunc(ctx)
+  	case "/baz":
+  		bazHandler.HandlerFunc(ctx)
+  	default:
+  		ctx.Error("not found", fasthttp.StatusNotFound)
+  	}
+  }
 
-fastttp.ListenAndServe(":80", m)
-```
+  fastttp.ListenAndServe(":80", m)
+  ```
 
 * net/http -> fasthttp conversion table:
 
