@@ -18,6 +18,8 @@ import (
 //
 // Request instance MUST NOT be used from concurrently running goroutines.
 type Request struct {
+	noCopy noCopy
+
 	// Request header
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
@@ -37,8 +39,6 @@ type Request struct {
 	// Group bool members in order to reduce Request object size.
 	parsedURI      bool
 	parsedPostArgs bool
-
-	noCopy noCopy
 }
 
 // Response represents HTTP response.
@@ -48,6 +48,8 @@ type Request struct {
 //
 // Response instance MUST NOT be used from concurrently running goroutines.
 type Response struct {
+	noCopy noCopy
+
 	// Response header
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
@@ -64,8 +66,6 @@ type Response struct {
 	// Response.Write() skips writing body if set to true.
 	// Use it for writing HEAD responses.
 	SkipBody bool
-
-	noCopy noCopy
 }
 
 // SetRequestURI sets RequestURI.

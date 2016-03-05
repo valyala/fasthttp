@@ -47,6 +47,8 @@ var cookiePool = &sync.Pool{
 //
 // Cookie instance MUST NOT be used from concurrently running goroutines.
 type Cookie struct {
+	noCopy noCopy
+
 	key    []byte
 	value  []byte
 	expire time.Time
@@ -55,8 +57,6 @@ type Cookie struct {
 
 	bufKV argsKV
 	buf   []byte
-
-	noCopy noCopy
 }
 
 // CopyTo copies src cookie to c.

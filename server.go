@@ -137,6 +137,8 @@ type RequestHandler func(ctx *RequestCtx)
 //
 // It is safe to call Server methods from concurrently running goroutines.
 type Server struct {
+	noCopy noCopy
+
 	// Handler for processing incoming requests.
 	Handler RequestHandler
 
@@ -270,8 +272,6 @@ type Server struct {
 	writerPool     sync.Pool
 	hijackConnPool sync.Pool
 	bytePool       sync.Pool
-
-	noCopy noCopy
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -345,6 +345,8 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 // running goroutines. The only exception is TimeoutError*, which may be called
 // while other goroutines accessing RequestCtx.
 type RequestCtx struct {
+	noCopy noCopy
+
 	// Incoming request.
 	//
 	// Copying Request by value is forbidden. Use pointer to Request instead.
@@ -376,8 +378,6 @@ type RequestCtx struct {
 	timeoutTimer    *time.Timer
 
 	hijackHandler HijackHandler
-
-	noCopy noCopy
 }
 
 // HijackHandler must process the hijacked connection c.

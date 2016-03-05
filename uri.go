@@ -36,6 +36,8 @@ var uriPool = &sync.Pool{
 //
 // URI instance MUST NOT be used from concurrently running goroutines.
 type URI struct {
+	noCopy noCopy
+
 	pathOriginal []byte
 	scheme       []byte
 	path         []byte
@@ -50,8 +52,6 @@ type URI struct {
 	requestURI []byte
 
 	h *RequestHeader
-
-	noCopy noCopy
 }
 
 // CopyTo copies uri contents to dst.

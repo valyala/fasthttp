@@ -18,6 +18,8 @@ import (
 // ResponseHeader instance MUST NOT be used from concurrently running
 // goroutines.
 type ResponseHeader struct {
+	noCopy noCopy
+
 	disableNormalizing bool
 	noHTTP11           bool
 	connectionClose    bool
@@ -33,8 +35,6 @@ type ResponseHeader struct {
 	bufKV argsKV
 
 	cookies []argsKV
-
-	noCopy noCopy
 }
 
 // RequestHeader represents HTTP request header.
@@ -45,6 +45,8 @@ type ResponseHeader struct {
 // RequestHeader instance MUST NOT be used from concurrently running
 // goroutines.
 type RequestHeader struct {
+	noCopy noCopy
+
 	disableNormalizing bool
 	noHTTP11           bool
 	connectionClose    bool
@@ -70,8 +72,6 @@ type RequestHeader struct {
 	cookies []argsKV
 
 	rawHeaders []byte
-
-	noCopy noCopy
 }
 
 // SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
