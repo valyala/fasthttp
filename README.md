@@ -173,7 +173,7 @@ Important points:
 instead of objects implementing [Handler interface](https://golang.org/pkg/net/http/#Handler).
 Fortunately, it is easy to pass bound struct methods to fasthttp:
 
-```go
+  ```go
 type MyHandler struct {
 	foobar string
 }
@@ -206,7 +206,7 @@ It contains all the functionality required for http request processing
 and response writing. Below is an example of a simple request handler conversion
 from net/http to fasthttp.
 
-```go
+  ```go
 // net/http request handler
 requestHandler := func(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
@@ -220,7 +220,7 @@ requestHandler := func(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-```go
+  ```go
 // the corresponding fasthttp request handler
 requestHandler := func(ctx *fasthttp.RequestCtx) {
 	switch string(ctx.Path()) {
@@ -237,7 +237,8 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
 * Fasthttp allows setting response headers and writing response body
 in arbitrary order. There is no 'headers first, then body' restriction
 like in net/http. The following code is valid for fasthttp:
-```go
+
+  ```go
 requestHandler := func(ctx *fasthttp.RequestCtx) {
 	// set some headers and status code first
 	ctx.SetContentType("foo/bar")
@@ -267,13 +268,15 @@ requestHandler := func(ctx *fasthttp.RequestCtx) {
 ```
 
 * Fasthttp doesn't provide [ServeMux](https://golang.org/pkg/net/http/#ServeMux),
-since I believe third-party request routers like
-[fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) and
-[fasthttprouter](https://github.com/buaazp/fasthttprouter) must be used instead,
-Net/http code with simple ServeMux is trivially converted
-to fasthttp code:
+but there are more powerful third-party routers with fasthttp support exist:
 
-```go
+  * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
+  * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
+  * [echo v2](https://github.com/labstack/echo/tree/v2)
+
+  Net/http code with simple ServeMux is trivially converted to fasthttp code:
+
+  ```go
 // net/http code
 
 m := &http.ServeMux{}
@@ -284,7 +287,7 @@ m.Handle("/baz", bazHandler)
 http.ListenAndServe(":80", m)
 ```
 
-```go
+  ```go
 // the corresponding fasthttp code
 m := func(ctx *fasthttp.RequestCtx) {
 	switch string(ctx.Path()) {
@@ -502,8 +505,6 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   * net/http handles more HTTP corner cases.
   * net/http should contain less bugs, since it is used and tested by much
     wider audience.
-  * Many existing web frameworks and request routers are built on top
-    of net/http.
   * net/http works on Go older than 1.5.
 
 * *Why fasthttp API prefers returning `[]byte` instead of `string`?*
@@ -524,11 +525,14 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
 
 * *Are there plans to add request routing to fasthttp?*
 
-  There are no plans to add request routing into fasthttp. I believe request
-  routing must be implemented in a separate package(s) like
-  [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) and
-  [fasthttprouter](https://github.com/buaazp/fasthttprouter).
-  See also [this issue](https://github.com/valyala/fasthttp/issues/8) for more info.
+  There are no plans to add request routing into fasthttp.
+  Use third-party routers with fasthttp support:
+
+    * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
+    * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
+    * [echo v2](https://github.com/labstack/echo/tree/v2)
+
+  See also [this issue](https://github.com/valyala/fasthttp/issues/9) for more info.
 
 * *I detected data race in fasthttp!*
 
