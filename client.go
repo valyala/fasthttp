@@ -1211,9 +1211,11 @@ func (c *HostClient) releaseReader(br *bufio.Reader) {
 	c.readerPool.Put(br)
 }
 
-var defaultTLSConfig = &tls.Config{
-	InsecureSkipVerify: true,
-	ClientSessionCache: tls.NewLRUClientSessionCache(0),
+func newDefaultTLSConfig() *tls.Config {
+	return &tls.Config{
+		InsecureSkipVerify: true,
+		ClientSessionCache: tls.NewLRUClientSessionCache(0),
+	}
 }
 
 func (c *HostClient) nextAddr() string {
@@ -1281,7 +1283,7 @@ func (c *HostClient) dialHost() (net.Conn, error) {
 	if c.IsTLS {
 		tlsConfig := c.TLSConfig
 		if tlsConfig == nil {
-			tlsConfig = defaultTLSConfig
+			tlsConfig = newDefaultTLSConfig()
 		}
 		conn = tls.Client(conn, tlsConfig)
 	}
