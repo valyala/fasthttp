@@ -144,7 +144,7 @@ func (h *ResponseHeader) SetConnectionClose() {
 func (h *ResponseHeader) ResetConnectionClose() {
 	if h.connectionClose {
 		h.connectionClose = false
-		h.h = delArg(h.h, strConnection)
+		h.h = delAllArgs(h.h, strConnection)
 	}
 }
 
@@ -171,7 +171,7 @@ func (h *RequestHeader) ResetConnectionClose() {
 	h.parseRawHeaders()
 	if h.connectionClose {
 		h.connectionClose = false
-		h.h = delArg(h.h, strConnection)
+		h.h = delAllArgs(h.h, strConnection)
 	}
 }
 
@@ -207,7 +207,7 @@ func (h *ResponseHeader) SetContentLength(contentLength int) {
 	h.contentLength = contentLength
 	if contentLength >= 0 {
 		h.contentLengthBytes = AppendUint(h.contentLengthBytes[:0], contentLength)
-		h.h = delArg(h.h, strTransferEncoding)
+		h.h = delAllArgs(h.h, strTransferEncoding)
 	} else {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 		value := strChunked
@@ -253,7 +253,7 @@ func (h *RequestHeader) SetContentLength(contentLength int) {
 	h.contentLength = contentLength
 	if contentLength >= 0 {
 		h.contentLengthBytes = AppendUint(h.contentLengthBytes[:0], contentLength)
-		h.h = delArg(h.h, strTransferEncoding)
+		h.h = delAllArgs(h.h, strTransferEncoding)
 	} else {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 		h.h = setArg(h.h, strTransferEncoding, strChunked)
@@ -773,21 +773,38 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 // Del deletes header with the given key.
 func (h *ResponseHeader) Del(key string) {
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
-	h.h = delArg(h.h, k)
+	h.del(k)
 }
 
 // DelBytes deletes header with the given key.
 func (h *ResponseHeader) DelBytes(key []byte) {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-	h.h = delArg(h.h, h.bufKV.key)
+	h.del(h.bufKV.key)
+}
+
+func (h *ResponseHeader) del(key []byte) {
+	switch {
+	case bytes.Equal(strContentType, key):
+		h.contentType = h.contentType[:0]
+	case bytes.Equal(strServer, key):
+		h.server = h.server[:0]
+	case bytes.Equal(strSetCookie, key):
+		h.cookies = h.cookies[:0]
+	case bytes.Equal(strContentLength, key):
+		h.contentLength = 0
+		h.contentLengthBytes = h.contentLengthBytes[:0]
+	case bytes.Equal(strConnection, key):
+		h.connectionClose = false
+	}
+	h.h = delAllArgs(h.h, key)
 }
 
 // Del deletes header with the given key.
 func (h *RequestHeader) Del(key string) {
 	h.parseRawHeaders()
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
-	h.h = delArg(h.h, k)
+	h.del(k)
 }
 
 // DelBytes deletes header with the given key.
@@ -795,7 +812,26 @@ func (h *RequestHeader) DelBytes(key []byte) {
 	h.parseRawHeaders()
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-	h.h = delArg(h.h, h.bufKV.key)
+	h.del(h.bufKV.key)
+}
+
+func (h *RequestHeader) del(key []byte) {
+	switch {
+	case bytes.Equal(strHost, key):
+		h.host = h.host[:0]
+	case bytes.Equal(strContentType, key):
+		h.contentType = h.contentType[:0]
+	case bytes.Equal(strUserAgent, key):
+		h.userAgent = h.userAgent[:0]
+	case bytes.Equal(strCookie, key):
+		h.cookies = h.cookies[:0]
+	case bytes.Equal(strContentLength, key):
+		h.contentLength = 0
+		h.contentLengthBytes = h.contentLengthBytes[:0]
+	case bytes.Equal(strConnection, key):
+		h.connectionClose = false
+	}
+	h.h = delAllArgs(h.h, key)
 }
 
 // Set sets the given 'key: value' header.

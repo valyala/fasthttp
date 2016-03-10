@@ -10,6 +10,121 @@ import (
 	"testing"
 )
 
+func TestRequestHeaderDel(t *testing.T) {
+	var h RequestHeader
+	h.Set("Foo-Bar", "baz")
+	h.Set("aaa", "bbb")
+	h.Set("Connection", "keep-alive")
+	h.Set("Content-Type", "aaa")
+	h.Set("Host", "aaabbb")
+	h.Set("User-Agent", "asdfas")
+	h.Set("Content-Length", "1123")
+	h.Set("Cookie", "foobar=baz")
+
+	h.Del("foo-bar")
+	h.Del("connection")
+	h.DelBytes([]byte("content-type"))
+	h.Del("Host")
+	h.Del("user-agent")
+	h.Del("content-length")
+	h.Del("cookie")
+
+	hv := h.Peek("aaa")
+	if string(hv) != "bbb" {
+		t.Fatalf("unexpected header value: %q. Expecting %q", hv, "bbb")
+	}
+	hv = h.Peek("Foo-Bar")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero value: %q", hv)
+	}
+	hv = h.Peek("Connection")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero value: %q", hv)
+	}
+	hv = h.Peek("Content-Type")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero value: %q", hv)
+	}
+	hv = h.Peek("Host")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero value: %q", hv)
+	}
+	hv = h.Peek("User-Agent")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero value: %q", hv)
+	}
+	hv = h.Peek("Content-Length")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero value: %q", hv)
+	}
+	hv = h.Peek("Cookie")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero value: %q", hv)
+	}
+
+	cv := h.Cookie("foobar")
+	if len(cv) > 0 {
+		t.Fatalf("unexpected cookie obtianed: %q", cv)
+	}
+	if h.ContentLength() != 0 {
+		t.Fatalf("unexpected content-length: %d. Expecting 0", h.ContentLength())
+	}
+}
+
+func TestResponseHeaderDel(t *testing.T) {
+	var h ResponseHeader
+	h.Set("Foo-Bar", "baz")
+	h.Set("aaa", "bbb")
+	h.Set("Connection", "keep-alive")
+	h.Set("Content-Type", "aaa")
+	h.Set("Server", "aaabbb")
+	h.Set("Content-Length", "1123")
+
+	var c Cookie
+	c.SetKey("foo")
+	c.SetValue("bar")
+	h.SetCookie(&c)
+
+	h.Del("foo-bar")
+	h.Del("connection")
+	h.DelBytes([]byte("content-type"))
+	h.Del("Server")
+	h.Del("content-length")
+	h.Del("set-cookie")
+
+	hv := h.Peek("aaa")
+	if string(hv) != "bbb" {
+		t.Fatalf("unexpected header value: %q. Expecting %q", hv, "bbb")
+	}
+	hv = h.Peek("Foo-Bar")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero header value: %q", hv)
+	}
+	hv = h.Peek("Connection")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero value: %q", hv)
+	}
+	hv = h.Peek("Content-Type")
+	if string(hv) != string(defaultContentType) {
+		t.Fatalf("unexpected content-type: %q. Expecting %q", hv, defaultContentType)
+	}
+	hv = h.Peek("Server")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero value: %q", hv)
+	}
+	hv = h.Peek("Content-Length")
+	if len(hv) > 0 {
+		t.Fatalf("non-zero value: %q", hv)
+	}
+
+	if h.Cookie(&c) {
+		t.Fatalf("unexpected cookie obtianed: %q", &c)
+	}
+	if h.ContentLength() != 0 {
+		t.Fatalf("unexpected content-length: %d. Expecting 0", h.ContentLength())
+	}
+}
+
 func TestAppendNormalizedHeaderKeyBytes(t *testing.T) {
 	testAppendNormalizedHeaderKeyBytes(t, "", "")
 	testAppendNormalizedHeaderKeyBytes(t, "Content-Type", "Content-Type")

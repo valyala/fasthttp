@@ -140,7 +140,7 @@ func (a *Args) Del(key string) {
 
 // DelBytes deletes argument with the given key from query args.
 func (a *Args) DelBytes(key []byte) {
-	a.args = delArg(a.args, key)
+	a.args = delAllArgs(a.args, key)
 }
 
 // Set sets 'key=value' argument.
@@ -284,6 +284,16 @@ func copyArgs(dst, src []argsKV) []argsKV {
 		dstKV.value = append(dstKV.value[:0], srcKV.value...)
 	}
 	return dst
+}
+
+func delAllArgs(args []argsKV, key []byte) []argsKV {
+	for {
+		argsNew := delArg(args, key)
+		if len(argsNew) == len(args) {
+			return args
+		}
+		args = argsNew
+	}
 }
 
 func delArg(args []argsKV, key []byte) []argsKV {
