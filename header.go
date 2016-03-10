@@ -784,17 +784,17 @@ func (h *ResponseHeader) DelBytes(key []byte) {
 }
 
 func (h *ResponseHeader) del(key []byte) {
-	switch {
-	case bytes.Equal(strContentType, key):
+	switch string(key) {
+	case "Content-Type":
 		h.contentType = h.contentType[:0]
-	case bytes.Equal(strServer, key):
+	case "Server":
 		h.server = h.server[:0]
-	case bytes.Equal(strSetCookie, key):
+	case "Set-Cookie":
 		h.cookies = h.cookies[:0]
-	case bytes.Equal(strContentLength, key):
+	case "Content-Length":
 		h.contentLength = 0
 		h.contentLengthBytes = h.contentLengthBytes[:0]
-	case bytes.Equal(strConnection, key):
+	case "Connection":
 		h.connectionClose = false
 	}
 	h.h = delAllArgs(h.h, key)
@@ -816,19 +816,19 @@ func (h *RequestHeader) DelBytes(key []byte) {
 }
 
 func (h *RequestHeader) del(key []byte) {
-	switch {
-	case bytes.Equal(strHost, key):
+	switch string(key) {
+	case "Host":
 		h.host = h.host[:0]
-	case bytes.Equal(strContentType, key):
+	case "Content-Type":
 		h.contentType = h.contentType[:0]
-	case bytes.Equal(strUserAgent, key):
+	case "User-Agent":
 		h.userAgent = h.userAgent[:0]
-	case bytes.Equal(strCookie, key):
+	case "Cookie":
 		h.cookies = h.cookies[:0]
-	case bytes.Equal(strContentLength, key):
+	case "Content-Length":
 		h.contentLength = 0
 		h.contentLengthBytes = h.contentLengthBytes[:0]
-	case bytes.Equal(strConnection, key):
+	case "Connection":
 		h.connectionClose = false
 	}
 	h.h = delAllArgs(h.h, key)
@@ -862,31 +862,31 @@ func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 // SetCanonical sets the given 'key: value' header assuming that
 // key is in canonical form.
 func (h *ResponseHeader) SetCanonical(key, value []byte) {
-	switch {
-	case bytes.Equal(strContentType, key):
+	switch string(key) {
+	case "Content-Type":
 		h.SetContentTypeBytes(value)
-	case bytes.Equal(strServer, key):
+	case "Server":
 		h.SetServerBytes(value)
-	case bytes.Equal(strSetCookie, key):
+	case "Set-Cookie":
 		var kv *argsKV
 		h.cookies, kv = allocArg(h.cookies)
 		kv.key = getCookieKey(kv.key, value)
 		kv.value = append(kv.value[:0], value...)
-	case bytes.Equal(strContentLength, key):
+	case "Content-Length":
 		if contentLength, err := parseContentLength(value); err == nil {
 			h.contentLength = contentLength
 			h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
 		}
-	case bytes.Equal(strConnection, key):
+	case "Connection":
 		if bytes.Equal(strClose, value) {
 			h.SetConnectionClose()
 		} else {
 			h.ResetConnectionClose()
 			h.h = setArg(h.h, key, value)
 		}
-	case bytes.Equal(strTransferEncoding, key):
+	case "Transfer-Encoding":
 		// Transfer-Encoding is managed automatically.
-	case bytes.Equal(strDate, key):
+	case "Date":
 		// Date is managed automatically.
 	default:
 		h.h = setArg(h.h, key, value)
@@ -946,29 +946,29 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 // key is in canonical form.
 func (h *RequestHeader) SetCanonical(key, value []byte) {
 	h.parseRawHeaders()
-	switch {
-	case bytes.Equal(strHost, key):
+	switch string(key) {
+	case "Host":
 		h.SetHostBytes(value)
-	case bytes.Equal(strContentType, key):
+	case "Content-Type":
 		h.SetContentTypeBytes(value)
-	case bytes.Equal(strUserAgent, key):
+	case "User-Agent":
 		h.SetUserAgentBytes(value)
-	case bytes.Equal(strCookie, key):
+	case "Cookie":
 		h.collectCookies()
 		h.cookies = parseRequestCookies(h.cookies, value)
-	case bytes.Equal(strContentLength, key):
+	case "Content-Length":
 		if contentLength, err := parseContentLength(value); err == nil {
 			h.contentLength = contentLength
 			h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
 		}
-	case bytes.Equal(strConnection, key):
+	case "Connection":
 		if bytes.Equal(strClose, value) {
 			h.SetConnectionClose()
 		} else {
 			h.ResetConnectionClose()
 			h.h = setArg(h.h, key, value)
 		}
-	case bytes.Equal(strTransferEncoding, key):
+	case "Transfer-Encoding":
 		// Transfer-Encoding is managed automatically.
 	default:
 		h.h = setArg(h.h, key, value)
@@ -1014,17 +1014,17 @@ func (h *RequestHeader) PeekBytes(key []byte) []byte {
 }
 
 func (h *ResponseHeader) peek(key []byte) []byte {
-	switch {
-	case bytes.Equal(strContentType, key):
+	switch string(key) {
+	case "Content-Type":
 		return h.ContentType()
-	case bytes.Equal(strServer, key):
+	case "Server":
 		return h.Server()
-	case bytes.Equal(strConnection, key):
+	case "Connection":
 		if h.ConnectionClose() {
 			return strClose
 		}
 		return peekArgBytes(h.h, key)
-	case bytes.Equal(strContentLength, key):
+	case "Content-Length":
 		return h.contentLengthBytes
 	default:
 		return peekArgBytes(h.h, key)
@@ -1033,19 +1033,19 @@ func (h *ResponseHeader) peek(key []byte) []byte {
 
 func (h *RequestHeader) peek(key []byte) []byte {
 	h.parseRawHeaders()
-	switch {
-	case bytes.Equal(strHost, key):
+	switch string(key) {
+	case "Host":
 		return h.Host()
-	case bytes.Equal(strContentType, key):
+	case "Content-Type":
 		return h.ContentType()
-	case bytes.Equal(strUserAgent, key):
+	case "User-Agent":
 		return h.UserAgent()
-	case bytes.Equal(strConnection, key):
+	case "Connection":
 		if h.ConnectionClose() {
 			return strClose
 		}
 		return peekArgBytes(h.h, key)
-	case bytes.Equal(strContentLength, key):
+	case "Content-Length":
 		return h.contentLengthBytes
 	default:
 		return peekArgBytes(h.h, key)
@@ -1576,12 +1576,12 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	var err error
 	var kv *argsKV
 	for s.next() {
-		switch {
-		case bytes.Equal(s.key, strContentType):
+		switch string(s.key) {
+		case "Content-Type":
 			h.contentType = append(h.contentType[:0], s.value...)
-		case bytes.Equal(s.key, strServer):
+		case "Server":
 			h.server = append(h.server[:0], s.value...)
-		case bytes.Equal(s.key, strContentLength):
+		case "Content-Length":
 			if h.contentLength != -1 {
 				if h.contentLength, err = parseContentLength(s.value); err != nil {
 					h.contentLength = -2
@@ -1589,16 +1589,16 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
 				}
 			}
-		case bytes.Equal(s.key, strTransferEncoding):
+		case "Transfer-Encoding":
 			if !bytes.Equal(s.value, strIdentity) {
 				h.contentLength = -1
 				h.h = setArg(h.h, strTransferEncoding, strChunked)
 			}
-		case bytes.Equal(s.key, strSetCookie):
+		case "Set-Cookie":
 			h.cookies, kv = allocArg(h.cookies)
 			kv.key = getCookieKey(kv.key, s.value)
 			kv.value = append(kv.value[:0], s.value...)
-		case bytes.Equal(s.key, strConnection):
+		case "Connection":
 			if bytes.Equal(s.value, strClose) {
 				h.connectionClose = true
 			} else {
@@ -1638,14 +1638,14 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	s.disableNormalizing = h.disableNormalizing
 	var err error
 	for s.next() {
-		switch {
-		case bytes.Equal(s.key, strHost):
+		switch string(s.key) {
+		case "Host":
 			h.host = append(h.host[:0], s.value...)
-		case bytes.Equal(s.key, strUserAgent):
+		case "User-Agent":
 			h.userAgent = append(h.userAgent[:0], s.value...)
-		case bytes.Equal(s.key, strContentType):
+		case "Content-Type":
 			h.contentType = append(h.contentType[:0], s.value...)
-		case bytes.Equal(s.key, strContentLength):
+		case "Content-Length":
 			if h.contentLength != -1 {
 				if h.contentLength, err = parseContentLength(s.value); err != nil {
 					h.contentLength = -2
@@ -1653,12 +1653,12 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 					h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
 				}
 			}
-		case bytes.Equal(s.key, strTransferEncoding):
+		case "Transfer-Encoding":
 			if !bytes.Equal(s.value, strIdentity) {
 				h.contentLength = -1
 				h.h = setArg(h.h, strTransferEncoding, strChunked)
 			}
-		case bytes.Equal(s.key, strConnection):
+		case "Connection":
 			if bytes.Equal(s.value, strClose) {
 				h.connectionClose = true
 			} else {
