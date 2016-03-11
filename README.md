@@ -272,7 +272,7 @@ but there are more powerful third-party routers with fasthttp support exist:
 
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
   * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
-  * [echo v2](https://github.com/labstack/echo/tree/v2)
+  * [echo v2](https://github.com/labstack/echo)
 
   Net/http code with simple ServeMux is trivially converted to fasthttp code:
 
@@ -530,7 +530,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
 
     * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
     * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
-    * [echo v2](https://github.com/labstack/echo/tree/v2)
+    * [echo v2](https://github.com/labstack/echo)
 
   See also [this issue](https://github.com/valyala/fasthttp/issues/9) for more info.
 
