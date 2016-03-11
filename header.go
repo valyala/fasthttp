@@ -1290,7 +1290,9 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 
 	for i, n := 0, len(h.h); i < n; i++ {
 		kv := &h.h[i]
-		dst = appendHeaderLine(dst, kv.key, kv.value)
+		if !bytes.Equal(kv.key, strDate) {
+			dst = appendHeaderLine(dst, kv.key, kv.value)
+		}
 	}
 
 	n := len(h.cookies)
