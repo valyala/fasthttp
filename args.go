@@ -309,19 +309,7 @@ func setArg(h []argsKV, key, value []byte) []argsKV {
 			return h
 		}
 	}
-
-	if cap(h) > n {
-		h = h[:n+1]
-		kv := &h[n]
-		kv.key = append(kv.key[:0], key...)
-		kv.value = append(kv.value[:0], value...)
-		return h
-	}
-
-	var kv argsKV
-	kv.key = append(kv.key, key...)
-	kv.value = append(kv.value, value...)
-	return append(h, kv)
+	return appendArg(h, key, value)
 }
 
 func appendArg(args []argsKV, key, value []byte) []argsKV {
