@@ -397,11 +397,7 @@ func (ff *fsFile) NewReader() (io.Reader, error) {
 func (ff *fsFile) smallFileReader() io.Reader {
 	v := ff.h.smallFileReaderPool.Get()
 	if v == nil {
-		r := &fsSmallFileReader{
-			ff:     ff,
-			endPos: ff.contentLength,
-		}
-		return r
+		v = &fsSmallFileReader{}
 	}
 	r := v.(*fsSmallFileReader)
 	r.ff = ff
