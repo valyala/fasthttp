@@ -177,13 +177,13 @@ func (h *RequestHeader) ResetConnectionClose() {
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *ResponseHeader) ConnectionUpgrade() bool {
-	return bytes.HasPrefix(h.Peek("Connection"), strUpgrade)
+	return hasHeaderValue(h.Peek("Connection"), strUpgrade)
 }
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *RequestHeader) ConnectionUpgrade() bool {
 	h.parseRawHeaders()
-	return bytes.HasPrefix(h.Peek("Connection"), strUpgrade)
+	return hasHeaderValue(h.Peek("Connection"), strUpgrade)
 }
 
 // ContentLength returns Content-Length header value.
@@ -1626,7 +1626,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 response unless 'Connection: keep-alive' is set.
 		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !bytes.Equal(v, strKeepAlive) && !bytes.Equal(v, strKeepAliveCamelCase)
+		h.connectionClose = !hasHeaderValue(v, strKeepAlive) && !hasHeaderValue(v, strKeepAliveCamelCase)
 	}
 
 	return len(buf) - len(s.b), nil
@@ -1686,7 +1686,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
 		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !bytes.Equal(v, strKeepAlive) && !bytes.Equal(v, strKeepAliveCamelCase)
+		h.connectionClose = !hasHeaderValue(v, strKeepAlive) && !hasHeaderValue(v, strKeepAliveCamelCase)
 	}
 
 	return len(buf) - len(s.b), nil
@@ -1781,6 +1781,48 @@ func (s *headerScanner) next() bool {
 	}
 	s.value = s.value[:n]
 	return true
+}
+
+type headerValueScanner struct {
+	b     []byte
+	value []byte
+}
+
+func (s *headerValueScanner) next() bool {
+	b := s.b
+	if len(b) == 0 {
+		return false
+	}
+	n := bytes.IndexByte(b, ',')
+	if n < 0 {
+		s.value = stripSpace(b)
+		s.b = b[len(b):]
+		return true
+	}
+	s.value = stripSpace(b[:n])
+	s.b = b[n+1:]
+	return true
+}
+
+func stripSpace(b []byte) []byte {
+	for len(b) > 0 && b[0] == ' ' {
+		b = b[1:]
+	}
+	for len(b) > 0 && b[len(b)-1] == ' ' {
+		b = b[:len(b)-1]
+	}
+	return b
+}
+
+func hasHeaderValue(s, value []byte) bool {
+	var vs headerValueScanner
+	vs.b = s
+	for vs.next() {
+		if bytes.Equal(vs.value, value) {
+			return true
+		}
+	}
+	return false
 }
 
 func nextLine(b []byte) ([]byte, []byte, error) {

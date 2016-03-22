@@ -10,6 +10,29 @@ import (
 	"testing"
 )
 
+func TestHasHeaderValue(t *testing.T) {
+	testHasHeaderValue(t, "foobar", "foobar", true)
+	testHasHeaderValue(t, "foobar", "foo", false)
+	testHasHeaderValue(t, "foobar", "bar", false)
+	testHasHeaderValue(t, "keep-alive, Upgrade", "keep-alive", true)
+	testHasHeaderValue(t, "keep-alive  ,    Upgrade", "Upgrade", true)
+	testHasHeaderValue(t, "keep-alive, Upgrade", "Upgrade-foo", false)
+	testHasHeaderValue(t, "keep-alive, Upgrade", "Upgr", false)
+	testHasHeaderValue(t, "foo  ,   bar,  baz   ,", "foo", true)
+	testHasHeaderValue(t, "foo  ,   bar,  baz   ,", "bar", true)
+	testHasHeaderValue(t, "foo  ,   bar,  baz   ,", "baz", true)
+	testHasHeaderValue(t, "foo  ,   bar,  baz   ,", "ba", false)
+	testHasHeaderValue(t, "foo, ", "", true)
+	testHasHeaderValue(t, "foo", "", false)
+}
+
+func testHasHeaderValue(t *testing.T, s, value string, has bool) {
+	ok := hasHeaderValue([]byte(s), []byte(value))
+	if ok != has {
+		t.Fatalf("unexpected hasHeaderValue(%q, %q)=%v. Expecting %v", s, value, ok, has)
+	}
+}
+
 func TestRequestHeaderDel(t *testing.T) {
 	var h RequestHeader
 	h.Set("Foo-Bar", "baz")
@@ -438,58 +461,88 @@ func testRequestMultipartFormBoundary(t *testing.T, s, boundary string) {
 }
 
 func TestResponseHeaderConnectionUpgrade(t *testing.T) {
+	testResponseHeaderConnectionUpgrade(t, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: Upgrade, HTTP2-Settings\r\n\r\n",
+		true, true)
+	testResponseHeaderConnectionUpgrade(t, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: keep-alive, Upgrade\r\n\r\n",
+		true, true)
+
+	// non-http/1.1 protocol has 'connection: close' by default, which also disables 'connection: upgrade'
+	testResponseHeaderConnectionUpgrade(t, "HTTP/1.0 200 OK\r\nContent-Length: 10\r\nConnection: Upgrade, HTTP2-Settings\r\n\r\n",
+		false, false)
+
+	// explicit keep-alive for non-http/1.1, so 'connection: upgrade' works
+	testResponseHeaderConnectionUpgrade(t, "HTTP/1.0 200 OK\r\nContent-Length: 10\r\nConnection: Upgrade, keep-alive\r\n\r\n",
+		true, true)
+
+	// implicit keep-alive for http/1.1
+	testResponseHeaderConnectionUpgrade(t, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n", false, true)
+
+	// no content-length, so 'connection: close' is assumed
+	testResponseHeaderConnectionUpgrade(t, "HTTP/1.1 200 OK\r\n\r\n", false, false)
+}
+
+func testResponseHeaderConnectionUpgrade(t *testing.T, s string, isUpgrade, isKeepAlive bool) {
 	var h ResponseHeader
 
-	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nConnection: Upgrade, HTTP2-Settings\r\n\r\n")
+	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %s. Response header %q", err, s)
 	}
-	if !h.ConnectionUpgrade() {
-		t.Fatalf("missing connection: upgrade")
+	upgrade := h.ConnectionUpgrade()
+	if upgrade != isUpgrade {
+		t.Fatalf("unexpected 'connection: upgrade' when parsing response header: %v. Expecting %v. header %q. v=%q",
+			upgrade, isUpgrade, s, h.Peek("Connection"))
 	}
-	if string(h.Peek("Connection")) != "Upgrade, HTTP2-Settings" {
-		t.Fatalf("Unexpected Connection %q. Expecting %q", h.Peek("Connection"), "Upgrade, HTTP2-Settings")
-	}
-
-	r = bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n")
-	br = bufio.NewReader(r)
-	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
-	}
-	if h.ConnectionUpgrade() {
-		t.Fatalf("unexpected connection: upgrade")
-	}
-	if string(h.Peek("Connection")) != "" {
-		t.Fatalf("unexpected Connection header: %q", h.Peek("Connection"))
+	keepAlive := !h.ConnectionClose()
+	if keepAlive != isKeepAlive {
+		t.Fatalf("unexpected 'connection: keep-alive' when parsing response header: %v. Expecting %v. header %q. v=%q",
+			keepAlive, isKeepAlive, s, &h)
 	}
 }
 
 func TestRequestHeaderConnectionUpgrade(t *testing.T) {
+	testRequestHeaderConnectionUpgrade(t, "GET /foobar HTTP/1.1\r\nConnection: Upgrade, HTTP2-Settings\r\nHost: foobar.com\r\n\r\n",
+		true, true)
+	testRequestHeaderConnectionUpgrade(t, "GET /foobar HTTP/1.1\r\nConnection: keep-alive,Upgrade\r\nHost: foobar.com\r\n\r\n",
+		true, true)
+
+	// non-http/1.1 has 'connection: close' by default, which resets 'connection: upgrade'
+	testRequestHeaderConnectionUpgrade(t, "GET /foobar HTTP/1.0\r\nConnection: Upgrade, HTTP2-Settings\r\nHost: foobar.com\r\n\r\n",
+		false, false)
+
+	// explicit 'connection: keep-alive' in non-http/1.1
+	testRequestHeaderConnectionUpgrade(t, "GET /foobar HTTP/1.0\r\nConnection: foo, Upgrade, keep-alive\r\nHost: foobar.com\r\n\r\n",
+		true, true)
+
+	// no upgrade
+	testRequestHeaderConnectionUpgrade(t, "GET /foobar HTTP/1.1\r\nConnection: Upgradess, foobar\r\nHost: foobar.com\r\n\r\n",
+		false, true)
+	testRequestHeaderConnectionUpgrade(t, "GET /foobar HTTP/1.1\r\nHost: foobar.com\r\n\r\n",
+		false, true)
+
+	// explicit connection close
+	testRequestHeaderConnectionUpgrade(t, "GET /foobar HTTP/1.1\r\nConnection: close\r\nHost: foobar.com\r\n\r\n",
+		false, false)
+}
+
+func testRequestHeaderConnectionUpgrade(t *testing.T, s string, isUpgrade, isKeepAlive bool) {
 	var h RequestHeader
 
-	r := bytes.NewBufferString("GET /foobar HTTP/1.1\r\nConnection: Upgrade, HTTP2-Settings\r\nHost: foobar.com\r\n\r\n")
+	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %s. Request header %q", err, s)
 	}
-	if !h.ConnectionUpgrade() {
-		t.Fatalf("missing connection: upgrade")
+	upgrade := h.ConnectionUpgrade()
+	if upgrade != isUpgrade {
+		t.Fatalf("unexpected 'connection: upgrade' when parsing request header: %v. Expecting %v. header %q",
+			upgrade, isUpgrade, s)
 	}
-	if string(h.Peek("Connection")) != "Upgrade, HTTP2-Settings" {
-		t.Fatalf("Unexpected Connection %q. Expecting %q", h.Peek("Connection"), "Upgrade, HTTP2-Settings")
-	}
-
-	r = bytes.NewBufferString("GET /foobar HTTP/1.1\r\nHost: foobar.com\r\n\r\n")
-	br = bufio.NewReader(r)
-	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
-	}
-	if h.ConnectionUpgrade() {
-		t.Fatalf("unexpected connection: upgrade")
-	}
-	if string(h.Peek("Connection")) != "" {
-		t.Fatalf("unexpected Connection header: %q", h.Peek("Connection"))
+	keepAlive := !h.ConnectionClose()
+	if keepAlive != isKeepAlive {
+		t.Fatalf("unexpected 'connection: keep-alive' when parsing request header: %v. Expecting %v. header %q",
+			keepAlive, isKeepAlive, s)
 	}
 }
 
