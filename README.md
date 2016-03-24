@@ -38,60 +38,56 @@ Below are benchmark results.
 
 net/http server:
 ```
-$ GOMAXPROCS=1 go test -bench=NetHTTPServerGet -benchmem -benchtime=5s
-PASS
-BenchmarkNetHTTPServerGet1ReqPerConn            	  300000	     21236 ns/op	    2404 B/op	      30 allocs/op
-BenchmarkNetHTTPServerGet2ReqPerConn            	  500000	     14634 ns/op	    2371 B/op	      24 allocs/op
-BenchmarkNetHTTPServerGet10ReqPerConn           	 1000000	      9447 ns/op	    2101 B/op	      19 allocs/op
-BenchmarkNetHTTPServerGet10KReqPerConn          	 1000000	      7939 ns/op	    2033 B/op	      18 allocs/op
-BenchmarkNetHTTPServerGet1ReqPerConn10KClients  	  300000	     30291 ns/op	    4589 B/op	      31 allocs/op
-BenchmarkNetHTTPServerGet2ReqPerConn10KClients  	  500000	     23199 ns/op	    3581 B/op	      25 allocs/op
-BenchmarkNetHTTPServerGet10ReqPerConn10KClients 	  500000	     13270 ns/op	    2621 B/op	      19 allocs/op
-BenchmarkNetHTTPServerGet100ReqPerConn10KClients	  500000	     11412 ns/op	    2119 B/op	      18 allocs/op
+$ GOMAXPROCS=1 go test -bench=NetHTTPServerGet -benchmem -benchtime=10s
+BenchmarkNetHTTPServerGet1ReqPerConn                	 1000000	     12052 ns/op	    2297 B/op	      29 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn                	 1000000	     12278 ns/op	    2327 B/op	      24 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn               	 2000000	      8903 ns/op	    2112 B/op	      19 allocs/op
+BenchmarkNetHTTPServerGet10KReqPerConn              	 2000000	      8451 ns/op	    2058 B/op	      18 allocs/op
+BenchmarkNetHTTPServerGet1ReqPerConn10KClients      	  500000	     26733 ns/op	    3229 B/op	      29 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn10KClients      	 1000000	     23351 ns/op	    3211 B/op	      24 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn10KClients     	 1000000	     13390 ns/op	    2483 B/op	      19 allocs/op
+BenchmarkNetHTTPServerGet100ReqPerConn10KClients    	 1000000	     13484 ns/op	    2171 B/op	      18 allocs/op
 ```
 
 fasthttp server:
 ```
-$ GOMAXPROCS=1 go test -bench=kServerGet -benchmem -benchtime=5s
-PASS
-BenchmarkServerGet1ReqPerConn            	 3000000	      2341 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet2ReqPerConn            	 5000000	      1799 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10ReqPerConn           	 5000000	      1239 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10KReqPerConn          	10000000	      1090 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet1ReqPerConn10KClients  	 3000000	      2860 ns/op	       4 B/op	       0 allocs/op
-BenchmarkServerGet2ReqPerConn10KClients  	 3000000	      1992 ns/op	       1 B/op	       0 allocs/op
-BenchmarkServerGet10ReqPerConn10KClients 	 5000000	      1297 ns/op	       1 B/op	       0 allocs/op
-BenchmarkServerGet100ReqPerConn10KClients	10000000	      1264 ns/op	       9 B/op	       0 allocs/op
+$ GOMAXPROCS=1 go test -bench=kServerGet -benchmem -benchtime=10s
+BenchmarkServerGet1ReqPerConn                       	10000000	      1559 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet2ReqPerConn                       	10000000	      1248 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10ReqPerConn                      	20000000	       797 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10KReqPerConn                     	20000000	       716 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet1ReqPerConn10KClients             	10000000	      1974 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet2ReqPerConn10KClients             	10000000	      1352 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10ReqPerConn10KClients            	20000000	       789 ns/op	       2 B/op	       0 allocs/op
+BenchmarkServerGet100ReqPerConn10KClients           	20000000	       604 ns/op	       0 B/op	       0 allocs/op
 ```
 
 *GOMAXPROCS=4*
 
 net/http server:
 ```
-$ GOMAXPROCS=4 go test -bench=NetHTTPServerGet -benchmem -benchtime=5s
-PASS
-BenchmarkNetHTTPServerGet1ReqPerConn-4            	 1000000	      5545 ns/op	    2433 B/op	      30 allocs/op
-BenchmarkNetHTTPServerGet2ReqPerConn-4            	 2000000	      4147 ns/op	    2398 B/op	      24 allocs/op
-BenchmarkNetHTTPServerGet10ReqPerConn-4           	 3000000	      2628 ns/op	    2118 B/op	      19 allocs/op
-BenchmarkNetHTTPServerGet10KReqPerConn-4          	 3000000	      2304 ns/op	    2037 B/op	      18 allocs/op
-BenchmarkNetHTTPServerGet1ReqPerConn10KClients-4  	 1000000	      7327 ns/op	    3561 B/op	      30 allocs/op
-BenchmarkNetHTTPServerGet2ReqPerConn10KClients-4  	 1000000	      5952 ns/op	    3073 B/op	      24 allocs/op
-BenchmarkNetHTTPServerGet10ReqPerConn10KClients-4 	 2000000	      4345 ns/op	    2530 B/op	      19 allocs/op
-BenchmarkNetHTTPServerGet100ReqPerConn10KClients-4	 2000000	      3866 ns/op	    2132 B/op	      18 allocs/op
+$ GOMAXPROCS=4 go test -bench=NetHTTPServerGet -benchmem -benchtime=10s
+BenchmarkNetHTTPServerGet1ReqPerConn-4                  	 3000000	      4529 ns/op	    2389 B/op	      29 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn-4                  	 5000000	      3896 ns/op	    2418 B/op	      24 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn-4                 	 5000000	      3145 ns/op	    2160 B/op	      19 allocs/op
+BenchmarkNetHTTPServerGet10KReqPerConn-4                	 5000000	      3054 ns/op	    2065 B/op	      18 allocs/op
+BenchmarkNetHTTPServerGet1ReqPerConn10KClients-4        	 1000000	     10321 ns/op	    3710 B/op	      30 allocs/op
+BenchmarkNetHTTPServerGet2ReqPerConn10KClients-4        	 2000000	      7556 ns/op	    3296 B/op	      24 allocs/op
+BenchmarkNetHTTPServerGet10ReqPerConn10KClients-4       	 5000000	      3905 ns/op	    2349 B/op	      19 allocs/op
+BenchmarkNetHTTPServerGet100ReqPerConn10KClients-4      	 5000000	      3435 ns/op	    2130 B/op	      18 allocs/op
 ```
 
 fasthttp server:
 ```
-$ GOMAXPROCS=4 go test -bench=kServerGet -benchmem -benchtime=5s
-PASS
-BenchmarkServerGet1ReqPerConn-4            	10000000	      1053 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet2ReqPerConn-4            	10000000	       685 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10ReqPerConn-4           	20000000	       393 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10KReqPerConn-4          	20000000	       338 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet1ReqPerConn10KClients-4  	10000000	      1033 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet2ReqPerConn10KClients-4  	10000000	       668 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet10ReqPerConn10KClients-4 	20000000	       393 ns/op	       0 B/op	       0 allocs/op
-BenchmarkServerGet100ReqPerConn10KClients-4	20000000	       384 ns/op	       4 B/op	       0 allocs/op
+$ GOMAXPROCS=4 go test -bench=kServerGet -benchmem -benchtime=10s
+BenchmarkServerGet1ReqPerConn-4                         	10000000	      1141 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet2ReqPerConn-4                         	20000000	       707 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10ReqPerConn-4                        	30000000	       341 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10KReqPerConn-4                       	50000000	       310 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet1ReqPerConn10KClients-4               	10000000	      1119 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet2ReqPerConn10KClients-4               	20000000	       644 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet10ReqPerConn10KClients-4              	30000000	       346 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServerGet100ReqPerConn10KClients-4             	50000000	       282 ns/op	       0 B/op	       0 allocs/op
 ```
 
 # HTTP client comparison with net/http
@@ -103,60 +99,56 @@ Below are benchmark results.
 
 net/http client:
 ```
-$ GOMAXPROCS=1 go test -bench='HTTPClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
-PASS
-BenchmarkNetHTTPClientDoFastServer           	  300000	     17095 ns/op	    2617 B/op	      35 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd1TCP        	  200000	     54155 ns/op	    5031 B/op	      56 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd10TCP       	  200000	     51260 ns/op	    5032 B/op	      56 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd100TCP      	  200000	     56424 ns/op	    5037 B/op	      56 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd1Inmemory   	  200000	     30739 ns/op	    5034 B/op	      57 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd10Inmemory  	  200000	     31338 ns/op	    5035 B/op	      57 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd100Inmemory 	  200000	     32847 ns/op	    5050 B/op	      57 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd1000Inmemory	  200000	     38110 ns/op	    5157 B/op	      57 allocs/op
+$ GOMAXPROCS=1 go test -bench='HTTPClient(Do|GetEndToEnd)' -benchmem -benchtime=10s
+BenchmarkNetHTTPClientDoFastServer                  	 1000000	     12567 ns/op	    2616 B/op	      35 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd1TCP               	  200000	     67030 ns/op	    5028 B/op	      56 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd10TCP              	  300000	     51098 ns/op	    5031 B/op	      56 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd100TCP             	  300000	     45096 ns/op	    5026 B/op	      55 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd1Inmemory          	  500000	     24779 ns/op	    5035 B/op	      57 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd10Inmemory         	 1000000	     26425 ns/op	    5035 B/op	      57 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd100Inmemory        	  500000	     28515 ns/op	    5045 B/op	      57 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd1000Inmemory       	  500000	     39511 ns/op	    5096 B/op	      56 allocs/op
 ```
 
 fasthttp client:
 ```
-$ GOMAXPROCS=1 go test -bench='kClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
-PASS
-BenchmarkClientDoFastServer           	10000000	       980 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd1TCP        	 1000000	     11197 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd10TCP       	 1000000	     11607 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd100TCP      	  500000	     12400 ns/op	       2 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd1Inmemory   	 2000000	      3853 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd10Inmemory  	 2000000	      3871 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd100Inmemory 	 2000000	      3885 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd1000Inmemory	 2000000	      3907 ns/op	       7 B/op	       0 allocs/op
+$ GOMAXPROCS=1 go test -bench='kClient(Do|GetEndToEnd)' -benchmem -benchtime=10s
+BenchmarkClientDoFastServer                         	20000000	       865 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd1TCP                      	 1000000	     18711 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd10TCP                     	 1000000	     14664 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd100TCP                    	 1000000	     14043 ns/op	       1 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd1Inmemory                 	 5000000	      3965 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd10Inmemory                	 3000000	      4060 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd100Inmemory               	 5000000	      3396 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd1000Inmemory              	 5000000	      3306 ns/op	       2 B/op	       0 allocs/op
 ```
 
 *GOMAXPROCS=4*
 
 net/http client:
 ```
-$ GOMAXPROCS=4 go test -bench='HTTPClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
-PASS
-BenchmarkNetHTTPClientDoFastServer-4           	 1000000	     10248 ns/op	    2620 B/op	      35 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd1TCP-4        	  300000	     27812 ns/op	    5052 B/op	      56 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd10TCP-4       	  300000	     25324 ns/op	    5036 B/op	      55 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd100TCP-4      	  200000	     26820 ns/op	    5098 B/op	      55 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd1Inmemory-4   	  500000	     15521 ns/op	    5040 B/op	      56 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd10Inmemory-4  	  500000	     15854 ns/op	    5032 B/op	      56 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd100Inmemory-4 	  500000	     16739 ns/op	    5051 B/op	      56 allocs/op
-BenchmarkNetHTTPClientGetEndToEnd1000Inmemory-4	  300000	     25085 ns/op	    5920 B/op	      58 allocs/op
+$ GOMAXPROCS=4 go test -bench='HTTPClient(Do|GetEndToEnd)' -benchmem -benchtime=10s
+BenchmarkNetHTTPClientDoFastServer-4                    	 2000000	      8774 ns/op	    2619 B/op	      35 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd1TCP-4                 	  500000	     22951 ns/op	    5047 B/op	      56 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd10TCP-4                	 1000000	     19182 ns/op	    5037 B/op	      55 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd100TCP-4               	 1000000	     16535 ns/op	    5031 B/op	      55 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd1Inmemory-4            	 1000000	     14495 ns/op	    5038 B/op	      56 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd10Inmemory-4           	 1000000	     10237 ns/op	    5034 B/op	      56 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd100Inmemory-4          	 1000000	     10125 ns/op	    5045 B/op	      56 allocs/op
+BenchmarkNetHTTPClientGetEndToEnd1000Inmemory-4         	 1000000	     11132 ns/op	    5136 B/op	      56 allocs/op
 ```
 
 fasthttp client:
 ```
-$ GOMAXPROCS=4 go test -bench='kClient(Do|GetEndToEnd)' -benchmem -benchtime=5s
-PASS
-BenchmarkClientDoFastServer-4           	20000000	       526 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd1TCP-4        	 1000000	      6706 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd10TCP-4       	 1000000	      6811 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd100TCP-4      	 1000000	      9053 ns/op	       5 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd1Inmemory-4   	 3000000	      2132 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd10Inmemory-4  	 3000000	      2081 ns/op	       0 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd100Inmemory-4 	 3000000	      2044 ns/op	       1 B/op	       0 allocs/op
-BenchmarkClientGetEndToEnd1000Inmemory-4	 3000000	      2069 ns/op	       7 B/op	       0 allocs/op
+$ GOMAXPROCS=4 go test -bench='kClient(Do|GetEndToEnd)' -benchmem -benchtime=10s
+BenchmarkClientDoFastServer-4                           	50000000	       397 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd1TCP-4                        	 2000000	      7388 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd10TCP-4                       	 2000000	      6689 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd100TCP-4                      	 3000000	      4927 ns/op	       1 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd1Inmemory-4                   	10000000	      1604 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd10Inmemory-4                  	10000000	      1458 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd100Inmemory-4                 	10000000	      1329 ns/op	       0 B/op	       0 allocs/op
+BenchmarkClientGetEndToEnd1000Inmemory-4                	10000000	      1316 ns/op	       5 B/op	       0 allocs/op
 ```
 
 # Switching from net/http to fasthttp
