@@ -1100,7 +1100,7 @@ func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, bo
 	bw := bufio.NewWriter(w)
 	err := req.Write(bw)
 	if err == nil {
-		t.Fatalf("Expecting error when writing request=%#v", req)
+		t.Fatalf("Expecting error when writing request=%#v", &req)
 	}
 }
 

@@ -967,7 +967,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 	expectedC1.SetKey("foobar")
 	expectedC1.SetValue("aaa")
 	if !equalCookie(&expectedC1, &c) {
-		t.Fatalf("unexpected cookie\n%#v\nExpected\n%#v\n", c, expectedC1)
+		t.Fatalf("unexpected cookie\n%#v\nExpected\n%#v\n", &c, &expectedC1)
 	}
 
 	c.SetKey("йцук")
@@ -980,7 +980,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 	expectedC2.SetValue("aaa")
 	expectedC2.SetDomain("foobar.com")
 	if !equalCookie(&expectedC2, &c) {
-		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", c, expectedC2)
+		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", &c, &expectedC2)
 	}
 
 	h.VisitAllCookie(func(key, value []byte) {
@@ -992,11 +992,11 @@ func TestResponseHeaderCookie(t *testing.T) {
 		switch {
 		case bytes.Equal(key, []byte("foobar")):
 			if !equalCookie(&expectedC1, &cc) {
-				t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", cc, expectedC1)
+				t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", &cc, &expectedC1)
 			}
 		case bytes.Equal(key, []byte("йцук")):
 			if !equalCookie(&expectedC2, &cc) {
-				t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", cc, expectedC2)
+				t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", &cc, &expectedC2)
 			}
 		default:
 			t.Fatalf("unexpected cookie key %q", key)
@@ -1023,7 +1023,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 		t.Fatalf("Cannot find cookie %q", c.Key())
 	}
 	if !equalCookie(&expectedC1, &c) {
-		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", c, expectedC1)
+		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", &c, &expectedC1)
 	}
 
 	c.SetKey("йцук")
@@ -1031,7 +1031,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 		t.Fatalf("cannot find cookie %q", c.Key())
 	}
 	if !equalCookie(&expectedC2, &c) {
-		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", c, expectedC2)
+		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", &c, &expectedC2)
 	}
 }
 
