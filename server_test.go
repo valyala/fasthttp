@@ -16,6 +16,214 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestServerMaxConnsPerIPLimit(t *testing.T) {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK")
+		},
+		MaxConnsPerIP: 1,
+		Logger:        &customLogger{},
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	serverCh := make(chan struct{})
+	go func() {
+		fakeLN := &fakeIPListener{
+			Listener: ln,
+		}
+		if err := s.Serve(fakeLN); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverCh)
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c1, err := ln.Dial()
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		c2, err := ln.Dial()
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		br := bufio.NewReader(c2)
+		var resp Response
+		if err = resp.Read(br); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if resp.StatusCode() != StatusTooManyRequests {
+			t.Fatalf("unexpected status code for the second connection: %d. Expecting %d",
+				resp.StatusCode(), StatusTooManyRequests)
+		}
+
+		if _, err = c1.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+			t.Fatalf("unexpected error when writing to the first connection: %s", err)
+		}
+		br = bufio.NewReader(c1)
+		if err = resp.Read(br); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code for the first connection: %d. Expecting %d",
+				resp.StatusCode(), StatusOK)
+		}
+		if string(resp.Body()) != "OK" {
+			t.Fatalf("unexpected body for the first connection: %q. Expecting %q", resp.Body(), "OK")
+		}
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	select {
+	case <-serverCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
+type fakeIPListener struct {
+	net.Listener
+}
+
+func (ln *fakeIPListener) Accept() (net.Conn, error) {
+	conn, err := ln.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &fakeIPConn{
+		Conn: conn,
+	}, nil
+}
+
+type fakeIPConn struct {
+	net.Conn
+}
+
+func (conn *fakeIPConn) RemoteAddr() net.Addr {
+	addr, err := net.ResolveTCPAddr("tcp4", "1.2.3.4:5789")
+	if err != nil {
+		panic(fmt.Sprintf("BUG: unexpected error: %s", err))
+	}
+	return addr
+}
+
+func TestServerConcurrencyLimit(t *testing.T) {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK")
+		},
+		Concurrency: 1,
+		Logger:      &customLogger{},
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	serverCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverCh)
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c1, err := ln.Dial()
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		c2, err := ln.Dial()
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		br := bufio.NewReader(c2)
+		var resp Response
+		if err = resp.Read(br); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if resp.StatusCode() != StatusServiceUnavailable {
+			t.Fatalf("unexpected status code for the second connection: %d. Expecting %d",
+				resp.StatusCode(), StatusServiceUnavailable)
+		}
+
+		if _, err = c1.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+			t.Fatalf("unexpected error when writing to the first connection: %s", err)
+		}
+		br = bufio.NewReader(c1)
+		if err = resp.Read(br); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code for the first connection: %d. Expecting %d",
+				resp.StatusCode(), StatusOK)
+		}
+		if string(resp.Body()) != "OK" {
+			t.Fatalf("unexpected body for the first connection: %q. Expecting %q", resp.Body(), "OK")
+		}
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	select {
+	case <-serverCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
+func TestServerWriteFastError(t *testing.T) {
+	s := &Server{
+		Name: "foobar",
+	}
+	var buf bytes.Buffer
+	expectedBody := "access denied"
+	s.writeFastError(&buf, StatusForbidden, expectedBody)
+
+	br := bufio.NewReader(&buf)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if resp.StatusCode() != StatusForbidden {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusForbidden)
+	}
+	body := resp.Body()
+	if string(body) != expectedBody {
+		t.Fatalf("unexpected body: %q. Expecting %q", body, expectedBody)
+	}
+	server := string(resp.Header.Server())
+	if server != s.Name {
+		t.Fatalf("unexpected server: %q. Expecting %q", server, s.Name)
+	}
+	contentType := string(resp.Header.ContentType())
+	if contentType != "text/plain" {
+		t.Fatalf("unexpected content-type: %q. Expecting %q", contentType, "text/plain")
+	}
+	if !resp.Header.ConnectionClose() {
+		t.Fatalf("expecting 'Connection: close' response header")
+	}
+}
+
 func TestServerServeTLSEmbed(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
