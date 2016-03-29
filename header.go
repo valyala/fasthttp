@@ -144,7 +144,7 @@ func (h *ResponseHeader) SetConnectionClose() {
 func (h *ResponseHeader) ResetConnectionClose() {
 	if h.connectionClose {
 		h.connectionClose = false
-		h.h = delAllArgs(h.h, strConnection)
+		h.h = delAllArgsBytes(h.h, strConnection)
 	}
 }
 
@@ -171,7 +171,7 @@ func (h *RequestHeader) ResetConnectionClose() {
 	h.parseRawHeaders()
 	if h.connectionClose {
 		h.connectionClose = false
-		h.h = delAllArgs(h.h, strConnection)
+		h.h = delAllArgsBytes(h.h, strConnection)
 	}
 }
 
@@ -207,7 +207,7 @@ func (h *ResponseHeader) SetContentLength(contentLength int) {
 	h.contentLength = contentLength
 	if contentLength >= 0 {
 		h.contentLengthBytes = AppendUint(h.contentLengthBytes[:0], contentLength)
-		h.h = delAllArgs(h.h, strTransferEncoding)
+		h.h = delAllArgsBytes(h.h, strTransferEncoding)
 	} else {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 		value := strChunked
@@ -253,7 +253,7 @@ func (h *RequestHeader) SetContentLength(contentLength int) {
 	h.contentLength = contentLength
 	if contentLength >= 0 {
 		h.contentLengthBytes = AppendUint(h.contentLengthBytes[:0], contentLength)
-		h.h = delAllArgs(h.h, strTransferEncoding)
+		h.h = delAllArgsBytes(h.h, strTransferEncoding)
 	} else {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 		h.h = setArgBytes(h.h, strTransferEncoding, strChunked)
@@ -797,7 +797,7 @@ func (h *ResponseHeader) del(key []byte) {
 	case "Connection":
 		h.connectionClose = false
 	}
-	h.h = delAllArgs(h.h, key)
+	h.h = delAllArgsBytes(h.h, key)
 }
 
 // Del deletes header with the given key.
@@ -831,7 +831,7 @@ func (h *RequestHeader) del(key []byte) {
 	case "Connection":
 		h.connectionClose = false
 	}
-	h.h = delAllArgs(h.h, key)
+	h.h = delAllArgsBytes(h.h, key)
 }
 
 // Set sets the given 'key: value' header.

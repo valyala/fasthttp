@@ -134,13 +134,12 @@ func (a *Args) WriteTo(w io.Writer) (int64, error) {
 
 // Del deletes argument with the given key from query args.
 func (a *Args) Del(key string) {
-	a.bufKV.key = append(a.bufKV.key[:0], key...)
-	a.DelBytes(a.bufKV.key)
+	a.args = delAllArgs(a.args, key)
 }
 
 // DelBytes deletes argument with the given key from query args.
 func (a *Args) DelBytes(key []byte) {
-	a.args = delAllArgs(a.args, key)
+	a.args = delAllArgs(a.args, b2s(key))
 }
 
 // Set sets 'key=value' argument.
@@ -283,10 +282,14 @@ func copyArgs(dst, src []argsKV) []argsKV {
 	return dst
 }
 
-func delAllArgs(args []argsKV, key []byte) []argsKV {
+func delAllArgsBytes(args []argsKV, key []byte) []argsKV {
+	return delAllArgs(args, b2s(key))
+}
+
+func delAllArgs(args []argsKV, key string) []argsKV {
 	for i, n := 0, len(args); i < n; i++ {
 		kv := &args[i]
-		if bytes.Equal(kv.key, key) {
+		if key == string(kv.key) {
 			tmp := *kv
 			copy(args[i:], args[i+1:])
 			n--
