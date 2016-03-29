@@ -834,6 +834,35 @@ func (h *RequestHeader) del(key []byte) {
 	h.h = delAllArgsBytes(h.h, key)
 }
 
+// Add adds the given 'key: value' header.
+//
+// Multiple headers with the same key may be added.
+func (h *ResponseHeader) Add(key, value string) {
+	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
+	h.h = appendArg(h.h, b2s(k), value)
+}
+
+// AddBytesK adds the given 'key: value' header.
+//
+// Multiple headers with the same key may be added.
+func (h *ResponseHeader) AddBytesK(key []byte, value string) {
+	h.Add(b2s(key), value)
+}
+
+// AddBytesV adds the given 'key: value' header.
+//
+// Multiple headers with the same key may be added.
+func (h *ResponseHeader) AddBytesV(key string, value []byte) {
+	h.Add(key, b2s(value))
+}
+
+// AddBytesKV adds the given 'key: value' header.
+//
+// Multiple headers with the same key may be added.
+func (h *ResponseHeader) AddBytesKV(key, value []byte) {
+	h.Add(b2s(key), b2s(value))
+}
+
 // Set sets the given 'key: value' header.
 func (h *ResponseHeader) Set(key, value string) {
 	initHeaderKV(&h.bufKV, key, value, h.disableNormalizing)
@@ -915,6 +944,35 @@ func (h *RequestHeader) SetCookieBytesKV(key, value []byte) {
 	h.parseRawHeaders()
 	h.collectCookies()
 	h.cookies = setArgBytes(h.cookies, key, value)
+}
+
+// Add adds the given 'key: value' header.
+//
+// Multiple headers with the same key may be added.
+func (h *RequestHeader) Add(key, value string) {
+	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
+	h.h = appendArg(h.h, b2s(k), value)
+}
+
+// AddBytesK adds the given 'key: value' header.
+//
+// Multiple headers with the same key may be added.
+func (h *RequestHeader) AddBytesK(key []byte, value string) {
+	h.Add(b2s(key), value)
+}
+
+// AddBytesV adds the given 'key: value' header.
+//
+// Multiple headers with the same key may be added.
+func (h *RequestHeader) AddBytesV(key string, value []byte) {
+	h.Add(key, b2s(value))
+}
+
+// AddBytesKV adds the given 'key: value' header.
+//
+// Multiple headers with the same key may be added.
+func (h *RequestHeader) AddBytesKV(key, value []byte) {
+	h.Add(b2s(key), b2s(value))
 }
 
 // Set sets the given 'key: value' header.

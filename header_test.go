@@ -10,6 +10,111 @@ import (
 	"testing"
 )
 
+func TestResponseHeaderAdd(t *testing.T) {
+	m := make(map[string]struct{})
+	var h ResponseHeader
+	h.Add("aaa", "bbb")
+	m["bbb"] = struct{}{}
+	for i := 0; i < 10; i++ {
+		v := fmt.Sprintf("%d", i)
+		h.Add("Foo-Bar", v)
+		m[v] = struct{}{}
+	}
+	if h.Len() != 12 {
+		t.Fatalf("unexpected header len %d. Expecting 12", h.Len())
+	}
+
+	h.VisitAll(func(k, v []byte) {
+		switch string(k) {
+		case "Aaa", "Foo-Bar":
+			if _, ok := m[string(v)]; !ok {
+				t.Fatalf("unexpected value found %q. key %q", v, k)
+			}
+			delete(m, string(v))
+		case "Content-Type":
+		default:
+			t.Fatalf("unexpected key found: %q", k)
+		}
+	})
+	if len(m) > 0 {
+		t.Fatalf("%d headers are missed", len(m))
+	}
+
+	s := h.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	var h1 ResponseHeader
+	if err := h1.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	h.VisitAll(func(k, v []byte) {
+		switch string(k) {
+		case "Aaa", "Foo-Bar":
+			m[string(v)] = struct{}{}
+		case "Content-Type":
+		default:
+			t.Fatalf("unexpected key found: %q", k)
+		}
+	})
+	if len(m) != 11 {
+		t.Fatalf("unexpected number of headers: %d. Expecting 11", len(m))
+	}
+}
+
+func TestRequestHeaderAdd(t *testing.T) {
+	m := make(map[string]struct{})
+	var h RequestHeader
+	h.Add("aaa", "bbb")
+	m["bbb"] = struct{}{}
+	for i := 0; i < 10; i++ {
+		v := fmt.Sprintf("%d", i)
+		h.Add("Foo-Bar", v)
+		m[v] = struct{}{}
+	}
+	if h.Len() != 11 {
+		t.Fatalf("unexpected header len %d. Expecting 11", h.Len())
+	}
+
+	h.VisitAll(func(k, v []byte) {
+		switch string(k) {
+		case "Aaa", "Foo-Bar":
+			if _, ok := m[string(v)]; !ok {
+				t.Fatalf("unexpected value found %q. key %q", v, k)
+			}
+			delete(m, string(v))
+		default:
+			t.Fatalf("unexpected key found: %q", k)
+		}
+	})
+	if len(m) > 0 {
+		t.Fatalf("%d headers are missed", len(m))
+	}
+
+	s := h.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	var h1 RequestHeader
+	if err := h1.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	h.VisitAll(func(k, v []byte) {
+		switch string(k) {
+		case "Aaa", "Foo-Bar":
+			m[string(v)] = struct{}{}
+		case "User-Agent":
+		default:
+			t.Fatalf("unexpected key found: %q", k)
+		}
+	})
+	if len(m) != 11 {
+		t.Fatalf("unexpected number of headers: %d. Expecting 11", len(m))
+	}
+	s1 := h1.String()
+	if s != s1 {
+		t.Fatalf("unexpected headers %q. Expecting %q", s1, s)
+	}
+}
+
 func TestHasHeaderValue(t *testing.T) {
 	testHasHeaderValue(t, "foobar", "foobar", true)
 	testHasHeaderValue(t, "foobar", "foo", false)

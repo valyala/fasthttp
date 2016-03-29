@@ -48,6 +48,8 @@ func TestArgsAdd(t *testing.T) {
 				t.Fatalf("unexpected value: %q. Expecting %q", v, "23")
 			}
 			baFound = true
+		default:
+			t.Fatalf("unexpected key found %q", k)
 		}
 	})
 	if !barFound || !bazFound || !oneFound || !baFound {
