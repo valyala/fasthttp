@@ -39,7 +39,7 @@ func (d *userData) Set(key string, value interface{}) {
 }
 
 func (d *userData) SetBytes(key []byte, value interface{}) {
-	d.Set(unsafeBytesToStr(key), value)
+	d.Set(b2s(key), value)
 }
 
 func (d *userData) Get(key string) interface{} {
@@ -55,7 +55,7 @@ func (d *userData) Get(key string) interface{} {
 }
 
 func (d *userData) GetBytes(key []byte) interface{} {
-	return d.Get(unsafeBytesToStr(key))
+	return d.Get(b2s(key))
 }
 
 func (d *userData) Reset() {

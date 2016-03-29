@@ -277,7 +277,7 @@ func (c *Cookie) ParseBytes(src []byte) error {
 		}
 		switch string(kv.key) {
 		case "expires":
-			v := unsafeBytesToStr(kv.value)
+			v := b2s(kv.value)
 			exptime, err := time.ParseInLocation(time.RFC1123, v, time.UTC)
 			if err != nil {
 				return err

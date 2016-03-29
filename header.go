@@ -1605,10 +1605,10 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				h.connectionClose = true
 			} else {
 				h.connectionClose = false
-				h.h = appendArg(h.h, s.key, s.value)
+				h.h = appendArgBytes(h.h, s.key, s.value)
 			}
 		default:
-			h.h = appendArg(h.h, s.key, s.value)
+			h.h = appendArgBytes(h.h, s.key, s.value)
 		}
 	}
 	if s.err != nil {
@@ -1665,10 +1665,10 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				h.connectionClose = true
 			} else {
 				h.connectionClose = false
-				h.h = appendArg(h.h, s.key, s.value)
+				h.h = appendArgBytes(h.h, s.key, s.value)
 			}
 		default:
-			h.h = appendArg(h.h, s.key, s.value)
+			h.h = appendArgBytes(h.h, s.key, s.value)
 		}
 	}
 	if s.err != nil {
@@ -1897,7 +1897,7 @@ func AppendNormalizedHeaderKey(dst []byte, key string) []byte {
 //   * HOST -> Host
 //   * foo-bar-baz -> Foo-Bar-Baz
 func AppendNormalizedHeaderKeyBytes(dst, key []byte) []byte {
-	return AppendNormalizedHeaderKey(dst, unsafeBytesToStr(key))
+	return AppendNormalizedHeaderKey(dst, b2s(key))
 }
 
 var errNeedMore = errors.New("need more data: cannot find trailing lf")

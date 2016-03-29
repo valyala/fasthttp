@@ -40,7 +40,7 @@ func AppendHTMLEscape(dst []byte, s string) []byte {
 // AppendHTMLEscapeBytes appends html-escaped s to dst and returns
 // the extended dst.
 func AppendHTMLEscapeBytes(dst, s []byte) []byte {
-	return AppendHTMLEscape(dst, unsafeBytesToStr(s))
+	return AppendHTMLEscape(dst, b2s(s))
 }
 
 // AppendIPv4 appends string representation of the given ip v4 to dst
@@ -108,7 +108,7 @@ func AppendHTTPDate(dst []byte, date time.Time) []byte {
 
 // ParseHTTPDate parses HTTP-compliant (RFC1123) date.
 func ParseHTTPDate(date []byte) (time.Time, error) {
-	return time.Parse(time.RFC1123, unsafeBytesToStr(date))
+	return time.Parse(time.RFC1123, b2s(date))
 }
 
 // AppendUint appends n to dst and returns the extended dst.
@@ -325,12 +325,12 @@ func lowercaseBytes(b []byte) {
 	}
 }
 
-// unsafeBytesToStr converts byte slice to a string without memory allocation.
+// b2s converts byte slice to a string without memory allocation.
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
 //
 // Note it may break if string and/or slice header will change
 // in the future go versions.
-func unsafeBytesToStr(b []byte) string {
+func b2s(b []byte) string {
 	return *(*string)(unsafe.Pointer(&b))
 }
 

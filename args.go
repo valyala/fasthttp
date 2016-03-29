@@ -145,20 +145,17 @@ func (a *Args) DelBytes(key []byte) {
 
 // Set sets 'key=value' argument.
 func (a *Args) Set(key, value string) {
-	a.bufKV.value = append(a.bufKV.value[:0], value...)
-	a.SetBytesV(key, a.bufKV.value)
+	a.args = setArg(a.args, key, value)
 }
 
 // SetBytesK sets 'key=value' argument.
 func (a *Args) SetBytesK(key []byte, value string) {
-	a.bufKV.value = append(a.bufKV.value[:0], value...)
-	a.SetBytesKV(key, a.bufKV.value)
+	a.args = setArg(a.args, b2s(key), value)
 }
 
 // SetBytesV sets 'key=value' argument.
 func (a *Args) SetBytesV(key string, value []byte) {
-	a.bufKV.key = append(a.bufKV.key[:0], key...)
-	a.SetBytesKV(a.bufKV.key, value)
+	a.args = setArg(a.args, key, b2s(value))
 }
 
 // SetBytesKV sets 'key=value' argument.
@@ -193,7 +190,7 @@ func (a *Args) PeekMulti(key string) [][]byte {
 
 // PeekMultiBytes returns all the arg values for the given key.
 func (a *Args) PeekMultiBytes(key []byte) [][]byte {
-	return a.PeekMulti(unsafeBytesToStr(key))
+	return a.PeekMulti(b2s(key))
 }
 
 // Has returns true if the given key exists in Args.
@@ -301,10 +298,14 @@ func delAllArgs(args []argsKV, key []byte) []argsKV {
 }
 
 func setArgBytes(h []argsKV, key, value []byte) []argsKV {
+	return setArg(h, b2s(key), b2s(value))
+}
+
+func setArg(h []argsKV, key, value string) []argsKV {
 	n := len(h)
 	for i := 0; i < n; i++ {
 		kv := &h[i]
-		if bytes.Equal(kv.key, key) {
+		if key == string(kv.key) {
 			kv.value = append(kv.value[:0], value...)
 			return h
 		}
@@ -312,7 +313,11 @@ func setArgBytes(h []argsKV, key, value []byte) []argsKV {
 	return appendArg(h, key, value)
 }
 
-func appendArg(args []argsKV, key, value []byte) []argsKV {
+func appendArgBytes(h []argsKV, key, value []byte) []argsKV {
+	return appendArg(h, b2s(key), b2s(value))
+}
+
+func appendArg(args []argsKV, key, value string) []argsKV {
 	var kv *argsKV
 	args, kv = allocArg(args)
 	kv.key = append(kv.key[:0], key...)
