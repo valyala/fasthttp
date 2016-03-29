@@ -32,6 +32,8 @@ type workerPool struct {
 	ready []*workerChan
 
 	stopCh chan struct{}
+
+	workerChanPool sync.Pool
 }
 
 type workerChan struct {
@@ -148,7 +150,7 @@ func (wp *workerPool) getCh() *workerChan {
 		if !createWorker {
 			return nil
 		}
-		vch := workerChanPool.Get()
+		vch := wp.workerChanPool.Get()
 		if vch == nil {
 			vch = &workerChan{
 				ch: make(chan net.Conn, workerChanCap),
@@ -157,7 +159,7 @@ func (wp *workerPool) getCh() *workerChan {
 		ch = vch.(*workerChan)
 		go func() {
 			wp.workerFunc(ch)
-			workerChanPool.Put(vch)
+			wp.workerChanPool.Put(vch)
 		}()
 	}
 	return ch
@@ -174,8 +176,6 @@ func (wp *workerPool) release(ch *workerChan) bool {
 	wp.lock.Unlock()
 	return true
 }
-
-var workerChanPool sync.Pool
 
 func (wp *workerPool) workerFunc(ch *workerChan) {
 	var c net.Conn
