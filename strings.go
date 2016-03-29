@@ -48,9 +48,11 @@ var (
 	strRange            = []byte("Range")
 	strContentRange     = []byte("Content-Range")
 
-	strCookieExpires = []byte("expires")
-	strCookieDomain  = []byte("domain")
-	strCookiePath    = []byte("path")
+	strCookieExpires  = []byte("expires")
+	strCookieDomain   = []byte("domain")
+	strCookiePath     = []byte("path")
+	strCookieHTTPOnly = []byte("HttpOnly")
+	strCookieSecure   = []byte("secure")
 
 	strClose               = []byte("close")
 	strGzip                = []byte("gzip")

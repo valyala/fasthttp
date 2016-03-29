@@ -6,6 +6,79 @@ import (
 	"time"
 )
 
+func TestCookieSecureHttpOnly(t *testing.T) {
+	var c Cookie
+
+	if err := c.Parse("foo=bar; HttpOnly; secure"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !c.Secure() {
+		t.Fatalf("secure must be set")
+	}
+	if !c.HTTPOnly() {
+		t.Fatalf("HttpOnly must be set")
+	}
+	s := c.String()
+	if !strings.Contains(s, "; secure") {
+		t.Fatalf("missing secure flag in cookie %q", s)
+	}
+	if !strings.Contains(s, "; HttpOnly") {
+		t.Fatalf("missing HttpOnly flag in cookie %q", s)
+	}
+}
+
+func TestCookieSecure(t *testing.T) {
+	var c Cookie
+
+	if err := c.Parse("foo=bar; secure"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !c.Secure() {
+		t.Fatalf("secure must be set")
+	}
+	s := c.String()
+	if !strings.Contains(s, "; secure") {
+		t.Fatalf("missing secure flag in cookie %q", s)
+	}
+
+	if err := c.Parse("foo=bar"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if c.HTTPOnly() {
+		t.Fatalf("Unexpected secure flag set")
+	}
+	s = c.String()
+	if strings.Contains(s, "secure") {
+		t.Fatalf("unexpected secure flag in cookie %q", s)
+	}
+}
+
+func TestCookieHttpOnly(t *testing.T) {
+	var c Cookie
+
+	if err := c.Parse("foo=bar; HttpOnly"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !c.HTTPOnly() {
+		t.Fatalf("HTTPOnly must be set")
+	}
+	s := c.String()
+	if !strings.Contains(s, "; HttpOnly") {
+		t.Fatalf("missing HttpOnly flag in cookie %q", s)
+	}
+
+	if err := c.Parse("foo=bar"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if c.HTTPOnly() {
+		t.Fatalf("Unexpected HTTPOnly flag set")
+	}
+	s = c.String()
+	if strings.Contains(s, "HttpOnly") {
+		t.Fatalf("unexpected HttpOnly flag in cookie %q", s)
+	}
+}
+
 func TestCookieAcquireReleaseSequential(t *testing.T) {
 	testCookieAcquireRelease(t)
 }
