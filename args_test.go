@@ -8,6 +8,53 @@ import (
 	"time"
 )
 
+func TestArgsAdd(t *testing.T) {
+	var a Args
+	a.Add("foo", "bar")
+	a.Add("foo", "baz")
+	a.Add("foo", "1")
+	a.Add("ba", "23")
+	if a.Len() != 4 {
+		t.Fatalf("unexpected number of elements: %d. Expecting 4", a.Len())
+	}
+	s := a.String()
+	expectedS := "foo=bar&foo=baz&foo=1&ba=23"
+	if s != expectedS {
+		t.Fatalf("unexpected result: %q. Expecting %q", s, expectedS)
+	}
+
+	var a1 Args
+	a1.Parse(s)
+	if a1.Len() != 4 {
+		t.Fatalf("unexpected number of elements: %d. Expecting 4", a.Len())
+	}
+
+	var barFound, bazFound, oneFound, baFound bool
+	a1.VisitAll(func(k, v []byte) {
+		switch string(k) {
+		case "foo":
+			switch string(v) {
+			case "bar":
+				barFound = true
+			case "baz":
+				bazFound = true
+			case "1":
+				oneFound = true
+			default:
+				t.Fatalf("unexpected value %q", v)
+			}
+		case "ba":
+			if string(v) != "23" {
+				t.Fatalf("unexpected value: %q. Expecting %q", v, "23")
+			}
+			baFound = true
+		}
+	})
+	if !barFound || !bazFound || !oneFound || !baFound {
+		t.Fatalf("something is missing: %v, %v, %v, %v", barFound, bazFound, oneFound, baFound)
+	}
+}
+
 func TestArgsAcquireReleaseSequential(t *testing.T) {
 	testArgsAcquireRelease(t)
 }

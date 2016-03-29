@@ -141,6 +141,34 @@ func (a *Args) DelBytes(key []byte) {
 	a.args = delAllArgs(a.args, b2s(key))
 }
 
+// Add adds 'key=value' argument.
+//
+// Multiple values for the same key may be added.
+func (a *Args) Add(key, value string) {
+	a.args = appendArg(a.args, key, value)
+}
+
+// AddBytesK adds 'key=value' argument.
+//
+// Multiple values for the same key may be added.
+func (a *Args) AddBytesK(key []byte, value string) {
+	a.args = appendArg(a.args, b2s(key), value)
+}
+
+// AddBytesV adds 'key=value' argument.
+//
+// Multiple values for the same key may be added.
+func (a *Args) AddBytesV(key string, value []byte) {
+	a.args = appendArg(a.args, key, b2s(value))
+}
+
+// AddBytesKV adds 'key=value' argument.
+//
+// Multiple values for the same key may be added.
+func (a *Args) AddBytesKV(key, value []byte) {
+	a.args = appendArg(a.args, b2s(key), b2s(value))
+}
+
 // Set sets 'key=value' argument.
 func (a *Args) Set(key, value string) {
 	a.args = setArg(a.args, key, value)
