@@ -163,7 +163,7 @@ func (a *Args) SetBytesV(key string, value []byte) {
 
 // SetBytesKV sets 'key=value' argument.
 func (a *Args) SetBytesKV(key, value []byte) {
-	a.args = setArg(a.args, key, value)
+	a.args = setArgBytes(a.args, key, value)
 }
 
 // Peek returns query arg value for the given key.
@@ -300,7 +300,7 @@ func delAllArgs(args []argsKV, key []byte) []argsKV {
 	return args
 }
 
-func setArg(h []argsKV, key, value []byte) []argsKV {
+func setArgBytes(h []argsKV, key, value []byte) []argsKV {
 	n := len(h)
 	for i := 0; i < n; i++ {
 		kv := &h[i]

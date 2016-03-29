@@ -215,7 +215,7 @@ func (h *ResponseHeader) SetContentLength(contentLength int) {
 			h.SetConnectionClose()
 			value = strIdentity
 		}
-		h.h = setArg(h.h, strTransferEncoding, value)
+		h.h = setArgBytes(h.h, strTransferEncoding, value)
 	}
 }
 
@@ -256,7 +256,7 @@ func (h *RequestHeader) SetContentLength(contentLength int) {
 		h.h = delAllArgs(h.h, strTransferEncoding)
 	} else {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
-		h.h = setArg(h.h, strTransferEncoding, strChunked)
+		h.h = setArgBytes(h.h, strTransferEncoding, strChunked)
 	}
 }
 
@@ -882,20 +882,20 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 			h.SetConnectionClose()
 		} else {
 			h.ResetConnectionClose()
-			h.h = setArg(h.h, key, value)
+			h.h = setArgBytes(h.h, key, value)
 		}
 	case "Transfer-Encoding":
 		// Transfer-Encoding is managed automatically.
 	case "Date":
 		// Date is managed automatically.
 	default:
-		h.h = setArg(h.h, key, value)
+		h.h = setArgBytes(h.h, key, value)
 	}
 }
 
 // SetCookie sets the given response cookie.
 func (h *ResponseHeader) SetCookie(cookie *Cookie) {
-	h.cookies = setArg(h.cookies, cookie.Key(), cookie.Cookie())
+	h.cookies = setArgBytes(h.cookies, cookie.Key(), cookie.Cookie())
 }
 
 // SetCookie sets 'key: value' cookies.
@@ -914,7 +914,7 @@ func (h *RequestHeader) SetCookieBytesK(key []byte, value string) {
 func (h *RequestHeader) SetCookieBytesKV(key, value []byte) {
 	h.parseRawHeaders()
 	h.collectCookies()
-	h.cookies = setArg(h.cookies, key, value)
+	h.cookies = setArgBytes(h.cookies, key, value)
 }
 
 // Set sets the given 'key: value' header.
@@ -966,12 +966,12 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 			h.SetConnectionClose()
 		} else {
 			h.ResetConnectionClose()
-			h.h = setArg(h.h, key, value)
+			h.h = setArgBytes(h.h, key, value)
 		}
 	case "Transfer-Encoding":
 		// Transfer-Encoding is managed automatically.
 	default:
-		h.h = setArg(h.h, key, value)
+		h.h = setArgBytes(h.h, key, value)
 	}
 }
 
@@ -1594,7 +1594,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 		case "Transfer-Encoding":
 			if !bytes.Equal(s.value, strIdentity) {
 				h.contentLength = -1
-				h.h = setArg(h.h, strTransferEncoding, strChunked)
+				h.h = setArgBytes(h.h, strTransferEncoding, strChunked)
 			}
 		case "Set-Cookie":
 			h.cookies, kv = allocArg(h.cookies)
@@ -1620,7 +1620,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}
 	if h.contentLength == -2 && !h.ConnectionUpgrade() && !h.mustSkipContentLength() {
-		h.h = setArg(h.h, strTransferEncoding, strIdentity)
+		h.h = setArgBytes(h.h, strTransferEncoding, strIdentity)
 		h.connectionClose = true
 	}
 	if h.noHTTP11 && !h.connectionClose {
@@ -1658,7 +1658,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 		case "Transfer-Encoding":
 			if !bytes.Equal(s.value, strIdentity) {
 				h.contentLength = -1
-				h.h = setArg(h.h, strTransferEncoding, strChunked)
+				h.h = setArgBytes(h.h, strTransferEncoding, strChunked)
 			}
 		case "Connection":
 			if bytes.Equal(s.value, strClose) {
