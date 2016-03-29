@@ -194,13 +194,12 @@ func (a *Args) PeekMultiBytes(key []byte) [][]byte {
 
 // Has returns true if the given key exists in Args.
 func (a *Args) Has(key string) bool {
-	a.bufKV.key = append(a.bufKV.key[:0], key...)
-	return a.HasBytes(a.bufKV.key)
+	return hasArg(a.args, key)
 }
 
 // HasBytes returns true if the given key exists in Args.
 func (a *Args) HasBytes(key []byte) bool {
-	return hasArg(a.args, key)
+	return hasArg(a.args, b2s(key))
 }
 
 // ErrNoArgValue is returned when Args value with the given key is missing.
@@ -342,10 +341,10 @@ func releaseArg(h []argsKV) []argsKV {
 	return h[:len(h)-1]
 }
 
-func hasArg(h []argsKV, k []byte) bool {
+func hasArg(h []argsKV, key string) bool {
 	for i, n := 0, len(h); i < n; i++ {
 		kv := &h[i]
-		if bytes.Equal(kv.key, k) {
+		if key == string(kv.key) {
 			return true
 		}
 	}
