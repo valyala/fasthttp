@@ -38,9 +38,8 @@ var argsPool = &sync.Pool{
 type Args struct {
 	noCopy noCopy
 
-	args  []argsKV
-	bufKV argsKV
-	buf   []byte
+	args []argsKV
+	buf  []byte
 }
 
 type argsKV struct {
@@ -216,14 +215,15 @@ func (a *Args) GetUint(key string) (int, error) {
 
 // SetUint sets uint value for the given key.
 func (a *Args) SetUint(key string, value int) {
-	a.bufKV.key = append(a.bufKV.key[:0], key...)
-	a.SetUintBytes(a.bufKV.key, value)
+	bb := AcquireByteBuffer()
+	bb.B = AppendUint(bb.B[:0], value)
+	a.SetBytesV(key, bb.B)
+	ReleaseByteBuffer(bb)
 }
 
 // SetUintBytes sets uint value for the given key.
 func (a *Args) SetUintBytes(key []byte, value int) {
-	a.bufKV.value = AppendUint(a.bufKV.value[:0], value)
-	a.SetBytesKV(key, a.bufKV.value)
+	a.SetUint(b2s(key), value)
 }
 
 // GetUintOrZero returns uint value for the given key.
