@@ -48,6 +48,7 @@ func (wp *workerPool) Start() {
 	wp.stopCh = make(chan struct{})
 	stopCh := wp.stopCh
 	go func() {
+		var scratch []*workerChan
 		for {
 			select {
 			case <-stopCh:
@@ -55,7 +56,7 @@ func (wp *workerPool) Start() {
 			default:
 				time.Sleep(10 * time.Second)
 			}
-			wp.clean()
+			wp.clean(&scratch)
 		}
 	}()
 }
@@ -79,30 +80,38 @@ func (wp *workerPool) Stop() {
 	wp.lock.Unlock()
 }
 
-const maxIdleWorkerDuration = 10 * time.Second
+const maxIdleWorkerDuration = 60 * time.Second
 
-func (wp *workerPool) clean() {
+func (wp *workerPool) clean(scratch *[]*workerChan) {
 	// Clean least recently used workers if they didn't serve connections
 	// for more than maxIdleWorkerDuration.
 	currentTime := time.Now()
 
 	wp.lock.Lock()
 	ready := wp.ready
-	for len(ready) > 1 && currentTime.Sub(ready[0].lastUseTime) > maxIdleWorkerDuration {
-		// notify the worker to stop.
-		ready[0].ch <- nil
-
-		ready = ready[1:]
-		wp.workersCount--
+	n := len(ready)
+	i := 0
+	for i < n && currentTime.Sub(ready[i].lastUseTime) > maxIdleWorkerDuration {
+		i++
 	}
-	if len(ready) < len(wp.ready) {
-		copy(wp.ready, ready)
-		for i := len(ready); i < len(wp.ready); i++ {
-			wp.ready[i] = nil
+	if i > 0 {
+		wp.workersCount -= i
+		*scratch = append((*scratch)[:0], ready[:i]...)
+		m := copy(ready, ready[i:])
+		for i = m; i < n; i++ {
+			ready[i] = nil
 		}
-		wp.ready = wp.ready[:len(ready)]
+		wp.ready = ready[:m]
 	}
 	wp.lock.Unlock()
+
+	// Notify obsolete workers to stop.
+	// This notification must be outside the wp.lock, since ch.ch
+	// may be blocking and may consume a lot of time if many workers
+	// are located on non-local CPUs.
+	for _, ch := range *scratch {
+		ch.ch <- nil
+	}
 }
 
 func (wp *workerPool) Serve(c net.Conn) bool {
