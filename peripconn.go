@@ -7,6 +7,7 @@ import (
 )
 
 type perIPConnCounter struct {
+	pool sync.Pool
 	lock sync.Mutex
 	m    map[uint32]int
 }
@@ -45,24 +46,22 @@ type perIPConn struct {
 }
 
 func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) *perIPConn {
-	v := perIPConnPool.Get()
+	v := counter.pool.Get()
 	if v == nil {
-		v = &perIPConn{}
+		v = &perIPConn{
+			perIPConnCounter: counter,
+		}
 	}
 	c := v.(*perIPConn)
 	c.Conn = conn
 	c.ip = ip
-	c.perIPConnCounter = counter
 	return c
 }
 
 func releasePerIPConn(c *perIPConn) {
 	c.Conn = nil
-	c.perIPConnCounter = nil
-	perIPConnPool.Put(c)
+	c.perIPConnCounter.pool.Put(c)
 }
-
-var perIPConnPool sync.Pool
 
 func (c *perIPConn) Close() error {
 	err := c.Conn.Close()
