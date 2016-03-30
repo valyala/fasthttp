@@ -95,7 +95,6 @@ func (wp *workerPool) clean(scratch *[]*workerChan) {
 		i++
 	}
 	if i > 0 {
-		wp.workersCount -= i
 		*scratch = append((*scratch)[:0], ready[:i]...)
 		m := copy(ready, ready[i:])
 		for i = m; i < n; i++ {
@@ -202,6 +201,9 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			c.Close()
 			wp.release(ch)
 		}
+		wp.lock.Lock()
+		wp.workersCount--
+		wp.lock.Unlock()
 	}()
 
 	for c = range ch.ch {
