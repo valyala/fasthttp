@@ -318,6 +318,10 @@ func BenchmarkClientGetEndToEnd1000Inmemory(b *testing.B) {
 	benchmarkClientGetEndToEndInmemory(b, 1000)
 }
 
+func BenchmarkClientGetEndToEnd10KInmemory(b *testing.B) {
+	benchmarkClientGetEndToEndInmemory(b, 10000)
+}
+
 func benchmarkClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 	ln := fasthttputil.NewInmemoryListener()
 
