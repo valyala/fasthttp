@@ -109,8 +109,10 @@ func (wp *workerPool) clean(scratch *[]*workerChan) {
 	// This notification must be outside the wp.lock, since ch.ch
 	// may be blocking and may consume a lot of time if many workers
 	// are located on non-local CPUs.
-	for _, ch := range *scratch {
+	tmp := *scratch
+	for i, ch := range tmp {
 		ch.ch <- nil
+		tmp[i] = nil
 	}
 }
 
@@ -151,6 +153,7 @@ func (wp *workerPool) getCh() *workerChan {
 		}
 	} else {
 		ch = ready[n]
+		ready[n] = nil
 		wp.ready = ready[:n]
 	}
 	wp.lock.Unlock()

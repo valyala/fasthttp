@@ -1232,7 +1232,7 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 				}
 				continue
 			}
-			return pic, nil
+			c = pic
 		}
 		return c, nil
 	}
