@@ -153,6 +153,12 @@ type Client struct {
 	// DefaultMaxConnsPerHost is used if not set.
 	MaxConnsPerHost int
 
+	// Idle keep-alive connections are closed after this duration.
+	//
+	// By default idle connections are closed
+	// after DefaultMaxIdleConnDuration.
+	MaxIdleConnDuration time.Duration
+
 	// Per-connection buffer size for responses' reading.
 	// This also limits the maximum header size.
 	//
@@ -337,6 +343,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			IsTLS:                         isTLS,
 			TLSConfig:                     c.TLSConfig,
 			MaxConns:                      c.MaxConnsPerHost,
+			MaxIdleConnDuration:           c.MaxIdleConnDuration,
 			ReadBufferSize:                c.ReadBufferSize,
 			WriteBufferSize:               c.WriteBufferSize,
 			ReadTimeout:                   c.ReadTimeout,
@@ -384,6 +391,10 @@ func (c *Client) mCleaner(m map[string]*HostClient) {
 // http client may establish per host by default (i.e. if
 // Client.MaxConnsPerHost isn't set).
 const DefaultMaxConnsPerHost = 512
+
+// DefaultMaxIdleConnDuration is the default duration before idle keep-alive
+// connection is closed.
+const DefaultMaxIdleConnDuration = 10 * time.Second
 
 // DialFunc must establish connection to addr.
 //
@@ -450,10 +461,16 @@ type HostClient struct {
 	// DefaultMaxConnsPerHost is used if not set.
 	MaxConns int
 
-	// Maximum duration for each keep-alive connection before closing.
+	// Keep-alive connections are closed after this duration.
 	//
 	// By default connection duration is unlimited.
 	MaxConnDuration time.Duration
+
+	// Idle keep-alive connections are closed after this duration.
+	//
+	// By default idle connections are closed
+	// after DefaultMaxIdleConnDuration.
+	MaxIdleConnDuration time.Duration
 
 	// Per-connection buffer size for responses' reading.
 	// This also limits the maximum header size.
@@ -1107,34 +1124,43 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 }
 
 func (c *HostClient) connsCleaner() {
-	mustStop := false
+	var (
+		scratch             []*clientConn
+		mustStop            bool
+		maxIdleConnDuration = c.MaxIdleConnDuration
+	)
+	if maxIdleConnDuration <= 0 {
+		maxIdleConnDuration = DefaultMaxIdleConnDuration
+	}
 	for {
-		t := time.Now()
+		currentTime := time.Now()
+
 		c.connsLock.Lock()
 		conns := c.conns
-		for len(conns) > 0 && t.Sub(conns[0].lastUseTime) > 10*time.Second {
-			cc := conns[0]
-			c.connsCount--
-			cc.c.Close()
-			releaseClientConn(cc)
-			conns = conns[1:]
+		n := len(conns)
+		i := 0
+		for i < n && currentTime.Sub(conns[i].lastUseTime) > maxIdleConnDuration {
+			i++
 		}
-		if len(conns) < len(c.conns) {
-			copy(c.conns, conns)
-			for i := len(conns); i < len(c.conns); i++ {
-				c.conns[i] = nil
+		mustStop = (c.connsCount == i)
+		scratch = append(scratch[:0], conns[:i]...)
+		if i > 0 {
+			m := copy(conns, conns[i:])
+			for i = m; i < n; i++ {
+				conns[i] = nil
 			}
-			c.conns = c.conns[:len(conns)]
-		}
-		if c.connsCount == 0 {
-			mustStop = true
+			c.conns = conns[:m]
 		}
 		c.connsLock.Unlock()
 
+		for i, cc := range scratch {
+			c.closeConn(cc)
+			scratch[i] = nil
+		}
 		if mustStop {
 			break
 		}
-		time.Sleep(10 * time.Second)
+		time.Sleep(maxIdleConnDuration)
 	}
 }
 
