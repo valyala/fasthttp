@@ -190,7 +190,6 @@ func (wp *workerPool) release(ch *workerChan) bool {
 
 func (wp *workerPool) workerFunc(ch *workerChan) {
 	var c net.Conn
-	var err error
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -206,10 +205,15 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 		wp.lock.Unlock()
 	}()
 
+	var (
+		connsServed uint64
+		err         error
+	)
 	for c = range ch.ch {
 		if c == nil {
 			break
 		}
+
 		if err = wp.WorkerFunc(c); err != nil && err != errHijacked {
 			errStr := err.Error()
 			if wp.LogAllErrors || !(strings.Contains(errStr, "broken pipe") ||
@@ -223,8 +227,21 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 		}
 		c = nil
 
+		// Recycle workers in order to reduce the amount of memory occupied
+		// by worker stacks, which could grow due to stack-hungry request handlers.
+		connsServed++
+		if connsServed >= maxConnsPerWorker {
+			break
+		}
+
 		if !wp.release(ch) {
 			break
 		}
 	}
 }
+
+// maxConnsPerWorker is the maximum number of connections each worker may serve.
+//
+// This setting allows recycling worker stacks, which could grow during
+// execution of stack-hungry request handlers provided by users.
+const maxConnsPerWorker = 100
