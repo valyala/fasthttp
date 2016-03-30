@@ -94,8 +94,8 @@ func (wp *workerPool) clean(scratch *[]*workerChan) {
 	for i < n && currentTime.Sub(ready[i].lastUseTime) > maxIdleWorkerDuration {
 		i++
 	}
+	*scratch = append((*scratch)[:0], ready[:i]...)
 	if i > 0 {
-		*scratch = append((*scratch)[:0], ready[:i]...)
 		m := copy(ready, ready[i:])
 		for i = m; i < n; i++ {
 			ready[i] = nil
