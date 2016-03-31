@@ -1483,7 +1483,9 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
-		connectionClose = connectionClose || ctx.Response.ConnectionClose()
+		// Verify Request.Header.connectionCloseFast() again,
+		// since request handler might trigger full headers' parsing.
+		connectionClose = connectionClose || ctx.Request.Header.connectionCloseFast() || ctx.Response.ConnectionClose()
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
 		} else if !isHTTP11 {
