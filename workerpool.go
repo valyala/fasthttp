@@ -194,12 +194,11 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 	defer func() {
 		if r := recover(); r != nil {
 			wp.Logger.Printf("panic: %s\nStack trace:\n%s", r, debug.Stack())
+			if c != nil {
+				c.Close()
+			}
 		}
 
-		if c != nil {
-			c.Close()
-			wp.release(ch)
-		}
 		wp.lock.Lock()
 		wp.workersCount--
 		wp.lock.Unlock()
