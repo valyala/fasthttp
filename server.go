@@ -152,6 +152,14 @@ type Server struct {
 	// DefaultConcurrency is used if not set.
 	Concurrency int
 
+	// Whether to disable keep-alive connections.
+	//
+	// The server will close all the incoming connections after sending
+	// the first response to client if this option is set to true.
+	//
+	// By default keep-alive connections are enabled.
+	DisableKeepalive bool
+
 	// Per-connection buffer size for requests' reading.
 	// This also limits the maximum header size.
 	//
@@ -1333,14 +1341,17 @@ func (s *Server) serveConn(c net.Conn) error {
 	connRequestNum := uint64(0)
 
 	ctx := s.acquireCtx(c)
-	var br *bufio.Reader
-	var bw *bufio.Writer
-
-	var err error
-	var connectionClose bool
-	var isHTTP11 bool
-	var timeoutResponse *Response
-	var hijackHandler HijackHandler
+	var (
+		br *bufio.Reader
+		bw *bufio.Writer
+	)
+	var (
+		err             error
+		connectionClose bool
+		isHTTP11        bool
+		timeoutResponse *Response
+		hijackHandler   HijackHandler
+	)
 	for {
 		ctx.id++
 		connRequestNum++
@@ -1422,7 +1433,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
-		connectionClose = ctx.Request.Header.connectionCloseFast()
+		connectionClose = s.DisableKeepalive || ctx.Request.Header.connectionCloseFast()
 		isHTTP11 = ctx.Request.Header.IsHTTP11()
 
 		ctx.connRequestNum = connRequestNum

@@ -16,6 +16,77 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestServerDisableKeepalive(t *testing.T) {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK")
+		},
+		DisableKeepalive: true,
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	serverCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverCh)
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		br := bufio.NewReader(c)
+		var resp Response
+		if err = resp.Read(br); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+		}
+		if !resp.ConnectionClose() {
+			t.Fatalf("expecting 'Connection: close' response header")
+		}
+		if string(resp.Body()) != "OK" {
+			t.Fatalf("unexpected body: %q. Expecting %q", resp.Body(), "OK")
+		}
+
+		// make sure the connection is closed
+		data, err := ioutil.ReadAll(br)
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if len(data) > 0 {
+			t.Fatalf("unexpected data read from the connection: %q. Expecting empty data", data)
+		}
+
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	select {
+	case <-serverCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
 func TestServerMaxConnsPerIPLimit(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
