@@ -23,6 +23,8 @@ type workerPool struct {
 
 	LogAllErrors bool
 
+	MaxIdleWorkerDuration time.Duration
+
 	Logger Logger
 
 	lock         sync.Mutex
@@ -50,13 +52,13 @@ func (wp *workerPool) Start() {
 	go func() {
 		var scratch []*workerChan
 		for {
+			wp.clean(&scratch)
 			select {
 			case <-stopCh:
 				return
 			default:
-				time.Sleep(10 * time.Second)
+				time.Sleep(wp.getMaxIdleWorkerDuration())
 			}
-			wp.clean(&scratch)
 		}
 	}()
 }
@@ -82,9 +84,16 @@ func (wp *workerPool) Stop() {
 	wp.lock.Unlock()
 }
 
-const maxIdleWorkerDuration = 60 * time.Second
+func (wp *workerPool) getMaxIdleWorkerDuration() time.Duration {
+	if wp.MaxIdleWorkerDuration <= 0 {
+		return 10 * time.Second
+	}
+	return wp.MaxIdleWorkerDuration
+}
 
 func (wp *workerPool) clean(scratch *[]*workerChan) {
+	maxIdleWorkerDuration := wp.getMaxIdleWorkerDuration()
+
 	// Clean least recently used workers if they didn't serve connections
 	// for more than maxIdleWorkerDuration.
 	currentTime := time.Now()
