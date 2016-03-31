@@ -205,10 +205,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 		wp.lock.Unlock()
 	}()
 
-	var (
-		connsServed uint64
-		err         error
-	)
+	var err error
 	for c = range ch.ch {
 		if c == nil {
 			break
@@ -227,21 +224,8 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 		}
 		c = nil
 
-		// Recycle workers in order to reduce the amount of memory occupied
-		// by worker stacks, which could grow due to stack-hungry request handlers.
-		connsServed++
-		if connsServed >= maxConnsPerWorker {
-			break
-		}
-
 		if !wp.release(ch) {
 			break
 		}
 	}
 }
-
-// maxConnsPerWorker is the maximum number of connections each worker may serve.
-//
-// This setting allows recycling worker stacks, which could grow during
-// execution of stack-hungry request handlers provided by users.
-const maxConnsPerWorker = 100
