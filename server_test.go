@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1787,11 +1788,14 @@ func TestServerEmptyResponse(t *testing.T) {
 }
 
 type customLogger struct {
-	out string
+	lock sync.Mutex
+	out  string
 }
 
 func (cl *customLogger) Printf(format string, args ...interface{}) {
+	cl.lock.Lock()
 	cl.out += fmt.Sprintf(format, args...)[6:] + "\n"
+	cl.lock.Unlock()
 }
 
 func TestServerLogger(t *testing.T) {

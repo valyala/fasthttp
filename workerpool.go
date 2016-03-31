@@ -72,10 +72,12 @@ func (wp *workerPool) Stop() {
 	// Do not wait for busy workers - they will stop after
 	// serving the connection and noticing wp.mustStop = true.
 	wp.lock.Lock()
-	for _, ch := range wp.ready {
+	ready := wp.ready
+	for i, ch := range ready {
 		ch.ch <- nil
+		ready[i] = nil
 	}
-	wp.ready = nil
+	wp.ready = ready[:0]
 	wp.mustStop = true
 	wp.lock.Unlock()
 }
