@@ -64,6 +64,10 @@ func testPipelineClientDoConcurrent(t *testing.T, concurrency int) {
 		}
 	}
 
+	if c.PendingRequests() != 0 {
+		t.Fatalf("unexpected number of pending requests: %d. Expecting zero", c.PendingRequests())
+	}
+
 	if err := ln.Close(); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -86,6 +90,10 @@ func testPipelineClientDo(t *testing.T, c *PipelineClient) {
 			err = c.Do(req, resp)
 		}
 		if err != nil {
+			if err == ErrPipelineOverflow {
+				time.Sleep(10 * time.Millisecond)
+				continue
+			}
 			t.Fatalf("unexpected error on iteration %d: %s", i, err)
 		}
 		if resp.StatusCode() != StatusOK {

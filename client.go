@@ -1547,7 +1547,15 @@ func (c *PipelineClient) Do(req *Request, resp *Response) error {
 		w.resp = &w.respCopy
 	}
 
-	c.chW <- w
+	// Put the request to outgoing queue
+	select {
+	case c.chW <- w:
+	default:
+		releasePipelineWork(&c.workPool, w)
+		return ErrPipelineOverflow
+	}
+
+	// Wait for the response
 	<-w.done
 	err := w.err
 
@@ -1555,6 +1563,10 @@ func (c *PipelineClient) Do(req *Request, resp *Response) error {
 
 	return err
 }
+
+// ErrPipelineOverflow may be returned from PipelineClient.Do
+// if the requests' queue is overflown.
+var ErrPipelineOverflow = errors.New("pipelined requests' queue has been overflown. Increase MaxPendingRequests")
 
 // DefaultMaxPendingRequests is the default value
 // for PipelineClient.MaxPendingRequests.
@@ -1756,7 +1768,10 @@ func (c *PipelineClient) logger() Logger {
 func (c *PipelineClient) PendingRequests() int {
 	c.init()
 
-	return len(c.chR)
+	c.chLock.Lock()
+	n := len(c.chR)
+	c.chLock.Unlock()
+	return n
 }
 
 var errPipelineClientStopped = errors.New("pipeline client has been stopped")
