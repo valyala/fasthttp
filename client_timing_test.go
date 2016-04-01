@@ -558,3 +558,76 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 		b.Fatalf("server wasn't stopped")
 	}
 }
+
+func BenchmarkPipelineClient1(b *testing.B) {
+	benchmarkPipelineClient(b, 1)
+}
+
+func BenchmarkPipelineClient10(b *testing.B) {
+	benchmarkPipelineClient(b, 10)
+}
+
+func BenchmarkPipelineClient100(b *testing.B) {
+	benchmarkPipelineClient(b, 100)
+}
+
+func BenchmarkPipelineClient1000(b *testing.B) {
+	benchmarkPipelineClient(b, 1000)
+}
+
+func benchmarkPipelineClient(b *testing.B, parallelism int) {
+	h := func(ctx *RequestCtx) {
+		ctx.WriteString("foobar")
+	}
+	ln := fasthttputil.NewInmemoryListener()
+
+	ch := make(chan struct{})
+	go func() {
+		if err := Serve(ln, h); err != nil {
+			b.Fatalf("error when serving requests: %s", err)
+		}
+		close(ch)
+	}()
+
+	var clients []*PipelineClient
+	for i := 0; i < runtime.GOMAXPROCS(-1); i++ {
+		c := &PipelineClient{
+			Dial:               func(addr string) (net.Conn, error) { return ln.Dial() },
+			ReadBufferSize:     1024 * 1024,
+			WriteBufferSize:    1024 * 1024,
+			MaxPendingRequests: parallelism,
+		}
+		clients = append(clients, c)
+	}
+
+	clientID := uint32(0)
+	requestURI := "/foo/bar?baz=123"
+	url := "http://unused.host" + requestURI
+	b.SetParallelism(parallelism)
+	b.RunParallel(func(pb *testing.PB) {
+		n := atomic.AddUint32(&clientID, 1)
+		c := clients[n%uint32(len(clients))]
+		var req Request
+		req.SetRequestURI(url)
+		var resp Response
+		for pb.Next() {
+			if err := c.Do(&req, &resp); err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if resp.StatusCode() != StatusOK {
+				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+			}
+			body := resp.Body()
+			if string(body) != "foobar" {
+				b.Fatalf("unexpected response %q. Expecting %q", body, "foobar")
+			}
+		}
+	})
+
+	ln.Close()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		b.Fatalf("server wasn't stopped")
+	}
+}

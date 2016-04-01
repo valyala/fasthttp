@@ -15,6 +15,96 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestPipelineClientDoSerial(t *testing.T) {
+	testPipelineClientDoConcurrent(t, 1)
+}
+
+func TestPipelineClientDoConcurrent(t *testing.T) {
+	testPipelineClientDoConcurrent(t, 10)
+}
+
+func testPipelineClientDoConcurrent(t *testing.T, concurrency int) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK")
+		},
+	}
+
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &PipelineClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxIdleConnDuration: 5 * time.Millisecond,
+		MaxPendingRequests:  2,
+	}
+
+	clientStopCh := make(chan struct{}, concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			testPipelineClientDo(t, c)
+			clientStopCh <- struct{}{}
+		}()
+	}
+
+	for i := 0; i < concurrency; i++ {
+		select {
+		case <-clientStopCh:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
+func testPipelineClientDo(t *testing.T, c *PipelineClient) {
+	var err error
+	req := AcquireRequest()
+	req.SetRequestURI("http://foobar/baz")
+	resp := AcquireResponse()
+	for i := 0; i < 10; i++ {
+		if i&1 == 0 {
+			err = c.DoTimeout(req, resp, time.Second)
+		} else {
+			err = c.Do(req, resp)
+		}
+		if err != nil {
+			t.Fatalf("unexpected error on iteration %d: %s", i, err)
+		}
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+		}
+		body := string(resp.Body())
+		if body != "OK" {
+			t.Fatalf("unexpected body: %q. Expecting %q", body, "OK")
+		}
+
+		// sleep for a while, so the connection to the host may expire.
+		if i%5 == 0 {
+			time.Sleep(30 * time.Millisecond)
+		}
+	}
+	ReleaseRequest(req)
+	ReleaseResponse(resp)
+}
+
 func TestClientDoTimeoutDisableNormalizing(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
