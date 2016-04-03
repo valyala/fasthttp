@@ -1449,6 +1449,7 @@ type pipelineWork struct {
 	req      *Request
 	resp     *Response
 	t        *time.Timer
+	deadline time.Time
 	err      error
 	done     chan struct{}
 }
@@ -1709,6 +1710,12 @@ func (c *PipelineClient) writer(conn net.Conn, stopCh <-chan struct{}) error {
 			}
 		}
 
+		if !w.deadline.IsZero() && time.Since(w.deadline) >= 0 {
+			w.err = ErrTimeout
+			w.done <- struct{}{}
+			continue
+		}
+
 		if c.WriteTimeout > 0 {
 			if err = conn.SetWriteDeadline(time.Now().Add(c.WriteTimeout)); err != nil {
 				w.err = err
@@ -1831,6 +1838,9 @@ func acquirePipelineWork(pool *sync.Pool, timeout time.Duration) *pipelineWork {
 		} else {
 			w.t.Reset(timeout)
 		}
+		w.deadline = time.Now().Add(timeout)
+	} else {
+		w.deadline = zeroTime
 	}
 	return w
 }
