@@ -1557,8 +1557,19 @@ func (c *PipelineClient) Do(req *Request, resp *Response) error {
 	select {
 	case c.chW <- w:
 	default:
-		releasePipelineWork(&c.workPool, w)
-		return ErrPipelineOverflow
+		// Try substituting the oldest w with the current one.
+		select {
+		case wOld := <-c.chW:
+			wOld.err = ErrPipelineOverflow
+			wOld.done <- struct{}{}
+		default:
+		}
+		select {
+		case c.chW <- w:
+		default:
+			releasePipelineWork(&c.workPool, w)
+			return ErrPipelineOverflow
+		}
 	}
 
 	// Wait for the response

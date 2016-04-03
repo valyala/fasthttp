@@ -65,7 +65,7 @@ func testPipelineClientDoConcurrent(t *testing.T, concurrency int, maxBatchDelay
 	for i := 0; i < concurrency; i++ {
 		select {
 		case <-clientStopCh:
-		case <-time.After(3*time.Second):
+		case <-time.After(3 * time.Second):
 			t.Fatalf("timeout")
 		}
 	}
