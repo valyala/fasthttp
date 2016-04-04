@@ -1377,6 +1377,12 @@ type PipelineClient struct {
 	// DefaultMaxPendingRequests is used by default.
 	MaxPendingRequests int
 
+	// The maximum delay before sending pipelined requests as a batch
+	// to the server.
+	//
+	// By default requests are sent immediately to the server.
+	MaxBatchDelay time.Duration
+
 	// Callback for connection establishing to the host.
 	//
 	// Default Dial is used if not set.
@@ -1443,6 +1449,7 @@ type pipelineWork struct {
 	req      *Request
 	resp     *Response
 	t        *time.Timer
+	deadline time.Time
 	err      error
 	done     chan struct{}
 }
@@ -1551,8 +1558,19 @@ func (c *PipelineClient) Do(req *Request, resp *Response) error {
 	select {
 	case c.chW <- w:
 	default:
-		releasePipelineWork(&c.workPool, w)
-		return ErrPipelineOverflow
+		// Try substituting the oldest w with the current one.
+		select {
+		case wOld := <-c.chW:
+			wOld.err = ErrPipelineOverflow
+			wOld.done <- struct{}{}
+		default:
+		}
+		select {
+		case c.chW <- w:
+		default:
+			releasePipelineWork(&c.workPool, w)
+			return ErrPipelineOverflow
+		}
 	}
 
 	// Wait for the response
@@ -1649,6 +1667,7 @@ func (c *PipelineClient) writer(conn net.Conn, stopCh <-chan struct{}) error {
 		writeBufferSize = defaultWriteBufferSize
 	}
 	bw := bufio.NewWriterSize(conn, writeBufferSize)
+	defer bw.Flush()
 	chR := c.chR
 	chW := c.chW
 
@@ -1656,13 +1675,20 @@ func (c *PipelineClient) writer(conn net.Conn, stopCh <-chan struct{}) error {
 	if maxIdleConnDuration <= 0 {
 		maxIdleConnDuration = DefaultMaxIdleConnDuration
 	}
+	maxBatchDelay := c.MaxBatchDelay
 
-	stopTimer := time.NewTimer(time.Hour)
 	var (
+		stopTimer      = time.NewTimer(time.Hour)
+		flushTimer     = time.NewTimer(time.Hour)
+		flushTimerCh   <-chan time.Time
+		instantTimerCh = make(chan time.Time)
+
 		w   *pipelineWork
 		err error
 	)
+	close(instantTimerCh)
 	for {
+	againChW:
 		select {
 		case w = <-chW:
 			// Fast path: len(chW) > 0
@@ -1675,7 +1701,19 @@ func (c *PipelineClient) writer(conn net.Conn, stopCh <-chan struct{}) error {
 				return nil
 			case <-stopCh:
 				return nil
+			case <-flushTimerCh:
+				if err = bw.Flush(); err != nil {
+					return err
+				}
+				flushTimerCh = nil
+				goto againChW
 			}
+		}
+
+		if !w.deadline.IsZero() && time.Since(w.deadline) >= 0 {
+			w.err = ErrTimeout
+			w.done <- struct{}{}
+			continue
 		}
 
 		if c.WriteTimeout > 0 {
@@ -1690,14 +1728,16 @@ func (c *PipelineClient) writer(conn net.Conn, stopCh <-chan struct{}) error {
 			w.done <- struct{}{}
 			return err
 		}
-		if len(chW) == 0 || len(chR) == cap(chR) {
-			if err = bw.Flush(); err != nil {
-				w.err = err
-				w.done <- struct{}{}
-				return err
+		if flushTimerCh == nil && (len(chW) == 0 || len(chR) == cap(chR)) {
+			if maxBatchDelay > 0 {
+				flushTimer.Reset(maxBatchDelay)
+				flushTimerCh = flushTimer.C
+			} else {
+				flushTimerCh = instantTimerCh
 			}
 		}
 
+	againChR:
 		select {
 		case chR <- w:
 			// Fast path: len(chR) < cap(chR)
@@ -1709,6 +1749,14 @@ func (c *PipelineClient) writer(conn net.Conn, stopCh <-chan struct{}) error {
 				w.err = errPipelineClientStopped
 				w.done <- struct{}{}
 				return nil
+			case <-flushTimerCh:
+				if err = bw.Flush(); err != nil {
+					w.err = err
+					w.done <- struct{}{}
+					return err
+				}
+				flushTimerCh = nil
+				goto againChR
 			}
 		}
 	}
@@ -1765,11 +1813,15 @@ func (c *PipelineClient) logger() Logger {
 
 // PendingRequests returns the current number of pending requests pipelined
 // to the server.
+//
+// This number may exceed MaxPendingRequests by up to two times, since
+// the client may keep up to MaxPendingRequests requests in the queue before
+// sending them to the server.
 func (c *PipelineClient) PendingRequests() int {
 	c.init()
 
 	c.chLock.Lock()
-	n := len(c.chR)
+	n := len(c.chR) + len(c.chW)
 	c.chLock.Unlock()
 	return n
 }
@@ -1790,6 +1842,9 @@ func acquirePipelineWork(pool *sync.Pool, timeout time.Duration) *pipelineWork {
 		} else {
 			w.t.Reset(timeout)
 		}
+		w.deadline = time.Now().Add(timeout)
+	} else {
+		w.deadline = zeroTime
 	}
 	return w
 }
