@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net"
 	"strings"
 	"sync"
@@ -860,10 +859,13 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	}
 }
 
+var sleepJitter uint64
+
 func updateSleepTime(prevTime time.Duration, deadline time.Time) time.Duration {
 	sleepTime := prevTime * 2
 	if sleepTime == 0 {
-		sleepTime = (10 + time.Duration(rand.Intn(40))) * time.Millisecond
+		jitter := atomic.AddUint64(&sleepJitter, 1) % 40
+		sleepTime = (10 + time.Duration(jitter)) * time.Millisecond
 	}
 
 	remainingTime := deadline.Sub(time.Now())
