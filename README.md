@@ -368,7 +368,8 @@ before returning from [RequestHandler](https://godoc.org/github.com/valyala/fast
 While fasthttp is optimized for speed, its' performance may be easily saturated
 by slow [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
 So [profile](http://blog.golang.org/profiling-go-programs) and optimize your
-code after switching to fasthttp.
+code after switching to fasthttp. For instance, use [quicktemplate](https://github.com/valyala/quicktemplate)
+instead of [html/template](https://golang.org/pkg/html/template/).
 
 * See also [fasthttputil](https://godoc.org/github.com/valyala/fasthttp/fasthttputil),
 [fasthttpadaptor](https://godoc.org/github.com/valyala/fasthttp/fasthttpadaptor) and
@@ -398,8 +399,12 @@ code after switching to fasthttp.
 * Avoid conversion between `[]byte` and `string`, since this may result in memory
   allocation+copy. Fasthttp API provides functions for both `[]byte` and `string` -
   use these functions instead of converting manually between `[]byte` and `string`.
+  There are some exceptions - see [this wiki page](https://github.com/golang/go/wiki/CompilerOptimizations#string-and-byte)
+  for more details.
 * Verify your tests and production code under
   [race detector](https://golang.org/doc/articles/race_detector.html) on a regular basis.
+* Prefer [quicktemplate](https://github.com/valyala/quicktemplate) instead of
+  [html/template](https://golang.org/pkg/html/template/) in your webserver.
 
 
 # Tricks with `[]byte` buffers
