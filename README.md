@@ -6,8 +6,9 @@
 # fasthttp
 Fast HTTP implementation for Go.
 
-Currently fasthttp is successfully used in a production serving 100K rps from 1M
-concurrent keep-alive connections on a single server.
+Currently fasthttp is successfully used by [VertaMedia](https://vertamedia.com/)
+in a production serving 100K rps from more than 1M concurrent keep-alive
+connections per physical server.
 
 [TechEmpower Benchmark round 12 results](https://www.techempower.com/benchmarks/#section=data-r12&hw=peak&test=plaintext)
 
