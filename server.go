@@ -1441,6 +1441,16 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.time = currentTime
 		s.Handler(ctx)
 
+		timeoutResponse = ctx.timeoutResponse
+		if timeoutResponse != nil {
+			ctx = s.acquireCtx(c)
+			timeoutResponse.CopyTo(&ctx.Response)
+			if br != nil {
+				// Close connection, since br may be attached to the old ctx via ctx.fbr.
+				ctx.SetConnectionClose()
+			}
+		}
+
 		if !ctx.IsGet() && ctx.IsHead() {
 			ctx.Response.SkipBody = true
 		}
@@ -1451,15 +1461,6 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		ctx.userValues.Reset()
 
-		timeoutResponse = ctx.timeoutResponse
-		if timeoutResponse != nil {
-			ctx = s.acquireCtx(c)
-			timeoutResponse.CopyTo(&ctx.Response)
-			if br != nil {
-				// Close connection, since br may be attached to the old ctx via ctx.fbr.
-				ctx.SetConnectionClose()
-			}
-		}
 		if s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn) {
 			ctx.SetConnectionClose()
 		}
