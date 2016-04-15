@@ -1330,6 +1330,10 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 	w.Write(strCRLF)
 	w.Write(b)
 	_, err := w.Write(strCRLF)
+	err1 := w.Flush()
+	if err == nil {
+		err = err1
+	}
 	return err
 }
 
