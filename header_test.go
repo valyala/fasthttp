@@ -1363,7 +1363,7 @@ func testResponseHeaderConnectionClose(t *testing.T, connectionClose bool) {
 }
 
 func TestRequestHeaderTooBig(t *testing.T) {
-	s := "GET / HTTP/1.1\r\nHost: aaa.com\r\n" + getHeaders(100500) + "\r\n"
+	s := "GET / HTTP/1.1\r\nHost: aaa.com\r\n" + getHeaders(10500) + "\r\n"
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReaderSize(r, 4096)
 	h := &RequestHeader{}

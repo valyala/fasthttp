@@ -50,7 +50,7 @@ func TestWorkerPoolMaxWorkersCountSerial(t *testing.T) {
 }
 
 func TestWorkerPoolMaxWorkersCountConcurrent(t *testing.T) {
-	concurrency := 10
+	concurrency := 4
 	ch := make(chan struct{}, concurrency)
 	for i := 0; i < concurrency; i++ {
 		go func() {
@@ -68,7 +68,7 @@ func TestWorkerPoolMaxWorkersCountConcurrent(t *testing.T) {
 }
 
 func testWorkerPoolMaxWorkersCountMulti(t *testing.T) {
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 5; i++ {
 		testWorkerPoolMaxWorkersCount(t)
 	}
 }
