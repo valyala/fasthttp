@@ -1341,16 +1341,20 @@ func (s *Server) serveConn(c net.Conn) error {
 	connRequestNum := uint64(0)
 
 	ctx := s.acquireCtx(c)
+	ctx.connTime = connTime
 	var (
 		br *bufio.Reader
 		bw *bufio.Writer
-	)
-	var (
+
 		err             error
-		connectionClose bool
-		isHTTP11        bool
 		timeoutResponse *Response
 		hijackHandler   HijackHandler
+
+		lastReadDeadlineTime  time.Time
+		lastWriteDeadlineTime time.Time
+
+		connectionClose bool
+		isHTTP11        bool
 	)
 	for {
 		ctx.id++
@@ -1358,19 +1362,10 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.time = currentTime
 
 		if s.ReadTimeout > 0 || s.MaxKeepaliveDuration > 0 {
-			readTimeout := s.ReadTimeout
-			if s.MaxKeepaliveDuration > 0 {
-				connTimeout := s.MaxKeepaliveDuration - currentTime.Sub(connTime)
-				if connTimeout <= 0 {
-					err = ErrKeepaliveTimeout
-					break
-				}
-				if connTimeout < readTimeout {
-					readTimeout = connTimeout
-				}
-			}
-			if err = c.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", readTimeout, err))
+			lastReadDeadlineTime = s.updateReadDeadline(c, ctx, lastReadDeadlineTime)
+			if lastReadDeadlineTime.IsZero() {
+				err = ErrKeepaliveTimeout
+				break
 			}
 		}
 
@@ -1466,22 +1461,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 
 		if s.WriteTimeout > 0 || s.MaxKeepaliveDuration > 0 {
-			writeTimeout := s.WriteTimeout
-			if s.MaxKeepaliveDuration > 0 {
-				connTimeout := s.MaxKeepaliveDuration - time.Since(connTime)
-				if connTimeout <= 0 {
-					// MaxKeepAliveDuration exceeded, but let's try sending response anyway
-					// in 100ms with 'Connection: close' header.
-					ctx.SetConnectionClose()
-					connTimeout = 100 * time.Millisecond
-				}
-				if connTimeout < writeTimeout {
-					writeTimeout = connTimeout
-				}
-			}
-			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", writeTimeout, err))
-			}
+			lastWriteDeadlineTime = s.updateWriteDeadline(c, ctx, lastWriteDeadlineTime)
 		}
 
 		// Verify Request.Header.connectionCloseFast() again,
@@ -1552,6 +1532,59 @@ func (s *Server) serveConn(c net.Conn) error {
 	}
 	s.releaseCtx(ctx)
 	return err
+}
+
+func (s *Server) updateReadDeadline(c net.Conn, ctx *RequestCtx, lastDeadlineTime time.Time) time.Time {
+	readTimeout := s.ReadTimeout
+	currentTime := ctx.time
+	if s.MaxKeepaliveDuration > 0 {
+		connTimeout := s.MaxKeepaliveDuration - currentTime.Sub(ctx.connTime)
+		if connTimeout <= 0 {
+			return zeroTime
+		}
+		if connTimeout < readTimeout {
+			readTimeout = connTimeout
+		}
+	}
+
+	// Optimization: update read deadline only if more than 25%
+	// of the last read deadline exceeded.
+	// See https://github.com/golang/go/issues/15133 for details.
+	if currentTime.Sub(lastDeadlineTime) > (readTimeout >> 2) {
+		if err := c.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
+			panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", readTimeout, err))
+		}
+		lastDeadlineTime = currentTime
+	}
+	return lastDeadlineTime
+}
+
+func (s *Server) updateWriteDeadline(c net.Conn, ctx *RequestCtx, lastDeadlineTime time.Time) time.Time {
+	writeTimeout := s.WriteTimeout
+	if s.MaxKeepaliveDuration > 0 {
+		connTimeout := s.MaxKeepaliveDuration - time.Since(ctx.connTime)
+		if connTimeout <= 0 {
+			// MaxKeepAliveDuration exceeded, but let's try sending response anyway
+			// in 100ms with 'Connection: close' header.
+			ctx.SetConnectionClose()
+			connTimeout = 100 * time.Millisecond
+		}
+		if connTimeout < writeTimeout {
+			writeTimeout = connTimeout
+		}
+	}
+
+	// Optimization: update write deadline only if more than 25%
+	// of the last write deadline exceeded.
+	// See https://github.com/golang/go/issues/15133 for details.
+	currentTime := time.Now()
+	if currentTime.Sub(lastDeadlineTime) > (writeTimeout >> 2) {
+		if err := c.SetWriteDeadline(currentTime.Add(writeTimeout)); err != nil {
+			panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", writeTimeout, err))
+		}
+		lastDeadlineTime = currentTime
+	}
+	return lastDeadlineTime
 }
 
 func hijackConnHandler(r io.Reader, c net.Conn, s *Server, h HijackHandler) {
