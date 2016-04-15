@@ -261,8 +261,10 @@ like in net/http. The following code is valid for fasthttp:
   ```
 
 * Fasthttp doesn't provide [ServeMux](https://golang.org/pkg/net/http/#ServeMux),
-but there are more powerful third-party routers with fasthttp support exist:
+but there are more powerful third-party routers and web frameworks
+with fasthttp support exist:
 
+  * [Iris](https://github.com/kataras/iris)
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
   * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
   * [echo v2](https://github.com/labstack/echo)
@@ -524,8 +526,9 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
 * *Are there plans to add request routing to fasthttp?*
 
   There are no plans to add request routing into fasthttp.
-  Use third-party routers with fasthttp support:
+  Use third-party routers and web frameworks with fasthttp support:
 
+    * [Iris](https://github.com/kataras/iris)
     * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
     * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
     * [echo v2](https://github.com/labstack/echo)
