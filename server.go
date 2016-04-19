@@ -1152,7 +1152,8 @@ func newTLSListenerEmbed(ln net.Listener, certData, keyData []byte) (net.Listene
 
 func newCertListener(ln net.Listener, cert *tls.Certificate) net.Listener {
 	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{*cert},
+		Certificates:             []tls.Certificate{*cert},
+		PreferServerCipherSuites: true,
 	}
 	return tls.NewListener(ln, tlsConfig)
 }
