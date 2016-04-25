@@ -29,6 +29,8 @@ var uriPool = &sync.Pool{
 	},
 }
 
+var dotBytes = []byte(".")
+
 // URI represents URI :) .
 //
 // It is forbidden copying URI instances. Create new instance and use CopyTo
@@ -269,8 +271,8 @@ func (u *URI) parse(host, uri []byte, h *RequestHeader) {
 func normalizePath(dst, src []byte) []byte {
 	dst = dst[:0]
 
-	// add leading slash
-	if len(src) == 0 || src[0] != '/' {
+	// add leading slash if it's not a subdomain
+	if len(src) == 0 || (src[0] != '/' && bytes.Index(src, dotBytes) == -1) {
 		dst = append(dst, '/')
 	}
 
