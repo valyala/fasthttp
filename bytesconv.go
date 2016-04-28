@@ -60,8 +60,13 @@ func AppendIPv4(dst []byte, ip net.IP) []byte {
 	return dst
 }
 
+var errEmptyIPStr = errors.New("empty ip address string")
+
 // ParseIPv4 parses ip address from ipStr into dst and returns the extended dst.
 func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
+	if len(ipStr) == 0 {
+		return dst, errEmptyIPStr
+	}
 	if len(dst) < net.IPv4len {
 		dst = make([]byte, net.IPv4len)
 	}
