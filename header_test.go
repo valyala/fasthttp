@@ -10,6 +10,28 @@ import (
 	"testing"
 )
 
+func TestResponseHeaderDelClientCookie(t *testing.T) {
+	cookieName := "foobar"
+
+	var h ResponseHeader
+	c := AcquireCookie()
+	c.SetKey(cookieName)
+	c.SetValue("aasdfsdaf")
+	h.SetCookie(c)
+
+	h.DelClientCookieBytes([]byte(cookieName))
+	if !h.Cookie(c) {
+		t.Fatalf("expecting cookie %q", c.Key())
+	}
+	if !c.Expire().Equal(CookieExpireDelete) {
+		t.Fatalf("unexpected cookie expiration time: %s. Expecting %s", c.Expire(), CookieExpireDelete)
+	}
+	if len(c.Value()) > 0 {
+		t.Fatalf("unexpected cookie value: %q. Expecting empty value", c.Value())
+	}
+	ReleaseCookie(c)
+}
+
 func TestResponseHeaderAdd(t *testing.T) {
 	m := make(map[string]struct{})
 	var h ResponseHeader

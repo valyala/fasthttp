@@ -944,12 +944,38 @@ func (h *RequestHeader) SetCookieBytesKV(key, value []byte) {
 	h.SetCookie(b2s(key), b2s(value))
 }
 
-// DelCookie removes cookie under the given key.
+// DelClientCookie instructs the client to remove the given cookie.
+//
+// Use DelCookie if you want just removing the cookie from response header.
+func (h *ResponseHeader) DelClientCookie(key string) {
+	h.DelCookie(key)
+
+	c := AcquireCookie()
+	c.SetKey(key)
+	c.SetExpire(CookieExpireDelete)
+	h.SetCookie(c)
+	ReleaseCookie(c)
+}
+
+// DelClientCookieBytes instructs the client to remove the given cookie.
+//
+// Use DelCookieBytes if you want just removing the cookie from response header.
+func (h *ResponseHeader) DelClientCookieBytes(key []byte) {
+	h.DelClientCookie(b2s(key))
+}
+
+// DelCookie removes cookie under the given key from response header.
+//
+// Note that DelCookie doesn't remove the cookie from the client.
+// Use DelClientCookie instead.
 func (h *ResponseHeader) DelCookie(key string) {
 	h.cookies = delAllArgs(h.cookies, key)
 }
 
-// DelCookieBytes removes cookie under the given key.
+// DelCookieBytes removes cookie under the given key from response header.
+//
+// Note that DelCookieBytes doesn't remove the cookie from the client.
+// Use DelClientCookieBytes instead.
 func (h *ResponseHeader) DelCookieBytes(key []byte) {
 	h.DelCookie(b2s(key))
 }
