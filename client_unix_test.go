@@ -2,6 +2,11 @@
 
 package fasthttp
 
+import (
+	"sync"
+	"testing"
+)
+
 func TestHostClientGet(t *testing.T) {
 	addr := "./TestHostClientGet.unix"
 	s := startEchoServer(t, "unix", addr)

@@ -2,8 +2,6 @@
 
 package fasthttp
 
-import "bytes"
-
 
 func addLeadingSlash(dst, src []byte) []byte {
 	// add leading slash for unix paths
