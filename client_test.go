@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -670,6 +671,55 @@ func TestClientConcurrent(t *testing.T) {
 			defer wg.Done()
 			testClientGet(t, &defaultClient, addr, 30)
 			testClientPost(t, &defaultClient, addr, 10)
+		}()
+	}
+	wg.Wait()
+}
+
+func skipIfNotUnix(tb testing.TB) {
+	switch runtime.GOOS {
+	case "android", "nacl", "plan9", "windows":
+		tb.Skipf("%s does not support unix sockets", runtime.GOOS)
+	}
+	if runtime.GOOS == "darwin" && (runtime.GOARCH == "arm" || runtime.GOARCH == "arm64") {
+		tb.Skip("iOS does not support unix, unixgram")
+	}
+}
+
+func TestHostClientGet(t *testing.T) {
+	skipIfNotUnix(t)
+	addr := "TestHostClientGet.unix"
+	s := startEchoServer(t, "unix", addr)
+	defer s.Stop()
+	c := createEchoClient(t, "unix", addr)
+
+	testHostClientGet(t, c, 100)
+}
+
+func TestHostClientPost(t *testing.T) {
+	skipIfNotUnix(t)
+	addr := "./TestHostClientPost.unix"
+	s := startEchoServer(t, "unix", addr)
+	defer s.Stop()
+	c := createEchoClient(t, "unix", addr)
+
+	testHostClientPost(t, c, 100)
+}
+
+func TestHostClientConcurrent(t *testing.T) {
+	skipIfNotUnix(t)
+	addr := "./TestHostClientConcurrent.unix"
+	s := startEchoServer(t, "unix", addr)
+	defer s.Stop()
+	c := createEchoClient(t, "unix", addr)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			testHostClientGet(t, c, 30)
+			testHostClientPost(t, c, 10)
 		}()
 	}
 	wg.Wait()
