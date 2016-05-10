@@ -92,6 +92,7 @@ func Listen(network, addr string) (l net.Listener, err error) {
 	}
 
 	if err = file.Close(); err != nil {
+		l.Close()
 		return nil, err
 	}
 
