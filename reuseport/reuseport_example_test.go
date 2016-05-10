@@ -8,7 +8,7 @@ import (
 	"github.com/valyala/fasthttp/reuseport"
 )
 
-func ExampleListener() {
+func ExampleListen() {
 	ln, err := reuseport.Listen("tcp4", "localhost:12345")
 	if err != nil {
 		log.Fatalf("error in reuseport listener: %s", err)
