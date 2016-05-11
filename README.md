@@ -16,6 +16,8 @@ connections per physical server.
 
 [Client Benchmarks](#http-client-comparison-with-nethttp)
 
+[Install](#install)
+
 [Documentation](https://godoc.org/github.com/valyala/fasthttp)
 
 [Examples from docs](https://godoc.org/github.com/valyala/fasthttp#pkg-examples)
@@ -151,6 +153,14 @@ BenchmarkClientGetEndToEnd10Inmemory-4                  	10000000	      1458 ns/
 BenchmarkClientGetEndToEnd100Inmemory-4                 	10000000	      1329 ns/op	       0 B/op	       0 allocs/op
 BenchmarkClientGetEndToEnd1000Inmemory-4                	10000000	      1316 ns/op	       5 B/op	       0 allocs/op
 ```
+
+
+# Install
+
+```
+go get -u github.com/valyala/fasthttp
+```
+
 
 # Switching from net/http to fasthttp
 
