@@ -30,6 +30,8 @@ connections per physical server.
 
 [Tricks with byte buffers](#tricks-with-byte-buffers)
 
+[Related projects](#related-projects)
+
 [FAQ](#faq)
 
 # HTTP server performance comparison with [net/http](https://golang.org/pkg/net/http/)
@@ -474,6 +476,22 @@ b := a[:100]  // is valid, since cap(a) == 100.
 statusCode, body, err := fasthttp.Get(nil, "http://google.com/")
 uintBuf := fasthttp.AppendUint(nil, 1234)
 ```
+
+# Related projects
+
+  * [fasthttp-contrib](https://github.com/fasthttp-contrib) - various useful
+    helpers for projects based on fasthttp.
+  * [iris](https://github.com/kataras/iris) - web application framework built
+    on top of fasthttp. Features speed and functionality.
+  * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) - fast and
+    powerful routing package for fasthttp servers.
+  * [fasthttprouter](https://github.com/buaazp/fasthttprouter) - a high
+    performance fasthttp request router that scales well.
+  * [echo](https://github.com/labstack/echo) - fast and unfancy HTTP server
+    framework with fasthttp support.
+  * [websocket](https://github.com/leavengood/websocket) - Gorilla-based
+    websocket implementation for fasthttp.
+
 
 # FAQ
 
