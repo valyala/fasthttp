@@ -205,8 +205,18 @@ func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyC
 
 	select {
 	case concurrencyCh <- struct{}{}:
-	case <-time.After(timeout):
-		return nil, ErrDialTimeout
+	default:
+		tc := acquireTimer(timeout)
+		isTimeout := false
+		select {
+		case concurrencyCh <- struct{}{}:
+		case <-tc.C:
+			isTimeout = true
+		}
+		releaseTimer(tc)
+		if isTimeout {
+			return nil, ErrDialTimeout
+		}
 	}
 
 	timeout = -time.Since(deadline)
@@ -215,7 +225,11 @@ func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyC
 		return nil, ErrDialTimeout
 	}
 
-	ch := make(chan dialResult, 1)
+	chv := dialResultChanPool.Get()
+	if chv == nil {
+		chv = make(chan dialResult, 1)
+	}
+	ch := chv.(chan dialResult)
 	go func() {
 		var dr dialResult
 		dr.conn, dr.err = net.DialTCP(network, nil, addr)
@@ -223,13 +237,26 @@ func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyC
 		<-concurrencyCh
 	}()
 
+	var (
+		conn net.Conn
+		err  error
+	)
+
+	tc := acquireTimer(timeout)
 	select {
 	case dr := <-ch:
-		return dr.conn, dr.err
-	case <-time.After(timeout):
-		return nil, ErrDialTimeout
+		conn = dr.conn
+		err = dr.err
+		dialResultChanPool.Put(ch)
+	case <-tc.C:
+		err = ErrDialTimeout
 	}
+	releaseTimer(tc)
+
+	return conn, err
 }
+
+var dialResultChanPool sync.Pool
 
 type dialResult struct {
 	conn net.Conn

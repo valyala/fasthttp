@@ -664,16 +664,7 @@ func clientGetURLDeadlineFreeConn(dst []byte, url string, deadline time.Time, c 
 		}
 	}()
 
-	var tc *time.Timer
-	tcv := timerPool.Get()
-	if tcv == nil {
-		tc = time.NewTimer(timeout)
-		tcv = tc
-	} else {
-		tc = tcv.(*time.Timer)
-		initTimer(tc, timeout)
-	}
-
+	tc := acquireTimer(timeout)
 	select {
 	case resp := <-ch:
 		ReleaseRequest(req)
@@ -685,9 +676,7 @@ func clientGetURLDeadlineFreeConn(dst []byte, url string, deadline time.Time, c 
 		body = dst
 		err = ErrTimeout
 	}
-
-	stopTimer(tc)
-	timerPool.Put(tcv)
+	releaseTimer(tc)
 
 	return statusCode, body, err
 }
@@ -916,16 +905,7 @@ func clientDoDeadlineFreeConn(req *Request, resp *Response, deadline time.Time, 
 		ch <- c.Do(reqCopy, respCopy)
 	}()
 
-	var tc *time.Timer
-	tcv := timerPool.Get()
-	if tcv == nil {
-		tc = time.NewTimer(timeout)
-		tcv = tc
-	} else {
-		tc = tcv.(*time.Timer)
-		initTimer(tc, timeout)
-	}
-
+	tc := acquireTimer(timeout)
 	var err error
 	select {
 	case err = <-ch:
@@ -939,17 +919,12 @@ func clientDoDeadlineFreeConn(req *Request, resp *Response, deadline time.Time, 
 	case <-tc.C:
 		err = ErrTimeout
 	}
-
-	stopTimer(tc)
-	timerPool.Put(tcv)
+	releaseTimer(tc)
 
 	return err
 }
 
-var (
-	errorChPool sync.Pool
-	timerPool   sync.Pool
-)
+var errorChPool sync.Pool
 
 // Do performs the given http request and sets the corresponding response.
 //
