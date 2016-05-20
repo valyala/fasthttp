@@ -11,6 +11,36 @@ import (
 	"testing"
 )
 
+func TestRequestContentTypeWithCharsetIssue100(t *testing.T) {
+	expectedContentType := "application/x-www-form-urlencoded; charset=UTF-8"
+	expectedBody := "0123=56789"
+	s := fmt.Sprintf("POST / HTTP/1.1\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+		expectedContentType, len(expectedBody), expectedBody)
+
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	var r Request
+	if err := r.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	body := r.Body()
+	if string(body) != expectedBody {
+		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
+	}
+	ct := r.Header.ContentType()
+	if string(ct) != expectedContentType {
+		t.Fatalf("unexpected content-type %q. Expecting %q", ct, expectedContentType)
+	}
+	args := r.PostArgs()
+	if args.Len() != 1 {
+		t.Fatalf("unexpected number of POST args: %d. Expecting 1", args.Len())
+	}
+	av := args.Peek("0123")
+	if string(av) != "56789" {
+		t.Fatalf("unexpected POST arg value: %q. Expecting %q", av, "56789")
+	}
+}
+
 func TestRequestReadMultipartFormWithFile(t *testing.T) {
 	s := `POST /upload HTTP/1.1
 Host: localhost:10000

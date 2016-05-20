@@ -504,7 +504,7 @@ func (req *Request) parsePostArgs() {
 	}
 	req.parsedPostArgs = true
 
-	if !bytes.Equal(req.Header.ContentType(), strPostArgsContentType) {
+	if !bytes.HasPrefix(req.Header.ContentType(), strPostArgsContentType) {
 		return
 	}
 	req.postArgs.ParseBytes(req.body)
