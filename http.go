@@ -375,6 +375,16 @@ func (resp *Response) ResetBody() {
 	resp.body = resp.body[:0]
 }
 
+// ReleaseBody retires the response body if it is greater than "size" bytes. 
+// This permits GC to reclaim the large buffer.  If used, must be before
+// ReleaseResponse.
+func (resp *Response) ReleaseBody(size int) {
+	if cap(resp.body) > size {
+		resp.ResetBody()
+		resp.body = []byte{}
+	}
+}
+
 // Body returns request body.
 func (req *Request) Body() []byte {
 	if req.bodyStream != nil {
