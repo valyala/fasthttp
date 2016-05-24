@@ -1350,6 +1350,7 @@ func nextConnID() uint64 {
 }
 
 func (s *Server) serveConn(c net.Conn) error {
+	serverName := s.getServerName()
 	connRequestNum := uint64(0)
 	connID := nextConnID()
 	currentTime := time.Now()
@@ -1445,6 +1446,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		connectionClose = s.DisableKeepalive || ctx.Request.Header.connectionCloseFast()
 		isHTTP11 = ctx.Request.Header.IsHTTP11()
 
+		ctx.Response.Header.SetServerBytes(serverName)
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
 		ctx.connTime = connTime
@@ -1667,15 +1669,7 @@ func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 	if ctx.timeoutResponse != nil {
 		panic("BUG: cannot write timed out response")
 	}
-	h := &ctx.Response.Header
-	serverOld := h.Server()
-	if len(serverOld) == 0 {
-		h.server = ctx.s.getServerName()
-	}
 	err := ctx.Response.Write(w)
-	if len(serverOld) == 0 {
-		h.server = serverOld
-	}
 	ctx.Response.Reset()
 	return err
 }
