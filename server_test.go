@@ -72,21 +72,12 @@ func TestServerResponseBodyStream(t *testing.T) {
 		}
 		close(readyCh)
 
-		n, err = br.Read(buf)
-		if err != nil {
-			t.Fatalf("unexpected error: %s", err)
-		}
-		b = buf[:n]
-		if string(b) != "6\r\nsecond\r\n" {
-			t.Fatalf("unexpected result %q. Expecting %q", b, "6\r\nsecond\r\n")
-		}
-
 		tail, err := ioutil.ReadAll(br)
 		if err != nil {
 			t.Fatalf("unexpected error: %s", err)
 		}
-		if string(tail) != "0\r\n\r\n" {
-			t.Fatalf("unexpected tail %q. Expecting %q", tail, "0\r\n\r\n")
+		if string(tail) != "6\r\nsecond\r\n0\r\n\r\n" {
+			t.Fatalf("unexpected tail %q. Expecting %q", tail, "6\r\nsecond\r\n0\r\n\r\n")
 		}
 
 		close(clientCh)
