@@ -565,21 +565,21 @@ func testStripPathSlashes(t *testing.T, path string, stripSlashes int, expectedP
 }
 
 func TestFileExtension(t *testing.T) {
-	testFileExtension(t, "foo.bar", false, ".bar")
-	testFileExtension(t, "foobar", false, "")
-	testFileExtension(t, "foo.bar.baz", false, ".baz")
-	testFileExtension(t, "", false, "")
-	testFileExtension(t, "/a/b/c.d/efg.jpg", false, ".jpg")
+	testFileExtension(t, "foo.bar", false, "zzz", ".bar")
+	testFileExtension(t, "foobar", false, "zzz", "")
+	testFileExtension(t, "foo.bar.baz", false, "zzz", ".baz")
+	testFileExtension(t, "", false, "zzz", "")
+	testFileExtension(t, "/a/b/c.d/efg.jpg", false, ".zzz", ".jpg")
 
-	testFileExtension(t, "foo.bar", true, ".bar")
-	testFileExtension(t, "foobar.fasthttp.gz", true, "")
-	testFileExtension(t, "foo.bar.baz.fasthttp.gz", true, ".baz")
-	testFileExtension(t, "", true, "")
-	testFileExtension(t, "/a/b/c.d/efg.jpg.fasthttp.gz", true, ".jpg")
+	testFileExtension(t, "foo.bar", true, ".zzz", ".bar")
+	testFileExtension(t, "foobar.zzz", true, ".zzz", "")
+	testFileExtension(t, "foo.bar.baz.fasthttp.gz", true, ".fasthttp.gz", ".baz")
+	testFileExtension(t, "", true, ".zzz", "")
+	testFileExtension(t, "/a/b/c.d/efg.jpg.xxx", true, ".xxx", ".jpg")
 }
 
-func testFileExtension(t *testing.T, path string, compressed bool, expectedExt string) {
-	ext := fileExtension(path, compressed)
+func testFileExtension(t *testing.T, path string, compressed bool, compressedFileSuffix, expectedExt string) {
+	ext := fileExtension(path, compressed, compressedFileSuffix)
 	if ext != expectedExt {
 		t.Fatalf("unexpected file extension for file %q: %q. Expecting %q", path, ext, expectedExt)
 	}

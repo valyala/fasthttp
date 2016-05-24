@@ -222,7 +222,7 @@ type FS struct {
 	// Transparently compresses responses if set to true.
 	//
 	// The server tries minimizing CPU usage by caching compressed files.
-	// It adds FSCompressedFileSuffix suffix to the original file name and
+	// It adds CompressedFileSuffix suffix to the original file name and
 	// tries saving the resulting compressed file under the new file name.
 	// So it is advisable to give the server write access to Root
 	// and to all inner folders in order to minimze CPU usage when serving
@@ -241,10 +241,17 @@ type FS struct {
 	// By default request path is not modified.
 	PathRewrite PathRewriteFunc
 
-	// The duration for files' caching.
+	// Expiration duration for inactive file handlers.
 	//
 	// FSHandlerCacheDuration is used by default.
 	CacheDuration time.Duration
+
+	// Suffix to add to the name of cached compressed file.
+	//
+	// This value has sense only if Compress is set.
+	//
+	// FSCompressedFileSuffix is used by default.
+	CompressedFileSuffix string
 
 	once sync.Once
 	h    RequestHandler
@@ -255,8 +262,8 @@ type FS struct {
 // See FS.Compress for details.
 const FSCompressedFileSuffix = ".fasthttp.gz"
 
-// FSHandlerCacheDuration is the duration for caching open file handles
-// by FSHandler.
+// FSHandlerCacheDuration is the default expiration duration for inactive
+// file handlers opened by FS.
 const FSHandlerCacheDuration = 10 * time.Second
 
 // FSHandler returns request handler serving static files from
@@ -325,17 +332,22 @@ func (fs *FS) initRequestHandler() {
 	if cacheDuration <= 0 {
 		cacheDuration = FSHandlerCacheDuration
 	}
+	compressedFileSuffix := fs.CompressedFileSuffix
+	if len(compressedFileSuffix) == 0 {
+		compressedFileSuffix = FSCompressedFileSuffix
+	}
 
 	h := &fsHandler{
-		root:               root,
-		indexNames:         fs.IndexNames,
-		pathRewrite:        fs.PathRewrite,
-		generateIndexPages: fs.GenerateIndexPages,
-		compress:           fs.Compress,
-		acceptByteRange:    fs.AcceptByteRange,
-		cacheDuration:      cacheDuration,
-		cache:              make(map[string]*fsFile),
-		compressedCache:    make(map[string]*fsFile),
+		root:                 root,
+		indexNames:           fs.IndexNames,
+		pathRewrite:          fs.PathRewrite,
+		generateIndexPages:   fs.GenerateIndexPages,
+		compress:             fs.Compress,
+		acceptByteRange:      fs.AcceptByteRange,
+		cacheDuration:        cacheDuration,
+		compressedFileSuffix: compressedFileSuffix,
+		cache:                make(map[string]*fsFile),
+		compressedCache:      make(map[string]*fsFile),
 	}
 
 	go func() {
@@ -350,13 +362,14 @@ func (fs *FS) initRequestHandler() {
 }
 
 type fsHandler struct {
-	root               string
-	indexNames         []string
-	pathRewrite        PathRewriteFunc
-	generateIndexPages bool
-	compress           bool
-	acceptByteRange    bool
-	cacheDuration      time.Duration
+	root                 string
+	indexNames           []string
+	pathRewrite          PathRewriteFunc
+	generateIndexPages   bool
+	compress             bool
+	acceptByteRange      bool
+	cacheDuration        time.Duration
+	compressedFileSuffix string
 
 	cache           map[string]*fsFile
 	compressedCache map[string]*fsFile
@@ -914,7 +927,7 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 	var filenames []string
 	for _, fi := range fileinfos {
 		name := fi.Name()
-		if strings.HasSuffix(name, FSCompressedFileSuffix) {
+		if strings.HasSuffix(name, h.compressedFileSuffix) {
 			// Do not show compressed files on index page.
 			continue
 		}
@@ -992,13 +1005,13 @@ func (h *fsHandler) compressAndOpenFSFile(filePath string) (*fsFile, error) {
 		return nil, errDirIndexRequired
 	}
 
-	if strings.HasSuffix(filePath, FSCompressedFileSuffix) ||
+	if strings.HasSuffix(filePath, h.compressedFileSuffix) ||
 		fileInfo.Size() > fsMaxCompressibleFileSize ||
 		!isFileCompressible(f, fsMinCompressRatio) {
 		return h.newFSFile(f, fileInfo, false)
 	}
 
-	compressedFilePath := filePath + FSCompressedFileSuffix
+	compressedFilePath := filePath + h.compressedFileSuffix
 	absPath, err := filepath.Abs(compressedFilePath)
 	if err != nil {
 		f.Close()
@@ -1072,7 +1085,7 @@ func (h *fsHandler) newCompressedFSFile(filePath string) (*fsFile, error) {
 func (h *fsHandler) openFSFile(filePath string, mustCompress bool) (*fsFile, error) {
 	filePathOriginal := filePath
 	if mustCompress {
-		filePath += FSCompressedFileSuffix
+		filePath += h.compressedFileSuffix
 	}
 
 	f, err := os.Open(filePath)
@@ -1092,7 +1105,8 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool) (*fsFile, err
 	if fileInfo.IsDir() {
 		f.Close()
 		if mustCompress {
-			return nil, fmt.Errorf("directory with unexpected suffix found: %q. Suffix: %q", filePath, FSCompressedFileSuffix)
+			return nil, fmt.Errorf("directory with unexpected suffix found: %q. Suffix: %q",
+				filePath, h.compressedFileSuffix)
 		}
 		return nil, errDirIndexRequired
 	}
@@ -1124,7 +1138,7 @@ func (h *fsHandler) newFSFile(f *os.File, fileInfo os.FileInfo, compressed bool)
 	}
 
 	// detect content-type
-	ext := fileExtension(fileInfo.Name(), compressed)
+	ext := fileExtension(fileInfo.Name(), compressed, h.compressedFileSuffix)
 	contentType := mime.TypeByExtension(ext)
 	if len(contentType) == 0 {
 		data, err := readFileHeader(f, compressed)
@@ -1197,9 +1211,9 @@ func stripTrailingSlashes(path []byte) []byte {
 	return path
 }
 
-func fileExtension(path string, compressed bool) string {
-	if compressed && strings.HasSuffix(path, FSCompressedFileSuffix) {
-		path = path[:len(path)-len(FSCompressedFileSuffix)]
+func fileExtension(path string, compressed bool, compressedFileSuffix string) string {
+	if compressed && strings.HasSuffix(path, compressedFileSuffix) {
+		path = path[:len(path)-len(compressedFileSuffix)]
 	}
 	n := strings.LastIndexByte(path, '.')
 	if n < 0 {
