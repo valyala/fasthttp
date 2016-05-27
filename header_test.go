@@ -1253,6 +1253,38 @@ func TestRequestHeaderCookie(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderMethod(t *testing.T) {
+	// common http methods
+	testRequestHeaderMethod(t, "GET")
+	testRequestHeaderMethod(t, "POST")
+	testRequestHeaderMethod(t, "HEAD")
+	testRequestHeaderMethod(t, "DELETE")
+
+	// non-http methods
+	testRequestHeaderMethod(t, "foobar")
+	testRequestHeaderMethod(t, "ABC")
+}
+
+func testRequestHeaderMethod(t *testing.T, expectedMethod string) {
+	var h RequestHeader
+	h.SetMethod(expectedMethod)
+	m := h.Method()
+	if string(m) != expectedMethod {
+		t.Fatalf("unexpected method: %q. Expecting %q", m, expectedMethod)
+	}
+
+	s := h.String()
+	var h1 RequestHeader
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := h1.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	m1 := h1.Method()
+	if string(m) != string(m1) {
+		t.Fatalf("unexpected method: %q. Expecting %q", m, m1)
+	}
+}
+
 func TestRequestHeaderSetGet(t *testing.T) {
 	h := &RequestHeader{}
 	h.SetRequestURI("/aa/bbb")
