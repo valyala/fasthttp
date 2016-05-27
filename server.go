@@ -762,6 +762,11 @@ func (ctx *RequestCtx) IsPut() bool {
 	return ctx.Request.Header.IsPut()
 }
 
+// IsDelete returns true if request method is DELETE.
+func (ctx *RequestCtx) IsDelete() bool {
+	return ctx.Request.Header.IsDelete()
+}
+
 // Method return request method.
 //
 // Returned value is valid until returning from RequestHandler.
