@@ -940,7 +940,7 @@ var errorChPool sync.Pool
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	retry, err := c.do(req, resp)
-	if err != nil && retry && isIdempotent(req) {
+	if err != nil && retry && IsIdempotent(req) {
 		_, err = c.do(req, resp)
 	}
 	if err == io.EOF {
@@ -949,7 +949,8 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	return err
 }
 
-func isIdempotent(req *Request) bool {
+// IsIdempotent returns whether the req is idemponent or not.
+func IsIdempotent(req *Request) bool {
 	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut()
 }
 
@@ -1874,4 +1875,169 @@ func releasePipelineWork(pool *sync.Pool, w *pipelineWork) {
 	w.resp = nil
 	w.err = nil
 	pool.Put(w)
+}
+
+// ProxyClient is a client used in revese proxies.
+//
+// ProxyClint provides methods for sending requests, reading response headers
+// and reading partial response body.
+//
+// It is forbidden copying ProxyClient instances. Create new instances instead.
+//
+// It is safe calling ProxyClient methods from concurrently running goroutines.
+type ProxyClient struct {
+	HostClient
+}
+
+// ProxyClientStatus holds the status information after executing SendRequest.
+//
+// It is forbidden copying ProxyClientStatus instances. It is only returned
+// from SendRequest.
+type ProxyClientStatus struct {
+	noCopy noCopy
+
+	cc              *clientConn
+	resetConnection bool
+	nilResp         bool
+	br              *bufio.Reader
+}
+
+// SendRequest sends a request.
+func (c *ProxyClient) SendRequest(req *Request) (bool, *ProxyClientStatus, error) {
+	if req == nil {
+		panic("BUG: req cannot be nil")
+	}
+
+	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix))
+
+	s := &ProxyClientStatus{}
+	cc, err := c.acquireConn()
+	if err != nil {
+		return false, s, err
+	}
+	s.cc = cc
+	conn := cc.c
+
+	if c.WriteTimeout > 0 {
+		// Optimization: update write deadline only if more than 25%
+		// of the last write deadline exceeded.
+		// See https://github.com/golang/go/issues/15133 for details.
+		currentTime := time.Now()
+		if currentTime.Sub(cc.lastWriteDeadlineTime) > (c.WriteTimeout >> 2) {
+			if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
+				c.closeConn(cc)
+				return true, s, err
+			}
+			cc.lastWriteDeadlineTime = currentTime
+		}
+	}
+
+	s.resetConnection = false
+	if c.MaxConnDuration > 0 && time.Since(cc.createdTime) > c.MaxConnDuration && !req.ConnectionClose() {
+		req.SetConnectionClose()
+		s.resetConnection = true
+	}
+
+	userAgentOld := req.Header.UserAgent()
+	if len(userAgentOld) == 0 {
+		req.Header.userAgent = c.getClientName()
+	}
+	bw := c.acquireWriter(conn)
+	err = req.Write(bw)
+	if len(userAgentOld) == 0 {
+		req.Header.userAgent = userAgentOld
+	}
+
+	if s.resetConnection {
+		req.Header.ResetConnectionClose()
+	}
+
+	if err == nil {
+		err = bw.Flush()
+	}
+	if err != nil {
+		c.releaseWriter(bw)
+		c.closeConn(cc)
+		return true, s, err
+	}
+	c.releaseWriter(bw)
+	return false, s, err
+}
+
+// ReadResponseHeader read a response header.
+func (c *ProxyClient) ReadResponseHeader(s *ProxyClientStatus, req *Request, resp *Response) (bool, error) {
+	s.nilResp = false
+	if resp == nil {
+		s.nilResp = true
+		resp = AcquireResponse()
+	}
+	cc := s.cc
+	conn := cc.c
+
+	var err error
+	if c.ReadTimeout > 0 {
+		// Optimization: update read deadline only if more than 25%
+		// of the last read deadline exceeded.
+		// See https://github.com/golang/go/issues/15133 for details.
+		currentTime := time.Now()
+		if currentTime.Sub(cc.lastReadDeadlineTime) > (c.ReadTimeout >> 2) {
+			if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
+				if s.nilResp {
+					ReleaseResponse(resp)
+				}
+				c.closeConn(cc)
+				return true, err
+			}
+			cc.lastReadDeadlineTime = currentTime
+		}
+	}
+
+	if !req.Header.IsGet() && req.Header.IsHead() {
+		resp.SkipBody = true
+	}
+	if c.DisableHeaderNamesNormalizing {
+		resp.Header.DisableNormalizing()
+	}
+
+	s.br = c.acquireReader(conn)
+	if err = resp.ReadHeader(s.br); err != nil {
+		if s.nilResp {
+			ReleaseResponse(resp)
+		}
+		c.releaseReader(s.br)
+		c.closeConn(cc)
+		if err == io.EOF {
+			return true, err
+		}
+		return false, err
+	}
+	return false, err
+}
+
+// ReadResponseBody read a response body.
+func (c *ProxyClient) ReadResponseBody(s *ProxyClientStatus, req *Request, resp *Response) (bool, error) {
+	var err error
+	if err = resp.ReadOnlyBody(s.br, c.MaxResponseBodySize); err != nil {
+		if s.nilResp {
+			ReleaseResponse(resp)
+		}
+		c.releaseReader(s.br)
+		c.closeConn(s.cc)
+		if err == io.EOF {
+			return true, err
+		}
+		return false, err
+	}
+	c.releaseReader(s.br)
+
+	if s.resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
+		c.closeConn(s.cc)
+	} else {
+		c.releaseConn(s.cc)
+	}
+
+	if s.nilResp {
+		ReleaseResponse(resp)
+	}
+	return false, err
 }
