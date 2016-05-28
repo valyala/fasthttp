@@ -41,7 +41,7 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 		req.SetRequestURI("http://foobar/baz/aaa?bbb=ddd")
 		resp := AcquireResponse()
 
-		// The following command does the same thing as HostClient.Do().
+		// The following command does the same thing as HostClient.Do() without retrying.
 		var body []byte
 		buf := new(bytes.Buffer)
 		_, s, err := c.SendRequest(req)
