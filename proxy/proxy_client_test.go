@@ -51,10 +51,15 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 			if err == nil {
 				err = c.SetResponseBodyStream(s, req, resp)
 				if err == nil {
-					_, err := buf.ReadFrom(resp.BodyStream())
+					rbs := resp.BodyStream()
+					_, err := buf.ReadFrom(rbs)
 					if err == nil {
 						responseBodyReadSuccessfully = true
 						body = buf.Bytes()
+					}
+					err2 := rbs.Close()
+					if err2 != nil {
+						t.Fatalf("unexpected error: %s", err)
 					}
 				}
 			}
