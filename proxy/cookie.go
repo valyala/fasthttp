@@ -1,17 +1,12 @@
 package proxy
 
-import "bytes"
+import (
+	"bytes"
+	"time"
+)
 
-//import (
-//	"bytes"
-//	"errors"
-//	"io"
-//	"sync"
-//	"time"
-//)
-//
-//var zeroTime time.Time
-//
+var zeroTime time.Time
+
 //var (
 //	// CookieExpireDelete may be set on Cookie.Expire for expiring the given cookie.
 //	CookieExpireDelete = time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)

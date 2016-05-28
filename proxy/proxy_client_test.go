@@ -28,12 +28,10 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 
 	dialsCount := make(map[string]int)
 	c := &ProxyClient{
-		HostClient{
-			Addr: "foo,bar,baz",
-			Dial: func(addr string) (net.Conn, error) {
-				dialsCount[addr]++
-				return ln.Dial()
-			},
+		Addr: "foo,bar,baz",
+		Dial: func(addr string) (net.Conn, error) {
+			dialsCount[addr]++
+			return ln.Dial()
 		},
 	}
 
@@ -50,7 +48,7 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 				retry, err = c.ReadResponseBody(s, req, resp)
 			}
 		}
-		if err != nil && retry && IsIdempotent(req) {
+		if err != nil && retry && isIdempotent(req) {
 			_, s, err = c.SendRequest(req)
 			if err == nil {
 				_, err = c.ReadResponseHeader(s, req, resp)

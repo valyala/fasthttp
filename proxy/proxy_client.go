@@ -13,6 +13,19 @@ import (
 	"time"
 )
 
+// AcquireRequest returns an empty Request instance from request pool.
+//
+// The returned Request instance may be passed to ReleaseRequest when it is
+// no longer needed. This allows Request recycling, reduces GC pressure
+// and usually improves performance.
+func AcquireRequest() *Request {
+	v := requestPool.Get()
+	if v == nil {
+		return &Request{}
+	}
+	return v.(*Request)
+}
+
 // AcquireResponse returns an empty Response instance from response pool.
 //
 // The returned Response instance may be passed to ReleaseResponse when it is
@@ -36,7 +49,7 @@ func ReleaseResponse(resp *Response) {
 }
 
 var (
-	//requestPool  sync.Pool
+	requestPool  sync.Pool
 	responsePool sync.Pool
 )
 
@@ -351,6 +364,10 @@ func (c *ProxyClient) ReadResponseBody(s *ProxyClientStatus, req *Request, resp 
 	return false, err
 }
 
+func isIdempotent(req *Request) bool {
+	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut()
+}
+
 var (
 	// ErrNoFreeConns is returned when no free connections available
 	// to the given host.
@@ -359,15 +376,15 @@ var (
 	//// ErrTimeout is returned from timed out calls.
 	//ErrTimeout = errors.New("timeout")
 
-	//// ErrConnectionClosed may be returned from client methods if the server
-	//// closes connection before returning the first response byte.
-	////
-	//// If you see this error, then either fix the server by returning
-	//// 'Connection: close' response header before closing the connection
-	//// or add 'Connection: close' request header before sending requests
-	//// to broken server.
-	//ErrConnectionClosed = errors.New("the server closed connection before returning the first response byte. " +
-	//	"Make sure the server returns 'Connection: close' response header before closing the connection")
+	// ErrConnectionClosed may be returned from client methods if the server
+	// closes connection before returning the first response byte.
+	//
+	// If you see this error, then either fix the server by returning
+	// 'Connection: close' response header before closing the connection
+	// or add 'Connection: close' request header before sending requests
+	// to broken server.
+	ErrConnectionClosed = errors.New("the server closed connection before returning the first response byte. " +
+		"Make sure the server returns 'Connection: close' response header before closing the connection")
 )
 
 func (c *ProxyClient) acquireConn() (*clientConn, error) {
