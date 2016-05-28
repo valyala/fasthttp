@@ -375,7 +375,7 @@ func (resp *Response) ResetBody() {
 	resp.body = resp.body[:0]
 }
 
-// ReleaseBody retires the response body if it is greater than "size" bytes.
+// ReleaseBody retires the response body if it is greater than "size" bytes. 
 // This permits GC to reclaim the large buffer.  If used, must be before
 // ReleaseResponse.
 func (resp *Response) ReleaseBody(size int) {
@@ -826,10 +826,13 @@ func (resp *Response) Read(r *bufio.Reader) error {
 	return resp.ReadLimitBody(r, 0)
 }
 
-// ReadHeader reads response headers from the given r
+// ReadLimitBody reads response from the given r, limiting the body size.
+//
+// If maxBodySize > 0 and the body size exceeds maxBodySize,
+// then ErrBodyTooLarge is returned.
 //
 // io.EOF is returned if r is closed before reading the first header byte.
-func (resp *Response) ReadHeader(r *bufio.Reader) error {
+func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	resp.resetSkipHeader()
 	err := resp.Header.Read(r)
 	if err != nil {
@@ -841,13 +844,8 @@ func (resp *Response) ReadHeader(r *bufio.Reader) error {
 			return err
 		}
 	}
-	return nil
-}
 
-// ReadOnlyBody reads response body from the given r, limiting the body size.
-func (resp *Response) ReadOnlyBody(r *bufio.Reader, maxBodySize int) error {
 	if !resp.mustSkipBody() {
-		var err error
 		resp.body, err = readBody(r, resp.Header.ContentLength(), maxBodySize, resp.body)
 		if err != nil {
 			resp.Reset()
@@ -856,21 +854,6 @@ func (resp *Response) ReadOnlyBody(r *bufio.Reader, maxBodySize int) error {
 		resp.Header.SetContentLength(len(resp.body))
 	}
 	return nil
-}
-
-// ReadLimitBody reads response from the given r, limiting the body size.
-//
-// If maxBodySize > 0 and the body size exceeds maxBodySize,
-// then ErrBodyTooLarge is returned.
-//
-// io.EOF is returned if r is closed before reading the first header byte.
-func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
-	err := resp.ReadHeader(r)
-	if err != nil {
-		return err
-	}
-
-	return resp.ReadOnlyBody(r, maxBodySize)
 }
 
 func (resp *Response) mustSkipBody() bool {
