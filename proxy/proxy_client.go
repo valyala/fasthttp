@@ -224,6 +224,20 @@ type ProxyClientStatus struct {
 	br              *bufio.Reader
 }
 
+func acquireProxyClientStatus() *ProxyClientStatus {
+	v := proxyClientStatusPool.Get()
+	if v == nil {
+		return &ProxyClientStatus{}
+	}
+	return v.(*ProxyClientStatus)
+}
+
+func releaseProxyClientStatus(s *ProxyClientStatus) {
+	proxyClientStatusPool.Put(s)
+}
+
+var proxyClientStatusPool sync.Pool
+
 // SendRequest sends a request.
 func (c *ProxyClient) SendRequest(req *Request) (bool, *ProxyClientStatus, error) {
 	if req == nil {
@@ -232,11 +246,11 @@ func (c *ProxyClient) SendRequest(req *Request) (bool, *ProxyClientStatus, error
 
 	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix))
 
-	s := &ProxyClientStatus{}
 	cc, err := c.acquireConn()
 	if err != nil {
-		return false, s, err
+		return false, nil, err
 	}
+	s := acquireProxyClientStatus()
 	s.cc = cc
 	conn := cc.c
 
@@ -248,7 +262,8 @@ func (c *ProxyClient) SendRequest(req *Request) (bool, *ProxyClientStatus, error
 		if currentTime.Sub(cc.lastWriteDeadlineTime) > (c.WriteTimeout >> 2) {
 			if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
 				c.closeConn(cc)
-				return true, s, err
+				releaseProxyClientStatus(s)
+				return true, nil, err
 			}
 			cc.lastWriteDeadlineTime = currentTime
 		}
@@ -280,10 +295,11 @@ func (c *ProxyClient) SendRequest(req *Request) (bool, *ProxyClientStatus, error
 	if err != nil {
 		c.releaseWriter(bw)
 		c.closeConn(cc)
-		return true, s, err
+		releaseProxyClientStatus(s)
+		return true, nil, err
 	}
 	c.releaseWriter(bw)
-	return false, s, err
+	return false, s, nil
 }
 
 // ReadResponseHeader read a response header.
@@ -308,6 +324,7 @@ func (c *ProxyClient) ReadResponseHeader(s *ProxyClientStatus, req *Request, res
 					ReleaseResponse(resp)
 				}
 				c.closeConn(cc)
+				releaseProxyClientStatus(s)
 				return true, err
 			}
 			cc.lastReadDeadlineTime = currentTime
@@ -329,11 +346,13 @@ func (c *ProxyClient) ReadResponseHeader(s *ProxyClientStatus, req *Request, res
 		c.releaseReader(s.br)
 		c.closeConn(cc)
 		if err == io.EOF {
+			releaseProxyClientStatus(s)
 			return true, err
 		}
+		releaseProxyClientStatus(s)
 		return false, err
 	}
-	return false, err
+	return false, nil
 }
 
 // ReadResponseBody read a response body.
@@ -346,8 +365,10 @@ func (c *ProxyClient) ReadResponseBody(s *ProxyClientStatus, req *Request, resp 
 		c.releaseReader(s.br)
 		c.closeConn(s.cc)
 		if err == io.EOF {
+			releaseProxyClientStatus(s)
 			return true, err
 		}
+		releaseProxyClientStatus(s)
 		return false, err
 	}
 	c.releaseReader(s.br)
@@ -361,7 +382,8 @@ func (c *ProxyClient) ReadResponseBody(s *ProxyClientStatus, req *Request, resp 
 	if s.nilResp {
 		ReleaseResponse(resp)
 	}
-	return false, err
+	releaseProxyClientStatus(s)
+	return false, nil
 }
 
 func isIdempotent(req *Request) bool {
