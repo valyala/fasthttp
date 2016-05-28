@@ -57,7 +57,7 @@ type Response struct {
 	body []byte
 	w    responseBodyWriter
 
-	bodyStream io.Reader
+	bodyStream io.ReadCloser
 
 	// Response.Read() skips reading body if set to true.
 	// Use it for reading HEAD responses.
@@ -162,24 +162,24 @@ func (req *Request) SetConnectionClose() {
 //	req.bodyStream = bodyStream
 //	req.Header.SetContentLength(bodySize)
 //}
+
+// SetBodyStream sets response body stream and, optionally body size.
 //
-//// SetBodyStream sets response body stream and, optionally body size.
-////
-//// If bodySize is >= 0, then the bodyStream must provide exactly bodySize bytes
-//// before returning io.EOF.
-////
-//// If bodySize < 0, then bodyStream is read until io.EOF.
-////
-//// bodyStream.Close() is called after finishing reading all body data
-//// if it implements io.Closer.
-////
-//// See also SetBodyStreamWriter.
-//func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
-//	resp.ResetBody()
-//	resp.bodyStream = bodyStream
-//	resp.Header.SetContentLength(bodySize)
-//}
+// If bodySize is >= 0, then the bodyStream must provide exactly bodySize bytes
+// before returning io.EOF.
 //
+// If bodySize < 0, then bodyStream is read until io.EOF.
+//
+// bodyStream.Close() is called after finishing reading all body data
+// if it implements io.Closer.
+//
+// See also SetBodyStreamWriter.
+func (resp *Response) SetBodyStream(bodyStream io.ReadCloser, bodySize int) {
+	resp.ResetBody()
+	resp.bodyStream = bodyStream
+	resp.Header.SetContentLength(bodySize)
+}
+
 //// SetBodyStreamWriter registers the given sw for populating request body.
 ////
 //// This function may be used in the following cases:
@@ -367,13 +367,13 @@ func (resp *Response) AppendBody(p []byte) {
 //	resp.closeBodyStream()
 //	resp.body = append(resp.body[:0], body...)
 //}
-//
-//// ResetBody resets response body.
-//func (resp *Response) ResetBody() {
-//	resp.closeBodyStream()
-//	resp.body = resp.body[:0]
-//}
-//
+
+// ResetBody resets response body.
+func (resp *Response) ResetBody() {
+	resp.closeBodyStream()
+	resp.body = resp.body[:0]
+}
+
 //// ReleaseBody retires the response body if it is greater than "size" bytes.
 //// This permits GC to reclaim the large buffer.  If used, must be before
 //// ReleaseResponse.
