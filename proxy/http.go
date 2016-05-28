@@ -848,19 +848,19 @@ func (resp *Response) ReadHeader(r *bufio.Reader) error {
 	return nil
 }
 
-// ReadOnlyBody reads response body from the given r, limiting the body size.
-func (resp *Response) ReadOnlyBody(r *bufio.Reader, maxBodySize int) error {
-	if !resp.mustSkipBody() {
-		var err error
-		resp.body, err = readBody(r, resp.Header.ContentLength(), maxBodySize, resp.body)
-		if err != nil {
-			resp.Reset()
-			return err
-		}
-		resp.Header.SetContentLength(len(resp.body))
-	}
-	return nil
-}
+//// ReadOnlyBody reads response body from the given r, limiting the body size.
+//func (resp *Response) ReadOnlyBody(r *bufio.Reader, maxBodySize int) error {
+//	if !resp.mustSkipBody() {
+//		var err error
+//		resp.body, err = readBody(r, resp.Header.ContentLength(), maxBodySize, resp.body)
+//		if err != nil {
+//			resp.Reset()
+//			return err
+//		}
+//		resp.Header.SetContentLength(len(resp.body))
+//	}
+//	return nil
+//}
 
 //// ReadLimitBody reads response from the given r, limiting the body size.
 ////
@@ -1368,148 +1368,148 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 	return err
 }
 
-// ErrBodyTooLarge is returned if either request or response body exceeds
-// the given limit.
-var ErrBodyTooLarge = errors.New("body size exceeds the given limit")
-
-func readBody(r *bufio.Reader, contentLength int, maxBodySize int, dst []byte) ([]byte, error) {
-	dst = dst[:0]
-	if contentLength >= 0 {
-		if maxBodySize > 0 && contentLength > maxBodySize {
-			return dst, ErrBodyTooLarge
-		}
-		return appendBodyFixedSize(r, dst, contentLength)
-	}
-	if contentLength == -1 {
-		return readBodyChunked(r, maxBodySize, dst)
-	}
-	return readBodyIdentity(r, maxBodySize, dst)
-}
-
-func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
-	dst = dst[:cap(dst)]
-	if len(dst) == 0 {
-		dst = make([]byte, 1024)
-	}
-	offset := 0
-	for {
-		nn, err := r.Read(dst[offset:])
-		if nn <= 0 {
-			if err != nil {
-				if err == io.EOF {
-					return dst[:offset], nil
-				}
-				return dst[:offset], err
-			}
-			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
-		}
-		offset += nn
-		if maxBodySize > 0 && offset > maxBodySize {
-			return dst[:offset], ErrBodyTooLarge
-		}
-		if len(dst) == offset {
-			n := round2(2 * offset)
-			if maxBodySize > 0 && n > maxBodySize {
-				n = maxBodySize + 1
-			}
-			b := make([]byte, n)
-			copy(b, dst)
-			dst = b
-		}
-	}
-}
-
-func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
-	if n == 0 {
-		return dst, nil
-	}
-
-	offset := len(dst)
-	dstLen := offset + n
-	if cap(dst) < dstLen {
-		b := make([]byte, round2(dstLen))
-		copy(b, dst)
-		dst = b
-	}
-	dst = dst[:dstLen]
-
-	for {
-		nn, err := r.Read(dst[offset:])
-		if nn <= 0 {
-			if err != nil {
-				if err == io.EOF {
-					err = io.ErrUnexpectedEOF
-				}
-				return dst[:offset], err
-			}
-			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
-		}
-		offset += nn
-		if offset == dstLen {
-			return dst, nil
-		}
-	}
-}
-
-func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
-	if len(dst) > 0 {
-		panic("BUG: expected zero-length buffer")
-	}
-
-	strCRLFLen := len(strCRLF)
-	for {
-		chunkSize, err := parseChunkSize(r)
-		if err != nil {
-			return dst, err
-		}
-		if maxBodySize > 0 && len(dst)+chunkSize > maxBodySize {
-			return dst, ErrBodyTooLarge
-		}
-		dst, err = appendBodyFixedSize(r, dst, chunkSize+strCRLFLen)
-		if err != nil {
-			return dst, err
-		}
-		if !bytes.Equal(dst[len(dst)-strCRLFLen:], strCRLF) {
-			return dst, fmt.Errorf("cannot find crlf at the end of chunk")
-		}
-		dst = dst[:len(dst)-strCRLFLen]
-		if chunkSize == 0 {
-			return dst, nil
-		}
-	}
-}
-
-func parseChunkSize(r *bufio.Reader) (int, error) {
-	n, err := readHexInt(r)
-	if err != nil {
-		return -1, err
-	}
-	c, err := r.ReadByte()
-	if err != nil {
-		return -1, fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err)
-	}
-	if c != '\r' {
-		return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\r')
-	}
-	c, err = r.ReadByte()
-	if err != nil {
-		return -1, fmt.Errorf("cannot read '\n' char at the end of chunk size: %s", err)
-	}
-	if c != '\n' {
-		return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\n')
-	}
-	return n, nil
-}
-
-func round2(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	n--
-	x := uint(0)
-	for n > 0 {
-		n >>= 1
-		x++
-	}
-	return 1 << x
-}
+//// ErrBodyTooLarge is returned if either request or response body exceeds
+//// the given limit.
+//var ErrBodyTooLarge = errors.New("body size exceeds the given limit")
+//
+//func readBody(r *bufio.Reader, contentLength int, maxBodySize int, dst []byte) ([]byte, error) {
+//	dst = dst[:0]
+//	if contentLength >= 0 {
+//		if maxBodySize > 0 && contentLength > maxBodySize {
+//			return dst, ErrBodyTooLarge
+//		}
+//		return appendBodyFixedSize(r, dst, contentLength)
+//	}
+//	if contentLength == -1 {
+//		return readBodyChunked(r, maxBodySize, dst)
+//	}
+//	return readBodyIdentity(r, maxBodySize, dst)
+//}
+//
+//func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
+//	dst = dst[:cap(dst)]
+//	if len(dst) == 0 {
+//		dst = make([]byte, 1024)
+//	}
+//	offset := 0
+//	for {
+//		nn, err := r.Read(dst[offset:])
+//		if nn <= 0 {
+//			if err != nil {
+//				if err == io.EOF {
+//					return dst[:offset], nil
+//				}
+//				return dst[:offset], err
+//			}
+//			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
+//		}
+//		offset += nn
+//		if maxBodySize > 0 && offset > maxBodySize {
+//			return dst[:offset], ErrBodyTooLarge
+//		}
+//		if len(dst) == offset {
+//			n := round2(2 * offset)
+//			if maxBodySize > 0 && n > maxBodySize {
+//				n = maxBodySize + 1
+//			}
+//			b := make([]byte, n)
+//			copy(b, dst)
+//			dst = b
+//		}
+//	}
+//}
+//
+//func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
+//	if n == 0 {
+//		return dst, nil
+//	}
+//
+//	offset := len(dst)
+//	dstLen := offset + n
+//	if cap(dst) < dstLen {
+//		b := make([]byte, round2(dstLen))
+//		copy(b, dst)
+//		dst = b
+//	}
+//	dst = dst[:dstLen]
+//
+//	for {
+//		nn, err := r.Read(dst[offset:])
+//		if nn <= 0 {
+//			if err != nil {
+//				if err == io.EOF {
+//					err = io.ErrUnexpectedEOF
+//				}
+//				return dst[:offset], err
+//			}
+//			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
+//		}
+//		offset += nn
+//		if offset == dstLen {
+//			return dst, nil
+//		}
+//	}
+//}
+//
+//func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
+//	if len(dst) > 0 {
+//		panic("BUG: expected zero-length buffer")
+//	}
+//
+//	strCRLFLen := len(strCRLF)
+//	for {
+//		chunkSize, err := parseChunkSize(r)
+//		if err != nil {
+//			return dst, err
+//		}
+//		if maxBodySize > 0 && len(dst)+chunkSize > maxBodySize {
+//			return dst, ErrBodyTooLarge
+//		}
+//		dst, err = appendBodyFixedSize(r, dst, chunkSize+strCRLFLen)
+//		if err != nil {
+//			return dst, err
+//		}
+//		if !bytes.Equal(dst[len(dst)-strCRLFLen:], strCRLF) {
+//			return dst, fmt.Errorf("cannot find crlf at the end of chunk")
+//		}
+//		dst = dst[:len(dst)-strCRLFLen]
+//		if chunkSize == 0 {
+//			return dst, nil
+//		}
+//	}
+//}
+//
+//func parseChunkSize(r *bufio.Reader) (int, error) {
+//	n, err := readHexInt(r)
+//	if err != nil {
+//		return -1, err
+//	}
+//	c, err := r.ReadByte()
+//	if err != nil {
+//		return -1, fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err)
+//	}
+//	if c != '\r' {
+//		return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\r')
+//	}
+//	c, err = r.ReadByte()
+//	if err != nil {
+//		return -1, fmt.Errorf("cannot read '\n' char at the end of chunk size: %s", err)
+//	}
+//	if c != '\n' {
+//		return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\n')
+//	}
+//	return n, nil
+//}
+//
+//func round2(n int) int {
+//	if n <= 0 {
+//		return 0
+//	}
+//	n--
+//	x := uint(0)
+//	for n > 0 {
+//		n >>= 1
+//		x++
+//	}
+//	return 1 << x
+//}
