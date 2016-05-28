@@ -396,7 +396,7 @@ type fsFile struct {
 	bigFilesLock sync.Mutex
 }
 
-func (ff *fsFile) NewReader() (io.Reader, error) {
+func (ff *fsFile) NewReader() (io.ReadCloser, error) {
 	if ff.isBig() {
 		r, err := ff.bigFileReader()
 		if err != nil {
@@ -407,7 +407,7 @@ func (ff *fsFile) NewReader() (io.Reader, error) {
 	return ff.smallFileReader(), nil
 }
 
-func (ff *fsFile) smallFileReader() io.Reader {
+func (ff *fsFile) smallFileReader() io.ReadCloser {
 	v := ff.h.smallFileReaderPool.Get()
 	if v == nil {
 		v = &fsSmallFileReader{}
@@ -428,12 +428,12 @@ func (ff *fsFile) isBig() bool {
 	return ff.contentLength > maxSmallFileSize && len(ff.dirIndex) == 0
 }
 
-func (ff *fsFile) bigFileReader() (io.Reader, error) {
+func (ff *fsFile) bigFileReader() (io.ReadCloser, error) {
 	if ff.f == nil {
 		panic("BUG: ff.f must be non-nil in bigFileReader")
 	}
 
-	var r io.Reader
+	var r io.ReadCloser
 
 	ff.bigFilesLock.Lock()
 	n := len(ff.bigFiles)

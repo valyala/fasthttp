@@ -178,7 +178,7 @@ func TestRequestBodyStreamMultipleBodyCalls(t *testing.T) {
 	var r Request
 
 	s := "foobar baz abc"
-	r.SetBodyStream(bytes.NewBufferString(s), len(s))
+	r.SetBodyStream(ioutil.NopCloser(bytes.NewBufferString(s)), len(s))
 	for i := 0; i < 10; i++ {
 		body := r.Body()
 		if string(body) != s {
@@ -191,7 +191,7 @@ func TestResponseBodyStreamMultipleBodyCalls(t *testing.T) {
 	var r Response
 
 	s := "foobar baz abc"
-	r.SetBodyStream(bytes.NewBufferString(s), len(s))
+	r.SetBodyStream(ioutil.NopCloser(bytes.NewBufferString(s)), len(s))
 	for i := 0; i < 10; i++ {
 		body := r.Body()
 		if string(body) != s {
@@ -222,7 +222,7 @@ func TestResponseBodyWriteToStream(t *testing.T) {
 	var r Response
 
 	expectedS := "aaabbbccc"
-	buf := bytes.NewBufferString(expectedS)
+	buf := ioutil.NopCloser(bytes.NewBufferString(expectedS))
 	r.SetBodyStream(buf, len(expectedS))
 
 	testBodyWriteTo(t, &r, expectedS, false)
@@ -901,7 +901,7 @@ func testSetRequestBodyStream(t *testing.T, body string, chunked bool) {
 	if chunked {
 		bodySize = -1
 	}
-	req.SetBodyStream(bytes.NewBufferString(body), bodySize)
+	req.SetBodyStream(ioutil.NopCloser(bytes.NewBufferString(body)), bodySize)
 
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
@@ -928,7 +928,7 @@ func testSetResponseBodyStream(t *testing.T, body string, chunked bool) {
 	if chunked {
 		bodySize = -1
 	}
-	resp.SetBodyStream(bytes.NewBufferString(body), bodySize)
+	resp.SetBodyStream(ioutil.NopCloser(bytes.NewBufferString(body)), bodySize)
 
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)

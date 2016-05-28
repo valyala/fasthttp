@@ -986,7 +986,7 @@ func (ctx *RequestCtx) PostBody() []byte {
 // If bodySize < 0, then bodyStream is read until io.EOF.
 //
 // See also SetBodyStreamWriter.
-func (ctx *RequestCtx) SetBodyStream(bodyStream io.Reader, bodySize int) {
+func (ctx *RequestCtx) SetBodyStream(bodyStream io.ReadCloser, bodySize int) {
 	ctx.Response.SetBodyStream(bodyStream, bodySize)
 }
 

@@ -28,7 +28,7 @@ type Request struct {
 	body []byte
 	w    requestBodyWriter
 
-	bodyStream io.Reader
+	bodyStream io.ReadCloser
 
 	uri      URI
 	postArgs Args
@@ -58,7 +58,7 @@ type Response struct {
 	body []byte
 	w    responseBodyWriter
 
-	bodyStream io.Reader
+	bodyStream io.ReadCloser
 
 	// Response.Read() skips reading body if set to true.
 	// Use it for reading HEAD responses.
@@ -158,7 +158,7 @@ func (resp *Response) SendFile(path string) error {
 // Note that GET and HEAD requests cannot have body.
 //
 // See also SetBodyStreamWriter.
-func (req *Request) SetBodyStream(bodyStream io.Reader, bodySize int) {
+func (req *Request) SetBodyStream(bodyStream io.ReadCloser, bodySize int) {
 	req.ResetBody()
 	req.bodyStream = bodyStream
 	req.Header.SetContentLength(bodySize)
@@ -175,7 +175,7 @@ func (req *Request) SetBodyStream(bodyStream io.Reader, bodySize int) {
 // if it implements io.Closer.
 //
 // See also SetBodyStreamWriter.
-func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
+func (resp *Response) SetBodyStream(bodyStream io.ReadCloser, bodySize int) {
 	resp.ResetBody()
 	resp.bodyStream = bodyStream
 	resp.Header.SetContentLength(bodySize)
