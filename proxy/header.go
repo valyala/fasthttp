@@ -523,11 +523,11 @@ func (h *RequestHeader) IsHTTP11() bool {
 	return !h.noHTTP11
 }
 
-//// IsHTTP11 returns true if the response is HTTP/1.1.
-//func (h *ResponseHeader) IsHTTP11() bool {
-//	return !h.noHTTP11
-//}
-//
+// IsHTTP11 returns true if the response is HTTP/1.1.
+func (h *ResponseHeader) IsHTTP11() bool {
+	return !h.noHTTP11
+}
+
 //// HasAcceptEncoding returns true if the header contains
 //// the given Accept-Encoding value.
 //func (h *RequestHeader) HasAcceptEncoding(acceptEncoding string) bool {
