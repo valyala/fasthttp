@@ -320,11 +320,11 @@ func (c *ProxyClient) ReadResponseHeader(s *ProxyClientStatus, req *Request, res
 		currentTime := time.Now()
 		if currentTime.Sub(cc.lastReadDeadlineTime) > (c.ReadTimeout >> 2) {
 			if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
-				if s.nilResp {
-					ReleaseResponse(resp)
-				}
-				c.closeConn(cc)
-				releaseProxyClientStatus(s)
+				//if s.nilResp {
+				//	ReleaseResponse(resp)
+				//}
+				//c.closeConn(cc)
+				//releaseProxyClientStatus(s)
 				return true, err
 			}
 			cc.lastReadDeadlineTime = currentTime
@@ -340,51 +340,75 @@ func (c *ProxyClient) ReadResponseHeader(s *ProxyClientStatus, req *Request, res
 
 	s.br = c.acquireReader(conn)
 	if err = resp.ReadHeader(s.br); err != nil {
-		if s.nilResp {
-			ReleaseResponse(resp)
-		}
-		c.releaseReader(s.br)
-		c.closeConn(cc)
+		//if s.nilResp {
+		//	ReleaseResponse(resp)
+		//}
+		//c.releaseReader(s.br)
+		//c.closeConn(cc)
 		if err == io.EOF {
-			releaseProxyClientStatus(s)
+			//releaseProxyClientStatus(s)
 			return true, err
 		}
-		releaseProxyClientStatus(s)
+		//releaseProxyClientStatus(s)
 		return false, err
 	}
 	return false, nil
 }
 
-// ReadResponseBody read a response body.
-func (c *ProxyClient) ReadResponseBody(s *ProxyClientStatus, req *Request, resp *Response) (bool, error) {
-	var err error
-	if err = resp.ReadOnlyBody(s.br, c.MaxResponseBodySize); err != nil {
-		if s.nilResp {
-			ReleaseResponse(resp)
-		}
+// SetResponseBodyStream sets up bodyStream of the response.
+func (c *ProxyClient) SetResponseBodyStream(s *ProxyClientStatus, req *Request, resp *Response) error {
+	return readTransferResponse(s, req, resp, s.br)
+}
+
+// CleanupAfterReadingResponseBody cleans up the ProxyClientStatus and Response.
+func (c *ProxyClient) CleanupAfterReadingResponseBody(s *ProxyClientStatus, req *Request, resp *Response, responseBodyReadSuccessfully bool) {
+	if s.br != nil {
 		c.releaseReader(s.br)
-		c.closeConn(s.cc)
-		if err == io.EOF {
-			releaseProxyClientStatus(s)
-			return true, err
+	}
+
+	if s.cc != nil {
+		if !responseBodyReadSuccessfully || s.resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
+			c.closeConn(s.cc)
+		} else {
+			c.releaseConn(s.cc)
 		}
-		releaseProxyClientStatus(s)
-		return false, err
 	}
-	c.releaseReader(s.br)
-
-	if s.resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
-		c.closeConn(s.cc)
-	} else {
-		c.releaseConn(s.cc)
-	}
-
 	if s.nilResp {
 		ReleaseResponse(resp)
 	}
 	releaseProxyClientStatus(s)
-	return false, nil
 }
+
+//// ReadResponseBody read a response body.
+//func (c *ProxyClient) ReadResponseBody(s *ProxyClientStatus, req *Request, resp *Response) (bool, error) {
+//	var err error
+//	if err = resp.ReadOnlyBody(s.br, c.MaxResponseBodySize); err != nil {
+//		if s.nilResp {
+//			ReleaseResponse(resp)
+//		}
+//		c.releaseReader(s.br)
+//		c.closeConn(s.cc)
+//		if err == io.EOF {
+//			releaseProxyClientStatus(s)
+//			return true, err
+//		}
+//		releaseProxyClientStatus(s)
+//		return false, err
+//	}
+//	c.releaseReader(s.br)
+//
+//	if s.resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
+//		c.closeConn(s.cc)
+//	} else {
+//		c.releaseConn(s.cc)
+//	}
+//
+//	if s.nilResp {
+//		ReleaseResponse(resp)
+//	}
+//	releaseProxyClientStatus(s)
+//	return false, nil
+//}
 
 func isIdempotent(req *Request) bool {
 	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut()

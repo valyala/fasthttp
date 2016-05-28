@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"io"
 	"net"
 	"testing"
@@ -41,20 +42,24 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 		resp := AcquireResponse()
 
 		// The following command does the same thing as HostClient.Do().
-		retry, s, err := c.SendRequest(req)
+		var body []byte
+		buf := new(bytes.Buffer)
+		_, s, err := c.SendRequest(req)
 		if err == nil {
-			retry, err = c.ReadResponseHeader(s, req, resp)
+			responseBodyReadSuccessfully := false
+			_, err = c.ReadResponseHeader(s, req, resp)
 			if err == nil {
-				retry, err = c.ReadResponseBody(s, req, resp)
-			}
-		}
-		if err != nil && retry && isIdempotent(req) {
-			_, s, err = c.SendRequest(req)
-			if err == nil {
-				_, err = c.ReadResponseHeader(s, req, resp)
+				err = c.SetResponseBodyStream(s, req, resp)
 				if err == nil {
-					_, err = c.ReadResponseBody(s, req, resp)
+					_, err := buf.ReadFrom(resp.BodyStream())
+					if err == nil {
+						responseBodyReadSuccessfully = true
+						body = buf.Bytes()
+					}
 				}
+			}
+			if s != nil {
+				c.CleanupAfterReadingResponseBody(s, req, resp, responseBodyReadSuccessfully)
 			}
 		}
 		if err == io.EOF {
@@ -68,7 +73,6 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 		if statusCode != StatusOK {
 			t.Fatalf("unexpected status code %d. Expecting %d", statusCode, StatusOK)
 		}
-		body := resp.Body()
 		if string(body) != "foobar" {
 			t.Fatalf("unexpected body %q. Expecting %q", body, "foobar")
 		}

@@ -180,6 +180,11 @@ func (resp *Response) SetBodyStream(bodyStream io.ReadCloser, bodySize int) {
 	resp.Header.SetContentLength(bodySize)
 }
 
+// BodyStream returns the body stream of the response.
+func (resp *Response) BodyStream() io.ReadCloser {
+	return resp.bodyStream
+}
+
 //// SetBodyStreamWriter registers the given sw for populating request body.
 ////
 //// This function may be used in the following cases:
