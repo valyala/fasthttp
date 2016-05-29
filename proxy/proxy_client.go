@@ -10,20 +10,22 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/valyala/fasthttp"
 )
 
-// AcquireRequest returns an empty Request instance from request pool.
-//
-// The returned Request instance may be passed to ReleaseRequest when it is
-// no longer needed. This allows Request recycling, reduces GC pressure
-// and usually improves performance.
-func AcquireRequest() *Request {
-	v := requestPool.Get()
-	if v == nil {
-		return &Request{}
-	}
-	return v.(*Request)
-}
+//// AcquireRequest returns an empty Request instance from request pool.
+////
+//// The returned Request instance may be passed to ReleaseRequest when it is
+//// no longer needed. This allows Request recycling, reduces GC pressure
+//// and usually improves performance.
+//func AcquireRequest() *Request {
+//	v := requestPool.Get()
+//	if v == nil {
+//		return &Request{}
+//	}
+//	return v.(*Request)
+//}
 
 // AcquireResponse returns an empty Response instance from response pool.
 //
@@ -48,7 +50,7 @@ func ReleaseResponse(resp *Response) {
 }
 
 var (
-	requestPool  sync.Pool
+	//requestPool  sync.Pool
 	responsePool sync.Pool
 )
 
@@ -214,7 +216,7 @@ type ProxyClient struct {
 // The caller must pass valid request and response.
 // The response body can be read from the resp.BodyStream().
 // The user must call ProxyClient.CleanupResponse() for clean up.
-func (c *ProxyClient) Do(req *Request, resp *Response) error {
+func (c *ProxyClient) Do(req *fasthttp.Request, resp *Response) error {
 	if req == nil {
 		panic("BUG: req cannot be nil")
 	}
@@ -252,12 +254,12 @@ func (c *ProxyClient) Do(req *Request, resp *Response) error {
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
-		req.Header.userAgent = c.getClientName()
+		req.Header.SetUserAgentBytes(c.getClientName())
 	}
 	bw := c.acquireWriter(conn)
 	err = req.Write(bw)
 	if len(userAgentOld) == 0 {
-		req.Header.userAgent = userAgentOld
+		req.Header.SetUserAgentBytes(userAgentOld)
 	}
 
 	if resetConnection {
@@ -315,7 +317,7 @@ func (c *ProxyClient) Do(req *Request, resp *Response) error {
 }
 
 // CleanupResponse releases the reader and closes or releases the connection used.
-func (c *ProxyClient) CleanupResponse(req *Request, resp *Response) {
+func (c *ProxyClient) CleanupResponse(req *fasthttp.Request, resp *Response) {
 	if resp.br != nil {
 		c.releaseReader(resp.br)
 		resp.br = nil

@@ -35,43 +35,43 @@ type ResponseHeader struct {
 	cookies []argsKV
 }
 
-// RequestHeader represents HTTP request header.
+//// RequestHeader represents HTTP request header.
+////
+//// It is forbidden copying RequestHeader instances.
+//// Create new instances instead and use CopyTo.
+////
+//// RequestHeader instance MUST NOT be used from concurrently running
+//// goroutines.
+//type RequestHeader struct {
+//	noCopy noCopy
 //
-// It is forbidden copying RequestHeader instances.
-// Create new instances instead and use CopyTo.
+//	disableNormalizing bool
+//	noHTTP11           bool
+//	connectionClose    bool
+//	isGet              bool
 //
-// RequestHeader instance MUST NOT be used from concurrently running
-// goroutines.
-type RequestHeader struct {
-	noCopy noCopy
-
-	disableNormalizing bool
-	noHTTP11           bool
-	connectionClose    bool
-	isGet              bool
-
-	// These two fields have been moved close to other bool fields
-	// for reducing RequestHeader object size.
-	cookiesCollected bool
-	rawHeadersParsed bool
-
-	contentLength      int
-	contentLengthBytes []byte
-
-	method      []byte
-	requestURI  []byte
-	host        []byte
-	contentType []byte
-	userAgent   []byte
-
-	h     []argsKV
-	bufKV argsKV
-
-	cookies []argsKV
-
-	rawHeaders []byte
-}
-
+//	// These two fields have been moved close to other bool fields
+//	// for reducing RequestHeader object size.
+//	cookiesCollected bool
+//	rawHeadersParsed bool
+//
+//	contentLength      int
+//	contentLengthBytes []byte
+//
+//	method      []byte
+//	requestURI  []byte
+//	host        []byte
+//	contentType []byte
+//	userAgent   []byte
+//
+//	h     []argsKV
+//	bufKV argsKV
+//
+//	cookies []argsKV
+//
+//	rawHeaders []byte
+//}
+//
 //// SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
 //// header.
 //func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
@@ -145,33 +145,33 @@ func (h *ResponseHeader) SetConnectionClose() {
 //		h.h = delAllArgsBytes(h.h, strConnection)
 //	}
 //}
-
-// ConnectionClose returns true if 'Connection: close' header is set.
-func (h *RequestHeader) ConnectionClose() bool {
-	h.parseRawHeaders()
-	return h.connectionClose
-}
-
+//
+//// ConnectionClose returns true if 'Connection: close' header is set.
+//func (h *RequestHeader) ConnectionClose() bool {
+//	h.parseRawHeaders()
+//	return h.connectionClose
+//}
+//
 //func (h *RequestHeader) connectionCloseFast() bool {
 //	// h.parseRawHeaders() isn't called for performance reasons.
 //	// Use ConnectionClose for triggering raw headers parsing.
 //	return h.connectionClose
 //}
-
-// SetConnectionClose sets 'Connection: close' header.
-func (h *RequestHeader) SetConnectionClose() {
-	// h.parseRawHeaders() isn't called for performance reasons.
-	h.connectionClose = true
-}
-
-// ResetConnectionClose clears 'Connection: close' header if it exists.
-func (h *RequestHeader) ResetConnectionClose() {
-	h.parseRawHeaders()
-	if h.connectionClose {
-		h.connectionClose = false
-		h.h = delAllArgsBytes(h.h, strConnection)
-	}
-}
+//
+//// SetConnectionClose sets 'Connection: close' header.
+//func (h *RequestHeader) SetConnectionClose() {
+//	// h.parseRawHeaders() isn't called for performance reasons.
+//	h.connectionClose = true
+//}
+//
+//// ResetConnectionClose clears 'Connection: close' header if it exists.
+//func (h *RequestHeader) ResetConnectionClose() {
+//	h.parseRawHeaders()
+//	if h.connectionClose {
+//		h.connectionClose = false
+//		h.h = delAllArgsBytes(h.h, strConnection)
+//	}
+//}
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *ResponseHeader) ConnectionUpgrade() bool {
@@ -231,32 +231,32 @@ func (h *ResponseHeader) mustSkipContentLength() bool {
 	return statusCode == StatusNotModified || statusCode == StatusNoContent || statusCode < 200
 }
 
-// ContentLength returns Content-Length header value.
+//// ContentLength returns Content-Length header value.
+////
+//// It may be negative:
+//// -1 means Transfer-Encoding: chunked.
+//func (h *RequestHeader) ContentLength() int {
+//	if h.noBody() {
+//		return 0
+//	}
+//	h.parseRawHeaders()
+//	return h.contentLength
+//}
 //
-// It may be negative:
-// -1 means Transfer-Encoding: chunked.
-func (h *RequestHeader) ContentLength() int {
-	if h.noBody() {
-		return 0
-	}
-	h.parseRawHeaders()
-	return h.contentLength
-}
-
-// SetContentLength sets Content-Length header value.
-//
-// Negative content-length sets 'Transfer-Encoding: chunked' header.
-func (h *RequestHeader) SetContentLength(contentLength int) {
-	h.parseRawHeaders()
-	h.contentLength = contentLength
-	if contentLength >= 0 {
-		h.contentLengthBytes = AppendUint(h.contentLengthBytes[:0], contentLength)
-		h.h = delAllArgsBytes(h.h, strTransferEncoding)
-	} else {
-		h.contentLengthBytes = h.contentLengthBytes[:0]
-		h.h = setArgBytes(h.h, strTransferEncoding, strChunked)
-	}
-}
+//// SetContentLength sets Content-Length header value.
+////
+//// Negative content-length sets 'Transfer-Encoding: chunked' header.
+//func (h *RequestHeader) SetContentLength(contentLength int) {
+//	h.parseRawHeaders()
+//	h.contentLength = contentLength
+//	if contentLength >= 0 {
+//		h.contentLengthBytes = AppendUint(h.contentLengthBytes[:0], contentLength)
+//		h.h = delAllArgsBytes(h.h, strTransferEncoding)
+//	} else {
+//		h.contentLengthBytes = h.contentLengthBytes[:0]
+//		h.h = setArgBytes(h.h, strTransferEncoding, strChunked)
+//	}
+//}
 
 // ContentType returns Content-Type header value.
 func (h *ResponseHeader) ContentType() []byte {
@@ -291,42 +291,42 @@ func (h *ResponseHeader) Server() []byte {
 //func (h *ResponseHeader) SetServerBytes(server []byte) {
 //	h.server = append(h.server[:0], server...)
 //}
-
-// ContentType returns Content-Type header value.
-func (h *RequestHeader) ContentType() []byte {
-	h.parseRawHeaders()
-	return h.contentType
-}
-
-//// SetContentType sets Content-Type header value.
-//func (h *RequestHeader) SetContentType(contentType string) {
+//
+//// ContentType returns Content-Type header value.
+//func (h *RequestHeader) ContentType() []byte {
+//	h.parseRawHeaders()
+//	return h.contentType
+//}
+//
+////// SetContentType sets Content-Type header value.
+////func (h *RequestHeader) SetContentType(contentType string) {
+////	h.parseRawHeaders()
+////	h.contentType = append(h.contentType[:0], contentType...)
+////}
+//
+//// SetContentTypeBytes sets Content-Type header value.
+//func (h *RequestHeader) SetContentTypeBytes(contentType []byte) {
 //	h.parseRawHeaders()
 //	h.contentType = append(h.contentType[:0], contentType...)
 //}
-
-// SetContentTypeBytes sets Content-Type header value.
-func (h *RequestHeader) SetContentTypeBytes(contentType []byte) {
-	h.parseRawHeaders()
-	h.contentType = append(h.contentType[:0], contentType...)
-}
-
-// SetMultipartFormBoundary sets the following Content-Type:
-// 'multipart/form-data; boundary=...'
-// where ... is substituted by the given boundary.
-func (h *RequestHeader) SetMultipartFormBoundary(boundary string) {
-	h.parseRawHeaders()
-
-	b := h.bufKV.value[:0]
-	b = append(b, strMultipartFormData...)
-	b = append(b, ';', ' ')
-	b = append(b, strBoundary...)
-	b = append(b, '=')
-	b = append(b, boundary...)
-	h.bufKV.value = b
-
-	h.SetContentTypeBytes(h.bufKV.value)
-}
-
+//
+//// SetMultipartFormBoundary sets the following Content-Type:
+//// 'multipart/form-data; boundary=...'
+//// where ... is substituted by the given boundary.
+//func (h *RequestHeader) SetMultipartFormBoundary(boundary string) {
+//	h.parseRawHeaders()
+//
+//	b := h.bufKV.value[:0]
+//	b = append(b, strMultipartFormData...)
+//	b = append(b, ';', ' ')
+//	b = append(b, strBoundary...)
+//	b = append(b, '=')
+//	b = append(b, boundary...)
+//	h.bufKV.value = b
+//
+//	h.SetContentTypeBytes(h.bufKV.value)
+//}
+//
 //// SetMultipartFormBoundaryBytes sets the following Content-Type:
 //// 'multipart/form-data; boundary=...'
 //// where ... is substituted by the given boundary.
@@ -382,44 +382,44 @@ func (h *RequestHeader) SetMultipartFormBoundary(boundary string) {
 //	}
 //	return nil
 //}
-
-// Host returns Host header value.
-func (h *RequestHeader) Host() []byte {
-	if len(h.host) > 0 {
-		return h.host
-	}
-	if !h.rawHeadersParsed {
-		// fast path without employing full headers parsing.
-		host := peekRawHeader(h.rawHeaders, strHost)
-		if len(host) > 0 {
-			h.host = append(h.host[:0], host...)
-			return h.host
-		}
-	}
-
-	// slow path.
-	h.parseRawHeaders()
-	return h.host
-}
-
+//
+//// Host returns Host header value.
+//func (h *RequestHeader) Host() []byte {
+//	if len(h.host) > 0 {
+//		return h.host
+//	}
+//	if !h.rawHeadersParsed {
+//		// fast path without employing full headers parsing.
+//		host := peekRawHeader(h.rawHeaders, strHost)
+//		if len(host) > 0 {
+//			h.host = append(h.host[:0], host...)
+//			return h.host
+//		}
+//	}
+//
+//	// slow path.
+//	h.parseRawHeaders()
+//	return h.host
+//}
+//
 //// SetHost sets Host header value.
 //func (h *RequestHeader) SetHost(host string) {
 //	h.parseRawHeaders()
 //	h.host = append(h.host[:0], host...)
 //}
-
-// SetHostBytes sets Host header value.
-func (h *RequestHeader) SetHostBytes(host []byte) {
-	h.parseRawHeaders()
-	h.host = append(h.host[:0], host...)
-}
-
-// UserAgent returns User-Agent header value.
-func (h *RequestHeader) UserAgent() []byte {
-	h.parseRawHeaders()
-	return h.userAgent
-}
-
+//
+//// SetHostBytes sets Host header value.
+//func (h *RequestHeader) SetHostBytes(host []byte) {
+//	h.parseRawHeaders()
+//	h.host = append(h.host[:0], host...)
+//}
+//
+//// UserAgent returns User-Agent header value.
+//func (h *RequestHeader) UserAgent() []byte {
+//	h.parseRawHeaders()
+//	return h.userAgent
+//}
+//
 //// SetUserAgent sets User-Agent header value.
 //func (h *RequestHeader) SetUserAgent(userAgent string) {
 //	h.parseRawHeaders()
@@ -446,15 +446,15 @@ func (h *RequestHeader) UserAgent() []byte {
 //func (h *RequestHeader) SetRefererBytes(referer []byte) {
 //	h.SetCanonical(strReferer, referer)
 //}
-
-// Method returns HTTP request method.
-func (h *RequestHeader) Method() []byte {
-	if len(h.method) == 0 {
-		return strGet
-	}
-	return h.method
-}
-
+//
+//// Method returns HTTP request method.
+//func (h *RequestHeader) Method() []byte {
+//	if len(h.method) == 0 {
+//		return strGet
+//	}
+//	return h.method
+//}
+//
 //// SetMethod sets HTTP request method.
 //func (h *RequestHeader) SetMethod(method string) {
 //	h.method = append(h.method, method...)
@@ -464,39 +464,39 @@ func (h *RequestHeader) Method() []byte {
 //func (h *RequestHeader) SetMethodBytes(method []byte) {
 //	h.method = append(h.method[:0], method...)
 //}
-
-// RequestURI returns RequestURI from the first HTTP request line.
-func (h *RequestHeader) RequestURI() []byte {
-	requestURI := h.requestURI
-	if len(requestURI) == 0 {
-		requestURI = strSlash
-	}
-	return requestURI
-}
-
-// SetRequestURI sets RequestURI for the first HTTP request line.
-// RequestURI must be properly encoded.
-// Use URI.RequestURI for constructing proper RequestURI if unsure.
-func (h *RequestHeader) SetRequestURI(requestURI string) {
-	h.requestURI = append(h.requestURI[:0], requestURI...)
-}
-
-// SetRequestURIBytes sets RequestURI for the first HTTP request line.
-// RequestURI must be properly encoded.
-// Use URI.RequestURI for constructing proper RequestURI if unsure.
-func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
-	h.requestURI = append(h.requestURI[:0], requestURI...)
-}
-
-// IsGet returns true if request method is GET.
-func (h *RequestHeader) IsGet() bool {
-	// Optimize fast path for GET requests.
-	if !h.isGet {
-		h.isGet = bytes.Equal(h.Method(), strGet)
-	}
-	return h.isGet
-}
-
+//
+//// RequestURI returns RequestURI from the first HTTP request line.
+//func (h *RequestHeader) RequestURI() []byte {
+//	requestURI := h.requestURI
+//	if len(requestURI) == 0 {
+//		requestURI = strSlash
+//	}
+//	return requestURI
+//}
+//
+//// SetRequestURI sets RequestURI for the first HTTP request line.
+//// RequestURI must be properly encoded.
+//// Use URI.RequestURI for constructing proper RequestURI if unsure.
+//func (h *RequestHeader) SetRequestURI(requestURI string) {
+//	h.requestURI = append(h.requestURI[:0], requestURI...)
+//}
+//
+//// SetRequestURIBytes sets RequestURI for the first HTTP request line.
+//// RequestURI must be properly encoded.
+//// Use URI.RequestURI for constructing proper RequestURI if unsure.
+//func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
+//	h.requestURI = append(h.requestURI[:0], requestURI...)
+//}
+//
+//// IsGet returns true if request method is GET.
+//func (h *RequestHeader) IsGet() bool {
+//	// Optimize fast path for GET requests.
+//	if !h.isGet {
+//		h.isGet = bytes.Equal(h.Method(), strGet)
+//	}
+//	return h.isGet
+//}
+//
 //// IsPost returns true if request methos is POST.
 //func (h *RequestHeader) IsPost() bool {
 //	return bytes.Equal(h.Method(), strPost)
@@ -506,16 +506,16 @@ func (h *RequestHeader) IsGet() bool {
 //func (h *RequestHeader) IsPut() bool {
 //	return bytes.Equal(h.Method(), strPut)
 //}
-
-// IsHead returns true if request method is HEAD.
-func (h *RequestHeader) IsHead() bool {
-	// Fast path
-	if h.isGet {
-		return false
-	}
-	return bytes.Equal(h.Method(), strHead)
-}
-
+//
+//// IsHead returns true if request method is HEAD.
+//func (h *RequestHeader) IsHead() bool {
+//	// Fast path
+//	if h.isGet {
+//		return false
+//	}
+//	return bytes.Equal(h.Method(), strHead)
+//}
+//
 //// IsHTTP11 returns true if the request is HTTP/1.1.
 //func (h *RequestHeader) IsHTTP11() bool {
 //	return !h.noHTTP11
@@ -1423,13 +1423,13 @@ func isOnlyCRLF(b []byte) bool {
 //
 //	return append(dst, strCRLF...)
 //}
-
-// Write writes request header to w.
-func (h *RequestHeader) Write(w *bufio.Writer) error {
-	_, err := w.Write(h.Header())
-	return err
-}
-
+//
+//// Write writes request header to w.
+//func (h *RequestHeader) Write(w *bufio.Writer) error {
+//	_, err := w.Write(h.Header())
+//	return err
+//}
+//
 //// WriteTo writes request header to w.
 ////
 //// WriteTo implements io.WriterTo interface.
@@ -1437,88 +1437,88 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 //	n, err := w.Write(h.Header())
 //	return int64(n), err
 //}
-
-// Header returns request header representation.
 //
-// The returned representation is valid until the next call to RequestHeader methods.
-func (h *RequestHeader) Header() []byte {
-	h.bufKV.value = h.AppendBytes(h.bufKV.value[:0])
-	return h.bufKV.value
-}
-
+//// Header returns request header representation.
+////
+//// The returned representation is valid until the next call to RequestHeader methods.
+//func (h *RequestHeader) Header() []byte {
+//	h.bufKV.value = h.AppendBytes(h.bufKV.value[:0])
+//	return h.bufKV.value
+//}
+//
 //// String returns request header representation.
 //func (h *RequestHeader) String() string {
 //	return string(h.Header())
 //}
-
-// AppendBytes appends request header representation to dst and returns
-// the extended dst.
-func (h *RequestHeader) AppendBytes(dst []byte) []byte {
-	// there is no need in h.parseRawHeaders() here - raw headers are specially handled below.
-	dst = append(dst, h.Method()...)
-	dst = append(dst, ' ')
-	dst = append(dst, h.RequestURI()...)
-	dst = append(dst, ' ')
-	dst = append(dst, strHTTP11...)
-	dst = append(dst, strCRLF...)
-
-	if !h.rawHeadersParsed && len(h.rawHeaders) > 0 {
-		return append(dst, h.rawHeaders...)
-	}
-
-	userAgent := h.UserAgent()
-	if len(userAgent) == 0 {
-		userAgent = defaultUserAgent
-	}
-	dst = appendHeaderLine(dst, strUserAgent, userAgent)
-
-	host := h.Host()
-	if len(host) > 0 {
-		dst = appendHeaderLine(dst, strHost, host)
-	}
-
-	contentType := h.ContentType()
-	if !h.noBody() {
-		if len(contentType) == 0 {
-			contentType = strPostArgsContentType
-		}
-		dst = appendHeaderLine(dst, strContentType, contentType)
-
-		if len(h.contentLengthBytes) > 0 {
-			dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
-		}
-	} else if len(contentType) > 0 {
-		dst = appendHeaderLine(dst, strContentType, contentType)
-	}
-
-	for i, n := 0, len(h.h); i < n; i++ {
-		kv := &h.h[i]
-		dst = appendHeaderLine(dst, kv.key, kv.value)
-	}
-
-	// there is no need in h.collectCookies() here, since if cookies aren't collected yet,
-	// they all are located in h.h.
-	n := len(h.cookies)
-	if n > 0 {
-		dst = append(dst, strCookie...)
-		dst = append(dst, strColonSpace...)
-		dst = appendRequestCookieBytes(dst, h.cookies)
-		dst = append(dst, strCRLF...)
-	}
-
-	if h.ConnectionClose() {
-		dst = appendHeaderLine(dst, strConnection, strClose)
-	}
-
-	return append(dst, strCRLF...)
-}
-
-func appendHeaderLine(dst, key, value []byte) []byte {
-	dst = append(dst, key...)
-	dst = append(dst, strColonSpace...)
-	dst = append(dst, value...)
-	return append(dst, strCRLF...)
-}
+//
+//// AppendBytes appends request header representation to dst and returns
+//// the extended dst.
+//func (h *RequestHeader) AppendBytes(dst []byte) []byte {
+//	// there is no need in h.parseRawHeaders() here - raw headers are specially handled below.
+//	dst = append(dst, h.Method()...)
+//	dst = append(dst, ' ')
+//	dst = append(dst, h.RequestURI()...)
+//	dst = append(dst, ' ')
+//	dst = append(dst, strHTTP11...)
+//	dst = append(dst, strCRLF...)
+//
+//	if !h.rawHeadersParsed && len(h.rawHeaders) > 0 {
+//		return append(dst, h.rawHeaders...)
+//	}
+//
+//	userAgent := h.UserAgent()
+//	if len(userAgent) == 0 {
+//		userAgent = defaultUserAgent
+//	}
+//	dst = appendHeaderLine(dst, strUserAgent, userAgent)
+//
+//	host := h.Host()
+//	if len(host) > 0 {
+//		dst = appendHeaderLine(dst, strHost, host)
+//	}
+//
+//	contentType := h.ContentType()
+//	if !h.noBody() {
+//		if len(contentType) == 0 {
+//			contentType = strPostArgsContentType
+//		}
+//		dst = appendHeaderLine(dst, strContentType, contentType)
+//
+//		if len(h.contentLengthBytes) > 0 {
+//			dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
+//		}
+//	} else if len(contentType) > 0 {
+//		dst = appendHeaderLine(dst, strContentType, contentType)
+//	}
+//
+//	for i, n := 0, len(h.h); i < n; i++ {
+//		kv := &h.h[i]
+//		dst = appendHeaderLine(dst, kv.key, kv.value)
+//	}
+//
+//	// there is no need in h.collectCookies() here, since if cookies aren't collected yet,
+//	// they all are located in h.h.
+//	n := len(h.cookies)
+//	if n > 0 {
+//		dst = append(dst, strCookie...)
+//		dst = append(dst, strColonSpace...)
+//		dst = appendRequestCookieBytes(dst, h.cookies)
+//		dst = append(dst, strCRLF...)
+//	}
+//
+//	if h.ConnectionClose() {
+//		dst = appendHeaderLine(dst, strConnection, strClose)
+//	}
+//
+//	return append(dst, strCRLF...)
+//}
+//
+//func appendHeaderLine(dst, key, value []byte) []byte {
+//	dst = append(dst, key...)
+//	dst = append(dst, strColonSpace...)
+//	dst = append(dst, value...)
+//	return append(dst, strCRLF...)
+//}
 
 func (h *ResponseHeader) parse(buf []byte) (int, error) {
 	m, err := h.parseFirstLine(buf)
@@ -1532,10 +1532,10 @@ func (h *ResponseHeader) parse(buf []byte) (int, error) {
 	return m + n, nil
 }
 
-func (h *RequestHeader) noBody() bool {
-	return h.IsGet() || h.IsHead()
-}
-
+//func (h *RequestHeader) noBody() bool {
+//	return h.IsGet() || h.IsHead()
+//}
+//
 //func (h *RequestHeader) parse(buf []byte) (int, error) {
 //	m, err := h.parseFirstLine(buf)
 //	if err != nil {
@@ -1622,38 +1622,38 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 //
 //	return len(buf) - len(bNext), nil
 //}
-
-func peekRawHeader(buf, key []byte) []byte {
-	n := bytes.Index(buf, key)
-	if n < 0 {
-		return nil
-	}
-	if n > 0 && buf[n-1] != '\n' {
-		return nil
-	}
-	n += len(key)
-	if n >= len(buf) {
-		return nil
-	}
-	if buf[n] != ':' {
-		return nil
-	}
-	n++
-	if buf[n] != ' ' {
-		return nil
-	}
-	n++
-	buf = buf[n:]
-	n = bytes.IndexByte(buf, '\n')
-	if n < 0 {
-		return nil
-	}
-	if n > 0 && buf[n-1] == '\r' {
-		n--
-	}
-	return buf[:n]
-}
-
+//
+//func peekRawHeader(buf, key []byte) []byte {
+//	n := bytes.Index(buf, key)
+//	if n < 0 {
+//		return nil
+//	}
+//	if n > 0 && buf[n-1] != '\n' {
+//		return nil
+//	}
+//	n += len(key)
+//	if n >= len(buf) {
+//		return nil
+//	}
+//	if buf[n] != ':' {
+//		return nil
+//	}
+//	n++
+//	if buf[n] != ' ' {
+//		return nil
+//	}
+//	n++
+//	buf = buf[n:]
+//	n = bytes.IndexByte(buf, '\n')
+//	if n < 0 {
+//		return nil
+//	}
+//	if n > 0 && buf[n-1] == '\r' {
+//		n--
+//	}
+//	return buf[:n]
+//}
+//
 //func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
 //	n := bytes.IndexByte(buf, '\n')
 //	if n < 0 {
@@ -1746,77 +1746,77 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	return len(buf) - len(s.b), nil
 }
 
-func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
-	h.contentLength = -2
-
-	var s headerScanner
-	s.b = buf
-	s.disableNormalizing = h.disableNormalizing
-	var err error
-	for s.next() {
-		switch string(s.key) {
-		case "Host":
-			h.host = append(h.host[:0], s.value...)
-		case "User-Agent":
-			h.userAgent = append(h.userAgent[:0], s.value...)
-		case "Content-Type":
-			h.contentType = append(h.contentType[:0], s.value...)
-		case "Content-Length":
-			if h.contentLength != -1 {
-				if h.contentLength, err = parseContentLength(s.value); err != nil {
-					h.contentLength = -2
-				} else {
-					h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
-				}
-			}
-		case "Transfer-Encoding":
-			if !bytes.Equal(s.value, strIdentity) {
-				h.contentLength = -1
-				h.h = setArgBytes(h.h, strTransferEncoding, strChunked)
-			}
-		case "Connection":
-			if bytes.Equal(s.value, strClose) {
-				h.connectionClose = true
-			} else {
-				h.connectionClose = false
-				h.h = appendArgBytes(h.h, s.key, s.value)
-			}
-		default:
-			h.h = appendArgBytes(h.h, s.key, s.value)
-		}
-	}
-	if s.err != nil {
-		h.connectionClose = true
-		return 0, s.err
-	}
-
-	if h.contentLength < 0 {
-		h.contentLengthBytes = h.contentLengthBytes[:0]
-	}
-	if h.noBody() {
-		h.contentLength = 0
-		h.contentLengthBytes = h.contentLengthBytes[:0]
-	}
-	if h.noHTTP11 && !h.connectionClose {
-		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
-		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive) && !hasHeaderValue(v, strKeepAliveCamelCase)
-	}
-
-	return len(buf) - len(s.b), nil
-}
-
-func (h *RequestHeader) parseRawHeaders() {
-	if h.rawHeadersParsed {
-		return
-	}
-	h.rawHeadersParsed = true
-	if len(h.rawHeaders) == 0 {
-		return
-	}
-	h.parseHeaders(h.rawHeaders)
-}
-
+//func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
+//	h.contentLength = -2
+//
+//	var s headerScanner
+//	s.b = buf
+//	s.disableNormalizing = h.disableNormalizing
+//	var err error
+//	for s.next() {
+//		switch string(s.key) {
+//		case "Host":
+//			h.host = append(h.host[:0], s.value...)
+//		case "User-Agent":
+//			h.userAgent = append(h.userAgent[:0], s.value...)
+//		case "Content-Type":
+//			h.contentType = append(h.contentType[:0], s.value...)
+//		case "Content-Length":
+//			if h.contentLength != -1 {
+//				if h.contentLength, err = parseContentLength(s.value); err != nil {
+//					h.contentLength = -2
+//				} else {
+//					h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
+//				}
+//			}
+//		case "Transfer-Encoding":
+//			if !bytes.Equal(s.value, strIdentity) {
+//				h.contentLength = -1
+//				h.h = setArgBytes(h.h, strTransferEncoding, strChunked)
+//			}
+//		case "Connection":
+//			if bytes.Equal(s.value, strClose) {
+//				h.connectionClose = true
+//			} else {
+//				h.connectionClose = false
+//				h.h = appendArgBytes(h.h, s.key, s.value)
+//			}
+//		default:
+//			h.h = appendArgBytes(h.h, s.key, s.value)
+//		}
+//	}
+//	if s.err != nil {
+//		h.connectionClose = true
+//		return 0, s.err
+//	}
+//
+//	if h.contentLength < 0 {
+//		h.contentLengthBytes = h.contentLengthBytes[:0]
+//	}
+//	if h.noBody() {
+//		h.contentLength = 0
+//		h.contentLengthBytes = h.contentLengthBytes[:0]
+//	}
+//	if h.noHTTP11 && !h.connectionClose {
+//		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
+//		v := peekArgBytes(h.h, strConnection)
+//		h.connectionClose = !hasHeaderValue(v, strKeepAlive) && !hasHeaderValue(v, strKeepAliveCamelCase)
+//	}
+//
+//	return len(buf) - len(s.b), nil
+//}
+//
+//func (h *RequestHeader) parseRawHeaders() {
+//	if h.rawHeadersParsed {
+//		return
+//	}
+//	h.rawHeadersParsed = true
+//	if len(h.rawHeaders) == 0 {
+//		return
+//	}
+//	h.parseHeaders(h.rawHeaders)
+//}
+//
 //func (h *RequestHeader) collectCookies() {
 //	if h.cookiesCollected {
 //		return

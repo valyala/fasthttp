@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -10,35 +9,35 @@ import (
 	"sync"
 )
 
-// Request represents HTTP request.
+//// Request represents HTTP request.
+////
+//// It is forbidden copying Request instances. Create new instances
+//// and use CopyTo instead.
+////
+//// Request instance MUST NOT be used from concurrently running goroutines.
+//type Request struct {
+//	noCopy noCopy
 //
-// It is forbidden copying Request instances. Create new instances
-// and use CopyTo instead.
+//	// Request header
+//	//
+//	// Copying Header by value is forbidden. Use pointer to Header instead.
+//	Header RequestHeader
 //
-// Request instance MUST NOT be used from concurrently running goroutines.
-type Request struct {
-	noCopy noCopy
-
-	// Request header
-	//
-	// Copying Header by value is forbidden. Use pointer to Header instead.
-	Header RequestHeader
-
-	body []byte
-	w    requestBodyWriter
-
-	bodyStream io.Reader
-
-	uri      URI
-	postArgs Args
-
-	multipartForm         *multipart.Form
-	multipartFormBoundary string
-
-	// Group bool members in order to reduce Request object size.
-	parsedURI      bool
-	parsedPostArgs bool
-}
+//	body []byte
+//	w    requestBodyWriter
+//
+//	bodyStream io.Reader
+//
+//	uri      URI
+//	postArgs Args
+//
+//	multipartForm         *multipart.Form
+//	multipartFormBoundary string
+//
+//	// Group bool members in order to reduce Request object size.
+//	parsedURI      bool
+//	parsedPostArgs bool
+//}
 
 // Response represents HTTP response.
 //
@@ -73,11 +72,11 @@ type Response struct {
 	sawEOF          bool
 }
 
-// SetRequestURI sets RequestURI.
-func (req *Request) SetRequestURI(requestURI string) {
-	req.Header.SetRequestURI(requestURI)
-	req.parsedURI = false
-}
+//// SetRequestURI sets RequestURI.
+//func (req *Request) SetRequestURI(requestURI string) {
+//	req.Header.SetRequestURI(requestURI)
+//	req.parsedURI = false
+//}
 
 //// SetRequestURIBytes sets RequestURI.
 //func (req *Request) SetRequestURIBytes(requestURI []byte) {
@@ -113,17 +112,17 @@ func (resp *Response) ConnectionClose() bool {
 //func (resp *Response) SetConnectionClose() {
 //	resp.Header.SetConnectionClose()
 //}
-
-// ConnectionClose returns true if 'Connection: close' header is set.
-func (req *Request) ConnectionClose() bool {
-	return req.Header.ConnectionClose()
-}
-
-// SetConnectionClose sets 'Connection: close' header.
-func (req *Request) SetConnectionClose() {
-	req.Header.SetConnectionClose()
-}
-
+//
+//// ConnectionClose returns true if 'Connection: close' header is set.
+//func (req *Request) ConnectionClose() bool {
+//	return req.Header.ConnectionClose()
+//}
+//
+//// SetConnectionClose sets 'Connection: close' header.
+//func (req *Request) SetConnectionClose() {
+//	req.Header.SetConnectionClose()
+//}
+//
 //// SendFile registers file on the given path to be used as response body
 //// when Write is called.
 ////
@@ -247,11 +246,11 @@ type responseBodyWriter struct {
 //	w.r.AppendBody(p)
 //	return len(p), nil
 //}
-
-type requestBodyWriter struct {
-	r *Request
-}
-
+//
+//type requestBodyWriter struct {
+//	r *Request
+//}
+//
 //func (w *requestBodyWriter) Write(p []byte) (int, error) {
 //	w.r.AppendBody(p)
 //	return len(p), nil
@@ -496,22 +495,22 @@ func (resp *Response) ResetBody() {
 //	a.body, b.body = b.body, a.body
 //	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
 //}
-
-// URI returns request URI
-func (req *Request) URI() *URI {
-	req.parseURI()
-	return &req.uri
-}
-
-func (req *Request) parseURI() {
-	if req.parsedURI {
-		return
-	}
-	req.parsedURI = true
-
-	req.uri.parseQuick(req.Header.RequestURI(), &req.Header)
-}
-
+//
+//// URI returns request URI
+//func (req *Request) URI() *URI {
+//	req.parseURI()
+//	return &req.uri
+//}
+//
+//func (req *Request) parseURI() {
+//	if req.parsedURI {
+//		return
+//	}
+//	req.parsedURI = true
+//
+//	req.uri.parseQuick(req.Header.RequestURI(), &req.Header)
+//}
+//
 //// PostArgs returns POST arguments.
 //func (req *Request) PostArgs() *Args {
 //	req.parsePostArgs()
@@ -961,56 +960,56 @@ var errRequestHostRequired = errors.New("missing required Host header in request
 //}
 //
 //var bufioWriterPool sync.Pool
-
-func (req *Request) onlyMultipartForm() bool {
-	return req.multipartForm != nil && len(req.body) == 0
-}
-
-// Write writes request to w.
 //
-// Write doesn't flush request to w for performance reasons.
+//func (req *Request) onlyMultipartForm() bool {
+//	return req.multipartForm != nil && len(req.body) == 0
+//}
 //
-// See also WriteTo.
-func (req *Request) Write(w *bufio.Writer) error {
-	if len(req.Header.Host()) == 0 || req.parsedURI {
-		uri := req.URI()
-		host := uri.Host()
-		if len(host) == 0 {
-			return errRequestHostRequired
-		}
-		req.Header.SetHostBytes(host)
-		req.Header.SetRequestURIBytes(uri.RequestURI())
-	}
-
-	if req.bodyStream != nil {
-		return req.writeBodyStream(w)
-	}
-
-	body := req.body
-	var err error
-	if req.onlyMultipartForm() {
-		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
-		if err != nil {
-			return fmt.Errorf("error when marshaling multipart form: %s", err)
-		}
-		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
-	}
-
-	hasBody := !req.Header.noBody()
-	if hasBody {
-		req.Header.SetContentLength(len(body))
-	}
-	if err = req.Header.Write(w); err != nil {
-		return err
-	}
-	if hasBody {
-		_, err = w.Write(body)
-	} else if len(body) > 0 {
-		return fmt.Errorf("non-zero body for non-POST request. body=%q", body)
-	}
-	return err
-}
-
+//// Write writes request to w.
+////
+//// Write doesn't flush request to w for performance reasons.
+////
+//// See also WriteTo.
+//func (req *Request) Write(w *bufio.Writer) error {
+//	if len(req.Header.Host()) == 0 || req.parsedURI {
+//		uri := req.URI()
+//		host := uri.Host()
+//		if len(host) == 0 {
+//			return errRequestHostRequired
+//		}
+//		req.Header.SetHostBytes(host)
+//		req.Header.SetRequestURIBytes(uri.RequestURI())
+//	}
+//
+//	if req.bodyStream != nil {
+//		return req.writeBodyStream(w)
+//	}
+//
+//	body := req.body
+//	var err error
+//	if req.onlyMultipartForm() {
+//		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
+//		if err != nil {
+//			return fmt.Errorf("error when marshaling multipart form: %s", err)
+//		}
+//		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
+//	}
+//
+//	hasBody := !req.Header.noBody()
+//	if hasBody {
+//		req.Header.SetContentLength(len(body))
+//	}
+//	if err = req.Header.Write(w); err != nil {
+//		return err
+//	}
+//	if hasBody {
+//		_, err = w.Write(body)
+//	} else if len(body) > 0 {
+//		return fmt.Errorf("non-zero body for non-POST request. body=%q", body)
+//	}
+//	return err
+//}
+//
 //// WriteGzip writes response with gzipped body to w.
 ////
 //// The method gzips response body and sets 'Content-Encoding: gzip'
@@ -1155,40 +1154,40 @@ func (req *Request) Write(w *bufio.Writer) error {
 //	}
 //	return nil
 //}
-
-func (req *Request) writeBodyStream(w *bufio.Writer) error {
-	var err error
-
-	contentLength := req.Header.ContentLength()
-	if contentLength < 0 {
-		lrSize := limitedReaderSize(req.bodyStream)
-		if lrSize >= 0 {
-			contentLength = int(lrSize)
-			if int64(contentLength) != lrSize {
-				contentLength = -1
-			}
-			if contentLength >= 0 {
-				req.Header.SetContentLength(contentLength)
-			}
-		}
-	}
-	if contentLength >= 0 {
-		if err = req.Header.Write(w); err == nil {
-			err = writeBodyFixedSize(w, req.bodyStream, int64(contentLength))
-		}
-	} else {
-		req.Header.SetContentLength(-1)
-		if err = req.Header.Write(w); err == nil {
-			err = writeBodyChunked(w, req.bodyStream)
-		}
-	}
-	err1 := req.closeBodyStream()
-	if err == nil {
-		err = err1
-	}
-	return err
-}
-
+//
+//func (req *Request) writeBodyStream(w *bufio.Writer) error {
+//	var err error
+//
+//	contentLength := req.Header.ContentLength()
+//	if contentLength < 0 {
+//		lrSize := limitedReaderSize(req.bodyStream)
+//		if lrSize >= 0 {
+//			contentLength = int(lrSize)
+//			if int64(contentLength) != lrSize {
+//				contentLength = -1
+//			}
+//			if contentLength >= 0 {
+//				req.Header.SetContentLength(contentLength)
+//			}
+//		}
+//	}
+//	if contentLength >= 0 {
+//		if err = req.Header.Write(w); err == nil {
+//			err = writeBodyFixedSize(w, req.bodyStream, int64(contentLength))
+//		}
+//	} else {
+//		req.Header.SetContentLength(-1)
+//		if err = req.Header.Write(w); err == nil {
+//			err = writeBodyChunked(w, req.bodyStream)
+//		}
+//	}
+//	err1 := req.closeBodyStream()
+//	if err == nil {
+//		err = err1
+//	}
+//	return err
+//}
+//
 //func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) error {
 //	var err error
 //
@@ -1221,18 +1220,18 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 //	}
 //	return err
 //}
-
-func (req *Request) closeBodyStream() error {
-	if req.bodyStream == nil {
-		return nil
-	}
-	var err error
-	if bsc, ok := req.bodyStream.(io.Closer); ok {
-		err = bsc.Close()
-	}
-	req.bodyStream = nil
-	return err
-}
+//
+//func (req *Request) closeBodyStream() error {
+//	if req.bodyStream == nil {
+//		return nil
+//	}
+//	var err error
+//	if bsc, ok := req.bodyStream.(io.Closer); ok {
+//		err = bsc.Close()
+//	}
+//	req.bodyStream = nil
+//	return err
+//}
 
 func (resp *Response) closeBodyStream() error {
 	if resp.bodyStream == nil {
@@ -1374,148 +1373,148 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 	return err
 }
 
-// ErrBodyTooLarge is returned if either request or response body exceeds
-// the given limit.
-var ErrBodyTooLarge = errors.New("body size exceeds the given limit")
-
-func readBody(r *bufio.Reader, contentLength int, maxBodySize int, dst []byte) ([]byte, error) {
-	dst = dst[:0]
-	if contentLength >= 0 {
-		if maxBodySize > 0 && contentLength > maxBodySize {
-			return dst, ErrBodyTooLarge
-		}
-		return appendBodyFixedSize(r, dst, contentLength)
-	}
-	if contentLength == -1 {
-		return readBodyChunked(r, maxBodySize, dst)
-	}
-	return readBodyIdentity(r, maxBodySize, dst)
-}
-
-func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
-	dst = dst[:cap(dst)]
-	if len(dst) == 0 {
-		dst = make([]byte, 1024)
-	}
-	offset := 0
-	for {
-		nn, err := r.Read(dst[offset:])
-		if nn <= 0 {
-			if err != nil {
-				if err == io.EOF {
-					return dst[:offset], nil
-				}
-				return dst[:offset], err
-			}
-			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
-		}
-		offset += nn
-		if maxBodySize > 0 && offset > maxBodySize {
-			return dst[:offset], ErrBodyTooLarge
-		}
-		if len(dst) == offset {
-			n := round2(2 * offset)
-			if maxBodySize > 0 && n > maxBodySize {
-				n = maxBodySize + 1
-			}
-			b := make([]byte, n)
-			copy(b, dst)
-			dst = b
-		}
-	}
-}
-
-func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
-	if n == 0 {
-		return dst, nil
-	}
-
-	offset := len(dst)
-	dstLen := offset + n
-	if cap(dst) < dstLen {
-		b := make([]byte, round2(dstLen))
-		copy(b, dst)
-		dst = b
-	}
-	dst = dst[:dstLen]
-
-	for {
-		nn, err := r.Read(dst[offset:])
-		if nn <= 0 {
-			if err != nil {
-				if err == io.EOF {
-					err = io.ErrUnexpectedEOF
-				}
-				return dst[:offset], err
-			}
-			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
-		}
-		offset += nn
-		if offset == dstLen {
-			return dst, nil
-		}
-	}
-}
-
-func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
-	if len(dst) > 0 {
-		panic("BUG: expected zero-length buffer")
-	}
-
-	strCRLFLen := len(strCRLF)
-	for {
-		chunkSize, err := parseChunkSize(r)
-		if err != nil {
-			return dst, err
-		}
-		if maxBodySize > 0 && len(dst)+chunkSize > maxBodySize {
-			return dst, ErrBodyTooLarge
-		}
-		dst, err = appendBodyFixedSize(r, dst, chunkSize+strCRLFLen)
-		if err != nil {
-			return dst, err
-		}
-		if !bytes.Equal(dst[len(dst)-strCRLFLen:], strCRLF) {
-			return dst, fmt.Errorf("cannot find crlf at the end of chunk")
-		}
-		dst = dst[:len(dst)-strCRLFLen]
-		if chunkSize == 0 {
-			return dst, nil
-		}
-	}
-}
-
-func parseChunkSize(r *bufio.Reader) (int, error) {
-	n, err := readHexInt(r)
-	if err != nil {
-		return -1, err
-	}
-	c, err := r.ReadByte()
-	if err != nil {
-		return -1, fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err)
-	}
-	if c != '\r' {
-		return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\r')
-	}
-	c, err = r.ReadByte()
-	if err != nil {
-		return -1, fmt.Errorf("cannot read '\n' char at the end of chunk size: %s", err)
-	}
-	if c != '\n' {
-		return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\n')
-	}
-	return n, nil
-}
-
-func round2(n int) int {
-	if n <= 0 {
-		return 0
-	}
-	n--
-	x := uint(0)
-	for n > 0 {
-		n >>= 1
-		x++
-	}
-	return 1 << x
-}
+//// ErrBodyTooLarge is returned if either request or response body exceeds
+//// the given limit.
+//var ErrBodyTooLarge = errors.New("body size exceeds the given limit")
+//
+//func readBody(r *bufio.Reader, contentLength int, maxBodySize int, dst []byte) ([]byte, error) {
+//	dst = dst[:0]
+//	if contentLength >= 0 {
+//		if maxBodySize > 0 && contentLength > maxBodySize {
+//			return dst, ErrBodyTooLarge
+//		}
+//		return appendBodyFixedSize(r, dst, contentLength)
+//	}
+//	if contentLength == -1 {
+//		return readBodyChunked(r, maxBodySize, dst)
+//	}
+//	return readBodyIdentity(r, maxBodySize, dst)
+//}
+//
+//func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
+//	dst = dst[:cap(dst)]
+//	if len(dst) == 0 {
+//		dst = make([]byte, 1024)
+//	}
+//	offset := 0
+//	for {
+//		nn, err := r.Read(dst[offset:])
+//		if nn <= 0 {
+//			if err != nil {
+//				if err == io.EOF {
+//					return dst[:offset], nil
+//				}
+//				return dst[:offset], err
+//			}
+//			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
+//		}
+//		offset += nn
+//		if maxBodySize > 0 && offset > maxBodySize {
+//			return dst[:offset], ErrBodyTooLarge
+//		}
+//		if len(dst) == offset {
+//			n := round2(2 * offset)
+//			if maxBodySize > 0 && n > maxBodySize {
+//				n = maxBodySize + 1
+//			}
+//			b := make([]byte, n)
+//			copy(b, dst)
+//			dst = b
+//		}
+//	}
+//}
+//
+//func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
+//	if n == 0 {
+//		return dst, nil
+//	}
+//
+//	offset := len(dst)
+//	dstLen := offset + n
+//	if cap(dst) < dstLen {
+//		b := make([]byte, round2(dstLen))
+//		copy(b, dst)
+//		dst = b
+//	}
+//	dst = dst[:dstLen]
+//
+//	for {
+//		nn, err := r.Read(dst[offset:])
+//		if nn <= 0 {
+//			if err != nil {
+//				if err == io.EOF {
+//					err = io.ErrUnexpectedEOF
+//				}
+//				return dst[:offset], err
+//			}
+//			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
+//		}
+//		offset += nn
+//		if offset == dstLen {
+//			return dst, nil
+//		}
+//	}
+//}
+//
+//func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
+//	if len(dst) > 0 {
+//		panic("BUG: expected zero-length buffer")
+//	}
+//
+//	strCRLFLen := len(strCRLF)
+//	for {
+//		chunkSize, err := parseChunkSize(r)
+//		if err != nil {
+//			return dst, err
+//		}
+//		if maxBodySize > 0 && len(dst)+chunkSize > maxBodySize {
+//			return dst, ErrBodyTooLarge
+//		}
+//		dst, err = appendBodyFixedSize(r, dst, chunkSize+strCRLFLen)
+//		if err != nil {
+//			return dst, err
+//		}
+//		if !bytes.Equal(dst[len(dst)-strCRLFLen:], strCRLF) {
+//			return dst, fmt.Errorf("cannot find crlf at the end of chunk")
+//		}
+//		dst = dst[:len(dst)-strCRLFLen]
+//		if chunkSize == 0 {
+//			return dst, nil
+//		}
+//	}
+//}
+//
+//func parseChunkSize(r *bufio.Reader) (int, error) {
+//	n, err := readHexInt(r)
+//	if err != nil {
+//		return -1, err
+//	}
+//	c, err := r.ReadByte()
+//	if err != nil {
+//		return -1, fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err)
+//	}
+//	if c != '\r' {
+//		return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\r')
+//	}
+//	c, err = r.ReadByte()
+//	if err != nil {
+//		return -1, fmt.Errorf("cannot read '\n' char at the end of chunk size: %s", err)
+//	}
+//	if c != '\n' {
+//		return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\n')
+//	}
+//	return n, nil
+//}
+//
+//func round2(n int) int {
+//	if n <= 0 {
+//		return 0
+//	}
+//	n--
+//	x := uint(0)
+//	for n > 0 {
+//		n >>= 1
+//		x++
+//	}
+//	return 1 << x
+//}

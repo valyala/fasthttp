@@ -15,6 +15,8 @@ import (
 	"io"
 	"io/ioutil"
 	"sync"
+
+	"github.com/valyala/fasthttp"
 )
 
 //// ErrLineTooLong is returned when reading request or response bodies
@@ -303,7 +305,7 @@ func suppressedHeaders(status int) []string {
 	return nil
 }
 
-func readTransferResponse(req *Request, resp *Response, r *bufio.Reader) (err error) {
+func readTransferResponse(req *fasthttp.Request, resp *Response, r *bufio.Reader) (err error) {
 	t := &responseTransferReader{RequestMethod: "GET"}
 
 	t.Header = resp.Header

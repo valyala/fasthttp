@@ -37,7 +37,7 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 	}
 
 	for i := 0; i < 9; i++ {
-		req := AcquireRequest()
+		req := fasthttp.AcquireRequest()
 		req.SetRequestURI("http://foobar/baz/aaa?bbb=ddd")
 		resp := AcquireResponse()
 
@@ -64,6 +64,9 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 		if string(body) != "foobar" {
 			t.Fatalf("unexpected body %q. Expecting %q", body, "foobar")
 		}
+
+		ReleaseResponse(resp)
+		fasthttp.ReleaseRequest(req)
 	}
 
 	if err := ln.Close(); err != nil {
