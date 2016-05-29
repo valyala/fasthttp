@@ -43,7 +43,7 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 
 		// The following command does the same thing as HostClient.Do() without retrying.
 		var body []byte
-		_, err := c.Do(req, resp)
+		err := c.Do(req, resp)
 		if err == nil {
 			responseBodyReadSuccessfully := false
 			rbs := resp.BodyStream()

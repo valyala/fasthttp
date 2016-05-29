@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"strings"
 	"sync"
@@ -214,7 +213,7 @@ type ProxyClient struct {
 // Do sends a request and read response headers.
 // The response body can be read from the resp.BodyStream().
 // The user must call ProxyClient.CleanupResponse() for clean up.
-func (c *ProxyClient) Do(req *Request, resp *Response) (bool, error) {
+func (c *ProxyClient) Do(req *Request, resp *Response) error {
 	if req == nil {
 		panic("BUG: req cannot be nil")
 	}
@@ -226,7 +225,7 @@ func (c *ProxyClient) Do(req *Request, resp *Response) (bool, error) {
 
 	cc, err := c.acquireConn()
 	if err != nil {
-		return false, err
+		return err
 	}
 	conn := cc.c
 
@@ -238,7 +237,7 @@ func (c *ProxyClient) Do(req *Request, resp *Response) (bool, error) {
 		if currentTime.Sub(cc.lastWriteDeadlineTime) > (c.WriteTimeout >> 2) {
 			if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
 				c.closeConn(cc)
-				return true, err
+				return err
 			}
 			cc.lastWriteDeadlineTime = currentTime
 		}
@@ -270,7 +269,7 @@ func (c *ProxyClient) Do(req *Request, resp *Response) (bool, error) {
 	if err != nil {
 		c.releaseWriter(bw)
 		c.closeConn(cc)
-		return true, err
+		return err
 	}
 	c.releaseWriter(bw)
 
@@ -282,7 +281,7 @@ func (c *ProxyClient) Do(req *Request, resp *Response) (bool, error) {
 		if currentTime.Sub(cc.lastReadDeadlineTime) > (c.ReadTimeout >> 2) {
 			if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
 				c.closeConn(cc)
-				return true, err
+				return err
 			}
 			cc.lastReadDeadlineTime = currentTime
 		}
@@ -299,25 +298,19 @@ func (c *ProxyClient) Do(req *Request, resp *Response) (bool, error) {
 	if err = resp.ReadHeader(br); err != nil {
 		c.releaseReader(br)
 		c.closeConn(cc)
-		if err == io.EOF {
-			return true, err
-		}
-		return false, err
+		return err
 	}
 
 	if err = readTransferResponse(req, resp, br); err != nil {
 		c.releaseReader(br)
 		c.closeConn(cc)
-		if err == io.EOF {
-			return true, err
-		}
-		return false, err
+		return err
 	}
 
 	resp.cc = cc
 	resp.resetConnection = resetConnection
 	resp.br = br
-	return false, nil
+	return nil
 }
 
 // CleanupResponse releases the reader and closes or releases the connection used.
