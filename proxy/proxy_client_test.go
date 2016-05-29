@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bytes"
 	"io"
 	"net"
 	"testing"
@@ -45,18 +44,13 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 		var body []byte
 		err := c.Do(req, resp)
 		if err == nil {
-			responseBodyReadSuccessfully := false
 			rbs := resp.BodyStream()
-			buf := new(bytes.Buffer)
-			_, err := buf.ReadFrom(rbs)
-			if err == nil {
-				responseBodyReadSuccessfully = true
-				body = buf.Bytes()
+			body = make([]byte, resp.Header.ContentLength())
+			_, err = rbs.Read(body)
+			if err == io.EOF {
+				err = nil
 			}
-			c.CleanupResponse(req, resp, responseBodyReadSuccessfully)
-		}
-		if err == io.EOF {
-			err = ErrConnectionClosed
+			c.CleanupResponse(req, resp)
 		}
 
 		if err != nil {

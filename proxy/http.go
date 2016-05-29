@@ -68,9 +68,9 @@ type Response struct {
 
 	// The following fields are used only for ProxyClient
 	cc              *clientConn
-	resetConnection bool
-	nilResp         bool
 	br              *bufio.Reader
+	resetConnection bool
+	sawEOF          bool
 }
 
 // SetRequestURI sets RequestURI.

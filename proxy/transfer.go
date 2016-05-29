@@ -358,6 +358,9 @@ func readTransferResponse(req *Request, resp *Response, r *bufio.Reader) (err er
 		t.Close = true
 	}
 
+	setSawEOF := func() {
+		resp.sawEOF = true
+	}
 	// Prepare body reader. ContentLength < 0 means chunked encoding
 	// or close connection when finished, since multipart is not supported yet
 	switch {
@@ -365,17 +368,17 @@ func readTransferResponse(req *Request, resp *Response, r *bufio.Reader) (err er
 		if noBodyExpected(t.RequestMethod) {
 			t.Body = eofReader
 		} else {
-			t.Body = &body{src: NewChunkedReader(r), hdr: resp, r: r, closing: t.Close}
+			t.Body = &body{src: NewChunkedReader(r), hdr: resp, r: r, closing: t.Close, onHitEOF: setSawEOF}
 		}
 	case realLength == 0:
 		t.Body = eofReader
 	case realLength > 0:
-		t.Body = &body{src: io.LimitReader(r, realLength), closing: t.Close}
+		t.Body = &body{src: io.LimitReader(r, realLength), closing: t.Close, onHitEOF: setSawEOF}
 	default:
 		// realLength < 0, i.e. "Content-Length" not mentioned in header
 		if t.Close {
 			// Close semantics (i.e. HTTP/1.0)
-			t.Body = &body{src: r, closing: t.Close}
+			t.Body = &body{src: r, closing: t.Close, onHitEOF: setSawEOF}
 		} else {
 			// Persistent connection (i.e. HTTP/1.1)
 			t.Body = eofReader

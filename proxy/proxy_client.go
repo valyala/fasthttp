@@ -211,6 +211,7 @@ type ProxyClient struct {
 }
 
 // Do sends a request and read response headers.
+// The caller must pass valid request and response.
 // The response body can be read from the resp.BodyStream().
 // The user must call ProxyClient.CleanupResponse() for clean up.
 func (c *ProxyClient) Do(req *Request, resp *Response) error {
@@ -314,20 +315,22 @@ func (c *ProxyClient) Do(req *Request, resp *Response) error {
 }
 
 // CleanupResponse releases the reader and closes or releases the connection used.
-func (c *ProxyClient) CleanupResponse(req *Request, resp *Response, responseBodyReadSuccessfully bool) {
+func (c *ProxyClient) CleanupResponse(req *Request, resp *Response) {
 	if resp.br != nil {
 		c.releaseReader(resp.br)
 		resp.br = nil
 	}
 
 	if resp.cc != nil {
-		if !responseBodyReadSuccessfully || resp.resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
+		if !resp.sawEOF || resp.resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
 			c.closeConn(resp.cc)
 		} else {
 			c.releaseConn(resp.cc)
 		}
 		resp.cc = nil
 	}
+	resp.sawEOF = false
+	resp.resetConnection = false
 }
 
 var (
