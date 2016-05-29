@@ -14,19 +14,6 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-//// AcquireRequest returns an empty Request instance from request pool.
-////
-//// The returned Request instance may be passed to ReleaseRequest when it is
-//// no longer needed. This allows Request recycling, reduces GC pressure
-//// and usually improves performance.
-//func AcquireRequest() *Request {
-//	v := requestPool.Get()
-//	if v == nil {
-//		return &Request{}
-//	}
-//	return v.(*Request)
-//}
-
 // AcquireResponse returns an empty Response instance from response pool.
 //
 // The returned Response instance may be passed to ReleaseResponse when it is

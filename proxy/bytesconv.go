@@ -8,123 +8,6 @@ import (
 	"unsafe"
 )
 
-//import (
-//	"bufio"
-//	"bytes"
-//	"errors"
-//	"fmt"
-//	"io"
-//	"math"
-//	"net"
-//	"sync"
-//	"time"
-//	"unsafe"
-//)
-//
-//// AppendHTMLEscape appends html-escaped s to dst and returns the extended dst.
-//func AppendHTMLEscape(dst []byte, s string) []byte {
-//	var prev int
-//	var sub string
-//	for i, n := 0, len(s); i < n; i++ {
-//		sub = ""
-//		switch s[i] {
-//		case '<':
-//			sub = "&lt;"
-//		case '>':
-//			sub = "&gt;"
-//		case '"':
-//			sub = "&quot;"
-//		case '\'':
-//			sub = "&#39;"
-//		}
-//		if len(sub) > 0 {
-//			dst = append(dst, s[prev:i]...)
-//			dst = append(dst, sub...)
-//			prev = i + 1
-//		}
-//	}
-//	return append(dst, s[prev:]...)
-//}
-//
-//// AppendHTMLEscapeBytes appends html-escaped s to dst and returns
-//// the extended dst.
-//func AppendHTMLEscapeBytes(dst, s []byte) []byte {
-//	return AppendHTMLEscape(dst, b2s(s))
-//}
-//
-//// AppendIPv4 appends string representation of the given ip v4 to dst
-//// and returns the extended dst.
-//func AppendIPv4(dst []byte, ip net.IP) []byte {
-//	ip = ip.To4()
-//	if ip == nil {
-//		return append(dst, "non-v4 ip passed to AppendIPv4"...)
-//	}
-//
-//	dst = AppendUint(dst, int(ip[0]))
-//	for i := 1; i < 4; i++ {
-//		dst = append(dst, '.')
-//		dst = AppendUint(dst, int(ip[i]))
-//	}
-//	return dst
-//}
-//
-//var errEmptyIPStr = errors.New("empty ip address string")
-//
-//// ParseIPv4 parses ip address from ipStr into dst and returns the extended dst.
-//func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
-//	if len(ipStr) == 0 {
-//		return dst, errEmptyIPStr
-//	}
-//	if len(dst) < net.IPv4len {
-//		dst = make([]byte, net.IPv4len)
-//	}
-//	copy(dst, net.IPv4zero)
-//	dst = dst.To4()
-//	if dst == nil {
-//		panic("BUG: dst must not be nil")
-//	}
-//
-//	b := ipStr
-//	for i := 0; i < 3; i++ {
-//		n := bytes.IndexByte(b, '.')
-//		if n < 0 {
-//			return dst, fmt.Errorf("cannot find dot in ipStr %q", ipStr)
-//		}
-//		v, err := ParseUint(b[:n])
-//		if err != nil {
-//			return dst, fmt.Errorf("cannot parse ipStr %q: %s", ipStr, err)
-//		}
-//		if v > 255 {
-//			return dst, fmt.Errorf("cannot parse ipStr %q: ip part cannot exceed 255: parsed %d", ipStr, v)
-//		}
-//		dst[i] = byte(v)
-//		b = b[n+1:]
-//	}
-//	v, err := ParseUint(b)
-//	if err != nil {
-//		return dst, fmt.Errorf("cannot parse ipStr %q: %s", ipStr, err)
-//	}
-//	if v > 255 {
-//		return dst, fmt.Errorf("cannot parse ipStr %q: ip part cannot exceed 255: parsed %d", ipStr, v)
-//	}
-//	dst[3] = byte(v)
-//
-//	return dst, nil
-//}
-//
-//// AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
-//// to dst and returns the extended dst.
-//func AppendHTTPDate(dst []byte, date time.Time) []byte {
-//	dst = date.In(time.UTC).AppendFormat(dst, time.RFC1123)
-//	copy(dst[len(dst)-3:], strGMT)
-//	return dst
-//}
-//
-//// ParseHTTPDate parses HTTP-compliant (RFC1123) date.
-//func ParseHTTPDate(date []byte) (time.Time, error) {
-//	return time.Parse(time.RFC1123, b2s(date))
-//}
-
 // AppendUint appends n to dst and returns the extended dst.
 func AppendUint(dst []byte, n int) []byte {
 	if n < 0 {
@@ -148,15 +31,6 @@ func AppendUint(dst []byte, n int) []byte {
 	return dst
 }
 
-//// ParseUint parses uint from buf.
-//func ParseUint(buf []byte) (int, error) {
-//	v, n, err := parseUintBuf(buf)
-//	if n != len(buf) {
-//		return -1, errUnexpectedTrailingChar
-//	}
-//	return v, err
-//}
-//
 var (
 	errEmptyInt            = errors.New("empty integer")
 	errUnexpectedFirstChar = errors.New("unexpected first char found. Expecting 0-9")
@@ -186,63 +60,6 @@ func parseUintBuf(b []byte) (int, int, error) {
 	}
 	return v, n, nil
 }
-
-//var (
-//	errEmptyFloat           = errors.New("empty float number")
-//	errDuplicateFloatPoint  = errors.New("duplicate point found in float number")
-//	errUnexpectedFloatEnd   = errors.New("unexpected end of float number")
-//	errInvalidFloatExponent = errors.New("invalid float number exponent")
-//	errUnexpectedFloatChar  = errors.New("unexpected char found in float number")
-//)
-//
-//// ParseUfloat parses unsigned float from buf.
-//func ParseUfloat(buf []byte) (float64, error) {
-//	if len(buf) == 0 {
-//		return -1, errEmptyFloat
-//	}
-//	b := buf
-//	var v uint64
-//	var offset = 1.0
-//	var pointFound bool
-//	for i, c := range b {
-//		if c < '0' || c > '9' {
-//			if c == '.' {
-//				if pointFound {
-//					return -1, errDuplicateFloatPoint
-//				}
-//				pointFound = true
-//				continue
-//			}
-//			if c == 'e' || c == 'E' {
-//				if i+1 >= len(b) {
-//					return -1, errUnexpectedFloatEnd
-//				}
-//				b = b[i+1:]
-//				minus := -1
-//				switch b[0] {
-//				case '+':
-//					b = b[1:]
-//					minus = 1
-//				case '-':
-//					b = b[1:]
-//				default:
-//					minus = 1
-//				}
-//				vv, err := ParseUint(b)
-//				if err != nil {
-//					return -1, errInvalidFloatExponent
-//				}
-//				return float64(v) * offset * math.Pow10(minus*int(vv)), nil
-//			}
-//			return -1, errUnexpectedFloatChar
-//		}
-//		v = 10*v + uint64(c-'0')
-//		if pointFound {
-//			offset /= 10
-//		}
-//	}
-//	return float64(v) * offset, nil
-//}
 
 var (
 	errEmptyHexNum    = errors.New("empty hex number")
@@ -393,23 +210,3 @@ func appendQuotedPath(dst, src []byte) []byte {
 	}
 	return dst
 }
-
-//// EqualBytesStr returns true if string(b) == s.
-////
-//// This function has no performance benefits comparing to string(b) == s.
-//// It is left here for backwards compatibility only.
-////
-//// This function is deperecated and may be deleted soon.
-//func EqualBytesStr(b []byte, s string) bool {
-//	return string(b) == s
-//}
-//
-//// AppendBytesStr appends src to dst and returns the extended dst.
-////
-//// This function has no performance benefits comparing to append(dst, src...).
-//// It is left here for backwards compatibility only.
-////
-//// This function is deprecated and may be deleted soon.
-//func AppendBytesStr(dst []byte, src string) []byte {
-//	return append(dst, src...)
-//}

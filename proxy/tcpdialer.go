@@ -36,31 +36,6 @@ func Dial(addr string) (net.Conn, error) {
 	return getDialer(DefaultDialTimeout, false)(addr)
 }
 
-//// DialTimeout dials the given TCP addr using tcp4 using the given timeout.
-////
-//// This function has the following additional features comparing to net.Dial:
-////
-////   * It reduces load on DNS resolver by caching resolved TCP addressed
-////     for DefaultDNSCacheDuration.
-////   * It dials all the resolved TCP addresses in round-robin manner until
-////     connection is established. This may be useful if certain addresses
-////     are temporarily unreachable.
-////
-//// This dialer is intended for custom code wrapping before passing
-//// to Client.Dial or HostClient.Dial.
-////
-//// For instance, per-host counters and/or limits may be implemented
-//// by such wrappers.
-////
-//// The addr passed to the function must contain port. Example addr values:
-////
-////     * foobar.baz:443
-////     * foo.bar:80
-////     * aaa.com:8080
-//func DialTimeout(addr string, timeout time.Duration) (net.Conn, error) {
-//	return getDialer(timeout, false)(addr)
-//}
-
 // DialDualStack dials the given TCP addr using both tcp4 and tcp6.
 //
 // This function has the following additional features comparing to net.Dial:
@@ -88,32 +63,6 @@ func Dial(addr string) (net.Conn, error) {
 func DialDualStack(addr string) (net.Conn, error) {
 	return getDialer(DefaultDialTimeout, true)(addr)
 }
-
-//// DialDualStackTimeout dials the given TCP addr using both tcp4 and tcp6
-//// using the given timeout.
-////
-//// This function has the following additional features comparing to net.Dial:
-////
-////   * It reduces load on DNS resolver by caching resolved TCP addressed
-////     for DefaultDNSCacheDuration.
-////   * It dials all the resolved TCP addresses in round-robin manner until
-////     connection is established. This may be useful if certain addresses
-////     are temporarily unreachable.
-////
-//// This dialer is intended for custom code wrapping before passing
-//// to Client.Dial or HostClient.Dial.
-////
-//// For instance, per-host counters and/or limits may be implemented
-//// by such wrappers.
-////
-//// The addr passed to the function must contain port. Example addr values:
-////
-////     * foobar.baz:443
-////     * foo.bar:80
-////     * aaa.com:8080
-//func DialDualStackTimeout(addr string, timeout time.Duration) (net.Conn, error) {
-//	return getDialer(timeout, true)(addr)
-//}
 
 func getDialer(timeout time.Duration, dualStack bool) DialFunc {
 	if timeout <= 0 {
