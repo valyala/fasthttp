@@ -303,7 +303,7 @@ func suppressedHeaders(status int) []string {
 	return nil
 }
 
-func readTransferResponse(s *ProxyClientStatus, req *Request, resp *Response, r *bufio.Reader) (err error) {
+func readTransferResponse(req *Request, resp *Response, r *bufio.Reader) (err error) {
 	t := &responseTransferReader{RequestMethod: "GET"}
 
 	t.Header = resp.Header
@@ -316,7 +316,7 @@ func readTransferResponse(s *ProxyClientStatus, req *Request, resp *Response, r 
 		t.ProtoMinor = 0
 	}
 	//t.Close = shouldClose(t.ProtoMajor, t.ProtoMinor, t.Header, true)
-	t.Close = s.resetConnection || req.ConnectionClose() || resp.ConnectionClose()
+	t.Close = resp.resetConnection || req.ConnectionClose() || resp.ConnectionClose()
 	t.RequestMethod = string(req.Header.Method())
 
 	isChunked := resp.Header.contentLength == -1

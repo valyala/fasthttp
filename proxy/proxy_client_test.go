@@ -43,29 +43,17 @@ func TestProxyClientMultipleAddrs(t *testing.T) {
 
 		// The following command does the same thing as HostClient.Do() without retrying.
 		var body []byte
-		buf := new(bytes.Buffer)
-		_, s, err := c.SendRequest(req)
+		_, err := c.Do(req, resp)
 		if err == nil {
 			responseBodyReadSuccessfully := false
-			_, err = c.ReadResponseHeader(s, req, resp)
+			rbs := resp.BodyStream()
+			buf := new(bytes.Buffer)
+			_, err := buf.ReadFrom(rbs)
 			if err == nil {
-				err = c.SetResponseBodyStream(s, req, resp)
-				if err == nil {
-					rbs := resp.BodyStream()
-					_, err := buf.ReadFrom(rbs)
-					if err == nil {
-						responseBodyReadSuccessfully = true
-						body = buf.Bytes()
-					}
-					err2 := rbs.Close()
-					if err2 != nil {
-						t.Fatalf("unexpected error: %s", err)
-					}
-				}
+				responseBodyReadSuccessfully = true
+				body = buf.Bytes()
 			}
-			if s != nil {
-				c.CleanupAfterReadingResponseBody(s, req, resp, responseBodyReadSuccessfully)
-			}
+			c.CleanupResponse(req, resp, responseBodyReadSuccessfully)
 		}
 		if err == io.EOF {
 			err = ErrConnectionClosed

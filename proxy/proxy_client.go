@@ -211,47 +211,23 @@ type ProxyClient struct {
 	writerPool sync.Pool
 }
 
-// ProxyClientStatus holds the status information after executing SendRequest.
-//
-// It is forbidden copying ProxyClientStatus instances. It is only returned
-// from SendRequest.
-type ProxyClientStatus struct {
-	noCopy noCopy
-
-	cc              *clientConn
-	resetConnection bool
-	nilResp         bool
-	br              *bufio.Reader
-}
-
-func acquireProxyClientStatus() *ProxyClientStatus {
-	v := proxyClientStatusPool.Get()
-	if v == nil {
-		return &ProxyClientStatus{}
-	}
-	return v.(*ProxyClientStatus)
-}
-
-func releaseProxyClientStatus(s *ProxyClientStatus) {
-	proxyClientStatusPool.Put(s)
-}
-
-var proxyClientStatusPool sync.Pool
-
-// SendRequest sends a request.
-func (c *ProxyClient) SendRequest(req *Request) (bool, *ProxyClientStatus, error) {
+// Do sends a request and read response headers.
+// The response body can be read from the resp.BodyStream().
+// The user must call ProxyClient.CleanupResponse() for clean up.
+func (c *ProxyClient) Do(req *Request, resp *Response) (bool, error) {
 	if req == nil {
 		panic("BUG: req cannot be nil")
+	}
+	if resp == nil {
+		panic("BUG: resp cannot be nil")
 	}
 
 	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix))
 
 	cc, err := c.acquireConn()
 	if err != nil {
-		return false, nil, err
+		return false, err
 	}
-	s := acquireProxyClientStatus()
-	s.cc = cc
 	conn := cc.c
 
 	if c.WriteTimeout > 0 {
@@ -262,17 +238,16 @@ func (c *ProxyClient) SendRequest(req *Request) (bool, *ProxyClientStatus, error
 		if currentTime.Sub(cc.lastWriteDeadlineTime) > (c.WriteTimeout >> 2) {
 			if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
 				c.closeConn(cc)
-				releaseProxyClientStatus(s)
-				return true, nil, err
+				return true, err
 			}
 			cc.lastWriteDeadlineTime = currentTime
 		}
 	}
 
-	s.resetConnection = false
+	resetConnection := false
 	if c.MaxConnDuration > 0 && time.Since(cc.createdTime) > c.MaxConnDuration && !req.ConnectionClose() {
 		req.SetConnectionClose()
-		s.resetConnection = true
+		resetConnection = true
 	}
 
 	userAgentOld := req.Header.UserAgent()
@@ -285,7 +260,7 @@ func (c *ProxyClient) SendRequest(req *Request) (bool, *ProxyClientStatus, error
 		req.Header.userAgent = userAgentOld
 	}
 
-	if s.resetConnection {
+	if resetConnection {
 		req.Header.ResetConnectionClose()
 	}
 
@@ -295,24 +270,10 @@ func (c *ProxyClient) SendRequest(req *Request) (bool, *ProxyClientStatus, error
 	if err != nil {
 		c.releaseWriter(bw)
 		c.closeConn(cc)
-		releaseProxyClientStatus(s)
-		return true, nil, err
+		return true, err
 	}
 	c.releaseWriter(bw)
-	return false, s, nil
-}
 
-// ReadResponseHeader read a response header.
-func (c *ProxyClient) ReadResponseHeader(s *ProxyClientStatus, req *Request, resp *Response) (bool, error) {
-	s.nilResp = false
-	if resp == nil {
-		s.nilResp = true
-		resp = AcquireResponse()
-	}
-	cc := s.cc
-	conn := cc.c
-
-	var err error
 	if c.ReadTimeout > 0 {
 		// Optimization: update read deadline only if more than 25%
 		// of the last read deadline exceeded.
@@ -320,11 +281,7 @@ func (c *ProxyClient) ReadResponseHeader(s *ProxyClientStatus, req *Request, res
 		currentTime := time.Now()
 		if currentTime.Sub(cc.lastReadDeadlineTime) > (c.ReadTimeout >> 2) {
 			if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
-				//if s.nilResp {
-				//	ReleaseResponse(resp)
-				//}
-				//c.closeConn(cc)
-				//releaseProxyClientStatus(s)
+				c.closeConn(cc)
 				return true, err
 			}
 			cc.lastReadDeadlineTime = currentTime
@@ -338,80 +295,46 @@ func (c *ProxyClient) ReadResponseHeader(s *ProxyClientStatus, req *Request, res
 		resp.Header.DisableNormalizing()
 	}
 
-	s.br = c.acquireReader(conn)
-	if err = resp.ReadHeader(s.br); err != nil {
-		//if s.nilResp {
-		//	ReleaseResponse(resp)
-		//}
-		//c.releaseReader(s.br)
-		//c.closeConn(cc)
+	br := c.acquireReader(conn)
+	if err = resp.ReadHeader(br); err != nil {
+		c.releaseReader(br)
+		c.closeConn(cc)
 		if err == io.EOF {
-			//releaseProxyClientStatus(s)
 			return true, err
 		}
-		//releaseProxyClientStatus(s)
 		return false, err
 	}
+
+	if err = readTransferResponse(req, resp, br); err != nil {
+		c.releaseReader(br)
+		c.closeConn(cc)
+		if err == io.EOF {
+			return true, err
+		}
+		return false, err
+	}
+
+	resp.cc = cc
+	resp.resetConnection = resetConnection
+	resp.br = br
 	return false, nil
 }
 
-// SetResponseBodyStream sets up bodyStream of the response.
-func (c *ProxyClient) SetResponseBodyStream(s *ProxyClientStatus, req *Request, resp *Response) error {
-	return readTransferResponse(s, req, resp, s.br)
-}
-
-// CleanupAfterReadingResponseBody cleans up the ProxyClientStatus and Response.
-func (c *ProxyClient) CleanupAfterReadingResponseBody(s *ProxyClientStatus, req *Request, resp *Response, responseBodyReadSuccessfully bool) {
-	if s.br != nil {
-		c.releaseReader(s.br)
+// CleanupResponse releases the reader and closes or releases the connection used.
+func (c *ProxyClient) CleanupResponse(req *Request, resp *Response, responseBodyReadSuccessfully bool) {
+	if resp.br != nil {
+		c.releaseReader(resp.br)
+		resp.br = nil
 	}
 
-	if s.cc != nil {
-		if !responseBodyReadSuccessfully || s.resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
-			c.closeConn(s.cc)
+	if resp.cc != nil {
+		if !responseBodyReadSuccessfully || resp.resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
+			c.closeConn(resp.cc)
 		} else {
-			c.releaseConn(s.cc)
+			c.releaseConn(resp.cc)
 		}
+		resp.cc = nil
 	}
-	if s.nilResp {
-		ReleaseResponse(resp)
-	}
-	releaseProxyClientStatus(s)
-}
-
-//// ReadResponseBody read a response body.
-//func (c *ProxyClient) ReadResponseBody(s *ProxyClientStatus, req *Request, resp *Response) (bool, error) {
-//	var err error
-//	if err = resp.ReadOnlyBody(s.br, c.MaxResponseBodySize); err != nil {
-//		if s.nilResp {
-//			ReleaseResponse(resp)
-//		}
-//		c.releaseReader(s.br)
-//		c.closeConn(s.cc)
-//		if err == io.EOF {
-//			releaseProxyClientStatus(s)
-//			return true, err
-//		}
-//		releaseProxyClientStatus(s)
-//		return false, err
-//	}
-//	c.releaseReader(s.br)
-//
-//	if s.resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
-//		c.closeConn(s.cc)
-//	} else {
-//		c.releaseConn(s.cc)
-//	}
-//
-//	if s.nilResp {
-//		ReleaseResponse(resp)
-//	}
-//	releaseProxyClientStatus(s)
-//	return false, nil
-//}
-
-func isIdempotent(req *Request) bool {
-	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut()
 }
 
 var (
