@@ -286,23 +286,23 @@ func (a *Args) SetBytesKV(key, value []byte) {
 //		f(kv.key, kv.value)
 //	}
 //}
-
-func copyArgs(dst, src []argsKV) []argsKV {
-	if cap(dst) < len(src) {
-		tmp := make([]argsKV, len(src))
-		copy(tmp, dst)
-		dst = tmp
-	}
-	n := len(src)
-	dst = dst[:n]
-	for i := 0; i < n; i++ {
-		dstKV := &dst[i]
-		srcKV := &src[i]
-		dstKV.key = append(dstKV.key[:0], srcKV.key...)
-		dstKV.value = append(dstKV.value[:0], srcKV.value...)
-	}
-	return dst
-}
+//
+//func copyArgs(dst, src []argsKV) []argsKV {
+//	if cap(dst) < len(src) {
+//		tmp := make([]argsKV, len(src))
+//		copy(tmp, dst)
+//		dst = tmp
+//	}
+//	n := len(src)
+//	dst = dst[:n]
+//	for i := 0; i < n; i++ {
+//		dstKV := &dst[i]
+//		srcKV := &src[i]
+//		dstKV.key = append(dstKV.key[:0], srcKV.key...)
+//		dstKV.value = append(dstKV.value[:0], srcKV.value...)
+//	}
+//	return dst
+//}
 
 func delAllArgsBytes(args []argsKV, key []byte) []argsKV {
 	return delAllArgs(args, b2s(key))

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"time"
 	"unsafe"
 )
 
@@ -112,15 +111,15 @@ import (
 //
 //	return dst, nil
 //}
-
-// AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
-// to dst and returns the extended dst.
-func AppendHTTPDate(dst []byte, date time.Time) []byte {
-	dst = date.In(time.UTC).AppendFormat(dst, time.RFC1123)
-	copy(dst[len(dst)-3:], strGMT)
-	return dst
-}
-
+//
+//// AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
+//// to dst and returns the extended dst.
+//func AppendHTTPDate(dst []byte, date time.Time) []byte {
+//	dst = date.In(time.UTC).AppendFormat(dst, time.RFC1123)
+//	copy(dst[len(dst)-3:], strGMT)
+//	return dst
+//}
+//
 //// ParseHTTPDate parses HTTP-compliant (RFC1123) date.
 //func ParseHTTPDate(date []byte) (time.Time, error) {
 //	return time.Parse(time.RFC1123, b2s(date))

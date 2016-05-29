@@ -109,10 +109,10 @@ func (resp *Response) ConnectionClose() bool {
 	return resp.Header.ConnectionClose()
 }
 
-// SetConnectionClose sets 'Connection: close' header.
-func (resp *Response) SetConnectionClose() {
-	resp.Header.SetConnectionClose()
-}
+//// SetConnectionClose sets 'Connection: close' header.
+//func (resp *Response) SetConnectionClose() {
+//	resp.Header.SetConnectionClose()
+//}
 
 // ConnectionClose returns true if 'Connection: close' header is set.
 func (req *Request) ConnectionClose() bool {
@@ -256,22 +256,22 @@ type requestBodyWriter struct {
 //	w.r.AppendBody(p)
 //	return len(p), nil
 //}
-
-// Body returns response body.
-func (resp *Response) Body() []byte {
-	if resp.bodyStream != nil {
-		var w ByteBuffer
-		_, err := copyZeroAlloc(&w, resp.bodyStream)
-		resp.closeBodyStream()
-		if err != nil {
-			resp.body = append(resp.body[:0], err.Error()...)
-		} else {
-			resp.body = append(resp.body[:0], w.B...)
-		}
-	}
-	return resp.body
-}
-
+//
+//// Body returns response body.
+//func (resp *Response) Body() []byte {
+//	if resp.bodyStream != nil {
+//		var w ByteBuffer
+//		_, err := copyZeroAlloc(&w, resp.bodyStream)
+//		resp.closeBodyStream()
+//		if err != nil {
+//			resp.body = append(resp.body[:0], err.Error()...)
+//		} else {
+//			resp.body = append(resp.body[:0], w.B...)
+//		}
+//	}
+//	return resp.body
+//}
+//
 //// BodyGunzip returns un-gzipped body data.
 ////
 //// This method may be used if the request header contains
@@ -350,15 +350,15 @@ func (resp *Response) Body() []byte {
 //	_, err := w.Write(resp.body)
 //	return err
 //}
-
-// AppendBody appends p to response body.
 //
-// It is safe re-using p after the function returns.
-func (resp *Response) AppendBody(p []byte) {
-	resp.closeBodyStream()
-	resp.body = append(resp.body, p...)
-}
-
+//// AppendBody appends p to response body.
+////
+//// It is safe re-using p after the function returns.
+//func (resp *Response) AppendBody(p []byte) {
+//	resp.closeBodyStream()
+//	resp.body = append(resp.body, p...)
+//}
+//
 //// AppendBodyString appends s to response body.
 //func (resp *Response) AppendBodyString(s string) {
 //	resp.closeBodyStream()
@@ -474,19 +474,19 @@ func (resp *Response) ResetBody() {
 //	// do not copy multipartForm - it will be automatically
 //	// re-created on the first call to MultipartForm.
 //}
-
-// CopyTo copies resp contents to dst except of body stream.
-func (resp *Response) CopyTo(dst *Response) {
-	resp.copyToSkipBody(dst)
-	dst.body = append(dst.body[:0], resp.body...)
-}
-
-func (resp *Response) copyToSkipBody(dst *Response) {
-	dst.Reset()
-	resp.Header.CopyTo(&dst.Header)
-	dst.SkipBody = resp.SkipBody
-}
-
+//
+//// CopyTo copies resp contents to dst except of body stream.
+//func (resp *Response) CopyTo(dst *Response) {
+//	resp.copyToSkipBody(dst)
+//	dst.body = append(dst.body[:0], resp.body...)
+//}
+//
+//func (resp *Response) copyToSkipBody(dst *Response) {
+//	dst.Reset()
+//	resp.Header.CopyTo(&dst.Header)
+//	dst.SkipBody = resp.SkipBody
+//}
+//
 //func swapRequestBody(a, b *Request) {
 //	a.body, b.body = b.body, a.body
 //	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
@@ -630,50 +630,50 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	return nil
 }
 
-func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize int) (*multipart.Form, error) {
-	// Do not care about memory allocations here, since they are tiny
-	// compared to multipart data (aka multi-MB files) usually sent
-	// in multipart/form-data requests.
-
-	if size <= 0 {
-		panic(fmt.Sprintf("BUG: form size must be greater than 0. Given %d", size))
-	}
-	lr := io.LimitReader(r, int64(size))
-	mr := multipart.NewReader(lr, boundary)
-	f, err := mr.ReadForm(int64(maxInMemoryFileSize))
-	if err != nil {
-		return nil, fmt.Errorf("cannot read multipart/form-data body: %s", err)
-	}
-	return f, nil
-}
-
-// Reset clears request contents.
-func (req *Request) Reset() {
-	req.Header.Reset()
-	req.resetSkipHeader()
-}
-
-func (req *Request) resetSkipHeader() {
-	req.closeBodyStream()
-	req.body = reuseBody(req.body)
-	req.uri.Reset()
-	req.parsedURI = false
-	req.postArgs.Reset()
-	req.parsedPostArgs = false
-	req.RemoveMultipartFormFiles()
-}
-
-// RemoveMultipartFormFiles removes multipart/form-data temporary files
-// associated with the request.
-func (req *Request) RemoveMultipartFormFiles() {
-	if req.multipartForm != nil {
-		// Do not check for error, since these files may be deleted or moved
-		// to new places by user code.
-		req.multipartForm.RemoveAll()
-		req.multipartForm = nil
-	}
-	req.multipartFormBoundary = ""
-}
+//func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize int) (*multipart.Form, error) {
+//	// Do not care about memory allocations here, since they are tiny
+//	// compared to multipart data (aka multi-MB files) usually sent
+//	// in multipart/form-data requests.
+//
+//	if size <= 0 {
+//		panic(fmt.Sprintf("BUG: form size must be greater than 0. Given %d", size))
+//	}
+//	lr := io.LimitReader(r, int64(size))
+//	mr := multipart.NewReader(lr, boundary)
+//	f, err := mr.ReadForm(int64(maxInMemoryFileSize))
+//	if err != nil {
+//		return nil, fmt.Errorf("cannot read multipart/form-data body: %s", err)
+//	}
+//	return f, nil
+//}
+//
+//// Reset clears request contents.
+//func (req *Request) Reset() {
+//	req.Header.Reset()
+//	req.resetSkipHeader()
+//}
+//
+//func (req *Request) resetSkipHeader() {
+//	req.closeBodyStream()
+//	req.body = reuseBody(req.body)
+//	req.uri.Reset()
+//	req.parsedURI = false
+//	req.postArgs.Reset()
+//	req.parsedPostArgs = false
+//	req.RemoveMultipartFormFiles()
+//}
+//
+//// RemoveMultipartFormFiles removes multipart/form-data temporary files
+//// associated with the request.
+//func (req *Request) RemoveMultipartFormFiles() {
+//	if req.multipartForm != nil {
+//		// Do not check for error, since these files may be deleted or moved
+//		// to new places by user code.
+//		req.multipartForm.RemoveAll()
+//		req.multipartForm = nil
+//	}
+//	req.multipartFormBoundary = ""
+//}
 
 // Reset clears response contents.
 func (resp *Response) Reset() {
@@ -718,11 +718,11 @@ func reuseBody(body []byte) []byte {
 //func (req *Request) Read(r *bufio.Reader) error {
 //	return req.ReadLimitBody(r, 0)
 //}
-
-const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
-
-var errGetOnly = errors.New("non-GET request received")
-
+//
+//const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
+//
+//var errGetOnly = errors.New("non-GET request received")
+//
 //// ReadLimitBody reads request from the given r, limiting the body size.
 ////
 //// If maxBodySize > 0 and the body size exceeds maxBodySize,
@@ -744,91 +744,91 @@ var errGetOnly = errors.New("non-GET request received")
 //func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 //	return req.readLimitBody(r, maxBodySize, false)
 //}
-
-func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool) error {
-	req.resetSkipHeader()
-	err := req.Header.Read(r)
-	if err != nil {
-		return err
-	}
-	if getOnly && !req.Header.IsGet() {
-		return errGetOnly
-	}
-
-	if req.Header.noBody() {
-		return nil
-	}
-
-	if req.MayContinue() {
-		// 'Expect: 100-continue' header found. Let the caller deciding
-		// whether to read request body or
-		// to return StatusExpectationFailed.
-		return nil
-	}
-
-	return req.ContinueReadBody(r, maxBodySize)
-}
-
-// MayContinue returns true if the request contains
-// 'Expect: 100-continue' header.
 //
-// The caller must do one of the following actions if MayContinue returns true:
+//func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool) error {
+//	req.resetSkipHeader()
+//	err := req.Header.Read(r)
+//	if err != nil {
+//		return err
+//	}
+//	if getOnly && !req.Header.IsGet() {
+//		return errGetOnly
+//	}
 //
-//     - Either send StatusExpectationFailed response if request headers don't
-//       satisfy the caller.
-//     - Or send StatusContinue response before reading request body
-//       with ContinueReadBody.
-//     - Or close the connection.
-func (req *Request) MayContinue() bool {
-	return bytes.Equal(req.Header.peek(strExpect), str100Continue)
-}
-
-// ContinueReadBody reads request body if request header contains
-// 'Expect: 100-continue'.
+//	if req.Header.noBody() {
+//		return nil
+//	}
 //
-// The caller must send StatusContinue response before calling this method.
+//	if req.MayContinue() {
+//		// 'Expect: 100-continue' header found. Let the caller deciding
+//		// whether to read request body or
+//		// to return StatusExpectationFailed.
+//		return nil
+//	}
 //
-// If maxBodySize > 0 and the body size exceeds maxBodySize,
-// then ErrBodyTooLarge is returned.
-func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
-	var err error
-	contentLength := req.Header.ContentLength()
-	if contentLength > 0 {
-		if maxBodySize > 0 && contentLength > maxBodySize {
-			return ErrBodyTooLarge
-		}
-
-		// Pre-read multipart form data of known length.
-		// This way we limit memory usage for large file uploads, since their contents
-		// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-		req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-		if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
-			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
-			if err != nil {
-				req.Reset()
-			}
-			return err
-		}
-	}
-
-	if contentLength == -2 {
-		// identity body has no sense for http requests, since
-		// the end of body is determined by connection close.
-		// So just ignore request body for requests without
-		// 'Content-Length' and 'Transfer-Encoding' headers.
-		req.Header.SetContentLength(0)
-		return nil
-	}
-
-	req.body, err = readBody(r, contentLength, maxBodySize, req.body)
-	if err != nil {
-		req.Reset()
-		return err
-	}
-	req.Header.SetContentLength(len(req.body))
-	return nil
-}
-
+//	return req.ContinueReadBody(r, maxBodySize)
+//}
+//
+//// MayContinue returns true if the request contains
+//// 'Expect: 100-continue' header.
+////
+//// The caller must do one of the following actions if MayContinue returns true:
+////
+////     - Either send StatusExpectationFailed response if request headers don't
+////       satisfy the caller.
+////     - Or send StatusContinue response before reading request body
+////       with ContinueReadBody.
+////     - Or close the connection.
+//func (req *Request) MayContinue() bool {
+//	return bytes.Equal(req.Header.peek(strExpect), str100Continue)
+//}
+//
+//// ContinueReadBody reads request body if request header contains
+//// 'Expect: 100-continue'.
+////
+//// The caller must send StatusContinue response before calling this method.
+////
+//// If maxBodySize > 0 and the body size exceeds maxBodySize,
+//// then ErrBodyTooLarge is returned.
+//func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
+//	var err error
+//	contentLength := req.Header.ContentLength()
+//	if contentLength > 0 {
+//		if maxBodySize > 0 && contentLength > maxBodySize {
+//			return ErrBodyTooLarge
+//		}
+//
+//		// Pre-read multipart form data of known length.
+//		// This way we limit memory usage for large file uploads, since their contents
+//		// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
+//		req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
+//		if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
+//			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
+//			if err != nil {
+//				req.Reset()
+//			}
+//			return err
+//		}
+//	}
+//
+//	if contentLength == -2 {
+//		// identity body has no sense for http requests, since
+//		// the end of body is determined by connection close.
+//		// So just ignore request body for requests without
+//		// 'Content-Length' and 'Transfer-Encoding' headers.
+//		req.Header.SetContentLength(0)
+//		return nil
+//	}
+//
+//	req.body, err = readBody(r, contentLength, maxBodySize, req.body)
+//	if err != nil {
+//		req.Reset()
+//		return err
+//	}
+//	req.Header.SetContentLength(len(req.body))
+//	return nil
+//}
+//
 //// Read reads response (including body) from the given r.
 ////
 //// io.EOF is returned if r is closed before reading the first header byte.
@@ -1128,33 +1128,33 @@ func (req *Request) Write(w *bufio.Writer) error {
 //	resp.Header.SetCanonical(strContentEncoding, strDeflate)
 //	return nil
 //}
-
-// Write writes response to w.
 //
-// Write doesn't flush response to w for performance reasons.
+//// Write writes response to w.
+////
+//// Write doesn't flush response to w for performance reasons.
+////
+//// See also WriteTo.
+//func (resp *Response) Write(w *bufio.Writer) error {
+//	sendBody := !resp.mustSkipBody()
 //
-// See also WriteTo.
-func (resp *Response) Write(w *bufio.Writer) error {
-	sendBody := !resp.mustSkipBody()
-
-	if resp.bodyStream != nil {
-		return resp.writeBodyStream(w, sendBody)
-	}
-
-	bodyLen := len(resp.body)
-	if sendBody || bodyLen > 0 {
-		resp.Header.SetContentLength(bodyLen)
-	}
-	if err := resp.Header.Write(w); err != nil {
-		return err
-	}
-	if sendBody {
-		if _, err := w.Write(resp.body); err != nil {
-			return err
-		}
-	}
-	return nil
-}
+//	if resp.bodyStream != nil {
+//		return resp.writeBodyStream(w, sendBody)
+//	}
+//
+//	bodyLen := len(resp.body)
+//	if sendBody || bodyLen > 0 {
+//		resp.Header.SetContentLength(bodyLen)
+//	}
+//	if err := resp.Header.Write(w); err != nil {
+//		return err
+//	}
+//	if sendBody {
+//		if _, err := w.Write(resp.body); err != nil {
+//			return err
+//		}
+//	}
+//	return nil
+//}
 
 func (req *Request) writeBodyStream(w *bufio.Writer) error {
 	var err error
@@ -1189,38 +1189,38 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 	return err
 }
 
-func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) error {
-	var err error
-
-	contentLength := resp.Header.ContentLength()
-	if contentLength < 0 {
-		lrSize := limitedReaderSize(resp.bodyStream)
-		if lrSize >= 0 {
-			contentLength = int(lrSize)
-			if int64(contentLength) != lrSize {
-				contentLength = -1
-			}
-			if contentLength >= 0 {
-				resp.Header.SetContentLength(contentLength)
-			}
-		}
-	}
-	if contentLength >= 0 {
-		if err = resp.Header.Write(w); err == nil && sendBody {
-			err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
-		}
-	} else {
-		resp.Header.SetContentLength(-1)
-		if err = resp.Header.Write(w); err == nil && sendBody {
-			err = writeBodyChunked(w, resp.bodyStream)
-		}
-	}
-	err1 := resp.closeBodyStream()
-	if err == nil {
-		err = err1
-	}
-	return err
-}
+//func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) error {
+//	var err error
+//
+//	contentLength := resp.Header.ContentLength()
+//	if contentLength < 0 {
+//		lrSize := limitedReaderSize(resp.bodyStream)
+//		if lrSize >= 0 {
+//			contentLength = int(lrSize)
+//			if int64(contentLength) != lrSize {
+//				contentLength = -1
+//			}
+//			if contentLength >= 0 {
+//				resp.Header.SetContentLength(contentLength)
+//			}
+//		}
+//	}
+//	if contentLength >= 0 {
+//		if err = resp.Header.Write(w); err == nil && sendBody {
+//			err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
+//		}
+//	} else {
+//		resp.Header.SetContentLength(-1)
+//		if err = resp.Header.Write(w); err == nil && sendBody {
+//			err = writeBodyChunked(w, resp.bodyStream)
+//		}
+//	}
+//	err1 := resp.closeBodyStream()
+//	if err == nil {
+//		err = err1
+//	}
+//	return err
+//}
 
 func (req *Request) closeBodyStream() error {
 	if req.bodyStream == nil {

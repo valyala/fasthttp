@@ -6,14 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 func TestProxyClientMultipleAddrs(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
-	s := &Server{
-		Handler: func(ctx *RequestCtx) {
+	s := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
 			ctx.Write(ctx.Host())
 			ctx.SetConnectionClose()
 		},
