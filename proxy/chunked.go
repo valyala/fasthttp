@@ -29,7 +29,7 @@ var ErrLineTooLong = errors.New("header line too long")
 //
 // NewChunkedReader is not needed by normal applications. The http package
 // automatically decodes chunking when reading response bodies.
-func NewChunkedReader(r io.Reader) io.Reader {
+func newChunkedReader(r io.Reader) io.Reader {
 	br, ok := r.(*bufio.Reader)
 	if !ok {
 		br = bufio.NewReader(r)

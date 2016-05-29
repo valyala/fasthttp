@@ -368,7 +368,7 @@ func readTransferResponse(req *Request, resp *Response, r *bufio.Reader) (err er
 		if noBodyExpected(t.RequestMethod) {
 			t.Body = eofReader
 		} else {
-			t.Body = &body{src: NewChunkedReader(r), hdr: resp, r: r, closing: t.Close, onHitEOF: setSawEOF}
+			t.Body = &body{src: newChunkedReader(r), hdr: resp, r: r, closing: t.Close, onHitEOF: setSawEOF}
 		}
 	case realLength == 0:
 		t.Body = eofReader
