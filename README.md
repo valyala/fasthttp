@@ -1,6 +1,6 @@
 [![Build Status](https://travis-ci.org/valyala/fasthttp.svg)](https://travis-ci.org/valyala/fasthttp)
 [![GoDoc](https://godoc.org/github.com/valyala/fasthttp?status.svg)](http://godoc.org/github.com/valyala/fasthttp)
-[![Coverage](http://gocover.io/_badge/github.com/valyala/fasthttp)](http://gocover.io/github.com/valyala/fasthttp)
+[![Coverage Status](https://coveralls.io/repos/github/valyala/fasthttp/badge.svg?branch=master)](https://coveralls.io/github/valyala/fasthttp?branch=master)
 [![Go Report](http://goreportcard.com/badge/valyala/fasthttp)](http://goreportcard.com/report/valyala/fasthttp)
 
 # fasthttp
