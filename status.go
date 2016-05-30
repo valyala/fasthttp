@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"fmt"
+	"net/http"
 	"sync/atomic"
 )
 
@@ -58,69 +59,11 @@ const (
 	StatusNetworkAuthenticationRequired = 511
 )
 
-var (
-	statusLines atomic.Value
-
-	statusMessages = map[int]string{
-		StatusContinue:           "Continue",
-		StatusSwitchingProtocols: "SwitchingProtocols",
-
-		StatusOK:                   "OK",
-		StatusCreated:              "Created",
-		StatusAccepted:             "Accepted",
-		StatusNonAuthoritativeInfo: "Non-Authoritative Info",
-		StatusNoContent:            "No Content",
-		StatusResetContent:         "Reset Content",
-		StatusPartialContent:       "Partial Content",
-
-		StatusMultipleChoices:   "Multiple Choices",
-		StatusMovedPermanently:  "Moved Permanently",
-		StatusFound:             "Found",
-		StatusSeeOther:          "See Other",
-		StatusNotModified:       "Not Modified",
-		StatusUseProxy:          "Use Proxy",
-		StatusTemporaryRedirect: "Temporary Redirect",
-
-		StatusBadRequest:                   "Bad Request",
-		StatusUnauthorized:                 "Unauthorized",
-		StatusPaymentRequired:              "Payment Required",
-		StatusForbidden:                    "Forbidden",
-		StatusNotFound:                     "Not Found",
-		StatusMethodNotAllowed:             "Method Not Allowed",
-		StatusNotAcceptable:                "Not Acceptable",
-		StatusProxyAuthRequired:            "Proxy Auth Required",
-		StatusRequestTimeout:               "Request Timeout",
-		StatusConflict:                     "Conflict",
-		StatusGone:                         "Gone",
-		StatusLengthRequired:               "Length Required",
-		StatusPreconditionFailed:           "Precondition Failed",
-		StatusRequestEntityTooLarge:        "Request Entity Too Large",
-		StatusRequestURITooLong:            "Request URI Too Long",
-		StatusUnsupportedMediaType:         "Unsupported Media Type",
-		StatusRequestedRangeNotSatisfiable: "Requested Range Not Satisfiable",
-		StatusExpectationFailed:            "Expectation Failed",
-		StatusTeapot:                       "Teapot",
-		StatusPreconditionRequired:         "Precondition Required",
-		StatusTooManyRequests:              "Too Many Requests",
-		StatusRequestHeaderFieldsTooLarge:  "Request HeaderFields Too Large",
-
-		StatusInternalServerError:           "Internal Server Error",
-		StatusNotImplemented:                "Not Implemented",
-		StatusBadGateway:                    "Bad Gateway",
-		StatusServiceUnavailable:            "Service Unavailable",
-		StatusGatewayTimeout:                "Gateway Timeout",
-		StatusHTTPVersionNotSupported:       "HTTP Version Not Supported",
-		StatusNetworkAuthenticationRequired: "Network Authentication Required",
-	}
-)
+var statusLines atomic.Value
 
 // StatusMessage returns HTTP status message for the given status code.
 func StatusMessage(statusCode int) string {
-	s := statusMessages[statusCode]
-	if s == "" {
-		s = "Unknown Status Code"
-	}
-	return s
+	return http.StatusText(statusCode)
 }
 
 func init() {
