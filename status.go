@@ -100,13 +100,17 @@ var (
 		StatusRequestedRangeNotSatisfiable: "Requested Range Not Satisfiable",
 		StatusExpectationFailed:            "Expectation Failed",
 		StatusTeapot:                       "Teapot",
+		StatusPreconditionRequired:         "Precondition Required",
+		StatusTooManyRequests:              "Too Many Requests",
+		StatusRequestHeaderFieldsTooLarge:  "Request HeaderFields Too Large",
 
-		StatusInternalServerError:     "Internal Server Error",
-		StatusNotImplemented:          "Not Implemented",
-		StatusBadGateway:              "Bad Gateway",
-		StatusServiceUnavailable:      "Service Unavailable",
-		StatusGatewayTimeout:          "Gateway Timeout",
-		StatusHTTPVersionNotSupported: "HTTP Version Not Supported",
+		StatusInternalServerError:           "Internal Server Error",
+		StatusNotImplemented:                "Not Implemented",
+		StatusBadGateway:                    "Bad Gateway",
+		StatusServiceUnavailable:            "Service Unavailable",
+		StatusGatewayTimeout:                "Gateway Timeout",
+		StatusHTTPVersionNotSupported:       "HTTP Version Not Supported",
+		StatusNetworkAuthenticationRequired: "Network Authentication Required",
 	}
 )
 
