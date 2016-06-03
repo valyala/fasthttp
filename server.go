@@ -1005,6 +1005,11 @@ func (ctx *RequestCtx) SetBodyStreamWriter(sw StreamWriter) {
 	ctx.Response.SetBodyStreamWriter(sw)
 }
 
+// IsBodyStream returns true if response body is set via SetBodyStream*.
+func (ctx *RequestCtx) IsBodyStream() bool {
+	return ctx.Response.IsBodyStream()
+}
+
 // Logger returns logger, which may be used for logging arbitrary
 // request-specific messages inside RequestHandler.
 //

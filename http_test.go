@@ -178,7 +178,13 @@ func TestRequestBodyStreamMultipleBodyCalls(t *testing.T) {
 	var r Request
 
 	s := "foobar baz abc"
+	if r.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return false")
+	}
 	r.SetBodyStream(bytes.NewBufferString(s), len(s))
+	if !r.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return true")
+	}
 	for i := 0; i < 10; i++ {
 		body := r.Body()
 		if string(body) != s {
@@ -191,7 +197,13 @@ func TestResponseBodyStreamMultipleBodyCalls(t *testing.T) {
 	var r Response
 
 	s := "foobar baz abc"
+	if r.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return false")
+	}
 	r.SetBodyStream(bytes.NewBufferString(s), len(s))
+	if !r.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return true")
+	}
 	for i := 0; i < 10; i++ {
 		body := r.Body()
 		if string(body) != s {
@@ -223,7 +235,13 @@ func TestResponseBodyWriteToStream(t *testing.T) {
 
 	expectedS := "aaabbbccc"
 	buf := bytes.NewBufferString(expectedS)
+	if r.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return false")
+	}
 	r.SetBodyStream(buf, len(expectedS))
+	if !r.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return true")
+	}
 
 	testBodyWriteTo(t, &r, expectedS, false)
 }
@@ -530,6 +548,9 @@ func TestRequestMayContinue(t *testing.T) {
 
 func TestResponseGzipStream(t *testing.T) {
 	var r Response
+	if r.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return false")
+	}
 	r.SetBodyStreamWriter(func(w *bufio.Writer) {
 		fmt.Fprintf(w, "foo")
 		w.Flush()
@@ -540,11 +561,17 @@ func TestResponseGzipStream(t *testing.T) {
 			t.Fatalf("unexpected error: %s", err)
 		}
 	})
+	if !r.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return true")
+	}
 	testResponseGzipExt(t, &r, "foobarbaz1234")
 }
 
 func TestResponseDeflateStream(t *testing.T) {
 	var r Response
+	if r.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return false")
+	}
 	r.SetBodyStreamWriter(func(w *bufio.Writer) {
 		w.Write([]byte("foo"))
 		w.Flush()
@@ -555,6 +582,9 @@ func TestResponseDeflateStream(t *testing.T) {
 			t.Fatalf("unexpected error: %s", err)
 		}
 	})
+	if !r.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return true")
+	}
 	testResponseDeflateExt(t, &r, "foobarbaz1234")
 }
 
@@ -901,7 +931,13 @@ func testSetRequestBodyStream(t *testing.T, body string, chunked bool) {
 	if chunked {
 		bodySize = -1
 	}
+	if req.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return false")
+	}
 	req.SetBodyStream(bytes.NewBufferString(body), bodySize)
+	if !req.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return true")
+	}
 
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
@@ -928,7 +964,13 @@ func testSetResponseBodyStream(t *testing.T, body string, chunked bool) {
 	if chunked {
 		bodySize = -1
 	}
+	if resp.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return false")
+	}
 	resp.SetBodyStream(bytes.NewBufferString(body), bodySize)
+	if !resp.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return true")
+	}
 
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)

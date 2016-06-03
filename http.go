@@ -183,6 +183,16 @@ func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
 	resp.Header.SetContentLength(bodySize)
 }
 
+// IsBodyStream returns true if body is set via SetBodyStream*
+func (req *Request) IsBodyStream() bool {
+	return req.bodyStream != nil
+}
+
+// IsBodyStream returns true if body is set via SetBodyStream*
+func (resp *Response) IsBodyStream() bool {
+	return resp.bodyStream != nil
+}
+
 // SetBodyStreamWriter registers the given sw for populating request body.
 //
 // This function may be used in the following cases:

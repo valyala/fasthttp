@@ -92,6 +92,9 @@ func TestServerResponseBodyStream(t *testing.T) {
 	readyCh := make(chan struct{})
 	h := func(ctx *RequestCtx) {
 		ctx.SetConnectionClose()
+		if ctx.IsBodyStream() {
+			t.Fatalf("IsBodyStream must return false")
+		}
 		ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
 			fmt.Fprintf(w, "first")
 			if err := w.Flush(); err != nil {
@@ -102,6 +105,9 @@ func TestServerResponseBodyStream(t *testing.T) {
 			// there is no need to flush w here, since it will
 			// be flushed automatically after returning from StreamWriter.
 		})
+		if !ctx.IsBodyStream() {
+			t.Fatalf("IsBodyStream must return true")
+		}
 	}
 
 	serverCh := make(chan struct{})
@@ -1256,6 +1262,9 @@ func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
 	var req Request
 	ctx.Init(&req, nil, defaultLogger)
 
+	if ctx.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return false")
+	}
 	ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
 		fmt.Fprintf(w, "body writer line 1\n")
 		if err := w.Flush(); err != nil {
@@ -1263,6 +1272,9 @@ func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
 		}
 		fmt.Fprintf(w, "body writer line 2\n")
 	})
+	if !ctx.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return true")
+	}
 
 	s := ctx.Response.String()
 
