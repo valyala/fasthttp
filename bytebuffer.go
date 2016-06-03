@@ -28,6 +28,22 @@ func (b *ByteBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// WriteString appends s to ByteBuffer.B
+func (b *ByteBuffer) WriteString(s string) (int, error) {
+	b.B = append(b.B, s...)
+	return len(s), nil
+}
+
+// Set sets ByteBuffer.B to p
+func (b *ByteBuffer) Set(p []byte) {
+	b.B = append(b.B[:0], p...)
+}
+
+// SetString sets ByteBuffer.B to s
+func (b *ByteBuffer) SetString(s string) {
+	b.B = append(b.B[:0], s...)
+}
+
 // Reset makes ByteBuffer.B empty.
 func (b *ByteBuffer) Reset() {
 	b.B = b.B[:0]
@@ -39,7 +55,25 @@ func (b *ByteBuffer) Reset() {
 // This reduces the number of memory allocations required for byte buffer
 // management.
 func AcquireByteBuffer() *ByteBuffer {
-	v := byteBufferPool.Get()
+	return defaultByteBufferPool.Acquire()
+}
+
+// ReleaseByteBuffer returns byte buffer to the pool.
+//
+// ByteBuffer.B mustn't be touched after returning it to the pool.
+// Otherwise data races occur.
+func ReleaseByteBuffer(b *ByteBuffer) {
+	defaultByteBufferPool.Release(b)
+}
+
+type byteBufferPool struct {
+	pool sync.Pool
+}
+
+var defaultByteBufferPool byteBufferPool
+
+func (p *byteBufferPool) Acquire() *ByteBuffer {
+	v := p.pool.Get()
 	if v == nil {
 		return &ByteBuffer{
 			B: make([]byte, 0, defaultByteBufferSize),
@@ -48,13 +82,7 @@ func AcquireByteBuffer() *ByteBuffer {
 	return v.(*ByteBuffer)
 }
 
-// ReleaseByteBuffer returns byte buffer to the pool.
-//
-// ByteBuffer.B mustn't be touched after returning it to the pool.
-// Otherwise data races occur.
-func ReleaseByteBuffer(b *ByteBuffer) {
+func (p *byteBufferPool) Release(b *ByteBuffer) {
 	b.B = b.B[:0]
-	byteBufferPool.Put(b)
+	p.pool.Put(b)
 }
-
-var byteBufferPool sync.Pool
