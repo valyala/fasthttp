@@ -1598,9 +1598,6 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	readyCh := make(chan struct{})
 	doneCh := make(chan struct{})
 	h := func(ctx *RequestCtx) {
-		if string(ctx.Path()) == "/" {
-			ctx.Success("aaa/bbb", []byte("real response"))
-		}
 		ctx.Success("aaa/bbb", []byte("real response"))
 		<-readyCh
 		doneCh <- struct{}{}

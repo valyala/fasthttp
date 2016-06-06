@@ -272,6 +272,7 @@ type Server struct {
 	Logger Logger
 
 	concurrency      uint32
+	concurrencyCh    chan struct{}
 	perIPConnCounter perIPConnCounter
 	serverName       atomic.Value
 
@@ -285,12 +286,24 @@ type Server struct {
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
 // error with the given msg to the client if h didn't return during
 // the given duration.
+//
+// The returned handler may return StatusTooManyRequests error with the given
+// msg to the client if there are more than Server.Concurrency concurrent
+// handlers h are running at the moment.
 func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) RequestHandler {
 	if timeout <= 0 {
 		return h
 	}
 
 	return func(ctx *RequestCtx) {
+		concurrencyCh := ctx.s.concurrencyCh
+		select {
+		case concurrencyCh <- struct{}{}:
+		default:
+			ctx.Error(msg, StatusTooManyRequests)
+			return
+		}
+
 		ch := ctx.timeoutCh
 		if ch == nil {
 			ch = make(chan struct{}, 1)
@@ -299,6 +312,7 @@ func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) Request
 		go func() {
 			h(ctx)
 			ch <- struct{}{}
+			<-concurrencyCh
 		}()
 		ctx.timeoutTimer = initTimer(ctx.timeoutTimer, timeout)
 		select {
@@ -1204,6 +1218,7 @@ func (s *Server) Serve(ln net.Listener) error {
 	var err error
 
 	maxWorkersCount := s.getConcurrency()
+	s.concurrencyCh = make(chan struct{}, maxWorkersCount)
 	wp := &workerPool{
 		WorkerFunc:      s.serveConn,
 		MaxWorkersCount: maxWorkersCount,
