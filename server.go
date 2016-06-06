@@ -330,6 +330,12 @@ func CompressHandler(h RequestHandler) RequestHandler {
 func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
+		ce := ctx.Response.Header.PeekBytes(strContentEncoding)
+		if len(ce) > 0 {
+			// Do not compress responses with non-empty
+			// Content-Encoding.
+			return
+		}
 		if ctx.Request.Header.HasAcceptEncodingBytes(strGzip) {
 			ctx.Response.gzipBody(level)
 		} else if ctx.Request.Header.HasAcceptEncodingBytes(strDeflate) {
