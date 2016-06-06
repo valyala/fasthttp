@@ -10,6 +10,14 @@ import (
 	"testing"
 )
 
+func TestResponseHeaderDefaultStatusCode(t *testing.T) {
+	var h ResponseHeader
+	statusCode := h.StatusCode()
+	if statusCode != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+	}
+}
+
 func TestResponseHeaderDelClientCookie(t *testing.T) {
 	cookieName := "foobar"
 
