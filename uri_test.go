@@ -109,6 +109,9 @@ func TestURIUpdate(t *testing.T) {
 	testURIUpdate(t, "http://foo.bar/baz", "~a/%20b=c,тест?йцу=ке", "http://foo.bar/~a/%20b=c,%D1%82%D0%B5%D1%81%D1%82?йцу=ке")
 	testURIUpdate(t, "http://foo.bar/baz", "/qwe#fragment", "http://foo.bar/qwe#fragment")
 	testURIUpdate(t, "http://foobar/baz/xxx", "aaa.html#bb?cc=dd&ee=dfd", "http://foobar/baz/aaa.html#bb?cc=dd&ee=dfd")
+
+	// hash
+	testURIUpdate(t, "http://foo.bar/baz#aaa", "#fragment", "http://foo.bar/baz#fragment")
 }
 
 func testURIUpdate(t *testing.T, base, update, result string) {
@@ -166,6 +169,7 @@ func TestURIPathNormalize(t *testing.T) {
 	testURIPathNormalize(t, &u, "/a/./b/././c/./d.html", "/a/b/c/d.html")
 	testURIPathNormalize(t, &u, "./foo/", "/foo/")
 	testURIPathNormalize(t, &u, "./../.././../../aaa/bbb/../../../././../", "/")
+	testURIPathNormalize(t, &u, "./a/./.././../b/./foo.html", "/b/foo.html")
 }
 
 func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string) {
