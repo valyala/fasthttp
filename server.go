@@ -627,7 +627,7 @@ func (ctx *RequestCtx) Host() []byte {
 
 // QueryArgs returns query arguments from RequestURI.
 //
-// It doesn't return POST'ed arguments - use PostArge() for this.
+// It doesn't return POST'ed arguments - use PostArgs() for this.
 //
 // Returned arguments are valid until returning from RequestHandler.
 //
