@@ -22,7 +22,7 @@ func TestPipeConnsCloseWhileReadWriteConcurrent(t *testing.T) {
 	for i := 0; i < concurrency; i++ {
 		select {
 		case <-ch:
-		case <-time.After(3*time.Second):
+		case <-time.After(3 * time.Second):
 			t.Fatalf("timeout")
 		}
 	}
@@ -40,45 +40,59 @@ func testPipeConnsCloseWhileReadWriteSerial(t *testing.T) {
 
 func testPipeConnsCloseWhileReadWrite(t *testing.T) {
 	pc := NewPipeConns()
-	readCh := make(chan struct{})
-	writeCh := make(chan struct{})
+	c1 := pc.Conn1()
+	c2 := pc.Conn2()
+
+	readCh := make(chan error)
 	go func() {
-		_, err := io.Copy(ioutil.Discard, pc.Conn1())
-		if err != nil {
+		var err error
+		if _, err = io.Copy(ioutil.Discard, c1); err != nil {
 			if err != errConnectionClosed {
-				t.Fatalf("unexpected error: %s", err)
+				err = fmt.Errorf("unexpected error: %s", err)
+			} else {
+				err = nil
 			}
 		}
-		close(readCh)
+		readCh <- err
 	}()
+
+	writeCh := make(chan error)
 	go func() {
+		var err error
 		for {
-			_, err := pc.Conn2().Write([]byte("foobar"))
-			if err != nil {
+			if _, err = c2.Write([]byte("foobar")); err != nil {
 				if err != errConnectionClosed {
-					t.Fatalf("unexpected error: %s", err)
+					err = fmt.Errorf("unexpected error: %s", err)
+				} else {
+					err = nil
 				}
 				break
 			}
 		}
-		close(writeCh)
+		writeCh <- err
 	}()
 
 	time.Sleep(10 * time.Millisecond)
-	if err := pc.Conn1().Close(); err != nil {
+	if err := c1.Close(); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
-	if err := pc.Conn2().Close(); err != nil {
+	if err := c2.Close(); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
 	select {
-	case <-readCh:
+	case err := <-readCh:
+		if err != nil {
+			t.Fatalf("unexpected error in reader: %s", err)
+		}
 	case <-time.After(time.Second):
 		t.Fatalf("timeout")
 	}
 	select {
-	case <-writeCh:
+	case err := <-writeCh:
+		if err != nil {
+			t.Fatalf("unexpected error in writer: %s", err)
+		}
 	case <-time.After(time.Second):
 		t.Fatalf("timeout")
 	}
