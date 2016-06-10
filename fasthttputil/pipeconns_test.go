@@ -208,11 +208,11 @@ func testPipeConnsClose(t *testing.T, c1, c2 net.Conn) {
 
 	// attempt closing already closed conns
 	for i := 0; i < 10; i++ {
-		if err := c1.Close(); err == nil {
-			t.Fatalf("expecting error")
+		if err := c1.Close(); err != nil {
+			t.Fatalf("unexpected error: %s", err)
 		}
-		if err := c2.Close(); err == nil {
-			t.Fatalf("expecting error")
+		if err := c2.Close(); err != nil {
+			t.Fatalf("unexpected error: %s", err)
 		}
 	}
 }
