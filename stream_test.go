@@ -39,18 +39,16 @@ func TestNewStreamReader(t *testing.T) {
 
 func TestStreamReaderClose(t *testing.T) {
 	firstLine := "the first line must pass"
-	ch := make(chan struct{})
+	ch := make(chan error, 1)
 	r := NewStreamReader(func(w *bufio.Writer) {
 		fmt.Fprintf(w, "%s", firstLine)
 		if err := w.Flush(); err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			ch <- fmt.Errorf("unexpected error on first flush: %s", err)
+			return
 		}
 
 		fmt.Fprintf(w, "the second line must fail")
-		if err := w.Flush(); err == nil {
-			t.Fatalf("expecting error")
-		}
-		close(ch)
+		ch <- nil
 	})
 
 	result := firstLine + "the"
@@ -71,7 +69,10 @@ func TestStreamReaderClose(t *testing.T) {
 	}
 
 	select {
-	case <-ch:
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("error returned from stream reader: %s", err)
+		}
 	case <-time.After(time.Second):
 		t.Fatalf("timeout")
 	}
