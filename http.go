@@ -1109,6 +1109,9 @@ func (resp *Response) gzipBody(level int) error {
 			zw := acquireGzipWriter(sw, level)
 			copyZeroAlloc(zw, bs)
 			releaseGzipWriter(zw)
+			if bsc, ok := bs.(io.Closer); ok {
+				bsc.Close()
+			}
 		})
 	} else {
 		w := responseBodyPool.Acquire()
@@ -1136,6 +1139,9 @@ func (resp *Response) deflateBody(level int) error {
 			zw := acquireFlateWriter(sw, level)
 			copyZeroAlloc(zw, bs)
 			releaseFlateWriter(zw)
+			if bsc, ok := bs.(io.Closer); ok {
+				bsc.Close()
+			}
 		})
 	} else {
 		w := responseBodyPool.Acquire()
