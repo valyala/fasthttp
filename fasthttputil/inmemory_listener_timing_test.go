@@ -1,10 +1,11 @@
-package fasthttputil
+package fasthttputil_test
 
 import (
 	"net"
 	"testing"
 
 	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 // BenchmarkPlainStreaming measures end-to-end plaintext streaming performance
@@ -40,7 +41,7 @@ func BenchmarkTLSHandshake(b *testing.B) {
 }
 
 func benchmark(b *testing.B, h fasthttp.RequestHandler, isTLS bool) {
-	ln := NewInmemoryListener()
+	ln := fasthttputil.NewInmemoryListener()
 	serverStopCh := startServer(b, ln, h, isTLS)
 	c := newClient(ln, isTLS)
 	b.RunParallel(func(pb *testing.PB) {
@@ -61,7 +62,7 @@ func handshakeHandler(ctx *fasthttp.RequestCtx) {
 	ctx.SetConnectionClose()
 }
 
-func startServer(b *testing.B, ln *InmemoryListener, h fasthttp.RequestHandler, isTLS bool) <-chan struct{} {
+func startServer(b *testing.B, ln *fasthttputil.InmemoryListener, h fasthttp.RequestHandler, isTLS bool) <-chan struct{} {
 	ch := make(chan struct{})
 	go func() {
 		var err error
@@ -83,7 +84,7 @@ const (
 	keyFile  = "./ssl-cert-snakeoil.key"
 )
 
-func newClient(ln *InmemoryListener, isTLS bool) *fasthttp.HostClient {
+func newClient(ln *fasthttputil.InmemoryListener, isTLS bool) *fasthttp.HostClient {
 	return &fasthttp.HostClient{
 		Dial: func(addr string) (net.Conn, error) {
 			return ln.Dial()
