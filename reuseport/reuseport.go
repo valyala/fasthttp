@@ -60,7 +60,13 @@ func Listen(network, addr string) (l net.Listener, err error) {
 		return nil, err
 	}
 
-	if fd, err = syscall.Socket(soType, syscall.SOCK_STREAM, syscall.IPPROTO_TCP); err != nil {
+	syscall.ForkLock.RLock()
+	fd, err = syscall.Socket(soType, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
+	if err == nil {
+		syscall.CloseOnExec(fd)
+	}
+	syscall.ForkLock.RUnlock()
+	if err != nil {
 		return nil, err
 	}
 
