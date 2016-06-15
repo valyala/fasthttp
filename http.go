@@ -70,6 +70,21 @@ type Response struct {
 	keepBodyBuffer bool
 }
 
+// SetHost sets host for the request.
+func (req *Request) SetHost(host string) {
+	req.URI().SetHost(host)
+}
+
+// SetHostBytes sets host for the request.
+func (req *Request) SetHostBytes(host []byte) {
+	req.URI().SetHostBytes(host)
+}
+
+// Host returns the host for the given request.
+func (req *Request) Host() []byte {
+	return req.URI().Host()
+}
+
 // SetRequestURI sets RequestURI.
 func (req *Request) SetRequestURI(requestURI string) {
 	req.Header.SetRequestURI(requestURI)

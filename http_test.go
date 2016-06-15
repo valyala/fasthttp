@@ -11,6 +11,27 @@ import (
 	"testing"
 )
 
+func TestRequestHostFromRequestURI(t *testing.T) {
+	hExpected := "foobar.com"
+	var req Request
+	req.SetRequestURI("http://proxy-host:123/foobar?baz")
+	req.SetHost(hExpected)
+	h := req.Host()
+	if string(h) != hExpected {
+		t.Fatalf("unexpected host set: %q. Expecting %q", h, hExpected)
+	}
+}
+
+func TestRequestHostFromHeader(t *testing.T) {
+	hExpected := "foobar.com"
+	var req Request
+	req.Header.SetHost(hExpected)
+	h := req.Host()
+	if string(h) != hExpected {
+		t.Fatalf("unexpected host set: %q. Expecting %q", h, hExpected)
+	}
+}
+
 func TestRequestContentTypeWithCharsetIssue100(t *testing.T) {
 	expectedContentType := "application/x-www-form-urlencoded; charset=UTF-8"
 	expectedBody := "0123=56789"
