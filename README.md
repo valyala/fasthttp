@@ -308,7 +308,7 @@ with fasthttp support exist:
   	}
   }
 
-  fastttp.ListenAndServe(":80", m)
+  fasthttp.ListenAndServe(":80", m)
   ```
 
 * net/http -> fasthttp conversion table:
