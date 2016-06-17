@@ -60,6 +60,9 @@ func TestServerResponseServerHeader(t *testing.T) {
 			} else {
 				ctx.WriteString("OK")
 			}
+
+			// make sure the server name is sent to the client after ctx.Response.Reset()
+			ctx.NotFound()
 		},
 		Name: serverName,
 	}
@@ -89,11 +92,14 @@ func TestServerResponseServerHeader(t *testing.T) {
 			t.Fatalf("unexpected error: %s", err)
 		}
 
-		if resp.StatusCode() != StatusOK {
-			t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+		if resp.StatusCode() != StatusNotFound {
+			t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotFound)
 		}
-		if string(resp.Body()) != "OK" {
-			t.Fatalf("unexpected body: %q. Expecting %q", resp.Body(), "OK")
+		if string(resp.Body()) != "404 Page not found" {
+			t.Fatalf("unexpected body: %q. Expecting %q", resp.Body(), "404 Page not found")
+		}
+		if string(resp.Header.Server()) != serverName {
+			t.Fatalf("unexpected server header: %q. Expecting %q", resp.Header.Server(), serverName)
 		}
 		if err = c.Close(); err != nil {
 			t.Fatalf("unexpected error: %s", err)

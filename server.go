@@ -1533,6 +1533,10 @@ func (s *Server) serveConn(c net.Conn) error {
 			ctx.Response.Header.SetCanonical(strConnection, strKeepAlive)
 		}
 
+		if len(ctx.Response.Header.Server()) == 0 {
+			ctx.Response.Header.SetServerBytes(serverName)
+		}
+
 		if bw == nil {
 			bw = acquireWriter(ctx)
 		}
