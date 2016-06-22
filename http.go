@@ -304,22 +304,17 @@ func (req *Request) bodyBytes() []byte {
 
 func (resp *Response) bodyBuffer() *ByteBuffer {
 	if resp.body == nil {
-		resp.body = responseBodyPool.Acquire()
+		resp.body = AcquireByteBuffer()
 	}
 	return resp.body
 }
 
 func (req *Request) bodyBuffer() *ByteBuffer {
 	if req.body == nil {
-		req.body = requestBodyPool.Acquire()
+		req.body = AcquireByteBuffer()
 	}
 	return req.body
 }
-
-var (
-	requestBodyPool  byteBufferPool
-	responseBodyPool byteBufferPool
-)
 
 // BodyGunzip returns un-gzipped body data.
 //
@@ -435,7 +430,7 @@ func (resp *Response) ResetBody() {
 		if resp.keepBodyBuffer {
 			resp.body.Reset()
 		} else {
-			responseBodyPool.Release(resp.body)
+			ReleaseByteBuffer(resp.body)
 			resp.body = nil
 		}
 	}
@@ -516,7 +511,7 @@ func (req *Request) ResetBody() {
 	req.RemoveMultipartFormFiles()
 	req.closeBodyStream()
 	if req.body != nil {
-		requestBodyPool.Release(req.body)
+		ReleaseByteBuffer(req.body)
 		req.body = nil
 	}
 }
@@ -1129,7 +1124,7 @@ func (resp *Response) gzipBody(level int) error {
 			}
 		})
 	} else {
-		w := responseBodyPool.Acquire()
+		w := AcquireByteBuffer()
 		zw := acquireGzipWriter(w, level)
 		_, err := zw.Write(resp.bodyBytes())
 		releaseGzipWriter(zw)
@@ -1138,7 +1133,7 @@ func (resp *Response) gzipBody(level int) error {
 		}
 
 		// Hack: swap resp.body with w.
-		responseBodyPool.Release(resp.body)
+		ReleaseByteBuffer(resp.body)
 		resp.body = w
 	}
 	resp.Header.SetCanonical(strContentEncoding, strGzip)
@@ -1159,7 +1154,7 @@ func (resp *Response) deflateBody(level int) error {
 			}
 		})
 	} else {
-		w := responseBodyPool.Acquire()
+		w := AcquireByteBuffer()
 		zw := acquireFlateWriter(w, level)
 		_, err := zw.Write(resp.bodyBytes())
 		releaseFlateWriter(zw)
@@ -1168,7 +1163,7 @@ func (resp *Response) deflateBody(level int) error {
 		}
 
 		// Hack: swap resp.body with w.
-		responseBodyPool.Release(resp.body)
+		ReleaseByteBuffer(resp.body)
 		resp.body = w
 	}
 	resp.Header.SetCanonical(strContentEncoding, strDeflate)
