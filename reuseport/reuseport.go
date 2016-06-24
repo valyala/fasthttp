@@ -17,10 +17,10 @@ import (
 )
 
 func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err error) {
-	// TODO: add support for tcp and tcp6 networks.
+	// TODO: add support for tcp networks.
 
-	if network != "tcp4" {
-		return nil, -1, errors.New("only tcp4 network is supported")
+	if network != "tcp4" && network != "tcp6" {
+		return nil, -1, errors.New("only tcp4 and tcp6 network is supported")
 	}
 
 	tcpAddr, err := net.ResolveTCPAddr(network, addr)
@@ -28,10 +28,27 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 		return nil, -1, err
 	}
 
-	var sa4 syscall.SockaddrInet4
-	sa4.Port = tcpAddr.Port
-	copy(sa4.Addr[:], tcpAddr.IP.To4())
-	return &sa4, syscall.AF_INET, nil
+	switch network {
+	case "tcp4":
+		var sa4 syscall.SockaddrInet4
+		sa4.Port = tcpAddr.Port
+		copy(sa4.Addr[:], tcpAddr.IP.To4())
+		return &sa4, syscall.AF_INET, nil
+	case "tcp6":
+		var sa6 syscall.SockaddrInet6
+		sa6.Port = tcpAddr.Port
+		copy(sa6.Addr[:], tcpAddr.IP.To16())
+		if tcpAddr.Zone != "" {
+			ifi, err := net.InterfaceByName(tcpAddr.Zone)
+			if err != nil {
+				return nil, -1, err
+			}
+			sa6.ZoneId = uint32(ifi.Index)
+		}
+		return &sa6, syscall.AF_INET6, nil
+	default:
+		return nil, -1, errors.New("Unknown network type " + network)
+	}
 }
 
 // ErrNoReusePort is returned if the OS doesn't support SO_REUSEPORT.
