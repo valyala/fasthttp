@@ -11,6 +11,8 @@ import (
 // slice. See example code for details.
 //
 // Use AcquireByteBuffer for obtaining an empty byte buffer.
+//
+// ByteBuffer is deprecated. Use github.com/valyala/bytebufferpool instead.
 type ByteBuffer bytebufferpool.ByteBuffer
 
 // Write implements io.Writer - it appends p to ByteBuffer.B
