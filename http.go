@@ -9,6 +9,8 @@ import (
 	"mime/multipart"
 	"os"
 	"sync"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 // Request represents HTTP request.
@@ -30,7 +32,7 @@ type Request struct {
 
 	bodyStream io.Reader
 	w          requestBodyWriter
-	body       *ByteBuffer
+	body       *bytebufferpool.ByteBuffer
 
 	multipartForm         *multipart.Form
 	multipartFormBoundary string
@@ -56,7 +58,7 @@ type Response struct {
 
 	bodyStream io.Reader
 	w          responseBodyWriter
-	body       *ByteBuffer
+	body       *bytebufferpool.ByteBuffer
 
 	// Response.Read() skips reading body if set to true.
 	// Use it for reading HEAD responses.
@@ -302,19 +304,24 @@ func (req *Request) bodyBytes() []byte {
 	return req.body.B
 }
 
-func (resp *Response) bodyBuffer() *ByteBuffer {
+func (resp *Response) bodyBuffer() *bytebufferpool.ByteBuffer {
 	if resp.body == nil {
-		resp.body = AcquireByteBuffer()
+		resp.body = responseBodyPool.Get()
 	}
 	return resp.body
 }
 
-func (req *Request) bodyBuffer() *ByteBuffer {
+func (req *Request) bodyBuffer() *bytebufferpool.ByteBuffer {
 	if req.body == nil {
-		req.body = AcquireByteBuffer()
+		req.body = requestBodyPool.Get()
 	}
 	return req.body
 }
+
+var (
+	responseBodyPool bytebufferpool.Pool
+	requestBodyPool  bytebufferpool.Pool
+)
 
 // BodyGunzip returns un-gzipped body data.
 //
@@ -430,7 +437,7 @@ func (resp *Response) ResetBody() {
 		if resp.keepBodyBuffer {
 			resp.body.Reset()
 		} else {
-			ReleaseByteBuffer(resp.body)
+			responseBodyPool.Put(resp.body)
 			resp.body = nil
 		}
 	}
@@ -511,7 +518,7 @@ func (req *Request) ResetBody() {
 	req.RemoveMultipartFormFiles()
 	req.closeBodyStream()
 	if req.body != nil {
-		ReleaseByteBuffer(req.body)
+		requestBodyPool.Put(req.body)
 		req.body = nil
 	}
 }
@@ -1124,7 +1131,7 @@ func (resp *Response) gzipBody(level int) error {
 			}
 		})
 	} else {
-		w := AcquireByteBuffer()
+		w := responseBodyPool.Get()
 		zw := acquireGzipWriter(w, level)
 		_, err := zw.Write(resp.bodyBytes())
 		releaseGzipWriter(zw)
@@ -1133,7 +1140,7 @@ func (resp *Response) gzipBody(level int) error {
 		}
 
 		// Hack: swap resp.body with w.
-		ReleaseByteBuffer(resp.body)
+		responseBodyPool.Put(resp.body)
 		resp.body = w
 	}
 	resp.Header.SetCanonical(strContentEncoding, strGzip)
@@ -1154,7 +1161,7 @@ func (resp *Response) deflateBody(level int) error {
 			}
 		})
 	} else {
-		w := AcquireByteBuffer()
+		w := responseBodyPool.Get()
 		zw := acquireFlateWriter(w, level)
 		_, err := zw.Write(resp.bodyBytes())
 		releaseFlateWriter(zw)
@@ -1163,7 +1170,7 @@ func (resp *Response) deflateBody(level int) error {
 		}
 
 		// Hack: swap resp.body with w.
-		ReleaseByteBuffer(resp.body)
+		responseBodyPool.Put(resp.body)
 		resp.body = w
 	}
 	resp.Header.SetCanonical(strContentEncoding, strDeflate)

@@ -44,7 +44,7 @@ func (b *ByteBuffer) Reset() {
 // This reduces the number of memory allocations required for byte buffer
 // management.
 func AcquireByteBuffer() *ByteBuffer {
-	return (*ByteBuffer)(bytebufferpool.Get())
+	return (*ByteBuffer)(defaultByteBufferPool.Get())
 }
 
 // ReleaseByteBuffer returns byte buffer to the pool.
@@ -52,9 +52,11 @@ func AcquireByteBuffer() *ByteBuffer {
 // ByteBuffer.B mustn't be touched after returning it to the pool.
 // Otherwise data races occur.
 func ReleaseByteBuffer(b *ByteBuffer) {
-	bytebufferpool.Put(bb(b))
+	defaultByteBufferPool.Put(bb(b))
 }
 
 func bb(b *ByteBuffer) *bytebufferpool.ByteBuffer {
 	return (*bytebufferpool.ByteBuffer)(b)
 }
+
+var defaultByteBufferPool bytebufferpool.Pool
