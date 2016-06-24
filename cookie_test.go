@@ -6,6 +6,38 @@ import (
 	"time"
 )
 
+func TestCookieValueWithEqualAndSpaceChars(t *testing.T) {
+	testCookieValueWithEqualAndSpaceChars(t, "sth1", "/", "MTQ2NjU5NTcwN3xfUVduVXk4aG9jSmZaNzNEb1dGa1VjekY1bG9vMmxSWlJBZUN2Q1ZtZVFNMTk2YU9YaWtCVmY1eDRWZXd3M3Q5RTJRZnZMbk5mWklSSFZJcVlXTDhiSFFHWWdpdFVLd1hwbXR2UUN4QlJ1N3BITFpkS3Y4PXzDvPNn6JVDBFB2wYVYPHdkdlZBm6n1_0QB3_GWwE40Tg==   ")
+	testCookieValueWithEqualAndSpaceChars(t, "sth2", "/", "123")
+	testCookieValueWithEqualAndSpaceChars(t, "sth3", "/", "123 ==   1")
+}
+
+func testCookieValueWithEqualAndSpaceChars(t *testing.T, expectedName, expectedPath, expectedValue string) {
+	var c Cookie
+	c.SetKey(expectedName)
+	c.SetPath(expectedPath)
+	c.SetValue(expectedValue)
+
+	s := c.String()
+
+	var c1 Cookie
+	if err := c1.Parse(s); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	name := c1.Key()
+	if string(name) != expectedName {
+		t.Fatalf("unexpected name %q. Expecting %q", name, expectedName)
+	}
+	path := c1.Path()
+	if string(path) != expectedPath {
+		t.Fatalf("unexpected path %q. Expecting %q", path, expectedPath)
+	}
+	value := c1.Value()
+	if string(value) != expectedValue {
+		t.Fatalf("unexpected value %q. Expecting %q", value, expectedValue)
+	}
+}
+
 func TestCookieSecureHttpOnly(t *testing.T) {
 	var c Cookie
 
