@@ -877,7 +877,7 @@ func (h *ResponseHeader) AddBytesKV(key, value []byte) {
 
 // Set sets the given 'key: value' header.
 //
-// Use Add for setting multiple header value under the same key.
+// Use Add for setting multiple header values under the same key.
 func (h *ResponseHeader) Set(key, value string) {
 	initHeaderKV(&h.bufKV, key, value, h.disableNormalizing)
 	h.SetCanonical(h.bufKV.key, h.bufKV.value)
@@ -885,7 +885,7 @@ func (h *ResponseHeader) Set(key, value string) {
 
 // SetBytesK sets the given 'key: value' header.
 //
-// Use AddBytesK for setting multiple header value under the same key.
+// Use AddBytesK for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesK(key []byte, value string) {
 	h.bufKV.value = append(h.bufKV.value[:0], value...)
 	h.SetBytesKV(key, h.bufKV.value)
@@ -893,7 +893,7 @@ func (h *ResponseHeader) SetBytesK(key []byte, value string) {
 
 // SetBytesV sets the given 'key: value' header.
 //
-// Use AddBytesV for setting multiple header value under the same key.
+// Use AddBytesV for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
 	h.SetCanonical(k, value)
@@ -901,7 +901,7 @@ func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 
 // SetBytesKV sets the given 'key: value' header.
 //
-// Use AddBytesKV for setting multiple header value under the same key.
+// Use AddBytesKV for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
@@ -1059,7 +1059,7 @@ func (h *RequestHeader) AddBytesKV(key, value []byte) {
 
 // Set sets the given 'key: value' header.
 //
-// Use Add for setting multiple header value under the same key.
+// Use Add for setting multiple header values under the same key.
 func (h *RequestHeader) Set(key, value string) {
 	initHeaderKV(&h.bufKV, key, value, h.disableNormalizing)
 	h.SetCanonical(h.bufKV.key, h.bufKV.value)
@@ -1067,7 +1067,7 @@ func (h *RequestHeader) Set(key, value string) {
 
 // SetBytesK sets the given 'key: value' header.
 //
-// Use AddBytesK for setting multiple header value under the same key.
+// Use AddBytesK for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesK(key []byte, value string) {
 	h.bufKV.value = append(h.bufKV.value[:0], value...)
 	h.SetBytesKV(key, h.bufKV.value)
@@ -1075,7 +1075,7 @@ func (h *RequestHeader) SetBytesK(key []byte, value string) {
 
 // SetBytesV sets the given 'key: value' header.
 //
-// Use AddBytesV for setting multiple header value under the same key.
+// Use AddBytesV for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesV(key string, value []byte) {
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
 	h.SetCanonical(k, value)
@@ -1083,7 +1083,7 @@ func (h *RequestHeader) SetBytesV(key string, value []byte) {
 
 // SetBytesKV sets the given 'key: value' header.
 //
-// Use AddBytesKV for setting multiple header value under the same key.
+// Use AddBytesKV for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesKV(key, value []byte) {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
 	normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
