@@ -447,6 +447,9 @@ func (resp *Response) ResetBody() {
 //
 // This permits GC to reclaim the large buffer.  If used, must be before
 // ReleaseResponse.
+//
+// Use this method only if you really understand how it works.
+// The majority of workloads don't need this method.
 func (resp *Response) ReleaseBody(size int) {
 	if cap(resp.body.B) > size {
 		resp.closeBodyStream()
@@ -458,6 +461,9 @@ func (resp *Response) ReleaseBody(size int) {
 //
 // This permits GC to reclaim the large buffer.  If used, must be before
 // ReleaseRequest.
+//
+// Use this method only if you really understand how it works.
+// The majority of workloads don't need this method.
 func (req *Request) ReleaseBody(size int) {
 	if cap(req.body.B) > size {
 		req.closeBodyStream()
