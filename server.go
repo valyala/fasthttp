@@ -216,7 +216,7 @@ type Server struct {
 	//
 	// The server rejects requests with bodies exceeding this limit.
 	//
-	// By default request body size is unlimited.
+	// Request body size is limited by DefaultMaxRequestBodySize by default.
 	MaxRequestBodySize int
 
 	// Aggressively reduces memory usage at the cost of higher CPU usage
@@ -1389,12 +1389,22 @@ func nextConnID() uint64 {
 	return atomic.AddUint64(&globalConnID, 1)
 }
 
+// DefaultMaxRequestBodySize is the maximum request body size the server
+// reads by default.
+//
+// See Server.MaxRequestBodySize for details.
+const DefaultMaxRequestBodySize = 4 * 1024 * 1024
+
 func (s *Server) serveConn(c net.Conn) error {
 	serverName := s.getServerName()
 	connRequestNum := uint64(0)
 	connID := nextConnID()
 	currentTime := time.Now()
 	connTime := currentTime
+	maxRequestBodySize := s.MaxRequestBodySize
+	if maxRequestBodySize <= 0 {
+		maxRequestBodySize = DefaultMaxRequestBodySize
+	}
 
 	ctx := s.acquireCtx(c)
 	ctx.connTime = connTime
@@ -1437,7 +1447,7 @@ func (s *Server) serveConn(c net.Conn) error {
 				ctx.Request.Header.DisableNormalizing()
 				ctx.Response.Header.DisableNormalizing()
 			}
-			err = ctx.Request.readLimitBody(br, s.MaxRequestBodySize, s.GetOnly)
+			err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly)
 			if br.Buffered() == 0 || err != nil {
 				releaseReader(s, br)
 				br = nil
@@ -1473,7 +1483,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			if br == nil {
 				br = acquireReader(ctx)
 			}
-			err = ctx.Request.ContinueReadBody(br, s.MaxRequestBodySize)
+			err = ctx.Request.ContinueReadBody(br, maxRequestBodySize)
 			if br.Buffered() == 0 || err != nil {
 				releaseReader(s, br)
 				br = nil
