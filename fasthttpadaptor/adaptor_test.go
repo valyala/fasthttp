@@ -20,6 +20,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	expectedRequestURI := "/foo/bar?baz=123"
 	expectedBody := "body 123 foo bar baz"
 	expectedContentLength := len(expectedBody)
+	expectedTransferEncoding := "encoding"
 	expectedHost := "foobar.com"
 	expectedRemoteAddr := "1.2.3.4:6789"
 	expectedHeader := map[string]string{
@@ -52,6 +53,9 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		}
 		if r.ContentLength != int64(expectedContentLength) {
 			t.Fatalf("unexpected contentLength %d. Expecting %d", r.ContentLength, expectedContentLength)
+		}
+		if len(r.TransferEncoding) != 1 || r.TransferEncoding[0] != expectedTransferEncoding {
+			t.Fatalf("unexpected transferEncoding %d. Expecting %d", r.TransferEncoding, expectedTransferEncoding)
 		}
 		if r.Host != expectedHost {
 			t.Fatalf("unexpected host %q. Expecting %q", r.Host, expectedHost)
@@ -91,6 +95,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	req.Header.SetMethod(expectedMethod)
 	req.SetRequestURI(expectedRequestURI)
 	req.Header.SetHost(expectedHost)
+	req.Header.Add("Transfer-Encoding", expectedTransferEncoding)
 	req.BodyWriter().Write([]byte(expectedBody))
 	for k, v := range expectedHeader {
 		req.Header.Set(k, v)
