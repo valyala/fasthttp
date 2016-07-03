@@ -593,7 +593,7 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 	curPos := r.startPos
 	bufv := copyBufPool.Get()
 	buf := bufv.([]byte)
-	for err != nil {
+	for err == nil {
 		tailLen := r.endPos - curPos
 		if tailLen <= 0 {
 			break

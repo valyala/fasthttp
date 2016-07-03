@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"path"
 	"sort"
 	"testing"
 	"time"
@@ -86,6 +88,57 @@ func TestServeFileHead(t *testing.T) {
 	if contentLength != len(expectedBody) {
 		t.Fatalf("unexpected Content-Length: %d. expecting %d", contentLength, len(expectedBody))
 	}
+}
+
+func TestServeFileSmallNoReadFrom(t *testing.T) {
+	teststr := "hello, world!"
+
+	tempdir, err := ioutil.TempDir("", "httpexpect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tempdir)
+
+	if err := ioutil.WriteFile(
+		path.Join(tempdir, "hello"), []byte(teststr), 0666); err != nil {
+		t.Fatal(err)
+	}
+
+	var ctx RequestCtx
+	var req Request
+	req.SetRequestURI("http://foobar.com/baz")
+	ctx.Init(&req, nil, nil)
+
+	ServeFile(&ctx, path.Join(tempdir, "hello"))
+
+	reader, ok := ctx.Response.bodyStream.(*fsSmallFileReader)
+	if !ok {
+		t.Fatal("expected fsSmallFileReader")
+	}
+
+	buf := bytes.NewBuffer(nil)
+
+	n, err := reader.WriteTo(pureWriter{buf})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if n != int64(len(teststr)) {
+		t.Fatalf("expected %d bytes, got %d bytes", len(teststr), n)
+	}
+
+	body := string(buf.Bytes())
+	if body != teststr {
+		t.Fatalf("expected '%s'", teststr)
+	}
+}
+
+type pureWriter struct {
+	w io.Writer
+}
+
+func (pw pureWriter) Write(p []byte) (nn int, err error) {
+	return pw.w.Write(p)
 }
 
 func TestServeFileCompressed(t *testing.T) {
