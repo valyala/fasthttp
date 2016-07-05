@@ -168,8 +168,8 @@ go get -u github.com/valyala/fasthttp
 Unfortunately, fasthttp doesn't provide API identical to net/http.
 See the [FAQ](#faq) for details.
 There is [net/http -> fasthttp handler converter](https://godoc.org/github.com/valyala/fasthttp/fasthttpadaptor),
-but it is advisable writing fasthttp request handlers by hands for gaining
-all the fasthttp advantages (especially high performance :) ).
+but it is better to write fasthttp request handlers by hand in order to use 
+all of the fasthttp advantages (especially high performance :) ).
 
 Important points:
 
@@ -239,7 +239,7 @@ from net/http to fasthttp.
   ```
 
 * Fasthttp allows setting response headers and writing response body
-in arbitrary order. There is no 'headers first, then body' restriction
+in an arbitrary order. There is no 'headers first, then body' restriction
 like in net/http. The following code is valid for fasthttp:
 
   ```go
@@ -273,7 +273,7 @@ like in net/http. The following code is valid for fasthttp:
 
 * Fasthttp doesn't provide [ServeMux](https://golang.org/pkg/net/http/#ServeMux),
 but there are more powerful third-party routers and web frameworks
-with fasthttp support exist:
+with fasthttp support:
 
   * [Iris](https://github.com/kataras/iris)
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
@@ -372,7 +372,7 @@ RequestCtx provides the following _band aids_ for this case:
   See [the example](https://godoc.org/github.com/valyala/fasthttp#example-RequestCtx-TimeoutError)
   for more details.
 
-Use brilliant tool - [race detector](http://blog.golang.org/race-detector) -
+Use this brilliant tool - [race detector](http://blog.golang.org/race-detector) -
 for detecting and eliminating data races in your program. If you detected
 data race related to fasthttp in your program, then there is high probability
 you forgot calling [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
@@ -499,13 +499,13 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   Because net/http API limits many optimization opportunities.
   For example:
   * net/http Request object lifetime isn't limited by request handler execution
-    time. So the server must create new request object per each request instead
-    of reusing existing objects like fasthttp do.
+    time. So the server must create a new request object per each request instead
+    of reusing existing objects like fasthttp does.
   * net/http headers are stored in a `map[string][]string`. So the server
     must parse all the headers, convert them from `[]byte` to `string` and put
     them into the map before calling user-provided request handler.
     This all requires unnecessary memory allocations avoided by fasthttp.
-  * net/http client API requires creating new response object per each request.
+  * net/http client API requires creating a new response object per each request.
 
 * *Why fasthttp API is incompatible with net/http?*
 
