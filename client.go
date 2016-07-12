@@ -19,12 +19,14 @@ import (
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
 //
-// Response is ignored if resp is nil.
-//
 // Client determines the server to be requested in the following order:
 //
 //   - from RequestURI if it contains full url with scheme and host;
 //   - from Host header otherwise.
+//
+// The function doesn't follow redirects. Use Get* for following redirects.
+//
+// Response is ignored if resp is nil.
 //
 // ErrNoFreeConns is returned if all DefaultMaxConnsPerHost connections
 // to the requested host are busy.
@@ -45,6 +47,8 @@ func Do(req *Request, resp *Response) error {
 //
 //   - from RequestURI if it contains full url with scheme and host;
 //   - from Host header otherwise.
+//
+// The function doesn't follow redirects. Use Get* for following redirects.
 //
 // Response is ignored if resp is nil.
 //
@@ -68,6 +72,8 @@ func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 //   - from RequestURI if it contains full url with scheme and host;
 //   - from Host header otherwise.
 //
+// The function doesn't follow redirects. Use Get* for following redirects.
+//
 // Response is ignored if resp is nil.
 //
 // ErrTimeout is returned if the response wasn't returned until
@@ -81,12 +87,16 @@ func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 
 // Get appends url contents to dst and returns it as body.
 //
+// The function follows redirects. Use Do* for manually handling redirects.
+//
 // New body buffer is allocated if dst is nil.
 func Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return defaultClient.Get(dst, url)
 }
 
 // GetTimeout appends url contents to dst and returns it as body.
+//
+// The function follows redirects. Use Do* for manually handling redirects.
 //
 // New body buffer is allocated if dst is nil.
 //
@@ -97,6 +107,8 @@ func GetTimeout(dst []byte, url string, timeout time.Duration) (statusCode int, 
 }
 
 // GetDeadline appends url contents to dst and returns it as body.
+//
+// The function follows redirects. Use Do* for manually handling redirects.
 //
 // New body buffer is allocated if dst is nil.
 //
@@ -109,6 +121,8 @@ func GetDeadline(dst []byte, url string, deadline time.Time) (statusCode int, bo
 // Post sends POST request to the given url with the given POST arguments.
 //
 // Response body is appended to dst, which is returned as body.
+//
+// The function follows redirects. Use Do* for manually handling redirects.
 //
 // New body buffer is allocated if dst is nil.
 //
@@ -216,12 +230,16 @@ type Client struct {
 
 // Get appends url contents to dst and returns it as body.
 //
+// The function follows redirects. Use Do* for manually handling redirects.
+//
 // New body buffer is allocated if dst is nil.
 func (c *Client) Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return clientGetURL(dst, url, c)
 }
 
 // GetTimeout appends url contents to dst and returns it as body.
+//
+// The function follows redirects. Use Do* for manually handling redirects.
 //
 // New body buffer is allocated if dst is nil.
 //
@@ -232,6 +250,8 @@ func (c *Client) GetTimeout(dst []byte, url string, timeout time.Duration) (stat
 }
 
 // GetDeadline appends url contents to dst and returns it as body.
+//
+// The function follows redirects. Use Do* for manually handling redirects.
 //
 // New body buffer is allocated if dst is nil.
 //
@@ -244,6 +264,8 @@ func (c *Client) GetDeadline(dst []byte, url string, deadline time.Time) (status
 // Post sends POST request to the given url with the given POST arguments.
 //
 // Response body is appended to dst, which is returned as body.
+//
+// The function follows redirects. Use Do* for manually handling redirects.
 //
 // New body buffer is allocated if dst is nil.
 //
@@ -262,6 +284,8 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 //
 //   - from RequestURI if it contains full url with scheme and host;
 //   - from Host header otherwise.
+//
+// The function doesn't follow redirects. Use Get* for following redirects.
 //
 // Response is ignored if resp is nil.
 //
@@ -285,6 +309,8 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 //   - from RequestURI if it contains full url with scheme and host;
 //   - from Host header otherwise.
 //
+// The function doesn't follow redirects. Use Get* for following redirects.
+//
 // Response is ignored if resp is nil.
 //
 // ErrTimeout is returned if the response wasn't returned until
@@ -301,12 +327,14 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
 //
-// Response is ignored if resp is nil.
-//
 // Client determines the server to be requested in the following order:
 //
 //   - from RequestURI if it contains full url with scheme and host;
 //   - from Host header otherwise.
+//
+// Response is ignored if resp is nil.
+//
+// The function doesn't follow redirects. Use Get* for following redirects.
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
 // to the requested host are busy.
@@ -561,12 +589,16 @@ func (c *HostClient) LastUseTime() time.Time {
 
 // Get appends url contents to dst and returns it as body.
 //
+// The function follows redirects. Use Do* for manually handling redirects.
+//
 // New body buffer is allocated if dst is nil.
 func (c *HostClient) Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return clientGetURL(dst, url, c)
 }
 
 // GetTimeout appends url contents to dst and returns it as body.
+//
+// The function follows redirects. Use Do* for manually handling redirects.
 //
 // New body buffer is allocated if dst is nil.
 //
@@ -577,6 +609,8 @@ func (c *HostClient) GetTimeout(dst []byte, url string, timeout time.Duration) (
 }
 
 // GetDeadline appends url contents to dst and returns it as body.
+//
+// The function follows redirects. Use Do* for manually handling redirects.
 //
 // New body buffer is allocated if dst is nil.
 //
@@ -589,6 +623,8 @@ func (c *HostClient) GetDeadline(dst []byte, url string, deadline time.Time) (st
 // Post sends POST request to the given url with the given POST arguments.
 //
 // Response body is appended to dst, which is returned as body.
+//
+// The function follows redirects. Use Do* for manually handling redirects.
 //
 // New body buffer is allocated if dst is nil.
 //
@@ -810,6 +846,8 @@ func ReleaseResponse(resp *Response) {
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
 //
+// The function doesn't follow redirects. Use Get* for following redirects.
+//
 // Response is ignored if resp is nil.
 //
 // ErrTimeout is returned if the response wasn't returned during
@@ -826,6 +864,8 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
+//
+// The function doesn't follow redirects. Use Get* for following redirects.
 //
 // Response is ignored if resp is nil.
 //
@@ -933,6 +973,8 @@ var errorChPool sync.Pool
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
+//
+// The function doesn't follow redirects. Use Get* for following redirects.
 //
 // Response is ignored if resp is nil.
 //
@@ -1466,6 +1508,8 @@ type pipelineWork struct {
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
 //
+// The function doesn't follow redirects. Use Get* for following redirects.
+//
 // Response is ignored if resp is nil.
 //
 // ErrTimeout is returned if the response wasn't returned during
@@ -1482,6 +1526,8 @@ func (c *PipelineClient) DoTimeout(req *Request, resp *Response, timeout time.Du
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
+//
+// The function doesn't follow redirects. Use Get* for following redirects.
 //
 // Response is ignored if resp is nil.
 //
@@ -1541,6 +1587,8 @@ func (c *PipelineClient) DoDeadline(req *Request, resp *Response, deadline time.
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
+//
+// The function doesn't follow redirects. Use Get* for following redirects.
 //
 // Response is ignored if resp is nil.
 //
