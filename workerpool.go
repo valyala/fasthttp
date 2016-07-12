@@ -3,7 +3,6 @@ package fasthttp
 import (
 	"net"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -203,13 +202,6 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 	var c net.Conn
 
 	defer func() {
-		if r := recover(); r != nil {
-			wp.Logger.Printf("panic: %s\nStack trace:\n%s", r, debug.Stack())
-			if c != nil {
-				c.Close()
-			}
-		}
-
 		wp.lock.Lock()
 		wp.workersCount--
 		wp.lock.Unlock()

@@ -10,7 +10,6 @@ import (
 	"mime/multipart"
 	"net"
 	"os"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1673,10 +1672,6 @@ func hijackConnHandler(r io.Reader, c net.Conn, s *Server, h HijackHandler) {
 	hjc := s.acquireHijackConn(r, c)
 
 	defer func() {
-		if r := recover(); r != nil {
-			s.logger().Printf("panic on hijacked conn: %s\nStack trace:\n%s", r, debug.Stack())
-		}
-
 		if br, ok := r.(*bufio.Reader); ok {
 			releaseReader(s, br)
 		}

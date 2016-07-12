@@ -3,7 +3,6 @@ package fasthttp
 import (
 	"bufio"
 	"io"
-	"runtime/debug"
 	"sync"
 
 	"github.com/valyala/fasthttp/fasthttputil"
@@ -42,12 +41,6 @@ func NewStreamReader(sw StreamWriter) io.ReadCloser {
 	}
 
 	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				defaultLogger.Printf("panic in StreamWriter: %s\nStack trace:\n%s", r, debug.Stack())
-			}
-		}()
-
 		sw(bw)
 		bw.Flush()
 		pw.Close()
