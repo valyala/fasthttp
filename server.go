@@ -481,6 +481,17 @@ func (ctx *RequestCtx) UserValueBytes(key []byte) interface{} {
 	return ctx.userValues.GetBytes(key)
 }
 
+// VisitUserValues calls visitor for each existing userValue.
+//
+// visitor must not retain references to key and value after returning.
+// Make key and/or value copies if you need storing them after returning.
+func (ctx *RequestCtx) VisitUserValues(visitor func([]byte, interface{})) {
+	for i, n := 0, len(ctx.userValues); i < n; i++ {
+		kv := &ctx.userValues[i]
+		visitor(kv.key, kv.value)
+	}
+}
+
 // IsTLS returns true if the underlying connection is tls.Conn.
 //
 // tls.Conn is an encrypted connection (aka SSL, HTTPS).

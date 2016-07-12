@@ -1031,6 +1031,17 @@ func TestRequestCtxUserValue(t *testing.T) {
 			t.Fatalf("unexpected value obtained for key %q: %v. Expecting %d", k, v, i)
 		}
 	}
+	vlen := 0
+	ctx.VisitUserValues(func(key []byte, value interface{}) {
+		vlen++
+		v := ctx.UserValueBytes(key)
+		if v != value {
+			t.Fatalf("unexpected value obtained from VisitUserValues for key: %q, expecting: %#v but got: %#v", key, v, value)
+		}
+	})
+	if len(ctx.userValues) != vlen {
+		t.Fatalf("the length of user values returned from VisitUserValues is not equal to the length of the userValues, expecting: %d but got: %d", len(ctx.userValues), vlen)
+	}
 }
 
 func TestServerHeadRequest(t *testing.T) {
