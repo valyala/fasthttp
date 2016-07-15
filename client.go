@@ -1592,9 +1592,6 @@ func (c *PipelineClient) DoDeadline(req *Request, resp *Response, deadline time.
 //
 // Response is ignored if resp is nil.
 //
-// ErrNoFreeConns is returned if all HostClient.MaxConns connections
-// to the host are busy.
-//
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *PipelineClient) Do(req *Request, resp *Response) error {
