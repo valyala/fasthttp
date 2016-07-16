@@ -589,24 +589,19 @@ func benchmarkPipelineClient(b *testing.B, parallelism int) {
 		close(ch)
 	}()
 
-	var clients []*PipelineClient
-	for i := 0; i < runtime.GOMAXPROCS(-1); i++ {
-		c := &PipelineClient{
-			Dial:               func(addr string) (net.Conn, error) { return ln.Dial() },
-			ReadBufferSize:     1024 * 1024,
-			WriteBufferSize:    1024 * 1024,
-			MaxPendingRequests: parallelism,
-		}
-		clients = append(clients, c)
+	maxConns := runtime.GOMAXPROCS(-1)
+	c := &PipelineClient{
+		Dial:               func(addr string) (net.Conn, error) { return ln.Dial() },
+		ReadBufferSize:     1024 * 1024,
+		WriteBufferSize:    1024 * 1024,
+		MaxConns:           maxConns,
+		MaxPendingRequests: parallelism * maxConns,
 	}
 
-	clientID := uint32(0)
 	requestURI := "/foo/bar?baz=123"
 	url := "http://unused.host" + requestURI
 	b.SetParallelism(parallelism)
 	b.RunParallel(func(pb *testing.PB) {
-		n := atomic.AddUint32(&clientID, 1)
-		c := clients[n%uint32(len(clients))]
 		var req Request
 		req.SetRequestURI(url)
 		var resp Response

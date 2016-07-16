@@ -17,18 +17,22 @@ import (
 )
 
 func TestPipelineClientDoSerial(t *testing.T) {
-	testPipelineClientDoConcurrent(t, 1, 0)
+	testPipelineClientDoConcurrent(t, 1, 0, 0)
 }
 
 func TestPipelineClientDoConcurrent(t *testing.T) {
-	testPipelineClientDoConcurrent(t, 10, 0)
+	testPipelineClientDoConcurrent(t, 10, 0, 1)
 }
 
 func TestPipelineClientDoBatchDelayConcurrent(t *testing.T) {
-	testPipelineClientDoConcurrent(t, 10, 5*time.Millisecond)
+	testPipelineClientDoConcurrent(t, 10, 5*time.Millisecond, 1)
 }
 
-func testPipelineClientDoConcurrent(t *testing.T, concurrency int, maxBatchDelay time.Duration) {
+func TestPipelineClientDoBatchDelayConcurrentMultiConn(t *testing.T) {
+	testPipelineClientDoConcurrent(t, 10, 5*time.Millisecond, 3)
+}
+
+func testPipelineClientDoConcurrent(t *testing.T, concurrency int, maxBatchDelay time.Duration, maxConns int) {
 	ln := fasthttputil.NewInmemoryListener()
 
 	s := &Server{
@@ -49,10 +53,10 @@ func testPipelineClientDoConcurrent(t *testing.T, concurrency int, maxBatchDelay
 		Dial: func(addr string) (net.Conn, error) {
 			return ln.Dial()
 		},
-		MaxIdleConnDuration: 23 * time.Millisecond,
-		MaxPendingRequests:  6,
-		MaxBatchDelay:       maxBatchDelay,
-		Logger:              &customLogger{},
+		MaxConns:           maxConns,
+		MaxPendingRequests: concurrency,
+		MaxBatchDelay:      maxBatchDelay,
+		Logger:             &customLogger{},
 	}
 
 	clientStopCh := make(chan struct{}, concurrency)
