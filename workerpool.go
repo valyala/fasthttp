@@ -201,12 +201,6 @@ func (wp *workerPool) release(ch *workerChan) bool {
 func (wp *workerPool) workerFunc(ch *workerChan) {
 	var c net.Conn
 
-	defer func() {
-		wp.lock.Lock()
-		wp.workersCount--
-		wp.lock.Unlock()
-	}()
-
 	var err error
 	for c = range ch.ch {
 		if c == nil {
@@ -230,4 +224,8 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			break
 		}
 	}
+
+	wp.lock.Lock()
+	wp.workersCount--
+	wp.lock.Unlock()
 }

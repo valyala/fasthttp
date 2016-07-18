@@ -1670,16 +1670,13 @@ func (s *Server) updateWriteDeadline(c net.Conn, ctx *RequestCtx, lastDeadlineTi
 
 func hijackConnHandler(r io.Reader, c net.Conn, s *Server, h HijackHandler) {
 	hjc := s.acquireHijackConn(r, c)
-
-	defer func() {
-		if br, ok := r.(*bufio.Reader); ok {
-			releaseReader(s, br)
-		}
-		c.Close()
-		s.releaseHijackConn(hjc)
-	}()
-
 	h(hjc)
+
+	if br, ok := r.(*bufio.Reader); ok {
+		releaseReader(s, br)
+	}
+	c.Close()
+	s.releaseHijackConn(hjc)
 }
 
 func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
