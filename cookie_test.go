@@ -7,7 +7,7 @@ import (
 )
 
 func TestCookieValueWithEqualAndSpaceChars(t *testing.T) {
-	testCookieValueWithEqualAndSpaceChars(t, "sth1", "/", "MTQ2NjU5NTcwN3xfUVduVXk4aG9jSmZaNzNEb1dGa1VjekY1bG9vMmxSWlJBZUN2Q1ZtZVFNMTk2YU9YaWtCVmY1eDRWZXd3M3Q5RTJRZnZMbk5mWklSSFZJcVlXTDhiSFFHWWdpdFVLd1hwbXR2UUN4QlJ1N3BITFpkS3Y4PXzDvPNn6JVDBFB2wYVYPHdkdlZBm6n1_0QB3_GWwE40Tg==   ")
+	testCookieValueWithEqualAndSpaceChars(t, "sth1", "/", "MTQ2NjU5NTcwN3xfUVduVXk4aG9jSmZaNzNEb1dGa1VjekY1bG9vMmxSWlJBZUN2Q1ZtZVFNMTk2YU9YaWtCVmY1eDRWZXd3M3Q5RTJRZnZMbk5mWklSSFZJcVlXTDhiSFFHWWdpdFVLd1hwbXR2UUN4QlJ1N3BITFpkS3Y4PXzDvPNn6JVDBFB2wYVYPHdkdlZBm6n1_0QB3_GWwE40Tg  ==")
 	testCookieValueWithEqualAndSpaceChars(t, "sth2", "/", "123")
 	testCookieValueWithEqualAndSpaceChars(t, "sth3", "/", "123 ==   1")
 }
@@ -173,6 +173,8 @@ func TestCookieParse(t *testing.T) {
 	testCookieParse(t, "foo", "foo")
 	testCookieParse(t, "foo=bar", "foo=bar")
 	testCookieParse(t, "foo=", "foo=")
+	testCookieParse(t, `foo="bar"`, "foo=bar")
+	testCookieParse(t, `"foo"=bar`, `"foo"=bar`)
 	testCookieParse(t, "foo=bar; domain=aaa.com; path=/foo/bar", "foo=bar; domain=aaa.com; path=/foo/bar")
 	testCookieParse(t, " xxx = yyy  ; path=/a/b;;;domain=foobar.com ; expires= Tue, 10 Nov 2009 23:00:00 GMT ; ;;",
 		"xxx=yyy; expires=Tue, 10 Nov 2009 23:00:00 GMT; domain=foobar.com; path=/a/b")
@@ -185,7 +187,7 @@ func testCookieParse(t *testing.T, s, expectedS string) {
 	}
 	result := string(c.Cookie())
 	if result != expectedS {
-		t.Fatalf("unexpected cookies %q. Expected %q. Original %q", result, expectedS, s)
+		t.Fatalf("unexpected cookies %q. Expecting %q. Original %q", result, expectedS, s)
 	}
 }
 
@@ -194,7 +196,7 @@ func TestCookieAppendBytes(t *testing.T) {
 
 	testCookieAppendBytes(t, c, "", "bar", "bar")
 	testCookieAppendBytes(t, c, "foo", "", "foo=")
-	testCookieAppendBytes(t, c, "ффф", "12 лодлы", "%D1%84%D1%84%D1%84=12%20%D0%BB%D0%BE%D0%B4%D0%BB%D1%8B")
+	testCookieAppendBytes(t, c, "ффф", "12 лодлы", "ффф=12 лодлы")
 
 	c.SetDomain("foobar.com")
 	testCookieAppendBytes(t, c, "a", "b", "a=b; domain=foobar.com")
@@ -211,7 +213,7 @@ func testCookieAppendBytes(t *testing.T, c *Cookie, key, value, expectedS string
 	c.SetValue(value)
 	result := string(c.AppendBytes(nil))
 	if result != expectedS {
-		t.Fatalf("Unexpected cookie %q. Expected %q", result, expectedS)
+		t.Fatalf("Unexpected cookie %q. Expecting %q", result, expectedS)
 	}
 }
 
@@ -230,7 +232,7 @@ func testParseRequestCookies(t *testing.T, s, expectedS string) {
 	cookies := parseRequestCookies(nil, []byte(s))
 	ss := string(appendRequestCookieBytes(nil, cookies))
 	if ss != expectedS {
-		t.Fatalf("Unexpected cookies after parsing: %q. Expected %q. String to parse %q", ss, expectedS, s)
+		t.Fatalf("Unexpected cookies after parsing: %q. Expecting %q. String to parse %q", ss, expectedS, s)
 	}
 }
 
@@ -238,7 +240,7 @@ func TestAppendRequestCookieBytes(t *testing.T) {
 	testAppendRequestCookieBytes(t, "=", "")
 	testAppendRequestCookieBytes(t, "foo=", "foo=")
 	testAppendRequestCookieBytes(t, "=bar", "bar")
-	testAppendRequestCookieBytes(t, "привет=a b;c&s s=aaa", "%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82=a%20b%3Bc; s%20s=aaa")
+	testAppendRequestCookieBytes(t, "привет=a bc&s s=aaa", "привет=a bc; s s=aaa")
 }
 
 func testAppendRequestCookieBytes(t *testing.T, s, expectedS string) {
@@ -257,10 +259,10 @@ func testAppendRequestCookieBytes(t *testing.T, s, expectedS string) {
 	prefix := "foobar"
 	result := string(appendRequestCookieBytes([]byte(prefix), cookies))
 	if result[:len(prefix)] != prefix {
-		t.Fatalf("unexpected prefix %q. Expected %q for cookie %q", result[:len(prefix)], prefix, s)
+		t.Fatalf("unexpected prefix %q. Expecting %q for cookie %q", result[:len(prefix)], prefix, s)
 	}
 	result = result[len(prefix):]
 	if result != expectedS {
-		t.Fatalf("Unexpected result %q. Expected %q for cookie %q", result, expectedS, s)
+		t.Fatalf("Unexpected result %q. Expecting %q for cookie %q", result, expectedS, s)
 	}
 }

@@ -10,6 +10,31 @@ import (
 	"testing"
 )
 
+func TestRequestHeaderSetCookieWithSpecialChars(t *testing.T) {
+	var h RequestHeader
+	h.Set("Cookie", "ID&14")
+	s := h.String()
+
+	if !strings.Contains(s, "Cookie: ID&14") {
+		t.Fatalf("Missing cookie in request header: [%s]", s)
+	}
+
+	var h1 RequestHeader
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := h1.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	cookie := h1.Peek("Cookie")
+	if string(cookie) != "ID&14" {
+		t.Fatalf("unexpected cooke: %q. Expecting %q", cookie, "ID&14")
+	}
+
+	cookie = h1.Cookie("")
+	if string(cookie) != "ID&14" {
+		t.Fatalf("unexpected cooke: %q. Expecting %q", cookie, "ID&14")
+	}
+}
+
 func TestResponseHeaderDefaultStatusCode(t *testing.T) {
 	var h ResponseHeader
 	statusCode := h.StatusCode()
