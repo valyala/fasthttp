@@ -222,8 +222,8 @@ type Server struct {
 	// if set to true.
 	//
 	// Try enabling this option only if the server consumes too much memory
-	// serving mostly idle keep-alive connections (more than 1M concurrent
-	// connections). This may reduce memory usage by up to 50%.
+	// serving mostly idle keep-alive connections. This may reduce memory
+	// usage by more than 50%.
 	//
 	// Aggressive memory usage reduction is disabled by default.
 	ReduceMemoryUsage bool
@@ -1816,11 +1816,15 @@ func (s *Server) acquireCtx(c net.Conn) *RequestCtx {
 	v := s.ctxPool.Get()
 	var ctx *RequestCtx
 	if v == nil {
-		v = &RequestCtx{
+		ctx = &RequestCtx{
 			s: s,
 		}
+		keepBodyBuffer := !s.ReduceMemoryUsage
+		ctx.Request.keepBodyBuffer = keepBodyBuffer
+		ctx.Response.keepBodyBuffer = keepBodyBuffer
+	} else {
+		ctx = v.(*RequestCtx)
 	}
-	ctx = v.(*RequestCtx)
 	ctx.c = c
 	return ctx
 }

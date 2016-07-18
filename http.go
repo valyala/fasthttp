@@ -40,6 +40,8 @@ type Request struct {
 	// Group bool members in order to reduce Request object size.
 	parsedURI      bool
 	parsedPostArgs bool
+
+	keepBodyBuffer bool
 }
 
 // Response represents HTTP response.
@@ -67,8 +69,6 @@ type Response struct {
 	// Use it for writing HEAD responses.
 	SkipBody bool
 
-	// This is a hackish field for client implementation, which allows
-	// avoiding body copying.
 	keepBodyBuffer bool
 }
 
@@ -524,8 +524,12 @@ func (req *Request) ResetBody() {
 	req.RemoveMultipartFormFiles()
 	req.closeBodyStream()
 	if req.body != nil {
-		requestBodyPool.Put(req.body)
-		req.body = nil
+		if req.keepBodyBuffer {
+			req.body.Reset()
+		} else {
+			requestBodyPool.Put(req.body)
+			req.body = nil
+		}
 	}
 }
 
