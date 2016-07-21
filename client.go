@@ -956,6 +956,7 @@ func clientDoDeadlineFreeConn(req *Request, resp *Response, deadline time.Time, 
 			respCopy.copyToSkipBody(resp)
 			swapResponseBody(resp, respCopy)
 		}
+		swapRequestBody(reqCopy, req)
 		ReleaseResponse(respCopy)
 		ReleaseRequest(reqCopy)
 		errorChPool.Put(chv)
