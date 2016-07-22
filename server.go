@@ -404,6 +404,8 @@ type RequestCtx struct {
 	timeoutTimer    *time.Timer
 
 	hijackHandler HijackHandler
+
+	held bool
 }
 
 // HijackHandler must process the hijacked connection c.
@@ -439,6 +441,23 @@ type HijackHandler func(c net.Conn)
 //
 func (ctx *RequestCtx) Hijack(handler HijackHandler) {
 	ctx.hijackHandler = handler
+}
+
+// Hold prevents the RequestCtx from being reused until the
+// handler explicitly calls Release().  This allows for safe
+// asynchronous processing to be performed using attributes
+// of the RequestCtx.
+func (ctx *RequestCtx) Hold() {
+	ctx.held = true
+}
+
+// Release returns the RequestCtx to the pool after being held by
+// calling Hold().
+func (ctx *RequestCtx) Release() {
+	if ctx.held {
+		ctx.s.releaseCtx(ctx)
+		ctx.held = false
+	}
 }
 
 // SetUserValue stores the given value (arbitrary object)
@@ -1602,6 +1621,12 @@ func (s *Server) serveConn(c net.Conn) error {
 			break
 		}
 
+		if ctx.held {
+			// responsibility for releasing the current ctx belongs to the
+			// handler so acqure a new one for the next iteration
+			ctx = s.acquireCtx(c)
+		}
+
 		currentTime = time.Now()
 	}
 
@@ -1887,6 +1912,7 @@ func (s *Server) releaseCtx(ctx *RequestCtx) {
 	}
 	ctx.c = nil
 	ctx.fbr.c = nil
+	ctx.held = false
 	s.ctxPool.Put(ctx)
 }
 

@@ -2315,6 +2315,44 @@ func TestServeConnMultiRequests(t *testing.T) {
 	verifyResponse(t, br, 200, "aaa", "requestURI=/abc, host=foobar.com")
 }
 
+func TestServerHeldRequest(t *testing.T) {
+	var heldCtx *RequestCtx
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			h := &ctx.Request.Header
+			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Peek("Host"))))
+			ctx.Hold()
+			heldCtx = ctx
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo/bar?baz HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, 200, "aaa", "requestURI=/foo/bar?baz, host=google.com")
+
+	if !heldCtx.held {
+		t.Fatalf("Unexpected held flag to be true")
+	}
+	heldCtx.Release()
+}
+
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) {
 	var resp Response
 	if err := resp.Read(r); err != nil {
