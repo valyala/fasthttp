@@ -1092,7 +1092,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		}
 	}
 
-	if !req.Header.IsGet() && req.Header.IsHead() {
+	if (!req.Header.IsGet() && req.Header.IsHead()) || req.HandlingBodyManually {
 		resp.SkipBody = true
 	}
 	if c.DisableHeaderNamesNormalizing {
@@ -1108,13 +1108,21 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		}
 		return false, err
 	}
-	c.releaseReader(br)
 
-	if resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
-		c.closeConn(cc)
+	shouldClose := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
+	if req.HandlingBodyManually {
+		resp.manualBodyReader = c.manualBodyReadAccessor(br, cc, shouldClose)
 	} else {
-		c.releaseConn(cc)
+		c.releaseReader(br)
+
+		if shouldClose {
+			c.closeConn(cc)
+		} else {
+			c.releaseConn(cc)
+		}
 	}
+
+
 
 	return false, err
 }
@@ -1401,6 +1409,32 @@ func addMissingPort(addr string, isTLS bool) string {
 		port = 443
 	}
 	return fmt.Sprintf("%s:%d", addr, port)
+}
+
+func (c *HostClient) manualBodyReadAccessor(connReader *bufio.Reader, conn *clientConn, shouldClose bool) io.ReadCloser {
+	return &manualBodyReadAccessor{
+		hostClient:c,
+		Reader:connReader,
+		conn:conn,
+		shouldClose:shouldClose,
+	}
+}
+
+type manualBodyReadAccessor struct {
+	hostClient *HostClient
+	*bufio.Reader
+	conn *clientConn
+	shouldClose bool
+}
+
+func (r *manualBodyReadAccessor) Close() error {
+	r.hostClient.releaseReader(r.Reader)
+	if r.shouldClose {
+		r.hostClient.closeConn(r.conn)
+	} else {
+		r.hostClient.releaseConn(r.conn)
+	}
+	return nil
 }
 
 // PipelineClient pipelines requests over a limited set of concurrent
