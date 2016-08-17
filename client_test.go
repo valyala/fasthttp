@@ -176,6 +176,81 @@ func TestClientDoTimeoutDisableNormalizing(t *testing.T) {
 	}
 }
 
+func TestHostClientMaxConnsWithDeadline(t *testing.T) {
+	var (
+		emptyBodyCount uint8
+		ln             = fasthttputil.NewInmemoryListener()
+		timeout        = 50 * time.Millisecond
+		wg             sync.WaitGroup
+	)
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if len(ctx.PostBody()) == 0 {
+				emptyBodyCount++
+			}
+
+			ctx.WriteString("foo")
+		},
+	}
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConns: 1,
+	}
+
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			req := AcquireRequest()
+			req.SetRequestURI("http://foobar/baz")
+			req.Header.SetMethod("POST")
+			req.SetBodyString("bar")
+			resp := AcquireResponse()
+
+			err := c.DoDeadline(req, resp, time.Now().Add(timeout))
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+
+			if resp.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
+			}
+
+			body := resp.Body()
+			if string(body) != "foo" {
+				t.Fatalf("unexpected body %q. Expecting %q", body, "abcd")
+			}
+		}()
+	}
+	wg.Wait()
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if emptyBodyCount > 0 {
+		t.Fatalf("at least one request body was empty")
+	}
+}
+
 func TestHostClientMaxConnDuration(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
