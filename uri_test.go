@@ -112,6 +112,9 @@ func TestURIUpdate(t *testing.T) {
 
 	// hash
 	testURIUpdate(t, "http://foo.bar/baz#aaa", "#fragment", "http://foo.bar/baz#fragment")
+
+	// uri without scheme
+	testURIUpdate(t, "https://foo.bar/baz", "//aaa.bbb/cc?dd", "https://aaa.bbb/cc?dd")
 }
 
 func testURIUpdate(t *testing.T, base, update, result string) {
