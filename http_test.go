@@ -1377,6 +1377,28 @@ func TestReadBodyChunked(t *testing.T) {
 	testReadBodyChunked(t, b, 12343)
 }
 
+func TestRequestURITLS(t *testing.T) {
+	uriNoScheme := "//foobar.com/baz/aa?bb=dd&dd#sdf"
+	requestURI := "http:" + uriNoScheme
+	requestURITLS := "https:" + uriNoScheme
+
+	var req Request
+
+	req.isTLS = true
+	req.SetRequestURI(requestURI)
+	uri := req.URI().String()
+	if uri != requestURITLS {
+		t.Fatalf("unexpected request uri: %q. Expecting %q", uri, requestURITLS)
+	}
+
+	req.Reset()
+	req.SetRequestURI(requestURI)
+	uri = req.URI().String()
+	if uri != requestURI {
+		t.Fatalf("unexpected request uri: %q. Expecting %q", uri, requestURI)
+	}
+}
+
 func TestRequestURI(t *testing.T) {
 	host := "foobar.com"
 	requestURI := "/aaa/bb+b%20d?ccc=ddd&qqq#1334dfds&=d"

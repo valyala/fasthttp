@@ -217,8 +217,11 @@ func (u *URI) Parse(host, uri []byte) {
 	u.parse(host, uri, nil)
 }
 
-func (u *URI) parseQuick(uri []byte, h *RequestHeader) {
+func (u *URI) parseQuick(uri []byte, h *RequestHeader, isTLS bool) {
 	u.parse(nil, uri, h)
+	if isTLS {
+		u.scheme = append(u.scheme[:0], strHTTPS...)
+	}
 }
 
 func (u *URI) parse(host, uri []byte, h *RequestHeader) {

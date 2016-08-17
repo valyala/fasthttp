@@ -1418,6 +1418,7 @@ func (s *Server) serveConn(c net.Conn) error {
 
 	ctx := s.acquireCtx(c)
 	ctx.connTime = connTime
+	isTLS := ctx.IsTLS()
 	var (
 		br *bufio.Reader
 		bw *bufio.Writer
@@ -1450,6 +1451,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		} else {
 			br, err = acquireByteReader(&ctx)
+			ctx.Request.isTLS = isTLS
 		}
 
 		if err == nil {
