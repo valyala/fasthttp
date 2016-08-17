@@ -17,6 +17,31 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestRequestCtxIsTLS(t *testing.T) {
+	var ctx RequestCtx
+
+	// tls.Conn
+	ctx.c = &tls.Conn{}
+	if !ctx.IsTLS() {
+		t.Fatalf("IsTLS must return true")
+	}
+
+	// non-tls.Conn
+	ctx.c = &readWriter{}
+	if ctx.IsTLS() {
+		t.Fatalf("IsTLS must return false")
+	}
+
+	// overriden tls.Conn
+	ctx.c = &struct {
+		*tls.Conn
+		fooBar bool
+	}{}
+	if !ctx.IsTLS() {
+		t.Fatalf("IsTLS must return true")
+	}
+}
+
 func TestRequestCtxRedirect(t *testing.T) {
 	testRequestCtxRedirect(t, "http://qqq/", "", "http://qqq/")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "", "http://qqq/foo/bar?baz=111")

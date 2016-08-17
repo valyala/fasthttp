@@ -491,11 +491,23 @@ func (ctx *RequestCtx) VisitUserValues(visitor func([]byte, interface{})) {
 	}
 }
 
+type connTLSer interface {
+	ConnectionState() tls.ConnectionState
+}
+
 // IsTLS returns true if the underlying connection is tls.Conn.
 //
 // tls.Conn is an encrypted connection (aka SSL, HTTPS).
 func (ctx *RequestCtx) IsTLS() bool {
-	_, ok := ctx.c.(*tls.Conn)
+	// cast to (connTLSer) instead of (*tls.Conn), since it catches
+	// cases with overriden tls.Conn such as:
+	//
+	// type customConn struct {
+	//     *tls.Conn
+	//
+	//     // other custom fields here
+	// }
+	_, ok := ctx.c.(connTLSer)
 	return ok
 }
 
@@ -506,7 +518,7 @@ func (ctx *RequestCtx) IsTLS() bool {
 // The returned state may be used for verifying TLS version, client certificates,
 // etc.
 func (ctx *RequestCtx) TLSConnectionState() *tls.ConnectionState {
-	tlsConn, ok := ctx.c.(*tls.Conn)
+	tlsConn, ok := ctx.c.(connTLSer)
 	if !ok {
 		return nil
 	}
