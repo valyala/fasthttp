@@ -1132,6 +1132,12 @@ func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
 }
 
 func (resp *Response) gzipBody(level int) error {
+	if len(resp.Header.peek(strContentEncoding)) > 0 {
+		// It looks like the body is already compressed.
+		// Do not compress it again.
+		return nil
+	}
+
 	// Do not care about memory allocations here, since gzip is slow
 	// and allocates a lot of memory by itself.
 	if resp.bodyStream != nil {
@@ -1162,6 +1168,12 @@ func (resp *Response) gzipBody(level int) error {
 }
 
 func (resp *Response) deflateBody(level int) error {
+	if len(resp.Header.peek(strContentEncoding)) > 0 {
+		// It looks like the body is already compressed.
+		// Do not compress it again.
+		return nil
+	}
+
 	// Do not care about memory allocations here, since flate is slow
 	// and allocates a lot of memory by itself.
 	if resp.bodyStream != nil {
