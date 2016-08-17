@@ -150,7 +150,13 @@ func (c *pipeConn) readNextByteBuffer(mayBlock bool) error {
 		select {
 		case c.b = <-c.rCh:
 		case <-c.pc.stopCh:
-			return io.EOF
+			// rCh may containg data when stopCh is closed.
+			// Read the data before returning EOF.
+			select {
+			case c.b = <-c.rCh:
+			default:
+				return io.EOF
+			}
 		}
 	}
 
