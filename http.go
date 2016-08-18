@@ -1144,7 +1144,11 @@ func (resp *Response) gzipBody(level int) error {
 		bs := resp.bodyStream
 		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
 			zw := acquireGzipWriter(sw, level)
-			copyZeroAlloc(zw, bs)
+			fw := &flushWriter{
+				wf: zw,
+				bw: sw,
+			}
+			copyZeroAlloc(fw, bs)
 			releaseGzipWriter(zw)
 			if bsc, ok := bs.(io.Closer); ok {
 				bsc.Close()
@@ -1180,7 +1184,11 @@ func (resp *Response) deflateBody(level int) error {
 		bs := resp.bodyStream
 		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
 			zw := acquireFlateWriter(sw, level)
-			copyZeroAlloc(zw, bs)
+			fw := &flushWriter{
+				wf: zw,
+				bw: sw,
+			}
+			copyZeroAlloc(fw, bs)
 			releaseFlateWriter(zw)
 			if bsc, ok := bs.(io.Closer); ok {
 				bsc.Close()
@@ -1201,6 +1209,30 @@ func (resp *Response) deflateBody(level int) error {
 	}
 	resp.Header.SetCanonical(strContentEncoding, strDeflate)
 	return nil
+}
+
+type writeFlusher interface {
+	io.Writer
+	Flush() error
+}
+
+type flushWriter struct {
+	wf writeFlusher
+	bw *bufio.Writer
+}
+
+func (w *flushWriter) Write(p []byte) (int, error) {
+	n, err := w.wf.Write(p)
+	if err != nil {
+		return 0, err
+	}
+	if err = w.wf.Flush(); err != nil {
+		return 0, err
+	}
+	if err = w.bw.Flush(); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // Write writes response to w.

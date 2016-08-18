@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRequestHostFromRequestURI(t *testing.T) {
@@ -575,8 +576,10 @@ func TestResponseGzipStream(t *testing.T) {
 	r.SetBodyStreamWriter(func(w *bufio.Writer) {
 		fmt.Fprintf(w, "foo")
 		w.Flush()
+		time.Sleep(time.Millisecond)
 		w.Write([]byte("barbaz"))
 		w.Flush()
+		time.Sleep(time.Millisecond)
 		fmt.Fprintf(w, "1234")
 		if err := w.Flush(); err != nil {
 			t.Fatalf("unexpected error: %s", err)
