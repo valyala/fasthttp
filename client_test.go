@@ -523,6 +523,25 @@ func TestClientFollowRedirects(t *testing.T) {
 			t.Fatalf("unexpected response %q. Expecting %q", body, "/aaab/sss")
 		}
 	}
+
+	for i := 0; i < 10; i++ {
+		req := AcquireRequest()
+		req.SetRequestURI(uri)
+		resp := AcquireResponse()
+		err := DoFollowRedirects(req, resp, 16)
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code: %d", resp.StatusCode())
+		}
+		if string(resp.Body()) != "/aaab/sss" {
+			t.Fatalf("unexpected response %q. Expecting %q", resp.Body(), "/aaab/sss")
+		}
+		ReleaseResponse(resp)
+		ReleaseRequest(req)
+	}
+
 }
 
 func TestClientGetTimeoutSuccess(t *testing.T) {
