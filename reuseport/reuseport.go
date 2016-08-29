@@ -66,19 +66,14 @@ func (e *ErrNoReusePort) Error() string {
 // Only tcp4 network is supported.
 //
 // ErrNoReusePort error is returned if the system doesn't support SO_REUSEPORT.
-func Listen(network, addr string) (l net.Listener, err error) {
-	var (
-		soType, fd int
-		file       *os.File
-		sockaddr   syscall.Sockaddr
-	)
-
-	if sockaddr, soType, err = getSockaddr(network, addr); err != nil {
+func Listen(network, addr string) (net.Listener, error) {
+	sockaddr, soType, err := getSockaddr(network, addr)
+	if err != nil {
 		return nil, err
 	}
 
 	syscall.ForkLock.RLock()
-	fd, err = syscall.Socket(soType, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
+	fd, err := syscall.Socket(soType, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
 	if err == nil {
 		syscall.CloseOnExec(fd)
 	}
@@ -88,6 +83,14 @@ func Listen(network, addr string) (l net.Listener, err error) {
 	}
 
 	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+		syscall.Close(fd)
+		return nil, err
+	}
+
+	// Reduce the number of OS context switches by delaying accept(2)
+	// return until the first portion of connection data is read
+	// by the OS.
+	if err = tcpDeferAccept(fd); err != nil {
 		syscall.Close(fd)
 		return nil, err
 	}
@@ -108,16 +111,17 @@ func Listen(network, addr string) (l net.Listener, err error) {
 	}
 
 	name := fmt.Sprintf("reuseport.%d.%s.%s", os.Getpid(), network, addr)
-	file = os.NewFile(uintptr(fd), name)
-	if l, err = net.FileListener(file); err != nil {
+	file := os.NewFile(uintptr(fd), name)
+	ln, err := net.FileListener(file)
+	if err != nil {
 		file.Close()
 		return nil, err
 	}
 
 	if err = file.Close(); err != nil {
-		l.Close()
+		ln.Close()
 		return nil, err
 	}
 
-	return l, err
+	return ln, nil
 }
