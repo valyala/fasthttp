@@ -16,6 +16,96 @@ import (
 	"syscall"
 )
 
+// ErrNoReusePort is returned if the OS doesn't support SO_REUSEPORT.
+type ErrNoReusePort struct {
+	err error
+}
+
+// Error implements error interface.
+func (e *ErrNoReusePort) Error() string {
+	return fmt.Sprintf("The OS doesn't support SO_REUSEPORT: %s", e.err)
+}
+
+// Listen returns TCP listener with SO_REUSEPORT option set.
+//
+// The returned listener tries enabling the following TCP options, which usually
+// have positive impact on performance:
+//
+// - TCP_DEFER_ACCEPT. This option expects that the server reads from accepted
+//   connections before writing to them.
+//
+// - TCP_FASTOPEN. See https://lwn.net/Articles/508865/ for details.
+//
+// Only tcp4 and tcp6 networks are supported.
+//
+// ErrNoReusePort error is returned if the system doesn't support SO_REUSEPORT.
+func Listen(network, addr string) (net.Listener, error) {
+	sa, soType, err := getSockaddr(network, addr)
+	if err != nil {
+		return nil, err
+	}
+
+	syscall.ForkLock.RLock()
+	fd, err := syscall.Socket(soType, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
+	if err == nil {
+		syscall.CloseOnExec(fd)
+	}
+	syscall.ForkLock.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+
+	if err = fdSetup(fd, sa, addr); err != nil {
+		syscall.Close(fd)
+		return nil, err
+	}
+
+	name := fmt.Sprintf("reuseport.%d.%s.%s", os.Getpid(), network, addr)
+	file := os.NewFile(uintptr(fd), name)
+	ln, err := net.FileListener(file)
+	if err != nil {
+		file.Close()
+		return nil, err
+	}
+
+	if err = file.Close(); err != nil {
+		ln.Close()
+		return nil, err
+	}
+
+	return ln, nil
+}
+
+func fdSetup(fd int, sa syscall.Sockaddr, addr string) error {
+	var err error
+
+	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+		return fmt.Errorf("cannot enable SO_REUSEADDR: %s", err)
+	}
+
+	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, soReusePort, 1); err != nil {
+		return &ErrNoReusePort{err}
+	}
+
+	if err = enableDeferAccept(fd); err != nil {
+		return err
+	}
+
+	if err = enableFastOpen(fd); err != nil {
+		return err
+	}
+
+	if err = syscall.Bind(fd, sa); err != nil {
+		return fmt.Errorf("cannot bind to %q: %s", addr, err)
+	}
+
+	if err = syscall.Listen(fd, syscall.SOMAXCONN); err != nil {
+		return fmt.Errorf("cannot listen on %q: %s", addr, err)
+	}
+
+	return nil
+}
+
 func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err error) {
 	// TODO: add support for tcp networks.
 
@@ -49,79 +139,4 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 	default:
 		return nil, -1, errors.New("Unknown network type " + network)
 	}
-}
-
-// ErrNoReusePort is returned if the OS doesn't support SO_REUSEPORT.
-type ErrNoReusePort struct {
-	err error
-}
-
-// Error implements error interface.
-func (e *ErrNoReusePort) Error() string {
-	return fmt.Sprintf("The OS doesn't support SO_REUSEPORT: %s", e.err)
-}
-
-// Listen returns TCP listener with SO_REUSEPORT option set.
-//
-// Only tcp4 network is supported.
-//
-// ErrNoReusePort error is returned if the system doesn't support SO_REUSEPORT.
-func Listen(network, addr string) (net.Listener, error) {
-	sockaddr, soType, err := getSockaddr(network, addr)
-	if err != nil {
-		return nil, err
-	}
-
-	syscall.ForkLock.RLock()
-	fd, err := syscall.Socket(soType, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
-	if err == nil {
-		syscall.CloseOnExec(fd)
-	}
-	syscall.ForkLock.RUnlock()
-	if err != nil {
-		return nil, err
-	}
-
-	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
-		syscall.Close(fd)
-		return nil, err
-	}
-
-	// Reduce the number of OS context switches by delaying accept(2)
-	// return until the first portion of connection data is read
-	// by the OS.
-	if err = tcpDeferAccept(fd); err != nil {
-		syscall.Close(fd)
-		return nil, err
-	}
-
-	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, soReusePort, 1); err != nil {
-		syscall.Close(fd)
-		return nil, &ErrNoReusePort{err}
-	}
-
-	if err = syscall.Bind(fd, sockaddr); err != nil {
-		syscall.Close(fd)
-		return nil, err
-	}
-
-	if err = syscall.Listen(fd, syscall.SOMAXCONN); err != nil {
-		syscall.Close(fd)
-		return nil, err
-	}
-
-	name := fmt.Sprintf("reuseport.%d.%s.%s", os.Getpid(), network, addr)
-	file := os.NewFile(uintptr(fd), name)
-	ln, err := net.FileListener(file)
-	if err != nil {
-		file.Close()
-		return nil, err
-	}
-
-	if err = file.Close(); err != nil {
-		ln.Close()
-		return nil, err
-	}
-
-	return ln, nil
 }
