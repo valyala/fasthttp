@@ -220,9 +220,15 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 			req.SetBodyString("bar")
 			resp := AcquireResponse()
 
-			err := c.DoDeadline(req, resp, time.Now().Add(timeout))
-			if err != nil {
-				t.Fatalf("unexpected error: %s", err)
+			for {
+				if err := c.DoDeadline(req, resp, time.Now().Add(timeout)); err != nil {
+					if err == ErrNoFreeConns {
+						time.Sleep(time.Millisecond)
+						continue
+					}
+					t.Fatalf("unexpected error: %s", err)
+				}
+				break
 			}
 
 			if resp.StatusCode() != StatusOK {
