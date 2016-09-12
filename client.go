@@ -1162,6 +1162,7 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 	} else {
 		n--
 		cc = c.conns[n]
+		c.conns[n] = nil
 		c.conns = c.conns[:n]
 	}
 	c.connsLock.Unlock()
