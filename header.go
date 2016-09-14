@@ -241,9 +241,15 @@ func (h *ResponseHeader) mustSkipContentLength() bool {
 // It may be negative:
 // -1 means Transfer-Encoding: chunked.
 func (h *RequestHeader) ContentLength() int {
-	if h.noBody() {
+	if h.ignoreBody() {
 		return 0
 	}
+	return h.realContentLength()
+}
+
+// realContentLength returns the actual Content-Length set in the request,
+// including positive lengths for GET/HEAD requests.
+func (h *RequestHeader) realContentLength() int {
 	h.parseRawHeaders()
 	return h.contentLength
 }
@@ -1512,7 +1518,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	}
 
 	contentType := h.ContentType()
-	if !h.noBody() {
+	if !h.ignoreBody() {
 		if len(contentType) == 0 {
 			contentType = strPostArgsContentType
 		}
@@ -1566,7 +1572,7 @@ func (h *ResponseHeader) parse(buf []byte) (int, error) {
 	return m + n, nil
 }
 
-func (h *RequestHeader) noBody() bool {
+func (h *RequestHeader) ignoreBody() bool {
 	return h.IsGet() || h.IsHead()
 }
 
@@ -1577,7 +1583,7 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 	}
 
 	var n int
-	if !h.noBody() || h.noHTTP11 {
+	if !h.ignoreBody() || h.noHTTP11 {
 		n, err = h.parseHeaders(buf[m:])
 		if err != nil {
 			return 0, err
@@ -1825,10 +1831,6 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	}
 
 	if h.contentLength < 0 {
-		h.contentLengthBytes = h.contentLengthBytes[:0]
-	}
-	if h.noBody() {
-		h.contentLength = 0
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}
 	if h.noHTTP11 && !h.connectionClose {
