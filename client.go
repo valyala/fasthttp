@@ -397,6 +397,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			WriteTimeout:                  c.WriteTimeout,
 			MaxResponseBodySize:           c.MaxResponseBodySize,
 			DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
+			connsCleanerChan:              make(chan struct{}, 1),
 		}
 		m[string(host)] = hc
 		if len(m) == 1 {
@@ -579,6 +580,10 @@ type HostClient struct {
 
 	readerPool sync.Pool
 	writerPool sync.Pool
+
+	connsCleanerLock sync.Mutex
+	connsCleanerChan chan struct{}
+	connsCleanerRun  bool
 }
 
 type clientConn struct {
@@ -1163,11 +1168,25 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 }
 
 func (c *HostClient) connsCleaner() {
+
+	c.connsCleanerLock.Lock()
+	if c.connsCleanerRun == false {
+		c.connsCleanerRun = true
+		c.connsCleanerLock.Unlock()
+	} else {
+		c.connsCleanerLock.Unlock()
+		select {
+		case c.connsCleanerChan <- struct{}{}:
+		default:
+		}
+		return
+	}
+
 	var (
 		scratch             []*clientConn
 		mustStop            bool
 		maxIdleConnDuration = c.MaxIdleConnDuration
-	)
+		)
 	if maxIdleConnDuration <= 0 {
 		maxIdleConnDuration = DefaultMaxIdleConnDuration
 	}
@@ -1197,9 +1216,15 @@ func (c *HostClient) connsCleaner() {
 			scratch[i] = nil
 		}
 		if mustStop {
+			c.connsCleanerLock.Lock()
+			c.connsCleanerRun = false
+			c.connsCleanerLock.Unlock()
 			break
 		}
-		time.Sleep(maxIdleConnDuration)
+		select {
+		case <-time.After(maxIdleConnDuration):
+		case <-c.connsCleanerChan:
+		}
 	}
 }
 
