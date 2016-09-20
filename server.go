@@ -1843,6 +1843,23 @@ func (s *Server) acquireCtx(c net.Conn) *RequestCtx {
 	return ctx
 }
 
+// Init2 prepares ctx for passing to RequestHandler.
+//
+// conn is used only for determining local and remote addresses.
+//
+// This function is intended for custom Server implementations.
+// See https://github.com/valyala/httpteleport for details.
+func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger) {
+	ctx.c = conn
+	ctx.logger.logger = logger
+	ctx.connID = nextConnID()
+	ctx.s = &fakeServer
+	ctx.connRequestNum = 0
+	ctx.connTime = time.Now()
+	ctx.time = ctx.connTime
+	ctx.Response.Reset()
+}
+
 // Init prepares ctx for passing to RequestHandler.
 //
 // remoteAddr and logger are optional. They are used by RequestCtx.Logger().
@@ -1852,35 +1869,31 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	if remoteAddr == nil {
 		remoteAddr = zeroTCPAddr
 	}
-	ctx.c = &fakeAddrer{
-		addr: remoteAddr,
+	c := &fakeAddrer{
+		laddr: zeroTCPAddr,
+		raddr: remoteAddr,
 	}
 	if logger == nil {
 		logger = defaultLogger
 	}
-	ctx.connID = nextConnID()
-	ctx.logger.logger = logger
-	ctx.s = &fakeServer
+	ctx.Init2(c, logger)
 	req.CopyTo(&ctx.Request)
-	ctx.Response.Reset()
-	ctx.connRequestNum = 0
-	ctx.connTime = time.Now()
-	ctx.time = ctx.connTime
 }
 
 var fakeServer Server
 
 type fakeAddrer struct {
 	net.Conn
-	addr net.Addr
+	laddr net.Addr
+	raddr net.Addr
 }
 
 func (fa *fakeAddrer) RemoteAddr() net.Addr {
-	return fa.addr
+	return fa.raddr
 }
 
 func (fa *fakeAddrer) LocalAddr() net.Addr {
-	return fa.addr
+	return fa.laddr
 }
 
 func (fa *fakeAddrer) Read(p []byte) (int, error) {
