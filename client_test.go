@@ -176,6 +176,100 @@ func TestClientDoTimeoutDisableNormalizing(t *testing.T) {
 	}
 }
 
+func TestHostClientPendingRequests(t *testing.T) {
+	const concurrency = 10
+	doneCh := make(chan struct{})
+	readyCh := make(chan struct{}, concurrency)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			readyCh <- struct{}{}
+			<-doneCh
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	pendingRequests := c.PendingRequests()
+	if pendingRequests != 0 {
+		t.Fatalf("non-zero pendingRequests: %d", pendingRequests)
+	}
+
+	resultCh := make(chan error, concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			req := AcquireRequest()
+			req.SetRequestURI("http://foobar/baz")
+			resp := AcquireResponse()
+
+			if err := c.DoTimeout(req, resp, 10*time.Second); err != nil {
+				resultCh <- fmt.Errorf("unexpected error: %s", err)
+				return
+			}
+
+			if resp.StatusCode() != StatusOK {
+				resultCh <- fmt.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
+				return
+			}
+			resultCh <- nil
+		}()
+	}
+
+	// wait while all the requests reach server
+	for i := 0; i < concurrency; i++ {
+		select {
+		case <-readyCh:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+
+	pendingRequests = c.PendingRequests()
+	if pendingRequests != concurrency {
+		t.Fatalf("unexpected pendingRequests: %d. Expecting %d", pendingRequests, concurrency)
+	}
+
+	// unblock request handlers on the server and wait until all the requests are finished.
+	close(doneCh)
+	for i := 0; i < concurrency; i++ {
+		select {
+		case err := <-resultCh:
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+
+	pendingRequests = c.PendingRequests()
+	if pendingRequests != 0 {
+		t.Fatalf("non-zero pendingRequests: %d", pendingRequests)
+	}
+
+	// stop the server
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
 func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 	var (
 		emptyBodyCount uint8

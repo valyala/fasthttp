@@ -579,6 +579,8 @@ type HostClient struct {
 
 	readerPool sync.Pool
 	writerPool sync.Pool
+
+	pendingRequests uint64
 }
 
 type clientConn struct {
@@ -957,6 +959,7 @@ var errorChPool sync.Pool
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) Do(req *Request, resp *Response) error {
+	atomic.AddUint64(&c.pendingRequests, 1)
 	retry, err := c.do(req, resp)
 	if err != nil && retry && isIdempotent(req) {
 		_, err = c.do(req, resp)
@@ -964,7 +967,17 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	if err == io.EOF {
 		err = ErrConnectionClosed
 	}
+	atomic.AddUint64(&c.pendingRequests, ^uint64(0))
 	return err
+}
+
+// PendingRequests returns the current number of requests the client
+// is executing.
+//
+// This function may be used for balancing load among multiple HostClient
+// instances.
+func (c *HostClient) PendingRequests() int {
+	return int(atomic.LoadUint64(&c.pendingRequests))
 }
 
 func isIdempotent(req *Request) bool {
@@ -1961,6 +1974,9 @@ func (c *pipelineConnClient) logger() Logger {
 // This number may exceed MaxPendingRequests*MaxConns by up to two times, since
 // each connection to the server may keep up to MaxPendingRequests requests
 // in the queue before sending them to the server.
+//
+// This function may be used for balancing load among multiple PipelineClient
+// instances.
 func (c *PipelineClient) PendingRequests() int {
 	c.connClientsLock.Lock()
 	n := 0
