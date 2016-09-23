@@ -1849,7 +1849,7 @@ func (s *Server) acquireCtx(c net.Conn) *RequestCtx {
 //
 // This function is intended for custom Server implementations.
 // See https://github.com/valyala/httpteleport for details.
-func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger) {
+func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage bool) {
 	ctx.c = conn
 	ctx.logger.logger = logger
 	ctx.connID = nextConnID()
@@ -1857,7 +1857,10 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger) {
 	ctx.connRequestNum = 0
 	ctx.connTime = time.Now()
 	ctx.time = ctx.connTime
-	ctx.Response.Reset()
+
+	keepBodyBuffer := !reduceMemoryUsage
+	ctx.Request.keepBodyBuffer = keepBodyBuffer
+	ctx.Response.keepBodyBuffer = keepBodyBuffer
 }
 
 // Init prepares ctx for passing to RequestHandler.
@@ -1876,7 +1879,7 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	if logger == nil {
 		logger = defaultLogger
 	}
-	ctx.Init2(c, logger)
+	ctx.Init2(c, logger, true)
 	req.CopyTo(&ctx.Request)
 }
 
