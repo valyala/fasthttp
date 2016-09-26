@@ -36,6 +36,8 @@ func NewPipeConns() *PipeConns {
 //   * It is faster.
 //   * It buffers Write calls, so there is no need to have concurrent goroutine
 //     calling Read in order to unblock each Write call.
+//   * It supports read and write deadlines.
+//
 type PipeConns struct {
 	c1         pipeConn
 	c2         pipeConn
@@ -79,6 +81,12 @@ type pipeConn struct {
 	rCh chan *byteBuffer
 	wCh chan *byteBuffer
 	pc  *PipeConns
+
+	readDeadlineTimer  *time.Timer
+	writeDeadlineTimer *time.Timer
+
+	readDeadlineCh  <-chan time.Time
+	writeDeadlineCh <-chan time.Time
 }
 
 func (c *pipeConn) Write(p []byte) (int, error) {
@@ -97,6 +105,9 @@ func (c *pipeConn) Write(p []byte) (int, error) {
 	default:
 		select {
 		case c.wCh <- b:
+		case <-c.writeDeadlineCh:
+			c.writeDeadlineCh = closedDeadlineCh
+			return 0, ErrTimeout
 		case <-c.pc.stopCh:
 			releaseByteBuffer(b)
 			return 0, errConnectionClosed
@@ -149,8 +160,17 @@ func (c *pipeConn) readNextByteBuffer(mayBlock bool) error {
 		}
 		select {
 		case c.b = <-c.rCh:
+		case <-c.readDeadlineCh:
+			c.readDeadlineCh = closedDeadlineCh
+			// rCh may contain data when deadline is reached.
+			// Read the data before returning ErrTimeout.
+			select {
+			case c.b = <-c.rCh:
+			default:
+				return ErrTimeout
+			}
 		case <-c.pc.stopCh:
-			// rCh may containg data when stopCh is closed.
+			// rCh may contain data when stopCh is closed.
 			// Read the data before returning EOF.
 			select {
 			case c.b = <-c.rCh:
@@ -167,7 +187,9 @@ func (c *pipeConn) readNextByteBuffer(mayBlock bool) error {
 var (
 	errWouldBlock       = errors.New("would block")
 	errConnectionClosed = errors.New("connection closed")
-	errNoDeadlines      = errors.New("deadline not supported")
+
+	// ErrTimeout is returned from Read() or Write() on timeout.
+	ErrTimeout = errors.New("timeout")
 )
 
 func (c *pipeConn) Close() error {
@@ -182,17 +204,51 @@ func (c *pipeConn) RemoteAddr() net.Addr {
 	return pipeAddr(0)
 }
 
-func (c *pipeConn) SetDeadline(t time.Time) error {
-	return errNoDeadlines
+func (c *pipeConn) SetDeadline(deadline time.Time) error {
+	c.SetReadDeadline(deadline)
+	c.SetWriteDeadline(deadline)
+	return nil
 }
 
-func (c *pipeConn) SetReadDeadline(t time.Time) error {
-	return c.SetDeadline(t)
+func (c *pipeConn) SetReadDeadline(deadline time.Time) error {
+	if c.readDeadlineTimer == nil {
+		c.readDeadlineTimer = time.NewTimer(time.Hour)
+	}
+	c.readDeadlineCh = updateTimer(c.readDeadlineTimer, deadline)
+	return nil
 }
 
-func (c *pipeConn) SetWriteDeadline(t time.Time) error {
-	return c.SetDeadline(t)
+func (c *pipeConn) SetWriteDeadline(deadline time.Time) error {
+	if c.writeDeadlineTimer == nil {
+		c.writeDeadlineTimer = time.NewTimer(time.Hour)
+	}
+	c.writeDeadlineCh = updateTimer(c.writeDeadlineTimer, deadline)
+	return nil
 }
+
+func updateTimer(t *time.Timer, deadline time.Time) <-chan time.Time {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	if deadline.IsZero() {
+		return nil
+	}
+	d := -time.Since(deadline)
+	if d <= 0 {
+		return closedDeadlineCh
+	}
+	t.Reset(d)
+	return t.C
+}
+
+var closedDeadlineCh = func() <-chan time.Time {
+	ch := make(chan time.Time)
+	close(ch)
+	return ch
+}()
 
 type pipeAddr int
 
