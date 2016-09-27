@@ -36,10 +36,10 @@ func ExpvarHandler(ctx *fasthttp.RequestCtx) {
 	fmt.Fprintf(ctx, "{\n")
 	first := true
 	expvar.Do(func(kv expvar.KeyValue) {
-		if !first {
-			fmt.Fprintf(ctx, ",\n")
-		}
 		if r.MatchString(kv.Key) {
+			if !first {
+				fmt.Fprintf(ctx, ",\n")
+			}
 			first = false
 			fmt.Fprintf(ctx, "\t%q: %s", kv.Key, kv.Value)
 		}
