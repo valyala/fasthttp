@@ -55,7 +55,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 			t.Fatalf("unexpected contentLength %d. Expecting %d", r.ContentLength, expectedContentLength)
 		}
 		if len(r.TransferEncoding) != 1 || r.TransferEncoding[0] != expectedTransferEncoding {
-			t.Fatalf("unexpected transferEncoding %d. Expecting %d", r.TransferEncoding, expectedTransferEncoding)
+			t.Fatalf("unexpected transferEncoding %q. Expecting %q", r.TransferEncoding, expectedTransferEncoding)
 		}
 		if r.Host != expectedHost {
 			t.Fatalf("unexpected host %q. Expecting %q", r.Host, expectedHost)
