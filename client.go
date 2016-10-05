@@ -581,6 +581,8 @@ type HostClient struct {
 	writerPool sync.Pool
 
 	pendingRequests uint64
+
+	connsCleanerRun bool
 }
 
 type clientConn struct {
@@ -1143,9 +1145,10 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 		if c.connsCount < maxConns {
 			c.connsCount++
 			createConn = true
-		}
-		if createConn && c.connsCount == 1 {
-			startCleaner = true
+			if !c.connsCleanerRun {
+				startCleaner = true
+				c.connsCleanerRun = true
+			}
 		}
 	} else {
 		n--
@@ -1162,6 +1165,10 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 		return nil, ErrNoFreeConns
 	}
 
+	if startCleaner {
+		go c.connsCleaner()
+	}
+
 	conn, err := c.dialHostHard()
 	if err != nil {
 		c.decConnsCount()
@@ -1169,16 +1176,12 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 	}
 	cc = acquireClientConn(conn)
 
-	if startCleaner {
-		go c.connsCleaner()
-	}
 	return cc, nil
 }
 
 func (c *HostClient) connsCleaner() {
 	var (
 		scratch             []*clientConn
-		mustStop            bool
 		maxIdleConnDuration = c.MaxIdleConnDuration
 	)
 	if maxIdleConnDuration <= 0 {
@@ -1187,6 +1190,7 @@ func (c *HostClient) connsCleaner() {
 	for {
 		currentTime := time.Now()
 
+		// Determine idle connections to be closed.
 		c.connsLock.Lock()
 		conns := c.conns
 		n := len(conns)
@@ -1194,7 +1198,6 @@ func (c *HostClient) connsCleaner() {
 		for i < n && currentTime.Sub(conns[i].lastUseTime) > maxIdleConnDuration {
 			i++
 		}
-		mustStop = (c.connsCount == i)
 		scratch = append(scratch[:0], conns[:i]...)
 		if i > 0 {
 			m := copy(conns, conns[i:])
@@ -1205,13 +1208,23 @@ func (c *HostClient) connsCleaner() {
 		}
 		c.connsLock.Unlock()
 
+		// Close idle connections.
 		for i, cc := range scratch {
 			c.closeConn(cc)
 			scratch[i] = nil
 		}
+
+		// Determine whether to stop the connsCleaner.
+		c.connsLock.Lock()
+		mustStop := c.connsCount == 0
+		if mustStop {
+			c.connsCleanerRun = false
+		}
+		c.connsLock.Unlock()
 		if mustStop {
 			break
 		}
+
 		time.Sleep(maxIdleConnDuration)
 	}
 }
