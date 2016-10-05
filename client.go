@@ -91,29 +91,6 @@ func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	return defaultClient.DoDeadline(req, resp, deadline)
 }
 
-// DoFollowRedirects performs the given request and waits for responss.
-//
-// Request must contain at least non-zero RequestURI with full url (including
-// scheme and host) or non-zero Host header + RequestURI.
-//
-// Client determines the server to be requested in the following order:
-//
-//   - from RequestURI if it contains full url with scheme and host;
-//   - from Host header otherwise.
-//
-// The function doesn't follow redirects. Use Get* for following redirects.
-//
-// Response is ignored if resp is nil.
-//
-// ErrTimeout is returned if the response wasn't returned until
-// the given deadline.
-//
-// It is recommended obtaining req and resp via AcquireRequest
-// and AcquireResponse in performance-critical code.
-func DoFollowRedirects(req *Request, resp *Response, maxRedirects int) error {
-	return defaultClient.DoFollowRedirects(req, resp, maxRedirects)
-}
-
 // Get appends url contents to dst and returns it as body.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
@@ -355,27 +332,6 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	return clientDoDeadline(req, resp, deadline, c)
-}
-
-// DoFollowRedirects performs the given request and follow redirects
-//
-// Request must contain at least non-zero RequestURI with full url (including
-// scheme and host) or non-zero Host header + RequestURI.
-//
-// Client determines the server to be requested in the following order:
-//
-//   - from RequestURI if it contains full url with scheme and host;
-//   - from Host header otherwise.
-//
-// Response is ignored if resp is nil.
-//
-// ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
-// to the requested host are busy.
-//
-// It is recommended obtaining req and resp via AcquireRequest
-// and AcquireResponse in performance-critical code.
-func (c *Client) DoFollowRedirects(req *Request, resp *Response, maxRedirects int) error {
-	return clientDoFollowRedirects(req, resp, maxRedirects, c)
 }
 
 // Do performs the given http request and fills the given http response.
@@ -781,39 +737,6 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 	return statusCode, body, err
 }
 
-func clientDoFollowRedirects(req *Request, resp *Response, maxRedirects int, c clientDoer) error {
-	redirectsCount := 0
-	var statusCode int
-	var err error
-	url := string(req.RequestURI())
-	for {
-		req.parsedURI = false
-		req.Header.host = req.Header.host[:0]
-		req.SetRequestURI(url)
-		if err = c.Do(req, resp); err != nil {
-			break
-		}
-		statusCode = resp.Header.StatusCode()
-		if statusCode != StatusMovedPermanently && statusCode != StatusFound && statusCode != StatusSeeOther {
-			break
-		}
-
-		redirectsCount++
-		if redirectsCount > maxRedirects {
-			err = errTooManyRedirects
-			break
-		}
-		location := resp.Header.peek(strLocation)
-		if len(location) == 0 {
-			err = errMissingLocation
-			break
-		}
-		url = getRedirectURL(string(req.RequestURI()), location)
-	}
-
-	return err
-}
-
 var (
 	errMissingLocation  = errors.New("missing Location header for http redirect")
 	errTooManyRedirects = errors.New("too many redirects detected when doing the request")
@@ -822,22 +745,6 @@ var (
 const maxRedirectsCount = 16
 
 func doRequestFollowRedirects(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
-	resp := AcquireResponse()
-	bodyBuf := resp.bodyBuffer()
-	resp.keepBodyBuffer = true
-	oldBody := bodyBuf.B
-	bodyBuf.B = dst
-	req.SetRequestURI(url)
-	err = clientDoFollowRedirects(req, resp, maxRedirectsCount, c)
-	statusCode = resp.Header.StatusCode()
-	body = bodyBuf.B
-	bodyBuf.B = oldBody
-	resp.keepBodyBuffer = false
-	ReleaseResponse(resp)
-	return statusCode, body, err
-}
-
-func doRequestFollowRedirects2(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
 	resp := AcquireResponse()
 	bodyBuf := resp.bodyBuffer()
 	resp.keepBodyBuffer = true
