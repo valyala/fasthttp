@@ -154,6 +154,48 @@ func AppendGzipBytes(dst, src []byte) []byte {
 	return AppendGzipBytesLevel(dst, src, CompressDefaultCompression)
 }
 
+// AppendDeflateBytesLevel appends deflated src to dst using the given
+// compression level and returns the resulting dst.
+//
+// Supported compression levels are:
+//
+//    * CompressNoCompression
+//    * CompressBestSpeed
+//    * CompressBestCompression
+//    * CompressDefaultCompression
+func AppendDeflateBytesLevel(dst, src []byte, level int) []byte {
+	w := &byteSliceWriter{dst}
+	WriteDeflateLevel(w, src, level)
+	return w.b
+}
+
+// WriteDeflateLevel writes deflated p to w using the given compression level
+// and returns the number of compressed bytes written to w.
+//
+// Supported compression levels are:
+//
+//    * CompressNoCompression
+//    * CompressBestSpeed
+//    * CompressBestCompression
+//    * CompressDefaultCompression
+func WriteDeflateLevel(w io.Writer, p []byte, level int) (int, error) {
+	fw := acquireFlateWriter(w, level)
+	n, err := fw.Write(p)
+	releaseFlateWriter(fw)
+	return n, err
+}
+
+// WriteDeflate writes deflated p to w and returns the number of compressed
+// bytes written to w.
+func WriteDeflate(w io.Writer, p []byte) (int, error) {
+	return WriteDeflateLevel(w, p, CompressDefaultCompression)
+}
+
+// AppendDeflateBytes appends deflated src to dst and returns the resulting dst.
+func AppendDeflateBytes(dst, src []byte) []byte {
+	return AppendDeflateBytesLevel(dst, src, CompressDefaultCompression)
+}
+
 // WriteGunzip writes ungzipped p to w and returns the number of uncompressed
 // bytes written to w.
 func WriteGunzip(w io.Writer, p []byte) (int, error) {
