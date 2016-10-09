@@ -150,8 +150,8 @@ func TestArgsWriteTo(t *testing.T) {
 	var a Args
 	a.Parse(s)
 
-	var w ByteBuffer
-	n, err := a.WriteTo(&w)
+	w := NewByteBuffer()
+	n, err := a.WriteTo(w)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}

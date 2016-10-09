@@ -8,7 +8,7 @@ import (
 func BenchmarkByteBufferWrite(b *testing.B) {
 	s := []byte("foobarbaz")
 	b.RunParallel(func(pb *testing.PB) {
-		var buf ByteBuffer
+		buf := NewByteBuffer()
 		for pb.Next() {
 			for i := 0; i < 100; i++ {
 				buf.Write(s)

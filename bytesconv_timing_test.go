@@ -89,8 +89,8 @@ func BenchmarkHexByte2Int(b *testing.B) {
 
 func BenchmarkWriteHexInt(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
-		var w ByteBuffer
-		bw := bufio.NewWriter(&w)
+		w := NewByteBuffer()
+		bw := bufio.NewWriter(w)
 		i := 0
 		for pb.Next() {
 			writeHexInt(bw, i)
@@ -99,7 +99,7 @@ func BenchmarkWriteHexInt(b *testing.B) {
 				i = 0
 			}
 			w.Reset()
-			bw.Reset(&w)
+			bw.Reset(w)
 		}
 	})
 }
