@@ -18,7 +18,7 @@ import (
 // ResponseHeader instance MUST NOT be used from concurrently running
 // goroutines.
 type ResponseHeader struct {
-	noCopy noCopy
+	noCopy             noCopy
 
 	disableNormalizing bool
 	noHTTP11           bool
@@ -28,13 +28,13 @@ type ResponseHeader struct {
 	contentLength      int
 	contentLengthBytes []byte
 
-	contentType []byte
-	server      []byte
+	contentType        []byte
+	server             []byte
 
-	h     []argsKV
-	bufKV argsKV
+	h                  []argsKV
+	bufKV              argsKV
 
-	cookies []argsKV
+	cookies            []argsKV
 }
 
 // RequestHeader represents HTTP request header.
@@ -45,7 +45,7 @@ type ResponseHeader struct {
 // RequestHeader instance MUST NOT be used from concurrently running
 // goroutines.
 type RequestHeader struct {
-	noCopy noCopy
+	noCopy             noCopy
 
 	disableNormalizing bool
 	noHTTP11           bool
@@ -54,24 +54,24 @@ type RequestHeader struct {
 
 	// These two fields have been moved close to other bool fields
 	// for reducing RequestHeader object size.
-	cookiesCollected bool
-	rawHeadersParsed bool
+	cookiesCollected   bool
+	rawHeadersParsed   bool
 
 	contentLength      int
 	contentLengthBytes []byte
 
-	method      []byte
-	requestURI  []byte
-	host        []byte
-	contentType []byte
-	userAgent   []byte
+	method             []byte
+	requestURI         []byte
+	host               []byte
+	contentType        []byte
+	userAgent          []byte
 
-	h     []argsKV
-	bufKV argsKV
+	h                  []argsKV
+	bufKV              argsKV
 
-	cookies []argsKV
+	cookies            []argsKV
 
-	rawHeaders []byte
+	rawHeaders         []byte
 }
 
 // SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
@@ -383,8 +383,8 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 		if n = bytes.IndexByte(b, ';'); n >= 0 {
 			b = b[:n]
 		}
-		if len(b) > 1 && b[0] == '"' && b[len(b)-1] == '"' {
-			b = b[1 : len(b)-1]
+		if len(b) > 1 && b[0] == '"' && b[len(b) - 1] == '"' {
+			b = b[1 : len(b) - 1]
 		}
 		return b
 	}
@@ -554,21 +554,23 @@ func (h *RequestHeader) HasAcceptEncodingBytes(acceptEncoding []byte) bool {
 	if n < 0 {
 		return false
 	}
-	b := ae[n+len(acceptEncoding):]
+	b := ae[n + len(acceptEncoding):]
 	if len(b) > 0 && b[0] != ',' {
 		return false
 	}
 	if n == 0 {
 		return true
 	}
-	return ae[n-1] == ' '
+	return ae[n - 1] == ' '
 }
 
 // Len returns the number of headers set,
 // i.e. the number of times f is called in VisitAll.
 func (h *ResponseHeader) Len() int {
 	n := 0
-	h.VisitAll(func(k, v []byte) { n++ })
+	h.VisitAll(func(k, v []byte) {
+		n++
+	})
 	return n
 }
 
@@ -576,7 +578,9 @@ func (h *ResponseHeader) Len() int {
 // i.e. the number of times f is called in VisitAll.
 func (h *RequestHeader) Len() int {
 	n := 0
-	h.VisitAll(func(k, v []byte) { n++ })
+	h.VisitAll(func(k, v []byte) {
+		n++
+	})
 	return n
 }
 
@@ -937,9 +941,9 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 			h.h = setArgBytes(h.h, key, value)
 		}
 	case "Transfer-Encoding":
-		// Transfer-Encoding is managed automatically.
+	// Transfer-Encoding is managed automatically.
 	case "Date":
-		// Date is managed automatically.
+	// Date is managed automatically.
 	default:
 		h.h = setArgBytes(h.h, key, value)
 	}
@@ -1120,7 +1124,7 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 			h.h = setArgBytes(h.h, key, value)
 		}
 	case "Transfer-Encoding":
-		// Transfer-Encoding is managed automatically.
+	// Transfer-Encoding is managed automatically.
 	default:
 		h.h = setArgBytes(h.h, key, value)
 	}
@@ -1154,6 +1158,15 @@ func (h *RequestHeader) Peek(key string) []byte {
 	return h.peek(k)
 }
 
+// PeekAll returns all header values for the given key.
+//
+// Returned value is valid until the next call to ResponseHeader.
+// Do not store references to returned value. Make copies instead.
+func (h *RequestHeader) PeekMulti(key string) [][]byte {
+	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
+	return h.peekMulti(k)
+}
+
 // PeekBytes returns header value for the given key.
 //
 // Returned value is valid until the next call to RequestHeader.
@@ -1180,6 +1193,10 @@ func (h *ResponseHeader) peek(key []byte) []byte {
 	default:
 		return peekArgBytes(h.h, key)
 	}
+}
+
+func (h *RequestHeader) peekMulti(key []byte) [][]byte {
+	return peekMultiArgBytes(h.h, key)
 }
 
 func (h *RequestHeader) peek(key []byte) []byte {
@@ -1610,7 +1627,7 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
 	h.noHTTP11 = !bytes.Equal(b[:n], strHTTP11)
-	b = b[n+1:]
+	b = b[n + 1:]
 
 	// parse status code
 	h.statusCode, n, err = parseUintBuf(b)
@@ -1640,7 +1657,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		return 0, fmt.Errorf("cannot find http request method in %q", buf)
 	}
 	h.method = append(h.method[:0], b[:n]...)
-	b = b[n+1:]
+	b = b[n + 1:]
 
 	// parse requestURI
 	n = bytes.LastIndexByte(b, ' ')
@@ -1649,7 +1666,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		n = len(b)
 	} else if n == 0 {
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
-	} else if !bytes.Equal(b[n+1:], strHTTP11) {
+	} else if !bytes.Equal(b[n + 1:], strHTTP11) {
 		h.noHTTP11 = true
 	}
 	h.requestURI = append(h.requestURI[:0], b[:n]...)
@@ -1662,7 +1679,7 @@ func peekRawHeader(buf, key []byte) []byte {
 	if n < 0 {
 		return nil
 	}
-	if n > 0 && buf[n-1] != '\n' {
+	if n > 0 && buf[n - 1] != '\n' {
 		return nil
 	}
 	n += len(key)
@@ -1682,7 +1699,7 @@ func peekRawHeader(buf, key []byte) []byte {
 	if n < 0 {
 		return nil
 	}
-	if n > 0 && buf[n-1] == '\r' {
+	if n > 0 && buf[n - 1] == '\r' {
 		n--
 	}
 	return buf[:n]
@@ -1861,7 +1878,7 @@ func (h *RequestHeader) collectCookies() {
 		if bytes.Equal(kv.key, strCookie) {
 			h.cookies = parseRequestCookies(h.cookies, kv.value)
 			tmp := *kv
-			copy(h.h[i:], h.h[i+1:])
+			copy(h.h[i:], h.h[i + 1:])
 			n--
 			i--
 			h.h[n] = tmp
@@ -1883,10 +1900,10 @@ func parseContentLength(b []byte) (int, error) {
 }
 
 type headerScanner struct {
-	b     []byte
-	key   []byte
-	value []byte
-	err   error
+	b                  []byte
+	key                []byte
+	value              []byte
+	err                error
 
 	disableNormalizing bool
 }
@@ -1919,12 +1936,12 @@ func (s *headerScanner) next() bool {
 		return false
 	}
 	s.value = s.b[:n]
-	s.b = s.b[n+1:]
+	s.b = s.b[n + 1:]
 
-	if n > 0 && s.value[n-1] == '\r' {
+	if n > 0 && s.value[n - 1] == '\r' {
 		n--
 	}
-	for n > 0 && s.value[n-1] == ' ' {
+	for n > 0 && s.value[n - 1] == ' ' {
 		n--
 	}
 	s.value = s.value[:n]
@@ -1948,7 +1965,7 @@ func (s *headerValueScanner) next() bool {
 		return true
 	}
 	s.value = stripSpace(b[:n])
-	s.b = b[n+1:]
+	s.b = b[n + 1:]
 	return true
 }
 
@@ -1956,8 +1973,8 @@ func stripSpace(b []byte) []byte {
 	for len(b) > 0 && b[0] == ' ' {
 		b = b[1:]
 	}
-	for len(b) > 0 && b[len(b)-1] == ' ' {
-		b = b[:len(b)-1]
+	for len(b) > 0 && b[len(b) - 1] == ' ' {
+		b = b[:len(b) - 1]
 	}
 	return b
 }
@@ -1979,10 +1996,10 @@ func nextLine(b []byte) ([]byte, []byte, error) {
 		return nil, nil, errNeedMore
 	}
 	n := nNext
-	if n > 0 && b[n-1] == '\r' {
+	if n > 0 && b[n - 1] == '\r' {
 		n--
 	}
-	return b[:n], b[nNext+1:], nil
+	return b[:n], b[nNext + 1:], nil
 }
 
 func initHeaderKV(kv *argsKV, key, value string, disableNormalizing bool) {
@@ -2030,7 +2047,7 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 //   * foo-bar-baz -> Foo-Bar-Baz
 func AppendNormalizedHeaderKey(dst []byte, key string) []byte {
 	dst = append(dst, key...)
-	normalizeHeaderKey(dst[len(dst)-len(key):], false)
+	normalizeHeaderKey(dst[len(dst) - len(key):], false)
 	return dst
 }
 
