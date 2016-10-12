@@ -825,6 +825,11 @@ func (ctx *RequestCtx) IsHead() bool {
 //
 // Always returns non-nil result.
 func (ctx *RequestCtx) RemoteAddr() net.Addr {
+	//when running local tests ran into ctx.c being nil. 
+	if ctx.c == nil {
+		return zeroTCPAddr	
+	}
+	
 	addr := ctx.c.RemoteAddr()
 	if addr == nil {
 		return zeroTCPAddr
