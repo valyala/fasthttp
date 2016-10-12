@@ -772,6 +772,23 @@ func (r *singleReadConn) Close() error {
 	return nil
 }
 
+func TestClientHTTPSInvalidServerName(t *testing.T) {
+	addrHTTPS := "127.0.0.1:57794"
+	sHTTPS := startEchoServerTLS(t, "tcp", addrHTTPS)
+	defer sHTTPS.Stop()
+
+	var c Client
+
+	addr := "https://" + addrHTTPS
+
+	for i := 0; i < 10; i++ {
+		_, _, err := c.GetTimeout(nil, addr, time.Second)
+		if err == nil {
+			t.Fatalf("expecting TLS error")
+		}
+	}
+}
+
 func TestClientHTTPSConcurrent(t *testing.T) {
 	addrHTTP := "127.0.0.1:56793"
 	sHTTP := startEchoServer(t, "tcp", addrHTTP)
@@ -780,6 +797,12 @@ func TestClientHTTPSConcurrent(t *testing.T) {
 	addrHTTPS := "127.0.0.1:56794"
 	sHTTPS := startEchoServerTLS(t, "tcp", addrHTTPS)
 	defer sHTTPS.Stop()
+
+	c := &Client{
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
 
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
@@ -790,8 +813,8 @@ func TestClientHTTPSConcurrent(t *testing.T) {
 		}
 		go func() {
 			defer wg.Done()
-			testClientGet(t, &defaultClient, addr, 20)
-			testClientPost(t, &defaultClient, addr, 10)
+			testClientGet(t, c, addr, 20)
+			testClientPost(t, c, addr, 10)
 		}()
 	}
 	wg.Wait()
