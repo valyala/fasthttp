@@ -721,13 +721,13 @@ func TestClientIdempotentRequest(t *testing.T) {
 	var args Args
 
 	dialsCount = 0
-	statusCode, body, err = c.Post(nil, "http://foobar/a/b", &args)
+	_, _, err = c.Post(nil, "http://foobar/a/b", &args)
 	if err == nil {
 		t.Fatalf("expecting error")
 	}
 
 	dialsCount = 0
-	statusCode, body, err = c.Post(nil, "http://foobar/a/b", nil)
+	_, _, err = c.Post(nil, "http://foobar/a/b", nil)
 	if err == nil {
 		t.Fatalf("expecting error")
 	}
