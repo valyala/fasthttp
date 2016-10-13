@@ -1075,9 +1075,9 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 	if isTLS {
 		certFile := "./ssl-cert-snakeoil.pem"
 		keyFile := "./ssl-cert-snakeoil.key"
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-		if err != nil {
-			t.Fatalf("Cannot load TLS certificate: %s", err)
+		cert, err1 := tls.LoadX509KeyPair(certFile, keyFile)
+		if err1 != nil {
+			t.Fatalf("Cannot load TLS certificate: %s", err1)
 		}
 		tlsConfig := &tls.Config{
 			Certificates: []tls.Certificate{cert},
