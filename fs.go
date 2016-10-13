@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"html"
@@ -15,8 +16,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/klauspost/compress/gzip"
 )
 
 // ServeFileBytesUncompressed returns HTTP response containing file contents
