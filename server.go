@@ -500,7 +500,7 @@ type connTLSer interface {
 // tls.Conn is an encrypted connection (aka SSL, HTTPS).
 func (ctx *RequestCtx) IsTLS() bool {
 	// cast to (connTLSer) instead of (*tls.Conn), since it catches
-	// cases with overriden tls.Conn such as:
+	// cases with overridden tls.Conn such as:
 	//
 	// type customConn struct {
 	//     *tls.Conn

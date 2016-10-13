@@ -32,7 +32,7 @@ func TestRequestCtxIsTLS(t *testing.T) {
 		t.Fatalf("IsTLS must return false")
 	}
 
-	// overriden tls.Conn
+	// overridden tls.Conn
 	ctx.c = &struct {
 		*tls.Conn
 		fooBar bool
