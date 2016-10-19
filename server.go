@@ -730,6 +730,29 @@ func (ctx *RequestCtx) FormFile(key string) (*multipart.FileHeader, error) {
 	return fhh[0], nil
 }
 
+// FormFiles returns uploaded files associated with the given multipart form key.
+//
+// All the files are automatically deleted after returning from RequestHandler,
+// so either move or copy uploaded files into new place if you want retaining them.
+//
+// Use SaveMultipartFiles function for permanently saving uploaded files.
+//
+// The returned file headers are valid until returning from RequestHandler.
+func (ctx *RequestCtx) FormFiles(key string) ([]*multipart.FileHeader, error) {
+	mf, err := ctx.MultipartForm()
+	if err != nil {
+		return nil, err
+	}
+	if mf.File == nil {
+		return nil, err
+	}
+	fhh := mf.File[key]
+	if fhh == nil {
+		return nil, ErrMissingFile
+	}
+	return fhh, nil
+}
+
 // ErrMissingFile may be returned from FormFile when the is no uploaded file
 // associated with the given multipart form key.
 var ErrMissingFile = errors.New("there is no uploaded file associated with the given key")
@@ -753,6 +776,17 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) error {
 	defer ff.Close()
 	_, err = copyZeroAlloc(ff, f)
 	return err
+}
+
+// SaveMultipartFiles saves multipart files fhs under the given filenames paths.
+func SaveMultipartFiles(fhs []*multipart.FileHeader, paths []string) error {
+	for i, fh := range fhs {
+		err := SaveMultipartFile(fh, paths[i])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // FormValue returns form value associated with the given key.
