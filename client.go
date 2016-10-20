@@ -1307,9 +1307,7 @@ func (c *HostClient) releaseReader(br *bufio.Reader) {
 
 func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 	if c == nil {
-		c = &tls.Config{
-			ClientSessionCache: tls.NewLRUClientSessionCache(0),
-		}
+		c = &tls.Config{}
 	} else {
 		// TODO: substitute this with c.Clone() after go1.8 becomes mainstream :)
 		c = &tls.Config{
@@ -1341,11 +1339,17 @@ func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 		}
 	}
 
-	serverName := tlsServerName(addr)
-	if serverName == "*" {
-		c.InsecureSkipVerify = true
-	} else {
-		c.ServerName = serverName
+	if c.ClientSessionCache == nil {
+		c.ClientSessionCache = tls.NewLRUClientSessionCache(0)
+	}
+
+	if len(c.ServerName) == 0 {
+		serverName := tlsServerName(addr)
+		if serverName == "*" {
+			c.InsecureSkipVerify = true
+		} else {
+			c.ServerName = serverName
+		}
 	}
 	return c
 }
