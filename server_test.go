@@ -1533,6 +1533,9 @@ func TestRequestCtxHijack(t *testing.T) {
 	hijackStopCh := make(chan struct{})
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			if ctx.Hijacked() {
+				t.Fatalf("connection mustn't be hijacked")
+			}
 			ctx.Hijack(func(c net.Conn) {
 				<-hijackStartCh
 
@@ -1555,6 +1558,9 @@ func TestRequestCtxHijack(t *testing.T) {
 					}
 				}
 			})
+			if !ctx.Hijacked() {
+				t.Fatalf("connection must be hijacked")
+			}
 			ctx.Success("foo/bar", []byte("hijack it!"))
 		},
 	}

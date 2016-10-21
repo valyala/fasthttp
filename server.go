@@ -441,6 +441,11 @@ func (ctx *RequestCtx) Hijack(handler HijackHandler) {
 	ctx.hijackHandler = handler
 }
 
+// Hijacked returns true after Hijack is called.
+func (ctx *RequestCtx) Hijacked() bool {
+	return ctx.hijackHandler != nil
+}
+
 // SetUserValue stores the given value (arbitrary object)
 // under the given key in ctx.
 //
