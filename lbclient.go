@@ -17,11 +17,13 @@ type BalancingClient interface {
 //
 // It has the following features:
 //
-//   - Balance load among available clients using 'least loaded' + 'round robin'
+//   - Balances load among available clients using 'least loaded' + 'round robin'
 //     hybrid technique.
-//   - Decrease load on unhealthy clients.
+//   - Dynamically decreases load on unhealthy clients.
 //
-// LBClient methods are safe for calling from concurrently running goroutines.
+// It is forbidden copying LBClient instances. Create new instances instead.
+//
+// It is safe calling LBClient methods from concurrently running goroutines.
 type LBClient struct {
 	noCopy noCopy
 

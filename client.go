@@ -460,6 +460,9 @@ type DialFunc func(addr string) (net.Conn, error)
 // HostClient balances http requests among hosts listed in Addr.
 //
 // HostClient may be used for balancing load among multiple upstream hosts.
+// While multiple addresses passed to HostClient.Addr may be used for balancing
+// load among them, it would be better using LBClient instead, since HostClient
+// may unevenly balance load among upstream hosts.
 //
 // It is forbidden copying HostClient instances. Create new instances instead.
 //
@@ -468,7 +471,7 @@ type HostClient struct {
 	noCopy noCopy
 
 	// Comma-separated list of upstream HTTP server host addresses,
-	// which are passed to Dial in round-robin manner.
+	// which are passed to Dial in a round-robin manner.
 	//
 	// Each address may contain port if default dialer is used.
 	// For example,
