@@ -1858,7 +1858,7 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.c = conn
 	ctx.logger.logger = logger
 	ctx.connID = nextConnID()
-	ctx.s = &fakeServer
+	ctx.s = fakeServer
 	ctx.connRequestNum = 0
 	ctx.connTime = time.Now()
 	ctx.time = ctx.connTime
@@ -1888,7 +1888,10 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	req.CopyTo(&ctx.Request)
 }
 
-var fakeServer Server
+var fakeServer = &Server{
+	// Initialize concurrencyCh for TimeoutHandler
+	concurrencyCh: make(chan struct{}, DefaultConcurrency),
+}
 
 type fakeAddrer struct {
 	net.Conn
