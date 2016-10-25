@@ -292,6 +292,28 @@ func (resp *Response) Body() []byte {
 	return resp.bodyBytes()
 }
 
+// Body returns response body.
+func (resp *Response) BodyWithErr() ([]byte, error) {
+	var err error
+	if resp.bodyStream != nil {
+		bodyBuf := resp.bodyBuffer()
+		bodyBuf.Reset()
+		_, err = copyZeroAlloc(bodyBuf, resp.bodyStream)
+		resp.closeBodyStream()
+		if err != nil {
+			bodyBuf.SetString(err.Error())
+		}
+	}
+	return resp.bodyBytes(), err
+}
+
+func (resp *Response) StreamBody() io.Reader {
+	if resp.bodyStream != nil {
+		return resp.bodyStream
+	}
+	return bytes.NewReader(resp.bodyBytes())
+}
+
 func (resp *Response) bodyBytes() []byte {
 	if resp.body == nil {
 		return nil
@@ -537,6 +559,48 @@ func (req *Request) Body() []byte {
 		return body
 	}
 	return req.bodyBytes()
+}
+
+// Body returns response body.
+func (req *Request) BodyWithErr() ([]byte, error) {
+	if req.bodyStream != nil {
+		bodyBuf := req.bodyBuffer()
+		bodyBuf.Reset()
+		_, err := copyZeroAlloc(bodyBuf, req.bodyStream)
+		req.closeBodyStream()
+		if err != nil {
+			bodyBuf.SetString(err.Error())
+		}
+		return req.bodyBytes(), err
+	} else if req.onlyMultipartForm() {
+		body, err := marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
+		if err != nil {
+			return []byte(err.Error()), err
+		}
+		return body, nil
+	}
+	return req.bodyBytes(), nil
+}
+
+type errorReader struct {
+	err error
+}
+
+func (r *errorReader) Read(b []byte) (int, error) {
+	return 0, r.err
+}
+
+func (req *Request) StreamBody() io.Reader {
+	if req.bodyStream != nil {
+		return req.bodyStream
+	} else if req.onlyMultipartForm() {
+		body, err := marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
+		if err != nil {
+			return &errorReader{err}
+		}
+		return bytes.NewReader(body)
+	}
+	return bytes.NewReader(req.bodyBytes())
 }
 
 // AppendBody appends p to request body.
