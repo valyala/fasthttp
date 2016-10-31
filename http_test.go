@@ -12,6 +12,30 @@ import (
 	"time"
 )
 
+func TestResponseWriteGzipNilBody(t *testing.T) {
+	var r Response
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := r.WriteGzip(bw); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+}
+
+func TestResponseWriteDeflateNilBody(t *testing.T) {
+	var r Response
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := r.WriteDeflate(bw); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+}
+
 func TestResponseSwapBodySerial(t *testing.T) {
 	testResponseSwapBody(t)
 }
