@@ -9,6 +9,7 @@ import (
 	"github.com/klauspost/compress/flate"
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zlib"
+	"github.com/valyala/fasthttp/stackless"
 )
 
 // Supported compression levels.
@@ -77,12 +78,15 @@ func acquireGzipWriter(w io.Writer, level int) *gzipWriter {
 
 	v := p.Get()
 	if v == nil {
-		zw, err := gzip.NewWriterLevel(w, level)
-		if err != nil {
-			panic(fmt.Sprintf("BUG: unexpected error from gzip.NewWriterLevel(%d): %s", level, err))
-		}
+		sw := stackless.NewWriter(w, func(w io.Writer) stackless.Writer {
+			zw, err := gzip.NewWriterLevel(w, level)
+			if err != nil {
+				panic(fmt.Sprintf("BUG: unexpected error from gzip.NewWriterLevel(%d): %s", level, err))
+			}
+			return zw
+		})
 		return &gzipWriter{
-			Writer: zw,
+			Writer: sw,
 			p:      p,
 		}
 	}
@@ -97,7 +101,7 @@ func releaseGzipWriter(zw *gzipWriter) {
 }
 
 type gzipWriter struct {
-	*gzip.Writer
+	stackless.Writer
 	p *sync.Pool
 }
 
@@ -225,12 +229,15 @@ func acquireFlateWriter(w io.Writer, level int) *flateWriter {
 
 	v := p.Get()
 	if v == nil {
-		zw, err := zlib.NewWriterLevel(w, level)
-		if err != nil {
-			panic(fmt.Sprintf("BUG: unexpected error in zlib.NewWriterLevel(%d): %s", level, err))
-		}
+		sw := stackless.NewWriter(w, func(w io.Writer) stackless.Writer {
+			zw, err := zlib.NewWriterLevel(w, level)
+			if err != nil {
+				panic(fmt.Sprintf("BUG: unexpected error in zlib.NewWriterLevel(%d): %s", level, err))
+			}
+			return zw
+		})
 		return &flateWriter{
-			Writer: zw,
+			Writer: sw,
 			p:      p,
 		}
 	}
@@ -245,7 +252,7 @@ func releaseFlateWriter(zw *flateWriter) {
 }
 
 type flateWriter struct {
-	*zlib.Writer
+	stackless.Writer
 	p *sync.Pool
 }
 
