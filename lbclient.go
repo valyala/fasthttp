@@ -84,6 +84,9 @@ func (cc *LBClient) Do(req *Request, resp *Response) error {
 }
 
 func (cc *LBClient) init() {
+	if len(cc.Clients) == 0 {
+		panic("BUG: LBClient.Clients cannot be empty")
+	}
 	for _, c := range cc.Clients {
 		cc.cs = append(cc.cs, &lbClient{
 			c:           c,
