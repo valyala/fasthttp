@@ -93,6 +93,10 @@ func (cc *LBClient) init() {
 			healthCheck: cc.HealthCheck,
 		})
 	}
+
+	// Randomize nextIdx in order to prevent initial servers'
+	// hammering from a cluster of identical LBClients.
+	cc.nextIdx = uint32(time.Now().UnixNano())
 }
 
 func (cc *LBClient) get() *lbClient {
