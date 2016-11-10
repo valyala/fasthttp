@@ -452,32 +452,33 @@ func TestRequestHeaderHTTP10ConnectionKeepAlive(t *testing.T) {
 	}
 }
 
-func TestBufferStartEnd(t *testing.T) {
-	testBufferStartEnd(t, "", "", "")
-	testBufferStartEnd(t, "foobar", "foobar", "")
+func TestBufferSnippet(t *testing.T) {
+	testBufferSnippet(t, "", `""`)
+	testBufferSnippet(t, "foobar", `"foobar"`)
 
 	b := string(createFixedBody(199))
-	testBufferStartEnd(t, b, b, "")
+	bExpected := fmt.Sprintf("%q", b)
+	testBufferSnippet(t, b, bExpected)
 	for i := 0; i < 10; i++ {
 		b += "foobar"
-		testBufferStartEnd(t, b, b, "")
+		bExpected = fmt.Sprintf("%q", b)
+		testBufferSnippet(t, b, bExpected)
 	}
 
 	b = string(createFixedBody(400))
-	testBufferStartEnd(t, b, b, "")
+	bExpected = fmt.Sprintf("%q", b)
+	testBufferSnippet(t, b, bExpected)
 	for i := 0; i < 10; i++ {
 		b += "sadfqwer"
-		testBufferStartEnd(t, b, b[:200], b[len(b)-200:])
+		bExpected = fmt.Sprintf("%q...%q", b[:200], b[len(b)-200:])
+		testBufferSnippet(t, b, bExpected)
 	}
 }
 
-func testBufferStartEnd(t *testing.T, buf, expectedStart, expectedEnd string) {
-	start, end := bufferStartEnd([]byte(buf))
-	if string(start) != expectedStart {
-		t.Fatalf("unexpected start %q. Expecting %q. buf %q", start, expectedStart, buf)
-	}
-	if string(end) != expectedEnd {
-		t.Fatalf("unexpected end %q. Expecting %q. buf %q", end, expectedEnd, buf)
+func testBufferSnippet(t *testing.T, buf, expectedSnippet string) {
+	snippet := bufferSnippet([]byte(buf))
+	if snippet != expectedSnippet {
+		t.Fatalf("unexpected snippet %s. Expecting %s", snippet, expectedSnippet)
 	}
 }
 
