@@ -17,6 +17,74 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestServerErrSmallBuffer(t *testing.T) {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("shouldn't be never called")
+		},
+		ReadBufferSize: 17,
+		Logger:         &customLogger{},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+
+	serverCh := make(chan error, 1)
+	go func() {
+		err := s.Serve(ln)
+		serverCh <- err
+	}()
+
+	clientCh := make(chan error, 1)
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			clientCh <- fmt.Errorf("unexpected error: %s", err)
+			return
+		}
+		_, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\nVERY-long-Header: sdfdfsd dsf dsaf dsf df fsd\r\n\r\n"))
+		if err != nil {
+			clientCh <- fmt.Errorf("unexpected error when sending request: %s", err)
+			return
+		}
+		br := bufio.NewReader(c)
+		var resp Response
+		if err = resp.Read(br); err != nil {
+			clientCh <- fmt.Errorf("unexpected error: %s", err)
+			return
+		}
+		statusCode := resp.StatusCode()
+		if statusCode != StatusRequestHeaderFieldsTooLarge {
+			clientCh <- fmt.Errorf("unexpected status code: %d. Expecting %d", statusCode, StatusRequestHeaderFieldsTooLarge)
+			return
+		}
+		clientCh <- nil
+	}()
+
+	var err error
+
+	// wait for the client
+	select {
+	case <-time.After(time.Second):
+		t.Fatalf("timeout when waiting for the client")
+	case err = <-clientCh:
+		if err != nil {
+			t.Fatalf("unexpected client error: %s", err)
+		}
+	}
+
+	// wait for the server
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-time.After(time.Second):
+		t.Fatalf("timeout when waiting for the server")
+	case err = <-serverCh:
+		if err != nil {
+			t.Fatalf("unexpected server error: %s", err)
+		}
+	}
+}
+
 func TestRequestCtxIsTLS(t *testing.T) {
 	var ctx RequestCtx
 
@@ -1771,9 +1839,14 @@ func TestServerGetOnly(t *testing.T) {
 		t.Fatalf("timeout")
 	}
 
-	resp := rw.w.Bytes()
-	if len(resp) > 0 {
-		t.Fatalf("unexpected response %q. Expecting zero", resp)
+	br := bufio.NewReader(&rw.w)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	statusCode := resp.StatusCode()
+	if statusCode != StatusBadRequest {
+		t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusBadRequest)
 	}
 }
 

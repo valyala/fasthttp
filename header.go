@@ -1255,9 +1255,6 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 		if n == 1 || err == io.EOF {
 			return io.EOF
 		}
-		if err == bufio.ErrBufferFull {
-			err = bufferFullError(r)
-		}
 		return fmt.Errorf("error when reading response headers: %s", err)
 	}
 	isEOF := (err != nil)
@@ -1276,7 +1273,9 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 			}
 		}
 		bStart, bEnd := bufferStartEnd(b)
-		return fmt.Errorf("error when reading response headers: %s. buf=%q...%q", err, bStart, bEnd)
+		return &ErrSmallBuffer{
+			error: fmt.Errorf("response headers don't fit the given buffer. buf(len=%d)=%q...%q", len(b), bStart, bEnd),
+		}
 	}
 	mustDiscard(r, headersLen)
 	return nil
@@ -1308,9 +1307,6 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		if n == 1 || err == io.EOF {
 			return io.EOF
 		}
-		if err == bufio.ErrBufferFull {
-			err = bufferFullError(r)
-		}
 		return fmt.Errorf("error when reading request headers: %s", err)
 	}
 	isEOF := (err != nil)
@@ -1329,20 +1325,12 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 			}
 		}
 		bStart, bEnd := bufferStartEnd(b)
-		return fmt.Errorf("error when reading request headers: %s. buf=%q...%q", err, bStart, bEnd)
+		return &ErrSmallBuffer{
+			error: fmt.Errorf("request headers don't fit the given buffer. buf(len=%d)=%q...%q", len(b), bStart, bEnd),
+		}
 	}
 	mustDiscard(r, headersLen)
 	return nil
-}
-
-func bufferFullError(r *bufio.Reader) error {
-	n := r.Buffered()
-	b, err := r.Peek(n)
-	if err != nil {
-		panic(fmt.Sprintf("BUG: unexpected error returned from bufio.Reader.Peek(Buffered()): %s", err))
-	}
-	bStart, bEnd := bufferStartEnd(b)
-	return fmt.Errorf("headers exceed %d bytes. Increase ReadBufferSize. buf=%q...%q", n, bStart, bEnd)
 }
 
 func bufferStartEnd(b []byte) ([]byte, []byte) {
@@ -2049,6 +2037,15 @@ func AppendNormalizedHeaderKeyBytes(dst, key []byte) []byte {
 }
 
 var errNeedMore = errors.New("need more data: cannot find trailing lf")
+
+// ErrSmallBuffer is returned when the provided buffer size is too small
+// for reading request and/or response headers.
+//
+// ReadBufferSize value from Server or clients should reduce the number
+// of such errors.
+type ErrSmallBuffer struct {
+	error
+}
 
 func mustPeekBuffered(r *bufio.Reader) []byte {
 	buf, err := r.Peek(r.Buffered())

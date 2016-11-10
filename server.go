@@ -1489,6 +1489,8 @@ func (s *Server) serveConn(c net.Conn) error {
 		if err != nil {
 			if err == io.EOF {
 				err = nil
+			} else {
+				bw = writeErrorResponse(bw, ctx, err)
 			}
 			break
 		}
@@ -1518,6 +1520,7 @@ func (s *Server) serveConn(c net.Conn) error {
 				br = nil
 			}
 			if err != nil {
+				bw = writeErrorResponse(bw, ctx, err)
 				break
 			}
 		}
@@ -1953,4 +1956,18 @@ func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 		"\r\n"+
 		"%s",
 		s.getServerName(), serverDate.Load(), len(msg), msg)
+}
+
+func writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, err error) *bufio.Writer {
+	if _, ok := err.(*ErrSmallBuffer); ok {
+		ctx.Error("Too big request header", StatusRequestHeaderFieldsTooLarge)
+	} else {
+		ctx.Error("Error when parsing request", StatusBadRequest)
+	}
+	if bw == nil {
+		bw = acquireWriter(ctx)
+	}
+	writeResponse(ctx, bw)
+	bw.Flush()
+	return bw
 }
