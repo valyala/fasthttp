@@ -1,3 +1,3 @@
-// Package stackless saves stack space when using writers from compress/*
-// packages.
+// Package stackless saves stack space for high number of concurrently
+// running goroutines, which use writers from compress/* packages.
 package stackless

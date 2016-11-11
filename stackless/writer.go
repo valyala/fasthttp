@@ -27,7 +27,7 @@ type NewWriterFunc func(w io.Writer) Writer
 // The returned writer writes data to dstW.
 //
 // Writers that use a lot of stack space may be wrapped into stackless writer,
-// thus saving stack space.
+// thus saving stack space for high number of concurrently running goroutines.
 func NewWriter(dstW io.Writer, newWriter NewWriterFunc) Writer {
 	w := &writer{
 		dstW: dstW,
@@ -86,7 +86,7 @@ func (w *writer) do(op op) error {
 	if err != nil {
 		return err
 	}
-	if w.xw.bb != nil {
+	if w.xw.bb != nil && len(w.xw.bb.B) > 0 {
 		_, err = w.dstW.Write(w.xw.bb.B)
 	}
 	w.xw.Reset()
