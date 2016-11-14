@@ -18,12 +18,13 @@ import (
 )
 
 func TestServerErrSmallBuffer(t *testing.T) {
+	logger := &customLogger{}
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.WriteString("shouldn't be never called")
 		},
 		ReadBufferSize: 20,
-		Logger:         &customLogger{},
+		Logger:         logger,
 	}
 	ln := fasthttputil.NewInmemoryListener()
 
@@ -64,24 +65,29 @@ func TestServerErrSmallBuffer(t *testing.T) {
 	// wait for the client
 	select {
 	case <-time.After(time.Second):
-		t.Fatalf("timeout when waiting for the client")
+		t.Fatalf("timeout when waiting for the client. Server log: %q", logger.out)
 	case err = <-clientCh:
 		if err != nil {
-			t.Fatalf("unexpected client error: %s", err)
+			t.Fatalf("unexpected client error: %s. Server log: %q", err, logger.out)
 		}
 	}
 
 	// wait for the server
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %s. Server log: %q", err, logger.out)
 	}
 	select {
 	case <-time.After(time.Second):
-		t.Fatalf("timeout when waiting for the server")
+		t.Fatalf("timeout when waiting for the server. Server log: %q", logger.out)
 	case err = <-serverCh:
 		if err != nil {
-			t.Fatalf("unexpected server error: %s", err)
+			t.Fatalf("unexpected server error: %s. Server log: %q", err, logger.out)
 		}
+	}
+
+	expectedErr := errSmallBuffer.Error()
+	if !strings.Contains(logger.out, expectedErr) {
+		t.Fatalf("unexpected log output: %q. Expecting %q", logger.out, expectedErr)
 	}
 }
 
