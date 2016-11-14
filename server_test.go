@@ -22,7 +22,7 @@ func TestServerErrSmallBuffer(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 			ctx.WriteString("shouldn't be never called")
 		},
-		ReadBufferSize: 17,
+		ReadBufferSize: 20,
 		Logger:         &customLogger{},
 	}
 	ln := fasthttputil.NewInmemoryListener()
@@ -40,7 +40,7 @@ func TestServerErrSmallBuffer(t *testing.T) {
 			clientCh <- fmt.Errorf("unexpected error: %s", err)
 			return
 		}
-		_, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\nVERY-long-Header: sdfdfsd dsf dsaf dsf df fsd\r\n\r\n"))
+		_, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aabb.com\r\nVERY-long-Header: sdfdfsd dsf dsaf dsf df fsd\r\n\r\n"))
 		if err != nil {
 			clientCh <- fmt.Errorf("unexpected error when sending request: %s", err)
 			return
