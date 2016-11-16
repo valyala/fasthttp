@@ -490,6 +490,8 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     framework with fasthttp support.
   * [websocket](https://github.com/leavengood/websocket) - Gorilla-based
     websocket implementation for fasthttp.
+  * [httpcache](https://github.com/GeekyPanda/httpcache) - An extremely easy-to-use web cache (or HTTP cache),
+    bonus support for fashttp
 
 
 # FAQ
