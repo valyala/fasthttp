@@ -57,6 +57,10 @@ func TestServerErrSmallBuffer(t *testing.T) {
 			clientCh <- fmt.Errorf("unexpected status code: %d. Expecting %d", statusCode, StatusRequestHeaderFieldsTooLarge)
 			return
 		}
+		if !resp.ConnectionClose() {
+			clientCh <- fmt.Errorf("missing 'Connection: close' response header")
+			return
+		}
 		clientCh <- nil
 	}()
 
@@ -1853,6 +1857,9 @@ func TestServerGetOnly(t *testing.T) {
 	statusCode := resp.StatusCode()
 	if statusCode != StatusBadRequest {
 		t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusBadRequest)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatalf("missing 'Connection: close' response header")
 	}
 }
 

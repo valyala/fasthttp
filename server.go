@@ -1964,6 +1964,7 @@ func writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, err error) *bufio.Wri
 	} else {
 		ctx.Error("Error when parsing request", StatusBadRequest)
 	}
+	ctx.SetConnectionClose()
 	if bw == nil {
 		bw = acquireWriter(ctx)
 	}
