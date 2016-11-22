@@ -48,6 +48,8 @@ var (
 	strAcceptRanges     = []byte("Accept-Ranges")
 	strRange            = []byte("Range")
 	strContentRange     = []byte("Content-Range")
+	strForwarded        = []byte("Forwarded")
+	strXForwardedProto  = []byte("X-Forwarded-Proto")
 
 	strCookieExpires  = []byte("expires")
 	strCookieDomain   = []byte("domain")
@@ -68,4 +70,5 @@ var (
 	strMultipartFormData   = []byte("multipart/form-data")
 	strBoundary            = []byte("boundary")
 	strBytes               = []byte("bytes")
+	strProtoHTTPS          = []byte("proto=https")
 )
