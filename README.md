@@ -486,6 +486,8 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     powerful routing package for fasthttp servers.
   * [fasthttprouter](https://github.com/buaazp/fasthttprouter) - a high
     performance fasthttp request router that scales well.
+  * [lu](https://github.com/vincentLiuxiang/lu) - a high performance
+    go middleware web framework which is based on fasthttp.
   * [echo](https://github.com/labstack/echo) - fast and unfancy HTTP server
     framework with fasthttp support.
   * [websocket](https://github.com/leavengood/websocket) - Gorilla-based
