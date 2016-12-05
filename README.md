@@ -278,7 +278,7 @@ with fasthttp support:
   * [Iris](https://github.com/kataras/iris)
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
   * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
-  * [echo v2](https://github.com/labstack/echo)
+  * [lu](https://github.com/vincentLiuxiang/lu)
 
   Net/http code with simple ServeMux is trivially converted to fasthttp code:
 
@@ -488,8 +488,6 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     performance fasthttp request router that scales well.
   * [lu](https://github.com/vincentLiuxiang/lu) - a high performance
     go middleware web framework which is based on fasthttp.
-  * [echo](https://github.com/labstack/echo) - fast and unfancy HTTP server
-    framework with fasthttp support.
   * [websocket](https://github.com/leavengood/websocket) - Gorilla-based
     websocket implementation for fasthttp.
 
@@ -560,7 +558,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     * [Iris](https://github.com/kataras/iris)
     * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
     * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
-    * [echo v2](https://github.com/labstack/echo)
+    * [lu](https://github.com/vincentLiuxiang/lu)
 
   See also [this issue](https://github.com/valyala/fasthttp/issues/9) for more info.
 
