@@ -8,3 +8,4 @@ import:
   - zlib
 - package: github.com/valyala/bytebufferpool
 - package: github.com/valyala/tcplisten
+- package: github.com/uber-go/zap
