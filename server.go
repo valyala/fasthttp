@@ -848,11 +848,22 @@ func (ctx *RequestCtx) LocalAddr() net.Addr {
 	return addr
 }
 
-// RemoteIP returns client ip for the given request.
+// RemoteIP returns the client ip the request came from.
 //
 // Always returns non-nil result.
 func (ctx *RequestCtx) RemoteIP() net.IP {
-	x, ok := ctx.RemoteAddr().(*net.TCPAddr)
+	return addrToIP(ctx.RemoteAddr())
+}
+
+// LocalIP returns the server ip the request came to.
+//
+// Always returns non-nil result.
+func (ctx *RequestCtx) LocalIP() net.IP {
+	return addrToIP(ctx.LocalAddr())
+}
+
+func addrToIP(addr net.Addr) net.IP {
+	x, ok := addr.(*net.TCPAddr)
 	if !ok {
 		return net.IPv4zero
 	}
