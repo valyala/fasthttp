@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/valyala/fasthttp"
+	"github.com/brightpearl/fasthttp"
 )
 
 func ExampleRequestCtx_SetBodyStreamWriter() {
