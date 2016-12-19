@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"mime/multipart"
 	"net"
 	"os"
@@ -14,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/uber-go/zap"
 )
 
 // ServeConn serves HTTP requests from the given connection
@@ -268,7 +269,7 @@ type Server struct {
 	// Logger, which is used by RequestCtx.Logger().
 	//
 	// By default standard logger from log package is used.
-	Logger Logger
+	Logger zap.Logger
 
 	concurrency      uint32
 	concurrencyCh    chan struct{}
@@ -552,26 +553,21 @@ func (r *firstByteReader) Read(b []byte) (int, error) {
 	return n + nn, err
 }
 
-// Logger is used for logging formatted messages.
-type Logger interface {
-	// Printf must have the same semantics as log.Printf.
-	Printf(format string, args ...interface{})
-}
-
 var ctxLoggerLock sync.Mutex
 
 type ctxLogger struct {
 	ctx    *RequestCtx
-	logger Logger
+	logger zap.Logger
 }
 
 func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	ctxLoggerLock.Lock()
-	msg := fmt.Sprintf(format, args...)
-	ctx := cl.ctx
-	req := &ctx.Request
-	cl.logger.Printf("%.3f #%016X - %s<->%s - %s %s - %s",
-		time.Since(ctx.Time()).Seconds(), ctx.ID(), ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method(), ctx.URI().FullURI(), msg)
+	// msg := fmt.Sprintf(format, args...)
+	// ctx := cl.ctx
+	// req := &ctx.Request
+	// cl.logger.Printf("%.3f #%016X - %s<->%s - %s %s - %s",
+	// time.Since(ctx.Time()).Seconds(), ctx.ID(), ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method(), ctx.URI().FullURI(), msg)
+	cl.logger.Info("TODO - log stuff")
 	ctxLoggerLock.Unlock()
 }
 
@@ -1079,14 +1075,14 @@ func (ctx *RequestCtx) IsBodyStream() bool {
 // for the current request.
 //
 // The returned logger is valid until returning from RequestHandler.
-func (ctx *RequestCtx) Logger() Logger {
+func (ctx *RequestCtx) Logger() zap.Logger {
 	if ctx.logger.ctx == nil {
 		ctx.logger.ctx = ctx
 	}
 	if ctx.logger.logger == nil {
 		ctx.logger.logger = ctx.s.logger()
 	}
-	return &ctx.logger
+	return ctx.logger.logger
 }
 
 // TimeoutError sets response status code to StatusRequestTimeout and sets
@@ -1278,8 +1274,8 @@ func (s *Server) Serve(ln net.Listener) error {
 				"The connection cannot be served because Server.Concurrency limit exceeded")
 			c.Close()
 			if time.Since(lastOverflowErrorTime) > time.Minute {
-				s.logger().Printf("The incoming connection cannot be served, because %d concurrent connections are served. "+
-					"Try increasing Server.Concurrency", maxWorkersCount)
+				s.logger().Error("The incoming connection cannot be served - max concurrent connections are served. "+
+					"Try increasing Server.Concurrency", zap.Int("maxWorkersCount", maxWorkersCount))
 				lastOverflowErrorTime = time.Now()
 			}
 
@@ -1303,12 +1299,12 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 				panic("BUG: net.Listener returned non-nil conn and non-nil error")
 			}
 			if netErr, ok := err.(net.Error); ok && netErr.Temporary() {
-				s.logger().Printf("Temporary error when accepting new connections: %s", netErr)
+				s.logger().Error("Temporary error when accepting new connections", zap.Error(netErr))
 				time.Sleep(time.Second)
 				continue
 			}
 			if err != io.EOF && !strings.Contains(err.Error(), "use of closed network connection") {
-				s.logger().Printf("Permanent error when accepting new connections: %s", err)
+				s.logger().Error("Permanent error when accepting new connections", zap.Error(err))
 				return nil, err
 			}
 			return nil, io.EOF
@@ -1320,8 +1316,7 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 			pic := wrapPerIPConn(s, c)
 			if pic == nil {
 				if time.Since(*lastPerIPErrorTime) > time.Minute {
-					s.logger().Printf("The number of connections from %s exceeds MaxConnsPerIP=%d",
-						getConnIP4(c), s.MaxConnsPerIP)
+					s.logger().Error("The number of connections exceeds MaxConnsPerIP", zap.String("addr", getConnIP4(c).String()), zap.Int("maxConnsPerIP", s.MaxConnsPerIP))
 					*lastPerIPErrorTime = time.Now()
 				}
 				continue
@@ -1347,9 +1342,9 @@ func wrapPerIPConn(s *Server, c net.Conn) net.Conn {
 	return acquirePerIPConn(c, ip, &s.perIPConnCounter)
 }
 
-var defaultLogger = Logger(log.New(os.Stderr, "", log.LstdFlags))
+var defaultLogger = zap.New(zap.NewJSONEncoder())
 
-func (s *Server) logger() Logger {
+func (s *Server) logger() zap.Logger {
 	if s.Logger != nil {
 		return s.Logger
 	}
@@ -1868,7 +1863,7 @@ func (s *Server) acquireCtx(c net.Conn) *RequestCtx {
 //
 // This function is intended for custom Server implementations.
 // See https://github.com/valyala/httpteleport for details.
-func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage bool) {
+func (ctx *RequestCtx) Init2(conn net.Conn, logger zap.Logger, reduceMemoryUsage bool) {
 	ctx.c = conn
 	ctx.logger.logger = logger
 	ctx.connID = nextConnID()
@@ -1887,7 +1882,7 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 // remoteAddr and logger are optional. They are used by RequestCtx.Logger().
 //
 // This function is intended for custom Server implementations.
-func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
+func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger zap.Logger) {
 	if remoteAddr == nil {
 		remoteAddr = zeroTCPAddr
 	}

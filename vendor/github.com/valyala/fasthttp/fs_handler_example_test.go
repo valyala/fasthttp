@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"log"
 
-	"github.com/brightpearl/fasthttp"
+	"github.com/valyala/fasthttp"
 )
 
 // Setup file handlers (aka 'file server config')

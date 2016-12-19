@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/brightpearl/fasthttp"
+	"github.com/valyala/fasthttp"
 )
 
 // NewFastHTTPHandlerFunc wraps net/http handler func to fasthttp

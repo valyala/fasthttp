@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/brightpearl/fasthttp"
+	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/reuseport"
 )
 

@@ -3,7 +3,7 @@ package fasthttp_test
 import (
 	"log"
 
-	"github.com/brightpearl/fasthttp"
+	"github.com/valyala/fasthttp"
 )
 
 func ExampleHostClient() {

@@ -3,7 +3,7 @@ package fasthttp_test
 import (
 	"fmt"
 
-	"github.com/brightpearl/fasthttp"
+	"github.com/valyala/fasthttp"
 )
 
 func ExampleByteBuffer() {
