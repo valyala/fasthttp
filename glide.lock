@@ -1,0 +1,25 @@
+hash: 8fb34b2ad8587327deff88c6d882c9fa51b8e35d4423030394b94781ff9641e7
+updated: 2016-12-19T14:43:36.71204312+01:00
+imports:
+- name: github.com/klauspost/compress
+  version: e3b7981a12dd3cab49afa1d3a50e715846f23732
+  subpackages:
+  - flate
+  - gzip
+  - zlib
+- name: github.com/klauspost/cpuid
+  version: 09cded8978dc9e80714c4d85b0322337b0a1e5e0
+- name: github.com/klauspost/crc32
+  version: cb6bfca970f6908083f26f39a79009d608efd5cd
+- name: github.com/valyala/bytebufferpool
+  version: e746df99fe4a3986f4d4f79e13c1e0117ce9c2f7
+- name: github.com/valyala/fasthttp
+  version: 82894ea1e876681803241ff69553f436e2231385
+  subpackages:
+  - expvarhandler
+  - fasthttputil
+  - reuseport
+  - stackless
+- name: github.com/valyala/tcplisten
+  version: ceec8f93295a060cdb565ec25e4ccf17941dbd55
+testImports: []

@@ -1,0 +1,10 @@
+package: github.com/brightpearl/fasthttp
+import:
+- package: github.com/klauspost/compress
+  version: ^1.2.0
+  subpackages:
+  - flate
+  - gzip
+  - zlib
+- package: github.com/valyala/bytebufferpool
+- package: github.com/valyala/tcplisten
