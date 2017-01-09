@@ -213,6 +213,11 @@ func (u *URI) SetHostBytes(host []byte) {
 }
 
 // Parse initializes URI from the given host and uri.
+//
+// host may be nil. In this case uri must contain fully qualified uri,
+// i.e. with scheme and host. http is assumed if scheme is omitted.
+//
+// uri may contain e.g. RequestURI without scheme and host if host is non-empty.
 func (u *URI) Parse(host, uri []byte) {
 	u.parse(host, uri, nil)
 }
@@ -369,6 +374,8 @@ func (u *URI) LastPathSegment() []byte {
 //
 //     * Absolute, i.e. http://foobar.com/aaa/bb?cc . In this case the original
 //       uri is replaced by newURI.
+//     * Absolute without scheme, i.e. //foobar.com/aaa/bb?cc. In this case
+//       the original scheme is preserved.
 //     * Missing host, i.e. /aaa/bb?cc . In this case only RequestURI part
 //       of the original uri is replaced.
 //     * Relative path, i.e.  xx?yy=abc . In this case the original RequestURI
@@ -383,6 +390,8 @@ func (u *URI) Update(newURI string) {
 //
 //     * Absolute, i.e. http://foobar.com/aaa/bb?cc . In this case the original
 //       uri is replaced by newURI.
+//     * Absolute without scheme, i.e. //foobar.com/aaa/bb?cc. In this case
+//       the original scheme is preserved.
 //     * Missing host, i.e. /aaa/bb?cc . In this case only RequestURI part
 //       of the original uri is replaced.
 //     * Relative path, i.e.  xx?yy=abc . In this case the original RequestURI

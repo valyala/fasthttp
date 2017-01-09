@@ -115,6 +115,7 @@ func TestURIUpdate(t *testing.T) {
 
 	// uri without scheme
 	testURIUpdate(t, "https://foo.bar/baz", "//aaa.bbb/cc?dd", "https://aaa.bbb/cc?dd")
+	testURIUpdate(t, "http://foo.bar/baz", "//aaa.bbb/cc?dd", "http://aaa.bbb/cc?dd")
 }
 
 func testURIUpdate(t *testing.T, base, update, result string) {
@@ -228,18 +229,25 @@ func testURIFullURI(t *testing.T, scheme, host, path, hash string, args *Args, e
 }
 
 func TestURIParseNilHost(t *testing.T) {
-	testURIParseScheme(t, "http://google.com/foo?bar#baz", "http")
-	testURIParseScheme(t, "HTtP://google.com/", "http")
-	testURIParseScheme(t, "://google.com/", "http")
-	testURIParseScheme(t, "fTP://aaa.com", "ftp")
-	testURIParseScheme(t, "httPS://aaa.com", "https")
+	testURIParseScheme(t, "http://google.com/foo?bar#baz", "http", "google.com", "/foo?bar#baz")
+	testURIParseScheme(t, "HTtP://google.com/", "http", "google.com", "/")
+	testURIParseScheme(t, "://google.com/xyz", "http", "google.com", "/xyz")
+	testURIParseScheme(t, "//google.com/foobar", "http", "google.com", "/foobar")
+	testURIParseScheme(t, "fTP://aaa.com", "ftp", "aaa.com", "/")
+	testURIParseScheme(t, "httPS://aaa.com", "https", "aaa.com", "/")
 }
 
-func testURIParseScheme(t *testing.T, uri, expectedScheme string) {
+func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expectedRequestURI string) {
 	var u URI
 	u.Parse(nil, []byte(uri))
 	if string(u.Scheme()) != expectedScheme {
-		t.Fatalf("Unexpected scheme %q. Expected %q for uri %q", u.Scheme(), expectedScheme, uri)
+		t.Fatalf("Unexpected scheme %q. Expecting %q for uri %q", u.Scheme(), expectedScheme, uri)
+	}
+	if string(u.Host()) != expectedHost {
+		t.Fatalf("Unexepcted host %q. Expecting %q for uri %q", u.Host(), expectedHost, uri)
+	}
+	if string(u.RequestURI()) != expectedRequestURI {
+		t.Fatalf("Unexepcted requestURI %q. Expecting %q for uri %q", u.RequestURI(), expectedRequestURI, uri)
 	}
 }
 
