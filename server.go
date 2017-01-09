@@ -1083,12 +1083,7 @@ func (ctx *RequestCtx) Logger() zap.Logger {
 		ctx.logger.logger = ctx.s.logger()
 	}
 
-	return &ctx.logger // ctxLogger doesn't implement zap.Logger, but returning ctx.logger.logger doesn't work because it skips the whole ctx
-
-	// TODO - context handling overhaul?
-	// TODO - or come back to fasthttp having its own interface and give up on uber?
-
-	// TODO - OR LEAVE FASTHTTP AS IT IS AND CHANGE UBER TO IMPLEMENT PRINTF? - EASIER?
+	return ctx.logger.logger
 }
 
 // TimeoutError sets response status code to StatusRequestTimeout and sets
