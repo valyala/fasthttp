@@ -560,17 +560,6 @@ type ctxLogger struct {
 	logger zap.Logger
 }
 
-func (cl *ctxLogger) Printf(format string, args ...interface{}) {
-	ctxLoggerLock.Lock()
-	// msg := fmt.Sprintf(format, args...)
-	// ctx := cl.ctx
-	// req := &ctx.Request
-	// cl.logger.Printf("%.3f #%016X - %s<->%s - %s %s - %s",
-	// time.Since(ctx.Time()).Seconds(), ctx.ID(), ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method(), ctx.URI().FullURI(), msg)
-	cl.logger.Info("TODO - log stuff")
-	ctxLoggerLock.Unlock()
-}
-
 var zeroTCPAddr = &net.TCPAddr{
 	IP: net.IPv4zero,
 }
