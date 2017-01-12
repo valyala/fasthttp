@@ -359,16 +359,16 @@ with fasthttp support:
   * http.StripPrefix() -> [fasthttp.PathRewriteFunc](https://godoc.org/github.com/valyala/fasthttp#PathRewriteFunc)
 
 * *VERY IMPORTANT!* Fasthttp disallows holding references
-to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx) or to its'
+to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx) or to its
 members after returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
 Otherwise [data races](http://blog.golang.org/race-detector) are inevitable.
 Carefully inspect all the net/http request handlers converted to fasthttp whether
-they retain references to RequestCtx or to its' members after returning.
+they retain references to RequestCtx or to its members after returning.
 RequestCtx provides the following _band aids_ for this case:
 
   * Wrap RequestHandler into [TimeoutHandler](https://godoc.org/github.com/valyala/fasthttp#TimeoutHandler).
   * Call [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
-  before returning from RequestHandler if there are references to RequestCtx or to its' members.
+  before returning from RequestHandler if there are references to RequestCtx or to its members.
   See [the example](https://godoc.org/github.com/valyala/fasthttp#example-RequestCtx-TimeoutError)
   for more details.
 
@@ -379,7 +379,7 @@ you forgot calling [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#
 before returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
 
 * Blind switching from net/http to fasthttp won't give you performance boost.
-While fasthttp is optimized for speed, its' performance may be easily saturated
+While fasthttp is optimized for speed, its performance may be easily saturated
 by slow [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
 So [profile](http://blog.golang.org/profiling-go-programs) and optimize your
 code after switching to fasthttp. For instance, use [quicktemplate](https://github.com/valyala/quicktemplate)
@@ -463,7 +463,7 @@ srcLen := len(src)
 dst = append(dst, "foobar"...)
 ```
 
-* `[]byte` buffer may be extended to its' capacity.
+* `[]byte` buffer may be extended to its capacity.
 ```go
 buf := make([]byte, 100)
 a := buf[:10]  // len(a) == 10, cap(a) == 100.
@@ -546,7 +546,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   Go1.5+. Older versions won't be supported, since their standard package
   [miss useful functions](https://github.com/valyala/fasthttp/issues/5).
 
-* *Please provide real benchmark data and sever information*
+* *Please provide real benchmark data and server information*
 
   See [this issue](https://github.com/valyala/fasthttp/issues/4).
 
@@ -568,11 +568,11 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   doing this check the following in your code:
 
   * Make sure there are no references to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx)
-  or to its' members after returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
+  or to its members after returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler).
   * Make sure you call [TimeoutError](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
   before returning from [RequestHandler](https://godoc.org/github.com/valyala/fasthttp#RequestHandler)
   if there are references to [RequestCtx](https://godoc.org/github.com/valyala/fasthttp#RequestCtx)
-  or to its' members, which may be accessed by other goroutines.
+  or to its members, which may be accessed by other goroutines.
 
 * *I didn't find an answer for my question here*
 

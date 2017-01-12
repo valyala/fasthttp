@@ -821,7 +821,7 @@ func AcquireRequest() *Request {
 
 // ReleaseRequest returns req acquired via AcquireRequest to request pool.
 //
-// It is forbidden accessing req and/or its' members after returning
+// It is forbidden accessing req and/or its members after returning
 // it to request pool.
 func ReleaseRequest(req *Request) {
 	req.Reset()
@@ -843,7 +843,7 @@ func AcquireResponse() *Response {
 
 // ReleaseResponse return resp acquired via AcquireResponse to response pool.
 //
-// It is forbidden accessing resp and/or its' members after returning
+// It is forbidden accessing resp and/or its members after returning
 // it to response pool.
 func ReleaseResponse(resp *Response) {
 	resp.Reset()
