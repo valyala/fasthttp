@@ -633,6 +633,15 @@ func TestServerServeTLSEmbed(t *testing.T) {
 	ch := make(chan struct{})
 	go func() {
 		err := ServeTLSEmbed(ln, certData, keyData, func(ctx *RequestCtx) {
+			if !ctx.IsTLS() {
+				ctx.Error("expecting tls", StatusBadRequest)
+				return
+			}
+			scheme := ctx.URI().Scheme()
+			if string(scheme) != "https" {
+				ctx.Error(fmt.Sprintf("unexpected scheme=%q. Expecting %q", scheme, "https"), StatusBadRequest)
+				return
+			}
 			ctx.WriteString("success")
 		})
 		if err != nil {
