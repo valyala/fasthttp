@@ -120,6 +120,24 @@ func TestRequestCtxIsTLS(t *testing.T) {
 	}
 }
 
+func TestRequestCtxRedirectHTTPSSchemeless(t *testing.T) {
+	var ctx RequestCtx
+
+	s := "GET /foo/bar?baz HTTP/1.1\nHost: aaa.com\n\n"
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := ctx.Request.Read(br); err != nil {
+		t.Fatalf("cannot read request: %s", err)
+	}
+	ctx.Request.isTLS = true
+
+	ctx.Redirect("//foobar.com/aa/bbb", StatusFound)
+	location := ctx.Response.Header.Peek("Location")
+	expectedLocation := "https://foobar.com/aa/bbb"
+	if string(location) != expectedLocation {
+		t.Fatalf("Unexpected location: %q. Expecting %q", location, expectedLocation)
+	}
+}
+
 func TestRequestCtxRedirect(t *testing.T) {
 	testRequestCtxRedirect(t, "http://qqq/", "", "http://qqq/")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "", "http://qqq/foo/bar?baz=111")
