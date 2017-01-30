@@ -285,6 +285,19 @@ func (a *Args) GetUfloatOrZero(key string) float64 {
 	return f
 }
 
+// GetBool returns boolean value for the given key.
+//
+// true is returned for '1', 'y' and 'yes' values,
+// otherwise false is returned.
+func (a *Args) GetBool(key string) bool {
+	switch string(a.Peek(key)) {
+	case "1", "y", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 func visitArgs(args []argsKV, f func(k, v []byte)) {
 	for i, n := 0, len(args); i < n; i++ {
 		kv := &args[i]

@@ -164,6 +164,29 @@ func TestArgsWriteTo(t *testing.T) {
 	}
 }
 
+func TestArgsGetBool(t *testing.T) {
+	testArgsGetBool(t, "", false)
+	testArgsGetBool(t, "0", false)
+	testArgsGetBool(t, "n", false)
+	testArgsGetBool(t, "no", false)
+	testArgsGetBool(t, "1", true)
+	testArgsGetBool(t, "y", true)
+	testArgsGetBool(t, "yes", true)
+
+	testArgsGetBool(t, "123", false)
+	testArgsGetBool(t, "foobar", false)
+}
+
+func testArgsGetBool(t *testing.T, value string, expectedResult bool) {
+	var a Args
+	a.Parse("v=" + value)
+
+	result := a.GetBool("v")
+	if result != expectedResult {
+		t.Fatalf("unexpected result %v. Expecting %v for value %q", result, expectedResult, value)
+	}
+}
+
 func TestArgsUint(t *testing.T) {
 	var a Args
 	a.SetUint("foo", 123)
