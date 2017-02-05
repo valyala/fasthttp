@@ -59,7 +59,7 @@ func getFuncWork() *funcWork {
 	v := funcWorkPool.Get()
 	if v == nil {
 		v = &funcWork{
-			done: make(chan struct{}),
+			done: make(chan struct{}, 1),
 		}
 	}
 	return v.(*funcWork)
