@@ -22,9 +22,19 @@ func NewFunc(f func(ctx interface{})) func(ctx interface{}) bool {
 	if f == nil {
 		panic("BUG: f cannot be nil")
 	}
+
+	funcWorkCh := make(chan *funcWork, runtime.GOMAXPROCS(-1)*2048)
+	onceInit := func() {
+		n := runtime.GOMAXPROCS(-1)
+		for i := 0; i < n; i++ {
+			go funcWorker(funcWorkCh, f)
+		}
+	}
+	var once sync.Once
+
 	return func(ctx interface{}) bool {
+		once.Do(onceInit)
 		fw := getFuncWork()
-		fw.f = f
 		fw.ctx = ctx
 
 		select {
@@ -39,21 +49,12 @@ func NewFunc(f func(ctx interface{})) func(ctx interface{}) bool {
 	}
 }
 
-func init() {
-	n := runtime.GOMAXPROCS(-1)
-	for i := 0; i < n; i++ {
-		go funcWorker()
-	}
-}
-
-func funcWorker() {
+func funcWorker(funcWorkCh <-chan *funcWork, f func(ctx interface{})) {
 	for fw := range funcWorkCh {
-		fw.f(fw.ctx)
+		f(fw.ctx)
 		fw.done <- struct{}{}
 	}
 }
-
-var funcWorkCh = make(chan *funcWork, runtime.GOMAXPROCS(-1)*1024)
 
 func getFuncWork() *funcWork {
 	v := funcWorkPool.Get()
@@ -66,7 +67,6 @@ func getFuncWork() *funcWork {
 }
 
 func putFuncWork(fw *funcWork) {
-	fw.f = nil
 	fw.ctx = nil
 	funcWorkPool.Put(fw)
 }
@@ -74,7 +74,6 @@ func putFuncWork(fw *funcWork) {
 var funcWorkPool sync.Pool
 
 type funcWork struct {
-	f    func(ctx interface{})
 	ctx  interface{}
 	done chan struct{}
 }

@@ -13,7 +13,7 @@ func TestNewFuncSimple(t *testing.T) {
 		atomic.AddUint64(&n, uint64(ctx.(int)))
 	})
 
-	iterations := 2 * cap(funcWorkCh)
+	iterations := 4 * 1024
 	for i := 0; i < iterations; i++ {
 		if !f(2) {
 			t.Fatalf("f mustn't return false")
@@ -33,7 +33,7 @@ func TestNewFuncMulti(t *testing.T) {
 		atomic.AddUint64(&n2, uint64(ctx.(int)))
 	})
 
-	iterations := 2 * cap(funcWorkCh)
+	iterations := 4 * 1024
 
 	f1Done := make(chan error, 1)
 	go func() {
