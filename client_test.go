@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1028,9 +1027,6 @@ func testClientDoTimeoutSuccess(t *testing.T, c *Client, addr string, n int) {
 			t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 		}
 		resultURI := string(resp.Body())
-		if strings.HasPrefix(uri, "https") {
-			resultURI = uri[:5] + resultURI[4:]
-		}
 		if resultURI != uri {
 			t.Fatalf("unexpected uri %q. Expecting %q", resultURI, uri)
 		}
@@ -1050,9 +1046,6 @@ func testClientGetTimeoutSuccess(t *testing.T, c *Client, addr string, n int) {
 			t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
 		}
 		resultURI := string(body)
-		if strings.HasPrefix(uri, "https") {
-			resultURI = uri[:5] + resultURI[4:]
-		}
 		if resultURI != uri {
 			t.Fatalf("unexpected uri %q. Expecting %q", resultURI, uri)
 		}

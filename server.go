@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -1494,6 +1495,8 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
+		ctx.Request.isTLS = isTLS
+
 		currentTime = time.Now()
 		ctx.lastReadDuration = currentTime.Sub(ctx.time)
 
@@ -1533,6 +1536,14 @@ func (s *Server) serveConn(c net.Conn) error {
 			if err != nil {
 				bw = writeErrorResponse(bw, ctx, err)
 				break
+			}
+		}
+
+		if !ctx.Request.isTLS {
+			if forwarded := ctx.Request.Header.PeekBytes(strForwarded); len(forwarded) > 0 {
+				ctx.Request.isTLS = bytes.Contains(forwarded, strProtoHTTPS)
+			} else {
+				ctx.Request.isTLS = bytes.Contains(ctx.Request.Header.PeekBytes(strXForwardedProto), strHTTPS)
 			}
 		}
 
