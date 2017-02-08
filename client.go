@@ -12,6 +12,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/uber-go/zap"
 )
 
 // Do performs the given http request and fills the given http response.
@@ -1586,8 +1588,8 @@ type PipelineClient struct {
 
 	// Logger for logging client errors.
 	//
-	// By default standard logger from log package is used.
-	Logger Logger
+	// By default a JSON logger from the uber-go/zap package is used.
+	Logger zap.Logger
 
 	connClients     []*pipelineConnClient
 	connClientsLock sync.Mutex
@@ -1608,7 +1610,7 @@ type pipelineConnClient struct {
 	WriteBufferSize     int
 	ReadTimeout         time.Duration
 	WriteTimeout        time.Duration
-	Logger              Logger
+	Logger              zap.Logger
 
 	workPool sync.Pool
 
@@ -1851,7 +1853,7 @@ func (c *pipelineConnClient) init() {
 		}
 		go func() {
 			if err := c.worker(); err != nil {
-				c.logger().Printf("error in PipelineClient(%q): %s", c.Addr, err)
+				c.logger().Error("Error in PipelineClient", zap.String("addr", c.Addr), zap.Error(err))
 				if netErr, ok := err.(net.Error); ok && netErr.Temporary() {
 					// Throttle client reconnections on temporary errors
 					time.Sleep(time.Second)
@@ -2089,7 +2091,7 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}) error
 	}
 }
 
-func (c *pipelineConnClient) logger() Logger {
+func (c *pipelineConnClient) logger() zap.Logger {
 	if c.Logger != nil {
 		return c.Logger
 	}

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/uber-go/zap"
 )
 
 // workerPool serves incoming connections via a pool of workers
@@ -24,7 +26,7 @@ type workerPool struct {
 
 	MaxIdleWorkerDuration time.Duration
 
-	Logger Logger
+	Logger zap.Logger
 
 	lock         sync.Mutex
 	workersCount int
@@ -212,7 +214,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			if wp.LogAllErrors || !(strings.Contains(errStr, "broken pipe") ||
 				strings.Contains(errStr, "reset by peer") ||
 				strings.Contains(errStr, "i/o timeout")) {
-				wp.Logger.Printf("error when serving connection %q<->%q: %s", c.LocalAddr(), c.RemoteAddr(), err)
+				wp.Logger.Error("Error when serving connection", zap.String("localAddr", c.LocalAddr().String()), zap.String("remoteAddr", c.RemoteAddr().String()), zap.Error(err))
 			}
 		}
 		if err != errHijacked {

@@ -4,7 +4,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/valyala/fasthttp"
+	"github.com/brightpearl/fasthttp"
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
