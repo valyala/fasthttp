@@ -1280,7 +1280,7 @@ func (s *Server) Serve(ln net.Listener) error {
 			if time.Since(lastOverflowErrorTime) > time.Minute {
 				s.logger().Printf("The incoming connection cannot be served, because %d concurrent connections are served. "+
 					"Try increasing Server.Concurrency", maxWorkersCount)
-				lastOverflowErrorTime = time.Now()
+				lastOverflowErrorTime = coarseTimeNow()
 			}
 
 			// The current server reached concurrency limit,
@@ -1322,7 +1322,7 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 				if time.Since(*lastPerIPErrorTime) > time.Minute {
 					s.logger().Printf("The number of connections from %s exceeds MaxConnsPerIP=%d",
 						getConnIP4(c), s.MaxConnsPerIP)
-					*lastPerIPErrorTime = time.Now()
+					*lastPerIPErrorTime = coarseTimeNow()
 				}
 				continue
 			}
@@ -1437,7 +1437,7 @@ func (s *Server) serveConn(c net.Conn) error {
 	serverName := s.getServerName()
 	connRequestNum := uint64(0)
 	connID := nextConnID()
-	currentTime := time.Now()
+	currentTime := coarseTimeNow()
 	connTime := currentTime
 	maxRequestBodySize := s.MaxRequestBodySize
 	if maxRequestBodySize <= 0 {
@@ -1494,7 +1494,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
-		currentTime = time.Now()
+		currentTime = coarseTimeNow()
 		ctx.lastReadDuration = currentTime.Sub(ctx.time)
 
 		if err != nil {
@@ -1635,7 +1635,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			break
 		}
 
-		currentTime = time.Now()
+		currentTime = coarseTimeNow()
 	}
 
 	if br != nil {
@@ -1691,7 +1691,7 @@ func (s *Server) updateWriteDeadline(c net.Conn, ctx *RequestCtx, lastDeadlineTi
 	// Optimization: update write deadline only if more than 25%
 	// of the last write deadline exceeded.
 	// See https://github.com/golang/go/issues/15133 for details.
-	currentTime := time.Now()
+	currentTime := coarseTimeNow()
 	if currentTime.Sub(lastDeadlineTime) > (writeTimeout >> 2) {
 		if err := c.SetWriteDeadline(currentTime.Add(writeTimeout)); err != nil {
 			panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", writeTimeout, err))
@@ -1874,7 +1874,7 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.connID = nextConnID()
 	ctx.s = fakeServer
 	ctx.connRequestNum = 0
-	ctx.connTime = time.Now()
+	ctx.connTime = coarseTimeNow()
 	ctx.time = ctx.connTime
 
 	keepBodyBuffer := !reduceMemoryUsage
