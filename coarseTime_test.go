@@ -10,7 +10,7 @@ func BenchmarkCoarseTimeNow(b *testing.B) {
 	var zeroTimeCount uint64
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			t := coarseTimeNow()
+			t := CoarseTimeNow()
 			if t.IsZero() {
 				atomic.AddUint64(&zeroTimeCount, 1)
 			}
