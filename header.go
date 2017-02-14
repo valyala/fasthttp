@@ -1425,10 +1425,9 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	dst = append(dst, statusLine(statusCode)...)
 
 	server := h.Server()
-	if len(server) == 0 {
-		server = defaultServerName
+	if len(server) != 0 {
+		dst = appendHeaderLine(dst, strServer, server)
 	}
-	dst = appendHeaderLine(dst, strServer, server)
 	dst = appendHeaderLine(dst, strDate, serverDate.Load().([]byte))
 
 	// Append Content-Type only for non-zero responses
