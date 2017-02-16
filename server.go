@@ -265,14 +265,14 @@ type Server struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
-	// ElideServerHeader, when set to true, causes the default Server header
+	// NoDefaultServerHeader, when set to true, causes the default Server header
 	// to be excluded from the Response.
 	//
 	// The default Server header value is the value of the Name field or an
 	// internal default value in its absence. With this option set to true,
 	// the only time a Server header will be sent is if a non-zero length
 	// value is explicitly provided during a request.
-	ElideServerHeader bool
+	NoDefaultServerHeader bool
 
 	// Logger, which is used by RequestCtx.Logger().
 	//
@@ -1449,7 +1449,7 @@ const DefaultMaxRequestBodySize = 4 * 1024 * 1024
 
 func (s *Server) serveConn(c net.Conn) error {
 	var serverName []byte
-	if !s.ElideServerHeader {
+	if !s.NoDefaultServerHeader {
 		serverName = s.getServerName()
 	}
 
@@ -1981,7 +1981,7 @@ func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 	w.Write(statusLine(statusCode))
 
 	server := ""
-	if !s.ElideServerHeader {
+	if !s.NoDefaultServerHeader {
 		server = fmt.Sprintf("Server: %s\r\n", s.getServerName())
 	}
 
