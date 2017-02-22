@@ -465,7 +465,7 @@ func (h *RequestHeader) Method() []byte {
 
 // SetMethod sets HTTP request method.
 func (h *RequestHeader) SetMethod(method string) {
-	h.method = append(h.method, method...)
+	h.method = append(h.method[:0], method...)
 }
 
 // SetMethodBytes sets HTTP request method.
