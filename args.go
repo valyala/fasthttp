@@ -331,11 +331,12 @@ func delAllArgs(args []argsKV, key string) []argsKV {
 		kv := &args[i]
 		if key == string(kv.key) {
 			n--
-			if i != n { // Overwrite args[i] with the last member, unless `i` is last
-				args[i] = args[n]
+			if i != n {
+				// Swap positions of the current and last member
+				args[i], args[n] = args[n], args[i]
 				i--
 			}
-			args = args[:n] // Shrink the array by one
+			args = args[:n] // Shrink the length
 		}
 	}
 	return args
