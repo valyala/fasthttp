@@ -312,8 +312,8 @@ func TestRequestUpdateURI(t *testing.T) {
 	a.Set("aaa", "bcse")
 
 	s := r.String()
-	if !strings.HasPrefix(s, "GET /123/432.html?aaa=bcse") {
-		t.Fatalf("cannot find %q in %q", "GET /123/432.html?aaa=bcse", s)
+	if !strings.HasPrefix(s, "GET http://foobar.com/123/432.html?aaa=bcse") {
+		t.Fatalf("cannot find %q in %q", "GET http://foobar.com/123/432.html?aaa=bcse", s)
 	}
 	if strings.Index(s, "\r\nHost: foobar.com\r\n") < 0 {
 		t.Fatalf("cannot find %q in %q", "\r\nHost: foobar.com\r\n", s)
@@ -976,7 +976,7 @@ func TestRequestString(t *testing.T) {
 	var r Request
 	r.SetRequestURI("http://foobar.com/aaa")
 	s := r.String()
-	expectedS := "GET /aaa HTTP/1.1\r\nUser-Agent: fasthttp\r\nHost: foobar.com\r\n\r\n"
+	expectedS := "GET http://foobar.com/aaa HTTP/1.1\r\nUser-Agent: fasthttp\r\nHost: foobar.com\r\n\r\n"
 	if s != expectedS {
 		t.Fatalf("unexpected request: %q. Expecting %q", s, expectedS)
 	}
@@ -1024,7 +1024,7 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	if string(req1.Header.Host()) != "google.com" {
 		t.Fatalf("unexpected host: %q. Expecting %q", req1.Header.Host(), "google.com")
 	}
-	if string(req.Header.RequestURI()) != "/foo/bar?baz=aaa" {
+	if string(req.Header.RequestURI()) != "http://google.com/foo/bar?baz=aaa" {
 		t.Fatalf("unexpected requestURI: %q. Expecting %q", req.Header.RequestURI(), "/foo/bar?baz=aaa")
 	}
 
