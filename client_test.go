@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -46,6 +47,157 @@ func TestClientPostArgs(t *testing.T) {
 	}
 	if len(res.Body()) == 0 {
 		t.Fatal("cannot set args as body")
+	}
+}
+
+func TestClientRedirectSameSchema(t *testing.T) {
+
+	listenHTTPS1 := testClientRedirectListener(t, true)
+	defer listenHTTPS1.Close()
+
+	listenHTTPS2 := testClientRedirectListener(t, true)
+	defer listenHTTPS2.Close()
+
+	sHTTPS1 := testClientRedirectChangingSchemaServer(t, listenHTTPS1, listenHTTPS1, true)
+	defer sHTTPS1.Stop()
+
+	sHTTPS2 := testClientRedirectChangingSchemaServer(t, listenHTTPS2, listenHTTPS2, false)
+	defer sHTTPS2.Stop()
+
+	destURL := fmt.Sprintf("https://%s/baz", listenHTTPS1.Addr().String())
+
+	urlParsed, err := url.Parse(destURL)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	var reqClient *HostClient
+
+	reqClient = &HostClient{
+		IsTLS: true,
+		Addr:  urlParsed.Host,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	statusCode, _, err := reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
+	if err != nil {
+		t.Fatalf("HostClient error: %s", err)
+		return
+	}
+
+	if statusCode != 200 {
+		t.Fatalf("HostClient error code response %d", statusCode)
+		return
+	}
+
+}
+
+func TestClientRedirectChangingSchemaHttp2Https(t *testing.T) {
+
+	listenHTTPS := testClientRedirectListener(t, true)
+	defer listenHTTPS.Close()
+
+	listenHTTP := testClientRedirectListener(t, false)
+	defer listenHTTP.Close()
+
+	sHTTPS := testClientRedirectChangingSchemaServer(t, listenHTTPS, listenHTTP, true)
+	defer sHTTPS.Stop()
+
+	sHTTP := testClientRedirectChangingSchemaServer(t, listenHTTPS, listenHTTP, false)
+	defer sHTTP.Stop()
+
+	destURL := fmt.Sprintf("http://%s/baz", listenHTTP.Addr().String())
+
+	urlParsed, err := url.Parse(destURL)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	var reqClient *HostClient
+
+	reqClient = &HostClient{
+		Addr: urlParsed.Host,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	statusCode, _, err := reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
+	if err != nil {
+		t.Fatalf("HostClient error: %s", err)
+		return
+	}
+
+	if statusCode != 200 {
+		t.Fatalf("HostClient error code response %d", statusCode)
+		return
+	}
+
+}
+
+func testClientRedirectListener(t *testing.T, isTLS bool) net.Listener {
+
+	var ln net.Listener
+	var err error
+	var tlsConfig *tls.Config
+
+	if isTLS {
+		certFile := "./ssl-cert-snakeoil.pem"
+		keyFile := "./ssl-cert-snakeoil.key"
+		cert, err1 := tls.LoadX509KeyPair(certFile, keyFile)
+		if err1 != nil {
+			t.Fatalf("Cannot load TLS certificate: %s", err1)
+		}
+		tlsConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+		ln, err = tls.Listen("tcp", "localhost:0", tlsConfig)
+	} else {
+		ln, err = net.Listen("tcp", "localhost:0")
+	}
+
+	if err != nil {
+		t.Fatalf("cannot listen isTLS %v: %s", isTLS, err)
+	}
+
+	return ln
+}
+
+func testClientRedirectChangingSchemaServer(t *testing.T, https, http net.Listener, isTLS bool) *testEchoServer {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if ctx.IsTLS() {
+				ctx.SetStatusCode(200)
+			} else {
+				ctx.Redirect(fmt.Sprintf("https://%s/baz", https.Addr().String()), 301)
+			}
+		},
+	}
+
+	var ln net.Listener
+	if isTLS {
+		ln = https
+	} else {
+		ln = http
+	}
+
+	ch := make(chan struct{})
+	go func() {
+		err := s.Serve(ln)
+		if err != nil {
+			t.Fatalf("unexpected error returned from Serve(): %s", err)
+		}
+		close(ch)
+	}()
+	return &testEchoServer{
+		s:  s,
+		ln: ln,
+		ch: ch,
+		t:  t,
 	}
 }
 

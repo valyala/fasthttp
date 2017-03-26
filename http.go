@@ -44,6 +44,9 @@ type Request struct {
 	keepBodyBuffer bool
 
 	isTLS bool
+
+	// To detect scheme changes in redirects
+	schemaUpdate bool
 }
 
 // Response represents HTTP response.
