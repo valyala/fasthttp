@@ -595,7 +595,7 @@ func (ctx *RequestCtx) ConnID() uint64 {
 // Time returns RequestHandler call time truncated to the nearest second.
 //
 // Call time.Now() at the beginning of RequestHandler in order to obtain
-// percise RequestHandler call time.
+// precise RequestHandler call time.
 func (ctx *RequestCtx) Time() time.Time {
 	return ctx.time
 }
