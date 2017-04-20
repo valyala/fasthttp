@@ -1,6 +1,7 @@
 package fasthttputil_test
 
 import (
+	"crypto/tls"
 	"net"
 	"testing"
 
@@ -36,14 +37,72 @@ func BenchmarkTLSStreaming(b *testing.B) {
 // for fasthttp client and server.
 //
 // It re-establishes new TLS connection per each http request.
-func BenchmarkTLSHandshake(b *testing.B) {
-	benchmark(b, handshakeHandler, true)
+func BenchmarkTLSHandshakeWithClientSessionCache(b *testing.B) {
+	bc := &benchConfig{
+		IsTLS: true,
+		DisableClientSessionCache: false,
+	}
+	benchmarkExt(b, handshakeHandler, bc)
+}
+
+func BenchmarkTLSHandshakeWithoutClientSessionCache(b *testing.B) {
+	bc := &benchConfig{
+		IsTLS: true,
+		DisableClientSessionCache: true,
+	}
+	benchmarkExt(b, handshakeHandler, bc)
 }
 
 func benchmark(b *testing.B, h fasthttp.RequestHandler, isTLS bool) {
+	bc := &benchConfig{
+		IsTLS: isTLS,
+	}
+	benchmarkExt(b, h, bc)
+}
+
+type benchConfig struct {
+	IsTLS                     bool
+	DisableClientSessionCache bool
+}
+
+func benchmarkExt(b *testing.B, h fasthttp.RequestHandler, bc *benchConfig) {
+	var serverTLSConfig, clientTLSConfig *tls.Config
+	if bc.IsTLS {
+		cert, err := tls.LoadX509KeyPair("./ssl-cert-snakeoil.pem", "./ssl-cert-snakeoil.key")
+		if err != nil {
+			b.Fatalf("cannot load TLS certificate: %s", err)
+		}
+		serverTLSConfig = &tls.Config{
+			Certificates:             []tls.Certificate{cert},
+			PreferServerCipherSuites: true,
+		}
+		clientTLSConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
+		if bc.DisableClientSessionCache {
+			clientTLSConfig.ClientSessionCache = fakeSessionCache{}
+		}
+	}
 	ln := fasthttputil.NewInmemoryListener()
-	serverStopCh := startServer(b, ln, h, isTLS)
-	c := newClient(ln, isTLS)
+	serverStopCh := make(chan struct{})
+	go func() {
+		serverLn := net.Listener(ln)
+		if serverTLSConfig != nil {
+			serverLn = tls.NewListener(serverLn, serverTLSConfig)
+		}
+		if err := fasthttp.Serve(serverLn, h); err != nil {
+			b.Fatalf("unexpected error in server: %s", err)
+		}
+		close(serverStopCh)
+	}()
+	c := &fasthttp.HostClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		IsTLS:     clientTLSConfig != nil,
+		TLSConfig: clientTLSConfig,
+	}
+
 	b.RunParallel(func(pb *testing.PB) {
 		runRequests(b, pb, c)
 	})
@@ -62,37 +121,6 @@ func handshakeHandler(ctx *fasthttp.RequestCtx) {
 	ctx.SetConnectionClose()
 }
 
-func startServer(b *testing.B, ln *fasthttputil.InmemoryListener, h fasthttp.RequestHandler, isTLS bool) <-chan struct{} {
-	ch := make(chan struct{})
-	go func() {
-		var err error
-		if isTLS {
-			err = fasthttp.ServeTLS(ln, certFile, keyFile, h)
-		} else {
-			err = fasthttp.Serve(ln, h)
-		}
-		if err != nil {
-			b.Fatalf("unexpected error in server: %s", err)
-		}
-		close(ch)
-	}()
-	return ch
-}
-
-const (
-	certFile = "./ssl-cert-snakeoil.pem"
-	keyFile  = "./ssl-cert-snakeoil.key"
-)
-
-func newClient(ln *fasthttputil.InmemoryListener, isTLS bool) *fasthttp.HostClient {
-	return &fasthttp.HostClient{
-		Dial: func(addr string) (net.Conn, error) {
-			return ln.Dial()
-		},
-		IsTLS: isTLS,
-	}
-}
-
 func runRequests(b *testing.B, pb *testing.PB, c *fasthttp.HostClient) {
 	var req fasthttp.Request
 	req.SetRequestURI("http://foo.bar/baz")
@@ -105,4 +133,14 @@ func runRequests(b *testing.B, pb *testing.PB, c *fasthttp.HostClient) {
 			b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), fasthttp.StatusOK)
 		}
 	}
+}
+
+type fakeSessionCache struct{}
+
+func (fakeSessionCache) Get(sessionKey string) (*tls.ClientSessionState, bool) {
+	return nil, false
+}
+
+func (fakeSessionCache) Put(sessionKey string, cs *tls.ClientSessionState) {
+	// no-op
 }
