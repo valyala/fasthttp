@@ -53,6 +53,24 @@ func BenchmarkTLSHandshakeWithoutClientSessionCache(b *testing.B) {
 	benchmarkExt(b, handshakeHandler, bc)
 }
 
+func BenchmarkTLSHandshakeWithCurvesWithClientSessionCache(b *testing.B) {
+	bc := &benchConfig{
+		IsTLS: true,
+		DisableClientSessionCache: false,
+		UseCurves:                 true,
+	}
+	benchmarkExt(b, handshakeHandler, bc)
+}
+
+func BenchmarkTLSHandshakeWithCurvesWithoutClientSessionCache(b *testing.B) {
+	bc := &benchConfig{
+		IsTLS: true,
+		DisableClientSessionCache: true,
+		UseCurves:                 true,
+	}
+	benchmarkExt(b, handshakeHandler, bc)
+}
+
 func benchmark(b *testing.B, h fasthttp.RequestHandler, isTLS bool) {
 	bc := &benchConfig{
 		IsTLS: isTLS,
@@ -63,6 +81,7 @@ func benchmark(b *testing.B, h fasthttp.RequestHandler, isTLS bool) {
 type benchConfig struct {
 	IsTLS                     bool
 	DisableClientSessionCache bool
+	UseCurves                 bool
 }
 
 func benchmarkExt(b *testing.B, h fasthttp.RequestHandler, bc *benchConfig) {
@@ -75,6 +94,12 @@ func benchmarkExt(b *testing.B, h fasthttp.RequestHandler, bc *benchConfig) {
 		serverTLSConfig = &tls.Config{
 			Certificates:             []tls.Certificate{cert},
 			PreferServerCipherSuites: true,
+		}
+		serverTLSConfig.CurvePreferences = []tls.CurveID{}
+		if bc.UseCurves {
+			serverTLSConfig.CurvePreferences = []tls.CurveID{
+				tls.CurveP256,
+			}
 		}
 		clientTLSConfig = &tls.Config{
 			InsecureSkipVerify: true,
