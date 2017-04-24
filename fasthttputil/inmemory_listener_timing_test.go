@@ -37,7 +37,7 @@ func BenchmarkTLSStreaming(b *testing.B) {
 // for fasthttp client and server.
 //
 // It re-establishes new TLS connection per each http request.
-func BenchmarkTLSHandshakeWithClientSessionCache(b *testing.B) {
+func BenchmarkTLSHandshakeRSAWithClientSessionCache(b *testing.B) {
 	bc := &benchConfig{
 		IsTLS: true,
 		DisableClientSessionCache: false,
@@ -45,7 +45,7 @@ func BenchmarkTLSHandshakeWithClientSessionCache(b *testing.B) {
 	benchmarkExt(b, handshakeHandler, bc)
 }
 
-func BenchmarkTLSHandshakeWithoutClientSessionCache(b *testing.B) {
+func BenchmarkTLSHandshakeRSAWithoutClientSessionCache(b *testing.B) {
 	bc := &benchConfig{
 		IsTLS: true,
 		DisableClientSessionCache: true,
@@ -53,20 +53,40 @@ func BenchmarkTLSHandshakeWithoutClientSessionCache(b *testing.B) {
 	benchmarkExt(b, handshakeHandler, bc)
 }
 
-func BenchmarkTLSHandshakeWithCurvesWithClientSessionCache(b *testing.B) {
+func BenchmarkTLSHandshakeECDSAWithClientSessionCache(b *testing.B) {
+	bc := &benchConfig{
+		IsTLS: true,
+		DisableClientSessionCache: false,
+		UseECDSA:                  true,
+	}
+	benchmarkExt(b, handshakeHandler, bc)
+}
+
+func BenchmarkTLSHandshakeECDSAWithoutClientSessionCache(b *testing.B) {
+	bc := &benchConfig{
+		IsTLS: true,
+		DisableClientSessionCache: true,
+		UseECDSA:                  true,
+	}
+	benchmarkExt(b, handshakeHandler, bc)
+}
+
+func BenchmarkTLSHandshakeECDSAWithCurvesWithClientSessionCache(b *testing.B) {
 	bc := &benchConfig{
 		IsTLS: true,
 		DisableClientSessionCache: false,
 		UseCurves:                 true,
+		UseECDSA:                  true,
 	}
 	benchmarkExt(b, handshakeHandler, bc)
 }
 
-func BenchmarkTLSHandshakeWithCurvesWithoutClientSessionCache(b *testing.B) {
+func BenchmarkTLSHandshakeECDSAWithCurvesWithoutClientSessionCache(b *testing.B) {
 	bc := &benchConfig{
 		IsTLS: true,
 		DisableClientSessionCache: true,
 		UseCurves:                 true,
+		UseECDSA:                  true,
 	}
 	benchmarkExt(b, handshakeHandler, bc)
 }
@@ -82,14 +102,21 @@ type benchConfig struct {
 	IsTLS                     bool
 	DisableClientSessionCache bool
 	UseCurves                 bool
+	UseECDSA                  bool
 }
 
 func benchmarkExt(b *testing.B, h fasthttp.RequestHandler, bc *benchConfig) {
 	var serverTLSConfig, clientTLSConfig *tls.Config
 	if bc.IsTLS {
-		cert, err := tls.LoadX509KeyPair("./ssl-cert-snakeoil.pem", "./ssl-cert-snakeoil.key")
+		certFile := "rsa.pem"
+		keyFile := "rsa.key"
+		if bc.UseECDSA {
+			certFile = "ecdsa.pem"
+			keyFile = "ecdsa.key"
+		}
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			b.Fatalf("cannot load TLS certificate: %s", err)
+			b.Fatalf("cannot load TLS certificate from certFile=%q, keyFile=%q: %s", certFile, keyFile, err)
 		}
 		serverTLSConfig = &tls.Config{
 			Certificates:             []tls.Certificate{cert},
