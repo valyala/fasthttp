@@ -1380,6 +1380,9 @@ func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 }
 
 func tlsServerName(addr string) string {
+	if !strings.Contains(addr, ":") {
+		return addr
+	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return "*"
