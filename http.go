@@ -344,8 +344,8 @@ func (resp *Response) BodyGunzip() ([]byte, error) {
 }
 
 func gunzipData(p []byte) ([]byte, error) {
-	var bb ByteBuffer
-	_, err := WriteGunzip(&bb, p)
+	bb := NewByteBuffer()
+	_, err := WriteGunzip(bb, p)
 	if err != nil {
 		return nil, err
 	}
@@ -371,8 +371,8 @@ func (resp *Response) BodyInflate() ([]byte, error) {
 }
 
 func inflateData(p []byte) ([]byte, error) {
-	var bb ByteBuffer
-	_, err := WriteInflate(&bb, p)
+	bb := NewByteBuffer()
+	_, err := WriteInflate(bb, p)
 	if err != nil {
 		return nil, err
 	}
@@ -707,8 +707,8 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 }
 
 func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
-	var buf ByteBuffer
-	if err := WriteMultipartForm(&buf, f, boundary); err != nil {
+	buf := NewByteBuffer()
+	if err := WriteMultipartForm(buf, f, boundary); err != nil {
 		return nil, err
 	}
 	return buf.B, nil
