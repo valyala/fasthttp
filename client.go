@@ -1281,7 +1281,7 @@ func acquireClientConn(conn net.Conn) *clientConn {
 }
 
 func releaseClientConn(cc *clientConn) {
-	cc.c = nil
+	*cc = clientConn{}
 	clientConnPool.Put(cc)
 }
 
