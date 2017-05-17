@@ -1278,7 +1278,7 @@ func TestServerExpect100Continue(t *testing.T) {
 }
 
 func TestCompressHandler(t *testing.T) {
-	expectedBody := "foo/bar/baz"
+	expectedBody := string(createFixedBody(2e4))
 	h := CompressHandler(func(ctx *RequestCtx) {
 		ctx.Write([]byte(expectedBody))
 	})

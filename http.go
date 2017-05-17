@@ -1206,8 +1206,15 @@ func (resp *Response) gzipBody(level int) error {
 			}
 		})
 	} else {
+		bodyBytes := resp.bodyBytes()
+		if len(bodyBytes) < minCompressLen {
+			// There is no sense in spending CPU time on small body compression,
+			// since there is a very high probability that the compressed
+			// body size will be bigger than the original body size.
+			return nil
+		}
 		w := responseBodyPool.Get()
-		w.B = AppendGzipBytesLevel(w.B, resp.bodyBytes(), level)
+		w.B = AppendGzipBytesLevel(w.B, bodyBytes, level)
 
 		// Hack: swap resp.body with w.
 		if resp.body != nil {
@@ -1243,8 +1250,15 @@ func (resp *Response) deflateBody(level int) error {
 			}
 		})
 	} else {
+		bodyBytes := resp.bodyBytes()
+		if len(bodyBytes) < minCompressLen {
+			// There is no sense in spending CPU time on small body compression,
+			// since there is a very high probability that the compressed
+			// body size will be bigger than the original body size.
+			return nil
+		}
 		w := responseBodyPool.Get()
-		w.B = AppendDeflateBytesLevel(w.B, resp.bodyBytes(), level)
+		w.B = AppendDeflateBytesLevel(w.B, bodyBytes, level)
 
 		// Hack: swap resp.body with w.
 		if resp.body != nil {
@@ -1255,6 +1269,9 @@ func (resp *Response) deflateBody(level int) error {
 	resp.Header.SetCanonical(strContentEncoding, strDeflate)
 	return nil
 }
+
+// Bodies with sizes smaller than minCompressLen aren't compressed at all
+const minCompressLen = 200
 
 type writeFlusher interface {
 	io.Writer
