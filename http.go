@@ -1189,6 +1189,11 @@ func (resp *Response) gzipBody(level int) error {
 		return nil
 	}
 
+	if !resp.Header.isCompressibleContentType() {
+		// The content-type cannot be compressed.
+		return nil
+	}
+
 	// Do not care about memory allocations here, since gzip is slow
 	// and allocates a lot of memory by itself.
 	if resp.bodyStream != nil {
@@ -1230,6 +1235,11 @@ func (resp *Response) deflateBody(level int) error {
 	if len(resp.Header.peek(strContentEncoding)) > 0 {
 		// It looks like the body is already compressed.
 		// Do not compress it again.
+		return nil
+	}
+
+	if !resp.Header.isCompressibleContentType() {
+		// The content-type cannot be compressed.
 		return nil
 	}
 

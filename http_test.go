@@ -752,10 +752,17 @@ func testResponseDeflate(t *testing.T, s string) {
 	var r Response
 	r.SetBodyString(s)
 	testResponseDeflateExt(t, &r, s)
+
+	// make sure the uncompressible Content-Type isn't compressed
+	r.Reset()
+	r.Header.SetContentType("image/jpeg")
+	r.SetBodyString(s)
+	testResponseDeflateExt(t, &r, s)
 }
 
 func testResponseDeflateExt(t *testing.T, r *Response, s string) {
-	isBodyStream := r.IsBodyStream()
+	isCompressible := isCompressibleResponse(r, s)
+
 	var buf bytes.Buffer
 	var err error
 	bw := bufio.NewWriter(&buf)
@@ -774,9 +781,10 @@ func testResponseDeflateExt(t *testing.T, r *Response, s string) {
 
 	ce := r1.Header.Peek("Content-Encoding")
 	var body []byte
-	if len(s) >= minCompressLen || isBodyStream {
+	if isCompressible {
 		if string(ce) != "deflate" {
-			t.Fatalf("unexpected Content-Encoding %q. Expecting %q", ce, "deflate")
+			t.Fatalf("unexpected Content-Encoding %q. Expecting %q. len(s)=%d, Content-Type: %q",
+				ce, "deflate", len(s), r.Header.ContentType())
 		}
 		body, err = r1.BodyInflate()
 		if err != nil {
@@ -797,10 +805,17 @@ func testResponseGzip(t *testing.T, s string) {
 	var r Response
 	r.SetBodyString(s)
 	testResponseGzipExt(t, &r, s)
+
+	// make sure the uncompressible Content-Type isn't compressed
+	r.Reset()
+	r.Header.SetContentType("image/jpeg")
+	r.SetBodyString(s)
+	testResponseGzipExt(t, &r, s)
 }
 
 func testResponseGzipExt(t *testing.T, r *Response, s string) {
-	isBodyStream := r.IsBodyStream()
+	isCompressible := isCompressibleResponse(r, s)
+
 	var buf bytes.Buffer
 	var err error
 	bw := bufio.NewWriter(&buf)
@@ -819,9 +834,10 @@ func testResponseGzipExt(t *testing.T, r *Response, s string) {
 
 	ce := r1.Header.Peek("Content-Encoding")
 	var body []byte
-	if len(s) > minCompressLen || isBodyStream {
+	if isCompressible {
 		if string(ce) != "gzip" {
-			t.Fatalf("unexpected Content-Encoding %q. Expecting %q", ce, "gzip")
+			t.Fatalf("unexpected Content-Encoding %q. Expecting %q. len(s)=%d, Content-Type: %q",
+				ce, "gzip", len(s), r.Header.ContentType())
 		}
 		body, err = r1.BodyGunzip()
 		if err != nil {
@@ -836,6 +852,14 @@ func testResponseGzipExt(t *testing.T, r *Response, s string) {
 	if string(body) != s {
 		t.Fatalf("unexpected body %q. Expecting %q", body, s)
 	}
+}
+
+func isCompressibleResponse(r *Response, s string) bool {
+	isCompressible := r.Header.isCompressibleContentType()
+	if isCompressible && len(s) < minCompressLen && !r.IsBodyStream() {
+		isCompressible = false
+	}
+	return isCompressible
 }
 
 func TestRequestMultipartForm(t *testing.T) {
