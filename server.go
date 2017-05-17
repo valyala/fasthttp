@@ -344,6 +344,10 @@ func CompressHandler(h RequestHandler) RequestHandler {
 func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
+		// Don't do anything for 204 or 304 as they never have a body.
+		if code := ctx.Response.StatusCode(); code == StatusNoContent || code == StatusNotModified {
+			return
+		}
 		ce := ctx.Response.Header.PeekBytes(strContentEncoding)
 		if len(ce) > 0 {
 			// Do not compress responses with non-empty

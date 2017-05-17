@@ -1372,6 +1372,28 @@ func TestCompressHandler(t *testing.T) {
 	}
 }
 
+func TestCompressHandlerNoContent(t *testing.T) {
+	h := CompressHandler(func(ctx *RequestCtx) {
+		ctx.Response.Header.SetStatusCode(StatusNoContent)
+	})
+
+	var ctx RequestCtx
+	var resp Response
+
+	ctx.Request.Header.Set("Accept-Encoding", "gzip, deflate, sdhc")
+
+	h(&ctx)
+	s := ctx.Response.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	ce := resp.Header.Peek("Content-Encoding")
+	if string(ce) != "" {
+		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
+	}
+}
+
 func TestRequestCtxWriteString(t *testing.T) {
 	var ctx RequestCtx
 	n, err := ctx.WriteString("foo")
