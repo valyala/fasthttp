@@ -633,7 +633,6 @@ func (h *ResponseHeader) resetSkipNormalize() {
 	h.contentLengthBytes = h.contentLengthBytes[:0]
 
 	h.contentType = h.contentType[:0]
-	h.server = h.server[:0]
 
 	h.h = h.h[:0]
 	h.cookies = h.cookies[:0]
