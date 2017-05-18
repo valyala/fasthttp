@@ -265,6 +265,15 @@ type Server struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
+	// NoDefaultServerHeader, when set to true, causes the default Server header
+	// to be excluded from the Response.
+	//
+	// The default Server header value is the value of the Name field or an
+	// internal default value in its absence. With this option set to true,
+	// the only time a Server header will be sent is if a non-zero length
+	// value is explicitly provided during a request.
+	NoDefaultServerHeader bool
+
 	// Logger, which is used by RequestCtx.Logger().
 	//
 	// By default standard logger from log package is used.
@@ -1442,7 +1451,11 @@ func nextConnID() uint64 {
 const DefaultMaxRequestBodySize = 4 * 1024 * 1024
 
 func (s *Server) serveConn(c net.Conn) error {
-	serverName := s.getServerName()
+	var serverName []byte
+	if !s.NoDefaultServerHeader {
+		serverName = s.getServerName()
+	}
+
 	connRequestNum := uint64(0)
 	connID := nextConnID()
 	currentTime := CoarseTimeNow()
@@ -1509,7 +1522,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			if err == io.EOF {
 				err = nil
 			} else {
-				bw = writeErrorResponse(bw, ctx, err)
+				bw = writeErrorResponse(bw, ctx, serverName, err)
 			}
 			break
 		}
@@ -1539,7 +1552,7 @@ func (s *Server) serveConn(c net.Conn) error {
 				br = nil
 			}
 			if err != nil {
-				bw = writeErrorResponse(bw, ctx, err)
+				bw = writeErrorResponse(bw, ctx, serverName, err)
 				break
 			}
 		}
@@ -1547,7 +1560,9 @@ func (s *Server) serveConn(c net.Conn) error {
 		connectionClose = s.DisableKeepalive || ctx.Request.Header.connectionCloseFast()
 		isHTTP11 = ctx.Request.Header.IsHTTP11()
 
-		ctx.Response.Header.SetServerBytes(serverName)
+		if serverName != nil {
+			ctx.Response.Header.SetServerBytes(serverName)
+		}
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
 		ctx.connTime = connTime
@@ -1594,7 +1609,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			ctx.Response.Header.SetCanonical(strConnection, strKeepAlive)
 		}
 
-		if len(ctx.Response.Header.Server()) == 0 {
+		if serverName != nil && len(ctx.Response.Header.Server()) == 0 {
 			ctx.Response.Header.SetServerBytes(serverName)
 		}
 
@@ -1967,22 +1982,33 @@ func (s *Server) getServerName() []byte {
 
 func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 	w.Write(statusLine(statusCode))
+
+	server := ""
+	if !s.NoDefaultServerHeader {
+		server = fmt.Sprintf("Server: %s\r\n", s.getServerName())
+	}
+
 	fmt.Fprintf(w, "Connection: close\r\n"+
-		"Server: %s\r\n"+
+		server+
 		"Date: %s\r\n"+
 		"Content-Type: text/plain\r\n"+
 		"Content-Length: %d\r\n"+
 		"\r\n"+
 		"%s",
-		s.getServerName(), serverDate.Load(), len(msg), msg)
+		serverDate.Load(), len(msg), msg)
 }
 
-func writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, err error) *bufio.Writer {
+func writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverName []byte,
+	err error) *bufio.Writer {
 	if _, ok := err.(*ErrSmallBuffer); ok {
 		ctx.Error("Too big request header", StatusRequestHeaderFieldsTooLarge)
 	} else {
 		ctx.Error("Error when parsing request", StatusBadRequest)
 	}
+	if serverName != nil {
+		ctx.Response.Header.SetServerBytes(serverName)
+	}
+
 	ctx.SetConnectionClose()
 	if bw == nil {
 		bw = acquireWriter(ctx)
