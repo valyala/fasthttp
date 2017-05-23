@@ -1,0 +1,51 @@
+package proxy
+
+var (
+	defaultServerName  = []byte("fasthttp")
+	defaultUserAgent   = []byte("fasthttp")
+	defaultContentType = []byte("text/plain; charset=utf-8")
+)
+
+var (
+	strSlash            = []byte("/")
+	strSlashSlash       = []byte("//")
+	strSlashDotDot      = []byte("/..")
+	strSlashDotSlash    = []byte("/./")
+	strSlashDotDotSlash = []byte("/../")
+	strCRLF             = []byte("\r\n")
+	strHTTP             = []byte("http")
+	strHTTP11           = []byte("HTTP/1.1")
+	strColonSlashSlash  = []byte("://")
+	strColonSpace       = []byte(": ")
+	strGMT              = []byte("GMT")
+
+	strResponseContinue = []byte("HTTP/1.1 100 Continue\r\n\r\n")
+
+	strGet  = []byte("GET")
+	strHead = []byte("HEAD")
+	strPut  = []byte("PUT")
+
+	strExpect           = []byte("Expect")
+	strConnection       = []byte("Connection")
+	strContentLength    = []byte("Content-Length")
+	strContentType      = []byte("Content-Type")
+	strDate             = []byte("Date")
+	strHost             = []byte("Host")
+	strServer           = []byte("Server")
+	strTransferEncoding = []byte("Transfer-Encoding")
+	strContentEncoding  = []byte("Content-Encoding")
+	strUserAgent        = []byte("User-Agent")
+	strCookie           = []byte("Cookie")
+	strSetCookie        = []byte("Set-Cookie")
+
+	strClose               = []byte("close")
+	strKeepAlive           = []byte("keep-alive")
+	strKeepAliveCamelCase  = []byte("Keep-Alive")
+	strUpgrade             = []byte("Upgrade")
+	strChunked             = []byte("chunked")
+	strIdentity            = []byte("identity")
+	str100Continue         = []byte("100-continue")
+	strPostArgsContentType = []byte("application/x-www-form-urlencoded")
+	strMultipartFormData   = []byte("multipart/form-data")
+	strBoundary            = []byte("boundary")
+)
