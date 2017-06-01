@@ -1544,7 +1544,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
-		connectionClose = s.DisableKeepalive || ctx.Request.Header.connectionCloseFast()
+		connectionClose = s.DisableKeepalive || ctx.Request.Header.ConnectionClose()
 		isHTTP11 = ctx.Request.Header.IsHTTP11()
 
 		ctx.Response.Header.SetServerBytes(serverName)
@@ -1584,7 +1584,7 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		// Verify Request.Header.connectionCloseFast() again,
 		// since request handler might trigger full headers' parsing.
-		connectionClose = connectionClose || ctx.Request.Header.connectionCloseFast() || ctx.Response.ConnectionClose()
+		connectionClose = connectionClose || ctx.Request.Header.ConnectionClose() || ctx.Response.ConnectionClose()
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
 		} else if !isHTTP11 {
