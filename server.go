@@ -1444,7 +1444,7 @@ func (s *Server) serveConn(c net.Conn) error {
 	serverName := s.getServerName()
 	connRequestNum := uint64(0)
 	connID := nextConnID()
-	currentTime := CoarseTimeNow()
+	currentTime := time.Now()
 	connTime := currentTime
 	maxRequestBodySize := s.MaxRequestBodySize
 	if maxRequestBodySize <= 0 {
