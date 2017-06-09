@@ -1057,7 +1057,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		// Optimization: update write deadline only if more than 25%
 		// of the last write deadline exceeded.
 		// See https://github.com/golang/go/issues/15133 for details.
-		currentTime := CoarseTimeNow()
+		currentTime := time.Now()
 		if currentTime.Sub(cc.lastWriteDeadlineTime) > (c.WriteTimeout >> 2) {
 			if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
 				c.closeConn(cc)
@@ -1276,7 +1276,7 @@ func acquireClientConn(conn net.Conn) *clientConn {
 	}
 	cc := v.(*clientConn)
 	cc.c = conn
-	cc.createdTime = CoarseTimeNow()
+	cc.createdTime = time.Now()
 	return cc
 }
 
