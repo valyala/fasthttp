@@ -375,6 +375,13 @@ func s2b(s string) []byte {
 	return *(*[]byte)(unsafe.Pointer(&bh))
 }
 
+// AppendUnquotedArg appends url-decoded src to dst and returns appended dst.
+//
+// dst may point to src. In this case src will be overwritten.
+func AppendUnquotedArg(dst, src []byte) []byte {
+	return decodeArgAppend(dst, src, true)
+}
+
 // AppendQuotedArg appends url-encoded src to dst and returns appended dst.
 func AppendQuotedArg(dst, src []byte) []byte {
 	for _, c := range src {

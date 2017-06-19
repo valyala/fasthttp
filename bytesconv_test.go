@@ -257,3 +257,44 @@ func testParseUintSuccess(t *testing.T, s string, expectedN int) {
 		t.Fatalf("Unexpected value %d. Expected %d. num=%q", n, expectedN, s)
 	}
 }
+
+func TestAppendUnquotedArg(t *testing.T) {
+	testAppendUnquotedArg(t, "", "")
+	testAppendUnquotedArg(t, "abc", "abc")
+	testAppendUnquotedArg(t, "тест.abc", "тест.abc")
+	testAppendUnquotedArg(t, "%D1%82%D0%B5%D1%81%D1%82%20%=&;:", "тест %=&;:")
+}
+
+func testAppendUnquotedArg(t *testing.T, s, expectedS string) {
+	// test appending to nil
+	result := AppendUnquotedArg(nil, []byte(s))
+	if string(result) != expectedS {
+		t.Fatalf("Unexpected AppendUnquotedArg(%q)=%q, want %q", s, result, expectedS)
+	}
+
+	// test appending to prefix
+	prefix := "prefix"
+	dst := []byte(prefix)
+	dst = AppendUnquotedArg(dst, []byte(s))
+	if !bytes.HasPrefix(dst, []byte(prefix)) {
+		t.Fatalf("Unexpected prefix for AppendUnquotedArg(%q)=%q, want %q", s, dst, prefix)
+	}
+	result = dst[len(prefix):]
+	if string(result) != expectedS {
+		t.Fatalf("Unexpected AppendUnquotedArg(%q)=%q, want %q", s, result, expectedS)
+	}
+
+	// test in-place appending
+	result = []byte(s)
+	result = AppendUnquotedArg(result[:0], result)
+	if string(result) != expectedS {
+		t.Fatalf("Unexpected AppendUnquotedArg(%q)=%q, want %q", s, result, expectedS)
+	}
+
+	// verify AppendQuotedArg <-> AppendUnquotedArg conversion
+	quotedS := AppendQuotedArg(nil, []byte(s))
+	unquotedS := AppendUnquotedArg(nil, quotedS)
+	if s != string(unquotedS) {
+		t.Fatalf("Unexpected AppendUnquotedArg(AppendQuotedArg(%q))=%q, want %q", s, unquotedS, s)
+	}
+}
