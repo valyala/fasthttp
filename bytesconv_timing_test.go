@@ -165,3 +165,23 @@ func BenchmarkLowercaseBytesMixed(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkAppendUnquotedArgFastPath(b *testing.B) {
+	src := []byte("foobarbaz no quoted chars fdskjsdf jklsdfdfskljd;aflskjdsaf fdsklj fsdkj fsdl kfjsdlk jfsdklj fsdfsdf sdfkflsd")
+	b.RunParallel(func(pb *testing.PB) {
+		var dst []byte
+		for pb.Next() {
+			dst = AppendUnquotedArg(dst[:0], src)
+		}
+	})
+}
+
+func BenchmarkAppendUnquotedArgSlowPath(b *testing.B) {
+	src := []byte("D0%B4%20%D0%B0%D0%B2%D0%BB%D0%B4%D1%84%D1%8B%D0%B0%D0%BE%20%D1%84%D0%B2%D0%B6%D0%BB%D0%B4%D1%8B%20%D0%B0%D0%BE")
+	b.RunParallel(func(pb *testing.PB) {
+		var dst []byte
+		for pb.Next() {
+			dst = AppendUnquotedArg(dst[:0], src)
+		}
+	})
+}

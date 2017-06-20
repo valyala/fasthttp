@@ -458,6 +458,12 @@ func decodeArg(dst, src []byte, decodePlus bool) []byte {
 }
 
 func decodeArgAppend(dst, src []byte, decodePlus bool) []byte {
+	if bytes.IndexByte(src, '%') < 0 && (!decodePlus || bytes.IndexByte(src, '+') < 0) {
+		// fast path: src doesn't contain encoded chars
+		return append(dst, src...)
+	}
+
+	// slow path
 	for i, n := 0, len(src); i < n; i++ {
 		c := src[i]
 		if c == '%' {
