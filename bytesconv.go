@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -16,6 +17,16 @@ import (
 
 // AppendHTMLEscape appends html-escaped s to dst and returns the extended dst.
 func AppendHTMLEscape(dst []byte, s string) []byte {
+	if strings.IndexByte(s, '<') < 0 &&
+		strings.IndexByte(s, '>') < 0 &&
+		strings.IndexByte(s, '"') < 0 &&
+		strings.IndexByte(s, '\'') < 0 {
+
+		// fast path - nothing to escape
+		return append(dst, s...)
+	}
+
+	// slow path
 	var prev int
 	var sub string
 	for i, n := 0, len(s); i < n; i++ {
