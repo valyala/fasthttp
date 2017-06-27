@@ -12,6 +12,78 @@ import (
 	"time"
 )
 
+func TestResponseBodyStreamDeflate(t *testing.T) {
+	body := createFixedBody(1e5)
+
+	// Verifies https://github.com/valyala/fasthttp/issues/176
+	// when Content-Length is explicitly set.
+	testResponseBodyStreamDeflate(t, body, len(body))
+
+	// Verifies that 'transfer-encoding: chunked' works as expected.
+	testResponseBodyStreamDeflate(t, body, -1)
+}
+
+func TestResponseBodyStreamGzip(t *testing.T) {
+	body := createFixedBody(1e5)
+
+	// Verifies https://github.com/valyala/fasthttp/issues/176
+	// when Content-Length is explicitly set.
+	testResponseBodyStreamGzip(t, body, len(body))
+
+	// Verifies that 'transfer-encoding: chunked' works as expected.
+	testResponseBodyStreamGzip(t, body, -1)
+}
+
+func testResponseBodyStreamDeflate(t *testing.T, body []byte, bodySize int) {
+	var r Response
+	r.SetBodyStream(bytes.NewReader(body), bodySize)
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := r.WriteDeflate(bw); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	var resp Response
+	br := bufio.NewReader(w)
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	respBody, err := resp.BodyInflate()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !bytes.Equal(respBody, body) {
+		t.Fatalf("unexpected body: %q. Expecting %q", respBody, body)
+	}
+}
+
+func testResponseBodyStreamGzip(t *testing.T, body []byte, bodySize int) {
+	var r Response
+	r.SetBodyStream(bytes.NewReader(body), bodySize)
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := r.WriteGzip(bw); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	var resp Response
+	br := bufio.NewReader(w)
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	respBody, err := resp.BodyGunzip()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !bytes.Equal(respBody, body) {
+		t.Fatalf("unexpected body: %q. Expecting %q", respBody, body)
+	}
+}
+
 func TestResponseWriteGzipNilBody(t *testing.T) {
 	var r Response
 	w := &bytes.Buffer{}
