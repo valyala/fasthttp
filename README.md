@@ -275,7 +275,6 @@ like in net/http. The following code is valid for fasthttp:
 but there are more powerful third-party routers and web frameworks
 with fasthttp support:
 
-  * [Iris](https://github.com/kataras/iris)
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
   * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
   * [lu](https://github.com/vincentLiuxiang/lu)
