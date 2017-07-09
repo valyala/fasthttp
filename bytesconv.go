@@ -344,16 +344,14 @@ func hexbyte2int(c byte) int {
 const toLower = 'a' - 'A'
 
 func uppercaseByte(p *byte) {
-	c := *p
-	if c >= 'a' && c <= 'z' {
-		*p = c - toLower
+	if *p >= 'a' && *p <= 'z' {
+		*p = *p - toLower
 	}
 }
 
 func lowercaseByte(p *byte) {
-	c := *p
-	if c >= 'A' && c <= 'Z' {
-		*p = c + toLower
+	if *p >= 'A' && *p <= 'Z' {
+		*p = *p + toLower
 	}
 }
 
@@ -361,6 +359,21 @@ func lowercaseBytes(b []byte) {
 	for i, n := 0, len(b); i < n; i++ {
 		lowercaseByte(&b[i])
 	}
+}
+
+// fastlen for byte slices uses slice len field directly
+// since it's pretty much safe, it will break only if slice
+// implementation will change, that seems to be impossible
+// without releasing Go2
+//
+// here we taking slice pointer, converting it to unsafe.Pointer
+// instruction, then converting it to a pointer to array of three
+// unsafe.Pointers, reading the middle one (1st index) as a uintptr,
+// then converting it to int. cause we don't have a real unsafe.Pointer
+// conversions at runtime (there is no real unsafe.Pointer type),
+// it's cheap and fast
+func fastlen(b []byte) int {
+	return int((uintptr)((*[3]unsafe.Pointer)(unsafe.Pointer(&b))[1]))
 }
 
 // b2s converts byte slice to a string without memory allocation.

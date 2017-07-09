@@ -2013,7 +2013,7 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 		return
 	}
 
-	n := len(b)
+	n := fastlen(b)
 	up := true
 	for i := 0; i < n; i++ {
 		switch b[i] {
@@ -2023,9 +2023,9 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 			if up {
 				up = false
 				uppercaseByte(&b[i])
-			} else {
-				lowercaseByte(&b[i])
+				continue
 			}
+			lowercaseByte(&b[i])
 		}
 	}
 }
