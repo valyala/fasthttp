@@ -2014,19 +2014,20 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 	}
 
 	n := len(b)
-	up := true
-	for i := 0; i < n; i++ {
-		switch b[i] {
-		case '-':
-			up = true
-		default:
-			if up {
-				up = false
+	if n == 0 {
+		return
+	}
+
+	uppercaseByte(&b[0])
+	for i := 1; i < n; i++ {
+		if b[i] == '-' {
+			i++
+			if i < n {
 				uppercaseByte(&b[i])
-			} else {
-				lowercaseByte(&b[i])
 			}
+			continue
 		}
+		lowercaseByte(&b[i])
 	}
 }
 

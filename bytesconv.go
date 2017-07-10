@@ -343,18 +343,34 @@ func hexbyte2int(c byte) int {
 
 const toLower = 'a' - 'A'
 
-func uppercaseByte(p *byte) {
-	c := *p
-	if c >= 'a' && c <= 'z' {
-		*p = c - toLower
+var toLowerTable = func() [256]byte {
+	var a [256]byte
+	for i := 0; i < 256; i++ {
+		c := byte(i)
+		if c >= 'A' && c <= 'Z' {
+			a[i] = toLower
+		}
 	}
+	return a
+}()
+
+var toUpperTable = func() [256]byte {
+	var a [256]byte
+	for i := 0; i < 256; i++ {
+		c := byte(i)
+		if c >= 'a' && c <= 'z' {
+			a[i] = 256 - toLower
+		}
+	}
+	return a
+}()
+
+func uppercaseByte(p *byte) {
+	*p += toUpperTable[*p]
 }
 
 func lowercaseByte(p *byte) {
-	c := *p
-	if c >= 'A' && c <= 'Z' {
-		*p = c + toLower
-	}
+	*p += toLowerTable[*p]
 }
 
 func lowercaseBytes(b []byte) {
