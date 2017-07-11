@@ -38,8 +38,8 @@ var argsPool = &sync.Pool{
 type Args struct {
 	noCopy noCopy
 
-	args []argsKV
-	buf  []byte
+	args   []argsKV
+	buf    []byte
 }
 
 type argsKV struct {
@@ -116,7 +116,7 @@ func (a *Args) AppendBytes(dst []byte) []byte {
 			dst = append(dst, '=')
 			dst = AppendQuotedArg(dst, kv.value)
 		}
-		if i+1 < n {
+		if i + 1 < n {
 			dst = append(dst, '&')
 		}
 	}
@@ -331,7 +331,7 @@ func delAllArgs(args []argsKV, key string) []argsKV {
 		kv := &args[i]
 		if key == string(kv.key) {
 			tmp := *kv
-			copy(args[i:], args[i+1:])
+			copy(args[i:], args[i + 1:])
 			n--
 			args[n] = tmp
 			args = args[:n]
@@ -371,7 +371,7 @@ func appendArg(args []argsKV, key, value string) []argsKV {
 func allocArg(h []argsKV) ([]argsKV, *argsKV) {
 	n := len(h)
 	if cap(h) > n {
-		h = h[:n+1]
+		h = h[:n + 1]
 	} else {
 		h = append(h, argsKV{})
 	}
@@ -379,7 +379,7 @@ func allocArg(h []argsKV) ([]argsKV, *argsKV) {
 }
 
 func releaseArg(h []argsKV) []argsKV {
-	return h[:len(h)-1]
+	return h[:len(h) - 1]
 }
 
 func hasArg(h []argsKV, key string) bool {
@@ -400,6 +400,17 @@ func peekArgBytes(h []argsKV, k []byte) []byte {
 		}
 	}
 	return nil
+}
+
+func peekMultiArgBytes(h []argsKV, k []byte) [][]byte {
+	var values [][]byte
+	for i, n := 0, len(h); i < n; i++ {
+		kv := &h[i]
+		if bytes.Equal(kv.key, k) {
+			values = append(values, kv.value)
+		}
+	}
+	return values
 }
 
 func peekArgStr(h []argsKV, k string) []byte {
@@ -438,7 +449,7 @@ func (s *argsScanner) next(kv *argsKV) bool {
 			} else {
 				kv.value = decodeArgAppend(kv.value[:0], s.b[k:i], true)
 			}
-			s.b = s.b[i+1:]
+			s.b = s.b[i + 1:]
 			return true
 		}
 	}
@@ -463,15 +474,15 @@ func decodeArgAppend(dst, src []byte, decodePlus bool) []byte {
 	for i, n := 0, len(src); i < n; i++ {
 		c := src[i]
 		if c == '%' {
-			if i+2 >= n {
+			if i + 2 >= n {
 				return append(dst, src[i:]...)
 			}
-			x1 := hexbyte2int(src[i+1])
-			x2 := hexbyte2int(src[i+2])
+			x1 := hexbyte2int(src[i + 1])
+			x2 := hexbyte2int(src[i + 2])
 			if x1 < 0 || x2 < 0 {
 				dst = append(dst, c)
 			} else {
-				dst = append(dst, byte(x1<<4|x2))
+				dst = append(dst, byte(x1 << 4 | x2))
 				i += 2
 			}
 		} else if decodePlus && c == '+' {
