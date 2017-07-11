@@ -2018,16 +2018,17 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 		return
 	}
 
-	uppercaseByte(&b[0])
+	b[0] = toUpperTable[b[0]]
 	for i := 1; i < n; i++ {
-		if b[i] == '-' {
+		p := &b[i]
+		if *p == '-' {
 			i++
 			if i < n {
-				uppercaseByte(&b[i])
+				b[i] = toUpperTable[b[i]]
 			}
 			continue
 		}
-		lowercaseByte(&b[i])
+		*p = toLowerTable[*p]
 	}
 }
 

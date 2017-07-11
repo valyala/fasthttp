@@ -348,8 +348,9 @@ var toLowerTable = func() [256]byte {
 	for i := 0; i < 256; i++ {
 		c := byte(i)
 		if c >= 'A' && c <= 'Z' {
-			a[i] = toLower
+			c += toLower
 		}
+		a[i] = c
 	}
 	return a
 }()
@@ -359,23 +360,17 @@ var toUpperTable = func() [256]byte {
 	for i := 0; i < 256; i++ {
 		c := byte(i)
 		if c >= 'a' && c <= 'z' {
-			a[i] = 256 - toLower
+			c -= toLower
 		}
+		a[i] = c
 	}
 	return a
 }()
 
-func uppercaseByte(p *byte) {
-	*p += toUpperTable[*p]
-}
-
-func lowercaseByte(p *byte) {
-	*p += toLowerTable[*p]
-}
-
 func lowercaseBytes(b []byte) {
-	for i, n := 0, len(b); i < n; i++ {
-		lowercaseByte(&b[i])
+	for i := 0; i < len(b); i++ {
+		p := &b[i]
+		*p = toLowerTable[*p]
 	}
 }
 
