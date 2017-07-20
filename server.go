@@ -1287,7 +1287,7 @@ func (s *Server) Serve(ln net.Listener) error {
 			if time.Since(lastOverflowErrorTime) > time.Minute {
 				s.logger().Printf("The incoming connection cannot be served, because %d concurrent connections are served. "+
 					"Try increasing Server.Concurrency", maxWorkersCount)
-				lastOverflowErrorTime = CoarseTimeNow()
+				lastOverflowErrorTime = time.Now()
 			}
 
 			// The current server reached concurrency limit,
@@ -1329,7 +1329,7 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 				if time.Since(*lastPerIPErrorTime) > time.Minute {
 					s.logger().Printf("The number of connections from %s exceeds MaxConnsPerIP=%d",
 						getConnIP4(c), s.MaxConnsPerIP)
-					*lastPerIPErrorTime = CoarseTimeNow()
+					*lastPerIPErrorTime = time.Now()
 				}
 				continue
 			}
@@ -1501,7 +1501,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
-		currentTime = CoarseTimeNow()
+		currentTime = time.Now()
 		ctx.lastReadDuration = currentTime.Sub(ctx.time)
 
 		if err != nil {
@@ -1642,7 +1642,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			break
 		}
 
-		currentTime = CoarseTimeNow()
+		currentTime = time.Now()
 	}
 
 	if br != nil {
@@ -1698,7 +1698,7 @@ func (s *Server) updateWriteDeadline(c net.Conn, ctx *RequestCtx, lastDeadlineTi
 	// Optimization: update write deadline only if more than 25%
 	// of the last write deadline exceeded.
 	// See https://github.com/golang/go/issues/15133 for details.
-	currentTime := CoarseTimeNow()
+	currentTime := time.Now()
 	if currentTime.Sub(lastDeadlineTime) > (writeTimeout >> 2) {
 		if err := c.SetWriteDeadline(currentTime.Add(writeTimeout)); err != nil {
 			panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", writeTimeout, err))
@@ -1881,7 +1881,7 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.connID = nextConnID()
 	ctx.s = fakeServer
 	ctx.connRequestNum = 0
-	ctx.connTime = CoarseTimeNow()
+	ctx.connTime = time.Now()
 	ctx.time = ctx.connTime
 
 	keepBodyBuffer := !reduceMemoryUsage
