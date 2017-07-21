@@ -277,7 +277,7 @@ func (u *URI) parse(host, uri []byte, h *RequestHeader) {
 func normalizePath(dst, src []byte) []byte {
 	dst = dst[:0]
 	dst = addLeadingSlash(dst, src)
-	dst = decodeArgAppend(dst, src, false)
+	dst = decodeArgAppendNoPlus(dst, src)
 
 	// remove duplicate slashes
 	b := dst

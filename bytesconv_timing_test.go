@@ -75,18 +75,6 @@ func BenchmarkInt2HexByte(b *testing.B) {
 	})
 }
 
-func BenchmarkHexByte2Int(b *testing.B) {
-	buf := []byte("0A1B2c3d4E5F6C7a8D9ab7cd03ef")
-	b.RunParallel(func(pb *testing.PB) {
-		var c byte
-		for pb.Next() {
-			for _, c = range buf {
-				hexbyte2int(c)
-			}
-		}
-	})
-}
-
 func BenchmarkWriteHexInt(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var w ByteBuffer
