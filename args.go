@@ -466,8 +466,8 @@ func decodeArgAppend(dst, src []byte) []byte {
 			if i+2 >= n {
 				return append(dst, src[i:]...)
 			}
-			x1 := hex2intTable[src[i+1]]
 			x2 := hex2intTable[src[i+2]]
+			x1 := hex2intTable[src[i+1]]
 			if x1 == 16 || x2 == 16 {
 				dst = append(dst, c)
 			} else {
@@ -501,8 +501,8 @@ func decodeArgAppendNoPlus(dst, src []byte) []byte {
 			if i+2 >= n {
 				return append(dst, src[i:]...)
 			}
-			x1 := hex2intTable[src[i+1]]
 			x2 := hex2intTable[src[i+2]]
+			x1 := hex2intTable[src[i+1]]
 			if x1 == 16 || x2 == 16 {
 				dst = append(dst, c)
 			} else {
