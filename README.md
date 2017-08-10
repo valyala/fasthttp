@@ -490,7 +490,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     go middleware web framework which is based on fasthttp.
   * [websocket](https://github.com/leavengood/websocket) - Gorilla-based
     websocket implementation for fasthttp.
-
+  * [alice](https://github.com/zc310/alice) - Painless middleware chaining for fasthttp.
 
 # FAQ
 
