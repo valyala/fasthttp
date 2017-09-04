@@ -1,6 +1,7 @@
 package fasthttp
 
 import (
+	"bufio"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -15,6 +16,101 @@ import (
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
+
+func TestClientDoWithCustomHeaders(t *testing.T) {
+	// make sure that the client sends all the request headers and body.
+	ln := fasthttputil.NewInmemoryListener()
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	uri := "/foo/bar/baz?a=b&cd=12"
+	headers := map[string]string{
+		"Foo":          "bar",
+		"Host":         "xxx.com",
+		"Content-Type": "asdfsdf",
+		"a-b-c-d-f":    "",
+	}
+	body := "request body"
+
+	ch := make(chan error)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			ch <- fmt.Errorf("cannot accept client connection: %s", err)
+			return
+		}
+		br := bufio.NewReader(conn)
+
+		var req Request
+		if err = req.Read(br); err != nil {
+			ch <- fmt.Errorf("cannot read client request: %s", err)
+			return
+		}
+		if string(req.Header.Method()) != "POST" {
+			ch <- fmt.Errorf("unexpected request method: %q. Expecting %q", req.Header.Method(), "POST")
+			return
+		}
+		reqURI := req.RequestURI()
+		if string(reqURI) != uri {
+			ch <- fmt.Errorf("unexpected request uri: %q. Expecting %q", reqURI, uri)
+			return
+		}
+		for k, v := range headers {
+			hv := req.Header.Peek(k)
+			if string(hv) != v {
+				ch <- fmt.Errorf("unexpected value for header %q: %q. Expecting %q", k, hv, v)
+				return
+			}
+		}
+		cl := req.Header.ContentLength()
+		if cl != len(body) {
+			ch <- fmt.Errorf("unexpected content-length %d. Expecting %d", cl, len(body))
+			return
+		}
+		reqBody := req.Body()
+		if string(reqBody) != body {
+			ch <- fmt.Errorf("unexpected request body: %q. Expecting %q", reqBody, body)
+			return
+		}
+
+		var resp Response
+		bw := bufio.NewWriter(conn)
+		if err = resp.Write(bw); err != nil {
+			ch <- fmt.Errorf("cannot send response: %s", err)
+			return
+		}
+		if err = bw.Flush(); err != nil {
+			ch <- fmt.Errorf("cannot flush response: %s", err)
+			return
+		}
+
+		ch <- nil
+	}()
+
+	var req Request
+	req.Header.SetMethod("POST")
+	req.SetRequestURI(uri)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	req.SetBodyString(body)
+
+	var resp Response
+
+	err := c.DoTimeout(&req, &resp, time.Second)
+	if err != nil {
+		t.Fatalf("error when doing request: %s", err)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("timeout")
+	}
+}
 
 func TestPipelineClientDoSerial(t *testing.T) {
 	testPipelineClientDoConcurrent(t, 1, 0, 0)
