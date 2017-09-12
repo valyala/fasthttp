@@ -328,7 +328,7 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
 // to the requested host are busy.
 //
-/// It is recommended obtaining req and resp via AcquireRequest
+// It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	return clientDoDeadline(req, resp, deadline, c)
@@ -866,7 +866,7 @@ func ReleaseResponse(resp *Response) {
 // ErrNoFreeConns is returned if all HostClient.MaxConns connections
 // to the host are busy.
 //
-/// It is recommended obtaining req and resp via AcquireRequest
+// It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return clientDoTimeout(req, resp, timeout, c)
