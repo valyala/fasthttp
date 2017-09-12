@@ -279,6 +279,8 @@ func (w *requestBodyWriter) Write(p []byte) (int, error) {
 }
 
 // Body returns response body.
+//
+// The returned body is valid until the response modification.
 func (resp *Response) Body() []byte {
 	if resp.bodyStream != nil {
 		bodyBuf := resp.bodyBuffer()
@@ -520,6 +522,8 @@ func (req *Request) SwapBody(body []byte) []byte {
 }
 
 // Body returns request body.
+//
+// The returned body is valid until the request modification.
 func (req *Request) Body() []byte {
 	if req.bodyStream != nil {
 		bodyBuf := req.bodyBuffer()
