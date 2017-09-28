@@ -657,21 +657,36 @@ func (req *Request) PostArgs() *Args {
 	return &req.postArgs
 }
 
-func (req *Request) parsePostArgs() {
+// GetPostArgs returns POST arguments in case of valid Content-Type header and throws error in other case
+func (req *Request) GetPostArgs() (*Args, error){
+	err := req.parsePostArgs()
+	if err != nil {
+		return nil, err
+	} else {
+		return &req.postArgs, nil
+	}
+}
+
+func (req *Request) parsePostArgs() error{
 	if req.parsedPostArgs {
-		return
+		return nil
 	}
 	req.parsedPostArgs = true
 
 	if !bytes.HasPrefix(req.Header.ContentType(), strPostArgsContentType) {
-		return
+		return ErrNoWwwFormEncoded
 	}
 	req.postArgs.ParseBytes(req.bodyBytes())
+	return nil
 }
 
 // ErrNoMultipartForm means that the request's Content-Type
 // isn't 'multipart/form-data'.
 var ErrNoMultipartForm = errors.New("request has no multipart/form-data Content-Type")
+
+// ErrNoWwwFormEncoded means that the request's Content'Type
+// isn't 'x-www-form-urlencoded'.
+var ErrNoWwwFormEncoded = errors.New("request has no x-www-form-urlencoded Content-Type")
 
 // MultipartForm returns requests's multipart form.
 //
