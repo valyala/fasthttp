@@ -823,7 +823,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			}
 		}
 	}
-	ctx.SetContentType(ff.contentType)
+	if len(ctx.Response.Header.ContentType()) == 0 {
+		ctx.SetContentType(ff.contentType)
+	}
 	ctx.SetStatusCode(statusCode)
 }
 
