@@ -1524,7 +1524,7 @@ type PipelineClient struct {
 
 	// The maximum number of concurrent connections to the Addr.
 	//
-	// A sinle connection is used by default.
+	// A single connection is used by default.
 	MaxConns int
 
 	// The maximum number of pending pipelined requests over

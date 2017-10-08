@@ -596,7 +596,7 @@ func (ctx *RequestCtx) ConnID() uint64 {
 // Time returns RequestHandler call time truncated to the nearest second.
 //
 // Call time.Now() at the beginning of RequestHandler in order to obtain
-// percise RequestHandler call time.
+// precise RequestHandler call time.
 func (ctx *RequestCtx) Time() time.Time {
 	return ctx.time
 }
@@ -1370,8 +1370,8 @@ var (
 	ErrPerIPConnLimit = errors.New("too many connections per ip")
 
 	// ErrConcurrencyLimit may be returned from ServeConn if the number
-	// of concurrenty served connections exceeds Server.Concurrency.
-	ErrConcurrencyLimit = errors.New("canot serve the connection because Server.Concurrency concurrent connections are served")
+	// of concurrently served connections exceeds Server.Concurrency.
+	ErrConcurrencyLimit = errors.New("cannot serve the connection because Server.Concurrency concurrent connections are served")
 
 	// ErrKeepaliveTimeout is returned from ServeConn
 	// if the connection lifetime exceeds MaxKeepaliveDuration.
