@@ -570,14 +570,19 @@ func (cl *ctxLogger) Printf(format string, args ...interface{}) {
 	ctxLoggerLock.Lock()
 	msg := fmt.Sprintf(format, args...)
 	ctx := cl.ctx
-	req := &ctx.Request
-	cl.logger.Printf("%.3f #%016X - %s<->%s - %s %s - %s",
-		time.Since(ctx.Time()).Seconds(), ctx.ID(), ctx.LocalAddr(), ctx.RemoteAddr(), req.Header.Method(), ctx.URI().FullURI(), msg)
+	cl.logger.Printf("%.3f %s - %s", time.Since(ctx.Time()).Seconds(), ctx.String(), msg)
 	ctxLoggerLock.Unlock()
 }
 
 var zeroTCPAddr = &net.TCPAddr{
 	IP: net.IPv4zero,
+}
+
+// String returns unique string representation of the ctx.
+//
+// The returned value may be useful for logging.
+func (ctx *RequestCtx) String() string {
+	return fmt.Sprintf("#%016X - %s<->%s - %s %s", ctx.ID(), ctx.LocalAddr(), ctx.RemoteAddr(), ctx.Request.Header.Method(), ctx.URI().FullURI())
 }
 
 // ID returns unique ID of the request.
@@ -838,6 +843,9 @@ func (ctx *RequestCtx) IsHead() bool {
 //
 // Always returns non-nil result.
 func (ctx *RequestCtx) RemoteAddr() net.Addr {
+	if ctx.c == nil {
+		return zeroTCPAddr
+	}
 	addr := ctx.c.RemoteAddr()
 	if addr == nil {
 		return zeroTCPAddr
@@ -849,6 +857,9 @@ func (ctx *RequestCtx) RemoteAddr() net.Addr {
 //
 // Always returns non-nil result.
 func (ctx *RequestCtx) LocalAddr() net.Addr {
+	if ctx.c == nil {
+		return zeroTCPAddr
+	}
 	addr := ctx.c.LocalAddr()
 	if addr == nil {
 		return zeroTCPAddr
