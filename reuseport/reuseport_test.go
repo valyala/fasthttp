@@ -13,7 +13,7 @@ func TestTCP4(t *testing.T) {
 }
 
 func TestTCP6(t *testing.T) {
-	testNewListener(t, "tcp6", "ip6-localhost:10081", 20, 1000)
+	testNewListener(t, "tcp6", "[::1]:10082", 20, 1000)
 }
 
 func testNewListener(t *testing.T, network, addr string, serversCount, requestsCount int) {
