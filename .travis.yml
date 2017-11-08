@@ -1,8 +1,8 @@
 language: go
 
 go:
-  - 1.8
-  - 1.7
+  - 1.9.x
+  - 1.8.x
 
 script:
   # build test for supported platforms
