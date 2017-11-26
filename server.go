@@ -121,7 +121,7 @@ func ListenAndServeTLSEmbed(addr string, certData, keyData []byte, handler Reque
 // RequestHandler must process incoming requests.
 //
 // RequestHandler must call ctx.TimeoutError() before returning
-// if it keeps references to ctx and/or its' members after the return.
+// if it keeps references to ctx and/or its members after the return.
 // Consider wrapping RequestHandler into TimeoutHandler if response time
 // must be limited.
 type RequestHandler func(ctx *RequestCtx)
@@ -202,7 +202,7 @@ type Server struct {
 
 	// Maximum keep-alive connection lifetime.
 	//
-	// The server closes keep-alive connection after its' lifetime
+	// The server closes keep-alive connection after its lifetime
 	// expiration.
 	//
 	// See also ReadTimeout for limiting the duration of idle keep-alive
@@ -363,7 +363,7 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 // It is forbidden copying RequestCtx instances.
 //
 // RequestHandler should avoid holding references to incoming RequestCtx and/or
-// its' members after the return.
+// its members after the return.
 // If holding RequestCtx references after the return is unavoidable
 // (for instance, ctx is passed to a separate goroutine and ctx lifetime cannot
 // be controlled), then the RequestHandler MUST call ctx.TimeoutError()
@@ -1070,7 +1070,7 @@ func (ctx *RequestCtx) SetBodyStream(bodyStream io.Reader, bodySize int) {
 // SetBodyStreamWriter registers the given stream writer for populating
 // response body.
 //
-// Access to RequestCtx and/or its' members is forbidden from sw.
+// Access to RequestCtx and/or its members is forbidden from sw.
 //
 // This function may be used in the following cases:
 //
