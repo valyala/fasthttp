@@ -671,6 +671,11 @@ func (ctx *RequestCtx) UserAgent() []byte {
 	return ctx.Request.Header.UserAgent()
 }
 
+// Origin returns Origin header value from the request.
+func (ctx *RequestCtx) Origin() []byte {
+	return ctx.Request.Header.Origin()
+}
+
 // Path returns requested path.
 //
 // The path is valid until returning from RequestHandler.
