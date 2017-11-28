@@ -65,6 +65,7 @@ type RequestHeader struct {
 	host        []byte
 	contentType []byte
 	userAgent   []byte
+	origin      []byte
 
 	h     []argsKV
 	bufKV argsKV
@@ -432,6 +433,12 @@ func (h *RequestHeader) SetHostBytes(host []byte) {
 func (h *RequestHeader) UserAgent() []byte {
 	h.parseRawHeaders()
 	return h.userAgent
+}
+
+// Origin returns Origin header value.
+func (h *RequestHeader) Origin() []byte {
+	h.parseRawHeaders()
+	return h.origin
 }
 
 // SetUserAgent sets User-Agent header value.
@@ -1827,6 +1834,8 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				h.connectionClose = false
 				h.h = appendArgBytes(h.h, s.key, s.value)
 			}
+		case "Origin":
+			h.origin = append(h.origin[:0], s.value...)
 		default:
 			h.h = appendArgBytes(h.h, s.key, s.value)
 		}
