@@ -447,6 +447,9 @@ const DefaultMaxConnsPerHost = 512
 // connection is closed.
 const DefaultMaxIdleConnDuration = 10 * time.Second
 
+// DefaultMaxIdemponentCallAttempts is the default idempotent calls attempts count.
+const DefaultMaxIdemponentCallAttempts = 5
+
 // DialFunc must establish connection to addr.
 //
 // There is no need in establishing TLS (SSL) connection for https.
@@ -525,6 +528,11 @@ type HostClient struct {
 	// By default idle connections are closed
 	// after DefaultMaxIdleConnDuration.
 	MaxIdleConnDuration time.Duration
+
+	// Maximum number of attempts for idempotent calls
+	//
+	// DefaultMaxIdemponentCallAttempts is used if not set.
+	MaxIdemponentCallAttempts int
 
 	// Per-connection buffer size for responses' reading.
 	// This also limits the maximum header size.
@@ -979,7 +987,10 @@ var errorChPool sync.Pool
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	var err error
 	var retry bool
-	const maxAttempts = 5
+	maxAttempts := c.MaxIdemponentCallAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultMaxIdemponentCallAttempts
+	}
 	attempts := 0
 
 	atomic.AddUint64(&c.pendingRequests, 1)
