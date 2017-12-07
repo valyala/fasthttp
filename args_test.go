@@ -8,6 +8,27 @@ import (
 	"time"
 )
 
+func TestDecodeArgAppend(t *testing.T) {
+	testDecodeArgAppend(t, "", "")
+	testDecodeArgAppend(t, "foobar", "foobar")
+	testDecodeArgAppend(t, "тест", "тест")
+	testDecodeArgAppend(t, "a%", "a%")
+	testDecodeArgAppend(t, "%a%21", "%a!")
+	testDecodeArgAppend(t, "ab%test", "ab%test")
+	testDecodeArgAppend(t, "d%тестF", "d%тестF")
+	testDecodeArgAppend(t, "a%\xffb%20c", "a%\xffb c")
+	testDecodeArgAppend(t, "foo%20bar", "foo bar")
+	testDecodeArgAppend(t, "f.o%2C1%3A2%2F4=%7E%60%21%40%23%24%25%5E%26*%28%29_-%3D%2B%5C%7C%2F%5B%5D%7B%7D%3B%3A%27%22%3C%3E%2C.%2F%3F",
+		"f.o,1:2/4=~`!@#$%^&*()_-=+\\|/[]{};:'\"<>,./?")
+}
+
+func testDecodeArgAppend(t *testing.T, s, expectedResult string) {
+	result := decodeArgAppend(nil, []byte(s))
+	if string(result) != expectedResult {
+		t.Fatalf("unexpected decodeArgAppend(%q)=%q; expecting %q", s, result, expectedResult)
+	}
+}
+
 func TestArgsAdd(t *testing.T) {
 	var a Args
 	a.Add("foo", "bar")

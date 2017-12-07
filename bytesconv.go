@@ -322,15 +322,15 @@ func hexCharUpper(c byte) byte {
 }
 
 var hex2intTable = func() []byte {
-	b := make([]byte, 255)
-	for i := byte(0); i < 255; i++ {
+	b := make([]byte, 256)
+	for i := 0; i < 256; i++ {
 		c := byte(16)
 		if i >= '0' && i <= '9' {
-			c = i - '0'
+			c = byte(i) - '0'
 		} else if i >= 'a' && i <= 'f' {
-			c = i - 'a' + 10
+			c = byte(i) - 'a' + 10
 		} else if i >= 'A' && i <= 'F' {
-			c = i - 'A' + 10
+			c = byte(i) - 'A' + 10
 		}
 		b[i] = c
 	}
