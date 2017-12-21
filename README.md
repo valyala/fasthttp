@@ -275,6 +275,7 @@ like in net/http. The following code is valid for fasthttp:
 but there are more powerful third-party routers and web frameworks
 with fasthttp support:
 
+  * [Door](https://github.com/claygod/door)
   * [Iris](https://github.com/kataras/iris)
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
   * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
@@ -490,6 +491,8 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     go middleware web framework which is based on fasthttp.
   * [websocket](https://github.com/leavengood/websocket) - Gorilla-based
     websocket implementation for fasthttp.
+  * [Door](https://github.com/claygod/door) - Nimble multiplexer for Fast HTTP
+    server, written in Golang.
 
 
 # FAQ
@@ -555,6 +558,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   There are no plans to add request routing into fasthttp.
   Use third-party routers and web frameworks with fasthttp support:
 
+    * [Door](https://github.com/claygod/door)
     * [Iris](https://github.com/kataras/iris)
     * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
     * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
