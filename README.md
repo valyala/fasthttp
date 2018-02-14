@@ -555,11 +555,10 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   There are no plans to add request routing into fasthttp.
   Use third-party routers and web frameworks with fasthttp support:
 
-    * [Iris](https://github.com/kataras/iris)
-    * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
-    * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
-    * [gramework](https://github.com/gramework/gramework)
-    * [lu](https://github.com/vincentLiuxiang/lu)
+    * [gramework](https://github.com/gramework/gramework) (framework, Apache 2.0)
+    * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) (router, BSD 3-Clause)
+    * [fasthttprouter](https://github.com/buaazp/fasthttprouter) (router, BSD 3-Clause)
+    * [lu](https://github.com/vincentLiuxiang/lu) (router/middleware framework, MIT)
 
   See also [this issue](https://github.com/valyala/fasthttp/issues/9) for more info.
 
