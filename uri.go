@@ -277,7 +277,7 @@ func (u *URI) parse(host, uri []byte, h *RequestHeader) {
 func normalizePath(dst, src []byte) []byte {
 	dst = dst[:0]
 	dst = addLeadingSlash(dst, src)
-	dst = decodeArgAppend(dst, src, false)
+	dst = decodeArgAppendNoPlus(dst, src)
 
 	// remove duplicate slashes
 	b := dst
@@ -500,6 +500,11 @@ func splitHostURI(host, uri []byte) ([]byte, []byte, []byte) {
 	uri = uri[n:]
 	n = bytes.IndexByte(uri, '/')
 	if n < 0 {
+		// A hack for bogus urls like foobar.com?a=b without
+		// slash after host.
+		if n = bytes.IndexByte(uri, '?'); n >= 0 {
+			return scheme, uri[:n], uri[n:]
+		}
 		return scheme, uri, strSlash
 	}
 	return scheme, uri[:n], uri[n:]

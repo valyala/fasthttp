@@ -235,6 +235,9 @@ func TestURIParseNilHost(t *testing.T) {
 	testURIParseScheme(t, "//google.com/foobar", "http", "google.com", "/foobar")
 	testURIParseScheme(t, "fTP://aaa.com", "ftp", "aaa.com", "/")
 	testURIParseScheme(t, "httPS://aaa.com", "https", "aaa.com", "/")
+
+	// missing slash after hostname
+	testURIParseScheme(t, "http://foobar.com?baz=111", "http", "foobar.com", "/?baz=111")
 }
 
 func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expectedRequestURI string) {

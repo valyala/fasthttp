@@ -263,6 +263,12 @@ func (h *RequestHeader) SetContentLength(contentLength int) {
 	}
 }
 
+func (h *ResponseHeader) isCompressibleContentType() bool {
+	contentType := h.ContentType()
+	return bytes.HasPrefix(contentType, strTextSlash) ||
+		bytes.HasPrefix(contentType, strApplicationSlash)
+}
+
 // ContentType returns Content-Type header value.
 func (h *ResponseHeader) ContentType() []byte {
 	contentType := h.contentType
@@ -465,7 +471,7 @@ func (h *RequestHeader) Method() []byte {
 
 // SetMethod sets HTTP request method.
 func (h *RequestHeader) SetMethod(method string) {
-	h.method = append(h.method, method...)
+	h.method = append(h.method[:0], method...)
 }
 
 // SetMethodBytes sets HTTP request method.
@@ -946,6 +952,8 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 }
 
 // SetCookie sets the given response cookie.
+//
+// It is save re-using the cookie after the function returns.
 func (h *ResponseHeader) SetCookie(cookie *Cookie) {
 	h.cookies = setArgBytes(h.cookies, cookie.Key(), cookie.Cookie())
 }
@@ -2006,19 +2014,21 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 	}
 
 	n := len(b)
-	up := true
-	for i := 0; i < n; i++ {
-		switch b[i] {
-		case '-':
-			up = true
-		default:
-			if up {
-				up = false
-				uppercaseByte(&b[i])
-			} else {
-				lowercaseByte(&b[i])
+	if n == 0 {
+		return
+	}
+
+	b[0] = toUpperTable[b[0]]
+	for i := 1; i < n; i++ {
+		p := &b[i]
+		if *p == '-' {
+			i++
+			if i < n {
+				b[i] = toUpperTable[b[i]]
 			}
+			continue
 		}
+		*p = toLowerTable[*p]
 	}
 }
 

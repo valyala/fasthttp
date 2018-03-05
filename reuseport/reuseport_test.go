@@ -13,7 +13,23 @@ func TestTCP4(t *testing.T) {
 }
 
 func TestTCP6(t *testing.T) {
-	testNewListener(t, "tcp6", "ip6-localhost:10081", 20, 1000)
+	// Run this test only if tcp6 interface exists.
+	if hasLocalIPv6(t) {
+		testNewListener(t, "tcp6", "[::1]:10082", 20, 1000)
+	}
+}
+
+func hasLocalIPv6(t *testing.T) bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		t.Fatalf("cannot obtain local interfaces: %s", err)
+	}
+	for _, a := range addrs {
+		if a.String() == "::1/128" {
+			return true
+		}
+	}
+	return false
 }
 
 func testNewListener(t *testing.T, network, addr string, serversCount, requestsCount int) {

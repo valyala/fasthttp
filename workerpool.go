@@ -187,7 +187,7 @@ func (wp *workerPool) getCh() *workerChan {
 }
 
 func (wp *workerPool) release(ch *workerChan) bool {
-	ch.lastUseTime = time.Now()
+	ch.lastUseTime = CoarseTimeNow()
 	wp.lock.Lock()
 	if wp.mustStop {
 		wp.lock.Unlock()

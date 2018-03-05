@@ -958,12 +958,7 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 
 	if mustCompress {
 		var zbuf ByteBuffer
-		zw := acquireGzipWriter(&zbuf, CompressDefaultCompression)
-		_, err = zw.Write(w.B)
-		releaseGzipWriter(zw)
-		if err != nil {
-			return nil, fmt.Errorf("error when compressing automatically generated index for directory %q: %s", dirPath, err)
-		}
+		zbuf.B = AppendGzipBytesLevel(zbuf.B, w.B, CompressDefaultCompression)
 		w = &zbuf
 	}
 
@@ -1048,12 +1043,12 @@ func (h *fsHandler) compressFileNolock(f *os.File, fileInfo os.FileInfo, filePat
 		return nil, errNoCreatePermission
 	}
 
-	zw := acquireGzipWriter(zf, CompressDefaultCompression)
+	zw := acquireStacklessGzipWriter(zf, CompressDefaultCompression)
 	_, err = copyZeroAlloc(zw, f)
 	if err1 := zw.Flush(); err == nil {
 		err = err1
 	}
-	releaseGzipWriter(zw)
+	releaseStacklessGzipWriter(zw, CompressDefaultCompression)
 	zf.Close()
 	f.Close()
 	if err != nil {

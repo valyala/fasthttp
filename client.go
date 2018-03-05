@@ -328,7 +328,7 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
 // to the requested host are busy.
 //
-/// It is recommended obtaining req and resp via AcquireRequest
+// It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	return clientDoDeadline(req, resp, deadline, c)
@@ -866,7 +866,7 @@ func ReleaseResponse(resp *Response) {
 // ErrNoFreeConns is returned if all HostClient.MaxConns connections
 // to the host are busy.
 //
-/// It is recommended obtaining req and resp via AcquireRequest
+// It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return clientDoTimeout(req, resp, timeout, c)
@@ -1041,7 +1041,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		panic("BUG: resp cannot be nil")
 	}
 
-	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix))
+	atomic.StoreUint32(&c.lastUseTime, uint32(CoarseTimeNow().Unix()-startTimeUnix))
 
 	// Free up resources occupied by response before sending the request,
 	// so the GC may reclaim these resources (e.g. response body).
@@ -1057,7 +1057,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		// Optimization: update write deadline only if more than 25%
 		// of the last write deadline exceeded.
 		// See https://github.com/golang/go/issues/15133 for details.
-		currentTime := time.Now()
+		currentTime := CoarseTimeNow()
 		if currentTime.Sub(cc.lastWriteDeadlineTime) > (c.WriteTimeout >> 2) {
 			if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
 				c.closeConn(cc)
@@ -1101,7 +1101,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		// Optimization: update read deadline only if more than 25%
 		// of the last read deadline exceeded.
 		// See https://github.com/golang/go/issues/15133 for details.
-		currentTime := time.Now()
+		currentTime := CoarseTimeNow()
 		if currentTime.Sub(cc.lastReadDeadlineTime) > (c.ReadTimeout >> 2) {
 			if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
 				c.closeConn(cc)
@@ -1276,7 +1276,7 @@ func acquireClientConn(conn net.Conn) *clientConn {
 	}
 	cc := v.(*clientConn)
 	cc.c = conn
-	cc.createdTime = time.Now()
+	cc.createdTime = CoarseTimeNow()
 	return cc
 }
 
@@ -1288,7 +1288,7 @@ func releaseClientConn(cc *clientConn) {
 var clientConnPool sync.Pool
 
 func (c *HostClient) releaseConn(cc *clientConn) {
-	cc.lastUseTime = time.Now()
+	cc.lastUseTime = CoarseTimeNow()
 	c.connsLock.Lock()
 	c.conns = append(c.conns, cc)
 	c.connsLock.Unlock()
@@ -1380,6 +1380,9 @@ func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 }
 
 func tlsServerName(addr string) string {
+	if !strings.Contains(addr, ":") {
+		return addr
+	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return "*"
@@ -1988,7 +1991,7 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}) error
 			// Optimization: update write deadline only if more than 25%
 			// of the last write deadline exceeded.
 			// See https://github.com/golang/go/issues/15133 for details.
-			currentTime := time.Now()
+			currentTime := CoarseTimeNow()
 			if currentTime.Sub(lastWriteDeadlineTime) > (writeTimeout >> 2) {
 				if err = conn.SetWriteDeadline(currentTime.Add(writeTimeout)); err != nil {
 					w.err = err
@@ -2069,7 +2072,7 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}) error
 			// Optimization: update read deadline only if more than 25%
 			// of the last read deadline exceeded.
 			// See https://github.com/golang/go/issues/15133 for details.
-			currentTime := time.Now()
+			currentTime := CoarseTimeNow()
 			if currentTime.Sub(lastReadDeadlineTime) > (readTimeout >> 2) {
 				if err = conn.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
 					w.err = err

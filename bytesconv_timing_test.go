@@ -75,18 +75,6 @@ func BenchmarkInt2HexByte(b *testing.B) {
 	})
 }
 
-func BenchmarkHexByte2Int(b *testing.B) {
-	buf := []byte("0A1B2c3d4E5F6C7a8D9ab7cd03ef")
-	b.RunParallel(func(pb *testing.PB) {
-		var c byte
-		for pb.Next() {
-			for _, c = range buf {
-				hexbyte2int(c)
-			}
-		}
-	})
-}
-
 func BenchmarkWriteHexInt(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var w ByteBuffer
@@ -162,6 +150,26 @@ func BenchmarkLowercaseBytesMixed(b *testing.B) {
 		for pb.Next() {
 			copy(s, src)
 			lowercaseBytes(s)
+		}
+	})
+}
+
+func BenchmarkAppendUnquotedArgFastPath(b *testing.B) {
+	src := []byte("foobarbaz no quoted chars fdskjsdf jklsdfdfskljd;aflskjdsaf fdsklj fsdkj fsdl kfjsdlk jfsdklj fsdfsdf sdfkflsd")
+	b.RunParallel(func(pb *testing.PB) {
+		var dst []byte
+		for pb.Next() {
+			dst = AppendUnquotedArg(dst[:0], src)
+		}
+	})
+}
+
+func BenchmarkAppendUnquotedArgSlowPath(b *testing.B) {
+	src := []byte("D0%B4%20%D0%B0%D0%B2%D0%BB%D0%B4%D1%84%D1%8B%D0%B0%D0%BE%20%D1%84%D0%B2%D0%B6%D0%BB%D0%B4%D1%8B%20%D0%B0%D0%BE")
+	b.RunParallel(func(pb *testing.PB) {
+		var dst []byte
+		for pb.Next() {
+			dst = AppendUnquotedArg(dst[:0], src)
 		}
 	})
 }

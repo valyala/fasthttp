@@ -17,6 +17,23 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestRequestCtxString(t *testing.T) {
+	var ctx RequestCtx
+
+	s := ctx.String()
+	expectedS := "#0000000000000000 - 0.0.0.0:0<->0.0.0.0:0 - GET http:///"
+	if s != expectedS {
+		t.Fatalf("unexpected ctx.String: %q. Expecting %q", s, expectedS)
+	}
+
+	ctx.Request.SetRequestURI("https://foobar.com/aaa?bb=c")
+	s = ctx.String()
+	expectedS = "#0000000000000000 - 0.0.0.0:0<->0.0.0.0:0 - GET https://foobar.com/aaa?bb=c"
+	if s != expectedS {
+		t.Fatalf("unexpected ctx.String: %q. Expecting %q", s, expectedS)
+	}
+}
+
 func TestServerErrSmallBuffer(t *testing.T) {
 	logger := &customLogger{}
 	s := &Server{
@@ -117,6 +134,24 @@ func TestRequestCtxIsTLS(t *testing.T) {
 	}{}
 	if !ctx.IsTLS() {
 		t.Fatalf("IsTLS must return true")
+	}
+}
+
+func TestRequestCtxRedirectHTTPSSchemeless(t *testing.T) {
+	var ctx RequestCtx
+
+	s := "GET /foo/bar?baz HTTP/1.1\nHost: aaa.com\n\n"
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := ctx.Request.Read(br); err != nil {
+		t.Fatalf("cannot read request: %s", err)
+	}
+	ctx.Request.isTLS = true
+
+	ctx.Redirect("//foobar.com/aa/bbb", StatusFound)
+	location := ctx.Response.Header.Peek("Location")
+	expectedLocation := "https://foobar.com/aa/bbb"
+	if string(location) != expectedLocation {
+		t.Fatalf("Unexpected location: %q. Expecting %q", location, expectedLocation)
 	}
 }
 
@@ -615,6 +650,15 @@ func TestServerServeTLSEmbed(t *testing.T) {
 	ch := make(chan struct{})
 	go func() {
 		err := ServeTLSEmbed(ln, certData, keyData, func(ctx *RequestCtx) {
+			if !ctx.IsTLS() {
+				ctx.Error("expecting tls", StatusBadRequest)
+				return
+			}
+			scheme := ctx.URI().Scheme()
+			if string(scheme) != "https" {
+				ctx.Error(fmt.Sprintf("unexpected scheme=%q. Expecting %q", scheme, "https"), StatusBadRequest)
+				return
+			}
 			ctx.WriteString("success")
 		})
 		if err != nil {
@@ -1251,7 +1295,7 @@ func TestServerExpect100Continue(t *testing.T) {
 }
 
 func TestCompressHandler(t *testing.T) {
-	expectedBody := "foo/bar/baz"
+	expectedBody := string(createFixedBody(2e4))
 	h := CompressHandler(func(ctx *RequestCtx) {
 		ctx.Write([]byte(expectedBody))
 	})

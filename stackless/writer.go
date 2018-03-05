@@ -1,10 +1,10 @@
 package stackless
 
 import (
+	"errors"
 	"fmt"
 	"github.com/valyala/bytebufferpool"
 	"io"
-	"runtime"
 )
 
 // Writer is an interface stackless writer must conform to.
@@ -31,7 +31,6 @@ type NewWriterFunc func(w io.Writer) Writer
 func NewWriter(dstW io.Writer, newWriter NewWriterFunc) Writer {
 	w := &writer{
 		dstW: dstW,
-		done: make(chan error),
 	}
 	w.zw = newWriter(&w.xw)
 	return w
@@ -42,8 +41,8 @@ type writer struct {
 	zw   Writer
 	xw   xWriter
 
-	done chan error
-	n    int
+	err error
+	n   int
 
 	p  []byte
 	op op
@@ -81,8 +80,10 @@ func (w *writer) Reset(dstW io.Writer) {
 
 func (w *writer) do(op op) error {
 	w.op = op
-	writerCh <- w
-	err := <-w.done
+	if !stacklessWriterFunc(w) {
+		return errHighLoad
+	}
+	err := w.err
 	if err != nil {
 		return err
 	}
@@ -92,6 +93,27 @@ func (w *writer) do(op op) error {
 	w.xw.Reset()
 
 	return err
+}
+
+var errHighLoad = errors.New("cannot compress data due to high load")
+
+var stacklessWriterFunc = NewFunc(writerFunc)
+
+func writerFunc(ctx interface{}) {
+	w := ctx.(*writer)
+	switch w.op {
+	case opWrite:
+		w.n, w.err = w.zw.Write(w.p)
+	case opFlush:
+		w.err = w.zw.Flush()
+	case opClose:
+		w.err = w.zw.Close()
+	case opReset:
+		w.zw.Reset(&w.xw)
+		w.err = nil
+	default:
+		panic(fmt.Sprintf("BUG: unexpected op: %d", w.op))
+	}
 }
 
 type xWriter struct {
@@ -114,33 +136,3 @@ func (w *xWriter) Reset() {
 }
 
 var bufferPool bytebufferpool.Pool
-
-func init() {
-	n := runtime.GOMAXPROCS(-1)
-	writerCh = make(chan *writer, n)
-	for i := 0; i < n; i++ {
-		go worker()
-	}
-}
-
-var writerCh chan *writer
-
-func worker() {
-	var err error
-	for w := range writerCh {
-		switch w.op {
-		case opWrite:
-			w.n, err = w.zw.Write(w.p)
-		case opFlush:
-			err = w.zw.Flush()
-		case opClose:
-			err = w.zw.Close()
-		case opReset:
-			w.zw.Reset(&w.xw)
-			err = nil
-		default:
-			panic(fmt.Sprintf("BUG: unexpected op: %d", w.op))
-		}
-		w.done <- err
-	}
-}

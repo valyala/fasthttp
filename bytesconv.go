@@ -9,6 +9,7 @@ import (
 	"math"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 	"unsafe"
@@ -16,6 +17,16 @@ import (
 
 // AppendHTMLEscape appends html-escaped s to dst and returns the extended dst.
 func AppendHTMLEscape(dst []byte, s string) []byte {
+	if strings.IndexByte(s, '<') < 0 &&
+		strings.IndexByte(s, '>') < 0 &&
+		strings.IndexByte(s, '"') < 0 &&
+		strings.IndexByte(s, '\'') < 0 {
+
+		// fast path - nothing to escape
+		return append(dst, s...)
+	}
+
+	// slow path
 	var prev int
 	var sub string
 	for i, n := 0, len(s); i < n; i++ {
@@ -254,8 +265,8 @@ func readHexInt(r *bufio.Reader) (int, error) {
 			}
 			return -1, err
 		}
-		k = hexbyte2int(c)
-		if k < 0 {
+		k = int(hex2intTable[c])
+		if k == 16 {
 			if i == 0 {
 				return -1, errEmptyHexNum
 			}
@@ -311,44 +322,51 @@ func hexCharUpper(c byte) byte {
 }
 
 var hex2intTable = func() []byte {
-	b := make([]byte, 255)
-	for i := byte(0); i < 255; i++ {
-		c := byte(0)
+	b := make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		c := byte(16)
 		if i >= '0' && i <= '9' {
-			c = 1 + i - '0'
+			c = byte(i) - '0'
 		} else if i >= 'a' && i <= 'f' {
-			c = 1 + i - 'a' + 10
+			c = byte(i) - 'a' + 10
 		} else if i >= 'A' && i <= 'F' {
-			c = 1 + i - 'A' + 10
+			c = byte(i) - 'A' + 10
 		}
 		b[i] = c
 	}
 	return b
 }()
 
-func hexbyte2int(c byte) int {
-	return int(hex2intTable[c]) - 1
-}
-
 const toLower = 'a' - 'A'
 
-func uppercaseByte(p *byte) {
-	c := *p
-	if c >= 'a' && c <= 'z' {
-		*p = c - toLower
+var toLowerTable = func() [256]byte {
+	var a [256]byte
+	for i := 0; i < 256; i++ {
+		c := byte(i)
+		if c >= 'A' && c <= 'Z' {
+			c += toLower
+		}
+		a[i] = c
 	}
-}
+	return a
+}()
 
-func lowercaseByte(p *byte) {
-	c := *p
-	if c >= 'A' && c <= 'Z' {
-		*p = c + toLower
+var toUpperTable = func() [256]byte {
+	var a [256]byte
+	for i := 0; i < 256; i++ {
+		c := byte(i)
+		if c >= 'a' && c <= 'z' {
+			c -= toLower
+		}
+		a[i] = c
 	}
-}
+	return a
+}()
 
 func lowercaseBytes(b []byte) {
-	for i, n := 0, len(b); i < n; i++ {
-		lowercaseByte(&b[i])
+	for i := 0; i < len(b); i++ {
+		p := &b[i]
+		*p = toLowerTable[*p]
 	}
 }
 
@@ -373,6 +391,13 @@ func s2b(s string) []byte {
 		Cap:  sh.Len,
 	}
 	return *(*[]byte)(unsafe.Pointer(&bh))
+}
+
+// AppendUnquotedArg appends url-decoded src to dst and returns appended dst.
+//
+// dst may point to src. In this case src will be overwritten.
+func AppendUnquotedArg(dst, src []byte) []byte {
+	return decodeArgAppend(dst, src)
 }
 
 // AppendQuotedArg appends url-encoded src to dst and returns appended dst.
