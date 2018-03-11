@@ -535,6 +535,26 @@ func (h *RequestHeader) IsDelete() bool {
 	return bytes.Equal(h.Method(), strDelete)
 }
 
+// IsConnect returns true if request method is CONNECT.
+func (h *RequestHeader) IsConnect() bool {
+	return bytes.Equal(h.Method(), strConnect)
+}
+
+// IsOptions returns true if request method is OPTIONS.
+func (h *RequestHeader) IsOptions() bool {
+	return bytes.Equal(h.Method(), strOptions)
+}
+
+// IsTrace returns true if request method is TRACE.
+func (h *RequestHeader) IsTrace() bool {
+	return bytes.Equal(h.Method(), strTrace)
+}
+
+// IsPatch returns true if request method is PATCH.
+func (h *RequestHeader) IsPatch() bool {
+	return bytes.Equal(h.Method(), strPatch)
+}
+
 // IsHTTP11 returns true if the request is HTTP/1.1.
 func (h *RequestHeader) IsHTTP11() bool {
 	return !h.noHTTP11
