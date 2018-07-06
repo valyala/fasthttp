@@ -1792,3 +1792,32 @@ func createChunkedBody(body []byte) []byte {
 	}
 	return append(b, []byte("0\r\n\r\n")...)
 }
+
+func TestWriteMultipartForm(t *testing.T) {
+	var w bytes.Buffer
+	s := strings.Replace(`--foo
+Content-Disposition: form-data; name="key"
+
+value
+--foo
+Content-Disposition: form-data; name="file"; filename="test.json"
+Content-Type: application/json
+
+{"foo": "bar"}
+--foo--
+`, "\n", "\r\n", -1)
+	mr := multipart.NewReader(strings.NewReader(s), "foo")
+	form, err := mr.ReadForm(1024)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if err := WriteMultipartForm(&w, form, "foo"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	if string(w.Bytes()) != s {
+		t.Fatalf("unexpected output %q", w.Bytes())
+	}
+}

@@ -744,7 +744,7 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	// marshal files
 	for k, fvv := range f.File {
 		for _, fv := range fvv {
-			vw, err := mw.CreateFormFile(k, fv.Filename)
+			vw, err := mw.CreatePart(fv.Header)
 			if err != nil {
 				return fmt.Errorf("cannot create form file %q (%q): %s", k, fv.Filename, err)
 			}
