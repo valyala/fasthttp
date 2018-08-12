@@ -19,7 +19,7 @@ before_install:
   - go get -v golang.org/x/tools/cmd/goimports
 
 script:
-  - test -z $(goimports -d $(find . -type f -name '*.go' -not -path "./vendor/*"))
+  - test -z "$(goimports -d $(find . -type f -name '*.go' -not -path "./vendor/*"))"
   # build test for supported platforms
   - GOOS=linux go build
   - GOOS=darwin go build
