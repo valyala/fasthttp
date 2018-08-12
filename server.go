@@ -827,6 +827,26 @@ func (ctx *RequestCtx) IsDelete() bool {
 	return ctx.Request.Header.IsDelete()
 }
 
+// IsConnect returns true if request method is CONNECT.
+func (ctx *RequestCtx) IsConnect() bool {
+	return ctx.Request.Header.IsConnect()
+}
+
+// IsOptions returns true if request method is OPTIONS.
+func (ctx *RequestCtx) IsOptions() bool {
+	return ctx.Request.Header.IsOptions()
+}
+
+// IsTrace returns true if request method is TRACE.
+func (ctx *RequestCtx) IsTrace() bool {
+	return ctx.Request.Header.IsTrace()
+}
+
+// IsPatch returns true if request method is PATCH.
+func (ctx *RequestCtx) IsPatch() bool {
+	return ctx.Request.Header.IsPatch()
+}
+
 // Method return request method.
 //
 // Returned value is valid until returning from RequestHandler.
