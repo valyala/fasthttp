@@ -487,6 +487,8 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     go middleware web framework which is based on fasthttp.
   * [websocket](https://github.com/leavengood/websocket) - Gorilla-based
     websocket implementation for fasthttp.
+  * [fasthttpsession](https://github.com/phachon/fasthttpsession) - a 
+    fast and powerful session package for fasthttp servers.
 
 
 # FAQ
