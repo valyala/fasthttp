@@ -622,52 +622,44 @@ func TestClientFollowRedirects(t *testing.T) {
 }
 
 func TestClientGetTimeoutSuccess(t *testing.T) {
-	addr := "127.0.0.1:56889"
-	s := startEchoServer(t, "tcp", addr)
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
 	defer s.Stop()
 
-	addr = "http://" + addr
-	testClientGetTimeoutSuccess(t, &defaultClient, addr, 100)
+	testClientGetTimeoutSuccess(t, &defaultClient, "http://"+s.Addr(), 100)
 }
 
 func TestClientGetTimeoutSuccessConcurrent(t *testing.T) {
-	addr := "127.0.0.1:56989"
-	s := startEchoServer(t, "tcp", addr)
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
 	defer s.Stop()
 
-	addr = "http://" + addr
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			testClientGetTimeoutSuccess(t, &defaultClient, addr, 100)
+			testClientGetTimeoutSuccess(t, &defaultClient, "http://"+s.Addr(), 100)
 		}()
 	}
 	wg.Wait()
 }
 
 func TestClientDoTimeoutSuccess(t *testing.T) {
-	addr := "127.0.0.1:63897"
-	s := startEchoServer(t, "tcp", addr)
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
 	defer s.Stop()
 
-	addr = "http://" + addr
-	testClientDoTimeoutSuccess(t, &defaultClient, addr, 100)
+	testClientDoTimeoutSuccess(t, &defaultClient, "http://"+s.Addr(), 100)
 }
 
 func TestClientDoTimeoutSuccessConcurrent(t *testing.T) {
-	addr := "127.0.0.1:63898"
-	s := startEchoServer(t, "tcp", addr)
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
 	defer s.Stop()
 
-	addr = "http://" + addr
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			testClientDoTimeoutSuccess(t, &defaultClient, addr, 100)
+			testClientDoTimeoutSuccess(t, &defaultClient, "http://"+s.Addr(), 100)
 		}()
 	}
 	wg.Wait()
@@ -937,16 +929,13 @@ func (r *singleReadConn) Close() error {
 }
 
 func TestClientHTTPSInvalidServerName(t *testing.T) {
-	addrHTTPS := "127.0.0.1:57794"
-	sHTTPS := startEchoServerTLS(t, "tcp", addrHTTPS)
+	sHTTPS := startEchoServerTLS(t, "tcp", "127.0.0.1:")
 	defer sHTTPS.Stop()
 
 	var c Client
 
-	addr := "https://" + addrHTTPS
-
 	for i := 0; i < 10; i++ {
-		_, _, err := c.GetTimeout(nil, addr, time.Second)
+		_, _, err := c.GetTimeout(nil, "https://"+sHTTPS.Addr(), time.Second)
 		if err == nil {
 			t.Fatalf("expecting TLS error")
 		}
@@ -954,12 +943,10 @@ func TestClientHTTPSInvalidServerName(t *testing.T) {
 }
 
 func TestClientHTTPSConcurrent(t *testing.T) {
-	addrHTTP := "127.0.0.1:56793"
-	sHTTP := startEchoServer(t, "tcp", addrHTTP)
+	sHTTP := startEchoServer(t, "tcp", "127.0.0.1:")
 	defer sHTTP.Stop()
 
-	addrHTTPS := "127.0.0.1:56794"
-	sHTTPS := startEchoServerTLS(t, "tcp", addrHTTPS)
+	sHTTPS := startEchoServerTLS(t, "tcp", "127.0.0.1:")
 	defer sHTTPS.Stop()
 
 	c := &Client{
@@ -971,9 +958,9 @@ func TestClientHTTPSConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 4; i++ {
 		wg.Add(1)
-		addr := "http://" + addrHTTP
+		addr := "http://" + sHTTP.Addr()
 		if i&1 != 0 {
-			addr = "https://" + addrHTTPS
+			addr = "https://" + sHTTPS.Addr()
 		}
 		go func() {
 			defer wg.Done()
@@ -987,10 +974,9 @@ func TestClientHTTPSConcurrent(t *testing.T) {
 func TestClientManyServers(t *testing.T) {
 	var addrs []string
 	for i := 0; i < 10; i++ {
-		addr := fmt.Sprintf("127.0.0.1:%d", 56904+i)
-		s := startEchoServer(t, "tcp", addr)
+		s := startEchoServer(t, "tcp", "127.0.0.1:")
 		defer s.Stop()
-		addrs = append(addrs, addr)
+		addrs = append(addrs, s.Addr())
 	}
 
 	var wg sync.WaitGroup
@@ -1007,29 +993,24 @@ func TestClientManyServers(t *testing.T) {
 }
 
 func TestClientGet(t *testing.T) {
-	addr := "127.0.0.1:56789"
-	s := startEchoServer(t, "tcp", addr)
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
 	defer s.Stop()
 
-	addr = "http://" + addr
-	testClientGet(t, &defaultClient, addr, 100)
+	testClientGet(t, &defaultClient, "http://"+s.Addr(), 100)
 }
 
 func TestClientPost(t *testing.T) {
-	addr := "127.0.0.1:56798"
-	s := startEchoServer(t, "tcp", addr)
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
 	defer s.Stop()
 
-	addr = "http://" + addr
-	testClientPost(t, &defaultClient, addr, 100)
+	testClientPost(t, &defaultClient, "http://"+s.Addr(), 100)
 }
 
 func TestClientConcurrent(t *testing.T) {
-	addr := "127.0.0.1:55780"
-	s := startEchoServer(t, "tcp", addr)
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
 	defer s.Stop()
 
-	addr = "http://" + addr
+	addr := "http://" + s.Addr()
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -1217,6 +1198,10 @@ func (s *testEchoServer) Stop() {
 	case <-time.After(time.Second):
 		s.t.Fatalf("timeout when waiting for server close")
 	}
+}
+
+func (s *testEchoServer) Addr() string {
+	return s.ln.Addr().String()
 }
 
 func startEchoServerTLS(t *testing.T, network, addr string) *testEchoServer {
