@@ -15,12 +15,11 @@ matrix:
   fast_finish: true
 
 before_install:
-  - GO_FILES=$(find . -iname '*.go' -type f | grep -v /vendor/)
   - go get -t -v ./...
   - go get -v golang.org/x/tools/cmd/goimports
 
 script:
-  - test -z $(goimports -l $GO_FILES)
+  - test -z $(goimports -d .)
   # build test for supported platforms
   - GOOS=linux go build
   - GOOS=darwin go build
