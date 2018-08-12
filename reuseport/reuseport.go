@@ -10,9 +10,10 @@ package reuseport
 
 import (
 	"fmt"
-	"github.com/valyala/tcplisten"
 	"net"
 	"strings"
+
+	"github.com/valyala/tcplisten"
 )
 
 // ErrNoReusePort is returned if the OS doesn't support SO_REUSEPORT.
