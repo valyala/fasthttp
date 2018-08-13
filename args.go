@@ -486,7 +486,7 @@ func decodeArgAppend(dst, src []byte) []byte {
 // decodeArgAppendNoPlus is almost identical to decodeArgAppend, but it doesn't
 // substitute '+' with ' '.
 //
-// The function is copy-pasted from decodeArgAppend due to the preformance
+// The function is copy-pasted from decodeArgAppend due to the performance
 // reasons only.
 func decodeArgAppendNoPlus(dst, src []byte) []byte {
 	if bytes.IndexByte(src, '%') < 0 {

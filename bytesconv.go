@@ -164,7 +164,7 @@ func ParseUint(buf []byte) (int, error) {
 var (
 	errEmptyInt               = errors.New("empty integer")
 	errUnexpectedFirstChar    = errors.New("unexpected first char found. Expecting 0-9")
-	errUnexpectedTrailingChar = errors.New("unexpected traling char found. Expecting 0-9")
+	errUnexpectedTrailingChar = errors.New("unexpected trailing char found. Expecting 0-9")
 	errTooLongInt             = errors.New("too long int")
 )
 
@@ -431,7 +431,7 @@ func appendQuotedPath(dst, src []byte) []byte {
 // This function has no performance benefits comparing to string(b) == s.
 // It is left here for backwards compatibility only.
 //
-// This function is deperecated and may be deleted soon.
+// This function is deprecated and may be deleted soon.
 func EqualBytesStr(b []byte, s string) bool {
 	return string(b) == s
 }

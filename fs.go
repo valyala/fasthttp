@@ -225,7 +225,7 @@ type FS struct {
 	// It adds CompressedFileSuffix suffix to the original file name and
 	// tries saving the resulting compressed file under the new file name.
 	// So it is advisable to give the server write access to Root
-	// and to all inner folders in order to minimze CPU usage when serving
+	// and to all inner folders in order to minimize CPU usage when serving
 	// compressed responses.
 	//
 	// Transparent compression is disabled by default.

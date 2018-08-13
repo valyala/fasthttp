@@ -8,7 +8,7 @@ import (
 
 // InmemoryListener provides in-memory dialer<->net.Listener implementation.
 //
-// It may be used either for fast in-process client<->server communcations
+// It may be used either for fast in-process client<->server communications
 // without network stack overhead or for client<->server tests.
 type InmemoryListener struct {
 	lock   sync.Mutex

@@ -511,7 +511,7 @@ func (h *RequestHeader) IsGet() bool {
 	return h.isGet
 }
 
-// IsPost returns true if request methos is POST.
+// IsPost returns true if request method is POST.
 func (h *RequestHeader) IsPost() bool {
 	return bytes.Equal(h.Method(), strPost)
 }
