@@ -1428,6 +1428,46 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderCookieIssue313(t *testing.T) {
+	var h RequestHeader
+	h.SetRequestURI("/")
+	h.Set("Host", "foobar.com")
+
+	h.SetCookie("foo", "bar")
+
+	if string(h.Peek("Cookie")) != "foo=bar" {
+		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek("Cookie"), "foo=bar")
+	}
+	cookieSeen := false
+	h.VisitAll(func(key, value []byte) {
+		switch string(key) {
+		case "Cookie":
+			cookieSeen = true
+		}
+	})
+	if !cookieSeen {
+		t.Fatalf("Cookie not present in VisitAll")
+	}
+
+	if string(h.Cookie("foo")) != "bar" {
+		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.Cookie("foo"), "bar")
+	}
+
+	if string(h.Peek("Cookie")) != "foo=bar" {
+		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek("Cookie"), "foo=bar")
+	}
+	cookieSeen = false
+	h.VisitAll(func(key, value []byte) {
+		switch string(key) {
+		case "Cookie":
+			cookieSeen = true
+		}
+	})
+	if !cookieSeen {
+		t.Fatalf("Cookie not present in VisitAll")
+	}
+}
+
 func TestRequestHeaderMethod(t *testing.T) {
 	// common http methods
 	testRequestHeaderMethod(t, "GET")
