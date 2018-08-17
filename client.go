@@ -1079,9 +1079,6 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	}
 	bw := c.acquireWriter(conn)
 	err = req.Write(bw)
-	if len(userAgentOld) == 0 {
-		req.Header.userAgent = userAgentOld
-	}
 
 	if resetConnection {
 		req.Header.ResetConnectionClose()

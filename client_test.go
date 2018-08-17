@@ -17,6 +17,37 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestClientUserAgent(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Write([]byte("response"))
+		},
+	}
+	go s.Serve(ln)
+
+	userAgent := "I'm not fasthttp"
+	c := &Client{
+		Name: userAgent,
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	res := AcquireResponse()
+
+	req.SetRequestURI("http://do.not.worry?we.are.going.to.make.fasthttp.great.again")
+
+	err := c.Do(req, res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ua := string(req.Header.UserAgent()); ua != userAgent {
+		t.Fatalf("User-Agent defers %s <> %s", ua, userAgent)
+	}
+}
+
 func TestClientDoWithCustomHeaders(t *testing.T) {
 	// make sure that the client sends all the request headers and body.
 	ln := fasthttputil.NewInmemoryListener()
