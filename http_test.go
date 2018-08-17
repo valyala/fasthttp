@@ -1372,7 +1372,7 @@ func TestResponseSuccess(t *testing.T) {
 
 	// response with missing server
 	testResponseSuccess(t, 500, "aaa", "", "aaadfsd",
-		500, "aaa", string(defaultServerName))
+		500, "aaa", "")
 
 	// empty body
 	testResponseSuccess(t, 200, "bbb", "qwer", "",
