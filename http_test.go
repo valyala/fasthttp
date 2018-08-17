@@ -1300,6 +1300,23 @@ func TestRequestReadChunked(t *testing.T) {
 	verifyTrailer(t, rb, "trail")
 }
 
+// See: https://github.com/erikdubbelboer/fasthttp/issues/34
+func TestRequestChunkedWhitespace(t *testing.T) {
+	var req Request
+
+	s := "POST /foo HTTP/1.1\r\nHost: google.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa/bb\r\n\r\n3  \r\nabc\r\n0\r\n\r\n"
+	r := bytes.NewBufferString(s)
+	rb := bufio.NewReader(r)
+	err := req.Read(rb)
+	if err != nil {
+		t.Fatalf("Unexpected error when reading chunked request: %s", err)
+	}
+	expectedBody := "abc"
+	if string(req.Body()) != expectedBody {
+		t.Fatalf("Unexpected body %q. Expected %q", req.Body(), expectedBody)
+	}
+}
+
 func TestResponseReadWithoutBody(t *testing.T) {
 	var resp Response
 
