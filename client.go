@@ -767,7 +767,11 @@ func doRequestFollowRedirects(req *Request, dst []byte, url string, c clientDoer
 			break
 		}
 		statusCode = resp.Header.StatusCode()
-		if statusCode != StatusMovedPermanently && statusCode != StatusFound && statusCode != StatusSeeOther {
+		if statusCode != StatusMovedPermanently &&
+			statusCode != StatusFound &&
+			statusCode != StatusSeeOther &&
+			statusCode != StatusTemporaryRedirect &&
+			statusCode != StatusPermanentRedirect {
 			break
 		}
 
