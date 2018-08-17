@@ -17,6 +17,67 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestServerName(t *testing.T) {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+
+	getReponse := func() []byte {
+		rw := &readWriter{}
+		rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+		ch := make(chan error)
+		go func() {
+			ch <- s.ServeConn(rw)
+		}()
+
+		select {
+		case err := <-ch:
+			if err != nil {
+				t.Fatalf("Unexpected error from serveConn: %s", err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatalf("timeout")
+		}
+
+		resp, err := ioutil.ReadAll(&rw.w)
+		if err != nil {
+			t.Fatalf("Unexpected error from ReadAll: %s", err)
+		}
+
+		return resp
+	}
+
+	resp := getReponse()
+	if !bytes.Contains(resp, []byte("\r\nServer: "+string(defaultServerName)+"\r\n")) {
+		t.Fatalf("Unexpected response %q expected Server: "+string(defaultServerName), resp)
+	}
+
+	// We can't just overwrite s.Name as fasthttp caches the name in an atomic.Value
+	s = &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+		Name: "foobar",
+	}
+
+	resp = getReponse()
+	if !bytes.Contains(resp, []byte("\r\nServer: foobar\r\n")) {
+		t.Fatalf("Unexpected response %q expected Server: foobar", resp)
+	}
+
+	s = &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+		NoDefaultServerHeader: true,
+	}
+
+	resp = getReponse()
+	if bytes.Contains(resp, []byte("\r\nServer: ")) {
+		t.Fatalf("Unexpected response %q expected no Server header", resp)
+	}
+}
+
 func TestRequestCtxString(t *testing.T) {
 	var ctx RequestCtx
 
