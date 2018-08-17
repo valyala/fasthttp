@@ -1393,6 +1393,50 @@ func TestRequestHeaderCookie(t *testing.T) {
 	}
 }
 
+func TestResponseHeaderCookieIssue4(t *testing.T) {
+	var h ResponseHeader
+
+	c := AcquireCookie()
+	c.SetKey("foo")
+	c.SetValue("bar")
+	h.SetCookie(c)
+
+	if string(h.Peek("Set-Cookie")) != "foo=bar" {
+		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek("Set-Cookie"), "foo=bar")
+	}
+	cookieSeen := false
+	h.VisitAll(func(key, value []byte) {
+		switch string(key) {
+		case "Set-Cookie":
+			cookieSeen = true
+		}
+	})
+	if !cookieSeen {
+		t.Fatalf("Set-Cookie not present in VisitAll")
+	}
+
+	c = AcquireCookie()
+	c.SetKey("foo")
+	h.Cookie(c)
+	if string(c.Value()) != "bar" {
+		t.Fatalf("Unexpected cookie value %q. Exepcted %q", c.Value(), "bar")
+	}
+
+	if string(h.Peek("Set-Cookie")) != "foo=bar" {
+		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek("Set-Cookie"), "foo=bar")
+	}
+	cookieSeen = false
+	h.VisitAll(func(key, value []byte) {
+		switch string(key) {
+		case "Set-Cookie":
+			cookieSeen = true
+		}
+	})
+	if !cookieSeen {
+		t.Fatalf("Set-Cookie not present in VisitAll")
+	}
+}
+
 func TestRequestHeaderMethod(t *testing.T) {
 	// common http methods
 	testRequestHeaderMethod(t, "GET")
