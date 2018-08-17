@@ -72,6 +72,9 @@ type RequestHeader struct {
 	cookies []argsKV
 
 	rawHeaders []byte
+
+	// stores an immutable copy of headers as they were recieved from the wire.
+	rawHeadersCopy []byte
 }
 
 // SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
@@ -1519,6 +1522,20 @@ func (h *RequestHeader) Header() []byte {
 	return h.bufKV.value
 }
 
+// RawHeaders returns raw header key/value bytes.
+//
+// Depending on server configuration, header keys may be normalized to
+// capital-case in place.
+//
+// This copy is set aside during parsing, so empty slice is returned for all
+// cases where parsing did not happen. Similarly, request line is not stored
+// during parsing and can not be returned.
+//
+// The slice is not safe to use after the handler returns.
+func (h *RequestHeader) RawHeaders() []byte {
+	return h.rawHeadersCopy
+}
+
 // String returns request header representation.
 func (h *RequestHeader) String() string {
 	return string(h.Header())
@@ -1616,18 +1633,20 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 	}
 
 	var n int
+	var rawHeaders []byte
+	rawHeaders, n, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
+	if err != nil {
+		return 0, err
+	}
+	h.rawHeadersCopy = append(h.rawHeadersCopy[:0], rawHeaders...)
 	if !h.ignoreBody() || h.noHTTP11 {
 		n, err = h.parseHeaders(buf[m:])
 		if err != nil {
 			return 0, err
 		}
+		h.rawHeaders = append(h.rawHeaders[:0], buf[m:m+n]...)
 		h.rawHeadersParsed = true
 	} else {
-		var rawHeaders []byte
-		rawHeaders, n, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
-		if err != nil {
-			return 0, err
-		}
 		h.rawHeaders = rawHeaders
 	}
 	return m + n, nil
@@ -1904,8 +1923,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 		v := peekArgBytes(h.h, strConnection)
 		h.connectionClose = !hasHeaderValue(v, strKeepAlive) && !hasHeaderValue(v, strKeepAliveCamelCase)
 	}
-
-	return len(buf) - len(s.b), nil
+	return s.hLen, nil
 }
 
 func (h *RequestHeader) parseRawHeaders() {
@@ -1956,6 +1974,9 @@ type headerScanner struct {
 	value []byte
 	err   error
 
+	// hLen stores header subslice len
+	hLen int
+
 	disableNormalizing bool
 }
 
@@ -1963,10 +1984,12 @@ func (s *headerScanner) next() bool {
 	bLen := len(s.b)
 	if bLen >= 2 && s.b[0] == '\r' && s.b[1] == '\n' {
 		s.b = s.b[2:]
+		s.hLen += 2
 		return false
 	}
 	if bLen >= 1 && s.b[0] == '\n' {
 		s.b = s.b[1:]
+		s.hLen++
 		return false
 	}
 	n := bytes.IndexByte(s.b, ':')
@@ -1980,6 +2003,7 @@ func (s *headerScanner) next() bool {
 	for len(s.b) > n && s.b[n] == ' ' {
 		n++
 	}
+	s.hLen += n
 	s.b = s.b[n:]
 	n = bytes.IndexByte(s.b, '\n')
 	if n < 0 {
@@ -1987,6 +2011,7 @@ func (s *headerScanner) next() bool {
 		return false
 	}
 	s.value = s.b[:n]
+	s.hLen += n + 1
 	s.b = s.b[n+1:]
 
 	if n > 0 && s.value[n-1] == '\r' {
