@@ -280,6 +280,12 @@ type Server struct {
 	writerPool     sync.Pool
 	hijackConnPool sync.Pool
 	bytePool       sync.Pool
+
+	// We need to know our listener so we can close it in Shutdown().
+	ln net.Listener
+
+	wg   sync.WaitGroup
+	stop int32
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -1294,6 +1300,14 @@ func (s *Server) Serve(ln net.Listener) error {
 	var c net.Conn
 	var err error
 
+	s.ln = ln
+	defer func() {
+		// Don't keep a reference to the listener if we don't need to.
+		s.ln = nil
+	}()
+
+	atomic.StoreInt32(&s.stop, 0)
+
 	maxWorkersCount := s.getConcurrency()
 	s.concurrencyCh = make(chan struct{}, maxWorkersCount)
 	wp := &workerPool{
@@ -1312,7 +1326,9 @@ func (s *Server) Serve(ln net.Listener) error {
 			}
 			return err
 		}
+		s.wg.Add(1)
 		if !wp.Serve(c) {
+			s.wg.Done()
 			s.writeFastError(c, StatusServiceUnavailable,
 				"The connection cannot be served because Server.Concurrency limit exceeded")
 			c.Close()
@@ -1332,6 +1348,27 @@ func (s *Server) Serve(ln net.Listener) error {
 		}
 		c = nil
 	}
+}
+
+// Shutdown gracefully shuts down the server without interrupting any active connections.
+// Shutdown works by first closing all open listeners and then waiting indefinitely for all connections to return to idle and then shut down.
+//
+// When Shutdown is called, Serve, ListenAndServe, and ListenAndServeTLS immediately return nil.
+// Make sure the program doesn't exit and waits instead for Shutdown to return.
+//
+// Shutdown does not close keepalive connections so its recommended to set ReadTimeout to something else than 0.
+func (s *Server) Shutdown() error {
+	if s.ln != nil {
+		if err := s.ln.Close(); err != nil {
+			return err
+		}
+	}
+	atomic.StoreInt32(&s.stop, 1)
+	// Closing the listener will make Serve() call Stop on the worker pool.
+	// Setting .stop to 1 will make serveConn() break out of its loop.
+	// Now we just have to wait until all workers are done.
+	s.wg.Wait()
+	return nil
 }
 
 func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.Conn, error) {
@@ -1435,6 +1472,8 @@ func (s *Server) ServeConn(c net.Conn) error {
 		return ErrConcurrencyLimit
 	}
 
+	s.wg.Add(1)
+
 	err := s.serveConn(c)
 
 	atomic.AddUint32(&s.concurrency, ^uint32(0))
@@ -1473,6 +1512,8 @@ func nextConnID() uint64 {
 const DefaultMaxRequestBodySize = 4 * 1024 * 1024
 
 func (s *Server) serveConn(c net.Conn) error {
+	defer s.wg.Done()
+
 	serverName := s.getServerName()
 	connRequestNum := uint64(0)
 	connID := nextConnID()
@@ -1501,6 +1542,11 @@ func (s *Server) serveConn(c net.Conn) error {
 		isHTTP11        bool
 	)
 	for {
+		if atomic.LoadInt32(&s.stop) == 1 {
+			err = nil
+			break
+		}
+
 		connRequestNum++
 		ctx.time = currentTime
 
