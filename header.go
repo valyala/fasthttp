@@ -50,7 +50,6 @@ type RequestHeader struct {
 	disableNormalizing bool
 	noHTTP11           bool
 	connectionClose    bool
-	isGet              bool
 
 	// These two fields have been moved close to other bool fields
 	// for reducing RequestHeader object size.
@@ -504,11 +503,7 @@ func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
 
 // IsGet returns true if request method is GET.
 func (h *RequestHeader) IsGet() bool {
-	// Optimize fast path for GET requests.
-	if !h.isGet {
-		h.isGet = bytes.Equal(h.Method(), strGet)
-	}
-	return h.isGet
+	return bytes.Equal(h.Method(), strGet)
 }
 
 // IsPost returns true if request method is POST.
@@ -523,10 +518,6 @@ func (h *RequestHeader) IsPut() bool {
 
 // IsHead returns true if request method is HEAD.
 func (h *RequestHeader) IsHead() bool {
-	// Fast path
-	if h.isGet {
-		return false
-	}
 	return bytes.Equal(h.Method(), strHead)
 }
 
@@ -668,7 +659,6 @@ func (h *RequestHeader) Reset() {
 func (h *RequestHeader) resetSkipNormalize() {
 	h.noHTTP11 = false
 	h.connectionClose = false
-	h.isGet = false
 
 	h.contentLength = 0
 	h.contentLengthBytes = h.contentLengthBytes[:0]
@@ -711,7 +701,6 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.disableNormalizing = h.disableNormalizing
 	dst.noHTTP11 = h.noHTTP11
 	dst.connectionClose = h.connectionClose
-	dst.isGet = h.isGet
 
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes[:0], h.contentLengthBytes...)
