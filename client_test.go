@@ -562,7 +562,6 @@ func TestHostClientMultipleAddrs(t *testing.T) {
 }
 
 func TestClientFollowRedirects(t *testing.T) {
-	addr := "127.0.0.1:55234"
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			switch string(ctx.Path()) {
@@ -579,10 +578,7 @@ func TestClientFollowRedirects(t *testing.T) {
 			}
 		},
 	}
-	ln, err := net.Listen("tcp4", addr)
-	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
-	}
+	ln := fasthttputil.NewInmemoryListener()
 
 	serverStopCh := make(chan struct{})
 	go func() {
@@ -592,9 +588,15 @@ func TestClientFollowRedirects(t *testing.T) {
 		close(serverStopCh)
 	}()
 
-	uri := fmt.Sprintf("http://%s/foo", addr)
+	c := &HostClient{
+		Addr: "xxx",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
 	for i := 0; i < 10; i++ {
-		statusCode, body, err := GetTimeout(nil, uri, time.Second)
+		statusCode, body, err := c.GetTimeout(nil, "http://xxx/foo", time.Second)
 		if err != nil {
 			t.Fatalf("unexpected error: %s", err)
 		}
@@ -606,9 +608,8 @@ func TestClientFollowRedirects(t *testing.T) {
 		}
 	}
 
-	uri = fmt.Sprintf("http://%s/aaab/sss", addr)
 	for i := 0; i < 10; i++ {
-		statusCode, body, err := Get(nil, uri)
+		statusCode, body, err := c.Get(nil, "http://xxx/aaab/sss")
 		if err != nil {
 			t.Fatalf("unexpected error: %s", err)
 		}
