@@ -157,12 +157,6 @@ func (h *RequestHeader) ConnectionClose() bool {
 	return h.connectionClose
 }
 
-func (h *RequestHeader) connectionCloseFast() bool {
-	// h.parseRawHeaders() isn't called for performance reasons.
-	// Use ConnectionClose for triggering raw headers parsing.
-	return h.connectionClose
-}
-
 // SetConnectionClose sets 'Connection: close' header.
 func (h *RequestHeader) SetConnectionClose() {
 	// h.parseRawHeaders() isn't called for performance reasons.
