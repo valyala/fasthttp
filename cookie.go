@@ -329,6 +329,19 @@ func appendRequestCookieBytes(dst []byte, cookies []argsKV) []byte {
 	return dst
 }
 
+// For Response we can not use the above function as response cookies
+// already contain the key= in the value.
+func appendResponseCookieBytes(dst []byte, cookies []argsKV) []byte {
+	for i, n := 0, len(cookies); i < n; i++ {
+		kv := &cookies[i]
+		dst = append(dst, kv.value...)
+		if i+1 < n {
+			dst = append(dst, ';', ' ')
+		}
+	}
+	return dst
+}
+
 func parseRequestCookies(cookies []argsKV, src []byte) []argsKV {
 	var s cookieScanner
 	s.b = src

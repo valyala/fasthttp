@@ -1211,6 +1211,8 @@ func (h *ResponseHeader) peek(key []byte) []byte {
 		return peekArgBytes(h.h, key)
 	case "Content-Length":
 		return h.contentLengthBytes
+	case "Set-Cookie":
+		return appendResponseCookieBytes(nil, h.cookies)
 	default:
 		return peekArgBytes(h.h, key)
 	}
