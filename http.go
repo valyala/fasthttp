@@ -1679,14 +1679,21 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 	if err != nil {
 		return -1, err
 	}
+	for {
+		c, err := r.ReadByte()
+		if err != nil {
+			return -1, fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err)
+		}
+		// Skip any trailing whitespace after chunk size.
+		if c == ' ' {
+			continue
+		}
+		if c != '\r' {
+			return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\r')
+		}
+		break
+	}
 	c, err := r.ReadByte()
-	if err != nil {
-		return -1, fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err)
-	}
-	if c != '\r' {
-		return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\r')
-	}
-	c, err = r.ReadByte()
 	if err != nil {
 		return -1, fmt.Errorf("cannot read '\n' char at the end of chunk size: %s", err)
 	}
