@@ -1581,7 +1581,6 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.Response.Header.SetServerBytes(serverName)
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
-		ctx.connTime = connTime
 		ctx.time = currentTime
 		s.Handler(ctx)
 
