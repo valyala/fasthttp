@@ -828,6 +828,37 @@ Connection: close
 	}
 }
 
+func TestServerGetWithContent(t *testing.T) {
+	h := func(ctx *RequestCtx) {
+		ctx.Success("foo/bar", []byte("success"))
+	}
+	s := &Server{
+		Handler: h,
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: mm.com\r\nContent-Length: 5\r\n\r\nabcde")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s.", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+
+	resp := rw.w.String()
+	if !strings.HasSuffix(resp, "success") {
+		t.Fatalf("unexpected response %s.", resp)
+	}
+}
+
 func TestServerDisableHeaderNamesNormalizing(t *testing.T) {
 	headerName := "CASE-senSITive-HEAder-NAME"
 	headerNameLower := strings.ToLower(headerName)
