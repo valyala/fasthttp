@@ -1233,6 +1233,12 @@ func (c *HostClient) connsCleaner() {
 		for i < n && currentTime.Sub(conns[i].lastUseTime) > maxIdleConnDuration {
 			i++
 		}
+		sleepFor := maxIdleConnDuration
+		if i < n {
+			// + 1 so we actually sleep past the expiration time and not up to it.
+			// Otherwise the > check above would still fail.
+			sleepFor = maxIdleConnDuration - currentTime.Sub(conns[i].lastUseTime) + 1
+		}
 		scratch = append(scratch[:0], conns[:i]...)
 		if i > 0 {
 			m := copy(conns, conns[i:])
@@ -1260,7 +1266,7 @@ func (c *HostClient) connsCleaner() {
 			break
 		}
 
-		time.Sleep(maxIdleConnDuration)
+		time.Sleep(sleepFor)
 	}
 }
 
