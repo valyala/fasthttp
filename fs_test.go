@@ -14,6 +14,14 @@ import (
 	"time"
 )
 
+type TestLogger struct {
+	t *testing.T
+}
+
+func (t TestLogger) Printf(format string, args ...interface{}) {
+	t.t.Logf(format, args...)
+}
+
 func TestNewVHostPathRewriter(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
@@ -51,6 +59,43 @@ func TestNewVHostPathRewriterMaliciousHost(t *testing.T) {
 	if string(path) != expectedPath {
 		t.Fatalf("unexpected path %q. Expecting %q", path, expectedPath)
 	}
+}
+
+func testPathNotFound(t *testing.T, pathNotFoundFunc RequestHandler) {
+	var ctx RequestCtx
+	var req Request
+	req.SetRequestURI("http//some.url/file")
+	ctx.Init(&req, nil, TestLogger{t})
+
+	fs := &FS{
+		Root:         "./",
+		PathNotFound: pathNotFoundFunc,
+	}
+	fs.NewRequestHandler()(&ctx)
+
+	if pathNotFoundFunc == nil {
+		// different to ...
+		if !bytes.Equal(ctx.Response.Body(),
+			[]byte("Cannot open requested path")) {
+			t.Fatalf("response defers. Response: %q", ctx.Response.Body())
+		}
+	} else {
+		// Equals to ...
+		if bytes.Equal(ctx.Response.Body(),
+			[]byte("Cannot open requested path")) {
+			t.Fatalf("respones defers. Response: %q", ctx.Response.Body())
+		}
+	}
+}
+
+func TestPathNotFound(t *testing.T) {
+	testPathNotFound(t, nil)
+}
+
+func TestPathNotFoundFunc(t *testing.T) {
+	testPathNotFound(t, func(ctx *RequestCtx) {
+		ctx.WriteString("Not found hehe")
+	})
 }
 
 func TestServeFileHead(t *testing.T) {
