@@ -924,15 +924,6 @@ func TestRequestHeaderEmptyMethod(t *testing.T) {
 	if !h.IsGet() {
 		t.Fatalf("empty method must be equivalent to GET")
 	}
-	if h.IsPost() {
-		t.Fatalf("empty method cannot be POST")
-	}
-	if h.IsHead() {
-		t.Fatalf("empty method cannot be HEAD")
-	}
-	if h.IsDelete() {
-		t.Fatalf("empty method cannot be DELETE")
-	}
 }
 
 func TestResponseHeaderHTTPVer(t *testing.T) {
