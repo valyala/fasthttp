@@ -189,6 +189,11 @@ func (h *RequestHeader) ConnectionUpgrade() bool {
 	return hasHeaderValue(h.Peek("Connection"), strUpgrade)
 }
 
+// PeekCookie is able to returns cookie by a given key from response.
+func (h *ResponseHeader) PeekCookie(key string) []byte {
+	return peekArgStr(h.cookies, key)
+}
+
 // ContentLength returns Content-Length header value.
 //
 // It may be negative:
