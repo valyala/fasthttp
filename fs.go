@@ -739,8 +739,8 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			if h.pathNotFound == nil {
 				ctx.Error("Cannot open requested path", StatusNotFound)
 			} else {
-				h.pathNotFound(ctx)
 				ctx.SetStatusCode(StatusNotFound)
+				h.pathNotFound(ctx)
 			}
 			return
 		}
