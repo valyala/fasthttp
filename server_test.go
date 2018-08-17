@@ -660,6 +660,52 @@ func TestServerWriteFastError(t *testing.T) {
 	}
 }
 
+func TestServerTLS(t *testing.T) {
+	text := []byte("Make fasthttp great again")
+	ln := fasthttputil.NewInmemoryListener()
+
+	certFile := "./ssl-cert-snakeoil.pem"
+	keyFile := "./ssl-cert-snakeoil.key"
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Write(text)
+		},
+	}
+
+	err := s.AppendCert(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err = s.ServeTLS(ln, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	c := &Client{
+		ReadTimeout: time.Second * 2,
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	req, res := AcquireRequest(), AcquireResponse()
+	req.SetRequestURI("https://some.url")
+
+	err = c.Do(req, res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(text, res.Body()) {
+		t.Fatal("error transmitting information")
+	}
+}
+
 func TestServerServeTLSEmbed(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
