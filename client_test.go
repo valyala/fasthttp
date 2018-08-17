@@ -17,6 +17,38 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestClientPostArgs(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			body := ctx.Request.Body()
+			if len(body) == 0 {
+				return
+			}
+			ctx.Write(body)
+		},
+	}
+	go s.Serve(ln)
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req, res := AcquireRequest(), AcquireResponse()
+	args := req.PostArgs()
+	args.Add("addhttp2", "support")
+	args.Add("fast", "http")
+	req.Header.SetMethod("POST")
+	req.SetRequestURI("http://make.fasthttp.great?again")
+	err := c.Do(req, res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Body()) == 0 {
+		t.Fatal("cannot set args as body")
+	}
+}
+
 func TestClientHeaderCase(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 	defer ln.Close()
