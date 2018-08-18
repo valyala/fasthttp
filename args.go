@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"strings"
 )
 
 // AcquireArgs returns an empty Args object from the pool.
@@ -290,8 +291,8 @@ func (a *Args) GetUfloatOrZero(key string) float64 {
 // true is returned for '1', 'y' and 'yes' values,
 // otherwise false is returned.
 func (a *Args) GetBool(key string) bool {
-	switch string(a.Peek(key)) {
-	case "1", "y", "yes":
+	switch strings.ToLower(string(a.Peek(key))) {
+	case "1", "y", "yes", "true", "t":
 		return true
 	default:
 		return false
