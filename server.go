@@ -598,18 +598,13 @@ func (ctx *RequestCtx) ConnID() uint64 {
 	return ctx.connID
 }
 
-// Time returns RequestHandler call time truncated to the nearest second.
-//
-// Call time.Now() at the beginning of RequestHandler in order to obtain
-// precise RequestHandler call time.
+// Time returns RequestHandler call time.
 func (ctx *RequestCtx) Time() time.Time {
 	return ctx.time
 }
 
-// ConnTime returns the time server starts serving the connection
+// ConnTime returns the time the server started serving the connection
 // the current request came from.
-//
-// The returned time is truncated to the nearest second.
 func (ctx *RequestCtx) ConnTime() time.Time {
 	return ctx.connTime
 }
