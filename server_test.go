@@ -2508,6 +2508,110 @@ func TestServeConnMultiRequests(t *testing.T) {
 	verifyResponse(t, br, 200, "aaa", "requestURI=/abc, host=foobar.com")
 }
 
+func TestShutdown(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+	h := func(ctx *RequestCtx) {
+		time.Sleep(time.Millisecond * 500)
+		ctx.Success("aaa/bbb", []byte("real response"))
+	}
+	s := &Server{
+		Handler: h,
+	}
+	serveCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexepcted error: %s", err)
+		}
+		_, err := ln.Dial()
+		if err == nil {
+			t.Fatalf("server is still listening")
+		}
+		serveCh <- struct{}{}
+	}()
+	clientCh := make(chan struct{})
+	go func() {
+		conn, err := ln.Dial()
+		if err != nil {
+			t.Fatalf("unexepcted error: %s", err)
+		}
+		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		br := bufio.NewReader(conn)
+		verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+		clientCh <- struct{}{}
+	}()
+	time.Sleep(time.Millisecond * 100)
+	shutdownCh := make(chan struct{})
+	go func() {
+		if err := s.Shutdown(); err != nil {
+			t.Fatalf("unexepcted error: %s", err)
+		}
+		shutdownCh <- struct{}{}
+	}()
+	done := 0
+	for {
+		select {
+		case <-time.After(time.Second):
+			t.Fatalf("shutdown took too long")
+		case <-serveCh:
+			done++
+		case <-clientCh:
+			done++
+		case <-shutdownCh:
+			done++
+		}
+		if done == 3 {
+			return
+		}
+	}
+}
+func TestShutdownReuse(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+	h := func(ctx *RequestCtx) {
+		ctx.Success("aaa/bbb", []byte("real response"))
+	}
+	s := &Server{
+		Handler:              h,
+		MaxKeepaliveDuration: time.Millisecond * 100,
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexepcted error: %s", err)
+		}
+	}()
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexepcted error: %s", err)
+	}
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	br := bufio.NewReader(conn)
+	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+	if err := s.Shutdown(); err != nil {
+		t.Fatalf("unexepcted error: %s", err)
+	}
+	ln = fasthttputil.NewInmemoryListener()
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexepcted error: %s", err)
+		}
+	}()
+	conn, err = ln.Dial()
+	if err != nil {
+		t.Fatalf("unexepcted error: %s", err)
+	}
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	br = bufio.NewReader(conn)
+	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+	if err := s.Shutdown(); err != nil {
+		t.Fatalf("unexepcted error: %s", err)
+	}
+}
+
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) {
 	var resp Response
 	if err := resp.Read(r); err != nil {
