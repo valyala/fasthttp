@@ -96,80 +96,48 @@ func TestRequestCtxString(t *testing.T) {
 }
 
 func TestServerErrSmallBuffer(t *testing.T) {
-	logger := &customLogger{}
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.WriteString("shouldn't be never called")
 		},
 		ReadBufferSize: 20,
-		Logger:         logger,
 	}
-	ln := fasthttputil.NewInmemoryListener()
 
-	serverCh := make(chan error, 1)
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: aabb.com\r\nVERY-long-Header: sdfdfsd dsf dsaf dsf df fsd\r\n\r\n")
+
+	ch := make(chan error)
 	go func() {
-		err := s.Serve(ln)
-		serverCh <- err
+		ch <- s.ServeConn(rw)
 	}()
 
-	clientCh := make(chan error, 1)
-	go func() {
-		c, err := ln.Dial()
-		if err != nil {
-			clientCh <- fmt.Errorf("unexpected error: %s", err)
-			return
-		}
-		_, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aabb.com\r\nVERY-long-Header: sdfdfsd dsf dsaf dsf df fsd\r\n\r\n"))
-		if err != nil {
-			clientCh <- fmt.Errorf("unexpected error when sending request: %s", err)
-			return
-		}
-		br := bufio.NewReader(c)
-		var resp Response
-		if err = resp.Read(br); err != nil {
-			clientCh <- fmt.Errorf("unexpected error: %s", err)
-			return
-		}
-		statusCode := resp.StatusCode()
-		if statusCode != StatusRequestHeaderFieldsTooLarge {
-			clientCh <- fmt.Errorf("unexpected status code: %d. Expecting %d", statusCode, StatusRequestHeaderFieldsTooLarge)
-			return
-		}
-		if !resp.ConnectionClose() {
-			clientCh <- fmt.Errorf("missing 'Connection: close' response header")
-			return
-		}
-		clientCh <- nil
-	}()
-
-	var err error
-
-	// wait for the client
+	var serverErr error
 	select {
-	case <-time.After(time.Second):
-		t.Fatalf("timeout when waiting for the client. Server log: %q", logger.out)
-	case err = <-clientCh:
-		if err != nil {
-			t.Fatalf("unexpected client error: %s. Server log: %q", err, logger.out)
-		}
+	case serverErr = <-ch:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
 	}
 
-	// wait for the server
-	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s. Server log: %q", err, logger.out)
+	if serverErr == nil {
+		t.Fatalf("expected error")
 	}
-	select {
-	case <-time.After(time.Second):
-		t.Fatalf("timeout when waiting for the server. Server log: %q", logger.out)
-	case err = <-serverCh:
-		if err != nil {
-			t.Fatalf("unexpected server error: %s. Server log: %q", err, logger.out)
-		}
+
+	br := bufio.NewReader(&rw.w)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	statusCode := resp.StatusCode()
+	if statusCode != StatusRequestHeaderFieldsTooLarge {
+		t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusRequestHeaderFieldsTooLarge)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatalf("missing 'Connection: close' response header")
 	}
 
 	expectedErr := errSmallBuffer.Error()
-	if !strings.Contains(logger.out, expectedErr) {
-		t.Fatalf("unexpected log output: %q. Expecting %q", logger.out, expectedErr)
+	if !strings.Contains(serverErr.Error(), expectedErr) {
+		t.Fatalf("unexpected log output: %v. Expecting %q", serverErr, expectedErr)
 	}
 }
 
