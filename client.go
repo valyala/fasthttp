@@ -91,20 +91,22 @@ func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	return defaultClient.DoDeadline(req, resp, deadline)
 }
 
-// Get appends url contents to dst and returns it as body.
+// Get returns the status code and body of url.
+//
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 func Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return defaultClient.Get(dst, url)
 }
 
-// GetTimeout appends url contents to dst and returns it as body.
+// GetTimeout returns the status code and body of url.
+//
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 //
 // ErrTimeout error is returned if url contents couldn't be fetched
 // during the given timeout.
@@ -112,11 +114,12 @@ func GetTimeout(dst []byte, url string, timeout time.Duration) (statusCode int, 
 	return defaultClient.GetTimeout(dst, url, timeout)
 }
 
-// GetDeadline appends url contents to dst and returns it as body.
+// GetDeadline returns the status code and body of url.
+//
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 //
 // ErrTimeout error is returned if url contents couldn't be fetched
 // until the given deadline.
@@ -126,11 +129,10 @@ func GetDeadline(dst []byte, url string, deadline time.Time) (statusCode int, bo
 
 // Post sends POST request to the given url with the given POST arguments.
 //
-// Response body is appended to dst, which is returned as body.
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 //
 // Empty POST body is sent if postArgs is nil.
 func Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
@@ -234,20 +236,22 @@ type Client struct {
 	ms    map[string]*HostClient
 }
 
-// Get appends url contents to dst and returns it as body.
+// Get returns the status code and body of url.
+//
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 func (c *Client) Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return clientGetURL(dst, url, c)
 }
 
-// GetTimeout appends url contents to dst and returns it as body.
+// GetTimeout returns the status code and body of url.
+//
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 //
 // ErrTimeout error is returned if url contents couldn't be fetched
 // during the given timeout.
@@ -255,11 +259,12 @@ func (c *Client) GetTimeout(dst []byte, url string, timeout time.Duration) (stat
 	return clientGetURLTimeout(dst, url, timeout, c)
 }
 
-// GetDeadline appends url contents to dst and returns it as body.
+// GetDeadline returns the status code and body of url.
+//
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 //
 // ErrTimeout error is returned if url contents couldn't be fetched
 // until the given deadline.
@@ -269,11 +274,10 @@ func (c *Client) GetDeadline(dst []byte, url string, deadline time.Time) (status
 
 // Post sends POST request to the given url with the given POST arguments.
 //
-// Response body is appended to dst, which is returned as body.
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 //
 // Empty POST body is sent if postArgs is nil.
 func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
@@ -609,20 +613,22 @@ func (c *HostClient) LastUseTime() time.Time {
 	return time.Unix(startTimeUnix+int64(n), 0)
 }
 
-// Get appends url contents to dst and returns it as body.
+// Get returns the status code and body of url.
+//
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 func (c *HostClient) Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return clientGetURL(dst, url, c)
 }
 
-// GetTimeout appends url contents to dst and returns it as body.
+// GetTimeout returns the status code and body of url.
+//
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 //
 // ErrTimeout error is returned if url contents couldn't be fetched
 // during the given timeout.
@@ -630,11 +636,12 @@ func (c *HostClient) GetTimeout(dst []byte, url string, timeout time.Duration) (
 	return clientGetURLTimeout(dst, url, timeout, c)
 }
 
-// GetDeadline appends url contents to dst and returns it as body.
+// GetDeadline returns the status code and body of url.
+//
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 //
 // ErrTimeout error is returned if url contents couldn't be fetched
 // until the given deadline.
@@ -644,11 +651,10 @@ func (c *HostClient) GetDeadline(dst []byte, url string, deadline time.Time) (st
 
 // Post sends POST request to the given url with the given POST arguments.
 //
-// Response body is appended to dst, which is returned as body.
+// The contents of dst will be replaced by the body and returned, if the dst
+// is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
-//
-// New body buffer is allocated if dst is nil.
 //
 // Empty POST body is sent if postArgs is nil.
 func (c *HostClient) Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
