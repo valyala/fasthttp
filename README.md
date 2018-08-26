@@ -278,6 +278,7 @@ with fasthttp support:
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
   * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
   * [lu](https://github.com/vincentLiuxiang/lu)
+  * [atreugo](https://github.com/savsgio/atreugo)
 
   Net/http code with simple ServeMux is trivially converted to fasthttp code:
 
@@ -487,8 +488,8 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     go middleware web framework which is based on fasthttp.
   * [websocket](https://github.com/leavengood/websocket) - Gorilla-based
     websocket implementation for fasthttp.
-  * [fasthttpsession](https://github.com/phachon/fasthttpsession) - a 
-    fast and powerful session package for fasthttp servers.
+  * [fasthttpsession](https://github.com/phachon/fasthttpsession) - a fast and powerful     session package for fasthttp servers.
+  * [atreugo](https://github.com/savsgio/atreugo) - Micro-framework to make simple the      use of routing and middlewares.
 
 
 # FAQ
@@ -558,6 +559,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
     * [gramework](https://github.com/gramework/gramework)
     * [lu](https://github.com/vincentLiuxiang/lu)
+    * [atreugo](https://github.com/savsgio/atreugo)
 
   See also [this issue](https://github.com/valyala/fasthttp/issues/9) for more info.
 
