@@ -211,6 +211,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			errStr := err.Error()
 			if wp.LogAllErrors || !(strings.Contains(errStr, "broken pipe") ||
 				strings.Contains(errStr, "reset by peer") ||
+				strings.Contains(errStr, "request headers: small read buffer") ||
 				strings.Contains(errStr, "i/o timeout")) {
 				wp.Logger.Printf("error when serving connection %q<->%q: %s", c.LocalAddr(), c.RemoteAddr(), err)
 			}
