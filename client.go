@@ -515,6 +515,12 @@ type HostClient struct {
 	// DefaultMaxConnsPerHost is used if not set.
 	MaxConns int
 
+	// Maximum number of attempts to make to to connect.
+	//
+	// By default (when MaxAttempts is 0 or below), the client makes a maximum of
+	// 5 attempts.
+	MaxAttempts int
+
 	// Keep-alive connections are closed after this duration.
 	//
 	// By default connection duration is unlimited.
@@ -979,7 +985,14 @@ var errorChPool sync.Pool
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	var err error
 	var retry bool
-	const maxAttempts = 5
+
+	var maxAttempts int
+	if c.MaxAttempts <= 0 {
+		maxAttempts = 5
+	} else {
+		maxAttempts = c.MaxAttempts
+	}
+
 	attempts := 0
 
 	atomic.AddUint64(&c.pendingRequests, 1)
