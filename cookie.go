@@ -275,7 +275,7 @@ func (c *Cookie) ParseBytes(src []byte) error {
 		if len(kv.key) == 0 && len(kv.value) == 0 {
 			continue
 		}
-		switch string(kv.key) {
+		switch string(bytes.ToLower(kv.key)) {
 		case "expires":
 			v := b2s(kv.value)
 			exptime, err := time.ParseInLocation(time.RFC1123, v, time.UTC)
@@ -288,8 +288,8 @@ func (c *Cookie) ParseBytes(src []byte) error {
 		case "path":
 			c.path = append(c.path[:0], kv.value...)
 		case "":
-			switch string(kv.value) {
-			case "HttpOnly":
+			switch string(bytes.ToLower(kv.value)) {
+			case "httponly":
 				c.httpOnly = true
 			case "secure":
 				c.secure = true
