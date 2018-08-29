@@ -370,6 +370,26 @@ func lowercaseBytes(b []byte) {
 	}
 }
 
+// compareLowerCaseA returns true if a converted to lower
+// case anc b are the same.
+//
+// B needs to be lower case already!
+//
+// Only works for ASCII strings.
+func compareLowerCaseA(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := 0; i < len(a); i++ {
+		if toLowerTable[a[i]] != b[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
 // b2s converts byte slice to a string without memory allocation.
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
 //

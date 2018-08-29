@@ -74,4 +74,11 @@ var (
 	strBytes               = []byte("bytes")
 	strTextSlash           = []byte("text/")
 	strApplicationSlash    = []byte("application/")
+
+	// Cookie related strings.
+	strDomain   = []byte("domain")
+	strExpires  = []byte("expires")
+	strHttponly = []byte("httponly")
+	strPath     = []byte("path")
+	strSecure   = []byte("secure")
 )

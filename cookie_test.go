@@ -109,6 +109,17 @@ func TestCookieHttpOnly(t *testing.T) {
 	if strings.Contains(s, "HttpOnly") {
 		t.Fatalf("unexpected HttpOnly flag in cookie %q", s)
 	}
+
+	if err := c.Parse("foo=bar; hTTPoNLY"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !c.HTTPOnly() {
+		t.Fatalf("HTTPOnly must be set")
+	}
+	s = c.String()
+	if !strings.Contains(s, "; HttpOnly") {
+		t.Fatalf("missing HttpOnly flag in cookie %q", s)
+	}
 }
 
 func TestCookieAcquireReleaseSequential(t *testing.T) {
@@ -264,5 +275,14 @@ func testAppendRequestCookieBytes(t *testing.T, s, expectedS string) {
 	result = result[len(prefix):]
 	if result != expectedS {
 		t.Fatalf("Unexpected result %q. Expecting %q for cookie %q", result, expectedS, s)
+	}
+}
+
+func BenchmarkCookieParseBytes(b *testing.B) {
+	cookie := []byte("foo=bar; httponly")
+	c := Cookie{}
+	for i := 0; i < b.N; i++ {
+		c.ParseBytes(cookie)
+		c.Reset()
 	}
 }
