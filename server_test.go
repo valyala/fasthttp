@@ -2649,6 +2649,7 @@ func TestShutdownReuse(t *testing.T) {
 	s := &Server{
 		Handler:              h,
 		MaxKeepaliveDuration: time.Millisecond * 100,
+		Logger:               &customLogger{}, // Ignore log output.
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
