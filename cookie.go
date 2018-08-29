@@ -272,27 +272,40 @@ func (c *Cookie) ParseBytes(src []byte) error {
 	c.value = append(c.value[:0], kv.value...)
 
 	for s.next(kv) {
-		if len(kv.key) == 0 && len(kv.value) == 0 {
-			continue
-		}
-		switch string(kv.key) {
-		case "expires":
-			v := b2s(kv.value)
-			exptime, err := time.ParseInLocation(time.RFC1123, v, time.UTC)
-			if err != nil {
-				return err
+		if len(kv.key) == 0 {
+			if len(kv.value) == 0 {
+				continue
 			}
-			c.expire = exptime
-		case "domain":
-			c.domain = append(c.domain[:0], kv.value...)
-		case "path":
-			c.path = append(c.path[:0], kv.value...)
-		case "":
-			switch string(kv.value) {
-			case "HttpOnly":
-				c.httpOnly = true
-			case "secure":
-				c.secure = true
+
+			switch kv.value[0] {
+			case 'h', 'H':
+				if compareLowerCaseA(kv.value, strHttponly) {
+					c.httpOnly = true
+				}
+			case 's', 'S':
+				if compareLowerCaseA(kv.value, strSecure) {
+					c.secure = true
+				}
+			}
+		} else {
+			switch kv.key[0] {
+			case 'e', 'E':
+				if compareLowerCaseA(kv.key, strExpires) {
+					v := b2s(kv.value)
+					exptime, err := time.ParseInLocation(time.RFC1123, v, time.UTC)
+					if err != nil {
+						return err
+					}
+					c.expire = exptime
+				}
+			case 'd', 'D':
+				if compareLowerCaseA(kv.key, strDomain) {
+					c.domain = append(c.domain[:0], kv.value...)
+				}
+			case 'p', 'P':
+				if compareLowerCaseA(kv.key, strPath) {
+					c.path = append(c.path[:0], kv.value...)
+				}
 			}
 		}
 	}
