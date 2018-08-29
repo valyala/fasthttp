@@ -93,7 +93,7 @@ func GenerateCert(host string) ([]byte, []byte, error) {
 		SignatureAlgorithm:    x509.SHA256WithRSA,
 		DNSNames:              []string{host},
 		BasicConstraintsValid: true,
-		IsCA: true,
+		IsCA:                  true,
 	}
 
 	certBytes, err := x509.CreateCertificate(
