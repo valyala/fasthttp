@@ -1363,9 +1363,12 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 	h.resetSkipNormalize()
 	b, err := r.Peek(n)
 	if len(b) == 0 {
-		// treat all errors on the first byte read as EOF
-		if n == 1 || err == io.EOF {
-			return io.EOF
+		if err == io.EOF {
+			return err
+		}
+
+		if err == nil {
+			panic("bufio.Reader.Peek() returned nil, nil")
 		}
 
 		// This is for go 1.6 bug. See https://github.com/golang/go/issues/14121 .

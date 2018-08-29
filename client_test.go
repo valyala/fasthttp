@@ -1346,6 +1346,7 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 				ctx.PostArgs().WriteTo(ctx)
 			}
 		},
+		Logger: &customLogger{}, // Ignore log output.
 	}
 	ch := make(chan struct{})
 	go func() {
