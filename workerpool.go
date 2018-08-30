@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"net"
+	"net/http"
 	"runtime"
 	"strings"
 	"sync"
@@ -35,6 +36,8 @@ type workerPool struct {
 	stopCh chan struct{}
 
 	workerChanPool sync.Pool
+
+	connState func(net.Conn, http.ConnState)
 }
 
 type workerChan struct {
@@ -216,8 +219,11 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 				wp.Logger.Printf("error when serving connection %q<->%q: %s", c.LocalAddr(), c.RemoteAddr(), err)
 			}
 		}
-		if err != errHijacked {
+		if err == errHijacked {
+			wp.connState(c, http.StateHijacked)
+		} else {
 			c.Close()
+			wp.connState(c, http.StateClosed)
 		}
 		c = nil
 
