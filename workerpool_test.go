@@ -3,7 +3,6 @@ package fasthttp
 import (
 	"io/ioutil"
 	"net"
-	"net/http"
 	"testing"
 	"time"
 
@@ -95,7 +94,7 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 		},
 		MaxWorkersCount: 10,
 		Logger:          defaultLogger,
-		connState:       func(net.Conn, http.ConnState) {},
+		connState:       func(net.Conn, ConnState) {},
 	}
 	wp.Start()
 
