@@ -2,7 +2,6 @@ package fasthttp
 
 import (
 	"net"
-	"net/http"
 	"runtime"
 	"strings"
 	"sync"
@@ -37,7 +36,7 @@ type workerPool struct {
 
 	workerChanPool sync.Pool
 
-	connState func(net.Conn, http.ConnState)
+	connState func(net.Conn, ConnState)
 }
 
 type workerChan struct {
@@ -220,10 +219,10 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			}
 		}
 		if err == errHijacked {
-			wp.connState(c, http.StateHijacked)
+			wp.connState(c, StateHijacked)
 		} else {
 			c.Close()
-			wp.connState(c, http.StateClosed)
+			wp.connState(c, StateClosed)
 		}
 		c = nil
 
