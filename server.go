@@ -1545,11 +1545,13 @@ func (s *Server) ServeConn(c net.Conn) error {
 
 	if err != errHijacked {
 		err1 := c.Close()
+		s.setState(c, StateClosed)
 		if err == nil {
 			err = err1
 		}
 	} else {
 		err = nil
+		s.setState(c, StateHijacked)
 	}
 	return err
 }
