@@ -1088,7 +1088,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 			return errRequestHostRequired
 		}
 		req.Header.SetHostBytes(host)
-		req.Header.SetRequestURIBytes(uri.RequestURI())
+		req.Header.SetRequestURIBytes(uri.FullURI())
 	}
 
 	if req.bodyStream != nil {
