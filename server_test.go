@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"mime/multipart"
 	"net"
 	"os"
 	"strings"
@@ -16,6 +17,61 @@ import (
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
+
+func TestSaveMultipartFile(t *testing.T) {
+	filea := "This is a test file."
+	fileb := strings.Repeat("test", 64)
+
+	mr := multipart.NewReader(strings.NewReader(""+
+		"--foo\r\n"+
+		"Content-Disposition: form-data; name=\"filea\"; filename=\"filea.txt\"\r\n"+
+		"Content-Type: text/plain\r\n"+
+		"\r\n"+
+		filea+"\r\n"+
+		"--foo\r\n"+
+		"Content-Disposition: form-data; name=\"fileb\"; filename=\"fileb.txt\"\r\n"+
+		"Content-Type: text/plain\r\n"+
+		"\r\n"+
+		fileb+"\r\n"+
+		"--foo--\r\n",
+	), "foo")
+
+	f, err := mr.ReadForm(64)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveMultipartFile(f.File["filea"][0], "filea.txt"); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove("filea.txt")
+
+	if c, err := ioutil.ReadFile("filea.txt"); err != nil {
+		t.Fatal(err)
+	} else if string(c) != filea {
+		t.Fatalf("filea changed expeced %q got %q", filea, c)
+	}
+
+	// Make sure fileb was saved to a file.
+	if ff, err := f.File["fileb"][0].Open(); err != nil {
+		t.Fatalf("expected FileHeader.Open to work")
+	} else if _, ok := ff.(*os.File); !ok {
+		t.Fatalf("expected fileb to be an os.File")
+	} else {
+		ff.Close()
+	}
+
+	if err := SaveMultipartFile(f.File["fileb"][0], "fileb.txt"); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove("fileb.txt")
+
+	if c, err := ioutil.ReadFile("fileb.txt"); err != nil {
+		t.Fatal(err)
+	} else if string(c) != fileb {
+		t.Fatalf("fileb changed expeced %q got %q", fileb, c)
+	}
+}
 
 func TestServerName(t *testing.T) {
 	s := &Server{

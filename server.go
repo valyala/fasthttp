@@ -771,15 +771,27 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	if ff, ok := f.(*os.File); ok {
+		// Windows can't rename files that are opened.
+		if err := f.Close(); err != nil {
+			return err
+		}
+
 		// If renaming fails we try the normal copying method.
 		// Renaming could fail if the files are on different devices.
 		if os.Rename(ff.Name(), path) == nil {
 			return nil
 		}
+
+		// Reopen f for the code below.
+		f, err = fh.Open()
+		if err != nil {
+			return err
+		}
 	}
+
+	defer f.Close()
 
 	ff, err := os.Create(path)
 	if err != nil {
