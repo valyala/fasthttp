@@ -17,6 +17,76 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestClientReadTimeout(t *testing.T) {
+	// This test is rather slow and increase the total test time
+	// from 2.5 seconds to 6.5 seconds.
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	timeout := false
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if timeout {
+				time.Sleep(time.Minute)
+			} else {
+				timeout = true
+			}
+		},
+		Logger: &customLogger{}, // Don't print closed pipe errors.
+	}
+	go s.Serve(ln)
+
+	c := &HostClient{
+		ReadTimeout:               time.Second * 4,
+		MaxIdemponentCallAttempts: 1,
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	req := AcquireRequest()
+	res := AcquireResponse()
+
+	req.SetRequestURI("http://localhost")
+
+	// Setting Connection: Close will make the connection be
+	// returned to the pool.
+	req.SetConnectionClose()
+
+	if err := c.Do(req, res); err != nil {
+		t.Fatal(err)
+	}
+
+	ReleaseRequest(req)
+	ReleaseResponse(res)
+
+	done := make(chan struct{})
+	go func() {
+		req := AcquireRequest()
+		res := AcquireResponse()
+
+		req.SetRequestURI("http://localhost")
+		req.SetConnectionClose()
+
+		c.Do(req, res)
+
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// This shouldn't take longer than the timeout times the number of requests it is going to try to do.
+		// Give it 2 seconds extra seconds just to be sure.
+	case <-time.After(c.ReadTimeout*time.Duration(c.MaxIdemponentCallAttempts) + time.Second*2):
+		t.Fatal("Client.ReadTimeout didn't work")
+	}
+}
+
 func TestClientUserAgent(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 

@@ -1305,7 +1305,8 @@ func acquireClientConn(conn net.Conn) *clientConn {
 }
 
 func releaseClientConn(cc *clientConn) {
-	cc.c = nil
+	// Reset all fields.
+	*cc = clientConn{}
 	clientConnPool.Put(cc)
 }
 
