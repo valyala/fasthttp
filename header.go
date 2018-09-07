@@ -283,7 +283,7 @@ func (h *ResponseHeader) isCompressibleContentType() bool {
 // ContentType returns Content-Type header value.
 func (h *ResponseHeader) ContentType() []byte {
 	contentType := h.contentType
-	if len(h.contentType) == 0 {
+	if h.contentType == nil {
 		contentType = defaultContentType
 	}
 	return contentType
@@ -663,7 +663,7 @@ func (h *ResponseHeader) resetSkipNormalize() {
 	h.contentLength = 0
 	h.contentLengthBytes = h.contentLengthBytes[:0]
 
-	h.contentType = h.contentType[:0]
+	h.contentType = nil
 	h.server = h.server[:0]
 
 	h.h = h.h[:0]
@@ -687,7 +687,7 @@ func (h *RequestHeader) resetSkipNormalize() {
 	h.method = h.method[:0]
 	h.requestURI = h.requestURI[:0]
 	h.host = h.host[:0]
-	h.contentType = h.contentType[:0]
+	h.contentType = nil
 	h.userAgent = h.userAgent[:0]
 
 	h.h = h.h[:0]
@@ -709,7 +709,9 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.statusCode = h.statusCode
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes[:0], h.contentLengthBytes...)
-	dst.contentType = append(dst.contentType[:0], h.contentType...)
+	if len(h.contentType) > 0 {
+		dst.contentType = append(dst.contentType[:0], h.contentType...)
+	}
 	dst.server = append(dst.server[:0], h.server...)
 	dst.h = copyArgs(dst.h, h.h)
 	dst.cookies = copyArgs(dst.cookies, h.cookies)
@@ -729,7 +731,9 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.method = append(dst.method[:0], h.method...)
 	dst.requestURI = append(dst.requestURI[:0], h.requestURI...)
 	dst.host = append(dst.host[:0], h.host...)
-	dst.contentType = append(dst.contentType[:0], h.contentType...)
+	if len(h.contentType) > 0 {
+		dst.contentType = append(dst.contentType[:0], h.contentType...)
+	}
 	dst.userAgent = append(dst.userAgent[:0], h.userAgent...)
 	dst.h = copyArgs(dst.h, h.h)
 	dst.cookies = copyArgs(dst.cookies, h.cookies)
@@ -834,7 +838,7 @@ func (h *ResponseHeader) DelBytes(key []byte) {
 func (h *ResponseHeader) del(key []byte) {
 	switch string(key) {
 	case "Content-Type":
-		h.contentType = h.contentType[:0]
+		h.contentType = nil
 	case "Server":
 		h.server = h.server[:0]
 	case "Set-Cookie":

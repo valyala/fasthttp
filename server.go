@@ -276,6 +276,8 @@ type Server struct {
 	// value is explicitly provided during a request.
 	NoDefaultServerHeader bool
 
+	DefaultContentType []byte
+
 	// ConnState specifies an optional callback function that is
 	// called when a client connection changes state. See the
 	// ConnState type and associated constants for details.
@@ -1585,6 +1587,7 @@ func (s *Server) serveConn(c net.Conn) error {
 	if !s.NoDefaultServerHeader {
 		serverName = s.getServerName()
 	}
+	contentType := s.DefaultContentType
 	connRequestNum := uint64(0)
 	connID := nextConnID()
 	currentTime := time.Now()
@@ -1701,6 +1704,9 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		if serverName != nil {
 			ctx.Response.Header.SetServerBytes(serverName)
+		}
+		if contentType != nil {
+			ctx.Response.Header.SetContentTypeBytes(contentType)
 		}
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
