@@ -70,11 +70,16 @@ func TestServerName(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 		},
 		NoDefaultServerHeader: true,
+		NoDefaultContentType:  true,
 	}
 
 	resp = getReponse()
 	if bytes.Contains(resp, []byte("\r\nServer: ")) {
 		t.Fatalf("Unexpected response %q expected no Server header", resp)
+	}
+
+	if bytes.Contains(resp, []byte("\r\nContent-Type: ")) {
+		t.Fatalf("Unexpected response %q expected no Content-Type header", resp)
 	}
 }
 
@@ -1928,7 +1933,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 		go func() {
 			conn, err := ln.Dial()
 			if err != nil {
-				t.Fatalf("unexepcted error: %s", err)
+				t.Fatalf("unexpected error: %s", err)
 			}
 			if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 				t.Fatalf("unexpected error: %s", err)

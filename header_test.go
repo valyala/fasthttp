@@ -1814,6 +1814,12 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\r\nContent-Length: 123\r\n\r\nfoiaaa",
 		400, 123, string(defaultContentType), "foiaaa")
 
+	// no content-type and no default
+	h.noDefaultContentType = true
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\r\nContent-Length: 123\r\n\r\nfoiaaa",
+		400, 123, "", "foiaaa")
+	h.noDefaultContentType = false
+
 	// no headers
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\n\r\naaaabbb",
 		200, -2, string(defaultContentType), "aaaabbb")

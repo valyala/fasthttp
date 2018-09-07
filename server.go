@@ -276,6 +276,13 @@ type Server struct {
 	// value is explicitly provided during a request.
 	NoDefaultServerHeader bool
 
+	// NoDefaultContentType, when set to true, causes the default Content-Type
+	// header to be excluded from the Response.
+	//
+	// The default Content-Type header value is the internal default value. When
+	// set to true, the Content-Type will not be present.
+	NoDefaultContentType bool
+
 	// ConnState specifies an optional callback function that is
 	// called when a client connection changes state. See the
 	// ConnState type and associated constants for details.
@@ -1636,6 +1643,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			br, err = acquireByteReader(&ctx)
 		}
 		ctx.Request.isTLS = isTLS
+		ctx.Response.Header.noDefaultContentType = s.NoDefaultContentType
 
 		if err == nil {
 			if s.DisableHeaderNamesNormalizing {

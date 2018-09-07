@@ -20,9 +20,10 @@ import (
 type ResponseHeader struct {
 	noCopy noCopy
 
-	disableNormalizing bool
-	noHTTP11           bool
-	connectionClose    bool
+	disableNormalizing   bool
+	noHTTP11             bool
+	connectionClose      bool
+	noDefaultContentType bool
 
 	statusCode         int
 	contentLength      int
@@ -283,7 +284,7 @@ func (h *ResponseHeader) isCompressibleContentType() bool {
 // ContentType returns Content-Type header value.
 func (h *ResponseHeader) ContentType() []byte {
 	contentType := h.contentType
-	if len(h.contentType) == 0 {
+	if !h.noDefaultContentType && len(h.contentType) == 0 {
 		contentType = defaultContentType
 	}
 	return contentType
@@ -652,6 +653,7 @@ func (h *ResponseHeader) DisableNormalizing() {
 // Reset clears response header.
 func (h *ResponseHeader) Reset() {
 	h.disableNormalizing = false
+	h.noDefaultContentType = false
 	h.resetSkipNormalize()
 }
 
@@ -705,6 +707,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.disableNormalizing = h.disableNormalizing
 	dst.noHTTP11 = h.noHTTP11
 	dst.connectionClose = h.connectionClose
+	dst.noDefaultContentType = h.noDefaultContentType
 
 	dst.statusCode = h.statusCode
 	dst.contentLength = h.contentLength
