@@ -70,11 +70,16 @@ func TestServerName(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 		},
 		NoDefaultServerHeader: true,
+		DefaultContentType:    []byte(""),
 	}
 
 	resp = getReponse()
 	if bytes.Contains(resp, []byte("\r\nServer: ")) {
 		t.Fatalf("Unexpected response %q expected no Server header", resp)
+	}
+
+	if bytes.Contains(resp, []byte("\r\nContent-Type: ")) {
+		t.Fatalf("Unexpected response %q expected no Content-Type header", resp)
 	}
 }
 
