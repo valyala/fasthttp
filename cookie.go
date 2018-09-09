@@ -272,34 +272,49 @@ func (c *Cookie) ParseBytes(src []byte) error {
 	c.value = append(c.value[:0], kv.value...)
 
 	for s.next(kv) {
-		if len(kv.key) == 0 && len(kv.value) == 0 {
-			continue
-		}
-		switch string(kv.key) {
-		case "expires":
-			v := b2s(kv.value)
-			// Try the same two formats as net/http
-			// See: https://github.com/golang/go/blob/00379be17e63a5b75b3237819392d2dc3b313a27/src/net/http/cookie.go#L133-L135
-			exptime, err := time.ParseInLocation(time.RFC1123, v, time.UTC)
-			if err != nil {
-				exptime, err = time.Parse("Mon, 02-Jan-2006 15:04:05 MST", v)
-				if err != nil {
-					return err
+		if len(kv.key) != 0 {
+			// Case insensitive switch on first char
+			switch kv.key[0] | 0x20 {
+			case 'e': // "expires"
+				if caseInsensitiveCompare(strCookieExpires, kv.key) {
+					v := b2s(kv.value)
+					// Try the same two formats as net/http
+					// See: https://github.com/golang/go/blob/00379be17e63a5b75b3237819392d2dc3b313a27/src/net/http/cookie.go#L133-L135
+					exptime, err := time.ParseInLocation(time.RFC1123, v, time.UTC)
+					if err != nil {
+						exptime, err = time.Parse("Mon, 02-Jan-2006 15:04:05 MST", v)
+						if err != nil {
+							return err
+						}
+					}
+					c.expire = exptime
+				}
+
+			case 'd': // "domain"
+				if caseInsensitiveCompare(strCookieDomain, kv.key) {
+					c.domain = append(c.domain[:0], kv.value...)
+				}
+
+			case 'p': // "path"
+				if caseInsensitiveCompare(strCookiePath, kv.key) {
+					c.path = append(c.path[:0], kv.value...)
 				}
 			}
-			c.expire = exptime
-		case "domain":
-			c.domain = append(c.domain[:0], kv.value...)
-		case "path":
-			c.path = append(c.path[:0], kv.value...)
-		case "":
-			switch string(kv.value) {
-			case "HttpOnly":
-				c.httpOnly = true
-			case "secure":
-				c.secure = true
+
+		} else if len(kv.value) != 0 {
+			// Case insensitive switch on first char
+			switch kv.value[0] | 0x20 {
+			case 'h': // "httponly"
+				if caseInsensitiveCompare(strCookieHTTPOnly, kv.value) {
+					c.httpOnly = true
+				}
+
+			case 's': // "secure"
+				if caseInsensitiveCompare(strCookieSecure, kv.value) {
+					c.secure = true
+				}
 			}
-		}
+		} // else empty or no match
 	}
 	return nil
 }
@@ -411,4 +426,18 @@ func decodeCookieArg(dst, src []byte, skipQuotes bool) []byte {
 		}
 	}
 	return append(dst[:0], src...)
+}
+
+// caseInsensitiveCompare does a case insensitive equality comparison of
+// two []byte. Assumes only letters need to be matched.
+func caseInsensitiveCompare(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := 0; i < len(a); i++ {
+		if a[i]|0x20 != b[i]|0x20 {
+			return false
+		}
+	}
+	return true
 }
