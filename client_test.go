@@ -17,6 +17,44 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestClientHeaderCase(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Write([]byte("HTTP/1.1 200 OK\r\n" +
+			"content-type: text/plain\r\n" +
+			"transfer-encoding: chunked\r\n\r\n" +
+			"24\r\nThis is the data in the first chunk \r\n" +
+			"1B\r\nand this is the second one \r\n" +
+			"0\r\n\r\n",
+		))
+	}()
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		ReadTimeout: time.Millisecond * 10,
+
+		// Even without name normalizing we should parse headers correctly.
+		DisableHeaderNamesNormalizing: true,
+	}
+
+	code, body, err := c.Get(nil, "http://example.com")
+	if err != nil {
+		t.Error(err)
+	} else if code != 200 {
+		t.Errorf("expected status code 200 got %d", code)
+	} else if string(body) != "This is the data in the first chunk and this is the second one " {
+		t.Errorf("wrong body: %q", body)
+	}
+}
+
 func TestClientReadTimeout(t *testing.T) {
 	// This test is rather slow and increase the total test time
 	// from 2.5 seconds to 6.5 seconds.
