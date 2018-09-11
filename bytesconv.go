@@ -440,7 +440,7 @@ func appendQuotedPath(dst, src []byte) []byte {
 // This function has no performance benefits comparing to string(b) == s.
 // It is left here for backwards compatibility only.
 //
-// This function is deprecated and may be deleted soon.
+// Deprecated: may be deleted soon.
 func EqualBytesStr(b []byte, s string) bool {
 	return string(b) == s
 }
@@ -450,7 +450,7 @@ func EqualBytesStr(b []byte, s string) bool {
 // This function has no performance benefits comparing to append(dst, src...).
 // It is left here for backwards compatibility only.
 //
-// This function is deprecated and may be deleted soon.
+// Deprecated: may be deleted soon.
 func AppendBytesStr(dst []byte, src string) []byte {
 	return append(dst, src...)
 }
