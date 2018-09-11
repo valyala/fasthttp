@@ -85,6 +85,43 @@ func TestCookieSecure(t *testing.T) {
 	}
 }
 
+func TestCookieMaxAge(t *testing.T) {
+	var c Cookie
+
+	maxAge := time.Unix(100, 0)
+	if err := c.Parse("foo=bar; max-age=100"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if maxAge != c.Expire() {
+		t.Fatalf("max-age must be set")
+	}
+	s := c.String()
+	if !strings.Contains(s, "; max-age=100") {
+		t.Fatalf("missing max-age flag in cookie %q", s)
+	}
+
+	if err := c.Parse("foo=bar; expires=Tue, 10 Nov 2009 23:00:00 GMT; max-age=100;"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if maxAge != c.Expire() {
+		t.Fatalf("max-age ignored")
+	}
+	s = c.String()
+	if s != "foo=bar; max-age=100; expires=Tue, 10 Nov 2009 23:00:00 GMT" {
+		t.Fatalf("missing max-age and expires flags in cookie %q", s)
+	}
+
+	expires := time.Unix(200, 0)
+	c.SetExpire(expires)
+	if expires != c.Expire() {
+		t.Fatalf("unexpected expiry %v", c.Expire())
+	}
+	s = c.String()
+	if s != "foo=bar; expires=Thu, 01 Jan 1970 00:03:20 GMT" {
+		t.Fatalf("unexpected cookie flags %q", s)
+	}
+}
+
 func TestCookieHttpOnly(t *testing.T) {
 	var c Cookie
 
@@ -176,8 +213,8 @@ func TestCookieParse(t *testing.T) {
 	testCookieParse(t, `foo="bar"`, "foo=bar")
 	testCookieParse(t, `"foo"=bar`, `"foo"=bar`)
 	testCookieParse(t, "foo=bar; Domain=aaa.com; PATH=/foo/bar", "foo=bar; domain=aaa.com; path=/foo/bar")
-	testCookieParse(t, " xxx = yyy  ; path=/a/b;;;domain=foobar.com ; expires= Tue, 10 Nov 2009 23:00:00 GMT ; ;;",
-		"xxx=yyy; expires=Tue, 10 Nov 2009 23:00:00 GMT; domain=foobar.com; path=/a/b")
+	testCookieParse(t, " xxx = yyy  ; max-age= 101 ; path=/a/b;;;domain=foobar.com ; expires= Tue, 10 Nov 2009 23:00:00 GMT ; ;;",
+		"xxx=yyy; max-age=101; expires=Tue, 10 Nov 2009 23:00:00 GMT; domain=foobar.com; path=/a/b")
 }
 
 func testCookieParse(t *testing.T, s, expectedS string) {
