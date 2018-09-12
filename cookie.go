@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -53,7 +52,7 @@ type Cookie struct {
 	key    []byte
 	value  []byte
 	expire time.Time
-	maxAge time.Time
+	maxAge int
 	domain []byte
 	path   []byte
 
@@ -131,30 +130,38 @@ func (c *Cookie) SetDomainBytes(domain []byte) {
 	c.domain = append(c.domain[:0], domain...)
 }
 
+// MaxAge returns the seconds until the cookie is meant to expire or 0
+// if no max age.
+func (c *Cookie) MaxAge() int {
+	return c.maxAge
+}
+
+// SetMaxAge sets cookie expiration time based on seconds. This takes precedence
+// over any absolute expiry set on the cookie
+//
+// Set max age to 0 to unset
+func (c *Cookie) SetMaxAge(seconds int) {
+	c.maxAge = seconds
+}
+
 // Expire returns cookie expiration time.
 //
 // CookieExpireUnlimited is returned if cookie doesn't expire
 func (c *Cookie) Expire() time.Time {
-	// Max-Age takes precedence over Expires
-	expire := c.maxAge
-	if expire.IsZero() {
-		expire = c.expire
-	}
+	expire := c.expire
 	if expire.IsZero() {
 		expire = CookieExpireUnlimited
 	}
 	return expire
 }
 
-// SetExpire sets cookie expiration time. Will remove Max-Age if set on cookie.
+// SetExpire sets cookie expiration time.
 //
 // Set expiration time to CookieExpireDelete for expiring (deleting)
 // the cookie on the client.
 //
 // By default cookie lifetime is limited by browser session.
 func (c *Cookie) SetExpire(expire time.Time) {
-	// Only support Expires via the API
-	c.maxAge = zeroTime
 	c.expire = expire
 }
 
@@ -197,7 +204,7 @@ func (c *Cookie) Reset() {
 	c.key = c.key[:0]
 	c.value = c.value[:0]
 	c.expire = zeroTime
-	c.maxAge = zeroTime
+	c.maxAge = 0
 	c.domain = c.domain[:0]
 	c.path = c.path[:0]
 	c.httpOnly = false
@@ -213,11 +220,12 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 	}
 	dst = append(dst, c.value...)
 
-	if !c.maxAge.IsZero() {
-		ts := strconv.Itoa(int(c.maxAge.Unix()))
-		dst = appendCookiePart(dst, strCookieMaxAge, []byte(ts))
-	}
-	if !c.expire.IsZero() {
+	if c.maxAge > 0 {
+		dst = append(dst, ';', ' ')
+		dst = append(dst, strCookieMaxAge...)
+		dst = append(dst, '=')
+		dst = AppendUint(dst, c.maxAge)
+	} else if !c.expire.IsZero() {
 		c.bufKV.value = AppendHTTPDate(c.bufKV.value[:0], c.expire)
 		dst = append(dst, ';', ' ')
 		dst = append(dst, strCookieExpires...)
@@ -291,11 +299,11 @@ func (c *Cookie) ParseBytes(src []byte) error {
 			switch kv.key[0] | 0x20 {
 			case 'm':
 				if caseInsensitiveCompare(strCookieMaxAge, kv.key) {
-					exptime, err := parseTimestamp(kv.value)
+					maxAge, err := ParseUint(kv.value)
 					if err != nil {
 						return err
 					}
-					c.maxAge = exptime
+					c.maxAge = maxAge
 				}
 
 			case 'e': // "expires"
@@ -340,19 +348,6 @@ func (c *Cookie) ParseBytes(src []byte) error {
 		} // else empty or no match
 	}
 	return nil
-}
-
-var errInvalidMaxAge = errors.New("max-age must be non-zero digit")
-
-func parseTimestamp(b []byte) (time.Time, error) {
-	v, err := ParseUint(b)
-	if err != nil {
-		return zeroTime, err
-	}
-	if v == 0 {
-		return zeroTime, errInvalidMaxAge
-	}
-	return time.Unix(int64(v), 0), nil
 }
 
 func appendCookiePart(dst, key, value []byte) []byte {

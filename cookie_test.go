@@ -88,11 +88,11 @@ func TestCookieSecure(t *testing.T) {
 func TestCookieMaxAge(t *testing.T) {
 	var c Cookie
 
-	maxAge := time.Unix(100, 0)
+	maxAge := 100
 	if err := c.Parse("foo=bar; max-age=100"); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
-	if maxAge != c.Expire() {
+	if maxAge != c.MaxAge() {
 		t.Fatalf("max-age must be set")
 	}
 	s := c.String()
@@ -103,22 +103,25 @@ func TestCookieMaxAge(t *testing.T) {
 	if err := c.Parse("foo=bar; expires=Tue, 10 Nov 2009 23:00:00 GMT; max-age=100;"); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
-	if maxAge != c.Expire() {
+	if maxAge != c.MaxAge() {
 		t.Fatalf("max-age ignored")
 	}
 	s = c.String()
-	if s != "foo=bar; max-age=100; expires=Tue, 10 Nov 2009 23:00:00 GMT" {
-		t.Fatalf("missing max-age and expires flags in cookie %q", s)
+	if s != "foo=bar; max-age=100" {
+		t.Fatalf("missing max-age in cookie %q", s)
 	}
 
-	expires := time.Unix(200, 0)
+	expires := time.Unix(100, 0)
 	c.SetExpire(expires)
-	if expires != c.Expire() {
-		t.Fatalf("unexpected expiry %v", c.Expire())
-	}
 	s = c.String()
-	if s != "foo=bar; expires=Thu, 01 Jan 1970 00:03:20 GMT" {
-		t.Fatalf("unexpected cookie flags %q", s)
+	if s != "foo=bar; max-age=100" {
+		t.Fatalf("expires should be ignored due to max-age: %q", s)
+	}
+
+	c.SetMaxAge(0)
+	s = c.String()
+	if s != "foo=bar; expires=Thu, 01 Jan 1970 00:01:40 GMT" {
+		t.Fatalf("missing expires %q", s)
 	}
 }
 
@@ -213,8 +216,9 @@ func TestCookieParse(t *testing.T) {
 	testCookieParse(t, `foo="bar"`, "foo=bar")
 	testCookieParse(t, `"foo"=bar`, `"foo"=bar`)
 	testCookieParse(t, "foo=bar; Domain=aaa.com; PATH=/foo/bar", "foo=bar; domain=aaa.com; path=/foo/bar")
-	testCookieParse(t, " xxx = yyy  ; max-age= 101 ; path=/a/b;;;domain=foobar.com ; expires= Tue, 10 Nov 2009 23:00:00 GMT ; ;;",
-		"xxx=yyy; max-age=101; expires=Tue, 10 Nov 2009 23:00:00 GMT; domain=foobar.com; path=/a/b")
+	testCookieParse(t, "foo=bar; max-age= 101 ; expires= Tue, 10 Nov 2009 23:00:00 GMT", "foo=bar; max-age=101")
+	testCookieParse(t, " xxx = yyy  ; path=/a/b;;;domain=foobar.com ; expires= Tue, 10 Nov 2009 23:00:00 GMT ; ;;",
+		"xxx=yyy; expires=Tue, 10 Nov 2009 23:00:00 GMT; domain=foobar.com; path=/a/b")
 }
 
 func testCookieParse(t *testing.T, s, expectedS string) {
