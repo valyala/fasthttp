@@ -1774,7 +1774,8 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				if caseInsensitiveCompare(s.key, strContentType) {
 					h.contentType = append(h.contentType[:0], s.value...)
 					continue
-				} else if caseInsensitiveCompare(s.key, strContentLength) {
+				} 
+				if caseInsensitiveCompare(s.key, strContentLength) {
 					if h.contentLength != -1 {
 						if h.contentLength, err = parseContentLength(s.value); err != nil {
 							h.contentLength = -2
@@ -1783,7 +1784,8 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 						}
 					}
 					continue
-				} else if caseInsensitiveCompare(s.key, strConnection) {
+				}
+				if caseInsensitiveCompare(s.key, strConnection) {
 					if bytes.Equal(s.value, strClose) {
 						h.connectionClose = true
 					} else {
@@ -1796,7 +1798,8 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				if caseInsensitiveCompare(s.key, strServer) {
 					h.server = append(h.server[:0], s.value...)
 					continue
-				} else if caseInsensitiveCompare(s.key, strSetCookie) {
+				}
+				if caseInsensitiveCompare(s.key, strSetCookie) {
 					h.cookies, kv = allocArg(h.cookies)
 					kv.key = getCookieKey(kv.key, s.value)
 					kv.value = append(kv.value[:0], s.value...)
@@ -1859,7 +1862,8 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				if caseInsensitiveCompare(s.key, strContentType) {
 					h.contentType = append(h.contentType[:0], s.value...)
 					continue
-				} else if caseInsensitiveCompare(s.key, strContentLength) {
+				}
+				if caseInsensitiveCompare(s.key, strContentLength) {
 					if h.contentLength != -1 {
 						if h.contentLength, err = parseContentLength(s.value); err != nil {
 							h.contentLength = -2
@@ -1868,7 +1872,8 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 						}
 					}
 					continue
-				} else if caseInsensitiveCompare(s.key, strConnection) {
+				}
+				if caseInsensitiveCompare(s.key, strConnection) {
 					if bytes.Equal(s.value, strClose) {
 						h.connectionClose = true
 					} else {
