@@ -52,6 +52,7 @@ type Cookie struct {
 	key    []byte
 	value  []byte
 	expire time.Time
+	maxAge int
 	domain []byte
 	path   []byte
 
@@ -68,6 +69,7 @@ func (c *Cookie) CopyTo(src *Cookie) {
 	c.key = append(c.key[:0], src.key...)
 	c.value = append(c.value[:0], src.value...)
 	c.expire = src.expire
+	c.maxAge = src.maxAge
 	c.domain = append(c.domain[:0], src.domain...)
 	c.path = append(c.path[:0], src.path...)
 	c.httpOnly = src.httpOnly
@@ -126,6 +128,20 @@ func (c *Cookie) SetDomain(domain string) {
 // SetDomainBytes sets cookie domain.
 func (c *Cookie) SetDomainBytes(domain []byte) {
 	c.domain = append(c.domain[:0], domain...)
+}
+
+// MaxAge returns the seconds until the cookie is meant to expire or 0
+// if no max age.
+func (c *Cookie) MaxAge() int {
+	return c.maxAge
+}
+
+// SetMaxAge sets cookie expiration time based on seconds. This takes precedence
+// over any absolute expiry set on the cookie
+//
+// Set max age to 0 to unset
+func (c *Cookie) SetMaxAge(seconds int) {
+	c.maxAge = seconds
 }
 
 // Expire returns cookie expiration time.
@@ -188,6 +204,7 @@ func (c *Cookie) Reset() {
 	c.key = c.key[:0]
 	c.value = c.value[:0]
 	c.expire = zeroTime
+	c.maxAge = 0
 	c.domain = c.domain[:0]
 	c.path = c.path[:0]
 	c.httpOnly = false
@@ -203,7 +220,12 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 	}
 	dst = append(dst, c.value...)
 
-	if !c.expire.IsZero() {
+	if c.maxAge > 0 {
+		dst = append(dst, ';', ' ')
+		dst = append(dst, strCookieMaxAge...)
+		dst = append(dst, '=')
+		dst = AppendUint(dst, c.maxAge)
+	} else if !c.expire.IsZero() {
 		c.bufKV.value = AppendHTTPDate(c.bufKV.value[:0], c.expire)
 		dst = append(dst, ';', ' ')
 		dst = append(dst, strCookieExpires...)
@@ -275,6 +297,15 @@ func (c *Cookie) ParseBytes(src []byte) error {
 		if len(kv.key) != 0 {
 			// Case insensitive switch on first char
 			switch kv.key[0] | 0x20 {
+			case 'm':
+				if caseInsensitiveCompare(strCookieMaxAge, kv.key) {
+					maxAge, err := ParseUint(kv.value)
+					if err != nil {
+						return err
+					}
+					c.maxAge = maxAge
+				}
+
 			case 'e': // "expires"
 				if caseInsensitiveCompare(strCookieExpires, kv.key) {
 					v := b2s(kv.value)
