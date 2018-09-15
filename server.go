@@ -302,7 +302,8 @@ type Server struct {
 	// We need to know our listener so we can close it in Shutdown().
 	ln net.Listener
 
-	wg   sync.WaitGroup
+	mu   sync.Mutex
+	open int32
 	stop int32
 }
 
@@ -1374,12 +1375,17 @@ func (s *Server) Serve(ln net.Listener) error {
 	var c net.Conn
 	var err error
 
+	s.mu.Lock()
 	s.ln = ln
+	s.mu.Unlock()
 	defer func() {
 		// Don't keep a reference to the listener if we don't need to.
+		s.mu.Lock()
 		s.ln = nil
+		s.mu.Unlock()
 	}()
 
+	atomic.StoreInt32(&s.open, 0)
 	atomic.StoreInt32(&s.stop, 0)
 
 	maxWorkersCount := s.getConcurrency()
@@ -1402,9 +1408,9 @@ func (s *Server) Serve(ln net.Listener) error {
 			return err
 		}
 		s.setState(c, StateNew)
-		s.wg.Add(1)
+		atomic.AddInt32(&s.open, 1)
 		if !wp.Serve(c) {
-			s.wg.Done()
+			atomic.AddInt32(&s.open, -1)
 			s.writeFastError(c, StatusServiceUnavailable,
 				"The connection cannot be served because Server.Concurrency limit exceeded")
 			c.Close()
@@ -1435,8 +1441,12 @@ func (s *Server) Serve(ln net.Listener) error {
 //
 // Shutdown does not close keepalive connections so its recommended to set ReadTimeout to something else than 0.
 func (s *Server) Shutdown() error {
-	if s.ln != nil {
-		if err := s.ln.Close(); err != nil {
+	s.mu.Lock()
+	ln := s.ln
+	s.ln = nil
+	s.mu.Unlock()
+	if ln != nil {
+		if err := ln.Close(); err != nil {
 			return err
 		}
 	}
@@ -1444,7 +1454,15 @@ func (s *Server) Shutdown() error {
 	// Closing the listener will make Serve() call Stop on the worker pool.
 	// Setting .stop to 1 will make serveConn() break out of its loop.
 	// Now we just have to wait until all workers are done.
-	s.wg.Wait()
+	for {
+		if open := atomic.LoadInt32(&s.open); open == 0 {
+			break
+		}
+		// This is not an optimal solution but using a sync.WaitGroup
+		// here causes data races as it's hard to prevent Add() to be called
+		// while Wait() is waiting.
+		time.Sleep(time.Millisecond * 100)
+	}
 	return nil
 }
 
@@ -1549,7 +1567,7 @@ func (s *Server) ServeConn(c net.Conn) error {
 		return ErrConcurrencyLimit
 	}
 
-	s.wg.Add(1)
+	atomic.AddInt32(&s.open, 1)
 
 	err := s.serveConn(c)
 
@@ -1591,7 +1609,7 @@ func nextConnID() uint64 {
 const DefaultMaxRequestBodySize = 4 * 1024 * 1024
 
 func (s *Server) serveConn(c net.Conn) error {
-	defer s.wg.Done()
+	defer atomic.AddInt32(&s.open, -1)
 
 	var serverName []byte
 	if !s.NoDefaultServerHeader {
