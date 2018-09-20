@@ -978,7 +978,13 @@ func (ctx *RequestCtx) SuccessString(contentType, body string) {
 // All other statusCode values are replaced by StatusFound (302).
 //
 // The redirect uri may be either absolute or relative to the current
-// request uri.
+// request uri. Fasthttp will always send an absolute uri back to the client.
+// To send a relative uri you can use the following code:
+//
+//   strLocation = []byte("Location") // Put this with your top level var () declarations.
+//   ctx.Response.Header.SetCanonical(strLocation, "/relative?uri")
+//   ctx.Response.SetStatusCode(fasthttp.StatusMovedPermanently)
+//
 func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
 	u := AcquireURI()
 	ctx.URI().CopyTo(u)
@@ -1000,7 +1006,13 @@ func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
 // All other statusCode values are replaced by StatusFound (302).
 //
 // The redirect uri may be either absolute or relative to the current
-// request uri.
+// request uri. Fasthttp will always send an absolute uri back to the client.
+// To send a relative uri you can use the following code:
+//
+//   strLocation = []byte("Location") // Put this with your top level var () declarations.
+//   ctx.Response.Header.SetCanonical(strLocation, "/relative?uri")
+//   ctx.Response.SetStatusCode(fasthttp.StatusMovedPermanently)
+//
 func (ctx *RequestCtx) RedirectBytes(uri []byte, statusCode int) {
 	s := b2s(uri)
 	ctx.Redirect(s, statusCode)
