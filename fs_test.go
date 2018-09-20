@@ -682,3 +682,25 @@ func testFileExtension(t *testing.T, path string, compressed bool, compressedFil
 		t.Fatalf("unexpected file extension for file %q: %q. Expecting %q", path, ext, expectedExt)
 	}
 }
+
+func TestServeFileContentType(t *testing.T) {
+	var ctx RequestCtx
+	var req Request
+	req.Header.SetMethod("GET")
+	req.SetRequestURI("http://foobar.com/baz")
+	ctx.Init(&req, nil, nil)
+
+	ServeFile(&ctx, "testdata/test.png")
+
+	var resp Response
+	s := ctx.Response.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	expected := []byte("image/png")
+	if !bytes.Equal(resp.Header.ContentType(), expected) {
+		t.Fatalf("Unexpected Content-Type, expected: %q got %q", expected, resp.Header.ContentType())
+	}
+}
