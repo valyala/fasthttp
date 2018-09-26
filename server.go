@@ -219,6 +219,18 @@ type Server struct {
 	// By default keep-alive connection lifetime is unlimited.
 	MaxKeepaliveDuration time.Duration
 
+	// Whether to enable tcp keep-alive connections.
+	//
+	// Whether the operating system should send tcp keep-alive messages on the tcp connection.
+	//
+	// By default tcp keep-alive connections are disabled.
+	TCPKeepalive bool
+
+	// Period between tcp keep-alive messages.
+	//
+	// TCP keep-alive period is determined by operation system by default.
+	TCPKeepalivePeriod time.Duration
+
 	// Maximum request body size.
 	//
 	// The server rejects requests with bodies exceeding this limit.
@@ -1234,17 +1246,20 @@ func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 // connections. It's used by ListenAndServe, ListenAndServeTLS and
 // ListenAndServeTLSEmbed so dead TCP connections (e.g. closing laptop mid-download)
 // eventually go away.
-type tcpKeepAliveListener struct {
+type tcpKeepaliveListener struct {
 	*net.TCPListener
+	keepalivePeriod time.Duration
 }
 
-func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
+func (ln tcpKeepaliveListener) Accept() (net.Conn, error) {
 	tc, err := ln.AcceptTCP()
 	if err != nil {
 		return nil, err
 	}
 	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(3 * time.Minute)
+	if ln.keepalivePeriod > 0 {
+		tc.SetKeepAlivePeriod(ln.keepalivePeriod)
+	}
 	return tc, nil
 }
 
@@ -1259,8 +1274,13 @@ func (s *Server) ListenAndServe(addr string) error {
 	if err != nil {
 		return err
 	}
-	if tcpln, ok := ln.(*net.TCPListener); ok {
-		return s.Serve(tcpKeepAliveListener{tcpln})
+	if s.TCPKeepalive {
+		if tcpln, ok := ln.(*net.TCPListener); ok {
+			return s.Serve(tcpKeepaliveListener{
+				TCPListener:     tcpln,
+				keepalivePeriod: s.TCPKeepalivePeriod,
+			})
+		}
 	}
 	return s.Serve(ln)
 }
@@ -1300,8 +1320,13 @@ func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
 	if err != nil {
 		return err
 	}
-	if tcpln, ok := ln.(*net.TCPListener); ok {
-		return s.ServeTLS(tcpKeepAliveListener{tcpln}, certFile, keyFile)
+	if s.TCPKeepalive {
+		if tcpln, ok := ln.(*net.TCPListener); ok {
+			return s.ServeTLS(tcpKeepaliveListener{
+				TCPListener:     tcpln,
+				keepalivePeriod: s.TCPKeepalivePeriod,
+			}, certFile, keyFile)
+		}
 	}
 	return s.ServeTLS(ln, certFile, keyFile)
 }
@@ -1322,8 +1347,13 @@ func (s *Server) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) e
 	if err != nil {
 		return err
 	}
-	if tcpln, ok := ln.(*net.TCPListener); ok {
-		return s.ServeTLSEmbed(tcpKeepAliveListener{tcpln}, certData, keyData)
+	if s.TCPKeepalive {
+		if tcpln, ok := ln.(*net.TCPListener); ok {
+			return s.ServeTLSEmbed(tcpKeepaliveListener{
+				TCPListener:     tcpln,
+				keepalivePeriod: s.TCPKeepalivePeriod,
+			}, certData, keyData)
+		}
 	}
 	return s.ServeTLSEmbed(ln, certData, keyData)
 }
