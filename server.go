@@ -18,6 +18,12 @@ import (
 
 var errNoCertOrKeyProvided = errors.New("Cert or key has not provided")
 
+var (
+	// ErrAlreadyServing is returned when calling Serve on a Server
+	// that is already serving connections.
+	ErrAlreadyServing = errors.New("Server is already serving connections")
+)
+
 // ServeConn serves HTTP requests from the given connection
 // using the given handler.
 //
@@ -1395,17 +1401,15 @@ func (s *Server) Serve(ln net.Listener) error {
 	var err error
 
 	s.mu.Lock()
-	s.ln = ln
-	s.mu.Unlock()
-	defer func() {
-		// Don't keep a reference to the listener if we don't need to.
-		s.mu.Lock()
-		s.ln = nil
-		s.mu.Unlock()
-	}()
+	{
+		if s.ln != nil {
+			s.mu.Unlock()
+			return ErrAlreadyServing
+		}
 
-	atomic.StoreInt32(&s.open, 0)
-	atomic.StoreInt32(&s.stop, 0)
+		s.ln = ln
+	}
+	s.mu.Unlock()
 
 	maxWorkersCount := s.getConcurrency()
 	s.concurrencyCh = make(chan struct{}, maxWorkersCount)
@@ -1461,15 +1465,19 @@ func (s *Server) Serve(ln net.Listener) error {
 // Shutdown does not close keepalive connections so its recommended to set ReadTimeout to something else than 0.
 func (s *Server) Shutdown() error {
 	s.mu.Lock()
-	ln := s.ln
-	s.ln = nil
-	s.mu.Unlock()
-	if ln != nil {
-		if err := ln.Close(); err != nil {
-			return err
-		}
-	}
+	defer s.mu.Unlock()
+
 	atomic.StoreInt32(&s.stop, 1)
+	defer atomic.StoreInt32(&s.stop, 0)
+
+	if s.ln == nil {
+		return nil
+	}
+
+	if err := s.ln.Close(); err != nil {
+		return err
+	}
+
 	// Closing the listener will make Serve() call Stop on the worker pool.
 	// Setting .stop to 1 will make serveConn() break out of its loop.
 	// Now we just have to wait until all workers are done.
@@ -1482,6 +1490,8 @@ func (s *Server) Shutdown() error {
 		// while Wait() is waiting.
 		time.Sleep(time.Millisecond * 100)
 	}
+
+	s.ln = nil
 	return nil
 }
 
