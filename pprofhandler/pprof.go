@@ -2,6 +2,7 @@ package pprofhandler
 
 import (
 	"net/http/pprof"
+	rtp "runtime/pprof"
 	"strings"
 
 	"github.com/valyala/fasthttp"
@@ -30,6 +31,14 @@ func PprofHandler(ctx *fasthttp.RequestCtx) {
 	} else if strings.HasPrefix(string(ctx.Path()), "/debug/pprof/trace") {
 		trace(ctx)
 	} else {
+		for _, v := range rtp.Profiles() {
+			ppName := v.Name()
+			if strings.HasPrefix(string(ctx.Path()), "/debug/pprof/"+ppName) {
+				namedHandler := fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Handler(ppName).ServeHTTP)
+				namedHandler(ctx)
+				return
+			}
+		}
 		index(ctx)
 	}
 }
