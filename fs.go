@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/klauspost/compress/gzip"
+	"github.com/valyala/bytebufferpool"
 )
 
 // ServeFileBytesUncompressed returns HTTP response containing file contents
@@ -139,12 +140,12 @@ func NewVHostPathRewriter(slashesCount int) PathRewriteFunc {
 		if len(host) == 0 {
 			host = strInvalidHost
 		}
-		b := AcquireByteBuffer()
+		b := bytebufferpool.Get()
 		b.B = append(b.B, '/')
 		b.B = append(b.B, host...)
 		b.B = append(b.B, path...)
 		ctx.URI().SetPathBytes(b.B)
-		ReleaseByteBuffer(b)
+		bytebufferpool.Put(b)
 
 		return ctx.Path()
 	}
@@ -915,7 +916,7 @@ var (
 )
 
 func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool) (*fsFile, error) {
-	w := &ByteBuffer{}
+	w := &bytebufferpool.ByteBuffer{}
 
 	basePathEscaped := html.EscapeString(string(base.Path()))
 	fmt.Fprintf(w, "<html><head><title>%s</title><style>.dir { font-weight: bold }</style></head><body>", basePathEscaped)
@@ -975,7 +976,7 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 	fmt.Fprintf(w, "</ul></body></html>")
 
 	if mustCompress {
-		var zbuf ByteBuffer
+		var zbuf bytebufferpool.ByteBuffer
 		zbuf.B = AppendGzipBytesLevel(zbuf.B, w.B, CompressDefaultCompression)
 		w = &zbuf
 	}

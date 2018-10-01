@@ -5,6 +5,8 @@ import (
 	"html"
 	"net"
 	"testing"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 func BenchmarkAppendHTMLEscape(b *testing.B) {
@@ -77,7 +79,7 @@ func BenchmarkInt2HexByte(b *testing.B) {
 
 func BenchmarkWriteHexInt(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
-		var w ByteBuffer
+		var w bytebufferpool.ByteBuffer
 		bw := bufio.NewWriter(&w)
 		i := 0
 		for pb.Next() {

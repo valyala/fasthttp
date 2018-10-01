@@ -7,6 +7,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 func TestAppendHTMLEscape(t *testing.T) {
@@ -92,7 +94,7 @@ func testAppendUint(t *testing.T, n int) {
 }
 
 func testWriteHexInt(t *testing.T, n int, expectedS string) {
-	var w ByteBuffer
+	var w bytebufferpool.ByteBuffer
 	bw := bufio.NewWriter(&w)
 	if err := writeHexInt(bw, n); err != nil {
 		t.Fatalf("unexpected error when writing hex %x: %s", n, err)

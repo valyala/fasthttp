@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 func TestDecodeArgAppend(t *testing.T) {
@@ -171,7 +173,7 @@ func TestArgsWriteTo(t *testing.T) {
 	var a Args
 	a.Parse(s)
 
-	var w ByteBuffer
+	var w bytebufferpool.ByteBuffer
 	n, err := a.WriteTo(&w)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)

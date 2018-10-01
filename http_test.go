@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 func TestResponseBodyStreamDeflate(t *testing.T) {
@@ -490,7 +492,7 @@ type bodyWriterTo interface {
 }
 
 func testBodyWriteTo(t *testing.T, bw bodyWriterTo, expectedS string, isRetainedBody bool) {
-	var buf ByteBuffer
+	var buf bytebufferpool.ByteBuffer
 	if err := bw.BodyWriteTo(&buf); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -564,7 +566,7 @@ func TestResponseWriteTo(t *testing.T) {
 	r.SetBodyString("foobar")
 
 	s := r.String()
-	var buf ByteBuffer
+	var buf bytebufferpool.ByteBuffer
 	n, err := r.WriteTo(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
@@ -583,7 +585,7 @@ func TestRequestWriteTo(t *testing.T) {
 	r.SetRequestURI("http://foobar.com/aaa/bbb")
 
 	s := r.String()
-	var buf ByteBuffer
+	var buf bytebufferpool.ByteBuffer
 	n, err := r.WriteTo(&buf)
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
@@ -1457,7 +1459,7 @@ func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, bo
 	req.Header.Set("User-Agent", userAgent)
 	req.SetBody([]byte(body))
 
-	w := &ByteBuffer{}
+	w := &bytebufferpool.ByteBuffer{}
 	bw := bufio.NewWriter(w)
 	err := req.Write(bw)
 	if err == nil {

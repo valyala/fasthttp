@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"sync"
+
+	"github.com/valyala/bytebufferpool"
 )
 
 // AcquireArgs returns an empty Args object from the pool.
@@ -243,10 +245,10 @@ func (a *Args) GetUint(key string) (int, error) {
 
 // SetUint sets uint value for the given key.
 func (a *Args) SetUint(key string, value int) {
-	bb := AcquireByteBuffer()
+	bb := bytebufferpool.Get()
 	bb.B = AppendUint(bb.B[:0], value)
 	a.SetBytesV(key, bb.B)
-	ReleaseByteBuffer(bb)
+	bytebufferpool.Put(bb)
 }
 
 // SetUintBytes sets uint value for the given key.
