@@ -1771,7 +1771,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				if caseInsensitiveCompare(s.key, strContentType) {
 					h.contentType = append(h.contentType[:0], s.value...)
 					continue
-				} 
+				}
 				if caseInsensitiveCompare(s.key, strContentLength) {
 					if h.contentLength != -1 {
 						if h.contentLength, err = parseContentLength(s.value); err != nil {

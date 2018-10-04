@@ -134,6 +134,9 @@ func ListenAndServeTLSEmbed(addr string, certData, keyData []byte, handler Reque
 // must be limited.
 type RequestHandler func(ctx *RequestCtx)
 
+// ServeHandler must process tls.Config.NextProto negotiated requests.
+type ServeHandler func(c net.Conn) error
+
 // Server implements HTTP server.
 //
 // Default Server settings should satisfy the majority of Server users.
@@ -311,7 +314,8 @@ type Server struct {
 	// By default standard logger from log package is used.
 	Logger Logger
 
-	tlsConfig *tls.Config
+	tlsConfig  *tls.Config
+	nextProtos map[string]ServeHandler
 
 	concurrency      uint32
 	concurrencyCh    chan struct{}
@@ -1242,6 +1246,26 @@ func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 	ctx.timeoutResponse = respCopy
 }
 
+// NextProto adds nph to be processed when key is negotiated when TLS conection is established.
+//
+// This function can only be called before the server is started.
+func (s *Server) NextProto(key string, nph ServeHandler) {
+	if s.nextProtos == nil {
+		s.nextProtos = make(map[string]ServeHandler)
+	}
+	s.configTLS()
+	s.tlsConfig.NextProtos = append(s.tlsConfig.NextProtos, key)
+	s.nextProtos[key] = nph
+}
+
+func (s *Server) hasNextProto(c net.Conn) (proto string) {
+	tlsConn, ok := c.(connTLSer)
+	if ok {
+		proto = tlsConn.ConnectionState().NegotiatedProtocol
+	}
+	return
+}
+
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
 // connections. It's used by ListenAndServe, ListenAndServeTLS and
 // ListenAndServeTLSEmbed so dead TCP connections (e.g. closing laptop mid-download)
@@ -1414,13 +1438,7 @@ func (s *Server) AppendCert(certFile, keyFile string) error {
 		return fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %s", certFile, keyFile, err)
 	}
 
-	if s.tlsConfig == nil {
-		s.tlsConfig = &tls.Config{
-			Certificates:             []tls.Certificate{cert},
-			PreferServerCipherSuites: true,
-		}
-		return nil
-	}
+	s.configTLS()
 
 	s.tlsConfig.Certificates = append(s.tlsConfig.Certificates, cert)
 	return nil
@@ -1438,16 +1456,18 @@ func (s *Server) AppendCertEmbed(certData, keyData []byte) error {
 			len(certData), len(keyData), err)
 	}
 
-	if s.tlsConfig == nil {
-		s.tlsConfig = &tls.Config{
-			Certificates:             []tls.Certificate{cert},
-			PreferServerCipherSuites: true,
-		}
-		return nil
-	}
+	s.configTLS()
 
 	s.tlsConfig.Certificates = append(s.tlsConfig.Certificates, cert)
 	return nil
+}
+
+func (s *Server) configTLS() {
+	if s.tlsConfig == nil {
+		s.tlsConfig = &tls.Config{
+			PreferServerCipherSuites: true,
+		}
+	}
 }
 
 // DefaultConcurrency is the maximum number of concurrent connections
@@ -1702,6 +1722,13 @@ const DefaultMaxRequestBodySize = 4 * 1024 * 1024
 
 func (s *Server) serveConn(c net.Conn) error {
 	defer atomic.AddInt32(&s.open, -1)
+
+	if proto := s.hasNextProto(c); proto != "" {
+		handler, ok := s.nextProtos[proto]
+		if ok {
+			return handler(c)
+		}
+	}
 
 	var serverName []byte
 	if !s.NoDefaultServerHeader {
