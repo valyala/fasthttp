@@ -24,7 +24,7 @@ func ExampleHostClient() {
 	useResponseBody(body)
 
 	// Fetch foobar page via local proxy. Reuse body buffer.
-	statusCode, body, err = c.Get(body, "http://foobar.com/google/com")
+	statusCode, body, err = c.Get(body[:0], "http://foobar.com/google/com")
 	if err != nil {
 		log.Fatalf("Error when loading foobar page through local proxy: %s", err)
 	}
