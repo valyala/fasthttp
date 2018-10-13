@@ -1505,6 +1505,13 @@ func (s *Server) Serve(ln net.Listener) error {
 	}
 	wp.Start()
 
+	// Count our waiting to accept a connection as an open connection.
+	// This way we can't get into any weird state where just after accepting
+	// a connection Shutdown is called which reads open as 0 because it isn't
+	// incremented yet.
+	atomic.AddInt32(&s.open, 1)
+	defer atomic.AddInt32(&s.open, -1)
+
 	for {
 		if c, err = acceptConn(s, ln, &lastPerIPErrorTime); err != nil {
 			wp.Stop()

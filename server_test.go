@@ -2708,9 +2708,9 @@ func TestShutdownReuse(t *testing.T) {
 		ctx.Success("aaa/bbb", []byte("real response"))
 	}
 	s := &Server{
-		Handler:              h,
-		MaxKeepaliveDuration: time.Millisecond * 100,
-		Logger:               &customLogger{}, // Ignore log output.
+		Handler:     h,
+		ReadTimeout: time.Second,
+		Logger:      &customLogger{}, // Ignore log output.
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
