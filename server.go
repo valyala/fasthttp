@@ -580,6 +580,15 @@ func (ctx *RequestCtx) TLSConnectionState() *tls.ConnectionState {
 	return &state
 }
 
+// Conn returns a reference to the underlying net.Conn.
+//
+// WARNING: Only use this method if you know what you are doing!
+//
+// Reading from or writing to the returned connection will end badly!
+func (ctx *RequestCtx) Conn() net.Conn {
+	return ctx.c
+}
+
 type firstByteReader struct {
 	c        net.Conn
 	ch       byte
