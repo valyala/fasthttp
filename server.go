@@ -1810,7 +1810,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 			// reading Headers and Body
 			err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly)
-			if br.Buffered() > 0 {
+			if err == nil {
 				// If we read any bytes off the wire, we're active.
 				s.setState(c, StateActive)
 			}
