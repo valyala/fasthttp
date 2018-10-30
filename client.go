@@ -969,8 +969,27 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	// Without this 'hack' the load on slow host could exceed MaxConns*
 	// concurrent requests, since timed out requests on client side
 	// usually continue execution on the host.
+	var cleanup int32
+	atomic.StoreInt32(&cleanup, 0)
+
 	go func() {
 		ch <- c.Do(reqCopy, respCopy)
+		if atomic.LoadInt32(&cleanup) == 1 {
+			if resp != nil {
+				respCopy.copyToSkipBody(resp)
+				swapResponseBody(resp, respCopy)
+			}
+			swapRequestBody(reqCopy, req)
+			ReleaseResponse(respCopy)
+			ReleaseRequest(reqCopy)
+			errorChPool.Put(chv)
+		}
+	}()
+
+	tc := acquireTimer(timeout)
+	var err error
+	select {
+	case err = <-ch:
 		if resp != nil {
 			respCopy.copyToSkipBody(resp)
 			swapResponseBody(resp, respCopy)
@@ -979,14 +998,8 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 		ReleaseResponse(respCopy)
 		ReleaseRequest(reqCopy)
 		errorChPool.Put(chv)
-	}()
-
-	tc := acquireTimer(timeout)
-	var err error
-	select {
-	case err = <-ch:
-		
 	case <-tc.C:
+		atomic.StoreInt32(&cleanup, 1)
 		err = ErrTimeout
 	}
 	releaseTimer(tc)
