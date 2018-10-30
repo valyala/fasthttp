@@ -962,7 +962,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	
 	go func() {
 		errDo := c.Do(reqCopy, respCopy)
-		// cleanup
+		// cleanup here
 		if resp != nil {
 			respCopy.copyToSkipBody(resp)
 			swapResponseBody(resp, respCopy)
