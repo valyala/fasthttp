@@ -961,12 +961,6 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	// usually continue execution on the host.
 	go func() {
 		ch <- c.Do(reqCopy, respCopy)
-	}()
-
-	tc := acquireTimer(timeout)
-	var err error
-	select {
-	case err = <-ch:
 		if resp != nil {
 			respCopy.copyToSkipBody(resp)
 			swapResponseBody(resp, respCopy)
@@ -975,6 +969,13 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 		ReleaseResponse(respCopy)
 		ReleaseRequest(reqCopy)
 		errorChPool.Put(chv)
+	}()
+
+	tc := acquireTimer(timeout)
+	var err error
+	select {
+	case err = <-ch:
+		
 	case <-tc.C:
 		err = ErrTimeout
 	}
