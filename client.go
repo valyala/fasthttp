@@ -480,6 +480,8 @@ type DialFunc func(addr string) (net.Conn, error)
 //
 // It is safe calling HostClient methods from concurrently running goroutines.
 type HostClient struct {
+	pendingRequests uint64
+
 	noCopy noCopy
 
 	// Comma-separated list of upstream HTTP server host addresses,
@@ -606,8 +608,6 @@ type HostClient struct {
 
 	readerPool sync.Pool
 	writerPool sync.Pool
-
-	pendingRequests uint64
 
 	connsCleanerRun bool
 }
