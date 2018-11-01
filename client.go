@@ -423,11 +423,15 @@ func (c *Client) Do(req *Request, resp *Response) error {
 
 func (c *Client) mCleaner(m map[string]*HostClient) {
 	mustStop := false
+
 	for {
-		t := time.Now()
 		c.mLock.Lock()
 		for k, v := range m {
-			if t.Sub(v.LastUseTime()) > time.Minute {
+			v.connsLock.Lock()
+			shouldRemove := v.connsCount == 0
+			v.connsLock.Unlock()
+
+			if shouldRemove {
 				delete(m, k)
 			}
 		}
