@@ -154,6 +154,10 @@ type Client struct {
 	// Default client name is used if not set.
 	Name string
 
+	// NoDefaultUserAgentHeader when set to true, causes the default
+	// User-Agent header to be excluded from the Request.
+	NoDefaultUserAgentHeader bool
+
 	// Callback for establishing new connections to hosts.
 	//
 	// Default Dial is used if not set.
@@ -389,6 +393,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 		hc = &HostClient{
 			Addr:                          addMissingPort(string(host), isTLS),
 			Name:                          c.Name,
+			NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 			Dial:                          c.Dial,
 			DialDualStack:                 c.DialDualStack,
 			IsTLS:                         isTLS,
@@ -490,6 +495,10 @@ type HostClient struct {
 
 	// Client name. Used in User-Agent request header.
 	Name string
+
+	// NoDefaultUserAgentHeader when set to true, causes the default
+	// User-Agent header to be excluded from the Request.
+	NoDefaultUserAgentHeader bool
 
 	// Callback for establishing new connection to the host.
 	//
@@ -1532,7 +1541,7 @@ func (c *HostClient) getClientName() []byte {
 	var clientName []byte
 	if v == nil {
 		clientName = []byte(c.Name)
-		if len(clientName) == 0 {
+		if len(clientName) == 0 && !c.NoDefaultUserAgentHeader {
 			clientName = defaultUserAgent
 		}
 		c.clientName.Store(clientName)

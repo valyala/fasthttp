@@ -309,12 +309,43 @@ func TestClientReadTimeout(t *testing.T) {
 	}
 }
 
-func TestClientUserAgent(t *testing.T) {
+func TestClientDefaultUserAgent(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
+	userAgentSeen := ""
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			ctx.Write([]byte("response"))
+			userAgentSeen = string(ctx.UserAgent())
+		},
+	}
+	go s.Serve(ln)
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	res := AcquireResponse()
+
+	req.SetRequestURI("http://example.com")
+
+	err := c.Do(req, res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if userAgentSeen != string(defaultUserAgent) {
+		t.Fatalf("User-Agent defers %q != %q", userAgentSeen, defaultUserAgent)
+	}
+}
+
+func TestClientSetUserAgent(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	userAgentSeen := ""
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			userAgentSeen = string(ctx.UserAgent())
 		},
 	}
 	go s.Serve(ln)
@@ -329,14 +360,45 @@ func TestClientUserAgent(t *testing.T) {
 	req := AcquireRequest()
 	res := AcquireResponse()
 
-	req.SetRequestURI("http://do.not.worry?we.are.going.to.make.fasthttp.great.again")
+	req.SetRequestURI("http://example.com")
 
 	err := c.Do(req, res)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ua := string(req.Header.UserAgent()); ua != userAgent {
-		t.Fatalf("User-Agent defers %s <> %s", ua, userAgent)
+	if userAgentSeen != userAgent {
+		t.Fatalf("User-Agent defers %q != %q", userAgentSeen, userAgent)
+	}
+}
+
+func TestClientNoUserAgent(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	userAgentSeen := ""
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			userAgentSeen = string(ctx.UserAgent())
+		},
+	}
+	go s.Serve(ln)
+
+	c := &Client{
+		NoDefaultUserAgentHeader: true,
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	res := AcquireResponse()
+
+	req.SetRequestURI("http://example.com")
+
+	err := c.Do(req, res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if userAgentSeen != "" {
+		t.Fatalf("User-Agent wrong %q != %q", userAgentSeen, "")
 	}
 }
 
