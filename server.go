@@ -1717,7 +1717,7 @@ func (s *Server) ServeConn(c net.Conn) error {
 var errHijacked = errors.New("connection has been hijacked")
 
 func (s *Server) GetCurrentConcurrency() uint32 {
-	return s.concurrency
+	return atomic.LoadUint32(&s.concurrency)
 }
 
 func (s *Server) getConcurrency() int {
