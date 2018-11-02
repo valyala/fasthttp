@@ -1716,6 +1716,10 @@ func (s *Server) ServeConn(c net.Conn) error {
 
 var errHijacked = errors.New("connection has been hijacked")
 
+// GetCurrentConcurrency returns a number of currently served
+// connections.
+//
+// This function is intended be used by monitoring systems
 func (s *Server) GetCurrentConcurrency() uint32 {
 	return atomic.LoadUint32(&s.concurrency)
 }
