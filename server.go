@@ -546,6 +546,7 @@ func (ctx *RequestCtx) VisitUserValues(visitor func([]byte, interface{})) {
 }
 
 type connTLSer interface {
+	Handshake() error
 	ConnectionState() tls.ConnectionState
 }
 
@@ -1268,7 +1269,7 @@ func (s *Server) NextProto(key string, nph ServeHandler) {
 }
 
 func (s *Server) hasNextProto(c net.Conn) (proto string, err error) {
-	tlsConn, ok := c.(*tls.Conn)
+	tlsConn, ok := c.(connTLSer)
 	if ok {
 		err = tlsConn.Handshake()
 		proto = tlsConn.ConnectionState().NegotiatedProtocol
