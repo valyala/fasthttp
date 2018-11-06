@@ -1268,11 +1268,12 @@ func (s *Server) NextProto(key string, nph ServeHandler) {
 	s.nextProtos[key] = nph
 }
 
-func (s *Server) hasNextProto(c net.Conn) (proto string, err error) {
-	tlsConn, ok := c.(connTLSer)
-	if ok {
+func (s *Server) getNextProto(c net.Conn) (proto string, err error) {
+	if tlsConn, ok := c.(connTLSer); ok {
 		err = tlsConn.Handshake()
-		proto = tlsConn.ConnectionState().NegotiatedProtocol
+		if err == nil {
+			proto = tlsConn.ConnectionState().NegotiatedProtocol
+		}
 	}
 	return
 }
@@ -1749,14 +1750,13 @@ const DefaultMaxRequestBodySize = 4 * 1024 * 1024
 func (s *Server) serveConn(c net.Conn) error {
 	defer atomic.AddInt32(&s.open, -1)
 
-	if proto, err := s.hasNextProto(c); err != nil {
+	if proto, err := s.getNextProto(c); err != nil {
 		return err
 	} else {
 		handler, ok := s.nextProtos[proto]
 		if ok {
 			return handler(c)
 		}
-		// TODO: else continue?
 	}
 
 	var serverName []byte
