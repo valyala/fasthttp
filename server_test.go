@@ -2053,8 +2053,8 @@ func TestServerGetOnly(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expecting error")
 		}
-		if err != errGetOnly {
-			t.Fatalf("Unexpected error from serveConn: %s. Expecting %s", err, errGetOnly)
+		if err != ErrGetOnly {
+			t.Fatalf("Unexpected error from serveConn: %s. Expecting %s", err, ErrGetOnly)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatalf("timeout")

@@ -153,6 +153,14 @@ type Server struct {
 	Handler RequestHandler
 
 	// ErrorHandler for returning an error response in user-defined way.
+	//
+	// Following errors will be captured with this handler:
+	//   * io.EOF
+	//   * io.ErrUnexpectedEOF
+	//   * ErrGetOnly
+	//   * ErrSmallBuffer
+	//   * ErrBodyTooLarge
+	//   * ErrBrokenChunks
 	ErrorHandler func(ctx *RequestCtx, err error)
 
 	// Server name for sending in response headers.

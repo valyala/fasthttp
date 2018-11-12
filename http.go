@@ -847,7 +847,9 @@ func (req *Request) Read(r *bufio.Reader) error {
 
 const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
 
-var errGetOnly = errors.New("non-GET request received")
+// ErrGetOnly is returned when server expects only GET requests,
+// but some other type of request came (Server.GetOnly option is enabled).
+var ErrGetOnly = errors.New("non-GET request received")
 
 // ReadLimitBody reads request from the given r, limiting the body size.
 //
@@ -881,7 +883,7 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 		return err
 	}
 	if getOnly && !req.Header.IsGet() {
-		return errGetOnly
+		return ErrGetOnly
 	}
 
 	if req.MayContinue() {
@@ -1652,6 +1654,11 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	}
 }
 
+// ErrBrokenChunks is returned when server got broken chunked body (Transfer-Encoding: chunked).
+type ErrBrokenChunks struct {
+	error
+}
+
 func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
 	if len(dst) > 0 {
 		panic("BUG: expected zero-length buffer")
@@ -1671,7 +1678,9 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 			return dst, err
 		}
 		if !bytes.Equal(dst[len(dst)-strCRLFLen:], strCRLF) {
-			return dst, fmt.Errorf("cannot find crlf at the end of chunk")
+			return dst, ErrBrokenChunks{
+				error: fmt.Errorf("cannot find crlf at the end of chunk"),
+			}
 		}
 		dst = dst[:len(dst)-strCRLFLen]
 		if chunkSize == 0 {
@@ -1688,23 +1697,31 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 	for {
 		c, err := r.ReadByte()
 		if err != nil {
-			return -1, fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err)
+			return -1, ErrBrokenChunks{
+				error: fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err),
+			}
 		}
 		// Skip any trailing whitespace after chunk size.
 		if c == ' ' {
 			continue
 		}
 		if c != '\r' {
-			return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\r')
+			return -1, ErrBrokenChunks{
+				error: fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\r'),
+			}
 		}
 		break
 	}
 	c, err := r.ReadByte()
 	if err != nil {
-		return -1, fmt.Errorf("cannot read '\n' char at the end of chunk size: %s", err)
+		return -1, ErrBrokenChunks{
+			error: fmt.Errorf("cannot read '\n' char at the end of chunk size: %s", err),
+		}
 	}
 	if c != '\n' {
-		return -1, fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\n')
+		return -1, ErrBrokenChunks{
+			error: fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\n'),
+		}
 	}
 	return n, nil
 }
