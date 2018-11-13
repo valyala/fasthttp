@@ -183,7 +183,8 @@ func parseUintBuf(b []byte) (int, int, error) {
 			}
 			return v, i, nil
 		}
-		if i >= maxIntChars {
+		// Test for overflow.
+		if v*10 < v {
 			return -1, i, errTooLongInt
 		}
 		v = 10*v + int(k)

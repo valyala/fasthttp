@@ -38,4 +38,5 @@ func TestParseUintSuccess(t *testing.T) {
 	testParseUintSuccess(t, "123", 123)
 	testParseUintSuccess(t, "1234567890", 1234567890)
 	testParseUintSuccess(t, "123456789012345678", 123456789012345678)
+	testParseUintSuccess(t, "9223372036854775807", 9223372036854775807)
 }

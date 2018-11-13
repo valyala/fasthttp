@@ -176,6 +176,7 @@ func TestParseUintError(t *testing.T) {
 
 	// too big num
 	testParseUintError(t, "12345678901234567890")
+	testParseUintError(t, "1234567890123456789012")
 }
 
 func TestParseUfloatSuccess(t *testing.T) {
