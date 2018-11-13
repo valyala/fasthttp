@@ -152,6 +152,17 @@ type Server struct {
 	// Handler for processing incoming requests.
 	Handler RequestHandler
 
+	// ErrorHandler for returning a response in case of an error while receiving or parsing the request.
+	//
+	// The following is a non-exhaustive list of errors that can be expected as argument:
+	//   * io.EOF
+	//   * io.ErrUnexpectedEOF
+	//   * ErrGetOnly
+	//   * ErrSmallBuffer
+	//   * ErrBodyTooLarge
+	//   * ErrBrokenChunks
+	ErrorHandler func(ctx *RequestCtx, err error)
+
 	// Server name for sending in response headers.
 	//
 	// Default server name is used if left blank.
@@ -1840,7 +1851,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			if err == io.EOF {
 				err = nil
 			} else {
-				bw = writeErrorResponse(bw, ctx, serverName, err)
+				bw = s.writeErrorResponse(bw, ctx, serverName, err)
 			}
 			break
 		}
@@ -1870,7 +1881,7 @@ func (s *Server) serveConn(c net.Conn) error {
 				br = nil
 			}
 			if err != nil {
-				bw = writeErrorResponse(bw, ctx, serverName, err)
+				bw = s.writeErrorResponse(bw, ctx, serverName, err)
 				break
 			}
 		}
@@ -2319,12 +2330,22 @@ func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 		serverDate.Load(), len(msg), msg)
 }
 
-func writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverName []byte, err error) *bufio.Writer {
+func defaultErrorHandler(ctx *RequestCtx, err error) {
 	if _, ok := err.(*ErrSmallBuffer); ok {
 		ctx.Error("Too big request header", StatusRequestHeaderFieldsTooLarge)
 	} else {
 		ctx.Error("Error when parsing request", StatusBadRequest)
 	}
+}
+
+func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverName []byte, err error) *bufio.Writer {
+	errorHandler := defaultErrorHandler
+	if s.ErrorHandler != nil {
+		errorHandler = s.ErrorHandler
+	}
+
+	errorHandler(ctx, err)
+
 	if serverName != nil {
 		ctx.Response.Header.SetServerBytes(serverName)
 	}
