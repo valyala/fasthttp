@@ -152,9 +152,9 @@ type Server struct {
 	// Handler for processing incoming requests.
 	Handler RequestHandler
 
-	// ErrorHandler for returning an error response in user-defined way.
+	// ErrorHandler for returning a response in case of an error while receiving or parsing the request.
 	//
-	// Following errors will be captured with this handler:
+	// The following is a non-exhaustive list of errors that can be expected as argument:
 	//   * io.EOF
 	//   * io.ErrUnexpectedEOF
 	//   * ErrGetOnly

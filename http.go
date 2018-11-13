@@ -848,7 +848,7 @@ func (req *Request) Read(r *bufio.Reader) error {
 const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
 
 // ErrGetOnly is returned when server expects only GET requests,
-// but some other type of request came (Server.GetOnly option is enabled).
+// but some other type of request came (Server.GetOnly option is true).
 var ErrGetOnly = errors.New("non-GET request received")
 
 // ReadLimitBody reads request from the given r, limiting the body size.
@@ -1654,8 +1654,8 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	}
 }
 
-// ErrBrokenChunks is returned when server got broken chunked body (Transfer-Encoding: chunked).
-type ErrBrokenChunks struct {
+// ErrBrokenChunk is returned when server receives a broken chunked body (Transfer-Encoding: chunked).
+type ErrBrokenChunk struct {
 	error
 }
 
@@ -1678,7 +1678,7 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 			return dst, err
 		}
 		if !bytes.Equal(dst[len(dst)-strCRLFLen:], strCRLF) {
-			return dst, ErrBrokenChunks{
+			return dst, ErrBrokenChunk{
 				error: fmt.Errorf("cannot find crlf at the end of chunk"),
 			}
 		}
@@ -1697,7 +1697,7 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 	for {
 		c, err := r.ReadByte()
 		if err != nil {
-			return -1, ErrBrokenChunks{
+			return -1, ErrBrokenChunk{
 				error: fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err),
 			}
 		}
@@ -1706,7 +1706,7 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 			continue
 		}
 		if c != '\r' {
-			return -1, ErrBrokenChunks{
+			return -1, ErrBrokenChunk{
 				error: fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\r'),
 			}
 		}
@@ -1714,12 +1714,12 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 	}
 	c, err := r.ReadByte()
 	if err != nil {
-		return -1, ErrBrokenChunks{
+		return -1, ErrBrokenChunk{
 			error: fmt.Errorf("cannot read '\n' char at the end of chunk size: %s", err),
 		}
 	}
 	if c != '\n' {
-		return -1, ErrBrokenChunks{
+		return -1, ErrBrokenChunk{
 			error: fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\n'),
 		}
 	}
