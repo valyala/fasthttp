@@ -7,5 +7,5 @@ package fasthttp
 // and also: https://stackoverflow.com/questions/52494458/nocopy-minimal-example
 type noCopy struct{}
 
-func (*noCopy) Lock() {}
-func (*noCopy) UnLock() {}
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}
