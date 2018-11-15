@@ -989,7 +989,6 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		bodyBuf.Reset()
 		bodyBuf.B, err = readBody(r, resp.Header.ContentLength(), maxBodySize, bodyBuf.B)
 		if err != nil {
-			resp.Reset()
 			return err
 		}
 		resp.Header.SetContentLength(len(bodyBuf.B))
