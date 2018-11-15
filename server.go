@@ -2257,6 +2257,52 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	req.CopyTo(&ctx.Request)
 }
 
+// Deadline returns the time when work done on behalf of this context
+// should be canceled. Deadline returns ok==false when no deadline is
+// set. Successive calls to Deadline return the same results.
+//
+// This method always returns 0, false and is only present to make
+// RequestCtx implement the context interface.
+func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
+	return
+}
+
+// Done returns a channel that's closed when work done on behalf of this
+// context should be canceled. Done may return nil if this context can
+// never be canceled. Successive calls to Done return the same value.
+//
+// This method always returns nil and is only present to make
+// RequestCtx implement the context interface.
+func (ctx *RequestCtx) Done() <-chan struct{} {
+	return nil
+}
+
+// Err returns a non-nil error value after Done is closed,
+// successive calls to Err return the same error.
+// If Done is not yet closed, Err returns nil.
+// If Done is closed, Err returns a non-nil error explaining why:
+// Canceled if the context was canceled
+// or DeadlineExceeded if the context's deadline passed.
+//
+// This method always returns nil and is only present to make
+// RequestCtx implement the context interface.
+func (ctx *RequestCtx) Err() error {
+	return nil
+}
+
+// Value returns the value associated with this context for key, or nil
+// if no value is associated with key. Successive calls to Value with
+// the same key returns the same result.
+//
+// This method is present to make RequestCtx implement the context interface.
+// This method is the same as calling ctx.UserValue(key)
+func (ctx *RequestCtx) Value(key interface{}) interface{} {
+	if keyString, ok := key.(string); ok {
+		return ctx.UserValue(keyString)
+	}
+	return nil
+}
+
 var fakeServer = &Server{
 	// Initialize concurrencyCh for TimeoutHandler
 	concurrencyCh: make(chan struct{}, DefaultConcurrency),

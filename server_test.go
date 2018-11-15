@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -17,6 +18,9 @@ import (
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
+
+// Make sure RequestCtx implements context.Context
+var _ context.Context = &RequestCtx{}
 
 func TestSaveMultipartFile(t *testing.T) {
 	filea := "This is a test file."
