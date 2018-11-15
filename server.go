@@ -1841,7 +1841,7 @@ func (s *Server) serveConn(c net.Conn) error {
 				// If we read any bytes off the wire, we're active.
 				s.setState(c, StateActive)
 			}
-			if br.Buffered() == 0 || err != nil {
+			if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
 				releaseReader(s, br)
 				br = nil
 			}
@@ -1875,10 +1875,12 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 			bw.Write(strResponseContinue)
 			err = bw.Flush()
-			releaseWriter(s, bw)
-			bw = nil
 			if err != nil {
 				break
+			}
+			if s.ReduceMemoryUsage {
+				releaseWriter(s, bw)
+				bw = nil
 			}
 
 			// Read request body.
@@ -1886,7 +1888,7 @@ func (s *Server) serveConn(c net.Conn) error {
 				br = acquireReader(ctx)
 			}
 			err = ctx.Request.ContinueReadBody(br, maxRequestBodySize)
-			if br.Buffered() == 0 || err != nil {
+			if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
 				releaseReader(s, br)
 				br = nil
 			}
@@ -1956,16 +1958,12 @@ func (s *Server) serveConn(c net.Conn) error {
 			break
 		}
 
-		if br == nil || connectionClose {
-			err = bw.Flush()
-			releaseWriter(s, bw)
-			bw = nil
-			if err != nil {
-				break
-			}
-			if connectionClose {
-				break
-			}
+		err = bw.Flush()
+		if err != nil {
+			break
+		}
+		if connectionClose {
+			break
 		}
 
 		if hijackHandler != nil {
