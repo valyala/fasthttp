@@ -67,6 +67,7 @@ type Response struct {
 	bodyStream io.Reader
 	w          responseBodyWriter
 	body       *bytebufferpool.ByteBuffer
+	bodyRaw    []byte
 
 	// Response.Read() skips reading body if set to true.
 	// Use it for reading HEAD responses.
@@ -321,6 +322,9 @@ func (resp *Response) Body() []byte {
 }
 
 func (resp *Response) bodyBytes() []byte {
+	if resp.bodyRaw != nil {
+		return resp.bodyRaw
+	}
 	if resp.body == nil {
 		return nil
 	}
@@ -462,6 +466,7 @@ func (resp *Response) SetBodyString(body string) {
 
 // ResetBody resets response body.
 func (resp *Response) ResetBody() {
+	resp.bodyRaw = nil
 	resp.closeBodyStream()
 	if resp.body != nil {
 		if resp.keepBodyBuffer {
@@ -471,6 +476,13 @@ func (resp *Response) ResetBody() {
 			resp.body = nil
 		}
 	}
+}
+
+// SetBodyRaw sets response body, but without copying it.
+//
+// From this point onward the body argument must not be changed.
+func (resp *Response) SetBodyRaw(body []byte) {
+	resp.bodyRaw = body
 }
 
 // ReleaseBody retires the response body if it is greater than "size" bytes.
