@@ -75,6 +75,10 @@ type RequestHeader struct {
 
 	// stores an immutable copy of headers as they were recieved from the wire.
 	rawHeadersCopy []byte
+
+	// hasReadOneByte can be used after calling Read() it will be true
+	// if at least one byte was read from the buffer/connection.
+	hasReadOneByte bool
 }
 
 // SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
@@ -1340,6 +1344,7 @@ func headerErrorMsg(typ string, err error, b []byte) error {
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) Read(r *bufio.Reader) error {
+	h.hasReadOneByte = false
 	n := 1
 	for {
 		err := h.tryRead(r, n)
@@ -1374,6 +1379,8 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		}
 
 		return fmt.Errorf("error when reading request headers: %s", err)
+	} else {
+		h.hasReadOneByte = true
 	}
 	b = mustPeekBuffered(r)
 	headersLen, errParse := h.parse(b)
