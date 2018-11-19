@@ -967,6 +967,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 		if atomic.LoadInt32(&cleanup) == 1 {
 			ReleaseResponse(respCopy)
 			ReleaseRequest(reqCopy)
+			errorChPool.Put(chv)
 		} else {
 			ch <- errDo
 		}
@@ -986,7 +987,6 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 		errorChPool.Put(chv)
 	case <-tc.C:
 		atomic.StoreInt32(&cleanup, 1)
-		errorChPool.Put(chv)
 		err = ErrTimeout
 	}
 	releaseTimer(tc)
