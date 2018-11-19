@@ -970,10 +970,11 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	// concurrent requests, since timed out requests on client side
 	// usually continue execution on the host.
 
-	cleanup := false
+	var cleanup int32
+	atomic.StoreInt32(&cleanup, 0)
 	go func() {
 		errDo := c.Do(reqCopy, respCopy)
-		if cleanup {
+		if atomic.LoadInt32(&cleanup) == 1 {
 			ReleaseResponse(respCopy)
 			ReleaseRequest(reqCopy)
 		} else {
@@ -994,7 +995,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 		ReleaseRequest(reqCopy)
 		errorChPool.Put(chv)
 	case <-tc.C:
-		cleanup = true
+		atomic.StoreInt32(&cleanup, 1)
 		errorChPool.Put(chv)
 		err = ErrTimeout
 	}
