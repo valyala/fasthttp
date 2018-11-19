@@ -1355,8 +1355,10 @@ var clientConnPool sync.Pool
 func (c *HostClient) releaseConn(cc *clientConn) {
 	cc.lastUseTime = time.Now()
 	//reset read and write deadline for reuse
-	if cc.c != nil {
+	if c.ReadTimeout > 0 {
 		cc.c.SetReadDeadline(time.Time{})
+	}
+	if c.WriteTimeout > 0 {
 		cc.c.SetWriteDeadline(time.Time{})
 	}
 	
