@@ -342,6 +342,7 @@ func (resp *Response) bodyBuffer() *bytebufferpool.ByteBuffer {
 	if resp.body == nil {
 		resp.body = responseBodyPool.Get()
 	}
+	resp.bodyRaw = nil
 	return resp.body
 }
 
@@ -482,6 +483,7 @@ func (resp *Response) ResetBody() {
 //
 // From this point onward the body argument must not be changed.
 func (resp *Response) SetBodyRaw(body []byte) {
+	resp.ResetBody()
 	resp.bodyRaw = body
 }
 
@@ -493,6 +495,7 @@ func (resp *Response) SetBodyRaw(body []byte) {
 // Use this method only if you really understand how it works.
 // The majority of workloads don't need this method.
 func (resp *Response) ReleaseBody(size int) {
+	resp.bodyRaw = nil
 	if cap(resp.body.B) > size {
 		resp.closeBodyStream()
 		resp.body = nil
@@ -530,6 +533,8 @@ func (resp *Response) SwapBody(body []byte) []byte {
 			bb.SetString(err.Error())
 		}
 	}
+
+	resp.bodyRaw = nil
 
 	oldBody := bb.B
 	bb.B = body
@@ -651,7 +656,12 @@ func (req *Request) copyToSkipBody(dst *Request) {
 // CopyTo copies resp contents to dst except of body stream.
 func (resp *Response) CopyTo(dst *Response) {
 	resp.copyToSkipBody(dst)
-	if resp.body != nil {
+	if resp.bodyRaw != nil {
+		dst.bodyRaw = resp.bodyRaw
+		if dst.body != nil {
+			dst.body.Reset()
+		}
+	} else if resp.body != nil {
 		dst.bodyBuffer().Set(resp.body.B)
 	} else if dst.body != nil {
 		dst.body.Reset()
@@ -673,6 +683,7 @@ func swapRequestBody(a, b *Request) {
 
 func swapResponseBody(a, b *Response) {
 	a.body, b.body = b.body, a.body
+	a.bodyRaw, b.bodyRaw = b.bodyRaw, a.bodyRaw
 	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
 }
 
@@ -1277,6 +1288,7 @@ func (resp *Response) gzipBody(level int) error {
 			responseBodyPool.Put(resp.body)
 		}
 		resp.body = w
+		resp.bodyRaw = nil
 	}
 	resp.Header.SetCanonical(strContentEncoding, strGzip)
 	return nil
@@ -1331,6 +1343,7 @@ func (resp *Response) deflateBody(level int) error {
 			responseBodyPool.Put(resp.body)
 		}
 		resp.body = w
+		resp.bodyRaw = nil
 	}
 	resp.Header.SetCanonical(strContentEncoding, strDeflate)
 	return nil
