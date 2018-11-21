@@ -621,9 +621,6 @@ type clientConn struct {
 
 	createdTime time.Time
 	lastUseTime time.Time
-
-	lastReadDeadlineTime  time.Time
-	lastWriteDeadlineTime time.Time
 }
 
 var startTimeUnix = time.Now().Unix()
@@ -1113,16 +1110,12 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	conn := cc.c
 
 	if c.WriteTimeout > 0 {
-		// Optimization: update write deadline only if more than 25%
-		// of the last write deadline exceeded.
-		// See https://github.com/golang/go/issues/15133 for details.
+		// Set Deadline every time, since golang has fixed the performance issue
+		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
 		currentTime := time.Now()
-		if currentTime.Sub(cc.lastWriteDeadlineTime) > (c.WriteTimeout >> 2) {
-			if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
-				c.closeConn(cc)
-				return true, err
-			}
-			cc.lastWriteDeadlineTime = currentTime
+		if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
+			c.closeConn(cc)
+			return true, err
 		}
 	}
 
@@ -1154,16 +1147,12 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	c.releaseWriter(bw)
 
 	if c.ReadTimeout > 0 {
-		// Optimization: update read deadline only if more than 25%
-		// of the last read deadline exceeded.
-		// See https://github.com/golang/go/issues/15133 for details.
+		// Set Deadline every time, since golang has fixed the performance issue
+		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
 		currentTime := time.Now()
-		if currentTime.Sub(cc.lastReadDeadlineTime) > (c.ReadTimeout >> 2) {
-			if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
-				c.closeConn(cc)
-				return true, err
-			}
-			cc.lastReadDeadlineTime = currentTime
+		if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
+			c.closeConn(cc)
+			return true, err
 		}
 	}
 
@@ -1354,13 +1343,6 @@ var clientConnPool sync.Pool
 
 func (c *HostClient) releaseConn(cc *clientConn) {
 	cc.lastUseTime = time.Now()
-	//reset read and write deadline for reuse
-	if c.ReadTimeout > 0 {
-		cc.c.SetReadDeadline(time.Time{})
-	}
-	if c.WriteTimeout > 0 {
-		cc.c.SetWriteDeadline(time.Time{})
-	}
 	
 	c.connsLock.Lock()
 	c.conns = append(c.conns, cc)
@@ -2027,8 +2009,6 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}) error
 
 		w   *pipelineWork
 		err error
-
-		lastWriteDeadlineTime time.Time
 	)
 	close(instantTimerCh)
 	for {
@@ -2061,17 +2041,13 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}) error
 		}
 
 		if writeTimeout > 0 {
-			// Optimization: update write deadline only if more than 25%
-			// of the last write deadline exceeded.
-			// See https://github.com/golang/go/issues/15133 for details.
+			// Set Deadline every time, since golang has fixed the performance issue
+			// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
 			currentTime := time.Now()
-			if currentTime.Sub(lastWriteDeadlineTime) > (writeTimeout >> 2) {
-				if err = conn.SetWriteDeadline(currentTime.Add(writeTimeout)); err != nil {
-					w.err = err
-					w.done <- struct{}{}
-					return err
-				}
-				lastWriteDeadlineTime = currentTime
+			if err = conn.SetWriteDeadline(currentTime.Add(writeTimeout)); err != nil {
+				w.err = err
+				w.done <- struct{}{}
+				return err
 			}
 		}
 		if err = w.req.Write(bw); err != nil {
@@ -2125,8 +2101,6 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}) error
 	var (
 		w   *pipelineWork
 		err error
-
-		lastReadDeadlineTime time.Time
 	)
 	for {
 		select {
@@ -2142,17 +2116,13 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}) error
 		}
 
 		if readTimeout > 0 {
-			// Optimization: update read deadline only if more than 25%
-			// of the last read deadline exceeded.
-			// See https://github.com/golang/go/issues/15133 for details.
+			// Set Deadline every time, since golang has fixed the performance issue
+			// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
 			currentTime := time.Now()
-			if currentTime.Sub(lastReadDeadlineTime) > (readTimeout >> 2) {
-				if err = conn.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
-					w.err = err
-					w.done <- struct{}{}
-					return err
-				}
-				lastReadDeadlineTime = currentTime
+			if err = conn.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
+				w.err = err
+				w.done <- struct{}{}
+				return err
 			}
 		}
 		if err = w.resp.Read(br); err != nil {
