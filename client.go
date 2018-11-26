@@ -971,7 +971,6 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	// usually continue execution on the host.
 
 	var cleanup int32
-	atomic.StoreInt32(&cleanup, 0)
 	go func() {
 		errDo := c.Do(reqCopy, respCopy)
 		if atomic.LoadInt32(&cleanup) == 1 {
