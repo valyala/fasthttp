@@ -1747,6 +1747,13 @@ func (s *Server) GetCurrentConcurrency() uint32 {
 	return atomic.LoadUint32(&s.concurrency)
 }
 
+// GetOpenConnectionsCount returns a number of opened connections.
+//
+// This function is intended be used by monitoring systems
+func (s *Server) GetOpenConnectionsCount() int32 {
+	return atomic.LoadInt32(&s.open) - 1
+}
+
 func (s *Server) getConcurrency() int {
 	n := s.Concurrency
 	if n <= 0 {
