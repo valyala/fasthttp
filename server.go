@@ -302,6 +302,10 @@ type Server struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
+	// DisableSleepWhenConcurrencyLimitsExceeded
+	// when set to true the server immediately tries to accept new connections.
+	DisableSleepWhenConcurrencyLimitsExceeded bool //concurrency limit
+
 	// NoDefaultServerHeader, when set to true, causes the default Server header
 	// to be excluded from the Response.
 	//
@@ -1566,7 +1570,9 @@ func (s *Server) Serve(ln net.Listener) error {
 			//
 			// There is a hope other servers didn't reach their
 			// concurrency limits yet :)
-			time.Sleep(100 * time.Millisecond)
+			if !s.DisableSleepWhenConcurrencyLimitsExceeded {
+				time.Sleep(100 * time.Millisecond)
+			}
 		}
 		c = nil
 	}
