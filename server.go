@@ -16,6 +16,10 @@ import (
 	"time"
 )
 
+const (
+	defaultSleepDurationWhenConcurrenyLimitExceeded = time.Millisecond * 100
+)
+
 var errNoCertOrKeyProvided = errors.New("Cert or key has not provided")
 
 var (
@@ -302,9 +306,11 @@ type Server struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
-	// DisableSleepWhenConcurrencyLimitsExceeded
-	// when set to true the server immediately tries to accept new connections.
-	DisableSleepWhenConcurrencyLimitsExceeded bool //concurrency limit
+	// SleepWhenConcurrencyLimitsExceeded is a duration to be slept of if
+	// the concurrency limit in exceeded (default [when is 0]: 100ms;
+	// any negative value to disable the sleeping and accept new connections
+	// immidiatelly).
+	SleepWhenConcurrencyLimitsExceeded time.Duration
 
 	// NoDefaultServerHeader, when set to true, causes the default Server header
 	// to be excluded from the Response.
@@ -1570,8 +1576,12 @@ func (s *Server) Serve(ln net.Listener) error {
 			//
 			// There is a hope other servers didn't reach their
 			// concurrency limits yet :)
-			if !s.DisableSleepWhenConcurrencyLimitsExceeded {
-				time.Sleep(100 * time.Millisecond)
+			sleepDuration := s.SleepWhenConcurrencyLimitsExceeded
+			if sleepDuration == 0 {
+				sleepDuration = defaultSleepDurationWhenConcurrenyLimitExceeded
+			}
+			if sleepDuration > 0 {
+				time.Sleep(sleepDuration)
 			}
 		}
 		c = nil
