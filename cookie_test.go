@@ -76,7 +76,7 @@ func TestCookieSecure(t *testing.T) {
 	if err := c.Parse("foo=bar"); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
-	if c.HTTPOnly() {
+	if c.Secure() {
 		t.Fatalf("Unexpected secure flag set")
 	}
 	s = c.String()
