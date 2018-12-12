@@ -53,13 +53,16 @@ var (
 	strRange            = []byte("Range")
 	strContentRange     = []byte("Content-Range")
 
-	strCookieExpires  = []byte("expires")
-	strCookieDomain   = []byte("domain")
-	strCookiePath     = []byte("path")
-	strCookieHTTPOnly = []byte("HttpOnly")
-	strCookieSecure   = []byte("secure")
-	strCookieMaxAge   = []byte("max-age")
-
+	strCookieExpires        = []byte("expires")
+	strCookieDomain         = []byte("domain")
+	strCookiePath           = []byte("path")
+	strCookieHTTPOnly       = []byte("HttpOnly")
+	strCookieSecure         = []byte("secure")
+	strCookieMaxAge         = []byte("max-age")
+	strCookieSameSite       = []byte("SameSite")
+	strCookieSameSiteLax    = []byte("Lax")
+	strCookieSameSiteStrict = []byte("Strict")
+	
 	strClose               = []byte("close")
 	strGzip                = []byte("gzip")
 	strDeflate             = []byte("deflate")
