@@ -302,6 +302,11 @@ type Server struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
+	// SleepWhenConcurrencyLimitsExceeded is a duration to be slept of if
+	// the concurrency limit in exceeded (default [when is 0]: don't sleep
+	// and accept new connections immidiatelly).
+	SleepWhenConcurrencyLimitsExceeded time.Duration
+
 	// NoDefaultServerHeader, when set to true, causes the default Server header
 	// to be excluded from the Response.
 	//
@@ -1566,7 +1571,11 @@ func (s *Server) Serve(ln net.Listener) error {
 			//
 			// There is a hope other servers didn't reach their
 			// concurrency limits yet :)
-			time.Sleep(100 * time.Millisecond)
+			//
+			// See also: https://github.com/valyala/fasthttp/pull/485#discussion_r239994990
+			if s.SleepWhenConcurrencyLimitsExceeded > 0 {
+				time.Sleep(s.SleepWhenConcurrencyLimitsExceeded)
+			}
 		}
 		c = nil
 	}
@@ -1739,6 +1748,13 @@ var errHijacked = errors.New("connection has been hijacked")
 // This function is intended be used by monitoring systems
 func (s *Server) GetCurrentConcurrency() uint32 {
 	return atomic.LoadUint32(&s.concurrency)
+}
+
+// GetOpenConnectionsCount returns a number of opened connections.
+//
+// This function is intended be used by monitoring systems
+func (s *Server) GetOpenConnectionsCount() int32 {
+	return atomic.LoadInt32(&s.open) - 1
 }
 
 func (s *Server) getConcurrency() int {
