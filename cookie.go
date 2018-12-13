@@ -18,6 +18,20 @@ var (
 	CookieExpireUnlimited = zeroTime
 )
 
+// CookieSameSite is an enum for the mode in which the SameSite flag should be set for the given cookie.
+// See https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site-00 for details.
+type CookieSameSite int
+const (
+	// CookieSameSiteDisabled removes the SameSite flag
+	CookieSameSiteDisabled CookieSameSite = iota
+	// CookieSameSiteDefaultMode sets the SameSite flag
+	CookieSameSiteDefaultMode
+	// CookieSameSiteLaxMode sets the SameSite flag with the "Lax" parameter
+	CookieSameSiteLaxMode
+	// CookieSameSiteStrictMode sets the SameSite flag with the "Strict" parameter
+	CookieSameSiteStrictMode
+)
+
 // AcquireCookie returns an empty Cookie object from the pool.
 //
 // The returned object may be returned back to the pool with ReleaseCookie.
@@ -58,6 +72,7 @@ type Cookie struct {
 
 	httpOnly bool
 	secure   bool
+	sameSite CookieSameSite
 
 	bufKV argsKV
 	buf   []byte
@@ -74,6 +89,7 @@ func (c *Cookie) CopyTo(src *Cookie) {
 	c.path = append(c.path[:0], src.path...)
 	c.httpOnly = src.httpOnly
 	c.secure = src.secure
+	c.sameSite = src.sameSite
 }
 
 // HTTPOnly returns true if the cookie is http only.
@@ -94,6 +110,16 @@ func (c *Cookie) Secure() bool {
 // SetSecure sets cookie's secure flag to the given value.
 func (c *Cookie) SetSecure(secure bool) {
 	c.secure = secure
+}
+
+// SameSite returns the SameSite mode.
+func (c *Cookie) SameSite() CookieSameSite {
+	return c.sameSite
+}
+
+// SetSameSite sets the cookie's SameSite flag to the given value.
+func (c *Cookie) SetSameSite(mode CookieSameSite) {
+	c.sameSite = mode
 }
 
 // Path returns cookie path.
@@ -209,6 +235,7 @@ func (c *Cookie) Reset() {
 	c.path = c.path[:0]
 	c.httpOnly = false
 	c.secure = false
+	c.sameSite = CookieSameSiteDisabled
 }
 
 // AppendBytes appends cookie representation to dst and returns
@@ -245,6 +272,21 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 	if c.secure {
 		dst = append(dst, ';', ' ')
 		dst = append(dst, strCookieSecure...)
+	}
+	switch c.sameSite {
+	case CookieSameSiteDefaultMode:
+		dst = append(dst, ';', ' ')
+		dst = append(dst, strCookieSameSite...)
+	case CookieSameSiteLaxMode:
+		dst = append(dst, ';', ' ')
+		dst = append(dst, strCookieSameSite...)
+		dst = append(dst, '=')
+		dst = append(dst, strCookieSameSiteLax...)
+	case CookieSameSiteStrictMode:
+		dst = append(dst, ';', ' ')
+		dst = append(dst, strCookieSameSite...)
+		dst = append(dst, '=')
+		dst = append(dst, strCookieSameSiteStrict...)
 	}
 	return dst
 }
@@ -330,6 +372,21 @@ func (c *Cookie) ParseBytes(src []byte) error {
 				if caseInsensitiveCompare(strCookiePath, kv.key) {
 					c.path = append(c.path[:0], kv.value...)
 				}
+
+			case 's': // "samesite"
+				if caseInsensitiveCompare(strCookieSameSite, kv.key) {
+					// Case insensitive switch on first char
+					switch kv.value[0] | 0x20 {
+					case 'l': // "lax"
+						if caseInsensitiveCompare(strCookieSameSiteLax, kv.value) {
+							c.sameSite = CookieSameSiteLaxMode
+						}
+					case 's': // "strict"
+						if caseInsensitiveCompare(strCookieSameSiteStrict, kv.value) {
+							c.sameSite = CookieSameSiteStrictMode
+						}
+					}
+				}
 			}
 
 		} else if len(kv.value) != 0 {
@@ -343,6 +400,8 @@ func (c *Cookie) ParseBytes(src []byte) error {
 			case 's': // "secure"
 				if caseInsensitiveCompare(strCookieSecure, kv.value) {
 					c.secure = true
+				} else if caseInsensitiveCompare(strCookieSameSite, kv.value) {
+					c.sameSite = CookieSameSiteDefaultMode
 				}
 			}
 		} // else empty or no match
