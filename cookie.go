@@ -18,11 +18,17 @@ var (
 	CookieExpireUnlimited = zeroTime
 )
 
+// CookieSameSite is an enum for the mode in which the SameSite flag should be set for the given cookie.
+// See https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site-00 for details.
 type CookieSameSite int
 const (
+	// CookieSameSiteDisabled removes the SameSite flag
 	CookieSameSiteDisabled CookieSameSite = iota
+	// CookieSameSiteDefaultMode sets the SameSite flag
 	CookieSameSiteDefaultMode
+	// CookieSameSiteLaxMode sets the SameSite flag with the "Lax" parameter
 	CookieSameSiteLaxMode
+	// CookieSameSiteStrictMode sets the SameSite flag with the "Strict" parameter
 	CookieSameSiteStrictMode
 )
 
