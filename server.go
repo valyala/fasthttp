@@ -1869,7 +1869,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		if err != nil {
 			if err == io.EOF {
 				err = nil
-			} else if connRequestNum > 1 && err == errNothingRead {
+			} else if connRequestNum >= 1 && err == errNothingRead {
 				// This is not the first request and we haven't read a single byte
 				// of a new request yet. This means it's just a keep-alive connection
 				// closing down either because the remote closed it or because
