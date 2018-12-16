@@ -2108,8 +2108,6 @@ func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
 }
 
 func (s *Server) releaseHijackConn(hjc *hijackConn) {
-	hjc.Conn = nil
-	hjc.r = nil
 	s.hijackConnPool.Put(hjc)
 }
 
