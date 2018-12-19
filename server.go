@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -327,6 +328,8 @@ type Server struct {
 	// called when a client connection changes state. See the
 	// ConnState type and associated constants for details.
 	ConnState func(net.Conn, ConnState)
+
+	WorkerChannelCapacity uint32
 
 	// Logger, which is used by RequestCtx.Logger().
 	//
@@ -1533,6 +1536,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		LogAllErrors:    s.LogAllErrors,
 		Logger:          s.logger(),
 		connState:       s.setState,
+		WorkerChannelCapacity: s.getWorkerChannelCapacity(),
 	}
 	wp.Start()
 
@@ -1762,6 +1766,26 @@ func (s *Server) getConcurrency() int {
 	if n <= 0 {
 		n = DefaultConcurrency
 	}
+	return n
+}
+
+func (s *Server) getWorkerChannelCapacity() uint32 {
+	n := s.WorkerChannelCapacity
+
+	if n == 0 {
+		// Use blocking workerChan if GOMAXPROCS=1.
+		// This immediately switches Serve to WorkerFunc, which results
+		// in higher performance (under go1.5 at least).
+		if runtime.GOMAXPROCS(0) == 1 {
+			n = 0
+		}
+
+		// Use non-blocking workerChan if GOMAXPROCS>1,
+		// since otherwise the Serve caller (Acceptor) may lag accepting
+		// new connections if WorkerFunc is CPU-bound.
+		n = 1
+	}
+
 	return n
 }
 
