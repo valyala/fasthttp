@@ -62,7 +62,7 @@ var (
 	strCookieSameSite       = []byte("SameSite")
 	strCookieSameSiteLax    = []byte("Lax")
 	strCookieSameSiteStrict = []byte("Strict")
-	
+
 	strClose               = []byte("close")
 	strGzip                = []byte("gzip")
 	strDeflate             = []byte("deflate")

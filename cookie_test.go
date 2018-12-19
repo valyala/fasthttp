@@ -98,7 +98,7 @@ func TestCookieSameSite(t *testing.T) {
 	if !strings.Contains(s, "; SameSite") {
 		t.Fatalf("missing SameSite flag in cookie %q", s)
 	}
-	
+
 	if err := c.Parse("foo=bar; samesite=lax"); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -109,7 +109,7 @@ func TestCookieSameSite(t *testing.T) {
 	if !strings.Contains(s, "; SameSite=Lax") {
 		t.Fatalf("missing SameSite flag in cookie %q", s)
 	}
-	
+
 	if err := c.Parse("foo=bar; samesite=strict"); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -120,7 +120,7 @@ func TestCookieSameSite(t *testing.T) {
 	if !strings.Contains(s, "; SameSite=Strict") {
 		t.Fatalf("missing SameSite flag in cookie %q", s)
 	}
-	
+
 	if err := c.Parse("foo=bar"); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
