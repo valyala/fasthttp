@@ -1778,12 +1778,12 @@ func (s *Server) getWorkerChannelCapacity() uint32 {
 		// in higher performance (under go1.5 at least).
 		if runtime.GOMAXPROCS(0) == 1 {
 			n = 0
+		} else {
+			// Use non-blocking workerChan if GOMAXPROCS>1,
+			// since otherwise the Serve caller (Acceptor) may lag accepting
+			// new connections if WorkerFunc is CPU-bound.
+			n = 1
 		}
-
-		// Use non-blocking workerChan if GOMAXPROCS>1,
-		// since otherwise the Serve caller (Acceptor) may lag accepting
-		// new connections if WorkerFunc is CPU-bound.
-		n = 1
 	}
 
 	return n
