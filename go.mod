@@ -1,4 +1,4 @@
-module github.com/valyala/fasthttp
+module github.com/vijayviji/fasthttp
 
 require (
 	github.com/klauspost/compress v1.4.0
