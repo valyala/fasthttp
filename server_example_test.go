@@ -7,7 +7,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/valyala/fasthttp"
+	"github.com/vijayviji/fasthttp"
 )
 
 func ExampleListenAndServe() {
