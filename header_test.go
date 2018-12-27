@@ -1277,6 +1277,47 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 	}
 }
 
+func TestResponseHeaderVisitAllInOrder(t *testing.T) {
+	var h RequestHeader
+
+	r := bytes.NewBufferString("GET / HTTP/1.1\r\nContent-Type: aa\r\nCookie: a=b\r\nHost: example.com\r\nUser-Agent: xxx\r\n\r\n")
+	br := bufio.NewReader(r)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("Unepxected error: %s", err)
+	}
+
+	if h.Len() != 4 {
+		t.Fatalf("Unexpected number of headers: %d. Expected 4", h.Len())
+	}
+
+	order := []string{
+		"Content-Type",
+		"Cookie",
+		"Host",
+		"User-Agent",
+	}
+	values := []string{
+		"aa",
+		"a=b",
+		"example.com",
+		"xxx",
+	}
+
+	h.VisitAllInOrder(func(key, value []byte) {
+		if len(order) == 0 {
+			t.Fatalf("no more headers expected, got %q", key)
+		}
+		if order[0] != string(key) {
+			t.Fatalf("expected header %q got %q", order[0], key)
+		}
+		if values[0] != string(value) {
+			t.Fatalf("expected header value %q got %q", values[0], value)
+		}
+		order = order[1:]
+		values = values[1:]
+	})
+}
+
 func TestResponseHeaderCookie(t *testing.T) {
 	var h ResponseHeader
 	var c Cookie
