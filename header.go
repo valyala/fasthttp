@@ -778,6 +778,8 @@ func (h *RequestHeader) VisitAllCookie(f func(key, value []byte)) {
 //
 // f must not retain references to key and/or value after returning.
 // Copy key and/or value contents before returning if you need retaining them.
+//
+// To get the headers in order they were received use VisitAllInOrder.
 func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 	h.parseRawHeaders()
 	host := h.Host()
@@ -804,6 +806,25 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 	visitArgs(h.h, f)
 	if h.ConnectionClose() {
 		f(strConnection, strClose)
+	}
+}
+
+// VisitAllInOrder calls f for each header in the order they were received.
+//
+// f must not retain references to key and/or value after returning.
+// Copy key and/or value contents before returning if you need retaining them.
+//
+// This function is slightly slower than VisitAll because it has to reparse the
+// raw headers to get the order.
+func (h *RequestHeader) VisitAllInOrder(f func(key, value []byte)) {
+	h.parseRawHeaders()
+	var s headerScanner
+	s.b = h.rawHeaders
+	s.disableNormalizing = h.disableNormalizing
+	for s.next() {
+		if len(s.key) > 0 {
+			f(s.key, s.value)
+		}
 	}
 }
 
