@@ -430,6 +430,7 @@ func (s *argsScanner) next(kv *argsKV) bool {
 		return false
 	}
 
+	kv.noValue = false
 	isKey := true
 	k := 0
 	for i, c := range s.b {
