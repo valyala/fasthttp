@@ -45,8 +45,9 @@ type Args struct {
 }
 
 type argsKV struct {
-	key   []byte
-	value []byte
+	key   	[]byte
+	value  	[]byte
+	noValue	bool
 }
 
 // Reset clears query args.
@@ -114,9 +115,11 @@ func (a *Args) AppendBytes(dst []byte) []byte {
 	for i, n := 0, len(a.args); i < n; i++ {
 		kv := &a.args[i]
 		dst = AppendQuotedArg(dst, kv.key)
-		dst = append(dst, '=')
-		if len(kv.value) > 0 {
-			dst = AppendQuotedArg(dst, kv.value)
+		if kv.noValue == false {
+			dst = append(dst, '=')
+			if len(kv.value) > 0 {
+				dst = AppendQuotedArg(dst, kv.value)
+			}
 		}
 		if i+1 < n {
 			dst = append(dst, '&')
@@ -323,6 +326,7 @@ func copyArgs(dst, src []argsKV) []argsKV {
 		srcKV := &src[i]
 		dstKV.key = append(dstKV.key[:0], srcKV.key...)
 		dstKV.value = append(dstKV.value[:0], srcKV.value...)
+		dstKV.noValue = srcKV.noValue
 	}
 	return dst
 }
@@ -440,6 +444,7 @@ func (s *argsScanner) next(kv *argsKV) bool {
 			if isKey {
 				kv.key = decodeArgAppend(kv.key[:0], s.b[:i])
 				kv.value = kv.value[:0]
+				kv.noValue = true
 			} else {
 				kv.value = decodeArgAppend(kv.value[:0], s.b[k:i])
 			}
@@ -451,6 +456,7 @@ func (s *argsScanner) next(kv *argsKV) bool {
 	if isKey {
 		kv.key = decodeArgAppend(kv.key[:0], s.b)
 		kv.value = kv.value[:0]
+		kv.noValue = true
 	} else {
 		kv.value = decodeArgAppend(kv.value[:0], s.b[k:])
 	}
