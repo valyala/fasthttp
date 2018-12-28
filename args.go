@@ -374,6 +374,7 @@ func appendArg(args []argsKV, key, value string) []argsKV {
 	args, kv = allocArg(args)
 	kv.key = append(kv.key[:0], key...)
 	kv.value = append(kv.value[:0], value...)
+	kv.noValue = false
 	return args
 }
 
