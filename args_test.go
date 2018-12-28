@@ -37,22 +37,24 @@ func TestArgsAdd(t *testing.T) {
 	a.Add("foo", "baz")
 	a.Add("foo", "1")
 	a.Add("ba", "23")
-	if a.Len() != 4 {
-		t.Fatalf("unexpected number of elements: %d. Expecting 4", a.Len())
+	a.Add("foo", "")
+	a.AddNoValue("foo")
+	if a.Len() != 6 {
+		t.Fatalf("unexpected number of elements: %d. Expecting 6", a.Len())
 	}
 	s := a.String()
-	expectedS := "foo=bar&foo=baz&foo=1&ba=23"
+	expectedS := "foo=bar&foo=baz&foo=1&ba=23&foo=&foo"
 	if s != expectedS {
 		t.Fatalf("unexpected result: %q. Expecting %q", s, expectedS)
 	}
 
 	var a1 Args
 	a1.Parse(s)
-	if a1.Len() != 4 {
-		t.Fatalf("unexpected number of elements: %d. Expecting 4", a.Len())
+	if a1.Len() != 6 {
+		t.Fatalf("unexpected number of elements: %d. Expecting 6", a.Len())
 	}
 
-	var barFound, bazFound, oneFound, baFound bool
+	var barFound, bazFound, oneFound, emptyFound1, emptyFound2, baFound bool
 	a1.VisitAll(func(k, v []byte) {
 		switch string(k) {
 		case "foo":
@@ -63,6 +65,12 @@ func TestArgsAdd(t *testing.T) {
 				bazFound = true
 			case "1":
 				oneFound = true
+			case "":
+				if emptyFound1 {
+					emptyFound2 = true
+				} else {
+					emptyFound1 = true
+				}
 			default:
 				t.Fatalf("unexpected value %q", v)
 			}
@@ -75,8 +83,8 @@ func TestArgsAdd(t *testing.T) {
 			t.Fatalf("unexpected key found %q", k)
 		}
 	})
-	if !barFound || !bazFound || !oneFound || !baFound {
-		t.Fatalf("something is missing: %v, %v, %v, %v", barFound, bazFound, oneFound, baFound)
+	if !barFound || !bazFound || !oneFound || !emptyFound1 || !emptyFound2 || !baFound {
+		t.Fatalf("something is missing: %v, %v, %v, %v, %v, %v", barFound, bazFound, oneFound, emptyFound1, emptyFound2, baFound)
 	}
 }
 
@@ -303,10 +311,12 @@ func TestArgsStringCompose(t *testing.T) {
 	a.Set("foo", "bar")
 	a.Set("aa", "bbb")
 	a.Set("привет", "мир")
+	a.SetNoValue("bb")
 	a.Set("", "xxxx")
 	a.Set("cvx", "")
+	a.SetNoValue("novalue")
 
-	expectedS := "foo=bar&aa=bbb&%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82=%D0%BC%D0%B8%D1%80&=xxxx&cvx="
+	expectedS := "foo=bar&aa=bbb&%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82=%D0%BC%D0%B8%D1%80&bb&=xxxx&cvx=&novalue"
 	s := a.String()
 	if s != expectedS {
 		t.Fatalf("Unexpected string %q. Exected %q", s, expectedS)
