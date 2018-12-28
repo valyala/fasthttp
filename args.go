@@ -179,14 +179,16 @@ func (a *Args) AddBytesKV(key, value []byte) {
 	a.args = appendArg(a.args, b2s(key), b2s(value), ArgsHasValue)
 }
 
-// Add adds 'key' argument.
+// AddNoValue adds only 'key' argument.
 //
 // Multiple values for the same key may be added.
+// Different with Add empty string, like key1=&key1=
+// Only key in argumemt, like key1&key1
 func (a *Args) AddNoValue(key string) {
 	a.args = appendArg(a.args, key, "", ArgsNoValue)
 }
 
-// AddBytesK adds 'key' argument.
+// AddBytesKNoValue adds 'key' argument.
 //
 // Multiple values for the same key may be added.
 func (a *Args) AddBytesKNoValue(key []byte) {
@@ -213,12 +215,15 @@ func (a *Args) SetBytesKV(key, value []byte) {
 	a.args = setArgBytes(a.args, key, value, ArgsHasValue)
 }
 
-// Set sets 'key' argument.
+// SetNoValue sets only 'key' argument.
+// 
+// Different with Set empty string, like key1=&key2=
+// Only key in argumemt, like key1&key2
 func (a *Args) SetNoValue(key string) {
 	a.args = setArg(a.args, key, "", ArgsNoValue)
 }
 
-// SetBytesK sets 'key' argument.
+// SetBytesKNoValue sets 'key' argument.
 func (a *Args) SetBytesKNoValue(key []byte) {
 	a.args = setArg(a.args, b2s(key), "", ArgsNoValue)
 }
