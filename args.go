@@ -120,7 +120,7 @@ func (a *Args) AppendBytes(dst []byte) []byte {
 	for i, n := 0, len(a.args); i < n; i++ {
 		kv := &a.args[i]
 		dst = AppendQuotedArg(dst, kv.key)
-		if ArgsHasValue == kv.noValue {
+		if kv.noValue == ArgsHasValue {
 			dst = append(dst, '=')
 			if len(kv.value) > 0 {
 				dst = AppendQuotedArg(dst, kv.value)
