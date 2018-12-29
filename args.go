@@ -179,16 +179,14 @@ func (a *Args) AddBytesKV(key, value []byte) {
 	a.args = appendArg(a.args, b2s(key), b2s(value), ArgsHasValue)
 }
 
-// AddNoValue adds only 'key' argument.
+// AddNoValue adds only 'key' as argument without the '='.
 //
 // Multiple values for the same key may be added.
-// Different with Add empty string, like key1=&key1=
-// Only key in argumemt, like key1&key1
 func (a *Args) AddNoValue(key string) {
 	a.args = appendArg(a.args, key, "", ArgsNoValue)
 }
 
-// AddBytesKNoValue adds 'key' argument.
+// AddBytesKNoValue adds only 'key' as argument without the '='.
 //
 // Multiple values for the same key may be added.
 func (a *Args) AddBytesKNoValue(key []byte) {
@@ -215,9 +213,8 @@ func (a *Args) SetBytesKV(key, value []byte) {
 	a.args = setArgBytes(a.args, key, value, ArgsHasValue)
 }
 
-// SetNoValue sets only 'key' argument.
-// 
-// Different with Set empty string, like key1=&key2=
+// SetNoValue sets only 'key' as argument without the '='.
+//
 // Only key in argumemt, like key1&key2
 func (a *Args) SetNoValue(key string) {
 	a.args = setArg(a.args, key, "", ArgsNoValue)
@@ -359,7 +356,7 @@ func copyArgs(dst, src []argsKV) []argsKV {
 		dstKV := &dst[i]
 		srcKV := &src[i]
 		dstKV.key = append(dstKV.key[:0], srcKV.key...)
-		if ArgsNoValue == srcKV.noValue {
+		if srcKV.noValue == ArgsNoValue {
 			dstKV.value = dstKV.value[:0]
 		} else {
 			dstKV.value = append(dstKV.value[:0], srcKV.value...)
@@ -396,7 +393,7 @@ func setArg(h []argsKV, key, value string, noValue bool) []argsKV {
 	for i := 0; i < n; i++ {
 		kv := &h[i]
 		if key == string(kv.key) {
-			if ArgsNoValue == noValue {
+			if noValue == ArgsNoValue {
 				kv.value = kv.value[:0]
 			} else {
 				kv.value = append(kv.value[:0], value...)
@@ -416,7 +413,7 @@ func appendArg(args []argsKV, key, value string, noValue bool) []argsKV {
 	var kv *argsKV
 	args, kv = allocArg(args)
 	kv.key = append(kv.key[:0], key...)
-	if ArgsNoValue == noValue {
+	if noValue == ArgsNoValue {
 		kv.value = kv.value[:0]
 	} else {
 		kv.value = append(kv.value[:0], value...)
