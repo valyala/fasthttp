@@ -48,6 +48,12 @@ func TestArgsAdd(t *testing.T) {
 		t.Fatalf("unexpected result: %q. Expecting %q", s, expectedS)
 	}
 
+	ss := a.StringSort()
+	expectedSS := "ba=23&foo=1&foo=bar&foo=baz"
+	if ss != expectedSS {
+		t.Fatalf("unexpected result: %q. Expecting %q", ss, expectedSS)
+	}
+
 	var a1 Args
 	a1.Parse(s)
 	if a1.Len() != 6 {
