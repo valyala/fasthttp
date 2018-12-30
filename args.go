@@ -136,12 +136,10 @@ func (a *Args) QueryStringSort() []byte {
 func (a *Args) AppendBytesSort(dst []byte) []byte {
 	sort.SliceStable(a.args, func(i, j int) bool {
 		n := bytes.Compare(a.args[i].key, a.args[j].key)
-		if n == -1 {
-			return true
-		} else if n == 0 {
+		if n == 0 {
 			return bytes.Compare(a.args[i].value, a.args[j].value) == -1
 		}
-		return false
+		return n == -1
 	})
 	return a.AppendBytes(dst)
 }
