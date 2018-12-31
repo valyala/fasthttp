@@ -9,6 +9,11 @@ import (
 	"github.com/valyala/bytebufferpool"
 )
 
+const (
+	argsNoValue = true
+	argsHasValue = false
+)
+
 // AcquireArgs returns an empty Args object from the pool.
 //
 // The returned Args may be returned to the pool with ReleaseArgs
@@ -45,8 +50,9 @@ type Args struct {
 }
 
 type argsKV struct {
-	key   []byte
-	value []byte
+	key     []byte
+	value   []byte
+	noValue bool
 }
 
 // Reset clears query args.
@@ -114,9 +120,11 @@ func (a *Args) AppendBytes(dst []byte) []byte {
 	for i, n := 0, len(a.args); i < n; i++ {
 		kv := &a.args[i]
 		dst = AppendQuotedArg(dst, kv.key)
-		if len(kv.value) > 0 {
+		if kv.noValue == argsHasValue {
 			dst = append(dst, '=')
-			dst = AppendQuotedArg(dst, kv.value)
+			if len(kv.value) > 0 {
+				dst = AppendQuotedArg(dst, kv.value)
+			}
 		}
 		if i+1 < n {
 			dst = append(dst, '&')
@@ -147,48 +155,74 @@ func (a *Args) DelBytes(key []byte) {
 //
 // Multiple values for the same key may be added.
 func (a *Args) Add(key, value string) {
-	a.args = appendArg(a.args, key, value)
+	a.args = appendArg(a.args, key, value, argsHasValue)
 }
 
 // AddBytesK adds 'key=value' argument.
 //
 // Multiple values for the same key may be added.
 func (a *Args) AddBytesK(key []byte, value string) {
-	a.args = appendArg(a.args, b2s(key), value)
+	a.args = appendArg(a.args, b2s(key), value, argsHasValue)
 }
 
 // AddBytesV adds 'key=value' argument.
 //
 // Multiple values for the same key may be added.
 func (a *Args) AddBytesV(key string, value []byte) {
-	a.args = appendArg(a.args, key, b2s(value))
+	a.args = appendArg(a.args, key, b2s(value), argsHasValue)
 }
 
 // AddBytesKV adds 'key=value' argument.
 //
 // Multiple values for the same key may be added.
 func (a *Args) AddBytesKV(key, value []byte) {
-	a.args = appendArg(a.args, b2s(key), b2s(value))
+	a.args = appendArg(a.args, b2s(key), b2s(value), argsHasValue)
+}
+
+// AddNoValue adds only 'key' as argument without the '='.
+//
+// Multiple values for the same key may be added.
+func (a *Args) AddNoValue(key string) {
+	a.args = appendArg(a.args, key, "", argsNoValue)
+}
+
+// AddBytesKNoValue adds only 'key' as argument without the '='.
+//
+// Multiple values for the same key may be added.
+func (a *Args) AddBytesKNoValue(key []byte) {
+	a.args = appendArg(a.args, b2s(key), "", argsNoValue)
 }
 
 // Set sets 'key=value' argument.
 func (a *Args) Set(key, value string) {
-	a.args = setArg(a.args, key, value)
+	a.args = setArg(a.args, key, value, argsHasValue)
 }
 
 // SetBytesK sets 'key=value' argument.
 func (a *Args) SetBytesK(key []byte, value string) {
-	a.args = setArg(a.args, b2s(key), value)
+	a.args = setArg(a.args, b2s(key), value, argsHasValue)
 }
 
 // SetBytesV sets 'key=value' argument.
 func (a *Args) SetBytesV(key string, value []byte) {
-	a.args = setArg(a.args, key, b2s(value))
+	a.args = setArg(a.args, key, b2s(value), argsHasValue)
 }
 
 // SetBytesKV sets 'key=value' argument.
 func (a *Args) SetBytesKV(key, value []byte) {
-	a.args = setArgBytes(a.args, key, value)
+	a.args = setArgBytes(a.args, key, value, argsHasValue)
+}
+
+// SetNoValue sets only 'key' as argument without the '='.
+//
+// Only key in argumemt, like key1&key2
+func (a *Args) SetNoValue(key string) {
+	a.args = setArg(a.args, key, "", argsNoValue)
+}
+
+// SetBytesKNoValue sets 'key' argument.
+func (a *Args) SetBytesKNoValue(key []byte) {
+	a.args = setArg(a.args, b2s(key), "", argsNoValue)
 }
 
 // Peek returns query arg value for the given key.
@@ -322,7 +356,12 @@ func copyArgs(dst, src []argsKV) []argsKV {
 		dstKV := &dst[i]
 		srcKV := &src[i]
 		dstKV.key = append(dstKV.key[:0], srcKV.key...)
-		dstKV.value = append(dstKV.value[:0], srcKV.value...)
+		if srcKV.noValue == argsNoValue {
+			dstKV.value = dstKV.value[:0]
+		} else {
+			dstKV.value = append(dstKV.value[:0], srcKV.value...)
+		}
+		dstKV.noValue = srcKV.noValue
 	}
 	return dst
 }
@@ -345,31 +384,41 @@ func delAllArgs(args []argsKV, key string) []argsKV {
 	return args
 }
 
-func setArgBytes(h []argsKV, key, value []byte) []argsKV {
-	return setArg(h, b2s(key), b2s(value))
+func setArgBytes(h []argsKV, key, value []byte, noValue bool) []argsKV {
+	return setArg(h, b2s(key), b2s(value), noValue)
 }
 
-func setArg(h []argsKV, key, value string) []argsKV {
+func setArg(h []argsKV, key, value string, noValue bool) []argsKV {
 	n := len(h)
 	for i := 0; i < n; i++ {
 		kv := &h[i]
 		if key == string(kv.key) {
-			kv.value = append(kv.value[:0], value...)
+			if noValue == argsNoValue {
+				kv.value = kv.value[:0]
+			} else {
+				kv.value = append(kv.value[:0], value...)
+			}
+			kv.noValue = noValue
 			return h
 		}
 	}
-	return appendArg(h, key, value)
+	return appendArg(h, key, value, noValue)
 }
 
-func appendArgBytes(h []argsKV, key, value []byte) []argsKV {
-	return appendArg(h, b2s(key), b2s(value))
+func appendArgBytes(h []argsKV, key, value []byte, noValue bool) []argsKV {
+	return appendArg(h, b2s(key), b2s(value), noValue)
 }
 
-func appendArg(args []argsKV, key, value string) []argsKV {
+func appendArg(args []argsKV, key, value string, noValue bool) []argsKV {
 	var kv *argsKV
 	args, kv = allocArg(args)
 	kv.key = append(kv.key[:0], key...)
-	kv.value = append(kv.value[:0], value...)
+	if noValue == argsNoValue {
+		kv.value = kv.value[:0]
+	} else {
+		kv.value = append(kv.value[:0], value...)
+	}
+	kv.noValue = noValue
 	return args
 }
 
@@ -425,6 +474,7 @@ func (s *argsScanner) next(kv *argsKV) bool {
 	if len(s.b) == 0 {
 		return false
 	}
+	kv.noValue = argsHasValue
 
 	isKey := true
 	k := 0
@@ -440,6 +490,7 @@ func (s *argsScanner) next(kv *argsKV) bool {
 			if isKey {
 				kv.key = decodeArgAppend(kv.key[:0], s.b[:i])
 				kv.value = kv.value[:0]
+				kv.noValue = argsNoValue
 			} else {
 				kv.value = decodeArgAppend(kv.value[:0], s.b[k:i])
 			}
@@ -451,6 +502,7 @@ func (s *argsScanner) next(kv *argsKV) bool {
 	if isKey {
 		kv.key = decodeArgAppend(kv.key[:0], s.b)
 		kv.value = kv.value[:0]
+		kv.noValue = argsNoValue
 	} else {
 		kv.value = decodeArgAppend(kv.value[:0], s.b[k:])
 	}
