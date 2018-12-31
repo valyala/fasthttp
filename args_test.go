@@ -50,7 +50,7 @@ func TestArgsAdd(t *testing.T) {
 
 	a.Sort()
 	ss := a.String()
-	expectedSS := "ba=23&foo=1&foo=bar&foo=baz"
+	expectedSS := "ba=23&foo=&foo&foo=1&foo=bar&foo=baz"
 	if ss != expectedSS {
 		t.Fatalf("unexpected result: %q. Expecting %q", ss, expectedSS)
 	}
