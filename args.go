@@ -110,24 +110,8 @@ func (a *Args) QueryString() []byte {
 	return a.buf
 }
 
-// String returns string representation of query args
-// which ASCII sorted by key, value.
-func (a *Args) StringSort() string {
-	return string(a.QueryStringSort())
-}
-
-// QueryString returns query string which ASCII sorted by key, value
-// for the args.
-//
-// The returned value is valid until the next call to Args methods.
-func (a *Args) QueryStringSort() []byte {
-	a.buf = a.AppendBytesSort(a.buf[:0])
-	return a.buf
-}
-
-// AppendBytes appends query string to dst and returns the extended dst
-// which ASCII sorted by key, value.
-func (a *Args) AppendBytesSort(dst []byte) []byte {
+// Sort change args order which ASCII sorted by key, value.
+func (a *Args) Sort() {
 	sort.SliceStable(a.args, func(i, j int) bool {
 		n := bytes.Compare(a.args[i].key, a.args[j].key)
 		if n == 0 {
@@ -135,7 +119,6 @@ func (a *Args) AppendBytesSort(dst []byte) []byte {
 		}
 		return n == -1
 	})
-	return a.AppendBytes(dst)
 }
 
 // AppendBytes appends query string to dst and returns the extended dst.
