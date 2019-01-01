@@ -1,6 +1,7 @@
 package fasthttp
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 	"strings"
@@ -48,7 +49,13 @@ func TestArgsAdd(t *testing.T) {
 		t.Fatalf("unexpected result: %q. Expecting %q", s, expectedS)
 	}
 
-	a.Sort()
+	a.Sort(func(i, j int) bool {
+		n := bytes.Compare(a.args[i].key, a.args[j].key)
+		if n == 0 {
+			return bytes.Compare(a.args[i].value, a.args[j].value) == -1
+		}
+		return n == -1
+	})
 	ss := a.String()
 	expectedSS := "ba=23&foo=&foo&foo=1&foo=bar&foo=baz"
 	if ss != expectedSS {

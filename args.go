@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	argsNoValue = true
+	argsNoValue  = true
 	argsHasValue = false
 )
 
@@ -116,15 +116,10 @@ func (a *Args) QueryString() []byte {
 	return a.buf
 }
 
-// Sort change args order which ASCII sorted by key, value.
-func (a *Args) Sort() {
-	sort.SliceStable(a.args, func(i, j int) bool {
-		n := bytes.Compare(a.args[i].key, a.args[j].key)
-		if n == 0 {
-			return bytes.Compare(a.args[i].value, a.args[j].value) == -1
-		}
-		return n == -1
-	})
+// Sort sorts the Args the provided less function
+// while keeping the original order of equal elements.
+func (a *Args) Sort(less func(i, j int) bool) {
+	sort.SliceStable(a.args, less)
 }
 
 // AppendBytes appends query string to dst and returns the extended dst.
