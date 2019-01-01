@@ -116,10 +116,15 @@ func (a *Args) QueryString() []byte {
 	return a.buf
 }
 
-// Sort sorts the Args the provided less function
-// while keeping the original order of equal elements.
-func (a *Args) Sort(less func(i, j int) bool) {
-	sort.SliceStable(a.args, less)
+// Sort sorts Args lexicographically by key and then value.
+func (a *Args) Sort(f func(x, y []byte) int) {
+	sort.SliceStable(a.args, func(i, j int) bool {
+		n := f(a.args[i].key, a.args[j].key)
+		if n == 0 {
+			return f(a.args[i].value, a.args[j].value) == -1
+		}
+		return n == -1
+	})
 }
 
 // AppendBytes appends query string to dst and returns the extended dst.
