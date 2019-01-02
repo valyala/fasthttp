@@ -116,7 +116,9 @@ func (a *Args) QueryString() []byte {
 	return a.buf
 }
 
-// Sort sorts Args lexicographically by key and then value.
+// Sort sorts Args by key and then value using 'f' as comparison function.
+//
+// For example args.Sort(bytes.Compare)
 func (a *Args) Sort(f func(x, y []byte) int) {
 	sort.SliceStable(a.args, func(i, j int) bool {
 		n := f(a.args[i].key, a.args[j].key)
