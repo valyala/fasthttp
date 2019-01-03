@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -21,6 +22,77 @@ import (
 
 // Make sure RequestCtx implements context.Context
 var _ context.Context = &RequestCtx{}
+
+func TestServerConnState(t *testing.T) {
+	states := make([]string, 0)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {},
+		ConnState: func(conn net.Conn, state ConnState) {
+			states = append(states, state.String())
+		},
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	serverCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverCh)
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		br := bufio.NewReader(c)
+		// Send 2 requests on the same connection.
+		for i := 0; i < 2; i++ {
+			if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			var resp Response
+			if err := resp.Read(br); err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			if resp.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+			}
+		}
+		if err := c.Close(); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		// Give the server a little bit of time to transition the connection to the close state.
+		time.Sleep(time.Millisecond * 100)
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	select {
+	case <-serverCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	// 2 requests so we go to active and idle twice.
+	expected := []string{"new", "active", "idle", "active", "idle", "closed"}
+
+	if !reflect.DeepEqual(expected, states) {
+		t.Fatalf("wrong state, expected %s, got %s", expected, states)
+	}
+}
 
 func TestSaveMultipartFile(t *testing.T) {
 	filea := "This is a test file."
