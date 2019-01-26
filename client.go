@@ -60,6 +60,11 @@ func Do(req *Request, resp *Response) error {
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// Warning: DoTimeout does not terminate the request itself. The request will
+// continue in the background and the response will be discarded.
+// If requests take too long and the connection pool gets filled up please
+// try using a Client and setting a ReadTimeout.
 func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return defaultClient.DoTimeout(req, resp, timeout)
 }
@@ -316,6 +321,11 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// Warning: DoTimeout does not terminate the request itself. The request will
+// continue in the background and the response will be discarded.
+// If requests take too long and the connection pool gets filled up please
+// try setting a ReadTimeout.
 func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return clientDoTimeout(req, resp, timeout, c)
 }
@@ -917,6 +927,11 @@ func ReleaseResponse(resp *Response) {
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// Warning: DoTimeout does not terminate the request itself. The request will
+// continue in the background and the response will be discarded.
+// If requests take too long and the connection pool gets filled up please
+// try setting a ReadTimeout.
 func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return clientDoTimeout(req, resp, timeout, c)
 }
@@ -1719,6 +1734,11 @@ type pipelineWork struct {
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// Warning: DoTimeout does not terminate the request itself. The request will
+// continue in the background and the response will be discarded.
+// If requests take too long and the connection pool gets filled up please
+// try setting a ReadTimeout.
 func (c *PipelineClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return c.DoDeadline(req, resp, time.Now().Add(timeout))
 }
