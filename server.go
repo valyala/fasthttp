@@ -1986,8 +1986,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 
 		if hijackHandler != nil {
-			var hjr io.Reader
-			hjr = c
+			var hjr io.Reader = c
 			if br != nil {
 				hjr = br
 				br = nil
