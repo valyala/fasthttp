@@ -98,7 +98,7 @@ func TestCookieSameSite(t *testing.T) {
 	if !strings.Contains(s, "; SameSite") {
 		t.Fatalf("missing SameSite flag in cookie %q", s)
 	}
-	
+
 	if err := c.Parse("foo=bar; samesite=lax"); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -109,7 +109,7 @@ func TestCookieSameSite(t *testing.T) {
 	if !strings.Contains(s, "; SameSite=Lax") {
 		t.Fatalf("missing SameSite flag in cookie %q", s)
 	}
-	
+
 	if err := c.Parse("foo=bar; samesite=strict"); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -120,7 +120,7 @@ func TestCookieSameSite(t *testing.T) {
 	if !strings.Contains(s, "; SameSite=Strict") {
 		t.Fatalf("missing SameSite flag in cookie %q", s)
 	}
-	
+
 	if err := c.Parse("foo=bar"); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -333,8 +333,9 @@ func TestAppendRequestCookieBytes(t *testing.T) {
 }
 
 func testAppendRequestCookieBytes(t *testing.T, s, expectedS string) {
-	var cookies []argsKV
-	for _, ss := range strings.Split(s, "&") {
+	kvs := strings.Split(s, "&")
+	cookies := make([]argsKV, 0, len(kvs))
+	for _, ss := range kvs {
 		tmp := strings.SplitN(ss, "=", 2)
 		if len(tmp) != 2 {
 			t.Fatalf("Cannot find '=' in %q, part of %q", ss, s)
