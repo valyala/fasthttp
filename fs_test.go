@@ -534,7 +534,7 @@ func TestFSHandlerSingleThread(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read dirnames in cwd: %s", err)
 	}
-	sort.Sort(sort.StringSlice(filenames))
+	sort.Strings(filenames)
 
 	for i := 0; i < 3; i++ {
 		fsHandlerTest(t, requestHandler, filenames)
@@ -554,7 +554,7 @@ func TestFSHandlerConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read dirnames in cwd: %s", err)
 	}
-	sort.Sort(sort.StringSlice(filenames))
+	sort.Strings(filenames)
 
 	concurrency := 10
 	ch := make(chan struct{}, concurrency)
