@@ -1833,7 +1833,7 @@ Content-Type: application/json
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	if string(w.Bytes()) != s {
+	if w.String() != s {
 		t.Fatalf("unexpected output %q", w.Bytes())
 	}
 }

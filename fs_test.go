@@ -172,7 +172,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 		t.Fatalf("expected %d bytes, got %d bytes", len(teststr), n)
 	}
 
-	body := string(buf.Bytes())
+	body := buf.String()
 	if body != teststr {
 		t.Fatalf("expected '%s'", teststr)
 	}
