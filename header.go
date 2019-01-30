@@ -73,7 +73,8 @@ type RequestHeader struct {
 
 	rawHeaders []byte
 
-	// stores an immutable copy of headers as they were recieved from the wire.
+	// stores an immutable copy of headers as they were received from the
+	// wire.
 	rawHeadersCopy []byte
 }
 
