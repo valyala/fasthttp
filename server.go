@@ -1599,25 +1599,29 @@ func (s *Server) Shutdown() error {
 	atomic.StoreInt32(&s.stop, 1)
 	defer atomic.StoreInt32(&s.stop, 0)
 
-	if s.ln == nil {
-		return nil
-	}
-
-	if err := s.ln.Close(); err != nil {
-		return err
-	}
-
 	// Closing the listener will make Serve() call Stop on the worker pool.
 	// Setting .stop to 1 will make serveConn() break out of its loop.
 	// Now we just have to wait until all workers are done.
 	for {
-		if open := atomic.LoadInt32(&s.open); open == 0 {
+		// Checking the .open to ensure all active connections had finished. 
+		// NOTE: The .open keeping the number of the active connections which
+		// include the server connection itself. That is, the .open will be 
+		// 1 + <active client connections> on a runnig server. 
+		if open := atomic.LoadInt32(&s.open); open <= 1 {
 			break
 		}
 		// This is not an optimal solution but using a sync.WaitGroup
 		// here causes data races as it's hard to prevent Add() to be called
 		// while Wait() is waiting.
 		time.Sleep(time.Millisecond * 100)
+	}
+
+	if s.ln == nil {
+		return nil
+	}
+
+	if err := s.ln.Close(); err != nil {
+		return err
 	}
 
 	s.ln = nil
