@@ -2722,12 +2722,11 @@ func TestServeConnMultiRequests(t *testing.T) {
 
 func TestShutdown(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
-	h := func(ctx *RequestCtx) {
-		time.Sleep(time.Millisecond * 500)
-		ctx.Success("aaa/bbb", []byte("real response"))
-	}
 	s := &Server{
-		Handler: h,
+		Handler: func(ctx *RequestCtx) {
+			time.Sleep(time.Millisecond * 500)
+			ctx.Success("aaa/bbb", []byte("real response"))
+		},
 	}
 	serveCh := make(chan struct{})
 	go func() {
@@ -2778,13 +2777,13 @@ func TestShutdown(t *testing.T) {
 		}
 	}
 }
+
 func TestShutdownReuse(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
-	h := func(ctx *RequestCtx) {
-		ctx.Success("aaa/bbb", []byte("real response"))
-	}
 	s := &Server{
-		Handler:     h,
+		Handler: func(ctx *RequestCtx) {
+			ctx.Success("aaa/bbb", []byte("real response"))
+		},
 		ReadTimeout: time.Second,
 		Logger:      &customLogger{}, // Ignore log output.
 	}
@@ -2823,6 +2822,39 @@ func TestShutdownReuse(t *testing.T) {
 	if err := s.Shutdown(); err != nil {
 		t.Fatalf("unexepcted error: %s", err)
 	}
+}
+
+func TestShutdownDone(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			<-ctx.Done()
+			ctx.Success("aaa/bbb", []byte("real response"))
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexepcted error: %s", err)
+		}
+	}()
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexepcted error: %s", err)
+	}
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	go func() {
+		// Shutdown won't return if the connection doesn't close,
+		// which doesn't happen until we read the response.
+		if err := s.Shutdown(); err != nil {
+			t.Fatalf("unexepcted error: %s", err)
+		}
+	}()
+	// We can only reach this point and get a valid response
+	// if reading from ctx.Done() returned.
+	br := bufio.NewReader(conn)
+	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 }
 
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) {

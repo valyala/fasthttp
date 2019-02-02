@@ -353,6 +353,7 @@ type Server struct {
 	mu   sync.Mutex
 	open int32
 	stop int32
+	done chan struct{}
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -1526,6 +1527,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		}
 
 		s.ln = ln
+		s.done = make(chan struct{})
 	}
 	s.mu.Unlock()
 
@@ -1605,6 +1607,10 @@ func (s *Server) Shutdown() error {
 
 	if err := s.ln.Close(); err != nil {
 		return err
+	}
+
+	if s.done != nil {
+		close(s.done)
 	}
 
 	// Closing the listener will make Serve() call Stop on the worker pool.
@@ -1824,11 +1830,6 @@ func (s *Server) serveConn(c net.Conn) error {
 		isHTTP11        bool
 	)
 	for {
-		if atomic.LoadInt32(&s.stop) == 1 {
-			err = nil
-			break
-		}
-
 		connRequestNum++
 		ctx.time = currentTime
 
@@ -2013,6 +2014,11 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		currentTime = time.Now()
 		s.setState(c, StateIdle)
+
+		if atomic.LoadInt32(&s.stop) == 1 {
+			err = nil
+			break
+		}
 	}
 
 	if br != nil {
@@ -2297,11 +2303,8 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // Done returns a channel that's closed when work done on behalf of this
 // context should be canceled. Done may return nil if this context can
 // never be canceled. Successive calls to Done return the same value.
-//
-// This method always returns nil and is only present to make
-// RequestCtx implement the context interface.
 func (ctx *RequestCtx) Done() <-chan struct{} {
-	return nil
+	return ctx.s.done
 }
 
 // Err returns a non-nil error value after Done is closed,
