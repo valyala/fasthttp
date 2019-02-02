@@ -958,7 +958,7 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 	base.CopyTo(&u)
 	u.Update(string(u.Path()) + "/")
 
-	sort.Sort(sort.StringSlice(filenames))
+	sort.Strings(filenames)
 	for _, name := range filenames {
 		u.Update(name)
 		pathEscaped := html.EscapeString(string(u.Path()))

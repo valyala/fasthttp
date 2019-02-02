@@ -72,9 +72,7 @@ func TestClientRedirectSameSchema(t *testing.T) {
 		return
 	}
 
-	var reqClient *HostClient
-
-	reqClient = &HostClient{
+	reqClient := &HostClient{
 		IsTLS: true,
 		Addr:  urlParsed.Host,
 		TLSConfig: &tls.Config{
@@ -117,9 +115,7 @@ func TestClientRedirectChangingSchemaHttp2Https(t *testing.T) {
 		return
 	}
 
-	var reqClient *HostClient
-
-	reqClient = &HostClient{
+	reqClient := &HostClient{
 		Addr: urlParsed.Host,
 		TLSConfig: &tls.Config{
 			InsecureSkipVerify: true,

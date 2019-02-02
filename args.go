@@ -134,7 +134,7 @@ func (a *Args) AppendBytes(dst []byte) []byte {
 	for i, n := 0, len(a.args); i < n; i++ {
 		kv := &a.args[i]
 		dst = AppendQuotedArg(dst, kv.key)
-		if kv.noValue == argsHasValue {
+		if !kv.noValue {
 			dst = append(dst, '=')
 			if len(kv.value) > 0 {
 				dst = AppendQuotedArg(dst, kv.value)
@@ -370,7 +370,7 @@ func copyArgs(dst, src []argsKV) []argsKV {
 		dstKV := &dst[i]
 		srcKV := &src[i]
 		dstKV.key = append(dstKV.key[:0], srcKV.key...)
-		if srcKV.noValue == argsNoValue {
+		if srcKV.noValue {
 			dstKV.value = dstKV.value[:0]
 		} else {
 			dstKV.value = append(dstKV.value[:0], srcKV.value...)
@@ -407,7 +407,7 @@ func setArg(h []argsKV, key, value string, noValue bool) []argsKV {
 	for i := 0; i < n; i++ {
 		kv := &h[i]
 		if key == string(kv.key) {
-			if noValue == argsNoValue {
+			if noValue {
 				kv.value = kv.value[:0]
 			} else {
 				kv.value = append(kv.value[:0], value...)
@@ -427,7 +427,7 @@ func appendArg(args []argsKV, key, value string, noValue bool) []argsKV {
 	var kv *argsKV
 	args, kv = allocArg(args)
 	kv.key = append(kv.key[:0], key...)
-	if noValue == argsNoValue {
+	if noValue {
 		kv.value = kv.value[:0]
 	} else {
 		kv.value = append(kv.value[:0], value...)

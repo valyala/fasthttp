@@ -395,7 +395,7 @@ func TestRequestUpdateURI(t *testing.T) {
 	if !strings.HasPrefix(s, "GET /123/432.html?aaa=bcse") {
 		t.Fatalf("cannot find %q in %q", "GET /123/432.html?aaa=bcse", s)
 	}
-	if strings.Index(s, "\r\nHost: foobar.com\r\n") < 0 {
+	if !strings.Contains(s, "\r\nHost: foobar.com\r\n") {
 		t.Fatalf("cannot find %q in %q", "\r\nHost: foobar.com\r\n", s)
 	}
 }
@@ -1833,7 +1833,7 @@ Content-Type: application/json
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	if string(w.Bytes()) != s {
+	if w.String() != s {
 		t.Fatalf("unexpected output %q", w.Bytes())
 	}
 }

@@ -172,7 +172,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 		t.Fatalf("expected %d bytes, got %d bytes", len(teststr), n)
 	}
 
-	body := string(buf.Bytes())
+	body := buf.String()
 	if body != teststr {
 		t.Fatalf("expected '%s'", teststr)
 	}
@@ -534,7 +534,7 @@ func TestFSHandlerSingleThread(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read dirnames in cwd: %s", err)
 	}
-	sort.Sort(sort.StringSlice(filenames))
+	sort.Strings(filenames)
 
 	for i := 0; i < 3; i++ {
 		fsHandlerTest(t, requestHandler, filenames)
@@ -554,7 +554,7 @@ func TestFSHandlerConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read dirnames in cwd: %s", err)
 	}
-	sort.Sort(sort.StringSlice(filenames))
+	sort.Strings(filenames)
 
 	concurrency := 10
 	ch := make(chan struct{}, concurrency)
