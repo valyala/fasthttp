@@ -65,10 +65,7 @@ func (cj *CookieJar) getFrom(host string, res *Response) {
 		res.Header.VisitAllCookie(func(key, value []byte) {
 			cookie := AcquireCookie()
 			cookie.SetKeyBytes(key)
-			if !res.Header.Cookie(cookie) {
-				// TODO: error?
-				cookie.ParseBytes(value)
-			}
+			cookie.ParseBytes(value)
 			cookies = append(cookies, cookie)
 		})
 		cj.hostCookies[host] = cookies
