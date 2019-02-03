@@ -750,7 +750,7 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 		}
 	}()
 
-	tc := acquireTimer(timeout)
+	tc := AcquireTimer(timeout)
 	select {
 	case resp := <-ch:
 		ReleaseRequest(req)
@@ -762,7 +762,7 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 		body = dst
 		err = ErrTimeout
 	}
-	releaseTimer(tc)
+	ReleaseTimer(tc)
 
 	return statusCode, body, err
 }
@@ -1003,7 +1003,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 		}
 	}()
 
-	tc := acquireTimer(timeout)
+	tc := AcquireTimer(timeout)
 	var err error
 	select {
 	case err = <-ch:
@@ -1019,7 +1019,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 		atomic.StoreInt32(&cleanup, 1)
 		err = ErrTimeout
 	}
-	releaseTimer(tc)
+	ReleaseTimer(tc)
 
 	return err
 }

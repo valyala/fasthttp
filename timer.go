@@ -26,7 +26,7 @@ func stopTimer(t *time.Timer) {
 	}
 }
 
-func acquireTimer(timeout time.Duration) *time.Timer {
+func AcquireTimer(timeout time.Duration) *time.Timer {
 	v := timerPool.Get()
 	if v == nil {
 		return time.NewTimer(timeout)
@@ -36,7 +36,7 @@ func acquireTimer(timeout time.Duration) *time.Timer {
 	return t
 }
 
-func releaseTimer(t *time.Timer) {
+func ReleaseTimer(t *time.Timer) {
 	stopTimer(t)
 	timerPool.Put(t)
 }
