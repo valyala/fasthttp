@@ -206,14 +206,14 @@ func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyC
 	select {
 	case concurrencyCh <- struct{}{}:
 	default:
-		tc := acquireTimer(timeout)
+		tc := AcquireTimer(timeout)
 		isTimeout := false
 		select {
 		case concurrencyCh <- struct{}{}:
 		case <-tc.C:
 			isTimeout = true
 		}
-		releaseTimer(tc)
+		ReleaseTimer(tc)
 		if isTimeout {
 			return nil, ErrDialTimeout
 		}
@@ -242,7 +242,7 @@ func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyC
 		err  error
 	)
 
-	tc := acquireTimer(timeout)
+	tc := AcquireTimer(timeout)
 	select {
 	case dr := <-ch:
 		conn = dr.conn
@@ -251,7 +251,7 @@ func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyC
 	case <-tc.C:
 		err = ErrDialTimeout
 	}
-	releaseTimer(tc)
+	ReleaseTimer(tc)
 
 	return conn, err
 }
