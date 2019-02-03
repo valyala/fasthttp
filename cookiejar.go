@@ -6,7 +6,7 @@ import (
 
 // CookieJar manages cookie storage
 type CookieJar struct {
-	m           sync.RWMutex
+	m           sync.Mutex
 	hostCookies map[string][]*Cookie
 }
 
@@ -14,14 +14,14 @@ type CookieJar struct {
 //
 // If there were no cookies related with host returned slice will be nil.
 func (cj *CookieJar) Get(host string) (cookies []*Cookie) {
-	cj.m.RLock()
+	cj.m.Lock()
 	{
 		if cj.hostCookies == nil {
 			cj.hostCookies = make(map[string][]*Cookie)
 		}
 		cookies = cj.hostCookies[host]
 	}
-	cj.m.RUnlock()
+	cj.m.Unlock()
 	return
 }
 
@@ -39,13 +39,13 @@ func (cj *CookieJar) Set(host string, cookies ...*Cookie) {
 	cj.m.Unlock()
 }
 
-func (cj *CookieJar) dumpTo(host string, req *Request) {
+func (cj *CookieJar) dumpTo(host []byte, req *Request) {
 	cj.m.Lock()
 	{
 		if cj.hostCookies == nil {
 			cj.hostCookies = make(map[string][]*Cookie)
 		}
-		cookies, ok := cj.hostCookies[host]
+		cookies, ok := cj.hostCookies[b2s(host)]
 		if ok {
 			for _, cookie := range cookies {
 				req.Header.SetCookieBytesKV(cookie.Key(), cookie.Value())
@@ -55,20 +55,21 @@ func (cj *CookieJar) dumpTo(host string, req *Request) {
 	cj.m.Unlock()
 }
 
-func (cj *CookieJar) getFrom(host string, res *Response) {
+func (cj *CookieJar) getFrom(host []byte, res *Response) {
 	cj.m.Lock()
 	{
+		hs := string(host)
 		if cj.hostCookies == nil {
 			cj.hostCookies = make(map[string][]*Cookie)
 		}
-		cookies := cj.hostCookies[host]
+		cookies := cj.hostCookies[hs]
 		res.Header.VisitAllCookie(func(key, value []byte) {
 			cookie := AcquireCookie()
 			cookie.SetKeyBytes(key)
 			cookie.ParseBytes(value)
 			cookies = append(cookies, cookie)
 		})
-		cj.hostCookies[host] = cookies
+		cj.hostCookies[hs] = cookies
 	}
 	cj.m.Unlock()
 }
