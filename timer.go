@@ -26,6 +26,10 @@ func stopTimer(t *time.Timer) {
 	}
 }
 
+// AcquireTimer returns an time.Timer from the pool.
+//
+// The returned Timer may be returned to the pool with ReleaseTimer
+// when no longer needed. This allows reducing GC load.
 func AcquireTimer(timeout time.Duration) *time.Timer {
 	v := timerPool.Get()
 	if v == nil {
@@ -36,6 +40,9 @@ func AcquireTimer(timeout time.Duration) *time.Timer {
 	return t
 }
 
+// ReleaseTimer returns the time.Timer acquired via AcquireTimer to the pool.
+//
+// Do not access the released time.Timer, otherwise data races may occur.
 func ReleaseTimer(t *time.Timer) {
 	stopTimer(t)
 	timerPool.Put(t)
