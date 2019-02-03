@@ -23,7 +23,7 @@ func AcquireArgs() *Args {
 	return argsPool.Get().(*Args)
 }
 
-// ReleaseArgs returns the object acquired via AquireArgs to the pool.
+// ReleaseArgs returns the object acquired via AcquireArgs to the pool.
 //
 // Do not access the released Args object, otherwise data races may occur.
 func ReleaseArgs(a *Args) {
