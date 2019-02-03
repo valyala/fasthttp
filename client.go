@@ -408,7 +408,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			c.m = m
 		}
 	}
-	hc := m[b2s(host)]
+	hc := m[string(host)]
 	if hc == nil {
 		hc = &HostClient{
 			Addr:                          addMissingPort(string(host), isTLS),
@@ -429,7 +429,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			MaxResponseBodySize:           c.MaxResponseBodySize,
 			DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
 		}
-		m[b2s(host)] = hc
+		m[string(host)] = hc
 		if len(m) == 1 {
 			startCleaner = true
 		}
