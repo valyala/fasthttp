@@ -50,6 +50,44 @@ func TestClientPostArgs(t *testing.T) {
 	}
 }
 
+func TestClientCookieJar(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+	key, value := "cometo", "thefasthttpcon"
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			cookie := AcquireCookie()
+			cookie.SetKey(key)
+			cookie.SetValue(value)
+			ctx.Response.Header.SetCookie(cookie)
+		},
+	}
+	go s.Serve(ln)
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		CookieJar: &CookieJar{},
+	}
+	req := AcquireRequest()
+	res := AcquireResponse()
+	req.SetRequestURI("http://fasthttp.con/hello/world")
+	err := c.Do(req, res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := c.CookieJar.Get("fasthttp.con")
+	if len(cs) == 0 {
+		t.Fatalf("Unexpected len: %d", len(cs))
+	}
+
+	if k := string(cs[0].Key()); k != key {
+		t.Fatalf("Unexpected key: %s <> %s", k, key)
+	}
+	if v := string(cs[0].Value()); v != value {
+		t.Fatalf("Unexpected value: %s <> %s", v, value)
+	}
+}
+
 func TestClientRedirectSameSchema(t *testing.T) {
 
 	listenHTTPS1 := testClientRedirectListener(t, true)
