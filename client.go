@@ -1111,7 +1111,7 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 		resp = AcquireResponse()
 	}
 
-	host := b2s(req.Host())
+	host := req.Host()
 	if c.CookieJar != nil {
 		c.CookieJar.dumpTo(host, req)
 	}
