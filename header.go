@@ -1253,9 +1253,8 @@ func (h *RequestHeader) peek(key []byte) []byte {
 	case "Cookie":
 		if h.cookiesCollected {
 			return appendRequestCookieBytes(nil, h.cookies)
-		} else {
-			return peekArgBytes(h.h, key)
 		}
+		return peekArgBytes(h.h, key)
 	default:
 		return peekArgBytes(h.h, key)
 	}
