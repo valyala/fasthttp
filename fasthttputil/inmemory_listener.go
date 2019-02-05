@@ -31,7 +31,7 @@ func NewInmemoryListener() *InmemoryListener {
 func (ln *InmemoryListener) Accept() (net.Conn, error) {
 	c, ok := <-ln.conns
 	if !ok {
-		return nil, fmt.Errorf("InmemoryListener is already closed: use of closed network connection")
+		return nil, fmt.Errorf("inmemoryListener is already closed: use of closed network connection")
 	}
 	return c, nil
 }
@@ -45,7 +45,7 @@ func (ln *InmemoryListener) Close() error {
 		close(ln.conns)
 		ln.closed = true
 	} else {
-		err = fmt.Errorf("InmemoryListener is already closed")
+		err = fmt.Errorf("inmemoryListener is already closed")
 	}
 	ln.lock.Unlock()
 	return err
@@ -78,7 +78,7 @@ func (ln *InmemoryListener) Dial() (net.Conn, error) {
 	ln.lock.Unlock()
 
 	if cConn == nil {
-		return nil, fmt.Errorf("InmemoryListener is already closed")
+		return nil, fmt.Errorf("inmemoryListener is already closed")
 	}
 	return cConn, nil
 }

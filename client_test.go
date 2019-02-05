@@ -435,7 +435,7 @@ func TestClientDoWithCustomHeaders(t *testing.T) {
 			return
 		}
 		if string(req.Header.Method()) != "POST" {
-			ch <- fmt.Errorf("unexpected request method: %q. Expecting %q", req.Header.Method(), "POST")
+			ch <- fmt.Errorf("unexpected request method: %q. Expecting %q", req.Header.Method(), "pOST")
 			return
 		}
 		reqURI := req.RequestURI()
