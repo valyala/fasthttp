@@ -544,6 +544,8 @@ type HostClient struct {
 	// Maximum number of connections which may be established to all hosts
 	// listed in Addr.
 	//
+	// It is safe to change this value using atomic.StoreUint64()
+	//
 	// DefaultMaxConnsPerHost is used if not set.
 	MaxConns uint64
 
