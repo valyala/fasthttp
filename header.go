@@ -1874,7 +1874,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 response unless 'Connection: keep-alive' is set.
 		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive) && !hasHeaderValue(v, strKeepAliveCamelCase)
+		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
 	}
 
 	return len(buf) - len(s.b), nil
@@ -1947,7 +1947,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
 		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive) && !hasHeaderValue(v, strKeepAliveCamelCase)
+		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
 	}
 	return s.hLen, nil
 }
