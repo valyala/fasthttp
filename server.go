@@ -1986,6 +1986,10 @@ func (s *Server) serveConn(c net.Conn) error {
 		if connectionClose {
 			break
 		}
+		if s.ReduceMemoryUsage {
+			releaseWriter(s, bw)
+			bw = nil
+		}
 
 		if hijackHandler != nil {
 			var hjr io.Reader = c
@@ -1997,12 +2001,8 @@ func (s *Server) serveConn(c net.Conn) error {
 				ctx = s.acquireCtx(c)
 			}
 			if bw != nil {
-				err = bw.Flush()
 				releaseWriter(s, bw)
 				bw = nil
-				if err != nil {
-					break
-				}
 			}
 			c.SetReadDeadline(zeroTime)
 			c.SetWriteDeadline(zeroTime)
