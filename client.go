@@ -413,7 +413,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			DialDualStack:                 c.DialDualStack,
 			IsTLS:                         isTLS,
 			TLSConfig:                     c.TLSConfig,
-			MaxConns:                      uint64(c.MaxConnsPerHost),
+			MaxConns:                      c.MaxConnsPerHost,
 			MaxIdleConnDuration:           c.MaxIdleConnDuration,
 			MaxIdemponentCallAttempts:     c.MaxIdemponentCallAttempts,
 			ReadBufferSize:                c.ReadBufferSize,
@@ -544,10 +544,11 @@ type HostClient struct {
 	// Maximum number of connections which may be established to all hosts
 	// listed in Addr.
 	//
-	// It is safe to change this value using atomic.StoreUint64()
+	// You can change this value while the HostClient is being used
+	// using HostClient.SetMaxConns(value)
 	//
 	// DefaultMaxConnsPerHost is used if not set.
-	MaxConns uint64
+	MaxConns int
 
 	// Keep-alive connections are closed after this duration.
 	//
@@ -616,7 +617,7 @@ type HostClient struct {
 	lastUseTime uint32
 
 	connsLock  sync.Mutex
-	connsCount uint64
+	connsCount int
 	conns      []*clientConn
 
 	addrsLock sync.Mutex
@@ -1240,8 +1241,10 @@ var (
 		"Make sure the server returns 'Connection: close' response header before closing the connection")
 )
 
-func (c *HostClient) getMaxConns() uint64 {
-	return atomic.LoadUint64(&c.MaxConns)
+func (c *HostClient) SetMaxConns(newMaxConns int) {
+	c.connsLock.Lock()
+	c.MaxConns = newMaxConns
+	c.connsLock.Unlock()
 }
 
 func (c *HostClient) acquireConn() (*clientConn, error) {
@@ -1253,7 +1256,7 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 	c.connsLock.Lock()
 	n = len(c.conns)
 	if n == 0 {
-		maxConns := c.getMaxConns()
+		maxConns := c.MaxConns
 		if maxConns <= 0 {
 			maxConns = DefaultMaxConnsPerHost
 		}
