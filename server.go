@@ -166,6 +166,13 @@ type Server struct {
 	//   * ErrBrokenChunks
 	ErrorHandler func(ctx *RequestCtx, err error)
 
+	// ResponseErrorHandler is called in case of an error while writing the response
+	//
+	// Useful if you want to log details of write failures for compliance and
+	// business critical requests
+	// The handler doesn't need to modify the response
+	ResponseErrorHandler func(ctx *RequestCtx, err error)
+
 	// Server name for sending in response headers.
 	//
 	// Default server name is used if left blank.
@@ -1976,11 +1983,19 @@ func (s *Server) serveConn(c net.Conn) error {
 			bw = acquireWriter(ctx)
 		}
 		if err = writeResponse(ctx, bw); err != nil {
+			handler := s.ResponseErrorHandler
+			if handler != nil {
+				handler(ctx, err)
+			}
 			break
 		}
 
 		err = bw.Flush()
 		if err != nil {
+			handler := s.ResponseErrorHandler
+			if handler != nil {
+				handler(ctx, err)
+			}
 			break
 		}
 		if connectionClose {
