@@ -53,17 +53,10 @@ func (cj *CookieJar) Get(uri *URI) (rcs []*Cookie) {
 						rcs = copyCookies(cookies) // make a copy
 						for i := 0; i < len(rcs); i++ {
 							cookie := rcs[i]
-							if len(path) > 1 && len(cookie.path) > 1 { // path > "/"
-								// In this case calculating the len will be enough.
-								// if we have path = '/some/path' and cookie.Path() = '/some'
-								switch {
-								case len(path) > len(cookie.path): // path differs
-									fallthrough
-								case !bytes.HasPrefix(cookie.path, path):
-									rcs = append(rcs[:i], rcs[i+1:]...)
-									ReleaseCookie(cookie)
-									i--
-								}
+							if len(path) > 1 && len(cookie.path) > 1 && !bytes.HasPrefix(cookie.path, path) {
+								rcs = append(rcs[:i], rcs[i+1:]...)
+								ReleaseCookie(cookie)
+								i--
 							}
 						}
 					}
