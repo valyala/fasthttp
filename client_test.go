@@ -75,7 +75,11 @@ func TestClientCookieJar(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cs := c.CookieJar.Get("fasthttp.con")
+
+	uri := AcquireURI()
+	uri.SetHost("fasthttp.con")
+
+	cs := c.CookieJar.Get(uri)
 	if len(cs) == 0 {
 		t.Fatalf("Unexpected len: %d", len(cs))
 	}
