@@ -23,10 +23,6 @@ func (cj *CookieJar) init() {
 	cj.m.Unlock()
 }
 
-func hasPort(host []byte) bool {
-	return bytes.IndexByte(host, ':') > 0
-}
-
 func copyCookies(cookies []*Cookie) (cs []*Cookie) {
 	// TODO: Try to delete the allocations
 	cs = make([]*Cookie, 0, len(cookies))
@@ -41,6 +37,8 @@ func copyCookies(cookies []*Cookie) (cs []*Cookie) {
 // Get returns the cookies stored from a specific domain.
 //
 // If there were no cookies related with host returned slice will be nil.
+//
+// returned cookies can be released safely.
 func (cj *CookieJar) Get(uri *URI) (cookies []*Cookie) {
 	if uri != nil {
 		cookies = cj.get(uri.Host(), uri.Path())
@@ -56,28 +54,25 @@ func (cj *CookieJar) get(host, path []byte) (rcs []*Cookie) {
 		hostStr = b2s(host)
 	)
 	// port must not be included.
-	if hasPort(host) {
-		hostStr, _, err = net.SplitHostPort(hostStr)
+	hostStr, _, err = net.SplitHostPort(hostStr)
+	if err != nil {
+		hostStr = b2s(host)
 	}
-	if err == nil {
-		cj.m.Lock()
-		{
-			// get cookies deleting expired ones
-			cookies := cj.getCookies(hostStr)
-			if len(cookies) > 0 {
-				rcs = copyCookies(cookies) // make a copy
-				for i := 0; i < len(rcs); i++ {
-					cookie := rcs[i]
-					if len(path) > 1 && len(cookie.path) > 1 && !bytes.HasPrefix(cookie.path, path) {
-						rcs = append(rcs[:i], rcs[i+1:]...)
-						ReleaseCookie(cookie)
-						i--
-					}
-				}
+	cj.m.Lock()
+	{
+		// get cookies deleting expired ones
+		cookies := cj.getCookies(hostStr)
+		rcs = copyCookies(cookies)
+		for i := 0; i < len(rcs); i++ {
+			cookie := rcs[i]
+			if len(path) > 1 && len(cookie.path) > 1 && !bytes.HasPrefix(cookie.Path(), path) {
+				rcs = append(rcs[:i], rcs[i+1:]...)
+				ReleaseCookie(cookie)
+				i--
 			}
 		}
-		cj.m.Unlock()
 	}
+	cj.m.Unlock()
 	return
 }
 
@@ -90,7 +85,7 @@ func (cj *CookieJar) getCookies(hostStr string) []*Cookie {
 	)
 	for i := 0; i < len(cookies); i++ {
 		c := cookies[i]
-		if !c.expire.IsZero() && t.Sub(c.expire) > 0 { // expired
+		if !c.Expire().IsZero() && c.Expire().Before(t) { // cookie expired
 			cookies = append(cookies[:i], cookies[i+1:]...)
 			ReleaseCookie(c)
 			i--
@@ -183,21 +178,32 @@ func (cj *CookieJar) getFrom(host, path []byte, res *Response) {
 	cj.init()
 
 	hostStr := b2s(host)
-	cookies, ok := cj.hostCookies[hostStr]
-	if !ok {
-		// If the key does not exists in the map then
-		// we must make a copy for the key.
-		hostStr = string(host)
-	}
-	res.Header.VisitAllCookie(func(key, value []byte) {
-		c := searchCookieByKeyAndPath(key, path, cookies)
-		if c == nil {
-			c = AcquireCookie()
-			cookies = append(cookies, c)
+	cj.m.Lock()
+	{
+		cookies, ok := cj.hostCookies[hostStr]
+		if !ok {
+			// If the key does not exists in the map then
+			// we must make a copy for the key.
+			hostStr = string(host)
 		}
-		c.ParseBytes(value)
-	})
-	cj.hostCookies[hostStr] = cookies
+		t := time.Now()
+		res.Header.VisitAllCookie(func(key, value []byte) {
+			created := false
+			c := searchCookieByKeyAndPath(key, path, cookies)
+			if c == nil {
+				c = AcquireCookie()
+				created = true
+			}
+			c.ParseBytes(value)
+			if c.Expire().IsZero() || c.Expire().After(t) { // cookie expired
+				cookies = append(cookies, c)
+			} else if created {
+				ReleaseCookie(c)
+			}
+		})
+		cj.hostCookies[hostStr] = cookies
+	}
+	cj.m.Unlock()
 }
 
 func searchCookieByKeyAndPath(key, path []byte, cookies []*Cookie) (cookie *Cookie) {
