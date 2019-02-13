@@ -51,6 +51,7 @@ func (cj *CookieJar) get(host, path []byte) (rcs []*Cookie) {
 
 	var (
 		err     error
+		cookies []*Cookie
 		hostStr = b2s(host)
 	)
 	// port must not be included.
@@ -61,18 +62,19 @@ func (cj *CookieJar) get(host, path []byte) (rcs []*Cookie) {
 	cj.m.Lock()
 	{
 		// get cookies deleting expired ones
-		cookies := cj.getCookies(hostStr)
-		rcs = copyCookies(cookies)
-		for i := 0; i < len(rcs); i++ {
-			cookie := rcs[i]
-			if len(path) > 1 && len(cookie.path) > 1 && !bytes.HasPrefix(cookie.Path(), path) {
-				rcs = append(rcs[:i], rcs[i+1:]...)
-				ReleaseCookie(cookie)
-				i--
-			}
-		}
+		cookies = cj.getCookies(hostStr)
 	}
 	cj.m.Unlock()
+
+	rcs = make([]*Cookie, 0, len(cookies))
+	for i := 0; i < len(cookies); i++ {
+		cookie := cookies[i]
+		if len(path) > 1 && len(cookie.path) > 1 && !bytes.HasPrefix(cookie.Path(), path) {
+			continue
+		}
+		rcs = append(rcs, cookie)
+	}
+
 	return
 }
 
