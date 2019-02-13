@@ -1146,6 +1146,8 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	}
 	conn := cc.c
 
+	resp.parseNetConn(conn)
+
 	if c.WriteTimeout > 0 {
 		// Set Deadline every time, since golang has fixed the performance issue
 		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
@@ -2086,6 +2088,8 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}) error
 			w.done <- struct{}{}
 			continue
 		}
+
+		w.resp.parseNetConn(conn)
 
 		if writeTimeout > 0 {
 			// Set Deadline every time, since golang has fixed the performance issue
