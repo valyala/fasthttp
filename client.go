@@ -1111,15 +1111,14 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 		resp = AcquireResponse()
 	}
 
-	host := req.Host()
 	if c.CookieJar != nil {
-		c.CookieJar.dumpTo(host, req)
+		c.CookieJar.dumpTo(req)
 	}
 
 	ok, err := c.doNonNilReqResp(req, resp)
 
 	if c.CookieJar != nil {
-		c.CookieJar.getFrom(host, resp)
+		c.CookieJar.getFrom(req.Host(), req.URI().Path(), resp)
 	}
 
 	if nilResp {

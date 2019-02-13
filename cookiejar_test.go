@@ -227,7 +227,7 @@ func TestCookieJarGetFromResponse(t *testing.T) {
 	res.Header.SetCookie(c3)
 
 	cj := &CookieJar{}
-	cj.getFrom(host, res)
+	cj.getFrom(host, nil, res)
 
 	cookies := cj.Get(uri)
 	if len(cookies) != 3 {
