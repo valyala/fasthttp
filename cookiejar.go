@@ -85,7 +85,7 @@ func (cj *CookieJar) getCookies(hostStr string) []*Cookie {
 	)
 	for i := 0; i < len(cookies); i++ {
 		c := cookies[i]
-		if !c.Expire().IsZero() && c.Expire().Before(t) { // cookie expired
+		if !c.Expire().Equal(CookieExpireUnlimited) && c.Expire().Before(t) { // cookie expired
 			cookies = append(cookies[:i], cookies[i+1:]...)
 			ReleaseCookie(c)
 			i--
