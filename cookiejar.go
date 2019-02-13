@@ -2,7 +2,9 @@ package fasthttp
 
 import (
 	"bytes"
+	"net"
 	"sync"
+	"time"
 )
 
 // CookieJar manages cookie storage
@@ -11,43 +13,121 @@ type CookieJar struct {
 	hostCookies map[string][]*Cookie
 }
 
+func hasPort(host []byte) bool {
+	return bytes.IndexByte(host, ':') > 0
+}
+
+func copyCookies(cookies []*Cookie) (cs []*Cookie) {
+	// TODO: Try to delete the allocations
+	cs = make([]*Cookie, 0, len(cookies))
+	for _, cookie := range cookies {
+		c := AcquireCookie()
+		c.CopyTo(cookie)
+		cs = append(cs, c)
+	}
+	return
+}
+
 // Get returns the cookies stored from a specific domain.
 //
 // If there were no cookies related with host returned slice will be nil.
-func (cj *CookieJar) Get(host string) (cookies []*Cookie) {
-	cj.m.Lock()
-	{
-		if cj.hostCookies == nil {
-			cj.hostCookies = make(map[string][]*Cookie)
+func (cj *CookieJar) Get(uri *URI) (rcs []*Cookie) {
+	if uri != nil {
+		var err error
+		host := uri.Host()
+		path := uri.Path()
+		hostStr := b2s(host)
+		// port must not be included.
+		if hasPort(host) {
+			hostStr, _, err = net.SplitHostPort(hostStr)
 		}
-		cookies = cj.hostCookies[host]
+		if err == nil {
+			cj.m.Lock()
+			{
+				if cj.hostCookies == nil {
+					cj.hostCookies = make(map[string][]*Cookie)
+				} else {
+					// get cookies deleting expired ones
+					cookies := cj.getCookies(hostStr)
+					if len(cookies) > 0 {
+						rcs = copyCookies(cookies) // make a copy
+						for i := 0; i < len(rcs); i++ {
+							cookie := rcs[i]
+							if len(path) > 1 && len(cookie.path) > 1 { // path > "/"
+								// In this case calculating the len will be enough.
+								// if we have path = '/some/path' and cookie.Path() = '/some'
+								switch {
+								case len(path) > len(cookie.path): // path differs
+									fallthrough
+								case !bytes.HasPrefix(cookie.path, path):
+									rcs = append(rcs[:i], rcs[i+1:]...)
+									ReleaseCookie(cookie)
+									i--
+								}
+							}
+						}
+					}
+				}
+			}
+			cj.m.Unlock()
+		}
 	}
-	cj.m.Unlock()
 	return
+}
+
+// getCookies returns a cookie slice releasing expired cookies
+func (cj *CookieJar) getCookies(hostStr string) []*Cookie {
+	var (
+		cookies = cj.hostCookies[hostStr]
+		t       = time.Now()
+		n       = len(cookies)
+	)
+	for i := 0; i < len(cookies); i++ {
+		c := cookies[i]
+		if !c.expire.IsZero() && t.Sub(c.expire) > 0 { // expired
+			cookies = append(cookies[:i], cookies[i+1:]...)
+			ReleaseCookie(c)
+			i--
+		}
+	}
+	if n > len(cookies) {
+		cj.hostCookies[hostStr] = cookies
+	}
+	return cookies
 }
 
 // Set sets cookies for a specific host.
 //
 // If the cookie key already exists it will be replaced by the new cookie value.
-func (cj *CookieJar) Set(host string, cookies ...*Cookie) {
-	cj.m.Lock()
-	{
-		if cj.hostCookies == nil {
-			cj.hostCookies = make(map[string][]*Cookie)
-		}
-		hcs := cj.hostCookies[host]
-		for _, cookie := range cookies {
-			c := searchCookieByKey(cookie.Key(), hcs)
-			if c != nil {
-				c.ParseBytes(cookie.Cookie())
-			} else {
-				// TODO: Make a copy of the cookie?
-				hcs = append(hcs, cookie)
+func (cj *CookieJar) Set(uri *URI, cookies ...*Cookie) {
+	if uri != nil {
+		cj.m.Lock()
+		{
+			host := uri.Host()
+			hostStr := b2s(host)
+			if cj.hostCookies == nil {
+				cj.hostCookies = make(map[string][]*Cookie)
 			}
+			hcs, ok := cj.hostCookies[hostStr]
+			if !ok {
+				// If the key does not exists in the map then
+				// we must make a copy for the key.
+				hostStr = string(host)
+			}
+			for _, cookie := range cookies {
+				c := searchCookieByKey(cookie.key, hcs)
+				if c != nil {
+					c.ParseBytes(cookie.Cookie())
+				} else {
+					c = AcquireCookie()
+					c.CopyTo(cookie)
+					hcs = append(hcs, c)
+				}
+			}
+			cj.hostCookies[hostStr] = hcs
 		}
-		cj.hostCookies[host] = hcs
+		cj.m.Unlock()
 	}
-	cj.m.Unlock()
 }
 
 // SetKeyValue sets a cookie by key and value for a specific host.
