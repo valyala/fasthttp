@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -2328,7 +2329,12 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 // This method always returns nil and is only present to make
 // RequestCtx implement the context interface.
 func (ctx *RequestCtx) Err() error {
-	return nil
+	select {
+		case <- ctx.Done():
+			return context.Canceled
+		default:
+			return nil
+	}
 }
 
 // Value returns the value associated with this context for key, or nil
