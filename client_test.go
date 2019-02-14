@@ -53,12 +53,26 @@ func TestClientPostArgs(t *testing.T) {
 func TestClientCookieJar(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 	key, value := "cometo", "thefasthttpcon"
+	key2, value2 := "hello", "world"
+	key3, value3 := "coo", "kie"
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			cookie := AcquireCookie()
 			cookie.SetKey(key)
 			cookie.SetValue(value)
 			ctx.Response.Header.SetCookie(cookie)
+
+			cookie2 := AcquireCookie()
+			cookie2.SetKey(key2)
+			cookie2.SetValue(value2)
+			cookie2.SetExpire(CookieExpireDelete)
+			ctx.Response.Header.SetCookie(cookie2)
+
+			cookie3:= AcquireCookie()
+			cookie3.SetKey(key3)
+			cookie3.SetValue(value3)
+			cookie3.SetPath("/hello/")
+			ctx.Response.Header.SetCookie(cookie3)
 		},
 	}
 	go s.Serve(ln)
@@ -80,8 +94,8 @@ func TestClientCookieJar(t *testing.T) {
 	uri.SetHost("fasthttp.con")
 
 	cs := c.CookieJar.Get(uri)
-	if len(cs) == 0 {
-		t.Fatalf("Unexpected len: %d", len(cs))
+	if len(cs) != 2 {
+		t.Fatalf("Unexpected len: %d. Expected: %d", len(cs), 2)
 	}
 
 	if k := string(cs[0].Key()); k != key {
@@ -89,6 +103,13 @@ func TestClientCookieJar(t *testing.T) {
 	}
 	if v := string(cs[0].Value()); v != value {
 		t.Fatalf("Unexpected value: %s <> %s", v, value)
+	}
+
+	if k := string(cs[1].Key()); k != key3 {
+		t.Fatalf("Unexpected key: %s <> %s", k, key3)
+	}
+	if v := string(cs[1].Value()); v != value3 {
+		t.Fatalf("Unexpected value: %s <> %s", v, value3)
 	}
 }
 
