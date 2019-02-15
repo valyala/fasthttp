@@ -2323,7 +2323,7 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 // successive calls to Err return the same error.
 // If Done is not yet closed, Err returns nil.
 // If Done is closed, Err returns a non-nil error explaining why:
-// Canceled if the context was canceled ( via server Shutdown )
+// Canceled if the context was canceled (via server Shutdown)
 // or DeadlineExceeded if the context's deadline passed.
 func (ctx *RequestCtx) Err() error {
 	select {
