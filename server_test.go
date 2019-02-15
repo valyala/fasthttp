@@ -2857,6 +2857,43 @@ func TestShutdownDone(t *testing.T) {
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 }
 
+func TestShutdownErr(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			// This will panic, but I was not able to intercept with recover()
+			c, cancel := context.WithCancel(ctx)
+			defer cancel()
+			<-c.Done()
+			ctx.Success("aaa/bbb", []byte("real response"))
+		},
+	}
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexepcted error: %s", err)
+		}
+	}()
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexepcted error: %s", err)
+	}
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	go func() {
+		// Shutdown won't return if the connection doesn't close,
+		// which doesn't happen until we read the response.
+		if err := s.Shutdown(); err != nil {
+			t.Fatalf("unexepcted error: %s", err)
+		}
+	}()
+	// We can only reach this point and get a valid response
+	// if reading from ctx.Done() returned.
+	br := bufio.NewReader(conn)
+	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+}
+
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) {
 	var resp Response
 	if err := resp.Read(r); err != nil {
