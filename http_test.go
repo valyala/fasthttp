@@ -7,12 +7,31 @@ import (
 	"io"
 	"io/ioutil"
 	"mime/multipart"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/valyala/bytebufferpool"
 )
+
+func TestResponseCopyTo(t *testing.T) {
+	resp := &Response{}
+	copyResp := &Response{}
+
+	// init resp
+	resp.laddr = zeroTCPAddr
+	resp.SkipBody = true
+	resp.Header.SetStatusCode(200)
+	resp.SetBodyString("test")
+
+	resp.CopyTo(copyResp)
+
+	if !reflect.DeepEqual(resp, copyResp) {
+		t.Fatal("ResponseCopyTo fail")
+	}
+
+}
 
 func TestResponseBodyStreamDeflate(t *testing.T) {
 	body := createFixedBody(1e5)

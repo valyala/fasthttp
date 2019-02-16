@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"os"
 	"sync"
 
@@ -75,6 +76,11 @@ type Response struct {
 	SkipBody bool
 
 	keepBodyBuffer bool
+
+	// Remote TCPAddr from concurrently net.Conn
+	raddr net.Addr
+	// Local TCPAddr from concurrently net.Conn
+	laddr net.Addr
 }
 
 // SetHost sets host for the request.
@@ -279,6 +285,23 @@ type requestBodyWriter struct {
 func (w *requestBodyWriter) Write(p []byte) (int, error) {
 	w.r.AppendBody(p)
 	return len(p), nil
+}
+
+func (resp *Response) parseNetConn(conn net.Conn) {
+	resp.raddr = conn.RemoteAddr()
+	resp.laddr = conn.LocalAddr()
+}
+
+// RemoteAddr returns the remote network address. The Addr returned is shared
+// by all invocations of RemoteAddr, so do not modify it.
+func (resp *Response) RemoteAddr() net.Addr {
+	return resp.raddr
+}
+
+// LocalAddr returns the local network address. The Addr returned is shared
+// by all invocations of LocalAddr, so do not modify it.
+func (resp *Response) LocalAddr() net.Addr {
+	return resp.laddr
 }
 
 // Body returns response body.
@@ -627,6 +650,8 @@ func (resp *Response) copyToSkipBody(dst *Response) {
 	dst.Reset()
 	resp.Header.CopyTo(&dst.Header)
 	dst.SkipBody = resp.SkipBody
+	dst.raddr = resp.raddr
+	dst.laddr = resp.laddr
 }
 
 func swapRequestBody(a, b *Request) {
@@ -820,6 +845,8 @@ func (resp *Response) Reset() {
 	resp.Header.Reset()
 	resp.resetSkipHeader()
 	resp.SkipBody = false
+	resp.raddr = nil
+	resp.laddr = nil
 }
 
 func (resp *Response) resetSkipHeader() {
