@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -1068,6 +1069,14 @@ func TestResponseHeaderCopyTo(t *testing.T) {
 	if !bytes.Equal(h1.Peek("aaa-bbb"), h.Peek("AAA-BBB")) {
 		t.Fatalf("unexpected aaa-bbb %q. Expected %q", h1.Peek("aaa-bbb"), h.Peek("aaa-bbb"))
 	}
+
+	// flush buf
+	h.bufKV = argsKV{}
+	h1.bufKV = argsKV{}
+
+	if !reflect.DeepEqual(h, h1) {
+		t.Fatalf("ResponseHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", h, h1)
+	}
 }
 
 func TestRequestHeaderCopyTo(t *testing.T) {
@@ -1091,6 +1100,14 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	}
 	if !bytes.Equal(h1.Peek("aaaxxx"), h.Peek("aaaxxx")) {
 		t.Fatalf("unexpected aaaxxx %q. Expected %q", h1.Peek("aaaxxx"), h.Peek("aaaxxx"))
+	}
+
+	// flush buf
+	h.bufKV = argsKV{}
+	h1.bufKV = argsKV{}
+
+	if !reflect.DeepEqual(h, h1) {
+		t.Fatalf("RequestHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", h, h1)
 	}
 }
 
@@ -1124,6 +1141,7 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 	if string(h1.Peek("Connection")) != "close" {
 		t.Fatalf("unexpected connection value: %q. Expecting %q", h.Peek("Connection"), "close")
 	}
+
 }
 
 func TestRequestHeaderSetCookie(t *testing.T) {
