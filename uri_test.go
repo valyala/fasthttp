@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -181,6 +182,22 @@ func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string)
 	if string(u.Path()) != expectedPath {
 		t.Fatalf("Unexpected path %q. Expected %q. requestURI=%q", u.Path(), expectedPath, requestURI)
 	}
+}
+
+func TestURICopyTo(t *testing.T) {
+	var u URI
+	var copyU URI
+	u.CopyTo(&copyU)
+	if !reflect.DeepEqual(u, copyU) {
+		t.Fatalf("URICopyTo fail, u: \n%+v\ncopyu: \n%+v\n", u, copyU)
+	}
+
+	u.UpdateBytes([]byte("https://google.com/foo?bar=baz&baraz#qqqq"))
+	u.CopyTo(&copyU)
+	if !reflect.DeepEqual(u, copyU) {
+		t.Fatalf("URICopyTo fail, u: \n%+v\ncopyu: \n%+v\n", u, copyU)
+	}
+
 }
 
 func TestURIFullURI(t *testing.T) {
