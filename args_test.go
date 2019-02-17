@@ -269,6 +269,7 @@ func TestArgsCopyTo(t *testing.T) {
 	testCopyTo(t, &a)
 
 	a.Set("xxx", "yyy")
+	a.AddNoValue("ba")
 	testCopyTo(t, &a)
 
 	a.Del("foo")
@@ -283,6 +284,10 @@ func testCopyTo(t *testing.T, a *Args) {
 
 	var b Args
 	a.CopyTo(&b)
+
+	if !reflect.DeepEqual(*a, b) {
+		t.Fatalf("ArgsCopyTo fail, a: \n%+v\nb: \n%+v\n", *a, b)
+	}
 
 	b.VisitAll(func(k, v []byte) {
 		if _, ok := keys[string(k)]; !ok {

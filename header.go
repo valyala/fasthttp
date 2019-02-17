@@ -726,6 +726,7 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.cookiesCollected = h.cookiesCollected
 	dst.rawHeaders = append(dst.rawHeaders[:0], h.rawHeaders...)
 	dst.rawHeadersParsed = h.rawHeadersParsed
+	dst.rawHeadersCopy = append(dst.rawHeadersCopy[:0], h.rawHeadersCopy...)
 }
 
 // VisitAll calls f for each header.
