@@ -1891,3 +1891,35 @@ Content-Type: application/json
 		t.Fatalf("unexpected output %q", w.Bytes())
 	}
 }
+
+
+func TestResponseRawBodySet(t *testing.T) {
+	var resp Response
+	
+	expectedS := "test"
+	body := []byte(expectedS)
+	resp.SetBodyRaw(body)
+	
+	testBodyWriteTo(t, &resp, expectedS, true)
+}
+
+func TestResponseRawBodyReset(t *testing.T) {
+	var resp Response
+	
+	body := []byte("test")
+	resp.SetBodyRaw(body)
+	resp.ResetBody()
+	
+	testBodyWriteTo(t, &resp, "", true)
+}
+
+func TestResponseRawBodyCopyTo(t *testing.T) {
+	var resp Response
+	
+	expectedS := "test"
+	body := []byte(expectedS)
+	resp.SetBodyRaw(body)
+	
+	testResponseCopyTo(t, &resp)
+}
+
