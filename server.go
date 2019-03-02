@@ -1829,6 +1829,8 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		connectionClose bool
 		isHTTP11        bool
+
+		reqReset bool
 	)
 	for {
 		connRequestNum++
@@ -1944,6 +1946,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		if !ctx.IsGet() && ctx.IsHead() {
 			ctx.Response.SkipBody = true
 		}
+		reqReset = true
 		ctx.Request.Reset()
 
 		hijackHandler = ctx.hijackHandler
@@ -2038,6 +2041,12 @@ func (s *Server) serveConn(c net.Conn) error {
 	}
 	if bw != nil {
 		releaseWriter(s, bw)
+	}
+	// in unexpected cases the for loop will break
+	// before request reset call. in such cases, call it before
+	// release to fix #548
+	if !reqReset {
+		ctx.Request.Reset()
 	}
 	s.releaseCtx(ctx)
 	return err
