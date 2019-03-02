@@ -334,6 +334,13 @@ type Server struct {
 	// By default standard logger from log package is used.
 	Logger Logger
 
+	// KeepHijackedConns is an opt-in disable of connection
+	// close by fasthttp after connections' HijackHandler returns.
+	// This allows to save goroutines, e.g. when fasthttp used to upgrade
+	// http connections to WS and connection goes to another handler,
+	// which will close it when needed.
+	KeepHijackedConns bool
+
 	tlsConfig  *tls.Config
 	nextProtos map[string]ServeHandler
 
@@ -478,9 +485,13 @@ type RequestCtx struct {
 
 // HijackHandler must process the hijacked connection c.
 //
-// The connection c is automatically closed after returning from HijackHandler.
+// If KeepHijackedConns is disabled, which is by default,
+// the connection c is automatically closed after returning from HijackHandler.
 //
-// The connection c must not be used after returning from the handler.
+// The connection c must not be used after returning from the handler, if KeepHijackedConns is disabled.
+//
+// When KeepHijackedConns enabled, fasthttp will not Close() the connection,
+// you must do it when you need it. You must not use c in any way after calling Close().
 type HijackHandler func(c net.Conn)
 
 // Hijack registers the given handler for connection hijacking.
@@ -2118,8 +2129,10 @@ func hijackConnHandler(r io.Reader, c net.Conn, s *Server, h HijackHandler) {
 	if br, ok := r.(*bufio.Reader); ok {
 		releaseReader(s, br)
 	}
-	c.Close()
-	s.releaseHijackConn(hjc)
+	if !s.KeepHijackedConns {
+		c.Close()
+		s.releaseHijackConn(hjc)
+	}
 }
 
 func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
@@ -2128,6 +2141,7 @@ func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
 		hjc := &hijackConn{
 			Conn: c,
 			r:    r,
+			s:    s,
 		}
 		return hjc
 	}
@@ -2146,15 +2160,27 @@ func (s *Server) releaseHijackConn(hjc *hijackConn) {
 type hijackConn struct {
 	net.Conn
 	r io.Reader
+	s *Server
 }
 
-func (c hijackConn) Read(p []byte) (int, error) {
+func (c *hijackConn) UnsafeConn() net.Conn {
+	return c.Conn
+}
+
+func (c *hijackConn) Read(p []byte) (int, error) {
 	return c.r.Read(p)
 }
 
-func (c hijackConn) Close() error {
-	// hijacked conn is closed in hijackConnHandler.
-	return nil
+func (c *hijackConn) Close() error {
+	if !c.s.KeepHijackedConns {
+		// when we do not keep hijacked connections,
+		// it is closed in hijackConnHandler.
+		return nil
+	}
+
+	conn := c.Conn
+	c.s.releaseHijackConn(c)
+	return conn.Close()
 }
 
 // LastTimeoutErrorResponse returns the last timeout response set
