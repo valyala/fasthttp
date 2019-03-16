@@ -58,26 +58,25 @@ func (cj *CookieJar) get(host, path []byte) (rcs []*Cookie) {
 // getCookies returns a cookie slice releasing expired cookies
 func (cj *CookieJar) getCookies(hostStr string) (cookies []*Cookie) {
 	cj.m.Lock()
-	{
-		cookies = cj.hostCookies[hostStr]
-		var (
-			t = time.Now()
-			n = len(cookies)
-		)
-		for i := 0; i < len(cookies); i++ {
-			c := cookies[i]
-			if !c.Expire().Equal(CookieExpireUnlimited) && c.Expire().Before(t) { // cookie expired
-				cookies = append(cookies[:i], cookies[i+1:]...)
-				ReleaseCookie(c)
-				i--
-			}
-		}
-		// has any cookie been deleted?
-		if n > len(cookies) {
-			cj.hostCookies[hostStr] = cookies
+	defer cj.m.Unlock()
+
+	cookies = cj.hostCookies[hostStr]
+	var (
+		t = time.Now()
+		n = len(cookies)
+	)
+	for i := 0; i < len(cookies); i++ {
+		c := cookies[i]
+		if !c.Expire().Equal(CookieExpireUnlimited) && c.Expire().Before(t) { // cookie expired
+			cookies = append(cookies[:i], cookies[i+1:]...)
+			ReleaseCookie(c)
+			i--
 		}
 	}
-	cj.m.Unlock()
+	// has any cookie been deleted?
+	if n > len(cookies) {
+		cj.hostCookies[hostStr] = cookies
+	}
 	return
 }
 
@@ -104,29 +103,29 @@ func (cj *CookieJar) SetByHost(host []byte, cookies ...*Cookie) {
 }
 
 func (cj *CookieJar) set(host []byte, cookies ...*Cookie) {
+	hostStr := b2s(host)
+
 	cj.m.Lock()
-	{
-		if cj.hostCookies == nil {
-			cj.hostCookies = make(map[string][]*Cookie)
-		}
-		hostStr := b2s(host)
-		hcs, ok := cj.hostCookies[hostStr]
-		if !ok {
-			// If the key does not exists in the map then
-			// we must make a copy for the key.
-			hostStr = string(host)
-		}
-		for _, cookie := range cookies {
-			c := searchCookieByKeyAndPath(cookie.Key(), cookie.Path(), hcs)
-			if c == nil {
-				c = AcquireCookie()
-				hcs = append(hcs, c)
-			}
-			c.CopyTo(cookie)
-		}
-		cj.hostCookies[hostStr] = hcs
+	defer cj.m.Unlock()
+
+	if cj.hostCookies == nil {
+		cj.hostCookies = make(map[string][]*Cookie)
 	}
-	cj.m.Unlock()
+	hcs, ok := cj.hostCookies[hostStr]
+	if !ok {
+		// If the key does not exists in the map then
+		// we must make a copy for the key.
+		hostStr = string(host)
+	}
+	for _, cookie := range cookies {
+		c := searchCookieByKeyAndPath(cookie.Key(), cookie.Path(), hcs)
+		if c == nil {
+			c = AcquireCookie()
+			hcs = append(hcs, c)
+		}
+		c.CopyTo(cookie)
+	}
+	cj.hostCookies[hostStr] = hcs
 }
 
 // SetKeyValue sets a cookie by key and value for a specific host.
@@ -162,34 +161,34 @@ func (cj *CookieJar) dumpTo(req *Request) {
 
 func (cj *CookieJar) getFrom(host, path []byte, res *Response) {
 	hostStr := b2s(host)
+
 	cj.m.Lock()
-	{
-		if cj.hostCookies == nil {
-			cj.hostCookies = make(map[string][]*Cookie)
-		}
-		cookies, ok := cj.hostCookies[hostStr]
-		if !ok {
-			// If the key does not exists in the map then
-			// we must make a copy for the key.
-			hostStr = string(host)
-		}
-		t := time.Now()
-		res.Header.VisitAllCookie(func(key, value []byte) {
-			created := false
-			c := searchCookieByKeyAndPath(key, path, cookies)
-			if c == nil {
-				c, created = AcquireCookie(), true
-			}
-			c.ParseBytes(value)
-			if c.Expire().Equal(CookieExpireUnlimited) || c.Expire().After(t) {
-				cookies = append(cookies, c)
-			} else if created {
-				ReleaseCookie(c)
-			}
-		})
-		cj.hostCookies[hostStr] = cookies
+	defer cj.m.Unlock()
+
+	if cj.hostCookies == nil {
+		cj.hostCookies = make(map[string][]*Cookie)
 	}
-	cj.m.Unlock()
+	cookies, ok := cj.hostCookies[hostStr]
+	if !ok {
+		// If the key does not exists in the map then
+		// we must make a copy for the key.
+		hostStr = string(host)
+	}
+	t := time.Now()
+	res.Header.VisitAllCookie(func(key, value []byte) {
+		created := false
+		c := searchCookieByKeyAndPath(key, path, cookies)
+		if c == nil {
+			c, created = AcquireCookie(), true
+		}
+		c.ParseBytes(value)
+		if c.Expire().Equal(CookieExpireUnlimited) || c.Expire().After(t) {
+			cookies = append(cookies, c)
+		} else if created {
+			ReleaseCookie(c)
+		}
+	})
+	cj.hostCookies[hostStr] = cookies
 }
 
 func searchCookieByKeyAndPath(key, path []byte, cookies []*Cookie) (cookie *Cookie) {
