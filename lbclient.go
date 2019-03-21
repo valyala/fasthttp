@@ -98,6 +98,18 @@ func (cc *LBClient) init() {
 	// hammering from a cluster of identical LBClients.
 	cc.nextIdx = uint32(time.Now().UnixNano())
 }
+// clients update: add & remove
+func (cc *LBClient) AddClients(c *HostClient) int {
+    cc.cs = append(cc.cs, &lbClient{
+        c:           c,
+        healthCheck: cc.HealthCheck,
+    })
+    return len(cc.cs)
+}
+func (cc *LBClient) RemoveClients(index int) int {                                                                                                           
+    cc.cs = append(cc.cs[:index], cc.cs[index+1:]...)
+    return len(cc.cs)
+}
 
 func (cc *LBClient) get() *lbClient {
 	cc.once.Do(cc.init)
