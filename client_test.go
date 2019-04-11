@@ -19,6 +19,29 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestClientNilResp(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go s.Serve(ln)
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod("GET")
+	req.SetRequestURI("http://example.com")
+	if err := c.Do(req, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DoTimeout(req, nil, time.Second); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClientParseConn(t *testing.T) {
 	network := "tcp"
 	ln, _ := net.Listen(network, "127.0.0.1:0")

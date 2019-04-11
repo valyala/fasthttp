@@ -985,9 +985,11 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	req.copyToSkipBody(reqCopy)
 	swapRequestBody(req, reqCopy)
 	respCopy := AcquireResponse()
-	// Not calling resp.copyToSkipBody(respCopy) here to avoid
-	// unexpected messing with headers
-	respCopy.SkipBody = resp.SkipBody
+	if resp != nil {
+		// Not calling resp.copyToSkipBody(respCopy) here to avoid
+		// unexpected messing with headers
+		respCopy.SkipBody = resp.SkipBody
+	}
 
 	// Note that the request continues execution on ErrTimeout until
 	// client-specific ReadTimeout exceeds. This helps limiting load
