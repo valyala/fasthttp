@@ -51,6 +51,20 @@ func (c *fakeClientConn) Close() error {
 	return nil
 }
 
+func (c *fakeClientConn) LocalAddr() net.Addr {
+	return &net.TCPAddr{
+		IP:   []byte{1, 2, 3, 4},
+		Port: 8765,
+	}
+}
+
+func (c *fakeClientConn) RemoteAddr() net.Addr {
+	return &net.TCPAddr{
+		IP:   []byte{1, 2, 3, 4},
+		Port: 8765,
+	}
+}
+
 func releaseFakeServerConn(c *fakeClientConn) {
 	c.n = 0
 	fakeClientConnPool.Put(c)
