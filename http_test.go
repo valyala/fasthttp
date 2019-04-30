@@ -702,7 +702,7 @@ func TestResponseSkipBody(t *testing.T) {
 func TestRequestNoContentLength(t *testing.T) {
 	var r Request
 
-	r.Header.SetMethod("HEAD")
+	r.Header.SetMethod(MethodHead)
 	r.Header.SetHost("foobar")
 
 	s := r.String()
@@ -710,7 +710,7 @@ func TestRequestNoContentLength(t *testing.T) {
 		t.Fatalf("unexpected content-length in HEAD request %q", s)
 	}
 
-	r.Header.SetMethod("POST")
+	r.Header.SetMethod(MethodPost)
 	fmt.Fprintf(r.BodyWriter(), "foobar body")
 	s = r.String()
 	if !strings.Contains(s, "Content-Length: ") {
@@ -1253,7 +1253,7 @@ func TestSetResponseBodyStreamChunked(t *testing.T) {
 func testSetRequestBodyStream(t *testing.T, body string, chunked bool) {
 	var req Request
 	req.Header.SetHost("foobar.com")
-	req.Header.SetMethod("POST")
+	req.Header.SetMethod(MethodPost)
 
 	bodySize := len(body)
 	if chunked {
@@ -1416,22 +1416,22 @@ func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBod
 
 func TestRequestSuccess(t *testing.T) {
 	// empty method, user-agent and body
-	testRequestSuccess(t, "", "/foo/bar", "google.com", "", "", "GET")
+	testRequestSuccess(t, "", "/foo/bar", "google.com", "", "", MethodGet)
 
 	// non-empty user-agent
-	testRequestSuccess(t, "GET", "/foo/bar", "google.com", "MSIE", "", "GET")
+	testRequestSuccess(t, MethodGet, "/foo/bar", "google.com", "MSIE", "", MethodGet)
 
 	// non-empty method
-	testRequestSuccess(t, "HEAD", "/aaa", "fobar", "", "", "HEAD")
+	testRequestSuccess(t, MethodHead, "/aaa", "fobar", "", "", MethodHead)
 
 	// POST method with body
-	testRequestSuccess(t, "POST", "/bbb", "aaa.com", "Chrome aaa", "post body", "POST")
+	testRequestSuccess(t, MethodPost, "/bbb", "aaa.com", "Chrome aaa", "post body", MethodPost)
 
 	// PUT method with body
-	testRequestSuccess(t, "PUT", "/aa/bb", "a.com", "ome aaa", "put body", "PUT")
+	testRequestSuccess(t, MethodPut, "/aa/bb", "a.com", "ome aaa", "put body", MethodPut)
 
 	// only host is set
-	testRequestSuccess(t, "", "", "gooble.com", "", "", "GET")
+	testRequestSuccess(t, "", "", "gooble.com", "", "", MethodGet)
 }
 
 func TestResponseSuccess(t *testing.T) {
@@ -1501,7 +1501,7 @@ func TestRequestWriteError(t *testing.T) {
 	testRequestWriteError(t, "", "/foo/bar", "", "", "")
 
 	// get with body
-	testRequestWriteError(t, "GET", "/foo/bar", "aaa.com", "", "foobar")
+	testRequestWriteError(t, MethodGet, "/foo/bar", "aaa.com", "", "foobar")
 }
 
 func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, body string) {
@@ -1531,7 +1531,7 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	req.SetBody([]byte(body))
 
 	contentType := "foobar"
-	if method == "POST" {
+	if method == MethodPost {
 		req.Header.Set("Content-Type", contentType)
 	}
 
@@ -1569,7 +1569,7 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 		t.Fatalf("Unexpected body: %q. Expected %q", req1.Body(), body)
 	}
 
-	if method == "POST" && string(req1.Header.Peek("Content-Type")) != contentType {
+	if method == MethodPost && string(req1.Header.Peek("Content-Type")) != contentType {
 		t.Fatalf("Unexpected content-type: %q. Expected %q", req1.Header.Peek("Content-Type"), contentType)
 	}
 }
@@ -1892,34 +1892,32 @@ Content-Type: application/json
 	}
 }
 
-
 func TestResponseRawBodySet(t *testing.T) {
 	var resp Response
-	
+
 	expectedS := "test"
 	body := []byte(expectedS)
 	resp.SetBodyRaw(body)
-	
+
 	testBodyWriteTo(t, &resp, expectedS, true)
 }
 
 func TestResponseRawBodyReset(t *testing.T) {
 	var resp Response
-	
+
 	body := []byte("test")
 	resp.SetBodyRaw(body)
 	resp.ResetBody()
-	
+
 	testBodyWriteTo(t, &resp, "", true)
 }
 
 func TestResponseRawBodyCopyTo(t *testing.T) {
 	var resp Response
-	
+
 	expectedS := "test"
 	body := []byte(expectedS)
 	resp.SetBodyRaw(body)
-	
+
 	testResponseCopyTo(t, &resp)
 }
-

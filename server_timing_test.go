@@ -347,7 +347,7 @@ func benchmarkNetHTTPServerGet(b *testing.B, clientsCount, requestsPerConn int) 
 	ch := make(chan struct{}, b.N)
 	s := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if req.Method != "GET" {
+			if req.Method != MethodGet {
 				b.Fatalf("Unexpected request method: %s", req.Method)
 			}
 			h := w.Header()
@@ -390,7 +390,7 @@ func benchmarkNetHTTPServerPost(b *testing.B, clientsCount, requestsPerConn int)
 	ch := make(chan struct{}, b.N)
 	s := &http.Server{
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if req.Method != "POST" {
+			if req.Method != MethodPost {
 				b.Fatalf("Unexpected request method: %s", req.Method)
 			}
 			body, err := ioutil.ReadAll(req.Body)

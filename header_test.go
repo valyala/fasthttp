@@ -1603,10 +1603,10 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 
 func TestRequestHeaderMethod(t *testing.T) {
 	// common http methods
-	testRequestHeaderMethod(t, "GET")
-	testRequestHeaderMethod(t, "POST")
-	testRequestHeaderMethod(t, "HEAD")
-	testRequestHeaderMethod(t, "DELETE")
+	testRequestHeaderMethod(t, MethodGet)
+	testRequestHeaderMethod(t, MethodPost)
+	testRequestHeaderMethod(t, MethodHead)
+	testRequestHeaderMethod(t, MethodDelete)
 
 	// non-http methods
 	testRequestHeaderMethod(t, "foobar")
@@ -1636,7 +1636,7 @@ func testRequestHeaderMethod(t *testing.T, expectedMethod string) {
 func TestRequestHeaderSetGet(t *testing.T) {
 	h := &RequestHeader{}
 	h.SetRequestURI("/aa/bbb")
-	h.SetMethod("POST")
+	h.SetMethod(MethodPost)
 	h.Set("foo", "bar")
 	h.Set("host", "12345")
 	h.Set("content-type", "aaa/bbb")
