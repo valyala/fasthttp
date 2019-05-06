@@ -1,6 +1,6 @@
 package fasthttp
 
-// HTTP methods were stolen from net/http.
+// HTTP methods were copied from net/http.
 const (
 	MethodGet     = "GET"     // RFC 7231, 4.3.1
 	MethodHead    = "HEAD"    // RFC 7231, 4.3.2
