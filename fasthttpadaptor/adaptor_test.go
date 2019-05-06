@@ -13,7 +13,7 @@ import (
 )
 
 func TestNewFastHTTPHandler(t *testing.T) {
-	expectedMethod := "POST"
+	expectedMethod := fasthttp.MethodPost
 	expectedProto := "HTTP/1.1"
 	expectedProtoMajor := 1
 	expectedProtoMinor := 1

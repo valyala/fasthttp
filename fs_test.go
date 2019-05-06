@@ -101,7 +101,7 @@ func TestPathNotFoundFunc(t *testing.T) {
 func TestServeFileHead(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
-	req.Header.SetMethod("HEAD")
+	req.Header.SetMethod(MethodHead)
 	req.SetRequestURI("http://foobar.com/baz")
 	ctx.Init(&req, nil, nil)
 
@@ -686,7 +686,7 @@ func testFileExtension(t *testing.T, path string, compressed bool, compressedFil
 func TestServeFileContentType(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
-	req.Header.SetMethod("GET")
+	req.Header.SetMethod(MethodGet)
 	req.SetRequestURI("http://foobar.com/baz")
 	ctx.Init(&req, nil, nil)
 

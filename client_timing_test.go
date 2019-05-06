@@ -157,7 +157,7 @@ func BenchmarkNetHTTPClientDoFastServer(b *testing.B) {
 
 	nn := uint32(0)
 	b.RunParallel(func(pb *testing.PB) {
-		req, err := http.NewRequest("GET", fmt.Sprintf("http://foobar%d.com/aaa/bbb", atomic.AddUint32(&nn, 1)), nil)
+		req, err := http.NewRequest(MethodGet, fmt.Sprintf("http://foobar%d.com/aaa/bbb", atomic.AddUint32(&nn, 1)), nil)
 		if err != nil {
 			b.Fatalf("unexpected error: %s", err)
 		}
@@ -542,7 +542,7 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 	url := "http://unused.host" + requestURI
 	b.SetParallelism(parallelism)
 	b.RunParallel(func(pb *testing.PB) {
-		req, err := http.NewRequest("GET", url, nil)
+		req, err := http.NewRequest(MethodGet, url, nil)
 		if err != nil {
 			b.Fatalf("unexpected error: %s", err)
 		}
