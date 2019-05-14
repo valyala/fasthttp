@@ -215,7 +215,7 @@ type Server struct {
 	WriteTimeout time.Duration
 
 	// IdleTimeout is the maximum amount of time to wait for the
-	// next request when keep-alives are enabled. If IdleTimeout
+	// next request when keep-alive is enabled. If IdleTimeout
 	// is zero, the value of ReadTimeout is used.
 	IdleTimeout time.Duration
 
