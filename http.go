@@ -62,7 +62,8 @@ type Response struct {
 	// Response header
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
-	Header ResponseHeader
+	Header               ResponseHeader
+	immediateHeaderFlush bool
 
 	bodyStream io.Reader
 	w          responseBodyWriter
@@ -148,6 +149,16 @@ func (req *Request) ConnectionClose() bool {
 // SetConnectionClose sets 'Connection: close' header.
 func (req *Request) SetConnectionClose() {
 	req.Header.SetConnectionClose()
+}
+
+// ImmediateHeaderFlush returns whether headers will be flushed without waiting for body bytes
+func (resp *Response) ImmediateHeaderFlush() bool {
+	return resp.immediateHeaderFlush
+}
+
+// SetImmediateHeaderFlush causes headers to be flushed without waiting for body bytes
+func (resp *Response) SetImmediateHeaderFlush() {
+	resp.immediateHeaderFlush = true
 }
 
 // SendFile registers file on the given path to be used as response body
@@ -870,6 +881,7 @@ func (resp *Response) Reset() {
 	resp.SkipBody = false
 	resp.raddr = nil
 	resp.laddr = nil
+	resp.immediateHeaderFlush = false
 }
 
 func (resp *Response) resetSkipHeader() {
@@ -1455,12 +1467,22 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) error {
 	}
 	if contentLength >= 0 {
 		if err = resp.Header.Write(w); err == nil && sendBody {
-			err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
+			if resp.immediateHeaderFlush {
+				err = w.Flush()
+			}
+			if err == nil {
+				err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
+			}
 		}
 	} else {
 		resp.Header.SetContentLength(-1)
 		if err = resp.Header.Write(w); err == nil && sendBody {
-			err = writeBodyChunked(w, resp.bodyStream)
+			if resp.immediateHeaderFlush {
+				err = w.Flush()
+			}
+			if err == nil {
+				err = writeBodyChunked(w, resp.bodyStream)
+			}
 		}
 	}
 	err1 := resp.closeBodyStream()
