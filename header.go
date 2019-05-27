@@ -178,13 +178,13 @@ func (h *RequestHeader) ResetConnectionClose() {
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *ResponseHeader) ConnectionUpgrade() bool {
-	return hasHeaderValue(h.Peek("Connection"), strUpgrade)
+	return hasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
 }
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *RequestHeader) ConnectionUpgrade() bool {
 	h.parseRawHeaders()
-	return hasHeaderValue(h.Peek("Connection"), strUpgrade)
+	return hasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
 }
 
 // PeekCookie is able to returns cookie by a given key from response.
@@ -845,16 +845,16 @@ func (h *ResponseHeader) DelBytes(key []byte) {
 
 func (h *ResponseHeader) del(key []byte) {
 	switch string(key) {
-	case "Content-Type":
+	case HeaderContentType:
 		h.contentType = h.contentType[:0]
-	case "Server":
+	case HeaderServer:
 		h.server = h.server[:0]
-	case "Set-Cookie":
+	case HeaderSetCookie:
 		h.cookies = h.cookies[:0]
-	case "Content-Length":
+	case HeaderContentLength:
 		h.contentLength = 0
 		h.contentLengthBytes = h.contentLengthBytes[:0]
-	case "Connection":
+	case HeaderConnection:
 		h.connectionClose = false
 	}
 	h.h = delAllArgsBytes(h.h, key)
@@ -877,18 +877,18 @@ func (h *RequestHeader) DelBytes(key []byte) {
 
 func (h *RequestHeader) del(key []byte) {
 	switch string(key) {
-	case "Host":
+	case HeaderHost:
 		h.host = h.host[:0]
-	case "Content-Type":
+	case HeaderContentType:
 		h.contentType = h.contentType[:0]
-	case "User-Agent":
+	case HeaderUserAgent:
 		h.userAgent = h.userAgent[:0]
-	case "Cookie":
+	case HeaderCookie:
 		h.cookies = h.cookies[:0]
-	case "Content-Length":
+	case HeaderContentLength:
 		h.contentLength = 0
 		h.contentLengthBytes = h.contentLengthBytes[:0]
-	case "Connection":
+	case HeaderConnection:
 		h.connectionClose = false
 	}
 	h.h = delAllArgsBytes(h.h, key)
@@ -964,30 +964,30 @@ func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 // key is in canonical form.
 func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	switch string(key) {
-	case "Content-Type":
+	case HeaderContentType:
 		h.SetContentTypeBytes(value)
-	case "Server":
+	case HeaderServer:
 		h.SetServerBytes(value)
-	case "Set-Cookie":
+	case HeaderSetCookie:
 		var kv *argsKV
 		h.cookies, kv = allocArg(h.cookies)
 		kv.key = getCookieKey(kv.key, value)
 		kv.value = append(kv.value[:0], value...)
-	case "Content-Length":
+	case HeaderContentLength:
 		if contentLength, err := parseContentLength(value); err == nil {
 			h.contentLength = contentLength
 			h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
 		}
-	case "Connection":
+	case HeaderConnection:
 		if bytes.Equal(strClose, value) {
 			h.SetConnectionClose()
 		} else {
 			h.ResetConnectionClose()
 			h.h = setArgBytes(h.h, key, value, argsHasValue)
 		}
-	case "Transfer-Encoding":
+	case HeaderTransferEncoding:
 		// Transfer-Encoding is managed automatically.
-	case "Date":
+	case HeaderDate:
 		// Date is managed automatically.
 	default:
 		h.h = setArgBytes(h.h, key, value, argsHasValue)
@@ -1149,28 +1149,28 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 func (h *RequestHeader) SetCanonical(key, value []byte) {
 	h.parseRawHeaders()
 	switch string(key) {
-	case "Host":
+	case HeaderHost:
 		h.SetHostBytes(value)
-	case "Content-Type":
+	case HeaderContentType:
 		h.SetContentTypeBytes(value)
-	case "User-Agent":
+	case HeaderUserAgent:
 		h.SetUserAgentBytes(value)
-	case "Cookie":
+	case HeaderCookie:
 		h.collectCookies()
 		h.cookies = parseRequestCookies(h.cookies, value)
-	case "Content-Length":
+	case HeaderContentLength:
 		if contentLength, err := parseContentLength(value); err == nil {
 			h.contentLength = contentLength
 			h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
 		}
-	case "Connection":
+	case HeaderConnection:
 		if bytes.Equal(strClose, value) {
 			h.SetConnectionClose()
 		} else {
 			h.ResetConnectionClose()
 			h.h = setArgBytes(h.h, key, value, argsHasValue)
 		}
-	case "Transfer-Encoding":
+	case HeaderTransferEncoding:
 		// Transfer-Encoding is managed automatically.
 	default:
 		h.h = setArgBytes(h.h, key, value, argsHasValue)
@@ -1217,18 +1217,18 @@ func (h *RequestHeader) PeekBytes(key []byte) []byte {
 
 func (h *ResponseHeader) peek(key []byte) []byte {
 	switch string(key) {
-	case "Content-Type":
+	case HeaderContentType:
 		return h.ContentType()
-	case "Server":
+	case HeaderServer:
 		return h.Server()
-	case "Connection":
+	case HeaderConnection:
 		if h.ConnectionClose() {
 			return strClose
 		}
 		return peekArgBytes(h.h, key)
-	case "Content-Length":
+	case HeaderContentLength:
 		return h.contentLengthBytes
-	case "Set-Cookie":
+	case HeaderSetCookie:
 		return appendResponseCookieBytes(nil, h.cookies)
 	default:
 		return peekArgBytes(h.h, key)
@@ -1238,20 +1238,20 @@ func (h *ResponseHeader) peek(key []byte) []byte {
 func (h *RequestHeader) peek(key []byte) []byte {
 	h.parseRawHeaders()
 	switch string(key) {
-	case "Host":
+	case HeaderHost:
 		return h.Host()
-	case "Content-Type":
+	case HeaderContentType:
 		return h.ContentType()
-	case "User-Agent":
+	case HeaderUserAgent:
 		return h.UserAgent()
-	case "Connection":
+	case HeaderConnection:
 		if h.ConnectionClose() {
 			return strClose
 		}
 		return peekArgBytes(h.h, key)
-	case "Content-Length":
+	case HeaderContentLength:
 		return h.contentLengthBytes
-	case "Cookie":
+	case HeaderCookie:
 		if h.cookiesCollected {
 			return appendRequestCookieBytes(nil, h.cookies)
 		} else {

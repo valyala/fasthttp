@@ -730,8 +730,8 @@ func TestRequestReadGzippedBody(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	if string(r.Header.Peek("Content-Encoding")) != "gzip" {
-		t.Fatalf("unexpected content-encoding: %q. Expecting %q", r.Header.Peek("Content-Encoding"), "gzip")
+	if string(r.Header.Peek(HeaderContentEncoding)) != "gzip" {
+		t.Fatalf("unexpected content-encoding: %q. Expecting %q", r.Header.Peek(HeaderContentEncoding), "gzip")
 	}
 	if r.Header.ContentLength() != len(body) {
 		t.Fatalf("unexpected content-length: %d. Expecting %d", r.Header.ContentLength(), len(body))
@@ -913,7 +913,7 @@ func testResponseDeflateExt(t *testing.T, r *Response, s string) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	ce := r1.Header.Peek("Content-Encoding")
+	ce := r1.Header.Peek(HeaderContentEncoding)
 	var body []byte
 	if isCompressible {
 		if string(ce) != "deflate" {
@@ -966,7 +966,7 @@ func testResponseGzipExt(t *testing.T, r *Response, s string) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	ce := r1.Header.Peek("Content-Encoding")
+	ce := r1.Header.Peek(HeaderContentEncoding)
 	var body []byte
 	if isCompressible {
 		if string(ce) != "gzip" {
@@ -1485,11 +1485,11 @@ func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, 
 	if resp1.Header.ContentLength() != len(body) {
 		t.Fatalf("Unexpected content-length: %d. Expected %d", resp1.Header.ContentLength(), len(body))
 	}
-	if string(resp1.Header.Peek("Content-Type")) != expectedContentType {
-		t.Fatalf("Unexpected content-type: %q. Expected %q", resp1.Header.Peek("Content-Type"), expectedContentType)
+	if string(resp1.Header.Peek(HeaderContentType)) != expectedContentType {
+		t.Fatalf("Unexpected content-type: %q. Expected %q", resp1.Header.Peek(HeaderContentType), expectedContentType)
 	}
-	if string(resp1.Header.Peek("Server")) != expectedServerName {
-		t.Fatalf("Unexpected server: %q. Expected %q", resp1.Header.Peek("Server"), expectedServerName)
+	if string(resp1.Header.Peek(HeaderServer)) != expectedServerName {
+		t.Fatalf("Unexpected server: %q. Expected %q", resp1.Header.Peek(HeaderServer), expectedServerName)
 	}
 	if !bytes.Equal(resp1.Body(), []byte(body)) {
 		t.Fatalf("Unexpected body: %q. Expected %q", resp1.Body(), body)
@@ -1509,8 +1509,8 @@ func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, bo
 
 	req.Header.SetMethod(method)
 	req.Header.SetRequestURI(requestURI)
-	req.Header.Set("Host", host)
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set(HeaderHost, host)
+	req.Header.Set(HeaderUserAgent, userAgent)
 	req.SetBody([]byte(body))
 
 	w := &bytebufferpool.ByteBuffer{}
@@ -1526,13 +1526,13 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 
 	req.Header.SetMethod(method)
 	req.Header.SetRequestURI(requestURI)
-	req.Header.Set("Host", host)
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set(HeaderHost, host)
+	req.Header.Set(HeaderUserAgent, userAgent)
 	req.SetBody([]byte(body))
 
 	contentType := "foobar"
 	if method == MethodPost {
-		req.Header.Set("Content-Type", contentType)
+		req.Header.Set(HeaderContentType, contentType)
 	}
 
 	w := &bytes.Buffer{}
@@ -1559,18 +1559,18 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	if string(req1.Header.RequestURI()) != requestURI {
 		t.Fatalf("Unexpected RequestURI: %q. Expected %q", req1.Header.RequestURI(), requestURI)
 	}
-	if string(req1.Header.Peek("Host")) != host {
-		t.Fatalf("Unexpected host: %q. Expected %q", req1.Header.Peek("Host"), host)
+	if string(req1.Header.Peek(HeaderHost)) != host {
+		t.Fatalf("Unexpected host: %q. Expected %q", req1.Header.Peek(HeaderHost), host)
 	}
-	if string(req1.Header.Peek("User-Agent")) != userAgent {
-		t.Fatalf("Unexpected user-agent: %q. Expected %q", req1.Header.Peek("User-Agent"), userAgent)
+	if string(req1.Header.Peek(HeaderUserAgent)) != userAgent {
+		t.Fatalf("Unexpected user-agent: %q. Expected %q", req1.Header.Peek(HeaderUserAgent), userAgent)
 	}
 	if !bytes.Equal(req1.Body(), []byte(body)) {
 		t.Fatalf("Unexpected body: %q. Expected %q", req1.Body(), body)
 	}
 
-	if method == MethodPost && string(req1.Header.Peek("Content-Type")) != contentType {
-		t.Fatalf("Unexpected content-type: %q. Expected %q", req1.Header.Peek("Content-Type"), contentType)
+	if method == MethodPost && string(req1.Header.Peek(HeaderContentType)) != contentType {
+		t.Fatalf("Unexpected content-type: %q. Expected %q", req1.Header.Peek(HeaderContentType), contentType)
 	}
 }
 
@@ -1729,7 +1729,7 @@ func TestRequestURI(t *testing.T) {
 	expectedHash := "1334dfds&=d"
 
 	var req Request
-	req.Header.Set("Host", host)
+	req.Header.Set(HeaderHost, host)
 	req.Header.SetRequestURI(requestURI)
 
 	uri := req.URI()
