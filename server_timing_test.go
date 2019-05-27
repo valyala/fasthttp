@@ -353,7 +353,7 @@ func benchmarkNetHTTPServerGet(b *testing.B, clientsCount, requestsPerConn int) 
 			h := w.Header()
 			h.Set("Content-Type", "text/plain")
 			if requestsPerConn == 1 {
-				h.Set("Connection", "close")
+				h.Set(HeaderConnection, "close")
 			}
 			w.Write(fakeResponse)
 			registerServedRequest(b, ch)
@@ -404,7 +404,7 @@ func benchmarkNetHTTPServerPost(b *testing.B, clientsCount, requestsPerConn int)
 			h := w.Header()
 			h.Set("Content-Type", "text/plain")
 			if requestsPerConn == 1 {
-				h.Set("Connection", "close")
+				h.Set(HeaderConnection, "close")
 			}
 			w.Write(body)
 			registerServedRequest(b, ch)
