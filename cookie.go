@@ -31,7 +31,7 @@ const (
 	CookieSameSiteLaxMode
 	// CookieSameSiteStrictMode sets the SameSite flag with the "Strict" parameter
 	CookieSameSiteStrictMode
-	// CookieSameSiteStrictMode sets the SameSite flag with the "None" parameter
+	// CookieSameSiteNoneMode sets the SameSite flag with the "None" parameter
 	// see https://tools.ietf.org/html/draft-west-cookie-incrementalism-00
 	CookieSameSiteNoneMode
 )
