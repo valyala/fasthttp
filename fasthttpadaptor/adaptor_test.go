@@ -13,7 +13,7 @@ import (
 )
 
 func TestNewFastHTTPHandler(t *testing.T) {
-	expectedMethod := "POST"
+	expectedMethod := fasthttp.MethodPost
 	expectedProto := "HTTP/1.1"
 	expectedProtoMajor := 1
 	expectedProtoMinor := 1
@@ -95,7 +95,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	req.Header.SetMethod(expectedMethod)
 	req.SetRequestURI(expectedRequestURI)
 	req.Header.SetHost(expectedHost)
-	req.Header.Add("Transfer-Encoding", expectedTransferEncoding)
+	req.Header.Add(fasthttp.HeaderTransferEncoding, expectedTransferEncoding)
 	req.BodyWriter().Write([]byte(expectedBody))
 	for k, v := range expectedHeader {
 		req.Header.Set(k, v)

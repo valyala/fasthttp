@@ -493,6 +493,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     websocket implementation for fasthttp.
   * [fasthttpsession](https://github.com/phachon/fasthttpsession) - a fast and powerful session package for fasthttp servers.
   * [atreugo](https://github.com/savsgio/atreugo) - Micro-framework to make simple the use of routing and middlewares.
+  * [kratgo](https://github.com/savsgio/kratgo) - Simple, lightweight and ultra-fast HTTP Cache to speed up your websites.
 
 
 # FAQ

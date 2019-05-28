@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -215,7 +216,7 @@ func TestRequestHeaderSetCookieWithSpecialChars(t *testing.T) {
 	if err := h1.Read(br); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
-	cookie := h1.Peek("Cookie")
+	cookie := h1.Peek(HeaderCookie)
 	if string(cookie) != "ID&14" {
 		t.Fatalf("unexpected cooke: %q. Expecting %q", cookie, "ID&14")
 	}
@@ -388,9 +389,9 @@ func TestRequestHeaderDel(t *testing.T) {
 	var h RequestHeader
 	h.Set("Foo-Bar", "baz")
 	h.Set("aaa", "bbb")
-	h.Set("Connection", "keep-alive")
+	h.Set(HeaderConnection, "keep-alive")
 	h.Set("Content-Type", "aaa")
-	h.Set("Host", "aaabbb")
+	h.Set(HeaderHost, "aaabbb")
 	h.Set("User-Agent", "asdfas")
 	h.Set("Content-Length", "1123")
 	h.Set("Cookie", "foobar=baz")
@@ -411,27 +412,27 @@ func TestRequestHeaderDel(t *testing.T) {
 	if len(hv) > 0 {
 		t.Fatalf("non-zero value: %q", hv)
 	}
-	hv = h.Peek("Connection")
+	hv = h.Peek(HeaderConnection)
 	if len(hv) > 0 {
 		t.Fatalf("non-zero value: %q", hv)
 	}
-	hv = h.Peek("Content-Type")
+	hv = h.Peek(HeaderContentType)
 	if len(hv) > 0 {
 		t.Fatalf("non-zero value: %q", hv)
 	}
-	hv = h.Peek("Host")
+	hv = h.Peek(HeaderHost)
 	if len(hv) > 0 {
 		t.Fatalf("non-zero value: %q", hv)
 	}
-	hv = h.Peek("User-Agent")
+	hv = h.Peek(HeaderUserAgent)
 	if len(hv) > 0 {
 		t.Fatalf("non-zero value: %q", hv)
 	}
-	hv = h.Peek("Content-Length")
+	hv = h.Peek(HeaderContentLength)
 	if len(hv) > 0 {
 		t.Fatalf("non-zero value: %q", hv)
 	}
-	hv = h.Peek("Cookie")
+	hv = h.Peek(HeaderCookie)
 	if len(hv) > 0 {
 		t.Fatalf("non-zero value: %q", hv)
 	}
@@ -449,10 +450,10 @@ func TestResponseHeaderDel(t *testing.T) {
 	var h ResponseHeader
 	h.Set("Foo-Bar", "baz")
 	h.Set("aaa", "bbb")
-	h.Set("Connection", "keep-alive")
-	h.Set("Content-Type", "aaa")
-	h.Set("Server", "aaabbb")
-	h.Set("Content-Length", "1123")
+	h.Set(HeaderConnection, "keep-alive")
+	h.Set(HeaderContentType, "aaa")
+	h.Set(HeaderServer, "aaabbb")
+	h.Set(HeaderContentLength, "1123")
 
 	var c Cookie
 	c.SetKey("foo")
@@ -462,7 +463,7 @@ func TestResponseHeaderDel(t *testing.T) {
 	h.Del("foo-bar")
 	h.Del("connection")
 	h.DelBytes([]byte("content-type"))
-	h.Del("Server")
+	h.Del(HeaderServer)
 	h.Del("content-length")
 	h.Del("set-cookie")
 
@@ -474,19 +475,19 @@ func TestResponseHeaderDel(t *testing.T) {
 	if len(hv) > 0 {
 		t.Fatalf("non-zero header value: %q", hv)
 	}
-	hv = h.Peek("Connection")
+	hv = h.Peek(HeaderConnection)
 	if len(hv) > 0 {
 		t.Fatalf("non-zero value: %q", hv)
 	}
-	hv = h.Peek("Content-Type")
+	hv = h.Peek(HeaderContentType)
 	if string(hv) != string(defaultContentType) {
 		t.Fatalf("unexpected content-type: %q. Expecting %q", hv, defaultContentType)
 	}
-	hv = h.Peek("Server")
+	hv = h.Peek(HeaderServer)
 	if len(hv) > 0 {
 		t.Fatalf("non-zero value: %q", hv)
 	}
-	hv = h.Peek("Content-Length")
+	hv = h.Peek(HeaderContentLength)
 	if len(hv) > 0 {
 		t.Fatalf("non-zero value: %q", hv)
 	}
@@ -726,7 +727,7 @@ func TestRequestHeaderSetByteRange(t *testing.T) {
 func testRequestHeaderSetByteRange(t *testing.T, startPos, endPos int, expectedV string) {
 	var h RequestHeader
 	h.SetByteRange(startPos, endPos)
-	v := h.Peek("Range")
+	v := h.Peek(HeaderRange)
 	if string(v) != expectedV {
 		t.Fatalf("unexpected range: %q. Expecting %q. startPos=%d, endPos=%d", v, expectedV, startPos, endPos)
 	}
@@ -740,7 +741,7 @@ func TestResponseHeaderSetContentRange(t *testing.T) {
 func testResponseHeaderSetContentRange(t *testing.T, startPos, endPos, contentLength int, expectedV string) {
 	var h ResponseHeader
 	h.SetContentRange(startPos, endPos, contentLength)
-	v := h.Peek("Content-Range")
+	v := h.Peek(HeaderContentRange)
 	if string(v) != expectedV {
 		t.Fatalf("unexpected content-range: %q. Expecting %q. startPos=%d, endPos=%d, contentLength=%d",
 			v, expectedV, startPos, endPos, contentLength)
@@ -765,7 +766,7 @@ func TestRequestHeaderHasAcceptEncoding(t *testing.T) {
 
 func testRequestHeaderHasAcceptEncoding(t *testing.T, ae, v string, resultExpected bool) {
 	var h RequestHeader
-	h.Set("Accept-Encoding", ae)
+	h.Set(HeaderAcceptEncoding, ae)
 	result := h.HasAcceptEncoding(v)
 	if result != resultExpected {
 		t.Fatalf("unexpected result in HasAcceptEncoding(%q, %q): %v. Expecting %v", ae, v, result, resultExpected)
@@ -1053,8 +1054,8 @@ func testRequestHeaderHTTPVer(t *testing.T, s string, connectionClose bool) {
 func TestResponseHeaderCopyTo(t *testing.T) {
 	var h ResponseHeader
 
-	h.Set("Set-Cookie", "foo=bar")
-	h.Set("Content-Type", "foobar")
+	h.Set(HeaderSetCookie, "foo=bar")
+	h.Set(HeaderContentType, "foobar")
 	h.Set("AAA-BBB", "aaaa")
 
 	var h1 ResponseHeader
@@ -1062,28 +1063,36 @@ func TestResponseHeaderCopyTo(t *testing.T) {
 	if !bytes.Equal(h1.Peek("Set-cookie"), h.Peek("Set-Cookie")) {
 		t.Fatalf("unexpected cookie %q. Expected %q", h1.Peek("set-cookie"), h.Peek("set-cookie"))
 	}
-	if !bytes.Equal(h1.Peek("Content-Type"), h.Peek("Content-Type")) {
+	if !bytes.Equal(h1.Peek(HeaderContentType), h.Peek(HeaderContentType)) {
 		t.Fatalf("unexpected content-type %q. Expected %q", h1.Peek("content-type"), h.Peek("content-type"))
 	}
 	if !bytes.Equal(h1.Peek("aaa-bbb"), h.Peek("AAA-BBB")) {
 		t.Fatalf("unexpected aaa-bbb %q. Expected %q", h1.Peek("aaa-bbb"), h.Peek("aaa-bbb"))
+	}
+
+	// flush buf
+	h.bufKV = argsKV{}
+	h1.bufKV = argsKV{}
+
+	if !reflect.DeepEqual(h, h1) {
+		t.Fatalf("ResponseHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", h, h1)
 	}
 }
 
 func TestRequestHeaderCopyTo(t *testing.T) {
 	var h RequestHeader
 
-	h.Set("Cookie", "aa=bb; cc=dd")
-	h.Set("Content-Type", "foobar")
-	h.Set("Host", "aaaa")
+	h.Set(HeaderCookie, "aa=bb; cc=dd")
+	h.Set(HeaderContentType, "foobar")
+	h.Set(HeaderHost, "aaaa")
 	h.Set("aaaxxx", "123")
 
 	var h1 RequestHeader
 	h.CopyTo(&h1)
-	if !bytes.Equal(h1.Peek("cookie"), h.Peek("Cookie")) {
+	if !bytes.Equal(h1.Peek("cookie"), h.Peek(HeaderCookie)) {
 		t.Fatalf("unexpected cookie after copying: %q. Expected %q", h1.Peek("cookie"), h.Peek("cookie"))
 	}
-	if !bytes.Equal(h1.Peek("content-type"), h.Peek("Content-Type")) {
+	if !bytes.Equal(h1.Peek("content-type"), h.Peek(HeaderContentType)) {
 		t.Fatalf("unexpected content-type %q. Expected %q", h1.Peek("content-type"), h.Peek("content-type"))
 	}
 	if !bytes.Equal(h1.Peek("host"), h.Peek("host")) {
@@ -1092,13 +1101,21 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	if !bytes.Equal(h1.Peek("aaaxxx"), h.Peek("aaaxxx")) {
 		t.Fatalf("unexpected aaaxxx %q. Expected %q", h1.Peek("aaaxxx"), h.Peek("aaaxxx"))
 	}
+
+	// flush buf
+	h.bufKV = argsKV{}
+	h1.bufKV = argsKV{}
+
+	if !reflect.DeepEqual(h, h1) {
+		t.Fatalf("RequestHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", h, h1)
+	}
 }
 
 func TestRequestHeaderConnectionClose(t *testing.T) {
 	var h RequestHeader
 
-	h.Set("Connection", "close")
-	h.Set("Host", "foobar")
+	h.Set(HeaderConnection, "close")
+	h.Set(HeaderHost, "foobar")
 	if !h.ConnectionClose() {
 		t.Fatalf("connection: close not set")
 	}
@@ -1121,9 +1138,10 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 	if !h1.ConnectionClose() {
 		t.Fatalf("unexpected connection: close value: %v", h1.ConnectionClose())
 	}
-	if string(h1.Peek("Connection")) != "close" {
+	if string(h1.Peek(HeaderConnection)) != "close" {
 		t.Fatalf("unexpected connection value: %q. Expecting %q", h.Peek("Connection"), "close")
 	}
+
 }
 
 func TestRequestHeaderSetCookie(t *testing.T) {
@@ -1147,7 +1165,7 @@ func TestResponseHeaderSetCookie(t *testing.T) {
 	var h ResponseHeader
 
 	h.Set("set-cookie", "foo=bar; path=/aa/bb; domain=aaa.com")
-	h.Set("Set-Cookie", "aaaaa=bxx")
+	h.Set(HeaderSetCookie, "aaaaa=bxx")
 
 	var c Cookie
 	c.SetKey("foo")
@@ -1192,17 +1210,17 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 		k := string(key)
 		v := string(value)
 		switch k {
-		case "Content-Length":
+		case HeaderContentLength:
 			if v != string(h.Peek(k)) {
 				t.Fatalf("unexpected content-length: %q. Expecting %q", v, h.Peek(k))
 			}
 			contentLengthCount++
-		case "Content-Type":
+		case HeaderContentType:
 			if v != string(h.Peek(k)) {
 				t.Fatalf("Unexpected content-type: %q. Expected %q", v, h.Peek(k))
 			}
 			contentTypeCount++
-		case "Set-Cookie":
+		case HeaderSetCookie:
 			if cookieCount == 0 && v != "aa=bb; path=/foo/bar" {
 				t.Fatalf("unexpected cookie header: %q. Expected %q", v, "aa=bb; path=/foo/bar")
 			}
@@ -1244,7 +1262,7 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 		k := string(key)
 		v := string(value)
 		switch k {
-		case "Host":
+		case HeaderHost:
 			if v != string(h.Peek(k)) {
 				t.Fatalf("Unexpected host value %q. Expected %q", v, h.Peek(k))
 			}
@@ -1257,7 +1275,7 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 				t.Fatalf("Unexpected value %q. Expected %q", v, "ZZ")
 			}
 			xxCount++
-		case "Cookie":
+		case HeaderCookie:
 			if v != "a=b; c=d" {
 				t.Fatalf("Unexpected cookie %q. Expected %q", v, "a=b; c=d")
 			}
@@ -1291,10 +1309,10 @@ func TestResponseHeaderVisitAllInOrder(t *testing.T) {
 	}
 
 	order := []string{
-		"Content-Type",
-		"Cookie",
-		"Host",
-		"User-Agent",
+		HeaderContentType,
+		HeaderCookie,
+		HeaderHost,
+		HeaderUserAgent,
 	}
 	values := []string{
 		"aa",
@@ -1448,7 +1466,7 @@ func equalCookie(c1, c2 *Cookie) bool {
 func TestRequestHeaderCookie(t *testing.T) {
 	var h RequestHeader
 	h.SetRequestURI("/foobar")
-	h.Set("Host", "foobar.com")
+	h.Set(HeaderHost, "foobar.com")
 
 	h.SetCookie("foo", "bar")
 	h.SetCookie("привет", "мир")
@@ -1507,13 +1525,13 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 	c.SetValue("bar")
 	h.SetCookie(c)
 
-	if string(h.Peek("Set-Cookie")) != "foo=bar" {
-		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek("Set-Cookie"), "foo=bar")
+	if string(h.Peek(HeaderSetCookie)) != "foo=bar" {
+		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek(HeaderSetCookie), "foo=bar")
 	}
 	cookieSeen := false
 	h.VisitAll(func(key, value []byte) {
 		switch string(key) {
-		case "Set-Cookie":
+		case HeaderSetCookie:
 			cookieSeen = true
 		}
 	})
@@ -1528,13 +1546,13 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 		t.Fatalf("Unexpected cookie value %q. Exepcted %q", c.Value(), "bar")
 	}
 
-	if string(h.Peek("Set-Cookie")) != "foo=bar" {
-		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek("Set-Cookie"), "foo=bar")
+	if string(h.Peek(HeaderSetCookie)) != "foo=bar" {
+		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek(HeaderSetCookie), "foo=bar")
 	}
 	cookieSeen = false
 	h.VisitAll(func(key, value []byte) {
 		switch string(key) {
-		case "Set-Cookie":
+		case HeaderSetCookie:
 			cookieSeen = true
 		}
 	})
@@ -1546,17 +1564,17 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 func TestRequestHeaderCookieIssue313(t *testing.T) {
 	var h RequestHeader
 	h.SetRequestURI("/")
-	h.Set("Host", "foobar.com")
+	h.Set(HeaderHost, "foobar.com")
 
 	h.SetCookie("foo", "bar")
 
-	if string(h.Peek("Cookie")) != "foo=bar" {
-		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek("Cookie"), "foo=bar")
+	if string(h.Peek(HeaderCookie)) != "foo=bar" {
+		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek(HeaderCookie), "foo=bar")
 	}
 	cookieSeen := false
 	h.VisitAll(func(key, value []byte) {
 		switch string(key) {
-		case "Cookie":
+		case HeaderCookie:
 			cookieSeen = true
 		}
 	})
@@ -1568,13 +1586,13 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.Cookie("foo"), "bar")
 	}
 
-	if string(h.Peek("Cookie")) != "foo=bar" {
-		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek("Cookie"), "foo=bar")
+	if string(h.Peek(HeaderCookie)) != "foo=bar" {
+		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek(HeaderCookie), "foo=bar")
 	}
 	cookieSeen = false
 	h.VisitAll(func(key, value []byte) {
 		switch string(key) {
-		case "Cookie":
+		case HeaderCookie:
 			cookieSeen = true
 		}
 	})
@@ -1585,10 +1603,10 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 
 func TestRequestHeaderMethod(t *testing.T) {
 	// common http methods
-	testRequestHeaderMethod(t, "GET")
-	testRequestHeaderMethod(t, "POST")
-	testRequestHeaderMethod(t, "HEAD")
-	testRequestHeaderMethod(t, "DELETE")
+	testRequestHeaderMethod(t, MethodGet)
+	testRequestHeaderMethod(t, MethodPost)
+	testRequestHeaderMethod(t, MethodHead)
+	testRequestHeaderMethod(t, MethodDelete)
 
 	// non-http methods
 	testRequestHeaderMethod(t, "foobar")
@@ -1618,7 +1636,7 @@ func testRequestHeaderMethod(t *testing.T, expectedMethod string) {
 func TestRequestHeaderSetGet(t *testing.T) {
 	h := &RequestHeader{}
 	h.SetRequestURI("/aa/bbb")
-	h.SetMethod("POST")
+	h.SetMethod(MethodPost)
 	h.Set("foo", "bar")
 	h.Set("host", "12345")
 	h.Set("content-type", "aaa/bbb")
@@ -1630,13 +1648,13 @@ func TestRequestHeaderSetGet(t *testing.T) {
 	h.Set("connection", "close")
 
 	expectRequestHeaderGet(t, h, "Foo", "bar")
-	expectRequestHeaderGet(t, h, "Host", "12345")
-	expectRequestHeaderGet(t, h, "Content-Type", "aaa/bbb")
-	expectRequestHeaderGet(t, h, "Content-Length", "1234")
+	expectRequestHeaderGet(t, h, HeaderHost, "12345")
+	expectRequestHeaderGet(t, h, HeaderContentType, "aaa/bbb")
+	expectRequestHeaderGet(t, h, HeaderContentLength, "1234")
 	expectRequestHeaderGet(t, h, "USER-AGent", "aaabbb")
-	expectRequestHeaderGet(t, h, "Referer", "axcv")
+	expectRequestHeaderGet(t, h, HeaderReferer, "axcv")
 	expectRequestHeaderGet(t, h, "baz", "xxxxx")
-	expectRequestHeaderGet(t, h, "Transfer-Encoding", "")
+	expectRequestHeaderGet(t, h, HeaderTransferEncoding, "")
 	expectRequestHeaderGet(t, h, "connecTION", "close")
 	if !h.ConnectionClose() {
 		t.Fatalf("unset connection: close")
@@ -1668,13 +1686,13 @@ func TestRequestHeaderSetGet(t *testing.T) {
 
 	expectRequestHeaderGet(t, &h1, "Foo", "bar")
 	expectRequestHeaderGet(t, &h1, "HOST", "12345")
-	expectRequestHeaderGet(t, &h1, "Content-Type", "aaa/bbb")
-	expectRequestHeaderGet(t, &h1, "Content-Length", "1234")
+	expectRequestHeaderGet(t, &h1, HeaderContentType, "aaa/bbb")
+	expectRequestHeaderGet(t, &h1, HeaderContentLength, "1234")
 	expectRequestHeaderGet(t, &h1, "USER-AGent", "aaabbb")
-	expectRequestHeaderGet(t, &h1, "Referer", "axcv")
+	expectRequestHeaderGet(t, &h1, HeaderReferer, "axcv")
 	expectRequestHeaderGet(t, &h1, "baz", "xxxxx")
-	expectRequestHeaderGet(t, &h1, "Transfer-Encoding", "")
-	expectRequestHeaderGet(t, &h1, "Connection", "close")
+	expectRequestHeaderGet(t, &h1, HeaderTransferEncoding, "")
+	expectRequestHeaderGet(t, &h1, HeaderConnection, "close")
 	if !h1.ConnectionClose() {
 		t.Fatalf("unset connection: close")
 	}
@@ -1686,17 +1704,17 @@ func TestResponseHeaderSetGet(t *testing.T) {
 	h.Set("content-type", "aaa/bbb")
 	h.Set("connection", "close")
 	h.Set("content-length", "1234")
-	h.Set("Server", "aaaa")
+	h.Set(HeaderServer, "aaaa")
 	h.Set("baz", "xxxxx")
-	h.Set("Transfer-Encoding", "chunked")
+	h.Set(HeaderTransferEncoding, "chunked")
 
 	expectResponseHeaderGet(t, h, "Foo", "bar")
-	expectResponseHeaderGet(t, h, "Content-Type", "aaa/bbb")
-	expectResponseHeaderGet(t, h, "Connection", "close")
-	expectResponseHeaderGet(t, h, "Content-Length", "1234")
+	expectResponseHeaderGet(t, h, HeaderContentType, "aaa/bbb")
+	expectResponseHeaderGet(t, h, HeaderConnection, "close")
+	expectResponseHeaderGet(t, h, HeaderContentLength, "1234")
 	expectResponseHeaderGet(t, h, "seRVer", "aaaa")
 	expectResponseHeaderGet(t, h, "baz", "xxxxx")
-	expectResponseHeaderGet(t, h, "Transfer-Encoding", "")
+	expectResponseHeaderGet(t, h, HeaderTransferEncoding, "")
 
 	if h.ContentLength() != 1234 {
 		t.Fatalf("Unexpected content-length %d. Expected %d", h.ContentLength(), 1234)
@@ -1729,8 +1747,8 @@ func TestResponseHeaderSetGet(t *testing.T) {
 	}
 
 	expectResponseHeaderGet(t, &h1, "Foo", "bar")
-	expectResponseHeaderGet(t, &h1, "Content-Type", "aaa/bbb")
-	expectResponseHeaderGet(t, &h1, "Connection", "close")
+	expectResponseHeaderGet(t, &h1, HeaderContentType, "aaa/bbb")
+	expectResponseHeaderGet(t, &h1, HeaderConnection, "close")
 	expectResponseHeaderGet(t, &h1, "seRVer", "aaaa")
 	expectResponseHeaderGet(t, &h1, "baz", "xxxxx")
 }
@@ -2262,8 +2280,8 @@ func verifyResponseHeader(t *testing.T, h *ResponseHeader, expectedStatusCode, e
 	if h.ContentLength() != expectedContentLength {
 		t.Fatalf("Unexpected content length %d. Expected %d", h.ContentLength(), expectedContentLength)
 	}
-	if string(h.Peek("Content-Type")) != expectedContentType {
-		t.Fatalf("Unexpected content type %q. Expected %q", h.Peek("Content-Type"), expectedContentType)
+	if string(h.Peek(HeaderContentType)) != expectedContentType {
+		t.Fatalf("Unexpected content type %q. Expected %q", h.Peek(HeaderContentType), expectedContentType)
 	}
 }
 
@@ -2275,14 +2293,14 @@ func verifyRequestHeader(t *testing.T, h *RequestHeader, expectedContentLength i
 	if string(h.RequestURI()) != expectedRequestURI {
 		t.Fatalf("Unexpected RequestURI %q. Expected %q", h.RequestURI(), expectedRequestURI)
 	}
-	if string(h.Peek("Host")) != expectedHost {
-		t.Fatalf("Unexpected host %q. Expected %q", h.Peek("Host"), expectedHost)
+	if string(h.Peek(HeaderHost)) != expectedHost {
+		t.Fatalf("Unexpected host %q. Expected %q", h.Peek(HeaderHost), expectedHost)
 	}
-	if string(h.Peek("Referer")) != expectedReferer {
-		t.Fatalf("Unexpected referer %q. Expected %q", h.Peek("Referer"), expectedReferer)
+	if string(h.Peek(HeaderReferer)) != expectedReferer {
+		t.Fatalf("Unexpected referer %q. Expected %q", h.Peek(HeaderReferer), expectedReferer)
 	}
-	if string(h.Peek("Content-Type")) != expectedContentType {
-		t.Fatalf("Unexpected content-type %q. Expected %q", h.Peek("Content-Type"), expectedContentType)
+	if string(h.Peek(HeaderContentType)) != expectedContentType {
+		t.Fatalf("Unexpected content-type %q. Expected %q", h.Peek(HeaderContentType), expectedContentType)
 	}
 }
 

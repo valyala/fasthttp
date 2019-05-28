@@ -985,9 +985,11 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	req.copyToSkipBody(reqCopy)
 	swapRequestBody(req, reqCopy)
 	respCopy := AcquireResponse()
-	// Not calling resp.copyToSkipBody(respCopy) here to avoid
-	// unexpected messing with headers
-	respCopy.SkipBody = resp.SkipBody
+	if resp != nil {
+		// Not calling resp.copyToSkipBody(respCopy) here to avoid
+		// unexpected messing with headers
+		respCopy.SkipBody = resp.SkipBody
+	}
 
 	// Note that the request continues execution on ErrTimeout until
 	// client-specific ReadTimeout exceeds. This helps limiting load
@@ -997,35 +999,47 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	// concurrent requests, since timed out requests on client side
 	// usually continue execution on the host.
 
-	var cleanup int32
+	var mu sync.Mutex
+	var timedout bool
+
 	go func() {
 		errDo := c.Do(reqCopy, respCopy)
-		if atomic.LoadInt32(&cleanup) == 1 {
-			ReleaseResponse(respCopy)
-			ReleaseRequest(reqCopy)
-			errorChPool.Put(chv)
-		} else {
-			ch <- errDo
+		mu.Lock()
+		{
+			if !timedout {
+				if resp != nil {
+					respCopy.copyToSkipBody(resp)
+					swapResponseBody(resp, respCopy)
+				}
+				swapRequestBody(reqCopy, req)
+				ch <- errDo
+			}
 		}
+		mu.Unlock()
+
+		ReleaseResponse(respCopy)
+		ReleaseRequest(reqCopy)
 	}()
 
 	tc := AcquireTimer(timeout)
 	var err error
 	select {
 	case err = <-ch:
-		if resp != nil {
-			respCopy.copyToSkipBody(resp)
-			swapResponseBody(resp, respCopy)
-		}
-		swapRequestBody(reqCopy, req)
-		ReleaseResponse(respCopy)
-		ReleaseRequest(reqCopy)
-		errorChPool.Put(chv)
 	case <-tc.C:
-		atomic.StoreInt32(&cleanup, 1)
-		err = ErrTimeout
+		mu.Lock()
+		{
+			timedout = true
+			err = ErrTimeout
+		}
+		mu.Unlock()
 	}
 	ReleaseTimer(tc)
+
+	select {
+	case <-ch:
+	default:
+	}
+	errorChPool.Put(chv)
 
 	return err
 }
@@ -1145,6 +1159,8 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		return false, err
 	}
 	conn := cc.c
+
+	resp.parseNetConn(conn)
 
 	if c.WriteTimeout > 0 {
 		// Set Deadline every time, since golang has fixed the performance issue
@@ -2086,6 +2102,8 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}) error
 			w.done <- struct{}{}
 			continue
 		}
+
+		w.resp.parseNetConn(conn)
 
 		if writeTimeout > 0 {
 			// Set Deadline every time, since golang has fixed the performance issue

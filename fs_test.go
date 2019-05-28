@@ -101,7 +101,7 @@ func TestPathNotFoundFunc(t *testing.T) {
 func TestServeFileHead(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
-	req.Header.SetMethod("HEAD")
+	req.Header.SetMethod(MethodHead)
 	req.SetRequestURI("http://foobar.com/baz")
 	ctx.Init(&req, nil, nil)
 
@@ -115,7 +115,7 @@ func TestServeFileHead(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	ce := resp.Header.Peek("Content-Encoding")
+	ce := resp.Header.Peek(HeaderContentEncoding)
 	if len(ce) > 0 {
 		t.Fatalf("Unexpected 'Content-Encoding' %q", ce)
 	}
@@ -190,7 +190,7 @@ func TestServeFileCompressed(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
 	req.SetRequestURI("http://foobar.com/baz")
-	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set(HeaderAcceptEncoding, "gzip")
 	ctx.Init(&req, nil, nil)
 
 	ServeFile(&ctx, "fs.go")
@@ -202,7 +202,7 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	ce := resp.Header.Peek("Content-Encoding")
+	ce := resp.Header.Peek(HeaderContentEncoding)
 	if string(ce) != "gzip" {
 		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "gzip")
 	}
@@ -224,7 +224,7 @@ func TestServeFileUncompressed(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
 	req.SetRequestURI("http://foobar.com/baz")
-	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set(HeaderAcceptEncoding, "gzip")
 	ctx.Init(&req, nil, nil)
 
 	ServeFileUncompressed(&ctx, "fs.go")
@@ -236,7 +236,7 @@ func TestServeFileUncompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	ce := resp.Header.Peek("Content-Encoding")
+	ce := resp.Header.Peek(HeaderContentEncoding)
 	if len(ce) > 0 {
 		t.Fatalf("Unexpected 'Content-Encoding' %q", ce)
 	}
@@ -319,7 +319,7 @@ func testFSByteRange(t *testing.T, h RequestHandler, filePath string) {
 	if resp.StatusCode() != StatusPartialContent {
 		t.Fatalf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusPartialContent, filePath)
 	}
-	cr := resp.Header.Peek("Content-Range")
+	cr := resp.Header.Peek(HeaderContentRange)
 
 	expectedCR := fmt.Sprintf("bytes %d-%d/%d", startPos, endPos, fileSize)
 	if string(cr) != expectedCR {
@@ -473,7 +473,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	if resp.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
-	ce := resp.Header.Peek("Content-Encoding")
+	ce := resp.Header.Peek(HeaderContentEncoding)
 	if string(ce) != "" {
 		t.Fatalf("unexpected content-encoding %q. Expecting empty string. filePath=%q", ce, filePath)
 	}
@@ -482,7 +482,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	// request compressed file
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI(filePath)
-	ctx.Request.Header.Set("Accept-Encoding", "gzip")
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip")
 	h(&ctx)
 	s = ctx.Response.String()
 	br = bufio.NewReader(bytes.NewBufferString(s))
@@ -492,7 +492,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	if resp.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
-	ce = resp.Header.Peek("Content-Encoding")
+	ce = resp.Header.Peek(HeaderContentEncoding)
 	if string(ce) != "gzip" {
 		t.Fatalf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "gzip", filePath)
 	}
@@ -686,7 +686,7 @@ func testFileExtension(t *testing.T, path string, compressed bool, compressedFil
 func TestServeFileContentType(t *testing.T) {
 	var ctx RequestCtx
 	var req Request
-	req.Header.SetMethod("GET")
+	req.Header.SetMethod(MethodGet)
 	req.SetRequestURI("http://foobar.com/baz")
 	ctx.Init(&req, nil, nil)
 

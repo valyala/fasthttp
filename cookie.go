@@ -21,6 +21,7 @@ var (
 // CookieSameSite is an enum for the mode in which the SameSite flag should be set for the given cookie.
 // See https://tools.ietf.org/html/draft-ietf-httpbis-cookie-same-site-00 for details.
 type CookieSameSite int
+
 const (
 	// CookieSameSiteDisabled removes the SameSite flag
 	CookieSameSiteDisabled CookieSameSite = iota

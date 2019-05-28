@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -17,6 +18,61 @@ import (
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
+
+func TestClientNilResp(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go s.Serve(ln)
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	if err := c.Do(req, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DoTimeout(req, nil, time.Second); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientParseConn(t *testing.T) {
+	network := "tcp"
+	ln, _ := net.Listen(network, "127.0.0.1:0")
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			return
+		},
+	}
+	go s.Serve(ln)
+	host := ln.Addr().String()
+	c := &Client{}
+	req, res := AcquireRequest(), AcquireResponse()
+	defer func() {
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+	}()
+	req.SetRequestURI("http://" + host + "")
+	c.Do(req, res)
+
+	if res.RemoteAddr().Network() != network {
+		t.Fatalf("req RemoteAddr parse network fail: %s, hope: %s", res.RemoteAddr().Network(), network)
+	}
+	if host != res.RemoteAddr().String() {
+		t.Fatalf("req RemoteAddr parse addr fail: %s, hope: %s", res.RemoteAddr().String(), host)
+	}
+
+	if !regexp.MustCompile(`^127\.0\.0\.1:[0-9]{4,5}$`).MatchString(res.LocalAddr().String()) {
+		t.Fatalf("res LocalAddr addr match fail: %s, hope match: %s", res.LocalAddr().String(), "^127.0.0.1:[0-9]{4,5}$")
+	}
+
+}
 
 func TestClientPostArgs(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
@@ -36,10 +92,14 @@ func TestClientPostArgs(t *testing.T) {
 		},
 	}
 	req, res := AcquireRequest(), AcquireResponse()
+	defer func() {
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+	}()
 	args := req.PostArgs()
 	args.Add("addhttp2", "support")
 	args.Add("fast", "http")
-	req.Header.SetMethod("POST")
+	req.Header.SetMethod(MethodPost)
 	req.SetRequestURI("http://make.fasthttp.great?again")
 	err := c.Do(req, res)
 	if err != nil {
@@ -430,8 +490,8 @@ func TestClientDoWithCustomHeaders(t *testing.T) {
 			ch <- fmt.Errorf("cannot read client request: %s", err)
 			return
 		}
-		if string(req.Header.Method()) != "POST" {
-			ch <- fmt.Errorf("unexpected request method: %q. Expecting %q", req.Header.Method(), "POST")
+		if string(req.Header.Method()) != MethodPost {
+			ch <- fmt.Errorf("unexpected request method: %q. Expecting %q", req.Header.Method(), MethodPost)
 			return
 		}
 		reqURI := req.RequestURI()
@@ -472,7 +532,7 @@ func TestClientDoWithCustomHeaders(t *testing.T) {
 	}()
 
 	var req Request
-	req.Header.SetMethod("POST")
+	req.Header.SetMethod(MethodPost)
 	req.SetRequestURI(uri)
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -787,7 +847,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 
 			req := AcquireRequest()
 			req.SetRequestURI("http://foobar/baz")
-			req.Header.SetMethod("POST")
+			req.Header.SetMethod(MethodPost)
 			req.SetBodyString("bar")
 			resp := AcquireResponse()
 
@@ -1157,6 +1217,14 @@ func (r *readTimeoutConn) Close() error {
 	return nil
 }
 
+func (r *readTimeoutConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (r *readTimeoutConn) RemoteAddr() net.Addr {
+	return nil
+}
+
 func TestClientNonIdempotentRetry(t *testing.T) {
 	dialsCount := 0
 	c := &Client{
@@ -1271,6 +1339,14 @@ func (w *writeErrorConn) Close() error {
 	return nil
 }
 
+func (r *writeErrorConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (r *writeErrorConn) RemoteAddr() net.Addr {
+	return nil
+}
+
 type readErrorConn struct {
 	net.Conn
 }
@@ -1284,6 +1360,14 @@ func (r *readErrorConn) Write(p []byte) (int, error) {
 }
 
 func (r *readErrorConn) Close() error {
+	return nil
+}
+
+func (r *readErrorConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (r *readErrorConn) RemoteAddr() net.Addr {
 	return nil
 }
 
@@ -1307,6 +1391,14 @@ func (r *singleReadConn) Write(p []byte) (int, error) {
 }
 
 func (r *singleReadConn) Close() error {
+	return nil
+}
+
+func (r *singleReadConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (r *singleReadConn) RemoteAddr() net.Addr {
 	return nil
 }
 

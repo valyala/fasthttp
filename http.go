@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"os"
 	"sync"
 
@@ -63,9 +64,14 @@ type Response struct {
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header ResponseHeader
 
+	// Flush headers as soon as possible without waiting for first body bytes.
+	// Relevant for bodyStream only.
+	ImmediateHeaderFlush bool
+
 	bodyStream io.Reader
 	w          responseBodyWriter
 	body       *bytebufferpool.ByteBuffer
+	bodyRaw    []byte
 
 	// Response.Read() skips reading body if set to true.
 	// Use it for reading HEAD responses.
@@ -75,6 +81,11 @@ type Response struct {
 	SkipBody bool
 
 	keepBodyBuffer bool
+
+	// Remote TCPAddr from concurrently net.Conn
+	raddr net.Addr
+	// Local TCPAddr from concurrently net.Conn
+	laddr net.Addr
 }
 
 // SetHost sets host for the request.
@@ -281,6 +292,23 @@ func (w *requestBodyWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (resp *Response) parseNetConn(conn net.Conn) {
+	resp.raddr = conn.RemoteAddr()
+	resp.laddr = conn.LocalAddr()
+}
+
+// RemoteAddr returns the remote network address. The Addr returned is shared
+// by all invocations of RemoteAddr, so do not modify it.
+func (resp *Response) RemoteAddr() net.Addr {
+	return resp.raddr
+}
+
+// LocalAddr returns the local network address. The Addr returned is shared
+// by all invocations of LocalAddr, so do not modify it.
+func (resp *Response) LocalAddr() net.Addr {
+	return resp.laddr
+}
+
 // Body returns response body.
 //
 // The returned body is valid until the response modification.
@@ -298,6 +326,9 @@ func (resp *Response) Body() []byte {
 }
 
 func (resp *Response) bodyBytes() []byte {
+	if resp.bodyRaw != nil {
+		return resp.bodyRaw
+	}
 	if resp.body == nil {
 		return nil
 	}
@@ -315,6 +346,7 @@ func (resp *Response) bodyBuffer() *bytebufferpool.ByteBuffer {
 	if resp.body == nil {
 		resp.body = responseBodyPool.Get()
 	}
+	resp.bodyRaw = nil
 	return resp.body
 }
 
@@ -439,6 +471,7 @@ func (resp *Response) SetBodyString(body string) {
 
 // ResetBody resets response body.
 func (resp *Response) ResetBody() {
+	resp.bodyRaw = nil
 	resp.closeBodyStream()
 	if resp.body != nil {
 		if resp.keepBodyBuffer {
@@ -450,6 +483,14 @@ func (resp *Response) ResetBody() {
 	}
 }
 
+// SetBodyRaw sets response body, but without copying it.
+//
+// From this point onward the body argument must not be changed.
+func (resp *Response) SetBodyRaw(body []byte) {
+	resp.ResetBody()
+	resp.bodyRaw = body
+}
+
 // ReleaseBody retires the response body if it is greater than "size" bytes.
 //
 // This permits GC to reclaim the large buffer.  If used, must be before
@@ -458,6 +499,7 @@ func (resp *Response) ResetBody() {
 // Use this method only if you really understand how it works.
 // The majority of workloads don't need this method.
 func (resp *Response) ReleaseBody(size int) {
+	resp.bodyRaw = nil
 	if cap(resp.body.B) > size {
 		resp.closeBodyStream()
 		resp.body = nil
@@ -495,6 +537,8 @@ func (resp *Response) SwapBody(body []byte) []byte {
 			bb.SetString(err.Error())
 		}
 	}
+
+	resp.bodyRaw = nil
 
 	oldBody := bb.B
 	bb.B = body
@@ -616,7 +660,12 @@ func (req *Request) copyToSkipBody(dst *Request) {
 // CopyTo copies resp contents to dst except of body stream.
 func (resp *Response) CopyTo(dst *Response) {
 	resp.copyToSkipBody(dst)
-	if resp.body != nil {
+	if resp.bodyRaw != nil {
+		dst.bodyRaw = resp.bodyRaw
+		if dst.body != nil {
+			dst.body.Reset()
+		}
+	} else if resp.body != nil {
 		dst.bodyBuffer().Set(resp.body.B)
 	} else if dst.body != nil {
 		dst.body.Reset()
@@ -627,6 +676,8 @@ func (resp *Response) copyToSkipBody(dst *Response) {
 	dst.Reset()
 	resp.Header.CopyTo(&dst.Header)
 	dst.SkipBody = resp.SkipBody
+	dst.raddr = resp.raddr
+	dst.laddr = resp.laddr
 }
 
 func swapRequestBody(a, b *Request) {
@@ -636,6 +687,7 @@ func swapRequestBody(a, b *Request) {
 
 func swapResponseBody(a, b *Response) {
 	a.body, b.body = b.body, a.body
+	a.bodyRaw, b.bodyRaw = b.bodyRaw, a.bodyRaw
 	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
 }
 
@@ -820,6 +872,9 @@ func (resp *Response) Reset() {
 	resp.Header.Reset()
 	resp.resetSkipHeader()
 	resp.SkipBody = false
+	resp.raddr = nil
+	resp.laddr = nil
+	resp.ImmediateHeaderFlush = false
 }
 
 func (resp *Response) resetSkipHeader() {
@@ -1238,6 +1293,7 @@ func (resp *Response) gzipBody(level int) error {
 			responseBodyPool.Put(resp.body)
 		}
 		resp.body = w
+		resp.bodyRaw = nil
 	}
 	resp.Header.SetCanonical(strContentEncoding, strGzip)
 	return nil
@@ -1292,6 +1348,7 @@ func (resp *Response) deflateBody(level int) error {
 			responseBodyPool.Put(resp.body)
 		}
 		resp.body = w
+		resp.bodyRaw = nil
 	}
 	resp.Header.SetCanonical(strContentEncoding, strDeflate)
 	return nil
@@ -1403,12 +1460,22 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) error {
 	}
 	if contentLength >= 0 {
 		if err = resp.Header.Write(w); err == nil && sendBody {
-			err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
+			if resp.ImmediateHeaderFlush {
+				err = w.Flush()
+			}
+			if err == nil {
+				err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
+			}
 		}
 	} else {
 		resp.Header.SetContentLength(-1)
 		if err = resp.Header.Write(w); err == nil && sendBody {
-			err = writeBodyChunked(w, resp.bodyStream)
+			if resp.ImmediateHeaderFlush {
+				err = w.Flush()
+			}
+			if err == nil {
+				err = writeBodyChunked(w, resp.bodyStream)
+			}
 		}
 	}
 	err1 := resp.closeBodyStream()
