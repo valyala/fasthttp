@@ -1008,6 +1008,8 @@ func addrToIP(addr net.Addr) net.IP {
 
 // Error sets response status code to the given value and sets response body
 // to the given message.
+//
+// Warning: this will reset the response headers and body already set!
 func (ctx *RequestCtx) Error(msg string, statusCode int) {
 	ctx.Response.Reset()
 	ctx.SetStatusCode(statusCode)
