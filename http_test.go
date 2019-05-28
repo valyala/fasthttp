@@ -1921,3 +1921,133 @@ func TestResponseRawBodyCopyTo(t *testing.T) {
 
 	testResponseCopyTo(t, &resp)
 }
+
+type testReader struct {
+	read chan (int)
+	cb   chan (struct{})
+}
+
+func (r *testReader) Read(b []byte) (int, error) {
+	read := <-r.read
+
+	if read == -1 {
+		return 0, io.EOF
+	}
+
+	r.cb <- struct{}{}
+
+	for i := 0; i < read; i++ {
+		b[i] = 'x'
+	}
+
+	return read, nil
+}
+
+func TestResponseImmediateHeaderFlushRegressionFixedLength(t *testing.T) {
+	var r Response
+
+	expectedS := "aaabbbccc"
+	buf := bytes.NewBufferString(expectedS)
+	r.SetBodyStream(buf, len(expectedS))
+	r.ImmediateHeaderFlush = true
+
+	testBodyWriteTo(t, &r, expectedS, false)
+}
+
+func TestResponseImmediateHeaderFlushRegressionChunked(t *testing.T) {
+	var r Response
+
+	expectedS := "aaabbbccc"
+	buf := bytes.NewBufferString(expectedS)
+	r.SetBodyStream(buf, -1)
+	r.ImmediateHeaderFlush = true
+
+	testBodyWriteTo(t, &r, expectedS, false)
+}
+
+func TestResponseImmediateHeaderFlushFixedLength(t *testing.T) {
+	var r Response
+
+	r.ImmediateHeaderFlush = true
+
+	ch := make(chan int)
+	cb := make(chan struct{})
+
+	buf := &testReader{read: ch, cb: cb}
+
+	r.SetBodyStream(buf, 3)
+
+	b := []byte{}
+	w := bytes.NewBuffer(b)
+	bb := bufio.NewWriter(w)
+
+	bw := &r
+
+	waitForIt := make(chan struct{})
+
+	go func() {
+		if err := bw.Write(bb); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		waitForIt <- struct{}{}
+	}()
+
+	ch <- 3
+
+	if !strings.Contains(w.String(), "Content-Length: 3") {
+		t.Fatalf("Expected headers to be flushed")
+	}
+
+	if strings.Contains(w.String(), "xxx") {
+		t.Fatalf("Did not expext body to be written yet")
+	}
+
+	<-cb
+	ch <- -1
+
+	<-waitForIt
+}
+
+func TestResponseImmediateHeaderFlushChunked(t *testing.T) {
+	var r Response
+
+	r.ImmediateHeaderFlush = true
+
+	ch := make(chan int)
+	cb := make(chan struct{})
+
+	buf := &testReader{read: ch, cb: cb}
+
+	r.SetBodyStream(buf, -1)
+
+	b := []byte{}
+	w := bytes.NewBuffer(b)
+	bb := bufio.NewWriter(w)
+
+	bw := &r
+
+	waitForIt := make(chan struct{})
+
+	go func() {
+		if err := bw.Write(bb); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+
+		waitForIt <- struct{}{}
+	}()
+
+	ch <- 3
+
+	if !strings.Contains(w.String(), "Transfer-Encoding: chunked") {
+		t.Fatalf("Expected headers to be flushed")
+	}
+
+	if strings.Contains(w.String(), "xxx") {
+		t.Fatalf("Did not expext body to be written yet")
+	}
+
+	<-cb
+	ch <- -1
+
+	<-waitForIt
+}

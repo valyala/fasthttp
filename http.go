@@ -64,6 +64,10 @@ type Response struct {
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header ResponseHeader
 
+	// Flush headers as soon as possible without waiting for first body bytes.
+	// Relevant for bodyStream only.
+	ImmediateHeaderFlush bool
+
 	bodyStream io.Reader
 	w          responseBodyWriter
 	body       *bytebufferpool.ByteBuffer
@@ -870,6 +874,7 @@ func (resp *Response) Reset() {
 	resp.SkipBody = false
 	resp.raddr = nil
 	resp.laddr = nil
+	resp.ImmediateHeaderFlush = false
 }
 
 func (resp *Response) resetSkipHeader() {
@@ -1455,12 +1460,22 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) error {
 	}
 	if contentLength >= 0 {
 		if err = resp.Header.Write(w); err == nil && sendBody {
-			err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
+			if resp.ImmediateHeaderFlush {
+				err = w.Flush()
+			}
+			if err == nil {
+				err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
+			}
 		}
 	} else {
 		resp.Header.SetContentLength(-1)
 		if err = resp.Header.Write(w); err == nil && sendBody {
-			err = writeBodyChunked(w, resp.bodyStream)
+			if resp.ImmediateHeaderFlush {
+				err = w.Flush()
+			}
+			if err == nil {
+				err = writeBodyChunked(w, resp.bodyStream)
+			}
 		}
 	}
 	err1 := resp.closeBodyStream()
