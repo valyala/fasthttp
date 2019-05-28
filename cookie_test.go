@@ -121,6 +121,29 @@ func TestCookieSameSite(t *testing.T) {
 		t.Fatalf("missing SameSite flag in cookie %q", s)
 	}
 
+	if err := c.Parse("foo=bar; samesite=none"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if c.SameSite() != CookieSameSiteNoneMode {
+		t.Fatalf("SameSite None Mode must be set")
+	}
+	s = c.String()
+	if !strings.Contains(s, "; SameSite=None") {
+		t.Fatalf("missing SameSite flag in cookie %q", s)
+	}
+
+	if err := c.Parse("foo=bar"); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	c.SetSameSite(CookieSameSiteNoneMode)
+	s = c.String()
+	if !strings.Contains(s, "; SameSite=None") {
+		t.Fatalf("missing SameSite flag in cookie %q", s)
+	}
+	if !strings.Contains(s, "; secure") {
+		t.Fatalf("missing Secure flag in cookie %q", s)
+	}
+
 	if err := c.Parse("foo=bar"); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
