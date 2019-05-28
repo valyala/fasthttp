@@ -31,6 +31,8 @@ const (
 	CookieSameSiteLaxMode
 	// CookieSameSiteStrictMode sets the SameSite flag with the "Strict" parameter
 	CookieSameSiteStrictMode
+	// CookieSameSiteStrictMode sets the SameSite flag with the "None" parameter
+	CookieSameSiteNoneMode
 )
 
 // AcquireCookie returns an empty Cookie object from the pool.
@@ -288,6 +290,11 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 		dst = append(dst, strCookieSameSite...)
 		dst = append(dst, '=')
 		dst = append(dst, strCookieSameSiteStrict...)
+	case CookieSameSiteNoneMode:
+		dst = append(dst, ';', ' ')
+		dst = append(dst, strCookieSameSite...)
+		dst = append(dst, '=')
+		dst = append(dst, strCookieSameSiteNone...)
 	}
 	return dst
 }
@@ -385,6 +392,10 @@ func (c *Cookie) ParseBytes(src []byte) error {
 					case 's': // "strict"
 						if caseInsensitiveCompare(strCookieSameSiteStrict, kv.value) {
 							c.sameSite = CookieSameSiteStrictMode
+						}
+					case 'n': // "none"
+						if caseInsensitiveCompare(strCookieSameSiteNone, kv.value) {
+							c.sameSite = CookieSameSiteNoneMode
 						}
 					}
 				}
