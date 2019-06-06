@@ -374,8 +374,8 @@ func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) Request
 	return TimeoutWithCodeHandler(h,timeout,msg, StatusRequestTimeout)
 }
 
-// TimeoutWithCodeHandler creates RequestHandler, which returns StatusRequestTimeout
-// error with the given msg to the client if h didn't return during
+// TimeoutWithCodeHandler creates RequestHandler, which returns an error with 
+// the given msg and status code to the client  if h didn't return during
 // the given duration.
 //
 // The returned handler may return StatusTooManyRequests error with the given
