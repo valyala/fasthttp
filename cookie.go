@@ -398,7 +398,7 @@ func (c *Cookie) ParseBytes(src []byte) error {
 						if caseInsensitiveCompare(strCookieSameSiteStrict, kv.value) {
 							c.sameSite = CookieSameSiteStrictMode
 						}
-					case 'n': // "strict"
+					case 'n': // "none"
 						if caseInsensitiveCompare(strCookieSameSiteNone, kv.value) {
 							c.sameSite = CookieSameSiteNoneMode
 						}
