@@ -377,7 +377,7 @@ type ConnConfig struct {
 // msg to the client if there are more than Server.Concurrency concurrent
 // handlers h are running at the moment.
 func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) RequestHandler {
-	return TimeoutWithCodeHandler(h,timeout,msg, StatusRequestTimeout)
+	return TimeoutWithCodeHandler(h, timeout, msg, StatusRequestTimeout)
 }
 
 // TimeoutWithCodeHandler creates RequestHandler, which returns an error with
@@ -2020,11 +2020,13 @@ func (s *Server) serveConn(c net.Conn) error {
 			ctx.SetConnectionClose()
 		}
 
+		writeTimeout := s.WriteTimeout
+
 		if perConnConfig != nil {
-			if err := c.SetWriteDeadline(time.Now().Add(perConnConfig.WriteTimeout)); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", s.WriteTimeout, err))
-			}
-		} else if s.WriteTimeout > 0 {
+			writeTimeout = perConnConfig.WriteTimeout
+		}
+
+		if writeTimeout > 0 {
 			if err := c.SetWriteDeadline(time.Now().Add(s.WriteTimeout)); err != nil {
 				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", s.WriteTimeout, err))
 			}
