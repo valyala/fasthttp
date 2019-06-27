@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/valyala/fasthttp/fasthttputil"
+	"github.com/thesyncim/fasthttp/fasthttputil"
 )
 
 // Make sure RequestCtx implements context.Context
@@ -2739,8 +2739,8 @@ func TestShutdownReuse(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
-		ReadHeadersTimeout: time.Second,
-		Logger:             &customLogger{}, // Ignore log output.
+		ReadTimeout: time.Second,
+		Logger:      &customLogger{}, // Ignore log output.
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {

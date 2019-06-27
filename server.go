@@ -166,8 +166,8 @@ type Server struct {
 	//   * ErrBodyTooLarge
 	//   * ErrBrokenChunks
 	ErrorHandler func(ctx *RequestCtx, err error)
-	//todo docs
-	ConnConfigHandler func(URI string) *ConnConfig
+
+	OnHeaderReceived func(header *RequestHeader) *RequestConfig
 
 	// Server name for sending in response headers.
 	//
@@ -187,13 +187,6 @@ type Server struct {
 	// By default keep-alive connections are enabled.
 	DisableKeepalive bool
 
-	// ReadTimeout is the amount of time allowed to read
-	// the full request headers. The connection's read
-	// deadline is reset when the connection opens, or for
-	// keep-alive connections after the first byte has been read.
-	//
-	// By default request read timeout is unlimited.
-	ReadHeadersTimeout time.Duration
 	// Per-connection buffer size for requests' reading.
 	// This also limits the maximum header size.
 	//
@@ -208,12 +201,25 @@ type Server struct {
 	// Default buffer size is used if not set.
 	WriteBufferSize int
 
+	// ReadTimeout is the amount of time allowed to read
+	// the full request including body. The connection's read
+	// deadline is reset when the connection opens, or for
+	// keep-alive connections after the first byte has been read.
+	//
+	// By default request read timeout is unlimited.
+	ReadTimeout time.Duration
+
+	// WriteTimeout is the maximum duration before timing out
+	// writes of the response. It is reset after the request handler
+	// has returned.
+	//
+	// By default response write timeout is unlimited.
+	WriteTimeout time.Duration
+
 	// IdleTimeout is the maximum amount of time to wait for the
 	// next request when keep-alive is enabled. If IdleTimeout
 	// is zero, the value of ReadTimeout is used.
 	IdleTimeout time.Duration
-
-	ConnConfig
 
 	// Maximum number of concurrent client connections allowed per IP.
 	//
@@ -244,6 +250,13 @@ type Server struct {
 	//
 	// TCP keep-alive period is determined by operation system by default.
 	TCPKeepalivePeriod time.Duration
+
+	// Maximum request body size.
+	//
+	// The server rejects requests with bodies exceeding this limit.
+	//
+	// Request body size is limited by DefaultMaxRequestBodySize by default.
+	MaxRequestBodySize int
 
 	// Aggressively reduces memory usage at the cost of higher CPU usage
 	// if set to true.
@@ -352,8 +365,10 @@ type Server struct {
 	done chan struct{}
 }
 
-type ConnConfig struct {
-	ReadBodyTimeout time.Duration
+type RequestConfig struct {
+	// ReadTimeout is the maximum duration for reading the entire
+	// request body.
+	ReadTimeout time.Duration
 	// WriteTimeout is the maximum duration before timing out
 	// writes of the response. It is reset after the request handler
 	// has returned.
@@ -367,6 +382,10 @@ type ConnConfig struct {
 	//
 	// Request body size is limited by DefaultMaxRequestBodySize by default.
 	MaxRequestBodySize int
+	// Per-connection buffer size for responses' writing.
+	//
+	// Default buffer size is used if not set.
+	WriteBufferSize int
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -1814,7 +1833,7 @@ func (s *Server) idleTimeout() time.Duration {
 	if s.IdleTimeout != 0 {
 		return s.IdleTimeout
 	}
-	return s.ReadHeadersTimeout
+	return s.ReadTimeout
 }
 
 func (s *Server) serveConn(c net.Conn) error {
@@ -1840,6 +1859,8 @@ func (s *Server) serveConn(c net.Conn) error {
 	if maxRequestBodySize <= 0 {
 		maxRequestBodySize = DefaultMaxRequestBodySize
 	}
+	readBodyTimeout := time.Duration(-1)
+	writeTimeout := s.WriteTimeout
 
 	ctx := s.acquireCtx(c)
 	ctx.connTime = connTime
@@ -1893,11 +1914,11 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		ctx.Request.isTLS = isTLS
 		ctx.Response.Header.noDefaultContentType = s.NoDefaultContentType
-		var perConnConfig *ConnConfig
+
 		if err == nil {
-			if s.ReadHeadersTimeout > 0 {
-				if err := c.SetReadDeadline(time.Now().Add(s.ReadHeadersTimeout)); err != nil {
-					panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", s.ReadHeadersTimeout, err))
+			if readBodyTimeout > 0 {
+				if err := c.SetReadDeadline(time.Now().Add(readBodyTimeout)); err != nil {
+					panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", s.ReadTimeout, err))
 				}
 			}
 
@@ -1911,16 +1932,18 @@ func (s *Server) serveConn(c net.Conn) error {
 				return err
 			}
 
-			if s.ConnConfigHandler != nil {
-				if c := s.ConnConfigHandler(ctx.Request.URI().String()); c != nil {
-					perConnConfig = c
-					maxRequestBodySize = perConnConfig.MaxRequestBodySize
+			if s.OnHeaderReceived != nil {
+				if rc := s.OnHeaderReceived(&ctx.Request.Header); rc != nil {
+					maxRequestBodySize = rc.MaxRequestBodySize
+					readBodyTimeout = rc.ReadTimeout
+					writeTimeout = rc.WriteTimeout
 				}
 			}
 
-			if perConnConfig != nil {
-				if err := c.SetReadDeadline(time.Now().Add(perConnConfig.ReadBodyTimeout)); err != nil {
-					panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", s.ReadHeadersTimeout, err))
+			if readBodyTimeout > -1 {
+				//extend read deadline for request body
+				if err := c.SetReadDeadline(time.Now().Add(readBodyTimeout)); err != nil {
+					panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", s.ReadTimeout, err))
 				}
 			}
 
@@ -2018,12 +2041,6 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		if s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn) {
 			ctx.SetConnectionClose()
-		}
-
-		writeTimeout := s.WriteTimeout
-
-		if perConnConfig != nil {
-			writeTimeout = perConnConfig.WriteTimeout
 		}
 
 		if writeTimeout > 0 {
