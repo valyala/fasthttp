@@ -167,7 +167,7 @@ type Server struct {
 	//   * ErrBrokenChunks
 	ErrorHandler func(ctx *RequestCtx, err error)
 
-	OnHeaderReceived func(header *RequestHeader) *RequestConfig
+	HeaderReceived func(header *RequestHeader) *RequestConfig
 
 	// Server name for sending in response headers.
 	//
@@ -365,29 +365,6 @@ type Server struct {
 	done chan struct{}
 }
 
-type RequestConfig struct {
-	// ReadTimeout is the maximum duration for reading the entire
-	// request body.
-	ReadTimeout time.Duration
-	// WriteTimeout is the maximum duration before timing out
-	// writes of the response. It is reset after the request handler
-	// has returned.
-	//
-	// By default response write timeout is unlimited.
-	WriteTimeout time.Duration
-
-	// Maximum request body size.
-	//
-	// The server rejects requests with bodies exceeding this limit.
-	//
-	// Request body size is limited by DefaultMaxRequestBodySize by default.
-	MaxRequestBodySize int
-	// Per-connection buffer size for responses' writing.
-	//
-	// Default buffer size is used if not set.
-	WriteBufferSize int
-}
-
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
 // error with the given msg to the client if h didn't return during
 // the given duration.
@@ -438,6 +415,17 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 		}
 		stopTimer(ctx.timeoutTimer)
 	}
+}
+
+type RequestConfig struct {
+	// ReadTimeout is the maximum duration for reading the entire
+	// request body.
+	ReadTimeout time.Duration
+	// WriteTimeout is the maximum duration before timing out
+	// writes of the response.
+	WriteTimeout time.Duration
+	// Maximum request body size.
+	MaxRequestBodySize int
 }
 
 // CompressHandler returns RequestHandler that transparently compresses
@@ -1859,7 +1847,6 @@ func (s *Server) serveConn(c net.Conn) error {
 	if maxRequestBodySize <= 0 {
 		maxRequestBodySize = DefaultMaxRequestBodySize
 	}
-	readBodyTimeout := time.Duration(-1)
 	writeTimeout := s.WriteTimeout
 
 	ctx := s.acquireCtx(c)
@@ -1916,43 +1903,39 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.Response.Header.noDefaultContentType = s.NoDefaultContentType
 
 		if err == nil {
-			if readBodyTimeout > 0 {
-				if err := c.SetReadDeadline(time.Now().Add(readBodyTimeout)); err != nil {
+			if s.ReadTimeout > 0 {
+				if err := c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", s.ReadTimeout, err))
 				}
 			}
-
 			if s.DisableHeaderNamesNormalizing {
 				ctx.Request.Header.DisableNormalizing()
 				ctx.Response.Header.DisableNormalizing()
 			}
 			// reading Headers
-			err := ctx.Request.Header.Read(br)
-			if err != nil {
-				return err
-			}
-
-			if s.OnHeaderReceived != nil {
-				if rc := s.OnHeaderReceived(&ctx.Request.Header); rc != nil {
-					maxRequestBodySize = rc.MaxRequestBodySize
-					readBodyTimeout = rc.ReadTimeout
-					writeTimeout = rc.WriteTimeout
+			if err = ctx.Request.Header.Read(br); err == nil {
+				if onHdrRecv := s.HeaderReceived; onHdrRecv != nil {
+					if reqConf := onHdrRecv(&ctx.Request.Header); reqConf != nil {
+						//overwrite default read body deadline
+						var deadline = time.Time{}
+						if reqConf.ReadTimeout != 0 {
+							deadline = time.Now().Add(reqConf.ReadTimeout)
+						}
+						if err := c.SetReadDeadline(deadline); err != nil {
+							panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", deadline, err))
+						}
+						maxRequestBodySize = reqConf.MaxRequestBodySize
+						writeTimeout = reqConf.WriteTimeout
+					}
 				}
+				//read body
+				err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly)
 			}
-
-			if readBodyTimeout > -1 {
-				//extend read deadline for request body
-				if err := c.SetReadDeadline(time.Now().Add(readBodyTimeout)); err != nil {
-					panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", s.ReadTimeout, err))
-				}
-			}
-
-			// read body
-			err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly)
 			if err == nil {
 				// If we read any bytes off the wire, we're active.
 				s.setState(c, StateActive)
 			}
+
 			if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
 				releaseReader(s, br)
 				br = nil
@@ -2044,7 +2027,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 
 		if writeTimeout > 0 {
-			if err := c.SetWriteDeadline(time.Now().Add(s.WriteTimeout)); err != nil {
+			if err := c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
 				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", s.WriteTimeout, err))
 			}
 		}
