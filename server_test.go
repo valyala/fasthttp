@@ -2849,6 +2849,86 @@ func TestShutdownErr(t *testing.T) {
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 }
 
+func TestMaxBodySizePerRequest(t *testing.T) {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			// do nothing :)
+		},
+		HeaderReceived: func(header *RequestHeader) RequestConfig {
+			return RequestConfig{
+				MaxRequestBodySize: 5 << 10, //overwrite default MaxRequestBodySize
+			}
+		},
+		ReadTimeout:        time.Second * 5,
+		WriteTimeout:       time.Second * 5,
+		MaxRequestBodySize: 1 << 20,
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", (5<<10)+1, strings.Repeat("a", (5<<10)+1)))
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != ErrBodyTooLarge {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("timeout")
+	}
+}
+
+func TestMaxReadTimeoutPerRequest(t *testing.T) {
+	headers := []byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n", 5*1024))
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			t.Fatal("shouldn't reach handler")
+		},
+		HeaderReceived: func(header *RequestHeader) RequestConfig {
+			return RequestConfig{
+				ReadTimeout:        time.Millisecond,
+				MaxRequestBodySize: DefaultMaxRequestBodySize,
+				WriteTimeout:       time.Second * 5,
+			}
+		},
+		ReadBufferSize: len(headers),
+		ReadTimeout:    time.Second * 5,
+		WriteTimeout:   time.Second * 5,
+	}
+
+	pipe := fasthttputil.NewPipeConns()
+	cc, sc := pipe.Conn1(), pipe.Conn2()
+	go func() {
+		//write headers
+		_, err := cc.Write(headers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		//write body
+		for i := 0; i < 5*1024; i++ {
+			time.Sleep(time.Millisecond)
+			cc.Write([]byte{'a'})
+		}
+	}()
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(sc)
+	}()
+
+	select {
+	case err := <-ch:
+		if err == nil || err != nil && !strings.EqualFold(err.Error(), "timeout") {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("test timeout")
+	}
+}
+
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) {
 	var resp Response
 	if err := resp.Read(r); err != nil {

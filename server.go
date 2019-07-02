@@ -23,6 +23,8 @@ var (
 	// ErrAlreadyServing is returned when calling Serve on a Server
 	// that is already serving connections.
 	ErrAlreadyServing = errors.New("Server is already serving connections")
+
+	zeroRequestConfig RequestConfig
 )
 
 // ServeConn serves HTTP requests from the given connection
@@ -167,7 +169,7 @@ type Server struct {
 	//   * ErrBrokenChunks
 	ErrorHandler func(ctx *RequestCtx, err error)
 
-	HeaderReceived func(header *RequestHeader) *RequestConfig
+	HeaderReceived func(header *RequestHeader) RequestConfig
 
 	// Server name for sending in response headers.
 	//
@@ -1915,9 +1917,9 @@ func (s *Server) serveConn(c net.Conn) error {
 			// reading Headers
 			if err = ctx.Request.Header.Read(br); err == nil {
 				if onHdrRecv := s.HeaderReceived; onHdrRecv != nil {
-					if reqConf := onHdrRecv(&ctx.Request.Header); reqConf != nil {
+					if reqConf := onHdrRecv(&ctx.Request.Header); reqConf != zeroRequestConfig {
 						//overwrite default read body deadline
-						var deadline = time.Time{}
+						deadline := zeroTime
 						if reqConf.ReadTimeout != 0 {
 							deadline = time.Now().Add(reqConf.ReadTimeout)
 						}
