@@ -169,6 +169,9 @@ type Server struct {
 	//   * ErrBrokenChunks
 	ErrorHandler func(ctx *RequestCtx, err error)
 
+	// HeaderReceived is called after receiving the header
+	//
+	// non zero RequestConfig field values will overwrite the default configs
 	HeaderReceived func(header *RequestHeader) RequestConfig
 
 	// Server name for sending in response headers.
@@ -419,14 +422,18 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 	}
 }
 
+//RequestConfig configure the per request deadline and body limits
 type RequestConfig struct {
 	// ReadTimeout is the maximum duration for reading the entire
 	// request body.
+	// a zero value means that default values will be honored
 	ReadTimeout time.Duration
 	// WriteTimeout is the maximum duration before timing out
 	// writes of the response.
+	// a zero value means that default values will be honored
 	WriteTimeout time.Duration
 	// Maximum request body size.
+	// a zero value means that default values will be honored
 	MaxRequestBodySize int
 }
 
@@ -1917,16 +1924,17 @@ func (s *Server) serveConn(c net.Conn) error {
 			// reading Headers
 			if err = ctx.Request.Header.Read(br); err == nil {
 				if onHdrRecv := s.HeaderReceived; onHdrRecv != nil {
-					if reqConf := onHdrRecv(&ctx.Request.Header); reqConf != zeroRequestConfig {
-						//overwrite default read body deadline
-						deadline := zeroTime
-						if reqConf.ReadTimeout != 0 {
-							deadline = time.Now().Add(reqConf.ReadTimeout)
-						}
+					reqConf := onHdrRecv(&ctx.Request.Header)
+					if reqConf.ReadTimeout > 0 {
+						deadline := time.Now().Add(reqConf.ReadTimeout)
 						if err := c.SetReadDeadline(deadline); err != nil {
 							panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", deadline, err))
 						}
+					}
+					if reqConf.MaxRequestBodySize > 0 {
 						maxRequestBodySize = reqConf.MaxRequestBodySize
+					}
+					if reqConf.WriteTimeout > 0 {
 						writeTimeout = reqConf.WriteTimeout
 					}
 				}
