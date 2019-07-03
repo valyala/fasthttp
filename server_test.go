@@ -2929,6 +2929,66 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 	}
 }
 
+func TestMaxWriteTimeoutPerRequest(t *testing.T) {
+	headers := []byte("GET /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: aa\r\n\r\n")
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
+				var buf [192]byte
+				for {
+					w.Write(buf[:])
+				}
+			})
+		},
+		HeaderReceived: func(header *RequestHeader) RequestConfig {
+			return RequestConfig{
+				ReadTimeout:        time.Second * 5,
+				MaxRequestBodySize: DefaultMaxRequestBodySize,
+				WriteTimeout:       time.Millisecond,
+			}
+		},
+		ReadBufferSize: 192,
+		ReadTimeout:    time.Second * 5,
+		WriteTimeout:   time.Second * 5,
+	}
+
+	pipe := fasthttputil.NewPipeConns()
+	cc, sc := pipe.Conn1(), pipe.Conn2()
+
+	var resp Response
+	go func() {
+		//write headers
+		_, err := cc.Write(headers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		br := bufio.NewReaderSize(cc, 192)
+		err = resp.Header.Read(br)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var chunk [192]byte
+		for {
+			time.Sleep(time.Millisecond)
+			br.Read(chunk[:])
+		}
+	}()
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(sc)
+	}()
+
+	select {
+	case err := <-ch:
+		if err == nil || err != nil && !strings.EqualFold(err.Error(), "timeout") {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("test timeout")
+	}
+}
+
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) {
 	var resp Response
 	if err := resp.Read(r); err != nil {
