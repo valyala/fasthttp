@@ -2856,7 +2856,7 @@ func TestMaxBodySizePerRequest(t *testing.T) {
 		},
 		HeaderReceived: func(header *RequestHeader) RequestConfig {
 			return RequestConfig{
-				MaxRequestBodySize: 5 << 10, //overwrite default MaxRequestBodySize
+				MaxRequestBodySize: 5 << 10,
 			}
 		},
 		ReadTimeout:        time.Second * 5,
@@ -2890,9 +2890,7 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 		},
 		HeaderReceived: func(header *RequestHeader) RequestConfig {
 			return RequestConfig{
-				ReadTimeout:        time.Millisecond,
-				MaxRequestBodySize: DefaultMaxRequestBodySize,
-				WriteTimeout:       time.Second * 5,
+				ReadTimeout: time.Millisecond,
 			}
 		},
 		ReadBufferSize: len(headers),
@@ -2942,9 +2940,7 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 		},
 		HeaderReceived: func(header *RequestHeader) RequestConfig {
 			return RequestConfig{
-				ReadTimeout:        time.Second * 5,
-				MaxRequestBodySize: DefaultMaxRequestBodySize,
-				WriteTimeout:       time.Millisecond,
+				WriteTimeout: time.Millisecond,
 			}
 		},
 		ReadBufferSize: 192,
