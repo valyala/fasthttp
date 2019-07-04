@@ -245,6 +245,9 @@ type Client struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
+	// ConnectionIsValid should return false if the net.Conn shouldn't be reused.
+	ConnectionIsValid ConnectionValidatorFunc
+
 	mLock sync.Mutex
 	m     map[string]*HostClient
 	ms    map[string]*HostClient
@@ -408,6 +411,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 		hc = &HostClient{
 			Addr:                          addMissingPort(string(host), isTLS),
 			Name:                          c.Name,
+			ConnectionIsValid:             c.ConnectionIsValid,
 			NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 			Dial:                          c.Dial,
 			DialDualStack:                 c.DialDualStack,
@@ -488,6 +492,18 @@ const DefaultMaxIdemponentCallAttempts = 5
 //   - foobar.com:443
 //   - foobar.com:8080
 type DialFunc func(addr string) (net.Conn, error)
+
+// ConnectionValidateStage passed to ConnectionValidatorFunc, to specify stage of validation
+// Implementation might decide to validate in all stages or just some, to balance between coherency and overhead
+type ConnectionValidatorStage uint8
+
+const (
+	ConnectionPreValidation ConnectionValidatorStage = iota
+	ConnectionPostValidation
+)
+
+// ConnectionValidatorFunc should return false if the net.Conn shouldn't be reused.
+type ConnectionValidatorFunc func(conn net.Conn, stage ConnectionValidatorStage) bool
 
 // HostClient balances http requests among hosts listed in Addr.
 //
@@ -612,6 +628,9 @@ type HostClient struct {
 	//     * content-type -> Content-Type
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
+
+	// Returns False if connection should be dropped
+	ConnectionIsValid ConnectionValidatorFunc
 
 	clientName  atomic.Value
 	lastUseTime uint32
@@ -1267,8 +1286,17 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 	var cc *clientConn
 	createConn := false
 	startCleaner := false
-
 	var n int
+
+	addConnection := func() {
+		c.connsCount++
+		createConn = true
+		if !c.connsCleanerRun {
+			startCleaner = true
+			c.connsCleanerRun = true
+		}
+	}
+
 	c.connsLock.Lock()
 	n = len(c.conns)
 	if n == 0 {
@@ -1277,18 +1305,20 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 			maxConns = DefaultMaxConnsPerHost
 		}
 		if c.connsCount < maxConns {
-			c.connsCount++
-			createConn = true
-			if !c.connsCleanerRun {
-				startCleaner = true
-				c.connsCleanerRun = true
-			}
+			addConnection()
 		}
 	} else {
 		n--
 		cc = c.conns[n]
 		c.conns[n] = nil
 		c.conns = c.conns[:n]
+		if c.ConnectionIsValid != nil && !c.ConnectionIsValid(cc.c, ConnectionPreValidation) {
+			// Received connection is invalid, replacing with new one
+			// There is no need to check for max connections, as we are still inside lock and just dropped accounted one
+			c.closeConn(cc)
+			cc = nil
+			addConnection()
+		}
 	}
 	c.connsLock.Unlock()
 
@@ -1402,6 +1432,10 @@ var clientConnPool sync.Pool
 
 func (c *HostClient) releaseConn(cc *clientConn) {
 	cc.lastUseTime = time.Now()
+	if c.ConnectionIsValid != nil && !c.ConnectionIsValid(cc.c, ConnectionPostValidation) {
+		c.closeConn(cc)
+		return
+	}
 	c.connsLock.Lock()
 	c.conns = append(c.conns, cc)
 	c.connsLock.Unlock()

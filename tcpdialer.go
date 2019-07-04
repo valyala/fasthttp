@@ -115,6 +115,12 @@ func DialDualStackTimeout(addr string, timeout time.Duration) (net.Conn, error) 
 	return defaultDialer.DialDualStackTimeout(addr, timeout)
 }
 
+// DnsResolverFunc resolves hostnames, inherits signature of net.LookupIP
+//
+// Implementing custom DnsResolverFunc allows to have application-specific
+// logic for dns resolution, instead of default net.LookupIP
+type DnsResolverFunc func(host string) ([]net.IP, error)
+
 var (
 	defaultDialer = &TCPDialer{Concurrency: 1000}
 )
@@ -128,6 +134,14 @@ type TCPDialer struct {
 	// WARNING: This can only be changed before the first Dial.
 	// Changes made after the first Dial will not affect anything.
 	Concurrency int
+
+	// DnsInvalidationCallback returns true if DNS should be re-resolved, as alternative to TTL
+	// Should be set before TCPDialer is used, to avoid races
+	DnsInvalidationCallback func() bool
+
+	// DnsResolver used to resolve DNS addresses, defaults to net.LookupIP
+	// Should be set before TCPDialer is used, to avoid races
+	DnsResolver DnsResolverFunc
 
 	tcpAddrsLock sync.Mutex
 	tcpAddrsMap  map[string]*tcpAddrEntry
@@ -379,15 +393,21 @@ func (d *TCPDialer) tcpAddrsClean() {
 
 func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, uint32, error) {
 	d.tcpAddrsLock.Lock()
+	if d.DnsResolver == nil {
+		d.DnsResolver = net.LookupIP
+	}
 	e := d.tcpAddrsMap[addr]
-	if e != nil && !e.pending && time.Since(e.resolveTime) > DefaultDNSCacheDuration {
-		e.pending = true
-		e = nil
+	if e != nil && !e.pending {
+		expired := time.Since(e.resolveTime) > DefaultDNSCacheDuration
+		if expired || d.DnsInvalidationCallback != nil && d.DnsInvalidationCallback() {
+			e.pending = true
+			e = nil
+		}
 	}
 	d.tcpAddrsLock.Unlock()
 
 	if e == nil {
-		addrs, err := resolveTCPAddrs(addr, dualStack)
+		addrs, err := d.resolveTCPAddrs(addr, dualStack)
 		if err != nil {
 			d.tcpAddrsLock.Lock()
 			e = d.tcpAddrsMap[addr]
@@ -412,7 +432,7 @@ func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, uin
 	return e.addrs, idx, nil
 }
 
-func resolveTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, error) {
+func (d *TCPDialer) resolveTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, error) {
 	host, portS, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -422,7 +442,7 @@ func resolveTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, error) {
 		return nil, err
 	}
 
-	ips, err := net.LookupIP(host)
+	ips, err := d.DnsResolver(host)
 	if err != nil {
 		return nil, err
 	}
