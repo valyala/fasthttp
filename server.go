@@ -371,10 +371,10 @@ type Server struct {
 // msg to the client if there are more than Server.Concurrency concurrent
 // handlers h are running at the moment.
 func TimeoutHandler(h RequestHandler, timeout time.Duration, msg string) RequestHandler {
-	return TimeoutWithCodeHandler(h,timeout,msg, StatusRequestTimeout)
+	return TimeoutWithCodeHandler(h, timeout, msg, StatusRequestTimeout)
 }
 
-// TimeoutWithCodeHandler creates RequestHandler, which returns an error with 
+// TimeoutWithCodeHandler creates RequestHandler, which returns an error with
 // the given msg and status code to the client  if h didn't return during
 // the given duration.
 //
@@ -1876,7 +1876,9 @@ func (s *Server) serveConn(c net.Conn) error {
 				if len(b) == 0 {
 					// If reading from a keep-alive connection returns nothing it means
 					// the connection was closed (either timeout or from the other side).
-					err = errNothingRead
+					if err != io.EOF {
+						err = errNothingRead{err}
+					}
 				}
 			}
 		} else {
@@ -1914,14 +1916,20 @@ func (s *Server) serveConn(c net.Conn) error {
 		if err != nil {
 			if err == io.EOF {
 				err = nil
-			} else if connRequestNum > 1 && err == errNothingRead {
-				// This is not the first request and we haven't read a single byte
-				// of a new request yet. This means it's just a keep-alive connection
-				// closing down either because the remote closed it or because
-				// or a read timeout on our side. Either way just close the connection
-				// and don't return any error response.
-				err = nil
-			} else {
+			} else if nr, ok := err.(errNothingRead); ok {
+				if connRequestNum > 1 {
+					// This is not the first request and we haven't read a single byte
+					// of a new request yet. This means it's just a keep-alive connection
+					// closing down either because the remote closed it or because
+					// or a read timeout on our side. Either way just close the connection
+					// and don't return any error response.
+					err = nil
+				} else {
+					err = nr.error
+				}
+			}
+
+			if err != nil {
 				bw = s.writeErrorResponse(bw, ctx, serverName, err)
 			}
 			break
