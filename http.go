@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -1148,6 +1149,24 @@ func (req *Request) Write(w *bufio.Writer) error {
 		}
 		req.Header.SetHostBytes(host)
 		req.Header.SetRequestURIBytes(uri.RequestURI())
+
+		if len(uri.username) > 0 {
+			// RequestHeader.SetBytesKV only uses RequestHeader.bufKV.key
+			// So we are free to use RequestHeader.bufKV.value as a scratch pad for
+			// the base64 encoding.
+			nl := len(uri.username) + len(uri.password) + 1
+			tl := nl + base64.StdEncoding.EncodedLen(nl)
+			if tl > cap(req.Header.bufKV.value) {
+				req.Header.bufKV.value = make([]byte, 0, tl)
+			}
+			buf := req.Header.bufKV.value[:0]
+			buf = append(buf, uri.username...)
+			buf = append(buf, strColon...)
+			buf = append(buf, uri.password...)
+			buf = buf[:tl]
+			base64.StdEncoding.Encode(buf[nl:], buf[:nl])
+			req.Header.SetBytesKV(strAuthorization, buf[nl:])
+		}
 	}
 
 	if req.bodyStream != nil {
