@@ -519,7 +519,7 @@ func TestClientDoWithCustomHeaders(t *testing.T) {
 
 		var resp Response
 		bw := bufio.NewWriter(conn)
-		if err = resp.Write(bw); err != nil {
+		if _, err = resp.Write(bw); err != nil {
 			ch <- fmt.Errorf("cannot send response: %s", err)
 			return
 		}

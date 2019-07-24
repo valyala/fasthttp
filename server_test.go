@@ -1862,7 +1862,7 @@ func TestRequestCtxSendFile(t *testing.T) {
 
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
-	if err := ctx.Response.Write(bw); err != nil {
+	if _, err := ctx.Response.Write(bw); err != nil {
 		t.Fatalf("error when writing response: %s", err)
 	}
 	if err := bw.Flush(); err != nil {

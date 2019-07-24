@@ -1183,7 +1183,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		req.Header.userAgent = c.getClientName()
 	}
 	bw := c.acquireWriter(conn)
-	err = req.Write(bw)
+	_, err = req.Write(bw)
 
 	if resetConnection {
 		req.Header.ResetConnectionClose()
@@ -2115,7 +2115,7 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}) error
 				return err
 			}
 		}
-		if err = w.req.Write(bw); err != nil {
+		if _, err = w.req.Write(bw); err != nil {
 			w.err = err
 			w.done <- struct{}{}
 			return err

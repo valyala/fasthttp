@@ -1189,7 +1189,7 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	req.Header.SetRequestURI("http://google.com/foo/bar?baz=aaa")
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
-	if err := req.Write(bw); err != nil {
+	if _, err := req.Write(bw); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 	if err := bw.Flush(); err != nil {
@@ -1213,7 +1213,7 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	req.Header.SetRequestURI("/foo/bar")
 	w.Reset()
 	bw.Reset(&w)
-	if err := req.Write(bw); err == nil {
+	if _, err := req.Write(bw); err == nil {
 		t.Fatalf("expecting error")
 	}
 }
@@ -1269,7 +1269,7 @@ func testSetRequestBodyStream(t *testing.T, body string, chunked bool) {
 
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
-	if err := req.Write(bw); err != nil {
+	if _, err := req.Write(bw); err != nil {
 		t.Fatalf("unexpected error when writing request: %s. body=%q", err, body)
 	}
 	if err := bw.Flush(); err != nil {
@@ -1302,7 +1302,7 @@ func testSetResponseBodyStream(t *testing.T, body string, chunked bool) {
 
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
-	if err := resp.Write(bw); err != nil {
+	if _, err := resp.Write(bw); err != nil {
 		t.Fatalf("unexpected error when writing response: %s. body=%q", err, body)
 	}
 	if err := bw.Flush(); err != nil {
@@ -1466,7 +1466,7 @@ func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, 
 
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
-	err := resp.Write(bw)
+	_, err := resp.Write(bw)
 	if err != nil {
 		t.Fatalf("Unexpected error when calling Response.Write(): %s", err)
 	}
@@ -1515,7 +1515,7 @@ func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, bo
 
 	w := &bytebufferpool.ByteBuffer{}
 	bw := bufio.NewWriter(w)
-	err := req.Write(bw)
+	_, err := req.Write(bw)
 	if err == nil {
 		t.Fatalf("Expecting error when writing request=%#v", &req)
 	}
@@ -1537,7 +1537,7 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
-	err := req.Write(bw)
+	_, err := req.Write(bw)
 	if err != nil {
 		t.Fatalf("Unexpected error when calling Request.Write(): %s", err)
 	}
@@ -1986,7 +1986,7 @@ func TestResponseImmediateHeaderFlushFixedLength(t *testing.T) {
 	waitForIt := make(chan struct{})
 
 	go func() {
-		if err := bw.Write(bb); err != nil {
+		if _, err := bw.Write(bb); err != nil {
 			t.Fatalf("unexpected error: %s", err)
 		}
 		waitForIt <- struct{}{}
@@ -2029,7 +2029,7 @@ func TestResponseImmediateHeaderFlushChunked(t *testing.T) {
 	waitForIt := make(chan struct{})
 
 	go func() {
-		if err := bw.Write(bb); err != nil {
+		if _, err := bw.Write(bb); err != nil {
 			t.Fatalf("unexpected error: %s", err)
 		}
 

@@ -37,6 +37,8 @@ type workerPool struct {
 	workerChanPool sync.Pool
 
 	connState func(net.Conn, ConnState)
+
+	trace *ServerTrace
 }
 
 type workerChan struct {
@@ -219,9 +221,15 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			}
 		}
 		if err == errHijacked {
+			if wp.trace != nil && wp.trace.HijackedConn != nil {
+				wp.trace.HijackedConn(c)
+			}
 			wp.connState(c, StateHijacked)
 		} else {
 			c.Close()
+			if wp.trace != nil && wp.trace.ClosedConn != nil {
+				wp.trace.ClosedConn(c)
+			}
 			wp.connState(c, StateClosed)
 		}
 		c = nil
