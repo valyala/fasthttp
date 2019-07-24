@@ -1080,37 +1080,6 @@ func writeBufio(hw httpWriter, w io.Writer) (int64, error) {
 	return n, err
 }
 
-type statsWriter struct {
-	w            io.Writer
-	bytesWritten int64
-}
-
-func (w *statsWriter) Write(p []byte) (int, error) {
-	n, err := w.w.Write(p)
-	w.bytesWritten += int64(n)
-	return n, err
-}
-
-func acquireStatsWriter(w io.Writer) *statsWriter {
-	v := statsWriterPool.Get()
-	if v == nil {
-		return &statsWriter{
-			w: w,
-		}
-	}
-	sw := v.(*statsWriter)
-	sw.w = w
-	return sw
-}
-
-func releaseStatsWriter(sw *statsWriter) {
-	sw.w = nil
-	sw.bytesWritten = 0
-	statsWriterPool.Put(sw)
-}
-
-var statsWriterPool sync.Pool
-
 func acquireBufioWriter(w io.Writer) *bufio.Writer {
 	v := bufioWriterPool.Get()
 	if v == nil {
