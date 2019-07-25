@@ -23,6 +23,98 @@ import (
 // Make sure RequestCtx implements context.Context
 var _ context.Context = &RequestCtx{}
 
+func TestServerTrace(t *testing.T) {
+	trace := make([]string, 0)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {},
+		Trace: ServerTrace{
+			GotConn: func(conn net.Conn) {
+				trace = append(trace, "GotConn")
+			},
+			ClosedConn: func(conn net.Conn) {
+				trace = append(trace, "ClosedConn")
+			},
+			ActivatedConn: func(conn net.Conn) {
+				trace = append(trace, "ActivatedConn")
+			},
+			IdledConn: func(conn net.Conn) {
+				trace = append(trace, "IdledConn")
+			},
+			HijackedConn: func(conn net.Conn) {
+				trace = append(trace, "HijackedConn")
+			},
+			GotRequest: func(ctx *RequestCtx) {
+				trace = append(trace, "GotRequest")
+			},
+			AcquiredContext: func(ctx *RequestCtx) {
+				trace = append(trace, "AcquiredContext")
+			},
+			WroteResponse: func(ctx *RequestCtx, _ int64, _ error) {
+				trace = append(trace, "WroteResponse")
+			},
+		},
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	serverCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverCh)
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		br := bufio.NewReader(c)
+		// Send 2 requests on the same connection.
+		for i := 0; i < 2; i++ {
+			if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			var resp Response
+			if err := resp.Read(br); err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			if resp.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+			}
+		}
+		if err := c.Close(); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		// Give the server a little bit of time to transition the connection to the close state.
+		time.Sleep(time.Millisecond * 100)
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	select {
+	case <-serverCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	expected := []string{"GotConn", "AcquiredContext", "ActivatedConn", "GotRequest", "WroteResponse", "IdledConn", "ActivatedConn", "GotRequest", "WroteResponse", "IdledConn", "ClosedConn"}
+
+	if !reflect.DeepEqual(expected, trace) {
+		t.Fatalf("wrong trace, expected %s, got %s", expected, trace)
+	}
+}
 func TestServerConnState(t *testing.T) {
 	states := make([]string, 0)
 	s := &Server{
