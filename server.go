@@ -2095,6 +2095,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		if s.Trace.WroteResponse != nil {
 			s.Trace.WroteResponse(ctx, n, err)
 		}
+		ctx.Response.Reset()
 		ctx.userValues.Reset()
 		if err != nil {
 			break
@@ -2253,7 +2254,6 @@ func writeResponse(ctx *RequestCtx, w *bufio.Writer) (int64, error) {
 		panic("BUG: cannot write timed out response")
 	}
 	n, err := ctx.Response.Write(w)
-	ctx.Response.Reset()
 	return n, err
 }
 
