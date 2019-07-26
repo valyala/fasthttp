@@ -2056,8 +2056,6 @@ func (s *Server) serveConn(c net.Conn) error {
 		if !ctx.IsGet() && ctx.IsHead() {
 			ctx.Response.SkipBody = true
 		}
-		reqReset = true
-		ctx.Request.Reset()
 
 		hijackHandler = ctx.hijackHandler
 		ctx.hijackHandler = nil
@@ -2095,6 +2093,8 @@ func (s *Server) serveConn(c net.Conn) error {
 		if s.Trace.WroteResponse != nil {
 			s.Trace.WroteResponse(ctx, n, err)
 		}
+		reqReset = true
+		ctx.Request.Reset()
 		ctx.Response.Reset()
 		ctx.userValues.Reset()
 		if err != nil {
