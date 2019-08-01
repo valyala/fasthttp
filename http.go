@@ -1511,10 +1511,10 @@ func (resp *Response) String() string {
 	return getHTTPString(resp)
 }
 
-func getHTTPString(hw io.WriterTo) string {
+func getHTTPString(hw httpWriter) string {
 	w := bytebufferpool.Get()
 	bw := bufio.NewWriter(w)
-	if _, err := hw.WriteTo(bw); err != nil {
+	if _, err := hw.Write(bw); err != nil {
 		return err.Error()
 	}
 	if err := bw.Flush(); err != nil {
