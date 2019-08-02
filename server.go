@@ -2088,10 +2088,9 @@ func (s *Server) serveConn(c net.Conn) error {
 			bw = acquireWriter(ctx)
 		}
 
-		var n int64
-		n, err = writeResponse(ctx, bw)
+		err = writeResponse(ctx, bw)
 		if s.Trace.WroteResponse != nil {
-			s.Trace.WroteResponse(ctx, n, err)
+			s.Trace.WroteResponse(ctx, err)
 		}
 		reqReset = true
 		ctx.Request.Reset()
@@ -2249,12 +2248,11 @@ func (ctx *RequestCtx) LastTimeoutErrorResponse() *Response {
 	return ctx.timeoutResponse
 }
 
-func writeResponse(ctx *RequestCtx, w *bufio.Writer) (int64, error) {
+func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 	if ctx.timeoutResponse != nil {
 		panic("BUG: cannot write timed out response")
 	}
-	n, err := ctx.Response.Write(w)
-	return n, err
+	return ctx.Response.Write(w)
 }
 
 const (
@@ -2527,9 +2525,9 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 	if bw == nil {
 		bw = acquireWriter(ctx)
 	}
-	n, err := writeResponse(ctx, bw)
+	err = writeResponse(ctx, bw)
 	if s.Trace.WroteResponse != nil {
-		s.Trace.WroteResponse(ctx, n, err)
+		s.Trace.WroteResponse(ctx, err)
 	}
 	bw.Flush()
 	return bw

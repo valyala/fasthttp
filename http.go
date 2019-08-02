@@ -1068,10 +1068,13 @@ func (resp *Response) WriteTo(w io.Writer) (int64, error) {
 }
 
 func writeBufio(hw httpWriter, w io.Writer) (int64, error) {
-	bw := acquireBufioWriter(w)
-	n, err1 := hw.Write(bw)
+	sw := acquireStatsWriter(w)
+	bw := acquireBufioWriter(sw)
+	err1 := hw.Write(bw)
 	err2 := bw.Flush()
 	releaseBufioWriter(bw)
+	n := sw.bytesWritten
+	releaseStatsWriter(sw)
 
 	err := err1
 	if err == nil {
@@ -1079,6 +1082,37 @@ func writeBufio(hw httpWriter, w io.Writer) (int64, error) {
 	}
 	return n, err
 }
+
+type statsWriter struct {
+	w            io.Writer
+	bytesWritten int64
+}
+
+func (w *statsWriter) Write(p []byte) (int, error) {
+	n, err := w.w.Write(p)
+	w.bytesWritten += int64(n)
+	return n, err
+}
+
+func acquireStatsWriter(w io.Writer) *statsWriter {
+	v := statsWriterPool.Get()
+	if v == nil {
+		return &statsWriter{
+			w: w,
+		}
+	}
+	sw := v.(*statsWriter)
+	sw.w = w
+	return sw
+}
+
+func releaseStatsWriter(sw *statsWriter) {
+	sw.w = nil
+	sw.bytesWritten = 0
+	statsWriterPool.Put(sw)
+}
+
+var statsWriterPool sync.Pool
 
 func acquireBufioWriter(w io.Writer) *bufio.Writer {
 	v := bufioWriterPool.Get()
@@ -1105,12 +1139,12 @@ func (req *Request) onlyMultipartForm() bool {
 // Write doesn't flush request to w for performance reasons.
 //
 // See also WriteTo.
-func (req *Request) Write(w *bufio.Writer) (nn int64, err error) {
+func (req *Request) Write(w *bufio.Writer) error {
 	if len(req.Header.Host()) == 0 || req.parsedURI {
 		uri := req.URI()
 		host := uri.Host()
 		if len(host) == 0 {
-			return nn, errRequestHostRequired
+			return errRequestHostRequired
 		}
 		req.Header.SetHostBytes(host)
 		req.Header.SetRequestURIBytes(uri.RequestURI())
@@ -1121,10 +1155,11 @@ func (req *Request) Write(w *bufio.Writer) (nn int64, err error) {
 	}
 
 	body := req.bodyBytes()
+	var err error
 	if req.onlyMultipartForm() {
 		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
 		if err != nil {
-			return 0, fmt.Errorf("error when marshaling multipart form: %s", err)
+			return fmt.Errorf("error when marshaling multipart form: %s", err)
 		}
 		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
 	}
@@ -1136,19 +1171,15 @@ func (req *Request) Write(w *bufio.Writer) (nn int64, err error) {
 		}
 		req.Header.SetContentLength(len(body))
 	}
-	n, err := req.Header.WriteTo(w)
-	nn += n
-	if err != nil {
-		return nn, err
+	if err = req.Header.Write(w); err != nil {
+		return err
 	}
 	if hasBody {
-		var n int
-		n, err = w.Write(body)
-		nn += int64(n)
+		_, err = w.Write(body)
 	} else if len(body) > 0 {
-		return nn, fmt.Errorf("non-zero body for non-POST request. body=%q", body)
+		return fmt.Errorf("non-zero body for non-POST request. body=%q", body)
 	}
-	return nn, err
+	return err
 }
 
 // WriteGzip writes response with gzipped body to w.
@@ -1179,10 +1210,7 @@ func (resp *Response) WriteGzipLevel(w *bufio.Writer, level int) error {
 	if err := resp.gzipBody(level); err != nil {
 		return err
 	}
-	if _, err := resp.Write(w); err != nil {
-		return err
-	}
-	return nil
+	return resp.Write(w)
 }
 
 // WriteDeflate writes response with deflated body to w.
@@ -1213,10 +1241,7 @@ func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
 	if err := resp.deflateBody(level); err != nil {
 		return err
 	}
-	if _, err := resp.Write(w); err != nil {
-		return err
-	}
-	return nil
+	return resp.Write(w)
 }
 
 func (resp *Response) gzipBody(level int) error {
@@ -1361,7 +1386,7 @@ func (w *flushWriter) Write(p []byte) (int, error) {
 // Write doesn't flush response to w for performance reasons.
 //
 // See also WriteTo.
-func (resp *Response) Write(w *bufio.Writer) (nn int64, err error) {
+func (resp *Response) Write(w *bufio.Writer) error {
 	sendBody := !resp.mustSkipBody()
 
 	if resp.bodyStream != nil {
@@ -1373,17 +1398,20 @@ func (resp *Response) Write(w *bufio.Writer) (nn int64, err error) {
 	if sendBody || bodyLen > 0 {
 		resp.Header.SetContentLength(bodyLen)
 	}
-	n, err := resp.Header.WriteTo(w)
-	nn += n
-	if err == nil && sendBody {
-		var n int
-		n, err = w.Write(body)
-		nn += int64(n)
+	if err := resp.Header.Write(w); err != nil {
+		return err
 	}
-	return nn, err
+	if sendBody {
+		if _, err := w.Write(body); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func (req *Request) writeBodyStream(w *bufio.Writer) (nn int64, err error) {
+func (req *Request) writeBodyStream(w *bufio.Writer) error {
+	var err error
+
 	contentLength := req.Header.ContentLength()
 	if contentLength < 0 {
 		lrSize := limitedReaderSize(req.bodyStream)
@@ -1397,31 +1425,26 @@ func (req *Request) writeBodyStream(w *bufio.Writer) (nn int64, err error) {
 			}
 		}
 	}
-	var n int64
 	if contentLength >= 0 {
-		n, err = req.Header.WriteTo(w)
-		nn += n
-		if err == nil {
-			n, err = writeBodyFixedSize(w, req.bodyStream, int64(contentLength))
-			nn += n
+		if err = req.Header.Write(w); err == nil {
+			err = writeBodyFixedSize(w, req.bodyStream, int64(contentLength))
 		}
 	} else {
 		req.Header.SetContentLength(-1)
-		n, err = req.Header.WriteTo(w)
-		nn += n
-		if err == nil {
-			n, err = writeBodyChunked(w, req.bodyStream)
-			nn += n
+		if err = req.Header.Write(w); err == nil {
+			err = writeBodyChunked(w, req.bodyStream)
 		}
 	}
 	err1 := req.closeBodyStream()
 	if err == nil {
 		err = err1
 	}
-	return nn, err
+	return err
 }
 
-func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (nn int64, err error) {
+func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) error {
+	var err error
+
 	contentLength := resp.Header.ContentLength()
 	if contentLength < 0 {
 		lrSize := limitedReaderSize(resp.bodyStream)
@@ -1435,30 +1458,23 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (nn int64,
 			}
 		}
 	}
-	var n int64
 	if contentLength >= 0 {
-		n, err = resp.Header.WriteTo(w)
-		nn += n
-		if err == nil && sendBody {
+		if err = resp.Header.Write(w); err == nil && sendBody {
 			if resp.ImmediateHeaderFlush {
 				err = w.Flush()
 			}
 			if err == nil {
-				n, err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
-				nn += n
+				err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
 			}
 		}
 	} else {
 		resp.Header.SetContentLength(-1)
-		n, err = resp.Header.WriteTo(w)
-		nn += n
-		if err == nil && sendBody {
+		if err = resp.Header.Write(w); err == nil && sendBody {
 			if resp.ImmediateHeaderFlush {
 				err = w.Flush()
 			}
 			if err == nil {
-				n, err = writeBodyChunked(w, resp.bodyStream)
-				nn += n
+				err = writeBodyChunked(w, resp.bodyStream)
 			}
 		}
 	}
@@ -1466,7 +1482,7 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (nn int64,
 	if err == nil {
 		err = err1
 	}
-	return nn, err
+	return err
 }
 
 func (req *Request) closeBodyStream() error {
@@ -1514,7 +1530,7 @@ func (resp *Response) String() string {
 func getHTTPString(hw httpWriter) string {
 	w := bytebufferpool.Get()
 	bw := bufio.NewWriter(w)
-	if _, err := hw.Write(bw); err != nil {
+	if err := hw.Write(bw); err != nil {
 		return err.Error()
 	}
 	if err := bw.Flush(); err != nil {
@@ -1526,17 +1542,17 @@ func getHTTPString(hw httpWriter) string {
 }
 
 type httpWriter interface {
-	Write(w *bufio.Writer) (int64, error)
+	Write(w *bufio.Writer) error
 }
 
-func writeBodyChunked(w *bufio.Writer, r io.Reader) (nn int64, err error) {
+func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	vbuf := copyBufPool.Get()
 	buf := vbuf.([]byte)
 
+	var err error
 	var n int
 	for {
 		n, err = r.Read(buf)
-		nn += int64(n)
 		if n == 0 {
 			if err == nil {
 				panic("BUG: io.Reader returned 0, nil")
@@ -1555,7 +1571,7 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) (nn int64, err error) {
 	}
 
 	copyBufPool.Put(vbuf)
-	return nn, err
+	return err
 }
 
 func limitedReaderSize(r io.Reader) int64 {
@@ -1566,12 +1582,12 @@ func limitedReaderSize(r io.Reader) int64 {
 	return lr.N
 }
 
-func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) (int64, error) {
+func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
 	if size > maxSmallFileSize {
 		// w buffer must be empty for triggering
 		// sendfile path in bufio.Writer.ReadFrom.
 		if err := w.Flush(); err != nil {
-			return 0, err
+			return err
 		}
 	}
 
@@ -1591,7 +1607,7 @@ func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) (int64, error)
 	if n != size && err == nil {
 		err = fmt.Errorf("copied %d bytes from body stream instead of %d bytes", n, size)
 	}
-	return n, err
+	return err
 }
 
 func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {

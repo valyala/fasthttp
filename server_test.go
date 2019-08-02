@@ -49,7 +49,7 @@ func TestServerTrace(t *testing.T) {
 			AcquiredContext: func(ctx *RequestCtx) {
 				trace = append(trace, "AcquiredContext")
 			},
-			WroteResponse: func(ctx *RequestCtx, _ int64, _ error) {
+			WroteResponse: func(ctx *RequestCtx, err error) {
 				trace = append(trace, "WroteResponse")
 			},
 		},
@@ -1954,7 +1954,7 @@ func TestRequestCtxSendFile(t *testing.T) {
 
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
-	if _, err := ctx.Response.Write(bw); err != nil {
+	if err := ctx.Response.Write(bw); err != nil {
 		t.Fatalf("error when writing response: %s", err)
 	}
 	if err := bw.Flush(); err != nil {

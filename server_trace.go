@@ -39,7 +39,7 @@ type ServerTrace struct {
 	AcquiredContext func(ctx *RequestCtx)
 
 	// WroteResponse is called after the response for a given request has been
-	// sent. <n> is the number of bytes that have been transferred and <err> is
-	// any error that may have been occurred while writing the response.
-	WroteResponse func(ctx *RequestCtx, n int64, err error)
+	// sent. <err> is any error that may have been occurred while writing the
+	// response.
+	WroteResponse func(ctx *RequestCtx, err error)
 }
