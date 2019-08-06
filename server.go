@@ -2529,6 +2529,7 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 	if s.Trace.WroteResponse != nil {
 		s.Trace.WroteResponse(ctx, err)
 	}
+	ctx.Response.Reset()
 	bw.Flush()
 	return bw
 }
