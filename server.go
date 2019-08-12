@@ -329,6 +329,13 @@ type Server struct {
 	// set to true, the Content-Type will not be present.
 	NoDefaultContentType bool
 
+	// NoDefaultDateHeader, when set to true, causes the default Date
+	// header to be excluded from the Response.
+	//
+	// The default Date header value is the current date value. When
+	// set to true, the Date will not be present.
+	NoDefaultDate bool
+
 	// ConnState specifies an optional callback function that is
 	// called when a client connection changes state. See the
 	// ConnState type and associated constants for details.
@@ -1910,6 +1917,7 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		ctx.Request.isTLS = isTLS
 		ctx.Response.Header.noDefaultContentType = s.NoDefaultContentType
+		ctx.Response.Header.noDefaultDate = s.NoDefaultDate
 
 		if err == nil {
 			if s.ReadTimeout > 0 {
@@ -2459,15 +2467,19 @@ func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 	if !s.NoDefaultServerHeader {
 		server = fmt.Sprintf("Server: %s\r\n", s.getServerName())
 	}
+	date := ""
+	if !s.NoDefaultDate {
+		date = fmt.Sprintf("Date: %s\r\n", serverDate.Load())
+	}
 
 	fmt.Fprintf(w, "Connection: close\r\n"+
 		server+
-		"Date: %s\r\n"+
+		date+
 		"Content-Type: text/plain\r\n"+
 		"Content-Length: %d\r\n"+
 		"\r\n"+
 		"%s",
-		serverDate.Load(), len(msg), msg)
+		len(msg), msg)
 }
 
 func defaultErrorHandler(ctx *RequestCtx, err error) {

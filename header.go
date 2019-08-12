@@ -24,6 +24,7 @@ type ResponseHeader struct {
 	noHTTP11             bool
 	connectionClose      bool
 	noDefaultContentType bool
+	noDefaultDate        bool
 
 	statusCode         int
 	contentLength      int
@@ -643,6 +644,7 @@ func (h *ResponseHeader) DisableNormalizing() {
 func (h *ResponseHeader) Reset() {
 	h.disableNormalizing = false
 	h.noDefaultContentType = false
+	h.noDefaultDate = false
 	h.resetSkipNormalize()
 }
 
@@ -696,6 +698,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.noHTTP11 = h.noHTTP11
 	dst.connectionClose = h.connectionClose
 	dst.noDefaultContentType = h.noDefaultContentType
+	dst.noDefaultDate = h.noDefaultDate
 
 	dst.statusCode = h.statusCode
 	dst.contentLength = h.contentLength
@@ -1493,7 +1496,9 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	if len(server) != 0 {
 		dst = appendHeaderLine(dst, strServer, server)
 	}
-	dst = appendHeaderLine(dst, strDate, serverDate.Load().([]byte))
+	if !h.noDefaultDate {
+		dst = appendHeaderLine(dst, strDate, serverDate.Load().([]byte))
+	}
 
 	// Append Content-Type only for non-zero responses
 	// or if it is explicitly set.
@@ -1511,7 +1516,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 
 	for i, n := 0, len(h.h); i < n; i++ {
 		kv := &h.h[i]
-		if !bytes.Equal(kv.key, strDate) {
+		if h.noDefaultDate || !bytes.Equal(kv.key, strDate) {
 			dst = appendHeaderLine(dst, kv.key, kv.value)
 		}
 	}
