@@ -245,6 +245,8 @@ type Client struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
+	TLSHandshakeTimeout time.Duration
+
 	mLock sync.Mutex
 	m     map[string]*HostClient
 	ms    map[string]*HostClient
@@ -422,6 +424,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			WriteTimeout:                  c.WriteTimeout,
 			MaxResponseBodySize:           c.MaxResponseBodySize,
 			DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
+			TLSHandshakeTimeout:           c.TLSHandshakeTimeout,
 		}
 		m[string(host)] = hc
 		if len(m) == 1 {
@@ -612,6 +615,8 @@ type HostClient struct {
 	//     * content-type -> Content-Type
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
+
+	TLSHandshakeTimeout time.Duration
 
 	clientName  atomic.Value
 	lastUseTime uint32
@@ -1537,7 +1542,7 @@ func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
 	for n > 0 {
 		addr := c.nextAddr()
 		tlsConfig := c.cachedTLSConfig(addr)
-		conn, err = dialAddr(addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig)
+		conn, err = dialAddr(addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, c.TLSHandshakeTimeout)
 		if err == nil {
 			return conn, nil
 		}
@@ -1568,7 +1573,19 @@ func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
 	return cfg
 }
 
-func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *tls.Config) (net.Conn, error) {
+type timeoutError struct{}
+
+func (timeoutError) Error() string   { return "fasthttp: Handshake timed out" }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+var emptyConfig tls.Config
+
+func defaultConfig() *tls.Config {
+	return &emptyConfig
+}
+
+func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
 	if dial == nil {
 		if dialDualStack {
 			dial = DialDualStack
@@ -1577,17 +1594,63 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 		}
 		addr = addMissingPort(addr, isTLS)
 	}
-	conn, err := dial(addr)
+	rawConn, err := dial(addr)
 	if err != nil {
 		return nil, err
 	}
-	if conn == nil {
+	if rawConn == nil {
 		panic("BUG: DialFunc returned (nil, nil)")
 	}
 	if isTLS {
-		conn = tls.Client(conn, tlsConfig)
+		var (
+			errChannel chan error
+			timer      *time.Timer
+		)
+
+		if timeout != 0 {
+			errChannel = make(chan error, 2)
+			timer = time.AfterFunc(timeout, func() {
+				errChannel <- timeoutError{}
+			})
+		}
+
+		colonPos := strings.LastIndex(addr, ":")
+		if colonPos == -1 {
+			colonPos = len(addr)
+		}
+		hostname := addr[:colonPos]
+
+		if tlsConfig == nil {
+			tlsConfig = defaultConfig()
+		}
+		// If no ServerName is set, infer the ServerName
+		// from the hostname we're connecting to.
+		if tlsConfig.ServerName == "" {
+			// Make a copy to avoid polluting argument or default.
+			c := tlsConfig.Clone()
+			c.ServerName = hostname
+			tlsConfig = c
+		}
+
+		conn := tls.Client(rawConn, tlsConfig)
+
+		if timeout == 0 {
+			err = conn.Handshake()
+		} else {
+			go func() {
+				errChannel <- conn.Handshake()
+				timer.Stop()
+			}()
+			err = <-errChannel
+		}
+
+		if err != nil {
+			rawConn.Close()
+			return nil, err
+		}
+		return conn, nil
 	}
-	return conn, nil
+	return rawConn, nil
 }
 
 func (c *HostClient) getClientName() []byte {
@@ -1992,7 +2055,7 @@ func (c *pipelineConnClient) init() {
 
 func (c *pipelineConnClient) worker() error {
 	tlsConfig := c.cachedTLSConfig()
-	conn, err := dialAddr(c.Addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig)
+	conn, err := dialAddr(c.Addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, 0)
 	if err != nil {
 		return err
 	}
