@@ -1499,7 +1499,10 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	// or if it is explicitly set.
 	// See https://github.com/valyala/fasthttp/issues/28 .
 	if h.ContentLength() != 0 || len(h.contentType) > 0 {
-		dst = appendHeaderLine(dst, strContentType, h.ContentType())
+		contentType := h.ContentType()
+		if len(contentType) > 0 {
+			dst = appendHeaderLine(dst, strContentType, contentType)
+		}
 	}
 
 	if len(h.contentLengthBytes) > 0 {
