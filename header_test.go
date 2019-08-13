@@ -1111,6 +1111,19 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	}
 }
 
+func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
+	var h ResponseHeader
+
+	h.noDefaultContentType = true
+	h.SetContentLength(5)
+
+	headers := h.String()
+
+	if strings.Index(headers, "Content-Type: \r\n") != -1 {
+		t.Fatalf("ResponseContentTypeNoDefaultNotEmpty fail, response: \n%+v\noutcome: \n%q\n", h, headers)
+	}
+}
+
 func TestRequestHeaderConnectionClose(t *testing.T) {
 	var h RequestHeader
 
