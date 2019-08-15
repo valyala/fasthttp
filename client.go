@@ -245,8 +245,6 @@ type Client struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
-	TLSHandshakeTimeout time.Duration
-
 	mLock sync.Mutex
 	m     map[string]*HostClient
 	ms    map[string]*HostClient
@@ -424,7 +422,6 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			WriteTimeout:                  c.WriteTimeout,
 			MaxResponseBodySize:           c.MaxResponseBodySize,
 			DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
-			TLSHandshakeTimeout:           c.TLSHandshakeTimeout,
 		}
 		m[string(host)] = hc
 		if len(m) == 1 {
@@ -615,8 +612,6 @@ type HostClient struct {
 	//     * content-type -> Content-Type
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
-
-	TLSHandshakeTimeout time.Duration
 
 	clientName  atomic.Value
 	lastUseTime uint32
@@ -1542,7 +1537,7 @@ func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
 	for n > 0 {
 		addr := c.nextAddr()
 		tlsConfig := c.cachedTLSConfig(addr)
-		conn, err = dialAddr(addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, c.TLSHandshakeTimeout)
+		conn, err = dialAddr(addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, c.WriteTimeout)
 		if err == nil {
 			return conn, nil
 		}
@@ -2057,7 +2052,7 @@ func (c *pipelineConnClient) init() {
 
 func (c *pipelineConnClient) worker() error {
 	tlsConfig := c.cachedTLSConfig()
-	conn, err := dialAddr(c.Addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, 0)
+	conn, err := dialAddr(c.Addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, c.WriteTimeout)
 	if err != nil {
 		return err
 	}

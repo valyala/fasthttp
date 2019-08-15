@@ -1747,14 +1747,7 @@ func newLocalListener(t testing.TB) net.Listener {
 	return ln
 }
 
-func isTimeoutError(err error) bool {
-	if ne, ok := err.(net.Error); ok {
-		return ne.Timeout()
-	}
-	return false
-}
-
-func TestDialAddrSuccess(t *testing.T) {
+func TestClientTLSHandshakeTimeout(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in short mode")
 	}
@@ -1776,69 +1769,16 @@ func TestDialAddrSuccess(t *testing.T) {
 			conn.Close()
 	}()
 
-	dialFunc := func(addr string) (net.Conn, error) {
-		var dialer net.Dialer
-		dialer.Timeout = 1 * time.Second
-		return dialer.Dial("tcp", addr)
+	client := Client{
+		WriteTimeout: 1 * time.Second,
 	}
 
-	var err error
-	if _, err = dialAddr(addr, dialFunc, false, true, nil, 1 * time.Second); err == nil {
+	_, _, err := client.Get(nil, "https://" + addr)
+	if err == nil {
 		t.Fatal("DialWithTimeout completed successfully")
 	}
 
-	if !isTimeoutError(err) {
+	if err.Error() != "fasthttp: Handshake timed out" {
 		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
-	}
-}
-
-func TestDialAddrFailure(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping in short mode")
-	}
-	listener := newLocalListener(t)
-
-	addr := listener.Addr().String()
-	defer listener.Close()
-
-	complete := make(chan bool)
-	defer close(complete)
-
-	go func() {
-		conn, err := listener.Accept()
-		if err != nil {
-			t.Error(err)
-			return
-		}
-		<-complete
-		conn.Close()
-	}()
-
-	dialFunc := func(addr string) (net.Conn, error) {
-		var dialer net.Dialer
-		dialer.Timeout = 1 * time.Second
-		conn, err := dialer.Dial("tcp", addr)
-		if err != nil {
-			return nil, err
-		}
-		return conn, conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-	}
-
-	var err error
-
-	success := make(chan bool, 1)
-	go func() {
-		if _, err = dialAddr(addr, dialFunc, false, true, nil, 0); err == nil {
-			t.Fatal("DialWithTimeout completed successfully")
-		}
-		success <- true
-	}()
-
-	time.Sleep(5 * time.Second)
-
-	select {
-	case <-success:
-		t.Errorf("test fail")
-	default:
 	}
 }
