@@ -1817,7 +1817,11 @@ func TestDialAddrFailure(t *testing.T) {
 	dialFunc := func(addr string) (net.Conn, error) {
 		var dialer net.Dialer
 		dialer.Timeout = 10 * time.Millisecond
-		return dialer.Dial("tcp", addr)
+		conn, err := dialer.Dial("tcp", addr)
+		if err != nil {
+			return nil, err
+		}
+		return conn, conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
 	}
 
 	var err error
