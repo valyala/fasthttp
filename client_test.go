@@ -1735,3 +1735,75 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 		t:  t,
 	}
 }
+
+func newLocalListener(t testing.TB) net.Listener {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		ln, err = net.Listen("tcp6", "[::1]:0")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ln
+}
+
+func isTimeoutError(err error) bool {
+	if ne, ok := err.(net.Error); ok {
+		return ne.Timeout()
+	}
+	return false
+}
+
+func TestDialAddr(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	listener := newLocalListener(t)
+
+	addr := listener.Addr().String()
+	defer listener.Close()
+
+	complete := make(chan bool)
+	defer close(complete)
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		<-complete
+		conn.Close()
+	}()
+
+	dialFunc := func(addr string) (net.Conn, error) {
+		var dialer net.Dialer
+		dialer.Timeout = 10 * time.Millisecond
+		return dialer.Dial("tcp", addr)
+	}
+
+	var err error
+	if _, err = dialAddr(addr, dialFunc, false, true, nil, 1 * time.Second); err == nil {
+		t.Fatal("DialWithTimeout completed successfully")
+	}
+
+	if !isTimeoutError(err) {
+		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
+	}
+
+	success := make(chan bool, 1)
+	go func() {
+		if _, err = dialAddr(addr, dialFunc, false, true, nil, 0); err == nil {
+			t.Fatal("DialWithTimeout completed successfully")
+		}
+		success <- true
+	}()
+
+	time.Sleep(5 * time.Second)
+
+	select {
+	case <-success:
+		t.Errorf("test fail")
+	default:
+	}
+}
