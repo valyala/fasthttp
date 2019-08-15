@@ -1638,8 +1638,10 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 			err = conn.Handshake()
 		} else {
 			go func() {
-				errChannel <- conn.Handshake()
+				err := conn.Handshake()
 				timer.Stop()
+				errChannel <- err
+
 			}()
 			err = <-errChannel
 		}

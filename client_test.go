@@ -1778,7 +1778,7 @@ func TestDialAddrSuccess(t *testing.T) {
 
 	dialFunc := func(addr string) (net.Conn, error) {
 		var dialer net.Dialer
-		dialer.Timeout = 10 * time.Millisecond
+		dialer.Timeout = 1 * time.Second
 		return dialer.Dial("tcp", addr)
 	}
 
@@ -1816,7 +1816,7 @@ func TestDialAddrFailure(t *testing.T) {
 
 	dialFunc := func(addr string) (net.Conn, error) {
 		var dialer net.Dialer
-		dialer.Timeout = 10 * time.Millisecond
+		dialer.Timeout = 1 * time.Second
 		conn, err := dialer.Dial("tcp", addr)
 		if err != nil {
 			return nil, err
