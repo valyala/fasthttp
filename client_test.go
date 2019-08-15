@@ -1754,7 +1754,45 @@ func isTimeoutError(err error) bool {
 	return false
 }
 
-func TestDialAddr(t *testing.T) {
+func TestDialAddrSuccess(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
+	listener := newLocalListener(t)
+
+	addr := listener.Addr().String()
+	defer listener.Close()
+
+	complete := make(chan bool)
+	defer close(complete)
+
+	go func() {
+			conn, err := listener.Accept()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			<-complete
+			conn.Close()
+	}()
+
+	dialFunc := func(addr string) (net.Conn, error) {
+		var dialer net.Dialer
+		dialer.Timeout = 10 * time.Millisecond
+		return dialer.Dial("tcp", addr)
+	}
+
+	var err error
+	if _, err = dialAddr(addr, dialFunc, false, true, nil, 1 * time.Second); err == nil {
+		t.Fatal("DialWithTimeout completed successfully")
+	}
+
+	if !isTimeoutError(err) {
+		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
+	}
+}
+
+func TestDialAddrFailure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping in short mode")
 	}
@@ -1783,13 +1821,6 @@ func TestDialAddr(t *testing.T) {
 	}
 
 	var err error
-	if _, err = dialAddr(addr, dialFunc, false, true, nil, 1 * time.Second); err == nil {
-		t.Fatal("DialWithTimeout completed successfully")
-	}
-
-	if !isTimeoutError(err) {
-		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
-	}
 
 	success := make(chan bool, 1)
 	go func() {
