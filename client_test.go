@@ -1768,14 +1768,15 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 
 	client := Client{
 		WriteTimeout: 1 * time.Second,
+		ReadTimeout:  1 * time.Second,
 	}
 
 	_, _, err := client.Get(nil, "https://"+addr)
 	if err == nil {
-		t.Fatal("DialWithTimeout completed successfully")
+		t.Fatal("tlsClientHandshake completed successfully")
 	}
 
-	if err.Error() != "fasthttp: Handshake timed out" {
+	if err != ErrTLSHandshakeTimeout {
 		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
 	}
 }

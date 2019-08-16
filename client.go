@@ -1568,47 +1568,41 @@ func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
 	return cfg
 }
 
-type timeoutError struct{}
+var ErrTLSHandshakeTimeout = errors.New("tls handshake timed out")
 
-func (timeoutError) Error() string   { return "fasthttp: Handshake timed out" }
-func (timeoutError) Timeout() bool   { return true }
-func (timeoutError) Temporary() bool { return true }
+var timeoutErrorChPool sync.Pool
 
-func tlsHandshake(rawConn net.Conn, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
-	timer := AcquireTimer(timeout)
+func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
+	tc := AcquireTimer(timeout)
 
-	cht := timeoutErrorChPool.Get()
-	if cht == nil {
-		cht = make(chan error, 1)
+	var ch chan error
+	chv := timeoutErrorChPool.Get()
+	if chv == nil {
+		chv = make(chan error)
 	}
-	errChannel := cht.(chan error)
-	defer func() {
-		<-errChannel
-		timeoutErrorChPool.Put(cht)
-	}()
+	ch = chv.(chan error)
+	defer timeoutErrorChPool.Put(chv)
 
 	conn := tls.Client(rawConn, tlsConfig)
 
 	go func() {
 		err := conn.Handshake()
-		ReleaseTimer(timer)
-		errChannel <- err
+		ReleaseTimer(tc)
+		ch <- err
 	}()
 
-	var err error
-
 	select {
-	case <-timer.C:
-		err = timeoutError{}
-	case err = <-errChannel:
-		errChannel <- nil
-	}
-
-	if err != nil {
+	case <-tc.C:
 		rawConn.Close()
-		return nil, err
+		<-ch
+		return nil, ErrTLSHandshakeTimeout
+	case err := <-ch:
+		if err != nil {
+			rawConn.Close()
+			return nil, err
+		}
+		return conn, nil
 	}
-	return conn, nil
 }
 
 func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
@@ -1631,12 +1625,10 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 		if timeout == 0 {
 			return tls.Client(conn, tlsConfig), nil
 		}
-		return tlsHandshake(conn, tlsConfig, timeout)
+		return tlsClientHandshake(conn, tlsConfig, timeout)
 	}
 	return conn, nil
 }
-
-var timeoutErrorChPool sync.Pool
 
 func (c *HostClient) getClientName() []byte {
 	v := c.clientName.Load()
