@@ -1603,10 +1603,16 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 		)
 
 		if timeout != 0 {
-			errChannel = make(chan error, 2)
-			timer = time.AfterFunc(timeout, func() {
+			chv := timeoutErrorChPool.Get()
+			if chv == nil {
+				chv = make(chan error, 2)
+			}
+			errChannel = chv.(chan error)
+			timer = AcquireTimer(timeout)
+			go func() {
+				<-timer.C
 				errChannel <- timeoutError{}
-			})
+			}()
 		}
 
 		colonPos := strings.LastIndex(addr, ":")
@@ -1634,21 +1640,26 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 		} else {
 			go func() {
 				err := conn.Handshake()
-				timer.Stop()
+				ReleaseTimer(timer)
 				errChannel <- err
-
 			}()
 			err = <-errChannel
 		}
 
 		if err != nil {
 			rawConn.Close()
+			if timeout != 0 {
+				<-errChannel
+				timeoutErrorChPool.Put(errChannel)
+			}
 			return nil, err
 		}
 		return conn, nil
 	}
 	return rawConn, nil
 }
+
+var timeoutErrorChPool sync.Pool
 
 func (c *HostClient) getClientName() []byte {
 	v := c.clientName.Load()

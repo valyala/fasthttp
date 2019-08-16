@@ -1739,9 +1739,6 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 func newLocalListener(t testing.TB) net.Listener {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		ln, err = net.Listen("tcp6", "[::1]:0")
-	}
-	if err != nil {
 		t.Fatal(err)
 	}
 	return ln
@@ -1749,7 +1746,7 @@ func newLocalListener(t testing.TB) net.Listener {
 
 func TestClientTLSHandshakeTimeout(t *testing.T) {
 	if testing.Short() {
-		t.Skip("skipping in short mode")
+		t.Skip("skipping test in short mode")
 	}
 	listener := newLocalListener(t)
 
@@ -1760,20 +1757,20 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 	defer close(complete)
 
 	go func() {
-			conn, err := listener.Accept()
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			<-complete
-			conn.Close()
+		conn, err := listener.Accept()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		<-complete
+		conn.Close()
 	}()
 
 	client := Client{
 		WriteTimeout: 1 * time.Second,
 	}
 
-	_, _, err := client.Get(nil, "https://" + addr)
+	_, _, err := client.Get(nil, "https://"+addr)
 	if err == nil {
 		t.Fatal("DialWithTimeout completed successfully")
 	}
