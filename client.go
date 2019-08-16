@@ -1574,10 +1574,41 @@ func (timeoutError) Error() string   { return "fasthttp: Handshake timed out" }
 func (timeoutError) Timeout() bool   { return true }
 func (timeoutError) Temporary() bool { return true }
 
-var emptyConfig tls.Config
+func tlsHandshake(rawConn net.Conn, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
+	timer := AcquireTimer(timeout)
 
-func defaultConfig() *tls.Config {
-	return &emptyConfig
+	cht := timeoutErrorChPool.Get()
+	if cht == nil {
+		cht = make(chan error, 1)
+	}
+	errChannel := cht.(chan error)
+	defer func() {
+		<-errChannel
+		timeoutErrorChPool.Put(cht)
+	}()
+
+	conn := tls.Client(rawConn, tlsConfig)
+
+	go func() {
+		err := conn.Handshake()
+		ReleaseTimer(timer)
+		errChannel <- err
+	}()
+
+	var err error
+
+	select {
+	case <-timer.C:
+		err = timeoutError{}
+	case err = <-errChannel:
+		errChannel <- nil
+	}
+
+	if err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
@@ -1589,74 +1620,20 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 		}
 		addr = addMissingPort(addr, isTLS)
 	}
-	rawConn, err := dial(addr)
+	conn, err := dial(addr)
 	if err != nil {
 		return nil, err
 	}
-	if rawConn == nil {
+	if conn == nil {
 		panic("BUG: DialFunc returned (nil, nil)")
 	}
 	if isTLS {
-		var (
-			errChannel chan error
-			timer      *time.Timer
-		)
-
-		if timeout != 0 {
-			chv := timeoutErrorChPool.Get()
-			if chv == nil {
-				chv = make(chan error, 2)
-			}
-			errChannel = chv.(chan error)
-			timer = AcquireTimer(timeout)
-			go func() {
-				<-timer.C
-				errChannel <- timeoutError{}
-			}()
-		}
-
-		colonPos := strings.LastIndex(addr, ":")
-		if colonPos == -1 {
-			colonPos = len(addr)
-		}
-		hostname := addr[:colonPos]
-
-		if tlsConfig == nil {
-			tlsConfig = defaultConfig()
-		}
-		// If no ServerName is set, infer the ServerName
-		// from the hostname we're connecting to.
-		if tlsConfig.ServerName == "" {
-			// Make a copy to avoid polluting argument or default.
-			c := tlsConfig.Clone()
-			c.ServerName = hostname
-			tlsConfig = c
-		}
-
-		conn := tls.Client(rawConn, tlsConfig)
-
 		if timeout == 0 {
-			err = conn.Handshake()
-		} else {
-			go func() {
-				err := conn.Handshake()
-				ReleaseTimer(timer)
-				errChannel <- err
-			}()
-			err = <-errChannel
+			return tls.Client(conn, tlsConfig), nil
 		}
-
-		if err != nil {
-			rawConn.Close()
-			if timeout != 0 {
-				<-errChannel
-				timeoutErrorChPool.Put(errChannel)
-			}
-			return nil, err
-		}
-		return conn, nil
+		return tlsHandshake(conn, tlsConfig, timeout)
 	}
-	return rawConn, nil
+	return conn, nil
 }
 
 var timeoutErrorChPool sync.Pool
