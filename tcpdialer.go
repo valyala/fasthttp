@@ -129,6 +129,8 @@ type TCPDialer struct {
 	// Changes made after the first Dial will not affect anything.
 	Concurrency int
 
+	LocalAddr *net.TCPAddr
+
 	tcpAddrsLock sync.Mutex
 	tcpAddrsMap  map[string]*tcpAddrEntry
 
@@ -265,7 +267,7 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 	n := uint32(len(addrs))
 	deadline := time.Now().Add(timeout)
 	for n > 0 {
-		conn, err = tryDial(network, &addrs[idx%n], deadline, d.concurrencyCh)
+		conn, err = d.tryDial(network, &addrs[idx%n], deadline, d.concurrencyCh)
 		if err == nil {
 			return conn, nil
 		}
@@ -278,7 +280,7 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 	return nil, err
 }
 
-func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyCh chan struct{}) (net.Conn, error) {
+func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyCh chan struct{}) (net.Conn, error) {
 	timeout := -time.Since(deadline)
 	if timeout <= 0 {
 		return nil, ErrDialTimeout
@@ -309,7 +311,7 @@ func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyC
 	ch := chv.(chan dialResult)
 	go func() {
 		var dr dialResult
-		dr.conn, dr.err = net.DialTCP(network, nil, addr)
+		dr.conn, dr.err = net.DialTCP(network, d.LocalAddr, addr)
 		ch <- dr
 		if concurrencyCh != nil {
 			<-concurrencyCh
