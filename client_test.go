@@ -19,6 +19,44 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestClientURLAuth(t *testing.T) {
+	cases := map[string]string{
+		"user:pass@": "dXNlcjpwYXNz",
+		"foo:@":      "Zm9vOg==",
+		":@":         "",
+		"@":          "",
+		"":           "",
+	}
+
+	ch := make(chan string, 1)
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ch <- string(ctx.Request.Header.Peek(HeaderAuthorization))
+		},
+	}
+	go s.Serve(ln)
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	for up, expected := range cases {
+		req := AcquireRequest()
+		req.Header.SetMethod(MethodGet)
+		req.SetRequestURI("http://" + up + "example.com")
+		if err := c.Do(req, nil); err != nil {
+			t.Fatal(err)
+		}
+
+		val := <-ch
+
+		if val != expected {
+			t.Fatalf("wrong %s header: %s expected %s", HeaderAuthorization, val, expected)
+		}
+	}
+}
+
 func TestClientNilResp(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
