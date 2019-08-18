@@ -1537,7 +1537,7 @@ func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
 	for n > 0 {
 		addr := c.nextAddr()
 		tlsConfig := c.cachedTLSConfig(addr)
-		conn, err = dialAddr(addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig)
+		conn, err = dialAddr(addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, c.WriteTimeout)
 		if err == nil {
 			return conn, nil
 		}
@@ -1568,7 +1568,43 @@ func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
 	return cfg
 }
 
-func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *tls.Config) (net.Conn, error) {
+var ErrTLSHandshakeTimeout = errors.New("tls handshake timed out")
+
+var timeoutErrorChPool sync.Pool
+
+func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
+	tc := AcquireTimer(timeout)
+	defer ReleaseTimer(tc)
+
+	var ch chan error
+	chv := timeoutErrorChPool.Get()
+	if chv == nil {
+		chv = make(chan error)
+	}
+	ch = chv.(chan error)
+	defer timeoutErrorChPool.Put(chv)
+
+	conn := tls.Client(rawConn, tlsConfig)
+
+	go func() {
+		ch <- conn.Handshake()
+	}()
+
+	select {
+	case <-tc.C:
+		rawConn.Close()
+		<-ch
+		return nil, ErrTLSHandshakeTimeout
+	case err := <-ch:
+		if err != nil {
+			rawConn.Close()
+			return nil, err
+		}
+		return conn, nil
+	}
+}
+
+func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
 	if dial == nil {
 		if dialDualStack {
 			dial = DialDualStack
@@ -1585,7 +1621,10 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 		panic("BUG: DialFunc returned (nil, nil)")
 	}
 	if isTLS {
-		conn = tls.Client(conn, tlsConfig)
+		if timeout == 0 {
+			return tls.Client(conn, tlsConfig), nil
+		}
+		return tlsClientHandshake(conn, tlsConfig, timeout)
 	}
 	return conn, nil
 }
@@ -1992,7 +2031,7 @@ func (c *pipelineConnClient) init() {
 
 func (c *pipelineConnClient) worker() error {
 	tlsConfig := c.cachedTLSConfig()
-	conn, err := dialAddr(c.Addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig)
+	conn, err := dialAddr(c.Addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, c.WriteTimeout)
 	if err != nil {
 		return err
 	}

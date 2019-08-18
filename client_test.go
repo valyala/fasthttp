@@ -1773,3 +1773,43 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 		t:  t,
 	}
 }
+
+func TestClientTLSHandshakeTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addr := listener.Addr().String()
+	defer listener.Close()
+
+	complete := make(chan bool)
+	defer close(complete)
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		<-complete
+		conn.Close()
+	}()
+
+	client := Client{
+		WriteTimeout: 1 * time.Second,
+		ReadTimeout:  1 * time.Second,
+	}
+
+	_, _, err = client.Get(nil, "https://"+addr)
+	if err == nil {
+		t.Fatal("tlsClientHandshake completed successfully")
+	}
+
+	if err != ErrTLSHandshakeTimeout {
+		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
+	}
+}
