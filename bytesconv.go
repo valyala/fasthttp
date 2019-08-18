@@ -386,7 +386,7 @@ func b2s(b []byte) string {
 // in the future go versions.
 func s2b(s string) (b []byte) {
 	sh := *(*reflect.StringHeader)(unsafe.Pointer(&s))
-	bh := *(*reflect.SliceHeader)(unsafe.Pointer(&b))
+	bh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
 	bh.Data = sh.Data
 	bh.Len = sh.Len
 	bh.Cap = sh.Len
