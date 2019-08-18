@@ -1574,6 +1574,7 @@ var timeoutErrorChPool sync.Pool
 
 func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
 	tc := AcquireTimer(timeout)
+	defer ReleaseTimer(tc)
 
 	var ch chan error
 	chv := timeoutErrorChPool.Get()
@@ -1586,9 +1587,7 @@ func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, timeout time.Du
 	conn := tls.Client(rawConn, tlsConfig)
 
 	go func() {
-		err := conn.Handshake()
-		ReleaseTimer(tc)
-		ch <- err
+		ch <- conn.Handshake()
 	}()
 
 	select {
