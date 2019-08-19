@@ -1,4 +1,4 @@
-// +build linux darwin dragonfly freebsd netbsd openbsd rumprun
+// +build !windows
 
 package reuseport
 
