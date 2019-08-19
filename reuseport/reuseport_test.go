@@ -1,3 +1,5 @@
+// +build linux darwin dragonfly freebsd netbsd openbsd rumprun
+
 package reuseport
 
 import (
