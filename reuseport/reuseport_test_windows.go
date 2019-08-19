@@ -5,7 +5,7 @@ import (
 )
 
 func TestListen(t *testing.T) {
-	ln, err := Listen("tcp6", "[::1]:10082")
+  _, err := Listen("tcp6", "[::1]:10082")
   if err == nil {
     t.Fatalf("unexpected non-error creating listener")
   }
