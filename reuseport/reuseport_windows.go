@@ -8,7 +8,7 @@ package reuseport
 
 import (
 	"fmt"
-  "net"
+	"net"
 )
 
 // ErrNoReusePort is returned if the OS doesn't support SO_REUSEPORT.
