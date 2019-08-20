@@ -1,5 +1,6 @@
 [![Build Status](https://travis-ci.org/valyala/fasthttp.svg)](https://travis-ci.org/valyala/fasthttp)
 [![GoDoc](https://godoc.org/github.com/valyala/fasthttp?status.svg)](http://godoc.org/github.com/valyala/fasthttp)
+[![fuzzit](https://app.fuzzit.dev/badge?org_id=fasthttp&branch=master)](https://fuzzit.dev)
 [![Go Report](https://goreportcard.com/badge/github.com/valyala/fasthttp)](https://goreportcard.com/report/github.com/valyala/fasthttp)
 
 # fasthttp

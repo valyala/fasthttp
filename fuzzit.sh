@@ -15,5 +15,5 @@ for w in request response cookie url; do
 	go-fuzz-build -libfuzzer -o fasthttp_$w.a ./fuzzit/$w/
 	clang -fsanitize=fuzzer fasthttp_$w.a -o fasthttp_$w
 
-	./fuzzitbin create job --type fuzzing fasthttp/$w fasthttp_$w
+	./fuzzitbin create job --type $1 fasthttp/$w fasthttp_$w
 done

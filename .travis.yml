@@ -1,5 +1,11 @@
 language: go
 
+# Docker is required for fuzzit regression tests
+services:
+  - docker
+
+dist: bionic
+
 os:
   - linux
   - osx
@@ -14,6 +20,10 @@ matrix:
   allow_failures:
     - tip
   fast_finish: true
+
+env:
+  global:
+    secure: "v/F0oI9zE9mcpEp4AVdHzSSHbe5ZFtH6B0i/BiUXKdQRQ10+JMPDOFRJQti7yxjMwltyd/QSFmR50Fl108sQYpo4xdlEXMHp2Y6OAN6crrp6PuHbLYgDWu3df/cH7/BqDyIq1uX8KZEeQssnygYN8hN4tpJCUg+NIb40Lm57Zsodt8DVjjyDWQQFDL7soNyAwGwQIqEyJsn+NUieXWEB1Qnt0xUtPIReuLlrwXR8wC1nLEjG9yz4ftDHHQdhVbO2b+xGWyaJ7QB5ixztaQP8Jnny6kSW9j6zEhJVuzdZ6d3xz23ibCbzSXBHdIUEI9u6ifQj8BYXr8fFS0FB3++IxgAYSs3ybZ+qEwuAxSBBm6YNW+3FrfDknVwTQscjKqnXPisjUqaRC9b31hke0tXzBq1488hE+wxMXeDM4LwWT5IMEO2gz0WGQXxmdVit72DIjCZxJkf1TvZZ0YH7Y//6wJTYYP9xulsy4gqu8CuFdWiF3fiGc3p5DTIS75nJ/Yy76Sa1pRPASKCujfLxtHE6Mt0XKvSolIXklYIzBkjN6vn80N6JIrqtqlimBGPW/Ec6+dwbmRe2AcOKRl4y7pZsGYhJhqdue1mucUYO/e2QeBZJGkqqG+zF5AW0v8x29BHvMwViAonc8o9eelkJ8khYzc/Qeq05pZnR/N/Pqfc+68k="
 
 before_install:
   - go get -t -v ./...
@@ -37,12 +47,11 @@ jobs:
 
         # run tests with the race detector as well
         - go test -race -v ./...
-    - stage: fuzzit
-      #if: branch = master AND type IN (push)
+    - stage: fuzzit.dev
       os:
         - linux
       go:
         - 1.12.x
       script:
-        - ./fuzzit.sh
-
+        - if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./fuzzit.sh fuzzing; fi
+        - if [ "$TRAVIS_PULL_REQUEST" != "false" ]; then ./fuzzit.sh local-regression; fi
