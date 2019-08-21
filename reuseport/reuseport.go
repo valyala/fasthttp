@@ -9,7 +9,6 @@
 package reuseport
 
 import (
-	"fmt"
 	"net"
 	"strings"
 
