@@ -16,16 +16,6 @@ import (
 	"github.com/valyala/tcplisten"
 )
 
-// ErrNoReusePort is returned if the OS doesn't support SO_REUSEPORT.
-type ErrNoReusePort struct {
-	err error
-}
-
-// Error implements error interface.
-func (e *ErrNoReusePort) Error() string {
-	return fmt.Sprintf("The OS doesn't support SO_REUSEPORT: %s", e.err)
-}
-
 // Listen returns TCP listener with SO_REUSEPORT option set.
 //
 // The returned listener tries enabling the following TCP options, which usually
