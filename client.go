@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1653,7 +1654,7 @@ func addMissingPort(addr string, isTLS bool) string {
 	if isTLS {
 		port = 443
 	}
-	return net.JoinHostPort(addr, port)
+	return net.JoinHostPort(addr, strconv.Itoa(port))
 }
 
 // PipelineClient pipelines requests over a limited set of concurrent
