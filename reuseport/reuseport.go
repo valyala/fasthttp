@@ -1,4 +1,4 @@
-// +build linux darwin dragonfly freebsd netbsd openbsd rumprun
+// +build !windows
 
 // Package reuseport provides TCP net.Listener with SO_REUSEPORT support.
 //
