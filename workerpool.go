@@ -22,6 +22,8 @@ type workerPool struct {
 
 	LogAllErrors bool
 
+	RecoverHandler func(r interface{})
+
 	MaxIdleWorkerDuration time.Duration
 
 	Logger Logger
@@ -200,8 +202,26 @@ func (wp *workerPool) release(ch *workerChan) bool {
 	return true
 }
 
+func (wp *workerPool) workerDone() {
+	wp.lock.Lock()
+	wp.workersCount--
+	wp.lock.Unlock()
+}
+
 func (wp *workerPool) workerFunc(ch *workerChan) {
 	var c net.Conn
+
+	if wp.RecoverHandler != nil {
+		defer func() {
+			if r := recover(); r != nil {
+				if c != nil {
+					c.Close()
+				}
+				wp.RecoverHandler(r)
+			}
+			wp.workerDone()
+		}()
+	}
 
 	var err error
 	for c = range ch.ch {
@@ -231,7 +251,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 		}
 	}
 
-	wp.lock.Lock()
-	wp.workersCount--
-	wp.lock.Unlock()
+	if wp.RecoverHandler == nil {
+		wp.workerDone()
+	}
 }

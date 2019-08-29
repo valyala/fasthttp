@@ -1,8 +1,10 @@
 package fasthttp
 
 import (
+	"fmt"
 	"io/ioutil"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -165,5 +167,113 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 	if err := ln.Close(); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
+	wp.Stop()
+}
+
+func TestWorkerPoolPanicErrorSerial(t *testing.T) {
+	testWorkerPoolPanicErrorMulti(t)
+}
+
+func TestWorkerPoolPanicErrorConcurrent(t *testing.T) {
+	concurrency := 10
+	ch := make(chan struct{}, concurrency)
+	for i := 0; i < concurrency; i++ {
+		go func() {
+			testWorkerPoolPanicErrorMulti(t)
+			ch <- struct{}{}
+		}()
+	}
+	for i := 0; i < concurrency; i++ {
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+}
+
+func testWorkerPoolPanicErrorMulti(t *testing.T) {
+	var globalCount uint64
+	var recoverCount uint64
+	wp := &workerPool{
+		WorkerFunc: func(conn net.Conn) error {
+			count := atomic.AddUint64(&globalCount, 1)
+			switch count % 3 {
+			case 0:
+				panic("foobar")
+			case 1:
+				return fmt.Errorf("fake error")
+			}
+			return nil
+		},
+		MaxWorkersCount:       1000,
+		MaxIdleWorkerDuration: time.Millisecond,
+		Logger:                &customLogger{},
+		RecoverHandler: func(r interface{}) {
+			if r == nil {
+				t.Fatalf("RecoverHandler got nil")
+			}
+			atomic.AddUint64(&recoverCount, 1)
+		},
+	}
+
+	for i := 0; i < 10; i++ {
+		testWorkerPoolPanicError(t, wp)
+	}
+
+	if recoverCount == 0 {
+		t.Fatalf("RecoverHandler was not called")
+	}
+}
+
+func testWorkerPoolPanicError(t *testing.T, wp *workerPool) {
+	wp.Start()
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	clientsCount := 10
+	clientCh := make(chan struct{}, clientsCount)
+	for i := 0; i < clientsCount; i++ {
+		go func() {
+			conn, err := ln.Dial()
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			data, err := ioutil.ReadAll(conn)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			if len(data) > 0 {
+				t.Fatalf("unexpected data read: %q. Expecting empty data", data)
+			}
+			if err = conn.Close(); err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			clientCh <- struct{}{}
+		}()
+	}
+
+	for i := 0; i < clientsCount; i++ {
+		conn, err := ln.Accept()
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if !wp.Serve(conn) {
+			t.Fatalf("worker pool mustn't be full")
+		}
+	}
+
+	for i := 0; i < clientsCount; i++ {
+		select {
+		case <-clientCh:
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
 	wp.Stop()
 }
