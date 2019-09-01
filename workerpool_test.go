@@ -209,9 +209,9 @@ func testWorkerPoolPanicErrorMulti(t *testing.T) {
 		MaxWorkersCount:       1000,
 		MaxIdleWorkerDuration: time.Millisecond,
 		Logger:                &customLogger{},
-		RecoverHandler: func(r interface{}) {
+		PanicHandler: func(r interface{}) {
 			if r == nil {
-				t.Fatalf("RecoverHandler got nil")
+				t.Fatalf("PanicHandler got nil")
 			}
 			atomic.AddUint64(&recoverCount, 1)
 		},
@@ -222,7 +222,7 @@ func testWorkerPoolPanicErrorMulti(t *testing.T) {
 	}
 
 	if recoverCount == 0 {
-		t.Fatalf("RecoverHandler was not called")
+		t.Fatalf("PanicHandler was not called")
 	}
 }
 

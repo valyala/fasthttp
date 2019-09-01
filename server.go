@@ -167,11 +167,11 @@ type Server struct {
 	//   * ErrBrokenChunks
 	ErrorHandler func(ctx *RequestCtx, err error)
 
-	// RecoverHandler for reacting on a panic. Called with the result of calling recover() if it is not nil.
+	// PanicHandler for reacting on a panic. Called with the result of calling recover() if it is not nil.
 	//
 	// To be on the safe side, implementors are advised to re-panic so the stack would continue to unwind.
 	// This would make sure you're not left in some inconsistent state due to the original panic.
-	RecoverHandler func(r interface{})
+	PanicHandler func(r interface{})
 
 	// HeaderReceived is called after receiving the header
 	//
@@ -1584,7 +1584,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		WorkerFunc:      s.serveConn,
 		MaxWorkersCount: maxWorkersCount,
 		LogAllErrors:    s.LogAllErrors,
-		RecoverHandler:  s.RecoverHandler,
+		PanicHandler:    s.PanicHandler,
 		Logger:          s.logger(),
 		connState:       s.setState,
 	}

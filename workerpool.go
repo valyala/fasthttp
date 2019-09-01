@@ -22,7 +22,7 @@ type workerPool struct {
 
 	LogAllErrors bool
 
-	RecoverHandler func(r interface{})
+	PanicHandler func(r interface{})
 
 	MaxIdleWorkerDuration time.Duration
 
@@ -211,13 +211,13 @@ func (wp *workerPool) workerDone() {
 func (wp *workerPool) workerFunc(ch *workerChan) {
 	var c net.Conn
 
-	if wp.RecoverHandler != nil {
+	if wp.PanicHandler != nil {
 		defer func() {
 			if r := recover(); r != nil {
 				if c != nil {
 					c.Close()
 				}
-				wp.RecoverHandler(r)
+				wp.PanicHandler(r)
 			}
 			wp.workerDone()
 		}()
@@ -251,7 +251,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 		}
 	}
 
-	if wp.RecoverHandler == nil {
+	if wp.PanicHandler == nil {
 		wp.workerDone()
 	}
 }
