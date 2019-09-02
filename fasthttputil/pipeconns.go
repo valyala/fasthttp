@@ -87,6 +87,8 @@ type pipeConn struct {
 
 	readDeadlineCh  <-chan time.Time
 	writeDeadlineCh <-chan time.Time
+
+	readDeadlineChLock sync.Mutex
 }
 
 func (c *pipeConn) Write(p []byte) (int, error) {
@@ -158,6 +160,8 @@ func (c *pipeConn) readNextByteBuffer(mayBlock bool) error {
 		if !mayBlock {
 			return errWouldBlock
 		}
+		c.readDeadlineChLock.Lock()
+		defer c.readDeadlineChLock.Unlock()
 		select {
 		case c.b = <-c.rCh:
 		case <-c.readDeadlineCh:
@@ -214,7 +218,10 @@ func (c *pipeConn) SetReadDeadline(deadline time.Time) error {
 	if c.readDeadlineTimer == nil {
 		c.readDeadlineTimer = time.NewTimer(time.Hour)
 	}
-	c.readDeadlineCh = updateTimer(c.readDeadlineTimer, deadline)
+	readDeadlineCh := updateTimer(c.readDeadlineTimer, deadline)
+	c.readDeadlineChLock.Lock()
+	c.readDeadlineCh = readDeadlineCh
+	c.readDeadlineChLock.Unlock()
 	return nil
 }
 
