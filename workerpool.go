@@ -213,13 +213,13 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 
 	if wp.PanicHandler != nil {
 		defer func() {
+			wp.workerDone()
 			if r := recover(); r != nil {
 				if c != nil {
 					c.Close()
 				}
 				wp.PanicHandler(r)
 			}
-			wp.workerDone()
 		}()
 	}
 

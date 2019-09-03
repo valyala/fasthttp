@@ -2154,14 +2154,20 @@ func (s *Server) setState(nc net.Conn, state ConnState) {
 
 func hijackConnHandler(r io.Reader, c net.Conn, s *Server, h HijackHandler) {
 	hjc := s.acquireHijackConn(r, c)
+
+	if s.PanicHandler != nil {
+		defer func() {
+			s.cleanAfterHijackConn(r, c, hjc)
+			if r := recover(); r != nil {
+				s.PanicHandler(r)
+			}
+		}()
+	}
+
 	h(hjc)
 
-	if br, ok := r.(*bufio.Reader); ok {
-		releaseReader(s, br)
-	}
-	if !s.KeepHijackedConns {
-		c.Close()
-		s.releaseHijackConn(hjc)
+	if s.PanicHandler == nil {
+		s.cleanAfterHijackConn(r, c, hjc)
 	}
 }
 
@@ -2185,6 +2191,16 @@ func (s *Server) releaseHijackConn(hjc *hijackConn) {
 	hjc.Conn = nil
 	hjc.r = nil
 	s.hijackConnPool.Put(hjc)
+}
+
+func (s *Server) cleanAfterHijackConn(r io.Reader, c net.Conn, hjc *hijackConn) {
+	if br, ok := r.(*bufio.Reader); ok {
+		releaseReader(s, br)
+	}
+	if !s.KeepHijackedConns {
+		c.Close()
+		s.releaseHijackConn(hjc)
+	}
 }
 
 type hijackConn struct {
