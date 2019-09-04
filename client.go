@@ -1143,7 +1143,11 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 
 	// Free up resources occupied by response before sending the request,
 	// so the GC may reclaim these resources (e.g. response body).
+
+	// backing up SkipBody in case it was set explicitly
+	customSkipBody := resp.SkipBody
 	resp.Reset()
+	resp.SkipBody = customSkipBody
 
 	// If we detected a redirect to another schema
 	if req.schemaUpdate {
@@ -1210,7 +1214,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		}
 	}
 
-	if !req.Header.IsGet() && req.Header.IsHead() {
+	if customSkipBody || !req.Header.IsGet() && req.Header.IsHead() {
 		resp.SkipBody = true
 	}
 	if c.DisableHeaderNamesNormalizing {
