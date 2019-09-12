@@ -11,6 +11,7 @@ os:
   - osx
 go:
   - tip
+  - 1.13
   - 1.12.x
   - 1.11.x
   - 1.10.x
@@ -27,14 +28,11 @@ env:
 
 before_install:
   - go get -t -v ./...
-  # - go get -v golang.org/x/tools/cmd/goimports
 
 jobs:
   include:
     - stage: test
       script:
-        # TODO(@kirilldanshin)
-        # - test -z "$(goimports -d $(find . -type f -name '*.go' -not -path "./vendor/*"))"
         # build test for supported platforms
         - GOOS=linux go build
         - GOOS=darwin go build
@@ -51,7 +49,7 @@ jobs:
       os:
         - linux
       go:
-        - 1.12.x
+        - 1.13
       script:
         - if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./fuzzit.sh fuzzing; fi
         - if [ "$TRAVIS_PULL_REQUEST" != "false" ]; then ./fuzzit.sh local-regression; fi
