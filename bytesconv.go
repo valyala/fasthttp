@@ -393,6 +393,80 @@ func s2b(s string) (b []byte) {
 	return b
 }
 
+var quotedArgTable = func() [256]bool {
+	// See http://www.w3.org/TR/html5/forms.html#form-submission-algorithm
+	var a [256]bool
+
+	// '0' ~ '9'
+	for i := int('0'); i <= int('9'); i++ {
+		a[i] = true
+	}
+
+	// 'a' ~ 'z'
+	for i := int('a'); i <= int('z'); i++ {
+		a[i] = true
+	}
+
+	// 'A' ~ 'Z'
+	for i := int('A'); i <= int('Z'); i++ {
+		a[i] = true
+	}
+
+	a[int('*')] = true
+	a[int('-')] = true
+	a[int('.')] = true
+	a[int('_')] = true
+
+	return a
+}()
+
+var quotedPathTable = func() [256]bool {
+	// From the spec: http://tools.ietf.org/html/rfc3986#section-3.3
+	// an path can contain zero or more of pchar that is defined as follows:
+	// pchar       = unreserved / pct-encoded / sub-delims / ":" / "@"
+	// pct-encoded = "%" HEXDIG HEXDIG
+	// unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
+	// sub-delims  = "!" / "$" / "&" / "'" / "(" / ")"
+	//             / "*" / "+" / "," / ";" / "="
+	var a [256]bool
+
+	// '0' ~ '9'
+	for i := int('0'); i <= int('9'); i++ {
+		a[i] = true
+	}
+
+	// 'a' ~ 'z'
+	for i := int('a'); i <= int('z'); i++ {
+		a[i] = true
+	}
+
+	// 'A' ~ 'Z'
+	for i := int('A'); i <= int('Z'); i++ {
+		a[i] = true
+	}
+
+	a[int('*')] = true
+	a[int('-')] = true
+	a[int('.')] = true
+	a[int('_')] = true
+	a[int('~')] = true
+	a[int('!')] = true
+	a[int('$')] = true
+	a[int('&')] = true
+	a[int('\'')] = true
+	a[int('(')] = true
+	a[int(')')] = true
+	a[int('+')] = true
+	a[int(',')] = true
+	a[int(';')] = true
+	a[int('=')] = true
+	a[int(':')] = true
+	a[int('@')] = true
+	a[int('/')] = true
+
+	return a
+}()
+
 // AppendUnquotedArg appends url-decoded src to dst and returns appended dst.
 //
 // dst may point to src. In this case src will be overwritten.
@@ -403,9 +477,7 @@ func AppendUnquotedArg(dst, src []byte) []byte {
 // AppendQuotedArg appends url-encoded src to dst and returns appended dst.
 func AppendQuotedArg(dst, src []byte) []byte {
 	for _, c := range src {
-		// See http://www.w3.org/TR/html5/forms.html#form-submission-algorithm
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-			c == '*' || c == '-' || c == '.' || c == '_' {
+		if quotedArgTable[int(c)] {
 			dst = append(dst, c)
 		} else {
 			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
@@ -416,17 +488,7 @@ func AppendQuotedArg(dst, src []byte) []byte {
 
 func appendQuotedPath(dst, src []byte) []byte {
 	for _, c := range src {
-		// From the spec: http://tools.ietf.org/html/rfc3986#section-3.3
-		// an path can contain zero or more of pchar that is defined as follows:
-		// pchar       = unreserved / pct-encoded / sub-delims / ":" / "@"
-		// pct-encoded = "%" HEXDIG HEXDIG
-		// unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
-		// sub-delims  = "!" / "$" / "&" / "'" / "(" / ")"
-		//             / "*" / "+" / "," / ";" / "="
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-			c == '-' || c == '.' || c == '_' || c == '~' || c == '!' || c == '$' ||
-			c == '&' || c == '\'' || c == '(' || c == ')' || c == '*' || c == '+' ||
-			c == ',' || c == ';' || c == '=' || c == ':' || c == '@' || c == '/' {
+		if quotedPathTable[int(c)] {
 			dst = append(dst, c)
 		} else {
 			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
