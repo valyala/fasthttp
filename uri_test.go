@@ -184,6 +184,16 @@ func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string)
 	}
 }
 
+func TestURINoNormalization(t *testing.T) {
+	var u URI
+	irregularPath := "/aaa%2Fbbb%2F%2E.%2Fxxx"
+	u.Parse(nil, []byte(irregularPath))
+	u.DisablePathNormalizing = true
+	if string(u.RequestURI()) != irregularPath {
+		t.Fatalf("Unexpected path %q. Expected %q.", u.Path(), irregularPath)
+	}
+}
+
 func TestURICopyTo(t *testing.T) {
 	var u URI
 	var copyU URI
