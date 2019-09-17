@@ -1,9 +1,7 @@
-[![Build Status](https://travis-ci.org/valyala/fasthttp.svg)](https://travis-ci.org/valyala/fasthttp)
-[![GoDoc](https://godoc.org/github.com/valyala/fasthttp?status.svg)](http://godoc.org/github.com/valyala/fasthttp)
-[![fuzzit](https://app.fuzzit.dev/badge?org_id=fasthttp&branch=master)](https://fuzzit.dev)
-[![Go Report](https://goreportcard.com/badge/github.com/valyala/fasthttp)](https://goreportcard.com/report/github.com/valyala/fasthttp)
+# fasthttp [![Build Status](https://travis-ci.org/valyala/fasthttp.svg)](https://travis-ci.org/valyala/fasthttp) [![GoDoc](https://godoc.org/github.com/valyala/fasthttp?status.svg)](http://godoc.org/github.com/valyala/fasthttp) [![fuzzit](https://app.fuzzit.dev/badge?org_id=fasthttp&branch=master)](https://fuzzit.dev) [![Go Report](https://goreportcard.com/badge/github.com/valyala/fasthttp)](https://goreportcard.com/report/github.com/valyala/fasthttp)
 
-# fasthttp
+![FastHTTP – Fastest and reliable HTTP implementation in Go](https://github.com/fasthttp/docs-assets/raw/master/banner@0.5.png)
+
 Fast HTTP implementation for Go.
 
 Currently fasthttp is successfully used by [VertaMedia](https://vertamedia.com/)
@@ -400,7 +398,7 @@ instead of [html/template](https://golang.org/pkg/html/template/).
 * Pin each server instance to a separate CPU core using [taskset](http://linux.die.net/man/1/taskset).
 * Ensure the interrupts of multiqueue network card are evenly distributed between CPU cores.
   See [this article](https://blog.cloudflare.com/how-to-achieve-low-latency/) for details.
-* Use Go 1.6 as it provides some considerable performance improvements.
+* Use Go 1.13 as it provides some considerable performance improvements.
 
 
 # Fasthttp best practices
