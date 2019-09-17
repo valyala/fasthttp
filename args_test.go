@@ -197,6 +197,7 @@ func TestPathEscape(t *testing.T) {
 	testPathEscape(t, "")
 	testPathEscape(t, "/")
 	testPathEscape(t, "//")
+	testPathEscape(t, "*") // See https://github.com/golang/go/issues/11202
 
 	// Test all characters
 	var pathSegment = make([]byte, 256)
