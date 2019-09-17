@@ -393,6 +393,66 @@ func s2b(s string) (b []byte) {
 	return b
 }
 
+var quotedArgShouldEscapeTable = func() [256]bool {
+	// According to RFC 3986 §2.3
+	var a [256]bool
+	for i := 0; i < 256; i++ {
+		a[i] = true
+	}
+
+	// ALPHA
+	for i := int('a'); i <= int('z'); i++ {
+		a[i] = false
+	}
+	for i := int('A'); i <= int('Z'); i++ {
+		a[i] = false
+	}
+
+	// DIGIT
+	for i := int('0'); i <= int('9'); i++ {
+		a[i] = false
+	}
+
+	// Unreserved characters
+	a[int('-')] = false
+	a[int('_')] = false
+	a[int('.')] = false
+	a[int('~')] = false
+
+	return a
+}()
+
+var quotedPathShouldEscapeTable = func() [256]bool {
+	// From the spec: http://tools.ietf.org/html/rfc3986#section-3.3
+	// an path can contain zero or more of pchar that is defined as follows:
+	// pchar       = unreserved / pct-encoded / sub-delims / ":" / "@"
+	// pct-encoded = "%" HEXDIG HEXDIG
+	// unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
+	// sub-delims  = "!" / "$" / "&" / "'" / "(" / ")"
+	//             / "*" / "+" / "," / ";" / "="
+	//
+	// The implementation here equal to net/url shouldEscape(s, encodePath)
+	//
+	// The RFC allows : @ & = + $ but saves / ; , for assigning
+	// meaning to individual path segments. This package
+	// only manipulates the path as a whole, so we allow those
+	// last three as well. That leaves only ? to escape.
+	var a = quotedArgShouldEscapeTable
+
+	// '$', '&', '+', ',', '/', ':', ';', '=', '@'
+	a[int('$')] = false
+	a[int('&')] = false
+	a[int('+')] = false
+	a[int(',')] = false
+	a[int('/')] = false
+	a[int(':')] = false
+	a[int(';')] = false
+	a[int('=')] = false
+	a[int('@')] = false
+
+	return a
+}()
+
 // AppendUnquotedArg appends url-decoded src to dst and returns appended dst.
 //
 // dst may point to src. In this case src will be overwritten.
@@ -403,12 +463,13 @@ func AppendUnquotedArg(dst, src []byte) []byte {
 // AppendQuotedArg appends url-encoded src to dst and returns appended dst.
 func AppendQuotedArg(dst, src []byte) []byte {
 	for _, c := range src {
-		// See http://www.w3.org/TR/html5/forms.html#form-submission-algorithm
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-			c == '*' || c == '-' || c == '.' || c == '_' {
-			dst = append(dst, c)
-		} else {
+		switch {
+		case c == ' ':
+			dst = append(dst, '+')
+		case quotedArgShouldEscapeTable[int(c)]:
 			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
+		default:
+			dst = append(dst, c)
 		}
 	}
 	return dst
@@ -416,20 +477,10 @@ func AppendQuotedArg(dst, src []byte) []byte {
 
 func appendQuotedPath(dst, src []byte) []byte {
 	for _, c := range src {
-		// From the spec: http://tools.ietf.org/html/rfc3986#section-3.3
-		// an path can contain zero or more of pchar that is defined as follows:
-		// pchar       = unreserved / pct-encoded / sub-delims / ":" / "@"
-		// pct-encoded = "%" HEXDIG HEXDIG
-		// unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
-		// sub-delims  = "!" / "$" / "&" / "'" / "(" / ")"
-		//             / "*" / "+" / "," / ";" / "="
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-			c == '-' || c == '.' || c == '_' || c == '~' || c == '!' || c == '$' ||
-			c == '&' || c == '\'' || c == '(' || c == ')' || c == '*' || c == '+' ||
-			c == ',' || c == ';' || c == '=' || c == ':' || c == '@' || c == '/' {
-			dst = append(dst, c)
-		} else {
+		if quotedPathShouldEscapeTable[int(c)] {
 			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
+		} else {
+			dst = append(dst, c)
 		}
 	}
 	return dst
