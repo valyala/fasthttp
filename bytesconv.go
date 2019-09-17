@@ -423,14 +423,6 @@ var quotedArgShouldEscapeTable = func() [256]bool {
 }()
 
 var quotedPathShouldEscapeTable = func() [256]bool {
-	// From the spec: http://tools.ietf.org/html/rfc3986#section-3.3
-	// an path can contain zero or more of pchar that is defined as follows:
-	// pchar       = unreserved / pct-encoded / sub-delims / ":" / "@"
-	// pct-encoded = "%" HEXDIG HEXDIG
-	// unreserved  = ALPHA / DIGIT / "-" / "." / "_" / "~"
-	// sub-delims  = "!" / "$" / "&" / "'" / "(" / ")"
-	//             / "*" / "+" / "," / ";" / "="
-	//
 	// The implementation here equal to net/url shouldEscape(s, encodePath)
 	//
 	// The RFC allows : @ & = + $ but saves / ; , for assigning
