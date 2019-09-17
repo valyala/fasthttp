@@ -171,7 +171,8 @@ func TestArgsPeekMulti(t *testing.T) {
 
 func TestArgsEscape(t *testing.T) {
 	testArgsEscape(t, "foo", "bar", "foo=bar")
-	// Test all
+
+	// Test all characters
 	k := "f.o,1:2/4"
 	var v = make([]byte, 256)
 	for i := 0; i < 256; i++ {
@@ -188,6 +189,29 @@ func testArgsEscape(t *testing.T, k, v, expectedS string) {
 	s := a.String()
 	if s != expectedS {
 		t.Fatalf("unexpected args %q. Expecting %q. k=%q, v=%q", s, expectedS, k, v)
+	}
+}
+
+func TestPathEscape(t *testing.T) {
+	testPathEscape(t, "/foo/bar")
+	testPathEscape(t, "")
+	testPathEscape(t, "/")
+	testPathEscape(t, "//")
+
+	// Test all characters
+	var pathSegment = make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		pathSegment[i] = byte(i)
+	}
+	testPathEscape(t, "/foo/"+string(pathSegment))
+}
+
+func testPathEscape(t *testing.T, s string) {
+	u := url.URL{Path: s}
+	expectedS := u.EscapedPath()
+	res := string(appendQuotedPath(make([]byte, 0, 10), []byte(s)))
+	if res != expectedS {
+		t.Fatalf("unexpected args %q. Expecting %q.", res, expectedS)
 	}
 }
 
