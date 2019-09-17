@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -170,8 +171,15 @@ func TestArgsPeekMulti(t *testing.T) {
 
 func TestArgsEscape(t *testing.T) {
 	testArgsEscape(t, "foo", "bar", "foo=bar")
-	testArgsEscape(t, "f.o,1:2/4", "~`!@#$%^&*()_-=+\\|/[]{};:'\"<>,./?",
-		"f.o%2C1%3A2%2F4=%7E%60%21%40%23%24%25%5E%26*%28%29_-%3D%2B%5C%7C%2F%5B%5D%7B%7D%3B%3A%27%22%3C%3E%2C.%2F%3F")
+	// Test all
+	k := "f.o,1:2/4"
+	var v = make([]byte, 256)
+	for i := 0; i <= 255; i++ {
+		v[i] = uint8(i)
+	}
+	u := url.Values{}
+	u.Add(k, string(v))
+	testArgsEscape(t, k, string(v), u.Encode())
 }
 
 func testArgsEscape(t *testing.T, k, v, expectedS string) {
@@ -344,7 +352,7 @@ func TestArgsString(t *testing.T) {
 	testArgsString(t, &a, "foo=bar")
 	testArgsString(t, &a, "foo=bar&baz=sss")
 	testArgsString(t, &a, "")
-	testArgsString(t, &a, "f%20o=x.x*-_8x%D0%BF%D1%80%D0%B8%D0%B2%D0%B5aaa&sdf=ss")
+	testArgsString(t, &a, "f+o=x.x%2A-_8x%D0%BF%D1%80%D0%B8%D0%B2%D0%B5aaa&sdf=ss")
 	testArgsString(t, &a, "=asdfsdf")
 }
 
