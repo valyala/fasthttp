@@ -174,8 +174,8 @@ func TestArgsEscape(t *testing.T) {
 	// Test all
 	k := "f.o,1:2/4"
 	var v = make([]byte, 256)
-	for i := 0; i <= 255; i++ {
-		v[i] = uint8(i)
+	for i := 0; i < 256; i++ {
+		v[i] = byte(i)
 	}
 	u := url.Values{}
 	u.Add(k, string(v))
