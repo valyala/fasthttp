@@ -48,6 +48,15 @@ type URI struct {
 	queryArgs       Args
 	parsedQueryArgs bool
 
+	// Path values are sent as-is without normalization
+	//
+	// Disabled path normalization may be useful for proxying incoming requests
+	// to servers that are expecting paths to be forwarded as-is.
+	//
+	// By default path values are normalized, i.e.
+	// extra slashes are removed, special characters are encoded.
+	DisablePathNormalizing bool
+
 	fullURI    []byte
 	requestURI []byte
 
@@ -71,6 +80,7 @@ func (u *URI) CopyTo(dst *URI) {
 
 	u.queryArgs.CopyTo(&dst.queryArgs)
 	dst.parsedQueryArgs = u.parsedQueryArgs
+	dst.DisablePathNormalizing = u.DisablePathNormalizing
 
 	// fullURI and requestURI shouldn't be copied, since they are created
 	// from scratch on each FullURI() and RequestURI() call.
@@ -215,6 +225,7 @@ func (u *URI) Reset() {
 	u.host = u.host[:0]
 	u.queryArgs.Reset()
 	u.parsedQueryArgs = false
+	u.DisablePathNormalizing = false
 
 	// There is no need in u.fullURI = u.fullURI[:0], since full uri
 	// is calculated on each call to FullURI().
@@ -387,7 +398,12 @@ func normalizePath(dst, src []byte) []byte {
 
 // RequestURI returns RequestURI - i.e. URI without Scheme and Host.
 func (u *URI) RequestURI() []byte {
-	dst := appendQuotedPath(u.requestURI[:0], u.Path())
+	var dst []byte
+	if u.DisablePathNormalizing {
+		dst = append(u.requestURI[:0], u.PathOriginal()...)
+	} else {
+		dst = appendQuotedPath(u.requestURI[:0], u.Path())
+	}
 	if u.queryArgs.Len() > 0 {
 		dst = append(dst, '?')
 		dst = u.queryArgs.AppendBytes(dst)
