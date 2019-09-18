@@ -210,7 +210,7 @@ func TestPathEscape(t *testing.T) {
 func testPathEscape(t *testing.T, s string) {
 	u := url.URL{Path: s}
 	expectedS := u.EscapedPath()
-	res := string(appendQuotedPath(make([]byte, 0, 10), []byte(s)))
+	res := string(appendQuotedPath(nil, []byte(s)))
 	if res != expectedS {
 		t.Fatalf("unexpected args %q. Expecting %q.", res, expectedS)
 	}

@@ -470,8 +470,7 @@ func AppendQuotedArg(dst, src []byte) []byte {
 func appendQuotedPath(dst, src []byte) []byte {
 	// Fix issue in https://github.com/golang/go/issues/11202
 	if len(src) == 1 && src[0] == '*' {
-		dst = append(dst, '*')
-		return dst
+		return append(dst, '*')
 	}
 
 	for _, c := range src {
