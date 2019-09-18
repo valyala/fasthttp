@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -170,8 +171,16 @@ func TestArgsPeekMulti(t *testing.T) {
 
 func TestArgsEscape(t *testing.T) {
 	testArgsEscape(t, "foo", "bar", "foo=bar")
-	testArgsEscape(t, "f.o,1:2/4", "~`!@#$%^&*()_-=+\\|/[]{};:'\"<>,./?",
-		"f.o%2C1%3A2%2F4=%7E%60%21%40%23%24%25%5E%26*%28%29_-%3D%2B%5C%7C%2F%5B%5D%7B%7D%3B%3A%27%22%3C%3E%2C.%2F%3F")
+
+	// Test all characters
+	k := "f.o,1:2/4"
+	var v = make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		v[i] = byte(i)
+	}
+	u := url.Values{}
+	u.Add(k, string(v))
+	testArgsEscape(t, k, string(v), u.Encode())
 }
 
 func testArgsEscape(t *testing.T, k, v, expectedS string) {
@@ -180,6 +189,30 @@ func testArgsEscape(t *testing.T, k, v, expectedS string) {
 	s := a.String()
 	if s != expectedS {
 		t.Fatalf("unexpected args %q. Expecting %q. k=%q, v=%q", s, expectedS, k, v)
+	}
+}
+
+func TestPathEscape(t *testing.T) {
+	testPathEscape(t, "/foo/bar")
+	testPathEscape(t, "")
+	testPathEscape(t, "/")
+	testPathEscape(t, "//")
+	testPathEscape(t, "*") // See https://github.com/golang/go/issues/11202
+
+	// Test all characters
+	var pathSegment = make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		pathSegment[i] = byte(i)
+	}
+	testPathEscape(t, "/foo/"+string(pathSegment))
+}
+
+func testPathEscape(t *testing.T, s string) {
+	u := url.URL{Path: s}
+	expectedS := u.EscapedPath()
+	res := string(appendQuotedPath(nil, []byte(s)))
+	if res != expectedS {
+		t.Fatalf("unexpected args %q. Expecting %q.", res, expectedS)
 	}
 }
 
@@ -344,7 +377,7 @@ func TestArgsString(t *testing.T) {
 	testArgsString(t, &a, "foo=bar")
 	testArgsString(t, &a, "foo=bar&baz=sss")
 	testArgsString(t, &a, "")
-	testArgsString(t, &a, "f%20o=x.x*-_8x%D0%BF%D1%80%D0%B8%D0%B2%D0%B5aaa&sdf=ss")
+	testArgsString(t, &a, "f+o=x.x%2A-_8x%D0%BF%D1%80%D0%B8%D0%B2%D0%B5aaa&sdf=ss")
 	testArgsString(t, &a, "=asdfsdf")
 }
 
