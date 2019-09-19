@@ -448,7 +448,7 @@ func AppendQuotedArg(dst, src []byte) []byte {
 		case c == ' ':
 			dst = append(dst, '+')
 		case quotedArgShouldEscapeTable[int(c)]:
-			dst = append(dst, '%', upperhex[c>>4], upperhex[c&15])
+			dst = append(dst, '%', upperhex[c>>4], upperhex[c&0xf])
 		default:
 			dst = append(dst, c)
 		}
