@@ -296,7 +296,7 @@ func writeHexInt(w *bufio.Writer, n int) error {
 	buf := v.([]byte)
 	i := len(buf) - 1
 	for {
-		buf[i] = int2hexbyte(n & 0xf)
+		buf[i] = upperhex[n&0xf]
 		n >>= 4
 		if n == 0 {
 			break
@@ -306,13 +306,6 @@ func writeHexInt(w *bufio.Writer, n int) error {
 	_, err := w.Write(buf[i:])
 	hexIntBufPool.Put(v)
 	return err
-}
-
-func int2hexbyte(n int) byte {
-	if n < 10 {
-		return '0' + byte(n)
-	}
-	return 'a' + byte(n) - 10
 }
 
 var hex2intTable = func() []byte {
