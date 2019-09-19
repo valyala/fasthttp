@@ -315,13 +315,6 @@ func int2hexbyte(n int) byte {
 	return 'a' + byte(n) - 10
 }
 
-func hexCharUpper(c byte) byte {
-	if c < 10 {
-		return '0' + c
-	}
-	return c - 10 + 'A'
-}
-
 var hex2intTable = func() []byte {
 	b := make([]byte, 256)
 	for i := 0; i < 256; i++ {
@@ -338,7 +331,10 @@ var hex2intTable = func() []byte {
 	return b
 }()
 
-const toLower = 'a' - 'A'
+const (
+	toLower  = 'a' - 'A'
+	upperhex = "0123456789ABCDEF"
+)
 
 var toLowerTable = func() [256]byte {
 	var a [256]byte
@@ -459,7 +455,7 @@ func AppendQuotedArg(dst, src []byte) []byte {
 		case c == ' ':
 			dst = append(dst, '+')
 		case quotedArgShouldEscapeTable[int(c)]:
-			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
+			dst = append(dst, '%', upperhex[c>>4], upperhex[c&15])
 		default:
 			dst = append(dst, c)
 		}
@@ -475,7 +471,7 @@ func appendQuotedPath(dst, src []byte) []byte {
 
 	for _, c := range src {
 		if quotedPathShouldEscapeTable[int(c)] {
-			dst = append(dst, '%', hexCharUpper(c>>4), hexCharUpper(c&15))
+			dst = append(dst, '%', upperhex[c>>4], upperhex[c&15])
 		} else {
 			dst = append(dst, c)
 		}
