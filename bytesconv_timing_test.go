@@ -65,18 +65,6 @@ func BenchmarkAppendIPv4(b *testing.B) {
 	})
 }
 
-func BenchmarkInt2HexByte(b *testing.B) {
-	buf := []int{1, 0xf, 2, 0xd, 3, 0xe, 4, 0xa, 5, 0xb, 6, 0xc, 7, 0xf, 0, 0xf, 6, 0xd, 9, 8, 4, 0x5}
-	b.RunParallel(func(pb *testing.PB) {
-		var n int
-		for pb.Next() {
-			for _, n = range buf {
-				int2hexbyte(n)
-			}
-		}
-	})
-}
-
 func BenchmarkWriteHexInt(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var w bytebufferpool.ByteBuffer
