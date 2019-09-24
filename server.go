@@ -1897,7 +1897,7 @@ func (s *Server) serveConn(c net.Conn) error {
 				if len(b) == 0 {
 					// If reading from a keep-alive connection returns nothing it means
 					// the connection was closed (either timeout or from the other side).
-					if err != io.EOF {
+					if err != io.EOF && err != io.ErrUnexpectedEOF {
 						err = errNothingRead{err}
 					}
 				}
