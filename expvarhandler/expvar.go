@@ -13,6 +13,8 @@ import (
 var (
 	expvarHandlerCalls = expvar.NewInt("expvarHandlerCalls")
 	expvarRegexpErrors = expvar.NewInt("expvarRegexpErrors")
+
+	defaultRE = regexp.MustCompile(".")
 )
 
 // ExpvarHandler dumps json representation of expvars to http response.
@@ -52,7 +54,7 @@ func ExpvarHandler(ctx *fasthttp.RequestCtx) {
 func getExpvarRegexp(ctx *fasthttp.RequestCtx) (*regexp.Regexp, error) {
 	r := string(ctx.QueryArgs().Peek("r"))
 	if len(r) == 0 {
-		r = "."
+		return defaultRE, nil
 	}
 	rr, err := regexp.Compile(r)
 	if err != nil {
