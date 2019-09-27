@@ -21,8 +21,8 @@ import (
 
 func TestClientURLAuth(t *testing.T) {
 	cases := map[string]string{
-		"user:pass@": "dXNlcjpwYXNz",
-		"foo:@":      "Zm9vOg==",
+		"user:pass@": "Basic dXNlcjpwYXNz",
+		"foo:@":      "Basic Zm9vOg==",
 		":@":         "",
 		"@":          "",
 		"":           "",

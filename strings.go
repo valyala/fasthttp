@@ -81,4 +81,5 @@ var (
 	strBytes               = []byte("bytes")
 	strTextSlash           = []byte("text/")
 	strApplicationSlash    = []byte("application/")
+	strBasicSpace          = []byte("Basic ")
 )
