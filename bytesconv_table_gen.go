@@ -75,10 +75,9 @@ func main() {
 		}
 
 		// Unreserved characters
-		a[int('-')] = 0
-		a[int('_')] = 0
-		a[int('.')] = 0
-		a[int('~')] = 0
+		for _, v := range `-_.~` {
+			a[v] = 0
+		}
 
 		return a
 	}()
@@ -92,16 +91,9 @@ func main() {
 		// last three as well. That leaves only ? to escape.
 		var a = quotedArgShouldEscapeTable
 
-		// '$', '&', '+', ',', '/', ':', ';', '=', '@'
-		a[int('$')] = 0
-		a[int('&')] = 0
-		a[int('+')] = 0
-		a[int(',')] = 0
-		a[int('/')] = 0
-		a[int(':')] = 0
-		a[int(';')] = 0
-		a[int('=')] = 0
-		a[int('@')] = 0
+		for _, v := range `$&+,/:;=@` {
+			a[v] = 0
+		}
 
 		return a
 	}()
