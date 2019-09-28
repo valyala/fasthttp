@@ -1,3 +1,5 @@
+//go:generate go run bytesconv_table_gen.go
+
 package fasthttp
 
 import (
@@ -308,51 +310,10 @@ func writeHexInt(w *bufio.Writer, n int) error {
 	return err
 }
 
-var hex2intTable = func() []byte {
-	b := make([]byte, 256)
-	for i := 0; i < 256; i++ {
-		c := byte(16)
-		if i >= '0' && i <= '9' {
-			c = byte(i) - '0'
-		} else if i >= 'a' && i <= 'f' {
-			c = byte(i) - 'a' + 10
-		} else if i >= 'A' && i <= 'F' {
-			c = byte(i) - 'A' + 10
-		}
-		b[i] = c
-	}
-	return b
-}()
-
 const (
-	toLower  = 'a' - 'A'
 	upperhex = "0123456789ABCDEF"
 	lowerhex = "0123456789abcdef"
 )
-
-var toLowerTable = func() [256]byte {
-	var a [256]byte
-	for i := 0; i < 256; i++ {
-		c := byte(i)
-		if c >= 'A' && c <= 'Z' {
-			c += toLower
-		}
-		a[i] = c
-	}
-	return a
-}()
-
-var toUpperTable = func() [256]byte {
-	var a [256]byte
-	for i := 0; i < 256; i++ {
-		c := byte(i)
-		if c >= 'a' && c <= 'z' {
-			c -= toLower
-		}
-		a[i] = c
-	}
-	return a
-}()
 
 func lowercaseBytes(b []byte) {
 	for i := 0; i < len(b); i++ {
@@ -383,58 +344,6 @@ func s2b(s string) (b []byte) {
 	return b
 }
 
-var quotedArgShouldEscapeTable = func() [256]bool {
-	// According to RFC 3986 §2.3
-	var a [256]bool
-	for i := 0; i < 256; i++ {
-		a[i] = true
-	}
-
-	// ALPHA
-	for i := int('a'); i <= int('z'); i++ {
-		a[i] = false
-	}
-	for i := int('A'); i <= int('Z'); i++ {
-		a[i] = false
-	}
-
-	// DIGIT
-	for i := int('0'); i <= int('9'); i++ {
-		a[i] = false
-	}
-
-	// Unreserved characters
-	a[int('-')] = false
-	a[int('_')] = false
-	a[int('.')] = false
-	a[int('~')] = false
-
-	return a
-}()
-
-var quotedPathShouldEscapeTable = func() [256]bool {
-	// The implementation here equal to net/url shouldEscape(s, encodePath)
-	//
-	// The RFC allows : @ & = + $ but saves / ; , for assigning
-	// meaning to individual path segments. This package
-	// only manipulates the path as a whole, so we allow those
-	// last three as well. That leaves only ? to escape.
-	var a = quotedArgShouldEscapeTable
-
-	// '$', '&', '+', ',', '/', ':', ';', '=', '@'
-	a[int('$')] = false
-	a[int('&')] = false
-	a[int('+')] = false
-	a[int(',')] = false
-	a[int('/')] = false
-	a[int(':')] = false
-	a[int(';')] = false
-	a[int('=')] = false
-	a[int('@')] = false
-
-	return a
-}()
-
 // AppendUnquotedArg appends url-decoded src to dst and returns appended dst.
 //
 // dst may point to src. In this case src will be overwritten.
@@ -448,7 +357,7 @@ func AppendQuotedArg(dst, src []byte) []byte {
 		switch {
 		case c == ' ':
 			dst = append(dst, '+')
-		case quotedArgShouldEscapeTable[int(c)]:
+		case quotedArgShouldEscapeTable[int(c)] != 0:
 			dst = append(dst, '%', upperhex[c>>4], upperhex[c&0xf])
 		default:
 			dst = append(dst, c)
@@ -464,7 +373,7 @@ func appendQuotedPath(dst, src []byte) []byte {
 	}
 
 	for _, c := range src {
-		if quotedPathShouldEscapeTable[int(c)] {
+		if quotedPathShouldEscapeTable[int(c)] != 0 {
 			dst = append(dst, '%', upperhex[c>>4], upperhex[c&15])
 		} else {
 			dst = append(dst, c)
