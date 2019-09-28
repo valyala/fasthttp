@@ -186,7 +186,7 @@ func TestParseUfloatSuccess(t *testing.T) {
 	testParseUfloatSuccess(t, "123.456", 123.456)
 	testParseUfloatSuccess(t, "123", 123)
 	testParseUfloatSuccess(t, "1234e2", 1234e2)
-	testParseUfloatSuccess(t, "1234E-5", 1234E-5)
+	testParseUfloatSuccess(t, "1234E-5", 1234e-5)
 	testParseUfloatSuccess(t, "1.234e+3", 1.234e+3)
 }
 
