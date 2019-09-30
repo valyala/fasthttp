@@ -825,12 +825,7 @@ func doRequestFollowRedirects(req *Request, dst []byte, url string, c clientDoer
 		if err = c.Do(req, resp); err != nil {
 			break
 		}
-		statusCode = resp.Header.StatusCode()
-		if statusCode != StatusMovedPermanently &&
-			statusCode != StatusFound &&
-			statusCode != StatusSeeOther &&
-			statusCode != StatusTemporaryRedirect &&
-			statusCode != StatusPermanentRedirect {
+		if IsFinishStatusCode(resp.Header.StatusCode()) {
 			break
 		}
 
@@ -862,6 +857,14 @@ func getRedirectURL(baseURL string, location []byte) string {
 	redirectURL := u.String()
 	ReleaseURI(u)
 	return redirectURL
+}
+
+func IsFinishStatusCode(statusCode int) bool {
+	return statusCode != StatusMovedPermanently &&
+		statusCode != StatusFound &&
+		statusCode != StatusSeeOther &&
+		statusCode != StatusTemporaryRedirect &&
+		statusCode != StatusPermanentRedirect
 }
 
 var (
