@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/valyala/bytebufferpool"
 )
@@ -49,6 +50,7 @@ type Request struct {
 
 	// To detect scheme changes in redirects
 	schemaUpdate bool
+	deadline     time.Time
 }
 
 // Response represents HTTP response.

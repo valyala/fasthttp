@@ -992,6 +992,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	reqCopy := AcquireRequest()
 	req.copyToSkipBody(reqCopy)
 	swapRequestBody(req, reqCopy)
+	reqCopy.deadline = deadline
 	respCopy := AcquireResponse()
 	if resp != nil {
 		// Not calling resp.copyToSkipBody(respCopy) here to avoid
@@ -1076,7 +1077,12 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		maxAttempts = DefaultMaxIdemponentCallAttempts
 	}
 	attempts := 0
-
+	if req.deadline.IsZero() {
+		timeout := c.ReadTimeout + c.WriteTimeout
+		if timeout != 0 {
+			req.deadline = time.Now().Add(timeout)
+		}
+	}
 	atomic.AddInt32(&c.pendingRequests, 1)
 	for {
 		retry, err = c.do(req, resp)
@@ -1166,7 +1172,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		req.SetConnectionClose()
 	}
 
-	cc, err := c.acquireConn()
+	cc, err := c.acquireConn(req.deadline)
 	if err != nil {
 		return false, err
 	}
@@ -1275,7 +1281,7 @@ func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Unlock()
 }
 
-func (c *HostClient) acquireConn() (*clientConn, error) {
+func (c *HostClient) acquireConn(deadline time.Time) (*clientConn, error) {
 	var cc *clientConn
 	createConn := false
 	startCleaner := false
@@ -1311,11 +1317,19 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 		return cc, nil
 	}
 	if !createConn {
-		if c.PreferWaitConn {
-			<-c.connNotify
-			return c.acquireConn()
+		if !c.PreferWaitConn {
+			return nil, ErrNoFreeConns
 		}
-		return nil, ErrNoFreeConns
+		timeout := time.Hour
+		if !deadline.IsZero() {
+			timeout = -time.Since(deadline)
+		}
+		select {
+		case <-c.connNotify:
+			return c.acquireConn(deadline)
+		case <-time.After(timeout):
+			return nil, ErrTimeout
+		}
 	}
 
 	if startCleaner {
