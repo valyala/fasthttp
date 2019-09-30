@@ -89,7 +89,7 @@ func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 // the given deadline.
 //
 // ErrNoFreeConns is returned if all DefaultMaxConnsPerHost connections
-// to the requested host are busy.
+// to the requested host are busy when PreferWaitConn is false.
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
@@ -187,6 +187,9 @@ type Client struct {
 	//
 	// DefaultMaxConnsPerHost is used if not set.
 	MaxConnsPerHost int
+
+	// wait conn instead of throw ErrNoFreeConns to clipping traffic,default is false
+	PreferWaitConn bool
 
 	// Idle keep-alive connections are closed after this duration.
 	//
@@ -318,7 +321,7 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 // the given timeout.
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
-// to the requested host are busy.
+// to the requested host are busy when PreferWaitConn is false.
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
@@ -350,7 +353,7 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // the given deadline.
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
-// to the requested host are busy.
+// to the requested host are busy when PreferWaitConn is false.
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
@@ -373,7 +376,7 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 // The function doesn't follow redirects. Use Get* for following redirects.
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
-// to the requested host are busy.
+// to the requested host are busy when PreferWaitConn is false.
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
@@ -415,6 +418,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			IsTLS:                         isTLS,
 			TLSConfig:                     c.TLSConfig,
 			MaxConns:                      c.MaxConnsPerHost,
+			PreferWaitConn:                c.PreferWaitConn,
 			MaxIdleConnDuration:           c.MaxIdleConnDuration,
 			MaxIdemponentCallAttempts:     c.MaxIdemponentCallAttempts,
 			ReadBufferSize:                c.ReadBufferSize,
@@ -551,6 +555,9 @@ type HostClient struct {
 	// DefaultMaxConnsPerHost is used if not set.
 	MaxConns int
 
+	// wait conn instead of throw ErrNoFreeConns to clipping traffic,default is disabled
+	PreferWaitConn bool
+
 	// Keep-alive connections are closed after this duration.
 	//
 	// By default connection duration is unlimited.
@@ -620,10 +627,10 @@ type HostClient struct {
 	connsLock  sync.Mutex
 	connsCount int
 	conns      []*clientConn
-
-	addrsLock sync.Mutex
-	addrs     []string
-	addrIdx   uint32
+	connNotify chan struct{}
+	addrsLock  sync.Mutex
+	addrs      []string
+	addrIdx    uint32
 
 	tlsConfigMap     map[string]*tls.Config
 	tlsConfigMapLock sync.Mutex
@@ -985,6 +992,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	reqCopy := AcquireRequest()
 	req.copyToSkipBody(reqCopy)
 	swapRequestBody(req, reqCopy)
+	reqCopy.deadline = deadline
 	respCopy := AcquireResponse()
 	if resp != nil {
 		// Not calling resp.copyToSkipBody(respCopy) here to avoid
@@ -1069,7 +1077,12 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		maxAttempts = DefaultMaxIdemponentCallAttempts
 	}
 	attempts := 0
-
+	if req.deadline.IsZero() {
+		timeout := c.ReadTimeout + c.WriteTimeout
+		if timeout != 0 {
+			req.deadline = time.Now().Add(timeout)
+		}
+	}
 	atomic.AddInt32(&c.pendingRequests, 1)
 	for {
 		retry, err = c.do(req, resp)
@@ -1159,7 +1172,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		req.SetConnectionClose()
 	}
 
-	cc, err := c.acquireConn()
+	cc, err := c.acquireConn(req.deadline)
 	if err != nil {
 		return false, err
 	}
@@ -1268,7 +1281,7 @@ func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Unlock()
 }
 
-func (c *HostClient) acquireConn() (*clientConn, error) {
+func (c *HostClient) acquireConn(deadline time.Time) (*clientConn, error) {
 	var cc *clientConn
 	createConn := false
 	startCleaner := false
@@ -1288,6 +1301,9 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 				startCleaner = true
 				c.connsCleanerRun = true
 			}
+			if c.connNotify == nil {
+				c.connNotify = make(chan struct{})
+			}
 		}
 	} else {
 		n--
@@ -1301,7 +1317,19 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 		return cc, nil
 	}
 	if !createConn {
-		return nil, ErrNoFreeConns
+		if !c.PreferWaitConn {
+			return nil, ErrNoFreeConns
+		}
+		timeout := time.Hour
+		if !deadline.IsZero() {
+			timeout = -time.Since(deadline)
+		}
+		select {
+		case <-c.connNotify:
+			return c.acquireConn(deadline)
+		case <-time.After(timeout):
+			return nil, ErrTimeout
+		}
 	}
 
 	if startCleaner {
@@ -1378,6 +1406,10 @@ func (c *HostClient) closeConn(cc *clientConn) {
 	c.decConnsCount()
 	cc.c.Close()
 	releaseClientConn(cc)
+	select {
+	case c.connNotify <- struct{}{}:
+	default:
+	}
 }
 
 func (c *HostClient) decConnsCount() {
@@ -1410,6 +1442,10 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 	c.connsLock.Lock()
 	c.conns = append(c.conns, cc)
 	c.connsLock.Unlock()
+	select {
+	case c.connNotify <- struct{}{}:
+	default:
+	}
 }
 
 func (c *HostClient) acquireWriter(conn net.Conn) *bufio.Writer {
