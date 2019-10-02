@@ -861,7 +861,7 @@ func getRedirectURL(baseURL string, location []byte) string {
 
 // StatusCodeIsRedirect checks the response code.
 //
-// If this is a redirect code then it returns true, otherwise false.
+// StatusCodeIsRedirect returns true if the status code indicates a redirect.
 func StatusCodeIsRedirect(statusCode int) bool {
 	return statusCode == StatusMovedPermanently ||
 		statusCode == StatusFound ||
