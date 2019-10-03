@@ -16,7 +16,7 @@ import (
 type workerPool struct {
 	// Function for serving server connections.
 	// It must leave c unclosed.
-	WorkerFunc ServeHandler
+	WorkerFunc func(c net.Conn) (int, error)
 
 	MaxWorkersCount int
 
@@ -211,13 +211,14 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 
 		start := time.Now()
 
-		if err = wp.WorkerFunc(c); err != nil && err != errHijacked {
+		var n int
+		if n, err = wp.WorkerFunc(c); err != nil && err != errHijacked {
 			errStr := err.Error()
 			if wp.LogAllErrors || !(strings.Contains(errStr, "broken pipe") ||
 				strings.Contains(errStr, "reset by peer") ||
 				strings.Contains(errStr, "request headers: small read buffer") ||
 				strings.Contains(errStr, "i/o timeout")) {
-				wp.Logger.Printf("error when serving connection %q<->%q after %v: %s", c.LocalAddr(), c.RemoteAddr(), time.Since(start), err)
+				wp.Logger.Printf("error when serving connection %q<->%q after %v and %d requests: %s", c.LocalAddr(), c.RemoteAddr(), time.Since(start), n, err)
 			}
 		}
 		if err == errHijacked {

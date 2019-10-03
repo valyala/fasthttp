@@ -1770,7 +1770,7 @@ func (s *Server) ServeConn(c net.Conn) error {
 
 	atomic.AddInt32(&s.open, 1)
 
-	err := s.serveConn(c)
+	_, err := s.serveConn(c)
 
 	atomic.AddUint32(&s.concurrency, ^uint32(0))
 
@@ -1831,15 +1831,15 @@ func (s *Server) idleTimeout() time.Duration {
 	return s.ReadTimeout
 }
 
-func (s *Server) serveConn(c net.Conn) error {
+func (s *Server) serveConn(c net.Conn) (int, error) {
 	defer atomic.AddInt32(&s.open, -1)
 
 	if proto, err := s.getNextProto(c); err != nil {
-		return err
+		return 0, err
 	} else {
 		handler, ok := s.nextProtos[proto]
 		if ok {
-			return handler(c)
+			return 0, handler(c)
 		}
 	}
 
@@ -1953,7 +1953,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 
 		if err != nil {
-			if err == io.EOF {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				err = nil
 			} else if nr, ok := err.(errNothingRead); ok {
 				if connRequestNum > 1 {
@@ -2136,7 +2136,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 		s.releaseCtx(ctx)
 	}
-	return err
+	return int(connRequestNum), err
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {

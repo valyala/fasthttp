@@ -33,7 +33,7 @@ func TestWorkerPoolStartStopConcurrent(t *testing.T) {
 
 func testWorkerPoolStartStop(t *testing.T) {
 	wp := &workerPool{
-		WorkerFunc:      func(conn net.Conn) error { return nil },
+		WorkerFunc:      func(conn net.Conn) (int, error) { return 0, nil },
 		MaxWorkersCount: 10,
 		Logger:          defaultLogger,
 	}
@@ -74,7 +74,7 @@ func testWorkerPoolMaxWorkersCountMulti(t *testing.T) {
 func testWorkerPoolMaxWorkersCount(t *testing.T) {
 	ready := make(chan struct{})
 	wp := &workerPool{
-		WorkerFunc: func(conn net.Conn) error {
+		WorkerFunc: func(conn net.Conn) (int, error) {
 			buf := make([]byte, 100)
 			n, err := conn.Read(buf)
 			if err != nil {
@@ -90,7 +90,7 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 
 			<-ready
 
-			return nil
+			return 0, nil
 		},
 		MaxWorkersCount: 10,
 		Logger:          defaultLogger,
