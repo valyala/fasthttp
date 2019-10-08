@@ -89,7 +89,7 @@ func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 // the given deadline.
 //
 // ErrNoFreeConns is returned if all DefaultMaxConnsPerHost connections
-// to the requested host are busy when PreferWaitConn is false.
+// to the requested host are busy and PreferWaitConn is false.
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
@@ -188,7 +188,7 @@ type Client struct {
 	// DefaultMaxConnsPerHost is used if not set.
 	MaxConnsPerHost int
 
-	// wait conn instead of throw ErrNoFreeConns to clipping traffic,default is false
+	// Wait for a connection if MaxConnsPerHost is reached instead of returning ErrNoFreeConns.
 	PreferWaitConn bool
 
 	// Idle keep-alive connections are closed after this duration.
@@ -321,7 +321,7 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 // the given timeout.
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
-// to the requested host are busy when PreferWaitConn is false.
+// to the requested host are busy and PreferWaitConn is false.
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
@@ -353,7 +353,7 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // the given deadline.
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
-// to the requested host are busy when PreferWaitConn is false.
+// to the requested host are busy and PreferWaitConn is false.
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
@@ -555,7 +555,7 @@ type HostClient struct {
 	// DefaultMaxConnsPerHost is used if not set.
 	MaxConns int
 
-	// wait conn instead of throw ErrNoFreeConns to clipping traffic,default is disabled
+	// Wait for a connection if MaxConnsPerHost is reached instead of returning ErrNoFreeConns.
 	PreferWaitConn bool
 
 	// Keep-alive connections are closed after this duration.

@@ -1813,3 +1813,51 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
 	}
 }
+
+func TestClient_WaitPrefer(t *testing.T) {
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer s.Stop()
+	addr := "http://" + s.Addr()
+	var (
+		limitClient = &Client{
+			MaxConnsPerHost: 2,
+		}
+		waitClient = &Client{
+			PreferWaitConn:  true,
+			MaxConnsPerHost: 2,
+		}
+		wg             sync.WaitGroup
+		noFreeConnErrs int32
+	)
+
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				_, _, err := limitClient.Get(nil, addr)
+				if err != nil {
+					if err == ErrNoFreeConns {
+						atomic.AddInt32(&noFreeConnErrs, 1)
+					} else {
+						t.Fatal("unexpected error:", err)
+					}
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if noFreeConnErrs == 0 {
+		t.Fatal("should be some ErrNoFreeConns")
+	}
+	t.Log("noFreeConnErrs:", noFreeConnErrs)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			testClientGet(t, waitClient, addr, 30)
+			testClientPost(t, waitClient, addr, 10)
+		}()
+	}
+	wg.Wait()
+}

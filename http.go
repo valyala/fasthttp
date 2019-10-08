@@ -856,6 +856,7 @@ func (req *Request) resetSkipHeader() {
 	req.postArgs.Reset()
 	req.parsedPostArgs = false
 	req.isTLS = false
+	req.deadline = time.Time{}
 }
 
 // RemoveMultipartFormFiles removes multipart/form-data temporary files
