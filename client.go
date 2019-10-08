@@ -188,7 +188,7 @@ type Client struct {
 	// DefaultMaxConnsPerHost is used if not set.
 	MaxConnsPerHost int
 
-	// wait conn instead of throw ErrNoFreeConns to clipping traffic,default is false
+	// Wait for a connection if MaxConnsPerHost is reached instead of returning ErrNoFreeConns.
 	PreferWaitConn bool
 
 	// Idle keep-alive connections are closed after this duration.
