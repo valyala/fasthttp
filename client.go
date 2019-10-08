@@ -89,7 +89,7 @@ func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 // the given deadline.
 //
 // ErrNoFreeConns is returned if all DefaultMaxConnsPerHost connections
-// to the requested host are busy when PreferWaitConn is false.
+// to the requested host are busy and PreferWaitConn is false.
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
