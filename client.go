@@ -246,6 +246,15 @@ type Client struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
+	// Path values are sent as-is without normalization
+	//
+	// Disabled path normalization may be useful for proxying incoming requests
+	// to servers that are expecting paths to be forwarded as-is.
+	//
+	// By default path values are normalized, i.e.
+	// extra slashes are removed, special characters are encoded.
+	DisablePathNormalizing bool
+
 	mLock sync.Mutex
 	m     map[string]*HostClient
 	ms    map[string]*HostClient
@@ -423,6 +432,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			WriteTimeout:                  c.WriteTimeout,
 			MaxResponseBodySize:           c.MaxResponseBodySize,
 			DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
+			DisablePathNormalizing:        c.DisablePathNormalizing,
 		}
 		m[string(host)] = hc
 		if len(m) == 1 {
@@ -613,6 +623,15 @@ type HostClient struct {
 	//     * content-type -> Content-Type
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
+
+	// Path values are sent as-is without normalization
+	//
+	// Disabled path normalization may be useful for proxying incoming requests
+	// to servers that are expecting paths to be forwarded as-is.
+	//
+	// By default path values are normalized, i.e.
+	// extra slashes are removed, special characters are encoded.
+	DisablePathNormalizing bool
 
 	clientName  atomic.Value
 	lastUseTime uint32
@@ -1153,6 +1172,10 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	customSkipBody := resp.SkipBody
 	resp.Reset()
 	resp.SkipBody = customSkipBody
+
+	if c.DisablePathNormalizing {
+		req.URI().DisablePathNormalizing = true
+	}
 
 	// If we detected a redirect to another schema
 	if req.schemaUpdate {
