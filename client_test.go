@@ -699,7 +699,7 @@ func testPipelineClientDo(t *testing.T, c *PipelineClient) {
 	ReleaseResponse(resp)
 }
 
-func TestClientDoTimeoutDisableNormalizing(t *testing.T) {
+func TestClientDoTimeoutDisableHeaderNamesNormalizing(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
 	s := &Server{
@@ -738,6 +738,57 @@ func TestClientDoTimeoutDisableNormalizing(t *testing.T) {
 		hv = resp.Header.Peek("Foo-Bar")
 		if len(hv) > 0 {
 			t.Fatalf("unexpected non-empty header value %q", hv)
+		}
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
+func TestClientDoTimeoutDisablePathNormalizing(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			uri := ctx.URI()
+			uri.DisablePathNormalizing = true
+			ctx.Response.Header.Set("received-uri", string(uri.FullURI()))
+		},
+	}
+
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		DisablePathNormalizing: true,
+	}
+
+	urlWithEncodedPath := "http://example.com/encoded/Y%2BY%2FY%3D/stuff"
+
+	var req Request
+	req.SetRequestURI(urlWithEncodedPath)
+	var resp Response
+	for i := 0; i < 5; i++ {
+		if err := c.DoTimeout(&req, &resp, time.Second); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		hv := resp.Header.Peek("received-uri")
+		if string(hv) != urlWithEncodedPath {
+			t.Fatalf("request uri was normalized: %q. Expecting %q", hv, urlWithEncodedPath)
 		}
 	}
 
