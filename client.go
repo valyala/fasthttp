@@ -1077,12 +1077,6 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		maxAttempts = DefaultMaxIdemponentCallAttempts
 	}
 	attempts := 0
-	if req.deadline.IsZero() {
-		timeout := c.ReadTimeout + c.WriteTimeout
-		if timeout != 0 {
-			req.deadline = time.Now().Add(timeout)
-		}
-	}
 	atomic.AddInt32(&c.pendingRequests, 1)
 	for {
 		retry, err = c.do(req, resp)
@@ -1171,9 +1165,16 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		req.schemaUpdate = false
 		req.SetConnectionClose()
 	}
-
-	cc, err := c.acquireConn(req.deadline)
+	deadline := req.deadline
+	// the deadline is final if call clientDoDeadline. otherwise every attempts is assign a new one
+	if deadline.IsZero() && c.ReadTimeout != 0 {
+		deadline = time.Now().Add(c.ReadTimeout)
+	} else {
+		deadline = time.Now().Add(DefaultDialTimeout)
+	}
+	cc, err := c.acquireConn(deadline)
 	if err != nil {
+		// no retry when acquireConn timeout
 		return false, err
 	}
 	conn := cc.c
@@ -1282,6 +1283,9 @@ func (c *HostClient) SetMaxConns(newMaxConns int) {
 }
 
 func (c *HostClient) acquireConn(deadline time.Time) (*clientConn, error) {
+	if time.Until(deadline) <= 0 {
+		return nil, ErrTimeout
+	}
 	var cc *clientConn
 	createConn := false
 	startCleaner := false
@@ -1320,16 +1324,8 @@ func (c *HostClient) acquireConn(deadline time.Time) (*clientConn, error) {
 		if !c.PreferWaitConn {
 			return nil, ErrNoFreeConns
 		}
-		timeout := time.Hour
-		if !deadline.IsZero() {
-			timeout = -time.Since(deadline)
-		}
-		select {
-		case <-c.connNotify:
-			return c.acquireConn(deadline)
-		case <-time.After(timeout):
-			return nil, ErrTimeout
-		}
+		<-c.connNotify
+		return c.acquireConn(deadline)
 	}
 
 	if startCleaner {
