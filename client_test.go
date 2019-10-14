@@ -1861,3 +1861,64 @@ func TestClient_WaitPrefer(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// TestClient_DoTimeout_PreferWaitConn  running concurrent 5 request  with 1  wait prefer connection,server blocking 300ms.
+// below is simulate activity.
+// id\timeline | start  | 300ms+  | 600ms+  | 900ms+   | end  |
+// 1            running     OK
+// 2            wait     running     OK
+// 3            wait     wait       running    OK
+// 4            wait     wait       wait       wait     wait
+// 5            wait     wait       wait       running  running
+//
+// In 1 second,on 0,300,600,900 ms will sending request to server.
+//  request at 900ms will timeout because did not get response in time.
+// one request wait conn all the time because there is no free.
+
+func TestClient_DoTimeout_PreferWaitConn(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	addr := "http://" + listener.Addr().String()
+	var (
+		serverGot int32
+		timeout   int32
+		wg        sync.WaitGroup
+	)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			atomic.AddInt32(&serverGot, 1)
+			time.Sleep(time.Millisecond * 300)
+
+		},
+	}
+	go s.Serve(listener)
+	time.Sleep(time.Millisecond)
+	waitClient := &Client{
+		PreferWaitConn:  true,
+		MaxConnsPerHost: 1,
+	}
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 1; j++ {
+				req := &Request{}
+				req.SetRequestURI(addr)
+				err2 := waitClient.DoTimeout(req, nil, time.Second)
+				if err2 == ErrTimeout {
+					atomic.AddInt32(&timeout, 1)
+				} else if err2 != nil {
+					t.Fatal(err2)
+				}
+			}
+
+		}()
+	}
+	wg.Wait()
+	if timeout != 2 || serverGot != 4 {
+		t.Fatal("unexpect value", timeout, serverGot)
+	}
+}
