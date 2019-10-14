@@ -1167,10 +1167,12 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	}
 	deadline := req.deadline
 	// the deadline is final if call clientDoDeadline. otherwise every attempts is assign a new one
-	if deadline.IsZero() && c.ReadTimeout != 0 {
-		deadline = time.Now().Add(c.ReadTimeout)
-	} else {
-		deadline = time.Now().Add(DefaultDialTimeout)
+	if deadline.IsZero() {
+		if c.ReadTimeout != 0 {
+			deadline = time.Now().Add(c.ReadTimeout)
+		} else {
+			deadline = time.Now().Add(DefaultDialTimeout)
+		}
 	}
 	cc, err := c.acquireConn(deadline)
 	if err != nil {
