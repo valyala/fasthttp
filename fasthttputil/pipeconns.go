@@ -9,6 +9,8 @@ import (
 )
 
 // NewPipeConns returns new bi-directional connection pipe.
+//
+// PipeConns is NOT safe for concurrent use by multiple goroutines!
 func NewPipeConns() *PipeConns {
 	ch1 := make(chan *byteBuffer, 4)
 	ch2 := make(chan *byteBuffer, 4)
@@ -38,6 +40,7 @@ func NewPipeConns() *PipeConns {
 //     calling Read in order to unblock each Write call.
 //   * It supports read and write deadlines.
 //
+// PipeConns is NOT safe for concurrent use by multiple goroutines!
 type PipeConns struct {
 	c1         pipeConn
 	c2         pipeConn
