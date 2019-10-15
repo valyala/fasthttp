@@ -23,6 +23,69 @@ import (
 // Make sure RequestCtx implements context.Context
 var _ context.Context = &RequestCtx{}
 
+func TestServerInvalidHeader(t *testing.T) {
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if ctx.Request.Header.Peek("Foo") != nil || ctx.Request.Header.Peek("Foo ") != nil {
+				t.Fatal("expected Foo header")
+			}
+		},
+		Logger: &testLogger{},
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+	}()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if _, err = c.Write([]byte("POST /foo HTTP/1.1\r\nHost: gle.com\r\nFoo : bar\r\nContent-Length: 5\r\n\r\n12345")); err != nil {
+		t.Fatal(err)
+	}
+
+	br := bufio.NewReader(c)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if resp.StatusCode() != StatusBadRequest {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusBadRequest)
+	}
+
+	c, err = ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if _, err = c.Write([]byte("GET /foo HTTP/1.1\r\nHost: gle.com\r\nFoo : bar\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	br = bufio.NewReader(c)
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	// Since we delay header parsing for GET and HEAD requests until the users asks for it
+	// we can't return 400 in case of a bad header.
+	// Inside the handler above we make sure to test that the invalid Foo header was ignored.
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+
+	if err := c.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+}
+
 func TestServerConnState(t *testing.T) {
 	states := make([]string, 0)
 	s := &Server{
@@ -595,7 +658,7 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 			ctx.WriteString("OK")
 		},
 		MaxConnsPerIP: 1,
-		Logger:        &customLogger{},
+		Logger:        &testLogger{},
 	}
 
 	ln := fasthttputil.NewInmemoryListener()
@@ -697,7 +760,7 @@ func TestServerConcurrencyLimit(t *testing.T) {
 			ctx.WriteString("OK")
 		},
 		Concurrency: 1,
-		Logger:      &customLogger{},
+		Logger:      &testLogger{},
 	}
 
 	ln := fasthttputil.NewInmemoryListener()
@@ -1970,7 +2033,7 @@ func TestRequestCtxHijack(t *testing.T) {
 
 func TestRequestCtxInit(t *testing.T) {
 	var ctx RequestCtx
-	var logger customLogger
+	var logger testLogger
 	globalConnID = 0x123456
 	ctx.Init(&ctx.Request, zeroTCPAddr, &logger)
 	ip := ctx.RemoteIP()
@@ -2443,19 +2506,8 @@ func TestServerEmptyResponse(t *testing.T) {
 	verifyResponse(t, br, 200, string(defaultContentType), "")
 }
 
-type customLogger struct {
-	lock sync.Mutex
-	out  string
-}
-
-func (cl *customLogger) Printf(format string, args ...interface{}) {
-	cl.lock.Lock()
-	cl.out += fmt.Sprintf(format, args...)[6:] + "\n"
-	cl.lock.Unlock()
-}
-
 func TestServerLogger(t *testing.T) {
-	cl := &customLogger{}
+	cl := &testLogger{}
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			logger := ctx.Logger()
@@ -2740,7 +2792,7 @@ func TestShutdownReuse(t *testing.T) {
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
 		ReadTimeout: time.Second,
-		Logger:      &customLogger{}, // Ignore log output.
+		Logger:      &testLogger{}, // Ignore log output.
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
@@ -3029,4 +3081,15 @@ func (rw *readWriter) SetReadDeadline(t time.Time) error {
 
 func (rw *readWriter) SetWriteDeadline(t time.Time) error {
 	return nil
+}
+
+type testLogger struct {
+	lock sync.Mutex
+	out  string
+}
+
+func (cl *testLogger) Printf(format string, args ...interface{}) {
+	cl.lock.Lock()
+	cl.out += fmt.Sprintf(format, args...)[6:] + "\n"
+	cl.lock.Unlock()
 }

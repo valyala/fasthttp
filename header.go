@@ -1893,6 +1893,13 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	var err error
 	for s.next() {
 		if len(s.key) > 0 {
+			// Spaces between the header key and colon are not allowed.
+			// See RFC 7230, Section 3.2.4.
+			if bytes.IndexByte(s.key, ' ') != -1 || bytes.IndexByte(s.key, '\t') != -1 {
+				err = fmt.Errorf("invalid header key %q", s.key)
+				continue
+			}
+
 			switch s.key[0] | 0x20 {
 			case 'h':
 				if caseInsensitiveCompare(s.key, strHost) {
@@ -1911,7 +1918,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				}
 				if caseInsensitiveCompare(s.key, strContentLength) {
 					if h.contentLength != -1 {
-						if h.contentLength, err = parseContentLength(s.value); err != nil {
+						var nerr error
+						if h.contentLength, nerr = parseContentLength(s.value); nerr != nil {
+							if err == nil {
+								err = nerr
+							}
 							h.contentLength = -2
 						} else {
 							h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
@@ -1940,9 +1951,12 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 		}
 		h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
 	}
-	if s.err != nil {
+	if s.err != nil && err == nil {
+		err = s.err
+	}
+	if err != nil {
 		h.connectionClose = true
-		return 0, s.err
+		return 0, err
 	}
 
 	if h.contentLength < 0 {

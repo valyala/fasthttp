@@ -351,7 +351,7 @@ func TestClientReadTimeout(t *testing.T) {
 				timeout = true
 			}
 		},
-		Logger: &customLogger{}, // Don't print closed pipe errors.
+		Logger: &testLogger{}, // Don't print closed pipe errors.
 	}
 	go s.Serve(ln)
 
@@ -631,7 +631,7 @@ func testPipelineClientDoConcurrent(t *testing.T, concurrency int, maxBatchDelay
 		MaxConns:           maxConns,
 		MaxPendingRequests: concurrency,
 		MaxBatchDelay:      maxBatchDelay,
-		Logger:             &customLogger{},
+		Logger:             &testLogger{},
 	}
 
 	clientStopCh := make(chan struct{}, concurrency)
@@ -1807,7 +1807,7 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 				ctx.PostArgs().WriteTo(ctx)
 			}
 		},
-		Logger: &customLogger{}, // Ignore log output.
+		Logger: &testLogger{}, // Ignore log output.
 	}
 	ch := make(chan struct{})
 	go func() {
