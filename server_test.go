@@ -24,6 +24,8 @@ import (
 var _ context.Context = &RequestCtx{}
 
 func TestServerInvalidHeader(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			if ctx.Request.Header.Peek("Foo") != nil || ctx.Request.Header.Peek("Foo ") != nil {
@@ -87,6 +89,8 @@ func TestServerInvalidHeader(t *testing.T) {
 }
 
 func TestServerConnState(t *testing.T) {
+	t.Parallel()
+
 	states := make([]string, 0)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {},
@@ -158,6 +162,8 @@ func TestServerConnState(t *testing.T) {
 }
 
 func TestSaveMultipartFile(t *testing.T) {
+	t.Parallel()
+
 	filea := "This is a test file."
 	fileb := strings.Repeat("test", 64)
 
@@ -213,6 +219,8 @@ func TestSaveMultipartFile(t *testing.T) {
 }
 
 func TestServerName(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 		},
@@ -279,6 +287,8 @@ func TestServerName(t *testing.T) {
 }
 
 func TestRequestCtxString(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 
 	s := ctx.String()
@@ -296,6 +306,8 @@ func TestRequestCtxString(t *testing.T) {
 }
 
 func TestServerErrSmallBuffer(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.WriteString("shouldn't be never called")
@@ -342,6 +354,8 @@ func TestServerErrSmallBuffer(t *testing.T) {
 }
 
 func TestRequestCtxIsTLS(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 
 	// tls.Conn
@@ -367,6 +381,8 @@ func TestRequestCtxIsTLS(t *testing.T) {
 }
 
 func TestRequestCtxRedirectHTTPSSchemeless(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 
 	s := "GET /foo/bar?baz HTTP/1.1\nHost: aaa.com\n\n"
@@ -385,6 +401,8 @@ func TestRequestCtxRedirectHTTPSSchemeless(t *testing.T) {
 }
 
 func TestRequestCtxRedirect(t *testing.T) {
+	t.Parallel()
+
 	testRequestCtxRedirect(t, "http://qqq/", "", "http://qqq/")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "", "http://qqq/foo/bar?baz=111")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "#aaa", "http://qqq/foo/bar?baz=111#aaa")
@@ -418,6 +436,8 @@ func testRequestCtxRedirect(t *testing.T, origURL, redirectURL, expectedURL stri
 }
 
 func TestServerResponseServerHeader(t *testing.T) {
+	t.Parallel()
+
 	serverName := "foobar serv"
 
 	s := &Server{
@@ -493,6 +513,8 @@ func TestServerResponseServerHeader(t *testing.T) {
 }
 
 func TestServerResponseBodyStream(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 
 	readyCh := make(chan struct{})
@@ -582,6 +604,8 @@ func TestServerResponseBodyStream(t *testing.T) {
 }
 
 func TestServerDisableKeepalive(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.WriteString("OK")
@@ -653,6 +677,8 @@ func TestServerDisableKeepalive(t *testing.T) {
 }
 
 func TestServerMaxConnsPerIPLimit(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.WriteString("OK")
@@ -755,6 +781,8 @@ func (conn *fakeIPConn) RemoteAddr() net.Addr {
 }
 
 func TestServerConcurrencyLimit(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.WriteString("OK")
@@ -828,6 +856,8 @@ func TestServerConcurrencyLimit(t *testing.T) {
 }
 
 func TestServerWriteFastError(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Name: "foobar",
 	}
@@ -861,6 +891,8 @@ func TestServerWriteFastError(t *testing.T) {
 }
 
 func TestServerTLS(t *testing.T) {
+	t.Parallel()
+
 	text := []byte("Make fasthttp great again")
 	ln := fasthttputil.NewInmemoryListener()
 
@@ -907,6 +939,8 @@ func TestServerTLS(t *testing.T) {
 }
 
 func TestServerServeTLSEmbed(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 
 	certFile := "./ssl-cert-snakeoil.pem"
@@ -988,6 +1022,8 @@ func TestServerServeTLSEmbed(t *testing.T) {
 }
 
 func TestServerMultipartFormDataRequest(t *testing.T) {
+	t.Parallel()
+
 	reqS := `POST /upload HTTP/1.1
 Host: qwerty.com
 Content-Length: 521
@@ -1104,6 +1140,8 @@ Connection: close
 }
 
 func TestServerGetWithContent(t *testing.T) {
+	t.Parallel()
+
 	h := func(ctx *RequestCtx) {
 		ctx.Success("foo/bar", []byte("success"))
 	}
@@ -1135,6 +1173,8 @@ func TestServerGetWithContent(t *testing.T) {
 }
 
 func TestServerDisableHeaderNamesNormalizing(t *testing.T) {
+	t.Parallel()
+
 	headerName := "CASE-senSITive-HEAder-NAME"
 	headerNameLower := strings.ToLower(headerName)
 	headerValue := "foobar baz"
@@ -1190,6 +1230,8 @@ func TestServerDisableHeaderNamesNormalizing(t *testing.T) {
 }
 
 func TestServerReduceMemoryUsageSerial(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 
 	s := &Server{
@@ -1219,6 +1261,8 @@ func TestServerReduceMemoryUsageSerial(t *testing.T) {
 }
 
 func TestServerReduceMemoryUsageConcurrent(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 
 	s := &Server{
@@ -1293,6 +1337,8 @@ func testServerRequests(t *testing.T, ln *fasthttputil.InmemoryListener) {
 }
 
 func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 
 	ch := make(chan struct{})
@@ -1370,6 +1416,8 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 }
 
 func TestServerHTTP10ConnectionClose(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 
 	ch := make(chan struct{})
@@ -1466,6 +1514,8 @@ func TestRequestCtxFormValue(t *testing.T) {
 }
 
 func TestRequestCtxUserValue(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 
 	for i := 0; i < 5; i++ {
@@ -1552,6 +1602,8 @@ func TestServerHeadRequest(t *testing.T) {
 }
 
 func TestServerExpect100Continue(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			if !ctx.IsPost() {
@@ -1601,6 +1653,8 @@ func TestServerExpect100Continue(t *testing.T) {
 }
 
 func TestCompressHandler(t *testing.T) {
+	t.Parallel()
+
 	expectedBody := string(createFixedBody(2e4))
 	h := CompressHandler(func(ctx *RequestCtx) {
 		ctx.Write([]byte(expectedBody))
@@ -1696,6 +1750,8 @@ func TestCompressHandler(t *testing.T) {
 }
 
 func TestRequestCtxWriteString(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 	n, err := ctx.WriteString("foo")
 	if err != nil {
@@ -1719,6 +1775,8 @@ func TestRequestCtxWriteString(t *testing.T) {
 }
 
 func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
+	t.Parallel()
+
 	rw := &readWriter{}
 	rw.r.WriteString("GET /foo HTTP/1.0\r\nConnection: keep-alive\r\nHost: google.com\r\n\r\n")
 	rw.r.WriteString("GET /bar HTTP/1.0\r\nHost: google.com\r\n\r\n")
@@ -1784,6 +1842,8 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 }
 
 func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 	var req Request
 	ctx.Init(&req, nil, defaultLogger)
@@ -1818,6 +1878,8 @@ func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
 }
 
 func TestRequestCtxIfModifiedSince(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 	var req Request
 	ctx.Init(&req, nil, defaultLogger)
@@ -1846,6 +1908,8 @@ func TestRequestCtxIfModifiedSince(t *testing.T) {
 }
 
 func TestRequestCtxSendFileNotModified(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 	var req Request
 	ctx.Init(&req, nil, defaultLogger)
@@ -1875,6 +1939,8 @@ func TestRequestCtxSendFileNotModified(t *testing.T) {
 }
 
 func TestRequestCtxSendFileModified(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 	var req Request
 	ctx.Init(&req, nil, defaultLogger)
@@ -1916,6 +1982,8 @@ func TestRequestCtxSendFileModified(t *testing.T) {
 }
 
 func TestRequestCtxSendFile(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 	var req Request
 	ctx.Init(&req, nil, defaultLogger)
@@ -1957,6 +2025,8 @@ func TestRequestCtxSendFile(t *testing.T) {
 }
 
 func TestRequestCtxHijack(t *testing.T) {
+	t.Parallel()
+
 	hijackStartCh := make(chan struct{})
 	hijackStopCh := make(chan struct{})
 	s := &Server{
@@ -2049,6 +2119,8 @@ func TestRequestCtxInit(t *testing.T) {
 }
 
 func TestTimeoutHandlerSuccess(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 	h := func(ctx *RequestCtx) {
 		if string(ctx.Path()) == "/" {
@@ -2103,6 +2175,8 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 }
 
 func TestTimeoutHandlerTimeout(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 	readyCh := make(chan struct{})
 	doneCh := make(chan struct{})
@@ -2168,6 +2242,8 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 }
 
 func TestServerGetOnly(t *testing.T) {
+	t.Parallel()
+
 	h := func(ctx *RequestCtx) {
 		if !ctx.IsGet() {
 			t.Fatalf("non-get request: %q", ctx.Method())
@@ -2214,6 +2290,8 @@ func TestServerGetOnly(t *testing.T) {
 }
 
 func TestServerTimeoutErrorWithResponse(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			go func() {
@@ -2265,6 +2343,8 @@ func TestServerTimeoutErrorWithResponse(t *testing.T) {
 }
 
 func TestServerTimeoutErrorWithCode(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			go func() {
@@ -2306,6 +2386,8 @@ func TestServerTimeoutErrorWithCode(t *testing.T) {
 }
 
 func TestServerTimeoutError(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			go func() {
@@ -2347,6 +2429,8 @@ func TestServerTimeoutError(t *testing.T) {
 }
 
 func TestServerMaxRequestsPerConn(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler:            func(ctx *RequestCtx) {},
 		MaxRequestsPerConn: 1,
@@ -2390,6 +2474,8 @@ func TestServerMaxRequestsPerConn(t *testing.T) {
 }
 
 func TestServerConnectionClose(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.SetConnectionClose()
@@ -2434,6 +2520,8 @@ func TestServerConnectionClose(t *testing.T) {
 }
 
 func TestServerRequestNumAndTime(t *testing.T) {
+	t.Parallel()
+
 	n := uint64(0)
 	var connT time.Time
 	s := &Server{
@@ -2479,6 +2567,8 @@ func TestServerRequestNumAndTime(t *testing.T) {
 }
 
 func TestServerEmptyResponse(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			// do nothing :)
@@ -2562,6 +2652,8 @@ func TestServerLogger(t *testing.T) {
 }
 
 func TestServerRemoteAddr(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
@@ -2626,6 +2718,8 @@ func (rw *readWriterRemoteAddr) LocalAddr() net.Addr {
 }
 
 func TestServerConnError(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.Error("foobar", 423)
@@ -2669,6 +2763,8 @@ func TestServerConnError(t *testing.T) {
 }
 
 func TestServeConnSingleRequest(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
@@ -2728,6 +2824,8 @@ func TestServeConnMultiRequests(t *testing.T) {
 }
 
 func TestShutdown(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
@@ -2786,6 +2884,8 @@ func TestShutdown(t *testing.T) {
 }
 
 func TestShutdownReuse(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
@@ -2832,6 +2932,8 @@ func TestShutdownReuse(t *testing.T) {
 }
 
 func TestShutdownDone(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
@@ -2865,6 +2967,8 @@ func TestShutdownDone(t *testing.T) {
 }
 
 func TestShutdownErr(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
@@ -2902,6 +3006,8 @@ func TestShutdownErr(t *testing.T) {
 }
 
 func TestMaxBodySizePerRequest(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			// do nothing :)
@@ -2935,6 +3041,8 @@ func TestMaxBodySizePerRequest(t *testing.T) {
 }
 
 func TestMaxReadTimeoutPerRequest(t *testing.T) {
+	t.Parallel()
+
 	headers := []byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n", 5*1024))
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
@@ -2980,6 +3088,8 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 }
 
 func TestMaxWriteTimeoutPerRequest(t *testing.T) {
+	t.Parallel()
+
 	headers := []byte("GET /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: aa\r\n\r\n")
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {

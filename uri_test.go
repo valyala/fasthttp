@@ -9,6 +9,8 @@ import (
 )
 
 func TestURICopyToQueryArgs(t *testing.T) {
+	t.Parallel()
+
 	var u URI
 	a := u.QueryArgs()
 	a.Set("foo", "bar")
@@ -23,10 +25,14 @@ func TestURICopyToQueryArgs(t *testing.T) {
 }
 
 func TestURIAcquireReleaseSequential(t *testing.T) {
+	t.Parallel()
+
 	testURIAcquireRelease(t)
 }
 
 func TestURIAcquireReleaseConcurrent(t *testing.T) {
+	t.Parallel()
+
 	ch := make(chan struct{}, 10)
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -62,6 +68,8 @@ func testURIAcquireRelease(t *testing.T) {
 }
 
 func TestURILastPathSegment(t *testing.T) {
+	t.Parallel()
+
 	testURILastPathSegment(t, "", "")
 	testURILastPathSegment(t, "/", "")
 	testURILastPathSegment(t, "/foo/bar/", "")
@@ -79,6 +87,8 @@ func testURILastPathSegment(t *testing.T, path, expectedSegment string) {
 }
 
 func TestURIPathEscape(t *testing.T) {
+	t.Parallel()
+
 	testURIPathEscape(t, "/foo/bar", "/foo/bar")
 	testURIPathEscape(t, "/f_o-o=b:ar,b.c&q", "/f_o-o=b:ar,b.c&q")
 	testURIPathEscape(t, "/aa?bb.тест~qq", "/aa%3Fbb.%D1%82%D0%B5%D1%81%D1%82~qq")
@@ -94,6 +104,8 @@ func testURIPathEscape(t *testing.T, path, expectedRequestURI string) {
 }
 
 func TestURIUpdate(t *testing.T) {
+	t.Parallel()
+
 	// full uri
 	testURIUpdate(t, "http://foo.bar/baz?aaa=22#aaa", "https://aa.com/bb", "https://aa.com/bb")
 
@@ -185,6 +197,8 @@ func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string)
 }
 
 func TestURINoNormalization(t *testing.T) {
+	t.Parallel()
+
 	var u URI
 	irregularPath := "/aaa%2Fbbb%2F%2E.%2Fxxx"
 	u.Parse(nil, []byte(irregularPath))
@@ -195,6 +209,8 @@ func TestURINoNormalization(t *testing.T) {
 }
 
 func TestURICopyTo(t *testing.T) {
+	t.Parallel()
+
 	var u URI
 	var copyU URI
 	u.CopyTo(&copyU)
@@ -211,6 +227,8 @@ func TestURICopyTo(t *testing.T) {
 }
 
 func TestURIFullURI(t *testing.T) {
+	t.Parallel()
+
 	var args Args
 
 	// empty scheme, path and hash
@@ -282,6 +300,8 @@ func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expecte
 }
 
 func TestURIParse(t *testing.T) {
+	t.Parallel()
+
 	var u URI
 
 	// no args

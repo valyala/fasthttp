@@ -16,6 +16,8 @@ import (
 )
 
 func TestRequestCopyTo(t *testing.T) {
+	t.Parallel()
+
 	var req Request
 
 	// empty copy
@@ -36,6 +38,8 @@ func TestRequestCopyTo(t *testing.T) {
 }
 
 func TestResponseCopyTo(t *testing.T) {
+	t.Parallel()
+
 	var resp Response
 
 	// empty copy
@@ -69,6 +73,8 @@ func testResponseCopyTo(t *testing.T, src *Response) {
 }
 
 func TestResponseBodyStreamDeflate(t *testing.T) {
+	t.Parallel()
+
 	body := createFixedBody(1e5)
 
 	// Verifies https://github.com/valyala/fasthttp/issues/176
@@ -80,6 +86,8 @@ func TestResponseBodyStreamDeflate(t *testing.T) {
 }
 
 func TestResponseBodyStreamGzip(t *testing.T) {
+	t.Parallel()
+
 	body := createFixedBody(1e5)
 
 	// Verifies https://github.com/valyala/fasthttp/issues/176
@@ -147,6 +155,8 @@ func testResponseBodyStreamGzip(t *testing.T, body []byte, bodySize int) {
 }
 
 func TestResponseWriteGzipNilBody(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
@@ -159,6 +169,8 @@ func TestResponseWriteGzipNilBody(t *testing.T) {
 }
 
 func TestResponseWriteDeflateNilBody(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
@@ -171,10 +183,14 @@ func TestResponseWriteDeflateNilBody(t *testing.T) {
 }
 
 func TestResponseSwapBodySerial(t *testing.T) {
+	t.Parallel()
+
 	testResponseSwapBody(t)
 }
 
 func TestResponseSwapBodyConcurrent(t *testing.T) {
+	t.Parallel()
+
 	ch := make(chan struct{})
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -221,10 +237,14 @@ func testResponseSwapBody(t *testing.T) {
 }
 
 func TestRequestSwapBodySerial(t *testing.T) {
+	t.Parallel()
+
 	testRequestSwapBody(t)
 }
 
 func TestRequestSwapBodyConcurrent(t *testing.T) {
+	t.Parallel()
+
 	ch := make(chan struct{})
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -271,6 +291,8 @@ func testRequestSwapBody(t *testing.T) {
 }
 
 func TestRequestHostFromRequestURI(t *testing.T) {
+	t.Parallel()
+
 	hExpected := "foobar.com"
 	var req Request
 	req.SetRequestURI("http://proxy-host:123/foobar?baz")
@@ -282,6 +304,8 @@ func TestRequestHostFromRequestURI(t *testing.T) {
 }
 
 func TestRequestHostFromHeader(t *testing.T) {
+	t.Parallel()
+
 	hExpected := "foobar.com"
 	var req Request
 	req.Header.SetHost(hExpected)
@@ -292,6 +316,8 @@ func TestRequestHostFromHeader(t *testing.T) {
 }
 
 func TestRequestContentTypeWithCharsetIssue100(t *testing.T) {
+	t.Parallel()
+
 	expectedContentType := "application/x-www-form-urlencoded; charset=UTF-8"
 	expectedBody := "0123=56789"
 	s := fmt.Sprintf("POST / HTTP/1.1\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
@@ -322,6 +348,8 @@ func TestRequestContentTypeWithCharsetIssue100(t *testing.T) {
 }
 
 func TestRequestReadMultipartFormWithFile(t *testing.T) {
+	t.Parallel()
+
 	s := `POST /upload HTTP/1.1
 Host: localhost:10000
 Content-Length: 521
@@ -405,6 +433,8 @@ tailfoobar`
 }
 
 func TestRequestRequestURI(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 
 	// Set request uri via SetRequestURI()
@@ -433,6 +463,8 @@ func TestRequestRequestURI(t *testing.T) {
 }
 
 func TestRequestUpdateURI(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 	r.Header.SetHost("aaa.bbb")
 	r.SetRequestURI("/lkjkl/kjl")
@@ -455,6 +487,8 @@ func TestRequestUpdateURI(t *testing.T) {
 }
 
 func TestRequestBodyStreamMultipleBodyCalls(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 
 	s := "foobar baz abc"
@@ -474,6 +508,8 @@ func TestRequestBodyStreamMultipleBodyCalls(t *testing.T) {
 }
 
 func TestResponseBodyStreamMultipleBodyCalls(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	s := "foobar baz abc"
@@ -493,6 +529,8 @@ func TestResponseBodyStreamMultipleBodyCalls(t *testing.T) {
 }
 
 func TestRequestBodyWriteToPlain(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 
 	expectedS := "foobarbaz"
@@ -502,6 +540,8 @@ func TestRequestBodyWriteToPlain(t *testing.T) {
 }
 
 func TestResponseBodyWriteToPlain(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	expectedS := "foobarbaz"
@@ -511,6 +551,8 @@ func TestResponseBodyWriteToPlain(t *testing.T) {
 }
 
 func TestResponseBodyWriteToStream(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	expectedS := "aaabbbccc"
@@ -527,6 +569,8 @@ func TestResponseBodyWriteToStream(t *testing.T) {
 }
 
 func TestRequestBodyWriteToMultipart(t *testing.T) {
+	t.Parallel()
+
 	expectedS := "--foobar\r\nContent-Disposition: form-data; name=\"key_0\"\r\n\r\nvalue_0\r\n--foobar--\r\n"
 	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=foobar\r\nContent-Length: %d\r\n\r\n%s",
 		len(expectedS), expectedS)
@@ -569,6 +613,8 @@ func testBodyWriteTo(t *testing.T, bw bodyWriterTo, expectedS string, isRetained
 }
 
 func TestRequestReadEOF(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 
 	br := bufio.NewReader(&bytes.Buffer{})
@@ -592,6 +638,8 @@ func TestRequestReadEOF(t *testing.T) {
 }
 
 func TestResponseReadEOF(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	br := bufio.NewReader(&bytes.Buffer{})
@@ -615,6 +663,8 @@ func TestResponseReadEOF(t *testing.T) {
 }
 
 func TestResponseWriteTo(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	r.SetBodyString("foobar")
@@ -634,6 +684,8 @@ func TestResponseWriteTo(t *testing.T) {
 }
 
 func TestRequestWriteTo(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 
 	r.SetRequestURI("http://foobar.com/aaa/bbb")
@@ -653,6 +705,8 @@ func TestRequestWriteTo(t *testing.T) {
 }
 
 func TestResponseSkipBody(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	// set StatusNotModified
@@ -700,6 +754,8 @@ func TestResponseSkipBody(t *testing.T) {
 }
 
 func TestRequestNoContentLength(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 
 	r.Header.SetMethod(MethodHead)
@@ -719,6 +775,8 @@ func TestRequestNoContentLength(t *testing.T) {
 }
 
 func TestRequestReadGzippedBody(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 
 	bodyOriginal := "foo bar baz compress me better!"
@@ -750,6 +808,8 @@ func TestRequestReadGzippedBody(t *testing.T) {
 }
 
 func TestRequestReadPostNoBody(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 
 	s := "POST /foo/bar HTTP/1.1\r\nContent-Type: aaa/bbb\r\n\r\naaaa"
@@ -781,6 +841,8 @@ func TestRequestReadPostNoBody(t *testing.T) {
 }
 
 func TestRequestContinueReadBody(t *testing.T) {
+	t.Parallel()
+
 	s := "PUT /foo/bar HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: foo/bar\r\n\r\nabcdef4343"
 	br := bufio.NewReader(bytes.NewBufferString(s))
 
@@ -810,6 +872,8 @@ func TestRequestContinueReadBody(t *testing.T) {
 }
 
 func TestRequestMayContinue(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 	if r.MayContinue() {
 		t.Fatalf("MayContinue on empty request must return false")
@@ -827,6 +891,8 @@ func TestRequestMayContinue(t *testing.T) {
 }
 
 func TestResponseGzipStream(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 	if r.IsBodyStream() {
 		t.Fatalf("IsBodyStream must return false")
@@ -850,6 +916,8 @@ func TestResponseGzipStream(t *testing.T) {
 }
 
 func TestResponseDeflateStream(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 	if r.IsBodyStream() {
 		t.Fatalf("IsBodyStream must return false")
@@ -871,12 +939,16 @@ func TestResponseDeflateStream(t *testing.T) {
 }
 
 func TestResponseDeflate(t *testing.T) {
+	t.Parallel()
+
 	for _, s := range compressTestcases {
 		testResponseDeflate(t, s)
 	}
 }
 
 func TestResponseGzip(t *testing.T) {
+	t.Parallel()
+
 	for _, s := range compressTestcases {
 		testResponseGzip(t, s)
 	}
@@ -997,6 +1069,8 @@ func isCompressibleResponse(r *Response, s string) bool {
 }
 
 func TestRequestMultipartForm(t *testing.T) {
+	t.Parallel()
+
 	var w bytes.Buffer
 	mw := multipart.NewWriter(&w)
 	for i := 0; i < 10; i++ {
@@ -1080,6 +1154,8 @@ func testRequestMultipartForm(t *testing.T, boundary string, formData []byte, pa
 }
 
 func TestResponseReadLimitBody(t *testing.T) {
+	t.Parallel()
+
 	// response with content-length
 	testResponseReadLimitBodySuccess(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 10\r\n\r\n9876543210", 10)
 	testResponseReadLimitBodySuccess(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 10\r\n\r\n9876543210", 100)
@@ -1097,6 +1173,8 @@ func TestResponseReadLimitBody(t *testing.T) {
 }
 
 func TestRequestReadLimitBody(t *testing.T) {
+	t.Parallel()
+
 	// request with content-length
 	testRequestReadLimitBodySuccess(t, "POST /foo HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 9\r\nContent-Type: aaa\r\n\r\n123456789", 9)
 	testRequestReadLimitBodySuccess(t, "POST /foo HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 9\r\nContent-Type: aaa\r\n\r\n123456789", 92)
@@ -1153,6 +1231,8 @@ func testRequestReadLimitBodySuccess(t *testing.T, s string, maxBodySize int) {
 }
 
 func TestRequestString(t *testing.T) {
+	t.Parallel()
+
 	var r Request
 	r.SetRequestURI("http://foobar.com/aaa")
 	s := r.String()
@@ -1174,6 +1254,8 @@ func TestRequestBodyWriter(t *testing.T) {
 }
 
 func TestResponseBodyWriter(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 	w := r.BodyWriter()
 	for i := 0; i < 10; i++ {
@@ -1185,6 +1267,8 @@ func TestResponseBodyWriter(t *testing.T) {
 }
 
 func TestRequestWriteRequestURINoHost(t *testing.T) {
+	t.Parallel()
+
 	var req Request
 	req.Header.SetRequestURI("http://google.com/foo/bar?baz=aaa")
 	var w bytes.Buffer
@@ -1219,18 +1303,24 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 }
 
 func TestSetRequestBodyStreamFixedSize(t *testing.T) {
+	t.Parallel()
+
 	testSetRequestBodyStream(t, "a", false)
 	testSetRequestBodyStream(t, string(createFixedBody(4097)), false)
 	testSetRequestBodyStream(t, string(createFixedBody(100500)), false)
 }
 
 func TestSetResponseBodyStreamFixedSize(t *testing.T) {
+	t.Parallel()
+
 	testSetResponseBodyStream(t, "a", false)
 	testSetResponseBodyStream(t, string(createFixedBody(4097)), false)
 	testSetResponseBodyStream(t, string(createFixedBody(100500)), false)
 }
 
 func TestSetRequestBodyStreamChunked(t *testing.T) {
+	t.Parallel()
+
 	testSetRequestBodyStream(t, "", true)
 
 	body := "foobar baz aaa bbb ccc"
@@ -1241,6 +1331,8 @@ func TestSetRequestBodyStreamChunked(t *testing.T) {
 }
 
 func TestSetResponseBodyStreamChunked(t *testing.T) {
+	t.Parallel()
+
 	testSetResponseBodyStream(t, "", true)
 
 	body := "foobar baz aaa bbb ccc"
@@ -1320,6 +1412,8 @@ func testSetResponseBodyStream(t *testing.T, body string, chunked bool) {
 }
 
 func TestRound2(t *testing.T) {
+	t.Parallel()
+
 	testRound2(t, 0, 0)
 	testRound2(t, 1, 1)
 	testRound2(t, 2, 2)
@@ -1339,6 +1433,8 @@ func testRound2(t *testing.T, n, expectedRound2 int) {
 }
 
 func TestRequestReadChunked(t *testing.T) {
+	t.Parallel()
+
 	var req Request
 
 	s := "POST /foo HTTP/1.1\r\nHost: google.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa/bb\r\n\r\n3\r\nabc\r\n5\r\n12345\r\n0\r\n\r\ntrail"
@@ -1358,6 +1454,8 @@ func TestRequestReadChunked(t *testing.T) {
 
 // See: https://github.com/erikdubbelboer/fasthttp/issues/34
 func TestRequestChunkedWhitespace(t *testing.T) {
+	t.Parallel()
+
 	var req Request
 
 	s := "POST /foo HTTP/1.1\r\nHost: google.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa/bb\r\n\r\n3  \r\nabc\r\n0\r\n\r\n"
@@ -1374,6 +1472,8 @@ func TestRequestChunkedWhitespace(t *testing.T) {
 }
 
 func TestResponseReadWithoutBody(t *testing.T) {
+	t.Parallel()
+
 	var resp Response
 
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 304 Not Modified\r\nContent-Type: aa\r\nContent-Length: 1235\r\n\r\nfoobar", false,
@@ -1415,6 +1515,8 @@ func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBod
 }
 
 func TestRequestSuccess(t *testing.T) {
+	t.Parallel()
+
 	// empty method, user-agent and body
 	testRequestSuccess(t, "", "/foo/bar", "google.com", "", "", MethodGet)
 
@@ -1435,6 +1537,8 @@ func TestRequestSuccess(t *testing.T) {
 }
 
 func TestResponseSuccess(t *testing.T) {
+	t.Parallel()
+
 	// 200 response
 	testResponseSuccess(t, 200, "test/plain", "server", "foobar",
 		200, "test/plain", "server")
@@ -1497,6 +1601,8 @@ func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, 
 }
 
 func TestRequestWriteError(t *testing.T) {
+	t.Parallel()
+
 	// no host
 	testRequestWriteError(t, "", "/foo/bar", "", "", "")
 
@@ -1575,6 +1681,8 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 }
 
 func TestResponseReadSuccess(t *testing.T) {
+	t.Parallel()
+
 	resp := &Response{}
 
 	// usual response
@@ -1616,6 +1724,8 @@ func TestResponseReadSuccess(t *testing.T) {
 }
 
 func TestResponseReadError(t *testing.T) {
+	t.Parallel()
+
 	resp := &Response{}
 
 	// empty response
@@ -1661,6 +1771,8 @@ func testResponseReadSuccess(t *testing.T, resp *Response, response string, expe
 }
 
 func TestReadBodyFixedSize(t *testing.T) {
+	t.Parallel()
+
 	var b []byte
 
 	// zero-size body
@@ -1680,6 +1792,8 @@ func TestReadBodyFixedSize(t *testing.T) {
 }
 
 func TestReadBodyChunked(t *testing.T) {
+	t.Parallel()
+
 	var b []byte
 
 	// zero-size body
@@ -1699,6 +1813,8 @@ func TestReadBodyChunked(t *testing.T) {
 }
 
 func TestRequestURITLS(t *testing.T) {
+	t.Parallel()
+
 	uriNoScheme := "//foobar.com/baz/aa?bb=dd&dd#sdf"
 	requestURI := "http:" + uriNoScheme
 	requestURITLS := "https:" + uriNoScheme
@@ -1721,6 +1837,8 @@ func TestRequestURITLS(t *testing.T) {
 }
 
 func TestRequestURI(t *testing.T) {
+	t.Parallel()
+
 	host := "foobar.com"
 	requestURI := "/aaa/bb+b%20d?ccc=ddd&qqq#1334dfds&=d"
 	expectedPathOriginal := "/aaa/bb+b%20d"
@@ -1751,6 +1869,8 @@ func TestRequestURI(t *testing.T) {
 }
 
 func TestRequestPostArgsSuccess(t *testing.T) {
+	t.Parallel()
+
 	var req Request
 
 	testRequestPostArgsSuccess(t, &req, "POST / HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 0\r\n\r\n", 0, "foo=", "=")
@@ -1759,6 +1879,8 @@ func TestRequestPostArgsSuccess(t *testing.T) {
 }
 
 func TestRequestPostArgsError(t *testing.T) {
+	t.Parallel()
+
 	var req Request
 
 	// non-post
@@ -1864,6 +1986,8 @@ func createChunkedBody(body []byte) []byte {
 }
 
 func TestWriteMultipartForm(t *testing.T) {
+	t.Parallel()
+
 	var w bytes.Buffer
 	s := strings.Replace(`--foo
 Content-Disposition: form-data; name="key"
@@ -1893,6 +2017,8 @@ Content-Type: application/json
 }
 
 func TestResponseRawBodySet(t *testing.T) {
+	t.Parallel()
+
 	var resp Response
 
 	expectedS := "test"
@@ -1903,6 +2029,8 @@ func TestResponseRawBodySet(t *testing.T) {
 }
 
 func TestResponseRawBodyReset(t *testing.T) {
+	t.Parallel()
+
 	var resp Response
 
 	body := []byte("test")
@@ -1913,6 +2041,8 @@ func TestResponseRawBodyReset(t *testing.T) {
 }
 
 func TestResponseRawBodyCopyTo(t *testing.T) {
+	t.Parallel()
+
 	var resp Response
 
 	expectedS := "test"
@@ -1944,6 +2074,8 @@ func (r *testReader) Read(b []byte) (int, error) {
 }
 
 func TestResponseImmediateHeaderFlushRegressionFixedLength(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	expectedS := "aaabbbccc"
@@ -1955,6 +2087,8 @@ func TestResponseImmediateHeaderFlushRegressionFixedLength(t *testing.T) {
 }
 
 func TestResponseImmediateHeaderFlushRegressionChunked(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	expectedS := "aaabbbccc"
@@ -1966,6 +2100,8 @@ func TestResponseImmediateHeaderFlushRegressionChunked(t *testing.T) {
 }
 
 func TestResponseImmediateHeaderFlushFixedLength(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	r.ImmediateHeaderFlush = true
@@ -2009,6 +2145,8 @@ func TestResponseImmediateHeaderFlushFixedLength(t *testing.T) {
 }
 
 func TestResponseImmediateHeaderFlushChunked(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	r.ImmediateHeaderFlush = true

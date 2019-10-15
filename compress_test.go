@@ -20,24 +20,32 @@ var compressTestcases = func() []string {
 }()
 
 func TestGzipBytesSerial(t *testing.T) {
+	t.Parallel()
+
 	if err := testGzipBytes(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestGzipBytesConcurrent(t *testing.T) {
+	t.Parallel()
+
 	if err := testConcurrent(10, testGzipBytes); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestDeflateBytesSerial(t *testing.T) {
+	t.Parallel()
+
 	if err := testDeflateBytes(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestDeflateBytesConcurrent(t *testing.T) {
+	t.Parallel()
+
 	if err := testConcurrent(10, testDeflateBytes); err != nil {
 		t.Fatal(err)
 	}
@@ -104,24 +112,32 @@ func testDeflateBytesSingleCase(s string) error {
 }
 
 func TestGzipCompressSerial(t *testing.T) {
+	t.Parallel()
+
 	if err := testGzipCompress(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestGzipCompressConcurrent(t *testing.T) {
+	t.Parallel()
+
 	if err := testConcurrent(10, testGzipCompress); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestFlateCompressSerial(t *testing.T) {
+	t.Parallel()
+
 	if err := testFlateCompress(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestFlateCompressConcurrent(t *testing.T) {
+	t.Parallel()
+
 	if err := testConcurrent(10, testFlateCompress); err != nil {
 		t.Fatal(err)
 	}

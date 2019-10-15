@@ -10,10 +10,14 @@ import (
 )
 
 func TestWorkerPoolStartStopSerial(t *testing.T) {
+	t.Parallel()
+
 	testWorkerPoolStartStop(t)
 }
 
 func TestWorkerPoolStartStopConcurrent(t *testing.T) {
+	t.Parallel()
+
 	concurrency := 10
 	ch := make(chan struct{}, concurrency)
 	for i := 0; i < concurrency; i++ {
@@ -44,10 +48,14 @@ func testWorkerPoolStartStop(t *testing.T) {
 }
 
 func TestWorkerPoolMaxWorkersCountSerial(t *testing.T) {
+	t.Parallel()
+
 	testWorkerPoolMaxWorkersCountMulti(t)
 }
 
 func TestWorkerPoolMaxWorkersCountConcurrent(t *testing.T) {
+	t.Parallel()
+
 	concurrency := 4
 	ch := make(chan struct{}, concurrency)
 	for i := 0; i < concurrency; i++ {

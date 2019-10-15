@@ -12,6 +12,8 @@ import (
 )
 
 func TestResponseHeaderEmptyValueFromHeader(t *testing.T) {
+	t.Parallel()
+
 	var h1 ResponseHeader
 	h1.SetContentType("foo/bar")
 	h1.Set("EmptyValue1", "")
@@ -37,6 +39,8 @@ func TestResponseHeaderEmptyValueFromHeader(t *testing.T) {
 }
 
 func TestResponseHeaderEmptyValueFromString(t *testing.T) {
+	t.Parallel()
+
 	s := "HTTP/1.1 200 OK\r\n" +
 		"EmptyValue1:\r\n" +
 		"Content-Type: foo/bar\r\n" +
@@ -62,6 +66,8 @@ func TestResponseHeaderEmptyValueFromString(t *testing.T) {
 }
 
 func TestRequestHeaderEmptyValueFromHeader(t *testing.T) {
+	t.Parallel()
+
 	var h1 RequestHeader
 	h1.SetRequestURI("/foo/bar")
 	h1.SetHost("foobar")
@@ -88,6 +94,8 @@ func TestRequestHeaderEmptyValueFromHeader(t *testing.T) {
 }
 
 func TestRequestHeaderEmptyValueFromString(t *testing.T) {
+	t.Parallel()
+
 	s := "GET / HTTP/1.1\r\n" +
 		"EmptyValue1:\r\n" +
 		"Host: foobar\r\n" +
@@ -112,6 +120,8 @@ func TestRequestHeaderEmptyValueFromString(t *testing.T) {
 }
 
 func TestRequestRawHeaders(t *testing.T) {
+	t.Parallel()
+
 	kvs := "host: foobar\r\n" +
 		"value: b\r\n" +
 		"\r\n"
@@ -203,6 +213,8 @@ func TestRequestRawHeaders(t *testing.T) {
 }
 
 func TestRequestHeaderSetCookieWithSpecialChars(t *testing.T) {
+	t.Parallel()
+
 	var h RequestHeader
 	h.Set("Cookie", "ID&14")
 	s := h.String()
@@ -228,6 +240,8 @@ func TestRequestHeaderSetCookieWithSpecialChars(t *testing.T) {
 }
 
 func TestResponseHeaderDefaultStatusCode(t *testing.T) {
+	t.Parallel()
+
 	var h ResponseHeader
 	statusCode := h.StatusCode()
 	if statusCode != StatusOK {
@@ -236,6 +250,8 @@ func TestResponseHeaderDefaultStatusCode(t *testing.T) {
 }
 
 func TestResponseHeaderDelClientCookie(t *testing.T) {
+	t.Parallel()
+
 	cookieName := "foobar"
 
 	var h ResponseHeader
@@ -258,6 +274,8 @@ func TestResponseHeaderDelClientCookie(t *testing.T) {
 }
 
 func TestResponseHeaderAdd(t *testing.T) {
+	t.Parallel()
+
 	m := make(map[string]struct{})
 	var h ResponseHeader
 	h.Add("aaa", "bbb")
@@ -363,6 +381,8 @@ func TestRequestHeaderAdd(t *testing.T) {
 }
 
 func TestHasHeaderValue(t *testing.T) {
+	t.Parallel()
+
 	testHasHeaderValue(t, "foobar", "foobar", true)
 	testHasHeaderValue(t, "foobar", "foo", false)
 	testHasHeaderValue(t, "foobar", "bar", false)
@@ -386,6 +406,8 @@ func testHasHeaderValue(t *testing.T, s, value string, has bool) {
 }
 
 func TestRequestHeaderDel(t *testing.T) {
+	t.Parallel()
+
 	var h RequestHeader
 	h.Set("Foo-Bar", "baz")
 	h.Set("aaa", "bbb")
@@ -447,6 +469,8 @@ func TestRequestHeaderDel(t *testing.T) {
 }
 
 func TestResponseHeaderDel(t *testing.T) {
+	t.Parallel()
+
 	var h ResponseHeader
 	h.Set("Foo-Bar", "baz")
 	h.Set("aaa", "bbb")
@@ -501,6 +525,8 @@ func TestResponseHeaderDel(t *testing.T) {
 }
 
 func TestAppendNormalizedHeaderKeyBytes(t *testing.T) {
+	t.Parallel()
+
 	testAppendNormalizedHeaderKeyBytes(t, "", "")
 	testAppendNormalizedHeaderKeyBytes(t, "Content-Type", "Content-Type")
 	testAppendNormalizedHeaderKeyBytes(t, "foO-bAr-BAZ", "Foo-Bar-Baz")
@@ -516,6 +542,8 @@ func testAppendNormalizedHeaderKeyBytes(t *testing.T, key, expectedKey string) {
 }
 
 func TestRequestHeaderHTTP10ConnectionClose(t *testing.T) {
+	t.Parallel()
+
 	s := "GET / HTTP/1.0\r\nHost: foobar\r\n\r\n"
 	var h RequestHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
@@ -529,6 +557,8 @@ func TestRequestHeaderHTTP10ConnectionClose(t *testing.T) {
 }
 
 func TestRequestHeaderHTTP10ConnectionKeepAlive(t *testing.T) {
+	t.Parallel()
+
 	s := "GET / HTTP/1.0\r\nHost: foobar\r\nConnection: keep-alive\r\n\r\n"
 	var h RequestHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
@@ -542,6 +572,8 @@ func TestRequestHeaderHTTP10ConnectionKeepAlive(t *testing.T) {
 }
 
 func TestBufferSnippet(t *testing.T) {
+	t.Parallel()
+
 	testBufferSnippet(t, "", `""`)
 	testBufferSnippet(t, "foobar", `"foobar"`)
 
@@ -572,6 +604,8 @@ func testBufferSnippet(t *testing.T, buf, expectedSnippet string) {
 }
 
 func TestResponseHeaderTrailingCRLFSuccess(t *testing.T) {
+	t.Parallel()
+
 	trailingCRLF := "\r\n\r\n\r\n"
 	s := "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 123\r\n\r\n" + trailingCRLF
 
@@ -592,6 +626,8 @@ func TestResponseHeaderTrailingCRLFSuccess(t *testing.T) {
 }
 
 func TestResponseHeaderTrailingCRLFError(t *testing.T) {
+	t.Parallel()
+
 	trailingCRLF := "\r\nerror\r\n\r\n"
 	s := "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 123\r\n\r\n" + trailingCRLF
 
@@ -612,6 +648,8 @@ func TestResponseHeaderTrailingCRLFError(t *testing.T) {
 }
 
 func TestRequestHeaderTrailingCRLFSuccess(t *testing.T) {
+	t.Parallel()
+
 	trailingCRLF := "\r\n\r\n\r\n"
 	s := "GET / HTTP/1.1\r\nHost: aaa.com\r\n\r\n" + trailingCRLF
 
@@ -632,6 +670,8 @@ func TestRequestHeaderTrailingCRLFSuccess(t *testing.T) {
 }
 
 func TestRequestHeaderTrailingCRLFError(t *testing.T) {
+	t.Parallel()
+
 	trailingCRLF := "\r\nerror\r\n\r\n"
 	s := "GET / HTTP/1.1\r\nHost: aaa.com\r\n\r\n" + trailingCRLF
 
@@ -652,6 +692,8 @@ func TestRequestHeaderTrailingCRLFError(t *testing.T) {
 }
 
 func TestRequestHeaderReadEOF(t *testing.T) {
+	t.Parallel()
+
 	var r RequestHeader
 
 	br := bufio.NewReader(&bytes.Buffer{})
@@ -675,6 +717,8 @@ func TestRequestHeaderReadEOF(t *testing.T) {
 }
 
 func TestResponseHeaderReadEOF(t *testing.T) {
+	t.Parallel()
+
 	var r ResponseHeader
 
 	br := bufio.NewReader(&bytes.Buffer{})
@@ -698,6 +742,8 @@ func TestResponseHeaderReadEOF(t *testing.T) {
 }
 
 func TestResponseHeaderOldVersion(t *testing.T) {
+	t.Parallel()
+
 	var h ResponseHeader
 
 	s := "HTTP/1.0 200 OK\r\nContent-Length: 5\r\nContent-Type: aaa\r\n\r\n12345"
@@ -734,6 +780,8 @@ func testRequestHeaderSetByteRange(t *testing.T, startPos, endPos int, expectedV
 }
 
 func TestResponseHeaderSetContentRange(t *testing.T) {
+	t.Parallel()
+
 	testResponseHeaderSetContentRange(t, 0, 0, 1, "bytes 0-0/1")
 	testResponseHeaderSetContentRange(t, 123, 456, 789, "bytes 123-456/789")
 }
@@ -749,6 +797,8 @@ func testResponseHeaderSetContentRange(t *testing.T, startPos, endPos, contentLe
 }
 
 func TestRequestHeaderHasAcceptEncoding(t *testing.T) {
+	t.Parallel()
+
 	testRequestHeaderHasAcceptEncoding(t, "", "gzip", false)
 	testRequestHeaderHasAcceptEncoding(t, "gzip", "sdhc", false)
 	testRequestHeaderHasAcceptEncoding(t, "deflate", "deflate", true)
@@ -774,6 +824,8 @@ func testRequestHeaderHasAcceptEncoding(t *testing.T, ae, v string, resultExpect
 }
 
 func TestRequestMultipartFormBoundary(t *testing.T) {
+	t.Parallel()
+
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar\r\n\r\n", "foobar")
 
 	// incorrect content-type
@@ -814,6 +866,8 @@ func testRequestMultipartFormBoundary(t *testing.T, s, boundary string) {
 }
 
 func TestResponseHeaderConnectionUpgrade(t *testing.T) {
+	t.Parallel()
+
 	testResponseHeaderConnectionUpgrade(t, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: Upgrade, HTTP2-Settings\r\n\r\n",
 		true, true)
 	testResponseHeaderConnectionUpgrade(t, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: keep-alive, Upgrade\r\n\r\n",
@@ -855,6 +909,8 @@ func testResponseHeaderConnectionUpgrade(t *testing.T, s string, isUpgrade, isKe
 }
 
 func TestRequestHeaderConnectionUpgrade(t *testing.T) {
+	t.Parallel()
+
 	testRequestHeaderConnectionUpgrade(t, "GET /foobar HTTP/1.1\r\nConnection: Upgrade, HTTP2-Settings\r\nHost: foobar.com\r\n\r\n",
 		true, true)
 	testRequestHeaderConnectionUpgrade(t, "GET /foobar HTTP/1.1\r\nConnection: keep-alive,Upgrade\r\nHost: foobar.com\r\n\r\n",
@@ -900,6 +956,8 @@ func testRequestHeaderConnectionUpgrade(t *testing.T, s string, isUpgrade, isKee
 }
 
 func TestRequestHeaderProxyWithCookie(t *testing.T) {
+	t.Parallel()
+
 	// Proxy request header (read it, then write it without touching any headers).
 	var h RequestHeader
 	r := bytes.NewBufferString("GET /foo HTTP/1.1\r\nFoo: bar\r\nHost: aaa.com\r\nCookie: foo=bar; bazzz=aaaaaaa; x=y\r\nCookie: aqqqqq=123\r\n\r\n")
@@ -945,6 +1003,8 @@ func TestRequestHeaderProxyWithCookie(t *testing.T) {
 }
 
 func TestPeekRawHeader(t *testing.T) {
+	t.Parallel()
+
 	// empty header
 	testPeekRawHeader(t, "", "Foo-Bar", "")
 
@@ -972,6 +1032,8 @@ func testPeekRawHeader(t *testing.T, rawHeaders, key string, expectedValue strin
 }
 
 func TestResponseHeaderFirstByteReadEOF(t *testing.T) {
+	t.Parallel()
+
 	var h ResponseHeader
 
 	r := &errorReader{fmt.Errorf("non-eof error")}
@@ -994,6 +1056,8 @@ func (r *errorReader) Read(p []byte) (int, error) {
 }
 
 func TestRequestHeaderEmptyMethod(t *testing.T) {
+	t.Parallel()
+
 	var h RequestHeader
 
 	if !h.IsGet() {
@@ -1002,6 +1066,8 @@ func TestRequestHeaderEmptyMethod(t *testing.T) {
 }
 
 func TestResponseHeaderHTTPVer(t *testing.T) {
+	t.Parallel()
+
 	// non-http/1.1
 	testResponseHeaderHTTPVer(t, "HTTP/1.0 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
 	testResponseHeaderHTTPVer(t, "HTTP/0.9 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
@@ -1012,6 +1078,8 @@ func TestResponseHeaderHTTPVer(t *testing.T) {
 }
 
 func TestRequestHeaderHTTPVer(t *testing.T) {
+	t.Parallel()
+
 	// non-http/1.1
 	testRequestHeaderHTTPVer(t, "GET / HTTP/1.0\r\nHost: aa.com\r\n\r\n", true)
 	testRequestHeaderHTTPVer(t, "GET / HTTP/0.9\r\nHost: aa.com\r\n\r\n", true)
@@ -1052,6 +1120,8 @@ func testRequestHeaderHTTPVer(t *testing.T, s string, connectionClose bool) {
 }
 
 func TestResponseHeaderCopyTo(t *testing.T) {
+	t.Parallel()
+
 	var h ResponseHeader
 
 	h.Set(HeaderSetCookie, "foo=bar")
@@ -1080,6 +1150,8 @@ func TestResponseHeaderCopyTo(t *testing.T) {
 }
 
 func TestRequestHeaderCopyTo(t *testing.T) {
+	t.Parallel()
+
 	var h RequestHeader
 
 	h.Set(HeaderCookie, "aa=bb; cc=dd")
@@ -1112,6 +1184,8 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 }
 
 func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
+	t.Parallel()
+
 	var h ResponseHeader
 
 	h.noDefaultContentType = true
@@ -1125,6 +1199,8 @@ func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
 }
 
 func TestRequestHeaderConnectionClose(t *testing.T) {
+	t.Parallel()
+
 	var h RequestHeader
 
 	h.Set(HeaderConnection, "close")
@@ -1158,6 +1234,8 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 }
 
 func TestRequestHeaderSetCookie(t *testing.T) {
+	t.Parallel()
+
 	var h RequestHeader
 
 	h.Set("Cookie", "foo=bar; baz=aaa")
@@ -1175,6 +1253,8 @@ func TestRequestHeaderSetCookie(t *testing.T) {
 }
 
 func TestResponseHeaderSetCookie(t *testing.T) {
+	t.Parallel()
+
 	var h ResponseHeader
 
 	h.Set("set-cookie", "foo=bar; path=/aa/bb; domain=aaa.com")
@@ -1205,6 +1285,8 @@ func TestResponseHeaderSetCookie(t *testing.T) {
 }
 
 func TestResponseHeaderVisitAll(t *testing.T) {
+	t.Parallel()
+
 	var h ResponseHeader
 
 	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 123\r\nSet-Cookie: aa=bb; path=/foo/bar\r\nSet-Cookie: ccc\r\n\r\n")
@@ -1257,6 +1339,8 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 }
 
 func TestRequestHeaderVisitAll(t *testing.T) {
+	t.Parallel()
+
 	var h RequestHeader
 
 	r := bytes.NewBufferString("GET / HTTP/1.1\r\nHost: aa.com\r\nXX: YYY\r\nXX: ZZ\r\nCookie: a=b; c=d\r\n\r\n")
@@ -1309,6 +1393,8 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 }
 
 func TestResponseHeaderVisitAllInOrder(t *testing.T) {
+	t.Parallel()
+
 	var h RequestHeader
 
 	r := bytes.NewBufferString("GET / HTTP/1.1\r\nContent-Type: aa\r\nCookie: a=b\r\nHost: example.com\r\nUser-Agent: xxx\r\n\r\n")
@@ -1350,6 +1436,8 @@ func TestResponseHeaderVisitAllInOrder(t *testing.T) {
 }
 
 func TestResponseHeaderCookie(t *testing.T) {
+	t.Parallel()
+
 	var h ResponseHeader
 	var c Cookie
 
@@ -1477,6 +1565,8 @@ func equalCookie(c1, c2 *Cookie) bool {
 }
 
 func TestRequestHeaderCookie(t *testing.T) {
+	t.Parallel()
+
 	var h RequestHeader
 	h.SetRequestURI("/foobar")
 	h.Set(HeaderHost, "foobar.com")
@@ -1531,6 +1621,8 @@ func TestRequestHeaderCookie(t *testing.T) {
 }
 
 func TestResponseHeaderCookieIssue4(t *testing.T) {
+	t.Parallel()
+
 	var h ResponseHeader
 
 	c := AcquireCookie()
@@ -1575,6 +1667,8 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 }
 
 func TestRequestHeaderCookieIssue313(t *testing.T) {
+	t.Parallel()
+
 	var h RequestHeader
 	h.SetRequestURI("/")
 	h.Set(HeaderHost, "foobar.com")
@@ -1615,6 +1709,8 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 }
 
 func TestRequestHeaderMethod(t *testing.T) {
+	t.Parallel()
+
 	// common http methods
 	testRequestHeaderMethod(t, MethodGet)
 	testRequestHeaderMethod(t, MethodPost)
@@ -1647,6 +1743,8 @@ func testRequestHeaderMethod(t *testing.T, expectedMethod string) {
 }
 
 func TestRequestHeaderSetGet(t *testing.T) {
+	t.Parallel()
+
 	h := &RequestHeader{}
 	h.SetRequestURI("/aa/bbb")
 	h.SetMethod(MethodPost)
@@ -1779,6 +1877,8 @@ func expectResponseHeaderGet(t *testing.T, h *ResponseHeader, key, expectedValue
 }
 
 func TestResponseHeaderConnectionClose(t *testing.T) {
+	t.Parallel()
+
 	testResponseHeaderConnectionClose(t, true)
 	testResponseHeaderConnectionClose(t, false)
 }
@@ -1812,6 +1912,8 @@ func testResponseHeaderConnectionClose(t *testing.T, connectionClose bool) {
 }
 
 func TestRequestHeaderTooBig(t *testing.T) {
+	t.Parallel()
+
 	s := "GET / HTTP/1.1\r\nHost: aaa.com\r\n" + getHeaders(10500) + "\r\n"
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReaderSize(r, 4096)
@@ -1823,6 +1925,8 @@ func TestRequestHeaderTooBig(t *testing.T) {
 }
 
 func TestResponseHeaderTooBig(t *testing.T) {
+	t.Parallel()
+
 	s := "HTTP/1.1 200 OK\r\nContent-Type: sss\r\nContent-Length: 0\r\n" + getHeaders(100500) + "\r\n"
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReaderSize(r, 4096)
@@ -1855,6 +1959,8 @@ func (r *bufioPeekReader) Read(b []byte) (int, error) {
 }
 
 func TestRequestHeaderBufioPeek(t *testing.T) {
+	t.Parallel()
+
 	r := &bufioPeekReader{
 		s: "GET / HTTP/1.1\r\nHost: foobar.com\r\n" + getHeaders(10) + "\r\naaaa",
 	}
@@ -1868,6 +1974,8 @@ func TestRequestHeaderBufioPeek(t *testing.T) {
 }
 
 func TestResponseHeaderBufioPeek(t *testing.T) {
+	t.Parallel()
+
 	r := &bufioPeekReader{
 		s: "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nContent-Type: aaa\r\n" + getHeaders(10) + "\r\n0123456789",
 	}
@@ -1889,6 +1997,8 @@ func getHeaders(n int) string {
 }
 
 func TestResponseHeaderReadSuccess(t *testing.T) {
+	t.Parallel()
+
 	h := &ResponseHeader{}
 
 	// straight order of content-length and content-type
@@ -2049,6 +2159,8 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 }
 
 func TestRequestHeaderReadSuccess(t *testing.T) {
+	t.Parallel()
+
 	h := &RequestHeader{}
 
 	// simple headers
@@ -2220,6 +2332,8 @@ func TestResponseHeaderReadError(t *testing.T) {
 }
 
 func TestRequestHeaderReadError(t *testing.T) {
+	t.Parallel()
+
 	h := &RequestHeader{}
 
 	// incorrect first line

@@ -7,6 +7,8 @@ import (
 )
 
 func TestCookieValueWithEqualAndSpaceChars(t *testing.T) {
+	t.Parallel()
+
 	testCookieValueWithEqualAndSpaceChars(t, "sth1", "/", "MTQ2NjU5NTcwN3xfUVduVXk4aG9jSmZaNzNEb1dGa1VjekY1bG9vMmxSWlJBZUN2Q1ZtZVFNMTk2YU9YaWtCVmY1eDRWZXd3M3Q5RTJRZnZMbk5mWklSSFZJcVlXTDhiSFFHWWdpdFVLd1hwbXR2UUN4QlJ1N3BITFpkS3Y4PXzDvPNn6JVDBFB2wYVYPHdkdlZBm6n1_0QB3_GWwE40Tg  ==")
 	testCookieValueWithEqualAndSpaceChars(t, "sth2", "/", "123")
 	testCookieValueWithEqualAndSpaceChars(t, "sth3", "/", "123 ==   1")
@@ -39,6 +41,8 @@ func testCookieValueWithEqualAndSpaceChars(t *testing.T, expectedName, expectedP
 }
 
 func TestCookieSecureHttpOnly(t *testing.T) {
+	t.Parallel()
+
 	var c Cookie
 
 	if err := c.Parse("foo=bar; HttpOnly; secure"); err != nil {
@@ -60,6 +64,8 @@ func TestCookieSecureHttpOnly(t *testing.T) {
 }
 
 func TestCookieSecure(t *testing.T) {
+	t.Parallel()
+
 	var c Cookie
 
 	if err := c.Parse("foo=bar; secure"); err != nil {
@@ -86,6 +92,8 @@ func TestCookieSecure(t *testing.T) {
 }
 
 func TestCookieSameSite(t *testing.T) {
+	t.Parallel()
+
 	var c Cookie
 
 	if err := c.Parse("foo=bar; samesite"); err != nil {
@@ -157,6 +165,8 @@ func TestCookieSameSite(t *testing.T) {
 }
 
 func TestCookieMaxAge(t *testing.T) {
+	t.Parallel()
+
 	var c Cookie
 
 	maxAge := 100
@@ -197,6 +207,8 @@ func TestCookieMaxAge(t *testing.T) {
 }
 
 func TestCookieHttpOnly(t *testing.T) {
+	t.Parallel()
+
 	var c Cookie
 
 	if err := c.Parse("foo=bar; HttpOnly"); err != nil {
@@ -223,10 +235,14 @@ func TestCookieHttpOnly(t *testing.T) {
 }
 
 func TestCookieAcquireReleaseSequential(t *testing.T) {
+	t.Parallel()
+
 	testCookieAcquireRelease(t)
 }
 
 func TestCookieAcquireReleaseConcurrent(t *testing.T) {
+	t.Parallel()
+
 	ch := make(chan struct{}, 10)
 	for i := 0; i < 10; i++ {
 		go func() {
@@ -281,6 +297,8 @@ func testCookieAcquireRelease(t *testing.T) {
 }
 
 func TestCookieParse(t *testing.T) {
+	t.Parallel()
+
 	testCookieParse(t, "foo", "foo")
 	testCookieParse(t, "foo=bar", "foo=bar")
 	testCookieParse(t, "foo=", "foo=")
@@ -304,6 +322,8 @@ func testCookieParse(t *testing.T, s, expectedS string) {
 }
 
 func TestCookieAppendBytes(t *testing.T) {
+	t.Parallel()
+
 	c := &Cookie{}
 
 	testCookieAppendBytes(t, c, "", "bar", "bar")
@@ -330,6 +350,8 @@ func testCookieAppendBytes(t *testing.T, c *Cookie, key, value, expectedS string
 }
 
 func TestParseRequestCookies(t *testing.T) {
+	t.Parallel()
+
 	testParseRequestCookies(t, "", "")
 	testParseRequestCookies(t, "=", "")
 	testParseRequestCookies(t, "foo", "foo")
@@ -349,6 +371,8 @@ func testParseRequestCookies(t *testing.T, s, expectedS string) {
 }
 
 func TestAppendRequestCookieBytes(t *testing.T) {
+	t.Parallel()
+
 	testAppendRequestCookieBytes(t, "=", "")
 	testAppendRequestCookieBytes(t, "foo=", "foo=")
 	testAppendRequestCookieBytes(t, "=bar", "bar")

@@ -9,6 +9,8 @@ import (
 )
 
 func TestIssue28ResponseWithoutBodyNoContentType(t *testing.T) {
+	t.Parallel()
+
 	var r Response
 
 	// Empty response without content-type
@@ -41,6 +43,8 @@ func TestIssue28ResponseWithoutBodyNoContentType(t *testing.T) {
 }
 
 func TestIssue6RequestHeaderSetContentType(t *testing.T) {
+	t.Parallel()
+
 	testIssue6RequestHeaderSetContentType(t, MethodGet)
 	testIssue6RequestHeaderSetContentType(t, MethodPost)
 	testIssue6RequestHeaderSetContentType(t, MethodPut)
