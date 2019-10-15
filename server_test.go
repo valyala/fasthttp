@@ -136,7 +136,7 @@ func TestServerConnState(t *testing.T) {
 	select {
 	case <-clientCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	if err := ln.Close(); err != nil {
@@ -146,7 +146,7 @@ func TestServerConnState(t *testing.T) {
 	select {
 	case <-serverCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	// 2 requests so we go to active and idle twice.
@@ -193,9 +193,9 @@ func TestSaveMultipartFile(t *testing.T) {
 
 	// Make sure fileb was saved to a file.
 	if ff, err := f.File["fileb"][0].Open(); err != nil {
-		t.Fatalf("expected FileHeader.Open to work")
+		t.Fatal("expected FileHeader.Open to work")
 	} else if _, ok := ff.(*os.File); !ok {
-		t.Fatalf("expected fileb to be an os.File")
+		t.Fatal("expected fileb to be an os.File")
 	} else {
 		ff.Close()
 	}
@@ -233,7 +233,7 @@ func TestServerName(t *testing.T) {
 				t.Fatalf("Unexpected error from serveConn: %s", err)
 			}
 		case <-time.After(100 * time.Millisecond):
-			t.Fatalf("timeout")
+			t.Fatal("timeout")
 		}
 
 		resp, err := ioutil.ReadAll(&rw.w)
@@ -315,11 +315,11 @@ func TestServerErrSmallBuffer(t *testing.T) {
 	select {
 	case serverErr = <-ch:
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	if serverErr == nil {
-		t.Fatalf("expected error")
+		t.Fatal("expected error")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -332,7 +332,7 @@ func TestServerErrSmallBuffer(t *testing.T) {
 		t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusRequestHeaderFieldsTooLarge)
 	}
 	if !resp.ConnectionClose() {
-		t.Fatalf("missing 'Connection: close' response header")
+		t.Fatal("missing 'Connection: close' response header")
 	}
 
 	expectedErr := errSmallBuffer.Error()
@@ -347,13 +347,13 @@ func TestRequestCtxIsTLS(t *testing.T) {
 	// tls.Conn
 	ctx.c = &tls.Conn{}
 	if !ctx.IsTLS() {
-		t.Fatalf("IsTLS must return true")
+		t.Fatal("IsTLS must return true")
 	}
 
 	// non-tls.Conn
 	ctx.c = &readWriter{}
 	if ctx.IsTLS() {
-		t.Fatalf("IsTLS must return false")
+		t.Fatal("IsTLS must return false")
 	}
 
 	// overridden tls.Conn
@@ -362,7 +362,7 @@ func TestRequestCtxIsTLS(t *testing.T) {
 		fooBar bool
 	}{}
 	if !ctx.IsTLS() {
-		t.Fatalf("IsTLS must return true")
+		t.Fatal("IsTLS must return true")
 	}
 }
 
@@ -478,7 +478,7 @@ func TestServerResponseServerHeader(t *testing.T) {
 	select {
 	case <-clientCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	if err := ln.Close(); err != nil {
@@ -488,7 +488,7 @@ func TestServerResponseServerHeader(t *testing.T) {
 	select {
 	case <-serverCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 }
 
@@ -499,7 +499,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 	h := func(ctx *RequestCtx) {
 		ctx.SetConnectionClose()
 		if ctx.IsBodyStream() {
-			t.Fatalf("IsBodyStream must return false")
+			t.Fatal("IsBodyStream must return false")
 		}
 		ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
 			fmt.Fprintf(w, "first")
@@ -512,7 +512,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 			// be flushed automatically after returning from StreamWriter.
 		})
 		if !ctx.IsBodyStream() {
-			t.Fatalf("IsBodyStream must return true")
+			t.Fatal("IsBodyStream must return true")
 		}
 	}
 
@@ -567,7 +567,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 	select {
 	case <-clientCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	if err := ln.Close(); err != nil {
@@ -577,7 +577,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 	select {
 	case <-serverCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 }
 
@@ -617,7 +617,7 @@ func TestServerDisableKeepalive(t *testing.T) {
 			t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 		}
 		if !resp.ConnectionClose() {
-			t.Fatalf("expecting 'Connection: close' response header")
+			t.Fatal("expecting 'Connection: close' response header")
 		}
 		if string(resp.Body()) != "OK" {
 			t.Fatalf("unexpected body: %q. Expecting %q", resp.Body(), "OK")
@@ -638,7 +638,7 @@ func TestServerDisableKeepalive(t *testing.T) {
 	select {
 	case <-clientCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	if err := ln.Close(); err != nil {
@@ -648,7 +648,7 @@ func TestServerDisableKeepalive(t *testing.T) {
 	select {
 	case <-serverCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 }
 
@@ -714,7 +714,7 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 	select {
 	case <-clientCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	if err := ln.Close(); err != nil {
@@ -724,7 +724,7 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 	select {
 	case <-serverCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 }
 
@@ -813,7 +813,7 @@ func TestServerConcurrencyLimit(t *testing.T) {
 	select {
 	case <-clientCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	if err := ln.Close(); err != nil {
@@ -823,7 +823,7 @@ func TestServerConcurrencyLimit(t *testing.T) {
 	select {
 	case <-serverCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 }
 
@@ -856,7 +856,7 @@ func TestServerWriteFastError(t *testing.T) {
 		t.Fatalf("unexpected content-type: %q. Expecting %q", contentType, "text/plain")
 	}
 	if !resp.Header.ConnectionClose() {
-		t.Fatalf("expecting 'Connection: close' response header")
+		t.Fatal("expecting 'Connection: close' response header")
 	}
 }
 
@@ -962,7 +962,7 @@ func TestServerServeTLSEmbed(t *testing.T) {
 		br := bufio.NewReader(tlsConn)
 		var resp Response
 		if err := resp.Read(br); err != nil {
-			t.Fatalf("unexpected error")
+			t.Fatal("unexpected error")
 		}
 		body := resp.Body()
 		if string(body) != "success" {
@@ -973,7 +973,7 @@ func TestServerServeTLSEmbed(t *testing.T) {
 	select {
 	case <-respCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	// close the server
@@ -983,7 +983,7 @@ func TestServerServeTLSEmbed(t *testing.T) {
 	select {
 	case <-ch:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 }
 
@@ -1089,7 +1089,7 @@ Connection: close
 	select {
 	case <-respCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	if err := ln.Close(); err != nil {
@@ -1099,7 +1099,7 @@ Connection: close
 	select {
 	case <-ch:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout when waiting for the server to stop")
+		t.Fatal("timeout when waiting for the server to stop")
 	}
 }
 
@@ -1125,7 +1125,7 @@ func TestServerGetWithContent(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s.", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	resp := rw.w.String()
@@ -1169,7 +1169,7 @@ func TestServerDisableHeaderNamesNormalizing(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -1214,7 +1214,7 @@ func TestServerReduceMemoryUsageSerial(t *testing.T) {
 	select {
 	case <-ch:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout when waiting for the server to stop")
+		t.Fatal("timeout when waiting for the server to stop")
 	}
 }
 
@@ -1256,7 +1256,7 @@ func TestServerReduceMemoryUsageConcurrent(t *testing.T) {
 	select {
 	case <-ch:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout when waiting for the server to stop")
+		t.Fatal("timeout when waiting for the server to stop")
 	}
 }
 
@@ -1327,13 +1327,13 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 		t.Fatalf("error when reading response: %s", err)
 	}
 	if resp.ConnectionClose() {
-		t.Fatalf("response mustn't have 'Connection: close' header")
+		t.Fatal("response mustn't have 'Connection: close' header")
 	}
 	if err = resp.Read(br); err != nil {
 		t.Fatalf("error when reading response: %s", err)
 	}
 	if !resp.ConnectionClose() {
-		t.Fatalf("response must have 'Connection: close' header")
+		t.Fatal("response must have 'Connection: close' header")
 	}
 
 	tailCh := make(chan struct{})
@@ -1351,7 +1351,7 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 	select {
 	case <-tailCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout when reading tail")
+		t.Fatal("timeout when reading tail")
 	}
 
 	if err = conn.Close(); err != nil {
@@ -1365,7 +1365,7 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 	select {
 	case <-ch:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout when waiting for the server to stop")
+		t.Fatal("timeout when waiting for the server to stop")
 	}
 }
 
@@ -1406,7 +1406,7 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 	}
 
 	if !resp.ConnectionClose() {
-		t.Fatalf("HTTP1.0 response must have 'Connection: close' header")
+		t.Fatal("HTTP1.0 response must have 'Connection: close' header")
 	}
 
 	tailCh := make(chan struct{})
@@ -1424,7 +1424,7 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 	select {
 	case <-tailCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout when reading tail")
+		t.Fatal("timeout when reading tail")
 	}
 
 	if err = conn.Close(); err != nil {
@@ -1438,7 +1438,7 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 	select {
 	case <-ch:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout when waiting for the server to stop")
+		t.Fatal("timeout when waiting for the server to stop")
 	}
 }
 
@@ -1520,7 +1520,7 @@ func TestServerHeadRequest(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -1585,7 +1585,7 @@ func TestServerExpect100Continue(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -1741,7 +1741,7 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 	select {
 	case <-ch:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -1756,7 +1756,7 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 		t.Fatalf("unexpected Connection header %q. Expecting %q", resp.Header.Peek(HeaderConnection), "keep-alive")
 	}
 	if resp.Header.ConnectionClose() {
-		t.Fatalf("unexpected Connection: close")
+		t.Fatal("unexpected Connection: close")
 	}
 
 	// verify the second response
@@ -1767,7 +1767,7 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 		t.Fatalf("unexpected Connection header %q. Expecting %q", resp.Header.Peek(HeaderConnection), "close")
 	}
 	if !resp.Header.ConnectionClose() {
-		t.Fatalf("expecting Connection: close")
+		t.Fatal("expecting Connection: close")
 	}
 
 	data, err := ioutil.ReadAll(br)
@@ -1789,7 +1789,7 @@ func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
 	ctx.Init(&req, nil, defaultLogger)
 
 	if ctx.IsBodyStream() {
-		t.Fatalf("IsBodyStream must return false")
+		t.Fatal("IsBodyStream must return false")
 	}
 	ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
 		fmt.Fprintf(w, "body writer line 1\n")
@@ -1799,7 +1799,7 @@ func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
 		fmt.Fprintf(w, "body writer line 2\n")
 	})
 	if !ctx.IsBodyStream() {
-		t.Fatalf("IsBodyStream must return true")
+		t.Fatal("IsBodyStream must return true")
 	}
 
 	s := ctx.Response.String()
@@ -1825,23 +1825,23 @@ func TestRequestCtxIfModifiedSince(t *testing.T) {
 	lastModified := time.Now().Add(-time.Hour)
 
 	if !ctx.IfModifiedSince(lastModified) {
-		t.Fatalf("IfModifiedSince must return true for non-existing If-Modified-Since header")
+		t.Fatal("IfModifiedSince must return true for non-existing If-Modified-Since header")
 	}
 
 	ctx.Request.Header.Set("If-Modified-Since", string(AppendHTTPDate(nil, lastModified)))
 
 	if ctx.IfModifiedSince(lastModified) {
-		t.Fatalf("If-Modified-Since current time must return false")
+		t.Fatal("If-Modified-Since current time must return false")
 	}
 
 	past := lastModified.Add(-time.Hour)
 	if ctx.IfModifiedSince(past) {
-		t.Fatalf("If-Modified-Since past time must return false")
+		t.Fatal("If-Modified-Since past time must return false")
 	}
 
 	future := lastModified.Add(time.Hour)
 	if !ctx.IfModifiedSince(future) {
-		t.Fatalf("If-Modified-Since future time must return true")
+		t.Fatal("If-Modified-Since future time must return true")
 	}
 }
 
@@ -1962,7 +1962,7 @@ func TestRequestCtxHijack(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			if ctx.Hijacked() {
-				t.Fatalf("connection mustn't be hijacked")
+				t.Fatal("connection mustn't be hijacked")
 			}
 			ctx.Hijack(func(c net.Conn) {
 				<-hijackStartCh
@@ -1987,7 +1987,7 @@ func TestRequestCtxHijack(t *testing.T) {
 				}
 			})
 			if !ctx.Hijacked() {
-				t.Fatalf("connection must be hijacked")
+				t.Fatal("connection must be hijacked")
 			}
 			ctx.Success("foo/bar", []byte("hijack it!"))
 		},
@@ -2009,7 +2009,7 @@ func TestRequestCtxHijack(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2019,7 +2019,7 @@ func TestRequestCtxHijack(t *testing.T) {
 	select {
 	case <-hijackStopCh:
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	data, err := ioutil.ReadAll(br)
@@ -2087,7 +2087,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 		select {
 		case <-clientCh:
 		case <-time.After(time.Second):
-			t.Fatalf("timeout")
+			t.Fatal("timeout")
 		}
 	}
 
@@ -2098,7 +2098,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 	select {
 	case <-serverCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 }
 
@@ -2143,7 +2143,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 		select {
 		case <-clientCh:
 		case <-time.After(time.Second):
-			t.Fatalf("timeout")
+			t.Fatal("timeout")
 		}
 	}
 
@@ -2152,7 +2152,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 		select {
 		case <-doneCh:
 		case <-time.After(time.Second):
-			t.Fatalf("timeout")
+			t.Fatal("timeout")
 		}
 	}
 
@@ -2163,7 +2163,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	select {
 	case <-serverCh:
 	case <-time.After(time.Second):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 }
 
@@ -2190,13 +2190,13 @@ func TestServerGetOnly(t *testing.T) {
 	select {
 	case err := <-ch:
 		if err == nil {
-			t.Fatalf("expecting error")
+			t.Fatal("expecting error")
 		}
 		if err != ErrGetOnly {
 			t.Fatalf("Unexpected error from serveConn: %s. Expecting %s", err, ErrGetOnly)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2209,7 +2209,7 @@ func TestServerGetOnly(t *testing.T) {
 		t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusBadRequest)
 	}
 	if !resp.ConnectionClose() {
-		t.Fatalf("missing 'Connection: close' response header")
+		t.Fatal("missing 'Connection: close' response header")
 	}
 }
 
@@ -2249,7 +2249,7 @@ func TestServerTimeoutErrorWithResponse(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2290,7 +2290,7 @@ func TestServerTimeoutErrorWithCode(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2331,7 +2331,7 @@ func TestServerTimeoutError(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2367,7 +2367,7 @@ func TestServerMaxRequestsPerConn(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2376,7 +2376,7 @@ func TestServerMaxRequestsPerConn(t *testing.T) {
 		t.Fatalf("Unexpected error when parsing response: %s", err)
 	}
 	if !resp.ConnectionClose() {
-		t.Fatalf("Response must have 'connection: close' header")
+		t.Fatal("Response must have 'connection: close' header")
 	}
 	verifyResponseHeader(t, &resp.Header, 200, 0, string(defaultContentType))
 
@@ -2411,7 +2411,7 @@ func TestServerConnectionClose(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2421,7 +2421,7 @@ func TestServerConnectionClose(t *testing.T) {
 		t.Fatalf("Unexpected error when parsing response: %s", err)
 	}
 	if !resp.ConnectionClose() {
-		t.Fatalf("expecting Connection: close header")
+		t.Fatal("expecting Connection: close header")
 	}
 
 	data, err := ioutil.ReadAll(br)
@@ -2467,7 +2467,7 @@ func TestServerRequestNumAndTime(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	if n != 3 {
@@ -2499,7 +2499,7 @@ func TestServerEmptyResponse(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2544,7 +2544,7 @@ func TestServerLogger(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2592,7 +2592,7 @@ func TestServerRemoteAddr(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2646,7 +2646,7 @@ func TestServerConnError(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2690,7 +2690,7 @@ func TestServeConnSingleRequest(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2719,7 +2719,7 @@ func TestServeConnMultiRequests(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2742,7 +2742,7 @@ func TestShutdown(t *testing.T) {
 		}
 		_, err := ln.Dial()
 		if err == nil {
-			t.Fatalf("server is still listening")
+			t.Fatal("server is still listening")
 		}
 		serveCh <- struct{}{}
 	}()
@@ -2771,7 +2771,7 @@ func TestShutdown(t *testing.T) {
 	for {
 		select {
 		case <-time.After(time.Second):
-			t.Fatalf("shutdown took too long")
+			t.Fatal("shutdown took too long")
 		case <-serveCh:
 			done++
 		case <-clientCh:
@@ -2930,7 +2930,7 @@ func TestMaxBodySizePerRequest(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(100 * time.Millisecond):
-		t.Fatalf("timeout")
+		t.Fatal("timeout")
 	}
 }
 
@@ -2975,7 +2975,7 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatalf("test timeout")
+		t.Fatal("test timeout")
 	}
 }
 
@@ -3033,7 +3033,7 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatalf("test timeout")
+		t.Fatal("test timeout")
 	}
 }
 
