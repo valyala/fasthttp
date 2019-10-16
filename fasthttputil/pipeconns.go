@@ -166,7 +166,9 @@ func (c *pipeConn) readNextByteBuffer(mayBlock bool) error {
 		select {
 		case c.b = <-c.rCh:
 		case <-readDeadlineCh:
+			c.readDeadlineChLock.Lock()
 			c.readDeadlineCh = closedDeadlineCh
+			c.readDeadlineChLock.Unlock()
 			// rCh may contain data when deadline is reached.
 			// Read the data before returning ErrTimeout.
 			select {
