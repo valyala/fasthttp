@@ -62,8 +62,6 @@ type URI struct {
 
 	username []byte
 	password []byte
-
-	h *RequestHeader
 }
 
 // CopyTo copies uri contents to dst.
@@ -84,7 +82,6 @@ func (u *URI) CopyTo(dst *URI) {
 
 	// fullURI and requestURI shouldn't be copied, since they are created
 	// from scratch on each FullURI() and RequestURI() call.
-	dst.h = u.h
 }
 
 // Hash returns URI hash, i.e. qwe of http://aaa.com/foo/bar?baz=123#qwe .
@@ -232,19 +229,12 @@ func (u *URI) Reset() {
 
 	// There is no need in u.requestURI = u.requestURI[:0], since requestURI
 	// is calculated on each call to RequestURI().
-
-	u.h = nil
 }
 
 // Host returns host part, i.e. aaa.com of http://aaa.com/foo/bar?baz=123#qwe .
 //
 // Host is always lowercased.
 func (u *URI) Host() []byte {
-	if len(u.host) == 0 && u.h != nil {
-		u.host = append(u.host[:0], u.h.Host()...)
-		lowercaseBytes(u.host)
-		u.h = nil
-	}
 	return u.host
 }
 
@@ -267,23 +257,18 @@ func (u *URI) SetHostBytes(host []byte) {
 //
 // uri may contain e.g. RequestURI without scheme and host if host is non-empty.
 func (u *URI) Parse(host, uri []byte) {
-	u.parse(host, uri, nil)
+	u.parse(host, uri, false)
 }
 
-func (u *URI) parseQuick(uri []byte, h *RequestHeader, isTLS bool) {
-	u.parse(nil, uri, h)
-	if isTLS {
-		u.scheme = append(u.scheme[:0], strHTTPS...)
-	}
-}
-
-func (u *URI) parse(host, uri []byte, h *RequestHeader) {
+func (u *URI) parse(host, uri []byte, isTLS bool) {
 	u.Reset()
-	u.h = h
 
 	scheme, host, uri := splitHostURI(host, uri)
 	u.scheme = append(u.scheme, scheme...)
 	lowercaseBytes(u.scheme)
+	if isTLS {
+		u.scheme = append(u.scheme[:0], strHTTPS...)
+	}
 
 	if n := bytes.Index(host, strAt); n >= 0 {
 		auth := host[:n]

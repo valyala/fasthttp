@@ -704,7 +704,7 @@ func (req *Request) parseURI() {
 	}
 	req.parsedURI = true
 
-	req.uri.parseQuick(req.Header.RequestURI(), &req.Header, req.isTLS)
+	req.uri.parse(req.Header.Host(), req.Header.RequestURI(), req.isTLS)
 }
 
 // PostArgs returns POST arguments.

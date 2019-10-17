@@ -435,6 +435,8 @@ func testParseByteRangeError(t *testing.T, v string, contentLength int) {
 }
 
 func TestFSCompressConcurrent(t *testing.T) {
+	// This test can't run parallel as files in / might by changed by other tests.
+
 	fs := &FS{
 		Root:               ".",
 		GenerateIndexPages: true,
@@ -465,7 +467,7 @@ func TestFSCompressConcurrent(t *testing.T) {
 }
 
 func TestFSCompressSingleThread(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	fs := &FS{
 		Root:               ".",
@@ -525,7 +527,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected error when gunzipping response body: %s. filePath=%q", err, filePath)
 	}
 	if string(zbody) != body {
-		t.Fatalf("unexpected body %q. Expected %q. FilePath=%q", zbody, body, filePath)
+		t.Fatalf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
 	}
 }
 

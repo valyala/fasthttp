@@ -610,24 +610,30 @@ func TestClientDoWithCustomHeaders(t *testing.T) {
 }
 
 func TestPipelineClientDoSerial(t *testing.T) {
+	t.Parallel()
+
 	testPipelineClientDoConcurrent(t, 1, 0, 0)
 }
 
 func TestPipelineClientDoConcurrent(t *testing.T) {
+	t.Parallel()
+
 	testPipelineClientDoConcurrent(t, 10, 0, 1)
 }
 
 func TestPipelineClientDoBatchDelayConcurrent(t *testing.T) {
+	t.Parallel()
+
 	testPipelineClientDoConcurrent(t, 10, 5*time.Millisecond, 1)
 }
 
 func TestPipelineClientDoBatchDelayConcurrentMultiConn(t *testing.T) {
+	t.Parallel()
+
 	testPipelineClientDoConcurrent(t, 10, 5*time.Millisecond, 3)
 }
 
 func testPipelineClientDoConcurrent(t *testing.T, concurrency int, maxBatchDelay time.Duration, maxConns int) {
-	t.Parallel()
-
 	ln := fasthttputil.NewInmemoryListener()
 
 	s := &Server{
