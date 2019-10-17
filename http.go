@@ -830,7 +830,7 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 	// in multipart/form-data requests.
 
 	if size <= 0 {
-		panic(fmt.Sprintf("BUG: form size must be greater than 0. Given %d", size))
+		return nil, fmt.Errorf("form size must be greater than 0. Given %d", size)
 	}
 	lr := io.LimitReader(r, int64(size))
 	mr := multipart.NewReader(lr, boundary)
