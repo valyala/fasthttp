@@ -1865,16 +1865,16 @@ func TestClient_WaitPrefer(t *testing.T) {
 
 // TestClient_DoTimeout_PreferWaitConn  running concurrent 5 request  with 1  wait prefer connection,server blocking 300ms.
 // below is simulate activity.
-// id\timeline | start  | 300ms+  | 600ms+  | 900ms+   | end  |
+// id\timeline | start  | 3000ms+  | 6000ms+  | 9000ms+   | 10000ms         |  12000ms(background)|
 // 1            running     OK
 // 2            wait     running     OK
 // 3            wait     wait       running    OK
-// 4            wait     wait       wait       wait     timeout(cancel)
-// 5            wait     wait       wait       running  timeout
+// 4            wait     wait       wait       wait        timeout(running) |  (ok)               |
+// 5            wait     wait       wait       running     timeout(wait)    |  (cancel)           |
 //
-// In 1 second,on 0,300,600,900 ms will sending request to server.
-//  request at 900ms will timeout because did not get response in time.
-// one request wait conn all the time then cancel because there is no free.
+// on 0,3000,6000,9000 ms will sending request to server.
+// request at 9000ms will timeout because did not get response in time.
+// one request wait conn all the time  because of no free conns then cancel since timeout.
 
 func TestClient_DoTimeout_PreferWaitConn(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -1891,8 +1891,7 @@ func TestClient_DoTimeout_PreferWaitConn(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			atomic.AddInt32(&serverGot, 1)
-			time.Sleep(time.Millisecond * 300)
-
+			time.Sleep(time.Second * 3)
 		},
 	}
 	go s.Serve(listener)
@@ -1908,7 +1907,7 @@ func TestClient_DoTimeout_PreferWaitConn(t *testing.T) {
 			for j := 0; j < 1; j++ {
 				req := &Request{}
 				req.SetRequestURI(addr)
-				err2 := waitClient.DoTimeout(req, nil, time.Second)
+				err2 := waitClient.DoTimeout(req, nil, time.Second*10)
 				if err2 == ErrTimeout {
 					atomic.AddInt32(&timeout, 1)
 				} else if err2 != nil {
