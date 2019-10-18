@@ -1825,6 +1825,7 @@ func TestClient_WaitPrefer(t *testing.T) {
 		waitClient = &Client{
 			PreferWaitConn:  true,
 			MaxConnsPerHost: 2,
+			ReadTimeout:     time.Minute,
 		}
 		wg             sync.WaitGroup
 		noFreeConnErrs int32
@@ -1868,12 +1869,12 @@ func TestClient_WaitPrefer(t *testing.T) {
 // 1            running     OK
 // 2            wait     running     OK
 // 3            wait     wait       running    OK
-// 4            wait     wait       wait       wait     wait
-// 5            wait     wait       wait       running  running
+// 4            wait     wait       wait       wait     timeout(cancel)
+// 5            wait     wait       wait       running  timeout
 //
 // In 1 second,on 0,300,600,900 ms will sending request to server.
 //  request at 900ms will timeout because did not get response in time.
-// one request wait conn all the time because there is no free.
+// one request wait conn all the time then cancel because there is no free.
 
 func TestClient_DoTimeout_PreferWaitConn(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
