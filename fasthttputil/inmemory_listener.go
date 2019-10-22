@@ -38,7 +38,7 @@ func NewInmemoryListener() *InmemoryListener {
 func (ln *InmemoryListener) Accept() (net.Conn, error) {
 	c, ok := <-ln.conns
 	if !ok {
-		return nil, errInmemoryListenerClosed
+		return nil, ErrInmemoryListenerClosed
 	}
 	close(c.accepted)
 	return c.conn, nil
@@ -53,7 +53,7 @@ func (ln *InmemoryListener) Close() error {
 		close(ln.conns)
 		ln.closed = true
 	} else {
-		err = errInmemoryListenerClosed
+		err = ErrInmemoryListenerClosed
 	}
 	ln.lock.Unlock()
 	return err
@@ -90,7 +90,7 @@ func (ln *InmemoryListener) Dial() (net.Conn, error) {
 	ln.lock.Unlock()
 
 	if cConn == nil {
-		return nil, errInmemoryListenerClosed
+		return nil, ErrInmemoryListenerClosed
 	}
 	return cConn, nil
 }
