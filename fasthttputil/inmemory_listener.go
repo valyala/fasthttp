@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-var errInmemoryListenerClosed = errors.New("InmemoryListener is already closed: use of closed network connection")
+var ErrInmemoryListenerClosed = errors.New("InmemoryListener is already closed: use of closed network connection")
 
 // InmemoryListener provides in-memory dialer<->net.Listener implementation.
 //
