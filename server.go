@@ -17,12 +17,12 @@ import (
 	"time"
 )
 
-var errNoCertOrKeyProvided = errors.New("Cert or key has not provided")
+var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 
 var (
 	// ErrAlreadyServing is returned when calling Serve on a Server
 	// that is already serving connections.
-	ErrAlreadyServing = errors.New("Server is already serving connections")
+	ErrAlreadyServing = errors.New("server is already serving connections")
 )
 
 // ServeConn serves HTTP requests from the given connection
