@@ -1292,7 +1292,7 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 123\r\nSet-Cookie: aa=bb; path=/foo/bar\r\nSet-Cookie: ccc\r\n\r\n")
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("Unepxected error: %s", err)
+		t.Fatalf("Unexpected error: %s", err)
 	}
 
 	if h.Len() != 4 {
@@ -1378,11 +1378,11 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 			}
 			cookieCount++
 		default:
-			t.Fatalf("Unepxected header %q=%q", k, v)
+			t.Fatalf("Unexpected header %q=%q", k, v)
 		}
 	})
 	if hostCount != 1 {
-		t.Fatalf("Unepxected number of host headers detected %d. Expected 1", hostCount)
+		t.Fatalf("Unexpected number of host headers detected %d. Expected 1", hostCount)
 	}
 	if xxCount != 2 {
 		t.Fatalf("Unexpected number of xx headers detected %d. Expected 2", xxCount)
@@ -1400,7 +1400,7 @@ func TestResponseHeaderVisitAllInOrder(t *testing.T) {
 	r := bytes.NewBufferString("GET / HTTP/1.1\r\nContent-Type: aa\r\nCookie: a=b\r\nHost: example.com\r\nUser-Agent: xxx\r\n\r\n")
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("Unepxected error: %s", err)
+		t.Fatalf("Unexpected error: %s", err)
 	}
 
 	if h.Len() != 4 {

@@ -450,7 +450,7 @@ func TestArgsSetGetDel(t *testing.T) {
 
 	a.Parse("aaa=xxx&bb=aa")
 	if string(a.Peek("foo0")) != "" {
-		t.Fatalf("Unepxected value %q", a.Peek("foo0"))
+		t.Fatalf("Unexpected value %q", a.Peek("foo0"))
 	}
 	if string(a.Peek("aaa")) != "xxx" {
 		t.Fatalf("Unexpected value %q. Expected %q", a.Peek("aaa"), "xxx")

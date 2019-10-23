@@ -65,7 +65,7 @@ func testWriter(newWriter NewWriterFunc, newReader func(io.Reader) io.Reader) er
 
 	for i := 0; i < 5; i++ {
 		if err := testWriterReuse(w, dstW, newReader); err != nil {
-			return fmt.Errorf("unepxected error when re-using writer on iteration %d: %s", i, err)
+			return fmt.Errorf("unexpected error when re-using writer on iteration %d: %s", i, err)
 		}
 		dstW = &bytes.Buffer{}
 		w.Reset(dstW)
