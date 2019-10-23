@@ -121,14 +121,12 @@ func (wp *workerPool) clean(scratch *[]*workerChan) {
 		return
 	}
 
-	*scratch = append((*scratch)[:0], ready[:i]...)
-	if i > 0 {
-		m := copy(ready, ready[i:])
-		for i = m; i < n; i++ {
-			ready[i] = nil
-		}
-		wp.ready = ready[:m]
+	*scratch = append((*scratch)[:0], ready[:i+1]...)
+	m := copy(ready, ready[i+1:])
+	for i = m; i < n; i++ {
+		ready[i] = nil
 	}
+	wp.ready = ready[:m]
 	wp.lock.Unlock()
 
 	// Notify obsolete workers to stop.
@@ -136,8 +134,8 @@ func (wp *workerPool) clean(scratch *[]*workerChan) {
 	// may be blocking and may consume a lot of time if many workers
 	// are located on non-local CPUs.
 	tmp := *scratch
-	for i, ch := range tmp {
-		ch.ch <- nil
+	for i := range tmp {
+		tmp[i].ch <- nil
 		tmp[i] = nil
 	}
 }
