@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-var errNoCertOrKeyProvided = errors.New("Cert or key has not provided")
+var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 
 var (
 	// ErrAlreadyServing is returned when calling Serve on a Server

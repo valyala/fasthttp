@@ -81,7 +81,7 @@ func testAppendIPv4(t *testing.T, ipStr string, isValid bool) {
 	s := string(AppendIPv4(nil, ip))
 	if isValid {
 		if s != ipStr {
-			t.Fatalf("unepxected ip %q. Expecting %q", s, ipStr)
+			t.Fatalf("unexpected ip %q. Expecting %q", s, ipStr)
 		}
 	} else {
 		ipStr = "non-v4 ip passed to AppendIPv4"
