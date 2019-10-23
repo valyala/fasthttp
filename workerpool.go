@@ -97,15 +97,30 @@ func (wp *workerPool) clean(scratch *[]*workerChan) {
 
 	// Clean least recently used workers if they didn't serve connections
 	// for more than maxIdleWorkerDuration.
-	currentTime := time.Now()
+	criticalTime := time.Now().Add(-maxIdleWorkerDuration)
 
 	wp.lock.Lock()
 	ready := wp.ready
 	n := len(ready)
-	i := 0
-	for i < n && currentTime.Sub(ready[i].lastUseTime) > maxIdleWorkerDuration {
-		i++
+
+	// Use binary-search algorithm to find out the index of the least recently worker which can be cleaned up.
+	i := func(l, r int) int {
+		var mid int
+		for l <= r {
+			mid = (l + r) / 2
+			if criticalTime.After(wp.ready[mid].lastUseTime) {
+				l = mid + 1
+			} else {
+				r = mid - 1
+			}
+		}
+		return r
+	}(0, n-1)
+	if i == -1 {
+		wp.lock.Unlock()
+		return
 	}
+
 	*scratch = append((*scratch)[:0], ready[:i]...)
 	if i > 0 {
 		m := copy(ready, ready[i:])
@@ -221,7 +236,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 		if err == errHijacked {
 			wp.connState(c, StateHijacked)
 		} else {
-			c.Close()
+			_ = c.Close()
 			wp.connState(c, StateClosed)
 		}
 		c = nil
