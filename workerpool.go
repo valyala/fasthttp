@@ -50,6 +50,11 @@ func (wp *workerPool) Start() {
 	}
 	wp.stopCh = make(chan struct{})
 	stopCh := wp.stopCh
+	wp.workerChanPool.New = func() interface{} {
+		return &workerChan{
+			ch: make(chan net.Conn, workerChanCap),
+		}
+	}
 	go func() {
 		var scratch []*workerChan
 		for {
@@ -187,11 +192,6 @@ func (wp *workerPool) getCh() *workerChan {
 			return nil
 		}
 		vch := wp.workerChanPool.Get()
-		if vch == nil {
-			vch = &workerChan{
-				ch: make(chan net.Conn, workerChanCap),
-			}
-		}
 		ch = vch.(*workerChan)
 		go func() {
 			wp.workerFunc(ch)
