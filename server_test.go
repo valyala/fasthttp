@@ -3147,6 +3147,24 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 	}
 }
 
+func TestIncompleteBody(t *testing.T) {
+	rw := &readWriter{}
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: google.com\r\nContent-Length: 5\r\n\r\n123")
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {},
+	}
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) {
 	var resp Response
 	if err := resp.Read(r); err != nil {
