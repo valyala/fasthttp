@@ -81,8 +81,8 @@ func (wp *workerPool) Stop() {
 	// serving the connection and noticing wp.mustStop = true.
 	wp.lock.Lock()
 	ready := wp.ready
-	for i, ch := range ready {
-		ch.ch <- nil
+	for i := range ready {
+		ready[i].ch <- nil
 		ready[i] = nil
 	}
 	wp.ready = ready[:0]
