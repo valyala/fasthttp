@@ -39,8 +39,7 @@ func binarySearch(workers []*worker, l, r int, criticalTime time.Time) int {
 	return r
 }
 
-func linearSearch(workers []*worker, criticalTime time.Time) int {
-	n := len(workers)
+func linearSearch(workers []*worker, n int, criticalTime time.Time) int {
 	i := 0
 	for i < n && criticalTime.After(workers[i].lastUseTime) {
 		i++
@@ -54,7 +53,8 @@ type worker struct {
 
 func BenchmarkCleanWorkers1(b *testing.B) {
 	workers, criticalTime := genTestData(10, 0.1)
-	rIndex := len(workers) - 1
+	wLen := len(workers)
+	rIndex := wLen - 1
 	b.Run("10,10%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -63,13 +63,14 @@ func BenchmarkCleanWorkers1(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
 
 	workers, criticalTime = genTestData(100, 0.1)
-	rIndex = len(workers) - 1
+	wLen = len(workers)
+	rIndex = wLen - 1
 	b.Run("100,10%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -78,13 +79,14 @@ func BenchmarkCleanWorkers1(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
 
 	workers, criticalTime = genTestData(1000, 0.1)
-	rIndex = len(workers) - 1
+	wLen = len(workers)
+	rIndex = wLen - 1
 	b.Run("1000,10%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -93,13 +95,14 @@ func BenchmarkCleanWorkers1(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
 
 	workers, criticalTime = genTestData(10000, 0.1)
-	rIndex = len(workers) - 1
+	wLen = len(workers)
+	rIndex = wLen - 1
 	b.Run("10000,10%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -108,7 +111,7 @@ func BenchmarkCleanWorkers1(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
@@ -116,7 +119,8 @@ func BenchmarkCleanWorkers1(b *testing.B) {
 
 func BenchmarkCleanWorkers2(b *testing.B) {
 	workers, criticalTime := genTestData(10, 0.5)
-	rIndex := len(workers) - 1
+	wLen := len(workers)
+	rIndex := wLen - 1
 	b.Run("10,50%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -125,13 +129,14 @@ func BenchmarkCleanWorkers2(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
 
 	workers, criticalTime = genTestData(100, 0.5)
-	rIndex = len(workers) - 1
+	wLen = len(workers)
+	rIndex = wLen - 1
 	b.Run("100,50%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -140,13 +145,14 @@ func BenchmarkCleanWorkers2(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
 
 	workers, criticalTime = genTestData(1000, 0.5)
-	rIndex = len(workers) - 1
+	wLen = len(workers)
+	rIndex = wLen - 1
 	b.Run("1000,50%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -155,13 +161,14 @@ func BenchmarkCleanWorkers2(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
 
 	workers, criticalTime = genTestData(10000, 0.5)
-	rIndex = len(workers) - 1
+	wLen = len(workers)
+	rIndex = wLen - 1
 	b.Run("10000,50%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -170,7 +177,7 @@ func BenchmarkCleanWorkers2(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
@@ -178,7 +185,8 @@ func BenchmarkCleanWorkers2(b *testing.B) {
 
 func BenchmarkCleanWorkers3(b *testing.B) {
 	workers, criticalTime := genTestData(10, 0.9)
-	rIndex := len(workers) - 1
+	wLen := len(workers)
+	rIndex := wLen - 1
 	b.Run("10,90%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -187,13 +195,14 @@ func BenchmarkCleanWorkers3(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
 
 	workers, criticalTime = genTestData(100, 0.9)
-	rIndex = len(workers) - 1
+	wLen = len(workers)
+	rIndex = wLen - 1
 	b.Run("100,90%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -202,13 +211,14 @@ func BenchmarkCleanWorkers3(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
 
 	workers, criticalTime = genTestData(1000, 0.9)
-	rIndex = len(workers) - 1
+	wLen = len(workers)
+	rIndex = wLen - 1
 	b.Run("1000,90%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -217,13 +227,14 @@ func BenchmarkCleanWorkers3(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
 
 	workers, criticalTime = genTestData(10000, 0.9)
-	rIndex = len(workers) - 1
+	wLen = len(workers)
+	rIndex = wLen - 1
 	b.Run("10000,90%", func(b *testing.B) {
 		b.Run("binary search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
@@ -232,7 +243,7 @@ func BenchmarkCleanWorkers3(b *testing.B) {
 		})
 		b.Run("linear search", func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				linearSearch(workers, criticalTime)
+				linearSearch(workers, wLen, criticalTime)
 			}
 		})
 	})
