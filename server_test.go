@@ -3159,7 +3159,7 @@ func TestIncompleteBodyReturnsUnexpectedEOF(t *testing.T) {
 	}()
 	select {
 	case err := <-ch:
-		if err.Error() != "unexpected EOF" {
+		if err == nil || err.Error() != "unexpected EOF" {
 			t.Fatal(err)
 		}
 	}
