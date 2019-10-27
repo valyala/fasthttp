@@ -3147,7 +3147,7 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 	}
 }
 
-func TestIncompleteBody(t *testing.T) {
+func TestIncompleteBodyReturnsUnexpectedEOF(t *testing.T) {
 	rw := &readWriter{}
 	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: google.com\r\nContent-Length: 5\r\n\r\n123")
 	s := &Server{
@@ -3159,7 +3159,7 @@ func TestIncompleteBody(t *testing.T) {
 	}()
 	select {
 	case err := <-ch:
-		if err != nil {
+		if err.Error() != "unexpected EOF" {
 			t.Fatal(err)
 		}
 	}
