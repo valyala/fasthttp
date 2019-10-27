@@ -109,18 +109,16 @@ func (wp *workerPool) clean(scratch *[]*workerChan) {
 	n := len(ready)
 
 	// Use binary-search algorithm to find out the index of the least recently worker which can be cleaned up.
-	i := func(l, r int) int {
-		var mid int
-		for l <= r {
-			mid = (l + r) / 2
-			if criticalTime.After(wp.ready[mid].lastUseTime) {
-				l = mid + 1
-			} else {
-				r = mid - 1
-			}
+	l, r, mid := 0, n-1, 0
+	for l <= r {
+		mid = (l + r) / 2
+		if criticalTime.After(wp.ready[mid].lastUseTime) {
+			l = mid + 1
+		} else {
+			r = mid - 1
 		}
-		return r
-	}(0, n-1)
+	}
+	i := r
 	if i == -1 {
 		wp.lock.Unlock()
 		return
