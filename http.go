@@ -641,6 +641,9 @@ func (req *Request) CopyTo(dst *Request) {
 	} else if dst.body != nil {
 		dst.body.Reset()
 	}
+
+	dst.multipartForm = req.multipartForm
+	dst.multipartFormBoundary = req.multipartFormBoundary
 }
 
 func (req *Request) copyToSkipBody(dst *Request) {
