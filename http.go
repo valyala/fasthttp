@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -63,6 +64,10 @@ type Response struct {
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header ResponseHeader
+
+	// Flush headers as soon as possible without waiting for first body bytes.
+	// Relevant for bodyStream only.
+	ImmediateHeaderFlush bool
 
 	bodyStream io.Reader
 	w          responseBodyWriter
@@ -699,7 +704,7 @@ func (req *Request) parseURI() {
 	}
 	req.parsedURI = true
 
-	req.uri.parseQuick(req.Header.RequestURI(), &req.Header, req.isTLS)
+	req.uri.parse(req.Header.Host(), req.Header.RequestURI(), req.isTLS)
 }
 
 // PostArgs returns POST arguments.
@@ -825,7 +830,7 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 	// in multipart/form-data requests.
 
 	if size <= 0 {
-		panic(fmt.Sprintf("BUG: form size must be greater than 0. Given %d", size))
+		return nil, fmt.Errorf("form size must be greater than 0. Given %d", size)
 	}
 	lr := io.LimitReader(r, int64(size))
 	mr := multipart.NewReader(lr, boundary)
@@ -870,6 +875,7 @@ func (resp *Response) Reset() {
 	resp.SkipBody = false
 	resp.raddr = nil
 	resp.laddr = nil
+	resp.ImmediateHeaderFlush = false
 }
 
 func (resp *Response) resetSkipHeader() {
@@ -921,6 +927,10 @@ var ErrGetOnly = errors.New("non-GET request received")
 // io.EOF is returned if r is closed before reading the first header byte.
 func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	req.resetSkipHeader()
+	if err := req.Header.Read(r); err != nil {
+		return err
+	}
+
 	return req.readLimitBody(r, maxBodySize, false)
 }
 
@@ -928,10 +938,6 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 	// Do not reset the request here - the caller must reset it before
 	// calling this method.
 
-	err := req.Header.Read(r)
-	if err != nil {
-		return err
-	}
 	if getOnly && !req.Header.IsGet() {
 		return ErrGetOnly
 	}
@@ -1143,6 +1149,25 @@ func (req *Request) Write(w *bufio.Writer) error {
 		}
 		req.Header.SetHostBytes(host)
 		req.Header.SetRequestURIBytes(uri.RequestURI())
+
+		if len(uri.username) > 0 {
+			// RequestHeader.SetBytesKV only uses RequestHeader.bufKV.key
+			// So we are free to use RequestHeader.bufKV.value as a scratch pad for
+			// the base64 encoding.
+			nl := len(uri.username) + len(uri.password) + 1
+			nb := nl + len(strBasicSpace)
+			tl := nb + base64.StdEncoding.EncodedLen(nl)
+			if tl > cap(req.Header.bufKV.value) {
+				req.Header.bufKV.value = make([]byte, 0, tl)
+			}
+			buf := req.Header.bufKV.value[:0]
+			buf = append(buf, uri.username...)
+			buf = append(buf, strColon...)
+			buf = append(buf, uri.password...)
+			buf = append(buf, strBasicSpace...)
+			base64.StdEncoding.Encode(buf[nb:tl], buf[:nl])
+			req.Header.SetBytesKV(strAuthorization, buf[nl:tl])
+		}
 	}
 
 	if req.bodyStream != nil {
@@ -1455,12 +1480,22 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) error {
 	}
 	if contentLength >= 0 {
 		if err = resp.Header.Write(w); err == nil && sendBody {
-			err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
+			if resp.ImmediateHeaderFlush {
+				err = w.Flush()
+			}
+			if err == nil {
+				err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
+			}
 		}
 	} else {
 		resp.Header.SetContentLength(-1)
 		if err = resp.Header.Write(w); err == nil && sendBody {
-			err = writeBodyChunked(w, resp.bodyStream)
+			if resp.ImmediateHeaderFlush {
+				err = w.Flush()
+			}
+			if err == nil {
+				err = writeBodyChunked(w, resp.bodyStream)
+			}
 		}
 	}
 	err1 := resp.closeBodyStream()

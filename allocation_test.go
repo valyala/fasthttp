@@ -9,6 +9,8 @@ import (
 )
 
 func TestAllocationServeConn(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 		},
@@ -49,7 +51,7 @@ func TestAllocationClient(t *testing.T) {
 	go s.Serve(ln)
 
 	c := &Client{}
-	url := "http://" + ln.Addr().String()
+	url := "http://test:test@" + ln.Addr().String() + "/foo?bar=baz"
 
 	n := testing.AllocsPerRun(100, func() {
 		req := AcquireRequest()
@@ -62,6 +64,22 @@ func TestAllocationClient(t *testing.T) {
 
 		ReleaseRequest(req)
 		ReleaseResponse(res)
+	})
+
+	if n != 0 {
+		t.Fatalf("expected 0 allocations, got %f", n)
+	}
+}
+
+func TestAllocationURI(t *testing.T) {
+	t.Parallel()
+
+	uri := []byte("http://username:password@example.com/some/path?foo=bar#test")
+
+	n := testing.AllocsPerRun(100, func() {
+		u := AcquireURI()
+		u.Parse(nil, uri)
+		ReleaseURI(u)
 	})
 
 	if n != 0 {

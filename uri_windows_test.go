@@ -5,6 +5,8 @@ package fasthttp
 import "testing"
 
 func TestURIPathNormalizeIssue86(t *testing.T) {
+	t.Parallel()
+
 	// see https://github.com/valyala/fasthttp/issues/86
 	var u URI
 

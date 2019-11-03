@@ -7,6 +7,8 @@ import (
 )
 
 func TestUserData(t *testing.T) {
+	t.Parallel()
+
 	var u userData
 
 	for i := 0; i < 10; i++ {
@@ -41,6 +43,8 @@ func testUserDataGet(t *testing.T, u *userData, key []byte, value interface{}) {
 }
 
 func TestUserDataValueClose(t *testing.T) {
+	t.Parallel()
+
 	var u userData
 
 	closeCalls := 0

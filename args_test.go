@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +13,8 @@ import (
 )
 
 func TestDecodeArgAppend(t *testing.T) {
+	t.Parallel()
+
 	testDecodeArgAppend(t, "", "")
 	testDecodeArgAppend(t, "foobar", "foobar")
 	testDecodeArgAppend(t, "тест", "тест")
@@ -33,6 +36,8 @@ func testDecodeArgAppend(t *testing.T, s, expectedResult string) {
 }
 
 func TestArgsAdd(t *testing.T) {
+	t.Parallel()
+
 	var a Args
 	a.Add("foo", "bar")
 	a.Add("foo", "baz")
@@ -143,6 +148,8 @@ func testArgsAcquireRelease(t *testing.T) {
 }
 
 func TestArgsPeekMulti(t *testing.T) {
+	t.Parallel()
+
 	var a Args
 	a.Parse("foo=123&bar=121&foo=321&foo=&barz=sdf")
 
@@ -169,9 +176,19 @@ func TestArgsPeekMulti(t *testing.T) {
 }
 
 func TestArgsEscape(t *testing.T) {
+	t.Parallel()
+
 	testArgsEscape(t, "foo", "bar", "foo=bar")
-	testArgsEscape(t, "f.o,1:2/4", "~`!@#$%^&*()_-=+\\|/[]{};:'\"<>,./?",
-		"f.o%2C1%3A2%2F4=%7E%60%21%40%23%24%25%5E%26*%28%29_-%3D%2B%5C%7C%2F%5B%5D%7B%7D%3B%3A%27%22%3C%3E%2C.%2F%3F")
+
+	// Test all characters
+	k := "f.o,1:2/4"
+	var v = make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		v[i] = byte(i)
+	}
+	u := url.Values{}
+	u.Add(k, string(v))
+	testArgsEscape(t, k, string(v), u.Encode())
 }
 
 func testArgsEscape(t *testing.T, k, v, expectedS string) {
@@ -183,7 +200,35 @@ func testArgsEscape(t *testing.T, k, v, expectedS string) {
 	}
 }
 
+func TestPathEscape(t *testing.T) {
+	t.Parallel()
+
+	testPathEscape(t, "/foo/bar")
+	testPathEscape(t, "")
+	testPathEscape(t, "/")
+	testPathEscape(t, "//")
+	testPathEscape(t, "*") // See https://github.com/golang/go/issues/11202
+
+	// Test all characters
+	var pathSegment = make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		pathSegment[i] = byte(i)
+	}
+	testPathEscape(t, "/foo/"+string(pathSegment))
+}
+
+func testPathEscape(t *testing.T, s string) {
+	u := url.URL{Path: s}
+	expectedS := u.EscapedPath()
+	res := string(appendQuotedPath(nil, []byte(s)))
+	if res != expectedS {
+		t.Fatalf("unexpected args %q. Expecting %q.", res, expectedS)
+	}
+}
+
 func TestArgsWriteTo(t *testing.T) {
+	t.Parallel()
+
 	s := "foo=bar&baz=123&aaa=bbb"
 
 	var a Args
@@ -204,6 +249,8 @@ func TestArgsWriteTo(t *testing.T) {
 }
 
 func TestArgsGetBool(t *testing.T) {
+	t.Parallel()
+
 	testArgsGetBool(t, "", false)
 	testArgsGetBool(t, "0", false)
 	testArgsGetBool(t, "n", false)
@@ -227,6 +274,8 @@ func testArgsGetBool(t *testing.T, value string, expectedResult bool) {
 }
 
 func TestArgsUint(t *testing.T) {
+	t.Parallel()
+
 	var a Args
 	a.SetUint("foo", 123)
 	a.SetUint("bar", 0)
@@ -260,6 +309,8 @@ func TestArgsUint(t *testing.T) {
 }
 
 func TestArgsCopyTo(t *testing.T) {
+	t.Parallel()
+
 	var a Args
 
 	// empty args
@@ -301,6 +352,8 @@ func testCopyTo(t *testing.T, a *Args) {
 }
 
 func TestArgsVisitAll(t *testing.T) {
+	t.Parallel()
+
 	var a Args
 	a.Set("foo", "bar")
 
@@ -320,6 +373,8 @@ func TestArgsVisitAll(t *testing.T) {
 }
 
 func TestArgsStringCompose(t *testing.T) {
+	t.Parallel()
+
 	var a Args
 	a.Set("foo", "bar")
 	a.Set("aa", "bbb")
@@ -337,6 +392,8 @@ func TestArgsStringCompose(t *testing.T) {
 }
 
 func TestArgsString(t *testing.T) {
+	t.Parallel()
+
 	var a Args
 
 	testArgsString(t, &a, "")
@@ -344,7 +401,7 @@ func TestArgsString(t *testing.T) {
 	testArgsString(t, &a, "foo=bar")
 	testArgsString(t, &a, "foo=bar&baz=sss")
 	testArgsString(t, &a, "")
-	testArgsString(t, &a, "f%20o=x.x*-_8x%D0%BF%D1%80%D0%B8%D0%B2%D0%B5aaa&sdf=ss")
+	testArgsString(t, &a, "f+o=x.x%2A-_8x%D0%BF%D1%80%D0%B8%D0%B2%D0%B5aaa&sdf=ss")
 	testArgsString(t, &a, "=asdfsdf")
 }
 
@@ -357,6 +414,8 @@ func testArgsString(t *testing.T, a *Args, s string) {
 }
 
 func TestArgsSetGetDel(t *testing.T) {
+	t.Parallel()
+
 	var a Args
 
 	if len(a.Peek("foo")) > 0 {
@@ -391,7 +450,7 @@ func TestArgsSetGetDel(t *testing.T) {
 
 	a.Parse("aaa=xxx&bb=aa")
 	if string(a.Peek("foo0")) != "" {
-		t.Fatalf("Unepxected value %q", a.Peek("foo0"))
+		t.Fatalf("Unexpected value %q", a.Peek("foo0"))
 	}
 	if string(a.Peek("aaa")) != "xxx" {
 		t.Fatalf("Unexpected value %q. Expected %q", a.Peek("aaa"), "xxx")
@@ -422,6 +481,8 @@ func TestArgsSetGetDel(t *testing.T) {
 }
 
 func TestArgsParse(t *testing.T) {
+	t.Parallel()
+
 	var a Args
 
 	// empty args
@@ -468,6 +529,8 @@ func TestArgsParse(t *testing.T) {
 }
 
 func TestArgsHas(t *testing.T) {
+	t.Parallel()
+
 	var a Args
 
 	// single arg

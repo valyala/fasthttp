@@ -5,6 +5,8 @@ import (
 )
 
 func TestIPxUint32(t *testing.T) {
+	t.Parallel()
+
 	testIPxUint32(t, 0)
 	testIPxUint32(t, 10)
 	testIPxUint32(t, 0x12892392)
@@ -19,6 +21,8 @@ func testIPxUint32(t *testing.T, n uint32) {
 }
 
 func TestPerIPConnCounter(t *testing.T) {
+	t.Parallel()
+
 	var cc perIPConnCounter
 
 	expectPanic(t, func() { cc.Unregister(123) })

@@ -186,7 +186,7 @@ func fasthttpEchoHandler(ctx *RequestCtx) {
 }
 
 func nethttpEchoHandler(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set(HeaderContentType, "text/plain")
 	w.Write([]byte(r.RequestURI))
 }
 
@@ -516,7 +516,7 @@ func BenchmarkNetHTTPClientEndToEndBigResponse10Inmemory(b *testing.B) {
 func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
 	bigResponse := createFixedBody(1024 * 1024)
 	h := func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set(HeaderContentType, "text/plain")
 		w.Write(bigResponse)
 	}
 	ln := fasthttputil.NewInmemoryListener()
