@@ -1462,8 +1462,19 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 	return err
 }
 
-func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) error {
-	var err error
+// ErrBodyStreamWritePanic is returned when panic happens during writing body stream.
+type ErrBodyStreamWritePanic struct {
+	error
+}
+
+func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = &ErrBodyStreamWritePanic{
+				error: fmt.Errorf("%+v", r),
+			}
+		}
+	}()
 
 	contentLength := resp.Header.ContentLength()
 	if contentLength < 0 {
