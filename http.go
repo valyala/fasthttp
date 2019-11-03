@@ -1471,7 +1471,7 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (err error
 	defer func() {
 		if r := recover(); r != nil {
 			err = &ErrBodyStreamWritePanic{
-				error: fmt.Errorf("%+v", r),
+				error: fmt.Errorf("panic while writing body stream: %+v", r),
 			}
 		}
 	}()

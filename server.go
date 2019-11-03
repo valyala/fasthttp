@@ -2219,11 +2219,6 @@ func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 		panic("BUG: cannot write timed out response")
 	}
 	err := ctx.Response.Write(w)
-	if err != nil {
-		if panicErr, ok := err.(*ErrBodyStreamWritePanic); ok {
-			ctx.logger.Printf("panic while writing response: %s", panicErr.Error())
-		}
-	}
 	ctx.Response.Reset()
 	return err
 }

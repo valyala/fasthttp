@@ -2189,3 +2189,64 @@ func TestResponseImmediateHeaderFlushChunked(t *testing.T) {
 
 	<-waitForIt
 }
+
+type ErroneousBodyStream struct {
+	errOnRead  bool
+	errOnClose bool
+}
+
+func (ebs *ErroneousBodyStream) Read(p []byte) (n int, err error) {
+	if ebs.errOnRead {
+		panic("reading erroneous body stream")
+	}
+	return 0, io.EOF
+}
+
+func (ebs *ErroneousBodyStream) Close() error {
+	if ebs.errOnClose {
+		panic("closing erroneous body stream")
+	}
+	return nil
+}
+
+func TestResponseBodyStreamErrorOnPanicDuringRead(t *testing.T) {
+	t.Parallel()
+	var resp Response
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+
+	ebs := &ErroneousBodyStream{errOnRead: true, errOnClose: false}
+	resp.SetBodyStream(ebs, 42)
+	err := resp.Write(bw)
+	if err == nil {
+		t.Fatalf("expected error when writing response.")
+	}
+	e, ok := err.(*ErrBodyStreamWritePanic)
+	if !ok {
+		t.Fatalf("expected error struct to be *ErrBodyStreamWritePanic, got: %+v.", e)
+	}
+	if e.Error() != "panic while writing body stream: reading erroneous body stream" {
+		t.Fatalf("unexpected error value, got: %+v.", e.Error())
+	}
+}
+
+func TestResponseBodyStreamErrorOnPanicDuringClose(t *testing.T) {
+	t.Parallel()
+	var resp Response
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+
+	ebs := &ErroneousBodyStream{errOnRead: false, errOnClose: true}
+	resp.SetBodyStream(ebs, 42)
+	err := resp.Write(bw)
+	if err == nil {
+		t.Fatalf("expected error when writing response.")
+	}
+	e, ok := err.(*ErrBodyStreamWritePanic)
+	if !ok {
+		t.Fatalf("expected error struct to be *ErrBodyStreamWritePanic, got: %+v.", e)
+	}
+	if e.Error() != "panic while writing body stream: closing erroneous body stream" {
+		t.Fatalf("unexpected error value, got: %+v.", e.Error())
+	}
+}
