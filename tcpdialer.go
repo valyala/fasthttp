@@ -437,7 +437,7 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver *net.Resolver) ([]net
 	}
 
 	if resolver == nil {
-		resolver = &net.Resolver{}
+		resolver = net.DefaultResolver
 	}
 
 	ctx := context.Background()
