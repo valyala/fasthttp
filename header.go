@@ -75,10 +75,11 @@ type RequestHeader struct {
 
 	// stores an immutable copy of headers as they were received from the
 	// wire.
-	rawHeadersCopy       []byte
-	EvenRawerHeadersCopy []byte
+	rawHeadersCopy []byte
 
 	NeededMore int
+	Peeks      []int
+	Buffered   []int
 }
 
 // SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
@@ -683,12 +684,16 @@ func (h *RequestHeader) resetSkipNormalize() {
 	h.contentType = h.contentType[:0]
 	h.userAgent = h.userAgent[:0]
 
-	h.h = nil
+	h.h = h.h[:0]
 	h.cookies = h.cookies[:0]
 	h.cookiesCollected = false
 
 	h.rawHeaders = h.rawHeaders[:0]
 	h.rawHeadersParsed = false
+
+	h.NeededMore = 0
+	h.Peeks = h.Peeks[:0]
+	h.Buffered = h.Buffered[:0]
 }
 
 // CopyTo copies all the headers to dst.
@@ -731,8 +736,9 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.rawHeadersParsed = h.rawHeadersParsed
 	dst.rawHeadersCopy = append(dst.rawHeadersCopy[:0], h.rawHeadersCopy...)
 
-	dst.EvenRawerHeadersCopy = append(dst.EvenRawerHeadersCopy[:0], h.EvenRawerHeadersCopy...)
 	dst.NeededMore = h.NeededMore
+	dst.Peeks = append(dst.Peeks[:0], h.Peeks...)
+	dst.Buffered = append(dst.Buffered[:0], h.Buffered...)
 }
 
 // VisitAll calls f for each header.
@@ -1389,12 +1395,8 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 	h.resetSkipNormalize()
 	b, err := r.Peek(n)
 
-	buffered := r.Buffered()
-	if c := cap(h.EvenRawerHeadersCopy); c < buffered {
-		h.EvenRawerHeadersCopy = make([]byte, buffered)
-	}
-	peeked, _ := r.Peek(buffered)
-	h.EvenRawerHeadersCopy = append(h.EvenRawerHeadersCopy[:0], peeked...)
+	h.Peeks = append(h.Peeks, n)
+	h.Buffered = append(h.Buffered, r.Buffered())
 
 	if len(b) == 0 {
 		if err == io.EOF {
