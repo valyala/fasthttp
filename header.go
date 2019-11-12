@@ -690,10 +690,6 @@ func (h *RequestHeader) resetSkipNormalize() {
 
 	h.rawHeaders = h.rawHeaders[:0]
 	h.rawHeadersParsed = false
-
-	h.NeededMore = 0
-	h.Peeks = h.Peeks[:0]
-	h.Buffered = h.Buffered[:0]
 }
 
 // CopyTo copies all the headers to dst.
@@ -1375,11 +1371,12 @@ func headerErrorMsg(typ string, err error, b []byte) error {
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) Read(r *bufio.Reader) error {
 	n := 1
-	needMore := 0
+	h.NeededMore = 0
+	h.Peeks = h.Peeks[:0]
+	h.Buffered = h.Buffered[:0]
 	for {
 		err := h.tryRead(r, n)
 		if err == nil {
-			h.NeededMore = needMore
 			return nil
 		}
 		if err != errNeedMore {
@@ -1387,7 +1384,7 @@ func (h *RequestHeader) Read(r *bufio.Reader) error {
 			return err
 		}
 		n = r.Buffered() + 1
-		needMore++
+		h.NeededMore++
 	}
 }
 
