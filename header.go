@@ -683,7 +683,7 @@ func (h *RequestHeader) resetSkipNormalize() {
 	h.contentType = h.contentType[:0]
 	h.userAgent = h.userAgent[:0]
 
-	h.h = h.h[:0]
+	h.h = nil
 	h.cookies = h.cookies[:0]
 	h.cookiesCollected = false
 
