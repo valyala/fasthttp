@@ -172,25 +172,16 @@ OS: CentOS Linux release 7.3.1611 (Core)
 ## Basic Test
 
 The first test case mocks 0 ms, 10 ms, 100 ms, 500 ms processing time in handlers.
-
 ![Benchmark (Round 3)](https://raw.githubusercontent.com/smallnest/go-web-framework-benchmark/master/benchmark.png)
 The number of concurrent clients is 5000.
-
-
 
 ![Latency (Round 3)](https://raw.githubusercontent.com/smallnest/go-web-framework-benchmark/master/benchmark_latency.png)
 Latencies represent the real processing time by web servers. The smaller is the better.
 
-
-
 ![Allocs (Round 3)](https://raw.githubusercontent.com/smallnest/go-web-framework-benchmark/master/benchmark_alloc.png)
 Allocations represent the heap allocations by web servers when running the tests. The unit is MB. The smaller is the better.
 
-
-
-
 If we enable http-pipelining, test result would look as following:
-
 ![benchmark pipelining (Round 2)](https://raw.githubusercontent.com/smallnest/go-web-framework-benchmark/master/benchmark-pipeline.png)
 
 **For more details about the benchmark results, please check [go-web-framework-benchmark](https://github.com/smallnest/go-web-framework-benchmark).**
