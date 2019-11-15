@@ -14,6 +14,8 @@ connections per physical server.
 
 [Client Benchmarks](#http-client-comparison-with-nethttp)
 
+[Benchmarks with other http frameworks in Go](#benchmarks-with-other-http-frameworks-in-go)
+
 [Install](#install)
 
 [Documentation](https://godoc.org/github.com/valyala/fasthttp)
@@ -156,6 +158,42 @@ BenchmarkClientGetEndToEnd100Inmemory-4                 	10000000	      1329 ns/
 BenchmarkClientGetEndToEnd1000Inmemory-4                	10000000	      1316 ns/op	       5 B/op	       0 allocs/op
 ```
 
+# Benchmarks with other http frameworks in Go
+
+## Test Environment
+
+```powershell
+CPU: Intel(R) Xeon(R) CPU E5-2630 v4 @ 2.20GHz (2 cpus, 10 physical cores, 40 logical cores)
+Memory: 32G
+Go: go1.12.7 linux/amd64
+OS: CentOS Linux release 7.3.1611 (Core)
+```
+
+## Basic Test
+
+The first test case mocks 0 ms, 10 ms, 100 ms, 500 ms processing time in handlers.
+
+![Benchmark (Round 3)](https://raw.githubusercontent.com/smallnest/go-web-framework-benchmark/master/benchmark.png)
+The number of concurrent clients is 5000.
+
+
+
+![Latency (Round 3)](https://raw.githubusercontent.com/smallnest/go-web-framework-benchmark/master/benchmark_latency.png)
+Latencies represent the real processing time by web servers. The smaller is the better.
+
+
+
+![Allocs (Round 3)](https://raw.githubusercontent.com/smallnest/go-web-framework-benchmark/master/benchmark_alloc.png)
+Allocations represent the heap allocations by web servers when running the tests. The unit is MB. The smaller is the better.
+
+
+
+
+If we enable http-pipelining, test result would look as following:
+
+![benchmark pipelining (Round 2)](https://raw.githubusercontent.com/smallnest/go-web-framework-benchmark/master/benchmark-pipeline.png)
+
+**For more details about the benchmark results, please check [go-web-framework-benchmark](https://github.com/smallnest/go-web-framework-benchmark).**
 
 # Install
 
