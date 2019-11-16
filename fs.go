@@ -194,7 +194,7 @@ func NewPathPrefixStripper(prefixSize int) PathRewriteFunc {
 //
 // It is prohibited copying FS values. Create new values instead.
 type FS struct {
-	noCopy noCopy
+	noCopy noCopy //nolint:unused,structcheck
 
 	// Path to the root directory to serve files from.
 	Root string
@@ -1193,7 +1193,9 @@ func readFileHeader(f *os.File, compressed bool) ([]byte, error) {
 		N: 512,
 	}
 	data, err := ioutil.ReadAll(lr)
-	f.Seek(0, 0)
+	if _, err := f.Seek(0, 0); err != nil {
+		return nil, err
+	}
 
 	if zr != nil {
 		releaseGzipReader(zr)

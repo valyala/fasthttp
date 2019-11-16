@@ -90,7 +90,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				ctx.Response.Header.Set(k, v)
 			}
 		}
-		ctx.Write(w.body)
+		ctx.Write(w.body) //nolint:errcheck
 	}
 }
 

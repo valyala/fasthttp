@@ -58,8 +58,8 @@ func testRequestCopyTo(t *testing.T, src *Request) {
 	var dst Request
 	src.CopyTo(&dst)
 
-	if !reflect.DeepEqual(*src, dst) {
-		t.Fatalf("RequestCopyTo fail, src: \n%+v\ndst: \n%+v\n", *src, dst)
+	if !reflect.DeepEqual(*src, dst) { //nolint:govet
+		t.Fatalf("RequestCopyTo fail, src: \n%+v\ndst: \n%+v\n", *src, dst) //nolint:govet
 	}
 }
 
@@ -67,8 +67,8 @@ func testResponseCopyTo(t *testing.T, src *Response) {
 	var dst Response
 	src.CopyTo(&dst)
 
-	if !reflect.DeepEqual(*src, dst) {
-		t.Fatalf("ResponseCopyTo fail, src: \n%+v\ndst: \n%+v\n", *src, dst)
+	if !reflect.DeepEqual(*src, dst) { //nolint:govet
+		t.Fatalf("ResponseCopyTo fail, src: \n%+v\ndst: \n%+v\n", *src, dst) //nolint:govet
 	}
 }
 
@@ -901,10 +901,10 @@ func TestResponseGzipStream(t *testing.T) {
 		fmt.Fprintf(w, "foo")
 		w.Flush()
 		time.Sleep(time.Millisecond)
-		w.Write([]byte("barbaz"))
-		w.Flush()
+		w.Write([]byte("barbaz")) //nolint:errcheck
+		w.Flush()                 //nolint:errcheck
 		time.Sleep(time.Millisecond)
-		fmt.Fprintf(w, "1234")
+		fmt.Fprintf(w, "1234") //nolint:errcheck
 		if err := w.Flush(); err != nil {
 			t.Fatalf("unexpected error: %s", err)
 		}
@@ -923,11 +923,11 @@ func TestResponseDeflateStream(t *testing.T) {
 		t.Fatalf("IsBodyStream must return false")
 	}
 	r.SetBodyStreamWriter(func(w *bufio.Writer) {
-		w.Write([]byte("foo"))
-		w.Flush()
-		fmt.Fprintf(w, "barbaz")
-		w.Flush()
-		w.Write([]byte("1234"))
+		w.Write([]byte("foo"))   //nolint:errcheck
+		w.Flush()                //nolint:errcheck
+		fmt.Fprintf(w, "barbaz") //nolint:errcheck
+		w.Flush()                //nolint:errcheck
+		w.Write([]byte("1234"))  //nolint:errcheck
 		if err := w.Flush(); err != nil {
 			t.Fatalf("unexpected error: %s", err)
 		}
@@ -1773,43 +1773,39 @@ func testResponseReadSuccess(t *testing.T, resp *Response, response string, expe
 func TestReadBodyFixedSize(t *testing.T) {
 	t.Parallel()
 
-	var b []byte
-
 	// zero-size body
-	testReadBodyFixedSize(t, b, 0)
+	testReadBodyFixedSize(t, 0)
 
 	// small-size body
-	testReadBodyFixedSize(t, b, 3)
+	testReadBodyFixedSize(t, 3)
 
 	// medium-size body
-	testReadBodyFixedSize(t, b, 1024)
+	testReadBodyFixedSize(t, 1024)
 
 	// large-size body
-	testReadBodyFixedSize(t, b, 1024*1024)
+	testReadBodyFixedSize(t, 1024*1024)
 
 	// smaller body after big one
-	testReadBodyFixedSize(t, b, 34345)
+	testReadBodyFixedSize(t, 34345)
 }
 
 func TestReadBodyChunked(t *testing.T) {
 	t.Parallel()
 
-	var b []byte
-
 	// zero-size body
-	testReadBodyChunked(t, b, 0)
+	testReadBodyChunked(t, 0)
 
 	// small-size body
-	testReadBodyChunked(t, b, 5)
+	testReadBodyChunked(t, 5)
 
 	// medium-size body
-	testReadBodyChunked(t, b, 43488)
+	testReadBodyChunked(t, 43488)
 
 	// big body
-	testReadBodyChunked(t, b, 3*1024*1024)
+	testReadBodyChunked(t, 3*1024*1024)
 
 	// smaler body after big one
-	testReadBodyChunked(t, b, 12343)
+	testReadBodyChunked(t, 12343)
 }
 
 func TestRequestURITLS(t *testing.T) {
@@ -1926,7 +1922,7 @@ func testRequestPostArgsSuccess(t *testing.T, req *Request, s string, expectedAr
 	}
 }
 
-func testReadBodyChunked(t *testing.T, b []byte, bodySize int) {
+func testReadBodyChunked(t *testing.T, bodySize int) {
 	body := createFixedBody(bodySize)
 	chunkedBody := createChunkedBody(body)
 	expectedTrailer := []byte("chunked shit")
@@ -1944,7 +1940,7 @@ func testReadBodyChunked(t *testing.T, b []byte, bodySize int) {
 	verifyTrailer(t, br, string(expectedTrailer))
 }
 
-func testReadBodyFixedSize(t *testing.T, b []byte, bodySize int) {
+func testReadBodyFixedSize(t *testing.T, bodySize int) {
 	body := createFixedBody(bodySize)
 	expectedTrailer := []byte("traler aaaa")
 	bodyWithTrailer := append(body, expectedTrailer...)
@@ -2123,7 +2119,7 @@ func TestResponseImmediateHeaderFlushFixedLength(t *testing.T) {
 
 	go func() {
 		if err := bw.Write(bb); err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %s", err)
 		}
 		waitForIt <- struct{}{}
 	}()
@@ -2168,7 +2164,7 @@ func TestResponseImmediateHeaderFlushChunked(t *testing.T) {
 
 	go func() {
 		if err := bw.Write(bb); err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %s", err)
 		}
 
 		waitForIt <- struct{}{}

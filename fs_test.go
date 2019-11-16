@@ -100,7 +100,7 @@ func TestPathNotFoundFunc(t *testing.T) {
 	t.Parallel()
 
 	testPathNotFound(t, func(ctx *RequestCtx) {
-		ctx.WriteString("Not found hehe")
+		ctx.WriteString("Not found hehe") //nolint:errcheck
 	})
 }
 
@@ -538,14 +538,14 @@ func TestFileLock(t *testing.T) {
 		filePath := fmt.Sprintf("foo/bar/%d.jpg", i)
 		lock := getFileLock(filePath)
 		lock.Lock()
-		lock.Unlock()
+		lock.Unlock() // nolint:staticcheck
 	}
 
 	for i := 0; i < 10; i++ {
 		filePath := fmt.Sprintf("foo/bar/%d.jpg", i)
 		lock := getFileLock(filePath)
 		lock.Lock()
-		lock.Unlock()
+		lock.Unlock() // nolint:staticcheck
 	}
 }
 

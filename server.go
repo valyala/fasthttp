@@ -148,7 +148,7 @@ type ServeHandler func(c net.Conn) error
 //
 // It is safe to call Server methods from concurrently running goroutines.
 type Server struct {
-	noCopy noCopy
+	noCopy noCopy //nolint:unused,structcheck
 
 	// Handler for processing incoming requests.
 	//
@@ -457,9 +457,9 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
 		if ctx.Request.Header.HasAcceptEncodingBytes(strGzip) {
-			ctx.Response.gzipBody(level)
+			ctx.Response.gzipBody(level) //nolint:errcheck
 		} else if ctx.Request.Header.HasAcceptEncodingBytes(strDeflate) {
-			ctx.Response.deflateBody(level)
+			ctx.Response.deflateBody(level) //nolint:errcheck
 		}
 	}
 }
@@ -479,7 +479,7 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 // running goroutines. The only exception is TimeoutError*, which may be called
 // while other goroutines accessing RequestCtx.
 type RequestCtx struct {
-	noCopy noCopy
+	noCopy noCopy //nolint:unused,structcheck
 
 	// Incoming request.
 	//
@@ -1357,9 +1357,15 @@ func (ln tcpKeepaliveListener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	tc.SetKeepAlive(true)
+	if err := tc.SetKeepAlive(true); err != nil {
+		tc.Close() //nolint:errcheck
+		return nil, err
+	}
 	if ln.keepalivePeriod > 0 {
-		tc.SetKeepAlivePeriod(ln.keepalivePeriod)
+		if err := tc.SetKeepAlivePeriod(ln.keepalivePeriod); err != nil {
+			tc.Close() //nolint:errcheck
+			return nil, err
+		}
 	}
 	return tc, nil
 }
@@ -1981,7 +1987,10 @@ func (s *Server) serveConn(c net.Conn) error {
 			if bw == nil {
 				bw = acquireWriter(ctx)
 			}
-			bw.Write(strResponseContinue)
+			_, err = bw.Write(strResponseContinue)
+			if err != nil {
+				break
+			}
 			err = bw.Flush()
 			if err != nil {
 				break
@@ -2105,10 +2114,15 @@ func (s *Server) serveConn(c net.Conn) error {
 				releaseWriter(s, bw)
 				bw = nil
 			}
-			c.SetReadDeadline(zeroTime)
-			c.SetWriteDeadline(zeroTime)
+			err = c.SetReadDeadline(zeroTime)
+			if err != nil {
+				break
+			}
+			err = c.SetWriteDeadline(zeroTime)
+			if err != nil {
+				break
+			}
 			go hijackConnHandler(hjr, c, s, hijackHandler)
-			hijackHandler = nil
 			err = errHijacked
 			break
 		}
@@ -2453,7 +2467,7 @@ func (s *Server) getServerName() []byte {
 }
 
 func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
-	w.Write(statusLine(statusCode))
+	w.Write(statusLine(statusCode)) //nolint:errcheck
 
 	server := ""
 	if !s.NoDefaultServerHeader {
@@ -2493,7 +2507,7 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 	if bw == nil {
 		bw = acquireWriter(ctx)
 	}
-	writeResponse(ctx, bw)
+	writeResponse(ctx, bw) //nolint:errcheck
 	bw.Flush()
 	return bw
 }
