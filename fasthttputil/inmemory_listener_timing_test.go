@@ -163,7 +163,7 @@ func benchmarkExt(b *testing.B, h fasthttp.RequestHandler, bc *benchConfig) {
 }
 
 func streamingHandler(ctx *fasthttp.RequestCtx) {
-	ctx.WriteString("foobar")
+	ctx.WriteString("foobar") //nolint:errcheck
 }
 
 func handshakeHandler(ctx *fasthttp.RequestCtx) {

@@ -65,7 +65,7 @@ var cookiePool = &sync.Pool{
 //
 // Cookie instance MUST NOT be used from concurrently running goroutines.
 type Cookie struct {
-	noCopy noCopy
+	noCopy noCopy //nolint:unused,structcheck
 
 	key    []byte
 	value  []byte

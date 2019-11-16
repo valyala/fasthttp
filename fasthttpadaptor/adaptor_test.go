@@ -96,7 +96,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	req.SetRequestURI(expectedRequestURI)
 	req.Header.SetHost(expectedHost)
 	req.Header.Add(fasthttp.HeaderTransferEncoding, expectedTransferEncoding)
-	req.BodyWriter().Write([]byte(expectedBody))
+	req.BodyWriter().Write([]byte(expectedBody)) // nolint:errcheck
 	for k, v := range expectedHeader {
 		req.Header.Set(k, v)
 	}

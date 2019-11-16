@@ -18,7 +18,7 @@ import (
 // ResponseHeader instance MUST NOT be used from concurrently running
 // goroutines.
 type ResponseHeader struct {
-	noCopy noCopy
+	noCopy noCopy //nolint:unused,structcheck
 
 	disableNormalizing   bool
 	noHTTP11             bool
@@ -46,7 +46,7 @@ type ResponseHeader struct {
 // RequestHeader instance MUST NOT be used from concurrently running
 // goroutines.
 type RequestHeader struct {
-	noCopy noCopy
+	noCopy noCopy //nolint:unused,structcheck
 
 	disableNormalizing bool
 	noHTTP11           bool
@@ -1283,7 +1283,7 @@ func (h *ResponseHeader) Cookie(cookie *Cookie) bool {
 	if v == nil {
 		return false
 	}
-	cookie.ParseBytes(v)
+	cookie.ParseBytes(v) //nolint:errcheck
 	return true
 }
 
@@ -1978,7 +1978,7 @@ func (h *RequestHeader) parseRawHeaders() {
 	if len(h.rawHeaders) == 0 {
 		return
 	}
-	h.parseHeaders(h.rawHeaders)
+	h.parseHeaders(h.rawHeaders) //nolint:errcheck
 }
 
 func (h *RequestHeader) collectCookies() {

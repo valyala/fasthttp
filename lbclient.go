@@ -25,7 +25,7 @@ type BalancingClient interface {
 //
 // It is safe calling LBClient methods from concurrently running goroutines.
 type LBClient struct {
-	noCopy noCopy
+	noCopy noCopy //nolint:unused,structcheck
 
 	// Clients must contain non-zero clients list.
 	// Incoming requests are balanced among these clients.

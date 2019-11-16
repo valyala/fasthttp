@@ -273,7 +273,9 @@ func readHexInt(r *bufio.Reader) (int, error) {
 			if i == 0 {
 				return -1, errEmptyHexNum
 			}
-			r.UnreadByte()
+			if err := r.UnreadByte(); err != nil {
+				return -1, err
+			}
 			return n, nil
 		}
 		if i >= maxHexIntChars {

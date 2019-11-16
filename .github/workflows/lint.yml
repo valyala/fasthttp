@@ -1,0 +1,10 @@
+name: lint
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: GolangCI-Lint Action
+      uses: actions-contrib/golangci-lint@v0.1.0

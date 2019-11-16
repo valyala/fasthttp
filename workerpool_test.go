@@ -86,14 +86,14 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 			buf := make([]byte, 100)
 			n, err := conn.Read(buf)
 			if err != nil {
-				t.Fatalf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %s", err)
 			}
 			buf = buf[:n]
 			if string(buf) != "foobar" {
-				t.Fatalf("unexpected data read: %q. Expecting %q", buf, "foobar")
+				t.Errorf("unexpected data read: %q. Expecting %q", buf, "foobar")
 			}
 			if _, err = conn.Write([]byte("baz")); err != nil {
-				t.Fatalf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %s", err)
 			}
 
 			<-ready
@@ -113,20 +113,20 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 		go func() {
 			conn, err := ln.Dial()
 			if err != nil {
-				t.Fatalf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %s", err)
 			}
 			if _, err = conn.Write([]byte("foobar")); err != nil {
-				t.Fatalf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %s", err)
 			}
 			data, err := ioutil.ReadAll(conn)
 			if err != nil {
-				t.Fatalf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %s", err)
 			}
 			if string(data) != "baz" {
-				t.Fatalf("unexpected value read: %q. Expecting %q", data, "baz")
+				t.Errorf("unexpected value read: %q. Expecting %q", data, "baz")
 			}
 			if err = conn.Close(); err != nil {
-				t.Fatalf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %s", err)
 			}
 			clientCh <- struct{}{}
 		}()
@@ -144,7 +144,7 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 
 	go func() {
 		if _, err := ln.Dial(); err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %s", err)
 		}
 	}()
 	conn, err := ln.Accept()

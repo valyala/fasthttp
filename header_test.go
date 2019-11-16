@@ -1144,8 +1144,8 @@ func TestResponseHeaderCopyTo(t *testing.T) {
 	h.bufKV = argsKV{}
 	h1.bufKV = argsKV{}
 
-	if !reflect.DeepEqual(h, h1) {
-		t.Fatalf("ResponseHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", h, h1)
+	if !reflect.DeepEqual(h, h1) { //nolint:govet
+		t.Fatalf("ResponseHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", h, h1) //nolint:govet
 	}
 }
 
@@ -1178,8 +1178,8 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	h.bufKV = argsKV{}
 	h1.bufKV = argsKV{}
 
-	if !reflect.DeepEqual(h, h1) {
-		t.Fatalf("RequestHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", h, h1)
+	if !reflect.DeepEqual(h, h1) { //nolint:govet
+		t.Fatalf("RequestHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", h, h1) //nolint:govet
 	}
 }
 
@@ -1193,8 +1193,8 @@ func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
 
 	headers := h.String()
 
-	if strings.Index(headers, "Content-Type: \r\n") != -1 {
-		t.Fatalf("ResponseContentTypeNoDefaultNotEmpty fail, response: \n%+v\noutcome: \n%q\n", h, headers)
+	if strings.Contains(headers, "Content-Type: \r\n") {
+		t.Fatalf("ResponseContentTypeNoDefaultNotEmpty fail, response: \n%+v\noutcome: \n%q\n", h, headers) //nolint:govet
 	}
 }
 
@@ -1477,7 +1477,9 @@ func TestResponseHeaderCookie(t *testing.T) {
 
 	h.VisitAllCookie(func(key, value []byte) {
 		var cc Cookie
-		cc.ParseBytes(value)
+		if err := cc.ParseBytes(value); err != nil {
+			t.Fatal(err)
+		}
 		if !bytes.Equal(key, cc.Key()) {
 			t.Fatalf("Unexpected cookie key %q. Expected %q", key, cc.Key())
 		}
