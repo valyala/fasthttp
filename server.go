@@ -2460,6 +2460,8 @@ func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 		server = fmt.Sprintf("Server: %s\r\n", s.getServerName())
 	}
 
+	serverDateOnce.Do(updateServerDate)
+
 	fmt.Fprintf(w, "Connection: close\r\n"+
 		server+
 		"Date: %s\r\n"+
