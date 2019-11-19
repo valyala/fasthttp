@@ -120,6 +120,8 @@ var (
 	defaultDialer = &TCPDialer{Concurrency: 1000}
 )
 
+type LookupIPAddrFunc func(ctx context.Context, host string) ([]net.IPAddr, error)
+
 // TCPDialer contains options to control a group of Dial calls.
 type TCPDialer struct {
 	// Concurrency controls the maximum number of concurrent Dails
@@ -142,6 +144,10 @@ type TCPDialer struct {
 	// 	},
 	// }
 	Resolver *net.Resolver
+	// This function may be used to implement your own logic for name resolution
+	// (e.g., doing DNS request separately and reusing its result here).
+	// By default if this function is not defined, the resolver above is used.
+	LookupIPAddr LookupIPAddrFunc
 
 	tcpAddrsLock sync.Mutex
 	tcpAddrsMap  map[string]*tcpAddrEntry
@@ -401,7 +407,7 @@ func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, uin
 	d.tcpAddrsLock.Unlock()
 
 	if e == nil {
-		addrs, err := resolveTCPAddrs(addr, dualStack, d.Resolver)
+		addrs, err := resolveTCPAddrs(addr, dualStack, d.Resolver, d.LookupIPAddr)
 		if err != nil {
 			d.tcpAddrsLock.Lock()
 			e = d.tcpAddrsMap[addr]
@@ -426,7 +432,7 @@ func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, uin
 	return e.addrs, idx, nil
 }
 
-func resolveTCPAddrs(addr string, dualStack bool, resolver *net.Resolver) ([]net.TCPAddr, error) {
+func resolveTCPAddrs(addr string, dualStack bool, resolver *net.Resolver, lookupFunc LookupIPAddrFunc) ([]net.TCPAddr, error) {
 	host, portS, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -440,8 +446,13 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver *net.Resolver) ([]net
 		resolver = net.DefaultResolver
 	}
 
+	var ipaddrs []net.IPAddr
 	ctx := context.Background()
-	ipaddrs, err := resolver.LookupIPAddr(ctx, host)
+	if lookupFunc == nil {
+		ipaddrs, err = resolver.LookupIPAddr(ctx, host)
+	} else {
+		ipaddrs, err = lookupFunc(ctx, host)
+	}
 	if err != nil {
 		return nil, err
 	}
