@@ -144,7 +144,7 @@ type TCPDialer struct {
 	// 	},
 	// }
 	Resolver *net.Resolver
-	// This function may be used to implement your own logic for name resolution
+	// LookupIPAddr may be used to implement your own logic for name resolution
 	// (e.g., doing DNS request separately and reusing its result here).
 	// By default if this function is not defined, the resolver above is used.
 	LookupIPAddr LookupIPAddrFunc
