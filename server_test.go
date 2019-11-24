@@ -73,11 +73,8 @@ func TestServerInvalidHeader(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 
-	// Since we delay header parsing for GET and HEAD requests until the users asks for it
-	// we can't return 400 in case of a bad header.
-	// Inside the handler above we make sure to test that the invalid Foo header was ignored.
-	if resp.StatusCode() != StatusOK {
-		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	if resp.StatusCode() != StatusBadRequest {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusBadRequest)
 	}
 
 	if err := c.Close(); err != nil {
