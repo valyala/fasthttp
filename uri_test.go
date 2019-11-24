@@ -349,8 +349,8 @@ func TestURIParse(t *testing.T) {
 	testURIParse(t, &u, "aaa.com", "//relative",
 		"http://aaa.com/relative", "aaa.com", "/relative", "//relative", "", "")
 
-	testURIParse(t, &u, "", "//aaa.com/absolute",
-		"http://aaa.com/absolute", "aaa.com", "/absolute", "/absolute", "", "")
+	testURIParse(t, &u, "", "//aaa.com//absolute",
+		"http://aaa.com/absolute", "aaa.com", "/absolute", "//absolute", "", "")
 }
 
 func testURIParse(t *testing.T, u *URI, host, uri,
