@@ -443,10 +443,9 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver) ([]net.TCPA
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
-
-	var ipaddrs []net.IPAddr
+	
 	ctx := context.Background()
-	ipaddrs, err = resolver.LookupIPAddr(ctx, host)
+	ipaddrs, err := resolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, err
 	}
