@@ -120,6 +120,10 @@ var (
 	defaultDialer = &TCPDialer{Concurrency: 1000}
 )
 
+type Resolver interface {
+	LookupIPAddr(context.Context, string) (names []net.IPAddr, err error)
+}
+
 // TCPDialer contains options to control a group of Dial calls.
 type TCPDialer struct {
 	// Concurrency controls the maximum number of concurrent Dails
@@ -141,7 +145,7 @@ type TCPDialer struct {
 	// 		},
 	// 	},
 	// }
-	Resolver *net.Resolver
+	Resolver Resolver
 
 	tcpAddrsLock sync.Mutex
 	tcpAddrsMap  map[string]*tcpAddrEntry
@@ -426,7 +430,7 @@ func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, uin
 	return e.addrs, idx, nil
 }
 
-func resolveTCPAddrs(addr string, dualStack bool, resolver *net.Resolver) ([]net.TCPAddr, error) {
+func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver) ([]net.TCPAddr, error) {
 	host, portS, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
@@ -439,7 +443,7 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver *net.Resolver) ([]net
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
-
+	
 	ctx := context.Background()
 	ipaddrs, err := resolver.LookupIPAddr(ctx, host)
 	if err != nil {
