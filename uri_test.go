@@ -345,6 +345,12 @@ func TestURIParse(t *testing.T) {
 	// http:// in query params
 	testURIParse(t, &u, "aaa.com", "/foo?bar=http://google.com",
 		"http://aaa.com/foo?bar=http://google.com", "aaa.com", "/foo", "/foo", "bar=http://google.com", "")
+
+	testURIParse(t, &u, "aaa.com", "//relative",
+		"http://aaa.com/relative", "aaa.com", "/relative", "//relative", "", "")
+
+	testURIParse(t, &u, "", "//aaa.com//absolute",
+		"http://aaa.com/absolute", "aaa.com", "/absolute", "//absolute", "", "")
 }
 
 func testURIParse(t *testing.T, u *URI, host, uri,
