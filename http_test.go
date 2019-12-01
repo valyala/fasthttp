@@ -1534,6 +1534,9 @@ func TestRequestSuccess(t *testing.T) {
 
 	// only host is set
 	testRequestSuccess(t, "", "", "gooble.com", "", "", MethodGet)
+
+	// get with body
+	testRequestSuccess(t, MethodGet, "/foo/bar", "aaa.com", "", "foobar", MethodGet)
 }
 
 func TestResponseSuccess(t *testing.T) {
@@ -1605,9 +1608,6 @@ func TestRequestWriteError(t *testing.T) {
 
 	// no host
 	testRequestWriteError(t, "", "/foo/bar", "", "", "")
-
-	// get with body
-	testRequestWriteError(t, MethodGet, "/foo/bar", "aaa.com", "", "foobar")
 }
 
 func testRequestWriteError(t *testing.T, method, requestURI, host, userAgent, body string) {

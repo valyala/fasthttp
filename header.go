@@ -245,9 +245,6 @@ func (h *ResponseHeader) mustSkipContentLength() bool {
 // It may be negative:
 // -1 means Transfer-Encoding: chunked.
 func (h *RequestHeader) ContentLength() int {
-	if h.ignoreBody() {
-		return 0
-	}
 	return h.realContentLength()
 }
 
@@ -1604,17 +1601,14 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	}
 
 	contentType := h.ContentType()
-	if !h.ignoreBody() {
-		if len(contentType) == 0 {
-			contentType = strPostArgsContentType
-		}
+	if len(contentType) == 0 && !h.ignoreBody() {
+		contentType = strPostArgsContentType
+	}
+	if len(contentType) > 0 {
 		dst = appendHeaderLine(dst, strContentType, contentType)
-
-		if len(h.contentLengthBytes) > 0 {
-			dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
-		}
-	} else if len(contentType) > 0 {
-		dst = appendHeaderLine(dst, strContentType, contentType)
+	}
+	if len(h.contentLengthBytes) > 0 {
+		dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
 	}
 
 	for i, n := 0, len(h.h); i < n; i++ {
@@ -1675,16 +1669,12 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 		return 0, err
 	}
 	h.rawHeadersCopy = append(h.rawHeadersCopy[:0], rawHeaders...)
-	if !h.ignoreBody() || h.noHTTP11 {
-		n, err = h.parseHeaders(buf[m:])
-		if err != nil {
-			return 0, err
-		}
-		h.rawHeaders = append(h.rawHeaders[:0], buf[m:m+n]...)
-		h.rawHeadersParsed = true
-	} else {
-		h.rawHeaders = rawHeaders
+	n, err = h.parseHeaders(buf[m:])
+	if err != nil {
+		return 0, err
 	}
+	h.rawHeaders = append(h.rawHeaders[:0], buf[m:m+n]...)
+	h.rawHeadersParsed = true
 	return m + n, nil
 }
 

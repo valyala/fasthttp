@@ -1184,11 +1184,12 @@ func (req *Request) Write(w *bufio.Writer) error {
 		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
 	}
 
-	hasBody := !req.Header.ignoreBody()
-	if hasBody {
-		if len(body) == 0 {
-			body = req.postArgs.QueryString()
-		}
+	hasBody := false
+	if len(body) == 0 {
+		body = req.postArgs.QueryString()
+	}
+	if len(body) != 0 || !req.Header.ignoreBody() {
+		hasBody = true
 		req.Header.SetContentLength(len(body))
 	}
 	if err = req.Header.Write(w); err != nil {

@@ -19,6 +19,39 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestClientGetWithBody(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			body := ctx.Request.Body()
+			ctx.Write(body)
+		},
+	}
+	go s.Serve(ln)
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req, res := AcquireRequest(), AcquireResponse()
+	defer func() {
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+	}()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	req.SetBodyString("test")
+	err := c.Do(req, res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Body()) == 0 {
+		t.Fatal("missing request body")
+	}
+}
+
 func TestClientURLAuth(t *testing.T) {
 	t.Parallel()
 
