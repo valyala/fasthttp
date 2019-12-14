@@ -2229,9 +2229,23 @@ func normalizeHeaderValue(ov, ob []byte, headerLength int) (nv, nb []byte, nhl i
 		nv[write] = c
 		write++
 	}
+
 	nv = nv[:write]
 	copy(ob[write:], ob[write+shrunk:])
-	nb = ob[write+2 : len(ob)-shrunk]
+
+	// Check if we need to skip \r\n or just \n
+	skip := 0
+	if ob[write] == '\r' {
+		if ob[write+1] == '\n' {
+			skip += 2
+		} else {
+			skip++
+		}
+	} else if ob[write] == '\n' {
+		skip++
+	}
+
+	nb = ob[write+skip : len(ob)-shrunk]
 	nhl = headerLength - shrunk
 	return
 }
