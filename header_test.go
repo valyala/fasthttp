@@ -6,10 +6,48 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestResponseHeaderMultiLineValue(t *testing.T) {
+	s := "HTTP/1.1 200 OK\r\n" +
+		"EmptyValue1:\r\n" +
+		"Content-Type: foo/bar;\r\n\tnewline;\r\n another/newline\r\n" + // the '\t' will be kept, won't be removed
+		"Foo: Bar\r\n" +
+		"Multi-Line: one;\r\n two\r\n" +
+		"Values: v1;\r\n v2;\r\n v3; v4\r\n" +
+		"\r\n"
+	expectContentType := "foo/bar;\tnewline; another/newline"
+	// net/http not only remove "\r\n" but also replace \t to space
+	expectNetHttpContentType := "foo/bar; newline; another/newline"
+	expectMultiLine := "one; two"
+	header := new(ResponseHeader)
+	_, err := header.parse([]byte(s))
+	if err != nil {
+		t.Fatalf("parse headers with multi-line values failed, %s", err)
+	}
+	gotContentType := header.Peek("Content-Type")
+	if string(gotContentType) != expectContentType {
+		t.Fatalf("unexpected content-type: %q. Expecting %q", gotContentType, expectContentType)
+	}
+	gotMultiLine := header.Peek("Multi-Line")
+	if string(gotMultiLine) != expectMultiLine {
+		t.Fatalf("unexpected multi-line: %q. Expecting %q", gotMultiLine, expectMultiLine)
+	}
+	// ensure behave same as net/http
+	response, err := http.ReadResponse(bufio.NewReader(strings.NewReader(s)), nil)
+	if err != nil {
+		t.Fatalf("parse response using net/http failed, %s", err)
+	}
+	gotNetHttpContentType := response.Header.Get("Content-Type")
+	if gotNetHttpContentType != expectNetHttpContentType {
+		t.Fatalf("unexpected content-type (net/http): %q. Expecting %q",
+			gotNetHttpContentType, expectNetHttpContentType)
+	}
+}
 
 func TestResponseHeaderEmptyValueFromHeader(t *testing.T) {
 	t.Parallel()
