@@ -15,37 +15,43 @@ import (
 func TestResponseHeaderMultiLineValue(t *testing.T) {
 	s := "HTTP/1.1 200 OK\r\n" +
 		"EmptyValue1:\r\n" +
-		"Content-Type: foo/bar;\r\n\tnewline;\r\n another/newline\r\n" + // the '\t' will be kept, won't be removed
+		"Content-Type: foo/bar;\r\n\tnewline;\r\n another/newline\r\n" +
 		"Foo: Bar\r\n" +
 		"Multi-Line: one;\r\n two\r\n" +
-		"Values: v1;\r\n v2;\r\n v3; v4\r\n" +
+		"Values: v1;\r\n v2; v3;\r\n v4;\tv5\r\n" +
 		"\r\n"
-	expectContentType := "foo/bar;\tnewline; another/newline"
-	// net/http not only remove "\r\n" but also replace \t to space
-	expectNetHttpContentType := "foo/bar; newline; another/newline"
-	expectMultiLine := "one; two"
 	header := new(ResponseHeader)
-	_, err := header.parse([]byte(s))
-	if err != nil {
+	if _, err := header.parse([]byte(s)); err != nil {
 		t.Fatalf("parse headers with multi-line values failed, %s", err)
 	}
-	gotContentType := header.Peek("Content-Type")
-	if string(gotContentType) != expectContentType {
-		t.Fatalf("unexpected content-type: %q. Expecting %q", gotContentType, expectContentType)
-	}
-	gotMultiLine := header.Peek("Multi-Line")
-	if string(gotMultiLine) != expectMultiLine {
-		t.Fatalf("unexpected multi-line: %q. Expecting %q", gotMultiLine, expectMultiLine)
-	}
-	// ensure behave same as net/http
 	response, err := http.ReadResponse(bufio.NewReader(strings.NewReader(s)), nil)
 	if err != nil {
 		t.Fatalf("parse response using net/http failed, %s", err)
 	}
-	gotNetHttpContentType := response.Header.Get("Content-Type")
-	if gotNetHttpContentType != expectNetHttpContentType {
-		t.Fatalf("unexpected content-type (net/http): %q. Expecting %q",
-			gotNetHttpContentType, expectNetHttpContentType)
+
+	for name, vals := range response.Header {
+		got := string(header.Peek(name))
+		want := vals[0]
+
+		if got != want {
+			t.Errorf("unexpected %s got: %q want: %q", name, got, want)
+		}
+	}
+}
+
+func TestResponseHeaderMultiLineName(t *testing.T) {
+	s := "HTTP/1.1 200 OK\r\n" +
+		"Host: golang.org\r\n" +
+		"Gopher-New-\r\n" +
+		" Line: This is a header on multiple lines\r\n" +
+		"\r\n"
+	header := new(ResponseHeader)
+	if _, err := header.parse([]byte(s)); err != errInvalidName {
+		m := make(map[string]string)
+		header.VisitAll(func(key, value []byte) {
+			m[string(key)] = string(value)
+		})
+		t.Errorf("expected error, got %q (%v)", m, err)
 	}
 }
 
