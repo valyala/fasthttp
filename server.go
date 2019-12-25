@@ -508,7 +508,8 @@ type RequestCtx struct {
 	timeoutCh       chan struct{}
 	timeoutTimer    *time.Timer
 
-	hijackHandler HijackHandler
+	hijackHandler    HijackHandler
+	hijackNoResponse bool
 }
 
 // HijackHandler must process the hijacked connection c.
@@ -534,7 +535,9 @@ type HijackHandler func(c net.Conn)
 //     * 'Connection: close' header exists in either request or response.
 //     * Unexpected error during response writing to the connection.
 //
-// The server stops processing requests from hijacked connections.
+// The server stops processing requests from hijacked connections. If the second
+// argument (noResponse) is supplied and is true the server won't send back any response.
+//
 // Server limits such as Concurrency, ReadTimeout, WriteTimeout, etc.
 // aren't applied to hijacked connections.
 //
@@ -546,8 +549,12 @@ type HijackHandler func(c net.Conn)
 //     * WebSocket ( https://en.wikipedia.org/wiki/WebSocket )
 //     * HTTP/2.0 ( https://en.wikipedia.org/wiki/HTTP/2 )
 //
-func (ctx *RequestCtx) Hijack(handler HijackHandler) {
+func (ctx *RequestCtx) Hijack(handler HijackHandler, noResponse ...bool) {
 	ctx.hijackHandler = handler
+
+	if len(noResponse) == 1 && noResponse[0] {
+		ctx.hijackNoResponse = true
+	}
 }
 
 // Hijacked returns true after Hijack is called.
@@ -1869,9 +1876,10 @@ func (s *Server) serveConn(c net.Conn) error {
 		br *bufio.Reader
 		bw *bufio.Writer
 
-		err             error
-		timeoutResponse *Response
-		hijackHandler   HijackHandler
+		err              error
+		timeoutResponse  *Response
+		hijackHandler    HijackHandler
+		hijackNoResponse bool
 
 		connectionClose bool
 		isHTTP11        bool
@@ -2044,6 +2052,8 @@ func (s *Server) serveConn(c net.Conn) error {
 
 		hijackHandler = ctx.hijackHandler
 		ctx.hijackHandler = nil
+		hijackNoResponse = ctx.hijackNoResponse
+		ctx.hijackNoResponse = false
 
 		ctx.userValues.Reset()
 
@@ -2071,30 +2081,32 @@ func (s *Server) serveConn(c net.Conn) error {
 			ctx.Response.Header.SetServerBytes(serverName)
 		}
 
-		if bw == nil {
-			bw = acquireWriter(ctx)
-		}
-		if err = writeResponse(ctx, bw); err != nil {
-			break
-		}
-
-		// Only flush the writer if we don't have another request in the pipeline.
-		// This is a big of an ugly optimization for https://www.techempower.com/benchmarks/
-		// This benchmark will send 16 pipelined requests. It is faster to pack as many responses
-		// in a TCP packet and send it back at once than waiting for a flush every request.
-		// In real world circumstances this behaviour could be argued as being wrong.
-		if br == nil || br.Buffered() == 0 || connectionClose {
-			err = bw.Flush()
-			if err != nil {
+		if !hijackNoResponse {
+			if bw == nil {
+				bw = acquireWriter(ctx)
+			}
+			if err = writeResponse(ctx, bw); err != nil {
 				break
 			}
-		}
-		if connectionClose {
-			break
-		}
-		if s.ReduceMemoryUsage {
-			releaseWriter(s, bw)
-			bw = nil
+
+			// Only flush the writer if we don't have another request in the pipeline.
+			// This is a big of an ugly optimization for https://www.techempower.com/benchmarks/
+			// This benchmark will send 16 pipelined requests. It is faster to pack as many responses
+			// in a TCP packet and send it back at once than waiting for a flush every request.
+			// In real world circumstances this behaviour could be argued as being wrong.
+			if br == nil || br.Buffered() == 0 || connectionClose {
+				err = bw.Flush()
+				if err != nil {
+					break
+				}
+			}
+			if connectionClose {
+				break
+			}
+			if s.ReduceMemoryUsage && hijackHandler == nil {
+				releaseWriter(s, bw)
+				bw = nil
+			}
 		}
 
 		if hijackHandler != nil {

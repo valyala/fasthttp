@@ -2098,6 +2098,50 @@ func TestRequestCtxHijack(t *testing.T) {
 	}
 }
 
+func TestRequestCtxHijackNoResponse(t *testing.T) {
+	t.Parallel()
+
+	hijackDone := make(chan error)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Hijack(func(c net.Conn) {
+				_, err := c.Write([]byte("test"))
+				hijackDone <- err
+			}, true)
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\nContent-Length: 0\r\n\r\n")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout")
+	}
+
+	select {
+	case err := <-hijackDone:
+		if err != nil {
+			t.Fatalf("Unexpected error from hijack: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout")
+	}
+
+	if got := rw.w.String(); got != "test" {
+		t.Errorf(`expected "test", got %q`, got)
+	}
+}
+
 func TestRequestCtxInit(t *testing.T) {
 	var ctx RequestCtx
 	var logger testLogger
