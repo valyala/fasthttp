@@ -535,8 +535,7 @@ type HijackHandler func(c net.Conn)
 //     * 'Connection: close' header exists in either request or response.
 //     * Unexpected error during response writing to the connection.
 //
-// The server stops processing requests from hijacked connections. If the second
-// argument (noResponse) is supplied and is true the server won't send back any response.
+// The server stops processing requests from hijacked connections.
 //
 // Server limits such as Concurrency, ReadTimeout, WriteTimeout, etc.
 // aren't applied to hijacked connections.
@@ -549,12 +548,17 @@ type HijackHandler func(c net.Conn)
 //     * WebSocket ( https://en.wikipedia.org/wiki/WebSocket )
 //     * HTTP/2.0 ( https://en.wikipedia.org/wiki/HTTP/2 )
 //
-func (ctx *RequestCtx) Hijack(handler HijackHandler, noResponse ...bool) {
+func (ctx *RequestCtx) Hijack(handler HijackHandler) {
 	ctx.hijackHandler = handler
+}
 
-	if len(noResponse) == 1 && noResponse[0] {
-		ctx.hijackNoResponse = true
-	}
+// HijackSetNoResponse changes the behavior of hijacking a request.
+// If HijackSetNoResponse is called with false fasthttp will send a response
+// to the client before calling the HijackHandler (default). If HijackSetNoResponse
+// is called with true no response is send back before calling the
+// HijackHandler supplied in the Hijack function.
+func (ctx *RequestCtx) HijackSetNoResponse(noResponse bool) {
+	ctx.hijackNoResponse = noResponse
 }
 
 // Hijacked returns true after Hijack is called.

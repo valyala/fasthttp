@@ -2107,7 +2107,8 @@ func TestRequestCtxHijackNoResponse(t *testing.T) {
 			ctx.Hijack(func(c net.Conn) {
 				_, err := c.Write([]byte("test"))
 				hijackDone <- err
-			}, true)
+			})
+			ctx.HijackSetNoResponse(true)
 		},
 	}
 
