@@ -2505,6 +2505,8 @@ func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 func defaultErrorHandler(ctx *RequestCtx, err error) {
 	if _, ok := err.(*ErrSmallBuffer); ok {
 		ctx.Error("Too big request header", StatusRequestHeaderFieldsTooLarge)
+	} else if netErr, ok := err.(*net.OpError); ok && netErr.Timeout() {
+		ctx.Error("Request timeout", StatusRequestTimeout)
 	} else {
 		ctx.Error("Error when parsing request", StatusBadRequest)
 	}
