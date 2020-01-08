@@ -12,3 +12,6 @@ const (
 	MethodOptions = "OPTIONS" // RFC 7231, 4.3.7
 	MethodTrace   = "TRACE"   // RFC 7231, 4.3.8
 )
+
+// HTTP max length of methods, len(MethodConnect) == 7.
+const MaxLengthMethod = 7

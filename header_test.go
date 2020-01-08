@@ -2403,6 +2403,20 @@ func TestRequestHeaderReadError(t *testing.T) {
 	testRequestHeaderReadError(t, h, "POST /a HTTP/1.1\r\nHost: bb\r\nContent-Type: aa\r\nContent-Length: dff\r\n\r\nqwerty")
 }
 
+func TestRequestHeaderInvalidMethodFromString(t *testing.T) {
+	t.Parallel()
+
+	s := "XXXXXXXX / HTTP/1.1\r\n" +
+		"Host: foobar\r\n" +
+		"\r\n"
+	var h RequestHeader
+	want := "get http request invalid method in"
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := h.Read(br); err != nil && !strings.Contains(err.Error(), want) {
+		t.Fatalf("unexpected error: %s", err)
+	}
+}
+
 func testResponseHeaderReadError(t *testing.T, h *ResponseHeader, headers string) {
 	r := bytes.NewBufferString(headers)
 	br := bufio.NewReader(r)

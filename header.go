@@ -1722,7 +1722,10 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	n := bytes.IndexByte(b, ' ')
 	if n <= 0 {
 		return 0, fmt.Errorf("cannot find http request method in %q", buf)
+	} else if n > MaxLengthMethod {
+		return 0, fmt.Errorf("get http request invalid method in %q", buf)
 	}
+
 	h.method = append(h.method[:0], b[:n]...)
 	b = b[n+1:]
 
