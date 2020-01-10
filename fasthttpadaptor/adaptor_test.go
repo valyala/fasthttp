@@ -135,7 +135,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	}
 }
 
-func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value interface{}) fasthttp.RequestHandler{
+func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value interface{}) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		ctx.SetUserValue(key, value)
 		next(ctx)
