@@ -82,7 +82,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		r.URL = rURL
 
 		var w netHTTPResponseWriter
-		h.ServeHTTP(&w, &r)
+		h.ServeHTTP(&w, r.WithContext(ctx))
 
 		ctx.SetStatusCode(w.StatusCode())
 		for k, vv := range w.Header() {

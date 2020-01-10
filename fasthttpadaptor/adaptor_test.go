@@ -32,6 +32,8 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
+	expectedContextKey := "contextKey"
+	expectedContextValue := "contextValue"
 
 	callsCount := 0
 	nethttpH := func(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +76,9 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		if !reflect.DeepEqual(r.URL, expectedURL) {
 			t.Fatalf("unexpected URL: %#v. Expecting %#v", r.URL, expectedURL)
 		}
+		if r.Context().Value(expectedContextKey) != expectedContextValue {
+			t.Fatalf("unexpected context value for key %q. Expecting %q", expectedContextKey, expectedContextValue)
+		}
 
 		for k, expectedV := range expectedHeader {
 			v := r.Header.Get(k)
@@ -88,6 +93,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		fmt.Fprintf(w, "request body is %q", body)
 	}
 	fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH))
+	fasthttpH = setContextValueMiddleware(fasthttpH, expectedContextKey, expectedContextValue)
 
 	var ctx fasthttp.RequestCtx
 	var req fasthttp.Request
@@ -126,5 +132,12 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	expectedResponseBody := fmt.Sprintf("request body is %q", expectedBody)
 	if string(resp.Body()) != expectedResponseBody {
 		t.Fatalf("unexpected response body %q. Expecting %q", resp.Body(), expectedResponseBody)
+	}
+}
+
+func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value interface{}) fasthttp.RequestHandler{
+	return func(ctx *fasthttp.RequestCtx) {
+		ctx.SetUserValue(key, value)
+		next(ctx)
 	}
 }
