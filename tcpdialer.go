@@ -120,6 +120,7 @@ var (
 	defaultDialer = &TCPDialer{Concurrency: 1000}
 )
 
+// Resolver represents interface of the tcp resolver.
 type Resolver interface {
 	LookupIPAddr(context.Context, string) (names []net.IPAddr, err error)
 }
@@ -443,7 +444,7 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver) ([]net.TCPA
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
-	
+
 	ctx := context.Background()
 	ipaddrs, err := resolver.LookupIPAddr(ctx, host)
 	if err != nil {

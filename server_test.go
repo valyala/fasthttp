@@ -191,7 +191,7 @@ func TestSaveMultipartFile(t *testing.T) {
 	if c, err := ioutil.ReadFile("filea.txt"); err != nil {
 		t.Fatal(err)
 	} else if string(c) != filea {
-		t.Fatalf("filea changed expeced %q got %q", filea, c)
+		t.Fatalf("filea changed expected %q got %q", filea, c)
 	}
 
 	// Make sure fileb was saved to a file.
@@ -211,7 +211,7 @@ func TestSaveMultipartFile(t *testing.T) {
 	if c, err := ioutil.ReadFile("fileb.txt"); err != nil {
 		t.Fatal(err)
 	} else if string(c) != fileb {
-		t.Fatalf("fileb changed expeced %q got %q", fileb, c)
+		t.Fatalf("fileb changed expected %q got %q", fileb, c)
 	}
 }
 

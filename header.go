@@ -1662,13 +1662,13 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 		return 0, err
 	}
 
-	var n int
 	var rawHeaders []byte
-	rawHeaders, n, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
+	rawHeaders, _, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
 	if err != nil {
 		return 0, err
 	}
 	h.rawHeadersCopy = append(h.rawHeadersCopy[:0], rawHeaders...)
+	var n int
 	n, err = h.parseHeaders(buf[m:])
 	if err != nil {
 		return 0, err

@@ -85,7 +85,7 @@ func testPathNotFound(t *testing.T, pathNotFoundFunc RequestHandler) {
 		// Equals to ...
 		if bytes.Equal(ctx.Response.Body(),
 			[]byte("Cannot open requested path")) {
-			t.Fatalf("respones defers. Response: %q", ctx.Response.Body())
+			t.Fatalf("response defers. Response: %q", ctx.Response.Body())
 		}
 	}
 }

@@ -1848,16 +1848,15 @@ func (s *Server) idleTimeout() time.Duration {
 	return s.ReadTimeout
 }
 
-func (s *Server) serveConn(c net.Conn) error {
+func (s *Server) serveConn(c net.Conn) (err error) {
 	defer atomic.AddInt32(&s.open, -1)
 
-	if proto, err := s.getNextProto(c); err != nil {
-		return err
-	} else {
-		handler, ok := s.nextProtos[proto]
-		if ok {
-			return handler(c)
-		}
+	var proto string
+	if proto, err = s.getNextProto(c); err != nil {
+		return
+	}
+	if handler, ok := s.nextProtos[proto]; ok {
+		return handler(c)
 	}
 
 	var serverName []byte
@@ -1880,7 +1879,6 @@ func (s *Server) serveConn(c net.Conn) error {
 		br *bufio.Reader
 		bw *bufio.Writer
 
-		err              error
 		timeoutResponse  *Response
 		hijackHandler    HijackHandler
 		hijackNoResponse bool
@@ -2166,7 +2164,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 		s.releaseCtx(ctx)
 	}
-	return err
+	return
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {
