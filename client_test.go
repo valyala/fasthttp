@@ -1523,11 +1523,11 @@ func (w *writeErrorConn) Close() error {
 	return nil
 }
 
-func (r *writeErrorConn) LocalAddr() net.Addr {
+func (w *writeErrorConn) LocalAddr() net.Addr {
 	return nil
 }
 
-func (r *writeErrorConn) RemoteAddr() net.Addr {
+func (w *writeErrorConn) RemoteAddr() net.Addr {
 	return nil
 }
 

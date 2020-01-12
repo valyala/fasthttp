@@ -1298,6 +1298,7 @@ var (
 		"Make sure the server returns 'Connection: close' response header before closing the connection")
 )
 
+// SetMaxConns sets up the maximum number of connections which may be established to all hosts listed in Addr.
 func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Lock()
 	c.MaxConns = newMaxConns
@@ -1609,6 +1610,7 @@ func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
 	return cfg
 }
 
+// ErrTLSHandshakeTimeout indicates there is a timeout from tls handshake.
 var ErrTLSHandshakeTimeout = errors.New("tls handshake timed out")
 
 var timeoutErrorChPool sync.Pool

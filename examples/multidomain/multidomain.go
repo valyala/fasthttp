@@ -69,6 +69,7 @@ func main() {
 	fmt.Println(server.ListenAndServeTLS(":8080", "", ""))
 }
 
+// GenerateCert generates certificate and private key based on the given host.
 func GenerateCert(host string) ([]byte, []byte, error) {
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {

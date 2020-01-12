@@ -6,6 +6,7 @@ import (
 	"sync"
 )
 
+// ErrInmemoryListenerClosed indicates that the InmemoryListener is already closed.
 var ErrInmemoryListenerClosed = errors.New("InmemoryListener is already closed: use of closed network connection")
 
 // InmemoryListener provides in-memory dialer<->net.Listener implementation.
