@@ -461,6 +461,7 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver) ([]net.TCPA
 		addrs = append(addrs, net.TCPAddr{
 			IP:   ip.IP,
 			Port: port,
+			Zone: ip.Zone,
 		})
 	}
 	if len(addrs) == 0 {
