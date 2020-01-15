@@ -340,9 +340,7 @@ func b2s(b []byte) string {
 func s2b(s string) (b []byte) {
 	bh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
 	sh := *(*reflect.StringHeader)(unsafe.Pointer(&s))
-	bh.Data = sh.Data
-	bh.Len = sh.Len
-	bh.Cap = sh.Len
+	bh.Data, bh.Len, bh.Cap = sh.Data, sh.Len, sh.Len
 	return b
 }
 

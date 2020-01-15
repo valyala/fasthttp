@@ -1572,10 +1572,12 @@ const DefaultConcurrency = 256 * 1024
 //
 // Serve blocks until the given listener returns permanent error.
 func (s *Server) Serve(ln net.Listener) error {
-	var lastOverflowErrorTime time.Time
-	var lastPerIPErrorTime time.Time
-	var c net.Conn
-	var err error
+	var (
+		lastOverflowErrorTime time.Time
+		lastPerIPErrorTime    time.Time
+		c                     net.Conn
+		err                   error
+	)
 
 	s.mu.Lock()
 	{
