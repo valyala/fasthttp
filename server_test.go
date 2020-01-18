@@ -3047,6 +3047,50 @@ func TestShutdownErr(t *testing.T) {
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 }
 
+func TestMultipleServe(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Success("aaa/bbb", []byte("real response"))
+		},
+	}
+
+	ln1 := fasthttputil.NewInmemoryListener()
+	ln2 := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln1); err != nil {
+			t.Errorf("unexepcted error: %s", err)
+		}
+	}()
+	go func() {
+		if err := s.Serve(ln2); err != nil {
+			t.Errorf("unexepcted error: %s", err)
+		}
+	}()
+
+	conn, err := ln1.Dial()
+	if err != nil {
+		t.Fatalf("unexepcted error: %s", err)
+	}
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	br := bufio.NewReader(conn)
+	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+
+	conn, err = ln2.Dial()
+	if err != nil {
+		t.Fatalf("unexepcted error: %s", err)
+	}
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	br = bufio.NewReader(conn)
+	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+}
+
 func TestMaxBodySizePerRequest(t *testing.T) {
 	t.Parallel()
 

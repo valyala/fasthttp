@@ -359,8 +359,8 @@ type Server struct {
 	writerPool     sync.Pool
 	hijackConnPool sync.Pool
 
-	// We need to know our listener so we can close it in Shutdown().
-	ln net.Listener
+	// We need to know our listeners so we can close them in Shutdown().
+	ln []net.Listener
 
 	mu   sync.Mutex
 	open int32
@@ -1577,20 +1577,21 @@ func (s *Server) Serve(ln net.Listener) error {
 	var c net.Conn
 	var err error
 
+	maxWorkersCount := s.getConcurrency()
+
 	s.mu.Lock()
 	{
-		if s.ln != nil {
-			s.mu.Unlock()
-			return ErrAlreadyServing
+		s.ln = append(s.ln, ln)
+		if s.done == nil {
+			s.done = make(chan struct{})
 		}
 
-		s.ln = ln
-		s.done = make(chan struct{})
+		if s.concurrencyCh == nil {
+			s.concurrencyCh = make(chan struct{}, maxWorkersCount)
+		}
 	}
 	s.mu.Unlock()
 
-	maxWorkersCount := s.getConcurrency()
-	s.concurrencyCh = make(chan struct{}, maxWorkersCount)
 	wp := &workerPool{
 		WorkerFunc:      s.serveConn,
 		MaxWorkersCount: maxWorkersCount,
@@ -1663,8 +1664,10 @@ func (s *Server) Shutdown() error {
 		return nil
 	}
 
-	if err := s.ln.Close(); err != nil {
-		return err
+	for _, ln := range s.ln {
+		if err := ln.Close(); err != nil {
+			return err
+		}
 	}
 
 	if s.done != nil {
@@ -1684,6 +1687,7 @@ func (s *Server) Shutdown() error {
 		time.Sleep(time.Millisecond * 100)
 	}
 
+	s.done = nil
 	s.ln = nil
 	return nil
 }
