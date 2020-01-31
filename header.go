@@ -1307,7 +1307,11 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 	h.resetSkipNormalize()
 	b, err := r.Peek(n)
 	if len(b) == 0 {
-		// treat all errors on the first byte read as EOF
+		// Return ErrTimeout on any timeout.
+		if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
+			return ErrTimeout
+		}
+		// treat all other errors on the first byte read as EOF
 		if n == 1 || err == io.EOF {
 			return io.EOF
 		}

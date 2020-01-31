@@ -436,7 +436,9 @@ func TestClientReadTimeout(t *testing.T) {
 		req.SetRequestURI("http://localhost")
 		req.SetConnectionClose()
 
-		c.Do(req, res) //nolint:errcheck
+		if err := c.Do(req, res); err != ErrTimeout {
+			t.Errorf("expected ErrTimeout got %#v", err)
+		}
 
 		ReleaseRequest(req)
 		ReleaseResponse(res)
