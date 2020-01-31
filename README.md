@@ -280,7 +280,6 @@ with fasthttp support:
   * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
   * [lu](https://github.com/vincentLiuxiang/lu)
   * [atreugo](https://github.com/savsgio/atreugo)
-  * [fiber](https://github.com/gofiber/fiber)
 
   Net/http code with simple ServeMux is trivially converted to fasthttp code:
 
