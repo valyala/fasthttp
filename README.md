@@ -169,7 +169,7 @@ go get -u github.com/valyala/fasthttp
 Unfortunately, fasthttp doesn't provide API identical to net/http.
 See the [FAQ](#faq) for details.
 There is [net/http -> fasthttp handler converter](https://godoc.org/github.com/valyala/fasthttp/fasthttpadaptor),
-but it is better to write fasthttp request handlers by hand in order to use 
+but it is better to write fasthttp request handlers by hand in order to use
 all of the fasthttp advantages (especially high performance :) ).
 
 Important points:
@@ -523,7 +523,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
 
 * *Why fasthttp doesn't support HTTP/2.0 and WebSockets?*
 
-  [HTTP/2.0 support](https://github.com/fasthttp/http2) is in progress. [WebSockets](https://github.com/fasthttp/websockets) has been done already. 
+  [HTTP/2.0 support](https://github.com/fasthttp/http2) is in progress. [WebSockets](https://github.com/fasthttp/websockets) has been done already.
   Third parties also may use [RequestCtx.Hijack](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack)
   for implementing these goodies.
 
@@ -548,7 +548,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
 
   Go1.5+. Older versions won't be supported, since their standard package
   [miss useful functions](https://github.com/valyala/fasthttp/issues/5).
-  
+
   **NOTE**: Go 1.9.7 is the oldest tested version. We recommend you to update as soon as you can. As of 1.11.3 we will drop 1.9.x support.
 
 * *Please provide real benchmark data and server information*
