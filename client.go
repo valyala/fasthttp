@@ -1284,9 +1284,6 @@ var (
 	// see this error.
 	ErrNoFreeConns = errors.New("no free connections available to host")
 
-	// ErrTimeout is returned from timed out calls.
-	ErrTimeout = errors.New("timeout")
-
 	// ErrConnectionClosed may be returned from client methods if the server
 	// closes connection before returning the first response byte.
 	//
@@ -1296,6 +1293,26 @@ var (
 	// to broken server.
 	ErrConnectionClosed = errors.New("the server closed connection before returning the first response byte. " +
 		"Make sure the server returns 'Connection: close' response header before closing the connection")
+)
+
+type timeoutError struct {
+}
+
+func (e *timeoutError) Error() string {
+	return "timeout"
+}
+
+// Only implement the Timeout() function of the net.Error interface.
+// This allows for checks like:
+//
+//   if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
+func (e *timeoutError) Timeout() bool {
+	return true
+}
+
+var (
+	// ErrTimeout is returned from timed out calls.
+	ErrTimeout = &timeoutError{}
 )
 
 // SetMaxConns sets up the maximum number of connections which may be established to all hosts listed in Addr.

@@ -197,9 +197,26 @@ func (c *pipeConn) readNextByteBuffer(mayBlock bool) error {
 var (
 	errWouldBlock       = errors.New("would block")
 	errConnectionClosed = errors.New("connection closed")
+)
 
+type timeoutError struct {
+}
+
+func (e *timeoutError) Error() string {
+	return "timeout"
+}
+
+// Only implement the Timeout() function of the net.Error interface.
+// This allows for checks like:
+//
+//   if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
+func (e *timeoutError) Timeout() bool {
+	return true
+}
+
+var (
 	// ErrTimeout is returned from Read() or Write() on timeout.
-	ErrTimeout = errors.New("timeout")
+	ErrTimeout = &timeoutError{}
 )
 
 func (c *pipeConn) Close() error {
