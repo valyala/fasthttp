@@ -1822,7 +1822,15 @@ func (s *Server) GetCurrentConcurrency() uint32 {
 //
 // This function is intended be used by monitoring systems
 func (s *Server) GetOpenConnectionsCount() int32 {
-	return atomic.LoadInt32(&s.open) - 1
+	if atomic.LoadInt32(&s.stop) == 0 {
+		// Decrement by one to avoid reporting the extra open value that gets
+		// counted while the server is listening.
+		return atomic.LoadInt32(&s.open) - 1
+	}
+	// This is not perfect, because s.stop could have changed to zero
+	// before we load the value of s.open. However, in the common case
+	// this avoids underreporting open connections by 1 during server shutdown.
+	return atomic.LoadInt32(&s.open)
 }
 
 func (s *Server) getConcurrency() int {
