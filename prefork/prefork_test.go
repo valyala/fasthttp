@@ -68,13 +68,18 @@ func Test_listen(t *testing.T) {
 
 func Test_setTCPListenerFiles(t *testing.T) {
 	p := &Prefork{
-		Addr:    getAddr(),
 		Network: defaultNetwork,
 	}
-	err := p.setTCPListenerFiles()
+	addr := getAddr()
+
+	err := p.setTCPListenerFiles(addr)
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if p.Addr != addr {
+		t.Errorf("Prefork.Addr == %s, want %s", p.Addr, addr)
 	}
 
 	if p.ln == nil {

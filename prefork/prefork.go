@@ -75,13 +75,15 @@ func (p *Prefork) listen(addr string) (net.Listener, error) {
 	return net.FileListener(os.NewFile(3, ""))
 }
 
-func (p *Prefork) setTCPListenerFiles() error {
-	addr, err := net.ResolveTCPAddr(p.Network, p.Addr)
+func (p *Prefork) setTCPListenerFiles(addr string) error {
+	p.Addr = addr
+
+	tcpAddr, err := net.ResolveTCPAddr(p.Network, p.Addr)
 	if err != nil {
 		return err
 	}
 
-	tcplistener, err := net.ListenTCP(p.Network, addr)
+	tcplistener, err := net.ListenTCP(p.Network, tcpAddr)
 	if err != nil {
 		return err
 	}
@@ -99,12 +101,11 @@ func (p *Prefork) setTCPListenerFiles() error {
 }
 
 func (p *Prefork) prefork(addr string) error {
-	p.Addr = addr
 	strCmd := os.Args[0]
 	chErr := make(chan error, 1)
 
 	if !p.Reuseport {
-		if err := p.setTCPListenerFiles(); err != nil {
+		if err := p.setTCPListenerFiles(addr); err != nil {
 			return err
 		}
 
