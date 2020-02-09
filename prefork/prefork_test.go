@@ -40,16 +40,21 @@ func Test_New(t *testing.T) {
 
 func Test_listen(t *testing.T) {
 	p := &Prefork{
-		Addr:      getAddr(),
 		Reuseport: true,
 	}
-	ln, err := p.listen()
+	addr := getAddr()
+
+	ln, err := p.listen(addr)
 
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	ln.Close()
+
+	if p.Addr != addr {
+		t.Errorf("Prefork.Addr == %s, want %s", p.Addr, addr)
+	}
 
 	if p.Network != defaultNetwork {
 		t.Errorf("Prefork.Network == %s, want %s", p.Network, defaultNetwork)

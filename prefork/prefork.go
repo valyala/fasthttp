@@ -59,7 +59,9 @@ func New(s *fasthttp.Server) *Prefork {
 	}
 }
 
-func (p *Prefork) listen() (net.Listener, error) {
+func (p *Prefork) listen(addr string) (net.Listener, error) {
+	p.Addr = addr
+
 	runtime.GOMAXPROCS(1)
 
 	if p.Network == "" {
@@ -96,7 +98,8 @@ func (p *Prefork) setTCPListenerFiles() error {
 	return nil
 }
 
-func (p *Prefork) prefork() error {
+func (p *Prefork) prefork(addr string) error {
+	p.Addr = addr
 	strCmd := os.Args[0]
 	chErr := make(chan error, 1)
 
@@ -124,10 +127,8 @@ func (p *Prefork) prefork() error {
 
 // ListenAndServe serves HTTP requests from the given TCP addr
 func (p *Prefork) ListenAndServe(addr string) error {
-	p.Addr = addr
-
 	if Child {
-		ln, err := p.listen()
+		ln, err := p.listen(addr)
 		if err != nil {
 			return err
 		}
@@ -137,17 +138,15 @@ func (p *Prefork) ListenAndServe(addr string) error {
 		return p.ServeFunc(ln)
 	}
 
-	return p.prefork()
+	return p.prefork(addr)
 }
 
 // ListenAndServeTLS serves HTTPS requests from the given TCP addr
 //
 // certFile and keyFile are paths to TLS certificate and key files.
 func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
-	p.Addr = addr
-
 	if Child {
-		ln, err := p.listen()
+		ln, err := p.listen(addr)
 		if err != nil {
 			return err
 		}
@@ -157,17 +156,15 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 		return p.ServeTLSFunc(ln, certFile, certKey)
 	}
 
-	return p.prefork()
+	return p.prefork(addr)
 }
 
 // ListenAndServeTLSEmbed serves HTTPS requests from the given TCP addr
 //
 // certData and keyData must contain valid TLS certificate and key data.
 func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) error {
-	p.Addr = addr
-
 	if Child {
-		ln, err := p.listen()
+		ln, err := p.listen(addr)
 		if err != nil {
 			return err
 		}
@@ -177,5 +174,5 @@ func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) 
 		return p.ServeTLSEmbedFunc(ln, certData, keyData)
 	}
 
-	return p.prefork()
+	return p.prefork(addr)
 }
