@@ -14,7 +14,7 @@ import (
 const preforkChildFlag = "prefork-child"
 const defaultNetwork = "tcp4"
 
-var Child bool
+var child bool
 
 // Prefork implements fasthttp server prefork
 //
@@ -22,8 +22,8 @@ var Child bool
 // increases performance significantly, because Go doesn't have to share
 // and manage memory between cores
 //
-// WARNING: Does not recommended for servers with in-memory cache,
-// because the cache will be duplicated in each process
+// WARNING: using prefork prevents the use of any global state!
+// Things like in-memory caches won't work.
 type Prefork struct {
 	Addr string
 
@@ -46,7 +46,7 @@ type Prefork struct {
 }
 
 func init() { // nolint:gochecknoinits
-	flag.BoolVar(&Child, preforkChildFlag, false, "is child proc")
+	flag.BoolVar(&child, preforkChildFlag, false, "is child proc")
 }
 
 // New wraps the fasthttp server to run with prefork processes
@@ -112,7 +112,7 @@ func (p *Prefork) prefork(addr string) error {
 		defer p.ln.Close()
 	}
 
-	for i := 0; i < runtime.NumCPU(); i++ {
+	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
 		cmd := exec.Command(strCmd, append(os.Args[1:], "-"+preforkChildFlag)...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
@@ -128,7 +128,7 @@ func (p *Prefork) prefork(addr string) error {
 
 // ListenAndServe serves HTTP requests from the given TCP addr
 func (p *Prefork) ListenAndServe(addr string) error {
-	if Child {
+	if child {
 		ln, err := p.listen(addr)
 		if err != nil {
 			return err
@@ -146,7 +146,7 @@ func (p *Prefork) ListenAndServe(addr string) error {
 //
 // certFile and keyFile are paths to TLS certificate and key files.
 func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
-	if Child {
+	if child {
 		ln, err := p.listen(addr)
 		if err != nil {
 			return err
@@ -164,7 +164,7 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 //
 // certData and keyData must contain valid TLS certificate and key data.
 func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) error {
-	if Child {
+	if child {
 		ln, err := p.listen(addr)
 		if err != nil {
 			return err

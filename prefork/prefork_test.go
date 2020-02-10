@@ -12,7 +12,7 @@ import (
 )
 
 func getAddr() string {
-	Child = true
+	child = true
 
 	return fmt.Sprintf(":%d", rand.Intn(9000-3000)+3000)
 }
