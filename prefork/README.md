@@ -38,8 +38,8 @@ Handler code:
 
 ```go
 func requestHandler(ctx *fasthttp.RequestCtx) {
-    // Simulate some hard work
-	time.Sleep(100 * time.Millisecond)
+    // Simulates some hard work
+    time.Sleep(100 * time.Millisecond)
 }
 ```
 
