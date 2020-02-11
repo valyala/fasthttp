@@ -447,9 +447,7 @@ func benchmarkServer(b *testing.B, s realServer, clientsCount, requestsPerConn i
 	ln := newFakeListener(b.N, clientsCount, requestsPerConn, request)
 	ch := make(chan struct{})
 	go func() {
-		if err := s.Serve(ln); err != nil {
-			panic(err)
-		}
+		s.Serve(ln) //nolint:errcheck
 		ch <- struct{}{}
 	}()
 
