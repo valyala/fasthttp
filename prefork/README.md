@@ -43,34 +43,48 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 }
 ```
 
-Results:
-
-- **WITH** prefork
+Test command:
 
 ```bash
-$ wrk -c 1000 -t 4 -d 30s http://localhost:8080
-Running 30s test @ http://localhost:8080
-  4 threads and 1000 connections
-  Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   104.35ms    1.81ms 114.01ms   73.68%
-    Req/Sec     2.40k   198.27     2.55k    94.19%
-  286846 requests in 30.03s, 25.44MB read
-  Socket errors: connect 0, read 62, write 0, timeout 0
-Requests/sec:   9551.60
-Transfer/sec:    867.48KB
+$ wrk -H 'Host: localhost' -H 'Accept: text/plain,text/html;q=0.9,application/xhtml+xml;q=0.9,application/xml;q=0.8,*/*;q=0.7' -H 'Connection: keep-alive' --latency -d 15 -c 512 --timeout 8 -t 4 http://localhost:8080
 ```
 
-- **WITHOUT** prefork
+Results:
+
+- prefork
 
 ```bash
-$ wrk -c 1000 -t 4 -d 30s http://localhost:8080
-Running 30s test @ http://localhost:8080
-  4 threads and 1000 connections
+Running 15s test @ http://localhost:8080
+  4 threads and 512 connections
   Thread Stats   Avg      Stdev     Max   +/- Stdev
-    Latency   104.39ms    2.62ms 119.24ms   66.75%
-    Req/Sec     2.13k   581.16     2.65k    83.23%
-  253666 requests in 30.06s, 22.50MB read
-  Socket errors: connect 0, read 903, write 88, timeout 0
-Requests/sec:   8439.21
-Transfer/sec:    766.45KB
+    Latency     4.75ms    4.27ms 126.24ms   97.45%
+    Req/Sec    26.46k     4.16k   71.18k    88.72%
+  Latency Distribution
+     50%    4.55ms
+     75%    4.82ms
+     90%    5.46ms
+     99%   15.49ms
+  1581916 requests in 15.09s, 140.30MB read
+  Socket errors: connect 0, read 318, write 0, timeout 0
+Requests/sec: 104861.58
+Transfer/sec:      9.30MB
+```
+
+- **non**-prefork
+
+```bash
+Running 15s test @ http://localhost:8080
+  4 threads and 512 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     6.42ms   11.83ms 177.19ms   96.42%
+    Req/Sec    24.96k     5.83k   56.83k    82.93%
+  Latency Distribution
+     50%    4.53ms
+     75%    4.93ms
+     90%    6.94ms
+     99%   74.54ms
+  1472441 requests in 15.09s, 130.59MB read
+  Socket errors: connect 0, read 265, write 0, timeout 0
+Requests/sec:  97553.34
+Transfer/sec:      8.65MB
 ```
