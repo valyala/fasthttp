@@ -43,6 +43,8 @@ type Prefork struct {
 }
 
 func init() { //nolint:gochecknoinits
+	// Definition flag to not break the program when the user adds their own flags
+	// and runs `flag.Parse()`
 	flag.Bool(preforkChildFlag[1:], false, "Is a child process")
 }
 
