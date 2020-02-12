@@ -42,7 +42,7 @@ type Prefork struct {
 }
 
 func init() { //nolint:gochecknoinits
-	flag.Bool(preforkChildFlag[1:], false, "is a child process")
+	flag.Bool(preforkChildFlag[1:], false, "Is a child process")
 }
 
 // IsChild checks if the current thread/process is a child
