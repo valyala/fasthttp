@@ -11,10 +11,8 @@ import (
 	"github.com/valyala/fasthttp/reuseport"
 )
 
-const preforkChildFlag = "prefork-child"
+const preforkChildFlag = "-prefork-child"
 const defaultNetwork = "tcp4"
-
-var child bool
 
 // Prefork implements fasthttp server prefork
 //
@@ -45,8 +43,19 @@ type Prefork struct {
 	files []*os.File
 }
 
-func init() { // nolint:gochecknoinits
-	flag.BoolVar(&child, preforkChildFlag, false, "is child proc")
+func init() { //nolint:gochecknoinits
+	flag.Bool(preforkChildFlag[1:], false, "is a child process")
+}
+
+// IsChild checks if the current thread/process is a child
+func IsChild() bool {
+	for _, arg := range os.Args[1:] {
+		if arg == preforkChildFlag {
+			return true
+		}
+	}
+
+	return false
 }
 
 // New wraps the fasthttp server to run with prefork processes
@@ -113,7 +122,7 @@ func (p *Prefork) prefork(addr string) error {
 	}
 
 	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
-		cmd := exec.Command(strCmd, append(os.Args[1:], "-"+preforkChildFlag)...)
+		cmd := exec.Command(strCmd, append(os.Args[1:], preforkChildFlag)...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.ExtraFiles = p.files
@@ -128,7 +137,7 @@ func (p *Prefork) prefork(addr string) error {
 
 // ListenAndServe serves HTTP requests from the given TCP addr
 func (p *Prefork) ListenAndServe(addr string) error {
-	if child {
+	if IsChild() {
 		ln, err := p.listen(addr)
 		if err != nil {
 			return err
@@ -146,7 +155,7 @@ func (p *Prefork) ListenAndServe(addr string) error {
 //
 // certFile and keyFile are paths to TLS certificate and key files.
 func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
-	if child {
+	if IsChild() {
 		ln, err := p.listen(addr)
 		if err != nil {
 			return err
@@ -164,7 +173,7 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 //
 // certData and keyData must contain valid TLS certificate and key data.
 func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) error {
-	if child {
+	if IsChild() {
 		ln, err := p.listen(addr)
 		if err != nil {
 			return err

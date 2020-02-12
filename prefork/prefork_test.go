@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net"
+	"os"
 	"reflect"
 	"runtime"
 	"testing"
@@ -11,10 +12,36 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-func getAddr() string {
-	child = true
+func init() { //nolint:gochecknoinits
+	setUp()
+}
 
+func setUp() {
+	os.Args = append(os.Args, preforkChildFlag)
+}
+
+func tearDown() {
+	os.Args = os.Args[:len(os.Args)-1]
+}
+
+func getAddr() string {
 	return fmt.Sprintf(":%d", rand.Intn(9000-3000)+3000)
+}
+
+func Test_IsChild(t *testing.T) {
+	v := IsChild()
+	if !v {
+		t.Errorf("IsChild() == %v, want %v", v, true)
+	}
+
+	tearDown()
+
+	v = IsChild()
+	if v {
+		t.Errorf("IsChild() == %v, want %v", v, false)
+	}
+
+	setUp()
 }
 
 func Test_New(t *testing.T) {
