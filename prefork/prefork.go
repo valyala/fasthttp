@@ -120,7 +120,7 @@ func (p *Prefork) prefork(addr string) error {
 	}
 
 	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
-		cmd := exec.Command(strCmd, append(os.Args[1:], preforkChildFlag)...)
+		cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.ExtraFiles = p.files
