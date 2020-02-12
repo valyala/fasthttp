@@ -29,6 +29,7 @@ type Prefork struct {
 	Network string
 
 	// Flag to use a listener with reuseport, if not a File Listener will be used
+	// See: https://www.nginx.com/blog/socket-sharding-nginx-release-1-9-1/
 	//
 	// It's disabled by default
 	Reuseport bool
@@ -108,7 +109,6 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 }
 
 func (p *Prefork) prefork(addr string) error {
-	strCmd := os.Args[0]
 	chErr := make(chan error, 1)
 
 	if !p.Reuseport {

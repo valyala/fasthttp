@@ -12,10 +12,6 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-func init() { //nolint:gochecknoinits
-	setUp()
-}
-
 func setUp() {
 	os.Args = append(os.Args, preforkChildFlag)
 }
@@ -30,18 +26,18 @@ func getAddr() string {
 
 func Test_IsChild(t *testing.T) {
 	v := IsChild()
-	if !v {
-		t.Errorf("IsChild() == %v, want %v", v, true)
-	}
-
-	tearDown()
-
-	v = IsChild()
 	if v {
 		t.Errorf("IsChild() == %v, want %v", v, false)
 	}
 
 	setUp()
+
+	v = IsChild()
+	if !v {
+		t.Errorf("IsChild() == %v, want %v", v, true)
+	}
+
+	tearDown()
 }
 
 func Test_New(t *testing.T) {
@@ -125,6 +121,8 @@ func Test_setTCPListenerFiles(t *testing.T) {
 }
 
 func Test_ListenAndServe(t *testing.T) {
+	setUp()
+
 	s := &fasthttp.Server{}
 	p := New(s)
 	p.Reuseport = true
@@ -149,9 +147,13 @@ func Test_ListenAndServe(t *testing.T) {
 	if p.ln == nil {
 		t.Error("Prefork.ln is nil")
 	}
+
+	tearDown()
 }
 
 func Test_ListenAndServeTLS(t *testing.T) {
+	setUp()
+
 	s := &fasthttp.Server{}
 	p := New(s)
 	p.Reuseport = true
@@ -176,9 +178,13 @@ func Test_ListenAndServeTLS(t *testing.T) {
 	if p.ln == nil {
 		t.Error("Prefork.ln is nil")
 	}
+
+	tearDown()
 }
 
 func Test_ListenAndServeTLSEmbed(t *testing.T) {
+	setUp()
+
 	s := &fasthttp.Server{}
 	p := New(s)
 	p.Reuseport = true
@@ -203,4 +209,6 @@ func Test_ListenAndServeTLSEmbed(t *testing.T) {
 	if p.ln == nil {
 		t.Error("Prefork.ln is nil")
 	}
+
+	tearDown()
 }
