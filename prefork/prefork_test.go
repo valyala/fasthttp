@@ -25,7 +25,7 @@ func tearDown() {
 }
 
 func getAddr() string {
-	return fmt.Sprintf(":%d", rand.Intn(9000-3000)+3000)
+	return fmt.Sprintf("0.0.0.0:%d", rand.Intn(9000-3000)+3000)
 }
 
 func Test_IsChild(t *testing.T) {
@@ -79,8 +79,9 @@ func Test_listen(t *testing.T) {
 
 	ln.Close()
 
-	if p.Addr != addr {
-		t.Errorf("Prefork.Addr == %s, want %s", p.Addr, addr)
+	lnAddr := ln.Addr().String()
+	if lnAddr != addr {
+		t.Errorf("Prefork.Addr == %s, want %s", lnAddr, addr)
 	}
 
 	if p.Network != defaultNetwork {
@@ -105,12 +106,13 @@ func Test_setTCPListenerFiles(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	if p.Addr != addr {
-		t.Errorf("Prefork.Addr == %s, want %s", p.Addr, addr)
-	}
-
 	if p.ln == nil {
 		t.Fatal("Prefork.ln is nil")
+	}
+
+	lnAddr := p.ln.Addr().String()
+	if lnAddr != addr {
+		t.Errorf("Prefork.Addr == %s, want %s", lnAddr, addr)
 	}
 
 	p.ln.Close()
@@ -137,8 +139,9 @@ func Test_ListenAndServe(t *testing.T) {
 
 	p.ln.Close()
 
-	if p.Addr != addr {
-		t.Errorf("Prefork.Addr == %s, want %s", p.Addr, addr)
+	lnAddr := p.ln.Addr().String()
+	if lnAddr != addr {
+		t.Errorf("Prefork.Addr == %s, want %s", lnAddr, addr)
 	}
 
 	if p.ln == nil {
@@ -163,8 +166,9 @@ func Test_ListenAndServeTLS(t *testing.T) {
 
 	p.ln.Close()
 
-	if p.Addr != addr {
-		t.Errorf("Prefork.Addr == %s, want %s", p.Addr, addr)
+	lnAddr := p.ln.Addr().String()
+	if lnAddr != addr {
+		t.Errorf("Prefork.Addr == %s, want %s", lnAddr, addr)
 	}
 
 	if p.ln == nil {
@@ -189,8 +193,9 @@ func Test_ListenAndServeTLSEmbed(t *testing.T) {
 
 	p.ln.Close()
 
-	if p.Addr != addr {
-		t.Errorf("Prefork.Addr == %s, want %s", p.Addr, addr)
+	lnAddr := p.ln.Addr().String()
+	if lnAddr != addr {
+		t.Errorf("Prefork.Addr == %s, want %s", lnAddr, addr)
 	}
 
 	if p.ln == nil {

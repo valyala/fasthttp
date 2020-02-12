@@ -23,8 +23,6 @@ const defaultNetwork = "tcp4"
 // WARNING: using prefork prevents the use of any global state!
 // Things like in-memory caches won't work.
 type Prefork struct {
-	Addr string
-
 	// The network must be "tcp", "tcp4" or "tcp6".
 	//
 	// By default is "tcp4"
@@ -69,8 +67,6 @@ func New(s *fasthttp.Server) *Prefork {
 }
 
 func (p *Prefork) listen(addr string) (net.Listener, error) {
-	p.Addr = addr
-
 	runtime.GOMAXPROCS(1)
 
 	if p.Network == "" {
@@ -78,16 +74,14 @@ func (p *Prefork) listen(addr string) (net.Listener, error) {
 	}
 
 	if p.Reuseport {
-		return reuseport.Listen(p.Network, p.Addr)
+		return reuseport.Listen(p.Network, addr)
 	}
 
 	return net.FileListener(os.NewFile(3, ""))
 }
 
 func (p *Prefork) setTCPListenerFiles(addr string) error {
-	p.Addr = addr
-
-	tcpAddr, err := net.ResolveTCPAddr(p.Network, p.Addr)
+	tcpAddr, err := net.ResolveTCPAddr(p.Network, addr)
 	if err != nil {
 		return err
 	}
