@@ -28,7 +28,7 @@ type Prefork struct {
 	// By default is "tcp4"
 	Network string
 
-	// Flag to use a listener with reuseport, if not a File Listener will be used
+	// Flag to use a listener with reuseport, if not a file Listener will be used
 	// See: https://www.nginx.com/blog/socket-sharding-nginx-release-1-9-1/
 	//
 	// It's disabled by default
