@@ -81,6 +81,10 @@ func (p *Prefork) listen(addr string) (net.Listener, error) {
 }
 
 func (p *Prefork) setTCPListenerFiles(addr string) error {
+	if p.Network == "" {
+		p.Network = defaultNetwork
+	}
+
 	tcpAddr, err := net.ResolveTCPAddr(p.Network, addr)
 	if err != nil {
 		return err

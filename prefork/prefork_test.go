@@ -95,9 +95,7 @@ func Test_listen(t *testing.T) {
 }
 
 func Test_setTCPListenerFiles(t *testing.T) {
-	p := &Prefork{
-		Network: defaultNetwork,
-	}
+	p := &Prefork{}
 	addr := getAddr()
 
 	err := p.setTCPListenerFiles(addr)
@@ -110,12 +108,16 @@ func Test_setTCPListenerFiles(t *testing.T) {
 		t.Fatal("Prefork.ln is nil")
 	}
 
+	p.ln.Close()
+
 	lnAddr := p.ln.Addr().String()
 	if lnAddr != addr {
 		t.Errorf("Prefork.Addr == %s, want %s", lnAddr, addr)
 	}
 
-	p.ln.Close()
+	if p.Network != defaultNetwork {
+		t.Errorf("Prefork.Network == %s, want %s", p.Network, defaultNetwork)
+	}
 
 	if len(p.files) != 1 {
 		t.Errorf("Prefork.files == %d, want %d", len(p.files), 1)
