@@ -59,7 +59,7 @@ func IsChild() bool {
 	return false
 }
 
-// New wraps the fasthttp server to run with prefork processes
+// New wraps the fasthttp server to run with preforked processes
 func New(s *fasthttp.Server) *Prefork {
 	return &Prefork{
 		Network:           defaultNetwork,
