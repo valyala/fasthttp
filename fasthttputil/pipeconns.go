@@ -232,7 +232,6 @@ func (c *pipeConn) RemoteAddr() net.Addr {
 }
 
 func (c *pipeConn) SetDeadline(deadline time.Time) error {
-	/* #nosec G104 */
 	c.SetReadDeadline(deadline)  //nolint:errcheck
 	c.SetWriteDeadline(deadline) //nolint:errcheck
 	return nil

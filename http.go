@@ -161,7 +161,6 @@ func (req *Request) SetConnectionClose() {
 // Note that SendFile doesn't set Content-Type, so set it yourself
 // with Header.SetContentType.
 func (resp *Response) SendFile(path string) error {
-	/* #nosec G304 */
 	f, err := os.Open(path)
 	if err != nil {
 		return err

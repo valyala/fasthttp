@@ -931,7 +931,6 @@ func (h *fsHandler) createDirIndex(base *URI, dirPath string, mustCompress bool)
 		fmt.Fprintf(w, `<li><a href="%s" class="dir">..</a></li>`, parentPathEscaped)
 	}
 
-	/* #nosec G304 */
 	f, err := os.Open(dirPath)
 	if err != nil {
 		return nil, err
@@ -1085,7 +1084,6 @@ func (h *fsHandler) compressFileNolock(f *os.File, fileInfo os.FileInfo, filePat
 }
 
 func (h *fsHandler) newCompressedFSFile(filePath string) (*fsFile, error) {
-	/* #nosec G304 */
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open compressed file %q: %s", filePath, err)
@@ -1104,7 +1102,6 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool) (*fsFile, err
 		filePath += h.compressedFileSuffix
 	}
 
-	/* #nosec G304 */
 	f, err := os.Open(filePath)
 	if err != nil {
 		if mustCompress && os.IsNotExist(err) {
@@ -1243,7 +1240,6 @@ func fileExtension(path string, compressed bool, compressedFileSuffix string) st
 
 // FileLastModified returns last modified time for the file.
 func FileLastModified(path string) (time.Time, error) {
-	/* #nosec G304 */
 	f, err := os.Open(path)
 	if err != nil {
 		return zeroTime, err
