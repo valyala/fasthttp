@@ -1520,6 +1520,7 @@ func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 			// Do not copy ClientAuth, since it is server-related stuff
 			// Do not copy ClientCAs, since it is server-related stuff
 
+			/* #nosec G402 */
 			InsecureSkipVerify: c.InsecureSkipVerify,
 			CipherSuites:       c.CipherSuites,
 
