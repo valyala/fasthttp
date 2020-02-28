@@ -401,10 +401,6 @@ func (u *URI) RequestURI() []byte {
 		dst = append(dst, '?')
 		dst = append(dst, u.queryString...)
 	}
-	if len(u.hash) > 0 {
-		dst = append(dst, '#')
-		dst = append(dst, u.hash...)
-	}
 	u.requestURI = dst
 	return u.requestURI
 }
@@ -519,7 +515,12 @@ func (u *URI) FullURI() []byte {
 // AppendBytes appends full uri to dst and returns the extended dst.
 func (u *URI) AppendBytes(dst []byte) []byte {
 	dst = u.appendSchemeHost(dst)
-	return append(dst, u.RequestURI()...)
+	dst = append(dst, u.RequestURI()...)
+	if len(u.hash) > 0 {
+		dst = append(dst, '#')
+		dst = append(dst, u.hash...)
+	}
+	return dst
 }
 
 func (u *URI) appendSchemeHost(dst []byte) []byte {

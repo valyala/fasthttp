@@ -15,6 +15,21 @@ import (
 	"github.com/valyala/bytebufferpool"
 )
 
+// Don't send the fragment/hash/# part of a URL to the server.
+func TestFragmentInURIRequest(t *testing.T) {
+	var req Request
+	req.SetRequestURI("https://docs.gitlab.com/ee/user/project/integrations/webhooks.html#events")
+
+	var b bytes.Buffer
+	req.WriteTo(&b)
+	got := b.String()
+	expected := "GET /ee/user/project/integrations/webhooks.html HTTP/1.1\r\nHost: docs.gitlab.com\r\n\r\n"
+
+	if got != expected {
+		t.Errorf("got %q expected %q", got, expected)
+	}
+}
+
 func TestRequestCopyTo(t *testing.T) {
 	t.Parallel()
 

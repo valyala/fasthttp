@@ -274,18 +274,18 @@ func testURIFullURI(t *testing.T, scheme, host, path, hash string, args *Args, e
 }
 
 func TestURIParseNilHost(t *testing.T) {
-	testURIParseScheme(t, "http://google.com/foo?bar#baz", "http", "google.com", "/foo?bar#baz")
-	testURIParseScheme(t, "HTtP://google.com/", "http", "google.com", "/")
-	testURIParseScheme(t, "://google.com/xyz", "http", "google.com", "/xyz")
-	testURIParseScheme(t, "//google.com/foobar", "http", "google.com", "/foobar")
-	testURIParseScheme(t, "fTP://aaa.com", "ftp", "aaa.com", "/")
-	testURIParseScheme(t, "httPS://aaa.com", "https", "aaa.com", "/")
+	testURIParseScheme(t, "http://google.com/foo?bar#baz", "http", "google.com", "/foo?bar", "baz")
+	testURIParseScheme(t, "HTtP://google.com/", "http", "google.com", "/", "")
+	testURIParseScheme(t, "://google.com/xyz", "http", "google.com", "/xyz", "")
+	testURIParseScheme(t, "//google.com/foobar", "http", "google.com", "/foobar", "")
+	testURIParseScheme(t, "fTP://aaa.com", "ftp", "aaa.com", "/", "")
+	testURIParseScheme(t, "httPS://aaa.com", "https", "aaa.com", "/", "")
 
 	// missing slash after hostname
-	testURIParseScheme(t, "http://foobar.com?baz=111", "http", "foobar.com", "/?baz=111")
+	testURIParseScheme(t, "http://foobar.com?baz=111", "http", "foobar.com", "/?baz=111", "")
 }
 
-func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expectedRequestURI string) {
+func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expectedRequestURI, expectedHash string) {
 	var u URI
 	u.Parse(nil, []byte(uri))
 	if string(u.Scheme()) != expectedScheme {
@@ -296,6 +296,9 @@ func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expecte
 	}
 	if string(u.RequestURI()) != expectedRequestURI {
 		t.Fatalf("Unexepcted requestURI %q. Expecting %q for uri %q", u.RequestURI(), expectedRequestURI, uri)
+	}
+	if string(u.hash) != expectedHash {
+		t.Fatalf("Unexepcted hash %q. Expecting %q for uri %q", u.hash, expectedHash, uri)
 	}
 }
 
