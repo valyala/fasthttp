@@ -11,6 +11,7 @@ os:
   - osx
 go:
   - tip
+  - 1.14.x
   - 1.13.x
   - 1.12.x
   - 1.11.x
@@ -49,7 +50,7 @@ jobs:
       os:
         - linux
       go:
-        - 1.13
+        - 1.14
       script:
         - if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./fuzzit.sh fuzzing; fi
         - if [ "$TRAVIS_PULL_REQUEST" != "false" ]; then ./fuzzit.sh local-regression; fi
