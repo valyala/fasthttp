@@ -84,8 +84,8 @@ func (ln *InmemoryListener) Dial() (net.Conn, error) {
 		// Wait until the connection has been accepted.
 		<-accepted
 	} else {
-		sConn.Close()
-		cConn.Close()
+		sConn.Close() //nolint:errcheck
+		cConn.Close() //nolint:errcheck
 		cConn = nil
 	}
 	ln.lock.Unlock()
