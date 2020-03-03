@@ -2,6 +2,7 @@ package prefork
 
 import (
 	"flag"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -110,30 +111,46 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 	return nil
 }
 
-func (p *Prefork) prefork(addr string) error {
-	chErr := make(chan error, 1)
+func (p *Prefork) prefork(addr string) (errs []error) {
+	defer func() {
+		if len(errs) == 0 {
+			errs = []error{nil}
+		}
+	}()
 
 	if !p.Reuseport {
 		if err := p.setTCPListenerFiles(addr); err != nil {
-			return err
+			errs = append(errs, err)
+			return
 		}
 
 		defer p.ln.Close()
 	}
 
-	for i := 0; i < runtime.GOMAXPROCS(0); i++ {
+	childProcs := make([]*exec.Cmd, runtime.GOMAXPROCS(0))
+	for i := range childProcs {
 		/* #nosec G204 */
-		cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.ExtraFiles = p.files
+		childProcs[i] = exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
+		childProcs[i].Stdout = os.Stdout
+		childProcs[i].Stderr = os.Stderr
+		childProcs[i].ExtraFiles = p.files
+		if err := childProcs[i].Start(); err != nil {
+			log.Printf("failed to start a child prefork process, error: %v\n", err)
+			errs = append(errs, err)
+			return
+		}
 
-		go func() {
-			chErr <- cmd.Run()
-		}()
 	}
 
-	return <-chErr
+	for _, proc := range childProcs {
+		if err := proc.Wait(); err != nil {
+			errs = append(errs, err)
+			log.Printf("one of the child prefork processes failed to complete, "+
+				"error: %v", err)
+		}
+	}
+
+	return
 }
 
 // ListenAndServe serves HTTP requests from the given TCP addr
@@ -149,7 +166,7 @@ func (p *Prefork) ListenAndServe(addr string) error {
 		return p.ServeFunc(ln)
 	}
 
-	return p.prefork(addr)
+	return p.prefork(addr)[0]
 }
 
 // ListenAndServeTLS serves HTTPS requests from the given TCP addr
@@ -167,7 +184,7 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 		return p.ServeTLSFunc(ln, certFile, certKey)
 	}
 
-	return p.prefork(addr)
+	return p.prefork(addr)[0]
 }
 
 // ListenAndServeTLSEmbed serves HTTPS requests from the given TCP addr
@@ -185,5 +202,5 @@ func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) 
 		return p.ServeTLSEmbedFunc(ln, certData, keyData)
 	}
 
-	return p.prefork(addr)
+	return p.prefork(addr)[0]
 }
