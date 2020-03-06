@@ -12,8 +12,11 @@ import (
 	"github.com/valyala/fasthttp/reuseport"
 )
 
-const preforkChildFlag = "-prefork-child"
-const defaultNetwork = "tcp4"
+const (
+	preforkChildFlag        = "-prefork-child"
+	defaultNetwork          = "tcp4"
+	defaultRecoverThreshold = 10
+)
 
 // Prefork implements fasthttp server prefork
 //
@@ -34,6 +37,10 @@ type Prefork struct {
 	//
 	// It's disabled by default
 	Reuseport bool
+
+	// Child prefork processes may exit with failure and will be started over until the times reach
+	// the value of RecoverThreshold, then it will return and terminate the server.
+	RecoverThreshold int
 
 	ServeFunc         func(ln net.Listener) error
 	ServeTLSFunc      func(ln net.Listener, certFile, keyFile string) error
@@ -64,6 +71,7 @@ func IsChild() bool {
 func New(s *fasthttp.Server) *Prefork {
 	return &Prefork{
 		Network:           defaultNetwork,
+		RecoverThreshold:  defaultRecoverThreshold,
 		ServeFunc:         s.Serve,
 		ServeTLSFunc:      s.ServeTLS,
 		ServeTLSEmbedFunc: s.ServeTLSEmbed,
@@ -156,14 +164,21 @@ func (p *Prefork) prefork(addr string) (err error) {
 		}()
 	}
 
-	var completeProcs int
+	var brokenProcs, completeProcs int
 	for sig := range sigCh {
 		if sig.err != nil {
 			delete(childProcs, sig.pid)
 
 			log.Printf("one of the child prefork processes failed to complete, "+
 				"error: %v", sig.err)
-			
+
+			if brokenProcs++; brokenProcs > p.RecoverThreshold {
+				log.Printf("child prefork processes exit too many times, "+
+					"which exceeds the value of RecoverThreshold(%d), "+
+					"exiting the master process.\n", brokenProcs)
+				break
+			}
+
 			/* #nosec G204 */
 			cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
 			cmd.Stdout = os.Stdout
@@ -174,8 +189,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 				sigCh <- procSig{cmd.Process.Pid, cmd.Run()}
 			}()
 		} else {
-			completeProcs++
-			if completeProcs == goMaxProcs {
+			if completeProcs++; completeProcs == goMaxProcs {
 				break
 			}
 		}
