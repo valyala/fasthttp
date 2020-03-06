@@ -124,8 +124,21 @@ func (p *Prefork) prefork(addr string) (err error) {
 		}()
 	}
 
+	type procSig struct {
+		pid int
+		err error
+	}
+
 	goMaxProcs := runtime.GOMAXPROCS(0)
-	errCh := make(chan error, goMaxProcs)
+	sigCh := make(chan procSig, goMaxProcs)
+	childProcs := make(map[int]*exec.Cmd)
+
+	defer func() {
+		for _, cmd := range childProcs {
+			_ = cmd.Process.Kill()
+		}
+	}()
+
 	for i := 0; i < goMaxProcs; i++ {
 		/* #nosec G204 */
 		cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
@@ -133,27 +146,34 @@ func (p *Prefork) prefork(addr string) (err error) {
 		cmd.Stderr = os.Stderr
 		cmd.ExtraFiles = p.files
 		if err = cmd.Start(); err != nil {
+			for _, proc := range childProcs {
+				_ = proc.Process.Kill()
+			}
 			log.Printf("failed to start a child prefork process, error: %v\n", err)
 			return
 		}
 
+		childProcs[cmd.Process.Pid] = cmd
 		go func() {
-			errCh <- cmd.Wait()
+			sigCh <- procSig{cmd.Process.Pid, cmd.Wait()}
 		}()
 	}
 
 	var completeProcs int
-	for procErr := range errCh {
-		if procErr != nil {
+	for sig := range sigCh {
+		if sig.err != nil {
+			delete(childProcs, sig.pid)
+
 			log.Printf("one of the child prefork processes failed to complete, "+
-				"error: %v", procErr)
+				"error: %v", sig.err)
 			/* #nosec G204 */
 			cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
 			cmd.Stdout = os.Stdout
 			cmd.Stderr = os.Stderr
 			cmd.ExtraFiles = p.files
+			childProcs[cmd.Process.Pid] = cmd
 			go func() {
-				errCh <- cmd.Run()
+				sigCh <- procSig{cmd.Process.Pid, cmd.Run()}
 			}()
 		} else {
 			completeProcs++
