@@ -134,8 +134,8 @@ func (p *Prefork) prefork(addr string) (err error) {
 	childProcs := make(map[int]*exec.Cmd)
 
 	defer func() {
-		for _, cmd := range childProcs {
-			_ = cmd.Process.Kill()
+		for _, proc := range childProcs {
+			_ = proc.Process.Kill()
 		}
 	}()
 
@@ -146,9 +146,6 @@ func (p *Prefork) prefork(addr string) (err error) {
 		cmd.Stderr = os.Stderr
 		cmd.ExtraFiles = p.files
 		if err = cmd.Start(); err != nil {
-			for _, proc := range childProcs {
-				_ = proc.Process.Kill()
-			}
 			log.Printf("failed to start a child prefork process, error: %v\n", err)
 			return
 		}
@@ -166,6 +163,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 
 			log.Printf("one of the child prefork processes failed to complete, "+
 				"error: %v", sig.err)
+			
 			/* #nosec G204 */
 			cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
 			cmd.Stdout = os.Stdout
