@@ -111,42 +111,55 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 	return nil
 }
 
-func (p *Prefork) prefork(addr string) (errs []error) {
-	defer func() {
-		if len(errs) == 0 {
-			errs = []error{nil}
-		}
-	}()
-
+func (p *Prefork) prefork(addr string) (err error) {
 	if !p.Reuseport {
-		if err := p.setTCPListenerFiles(addr); err != nil {
-			errs = append(errs, err)
+		if err = p.setTCPListenerFiles(addr); err != nil {
 			return
 		}
 
-		defer p.ln.Close()
+		defer func() {
+			if err == nil {
+				err = p.ln.Close()
+			}
+		}()
 	}
 
-	childProcs := make([]*exec.Cmd, runtime.GOMAXPROCS(0))
-	for i := range childProcs {
+	goMaxProcs := runtime.GOMAXPROCS(0)
+	errCh := make(chan error, goMaxProcs)
+	for i := 0; i < goMaxProcs; i++ {
 		/* #nosec G204 */
-		childProcs[i] = exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
-		childProcs[i].Stdout = os.Stdout
-		childProcs[i].Stderr = os.Stderr
-		childProcs[i].ExtraFiles = p.files
-		if err := childProcs[i].Start(); err != nil {
+		cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.ExtraFiles = p.files
+		if err = cmd.Start(); err != nil {
 			log.Printf("failed to start a child prefork process, error: %v\n", err)
-			errs = append(errs, err)
 			return
 		}
 
+		go func() {
+			errCh <- cmd.Wait()
+		}()
 	}
 
-	for _, proc := range childProcs {
-		if err := proc.Wait(); err != nil {
-			errs = append(errs, err)
+	var completeProcs int
+	for procErr := range errCh {
+		if procErr != nil {
 			log.Printf("one of the child prefork processes failed to complete, "+
-				"error: %v", err)
+				"error: %v", procErr)
+			/* #nosec G204 */
+			cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			cmd.ExtraFiles = p.files
+			go func() {
+				errCh <- cmd.Run()
+			}()
+		} else {
+			completeProcs++
+			if completeProcs == goMaxProcs {
+				break
+			}
 		}
 	}
 
@@ -166,7 +179,7 @@ func (p *Prefork) ListenAndServe(addr string) error {
 		return p.ServeFunc(ln)
 	}
 
-	return p.prefork(addr)[0]
+	return p.prefork(addr)
 }
 
 // ListenAndServeTLS serves HTTPS requests from the given TCP addr
@@ -184,7 +197,7 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 		return p.ServeTLSFunc(ln, certFile, certKey)
 	}
 
-	return p.prefork(addr)[0]
+	return p.prefork(addr)
 }
 
 // ListenAndServeTLSEmbed serves HTTPS requests from the given TCP addr
@@ -202,5 +215,5 @@ func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) 
 		return p.ServeTLSEmbedFunc(ln, certData, keyData)
 	}
 
-	return p.prefork(addr)[0]
+	return p.prefork(addr)
 }
