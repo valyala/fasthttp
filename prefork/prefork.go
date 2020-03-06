@@ -1,6 +1,7 @@
 package prefork
 
 import (
+	"errors"
 	"flag"
 	"log"
 	"net"
@@ -176,6 +177,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 				log.Printf("child prefork processes exit too many times, "+
 					"which exceeds the value of RecoverThreshold(%d), "+
 					"exiting the master process.\n", brokenProcs)
+				err = errors.New("exceeding the value of RecoverThreshold")
 				break
 			}
 
