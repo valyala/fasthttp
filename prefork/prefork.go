@@ -19,6 +19,19 @@ const (
 	defaultRecoverThreshold = 10
 )
 
+var (
+	defaultLogger = Logger(log.New(os.Stderr, "", log.LstdFlags))
+	// ErrOverRecovery is returned when the times of starting over child prefork processes exceed
+	// the threshold.
+	ErrOverRecovery = errors.New("exceeding the value of RecoverThreshold")
+)
+
+// Logger is used for logging formatted messages.
+type Logger interface {
+	// Printf must have the same semantics as log.Printf.
+	Printf(format string, args ...interface{})
+}
+
 // Prefork implements fasthttp server prefork
 //
 // Preforks master process (with all cores) between several child processes
@@ -42,6 +55,9 @@ type Prefork struct {
 	// Child prefork processes may exit with failure and will be started over until the times reach
 	// the value of RecoverThreshold, then it will return and terminate the server.
 	RecoverThreshold int
+
+	// By default standard logger from log package is used.
+	Logger Logger
 
 	ServeFunc         func(ln net.Listener) error
 	ServeTLSFunc      func(ln net.Listener, certFile, keyFile string) error
@@ -73,10 +89,18 @@ func New(s *fasthttp.Server) *Prefork {
 	return &Prefork{
 		Network:           defaultNetwork,
 		RecoverThreshold:  defaultRecoverThreshold,
+		Logger:            s.Logger,
 		ServeFunc:         s.Serve,
 		ServeTLSFunc:      s.ServeTLS,
 		ServeTLSEmbedFunc: s.ServeTLSEmbed,
 	}
+}
+
+func (p *Prefork) logger() Logger {
+	if p.Logger != nil {
+		return p.Logger
+	}
+	return defaultLogger
 }
 
 func (p *Prefork) listen(addr string) (net.Listener, error) {
@@ -120,15 +144,26 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 	return nil
 }
 
+func (p *Prefork) doCommand() (*exec.Cmd, error) {
+	/* #nosec G204 */
+	cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.ExtraFiles = p.files
+	return cmd, cmd.Start()
+}
+
 func (p *Prefork) prefork(addr string) (err error) {
 	if !p.Reuseport {
 		if err = p.setTCPListenerFiles(addr); err != nil {
 			return
 		}
 
+		// defer for closing the net.Listener opened by setTCPListenerFiles.
 		defer func() {
+			e := p.ln.Close()
 			if err == nil {
-				err = p.ln.Close()
+				err = e
 			}
 		}()
 	}
@@ -149,13 +184,9 @@ func (p *Prefork) prefork(addr string) (err error) {
 	}()
 
 	for i := 0; i < goMaxProcs; i++ {
-		/* #nosec G204 */
-		cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.ExtraFiles = p.files
-		if err = cmd.Start(); err != nil {
-			log.Printf("failed to start a child prefork process, error: %v\n", err)
+		var cmd *exec.Cmd
+		if cmd, err = p.doCommand(); err != nil {
+			p.logger().Printf("failed to start a child prefork process, error: %v\n", err)
 			return
 		}
 
@@ -170,25 +201,24 @@ func (p *Prefork) prefork(addr string) (err error) {
 		if sig.err != nil {
 			delete(childProcs, sig.pid)
 
-			log.Printf("one of the child prefork processes failed to complete, "+
+			p.logger().Printf("one of the child prefork processes failed to complete, "+
 				"error: %v", sig.err)
 
 			if brokenProcs++; brokenProcs > p.RecoverThreshold {
-				log.Printf("child prefork processes exit too many times, "+
+				p.logger().Printf("child prefork processes exit too many times, "+
 					"which exceeds the value of RecoverThreshold(%d), "+
 					"exiting the master process.\n", brokenProcs)
-				err = errors.New("exceeding the value of RecoverThreshold")
+				err = ErrOverRecovery
 				break
 			}
 
-			/* #nosec G204 */
-			cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-			cmd.ExtraFiles = p.files
+			var cmd *exec.Cmd
+			if cmd, err = p.doCommand(); err != nil {
+				break
+			}
 			childProcs[cmd.Process.Pid] = cmd
 			go func() {
-				sigCh <- procSig{cmd.Process.Pid, cmd.Run()}
+				sigCh <- procSig{cmd.Process.Pid, cmd.Wait()}
 			}()
 		} else {
 			if completeProcs++; completeProcs == goMaxProcs {
