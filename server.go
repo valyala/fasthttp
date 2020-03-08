@@ -322,6 +322,13 @@ type Server struct {
 	// value is explicitly provided during a request.
 	NoDefaultServerHeader bool
 
+	// NoDefaultDate, when set to true, causes the default Date
+	// header to be excluded from the Response.
+	//
+	// The default Date header value is the current date value. When
+	// set to true, the Date will not be present.
+	NoDefaultDate bool
+
 	// NoDefaultContentType, when set to true, causes the default Content-Type
 	// header to be excluded from the Response.
 	//
@@ -907,7 +914,7 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) error {
 	if err != nil {
 		return err
 	}
-	defer ff.Close()
+	defer ff.Close() // #nosec G307
 	_, err = copyZeroAlloc(ff, f)
 	return err
 }
@@ -1938,6 +1945,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		ctx.Request.isTLS = isTLS
 		ctx.Response.Header.noDefaultContentType = s.NoDefaultContentType
+		ctx.Response.Header.noDefaultDate = s.NoDefaultDate
 
 		if err == nil {
 			if s.ReadTimeout > 0 {
@@ -2500,16 +2508,20 @@ func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 		server = fmt.Sprintf("Server: %s\r\n", s.getServerName())
 	}
 
-	serverDateOnce.Do(updateServerDate)
+	date := ""
+	if !s.NoDefaultDate {
+		serverDateOnce.Do(updateServerDate)
+		date = fmt.Sprintf("Date: %s\r\n", serverDate.Load())
+	}
 
 	fmt.Fprintf(w, "Connection: close\r\n"+
 		server+
-		"Date: %s\r\n"+
+		date+
 		"Content-Type: text/plain\r\n"+
 		"Content-Length: %d\r\n"+
 		"\r\n"+
 		"%s",
-		serverDate.Load(), len(msg), msg)
+		len(msg), msg)
 }
 
 func defaultErrorHandler(ctx *RequestCtx, err error) {
