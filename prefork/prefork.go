@@ -14,9 +14,8 @@ import (
 )
 
 const (
-	preforkChildFlag        = "-prefork-child"
-	defaultNetwork          = "tcp4"
-	defaultRecoverThreshold = 10
+	preforkChildFlag = "-prefork-child"
+	defaultNetwork   = "tcp4"
 )
 
 var (
@@ -88,7 +87,7 @@ func IsChild() bool {
 func New(s *fasthttp.Server) *Prefork {
 	return &Prefork{
 		Network:           defaultNetwork,
-		RecoverThreshold:  defaultRecoverThreshold,
+		RecoverThreshold:  runtime.GOMAXPROCS(0) / 2,
 		Logger:            s.Logger,
 		ServeFunc:         s.Serve,
 		ServeTLSFunc:      s.ServeTLS,
@@ -196,36 +195,29 @@ func (p *Prefork) prefork(addr string) (err error) {
 		}()
 	}
 
-	var brokenProcs, completeProcs int
+	var exitedProcs int
 	for sig := range sigCh {
-		if sig.err != nil {
-			delete(childProcs, sig.pid)
+		delete(childProcs, sig.pid)
 
-			p.logger().Printf("one of the child prefork processes failed to complete, "+
-				"error: %v", sig.err)
+		p.logger().Printf("one of the child prefork processes exited with "+
+			"error: %v", sig.err)
 
-			if brokenProcs++; brokenProcs > p.RecoverThreshold {
-				p.logger().Printf("child prefork processes exit too many times, "+
-					"which exceeds the value of RecoverThreshold(%d), "+
-					"exiting the master process.\n", brokenProcs)
-				err = ErrOverRecovery
-				break
-			}
-
-			var cmd *exec.Cmd
-			if cmd, err = p.doCommand(); err != nil {
-				break
-			}
-			childProcs[cmd.Process.Pid] = cmd
-			go func() {
-				sigCh <- procSig{cmd.Process.Pid, cmd.Wait()}
-			}()
-		} else {
-			if completeProcs++; completeProcs == goMaxProcs {
-				p.logger().Printf("all child prefork processes exit, master process exiting")
-				break
-			}
+		if exitedProcs++; exitedProcs > p.RecoverThreshold {
+			p.logger().Printf("child prefork processes exit too many times, "+
+				"which exceeds the value of RecoverThreshold(%d), "+
+				"exiting the master process.\n", exitedProcs)
+			err = ErrOverRecovery
+			break
 		}
+
+		var cmd *exec.Cmd
+		if cmd, err = p.doCommand(); err != nil {
+			break
+		}
+		childProcs[cmd.Process.Pid] = cmd
+		go func() {
+			sigCh <- procSig{cmd.Process.Pid, cmd.Wait()}
+		}()
 	}
 
 	return
