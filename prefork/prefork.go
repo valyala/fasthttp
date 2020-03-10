@@ -222,6 +222,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 			}()
 		} else {
 			if completeProcs++; completeProcs == goMaxProcs {
+				p.logger().Printf("all child prefork processes exit, master process exiting")
 				break
 			}
 		}
