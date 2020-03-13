@@ -883,16 +883,21 @@ func (ctx *RequestCtx) FormFile(key string) (*multipart.FileHeader, error) {
 var ErrMissingFile = errors.New("there is no uploaded file associated with the given key")
 
 // SaveMultipartFile saves multipart file fh under the given filename path.
-func SaveMultipartFile(fh *multipart.FileHeader, path string) error {
-	f, err := fh.Open()
+func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
+	var (
+		f  multipart.File
+		ff *os.File
+	)
+	f, err = fh.Open()
 	if err != nil {
-		return err
+		return
 	}
 
-	if ff, ok := f.(*os.File); ok {
+	var ok bool
+	if ff, ok = f.(*os.File); ok {
 		// Windows can't rename files that are opened.
-		if err := f.Close(); err != nil {
-			return err
+		if err = f.Close(); err != nil {
+			return
 		}
 
 		// If renaming fails we try the normal copying method.
@@ -902,21 +907,29 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) error {
 		}
 
 		// Reopen f for the code below.
-		f, err = fh.Open()
-		if err != nil {
-			return err
+		if f, err = fh.Open(); err != nil {
+			return
 		}
 	}
 
-	defer f.Close()
+	defer func() {
+		e := f.Close()
+		if err == nil {
+			err = e
+		}
+	}()
 
-	ff, err := os.Create(path)
-	if err != nil {
-		return err
+	if ff, err = os.Create(path); err != nil {
+		return
 	}
-	defer ff.Close() // #nosec G307
+	defer func() {
+		e := ff.Close()
+		if err == nil {
+			err = e
+		}
+	}()
 	_, err = copyZeroAlloc(ff, f)
-	return err
+	return
 }
 
 // FormValue returns form value associated with the given key.
