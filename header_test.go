@@ -1250,6 +1250,20 @@ func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
 	}
 }
 
+func TestResponseDateNoDefaultNotEmpty(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+
+	h.noDefaultDate = true
+
+	headers := h.String()
+
+	if strings.Contains(headers, "\r\nDate: ") {
+		t.Fatalf("ResponseDateNoDefaultNotEmpty fail, response: \n%+v\noutcome: \n%q\n", h, headers) //nolint:govet
+	}
+}
+
 func TestRequestHeaderConnectionClose(t *testing.T) {
 	t.Parallel()
 
