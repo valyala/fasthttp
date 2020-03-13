@@ -271,6 +271,7 @@ func TestServerName(t *testing.T) {
 		},
 		NoDefaultServerHeader: true,
 		NoDefaultContentType:  true,
+		NoDefaultDate:         true,
 	}
 
 	resp = getReponse()
@@ -280,6 +281,10 @@ func TestServerName(t *testing.T) {
 
 	if bytes.Contains(resp, []byte("\r\nContent-Type: ")) {
 		t.Fatalf("Unexpected response %q expected no Content-Type header", resp)
+	}
+
+	if bytes.Contains(resp, []byte("\r\nDate: ")) {
+		t.Fatalf("Unexpected response %q expected no Date header", resp)
 	}
 }
 
