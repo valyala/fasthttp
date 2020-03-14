@@ -3,7 +3,6 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -657,7 +656,7 @@ type HostClient struct {
 	connsLock  sync.Mutex
 	connsCount int
 	conns      []*clientConn
-	connsWait  *wantConnQueue
+	connsWait  wantConnQueue
 
 	addrsLock sync.Mutex
 	addrs     []string
@@ -1372,7 +1371,9 @@ func (c *HostClient) acquireConn() (cc *clientConn, err error) {
 		}
 
 		// wait for a free connection
-		ctx, cancelFunc := context.WithTimeout(context.Background(), c.MaxConnWaitTimeout)
+		tc := AcquireTimer(c.MaxConnWaitTimeout)
+		defer ReleaseTimer(tc)
+
 		w := &wantConn{
 			ready: make(chan struct{}, 1),
 		}
@@ -1386,14 +1387,9 @@ func (c *HostClient) acquireConn() (cc *clientConn, err error) {
 
 		select {
 		case <-w.ready:
-			cancelFunc()
 			return w.conn, w.err
-		case <-ctx.Done():
-			if ctx.Err() == context.DeadlineExceeded {
-				return nil, ErrNoFreeConns
-			}
-			// Shouldn't happen
-			panic("fasthttp: internal error: connection waiting operation canceled")
+		case <-tc.C:
+			return nil, ErrNoFreeConns
 		}
 	}
 
@@ -1414,12 +1410,10 @@ func (c *HostClient) acquireConn() (cc *clientConn, err error) {
 func (c *HostClient) queueForIdle(w *wantConn) {
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
-	if c.connsWait == nil {
-		c.connsWait = &wantConnQueue{}
-	}
 	q := c.connsWait
 	q.clearFront()
 	q.pushBack(w)
+	c.connsWait = q
 }
 
 func (c *HostClient) dialConnFor(w *wantConn) {
@@ -1521,6 +1515,9 @@ func (c *HostClient) decConnsCount() {
 				break
 			}
 		}
+		// q is a value (like a slice), so we have to store
+		// the updated q back.
+		c.connsWait = q
 	}
 	if !dialed {
 		c.connsCount--
@@ -1568,6 +1565,9 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 				break
 			}
 		}
+		// q is a value (like a slice), so we have to store
+		// the updated q back.
+		c.connsWait = q
 	}
 	if !delivered {
 		c.conns = append(c.conns, cc)
