@@ -648,7 +648,6 @@ func newFasthttpSleepEchoHandler(sleep time.Duration) RequestHandler {
 	}
 }
 
-// this benchmark is to demonstrate heap allocations when waiting for a free connection
 func BenchmarkClientGetEndToEndWaitConn1Inmemory(b *testing.B) {
 	benchmarkClientGetEndToEndWaitConnInmemory(b, 1)
 }
@@ -673,8 +672,10 @@ func benchmarkClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism int) {
 	ln := fasthttputil.NewInmemoryListener()
 
 	ch := make(chan struct{})
+	sleepDuration := 50 * time.Millisecond
 	go func() {
-		if err := Serve(ln, newFasthttpSleepEchoHandler(50 * time.Millisecond)); err != nil {
+
+		if err := Serve(ln, newFasthttpSleepEchoHandler(sleepDuration)); err != nil {
 			b.Errorf("error when serving requests: %s", err)
 		}
 		close(ch)
@@ -706,6 +707,81 @@ func benchmarkClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism int) {
 				}
 			}
 			buf = body
+		}
+	})
+
+	ln.Close()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		b.Fatalf("server wasn't stopped")
+	}
+}
+
+func newNethttpSleepEchoHandler(sleep time.Duration) http.HandlerFunc{
+	return func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(sleep)
+		w.Header().Set(HeaderContentType, "text/plain")
+		w.Write([]byte(r.RequestURI)) //nolint:errcheck
+	}
+}
+
+func BenchmarkNetHTTPClientGetEndToEndWaitConn1Inmemory(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b, 1)
+}
+
+func BenchmarkNetHTTPClientGetEndToEndWaitConn10Inmemory(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b, 10)
+}
+
+func BenchmarkNetHTTPClientGetEndToEndWaitConn100Inmemory(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b, 100)
+}
+
+func BenchmarkNetHTTPClientGetEndToEndWaitConn1000Inmemory(b *testing.B) {
+	benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b, 1000)
+}
+
+func benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism int) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	ch := make(chan struct{})
+	sleep := 50 * time.Millisecond
+	go func() {
+		if err := http.Serve(ln, newNethttpSleepEchoHandler(sleep)); err != nil && !strings.Contains(
+			err.Error(), "use of closed network connection") {
+			b.Errorf("error when serving requests: %s", err)
+		}
+		close(ch)
+	}()
+
+	c := &http.Client{
+		Transport: &http.Transport{
+			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
+			MaxIdleConnsPerHost: 1,
+		},
+	}
+
+	requestURI := "/foo/bar?baz=123"
+	url := "http://unused.host" + requestURI
+	b.SetParallelism(parallelism)
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			resp, err := c.Get(url)
+			if err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if resp.StatusCode != http.StatusOK {
+				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
+			}
+			body, err := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				b.Fatalf("unexpected error when reading response body: %s", err)
+			}
+			if string(body) != requestURI {
+				b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)
+			}
 		}
 	})
 
