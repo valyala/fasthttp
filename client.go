@@ -656,7 +656,7 @@ type HostClient struct {
 	connsLock  sync.Mutex
 	connsCount int
 	conns      []*clientConn
-	connsWait  wantConnQueue
+	connsWait  *wantConnQueue
 
 	addrsLock sync.Mutex
 	addrs     []string
@@ -1410,10 +1410,11 @@ func (c *HostClient) acquireConn() (cc *clientConn, err error) {
 func (c *HostClient) queueForIdle(w *wantConn) {
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
-	q := c.connsWait
-	q.clearFront()
-	q.pushBack(w)
-	c.connsWait = q
+	if c.connsWait == nil {
+		c.connsWait = &wantConnQueue{}
+	}
+	c.connsWait.clearFront()
+	c.connsWait.pushBack(w)
 }
 
 func (c *HostClient) dialConnFor(w *wantConn) {
@@ -1506,7 +1507,7 @@ func (c *HostClient) decConnsCount() {
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
 	dialed := false
-	if q := c.connsWait; q.len() > 0 {
+	if q := c.connsWait; q != nil && q.len() > 0 {
 		for q.len() > 0 {
 			w := q.popFront()
 			if w.waiting() {
@@ -1515,9 +1516,6 @@ func (c *HostClient) decConnsCount() {
 				break
 			}
 		}
-		// q is a value (like a slice), so we have to store
-		// the updated q back.
-		c.connsWait = q
 	}
 	if !dialed {
 		c.connsCount--
@@ -1557,7 +1555,7 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
 	delivered := false
-	if q := c.connsWait; q.len() > 0 {
+	if q := c.connsWait; q != nil && q.len() > 0 {
 		for q.len() > 0 {
 			w := q.popFront()
 			if w.waiting() {
@@ -1565,9 +1563,6 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 				break
 			}
 		}
-		// q is a value (like a slice), so we have to store
-		// the updated q back.
-		c.connsWait = q
 	}
 	if !delivered {
 		c.conns = append(c.conns, cc)
@@ -1853,7 +1848,7 @@ func (w *wantConn) cancel(c *HostClient, err error) {
 	w.mu.Unlock()
 
 	if conn != nil {
-		c.releaseConn(w.conn)
+		c.releaseConn(conn)
 	}
 }
 
