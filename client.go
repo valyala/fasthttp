@@ -1835,7 +1835,7 @@ func (w *wantConn) tryDeliver(conn *clientConn, err error) bool {
 }
 
 // cancel marks w as no longer wanting a result (for example, due to cancellation).
-// If a connection has been delivered already, cancel returns it with t.putOrCloseIdleConn.
+// If a connection has been delivered already, cancel returns it with c.releaseConn.
 func (w *wantConn) cancel(c *HostClient, err error) {
 	w.mu.Lock()
 	if w.conn == nil && w.err == nil {

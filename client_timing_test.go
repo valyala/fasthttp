@@ -664,10 +664,6 @@ func BenchmarkClientGetEndToEndWaitConn1000Inmemory(b *testing.B) {
 	benchmarkClientGetEndToEndWaitConnInmemory(b, 1000)
 }
 
-func BenchmarkClientGetEndToEndWaitConn10kInmemory(b *testing.B) {
-	benchmarkClientGetEndToEndWaitConnInmemory(b, 10000)
-}
-
 func benchmarkClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism int) {
 	ln := fasthttputil.NewInmemoryListener()
 
@@ -684,7 +680,7 @@ func benchmarkClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism int) {
 	c := &Client{
 		MaxConnsPerHost:    1,
 		Dial:               func(addr string) (net.Conn, error) { return ln.Dial() },
-		MaxConnWaitTimeout: time.Second,
+		MaxConnWaitTimeout: 5 * time.Second,
 	}
 
 	requestURI := "/foo/bar?baz=123&sleep=10ms"
@@ -718,7 +714,7 @@ func benchmarkClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism int) {
 	}
 }
 
-func newNethttpSleepEchoHandler(sleep time.Duration) http.HandlerFunc{
+func newNethttpSleepEchoHandler(sleep time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(sleep)
 		w.Header().Set(HeaderContentType, "text/plain")
@@ -757,9 +753,10 @@ func benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
-			MaxIdleConnsPerHost: 1,
+			Dial:            func(_, _ string) (net.Conn, error) { return ln.Dial() },
+			MaxConnsPerHost: 1,
 		},
+		Timeout: 5 * time.Second,
 	}
 
 	requestURI := "/foo/bar?baz=123"
@@ -769,18 +766,21 @@ func benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism
 		for pb.Next() {
 			resp, err := c.Get(url)
 			if err != nil {
-				b.Fatalf("unexpected error: %s", err)
-			}
-			if resp.StatusCode != http.StatusOK {
-				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
-			}
-			body, err := ioutil.ReadAll(resp.Body)
-			resp.Body.Close()
-			if err != nil {
-				b.Fatalf("unexpected error when reading response body: %s", err)
-			}
-			if string(body) != requestURI {
-				b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)
+				if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() {
+					b.Fatalf("unexpected error: %s", err)
+				}
+			} else {
+				if resp.StatusCode != http.StatusOK {
+					b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
+				}
+				body, err := ioutil.ReadAll(resp.Body)
+				resp.Body.Close()
+				if err != nil {
+					b.Fatalf("unexpected error when reading response body: %s", err)
+				}
+				if string(body) != requestURI {
+					b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)
+				}
 			}
 		}
 	})
