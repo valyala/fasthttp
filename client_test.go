@@ -2012,7 +2012,7 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 			return ln.Dial()
 		},
 		MaxConns:           1,
-		MaxConnWaitTimeout: 30 * time.Millisecond,
+		MaxConnWaitTimeout: 200 * time.Millisecond,
 	}
 
 	for i := 0; i < 5; i++ {
@@ -2127,7 +2127,6 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 	if c.connsWait.len() > 0 {
 		t.Errorf("connsWait has %v items remaining", c.connsWait.len())
 	}
-	t.Logf("errNoFreeConnsCount: %d", errNoFreeConnsCount)
 	if errNoFreeConnsCount == 0 {
 		t.Errorf("unexpected errorCount: %d. Expecting > 0", errNoFreeConnsCount)
 	}
