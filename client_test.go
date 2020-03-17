@@ -2092,7 +2092,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 		MaxConnWaitTimeout: 10 * time.Millisecond,
 	}
 
-	errNoFreeConnsCount := 0
+	var errNoFreeConnsCount uint32
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func() {
@@ -2108,7 +2108,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 				if err != ErrNoFreeConns {
 					t.Errorf("unexpected error: %s. Expecting %s", err, ErrNoFreeConns)
 				}
-				errNoFreeConnsCount++
+				atomic.AddUint32(&errNoFreeConnsCount, 1)
 			} else {
 				if resp.StatusCode() != StatusOK {
 					t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
