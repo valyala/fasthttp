@@ -2143,3 +2143,102 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 		t.Fatalf("at least one request body was empty")
 	}
 }
+
+func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
+	var (
+		emptyBodyCount uint8
+		ln             = fasthttputil.NewInmemoryListener()
+		wg             sync.WaitGroup
+		// make deadline reach earlier than conns wait timeout
+		sleep              = 100 * time.Millisecond
+		timeout            = 10 * time.Millisecond
+		maxConnWaitTimeout = 50 * time.Millisecond
+	)
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if len(ctx.PostBody()) == 0 {
+				emptyBodyCount++
+			}
+			time.Sleep(sleep)
+			ctx.WriteString("foo") //nolint:errcheck
+		},
+	}
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConns:           1,
+		MaxConnWaitTimeout: maxConnWaitTimeout,
+	}
+
+	var errTimeoutCount uint32
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			req := AcquireRequest()
+			req.SetRequestURI("http://foobar/baz")
+			req.Header.SetMethod(MethodPost)
+			req.SetBodyString("bar")
+			resp := AcquireResponse()
+
+			if err := c.DoDeadline(req, resp, time.Now().Add(timeout)); err != nil {
+				if err != ErrTimeout {
+					t.Errorf("unexpected error: %s. Expecting %s", err, ErrTimeout)
+				}
+				atomic.AddUint32(&errTimeoutCount, 1)
+			} else {
+				if resp.StatusCode() != StatusOK {
+					t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
+				}
+
+				body := resp.Body()
+				if string(body) != "foo" {
+					t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
+				}
+			}
+
+		}()
+	}
+	wg.Wait()
+
+	c.connsLock.Lock()
+	for {
+		w := c.connsWait.popFront()
+		if w == nil {
+			break
+		}
+		w.mu.Lock()
+		if w.err != ErrTimeout {
+			t.Errorf("unexpected error: %s. Expecting %s", w.err, ErrTimeout)
+		}
+		w.mu.Unlock()
+	}
+	c.connsLock.Unlock()
+	if errTimeoutCount == 0 {
+		t.Errorf("unexpected errTimeoutCount: %d. Expecting > 0", errTimeoutCount)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if emptyBodyCount > 0 {
+		t.Fatalf("at least one request body was empty")
+	}
+}

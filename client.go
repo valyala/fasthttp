@@ -1048,6 +1048,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	var timedout bool
 
 	go func() {
+		reqCopy.timeout = timeout
 		errDo := c.Do(reqCopy, respCopy)
 		mu.Lock()
 		{
@@ -1207,7 +1208,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		req.SetConnectionClose()
 	}
 
-	cc, err := c.acquireConn()
+	cc, err := c.acquireConn(req.timeout)
 	if err != nil {
 		return false, err
 	}
@@ -1334,7 +1335,7 @@ func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Unlock()
 }
 
-func (c *HostClient) acquireConn() (cc *clientConn, err error) {
+func (c *HostClient) acquireConn(reqTimeout time.Duration) (cc *clientConn, err error) {
 	createConn := false
 	startCleaner := false
 
@@ -1370,8 +1371,21 @@ func (c *HostClient) acquireConn() (cc *clientConn, err error) {
 			return nil, ErrNoFreeConns
 		}
 
+		// reqTimeout    c.MaxConnWaitTimeout   wait duration
+		//     d1                 d2            min(d1, d2)
+		//  0(not set)            d2            d2
+		//     d1            0(don't wait)      0(don't wait)
+		//  0(not set)            d2            d2
+		timeout := c.MaxConnWaitTimeout
+		timeoutOverridden := false
+		// reqTimeout == 0 means not set
+		if reqTimeout > 0 && reqTimeout < timeout {
+				timeout = reqTimeout
+				timeoutOverridden = true
+		}
+
 		// wait for a free connection
-		tc := AcquireTimer(c.MaxConnWaitTimeout)
+		tc := AcquireTimer(timeout)
 		defer ReleaseTimer(tc)
 
 		w := &wantConn{
@@ -1389,6 +1403,9 @@ func (c *HostClient) acquireConn() (cc *clientConn, err error) {
 		case <-w.ready:
 			return w.conn, w.err
 		case <-tc.C:
+			if timeoutOverridden {
+				return nil, ErrTimeout
+			}
 			return nil, ErrNoFreeConns
 		}
 	}
