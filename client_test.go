@@ -2220,7 +2220,7 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 			break
 		}
 		w.mu.Lock()
-		if w.err != ErrTimeout {
+		if w.err != nil && w.err != ErrTimeout {
 			t.Errorf("unexpected error: %s. Expecting %s", w.err, ErrTimeout)
 		}
 		w.mu.Unlock()
