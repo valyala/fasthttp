@@ -1184,6 +1184,7 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		maxAttempts = DefaultMaxIdemponentCallAttempts
 	}
 	attempts := 0
+	hasBodyStream := req.IsBodyStream()
 
 	atomic.AddInt32(&c.pendingRequests, 1)
 	for {
@@ -1192,6 +1193,9 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 			break
 		}
 
+		if hasBodyStream {
+			break
+		}
 		if !isIdempotent(req) {
 			// Retry non-idempotent requests if the server closes
 			// the connection before sending the response.

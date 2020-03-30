@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -1493,6 +1494,43 @@ func TestClientNonIdempotentRetry(t *testing.T) {
 	}
 }
 
+func TestClientNonIdempotentRetry_BodyStream(t *testing.T) {
+	t.Parallel()
+
+	dialsCount := 0
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			dialsCount++
+			switch dialsCount {
+			case 1, 2:
+				return &readErrorConn{}, nil
+			case 3:
+				return &singleEchoConn{
+					b: []byte("HTTP/1.1 345 OK\r\nContent-Type: foobar\r\n\r\n"),
+				}, nil
+			default:
+				t.Fatalf("unexpected number of dials: %d", dialsCount)
+			}
+			panic("unreachable")
+		},
+	}
+
+	dialsCount = 0
+
+	req := Request{}
+	res := Response{}
+
+	req.SetRequestURI("http://foobar/a/b")
+	req.Header.SetMethod("POST")
+	body := bytes.NewBufferString("test")
+	req.SetBodyStream(body, body.Len())
+
+	err := c.Do(&req, &res)
+	if err == nil {
+		t.Fatal("expected error from being unable to retry a bodyStream")
+	}
+}
+
 func TestClientIdempotentRequest(t *testing.T) {
 	t.Parallel()
 
@@ -1622,6 +1660,71 @@ func (r *singleReadConn) LocalAddr() net.Addr {
 
 func (r *singleReadConn) RemoteAddr() net.Addr {
 	return nil
+}
+
+type singleEchoConn struct {
+	net.Conn
+	b []byte
+	n int
+}
+
+func (r *singleEchoConn) Read(p []byte) (int, error) {
+	if len(r.b) == r.n {
+		return 0, io.EOF
+	}
+	n := copy(p, r.b[r.n:])
+	r.n += n
+	return n, nil
+}
+
+func (r *singleEchoConn) Write(p []byte) (int, error) {
+	r.b = append(r.b, p...)
+	return len(p), nil
+}
+
+func (r *singleEchoConn) Close() error {
+	return nil
+}
+
+func (r *singleEchoConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (r *singleEchoConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func TestSingleEchoConn(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return &singleEchoConn{
+				b: []byte("HTTP/1.1 345 OK\r\nContent-Type: foobar\r\n\r\n"),
+			}, nil
+		},
+	}
+
+	req := Request{}
+	res := Response{}
+
+	req.SetRequestURI("http://foobar/a/b")
+	req.Header.SetMethod("POST")
+	req.Header.Set("Content-Type", "text/plain")
+	body := bytes.NewBufferString("test")
+	req.SetBodyStream(body, body.Len())
+
+	err := c.Do(&req, &res)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if res.StatusCode() != 345 {
+		t.Fatalf("unexpected status code: %d. Expecting 345", res.StatusCode())
+	}
+	expected := "POST /a/b HTTP/1.1\r\nUser-Agent: fasthttp\r\nHost: foobar\r\nContent-Type: text/plain\r\nContent-Length: 4\r\n\r\ntest"
+	if string(res.Body()) != expected {
+		t.Fatalf("unexpected body: %q. Expecting %q", res.Body(), expected)
+	}
 }
 
 func TestClientHTTPSInvalidServerName(t *testing.T) {
