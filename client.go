@@ -284,6 +284,11 @@ type Client struct {
 	// extra slashes are removed, special characters are encoded.
 	DisablePathNormalizing bool
 
+	// Maximum duration for waiting for a free connection.
+	//
+	// By default will not waiting, return ErrNoFreeConns immediately
+	MaxConnWaitTimeout time.Duration
+
 	mLock sync.Mutex
 	m     map[string]*HostClient
 	ms    map[string]*HostClient
@@ -487,6 +492,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			MaxResponseBodySize:           c.MaxResponseBodySize,
 			DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
 			DisablePathNormalizing:        c.DisablePathNormalizing,
+			MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
 		}
 		m[string(host)] = hc
 		if len(m) == 1 {
@@ -687,12 +693,18 @@ type HostClient struct {
 	// extra slashes are removed, special characters are encoded.
 	DisablePathNormalizing bool
 
+	// Maximum duration for waiting for a free connection.
+	//
+	// By default will not waiting, return ErrNoFreeConns immediately
+	MaxConnWaitTimeout time.Duration
+
 	clientName  atomic.Value
 	lastUseTime uint32
 
 	connsLock  sync.Mutex
 	connsCount int
 	conns      []*clientConn
+	connsWait  *wantConnQueue
 
 	addrsLock sync.Mutex
 	addrs     []string
@@ -1119,6 +1131,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	var timedout bool
 
 	go func() {
+		reqCopy.timeout = timeout
 		errDo := c.Do(reqCopy, respCopy)
 		mu.Lock()
 		{
@@ -1282,7 +1295,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		req.SetConnectionClose()
 	}
 
-	cc, err := c.acquireConn()
+	cc, err := c.acquireConn(req.timeout)
 	if err != nil {
 		return false, err
 	}
@@ -1409,8 +1422,7 @@ func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Unlock()
 }
 
-func (c *HostClient) acquireConn() (*clientConn, error) {
-	var cc *clientConn
+func (c *HostClient) acquireConn(reqTimeout time.Duration) (cc *clientConn, err error) {
 	createConn := false
 	startCleaner := false
 
@@ -1442,7 +1454,47 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 		return cc, nil
 	}
 	if !createConn {
-		return nil, ErrNoFreeConns
+		if c.MaxConnWaitTimeout <= 0 {
+			return nil, ErrNoFreeConns
+		}
+
+		// reqTimeout    c.MaxConnWaitTimeout   wait duration
+		//     d1                 d2            min(d1, d2)
+		//  0(not set)            d2            d2
+		//     d1            0(don't wait)      0(don't wait)
+		//  0(not set)            d2            d2
+		timeout := c.MaxConnWaitTimeout
+		timeoutOverridden := false
+		// reqTimeout == 0 means not set
+		if reqTimeout > 0 && reqTimeout < timeout {
+				timeout = reqTimeout
+				timeoutOverridden = true
+		}
+
+		// wait for a free connection
+		tc := AcquireTimer(timeout)
+		defer ReleaseTimer(tc)
+
+		w := &wantConn{
+			ready: make(chan struct{}, 1),
+		}
+		defer func() {
+			if err != nil {
+				w.cancel(c, err)
+			}
+		}()
+
+		c.queueForIdle(w)
+
+		select {
+		case <-w.ready:
+			return w.conn, w.err
+		case <-tc.C:
+			if timeoutOverridden {
+				return nil, ErrTimeout
+			}
+			return nil, ErrNoFreeConns
+		}
 	}
 
 	if startCleaner {
@@ -1457,6 +1509,33 @@ func (c *HostClient) acquireConn() (*clientConn, error) {
 	cc = acquireClientConn(conn)
 
 	return cc, nil
+}
+
+func (c *HostClient) queueForIdle(w *wantConn) {
+	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
+	if c.connsWait == nil {
+		c.connsWait = &wantConnQueue{}
+	}
+	c.connsWait.clearFront()
+	c.connsWait.pushBack(w)
+}
+
+func (c *HostClient) dialConnFor(w *wantConn) {
+	conn, err := c.dialHostHard()
+
+	if err != nil {
+		w.tryDeliver(nil, err)
+		c.decConnsCount()
+		return
+	}
+
+	cc := acquireClientConn(conn)
+	delivered := w.tryDeliver(cc, nil)
+	if !delivered {
+		// not delivered, return idle connection
+		c.releaseConn(cc)
+	}
 }
 
 func (c *HostClient) connsCleaner() {
@@ -1522,9 +1601,30 @@ func (c *HostClient) closeConn(cc *clientConn) {
 }
 
 func (c *HostClient) decConnsCount() {
+	if c.MaxConnWaitTimeout <= 0 {
+		c.connsLock.Lock()
+		c.connsCount--
+		c.connsLock.Unlock()
+		return
+	}
+
 	c.connsLock.Lock()
-	c.connsCount--
-	c.connsLock.Unlock()
+	defer c.connsLock.Unlock()
+	dialed := false
+	if q := c.connsWait; q != nil && q.len() > 0 {
+		for q.len() > 0 {
+			w := q.popFront()
+			if w.waiting() {
+				go c.dialConnFor(w)
+				dialed = true
+				break
+			}
+		}
+	}
+	if !dialed {
+		c.connsCount--
+	}
+
 }
 
 func acquireClientConn(conn net.Conn) *clientConn {
@@ -1548,9 +1648,29 @@ var clientConnPool sync.Pool
 
 func (c *HostClient) releaseConn(cc *clientConn) {
 	cc.lastUseTime = time.Now()
+	if c.MaxConnWaitTimeout <= 0 {
+		c.connsLock.Lock()
+		c.conns = append(c.conns, cc)
+		c.connsLock.Unlock()
+		return
+	}
+
+	// try to deliver an idle connection to a *wantConn
 	c.connsLock.Lock()
-	c.conns = append(c.conns, cc)
-	c.connsLock.Unlock()
+	defer c.connsLock.Unlock()
+	delivered := false
+	if q := c.connsWait; q != nil && q.len() > 0 {
+		for q.len() > 0 {
+			w := q.popFront()
+			if w.waiting() {
+				delivered = w.tryDeliver(cc, nil)
+				break
+			}
+		}
+	}
+	if !delivered {
+		c.conns = append(c.conns, cc)
+	}
 }
 
 func (c *HostClient) acquireWriter(conn net.Conn) *bufio.Writer {
@@ -1774,6 +1894,137 @@ func addMissingPort(addr string, isTLS bool) string {
 		port = 443
 	}
 	return net.JoinHostPort(addr, strconv.Itoa(port))
+}
+
+// A wantConn records state about a wanted connection
+// (that is, an active call to getConn).
+// The conn may be gotten by dialing or by finding an idle connection,
+// or a cancellation may make the conn no longer wanted.
+// These three options are racing against each other and use
+// wantConn to coordinate and agree about the winning outcome.
+//
+// inspired by net/http/transport.go
+type wantConn struct {
+	ready chan struct{}
+	mu    sync.Mutex // protects conn, err, close(ready)
+	conn  *clientConn
+	err   error
+}
+
+// waiting reports whether w is still waiting for an answer (connection or error).
+func (w *wantConn) waiting() bool {
+	select {
+	case <-w.ready:
+		return false
+	default:
+		return true
+	}
+}
+
+// tryDeliver attempts to deliver conn, err to w and reports whether it succeeded.
+func (w *wantConn) tryDeliver(conn *clientConn, err error) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.conn != nil || w.err != nil {
+		return false
+	}
+	w.conn = conn
+	w.err = err
+	if w.conn == nil && w.err == nil {
+		panic("fasthttp: internal error: misuse of tryDeliver")
+	}
+	close(w.ready)
+	return true
+}
+
+// cancel marks w as no longer wanting a result (for example, due to cancellation).
+// If a connection has been delivered already, cancel returns it with c.releaseConn.
+func (w *wantConn) cancel(c *HostClient, err error) {
+	w.mu.Lock()
+	if w.conn == nil && w.err == nil {
+		close(w.ready) // catch misbehavior in future delivery
+	}
+
+	conn := w.conn
+	w.conn = nil
+	w.err = err
+	w.mu.Unlock()
+
+	if conn != nil {
+		c.releaseConn(conn)
+	}
+}
+
+// A wantConnQueue is a queue of wantConns.
+//
+// inspired by net/http/transport.go
+type wantConnQueue struct {
+	// This is a queue, not a deque.
+	// It is split into two stages - head[headPos:] and tail.
+	// popFront is trivial (headPos++) on the first stage, and
+	// pushBack is trivial (append) on the second stage.
+	// If the first stage is empty, popFront can swap the
+	// first and second stages to remedy the situation.
+	//
+	// This two-stage split is analogous to the use of two lists
+	// in Okasaki's purely functional queue but without the
+	// overhead of reversing the list when swapping stages.
+	head    []*wantConn
+	headPos int
+	tail    []*wantConn
+}
+
+// len returns the number of items in the queue.
+func (q *wantConnQueue) len() int {
+	return len(q.head) - q.headPos + len(q.tail)
+}
+
+// pushBack adds w to the back of the queue.
+func (q *wantConnQueue) pushBack(w *wantConn) {
+	q.tail = append(q.tail, w)
+}
+
+// popFront removes and returns the wantConn at the front of the queue.
+func (q *wantConnQueue) popFront() *wantConn {
+	if q.headPos >= len(q.head) {
+		if len(q.tail) == 0 {
+			return nil
+		}
+		// Pick up tail as new head, clear tail.
+		q.head, q.headPos, q.tail = q.tail, 0, q.head[:0]
+	}
+
+	w := q.head[q.headPos]
+	q.head[q.headPos] = nil
+	q.headPos++
+	return w
+}
+
+// peekFront returns the wantConn at the front of the queue without removing it.
+func (q *wantConnQueue) peekFront() *wantConn {
+
+	if q.headPos < len(q.head) {
+		return q.head[q.headPos]
+	}
+	if len(q.tail) > 0 {
+		return q.tail[0]
+	}
+	return nil
+
+}
+
+// cleanFront pops any wantConns that are no longer waiting from the head of the
+// queue, reporting whether any were popped.
+func (q *wantConnQueue) clearFront() (cleaned bool) {
+	for {
+		w := q.peekFront()
+		if w == nil || w.waiting() {
+			return cleaned
+		}
+		q.popFront()
+		cleaned = true
+	}
 }
 
 // PipelineClient pipelines requests over a limited set of concurrent

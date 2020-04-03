@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/valyala/bytebufferpool"
 )
@@ -49,6 +50,10 @@ type Request struct {
 
 	// To detect scheme changes in redirects
 	schemaUpdate bool
+
+	// Request timeout. Usually set by DoDealine or DoTimeout
+	// if <= 0, means not set
+	timeout time.Duration
 }
 
 // Response represents HTTP response.
@@ -845,6 +850,7 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 func (req *Request) Reset() {
 	req.Header.Reset()
 	req.resetSkipHeader()
+	req.timeout = 0
 }
 
 func (req *Request) resetSkipHeader() {
