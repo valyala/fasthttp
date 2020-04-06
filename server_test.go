@@ -2148,6 +2148,43 @@ func TestRequestCtxHijackNoResponse(t *testing.T) {
 	}
 }
 
+func TestRequestCtxNoHijackNoResponse(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			io.WriteString(ctx, "test")
+			ctx.HijackSetNoResponse(true)
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\nContent-Length: 0\r\n\r\n")
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout")
+	}
+
+	bf := bufio.NewReader(
+		strings.NewReader(rw.w.String()),
+	)
+	resp := AcquireResponse()
+	resp.Read(bf)
+	if got := string(resp.Body()); got != "test" {
+		t.Errorf(`expected "test", got %q`, got)
+	}
+}
+
 func TestRequestCtxInit(t *testing.T) {
 	var ctx RequestCtx
 	var logger testLogger
