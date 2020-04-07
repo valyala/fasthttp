@@ -2087,7 +2087,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		hijackHandler = ctx.hijackHandler
 		ctx.hijackHandler = nil
-		hijackNoResponse = ctx.hijackNoResponse
+		hijackNoResponse = ctx.hijackNoResponse && hijackHandler != nil
 		ctx.hijackNoResponse = false
 
 		ctx.userValues.Reset()
