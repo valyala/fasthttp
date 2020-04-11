@@ -869,7 +869,7 @@ func TestRequestContinueReadBody(t *testing.T) {
 		t.Fatalf("MayContinue must return true")
 	}
 
-	if err := r.ContinueReadBody(br, 0); err != nil {
+	if err := r.ContinueReadBody(br, 0, true); err != nil {
 		t.Fatalf("error when reading request body: %s", err)
 	}
 	body := r.Body()
@@ -884,6 +884,48 @@ func TestRequestContinueReadBody(t *testing.T) {
 	if string(tail) != "f4343" {
 		t.Fatalf("unexpected tail %q. Expecting %q", tail, "f4343")
 	}
+}
+
+func TestRequestContinueReadBodyDisablePrereadMultipartForm(t *testing.T) {
+	t.Parallel()
+
+	var w bytes.Buffer
+	mw := multipart.NewWriter(&w)
+	for i := 0; i < 10; i++ {
+		k := fmt.Sprintf("key_%d", i)
+		v := fmt.Sprintf("value_%d", i)
+		if err := mw.WriteField(k, v); err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+	}
+	boundary := mw.Boundary()
+	if err := mw.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	formData := w.Bytes()
+
+	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=%s\r\nContent-Length: %d\r\n\r\n%s",
+		boundary, len(formData), formData)
+	br := bufio.NewReader(bytes.NewBufferString(s))
+
+	var r Request
+
+	if err := r.Header.Read(br); err != nil {
+		t.Fatalf("unexpected error reading headers: %s", err)
+	}
+
+	if err := r.readLimitBody(br, 10000, false, false); err != nil {
+		t.Fatalf("unexpected error reading body: %s", err)
+	}
+
+	if r.multipartForm != nil {
+		t.Fatalf("The multipartForm of the Request must be nil")
+	}
+
+	if string(formData) != string(r.Body()) {
+		t.Fatalf("The body given must equal the body in the Request")
+	}
+
 }
 
 func TestRequestMayContinue(t *testing.T) {

@@ -280,6 +280,14 @@ type Server struct {
 	// Server accepts all the requests by default.
 	GetOnly bool
 
+	// Will not pre parse Multipart Form data if set to true.
+	//
+	// This option is useful for servers that desire to treat
+	// multipart form data as a binary blob, or choose when to parse the data.
+	//
+	// Server pre parses multipart form data by default.
+	DisablePreParseMultipartForm bool
+
 	// Logs all errors, including the most frequent
 	// 'connection reset by peer', 'broken pipe' and 'connection timeout'
 	// errors. Such errors are common in production serving real-world
@@ -1988,7 +1996,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					}
 				}
 				//read body
-				err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly)
+				err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
 			}
 			if err == nil {
 				// If we read any bytes off the wire, we're active.
@@ -2047,7 +2055,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			if br == nil {
 				br = acquireReader(ctx)
 			}
-			err = ctx.Request.ContinueReadBody(br, maxRequestBodySize)
+			err = ctx.Request.ContinueReadBody(br, maxRequestBodySize, !s.DisablePreParseMultipartForm)
 			if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
 				releaseReader(s, br)
 				br = nil
