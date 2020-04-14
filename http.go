@@ -937,10 +937,10 @@ func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		return err
 	}
 
-	return req.readLimitBody(r, maxBodySize, false)
+	return req.readLimitBody(r, maxBodySize, false, true)
 }
 
-func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool) error {
+func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool, preParseMultipartForm bool) error {
 	// Do not reset the request here - the caller must reset it before
 	// calling this method.
 
@@ -955,7 +955,7 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 		return nil
 	}
 
-	return req.ContinueReadBody(r, maxBodySize)
+	return req.ContinueReadBody(r, maxBodySize, preParseMultipartForm)
 }
 
 // MayContinue returns true if the request contains
@@ -979,7 +979,7 @@ func (req *Request) MayContinue() bool {
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
-func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
+func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
 	var err error
 	contentLength := req.Header.realContentLength()
 	if contentLength > 0 {
@@ -987,16 +987,18 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
 			return ErrBodyTooLarge
 		}
 
-		// Pre-read multipart form data of known length.
-		// This way we limit memory usage for large file uploads, since their contents
-		// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-		req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-		if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
-			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
-			if err != nil {
-				req.Reset()
+		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
+			// Pre-read multipart form data of known length.
+			// This way we limit memory usage for large file uploads, since their contents
+			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
+			req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
+			if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
+				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
+				if err != nil {
+					req.Reset()
+				}
+				return err
 			}
-			return err
 		}
 	}
 
