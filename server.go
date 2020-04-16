@@ -1888,8 +1888,14 @@ func (s *Server) idleTimeout() time.Duration {
 	return s.ReadTimeout
 }
 
+func (s *Server) serveConnCleanup() {
+	atomic.AddInt32(&s.open, -1)
+	atomic.AddUint32(&s.concurrency, ^uint32(0))
+}
+
 func (s *Server) serveConn(c net.Conn) (err error) {
-	defer atomic.AddInt32(&s.open, -1)
+	defer s.serveConnCleanup()
+	atomic.AddUint32(&s.concurrency, 1)
 
 	var proto string
 	if proto, err = s.getNextProto(c); err != nil {
