@@ -180,6 +180,9 @@ type Server struct {
 	// The maximum number of concurrent connections the server may serve.
 	//
 	// DefaultConcurrency is used if not set.
+	//
+	// Concurrency only works if you either call Serve once, or only ServeConn multiple times.
+	// It works with ListenAndServe as well.
 	Concurrency int
 
 	// Whether to disable keep-alive connections.
