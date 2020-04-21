@@ -172,6 +172,17 @@ type Server struct {
 	// non zero RequestConfig field values will overwrite the default configs
 	HeaderReceived func(header *RequestHeader) RequestConfig
 
+	// DenyRequest is called after receiving the Expect 100 Continue Header
+	//
+	//https://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html#sec8.2.3
+	//https://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html#sec10.1.1
+	//Using DenyRequest a server can make decisioning on whether or not
+	//to read a potentially large request body based on the headers
+	//
+	// The default is to automatically read request bodies of Expect 100 Continue requests
+	// like they are normal requests
+	DenyRequest func(header *RequestHeader) bool
+
 	// Server name for sending in response headers.
 	//
 	// Default server name is used if left blank.
@@ -1935,7 +1946,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		connectionClose bool
 		isHTTP11        bool
 
-		reqReset bool
+		reqReset      bool
+		deniedRequest bool
 	)
 	for {
 		connRequestNum++
@@ -2041,37 +2053,53 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		}
 
 		// 'Expect: 100-continue' request handling.
-		// See http://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html for details.
+		// See https://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html#sec8.2.3 for details.
 		if ctx.Request.MayContinue() {
-			// Send 'HTTP/1.1 100 Continue' response.
-			if bw == nil {
-				bw = acquireWriter(ctx)
-			}
-			_, err = bw.Write(strResponseContinue)
-			if err != nil {
-				break
-			}
-			err = bw.Flush()
-			if err != nil {
-				break
-			}
-			if s.ReduceMemoryUsage {
-				releaseWriter(s, bw)
-				bw = nil
+
+			//Allow the ability to deny reading the incoming request body
+			if s.DenyRequest != nil {
+				if deniedRequest = s.DenyRequest(&ctx.Request.Header); deniedRequest {
+					if br != nil {
+						br.Reset(ctx.c)
+					}
+
+					ctx.SetStatusCode(StatusExpectationFailed)
+				}
 			}
 
-			// Read request body.
-			if br == nil {
-				br = acquireReader(ctx)
-			}
-			err = ctx.Request.ContinueReadBody(br, maxRequestBodySize, !s.DisablePreParseMultipartForm)
-			if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
-				releaseReader(s, br)
-				br = nil
-			}
-			if err != nil {
-				bw = s.writeErrorResponse(bw, ctx, serverName, err)
-				break
+			if !deniedRequest {
+				if bw == nil {
+					bw = acquireWriter(ctx)
+				}
+
+				// Send 'HTTP/1.1 100 Continue' response.
+				_, err = bw.Write(strResponseContinue)
+				if err != nil {
+					break
+				}
+				err = bw.Flush()
+				if err != nil {
+					break
+				}
+				if s.ReduceMemoryUsage {
+					releaseWriter(s, bw)
+					bw = nil
+				}
+
+				// Read request body.
+				if br == nil {
+					br = acquireReader(ctx)
+				}
+
+				err = ctx.Request.ContinueReadBody(br, maxRequestBodySize, !s.DisablePreParseMultipartForm)
+				if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
+					releaseReader(s, br)
+					br = nil
+				}
+				if err != nil {
+					bw = s.writeErrorResponse(bw, ctx, serverName, err)
+					break
+				}
 			}
 		}
 
@@ -2084,7 +2112,12 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
 		ctx.time = time.Now()
-		s.Handler(ctx)
+
+		//if a client denies a request
+		//the handler should not be called
+		if !deniedRequest {
+			s.Handler(ctx)
+		}
 
 		timeoutResponse = ctx.timeoutResponse
 		if timeoutResponse != nil {
