@@ -1350,7 +1350,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		}
 	}
 
-	if customSkipBody || !req.Header.IsGet() && req.Header.IsHead() {
+	if customSkipBody || req.Header.IsHead() {
 		resp.SkipBody = true
 	}
 	if c.DisableHeaderNamesNormalizing {
@@ -1467,8 +1467,8 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration) (cc *clientConn, err 
 		timeoutOverridden := false
 		// reqTimeout == 0 means not set
 		if reqTimeout > 0 && reqTimeout < timeout {
-				timeout = reqTimeout
-				timeoutOverridden = true
+			timeout = reqTimeout
+			timeoutOverridden = true
 		}
 
 		// wait for a free connection
