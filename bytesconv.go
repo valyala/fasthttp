@@ -185,11 +185,12 @@ func parseUintBuf(b []byte) (int, int, error) {
 			}
 			return v, i, nil
 		}
+		vNew := 10*v + int(k)
 		// Test for overflow.
-		if v*10 < v {
+		if vNew < v {
 			return -1, i, errTooLongInt
 		}
-		v = 10*v + int(k)
+		v = vNew
 	}
 	return v, n, nil
 }
