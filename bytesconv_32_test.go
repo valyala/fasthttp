@@ -38,10 +38,22 @@ func TestReadHexIntSuccess(t *testing.T) {
 	testReadHexIntSuccess(t, "1234ZZZ", 0x1234)
 }
 
+func TestParseUintError32(t *testing.T) {
+	t.Parallel()
+
+	// Overflow by last digit: 2 ** 32 / 2 * 10 ** n
+	testParseUintError(t, "2147483648")
+	testParseUintError(t, "21474836480")
+	testParseUintError(t, "214748364800")
+}
+
 func TestParseUintSuccess(t *testing.T) {
 	t.Parallel()
 
 	testParseUintSuccess(t, "0", 0)
 	testParseUintSuccess(t, "123", 123)
 	testParseUintSuccess(t, "123456789", 123456789)
+
+	// Max supported value: 2 ** 32 / 2 - 1
+	testParseUintSuccess(t, "2147483647", 2147483647)
 }
