@@ -354,6 +354,9 @@ func TestURIParse(t *testing.T) {
 
 	testURIParse(t, &u, "", "//aaa.com//absolute",
 		"http://aaa.com/absolute", "aaa.com", "/absolute", "//absolute", "", "")
+
+	testURIParse(t, &u, "", "//aaa.com\r\n\r\nGET x",
+		"http:///", "", "/", "", "", "")
 }
 
 func testURIParse(t *testing.T, u *URI, host, uri,

@@ -20,6 +20,38 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestClientInvalidURI(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	requests := int64(0)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			atomic.AddInt64(&requests, 1)
+		},
+	}
+	go s.Serve(ln)
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req, res := AcquireRequest(), AcquireResponse()
+	defer func() {
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+	}()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com\r\n\r\nGET /\r\n\r\n")
+	err := c.Do(req, res)
+	if err == nil {
+		t.Fatal("expected error (missing required Host header in request)")
+	}
+	if n := atomic.LoadInt64(&requests); n != 0 {
+		t.Fatalf("0 requests expected, got %d", n)
+	}
+}
+
 func TestClientGetWithBody(t *testing.T) {
 	t.Parallel()
 
