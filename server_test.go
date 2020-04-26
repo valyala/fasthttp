@@ -1654,12 +1654,12 @@ func TestServerExpect100Continue(t *testing.T) {
 	}
 }
 
-func TestServerDenyRequest(t *testing.T) {
+func TestServerContinueHandler(t *testing.T) {
 	t.Parallel()
 
 	acceptContentLength := 5
 	s := &Server{
-		DenyRequest: func(headers *RequestHeader) bool {
+		ContinueHandler: func(headers *RequestHeader) bool {
 			if !headers.IsPost() {
 				t.Errorf("unexpected method %q. Expecting POST", headers.Method())
 			}
@@ -1669,7 +1669,7 @@ func TestServerDenyRequest(t *testing.T) {
 				t.Errorf("unexpectected content-type: %q. Expecting %q", ct, "a/b")
 			}
 
-			//deny anything that isn't the accepted content length
+			// Pass on any request that isn't the accepted content length
 			return headers.contentLength != acceptContentLength
 		},
 		Handler: func(ctx *RequestCtx) {
@@ -1720,14 +1720,14 @@ func TestServerDenyRequest(t *testing.T) {
 		}
 	}
 
-	//the same server should not fail when handling the three different types of requests
-	//Regular requests
-	//Expect 100 continue accepted
-	//Exepect 100 continue denied
+	// The same server should not fail when handling the three different types of requests
+	// Regular requests
+	// Expect 100 continue accepted
+	// Exepect 100 continue denied
 	rw := &readWriter{}
 	for i := 0; i < 25; i++ {
 
-		//Regular requests without Expect 100 continue header
+		// Regular requests without Expect 100 continue header
 		rw.r.Reset()
 		rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
 		sendRequest(rw, StatusOK, "foobar")

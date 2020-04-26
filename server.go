@@ -172,16 +172,16 @@ type Server struct {
 	// non zero RequestConfig field values will overwrite the default configs
 	HeaderReceived func(header *RequestHeader) RequestConfig
 
-	// DenyRequest is called after receiving the Expect 100 Continue Header
+	// ContinueHandler is called after receiving the Expect 100 Continue Header
 	//
-	//https://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html#sec8.2.3
-	//https://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html#sec10.1.1
-	//Using DenyRequest a server can make decisioning on whether or not
-	//to read a potentially large request body based on the headers
+	// https://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html#sec8.2.3
+	// https://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html#sec10.1.1
+	// Using ContinueHandler a server can make decisioning on whether or not
+	// to read a potentially large request body based on the headers
 	//
 	// The default is to automatically read request bodies of Expect 100 Continue requests
 	// like they are normal requests
-	DenyRequest func(header *RequestHeader) bool
+	ContinueHandler func(header *RequestHeader) bool
 
 	// Server name for sending in response headers.
 	//
@@ -2019,6 +2019,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 				//read body
 				err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
 			}
+
 			if err == nil {
 				// If we read any bytes off the wire, we're active.
 				s.setState(c, StateActive)
@@ -2056,9 +2057,9 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		// See https://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html#sec8.2.3 for details.
 		if ctx.Request.MayContinue() {
 
-			//Allow the ability to deny reading the incoming request body
-			if s.DenyRequest != nil {
-				if deniedRequest = s.DenyRequest(&ctx.Request.Header); deniedRequest {
+			// Allow the ability to deny reading the incoming request body
+			if s.ContinueHandler != nil {
+				if deniedRequest = s.ContinueHandler(&ctx.Request.Header); deniedRequest {
 					if br != nil {
 						br.Reset(ctx.c)
 					}
@@ -2113,8 +2114,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		ctx.connRequestNum = connRequestNum
 		ctx.time = time.Now()
 
-		//if a client denies a request
-		//the handler should not be called
+		// If a client denies a request the handler should not be called
 		if !deniedRequest {
 			s.Handler(ctx)
 		}
