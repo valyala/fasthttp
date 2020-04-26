@@ -1670,7 +1670,7 @@ func TestServerContinueHandler(t *testing.T) {
 			}
 
 			// Pass on any request that isn't the accepted content length
-			return headers.contentLength != acceptContentLength
+			return headers.contentLength == acceptContentLength
 		},
 		Handler: func(ctx *RequestCtx) {
 			if ctx.Request.Header.contentLength != acceptContentLength {

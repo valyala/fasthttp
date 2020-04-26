@@ -1946,8 +1946,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		connectionClose bool
 		isHTTP11        bool
 
-		reqReset      bool
-		deniedRequest bool
+		reqReset               bool
+		continueReadingRequest bool = true
 	)
 	for {
 		connRequestNum++
@@ -2059,7 +2059,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 			// Allow the ability to deny reading the incoming request body
 			if s.ContinueHandler != nil {
-				if deniedRequest = s.ContinueHandler(&ctx.Request.Header); deniedRequest {
+				if continueReadingRequest = s.ContinueHandler(&ctx.Request.Header); !continueReadingRequest {
 					if br != nil {
 						br.Reset(ctx.c)
 					}
@@ -2068,7 +2068,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 				}
 			}
 
-			if !deniedRequest {
+			if continueReadingRequest {
 				if bw == nil {
 					bw = acquireWriter(ctx)
 				}
@@ -2115,7 +2115,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		ctx.time = time.Now()
 
 		// If a client denies a request the handler should not be called
-		if !deniedRequest {
+		if continueReadingRequest {
 			s.Handler(ctx)
 		}
 
