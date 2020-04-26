@@ -18,10 +18,19 @@ go:
   - 1.10.x
   - 1.9.x
 
-matrix:
-  allow_failures:
-    - tip
-  fast_finish: true
+script:
+  # build test for supported platforms
+  - GOOS=linux go build
+  - GOOS=darwin go build
+  - GOOS=freebsd go build
+  - GOOS=windows go build
+  - GOARCH=386 go build
+
+  # run tests on a standard platform
+  - go test -v ./...
+
+  # run tests with the race detector as well
+  - go test -race -v ./...
 
 env:
   global:
@@ -31,21 +40,9 @@ before_install:
   - go get -t -v ./...
 
 jobs:
+  allow_failures:
+    - go: tip
   include:
-    - stage: test
-      script:
-        # build test for supported platforms
-        - GOOS=linux go build
-        - GOOS=darwin go build
-        - GOOS=freebsd go build
-        - GOOS=windows go build
-        - GOARCH=386 go build
-
-        # run tests on a standard platform
-        - go test -v ./...
-
-        # run tests with the race detector as well
-        - go test -race -v ./...
     - stage: fuzzit.dev
       os:
         - linux
