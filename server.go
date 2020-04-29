@@ -375,6 +375,10 @@ type Server struct {
 	// which will close it when needed.
 	KeepHijackedConns bool
 
+	// RequestTimeHandler will call into client code after a response has been sent with start time
+	// of the request.  This allows tracking of processing time for request.
+	RequestTimeHandler func(startTime time.Time)
+
 	tlsConfig  *tls.Config
 	nextProtos map[string]ServeHandler
 
@@ -1948,8 +1952,14 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		reqReset               bool
 		continueReadingRequest bool = true
+
+		startTime time.Time
 	)
 	for {
+		if s.RequestTimeHandler != nil {
+			startTime = time.Now()
+		}
+
 		connRequestNum++
 
 		// If this is a keep-alive connection set the idle timeout.
@@ -2172,6 +2182,10 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			}
 			if err = writeResponse(ctx, bw); err != nil {
 				break
+			}
+
+			if s.RequestTimeHandler != nil {
+				s.RequestTimeHandler(startTime)
 			}
 
 			// Only flush the writer if we don't have another request in the pipeline.
