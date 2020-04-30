@@ -1321,7 +1321,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
-		req.Header.userAgent = c.getClientName()
+		req.Header.userAgent = append(req.Header.userAgent[:0], c.getClientName()...)
 	}
 	bw := c.acquireWriter(conn)
 	err = req.Write(bw)
