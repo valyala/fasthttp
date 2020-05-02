@@ -245,7 +245,7 @@ func TestClientRedirectSameSchema(t *testing.T) {
 
 	urlParsed, err := url.Parse(destURL)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatal(err)
 		return
 	}
 
@@ -270,7 +270,42 @@ func TestClientRedirectSameSchema(t *testing.T) {
 
 }
 
-func TestClientRedirectChangingSchemaHttp2Https(t *testing.T) {
+func TestClientRedirectClientChangingSchemaHttp2Https(t *testing.T) {
+	t.Parallel()
+
+	listenHTTPS := testClientRedirectListener(t, true)
+	defer listenHTTPS.Close()
+
+	listenHTTP := testClientRedirectListener(t, false)
+	defer listenHTTP.Close()
+
+	sHTTPS := testClientRedirectChangingSchemaServer(t, listenHTTPS, listenHTTP, true)
+	defer sHTTPS.Stop()
+
+	sHTTP := testClientRedirectChangingSchemaServer(t, listenHTTPS, listenHTTP, false)
+	defer sHTTP.Stop()
+
+	destURL := fmt.Sprintf("http://%s/baz", listenHTTP.Addr().String())
+
+	reqClient := &Client{
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	statusCode, _, err := reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
+	if err != nil {
+		t.Fatalf("HostClient error: %s", err)
+		return
+	}
+
+	if statusCode != 200 {
+		t.Fatalf("HostClient error code response %d", statusCode)
+		return
+	}
+}
+
+func TestClientRedirectHostClientChangingSchemaHttp2Https(t *testing.T) {
 	t.Parallel()
 
 	listenHTTPS := testClientRedirectListener(t, true)
@@ -289,7 +324,7 @@ func TestClientRedirectChangingSchemaHttp2Https(t *testing.T) {
 
 	urlParsed, err := url.Parse(destURL)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatal(err)
 		return
 	}
 
@@ -300,15 +335,9 @@ func TestClientRedirectChangingSchemaHttp2Https(t *testing.T) {
 		},
 	}
 
-	statusCode, _, err := reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
-	if err != nil {
-		t.Fatalf("HostClient error: %s", err)
-		return
-	}
-
-	if statusCode != 200 {
-		t.Fatalf("HostClient error code response %d", statusCode)
-		return
+	_, _, err = reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
+	if err != ErrHostClientRedirectToDifferentScheme {
+		t.Fatal("expected HostClient error")
 	}
 }
 
