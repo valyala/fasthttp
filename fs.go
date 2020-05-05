@@ -684,6 +684,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	} else {
 		path = ctx.Path()
 	}
+	hasTrailingSlash := path[len(path) - 1] == '/'
 	path = stripTrailingSlashes(path)
 
 	if n := bytes.IndexByte(path, 0); n >= 0 {
@@ -729,6 +730,10 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			ff, err = h.openFSFile(filePath, mustCompress)
 		}
 		if err == errDirIndexRequired {
+			if !hasTrailingSlash {
+				ctx.RedirectBytes(append(path, '/'), StatusFound)
+				return
+			}
 			ff, err = h.openIndexFile(ctx, filePath, mustCompress)
 			if err != nil {
 				ctx.Logger().Printf("cannot open dir index %q: %s", filePath, err)
