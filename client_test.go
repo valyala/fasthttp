@@ -2295,6 +2295,10 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 	}
 	wg.Wait()
 
+	// Prevent a race condition with the conns cleaner that might still be running.
+	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
+
 	if c.connsWait.len() > 0 {
 		t.Errorf("connsWait has %v items remaining", c.connsWait.len())
 	}
