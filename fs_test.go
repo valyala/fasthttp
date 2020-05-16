@@ -765,6 +765,6 @@ func TestServeFileDirectoryRedirect(t *testing.T) {
 	ctx.Response.Reset()
 	ServeFile(&ctx, "fs.go")
 	if ctx.Response.StatusCode() != StatusOK {
-		t.Fatalf("Unexpected status code %d for file '/.git'. Expecting %d.", ctx.Response.StatusCode(), StatusOK)
+		t.Fatalf("Unexpected status code %d for file '/fs.go'. Expecting %d.", ctx.Response.StatusCode(), StatusOK)
 	}
 }
