@@ -46,10 +46,9 @@ type Request struct {
 
 	keepBodyBuffer bool
 
+	// Used by Server to indicate the request was received on a HTTPS endpoint.
+	// Client/HostClient shouldn't use this field but should depend on the uri.scheme instead.
 	isTLS bool
-
-	// To detect scheme changes in redirects
-	schemaUpdate bool
 
 	// Request timeout. Usually set by DoDealine or DoTimeout
 	// if <= 0, means not set
