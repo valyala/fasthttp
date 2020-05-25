@@ -940,6 +940,56 @@ func TestServerTLS(t *testing.T) {
 	}
 }
 
+func TestServerTLSReadTimeout(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	certFile := "./ssl-cert-snakeoil.pem"
+	keyFile := "./ssl-cert-snakeoil.key"
+
+	s := &Server{
+		ReadTimeout: time.Millisecond * 50,
+		Logger:      &testLogger{}, // Ignore log output.
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+
+	err := s.AppendCert(certFile, keyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		err = s.ServeTLS(ln, "", "")
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Error(err)
+	}
+
+	r := make(chan error)
+
+	go func() {
+		b := make([]byte, 1)
+		_, err := c.Read(b)
+		c.Close()
+		r <- err
+	}()
+
+	select {
+	case err = <-r:
+	case <-time.After(time.Millisecond * 100):
+	}
+
+	if err == nil {
+		t.Error("server didn't close connection after timeout")
+	}
+}
+
 func TestServerServeTLSEmbed(t *testing.T) {
 	t.Parallel()
 

@@ -1419,6 +1419,18 @@ func (s *Server) NextProto(key string, nph ServeHandler) {
 
 func (s *Server) getNextProto(c net.Conn) (proto string, err error) {
 	if tlsConn, ok := c.(connTLSer); ok {
+		if s.ReadTimeout > 0 {
+			if err := c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
+				panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", s.ReadTimeout, err))
+			}
+		}
+
+		if s.WriteTimeout > 0 {
+			if err := c.SetWriteDeadline(time.Now().Add(s.WriteTimeout)); err != nil {
+				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", s.WriteTimeout, err))
+			}
+		}
+
 		err = tlsConn.Handshake()
 		if err == nil {
 			proto = tlsConn.ConnectionState().NegotiatedProtocol
@@ -2179,7 +2191,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		if writeTimeout > 0 {
 			if err := c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", s.WriteTimeout, err))
+				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", writeTimeout, err))
 			}
 		}
 
