@@ -284,11 +284,11 @@ func (u *URI) parse(host, uri []byte, isTLS bool) {
 		host = host[n+1:]
 
 		if n := bytes.Index(auth, strColon); n >= 0 {
-			u.username = auth[:n]
-			u.password = auth[n+1:]
+			u.username = append(u.username[:0], auth[:n]...)
+			u.password = append(u.password[:0], auth[n+1:]...)
 		} else {
-			u.username = auth
-			u.password = auth[:0] // Make sure it's not nil
+			u.username = append(u.username[:0], auth...)
+			u.password = u.password[:0]
 		}
 	}
 

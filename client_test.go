@@ -112,7 +112,7 @@ func TestClientURLAuth(t *testing.T) {
 	for up, expected := range cases {
 		req := AcquireRequest()
 		req.Header.SetMethod(MethodGet)
-		req.SetRequestURI("http://" + up + "example.com")
+		req.SetRequestURI("http://" + up + "example.com/foo/bar")
 		if err := c.Do(req, nil); err != nil {
 			t.Fatal(err)
 		}
