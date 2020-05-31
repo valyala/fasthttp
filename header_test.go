@@ -174,8 +174,8 @@ func TestRequestHeaderEmptyValueFromString(t *testing.T) {
 func TestRequestRawHeaders(t *testing.T) {
 	t.Parallel()
 
-	kvs := "host: foobar\r\n" +
-		"value: b\r\n" +
+	kvs := "hOsT: foobar\r\n" +
+		"value:  b\r\n" +
 		"\r\n"
 	t.Run("normalized", func(t *testing.T) {
 		s := "GET / HTTP/1.1\r\n" + kvs
