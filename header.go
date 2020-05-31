@@ -38,6 +38,8 @@ type ResponseHeader struct {
 	bufKV argsKV
 
 	cookies []argsKV
+
+	RawHeaders []byte
 }
 
 // RequestHeader represents HTTP request header.
@@ -659,6 +661,8 @@ func (h *ResponseHeader) resetSkipNormalize() {
 
 	h.h = h.h[:0]
 	h.cookies = h.cookies[:0]
+
+	h.RawHeaders = h.RawHeaders[:0]
 }
 
 // Reset clears request header.
@@ -1650,6 +1654,7 @@ func appendHeaderLine(dst, key, value []byte) []byte {
 }
 
 func (h *ResponseHeader) parse(buf []byte) (int, error) {
+	h.RawHeaders = append(h.RawHeaders[:0], buf...)
 	m, err := h.parseFirstLine(buf)
 	if err != nil {
 		return 0, err
