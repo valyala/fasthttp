@@ -949,7 +949,7 @@ func TestServerTLSReadTimeout(t *testing.T) {
 	keyFile := "./ssl-cert-snakeoil.key"
 
 	s := &Server{
-		ReadTimeout: time.Millisecond * 50,
+		ReadTimeout: time.Millisecond * 100,
 		Logger:      &testLogger{}, // Ignore log output.
 		Handler: func(ctx *RequestCtx) {
 		},
@@ -982,7 +982,7 @@ func TestServerTLSReadTimeout(t *testing.T) {
 
 	select {
 	case err = <-r:
-	case <-time.After(time.Millisecond * 100):
+	case <-time.After(time.Millisecond * 200):
 	}
 
 	if err == nil {
