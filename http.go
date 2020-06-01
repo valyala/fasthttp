@@ -729,13 +729,13 @@ func (req *Request) URI() *URI {
 	return &req.uri
 }
 
-func (req *Request) parseURI() {
+func (req *Request) parseURI() error {
 	if req.parsedURI {
-		return
+		return nil
 	}
 	req.parsedURI = true
 
-	req.uri.parse(req.Header.Host(), req.Header.RequestURI(), req.isTLS)
+	return req.uri.parse(req.Header.Host(), req.Header.RequestURI(), req.isTLS)
 }
 
 // PostArgs returns POST arguments.

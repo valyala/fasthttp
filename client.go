@@ -451,6 +451,10 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
 	uri := req.URI()
+	if uri == nil {
+		return ErrorInvalidURI
+	}
+
 	host := uri.Host()
 
 	isTLS := false
@@ -926,7 +930,9 @@ func doRequestFollowRedirects(req *Request, resp *Response, url string, maxRedir
 
 	for {
 		req.SetRequestURI(url)
-		req.parseURI()
+		if err := req.parseURI(); err != nil {
+			return 0, nil, err
+		}
 
 		if err = c.Do(req, resp); err != nil {
 			break
