@@ -16,7 +16,8 @@ var listenConfig = net.ListenConfig{
 	},
 }
 
-// Listen always returns ErrNoReusePort on Windows
+// Listen returns TCP listener with SO_REUSEADDR option set, SO_REUSEPORT is not supported on Windows, so it uses
+// SO_REUSEADDR as an alternative.
 func Listen(network, addr string) (net.Listener, error) {
 	return listenConfig.Listen(context.Background(), network, addr)
 }
