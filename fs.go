@@ -84,7 +84,7 @@ func ServeFile(ctx *RequestCtx, path string) {
 	})
 	if len(path) == 0 || path[0] != '/' {
 		// extend relative path to absolute path
-		hasTrailingSlash := path[len(path) - 1] == '/'
+		hasTrailingSlash := len(path) > 0 && path[len(path)-1] == '/'
 		var err error
 		if path, err = filepath.Abs(path); err != nil {
 			ctx.Logger().Printf("cannot resolve path %q to absolute file path: %s", path, err)
@@ -688,7 +688,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	} else {
 		path = ctx.Path()
 	}
-	hasTrailingSlash := path[len(path) - 1] == '/'
+	hasTrailingSlash := len(path) > 0 && path[len(path)-1] == '/'
 	path = stripTrailingSlashes(path)
 
 	if n := bytes.IndexByte(path, 0); n >= 0 {
