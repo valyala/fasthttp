@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"runtime"
 	"sort"
 	"testing"
 	"time"
@@ -740,6 +741,10 @@ func TestServeFileContentType(t *testing.T) {
 }
 
 func TestServeFileDirectoryRedirect(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
 	t.Parallel()
 
 	var ctx RequestCtx

@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 )
@@ -511,7 +512,7 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 		path := u.Path()
 		n = bytes.LastIndexByte(path, '/')
 		if n < 0 {
-			panic("BUG: path must contain at least one slash")
+			panic(fmt.Sprintf("BUG: path must contain at least one slash: %s %s", u.Path(), newURI))
 		}
 		buf = u.appendSchemeHost(buf[:0])
 		buf = appendQuotedPath(buf, path[:n+1])

@@ -6,6 +6,8 @@ Preforks master process between several child processes increases performance, b
 
 **WARNING: using prefork prevents the use of any global state!. Things like in-memory caches won't work.**
 
+Note: Prefork is not supported on Windows.
+
 - How it works:
 
 ```go
