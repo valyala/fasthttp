@@ -11,16 +11,15 @@ os:
   - osx
 go:
   - tip
+  - 1.14.x
   - 1.13.x
   - 1.12.x
   - 1.11.x
   - 1.10.x
   - 1.9.x
 
-matrix:
-  allow_failures:
-    - tip
-  fast_finish: true
+script:
+  - go test -v ./...
 
 env:
   global:
@@ -30,26 +29,50 @@ before_install:
   - go get -t -v ./...
 
 jobs:
+  allow_failures:
+    - go: tip
   include:
-    - stage: test
+    - stage: cross compilation
+      os:
+        - linux
+      go:
+        - 1.14.x
       script:
-        # build test for supported platforms
         - GOOS=linux go build
         - GOOS=darwin go build
         - GOOS=freebsd go build
         - GOOS=windows go build
         - GOARCH=386 go build
-
-        # run tests on a standard platform
-        - go test -v ./...
-
-        # run tests with the race detector as well
+    - stage: cross compilation
+      os:
+        - osx
+      go:
+        - 1.14.x
+      script:
+        - GOOS=linux go build
+        - GOOS=darwin go build
+        - GOOS=freebsd go build
+        - GOOS=windows go build
+        - GOARCH=386 go build
+    - stage: race detector
+      os:
+        - linux
+      go:
+        - 1.14.x
+      script:
+        - go test -race -v ./...
+    - stage: race detector
+      os:
+        - osx
+      go:
+        - 1.14.x
+      script:
         - go test -race -v ./...
     - stage: fuzzit.dev
       os:
         - linux
       go:
-        - 1.13
+        - 1.14.x
       script:
         - if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./fuzzit.sh fuzzing; fi
         - if [ "$TRAVIS_PULL_REQUEST" != "false" ]; then ./fuzzit.sh local-regression; fi

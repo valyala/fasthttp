@@ -174,8 +174,8 @@ func TestRequestHeaderEmptyValueFromString(t *testing.T) {
 func TestRequestRawHeaders(t *testing.T) {
 	t.Parallel()
 
-	kvs := "host: foobar\r\n" +
-		"value: b\r\n" +
+	kvs := "hOsT: foobar\r\n" +
+		"value:  b\r\n" +
 		"\r\n"
 	t.Run("normalized", func(t *testing.T) {
 		s := "GET / HTTP/1.1\r\n" + kvs
@@ -1247,6 +1247,20 @@ func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
 
 	if strings.Contains(headers, "Content-Type: \r\n") {
 		t.Fatalf("ResponseContentTypeNoDefaultNotEmpty fail, response: \n%+v\noutcome: \n%q\n", h, headers) //nolint:govet
+	}
+}
+
+func TestResponseDateNoDefaultNotEmpty(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+
+	h.noDefaultDate = true
+
+	headers := h.String()
+
+	if strings.Contains(headers, "\r\nDate: ") {
+		t.Fatalf("ResponseDateNoDefaultNotEmpty fail, response: \n%+v\noutcome: \n%q\n", h, headers) //nolint:govet
 	}
 }
 

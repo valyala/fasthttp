@@ -120,6 +120,7 @@ var (
 	defaultDialer = &TCPDialer{Concurrency: 1000}
 )
 
+// Resolver represents interface of the tcp resolver.
 type Resolver interface {
 	LookupIPAddr(context.Context, string) (names []net.IPAddr, err error)
 }
@@ -133,6 +134,11 @@ type TCPDialer struct {
 	// WARNING: This can only be changed before the first Dial.
 	// Changes made after the first Dial will not affect anything.
 	Concurrency int
+
+	// LocalAddr is the local address to use when dialing an
+	// address.
+	// If nil, a local address is automatically chosen.
+	LocalAddr *net.TCPAddr
 
 	// This may be used to override DNS resolving policy, like this:
 	// var dialer = &fasthttp.TCPDialer{
@@ -283,7 +289,7 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 	n := uint32(len(addrs))
 	deadline := time.Now().Add(timeout)
 	for n > 0 {
-		conn, err = tryDial(network, &addrs[idx%n], deadline, d.concurrencyCh)
+		conn, err = d.tryDial(network, &addrs[idx%n], deadline, d.concurrencyCh)
 		if err == nil {
 			return conn, nil
 		}
@@ -296,7 +302,7 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 	return nil, err
 }
 
-func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyCh chan struct{}) (net.Conn, error) {
+func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyCh chan struct{}) (net.Conn, error) {
 	timeout := -time.Since(deadline)
 	if timeout <= 0 {
 		return nil, ErrDialTimeout
@@ -327,7 +333,7 @@ func tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyC
 	ch := chv.(chan dialResult)
 	go func() {
 		var dr dialResult
-		dr.conn, dr.err = net.DialTCP(network, nil, addr)
+		dr.conn, dr.err = net.DialTCP(network, d.LocalAddr, addr)
 		ch <- dr
 		if concurrencyCh != nil {
 			<-concurrencyCh
@@ -443,7 +449,7 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver) ([]net.TCPA
 	if resolver == nil {
 		resolver = net.DefaultResolver
 	}
-	
+
 	ctx := context.Background()
 	ipaddrs, err := resolver.LookupIPAddr(ctx, host)
 	if err != nil {
@@ -460,6 +466,7 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver) ([]net.TCPA
 		addrs = append(addrs, net.TCPAddr{
 			IP:   ip.IP,
 			Port: port,
+			Zone: ip.Zone,
 		})
 	}
 	if len(addrs) == 0 {

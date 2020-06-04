@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/valyala/bytebufferpool"
 )
@@ -45,10 +46,13 @@ type Request struct {
 
 	keepBodyBuffer bool
 
+	// Used by Server to indicate the request was received on a HTTPS endpoint.
+	// Client/HostClient shouldn't use this field but should depend on the uri.scheme instead.
 	isTLS bool
 
-	// To detect scheme changes in redirects
-	schemaUpdate bool
+	// Request timeout. Usually set by DoDealine or DoTimeout
+	// if <= 0, means not set
+	timeout time.Duration
 }
 
 // Response represents HTTP response.
@@ -390,6 +394,33 @@ func gunzipData(p []byte) ([]byte, error) {
 	return bb.B, nil
 }
 
+// BodyUnbrotli returns un-gzipped body data.
+//
+// This method may be used if the request header contains
+// 'Content-Encoding: gzip' for reading un-gzipped body.
+// Use Body for reading gzipped request body.
+func (req *Request) BodyUnbrotli() ([]byte, error) {
+	return unBrotliData(req.Body())
+}
+
+// BodyUnbrotli returns un-gzipped body data.
+//
+// This method may be used if the response header contains
+// 'Content-Encoding: gzip' for reading un-gzipped body.
+// Use Body for reading gzipped response body.
+func (resp *Response) BodyUnbrotli() ([]byte, error) {
+	return unBrotliData(resp.Body())
+}
+
+func unBrotliData(p []byte) ([]byte, error) {
+	var bb bytebufferpool.ByteBuffer
+	_, err := WriteUnbrotli(&bb, p)
+	if err != nil {
+		return nil, err
+	}
+	return bb.B, nil
+}
+
 // BodyInflate returns inflated body data.
 //
 // This method may be used if the response header contains
@@ -698,13 +729,13 @@ func (req *Request) URI() *URI {
 	return &req.uri
 }
 
-func (req *Request) parseURI() {
+func (req *Request) parseURI() error {
 	if req.parsedURI {
-		return
+		return nil
 	}
 	req.parsedURI = true
 
-	req.uri.parse(req.Header.Host(), req.Header.RequestURI(), req.isTLS)
+	return req.uri.parse(req.Header.Host(), req.Header.RequestURI(), req.isTLS)
 }
 
 // PostArgs returns POST arguments.
@@ -845,6 +876,7 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 func (req *Request) Reset() {
 	req.Header.Reset()
 	req.resetSkipHeader()
+	req.timeout = 0
 }
 
 func (req *Request) resetSkipHeader() {
@@ -931,10 +963,10 @@ func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		return err
 	}
 
-	return req.readLimitBody(r, maxBodySize, false)
+	return req.readLimitBody(r, maxBodySize, false, true)
 }
 
-func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool) error {
+func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool, preParseMultipartForm bool) error {
 	// Do not reset the request here - the caller must reset it before
 	// calling this method.
 
@@ -949,7 +981,7 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 		return nil
 	}
 
-	return req.ContinueReadBody(r, maxBodySize)
+	return req.ContinueReadBody(r, maxBodySize, preParseMultipartForm)
 }
 
 // MayContinue returns true if the request contains
@@ -973,7 +1005,7 @@ func (req *Request) MayContinue() bool {
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
-func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
+func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
 	var err error
 	contentLength := req.Header.realContentLength()
 	if contentLength > 0 {
@@ -981,16 +1013,18 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int) error {
 			return ErrBodyTooLarge
 		}
 
-		// Pre-read multipart form data of known length.
-		// This way we limit memory usage for large file uploads, since their contents
-		// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-		req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-		if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
-			req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
-			if err != nil {
-				req.Reset()
+		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
+			// Pre-read multipart form data of known length.
+			// This way we limit memory usage for large file uploads, since their contents
+			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
+			req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
+			if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
+				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
+				if err != nil {
+					req.Reset()
+				}
+				return err
 			}
-			return err
 		}
 	}
 
@@ -1263,6 +1297,61 @@ func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
 		return err
 	}
 	return resp.Write(w)
+}
+
+func (resp *Response) brotliBody(level int) error {
+	if len(resp.Header.peek(strContentEncoding)) > 0 {
+		// It looks like the body is already compressed.
+		// Do not compress it again.
+		return nil
+	}
+
+	if !resp.Header.isCompressibleContentType() {
+		// The content-type cannot be compressed.
+		return nil
+	}
+
+	if resp.bodyStream != nil {
+		// Reset Content-Length to -1, since it is impossible
+		// to determine body size beforehand of streamed compression.
+		// For https://github.com/valyala/fasthttp/issues/176 .
+		resp.Header.SetContentLength(-1)
+
+		// Do not care about memory allocations here, since brotli is slow
+		// and allocates a lot of memory by itself.
+		bs := resp.bodyStream
+		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
+			zw := acquireStacklessBrotliWriter(sw, level)
+			fw := &flushWriter{
+				wf: zw,
+				bw: sw,
+			}
+			copyZeroAlloc(fw, bs) //nolint:errcheck
+			releaseStacklessBrotliWriter(zw, level)
+			if bsc, ok := bs.(io.Closer); ok {
+				bsc.Close()
+			}
+		})
+	} else {
+		bodyBytes := resp.bodyBytes()
+		if len(bodyBytes) < minCompressLen {
+			// There is no sense in spending CPU time on small body compression,
+			// since there is a very high probability that the compressed
+			// body size will be bigger than the original body size.
+			return nil
+		}
+		w := responseBodyPool.Get()
+		w.B = AppendBrotliBytesLevel(w.B, bodyBytes, level)
+
+		// Hack: swap resp.body with w.
+		if resp.body != nil {
+			responseBodyPool.Put(resp.body)
+		}
+		resp.body = w
+		resp.bodyRaw = nil
+	}
+	resp.Header.SetCanonical(strContentEncoding, strBr)
+	return nil
 }
 
 func (resp *Response) gzipBody(level int) error {

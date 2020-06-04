@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -18,6 +19,38 @@ import (
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
+
+func TestClientInvalidURI(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	requests := int64(0)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			atomic.AddInt64(&requests, 1)
+		},
+	}
+	go s.Serve(ln)
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req, res := AcquireRequest(), AcquireResponse()
+	defer func() {
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+	}()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com\r\n\r\nGET /\r\n\r\n")
+	err := c.Do(req, res)
+	if err == nil {
+		t.Fatal("expected error (missing required Host header in request)")
+	}
+	if n := atomic.LoadInt64(&requests); n != 0 {
+		t.Fatalf("0 requests expected, got %d", n)
+	}
+}
 
 func TestClientGetWithBody(t *testing.T) {
 	t.Parallel()
@@ -79,7 +112,7 @@ func TestClientURLAuth(t *testing.T) {
 	for up, expected := range cases {
 		req := AcquireRequest()
 		req.Header.SetMethod(MethodGet)
-		req.SetRequestURI("http://" + up + "example.com")
+		req.SetRequestURI("http://" + up + "example.com/foo/bar")
 		if err := c.Do(req, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -212,7 +245,7 @@ func TestClientRedirectSameSchema(t *testing.T) {
 
 	urlParsed, err := url.Parse(destURL)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatal(err)
 		return
 	}
 
@@ -237,7 +270,42 @@ func TestClientRedirectSameSchema(t *testing.T) {
 
 }
 
-func TestClientRedirectChangingSchemaHttp2Https(t *testing.T) {
+func TestClientRedirectClientChangingSchemaHttp2Https(t *testing.T) {
+	t.Parallel()
+
+	listenHTTPS := testClientRedirectListener(t, true)
+	defer listenHTTPS.Close()
+
+	listenHTTP := testClientRedirectListener(t, false)
+	defer listenHTTP.Close()
+
+	sHTTPS := testClientRedirectChangingSchemaServer(t, listenHTTPS, listenHTTP, true)
+	defer sHTTPS.Stop()
+
+	sHTTP := testClientRedirectChangingSchemaServer(t, listenHTTPS, listenHTTP, false)
+	defer sHTTP.Stop()
+
+	destURL := fmt.Sprintf("http://%s/baz", listenHTTP.Addr().String())
+
+	reqClient := &Client{
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+
+	statusCode, _, err := reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
+	if err != nil {
+		t.Fatalf("HostClient error: %s", err)
+		return
+	}
+
+	if statusCode != 200 {
+		t.Fatalf("HostClient error code response %d", statusCode)
+		return
+	}
+}
+
+func TestClientRedirectHostClientChangingSchemaHttp2Https(t *testing.T) {
 	t.Parallel()
 
 	listenHTTPS := testClientRedirectListener(t, true)
@@ -256,7 +324,7 @@ func TestClientRedirectChangingSchemaHttp2Https(t *testing.T) {
 
 	urlParsed, err := url.Parse(destURL)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatal(err)
 		return
 	}
 
@@ -267,15 +335,9 @@ func TestClientRedirectChangingSchemaHttp2Https(t *testing.T) {
 		},
 	}
 
-	statusCode, _, err := reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
-	if err != nil {
-		t.Fatalf("HostClient error: %s", err)
-		return
-	}
-
-	if statusCode != 200 {
-		t.Fatalf("HostClient error code response %d", statusCode)
-		return
+	_, _, err = reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
+	if err != ErrHostClientRedirectToDifferentScheme {
+		t.Fatal("expected HostClient error")
 	}
 }
 
@@ -436,7 +498,9 @@ func TestClientReadTimeout(t *testing.T) {
 		req.SetRequestURI("http://localhost")
 		req.SetConnectionClose()
 
-		c.Do(req, res) //nolint:errcheck
+		if err := c.Do(req, res); err != ErrTimeout {
+			t.Errorf("expected ErrTimeout got %#v", err)
+		}
 
 		ReleaseRequest(req)
 		ReleaseResponse(res)
@@ -1225,6 +1289,42 @@ func TestClientFollowRedirects(t *testing.T) {
 			t.Fatalf("unexpected response %q. Expecting %q", body, "/aaab/sss")
 		}
 	}
+
+	for i := 0; i < 10; i++ {
+		req := AcquireRequest()
+		resp := AcquireResponse()
+
+		req.SetRequestURI("http://xxx/foo")
+
+		err := c.DoRedirects(req, resp, 16)
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+
+		if statusCode := resp.StatusCode(); statusCode != StatusOK {
+			t.Fatalf("unexpected status code: %d", statusCode)
+		}
+
+		if body := string(resp.Body()); body != "/bar" {
+			t.Fatalf("unexpected response %q. Expecting %q", body, "/bar")
+		}
+
+		ReleaseRequest(req)
+		ReleaseResponse(resp)
+	}
+
+	req := AcquireRequest()
+	resp := AcquireResponse()
+
+	req.SetRequestURI("http://xxx/foo")
+
+	err := c.DoRedirects(req, resp, 0)
+	if have, want := err, ErrTooManyRedirects; have != want {
+		t.Fatalf("want error: %v, have %v", want, have)
+	}
+
+	ReleaseRequest(req)
+	ReleaseResponse(resp)
 }
 
 func TestClientGetTimeoutSuccess(t *testing.T) {
@@ -1455,6 +1555,43 @@ func TestClientNonIdempotentRetry(t *testing.T) {
 	}
 }
 
+func TestClientNonIdempotentRetry_BodyStream(t *testing.T) {
+	t.Parallel()
+
+	dialsCount := 0
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			dialsCount++
+			switch dialsCount {
+			case 1, 2:
+				return &readErrorConn{}, nil
+			case 3:
+				return &singleEchoConn{
+					b: []byte("HTTP/1.1 345 OK\r\nContent-Type: foobar\r\n\r\n"),
+				}, nil
+			default:
+				t.Fatalf("unexpected number of dials: %d", dialsCount)
+			}
+			panic("unreachable")
+		},
+	}
+
+	dialsCount = 0
+
+	req := Request{}
+	res := Response{}
+
+	req.SetRequestURI("http://foobar/a/b")
+	req.Header.SetMethod("POST")
+	body := bytes.NewBufferString("test")
+	req.SetBodyStream(body, body.Len())
+
+	err := c.Do(&req, &res)
+	if err == nil {
+		t.Fatal("expected error from being unable to retry a bodyStream")
+	}
+}
+
 func TestClientIdempotentRequest(t *testing.T) {
 	t.Parallel()
 
@@ -1511,6 +1648,58 @@ func TestClientIdempotentRequest(t *testing.T) {
 	}
 }
 
+func TestClientRetryRequestWithCustomDecider(t *testing.T) {
+	t.Parallel()
+
+	dialsCount := 0
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			dialsCount++
+			switch dialsCount {
+			case 1:
+				return &singleReadConn{
+					s: "invalid response",
+				}, nil
+			case 2:
+				return &writeErrorConn{}, nil
+			case 3:
+				return &readErrorConn{}, nil
+			case 4:
+				return &singleReadConn{
+					s: "HTTP/1.1 345 OK\r\nContent-Type: foobar\r\nContent-Length: 7\r\n\r\n0123456",
+				}, nil
+			default:
+				t.Fatalf("unexpected number of dials: %d", dialsCount)
+			}
+			panic("unreachable")
+		},
+		RetryIf: func(req *Request) bool {
+			return req.URI().String() == "http://foobar/a/b"
+		},
+	}
+
+	var args Args
+
+	// Post must succeed for http://foobar/a/b uri.
+	statusCode, body, err := c.Post(nil, "http://foobar/a/b", &args)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if statusCode != 345 {
+		t.Fatalf("unexpected status code: %d. Expecting 345", statusCode)
+	}
+	if string(body) != "0123456" {
+		t.Fatalf("unexpected body: %q. Expecting %q", body, "0123456")
+	}
+
+	// POST must fail for http://foobar/a/b/c uri.
+	dialsCount = 0
+	_, _, err = c.Post(nil, "http://foobar/a/b/c", &args)
+	if err == nil {
+		t.Fatalf("expecting error")
+	}
+}
+
 type writeErrorConn struct {
 	net.Conn
 }
@@ -1523,11 +1712,11 @@ func (w *writeErrorConn) Close() error {
 	return nil
 }
 
-func (r *writeErrorConn) LocalAddr() net.Addr {
+func (w *writeErrorConn) LocalAddr() net.Addr {
 	return nil
 }
 
-func (r *writeErrorConn) RemoteAddr() net.Addr {
+func (w *writeErrorConn) RemoteAddr() net.Addr {
 	return nil
 }
 
@@ -1584,6 +1773,71 @@ func (r *singleReadConn) LocalAddr() net.Addr {
 
 func (r *singleReadConn) RemoteAddr() net.Addr {
 	return nil
+}
+
+type singleEchoConn struct {
+	net.Conn
+	b []byte
+	n int
+}
+
+func (r *singleEchoConn) Read(p []byte) (int, error) {
+	if len(r.b) == r.n {
+		return 0, io.EOF
+	}
+	n := copy(p, r.b[r.n:])
+	r.n += n
+	return n, nil
+}
+
+func (r *singleEchoConn) Write(p []byte) (int, error) {
+	r.b = append(r.b, p...)
+	return len(p), nil
+}
+
+func (r *singleEchoConn) Close() error {
+	return nil
+}
+
+func (r *singleEchoConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (r *singleEchoConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func TestSingleEchoConn(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return &singleEchoConn{
+				b: []byte("HTTP/1.1 345 OK\r\nContent-Type: foobar\r\n\r\n"),
+			}, nil
+		},
+	}
+
+	req := Request{}
+	res := Response{}
+
+	req.SetRequestURI("http://foobar/a/b")
+	req.Header.SetMethod("POST")
+	req.Header.Set("Content-Type", "text/plain")
+	body := bytes.NewBufferString("test")
+	req.SetBodyStream(body, body.Len())
+
+	err := c.Do(&req, &res)
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if res.StatusCode() != 345 {
+		t.Fatalf("unexpected status code: %d. Expecting 345", res.StatusCode())
+	}
+	expected := "POST /a/b HTTP/1.1\r\nUser-Agent: fasthttp\r\nHost: foobar\r\nContent-Type: text/plain\r\nContent-Length: 4\r\n\r\ntest"
+	if string(res.Body()) != expected {
+		t.Fatalf("unexpected body: %q. Expecting %q", res.Body(), expected)
+	}
 }
 
 func TestClientHTTPSInvalidServerName(t *testing.T) {
@@ -1977,5 +2231,270 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 
 	if err != ErrTLSHandshakeTimeout {
 		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
+	}
+}
+
+func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
+	var (
+		emptyBodyCount uint8
+		ln             = fasthttputil.NewInmemoryListener()
+		wg             sync.WaitGroup
+	)
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if len(ctx.PostBody()) == 0 {
+				emptyBodyCount++
+			}
+			time.Sleep(5 * time.Millisecond)
+			ctx.WriteString("foo") //nolint:errcheck
+		},
+	}
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConns:           1,
+		MaxConnWaitTimeout: 200 * time.Millisecond,
+	}
+
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			req := AcquireRequest()
+			req.SetRequestURI("http://foobar/baz")
+			req.Header.SetMethod(MethodPost)
+			req.SetBodyString("bar")
+			resp := AcquireResponse()
+
+			if err := c.Do(req, resp); err != nil {
+				t.Errorf("unexpected error: %s", err)
+			}
+
+			if resp.StatusCode() != StatusOK {
+				t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
+			}
+
+			body := resp.Body()
+			if string(body) != "foo" {
+				t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
+			}
+		}()
+	}
+	wg.Wait()
+
+	if c.connsWait.len() > 0 {
+		t.Errorf("connsWait has %v items remaining", c.connsWait.len())
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if emptyBodyCount > 0 {
+		t.Fatalf("at least one request body was empty")
+	}
+}
+
+func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
+	var (
+		emptyBodyCount uint8
+		ln             = fasthttputil.NewInmemoryListener()
+		wg             sync.WaitGroup
+	)
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if len(ctx.PostBody()) == 0 {
+				emptyBodyCount++
+			}
+			time.Sleep(5 * time.Millisecond)
+			ctx.WriteString("foo") //nolint:errcheck
+		},
+	}
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConns:           1,
+		MaxConnWaitTimeout: 10 * time.Millisecond,
+	}
+
+	var errNoFreeConnsCount uint32
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			req := AcquireRequest()
+			req.SetRequestURI("http://foobar/baz")
+			req.Header.SetMethod(MethodPost)
+			req.SetBodyString("bar")
+			resp := AcquireResponse()
+
+			if err := c.Do(req, resp); err != nil {
+				if err != ErrNoFreeConns {
+					t.Errorf("unexpected error: %s. Expecting %s", err, ErrNoFreeConns)
+				}
+				atomic.AddUint32(&errNoFreeConnsCount, 1)
+			} else {
+				if resp.StatusCode() != StatusOK {
+					t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
+				}
+
+				body := resp.Body()
+				if string(body) != "foo" {
+					t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
+				}
+			}
+
+		}()
+	}
+	wg.Wait()
+
+	// Prevent a race condition with the conns cleaner that might still be running.
+	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
+
+	if c.connsWait.len() > 0 {
+		t.Errorf("connsWait has %v items remaining", c.connsWait.len())
+	}
+	if errNoFreeConnsCount == 0 {
+		t.Errorf("unexpected errorCount: %d. Expecting > 0", errNoFreeConnsCount)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if emptyBodyCount > 0 {
+		t.Fatalf("at least one request body was empty")
+	}
+}
+
+func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
+	var (
+		emptyBodyCount uint8
+		ln             = fasthttputil.NewInmemoryListener()
+		wg             sync.WaitGroup
+		// make deadline reach earlier than conns wait timeout
+		sleep              = 100 * time.Millisecond
+		timeout            = 10 * time.Millisecond
+		maxConnWaitTimeout = 50 * time.Millisecond
+	)
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if len(ctx.PostBody()) == 0 {
+				emptyBodyCount++
+			}
+			time.Sleep(sleep)
+			ctx.WriteString("foo") //nolint:errcheck
+		},
+	}
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConns:           1,
+		MaxConnWaitTimeout: maxConnWaitTimeout,
+	}
+
+	var errTimeoutCount uint32
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			req := AcquireRequest()
+			req.SetRequestURI("http://foobar/baz")
+			req.Header.SetMethod(MethodPost)
+			req.SetBodyString("bar")
+			resp := AcquireResponse()
+
+			if err := c.DoDeadline(req, resp, time.Now().Add(timeout)); err != nil {
+				if err != ErrTimeout {
+					t.Errorf("unexpected error: %s. Expecting %s", err, ErrTimeout)
+				}
+				atomic.AddUint32(&errTimeoutCount, 1)
+			} else {
+				if resp.StatusCode() != StatusOK {
+					t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
+				}
+
+				body := resp.Body()
+				if string(body) != "foo" {
+					t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
+				}
+			}
+
+		}()
+	}
+	wg.Wait()
+
+	c.connsLock.Lock()
+	for {
+		w := c.connsWait.popFront()
+		if w == nil {
+			break
+		}
+		w.mu.Lock()
+		if w.err != nil && w.err != ErrTimeout {
+			t.Errorf("unexpected error: %s. Expecting %s", w.err, ErrTimeout)
+		}
+		w.mu.Unlock()
+	}
+	c.connsLock.Unlock()
+	if errTimeoutCount == 0 {
+		t.Errorf("unexpected errTimeoutCount: %d. Expecting > 0", errTimeoutCount)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+
+	if emptyBodyCount > 0 {
+		t.Fatalf("at least one request body was empty")
 	}
 }

@@ -185,11 +185,12 @@ func parseUintBuf(b []byte) (int, int, error) {
 			}
 			return v, i, nil
 		}
+		vNew := 10*v + int(k)
 		// Test for overflow.
-		if v*10 < v {
+		if vNew < v {
 			return -1, i, errTooLongInt
 		}
-		v = 10*v + int(k)
+		v = vNew
 	}
 	return v, n, nil
 }
@@ -330,6 +331,7 @@ func lowercaseBytes(b []byte) {
 // Note it may break if string and/or slice header will change
 // in the future go versions.
 func b2s(b []byte) string {
+	/* #nosec G103 */
 	return *(*string)(unsafe.Pointer(&b))
 }
 
@@ -338,7 +340,9 @@ func b2s(b []byte) string {
 // Note it may break if string and/or slice header will change
 // in the future go versions.
 func s2b(s string) (b []byte) {
+	/* #nosec G103 */
 	bh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
+	/* #nosec G103 */
 	sh := *(*reflect.StringHeader)(unsafe.Pointer(&s))
 	bh.Data = sh.Data
 	bh.Len = sh.Len
