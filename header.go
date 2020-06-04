@@ -1351,7 +1351,7 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		// n == 1 on the first read for the request.
 		if n == 1 {
 			// We didn't read a single byte.
-			return errNothingRead{err}
+			return ErrNothingRead{err}
 		}
 
 		return fmt.Errorf("error when reading request headers: %s", err)
@@ -2247,7 +2247,11 @@ var (
 	errSmallBuffer = errors.New("small read buffer. Increase ReadBufferSize")
 )
 
-type errNothingRead struct {
+// ErrNothingRead is returned that means just a keep-alive connection
+// closing down either because the remote closed it or because
+// or a read timeout on our side.
+// Either way just close the connection and don't return any error response.
+type ErrNothingRead struct {
 	error
 }
 
