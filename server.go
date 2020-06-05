@@ -2018,7 +2018,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					// If reading from a keep-alive connection returns nothing it means
 					// the connection was closed (either timeout or from the other side).
 					if err != io.EOF {
-						err = errNothingRead{err}
+						err = ErrNothingRead{err}
 					}
 				}
 			}
@@ -2077,7 +2077,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		if err != nil {
 			if err == io.EOF {
 				err = nil
-			} else if nr, ok := err.(errNothingRead); ok {
+			} else if nr, ok := err.(ErrNothingRead); ok {
 				if connRequestNum > 1 {
 					// This is not the first request and we haven't read a single byte
 					// of a new request yet. This means it's just a keep-alive connection
