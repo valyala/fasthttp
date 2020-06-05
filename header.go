@@ -2247,10 +2247,8 @@ var (
 	errSmallBuffer = errors.New("small read buffer. Increase ReadBufferSize")
 )
 
-// ErrNothingRead is returned that means just a keep-alive connection
-// closing down either because the remote closed it or because
-// or a read timeout on our side.
-// Either way just close the connection and don't return any error response.
+// ErrNothingRead is returned when a keep-alive connection is closed,
+// either because the remote closed it or because of a read timeout.
 type ErrNothingRead struct {
 	error
 }
