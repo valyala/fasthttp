@@ -982,7 +982,7 @@ func TestServerTLSReadTimeout(t *testing.T) {
 
 	select {
 	case err = <-r:
-	case <-time.After(time.Millisecond * 200):
+	case <-time.After(time.Millisecond * 500):
 	}
 
 	if err == nil {
