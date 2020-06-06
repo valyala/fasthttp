@@ -9,14 +9,13 @@ dist: bionic
 os:
   - linux
   - osx
+  - windows
 go:
   - tip
   - 1.14.x
   - 1.13.x
   - 1.12.x
   - 1.11.x
-  - 1.10.x
-  - 1.9.x
 
 script:
   - go test -v ./...

@@ -1,3 +1,5 @@
+// +build !windows
+
 package prefork
 
 import (
@@ -91,6 +93,10 @@ func Test_listen(t *testing.T) {
 }
 
 func Test_setTCPListenerFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
 	p := &Prefork{}
 	addr := getAddr()
 

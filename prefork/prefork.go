@@ -1,3 +1,5 @@
+// +build !windows
+
 package prefork
 
 import (
@@ -22,7 +24,8 @@ var (
 	defaultLogger = Logger(log.New(os.Stderr, "", log.LstdFlags))
 	// ErrOverRecovery is returned when the times of starting over child prefork processes exceed
 	// the threshold.
-	ErrOverRecovery = errors.New("exceeding the value of RecoverThreshold")
+	ErrOverRecovery           = errors.New("exceeding the value of RecoverThreshold")
+	ErrOnlyReuseportOnWindows = errors.New("windows only supports Reuseport = true")
 )
 
 // Logger is used for logging formatted messages.
@@ -154,6 +157,10 @@ func (p *Prefork) doCommand() (*exec.Cmd, error) {
 
 func (p *Prefork) prefork(addr string) (err error) {
 	if !p.Reuseport {
+		if runtime.GOOS == "windows" {
+			return ErrOnlyReuseportOnWindows
+		}
+
 		if err = p.setTCPListenerFiles(addr); err != nil {
 			return
 		}
