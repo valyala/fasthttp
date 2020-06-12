@@ -20,6 +20,60 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestPipelineClientIssue832(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	req := AcquireRequest()
+	defer ReleaseRequest(req)
+	req.SetHost("example.com")
+
+	res := AcquireResponse()
+	defer ReleaseResponse(res)
+
+	client := PipelineClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		ReadTimeout: time.Millisecond * 10,
+		Logger:      &testLogger{}, // Ignore log output.
+	}
+
+	attempts := 10
+	go func() {
+		for i := 0; i < attempts; i++ {
+			c, err := ln.Accept()
+			if err != nil {
+				t.Error(err)
+			}
+			if c != nil {
+				go func() {
+					time.Sleep(time.Millisecond * 50)
+					c.Close()
+				}()
+			}
+		}
+	}()
+
+	done := make(chan int)
+	go func() {
+		defer close(done)
+
+		for i := 0; i < attempts; i++ {
+			if err := client.Do(req, res); err == nil {
+				t.Error("error expected")
+			}
+		}
+	}()
+
+	select {
+	case <-time.After(time.Second):
+		t.Fatal("PipelineClient did not restart worker")
+	case <-done:
+	}
+}
+
 func TestClientInvalidURI(t *testing.T) {
 	t.Parallel()
 
