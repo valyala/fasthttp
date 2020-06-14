@@ -83,7 +83,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 
 		var w netHTTPResponseWriter
 		w.Header().Set(fasthttp.HeaderContentType, "text/html")
-		h.ServeHTTP(&w, &r)
+		h.ServeHTTP(&w, r.WithContext(ctx))
 
 		ctx.SetStatusCode(w.StatusCode())
 		for k, vv := range w.Header() {
@@ -91,7 +91,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				ctx.Response.Header.Set(k, v)
 			}
 		}
-		ctx.Write(w.body)
+		ctx.Write(w.body) //nolint:errcheck
 	}
 }
 
