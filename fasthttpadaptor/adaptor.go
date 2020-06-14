@@ -82,6 +82,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		r.URL = rURL
 
 		var w netHTTPResponseWriter
+		w.Header().Set(fasthttp.HeaderContentType, "text/html")
 		h.ServeHTTP(&w, &r)
 
 		ctx.SetStatusCode(w.StatusCode())
