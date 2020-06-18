@@ -281,6 +281,7 @@ with fasthttp support:
   * [lu](https://github.com/vincentLiuxiang/lu)
   * [atreugo](https://github.com/savsgio/atreugo)
   * [Fiber](https://github.com/gofiber/fiber)
+  * [Gearbox](https://github.com/gogearbox/gearbox)
 
   Net/http code with simple ServeMux is trivially converted to fasthttp code:
 
@@ -498,6 +499,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   * [kratgo](https://github.com/savsgio/kratgo) - Simple, lightweight and ultra-fast HTTP Cache to speed up your websites.
   * [kit-plugins](https://github.com/wencan/kit-plugins/tree/master/transport/fasthttp) - go-kit transport implementation for fasthttp.
   * [Fiber](https://github.com/gofiber/fiber) - An Expressjs inspired web framework running on Fasthttp
+  * [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization
 
 
 # FAQ
@@ -570,6 +572,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     * [lu](https://github.com/vincentLiuxiang/lu)
     * [atreugo](https://github.com/savsgio/atreugo)
     * [Fiber](https://github.com/gofiber/fiber)
+    * [Gearbox](https://github.com/gogearbox/gearbox)
 
   See also [this issue](https://github.com/valyala/fasthttp/issues/9) for more info.
 
