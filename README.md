@@ -277,7 +277,7 @@ but there are more powerful third-party routers and web frameworks
 with fasthttp support:
 
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
-  * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
+  * [router](https://github.com/fasthttp/router)
   * [lu](https://github.com/vincentLiuxiang/lu)
   * [atreugo](https://github.com/savsgio/atreugo)
   * [Fiber](https://github.com/gofiber/fiber)
@@ -485,7 +485,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     helpers for projects based on fasthttp.
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) - fast and
     powerful routing package for fasthttp servers.
-  * [fasthttprouter](https://github.com/buaazp/fasthttprouter) - a high
+  * [router](https://github.com/fasthttp/router) - a high
     performance fasthttp request router that scales well.
   * [fastws](https://github.com/fasthttp/fastws) - Bloatless WebSocket package made for fasthttp
     to handle Read/Write operations concurrently.
@@ -567,7 +567,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   Use third-party routers and web frameworks with fasthttp support:
 
     * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
-    * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
+    * [router](https://github.com/fasthttp/router)
     * [gramework](https://github.com/gramework/gramework)
     * [lu](https://github.com/vincentLiuxiang/lu)
     * [atreugo](https://github.com/savsgio/atreugo)
