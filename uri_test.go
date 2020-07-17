@@ -56,7 +56,7 @@ func testURIAcquireRelease(t *testing.T) {
 		host := fmt.Sprintf("host.%d.com", i*23)
 		path := fmt.Sprintf("/foo/%d/bar", i*17)
 		queryArgs := "?foo=bar&baz=aass"
-		u.Parse([]byte(host), []byte(path+queryArgs))
+		u.Parse([]byte(host), []byte(path+queryArgs)) //nolint:errcheck
 		if string(u.Host()) != host {
 			t.Fatalf("unexpected host %q. Expecting %q", u.Host(), host)
 		}
@@ -133,7 +133,7 @@ func TestURIUpdate(t *testing.T) {
 
 func testURIUpdate(t *testing.T, base, update, result string) {
 	var u URI
-	u.Parse(nil, []byte(base))
+	u.Parse(nil, []byte(base)) //nolint:errcheck
 	u.Update(update)
 	s := u.String()
 	if s != result {
@@ -190,7 +190,7 @@ func TestURIPathNormalize(t *testing.T) {
 }
 
 func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string) {
-	u.Parse(nil, []byte(requestURI))
+	u.Parse(nil, []byte(requestURI)) //nolint:errcheck
 	if string(u.Path()) != expectedPath {
 		t.Fatalf("Unexpected path %q. Expected %q. requestURI=%q", u.Path(), expectedPath, requestURI)
 	}
@@ -201,7 +201,7 @@ func TestURINoNormalization(t *testing.T) {
 
 	var u URI
 	irregularPath := "/aaa%2Fbbb%2F%2E.%2Fxxx"
-	u.Parse(nil, []byte(irregularPath))
+	u.Parse(nil, []byte(irregularPath)) //nolint:errcheck
 	u.DisablePathNormalizing = true
 	if string(u.RequestURI()) != irregularPath {
 		t.Fatalf("Unexpected path %q. Expected %q.", u.Path(), irregularPath)
@@ -250,7 +250,7 @@ func TestURIFullURI(t *testing.T) {
 
 	// test with empty args and non-empty query string
 	var u URI
-	u.Parse([]byte("google.com"), []byte("/foo?bar=baz&baraz#qqqq"))
+	u.Parse([]byte("google.com"), []byte("/foo?bar=baz&baraz#qqqq")) //nolint:errcheck
 	uri := u.FullURI()
 	expectedURI := "http://google.com/foo?bar=baz&baraz#qqqq"
 	if string(uri) != expectedURI {
@@ -287,7 +287,7 @@ func TestURIParseNilHost(t *testing.T) {
 
 func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expectedRequestURI, expectedHash string) {
 	var u URI
-	u.Parse(nil, []byte(uri))
+	u.Parse(nil, []byte(uri)) //nolint:errcheck
 	if string(u.Scheme()) != expectedScheme {
 		t.Fatalf("Unexpected scheme %q. Expecting %q for uri %q", u.Scheme(), expectedScheme, uri)
 	}
@@ -361,7 +361,7 @@ func TestURIParse(t *testing.T) {
 
 func testURIParse(t *testing.T, u *URI, host, uri,
 	expectedURI, expectedHost, expectedPath, expectedPathOriginal, expectedArgs, expectedHash string) {
-	u.Parse([]byte(host), []byte(uri))
+	u.Parse([]byte(host), []byte(uri)) //nolint:errcheck
 
 	if !bytes.Equal(u.FullURI(), []byte(expectedURI)) {
 		t.Fatalf("Unexpected uri %q. Expected %q. host=%q, uri=%q", u.FullURI(), expectedURI, host, uri)

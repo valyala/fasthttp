@@ -2293,7 +2293,7 @@ func TestRequestCtxNoHijackNoResponse(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			io.WriteString(ctx, "test")
+			io.WriteString(ctx, "test") //nolint:errcheck
 			ctx.HijackSetNoResponse(true)
 		},
 	}
@@ -2319,7 +2319,7 @@ func TestRequestCtxNoHijackNoResponse(t *testing.T) {
 		strings.NewReader(rw.w.String()),
 	)
 	resp := AcquireResponse()
-	resp.Read(bf)
+	resp.Read(bf) //nolint:errcheck
 	if got := string(resp.Body()); got != "test" {
 		t.Errorf(`expected "test", got %q`, got)
 	}

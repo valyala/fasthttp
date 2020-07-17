@@ -915,7 +915,7 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	oldBody := bodyBuf.B
 	bodyBuf.B = dst
 
-	statusCode, body, err = doRequestFollowRedirects(req, resp, url, defaultMaxRedirectsCount, c)
+	statusCode, _, err = doRequestFollowRedirects(req, resp, url, defaultMaxRedirectsCount, c)
 
 	body = bodyBuf.B
 	bodyBuf.B = oldBody

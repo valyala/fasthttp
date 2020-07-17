@@ -144,7 +144,7 @@ func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value i
 
 func TestContentType(t *testing.T) {
 	nethttpH := func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("<!doctype html><html>"))
+		w.Write([]byte("<!doctype html><html>")) //nolint:errcheck
 	}
 	fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH))
 
