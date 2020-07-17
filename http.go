@@ -725,7 +725,7 @@ func swapResponseBody(a, b *Response) {
 
 // URI returns request URI
 func (req *Request) URI() *URI {
-	req.parseURI()
+	req.parseURI() //nolint:errcheck
 	return &req.uri
 }
 

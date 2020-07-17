@@ -27,7 +27,7 @@ func BenchmarkURIFullURI(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		var u URI
-		u.Parse(host, requestURI)
+		u.Parse(host, requestURI) //nolint:errcheck
 		for pb.Next() {
 			uri := u.FullURI()
 			if len(uri) != uriLen {
@@ -43,7 +43,7 @@ func benchmarkURIParse(b *testing.B, host, uri string) {
 	b.RunParallel(func(pb *testing.PB) {
 		var u URI
 		for pb.Next() {
-			u.Parse(strHost, strURI)
+			u.Parse(strHost, strURI) //nolint:errcheck
 		}
 	})
 }

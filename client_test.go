@@ -84,7 +84,7 @@ func TestClientInvalidURI(t *testing.T) {
 			atomic.AddInt64(&requests, 1)
 		},
 	}
-	go s.Serve(ln)
+	go s.Serve(ln) //nolint:errcheck
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
 			return ln.Dial()
@@ -113,10 +113,10 @@ func TestClientGetWithBody(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			body := ctx.Request.Body()
-			ctx.Write(body)
+			ctx.Write(body) //nolint:errcheck
 		},
 	}
-	go s.Serve(ln)
+	go s.Serve(ln) //nolint:errcheck
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
 			return ln.Dial()
