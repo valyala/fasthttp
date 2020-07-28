@@ -5,11 +5,17 @@ import (
 	"sync/atomic"
 )
 
+const (
+	statusMessageMin = 100
+	statusMessageMax = 511
+)
+
 // HTTP status codes were stolen from net/http.
 const (
 	StatusContinue           = 100 // RFC 7231, 6.2.1
 	StatusSwitchingProtocols = 101 // RFC 7231, 6.2.2
 	StatusProcessing         = 102 // RFC 2518, 10.1
+	StatusEarlyHints         = 103 // RFC 8297
 
 	StatusOK                   = 200 // RFC 7231, 6.3.1
 	StatusCreated              = 201 // RFC 7231, 6.3.2
@@ -51,6 +57,7 @@ const (
 	StatusRequestedRangeNotSatisfiable = 416 // RFC 7233, 4.4
 	StatusExpectationFailed            = 417 // RFC 7231, 6.5.14
 	StatusTeapot                       = 418 // RFC 7168, 2.3.3
+	StatusMisdirectedRequest           = 421 // RFC 7540, 9.1.2
 	StatusUnprocessableEntity          = 422 // RFC 4918, 11.2
 	StatusLocked                       = 423 // RFC 4918, 11.3
 	StatusFailedDependency             = 424 // RFC 4918, 11.4
@@ -74,12 +81,14 @@ const (
 )
 
 var (
-	statusLines atomic.Value
+	invalidStatusLines atomic.Value
+	statusLines        = make([][]byte, statusMessageMax+1)
 
-	statusMessages = map[int]string{
+	statusMessages = []string{
 		StatusContinue:           "Continue",
 		StatusSwitchingProtocols: "Switching Protocols",
 		StatusProcessing:         "Processing",
+		StatusEarlyHints:         "Early Hints",
 
 		StatusOK:                   "OK",
 		StatusCreated:              "Created",
@@ -120,6 +129,7 @@ var (
 		StatusRequestedRangeNotSatisfiable: "Requested Range Not Satisfiable",
 		StatusExpectationFailed:            "Expectation Failed",
 		StatusTeapot:                       "I'm a teapot",
+		StatusMisdirectedRequest:           "Misdirected Request",
 		StatusUnprocessableEntity:          "Unprocessable Entity",
 		StatusLocked:                       "Locked",
 		StatusFailedDependency:             "Failed Dependency",
@@ -145,6 +155,10 @@ var (
 
 // StatusMessage returns HTTP status message for the given status code.
 func StatusMessage(statusCode int) string {
+	if statusCode < statusMessageMin || statusCode > statusMessageMax {
+		return "Unknown Status Code"
+	}
+
 	s := statusMessages[statusCode]
 	if s == "" {
 		s = "Unknown Status Code"
@@ -153,11 +167,24 @@ func StatusMessage(statusCode int) string {
 }
 
 func init() {
-	statusLines.Store(make(map[int][]byte))
+	invalidStatusLines.Store(make(map[int][]byte))
+
+	for i := 0; i < len(statusLines); i++ {
+		statusLines[i] = []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", i, StatusMessage(i)))
+	}
 }
 
 func statusLine(statusCode int) []byte {
-	m := statusLines.Load().(map[int][]byte)
+	if statusCode < 0 || statusCode > statusMessageMax {
+		return invalidStatusLine(statusCode)
+	}
+
+	return statusLines[statusCode]
+}
+
+// invalidStatusLine return status line of which bigger than statusMessageMax(511)
+func invalidStatusLine(statusCode int) []byte {
+	m := invalidStatusLines.Load().(map[int][]byte)
 	h := m[statusCode]
 	if h != nil {
 		return h
@@ -171,6 +198,6 @@ func statusLine(statusCode int) []byte {
 		newM[k] = v
 	}
 	newM[statusCode] = h
-	statusLines.Store(newM)
+	invalidStatusLines.Store(newM)
 	return h
 }
