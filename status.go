@@ -169,6 +169,7 @@ func StatusMessage(statusCode int) string {
 func init() {
 	invalidStatusLines.Store(make(map[int][]byte))
 
+	// Fill all valid status lines
 	for i := 0; i < len(statusLines); i++ {
 		statusLines[i] = []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", i, StatusMessage(i)))
 	}
