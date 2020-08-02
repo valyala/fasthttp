@@ -179,9 +179,6 @@ func statusLine(statusCode int) []byte {
 	return statusLines[statusCode]
 }
 
-// invalidStatusLine return status line of which
-// smaller than 0 or
-// bigger than statusMessageMax(511)
 func invalidStatusLine(statusCode int) []byte {
 	statusText := StatusMessage(statusCode)
 	return []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusText))
