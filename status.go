@@ -2,7 +2,6 @@ package fasthttp
 
 import (
 	"fmt"
-	"sync/atomic"
 )
 
 const (
@@ -81,8 +80,7 @@ const (
 )
 
 var (
-	invalidStatusLines atomic.Value
-	statusLines        = make([][]byte, statusMessageMax+1)
+	statusLines = make([][]byte, statusMessageMax+1)
 
 	statusMessages = []string{
 		StatusContinue:           "Continue",
@@ -167,8 +165,6 @@ func StatusMessage(statusCode int) string {
 }
 
 func init() {
-	invalidStatusLines.Store(make(map[int][]byte))
-
 	// Fill all valid status lines
 	for i := 0; i < len(statusLines); i++ {
 		statusLines[i] = []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", i, StatusMessage(i)))
@@ -183,22 +179,10 @@ func statusLine(statusCode int) []byte {
 	return statusLines[statusCode]
 }
 
-// invalidStatusLine return status line of which bigger than statusMessageMax(511)
+// invalidStatusLine return status line of which
+// smaller than 0 or
+// bigger than statusMessageMax(511)
 func invalidStatusLine(statusCode int) []byte {
-	m := invalidStatusLines.Load().(map[int][]byte)
-	h := m[statusCode]
-	if h != nil {
-		return h
-	}
-
 	statusText := StatusMessage(statusCode)
-
-	h = []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusText))
-	newM := make(map[int][]byte, len(m)+1)
-	for k, v := range m {
-		newM[k] = v
-	}
-	newM[statusCode] = h
-	invalidStatusLines.Store(newM)
-	return h
+	return []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, statusText))
 }
