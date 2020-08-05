@@ -1240,7 +1240,7 @@ func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
 
 	var h ResponseHeader
 
-	h.noDefaultContentType = true
+	h.DisableNoDefaultContentType()
 	h.SetContentLength(5)
 
 	headers := h.String()
