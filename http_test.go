@@ -21,7 +21,7 @@ func TestFragmentInURIRequest(t *testing.T) {
 	req.SetRequestURI("https://docs.gitlab.com/ee/user/project/integrations/webhooks.html#events")
 
 	var b bytes.Buffer
-	req.WriteTo(&b)
+	req.WriteTo(&b) //nolint:errcheck
 	got := b.String()
 	expected := "GET /ee/user/project/integrations/webhooks.html HTTP/1.1\r\nHost: docs.gitlab.com\r\n\r\n"
 

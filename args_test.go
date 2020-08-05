@@ -336,8 +336,8 @@ func testCopyTo(t *testing.T, a *Args) {
 	var b Args
 	a.CopyTo(&b)
 
-	if !reflect.DeepEqual(*a, b) { //nolint:govet
-		t.Fatalf("ArgsCopyTo fail, a: \n%+v\nb: \n%+v\n", *a, b) //nolint:govet
+	if !reflect.DeepEqual(*a, b) { //nolint
+		t.Fatalf("ArgsCopyTo fail, a: \n%+v\nb: \n%+v\n", *a, b) //nolint
 	}
 
 	b.VisitAll(func(k, v []byte) {

@@ -394,20 +394,20 @@ func gunzipData(p []byte) ([]byte, error) {
 	return bb.B, nil
 }
 
-// BodyUnbrotli returns un-gzipped body data.
+// BodyUnbrotli returns un-brotlied body data.
 //
 // This method may be used if the request header contains
-// 'Content-Encoding: gzip' for reading un-gzipped body.
-// Use Body for reading gzipped request body.
+// 'Content-Encoding: br' for reading un-brotlied body.
+// Use Body for reading brotlied request body.
 func (req *Request) BodyUnbrotli() ([]byte, error) {
 	return unBrotliData(req.Body())
 }
 
-// BodyUnbrotli returns un-gzipped body data.
+// BodyUnbrotli returns un-brotlied body data.
 //
 // This method may be used if the response header contains
-// 'Content-Encoding: gzip' for reading un-gzipped body.
-// Use Body for reading gzipped response body.
+// 'Content-Encoding: br' for reading un-brotlied body.
+// Use Body for reading brotlied response body.
 func (resp *Response) BodyUnbrotli() ([]byte, error) {
 	return unBrotliData(resp.Body())
 }
@@ -725,7 +725,7 @@ func swapResponseBody(a, b *Response) {
 
 // URI returns request URI
 func (req *Request) URI() *URI {
-	req.parseURI()
+	req.parseURI() //nolint:errcheck
 	return &req.uri
 }
 

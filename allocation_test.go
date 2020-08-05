@@ -78,7 +78,7 @@ func TestAllocationURI(t *testing.T) {
 
 	n := testing.AllocsPerRun(100, func() {
 		u := AcquireURI()
-		u.Parse(nil, uri)
+		u.Parse(nil, uri) //nolint:errcheck
 		ReleaseURI(u)
 	})
 

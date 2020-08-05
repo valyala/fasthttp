@@ -141,3 +141,30 @@ func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value i
 		next(ctx)
 	}
 }
+
+func TestContentType(t *testing.T) {
+	nethttpH := func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("<!doctype html><html>")) //nolint:errcheck
+	}
+	fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH))
+
+	var ctx fasthttp.RequestCtx
+	var req fasthttp.Request
+
+	req.SetRequestURI("http://example.com")
+
+	remoteAddr, err := net.ResolveTCPAddr("tcp", "1.2.3.4:80")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	ctx.Init(&req, remoteAddr, nil)
+
+	fasthttpH(&ctx)
+
+	resp := &ctx.Response
+	got := string(resp.Header.Peek("Content-Type"))
+	expected := "text/html; charset=utf-8"
+	if got != expected {
+		t.Errorf("expected %q got %q", expected, got)
+	}
+}
