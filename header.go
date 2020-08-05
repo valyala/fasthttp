@@ -601,6 +601,11 @@ func (h *ResponseHeader) DisableNormalizing() {
 	h.disableNormalizing = true
 }
 
+// Disable add default contentype if no Content-Type header.
+func (h *ResponseHeader) DisableNoDefaultContentType() {
+	h.noDefaultContentType = true
+}
+
 // Reset clears response header.
 func (h *ResponseHeader) Reset() {
 	h.disableNormalizing = false
