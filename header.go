@@ -601,9 +601,7 @@ func (h *ResponseHeader) DisableNormalizing() {
 	h.disableNormalizing = true
 }
 
-// SetNoDefaultContentType sets header's 'noDefaultContentType' flag to the given value.
-//
-// Disable add 'defaultContentType' if no Content-Type header when 'noDefaultContentType' is true.
+// SetNoDefaultContentType allows you to control if a default Content-Type header will be set (false) or not (true).
 func (h *ResponseHeader) SetNoDefaultContentType(noDefaultContentType bool) {
 	h.noDefaultContentType = noDefaultContentType
 }
