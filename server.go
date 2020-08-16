@@ -2170,12 +2170,9 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		timeoutResponse = ctx.timeoutResponse
 		if timeoutResponse != nil {
+			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
 			ctx = s.acquireCtx(c)
 			timeoutResponse.CopyTo(&ctx.Response)
-			if br != nil {
-				// Close connection, since br may be attached to the old ctx via ctx.fbr.
-				ctx.SetConnectionClose()
-			}
 		}
 
 		if !ctx.IsGet() && ctx.IsHead() {
