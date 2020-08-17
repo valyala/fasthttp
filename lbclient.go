@@ -100,6 +100,9 @@ func (cc *LBClient) get() *lbClient {
 	minN := minC.PendingRequests()
 	minT := atomic.LoadUint64(&minC.total)
 	for _, c := range cs[1:] {
+		if c.underPenalty() {
+			continue
+		}
 		n := c.PendingRequests()
 		t := atomic.LoadUint64(&c.total)
 		if n < minN || (n == minN && t < minT) {
@@ -143,6 +146,10 @@ func (c *lbClient) isHealthy(req *Request, resp *Response, err error) bool {
 		return err == nil
 	}
 	return c.healthCheck(req, resp, err)
+}
+
+func (c *lbClient) underPenalty() bool {
+	return atomic.LoadUint32(&c.penalty) > 0
 }
 
 func (c *lbClient) incPenalty() bool {
