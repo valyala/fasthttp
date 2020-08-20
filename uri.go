@@ -575,11 +575,15 @@ func splitHostURI(host, uri []byte) ([]byte, []byte, []byte) {
 	n += len(strSlashSlash)
 	uri = uri[n:]
 	n = bytes.IndexByte(uri, '/')
-	if n < 0 {
+	nq := bytes.IndexByte(uri, '?')
+	if nq >= 0 && nq < n {
+		// A hack for urls like foobar.com?a=b/xyz
+		n = nq
+	} else if n < 0 {
 		// A hack for bogus urls like foobar.com?a=b without
 		// slash after host.
-		if n = bytes.IndexByte(uri, '?'); n >= 0 {
-			return scheme, uri[:n], uri[n:]
+		if nq >= 0 {
+			return scheme, uri[:nq], uri[nq:]
 		}
 		return scheme, uri, strSlash
 	}
