@@ -125,6 +125,9 @@ func (cc *LBClient) get() *lbClient {
 		minN := minC.PendingRequests()
 		minT := atomic.LoadUint64(&minC.total)
 		for _, c := range cs[off:] {
+			if c.underPenalty() {
+				continue
+			}
 			n := c.PendingRequests()
 			t := atomic.LoadUint64(&c.total)
 			if n < minN || (n == minN && t < minT) {
