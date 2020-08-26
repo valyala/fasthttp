@@ -1,6 +1,7 @@
 package fasthttp
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -58,15 +59,25 @@ type LBClient struct {
 // The timeout may be overridden via LBClient.Timeout.
 const DefaultLBClientTimeout = time.Second
 
+var ErrNoAliveClients = errors.New("no alive clients available")
+
 // DoDeadline calls DoDeadline on the least loaded client
 func (cc *LBClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
-	return cc.get().DoDeadline(req, resp, deadline)
+	c := cc.get()
+	if c == nil {
+		return ErrNoAliveClients
+	}
+	return c.DoDeadline(req, resp, deadline)
 }
 
 // DoTimeout calculates deadline and calls DoDeadline on the least loaded client
 func (cc *LBClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
+	c := cc.get()
+	if c == nil {
+		return ErrNoAliveClients
+	}
 	deadline := time.Now().Add(timeout)
-	return cc.get().DoDeadline(req, resp, deadline)
+	return c.DoDeadline(req, resp, deadline)
 }
 
 // Do calls calculates deadline using LBClient.Timeout and calls DoDeadline
@@ -95,20 +106,32 @@ func (cc *LBClient) get() *lbClient {
 	cc.once.Do(cc.init)
 
 	cs := cc.cs
-
-	minC := cs[0]
-	minN := minC.PendingRequests()
-	minT := atomic.LoadUint64(&minC.total)
-	for _, c := range cs[1:] {
-		if c.underPenalty() {
-			continue
-		}
-		n := c.PendingRequests()
-		t := atomic.LoadUint64(&c.total)
-		if n < minN || (n == minN && t < minT) {
+	var (
+		minC *lbClient
+		off  int
+	)
+	for i, c := range cs {
+		if !c.underPenalty() {
 			minC = c
-			minN = n
-			minT = t
+			off = i + 1
+			break
+		}
+	}
+	if minC == nil {
+		return nil
+	}
+
+	if off < len(cs) {
+		minN := minC.PendingRequests()
+		minT := atomic.LoadUint64(&minC.total)
+		for _, c := range cs[off:] {
+			n := c.PendingRequests()
+			t := atomic.LoadUint64(&c.total)
+			if n < minN || (n == minN && t < minT) {
+				minC = c
+				minN = n
+				minT = t
+			}
 		}
 	}
 	return minC
