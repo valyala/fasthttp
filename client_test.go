@@ -20,6 +20,50 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestCloseIdleConnections(t *testing.T) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	if _, _, err := c.Get(nil, "http://google.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	connsLen := func() int {
+		c.mLock.Lock()
+		defer c.mLock.Unlock()
+
+		c.m["google.com"].connsLock.Lock()
+		defer c.m["google.com"].connsLock.Unlock()
+
+		return len(c.m["google.com"].conns)
+	}
+
+	if conns := connsLen(); conns > 1 {
+		t.Errorf("expected 1 conns got %d", conns)
+	}
+
+	c.CloseIdleConnections()
+
+	if conns := connsLen(); conns > 0 {
+		t.Errorf("expected 0 conns got %d", conns)
+	}
+}
+
 func TestPipelineClientIssue832(t *testing.T) {
 	t.Parallel()
 
