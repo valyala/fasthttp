@@ -365,12 +365,10 @@ func (fs *FS) initRequestHandler() {
 		cacheDuration = FSHandlerCacheDuration
 	}
 
-	compressedFileSuffixes := make(map[string]string)
-	if len(fs.CompressedFileSuffixes["br"]) > 1 && strings.HasPrefix(fs.CompressedFileSuffixes["br"], ".") &&
-		len(fs.CompressedFileSuffixes["gzip"]) > 1 && strings.HasPrefix(fs.CompressedFileSuffixes["gzip"], ".") &&
-		fs.CompressedFileSuffixes["br"] != fs.CompressedFileSuffixes["gzip"] {
-		compressedFileSuffixes = fs.CompressedFileSuffixes
-	} else {
+	compressedFileSuffixes := fs.CompressedFileSuffixes
+	if len(compressedFileSuffixes["br"]) < 2 || !strings.HasPrefix(compressedFileSuffixes["br"], ".") ||
+		len(compressedFileSuffixes["gzip"]) < 2 || !strings.HasPrefix(compressedFileSuffixes["gzip"], ".") ||
+		compressedFileSuffixes["br"] == compressedFileSuffixes["gzip"] {
 		compressedFileSuffixes = FSCompressedFileSuffixes
 	}
 
