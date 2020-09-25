@@ -234,7 +234,6 @@ func TestServeFileCompressed(t *testing.T) {
 	}
 
 	// request compressed brotli file
-
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "br")
