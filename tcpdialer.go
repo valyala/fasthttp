@@ -333,7 +333,10 @@ func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Tim
 	ch := chv.(chan dialResult)
 	go func() {
 		var dr dialResult
-		dr.conn, dr.err = net.DialTCP(network, d.LocalAddr, addr)
+		dialer := net.Dialer{LocalAddr: d.LocalAddr}
+		ctx, cancel_ctx := context.WithDeadline(context.Background(), deadline)
+		defer cancel_ctx()
+		dr.conn, dr.err = dialer.DialContext(ctx, network, addr)
 		ch <- dr
 		if concurrencyCh != nil {
 			<-concurrencyCh
