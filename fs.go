@@ -286,6 +286,11 @@ type FS struct {
 	h    RequestHandler
 }
 
+// FSCompressedFileSuffix is the suffix FS adds to the original file names
+// when trying to store compressed file under the new file name.
+// See FS.Compress for details.
+const FSCompressedFileSuffix = ".fasthttp.gz"
+
 // FSCompressedFileSuffixes is the suffixes FS adds to the original file names depending on encoding
 // when trying to store compressed file under the new file name.
 // See FS.Compress for details.
@@ -366,15 +371,14 @@ func (fs *FS) initRequestHandler() {
 	}
 
 	compressedFileSuffixes := fs.CompressedFileSuffixes
-	if len(compressedFileSuffixes["br"]) < 2 || !strings.HasPrefix(compressedFileSuffixes["br"], ".") ||
-		len(compressedFileSuffixes["gzip"]) < 2 || !strings.HasPrefix(compressedFileSuffixes["gzip"], ".") ||
+	if len(compressedFileSuffixes["br"]) == 0 || len(compressedFileSuffixes["gzip"]) == 0 ||
 		compressedFileSuffixes["br"] == compressedFileSuffixes["gzip"] {
 		compressedFileSuffixes = FSCompressedFileSuffixes
 	}
 
-	if len(fs.CompressedFileSuffix) > 1 && strings.HasPrefix(fs.CompressedFileSuffix, ".") {
+	if len(fs.CompressedFileSuffix) > 0 {
 		compressedFileSuffixes["gzip"] = fs.CompressedFileSuffix
-		compressedFileSuffixes["br"] = strings.TrimSuffix(fs.CompressedFileSuffix, filepath.Ext(fs.CompressedFileSuffix)) + ".br"
+		compressedFileSuffixes["br"] = FSCompressedFileSuffixes["br"]
 	}
 
 	h := &fsHandler{

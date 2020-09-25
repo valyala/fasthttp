@@ -234,6 +234,7 @@ func TestServeFileCompressed(t *testing.T) {
 	}
 
 	// request compressed brotli file
+
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "br")
@@ -492,7 +493,7 @@ func TestFSCompressConcurrent(t *testing.T) {
 	for i := 0; i < concurrency; i++ {
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(time.Second * 2):
 			t.Fatalf("timeout")
 		}
 	}
