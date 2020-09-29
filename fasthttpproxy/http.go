@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"encoding/base64"
 	"fmt"
-	"github.com/valyala/fasthttp"
 	"net"
 	"strings"
 	"time"
+
+	"github.com/valyala/fasthttp"
 )
 
 // FasthttpHTTPDialer returns a fasthttp.DialFunc that dials using
