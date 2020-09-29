@@ -26,7 +26,7 @@ func FasthttpHTTPDialer(proxy string) fasthttp.DialFunc {
 //
 // Example usage:
 //	c := &fasthttp.Client{
-//		Dial: fasthttpproxy.FasthttpHTTPDialer("username:password@localhost:9050"),
+//		Dial: fasthttpproxy.FasthttpHTTPDialerTimeout("username:password@localhost:9050", time.Second * 2),
 //	}
 func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.DialFunc {
 	var auth string
