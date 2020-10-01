@@ -336,13 +336,6 @@ func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Tim
 	return conn, err
 }
 
-var dialResultChanPool sync.Pool
-
-type dialResult struct {
-	conn net.Conn
-	err  error
-}
-
 // ErrDialTimeout is returned when TCP dialing is timed out.
 var ErrDialTimeout = errors.New("dialing to the given TCP address timed out")
 
