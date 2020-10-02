@@ -324,6 +324,7 @@ func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Tim
 				return nil, ErrDialTimeout
 			}
 		}
+		defer func() { <-concurrencyCh }()
 	}
 
 	dialer := net.Dialer{LocalAddr: d.LocalAddr}
