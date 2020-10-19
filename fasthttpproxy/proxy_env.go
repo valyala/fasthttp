@@ -1,4 +1,4 @@
-package httpclient
+package fasthttpproxy
 
 import (
 	"bufio"

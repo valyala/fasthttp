@@ -1,16 +1,14 @@
-package httpclient
+package fasthttpproxy
 
 import (
 	"bufio"
 	"encoding/base64"
 	"fmt"
 	"net"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/valyala/fasthttp"
-	"golang.org/x/net/http/httpproxy"
 )
 
 // FasthttpHTTPDialer returns a fasthttp.DialFunc that dials using
