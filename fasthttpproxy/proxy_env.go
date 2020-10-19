@@ -90,16 +90,16 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 		res.SkipBody = true
 
 		if err := res.Read(bufio.NewReader(conn)); err != nil {
-			if err := conn.Close(); err != nil {
-				return nil, fmt.Errorf("conn close err %w followed by read conn err %w")
+			if connErr := conn.Close(); connErr != nil {
+				return nil, fmt.Errorf("conn close err %w followed by read conn err %w", connErr, err)
 			}
 			return nil, err
 		}
 		if res.Header.StatusCode() != 200 {
-			if err := conn.Close(); err != nil {
+			if connErr := conn.Close(); connErr != nil {
 				return nil, fmt.Errorf(
 					"conn close err %w followed by connect to proxy: code: %d body %s",
-					res.StatusCode(), string(res.Body()))
+					connErr, res.StatusCode(), string(res.Body()))
 			}
 			return nil, fmt.Errorf("could not connect to proxy: code: %d body %s", res.StatusCode(), string(res.Body()))
 		}
