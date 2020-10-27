@@ -14,23 +14,23 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// FasthttpHTTPDialer returns a fasthttp.DialFunc that dials using
+// FasthttpProxyHTTPDialer returns a fasthttp.DialFunc that dials using
 // the the env(HTTP_PROXY, HTTPS_PROXY and NO_PROXY) configured HTTP proxy.
 //
 // Example usage:
 //	c := &fasthttp.Client{
-//		Dial: FasthttpHTTPDialer(),
+//		Dial: FasthttpProxyHTTPDialer(),
 //	}
-func FasthttpHTTPDialer() fasthttp.DialFunc {
-	return FasthttpHTTPDialerTimeout(0)
+func FasthttpProxyHTTPDialer() fasthttp.DialFunc {
+	return FasthttpProxyHTTPDialerTimeout(0)
 }
 
-// FasthttpHTTPDialer returns a fasthttp.DialFunc that dials using
+// FasthttpProxyHTTPDialer returns a fasthttp.DialFunc that dials using
 // the env(HTTP_PROXY, HTTPS_PROXY and NO_PROXY) configured HTTP proxy using the given timeout.
 //
 // Example usage:
 //	c := &fasthttp.Client{
-//		Dial: FasthttpHTTPDialerTimeout(time.Second * 2),
+//		Dial: FasthttpProxyHTTPDialerTimeout(time.Second * 2),
 //	}
 
 const (
@@ -38,7 +38,7 @@ const (
 	tlsPort     = "443"
 )
 
-func FasthttpHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
+func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 	proxier := httpproxy.FromEnvironment().ProxyFunc()
 
 	// encoded auth barrier for http and https proxy.
