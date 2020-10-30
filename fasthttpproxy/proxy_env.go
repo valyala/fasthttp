@@ -35,6 +35,7 @@ func FasthttpProxyHTTPDialer() fasthttp.DialFunc {
 
 const (
 	httpsScheme = "https"
+	httpScheme  = "http"
 	tlsPort     = "443"
 )
 
@@ -52,7 +53,7 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 			return nil, fmt.Errorf("unexpected addr format: %w", err)
 		}
 
-		reqURL := &url.URL{Host: addr, Scheme: httpsScheme}
+		reqURL := &url.URL{Host: addr, Scheme: httpScheme}
 		if port == tlsPort {
 			reqURL.Scheme = httpsScheme
 		}
