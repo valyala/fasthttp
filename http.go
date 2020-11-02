@@ -36,6 +36,7 @@ type Request struct {
 	bodyStream io.Reader
 	w          requestBodyWriter
 	body       *bytebufferpool.ByteBuffer
+	bodyRaw    []byte
 
 	multipartForm         *multipart.Form
 	multipartFormBoundary string
@@ -341,6 +342,9 @@ func (resp *Response) bodyBytes() []byte {
 }
 
 func (req *Request) bodyBytes() []byte {
+	if req.bodyRaw != nil {
+		return req.bodyRaw
+	}
 	if req.body == nil {
 		return nil
 	}
@@ -359,6 +363,7 @@ func (req *Request) bodyBuffer() *bytebufferpool.ByteBuffer {
 	if req.body == nil {
 		req.body = requestBodyPool.Get()
 	}
+	req.bodyRaw = nil
 	return req.body
 }
 
@@ -527,6 +532,14 @@ func (resp *Response) SetBodyRaw(body []byte) {
 	resp.bodyRaw = body
 }
 
+// SetBodyRaw sets response body, but without copying it.
+//
+// From this point onward the body argument must not be changed.
+func (req *Request) SetBodyRaw(body []byte) {
+	req.ResetBody()
+	req.bodyRaw = body
+}
+
 // ReleaseBody retires the response body if it is greater than "size" bytes.
 //
 // This permits GC to reclaim the large buffer.  If used, must be before
@@ -550,6 +563,7 @@ func (resp *Response) ReleaseBody(size int) {
 // Use this method only if you really understand how it works.
 // The majority of workloads don't need this method.
 func (req *Request) ReleaseBody(size int) {
+	req.bodyRaw = nil
 	if cap(req.body.B) > size {
 		req.closeBodyStream() //nolint:errcheck
 		req.body = nil
@@ -599,6 +613,8 @@ func (req *Request) SwapBody(body []byte) []byte {
 		}
 	}
 
+	req.bodyRaw = nil
+
 	oldBody := bb.B
 	bb.B = body
 	return oldBody
@@ -608,7 +624,9 @@ func (req *Request) SwapBody(body []byte) []byte {
 //
 // The returned body is valid until the request modification.
 func (req *Request) Body() []byte {
-	if req.bodyStream != nil {
+	if req.bodyRaw != nil {
+		return req.bodyRaw
+	} else if req.bodyStream != nil {
 		bodyBuf := req.bodyBuffer()
 		bodyBuf.Reset()
 		_, err := copyZeroAlloc(bodyBuf, req.bodyStream)
@@ -660,6 +678,7 @@ func (req *Request) SetBodyString(body string) {
 
 // ResetBody resets request body.
 func (req *Request) ResetBody() {
+	req.bodyRaw = nil
 	req.RemoveMultipartFormFiles()
 	req.closeBodyStream() //nolint:errcheck
 	if req.body != nil {
@@ -675,7 +694,12 @@ func (req *Request) ResetBody() {
 // CopyTo copies req contents to dst except of body stream.
 func (req *Request) CopyTo(dst *Request) {
 	req.copyToSkipBody(dst)
-	if req.body != nil {
+	if req.bodyRaw != nil {
+		dst.bodyRaw = req.bodyRaw
+		if dst.body != nil {
+			dst.body.Reset()
+		}
+	} else if req.body != nil {
 		dst.bodyBuffer().Set(req.body.B)
 	} else if dst.body != nil {
 		dst.body.Reset()
@@ -722,6 +746,7 @@ func (resp *Response) copyToSkipBody(dst *Response) {
 
 func swapRequestBody(a, b *Request) {
 	a.body, b.body = b.body, a.body
+	a.bodyRaw, b.bodyRaw = b.bodyRaw, a.bodyRaw
 	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
 }
 

@@ -2081,6 +2081,18 @@ func TestResponseRawBodySet(t *testing.T) {
 	testBodyWriteTo(t, &resp, expectedS, true)
 }
 
+func TestRequestRawBodySet(t *testing.T) {
+	t.Parallel()
+
+	var r Request
+
+	expectedS := "test"
+	body := []byte(expectedS)
+	r.SetBodyRaw(body)
+
+	testBodyWriteTo(t, &r, expectedS, true)
+}
+
 func TestResponseRawBodyReset(t *testing.T) {
 	t.Parallel()
 
@@ -2093,6 +2105,18 @@ func TestResponseRawBodyReset(t *testing.T) {
 	testBodyWriteTo(t, &resp, "", true)
 }
 
+func TestRequestRawBodyReset(t *testing.T) {
+	t.Parallel()
+
+	var r Request
+
+	body := []byte("test")
+	r.SetBodyRaw(body)
+	r.ResetBody()
+
+	testBodyWriteTo(t, &r, "", true)
+}
+
 func TestResponseRawBodyCopyTo(t *testing.T) {
 	t.Parallel()
 
@@ -2103,6 +2127,22 @@ func TestResponseRawBodyCopyTo(t *testing.T) {
 	resp.SetBodyRaw(body)
 
 	testResponseCopyTo(t, &resp)
+}
+
+func TestRequestRawBodyCopyTo(t *testing.T) {
+	t.Parallel()
+
+	var a Request
+
+	body := []byte("test")
+	a.SetBodyRaw(body)
+
+	var b Request
+
+	a.CopyTo(&b)
+
+	testBodyWriteTo(t, &a, "test", true)
+	testBodyWriteTo(t, &b, "test", true)
 }
 
 type testReader struct {
