@@ -49,7 +49,7 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 
 		port, _, err := net.SplitHostPort(addr)
 		if err != nil {
-			return nil, fmt.Errorf("unexpected addr format: %w", err)
+			return nil, fmt.Errorf("unexpected addr format: %v", err)
 		}
 
 		reqURL := &url.URL{Host: addr, Scheme: httpsScheme}
@@ -108,7 +108,7 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 
 		if err := res.Read(bufio.NewReader(conn)); err != nil {
 			if connErr := conn.Close(); connErr != nil {
-				return nil, fmt.Errorf("conn close err %v followed by read conn err %w", connErr, err)
+				return nil, fmt.Errorf("conn close err %v followed by read conn err %s", connErr, err)
 			}
 			return nil, err
 		}
