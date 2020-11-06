@@ -1,4 +1,7 @@
 language: go
+arch:
+  - amd64
+  - ppc64le
 
 dist: bionic
 
@@ -59,3 +62,12 @@ jobs:
         - 1.15.x
       script:
         - go test -race -v ./...
+    - stage: race detector
+      arch: ppc64le
+      os:
+        - linux
+      go:
+        - 1.15.x
+      script:
+        - go test -race -v ./...
+
