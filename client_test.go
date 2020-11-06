@@ -47,6 +47,10 @@ func TestCloseIdleConnections(t *testing.T) {
 		c.mLock.Lock()
 		defer c.mLock.Unlock()
 
+		if _, ok := c.m["google.com"]; !ok {
+			return 0
+		}
+
 		c.m["google.com"].connsLock.Lock()
 		defer c.m["google.com"].connsLock.Unlock()
 
