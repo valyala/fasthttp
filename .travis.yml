@@ -62,7 +62,6 @@ jobs:
         - 1.15.x
       script:
         - go test -race -v ./...
-#Adding power on support
     - stage: race detector
       arch: ppc64le
       os:
