@@ -327,7 +327,11 @@ func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Tim
 		defer func() { <-concurrencyCh }()
 	}
 
-	dialer := net.Dialer{LocalAddr: d.LocalAddr}
+	dialer := net.Dialer{}
+	if d.LocalAddr != nil {
+		dialer.LocalAddr = d.LocalAddr
+	}
+
 	ctx, cancel_ctx := context.WithDeadline(context.Background(), deadline)
 	defer cancel_ctx()
 	conn, err := dialer.DialContext(ctx, network, addr.String())
