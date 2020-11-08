@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"strconv"
 	"testing"
 
 	"github.com/valyala/bytebufferpool"
@@ -145,4 +146,35 @@ func benchmarkNormalizeHeaderKey(b *testing.B, src []byte) {
 			normalizeHeaderKey(buf, false)
 		}
 	})
+}
+
+func BenchmarkRemoveNewLines(b *testing.B) {
+	type testcase struct {
+		value         string
+		expectedValue string
+	}
+
+	var testcases = []testcase{
+		{value: "MaliciousValue", expectedValue: "MaliciousValue"},
+		{value: "MaliciousValue\r\n", expectedValue: "MaliciousValue  "},
+		{value: "Malicious\nValue", expectedValue: "Malicious Value"},
+		{value: "Malicious\rValue", expectedValue: "Malicious Value"},
+	}
+
+	for i, tcase := range testcases {
+		caseName := strconv.FormatInt(int64(i), 10)
+		b.Run(caseName, func(subB *testing.B) {
+			subB.ReportAllocs()
+			var h RequestHeader
+			for i := 0; i < subB.N; i++ {
+				h.Set("Test", tcase.value)
+			}
+			subB.StopTimer()
+			actualValue := string(h.Peek("Test"))
+
+			if actualValue != tcase.expectedValue {
+				subB.Errorf("unexpected value, got: %+v", actualValue)
+			}
+		})
+	}
 }
