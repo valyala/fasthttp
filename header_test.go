@@ -1240,7 +1240,7 @@ func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
 
 	var h ResponseHeader
 
-	h.noDefaultContentType = true
+	h.SetNoDefaultContentType(true)
 	h.SetContentLength(5)
 
 	headers := h.String()
@@ -2193,10 +2193,10 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 		400, 123, string(defaultContentType), "foiaaa")
 
 	// no content-type and no default
-	h.noDefaultContentType = true
+	h.SetNoDefaultContentType(true)
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\r\nContent-Length: 123\r\n\r\nfoiaaa",
 		400, 123, "", "foiaaa")
-	h.noDefaultContentType = false
+	h.SetNoDefaultContentType(false)
 
 	// no headers
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\n\r\naaaabbb",

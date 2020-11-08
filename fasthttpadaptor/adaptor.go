@@ -85,10 +85,25 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		h.ServeHTTP(&w, r.WithContext(ctx))
 
 		ctx.SetStatusCode(w.StatusCode())
+		haveContentType := false
 		for k, vv := range w.Header() {
+			if k == fasthttp.HeaderContentType {
+				haveContentType = true
+			}
+
 			for _, v := range vv {
 				ctx.Response.Header.Set(k, v)
 			}
+		}
+		if !haveContentType {
+			// From net/http.ResponseWriter.Write:
+			// If the Header does not contain a Content-Type line, Write adds a Content-Type set
+			// to the result of passing the initial 512 bytes of written data to DetectContentType.
+			l := 512
+			if len(w.body) < 512 {
+				l = len(w.body)
+			}
+			ctx.Response.Header.Set(fasthttp.HeaderContentType, http.DetectContentType(w.body[:l]))
 		}
 		ctx.Write(w.body) //nolint:errcheck
 	}

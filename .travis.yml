@@ -1,22 +1,19 @@
 language: go
-
-# Docker is required for fuzzit regression tests
-services:
-  - docker
+arch:
+  - amd64
+  - ppc64le
 
 dist: bionic
 
 os:
   - linux
   - osx
+  - windows
 go:
-  - tip
+  - 1.15.x
   - 1.14.x
   - 1.13.x
   - 1.12.x
-  - 1.11.x
-  - 1.10.x
-  - 1.9.x
 
 script:
   - go test -v ./...
@@ -29,14 +26,12 @@ before_install:
   - go get -t -v ./...
 
 jobs:
-  allow_failures:
-    - go: tip
   include:
     - stage: cross compilation
       os:
         - linux
       go:
-        - 1.14.x
+        - 1.15.x
       script:
         - GOOS=linux go build
         - GOOS=darwin go build
@@ -47,32 +42,32 @@ jobs:
       os:
         - osx
       go:
-        - 1.14.x
+        - 1.15.x
       script:
         - GOOS=linux go build
         - GOOS=darwin go build
         - GOOS=freebsd go build
         - GOOS=windows go build
-        - GOARCH=386 go build
     - stage: race detector
       os:
         - linux
       go:
-        - 1.14.x
+        - 1.15.x
       script:
         - go test -race -v ./...
     - stage: race detector
       os:
         - osx
       go:
-        - 1.14.x
+        - 1.15.x
       script:
         - go test -race -v ./...
-    - stage: fuzzit.dev
+    - stage: race detector
+      arch: ppc64le
       os:
         - linux
       go:
-        - 1.14.x
+        - 1.15.x
       script:
-        - if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./fuzzit.sh fuzzing; fi
-        - if [ "$TRAVIS_PULL_REQUEST" != "false" ]; then ./fuzzit.sh local-regression; fi
+        - go test -race -v ./...
+

@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"path"
+	"runtime"
 	"sort"
 	"testing"
 	"time"
@@ -200,14 +201,15 @@ func TestServeFileCompressed(t *testing.T) {
 	t.Parallel()
 
 	var ctx RequestCtx
-	var req Request
-	req.SetRequestURI("http://foobar.com/baz")
-	req.Header.Set(HeaderAcceptEncoding, "gzip")
-	ctx.Init(&req, nil, nil)
-
-	ServeFile(&ctx, "fs.go")
+	ctx.Init(&Request{}, nil, nil)
 
 	var resp Response
+
+	// request compressed gzip file
+	ctx.Request.SetRequestURI("http://foobar.com/baz")
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip")
+	ServeFile(&ctx, "fs.go")
+
 	s := ctx.Response.String()
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
@@ -224,6 +226,35 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 	expectedBody, err := getFileContents("/fs.go")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if !bytes.Equal(body, expectedBody) {
+		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
+	}
+
+	// request compressed brotli file
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI("http://foobar.com/baz")
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "br")
+	ServeFile(&ctx, "fs.go")
+
+	s = ctx.Response.String()
+	br = bufio.NewReader(bytes.NewBufferString(s))
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	ce = resp.Header.Peek(HeaderContentEncoding)
+	if string(ce) != "br" {
+		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "br")
+	}
+
+	body, err = resp.BodyUnbrotli()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	expectedBody, err = getFileContents("/fs.go")
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -441,6 +472,7 @@ func TestFSCompressConcurrent(t *testing.T) {
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
+		CompressBrotli:     true,
 	}
 	h := fs.NewRequestHandler()
 
@@ -460,7 +492,7 @@ func TestFSCompressConcurrent(t *testing.T) {
 	for i := 0; i < concurrency; i++ {
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(time.Second * 2):
 			t.Fatalf("timeout")
 		}
 	}
@@ -473,6 +505,7 @@ func TestFSCompressSingleThread(t *testing.T) {
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
+		CompressBrotli:     true,
 	}
 	h := fs.NewRequestHandler()
 
@@ -485,12 +518,12 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	var ctx RequestCtx
 	ctx.Init(&Request{}, nil, nil)
 
+	var resp Response
+
 	// request uncompressed file
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI(filePath)
 	h(&ctx)
-
-	var resp Response
 	s := ctx.Response.String()
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
@@ -505,7 +538,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	}
 	body := string(resp.Body())
 
-	// request compressed file
+	// request compressed gzip file
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI(filePath)
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip")
@@ -525,6 +558,31 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	zbody, err := resp.BodyGunzip()
 	if err != nil {
 		t.Fatalf("unexpected error when gunzipping response body: %s. filePath=%q", err, filePath)
+	}
+	if string(zbody) != body {
+		t.Fatalf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
+	}
+
+	// request compressed brotli file
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI(filePath)
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "br")
+	h(&ctx)
+	s = ctx.Response.String()
+	br = bufio.NewReader(bytes.NewBufferString(s))
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %s. filePath=%q", err, filePath)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
+	}
+	ce = resp.Header.Peek(HeaderContentEncoding)
+	if string(ce) != "br" {
+		t.Fatalf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "br", filePath)
+	}
+	zbody, err = resp.BodyUnbrotli()
+	if err != nil {
+		t.Fatalf("unexpected error when unbrotling response body: %s. filePath=%q", err, filePath)
 	}
 	if string(zbody) != body {
 		t.Fatalf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
@@ -740,6 +798,10 @@ func TestServeFileContentType(t *testing.T) {
 }
 
 func TestServeFileDirectoryRedirect(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
 	t.Parallel()
 
 	var ctx RequestCtx
@@ -749,16 +811,16 @@ func TestServeFileDirectoryRedirect(t *testing.T) {
 
 	ctx.Request.Reset()
 	ctx.Response.Reset()
-	ServeFile(&ctx, ".git")
+	ServeFile(&ctx, "fasthttputil")
 	if ctx.Response.StatusCode() != StatusFound {
-		t.Fatalf("Unexpected status code %d for directory '/.git' without trailing slash. Expecting %d.", ctx.Response.StatusCode(), StatusFound)
+		t.Fatalf("Unexpected status code %d for directory '/fasthttputil' without trailing slash. Expecting %d.", ctx.Response.StatusCode(), StatusFound)
 	}
 
 	ctx.Request.Reset()
 	ctx.Response.Reset()
-	ServeFile(&ctx, ".git/")
+	ServeFile(&ctx, "fasthttputil/")
 	if ctx.Response.StatusCode() != StatusOK {
-		t.Fatalf("Unexpected status code %d for directory '/.git/' with trailing slash. Expecting %d.", ctx.Response.StatusCode(), StatusOK)
+		t.Fatalf("Unexpected status code %d for directory '/fasthttputil/' with trailing slash. Expecting %d.", ctx.Response.StatusCode(), StatusOK)
 	}
 
 	ctx.Request.Reset()

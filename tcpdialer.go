@@ -324,46 +324,21 @@ func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Tim
 				return nil, ErrDialTimeout
 			}
 		}
+		defer func() { <-concurrencyCh }()
 	}
 
-	chv := dialResultChanPool.Get()
-	if chv == nil {
-		chv = make(chan dialResult, 1)
+	dialer := net.Dialer{}
+	if d.LocalAddr != nil {
+		dialer.LocalAddr = d.LocalAddr
 	}
-	ch := chv.(chan dialResult)
-	go func() {
-		var dr dialResult
-		dr.conn, dr.err = net.DialTCP(network, d.LocalAddr, addr)
-		ch <- dr
-		if concurrencyCh != nil {
-			<-concurrencyCh
-		}
-	}()
 
-	var (
-		conn net.Conn
-		err  error
-	)
-
-	tc := AcquireTimer(timeout)
-	select {
-	case dr := <-ch:
-		conn = dr.conn
-		err = dr.err
-		dialResultChanPool.Put(ch)
-	case <-tc.C:
-		err = ErrDialTimeout
+	ctx, cancel_ctx := context.WithDeadline(context.Background(), deadline)
+	defer cancel_ctx()
+	conn, err := dialer.DialContext(ctx, network, addr.String())
+	if err != nil && ctx.Err() == context.DeadlineExceeded {
+		return nil, ErrDialTimeout
 	}
-	ReleaseTimer(tc)
-
 	return conn, err
-}
-
-var dialResultChanPool sync.Pool
-
-type dialResult struct {
-	conn net.Conn
-	err  error
 }
 
 // ErrDialTimeout is returned when TCP dialing is timed out.

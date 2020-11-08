@@ -1,4 +1,4 @@
-# fasthttp [![Build Status](https://travis-ci.org/valyala/fasthttp.svg?branch=master)](https://travis-ci.org/valyala/fasthttp?branch=master) [![GoDoc](https://godoc.org/github.com/valyala/fasthttp?status.svg)](http://godoc.org/github.com/valyala/fasthttp) [![fuzzit](https://app.fuzzit.dev/badge?org_id=fasthttp&branch=master)](https://fuzzit.dev) [![Go Report](https://goreportcard.com/badge/github.com/valyala/fasthttp)](https://goreportcard.com/report/github.com/valyala/fasthttp) [![Sourcegraph](https://sourcegraph.com/github.com/valyala/fasthttp/-/badge.svg)](https://sourcegraph.com/github.com/valyala/fasthttp?badge)
+# fasthttp [![Build Status](https://travis-ci.org/valyala/fasthttp.svg?branch=master)](https://travis-ci.org/valyala/fasthttp?branch=master) [![GoDoc](https://godoc.org/github.com/valyala/fasthttp?status.svg)](http://godoc.org/github.com/valyala/fasthttp) [![Go Report](https://goreportcard.com/badge/github.com/valyala/fasthttp)](https://goreportcard.com/report/github.com/valyala/fasthttp) [![Sourcegraph](https://sourcegraph.com/github.com/valyala/fasthttp/-/badge.svg)](https://sourcegraph.com/github.com/valyala/fasthttp?badge)
 
 ![FastHTTP – Fastest and reliable HTTP implementation in Go](https://github.com/fasthttp/docs-assets/raw/master/banner@0.5.png)
 
@@ -277,10 +277,11 @@ but there are more powerful third-party routers and web frameworks
 with fasthttp support:
 
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
-  * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
+  * [router](https://github.com/fasthttp/router)
   * [lu](https://github.com/vincentLiuxiang/lu)
   * [atreugo](https://github.com/savsgio/atreugo)
   * [Fiber](https://github.com/gofiber/fiber)
+  * [Gearbox](https://github.com/gogearbox/gearbox)
 
   Net/http code with simple ServeMux is trivially converted to fasthttp code:
 
@@ -484,7 +485,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     helpers for projects based on fasthttp.
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) - fast and
     powerful routing package for fasthttp servers.
-  * [fasthttprouter](https://github.com/buaazp/fasthttprouter) - a high
+  * [router](https://github.com/fasthttp/router) - a high
     performance fasthttp request router that scales well.
   * [fastws](https://github.com/fasthttp/fastws) - Bloatless WebSocket package made for fasthttp
     to handle Read/Write operations concurrently.
@@ -498,6 +499,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   * [kratgo](https://github.com/savsgio/kratgo) - Simple, lightweight and ultra-fast HTTP Cache to speed up your websites.
   * [kit-plugins](https://github.com/wencan/kit-plugins/tree/master/transport/fasthttp) - go-kit transport implementation for fasthttp.
   * [Fiber](https://github.com/gofiber/fiber) - An Expressjs inspired web framework running on Fasthttp
+  * [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization
 
 
 # FAQ
@@ -565,11 +567,12 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   Use third-party routers and web frameworks with fasthttp support:
 
     * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
-    * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
+    * [router](https://github.com/fasthttp/router)
     * [gramework](https://github.com/gramework/gramework)
     * [lu](https://github.com/vincentLiuxiang/lu)
     * [atreugo](https://github.com/savsgio/atreugo)
     * [Fiber](https://github.com/gofiber/fiber)
+    * [Gearbox](https://github.com/gogearbox/gearbox)
 
   See also [this issue](https://github.com/valyala/fasthttp/issues/9) for more info.
 

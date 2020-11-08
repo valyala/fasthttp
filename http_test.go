@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"mime/multipart"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -21,12 +22,59 @@ func TestFragmentInURIRequest(t *testing.T) {
 	req.SetRequestURI("https://docs.gitlab.com/ee/user/project/integrations/webhooks.html#events")
 
 	var b bytes.Buffer
-	req.WriteTo(&b)
+	req.WriteTo(&b) //nolint:errcheck
 	got := b.String()
 	expected := "GET /ee/user/project/integrations/webhooks.html HTTP/1.1\r\nHost: docs.gitlab.com\r\n\r\n"
 
 	if got != expected {
 		t.Errorf("got %q expected %q", got, expected)
+	}
+}
+
+func TestIssue875(t *testing.T) {
+	type testcase struct {
+		uri              string
+		expectedRedirect string
+		expectedLocation string
+	}
+
+	var testcases = []testcase{
+		{
+			uri:              `http://localhost:3000/?redirect=foo%0d%0aSet-Cookie:%20SESSIONID=MaliciousValue%0d%0a`,
+			expectedRedirect: "foo\r\nSet-Cookie: SESSIONID=MaliciousValue\r\n",
+			expectedLocation: "Location: foo  Set-Cookie: SESSIONID=MaliciousValue",
+		},
+		{
+			uri:              `http://localhost:3000/?redirect=foo%0dSet-Cookie:%20SESSIONID=MaliciousValue%0d%0a`,
+			expectedRedirect: "foo\rSet-Cookie: SESSIONID=MaliciousValue\r\n",
+			expectedLocation: "Location: foo Set-Cookie: SESSIONID=MaliciousValue",
+		},
+		{
+			uri:              `http://localhost:3000/?redirect=foo%0aSet-Cookie:%20SESSIONID=MaliciousValue%0d%0a`,
+			expectedRedirect: "foo\nSet-Cookie: SESSIONID=MaliciousValue\r\n",
+			expectedLocation: "Location: foo Set-Cookie: SESSIONID=MaliciousValue",
+		},
+	}
+
+	for i, tcase := range testcases {
+		caseName := strconv.FormatInt(int64(i), 10)
+		t.Run(caseName, func(subT *testing.T) {
+			ctx := &RequestCtx{
+				Request:  Request{},
+				Response: Response{},
+			}
+			ctx.Request.SetRequestURI(tcase.uri)
+
+			q := string(ctx.QueryArgs().Peek("redirect"))
+			if q != tcase.expectedRedirect {
+				subT.Errorf("unexpected redirect query value, got: %+v", q)
+			}
+			ctx.Response.Header.Set("Location", q)
+
+			if !strings.Contains(ctx.Response.String(), tcase.expectedLocation) {
+				subT.Errorf("invalid escaping, got\n%s", ctx.Response.String())
+			}
+		})
 	}
 }
 
@@ -2081,6 +2129,18 @@ func TestResponseRawBodySet(t *testing.T) {
 	testBodyWriteTo(t, &resp, expectedS, true)
 }
 
+func TestRequestRawBodySet(t *testing.T) {
+	t.Parallel()
+
+	var r Request
+
+	expectedS := "test"
+	body := []byte(expectedS)
+	r.SetBodyRaw(body)
+
+	testBodyWriteTo(t, &r, expectedS, true)
+}
+
 func TestResponseRawBodyReset(t *testing.T) {
 	t.Parallel()
 
@@ -2093,6 +2153,18 @@ func TestResponseRawBodyReset(t *testing.T) {
 	testBodyWriteTo(t, &resp, "", true)
 }
 
+func TestRequestRawBodyReset(t *testing.T) {
+	t.Parallel()
+
+	var r Request
+
+	body := []byte("test")
+	r.SetBodyRaw(body)
+	r.ResetBody()
+
+	testBodyWriteTo(t, &r, "", true)
+}
+
 func TestResponseRawBodyCopyTo(t *testing.T) {
 	t.Parallel()
 
@@ -2103,6 +2175,22 @@ func TestResponseRawBodyCopyTo(t *testing.T) {
 	resp.SetBodyRaw(body)
 
 	testResponseCopyTo(t, &resp)
+}
+
+func TestRequestRawBodyCopyTo(t *testing.T) {
+	t.Parallel()
+
+	var a Request
+
+	body := []byte("test")
+	a.SetBodyRaw(body)
+
+	var b Request
+
+	a.CopyTo(&b)
+
+	testBodyWriteTo(t, &a, "test", true)
+	testBodyWriteTo(t, &b, "test", true)
 }
 
 type testReader struct {

@@ -512,27 +512,39 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	c.mLock.Unlock()
 
 	if startCleaner {
-		go c.mCleaner(m)
+		go c.mCleaner()
 	}
 
 	return hc.Do(req, resp)
 }
 
-func (c *Client) mCleaner(m map[string]*HostClient) {
+// CloseIdleConnections closes any connections which were previously
+// connected from previous requests but are now sitting idle in a
+// "keep-alive" state. It does not interrupt any connections currently
+// in use.
+func (c *Client) CloseIdleConnections() {
+	c.mLock.Lock()
+	for _, v := range c.m {
+		v.CloseIdleConnections()
+	}
+	c.mLock.Unlock()
+}
+
+func (c *Client) mCleaner() {
 	mustStop := false
 
 	for {
 		c.mLock.Lock()
-		for k, v := range m {
+		for k, v := range c.m {
 			v.connsLock.Lock()
 			shouldRemove := v.connsCount == 0
 			v.connsLock.Unlock()
 
 			if shouldRemove {
-				delete(m, k)
+				delete(c.m, k)
 			}
 		}
-		if len(m) == 0 {
+		if len(c.m) == 0 {
 			mustStop = true
 		}
 		c.mLock.Unlock()
@@ -915,7 +927,7 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	oldBody := bodyBuf.B
 	bodyBuf.B = dst
 
-	statusCode, body, err = doRequestFollowRedirects(req, resp, url, defaultMaxRedirectsCount, c)
+	statusCode, _, err = doRequestFollowRedirects(req, resp, url, defaultMaxRedirectsCount, c)
 
 	body = bodyBuf.B
 	bodyBuf.B = oldBody
@@ -1542,6 +1554,24 @@ func (c *HostClient) dialConnFor(w *wantConn) {
 	if !delivered {
 		// not delivered, return idle connection
 		c.releaseConn(cc)
+	}
+}
+
+// CloseIdleConnections closes any connections which were previously
+// connected from previous requests but are now sitting idle in a
+// "keep-alive" state. It does not interrupt any connections currently
+// in use.
+func (c *HostClient) CloseIdleConnections() {
+	c.connsLock.Lock()
+	scratch := append([]*clientConn{}, c.conns...)
+	for i := range c.conns {
+		c.conns[i] = nil
+	}
+	c.conns = c.conns[:0]
+	c.connsLock.Unlock()
+
+	for _, cc := range scratch {
+		c.closeConn(cc)
 	}
 }
 
@@ -2389,20 +2419,28 @@ func (c *pipelineConnClient) init() {
 			c.chW = make(chan *pipelineWork, maxPendingRequests)
 		}
 		go func() {
-			if err := c.worker(); err != nil {
-				c.logger().Printf("error in PipelineClient(%q): %s", c.Addr, err)
-				if netErr, ok := err.(net.Error); ok && netErr.Temporary() {
-					// Throttle client reconnections on temporary errors
-					time.Sleep(time.Second)
+			// Keep restarting the worker if it fails (connection errors for example).
+			for {
+				if err := c.worker(); err != nil {
+					c.logger().Printf("error in PipelineClient(%q): %s", c.Addr, err)
+					if netErr, ok := err.(net.Error); ok && netErr.Temporary() {
+						// Throttle client reconnections on temporary errors
+						time.Sleep(time.Second)
+					}
+				} else {
+					c.chLock.Lock()
+					stop := len(c.chR) == 0 && len(c.chW) == 0
+					if !stop {
+						c.chR = nil
+						c.chW = nil
+					}
+					c.chLock.Unlock()
+
+					if stop {
+						break
+					}
 				}
 			}
-
-			c.chLock.Lock()
-			// Do not reset c.chW to nil, since it may contain
-			// pending requests, which could be served on the next
-			// connection to the host.
-			c.chR = nil
-			c.chLock.Unlock()
 		}()
 	}
 	c.chLock.Unlock()

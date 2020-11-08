@@ -982,7 +982,7 @@ func TestServerTLSReadTimeout(t *testing.T) {
 
 	select {
 	case err = <-r:
-	case <-time.After(time.Millisecond * 200):
+	case <-time.After(time.Millisecond * 500):
 	}
 
 	if err == nil {
@@ -2293,7 +2293,7 @@ func TestRequestCtxNoHijackNoResponse(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			io.WriteString(ctx, "test")
+			io.WriteString(ctx, "test") //nolint:errcheck
 			ctx.HijackSetNoResponse(true)
 		},
 	}
@@ -2319,7 +2319,7 @@ func TestRequestCtxNoHijackNoResponse(t *testing.T) {
 		strings.NewReader(rw.w.String()),
 	)
 	resp := AcquireResponse()
-	resp.Read(bf)
+	resp.Read(bf) //nolint:errcheck
 	if got := string(resp.Body()); got != "test" {
 		t.Errorf(`expected "test", got %q`, got)
 	}
@@ -2465,6 +2465,45 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	}
 }
 
+func TestTimeoutHandlerTimeoutReuse(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	h := func(ctx *RequestCtx) {
+		if string(ctx.Path()) == "/timeout" {
+			time.Sleep(time.Second)
+		}
+		ctx.SetBodyString("ok")
+	}
+	s := &Server{
+		Handler: TimeoutHandler(h, 20*time.Millisecond, "timeout!!!"),
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexepcted error: %s", err)
+		}
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	br := bufio.NewReader(conn)
+	if _, err = conn.Write([]byte("GET /timeout HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "timeout!!!")
+
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	verifyResponse(t, br, StatusOK, string(defaultContentType), "ok")
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+}
+
 func TestServerGetOnly(t *testing.T) {
 	t.Parallel()
 
@@ -2556,6 +2595,7 @@ func TestServerTimeoutErrorWithResponse(t *testing.T) {
 
 	br := bufio.NewReader(&rw.w)
 	verifyResponse(t, br, 456, "foo/bar", "path=/foo")
+	verifyResponse(t, br, 456, "foo/bar", "path=/bar")
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
@@ -2599,6 +2639,7 @@ func TestServerTimeoutErrorWithCode(t *testing.T) {
 
 	br := bufio.NewReader(&rw.w)
 	verifyResponse(t, br, StatusBadRequest, string(defaultContentType), "stolen ctx")
+	verifyResponse(t, br, StatusBadRequest, string(defaultContentType), "stolen ctx")
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
@@ -2641,6 +2682,7 @@ func TestServerTimeoutError(t *testing.T) {
 	}
 
 	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "stolen ctx")
 	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "stolen ctx")
 
 	data, err := ioutil.ReadAll(br)

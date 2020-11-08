@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/valyala/fasthttp"
 )
@@ -18,6 +19,17 @@ import (
 //		Dial: fasthttpproxy.FasthttpHTTPDialer("username:password@localhost:9050"),
 //	}
 func FasthttpHTTPDialer(proxy string) fasthttp.DialFunc {
+	return FasthttpHTTPDialerTimeout(proxy, 0)
+}
+
+// FasthttpHTTPDialer returns a fasthttp.DialFunc that dials using
+// the provided HTTP proxy using the given timeout.
+//
+// Example usage:
+//	c := &fasthttp.Client{
+//		Dial: fasthttpproxy.FasthttpHTTPDialerTimeout("username:password@localhost:9050", time.Second * 2),
+//	}
+func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.DialFunc {
 	var auth string
 	if strings.Contains(proxy, "@") {
 		split := strings.Split(proxy, "@")
@@ -26,7 +38,13 @@ func FasthttpHTTPDialer(proxy string) fasthttp.DialFunc {
 	}
 
 	return func(addr string) (net.Conn, error) {
-		conn, err := fasthttp.Dial(proxy)
+		var conn net.Conn
+		var err error
+		if timeout == 0 {
+			conn, err = fasthttp.Dial(proxy)
+		} else {
+			conn, err = fasthttp.DialTimeout(proxy, timeout)
+		}
 		if err != nil {
 			return nil, err
 		}

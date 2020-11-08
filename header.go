@@ -591,6 +591,22 @@ func (h *RequestHeader) DisableNormalizing() {
 	h.disableNormalizing = true
 }
 
+// EnableNormalizing enables header names' normalization.
+//
+// Header names are normalized by uppercasing the first letter and
+// all the first letters following dashes, while lowercasing all
+// the other letters.
+// Examples:
+//
+//     * CONNECTION -> Connection
+//     * conteNT-tYPE -> Content-Type
+//     * foo-bar-baz -> Foo-Bar-Baz
+//
+// This is enabled by default unless disabled using DisableNormalizing()
+func (h *RequestHeader) EnableNormalizing() {
+	h.disableNormalizing = false
+}
+
 // DisableNormalizing disables header names' normalization.
 //
 // By default all the header names are normalized by uppercasing
@@ -607,10 +623,31 @@ func (h *ResponseHeader) DisableNormalizing() {
 	h.disableNormalizing = true
 }
 
+// EnableNormalizing enables header names' normalization.
+//
+// Header names are normalized by uppercasing the first letter and
+// all the first letters following dashes, while lowercasing all
+// the other letters.
+// Examples:
+//
+//     * CONNECTION -> Connection
+//     * conteNT-tYPE -> Content-Type
+//     * foo-bar-baz -> Foo-Bar-Baz
+//
+// This is enabled by default unless disabled using DisableNormalizing()
+func (h *ResponseHeader) EnableNormalizing() {
+	h.disableNormalizing = false
+}
+
+// SetNoDefaultContentType allows you to control if a default Content-Type header will be set (false) or not (true).
+func (h *ResponseHeader) SetNoDefaultContentType(noDefaultContentType bool) {
+	h.noDefaultContentType = noDefaultContentType
+}
+
 // Reset clears response header.
 func (h *ResponseHeader) Reset() {
 	h.disableNormalizing = false
-	h.noDefaultContentType = false
+	h.SetNoDefaultContentType(false)
 	h.noDefaultDate = false
 	h.resetSkipNormalize()
 }
@@ -1357,7 +1394,7 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		// n == 1 on the first read for the request.
 		if n == 1 {
 			// We didn't read a single byte.
-			return errNothingRead{err}
+			return ErrNothingRead{err}
 		}
 
 		return fmt.Errorf("error when reading request headers: %s", err)
@@ -2136,11 +2173,15 @@ func nextLine(b []byte) ([]byte, []byte, error) {
 	return b[:n], b[nNext+1:], nil
 }
 
+var (
+	foldReplacer = strings.NewReplacer("\r\n", "  ", "\r", " ", "\n", " ")
+)
+
 func initHeaderKV(kv *argsKV, key, value string, disableNormalizing bool) {
 	kv.key = getHeaderKeyBytes(kv, key, disableNormalizing)
 	// https://tools.ietf.org/html/rfc7230#section-3.2.4
 	kv.value = append(kv.value[:0], value...)
-	kv.value = removeNewLines(kv.value, value)
+  kv.value = removeNewLines(kv.value, value)
 }
 
 func getHeaderKeyBytes(kv *argsKV, key string, disableNormalizing bool) []byte {
@@ -2278,7 +2319,9 @@ var (
 	errSmallBuffer = errors.New("small read buffer. Increase ReadBufferSize")
 )
 
-type errNothingRead struct {
+// ErrNothingRead is returned when a keep-alive connection is closed,
+// either because the remote closed it or because of a read timeout.
+type ErrNothingRead struct {
 	error
 }
 
