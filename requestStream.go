@@ -18,8 +18,8 @@ type requestStream struct {
 }
 
 func (rs *requestStream) Read(p []byte) (int, error) {
-	p = p[:0]
 	if rs.contentLength == -1 {
+		p = p[:0]
 		strCRLFLen := len(strCRLF)
 		chunkSize, err := parseChunkSize(rs.reader)
 		if err != nil {
