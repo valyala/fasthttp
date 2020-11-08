@@ -375,6 +375,11 @@ type Server struct {
 	// which will close it when needed.
 	KeepHijackedConns bool
 
+	// StreamRequestBody enables request body streaming,
+	// and calls the handler sooner when given body is
+	// larger then the current limit.
+	StreamRequestBody bool
+
 	tlsConfig  *tls.Config
 	nextProtos map[string]ServeHandler
 
@@ -2066,7 +2071,11 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					}
 				}
 				//read body
-				err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
+				if s.StreamRequestBody {
+					err = ctx.Request.readBodyStream(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
+				} else {
+					err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
+				}
 			}
 
 			if err == nil {
