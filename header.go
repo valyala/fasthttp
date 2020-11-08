@@ -2262,11 +2262,10 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 
 // removeNewLines will replace `\r` and `\n` with an empty space
 func removeNewLines(raw []byte, rawStr string) []byte {
-	// strings.IndexByte is faster than bytes.IndexByte
 	// check if a `\r` is present and save the position.
-	// if no `\r` is found, check if a `\n` is present,
+	// if no `\r` is found, check if a `\n` is present.
+	// note: as of 1.15.4 strings.IndexByte is faster than bytes.IndexByte.
 	if found := strings.IndexByte(rawStr, rChar); found == -1 {
-		// check if a `\n` is present if no `\r` is found
 		if found = strings.IndexByte(rawStr, nChar); found == -1 {
 			return raw
 		}
