@@ -2279,6 +2279,12 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			break
 		}
 
+		if ctx.Request.bodyStream != nil {
+			if rs, ok := ctx.Request.bodyStream.(*requestStream); ok {
+				releaseRequestStream(rs)
+			}
+		}
+
 		s.setState(c, StateIdle)
 
 		if atomic.LoadInt32(&s.stop) == 1 {
