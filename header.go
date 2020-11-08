@@ -2173,10 +2173,6 @@ func nextLine(b []byte) ([]byte, []byte, error) {
 	return b[:n], b[nNext+1:], nil
 }
 
-var (
-	foldReplacer = strings.NewReplacer("\r\n", "  ", "\r", " ", "\n", " ")
-)
-
 func initHeaderKV(kv *argsKV, key, value string, disableNormalizing bool) {
 	kv.key = getHeaderKeyBytes(kv, key, disableNormalizing)
 	// https://tools.ietf.org/html/rfc7230#section-3.2.4
