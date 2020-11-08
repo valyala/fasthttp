@@ -1066,16 +1066,23 @@ func (req *Request) readBodyStream(r *bufio.Reader, maxBodySize int, getOnly boo
 	if err != nil {
 		if err == ErrBodyTooLarge {
 			req.Header.SetContentLength(contentLength)
-
+			req.body = bodyBuf
+			req.bodyRaw = bodyBuf.B[:maxBodySize]
 			req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
 			return nil
 		}
 		if err == errChunkedStream {
+			req.body = bodyBuf
+			req.bodyRaw = bodyBuf.B[:maxBodySize]
 			req.bodyStream = acquireRequestStream(bodyBuf, r, -1)
 			return nil
 		}
 		req.Reset()
 		return err
+	} else {
+		req.body = bodyBuf
+		req.bodyRaw = bodyBuf.B[:maxBodySize]
+		req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
 	}
 	req.Header.SetContentLength(len(bodyBuf.B))
 	return nil
@@ -1140,6 +1147,69 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 	if err != nil {
 		req.Reset()
 		return err
+	}
+	req.Header.SetContentLength(len(bodyBuf.B))
+	return nil
+}
+
+// ContinueReadBody reads request body if request header contains
+// 'Expect: 100-continue'.
+//
+// The caller must send StatusContinue response before calling this method.
+//
+// If maxBodySize > 0 and the body size exceeds maxBodySize,
+// then ErrBodyTooLarge is returned.
+func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
+	var err error
+	contentLength := req.Header.realContentLength()
+	if contentLength > 0 {
+		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
+			// Pre-read multipart form data of known length.
+			// This way we limit memory usage for large file uploads, since their contents
+			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
+			req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
+			if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
+				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
+				if err != nil {
+					req.Reset()
+				}
+				return err
+			}
+		}
+	}
+
+	if contentLength == -2 {
+		// identity body has no sense for http requests, since
+		// the end of body is determined by connection close.
+		// So just ignore request body for requests without
+		// 'Content-Length' and 'Transfer-Encoding' headers.
+		req.Header.SetContentLength(0)
+		return nil
+	}
+
+	bodyBuf := req.bodyBuffer()
+	bodyBuf.Reset()
+	bodyBuf.B, err = readBodyWithStreaming(r, contentLength, maxBodySize, bodyBuf.B)
+	if err != nil {
+		if err == ErrBodyTooLarge {
+			req.Header.SetContentLength(contentLength)
+			req.body = bodyBuf
+			req.bodyRaw = bodyBuf.B[:maxBodySize]
+			req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
+			return nil
+		}
+		if err == errChunkedStream {
+			req.body = bodyBuf
+			req.bodyRaw = bodyBuf.B[:maxBodySize]
+			req.bodyStream = acquireRequestStream(bodyBuf, r, -1)
+			return nil
+		}
+		req.Reset()
+		return err
+	} else {
+		req.body = bodyBuf
+		req.bodyRaw = bodyBuf.B[:maxBodySize]
+		req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
 	}
 	req.Header.SetContentLength(len(bodyBuf.B))
 	return nil
@@ -1885,7 +1955,11 @@ func readBodyWithStreaming(r *bufio.Reader, contentLength int, maxBodySize int, 
 	dst = dst[:0]
 	switch {
 	case contentLength >= 0 && maxBodySize >= contentLength:
-		b, err = appendBodyFixedSize(r, dst, contentLength)
+		readN := maxBodySize
+		if contentLength > 8*1024 {
+			readN = 8 * 1024
+		}
+		b, err = appendBodyFixedSize(r, dst, readN)
 	case contentLength == -1:
 		// handled in requestStream.Read()
 		err = errChunkedStream

@@ -1352,7 +1352,7 @@ func headerErrorMsg(typ string, err error, b []byte) error {
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) Read(r *bufio.Reader) error {
-	n := 1
+	n := 16
 	for {
 		err := h.tryRead(r, n)
 		if err == nil {

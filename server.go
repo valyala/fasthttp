@@ -2150,7 +2150,11 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					br = acquireReader(ctx)
 				}
 
-				err = ctx.Request.ContinueReadBody(br, maxRequestBodySize, !s.DisablePreParseMultipartForm)
+				if s.StreamRequestBody {
+					err = ctx.Request.ContinueReadBodyStream(br, maxRequestBodySize, !s.DisablePreParseMultipartForm)
+				} else {
+					err = ctx.Request.ContinueReadBody(br, maxRequestBodySize, !s.DisablePreParseMultipartForm)
+				}
 				if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
 					releaseReader(s, br)
 					br = nil
