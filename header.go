@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -2167,9 +2168,14 @@ func nextLine(b []byte) ([]byte, []byte, error) {
 	return b[:n], b[nNext+1:], nil
 }
 
+var (
+	foldReplacer = strings.NewReplacer("\r\n", "  ", "\r", " ", "\n", " ")
+)
+
 func initHeaderKV(kv *argsKV, key, value string, disableNormalizing bool) {
 	kv.key = getHeaderKeyBytes(kv, key, disableNormalizing)
-	kv.value = append(kv.value[:0], value...)
+	// https://tools.ietf.org/html/rfc7230#section-3.2.4
+	kv.value = append(kv.value[:0], foldReplacer.Replace(value)...)
 }
 
 func getHeaderKeyBytes(kv *argsKV, key string, disableNormalizing bool) []byte {
