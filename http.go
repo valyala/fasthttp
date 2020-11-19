@@ -1081,7 +1081,7 @@ func (req *Request) readBodyStream(r *bufio.Reader, maxBodySize int, getOnly boo
 		return err
 	} else {
 		req.body = bodyBuf
-		req.bodyRaw = bodyBuf.B[:maxBodySize]
+		req.bodyRaw = bodyBuf.B
 		req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
 	}
 	req.Header.SetContentLength(len(bodyBuf.B))

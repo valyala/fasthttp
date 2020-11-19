@@ -3350,6 +3350,81 @@ func TestMaxBodySizePerRequest(t *testing.T) {
 	}
 }
 
+func TestStreamRequestBody(t *testing.T) {
+	t.Parallel()
+
+	reqBody := strings.Repeat("a", 1<<20)
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			b, err := ioutil.ReadAll(ctx.RequestBodyStream())
+			if err != nil {
+				t.Error(err)
+			}
+			if string(b) != reqBody {
+				t.Fatal("incorrect request body")
+			}
+		},
+		ReadTimeout:       time.Second * 5,
+		StreamRequestBody: true,
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", 1<<20, reqBody))
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout")
+	}
+}
+
+func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
+	t.Parallel()
+
+	largeReqBody := strings.Repeat("a", 1<<20)
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			b, err := ioutil.ReadAll(ctx.RequestBodyStream())
+			if err != nil {
+				t.Error(err)
+			}
+			if string(b) != largeReqBody {
+				t.Fatal("incorrect request body")
+			}
+		},
+		ReadTimeout:        time.Second * 5,
+		StreamRequestBody:  true,
+		MaxRequestBodySize: 1,
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", 1<<20, largeReqBody))
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rw)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout")
+	}
+}
+
 func TestMaxReadTimeoutPerRequest(t *testing.T) {
 	t.Parallel()
 
