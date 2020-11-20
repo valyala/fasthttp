@@ -3353,24 +3353,26 @@ func TestMaxBodySizePerRequest(t *testing.T) {
 func TestStreamRequestBody(t *testing.T) {
 	t.Parallel()
 
-	reqBody := strings.Repeat("a", 1<<20)
+	part1 := strings.Repeat("1", 1<<10)
+	part2 := strings.Repeat("2", 1<<20-1<<10)
+
+	reqBody := part1 + part2
+	contentLength := len(reqBody)
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			b, err := ioutil.ReadAll(ctx.RequestBodyStream())
-			if err != nil {
-				t.Error(err)
-			}
-			if string(b) != reqBody {
-				t.Fatal("incorrect request body")
-			}
+			checkReader(t, ctx.RequestBodyStream(), reqBody)
 		},
 		ReadTimeout:       time.Second * 5,
 		StreamRequestBody: true,
 	}
 
 	rw := &readWriter{}
-	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", 1<<20, reqBody))
+	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))
+
+	time.AfterFunc(time.Millisecond*10, func() {
+		rw.r.WriteString(part2)
+	})
 
 	ch := make(chan error)
 	go func() {
@@ -3390,17 +3392,15 @@ func TestStreamRequestBody(t *testing.T) {
 func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 	t.Parallel()
 
-	largeReqBody := strings.Repeat("a", 1<<20)
+	partOne := strings.Repeat("1", 1<<3)
+	partTwo := strings.Repeat("2", 1<<5-1<<3)
+
+	largeReqBody := partOne + partTwo
+	contentLength := len(largeReqBody)
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			b, err := ioutil.ReadAll(ctx.RequestBodyStream())
-			if err != nil {
-				t.Error(err)
-			}
-			if string(b) != largeReqBody {
-				t.Fatal("incorrect request body")
-			}
+			checkReader(t, ctx.RequestBodyStream(), largeReqBody)
 		},
 		ReadTimeout:        time.Second * 5,
 		StreamRequestBody:  true,
@@ -3408,7 +3408,11 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 	}
 
 	rw := &readWriter{}
-	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", 1<<20, largeReqBody))
+	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, partOne))
+
+	time.AfterFunc(time.Millisecond*10, func() {
+		rw.r.WriteString(partTwo)
+	})
 
 	ch := make(chan error)
 	go func() {
@@ -3422,6 +3426,31 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("timeout")
+	}
+}
+
+func checkReader(t *testing.T, r io.Reader, expected string) {
+	var (
+		b      = make([]byte, len(expected))
+		offset int
+	)
+	for {
+		n, err := r.Read(b[offset:])
+		offset += n
+		if err != nil {
+			if err == io.EOF {
+				if offset == len(expected) {
+					if string(b[:offset]) != expected {
+						t.Fatal("incorrect request body")
+					}
+					return
+				}
+				// If we don't sleep for next part, test timeouts
+				time.Sleep(time.Millisecond * 10)
+				continue
+			}
+			t.Fatalf("Unexpected error from reader: %s", err)
+		}
 	}
 }
 
