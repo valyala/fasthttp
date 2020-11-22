@@ -583,3 +583,17 @@ func testArgsParse(t *testing.T, a *Args, s string, expectedLen int, expectedArg
 		}
 	}
 }
+
+func TestArgsDeleteAll(t *testing.T) {
+	t.Parallel()
+	var a Args
+	a.Add("q1", "foo")
+	a.Add("q1", "bar")
+	a.Add("q1", "baz")
+	a.Add("q1", "quux")
+	a.Add("q2", "1234")
+	a.Del("q1")
+	if a.Len() != 1 || a.Has("q1") {
+		t.Fatalf("Expected q1 arg to be completely deleted. Current Args: %s", a.String())
+	}
+}

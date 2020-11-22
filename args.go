@@ -391,6 +391,7 @@ func delAllArgs(args []argsKV, key string) []argsKV {
 			tmp := *kv
 			copy(args[i:], args[i+1:])
 			n--
+			i--
 			args[n] = tmp
 			args = args[:n]
 		}
