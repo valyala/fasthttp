@@ -1595,10 +1595,6 @@ func (es *GnetHTTP) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
 func (es *GnetHTTP) PreWrite() {
 }
 
-type httpServer struct {
-	*gnet.EventServer
-}
-
 type httpCodec struct {
 	fasthttpserver *Server
 }
@@ -1675,7 +1671,10 @@ func (s *Server) ListenAndServeGnet(addr string) error {
 
 //StopServeGnet ... stops gnet server
 func StopServeGnet(addr string) {
-	gnet.Stop(context.Background(), fmt.Sprintf("tcp://%v", addr))
+	err := gnet.Stop(context.Background(), fmt.Sprintf("tcp://%v", addr))
+	if err != nil {
+		log.Println("Error StopServeGnet", err)
+	}
 }
 
 // ListenAndServeUNIX serves HTTP requests from the given UNIX addr.
