@@ -1494,8 +1494,6 @@ func (s *Server) ListenAndServe(addr string) error {
 //GnetConn - Implements the net.Conn interface to allow adapting Gnet to the serveConn method
 type GnetConn struct {
 	gnetConn    gnet.Conn
-	localAddr   net.Addr
-	remoteAddr  net.Addr
 	readBuffer  *bytes.Buffer
 	writeBuffer *bytes.Buffer
 	closed      bool
@@ -1524,12 +1522,12 @@ func (gc *GnetConn) Close() error {
 
 // LocalAddr returns the local network address.
 func (gc *GnetConn) LocalAddr() net.Addr {
-	return gc.localAddr
+	return gc.gnetConn.LocalAddr()
 }
 
 // RemoteAddr returns the remote network address.
 func (gc *GnetConn) RemoteAddr() net.Addr {
-	return gc.remoteAddr
+	return gc.gnetConn.RemoteAddr()
 }
 
 // SetDeadline sets the read and write deadlines associated
@@ -1569,7 +1567,7 @@ func (gc *GnetConn) SetReadDeadline(t time.Time) error {
 // Even if write times out, it may return n > 0, indicating that
 // some of the data was successfully written.
 // A zero value for t means Write will not time out.
-func (*GnetConn) SetWriteDeadline(t time.Time) error {
+func (gc *GnetConn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
@@ -1583,44 +1581,73 @@ type GnetHTTP struct {
 // The parameter:c has information about the connection such as it's local and remote address.
 // Parameter:out is the return value which is going to be sent back to the client.
 func (es *GnetHTTP) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
-	log.Println("OPENED")
 	return
 }
 
 // OnClosed fires when a connection has been closed.
 // The parameter:err is the last known connection error.
 func (es *GnetHTTP) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
-	log.Println("CLOSED")
 	return
 }
 
 // PreWrite fires just before any data is written to any client socket, this event function is usually used to
 // put some code of logging/counting/reporting or any prepositive operations before writing data to client.
 func (es *GnetHTTP) PreWrite() {
-	log.Println("PREWRITE")
 }
 
-// React fires when a connection sends the server data.
-// Call c.Read() or c.ReadN(n) within the parameter:c to read incoming data from client.
-// Parameter:out is the return value which is going to be sent back to the client.
-func (es *GnetHTTP) React(frame []byte, c gnet.Conn) (out []byte, action gnet.Action) {
-	log.Println("REACTING!!!!!")
+type httpServer struct {
+	*gnet.EventServer
+}
+
+type httpCodec struct {
+	fasthttpserver *Server
+}
+
+func (hc *httpCodec) Encode(c gnet.Conn, buf []byte) (out []byte, err error) {
+	return buf, nil
+}
+
+func (hc *httpCodec) Decode(c gnet.Conn) (out []byte, err error) {
+	buf := c.Read()
+	if buf == nil {
+		return
+	}
+
 	gconn := &GnetConn{
 		gnetConn:    c,
-		readBuffer:  bytes.NewBuffer(frame),
+		readBuffer:  bytes.NewBuffer(buf),
 		writeBuffer: &bytes.Buffer{},
-		localAddr:   c.LocalAddr(),
-		remoteAddr:  c.RemoteAddr(),
 	}
-	c.SetContext(gconn)
 
 	//Bypasses the workpoll based implementation...
-	es.fasthttpserver.serveConn(gconn)
+	err = hc.fasthttpserver.serveConn(gconn)
+	if err == nil {
+		c.ResetBuffer()
+		return gconn.writeBuffer.Bytes(), err
+	}
 
-	action = gnet.Close
-	c.ResetBuffer()
+	if err != errHijacked {
+		c.ResetBuffer()
+		return gconn.writeBuffer.Bytes(), err
+	}
 
-	return gconn.writeBuffer.Bytes(), action
+	log.Println("request not ready, yet (Partial request?)")
+
+	return nil, err
+}
+
+//OnInitComplete -
+func (es *GnetHTTP) OnInitComplete(srv gnet.Server) (action gnet.Action) {
+	log.Printf("HTTP server is listening on %s (multi-cores: %t, loops: %d)\n",
+		srv.Addr.String(), srv.Multicore, srv.NumEventLoop)
+	return
+}
+
+//React -
+func (es *GnetHTTP) React(frame []byte, c gnet.Conn) (out []byte, action gnet.Action) {
+	// handle the request
+	out = frame
+	return
 }
 
 //ListenAndServeGnet uses gnet for non-blocking event based connections...
@@ -1633,12 +1660,22 @@ func ListenAndServeGnet(addr string, handler RequestHandler) error {
 
 //ListenAndServeGnet uses gnet for non-blocking event based connections...
 func (s *Server) ListenAndServeGnet(addr string) error {
+
+	hc := &httpCodec{
+		fasthttpserver: s,
+	}
+
 	server := &GnetHTTP{fasthttpserver: s}
-	err := gnet.Serve(server, fmt.Sprintf("tcp://%v", addr), gnet.WithMulticore(true))
+	err := gnet.Serve(server, fmt.Sprintf("tcp://%v", addr), gnet.WithMulticore(true), gnet.WithCodec(hc))
 	if err != nil {
 		log.Println("Error gnet serve", err)
 	}
 	return err
+}
+
+//StopServeGnet ... stops gnet server
+func StopServeGnet(addr string) {
+	gnet.Stop(context.Background(), fmt.Sprintf("tcp://%v", addr))
 }
 
 // ListenAndServeUNIX serves HTTP requests from the given UNIX addr.
