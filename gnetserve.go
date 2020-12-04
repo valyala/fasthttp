@@ -12,6 +12,45 @@ import (
 	"github.com/panjf2000/gnet"
 )
 
+//ListenAndServeGnet uses gnet for non-blocking event based connections...
+func ListenAndServeGnet(addr string, handler RequestHandler) error {
+	s := &Server{
+		Handler: handler,
+	}
+	return s.ListenAndServeGnet(addr)
+}
+
+//ListenAndServeGnet uses gnet for non-blocking event based connections...
+func (s *Server) ListenAndServeGnet(addr string) error {
+
+	hc := &httpCodec{
+		fasthttpserver: s,
+		gconnPool: sync.Pool{
+			New: func() interface{} {
+				return &GnetConn{
+					readBuffer:  &bytes.Buffer{},
+					writeBuffer: &bytes.Buffer{},
+				}
+			},
+		},
+	}
+
+	server := &GnetHTTP{fasthttpserver: s}
+	err := gnet.Serve(server, fmt.Sprintf("tcp://%v", addr), gnet.WithMulticore(true), gnet.WithCodec(hc))
+	if err != nil {
+		log.Println("Error gnet serve", err)
+	}
+	return err
+}
+
+//StopServeGnet ... stops gnet server
+func StopServeGnet(addr string) {
+	err := gnet.Stop(context.Background(), fmt.Sprintf("tcp://%v", addr))
+	if err != nil {
+		log.Println("Error StopServeGnet", err)
+	}
+}
+
 //GnetConn - Implements the net.Conn interface to allow adapting Gnet to the serveConn method
 type GnetConn struct {
 	gnetConn    gnet.Conn
@@ -176,43 +215,4 @@ func (es *GnetHTTP) OnInitComplete(srv gnet.Server) (action gnet.Action) {
 func (es *GnetHTTP) React(frame []byte, c gnet.Conn) (out []byte, action gnet.Action) {
 	out = frame
 	return
-}
-
-//ListenAndServeGnet uses gnet for non-blocking event based connections...
-func ListenAndServeGnet(addr string, handler RequestHandler) error {
-	s := &Server{
-		Handler: handler,
-	}
-	return s.ListenAndServeGnet(addr)
-}
-
-//ListenAndServeGnet uses gnet for non-blocking event based connections...
-func (s *Server) ListenAndServeGnet(addr string) error {
-
-	hc := &httpCodec{
-		fasthttpserver: s,
-		gconnPool: sync.Pool{
-			New: func() interface{} {
-				return &GnetConn{
-					readBuffer:  &bytes.Buffer{},
-					writeBuffer: &bytes.Buffer{},
-				}
-			},
-		},
-	}
-
-	server := &GnetHTTP{fasthttpserver: s}
-	err := gnet.Serve(server, fmt.Sprintf("tcp://%v", addr), gnet.WithMulticore(true), gnet.WithCodec(hc))
-	if err != nil {
-		log.Println("Error gnet serve", err)
-	}
-	return err
-}
-
-//StopServeGnet ... stops gnet server
-func StopServeGnet(addr string) {
-	err := gnet.Stop(context.Background(), fmt.Sprintf("tcp://%v", addr))
-	if err != nil {
-		log.Println("Error StopServeGnet", err)
-	}
 }
