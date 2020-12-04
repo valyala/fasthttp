@@ -3356,12 +3356,12 @@ func TestStreamRequestBody(t *testing.T) {
 	part1 := strings.Repeat("1", 1<<10)
 	part2 := strings.Repeat("2", 1<<20-1<<10)
 
-	reqBody := part1 + part2
-	contentLength := len(reqBody)
+	contentLength := len(part1) + len(part2)
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			checkReader(t, ctx.RequestBodyStream(), reqBody)
+			checkReader(t, ctx.RequestBodyStream(), part1)
+			checkReader(t, ctx.RequestBodyStream(), part2)
 		},
 		ReadTimeout:       time.Second * 5,
 		StreamRequestBody: true,
@@ -3370,7 +3370,7 @@ func TestStreamRequestBody(t *testing.T) {
 	rw := &readWriter{}
 	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))
 
-	time.AfterFunc(time.Millisecond*10, func() {
+	time.AfterFunc(time.Millisecond*100, func() {
 		rw.r.WriteString(part2)
 	})
 
@@ -3384,7 +3384,7 @@ func TestStreamRequestBody(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timeout")
 	}
 }
@@ -3392,15 +3392,15 @@ func TestStreamRequestBody(t *testing.T) {
 func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 	t.Parallel()
 
-	partOne := strings.Repeat("1", 1<<3)
-	partTwo := strings.Repeat("2", 1<<5-1<<3)
+	partOne := strings.Repeat("1", 1<<18)
+	partTwo := strings.Repeat("2", 1<<20-1<<18)
 
-	largeReqBody := partOne + partTwo
-	contentLength := len(largeReqBody)
+	contentLength := len(partOne) + len(partTwo)
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			checkReader(t, ctx.RequestBodyStream(), largeReqBody)
+			checkReader(t, ctx.RequestBodyStream(), partOne)
+			checkReader(t, ctx.RequestBodyStream(), partTwo)
 		},
 		ReadTimeout:        time.Second * 5,
 		StreamRequestBody:  true,
@@ -3410,7 +3410,7 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 	rw := &readWriter{}
 	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, partOne))
 
-	time.AfterFunc(time.Millisecond*10, func() {
+	time.AfterFunc(time.Millisecond*100, func() {
 		rw.r.WriteString(partTwo)
 	})
 
@@ -3424,7 +3424,7 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(500 * time.Millisecond):
 		t.Fatal("timeout")
 	}
 }
@@ -3446,10 +3446,17 @@ func checkReader(t *testing.T, r io.Reader, expected string) {
 					return
 				}
 				// If we don't sleep for next part, test timeouts
-				time.Sleep(time.Millisecond * 10)
+				time.Sleep(time.Millisecond * 150)
 				continue
 			}
 			t.Fatalf("Unexpected error from reader: %s", err)
+		}
+
+		if offset == len(expected) {
+			if string(b[:offset]) != expected {
+				t.Fatal("incorrect request body")
+			}
+			return
 		}
 	}
 }
