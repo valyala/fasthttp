@@ -1571,6 +1571,15 @@ func (gc *GnetConn) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
+//Reinit
+func (gc *GnetConn) Reinit(b []byte, c gnet.Conn) {
+	gc.closed = false
+	gc.gnetConn = c
+	gc.writeBuffer.Reset()
+	gc.readBuffer.Reset()
+	_, _ = gc.readBuffer.Write(b)
+}
+
 // GnetHTTP -
 type GnetHTTP struct {
 	*gnet.EventServer
@@ -1597,6 +1606,7 @@ func (es *GnetHTTP) PreWrite() {
 
 type httpCodec struct {
 	fasthttpserver *Server
+	gconnPool      sync.Pool
 }
 
 func (hc *httpCodec) Encode(c gnet.Conn, buf []byte) (out []byte, err error) {
@@ -1605,18 +1615,20 @@ func (hc *httpCodec) Encode(c gnet.Conn, buf []byte) (out []byte, err error) {
 
 func (hc *httpCodec) Decode(c gnet.Conn) (out []byte, err error) {
 	buf := c.Read()
-	if buf == nil {
+	if len(buf) == 0 {
 		return
 	}
 
-	gconn := &GnetConn{
-		gnetConn:    c,
-		readBuffer:  bytes.NewBuffer(buf),
-		writeBuffer: &bytes.Buffer{},
-	}
+	//Re-use buffers...
+	gconn := hc.gconnPool.Get().(*GnetConn)
+	gconn.Reinit(buf, c)
 
 	//Bypasses the workpoll based implementation...
 	err = hc.fasthttpserver.serveConn(gconn)
+
+	//Reuse buffer...
+	hc.gconnPool.Put(gconn)
+
 	if err == nil {
 		c.ResetBuffer()
 		return gconn.writeBuffer.Bytes(), err
@@ -1659,6 +1671,14 @@ func (s *Server) ListenAndServeGnet(addr string) error {
 
 	hc := &httpCodec{
 		fasthttpserver: s,
+		gconnPool: sync.Pool{
+			New: func() interface{} {
+				return &GnetConn{
+					readBuffer:  &bytes.Buffer{},
+					writeBuffer: &bytes.Buffer{},
+				}
+			},
+		},
 	}
 
 	server := &GnetHTTP{fasthttpserver: s}
