@@ -3355,12 +3355,15 @@ func TestStreamRequestBody(t *testing.T) {
 
 	part1 := strings.Repeat("1", 1<<10)
 	part2 := strings.Repeat("2", 1<<20-1<<10)
-
 	contentLength := len(part1) + len(part2)
+	next := make(chan struct{})
+	done := make(chan struct{})
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			checkReader(t, ctx.RequestBodyStream(), part1)
+			close(next)
+			<-done
 			checkReader(t, ctx.RequestBodyStream(), part2)
 		},
 		ReadTimeout:       time.Second * 5,
@@ -3370,14 +3373,19 @@ func TestStreamRequestBody(t *testing.T) {
 	rw := &readWriter{}
 	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))
 
-	time.AfterFunc(time.Millisecond*100, func() {
-		rw.r.WriteString(part2)
-	})
-
 	ch := make(chan error)
 	go func() {
 		ch <- s.ServeConn(rw)
 	}()
+
+	select {
+	case <-next:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("part1 timeout")
+	}
+
+	rw.r.WriteString(part2)
+	close(done)
 
 	select {
 	case err := <-ch:
@@ -3385,7 +3393,7 @@ func TestStreamRequestBody(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timeout")
+		t.Fatal("part2 timeout")
 	}
 }
 
@@ -3394,12 +3402,15 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 
 	partOne := strings.Repeat("1", 1<<18)
 	partTwo := strings.Repeat("2", 1<<20-1<<18)
-
 	contentLength := len(partOne) + len(partTwo)
+	next := make(chan struct{})
+	done := make(chan struct{})
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			checkReader(t, ctx.RequestBodyStream(), partOne)
+			close(next)
+			<-done
 			checkReader(t, ctx.RequestBodyStream(), partTwo)
 		},
 		ReadTimeout:        time.Second * 5,
@@ -3410,14 +3421,19 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 	rw := &readWriter{}
 	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, partOne))
 
-	time.AfterFunc(time.Millisecond*100, func() {
-		rw.r.WriteString(partTwo)
-	})
-
 	ch := make(chan error)
 	go func() {
 		ch <- s.ServeConn(rw)
 	}()
+
+	select {
+	case <-next:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("part1 timeout")
+	}
+
+	rw.r.WriteString(partTwo)
+	close(done)
 
 	select {
 	case err := <-ch:
@@ -3425,7 +3441,7 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 			t.Error(err)
 		}
 	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timeout")
+		t.Fatal("part2 timeout")
 	}
 }
 
