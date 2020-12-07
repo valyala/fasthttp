@@ -1958,7 +1958,7 @@ func (h *RequestHeader) collectCookies() {
 
 	for i, n := 0, len(h.h); i < n; i++ {
 		kv := &h.h[i]
-		if bytes.Equal(kv.key, strCookie) {
+		if caseInsensitiveCompare(kv.key, strCookie) {
 			h.cookies = parseRequestCookies(h.cookies, kv.value)
 			tmp := *kv
 			copy(h.h[i:], h.h[i+1:])
