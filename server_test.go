@@ -3357,25 +3357,29 @@ func TestStreamRequestBody(t *testing.T) {
 	part2 := strings.Repeat("2", 1<<20-1<<10)
 	contentLength := len(part1) + len(part2)
 	next := make(chan struct{})
-	done := make(chan struct{})
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			checkReader(t, ctx.RequestBodyStream(), part1)
 			close(next)
-			<-done
 			checkReader(t, ctx.RequestBodyStream(), part2)
 		},
-		ReadTimeout:       time.Second * 5,
+		DisableKeepalive:  true,
 		StreamRequestBody: true,
 	}
 
-	rw := &readWriter{}
-	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))
+	pipe := fasthttputil.NewPipeConns()
+	cc, sc := pipe.Conn1(), pipe.Conn2()
+	go func() {
+		//write headers and part1 body
+		if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	ch := make(chan error)
 	go func() {
-		ch <- s.ServeConn(rw)
+		ch <- s.ServeConn(sc)
 	}()
 
 	select {
@@ -3384,8 +3388,11 @@ func TestStreamRequestBody(t *testing.T) {
 		t.Fatal("part1 timeout")
 	}
 
-	rw.r.WriteString(part2)
-	close(done)
+	go func() {
+		if _, err := cc.Write([]byte(part2)); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	select {
 	case err := <-ch:
@@ -3400,30 +3407,34 @@ func TestStreamRequestBody(t *testing.T) {
 func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 	t.Parallel()
 
-	partOne := strings.Repeat("1", 1<<18)
-	partTwo := strings.Repeat("2", 1<<20-1<<18)
-	contentLength := len(partOne) + len(partTwo)
+	part1 := strings.Repeat("1", 1<<18)
+	part2 := strings.Repeat("2", 1<<20-1<<18)
+	contentLength := len(part1) + len(part2)
 	next := make(chan struct{})
-	done := make(chan struct{})
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			checkReader(t, ctx.RequestBodyStream(), partOne)
+			checkReader(t, ctx.RequestBodyStream(), part1)
 			close(next)
-			<-done
-			checkReader(t, ctx.RequestBodyStream(), partTwo)
+			checkReader(t, ctx.RequestBodyStream(), part2)
 		},
-		ReadTimeout:        time.Second * 5,
+		DisableKeepalive:   true,
 		StreamRequestBody:  true,
 		MaxRequestBodySize: 1,
 	}
 
-	rw := &readWriter{}
-	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, partOne))
+	pipe := fasthttputil.NewPipeConns()
+	cc, sc := pipe.Conn1(), pipe.Conn2()
+	go func() {
+		//write headers and part1 body
+		if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	ch := make(chan error)
 	go func() {
-		ch <- s.ServeConn(rw)
+		ch <- s.ServeConn(sc)
 	}()
 
 	select {
@@ -3432,8 +3443,11 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 		t.Fatal("part1 timeout")
 	}
 
-	rw.r.WriteString(partTwo)
-	close(done)
+	go func() {
+		if _, err := cc.Write([]byte(part2)); err != nil {
+			t.Error(err)
+		}
+	}()
 
 	select {
 	case err := <-ch:
@@ -3446,34 +3460,12 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 }
 
 func checkReader(t *testing.T, r io.Reader, expected string) {
-	var (
-		b      = make([]byte, len(expected))
-		offset int
-	)
-	for {
-		n, err := r.Read(b[offset:])
-		offset += n
-		if err != nil {
-			if err == io.EOF {
-				if offset == len(expected) {
-					if string(b[:offset]) != expected {
-						t.Fatal("incorrect request body")
-					}
-					return
-				}
-				// If we don't sleep for next part, test timeouts
-				time.Sleep(time.Millisecond * 150)
-				continue
-			}
-			t.Fatalf("Unexpected error from reader: %s", err)
-		}
-
-		if offset == len(expected) {
-			if string(b[:offset]) != expected {
-				t.Fatal("incorrect request body")
-			}
-			return
-		}
+	b := make([]byte, len(expected))
+	if _, err := io.ReadFull(r, b); err != nil {
+		t.Fatalf("Unexpected error from reader: %s", err)
+	}
+	if string(b) != expected {
+		t.Fatal("incorrect request body")
 	}
 }
 
