@@ -3370,12 +3370,10 @@ func TestStreamRequestBody(t *testing.T) {
 
 	pipe := fasthttputil.NewPipeConns()
 	cc, sc := pipe.Conn1(), pipe.Conn2()
-	go func() {
-		//write headers and part1 body
-		if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
-			t.Error(err)
-		}
-	}()
+	//write headers and part1 body
+	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
+		t.Error(err)
+	}
 
 	ch := make(chan error)
 	go func() {
@@ -3388,11 +3386,9 @@ func TestStreamRequestBody(t *testing.T) {
 		t.Fatal("part1 timeout")
 	}
 
-	go func() {
-		if _, err := cc.Write([]byte(part2)); err != nil {
-			t.Error(err)
-		}
-	}()
+	if _, err := cc.Write([]byte(part2)); err != nil {
+		t.Error(err)
+	}
 
 	select {
 	case err := <-ch:
@@ -3425,12 +3421,10 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 
 	pipe := fasthttputil.NewPipeConns()
 	cc, sc := pipe.Conn1(), pipe.Conn2()
-	go func() {
-		//write headers and part1 body
-		if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
-			t.Error(err)
-		}
-	}()
+	//write headers and part1 body
+	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
+		t.Error(err)
+	}
 
 	ch := make(chan error)
 	go func() {
@@ -3443,11 +3437,9 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 		t.Fatal("part1 timeout")
 	}
 
-	go func() {
-		if _, err := cc.Write([]byte(part2)); err != nil {
-			t.Error(err)
-		}
-	}()
+	if _, err := cc.Write([]byte(part2)); err != nil {
+		t.Error(err)
+	}
 
 	select {
 	case err := <-ch:
