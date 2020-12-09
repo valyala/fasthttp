@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"mime/multipart"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,53 @@ func TestFragmentInURIRequest(t *testing.T) {
 
 	if got != expected {
 		t.Errorf("got %q expected %q", got, expected)
+	}
+}
+
+func TestIssue875(t *testing.T) {
+	type testcase struct {
+		uri              string
+		expectedRedirect string
+		expectedLocation string
+	}
+
+	var testcases = []testcase{
+		{
+			uri:              `http://localhost:3000/?redirect=foo%0d%0aSet-Cookie:%20SESSIONID=MaliciousValue%0d%0a`,
+			expectedRedirect: "foo\r\nSet-Cookie: SESSIONID=MaliciousValue\r\n",
+			expectedLocation: "Location: foo  Set-Cookie: SESSIONID=MaliciousValue",
+		},
+		{
+			uri:              `http://localhost:3000/?redirect=foo%0dSet-Cookie:%20SESSIONID=MaliciousValue%0d%0a`,
+			expectedRedirect: "foo\rSet-Cookie: SESSIONID=MaliciousValue\r\n",
+			expectedLocation: "Location: foo Set-Cookie: SESSIONID=MaliciousValue",
+		},
+		{
+			uri:              `http://localhost:3000/?redirect=foo%0aSet-Cookie:%20SESSIONID=MaliciousValue%0d%0a`,
+			expectedRedirect: "foo\nSet-Cookie: SESSIONID=MaliciousValue\r\n",
+			expectedLocation: "Location: foo Set-Cookie: SESSIONID=MaliciousValue",
+		},
+	}
+
+	for i, tcase := range testcases {
+		caseName := strconv.FormatInt(int64(i), 10)
+		t.Run(caseName, func(subT *testing.T) {
+			ctx := &RequestCtx{
+				Request:  Request{},
+				Response: Response{},
+			}
+			ctx.Request.SetRequestURI(tcase.uri)
+
+			q := string(ctx.QueryArgs().Peek("redirect"))
+			if q != tcase.expectedRedirect {
+				subT.Errorf("unexpected redirect query value, got: %+v", q)
+			}
+			ctx.Response.Header.Set("Location", q)
+
+			if !strings.Contains(ctx.Response.String(), tcase.expectedLocation) {
+				subT.Errorf("invalid escaping, got\n%s", ctx.Response.String())
+			}
+		})
 	}
 }
 
