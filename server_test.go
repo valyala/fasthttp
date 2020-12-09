@@ -3350,6 +3350,117 @@ func TestMaxBodySizePerRequest(t *testing.T) {
 	}
 }
 
+func TestStreamRequestBody(t *testing.T) {
+	t.Parallel()
+
+	part1 := strings.Repeat("1", 1<<10)
+	part2 := strings.Repeat("2", 1<<20-1<<10)
+	contentLength := len(part1) + len(part2)
+	next := make(chan struct{})
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			checkReader(t, ctx.RequestBodyStream(), part1)
+			close(next)
+			checkReader(t, ctx.RequestBodyStream(), part2)
+		},
+		DisableKeepalive:  true,
+		StreamRequestBody: true,
+	}
+
+	pipe := fasthttputil.NewPipeConns()
+	cc, sc := pipe.Conn1(), pipe.Conn2()
+	//write headers and part1 body
+	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
+		t.Error(err)
+	}
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(sc)
+	}()
+
+	select {
+	case <-next:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("part1 timeout")
+	}
+
+	if _, err := cc.Write([]byte(part2)); err != nil {
+		t.Error(err)
+	}
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("part2 timeout")
+	}
+}
+
+func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
+	t.Parallel()
+
+	part1 := strings.Repeat("1", 1<<18)
+	part2 := strings.Repeat("2", 1<<20-1<<18)
+	contentLength := len(part1) + len(part2)
+	next := make(chan struct{})
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			checkReader(t, ctx.RequestBodyStream(), part1)
+			close(next)
+			checkReader(t, ctx.RequestBodyStream(), part2)
+		},
+		DisableKeepalive:   true,
+		StreamRequestBody:  true,
+		MaxRequestBodySize: 1,
+	}
+
+	pipe := fasthttputil.NewPipeConns()
+	cc, sc := pipe.Conn1(), pipe.Conn2()
+	//write headers and part1 body
+	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
+		t.Error(err)
+	}
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(sc)
+	}()
+
+	select {
+	case <-next:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("part1 timeout")
+	}
+
+	if _, err := cc.Write([]byte(part2)); err != nil {
+		t.Error(err)
+	}
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("part2 timeout")
+	}
+}
+
+func checkReader(t *testing.T, r io.Reader, expected string) {
+	b := make([]byte, len(expected))
+	if _, err := io.ReadFull(r, b); err != nil {
+		t.Fatalf("Unexpected error from reader: %s", err)
+	}
+	if string(b) != expected {
+		t.Fatal("incorrect request body")
+	}
+}
+
 func TestMaxReadTimeoutPerRequest(t *testing.T) {
 	t.Parallel()
 
