@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -2177,7 +2176,7 @@ func initHeaderKV(kv *argsKV, key, value string, disableNormalizing bool) {
 	kv.key = getHeaderKeyBytes(kv, key, disableNormalizing)
 	// https://tools.ietf.org/html/rfc7230#section-3.2.4
 	kv.value = append(kv.value[:0], value...)
-	kv.value = removeNewLines(kv.value, value)
+	kv.value = removeNewLines(kv.value)
 }
 
 func getHeaderKeyBytes(kv *argsKV, key string, disableNormalizing bool) []byte {
@@ -2257,17 +2256,26 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 }
 
 // removeNewLines will replace `\r` and `\n` with an empty space
-func removeNewLines(raw []byte, rawStr string) []byte {
+func removeNewLines(raw []byte) []byte {
 	// check if a `\r` is present and save the position.
 	// if no `\r` is found, check if a `\n` is present.
-	// note: as of 1.15.4 strings.IndexByte is faster than bytes.IndexByte.
-	if found := strings.IndexByte(rawStr, rChar); found == -1 {
-		if found = strings.IndexByte(rawStr, nChar); found == -1 {
-			return raw
+	foundR := bytes.IndexByte(raw, rChar)
+	foundN := bytes.IndexByte(raw, nChar)
+	start := 0
+
+	if foundN != -1 {
+		if foundR > foundN {
+			start = foundN
+		} else if foundR != -1 {
+			start = foundR
 		}
+	} else if foundR != -1 {
+		start = foundR
+	} else {
+		return raw
 	}
-	// loop from found position to replace `\r` or `\n` with empty space
-	for i := 0; i < len(raw); i++ {
+
+	for i := start; i < len(raw); i++ {
 		switch raw[i] {
 		case rChar, nChar:
 			raw[i] = ' '
