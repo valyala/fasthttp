@@ -597,3 +597,27 @@ func TestArgsDeleteAll(t *testing.T) {
 		t.Fatalf("Expected q1 arg to be completely deleted. Current Args: %s", a.String())
 	}
 }
+
+func TestIssue932(t *testing.T) {
+	t.Parallel()
+	var a []argsKV
+
+	a = setArg(a, "t1", "ok", argsHasValue)
+	a = setArg(a, "t2", "", argsHasValue)
+	a = setArg(a, "t1", "", argsHasValue)
+	a = setArgBytes(a, s2b("t3"), []byte{}, argsHasValue)
+	a = setArgBytes(a, s2b("t4"), nil, argsHasValue)
+
+	if peekArgStr(a, "t1") == nil {
+		t.Error("nil not expected for t1")
+	}
+	if peekArgStr(a, "t2") == nil {
+		t.Error("nil not expected for t2")
+	}
+	if peekArgStr(a, "t3") == nil {
+		t.Error("nil not expected for t3")
+	}
+	if peekArgStr(a, "t4") != nil {
+		t.Error("nil expected for t4")
+	}
+}

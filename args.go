@@ -361,7 +361,13 @@ func visitArgs(args []argsKV, f func(k, v []byte)) {
 func copyArgs(dst, src []argsKV) []argsKV {
 	if cap(dst) < len(src) {
 		tmp := make([]argsKV, len(src))
+		dst = dst[:cap(dst)] // copy all of dst.
 		copy(tmp, dst)
+		for i := len(dst); i < len(tmp); i++ {
+			// Make sure nothing is nil.
+			tmp[i].key = []byte{}
+			tmp[i].value = []byte{}
+		}
 		dst = tmp
 	}
 	n := len(src)
@@ -442,7 +448,9 @@ func allocArg(h []argsKV) ([]argsKV, *argsKV) {
 	if cap(h) > n {
 		h = h[:n+1]
 	} else {
-		h = append(h, argsKV{})
+		h = append(h, argsKV{
+			value: []byte{},
+		})
 	}
 	return h, &h[n]
 }
