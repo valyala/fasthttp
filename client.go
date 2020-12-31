@@ -527,6 +527,9 @@ func (c *Client) CloseIdleConnections() {
 	for _, v := range c.m {
 		v.CloseIdleConnections()
 	}
+	for _, v := range c.ms {
+		v.CloseIdleConnections()
+	}
 	c.mLock.Unlock()
 }
 
