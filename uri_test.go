@@ -386,3 +386,15 @@ func testURIParse(t *testing.T, u *URI, host, uri,
 		t.Fatalf("Unexpected hash %q. Expected %q. host=%q, uri=%q", u.Hash(), expectedHash, host, uri)
 	}
 }
+
+func TestURIWithQuerystringOverride(t *testing.T) {
+	var u URI
+	u.SetQueryString("q1=foo&q2=bar")
+	u.QueryArgs().Add("q3", "baz")
+	u.SetQueryString("q1=foo&q2=bar&q4=quux")
+	uriString := string(u.RequestURI())
+
+	if uriString != "/?q1=foo&q2=bar&q4=quux" {
+		t.Fatalf("Expected Querystring to be overriden but was %s ", uriString)
+	}
+}
