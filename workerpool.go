@@ -57,13 +57,15 @@ func (wp *workerPool) Start() {
 	}
 	go func() {
 		var scratch []*workerChan
+
+		sleep := time.NewTicker(wp.getMaxIdleWorkerDuration())
 		for {
 			wp.clean(&scratch)
 			select {
 			case <-stopCh:
+				sleep.Stop()
 				return
-			default:
-				time.Sleep(wp.getMaxIdleWorkerDuration())
+			case <-sleep.C:
 			}
 		}
 	}()
