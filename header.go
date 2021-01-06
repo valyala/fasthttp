@@ -1839,7 +1839,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				}
 			case 't':
 				if caseInsensitiveCompare(s.key, strTransferEncoding) {
-					if !bytes.Equal(s.value, strIdentity) {
+					if len(s.value) > 0 && !bytes.Equal(s.value, strIdentity) {
 						h.contentLength = -1
 						h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 					}

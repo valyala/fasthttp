@@ -16,6 +16,22 @@ import (
 	"github.com/valyala/bytebufferpool"
 )
 
+func TestResponseEmptyTransferEncoding(t *testing.T) {
+	t.Parallel()
+
+	var r Response
+
+	body := "Some body"
+	br := bufio.NewReader(bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: \r\nContent-Length: 9\r\n\r\n" + body))
+	err := r.Read(br)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(r.Body()); got != body {
+		t.Fatalf("expected %q got %q", body, got)
+	}
+}
+
 // Don't send the fragment/hash/# part of a URL to the server.
 func TestFragmentInURIRequest(t *testing.T) {
 	var req Request
