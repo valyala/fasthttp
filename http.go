@@ -315,20 +315,29 @@ func (resp *Response) LocalAddr() net.Addr {
 	return resp.laddr
 }
 
-// Body returns response body.
-//
-// The returned body is valid until the response modification.
-func (resp *Response) Body() []byte {
+// BodyOrErr returns response (body, nil) if success.
+// when error occurs, it returns nil, err.
+func (resp *Response) BodyOrErr() ([]byte, error) {
 	if resp.bodyStream != nil {
 		bodyBuf := resp.bodyBuffer()
 		bodyBuf.Reset()
 		_, err := copyZeroAlloc(bodyBuf, resp.bodyStream)
 		resp.closeBodyStream() //nolint:errcheck
 		if err != nil {
-			bodyBuf.SetString(err.Error())
+			return nil, err
 		}
 	}
-	return resp.bodyBytes()
+	return resp.bodyBytes(), nil
+}
+
+// Body returns response body.
+// if error occurs, the error message would be put into body.
+func (resp *Response) Body() []byte {
+	body, err := resp.BodyOrErr()
+	if err != nil {
+		return []byte(err.Error())
+	}
+	return body
 }
 
 func (resp *Response) bodyBytes() []byte {
@@ -620,28 +629,39 @@ func (req *Request) SwapBody(body []byte) []byte {
 	return oldBody
 }
 
-// Body returns request body.
-//
-// The returned body is valid until the request modification.
-func (req *Request) Body() []byte {
+// BodyOrErr returns response (body, nil) if success.
+// when error occurs, it returns nil, err.
+func (req *Request) BodyOrErr() ([]byte, error) {
 	if req.bodyRaw != nil {
-		return req.bodyRaw
-	} else if req.bodyStream != nil {
+		return req.bodyRaw, nil
+	}
+	if req.bodyStream != nil {
 		bodyBuf := req.bodyBuffer()
 		bodyBuf.Reset()
 		_, err := copyZeroAlloc(bodyBuf, req.bodyStream)
 		req.closeBodyStream() //nolint:errcheck
 		if err != nil {
-			bodyBuf.SetString(err.Error())
+			return nil, err
 		}
+		return req.bodyBytes(), nil
 	} else if req.onlyMultipartForm() {
 		body, err := marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
 		if err != nil {
-			return []byte(err.Error())
+			return nil, err
 		}
-		return body
+		return body, nil
 	}
-	return req.bodyBytes()
+	return req.bodyBytes(), nil
+}
+
+// Body returns request body.
+// if error occurs, the error message would be put into body.
+func (req *Request) Body() []byte {
+	body, err := req.BodyOrErr()
+	if err != nil {
+		return []byte(err.Error())
+	}
+	return body
 }
 
 // AppendBody appends p to request body.
