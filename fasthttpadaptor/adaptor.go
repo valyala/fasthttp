@@ -81,8 +81,11 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		}
 		r.URL = rURL
 
-		var w netHTTPResponseWriter
+		w := NetHTTPResponseWriter{Ctx: ctx}
 		h.ServeHTTP(&w, r.WithContext(ctx))
+		if w.IsHijackerConn {
+			return
+		}
 
 		ctx.SetStatusCode(w.StatusCode())
 		haveContentType := false
@@ -127,31 +130,33 @@ func (r *netHTTPBody) Close() error {
 	return nil
 }
 
-type netHTTPResponseWriter struct {
-	statusCode int
-	h          http.Header
-	body       []byte
+type NetHTTPResponseWriter struct {
+	Ctx            *fasthttp.RequestCtx
+	statusCode     int
+	h              http.Header
+	body           []byte
+	IsHijackerConn bool
 }
 
-func (w *netHTTPResponseWriter) StatusCode() int {
+func (w *NetHTTPResponseWriter) StatusCode() int {
 	if w.statusCode == 0 {
 		return http.StatusOK
 	}
 	return w.statusCode
 }
 
-func (w *netHTTPResponseWriter) Header() http.Header {
+func (w *NetHTTPResponseWriter) Header() http.Header {
 	if w.h == nil {
 		w.h = make(http.Header)
 	}
 	return w.h
 }
 
-func (w *netHTTPResponseWriter) WriteHeader(statusCode int) {
+func (w *NetHTTPResponseWriter) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
 }
 
-func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
+func (w *NetHTTPResponseWriter) Write(p []byte) (int, error) {
 	w.body = append(w.body, p...)
 	return len(p), nil
 }
