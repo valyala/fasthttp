@@ -1317,7 +1317,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		req.URI().DisablePathNormalizing = true
 	}
 
-	cc, err := c.acquireConn(req.timeout)
+	cc, err := c.acquireConn(req.timeout, req.ConnectionClose())
 	if err != nil {
 		return false, err
 	}
@@ -1444,7 +1444,7 @@ func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Unlock()
 }
 
-func (c *HostClient) acquireConn(reqTimeout time.Duration) (cc *clientConn, err error) {
+func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
 	createConn := false
 	startCleaner := false
 
@@ -1459,7 +1459,7 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration) (cc *clientConn, err 
 		if c.connsCount < maxConns {
 			c.connsCount++
 			createConn = true
-			if !c.connsCleanerRun {
+			if !c.connsCleanerRun && !connectionClose {
 				startCleaner = true
 				c.connsCleanerRun = true
 			}
