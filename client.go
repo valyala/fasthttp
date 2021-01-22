@@ -1459,7 +1459,7 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 		if c.connsCount < maxConns {
 			c.connsCount++
 			createConn = true
-			if !(c.connsCleanerRun || connectionClose) {
+			if !c.connsCleanerRun && !connectionClose {
 				startCleaner = true
 				c.connsCleanerRun = true
 			}
