@@ -1344,12 +1344,6 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 			c.closeConn(cc)
 			return true, err
 		}
-		if c.IsTLS {
-			if err = conn.SetReadDeadline(currentTime.Add(c.WriteTimeout + c.HandshakeTimeout)); err != nil {
-				c.closeConn(cc)
-				return true, err
-			}
-		}
 	}
 
 	resetConnection := false
@@ -1384,11 +1378,6 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
 		currentTime := time.Now()
 		if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
-			c.closeConn(cc)
-			return true, err
-		}
-	} else if c.HandshakeTimeout > 0 && c.IsTLS {
-		if err = conn.SetReadDeadline(time.Time{}); err != nil {
 			c.closeConn(cc)
 			return true, err
 		}
@@ -1830,7 +1819,7 @@ func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
 		n = 1
 	}
 
-	timeout := c.ReadTimeout + c.WriteTimeout
+	timeout := c.ReadTimeout + c.WriteTimeout + c.HandshakeTimeout
 	if timeout <= 0 {
 		timeout = DefaultDialTimeout
 	}
@@ -1838,7 +1827,7 @@ func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
 	for n > 0 {
 		addr := c.nextAddr()
 		tlsConfig := c.cachedTLSConfig(addr)
-		conn, err = dialAddr(addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, c.WriteTimeout)
+		conn, err = dialAddr(addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, c.HandshakeTimeout)
 		if err == nil {
 			return conn, nil
 		}
@@ -1887,7 +1876,27 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 	}
 	_, isTLSAlready := conn.(*tls.Conn)
 	if isTLS && !isTLSAlready {
+		if timeout > 0 {
+			return tlsClientHandshake(conn, tlsConfig, timeout)	
+		}
 		return tls.Client(conn, tlsConfig), nil
+	}
+	return conn, nil
+}
+
+func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, handshakeTimeout time.Duration) (net.Conn, error) { // done on the stage of acquireConn so no WriteTimeout or ReadTimeout applied to rawConn
+	conn := tls.Client(rawConn, tlsConfig)
+	if err := conn.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	if err := conn.Handshake(); err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil { // to allow later settings of writeTimeout and readTimeout or to allow them be empty/default 
+		rawConn.Close()
+		return nil, err
 	}
 	return conn, nil
 }
