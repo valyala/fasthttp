@@ -248,6 +248,11 @@ type Client struct {
 	//
 	// By default request write timeout is unlimited.
 	WriteTimeout time.Duration
+	
+	// Maximum duration for full handshake reading and writing.
+	//
+	// By default request handshake timeout is unlimited.
+	HandshakeTimeout time.Duration
 
 	// Maximum response body size.
 	//
@@ -498,6 +503,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			WriteBufferSize:               c.WriteBufferSize,
 			ReadTimeout:                   c.ReadTimeout,
 			WriteTimeout:                  c.WriteTimeout,
+			HandshakeTimeout:              c.HandshakeTimeout,
 			MaxResponseBodySize:           c.MaxResponseBodySize,
 			DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
 			DisablePathNormalizing:        c.DisablePathNormalizing,
@@ -687,6 +693,11 @@ type HostClient struct {
 	//
 	// By default request write timeout is unlimited.
 	WriteTimeout time.Duration
+	
+	// Maximum duration for full handshake reading and writing.
+	//
+	// By default request handshake timeout is unlimited.
+	HandshakeTimeout time.Duration
 
 	// Maximum response body size.
 	//
@@ -1333,6 +1344,12 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 			c.closeConn(cc)
 			return true, err
 		}
+		if c.IsTLS {
+			if err = conn.SetReadDeadline(currentTime.Add(c.WriteTimeout + c.HandshakeTimeout)); err != nil {
+				c.closeConn(cc)
+				return true, err
+			}
+		}
 	}
 
 	resetConnection := false
@@ -1367,6 +1384,11 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
 		currentTime := time.Now()
 		if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
+			c.closeConn(cc)
+			return true, err
+		}
+	} else if c.HandshakeTimeout > 0 && c.IsTLS {
+		if err = conn.SetReadDeadline(time.Time{}); err != nil {
 			c.closeConn(cc)
 			return true, err
 		}
@@ -1847,43 +1869,6 @@ func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
 	return cfg
 }
 
-// ErrTLSHandshakeTimeout indicates there is a timeout from tls handshake.
-var ErrTLSHandshakeTimeout = errors.New("tls handshake timed out")
-
-var timeoutErrorChPool sync.Pool
-
-func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
-	tc := AcquireTimer(timeout)
-	defer ReleaseTimer(tc)
-
-	var ch chan error
-	chv := timeoutErrorChPool.Get()
-	if chv == nil {
-		chv = make(chan error)
-	}
-	ch = chv.(chan error)
-	defer timeoutErrorChPool.Put(chv)
-
-	conn := tls.Client(rawConn, tlsConfig)
-
-	go func() {
-		ch <- conn.Handshake()
-	}()
-
-	select {
-	case <-tc.C:
-		rawConn.Close()
-		<-ch
-		return nil, ErrTLSHandshakeTimeout
-	case err := <-ch:
-		if err != nil {
-			rawConn.Close()
-			return nil, err
-		}
-		return conn, nil
-	}
-}
-
 func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
 	if dial == nil {
 		if dialDualStack {
@@ -1902,10 +1887,7 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 	}
 	_, isTLSAlready := conn.(*tls.Conn)
 	if isTLS && !isTLSAlready {
-		if timeout == 0 {
-			return tls.Client(conn, tlsConfig), nil
-		}
-		return tlsClientHandshake(conn, tlsConfig, timeout)
+		return tls.Client(conn, tlsConfig), nil
 	}
 	return conn, nil
 }
