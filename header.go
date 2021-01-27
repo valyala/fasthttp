@@ -1016,6 +1016,16 @@ func (h *RequestHeader) SetCookieBytesKV(key, value []byte) {
 }
 
 // DelClientCookie instructs the client to remove the given cookie.
+// This doesn't work for a cookie with specific domain or path,
+// you should delete it manually like:
+//
+//      c := AcquireCookie()
+//      c.SetKey(key)
+//      c.SetDomain("example.com")
+//      c.SetPath("/path")
+//      c.SetExpire(CookieExpireDelete)
+//      h.SetCookie(c)
+//      ReleaseCookie(c)
 //
 // Use DelCookie if you want just removing the cookie from response header.
 func (h *ResponseHeader) DelClientCookie(key string) {
@@ -1029,6 +1039,16 @@ func (h *ResponseHeader) DelClientCookie(key string) {
 }
 
 // DelClientCookieBytes instructs the client to remove the given cookie.
+// This doesn't work for a cookie with specific domain or path,
+// you should delete it manually like:
+//
+//      c := AcquireCookie()
+//      c.SetKey(key)
+//      c.SetDomain("example.com")
+//      c.SetPath("/path")
+//      c.SetExpire(CookieExpireDelete)
+//      h.SetCookie(c)
+//      ReleaseCookie(c)
 //
 // Use DelCookieBytes if you want just removing the cookie from response header.
 func (h *ResponseHeader) DelClientCookieBytes(key []byte) {
