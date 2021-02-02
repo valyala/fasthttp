@@ -3473,7 +3473,7 @@ func TestIncompleteBodyReturnsUnexpectedEOF(t *testing.T) {
 	}
 }
 
-func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) Response {
+func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) *Response {
 	var resp Response
 	if err := resp.Read(r); err != nil {
 		t.Fatalf("Unexpected error when parsing response: %s", err)
@@ -3483,7 +3483,7 @@ func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expec
 		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), []byte(expectedBody))
 	}
 	verifyResponseHeader(t, &resp.Header, expectedStatusCode, len(resp.Body()), expectedContentType)
-	return resp
+	return &resp
 }
 
 type readWriter struct {
