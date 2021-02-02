@@ -2196,7 +2196,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			}
 		}
 
-		connectionClose = connectionClose || ctx.Response.ConnectionClose()
+		connectionClose = connectionClose || ctx.Response.ConnectionClose() || atomic.LoadInt32(&s.stop) == 1
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
 		} else if !isHTTP11 {
