@@ -1170,27 +1170,31 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 	bodyBuf := req.bodyBuffer()
 	bodyBuf.Reset()
 	bodyBuf.B, err = readBodyWithStreaming(r, contentLength, maxBodySize, bodyBuf.B)
+	bodyBufLen := maxBodySize
+	if contentLength < maxBodySize {
+		bodyBufLen = cap(bodyBuf.B)
+	}
 	if err != nil {
 		if err == ErrBodyTooLarge {
 			req.Header.SetContentLength(contentLength)
 			req.body = bodyBuf
-			req.bodyRaw = bodyBuf.B[:maxBodySize]
+			req.bodyRaw = bodyBuf.B[:bodyBufLen]
 			req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
 			return nil
 		}
 		if err == errChunkedStream {
 			req.body = bodyBuf
-			req.bodyRaw = bodyBuf.B[:maxBodySize]
+			req.bodyRaw = bodyBuf.B[:bodyBufLen]
 			req.bodyStream = acquireRequestStream(bodyBuf, r, -1)
 			return nil
 		}
 		req.Reset()
 		return err
-	} else {
-		req.body = bodyBuf
-		req.bodyRaw = bodyBuf.B[:maxBodySize]
-		req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
 	}
+
+	req.body = bodyBuf
+	req.bodyRaw = bodyBuf.B[:bodyBufLen]
+	req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
 	req.Header.SetContentLength(len(bodyBuf.B))
 	return nil
 }

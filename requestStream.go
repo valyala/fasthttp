@@ -13,7 +13,7 @@ import (
 type requestStream struct {
 	prefetchedBytes *bytes.Reader
 	reader          *bufio.Reader
-	n               int
+	totalBytesRead  int
 	contentLength   int
 }
 
@@ -40,27 +40,27 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		}
 		return len(p), nil
 	}
-	if rs.n == rs.contentLength {
+	if rs.totalBytesRead == rs.contentLength {
 		return 0, io.EOF
 	}
 	var n int
 	var err error
-	if int(rs.prefetchedBytes.Size()) > rs.n {
+	if int(rs.prefetchedBytes.Size()) > rs.totalBytesRead {
 		n, err := rs.prefetchedBytes.Read(p)
-		rs.n += n
+		rs.totalBytesRead += n
 		if n == rs.contentLength {
 			return n, io.EOF
 		}
 		return n, err
 	} else {
 		n, err = rs.reader.Read(p)
-		rs.n += n
+		rs.totalBytesRead += n
 		if err != nil {
 			return n, err
 		}
 	}
 
-	if rs.n == rs.contentLength {
+	if rs.totalBytesRead == rs.contentLength {
 		err = io.EOF
 	}
 	return n, err
@@ -77,7 +77,7 @@ func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, content
 
 func releaseRequestStream(rs *requestStream) {
 	rs.prefetchedBytes = nil
-	rs.n = 0
+	rs.totalBytesRead = 0
 	rs.reader = nil
 	requestStreamPool.Put(rs)
 }
