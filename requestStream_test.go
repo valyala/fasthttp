@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"io/ioutil"
 	"testing"
-	"time"
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
@@ -50,7 +49,10 @@ func TestRequestStream(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
 	go func() {
-		s.Serve(ln)
+		err := s.Serve(ln)
+		if err != nil {
+			t.Errorf("could not serve listener: %s", err)
+		}
 	}()
 
 	req := Request{}
@@ -84,6 +86,6 @@ func TestRequestStream(t *testing.T) {
 	}
 
 	println(respH.String())
-	time.Sleep(5 * time.Second)
+	// time.Sleep(5 * time.Second)
 
 }
