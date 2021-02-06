@@ -1566,17 +1566,22 @@ func (s *Server) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) e
 // If the certFile or keyFile has not been provided the server structure,
 // the function will use previously added TLS configuration.
 func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
+	s.mu.Lock()
 	err := s.AppendCert(certFile, keyFile)
 	if err != nil && err != errNoCertOrKeyProvided {
+		s.mu.Unlock()
 		return err
 	}
 	if s.tlsConfig == nil {
+		s.mu.Unlock()
 		return errNoCertOrKeyProvided
 	}
 
 	// BuildNameToCertificate has been deprecated since 1.14.
 	// But since we also support older versions we'll keep this here.
 	s.tlsConfig.BuildNameToCertificate() //nolint:staticcheck
+
+	s.mu.Unlock()
 
 	return s.Serve(
 		tls.NewListener(ln, s.tlsConfig),
@@ -1590,17 +1595,23 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 // If the certFile or keyFile has not been provided the server structure,
 // the function will use previously added TLS configuration.
 func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error {
+	s.mu.Lock()
+
 	err := s.AppendCertEmbed(certData, keyData)
 	if err != nil && err != errNoCertOrKeyProvided {
+		s.mu.Unlock()
 		return err
 	}
 	if s.tlsConfig == nil {
+		s.mu.Unlock()
 		return errNoCertOrKeyProvided
 	}
 
 	// BuildNameToCertificate has been deprecated since 1.14.
 	// But since we also support older versions we'll keep this here.
 	s.tlsConfig.BuildNameToCertificate() //nolint:staticcheck
+
+	s.mu.Unlock()
 
 	return s.Serve(
 		tls.NewListener(ln, s.tlsConfig),
