@@ -449,12 +449,16 @@ func testClientRedirectListener(t *testing.T, isTLS bool) net.Listener {
 	var tlsConfig *tls.Config
 
 	if isTLS {
-		certFile := "./ssl-cert-snakeoil.pem"
-		keyFile := "./ssl-cert-snakeoil.key"
-		cert, err1 := tls.LoadX509KeyPair(certFile, keyFile)
-		if err1 != nil {
-			t.Fatalf("Cannot load TLS certificate: %s", err1)
+		certData, keyData, kerr := GenerateTestCertificate("localhost")
+		if kerr != nil {
+			t.Fatal(kerr)
 		}
+
+		cert, kerr := tls.X509KeyPair(certData, keyData)
+		if kerr != nil {
+			t.Fatal(kerr)
+		}
+
 		tlsConfig = &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}
@@ -2251,12 +2255,16 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 	var ln net.Listener
 	var err error
 	if isTLS {
-		certFile := "./ssl-cert-snakeoil.pem"
-		keyFile := "./ssl-cert-snakeoil.key"
-		cert, err1 := tls.LoadX509KeyPair(certFile, keyFile)
-		if err1 != nil {
-			t.Fatalf("Cannot load TLS certificate: %s", err1)
+		certData, keyData, kerr := GenerateTestCertificate("localhost")
+		if kerr != nil {
+			t.Fatal(kerr)
 		}
+
+		cert, kerr := tls.X509KeyPair(certData, keyData)
+		if kerr != nil {
+			t.Fatal(kerr)
+		}
+
 		tlsConfig := &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}

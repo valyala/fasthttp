@@ -898,16 +898,18 @@ func TestServerTLS(t *testing.T) {
 	text := []byte("Make fasthttp great again")
 	ln := fasthttputil.NewInmemoryListener()
 
-	certFile := "./ssl-cert-snakeoil.pem"
-	keyFile := "./ssl-cert-snakeoil.key"
-
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.Write(text) //nolint:errcheck
 		},
 	}
 
-	err := s.AppendCert(certFile, keyFile)
+	certData, keyData, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = s.AppendCertEmbed(certData, keyData)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -945,9 +947,6 @@ func TestServerTLSReadTimeout(t *testing.T) {
 
 	ln := fasthttputil.NewInmemoryListener()
 
-	certFile := "./ssl-cert-snakeoil.pem"
-	keyFile := "./ssl-cert-snakeoil.key"
-
 	s := &Server{
 		ReadTimeout: time.Millisecond * 100,
 		Logger:      &testLogger{}, // Ignore log output.
@@ -955,7 +954,12 @@ func TestServerTLSReadTimeout(t *testing.T) {
 		},
 	}
 
-	err := s.AppendCert(certFile, keyFile)
+	certData, keyData, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = s.AppendCertEmbed(certData, keyData)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -995,16 +999,9 @@ func TestServerServeTLSEmbed(t *testing.T) {
 
 	ln := fasthttputil.NewInmemoryListener()
 
-	certFile := "./ssl-cert-snakeoil.pem"
-	keyFile := "./ssl-cert-snakeoil.key"
-
-	certData, err := ioutil.ReadFile(certFile)
+	certData, keyData, err := GenerateTestCertificate("localhost")
 	if err != nil {
-		t.Fatalf("unexpected error when reading %q: %s", certFile, err)
-	}
-	keyData, err := ioutil.ReadFile(keyFile)
-	if err != nil {
-		t.Fatalf("unexpected error when reading %q: %s", keyFile, err)
+		t.Fatal(err)
 	}
 
 	// start the server
