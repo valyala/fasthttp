@@ -76,7 +76,7 @@ func testPathNotFound(t *testing.T, pathNotFoundFunc RequestHandler) {
 	fs := &FS{
 		Root:         "./",
 		PathNotFound: pathNotFoundFunc,
-		Stop:         stop,
+		CleanStop:    stop,
 	}
 	fs.NewRequestHandler()(&ctx)
 
@@ -309,7 +309,7 @@ func TestFSByteRangeConcurrent(t *testing.T) {
 	fs := &FS{
 		Root:            ".",
 		AcceptByteRange: true,
-		Stop:            stop,
+		CleanStop:       stop,
 	}
 	h := fs.NewRequestHandler()
 
@@ -343,7 +343,7 @@ func TestFSByteRangeSingleThread(t *testing.T) {
 	fs := &FS{
 		Root:            ".",
 		AcceptByteRange: true,
-		Stop:            stop,
+		CleanStop:       stop,
 	}
 	h := fs.NewRequestHandler()
 
@@ -488,7 +488,7 @@ func TestFSCompressConcurrent(t *testing.T) {
 		GenerateIndexPages: true,
 		Compress:           true,
 		CompressBrotli:     true,
-		Stop:               stop,
+		CleanStop:          stop,
 	}
 	h := fs.NewRequestHandler()
 
@@ -525,7 +525,7 @@ func TestFSCompressSingleThread(t *testing.T) {
 		GenerateIndexPages: true,
 		Compress:           true,
 		CompressBrotli:     true,
-		Stop:               stop,
+		CleanStop:          stop,
 	}
 	h := fs.NewRequestHandler()
 
