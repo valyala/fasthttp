@@ -2227,8 +2227,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		}
 
 		connectionClose = connectionClose || ctx.Response.ConnectionClose()
-		// refer isuee https://github.com/valyala/fasthttp/issues/958
-		connectionClose = connectionClose || (atomic.LoadInt32(&s.stop) == 1 && s.CloseOnShutdown)
+		connectionClose = connectionClose || ctx.Response.ConnectionClose() || (s.CloseOnShutdown && atomic.LoadInt32(&s.stop) == 1)
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
 		} else if !isHTTP11 {
