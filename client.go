@@ -856,8 +856,6 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 	}
 	ch = chv.(chan clientURLResponse)
 
-	req := AcquireRequest()
-
 	// Note that the request continues execution on ErrTimeout until
 	// client-specific ReadTimeout exceeds. This helps limiting load
 	// on slow hosts by MaxConns* concurrent requests.
@@ -865,28 +863,55 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 	// Without this 'hack' the load on slow host could exceed MaxConns*
 	// concurrent requests, since timed out requests on client side
 	// usually continue execution on the host.
+
+	var mu sync.Mutex
+	var timedout, responded bool
+
 	go func() {
+		req := AcquireRequest()
+
 		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirectsBuffer(req, dst, url, c)
-		ch <- clientURLResponse{
-			statusCode: statusCodeCopy,
-			body:       bodyCopy,
-			err:        errCopy,
+		mu.Lock()
+		{
+			if !timedout {
+				ch <- clientURLResponse{
+					statusCode: statusCodeCopy,
+					body:       bodyCopy,
+					err:        errCopy,
+				}
+				responded = true
+			}
 		}
+		mu.Unlock()
+
+		ReleaseRequest(req)
 	}()
 
 	tc := AcquireTimer(timeout)
 	select {
 	case resp := <-ch:
-		ReleaseRequest(req)
-		clientURLResponseChPool.Put(chv)
 		statusCode = resp.statusCode
 		body = resp.body
 		err = resp.err
 	case <-tc.C:
-		body = dst
-		err = ErrTimeout
+		mu.Lock()
+		{
+			if responded {
+				resp := <-ch
+				statusCode = resp.statusCode
+				body = resp.body
+				err = resp.err
+			} else {
+				timedout = true
+				err = ErrTimeout
+				body = dst
+			}
+		}
+		mu.Unlock()
 	}
 	ReleaseTimer(tc)
+
+	clientURLResponseChPool.Put(chv)
 
 	return statusCode, body, err
 }
@@ -1193,10 +1218,6 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	}
 	ReleaseTimer(tc)
 
-	select {
-	case <-ch:
-	default:
-	}
 	errorChPool.Put(chv)
 
 	return err
