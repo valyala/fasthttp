@@ -1152,7 +1152,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	// usually continue execution on the host.
 
 	var mu sync.Mutex
-	var timedout bool
+	var timedout, responded bool
 
 	go func() {
 		reqCopy.timeout = timeout
@@ -1166,6 +1166,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 				}
 				swapRequestBody(reqCopy, req)
 				ch <- errDo
+				responded = true
 			}
 		}
 		mu.Unlock()
@@ -1181,8 +1182,12 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	case <-tc.C:
 		mu.Lock()
 		{
-			timedout = true
-			err = ErrTimeout
+			if responded {
+				err = <-ch
+			} else {
+				timedout = true
+				err = ErrTimeout
+			}
 		}
 		mu.Unlock()
 	}
