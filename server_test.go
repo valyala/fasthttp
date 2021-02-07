@@ -3117,7 +3117,70 @@ func TestShutdown(t *testing.T) {
 			t.Errorf("unexpected error: %s", err)
 		}
 		br := bufio.NewReader(conn)
-		verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+		resp := verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+		verifyResponseHeaderConnection(t, &resp.Header, "")
+		clientCh <- struct{}{}
+	}()
+	time.Sleep(time.Millisecond * 100)
+	shutdownCh := make(chan struct{})
+	go func() {
+		if err := s.Shutdown(); err != nil {
+			t.Errorf("unexepcted error: %s", err)
+		}
+		shutdownCh <- struct{}{}
+	}()
+	done := 0
+	for {
+		select {
+		case <-time.After(time.Second):
+			t.Fatal("shutdown took too long")
+		case <-serveCh:
+			done++
+		case <-clientCh:
+			done++
+		case <-shutdownCh:
+			done++
+		}
+		if done == 3 {
+			return
+		}
+	}
+}
+
+func TestCloseOnShutdown(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			time.Sleep(time.Millisecond * 500)
+			ctx.Success("aaa/bbb", []byte("real response"))
+		},
+		CloseOnShutdown: true,
+	}
+	serveCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexepcted error: %s", err)
+		}
+		_, err := ln.Dial()
+		if err == nil {
+			t.Error("server is still listening")
+		}
+		serveCh <- struct{}{}
+	}()
+	clientCh := make(chan struct{})
+	go func() {
+		conn, err := ln.Dial()
+		if err != nil {
+			t.Errorf("unexepcted error: %s", err)
+		}
+		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error: %s", err)
+		}
+		br := bufio.NewReader(conn)
+		resp := verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+		verifyResponseHeaderConnection(t, &resp.Header, "close")
 		clientCh <- struct{}{}
 	}()
 	time.Sleep(time.Millisecond * 100)
@@ -3580,7 +3643,7 @@ func TestIncompleteBodyReturnsUnexpectedEOF(t *testing.T) {
 	}
 }
 
-func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) {
+func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) *Response {
 	var resp Response
 	if err := resp.Read(r); err != nil {
 		t.Fatalf("Unexpected error when parsing response: %s", err)
@@ -3590,6 +3653,7 @@ func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expec
 		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), []byte(expectedBody))
 	}
 	verifyResponseHeader(t, &resp.Header, expectedStatusCode, len(resp.Body()), expectedContentType)
+	return &resp
 }
 
 type readWriter struct {
