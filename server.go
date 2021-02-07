@@ -375,6 +375,10 @@ type Server struct {
 	// which will close it when needed.
 	KeepHijackedConns bool
 
+	// CloseOnShutdown , when set true server add HTTP Header: `Connection: close` into HTTP Response
+	// refer isuee https://github.com/valyala/fasthttp/issues/958
+	CloseOnShutdown bool
+
 	tlsConfig  *tls.Config
 	nextProtos map[string]ServeHandler
 
@@ -2196,7 +2200,9 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			}
 		}
 
-		connectionClose = connectionClose || ctx.Response.ConnectionClose() || atomic.LoadInt32(&s.stop) == 1
+		connectionClose = connectionClose || ctx.Response.ConnectionClose()
+		// refer isuee https://github.com/valyala/fasthttp/issues/958
+		connectionClose = connectionClose || (atomic.LoadInt32(&s.stop) == 1 && s.CloseOnShutdown)
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
 		} else if !isHTTP11 {
