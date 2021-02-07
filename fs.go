@@ -282,6 +282,11 @@ type FS struct {
 	// FSCompressedFileSuffixes is used by default.
 	CompressedFileSuffixes map[string]string
 
+	// If CleanStop is set, the channel can be closed to stop the cleanup handlers
+	// for the FS RequestHandlers created with NewRequestHandler.
+	// NEVER close this channel while the handler is still being used!
+	CleanStop chan struct{}
+
 	once sync.Once
 	h    RequestHandler
 }
@@ -399,9 +404,29 @@ func (fs *FS) initRequestHandler() {
 
 	go func() {
 		var pendingFiles []*fsFile
+
+		clean := func() {
+			pendingFiles = h.cleanCache(pendingFiles)
+		}
+
+		if fs.CleanStop != nil {
+			t := time.NewTicker(cacheDuration / 2)
+			for {
+				select {
+				case <-t.C:
+					clean()
+				case _, stillOpen := <-fs.CleanStop:
+					// Ignore values send on the channel, only stop when it is closed.
+					if !stillOpen {
+						t.Stop()
+						return
+					}
+				}
+			}
+		}
 		for {
 			time.Sleep(cacheDuration / 2)
-			pendingFiles = h.cleanCache(pendingFiles)
+			clean()
 		}
 	}()
 
