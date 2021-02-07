@@ -376,8 +376,7 @@ type Server struct {
 	KeepHijackedConns bool
 
 
-	// CloseOnShutdown , when set true server add HTTP Header: `Connection: close` into HTTP Response
-	// refer isuee https://github.com/valyala/fasthttp/issues/958
+	// CloseOnShutdown when true adds a `Connection: close` header when when the server is shutting down.
 	CloseOnShutdown bool
 
 	// StreamRequestBody enables request body streaming,
