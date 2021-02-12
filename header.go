@@ -68,6 +68,7 @@ type RequestHeader struct {
 
 	method      []byte
 	requestURI  []byte
+	proto       []byte
 	host        []byte
 	contentType []byte
 	userAgent   []byte
@@ -453,6 +454,24 @@ func (h *RequestHeader) SetMethod(method string) {
 // SetMethodBytes sets HTTP request method.
 func (h *RequestHeader) SetMethodBytes(method []byte) {
 	h.method = append(h.method[:0], method...)
+}
+
+// Protocol returns HTTP protocol.
+func (h *RequestHeader) Protocol() []byte {
+	if len(h.proto) == 0 {
+		return strHTTP11
+	}
+	return h.proto
+}
+
+// SetProtocol sets HTTP request protocol.
+func (h *RequestHeader) SetProtocol(method string) {
+	h.proto = append(h.proto[:0], method...)
+}
+
+// SetProtocolBytes sets HTTP request protocol.
+func (h *RequestHeader) SetProtocolBytes(method []byte) {
+	h.proto = append(h.proto[:0], method...)
 }
 
 // RequestURI returns RequestURI from the first HTTP request line.
@@ -1601,7 +1620,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	dst = append(dst, ' ')
 	dst = append(dst, h.RequestURI()...)
 	dst = append(dst, ' ')
-	dst = append(dst, strHTTP11...)
+	dst = append(dst, h.Protocol()...)
 	dst = append(dst, strCRLF...)
 
 	userAgent := h.UserAgent()
