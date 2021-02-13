@@ -467,11 +467,13 @@ func (h *RequestHeader) Protocol() []byte {
 // SetProtocol sets HTTP request protocol.
 func (h *RequestHeader) SetProtocol(method string) {
 	h.proto = append(h.proto[:0], method...)
+	h.noHTTP11 = !bytes.Equal(h.proto, strHTTP11)
 }
 
 // SetProtocolBytes sets HTTP request protocol.
 func (h *RequestHeader) SetProtocolBytes(method []byte) {
 	h.proto = append(h.proto[:0], method...)
+	h.noHTTP11 = !bytes.Equal(h.proto, strHTTP11)
 }
 
 // RequestURI returns RequestURI from the first HTTP request line.
@@ -699,6 +701,7 @@ func (h *RequestHeader) resetSkipNormalize() {
 	h.contentLengthBytes = h.contentLengthBytes[:0]
 
 	h.method = h.method[:0]
+	h.proto = h.proto[:0]
 	h.requestURI = h.requestURI[:0]
 	h.host = h.host[:0]
 	h.contentType = h.contentType[:0]
@@ -741,6 +744,7 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes[:0], h.contentLengthBytes...)
 	dst.method = append(dst.method[:0], h.method...)
+	dst.proto = append(dst.proto[:0], h.proto...)
 	dst.requestURI = append(dst.requestURI[:0], h.requestURI...)
 	dst.host = append(dst.host[:0], h.host...)
 	dst.contentType = append(dst.contentType[:0], h.contentType...)
