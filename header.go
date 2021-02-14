@@ -1759,16 +1759,21 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	h.method = append(h.method[:0], b[:n]...)
 	b = b[n+1:]
 
+	protoStr := strHTTP11
 	// parse requestURI
 	n = bytes.LastIndexByte(b, ' ')
 	if n < 0 {
 		h.noHTTP11 = true
 		n = len(b)
+		protoStr = strHTTP10
 	} else if n == 0 {
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
 	} else if !bytes.Equal(b[n+1:], strHTTP11) {
 		h.noHTTP11 = true
+		protoStr = b[n+1:]
 	}
+
+	h.proto = append(h.proto[:0], protoStr...)
 	h.requestURI = append(h.requestURI[:0], b[:n]...)
 
 	return len(buf) - len(bNext), nil
