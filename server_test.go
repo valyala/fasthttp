@@ -1073,7 +1073,16 @@ func TestServerServeTLSEmbed(t *testing.T) {
 func TestServerMultipartFormDataRequest(t *testing.T) {
 	t.Parallel()
 
-	reqS := `POST /upload HTTP/1.1
+	for _, test := range []struct {
+		StreamRequestBody            bool
+		DisablePreParseMultipartForm bool
+	}{
+		{false, false},
+		{false, true},
+		{true, false},
+		{true, true},
+	} {
+		reqS := `POST /upload HTTP/1.1
 Host: qwerty.com
 Content-Length: 521
 Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryJwfATyF8tmxSJnLg
@@ -1100,91 +1109,94 @@ Connection: close
 
 `
 
-	ln := fasthttputil.NewInmemoryListener()
+		ln := fasthttputil.NewInmemoryListener()
 
-	s := &Server{
-		Handler: func(ctx *RequestCtx) {
-			switch string(ctx.Path()) {
-			case "/upload":
-				f, err := ctx.MultipartForm()
-				if err != nil {
-					t.Errorf("unexpected error: %s", err)
+		s := &Server{
+			StreamRequestBody:            test.StreamRequestBody,
+			DisablePreParseMultipartForm: test.DisablePreParseMultipartForm,
+			Handler: func(ctx *RequestCtx) {
+				switch string(ctx.Path()) {
+				case "/upload":
+					f, err := ctx.MultipartForm()
+					if err != nil {
+						t.Errorf("unexpected error: %s", err)
+					}
+					if len(f.Value) != 1 {
+						t.Errorf("unexpected values %d. Expecting %d", len(f.Value), 1)
+					}
+					if len(f.File) != 1 {
+						t.Errorf("unexpected file values %d. Expecting %d", len(f.File), 1)
+					}
+					fv := ctx.FormValue("f1")
+					if string(fv) != "value1" {
+						t.Errorf("unexpected form value: %q. Expecting %q", fv, "value1")
+					}
+					ctx.Redirect("/", StatusSeeOther)
+				default:
+					ctx.WriteString("non-upload") //nolint:errcheck
 				}
-				if len(f.Value) != 1 {
-					t.Errorf("unexpected values %d. Expecting %d", len(f.Value), 1)
-				}
-				if len(f.File) != 1 {
-					t.Errorf("unexpected file values %d. Expecting %d", len(f.File), 1)
-				}
-				fv := ctx.FormValue("f1")
-				if string(fv) != "value1" {
-					t.Errorf("unexpected form value: %q. Expecting %q", fv, "value1")
-				}
-				ctx.Redirect("/", StatusSeeOther)
-			default:
-				ctx.WriteString("non-upload") //nolint:errcheck
+			},
+		}
+
+		ch := make(chan struct{})
+		go func() {
+			if err := s.Serve(ln); err != nil {
+				t.Errorf("unexpected error: %s", err)
 			}
-		},
-	}
+			close(ch)
+		}()
 
-	ch := make(chan struct{})
-	go func() {
-		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+		conn, err := ln.Dial()
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
 		}
-		close(ch)
-	}()
-
-	conn, err := ln.Dial()
-	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
-	}
-	if _, err = conn.Write([]byte(reqS)); err != nil {
-		t.Fatalf("unexpected error: %s", err)
-	}
-
-	var resp Response
-	br := bufio.NewReader(conn)
-	respCh := make(chan struct{})
-	go func() {
-		if err := resp.Read(br); err != nil {
-			t.Errorf("error when reading response: %s", err)
-		}
-		if resp.StatusCode() != StatusSeeOther {
-			t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusSeeOther)
-		}
-		loc := resp.Header.Peek(HeaderLocation)
-		if string(loc) != "http://qwerty.com/" {
-			t.Errorf("unexpected location %q. Expecting %q", loc, "http://qwerty.com/")
+		if _, err = conn.Write([]byte(reqS)); err != nil {
+			t.Fatalf("unexpected error: %s", err)
 		}
 
-		if err := resp.Read(br); err != nil {
-			t.Errorf("error when reading the second response: %s", err)
-		}
-		if resp.StatusCode() != StatusOK {
-			t.Errorf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
-		}
-		body := resp.Body()
-		if string(body) != "non-upload" {
-			t.Errorf("unexpected body %q. Expecting %q", body, "non-upload")
-		}
-		close(respCh)
-	}()
+		var resp Response
+		br := bufio.NewReader(conn)
+		respCh := make(chan struct{})
+		go func() {
+			if err := resp.Read(br); err != nil {
+				t.Errorf("error when reading response: %s", err)
+			}
+			if resp.StatusCode() != StatusSeeOther {
+				t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusSeeOther)
+			}
+			loc := resp.Header.Peek(HeaderLocation)
+			if string(loc) != "http://qwerty.com/" {
+				t.Errorf("unexpected location %q. Expecting %q", loc, "http://qwerty.com/")
+			}
 
-	select {
-	case <-respCh:
-	case <-time.After(time.Second):
-		t.Fatal("timeout")
-	}
+			if err := resp.Read(br); err != nil {
+				t.Errorf("error when reading the second response: %s", err)
+			}
+			if resp.StatusCode() != StatusOK {
+				t.Errorf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+			}
+			body := resp.Body()
+			if string(body) != "non-upload" {
+				t.Errorf("unexpected body %q. Expecting %q", body, "non-upload")
+			}
+			close(respCh)
+		}()
 
-	if err := ln.Close(); err != nil {
-		t.Fatalf("error when closing listener: %s", err)
-	}
+		select {
+		case <-respCh:
+		case <-time.After(time.Second):
+			t.Fatal("timeout")
+		}
 
-	select {
-	case <-ch:
-	case <-time.After(time.Second):
-		t.Fatal("timeout when waiting for the server to stop")
+		if err := ln.Close(); err != nil {
+			t.Fatalf("error when closing listener: %s", err)
+		}
+
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatal("timeout when waiting for the server to stop")
+		}
 	}
 }
 
@@ -3413,8 +3425,8 @@ func TestMaxBodySizePerRequest(t *testing.T) {
 func TestStreamRequestBody(t *testing.T) {
 	t.Parallel()
 
-	part1 := strings.Repeat("1", 1<<10)
-	part2 := strings.Repeat("2", 1<<20-1<<10)
+	part1 := strings.Repeat("1", 1<<15)
+	part2 := strings.Repeat("2", 1<<16)
 	contentLength := len(part1) + len(part2)
 	next := make(chan struct{})
 
@@ -3424,15 +3436,17 @@ func TestStreamRequestBody(t *testing.T) {
 			close(next)
 			checkReader(t, ctx.RequestBodyStream(), part2)
 		},
-		DisableKeepalive:  true,
 		StreamRequestBody: true,
 	}
 
 	pipe := fasthttputil.NewPipeConns()
 	cc, sc := pipe.Conn1(), pipe.Conn2()
 	//write headers and part1 body
-	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
-		t.Error(err)
+	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n", contentLength))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cc.Write([]byte(part1)); err != nil {
+		t.Fatal(err)
 	}
 
 	ch := make(chan error)
@@ -3447,12 +3461,15 @@ func TestStreamRequestBody(t *testing.T) {
 	}
 
 	if _, err := cc.Write([]byte(part2)); err != nil {
-		t.Error(err)
+		t.Fatal(err)
+	}
+	if err := sc.Close(); err != nil {
+		t.Fatal(err)
 	}
 
 	select {
 	case err := <-ch:
-		if err != nil {
+		if err == nil || err.Error() != "connection closed" { // fasthttputil.errConnectionClosed is private so do a string match.
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
 	case <-time.After(500 * time.Millisecond):
