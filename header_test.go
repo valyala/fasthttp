@@ -2479,6 +2479,12 @@ func verifyResponseHeader(t *testing.T, h *ResponseHeader, expectedStatusCode, e
 	}
 }
 
+func verifyResponseHeaderConnection(t *testing.T, h *ResponseHeader, expectConnection string) {
+	if string(h.Peek(HeaderConnection)) != expectConnection {
+		t.Fatalf("Unexpected Connection %q. Expected %q", h.Peek(HeaderConnection), expectConnection)
+	}
+}
+
 func verifyRequestHeader(t *testing.T, h *RequestHeader, expectedContentLength int,
 	expectedRequestURI, expectedHost, expectedReferer, expectedContentType string) {
 	if h.ContentLength() != expectedContentLength {

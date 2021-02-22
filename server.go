@@ -375,6 +375,9 @@ type Server struct {
 	// which will close it when needed.
 	KeepHijackedConns bool
 
+	// CloseOnShutdown when true adds a `Connection: close` header when when the server is shutting down.
+	CloseOnShutdown bool
+
 	// StreamRequestBody enables request body streaming,
 	// and calls the handler sooner when given body is
 	// larger then the current limit.
@@ -2221,6 +2224,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		}
 
 		connectionClose = connectionClose || ctx.Response.ConnectionClose()
+		connectionClose = connectionClose || ctx.Response.ConnectionClose() || (s.CloseOnShutdown && atomic.LoadInt32(&s.stop) == 1)
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
 		} else if !isHTTP11 {

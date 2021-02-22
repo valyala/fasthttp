@@ -45,7 +45,12 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 	}
 	var n int
 	var err error
-	if int(rs.prefetchedBytes.Size()) > rs.totalBytesRead {
+	prefetchedSize := int(rs.prefetchedBytes.Size())
+	if prefetchedSize > rs.totalBytesRead {
+		left := prefetchedSize - rs.totalBytesRead
+		if len(p) > left {
+			p = p[:left]
+		}
 		n, err := rs.prefetchedBytes.Read(p)
 		rs.totalBytesRead += n
 		if n == rs.contentLength {
@@ -53,6 +58,10 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		}
 		return n, err
 	} else {
+		left := rs.contentLength - rs.totalBytesRead
+		if len(p) > left {
+			p = p[:left]
+		}
 		n, err = rs.reader.Read(p)
 		rs.totalBytesRead += n
 		if err != nil {
