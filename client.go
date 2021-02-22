@@ -512,7 +512,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	c.mLock.Unlock()
 
 	if startCleaner {
-		go c.mCleaner()
+		go c.mCleaner(m)
 	}
 
 	return hc.Do(req, resp)
@@ -533,12 +533,12 @@ func (c *Client) CloseIdleConnections() {
 	c.mLock.Unlock()
 }
 
-func (c *Client) mCleaner() {
+func (c *Client) mCleaner(m map[string]*HostClient) {
 	mustStop := false
 
 	for {
 		c.mLock.Lock()
-		for k, v := range c.m {
+		for k, v := range m {
 			v.connsLock.Lock()
 			shouldRemove := v.connsCount == 0
 			v.connsLock.Unlock()
