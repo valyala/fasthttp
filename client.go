@@ -2144,6 +2144,15 @@ type PipelineClient struct {
 	// since unfortunately ipv6 remains broken in many networks worldwide :)
 	DialDualStack bool
 
+	// Path values are sent as-is without normalization
+	//
+	// Disabled path normalization may be useful for proxying incoming requests
+	// to servers that are expecting paths to be forwarded as-is.
+	//
+	// By default path values are normalized, i.e.
+	// extra slashes are removed, special characters are encoded.
+	DisablePathNormalizing bool
+
 	// Whether to use TLS (aka SSL or HTTPS) for host connections.
 	IsTLS bool
 
@@ -2189,19 +2198,20 @@ type PipelineClient struct {
 type pipelineConnClient struct {
 	noCopy noCopy //nolint:unused,structcheck
 
-	Addr                string
-	MaxPendingRequests  int
-	MaxBatchDelay       time.Duration
-	Dial                DialFunc
-	DialDualStack       bool
-	IsTLS               bool
-	TLSConfig           *tls.Config
-	MaxIdleConnDuration time.Duration
-	ReadBufferSize      int
-	WriteBufferSize     int
-	ReadTimeout         time.Duration
-	WriteTimeout        time.Duration
-	Logger              Logger
+	Addr                   string
+	MaxPendingRequests     int
+	MaxBatchDelay          time.Duration
+	Dial                   DialFunc
+	DialDualStack          bool
+	DisablePathNormalizing bool
+	IsTLS                  bool
+	TLSConfig              *tls.Config
+	MaxIdleConnDuration    time.Duration
+	ReadBufferSize         int
+	WriteBufferSize        int
+	ReadTimeout            time.Duration
+	WriteTimeout           time.Duration
+	Logger                 Logger
 
 	workPool sync.Pool
 
@@ -2275,6 +2285,10 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		return ErrTimeout
 	}
 
+	if c.DisablePathNormalizing {
+		req.URI().DisablePathNormalizing = true
+	}
+
 	w := acquirePipelineWork(&c.workPool, timeout)
 	w.req = &w.reqCopy
 	w.resp = &w.respCopy
@@ -2331,6 +2345,10 @@ func (c *PipelineClient) Do(req *Request, resp *Response) error {
 
 func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
 	c.init()
+
+	if c.DisablePathNormalizing {
+		req.URI().DisablePathNormalizing = true
+	}
 
 	w := acquirePipelineWork(&c.workPool, 0)
 	w.req = req
@@ -2410,19 +2428,20 @@ func (c *PipelineClient) getConnClientUnlocked() *pipelineConnClient {
 
 func (c *PipelineClient) newConnClient() *pipelineConnClient {
 	cc := &pipelineConnClient{
-		Addr:                c.Addr,
-		MaxPendingRequests:  c.MaxPendingRequests,
-		MaxBatchDelay:       c.MaxBatchDelay,
-		Dial:                c.Dial,
-		DialDualStack:       c.DialDualStack,
-		IsTLS:               c.IsTLS,
-		TLSConfig:           c.TLSConfig,
-		MaxIdleConnDuration: c.MaxIdleConnDuration,
-		ReadBufferSize:      c.ReadBufferSize,
-		WriteBufferSize:     c.WriteBufferSize,
-		ReadTimeout:         c.ReadTimeout,
-		WriteTimeout:        c.WriteTimeout,
-		Logger:              c.Logger,
+		Addr:                   c.Addr,
+		MaxPendingRequests:     c.MaxPendingRequests,
+		MaxBatchDelay:          c.MaxBatchDelay,
+		Dial:                   c.Dial,
+		DialDualStack:          c.DialDualStack,
+		DisablePathNormalizing: c.DisablePathNormalizing,
+		IsTLS:                  c.IsTLS,
+		TLSConfig:              c.TLSConfig,
+		MaxIdleConnDuration:    c.MaxIdleConnDuration,
+		ReadBufferSize:         c.ReadBufferSize,
+		WriteBufferSize:        c.WriteBufferSize,
+		ReadTimeout:            c.ReadTimeout,
+		WriteTimeout:           c.WriteTimeout,
+		Logger:                 c.Logger,
 	}
 	c.connClients = append(c.connClients, cc)
 	return cc
