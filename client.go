@@ -544,10 +544,10 @@ func (c *Client) mCleaner(m map[string]*HostClient) {
 			v.connsLock.Unlock()
 
 			if shouldRemove {
-				delete(c.m, k)
+				delete(m, k)
 			}
 		}
-		if len(c.m) == 0 {
+		if len(m) == 0 {
 			mustStop = true
 		}
 		c.mLock.Unlock()
