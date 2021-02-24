@@ -342,6 +342,15 @@ func (r *byteSliceReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+func (r *byteSliceReader) ReadByte() (byte, error) {
+	if len(r.b) == 0 {
+		return 0, io.EOF
+	}
+	n := r.b[0]
+	r.b = r.b[1:]
+	return n, nil
+}
+
 func acquireStacklessDeflateWriter(w io.Writer, level int) stackless.Writer {
 	nLevel := normalizeCompressLevel(level)
 	p := stacklessDeflateWriterPoolMap[nLevel]
