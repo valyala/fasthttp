@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net"
 	"net/http"
 	"runtime"
@@ -243,6 +244,126 @@ func benchmarkClientGetEndToEndTCP(b *testing.B, parallelism int) {
 	})
 
 	ln.Close()
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		b.Fatalf("server wasn't stopped")
+	}
+}
+
+func BenchmarkClientGetEndToEnd1TCPGnet(b *testing.B) {
+	benchmarkClientGetEndToEndTCPGnet(b, 1)
+}
+
+func BenchmarkClientGetEndToEnd10TCPGnet(b *testing.B) {
+	benchmarkClientGetEndToEndTCPGnet(b, 10)
+}
+
+func BenchmarkClientGetEndToEnd100TCPGnet(b *testing.B) {
+	benchmarkClientGetEndToEndTCPGnet(b, 100)
+}
+
+func TestGnet(t *testing.T) {
+
+	addr := "127.0.0.1:8543"
+
+	go func() {
+		// ln, err := net.Listen("tcp4", addr)
+		// if err != nil {
+		// 	log.Printf("cannot listen %q: %s", addr, err)
+		// }
+
+		// if err := http.Serve(ln, http.HandlerFunc(nethttpEchoHandler)); err != nil && !strings.Contains(
+		// 	err.Error(), "use of closed network connection") {
+		// 	log.Printf("error when serving requests: %s", err)
+		// }
+		if err := ListenAndServeGnet(addr, fasthttpEchoHandler); err != nil {
+			log.Printf("error when serving requests: %s", err)
+			log.Printf("error when serving requests: %s", err)
+		}
+	}()
+
+	//Let the server startup...
+	time.Sleep(1 * time.Millisecond)
+
+	// p := profile.Start(profile.CPUProfile, profile.ProfilePath("."), profile.NoShutdownHook)
+	// p := profile.Start(profile.MemProfile, profile.ProfilePath("."), profile.NoShutdownHook)
+	// p := profile.Start(profile.TraceProfile, profile.ProfilePath("."), profile.NoShutdownHook)
+
+	c := &Client{
+		MaxConnsPerHost: runtime.GOMAXPROCS(-1),
+	}
+
+	requestURI := "/foo/bar?baz=123"
+	url := "http://" + addr + requestURI
+	for i := 0; i < 500000; i++ {
+		var buf []byte
+		statusCode, body, err := c.Get(buf, url)
+		if err != nil {
+			log.Printf("unexpected error: %s", err)
+		}
+		if statusCode != StatusOK {
+			log.Printf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+		}
+		if string(body) != requestURI {
+			log.Printf("unexpected response %q. Expecting %q", body, requestURI)
+		}
+		buf = body
+	}
+
+	// timeout, cancel := context.WithTimeout(context.Background(), time.Minute)
+	StopServeGnet(addr)
+	time.Sleep(1 * time.Millisecond)
+
+	// p.Stop()
+	log.Println("DONE!")
+
+}
+
+func benchmarkClientGetEndToEndTCPGnet(b *testing.B, parallelism int) {
+	addr := "127.0.0.1:8543"
+
+	ch := make(chan struct{})
+	go func() {
+		if err := ListenAndServeGnet(addr, fasthttpEchoHandler); err != nil {
+			b.Errorf("error when serving requests: %s", err)
+		}
+		close(ch)
+	}()
+
+	//Let the server startup...
+	time.Sleep(1 * time.Millisecond)
+
+	c := &Client{
+		MaxConnsPerHost: runtime.GOMAXPROCS(-1) * parallelism,
+	}
+
+	requestURI := "/foo/bar?baz=123"
+	url := "http://" + addr + requestURI
+	b.SetParallelism(parallelism)
+	b.RunParallel(func(pb *testing.PB) {
+		var buf []byte
+		for pb.Next() {
+			statusCode, body, err := c.Get(buf, url)
+			if err != nil {
+				b.Fatalf("unexpected error: %s", err)
+			}
+			if statusCode != StatusOK {
+				b.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+			}
+			if string(body) != requestURI {
+				b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)
+			}
+			buf = body
+		}
+	})
+
+	// timeout, cancel := context.WithTimeout(context.Background(), time.Minute)
+	StopServeGnet(addr)
+	time.Sleep(1 * time.Millisecond)
+
+	// cancel()
+	// ln.Close()
 	select {
 	case <-ch:
 	case <-time.After(time.Second):
