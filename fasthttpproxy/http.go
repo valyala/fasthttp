@@ -70,7 +70,7 @@ func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.Dia
 		}
 		if res.Header.StatusCode() != 200 {
 			conn.Close()
-			return nil, fmt.Errorf("could not connect to proxy")
+			return nil, fmt.Errorf("could not connect to proxy: %s status code: %d", proxy, res.Header.StatusCode())
 		}
 		return conn, nil
 	}
