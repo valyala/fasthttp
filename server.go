@@ -312,6 +312,14 @@ type Server struct {
 	// are suppressed in order to limit output log traffic.
 	LogAllErrors bool
 
+	// Will not log potentially sensitive content in error logs
+	//
+	// This option is useful for servers that handle sensitive data
+	// in the request/response.
+	//
+	// Server logs all full errors by default.
+	SecureErrorLogMessage bool
+
 	// Header names are passed as-is without normalization
 	// if this option is set.
 	//
@@ -2054,6 +2062,12 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		ctx.Request.isTLS = isTLS
 		ctx.Response.Header.noDefaultContentType = s.NoDefaultContentType
 		ctx.Response.Header.noDefaultDate = s.NoDefaultDate
+
+		// Secure header error logs configuration
+		ctx.Request.Header.secureErrorLogMessage = s.SecureErrorLogMessage
+		ctx.Response.Header.secureErrorLogMessage = s.SecureErrorLogMessage
+		ctx.Request.secureErrorLogMessage = s.SecureErrorLogMessage
+		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
 		if err == nil {
 			if s.ReadTimeout > 0 {
