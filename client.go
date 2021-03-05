@@ -2152,6 +2152,24 @@ type PipelineClient struct {
 	// since unfortunately ipv6 remains broken in many networks worldwide :)
 	DialDualStack bool
 
+	// Response header names are passed as-is without normalization
+	// if this option is set.
+	//
+	// Disabled header names' normalization may be useful only for proxying
+	// responses to other clients expecting case-sensitive
+	// header names. See https://github.com/valyala/fasthttp/issues/57
+	// for details.
+	//
+	// By default request and response header names are normalized, i.e.
+	// The first letter and the first letters following dashes
+	// are uppercased, while all the other letters are lowercased.
+	// Examples:
+	//
+	//     * HOST -> Host
+	//     * content-type -> Content-Type
+	//     * cONTENT-lenGTH -> Content-Length
+	DisableHeaderNamesNormalizing bool
+
 	// Path values are sent as-is without normalization
 	//
 	// Disabled path normalization may be useful for proxying incoming requests
@@ -2206,20 +2224,21 @@ type PipelineClient struct {
 type pipelineConnClient struct {
 	noCopy noCopy //nolint:unused,structcheck
 
-	Addr                   string
-	MaxPendingRequests     int
-	MaxBatchDelay          time.Duration
-	Dial                   DialFunc
-	DialDualStack          bool
-	DisablePathNormalizing bool
-	IsTLS                  bool
-	TLSConfig              *tls.Config
-	MaxIdleConnDuration    time.Duration
-	ReadBufferSize         int
-	WriteBufferSize        int
-	ReadTimeout            time.Duration
-	WriteTimeout           time.Duration
-	Logger                 Logger
+	Addr                          string
+	MaxPendingRequests            int
+	MaxBatchDelay                 time.Duration
+	Dial                          DialFunc
+	DialDualStack                 bool
+	DisableHeaderNamesNormalizing bool
+	DisablePathNormalizing        bool
+	IsTLS                         bool
+	TLSConfig                     *tls.Config
+	MaxIdleConnDuration           time.Duration
+	ReadBufferSize                int
+	WriteBufferSize               int
+	ReadTimeout                   time.Duration
+	WriteTimeout                  time.Duration
+	Logger                        Logger
 
 	workPool sync.Pool
 
@@ -2298,6 +2317,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	}
 
 	w := acquirePipelineWork(&c.workPool, timeout)
+	w.respCopy.Header.disableNormalizing = c.DisableHeaderNamesNormalizing
 	w.req = &w.reqCopy
 	w.resp = &w.respCopy
 
@@ -2353,6 +2373,8 @@ func (c *PipelineClient) Do(req *Request, resp *Response) error {
 
 func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
 	c.init()
+
+	resp.Header.disableNormalizing = c.DisableHeaderNamesNormalizing
 
 	if c.DisablePathNormalizing {
 		req.URI().DisablePathNormalizing = true
@@ -2436,20 +2458,21 @@ func (c *PipelineClient) getConnClientUnlocked() *pipelineConnClient {
 
 func (c *PipelineClient) newConnClient() *pipelineConnClient {
 	cc := &pipelineConnClient{
-		Addr:                   c.Addr,
-		MaxPendingRequests:     c.MaxPendingRequests,
-		MaxBatchDelay:          c.MaxBatchDelay,
-		Dial:                   c.Dial,
-		DialDualStack:          c.DialDualStack,
-		DisablePathNormalizing: c.DisablePathNormalizing,
-		IsTLS:                  c.IsTLS,
-		TLSConfig:              c.TLSConfig,
-		MaxIdleConnDuration:    c.MaxIdleConnDuration,
-		ReadBufferSize:         c.ReadBufferSize,
-		WriteBufferSize:        c.WriteBufferSize,
-		ReadTimeout:            c.ReadTimeout,
-		WriteTimeout:           c.WriteTimeout,
-		Logger:                 c.Logger,
+		Addr:                          c.Addr,
+		MaxPendingRequests:            c.MaxPendingRequests,
+		MaxBatchDelay:                 c.MaxBatchDelay,
+		Dial:                          c.Dial,
+		DialDualStack:                 c.DialDualStack,
+		DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
+		DisablePathNormalizing:        c.DisablePathNormalizing,
+		IsTLS:                         c.IsTLS,
+		TLSConfig:                     c.TLSConfig,
+		MaxIdleConnDuration:           c.MaxIdleConnDuration,
+		ReadBufferSize:                c.ReadBufferSize,
+		WriteBufferSize:               c.WriteBufferSize,
+		ReadTimeout:                   c.ReadTimeout,
+		WriteTimeout:                  c.WriteTimeout,
+		Logger:                        c.Logger,
 	}
 	c.connClients = append(c.connClients, cc)
 	return cc
