@@ -2,6 +2,7 @@ package fasthttpproxy
 
 import (
 	"net"
+	"net/url"
 
 	"github.com/valyala/fasthttp"
 	"golang.org/x/net/proxy"
@@ -15,7 +16,14 @@ import (
 //		Dial: fasthttpproxy.FasthttpSocksDialer("localhost:9050"),
 //	}
 func FasthttpSocksDialer(proxyAddr string) fasthttp.DialFunc {
-	dialer, err := proxy.SOCKS5("tcp", proxyAddr, nil, proxy.Direct)
+	var (
+		u      *url.URL
+		err    error
+		dialer proxy.Dialer
+	)
+	if u, err = url.Parse(proxyAddr); err == nil {
+		dialer, err = proxy.FromURL(u, proxy.Direct)
+	}
 	// It would be nice if we could return the error here. But we can't
 	// change our API so just keep returning it in the returned Dial function.
 	// Besides the implementation of proxy.SOCKS5() at the time of writing this
