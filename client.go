@@ -1693,6 +1693,14 @@ func (c *HostClient) decConnsCount() {
 
 }
 
+// ConnsCount returns connection count of HostClient
+func (c *HostClient) ConnsCount() int {
+	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
+
+	return c.connsCount
+}
+
 func acquireClientConn(conn net.Conn) *clientConn {
 	v := clientConnPool.Get()
 	if v == nil {
