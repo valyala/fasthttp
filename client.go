@@ -482,28 +482,27 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	}
 	hc := m[string(host)]
 	if hc == nil {
-		hc = &HostClient{
-			Addr:                          addMissingPort(string(host), isTLS),
-			Name:                          c.Name,
-			NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
-			Dial:                          c.Dial,
-			DialDualStack:                 c.DialDualStack,
-			IsTLS:                         isTLS,
-			TLSConfig:                     c.TLSConfig,
-			MaxConns:                      c.MaxConnsPerHost,
-			MaxIdleConnDuration:           c.MaxIdleConnDuration,
-			MaxConnDuration:               c.MaxConnDuration,
-			MaxIdemponentCallAttempts:     c.MaxIdemponentCallAttempts,
-			ReadBufferSize:                c.ReadBufferSize,
-			WriteBufferSize:               c.WriteBufferSize,
-			ReadTimeout:                   c.ReadTimeout,
-			WriteTimeout:                  c.WriteTimeout,
-			MaxResponseBodySize:           c.MaxResponseBodySize,
-			DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
-			DisablePathNormalizing:        c.DisablePathNormalizing,
-			MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
-			RetryIf:                       c.RetryIf,
-		}
+		hc = AcquireHostClient()
+		hc.Addr = addMissingPort(string(host), isTLS)
+		hc.Name = c.Name
+		hc.NoDefaultUserAgentHeader = c.NoDefaultUserAgentHeader
+		hc.Dial = c.Dial
+		hc.DialDualStack = c.DialDualStack
+		hc.IsTLS = isTLS
+		hc.TLSConfig = c.TLSConfig
+		hc.MaxConns = c.MaxConnsPerHost
+		hc.MaxIdleConnDuration = c.MaxIdleConnDuration
+		hc.MaxConnDuration = c.MaxConnDuration
+		hc.MaxIdemponentCallAttempts = c.MaxIdemponentCallAttempts
+		hc.ReadBufferSize = c.ReadBufferSize
+		hc.WriteBufferSize = c.WriteBufferSize
+		hc.ReadTimeout = c.ReadTimeout
+		hc.WriteTimeout = c.WriteTimeout
+		hc.MaxResponseBodySize = c.MaxResponseBodySize
+		hc.DisableHeaderNamesNormalizing = c.DisableHeaderNamesNormalizing
+		hc.DisablePathNormalizing = c.DisablePathNormalizing
+		hc.MaxConnWaitTimeout = c.MaxConnWaitTimeout
+		hc.RetryIf = c.RetryIf
 		m[string(host)] = hc
 		if len(m) == 1 {
 			startCleaner = true
@@ -544,6 +543,7 @@ func (c *Client) mCleaner(m map[string]*HostClient) {
 			v.connsLock.Unlock()
 
 			if shouldRemove {
+				ReleaseHostClient(v)
 				delete(m, k)
 			}
 		}
@@ -1818,8 +1818,8 @@ func tlsServerName(addr string) string {
 
 func (c *HostClient) nextAddr() string {
 	c.addrsLock.Lock()
-	if c.addrs == nil {
-		c.addrs = strings.Split(c.Addr, ",")
+	if len(c.addrs) == 0 {
+		c.addrs = append(c.addrs, strings.Split(c.Addr, ",")...)
 	}
 	addr := c.addrs[0]
 	if len(c.addrs) > 1 {
@@ -1880,6 +1880,67 @@ func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
 
 	return cfg
 }
+
+// AcquireHostClient returns an empty HostClient instance from host client pool.
+//
+// The returned HostClient instance may be passed to ReleaseHostClient when it is
+// no longer needed. This allows HostClient recycling, reduces GC pressure
+// and usually improves performance.
+func AcquireHostClient() *HostClient {
+	v := hostClientPool.Get()
+	if v == nil {
+		return &HostClient{}
+	}
+	return v.(*HostClient)
+}
+
+// ReleaseHostClient returns hc acquired via AcquireHostClient to host client pool.
+//
+// It is forbidden accessing hc and/or its' members after returning
+// it to host client pool.
+func ReleaseHostClient(hc *HostClient) {
+	hc.Reset()
+	hostClientPool.Put(hc)
+}
+
+// Reset clears host client contents.
+func (hc *HostClient) Reset() {
+	hc.Addr = ""
+	hc.Name = ""
+	hc.Dial = nil
+	hc.DialDualStack = false
+	hc.IsTLS = false
+	hc.TLSConfig = nil
+	hc.MaxConns = 0
+	hc.MaxConnDuration = 0
+	hc.MaxIdleConnDuration = 0
+	hc.MaxIdemponentCallAttempts = 0
+	hc.ReadBufferSize = 0
+	hc.WriteBufferSize = 0
+	hc.ReadTimeout = 0
+	hc.WriteTimeout = 0
+	hc.MaxResponseBodySize = 0
+	hc.DisableHeaderNamesNormalizing = false
+	hc.DisablePathNormalizing = false
+	hc.MaxConnWaitTimeout = 0
+	hc.RetryIf = nil
+	hc.clientName = atomic.Value{}
+	hc.lastUseTime = 0
+	hc.connsCount = 0
+	hc.conns = hc.conns[:0]
+	if hc.connsWait != nil {
+		hc.connsWait.head = hc.connsWait.head[:0]
+		hc.connsWait.headPos = 0
+		hc.connsWait.tail = hc.connsWait.tail[:0]
+	}
+	hc.addrs = hc.addrs[:0]
+	hc.addrIdx = 0
+	hc.tlsConfigMap = nil
+	hc.pendingRequests = 0
+	hc.connsCleanerRun = false
+}
+
+var hostClientPool sync.Pool
 
 // ErrTLSHandshakeTimeout indicates there is a timeout from tls handshake.
 var ErrTLSHandshakeTimeout = errors.New("tls handshake timed out")
