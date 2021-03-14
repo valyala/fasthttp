@@ -1898,12 +1898,16 @@ func AcquireHostClient() *HostClient {
 //
 // It is forbidden accessing hc and/or its' members after returning
 // it to host client pool.
+// Note that HostClient ConnsCount must be 0 when calling ReleaseHostClient, otherwise
+// it will trigger a panic
 func ReleaseHostClient(hc *HostClient) {
 	hc.Reset()
 	hostClientPool.Put(hc)
 }
 
 // Reset clears host client contents.
+// Note that HostClient ConnsCount must be 0 when calling Reset, otherwise
+// it will trigger a panic
 func (hc *HostClient) Reset() {
 	hc.Addr = ""
 	hc.Name = ""
@@ -1926,6 +1930,11 @@ func (hc *HostClient) Reset() {
 	hc.RetryIf = nil
 	hc.clientName = atomic.Value{}
 	hc.lastUseTime = 0
+
+	hc.connsLock.Lock()
+	if hc.connsCount != 0 {
+		panic("fasthttp: internal error: misuse of HostClient.Reset with non-zero ConnsCount")
+	}
 	hc.connsCount = 0
 	hc.conns = hc.conns[:0]
 	if hc.connsWait != nil {
@@ -1933,7 +1942,12 @@ func (hc *HostClient) Reset() {
 		hc.connsWait.headPos = 0
 		hc.connsWait.tail = hc.connsWait.tail[:0]
 	}
+	hc.connsLock.Unlock()
+
+	hc.addrsLock.Lock()
 	hc.addrs = hc.addrs[:0]
+	hc.addrsLock.Unlock()
+
 	hc.addrIdx = 0
 	hc.tlsConfigMap = nil
 	hc.pendingRequests = 0
