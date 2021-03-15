@@ -1716,21 +1716,21 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (err error
 		}
 	}
 	if contentLength >= 0 {
-		if err = resp.Header.Write(w); err == nil && sendBody {
+		if err = resp.Header.Write(w); err == nil {
 			if resp.ImmediateHeaderFlush {
 				err = w.Flush()
 			}
-			if err == nil {
+			if err == nil && sendBody {
 				err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
 			}
 		}
 	} else {
 		resp.Header.SetContentLength(-1)
-		if err = resp.Header.Write(w); err == nil && sendBody {
+		if err = resp.Header.Write(w); err == nil {
 			if resp.ImmediateHeaderFlush {
 				err = w.Flush()
 			}
-			if err == nil {
+			if err == nil && sendBody {
 				err = writeBodyChunked(w, resp.bodyStream)
 			}
 		}
