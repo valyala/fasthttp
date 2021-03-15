@@ -2120,6 +2120,13 @@ type PipelineClient struct {
 	// Address of the host to connect to.
 	Addr string
 
+	// PipelineClient name. Used in User-Agent request header.
+	Name string
+
+	// NoDefaultUserAgentHeader when set to true, causes the default
+	// User-Agent header to be excluded from the Request.
+	NoDefaultUserAgentHeader bool
+
 	// The maximum number of concurrent connections to the Addr.
 	//
 	// A single connection is used by default.
@@ -2225,6 +2232,8 @@ type pipelineConnClient struct {
 	noCopy noCopy //nolint:unused,structcheck
 
 	Addr                          string
+	Name                          string
+	NoDefaultUserAgentHeader      bool
 	MaxPendingRequests            int
 	MaxBatchDelay                 time.Duration
 	Dial                          DialFunc
@@ -2248,6 +2257,7 @@ type pipelineConnClient struct {
 
 	tlsConfigLock sync.Mutex
 	tlsConfig     *tls.Config
+	clientName    atomic.Value
 }
 
 type pipelineWork struct {
@@ -2316,6 +2326,11 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		req.URI().DisablePathNormalizing = true
 	}
 
+	userAgentOld := req.Header.UserAgent()
+	if len(userAgentOld) == 0 {
+		req.Header.userAgent = append(req.Header.userAgent[:0], c.getClientName()...)
+	}
+
 	w := acquirePipelineWork(&c.workPool, timeout)
 	w.respCopy.Header.disableNormalizing = c.DisableHeaderNamesNormalizing
 	w.req = &w.reqCopy
@@ -2378,6 +2393,11 @@ func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
 
 	if c.DisablePathNormalizing {
 		req.URI().DisablePathNormalizing = true
+	}
+
+	userAgentOld := req.Header.UserAgent()
+	if len(userAgentOld) == 0 {
+		req.Header.userAgent = append(req.Header.userAgent[:0], c.getClientName()...)
 	}
 
 	w := acquirePipelineWork(&c.workPool, 0)
@@ -2459,6 +2479,8 @@ func (c *PipelineClient) getConnClientUnlocked() *pipelineConnClient {
 func (c *PipelineClient) newConnClient() *pipelineConnClient {
 	cc := &pipelineConnClient{
 		Addr:                          c.Addr,
+		Name:                          c.Name,
+		NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 		MaxPendingRequests:            c.MaxPendingRequests,
 		MaxBatchDelay:                 c.MaxBatchDelay,
 		Dial:                          c.Dial,
@@ -2768,6 +2790,21 @@ func (c *pipelineConnClient) PendingRequests() int {
 	n := len(c.chR) + len(c.chW)
 	c.chLock.Unlock()
 	return n
+}
+
+func (c *pipelineConnClient) getClientName() []byte {
+	v := c.clientName.Load()
+	var clientName []byte
+	if v == nil {
+		clientName = []byte(c.Name)
+		if len(clientName) == 0 && !c.NoDefaultUserAgentHeader {
+			clientName = defaultUserAgent
+		}
+		c.clientName.Store(clientName)
+	} else {
+		clientName = v.([]byte)
+	}
+	return clientName
 }
 
 var errPipelineConnStopped = errors.New("pipeline connection has been stopped")
