@@ -68,6 +68,56 @@ func TestCloseIdleConnections(t *testing.T) {
 	}
 }
 
+func TestPipelineClientSetUserAgent(t *testing.T) {
+	t.Parallel()
+
+	testPipelineClientSetUserAgent(t, 0)
+}
+
+func TestPipelineClientSetUserAgentTimeout(t *testing.T) {
+	t.Parallel()
+
+	testPipelineClientSetUserAgent(t, time.Second)
+}
+
+func testPipelineClientSetUserAgent(t *testing.T, timeout time.Duration) {
+	ln := fasthttputil.NewInmemoryListener()
+
+	userAgentSeen := ""
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			userAgentSeen = string(ctx.UserAgent())
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+
+	userAgent := "I'm not fasthttp"
+	c := &HostClient{
+		Name: userAgent,
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	res := AcquireResponse()
+
+	req.SetRequestURI("http://example.com")
+
+	var err error
+	if timeout <= 0 {
+		err = c.Do(req, res)
+	} else {
+		err = c.DoTimeout(req, res, timeout)
+	}
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if userAgentSeen != userAgent {
+		t.Fatalf("User-Agent defers %q != %q", userAgentSeen, userAgent)
+	}
+}
+
 func TestPipelineClientIssue832(t *testing.T) {
 	t.Parallel()
 
