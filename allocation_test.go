@@ -48,7 +48,7 @@ func TestAllocationClient(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 		},
 	}
-	go s.Serve(ln)
+	go s.Serve(ln) //nolint:errcheck
 
 	c := &Client{}
 	url := "http://test:test@" + ln.Addr().String() + "/foo?bar=baz"
@@ -78,7 +78,7 @@ func TestAllocationURI(t *testing.T) {
 
 	n := testing.AllocsPerRun(100, func() {
 		u := AcquireURI()
-		u.Parse(nil, uri)
+		u.Parse(nil, uri) //nolint:errcheck
 		ReleaseURI(u)
 	})
 

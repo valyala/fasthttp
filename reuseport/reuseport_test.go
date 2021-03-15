@@ -1,5 +1,3 @@
-// +build !windows
-
 package reuseport
 
 import (
@@ -68,7 +66,7 @@ func testNewListener(t *testing.T, network, addr string, serversCount, requestsC
 		ch := make(chan struct{})
 		go func() {
 			if resp, err = ioutil.ReadAll(c); err != nil {
-				t.Fatalf("%d. unexpected error when reading response: %s", i, err)
+				t.Errorf("%d. unexpected error when reading response: %s", i, err)
 			}
 			close(ch)
 		}()

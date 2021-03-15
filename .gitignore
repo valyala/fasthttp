@@ -1,3 +1,6 @@
 tags
 *.pprof
 *.fasthttp.gz
+*.fasthttp.br
+.idea
+.DS_Store

@@ -143,7 +143,7 @@ func benchmarkExt(b *testing.B, h fasthttp.RequestHandler, bc *benchConfig) {
 			serverLn = tls.NewListener(serverLn, serverTLSConfig)
 		}
 		if err := fasthttp.Serve(serverLn, h); err != nil {
-			b.Fatalf("unexpected error in server: %s", err)
+			b.Errorf("unexpected error in server: %s", err)
 		}
 		close(serverStopCh)
 	}()
@@ -163,7 +163,7 @@ func benchmarkExt(b *testing.B, h fasthttp.RequestHandler, bc *benchConfig) {
 }
 
 func streamingHandler(ctx *fasthttp.RequestCtx) {
-	ctx.WriteString("foobar")
+	ctx.WriteString("foobar") //nolint:errcheck
 }
 
 func handshakeHandler(ctx *fasthttp.RequestCtx) {

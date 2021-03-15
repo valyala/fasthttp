@@ -44,7 +44,7 @@ var argsPool = &sync.Pool{
 //
 // Args instance MUST NOT be used from concurrently running goroutines.
 type Args struct {
-	noCopy noCopy
+	noCopy noCopy //nolint:unused,structcheck
 
 	args []argsKV
 	buf  []byte
@@ -361,7 +361,13 @@ func visitArgs(args []argsKV, f func(k, v []byte)) {
 func copyArgs(dst, src []argsKV) []argsKV {
 	if cap(dst) < len(src) {
 		tmp := make([]argsKV, len(src))
+		dst = dst[:cap(dst)] // copy all of dst.
 		copy(tmp, dst)
+		for i := len(dst); i < len(tmp); i++ {
+			// Make sure nothing is nil.
+			tmp[i].key = []byte{}
+			tmp[i].value = []byte{}
+		}
 		dst = tmp
 	}
 	n := len(src)
@@ -391,6 +397,7 @@ func delAllArgs(args []argsKV, key string) []argsKV {
 			tmp := *kv
 			copy(args[i:], args[i+1:])
 			n--
+			i--
 			args[n] = tmp
 			args = args[:n]
 		}
@@ -441,7 +448,9 @@ func allocArg(h []argsKV) ([]argsKV, *argsKV) {
 	if cap(h) > n {
 		h = h[:n+1]
 	} else {
-		h = append(h, argsKV{})
+		h = append(h, argsKV{
+			value: []byte{},
+		})
 	}
 	return h, &h[n]
 }

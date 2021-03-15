@@ -336,8 +336,8 @@ func testCopyTo(t *testing.T, a *Args) {
 	var b Args
 	a.CopyTo(&b)
 
-	if !reflect.DeepEqual(*a, b) {
-		t.Fatalf("ArgsCopyTo fail, a: \n%+v\nb: \n%+v\n", *a, b)
+	if !reflect.DeepEqual(*a, b) { //nolint
+		t.Fatalf("ArgsCopyTo fail, a: \n%+v\nb: \n%+v\n", *a, b) //nolint
 	}
 
 	b.VisitAll(func(k, v []byte) {
@@ -581,5 +581,43 @@ func testArgsParse(t *testing.T, a *Args, s string, expectedLen int, expectedArg
 		if string(buf) != v {
 			t.Fatalf("Unexpected value for key=%q: %q. Expected %q. s=%q", k, buf, v, s)
 		}
+	}
+}
+
+func TestArgsDeleteAll(t *testing.T) {
+	t.Parallel()
+	var a Args
+	a.Add("q1", "foo")
+	a.Add("q1", "bar")
+	a.Add("q1", "baz")
+	a.Add("q1", "quux")
+	a.Add("q2", "1234")
+	a.Del("q1")
+	if a.Len() != 1 || a.Has("q1") {
+		t.Fatalf("Expected q1 arg to be completely deleted. Current Args: %s", a.String())
+	}
+}
+
+func TestIssue932(t *testing.T) {
+	t.Parallel()
+	var a []argsKV
+
+	a = setArg(a, "t1", "ok", argsHasValue)
+	a = setArg(a, "t2", "", argsHasValue)
+	a = setArg(a, "t1", "", argsHasValue)
+	a = setArgBytes(a, s2b("t3"), []byte{}, argsHasValue)
+	a = setArgBytes(a, s2b("t4"), nil, argsHasValue)
+
+	if peekArgStr(a, "t1") == nil {
+		t.Error("nil not expected for t1")
+	}
+	if peekArgStr(a, "t2") == nil {
+		t.Error("nil not expected for t2")
+	}
+	if peekArgStr(a, "t3") == nil {
+		t.Error("nil not expected for t3")
+	}
+	if peekArgStr(a, "t4") != nil {
+		t.Error("nil expected for t4")
 	}
 }

@@ -54,7 +54,7 @@ Any GitHub issues pertaining to a security issue will be prefixed with [security
 ### Comments on This Policy
 If you have any suggestions to improve this policy, please send an email to oss-security@highload.solutions for discussion.
 
-### PGP Key for oss-security@highload.solutions
+### PGP Key for oss-security@highload.ltd
 
 We accept PGP-encrypted email, but the majority of the security team are not regular PGP users
 so it's somewhat inconvenient. Please only use PGP for critical security reports.

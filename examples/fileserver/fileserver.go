@@ -17,11 +17,11 @@ var (
 	addr               = flag.String("addr", "localhost:8080", "TCP address to listen to")
 	addrTLS            = flag.String("addrTLS", "", "TCP address to listen to TLS (aka SSL or HTTPS) requests. Leave empty for disabling TLS")
 	byteRange          = flag.Bool("byteRange", false, "Enables byte range requests if set to true")
-	certFile           = flag.String("certFile", "./ssl-cert-snakeoil.pem", "Path to TLS certificate file")
+	certFile           = flag.String("certFile", "./ssl-cert.pem", "Path to TLS certificate file")
 	compress           = flag.Bool("compress", false, "Enables transparent response compression if set to true")
 	dir                = flag.String("dir", "/usr/share/nginx/html", "Directory to serve static files from")
 	generateIndexPages = flag.Bool("generateIndexPages", true, "Whether to generate directory index pages")
-	keyFile            = flag.String("keyFile", "./ssl-cert-snakeoil.key", "Path to TLS key file")
+	keyFile            = flag.String("keyFile", "./ssl-cert.key", "Path to TLS key file")
 	vhost              = flag.Bool("vhost", false, "Enables virtual hosting by prepending the requested path with the requested hostname")
 )
 

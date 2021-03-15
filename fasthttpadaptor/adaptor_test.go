@@ -32,6 +32,8 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
+	expectedContextKey := "contextKey"
+	expectedContextValue := "contextValue"
 
 	callsCount := 0
 	nethttpH := func(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +76,9 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		if !reflect.DeepEqual(r.URL, expectedURL) {
 			t.Fatalf("unexpected URL: %#v. Expecting %#v", r.URL, expectedURL)
 		}
+		if r.Context().Value(expectedContextKey) != expectedContextValue {
+			t.Fatalf("unexpected context value for key %q. Expecting %q", expectedContextKey, expectedContextValue)
+		}
 
 		for k, expectedV := range expectedHeader {
 			v := r.Header.Get(k)
@@ -88,6 +93,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		fmt.Fprintf(w, "request body is %q", body)
 	}
 	fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH))
+	fasthttpH = setContextValueMiddleware(fasthttpH, expectedContextKey, expectedContextValue)
 
 	var ctx fasthttp.RequestCtx
 	var req fasthttp.Request
@@ -96,7 +102,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	req.SetRequestURI(expectedRequestURI)
 	req.Header.SetHost(expectedHost)
 	req.Header.Add(fasthttp.HeaderTransferEncoding, expectedTransferEncoding)
-	req.BodyWriter().Write([]byte(expectedBody))
+	req.BodyWriter().Write([]byte(expectedBody)) // nolint:errcheck
 	for k, v := range expectedHeader {
 		req.Header.Set(k, v)
 	}
@@ -126,5 +132,39 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	expectedResponseBody := fmt.Sprintf("request body is %q", expectedBody)
 	if string(resp.Body()) != expectedResponseBody {
 		t.Fatalf("unexpected response body %q. Expecting %q", resp.Body(), expectedResponseBody)
+	}
+}
+
+func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value interface{}) fasthttp.RequestHandler {
+	return func(ctx *fasthttp.RequestCtx) {
+		ctx.SetUserValue(key, value)
+		next(ctx)
+	}
+}
+
+func TestContentType(t *testing.T) {
+	nethttpH := func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("<!doctype html><html>")) //nolint:errcheck
+	}
+	fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH))
+
+	var ctx fasthttp.RequestCtx
+	var req fasthttp.Request
+
+	req.SetRequestURI("http://example.com")
+
+	remoteAddr, err := net.ResolveTCPAddr("tcp", "1.2.3.4:80")
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	ctx.Init(&req, remoteAddr, nil)
+
+	fasthttpH(&ctx)
+
+	resp := &ctx.Response
+	got := string(resp.Header.Peek("Content-Type"))
+	expected := "text/html; charset=utf-8"
+	if got != expected {
+		t.Errorf("expected %q got %q", expected, got)
 	}
 }

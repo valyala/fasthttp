@@ -1,6 +1,6 @@
 // +build gofuzz
 
-package fasthttp
+package fuzz
 
 import (
 	"bufio"

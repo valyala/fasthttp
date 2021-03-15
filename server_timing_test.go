@@ -355,7 +355,7 @@ func benchmarkNetHTTPServerGet(b *testing.B, clientsCount, requestsPerConn int) 
 			if requestsPerConn == 1 {
 				h.Set(HeaderConnection, "close")
 			}
-			w.Write(fakeResponse)
+			w.Write(fakeResponse) //nolint:errcheck
 			registerServedRequest(b, ch)
 		}),
 	}
@@ -406,7 +406,7 @@ func benchmarkNetHTTPServerPost(b *testing.B, clientsCount, requestsPerConn int)
 			if requestsPerConn == 1 {
 				h.Set(HeaderConnection, "close")
 			}
-			w.Write(body)
+			w.Write(body) //nolint:errcheck
 			registerServedRequest(b, ch)
 		}),
 	}
@@ -447,7 +447,7 @@ func benchmarkServer(b *testing.B, s realServer, clientsCount, requestsPerConn i
 	ln := newFakeListener(b.N, clientsCount, requestsPerConn, request)
 	ch := make(chan struct{})
 	go func() {
-		s.Serve(ln)
+		s.Serve(ln) //nolint:errcheck
 		ch <- struct{}{}
 	}()
 

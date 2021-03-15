@@ -71,7 +71,7 @@ func BenchmarkWriteHexInt(b *testing.B) {
 		bw := bufio.NewWriter(&w)
 		i := 0
 		for pb.Next() {
-			writeHexInt(bw, i)
+			writeHexInt(bw, i) //nolint:errcheck
 			i++
 			if i > 0x7fffffff {
 				i = 0

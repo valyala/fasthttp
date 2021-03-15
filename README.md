@@ -1,4 +1,4 @@
-# fasthttp [![Build Status](https://travis-ci.org/valyala/fasthttp.svg)](https://travis-ci.org/valyala/fasthttp) [![GoDoc](https://godoc.org/github.com/valyala/fasthttp?status.svg)](http://godoc.org/github.com/valyala/fasthttp) [![fuzzit](https://app.fuzzit.dev/badge?org_id=fasthttp&branch=master)](https://fuzzit.dev) [![Go Report](https://goreportcard.com/badge/github.com/valyala/fasthttp)](https://goreportcard.com/report/github.com/valyala/fasthttp) [![Sourcegraph](https://sourcegraph.com/github.com/valyala/fasthttp/-/badge.svg)](https://sourcegraph.com/github.com/valyala/fasthttp?badge)
+# fasthttp [![Build Status](https://travis-ci.org/valyala/fasthttp.svg?branch=master)](https://travis-ci.org/valyala/fasthttp?branch=master) [![GoDoc](https://godoc.org/github.com/valyala/fasthttp?status.svg)](http://godoc.org/github.com/valyala/fasthttp) [![Go Report](https://goreportcard.com/badge/github.com/valyala/fasthttp)](https://goreportcard.com/report/github.com/valyala/fasthttp) [![Sourcegraph](https://sourcegraph.com/github.com/valyala/fasthttp/-/badge.svg)](https://sourcegraph.com/github.com/valyala/fasthttp?badge)
 
 ![FastHTTP – Fastest and reliable HTTP implementation in Go](https://github.com/fasthttp/docs-assets/raw/master/banner@0.5.png)
 
@@ -8,7 +8,7 @@ Currently fasthttp is successfully used by [VertaMedia](https://vertamedia.com/)
 in a production serving up to 200K rps from more than 1.5M concurrent keep-alive
 connections per physical server.
 
-[TechEmpower Benchmark round 18 results](https://www.techempower.com/benchmarks/#section=data-r18&hw=ph&test=plaintext)
+[TechEmpower Benchmark round 19 results](https://www.techempower.com/benchmarks/#section=data-r19&hw=ph&test=plaintext)
 
 [Server Benchmarks](#http-server-performance-comparison-with-nethttp)
 
@@ -169,7 +169,7 @@ go get -u github.com/valyala/fasthttp
 Unfortunately, fasthttp doesn't provide API identical to net/http.
 See the [FAQ](#faq) for details.
 There is [net/http -> fasthttp handler converter](https://godoc.org/github.com/valyala/fasthttp/fasthttpadaptor),
-but it is better to write fasthttp request handlers by hand in order to use 
+but it is better to write fasthttp request handlers by hand in order to use
 all of the fasthttp advantages (especially high performance :) ).
 
 Important points:
@@ -277,9 +277,11 @@ but there are more powerful third-party routers and web frameworks
 with fasthttp support:
 
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
-  * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
+  * [router](https://github.com/fasthttp/router)
   * [lu](https://github.com/vincentLiuxiang/lu)
   * [atreugo](https://github.com/savsgio/atreugo)
+  * [Fiber](https://github.com/gofiber/fiber)
+  * [Gearbox](https://github.com/gogearbox/gearbox)
 
   Net/http code with simple ServeMux is trivially converted to fasthttp code:
 
@@ -483,8 +485,10 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
     helpers for projects based on fasthttp.
   * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) - fast and
     powerful routing package for fasthttp servers.
-  * [fasthttprouter](https://github.com/buaazp/fasthttprouter) - a high
+  * [router](https://github.com/fasthttp/router) - a high
     performance fasthttp request router that scales well.
+  * [fastws](https://github.com/fasthttp/fastws) - Bloatless WebSocket package made for fasthttp
+    to handle Read/Write operations concurrently.
   * [gramework](https://github.com/gramework/gramework) - a web framework made by one of fasthttp maintainers
   * [lu](https://github.com/vincentLiuxiang/lu) - a high performance
     go middleware web framework which is based on fasthttp.
@@ -494,6 +498,8 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   * [atreugo](https://github.com/savsgio/atreugo) - High performance and extensible micro web framework with zero memory allocations in hot paths.
   * [kratgo](https://github.com/savsgio/kratgo) - Simple, lightweight and ultra-fast HTTP Cache to speed up your websites.
   * [kit-plugins](https://github.com/wencan/kit-plugins/tree/master/transport/fasthttp) - go-kit transport implementation for fasthttp.
+  * [Fiber](https://github.com/gofiber/fiber) - An Expressjs inspired web framework running on Fasthttp
+  * [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization
 
 
 # FAQ
@@ -523,7 +529,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
 
 * *Why fasthttp doesn't support HTTP/2.0 and WebSockets?*
 
-  [HTTP/2.0 support](https://github.com/fasthttp/http2) is in progress. [WebSockets](https://github.com/fasthttp/websockets) has been done already. 
+  [HTTP/2.0 support](https://github.com/fasthttp/http2) is in progress. [WebSockets](https://github.com/fasthttp/websockets) has been done already.
   Third parties also may use [RequestCtx.Hijack](https://godoc.org/github.com/valyala/fasthttp#RequestCtx.Hijack)
   for implementing these goodies.
 
@@ -548,7 +554,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
 
   Go1.5+. Older versions won't be supported, since their standard package
   [miss useful functions](https://github.com/valyala/fasthttp/issues/5).
-  
+
   **NOTE**: Go 1.9.7 is the oldest tested version. We recommend you to update as soon as you can. As of 1.11.3 we will drop 1.9.x support.
 
 * *Please provide real benchmark data and server information*
@@ -561,10 +567,12 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   Use third-party routers and web frameworks with fasthttp support:
 
     * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
-    * [fasthttprouter](https://github.com/buaazp/fasthttprouter)
+    * [router](https://github.com/fasthttp/router)
     * [gramework](https://github.com/gramework/gramework)
     * [lu](https://github.com/vincentLiuxiang/lu)
     * [atreugo](https://github.com/savsgio/atreugo)
+    * [Fiber](https://github.com/gofiber/fiber)
+    * [Gearbox](https://github.com/gogearbox/gearbox)
 
   See also [this issue](https://github.com/valyala/fasthttp/issues/9) for more info.
 

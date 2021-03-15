@@ -6,6 +6,7 @@ import (
 	"sync"
 )
 
+// ErrInmemoryListenerClosed indicates that the InmemoryListener is already closed.
 var ErrInmemoryListenerClosed = errors.New("InmemoryListener is already closed: use of closed network connection")
 
 // InmemoryListener provides in-memory dialer<->net.Listener implementation.
@@ -83,8 +84,8 @@ func (ln *InmemoryListener) Dial() (net.Conn, error) {
 		// Wait until the connection has been accepted.
 		<-accepted
 	} else {
-		sConn.Close()
-		cConn.Close()
+		sConn.Close() //nolint:errcheck
+		cConn.Close() //nolint:errcheck
 		cConn = nil
 	}
 	ln.lock.Unlock()
