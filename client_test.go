@@ -305,6 +305,34 @@ func TestClientNilResp(t *testing.T) {
 	}
 }
 
+func TestPipelineClientNilResp(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &PipelineClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	if err := c.Do(req, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DoTimeout(req, nil, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DoDeadline(req, nil, time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClientParseConn(t *testing.T) {
 	t.Parallel()
 
@@ -337,7 +365,6 @@ func TestClientParseConn(t *testing.T) {
 	if !regexp.MustCompile(`^127\.0\.0\.1:[0-9]{4,5}$`).MatchString(res.LocalAddr().String()) {
 		t.Fatalf("res LocalAddr addr match fail: %s, hope match: %s", res.LocalAddr().String(), "^127.0.0.1:[0-9]{4,5}$")
 	}
-
 }
 
 func TestClientPostArgs(t *testing.T) {
@@ -419,7 +446,6 @@ func TestClientRedirectSameSchema(t *testing.T) {
 		t.Fatalf("HostClient error code response %d", statusCode)
 		return
 	}
-
 }
 
 func TestClientRedirectClientChangingSchemaHttp2Https(t *testing.T) {
@@ -2601,7 +2627,6 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 					t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
 				}
 			}
-
 		}()
 	}
 	wg.Wait()
@@ -2694,7 +2719,6 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 					t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
 				}
 			}
-
 		}()
 	}
 	wg.Wait()

@@ -1443,8 +1443,7 @@ var (
 		"Make sure the server returns 'Connection: close' response header before closing the connection")
 )
 
-type timeoutError struct {
-}
+type timeoutError struct{}
 
 func (e *timeoutError) Error() string {
 	return "timeout"
@@ -1458,10 +1457,8 @@ func (e *timeoutError) Timeout() bool {
 	return true
 }
 
-var (
-	// ErrTimeout is returned from timed out calls.
-	ErrTimeout = &timeoutError{}
-)
+// ErrTimeout is returned from timed out calls.
+var ErrTimeout = &timeoutError{}
 
 // SetMaxConns sets up the maximum number of connections which may be established to all hosts listed in Addr.
 func (c *HostClient) SetMaxConns(newMaxConns int) {
@@ -1571,7 +1568,6 @@ func (c *HostClient) queueForIdle(w *wantConn) {
 
 func (c *HostClient) dialConnFor(w *wantConn) {
 	conn, err := c.dialHostHard()
-
 	if err != nil {
 		w.tryDeliver(nil, err)
 		c.decConnsCount()
@@ -1690,7 +1686,6 @@ func (c *HostClient) decConnsCount() {
 	if !dialed {
 		c.connsCount--
 	}
-
 }
 
 // ConnsCount returns connection count of HostClient
@@ -2078,7 +2073,6 @@ func (q *wantConnQueue) popFront() *wantConn {
 
 // peekFront returns the wantConn at the front of the queue without removing it.
 func (q *wantConnQueue) peekFront() *wantConn {
-
 	if q.headPos < len(q.head) {
 		return q.head[q.headPos]
 	}
@@ -2086,7 +2080,6 @@ func (q *wantConnQueue) peekFront() *wantConn {
 		return q.tail[0]
 	}
 	return nil
-
 }
 
 // cleanFront pops any wantConns that are no longer waiting from the head of the
@@ -2389,8 +2382,6 @@ func (c *PipelineClient) Do(req *Request, resp *Response) error {
 func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
 	c.init()
 
-	resp.Header.disableNormalizing = c.DisableHeaderNamesNormalizing
-
 	if c.DisablePathNormalizing {
 		req.URI().DisablePathNormalizing = true
 	}
@@ -2403,6 +2394,7 @@ func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
 	w := acquirePipelineWork(&c.workPool, 0)
 	w.req = req
 	if resp != nil {
+		resp.Header.disableNormalizing = c.DisableHeaderNamesNormalizing
 		w.resp = resp
 	} else {
 		w.resp = &w.respCopy
