@@ -285,11 +285,11 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		u.scheme = append(u.scheme[:0], strHTTPS...)
 	}
 
-	if n := bytes.Index(host, strAt); n >= 0 {
+	if n := bytes.IndexByte(host, '@'); n >= 0 {
 		auth := host[:n]
 		host = host[n+1:]
 
-		if n := bytes.Index(auth, strColon); n >= 0 {
+		if n := bytes.IndexByte(auth, ':'); n >= 0 {
 			u.username = append(u.username[:0], auth[:n]...)
 			u.password = append(u.password[:0], auth[n+1:]...)
 		} else {
