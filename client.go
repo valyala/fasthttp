@@ -293,6 +293,8 @@ type Client struct {
 	//
 	// By default will use isIdempotent function
 	RetryIf RetryIfFunc
+	
+	CheckRedirect func(*fasthttp.Request, *fasthttp.Response) error
 
 	mLock sync.Mutex
 	m     map[string]*HostClient
