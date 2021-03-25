@@ -297,6 +297,8 @@ type Client struct {
 	mLock sync.Mutex
 	m     map[string]*HostClient
 	ms    map[string]*HostClient
+	readerPool sync.Pool
+	writerPool sync.Pool
 }
 
 // Get returns the status code and body of url.
@@ -503,6 +505,8 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			DisablePathNormalizing:        c.DisablePathNormalizing,
 			MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
 			RetryIf:                       c.RetryIf,
+			clientReaderPool:              &c.readerPool,
+			clientWriterPool:              &c.writerPool,
 		}
 		m[string(host)] = hc
 		if len(m) == 1 {
@@ -750,6 +754,9 @@ type HostClient struct {
 
 	readerPool sync.Pool
 	writerPool sync.Pool
+
+	clientReaderPool *sync.Pool
+	clientWriterPool *sync.Pool
 
 	pendingRequests int32
 
@@ -1743,39 +1750,73 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 }
 
 func (c *HostClient) acquireWriter(conn net.Conn) *bufio.Writer {
-	v := c.writerPool.Get()
-	if v == nil {
-		n := c.WriteBufferSize
-		if n <= 0 {
-			n = defaultWriteBufferSize
+	var v interface{}
+	if c.clientWriterPool != nil {
+		v = c.clientWriterPool.Get()
+		if v == nil {
+			n := c.WriteBufferSize
+			if n <= 0 {
+				n = defaultWriteBufferSize
+			}
+			return bufio.NewWriterSize(conn, n)
 		}
-		return bufio.NewWriterSize(conn, n)
+	} else {
+		v = c.writerPool.Get()
+		if v == nil {
+			n := c.WriteBufferSize
+			if n <= 0 {
+				n = defaultWriteBufferSize
+			}
+			return bufio.NewWriterSize(conn, n)
+		}
 	}
+
 	bw := v.(*bufio.Writer)
 	bw.Reset(conn)
 	return bw
 }
 
 func (c *HostClient) releaseWriter(bw *bufio.Writer) {
-	c.writerPool.Put(bw)
+	if c.clientWriterPool != nil {
+		c.clientWriterPool.Put(bw)
+	} else {
+		c.writerPool.Put(bw)
+	}
 }
 
 func (c *HostClient) acquireReader(conn net.Conn) *bufio.Reader {
-	v := c.readerPool.Get()
-	if v == nil {
-		n := c.ReadBufferSize
-		if n <= 0 {
-			n = defaultReadBufferSize
+	var v interface{}
+	if c.clientReaderPool != nil {
+		v = c.clientReaderPool.Get()
+		if v == nil {
+			n := c.ReadBufferSize
+			if n <= 0 {
+				n = defaultReadBufferSize
+			}
+			return bufio.NewReaderSize(conn, n)
 		}
-		return bufio.NewReaderSize(conn, n)
+	} else {
+		v = c.readerPool.Get()
+		if v == nil {
+			n := c.ReadBufferSize
+			if n <= 0 {
+				n = defaultReadBufferSize
+			}
+			return bufio.NewReaderSize(conn, n)
+		}
 	}
+
 	br := v.(*bufio.Reader)
 	br.Reset(conn)
 	return br
 }
 
 func (c *HostClient) releaseReader(br *bufio.Reader) {
-	c.readerPool.Put(br)
+	if c.clientReaderPool != nil {
+		c.clientReaderPool.Put(br)
+	} else {
+		c.readerPool.Put(br)
+	}
 }
 
 func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
