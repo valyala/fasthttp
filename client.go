@@ -727,6 +727,14 @@ type HostClient struct {
 	// extra slashes are removed, special characters are encoded.
 	DisablePathNormalizing bool
 
+	// Will not log potentially sensitive content in error logs
+	//
+	// This option is useful for servers that handle sensitive data
+	// in the request/response.
+	//
+	// Client logs full errors by default.
+	SecureErrorLogMessage bool
+
 	// Maximum duration for waiting for a free connection.
 	//
 	// By default will not waiting, return ErrNoFreeConns immediately
@@ -1331,6 +1339,12 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	if resp == nil {
 		panic("BUG: resp cannot be nil")
 	}
+
+	// Secure header error logs configuration
+	resp.secureErrorLogMessage = c.SecureErrorLogMessage
+	resp.Header.secureErrorLogMessage = c.SecureErrorLogMessage
+	req.secureErrorLogMessage = c.SecureErrorLogMessage
+	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
 	if c.IsTLS != bytes.Equal(req.uri.Scheme(), strHTTPS) {
 		return false, ErrHostClientRedirectToDifferentScheme

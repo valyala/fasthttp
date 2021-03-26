@@ -41,6 +41,7 @@ type Request struct {
 
 	multipartForm         *multipart.Form
 	multipartFormBoundary string
+	secureErrorLogMessage        bool
 
 	// Group bool members in order to reduce Request object size.
 	parsedURI      bool
@@ -88,6 +89,7 @@ type Response struct {
 	SkipBody bool
 
 	keepBodyBuffer bool
+	secureErrorLogMessage bool
 
 	// Remote TCPAddr from concurrently net.Conn
 	raddr net.Addr
@@ -1368,6 +1370,9 @@ func (req *Request) Write(w *bufio.Writer) error {
 	if hasBody {
 		_, err = w.Write(body)
 	} else if len(body) > 0 {
+		if req.secureErrorLogMessage {
+			return fmt.Errorf("non-zero body for non-POST request")
+		}
 		return fmt.Errorf("non-zero body for non-POST request. body=%q", body)
 	}
 	return err

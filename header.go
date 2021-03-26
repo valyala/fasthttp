@@ -35,6 +35,7 @@ type ResponseHeader struct {
 	statusCode         int
 	contentLength      int
 	contentLengthBytes []byte
+	secureErrorLogMessage     bool
 
 	contentType []byte
 	server      []byte
@@ -65,6 +66,7 @@ type RequestHeader struct {
 
 	contentLength      int
 	contentLengthBytes []byte
+	secureErrorLogMessage     bool
 
 	method      []byte
 	requestURI  []byte
@@ -1354,6 +1356,11 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 
 		// This is for go 1.6 bug. See https://github.com/golang/go/issues/14121 .
 		if err == bufio.ErrBufferFull {
+			if h.secureErrorLogMessage {
+				return &ErrSmallBuffer{
+					error: fmt.Errorf("error when reading response headers"),
+				}
+			}
 			return &ErrSmallBuffer{
 				error: fmt.Errorf("error when reading response headers: %s", errSmallBuffer),
 			}
@@ -1364,15 +1371,15 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 	b = mustPeekBuffered(r)
 	headersLen, errParse := h.parse(b)
 	if errParse != nil {
-		return headerError("response", err, errParse, b)
+		return headerError("response", err, errParse, b, h.secureErrorLogMessage)
 	}
 	mustDiscard(r, headersLen)
 	return nil
 }
 
-func headerError(typ string, err, errParse error, b []byte) error {
+func headerError(typ string, err, errParse error, b []byte, secureErrorLogMessage bool) error {
 	if errParse != errNeedMore {
-		return headerErrorMsg(typ, errParse, b)
+		return headerErrorMsg(typ, errParse, b, secureErrorLogMessage)
 	}
 	if err == nil {
 		return errNeedMore
@@ -1385,14 +1392,17 @@ func headerError(typ string, err, errParse error, b []byte) error {
 	}
 
 	if err != bufio.ErrBufferFull {
-		return headerErrorMsg(typ, err, b)
+		return headerErrorMsg(typ, err, b, secureErrorLogMessage)
 	}
 	return &ErrSmallBuffer{
-		error: headerErrorMsg(typ, errSmallBuffer, b),
+		error: headerErrorMsg(typ, errSmallBuffer, b, secureErrorLogMessage),
 	}
 }
 
-func headerErrorMsg(typ string, err error, b []byte) error {
+func headerErrorMsg(typ string, err error, b []byte, secureErrorLogMessage bool) error {
+	if secureErrorLogMessage {
+		return fmt.Errorf("error when reading %s headers: %s. Buffer size=%d", typ, err, len(b))
+	}
 	return fmt.Errorf("error when reading %s headers: %s. Buffer size=%d, contents: %s", typ, err, len(b), bufferSnippet(b))
 }
 
@@ -1444,7 +1454,7 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 	b = mustPeekBuffered(r)
 	headersLen, errParse := h.parse(b)
 	if errParse != nil {
-		return headerError("request", err, errParse, b)
+		return headerError("request", err, errParse, b, h.secureErrorLogMessage)
 	}
 	mustDiscard(r, headersLen)
 	return nil
@@ -1724,6 +1734,9 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	// parse protocol
 	n := bytes.IndexByte(b, ' ')
 	if n < 0 {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("cannot find whitespace in the first line of response")
+		}
 		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
 	h.noHTTP11 = !bytes.Equal(b[:n], strHTTP11)
@@ -1732,9 +1745,15 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	// parse status code
 	h.statusCode, n, err = parseUintBuf(b)
 	if err != nil {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("cannot parse response status code: %s", err)
+		}
 		return 0, fmt.Errorf("cannot parse response status code: %s. Response %q", err, buf)
 	}
 	if len(b) > n && b[n] != ' ' {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unexpected char at the end of status code")
+		}
 		return 0, fmt.Errorf("unexpected char at the end of status code. Response %q", buf)
 	}
 
@@ -1754,6 +1773,9 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	// parse method
 	n := bytes.IndexByte(b, ' ')
 	if n <= 0 {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("cannot find http request method")
+		}
 		return 0, fmt.Errorf("cannot find http request method in %q", buf)
 	}
 	h.method = append(h.method[:0], b[:n]...)
@@ -1767,6 +1789,9 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		n = len(b)
 		protoStr = strHTTP10
 	} else if n == 0 {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("requestURI cannot be empty")
+		}
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
 	} else if !bytes.Equal(b[n+1:], strHTTP11) {
 		h.noHTTP11 = true
