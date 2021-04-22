@@ -2966,6 +2966,56 @@ func TestServerRemoteAddr(t *testing.T) {
 	verifyResponse(t, br, 200, "text/html", "requestURI=/foo1, remoteAddr=1.2.3.4:8765, remoteIP=1.2.3.4")
 }
 
+func TestServerCustomRemoteAddr(t *testing.T) {
+	t.Parallel()
+
+	customRemoteAddrHandler := func(h RequestHandler) RequestHandler {
+		return func(ctx *RequestCtx) {
+			ctx.SetRemoteAddr(&net.TCPAddr{
+				IP:   []byte{1, 2, 3, 5},
+				Port: 0,
+			})
+			h(ctx)
+		}
+	}
+
+	s := &Server{
+		Handler: customRemoteAddrHandler(func(ctx *RequestCtx) {
+			h := &ctx.Request.Header
+			ctx.Success("text/html", []byte(fmt.Sprintf("requestURI=%s, remoteAddr=%s, remoteIP=%s",
+				h.RequestURI(), ctx.RemoteAddr(), ctx.RemoteIP())))
+		}),
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo1 HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	rwx := &readWriterRemoteAddr{
+		rw: rw,
+		addr: &net.TCPAddr{
+			IP:   []byte{1, 2, 3, 4},
+			Port: 8765,
+		},
+	}
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(rwx)
+	}()
+
+	select {
+	case err := <-ch:
+		if err != nil {
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("timeout")
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, 200, "text/html", "requestURI=/foo1, remoteAddr=1.2.3.5:0, remoteIP=1.2.3.5")
+}
+
 type readWriterRemoteAddr struct {
 	net.Conn
 	rw   io.ReadWriteCloser
