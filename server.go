@@ -572,6 +572,7 @@ type RequestCtx struct {
 	connID         uint64
 	connRequestNum uint64
 	connTime       time.Time
+	remoteAddr     net.Addr
 
 	time time.Time
 
@@ -1091,6 +1092,9 @@ func (ctx *RequestCtx) IsHead() bool {
 //
 // Always returns non-nil result.
 func (ctx *RequestCtx) RemoteAddr() net.Addr {
+	if ctx.remoteAddr != nil {
+		return ctx.remoteAddr
+	}
 	if ctx.c == nil {
 		return zeroTCPAddr
 	}
@@ -1099,6 +1103,14 @@ func (ctx *RequestCtx) RemoteAddr() net.Addr {
 		return zeroTCPAddr
 	}
 	return addr
+}
+
+// SetRemoteAddr sets remote address to the given value.
+//
+// Set nil value to resore default behaviour for using
+// connection remote address.
+func (ctx *RequestCtx) SetRemoteAddr(remoteAddr net.Addr) {
+	ctx.remoteAddr = remoteAddr
 }
 
 // LocalAddr returns server address for the given request.
@@ -2524,6 +2536,7 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 // See https://github.com/valyala/httpteleport for details.
 func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage bool) {
 	ctx.c = conn
+	ctx.remoteAddr = nil
 	ctx.logger.logger = logger
 	ctx.connID = nextConnID()
 	ctx.s = fakeServer
@@ -2636,6 +2649,7 @@ func (s *Server) releaseCtx(ctx *RequestCtx) {
 		panic("BUG: cannot release timed out RequestCtx")
 	}
 	ctx.c = nil
+	ctx.remoteAddr = nil
 	ctx.fbr.c = nil
 	s.ctxPool.Put(ctx)
 }
