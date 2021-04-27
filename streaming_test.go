@@ -101,7 +101,7 @@ aaaaaaaaaa`
 }
 
 func getChunkedTestEnv(t testing.TB) (*fasthttputil.InmemoryListener, []byte) {
-	body := createFixedBody(3)
+	body := createFixedBody(128 * 1024)
 	chunkedBody := createChunkedBody(body)
 
 	testHandler := func(ctx *RequestCtx) {
