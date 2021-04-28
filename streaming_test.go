@@ -100,7 +100,7 @@ aaaaaaaaaa`
 	}
 }
 
-func TestRequestStream(t *testing.T) {
+func getChunkedTestEnv(t testing.TB) (*fasthttputil.InmemoryListener, []byte) {
 	body := createFixedBody(3)
 	chunkedBody := createChunkedBody(body)
 
@@ -111,8 +111,8 @@ func TestRequestStream(t *testing.T) {
 			t.Error("unexpected error while reading request body stream")
 		}
 
-		if !bytes.Equal(chunkedBody, bodyBytes) {
-			t.Errorf("unexpected request body, expected %q, got %q", chunkedBody, bodyBytes)
+		if !bytes.Equal(body, bodyBytes) {
+			t.Errorf("unexpected request body, expected %q, got %q", body, bodyBytes)
 		}
 	}
 	s := &Server{
@@ -133,16 +133,23 @@ func TestRequestStream(t *testing.T) {
 	req := Request{}
 	req.SetHost("localhost")
 	req.Header.SetMethod("POST")
-	req.SetBodyStream(bytes.NewBuffer(chunkedBody), len(chunkedBody))
 	req.Header.Set("transfer-encoding", "chunked")
 	req.Header.SetContentLength(-1)
 
-	formattedRequest := req.String()
+	formattedRequest := req.Header.Header()
+	formattedRequest = append(formattedRequest, chunkedBody...)
+
+	return ln, formattedRequest
+}
+
+func TestRequestStream(t *testing.T) {
+	ln, formattedRequest := getChunkedTestEnv(t)
+
 	c, err := ln.Dial()
 	if err != nil {
 		t.Errorf("unexpected error while dialing: %s", err)
 	}
-	if _, err = c.Write([]byte(formattedRequest)); err != nil {
+	if _, err = c.Write(formattedRequest); err != nil {
 		t.Errorf("unexpected error while writing request: %s", err)
 	}
 
@@ -154,46 +161,9 @@ func TestRequestStream(t *testing.T) {
 }
 
 func BenchmarkRequestStreamE2E(b *testing.B) {
-	body := createFixedBody(3)
-	chunkedBody := createChunkedBody(body)
+	ln, formattedRequest := getChunkedTestEnv(b)
 
-	testHandler := func(ctx *RequestCtx) {
-		bodyBytes, err := ioutil.ReadAll(ctx.RequestBodyStream())
-		if err != nil {
-			b.Logf("ioutil read returned err=%s", err)
-			b.Error("unexpected error while reading request body stream")
-		}
-
-		if !bytes.Equal(chunkedBody, bodyBytes) {
-			b.Errorf("unexpected request body, expected %q, got %q", chunkedBody, bodyBytes)
-		}
-	}
-	s := &Server{
-		Handler:            testHandler,
-		StreamRequestBody:  true,
-		MaxRequestBodySize: 1, // easier to test with small limit
-	}
-
-	ln := fasthttputil.NewInmemoryListener()
 	wg := &sync.WaitGroup{}
-
-	go func() {
-		err := s.Serve(ln)
-
-		if err != nil {
-			b.Errorf("could not serve listener: %s", err)
-		}
-	}()
-
-	req := Request{}
-	req.SetHost("localhost")
-	req.Header.SetMethod("POST")
-	req.SetBodyStream(bytes.NewBuffer(chunkedBody), len(chunkedBody))
-	req.Header.Set("transfer-encoding", "chunked")
-	req.Header.SetContentLength(-1)
-
-	formattedRequest := []byte(req.String())
-
 	wg.Add(4)
 	for i := 0; i < 4; i++ {
 		go func(wg *sync.WaitGroup) {
