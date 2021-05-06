@@ -428,12 +428,12 @@ func TestClientRedirectSameSchema(t *testing.T) {
 		return
 	}
 
-	reqClient := AcquireHostClient()
-	defer ReleaseHostClient(reqClient)
-	reqClient.IsTLS = true
-	reqClient.Addr = urlParsed.Host
-	reqClient.TLSConfig = &tls.Config{
-		InsecureSkipVerify: true,
+	reqClient := &HostClient{
+		IsTLS: true,
+		Addr:  urlParsed.Host,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
 	}
 
 	statusCode, _, err := reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
@@ -506,11 +506,11 @@ func TestClientRedirectHostClientChangingSchemaHttp2Https(t *testing.T) {
 		return
 	}
 
-	reqClient := AcquireHostClient()
-	defer ReleaseHostClient(reqClient)
-	reqClient.Addr = urlParsed.Host
-	reqClient.TLSConfig = &tls.Config{
-		InsecureSkipVerify: true,
+	reqClient := &HostClient{
+		Addr: urlParsed.Host,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
 	}
 
 	_, _, err = reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
@@ -648,12 +648,12 @@ func TestClientReadTimeout(t *testing.T) {
 	}
 	go s.Serve(ln) //nolint:errcheck
 
-	c := AcquireHostClient()
-	defer ReleaseHostClient(c)
-	c.ReadTimeout = time.Second * 4
-	c.MaxIdemponentCallAttempts = 1
-	c.Dial = func(addr string) (net.Conn, error) {
-		return ln.Dial()
+	c := &HostClient{
+		ReadTimeout:               time.Second * 4,
+		MaxIdemponentCallAttempts: 1,
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
 	}
 
 	req := AcquireRequest()
@@ -1206,11 +1206,11 @@ func TestHostClientPendingRequests(t *testing.T) {
 		close(serverStopCh)
 	}()
 
-	c := AcquireHostClient()
-	defer ReleaseHostClient(c)
-	c.Addr = "foobar"
-	c.Dial = func(addr string) (net.Conn, error) {
-		return ln.Dial()
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
 	}
 
 	pendingRequests := c.PendingRequests()
@@ -1306,13 +1306,13 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 		close(serverStopCh)
 	}()
 
-	c := AcquireHostClient()
-	defer ReleaseHostClient(c)
-	c.Addr = "foobar"
-	c.Dial = func(addr string) (net.Conn, error) {
-		return ln.Dial()
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConns: 1,
 	}
-	c.MaxConns = 1
 
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
@@ -1384,13 +1384,13 @@ func TestHostClientMaxConnDuration(t *testing.T) {
 		close(serverStopCh)
 	}()
 
-	c := AcquireHostClient()
-	defer ReleaseHostClient(c)
-	c.Addr = "foobar"
-	c.Dial = func(addr string) (net.Conn, error) {
-		return ln.Dial()
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConnDuration: 10 * time.Millisecond,
 	}
-	c.MaxConnDuration = 10 * time.Millisecond
 
 	for i := 0; i < 5; i++ {
 		statusCode, body, err := c.Get(nil, "http://aaaa.com/bbb/cc")
@@ -1440,13 +1440,12 @@ func TestHostClientMultipleAddrs(t *testing.T) {
 	}()
 
 	dialsCount := make(map[string]int)
-
-	c := AcquireHostClient()
-	defer ReleaseHostClient(c)
-	c.Addr = "foo,bar,baz"
-	c.Dial = func(addr string) (net.Conn, error) {
-		dialsCount[addr]++
-		return ln.Dial()
+	c := &HostClient{
+		Addr: "foo,bar,baz",
+		Dial: func(addr string) (net.Conn, error) {
+			dialsCount[addr]++
+			return ln.Dial()
+		},
 	}
 
 	for i := 0; i < 9; i++ {
@@ -1510,11 +1509,11 @@ func TestClientFollowRedirects(t *testing.T) {
 		close(serverStopCh)
 	}()
 
-	c := AcquireHostClient()
-	defer ReleaseHostClient(c)
-	c.Addr = "xxx"
-	c.Dial = func(addr string) (net.Conn, error) {
-		return ln.Dial()
+	c := &HostClient{
+		Addr: "xxx",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
 	}
 
 	for i := 0; i < 10; i++ {
@@ -2218,7 +2217,6 @@ func TestHostClientGet(t *testing.T) {
 	s := startEchoServer(t, "unix", addr)
 	defer s.Stop()
 	c := createEchoClient(t, "unix", addr)
-	defer ReleaseHostClient(c)
 
 	testHostClientGet(t, c, 100)
 }
@@ -2231,7 +2229,6 @@ func TestHostClientPost(t *testing.T) {
 	s := startEchoServer(t, "unix", addr)
 	defer s.Stop()
 	c := createEchoClient(t, "unix", addr)
-	defer ReleaseHostClient(c)
 
 	testHostClientPost(t, c, 100)
 }
@@ -2244,7 +2241,6 @@ func TestHostClientConcurrent(t *testing.T) {
 	s := startEchoServer(t, "unix", addr)
 	defer s.Stop()
 	c := createEchoClient(t, "unix", addr)
-	defer ReleaseHostClient(c)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -2362,12 +2358,12 @@ type clientGetter interface {
 }
 
 func createEchoClient(t *testing.T, network, addr string) *HostClient {
-	c := AcquireHostClient()
-	c.Addr = addr
-	c.Dial = func(addr string) (net.Conn, error) {
-		return net.Dial(network, addr)
+	return &HostClient{
+		Addr: addr,
+		Dial: func(addr string) (net.Conn, error) {
+			return net.Dial(network, addr)
+		},
 	}
-	return c
 }
 
 type testEchoServer struct {
@@ -2518,14 +2514,14 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 		close(serverStopCh)
 	}()
 
-	c := AcquireHostClient()
-	defer ReleaseHostClient(c)
-	c.Addr = "foobar"
-	c.Dial = func(addr string) (net.Conn, error) {
-		return ln.Dial()
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConns:           1,
+		MaxConnWaitTimeout: 200 * time.Millisecond,
 	}
-	c.MaxConns = 1
-	c.MaxConnWaitTimeout = 200 * time.Millisecond
 
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
@@ -2595,14 +2591,14 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 		close(serverStopCh)
 	}()
 
-	c := AcquireHostClient()
-	defer ReleaseHostClient(c)
-	c.Addr = "foobar"
-	c.Dial = func(addr string) (net.Conn, error) {
-		return ln.Dial()
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConns:           1,
+		MaxConnWaitTimeout: 10 * time.Millisecond,
 	}
-	c.MaxConns = 1
-	c.MaxConnWaitTimeout = 10 * time.Millisecond
 
 	var errNoFreeConnsCount uint32
 	for i := 0; i < 5; i++ {
@@ -2687,14 +2683,14 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 		close(serverStopCh)
 	}()
 
-	c := AcquireHostClient()
-	defer ReleaseHostClient(c)
-	c.Addr = "foobar"
-	c.Dial = func(addr string) (net.Conn, error) {
-		return ln.Dial()
+	c := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConns:           1,
+		MaxConnWaitTimeout: maxConnWaitTimeout,
 	}
-	c.MaxConns = 1
-	c.MaxConnWaitTimeout = maxConnWaitTimeout
 
 	var errTimeoutCount uint32
 	for i := 0; i < 5; i++ {

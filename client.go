@@ -294,9 +294,9 @@ type Client struct {
 	// By default will use isIdempotent function
 	RetryIf RetryIfFunc
 
-	mLock sync.Mutex
-	m     map[string]*HostClient
-	ms    map[string]*HostClient
+	mLock      sync.Mutex
+	m          map[string]*HostClient
+	ms         map[string]*HostClient
 	readerPool sync.Pool
 	writerPool sync.Pool
 }
@@ -2000,6 +2000,15 @@ func (hc *HostClient) Reset() {
 
 	hc.addrIdx = 0
 	hc.tlsConfigMap = nil
+
+	// Release pools from Client.
+	if hc.clientReaderPool != nil {
+		hc.clientReaderPool = nil
+	}
+	if hc.clientWriterPool != nil {
+		hc.clientWriterPool = nil
+	}
+
 	hc.pendingRequests = 0
 	hc.connsCleanerRun = false
 }
