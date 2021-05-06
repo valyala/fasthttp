@@ -2399,6 +2399,31 @@ func TestResponseHeaderReadError(t *testing.T) {
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n")
 }
 
+func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
+	h := &ResponseHeader{
+		secureErrorLogMessage: true,
+	}
+
+	// incorrect first line
+	testResponseHeaderReadSecuredError(t, h, "fo")
+	testResponseHeaderReadSecuredError(t, h, "foobarbaz")
+	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1")
+	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 ")
+	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 s")
+
+	// non-numeric status code
+	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 foobar OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n\r\n")
+	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 123foobar OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n\r\n")
+	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 foobar344 OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n\r\n")
+
+
+	// no headers
+	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 200 OK\r\n")
+
+	// no trailing crlf
+	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n")
+}
+
 func TestRequestHeaderReadError(t *testing.T) {
 	t.Parallel()
 
@@ -2417,6 +2442,25 @@ func TestRequestHeaderReadError(t *testing.T) {
 	testRequestHeaderReadError(t, h, "POST /a HTTP/1.1\r\nHost: bb\r\nContent-Type: aa\r\nContent-Length: dff\r\n\r\nqwerty")
 }
 
+func TestRequestHeaderReadSecuredError(t *testing.T) {
+	t.Parallel()
+
+	h := &RequestHeader{
+		secureErrorLogMessage: true,
+	}
+
+	// incorrect first line
+	testRequestHeaderReadSecuredError(t, h, "fo")
+	testRequestHeaderReadSecuredError(t, h, "GET ")
+	testRequestHeaderReadSecuredError(t, h, "GET / HTTP/1.1\r")
+
+	// missing RequestURI
+	testRequestHeaderReadSecuredError(t, h, "GET  HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	// post with invalid content-length
+	testRequestHeaderReadSecuredError(t, h, "POST /a HTTP/1.1\r\nHost: bb\r\nContent-Type: aa\r\nContent-Length: dff\r\n\r\nqwerty")
+}
+
 func testResponseHeaderReadError(t *testing.T, h *ResponseHeader, headers string) {
 	r := bytes.NewBufferString(headers)
 	br := bufio.NewReader(r)
@@ -2424,7 +2468,21 @@ func testResponseHeaderReadError(t *testing.T, h *ResponseHeader, headers string
 	if err == nil {
 		t.Fatalf("Expecting error when reading response header %q", headers)
 	}
+	// make sure response header works after error
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Type: foo/bar\r\nContent-Length: 12345\r\n\r\nsss",
+		200, 12345, "foo/bar", "sss")
+}
 
+func testResponseHeaderReadSecuredError(t *testing.T, h *ResponseHeader, headers string) {
+	r := bytes.NewBufferString(headers)
+	br := bufio.NewReader(r)
+	err := h.Read(br)
+	if err == nil {
+		t.Fatalf("Expecting error when reading response header %q", headers)
+	}
+	if strings.Contains(err.Error(), headers) {
+		t.Fatalf("Not expecting header content in err %q", err)
+	}
 	// make sure response header works after error
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Type: foo/bar\r\nContent-Length: 12345\r\n\r\nsss",
 		200, 12345, "foo/bar", "sss")
@@ -2438,6 +2496,21 @@ func testRequestHeaderReadError(t *testing.T, h *RequestHeader, headers string) 
 		t.Fatalf("Expecting error when reading request header %q", headers)
 	}
 
+	// make sure request header works after error
+	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\nHost: aaaa\r\n\r\nxxx",
+		-2, "/foo/bar", "aaaa", "", "", "xxx")
+}
+
+func testRequestHeaderReadSecuredError(t *testing.T, h *RequestHeader, headers string) {
+	r := bytes.NewBufferString(headers)
+	br := bufio.NewReader(r)
+	err := h.Read(br)
+	if err == nil {
+		t.Fatalf("Expecting error when reading request header %q", headers)
+	}
+	if strings.Contains(err.Error(), headers) {
+		t.Fatalf("Not expecting header content in err %q", err)
+	}
 	// make sure request header works after error
 	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\nHost: aaaa\r\n\r\nxxx",
 		-2, "/foo/bar", "aaaa", "", "", "xxx")
