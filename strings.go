@@ -21,7 +21,6 @@ var (
 	strColonSlashSlash  = []byte("://")
 	strColonSpace       = []byte(": ")
 	strGMT              = []byte("GMT")
-	strAt               = []byte("@")
 
 	strResponseContinue = []byte("HTTP/1.1 100 Continue\r\n\r\n")
 

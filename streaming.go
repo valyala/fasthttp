@@ -3,7 +3,6 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"io"
 	"sync"
 
@@ -15,36 +14,47 @@ type requestStream struct {
 	reader          *bufio.Reader
 	totalBytesRead  int
 	contentLength   int
+	chunkLeft       int
 }
 
 func (rs *requestStream) Read(p []byte) (int, error) {
+	var (
+		n   int
+		err error
+	)
 	if rs.contentLength == -1 {
-		p = p[:0]
-		strCRLFLen := len(strCRLF)
-		chunkSize, err := parseChunkSize(rs.reader)
-		if err != nil {
-			return len(p), err
-		}
-		p, err = appendBodyFixedSize(rs.reader, p, chunkSize+strCRLFLen)
-		if err != nil {
-			return len(p), err
-		}
-		if !bytes.Equal(p[len(p)-strCRLFLen:], strCRLF) {
-			return len(p), ErrBrokenChunk{
-				error: fmt.Errorf("cannot find crlf at the end of chunk"),
+		if rs.chunkLeft == 0 {
+			chunkSize, err := parseChunkSize(rs.reader)
+			if err != nil {
+				return 0, err
 			}
+			if chunkSize == 0 {
+				err = readCrLf(rs.reader)
+				if err == nil {
+					err = io.EOF
+				}
+				return 0, err
+			}
+			rs.chunkLeft = chunkSize
 		}
-		p = p[:len(p)-strCRLFLen]
-		if chunkSize == 0 {
-			return len(p), io.EOF
+		bytesToRead := len(p)
+		if rs.chunkLeft < len(p) {
+			bytesToRead = rs.chunkLeft
 		}
-		return len(p), nil
+		n, err = rs.reader.Read(p[:bytesToRead])
+		rs.totalBytesRead += n
+		rs.chunkLeft -= n
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+		if err == nil && rs.chunkLeft == 0 {
+			err = readCrLf(rs.reader)
+		}
+		return n, err
 	}
 	if rs.totalBytesRead == rs.contentLength {
 		return 0, io.EOF
 	}
-	var n int
-	var err error
 	prefetchedSize := int(rs.prefetchedBytes.Size())
 	if prefetchedSize > rs.totalBytesRead {
 		left := prefetchedSize - rs.totalBytesRead
@@ -87,6 +97,7 @@ func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, content
 func releaseRequestStream(rs *requestStream) {
 	rs.prefetchedBytes = nil
 	rs.totalBytesRead = 0
+	rs.chunkLeft = 0
 	rs.reader = nil
 	requestStreamPool.Put(rs)
 }

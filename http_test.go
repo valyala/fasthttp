@@ -2212,6 +2212,7 @@ func TestRequestRawBodyCopyTo(t *testing.T) {
 type testReader struct {
 	read chan (int)
 	cb   chan (struct{})
+	onClose func() error 
 }
 
 func (r *testReader) Read(b []byte) (int, error) {
@@ -2228,6 +2229,13 @@ func (r *testReader) Read(b []byte) (int, error) {
 	}
 
 	return read, nil
+}
+
+func (r *testReader) Close() error {
+	if r.onClose != nil {
+		return r.onClose()
+	}
+	return nil
 }
 
 func TestResponseImmediateHeaderFlushRegressionFixedLength(t *testing.T) {
@@ -2301,6 +2309,42 @@ func TestResponseImmediateHeaderFlushFixedLength(t *testing.T) {
 	<-waitForIt
 }
 
+func TestResponseImmediateHeaderFlushFixedLengthSkipBody(t *testing.T) {
+	t.Parallel()
+
+	var r Response
+
+	r.ImmediateHeaderFlush = true
+	r.SkipBody = true
+
+	ch := make(chan int)
+	cb := make(chan struct{})
+
+	buf := &testReader{read: ch, cb: cb}
+
+	r.SetBodyStream(buf, 0)
+
+	b := []byte{}
+	w := bytes.NewBuffer(b)
+	bb := bufio.NewWriter(w)
+
+	var headersOnClose string
+	buf.onClose = func() error {
+		headersOnClose = w.String()
+		return nil
+	}
+
+	bw := &r
+
+	if err := bw.Write(bb); err != nil {
+		t.Errorf("unexpected error: %s", err)
+	}
+
+	if !strings.Contains(headersOnClose, "Content-Length: 0") {
+		t.Fatalf("Expected headers to be eagerly flushed")
+	}
+}
+
 func TestResponseImmediateHeaderFlushChunked(t *testing.T) {
 	t.Parallel()
 
@@ -2345,6 +2389,42 @@ func TestResponseImmediateHeaderFlushChunked(t *testing.T) {
 	ch <- -1
 
 	<-waitForIt
+}
+
+func TestResponseImmediateHeaderFlushChunkedNoBody(t *testing.T) {
+	t.Parallel()
+
+	var r Response
+
+	r.ImmediateHeaderFlush = true
+	r.SkipBody = true
+
+	ch := make(chan int)
+	cb := make(chan struct{})
+
+	buf := &testReader{read: ch, cb: cb}
+
+	r.SetBodyStream(buf, -1)
+
+	b := []byte{}
+	w := bytes.NewBuffer(b)
+	bb := bufio.NewWriter(w)
+
+	var headersOnClose string
+	buf.onClose = func() error {
+		headersOnClose = w.String()
+		return nil
+	}
+
+	bw := &r
+
+	if err := bw.Write(bb); err != nil {
+		t.Errorf("unexpected error: %s", err)
+	}
+
+	if !strings.Contains(headersOnClose, "Transfer-Encoding: chunked") {
+		t.Fatalf("Expected headers to be eagerly flushed")
+	}
 }
 
 type ErroneousBodyStream struct {

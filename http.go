@@ -41,6 +41,7 @@ type Request struct {
 
 	multipartForm         *multipart.Form
 	multipartFormBoundary string
+	secureErrorLogMessage        bool
 
 	// Group bool members in order to reduce Request object size.
 	parsedURI      bool
@@ -88,6 +89,7 @@ type Response struct {
 	SkipBody bool
 
 	keepBodyBuffer bool
+	secureErrorLogMessage bool
 
 	// Remote TCPAddr from concurrently net.Conn
 	raddr net.Addr
@@ -1368,6 +1370,9 @@ func (req *Request) Write(w *bufio.Writer) error {
 	if hasBody {
 		_, err = w.Write(body)
 	} else if len(body) > 0 {
+		if req.secureErrorLogMessage {
+			return fmt.Errorf("non-zero body for non-POST request")
+		}
 		return fmt.Errorf("non-zero body for non-POST request. body=%q", body)
 	}
 	return err
@@ -1716,21 +1721,21 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (err error
 		}
 	}
 	if contentLength >= 0 {
-		if err = resp.Header.Write(w); err == nil && sendBody {
+		if err = resp.Header.Write(w); err == nil {
 			if resp.ImmediateHeaderFlush {
 				err = w.Flush()
 			}
-			if err == nil {
+			if err == nil && sendBody {
 				err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
 			}
 		}
 	} else {
 		resp.Header.SetContentLength(-1)
-		if err = resp.Header.Write(w); err == nil && sendBody {
+		if err = resp.Header.Write(w); err == nil {
 			if resp.ImmediateHeaderFlush {
 				err = w.Flush()
 			}
-			if err == nil {
+			if err == nil && sendBody {
 				err = writeBodyChunked(w, resp.bodyStream)
 			}
 		}
@@ -2067,25 +2072,35 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 		if c == ' ' {
 			continue
 		}
-		if c != '\r' {
+		if err := r.UnreadByte(); err != nil {
 			return -1, ErrBrokenChunk{
-				error: fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\r'),
+				error: fmt.Errorf("cannot unread '\r' char at the end of chunk size: %s", err),
 			}
 		}
 		break
 	}
-	c, err := r.ReadByte()
+	err = readCrLf(r)
 	if err != nil {
-		return -1, ErrBrokenChunk{
-			error: fmt.Errorf("cannot read '\n' char at the end of chunk size: %s", err),
-		}
-	}
-	if c != '\n' {
-		return -1, ErrBrokenChunk{
-			error: fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, '\n'),
-		}
+		return -1, err
 	}
 	return n, nil
+}
+
+func readCrLf(r *bufio.Reader) error {
+	for _, exp := range []byte{'\r', '\n'} {
+		c, err := r.ReadByte()
+		if err != nil {
+			return ErrBrokenChunk{
+				error: fmt.Errorf("cannot read %q char at the end of chunk size: %s", exp, err),
+			}
+		}
+		if c != exp {
+			return ErrBrokenChunk{
+				error: fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, exp),
+			}
+		}
+	}
+	return nil
 }
 
 func round2(n int) int {
