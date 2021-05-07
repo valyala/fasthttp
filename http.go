@@ -41,7 +41,7 @@ type Request struct {
 
 	multipartForm         *multipart.Form
 	multipartFormBoundary string
-	secureErrorLogMessage        bool
+	secureErrorLogMessage bool
 
 	// Group bool members in order to reduce Request object size.
 	parsedURI      bool
@@ -88,7 +88,7 @@ type Response struct {
 	// Use it for writing HEAD responses.
 	SkipBody bool
 
-	keepBodyBuffer bool
+	keepBodyBuffer        bool
 	secureErrorLogMessage bool
 
 	// Remote TCPAddr from concurrently net.Conn
@@ -1111,7 +1111,10 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 		// the end of body is determined by connection close.
 		// So just ignore request body for requests without
 		// 'Content-Length' and 'Transfer-Encoding' headers.
-		req.Header.SetContentLength(0)
+		// refer to https://tools.ietf.org/html/rfc7230#section-3.3.2
+		if !req.Header.IsGet() {
+			req.Header.SetContentLength(0)
+		}
 		return nil
 	}
 
