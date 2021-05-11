@@ -32,10 +32,10 @@ type ResponseHeader struct {
 	noDefaultContentType bool
 	noDefaultDate        bool
 
-	statusCode         int
-	contentLength      int
-	contentLengthBytes []byte
-	secureErrorLogMessage     bool
+	statusCode            int
+	contentLength         int
+	contentLengthBytes    []byte
+	secureErrorLogMessage bool
 
 	contentType []byte
 	server      []byte
@@ -64,9 +64,9 @@ type RequestHeader struct {
 	// for reducing RequestHeader object size.
 	cookiesCollected bool
 
-	contentLength      int
-	contentLengthBytes []byte
-	secureErrorLogMessage     bool
+	contentLength         int
+	contentLengthBytes    []byte
+	secureErrorLogMessage bool
 
 	method      []byte
 	requestURI  []byte
@@ -1649,7 +1649,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 
 	contentType := h.ContentType()
 	if len(contentType) == 0 && !h.ignoreBody() {
-		contentType = strPostArgsContentType
+		contentType = strDefaultContentType
 	}
 	if len(contentType) > 0 {
 		dst = appendHeaderLine(dst, strContentType, contentType)
