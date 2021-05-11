@@ -68,7 +68,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			case "Transfer-Encoding":
 				r.TransferEncoding = append(r.TransferEncoding, sv)
 			default:
-				hdr.Set(sk, sv)
+				hdr.Add(sk, sv)
 			}
 		})
 		r.Header = hdr
@@ -92,7 +92,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			}
 
 			for _, v := range vv {
-				ctx.Response.Header.Set(k, v)
+				ctx.Response.Header.Add(k, v)
 			}
 		}
 		if !haveContentType {
