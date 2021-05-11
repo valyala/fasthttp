@@ -1112,7 +1112,7 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 		// So just ignore request body for requests without
 		// 'Content-Length' and 'Transfer-Encoding' headers.
 		// refer to https://tools.ietf.org/html/rfc7230#section-3.3.2
-		if !req.Header.IsGet() {
+		if !req.Header.ignoreBody() {
 			req.Header.SetContentLength(0)
 		}
 		return nil
