@@ -9,10 +9,13 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// ConvertRequest convert a fasthttp.Request to http.Request
-// setURI is optionally because your use in client mode
-func ConvertRequest(ctx *fasthttp.RequestCtx, setURI bool) (*http.Request, error) {
-	var r http.Request
+// ConvertRequest convert a fasthttp.Request to an http.Request
+// forServer should be set to true when the http.Request is going to passed to a http.Handler.
+func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) error {
+	rURL, err := url.ParseRequestURI(string(ctx.RequestURI()))
+	if err != nil {
+		return err
+	}
 
 	r.Method = string(ctx.Method())
 	r.Proto = "HTTP/1.1"
@@ -22,7 +25,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, setURI bool) (*http.Request, error
 	r.RemoteAddr = ctx.RemoteAddr().String()
 	r.Host = string(ctx.Host())
 
-	if setURI {
+	if forServer {
 		r.RequestURI = string(ctx.RequestURI())
 	}
 
@@ -40,12 +43,6 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, setURI bool) (*http.Request, error
 
 	r.Header = hdr
 	r.Body = ioutil.NopCloser(bytes.NewReader(ctx.PostBody()))
-
-	rURL, err := url.ParseRequestURI(string(ctx.RequestURI()))
-	if err != nil {
-		return nil, err
-	}
-
 	r.URL = rURL
-	return &r, nil
+	return nil
 }
