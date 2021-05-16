@@ -15,6 +15,7 @@ go:
   - 1.14.x
   - 1.13.x
   - 1.12.x
+  - tip
 
 script:
   - go test -v ./...
@@ -27,6 +28,9 @@ before_install:
   - go get -t -v ./...
 
 jobs:
+  allow_failures:
+    - go: tip
+
   include:
     - stage: cross compilation
       os:
