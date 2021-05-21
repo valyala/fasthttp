@@ -6,6 +6,13 @@ import (
 	"time"
 )
 
+func TestCookiePanic(t *testing.T) {
+	var c Cookie
+	if err := c.Parse(";SAMeSITe="); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestCookieValueWithEqualAndSpaceChars(t *testing.T) {
 	t.Parallel()
 

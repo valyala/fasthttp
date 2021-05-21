@@ -400,7 +400,7 @@ instead of [html/template](https://golang.org/pkg/html/template/).
 * Pin each server instance to a separate CPU core using [taskset](http://linux.die.net/man/1/taskset).
 * Ensure the interrupts of multiqueue network card are evenly distributed between CPU cores.
   See [this article](https://blog.cloudflare.com/how-to-achieve-low-latency/) for details.
-* Use Go 1.13 as it provides some considerable performance improvements.
+* Use the latest version of Go as each version contains performance improvements.
 
 
 # Fasthttp best practices

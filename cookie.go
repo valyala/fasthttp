@@ -388,19 +388,21 @@ func (c *Cookie) ParseBytes(src []byte) error {
 
 			case 's': // "samesite"
 				if caseInsensitiveCompare(strCookieSameSite, kv.key) {
-					// Case insensitive switch on first char
-					switch kv.value[0] | 0x20 {
-					case 'l': // "lax"
-						if caseInsensitiveCompare(strCookieSameSiteLax, kv.value) {
-							c.sameSite = CookieSameSiteLaxMode
-						}
-					case 's': // "strict"
-						if caseInsensitiveCompare(strCookieSameSiteStrict, kv.value) {
-							c.sameSite = CookieSameSiteStrictMode
-						}
-					case 'n': // "none"
-						if caseInsensitiveCompare(strCookieSameSiteNone, kv.value) {
-							c.sameSite = CookieSameSiteNoneMode
+					if len(kv.value) > 0 {
+						// Case insensitive switch on first char
+						switch kv.value[0] | 0x20 {
+						case 'l': // "lax"
+							if caseInsensitiveCompare(strCookieSameSiteLax, kv.value) {
+								c.sameSite = CookieSameSiteLaxMode
+							}
+						case 's': // "strict"
+							if caseInsensitiveCompare(strCookieSameSiteStrict, kv.value) {
+								c.sameSite = CookieSameSiteStrictMode
+							}
+						case 'n': // "none"
+							if caseInsensitiveCompare(strCookieSameSiteNone, kv.value) {
+								c.sameSite = CookieSameSiteNoneMode
+							}
 						}
 					}
 				}

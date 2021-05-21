@@ -1250,6 +1250,33 @@ func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
 	}
 }
 
+func TestRequestContentTypeDefaultNotEmpty(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.SetMethod(MethodPost)
+	h.SetContentLength(5)
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := h.Write(bw); err != nil {
+		t.Fatalf("Unexpected error: %s", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("Unexpected error: %s", err)
+	}
+
+	var h1 RequestHeader
+	br := bufio.NewReader(w)
+	if err := h1.Read(br); err != nil {
+		t.Fatalf("Unexpected error: %s", err)
+	}
+
+	if string(h1.contentType) != "application/octet-stream" {
+		t.Fatalf("unexpected Content-Type %q. Expecting %q", h1.contentType, "application/octet-stream")
+	}
+}
+
 func TestResponseDateNoDefaultNotEmpty(t *testing.T) {
 	t.Parallel()
 
@@ -2415,7 +2442,6 @@ func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
 	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 foobar OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n\r\n")
 	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 123foobar OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n\r\n")
 	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 foobar344 OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n\r\n")
-
 
 	// no headers
 	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 200 OK\r\n")
