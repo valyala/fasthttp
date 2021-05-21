@@ -2327,6 +2327,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		}
 
 		s.setState(c, StateIdle)
+		ctx.userValues.Reset()
 
 		if atomic.LoadInt32(&s.stop) == 1 {
 			err = nil
