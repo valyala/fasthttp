@@ -1054,35 +1054,6 @@ func TestRequestHeaderProxyWithCookie(t *testing.T) {
 	}
 }
 
-func TestPeekRawHeader(t *testing.T) {
-	t.Parallel()
-
-	// empty header
-	testPeekRawHeader(t, "", "Foo-Bar", "")
-
-	// different case
-	testPeekRawHeader(t, "Content-Length: 3443\r\n", "content-length", "")
-
-	// no trailing crlf
-	testPeekRawHeader(t, "Content-Length: 234", "Content-Length", "")
-
-	// single header
-	testPeekRawHeader(t, "Content-Length: 12345\r\n", "Content-Length", "12345")
-
-	// multiple headers
-	testPeekRawHeader(t, "Host: foobar\r\nContent-Length: 434\r\nFoo: bar\r\n\r\n", "Content-Length", "434")
-
-	// lf without cr
-	testPeekRawHeader(t, "Foo: bar\nConnection: close\nAaa: bbb\ncc: ddd\n", "Connection", "close")
-}
-
-func testPeekRawHeader(t *testing.T, rawHeaders, key string, expectedValue string) {
-	v := peekRawHeader([]byte(rawHeaders), []byte(key))
-	if string(v) != expectedValue {
-		t.Fatalf("unexpected raw headers value %q. Expected %q. key %q, rawHeaders %q", v, expectedValue, key, rawHeaders)
-	}
-}
-
 func TestResponseHeaderFirstByteReadEOF(t *testing.T) {
 	t.Parallel()
 

@@ -1804,37 +1804,6 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	return len(buf) - len(bNext), nil
 }
 
-func peekRawHeader(buf, key []byte) []byte {
-	n := bytes.Index(buf, key)
-	if n < 0 {
-		return nil
-	}
-	if n > 0 && buf[n-1] != nChar {
-		return nil
-	}
-	n += len(key)
-	if n >= len(buf) {
-		return nil
-	}
-	if buf[n] != ':' {
-		return nil
-	}
-	n++
-	if buf[n] != ' ' {
-		return nil
-	}
-	n++
-	buf = buf[n:]
-	n = bytes.IndexByte(buf, nChar)
-	if n < 0 {
-		return nil
-	}
-	if n > 0 && buf[n-1] == rChar {
-		n--
-	}
-	return buf[:n]
-}
-
 func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
 	n := bytes.IndexByte(buf, nChar)
 	if n < 0 {
