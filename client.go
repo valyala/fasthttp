@@ -294,9 +294,9 @@ type Client struct {
 	// By default will use isIdempotent function
 	RetryIf RetryIfFunc
 
-	mLock sync.Mutex
-	m     map[string]*HostClient
-	ms    map[string]*HostClient
+	mLock      sync.Mutex
+	m          map[string]*HostClient
+	ms         map[string]*HostClient
 	readerPool sync.Pool
 	writerPool sync.Pool
 }
@@ -1047,6 +1047,11 @@ func AcquireRequest() *Request {
 		return &Request{}
 	}
 	return v.(*Request)
+}
+
+// AcquireTestRequestCtx returns an empty Request instance from request pool with fake server for testing.
+func AcquireTestRequestCtx() *RequestCtx {
+	return &RequestCtx{Request: *AcquireRequest(), s: fakeServer}
 }
 
 // ReleaseRequest returns req acquired via AcquireRequest to request pool.
