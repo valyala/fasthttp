@@ -358,7 +358,7 @@ type tcpAddrEntry struct {
 
 // DefaultDNSCacheDuration is the duration for caching resolved TCP addresses
 // by Dial* functions.
-const DefaultDNSCacheDuration = time.Minute
+var DefaultDNSCacheDuration = time.Minute
 
 func (d *TCPDialer) tcpAddrsClean() {
 	expireDuration := 2 * DefaultDNSCacheDuration
