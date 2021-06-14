@@ -1952,6 +1952,70 @@ func TestClientRetryRequestWithCustomDecider(t *testing.T) {
 	}
 }
 
+func TestHostClientTransport(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("abcd") //nolint:errcheck
+		},
+	}
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %s", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &HostClient{
+		Addr: "foobar",
+		Transport: func() TransportFunc {
+			c, _ := ln.Dial()
+
+			br := bufio.NewReader(c)
+			bw := bufio.NewWriter(c)
+
+			return func(req *Request, res *Response) error {
+				if err := req.Write(bw); err != nil {
+					return err
+				}
+
+				if err := bw.Flush(); err != nil {
+					return err
+				}
+
+				return res.Read(br)
+			}
+		}(),
+	}
+
+	for i := 0; i < 5; i++ {
+		statusCode, body, err := c.Get(nil, "http://aaaa.com/bbb/cc")
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		if statusCode != StatusOK {
+			t.Fatalf("unexpected status code %d. Expecting %d", statusCode, StatusOK)
+		}
+		if string(body) != "abcd" {
+			t.Fatalf("unexpected body %q. Expecting %q", body, "abcd")
+		}
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
 type writeErrorConn struct {
 	net.Conn
 }
