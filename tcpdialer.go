@@ -153,7 +153,7 @@ type TCPDialer struct {
 	// }
 	Resolver Resolver
 
-	// DNSCacheDuration may be used to override the default DNS cache duration (DefaultDNSCacheDuration = time.Minute)
+	// DNSCacheDuration may be used to override the default DNS cache duration (DefaultDNSCacheDuration)
 	DNSCacheDuration time.Duration
 
 	tcpAddrsLock sync.Mutex
