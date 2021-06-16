@@ -294,9 +294,9 @@ type Client struct {
 	// By default will use isIdempotent function
 	RetryIf RetryIfFunc
 
-	mLock sync.Mutex
-	m     map[string]*HostClient
-	ms    map[string]*HostClient
+	mLock      sync.Mutex
+	m          map[string]*HostClient
+	ms         map[string]*HostClient
 	readerPool sync.Pool
 	writerPool sync.Pool
 }
@@ -594,6 +594,9 @@ type DialFunc func(addr string) (net.Conn, error)
 // Request argument passed to RetryIfFunc, if there are any request errors.
 type RetryIfFunc func(request *Request) bool
 
+// TransportFunc wraps every request/response.
+type TransportFunc func(*Request, *Response) error
+
 // HostClient balances http requests among hosts listed in Addr.
 //
 // HostClient may be used for balancing load among multiple upstream hosts.
@@ -744,6 +747,9 @@ type HostClient struct {
 	//
 	// By default will use isIdempotent function
 	RetryIf RetryIfFunc
+
+	// Transport defines a transport-like mechanism that wraps every request/response.
+	Transport TransportFunc
 
 	clientName  atomic.Value
 	lastUseTime uint32
@@ -1360,8 +1366,16 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	resp.Reset()
 	resp.SkipBody = customSkipBody
 
-	if c.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
+	req.URI().DisablePathNormalizing = c.DisablePathNormalizing
+
+	userAgentOld := req.Header.UserAgent()
+	if len(userAgentOld) == 0 {
+		req.Header.userAgent = append(req.Header.userAgent[:0], c.getClientName()...)
+	}
+
+	if c.Transport != nil {
+		err := c.Transport(req, resp)
+		return err == nil, err
 	}
 
 	cc, err := c.acquireConn(req.timeout, req.ConnectionClose())
@@ -1388,10 +1402,6 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		resetConnection = true
 	}
 
-	userAgentOld := req.Header.UserAgent()
-	if len(userAgentOld) == 0 {
-		req.Header.userAgent = append(req.Header.userAgent[:0], c.getClientName()...)
-	}
 	bw := c.acquireWriter(conn)
 	err = req.Write(bw)
 
