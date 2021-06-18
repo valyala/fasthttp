@@ -14,6 +14,12 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
+const (
+	httpsScheme = "https"
+	httpScheme  = "http"
+	tlsPort     = "443"
+)
+
 // FasthttpProxyHTTPDialer returns a fasthttp.DialFunc that dials using
 // the the env(HTTP_PROXY, HTTPS_PROXY and NO_PROXY) configured HTTP proxy.
 //
@@ -32,13 +38,6 @@ func FasthttpProxyHTTPDialer() fasthttp.DialFunc {
 //	c := &fasthttp.Client{
 //		Dial: FasthttpProxyHTTPDialerTimeout(time.Second * 2),
 //	}
-
-const (
-	httpsScheme = "https"
-	httpScheme  = "http"
-	tlsPort     = "443"
-)
-
 func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 	proxier := httpproxy.FromEnvironment().ProxyFunc()
 
