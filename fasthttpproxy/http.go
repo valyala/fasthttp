@@ -22,7 +22,7 @@ func FasthttpHTTPDialer(proxy string) fasthttp.DialFunc {
 	return FasthttpHTTPDialerTimeout(proxy, 0)
 }
 
-// FasthttpHTTPDialer returns a fasthttp.DialFunc that dials using
+// FasthttpHTTPDialerTimeout returns a fasthttp.DialFunc that dials using
 // the provided HTTP proxy using the given timeout.
 //
 // Example usage:

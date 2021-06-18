@@ -22,7 +22,9 @@ var (
 	defaultLogger = Logger(log.New(os.Stderr, "", log.LstdFlags))
 	// ErrOverRecovery is returned when the times of starting over child prefork processes exceed
 	// the threshold.
-	ErrOverRecovery           = errors.New("exceeding the value of RecoverThreshold")
+	ErrOverRecovery = errors.New("exceeding the value of RecoverThreshold")
+
+	// ErrOnlyReuseportOnWindows is returned when Reuseport is false.
 	ErrOnlyReuseportOnWindows = errors.New("windows only supports Reuseport = true")
 )
 

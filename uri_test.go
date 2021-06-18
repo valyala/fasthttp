@@ -395,6 +395,6 @@ func TestURIWithQuerystringOverride(t *testing.T) {
 	uriString := string(u.RequestURI())
 
 	if uriString != "/?q1=foo&q2=bar&q4=quux" {
-		t.Fatalf("Expected Querystring to be overriden but was %s ", uriString)
+		t.Fatalf("Expected Querystring to be overridden but was %s ", uriString)
 	}
 }
