@@ -1108,7 +1108,6 @@ Host: asbd
 Connection: close
 
 `
-
 		ln := fasthttputil.NewInmemoryListener()
 
 		s := &Server{
@@ -3575,6 +3574,47 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("part2 timeout")
+	}
+}
+
+func TestStreamBodyReqestContentLength(t *testing.T) {
+	t.Parallel()
+	content := strings.Repeat("1", 1<<15) // 32K
+	contentLength := len(content)
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			realContentLength := ctx.Request.Header.ContentLength()
+			if realContentLength != contentLength {
+				t.Fatal("incorrect content length")
+			}
+		},
+		MaxRequestBodySize: 1 * 1024 * 1024, // 1M
+		StreamRequestBody:  true,
+	}
+
+	pipe := fasthttputil.NewPipeConns()
+	cc, sc := pipe.Conn1(), pipe.Conn2()
+	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, content))); err != nil {
+		t.Fatal(err)
+	}
+
+	ch := make(chan error)
+	go func() {
+		ch <- s.ServeConn(sc)
+	}()
+
+	if err := sc.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case err := <-ch:
+		if err == nil || err.Error() != "connection closed" { // fasthttputil.errConnectionClosed is private so do a string match.
+			t.Fatalf("Unexpected error from serveConn: %s", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("test timeout")
 	}
 }
 

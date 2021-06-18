@@ -1185,7 +1185,7 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 
 	req.body = bodyBuf
 	req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
-	req.Header.SetContentLength(len(bodyBuf.B))
+	req.Header.SetContentLength(contentLength)
 	return nil
 }
 
