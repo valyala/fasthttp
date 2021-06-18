@@ -948,7 +948,7 @@ func TestServerTLSReadTimeout(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
 	s := &Server{
-		ReadTimeout: time.Millisecond * 100,
+		ReadTimeout: time.Millisecond * 500,
 		Logger:      &testLogger{}, // Ignore log output.
 		Handler: func(ctx *RequestCtx) {
 		},
@@ -986,7 +986,7 @@ func TestServerTLSReadTimeout(t *testing.T) {
 
 	select {
 	case err = <-r:
-	case <-time.After(time.Millisecond * 500):
+	case <-time.After(time.Second):
 	}
 
 	if err == nil {

@@ -510,7 +510,7 @@ func TestFSCompressConcurrent(t *testing.T) {
 	for i := 0; i < concurrency; i++ {
 		select {
 		case <-ch:
-		case <-time.After(time.Second * 2):
+		case <-time.After(time.Second * 3):
 			t.Fatalf("timeout")
 		}
 	}
