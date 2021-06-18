@@ -126,11 +126,12 @@ func TestPipelineClientIssue832(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 
 	req := AcquireRequest()
-	defer ReleaseRequest(req)
+	// Don't defer ReleaseRequest as we use it in a goroutine that might not be done at the end.
+
 	req.SetHost("example.com")
 
 	res := AcquireResponse()
-	defer ReleaseResponse(res)
+	// Don't defer ReleaseResponse as we use it in a goroutine that might not be done at the end.
 
 	client := PipelineClient{
 		Dial: func(addr string) (net.Conn, error) {
