@@ -9,8 +9,6 @@ import (
 )
 
 func TestAllocationServeConn(t *testing.T) {
-	t.Parallel()
-
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 		},
@@ -72,8 +70,6 @@ func TestAllocationClient(t *testing.T) {
 }
 
 func TestAllocationURI(t *testing.T) {
-	t.Parallel()
-
 	uri := []byte("http://username:password@example.com/some/path?foo=bar#test")
 
 	n := testing.AllocsPerRun(100, func() {

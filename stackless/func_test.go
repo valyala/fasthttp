@@ -8,6 +8,8 @@ import (
 )
 
 func TestNewFuncSimple(t *testing.T) {
+	t.Parallel()
+
 	var n uint64
 	f := NewFunc(func(ctx interface{}) {
 		atomic.AddUint64(&n, uint64(ctx.(int)))
@@ -25,6 +27,8 @@ func TestNewFuncSimple(t *testing.T) {
 }
 
 func TestNewFuncMulti(t *testing.T) {
+	t.Parallel()
+
 	var n1, n2 uint64
 	f1 := NewFunc(func(ctx interface{}) {
 		atomic.AddUint64(&n1, uint64(ctx.(int)))

@@ -143,6 +143,8 @@ func getChunkedTestEnv(t testing.TB) (*fasthttputil.InmemoryListener, []byte) {
 }
 
 func TestRequestStream(t *testing.T) {
+	t.Parallel()
+
 	ln, formattedRequest := getChunkedTestEnv(t)
 
 	c, err := ln.Dial()

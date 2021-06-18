@@ -9,10 +9,14 @@ import (
 )
 
 func TestTCP4(t *testing.T) {
+	t.Parallel()
+
 	testNewListener(t, "tcp4", "localhost:10081", 20, 1000)
 }
 
 func TestTCP6(t *testing.T) {
+	t.Parallel()
+
 	// Run this test only if tcp6 interface exists.
 	if hasLocalIPv6(t) {
 		testNewListener(t, "tcp6", "[::1]:10082", 20, 1000)
@@ -33,7 +37,6 @@ func hasLocalIPv6(t *testing.T) bool {
 }
 
 func testNewListener(t *testing.T, network, addr string, serversCount, requestsCount int) {
-
 	var lns []net.Listener
 	doneCh := make(chan struct{}, serversCount)
 

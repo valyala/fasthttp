@@ -25,22 +25,25 @@ func getAddr() string {
 }
 
 func Test_IsChild(t *testing.T) {
+	// This test can't run parallel as it modifies os.Args.
+
 	v := IsChild()
 	if v {
 		t.Errorf("IsChild() == %v, want %v", v, false)
 	}
 
 	setUp()
+	defer tearDown()
 
 	v = IsChild()
 	if !v {
 		t.Errorf("IsChild() == %v, want %v", v, true)
 	}
-
-	tearDown()
 }
 
 func Test_New(t *testing.T) {
+	t.Parallel()
+
 	s := &fasthttp.Server{}
 	p := New(s)
 
@@ -62,6 +65,8 @@ func Test_New(t *testing.T) {
 }
 
 func Test_listen(t *testing.T) {
+	t.Parallel()
+
 	p := &Prefork{
 		Reuseport: true,
 	}
@@ -91,6 +96,8 @@ func Test_listen(t *testing.T) {
 }
 
 func Test_setTCPListenerFiles(t *testing.T) {
+	t.Parallel()
+
 	if runtime.GOOS == "windows" {
 		t.SkipNow()
 	}
@@ -125,7 +132,10 @@ func Test_setTCPListenerFiles(t *testing.T) {
 }
 
 func Test_ListenAndServe(t *testing.T) {
+	// This test can't run parallel as it modifies os.Args.
+
 	setUp()
+	defer tearDown()
 
 	s := &fasthttp.Server{}
 	p := New(s)
@@ -151,12 +161,13 @@ func Test_ListenAndServe(t *testing.T) {
 	if p.ln == nil {
 		t.Error("Prefork.ln is nil")
 	}
-
-	tearDown()
 }
 
 func Test_ListenAndServeTLS(t *testing.T) {
+	// This test can't run parallel as it modifies os.Args.
+
 	setUp()
+	defer tearDown()
 
 	s := &fasthttp.Server{}
 	p := New(s)
@@ -182,12 +193,13 @@ func Test_ListenAndServeTLS(t *testing.T) {
 	if p.ln == nil {
 		t.Error("Prefork.ln is nil")
 	}
-
-	tearDown()
 }
 
 func Test_ListenAndServeTLSEmbed(t *testing.T) {
+	// This test can't run parallel as it modifies os.Args.
+
 	setUp()
+	defer tearDown()
 
 	s := &fasthttp.Server{}
 	p := New(s)
@@ -213,6 +225,4 @@ func Test_ListenAndServeTLSEmbed(t *testing.T) {
 	if p.ln == nil {
 		t.Error("Prefork.ln is nil")
 	}
-
-	tearDown()
 }

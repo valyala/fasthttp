@@ -14,6 +14,8 @@ import (
 )
 
 func TestInmemoryListener(t *testing.T) {
+	t.Parallel()
+
 	ln := NewInmemoryListener()
 
 	ch := make(chan struct{})
@@ -156,12 +158,16 @@ func testInmemoryListenerHTTPSingle(t *testing.T, client *http.Client, content s
 }
 
 func TestInmemoryListenerHTTPSingle(t *testing.T) {
+	t.Parallel()
+
 	testInmemoryListenerHTTP(t, func(t *testing.T, client *http.Client) {
 		testInmemoryListenerHTTPSingle(t, client, "request")
 	})
 }
 
 func TestInmemoryListenerHTTPSerial(t *testing.T) {
+	t.Parallel()
+
 	testInmemoryListenerHTTP(t, func(t *testing.T, client *http.Client) {
 		for i := 0; i < 10; i++ {
 			testInmemoryListenerHTTPSingle(t, client, fmt.Sprintf("request_%d", i))
@@ -170,6 +176,8 @@ func TestInmemoryListenerHTTPSerial(t *testing.T) {
 }
 
 func TestInmemoryListenerHTTPConcurrent(t *testing.T) {
+	t.Parallel()
+
 	testInmemoryListenerHTTP(t, func(t *testing.T, client *http.Client) {
 		var wg sync.WaitGroup
 		for i := 0; i < 10; i++ {

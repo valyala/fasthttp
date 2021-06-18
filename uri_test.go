@@ -142,6 +142,8 @@ func testURIUpdate(t *testing.T, base, update, result string) {
 }
 
 func TestURIPathNormalize(t *testing.T) {
+	t.Parallel()
+
 	var u URI
 
 	// double slash
@@ -274,6 +276,8 @@ func testURIFullURI(t *testing.T, scheme, host, path, hash string, args *Args, e
 }
 
 func TestURIParseNilHost(t *testing.T) {
+	t.Parallel()
+
 	testURIParseScheme(t, "http://google.com/foo?bar#baz", "http", "google.com", "/foo?bar", "baz")
 	testURIParseScheme(t, "HTtP://google.com/", "http", "google.com", "/", "")
 	testURIParseScheme(t, "://google.com/xyz", "http", "google.com", "/xyz", "")
@@ -388,6 +392,8 @@ func testURIParse(t *testing.T, u *URI, host, uri,
 }
 
 func TestURIWithQuerystringOverride(t *testing.T) {
+	t.Parallel()
+
 	var u URI
 	u.SetQueryString("q1=foo&q2=bar")
 	u.QueryArgs().Add("q3", "baz")

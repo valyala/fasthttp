@@ -12,12 +12,16 @@ import (
 )
 
 func TestCompressFlateSerial(t *testing.T) {
+	t.Parallel()
+
 	if err := testCompressFlate(); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 }
 
 func TestCompressFlateConcurrent(t *testing.T) {
+	t.Parallel()
+
 	if err := testConcurrent(testCompressFlate, 10); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
@@ -36,12 +40,16 @@ func testCompressFlate() error {
 }
 
 func TestCompressGzipSerial(t *testing.T) {
+	t.Parallel()
+
 	if err := testCompressGzip(); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
 }
 
 func TestCompressGzipConcurrent(t *testing.T) {
+	t.Parallel()
+
 	if err := testConcurrent(testCompressGzip, 10); err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}

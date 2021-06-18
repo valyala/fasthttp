@@ -7,6 +7,8 @@ import (
 )
 
 func TestCookiePanic(t *testing.T) {
+	t.Parallel()
+
 	var c Cookie
 	if err := c.Parse(";SAMeSITe="); err != nil {
 		t.Error(err)

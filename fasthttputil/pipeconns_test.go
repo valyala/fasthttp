@@ -11,6 +11,8 @@ import (
 )
 
 func TestPipeConnsWriteTimeout(t *testing.T) {
+	t.Parallel()
+
 	pc := NewPipeConns()
 	c1 := pc.Conn1()
 
@@ -67,10 +69,14 @@ func TestPipeConnsWriteTimeout(t *testing.T) {
 }
 
 func TestPipeConnsPositiveReadTimeout(t *testing.T) {
+	t.Parallel()
+
 	testPipeConnsReadTimeout(t, time.Millisecond)
 }
 
 func TestPipeConnsNegativeReadTimeout(t *testing.T) {
+	t.Parallel()
+
 	testPipeConnsReadTimeout(t, -time.Second)
 }
 
@@ -116,6 +122,8 @@ func testPipeConnsReadTimeout(t *testing.T, timeout time.Duration) {
 }
 
 func TestPipeConnsCloseWhileReadWriteConcurrent(t *testing.T) {
+	t.Parallel()
+
 	concurrency := 4
 	ch := make(chan struct{}, concurrency)
 	for i := 0; i < concurrency; i++ {
@@ -135,6 +143,8 @@ func TestPipeConnsCloseWhileReadWriteConcurrent(t *testing.T) {
 }
 
 func TestPipeConnsCloseWhileReadWriteSerial(t *testing.T) {
+	t.Parallel()
+
 	testPipeConnsCloseWhileReadWriteSerial(t)
 }
 
@@ -205,10 +215,14 @@ func testPipeConnsCloseWhileReadWrite(t *testing.T) {
 }
 
 func TestPipeConnsReadWriteSerial(t *testing.T) {
+	t.Parallel()
+
 	testPipeConnsReadWriteSerial(t)
 }
 
 func TestPipeConnsReadWriteConcurrent(t *testing.T) {
+	t.Parallel()
+
 	testConcurrency(t, 10, testPipeConnsReadWriteSerial)
 }
 
@@ -262,10 +276,14 @@ func testPipeConnsReadWrite(t *testing.T, c1, c2 net.Conn) {
 }
 
 func TestPipeConnsCloseSerial(t *testing.T) {
+	t.Parallel()
+
 	testPipeConnsCloseSerial(t)
 }
 
 func TestPipeConnsCloseConcurrent(t *testing.T) {
+	t.Parallel()
+
 	testConcurrency(t, 10, testPipeConnsCloseSerial)
 }
 

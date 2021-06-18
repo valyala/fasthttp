@@ -1551,6 +1551,8 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 }
 
 func TestRequestCtxFormValue(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 	var req Request
 	req.SetRequestURI("/foo/bar?baz=123&aaa=bbb")
@@ -1609,6 +1611,8 @@ func TestRequestCtxUserValue(t *testing.T) {
 }
 
 func TestServerHeadRequest(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			fmt.Fprintf(ctx, "Request method is %q", ctx.Method())
@@ -2334,6 +2338,8 @@ func TestRequestCtxNoHijackNoResponse(t *testing.T) {
 }
 
 func TestRequestCtxInit(t *testing.T) {
+	// This test can't run parallel as it modifies globalConnID.
+
 	var ctx RequestCtx
 	var logger testLogger
 	globalConnID = 0x123456
@@ -2871,6 +2877,8 @@ func TestServerEmptyResponse(t *testing.T) {
 }
 
 func TestServerLogger(t *testing.T) {
+	// This test can't run parallel as it modifies globalConnID.
+
 	cl := &testLogger{}
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
@@ -3118,6 +3126,8 @@ func TestServeConnSingleRequest(t *testing.T) {
 }
 
 func TestServeConnMultiRequests(t *testing.T) {
+	t.Parallel()
+
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
@@ -3278,7 +3288,7 @@ func TestShutdownReuse(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
-		ReadTimeout: time.Second,
+		ReadTimeout: time.Millisecond * 100,
 		Logger:      &testLogger{}, // Ignore log output.
 	}
 	go func() {
@@ -3736,6 +3746,8 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 }
 
 func TestIncompleteBodyReturnsUnexpectedEOF(t *testing.T) {
+	t.Parallel()
+
 	rw := &readWriter{}
 	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: google.com\r\nContent-Length: 5\r\n\r\n123")
 	s := &Server{

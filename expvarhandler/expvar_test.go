@@ -10,6 +10,8 @@ import (
 )
 
 func TestExpvarHandlerBasic(t *testing.T) {
+	t.Parallel()
+
 	expvar.Publish("customVar", expvar.Func(func() interface{} {
 		return "foobar"
 	}))

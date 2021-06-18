@@ -50,6 +50,8 @@ func TestNewVHostPathRewriter(t *testing.T) {
 }
 
 func TestNewVHostPathRewriterMaliciousHost(t *testing.T) {
+	t.Parallel()
+
 	var ctx RequestCtx
 	var req Request
 	req.Header.SetHost("/../../../etc/passwd")
@@ -301,7 +303,7 @@ func TestServeFileUncompressed(t *testing.T) {
 }
 
 func TestFSByteRangeConcurrent(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	stop := make(chan struct{})
 	defer close(stop)
@@ -335,7 +337,7 @@ func TestFSByteRangeConcurrent(t *testing.T) {
 }
 
 func TestFSByteRangeSingleThread(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	stop := make(chan struct{})
 	defer close(stop)
@@ -818,11 +820,11 @@ func TestServeFileContentType(t *testing.T) {
 }
 
 func TestServeFileDirectoryRedirect(t *testing.T) {
+	t.Parallel()
+
 	if runtime.GOOS == "windows" {
 		t.SkipNow()
 	}
-
-	t.Parallel()
 
 	var ctx RequestCtx
 	var req Request

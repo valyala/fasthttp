@@ -13,6 +13,8 @@ import (
 )
 
 func TestNewFastHTTPHandler(t *testing.T) {
+	t.Parallel()
+
 	expectedMethod := fasthttp.MethodPost
 	expectedProto := "HTTP/1.1"
 	expectedProtoMajor := 1
@@ -141,6 +143,8 @@ func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value i
 }
 
 func TestContentType(t *testing.T) {
+	t.Parallel()
+
 	nethttpH := func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("<!doctype html><html>")) //nolint:errcheck
 	}

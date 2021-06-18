@@ -21,6 +21,8 @@ import (
 )
 
 func TestCloseIdleConnections(t *testing.T) {
+	t.Parallel()
+
 	ln := fasthttputil.NewInmemoryListener()
 
 	s := &Server{
@@ -278,10 +280,7 @@ func TestClientURLAuth(t *testing.T) {
 }
 
 func TestClientNilResp(t *testing.T) {
-	// For some reason running this test in parallel sometimes
-	// triggers the race checker. I have not been able to find an
-	// actual race condition so I think it's something else going wrong.
-	// For now just don't run this test in parallel.
+	t.Parallel()
 
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
@@ -303,6 +302,7 @@ func TestClientNilResp(t *testing.T) {
 	if err := c.DoTimeout(req, nil, time.Second); err != nil {
 		t.Fatal(err)
 	}
+	ln.Close()
 }
 
 func TestPipelineClientNilResp(t *testing.T) {
@@ -627,19 +627,13 @@ func TestClientHeaderCase(t *testing.T) {
 func TestClientReadTimeout(t *testing.T) {
 	t.Parallel()
 
-	// This test is rather slow and increase the total test time
-	// from 2.5 seconds to 6.5 seconds.
-	if testing.Short() {
-		t.Skip("skipping test in short mode")
-	}
-
 	ln := fasthttputil.NewInmemoryListener()
 
 	timeout := false
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			if timeout {
-				time.Sleep(time.Minute)
+				time.Sleep(time.Second)
 			} else {
 				timeout = true
 			}
@@ -649,7 +643,7 @@ func TestClientReadTimeout(t *testing.T) {
 	go s.Serve(ln) //nolint:errcheck
 
 	c := &HostClient{
-		ReadTimeout:               time.Second * 4,
+		ReadTimeout:               time.Millisecond * 400,
 		MaxIdemponentCallAttempts: 1,
 		Dial: func(addr string) (net.Conn, error) {
 			return ln.Dial()
@@ -692,8 +686,8 @@ func TestClientReadTimeout(t *testing.T) {
 	select {
 	case <-done:
 		// This shouldn't take longer than the timeout times the number of requests it is going to try to do.
-		// Give it 2 seconds extra seconds just to be sure.
-	case <-time.After(c.ReadTimeout*time.Duration(c.MaxIdemponentCallAttempts) + time.Second*2):
+		// Give it an extra second just to be sure.
+	case <-time.After(c.ReadTimeout*time.Duration(c.MaxIdemponentCallAttempts) + time.Second):
 		t.Fatal("Client.ReadTimeout didn't work")
 	}
 }
@@ -1282,6 +1276,8 @@ func TestHostClientPendingRequests(t *testing.T) {
 }
 
 func TestHostClientMaxConnsWithDeadline(t *testing.T) {
+	t.Parallel()
+
 	var (
 		emptyBodyCount uint8
 		ln             = fasthttputil.NewInmemoryListener()
@@ -2515,9 +2511,6 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 func TestClientTLSHandshakeTimeout(t *testing.T) {
 	t.Parallel()
 
-	if testing.Short() {
-		t.Skip("skipping test in short mode")
-	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -2540,8 +2533,8 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 	}()
 
 	client := Client{
-		WriteTimeout: 1 * time.Second,
-		ReadTimeout:  1 * time.Second,
+		WriteTimeout: 100 * time.Millisecond,
+		ReadTimeout:  100 * time.Millisecond,
 	}
 
 	_, _, err = client.Get(nil, "https://"+addr)
@@ -2555,6 +2548,8 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 }
 
 func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
+	t.Parallel()
+
 	var (
 		emptyBodyCount uint8
 		ln             = fasthttputil.NewInmemoryListener()
@@ -2632,6 +2627,8 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 }
 
 func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
+	t.Parallel()
+
 	var (
 		emptyBodyCount uint8
 		ln             = fasthttputil.NewInmemoryListener()
@@ -2720,6 +2717,8 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 }
 
 func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
+	t.Parallel()
+
 	var (
 		emptyBodyCount uint8
 		ln             = fasthttputil.NewInmemoryListener()

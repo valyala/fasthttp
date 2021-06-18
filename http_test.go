@@ -34,6 +34,8 @@ func TestResponseEmptyTransferEncoding(t *testing.T) {
 
 // Don't send the fragment/hash/# part of a URL to the server.
 func TestFragmentInURIRequest(t *testing.T) {
+	t.Parallel()
+
 	var req Request
 	req.SetRequestURI("https://docs.gitlab.com/ee/user/project/integrations/webhooks.html#events")
 
@@ -48,6 +50,8 @@ func TestFragmentInURIRequest(t *testing.T) {
 }
 
 func TestIssue875(t *testing.T) {
+	t.Parallel()
+
 	type testcase struct {
 		uri              string
 		expectedRedirect string
