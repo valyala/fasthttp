@@ -1494,13 +1494,20 @@ func headerErrorMsg(typ string, err error, b []byte, secureErrorLogMessage bool)
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) Read(r *bufio.Reader) error {
+	return h.readLoop(r, true)
+}
+
+// readLoop reads request header from r optionally loops until it has enough data.
+//
+// io.EOF is returned if r is closed before reading the first header byte.
+func (h *RequestHeader) readLoop(r *bufio.Reader, waitForMore bool) error {
 	n := 1
 	for {
 		err := h.tryRead(r, n)
 		if err == nil {
 			return nil
 		}
-		if err != errNeedMore {
+		if !waitForMore || err != errNeedMore {
 			h.resetSkipNormalize()
 			return err
 		}
