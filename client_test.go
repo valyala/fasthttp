@@ -169,7 +169,7 @@ func TestPipelineClientIssue832(t *testing.T) {
 	}()
 
 	select {
-	case <-time.After(time.Second):
+	case <-time.After(time.Second * 2):
 		t.Fatal("PipelineClient did not restart worker")
 	case <-done:
 	}
@@ -2580,7 +2580,7 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 			return ln.Dial()
 		},
 		MaxConns:           1,
-		MaxConnWaitTimeout: 200 * time.Millisecond,
+		MaxConnWaitTimeout: time.Second,
 	}
 
 	for i := 0; i < 5; i++ {
@@ -2618,7 +2618,7 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(time.Second * 5):
 		t.Fatalf("timeout")
 	}
 
