@@ -2056,7 +2056,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			// within the idle time.
 			if connRequestNum > 1 {
 				var b []byte
-				b, err = br.Peek(4)
+				b, err = br.Peek(1)
 				if len(b) == 0 {
 					// If reading from a keep-alive connection returns nothing it means
 					// the connection was closed (either timeout or from the other side).
