@@ -693,6 +693,11 @@ func (ctx *RequestCtx) VisitUserValues(visitor func([]byte, interface{})) {
 	}
 }
 
+// ResetUserValues allows to reset user values from Request Context
+func (ctx *RequestCtx) ResetUserValues() {
+	ctx.userValues.Reset()
+}
+
 type connTLSer interface {
 	Handshake() error
 	ConnectionState() tls.ConnectionState
