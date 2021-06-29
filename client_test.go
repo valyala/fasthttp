@@ -2580,7 +2580,7 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 			return ln.Dial()
 		},
 		MaxConns:           1,
-		MaxConnWaitTimeout: time.Second,
+		MaxConnWaitTimeout: time.Second * 2,
 	}
 
 	for i := 0; i < 5; i++ {
