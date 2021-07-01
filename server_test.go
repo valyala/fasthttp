@@ -1757,6 +1757,15 @@ func TestRequestCtxUserValue(t *testing.T) {
 	if len(ctx.userValues) != vlen {
 		t.Fatalf("the length of user values returned from VisitUserValues is not equal to the length of the userValues, expecting: %d but got: %d", len(ctx.userValues), vlen)
 	}
+
+	ctx.ResetUserValues()
+	for i := 0; i < 10; i++ {
+		k := fmt.Sprintf("key-%d", i)
+		v := ctx.UserValue(k)
+		if v != nil {
+			t.Fatalf("unexpected value obtained for key %q: %v. Expecting nil", k, v)
+		}
+	}
 }
 
 func TestServerHeadRequest(t *testing.T) {
