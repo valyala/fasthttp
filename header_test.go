@@ -29,7 +29,7 @@ func TestResponseHeaderAddContentType(t *testing.T) {
 	h.WriteTo(&buf) //nolint:errcheck
 
 	if n := strings.Count(buf.String(), "Content-Type: "); n != 1 {
-		t.Errorf("Content-Type occured %d times", n)
+		t.Errorf("Content-Type occurred %d times", n)
 	}
 }
 
