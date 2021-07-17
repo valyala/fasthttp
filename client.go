@@ -188,6 +188,11 @@ type Client struct {
 	// User-Agent header to be excluded from the Request.
 	NoDefaultUserAgentHeader bool
 
+	// CookieJar stores cookies allowing user to handle cookies easily.
+	//
+	// If CookieJar is nil no cookie will be collected.
+	CookieJar *CookieJar
+
 	// Callback for establishing new connections to hosts.
 	//
 	// Default Dial is used if not set.
@@ -489,6 +494,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			Name:                          c.Name,
 			NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 			Dial:                          c.Dial,
+			CookieJar:                     c.CookieJar,
 			DialDualStack:                 c.DialDualStack,
 			IsTLS:                         isTLS,
 			TLSConfig:                     c.TLSConfig,
@@ -632,6 +638,10 @@ type HostClient struct {
 	//
 	// Default Dial is used if not set.
 	Dial DialFunc
+
+	// CookieJar stores cookies. If CookieJar is nil
+	// no cookie will be collected.
+	CookieJar *CookieJar
 
 	// Attempt to connect to both ipv4 and ipv6 host addresses
 	// if set to true.
@@ -1329,7 +1339,15 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 		resp = AcquireResponse()
 	}
 
+	if c.CookieJar != nil {
+		c.CookieJar.dumpTo(req)
+	}
+
 	ok, err := c.doNonNilReqResp(req, resp)
+
+	if c.CookieJar != nil {
+		c.CookieJar.getFrom(req.Host(), req.URI().Path(), resp)
+	}
 
 	if nilResp {
 		ReleaseResponse(resp)
