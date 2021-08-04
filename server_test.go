@@ -529,6 +529,11 @@ func TestRequestCtxIsTLS(t *testing.T) {
 	if !ctx.IsTLS() {
 		t.Fatal("IsTLS must return true")
 	}
+
+	ctx.c = &perIPConn{Conn: &tls.Conn{}}
+	if !ctx.IsTLS() {
+		t.Fatal("IsTLS must return true")
+	}
 }
 
 func TestRequestCtxRedirectHTTPSSchemeless(t *testing.T) {

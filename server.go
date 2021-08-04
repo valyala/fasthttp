@@ -715,6 +715,13 @@ func (ctx *RequestCtx) IsTLS() bool {
 	//
 	//     // other custom fields here
 	// }
+
+	// perIPConn wraps the net.Conn in the Conn field
+	if pic, ok := ctx.c.(*perIPConn); ok {
+		_, ok := pic.Conn.(connTLSer)
+		return ok
+	}
+
 	_, ok := ctx.c.(connTLSer)
 	return ok
 }
