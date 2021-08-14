@@ -13,7 +13,7 @@ import (
 //
 // Example usage:
 //	c := &fasthttp.Client{
-//		Dial: fasthttpproxy.FasthttpSocksDialer("localhost:9050"),
+//		Dial: fasthttpproxy.FasthttpSocksDialer("socks5://localhost:9050"),
 //	}
 func FasthttpSocksDialer(proxyAddr string) fasthttp.DialFunc {
 	var (
