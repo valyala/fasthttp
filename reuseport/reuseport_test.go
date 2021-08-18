@@ -75,7 +75,7 @@ func testNewListener(t *testing.T, network, addr string, serversCount, requestsC
 		}()
 		select {
 		case <-ch:
-		case <-time.After(200 * time.Millisecond):
+		case <-time.After(250 * time.Millisecond):
 			t.Fatalf("%d. timeout when waiting for response", i)
 		}
 

@@ -477,7 +477,7 @@ func TestServerErrSmallBuffer(t *testing.T) {
 	var serverErr error
 	select {
 	case serverErr = <-ch:
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(200 * time.Millisecond):
 		t.Fatal("timeout")
 	}
 
@@ -1929,7 +1929,7 @@ func TestServerContinueHandler(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Unexpected error from serveConn: %s", err)
 			}
-		case <-time.After(200 * time.Millisecond):
+		case <-time.After(250 * time.Millisecond):
 			t.Fatal("timeout")
 		}
 
@@ -3234,7 +3234,7 @@ func TestServerConnError(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(200 * time.Millisecond):
 		t.Fatal("timeout")
 	}
 
