@@ -3128,7 +3128,7 @@ func TestServerRemoteAddr(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error from serveConn: %s", err)
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(200 * time.Millisecond):
 		t.Fatal("timeout")
 	}
 
