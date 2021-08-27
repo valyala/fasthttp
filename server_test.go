@@ -75,7 +75,7 @@ func TestServerCRNLAfterPost(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 		},
 		Logger:      &testLogger{},
-		ReadTimeout: time.Millisecond * 1,
+		ReadTimeout: time.Millisecond * 100,
 	}
 
 	ln := fasthttputil.NewInmemoryListener()
@@ -139,8 +139,8 @@ func TestServerPipelineFlush(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		// Wait for 100ms to finish the request
-		time.Sleep(time.Millisecond * 100)
+		// Wait for 200ms to finish the request
+		time.Sleep(time.Millisecond * 200)
 
 		if _, err = c.Write([]byte("google.com\r\n\r\n")); err != nil {
 			t.Error(err)
@@ -158,9 +158,9 @@ func TestServerPipelineFlush(t *testing.T) {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 	}
 
-	// Since the second request takes 100ms to finish we expect the first one to be flushed earlier.
+	// Since the second request takes 200ms to finish we expect the first one to be flushed earlier.
 	d := time.Since(start)
-	if d > time.Millisecond*10 {
+	if d > time.Millisecond*100 {
 		t.Fatalf("had to wait for %v", d)
 	}
 
@@ -2653,7 +2653,7 @@ func TestTimeoutHandlerTimeoutReuse(t *testing.T) {
 		ctx.SetBodyString("ok")
 	}
 	s := &Server{
-		Handler: TimeoutHandler(h, 20*time.Millisecond, "timeout!!!"),
+		Handler: TimeoutHandler(h, 500*time.Millisecond, "timeout!!!"),
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
@@ -3366,7 +3366,7 @@ func TestShutdown(t *testing.T) {
 	done := 0
 	for {
 		select {
-		case <-time.After(time.Second):
+		case <-time.After(time.Second * 2):
 			t.Fatal("shutdown took too long")
 		case <-serveCh:
 			done++
