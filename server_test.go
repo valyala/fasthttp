@@ -3964,6 +3964,10 @@ func (rw *readWriter) LocalAddr() net.Addr {
 	return zeroTCPAddr
 }
 
+func (rw *readWriter) SetDeadline(t time.Time) error {
+	return nil
+}
+
 func (rw *readWriter) SetReadDeadline(t time.Time) error {
 	return nil
 }
