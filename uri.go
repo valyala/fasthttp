@@ -390,7 +390,7 @@ func normalizePath(dst, src []byte) []byte {
 	if n >= 0 && n+len(strSlashDotDot) == len(b) {
 		nn := bytes.LastIndexByte(b[:n], '/')
 		if nn < 0 {
-			return strSlash
+			return append(dst[:0], strSlash...)
 		}
 		b = b[:nn+1]
 	}
