@@ -2014,6 +2014,14 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		return
 	}
 	if handler, ok := s.nextProtos[proto]; ok {
+		// Remove read or write deadlines that might have previously been set.
+		// The next handler is responsible for setting its own deadlines.
+		if s.ReadTimeout > 0 || s.WriteTimeout > 0 {
+			if err := c.SetDeadline(zeroTime); err != nil {
+				panic(fmt.Sprintf("BUG: error in SetDeadline(zeroTime): %s", err))
+			}
+		}
+
 		return handler(c)
 	}
 
@@ -2029,6 +2037,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		maxRequestBodySize = DefaultMaxRequestBodySize
 	}
 	writeTimeout := s.WriteTimeout
+	previousWriteTimeout := time.Duration(0)
 
 	ctx := s.acquireCtx(c)
 	ctx.connTime = connTime
@@ -2097,6 +2106,12 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			if s.ReadTimeout > 0 {
 				if err := c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", s.ReadTimeout, err))
+				}
+			} else if s.IdleTimeout > 0 && connRequestNum > 1 {
+				// If this was an idle connection and the server has an IdleTimeout but
+				// no ReadTimeout then we should remove the ReadTimeout.
+				if err := c.SetReadDeadline(zeroTime); err != nil {
+					panic(fmt.Sprintf("BUG: error in SetReadDeadline(zeroTime): %s", err))
 				}
 			}
 			if s.DisableHeaderNamesNormalizing {
@@ -2277,6 +2292,13 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			if err := c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
 				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", writeTimeout, err))
 			}
+			previousWriteTimeout = writeTimeout
+		} else if previousWriteTimeout > 0 {
+			// We don't want a write timeout but we previously set one, remove it.
+			if err := c.SetWriteDeadline(zeroTime); err != nil {
+				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(zeroTime): %s", err))
+			}
+			previousWriteTimeout = 0
 		}
 
 		connectionClose = connectionClose || ctx.Response.ConnectionClose()
@@ -2339,11 +2361,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 				releaseWriter(s, bw)
 				bw = nil
 			}
-			err = c.SetReadDeadline(zeroTime)
-			if err != nil {
-				break
-			}
-			err = c.SetWriteDeadline(zeroTime)
+			err = c.SetDeadline(zeroTime)
 			if err != nil {
 				break
 			}
