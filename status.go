@@ -2,7 +2,6 @@ package fasthttp
 
 import (
 	"fmt"
-	"strconv"
 )
 
 const (
@@ -185,7 +184,7 @@ func invalidStatusLine(statusCode int) []byte {
 	// xxx placeholder of status code
 	var line = make([]byte, 0, len("HTTP/1.1 xxx \r\n")+len(statusText))
 	line = append(line, []byte("HTTP/1.1 ")...)
-	line = append(line, []byte(strconv.Itoa(statusCode))...)
+	line = AppendUint(line, statusCode)
 	line = append(line, []byte(" ")...)
 	line = append(line, []byte(statusText)...)
 	line = append(line, []byte("\r\n")...)
