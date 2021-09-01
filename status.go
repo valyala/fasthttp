@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"fmt"
+	"strconv"
 )
 
 const (
@@ -183,14 +184,8 @@ func invalidStatusLine(statusCode int) []byte {
 	statusText := StatusMessage(statusCode)
 	// xxx placeholder of status code
 	var line = make([]byte, 0, len("HTTP/1.1 xxx \r\n")+len(statusText))
-	if statusCode < 0 {
-		line = append(line, []byte("HTTP/1.1 -")...)
-		statusCode = -statusCode
-	} else {
-		line = append(line, []byte("HTTP/1.1 ")...)
-	}
-
-	line = AppendUint(line, statusCode)
+	line = append(line, []byte("HTTP/1.1 ")...)
+	line = strconv.AppendInt(line, int64(statusCode), 10)
 	line = append(line, []byte(" ")...)
 	line = append(line, []byte(statusText)...)
 	line = append(line, []byte("\r\n")...)
