@@ -24,15 +24,15 @@ var (
 
 	strResponseContinue = []byte("HTTP/1.1 100 Continue\r\n\r\n")
 
-	strGet     = []byte(MethodGet)
-	strHead    = []byte(MethodHead)
-	strPost    = []byte(MethodPost)
-	strPut     = []byte(MethodPut)
-	strDelete  = []byte(MethodDelete)
-	strConnect = []byte(MethodConnect)
-	strOptions = []byte(MethodOptions)
-	strTrace   = []byte(MethodTrace)
-	strPatch   = []byte(MethodPatch)
+	strGet     = []byte(MethodGet)     //nolint:unused
+	strHead    = []byte(MethodHead)    //nolint:unused
+	strPost    = []byte(MethodPost)    //nolint:unused
+	strPut     = []byte(MethodPut)     //nolint:unused
+	strDelete  = []byte(MethodDelete)  //nolint:unused
+	strConnect = []byte(MethodConnect) //nolint:unused
+	strOptions = []byte(MethodOptions) //nolint:unused
+	strTrace   = []byte(MethodTrace)   //nolint:unused
+	strPatch   = []byte(MethodPatch)   //nolint:unused
 
 	strExpect           = []byte(HeaderExpect)
 	strConnection       = []byte(HeaderConnection)
