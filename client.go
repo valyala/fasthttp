@@ -950,7 +950,7 @@ var clientURLResponseChPool sync.Pool
 
 func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (statusCode int, body []byte, err error) {
 	req := AcquireRequest()
-	req.Header.SetMethodBytes(strPost)
+	req.Header.SetMethodBytes([]byte(MethodPost))
 	req.Header.SetContentTypeBytes(strPostArgsContentType)
 	if postArgs != nil {
 		if _, err := postArgs.WriteTo(req.BodyWriter()); err != nil {

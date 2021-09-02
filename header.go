@@ -443,7 +443,7 @@ func (h *RequestHeader) SetRefererBytes(referer []byte) {
 // Method returns HTTP request method.
 func (h *RequestHeader) Method() []byte {
 	if len(h.method) == 0 {
-		return strGet
+		return []byte(MethodGet)
 	}
 	return h.method
 }
