@@ -187,3 +187,64 @@ func BenchmarkRequestHeaderIsPost(b *testing.B) {
 		}
 	})
 }
+func BenchmarkRequestHeaderIsHead(b *testing.B) {
+	req := &RequestHeader{method: strHead}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req.IsHead()
+		}
+	})
+}
+func BenchmarkRequestHeaderIsPut(b *testing.B) {
+	req := &RequestHeader{method: strPut}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req.IsPut()
+		}
+	})
+}
+
+func BenchmarkRequestHeaderIsDelete(b *testing.B) {
+	req := &RequestHeader{method: strDelete}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req.IsDelete()
+		}
+	})
+}
+
+func BenchmarkRequestHeaderIsConnect(b *testing.B) {
+	req := &RequestHeader{method: strConnect}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req.IsConnect()
+		}
+	})
+}
+
+func BenchmarkRequestHeaderIsOptions(b *testing.B) {
+	req := &RequestHeader{method: strOptions}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req.IsOptions()
+		}
+	})
+}
+
+func BenchmarkRequestHeaderIsTrace(b *testing.B) {
+	req := &RequestHeader{method: strTrace}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req.IsTrace()
+		}
+	})
+}
+
+func BenchmarkRequestHeaderIsPatch(b *testing.B) {
+	req := &RequestHeader{method: strPatch}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req.IsPatch()
+		}
+	})
+}
