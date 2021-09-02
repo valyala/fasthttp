@@ -178,3 +178,12 @@ func BenchmarkRemoveNewLines(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkRequestHeaderIsPost(b *testing.B) {
+	req := &RequestHeader{method: strPost}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			req.IsPost()
+		}
+	})
+}
