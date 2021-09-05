@@ -112,7 +112,7 @@ func TestPathNotFoundFunc(t *testing.T) {
 }
 
 func TestServeFileHead(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	var ctx RequestCtx
 	var req Request
@@ -204,7 +204,7 @@ func (pw pureWriter) Write(p []byte) (nn int, err error) {
 }
 
 func TestServeFileCompressed(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	var ctx RequestCtx
 	ctx.Init(&Request{}, nil, nil)
@@ -270,7 +270,7 @@ func TestServeFileCompressed(t *testing.T) {
 }
 
 func TestServeFileUncompressed(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	var ctx RequestCtx
 	var req Request
@@ -611,25 +611,9 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	}
 }
 
-func TestFileLock(t *testing.T) {
-	t.Parallel()
-
-	for i := 0; i < 10; i++ {
-		filePath := fmt.Sprintf("foo/bar/%d.jpg", i)
-		lock := getFileLock(filePath)
-		lock.Lock()
-		lock.Unlock() // nolint:staticcheck
-	}
-
-	for i := 0; i < 10; i++ {
-		filePath := fmt.Sprintf("foo/bar/%d.jpg", i)
-		lock := getFileLock(filePath)
-		lock.Lock()
-		lock.Unlock() // nolint:staticcheck
-	}
-}
-
 func TestFSHandlerSingleThread(t *testing.T) {
+	// This test can't run parallel as files in / might by changed by other tests.
+
 	requestHandler := FSHandler(".", 0)
 
 	f, err := os.Open(".")
@@ -650,6 +634,8 @@ func TestFSHandlerSingleThread(t *testing.T) {
 }
 
 func TestFSHandlerConcurrent(t *testing.T) {
+	// This test can't run parallel as files in / might by changed by other tests.
+
 	requestHandler := FSHandler(".", 0)
 
 	f, err := os.Open(".")
@@ -796,7 +782,7 @@ func testFileExtension(t *testing.T, path string, compressed bool, compressedFil
 }
 
 func TestServeFileContentType(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	var ctx RequestCtx
 	var req Request
