@@ -83,5 +83,6 @@ var (
 	strBytes               = []byte("bytes")
 	strTextSlash           = []byte("text/")
 	strApplicationSlash    = []byte("application/")
+	strImageSVGSlash       = []byte("image/svg")
 	strBasicSpace          = []byte("Basic ")
 )
