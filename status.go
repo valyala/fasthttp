@@ -184,10 +184,10 @@ func invalidStatusLine(statusCode int) []byte {
 	statusText := StatusMessage(statusCode)
 	// xxx placeholder of status code
 	var line = make([]byte, 0, len("HTTP/1.1 xxx \r\n")+len(statusText))
-	line = append(line, []byte("HTTP/1.1 ")...)
+	line = append(line, "HTTP/1.1 "...)
 	line = strconv.AppendInt(line, int64(statusCode), 10)
-	line = append(line, []byte(" ")...)
-	line = append(line, []byte(statusText)...)
-	line = append(line, []byte("\r\n")...)
+	line = append(line, ' ')
+	line = append(line, statusText...)
+	line = append(line, "\r\n"...)
 	return line
 }
