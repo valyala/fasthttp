@@ -24,16 +24,6 @@ var (
 
 	strResponseContinue = []byte("HTTP/1.1 100 Continue\r\n\r\n")
 
-	strGet     = []byte(MethodGet)
-	strHead    = []byte(MethodHead)
-	strPost    = []byte(MethodPost)
-	strPut     = []byte(MethodPut)
-	strDelete  = []byte(MethodDelete)
-	strConnect = []byte(MethodConnect)
-	strOptions = []byte(MethodOptions)
-	strTrace   = []byte(MethodTrace)
-	strPatch   = []byte(MethodPatch)
-
 	strExpect           = []byte(HeaderExpect)
 	strConnection       = []byte(HeaderConnection)
 	strContentLength    = []byte(HeaderContentLength)
