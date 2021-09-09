@@ -20,6 +20,76 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestClientDoTimeoutsSuccess(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer s.Shutdown() //nolint:errcheck
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	defer c.CloseIdleConnections()
+
+	var req Request
+	var resp Response
+
+	req.SetRequestURI("http://example.com")
+	if err := c.DoTimeouts(&req, &resp, time.Second, time.Second); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+}
+
+func TestClientDoTimeoutsTimeout(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			time.Sleep(time.Millisecond * 400)
+		},
+		Logger: &testLogger{},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer s.Shutdown() //nolint:errcheck
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxIdemponentCallAttempts: 1,
+	}
+	defer c.CloseIdleConnections()
+
+	var req Request
+	var resp Response
+
+	req.SetRequestURI("http://example.com")
+	if err := c.DoTimeouts(&req, &resp, time.Millisecond*200, time.Millisecond*200); err == nil {
+		t.Fatal("expected timeout error")
+	}
+}
+
 func TestCloseIdleConnections(t *testing.T) {
 	t.Parallel()
 
