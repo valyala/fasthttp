@@ -8,9 +8,12 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
-    - name: GolangCI-Lint Action
-      uses: golangci/golangci-lint-action@v2
+    - uses: actions/checkout@v2
+    - uses: actions/setup-go@v2
+      with:
+        go-version: 1.17.x
+    - run: go version
+    - run: diff -u <(echo -n) <(gofmt -d .)
+    - uses: golangci/golangci-lint-action@v2
       with:
         version: v1.28.3

@@ -11,11 +11,11 @@ import (
 	"math"
 	"net"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 	"unsafe"
-	"runtime"
 )
 
 // AppendHTMLEscape appends html-escaped s to dst and returns the extended dst.
