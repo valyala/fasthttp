@@ -271,11 +271,11 @@ func (h *RequestHeader) SetContentLength(contentLength int) {
 func (h *ResponseHeader) isCompressibleContentType() bool {
 	contentType := h.ContentType()
 	return bytes.HasPrefix(contentType, strTextSlash) ||
-			bytes.HasPrefix(contentType, strApplicationSlash) ||
-			bytes.HasPrefix(contentType, strImageSVG) ||
-			bytes.HasPrefix(contentType, strImageIcon) ||
-			bytes.HasPrefix(contentType, strFontSlash) ||
-			bytes.HasPrefix(contentType, strMultipartSlash)
+		bytes.HasPrefix(contentType, strApplicationSlash) ||
+		bytes.HasPrefix(contentType, strImageSVG) ||
+		bytes.HasPrefix(contentType, strImageIcon) ||
+		bytes.HasPrefix(contentType, strFontSlash) ||
+		bytes.HasPrefix(contentType, strMultipartSlash)
 }
 
 // ContentType returns Content-Type header value.
