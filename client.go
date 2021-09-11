@@ -546,7 +546,6 @@ func (c *Client) cleanHostClients(m map[string]*HostClient) {
 	for k, v := range m {
 		// Lock HostClient, and delete it from map m where it has no connections.
 		v.connsLock.Lock()
-		fmt.Printf("Client check host client connsCount:%d, %p\n", v.connsCount, v)
 		if v.connsCount == 0 {
 			delete(m, k)
 		}
@@ -566,7 +565,6 @@ func (c *Client) hasResource() bool {
 	c.mLock.Lock()
 	defer c.mLock.Unlock()
 	if len(c.m) > 0 || len(c.ms) > 0 {
-		fmt.Printf("client has resource, c.m:%d, c.ms:%d\n", len(c.m), len(c.ms))
 		return true
 	}
 	return false
@@ -1511,8 +1509,6 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 	createConn := false
 	startCleaner := false
 
-	fmt.Printf("accquireConn HostClient:%p\n", c)
-
 	var n int
 	c.connsLock.Lock()
 	n = len(c.conns)
@@ -1538,7 +1534,6 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 	c.connsLock.Unlock()
 
 	if cc != nil {
-		fmt.Printf("accquireConn use exist connection, HostClient:%p\n", c)
 		return cc, nil
 	}
 	if !createConn {
@@ -1693,7 +1688,6 @@ func (c *HostClient) cleanResource() {
 
 func (c *HostClient) hasResource() bool {
 	cnt := c.ConnsCount()
-	fmt.Printf("HostClient has resource, cnt:%d\n", cnt)
 	return cnt > 0
 }
 
@@ -2951,8 +2945,6 @@ func (c *clientCleaner) register(client resourceClean) {
 	// Check if init
 	c.init()
 
-	fmt.Printf("register client:%p\n", client)
-
 	// Store client
 	c.clients.Store(client, struct{}{})
 }
@@ -2967,23 +2959,17 @@ func (c *clientCleaner) cleanClient() {
 		return true
 	})
 
-	fmt.Printf("number of clients:%d\n", len(allClients))
-
 	// Clean connections for each client.
 	for _, client := range allClients {
 		//Clean resource.
-		fmt.Printf("check client:%p\n", client)
 		client.cleanResource()
 		// If a client has no resource, delete it from c.clients.
 		// But client may create resource before deleted,
 		// so check again. If it has any resource, store it into c.clients.
 		if !client.hasResource() {
-			fmt.Printf("client has no resource:%p\n", client)
 			c.clients.Delete(client)
 			if client.hasResource() {
 				c.clients.Store(client, struct{}{})
-			} else {
-				fmt.Printf("delete client:%p\n", client)
 			}
 		}
 	}
