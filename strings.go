@@ -24,16 +24,6 @@ var (
 
 	strResponseContinue = []byte("HTTP/1.1 100 Continue\r\n\r\n")
 
-	strGet     = []byte(MethodGet)
-	strHead    = []byte(MethodHead)
-	strPost    = []byte(MethodPost)
-	strPut     = []byte(MethodPut)
-	strDelete  = []byte(MethodDelete)
-	strConnect = []byte(MethodConnect)
-	strOptions = []byte(MethodOptions)
-	strTrace   = []byte(MethodTrace)
-	strPatch   = []byte(MethodPatch)
-
 	strExpect           = []byte(HeaderExpect)
 	strConnection       = []byte(HeaderConnection)
 	strContentLength    = []byte(HeaderContentLength)
@@ -81,7 +71,12 @@ var (
 	strMultipartFormData   = []byte("multipart/form-data")
 	strBoundary            = []byte("boundary")
 	strBytes               = []byte("bytes")
-	strTextSlash           = []byte("text/")
-	strApplicationSlash    = []byte("application/")
 	strBasicSpace          = []byte("Basic ")
+
+	strApplicationSlash = []byte("application/")
+	strImageSVG         = []byte("image/svg")
+	strImageIcon        = []byte("image/x-icon")
+	strFontSlash        = []byte("font/")
+	strMultipartSlash   = []byte("multipart/")
+	strTextSlash        = []byte("text/")
 )

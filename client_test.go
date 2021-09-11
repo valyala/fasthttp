@@ -1282,7 +1282,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 	var (
 		emptyBodyCount uint8
 		ln             = fasthttputil.NewInmemoryListener()
-		timeout        = 50 * time.Millisecond
+		timeout        = 200 * time.Millisecond
 		wg             sync.WaitGroup
 	)
 

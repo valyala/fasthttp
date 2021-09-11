@@ -67,7 +67,7 @@ func TestWorkerPoolMaxWorkersCountConcurrent(t *testing.T) {
 	for i := 0; i < concurrency; i++ {
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(time.Second * 2):
 			t.Fatalf("timeout")
 		}
 	}
