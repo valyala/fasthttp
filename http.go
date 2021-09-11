@@ -53,7 +53,7 @@ type Request struct {
 	// Client/HostClient shouldn't use this field but should depend on the uri.scheme instead.
 	isTLS bool
 
-	// Request timeout. Usually set by DoDealine or DoTimeout
+	// Request timeout. Usually set by DoDeadline or DoTimeout
 	// if <= 0, means not set
 	timeout time.Duration
 }
