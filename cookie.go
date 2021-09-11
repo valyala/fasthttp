@@ -85,12 +85,12 @@ type Cookie struct {
 // CopyTo copies src cookie to c.
 func (c *Cookie) CopyTo(src *Cookie) {
 	c.Reset()
-	c.key = append(c.key[:0], src.key...)
-	c.value = append(c.value[:0], src.value...)
+	c.key = append(c.key, src.key...)
+	c.value = append(c.value, src.value...)
 	c.expire = src.expire
 	c.maxAge = src.maxAge
-	c.domain = append(c.domain[:0], src.domain...)
-	c.path = append(c.path[:0], src.path...)
+	c.domain = append(c.domain, src.domain...)
+	c.path = append(c.path, src.path...)
 	c.httpOnly = src.httpOnly
 	c.secure = src.secure
 	c.sameSite = src.sameSite
@@ -345,8 +345,8 @@ func (c *Cookie) ParseBytes(src []byte) error {
 		return errNoCookies
 	}
 
-	c.key = append(c.key[:0], kv.key...)
-	c.value = append(c.value[:0], kv.value...)
+	c.key = append(c.key, kv.key...)
+	c.value = append(c.value, kv.value...)
 
 	for s.next(kv) {
 		if len(kv.key) != 0 {
@@ -378,12 +378,12 @@ func (c *Cookie) ParseBytes(src []byte) error {
 
 			case 'd': // "domain"
 				if caseInsensitiveCompare(strCookieDomain, kv.key) {
-					c.domain = append(c.domain[:0], kv.value...)
+					c.domain = append(c.domain, kv.value...)
 				}
 
 			case 'p': // "path"
 				if caseInsensitiveCompare(strCookiePath, kv.key) {
-					c.path = append(c.path[:0], kv.value...)
+					c.path = append(c.path, kv.value...)
 				}
 
 			case 's': // "samesite"

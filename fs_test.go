@@ -112,7 +112,7 @@ func TestPathNotFoundFunc(t *testing.T) {
 }
 
 func TestServeFileHead(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	var ctx RequestCtx
 	var req Request
@@ -204,7 +204,7 @@ func (pw pureWriter) Write(p []byte) (nn int, err error) {
 }
 
 func TestServeFileCompressed(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	var ctx RequestCtx
 	ctx.Init(&Request{}, nil, nil)
@@ -270,7 +270,7 @@ func TestServeFileCompressed(t *testing.T) {
 }
 
 func TestServeFileUncompressed(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	var ctx RequestCtx
 	var req Request
@@ -480,7 +480,7 @@ func testParseByteRangeError(t *testing.T, v string, contentLength int) {
 }
 
 func TestFSCompressConcurrent(t *testing.T) {
-	// This test can't run parallel as files in / might by changed by other tests.
+	// This test can't run parallel as files in / might be changed by other tests.
 
 	stop := make(chan struct{})
 	defer close(stop)
@@ -549,14 +549,14 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	s := ctx.Response.String()
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s. filePath=%q", err, filePath)
+		t.Errorf("unexpected error: %s. filePath=%q", err, filePath)
 	}
 	if resp.StatusCode() != StatusOK {
-		t.Fatalf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
+		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
 	ce := resp.Header.Peek(HeaderContentEncoding)
 	if string(ce) != "" {
-		t.Fatalf("unexpected content-encoding %q. Expecting empty string. filePath=%q", ce, filePath)
+		t.Errorf("unexpected content-encoding %q. Expecting empty string. filePath=%q", ce, filePath)
 	}
 	body := string(resp.Body())
 
@@ -568,21 +568,21 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	s = ctx.Response.String()
 	br = bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s. filePath=%q", err, filePath)
+		t.Errorf("unexpected error: %s. filePath=%q", err, filePath)
 	}
 	if resp.StatusCode() != StatusOK {
-		t.Fatalf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
+		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
 	ce = resp.Header.Peek(HeaderContentEncoding)
 	if string(ce) != "gzip" {
-		t.Fatalf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "gzip", filePath)
+		t.Errorf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "gzip", filePath)
 	}
 	zbody, err := resp.BodyGunzip()
 	if err != nil {
-		t.Fatalf("unexpected error when gunzipping response body: %s. filePath=%q", err, filePath)
+		t.Errorf("unexpected error when gunzipping response body: %s. filePath=%q", err, filePath)
 	}
 	if string(zbody) != body {
-		t.Fatalf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
+		t.Errorf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
 	}
 
 	// request compressed brotli file
@@ -593,43 +593,27 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	s = ctx.Response.String()
 	br = bufio.NewReader(bytes.NewBufferString(s))
 	if err = resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s. filePath=%q", err, filePath)
+		t.Errorf("unexpected error: %s. filePath=%q", err, filePath)
 	}
 	if resp.StatusCode() != StatusOK {
-		t.Fatalf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
+		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
 	ce = resp.Header.Peek(HeaderContentEncoding)
 	if string(ce) != "br" {
-		t.Fatalf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "br", filePath)
+		t.Errorf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "br", filePath)
 	}
 	zbody, err = resp.BodyUnbrotli()
 	if err != nil {
-		t.Fatalf("unexpected error when unbrotling response body: %s. filePath=%q", err, filePath)
+		t.Errorf("unexpected error when unbrotling response body: %s. filePath=%q", err, filePath)
 	}
 	if string(zbody) != body {
-		t.Fatalf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
-	}
-}
-
-func TestFileLock(t *testing.T) {
-	t.Parallel()
-
-	for i := 0; i < 10; i++ {
-		filePath := fmt.Sprintf("foo/bar/%d.jpg", i)
-		lock := getFileLock(filePath)
-		lock.Lock()
-		lock.Unlock() // nolint:staticcheck
-	}
-
-	for i := 0; i < 10; i++ {
-		filePath := fmt.Sprintf("foo/bar/%d.jpg", i)
-		lock := getFileLock(filePath)
-		lock.Lock()
-		lock.Unlock() // nolint:staticcheck
+		t.Errorf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
 	}
 }
 
 func TestFSHandlerSingleThread(t *testing.T) {
+	// This test can't run parallel as files in / might by changed by other tests.
+
 	requestHandler := FSHandler(".", 0)
 
 	f, err := os.Open(".")
@@ -650,6 +634,8 @@ func TestFSHandlerSingleThread(t *testing.T) {
 }
 
 func TestFSHandlerConcurrent(t *testing.T) {
+	// This test can't run parallel as files in / might by changed by other tests.
+
 	requestHandler := FSHandler(".", 0)
 
 	f, err := os.Open(".")
@@ -796,7 +782,7 @@ func testFileExtension(t *testing.T, path string, compressed bool, compressedFil
 }
 
 func TestServeFileContentType(t *testing.T) {
-	t.Parallel()
+	// This test can't run parallel as files in / might by changed by other tests.
 
 	var ctx RequestCtx
 	var req Request

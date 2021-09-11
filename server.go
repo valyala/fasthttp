@@ -196,14 +196,6 @@ type Server struct {
 	// It works with ListenAndServe as well.
 	Concurrency int
 
-	// Whether to disable keep-alive connections.
-	//
-	// The server will close all the incoming connections after sending
-	// the first response to client if this option is set to true.
-	//
-	// By default keep-alive connections are enabled.
-	DisableKeepalive bool
-
 	// Per-connection buffer size for requests' reading.
 	// This also limits the maximum header size.
 	//
@@ -256,13 +248,6 @@ type Server struct {
 	// Deprecated: Use IdleTimeout instead.
 	MaxKeepaliveDuration time.Duration
 
-	// Whether to enable tcp keep-alive connections.
-	//
-	// Whether the operating system should send tcp keep-alive messages on the tcp connection.
-	//
-	// By default tcp keep-alive connections are disabled.
-	TCPKeepalive bool
-
 	// Period between tcp keep-alive messages.
 	//
 	// TCP keep-alive period is determined by operation system by default.
@@ -274,6 +259,21 @@ type Server struct {
 	//
 	// Request body size is limited by DefaultMaxRequestBodySize by default.
 	MaxRequestBodySize int
+
+	// Whether to disable keep-alive connections.
+	//
+	// The server will close all the incoming connections after sending
+	// the first response to client if this option is set to true.
+	//
+	// By default keep-alive connections are enabled.
+	DisableKeepalive bool
+
+	// Whether to enable tcp keep-alive connections.
+	//
+	// Whether the operating system should send tcp keep-alive messages on the tcp connection.
+	//
+	// By default tcp keep-alive connections are disabled.
+	TCPKeepalive bool
 
 	// Aggressively reduces memory usage at the cost of higher CPU usage
 	// if set to true.
@@ -366,16 +366,6 @@ type Server struct {
 	// set to true, the Content-Type will not be present.
 	NoDefaultContentType bool
 
-	// ConnState specifies an optional callback function that is
-	// called when a client connection changes state. See the
-	// ConnState type and associated constants for details.
-	ConnState func(net.Conn, ConnState)
-
-	// Logger, which is used by RequestCtx.Logger().
-	//
-	// By default standard logger from log package is used.
-	Logger Logger
-
 	// KeepHijackedConns is an opt-in disable of connection
 	// close by fasthttp after connections' HijackHandler returns.
 	// This allows to save goroutines, e.g. when fasthttp used to upgrade
@@ -390,6 +380,16 @@ type Server struct {
 	// and calls the handler sooner when given body is
 	// larger then the current limit.
 	StreamRequestBody bool
+
+	// ConnState specifies an optional callback function that is
+	// called when a client connection changes state. See the
+	// ConnState type and associated constants for details.
+	ConnState func(net.Conn, ConnState)
+
+	// Logger, which is used by RequestCtx.Logger().
+	//
+	// By default standard logger from log package is used.
+	Logger Logger
 
 	tlsConfig  *tls.Config
 	nextProtos map[string]ServeHandler
@@ -2014,6 +2014,14 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		return
 	}
 	if handler, ok := s.nextProtos[proto]; ok {
+		// Remove read or write deadlines that might have previously been set.
+		// The next handler is responsible for setting its own deadlines.
+		if s.ReadTimeout > 0 || s.WriteTimeout > 0 {
+			if err := c.SetDeadline(zeroTime); err != nil {
+				panic(fmt.Sprintf("BUG: error in SetDeadline(zeroTime): %s", err))
+			}
+		}
+
 		return handler(c)
 	}
 
@@ -2029,6 +2037,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		maxRequestBodySize = DefaultMaxRequestBodySize
 	}
 	writeTimeout := s.WriteTimeout
+	previousWriteTimeout := time.Duration(0)
 
 	ctx := s.acquireCtx(c)
 	ctx.connTime = connTime
@@ -2097,6 +2106,12 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			if s.ReadTimeout > 0 {
 				if err := c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", s.ReadTimeout, err))
+				}
+			} else if s.IdleTimeout > 0 && connRequestNum > 1 {
+				// If this was an idle connection and the server has an IdleTimeout but
+				// no ReadTimeout then we should remove the ReadTimeout.
+				if err := c.SetReadDeadline(zeroTime); err != nil {
+					panic(fmt.Sprintf("BUG: error in SetReadDeadline(zeroTime): %s", err))
 				}
 			}
 			if s.DisableHeaderNamesNormalizing {
@@ -2277,6 +2292,13 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			if err := c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
 				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%s): %s", writeTimeout, err))
 			}
+			previousWriteTimeout = writeTimeout
+		} else if previousWriteTimeout > 0 {
+			// We don't want a write timeout but we previously set one, remove it.
+			if err := c.SetWriteDeadline(zeroTime); err != nil {
+				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(zeroTime): %s", err))
+			}
+			previousWriteTimeout = 0
 		}
 
 		connectionClose = connectionClose || ctx.Response.ConnectionClose()
@@ -2339,11 +2361,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 				releaseWriter(s, bw)
 				bw = nil
 			}
-			err = c.SetReadDeadline(zeroTime)
-			if err != nil {
-				break
-			}
-			err = c.SetWriteDeadline(zeroTime)
+			err = c.SetDeadline(zeroTime)
 			if err != nil {
 				break
 			}
