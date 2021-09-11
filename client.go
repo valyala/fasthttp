@@ -518,7 +518,8 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	c.mLock.Unlock()
 
 	if startCleaner {
-		go c.mCleaner(m)
+		// Register client to cleaner
+		cCleaner.register(c)
 	}
 
 	return hc.Do(req, resp)
@@ -539,37 +540,36 @@ func (c *Client) CloseIdleConnections() {
 	c.mLock.Unlock()
 }
 
-func (c *Client) mCleaner(m map[string]*HostClient) {
-	mustStop := false
-
-	sleep := c.MaxIdleConnDuration
-	if sleep < time.Second {
-		sleep = time.Second
-	} else if sleep > 10*time.Second {
-		sleep = 10 * time.Second
+// Clean HostClient in a map when the HostClient has no more connections.
+func (c *Client) cleanHostClients(m map[string]*HostClient) {
+	c.mLock.Lock()
+	for k, v := range m {
+		// Lock HostClient, and delete it from map m where it has no connections.
+		v.connsLock.Lock()
+		fmt.Printf("Client check host client connsCount:%d, %p\n", v.connsCount, v)
+		if v.connsCount == 0 {
+			delete(m, k)
+		}
+		v.connsLock.Unlock()
 	}
+	c.mLock.Unlock()
+}
 
-	for {
-		c.mLock.Lock()
-		for k, v := range m {
-			v.connsLock.Lock()
-			shouldRemove := v.connsCount == 0
-			v.connsLock.Unlock()
+// Clean HostClient for Client.
+func (c *Client) cleanResource() {
+	c.cleanHostClients(c.m)
+	c.cleanHostClients(c.ms)
+}
 
-			if shouldRemove {
-				delete(m, k)
-			}
-		}
-		if len(m) == 0 {
-			mustStop = true
-		}
-		c.mLock.Unlock()
-
-		if mustStop {
-			break
-		}
-		time.Sleep(sleep)
+// Whether a Client has any HostClient.
+func (c *Client) hasResource() bool {
+	c.mLock.Lock()
+	defer c.mLock.Unlock()
+	if len(c.m) > 0 || len(c.ms) > 0 {
+		fmt.Printf("client has resource, c.m:%d, c.ms:%d\n", len(c.m), len(c.ms))
+		return true
 	}
+	return false
 }
 
 // DefaultMaxConnsPerHost is the maximum number of concurrent connections
@@ -1511,6 +1511,8 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 	createConn := false
 	startCleaner := false
 
+	fmt.Printf("accquireConn HostClient:%p\n", c)
+
 	var n int
 	c.connsLock.Lock()
 	n = len(c.conns)
@@ -1522,9 +1524,9 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 		if c.connsCount < maxConns {
 			c.connsCount++
 			createConn = true
-			if !c.connsCleanerRun && !connectionClose {
+			// first time to create connection, need to start cleaner
+			if c.connsCount == 1 {
 				startCleaner = true
-				c.connsCleanerRun = true
 			}
 		}
 	} else {
@@ -1536,6 +1538,7 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 	c.connsLock.Unlock()
 
 	if cc != nil {
+		fmt.Printf("accquireConn use exist connection, HostClient:%p\n", c)
 		return cc, nil
 	}
 	if !createConn {
@@ -1583,7 +1586,8 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 	}
 
 	if startCleaner {
-		go c.connsCleaner()
+		// Register to cleaner.
+		cCleaner.register(c)
 	}
 
 	conn, err := c.dialHostHard()
@@ -1648,52 +1652,49 @@ func (c *HostClient) connsCleaner() {
 	if maxIdleConnDuration <= 0 {
 		maxIdleConnDuration = DefaultMaxIdleConnDuration
 	}
-	for {
-		currentTime := time.Now()
 
-		// Determine idle connections to be closed.
-		c.connsLock.Lock()
-		conns := c.conns
-		n := len(conns)
-		i := 0
-		for i < n && currentTime.Sub(conns[i].lastUseTime) > maxIdleConnDuration {
-			i++
-		}
-		sleepFor := maxIdleConnDuration
-		if i < n {
-			// + 1 so we actually sleep past the expiration time and not up to it.
-			// Otherwise the > check above would still fail.
-			sleepFor = maxIdleConnDuration - currentTime.Sub(conns[i].lastUseTime) + 1
-		}
-		scratch = append(scratch[:0], conns[:i]...)
-		if i > 0 {
-			m := copy(conns, conns[i:])
-			for i = m; i < n; i++ {
-				conns[i] = nil
-			}
-			c.conns = conns[:m]
-		}
-		c.connsLock.Unlock()
+	currentTime := time.Now()
 
-		// Close idle connections.
-		for i, cc := range scratch {
-			c.closeConn(cc)
-			scratch[i] = nil
-		}
-
-		// Determine whether to stop the connsCleaner.
-		c.connsLock.Lock()
-		mustStop := c.connsCount == 0
-		if mustStop {
-			c.connsCleanerRun = false
-		}
-		c.connsLock.Unlock()
-		if mustStop {
-			break
-		}
-
-		time.Sleep(sleepFor)
+	// Determine idle connections to be closed.
+	c.connsLock.Lock()
+	conns := c.conns
+	n := len(conns)
+	i := 0
+	for i < n && currentTime.Sub(conns[i].lastUseTime) > maxIdleConnDuration {
+		i++
 	}
+	// If no connections need to be closed, unlock and finish.
+	if i <= 0 {
+		c.connsLock.Unlock()
+		return
+	}
+
+	// Connections to be closed.
+	scratch = append(scratch[:0], conns[:i]...)
+	m := copy(conns, conns[i:])
+	for i = m; i < n; i++ {
+		conns[i] = nil
+	}
+	// Connections to be used.
+	c.conns = conns[:m]
+	c.connsLock.Unlock()
+
+	// Close idle connections.
+	for i, cc := range scratch {
+		c.closeConn(cc)
+		scratch[i] = nil
+	}
+}
+
+// clean connection resources for HostClient.
+func (c *HostClient) cleanResource() {
+	c.connsCleaner()
+}
+
+func (c *HostClient) hasResource() bool {
+	cnt := c.ConnsCount()
+	fmt.Printf("HostClient has resource, cnt:%d\n", cnt)
+	return cnt > 0
 }
 
 func (c *HostClient) closeConn(cc *clientConn) {
@@ -2906,4 +2907,84 @@ func releasePipelineWork(pool *sync.Pool, w *pipelineWork) {
 	w.resp = nil
 	w.err = nil
 	pool.Put(w)
+}
+
+// Resource Clean interface.
+// resourceClean can register into clientCleaner for cleaning resources.
+type resourceClean interface {
+	cleanResource()
+	hasResource() bool
+}
+
+// Cleaner to clean resources.
+// Client, HostClient register into cleaner. The Cleaner will check and delete client
+// where it has no resources.
+type clientCleaner struct {
+	initOnce       sync.Once
+	// clients to clean
+	clients        sync.Map
+}
+
+// Global cleaner.
+var cCleaner = &clientCleaner{}
+
+// Initialize cleaner.
+func (c *clientCleaner) init() {
+	c.initOnce.Do(func() {
+		go c.cleaner()
+	})
+}
+
+// Clean clients
+func (c *clientCleaner) cleaner() {
+	for {
+		c.cleanClient()
+		time.Sleep(10 * time.Second)
+	}
+}
+
+// Register Client to cleaner.
+func (c *clientCleaner) register(client resourceClean) {
+	if client == nil {
+		return
+	}
+	// Check if init
+	c.init()
+
+	fmt.Printf("register client:%p\n", client)
+
+	// Store client
+	c.clients.Store(client, struct{}{})
+}
+
+// Clean Client when the client has no resource.
+func (c *clientCleaner) cleanClient() {
+	// Find all clients
+	allClients := make([]resourceClean, 0)
+	c.clients.Range(func (key, value interface{}) bool {
+		client := key.(resourceClean)
+		allClients = append(allClients, client)
+		return true
+	})
+
+	fmt.Printf("number of clients:%d\n", len(allClients))
+
+	// Clean connections for each client.
+	for _, client := range allClients {
+		//Clean resource.
+		fmt.Printf("check client:%p\n", client)
+		client.cleanResource()
+		// If a client has no resource, delete it from c.clients.
+		// But client may create resource before deleted,
+		// so check again. If it has any resource, store it into c.clients.
+		if !client.hasResource() {
+			fmt.Printf("client has no resource:%p\n", client)
+			c.clients.Delete(client)
+			if client.hasResource() {
+				c.clients.Store(client, struct{}{})
+			} else {
+				fmt.Printf("delete client:%p\n", client)
+			}
+		}
+	}
 }
