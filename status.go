@@ -173,7 +173,7 @@ func init() {
 }
 
 func statusLine(statusCode int) []byte {
-	if statusCode < 0 || statusCode > statusMessageMax {
+	if statusCode < statusMessageMin || statusCode > statusMessageMax {
 		return invalidStatusLine(statusCode)
 	}
 
