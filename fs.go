@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -794,6 +795,10 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	if !ok {
 		pathStr := string(path)
 		filePath := h.root + pathStr
+		switch runtime.GOOS {
+		case "windows":
+			filePath = filepath.FromSlash(filePath)
+		}
 		var err error
 		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
 		if mustCompress && err == errNoCreatePermission {
