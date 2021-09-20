@@ -156,8 +156,7 @@ type TCPDialer struct {
 	// DNSCacheDuration may be used to override the default DNS cache duration (DefaultDNSCacheDuration)
 	DNSCacheDuration time.Duration
 
-	tcpAddrsLock sync.Mutex
-	tcpAddrsMap  map[string]*tcpAddrEntry
+	tcpAddrsMap sync.Map
 
 	concurrencyCh chan struct{}
 
@@ -280,7 +279,6 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 			d.DNSCacheDuration = DefaultDNSCacheDuration
 		}
 
-		d.tcpAddrsMap = make(map[string]*tcpAddrEntry)
 		go d.tcpAddrsClean()
 	})
 
@@ -373,35 +371,32 @@ func (d *TCPDialer) tcpAddrsClean() {
 	for {
 		time.Sleep(time.Second)
 		t := time.Now()
-
-		d.tcpAddrsLock.Lock()
-		for k, e := range d.tcpAddrsMap {
-			if t.Sub(e.resolveTime) > expireDuration {
-				delete(d.tcpAddrsMap, k)
+		d.tcpAddrsMap.Range(func(k, v interface{}) bool {
+			if e, ok := v.(*tcpAddrEntry); ok && t.Sub(e.resolveTime) > expireDuration {
+				d.tcpAddrsMap.Delete(k)
 			}
-		}
-		d.tcpAddrsLock.Unlock()
+			return true
+		})
+
 	}
 }
 
 func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, uint32, error) {
-	d.tcpAddrsLock.Lock()
-	e := d.tcpAddrsMap[addr]
-	if e != nil && !e.pending && time.Since(e.resolveTime) > d.DNSCacheDuration {
+	item, exist := d.tcpAddrsMap.Load(addr)
+	e, ok := item.(*tcpAddrEntry)
+	if exist && ok && e != nil && !e.pending && time.Since(e.resolveTime) > d.DNSCacheDuration {
 		e.pending = true
 		e = nil
 	}
-	d.tcpAddrsLock.Unlock()
 
 	if e == nil {
 		addrs, err := resolveTCPAddrs(addr, dualStack, d.Resolver)
 		if err != nil {
-			d.tcpAddrsLock.Lock()
-			e = d.tcpAddrsMap[addr]
-			if e != nil && e.pending {
+			item, exist := d.tcpAddrsMap.Load(addr)
+			e, ok = item.(*tcpAddrEntry)
+			if exist && ok && e != nil && e.pending {
 				e.pending = false
 			}
-			d.tcpAddrsLock.Unlock()
 			return nil, 0, err
 		}
 
@@ -409,10 +404,7 @@ func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool) ([]net.TCPAddr, uin
 			addrs:       addrs,
 			resolveTime: time.Now(),
 		}
-
-		d.tcpAddrsLock.Lock()
-		d.tcpAddrsMap[addr] = e
-		d.tcpAddrsLock.Unlock()
+		d.tcpAddrsMap.Store(addr, e)
 	}
 
 	idx := atomic.AddUint32(&e.addrsIdx, 1)
