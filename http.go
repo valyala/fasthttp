@@ -320,7 +320,9 @@ func (resp *Response) LocalAddr() net.Addr {
 
 // Body returns response body.
 //
-// The returned body is valid until the response modification.
+// The returned value is valid until the response is released,
+// either though ReleaseResponse or your request handler returning.
+// Do not store references to returned value. Make copies instead.
 func (resp *Response) Body() []byte {
 	if resp.bodyStream != nil {
 		bodyBuf := resp.bodyBuffer()
@@ -638,7 +640,9 @@ func (req *Request) SwapBody(body []byte) []byte {
 
 // Body returns request body.
 //
-// The returned body is valid until the request modification.
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
+// Do not store references to returned value. Make copies instead.
 func (req *Request) Body() []byte {
 	if req.bodyRaw != nil {
 		return req.bodyRaw

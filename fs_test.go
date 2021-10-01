@@ -60,7 +60,7 @@ func TestNewVHostPathRewriterMaliciousHost(t *testing.T) {
 
 	f := NewVHostPathRewriter(0)
 	path := f(&ctx)
-	expectedPath := "/invalid-host/foo/bar/baz"
+	expectedPath := "/invalid-host/"
 	if string(path) != expectedPath {
 		t.Fatalf("unexpected path %q. Expecting %q", path, expectedPath)
 	}

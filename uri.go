@@ -89,7 +89,7 @@ func (u *URI) CopyTo(dst *URI) {
 
 // Hash returns URI hash, i.e. qwe of http://aaa.com/foo/bar?baz=123#qwe .
 //
-// The returned value is valid until the next URI method call.
+// The returned bytes are valid until the next URI method call.
 func (u *URI) Hash() []byte {
 	return u.hash
 }
@@ -105,6 +105,8 @@ func (u *URI) SetHashBytes(hash []byte) {
 }
 
 // Username returns URI username
+//
+// The returned bytes are valid until the next URI method call.
 func (u *URI) Username() []byte {
 	return u.username
 }
@@ -120,6 +122,8 @@ func (u *URI) SetUsernameBytes(username []byte) {
 }
 
 // Password returns URI password
+//
+// The returned bytes are valid until the next URI method call.
 func (u *URI) Password() []byte {
 	return u.password
 }
@@ -137,7 +141,7 @@ func (u *URI) SetPasswordBytes(password []byte) {
 // QueryString returns URI query string,
 // i.e. baz=123 of http://aaa.com/foo/bar?baz=123#qwe .
 //
-// The returned value is valid until the next URI method call.
+// The returned bytes are valid until the next URI method call.
 func (u *URI) QueryString() []byte {
 	return u.queryString
 }
@@ -159,7 +163,7 @@ func (u *URI) SetQueryStringBytes(queryString []byte) {
 // The returned path is always urldecoded and normalized,
 // i.e. '//f%20obar/baz/../zzz' becomes '/f obar/zzz'.
 //
-// The returned value is valid until the next URI method call.
+// The returned bytes are valid until the next URI method call.
 func (u *URI) Path() []byte {
 	path := u.path
 	if len(path) == 0 {
@@ -182,7 +186,7 @@ func (u *URI) SetPathBytes(path []byte) {
 
 // PathOriginal returns the original path from requestURI passed to URI.Parse().
 //
-// The returned value is valid until the next URI method call.
+// The returned bytes are valid until the next URI method call.
 func (u *URI) PathOriginal() []byte {
 	return u.pathOriginal
 }
@@ -191,7 +195,7 @@ func (u *URI) PathOriginal() []byte {
 //
 // Returned scheme is always lowercased.
 //
-// The returned value is valid until the next URI method call.
+// The returned bytes are valid until the next URI method call.
 func (u *URI) Scheme() []byte {
 	scheme := u.scheme
 	if len(scheme) == 0 {
@@ -237,6 +241,8 @@ func (u *URI) Reset() {
 // Host returns host part, i.e. aaa.com of http://aaa.com/foo/bar?baz=123#qwe .
 //
 // Host is always lowercased.
+//
+// The returned bytes are valid until the next URI method call.
 func (u *URI) Host() []byte {
 	return u.host
 }
@@ -645,6 +651,8 @@ func (u *URI) RequestURI() []byte {
 //    * For /foo/bar/baz.html path returns baz.html.
 //    * For /foo/bar/ returns empty byte slice.
 //    * For /foobar.js returns foobar.js.
+//
+// The returned bytes are valid until the next URI method call.
 func (u *URI) LastPathSegment() []byte {
 	path := u.Path()
 	n := bytes.LastIndexByte(path, '/')
@@ -746,6 +754,8 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 }
 
 // FullURI returns full uri in the form {Scheme}://{Host}{RequestURI}#{Hash}.
+//
+// The returned bytes are valid until the next URI method call.
 func (u *URI) FullURI() []byte {
 	u.fullURI = u.AppendBytes(u.fullURI[:0])
 	return u.fullURI
@@ -812,6 +822,8 @@ func splitHostURI(host, uri []byte) ([]byte, []byte, []byte) {
 }
 
 // QueryArgs returns query args.
+//
+// The returned args are valid until the next URI method call.
 func (u *URI) QueryArgs() *Args {
 	u.parseQueryArgs()
 	return &u.queryArgs

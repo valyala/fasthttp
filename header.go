@@ -1306,8 +1306,9 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 
 // Peek returns header value for the given key.
 //
-// Returned value is valid until the next call to ResponseHeader.
-// Do not store references to returned value. Make copies instead.
+// The returned value is valid until the response is released,
+// either though ReleaseResponse or your request handler returning.
+// Do not store references to the returned value. Make copies instead.
 func (h *ResponseHeader) Peek(key string) []byte {
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
 	return h.peek(k)
@@ -1315,7 +1316,8 @@ func (h *ResponseHeader) Peek(key string) []byte {
 
 // PeekBytes returns header value for the given key.
 //
-// Returned value is valid until the next call to ResponseHeader.
+// The returned value is valid until the response is released,
+// either though ReleaseResponse or your request handler returning.
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) PeekBytes(key []byte) []byte {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
@@ -1325,7 +1327,8 @@ func (h *ResponseHeader) PeekBytes(key []byte) []byte {
 
 // Peek returns header value for the given key.
 //
-// Returned value is valid until the next call to RequestHeader.
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) Peek(key string) []byte {
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
@@ -1334,7 +1337,8 @@ func (h *RequestHeader) Peek(key string) []byte {
 
 // PeekBytes returns header value for the given key.
 //
-// Returned value is valid until the next call to RequestHeader.
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) PeekBytes(key []byte) []byte {
 	h.bufKV.key = append(h.bufKV.key[:0], key...)
@@ -1615,7 +1619,9 @@ func (h *ResponseHeader) WriteTo(w io.Writer) (int64, error) {
 
 // Header returns response header representation.
 //
-// The returned value is valid until the next call to ResponseHeader methods.
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
+// Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) Header() []byte {
 	h.bufKV.value = h.AppendBytes(h.bufKV.value[:0])
 	return h.bufKV.value
@@ -1697,7 +1703,9 @@ func (h *RequestHeader) WriteTo(w io.Writer) (int64, error) {
 
 // Header returns request header representation.
 //
-// The returned representation is valid until the next call to RequestHeader methods.
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
+// Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) Header() []byte {
 	h.bufKV.value = h.AppendBytes(h.bufKV.value[:0])
 	return h.bufKV.value

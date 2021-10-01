@@ -859,40 +859,42 @@ func (ctx *RequestCtx) SetContentTypeBytes(contentType []byte) {
 
 // RequestURI returns RequestURI.
 //
-// This uri is valid until returning from RequestHandler.
+// The returned bytes are valid until your request handler returns.
 func (ctx *RequestCtx) RequestURI() []byte {
 	return ctx.Request.Header.RequestURI()
 }
 
 // URI returns requested uri.
 //
-// The uri is valid until returning from RequestHandler.
+// This uri is valid until your request handler returns.
 func (ctx *RequestCtx) URI() *URI {
 	return ctx.Request.URI()
 }
 
 // Referer returns request referer.
 //
-// The referer is valid until returning from RequestHandler.
+// The returned bytes are valid until your request handler returns.
 func (ctx *RequestCtx) Referer() []byte {
 	return ctx.Request.Header.Referer()
 }
 
 // UserAgent returns User-Agent header value from the request.
+//
+// The returned bytes are valid until your request handler returns.
 func (ctx *RequestCtx) UserAgent() []byte {
 	return ctx.Request.Header.UserAgent()
 }
 
 // Path returns requested path.
 //
-// The path is valid until returning from RequestHandler.
+// The returned bytes are valid until your request handler returns.
 func (ctx *RequestCtx) Path() []byte {
 	return ctx.URI().Path()
 }
 
 // Host returns requested host.
 //
-// The host is valid until returning from RequestHandler.
+// The returned bytes are valid until your request handler returns.
 func (ctx *RequestCtx) Host() []byte {
 	return ctx.URI().Host()
 }
@@ -901,9 +903,9 @@ func (ctx *RequestCtx) Host() []byte {
 //
 // It doesn't return POST'ed arguments - use PostArgs() for this.
 //
-// Returned arguments are valid until returning from RequestHandler.
-//
 // See also PostArgs, FormValue and FormFile.
+//
+// These args are valid until your request handler returns.
 func (ctx *RequestCtx) QueryArgs() *Args {
 	return ctx.URI().QueryArgs()
 }
@@ -912,9 +914,9 @@ func (ctx *RequestCtx) QueryArgs() *Args {
 //
 // It doesn't return query arguments from RequestURI - use QueryArgs for this.
 //
-// Returned arguments are valid until returning from RequestHandler.
-//
 // See also QueryArgs, FormValue and FormFile.
+//
+// These args are valid until your request handler returns.
 func (ctx *RequestCtx) PostArgs() *Args {
 	return ctx.Request.PostArgs()
 }
@@ -930,7 +932,7 @@ func (ctx *RequestCtx) PostArgs() *Args {
 //
 // Use SaveMultipartFile function for permanently saving uploaded file.
 //
-// The returned form is valid until returning from RequestHandler.
+// The returned form is valid until your request handler returns.
 //
 // See also FormFile and FormValue.
 func (ctx *RequestCtx) MultipartForm() (*multipart.Form, error) {
@@ -944,7 +946,7 @@ func (ctx *RequestCtx) MultipartForm() (*multipart.Form, error) {
 //
 // Use SaveMultipartFile function for permanently saving uploaded file.
 //
-// The returned file header is valid until returning from RequestHandler.
+// The returned file header is valid until your request handler returns.
 func (ctx *RequestCtx) FormFile(key string) (*multipart.FileHeader, error) {
 	mf, err := ctx.MultipartForm()
 	if err != nil {
@@ -1028,7 +1030,7 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
 //   * MultipartForm for obtaining values from multipart form.
 //   * FormFile for obtaining uploaded files.
 //
-// The returned value is valid until returning from RequestHandler.
+// The returned value is valid until your request handler returns.
 func (ctx *RequestCtx) FormValue(key string) []byte {
 	v := ctx.QueryArgs().Peek(key)
 	if len(v) > 0 {
@@ -1090,7 +1092,7 @@ func (ctx *RequestCtx) IsPatch() bool {
 
 // Method return request method.
 //
-// Returned value is valid until returning from RequestHandler.
+// Returned value is valid until your request handler returns.
 func (ctx *RequestCtx) Method() []byte {
 	return ctx.Request.Header.Method()
 }
@@ -1336,7 +1338,7 @@ func (ctx *RequestCtx) WriteString(s string) (int, error) {
 
 // PostBody returns POST request body.
 //
-// The returned value is valid until RequestHandler return.
+// The returned bytes are valid until your request handler returns.
 func (ctx *RequestCtx) PostBody() []byte {
 	return ctx.Request.Body()
 }
@@ -1386,7 +1388,7 @@ func (ctx *RequestCtx) IsBodyStream() bool {
 // It is safe re-using returned logger for logging multiple messages
 // for the current request.
 //
-// The returned logger is valid until returning from RequestHandler.
+// The returned logger is valid until your request handler returns.
 func (ctx *RequestCtx) Logger() Logger {
 	if ctx.logger.ctx == nil {
 		ctx.logger.ctx = ctx
