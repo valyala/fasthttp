@@ -1989,7 +1989,7 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	offset := len(dst)
 	dstLen := offset + n
 	if cap(dst) < dstLen {
-		dst = append(dst[:cap(dst)], make([]byte, round2(dstLen) - cap(dst))...)
+		dst = append(dst[:cap(dst)], make([]byte, round2(dstLen)-cap(dst))...)
 	}
 	dst = dst[:dstLen]
 
