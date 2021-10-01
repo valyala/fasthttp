@@ -365,6 +365,18 @@ func TestURIParse(t *testing.T) {
 
 	testURIParse(t, &u, "", "//aaa.com\r\n\r\nGET x",
 		"http:///", "", "/", "", "", "")
+
+	testURIParse(t, &u, "", "http://[fe80::1%25en0]/",
+		"http://[fe80::1%en0]/", "[fe80::1%en0]", "/", "/", "", "")
+
+	testURIParse(t, &u, "", "http://[fe80::1%25en0]:8080/",
+		"http://[fe80::1%en0]:8080/", "[fe80::1%en0]:8080", "/", "/", "", "")
+
+	testURIParse(t, &u, "", "http://hello.世界.com/foo",
+		"http://hello.世界.com/foo", "hello.世界.com", "/foo", "/foo", "", "")
+
+	testURIParse(t, &u, "", "http://hello.%e4%b8%96%e7%95%8c.com/foo",
+		"http://hello.世界.com/foo", "hello.世界.com", "/foo", "/foo", "", "")
 }
 
 func testURIParse(t *testing.T, u *URI, host, uri,
@@ -402,5 +414,16 @@ func TestURIWithQuerystringOverride(t *testing.T) {
 
 	if uriString != "/?q1=foo&q2=bar&q4=quux" {
 		t.Fatalf("Expected Querystring to be overridden but was %s ", uriString)
+	}
+}
+
+func TestInvalidUrl(t *testing.T) {
+	url := `https://.çèéà@&~!&:=\\/\"'~<>|+-*()[]{}%$;,¥&&$22|||<>< 4ly8lzjmoNx233AXELDtyaFQiiUH-fd8c-CnXUJVYnGIs4Uwr-bptom5GCnWtsGMQxeM2ZhoKE973eKgs2Sjh6RePnyaLpCi6SiNSLevcMoraARrp88L-SgtKqd-XHAtSI8hiPRiXPQmDIA4BGhSgoc0nfn1PoYuGKKmDcZ04tANRc3iz4aF4-A1UrO8bLHTH7MEJvzx.someqa.fr/A/?&QS_BEGIN<&8{b'Ob=p*f> QS_END`
+
+	u := AcquireURI()
+	defer ReleaseURI(u)
+
+	if err := u.Parse(nil, []byte(url)); err == nil {
+		t.Fail()
 	}
 }
