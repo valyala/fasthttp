@@ -427,3 +427,23 @@ func TestInvalidUrl(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestNoOverwriteInput(t *testing.T) {
+	str := `//%AA`
+	url := []byte(str)
+
+	u := AcquireURI()
+	defer ReleaseURI(u)
+
+	if err := u.Parse(nil, url); err != nil {
+		t.Error(err)
+	}
+
+	if string(url) != str {
+		t.Error()
+	}
+
+	if u.String() != "http://\xaa/" {
+		t.Errorf("%q", u.String())
+	}
+}

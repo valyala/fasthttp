@@ -305,11 +305,12 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		}
 	}
 
-	host, err := parseHost(host)
-	if err != nil {
-		return err
-	}
 	u.host = append(u.host, host...)
+	if parsedHost, err := parseHost(u.host); err != nil {
+		return err
+	} else {
+		u.host = parsedHost
+	}
 	lowercaseBytes(u.host)
 
 	b := uri
@@ -353,6 +354,8 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 // information. That is, as host[:port].
 //
 // Based on https://github.com/golang/go/blob/8ac5cbe05d61df0a7a7c9a38ff33305d4dcfea32/src/net/url/url.go#L619
+//
+// The host is parsed and unescaped in place overwriting the contents of the host parameter.
 func parseHost(host []byte) ([]byte, error) {
 	if len(host) > 0 && host[0] == '[' {
 		// Parse an IP-Literal in RFC 3986 and RFC 6874.
@@ -425,6 +428,8 @@ func (e InvalidHostError) Error() string {
 // which section of the URL string is being unescaped.
 //
 // Based on https://github.com/golang/go/blob/8ac5cbe05d61df0a7a7c9a38ff33305d4dcfea32/src/net/url/url.go#L199
+//
+// Unescapes in place overwriting the contents of s and returning it.
 func unescape(s []byte, mode encoding) ([]byte, error) {
 	// Count %, check that they're well-formed.
 	n := 0
