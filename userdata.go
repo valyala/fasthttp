@@ -22,7 +22,7 @@ func (d *userData) Set(key string, value interface{}) {
 		}
 	}
 	if value == nil {
-		return 
+		return
 	}
 
 	c := cap(args)
