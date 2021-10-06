@@ -21,6 +21,9 @@ func (d *userData) Set(key string, value interface{}) {
 			return
 		}
 	}
+	if value == nil {
+		return 
+	}
 
 	c := cap(args)
 	if c > n {
