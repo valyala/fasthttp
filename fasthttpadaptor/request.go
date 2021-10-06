@@ -61,7 +61,7 @@ func ConvertFastRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer boo
 
 // ConvertHTTPRequest converts a http.Request to a fasthttp.Request
 // forServer should be set to true when the http.Request is going to be passed to a http.Handler.
-func ConvertHTTPRequest(r *http.Request, ctx *fasthttp.RequestCtx, forServer bool) error {
+func ConvertHTTPRequest(r *http.Request, ctx *fasthttp.RequestCtx) error {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return err
