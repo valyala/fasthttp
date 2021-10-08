@@ -109,7 +109,7 @@ func (d *userData) Reset() {
 	*d = (*d)[:0]
 }
 
-func (d *userData) Delete(key string) {
+func (d *userData) Remove(key string) {
 	args := *d
 	n := len(args)
 	for i := 0; i < n; i++ {
@@ -122,4 +122,8 @@ func (d *userData) Delete(key string) {
 			return
 		}
 	}
+}
+
+func (d *userData) RemoveBytes(key []byte) {
+	d.Remove(b2s(key))
 }
