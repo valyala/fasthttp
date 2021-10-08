@@ -90,7 +90,7 @@ func TestUserDataDelete(t *testing.T) {
 
 	for i := 0; i < 10; i += 2 {
 		k := fmt.Sprintf("key_%d", i)
-		u.Delete(k)
+		u.Remove(k)
 		if val := u.Get(k); val != nil {
 			t.Fatalf("unexpected key= %s, value =%v ,Expecting key= %s, value = nil", k, val, k)
 		}
