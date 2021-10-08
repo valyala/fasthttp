@@ -698,6 +698,16 @@ func (ctx *RequestCtx) ResetUserValues() {
 	ctx.userValues.Reset()
 }
 
+// RemoveUserValue removes the given key and the value under it in ctx.
+func (ctx *RequestCtx) RemoveUserValue(key string) {
+	ctx.userValues.Remove(key)
+}
+
+// RemoveUserValueBytes removes the given key and the value under it in ctx.
+func (ctx *RequestCtx) RemoveUserValueBytes(key []byte) {
+	ctx.userValues.RemoveBytes(key)
+}
+
 type connTLSer interface {
 	Handshake() error
 	ConnectionState() tls.ConnectionState
