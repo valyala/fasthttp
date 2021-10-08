@@ -2,19 +2,11 @@ package fasthttp
 
 import (
 	"io"
-	"sync/atomic"
-)
-
-const (
-	statusAlive = iota
-	statusLocked
-	statusDeleted
 )
 
 type userDataKV struct {
-	key    []byte
-	value  interface{}
-	status uint32
+	key   []byte
+	value interface{}
 }
 
 type userData []userDataKV
@@ -22,38 +14,11 @@ type userData []userDataKV
 func (d *userData) Set(key string, value interface{}) {
 	args := *d
 	n := len(args)
-	idx := -1 // the index of a deleted userDataKV in userData. for memory reuse.
-
-	defer func() {
-		if idx == -1 {
-			return
-		}
-		// unlock the locked userDataKV
-		atomic.CompareAndSwapUint32(&args[idx].status, statusLocked, statusDeleted)
-	}()
-
 	for i := 0; i < n; i++ {
 		kv := &args[i]
 		if string(kv.key) == key {
 			kv.value = value
-			kv.status = statusAlive
 			return
-		}
-		// lock the locked userDataKV and record its index.
-		if idx == -1 {
-			if ok := atomic.CompareAndSwapUint32(&kv.status, statusDeleted, statusLocked); ok {
-				idx = i
-			}
-		}
-	}
-
-	// reuse
-	if idx != -1 {
-		kv := &args[idx]
-		if kv.status == statusLocked {
-			kv.key = append(kv.key[:0], key...)
-			kv.value = value
-			kv.status = statusAlive
 		}
 	}
 
@@ -86,7 +51,7 @@ func (d *userData) Get(key string) interface{} {
 	n := len(args)
 	for i := 0; i < n; i++ {
 		kv := &args[i]
-		if string(kv.key) == key && kv.status == statusAlive {
+		if string(kv.key) == key {
 			return kv.value
 		}
 	}
@@ -115,10 +80,11 @@ func (d *userData) Remove(key string) {
 	for i := 0; i < n; i++ {
 		kv := &args[i]
 		if string(kv.key) == key {
-			kv.status = statusDeleted
-			if vc, ok := kv.value.(io.Closer); ok {
-				vc.Close()
-			}
+			n--
+			args[i] = args[n]
+			args[n].value = nil
+			args = args[:n]
+			*d = args
 			return
 		}
 	}
