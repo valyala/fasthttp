@@ -4,6 +4,12 @@
 
 Fast HTTP implementation for Go.
 
+# fasthttp might not be for you!
+fasthttp was design for some high performance edge cases. **Unless** your server/client needs to handle **thousands of small to medium requests per seconds** and needs a consistent low millisecond response time fasthttp might not be for you. **For most cases `net/http` is much better** as it's easier to use and can handle more cases. For most cases you won't even notice the performance difference.
+
+
+## General info and links
+
 Currently fasthttp is successfully used by [VertaMedia](https://vertamedia.com/)
 in a production serving up to 200K rps from more than 1.5M concurrent keep-alive
 connections per physical server.
@@ -34,7 +40,7 @@ connections per physical server.
 
 [FAQ](#faq)
 
-# HTTP server performance comparison with [net/http](https://golang.org/pkg/net/http/)
+## HTTP server performance comparison with [net/http](https://golang.org/pkg/net/http/)
 
 In short, fasthttp server is up to 10 times faster than net/http.
 Below are benchmark results.
@@ -95,7 +101,7 @@ BenchmarkServerGet10ReqPerConn10KClients-4              	30000000	       346 ns/
 BenchmarkServerGet100ReqPerConn10KClients-4             	50000000	       282 ns/op	       0 B/op	       0 allocs/op
 ```
 
-# HTTP client comparison with net/http
+## HTTP client comparison with net/http
 
 In short, fasthttp client is up to 10 times faster than net/http.
 Below are benchmark results.
@@ -157,14 +163,14 @@ BenchmarkClientGetEndToEnd1000Inmemory-4                	10000000	      1316 ns/
 ```
 
 
-# Install
+## Install
 
 ```
 go get -u github.com/valyala/fasthttp
 ```
 
 
-# Switching from net/http to fasthttp
+## Switching from net/http to fasthttp
 
 Unfortunately, fasthttp doesn't provide API identical to net/http.
 See the [FAQ](#faq) for details.
@@ -393,7 +399,7 @@ instead of [html/template](https://golang.org/pkg/html/template/).
 [expvarhandler](https://godoc.org/github.com/valyala/fasthttp/expvarhandler).
 
 
-# Performance optimization tips for multi-core systems
+## Performance optimization tips for multi-core systems
 
 * Use [reuseport](https://godoc.org/github.com/valyala/fasthttp/reuseport) listener.
 * Run a separate server instance per CPU core with GOMAXPROCS=1.
@@ -403,7 +409,7 @@ instead of [html/template](https://golang.org/pkg/html/template/).
 * Use the latest version of Go as each version contains performance improvements.
 
 
-# Fasthttp best practices
+## Fasthttp best practices
 
 * Do not allocate objects and `[]byte` buffers - just reuse them as much
   as possible. Fasthttp API design encourages this.
@@ -424,7 +430,7 @@ instead of [html/template](https://golang.org/pkg/html/template/).
   [html/template](https://golang.org/pkg/html/template/) in your webserver.
 
 
-# Tricks with `[]byte` buffers
+## Tricks with `[]byte` buffers
 
 The following tricks are used by fasthttp. Use them in your code too.
 
@@ -479,7 +485,7 @@ statusCode, body, err := fasthttp.Get(nil, "http://google.com/")
 uintBuf := fasthttp.AppendUint(nil, 1234)
 ```
 
-# Related projects
+## Related projects
 
   * [fasthttp](https://github.com/fasthttp) - various useful
     helpers for projects based on fasthttp.
@@ -505,7 +511,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   * [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization
 
 
-# FAQ
+## FAQ
 
 * *Why creating yet another http package instead of optimizing net/http?*
 
@@ -542,9 +548,10 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
   * net/http supports [HTTP/2.0 starting from go1.6](https://http2.golang.org/).
   * net/http API is stable, while fasthttp API constantly evolves.
   * net/http handles more HTTP corner cases.
+  * net/http can stream both request and response bodies
+  * net/http can handle bigger bodies as it doesn't read the whole body into memory
   * net/http should contain less bugs, since it is used and tested by much
     wider audience.
-  * net/http works on Go older than 1.5.
 
 * *Why fasthttp API prefers returning `[]byte` instead of `string`?*
 
@@ -555,10 +562,7 @@ uintBuf := fasthttp.AppendUint(nil, 1234)
 
 * *Which GO versions are supported by fasthttp?*
 
-  Go1.5+. Older versions won't be supported, since their standard package
-  [miss useful functions](https://github.com/valyala/fasthttp/issues/5).
-
-  **NOTE**: Go 1.9.7 is the oldest tested version. We recommend you to update as soon as you can. As of 1.11.3 we will drop 1.9.x support.
+  Go 1.15.x. Older versions won't be supported.
 
 * *Please provide real benchmark data and server information*
 
