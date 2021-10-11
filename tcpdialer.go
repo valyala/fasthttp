@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/zhangyunhao116/skipmap"
 )
 
 // Dial dials the given TCP addr using tcp4.
@@ -156,7 +158,7 @@ type TCPDialer struct {
 	// DNSCacheDuration may be used to override the default DNS cache duration (DefaultDNSCacheDuration)
 	DNSCacheDuration time.Duration
 
-	tcpAddrsMap sync.Map
+	tcpAddrsMap *skipmap.StringMap
 
 	concurrencyCh chan struct{}
 
@@ -279,6 +281,8 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 			d.DNSCacheDuration = DefaultDNSCacheDuration
 		}
 
+		d.tcpAddrsMap = skipmap.NewString()
+
 		go d.tcpAddrsClean()
 	})
 
@@ -371,7 +375,7 @@ func (d *TCPDialer) tcpAddrsClean() {
 	for {
 		time.Sleep(time.Second)
 		t := time.Now()
-		d.tcpAddrsMap.Range(func(k, v interface{}) bool {
+		d.tcpAddrsMap.Range(func(k string, v interface{}) bool {
 			if e, ok := v.(*tcpAddrEntry); ok && t.Sub(e.resolveTime) > expireDuration {
 				d.tcpAddrsMap.Delete(k)
 			}
