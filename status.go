@@ -152,11 +152,12 @@ var (
 	}
 )
 
-func SetStatusMessage(statusCode int, statusCodeText string) error {
+// SetStatusMessage allows the given HTTP status message to be changed to given status code message.
+func SetStatusMessage(statusCode int, statusCodeMessage string) error {
 	if statusCode < statusMessageMin || statusCode > statusMessageMax {
 		return fmt.Errorf("unknown status code")
 	}
-	statusMessages[statusCode] = statusCodeText
+	statusMessages[statusCode] = statusCodeMessage
 	setStatusLine(statusCode)
 	return nil
 }
