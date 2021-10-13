@@ -6,6 +6,8 @@ import (
 )
 
 func TestStatusLine(t *testing.T) {
+	SetStatusMessage(204, "NC")
+
 	t.Parallel()
 
 	testStatusLine(t, -1, []byte("HTTP/1.1 -1 Unknown Status Code\r\n"))
@@ -14,6 +16,7 @@ func TestStatusLine(t *testing.T) {
 	testStatusLine(t, 512, []byte("HTTP/1.1 512 Unknown Status Code\r\n"))
 	testStatusLine(t, 512, []byte("HTTP/1.1 512 Unknown Status Code\r\n"))
 	testStatusLine(t, 520, []byte("HTTP/1.1 520 Unknown Status Code\r\n"))
+	testStatusLine(t, 204, []byte("HTTP/1.1 204 NC\r\n"))
 }
 
 func testStatusLine(t *testing.T, statusCode int, expected []byte) {
