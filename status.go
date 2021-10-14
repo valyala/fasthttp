@@ -152,16 +152,6 @@ var (
 	}
 )
 
-// SetStatusMessage allows the given HTTP status message to be changed to given status code message.
-func SetStatusMessage(statusCode int, statusCodeMessage string) error {
-	if statusCode < statusMessageMin || statusCode > statusMessageMax {
-		return fmt.Errorf("unknown status code")
-	}
-	statusMessages[statusCode] = statusCodeMessage
-	setStatusLine(statusCode)
-	return nil
-}
-
 // StatusMessage returns HTTP status message for the given status code.
 func StatusMessage(statusCode int) string {
 	if statusCode < statusMessageMin || statusCode > statusMessageMax {
@@ -178,12 +168,8 @@ func StatusMessage(statusCode int) string {
 func init() {
 	// Fill all valid status lines
 	for i := 0; i < len(statusLines); i++ {
-		setStatusLine(i)
+		statusLines[i] = []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", i, StatusMessage(i)))
 	}
-}
-
-func setStatusLine(statusCode int) {
-	statusLines[statusCode] = []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", statusCode, StatusMessage(statusCode)))
 }
 
 func statusLine(statusCode int) []byte {

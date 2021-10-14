@@ -33,6 +33,7 @@ type ResponseHeader struct {
 	noDefaultDate        bool
 
 	statusCode            int
+	statusLine            []byte
 	contentLength         int
 	contentLengthBytes    []byte
 	secureErrorLogMessage bool
@@ -134,6 +135,11 @@ func (h *ResponseHeader) StatusCode() int {
 // SetStatusCode sets response status code.
 func (h *ResponseHeader) SetStatusCode(statusCode int) {
 	h.statusCode = statusCode
+}
+
+// SetStatusLine sets response status line bytes.
+func (h *ResponseHeader) SetStatusLine(statusLine []byte) {
+	h.statusLine = statusLine
 }
 
 // SetLastModified sets 'Last-Modified' header to the given value.
@@ -1639,7 +1645,12 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	if statusCode < 0 {
 		statusCode = StatusOK
 	}
-	dst = append(dst, statusLine(statusCode)...)
+
+	if h.statusLine != nil {
+		dst = append(dst, h.statusLine...)
+	} else {
+		dst = append(dst, statusLine(statusCode)...)
+	}
 
 	server := h.Server()
 	if len(server) != 0 {
