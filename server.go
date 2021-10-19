@@ -395,10 +395,10 @@ type Server struct {
 	// by ServeTLS, ServeTLSEmbed, ListenAndServeTLS, ListenAndServeTLSEmbed,
 	// AppendCert, AppendCertEmbed and NextProto.
 	//
-	// Note that this value is cloned by those functions, so it's not
-	// possible to modify the configuration with methods like
-	// tls.Config.SetSessionTicketKeys. To use
-	// SetSessionTicketKeys, use Server.Serve with a TLS Listener
+	// Note that this value is cloned by ServeTLS, ServeTLSEmbed, ListenAndServeTLS
+	// and ListenAndServeTLSEmbed, so it's not possible to modify the configuration
+	// with methods like tls.Config.SetSessionTicketKeys.
+	// To use SetSessionTicketKeys, use Server.Serve with a TLS Listener
 	// instead.
 	TLSConfig *tls.Config
 
@@ -1647,7 +1647,7 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	s.mu.Unlock()
 
 	return s.Serve(
-		tls.NewListener(ln, s.TLSConfig),
+		tls.NewListener(ln, s.TLSConfig.Clone()),
 	)
 }
 
@@ -1677,7 +1677,7 @@ func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error 
 	s.mu.Unlock()
 
 	return s.Serve(
-		tls.NewListener(ln, s.TLSConfig),
+		tls.NewListener(ln, s.TLSConfig.Clone()),
 	)
 }
 
@@ -1722,8 +1722,6 @@ func (s *Server) AppendCertEmbed(certData, keyData []byte) error {
 func (s *Server) configTLS() {
 	if s.TLSConfig == nil {
 		s.TLSConfig = &tls.Config{}
-	} else {
-		s.TLSConfig = s.TLSConfig.Clone()
 	}
 }
 
