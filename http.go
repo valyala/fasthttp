@@ -1200,7 +1200,10 @@ func (resp *Response) Read(r *bufio.Reader) error {
 	return resp.ReadLimitBody(r, 0)
 }
 
-// ReadLimitBody reads response from the given r, limiting the body size.
+// ReadLimitBody reads response headers from the given r,
+// then reads the body using the ReadBody function and limiting the body size.
+//
+// If SkipBody is true then it skips reading the response body.
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
@@ -1220,14 +1223,23 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	}
 
 	if !resp.mustSkipBody() {
-		bodyBuf := resp.bodyBuffer()
-		bodyBuf.Reset()
-		bodyBuf.B, err = readBody(r, resp.Header.ContentLength(), maxBodySize, bodyBuf.B)
-		if err != nil {
-			return err
-		}
-		resp.Header.SetContentLength(len(bodyBuf.B))
+		return resp.ReadBody(r, maxBodySize)
 	}
+	return nil
+}
+
+// ReadBody reads response body from the given r, limiting the body size.
+//
+// If maxBodySize > 0 and the body size exceeds maxBodySize,
+// then ErrBodyTooLarge is returned.
+func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
+	bodyBuf := resp.bodyBuffer()
+	bodyBuf.Reset()
+	bodyBuf.B, err = readBody(r, resp.Header.ContentLength(), maxBodySize, bodyBuf.B)
+	if err != nil {
+		return err
+	}
+	resp.Header.SetContentLength(len(bodyBuf.B))
 	return nil
 }
 
