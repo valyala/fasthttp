@@ -139,7 +139,7 @@ func (h *ResponseHeader) SetStatusCode(statusCode int) {
 
 // SetStatusLine sets response status line bytes.
 func (h *ResponseHeader) SetStatusLine(statusLine []byte) {
-	h.statusLine = statusLine
+	h.statusLine = append(h.statusLine[:0], statusLine...)
 }
 
 // SetLastModified sets 'Last-Modified' header to the given value.
@@ -689,6 +689,7 @@ func (h *ResponseHeader) resetSkipNormalize() {
 	h.connectionClose = false
 
 	h.statusCode = 0
+	h.statusLine = h.statusLine[:0]
 	h.contentLength = 0
 	h.contentLengthBytes = h.contentLengthBytes[:0]
 
@@ -737,6 +738,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.noDefaultDate = h.noDefaultDate
 
 	dst.statusCode = h.statusCode
+	dst.statusLine = append(dst.statusLine[:0], h.statusLine...)
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes[:0], h.contentLengthBytes...)
 	dst.contentType = append(dst.contentType[:0], h.contentType...)
@@ -1646,7 +1648,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		statusCode = StatusOK
 	}
 
-	if h.statusLine != nil {
+	if len(h.statusLine) > 0 {
 		dst = append(dst, h.statusLine...)
 	} else {
 		dst = append(dst, statusLine(statusCode)...)
@@ -1869,6 +1871,9 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 			return 0, fmt.Errorf("unexpected char at the end of status code")
 		}
 		return 0, fmt.Errorf("unexpected char at the end of status code. Response %q", buf)
+	}
+	if len(b) > n+1 && !bytes.Equal(b[n+1:], statusLine(h.statusCode)) {
+		h.SetStatusLine(b[n+1:])
 	}
 
 	return len(buf) - len(bNext), nil
