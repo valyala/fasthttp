@@ -732,9 +732,9 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 
 	dst.statusCode = h.statusCode
 	dst.contentLength = h.contentLength
-	dst.contentLengthBytes = append(dst.contentLengthBytes[:0], h.contentLengthBytes...)
-	dst.contentType = append(dst.contentType[:0], h.contentType...)
-	dst.server = append(dst.server[:0], h.server...)
+	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)
+	dst.contentType = append(dst.contentType, h.contentType...)
+	dst.server = append(dst.server, h.server...)
 	dst.h = copyArgs(dst.h, h.h)
 	dst.cookies = copyArgs(dst.cookies, h.cookies)
 }
@@ -748,17 +748,17 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.connectionClose = h.connectionClose
 
 	dst.contentLength = h.contentLength
-	dst.contentLengthBytes = append(dst.contentLengthBytes[:0], h.contentLengthBytes...)
-	dst.method = append(dst.method[:0], h.method...)
-	dst.proto = append(dst.proto[:0], h.proto...)
-	dst.requestURI = append(dst.requestURI[:0], h.requestURI...)
-	dst.host = append(dst.host[:0], h.host...)
-	dst.contentType = append(dst.contentType[:0], h.contentType...)
-	dst.userAgent = append(dst.userAgent[:0], h.userAgent...)
+	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)
+	dst.method = append(dst.method, h.method...)
+	dst.proto = append(dst.proto, h.proto...)
+	dst.requestURI = append(dst.requestURI, h.requestURI...)
+	dst.host = append(dst.host, h.host...)
+	dst.contentType = append(dst.contentType, h.contentType...)
+	dst.userAgent = append(dst.userAgent, h.userAgent...)
 	dst.h = copyArgs(dst.h, h.h)
 	dst.cookies = copyArgs(dst.cookies, h.cookies)
 	dst.cookiesCollected = h.cookiesCollected
-	dst.rawHeaders = append(dst.rawHeaders[:0], h.rawHeaders...)
+	dst.rawHeaders = append(dst.rawHeaders, h.rawHeaders...)
 }
 
 // VisitAll calls f for each header.
