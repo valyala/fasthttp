@@ -3,16 +3,15 @@ package fasthttpadaptor
 import (
 	"bytes"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"net/url"
 
 	"github.com/valyala/fasthttp"
 )
 
-// ConvertFastRequest converts a fasthttp.Request to a http.Request
-// forServer should be set to true when the http.Request is going to be passed to a http.Handler.
-func ConvertFastRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) error {
+// ConvertRequest convert a fasthttp.Request to an http.Request
+// forServer should be set to true when the http.Request is going to passed to a http.Handler.
+func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) error {
 	body := ctx.PostBody()
 	strRequestURI := string(ctx.RequestURI())
 
@@ -55,64 +54,6 @@ func ConvertFastRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer boo
 			r.Header.Set(sk, sv)
 		}
 	})
-
-	return nil
-}
-
-// ConvertHTTPRequest converts a http.Request to a fasthttp.Request
-// forServer should be set to true when the http.Request is going to be passed to a http.Handler.
-func ConvertHTTPRequest(r *http.Request, ctx *fasthttp.RequestCtx) error {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return err
-	}
-
-	ip, err := net.ResolveIPAddr("tcp", host)
-	if err != nil {
-		return err
-	}
-
-	ctx.SetRemoteAddr(ip)
-
-	if ctx.Request.Header.Len() > 0 {
-		ctx.Request.Header.Reset()
-	}
-
-	for k, v := range r.Header {
-		if len(v) > 1 {
-			for _, vv := range v {
-				ctx.Request.Header.Add(k, vv)
-			}
-		} else {
-			ctx.Request.Header.Set(k, v[0])
-		}
-	}
-
-	if len(r.TransferEncoding) > 0 {
-		if len(r.TransferEncoding) > 1 {
-			for _, e := range r.TransferEncoding {
-				ctx.Request.Header.Add("Transfer-Encoding", e)
-			}
-		} else {
-			ctx.Request.Header.Add("Transfer-Encoding", r.TransferEncoding[0])
-		}
-	}
-
-	ctx.Request.URI().Update(r.URL.String())
-
-	ctx.Request.Header.SetMethod(r.Method)
-	ctx.Request.Header.SetProtocol(r.Proto)
-	ctx.Request.Header.SetContentLength(int(r.ContentLength))
-	ctx.Request.Header.SetHost(r.Host)
-	*ctx.TLSConnectionState() = *r.TLS
-
-	bodyBytes := new(bytes.Buffer)
-	_, err = bodyBytes.ReadFrom(r.Body)
-	if err != nil {
-		return err
-	}
-
-	ctx.Request.SetBodyRaw(bodyBytes.Bytes())
 
 	return nil
 }
