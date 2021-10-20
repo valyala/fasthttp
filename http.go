@@ -1122,6 +1122,14 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 		return nil
 	}
 
+	return req.ReadBody(r, contentLength, maxBodySize)
+}
+
+// ReadBody reads request body from the given r, limiting the body size.
+//
+// If maxBodySize > 0 and the body size exceeds maxBodySize,
+// then ErrBodyTooLarge is returned.
+func (req *Request) ReadBody(r *bufio.Reader, contentLength int, maxBodySize int) (err error) {
 	bodyBuf := req.bodyBuffer()
 	bodyBuf.Reset()
 	bodyBuf.B, err = readBody(r, contentLength, maxBodySize, bodyBuf.B)
@@ -1133,7 +1141,7 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 	return nil
 }
 
-// ContinueReadBody reads request body if request header contains
+// ContinueReadBodyStream reads request body if request header contains
 // 'Expect: 100-continue'.
 //
 // The caller must send StatusContinue response before calling this method.
