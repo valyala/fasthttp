@@ -137,6 +137,14 @@ func (h *ResponseHeader) SetStatusCode(statusCode int) {
 	h.statusCode = statusCode
 }
 
+// StatusLine returns response status line.
+func (h *ResponseHeader) StatusLine() []byte {
+	if len(h.statusLine) > 0 {
+		return h.statusLine
+	}
+	return statusLine(h.StatusCode())
+}
+
 // SetStatusLine sets response status line bytes.
 func (h *ResponseHeader) SetStatusLine(statusLine []byte) {
 	h.statusLine = append(h.statusLine[:0], statusLine...)

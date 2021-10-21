@@ -52,8 +52,8 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 		t.Fatalf("parse response using net/http failed, %s", err)
 	}
 
-	if !bytes.Equal(header.statusLine, []byte("SuperOK")) {
-		t.Errorf("parse status line with non-default value failed, got: %s want: SuperOK", header.statusLine)
+	if !bytes.Equal(header.StatusLine(), []byte("SuperOK")) {
+		t.Errorf("parse status line with non-default value failed, got: %s want: SuperOK", header.StatusLine())
 	}
 
 	for name, vals := range response.Header {
@@ -75,15 +75,16 @@ func TestResponseHeaderMultiLineName(t *testing.T) {
 		" Line: This is a header on multiple lines\r\n" +
 		"\r\n"
 	header := new(ResponseHeader)
-	if len(header.statusLine) > 0 {
-		t.Errorf("expected default status line, got: %s", header.statusLine)
-	}
 	if _, err := header.parse([]byte(s)); err != errInvalidName {
 		m := make(map[string]string)
 		header.VisitAll(func(key, value []byte) {
 			m[string(key)] = string(value)
 		})
 		t.Errorf("expected error, got %q (%v)", m, err)
+	}
+
+	if !bytes.Equal(header.StatusLine(), []byte("OK")) {
+		t.Errorf("expected default status line, got: %s", header.StatusLine())
 	}
 }
 
