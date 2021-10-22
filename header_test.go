@@ -36,7 +36,7 @@ func TestResponseHeaderAddContentType(t *testing.T) {
 func TestResponseHeaderMultiLineValue(t *testing.T) {
 	t.Parallel()
 
-	s := "HTTP/1.1 200 OK\r\n" +
+	s := "HTTP/1.1 200 SuperOK\r\n" +
 		"EmptyValue1:\r\n" +
 		"Content-Type: foo/bar;\r\n\tnewline;\r\n another/newline\r\n" +
 		"Foo: Bar\r\n" +
@@ -50,6 +50,10 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 	response, err := http.ReadResponse(bufio.NewReader(strings.NewReader(s)), nil)
 	if err != nil {
 		t.Fatalf("parse response using net/http failed, %s", err)
+	}
+
+	if !bytes.Equal(header.StatusLine(), []byte("SuperOK")) {
+		t.Errorf("parse status line with non-default value failed, got: %s want: SuperOK", header.StatusLine())
 	}
 
 	for name, vals := range response.Header {
@@ -77,6 +81,10 @@ func TestResponseHeaderMultiLineName(t *testing.T) {
 			m[string(key)] = string(value)
 		})
 		t.Errorf("expected error, got %q (%v)", m, err)
+	}
+
+	if !bytes.Equal(header.StatusLine(), []byte("OK")) {
+		t.Errorf("expected default status line, got: %s", header.StatusLine())
 	}
 }
 

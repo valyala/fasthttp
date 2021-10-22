@@ -837,6 +837,24 @@ func TestResponseSkipBody(t *testing.T) {
 		t.Fatalf("unexpected content-type in response %q", s)
 	}
 
+	// set StatusNoContent with statusLine
+	r.Header.SetStatusCode(StatusNoContent)
+	r.Header.SetStatusLine([]byte("HTTP/1.1 204 NC\r\n"))
+	r.SetBodyString("foobar")
+	s = r.String()
+	if strings.Contains(s, "\r\n\r\nfoobar") {
+		t.Fatalf("unexpected non-zero body in response %q", s)
+	}
+	if strings.Contains(s, "Content-Length: ") {
+		t.Fatalf("unexpected content-length in response %q", s)
+	}
+	if strings.Contains(s, "Content-Type: ") {
+		t.Fatalf("unexpected content-type in response %q", s)
+	}
+	if !strings.HasPrefix(s, "HTTP/1.1 204 NC\r\n") {
+		t.Fatalf("expecting non-default status line in response %q", s)
+	}
+
 	// explicitly skip body
 	r.Header.SetStatusCode(StatusOK)
 	r.SkipBody = true
