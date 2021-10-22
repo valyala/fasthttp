@@ -1211,7 +1211,7 @@ func (resp *Response) Read(r *bufio.Reader) error {
 // ReadLimitBody reads response headers from the given r,
 // then reads the body using the ReadBody function and limiting the body size.
 //
-// If SkipBody is true then it skips reading the response body.
+// If resp.SkipBody is true then it skips reading the response body.
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
