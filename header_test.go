@@ -488,9 +488,9 @@ func TestHasHeaderValue(t *testing.T) {
 }
 
 func testHasHeaderValue(t *testing.T, s, value string, has bool) {
-	ok := hasHeaderValue([]byte(s), []byte(value))
+	ok := HasHeaderValue([]byte(s), []byte(value))
 	if ok != has {
-		t.Fatalf("unexpected hasHeaderValue(%q, %q)=%v. Expecting %v", s, value, ok, has)
+		t.Fatalf("unexpected HasHeaderValue(%q, %q)=%v. Expecting %v", s, value, ok, has)
 	}
 }
 

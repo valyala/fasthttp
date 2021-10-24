@@ -194,12 +194,12 @@ func (h *RequestHeader) ResetConnectionClose() {
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *ResponseHeader) ConnectionUpgrade() bool {
-	return hasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
+	return HasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
 }
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *RequestHeader) ConnectionUpgrade() bool {
-	return hasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
+	return HasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
 }
 
 // PeekCookie is able to returns cookie by a given key from response.
@@ -2033,7 +2033,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 response unless 'Connection: keep-alive' is set.
 		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
+		h.connectionClose = !HasHeaderValue(v, strKeepAlive)
 	}
 
 	return len(buf) - len(s.b), nil
@@ -2120,7 +2120,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
 		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
+		h.connectionClose = !HasHeaderValue(v, strKeepAlive)
 	}
 	return s.hLen, nil
 }
@@ -2318,7 +2318,7 @@ func stripSpace(b []byte) []byte {
 	return b
 }
 
-func hasHeaderValue(s, value []byte) bool {
+func HasHeaderValue(s, value []byte) bool {
 	var vs headerValueScanner
 	vs.b = s
 	for vs.next() {
