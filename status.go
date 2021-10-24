@@ -176,7 +176,7 @@ func init() {
 func formatStatusLine(dst []byte, statusCode int, statusMessage []byte) []byte {
 	dst = append(dst[:0], httpHeader...)
 	dst = append(dst, ' ')
-	dst = i2b(dst, uint64(statusCode))
+	dst = strconv.AppendInt(dst, int64(statusCode), 10)
 	dst = append(dst, ' ')
 	dst = append(dst, statusMessage...)
 	dst = append(dst, strCRLF...)
