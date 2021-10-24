@@ -194,12 +194,12 @@ func (h *RequestHeader) ResetConnectionClose() {
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *ResponseHeader) ConnectionUpgrade() bool {
-	return HasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
+	return HasCommaHeaderValue(h.Peek(HeaderConnection), strUpgrade)
 }
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *RequestHeader) ConnectionUpgrade() bool {
-	return HasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
+	return HasCommaHeaderValue(h.Peek(HeaderConnection), strUpgrade)
 }
 
 // PeekCookie is able to returns cookie by a given key from response.
@@ -2033,7 +2033,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 response unless 'Connection: keep-alive' is set.
 		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !HasHeaderValue(v, strKeepAlive)
+		h.connectionClose = !HasCommaHeaderValue(v, strKeepAlive)
 	}
 
 	return len(buf) - len(s.b), nil
@@ -2120,7 +2120,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
 		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !HasHeaderValue(v, strKeepAlive)
+		h.connectionClose = !HasCommaHeaderValue(v, strKeepAlive)
 	}
 	return s.hLen, nil
 }
@@ -2287,17 +2287,38 @@ func (s *headerScanner) next() bool {
 	return true
 }
 
-type headerValueScanner struct {
+type commaHeaderValueScanner struct {
 	b     []byte
 	value []byte
 }
 
-func (s *headerValueScanner) next() bool {
+func (s *commaHeaderValueScanner) next() bool {
 	b := s.b
 	if len(b) == 0 {
 		return false
 	}
 	n := bytes.IndexByte(b, ',')
+	if n < 0 {
+		s.value = stripSpace(b)
+		s.b = b[len(b):]
+		return true
+	}
+	s.value = stripSpace(b[:n])
+	s.b = b[n+1:]
+	return true
+}
+
+type semicolonHeaderValueScanner struct {
+	b     []byte
+	value []byte
+}
+
+func (s *semicolonHeaderValueScanner) next() bool {
+	b := s.b
+	if len(b) == 0 {
+		return false
+	}
+	n := bytes.IndexByte(b, ';')
 	if n < 0 {
 		s.value = stripSpace(b)
 		s.b = b[len(b):]
@@ -2318,8 +2339,19 @@ func stripSpace(b []byte) []byte {
 	return b
 }
 
-func HasHeaderValue(s, value []byte) bool {
-	var vs headerValueScanner
+func HasCommaHeaderValue(s, value []byte) bool {
+	var vs commaHeaderValueScanner
+	vs.b = s
+	for vs.next() {
+		if caseInsensitiveCompare(vs.value, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func HasSemicolonHeaderValue(s, value []byte) bool {
+	var vs semicolonHeaderValueScanner
 	vs.b = s
 	for vs.next() {
 		if caseInsensitiveCompare(vs.value, value) {

@@ -469,28 +469,54 @@ func TestRequestHeaderAdd(t *testing.T) {
 	}
 }
 
-func TestHasHeaderValue(t *testing.T) {
+func TestHasCommaHeaderValue(t *testing.T) {
 	t.Parallel()
 
-	testHasHeaderValue(t, "foobar", "foobar", true)
-	testHasHeaderValue(t, "foobar", "foo", false)
-	testHasHeaderValue(t, "foobar", "bar", false)
-	testHasHeaderValue(t, "keep-alive, Upgrade", "keep-alive", true)
-	testHasHeaderValue(t, "keep-alive  ,    Upgrade", "Upgrade", true)
-	testHasHeaderValue(t, "keep-alive, Upgrade", "Upgrade-foo", false)
-	testHasHeaderValue(t, "keep-alive, Upgrade", "Upgr", false)
-	testHasHeaderValue(t, "foo  ,   bar,  baz   ,", "foo", true)
-	testHasHeaderValue(t, "foo  ,   bar,  baz   ,", "bar", true)
-	testHasHeaderValue(t, "foo  ,   bar,  baz   ,", "baz", true)
-	testHasHeaderValue(t, "foo  ,   bar,  baz   ,", "ba", false)
-	testHasHeaderValue(t, "foo, ", "", true)
-	testHasHeaderValue(t, "foo", "", false)
+	testCommaHasHeaderValue(t, "foobar", "foobar", true)
+	testCommaHasHeaderValue(t, "foobar", "foo", false)
+	testCommaHasHeaderValue(t, "foobar", "bar", false)
+	testCommaHasHeaderValue(t, "keep-alive, Upgrade", "keep-alive", true)
+	testCommaHasHeaderValue(t, "keep-alive  ,    Upgrade", "Upgrade", true)
+	testCommaHasHeaderValue(t, "keep-alive, Upgrade", "Upgrade-foo", false)
+	testCommaHasHeaderValue(t, "keep-alive, Upgrade", "Upgr", false)
+	testCommaHasHeaderValue(t, "foo  ,   bar,  baz   ,", "foo", true)
+	testCommaHasHeaderValue(t, "foo  ,   bar,  baz   ,", "bar", true)
+	testCommaHasHeaderValue(t, "foo  ,   bar,  baz   ,", "baz", true)
+	testCommaHasHeaderValue(t, "foo  ,   bar,  baz   ,", "ba", false)
+	testCommaHasHeaderValue(t, "foo, ", "", true)
+	testCommaHasHeaderValue(t, "foo", "", false)
 }
 
-func testHasHeaderValue(t *testing.T, s, value string, has bool) {
-	ok := HasHeaderValue([]byte(s), []byte(value))
+func TestHasSemicolonHeaderValue(t *testing.T) {
+	t.Parallel()
+
+	testSemicolonHasHeaderValue(t, "foobar", "foobar", true)
+	testSemicolonHasHeaderValue(t, "foobar", "foo", false)
+	testSemicolonHasHeaderValue(t, "foobar", "bar", false)
+	testSemicolonHasHeaderValue(t, "keep-alive; Upgrade", "keep-alive", true)
+	testSemicolonHasHeaderValue(t, "keep-alive;Upgrade", "keep-alive", true)
+	testSemicolonHasHeaderValue(t, "keep-alive  ;    Upgrade", "Upgrade", true)
+	testSemicolonHasHeaderValue(t, "keep-alive; Upgrade", "Upgrade-foo", false)
+	testSemicolonHasHeaderValue(t, "keep-alive; Upgrade", "Upgr", false)
+	testSemicolonHasHeaderValue(t, "foo  ;   bar;  baz   ;", "foo", true)
+	testSemicolonHasHeaderValue(t, "foo  ;   bar;  baz   ;", "bar", true)
+	testSemicolonHasHeaderValue(t, "foo  ;   bar;  baz   ;", "baz", true)
+	testSemicolonHasHeaderValue(t, "foo  ;   bar;  baz   ;", "ba", false)
+	testSemicolonHasHeaderValue(t, "foo; ", "", true)
+	testSemicolonHasHeaderValue(t, "foo", "", false)
+}
+
+func testCommaHasHeaderValue(t *testing.T, s, value string, has bool) {
+	ok := HasCommaHeaderValue([]byte(s), []byte(value))
 	if ok != has {
-		t.Fatalf("unexpected HasHeaderValue(%q, %q)=%v. Expecting %v", s, value, ok, has)
+		t.Fatalf("unexpected HasCommaHeaderValue(%q, %q)=%v. Expecting %v", s, value, ok, has)
+	}
+}
+
+func testSemicolonHasHeaderValue(t *testing.T, s, value string, has bool) {
+	ok := HasSemicolonHeaderValue([]byte(s), []byte(value))
+	if ok != has {
+		t.Fatalf("unexpected HasSemicolonHeaderValue(%q, %q)=%v. Expecting %v", s, value, ok, has)
 	}
 }
 
