@@ -16,6 +16,41 @@ import (
 	"github.com/valyala/bytebufferpool"
 )
 
+func TestIssue1132(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		body     string
+		expected string
+	}{
+		{
+			body:     "HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nfoo",
+			expected: "HTTP/1.1 200 OK\r\n",
+		},
+		{
+			body:     "HTTP/1.1 204 NC\r\n\r\n",
+			expected: "HTTP/1.1 204 NC\r\n",
+		},
+	} {
+		t.Run(c.expected, func(t *testing.T) {
+			var r Response
+
+			br := bufio.NewReader(bytes.NewBufferString(c.body))
+			err := r.Read(br)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			got := r.Header.StatusLine()
+			expected := []byte(c.expected)
+
+			if !bytes.Equal(got, expected) {
+				t.Fatalf("got %q expected %q", got, expected)
+			}
+		})
+	}
+}
+
 func TestResponseEmptyTransferEncoding(t *testing.T) {
 	t.Parallel()
 

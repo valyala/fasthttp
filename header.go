@@ -138,6 +138,12 @@ func (h *ResponseHeader) SetStatusCode(statusCode int) {
 }
 
 // StatusLine returns response status line.
+//
+// Return value looks something like "HTTP/1.1 200 OK\r\n"
+//
+// The returned value is valid until the response is released,
+// either though ReleaseResponse or your request handler returning.
+// Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) StatusLine() []byte {
 	if len(h.statusLine) > 0 {
 		return h.statusLine
@@ -146,8 +152,17 @@ func (h *ResponseHeader) StatusLine() []byte {
 }
 
 // SetStatusLine sets response status line bytes.
+//
+// statusLine should be something like "HTTP/1.1 200 OK\r\n"
+// The \r\n is optional and will automatically be added.
+//
+// statusLine is safe to reuse after this method has returned.
 func (h *ResponseHeader) SetStatusLine(statusLine []byte) {
 	h.statusLine = append(h.statusLine[:0], statusLine...)
+
+	if !bytes.HasSuffix(h.statusLine, strCRLF) {
+		h.statusLine = append(h.statusLine, strCRLF...)
+	}
 }
 
 // SetLastModified sets 'Last-Modified' header to the given value.
@@ -1855,6 +1870,9 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 	}
 
+	// Store the full statis line for use below.
+	sLine := b
+
 	// parse protocol
 	n := bytes.IndexByte(b, ' ')
 	if n < 0 {
@@ -1880,8 +1898,11 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 		return 0, fmt.Errorf("unexpected char at the end of status code. Response %q", buf)
 	}
+
+	// Only call SetStatusLine after we did all error checks to prevent
+	// a broken ResponseHeader.
 	if len(b) > n+1 && !bytes.Equal(b[n+1:], statusLine(h.statusCode)) {
-		h.SetStatusLine(b[n+1:])
+		h.SetStatusLine(sLine)
 	}
 
 	return len(buf) - len(bNext), nil
