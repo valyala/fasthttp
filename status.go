@@ -169,18 +169,17 @@ func StatusMessage(statusCode int) string {
 func init() {
 	// Fill all valid status lines
 	for i := 0; i < len(statusLines); i++ {
-		statusLines[i] = formatStatusLine([]byte{}, i, []byte(StatusMessage(i)))
+		statusLines[i] = formatStatusLine([]byte{}, httpHeader, i, []byte(StatusMessage(i)))
 	}
 }
 
-func formatStatusLine(dst []byte, statusCode int, statusMessage []byte) []byte {
-	dst = append(dst[:0], httpHeader...)
+func formatStatusLine(dst []byte, protocol []byte, statusCode int, statusText []byte) []byte {
+	dst = append(dst, protocol...)
 	dst = append(dst, ' ')
 	dst = strconv.AppendInt(dst, int64(statusCode), 10)
 	dst = append(dst, ' ')
-	dst = append(dst, statusMessage...)
-	dst = append(dst, strCRLF...)
-	return dst
+	dst = append(dst, statusText...)
+	return append(dst, strCRLF...)
 }
 
 func statusLine(statusCode int) []byte {
