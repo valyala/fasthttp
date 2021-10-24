@@ -56,6 +56,21 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 		t.Errorf("parse status line with non-default value failed, got: %s want: SuperOK", header.StatusMessage())
 	}
 
+	header.SetProtocol([]byte("HTTP/3.3"))
+	if !bytes.Equal(header.Protocol(), []byte("HTTP/3.3")) {
+		t.Errorf("parse protocol with non-default value failed, got: %s want: HTTP/3.3", header.Protocol())
+	}
+
+	if !bytes.Equal(header.AppendStatusLine([]byte{}), []byte("HTTP/3.3 200 SuperOK\r\n")) {
+		t.Errorf("parse status line with non-default value failed, got: %s want: HTTP/3.3 200 SuperOK", header.Protocol())
+	}
+
+	header.SetStatusMessage(nil)
+
+	if !bytes.Equal(header.AppendStatusLine([]byte{}), []byte("HTTP/3.3 200 OK\r\n")) {
+		t.Errorf("parse status line with default protocol value failed, got: %s want: HTTP/3.3 200 OK", header.Protocol())
+	}
+
 	for name, vals := range response.Header {
 		got := string(header.Peek(name))
 		want := vals[0]
@@ -85,6 +100,14 @@ func TestResponseHeaderMultiLineName(t *testing.T) {
 
 	if !bytes.Equal(header.StatusMessage(), []byte("OK")) {
 		t.Errorf("expected default status line, got: %s", header.StatusMessage())
+	}
+
+	if !bytes.Equal(header.Protocol(), []byte("HTTP/1.1")) {
+		t.Errorf("expected default protocol, got: %s", header.Protocol())
+	}
+
+	if !bytes.Equal(header.AppendStatusLine([]byte{}), []byte("HTTP/1.1 200 OK\r\n")) {
+		t.Errorf("parse status line with non-default value failed, got: %s want: HTTP/1.1 200 OK", header.Protocol())
 	}
 }
 

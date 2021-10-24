@@ -147,8 +147,8 @@ func (h *ResponseHeader) StatusMessage() []byte {
 }
 
 // SetStatusMessage sets response status message bytes.
-func (h *ResponseHeader) SetStatusMessage(statusLine []byte) {
-	h.statusMessage = append(h.statusMessage[:0], statusLine...)
+func (h *ResponseHeader) SetStatusMessage(statusMessage []byte) {
+	h.statusMessage = append(h.statusMessage[:0], statusMessage...)
 }
 
 // Protocol returns response protocol bytes.
@@ -1662,21 +1662,25 @@ func (h *ResponseHeader) String() string {
 	return string(h.Header())
 }
 
-// AppendBytes appends response header representation to dst and returns
-// the extended dst.
-func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
+func (h *ResponseHeader) AppendStatusLine(dst []byte) []byte {
 	statusCode := h.StatusCode()
 	if statusCode < 0 {
 		statusCode = StatusOK
 	}
 
 	if len(h.statusMessage) > 0 {
-		dst = formatStatusLine(dst[:0], h.Protocol(), statusCode, h.statusMessage)
+		return formatStatusLine(dst, h.Protocol(), statusCode, h.statusMessage)
 	} else if len(h.protocol) > 0 {
-		dst = formatStatusLine(dst[:0], h.protocol, statusCode, h.StatusMessage())
+		return formatStatusLine(dst, h.protocol, statusCode, h.StatusMessage())
 	} else {
-		dst = append(dst, statusLine(statusCode)...)
+		return append(dst, statusLine(statusCode)...)
 	}
+}
+
+// AppendBytes appends response header representation to dst and returns
+// the extended dst.
+func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
+	dst = h.AppendStatusLine(dst[:0])
 
 	server := h.Server()
 	if len(server) != 0 {
