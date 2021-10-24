@@ -80,8 +80,6 @@ const (
 )
 
 var (
-	httpHeader = []byte("HTTP/1.1")
-
 	statusLines = make([][]byte, statusMessageMax+1)
 
 	statusMessages = []string{
@@ -169,7 +167,7 @@ func StatusMessage(statusCode int) string {
 func init() {
 	// Fill all valid status lines
 	for i := 0; i < len(statusLines); i++ {
-		statusLines[i] = formatStatusLine(nil, httpHeader, i, []byte(StatusMessage(i)))
+		statusLines[i] = formatStatusLine(nil, strHTTP11, i, []byte(StatusMessage(i)))
 	}
 }
 
@@ -191,13 +189,5 @@ func statusLine(statusCode int) []byte {
 }
 
 func invalidStatusLine(statusCode int) []byte {
-	statusText := StatusMessage(statusCode)
-	// xxx placeholder of status code
-	var line = make([]byte, 0, len("HTTP/1.1 xxx \r\n")+len(statusText))
-	line = append(line, "HTTP/1.1 "...)
-	line = strconv.AppendInt(line, int64(statusCode), 10)
-	line = append(line, ' ')
-	line = append(line, statusText...)
-	line = append(line, "\r\n"...)
-	return line
+	return formatStatusLine(nil, strHTTP11, statusCode, s2b(StatusMessage(statusCode)))
 }
