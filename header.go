@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,7 +34,7 @@ type ResponseHeader struct {
 	noDefaultDate        bool
 
 	statusCode            int
-	statusLine            []byte
+	statusText            []byte
 	contentLength         int
 	contentLengthBytes    []byte
 	secureErrorLogMessage bool
@@ -137,17 +138,27 @@ func (h *ResponseHeader) SetStatusCode(statusCode int) {
 	h.statusCode = statusCode
 }
 
-// StatusLine returns response status line.
-func (h *ResponseHeader) StatusLine() []byte {
-	if len(h.statusLine) > 0 {
-		return h.statusLine
+// StatusLine returns response status text.
+//
+// Return value looks something like "OK"
+//
+// The returned value is valid until the response is released,
+// either though ReleaseResponse or your request handler returning.
+// Do not store references to returned value. Make copies instead.
+func (h *ResponseHeader) StatusText() []byte {
+	if len(h.statusText) > 0 {
+		return h.statusText
 	}
-	return statusLine(h.StatusCode())
+	return s2b(StatusMessage(h.StatusCode()))
 }
 
-// SetStatusLine sets response status line bytes.
-func (h *ResponseHeader) SetStatusLine(statusLine []byte) {
-	h.statusLine = append(h.statusLine[:0], statusLine...)
+// SetStatusText sets response status text bytes.
+//
+// statusLine should be something like "OK".
+//
+// statusLine is safe to reuse after this method has returned.
+func (h *ResponseHeader) SetStatusText(statusLine []byte) {
+	h.statusText = append(h.statusText[:0], statusLine...)
 }
 
 // SetLastModified sets 'Last-Modified' header to the given value.
@@ -697,7 +708,7 @@ func (h *ResponseHeader) resetSkipNormalize() {
 	h.connectionClose = false
 
 	h.statusCode = 0
-	h.statusLine = h.statusLine[:0]
+	h.statusText = h.statusText[:0]
 	h.contentLength = 0
 	h.contentLengthBytes = h.contentLengthBytes[:0]
 
@@ -746,7 +757,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.noDefaultDate = h.noDefaultDate
 
 	dst.statusCode = h.statusCode
-	dst.statusLine = append(dst.statusLine[:0], h.statusLine...)
+	dst.statusText = append(dst.statusText[:0], h.statusText...)
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)
 	dst.contentType = append(dst.contentType, h.contentType...)
@@ -1656,8 +1667,12 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		statusCode = StatusOK
 	}
 
-	if len(h.statusLine) > 0 {
-		dst = append(dst, h.statusLine...)
+	if len(h.statusText) > 0 {
+		dst = append(dst, "HTTP/1.1 "...)
+		dst = strconv.AppendInt(dst, int64(statusCode), 10)
+		dst = append(dst, ' ')
+		dst = append(dst, h.statusText...)
+		dst = append(dst, "\r\n"...)
 	} else {
 		dst = append(dst, statusLine(statusCode)...)
 	}
@@ -1881,7 +1896,7 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		return 0, fmt.Errorf("unexpected char at the end of status code. Response %q", buf)
 	}
 	if len(b) > n+1 && !bytes.Equal(b[n+1:], statusLine(h.statusCode)) {
-		h.SetStatusLine(b[n+1:])
+		h.SetStatusText(b[n+1:])
 	}
 
 	return len(buf) - len(bNext), nil
