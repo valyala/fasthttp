@@ -1662,6 +1662,8 @@ func (h *ResponseHeader) String() string {
 	return string(h.Header())
 }
 
+// AppendStatusLine appends the response status line to dst and returns
+// the extended dst.
 func (h *ResponseHeader) AppendStatusLine(dst []byte) []byte {
 	statusCode := h.StatusCode()
 	if statusCode < 0 {
