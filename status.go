@@ -169,7 +169,7 @@ func StatusMessage(statusCode int) string {
 func init() {
 	// Fill all valid status lines
 	for i := 0; i < len(statusLines); i++ {
-		statusLines[i] = formatStatusLine([]byte{}, httpHeader, i, []byte(StatusMessage(i)))
+		statusLines[i] = formatStatusLine(nil, httpHeader, i, []byte(StatusMessage(i)))
 	}
 }
 
