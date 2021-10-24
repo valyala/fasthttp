@@ -1670,10 +1670,8 @@ func (h *ResponseHeader) AppendStatusLine(dst []byte) []byte {
 		statusCode = StatusOK
 	}
 
-	if len(h.statusMessage) > 0 {
-		return formatStatusLine(dst, h.Protocol(), statusCode, h.statusMessage)
-	} else if len(h.protocol) > 0 {
-		return formatStatusLine(dst, h.protocol, statusCode, h.StatusMessage())
+	if len(h.statusMessage) > 0 || len(h.protocol) > 0 {
+		return formatStatusLine(dst, h.Protocol(), statusCode, h.StatusMessage())
 	} else {
 		return append(dst, statusLine(statusCode)...)
 	}
