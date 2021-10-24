@@ -146,8 +146,8 @@ func (h *ResponseHeader) StatusLine() []byte {
 }
 
 // SetStatusLine sets response status line bytes.
-func (h *ResponseHeader) SetStatusLine(statusLine []byte) {
-	h.statusLine = append(h.statusLine[:0], statusLine...)
+func (h *ResponseHeader) SetStatusLine(statusCode int, statusLine []byte) {
+	h.statusLine = formatStatusLine(h.statusLine, statusCode, statusLine)
 }
 
 // SetLastModified sets 'Last-Modified' header to the given value.
@@ -1880,8 +1880,8 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 		return 0, fmt.Errorf("unexpected char at the end of status code. Response %q", buf)
 	}
-	if len(b) > n+1 && !bytes.Equal(b[n+1:], statusLine(h.statusCode)) {
-		h.SetStatusLine(b[n+1:])
+	if len(b) > n+1 && !bytes.Equal(b[n+1:], statusLines[h.statusCode]) {
+		h.SetStatusLine(h.statusCode, b[n+1:])
 	}
 
 	return len(buf) - len(bNext), nil

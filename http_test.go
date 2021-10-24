@@ -839,7 +839,7 @@ func TestResponseSkipBody(t *testing.T) {
 
 	// set StatusNoContent with statusLine
 	r.Header.SetStatusCode(StatusNoContent)
-	r.Header.SetStatusLine([]byte("HTTP/1.1 204 NC\r\n"))
+	r.Header.SetStatusLine(204, []byte("NC"))
 	r.SetBodyString("foobar")
 	s = r.String()
 	if strings.Contains(s, "\r\n\r\nfoobar") {

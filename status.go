@@ -1,7 +1,6 @@
 package fasthttp
 
 import (
-	"fmt"
 	"strconv"
 )
 
@@ -81,6 +80,8 @@ const (
 )
 
 var (
+	httpHeader = []byte("HTTP/1.1")
+
 	statusLines = make([][]byte, statusMessageMax+1)
 
 	statusMessages = []string{
@@ -168,8 +169,18 @@ func StatusMessage(statusCode int) string {
 func init() {
 	// Fill all valid status lines
 	for i := 0; i < len(statusLines); i++ {
-		statusLines[i] = []byte(fmt.Sprintf("HTTP/1.1 %d %s\r\n", i, StatusMessage(i)))
+		statusLines[i] = formatStatusLine([]byte{}, i, []byte(StatusMessage(i)))
 	}
+}
+
+func formatStatusLine(dst []byte, statusCode int, statusMessage []byte) []byte {
+	dst = append(dst[:0], httpHeader...)
+	dst = append(dst, ' ')
+	dst = i2b(dst, uint64(statusCode))
+	dst = append(dst, ' ')
+	dst = append(dst, statusMessage...)
+	dst = append(dst, strCRLF...)
+	return dst
 }
 
 func statusLine(statusCode int) []byte {
