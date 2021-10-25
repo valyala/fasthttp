@@ -746,7 +746,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.noDefaultDate = h.noDefaultDate
 
 	dst.statusCode = h.statusCode
-	dst.statusLine = append(dst.statusLine[:0], h.statusLine...)
+	dst.statusLine = append(dst.statusLine, h.statusLine...)
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)
 	dst.contentType = append(dst.contentType, h.contentType...)
