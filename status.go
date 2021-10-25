@@ -80,95 +80,87 @@ const (
 )
 
 var (
-	statusLines = make([][]byte, statusMessageMax+1)
+	unknownStatusCode = []byte("Unknown Status Code")
 
-	statusMessages = []string{
-		StatusContinue:           "Continue",
-		StatusSwitchingProtocols: "Switching Protocols",
-		StatusProcessing:         "Processing",
-		StatusEarlyHints:         "Early Hints",
+	statusMessages = [][]byte{
+		StatusContinue:           []byte("Continue"),
+		StatusSwitchingProtocols: []byte("Switching Protocols"),
+		StatusProcessing:         []byte("Processing"),
+		StatusEarlyHints:         []byte("Early Hints"),
 
-		StatusOK:                   "OK",
-		StatusCreated:              "Created",
-		StatusAccepted:             "Accepted",
-		StatusNonAuthoritativeInfo: "Non-Authoritative Information",
-		StatusNoContent:            "No Content",
-		StatusResetContent:         "Reset Content",
-		StatusPartialContent:       "Partial Content",
-		StatusMultiStatus:          "Multi-Status",
-		StatusAlreadyReported:      "Already Reported",
-		StatusIMUsed:               "IM Used",
+		StatusOK:                   []byte("OK"),
+		StatusCreated:              []byte("Created"),
+		StatusAccepted:             []byte("Accepted"),
+		StatusNonAuthoritativeInfo: []byte("Non-Authoritative Information"),
+		StatusNoContent:            []byte("No Content"),
+		StatusResetContent:         []byte("Reset Content"),
+		StatusPartialContent:       []byte("Partial Content"),
+		StatusMultiStatus:          []byte("Multi-Status"),
+		StatusAlreadyReported:      []byte("Already Reported"),
+		StatusIMUsed:               []byte("IM Used"),
 
-		StatusMultipleChoices:   "Multiple Choices",
-		StatusMovedPermanently:  "Moved Permanently",
-		StatusFound:             "Found",
-		StatusSeeOther:          "See Other",
-		StatusNotModified:       "Not Modified",
-		StatusUseProxy:          "Use Proxy",
-		StatusTemporaryRedirect: "Temporary Redirect",
-		StatusPermanentRedirect: "Permanent Redirect",
+		StatusMultipleChoices:   []byte("Multiple Choices"),
+		StatusMovedPermanently:  []byte("Moved Permanently"),
+		StatusFound:             []byte("Found"),
+		StatusSeeOther:          []byte("See Other"),
+		StatusNotModified:       []byte("Not Modified"),
+		StatusUseProxy:          []byte("Use Proxy"),
+		StatusTemporaryRedirect: []byte("Temporary Redirect"),
+		StatusPermanentRedirect: []byte("Permanent Redirect"),
 
-		StatusBadRequest:                   "Bad Request",
-		StatusUnauthorized:                 "Unauthorized",
-		StatusPaymentRequired:              "Payment Required",
-		StatusForbidden:                    "Forbidden",
-		StatusNotFound:                     "Not Found",
-		StatusMethodNotAllowed:             "Method Not Allowed",
-		StatusNotAcceptable:                "Not Acceptable",
-		StatusProxyAuthRequired:            "Proxy Authentication Required",
-		StatusRequestTimeout:               "Request Timeout",
-		StatusConflict:                     "Conflict",
-		StatusGone:                         "Gone",
-		StatusLengthRequired:               "Length Required",
-		StatusPreconditionFailed:           "Precondition Failed",
-		StatusRequestEntityTooLarge:        "Request Entity Too Large",
-		StatusRequestURITooLong:            "Request URI Too Long",
-		StatusUnsupportedMediaType:         "Unsupported Media Type",
-		StatusRequestedRangeNotSatisfiable: "Requested Range Not Satisfiable",
-		StatusExpectationFailed:            "Expectation Failed",
-		StatusTeapot:                       "I'm a teapot",
-		StatusMisdirectedRequest:           "Misdirected Request",
-		StatusUnprocessableEntity:          "Unprocessable Entity",
-		StatusLocked:                       "Locked",
-		StatusFailedDependency:             "Failed Dependency",
-		StatusUpgradeRequired:              "Upgrade Required",
-		StatusPreconditionRequired:         "Precondition Required",
-		StatusTooManyRequests:              "Too Many Requests",
-		StatusRequestHeaderFieldsTooLarge:  "Request Header Fields Too Large",
-		StatusUnavailableForLegalReasons:   "Unavailable For Legal Reasons",
+		StatusBadRequest:                   []byte("Bad Request"),
+		StatusUnauthorized:                 []byte("Unauthorized"),
+		StatusPaymentRequired:              []byte("Payment Required"),
+		StatusForbidden:                    []byte("Forbidden"),
+		StatusNotFound:                     []byte("Not Found"),
+		StatusMethodNotAllowed:             []byte("Method Not Allowed"),
+		StatusNotAcceptable:                []byte("Not Acceptable"),
+		StatusProxyAuthRequired:            []byte("Proxy Authentication Required"),
+		StatusRequestTimeout:               []byte("Request Timeout"),
+		StatusConflict:                     []byte("Conflict"),
+		StatusGone:                         []byte("Gone"),
+		StatusLengthRequired:               []byte("Length Required"),
+		StatusPreconditionFailed:           []byte("Precondition Failed"),
+		StatusRequestEntityTooLarge:        []byte("Request Entity Too Large"),
+		StatusRequestURITooLong:            []byte("Request URI Too Long"),
+		StatusUnsupportedMediaType:         []byte("Unsupported Media Type"),
+		StatusRequestedRangeNotSatisfiable: []byte("Requested Range Not Satisfiable"),
+		StatusExpectationFailed:            []byte("Expectation Failed"),
+		StatusTeapot:                       []byte("I'm a teapot"),
+		StatusMisdirectedRequest:           []byte("Misdirected Request"),
+		StatusUnprocessableEntity:          []byte("Unprocessable Entity"),
+		StatusLocked:                       []byte("Locked"),
+		StatusFailedDependency:             []byte("Failed Dependency"),
+		StatusUpgradeRequired:              []byte("Upgrade Required"),
+		StatusPreconditionRequired:         []byte("Precondition Required"),
+		StatusTooManyRequests:              []byte("Too Many Requests"),
+		StatusRequestHeaderFieldsTooLarge:  []byte("Request Header Fields Too Large"),
+		StatusUnavailableForLegalReasons:   []byte("Unavailable For Legal Reasons"),
 
-		StatusInternalServerError:           "Internal Server Error",
-		StatusNotImplemented:                "Not Implemented",
-		StatusBadGateway:                    "Bad Gateway",
-		StatusServiceUnavailable:            "Service Unavailable",
-		StatusGatewayTimeout:                "Gateway Timeout",
-		StatusHTTPVersionNotSupported:       "HTTP Version Not Supported",
-		StatusVariantAlsoNegotiates:         "Variant Also Negotiates",
-		StatusInsufficientStorage:           "Insufficient Storage",
-		StatusLoopDetected:                  "Loop Detected",
-		StatusNotExtended:                   "Not Extended",
-		StatusNetworkAuthenticationRequired: "Network Authentication Required",
+		StatusInternalServerError:           []byte("Internal Server Error"),
+		StatusNotImplemented:                []byte("Not Implemented"),
+		StatusBadGateway:                    []byte("Bad Gateway"),
+		StatusServiceUnavailable:            []byte("Service Unavailable"),
+		StatusGatewayTimeout:                []byte("Gateway Timeout"),
+		StatusHTTPVersionNotSupported:       []byte("HTTP Version Not Supported"),
+		StatusVariantAlsoNegotiates:         []byte("Variant Also Negotiates"),
+		StatusInsufficientStorage:           []byte("Insufficient Storage"),
+		StatusLoopDetected:                  []byte("Loop Detected"),
+		StatusNotExtended:                   []byte("Not Extended"),
+		StatusNetworkAuthenticationRequired: []byte("Network Authentication Required"),
 	}
 )
 
 // StatusMessage returns HTTP status message for the given status code.
-func StatusMessage(statusCode int) string {
+func StatusMessage(statusCode int) []byte {
 	if statusCode < statusMessageMin || statusCode > statusMessageMax {
-		return "Unknown Status Code"
+		return unknownStatusCode
 	}
 
-	s := statusMessages[statusCode]
-	if s == "" {
-		s = "Unknown Status Code"
+	if s := statusMessages[statusCode]; s != nil {
+		return s
 	}
-	return s
-}
-
-func init() {
-	// Fill all valid status lines
-	for i := 0; i < len(statusLines); i++ {
-		statusLines[i] = formatStatusLine(nil, strHTTP11, i, []byte(StatusMessage(i)))
-	}
+	return unknownStatusCode
 }
 
 func formatStatusLine(dst []byte, protocol []byte, statusCode int, statusText []byte) []byte {
@@ -178,16 +170,4 @@ func formatStatusLine(dst []byte, protocol []byte, statusCode int, statusText []
 	dst = append(dst, ' ')
 	dst = append(dst, statusText...)
 	return append(dst, strCRLF...)
-}
-
-func statusLine(statusCode int) []byte {
-	if statusCode < 0 || statusCode > statusMessageMax {
-		return invalidStatusLine(statusCode)
-	}
-
-	return statusLines[statusCode]
-}
-
-func invalidStatusLine(statusCode int) []byte {
-	return formatStatusLine(nil, strHTTP11, statusCode, s2b(StatusMessage(statusCode)))
 }

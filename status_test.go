@@ -17,7 +17,7 @@ func TestStatusLine(t *testing.T) {
 }
 
 func testStatusLine(t *testing.T, statusCode int, expected []byte) {
-	line := statusLine(statusCode)
+	line := formatStatusLine(nil, strHTTP11, statusCode, StatusMessage(statusCode))
 	if !bytes.Equal(expected, line) {
 		t.Fatalf("unexpected status line %s. Expecting %s", string(line), string(expected))
 	}

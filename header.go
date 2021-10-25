@@ -140,10 +140,7 @@ func (h *ResponseHeader) SetStatusCode(statusCode int) {
 
 // StatusMessage returns response status message.
 func (h *ResponseHeader) StatusMessage() []byte {
-	if len(h.statusMessage) > 0 {
-		return h.statusMessage
-	}
-	return s2b(StatusMessage(h.StatusCode()))
+	return h.statusMessage
 }
 
 // SetStatusMessage sets response status message bytes.
@@ -1671,12 +1668,7 @@ func (h *ResponseHeader) AppendStatusLine(dst []byte) []byte {
 	if statusCode < 0 {
 		statusCode = StatusOK
 	}
-
-	if len(h.statusMessage) > 0 || len(h.protocol) > 0 {
-		return formatStatusLine(dst, h.Protocol(), statusCode, h.StatusMessage())
-	} else {
-		return append(dst, statusLine(statusCode)...)
-	}
+	return formatStatusLine(dst, h.Protocol(), statusCode, h.StatusMessage())
 }
 
 // AppendBytes appends response header representation to dst and returns
@@ -1902,7 +1894,7 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 		return 0, fmt.Errorf("unexpected char at the end of status code. Response %q", buf)
 	}
-	if len(b) > n+1 && !bytes.Equal(b[n+1:], s2b(StatusMessage(h.statusCode))) {
+	if len(b) > n+1 {
 		h.SetStatusMessage(b[n+1:])
 	}
 

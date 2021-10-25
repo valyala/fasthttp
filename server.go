@@ -2741,7 +2741,7 @@ func (s *Server) getServerName() []byte {
 }
 
 func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
-	w.Write(statusLine(statusCode)) //nolint:errcheck
+	w.Write(formatStatusLine(nil, strHTTP11, statusCode, StatusMessage(statusCode))) //nolint:errcheck
 
 	server := ""
 	if !s.NoDefaultServerHeader {
