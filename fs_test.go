@@ -1,3 +1,6 @@
+// go:build !windows
+// Don't run FS tests on windows as it isn't compatible for now.
+
 package fasthttp
 
 import (
