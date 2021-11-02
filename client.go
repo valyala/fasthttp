@@ -1,5 +1,4 @@
 // go:build !windows || !race
-// +build !windows !race
 
 package fasthttp
 
