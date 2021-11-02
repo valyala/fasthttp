@@ -1661,9 +1661,9 @@ func (h *ResponseHeader) String() string {
 	return string(h.Header())
 }
 
-// AppendStatusLine appends the response status line to dst and returns
+// appendStatusLine appends the response status line to dst and returns
 // the extended dst.
-func (h *ResponseHeader) AppendStatusLine(dst []byte) []byte {
+func (h *ResponseHeader) appendStatusLine(dst []byte) []byte {
 	statusCode := h.StatusCode()
 	if statusCode < 0 {
 		statusCode = StatusOK
@@ -1674,7 +1674,7 @@ func (h *ResponseHeader) AppendStatusLine(dst []byte) []byte {
 // AppendBytes appends response header representation to dst and returns
 // the extended dst.
 func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
-	dst = h.AppendStatusLine(dst[:0])
+	dst = h.appendStatusLine(dst[:0])
 
 	server := h.Server()
 	if len(server) != 0 {
