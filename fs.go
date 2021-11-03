@@ -1370,18 +1370,15 @@ func fsModTime(t time.Time) time.Time {
 	return t.In(time.UTC).Truncate(time.Second)
 }
 
-var (
-	filesLockMap     = make(map[string]*sync.Mutex)
-	filesLockMapLock sync.Mutex
-)
+var filesLockMap sync.Map
 
 func getFileLock(absPath string) *sync.Mutex {
-	filesLockMapLock.Lock()
-	flock := filesLockMap[absPath]
-	if flock == nil {
-		flock = &sync.Mutex{}
-		filesLockMap[absPath] = flock
+	v, exist := filesLockMap.Load(absPath)
+	if exist == false {
+		flock := &sync.Mutex{}
+		filesLockMap.Store(absPath,flock)
+		return flock
 	}
-	filesLockMapLock.Unlock()
-	return flock
+	filelock:=v.(*sync.Mutex)
+	return filelock
 }
