@@ -1373,12 +1373,7 @@ func fsModTime(t time.Time) time.Time {
 var filesLockMap sync.Map
 
 func getFileLock(absPath string) *sync.Mutex {
-	v, exist := filesLockMap.Load(absPath)
-	if exist == false {
-		flock := &sync.Mutex{}
-		filesLockMap.Store(absPath,flock)
-		return flock
-	}
+	v, _ := filesLockMap.LoadOrStore(absPath,&sync.Mutex{})
 	filelock:=v.(*sync.Mutex)
 	return filelock
 }
