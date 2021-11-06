@@ -380,7 +380,7 @@ func appendQuotedPath(dst, src []byte) []byte {
 
 	for _, c := range src {
 		if quotedPathShouldEscapeTable[int(c)] != 0 {
-			dst = append(dst, '%', upperhex[c>>4], upperhex[c&15])
+			dst = append(dst, '%', upperhex[c>>4], upperhex[c&0xf])
 		} else {
 			dst = append(dst, c)
 		}
