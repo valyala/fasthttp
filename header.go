@@ -759,7 +759,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 
 	dst.statusCode = h.statusCode
 	dst.statusMessage = append(dst.statusMessage, h.statusMessage...)
-	dst.protocol = append(dst.protocol[:0], h.protocol...)
+	dst.protocol = append(dst.protocol, h.protocol...)
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)
 	dst.contentType = append(dst.contentType, h.contentType...)
