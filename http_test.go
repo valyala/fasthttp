@@ -515,6 +515,31 @@ tailfoobar`
 	}
 }
 
+func TestRequestSetURI(t *testing.T) {
+	t.Parallel()
+
+	var r Request
+
+	uri := "/foo/bar?baz"
+	u := &URI{}
+	u.Parse(nil, []byte(uri)) //nolint:errcheck
+	// Set request uri via SetURI()
+	r.SetURI(u) // copies URI
+	// modifying an original URI struct doesn't affect stored URI inside of request
+	u.SetPath("newPath")
+	if string(r.RequestURI()) != uri {
+		t.Fatalf("unexpected request uri %q. Expecting %q", r.RequestURI(), uri)
+	}
+
+	// Set request uri to nil just resets the URI
+	r.Reset()
+	uri = "/"
+	r.SetURI(nil)
+	if string(r.RequestURI()) != uri {
+		t.Fatalf("unexpected request uri %q. Expecting %q", r.RequestURI(), uri)
+	}
+}
+
 func TestRequestRequestURI(t *testing.T) {
 	t.Parallel()
 

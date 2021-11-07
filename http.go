@@ -774,6 +774,20 @@ func (req *Request) URI() *URI {
 	return &req.uri
 }
 
+// SetURI initializes request URI
+// Use this method if a single URI may be reused across multiple requests.
+// Otherwise, you can just use SetRequestURI() and it will be parsed as new URI.
+// The URI is copied and can be safely modified later.
+func (req *Request) SetURI(newUri *URI) {
+	if newUri != nil {
+		newUri.CopyTo(&req.uri)
+		req.parsedURI = true
+		return
+	}
+	req.uri.Reset()
+	req.parsedURI = false
+}
+
 func (req *Request) parseURI() error {
 	if req.parsedURI {
 		return nil
