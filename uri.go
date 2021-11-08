@@ -216,6 +216,14 @@ func (u *URI) SetSchemeBytes(scheme []byte) {
 	lowercaseBytes(u.scheme)
 }
 
+func (u *URI) isHttps() bool {
+	return bytes.Equal(u.scheme, strHTTPS)
+}
+
+func (u *URI) isHttp() bool {
+	return len(u.scheme) == 0 || bytes.Equal(u.scheme, strHTTP)
+}
+
 // Reset clears uri.
 func (u *URI) Reset() {
 	u.pathOriginal = u.pathOriginal[:0]
@@ -282,14 +290,13 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 
 	if len(host) == 0 || bytes.Contains(uri, strColonSlashSlash) {
 		scheme, newHost, newURI := splitHostURI(host, uri)
-		u.scheme = append(u.scheme, scheme...)
-		lowercaseBytes(u.scheme)
+		u.SetSchemeBytes(scheme)
 		host = newHost
 		uri = newURI
 	}
 
 	if isTLS {
-		u.scheme = append(u.scheme[:0], strHTTPS...)
+		u.SetSchemeBytes(strHTTPS)
 	}
 
 	if n := bytes.IndexByte(host, '@'); n >= 0 {

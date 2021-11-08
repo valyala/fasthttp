@@ -310,6 +310,29 @@ func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expecte
 	}
 }
 
+func TestIsHttp(t *testing.T) {
+	var u URI
+	if !u.isHttp() || u.isHttps() {
+		t.Fatalf("http scheme is assumed by default and not https")
+	}
+	u.SetSchemeBytes([]byte{})
+	if !u.isHttp() || u.isHttps() {
+		t.Fatalf("empty scheme must be threaten as http and not https")
+	}
+	u.SetScheme("http")
+	if !u.isHttp() || u.isHttps() {
+		t.Fatalf("scheme must be threaten as http and not https")
+	}
+	u.SetScheme("https")
+	if !u.isHttps() || u.isHttp() {
+		t.Fatalf("scheme must be threaten as https and not http")
+	}
+	u.SetScheme("dav")
+	if u.isHttps() || u.isHttp() {
+		t.Fatalf("scheme must be threaten as not http and not https")
+	}
+}
+
 func TestURIParse(t *testing.T) {
 	t.Parallel()
 
