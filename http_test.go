@@ -837,9 +837,9 @@ func TestResponseSkipBody(t *testing.T) {
 		t.Fatalf("unexpected content-type in response %q", s)
 	}
 
-	// set StatusNoContent with statusLine
+	// set StatusNoContent with statusMessage
 	r.Header.SetStatusCode(StatusNoContent)
-	r.Header.SetStatusLine([]byte("HTTP/1.1 204 NC\r\n"))
+	r.Header.SetStatusMessage([]byte("NC"))
 	r.SetBodyString("foobar")
 	s = r.String()
 	if strings.Contains(s, "\r\n\r\nfoobar") {

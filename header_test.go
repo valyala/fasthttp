@@ -52,8 +52,29 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 		t.Fatalf("parse response using net/http failed, %s", err)
 	}
 
-	if !bytes.Equal(header.StatusLine(), []byte("SuperOK")) {
-		t.Errorf("parse status line with non-default value failed, got: %s want: SuperOK", header.StatusLine())
+	if !bytes.Equal(header.StatusMessage(), []byte("SuperOK")) {
+		t.Errorf("parse status line with non-default value failed, got: '%s' want: 'SuperOK'", header.StatusMessage())
+	}
+
+	header.SetProtocol([]byte("HTTP/3.3"))
+	if !bytes.Equal(header.Protocol(), []byte("HTTP/3.3")) {
+		t.Errorf("parse protocol with non-default value failed, got: '%s' want: 'HTTP/3.3'", header.Protocol())
+	}
+
+	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/3.3 200 SuperOK\r\n")) {
+		t.Errorf("parse status line with non-default value failed, got: '%s' want: 'HTTP/3.3 200 SuperOK'", header.Protocol())
+	}
+
+	header.SetStatusMessage(nil)
+
+	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/3.3 200 OK\r\n")) {
+		t.Errorf("parse status line with default protocol value failed, got: '%s' want: 'HTTP/3.3 200 OK'", header.appendStatusLine(nil))
+	}
+
+	header.SetStatusMessage(s2b(StatusMessage(200)))
+
+	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/3.3 200 OK\r\n")) {
+		t.Errorf("parse status line with default protocol value failed, got: '%s' want: 'HTTP/3.3 200 OK'", header.appendStatusLine(nil))
 	}
 
 	for name, vals := range response.Header {
@@ -83,8 +104,16 @@ func TestResponseHeaderMultiLineName(t *testing.T) {
 		t.Errorf("expected error, got %q (%v)", m, err)
 	}
 
-	if !bytes.Equal(header.StatusLine(), []byte("OK")) {
-		t.Errorf("expected default status line, got: %s", header.StatusLine())
+	if !bytes.Equal(header.StatusMessage(), []byte("OK")) {
+		t.Errorf("expected default status line, got: %s", header.StatusMessage())
+	}
+
+	if !bytes.Equal(header.Protocol(), []byte("HTTP/1.1")) {
+		t.Errorf("expected default protocol, got: %s", header.Protocol())
+	}
+
+	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/1.1 200 OK\r\n")) {
+		t.Errorf("parse status line with non-default value failed, got: %s want: HTTP/1.1 200 OK", header.Protocol())
 	}
 }
 
