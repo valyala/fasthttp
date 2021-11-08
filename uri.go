@@ -216,6 +216,14 @@ func (u *URI) SetSchemeBytes(scheme []byte) {
 	lowercaseBytes(u.scheme)
 }
 
+func (u *URI) isHttps() bool {
+	return bytes.Equal(u.scheme, strHTTPS)
+}
+
+func (u *URI) isHttp() bool {
+	return len(u.scheme) == 0 || bytes.Equal(u.scheme, strHTTP)
+}
+
 // Reset clears uri.
 func (u *URI) Reset() {
 	u.pathOriginal = u.pathOriginal[:0]

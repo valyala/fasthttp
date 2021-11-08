@@ -4,7 +4,6 @@ package fasthttp
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -464,11 +463,10 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	host := uri.Host()
 
 	isTLS := false
-	scheme := uri.Scheme()
-	if bytes.Equal(scheme, strHTTPS) {
+	if uri.isHttps() {
 		isTLS = true
-	} else if !bytes.Equal(scheme, strHTTP) {
-		return fmt.Errorf("unsupported protocol %q. http and https are supported", scheme)
+	} else if !uri.isHttp() {
+		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
 	}
 
 	startCleaner := false
@@ -1363,7 +1361,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.secureErrorLogMessage = c.SecureErrorLogMessage
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
-	if c.IsTLS != bytes.Equal(req.uri.Scheme(), strHTTPS) {
+	if c.IsTLS != req.uri.isHttps() {
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 
