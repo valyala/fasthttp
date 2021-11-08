@@ -290,14 +290,13 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 
 	if len(host) == 0 || bytes.Contains(uri, strColonSlashSlash) {
 		scheme, newHost, newURI := splitHostURI(host, uri)
-		u.scheme = append(u.scheme, scheme...)
-		lowercaseBytes(u.scheme)
+		u.SetSchemeBytes(scheme)
 		host = newHost
 		uri = newURI
 	}
 
 	if isTLS {
-		u.scheme = append(u.scheme[:0], strHTTPS...)
+		u.SetSchemeBytes(strHTTPS)
 	}
 
 	if n := bytes.IndexByte(host, '@'); n >= 0 {
