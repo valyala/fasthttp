@@ -67,8 +67,8 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 
 	header.SetStatusMessage(nil)
 
-	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/3.3 200 \r\n")) {
-		t.Errorf("parse status line with default protocol value failed, got: '%s' want: 'HTTP/3.3 200 '", header.appendStatusLine(nil))
+	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/3.3 200 OK\r\n")) {
+		t.Errorf("parse status line with default protocol value failed, got: '%s' want: 'HTTP/3.3 200 OK'", header.appendStatusLine(nil))
 	}
 
 	header.SetStatusMessage(s2b(StatusMessage(200)))
