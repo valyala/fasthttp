@@ -3347,6 +3347,49 @@ func TestShutdownErr(t *testing.T) {
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 }
 
+func TestShutdownCloseIdleConns(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Success("aaa/bbb", []byte("real response"))
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexepcted error: %s", err)
+		}
+	}()
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexepcted error: %s", err)
+	}
+
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Errorf("unexpected error: %s", err)
+	}
+	time.Sleep(100 * time.Millisecond)
+
+	shutdownErr := make(chan error)
+	go func() {
+		shutdownErr <- s.Shutdown()
+	}()
+
+	timer := time.NewTimer(time.Second)
+	select {
+	case <-timer.C:
+		t.Fatalf("idel connections don't close when shutdown")
+	case err = <-shutdownErr:
+		if err != nil {
+			t.Errorf("unexepcted error: %s", err)
+		}
+	}
+
+	br := bufio.NewReader(conn)
+	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+}
+
 func TestMultipleServe(t *testing.T) {
 	t.Parallel()
 

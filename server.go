@@ -414,13 +414,15 @@ type Server struct {
 	writerPool     sync.Pool
 	hijackConnPool sync.Pool
 
-	// We need to know our listeners so we can close them in Shutdown().
+	// We need to know our listeners and idle connections so we can close them in Shutdown().
 	ln []net.Listener
+	idleConns map[net.Conn]struct{}
 
-	mu   sync.Mutex
-	open int32
-	stop int32
-	done chan struct{}
+	connsMu sync.Mutex
+	mu      sync.Mutex
+	open    int32
+	stop    int32
+	done    chan struct{}
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -1835,6 +1837,8 @@ func (s *Server) Shutdown() error {
 		close(s.done)
 	}
 
+	s.closeIdleConns()
+
 	// Closing the listener will make Serve() call Stop on the worker pool.
 	// Setting .stop to 1 will make serveConn() break out of its loop.
 	// Now we just have to wait until all workers are done.
@@ -2425,6 +2429,16 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {
+	s.connsMu.Lock()
+	s.trackConn(nc, state)
+	s.connsMu.Unlock()
+	if hook := s.ConnState; hook != nil {
+		hook(nc, state)
+	}
+}
+
+func (s *Server) setStateLocked(nc net.Conn, state ConnState) {
+	s.trackConn(nc, state)
 	if hook := s.ConnState; hook != nil {
 		hook(nc, state)
 	}
@@ -2792,6 +2806,28 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 	writeResponse(ctx, bw) //nolint:errcheck
 	bw.Flush()
 	return bw
+}
+
+func (s *Server) trackConn(c net.Conn, state ConnState) {
+	switch state {
+	case StateIdle:
+		if s.idleConns == nil {
+			s.idleConns = make(map[net.Conn]struct{})
+		}
+		s.idleConns[c] = struct{}{}
+
+	default:
+		delete(s.idleConns, c)
+	}
+}
+
+func (s *Server) closeIdleConns() {
+	s.connsMu.Lock()
+	for c := range s.idleConns {
+		c.Close()
+		s.setStateLocked(c, StateClosed)
+	}
+	s.connsMu.Unlock()
 }
 
 // A ConnState represents the state of a client connection to a server.
