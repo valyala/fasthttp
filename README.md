@@ -485,7 +485,7 @@ statusCode, body, err := fasthttp.Get(nil, "http://google.com/")
 uintBuf := fasthttp.AppendUint(nil, 1234)
 ```
 
-* String and `[]byte` buffer may converts wihtout memory allocation
+* String and `[]byte` buffers may converted without memory allocations
 ```go
 func b2s(b []byte) string {
     return *(*string)(unsafe.Pointer(&b))
@@ -500,12 +500,11 @@ func s2b(s string) (b []byte) {
     return b
 }
 ```
-The underlying structure of `[]byte` buffer has only one `Len` field more than String.
-So, we can construct one directly from the other.
 
-Note:
-This is an unsafe way, 
-please make sure not to modify the bytes in the `[]byte` buffer if the result string still survives.
+### Warning:
+This is an **unsafe** way, the result string and `[]byte` buffer share the same bytes.
+
+**Please make sure not to modify the bytes in the `[]byte` buffer if the string still survives!**
 
 ## Related projects
 
