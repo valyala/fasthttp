@@ -2322,7 +2322,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			previousWriteTimeout = 0
 		}
 
-		connectionClose = connectionClose || ctx.Response.ConnectionClose()
 		connectionClose = connectionClose || ctx.Response.ConnectionClose() || (s.CloseOnShutdown && atomic.LoadInt32(&s.stop) == 1)
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
