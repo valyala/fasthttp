@@ -416,13 +416,14 @@ type Server struct {
 
 	// We need to know our listeners and idle connections so we can close them in Shutdown().
 	ln []net.Listener
-	idleConns map[net.Conn]struct{}
 
-	connsMu sync.Mutex
-	mu      sync.Mutex
-	open    int32
-	stop    int32
-	done    chan struct{}
+	idleConns   map[net.Conn]struct{}
+	idleConnsMu sync.Mutex
+
+	mu   sync.Mutex
+	open int32
+	stop int32
+	done chan struct{}
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -2429,15 +2430,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {
-	s.connsMu.Lock()
-	s.trackConn(nc, state)
-	s.connsMu.Unlock()
-	if hook := s.ConnState; hook != nil {
-		hook(nc, state)
-	}
-}
-
-func (s *Server) setStateLocked(nc net.Conn, state ConnState) {
 	s.trackConn(nc, state)
 	if hook := s.ConnState; hook != nil {
 		hook(nc, state)
@@ -2809,6 +2801,7 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 }
 
 func (s *Server) trackConn(c net.Conn, state ConnState) {
+	s.idleConnsMu.Lock()
 	switch state {
 	case StateIdle:
 		if s.idleConns == nil {
@@ -2819,15 +2812,16 @@ func (s *Server) trackConn(c net.Conn, state ConnState) {
 	default:
 		delete(s.idleConns, c)
 	}
+	s.idleConnsMu.Unlock()
 }
 
 func (s *Server) closeIdleConns() {
-	s.connsMu.Lock()
+	s.idleConnsMu.Lock()
 	for c := range s.idleConns {
 		c.Close()
-		s.setStateLocked(c, StateClosed)
 	}
-	s.connsMu.Unlock()
+	s.idleConns = nil
+	s.idleConnsMu.Unlock()
 }
 
 // A ConnState represents the state of a client connection to a server.
