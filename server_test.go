@@ -3371,13 +3371,13 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 	}
 	br := bufio.NewReader(conn)
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
-	
+
 	shutdownErr := make(chan error)
 	go func() {
 		shutdownErr <- s.Shutdown()
 	}()
 
-	timer := time.NewTimer(time.Second)	
+	timer := time.NewTimer(time.Second)
 	select {
 	case <-timer.C:
 		t.Fatal("idle connections not closed on shutdown")
