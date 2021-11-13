@@ -3369,25 +3369,23 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 		t.Errorf("unexpected error: %s", err)
 	}
-	time.Sleep(100 * time.Millisecond)
-
+	br := bufio.NewReader(conn)
+	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+	
 	shutdownErr := make(chan error)
 	go func() {
 		shutdownErr <- s.Shutdown()
 	}()
 
-	timer := time.NewTimer(time.Second)
+	timer := time.NewTimer(time.Second)	
 	select {
 	case <-timer.C:
-		t.Fatalf("idel connections don't close when shutdown")
+		t.Fatal("idle connections not closed on shutdown")
 	case err = <-shutdownErr:
 		if err != nil {
 			t.Errorf("unexepcted error: %s", err)
 		}
 	}
-
-	br := bufio.NewReader(conn)
-	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 }
 
 func TestMultipleServe(t *testing.T) {

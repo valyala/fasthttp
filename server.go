@@ -2818,7 +2818,7 @@ func (s *Server) trackConn(c net.Conn, state ConnState) {
 func (s *Server) closeIdleConns() {
 	s.idleConnsMu.Lock()
 	for c := range s.idleConns {
-		c.Close()
+		_ = c.Close()
 	}
 	s.idleConns = nil
 	s.idleConnsMu.Unlock()
