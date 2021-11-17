@@ -2302,8 +2302,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		if !ctx.IsGet() && ctx.IsHead() {
 			ctx.Response.SkipBody = true
 		}
-		reqReset = true
-		ctx.Request.Reset()
 
 		hijackHandler = ctx.hijackHandler
 		ctx.hijackHandler = nil
@@ -2403,6 +2401,9 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		s.setState(c, StateIdle)
 		ctx.userValues.Reset()
+
+		reqReset = true
+		ctx.Request.Reset()
 
 		if atomic.LoadInt32(&s.stop) == 1 {
 			err = nil
