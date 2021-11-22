@@ -2118,6 +2118,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			br, err = acquireByteReader(&ctx)
 		}
 
+		reqReset = false
 		ctx.Request.isTLS = isTLS
 		ctx.Response.Header.noDefaultContentType = s.NoDefaultContentType
 		ctx.Response.Header.noDefaultDate = s.NoDefaultDate

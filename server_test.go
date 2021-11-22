@@ -25,6 +25,15 @@ import (
 // Make sure RequestCtx implements context.Context
 var _ context.Context = &RequestCtx{}
 
+type closerWithRequestCtx struct {
+	ctx       *RequestCtx
+	closeFunc func(ctx *RequestCtx) error
+}
+
+func (c *closerWithRequestCtx) Close() error {
+	return c.closeFunc(c.ctx)
+}
+
 func TestServerCRNLAfterPost_Pipeline(t *testing.T) {
 	t.Parallel()
 
@@ -2029,6 +2038,43 @@ func TestRequestCtxWriteString(t *testing.T) {
 	s := ctx.Response.Body()
 	if string(s) != "fooпривет" {
 		t.Fatalf("unexpected response body %q. Expecting %q", s, "fooпривет")
+	}
+}
+
+func TestServeConnKeepRequestValuesUntilResetUserValues(t *testing.T) {
+	t.Parallel()
+
+	reqStr := "POST /foo HTTP/1.0\r\nHost: google.com\r\nContent-Type: application/octet-stream\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n"
+
+	rw := &readWriter{}
+	rw.r.WriteString(reqStr)
+
+	var resultReqStr string
+
+	ch := make(chan struct{})
+	go func() {
+		err := ServeConn(rw, func(ctx *RequestCtx) {
+			ctx.SetUserValue("myKey", &closerWithRequestCtx{
+				ctx: ctx,
+				closeFunc: func(closerCtx *RequestCtx) error {
+					resultReqStr = closerCtx.Request.String()
+					return nil
+				}})
+		})
+		if err != nil {
+			t.Errorf("unexpected error in ServeConn: %s", err)
+		}
+		close(ch)
+	}()
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+
+	if resultReqStr != reqStr {
+		t.Errorf("Request == %s, want %s", resultReqStr, reqStr)
 	}
 }
 
