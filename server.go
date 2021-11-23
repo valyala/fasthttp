@@ -2118,6 +2118,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			br, err = acquireByteReader(&ctx)
 		}
 
+		reqReset = false
 		ctx.Request.isTLS = isTLS
 		ctx.Response.Header.noDefaultContentType = s.NoDefaultContentType
 		ctx.Response.Header.noDefaultDate = s.NoDefaultDate
@@ -2302,8 +2303,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		if !ctx.IsGet() && ctx.IsHead() {
 			ctx.Response.SkipBody = true
 		}
-		reqReset = true
-		ctx.Request.Reset()
 
 		hijackHandler = ctx.hijackHandler
 		ctx.hijackHandler = nil
@@ -2403,6 +2402,9 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		s.setState(c, StateIdle)
 		ctx.userValues.Reset()
+
+		reqReset = true
+		ctx.Request.Reset()
 
 		if atomic.LoadInt32(&s.stop) == 1 {
 			err = nil
