@@ -36,8 +36,9 @@ const (
 	HeaderVary              = "Vary"
 
 	// Connection management
-	HeaderConnection = "Connection"
-	HeaderKeepAlive  = "Keep-Alive"
+	HeaderConnection      = "Connection"
+	HeaderKeepAlive       = "Keep-Alive"
+	HeaderProxyConnection = "Proxy-Connection"
 
 	// Content negotiation
 	HeaderAccept         = "Accept"

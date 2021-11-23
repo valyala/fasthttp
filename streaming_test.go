@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"sync"
 	"testing"
@@ -102,7 +103,7 @@ aaaaaaaaaa`
 
 func getChunkedTestEnv(t testing.TB) (*fasthttputil.InmemoryListener, []byte) {
 	body := createFixedBody(128 * 1024)
-	chunkedBody := createChunkedBody(body)
+	chunkedBody := createChunkedBody(body, nil, true)
 
 	testHandler := func(ctx *RequestCtx) {
 		bodyBytes, err := ioutil.ReadAll(ctx.RequestBodyStream())
@@ -140,6 +141,70 @@ func getChunkedTestEnv(t testing.TB) (*fasthttputil.InmemoryListener, []byte) {
 	formattedRequest = append(formattedRequest, chunkedBody...)
 
 	return ln, formattedRequest
+}
+
+func TestRequestStreamChunkedWithTrailer(t *testing.T) {
+	t.Parallel()
+
+	body := createFixedBody(10)
+	expectedTrailer := map[string]string{
+		"Foo": "footest",
+		"Bar": "bartest",
+	}
+	chunkedBody := createChunkedBody(body, expectedTrailer, true)
+	req := fmt.Sprintf(`POST / HTTP/1.1
+Host: example.com
+Transfer-Encoding: chunked
+Trailer: Foo, Bar
+
+%s
+`, chunkedBody)
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *RequestCtx) {
+			all, err := ioutil.ReadAll(ctx.RequestBodyStream())
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
+			if !bytes.Equal(all, body) {
+				t.Fatalf("unexpected body %q. Expecting %q", all, body)
+			}
+
+			for k, v := range expectedTrailer {
+				r := ctx.Request.Header.Peek(k)
+				if string(r) != v {
+					t.Fatalf("unexpected trailer %s. Expecting %s. Got %q", k, v, r)
+				}
+			}
+		},
+	}
+
+	ch := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %s", err)
+		}
+		close(ch)
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if _, err = conn.Write([]byte(req)); err != nil {
+		t.Fatalf("unexpected error: %s", err)
+	}
+	if err := ln.Close(); err != nil {
+		t.Fatalf("error when closing listener: %s", err)
+	}
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("timeout when waiting for the server to stop")
+	}
 }
 
 func TestRequestStream(t *testing.T) {
