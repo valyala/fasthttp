@@ -581,7 +581,7 @@ func TestRequestUpdateURI(t *testing.T) {
 	// the requestURI and Host header are properly updated
 	u := r.URI()
 	u.SetPath("/123/432.html")
-	u.SetHost("foobar.com")
+	u.SetHost("foobar.com") // It will not take effect, because the header of r has set the Host.
 	a := u.QueryArgs()
 	a.Set("aaa", "bcse")
 
@@ -589,6 +589,13 @@ func TestRequestUpdateURI(t *testing.T) {
 	if !strings.HasPrefix(s, "GET /123/432.html?aaa=bcse") {
 		t.Fatalf("cannot find %q in %q", "GET /123/432.html?aaa=bcse", s)
 	}
+	if !strings.Contains(s, "\r\nHost: aaa.bbb\r\n") {
+		t.Fatalf("cannot find %q in %q", "\r\nHost: foobar.com\r\n", s)
+	}
+
+	// Now there is no Host in the header of r, use the host in the url
+	r.Header.SetHost("")
+	s = r.String()
 	if !strings.Contains(s, "\r\nHost: foobar.com\r\n") {
 		t.Fatalf("cannot find %q in %q", "\r\nHost: foobar.com\r\n", s)
 	}
