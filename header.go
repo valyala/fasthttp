@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -385,29 +384,80 @@ func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
 	h.SetContentTypeBytes(h.bufKV.value)
 }
 
-// SetTrailer sets header Trailer value chunked response.
+// SetTrailer sets header Trailer value for chunked response
+// to indicate which headers will be sent after the body.
+//
+// Use Set to set the trailer header later.
+//
+// Trailers are only supported with chunked transfer.
+// Trailers allow the sender to include additional headers at the end of chunked messages.
+//
+// The following trailers are forbidden:
+// 1. necessary for message framing (e.g., Transfer-Encoding and Content-Length),
+// 2. routing (e.g., Host),
+// 3. request modifiers (e.g., controls and conditionals in Section 5 of [RFC7231]),
+// 4. authentication (e.g., see [RFC7235] and [RFC6265]),
+// 5. response control data (e.g., see Section 7.1 of [RFC7231]),
+// 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 func (h *ResponseHeader) SetTrailer(trailer string) {
-	for i := -1; i+1 < len(trailer); {
-		trailer = trailer[i+1:]
-		i = strings.IndexByte(trailer, ',')
-		if i < 0 {
-			i = len(trailer)
-		}
-		key := trailer[:i]
-		for len(key) > 0 && key[0] == ' ' {
-			key = key[1:]
-		}
-		for len(key) > 0 && key[len(key)-1] == ' ' {
-			key = key[:len(key)-1]
-		}
-		h.bufKV.key = append(h.bufKV.key[:0], key...)
-		normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-		h.trailer = setArgBytes(h.trailer, h.bufKV.key, nil, argsNoValue)
-	}
+	h.SetTrailerBytes(s2b(trailer))
 }
 
-// SetTrailerBytes sets Trailer header value for chunked response.
+// SetTrailerBytes sets Trailer header value for chunked response
+// to indicate which headers will be sent after the body.
+//
+// Use Set to set the trailer header later.
+//
+// Trailers are only supported with chunked transfer.
+// Trailers allow the sender to include additional headers at the end of chunked messages.
+//
+// The following trailers are forbidden:
+// 1. necessary for message framing (e.g., Transfer-Encoding and Content-Length),
+// 2. routing (e.g., Host),
+// 3. request modifiers (e.g., controls and conditionals in Section 5 of [RFC7231]),
+// 4. authentication (e.g., see [RFC7235] and [RFC6265]),
+// 5. response control data (e.g., see Section 7.1 of [RFC7231]),
+// 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 func (h *ResponseHeader) SetTrailerBytes(trailer []byte) {
+	h.trailer = h.trailer[:0]
+	h.AddTrailerBytes(trailer)
+}
+
+// AddTrailer add Trailer header value for chunked response
+// to indicate which headers will be sent after the body.
+//
+// Use Set to set the trailer header later.
+//
+// Trailers are only supported with chunked transfer.
+// Trailers allow the sender to include additional headers at the end of chunked messages.
+//
+// The following trailers are forbidden:
+// 1. necessary for message framing (e.g., Transfer-Encoding and Content-Length),
+// 2. routing (e.g., Host),
+// 3. request modifiers (e.g., controls and conditionals in Section 5 of [RFC7231]),
+// 4. authentication (e.g., see [RFC7235] and [RFC6265]),
+// 5. response control data (e.g., see Section 7.1 of [RFC7231]),
+// 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
+func (h *ResponseHeader) AddTrailer(trailer string) {
+	h.AddTrailerBytes(s2b(trailer))
+}
+
+// AddTrailerBytes add Trailer header value for chunked response
+// to indicate which headers will be sent after the body.
+//
+// Use Set to set the trailer header later.
+//
+// Trailers are only supported with chunked transfer.
+// Trailers allow the sender to include additional headers at the end of chunked messages.
+//
+// The following trailers are forbidden:
+// 1. necessary for message framing (e.g., Transfer-Encoding and Content-Length),
+// 2. routing (e.g., Host),
+// 3. request modifiers (e.g., controls and conditionals in Section 5 of [RFC7231]),
+// 4. authentication (e.g., see [RFC7235] and [RFC6265]),
+// 5. response control data (e.g., see Section 7.1 of [RFC7231]),
+// 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
+func (h *ResponseHeader) AddTrailerBytes(trailer []byte) {
 	for i := -1; i+1 < len(trailer); {
 		trailer = trailer[i+1:]
 		i = bytes.IndexByte(trailer, ',')
@@ -421,9 +471,12 @@ func (h *ResponseHeader) SetTrailerBytes(trailer []byte) {
 		for len(key) > 0 && key[len(key)-1] == ' ' {
 			key = key[:len(key)-1]
 		}
+		if isBadTrailer(key) {
+			continue
+		}
 		h.bufKV.key = append(h.bufKV.key[:0], key...)
 		normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-		h.trailer = setArgBytes(h.trailer, h.bufKV.key, nil, argsNoValue)
+		h.trailer = appendArgBytes(h.trailer, h.bufKV.key, nil, argsNoValue)
 	}
 }
 
@@ -575,29 +628,80 @@ func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
 	h.requestURI = append(h.requestURI[:0], requestURI...)
 }
 
-// SetTrailer sets Trailer header value for chunked request.
+// SetTrailer sets Trailer header value for chunked request
+// to indicate which headers will be sent after the body.
+//
+// Use Set to set the trailer header later.
+//
+// Trailers are only supported with chunked transfer.
+// Trailers allow the sender to include additional headers at the end of chunked messages.
+//
+// The following trailers are forbidden:
+// 1. necessary for message framing (e.g., Transfer-Encoding and Content-Length),
+// 2. routing (e.g., Host),
+// 3. request modifiers (e.g., controls and conditionals in Section 5 of [RFC7231]),
+// 4. authentication (e.g., see [RFC7235] and [RFC6265]),
+// 5. response control data (e.g., see Section 7.1 of [RFC7231]),
+// 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 func (h *RequestHeader) SetTrailer(trailer string) {
-	for i := -1; i+1 < len(trailer); {
-		trailer = trailer[i+1:]
-		i = strings.IndexByte(trailer, ',')
-		if i < 0 {
-			i = len(trailer)
-		}
-		key := trailer[:i]
-		for len(key) > 0 && key[0] == ' ' {
-			key = key[1:]
-		}
-		for len(key) > 0 && key[len(key)-1] == ' ' {
-			key = key[:len(key)-1]
-		}
-		h.bufKV.key = append(h.bufKV.key[:0], key...)
-		normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-		h.trailer = setArgBytes(h.trailer, h.bufKV.key, nil, argsNoValue)
-	}
+	h.SetTrailerBytes(s2b(trailer))
 }
 
-// SetTrailerBytes sets Trailer header value for chunked request.
+// SetTrailerBytes sets Trailer header value for chunked request
+// to indicate which headers will be sent after the body.
+//
+// Use Set to set the trailer header later.
+//
+// Trailers are only supported with chunked transfer.
+// Trailers allow the sender to include additional headers at the end of chunked messages.
+//
+// The following trailers are forbidden:
+// 1. necessary for message framing (e.g., Transfer-Encoding and Content-Length),
+// 2. routing (e.g., Host),
+// 3. request modifiers (e.g., controls and conditionals in Section 5 of [RFC7231]),
+// 4. authentication (e.g., see [RFC7235] and [RFC6265]),
+// 5. response control data (e.g., see Section 7.1 of [RFC7231]),
+// 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 func (h *RequestHeader) SetTrailerBytes(trailer []byte) {
+	h.trailer = h.trailer[:0]
+	h.AddTrailerBytes(trailer)
+}
+
+// AddTrailer add Trailer header value for chunked request
+// to indicate which headers will be sent after the body.
+//
+// Use Set to set the trailer header later.
+//
+// Trailers are only supported with chunked transfer.
+// Trailers allow the sender to include additional headers at the end of chunked messages.
+//
+// The following trailers are forbidden:
+// 1. necessary for message framing (e.g., Transfer-Encoding and Content-Length),
+// 2. routing (e.g., Host),
+// 3. request modifiers (e.g., controls and conditionals in Section 5 of [RFC7231]),
+// 4. authentication (e.g., see [RFC7235] and [RFC6265]),
+// 5. response control data (e.g., see Section 7.1 of [RFC7231]),
+// 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
+func (h *RequestHeader) AddTrailer(trailer string) {
+	h.AddTrailerBytes(s2b(trailer))
+}
+
+// AddTrailerBytes add Trailer header value for chunked request
+// to indicate which headers will be sent after the body.
+//
+// Use Set to set the trailer header later.
+//
+// Trailers are only supported with chunked transfer.
+// Trailers allow the sender to include additional headers at the end of chunked messages.
+//
+// The following trailers are forbidden:
+// 1. necessary for message framing (e.g., Transfer-Encoding and Content-Length),
+// 2. routing (e.g., Host),
+// 3. request modifiers (e.g., controls and conditionals in Section 5 of [RFC7231]),
+// 4. authentication (e.g., see [RFC7235] and [RFC6265]),
+// 5. response control data (e.g., see Section 7.1 of [RFC7231]),
+// 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
+func (h *RequestHeader) AddTrailerBytes(trailer []byte) {
 	for i := -1; i+1 < len(trailer); {
 		trailer = trailer[i+1:]
 		i = bytes.IndexByte(trailer, ',')
@@ -611,9 +715,13 @@ func (h *RequestHeader) SetTrailerBytes(trailer []byte) {
 		for len(key) > 0 && key[len(key)-1] == ' ' {
 			key = key[:len(key)-1]
 		}
+		// Forbidden by RFC 7230, section 4.1.2
+		if isBadTrailer(key) {
+			continue
+		}
 		h.bufKV.key = append(h.bufKV.key[:0], key...)
 		normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-		h.trailer = setArgBytes(h.trailer, h.bufKV.key, nil, argsNoValue)
+		h.trailer = appendArgBytes(h.trailer, h.bufKV.key, nil, argsNoValue)
 	}
 }
 
@@ -904,7 +1012,7 @@ func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
 	}
 	if len(h.trailer) > 0 {
 		visitArgs(h.trailer, func(k, v []byte) {
-			f(strTrailer, k)
+			f(strTrailer, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
 		})
 	}
 	visitArgs(h.h, f)
@@ -970,7 +1078,7 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 	}
 	if len(h.trailer) > 0 {
 		visitArgs(h.trailer, func(k, v []byte) {
-			f(strTrailer, k)
+			f(strTrailer, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
 		})
 	}
 
@@ -1188,7 +1296,7 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 // Transfer-Encoding and Date headers can only be set once and will
 // overwrite the previous value.
 //
-// If the header is in Trailer, it will send after the chunked response body.
+// If the header is set as a Trailer, it will be sent after the chunked response body.
 func (h *ResponseHeader) Add(key, value string) {
 	h.AddBytesKV(s2b(key), s2b(value))
 }
@@ -1202,7 +1310,7 @@ func (h *ResponseHeader) Add(key, value string) {
 // Transfer-Encoding and Date headers can only be set once and will
 // overwrite the previous value.
 //
-// If the header is in Trailer, it will send after the chunked response body.
+// If the header is set as a Trailer, it will be sent after the chunked response body.
 func (h *ResponseHeader) AddBytesK(key []byte, value string) {
 	h.AddBytesKV(key, s2b(value))
 }
@@ -1216,7 +1324,7 @@ func (h *ResponseHeader) AddBytesK(key []byte, value string) {
 // Transfer-Encoding and Date headers can only be set once and will
 // overwrite the previous value.
 //
-// If the header is in Trailer, it will send after the chunked response body.
+// If the header is set as a Trailer, it will be sent after the chunked response body.
 func (h *ResponseHeader) AddBytesV(key string, value []byte) {
 	h.AddBytesKV(s2b(key), value)
 }
@@ -1230,7 +1338,7 @@ func (h *ResponseHeader) AddBytesV(key string, value []byte) {
 // Transfer-Encoding and Date headers can only be set once and will
 // overwrite the previous value.
 //
-// If the header is in Trailer, it will send after the chunked response body.
+// If the header is set as a Trailer, it will be sent after the chunked response body.
 func (h *ResponseHeader) AddBytesKV(key, value []byte) {
 	if h.setSpecialHeader(key, value) {
 		return
@@ -1242,7 +1350,7 @@ func (h *ResponseHeader) AddBytesKV(key, value []byte) {
 
 // Set sets the given 'key: value' header.
 //
-// If the header is in Trailer, it will send after the chunked response body.
+// If the header is set as a Trailer, it will be sent after the chunked response body.
 //
 // Use Add for setting multiple header values under the same key.
 func (h *ResponseHeader) Set(key, value string) {
@@ -1252,7 +1360,7 @@ func (h *ResponseHeader) Set(key, value string) {
 
 // SetBytesK sets the given 'key: value' header.
 //
-// If the header is in Trailer, it will send after the chunked response body.
+// If the header is set as a Trailer, it will be sent after the chunked response body.
 //
 // Use AddBytesK for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesK(key []byte, value string) {
@@ -1262,7 +1370,7 @@ func (h *ResponseHeader) SetBytesK(key []byte, value string) {
 
 // SetBytesV sets the given 'key: value' header.
 //
-// If the header is in Trailer, it will send after the chunked response body.
+// If the header is set as a Trailer, it will be sent after the chunked response body.
 //
 // Use AddBytesV for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesV(key string, value []byte) {
@@ -1272,7 +1380,7 @@ func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 
 // SetBytesKV sets the given 'key: value' header.
 //
-// If the header is in Trailer, it will send after the chunked response body.
+// If the header is set as a Trailer, it will be sent after the chunked response body.
 //
 // Use AddBytesKV for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesKV(key, value []byte) {
@@ -1284,7 +1392,7 @@ func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 // SetCanonical sets the given 'key: value' header assuming that
 // key is in canonical form.
 //
-// If the header is in Trailer, it will send after the chunked response body.
+// If the header is set as a Trailer, it will be sent after the chunked response body.
 func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	if h.setSpecialHeader(key, value) {
 		return
@@ -1399,7 +1507,7 @@ func (h *RequestHeader) DelAllCookies() {
 // Multiple headers with the same key may be added with this function.
 // Use Set for setting a single header for the given key.
 //
-// If the header is in Trailer, it will send after the chunked request body.
+// If the header is set as a Trailer, it will be sent after the chunked request body.
 func (h *RequestHeader) Add(key, value string) {
 	h.AddBytesKV(s2b(key), s2b(value))
 }
@@ -1409,7 +1517,7 @@ func (h *RequestHeader) Add(key, value string) {
 // Multiple headers with the same key may be added with this function.
 // Use SetBytesK for setting a single header for the given key.
 //
-// If the header is in Trailer, it will send after the chunked request body.
+// If the header is set as a Trailer, it will be sent after the chunked request body.
 func (h *RequestHeader) AddBytesK(key []byte, value string) {
 	h.AddBytesKV(key, s2b(value))
 }
@@ -1419,7 +1527,7 @@ func (h *RequestHeader) AddBytesK(key []byte, value string) {
 // Multiple headers with the same key may be added with this function.
 // Use SetBytesV for setting a single header for the given key.
 //
-// If the header is in Trailer, it will send after the chunked request body.
+// If the header is set as a Trailer, it will be sent after the chunked request body.
 func (h *RequestHeader) AddBytesV(key string, value []byte) {
 	h.AddBytesKV(s2b(key), value)
 }
@@ -1433,7 +1541,7 @@ func (h *RequestHeader) AddBytesV(key string, value []byte) {
 // Transfer-Encoding, Host and User-Agent headers can only be set once
 // and will overwrite the previous value.
 //
-// If the header is in Trailer, it will send after the chunked request body.
+// If the header is set as a Trailer, it will be sent after the chunked request body.
 func (h *RequestHeader) AddBytesKV(key, value []byte) {
 	if h.setSpecialHeader(key, value) {
 		return
@@ -1445,7 +1553,7 @@ func (h *RequestHeader) AddBytesKV(key, value []byte) {
 
 // Set sets the given 'key: value' header.
 //
-// If the header is in Trailer, it will send after the chunked request body.
+// If the header is set as a Trailer, it will be sent after the chunked request body.
 //
 // Use Add for setting multiple header values under the same key.
 func (h *RequestHeader) Set(key, value string) {
@@ -1455,7 +1563,7 @@ func (h *RequestHeader) Set(key, value string) {
 
 // SetBytesK sets the given 'key: value' header.
 //
-// If the header is in Trailer, it will send after the chunked request body.
+// If the header is set as a Trailer, it will be sent after the chunked request body.
 //
 // Use AddBytesK for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesK(key []byte, value string) {
@@ -1465,7 +1573,7 @@ func (h *RequestHeader) SetBytesK(key []byte, value string) {
 
 // SetBytesV sets the given 'key: value' header.
 //
-// If the header is in Trailer, it will send after the chunked request body.
+// If the header is set as a Trailer, it will be sent after the chunked request body.
 //
 // Use AddBytesV for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesV(key string, value []byte) {
@@ -1475,7 +1583,7 @@ func (h *RequestHeader) SetBytesV(key string, value []byte) {
 
 // SetBytesKV sets the given 'key: value' header.
 //
-// If the header is in Trailer, it will send after the chunked request body.
+// If the header is set as a Trailer, it will be sent after the chunked request body.
 //
 // Use AddBytesKV for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesKV(key, value []byte) {
@@ -1487,7 +1595,7 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 // SetCanonical sets the given 'key: value' header assuming that
 // key is in canonical form.
 //
-// If the header is in Trailer, it will send after the chunked request body.
+// If the header is set as a Trailer, it will be sent after the chunked request body.
 func (h *RequestHeader) SetCanonical(key, value []byte) {
 	if h.setSpecialHeader(key, value) {
 		return
@@ -1925,6 +2033,8 @@ func (h *ResponseHeader) WriteTo(w io.Writer) (int64, error) {
 
 // Header returns response header representation.
 //
+// Headers that set as Trailer will not represent. Use TrailerHeader for trailers.
+//
 // The returned value is valid until the request is released,
 // either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
@@ -1941,6 +2051,8 @@ func (h *ResponseHeader) writeTrailer(w *bufio.Writer) error {
 
 // TrailerHeader returns response trailer header representation.
 //
+// Trailers will only be received with chunked transfer.
+//
 // The returned value is valid until the request is released,
 // either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
@@ -1950,7 +2062,8 @@ func (h *ResponseHeader) TrailerHeader() []byte {
 		value := h.peek(t.key)
 		h.bufKV.value = appendHeaderLine(h.bufKV.value, t.key, value)
 	}
-	return append(h.bufKV.value, strCRLF...)
+	h.bufKV.value = append(h.bufKV.value, strCRLF...)
+	return h.bufKV.value
 }
 
 // String returns response header representation.
@@ -2048,7 +2161,7 @@ func (h *RequestHeader) WriteTo(w io.Writer) (int64, error) {
 
 // Header returns request header representation.
 //
-// Header that set in Trailer will not represent. Use TrailerHeader for trailer.
+// Headers that set as Trailer will not represent. Use TrailerHeader for trailers.
 //
 // The returned value is valid until the request is released,
 // either though ReleaseRequest or your request handler returning.
@@ -2066,7 +2179,7 @@ func (h *RequestHeader) writeTrailer(w *bufio.Writer) error {
 
 // TrailerHeader returns request trailer header representation.
 //
-// Header that set in Trailer will not represent. Use TrailerHeader for trailer.
+// Trailers will only be received with chunked transfer.
 //
 // The returned value is valid until the request is released,
 // either though ReleaseRequest or your request handler returning.
@@ -2077,7 +2190,8 @@ func (h *RequestHeader) TrailerHeader() []byte {
 		value := h.peek(t.key)
 		h.bufKV.value = appendHeaderLine(h.bufKV.value, t.key, value)
 	}
-	return append(h.bufKV.value, strCRLF...)
+	h.bufKV.value = append(h.bufKV.value, strCRLF...)
+	return h.bufKV.value
 }
 
 // RawHeaders returns raw header key/value bytes.

@@ -176,7 +176,7 @@ func testRequestBodyStreamWithTrailer(t *testing.T, body []byte, disableNormaliz
 	req1.SetHost("google.com")
 	req1.SetBodyStream(bytes.NewBuffer(body), -1)
 	for k, v := range expectedTrailer {
-		req1.Header.SetTrailer(k)
+		req1.Header.AddTrailer(k)
 		req1.Header.Set(k, v)
 	}
 
@@ -230,7 +230,7 @@ func testResponseBodyStreamWithTrailer(t *testing.T, body []byte, disableNormali
 	resp1.Header.disableNormalizing = disableNormalizing
 	resp1.SetBodyStream(bytes.NewReader(body), -1)
 	for k, v := range expectedTrailer {
-		resp1.Header.SetTrailer(k)
+		resp1.Header.AddTrailer(k)
 		resp1.Header.Set(k, v)
 	}
 
@@ -1690,7 +1690,7 @@ func testSetRequestBodyStreamChunked(t *testing.T, body string, trailer map[stri
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
 	for k := range trailer {
-		req.Header.SetTrailer(k)
+		req.Header.AddTrailer(k)
 	}
 	if err := req.Write(bw); err != nil {
 		t.Fatalf("unexpected error when writing request: %s. body=%q", err, body)
@@ -1761,7 +1761,7 @@ func testSetResponseBodyStreamChunked(t *testing.T, body string, trailer map[str
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
 	for k := range trailer {
-		resp.Header.SetTrailer(k)
+		resp.Header.AddTrailer(k)
 	}
 	if err := resp.Write(bw); err != nil {
 		t.Fatalf("unexpected error when writing response: %s. body=%q", err, body)
@@ -1858,7 +1858,7 @@ func TestResponseReadWithoutBody(t *testing.T) {
 		304, 1235, "aa", nil)
 
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 204 Foo Bar\r\nContent-Type: aab\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nFoo: bar\r\n\r\n", false,
-		204, -1, "aab", map[string]string{"Foo":"bar"})
+		204, -1, "aab", map[string]string{"Foo": "bar"})
 
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 123 AAA\r\nContent-Type: xxx\r\nContent-Length: 3434\r\n\r\n", false,
 		123, 3434, "xxx", nil)
@@ -2062,6 +2062,8 @@ func TestResponseReadSuccess(t *testing.T) {
 	t.Parallel()
 
 	resp := &Response{}
+	resp.Header.SetTrailer("Foo")
+	resp.Header.Set("Foo", "bar")
 
 	// usual response
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nContent-Type: foo/bar\r\n\r\n0123456789",
@@ -2073,12 +2075,12 @@ func TestResponseReadSuccess(t *testing.T) {
 
 	// response with trailer
 	testResponseReadSuccess(t, resp, "HTTP/1.1 300 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: bar\r\n\r\n5\r\n56789\r\n0\r\nfoo: bar\r\n\r\n",
-		300, -1, "bar", "56789", map[string]string{"Foo":"bar"})
+		300, -1, "bar", "56789", map[string]string{"Foo": "bar"})
 
 	// response with trailer disableNormalizing
 	resp.Header.DisableNormalizing()
 	testResponseReadSuccess(t, resp, "HTTP/1.1 300 OK\r\nTransfer-Encoding: chunked\r\nContent-Type: bar\r\n\r\n5\r\n56789\r\n0\r\nfoo: bar\r\n\r\n",
-		300, -1, "bar", "56789", map[string]string{"foo":"bar"})
+		300, -1, "bar", "56789", map[string]string{"foo": "bar"})
 
 	// no content-length ('identity' transfer-encoding)
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: foobar\r\n\r\nzxxxx",
@@ -2095,23 +2097,23 @@ func TestResponseReadSuccess(t *testing.T) {
 
 	// chunked response
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nqwer\r\n2\r\nty\r\n0\r\nFoo2: bar2\r\n\r\n",
-		200, -1, "text/html", "qwerty", map[string]string{"Foo2":"bar2"})
+		200, -1, "text/html", "qwerty", map[string]string{"Foo2": "bar2"})
 
 	// chunked response with non-chunked Transfer-Encoding.
 	testResponseReadSuccess(t, resp, "HTTP/1.1 230 OK\r\nContent-Type: text\r\nTransfer-Encoding: aaabbb\r\n\r\n2\r\ner\r\n2\r\nty\r\n0\r\nFoo3: bar3\r\n\r\n",
-		230, -1, "text", "erty", map[string]string{"Foo3":"bar3"})
+		230, -1, "text", "erty", map[string]string{"Foo3": "bar3"})
 
 	// chunked response with content-length
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: foo/bar\r\nContent-Length: 123\r\nTransfer-Encoding: chunked\r\n\r\n4\r\ntest\r\n0\r\nFoo4:bar4\r\n\r\n",
-		200, -1, "foo/bar", "test", map[string]string{"Foo4":"bar4"})
+		200, -1, "foo/bar", "test", map[string]string{"Foo4": "bar4"})
 
 	// chunked response with empty body
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nFoo5: bar5\r\n\r\n",
-		200, -1, "text/html", "", map[string]string{"Foo5":"bar5"})
+		200, -1, "text/html", "", map[string]string{"Foo5": "bar5"})
 
 	// chunked response with chunk extension
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n3;ext\r\naaa\r\n0\r\nFoo6: bar6\r\n\r\n",
-		200, -1, "text/html", "aaa", map[string]string{"Foo6":"bar6"})
+		200, -1, "text/html", "aaa", map[string]string{"Foo6": "bar6"})
 
 }
 
@@ -2321,7 +2323,7 @@ func testRequestPostArgsSuccess(t *testing.T, req *Request, s string, expectedAr
 
 func testReadBodyChunked(t *testing.T, bodySize int) {
 	body := createFixedBody(bodySize)
-	expectedTrailer := map[string]string{"Foo":"bar"}
+	expectedTrailer := map[string]string{"Foo": "bar"}
 	chunkedBody := createChunkedBody(body, expectedTrailer, true)
 
 	r := bytes.NewBuffer(chunkedBody)

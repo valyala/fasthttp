@@ -1496,7 +1496,7 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 	}
 	contentLengthCount := 0
 	contentTypeCount := 0
-	cookieCount, trailerCount := 0, 0
+	cookieCount := 0
 	h.VisitAll(func(key, value []byte) {
 		k := string(key)
 		v := string(value)
@@ -1520,13 +1520,9 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 			}
 			cookieCount++
 		case HeaderTrailer:
-			if trailerCount == 0 && v != "Foo" {
-				t.Fatalf("unexpected trailer header: %q. Expected %q", v, "Foo")
+			if v != "Foo, Bar" {
+				t.Fatalf("Unexpected trailer header %q. Expected %q", v, "Foo, Bar")
 			}
-			if trailerCount == 1 && v != "Bar" {
-				t.Fatalf("unexpected trailer header: %q. Expected %q", v, "Bar")
-			}
-			trailerCount++
 		default:
 			t.Fatalf("unexpected header %q=%q", k, v)
 		}
@@ -1558,7 +1554,7 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 	}
 	hostCount := 0
 	xxCount := 0
-	cookieCount, trailerCount := 0, 0
+	cookieCount := 0
 	h.VisitAll(func(key, value []byte) {
 		k := string(key)
 		v := string(value)
@@ -1582,13 +1578,9 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 			}
 			cookieCount++
 		case HeaderTrailer:
-			if trailerCount == 0 && v != "Foo" {
-				t.Fatalf("unexpected trailer header: %q. Expected %q", v, "Foo")
+			if v != "Foo, Bar" {
+				t.Fatalf("Unexpected trailer header %q. Expected %q", v, "Foo, Bar")
 			}
-			if trailerCount == 1 && v != "Bar" {
-				t.Fatalf("unexpected trailer header: %q. Expected %q", v, "Bar")
-			}
-			trailerCount++
 		default:
 			t.Fatalf("Unexpected header %q=%q", k, v)
 		}
