@@ -2062,8 +2062,6 @@ func TestResponseReadSuccess(t *testing.T) {
 	t.Parallel()
 
 	resp := &Response{}
-	resp.Header.SetTrailer("Foo")
-	resp.Header.Set("Foo", "bar")
 
 	// usual response
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nContent-Type: foo/bar\r\n\r\n0123456789",
