@@ -400,7 +400,7 @@ func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
 // 5. response control data (e.g., see Section 7.1 of [RFC7231]),
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
-// Return an error indicating which trailers are forbidden.
+// Return ErrBadTrailer if contain any forbidden trailers.
 func (h *ResponseHeader) SetTrailer(trailer string) error {
 	return h.SetTrailerBytes(s2b(trailer))
 }
@@ -421,7 +421,7 @@ func (h *ResponseHeader) SetTrailer(trailer string) error {
 // 5. response control data (e.g., see Section 7.1 of [RFC7231]),
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
-// Return an error indicating which trailers are forbidden.
+// Return ErrBadTrailer if contain any forbidden trailers.
 func (h *ResponseHeader) SetTrailerBytes(trailer []byte) error {
 	h.trailer = h.trailer[:0]
 	return h.AddTrailerBytes(trailer)
@@ -443,10 +443,12 @@ func (h *ResponseHeader) SetTrailerBytes(trailer []byte) error {
 // 5. response control data (e.g., see Section 7.1 of [RFC7231]),
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
-// Return an error indicating which trailers are forbidden.
+// Return ErrBadTrailer if contain any forbidden trailers.
 func (h *ResponseHeader) AddTrailer(trailer string) error {
 	return h.AddTrailerBytes(s2b(trailer))
 }
+
+var ErrBadTrailer = errors.New("contain forbidden trailer")
 
 // AddTrailerBytes add Trailer header value for chunked response
 // to indicate which headers will be sent after the body.
@@ -464,9 +466,9 @@ func (h *ResponseHeader) AddTrailer(trailer string) error {
 // 5. response control data (e.g., see Section 7.1 of [RFC7231]),
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
-// Return an error indicating which trailers are forbidden.
+// Return ErrBadTrailer if contain any forbidden trailers.
 func (h *ResponseHeader) AddTrailerBytes(trailer []byte) error {
-	var badTrailers []byte
+	var err error
 	for i := -1; i+1 < len(trailer); {
 		trailer = trailer[i+1:]
 		i = bytes.IndexByte(trailer, ',')
@@ -482,8 +484,7 @@ func (h *ResponseHeader) AddTrailerBytes(trailer []byte) error {
 		}
 		// Forbidden by RFC 7230, section 4.1.2
 		if isBadTrailer(key) {
-			badTrailers = append(badTrailers, key...)
-			badTrailers = append(badTrailers, strCommaSpace...)
+			err = ErrBadTrailer
 			continue
 		}
 		h.bufKV.key = append(h.bufKV.key[:0], key...)
@@ -491,10 +492,7 @@ func (h *ResponseHeader) AddTrailerBytes(trailer []byte) error {
 		h.trailer = appendArgBytes(h.trailer, h.bufKV.key, nil, argsNoValue)
 	}
 
-	if len(badTrailers) > 0 {
-		return fmt.Errorf("forbidden trailers: %s", badTrailers[:len(badTrailers)-len(strCommaSpace)])
-	}
-	return nil
+	return err
 }
 
 // MultipartFormBoundary returns boundary part
@@ -661,7 +659,7 @@ func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
 // 5. response control data (e.g., see Section 7.1 of [RFC7231]),
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
-// Return an error indicating which trailers are forbidden.
+// Return ErrBadTrailer if contain any forbidden trailers.
 func (h *RequestHeader) SetTrailer(trailer string) error {
 	return h.SetTrailerBytes(s2b(trailer))
 }
@@ -682,7 +680,7 @@ func (h *RequestHeader) SetTrailer(trailer string) error {
 // 5. response control data (e.g., see Section 7.1 of [RFC7231]),
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
-// Return an error indicating which trailers are forbidden.
+// Return ErrBadTrailer if contain any forbidden trailers.
 func (h *RequestHeader) SetTrailerBytes(trailer []byte) error {
 	h.trailer = h.trailer[:0]
 	return h.AddTrailerBytes(trailer)
@@ -704,7 +702,7 @@ func (h *RequestHeader) SetTrailerBytes(trailer []byte) error {
 // 5. response control data (e.g., see Section 7.1 of [RFC7231]),
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
-// Return an error indicating which trailers are forbidden.
+// Return ErrBadTrailer if contain any forbidden trailers.
 func (h *RequestHeader) AddTrailer(trailer string) error {
 	return h.AddTrailerBytes(s2b(trailer))
 }
@@ -725,9 +723,9 @@ func (h *RequestHeader) AddTrailer(trailer string) error {
 // 5. response control data (e.g., see Section 7.1 of [RFC7231]),
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
-// Return an error indicating which trailers are forbidden.
+// Return ErrBadTrailer if contain any forbidden trailers.
 func (h *RequestHeader) AddTrailerBytes(trailer []byte) error {
-	var badTrailers []byte
+	var err error
 	for i := -1; i+1 < len(trailer); {
 		trailer = trailer[i+1:]
 		i = bytes.IndexByte(trailer, ',')
@@ -743,8 +741,7 @@ func (h *RequestHeader) AddTrailerBytes(trailer []byte) error {
 		}
 		// Forbidden by RFC 7230, section 4.1.2
 		if isBadTrailer(key) {
-			badTrailers = append(badTrailers, key...)
-			badTrailers = append(badTrailers, strCommaSpace...)
+			err = ErrBadTrailer
 			continue
 		}
 		h.bufKV.key = append(h.bufKV.key[:0], key...)
@@ -752,10 +749,7 @@ func (h *RequestHeader) AddTrailerBytes(trailer []byte) error {
 		h.trailer = appendArgBytes(h.trailer, h.bufKV.key, nil, argsNoValue)
 	}
 
-	if len(badTrailers) > 0 {
-		return fmt.Errorf("forbidden trailers: %s", badTrailers[:len(badTrailers)-len(strCommaSpace)])
-	}
-	return nil
+	return err
 }
 
 // IsGet returns true if request method is GET.
@@ -2638,7 +2632,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					continue
 				}
 				if caseInsensitiveCompare(s.key, strTrailer) {
-					_ = h.SetTrailerBytes(s.value)
+					err = h.SetTrailerBytes(s.value)
 					continue
 				}
 			}
@@ -2663,7 +2657,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
 	}
 
-	return len(buf) - len(s.b), nil
+	return len(buf) - len(s.b), err
 }
 
 func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
@@ -2730,7 +2724,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 					continue
 				}
 				if caseInsensitiveCompare(s.key, strTrailer) {
-					_ = h.SetTrailerBytes(s.value)
+					err = h.SetTrailerBytes(s.value)
 					continue
 				}
 			}
@@ -2776,13 +2770,15 @@ func (h *RequestHeader) collectCookies() {
 	h.cookiesCollected = true
 }
 
+var errNonNumericChars = errors.New("non-numeric chars at the end of Content-Length")
+
 func parseContentLength(b []byte) (int, error) {
 	v, n, err := parseUintBuf(b)
 	if err != nil {
-		return -1, err
+		return -1, fmt.Errorf("cannot parse Content-Length: %s", err)
 	}
 	if n != len(b) {
-		return -1, fmt.Errorf("non-numeric chars at the end of Content-Length")
+		return -1, fmt.Errorf("cannot parse Content-Length: %s", errNonNumericChars)
 	}
 	return v, nil
 }

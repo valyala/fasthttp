@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -1644,11 +1645,10 @@ func TestResponseHeaderAddTrailerError(t *testing.T) {
 
 	var h ResponseHeader
 	err := h.AddTrailer("Foo,   Content-Length , Bar,Transfer-Encoding,")
-	expectedErr := "forbidden trailers: Content-Length, Transfer-Encoding"
 	expectedTrailer := "Foo, Bar"
 
-	if err.Error() != expectedErr {
-		t.Fatalf("unexpected err %q. Expected %q", err.Error(), expectedErr)
+	if !errors.Is(err, ErrBadTrailer) {
+		t.Fatalf("unexpected err %q. Expected %q", err, ErrBadTrailer)
 	}
 	if trailer := string(h.Peek(HeaderTrailer)); trailer != expectedTrailer {
 		t.Fatalf("unexpected trailer %q. Expected %q", trailer, expectedTrailer)
@@ -1661,11 +1661,10 @@ func TestRequestHeaderAddTrailerError(t *testing.T) {
 
 	var h RequestHeader
 	err := h.AddTrailer("Foo,   Content-Length , Bar,Transfer-Encoding,")
-	expectedErr := "forbidden trailers: Content-Length, Transfer-Encoding"
 	expectedTrailer := "Foo, Bar"
 
-	if err.Error() != expectedErr {
-		t.Fatalf("unexpected err %q. Expected %q", err.Error(), expectedErr)
+	if !errors.Is(err, ErrBadTrailer) {
+		t.Fatalf("unexpected err %q. Expected %q", err, ErrBadTrailer)
 	}
 	if trailer := string(h.Peek(HeaderTrailer)); trailer != expectedTrailer {
 		t.Fatalf("unexpected trailer %q. Expected %q", trailer, expectedTrailer)
@@ -2344,14 +2343,6 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 		t.Fatalf("expecting connection: close for identity response")
 	}
 
-	// non-numeric content-length
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: faaa\r\nContent-Type: text/html\r\n\r\nfoobar",
-		200, -2, "text/html")
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 201 OK\r\nContent-Length: 123aa\r\nContent-Type: text/ht\r\n\r\naaa",
-		201, -2, "text/ht")
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: aa124\r\nContent-Type: html\r\n\r\nxx",
-		200, -2, "html")
-
 	// no content-type
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\r\nContent-Length: 123\r\n\r\nfoiaaa",
 		400, 123, string(defaultContentType))
@@ -2558,11 +2549,19 @@ func TestResponseHeaderReadError(t *testing.T) {
 	testResponseHeaderReadError(t, h, "HTTP/1.1 123foobar OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n\r\n")
 	testResponseHeaderReadError(t, h, "HTTP/1.1 foobar344 OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n\r\n")
 
+	// non-numeric content-length
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: faaa\r\nContent-Type: text/html\r\n\r\nfoobar")
+	testResponseHeaderReadError(t, h, "HTTP/1.1 201 OK\r\nContent-Length: 123aa\r\nContent-Type: text/ht\r\n\r\naaa")
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: aa124\r\nContent-Type: html\r\n\r\nxx")
+
 	// no headers
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\n")
 
 	// no trailing crlf
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n")
+
+	// forbidden trailer
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: -1\r\nTrailer: Foo, Content-Length\r\n\r\n")
 }
 
 func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
@@ -2607,6 +2606,9 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// post with invalid content-length
 	testRequestHeaderReadError(t, h, "POST /a HTTP/1.1\r\nHost: bb\r\nContent-Type: aa\r\nContent-Length: dff\r\n\r\nqwerty")
+
+	// forbidden trailer
+	testRequestHeaderReadError(t, h, "POST /a HTTP/1.1\r\nContent-Length: -1\r\nTrailer: Foo, Content-Length\r\n\r\n")
 }
 
 func TestRequestHeaderReadSecuredError(t *testing.T) {
