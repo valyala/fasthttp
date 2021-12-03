@@ -3797,7 +3797,10 @@ func TestServerChunkedResponse(t *testing.T) {
 		ctx.Response.Header.DisableNormalizing()
 		ctx.Response.Header.Set("Transfer-Encoding", "chunked")
 		for k := range trailer {
-			ctx.Response.Header.AddTrailer(k)
+			err := ctx.Response.Header.AddTrailer(k)
+			if err != nil {
+				t.Fatalf("unexpected error: %s", err)
+			}
 		}
 		ctx.Response.SetBodyStreamWriter(func(w *bufio.Writer) {
 			for i := 0; i < 3; i++ {

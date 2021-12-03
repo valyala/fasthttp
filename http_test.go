@@ -176,7 +176,10 @@ func testRequestBodyStreamWithTrailer(t *testing.T, body []byte, disableNormaliz
 	req1.SetHost("google.com")
 	req1.SetBodyStream(bytes.NewBuffer(body), -1)
 	for k, v := range expectedTrailer {
-		req1.Header.AddTrailer(k)
+		err := req1.Header.AddTrailer(k)
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
 		req1.Header.Set(k, v)
 	}
 
@@ -230,7 +233,10 @@ func testResponseBodyStreamWithTrailer(t *testing.T, body []byte, disableNormali
 	resp1.Header.disableNormalizing = disableNormalizing
 	resp1.SetBodyStream(bytes.NewReader(body), -1)
 	for k, v := range expectedTrailer {
-		resp1.Header.AddTrailer(k)
+		err := resp1.Header.AddTrailer(k)
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
 		resp1.Header.Set(k, v)
 	}
 
@@ -1690,7 +1696,10 @@ func testSetRequestBodyStreamChunked(t *testing.T, body string, trailer map[stri
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
 	for k := range trailer {
-		req.Header.AddTrailer(k)
+		err := req.Header.AddTrailer(k)
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
 	}
 	if err := req.Write(bw); err != nil {
 		t.Fatalf("unexpected error when writing request: %s. body=%q", err, body)
@@ -1761,7 +1770,10 @@ func testSetResponseBodyStreamChunked(t *testing.T, body string, trailer map[str
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
 	for k := range trailer {
-		resp.Header.AddTrailer(k)
+		err := resp.Header.AddTrailer(k)
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
 	}
 	if err := resp.Write(bw); err != nil {
 		t.Fatalf("unexpected error when writing response: %s. body=%q", err, body)
