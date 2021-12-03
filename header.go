@@ -2770,7 +2770,7 @@ func (h *RequestHeader) collectCookies() {
 	h.cookiesCollected = true
 }
 
-var errNonNumericChars = errors.New("non-numeric chars at the end of Content-Length")
+var errNonNumericChars = errors.New("non-numeric chars at the end")
 
 func parseContentLength(b []byte) (int, error) {
 	v, n, err := parseUintBuf(b)
