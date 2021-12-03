@@ -1491,8 +1491,8 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 		t.Fatalf("Unexpected error: %s", err)
 	}
 
-	if h.Len() != 6 {
-		t.Fatalf("Unexpected number of headers: %d. Expected 4", h.Len())
+	if h.Len() != 5 {
+		t.Fatalf("Unexpected number of headers: %d. Expected 5", h.Len())
 	}
 	contentLengthCount := 0
 	contentTypeCount := 0
@@ -1549,8 +1549,8 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 		t.Fatalf("Unexpected error: %s", err)
 	}
 
-	if h.Len() != 6 {
-		t.Fatalf("Unexpected number of header: %d. Expected 6", h.Len())
+	if h.Len() != 5 {
+		t.Fatalf("Unexpected number of header: %d. Expected 5", h.Len())
 	}
 	hostCount := 0
 	xxCount := 0
@@ -1637,6 +1637,40 @@ func TestRequestHeaderVisitAllInOrder(t *testing.T) {
 		order = order[1:]
 		values = values[1:]
 	})
+}
+
+func TestResponseHeaderAddTrailerError(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	err := h.AddTrailer("Foo,   Content-Length , Bar,Transfer-Encoding,")
+	expectedErr := "forbidden trailers: Content-Length, Transfer-Encoding"
+	expectedTrailer := "Foo, Bar"
+
+	if err.Error() != expectedErr {
+		t.Fatalf("unexpected err %q. Expected %q", err.Error(), expectedErr)
+	}
+	if trailer := string(h.Peek(HeaderTrailer)); trailer != expectedTrailer {
+		t.Fatalf("unexpected trailer %q. Expected %q", trailer, expectedTrailer)
+	}
+
+}
+
+func TestRequestHeaderAddTrailerError(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	err := h.AddTrailer("Foo,   Content-Length , Bar,Transfer-Encoding,")
+	expectedErr := "forbidden trailers: Content-Length, Transfer-Encoding"
+	expectedTrailer := "Foo, Bar"
+
+	if err.Error() != expectedErr {
+		t.Fatalf("unexpected err %q. Expected %q", err.Error(), expectedErr)
+	}
+	if trailer := string(h.Peek(HeaderTrailer)); trailer != expectedTrailer {
+		t.Fatalf("unexpected trailer %q. Expected %q", trailer, expectedTrailer)
+	}
+
 }
 
 func TestResponseHeaderCookie(t *testing.T) {
