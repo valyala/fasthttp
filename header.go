@@ -1046,16 +1046,16 @@ func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
 	}
 }
 
-// VisitAllTrailer calls f for each response trailer.
+// VisitAllTrailer calls f for each response Trailer.
 //
-// f must not retain references to key and/or value after returning.
+// f must not retain references to value after returning.
 func (h *ResponseHeader) VisitAllTrailer(f func(value []byte)) {
 	visitArgsKey(h.trailer, f)
 }
 
-// VisitAllTrailer calls f for each request trailer.
+// VisitAllTrailer calls f for each request Trailer.
 //
-// f must not retain references to key and/or value after returning.
+// f must not retain references to value after returning.
 func (h *RequestHeader) VisitAllTrailer(f func(value []byte)) {
 	visitArgsKey(h.trailer, f)
 }
@@ -2775,10 +2775,10 @@ var errNonNumericChars = errors.New("non-numeric chars found")
 func parseContentLength(b []byte) (int, error) {
 	v, n, err := parseUintBuf(b)
 	if err != nil {
-		return -1, fmt.Errorf("cannot parse Content-Length: %s", err)
+		return -1, fmt.Errorf("cannot parse Content-Length: %w", err)
 	}
 	if n != len(b) {
-		return -1, fmt.Errorf("cannot parse Content-Length: %s", errNonNumericChars)
+		return -1, fmt.Errorf("cannot parse Content-Length: %w", errNonNumericChars)
 	}
 	return v, nil
 }

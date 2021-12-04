@@ -166,16 +166,16 @@ Trailer: Foo, Bar
 		Handler: func(ctx *RequestCtx) {
 			all, err := ioutil.ReadAll(ctx.RequestBodyStream())
 			if err != nil {
-				t.Fatalf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %s", err)
 			}
 			if !bytes.Equal(all, body) {
-				t.Fatalf("unexpected body %q. Expecting %q", all, body)
+				t.Errorf("unexpected body %q. Expecting %q", all, body)
 			}
 
 			for k, v := range expectedTrailer {
 				r := ctx.Request.Header.Peek(k)
 				if string(r) != v {
-					t.Fatalf("unexpected trailer %s. Expecting %s. Got %q", k, v, r)
+					t.Errorf("unexpected trailer %s. Expecting %s. Got %q", k, v, r)
 				}
 			}
 		},

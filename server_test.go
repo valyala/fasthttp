@@ -3799,14 +3799,14 @@ func TestServerChunkedResponse(t *testing.T) {
 		for k := range trailer {
 			err := ctx.Response.Header.AddTrailer(k)
 			if err != nil {
-				t.Fatalf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %s", err)
 			}
 		}
 		ctx.Response.SetBodyStreamWriter(func(w *bufio.Writer) {
 			for i := 0; i < 3; i++ {
 				fmt.Fprintf(w, "message %d", i)
 				if err := w.Flush(); err != nil {
-					return
+					t.Errorf("unexpected error: %s", err)
 				}
 				time.Sleep(time.Second)
 			}
