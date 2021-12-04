@@ -1360,7 +1360,9 @@ func (req *Request) Write(w *bufio.Writer) error {
 		if len(host) == 0 {
 			return errRequestHostRequired
 		}
-		req.Header.SetHostBytes(host)
+		if len(req.Header.Host()) == 0 {
+			req.Header.SetHostBytes(host)
+		}
 		req.Header.SetRequestURIBytes(uri.RequestURI())
 
 		if len(uri.username) > 0 {
