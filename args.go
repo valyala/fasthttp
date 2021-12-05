@@ -361,6 +361,13 @@ func visitArgs(args []argsKV, f func(k, v []byte)) {
 	}
 }
 
+func visitArgsKey(args []argsKV, f func(k []byte)) {
+	for i, n := 0, len(args); i < n; i++ {
+		kv := &args[i]
+		f(kv.key)
+	}
+}
+
 func copyArgs(dst, src []argsKV) []argsKV {
 	if cap(dst) < len(src) {
 		tmp := make([]argsKV, len(src))

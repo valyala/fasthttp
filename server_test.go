@@ -3609,7 +3609,7 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 	}
 }
 
-func TestStreamBodyReqestContentLength(t *testing.T) {
+func TestStreamBodyRequestContentLength(t *testing.T) {
 	t.Parallel()
 	content := strings.Repeat("1", 1<<15) // 32K
 	contentLength := len(content)
@@ -3781,6 +3781,67 @@ func TestIncompleteBodyReturnsUnexpectedEOF(t *testing.T) {
 	}()
 	if err := <-ch; err == nil || err.Error() != "unexpected EOF" {
 		t.Fatal(err)
+	}
+}
+
+func TestServerChunkedResponse(t *testing.T) {
+	t.Parallel()
+
+	trailer := map[string]string{
+		"AtEnd1": "1111",
+		"AtEnd2": "2222",
+		"AtEnd3": "3333",
+	}
+
+	h := func(ctx *RequestCtx) {
+		ctx.Response.Header.DisableNormalizing()
+		ctx.Response.Header.Set("Transfer-Encoding", "chunked")
+		for k := range trailer {
+			err := ctx.Response.Header.AddTrailer(k)
+			if err != nil {
+				t.Errorf("unexpected error: %s", err)
+			}
+		}
+		ctx.Response.SetBodyStreamWriter(func(w *bufio.Writer) {
+			for i := 0; i < 3; i++ {
+				fmt.Fprintf(w, "message %d", i)
+				if err := w.Flush(); err != nil {
+					t.Errorf("unexpected error: %s", err)
+				}
+				time.Sleep(time.Second)
+			}
+		})
+		for k, v := range trailer {
+			ctx.Response.Header.Set(k, v)
+		}
+	}
+	s := &Server{
+		Handler: h,
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: test.com\r\n\r\n")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %s", err)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Unexpected error when reading response: %s", err)
+	}
+	if resp.Header.ContentLength() != -1 {
+		t.Fatalf("Unexpected Content-Length %d. Expected %d", resp.Header.ContentLength(), -1)
+	}
+	if !bytes.Equal(resp.Body(), []byte("message 0"+"message 1"+"message 2")) {
+		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), "foobar")
+	}
+	for k, v := range trailer {
+		h := resp.Header.Peek(k)
+		if !bytes.Equal(resp.Header.Peek(k), []byte(v)) {
+			t.Fatalf("Unexpected trailer %s. Expected %s. Got %q", k, v, h)
+		}
 	}
 }
 

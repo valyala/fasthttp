@@ -1136,7 +1136,17 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 		return nil
 	}
 
-	return req.ReadBody(r, contentLength, maxBodySize)
+	if err = req.ReadBody(r, contentLength, maxBodySize); err != nil {
+		return err
+	}
+
+	if req.Header.ContentLength() == -1 {
+		err = req.Header.ReadTrailer(r)
+		if err != nil && err != io.EOF {
+			return err
+		}
+	}
+	return nil
 }
 
 // ReadBody reads request body from the given r, limiting the body size.
@@ -1146,12 +1156,22 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 func (req *Request) ReadBody(r *bufio.Reader, contentLength int, maxBodySize int) (err error) {
 	bodyBuf := req.bodyBuffer()
 	bodyBuf.Reset()
-	bodyBuf.B, err = readBody(r, contentLength, maxBodySize, bodyBuf.B)
+
+	if contentLength >= 0 {
+		bodyBuf.B, err = readBody(r, contentLength, maxBodySize, bodyBuf.B)
+
+	} else if contentLength == -1 {
+		bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
+
+	} else {
+		bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
+		req.Header.SetContentLength(len(bodyBuf.B))
+	}
+
 	if err != nil {
 		req.Reset()
 		return err
 	}
-	req.Header.SetContentLength(len(bodyBuf.B))
 	return nil
 }
 
@@ -1197,12 +1217,12 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 		if err == ErrBodyTooLarge {
 			req.Header.SetContentLength(contentLength)
 			req.body = bodyBuf
-			req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
+			req.bodyStream = acquireRequestStream(bodyBuf, r, &req.Header)
 			return nil
 		}
 		if err == errChunkedStream {
 			req.body = bodyBuf
-			req.bodyStream = acquireRequestStream(bodyBuf, r, -1)
+			req.bodyStream = acquireRequestStream(bodyBuf, r, &req.Header)
 			return nil
 		}
 		req.Reset()
@@ -1210,7 +1230,7 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 	}
 
 	req.body = bodyBuf
-	req.bodyStream = acquireRequestStream(bodyBuf, r, contentLength)
+	req.bodyStream = acquireRequestStream(bodyBuf, r, &req.Header)
 	req.Header.SetContentLength(contentLength)
 	return nil
 }
@@ -1245,7 +1265,17 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	}
 
 	if !resp.mustSkipBody() {
-		return resp.ReadBody(r, maxBodySize)
+		err = resp.ReadBody(r, maxBodySize)
+		if err != nil {
+			return err
+		}
+	}
+
+	if resp.Header.ContentLength() == -1 {
+		err = resp.Header.ReadTrailer(r)
+		if err != nil && err != io.EOF {
+			return err
+		}
 	}
 	return nil
 }
@@ -1257,12 +1287,19 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
 	bodyBuf := resp.bodyBuffer()
 	bodyBuf.Reset()
-	bodyBuf.B, err = readBody(r, resp.Header.ContentLength(), maxBodySize, bodyBuf.B)
-	if err != nil {
-		return err
+
+	contentLength := resp.Header.ContentLength()
+	if contentLength >= 0 {
+		bodyBuf.B, err = readBody(r, contentLength, maxBodySize, bodyBuf.B)
+
+	} else if contentLength == -1 {
+		bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
+
+	} else {
+		bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
+		resp.Header.SetContentLength(len(bodyBuf.B))
 	}
-	resp.Header.SetContentLength(len(bodyBuf.B))
-	return nil
+	return err
 }
 
 func (resp *Response) mustSkipBody() bool {
@@ -1723,8 +1760,12 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 		}
 	} else {
 		req.Header.SetContentLength(-1)
-		if err = req.Header.Write(w); err == nil {
+		err = req.Header.Write(w)
+		if err == nil {
 			err = writeBodyChunked(w, req.bodyStream)
+		}
+		if err == nil {
+			err = req.Header.writeTrailer(w)
 		}
 	}
 	err1 := req.closeBodyStream()
@@ -1778,6 +1819,9 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (err error
 			}
 			if err == nil && sendBody {
 				err = writeBodyChunked(w, resp.bodyStream)
+			}
+			if err == nil {
+				err = resp.Header.writeTrailer(w)
 			}
 		}
 	}
@@ -1927,12 +1971,13 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 	if _, err := w.Write(b); err != nil {
 		return err
 	}
-	_, err := w.Write(strCRLF)
-	err1 := w.Flush()
-	if err == nil {
-		err = err1
+	// If is end chunk, write CRLF after writing trailer
+	if n > 0 {
+		if _, err := w.Write(strCRLF); err != nil {
+			return err
+		}
 	}
-	return err
+	return w.Flush()
 }
 
 // ErrBodyTooLarge is returned if either request or response body exceeds
@@ -1940,17 +1985,10 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 var ErrBodyTooLarge = errors.New("body size exceeds the given limit")
 
 func readBody(r *bufio.Reader, contentLength int, maxBodySize int, dst []byte) ([]byte, error) {
-	dst = dst[:0]
-	if contentLength >= 0 {
-		if maxBodySize > 0 && contentLength > maxBodySize {
-			return dst, ErrBodyTooLarge
-		}
-		return appendBodyFixedSize(r, dst, contentLength)
+	if maxBodySize > 0 && contentLength > maxBodySize {
+		return dst, ErrBodyTooLarge
 	}
-	if contentLength == -1 {
-		return readBodyChunked(r, maxBodySize, dst)
-	}
-	return readBodyIdentity(r, maxBodySize, dst)
+	return appendBodyFixedSize(r, dst, contentLength)
 }
 
 var errChunkedStream = errors.New("chunked stream")
@@ -2067,6 +2105,9 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 		if err != nil {
 			return dst, err
 		}
+		if chunkSize == 0 {
+			return dst, err
+		}
 		if maxBodySize > 0 && len(dst)+chunkSize > maxBodySize {
 			return dst, ErrBodyTooLarge
 		}
@@ -2080,9 +2121,6 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 			}
 		}
 		dst = dst[:len(dst)-strCRLFLen]
-		if chunkSize == 0 {
-			return dst, nil
-		}
 	}
 }
 
@@ -2098,8 +2136,9 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 				error: fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err),
 			}
 		}
-		// Skip any trailing whitespace after chunk size.
-		if c == ' ' {
+		// Skip chunk extension after chunk size.
+		// Add support later if anyone needs it.
+		if c != '\r' {
 			continue
 		}
 		if err := r.UnreadByte(); err != nil {
