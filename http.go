@@ -57,8 +57,8 @@ type Request struct {
 	// if <= 0, means not set
 	timeout time.Duration
 
-	// Allow to change Host header with parsedURI == true (E.g. Client for type).
-	AllowToChangeHostHeader bool
+	// Use Host header (request.Header.SetHost) instead of the host from SetRequestURI, SetHost, or URI().SetHost
+	UseHostHeader bool
 }
 
 // Response represents HTTP response.
@@ -1363,7 +1363,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 		if len(host) == 0 {
 			return errRequestHostRequired
 		}
-		if len(req.Header.Host()) == 0 || !req.AllowToChangeHostHeader {
+		if len(req.Header.Host()) == 0 || !req.UseHostHeader {
 			req.Header.SetHostBytes(host)
 		}
 		req.Header.SetRequestURIBytes(uri.RequestURI())
