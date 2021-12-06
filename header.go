@@ -2339,9 +2339,15 @@ func (h *ResponseHeader) parse(buf []byte) (int, error) {
 }
 
 func (h *ResponseHeader) parseTrailer(buf []byte) (int, error) {
+	// Skip any 0 length chunk.
 	if buf[0] == '0' {
-		buf = buf[len(strCRLF)+1:]
+		skip := len(strCRLF) + 1
+		if len(buf) < skip {
+			return 0, io.EOF
+		}
+		buf = buf[skip:]
 	}
+
 	var s headerScanner
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
@@ -2392,9 +2398,15 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 }
 
 func (h *RequestHeader) parseTrailer(buf []byte) (int, error) {
+	// Skip any 0 length chunk.
 	if buf[0] == '0' {
-		buf = buf[len(strCRLF)+1:]
+		skip := len(strCRLF) + 1
+		if len(buf) < skip {
+			return 0, io.EOF
+		}
+		buf = buf[skip:]
 	}
+
 	var s headerScanner
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
