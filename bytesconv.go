@@ -98,7 +98,7 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 		}
 		v, err := ParseUint(b[:n])
 		if err != nil {
-			return dst, fmt.Errorf("cannot parse ipStr %q: %s", ipStr, err)
+			return dst, fmt.Errorf("cannot parse ipStr %q: %w", ipStr, err)
 		}
 		if v > 255 {
 			return dst, fmt.Errorf("cannot parse ipStr %q: ip part cannot exceed 255: parsed %d", ipStr, v)
@@ -108,7 +108,7 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	}
 	v, err := ParseUint(b)
 	if err != nil {
-		return dst, fmt.Errorf("cannot parse ipStr %q: %s", ipStr, err)
+		return dst, fmt.Errorf("cannot parse ipStr %q: %w", ipStr, err)
 	}
 	if v > 255 {
 		return dst, fmt.Errorf("cannot parse ipStr %q: ip part cannot exceed 255: parsed %d", ipStr, v)

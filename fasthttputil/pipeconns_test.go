@@ -164,7 +164,7 @@ func testPipeConnsCloseWhileReadWrite(t *testing.T) {
 		var err error
 		if _, err = io.Copy(ioutil.Discard, c1); err != nil {
 			if err != errConnectionClosed {
-				err = fmt.Errorf("unexpected error: %s", err)
+				err = fmt.Errorf("unexpected error: %w", err)
 			} else {
 				err = nil
 			}
@@ -178,7 +178,7 @@ func testPipeConnsCloseWhileReadWrite(t *testing.T) {
 		for {
 			if _, err = c2.Write([]byte("foobar")); err != nil {
 				if err != errConnectionClosed {
-					err = fmt.Errorf("unexpected error: %s", err)
+					err = fmt.Errorf("unexpected error: %w", err)
 				} else {
 					err = nil
 				}
