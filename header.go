@@ -2736,7 +2736,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 					continue
 				}
 				if caseInsensitiveCompare(s.key, strTrailer) {
-					err = h.SetTrailerBytes(s.value)
+					if nerr := h.SetTrailerBytes(s.value); nerr != nil {
+						if err == nil {
+							err = nerr
+						}
+					}
 					continue
 				}
 			}
