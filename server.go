@@ -1561,14 +1561,14 @@ func (s *Server) ListenAndServe(addr string) error {
 // The server sets the given file mode for the UNIX addr.
 func (s *Server) ListenAndServeUNIX(addr string, mode os.FileMode) error {
 	if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("unexpected error when trying to remove unix socket file %q: %s", addr, err)
+		return fmt.Errorf("unexpected error when trying to remove unix socket file %q: %w", addr, err)
 	}
 	ln, err := net.Listen("unix", addr)
 	if err != nil {
 		return err
 	}
 	if err = os.Chmod(addr, mode); err != nil {
-		return fmt.Errorf("cannot chmod %#o for %q: %s", mode, addr, err)
+		return fmt.Errorf("cannot chmod %#o for %q: %w", mode, addr, err)
 	}
 	return s.Serve(ln)
 }
@@ -1695,7 +1695,7 @@ func (s *Server) AppendCert(certFile, keyFile string) error {
 
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %s", certFile, keyFile, err)
+		return fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %w", certFile, keyFile, err)
 	}
 
 	s.configTLS()

@@ -1797,11 +1797,11 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 				}
 			}
 			return &ErrSmallBuffer{
-				error: fmt.Errorf("error when reading response headers: %s", errSmallBuffer),
+				error: fmt.Errorf("error when reading response headers: %w", errSmallBuffer),
 			}
 		}
 
-		return fmt.Errorf("error when reading response headers: %s", err)
+		return fmt.Errorf("error when reading response headers: %w", err)
 	}
 	b = mustPeekBuffered(r)
 	headersLen, errParse := h.parse(b)
@@ -1849,11 +1849,11 @@ func (h *ResponseHeader) tryReadTrailer(r *bufio.Reader, n int) error {
 				}
 			}
 			return &ErrSmallBuffer{
-				error: fmt.Errorf("error when reading response trailer: %s", errSmallBuffer),
+				error: fmt.Errorf("error when reading response trailer: %w", errSmallBuffer),
 			}
 		}
 
-		return fmt.Errorf("error when reading response trailer: %s", err)
+		return fmt.Errorf("error when reading response trailer: %w", err)
 	}
 	b = mustPeekBuffered(r)
 	headersLen, errParse := h.parseTrailer(b)
@@ -1891,9 +1891,9 @@ func headerError(typ string, err, errParse error, b []byte, secureErrorLogMessag
 
 func headerErrorMsg(typ string, err error, b []byte, secureErrorLogMessage bool) error {
 	if secureErrorLogMessage {
-		return fmt.Errorf("error when reading %s headers: %s. Buffer size=%d", typ, err, len(b))
+		return fmt.Errorf("error when reading %s headers: %w. Buffer size=%d", typ, err, len(b))
 	}
-	return fmt.Errorf("error when reading %s headers: %s. Buffer size=%d, contents: %s", typ, err, len(b), bufferSnippet(b))
+	return fmt.Errorf("error when reading %s headers: %w. Buffer size=%d, contents: %s", typ, err, len(b), bufferSnippet(b))
 }
 
 // Read reads request header from r.
@@ -1958,11 +1958,11 @@ func (h *RequestHeader) tryReadTrailer(r *bufio.Reader, n int) error {
 				}
 			}
 			return &ErrSmallBuffer{
-				error: fmt.Errorf("error when reading request trailer: %s", errSmallBuffer),
+				error: fmt.Errorf("error when reading request trailer: %w", errSmallBuffer),
 			}
 		}
 
-		return fmt.Errorf("error when reading request trailer: %s", err)
+		return fmt.Errorf("error when reading request trailer: %w", err)
 	}
 	b = mustPeekBuffered(r)
 	headersLen, errParse := h.parseTrailer(b)
@@ -1991,7 +1991,7 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		// This is for go 1.6 bug. See https://github.com/golang/go/issues/14121 .
 		if err == bufio.ErrBufferFull {
 			return &ErrSmallBuffer{
-				error: fmt.Errorf("error when reading request headers: %s", errSmallBuffer),
+				error: fmt.Errorf("error when reading request headers: %w", errSmallBuffer),
 			}
 		}
 
@@ -2001,7 +2001,7 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 			return ErrNothingRead{err}
 		}
 
-		return fmt.Errorf("error when reading request headers: %s", err)
+		return fmt.Errorf("error when reading request headers: %w", err)
 	}
 	b = mustPeekBuffered(r)
 	headersLen, errParse := h.parse(b)
@@ -2499,9 +2499,9 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	h.statusCode, n, err = parseUintBuf(b)
 	if err != nil {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("cannot parse response status code: %s", err)
+			return 0, fmt.Errorf("cannot parse response status code: %w", err)
 		}
-		return 0, fmt.Errorf("cannot parse response status code: %s. Response %q", err, buf)
+		return 0, fmt.Errorf("cannot parse response status code: %w. Response %q", err, buf)
 	}
 	if len(b) > n && b[n] != ' ' {
 		if h.secureErrorLogMessage {

@@ -844,7 +844,7 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 		if bytes.Equal(ce, strGzip) {
 			// Do not care about memory usage here.
 			if bodyStream, err = gzip.NewReader(bodyStream); err != nil {
-				return nil, fmt.Errorf("cannot gunzip request body: %s", err)
+				return nil, fmt.Errorf("cannot gunzip request body: %w", err)
 			}
 		} else if len(ce) > 0 {
 			return nil, fmt.Errorf("unsupported Content-Encoding: %q", ce)
@@ -853,14 +853,14 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 		mr := multipart.NewReader(bodyStream, req.multipartFormBoundary)
 		req.multipartForm, err = mr.ReadForm(8 * 1024)
 		if err != nil {
-			return nil, fmt.Errorf("cannot read multipart/form-data body: %s", err)
+			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 		}
 	} else {
 		body := req.bodyBytes()
 		if bytes.Equal(ce, strGzip) {
 			// Do not care about memory usage here.
 			if body, err = AppendGunzipBytes(nil, body); err != nil {
-				return nil, fmt.Errorf("cannot gunzip request body: %s", err)
+				return nil, fmt.Errorf("cannot gunzip request body: %w", err)
 			}
 		} else if len(ce) > 0 {
 			return nil, fmt.Errorf("unsupported Content-Encoding: %q", ce)
@@ -894,14 +894,14 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 
 	mw := multipart.NewWriter(w)
 	if err := mw.SetBoundary(boundary); err != nil {
-		return fmt.Errorf("cannot use form boundary %q: %s", boundary, err)
+		return fmt.Errorf("cannot use form boundary %q: %w", boundary, err)
 	}
 
 	// marshal values
 	for k, vv := range f.Value {
 		for _, v := range vv {
 			if err := mw.WriteField(k, v); err != nil {
-				return fmt.Errorf("cannot write form field %q value %q: %s", k, v, err)
+				return fmt.Errorf("cannot write form field %q value %q: %w", k, v, err)
 			}
 		}
 	}
@@ -911,23 +911,23 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 		for _, fv := range fvv {
 			vw, err := mw.CreatePart(fv.Header)
 			if err != nil {
-				return fmt.Errorf("cannot create form file %q (%q): %s", k, fv.Filename, err)
+				return fmt.Errorf("cannot create form file %q (%q): %w", k, fv.Filename, err)
 			}
 			fh, err := fv.Open()
 			if err != nil {
 				return fmt.Errorf("cannot open form file %q (%q): %s", k, fv.Filename, err)
 			}
 			if _, err = copyZeroAlloc(vw, fh); err != nil {
-				return fmt.Errorf("error when copying form file %q (%q): %s", k, fv.Filename, err)
+				return fmt.Errorf("error when copying form file %q (%q): %w", k, fv.Filename, err)
 			}
 			if err = fh.Close(); err != nil {
-				return fmt.Errorf("cannot close form file %q (%q): %s", k, fv.Filename, err)
+				return fmt.Errorf("cannot close form file %q (%q): %w", k, fv.Filename, err)
 			}
 		}
 	}
 
 	if err := mw.Close(); err != nil {
-		return fmt.Errorf("error when closing multipart form writer: %s", err)
+		return fmt.Errorf("error when closing multipart form writer: %w", err)
 	}
 
 	return nil
@@ -945,7 +945,7 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 	mr := multipart.NewReader(lr, boundary)
 	f, err := mr.ReadForm(int64(maxInMemoryFileSize))
 	if err != nil {
-		return nil, fmt.Errorf("cannot read multipart/form-data body: %s", err)
+		return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 	}
 	return f, nil
 }
@@ -1429,7 +1429,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	if req.onlyMultipartForm() {
 		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
 		if err != nil {
-			return fmt.Errorf("error when marshaling multipart form: %s", err)
+			return fmt.Errorf("error when marshaling multipart form: %w", err)
 		}
 		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
 	}
@@ -2143,7 +2143,7 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 		}
 		if err := r.UnreadByte(); err != nil {
 			return -1, ErrBrokenChunk{
-				error: fmt.Errorf("cannot unread '\r' char at the end of chunk size: %s", err),
+				error: fmt.Errorf("cannot unread '\r' char at the end of chunk size: %w", err),
 			}
 		}
 		break
@@ -2160,7 +2160,7 @@ func readCrLf(r *bufio.Reader) error {
 		c, err := r.ReadByte()
 		if err != nil {
 			return ErrBrokenChunk{
-				error: fmt.Errorf("cannot read %q char at the end of chunk size: %s", exp, err),
+				error: fmt.Errorf("cannot read %q char at the end of chunk size: %w", exp, err),
 			}
 		}
 		if c != exp {

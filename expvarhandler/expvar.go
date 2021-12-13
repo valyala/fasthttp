@@ -58,7 +58,7 @@ func getExpvarRegexp(ctx *fasthttp.RequestCtx) (*regexp.Regexp, error) {
 	}
 	rr, err := regexp.Compile(r)
 	if err != nil {
-		return nil, fmt.Errorf("cannot parse r=%q: %s", r, err)
+		return nil, fmt.Errorf("cannot parse r=%q: %w", r, err)
 	}
 	return rr, nil
 }
