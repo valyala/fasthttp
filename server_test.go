@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -2041,23 +2042,28 @@ func TestRequestCtxWriteString(t *testing.T) {
 	}
 }
 
-func TestServeConnKeepRequestValuesUntilResetUserValues(t *testing.T) {
+func TestServeConnKeepRequestAndResponseUntilResetUserValues(t *testing.T) {
 	t.Parallel()
 
 	reqStr := "POST /foo HTTP/1.0\r\nHost: google.com\r\nContent-Type: application/octet-stream\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n"
+	respRegex := regexp.MustCompile("HTTP/1.1 308 Permanent Redirect\r\nServer: fasthttp\r\nDate: (.*)\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n")
 
 	rw := &readWriter{}
 	rw.r.WriteString(reqStr)
 
-	var resultReqStr string
+	var resultReqStr, resultRespStr string
 
 	ch := make(chan struct{})
 	go func() {
 		err := ServeConn(rw, func(ctx *RequestCtx) {
+			ctx.Response.SetStatusCode(StatusPermanentRedirect)
+
 			ctx.SetUserValue("myKey", &closerWithRequestCtx{
 				ctx: ctx,
 				closeFunc: func(closerCtx *RequestCtx) error {
 					resultReqStr = closerCtx.Request.String()
+					resultRespStr = closerCtx.Response.String()
+
 					return nil
 				}})
 		})
@@ -2075,6 +2081,10 @@ func TestServeConnKeepRequestValuesUntilResetUserValues(t *testing.T) {
 
 	if resultReqStr != reqStr {
 		t.Errorf("Request == %s, want %s", resultReqStr, reqStr)
+	}
+
+	if !respRegex.MatchString(resultRespStr) {
+		t.Errorf("Response == %s, want regex %s", resultRespStr, respRegex)
 	}
 }
 
