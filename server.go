@@ -2079,7 +2079,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		connectionClose bool
 		isHTTP11        bool
 
-		reqReset               bool
+		reqReset, respReset    bool
 		continueReadingRequest bool = true
 	)
 	for {
@@ -2118,7 +2118,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			br, err = acquireByteReader(&ctx)
 		}
 
-		reqReset = false
+		reqReset, respReset = false, false
 		ctx.Request.isTLS = isTLS
 		ctx.Response.Header.noDefaultContentType = s.NoDefaultContentType
 		ctx.Response.Header.noDefaultDate = s.NoDefaultDate
@@ -2403,8 +2403,9 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		s.setState(c, StateIdle)
 		ctx.userValues.Reset()
 
-		reqReset = true
+		reqReset, respReset = true, true
 		ctx.Request.Reset()
+		ctx.Response.Reset()
 
 		if atomic.LoadInt32(&s.stop) == 1 {
 			err = nil
@@ -2420,10 +2421,13 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 	}
 	if ctx != nil {
 		// in unexpected cases the for loop will break
-		// before request reset call. in such cases, call it before
+		// before request/response reset call. in such cases, call it before
 		// release to fix #548
 		if !reqReset {
 			ctx.Request.Reset()
+		}
+		if !respReset {
+			ctx.Response.Reset()
 		}
 		s.releaseCtx(ctx)
 	}
@@ -2511,7 +2515,7 @@ func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 		panic("BUG: cannot write timed out response")
 	}
 	err := ctx.Response.Write(w)
-	ctx.Response.Reset()
+
 	return err
 }
 
@@ -2796,8 +2800,11 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 	if bw == nil {
 		bw = acquireWriter(ctx)
 	}
+
 	writeResponse(ctx, bw) //nolint:errcheck
+	ctx.Response.Reset()
 	bw.Flush()
+
 	return bw
 }
 
