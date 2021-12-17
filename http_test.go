@@ -79,7 +79,7 @@ func TestIssue875(t *testing.T) {
 		expectedLocation string
 	}
 
-	var testcases = []testcase{
+	testcases := []testcase{
 		{
 			uri:              `http://localhost:3000/?redirect=foo%0d%0aSet-Cookie:%20SESSIONID=MaliciousValue%0d%0a`,
 			expectedRedirect: "foo\r\nSet-Cookie: SESSIONID=MaliciousValue\r\n",
@@ -138,7 +138,6 @@ func TestRequestCopyTo(t *testing.T) {
 		t.Fatalf("unexpected error: %s", err)
 	}
 	testRequestCopyTo(t, &req)
-
 }
 
 func TestResponseCopyTo(t *testing.T) {
@@ -155,7 +154,6 @@ func TestResponseCopyTo(t *testing.T) {
 	resp.Header.SetStatusCode(200)
 	resp.SetBodyString("test")
 	testResponseCopyTo(t, &resp)
-
 }
 
 func testRequestCopyTo(t *testing.T, src *Request) {
@@ -731,6 +729,31 @@ func TestRequestUpdateURI(t *testing.T) {
 	}
 }
 
+func TestUseHostHeader(t *testing.T) {
+	t.Parallel()
+
+	var r Request
+	r.UseHostHeader = true
+	r.Header.SetHost("aaa.bbb")
+	r.SetRequestURI("/lkjkl/kjl")
+
+	// Modify request uri and host via URI() object and make sure
+	// the requestURI and Host header are properly updated
+	u := r.URI()
+	u.SetPath("/123/432.html")
+	u.SetHost("foobar.com")
+	a := u.QueryArgs()
+	a.Set("aaa", "bcse")
+
+	s := r.String()
+	if !strings.HasPrefix(s, "GET /123/432.html?aaa=bcse") {
+		t.Fatalf("cannot find %q in %q", "GET /123/432.html?aaa=bcse", s)
+	}
+	if !strings.Contains(s, "\r\nHost: aaa.bbb\r\n") {
+		t.Fatalf("cannot find %q in %q", "\r\nHost: aaa.bbb\r\n", s)
+	}
+}
+
 func TestRequestBodyStreamMultipleBodyCalls(t *testing.T) {
 	t.Parallel()
 
@@ -1190,7 +1213,6 @@ func TestRequestContinueReadBodyDisablePrereadMultipartForm(t *testing.T) {
 	if string(formData) != string(r.Body()) {
 		t.Fatalf("The body given must equal the body in the Request")
 	}
-
 }
 
 func TestRequestMayContinue(t *testing.T) {
@@ -2434,7 +2456,6 @@ Content-Type: application/json
 `, "\n", "\r\n", -1)
 	mr := multipart.NewReader(strings.NewReader(s), "foo")
 	form, err := mr.ReadForm(1024)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %s", err)
 	}
