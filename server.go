@@ -248,6 +248,10 @@ type Server struct {
 	// Deprecated: Use IdleTimeout instead.
 	MaxKeepaliveDuration time.Duration
 
+	// MaxIdleWorkerDuration is the maximum idle time of a single worker in the underlying
+	// worker pool of the Server. Idle workers beyond this time will be cleared.
+	MaxIdleWorkerDuration time.Duration
+
 	// Period between tcp keep-alive messages.
 	//
 	// TCP keep-alive period is determined by operation system by default.
@@ -1757,11 +1761,12 @@ func (s *Server) Serve(ln net.Listener) error {
 	s.mu.Unlock()
 
 	wp := &workerPool{
-		WorkerFunc:      s.serveConn,
-		MaxWorkersCount: maxWorkersCount,
-		LogAllErrors:    s.LogAllErrors,
-		Logger:          s.logger(),
-		connState:       s.setState,
+		WorkerFunc:            s.serveConn,
+		MaxWorkersCount:       maxWorkersCount,
+		LogAllErrors:          s.LogAllErrors,
+		MaxIdleWorkerDuration: s.MaxIdleWorkerDuration,
+		Logger:                s.logger(),
+		connState:             s.setState,
 	}
 	wp.Start()
 
