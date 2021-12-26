@@ -9,6 +9,8 @@ import (
 	"io"
 	"io/ioutil"
 	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strconv"
 	"strings"
@@ -751,6 +753,41 @@ func TestUseHostHeader(t *testing.T) {
 	}
 	if !strings.Contains(s, "\r\nHost: aaa.bbb\r\n") {
 		t.Fatalf("cannot find %q in %q", "\r\nHost: aaa.bbb\r\n", s)
+	}
+}
+
+func TestUseHostHeader2(t *testing.T) {
+	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "SomeHost" {
+			http.Error(w, fmt.Sprintf("Expected Host header to be '%s', but got '%s'", "SomeHost", r.Host), http.StatusBadRequest)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	defer testServer.Close()
+
+	client := &Client{}
+	req := AcquireRequest()
+	defer ReleaseRequest(req)
+	resp := AcquireResponse()
+	defer ReleaseResponse(resp)
+
+	req.SetRequestURI(testServer.URL)
+	req.UseHostHeader = true
+	req.Header.SetHost("SomeHost")
+	if err := client.DoTimeout(req, resp, 1*time.Second); err != nil {
+		t.Fatalf("DoTimeout returned an error '%s'", err)
+	} else {
+		if resp.StatusCode() != http.StatusOK {
+			t.Fatalf("DoTimeout: %s", resp.body)
+		}
+	}
+	if err := client.Do(req, resp); err != nil {
+		t.Fatalf("DoTimeout returned an error '%s'", err)
+	} else {
+		if resp.StatusCode() != http.StatusOK {
+			t.Fatalf("Do: %s", resp.body)
+		}
 	}
 }
 

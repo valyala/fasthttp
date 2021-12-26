@@ -732,6 +732,8 @@ func (req *Request) copyToSkipBody(dst *Request) {
 	dst.parsedPostArgs = req.parsedPostArgs
 	dst.isTLS = req.isTLS
 
+	dst.UseHostHeader = req.UseHostHeader
+
 	// do not copy multipartForm - it will be automatically
 	// re-created on the first call to MultipartForm.
 }
