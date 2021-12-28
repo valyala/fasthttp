@@ -960,6 +960,7 @@ func (req *Request) Reset() {
 	req.Header.Reset()
 	req.resetSkipHeader()
 	req.timeout = 0
+	req.UseHostHeader = false
 }
 
 func (req *Request) resetSkipHeader() {
