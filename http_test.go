@@ -757,6 +757,7 @@ func TestUseHostHeader(t *testing.T) {
 }
 
 func TestUseHostHeader2(t *testing.T) {
+	t.Parallel()
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Host != "SomeHost" {
 			http.Error(w, fmt.Sprintf("Expected Host header to be '%s', but got '%s'", "SomeHost", r.Host), http.StatusBadRequest)
@@ -788,6 +789,19 @@ func TestUseHostHeader2(t *testing.T) {
 		if resp.StatusCode() != http.StatusOK {
 			t.Fatalf("Do: %s", resp.body)
 		}
+	}
+}
+
+func TestUseHostHeaderAfterRelease(t *testing.T) {
+	t.Parallel()
+	req := AcquireRequest()
+	req.UseHostHeader = true
+	ReleaseRequest(req)
+
+	req = AcquireRequest()
+	defer ReleaseRequest(req)
+	if req.UseHostHeader {
+		t.Fatalf("UseHostHeader was not released in ReleaseRequest()")
 	}
 }
 
