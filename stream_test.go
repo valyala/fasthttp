@@ -47,7 +47,7 @@ func TestStreamReaderClose(t *testing.T) {
 	r := NewStreamReader(func(w *bufio.Writer) {
 		fmt.Fprintf(w, "%s", firstLine)
 		if err := w.Flush(); err != nil {
-			ch <- fmt.Errorf("unexpected error on first flush: %s", err)
+			ch <- fmt.Errorf("unexpected error on first flush: %w", err)
 			return
 		}
 
@@ -89,7 +89,7 @@ func TestStreamReaderClose(t *testing.T) {
 	// read trailing data
 	go func() {
 		if _, err := ioutil.ReadAll(r); err != nil {
-			ch <- fmt.Errorf("unexpected error when reading trailing data: %s", err)
+			ch <- fmt.Errorf("unexpected error when reading trailing data: %w", err)
 			return
 		}
 		ch <- nil

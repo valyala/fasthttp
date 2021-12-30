@@ -20,7 +20,7 @@ func BenchmarkStatusLine512(b *testing.B) {
 func benchmarkStatusLine(b *testing.B, statusCode int, expected []byte) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			line := statusLine(statusCode)
+			line := formatStatusLine(nil, strHTTP11, statusCode, s2b(StatusMessage(statusCode)))
 			if !bytes.Equal(expected, line) {
 				b.Fatalf("unexpected status line %s. Expecting %s", string(line), string(expected))
 			}

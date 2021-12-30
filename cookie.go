@@ -149,7 +149,8 @@ func (c *Cookie) SetPathBytes(path []byte) {
 
 // Domain returns cookie domain.
 //
-// The returned domain is valid until the next Cookie modification method call.
+// The returned value is valid until the Cookie reused or released (ReleaseCookie).
+// Do not store references to the returned value. Make copies instead.
 func (c *Cookie) Domain() []byte {
 	return c.domain
 }
@@ -201,7 +202,8 @@ func (c *Cookie) SetExpire(expire time.Time) {
 
 // Value returns cookie value.
 //
-// The returned value is valid until the next Cookie modification method call.
+// The returned value is valid until the Cookie reused or released (ReleaseCookie).
+// Do not store references to the returned value. Make copies instead.
 func (c *Cookie) Value() []byte {
 	return c.value
 }
@@ -218,7 +220,8 @@ func (c *Cookie) SetValueBytes(value []byte) {
 
 // Key returns cookie name.
 //
-// The returned value is valid until the next Cookie modification method call.
+// The returned value is valid until the Cookie reused or released (ReleaseCookie).
+// Do not store references to the returned value. Make copies instead.
 func (c *Cookie) Key() []byte {
 	return c.key
 }
@@ -306,7 +309,8 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 
 // Cookie returns cookie representation.
 //
-// The returned value is valid until the next call to Cookie methods.
+// The returned value is valid until the Cookie reused or released (ReleaseCookie).
+// Do not store references to the returned value. Make copies instead.
 func (c *Cookie) Cookie() []byte {
 	c.buf = c.AppendBytes(c.buf[:0])
 	return c.buf

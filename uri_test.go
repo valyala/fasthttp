@@ -310,6 +310,29 @@ func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expecte
 	}
 }
 
+func TestIsHttp(t *testing.T) {
+	var u URI
+	if !u.isHttp() || u.isHttps() {
+		t.Fatalf("http scheme is assumed by default and not https")
+	}
+	u.SetSchemeBytes([]byte{})
+	if !u.isHttp() || u.isHttps() {
+		t.Fatalf("empty scheme must be threaten as http and not https")
+	}
+	u.SetScheme("http")
+	if !u.isHttp() || u.isHttps() {
+		t.Fatalf("scheme must be threaten as http and not https")
+	}
+	u.SetScheme("https")
+	if !u.isHttps() || u.isHttp() {
+		t.Fatalf("scheme must be threaten as https and not http")
+	}
+	u.SetScheme("dav")
+	if u.isHttps() || u.isHttp() {
+		t.Fatalf("scheme must be threaten as not http and not https")
+	}
+}
+
 func TestURIParse(t *testing.T) {
 	t.Parallel()
 
@@ -365,6 +388,18 @@ func TestURIParse(t *testing.T) {
 
 	testURIParse(t, &u, "", "//aaa.com\r\n\r\nGET x",
 		"http:///", "", "/", "", "", "")
+
+	testURIParse(t, &u, "", "http://[fe80::1%25en0]/",
+		"http://[fe80::1%en0]/", "[fe80::1%en0]", "/", "/", "", "")
+
+	testURIParse(t, &u, "", "http://[fe80::1%25en0]:8080/",
+		"http://[fe80::1%en0]:8080/", "[fe80::1%en0]:8080", "/", "/", "", "")
+
+	testURIParse(t, &u, "", "http://hello.世界.com/foo",
+		"http://hello.世界.com/foo", "hello.世界.com", "/foo", "/foo", "", "")
+
+	testURIParse(t, &u, "", "http://hello.%e4%b8%96%e7%95%8c.com/foo",
+		"http://hello.世界.com/foo", "hello.世界.com", "/foo", "/foo", "", "")
 }
 
 func testURIParse(t *testing.T, u *URI, host, uri,
@@ -402,5 +437,36 @@ func TestURIWithQuerystringOverride(t *testing.T) {
 
 	if uriString != "/?q1=foo&q2=bar&q4=quux" {
 		t.Fatalf("Expected Querystring to be overridden but was %s ", uriString)
+	}
+}
+
+func TestInvalidUrl(t *testing.T) {
+	url := `https://.çèéà@&~!&:=\\/\"'~<>|+-*()[]{}%$;,¥&&$22|||<>< 4ly8lzjmoNx233AXELDtyaFQiiUH-fd8c-CnXUJVYnGIs4Uwr-bptom5GCnWtsGMQxeM2ZhoKE973eKgs2Sjh6RePnyaLpCi6SiNSLevcMoraARrp88L-SgtKqd-XHAtSI8hiPRiXPQmDIA4BGhSgoc0nfn1PoYuGKKmDcZ04tANRc3iz4aF4-A1UrO8bLHTH7MEJvzx.someqa.fr/A/?&QS_BEGIN<&8{b'Ob=p*f> QS_END`
+
+	u := AcquireURI()
+	defer ReleaseURI(u)
+
+	if err := u.Parse(nil, []byte(url)); err == nil {
+		t.Fail()
+	}
+}
+
+func TestNoOverwriteInput(t *testing.T) {
+	str := `//%AA`
+	url := []byte(str)
+
+	u := AcquireURI()
+	defer ReleaseURI(u)
+
+	if err := u.Parse(nil, url); err != nil {
+		t.Error(err)
+	}
+
+	if string(url) != str {
+		t.Error()
+	}
+
+	if u.String() != "http://\xaa/" {
+		t.Errorf("%q", u.String())
 	}
 }

@@ -1,8 +1,9 @@
+// go:build !windows || !race
+
 package fasthttp
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -462,11 +463,10 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	host := uri.Host()
 
 	isTLS := false
-	scheme := uri.Scheme()
-	if bytes.Equal(scheme, strHTTPS) {
+	if uri.isHttps() {
 		isTLS = true
-	} else if !bytes.Equal(scheme, strHTTP) {
-		return fmt.Errorf("unsupported protocol %q. http and https are supported", scheme)
+	} else if !uri.isHttp() {
+		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
 	}
 
 	startCleaner := false
@@ -515,6 +515,10 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			startCleaner = true
 		}
 	}
+
+	atomic.AddInt32(&hc.pendingClientRequests, 1)
+	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
+
 	c.mLock.Unlock()
 
 	if startCleaner {
@@ -553,12 +557,10 @@ func (c *Client) mCleaner(m map[string]*HostClient) {
 		c.mLock.Lock()
 		for k, v := range m {
 			v.connsLock.Lock()
-			shouldRemove := v.connsCount == 0
-			v.connsLock.Unlock()
-
-			if shouldRemove {
+			if v.connsCount == 0 && atomic.LoadInt32(&v.pendingClientRequests) == 0 {
 				delete(m, k)
 			}
+			v.connsLock.Unlock()
 		}
 		if len(m) == 0 {
 			mustStop = true
@@ -782,6 +784,10 @@ type HostClient struct {
 	clientWriterPool *sync.Pool
 
 	pendingRequests int32
+
+	// pendingClientRequests counts the number of requests that a Client is currently running using this HostClient.
+	// It will be incremented ealier than pendingRequests and will be used by Client to see if the HostClient is still in use.
+	pendingClientRequests int32
 
 	connsCleanerRun bool
 }
@@ -1361,7 +1367,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.secureErrorLogMessage = c.SecureErrorLogMessage
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
-	if c.IsTLS != bytes.Equal(req.uri.Scheme(), strHTTPS) {
+	if c.IsTLS != req.uri.isHttps() {
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 

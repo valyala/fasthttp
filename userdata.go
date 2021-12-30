@@ -22,6 +22,10 @@ func (d *userData) Set(key string, value interface{}) {
 		}
 	}
 
+	if value == nil {
+		return
+	}
+
 	c := cap(args)
 	if c > n {
 		args = args[:n+1]
@@ -68,4 +72,24 @@ func (d *userData) Reset() {
 		}
 	}
 	*d = (*d)[:0]
+}
+
+func (d *userData) Remove(key string) {
+	args := *d
+	n := len(args)
+	for i := 0; i < n; i++ {
+		kv := &args[i]
+		if string(kv.key) == key {
+			n--
+			args[i] = args[n]
+			args[n].value = nil
+			args = args[:n]
+			*d = args
+			return
+		}
+	}
+}
+
+func (d *userData) RemoveBytes(key []byte) {
+	d.Remove(b2s(key))
 }

@@ -626,6 +626,10 @@ func TestClientHeaderCase(t *testing.T) {
 }
 
 func TestClientReadTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
 	t.Parallel()
 
 	ln := fasthttputil.NewInmemoryListener()
@@ -814,14 +818,14 @@ func TestClientDoWithCustomHeaders(t *testing.T) {
 	go func() {
 		conn, err := ln.Accept()
 		if err != nil {
-			ch <- fmt.Errorf("cannot accept client connection: %s", err)
+			ch <- fmt.Errorf("cannot accept client connection: %w", err)
 			return
 		}
 		br := bufio.NewReader(conn)
 
 		var req Request
 		if err = req.Read(br); err != nil {
-			ch <- fmt.Errorf("cannot read client request: %s", err)
+			ch <- fmt.Errorf("cannot read client request: %w", err)
 			return
 		}
 		if string(req.Header.Method()) != MethodPost {
@@ -854,11 +858,11 @@ func TestClientDoWithCustomHeaders(t *testing.T) {
 		var resp Response
 		bw := bufio.NewWriter(conn)
 		if err = resp.Write(bw); err != nil {
-			ch <- fmt.Errorf("cannot send response: %s", err)
+			ch <- fmt.Errorf("cannot send response: %w", err)
 			return
 		}
 		if err = bw.Flush(); err != nil {
-			ch <- fmt.Errorf("cannot flush response: %s", err)
+			ch <- fmt.Errorf("cannot flush response: %w", err)
 			return
 		}
 
@@ -1221,7 +1225,7 @@ func TestHostClientPendingRequests(t *testing.T) {
 			resp := AcquireResponse()
 
 			if err := c.DoTimeout(req, resp, 10*time.Second); err != nil {
-				resultCh <- fmt.Errorf("unexpected error: %s", err)
+				resultCh <- fmt.Errorf("unexpected error: %w", err)
 				return
 			}
 

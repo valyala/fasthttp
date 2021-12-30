@@ -1,3 +1,6 @@
+// go:build !windows
+// Don't run FS tests on windows as it isn't compatible for now.
+
 package fasthttp
 
 import (
@@ -60,7 +63,7 @@ func TestNewVHostPathRewriterMaliciousHost(t *testing.T) {
 
 	f := NewVHostPathRewriter(0)
 	path := f(&ctx)
-	expectedPath := "/invalid-host/foo/bar/baz"
+	expectedPath := "/invalid-host/"
 	if string(path) != expectedPath {
 		t.Fatalf("unexpected path %q. Expecting %q", path, expectedPath)
 	}

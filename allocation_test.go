@@ -71,7 +71,7 @@ func TestAllocationClient(t *testing.T) {
 }
 
 func TestAllocationURI(t *testing.T) {
-	uri := []byte("http://username:password@example.com/some/path?foo=bar#test")
+	uri := []byte("http://username:password@hello.%e4%b8%96%e7%95%8c.com/some/path?foo=bar#test")
 
 	n := testing.AllocsPerRun(100, func() {
 		u := AcquireURI()
