@@ -127,7 +127,7 @@ type Resolver interface {
 
 // TCPDialer contains options to control a group of Dial calls.
 type TCPDialer struct {
-	// Concurrency controls the maximum number of concurrent Dails
+	// Concurrency controls the maximum number of concurrent Dials
 	// that can be performed using this object.
 	// Setting this to 0 means unlimited.
 	//
