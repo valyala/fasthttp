@@ -1991,7 +1991,7 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		// This is for go 1.6 bug. See https://github.com/golang/go/issues/14121 .
 		if err == bufio.ErrBufferFull {
 			return &ErrSmallBuffer{
-				error: fmt.Errorf("error when reading request headers: %w", errSmallBuffer),
+				error: fmt.Errorf("error when reading request headers: %w (n=%d, r.Buffered()=%d)", errSmallBuffer, n, r.Buffered()),
 			}
 		}
 
