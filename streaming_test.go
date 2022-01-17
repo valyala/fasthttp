@@ -31,6 +31,7 @@ aaaaaaaaaa`
 	s := &Server{
 		StreamRequestBody: true,
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			body := ""
 			expected := "aaaaaaaaaa"
 			if string(ctx.Path()) == "/one" {

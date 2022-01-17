@@ -920,6 +920,7 @@ func testPipelineClientDoConcurrent(t *testing.T, concurrency int, maxBatchDelay
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.WriteString("OK") //nolint:errcheck
 		},
 	}
@@ -1192,6 +1193,7 @@ func TestHostClientPendingRequests(t *testing.T) {
 	readyCh := make(chan struct{}, concurrency)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			readyCh <- struct{}{}
 			<-doneCh
 		},
@@ -1296,6 +1298,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 				emptyBodyCount++
 			}
 
+			ctx.SetStatusCode(200)
 			ctx.WriteString("foo") //nolint:errcheck
 		},
 	}
@@ -1371,6 +1374,7 @@ func TestHostClientMaxConnDuration(t *testing.T) {
 	connectionCloseCount := uint32(0)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.WriteString("abcd") //nolint:errcheck
 			if ctx.Request.ConnectionClose() {
 				atomic.AddUint32(&connectionCloseCount, 1)
@@ -1428,6 +1432,7 @@ func TestHostClientMultipleAddrs(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.Write(ctx.Host()) //nolint:errcheck
 			ctx.SetConnectionClose()
 		},
@@ -1496,6 +1501,7 @@ func TestClientFollowRedirects(t *testing.T) {
 				u.Update("/bar")
 				ctx.Redirect(u.String(), StatusFound)
 			default:
+				ctx.SetStatusCode(200)
 				ctx.Success("text/plain", ctx.Path())
 			}
 		},
@@ -1960,6 +1966,7 @@ func TestHostClientTransport(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.WriteString("abcd") //nolint:errcheck
 		},
 	}
@@ -2490,8 +2497,10 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			if ctx.IsGet() {
+				ctx.SetStatusCode(200)
 				ctx.Success("text/plain", ctx.URI().FullURI())
 			} else if ctx.IsPost() {
+				ctx.SetStatusCode(200)
 				ctx.PostArgs().WriteTo(ctx) //nolint:errcheck
 			}
 		},
@@ -2567,6 +2576,7 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 				emptyBodyCount++
 			}
 			time.Sleep(5 * time.Millisecond)
+			ctx.SetStatusCode(200)
 			ctx.WriteString("foo") //nolint:errcheck
 		},
 	}
@@ -2646,6 +2656,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 				emptyBodyCount++
 			}
 			time.Sleep(5 * time.Millisecond)
+			ctx.SetStatusCode(200)
 			ctx.WriteString("foo") //nolint:errcheck
 		},
 	}

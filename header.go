@@ -129,9 +129,6 @@ func (h *RequestHeader) SetByteRange(startPos, endPos int) {
 
 // StatusCode returns response status code.
 func (h *ResponseHeader) StatusCode() int {
-	if h.statusCode == 0 {
-		return StatusOK
-	}
 	return h.statusCode
 }
 

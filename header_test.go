@@ -359,7 +359,7 @@ func TestResponseHeaderDefaultStatusCode(t *testing.T) {
 
 	var h ResponseHeader
 	statusCode := h.StatusCode()
-	if statusCode != StatusOK {
+	if statusCode != 0 {
 		t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
 	}
 }

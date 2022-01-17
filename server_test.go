@@ -40,6 +40,7 @@ func TestServerCRNLAfterPost_Pipeline(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 		},
 		Logger: &testLogger{},
 	}
@@ -85,6 +86,7 @@ func TestServerCRNLAfterPost(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 		},
 		Logger:      &testLogger{},
 		ReadTimeout: time.Millisecond * 100,
@@ -128,6 +130,7 @@ func TestServerPipelineFlush(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 		},
 	}
 	ln := fasthttputil.NewInmemoryListener()
@@ -251,7 +254,9 @@ func TestServerConnState(t *testing.T) {
 
 	states := make([]string, 0)
 	s := &Server{
-		Handler: func(ctx *RequestCtx) {},
+		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
+		},
 		ConnState: func(conn net.Conn, state ConnState) {
 			states = append(states, state.String())
 		},
@@ -677,6 +682,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 
 	readyCh := make(chan struct{})
 	h := func(ctx *RequestCtx) {
+		ctx.SetStatusCode(200)
 		ctx.SetConnectionClose()
 		if ctx.IsBodyStream() {
 			t.Fatal("IsBodyStream must return false")
@@ -766,6 +772,7 @@ func TestServerDisableKeepalive(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.WriteString("OK") //nolint:errcheck
 		},
 		DisableKeepalive: true,
@@ -839,6 +846,7 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.WriteString("OK") //nolint:errcheck
 		},
 		MaxConnsPerIP: 1,
@@ -943,6 +951,7 @@ func TestServerConcurrencyLimit(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.WriteString("OK") //nolint:errcheck
 		},
 		Concurrency: 1,
@@ -1287,6 +1296,7 @@ Connection: close
 					}
 					ctx.Redirect("/", StatusSeeOther)
 				default:
+					ctx.SetStatusCode(200)
 					ctx.WriteString("non-upload") //nolint:errcheck
 				}
 			},
@@ -1759,6 +1769,7 @@ func TestServerHeadRequest(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			fmt.Fprintf(ctx, "Request method is %q", ctx.Method())
 			ctx.SetContentType("aaa/bbb")
 		},
@@ -1817,6 +1828,7 @@ func TestServerExpect100Continue(t *testing.T) {
 			if string(ctx.PostBody()) != "12345" {
 				t.Errorf("unexpected body: %q. Expecting %q", ctx.PostBody(), "12345")
 			}
+			ctx.SetStatusCode(200)
 			ctx.WriteString("foobar") //nolint:errcheck
 		},
 	}
@@ -1875,6 +1887,7 @@ func TestServerContinueHandler(t *testing.T) {
 			if string(ctx.PostBody()) != "12345" {
 				t.Errorf("unexpected body: %q. Expecting %q", ctx.PostBody(), "12345")
 			}
+			ctx.SetStatusCode(200)
 			ctx.WriteString("foobar") //nolint:errcheck
 		},
 	}
@@ -2373,6 +2386,7 @@ func TestRequestCtxHijack(t *testing.T) {
 			if !ctx.Hijacked() {
 				t.Error("connection must be hijacked")
 			}
+			ctx.SetStatusCode(200)
 			ctx.Success("foo/bar", []byte("hijack it!"))
 		},
 	}
@@ -2492,6 +2506,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 	h := func(ctx *RequestCtx) {
 		if string(ctx.Path()) == "/" {
+			ctx.SetStatusCode(200)
 			ctx.Success("aaa/bbb", []byte("real response"))
 		}
 	}
@@ -2617,6 +2632,7 @@ func TestTimeoutHandlerTimeoutReuse(t *testing.T) {
 		if string(ctx.Path()) == "/timeout" {
 			time.Sleep(time.Second)
 		}
+		ctx.SetStatusCode(200)
 		ctx.SetBodyString("ok")
 	}
 	s := &Server{
@@ -2812,7 +2828,7 @@ func TestServerMaxRequestsPerConn(t *testing.T) {
 	t.Parallel()
 
 	s := &Server{
-		Handler:            func(ctx *RequestCtx) {},
+		Handler:            func(ctx *RequestCtx) { ctx.SetStatusCode(200) },
 		MaxRequestsPerConn: 1,
 	}
 
@@ -2886,6 +2902,7 @@ func TestServerRequestNumAndTime(t *testing.T) {
 	var connT time.Time
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			n++
 			if ctx.ConnRequestNum() != n {
 				t.Errorf("unexpected request number: %d. Expecting %d", ctx.ConnRequestNum(), n)
@@ -2933,7 +2950,7 @@ func TestServerEmptyResponse(t *testing.T) {
 	}
 
 	br := bufio.NewReader(&rw.w)
-	verifyResponse(t, br, 200, string(defaultContentType), "")
+	verifyResponse(t, br, 0, string(defaultContentType), "")
 }
 
 func TestServerLogger(t *testing.T) {
@@ -2945,6 +2962,7 @@ func TestServerLogger(t *testing.T) {
 			logger := ctx.Logger()
 			h := &ctx.Request.Header
 			logger.Printf("begin")
+			ctx.SetStatusCode(200)
 			ctx.Success("text/html", []byte(fmt.Sprintf("requestURI=%s, body=%q, remoteAddr=%s",
 				h.RequestURI(), ctx.Request.Body(), ctx.RemoteAddr())))
 			logger.Printf("end")
@@ -2990,6 +3008,7 @@ func TestServerRemoteAddr(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
+			ctx.SetStatusCode(200)
 			ctx.Success("text/html", []byte(fmt.Sprintf("requestURI=%s, remoteAddr=%s, remoteIP=%s",
 				h.RequestURI(), ctx.RemoteAddr(), ctx.RemoteIP())))
 		},
@@ -3019,6 +3038,7 @@ func TestServerCustomRemoteAddr(t *testing.T) {
 
 	customRemoteAddrHandler := func(h RequestHandler) RequestHandler {
 		return func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.SetRemoteAddr(&net.TCPAddr{
 				IP:   []byte{1, 2, 3, 5},
 				Port: 0,
@@ -3121,6 +3141,7 @@ func TestServeConnSingleRequest(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
+			ctx.SetStatusCode(200)
 			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Peek(HeaderHost))))
 		},
 	}
@@ -3142,6 +3163,7 @@ func TestServeConnMultiRequests(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
+			ctx.SetStatusCode(200)
 			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Peek(HeaderHost))))
 		},
 	}
@@ -3165,6 +3187,7 @@ func TestShutdown(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			time.Sleep(time.Millisecond * 500)
+			ctx.SetStatusCode(200)
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
 	}
@@ -3226,6 +3249,7 @@ func TestCloseOnShutdown(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			time.Sleep(time.Millisecond * 500)
+			ctx.SetStatusCode(200)
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
 		CloseOnShutdown: true,
@@ -3287,6 +3311,7 @@ func TestShutdownReuse(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
 		ReadTimeout: time.Millisecond * 100,
@@ -3336,6 +3361,7 @@ func TestShutdownDone(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			<-ctx.Done()
+			ctx.SetStatusCode(200)
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
 	}
@@ -3374,6 +3400,7 @@ func TestShutdownErr(t *testing.T) {
 			c, cancel := context.WithCancel(ctx)
 			defer cancel()
 			<-c.Done()
+			ctx.SetStatusCode(200)
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
 	}
@@ -3409,6 +3436,7 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
 	}
@@ -3449,6 +3477,7 @@ func TestMultipleServe(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(200)
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
 	}

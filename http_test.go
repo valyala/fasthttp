@@ -2032,7 +2032,7 @@ func TestResponseSuccess(t *testing.T) {
 
 	// response with missing statusCode
 	testResponseSuccess(t, 0, "text/plain", "server", "foobar",
-		200, "text/plain", "server")
+		0, "text/plain", "server")
 
 	// response with missing server
 	testResponseSuccess(t, 500, "aaa", "", "aaadfsd",
