@@ -2114,7 +2114,7 @@ func TestServeConnHijackResetUserValues(t *testing.T) {
 			t.Errorf("unexpected error in ServeConn: %s", err)
 		}
 
-		time.Sleep(500 * time.Millisecond) // Wait Hijack handler to be called.
+		time.Sleep(500 * time.Millisecond) // Wait for the Hijack handler to be called.
 
 		close(ch)
 	}()
