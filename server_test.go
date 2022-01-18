@@ -2095,16 +2095,13 @@ func TestServeConnHijackResetUserValues(t *testing.T) {
 	rw.r.WriteString("GET /foo HTTP/1.0\r\nConnection: keep-alive\r\nHost: google.com\r\n\r\n")
 	rw.r.WriteString("")
 
-	userValuesClosed := false
-
 	ch := make(chan struct{})
 	go func() {
 		err := ServeConn(rw, func(ctx *RequestCtx) {
 			ctx.Hijack(func(c net.Conn) {})
 			ctx.SetUserValue("myKey", &closerWithRequestCtx{
-				ctx: ctx,
 				closeFunc: func(_ *RequestCtx) error {
-					userValuesClosed = true
+					close(ch)
 
 					return nil
 				}},
@@ -2113,20 +2110,12 @@ func TestServeConnHijackResetUserValues(t *testing.T) {
 		if err != nil {
 			t.Errorf("unexpected error in ServeConn: %s", err)
 		}
-
-		time.Sleep(500 * time.Millisecond) // Wait for the Hijack handler to be called.
-
-		close(ch)
 	}()
 
 	select {
 	case <-ch:
 	case <-time.After(time.Second):
-		t.Fatal("timeout")
-	}
-
-	if !userValuesClosed {
-		t.Errorf("UserValues should be reset")
+		t.Errorf("Timeout: UserValues should be reset")
 	}
 }
 
