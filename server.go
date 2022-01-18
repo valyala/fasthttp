@@ -2375,6 +2375,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		if hijackHandler != nil {
 			var hjr io.Reader = c
+			hctx := ctx
 			if br != nil {
 				hjr = br
 				br = nil
@@ -2394,7 +2395,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			if err != nil {
 				break
 			}
-			go hijackConnHandler(hjr, c, s, hijackHandler)
+			go hijackConnHandler(hctx, hjr, c, s, hijackHandler)
 			err = errHijacked
 			break
 		}
@@ -2446,7 +2447,7 @@ func (s *Server) setState(nc net.Conn, state ConnState) {
 	}
 }
 
-func hijackConnHandler(r io.Reader, c net.Conn, s *Server, h HijackHandler) {
+func hijackConnHandler(ctx *RequestCtx, r io.Reader, c net.Conn, s *Server, h HijackHandler) {
 	hjc := s.acquireHijackConn(r, c)
 	h(hjc)
 
@@ -2457,6 +2458,7 @@ func hijackConnHandler(r io.Reader, c net.Conn, s *Server, h HijackHandler) {
 		c.Close()
 		s.releaseHijackConn(hjc)
 	}
+	ctx.ResetUserValues()
 }
 
 func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {

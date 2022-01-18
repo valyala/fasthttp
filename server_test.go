@@ -2088,6 +2088,37 @@ func TestServeConnKeepRequestAndResponseUntilResetUserValues(t *testing.T) {
 	}
 }
 
+func TestServeConnHijackResetUserValues(t *testing.T) {
+	t.Parallel()
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.0\r\nConnection: keep-alive\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("")
+
+	ch := make(chan struct{})
+	go func() {
+		err := ServeConn(rw, func(ctx *RequestCtx) {
+			ctx.Hijack(func(c net.Conn) {})
+			ctx.SetUserValue("myKey", &closerWithRequestCtx{
+				closeFunc: func(_ *RequestCtx) error {
+					close(ch)
+
+					return nil
+				}},
+			)
+		})
+		if err != nil {
+			t.Errorf("unexpected error in ServeConn: %s", err)
+		}
+	}()
+
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Errorf("Timeout: UserValues should be reset")
+	}
+}
+
 func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 	t.Parallel()
 
