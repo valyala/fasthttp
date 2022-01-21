@@ -2512,7 +2512,7 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 		case signal := <-hijackStopCh:
 			count++
 
-			time.Sleep(50 * time.Millisecond) // Wait to ensure the the connection is finished.
+			time.Sleep(200 * time.Millisecond) // Wait to ensure the the connection is finished.
 
 			id := signal.id
 			rw := signal.rw
