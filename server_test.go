@@ -2435,6 +2435,7 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 		rw *readWriter
 	}
 
+	wg := sync.WaitGroup{}
 	totalConns := 100
 	hijackStartCh := make(chan *hijackSignal, totalConns)
 	hijackStopCh := make(chan *hijackSignal, totalConns)
@@ -2446,6 +2447,11 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 
 		ctx.Hijack(func(c net.Conn) {
 			signal := <-hijackStartCh
+			defer func() {
+				hijackStopCh <- signal
+				wg.Done()
+			}()
+
 			b := make([]byte, 1)
 			stop := false
 
@@ -2468,8 +2474,6 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 					t.Errorf("unexpected error when writing data: %s", err)
 				}
 			}
-
-			hijackStopCh <- signal
 		})
 
 		if !ctx.Hijacked() {
@@ -2480,7 +2484,6 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 	}
 
 	hijackedString := "foobar baz hijacked!!!"
-	wg := sync.WaitGroup{}
 
 	for i := 0; i < totalConns; i++ {
 		wg.Add(1)
@@ -2488,16 +2491,12 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 		go func(t *testing.T, id int) {
 			t.Helper()
 
-			defer wg.Done()
-
 			rw := new(readWriter)
 			rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
 			rw.r.WriteString(hijackedString)
 
 			if err := s.ServeConn(rw); err != nil {
 				t.Errorf("[iter: %d] Unexpected error from serveConn: %s", id, err)
-
-				return
 			}
 
 			hijackStartCh <- &hijackSignal{id, rw}
@@ -2511,8 +2510,6 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 		select {
 		case signal := <-hijackStopCh:
 			count++
-
-			time.Sleep(200 * time.Millisecond) // Wait to ensure the the connection is finished.
 
 			id := signal.id
 			rw := signal.rw
