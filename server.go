@@ -777,10 +777,42 @@ func (ctx *RequestCtx) Conn() net.Conn {
 	return ctx.c
 }
 
+func (ctx *RequestCtx) reset() {
+	ctx.userValues.Reset()
+	ctx.Request.Reset()
+	ctx.Response.Reset()
+	ctx.fbr.reset()
+
+	ctx.connID = 0
+	ctx.connRequestNum = 0
+	ctx.connTime = zeroTime
+	ctx.remoteAddr = nil
+	ctx.time = zeroTime
+	ctx.s = nil
+	ctx.c = nil
+
+	if ctx.timeoutResponse != nil {
+		ctx.timeoutResponse.Reset()
+	}
+
+	if ctx.timeoutTimer != nil {
+		stopTimer(ctx.timeoutTimer)
+	}
+
+	ctx.hijackHandler = nil
+	ctx.hijackNoResponse = false
+}
+
 type firstByteReader struct {
 	c        net.Conn
 	ch       byte
 	byteRead bool
+}
+
+func (r *firstByteReader) reset() {
+	r.c = nil
+	r.ch = 0
+	r.byteRead = false
 }
 
 func (r *firstByteReader) Read(b []byte) (int, error) {
@@ -2084,7 +2116,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		connectionClose bool
 		isHTTP11        bool
 
-		reqReset, respReset    bool
 		continueReadingRequest bool = true
 	)
 	for {
@@ -2123,7 +2154,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			br, err = acquireByteReader(&ctx)
 		}
 
-		reqReset, respReset = false, false
 		ctx.Request.isTLS = isTLS
 		ctx.Response.Header.noDefaultContentType = s.NoDefaultContentType
 		ctx.Response.Header.noDefaultDate = s.NoDefaultDate
@@ -2375,13 +2405,9 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		if hijackHandler != nil {
 			var hjr io.Reader = c
-			hctx := ctx
 			if br != nil {
 				hjr = br
 				br = nil
-
-				// br may point to ctx.fbr, so do not return ctx into pool below.
-				ctx = nil
 			}
 			if bw != nil {
 				err = bw.Flush()
@@ -2395,7 +2421,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			if err != nil {
 				break
 			}
-			go hijackConnHandler(hctx, hjr, c, s, hijackHandler)
+			go hijackConnHandler(ctx, hjr, c, s, hijackHandler)
 			err = errHijacked
 			break
 		}
@@ -2408,8 +2434,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		s.setState(c, StateIdle)
 		ctx.userValues.Reset()
-
-		reqReset, respReset = true, true
 		ctx.Request.Reset()
 		ctx.Response.Reset()
 
@@ -2425,18 +2449,10 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 	if bw != nil {
 		releaseWriter(s, bw)
 	}
-	if ctx != nil {
-		// in unexpected cases the for loop will break
-		// before request/response reset call. in such cases, call it before
-		// release to fix #548
-		if !reqReset {
-			ctx.Request.Reset()
-		}
-		if !respReset {
-			ctx.Response.Reset()
-		}
+	if hijackHandler == nil {
 		s.releaseCtx(ctx)
 	}
+
 	return
 }
 
@@ -2458,7 +2474,7 @@ func hijackConnHandler(ctx *RequestCtx, r io.Reader, c net.Conn, s *Server, h Hi
 		c.Close()
 		s.releaseHijackConn(hjc)
 	}
-	ctx.ResetUserValues()
+	s.releaseCtx(ctx)
 }
 
 func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
@@ -2603,17 +2619,19 @@ func releaseWriter(s *Server, w *bufio.Writer) {
 func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 	v := s.ctxPool.Get()
 	if v == nil {
-		ctx = &RequestCtx{
-			s: s,
-		}
 		keepBodyBuffer := !s.ReduceMemoryUsage
+
+		ctx = new(RequestCtx)
 		ctx.Request.keepBodyBuffer = keepBodyBuffer
 		ctx.Response.keepBodyBuffer = keepBodyBuffer
 	} else {
 		ctx = v.(*RequestCtx)
 	}
+
+	ctx.s = s
 	ctx.c = c
-	return
+
+	return ctx
 }
 
 // Init2 prepares ctx for passing to RequestHandler.
@@ -2736,10 +2754,8 @@ func (s *Server) releaseCtx(ctx *RequestCtx) {
 	if ctx.timeoutResponse != nil {
 		panic("BUG: cannot release timed out RequestCtx")
 	}
-	ctx.c = nil
-	ctx.remoteAddr = nil
-	ctx.fbr.c = nil
-	ctx.userValues.Reset()
+
+	ctx.reset()
 	s.ctxPool.Put(ctx)
 }
 
