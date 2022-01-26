@@ -70,14 +70,14 @@ type URI struct {
 // CopyTo copies uri contents to dst.
 func (u *URI) CopyTo(dst *URI) {
 	dst.Reset()
-	dst.pathOriginal = append(dst.pathOriginal[:0], u.pathOriginal...)
-	dst.scheme = append(dst.scheme[:0], u.scheme...)
-	dst.path = append(dst.path[:0], u.path...)
-	dst.queryString = append(dst.queryString[:0], u.queryString...)
-	dst.hash = append(dst.hash[:0], u.hash...)
-	dst.host = append(dst.host[:0], u.host...)
-	dst.username = append(dst.username[:0], u.username...)
-	dst.password = append(dst.password[:0], u.password...)
+	dst.pathOriginal = append(dst.pathOriginal, u.pathOriginal...)
+	dst.scheme = append(dst.scheme, u.scheme...)
+	dst.path = append(dst.path, u.path...)
+	dst.queryString = append(dst.queryString, u.queryString...)
+	dst.hash = append(dst.hash, u.hash...)
+	dst.host = append(dst.host, u.host...)
+	dst.username = append(dst.username, u.username...)
+	dst.password = append(dst.password, u.password...)
 
 	u.queryArgs.CopyTo(&dst.queryArgs)
 	dst.parsedQueryArgs = u.parsedQueryArgs
