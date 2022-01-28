@@ -1367,7 +1367,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.secureErrorLogMessage = c.SecureErrorLogMessage
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
-	if c.IsTLS != req.uri.isHttps() {
+	if c.IsTLS != req.URI().isHttps() {
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 
