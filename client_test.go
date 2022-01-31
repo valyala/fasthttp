@@ -2840,4 +2840,3 @@ func TestHttpsRequestWithoutParsedURL(t *testing.T) {
 		t.Fatalf("https requests with IsTLS client must succeed")
 	}
 }
-
