@@ -2820,3 +2820,24 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 		t.Fatalf("at least one request body was empty")
 	}
 }
+
+func TestHttpsRequestWithoutParsedURL(t *testing.T) {
+	t.Parallel()
+
+	client := HostClient{
+		IsTLS: true,
+		Transport: func(r1 *Request, r2 *Response) error {
+			return nil
+		},
+	}
+
+	req := &Request{}
+
+	req.SetRequestURI("https://foo.com/bar")
+
+	_, err := client.doNonNilReqResp(req, &Response{})
+	if err != nil {
+		t.Fatalf("https requests with IsTLS client must succeed")
+	}
+}
+
