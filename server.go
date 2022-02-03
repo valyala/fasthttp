@@ -454,7 +454,7 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 	}
 
 	return func(ctx *RequestCtx) {
-		concurrencyCh := ctx.s.concurrencyCh
+		concurrencyCh := ctx.s.Load().(*Server).concurrencyCh
 		select {
 		case concurrencyCh <- struct{}{}:
 		default:
@@ -594,7 +594,7 @@ type RequestCtx struct {
 	time time.Time
 
 	logger ctxLogger
-	s      *Server
+	s      atomic.Value
 	c      net.Conn
 	fbr    firstByteReader
 
@@ -788,7 +788,7 @@ func (ctx *RequestCtx) reset() {
 	ctx.connTime = zeroTime
 	ctx.remoteAddr = nil
 	ctx.time = zeroTime
-	ctx.s = nil
+	ctx.s.Store(fakeServer)
 	ctx.c = nil
 
 	if ctx.timeoutResponse != nil {
@@ -1453,7 +1453,7 @@ func (ctx *RequestCtx) Logger() Logger {
 		ctx.logger.ctx = ctx
 	}
 	if ctx.logger.logger == nil {
-		ctx.logger.logger = ctx.s.logger()
+		ctx.logger.logger = ctx.s.Load().(*Server).logger()
 	}
 	return &ctx.logger
 }
@@ -2549,7 +2549,7 @@ const (
 
 func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
 	ctx := *ctxP
-	s := ctx.s
+	s := ctx.s.Load().(*Server)
 	c := ctx.c
 	s.releaseCtx(ctx)
 
@@ -2581,9 +2581,10 @@ func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
 }
 
 func acquireReader(ctx *RequestCtx) *bufio.Reader {
-	v := ctx.s.readerPool.Get()
+	s := ctx.s.Load().(*Server)
+	v := s.readerPool.Get()
 	if v == nil {
-		n := ctx.s.ReadBufferSize
+		n := s.ReadBufferSize
 		if n <= 0 {
 			n = defaultReadBufferSize
 		}
@@ -2599,9 +2600,10 @@ func releaseReader(s *Server, r *bufio.Reader) {
 }
 
 func acquireWriter(ctx *RequestCtx) *bufio.Writer {
-	v := ctx.s.writerPool.Get()
+	s := ctx.s.Load().(*Server)
+	v := s.writerPool.Get()
 	if v == nil {
-		n := ctx.s.WriteBufferSize
+		n := s.WriteBufferSize
 		if n <= 0 {
 			n = defaultWriteBufferSize
 		}
@@ -2627,8 +2629,7 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 	} else {
 		ctx = v.(*RequestCtx)
 	}
-
-	ctx.s = s
+	ctx.s.Store(s)
 	ctx.c = c
 
 	return ctx
@@ -2645,7 +2646,7 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.remoteAddr = nil
 	ctx.logger.logger = logger
 	ctx.connID = nextConnID()
-	ctx.s = fakeServer
+	ctx.s.Store(fakeServer)
 	ctx.connRequestNum = 0
 	ctx.connTime = time.Now()
 
@@ -2684,11 +2685,21 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 	return
 }
 
+var closed = make(chan struct{})
+
+func init() {
+	close(closed)
+}
+
 // Done returns a channel that's closed when work done on behalf of this
 // context should be canceled. Done may return nil if this context can
 // never be canceled. Successive calls to Done return the same value.
 func (ctx *RequestCtx) Done() <-chan struct{} {
-	return ctx.s.done
+	s := ctx.s.Load()
+	if s != fakeServer {
+		return s.(*Server).done
+	}
+	return closed
 }
 
 // Err returns a non-nil error value after Done is closed,
@@ -2698,12 +2709,16 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 // Canceled if the context was canceled (via server Shutdown)
 // or DeadlineExceeded if the context's deadline passed.
 func (ctx *RequestCtx) Err() error {
-	select {
-	case <-ctx.s.done:
-		return context.Canceled
-	default:
-		return nil
+	s := ctx.s.Load()
+	if s != fakeServer {
+		select {
+		case <-s.(*Server).done:
+			return context.Canceled
+		default:
+			return nil
+		}
 	}
+	return context.Canceled
 }
 
 // Value returns the value associated with this context for key, or nil
