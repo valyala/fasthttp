@@ -424,10 +424,11 @@ type Server struct {
 	idleConns   map[net.Conn]struct{}
 	idleConnsMu sync.Mutex
 
-	mu   sync.Mutex
-	open int32
-	stop int32
-	done chan struct{}
+	mu     sync.Mutex
+	open   int32
+	stop   int32
+	done   context.Context
+	cancel context.CancelFunc
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -557,6 +558,12 @@ func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) R
 	}
 }
 
+type ContextWithoutValue interface {
+	Deadline() (deadline time.Time, ok bool)
+	Done() <-chan struct{}
+	Err() error
+}
+
 // RequestCtx contains incoming request and manages outgoing response.
 //
 // It is forbidden copying RequestCtx instances.
@@ -572,6 +579,8 @@ func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) R
 // running goroutines. The only exception is TimeoutError*, which may be called
 // while other goroutines accessing RequestCtx.
 type RequestCtx struct {
+	ContextWithoutValue
+
 	noCopy noCopy //nolint:unused,structcheck
 
 	// Incoming request.
@@ -753,6 +762,23 @@ func (ctx *RequestCtx) IsTLS() bool {
 	return ok
 }
 
+// Value returns the value associated with this context for key, or nil
+// if no value is associated with key. Successive calls to Value with
+// the same key returns the same result.
+//
+// This method is present to make RequestCtx implement the context interface.
+// This method is the same as calling ctx.UserValue(key)
+func (ctx *RequestCtx) Value(key interface{}) interface{} {
+	switch k := key.(type) {
+	case string:
+		return ctx.UserValue(k)
+	case *int:
+		return ctx.ContextWithoutValue.(context.Context).Value(key)
+	default:
+		return nil
+	}
+}
+
 // TLSConnectionState returns TLS connection state.
 //
 // The function returns nil if the underlying connection isn't tls.Conn.
@@ -790,6 +816,7 @@ func (ctx *RequestCtx) reset() {
 	ctx.time = zeroTime
 	ctx.s = nil
 	ctx.c = nil
+	ctx.ContextWithoutValue = nil
 
 	if ctx.timeoutResponse != nil {
 		ctx.timeoutResponse.Reset()
@@ -1783,7 +1810,7 @@ func (s *Server) Serve(ln net.Listener) error {
 	{
 		s.ln = append(s.ln, ln)
 		if s.done == nil {
-			s.done = make(chan struct{})
+			s.done, s.cancel = context.WithCancel(context.Background())
 		}
 
 		if s.concurrencyCh == nil {
@@ -1872,7 +1899,7 @@ func (s *Server) Shutdown() error {
 	}
 
 	if s.done != nil {
-		close(s.done)
+		s.cancel()
 	}
 
 	s.closeIdleConns()
@@ -1891,6 +1918,7 @@ func (s *Server) Shutdown() error {
 	}
 
 	s.done = nil
+	s.cancel = nil
 	s.ln = nil
 	return nil
 }
@@ -2628,6 +2656,7 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 		ctx = v.(*RequestCtx)
 	}
 
+	ctx.ContextWithoutValue = s.done
 	ctx.s = s
 	ctx.c = c
 
@@ -2672,51 +2701,6 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	}
 	ctx.Init2(c, logger, true)
 	req.CopyTo(&ctx.Request)
-}
-
-// Deadline returns the time when work done on behalf of this context
-// should be canceled. Deadline returns ok==false when no deadline is
-// set. Successive calls to Deadline return the same results.
-//
-// This method always returns 0, false and is only present to make
-// RequestCtx implement the context interface.
-func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
-	return
-}
-
-// Done returns a channel that's closed when work done on behalf of this
-// context should be canceled. Done may return nil if this context can
-// never be canceled. Successive calls to Done return the same value.
-func (ctx *RequestCtx) Done() <-chan struct{} {
-	return ctx.s.done
-}
-
-// Err returns a non-nil error value after Done is closed,
-// successive calls to Err return the same error.
-// If Done is not yet closed, Err returns nil.
-// If Done is closed, Err returns a non-nil error explaining why:
-// Canceled if the context was canceled (via server Shutdown)
-// or DeadlineExceeded if the context's deadline passed.
-func (ctx *RequestCtx) Err() error {
-	select {
-	case <-ctx.s.done:
-		return context.Canceled
-	default:
-		return nil
-	}
-}
-
-// Value returns the value associated with this context for key, or nil
-// if no value is associated with key. Successive calls to Value with
-// the same key returns the same result.
-//
-// This method is present to make RequestCtx implement the context interface.
-// This method is the same as calling ctx.UserValue(key)
-func (ctx *RequestCtx) Value(key interface{}) interface{} {
-	if keyString, ok := key.(string); ok {
-		return ctx.UserValue(keyString)
-	}
-	return nil
 }
 
 var fakeServer = &Server{
