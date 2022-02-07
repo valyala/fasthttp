@@ -42,7 +42,7 @@ type URI struct {
 	noCopy noCopy //nolint:unused,structcheck
 
 	pathOriginal []byte
-	scheme       []byte
+	scheme       *[]byte
 	path         []byte
 	queryString  []byte
 	hash         []byte
@@ -71,7 +71,7 @@ type URI struct {
 func (u *URI) CopyTo(dst *URI) {
 	dst.Reset()
 	dst.pathOriginal = append(dst.pathOriginal[:0], u.pathOriginal...)
-	dst.scheme = append(dst.scheme[:0], u.scheme...)
+	dst.scheme = u.scheme
 	dst.path = append(dst.path[:0], u.path...)
 	dst.queryString = append(dst.queryString[:0], u.queryString...)
 	dst.hash = append(dst.hash[:0], u.hash...)
@@ -197,37 +197,62 @@ func (u *URI) PathOriginal() []byte {
 //
 // The returned bytes are valid until the next URI method call.
 func (u *URI) Scheme() []byte {
-	scheme := u.scheme
-	if len(scheme) == 0 {
-		scheme = strHTTP
+	if u.scheme == nil {
+		return strHTTP
 	}
-	return scheme
+	return *u.scheme
 }
 
 // SetScheme sets URI scheme, i.e. http, https, ftp, etc.
 func (u *URI) SetScheme(scheme string) {
-	u.scheme = append(u.scheme[:0], scheme...)
-	lowercaseBytes(u.scheme)
+	if len(scheme) == 0 {
+		u.scheme = nil
+		return
+	}
+	if scheme == "http" {
+		u.scheme = &strHTTP
+		return
+	}
+	if scheme == "https" {
+		u.scheme = &strHTTPS
+		return
+	}
+	newScheme := []byte(scheme)
+	lowercaseBytes(newScheme)
+	u.scheme = &newScheme
 }
 
 // SetSchemeBytes sets URI scheme, i.e. http, https, ftp, etc.
 func (u *URI) SetSchemeBytes(scheme []byte) {
-	u.scheme = append(u.scheme[:0], scheme...)
-	lowercaseBytes(u.scheme)
+	if len(scheme) == 0 {
+		u.scheme = nil
+		return
+	}
+	if bytes.Equal(scheme, strHTTP) {
+		u.scheme = &strHTTP
+		return
+	}
+	if bytes.Equal(scheme, strHTTPS) {
+		u.scheme = &strHTTPS
+		return
+	}
+	newScheme := append([]byte(nil), scheme...) // copy scheme
+	lowercaseBytes(newScheme)
+	u.scheme = &newScheme
 }
 
 func (u *URI) isHttps() bool {
-	return bytes.Equal(u.scheme, strHTTPS)
+	return u.scheme == &strHTTPS
 }
 
 func (u *URI) isHttp() bool {
-	return len(u.scheme) == 0 || bytes.Equal(u.scheme, strHTTP)
+	return u.scheme == nil || u.scheme == &strHTTP
 }
 
 // Reset clears uri.
 func (u *URI) Reset() {
 	u.pathOriginal = u.pathOriginal[:0]
-	u.scheme = u.scheme[:0]
+	u.scheme = nil
 	u.path = u.path[:0]
 	u.queryString = u.queryString[:0]
 	u.hash = u.hash[:0]
@@ -714,16 +739,13 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 	n := bytes.Index(newURI, strSlashSlash)
 	if n >= 0 {
 		// absolute uri
-		var b [32]byte
-		schemeOriginal := b[:0]
-		if len(u.scheme) > 0 {
-			schemeOriginal = append([]byte(nil), u.scheme...)
-		}
+		schemeOriginal := u.scheme
 		if err := u.Parse(nil, newURI); err != nil {
 			return nil
 		}
-		if len(schemeOriginal) > 0 && len(u.scheme) == 0 {
-			u.scheme = append(u.scheme[:0], schemeOriginal...)
+		// if schema wasn't changed then use the old
+		if u.scheme == nil {
+			u.scheme = schemeOriginal
 		}
 		return buf
 	}
