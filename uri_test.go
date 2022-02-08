@@ -107,28 +107,31 @@ func TestURIUpdate(t *testing.T) {
 	t.Parallel()
 
 	// full uri
-	testURIUpdate(t, "http://foo.bar/baz?aaa=22#aaa", "https://aa.com/bb", "https://aa.com/bb")
+	testURIUpdate(t, "http://example.net/dir/path1.html?param1=val1#fragment1", "https://example.com/dir/path2.html", "https://example.com/dir/path2.html")
 
 	// empty uri
-	testURIUpdate(t, "http://aaa.com/aaa.html?234=234#add", "", "http://aaa.com/aaa.html?234=234#add")
+	testURIUpdate(t, "http://example.com/dir/path1.html?param1=val1#fragment1", "", "http://example.com/dir/path1.html?param1=val1#fragment1")
 
 	// request uri
-	testURIUpdate(t, "ftp://aaa/xxx/yyy?aaa=bb#aa", "/boo/bar?xx", "ftp://aaa/boo/bar?xx")
+	testURIUpdate(t, "http://example.com/dir/path1.html?param1=val1#fragment1", "/dir/path2.html?param2=val2#fragment2", "http://example.com/dir/path2.html?param2=val2#fragment2")
+
+	// schema
+	testURIUpdate(t, "http://example.com/dir/path1.html?param1=val1#fragment1", "https://example.com/dir/path1.html?param1=val1#fragment1", "https://example.com/dir/path1.html?param1=val1#fragment1")
 
 	// relative uri
-	testURIUpdate(t, "http://foo.bar/baz/xxx.html?aaa=22#aaa", "bb.html?xx=12#pp", "http://foo.bar/baz/bb.html?xx=12#pp")
-	testURIUpdate(t, "http://xx/a/b/c/d", "../qwe/p?zx=34", "http://xx/a/b/qwe/p?zx=34")
-	testURIUpdate(t, "https://qqq/aaa.html?foo=bar", "?baz=434&aaa#xcv", "https://qqq/aaa.html?baz=434&aaa#xcv")
-	testURIUpdate(t, "http://foo.bar/baz", "~a/%20b=c,тест?йцу=ке", "http://foo.bar/~a/%20b=c,%D1%82%D0%B5%D1%81%D1%82?йцу=ке")
-	testURIUpdate(t, "http://foo.bar/baz", "/qwe#fragment", "http://foo.bar/qwe#fragment")
-	testURIUpdate(t, "http://foobar/baz/xxx", "aaa.html#bb?cc=dd&ee=dfd", "http://foobar/baz/aaa.html#bb?cc=dd&ee=dfd")
+	testURIUpdate(t, "http://example.com/baz/xxx.html?aaa=22#aaa", "bb.html?xx=12#pp", "http://example.com/baz/bb.html?xx=12#pp")
+	testURIUpdate(t, "http://example.com/a/b/c/d", "../qwe/p?zx=34", "http://example.com/a/b/qwe/p?zx=34")
+	testURIUpdate(t, "http://example.com/aaa.html?foo=bar", "?baz=434&aaa#xcv", "http://example.com/aaa.html?baz=434&aaa#xcv")
+	testURIUpdate(t, "http://example.com/baz", "~a/%20b=c,тест?йцу=ке", "http://example.com/~a/%20b=c,%D1%82%D0%B5%D1%81%D1%82?йцу=ке")
+	testURIUpdate(t, "http://example.com/baz", "/qwe#fragment", "http://example.com/qwe#fragment")
+	testURIUpdate(t, "http://example.com/baz/xxx", "aaa.html#bb?cc=dd&ee=dfd", "http://example.com/baz/aaa.html#bb?cc=dd&ee=dfd")
 
 	// hash
-	testURIUpdate(t, "http://foo.bar/baz#aaa", "#fragment", "http://foo.bar/baz#fragment")
+	testURIUpdate(t, "http://example.com/#fragment1", "#fragment2", "http://example.com/#fragment2")
 
 	// uri without scheme
-	testURIUpdate(t, "https://foo.bar/baz", "//aaa.bbb/cc?dd", "https://aaa.bbb/cc?dd")
-	testURIUpdate(t, "http://foo.bar/baz", "//aaa.bbb/cc?dd", "http://aaa.bbb/cc?dd")
+	testURIUpdate(t, "https://example.net/dir/path1.html", "//example.com/dir/path2.html", "https://example.com/dir/path2.html")
+	testURIUpdate(t, "http://example.net/dir/path1.html", "//example.com/dir/path2.html", "http://example.com/dir/path2.html")
 }
 
 func testURIUpdate(t *testing.T, base, update, result string) {
@@ -237,13 +240,13 @@ func TestURIFullURI(t *testing.T) {
 	testURIFullURI(t, "", "example.com", "", "", &args, "http://example.com/")
 
 	// empty scheme and hash
-	testURIFullURI(t, "", "aa.com", "/foo/bar", "", &args, "http://aa.com/foo/bar")
+	testURIFullURI(t, "", "example.com", "/foo/bar", "", &args, "http://example.com/foo/bar")
 
 	// empty hash
 	testURIFullURI(t, "fTP", "example.com", "/foo", "", &args, "ftp://example.com/foo")
 
 	// empty args
-	testURIFullURI(t, "https", "xx.com", "/", "aaa", &args, "https://xx.com/#aaa")
+	testURIFullURI(t, "https", "example.com", "/", "aaa", &args, "https://example.com/#aaa")
 
 	// non-empty args and non-ASCII path
 	args.Set("foo", "bar")
@@ -282,8 +285,8 @@ func TestURIParseNilHost(t *testing.T) {
 	testURIParseScheme(t, "HTtP://google.com/", "http", "google.com", "/", "")
 	testURIParseScheme(t, "://google.com/xyz", "http", "google.com", "/xyz", "")
 	testURIParseScheme(t, "//google.com/foobar", "http", "google.com", "/foobar", "")
-	testURIParseScheme(t, "fTP://aaa.com", "ftp", "aaa.com", "/", "")
-	testURIParseScheme(t, "httPS://aaa.com", "https", "aaa.com", "/", "")
+	testURIParseScheme(t, "fTP://example.com", "ftp", "example.com", "/", "")
+	testURIParseScheme(t, "httPS://example.com", "https", "example.com", "/", "")
 
 	// missing slash after hostname
 	testURIParseScheme(t, "http://example.com?baz=111", "http", "example.com", "/?baz=111", "")
@@ -351,25 +354,25 @@ func TestURIParse(t *testing.T) {
 		"http://example.com/a.b.c?def=gkl#mnop", "example.com", "/a.b.c", "/a.b.c", "def=gkl", "mnop")
 
 	// '?' and '#' in hash
-	testURIParse(t, &u, "aaa.com", "/foo#bar?baz=aaa#bbb",
-		"http://aaa.com/foo#bar?baz=aaa#bbb", "aaa.com", "/foo", "/foo", "", "bar?baz=aaa#bbb")
+	testURIParse(t, &u, "example.com", "/foo#bar?baz=aaa#bbb",
+		"http://example.com/foo#bar?baz=aaa#bbb", "example.com", "/foo", "/foo", "", "bar?baz=aaa#bbb")
 
 	// encoded path
-	testURIParse(t, &u, "aa.com", "/Test%20+%20%D0%BF%D1%80%D0%B8?asdf=%20%20&s=12#sdf",
-		"http://aa.com/Test%20+%20%D0%BF%D1%80%D0%B8?asdf=%20%20&s=12#sdf", "aa.com", "/Test + при", "/Test%20+%20%D0%BF%D1%80%D0%B8", "asdf=%20%20&s=12", "sdf")
+	testURIParse(t, &u, "example.com", "/Test%20+%20%D0%BF%D1%80%D0%B8?asdf=%20%20&s=12#sdf",
+		"http://example.com/Test%20+%20%D0%BF%D1%80%D0%B8?asdf=%20%20&s=12#sdf", "example.com", "/Test + при", "/Test%20+%20%D0%BF%D1%80%D0%B8", "asdf=%20%20&s=12", "sdf")
 
 	// host in uppercase
 	testURIParse(t, &u, "example.com", "/bC?De=F#Gh",
 		"http://example.com/bC?De=F#Gh", "example.com", "/bC", "/bC", "De=F", "Gh")
 
 	// uri with hostname
-	testURIParse(t, &u, "example.com", "http://aaa.com/foo/bar?baz=aaa#ddd",
-		"http://aaa.com/foo/bar?baz=aaa#ddd", "aaa.com", "/foo/bar", "/foo/bar", "baz=aaa", "ddd")
+	testURIParse(t, &u, "example.com", "http://example.com/foo/bar?baz=aaa#ddd",
+		"http://example.com/foo/bar?baz=aaa#ddd", "example.com", "/foo/bar", "/foo/bar", "baz=aaa", "ddd")
 	testURIParse(t, &u, "example.com", "https://ab.com/f/b%20r?baz=aaa#ddd",
 		"https://ab.com/f/b%20r?baz=aaa#ddd", "ab.com", "/f/b r", "/f/b%20r", "baz=aaa", "ddd")
 
 	// no slash after hostname in uri
-	testURIParse(t, &u, "aaa.com", "http://google.com",
+	testURIParse(t, &u, "example.com", "http://google.com",
 		"http://google.com/", "google.com", "/", "/", "", "")
 
 	// uppercase hostname in uri
@@ -377,16 +380,16 @@ func TestURIParse(t *testing.T) {
 		"http://gogle.com/aaa", "gogle.com", "/aaa", "/aaa", "", "")
 
 	// http:// in query params
-	testURIParse(t, &u, "aaa.com", "/foo?bar=http://google.com",
-		"http://aaa.com/foo?bar=http://google.com", "aaa.com", "/foo", "/foo", "bar=http://google.com", "")
+	testURIParse(t, &u, "example.com", "/foo?bar=http://google.com",
+		"http://example.com/foo?bar=http://google.com", "example.com", "/foo", "/foo", "bar=http://google.com", "")
 
-	testURIParse(t, &u, "aaa.com", "//relative",
-		"http://aaa.com/relative", "aaa.com", "/relative", "//relative", "", "")
+	testURIParse(t, &u, "example.com", "//relative",
+		"http://example.com/relative", "example.com", "/relative", "//relative", "", "")
 
-	testURIParse(t, &u, "", "//aaa.com//absolute",
-		"http://aaa.com/absolute", "aaa.com", "/absolute", "//absolute", "", "")
+	testURIParse(t, &u, "", "//example.com//absolute",
+		"http://example.com/absolute", "example.com", "/absolute", "//absolute", "", "")
 
-	testURIParse(t, &u, "", "//aaa.com\r\n\r\nGET x",
+	testURIParse(t, &u, "", "//example.com\r\n\r\nGET x",
 		"http:///", "", "/", "", "", "")
 
 	testURIParse(t, &u, "", "http://[fe80::1%25en0]/",
