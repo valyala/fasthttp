@@ -132,6 +132,8 @@ func TestURIUpdate(t *testing.T) {
 	// uri without scheme
 	testURIUpdate(t, "https://example.net/dir/path1.html", "//example.com/dir/path2.html", "https://example.com/dir/path2.html")
 	testURIUpdate(t, "http://example.net/dir/path1.html", "//example.com/dir/path2.html", "http://example.com/dir/path2.html")
+	// host with port
+	testURIUpdate(t, "http://example.net/", "//example.com:8080/", "http://example.com:8080/")
 }
 
 func testURIUpdate(t *testing.T, base, update, result string) {
@@ -380,8 +382,8 @@ func TestURIParse(t *testing.T) {
 		"http://example.com/aaa", "example.com", "/aaa", "/aaa", "", "")
 
 	// http:// in query params
-	testURIParse(t, &u, "example.com", "/foo?bar=http://example.com",
-		"http://example.com/foo?bar=http://example.com", "example.com", "/foo", "/foo", "bar=http://example.com", "")
+	testURIParse(t, &u, "example.com", "/foo?bar=http://example.org",
+		"http://example.com/foo?bar=http://example.org", "example.com", "/foo", "/foo", "bar=http://example.org", "")
 
 	testURIParse(t, &u, "example.com", "//relative",
 		"http://example.com/relative", "example.com", "/relative", "//relative", "", "")
