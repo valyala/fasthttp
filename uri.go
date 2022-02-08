@@ -246,13 +246,30 @@ func (u *URI) Reset() {
 	// is calculated on each call to RequestURI().
 }
 
-// Host returns host part, i.e. aaa.com of http://aaa.com/foo/bar?baz=123#qwe .
+// Host returns host part or host:port if the port was specified.
+//
+// http://aaa.com/foo/bar?baz=123#qwe returns aaa.com
+// http://aaa.com:8080/foo/bar?baz=123#qwe returns aaa.com:8080
 //
 // Host is always lowercased.
 //
 // The returned bytes are valid until the next URI method call.
 func (u *URI) Host() []byte {
 	return u.host
+}
+
+// HostWithPort returns host:port
+// If the port wasn't specified then it will be set to protocol's default
+//
+// http://aaa.com/foo/bar?baz=123#qwe returns aaa.com:80
+// https://aaa.com/foo/bar?baz=123#qwe returns aaa.com:443
+// http://aaa.com:8080/foo/bar?baz=123#qwe returns aaa.com:8080
+//
+// Host is always lowercased.
+//
+// The returned bytes are valid until the next URI method call.
+func (u *URI) HostWithPort() []byte {
+	return []byte(addMissingPort(string(u.host), u.isHttps()))
 }
 
 // SetHost sets host for the uri.

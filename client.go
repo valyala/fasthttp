@@ -299,7 +299,6 @@ type Client struct {
 
 	mLock      sync.Mutex
 	m          map[string]*HostClient
-	ms         map[string]*HostClient
 	readerPool sync.Pool
 	writerPool sync.Pool
 }
@@ -460,7 +459,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 		return ErrorInvalidURI
 	}
 
-	host := uri.Host()
+	host := uri.HostWithPort()
 
 	isTLS := false
 	if uri.isHttps() {
@@ -472,22 +471,13 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	startCleaner := false
 
 	c.mLock.Lock()
-	m := c.m
-	if isTLS {
-		m = c.ms
+	if c.m == nil {
+		c.m = make(map[string]*HostClient)
 	}
-	if m == nil {
-		m = make(map[string]*HostClient)
-		if isTLS {
-			c.ms = m
-		} else {
-			c.m = m
-		}
-	}
-	hc := m[string(host)]
+	hc := c.m[string(host)]
 	if hc == nil {
 		hc = &HostClient{
-			Addr:                          addMissingPort(string(host), isTLS),
+			Addr:                          string(host),
 			Name:                          c.Name,
 			NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 			Dial:                          c.Dial,
@@ -510,8 +500,8 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			clientReaderPool:              &c.readerPool,
 			clientWriterPool:              &c.writerPool,
 		}
-		m[string(host)] = hc
-		if len(m) == 1 {
+		c.m[string(host)] = hc
+		if len(c.m) == 1 {
 			startCleaner = true
 		}
 	}
@@ -522,7 +512,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	c.mLock.Unlock()
 
 	if startCleaner {
-		go c.mCleaner(m)
+		go c.mCleaner(c.m)
 	}
 
 	return hc.Do(req, resp)
@@ -535,9 +525,6 @@ func (c *Client) Do(req *Request, resp *Response) error {
 func (c *Client) CloseIdleConnections() {
 	c.mLock.Lock()
 	for _, v := range c.m {
-		v.CloseIdleConnections()
-	}
-	for _, v := range c.ms {
 		v.CloseIdleConnections()
 	}
 	c.mLock.Unlock()
