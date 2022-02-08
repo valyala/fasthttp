@@ -808,7 +808,7 @@ func TestClientDoWithCustomHeaders(t *testing.T) {
 	uri := "/foo/bar/baz?a=b&cd=12"
 	headers := map[string]string{
 		"Foo":          "bar",
-		"Host":         "xxx.com",
+		"Host":         "example.com",
 		"Content-Type": "asdfsdf",
 		"a-b-c-d-f":    "",
 	}

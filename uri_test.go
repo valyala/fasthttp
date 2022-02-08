@@ -240,7 +240,7 @@ func TestURIFullURI(t *testing.T) {
 	testURIFullURI(t, "", "aa.com", "/foo/bar", "", &args, "http://aa.com/foo/bar")
 
 	// empty hash
-	testURIFullURI(t, "fTP", "XXx.com", "/foo", "", &args, "ftp://xxx.com/foo")
+	testURIFullURI(t, "fTP", "example.com", "/foo", "", &args, "ftp://example.com/foo")
 
 	// empty args
 	testURIFullURI(t, "https", "xx.com", "/", "aaa", &args, "https://xx.com/#aaa")
@@ -248,7 +248,7 @@ func TestURIFullURI(t *testing.T) {
 	// non-empty args and non-ASCII path
 	args.Set("foo", "bar")
 	args.Set("xxx", "йух")
-	testURIFullURI(t, "", "xxx.com", "/тест123", "2er", &args, "http://xxx.com/%D1%82%D0%B5%D1%81%D1%82123?foo=bar&xxx=%D0%B9%D1%83%D1%85#2er")
+	testURIFullURI(t, "", "example.com", "/тест123", "2er", &args, "http://example.com/%D1%82%D0%B5%D1%81%D1%82123?foo=bar&xxx=%D0%B9%D1%83%D1%85#2er")
 
 	// test with empty args and non-empty query string
 	var u URI
@@ -363,9 +363,9 @@ func TestURIParse(t *testing.T) {
 		"http://foobar.com/bC?De=F#Gh", "foobar.com", "/bC", "/bC", "De=F", "Gh")
 
 	// uri with hostname
-	testURIParse(t, &u, "xxx.com", "http://aaa.com/foo/bar?baz=aaa#ddd",
+	testURIParse(t, &u, "example.com", "http://aaa.com/foo/bar?baz=aaa#ddd",
 		"http://aaa.com/foo/bar?baz=aaa#ddd", "aaa.com", "/foo/bar", "/foo/bar", "baz=aaa", "ddd")
-	testURIParse(t, &u, "xxx.com", "https://ab.com/f/b%20r?baz=aaa#ddd",
+	testURIParse(t, &u, "example.com", "https://ab.com/f/b%20r?baz=aaa#ddd",
 		"https://ab.com/f/b%20r?baz=aaa#ddd", "ab.com", "/f/b r", "/f/b%20r", "baz=aaa", "ddd")
 
 	// no slash after hostname in uri
