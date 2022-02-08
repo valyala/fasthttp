@@ -368,16 +368,16 @@ func TestURIParse(t *testing.T) {
 	// uri with hostname
 	testURIParse(t, &u, "example.com", "http://example.com/foo/bar?baz=aaa#ddd",
 		"http://example.com/foo/bar?baz=aaa#ddd", "example.com", "/foo/bar", "/foo/bar", "baz=aaa", "ddd")
-	testURIParse(t, &u, "example.com", "https://ab.com/f/b%20r?baz=aaa#ddd",
-		"https://ab.com/f/b%20r?baz=aaa#ddd", "ab.com", "/f/b r", "/f/b%20r", "baz=aaa", "ddd")
+	testURIParse(t, &u, "example.net", "https://example.com/f/b%20r?baz=aaa#ddd",
+		"https://example.com/f/b%20r?baz=aaa#ddd", "example.com", "/f/b r", "/f/b%20r", "baz=aaa", "ddd")
 
 	// no slash after hostname in uri
 	testURIParse(t, &u, "example.com", "http://example.com",
 		"http://example.com/", "example.com", "/", "/", "", "")
 
 	// uppercase hostname in uri
-	testURIParse(t, &u, "abc.com", "http://GoGLE.com/aaa",
-		"http://gogle.com/aaa", "gogle.com", "/aaa", "/aaa", "", "")
+	testURIParse(t, &u, "example.net", "http://EXAMPLE.COM/aaa",
+		"http://example.com/aaa", "example.com", "/aaa", "/aaa", "", "")
 
 	// http:// in query params
 	testURIParse(t, &u, "example.com", "/foo?bar=http://example.com",
