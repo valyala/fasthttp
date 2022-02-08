@@ -329,13 +329,13 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		}
 	}
 
+	// parseHost overrides input host so copy it
 	u.host = append(u.host, host...)
-	if parsedHost, err := parseHost(u.host); err != nil {
+	parsedHost, err := parseHost(u.host)
+	if err != nil {
 		return err
-	} else {
-		u.host = parsedHost
 	}
-	lowercaseBytes(u.host)
+	u.SetHostBytes(parsedHost)
 
 	b := uri
 	queryIndex := bytes.IndexByte(b, '?')
