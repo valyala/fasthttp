@@ -234,7 +234,7 @@ func TestURIFullURI(t *testing.T) {
 	var args Args
 
 	// empty scheme, path and hash
-	testURIFullURI(t, "", "foobar.com", "", "", &args, "http://foobar.com/")
+	testURIFullURI(t, "", "example.com", "", "", &args, "http://example.com/")
 
 	// empty scheme and hash
 	testURIFullURI(t, "", "aa.com", "/foo/bar", "", &args, "http://aa.com/foo/bar")
@@ -286,11 +286,11 @@ func TestURIParseNilHost(t *testing.T) {
 	testURIParseScheme(t, "httPS://aaa.com", "https", "aaa.com", "/", "")
 
 	// missing slash after hostname
-	testURIParseScheme(t, "http://foobar.com?baz=111", "http", "foobar.com", "/?baz=111", "")
+	testURIParseScheme(t, "http://example.com?baz=111", "http", "example.com", "/?baz=111", "")
 
 	// slash in args
-	testURIParseScheme(t, "http://foobar.com?baz=111/222/xyz", "http", "foobar.com", "/?baz=111/222/xyz", "")
-	testURIParseScheme(t, "http://foobar.com?111/222/xyz", "http", "foobar.com", "/?111/222/xyz", "")
+	testURIParseScheme(t, "http://example.com?baz=111/222/xyz", "http", "example.com", "/?baz=111/222/xyz", "")
+	testURIParseScheme(t, "http://example.com?111/222/xyz", "http", "example.com", "/?111/222/xyz", "")
 }
 
 func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expectedRequestURI, expectedHash string) {
@@ -347,8 +347,8 @@ func TestURIParse(t *testing.T) {
 		"http://xx/aa?ss", "xx", "/aa", "/aa", "ss", "")
 
 	// args and hash
-	testURIParse(t, &u, "foobar.com", "/a.b.c?def=gkl#mnop",
-		"http://foobar.com/a.b.c?def=gkl#mnop", "foobar.com", "/a.b.c", "/a.b.c", "def=gkl", "mnop")
+	testURIParse(t, &u, "example.com", "/a.b.c?def=gkl#mnop",
+		"http://example.com/a.b.c?def=gkl#mnop", "example.com", "/a.b.c", "/a.b.c", "def=gkl", "mnop")
 
 	// '?' and '#' in hash
 	testURIParse(t, &u, "aaa.com", "/foo#bar?baz=aaa#bbb",
@@ -359,8 +359,8 @@ func TestURIParse(t *testing.T) {
 		"http://aa.com/Test%20+%20%D0%BF%D1%80%D0%B8?asdf=%20%20&s=12#sdf", "aa.com", "/Test + при", "/Test%20+%20%D0%BF%D1%80%D0%B8", "asdf=%20%20&s=12", "sdf")
 
 	// host in uppercase
-	testURIParse(t, &u, "FOObar.COM", "/bC?De=F#Gh",
-		"http://foobar.com/bC?De=F#Gh", "foobar.com", "/bC", "/bC", "De=F", "Gh")
+	testURIParse(t, &u, "example.com", "/bC?De=F#Gh",
+		"http://example.com/bC?De=F#Gh", "example.com", "/bC", "/bC", "De=F", "Gh")
 
 	// uri with hostname
 	testURIParse(t, &u, "example.com", "http://aaa.com/foo/bar?baz=aaa#ddd",
