@@ -476,7 +476,7 @@ func TestSetHost(t *testing.T) {
 	defer ReleaseURI(u)
 
 	// set http with a standard 80 port
-	u.Parse(nil, []byte("http://example.com/"))
+	u.Parse(nil, []byte("http://example.com/")) //nolint:errcheck
 	assertHostAndPort(t, u, "example.com", "example.com:80", ":80")
 	// set https with a standard 443 port
 	u.Update("https://example.com/")
