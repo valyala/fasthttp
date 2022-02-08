@@ -46,7 +46,8 @@ type URI struct {
 	path         []byte
 	queryString  []byte
 	hash         []byte
-	host         []byte
+	host         []byte // host AND port in form example.com:443
+	portPos      int8   // position in host where port part begins, for standard ports is negative
 
 	queryArgs       Args
 	parsedQueryArgs bool
@@ -76,6 +77,7 @@ func (u *URI) CopyTo(dst *URI) {
 	dst.queryString = append(dst.queryString, u.queryString...)
 	dst.hash = append(dst.hash, u.hash...)
 	dst.host = append(dst.host, u.host...)
+	dst.portPos = u.portPos
 	dst.username = append(dst.username, u.username...)
 	dst.password = append(dst.password, u.password...)
 
@@ -235,6 +237,7 @@ func (u *URI) Reset() {
 	u.password = u.password[:0]
 
 	u.host = u.host[:0]
+	u.portPos = 0
 	u.queryArgs.Reset()
 	u.parsedQueryArgs = false
 	u.DisablePathNormalizing = false
@@ -255,7 +258,26 @@ func (u *URI) Reset() {
 //
 // The returned bytes are valid until the next URI method call.
 func (u *URI) Host() []byte {
+	// if port is standard then return just host itself
+	if u.isStandardPort() {
+		return u.host[:-u.portPos]
+	}
+	// return fill host:port
 	return u.host
+}
+
+// isStandardPort port is ether 80 for http or 443 for https
+func (u *URI) isStandardPort() bool {
+	return u.portPos < 0
+}
+
+// Port returns bytes of port part of URI including colon i.e. ":8080"
+func (u *URI) Port() []byte {
+	// if port is standard then return just host itself
+	if u.isStandardPort() {
+		return u.host[-u.portPos:]
+	}
+	return u.host[u.portPos:]
 }
 
 // HostWithPort returns host:port
@@ -269,19 +291,49 @@ func (u *URI) Host() []byte {
 //
 // The returned bytes are valid until the next URI method call.
 func (u *URI) HostWithPort() []byte {
-	return []byte(addMissingPort(string(u.host), u.isHttps()))
+	return u.host
 }
 
 // SetHost sets host for the uri.
 func (u *URI) SetHost(host string) {
 	u.host = append(u.host[:0], host...)
 	lowercaseBytes(u.host)
+	u.setPortPos()
 }
 
 // SetHostBytes sets host for the uri.
 func (u *URI) SetHostBytes(host []byte) {
 	u.host = append(u.host[:0], host...)
 	lowercaseBytes(u.host)
+	u.setPortPos()
+}
+
+func (u *URI) setPortPos() {
+	lastColonPos := bytes.LastIndexByte(u.host, ':')   // colon may be a port delimiter but may be inside IPv6 addr
+	lastBracketPos := bytes.LastIndexByte(u.host, ']') // closing bracket of IPv6
+	portPos := 0
+	if lastColonPos > 0 {
+		if lastBracketPos < 0 {
+			portPos = lastColonPos
+		} else if lastColonPos == lastBracketPos+1 {
+			portPos = lastColonPos
+		}
+	}
+	if portPos == 0 {
+		hostLen := len(u.host)
+		portPos = -hostLen
+		if hostLen > 0 {
+			// set standard port
+			port := ""
+			if u.isHttp() {
+				port = ":80"
+			} else if u.isHttps() {
+				port = ":443"
+			}
+			u.host = append(u.host, port...)
+		}
+	}
+	u.portPos = int8(portPos)
 }
 
 var (

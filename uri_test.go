@@ -470,3 +470,35 @@ func TestNoOverwriteInput(t *testing.T) {
 		t.Errorf("%q", u.String())
 	}
 }
+
+func TestSetHost(t *testing.T) {
+	u := AcquireURI()
+	defer ReleaseURI(u)
+
+	// set http with a standard 80 port
+	u.Parse(nil, []byte("http://example.com/"))
+	assertHostAndPort(t, u, "example.com", "example.com:80", ":80")
+	// set https with a standard 443 port
+	u.Update("https://example.com/")
+	assertHostAndPort(t, u, "example.com", "example.com:443", ":443")
+	// set http with a custom port
+	u.Update("http://example.com:8080/")
+	assertHostAndPort(t, u, "example.com:8080", "example.com:8080", ":8080")
+
+	u.SetHost("[:1]")
+	assertHostAndPort(t, u, "[:1]", "[:1]:80", ":80")
+	u.SetHost("[:1]:8080")
+	assertHostAndPort(t, u, "[:1]:8080", "[:1]:8080", ":8080")
+}
+
+func assertHostAndPort(t *testing.T, u *URI, expectedHost string, expectedHostWithPort string, expectedPort string) {
+	if string(u.Host()) != expectedHost {
+		t.Fail()
+	}
+	if string(u.HostWithPort()) != expectedHostWithPort {
+		t.Fail()
+	}
+	if string(u.Port()) != expectedPort {
+		t.Fail()
+	}
+}
