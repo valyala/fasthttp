@@ -224,21 +224,7 @@ func (u *URI) SetScheme(scheme string) {
 
 // SetSchemeBytes sets URI scheme, i.e. http, https, ftp, etc.
 func (u *URI) SetSchemeBytes(scheme []byte) {
-	if len(scheme) == 0 {
-		u.scheme = nil
-		return
-	}
-	if bytes.Equal(scheme, strHTTP) {
-		u.scheme = &strHTTP
-		return
-	}
-	if bytes.Equal(scheme, strHTTPS) {
-		u.scheme = &strHTTPS
-		return
-	}
-	newScheme := append([]byte(nil), scheme...) // copy scheme
-	lowercaseBytes(newScheme)
-	u.scheme = &newScheme
+	u.SetScheme(b2s(scheme))
 }
 
 func (u *URI) isHttps() bool {
