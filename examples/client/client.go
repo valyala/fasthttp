@@ -3,12 +3,13 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/valyala/fasthttp"
 	"io"
 	"net/http"
 	"os"
 	"reflect"
 	"time"
+
+	"github.com/valyala/fasthttp"
 )
 
 var headerContentTypeJson = []byte("application/json")
