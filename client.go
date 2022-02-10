@@ -297,6 +297,9 @@ type Client struct {
 	// By default will use isIdempotent function
 	RetryIf RetryIfFunc
 
+	// ConfigureClient configures the fasthttp.HostClient.
+	ConfigureClient func(hc *HostClient) error
+
 	mLock      sync.Mutex
 	m          map[string]*HostClient
 	ms         map[string]*HostClient
@@ -510,6 +513,13 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			clientReaderPool:              &c.readerPool,
 			clientWriterPool:              &c.writerPool,
 		}
+
+		if c.ConfigureClient != nil {
+			if err := c.ConfigureClient(hc); err != nil {
+				return err
+			}
+		}
+
 		m[string(host)] = hc
 		if len(m) == 1 {
 			startCleaner = true
