@@ -5,65 +5,65 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // workerPool serves incoming connections via a pool of workers
-// in FILO order, i.e. the most recently stopped worker will serve the next
-// incoming connection.
 //
 // Such a scheme keeps CPU caches hot (in theory).
 type workerPool struct {
 	// Function for serving server connections.
 	// It must leave c unclosed.
-	WorkerFunc ServeHandler
-
-	MaxWorkersCount int
-
-	LogAllErrors bool
-
+	WorkerFunc            ServeHandler
+	MaxWorkersCount       int64
+	LogAllErrors          bool
 	MaxIdleWorkerDuration time.Duration
+	Logger                Logger
+	ConnState             func(net.Conn, ConnState)
 
-	Logger Logger
-
-	lock         sync.Mutex
-	workersCount int
-	mustStop     bool
-
-	ready []*workerChan
+	workersCount         int64
+	idleWorkers          sync.Pool
+	lastIdleWorkersCount int64
+	idleWorkersCount     int64
+	state                int32
 
 	stopCh chan struct{}
-
-	workerChanPool sync.Pool
-
-	connState func(net.Conn, ConnState)
 }
+
+type workerPoolState int32
+
+const (
+	workerPoolState_Unset workerPoolState = iota
+	workerPoolState_Running
+	workerPoolState_Stopping
+	workerPoolState_Stopped
+)
 
 type workerChan struct {
-	lastUseTime time.Time
-	ch          chan net.Conn
+	ch chan net.Conn
 }
+
+func (wp *workerPool) State() workerPoolState         { return workerPoolState(atomic.LoadInt32(&wp.state)) }
+func (wp *workerPool) SetState(state workerPoolState) { atomic.StoreInt32(&wp.state, int32(state)) }
 
 func (wp *workerPool) Start() {
 	if wp.stopCh != nil {
 		panic("BUG: workerPool already started")
 	}
+	if wp.MaxIdleWorkerDuration <= 0 {
+		wp.MaxIdleWorkerDuration = 10 * time.Second
+	}
 	wp.stopCh = make(chan struct{})
 	stopCh := wp.stopCh
-	wp.workerChanPool.New = func() interface{} {
-		return &workerChan{
-			ch: make(chan net.Conn, workerChanCap),
-		}
-	}
 	go func() {
-		var scratch []*workerChan
 		for {
-			wp.clean(&scratch)
+			wp.clean()
 			select {
 			case <-stopCh:
 				return
 			default:
-				time.Sleep(wp.getMaxIdleWorkerDuration())
+				time.Sleep(wp.MaxIdleWorkerDuration)
 			}
 		}
 	}()
@@ -76,80 +76,53 @@ func (wp *workerPool) Stop() {
 	close(wp.stopCh)
 	wp.stopCh = nil
 
-	// Stop all the workers waiting for incoming connections.
 	// Do not wait for busy workers - they will stop after
-	// serving the connection and noticing wp.mustStop = true.
-	wp.lock.Lock()
-	ready := wp.ready
-	for i := range ready {
-		ready[i].ch <- nil
-		ready[i] = nil
-	}
-	wp.ready = ready[:0]
-	wp.mustStop = true
-	wp.lock.Unlock()
-}
+	// serving the connection and noticing the stopping state.
+	wp.SetState(workerPoolState_Stopping)
 
-func (wp *workerPool) getMaxIdleWorkerDuration() time.Duration {
-	if wp.MaxIdleWorkerDuration <= 0 {
-		return 10 * time.Second
-	}
-	return wp.MaxIdleWorkerDuration
-}
-
-func (wp *workerPool) clean(scratch *[]*workerChan) {
-	maxIdleWorkerDuration := wp.getMaxIdleWorkerDuration()
-
-	// Clean least recently used workers if they didn't serve connections
-	// for more than maxIdleWorkerDuration.
-	criticalTime := time.Now().Add(-maxIdleWorkerDuration)
-
-	wp.lock.Lock()
-	ready := wp.ready
-	n := len(ready)
-
-	// Use binary-search algorithm to find out the index of the least recently worker which can be cleaned up.
-	l, r, mid := 0, n-1, 0
-	for l <= r {
-		mid = (l + r) / 2
-		if criticalTime.After(wp.ready[mid].lastUseTime) {
-			l = mid + 1
-		} else {
-			r = mid - 1
+	// Stop all the workers waiting for incoming connections.
+	var wc = atomic.LoadInt64(&wp.workersCount)
+	for i := int64(0); i < wc; i++ {
+		var w = wp.idleWorkers.Get()
+		if w == nil {
+			break
 		}
+		w.(*workerChan).ch <- nil
 	}
-	i := r
-	if i == -1 {
-		wp.lock.Unlock()
+
+	wp.SetState(workerPoolState_Stopped)
+}
+
+func (wp *workerPool) Serve(c net.Conn) bool {
+	var w = wp.getWorker()
+	if w == nil {
+		return false
+	}
+	w.ch <- c
+	return true
+}
+
+func (wp *workerPool) clean() {
+	var iwc = atomic.SwapInt64(&wp.idleWorkersCount, 0)
+	var liwc = atomic.SwapInt64(&wp.lastIdleWorkersCount, iwc)
+	if (iwc < wp.MaxWorkersCount*10/100) || // Don't clean if idle worker numbers smaller than 10% of allowed workers numbers
+		iwc < 0 || // Don't clean when active idle worker numbers is negative
+		iwc < liwc { // Don't clean when active idle worker numbers period smaller than last one
 		return
 	}
 
-	*scratch = append((*scratch)[:0], ready[:i+1]...)
-	m := copy(ready, ready[i+1:])
-	for i = m; i < n; i++ {
-		ready[i] = nil
-	}
-	wp.ready = ready[:m]
-	wp.lock.Unlock()
-
+	var cleanNumber = iwc - liwc
 	// Notify obsolete workers to stop.
 	// This notification must be outside the wp.lock, since ch.ch
 	// may be blocking and may consume a lot of time if many workers
 	// are located on non-local CPUs.
-	tmp := *scratch
-	for i := range tmp {
-		tmp[i].ch <- nil
-		tmp[i] = nil
+	for i := int64(0); i < cleanNumber; i++ {
+		var w = wp.idleWorkers.Get()
+		if w == nil {
+			continue
+		}
+		w.(*workerChan).ch <- nil
 	}
-}
-
-func (wp *workerPool) Serve(c net.Conn) bool {
-	ch := wp.getCh()
-	if ch == nil {
-		return false
-	}
-	ch.ch <- c
-	return true
 }
 
 var workerChanCap = func() int {
@@ -166,61 +139,44 @@ var workerChanCap = func() int {
 	return 1
 }()
 
-func (wp *workerPool) getCh() *workerChan {
-	var ch *workerChan
-	createWorker := false
-
-	wp.lock.Lock()
-	ready := wp.ready
-	n := len(ready) - 1
-	if n < 0 {
-		if wp.workersCount < wp.MaxWorkersCount {
-			createWorker = true
-			wp.workersCount++
-		}
-	} else {
-		ch = ready[n]
-		ready[n] = nil
-		wp.ready = ready[:n]
-	}
-	wp.lock.Unlock()
-
+func (wp *workerPool) getWorker() (ch *workerChan) {
+	ch = wp.getIdleWorker()
 	if ch == nil {
-		if !createWorker {
-			return nil
-		}
-		vch := wp.workerChanPool.Get()
-		ch = vch.(*workerChan)
-		go func() {
-			wp.workerFunc(ch)
-			wp.workerChanPool.Put(vch)
-		}()
+		ch = wp.makeNewWorker()
 	}
-	return ch
+	return
 }
 
-func (wp *workerPool) release(ch *workerChan) bool {
-	ch.lastUseTime = time.Now()
-	wp.lock.Lock()
-	if wp.mustStop {
-		wp.lock.Unlock()
-		return false
+func (wp *workerPool) getIdleWorker() (ch *workerChan) {
+	var w = wp.idleWorkers.Get()
+	if w != nil {
+		ch = w.(*workerChan)
+		atomic.AddInt64(&wp.idleWorkersCount, -1)
 	}
-	wp.ready = append(wp.ready, ch)
-	wp.lock.Unlock()
-	return true
+	return
+}
+
+func (wp *workerPool) makeNewWorker() (ch *workerChan) {
+	var wc = atomic.LoadInt64(&wp.workersCount)
+	if wc < wp.MaxWorkersCount {
+		ch = &workerChan{
+			ch: make(chan net.Conn, workerChanCap),
+		}
+		atomic.AddInt64(&wp.workersCount, 1)
+
+		go wp.workerFunc(ch)
+	}
+	return
 }
 
 func (wp *workerPool) workerFunc(ch *workerChan) {
-	var c net.Conn
-
-	var err error
-	for c = range ch.ch {
+	for c := range ch.ch {
 		if c == nil {
 			break
 		}
 
-		if err = wp.WorkerFunc(c); err != nil && err != errHijacked {
+		var err = wp.WorkerFunc(c)
+		if err != nil && err != errHijacked {
 			errStr := err.Error()
 			if wp.LogAllErrors || !(strings.Contains(errStr, "broken pipe") ||
 				strings.Contains(errStr, "reset by peer") ||
@@ -231,19 +187,19 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			}
 		}
 		if err == errHijacked {
-			wp.connState(c, StateHijacked)
+			wp.ConnState(c, StateHijacked)
 		} else {
 			_ = c.Close()
-			wp.connState(c, StateClosed)
+			wp.ConnState(c, StateClosed)
 		}
-		c = nil
 
-		if !wp.release(ch) {
+		if wp.State() == workerPoolState_Stopping {
 			break
 		}
+
+		wp.idleWorkers.Put(ch)
+		atomic.AddInt64(&wp.idleWorkersCount, 1)
 	}
 
-	wp.lock.Lock()
-	wp.workersCount--
-	wp.lock.Unlock()
+	atomic.AddInt64(&wp.workersCount, -1)
 }

@@ -1794,11 +1794,11 @@ func (s *Server) Serve(ln net.Listener) error {
 
 	wp := &workerPool{
 		WorkerFunc:            s.serveConn,
-		MaxWorkersCount:       maxWorkersCount,
+		MaxWorkersCount:       int64(maxWorkersCount),
 		LogAllErrors:          s.LogAllErrors,
 		MaxIdleWorkerDuration: s.MaxIdleWorkerDuration,
 		Logger:                s.logger(),
-		connState:             s.setState,
+		ConnState:             s.setState,
 	}
 	wp.Start()
 

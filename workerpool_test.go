@@ -102,14 +102,14 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 		},
 		MaxWorkersCount: 10,
 		Logger:          defaultLogger,
-		connState:       func(net.Conn, ConnState) {},
+		ConnState:       func(net.Conn, ConnState) {},
 	}
 	wp.Start()
 
 	ln := fasthttputil.NewInmemoryListener()
 
 	clientCh := make(chan struct{}, wp.MaxWorkersCount)
-	for i := 0; i < wp.MaxWorkersCount; i++ {
+	for i := int64(0); i < wp.MaxWorkersCount; i++ {
 		go func() {
 			conn, err := ln.Dial()
 			if err != nil {
@@ -132,7 +132,7 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < wp.MaxWorkersCount; i++ {
+	for i := int64(0); i < wp.MaxWorkersCount; i++ {
 		conn, err := ln.Accept()
 		if err != nil {
 			t.Fatalf("unexpected error: %s", err)
@@ -162,7 +162,7 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 
 	close(ready)
 
-	for i := 0; i < wp.MaxWorkersCount; i++ {
+	for i := int64(0); i < wp.MaxWorkersCount; i++ {
 		select {
 		case <-clientCh:
 		case <-time.After(time.Second):
