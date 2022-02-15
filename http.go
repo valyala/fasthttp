@@ -1012,8 +1012,6 @@ func (resp *Response) Reset() {
 	resp.ImmediateHeaderFlush = false
 }
 
-
-
 func (resp *Response) resetSkipHeader() {
 	resp.ResetBody()
 }
