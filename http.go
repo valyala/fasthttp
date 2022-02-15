@@ -17,6 +17,18 @@ import (
 	"github.com/valyala/bytebufferpool"
 )
 
+var (
+	requestBodyMaxLimit  = 0
+	responseBodyMaxLimit = 0
+)
+
+// SetBodyLimit set the max body limit in request and response
+// if the body size larger than the limit,it will be released
+func SetBodyLimit(reqBodyMaxLimit, respBodyMaxLimit int) {
+	requestBodyMaxLimit = reqBodyMaxLimit
+	responseBodyMaxLimit = respBodyMaxLimit
+}
+
 // Request represents HTTP request.
 //
 // It is forbidden copying Request instances. Create new instances
@@ -957,6 +969,9 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 
 // Reset clears request contents.
 func (req *Request) Reset() {
+	if requestBodyMaxLimit > 0 && req.body != nil {
+		req.ReleaseBody(requestBodyMaxLimit)
+	}
 	req.Header.Reset()
 	req.resetSkipHeader()
 	req.timeout = 0
@@ -986,6 +1001,9 @@ func (req *Request) RemoveMultipartFormFiles() {
 
 // Reset clears response contents.
 func (resp *Response) Reset() {
+	if responseBodyMaxLimit > 0 && resp.body != nil {
+		resp.ReleaseBody(responseBodyMaxLimit)
+	}
 	resp.Header.Reset()
 	resp.resetSkipHeader()
 	resp.SkipBody = false
@@ -993,6 +1011,8 @@ func (resp *Response) Reset() {
 	resp.laddr = nil
 	resp.ImmediateHeaderFlush = false
 }
+
+
 
 func (resp *Response) resetSkipHeader() {
 	resp.ResetBody()
