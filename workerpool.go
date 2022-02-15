@@ -27,8 +27,6 @@ type workerPool struct {
 	lastIdleWorkersCount int64
 	idleWorkersCount     int64
 	state                int32
-
-	stopCh chan struct{}
 }
 
 type workerPoolState int32
@@ -48,33 +46,37 @@ func (wp *workerPool) State() workerPoolState         { return workerPoolState(a
 func (wp *workerPool) SetState(state workerPoolState) { atomic.StoreInt32(&wp.state, int32(state)) }
 
 func (wp *workerPool) Start() {
-	if wp.stopCh != nil {
-		panic("BUG: workerPool already started")
+	var wpStatus = wp.State()
+	if wpStatus != workerPoolState_Unset {
+		if wpStatus == workerPoolState_Running {
+			panic("BUG: workerPool already started")
+		}
+		if wpStatus == workerPoolState_Stopping {
+			panic("BUG: workerPool is on stopping state and can't re-start before last stop proccess")
+		}
+		// Let worker pool to reuse in workerPoolState_Stopped state.
 	}
 	if wp.MaxIdleWorkerDuration <= 0 {
 		wp.MaxIdleWorkerDuration = 10 * time.Second
 	}
-	wp.stopCh = make(chan struct{})
-	stopCh := wp.stopCh
+	wp.SetState(workerPoolState_Running)
+
 	go func() {
 		for {
-			wp.clean()
-			select {
-			case <-stopCh:
-				return
-			default:
-				time.Sleep(wp.MaxIdleWorkerDuration)
+			time.Sleep(wp.MaxIdleWorkerDuration)
+			if wp.isStop() {
+				break
 			}
+			wp.clean()
 		}
 	}()
 }
 
 func (wp *workerPool) Stop() {
-	if wp.stopCh == nil {
+	var wpStatus = wp.State()
+	if wpStatus != workerPoolState_Running {
 		panic("BUG: workerPool wasn't started")
 	}
-	close(wp.stopCh)
-	wp.stopCh = nil
 
 	// Do not wait for busy workers - they will stop after
 	// serving the connection and noticing the stopping state.
@@ -100,6 +102,14 @@ func (wp *workerPool) Serve(c net.Conn) bool {
 	}
 	w.ch <- c
 	return true
+}
+
+func (wp *workerPool) isStop() bool {
+	var wpStatus = wp.State()
+	if wpStatus == workerPoolState_Stopping || wpStatus == workerPoolState_Stopped {
+		return true
+	}
+	return false
 }
 
 func (wp *workerPool) clean() {
@@ -193,7 +203,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			wp.ConnState(c, StateClosed)
 		}
 
-		if wp.State() == workerPoolState_Stopping {
+		if wp.isStop() {
 			break
 		}
 
