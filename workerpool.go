@@ -4,12 +4,15 @@ import (
 	"net"
 	"runtime"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/valyala/fasthttp/pool"
 )
 
 // workerPool serves incoming connections via a pool of workers
+// in LIFO order, i.e. the most recently stopped worker will serve the next
+// incoming connection.
 //
 // Such a scheme keeps CPU caches hot (in theory).
 type workerPool struct {
@@ -22,11 +25,8 @@ type workerPool struct {
 	Logger                Logger
 	ConnState             func(net.Conn, ConnState)
 
-	workersCount         int64
-	idleWorkers          sync.Pool
-	lastIdleWorkersCount int64
-	idleWorkersCount     int64
-	state                int32
+	idleWorkers pool.LIFO
+	state       int32
 }
 
 type workerPoolState int32
@@ -56,20 +56,26 @@ func (wp *workerPool) Start() {
 		}
 		// Let worker pool to reuse in workerPoolState_Stopped state.
 	}
+	wp.SetState(workerPoolState_Running)
+
 	if wp.MaxIdleWorkerDuration <= 0 {
 		wp.MaxIdleWorkerDuration = 10 * time.Second
 	}
-	wp.SetState(workerPoolState_Running)
 
-	go func() {
-		for {
-			time.Sleep(wp.MaxIdleWorkerDuration)
-			if wp.isStop() {
-				break
-			}
-			wp.clean()
+	wp.idleWorkers.MaxItems = wp.MaxWorkersCount
+	// wp.idleWorkers.MinItems = wp.MaxWorkersCount / 8
+	wp.idleWorkers.IdleTimeout = wp.MaxIdleWorkerDuration
+	wp.idleWorkers.New = func() interface{} {
+		var ch = &workerChan{
+			ch: make(chan net.Conn, workerChanCap),
 		}
-	}()
+		go wp.workerFunc(ch)
+		return ch
+	}
+	wp.idleWorkers.Close = func(item interface{}) {
+		item.(*workerChan).ch <- nil
+	}
+	wp.idleWorkers.Start()
 }
 
 func (wp *workerPool) Stop() {
@@ -78,61 +84,18 @@ func (wp *workerPool) Stop() {
 		panic("BUG: workerPool wasn't started")
 	}
 
-	// Do not wait for busy workers - they will stop after
-	// serving the connection and noticing the stopping state.
 	wp.SetState(workerPoolState_Stopping)
-
-	// Stop all the workers waiting for incoming connections.
-	var wc = atomic.LoadInt64(&wp.workersCount)
-	for i := int64(0); i < wc; i++ {
-		var w = wp.idleWorkers.Get()
-		if w == nil {
-			break
-		}
-		w.(*workerChan).ch <- nil
-	}
-
+	wp.idleWorkers.Stop()
 	wp.SetState(workerPoolState_Stopped)
 }
 
 func (wp *workerPool) Serve(c net.Conn) bool {
-	var w = wp.getWorker()
+	var w = wp.idleWorkers.Get()
 	if w == nil {
 		return false
 	}
-	w.ch <- c
+	w.(*workerChan).ch <- c
 	return true
-}
-
-func (wp *workerPool) isStop() bool {
-	var wpStatus = wp.State()
-	if wpStatus == workerPoolState_Stopping || wpStatus == workerPoolState_Stopped {
-		return true
-	}
-	return false
-}
-
-func (wp *workerPool) clean() {
-	var iwc = atomic.SwapInt64(&wp.idleWorkersCount, 0)
-	var liwc = atomic.SwapInt64(&wp.lastIdleWorkersCount, iwc)
-	if (iwc < wp.MaxWorkersCount*10/100) || // Don't clean if idle worker numbers smaller than 10% of allowed workers numbers
-		iwc < 0 || // Don't clean when active idle worker numbers is negative
-		iwc < liwc { // Don't clean when active idle worker numbers period smaller than last one
-		return
-	}
-
-	var cleanNumber = iwc - liwc
-	// Notify obsolete workers to stop.
-	// This notification must be outside the wp.lock, since ch.ch
-	// may be blocking and may consume a lot of time if many workers
-	// are located on non-local CPUs.
-	for i := int64(0); i < cleanNumber; i++ {
-		var w = wp.idleWorkers.Get()
-		if w == nil {
-			continue
-		}
-		w.(*workerChan).ch <- nil
-	}
 }
 
 var workerChanCap = func() int {
@@ -148,36 +111,6 @@ var workerChanCap = func() int {
 	// new connections if WorkerFunc is CPU-bound.
 	return 1
 }()
-
-func (wp *workerPool) getWorker() (ch *workerChan) {
-	ch = wp.getIdleWorker()
-	if ch == nil {
-		ch = wp.makeNewWorker()
-	}
-	return
-}
-
-func (wp *workerPool) getIdleWorker() (ch *workerChan) {
-	var w = wp.idleWorkers.Get()
-	if w != nil {
-		ch = w.(*workerChan)
-		atomic.AddInt64(&wp.idleWorkersCount, -1)
-	}
-	return
-}
-
-func (wp *workerPool) makeNewWorker() (ch *workerChan) {
-	var wc = atomic.LoadInt64(&wp.workersCount)
-	if wc < wp.MaxWorkersCount {
-		ch = &workerChan{
-			ch: make(chan net.Conn, workerChanCap),
-		}
-		atomic.AddInt64(&wp.workersCount, 1)
-
-		go wp.workerFunc(ch)
-	}
-	return
-}
 
 func (wp *workerPool) workerFunc(ch *workerChan) {
 	for c := range ch.ch {
@@ -203,13 +136,6 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			wp.ConnState(c, StateClosed)
 		}
 
-		if wp.isStop() {
-			break
-		}
-
 		wp.idleWorkers.Put(ch)
-		atomic.AddInt64(&wp.idleWorkersCount, 1)
 	}
-
-	atomic.AddInt64(&wp.workersCount, -1)
 }
