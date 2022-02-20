@@ -2335,7 +2335,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			timeoutResponse.CopyTo(&ctx.Response)
 		}
 
-		if !ctx.IsGet() && ctx.IsHead() {
+		if ctx.IsHead() {
 			ctx.Response.SkipBody = true
 		}
 
