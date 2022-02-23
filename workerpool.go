@@ -1,6 +1,7 @@
 package fasthttp
 
 import (
+	"errors"
 	"net"
 	"runtime"
 	"strings"
@@ -226,7 +227,8 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 				strings.Contains(errStr, "reset by peer") ||
 				strings.Contains(errStr, "request headers: small read buffer") ||
 				strings.Contains(errStr, "unexpected EOF") ||
-				strings.Contains(errStr, "i/o timeout")) {
+				strings.Contains(errStr, "i/o timeout") ||
+				errors.Is(err, ErrBadTrailer)) {
 				wp.Logger.Printf("error when serving connection %q<->%q: %s", c.LocalAddr(), c.RemoteAddr(), err)
 			}
 		}
