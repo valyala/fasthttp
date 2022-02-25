@@ -18,13 +18,13 @@ import (
 )
 
 var (
-	requestBodyMaxLimit  = 0
-	responseBodyMaxLimit = 0
+	requestBodyMaxLimit  = -1
+	responseBodyMaxLimit = -1
 )
 
-// SetBodyLimit set the max body limit in request and response
+// SetBodySizePoolLimit set the max body limit in request and response
 // if the body size larger than the limit,it will be released
-func SetBodyLimit(reqBodyMaxLimit, respBodyMaxLimit int) {
+func SetBodySizePoolLimit(reqBodyMaxLimit, respBodyMaxLimit int) {
 	requestBodyMaxLimit = reqBodyMaxLimit
 	responseBodyMaxLimit = respBodyMaxLimit
 }
@@ -969,7 +969,7 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 
 // Reset clears request contents.
 func (req *Request) Reset() {
-	if requestBodyMaxLimit > 0 && req.body != nil {
+	if requestBodyMaxLimit >= 0 && req.body != nil {
 		req.ReleaseBody(requestBodyMaxLimit)
 	}
 	req.Header.Reset()
@@ -1001,7 +1001,7 @@ func (req *Request) RemoveMultipartFormFiles() {
 
 // Reset clears response contents.
 func (resp *Response) Reset() {
-	if responseBodyMaxLimit > 0 && resp.body != nil {
+	if responseBodyMaxLimit >= 0 && resp.body != nil {
 		resp.ReleaseBody(responseBodyMaxLimit)
 	}
 	resp.Header.Reset()
