@@ -2442,6 +2442,10 @@ func (h *RequestHeader) parseTrailer(buf []byte) (int, error) {
 }
 
 func isBadTrailer(key []byte) bool {
+	if len(key) == 0 {
+		return true
+	}
+
 	switch key[0] | 0x20 {
 	case 'a':
 		return caseInsensitiveCompare(key, strAuthorization)
