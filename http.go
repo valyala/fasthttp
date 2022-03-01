@@ -1001,8 +1001,8 @@ func (req *Request) RemoveMultipartFormFiles() {
 
 // Reset clears response contents.
 func (resp *Response) Reset() {
-	if responseBodyMaxLimit >= 0 && resp.body != nil {
-		resp.ReleaseBody(responseBodyMaxLimit)
+	if responseBodyPoolSizeLimit >= 0 && resp.body != nil {
+		resp.ReleaseBody(responseBodyPoolSizeLimit)
 	}
 	resp.Header.Reset()
 	resp.resetSkipHeader()
