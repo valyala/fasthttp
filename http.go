@@ -969,8 +969,8 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 
 // Reset clears request contents.
 func (req *Request) Reset() {
-	if requestBodyMaxLimit >= 0 && req.body != nil {
-		req.ReleaseBody(requestBodyMaxLimit)
+	if requestBodyPoolSizeLimit >= 0 && req.body != nil {
+		req.ReleaseBody(requestBodyPoolSizeLimit)
 	}
 	req.Header.Reset()
 	req.resetSkipHeader()
