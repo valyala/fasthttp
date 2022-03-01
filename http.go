@@ -24,9 +24,9 @@ var (
 
 // SetBodySizePoolLimit set the max body limit in request and response
 // if the body size larger than the limit,it will be released
-func SetBodySizePoolLimit(reqBodyMaxLimit, respBodyMaxLimit int) {
-	requestBodyMaxLimit = reqBodyMaxLimit
-	responseBodyMaxLimit = respBodyMaxLimit
+func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
+	requestBodyPoolSizeLimit = reqBodyLimit
+	responseBodyPoolSizeLimit = respBodyLimit
 }
 
 // Request represents HTTP request.
