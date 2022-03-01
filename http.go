@@ -22,8 +22,8 @@ var (
 	responseBodyPoolSizeLimit = -1
 )
 
-// SetBodySizePoolLimit set the max body limit in request and response
-// if the body size larger than the limit,it will be released
+// SetBodySizePoolLimit set the max body size for bodies to be returned to the pool.
+// If the body size is larger it will be released instead of put back into the pool for reuse.
 func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
 	requestBodyPoolSizeLimit = reqBodyLimit
 	responseBodyPoolSizeLimit = respBodyLimit
