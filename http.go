@@ -18,8 +18,8 @@ import (
 )
 
 var (
-	requestBodyMaxLimit  = -1
-	responseBodyMaxLimit = -1
+	requestBodyPoolSizeLimit  = -1
+	responseBodyPoolSizeLimit = -1
 )
 
 // SetBodySizePoolLimit set the max body limit in request and response
