@@ -174,7 +174,7 @@ func TestServerPipelineFlush(t *testing.T) {
 
 	// Since the second request takes 200ms to finish we expect the first one to be flushed earlier.
 	d := time.Since(start)
-	if d > time.Millisecond*100 {
+	if d >= time.Millisecond*200 {
 		t.Fatalf("had to wait for %v", d)
 	}
 
