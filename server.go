@@ -788,8 +788,13 @@ func (ctx *RequestCtx) reset() {
 	ctx.connTime = zeroTime
 	ctx.remoteAddr = nil
 	ctx.time = zeroTime
-	ctx.s = nil
 	ctx.c = nil
+
+	// Don't reset ctx.s!
+	// We have a pool per server so the next time this ctx is used it
+	// will be assigned the same value again.
+	// ctx might still be in use for context.Done() and context.Err()
+	// which are safe to use as they only use ctx.s and no other value.
 
 	if ctx.timeoutResponse != nil {
 		ctx.timeoutResponse.Reset()
