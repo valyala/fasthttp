@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -2893,5 +2895,56 @@ func TestRstConnResponseWhileSending(t *testing.T) {
 	}
 	if expectedStatus != resp.StatusCode() {
 		t.Fatalf("Expected %d status code, but got %d", expectedStatus, resp.StatusCode())
+	}
+}
+
+// See issue #1232
+func TestRstConnClosedWithoutResponse(t *testing.T) {
+	const expectedStatus = http.StatusTeapot
+	const payload = "payload"
+
+	srv, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	go func() {
+		conn, err := srv.Accept()
+		if err != nil {
+			t.Errorf(err.Error())
+		}
+
+		// Read at least one byte of the header
+		// Otherwise we would have an unsolicited response
+		ioutil.ReadAll(io.LimitReader(conn, 1))
+
+		// Respond with incomplete header
+		conn.Write([]byte("Http"))
+
+		// Forcefully close connection
+		err = conn.(*net.TCPConn).SetLinger(0)
+		if err != nil {
+			t.Errorf(err.Error())
+		}
+		conn.Close()
+	}()
+
+	svrUrl := "http://" + srv.Addr().String()
+
+	client := HostClient{Addr: srv.Addr().String()}
+
+	req := AcquireRequest()
+	defer ReleaseRequest(req)
+	resp := AcquireResponse()
+	defer ReleaseResponse(resp)
+
+	req.Header.SetMethod("POST")
+	req.SetBodyStream(strings.NewReader(payload), len(payload))
+	req.SetRequestURI(svrUrl)
+
+	err = client.Do(req, resp)
+
+	if !errors.Is(err, syscall.ECONNRESET) {
+		t.Fatalf("Expected connection reset error")
 	}
 }

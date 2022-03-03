@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/valyala/bytebufferpool"
@@ -1290,6 +1291,9 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 
 	if !resp.mustSkipBody() {
 		err = resp.ReadBody(r, maxBodySize)
+		if errors.Is(err, syscall.ECONNRESET) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -1297,6 +1301,9 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 
 	if resp.Header.ContentLength() == -1 {
 		err = resp.Header.ReadTrailer(r)
+		if errors.Is(err, syscall.ECONNRESET) {
+			return nil
+		}
 		if err != nil && err != io.EOF {
 			return err
 		}

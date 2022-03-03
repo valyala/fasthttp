@@ -1464,7 +1464,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	br := c.acquireReader(conn)
 	err = resp.ReadLimitBody(br, c.MaxResponseBodySize)
 	c.releaseReader(br)
-	if err != nil && !errors.Is(err, syscall.ECONNRESET) {
+	if err != nil {
 		c.closeConn(cc)
 		// Don't retry in case of ErrBodyTooLarge since we will just get the same again.
 		retry := err != ErrBodyTooLarge
