@@ -30,6 +30,10 @@ import (
 // with good compression ratio.
 //
 // See also RequestCtx.SendFileBytes.
+//
+// WARNING: do not pass any user supplied paths to this function!
+// WARNING: if path is based on user input users will be able to request
+// any file on your filesystem! Use fasthttp.FS with a sane Root instead.
 func ServeFileBytesUncompressed(ctx *RequestCtx, path []byte) {
 	ServeFileUncompressed(ctx, b2s(path))
 }
@@ -43,6 +47,10 @@ func ServeFileBytesUncompressed(ctx *RequestCtx, path []byte) {
 // with good compression ratio.
 //
 // See also RequestCtx.SendFile.
+//
+// WARNING: do not pass any user supplied paths to this function!
+// WARNING: if path is based on user input users will be able to request
+// any file on your filesystem! Use fasthttp.FS with a sane Root instead.
 func ServeFileUncompressed(ctx *RequestCtx, path string) {
 	ctx.Request.Header.DelBytes(strAcceptEncoding)
 	ServeFile(ctx, path)
@@ -62,6 +70,10 @@ func ServeFileUncompressed(ctx *RequestCtx, path string) {
 // file contents.
 //
 // See also RequestCtx.SendFileBytes.
+//
+// WARNING: do not pass any user supplied paths to this function!
+// WARNING: if path is based on user input users will be able to request
+// any file on your filesystem! Use fasthttp.FS with a sane Root instead.
 func ServeFileBytes(ctx *RequestCtx, path []byte) {
 	ServeFile(ctx, b2s(path))
 }
@@ -79,6 +91,10 @@ func ServeFileBytes(ctx *RequestCtx, path []byte) {
 // Use ServeFileUncompressed is you don't need serving compressed file contents.
 //
 // See also RequestCtx.SendFile.
+//
+// WARNING: do not pass any user supplied paths to this function!
+// WARNING: if path is based on user input users will be able to request
+// any file on your filesystem! Use fasthttp.FS with a sane Root instead.
 func ServeFile(ctx *RequestCtx, path string) {
 	rootFSOnce.Do(func() {
 		rootFSHandler = rootFS.NewRequestHandler()

@@ -1338,6 +1338,10 @@ func (ctx *RequestCtx) ResetBody() {
 // SendFile logs all the errors via ctx.Logger.
 //
 // See also ServeFile, FSHandler and FS.
+//
+// WARNING: do not pass any user supplied paths to this function!
+// WARNING: if path is based on user input users will be able to request
+// any file on your filesystem! Use fasthttp.FS with a sane Root instead.
 func (ctx *RequestCtx) SendFile(path string) {
 	ServeFile(ctx, path)
 }
@@ -1349,6 +1353,10 @@ func (ctx *RequestCtx) SendFile(path string) {
 // SendFileBytes logs all the errors via ctx.Logger.
 //
 // See also ServeFileBytes, FSHandler and FS.
+//
+// WARNING: do not pass any user supplied paths to this function!
+// WARNING: if path is based on user input users will be able to request
+// any file on your filesystem! Use fasthttp.FS with a sane Root instead.
 func (ctx *RequestCtx) SendFileBytes(path []byte) {
 	ServeFileBytes(ctx, path)
 }
