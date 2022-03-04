@@ -2863,10 +2863,16 @@ func TestRstConnResponseWhileSending(t *testing.T) {
 
 		// Read at least one byte of the header
 		// Otherwise we would have an unsolicited response
-		ioutil.ReadAll(io.LimitReader(conn, 1))
+		_, err = ioutil.ReadAll(io.LimitReader(conn, 1))
+		if err != nil {
+			t.Errorf(err.Error())
+		}
 
 		// Respond
-		conn.Write([]byte("HTTP/1.1 418 Teapot\r\n\r\n"))
+		_, err = conn.Write([]byte("HTTP/1.1 418 Teapot\r\n\r\n"))
+		if err != nil {
+			t.Errorf(err.Error())
+		}
 
 		// Forcefully close connection
 		err = conn.(*net.TCPConn).SetLinger(0)
@@ -2900,7 +2906,6 @@ func TestRstConnResponseWhileSending(t *testing.T) {
 
 // See issue #1232
 func TestRstConnClosedWithoutResponse(t *testing.T) {
-	const expectedStatus = http.StatusTeapot
 	const payload = "payload"
 
 	srv, err := net.Listen("tcp", "127.0.0.1:0")
@@ -2916,10 +2921,16 @@ func TestRstConnClosedWithoutResponse(t *testing.T) {
 
 		// Read at least one byte of the header
 		// Otherwise we would have an unsolicited response
-		ioutil.ReadAll(io.LimitReader(conn, 1))
+		_, err = ioutil.ReadAll(io.LimitReader(conn, 1))
+		if err != nil {
+			t.Errorf(err.Error())
+		}
 
 		// Respond with incomplete header
-		conn.Write([]byte("Http"))
+		_, err = conn.Write([]byte("Http"))
+		if err != nil {
+			t.Errorf(err.Error())
+		}
 
 		// Forcefully close connection
 		err = conn.(*net.TCPConn).SetLinger(0)
