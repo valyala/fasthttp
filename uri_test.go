@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -120,11 +121,15 @@ func TestURIUpdate(t *testing.T) {
 
 	// relative uri
 	testURIUpdate(t, "http://example.com/baz/xxx.html?aaa=22#aaa", "bb.html?xx=12#pp", "http://example.com/baz/bb.html?xx=12#pp")
-	testURIUpdate(t, "http://example.com/a/b/c/d", "../qwe/p?zx=34", "http://example.com/a/b/qwe/p?zx=34")
+
 	testURIUpdate(t, "http://example.com/aaa.html?foo=bar", "?baz=434&aaa#xcv", "http://example.com/aaa.html?baz=434&aaa#xcv")
 	testURIUpdate(t, "http://example.com/baz", "~a/%20b=c,тест?йцу=ке", "http://example.com/~a/%20b=c,%D1%82%D0%B5%D1%81%D1%82?йцу=ке")
 	testURIUpdate(t, "http://example.com/baz", "/qwe#fragment", "http://example.com/qwe#fragment")
 	testURIUpdate(t, "http://example.com/baz/xxx", "aaa.html#bb?cc=dd&ee=dfd", "http://example.com/baz/aaa.html#bb?cc=dd&ee=dfd")
+
+	if runtime.GOOS != "windows" {
+		testURIUpdate(t, "http://example.com/a/b/c/d", "../qwe/p?zx=34", "http://example.com/a/b/qwe/p?zx=34")
+	}
 
 	// hash
 	testURIUpdate(t, "http://example.com/#fragment1", "#fragment2", "http://example.com/#fragment2")
@@ -147,6 +152,10 @@ func testURIUpdate(t *testing.T, base, update, result string) {
 }
 
 func TestURIPathNormalize(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
 	t.Parallel()
 
 	var u URI

@@ -16,6 +16,7 @@ import (
 	"os"
 	"reflect"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -173,7 +174,7 @@ func TestServerPipelineFlush(t *testing.T) {
 
 	// Since the second request takes 200ms to finish we expect the first one to be flushed earlier.
 	d := time.Since(start)
-	if d > time.Millisecond*100 {
+	if d >= time.Millisecond*200 {
 		t.Fatalf("had to wait for %v", d)
 	}
 
@@ -573,12 +574,15 @@ func TestRequestCtxRedirect(t *testing.T) {
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "x.html?b=1#aaa=bbb&cc=ddd", "http://qqq/foo/x.html?b=1#aaa=bbb&cc=ddd")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "/x.html", "http://qqq/x.html")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "/x.html#aaa=bbb&cc=ddd", "http://qqq/x.html#aaa=bbb&cc=ddd")
-	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "../x.html", "http://qqq/x.html")
-	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "../../x.html", "http://qqq/x.html")
-	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "./.././../x.html", "http://qqq/x.html")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "http://foo.bar/baz", "http://foo.bar/baz")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "https://foo.bar/baz", "https://foo.bar/baz")
 	testRequestCtxRedirect(t, "https://foo.com/bar?aaa", "//google.com/aaa?bb", "https://google.com/aaa?bb")
+
+	if runtime.GOOS != "windows" {
+		testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "../x.html", "http://qqq/x.html")
+		testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "../../x.html", "http://qqq/x.html")
+		testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "./.././../x.html", "http://qqq/x.html")
+	}
 }
 
 func testRequestCtxRedirect(t *testing.T, origURL, redirectURL, expectedURL string) {
