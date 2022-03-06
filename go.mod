@@ -4,7 +4,7 @@ go 1.12
 
 require (
 	github.com/andybalholm/brotli v1.0.4
-	github.com/klauspost/compress v1.14.4
+	github.com/klauspost/compress v1.15.0
 	github.com/valyala/bytebufferpool v1.0.0
 	github.com/valyala/tcplisten v1.0.0
 	golang.org/x/crypto v0.0.0-20220214200702-86341886e292
