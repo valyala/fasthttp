@@ -1291,14 +1291,20 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 
 	if !resp.mustSkipBody() {
 		err = resp.ReadBody(r, maxBodySize)
-		if err != nil && !errors.Is(err, syscall.ECONNRESET) {
+		if err != nil {
+			if errors.Is(err, syscall.ECONNRESET) {
+				return nil
+			}
 			return err
 		}
 	}
 
 	if resp.Header.ContentLength() == -1 {
 		err = resp.Header.ReadTrailer(r)
-		if err != nil && err != io.EOF && !errors.Is(err, syscall.ECONNRESET) {
+		if err != nil && err != io.EOF {
+			if errors.Is(err, syscall.ECONNRESET) {
+				return nil
+			}
 			return err
 		}
 	}
