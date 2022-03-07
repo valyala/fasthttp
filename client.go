@@ -1439,7 +1439,8 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		err = bw.Flush()
 	}
 	c.releaseWriter(bw)
-	if err != nil && !errors.Is(err, syscall.ECONNRESET) {
+	isECONNRESET := errors.Is(err, syscall.ECONNRESET)
+	if err != nil && !isECONNRESET {
 		c.closeConn(cc)
 		return true, err
 	}
@@ -1471,7 +1472,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		return retry, err
 	}
 
-	if resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
+	if resetConnection || req.ConnectionClose() || resp.ConnectionClose() || isECONNRESET {
 		c.closeConn(cc)
 	} else {
 		c.releaseConn(cc)
