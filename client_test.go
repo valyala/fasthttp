@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -17,7 +16,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -2955,7 +2953,7 @@ func TestRstConnClosedWithoutResponse(t *testing.T) {
 
 	err = client.Do(req, resp)
 
-	if !errors.Is(err, syscall.ECONNRESET) {
+	if !isConnectionReset(err) {
 		t.Fatalf("Expected connection reset error")
 	}
 }

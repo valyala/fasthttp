@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -1439,8 +1438,8 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		err = bw.Flush()
 	}
 	c.releaseWriter(bw)
-	isECONNRESET := errors.Is(err, syscall.ECONNRESET)
-	if err != nil && !isECONNRESET {
+	isConnRST := isConnectionReset(err)
+	if err != nil && !isConnRST {
 		c.closeConn(cc)
 		return true, err
 	}
@@ -1472,7 +1471,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		return retry, err
 	}
 
-	if resetConnection || req.ConnectionClose() || resp.ConnectionClose() || isECONNRESET {
+	if resetConnection || req.ConnectionClose() || resp.ConnectionClose() || isConnRST {
 		c.closeConn(cc)
 	} else {
 		c.releaseConn(cc)
