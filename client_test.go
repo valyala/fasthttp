@@ -2839,7 +2839,7 @@ func TestHttpsRequestWithoutParsedURL(t *testing.T) {
 
 	_, err := client.doNonNilReqResp(req, &Response{})
 	if err != nil {
-		t.Fatalf("https requests with IsTLS client must succeed")
+		t.Fatal("https requests with IsTLS client must succeed")
 	}
 }
 
@@ -2850,32 +2850,32 @@ func TestRstConnResponseWhileSending(t *testing.T) {
 
 	srv, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatal(err.Error())
+		t.Fatal(err)
 	}
 
 	go func() {
 		conn, err := srv.Accept()
 		if err != nil {
-			t.Errorf(err.Error())
+			t.Error(err)
 		}
 
 		// Read at least one byte of the header
 		// Otherwise we would have an unsolicited response
 		_, err = ioutil.ReadAll(io.LimitReader(conn, 1))
 		if err != nil {
-			t.Errorf(err.Error())
+			t.Error(err)
 		}
 
 		// Respond
 		_, err = conn.Write([]byte("HTTP/1.1 418 Teapot\r\n\r\n"))
 		if err != nil {
-			t.Errorf(err.Error())
+			t.Error(err)
 		}
 
 		// Forcefully close connection
 		err = conn.(*net.TCPConn).SetLinger(0)
 		if err != nil {
-			t.Errorf(err.Error())
+			t.Error(err)
 		}
 		conn.Close()
 	}()
@@ -2895,7 +2895,7 @@ func TestRstConnResponseWhileSending(t *testing.T) {
 
 	err = client.Do(req, resp)
 	if err != nil {
-		t.Fatal(err.Error())
+		t.Fatal(err)
 	}
 	if expectedStatus != resp.StatusCode() {
 		t.Fatalf("Expected %d status code, but got %d", expectedStatus, resp.StatusCode())
@@ -2908,32 +2908,32 @@ func TestRstConnClosedWithoutResponse(t *testing.T) {
 
 	srv, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatal(err.Error())
+		t.Fatal(err)
 	}
 
 	go func() {
 		conn, err := srv.Accept()
 		if err != nil {
-			t.Errorf(err.Error())
+			t.Error(err)
 		}
 
 		// Read at least one byte of the header
 		// Otherwise we would have an unsolicited response
 		_, err = ioutil.ReadAll(io.LimitReader(conn, 1))
 		if err != nil {
-			t.Errorf(err.Error())
+			t.Error(err)
 		}
 
 		// Respond with incomplete header
 		_, err = conn.Write([]byte("Http"))
 		if err != nil {
-			t.Errorf(err.Error())
+			t.Error(err)
 		}
 
 		// Forcefully close connection
 		err = conn.(*net.TCPConn).SetLinger(0)
 		if err != nil {
-			t.Errorf(err.Error())
+			t.Error(err)
 		}
 		conn.Close()
 	}()
@@ -2954,6 +2954,6 @@ func TestRstConnClosedWithoutResponse(t *testing.T) {
 	err = client.Do(req, resp)
 
 	if !isConnectionReset(err) {
-		t.Fatalf("Expected connection reset error")
+		t.Fatal("Expected connection reset error")
 	}
 }
