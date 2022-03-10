@@ -50,6 +50,7 @@ type LBClient struct {
 	cs []*lbClient
 
 	once sync.Once
+	mu   sync.Mutex
 }
 
 // DefaultLBClientTimeout is the default request timeout used by LBClient
@@ -89,6 +90,37 @@ func (cc *LBClient) init() {
 			healthCheck: cc.HealthCheck,
 		})
 	}
+}
+
+// AddClient adds a new HostClient to the balanced clients
+// returns the new total number of clients
+func (cc *LBClient) AddClient(c *HostClient) int {
+	cc.mu.Lock()
+	cc.cs = append(cc.cs, &lbClient{
+		c:           c,
+		healthCheck: cc.HealthCheck,
+	})
+	cc.mu.Unlock()
+	return len(cc.cs)
+}
+
+// RemoveClients removes clients using the provided callback
+// if rc returns true, the passed client will be removed
+// returns the new total number of clients
+func (cc *LBClient) RemoveClients(rc func(*HostClient) bool) int {
+	cc.mu.Lock()
+	for idx, cs := range cc.cs {
+		// ignore non HostClient BalancingClients
+		hc, ok := cs.c.(*HostClient)
+		if !ok {
+			continue
+		}
+		if rc(hc) {
+			cc.cs = append(cc.cs[:idx], cc.cs[idx+1])
+		}
+	}
+	cc.mu.Unlock()
+	return len(cc.cs)
 }
 
 func (cc *LBClient) get() *lbClient {
