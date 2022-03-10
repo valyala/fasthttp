@@ -92,9 +92,9 @@ func (cc *LBClient) init() {
 	}
 }
 
-// AddClient adds a new HostClient to the balanced clients
+// AddClient adds a new client to the balanced clients
 // returns the new total number of clients
-func (cc *LBClient) AddClient(c *HostClient) int {
+func (cc *LBClient) AddClient(c BalancingClient) int {
 	cc.mu.Lock()
 	cc.cs = append(cc.cs, &lbClient{
 		c:           c,
@@ -107,15 +107,10 @@ func (cc *LBClient) AddClient(c *HostClient) int {
 // RemoveClients removes clients using the provided callback
 // if rc returns true, the passed client will be removed
 // returns the new total number of clients
-func (cc *LBClient) RemoveClients(rc func(*HostClient) bool) int {
+func (cc *LBClient) RemoveClients(rc func(BalancingClient) bool) int {
 	cc.mu.Lock()
 	for idx, cs := range cc.cs {
-		// ignore non HostClient BalancingClients
-		hc, ok := cs.c.(*HostClient)
-		if !ok {
-			continue
-		}
-		if rc(hc) {
+		if rc(cs.c) {
 			cc.cs = append(cc.cs[:idx], cc.cs[idx+1])
 		}
 	}
