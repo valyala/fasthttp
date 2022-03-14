@@ -1291,6 +1291,9 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	if !resp.mustSkipBody() {
 		err = resp.ReadBody(r, maxBodySize)
 		if err != nil {
+			if isConnectionReset(err) {
+				return nil
+			}
 			return err
 		}
 	}
@@ -1298,6 +1301,9 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	if resp.Header.ContentLength() == -1 {
 		err = resp.Header.ReadTrailer(r)
 		if err != nil && err != io.EOF {
+			if isConnectionReset(err) {
+				return nil
+			}
 			return err
 		}
 	}

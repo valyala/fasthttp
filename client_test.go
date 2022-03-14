@@ -2837,6 +2837,6 @@ func TestHttpsRequestWithoutParsedURL(t *testing.T) {
 
 	_, err := client.doNonNilReqResp(req, &Response{})
 	if err != nil {
-		t.Fatalf("https requests with IsTLS client must succeed")
+		t.Fatal("https requests with IsTLS client must succeed")
 	}
 }

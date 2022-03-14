@@ -1437,12 +1437,12 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	if err == nil {
 		err = bw.Flush()
 	}
-	if err != nil {
-		c.releaseWriter(bw)
+	c.releaseWriter(bw)
+	isConnRST := isConnectionReset(err)
+	if err != nil && !isConnRST {
 		c.closeConn(cc)
 		return true, err
 	}
-	c.releaseWriter(bw)
 
 	if c.ReadTimeout > 0 {
 		// Set Deadline every time, since golang has fixed the performance issue
@@ -1462,22 +1462,22 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	}
 
 	br := c.acquireReader(conn)
-	if err = resp.ReadLimitBody(br, c.MaxResponseBodySize); err != nil {
-		c.releaseReader(br)
+	err = resp.ReadLimitBody(br, c.MaxResponseBodySize)
+	c.releaseReader(br)
+	if err != nil {
 		c.closeConn(cc)
 		// Don't retry in case of ErrBodyTooLarge since we will just get the same again.
 		retry := err != ErrBodyTooLarge
 		return retry, err
 	}
-	c.releaseReader(br)
 
-	if resetConnection || req.ConnectionClose() || resp.ConnectionClose() {
+	if resetConnection || req.ConnectionClose() || resp.ConnectionClose() || isConnRST {
 		c.closeConn(cc)
 	} else {
 		c.releaseConn(cc)
 	}
 
-	return false, err
+	return false, nil
 }
 
 var (
