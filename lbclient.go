@@ -50,7 +50,7 @@ type LBClient struct {
 	cs []*lbClient
 
 	once sync.Once
-	mu   sync.Mutex
+	mu   sync.RWMutex
 }
 
 // DefaultLBClientTimeout is the default request timeout used by LBClient
@@ -121,6 +121,7 @@ func (cc *LBClient) RemoveClients(rc func(BalancingClient) bool) int {
 func (cc *LBClient) get() *lbClient {
 	cc.once.Do(cc.init)
 
+	cc.mu.RLock()
 	cs := cc.cs
 
 	minC := cs[0]
@@ -135,6 +136,7 @@ func (cc *LBClient) get() *lbClient {
 			minT = t
 		}
 	}
+	cc.mu.RUnlock()
 	return minC
 }
 
