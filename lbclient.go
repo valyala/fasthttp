@@ -81,6 +81,7 @@ func (cc *LBClient) Do(req *Request, resp *Response) error {
 }
 
 func (cc *LBClient) init() {
+	cc.mu.Lock()
 	if len(cc.Clients) == 0 {
 		panic("BUG: LBClient.Clients cannot be empty")
 	}
@@ -90,6 +91,7 @@ func (cc *LBClient) init() {
 			healthCheck: cc.HealthCheck,
 		})
 	}
+	cc.mu.Unlock()
 }
 
 // AddClient adds a new client to the balanced clients
