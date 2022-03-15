@@ -19,7 +19,8 @@ import (
 
 // AppendHTMLEscape appends html-escaped s to dst and returns the extended dst.
 func AppendHTMLEscape(dst []byte, s string) []byte {
-	if strings.IndexByte(s, '<') < 0 &&
+	if strings.IndexByte(s, '&') < 0 &&
+		strings.IndexByte(s, '<') < 0 &&
 		strings.IndexByte(s, '>') < 0 &&
 		strings.IndexByte(s, '"') < 0 &&
 		strings.IndexByte(s, '\'') < 0 {
@@ -34,14 +35,16 @@ func AppendHTMLEscape(dst []byte, s string) []byte {
 	for i, n := 0, len(s); i < n; i++ {
 		sub = ""
 		switch s[i] {
+		case '&':
+			sub = "&amp;"
 		case '<':
 			sub = "&lt;"
 		case '>':
 			sub = "&gt;"
 		case '"':
-			sub = "&quot;"
+			sub = "&#34;" // "&#34;" is shorter than "&quot;".
 		case '\'':
-			sub = "&#39;"
+			sub = "&#39;" // "&#39;" is shorter than "&apos;" and apos was not in HTML until HTML5.
 		}
 		if len(sub) > 0 {
 			dst = append(dst, s[prev:i]...)

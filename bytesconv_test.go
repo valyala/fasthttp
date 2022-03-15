@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"html"
 	"net"
 	"testing"
 	"time"
@@ -14,10 +15,21 @@ import (
 func TestAppendHTMLEscape(t *testing.T) {
 	t.Parallel()
 
+	// Sync with html.EscapeString
+	allcases := make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		allcases[i] = byte(i)
+	}
+	res := string(AppendHTMLEscape(nil, string(allcases)))
+	expect := string(html.EscapeString(string(allcases)))
+	if res != expect {
+		t.Fatalf("unexpected string %q. Expecting %q.", res, expect)
+	}
+
 	testAppendHTMLEscape(t, "", "")
 	testAppendHTMLEscape(t, "<", "&lt;")
 	testAppendHTMLEscape(t, "a", "a")
-	testAppendHTMLEscape(t, `><"''`, "&gt;&lt;&quot;&#39;&#39;")
+	testAppendHTMLEscape(t, `><"''`, "&gt;&lt;&#34;&#39;&#39;")
 	testAppendHTMLEscape(t, "fo<b x='ss'>a</b>xxx", "fo&lt;b x=&#39;ss&#39;&gt;a&lt;/b&gt;xxx")
 }
 
