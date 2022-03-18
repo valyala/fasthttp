@@ -988,14 +988,14 @@ func testPipelineClientDo(t *testing.T, c *PipelineClient) {
 				time.Sleep(10 * time.Millisecond)
 				continue
 			}
-			t.Fatalf("unexpected error on iteration %d: %s", i, err)
+			t.Errorf("unexpected error on iteration %d: %s", i, err)
 		}
 		if resp.StatusCode() != StatusOK {
-			t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+			t.Errorf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 		}
 		body := string(resp.Body())
 		if body != "OK" {
-			t.Fatalf("unexpected body: %q. Expecting %q", body, "OK")
+			t.Errorf("unexpected body: %q. Expecting %q", body, "OK")
 		}
 
 		// sleep for a while, so the connection to the host may expire.
@@ -1705,10 +1705,10 @@ func testClientDoTimeoutError(t *testing.T, c *Client, n int) {
 	for i := 0; i < n; i++ {
 		err := c.DoTimeout(&req, &resp, time.Millisecond)
 		if err == nil {
-			t.Fatalf("expecting error")
+			t.Errorf("expecting error")
 		}
 		if err != ErrTimeout {
-			t.Fatalf("unexpected error: %s. Expecting %s", err, ErrTimeout)
+			t.Errorf("unexpected error: %s. Expecting %s", err, ErrTimeout)
 		}
 	}
 }
@@ -1718,16 +1718,16 @@ func testClientGetTimeoutError(t *testing.T, c *Client, n int) {
 	for i := 0; i < n; i++ {
 		statusCode, body, err := c.GetTimeout(buf, "http://foobar.com/baz", time.Millisecond)
 		if err == nil {
-			t.Fatalf("expecting error")
+			t.Errorf("expecting error")
 		}
 		if err != ErrTimeout {
-			t.Fatalf("unexpected error: %s. Expecting %s", err, ErrTimeout)
+			t.Errorf("unexpected error: %s. Expecting %s", err, ErrTimeout)
 		}
 		if statusCode != 0 {
-			t.Fatalf("unexpected statusCode=%d. Expecting %d", statusCode, 0)
+			t.Errorf("unexpected statusCode=%d. Expecting %d", statusCode, 0)
 		}
 		if body == nil {
-			t.Fatalf("body must be non-nil")
+			t.Errorf("body must be non-nil")
 		}
 	}
 }
@@ -2326,14 +2326,14 @@ func testClientGet(t *testing.T, c clientGetter, addr string, n int) {
 		statusCode, body, err := c.Get(buf, uri)
 		buf = body
 		if err != nil {
-			t.Fatalf("unexpected error when doing http request: %s", err)
+			t.Errorf("unexpected error when doing http request: %s", err)
 		}
 		if statusCode != StatusOK {
-			t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+			t.Errorf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
 		}
 		resultURI := string(body)
 		if resultURI != uri {
-			t.Fatalf("unexpected uri %q. Expecting %q", resultURI, uri)
+			t.Errorf("unexpected uri %q. Expecting %q", resultURI, uri)
 		}
 	}
 }
@@ -2346,17 +2346,17 @@ func testClientDoTimeoutSuccess(t *testing.T, c *Client, addr string, n int) {
 		uri := fmt.Sprintf("%s/foo/%d?bar=baz", addr, i)
 		req.SetRequestURI(uri)
 		if err := c.DoTimeout(&req, &resp, time.Second); err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %s", err)
 		}
 		if resp.StatusCode() != StatusOK {
-			t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+			t.Errorf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 		}
 		resultURI := string(resp.Body())
 		if strings.HasPrefix(uri, "https") {
 			resultURI = uri[:5] + resultURI[4:]
 		}
 		if resultURI != uri {
-			t.Fatalf("unexpected uri %q. Expecting %q", resultURI, uri)
+			t.Errorf("unexpected uri %q. Expecting %q", resultURI, uri)
 		}
 	}
 }
@@ -2368,17 +2368,17 @@ func testClientGetTimeoutSuccess(t *testing.T, c *Client, addr string, n int) {
 		statusCode, body, err := c.GetTimeout(buf, uri, time.Second)
 		buf = body
 		if err != nil {
-			t.Fatalf("unexpected error when doing http request: %s", err)
+			t.Errorf("unexpected error when doing http request: %s", err)
 		}
 		if statusCode != StatusOK {
-			t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+			t.Errorf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
 		}
 		resultURI := string(body)
 		if strings.HasPrefix(uri, "https") {
 			resultURI = uri[:5] + resultURI[4:]
 		}
 		if resultURI != uri {
-			t.Fatalf("unexpected uri %q. Expecting %q", resultURI, uri)
+			t.Errorf("unexpected uri %q. Expecting %q", resultURI, uri)
 		}
 	}
 }
@@ -2394,14 +2394,14 @@ func testClientPost(t *testing.T, c clientPoster, addr string, n int) {
 		statusCode, body, err := c.Post(buf, uri, &args)
 		buf = body
 		if err != nil {
-			t.Fatalf("unexpected error when doing http request: %s", err)
+			t.Errorf("unexpected error when doing http request: %s", err)
 		}
 		if statusCode != StatusOK {
-			t.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
+			t.Errorf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
 		}
 		s := string(body)
 		if s != argsS {
-			t.Fatalf("unexpected response %q. Expecting %q", s, argsS)
+			t.Errorf("unexpected response %q. Expecting %q", s, argsS)
 		}
 	}
 }
