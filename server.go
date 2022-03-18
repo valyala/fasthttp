@@ -482,7 +482,7 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 	}
 }
 
-//RequestConfig configure the per request deadline and body limits
+// RequestConfig configure the per request deadline and body limits
 type RequestConfig struct {
 	// ReadTimeout is the maximum duration for reading the entire
 	// request body.
@@ -1915,8 +1915,8 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 			if c != nil {
 				panic("BUG: net.Listener returned non-nil conn and non-nil error")
 			}
-			if netErr, ok := err.(net.Error); ok && netErr.Temporary() {
-				s.logger().Printf("Temporary error when accepting new connections: %s", netErr)
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				s.logger().Printf("Timeout error when accepting new connections: %s", netErr)
 				time.Sleep(time.Second)
 				continue
 			}
@@ -2230,7 +2230,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 						writeTimeout = reqConf.WriteTimeout
 					}
 				}
-				//read body
+				// read body
 				if s.StreamRequestBody {
 					err = ctx.Request.readBodyStream(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
 				} else {
