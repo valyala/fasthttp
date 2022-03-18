@@ -2916,14 +2916,15 @@ func (c *pipelineConnClient) getClientName() []byte {
 
 var errPipelineConnStopped = errors.New("pipeline connection has been stopped")
 
-func acquirePipelineWork(pool *sync.Pool, timeout time.Duration) *pipelineWork {
+func acquirePipelineWork(pool *sync.Pool, timeout time.Duration) (w *pipelineWork) {
 	v := pool.Get()
-	if v == nil {
-		v = &pipelineWork{
+	if v != nil {
+		w = v.(*pipelineWork)
+	} else {
+		w = &pipelineWork{
 			done: make(chan struct{}, 1),
 		}
 	}
-	w := v.(*pipelineWork)
 	if timeout > 0 {
 		if w.t == nil {
 			w.t = time.NewTimer(timeout)

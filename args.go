@@ -230,7 +230,7 @@ func (a *Args) SetBytesKV(key, value []byte) {
 
 // SetNoValue sets only 'key' as argument without the '='.
 //
-// Only key in argumemt, like key1&key2
+// Only key in argument, like key1&key2
 func (a *Args) SetNoValue(key string) {
 	a.args = setArg(a.args, key, "", argsNoValue)
 }
