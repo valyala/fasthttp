@@ -21,6 +21,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@master
-        with:
-          args: -exclude=G104,G304 ./...
+        run: | # https://github.com/securego/gosec/issues/469#issuecomment-1070608395
+          export PATH=$PATH:$(go env GOPATH)/bin
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -exclude=G104,G304 ./...
