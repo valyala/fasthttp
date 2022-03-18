@@ -6,11 +6,27 @@ import (
 	"fmt"
 	"html"
 	"net"
+	"net/url"
 	"testing"
 	"time"
 
 	"github.com/valyala/bytebufferpool"
 )
+
+func TestAppendQuotedArg(t *testing.T) {
+	t.Parallel()
+
+	// Sync with url.QueryEscape
+	allcases := make([]byte, 256)
+	for i := 0; i < 256; i++ {
+		allcases[i] = byte(i)
+	}
+	res := string(AppendQuotedArg(nil, allcases))
+	expect := url.QueryEscape(string(allcases))
+	if res != expect {
+		t.Fatalf("unexpected string %q. Expecting %q.", res, expect)
+	}
+}
 
 func TestAppendHTMLEscape(t *testing.T) {
 	t.Parallel()
