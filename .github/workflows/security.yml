@@ -8,9 +8,11 @@ jobs:
   test:
     strategy:
       matrix:
-        go-version: [1.17.x]
+        go-version: [1.18.x]
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
+    env:
+      GO111MODULE: on
     steps:
       - name: Install Go
         uses: actions/setup-go@v1
@@ -18,5 +20,8 @@ jobs:
           go-version: ${{ matrix.go-version }}
       - name: Checkout code
         uses: actions/checkout@v2
-      - name: Security
-        run: go get github.com/securego/gosec/cmd/gosec; `go env GOPATH`/bin/gosec -exclude=G104,G304 ./...
+      - name: Run Gosec Security Scanner
+        run: | # https://github.com/securego/gosec/issues/469#issuecomment-1070608395
+          export PATH=$PATH:$(go env GOPATH)/bin
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
+          gosec -exclude=G104,G304,G402 ./...
