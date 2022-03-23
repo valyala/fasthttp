@@ -1832,7 +1832,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		}
 		s.setState(c, StateNew)
 		if !s.NoDefaultDate {
-			s.updateServerDate()
+			s.updateServerDateWithDone()
 		}
 		atomic.AddInt32(&s.open, 1)
 		if !wp.Serve(c) {
@@ -1993,7 +1993,7 @@ var (
 // ServeConn closes c before returning.
 func (s *Server) ServeConn(c net.Conn) error {
 	if !s.NoDefaultDate {
-		s.updateServerDate()
+		s.updateServerDateWithDone()
 	}
 	if s.MaxConnsPerIP > 0 {
 		pic := wrapPerIPConn(s, c)
@@ -2925,7 +2925,7 @@ func (c ConnState) String() string {
 	return stateName[c]
 }
 
-func (s *Server) updateServerDate() {
+func (s *Server) updateServerDateWithDone() {
 	serverDateOnce.Do(func() {
 		refreshServerDate()
 		go func() {
@@ -2940,14 +2940,4 @@ func (s *Server) updateServerDate() {
 			}
 		}()
 	})
-}
-
-var (
-	serverDate     atomic.Value
-	serverDateOnce sync.Once // serverDateOnce.Do(updateServerDate)
-)
-
-func refreshServerDate() {
-	b := AppendHTTPDate(nil, time.Now())
-	serverDate.Store(b)
 }
