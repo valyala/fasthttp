@@ -113,7 +113,7 @@ func (cc *LBClient) RemoveClients(rc func(BalancingClient) bool) int {
 	cc.mu.Lock()
 	for idx, cs := range cc.cs {
 		if rc(cs.c) {
-			cc.cs = append(cc.cs[:idx], cc.cs[idx+1])
+			cc.cs = append(cc.cs[:idx], cc.cs[idx+1:]...)
 		}
 	}
 	cc.mu.Unlock()
