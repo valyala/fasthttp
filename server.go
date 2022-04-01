@@ -2138,7 +2138,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		if connRequestNum > 1 {
 			if d := s.idleTimeout(); d > 0 {
 				if err := c.SetReadDeadline(time.Now().Add(d)); err != nil {
-					panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", d, err))
+					break
 				}
 			}
 		}
@@ -2178,15 +2178,17 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
 		if err == nil {
+			s.setState(c, StateActive)
+
 			if s.ReadTimeout > 0 {
 				if err := c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
-					panic(fmt.Sprintf("BUG: error in SetReadDeadline(%s): %s", s.ReadTimeout, err))
+					break
 				}
 			} else if s.IdleTimeout > 0 && connRequestNum > 1 {
 				// If this was an idle connection and the server has an IdleTimeout but
 				// no ReadTimeout then we should remove the ReadTimeout.
 				if err := c.SetReadDeadline(zeroTime); err != nil {
-					panic(fmt.Sprintf("BUG: error in SetReadDeadline(zeroTime): %s", err))
+					break
 				}
 			}
 			if s.DisableHeaderNamesNormalizing {
@@ -2236,11 +2238,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 				} else {
 					err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
 				}
-			}
-
-			if err == nil {
-				// If we read any bytes off the wire, we're active.
-				s.setState(c, StateActive)
 			}
 
 			if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
