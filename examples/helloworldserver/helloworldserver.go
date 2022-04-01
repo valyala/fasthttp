@@ -22,7 +22,7 @@ func main() {
 	}
 
 	if err := fasthttp.ListenAndServe(*addr, h); err != nil {
-		log.Fatalf("Error in ListenAndServe: %s", err)
+		log.Fatalf("Error in ListenAndServe: %v", err)
 	}
 }
 

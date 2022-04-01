@@ -51,17 +51,17 @@ aaaaaaaaaa`
 	ch := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(ch)
 	}()
 
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = conn.Write([]byte(reqS)); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var resp Response
@@ -69,14 +69,14 @@ aaaaaaaaaa`
 	respCh := make(chan struct{})
 	go func() {
 		if err := resp.Read(br); err != nil {
-			t.Errorf("error when reading response: %s", err)
+			t.Errorf("error when reading response: %v", err)
 		}
 		if resp.StatusCode() != StatusOK {
 			t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
 		}
 
 		if err := resp.Read(br); err != nil {
-			t.Errorf("error when reading response: %s", err)
+			t.Errorf("error when reading response: %v", err)
 		}
 		if resp.StatusCode() != StatusOK {
 			t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -91,7 +91,7 @@ aaaaaaaaaa`
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("error when closing listener: %s", err)
+		t.Fatalf("error when closing listener: %v", err)
 	}
 
 	select {
@@ -108,7 +108,7 @@ func getChunkedTestEnv(t testing.TB) (*fasthttputil.InmemoryListener, []byte) {
 	testHandler := func(ctx *RequestCtx) {
 		bodyBytes, err := ioutil.ReadAll(ctx.RequestBodyStream())
 		if err != nil {
-			t.Logf("ioutil read returned err=%s", err)
+			t.Logf("ioutil read returned err=%v", err)
 			t.Error("unexpected error while reading request body stream")
 		}
 
@@ -127,7 +127,7 @@ func getChunkedTestEnv(t testing.TB) (*fasthttputil.InmemoryListener, []byte) {
 	go func() {
 		err := s.Serve(ln)
 		if err != nil {
-			t.Errorf("could not serve listener: %s", err)
+			t.Errorf("could not serve listener: %v", err)
 		}
 	}()
 
@@ -166,7 +166,7 @@ Trailer: Foo, Bar
 		Handler: func(ctx *RequestCtx) {
 			all, err := ioutil.ReadAll(ctx.RequestBodyStream())
 			if err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			if !bytes.Equal(all, body) {
 				t.Errorf("unexpected body %q. Expecting %q", all, body)
@@ -175,7 +175,7 @@ Trailer: Foo, Bar
 			for k, v := range expectedTrailer {
 				r := ctx.Request.Header.Peek(k)
 				if string(r) != v {
-					t.Errorf("unexpected trailer %s. Expecting %s. Got %q", k, v, r)
+					t.Errorf("unexpected trailer %q. Expecting %q. Got %q", k, v, r)
 				}
 			}
 		},
@@ -184,20 +184,20 @@ Trailer: Foo, Bar
 	ch := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(ch)
 	}()
 
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = conn.Write([]byte(req)); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := ln.Close(); err != nil {
-		t.Fatalf("error when closing listener: %s", err)
+		t.Fatalf("error when closing listener: %v", err)
 	}
 
 	select {
@@ -214,16 +214,16 @@ func TestRequestStream(t *testing.T) {
 
 	c, err := ln.Dial()
 	if err != nil {
-		t.Errorf("unexpected error while dialing: %s", err)
+		t.Errorf("unexpected error while dialing: %v", err)
 	}
 	if _, err = c.Write(formattedRequest); err != nil {
-		t.Errorf("unexpected error while writing request: %s", err)
+		t.Errorf("unexpected error while writing request: %v", err)
 	}
 
 	br := bufio.NewReader(c)
 	var respH ResponseHeader
 	if err = respH.Read(br); err != nil {
-		t.Errorf("unexpected error: %s", err)
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -237,16 +237,16 @@ func BenchmarkRequestStreamE2E(b *testing.B) {
 			for i := 0; i < b.N/4; i++ {
 				c, err := ln.Dial()
 				if err != nil {
-					b.Errorf("unexpected error while dialing: %s", err)
+					b.Errorf("unexpected error while dialing: %v", err)
 				}
 				if _, err = c.Write(formattedRequest); err != nil {
-					b.Errorf("unexpected error while writing request: %s", err)
+					b.Errorf("unexpected error while writing request: %v", err)
 				}
 
 				br := bufio.NewReaderSize(c, 128)
 				var respH ResponseHeader
 				if err = respH.Read(br); err != nil {
-					b.Errorf("unexpected error: %s", err)
+					b.Errorf("unexpected error: %v", err)
 				}
 				c.Close()
 			}

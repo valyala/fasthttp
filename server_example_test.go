@@ -27,7 +27,7 @@ func ExampleListenAndServe() {
 	//
 	// ListenAndServe returns only on error, so usually it blocks forever.
 	if err := fasthttp.ListenAndServe(listenAddr, requestHandler); err != nil {
-		log.Fatalf("error in ListenAndServe: %s", err)
+		log.Fatalf("error in ListenAndServe: %v", err)
 	}
 }
 
@@ -39,7 +39,7 @@ func ExampleServe() {
 	// For example, unix socket listener or TLS listener.
 	ln, err := net.Listen("tcp4", "127.0.0.1:8080")
 	if err != nil {
-		log.Fatalf("error in net.Listen: %s", err)
+		log.Fatalf("error in net.Listen: %v", err)
 	}
 
 	// This function will be called by the server for each incoming request.
@@ -55,7 +55,7 @@ func ExampleServe() {
 	//
 	// Serve returns on ln.Close() or error, so usually it blocks forever.
 	if err := fasthttp.Serve(ln, requestHandler); err != nil {
-		log.Fatalf("error in Serve: %s", err)
+		log.Fatalf("error in Serve: %v", err)
 	}
 }
 
@@ -82,7 +82,7 @@ func ExampleServer() {
 	//
 	// ListenAndServe returns only on error, so usually it blocks forever.
 	if err := s.ListenAndServe("127.0.0.1:80"); err != nil {
-		log.Fatalf("error in ListenAndServe: %s", err)
+		log.Fatalf("error in ListenAndServe: %v", err)
 	}
 }
 
@@ -94,7 +94,7 @@ func ExampleRequestCtx_Hijack() {
 		var buf [1]byte
 		for {
 			if _, err := c.Read(buf[:]); err != nil {
-				log.Printf("error when reading from hijacked connection: %s", err)
+				log.Printf("error when reading from hijacked connection: %v", err)
 				return
 			}
 			fmt.Fprintf(c, "You sent me %q. Waiting for new data\n", buf[:])
@@ -120,7 +120,7 @@ func ExampleRequestCtx_Hijack() {
 	}
 
 	if err := fasthttp.ListenAndServe(":80", requestHandler); err != nil {
-		log.Fatalf("error in ListenAndServe: %s", err)
+		log.Fatalf("error in ListenAndServe: %v", err)
 	}
 }
 
@@ -151,7 +151,7 @@ func ExampleRequestCtx_TimeoutError() {
 	}
 
 	if err := fasthttp.ListenAndServe(":80", requestHandler); err != nil {
-		log.Fatalf("error in ListenAndServe: %s", err)
+		log.Fatalf("error in ListenAndServe: %v", err)
 	}
 }
 
@@ -172,6 +172,6 @@ func ExampleRequestCtx_Logger() {
 	}
 
 	if err := fasthttp.ListenAndServe(":80", requestHandler); err != nil {
-		log.Fatalf("error in ListenAndServe: %s", err)
+		log.Fatalf("error in ListenAndServe: %v", err)
 	}
 }

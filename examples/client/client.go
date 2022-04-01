@@ -53,7 +53,7 @@ func sendGetRequest() {
 	if err == nil {
 		fmt.Printf("DEBUG Response: %s\n", resp.Body())
 	} else {
-		fmt.Fprintf(os.Stderr, "ERR Connection error: %s\n", err)
+		fmt.Fprintf(os.Stderr, "ERR Connection error: %v\n", err)
 	}
 	fasthttp.ReleaseResponse(resp)
 }
@@ -85,7 +85,7 @@ func sendPostRequest() {
 			if err == io.EOF || err == nil {
 				fmt.Printf("DEBUG Parsed Response: %v\n", respEntity)
 			} else {
-				fmt.Fprintf(os.Stderr, "ERR failed to parse reponse: %s\n", err)
+				fmt.Fprintf(os.Stderr, "ERR failed to parse reponse: %v\n", err)
 			}
 		} else {
 			fmt.Fprintf(os.Stderr, "ERR invalid HTTP response code: %d\n", statusCode)
@@ -93,9 +93,9 @@ func sendPostRequest() {
 	} else {
 		errName, known := httpConnError(err)
 		if known {
-			fmt.Fprintf(os.Stderr, "WARN conn error: %s\n", errName)
+			fmt.Fprintf(os.Stderr, "WARN conn error: %v\n", errName)
 		} else {
-			fmt.Fprintf(os.Stderr, "ERR conn failure: %s %s\n", errName, err)
+			fmt.Fprintf(os.Stderr, "ERR conn failure: %v %v\n", errName, err)
 		}
 	}
 	fasthttp.ReleaseResponse(resp)

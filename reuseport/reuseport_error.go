@@ -11,5 +11,5 @@ type ErrNoReusePort struct {
 
 // Error implements error interface.
 func (e *ErrNoReusePort) Error() string {
-	return fmt.Sprintf("The OS doesn't support SO_REUSEPORT: %s", e.err)
+	return fmt.Sprintf("The OS doesn't support SO_REUSEPORT: %v", e.err)
 }

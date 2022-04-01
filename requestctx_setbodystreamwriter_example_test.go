@@ -12,7 +12,7 @@ import (
 func ExampleRequestCtx_SetBodyStreamWriter() {
 	// Start fasthttp server for streaming responses.
 	if err := fasthttp.ListenAndServe(":8080", responseStreamHandler); err != nil {
-		log.Fatalf("unexpected error in server: %s", err)
+		log.Fatalf("unexpected error in server: %v", err)
 	}
 }
 

@@ -3181,6 +3181,6 @@ func mustPeekBuffered(r *bufio.Reader) []byte {
 
 func mustDiscard(r *bufio.Reader, n int) {
 	if _, err := r.Discard(n); err != nil {
-		panic(fmt.Sprintf("bufio.Reader.Discard(%d) failed: %s", n, err))
+		panic(fmt.Sprintf("bufio.Reader.Discard(%d) failed: %v", n, err))
 	}
 }

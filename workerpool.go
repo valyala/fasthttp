@@ -229,7 +229,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 				strings.Contains(errStr, "unexpected EOF") ||
 				strings.Contains(errStr, "i/o timeout") ||
 				errors.Is(err, ErrBadTrailer)) {
-				wp.Logger.Printf("error when serving connection %q<->%q: %s", c.LocalAddr(), c.RemoteAddr(), err)
+				wp.Logger.Printf("error when serving connection %q<->%q: %v", c.LocalAddr(), c.RemoteAddr(), err)
 			}
 		}
 		if err == errHijacked {

@@ -42,6 +42,6 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 
 func ExampleFSHandler() {
 	if err := fasthttp.ListenAndServe(":80", requestHandler); err != nil {
-		log.Fatalf("Error in server: %s", err)
+		log.Fatalf("Error in server: %v", err)
 	}
 }

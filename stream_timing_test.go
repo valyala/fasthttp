@@ -52,16 +52,16 @@ func benchmarkStreamReader(b *testing.B, size int) {
 				if err == io.EOF {
 					break
 				}
-				b.Fatalf("unexpected error when reading from stream reader: %s", err)
+				b.Fatalf("unexpected error when reading from stream reader: %v", err)
 			}
 		}
 		if err := sr.Close(); err != nil {
-			b.Fatalf("unexpected error when closing stream reader: %s", err)
+			b.Fatalf("unexpected error when closing stream reader: %v", err)
 		}
 		select {
 		case err := <-ch:
 			if err != nil {
-				b.Fatalf("unexpected error from stream reader: %s", err)
+				b.Fatalf("unexpected error from stream reader: %v", err)
 			}
 		case <-time.After(time.Second):
 			b.Fatalf("timeout")

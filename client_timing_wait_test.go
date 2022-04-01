@@ -45,7 +45,7 @@ func benchmarkClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism int) {
 	go func() {
 
 		if err := Serve(ln, newFasthttpSleepEchoHandler(sleepDuration)); err != nil {
-			b.Errorf("error when serving requests: %s", err)
+			b.Errorf("error when serving requests: %v", err)
 		}
 		close(ch)
 	}()
@@ -65,7 +65,7 @@ func benchmarkClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism int) {
 			statusCode, body, err := c.Get(buf, url)
 			if err != nil {
 				if err != ErrNoFreeConns {
-					b.Fatalf("unexpected error: %s", err)
+					b.Fatalf("unexpected error: %v", err)
 				}
 			} else {
 				if statusCode != StatusOK {
@@ -119,7 +119,7 @@ func benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism
 	go func() {
 		if err := http.Serve(ln, newNethttpSleepEchoHandler(sleep)); err != nil && !strings.Contains(
 			err.Error(), "use of closed network connection") {
-			b.Errorf("error when serving requests: %s", err)
+			b.Errorf("error when serving requests: %v", err)
 		}
 		close(ch)
 	}()
@@ -140,7 +140,7 @@ func benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism
 			resp, err := c.Get(url)
 			if err != nil {
 				if netErr, ok := err.(net.Error); !ok || !netErr.Timeout() {
-					b.Fatalf("unexpected error: %s", err)
+					b.Fatalf("unexpected error: %v", err)
 				}
 			} else {
 				if resp.StatusCode != http.StatusOK {
@@ -149,7 +149,7 @@ func benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism
 				body, err := ioutil.ReadAll(resp.Body)
 				resp.Body.Close()
 				if err != nil {
-					b.Fatalf("unexpected error when reading response body: %s", err)
+					b.Fatalf("unexpected error when reading response body: %v", err)
 				}
 				if string(body) != requestURI {
 					b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)

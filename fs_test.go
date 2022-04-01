@@ -130,7 +130,7 @@ func TestServeFileHead(t *testing.T) {
 	s := ctx.Response.String()
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	ce := resp.Header.Peek(HeaderContentEncoding)
@@ -145,7 +145,7 @@ func TestServeFileHead(t *testing.T) {
 
 	expectedBody, err := getFileContents("/fs.go")
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	contentLength := resp.Header.ContentLength()
 	if contentLength != len(expectedBody) {
@@ -194,7 +194,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 
 	body := buf.String()
 	if body != teststr {
-		t.Fatalf("expected '%s'", teststr)
+		t.Fatalf("expected '%q'", teststr)
 	}
 }
 
@@ -222,7 +222,7 @@ func TestServeFileCompressed(t *testing.T) {
 	s := ctx.Response.String()
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	ce := resp.Header.Peek(HeaderContentEncoding)
@@ -232,11 +232,11 @@ func TestServeFileCompressed(t *testing.T) {
 
 	body, err := resp.BodyGunzip()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	expectedBody, err := getFileContents("/fs.go")
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if !bytes.Equal(body, expectedBody) {
 		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
@@ -251,7 +251,7 @@ func TestServeFileCompressed(t *testing.T) {
 	s = ctx.Response.String()
 	br = bufio.NewReader(bytes.NewBufferString(s))
 	if err = resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	ce = resp.Header.Peek(HeaderContentEncoding)
@@ -261,11 +261,11 @@ func TestServeFileCompressed(t *testing.T) {
 
 	body, err = resp.BodyUnbrotli()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	expectedBody, err = getFileContents("/fs.go")
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if !bytes.Equal(body, expectedBody) {
 		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
@@ -287,7 +287,7 @@ func TestServeFileUncompressed(t *testing.T) {
 	s := ctx.Response.String()
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	ce := resp.Header.Peek(HeaderContentEncoding)
@@ -298,7 +298,7 @@ func TestServeFileUncompressed(t *testing.T) {
 	body := resp.Body()
 	expectedBody, err := getFileContents("/fs.go")
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if !bytes.Equal(body, expectedBody) {
 		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
@@ -362,7 +362,7 @@ func testFSByteRange(t *testing.T, h RequestHandler, filePath string) {
 
 	expectedBody, err := getFileContents(filePath)
 	if err != nil {
-		t.Fatalf("cannot read file %q: %s", filePath, err)
+		t.Fatalf("cannot read file %q: %v", filePath, err)
 	}
 
 	fileSize := len(expectedBody)
@@ -380,7 +380,7 @@ func testFSByteRange(t *testing.T, h RequestHandler, filePath string) {
 	s := ctx.Response.String()
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s. filePath=%q", err, filePath)
+		t.Fatalf("unexpected error: %v. filePath=%q", err, filePath)
 	}
 	if resp.StatusCode() != StatusPartialContent {
 		t.Fatalf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusPartialContent, filePath)
@@ -438,7 +438,7 @@ func TestParseByteRangeSuccess(t *testing.T) {
 func testParseByteRangeSuccess(t *testing.T, v string, contentLength, startPos, endPos int) {
 	startPos1, endPos1, err := ParseByteRange([]byte(v), contentLength)
 	if err != nil {
-		t.Fatalf("unexpected error: %s. v=%q, contentLength=%d", err, v, contentLength)
+		t.Fatalf("unexpected error: %v. v=%q, contentLength=%d", err, v, contentLength)
 	}
 	if startPos1 != startPos {
 		t.Fatalf("unexpected startPos=%d. Expecting %d. v=%q, contentLength=%d", startPos1, startPos, v, contentLength)
@@ -562,7 +562,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	s := ctx.Response.String()
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Errorf("unexpected error: %s. filePath=%q", err, filePath)
+		t.Errorf("unexpected error: %v. filePath=%q", err, filePath)
 	}
 	if resp.StatusCode() != StatusOK {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
@@ -581,7 +581,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	s = ctx.Response.String()
 	br = bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Errorf("unexpected error: %s. filePath=%q", err, filePath)
+		t.Errorf("unexpected error: %v. filePath=%q", err, filePath)
 	}
 	if resp.StatusCode() != StatusOK {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
@@ -592,7 +592,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	}
 	zbody, err := resp.BodyGunzip()
 	if err != nil {
-		t.Errorf("unexpected error when gunzipping response body: %s. filePath=%q", err, filePath)
+		t.Errorf("unexpected error when gunzipping response body: %v. filePath=%q", err, filePath)
 	}
 	if string(zbody) != body {
 		t.Errorf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
@@ -606,7 +606,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	s = ctx.Response.String()
 	br = bufio.NewReader(bytes.NewBufferString(s))
 	if err = resp.Read(br); err != nil {
-		t.Errorf("unexpected error: %s. filePath=%q", err, filePath)
+		t.Errorf("unexpected error: %v. filePath=%q", err, filePath)
 	}
 	if resp.StatusCode() != StatusOK {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
@@ -617,7 +617,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	}
 	zbody, err = resp.BodyUnbrotli()
 	if err != nil {
-		t.Errorf("unexpected error when unbrotling response body: %s. filePath=%q", err, filePath)
+		t.Errorf("unexpected error when unbrotling response body: %v. filePath=%q", err, filePath)
 	}
 	if string(zbody) != body {
 		t.Errorf("unexpected body len=%d. Expected len=%d. FilePath=%q", len(zbody), len(body), filePath)
@@ -631,13 +631,13 @@ func TestFSHandlerSingleThread(t *testing.T) {
 
 	f, err := os.Open(".")
 	if err != nil {
-		t.Fatalf("cannot open cwd: %s", err)
+		t.Fatalf("cannot open cwd: %v", err)
 	}
 
 	filenames, err := f.Readdirnames(0)
 	f.Close()
 	if err != nil {
-		t.Fatalf("cannot read dirnames in cwd: %s", err)
+		t.Fatalf("cannot read dirnames in cwd: %v", err)
 	}
 	sort.Strings(filenames)
 
@@ -653,13 +653,13 @@ func TestFSHandlerConcurrent(t *testing.T) {
 
 	f, err := os.Open(".")
 	if err != nil {
-		t.Fatalf("cannot open cwd: %s", err)
+		t.Fatalf("cannot open cwd: %v", err)
 	}
 
 	filenames, err := f.Readdirnames(0)
 	f.Close()
 	if err != nil {
-		t.Fatalf("cannot read dirnames in cwd: %s", err)
+		t.Fatalf("cannot read dirnames in cwd: %v", err)
 	}
 	sort.Strings(filenames)
 
@@ -693,11 +693,11 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 	for _, name := range filenames {
 		f, err := os.Open(name)
 		if err != nil {
-			t.Fatalf("cannot open file %q: %s", name, err)
+			t.Fatalf("cannot open file %q: %v", name, err)
 		}
 		stat, err := f.Stat()
 		if err != nil {
-			t.Fatalf("cannot get file stat %q: %s", name, err)
+			t.Fatalf("cannot get file stat %q: %v", name, err)
 		}
 		if stat.IsDir() {
 			f.Close()
@@ -706,7 +706,7 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 		data, err := ioutil.ReadAll(f)
 		f.Close()
 		if err != nil {
-			t.Fatalf("cannot read file contents %q: %s", name, err)
+			t.Fatalf("cannot read file contents %q: %v", name, err)
 		}
 
 		ctx.URI().Update(name)
@@ -716,7 +716,7 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 		}
 		body, err := ioutil.ReadAll(ctx.Response.bodyStream)
 		if err != nil {
-			t.Fatalf("error when reading response body stream: %s", err)
+			t.Fatalf("error when reading response body stream: %v", err)
 		}
 		if !bytes.Equal(body, data) {
 			t.Fatalf("unexpected body returned: %q. Expecting %q", body, data)
@@ -735,7 +735,7 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 	}
 	body, err := ioutil.ReadAll(ctx.Response.bodyStream)
 	if err != nil {
-		t.Fatalf("error when reading response body stream: %s", err)
+		t.Fatalf("error when reading response body stream: %v", err)
 	}
 	if len(body) == 0 {
 		t.Fatalf("index page must be non-empty")
@@ -809,7 +809,7 @@ func TestServeFileContentType(t *testing.T) {
 	s := ctx.Response.String()
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	expected := []byte("image/png")

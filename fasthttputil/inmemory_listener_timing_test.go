@@ -116,7 +116,7 @@ func benchmarkExt(b *testing.B, h fasthttp.RequestHandler, bc *benchConfig) {
 		}
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			b.Fatalf("cannot load TLS certificate from certFile=%q, keyFile=%q: %s", certFile, keyFile, err)
+			b.Fatalf("cannot load TLS certificate from certFile=%q, keyFile=%q: %v", certFile, keyFile, err)
 		}
 		serverTLSConfig = &tls.Config{
 			Certificates:             []tls.Certificate{cert},
@@ -143,7 +143,7 @@ func benchmarkExt(b *testing.B, h fasthttp.RequestHandler, bc *benchConfig) {
 			serverLn = tls.NewListener(serverLn, serverTLSConfig)
 		}
 		if err := fasthttp.Serve(serverLn, h); err != nil {
-			b.Errorf("unexpected error in server: %s", err)
+			b.Errorf("unexpected error in server: %v", err)
 		}
 		close(serverStopCh)
 	}()
@@ -179,7 +179,7 @@ func runRequests(b *testing.B, pb *testing.PB, c *fasthttp.HostClient) {
 	var resp fasthttp.Response
 	for pb.Next() {
 		if err := c.Do(&req, &resp); err != nil {
-			b.Fatalf("unexpected error: %s", err)
+			b.Fatalf("unexpected error: %v", err)
 		}
 		if resp.StatusCode() != fasthttp.StatusOK {
 			b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), fasthttp.StatusOK)

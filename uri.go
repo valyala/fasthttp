@@ -808,7 +808,7 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 		path := u.Path()
 		n = bytes.LastIndexByte(path, '/')
 		if n < 0 {
-			panic(fmt.Sprintf("BUG: path must contain at least one slash: %s %s", u.Path(), newURI))
+			panic(fmt.Sprintf("BUG: path must contain at least one slash: %q %q", u.Path(), newURI))
 		}
 		buf = u.appendSchemeHost(buf[:0])
 		buf = appendQuotedPath(buf, path[:n+1])

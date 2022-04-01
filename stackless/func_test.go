@@ -66,7 +66,7 @@ func TestNewFuncMulti(t *testing.T) {
 	select {
 	case err := <-f1Done:
 		if err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("timeout")
@@ -75,7 +75,7 @@ func TestNewFuncMulti(t *testing.T) {
 	select {
 	case err := <-f2Done:
 		if err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("timeout")

@@ -21,7 +21,7 @@ func TestNewStreamReader(t *testing.T) {
 
 	data, err := ioutil.ReadAll(r)
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	expectedData := "Hello, world\nLine #2\n"
 	if string(data) != expectedData {
@@ -64,7 +64,7 @@ func TestStreamReaderClose(t *testing.T) {
 	buf := make([]byte, len(firstLine))
 	n, err := io.ReadFull(r, buf)
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if n != len(buf) {
 		t.Fatalf("unexpected number of bytes read: %d. Expecting %d", n, len(buf))
@@ -74,13 +74,13 @@ func TestStreamReaderClose(t *testing.T) {
 	}
 
 	if err := r.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	select {
 	case err := <-ch:
 		if err != nil {
-			t.Fatalf("error returned from stream reader: %s", err)
+			t.Fatalf("error returned from stream reader: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("timeout when waiting for stream reader")
@@ -98,7 +98,7 @@ func TestStreamReaderClose(t *testing.T) {
 	select {
 	case err := <-ch:
 		if err != nil {
-			t.Fatalf("error returned when reading tail data: %s", err)
+			t.Fatalf("error returned when reading tail data: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("timeout when reading tail data")

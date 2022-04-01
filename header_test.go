@@ -45,36 +45,36 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 		"\r\n"
 	header := new(ResponseHeader)
 	if _, err := header.parse([]byte(s)); err != nil {
-		t.Fatalf("parse headers with multi-line values failed, %s", err)
+		t.Fatalf("parse headers with multi-line values failed, %v", err)
 	}
 	response, err := http.ReadResponse(bufio.NewReader(strings.NewReader(s)), nil)
 	if err != nil {
-		t.Fatalf("parse response using net/http failed, %s", err)
+		t.Fatalf("parse response using net/http failed, %v", err)
 	}
 
 	if !bytes.Equal(header.StatusMessage(), []byte("SuperOK")) {
-		t.Errorf("parse status line with non-default value failed, got: '%s' want: 'SuperOK'", header.StatusMessage())
+		t.Errorf("parse status line with non-default value failed, got: '%q' want: 'SuperOK'", header.StatusMessage())
 	}
 
 	header.SetProtocol([]byte("HTTP/3.3"))
 	if !bytes.Equal(header.Protocol(), []byte("HTTP/3.3")) {
-		t.Errorf("parse protocol with non-default value failed, got: '%s' want: 'HTTP/3.3'", header.Protocol())
+		t.Errorf("parse protocol with non-default value failed, got: '%q' want: 'HTTP/3.3'", header.Protocol())
 	}
 
 	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/3.3 200 SuperOK\r\n")) {
-		t.Errorf("parse status line with non-default value failed, got: '%s' want: 'HTTP/3.3 200 SuperOK'", header.Protocol())
+		t.Errorf("parse status line with non-default value failed, got: '%q' want: 'HTTP/3.3 200 SuperOK'", header.Protocol())
 	}
 
 	header.SetStatusMessage(nil)
 
 	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/3.3 200 OK\r\n")) {
-		t.Errorf("parse status line with default protocol value failed, got: '%s' want: 'HTTP/3.3 200 OK'", header.appendStatusLine(nil))
+		t.Errorf("parse status line with default protocol value failed, got: '%q' want: 'HTTP/3.3 200 OK'", header.appendStatusLine(nil))
 	}
 
 	header.SetStatusMessage(s2b(StatusMessage(200)))
 
 	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/3.3 200 OK\r\n")) {
-		t.Errorf("parse status line with default protocol value failed, got: '%s' want: 'HTTP/3.3 200 OK'", header.appendStatusLine(nil))
+		t.Errorf("parse status line with default protocol value failed, got: '%q' want: 'HTTP/3.3 200 OK'", header.appendStatusLine(nil))
 	}
 
 	for name, vals := range response.Header {
@@ -82,7 +82,7 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 		want := vals[0]
 
 		if got != want {
-			t.Errorf("unexpected %s got: %q want: %q", name, got, want)
+			t.Errorf("unexpected %q got: %q want: %q", name, got, want)
 		}
 	}
 }
@@ -105,15 +105,15 @@ func TestResponseHeaderMultiLineName(t *testing.T) {
 	}
 
 	if !bytes.Equal(header.StatusMessage(), []byte("OK")) {
-		t.Errorf("expected default status line, got: %s", header.StatusMessage())
+		t.Errorf("expected default status line, got: %q", header.StatusMessage())
 	}
 
 	if !bytes.Equal(header.Protocol(), []byte("HTTP/1.1")) {
-		t.Errorf("expected default protocol, got: %s", header.Protocol())
+		t.Errorf("expected default protocol, got: %q", header.Protocol())
 	}
 
 	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/1.1 200 OK\r\n")) {
-		t.Errorf("parse status line with non-default value failed, got: %s want: HTTP/1.1 200 OK", header.Protocol())
+		t.Errorf("parse status line with non-default value failed, got: %q want: HTTP/1.1 200 OK", header.Protocol())
 	}
 }
 
@@ -138,7 +138,7 @@ func TestResponseHeaderEmptyValueFromHeader(t *testing.T) {
 	var h ResponseHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if string(h.ContentType()) != string(h1.ContentType()) {
 		t.Fatalf("unexpected content-type: %q. Expecting %q", h.ContentType(), h1.ContentType())
@@ -165,7 +165,7 @@ func TestResponseHeaderEmptyValueFromString(t *testing.T) {
 	var h ResponseHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if string(h.ContentType()) != "foo/bar" {
 		t.Fatalf("unexpected content-type: %q. Expecting %q", h.ContentType(), "foo/bar")
@@ -193,7 +193,7 @@ func TestRequestHeaderEmptyValueFromHeader(t *testing.T) {
 	var h RequestHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if string(h.Host()) != string(h1.Host()) {
 		t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), h1.Host())
@@ -219,7 +219,7 @@ func TestRequestHeaderEmptyValueFromString(t *testing.T) {
 	var h RequestHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if string(h.Host()) != "foobar" {
 		t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), "foobar")
@@ -246,7 +246,7 @@ func TestRequestRawHeaders(t *testing.T) {
 		var h RequestHeader
 		br := bufio.NewReader(bytes.NewBufferString(s))
 		if err := h.Read(br); err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
 		if string(h.Host()) != "foobar" {
 			t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), "foobar")
@@ -272,7 +272,7 @@ func TestRequestRawHeaders(t *testing.T) {
 			var h RequestHeader
 			br := bufio.NewReader(bytes.NewBufferString(s))
 			if err := h.Read(br); err != nil {
-				t.Fatalf("unexpected error: %s", err)
+				t.Fatalf("unexpected error: %v", err)
 			}
 			if string(h.Host()) != "foobar" {
 				t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), "foobar")
@@ -292,7 +292,7 @@ func TestRequestRawHeaders(t *testing.T) {
 		var h RequestHeader
 		br := bufio.NewReader(bytes.NewBufferString(s))
 		if err := h.Read(br); err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
 		if string(h.Host()) != "foobar" {
 			t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), "foobar")
@@ -312,7 +312,7 @@ func TestRequestRawHeaders(t *testing.T) {
 		h.DisableNormalizing()
 		br := bufio.NewReader(bytes.NewBufferString(s))
 		if err := h.Read(br); err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
 		if string(h.Host()) != "" {
 			t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), "")
@@ -335,13 +335,13 @@ func TestRequestHeaderSetCookieWithSpecialChars(t *testing.T) {
 	s := h.String()
 
 	if !strings.Contains(s, "Cookie: ID&14") {
-		t.Fatalf("Missing cookie in request header: [%s]", s)
+		t.Fatalf("Missing cookie in request header: %q", s)
 	}
 
 	var h1 RequestHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	cookie := h1.Peek(HeaderCookie)
 	if string(cookie) != "ID&14" {
@@ -380,7 +380,7 @@ func TestResponseHeaderDelClientCookie(t *testing.T) {
 		t.Fatalf("expecting cookie %q", c.Key())
 	}
 	if !c.Expire().Equal(CookieExpireDelete) {
-		t.Fatalf("unexpected cookie expiration time: %s. Expecting %s", c.Expire(), CookieExpireDelete)
+		t.Fatalf("unexpected cookie expiration time: %q. Expecting %q", c.Expire(), CookieExpireDelete)
 	}
 	if len(c.Value()) > 0 {
 		t.Fatalf("unexpected cookie value: %q. Expecting empty value", c.Value())
@@ -425,7 +425,7 @@ func TestResponseHeaderAdd(t *testing.T) {
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	var h1 ResponseHeader
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	h.VisitAll(func(k, v []byte) {
@@ -478,7 +478,7 @@ func TestRequestHeaderAdd(t *testing.T) {
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	var h1 RequestHeader
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	h.VisitAll(func(k, v []byte) {
@@ -666,14 +666,14 @@ func TestResponseHeaderSetTrailerGetBytes(t *testing.T) {
 	headerBytes := h.Header()
 	n, err := h.parseFirstLine(headerBytes)
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if string(headerBytes[n:]) != "Foo: bar\r\nTrailer: Baz\r\n\r\n" {
-		t.Fatalf("Unexpected header: %q. Expected %s", headerBytes[n:], "Foo: bar\nTrailer: Baz\n\n")
+		t.Fatalf("Unexpected header: %q. Expected %q", headerBytes[n:], "Foo: bar\nTrailer: Baz\n\n")
 	}
 	if string(h.TrailerHeader()) != "Baz: test\r\n\r\n" {
-		t.Fatalf("Unexpected trailer header: %q. Expected %s", h.TrailerHeader(), "Baz: test\r\n\r\n")
+		t.Fatalf("Unexpected trailer header: %q. Expected %q", h.TrailerHeader(), "Baz: test\r\n\r\n")
 	}
 }
 
@@ -688,14 +688,14 @@ func TestRequestHeaderSetTrailerGetBytes(t *testing.T) {
 	headerBytes := h.Header()
 	n, err := h.parseFirstLine(headerBytes)
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if string(headerBytes[n:]) != "Foo: bar\r\nTrailer: Baz\r\n\r\n" {
-		t.Fatalf("Unexpected header: %q. Expected %s", headerBytes[n:], "Foo: bar\nTrailer: Baz\n\n")
+		t.Fatalf("Unexpected header: %q. Expected %q", headerBytes[n:], "Foo: bar\nTrailer: Baz\n\n")
 	}
 	if string(h.TrailerHeader()) != "Baz: test\r\n\r\n" {
-		t.Fatalf("Unexpected trailer header: %q. Expected %s", h.TrailerHeader(), "Baz: test\r\n\r\n")
+		t.Fatalf("Unexpected trailer header: %q. Expected %q", h.TrailerHeader(), "Baz: test\r\n\r\n")
 	}
 }
 
@@ -723,7 +723,7 @@ func TestRequestHeaderHTTP10ConnectionClose(t *testing.T) {
 	var h RequestHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if !h.ConnectionClose() {
@@ -738,7 +738,7 @@ func TestRequestHeaderHTTP10ConnectionKeepAlive(t *testing.T) {
 	var h RequestHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if h.ConnectionClose() {
@@ -774,7 +774,7 @@ func TestBufferSnippet(t *testing.T) {
 func testBufferSnippet(t *testing.T, buf, expectedSnippet string) {
 	snippet := bufferSnippet([]byte(buf))
 	if snippet != expectedSnippet {
-		t.Fatalf("unexpected snippet %s. Expecting %s", snippet, expectedSnippet)
+		t.Fatalf("unexpected snippet %q. Expecting %q", snippet, expectedSnippet)
 	}
 }
 
@@ -787,7 +787,7 @@ func TestResponseHeaderTrailingCRLFSuccess(t *testing.T) {
 	var r ResponseHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := r.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// try reading the trailing CRLF. It must return EOF
@@ -796,7 +796,7 @@ func TestResponseHeaderTrailingCRLFSuccess(t *testing.T) {
 		t.Fatalf("expecting error")
 	}
 	if err != io.EOF {
-		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+		t.Fatalf("unexpected error: %v. Expecting %v", err, io.EOF)
 	}
 }
 
@@ -809,7 +809,7 @@ func TestResponseHeaderTrailingCRLFError(t *testing.T) {
 	var r ResponseHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := r.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// try reading the trailing CRLF. It must return EOF
@@ -818,7 +818,7 @@ func TestResponseHeaderTrailingCRLFError(t *testing.T) {
 		t.Fatalf("expecting error")
 	}
 	if err == io.EOF {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -831,7 +831,7 @@ func TestRequestHeaderTrailingCRLFSuccess(t *testing.T) {
 	var r RequestHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := r.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// try reading the trailing CRLF. It must return EOF
@@ -840,7 +840,7 @@ func TestRequestHeaderTrailingCRLFSuccess(t *testing.T) {
 		t.Fatalf("expecting error")
 	}
 	if err != io.EOF {
-		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+		t.Fatalf("unexpected error: %v. Expecting %v", err, io.EOF)
 	}
 }
 
@@ -853,7 +853,7 @@ func TestRequestHeaderTrailingCRLFError(t *testing.T) {
 	var r RequestHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := r.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// try reading the trailing CRLF. It must return EOF
@@ -862,7 +862,7 @@ func TestRequestHeaderTrailingCRLFError(t *testing.T) {
 		t.Fatalf("expecting error")
 	}
 	if err == io.EOF {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -877,7 +877,7 @@ func TestRequestHeaderReadEOF(t *testing.T) {
 		t.Fatalf("expecting error")
 	}
 	if err != io.EOF {
-		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+		t.Fatalf("unexpected error: %v. Expecting %v", err, io.EOF)
 	}
 
 	// incomplete request header mustn't return io.EOF
@@ -902,7 +902,7 @@ func TestResponseHeaderReadEOF(t *testing.T) {
 		t.Fatalf("expecting error")
 	}
 	if err != io.EOF {
-		t.Fatalf("unexpected error: %s. Expecting %s", err, io.EOF)
+		t.Fatalf("unexpected error: %v. Expecting %v", err, io.EOF)
 	}
 
 	// incomplete response header mustn't return io.EOF
@@ -925,14 +925,14 @@ func TestResponseHeaderOldVersion(t *testing.T) {
 	s += "HTTP/1.0 200 OK\r\nContent-Length: 2\r\nContent-Type: ass\r\nConnection: keep-alive\r\n\r\n42"
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if !h.ConnectionClose() {
 		t.Fatalf("expecting 'Connection: close' for the response with old http protocol")
 	}
 
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if h.ConnectionClose() {
 		t.Fatalf("unexpected 'Connection: close' for keep-alive response with old http protocol")
@@ -1033,7 +1033,7 @@ func testRequestMultipartFormBoundary(t *testing.T, s, boundary string) {
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s. s=%q, boundary=%q", err, s, boundary)
+		t.Fatalf("unexpected error: %v. s=%q, boundary=%q", err, s, boundary)
 	}
 
 	b := h.MultipartFormBoundary()
@@ -1071,7 +1071,7 @@ func testResponseHeaderConnectionUpgrade(t *testing.T, s string, isUpgrade, isKe
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s. Response header %q", err, s)
+		t.Fatalf("unexpected error: %v. Response header %q", err, s)
 	}
 	upgrade := h.ConnectionUpgrade()
 	if upgrade != isUpgrade {
@@ -1118,7 +1118,7 @@ func testRequestHeaderConnectionUpgrade(t *testing.T, s string, isUpgrade, isKee
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s. Request header %q", err, s)
+		t.Fatalf("unexpected error: %v. Request header %q", err, s)
 	}
 	upgrade := h.ConnectionUpgrade()
 	if upgrade != isUpgrade {
@@ -1140,21 +1140,21 @@ func TestRequestHeaderProxyWithCookie(t *testing.T) {
 	r := bytes.NewBufferString("GET /foo HTTP/1.1\r\nFoo: bar\r\nHost: aaa.com\r\nCookie: foo=bar; bazzz=aaaaaaa; x=y\r\nCookie: aqqqqq=123\r\n\r\n")
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
 	if err := h.Write(bw); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var h1 RequestHeader
 	br.Reset(w)
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if string(h1.RequestURI()) != "/foo" {
 		t.Fatalf("unexpected requestURI: %q. Expecting %q", h1.RequestURI(), "/foo")
@@ -1191,7 +1191,7 @@ func TestResponseHeaderFirstByteReadEOF(t *testing.T) {
 		t.Fatalf("expecting error")
 	}
 	if err != io.EOF {
-		t.Fatalf("unexpected error %s. Expecting %s", err, io.EOF)
+		t.Fatalf("unexpected error %v. Expecting %v", err, io.EOF)
 	}
 }
 
@@ -1247,7 +1247,7 @@ func testResponseHeaderHTTPVer(t *testing.T, s string, connectionClose bool) {
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s. response=%q", err, s)
+		t.Fatalf("unexpected error: %v. response=%q", err, s)
 	}
 	if h.ConnectionClose() != connectionClose {
 		t.Fatalf("unexpected connectionClose %v. Expecting %v. response=%q", h.ConnectionClose(), connectionClose, s)
@@ -1260,7 +1260,7 @@ func testRequestHeaderHTTPVer(t *testing.T, s string, connectionClose bool) {
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s. request=%q", err, s)
+		t.Fatalf("unexpected error: %v. request=%q", err, s)
 	}
 	if h.ConnectionClose() != connectionClose {
 		t.Fatalf("unexpected connectionClose %v. Expecting %v. request=%q", h.ConnectionClose(), connectionClose, s)
@@ -1364,16 +1364,16 @@ func TestRequestContentTypeDefaultNotEmpty(t *testing.T) {
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
 	if err := h.Write(bw); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	var h1 RequestHeader
 	br := bufio.NewReader(w)
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	if string(h1.contentType) != "application/octet-stream" {
@@ -1391,16 +1391,16 @@ func TestRequestContentTypeNoDefault(t *testing.T) {
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
 	if err := h.Write(bw); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	var h1 RequestHeader
 	br := bufio.NewReader(w)
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	if string(h1.contentType) != "" {
@@ -1436,16 +1436,16 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 	var w bytes.Buffer
 	bw := bufio.NewWriter(&w)
 	if err := h.Write(bw); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var h1 RequestHeader
 	br := bufio.NewReader(&w)
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("error when reading request header: %s", err)
+		t.Fatalf("error when reading request header: %v", err)
 	}
 
 	if !h1.ConnectionClose() {
@@ -1516,7 +1516,7 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 123\r\nSet-Cookie: aa=bb; path=/foo/bar\r\nSet-Cookie: ccc\r\nTrailer: Foo, Bar\r\n\r\n")
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	if h.Len() != 5 {
@@ -1574,7 +1574,7 @@ func TestRequestHeaderVisitAll(t *testing.T) {
 	r := bytes.NewBufferString("GET / HTTP/1.1\r\nHost: aa.com\r\nXX: YYY\r\nXX: ZZ\r\nCookie: a=b; c=d\r\nTrailer: Foo, Bar\r\n\r\n")
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	if h.Len() != 5 {
@@ -1632,7 +1632,7 @@ func TestRequestHeaderVisitAllInOrder(t *testing.T) {
 	r := bytes.NewBufferString("GET / HTTP/1.1\r\nContent-Type: aa\r\nCookie: a=b\r\nHost: example.com\r\nUser-Agent: xxx\r\n\r\n")
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	if h.Len() != 4 {
@@ -1764,10 +1764,10 @@ func TestResponseHeaderCookie(t *testing.T) {
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
 	if err := h.Write(bw); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	h.DelAllCookies()
@@ -1775,7 +1775,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 	var h1 ResponseHeader
 	br := bufio.NewReader(w)
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	c.SetKey("foobar")
@@ -1850,16 +1850,16 @@ func TestRequestHeaderCookie(t *testing.T) {
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
 	if err := h.Write(bw); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	var h1 RequestHeader
 	br := bufio.NewReader(w)
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("Unexpected error: %s", err)
+		t.Fatalf("Unexpected error: %v", err)
 	}
 
 	if !bytes.Equal(h1.Cookie("foo"), h.Cookie("foo")) {
@@ -2000,7 +2000,7 @@ func testRequestHeaderMethod(t *testing.T, expectedMethod string) {
 	var h1 RequestHeader
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	m1 := h1.Method()
 	if string(m) != string(m1) {
@@ -2045,16 +2045,16 @@ func TestRequestHeaderSetGet(t *testing.T) {
 	bw := bufio.NewWriter(w)
 	err := h.Write(bw)
 	if err != nil {
-		t.Fatalf("Unexpected error when writing request header: %s", err)
+		t.Fatalf("Unexpected error when writing request header: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("Unexpected error when flushing request header: %s", err)
+		t.Fatalf("Unexpected error when flushing request header: %v", err)
 	}
 
 	var h1 RequestHeader
 	br := bufio.NewReader(w)
 	if err = h1.Read(br); err != nil {
-		t.Fatalf("Unexpected error when reading request header: %s", err)
+		t.Fatalf("Unexpected error when reading request header: %v", err)
 	}
 
 	if h1.ContentLength() != h.ContentLength() {
@@ -2106,16 +2106,16 @@ func TestResponseHeaderSetGet(t *testing.T) {
 	bw := bufio.NewWriter(w)
 	err := h.Write(bw)
 	if err != nil {
-		t.Fatalf("Unexpected error when writing response header: %s", err)
+		t.Fatalf("Unexpected error when writing response header: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("Unexpected error when flushing response header: %s", err)
+		t.Fatalf("Unexpected error when flushing response header: %v", err)
 	}
 
 	var h1 ResponseHeader
 	br := bufio.NewReader(w)
 	if err = h1.Read(br); err != nil {
-		t.Fatalf("Unexpected error when reading response header: %s", err)
+		t.Fatalf("Unexpected error when reading response header: %v", err)
 	}
 
 	if h1.ContentLength() != h.ContentLength() {
@@ -2162,17 +2162,17 @@ func testResponseHeaderConnectionClose(t *testing.T, connectionClose bool) {
 	bw := bufio.NewWriter(w)
 	err := h.Write(bw)
 	if err != nil {
-		t.Fatalf("Unexpected error when writing response header: %s", err)
+		t.Fatalf("Unexpected error when writing response header: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("Unexpected error when flushing response header: %s", err)
+		t.Fatalf("Unexpected error when flushing response header: %v", err)
 	}
 
 	var h1 ResponseHeader
 	br := bufio.NewReader(w)
 	err = h1.Read(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when reading response header: %s", err)
+		t.Fatalf("Unexpected error when reading response header: %v", err)
 	}
 	if h1.ConnectionClose() != h.ConnectionClose() {
 		t.Fatalf("Unexpected value for ConnectionClose: %v. Expected %v", h1.ConnectionClose(), h.ConnectionClose())
@@ -2235,7 +2235,7 @@ func TestRequestHeaderBufioPeek(t *testing.T) {
 	br := bufio.NewReaderSize(r, 4096)
 	h := &RequestHeader{}
 	if err := h.Read(br); err != nil {
-		t.Fatalf("Unexpected error when reading request: %s", err)
+		t.Fatalf("Unexpected error when reading request: %v", err)
 	}
 	verifyRequestHeader(t, h, -2, "/", "foobar.com", "", "")
 }
@@ -2249,7 +2249,7 @@ func TestResponseHeaderBufioPeek(t *testing.T) {
 	br := bufio.NewReaderSize(r, 4096)
 	h := &ResponseHeader{}
 	if err := h.Read(br); err != nil {
-		t.Fatalf("Unexpected error when reading response: %s", err)
+		t.Fatalf("Unexpected error when reading response: %v", err)
 	}
 	verifyResponseHeader(t, h, 200, 10, "aaa")
 }
@@ -2718,7 +2718,7 @@ func testResponseHeaderReadSuccess(t *testing.T, h *ResponseHeader, headers stri
 	br := bufio.NewReader(r)
 	err := h.Read(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when parsing response headers: %s. headers=%q", err, headers)
+		t.Fatalf("Unexpected error when parsing response headers: %v. headers=%q", err, headers)
 	}
 	verifyResponseHeader(t, h, expectedStatusCode, expectedContentLength, expectedContentType)
 }
@@ -2729,7 +2729,7 @@ func testRequestHeaderReadSuccess(t *testing.T, h *RequestHeader, headers string
 	br := bufio.NewReader(r)
 	err := h.Read(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when parsing request headers: %s. headers=%q", err, headers)
+		t.Fatalf("Unexpected error when parsing request headers: %v. headers=%q", err, headers)
 	}
 	verifyRequestHeader(t, h, expectedContentLength, expectedRequestURI, expectedHost, expectedReferer, expectedContentType)
 }
@@ -2775,7 +2775,7 @@ func verifyResponseTrailer(t *testing.T, h *ResponseHeader, expectedTrailers map
 	for k, v := range expectedTrailers {
 		got := h.Peek(k)
 		if !bytes.Equal(got, []byte(v)) {
-			t.Fatalf("Unexpected trailer %s. Expected %s. Got %q", k, v, got)
+			t.Fatalf("Unexpected trailer %q. Expected %q. Got %q", k, v, got)
 		}
 	}
 }
@@ -2784,7 +2784,7 @@ func verifyRequestTrailer(t *testing.T, h *RequestHeader, expectedTrailers map[s
 	for k, v := range expectedTrailers {
 		got := h.Peek(k)
 		if !bytes.Equal(got, []byte(v)) {
-			t.Fatalf("Unexpected trailer %s. Expected %s. Got %q", k, v, got)
+			t.Fatalf("Unexpected trailer %q. Expected %q. Got %q", k, v, got)
 		}
 	}
 }
@@ -2797,7 +2797,7 @@ func verifyTrailer(t *testing.T, r *bufio.Reader, expectedTrailers map[string]st
 			return
 		}
 		if err != nil {
-			t.Fatalf("Cannot read trailer: %s", err)
+			t.Fatalf("Cannot read trailer: %v", err)
 		}
 		verifyRequestTrailer(t, &req.Header, expectedTrailers)
 		return
@@ -2809,7 +2809,7 @@ func verifyTrailer(t *testing.T, r *bufio.Reader, expectedTrailers map[string]st
 		return
 	}
 	if err != nil {
-		t.Fatalf("Cannot read trailer: %s", err)
+		t.Fatalf("Cannot read trailer: %v", err)
 	}
 	verifyResponseTrailer(t, &resp.Header, expectedTrailers)
 }

@@ -30,7 +30,7 @@ func ExpvarHandler(ctx *fasthttp.RequestCtx) {
 	r, err := getExpvarRegexp(ctx)
 	if err != nil {
 		expvarRegexpErrors.Add(1)
-		fmt.Fprintf(ctx, "Error when obtaining expvar regexp: %s", err)
+		fmt.Fprintf(ctx, "Error when obtaining expvar regexp: %v", err)
 		ctx.SetStatusCode(fasthttp.StatusBadRequest)
 		return
 	}

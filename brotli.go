@@ -140,7 +140,7 @@ func nonblockingWriteBrotli(ctxv interface{}) {
 
 	_, err := zw.Write(ctx.p)
 	if err != nil {
-		panic(fmt.Sprintf("BUG: brotli.Writer.Write for len(p)=%d returned unexpected error: %s", len(ctx.p), err))
+		panic(fmt.Sprintf("BUG: brotli.Writer.Write for len(p)=%d returned unexpected error: %v", len(ctx.p), err))
 	}
 
 	releaseRealBrotliWriter(zw, ctx.level)

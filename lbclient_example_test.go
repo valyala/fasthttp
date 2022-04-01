@@ -31,7 +31,7 @@ func ExampleLBClient() {
 		url := fmt.Sprintf("http://abcedfg/foo/bar/%d", i)
 		req.SetRequestURI(url)
 		if err := lbc.Do(&req, &resp); err != nil {
-			log.Fatalf("Error when sending request: %s", err)
+			log.Fatalf("Error when sending request: %v", err)
 		}
 		if resp.StatusCode() != fasthttp.StatusOK {
 			log.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), fasthttp.StatusOK)
