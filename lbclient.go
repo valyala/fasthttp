@@ -50,6 +50,7 @@ type LBClient struct {
 	cs []*lbClient
 
 	once sync.Once
+	mu   sync.RWMutex
 }
 
 // DefaultLBClientTimeout is the default request timeout used by LBClient
@@ -80,6 +81,8 @@ func (cc *LBClient) Do(req *Request, resp *Response) error {
 }
 
 func (cc *LBClient) init() {
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
 	if len(cc.Clients) == 0 {
 		panic("BUG: LBClient.Clients cannot be empty")
 	}
@@ -91,9 +94,44 @@ func (cc *LBClient) init() {
 	}
 }
 
+// AddClient adds a new client to the balanced clients
+// returns the new total number of clients
+func (cc *LBClient) AddClient(c BalancingClient) int {
+	cc.mu.Lock()
+	cc.cs = append(cc.cs, &lbClient{
+		c:           c,
+		healthCheck: cc.HealthCheck,
+	})
+	cc.mu.Unlock()
+	return len(cc.cs)
+}
+
+// RemoveClients removes clients using the provided callback
+// if rc returns true, the passed client will be removed
+// returns the new total number of clients
+func (cc *LBClient) RemoveClients(rc func(BalancingClient) bool) int {
+	cc.mu.Lock()
+	n := 0
+	for _, cs := range cc.cs {
+		if rc(cs.c) {
+			continue
+		}
+		cc.cs[n] = cs
+		n++
+	}
+	for i := n; i < len(cc.cs); i++ {
+		cc.cs[i] = nil
+	}
+	cc.cs = cc.cs[:n]
+
+	cc.mu.Unlock()
+	return len(cc.cs)
+}
+
 func (cc *LBClient) get() *lbClient {
 	cc.once.Do(cc.init)
 
+	cc.mu.RLock()
 	cs := cc.cs
 
 	minC := cs[0]
@@ -108,6 +146,7 @@ func (cc *LBClient) get() *lbClient {
 			minT = t
 		}
 	}
+	cc.mu.RUnlock()
 	return minC
 }
 
