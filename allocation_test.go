@@ -39,7 +39,7 @@ func TestAllocationServeConn(t *testing.T) {
 func TestAllocationClient(t *testing.T) {
 	ln, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("cannot listen: %s", err)
+		t.Fatalf("cannot listen: %v", err)
 	}
 	defer ln.Close()
 

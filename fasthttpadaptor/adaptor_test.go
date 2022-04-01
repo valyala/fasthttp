@@ -31,7 +31,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	}
 	expectedURL, err := url.ParseRequestURI(expectedRequestURI)
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	expectedContextKey := "contextKey"
 	expectedContextValue := "contextValue"
@@ -69,7 +69,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		body, err := ioutil.ReadAll(r.Body)
 		r.Body.Close()
 		if err != nil {
-			t.Fatalf("unexpected error when reading request body: %s", err)
+			t.Fatalf("unexpected error when reading request body: %v", err)
 		}
 		if string(body) != expectedBody {
 			t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
@@ -109,7 +109,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 
 	remoteAddr, err := net.ResolveTCPAddr("tcp", expectedRemoteAddr)
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	ctx.Init(&req, remoteAddr, nil)
 
@@ -157,7 +157,7 @@ func TestContentType(t *testing.T) {
 
 	remoteAddr, err := net.ResolveTCPAddr("tcp", "1.2.3.4:80")
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	ctx.Init(&req, remoteAddr, nil)
 

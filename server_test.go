@@ -51,13 +51,13 @@ func TestServerCRNLAfterPost_Pipeline(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 
 	c, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	defer c.Close()
 	if _, err = c.Write([]byte("POST / HTTP/1.1\r\nHost: golang.org\r\nContent-Length: 3\r\n\r\nABC" +
@@ -69,13 +69,13 @@ func TestServerCRNLAfterPost_Pipeline(t *testing.T) {
 	br := bufio.NewReader(c)
 	var resp Response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 	}
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -97,13 +97,13 @@ func TestServerCRNLAfterPost(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 
 	c, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	defer c.Close()
 	if _, err = c.Write([]byte("POST / HTTP/1.1\r\nHost: golang.org\r\nContent-Length: 3\r\n\r\nABC" +
@@ -115,7 +115,7 @@ func TestServerCRNLAfterPost(t *testing.T) {
 	br := bufio.NewReader(c)
 	var resp Response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -136,13 +136,13 @@ func TestServerPipelineFlush(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 
 	c, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = c.Write([]byte("GET /foo1 HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func TestServerPipelineFlush(t *testing.T) {
 	var resp Response
 
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -179,7 +179,7 @@ func TestServerPipelineFlush(t *testing.T) {
 	}
 
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -202,13 +202,13 @@ func TestServerInvalidHeader(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 
 	c, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = c.Write([]byte("POST /foo HTTP/1.1\r\nHost: gle.com\r\nFoo : bar\r\nContent-Length: 5\r\n\r\n12345")); err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestServerInvalidHeader(t *testing.T) {
 	br := bufio.NewReader(c)
 	var resp Response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.StatusCode() != StatusBadRequest {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusBadRequest)
@@ -225,7 +225,7 @@ func TestServerInvalidHeader(t *testing.T) {
 
 	c, err = ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = c.Write([]byte("GET /foo HTTP/1.1\r\nHost: gle.com\r\nFoo : bar\r\n\r\n")); err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestServerInvalidHeader(t *testing.T) {
 
 	br = bufio.NewReader(c)
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if resp.StatusCode() != StatusBadRequest {
@@ -241,10 +241,10 @@ func TestServerInvalidHeader(t *testing.T) {
 	}
 
 	if err := c.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -264,7 +264,7 @@ func TestServerConnState(t *testing.T) {
 	serverCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(serverCh)
 	}()
@@ -273,24 +273,24 @@ func TestServerConnState(t *testing.T) {
 	go func() {
 		c, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		br := bufio.NewReader(c)
 		// Send 2 requests on the same connection.
 		for i := 0; i < 2; i++ {
 			if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			var resp Response
 			if err := resp.Read(br); err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			if resp.StatusCode() != StatusOK {
 				t.Errorf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 			}
 		}
 		if err := c.Close(); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		// Give the server a little bit of time to transition the connection to the close state.
 		time.Sleep(time.Millisecond * 100)
@@ -304,7 +304,7 @@ func TestServerConnState(t *testing.T) {
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	select {
@@ -317,7 +317,7 @@ func TestServerConnState(t *testing.T) {
 	expected := []string{"new", "active", "idle", "active", "idle", "closed"}
 
 	if !reflect.DeepEqual(expected, states) {
-		t.Fatalf("wrong state, expected %s, got %s", expected, states)
+		t.Fatalf("wrong state, expected %q, got %q", expected, states)
 	}
 }
 
@@ -391,12 +391,12 @@ func TestServerName(t *testing.T) {
 		rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 		if err := s.ServeConn(rw); err != nil {
-			t.Fatalf("Unexpected error from serveConn: %s", err)
+			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 
 		resp, err := ioutil.ReadAll(&rw.w)
 		if err != nil {
-			t.Fatalf("Unexpected error from ReadAll: %s", err)
+			t.Fatalf("Unexpected error from ReadAll: %v", err)
 		}
 
 		return resp
@@ -492,7 +492,7 @@ func TestServerErrSmallBuffer(t *testing.T) {
 	br := bufio.NewReader(&rw.w)
 	var resp Response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	statusCode := resp.StatusCode()
 	if statusCode != StatusRequestHeaderFieldsTooLarge {
@@ -548,7 +548,7 @@ func TestRequestCtxRedirectHTTPSSchemeless(t *testing.T) {
 	s := "GET /foo/bar?baz HTTP/1.1\nHost: aaa.com\n\n"
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := ctx.Request.Read(br); err != nil {
-		t.Fatalf("cannot read request: %s", err)
+		t.Fatalf("cannot read request: %v", err)
 	}
 	ctx.Request.isTLS = true
 
@@ -623,7 +623,7 @@ func TestServerResponseServerHeader(t *testing.T) {
 	serverCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(serverCh)
 	}()
@@ -632,15 +632,15 @@ func TestServerResponseServerHeader(t *testing.T) {
 	go func() {
 		c, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		br := bufio.NewReader(c)
 		var resp Response
 		if err = resp.Read(br); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 
 		if resp.StatusCode() != StatusNotFound {
@@ -653,7 +653,7 @@ func TestServerResponseServerHeader(t *testing.T) {
 			t.Errorf("unexpected server header: %q. Expecting %q", resp.Header.Server(), serverName)
 		}
 		if err = c.Close(); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(clientCh)
 	}()
@@ -665,7 +665,7 @@ func TestServerResponseServerHeader(t *testing.T) {
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	select {
@@ -704,7 +704,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 	serverCh := make(chan struct{})
 	go func() {
 		if err := Serve(ln, h); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(serverCh)
 	}()
@@ -713,15 +713,15 @@ func TestServerResponseBodyStream(t *testing.T) {
 	go func() {
 		c, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		br := bufio.NewReader(c)
 		var respH ResponseHeader
 		if err = respH.Read(br); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if respH.StatusCode() != StatusOK {
 			t.Errorf("unexpected status code: %d. Expecting %d", respH.StatusCode(), StatusOK)
@@ -730,7 +730,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 		buf := make([]byte, 1024)
 		n, err := br.Read(buf)
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		b := buf[:n]
 		if string(b) != "5\r\nfirst\r\n" {
@@ -740,7 +740,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 
 		tail, err := ioutil.ReadAll(br)
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if string(tail) != "6\r\nsecond\r\n0\r\n\r\n" {
 			t.Errorf("unexpected tail %q. Expecting %q", tail, "6\r\nsecond\r\n0\r\n\r\n")
@@ -756,7 +756,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	select {
@@ -781,7 +781,7 @@ func TestServerDisableKeepalive(t *testing.T) {
 	serverCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(serverCh)
 	}()
@@ -790,15 +790,15 @@ func TestServerDisableKeepalive(t *testing.T) {
 	go func() {
 		c, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		br := bufio.NewReader(c)
 		var resp Response
 		if err = resp.Read(br); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if resp.StatusCode() != StatusOK {
 			t.Errorf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -813,7 +813,7 @@ func TestServerDisableKeepalive(t *testing.T) {
 		// make sure the connection is closed
 		data, err := ioutil.ReadAll(br)
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if len(data) > 0 {
 			t.Errorf("unexpected data read from the connection: %q. Expecting empty data", data)
@@ -829,7 +829,7 @@ func TestServerDisableKeepalive(t *testing.T) {
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	select {
@@ -858,7 +858,7 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 			Listener: ln,
 		}
 		if err := s.Serve(fakeLN); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(serverCh)
 	}()
@@ -867,16 +867,16 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 	go func() {
 		c1, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		c2, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		br := bufio.NewReader(c2)
 		var resp Response
 		if err = resp.Read(br); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if resp.StatusCode() != StatusTooManyRequests {
 			t.Errorf("unexpected status code for the second connection: %d. Expecting %d",
@@ -884,11 +884,11 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 		}
 
 		if _, err = c1.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
-			t.Errorf("unexpected error when writing to the first connection: %s", err)
+			t.Errorf("unexpected error when writing to the first connection: %v", err)
 		}
 		br = bufio.NewReader(c1)
 		if err = resp.Read(br); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if resp.StatusCode() != StatusOK {
 			t.Errorf("unexpected status code for the first connection: %d. Expecting %d",
@@ -907,7 +907,7 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	select {
@@ -938,7 +938,7 @@ type fakeIPConn struct {
 func (conn *fakeIPConn) RemoteAddr() net.Addr {
 	addr, err := net.ResolveTCPAddr("tcp4", "1.2.3.4:5789")
 	if err != nil {
-		panic(fmt.Sprintf("BUG: unexpected error: %s", err))
+		panic(fmt.Sprintf("BUG: unexpected error: %v", err))
 	}
 	return addr
 }
@@ -959,7 +959,7 @@ func TestServerConcurrencyLimit(t *testing.T) {
 	serverCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(serverCh)
 	}()
@@ -968,16 +968,16 @@ func TestServerConcurrencyLimit(t *testing.T) {
 	go func() {
 		c1, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		c2, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		br := bufio.NewReader(c2)
 		var resp Response
 		if err = resp.Read(br); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if resp.StatusCode() != StatusServiceUnavailable {
 			t.Errorf("unexpected status code for the second connection: %d. Expecting %d",
@@ -985,11 +985,11 @@ func TestServerConcurrencyLimit(t *testing.T) {
 		}
 
 		if _, err = c1.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
-			t.Errorf("unexpected error when writing to the first connection: %s", err)
+			t.Errorf("unexpected error when writing to the first connection: %v", err)
 		}
 		br = bufio.NewReader(c1)
 		if err = resp.Read(br); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if resp.StatusCode() != StatusOK {
 			t.Errorf("unexpected status code for the first connection: %d. Expecting %d",
@@ -1008,7 +1008,7 @@ func TestServerConcurrencyLimit(t *testing.T) {
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	select {
@@ -1031,7 +1031,7 @@ func TestServerWriteFastError(t *testing.T) {
 	br := bufio.NewReader(&buf)
 	var resp Response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.StatusCode() != StatusForbidden {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusForbidden)
@@ -1180,7 +1180,7 @@ func TestServerServeTLSEmbed(t *testing.T) {
 			ctx.WriteString("success") //nolint:errcheck
 		})
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(ch)
 	}()
@@ -1188,7 +1188,7 @@ func TestServerServeTLSEmbed(t *testing.T) {
 	// establish connection to the server
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	tlsConn := tls.Client(conn, &tls.Config{
 		InsecureSkipVerify: true,
@@ -1196,7 +1196,7 @@ func TestServerServeTLSEmbed(t *testing.T) {
 
 	// send request
 	if _, err = tlsConn.Write([]byte("GET / HTTP/1.1\r\nHost: aaa\r\n\r\n")); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// read response
@@ -1221,7 +1221,7 @@ func TestServerServeTLSEmbed(t *testing.T) {
 
 	// close the server
 	if err = ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	select {
 	case <-ch:
@@ -1278,7 +1278,7 @@ Connection: close
 				case "/upload":
 					f, err := ctx.MultipartForm()
 					if err != nil {
-						t.Errorf("unexpected error: %s", err)
+						t.Errorf("unexpected error: %v", err)
 					}
 					if len(f.Value) != 1 {
 						t.Errorf("unexpected values %d. Expecting %d", len(f.Value), 1)
@@ -1300,17 +1300,17 @@ Connection: close
 		ch := make(chan struct{})
 		go func() {
 			if err := s.Serve(ln); err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			close(ch)
 		}()
 
 		conn, err := ln.Dial()
 		if err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
 		if _, err = conn.Write([]byte(reqS)); err != nil {
-			t.Fatalf("unexpected error: %s", err)
+			t.Fatalf("unexpected error: %v", err)
 		}
 
 		var resp Response
@@ -1318,7 +1318,7 @@ Connection: close
 		respCh := make(chan struct{})
 		go func() {
 			if err := resp.Read(br); err != nil {
-				t.Errorf("error when reading response: %s", err)
+				t.Errorf("error when reading response: %v", err)
 			}
 			if resp.StatusCode() != StatusSeeOther {
 				t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusSeeOther)
@@ -1329,7 +1329,7 @@ Connection: close
 			}
 
 			if err := resp.Read(br); err != nil {
-				t.Errorf("error when reading the second response: %s", err)
+				t.Errorf("error when reading the second response: %v", err)
 			}
 			if resp.StatusCode() != StatusOK {
 				t.Errorf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -1348,7 +1348,7 @@ Connection: close
 		}
 
 		if err := ln.Close(); err != nil {
-			t.Fatalf("error when closing listener: %s", err)
+			t.Fatalf("error when closing listener: %v", err)
 		}
 
 		select {
@@ -1373,12 +1373,12 @@ func TestServerGetWithContent(t *testing.T) {
 	rw.r.WriteString("GET / HTTP/1.1\r\nHost: mm.com\r\nContent-Length: 5\r\n\r\nabcde")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	resp := rw.w.String()
 	if !strings.HasSuffix(resp, "success") {
-		t.Fatalf("unexpected response %s.", resp)
+		t.Fatalf("unexpected response %q.", resp)
 	}
 }
 
@@ -1409,14 +1409,14 @@ func TestServerDisableHeaderNamesNormalizing(t *testing.T) {
 	rw.r.WriteString(fmt.Sprintf("GET / HTTP/1.1\r\n%s: %s\r\nHost: google.com\r\n\r\n", headerName, headerValue))
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
 	var resp Response
 	resp.Header.DisableNormalizing()
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	hv := resp.Header.Peek(headerName)
@@ -1442,7 +1442,7 @@ func TestServerReduceMemoryUsageSerial(t *testing.T) {
 	ch := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(ch)
 	}()
@@ -1450,7 +1450,7 @@ func TestServerReduceMemoryUsageSerial(t *testing.T) {
 	testServerRequests(t, ln)
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("error when closing listener: %s", err)
+		t.Fatalf("error when closing listener: %v", err)
 	}
 
 	select {
@@ -1473,7 +1473,7 @@ func TestServerReduceMemoryUsageConcurrent(t *testing.T) {
 	ch := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(ch)
 	}()
@@ -1494,7 +1494,7 @@ func TestServerReduceMemoryUsageConcurrent(t *testing.T) {
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("error when closing listener: %s", err)
+		t.Fatalf("error when closing listener: %v", err)
 	}
 
 	select {
@@ -1507,20 +1507,20 @@ func TestServerReduceMemoryUsageConcurrent(t *testing.T) {
 func testServerRequests(t *testing.T, ln *fasthttputil.InmemoryListener) {
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	br := bufio.NewReader(conn)
 	var resp Response
 	for i := 0; i < 10; i++ {
 		if _, err = fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: aaa\r\n\r\n"); err != nil {
-			t.Fatalf("unexpected error on iteration %d: %s", i, err)
+			t.Fatalf("unexpected error on iteration %d: %v", i, err)
 		}
 
 		respCh := make(chan struct{})
 		go func() {
 			if err = resp.Read(br); err != nil {
-				t.Errorf("unexpected error when reading response on iteration %d: %s", i, err)
+				t.Errorf("unexpected error when reading response on iteration %d: %v", i, err)
 			}
 			close(respCh)
 		}()
@@ -1532,7 +1532,7 @@ func testServerRequests(t *testing.T, ln *fasthttputil.InmemoryListener) {
 	}
 
 	if err = conn.Close(); err != nil {
-		t.Fatalf("error when closing the connection: %s", err)
+		t.Fatalf("error when closing the connection: %v", err)
 	}
 }
 
@@ -1549,34 +1549,34 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 			}
 		})
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(ch)
 	}()
 
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	_, err = fmt.Fprintf(conn, "%s", "GET / HTTP/1.0\r\nHost: aaa\r\nConnection: keep-alive\r\n\r\n")
 	if err != nil {
-		t.Fatalf("error when writing request: %s", err)
+		t.Fatalf("error when writing request: %v", err)
 	}
 	_, err = fmt.Fprintf(conn, "%s", "GET /close HTTP/1.0\r\nHost: aaa\r\nConnection: keep-alive\r\n\r\n")
 	if err != nil {
-		t.Fatalf("error when writing request: %s", err)
+		t.Fatalf("error when writing request: %v", err)
 	}
 
 	br := bufio.NewReader(conn)
 	var resp Response
 	if err = resp.Read(br); err != nil {
-		t.Fatalf("error when reading response: %s", err)
+		t.Fatalf("error when reading response: %v", err)
 	}
 	if resp.ConnectionClose() {
 		t.Fatal("response mustn't have 'Connection: close' header")
 	}
 	if err = resp.Read(br); err != nil {
-		t.Fatalf("error when reading response: %s", err)
+		t.Fatalf("error when reading response: %v", err)
 	}
 	if !resp.ConnectionClose() {
 		t.Fatal("response must have 'Connection: close' header")
@@ -1586,7 +1586,7 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 	go func() {
 		tail, err := ioutil.ReadAll(br)
 		if err != nil {
-			t.Errorf("error when reading tail: %s", err)
+			t.Errorf("error when reading tail: %v", err)
 		}
 		if len(tail) > 0 {
 			t.Errorf("unexpected non-zero tail %q", tail)
@@ -1601,11 +1601,11 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 	}
 
 	if err = conn.Close(); err != nil {
-		t.Fatalf("error when closing the connection: %s", err)
+		t.Fatalf("error when closing the connection: %v", err)
 	}
 
 	if err = ln.Close(); err != nil {
-		t.Fatalf("error when closing listener: %s", err)
+		t.Fatalf("error when closing listener: %v", err)
 	}
 
 	select {
@@ -1633,24 +1633,24 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 			ctx.Response.Header.Set(HeaderConnection, "keep-alive")
 		})
 		if err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(ch)
 	}()
 
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	_, err = fmt.Fprintf(conn, "%s", "GET / HTTP/1.0\r\nHost: aaa\r\n\r\n")
 	if err != nil {
-		t.Fatalf("error when writing request: %s", err)
+		t.Fatalf("error when writing request: %v", err)
 	}
 
 	br := bufio.NewReader(conn)
 	var resp Response
 	if err = resp.Read(br); err != nil {
-		t.Fatalf("error when reading response: %s", err)
+		t.Fatalf("error when reading response: %v", err)
 	}
 
 	if !resp.ConnectionClose() {
@@ -1661,7 +1661,7 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 	go func() {
 		tail, err := ioutil.ReadAll(br)
 		if err != nil {
-			t.Errorf("error when reading tail: %s", err)
+			t.Errorf("error when reading tail: %v", err)
 		}
 		if len(tail) > 0 {
 			t.Errorf("unexpected non-zero tail %q", tail)
@@ -1676,11 +1676,11 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 	}
 
 	if err = conn.Close(); err != nil {
-		t.Fatalf("error when closing the connection: %s", err)
+		t.Fatalf("error when closing the connection: %v", err)
 	}
 
 	if err = ln.Close(); err != nil {
-		t.Fatalf("error when closing listener: %s", err)
+		t.Fatalf("error when closing listener: %v", err)
 	}
 
 	select {
@@ -1773,14 +1773,14 @@ func TestServerHeadRequest(t *testing.T) {
 	rw.r.WriteString("HEAD /foobar HTTP/1.1\r\nHost: aaa.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
 	var resp Response
 	resp.SkipBody = true
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("Unexpected error when parsing response: %s", err)
+		t.Fatalf("Unexpected error when parsing response: %v", err)
 	}
 	if resp.Header.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.Header.StatusCode(), StatusOK)
@@ -1797,7 +1797,7 @@ func TestServerHeadRequest(t *testing.T) {
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
 	if len(data) > 0 {
 		t.Fatalf("unexpected remaining data %q", data)
@@ -1830,7 +1830,7 @@ func TestServerExpect100Continue(t *testing.T) {
 	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -1838,7 +1838,7 @@ func TestServerExpect100Continue(t *testing.T) {
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
 	if len(data) > 0 {
 		t.Fatalf("unexpected remaining data %q", data)
@@ -1886,7 +1886,7 @@ func TestServerContinueHandler(t *testing.T) {
 
 	sendRequest := func(rw *readWriter, expectedStatusCode int, expectedResponse string) {
 		if err := s.ServeConn(rw); err != nil {
-			t.Fatalf("Unexpected error from serveConn: %s", err)
+			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 
 		br := bufio.NewReader(&rw.w)
@@ -1894,7 +1894,7 @@ func TestServerContinueHandler(t *testing.T) {
 
 		data, err := ioutil.ReadAll(br)
 		if err != nil {
-			t.Fatalf("Unexpected error when reading remaining data: %s", err)
+			t.Fatalf("Unexpected error when reading remaining data: %v", err)
 		}
 		if len(data) > 0 {
 			t.Fatalf("unexpected remaining data %q", data)
@@ -1941,7 +1941,7 @@ func TestCompressHandler(t *testing.T) {
 	s := ctx.Response.String()
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	ce := resp.Header.Peek(HeaderContentEncoding)
 	if string(ce) != "" {
@@ -1961,7 +1961,7 @@ func TestCompressHandler(t *testing.T) {
 	s = ctx.Response.String()
 	br = bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	ce = resp.Header.Peek(HeaderContentEncoding)
 	if string(ce) != "gzip" {
@@ -1969,7 +1969,7 @@ func TestCompressHandler(t *testing.T) {
 	}
 	body, err := resp.BodyGunzip()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if string(body) != expectedBody {
 		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
@@ -1984,7 +1984,7 @@ func TestCompressHandler(t *testing.T) {
 	s = ctx.Response.String()
 	br = bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	ce = resp.Header.Peek(HeaderContentEncoding)
 	if string(ce) != "gzip" {
@@ -1992,7 +1992,7 @@ func TestCompressHandler(t *testing.T) {
 	}
 	body, err = resp.BodyGunzip()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if string(body) != expectedBody {
 		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
@@ -2007,7 +2007,7 @@ func TestCompressHandler(t *testing.T) {
 	s = ctx.Response.String()
 	br = bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	ce = resp.Header.Peek(HeaderContentEncoding)
 	if string(ce) != "deflate" {
@@ -2015,7 +2015,7 @@ func TestCompressHandler(t *testing.T) {
 	}
 	body, err = resp.BodyInflate()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if string(body) != expectedBody {
 		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
@@ -2028,14 +2028,14 @@ func TestRequestCtxWriteString(t *testing.T) {
 	var ctx RequestCtx
 	n, err := ctx.WriteString("foo")
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if n != 3 {
 		t.Fatalf("unexpected n %d. Expecting 3", n)
 	}
 	n, err = ctx.WriteString("привет")
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if n != 12 {
 		t.Fatalf("unexpected n=%d. Expecting 12", n)
@@ -2073,7 +2073,7 @@ func TestServeConnKeepRequestAndResponseUntilResetUserValues(t *testing.T) {
 				}})
 		})
 		if err != nil {
-			t.Errorf("unexpected error in ServeConn: %s", err)
+			t.Errorf("unexpected error in ServeConn: %v", err)
 		}
 		close(ch)
 	}()
@@ -2085,11 +2085,11 @@ func TestServeConnKeepRequestAndResponseUntilResetUserValues(t *testing.T) {
 	}
 
 	if resultReqStr != reqStr {
-		t.Errorf("Request == %s, want %s", resultReqStr, reqStr)
+		t.Errorf("Request == %q, want %q", resultReqStr, reqStr)
 	}
 
 	if !respRegex.MatchString(resultRespStr) {
-		t.Errorf("Response == %s, want regex %s", resultRespStr, respRegex)
+		t.Errorf("Response == %q, want regex %q", resultRespStr, respRegex)
 	}
 }
 
@@ -2129,7 +2129,7 @@ func TestServerErrorHandler(t *testing.T) {
 		go func() {
 			err := s.ServeConn(rw)
 			if err != nil && !errors.Is(err, ErrBodyTooLarge) {
-				t.Errorf("unexpected error in ServeConn: %s", err)
+				t.Errorf("unexpected error in ServeConn: %v", err)
 			}
 			close(ch)
 		}()
@@ -2141,11 +2141,11 @@ func TestServerErrorHandler(t *testing.T) {
 		}
 
 		if resultReqStr != expectedReqStr {
-			t.Errorf("[iter: %d] Request == %s, want %s", i, resultReqStr, reqStr)
+			t.Errorf("[iter: %d] Request == %q, want %s", i, resultReqStr, reqStr)
 		}
 
 		if !respRegex.MatchString(resultRespStr) {
-			t.Errorf("[iter: %d] Response == %s, want regex %s", i, resultRespStr, respRegex)
+			t.Errorf("[iter: %d] Response == %q, want regex %q", i, resultRespStr, respRegex)
 		}
 	}
 }
@@ -2170,7 +2170,7 @@ func TestServeConnHijackResetUserValues(t *testing.T) {
 			)
 		})
 		if err != nil {
-			t.Errorf("unexpected error in ServeConn: %s", err)
+			t.Errorf("unexpected error in ServeConn: %v", err)
 		}
 	}()
 
@@ -2198,7 +2198,7 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 			ctx.SuccessString("aaa/bbb", "foobar")
 		})
 		if err != nil {
-			t.Errorf("unexpected error in ServeConn: %s", err)
+			t.Errorf("unexpected error in ServeConn: %v", err)
 		}
 		close(ch)
 	}()
@@ -2215,7 +2215,7 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 
 	// verify the first response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("Unexpected error when parsing response: %s", err)
+		t.Fatalf("Unexpected error when parsing response: %v", err)
 	}
 	if string(resp.Header.Peek(HeaderConnection)) != "keep-alive" {
 		t.Fatalf("unexpected Connection header %q. Expecting %q", resp.Header.Peek(HeaderConnection), "keep-alive")
@@ -2226,7 +2226,7 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 
 	// verify the second response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("Unexpected error when parsing response: %s", err)
+		t.Fatalf("Unexpected error when parsing response: %v", err)
 	}
 	if string(resp.Header.Peek(HeaderConnection)) != "close" {
 		t.Fatalf("unexpected Connection header %q. Expecting %q", resp.Header.Peek(HeaderConnection), "close")
@@ -2237,7 +2237,7 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
 	if len(data) != 0 {
 		t.Fatalf("Unexpected data read after responses %q", data)
@@ -2261,7 +2261,7 @@ func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
 	ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
 		fmt.Fprintf(w, "body writer line 1\n")
 		if err := w.Flush(); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		fmt.Fprintf(w, "body writer line 2\n")
 	})
@@ -2274,7 +2274,7 @@ func TestRequestCtxSetBodyStreamWriter(t *testing.T) {
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	var resp Response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("Error when reading response: %s", err)
+		t.Fatalf("Error when reading response: %v", err)
 	}
 
 	body := string(resp.Body())
@@ -2324,7 +2324,7 @@ func TestRequestCtxSendFileNotModified(t *testing.T) {
 	filePath := "./server_test.go"
 	lastModified, err := FileLastModified(filePath)
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	ctx.Request.Header.Set("If-Modified-Since", string(AppendHTTPDate(nil, lastModified)))
 
@@ -2335,7 +2335,7 @@ func TestRequestCtxSendFileNotModified(t *testing.T) {
 	var resp Response
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("error when reading response: %s", err)
+		t.Fatalf("error when reading response: %v", err)
 	}
 	if resp.StatusCode() != StatusNotModified {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotModified)
@@ -2355,7 +2355,7 @@ func TestRequestCtxSendFileModified(t *testing.T) {
 	filePath := "./server_test.go"
 	lastModified, err := FileLastModified(filePath)
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	lastModified = lastModified.Add(-time.Hour)
 	ctx.Request.Header.Set("If-Modified-Since", string(AppendHTTPDate(nil, lastModified)))
@@ -2367,7 +2367,7 @@ func TestRequestCtxSendFileModified(t *testing.T) {
 	var resp Response
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("error when reading response: %s", err)
+		t.Fatalf("error when reading response: %v", err)
 	}
 	if resp.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -2375,12 +2375,12 @@ func TestRequestCtxSendFileModified(t *testing.T) {
 
 	f, err := os.Open(filePath)
 	if err != nil {
-		t.Fatalf("cannot open file: %s", err)
+		t.Fatalf("cannot open file: %v", err)
 	}
 	body, err := ioutil.ReadAll(f)
 	f.Close()
 	if err != nil {
-		t.Fatalf("error when reading file: %s", err)
+		t.Fatalf("error when reading file: %v", err)
 	}
 
 	if !bytes.Equal(resp.Body(), body) {
@@ -2401,16 +2401,16 @@ func TestRequestCtxSendFile(t *testing.T) {
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
 	if err := ctx.Response.Write(bw); err != nil {
-		t.Fatalf("error when writing response: %s", err)
+		t.Fatalf("error when writing response: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("error when flushing response: %s", err)
+		t.Fatalf("error when flushing response: %v", err)
 	}
 
 	var resp Response
 	br := bufio.NewReader(w)
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("error when reading response: %s", err)
+		t.Fatalf("error when reading response: %v", err)
 	}
 	if resp.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -2418,12 +2418,12 @@ func TestRequestCtxSendFile(t *testing.T) {
 
 	f, err := os.Open(filePath)
 	if err != nil {
-		t.Fatalf("cannot open file: %s", err)
+		t.Fatalf("cannot open file: %v", err)
 	}
 	body, err := ioutil.ReadAll(f)
 	f.Close()
 	if err != nil {
-		t.Fatalf("error when reading file: %s", err)
+		t.Fatalf("error when reading file: %v", err)
 	}
 
 	if !bytes.Equal(resp.Body(), body) {
@@ -2469,13 +2469,13 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 						continue
 					}
 
-					t.Errorf("unexpected read error: %s", err)
+					t.Errorf("unexpected read error: %v", err)
 				} else if n != 1 {
 					t.Errorf("unexpected number of bytes read: %d. Expecting 1", n)
 				}
 
 				if _, err = c.Write(b); err != nil {
-					t.Errorf("unexpected error when writing data: %s", err)
+					t.Errorf("unexpected error when writing data: %v", err)
 				}
 			}
 		})
@@ -2500,7 +2500,7 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 			rw.r.WriteString(hijackedString)
 
 			if err := s.ServeConn(rw); err != nil {
-				t.Errorf("[iter: %d] Unexpected error from serveConn: %s", id, err)
+				t.Errorf("[iter: %d] Unexpected error from serveConn: %v", id, err)
 			}
 
 			hijackStartCh <- &hijackSignal{id, rw}
@@ -2523,13 +2523,13 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 
 			data, err := ioutil.ReadAll(br)
 			if err != nil {
-				t.Errorf("[iter: %d] Unexpected error when reading remaining data: %s", id, err)
+				t.Errorf("[iter: %d] Unexpected error when reading remaining data: %v", id, err)
 
 				return
 			}
 			if string(data) != hijackedString {
 				t.Errorf(
-					"[iter: %d] Unexpected response %s. Expecting %s",
+					"[iter: %d] Unexpected response %q. Expecting %q",
 					id, data, hijackedString,
 				)
 
@@ -2576,13 +2576,13 @@ func TestRequestCtxHijackNoResponse(t *testing.T) {
 	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\nContent-Length: 0\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	select {
 	case err := <-hijackDone:
 		if err != nil {
-			t.Fatalf("Unexpected error from hijack: %s", err)
+			t.Fatalf("Unexpected error from hijack: %v", err)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("timeout")
@@ -2607,7 +2607,7 @@ func TestRequestCtxNoHijackNoResponse(t *testing.T) {
 	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\nContent-Length: 0\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	bf := bufio.NewReader(
@@ -2654,7 +2654,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 	serverCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 		close(serverCh)
 	}()
@@ -2665,10 +2665,10 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 		go func() {
 			conn, err := ln.Dial()
 			if err != nil {
-				t.Errorf("unexepcted error: %s", err)
+				t.Errorf("unexepcted error: %v", err)
 			}
 			if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			br := bufio.NewReader(conn)
 			verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
@@ -2685,7 +2685,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	select {
@@ -2712,7 +2712,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	serverCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 		close(serverCh)
 	}()
@@ -2723,10 +2723,10 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 		go func() {
 			conn, err := ln.Dial()
 			if err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			br := bufio.NewReader(conn)
 			verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "timeout!!!")
@@ -2752,7 +2752,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	select {
@@ -2777,27 +2777,27 @@ func TestTimeoutHandlerTimeoutReuse(t *testing.T) {
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}()
 
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	br := bufio.NewReader(conn)
 	if _, err = conn.Write([]byte("GET /timeout HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "timeout!!!")
 
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	verifyResponse(t, br, StatusOK, string(defaultContentType), "ok")
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -2829,7 +2829,7 @@ func TestServerGetOnly(t *testing.T) {
 			t.Fatal("expecting error")
 		}
 		if err != ErrGetOnly {
-			t.Fatalf("Unexpected error from serveConn: %s. Expecting %s", err, ErrGetOnly)
+			t.Fatalf("Unexpected error from serveConn: %v. Expecting %v", err, ErrGetOnly)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("timeout")
@@ -2838,7 +2838,7 @@ func TestServerGetOnly(t *testing.T) {
 	br := bufio.NewReader(&rw.w)
 	var resp Response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	statusCode := resp.StatusCode()
 	if statusCode != StatusBadRequest {
@@ -2877,7 +2877,7 @@ func TestServerTimeoutErrorWithResponse(t *testing.T) {
 	rw.r.WriteString("GET /bar HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2886,7 +2886,7 @@ func TestServerTimeoutErrorWithResponse(t *testing.T) {
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
 	if len(data) != 0 {
 		t.Fatalf("Unexpected data read after the first response %q. Expecting %q", data, "")
@@ -2911,7 +2911,7 @@ func TestServerTimeoutErrorWithCode(t *testing.T) {
 	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2920,7 +2920,7 @@ func TestServerTimeoutErrorWithCode(t *testing.T) {
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
 	if len(data) != 0 {
 		t.Fatalf("Unexpected data read after the first response %q. Expecting %q", data, "")
@@ -2945,7 +2945,7 @@ func TestServerTimeoutError(t *testing.T) {
 	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -2954,7 +2954,7 @@ func TestServerTimeoutError(t *testing.T) {
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
 	if len(data) != 0 {
 		t.Fatalf("Unexpected data read after the first response %q. Expecting %q", data, "")
@@ -2974,13 +2974,13 @@ func TestServerMaxRequestsPerConn(t *testing.T) {
 	rw.r.WriteString("GET /bar HTTP/1.1\r\nHost: aaa.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
 	var resp Response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("Unexpected error when parsing response: %s", err)
+		t.Fatalf("Unexpected error when parsing response: %v", err)
 	}
 	if !resp.ConnectionClose() {
 		t.Fatal("Response must have 'connection: close' header")
@@ -2989,7 +2989,7 @@ func TestServerMaxRequestsPerConn(t *testing.T) {
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
 	if len(data) != 0 {
 		t.Fatalf("Unexpected data read after the first response %q. Expecting %q", data, "")
@@ -3010,14 +3010,14 @@ func TestServerConnectionClose(t *testing.T) {
 	rw.r.WriteString("GET /must/be/ignored HTTP/1.1\r\nHost: aaa.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
 	var resp Response
 
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("Unexpected error when parsing response: %s", err)
+		t.Fatalf("Unexpected error when parsing response: %v", err)
 	}
 	if !resp.ConnectionClose() {
 		t.Fatal("expecting Connection: close header")
@@ -3025,7 +3025,7 @@ func TestServerConnectionClose(t *testing.T) {
 
 	data, err := ioutil.ReadAll(br)
 	if err != nil {
-		t.Fatalf("Unexpected error when reading remaining data: %s", err)
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
 	if len(data) != 0 {
 		t.Fatalf("Unexpected data read after the first response %q. Expecting %q", data, "")
@@ -3047,7 +3047,7 @@ func TestServerRequestNumAndTime(t *testing.T) {
 				connT = ctx.ConnTime()
 			}
 			if ctx.ConnTime() != connT {
-				t.Errorf("unexpected serve conn time: %s. Expecting %s", ctx.ConnTime(), connT)
+				t.Errorf("unexpected serve conn time: %q. Expecting %q", ctx.ConnTime(), connT)
 			}
 		},
 	}
@@ -3058,7 +3058,7 @@ func TestServerRequestNumAndTime(t *testing.T) {
 	rw.r.WriteString("GET /baz HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	if n != 3 {
@@ -3082,7 +3082,7 @@ func TestServerEmptyResponse(t *testing.T) {
 	rw.r.WriteString("GET /foo1 HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -3120,7 +3120,7 @@ func TestServerLogger(t *testing.T) {
 	globalConnID = 0
 
 	if err := s.ServeConn(rwx); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -3160,7 +3160,7 @@ func TestServerRemoteAddr(t *testing.T) {
 	}
 
 	if err := s.ServeConn(rwx); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -3200,7 +3200,7 @@ func TestServerCustomRemoteAddr(t *testing.T) {
 	}
 
 	if err := s.ServeConn(rwx); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -3246,13 +3246,13 @@ func TestServerConnError(t *testing.T) {
 	rw.r.WriteString("GET /foo/bar?baz HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
 	var resp Response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("Unexpected error when reading response: %s", err)
+		t.Fatalf("Unexpected error when reading response: %v", err)
 	}
 	if resp.Header.StatusCode() != 423 {
 		t.Fatalf("Unexpected status code %d. Expected %d", resp.Header.StatusCode(), 423)
@@ -3282,7 +3282,7 @@ func TestServeConnSingleRequest(t *testing.T) {
 	rw.r.WriteString("GET /foo/bar?baz HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -3303,7 +3303,7 @@ func TestServeConnMultiRequests(t *testing.T) {
 	rw.r.WriteString("GET /foo/bar?baz HTTP/1.1\r\nHost: google.com\r\n\r\nGET /abc HTTP/1.1\r\nHost: foobar.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
@@ -3324,7 +3324,7 @@ func TestShutdown(t *testing.T) {
 	serveCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 		_, err := ln.Dial()
 		if err == nil {
@@ -3336,10 +3336,10 @@ func TestShutdown(t *testing.T) {
 	go func() {
 		conn, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		br := bufio.NewReader(conn)
 		resp := verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
@@ -3350,7 +3350,7 @@ func TestShutdown(t *testing.T) {
 	shutdownCh := make(chan struct{})
 	go func() {
 		if err := s.Shutdown(); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 		shutdownCh <- struct{}{}
 	}()
@@ -3386,7 +3386,7 @@ func TestCloseOnShutdown(t *testing.T) {
 	serveCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 		_, err := ln.Dial()
 		if err == nil {
@@ -3398,10 +3398,10 @@ func TestCloseOnShutdown(t *testing.T) {
 	go func() {
 		conn, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		br := bufio.NewReader(conn)
 		resp := verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
@@ -3412,7 +3412,7 @@ func TestCloseOnShutdown(t *testing.T) {
 	shutdownCh := make(chan struct{})
 	go func() {
 		if err := s.Shutdown(); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 		shutdownCh <- struct{}{}
 	}()
@@ -3447,38 +3447,38 @@ func TestShutdownReuse(t *testing.T) {
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}()
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %s", err)
+		t.Fatalf("unexepcted error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	br := bufio.NewReader(conn)
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 	if err := s.Shutdown(); err != nil {
-		t.Fatalf("unexepcted error: %s", err)
+		t.Fatalf("unexepcted error: %v", err)
 	}
 	ln = fasthttputil.NewInmemoryListener()
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}()
 	conn, err = ln.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %s", err)
+		t.Fatalf("unexepcted error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	br = bufio.NewReader(conn)
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 	if err := s.Shutdown(); err != nil {
-		t.Fatalf("unexepcted error: %s", err)
+		t.Fatalf("unexepcted error: %v", err)
 	}
 }
 
@@ -3494,21 +3494,21 @@ func TestShutdownDone(t *testing.T) {
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}()
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %s", err)
+		t.Fatalf("unexepcted error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	go func() {
 		// Shutdown won't return if the connection doesn't close,
 		// which doesn't happen until we read the response.
 		if err := s.Shutdown(); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}()
 	// We can only reach this point and get a valid response
@@ -3533,21 +3533,21 @@ func TestShutdownErr(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}()
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %s", err)
+		t.Fatalf("unexepcted error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	go func() {
 		// Shutdown won't return if the connection doesn't close,
 		// which doesn't happen until we read the response.
 		if err := s.Shutdown(); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}()
 	// We can only reach this point and get a valid response
@@ -3567,16 +3567,16 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}()
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %s", err)
+		t.Fatalf("unexepcted error: %v", err)
 	}
 
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-		t.Errorf("unexpected error: %s", err)
+		t.Errorf("unexpected error: %v", err)
 	}
 	br := bufio.NewReader(conn)
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
@@ -3592,7 +3592,7 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 		t.Fatal("idle connections not closed on shutdown")
 	case err = <-shutdownErr:
 		if err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}
 }
@@ -3611,31 +3611,31 @@ func TestMultipleServe(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(ln1); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}()
 	go func() {
 		if err := s.Serve(ln2); err != nil {
-			t.Errorf("unexepcted error: %s", err)
+			t.Errorf("unexepcted error: %v", err)
 		}
 	}()
 
 	conn, err := ln1.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %s", err)
+		t.Fatalf("unexepcted error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	br := bufio.NewReader(conn)
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 
 	conn, err = ln2.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %s", err)
+		t.Fatalf("unexepcted error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	br = bufio.NewReader(conn)
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
@@ -3662,7 +3662,7 @@ func TestMaxBodySizePerRequest(t *testing.T) {
 	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", (5<<10)+1, strings.Repeat("a", (5<<10)+1)))
 
 	if err := s.ServeConn(rw); err != ErrBodyTooLarge {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 }
 
@@ -3713,8 +3713,8 @@ func TestStreamRequestBody(t *testing.T) {
 
 	select {
 	case err := <-ch:
-		if err == nil || err.Error() != "connection closed" { // fasthttputil.errConnectionClosed is private so do a string match.
-			t.Fatalf("Unexpected error from serveConn: %s", err)
+		if err != nil && err.Error() != "connection closed" { // fasthttputil.errConnectionClosed is private so do a string match.
+			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("part2 timeout")
@@ -3806,7 +3806,7 @@ func TestStreamBodyRequestContentLength(t *testing.T) {
 	select {
 	case err := <-ch:
 		if err == nil || err.Error() != "connection closed" { // fasthttputil.errConnectionClosed is private so do a string match.
-			t.Fatalf("Unexpected error from serveConn: %s", err)
+			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("test timeout")
@@ -3816,7 +3816,7 @@ func TestStreamBodyRequestContentLength(t *testing.T) {
 func checkReader(t *testing.T, r io.Reader, expected string) {
 	b := make([]byte, len(expected))
 	if _, err := io.ReadFull(r, b); err != nil {
-		t.Fatalf("Unexpected error from reader: %s", err)
+		t.Fatalf("Unexpected error from reader: %v", err)
 	}
 	if string(b) != expected {
 		t.Fatal("incorrect request body")
@@ -3863,7 +3863,7 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 	select {
 	case err := <-ch:
 		if err == nil || err != nil && !strings.EqualFold(err.Error(), "timeout") {
-			t.Fatalf("Unexpected error from serveConn: %s", err)
+			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("test timeout")
@@ -3923,7 +3923,7 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 	select {
 	case err := <-ch:
 		if err == nil || err != nil && !strings.EqualFold(err.Error(), "timeout") {
-			t.Fatalf("Unexpected error from serveConn: %s", err)
+			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("test timeout")
@@ -3962,14 +3962,14 @@ func TestServerChunkedResponse(t *testing.T) {
 		for k := range trailer {
 			err := ctx.Response.Header.AddTrailer(k)
 			if err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 		}
 		ctx.Response.SetBodyStreamWriter(func(w *bufio.Writer) {
 			for i := 0; i < 3; i++ {
 				fmt.Fprintf(w, "message %d", i)
 				if err := w.Flush(); err != nil {
-					t.Errorf("unexpected error: %s", err)
+					t.Errorf("unexpected error: %v", err)
 				}
 				time.Sleep(time.Second)
 			}
@@ -3986,13 +3986,13 @@ func TestServerChunkedResponse(t *testing.T) {
 	rw.r.WriteString("GET / HTTP/1.1\r\nHost: test.com\r\n\r\n")
 
 	if err := s.ServeConn(rw); err != nil {
-		t.Fatalf("Unexpected error from serveConn: %s", err)
+		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
 	br := bufio.NewReader(&rw.w)
 	var resp Response
 	if err := resp.Read(br); err != nil {
-		t.Fatalf("Unexpected error when reading response: %s", err)
+		t.Fatalf("Unexpected error when reading response: %v", err)
 	}
 	if resp.Header.ContentLength() != -1 {
 		t.Fatalf("Unexpected Content-Length %d. Expected %d", resp.Header.ContentLength(), -1)
@@ -4003,7 +4003,7 @@ func TestServerChunkedResponse(t *testing.T) {
 	for k, v := range trailer {
 		h := resp.Header.Peek(k)
 		if !bytes.Equal(resp.Header.Peek(k), []byte(v)) {
-			t.Fatalf("Unexpected trailer %s. Expected %s. Got %q", k, v, h)
+			t.Fatalf("Unexpected trailer %q. Expected %q. Got %q", k, v, h)
 		}
 	}
 }
@@ -4011,7 +4011,7 @@ func TestServerChunkedResponse(t *testing.T) {
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) *Response {
 	var resp Response
 	if err := resp.Read(r); err != nil {
-		t.Fatalf("Unexpected error when parsing response: %s", err)
+		t.Fatalf("Unexpected error when parsing response: %v", err)
 	}
 
 	if !bytes.Equal(resp.Body(), []byte(expectedBody)) {

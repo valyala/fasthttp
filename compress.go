@@ -101,7 +101,7 @@ func acquireRealGzipWriter(w io.Writer, level int) *gzip.Writer {
 	if v == nil {
 		zw, err := gzip.NewWriterLevel(w, level)
 		if err != nil {
-			panic(fmt.Sprintf("BUG: unexpected error from gzip.NewWriterLevel(%d): %s", level, err))
+			panic(fmt.Sprintf("BUG: unexpected error from gzip.NewWriterLevel(%d): %v", level, err))
 		}
 		return zw
 	}
@@ -177,7 +177,7 @@ func nonblockingWriteGzip(ctxv interface{}) {
 
 	_, err := zw.Write(ctx.p)
 	if err != nil {
-		panic(fmt.Sprintf("BUG: gzip.Writer.Write for len(p)=%d returned unexpected error: %s", len(ctx.p), err))
+		panic(fmt.Sprintf("BUG: gzip.Writer.Write for len(p)=%d returned unexpected error: %v", len(ctx.p), err))
 	}
 
 	releaseRealGzipWriter(zw, ctx.level)
@@ -273,7 +273,7 @@ func nonblockingWriteDeflate(ctxv interface{}) {
 
 	_, err := zw.Write(ctx.p)
 	if err != nil {
-		panic(fmt.Sprintf("BUG: zlib.Writer.Write for len(p)=%d returned unexpected error: %s", len(ctx.p), err))
+		panic(fmt.Sprintf("BUG: zlib.Writer.Write for len(p)=%d returned unexpected error: %v", len(ctx.p), err))
 	}
 
 	releaseRealDeflateWriter(zw, ctx.level)
@@ -379,7 +379,7 @@ func acquireRealDeflateWriter(w io.Writer, level int) *zlib.Writer {
 	if v == nil {
 		zw, err := zlib.NewWriterLevel(w, level)
 		if err != nil {
-			panic(fmt.Sprintf("BUG: unexpected error from zlib.NewWriterLevel(%d): %s", level, err))
+			panic(fmt.Sprintf("BUG: unexpected error from zlib.NewWriterLevel(%d): %v", level, err))
 		}
 		return zw
 	}

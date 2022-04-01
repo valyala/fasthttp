@@ -29,7 +29,7 @@ func main() {
 	if err == nil {
 		fmt.Printf("Response: %s\n", resp.Body())
 	} else {
-		fmt.Fprintf(os.Stderr, "Connection error: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Connection error: %v\n", err)
 	}
 	fasthttp.ReleaseResponse(resp)
 }

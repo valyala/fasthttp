@@ -26,7 +26,7 @@ func TestExpvarHandlerBasic(t *testing.T) {
 
 	var m map[string]interface{}
 	if err := json.Unmarshal(body, &m); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if _, ok := m["cmdline"]; !ok {

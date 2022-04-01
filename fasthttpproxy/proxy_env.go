@@ -115,10 +115,10 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 		if res.Header.StatusCode() != 200 {
 			if connErr := conn.Close(); connErr != nil {
 				return nil, fmt.Errorf(
-					"conn close err %w precede by connect to proxy: code: %d body %s",
+					"conn close err %w precede by connect to proxy: code: %d body %q",
 					connErr, res.StatusCode(), string(res.Body()))
 			}
-			return nil, fmt.Errorf("could not connect to proxy: code: %d body %s", res.StatusCode(), string(res.Body()))
+			return nil, fmt.Errorf("could not connect to proxy: code: %d body %q", res.StatusCode(), string(res.Body()))
 		}
 		return conn, nil
 	}

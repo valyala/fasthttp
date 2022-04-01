@@ -104,7 +104,7 @@ func ServeFile(ctx *RequestCtx, path string) {
 		hasTrailingSlash := len(path) > 0 && path[len(path)-1] == '/'
 		var err error
 		if path, err = filepath.Abs(path); err != nil {
-			ctx.Logger().Printf("cannot resolve path %q to absolute file path: %s", path, err)
+			ctx.Logger().Printf("cannot resolve path %q to absolute file path: %v", path, err)
 			ctx.Error("Internal Server Error", StatusInternalServerError)
 			return
 		}
@@ -825,12 +825,12 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			}
 			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
 			if err != nil {
-				ctx.Logger().Printf("cannot open dir index %q: %s", filePath, err)
+				ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
 				ctx.Error("Directory index is forbidden", StatusForbidden)
 				return
 			}
 		} else if err != nil {
-			ctx.Logger().Printf("cannot open file %q: %s", filePath, err)
+			ctx.Logger().Printf("cannot open file %q: %v", filePath, err)
 			if h.pathNotFound == nil {
 				ctx.Error("Cannot open requested path", StatusNotFound)
 			} else {
@@ -867,7 +867,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 
 	r, err := ff.NewReader()
 	if err != nil {
-		ctx.Logger().Printf("cannot obtain file reader for path=%q: %s", path, err)
+		ctx.Logger().Printf("cannot obtain file reader for path=%q: %v", path, err)
 		ctx.Error("Internal Server Error", StatusInternalServerError)
 		return
 	}
@@ -889,14 +889,14 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			startPos, endPos, err := ParseByteRange(byteRange, contentLength)
 			if err != nil {
 				r.(io.Closer).Close()
-				ctx.Logger().Printf("cannot parse byte range %q for path=%q: %s", byteRange, path, err)
+				ctx.Logger().Printf("cannot parse byte range %q for path=%q: %v", byteRange, path, err)
 				ctx.Error("Range Not Satisfiable", StatusRequestedRangeNotSatisfiable)
 				return
 			}
 
 			if err = r.(byteRangeUpdater).UpdateByteRange(startPos, endPos); err != nil {
 				r.(io.Closer).Close()
-				ctx.Logger().Printf("cannot seek byte range %q for path=%q: %s", byteRange, path, err)
+				ctx.Logger().Printf("cannot seek byte range %q for path=%q: %v", byteRange, path, err)
 				ctx.Error("Internal Server Error", StatusInternalServerError)
 				return
 			}
@@ -916,7 +916,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.Response.Header.SetContentLength(contentLength)
 		if rc, ok := r.(io.Closer); ok {
 			if err := rc.Close(); err != nil {
-				ctx.Logger().Printf("cannot close file reader: %s", err)
+				ctx.Logger().Printf("cannot close file reader: %v", err)
 				ctx.Error("Internal Server Error", StatusInternalServerError)
 				return
 			}
@@ -1134,7 +1134,7 @@ func (h *fsHandler) compressAndOpenFSFile(filePath string, fileEncoding string) 
 	absPath, err := filepath.Abs(compressedFilePath)
 	if err != nil {
 		f.Close()
-		return nil, fmt.Errorf("cannot determine absolute path for %q: %s", compressedFilePath, err)
+		return nil, fmt.Errorf("cannot determine absolute path for %q: %v", compressedFilePath, err)
 	}
 
 	flock := getFileLock(absPath)
@@ -1187,7 +1187,7 @@ func (h *fsHandler) compressFileNolock(f *os.File, fileInfo os.FileInfo, filePat
 		return nil, fmt.Errorf("error when compressing file %q to %q: %w", filePath, tmpFilePath, err)
 	}
 	if err = os.Chtimes(tmpFilePath, time.Now(), fileInfo.ModTime()); err != nil {
-		return nil, fmt.Errorf("cannot change modification time to %s for tmp file %q: %s",
+		return nil, fmt.Errorf("cannot change modification time to %v for tmp file %q: %v",
 			fileInfo.ModTime(), tmpFilePath, err)
 	}
 	if err = os.Rename(tmpFilePath, compressedFilePath); err != nil {

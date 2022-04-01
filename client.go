@@ -2630,7 +2630,7 @@ func (c *pipelineConnClient) init() {
 			// Keep restarting the worker if it fails (connection errors for example).
 			for {
 				if err := c.worker(); err != nil {
-					c.logger().Printf("error in PipelineClient(%q): %s", c.Addr, err)
+					c.logger().Printf("error in PipelineClient(%q): %v", c.Addr, err)
 					if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 						// Throttle client reconnections on timeout errors
 						time.Sleep(time.Second)

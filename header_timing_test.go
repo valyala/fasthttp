@@ -38,7 +38,7 @@ func BenchmarkRequestHeaderRead(b *testing.B) {
 			buf.n = 0
 			br.Reset(buf)
 			if err := h.Read(br); err != nil {
-				b.Fatalf("unexpected error when reading header: %s", err)
+				b.Fatalf("unexpected error when reading header: %v", err)
 			}
 		}
 	})
@@ -55,7 +55,7 @@ func BenchmarkResponseHeaderRead(b *testing.B) {
 			buf.n = 0
 			br.Reset(buf)
 			if err := h.Read(br); err != nil {
-				b.Fatalf("unexpected error when reading header: %s", err)
+				b.Fatalf("unexpected error when reading header: %v", err)
 			}
 		}
 	})
@@ -71,7 +71,7 @@ func BenchmarkRequestHeaderWrite(b *testing.B) {
 		var w bytebufferpool.ByteBuffer
 		for pb.Next() {
 			if _, err := h.WriteTo(&w); err != nil {
-				b.Fatalf("unexpected error when writing header: %s", err)
+				b.Fatalf("unexpected error when writing header: %v", err)
 			}
 			w.Reset()
 		}
@@ -89,7 +89,7 @@ func BenchmarkResponseHeaderWrite(b *testing.B) {
 		var w bytebufferpool.ByteBuffer
 		for pb.Next() {
 			if _, err := h.WriteTo(&w); err != nil {
-				b.Fatalf("unexpected error when writing header: %s", err)
+				b.Fatalf("unexpected error when writing header: %v", err)
 			}
 			w.Reset()
 		}

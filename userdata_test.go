@@ -92,7 +92,7 @@ func TestUserDataDelete(t *testing.T) {
 		k := fmt.Sprintf("key_%d", i)
 		u.Remove(k)
 		if val := u.Get(k); val != nil {
-			t.Fatalf("unexpected key= %s, value =%v ,Expecting key= %s, value = nil", k, val, k)
+			t.Fatalf("unexpected key= %q, value =%v ,Expecting key= %q, value = nil", k, val, k)
 		}
 		kk := fmt.Sprintf("key_%d", i+1)
 		testUserDataGet(t, &u, []byte(kk), i+1)

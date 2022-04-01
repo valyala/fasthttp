@@ -15,7 +15,7 @@ func TestCompressFlateSerial(t *testing.T) {
 	t.Parallel()
 
 	if err := testCompressFlate(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -23,7 +23,7 @@ func TestCompressFlateConcurrent(t *testing.T) {
 	t.Parallel()
 
 	if err := testConcurrent(testCompressFlate, 10); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -31,7 +31,7 @@ func testCompressFlate() error {
 	return testWriter(func(w io.Writer) Writer {
 		zw, err := flate.NewWriter(w, flate.DefaultCompression)
 		if err != nil {
-			panic(fmt.Sprintf("BUG: unexpected error: %s", err))
+			panic(fmt.Sprintf("BUG: unexpected error: %v", err))
 		}
 		return zw
 	}, func(r io.Reader) io.Reader {
@@ -43,7 +43,7 @@ func TestCompressGzipSerial(t *testing.T) {
 	t.Parallel()
 
 	if err := testCompressGzip(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -51,7 +51,7 @@ func TestCompressGzipConcurrent(t *testing.T) {
 	t.Parallel()
 
 	if err := testConcurrent(testCompressGzip, 10); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -61,7 +61,7 @@ func testCompressGzip() error {
 	}, func(r io.Reader) io.Reader {
 		zr, err := gzip.NewReader(r)
 		if err != nil {
-			panic(fmt.Sprintf("BUG: cannot create gzip reader: %s", err))
+			panic(fmt.Sprintf("BUG: cannot create gzip reader: %v", err))
 		}
 		return zr
 	})

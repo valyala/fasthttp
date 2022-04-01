@@ -23,6 +23,6 @@ func ExampleFS() {
 
 	// Start the server.
 	if err := fasthttp.ListenAndServe(":8080", h); err != nil {
-		log.Fatalf("error in ListenAndServe: %s", err)
+		log.Fatalf("error in ListenAndServe: %v", err)
 	}
 }

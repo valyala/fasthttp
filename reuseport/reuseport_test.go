@@ -23,7 +23,7 @@ func TestTCP6(t *testing.T) {
 func hasLocalIPv6(t *testing.T) bool {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
-		t.Fatalf("cannot obtain local interfaces: %s", err)
+		t.Fatalf("cannot obtain local interfaces: %v", err)
 	}
 	for _, a := range addrs {
 		if a.String() == "::1/128" {

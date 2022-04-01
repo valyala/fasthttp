@@ -69,7 +69,7 @@ func testIssue6RequestHeaderSetContentType(t *testing.T, method string) {
 
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := h1.Read(br); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	issue6VerifyRequestHeader(t, &h1, contentType, contentLength, method)
 }

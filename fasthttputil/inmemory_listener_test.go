@@ -23,13 +23,13 @@ func TestInmemoryListener(t *testing.T) {
 		go func(n int) {
 			conn, err := ln.Dial()
 			if err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			defer conn.Close()
 			req := fmt.Sprintf("request_%d", n)
 			nn, err := conn.Write([]byte(req))
 			if err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			if nn != len(req) {
 				t.Errorf("unexpected number of bytes written: %d. Expecting %d", nn, len(req))
@@ -37,7 +37,7 @@ func TestInmemoryListener(t *testing.T) {
 			buf := make([]byte, 30)
 			nn, err = conn.Read(buf)
 			if err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			buf = buf[:nn]
 			resp := fmt.Sprintf("response_%d", n)
@@ -63,7 +63,7 @@ func TestInmemoryListener(t *testing.T) {
 			buf := make([]byte, 30)
 			n, err := conn.Read(buf)
 			if err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			buf = buf[:n]
 			if !bytes.HasPrefix(buf, []byte("request_")) {
@@ -72,7 +72,7 @@ func TestInmemoryListener(t *testing.T) {
 			resp := fmt.Sprintf("response_%s", buf[len("request_"):])
 			n, err = conn.Write([]byte(resp))
 			if err != nil {
-				t.Errorf("unexpected error: %s", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			if n != len(resp) {
 				t.Errorf("unexpected number of bytes written: %d. Expecting %d", n, len(resp))
@@ -89,7 +89,7 @@ func TestInmemoryListener(t *testing.T) {
 	}
 
 	if err := ln.Close(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	select {
@@ -108,7 +108,7 @@ func (s *echoServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 	time.Sleep(time.Millisecond * 100)
 	if _, err := io.Copy(w, r.Body); err != nil {
-		s.t.Fatalf("unexpected error: %s", err)
+		s.t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -131,7 +131,7 @@ func testInmemoryListenerHTTP(t *testing.T, f func(t *testing.T, client *http.Cl
 
 	go func() {
 		if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
-			t.Errorf("unexpected error: %s", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 
@@ -145,15 +145,15 @@ func testInmemoryListenerHTTP(t *testing.T, f func(t *testing.T, client *http.Cl
 func testInmemoryListenerHTTPSingle(t *testing.T, client *http.Client, content string) {
 	res, err := client.Post("http://...", "text/plain", bytes.NewBufferString(content))
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	b, err := ioutil.ReadAll(res.Body)
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	s := string(b)
 	if string(b) != content {
-		t.Fatalf("unexpected response %s, expecting %s", s, content)
+		t.Fatalf("unexpected response %q, expecting %q", s, content)
 	}
 }
 

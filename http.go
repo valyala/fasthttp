@@ -932,7 +932,7 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 			}
 			fh, err := fv.Open()
 			if err != nil {
-				return fmt.Errorf("cannot open form file %q (%q): %s", k, fv.Filename, err)
+				return fmt.Errorf("cannot open form file %q (%q): %w", k, fv.Filename, err)
 			}
 			if _, err = copyZeroAlloc(vw, fh); err != nil {
 				return fmt.Errorf("error when copying form file %q (%q): %w", k, fv.Filename, err)
@@ -2168,7 +2168,7 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 		c, err := r.ReadByte()
 		if err != nil {
 			return -1, ErrBrokenChunk{
-				error: fmt.Errorf("cannot read '\r' char at the end of chunk size: %s", err),
+				error: fmt.Errorf("cannot read '\r' char at the end of chunk size: %w", err),
 			}
 		}
 		// Skip chunk extension after chunk size.

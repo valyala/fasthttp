@@ -102,7 +102,7 @@ func BenchmarkClientGetTimeoutFastServer(b *testing.B) {
 		for pb.Next() {
 			statusCode, bodyBuf, err = c.GetTimeout(bodyBuf[:0], url, time.Second)
 			if err != nil {
-				b.Fatalf("unexpected error: %s", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
 			if statusCode != StatusOK {
 				b.Fatalf("unexpected status code: %d", statusCode)
@@ -131,7 +131,7 @@ func BenchmarkClientDoFastServer(b *testing.B) {
 		req.Header.SetRequestURI(fmt.Sprintf("http://foobar%d.com/aaa/bbb", atomic.AddUint32(&nn, 1)))
 		for pb.Next() {
 			if err := c.Do(&req, &resp); err != nil {
-				b.Fatalf("unexpected error: %s", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
 			if resp.Header.StatusCode() != StatusOK {
 				b.Fatalf("unexpected status code: %d", resp.Header.StatusCode())
@@ -159,12 +159,12 @@ func BenchmarkNetHTTPClientDoFastServer(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		req, err := http.NewRequest(MethodGet, fmt.Sprintf("http://foobar%d.com/aaa/bbb", atomic.AddUint32(&nn, 1)), nil)
 		if err != nil {
-			b.Fatalf("unexpected error: %s", err)
+			b.Fatalf("unexpected error: %v", err)
 		}
 		for pb.Next() {
 			resp, err := c.Do(req)
 			if err != nil {
-				b.Fatalf("unexpected error: %s", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
 			if resp.StatusCode != http.StatusOK {
 				b.Fatalf("unexpected status code: %d", resp.StatusCode)
@@ -172,7 +172,7 @@ func BenchmarkNetHTTPClientDoFastServer(b *testing.B) {
 			respBody, err := ioutil.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
-				b.Fatalf("unexpected error when reading response body: %s", err)
+				b.Fatalf("unexpected error when reading response body: %v", err)
 			}
 			if !bytes.Equal(respBody, body) {
 				b.Fatalf("unexpected response body: %q. Expected %q", respBody, body)
@@ -207,13 +207,13 @@ func benchmarkClientGetEndToEndTCP(b *testing.B, parallelism int) {
 
 	ln, err := net.Listen("tcp4", addr)
 	if err != nil {
-		b.Fatalf("cannot listen %q: %s", addr, err)
+		b.Fatalf("cannot listen %q: %v", addr, err)
 	}
 
 	ch := make(chan struct{})
 	go func() {
 		if err := Serve(ln, fasthttpEchoHandler); err != nil {
-			b.Errorf("error when serving requests: %s", err)
+			b.Errorf("error when serving requests: %v", err)
 		}
 		close(ch)
 	}()
@@ -230,7 +230,7 @@ func benchmarkClientGetEndToEndTCP(b *testing.B, parallelism int) {
 		for pb.Next() {
 			statusCode, body, err := c.Get(buf, url)
 			if err != nil {
-				b.Fatalf("unexpected error: %s", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
 			if statusCode != StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
@@ -267,14 +267,14 @@ func benchmarkNetHTTPClientGetEndToEndTCP(b *testing.B, parallelism int) {
 
 	ln, err := net.Listen("tcp4", addr)
 	if err != nil {
-		b.Fatalf("cannot listen %q: %s", addr, err)
+		b.Fatalf("cannot listen %q: %v", addr, err)
 	}
 
 	ch := make(chan struct{})
 	go func() {
 		if err := http.Serve(ln, http.HandlerFunc(nethttpEchoHandler)); err != nil && !strings.Contains(
 			err.Error(), "use of closed network connection") {
-			b.Errorf("error when serving requests: %s", err)
+			b.Errorf("error when serving requests: %v", err)
 		}
 		close(ch)
 	}()
@@ -292,7 +292,7 @@ func benchmarkNetHTTPClientGetEndToEndTCP(b *testing.B, parallelism int) {
 		for pb.Next() {
 			resp, err := c.Get(url)
 			if err != nil {
-				b.Fatalf("unexpected error: %s", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
 			if resp.StatusCode != http.StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
@@ -300,7 +300,7 @@ func benchmarkNetHTTPClientGetEndToEndTCP(b *testing.B, parallelism int) {
 			body, err := ioutil.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
-				b.Fatalf("unexpected error when reading response body: %s", err)
+				b.Fatalf("unexpected error when reading response body: %v", err)
 			}
 			if string(body) != requestURI {
 				b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)
@@ -342,7 +342,7 @@ func benchmarkClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 	ch := make(chan struct{})
 	go func() {
 		if err := Serve(ln, fasthttpEchoHandler); err != nil {
-			b.Errorf("error when serving requests: %s", err)
+			b.Errorf("error when serving requests: %v", err)
 		}
 		close(ch)
 	}()
@@ -360,7 +360,7 @@ func benchmarkClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 		for pb.Next() {
 			statusCode, body, err := c.Get(buf, url)
 			if err != nil {
-				b.Fatalf("unexpected error: %s", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
 			if statusCode != StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
@@ -403,7 +403,7 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 	go func() {
 		if err := http.Serve(ln, http.HandlerFunc(nethttpEchoHandler)); err != nil && !strings.Contains(
 			err.Error(), "use of closed network connection") {
-			b.Errorf("error when serving requests: %s", err)
+			b.Errorf("error when serving requests: %v", err)
 		}
 		close(ch)
 	}()
@@ -422,7 +422,7 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 		for pb.Next() {
 			resp, err := c.Get(url)
 			if err != nil {
-				b.Fatalf("unexpected error: %s", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
 			if resp.StatusCode != http.StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
@@ -430,7 +430,7 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 			body, err := ioutil.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
-				b.Fatalf("unexpected error when reading response body: %s", err)
+				b.Fatalf("unexpected error when reading response body: %v", err)
 			}
 			if string(body) != requestURI {
 				b.Fatalf("unexpected response %q. Expecting %q", body, requestURI)
@@ -466,7 +466,7 @@ func benchmarkClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
 	ch := make(chan struct{})
 	go func() {
 		if err := Serve(ln, h); err != nil {
-			b.Errorf("error when serving requests: %s", err)
+			b.Errorf("error when serving requests: %v", err)
 		}
 		close(ch)
 	}()
@@ -485,7 +485,7 @@ func benchmarkClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
 		var resp Response
 		for pb.Next() {
 			if err := c.DoTimeout(&req, &resp, 5*time.Second); err != nil {
-				b.Fatalf("unexpected error: %s", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
 			if resp.StatusCode() != StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -525,7 +525,7 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 	go func() {
 		if err := http.Serve(ln, http.HandlerFunc(h)); err != nil && !strings.Contains(
 			err.Error(), "use of closed network connection") {
-			b.Errorf("error when serving requests: %s", err)
+			b.Errorf("error when serving requests: %v", err)
 		}
 		close(ch)
 	}()
@@ -544,12 +544,12 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 	b.RunParallel(func(pb *testing.PB) {
 		req, err := http.NewRequest(MethodGet, url, nil)
 		if err != nil {
-			b.Fatalf("unexpected error: %s", err)
+			b.Fatalf("unexpected error: %v", err)
 		}
 		for pb.Next() {
 			resp, err := c.Do(req)
 			if err != nil {
-				b.Fatalf("unexpected error: %s", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
 			if resp.StatusCode != http.StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
@@ -557,7 +557,7 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 			body, err := ioutil.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
-				b.Fatalf("unexpected error when reading response body: %s", err)
+				b.Fatalf("unexpected error when reading response body: %v", err)
 			}
 			if !bytes.Equal(bigResponse, body) {
 				b.Fatalf("unexpected response %q. Expecting %q", body, bigResponse)
@@ -598,7 +598,7 @@ func benchmarkPipelineClient(b *testing.B, parallelism int) {
 	ch := make(chan struct{})
 	go func() {
 		if err := Serve(ln, h); err != nil {
-			b.Errorf("error when serving requests: %s", err)
+			b.Errorf("error when serving requests: %v", err)
 		}
 		close(ch)
 	}()
@@ -621,7 +621,7 @@ func benchmarkPipelineClient(b *testing.B, parallelism int) {
 		var resp Response
 		for pb.Next() {
 			if err := c.Do(&req, &resp); err != nil {
-				b.Fatalf("unexpected error: %s", err)
+				b.Fatalf("unexpected error: %v", err)
 			}
 			if resp.StatusCode() != StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)

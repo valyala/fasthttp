@@ -16,7 +16,7 @@ func testIPxUint32(t *testing.T, n uint32) {
 	ip := uint322ip(n)
 	nn := ip2uint32(ip)
 	if n != nn {
-		t.Fatalf("Unexpected value=%d for ip=%s. Expected %d", nn, ip, n)
+		t.Fatalf("Unexpected value=%d for ip=%q. Expected %d", nn, ip, n)
 	}
 }
 

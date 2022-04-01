@@ -76,7 +76,7 @@ func testParseIPv4(t *testing.T, ipStr string, isValid bool) {
 	ip, err := ParseIPv4(nil, []byte(ipStr))
 	if isValid {
 		if err != nil {
-			t.Fatalf("unexpected error when parsing ip %q: %s", ipStr, err)
+			t.Fatalf("unexpected error when parsing ip %q: %v", ipStr, err)
 		}
 		s := string(AppendIPv4(nil, ip))
 		if s != ipStr {
@@ -131,10 +131,10 @@ func testWriteHexInt(t *testing.T, n int, expectedS string) {
 	var w bytebufferpool.ByteBuffer
 	bw := bufio.NewWriter(&w)
 	if err := writeHexInt(bw, n); err != nil {
-		t.Fatalf("unexpected error when writing hex %x: %s", n, err)
+		t.Fatalf("unexpected error when writing hex %x: %v", n, err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("unexpected error when flushing hex %x: %s", n, err)
+		t.Fatalf("unexpected error when flushing hex %x: %v", n, err)
 	}
 	s := string(w.B)
 	if s != expectedS {
@@ -168,7 +168,7 @@ func testReadHexIntSuccess(t *testing.T, s string, expectedN int) {
 	br := bufio.NewReader(r)
 	n, err := readHexInt(br)
 	if err != nil {
-		t.Fatalf("unexpected error: %s. s=%q", err, s)
+		t.Fatalf("unexpected error: %v. s=%q", err, s)
 	}
 	if n != expectedN {
 		t.Fatalf("unexpected hex int %d. Expected %d. s=%q", n, expectedN, s)
@@ -274,7 +274,7 @@ func testParseUfloatError(t *testing.T, s string) {
 func testParseUfloatSuccess(t *testing.T, s string, expectedF float64) {
 	f, err := ParseUfloat([]byte(s))
 	if err != nil {
-		t.Fatalf("Unexpected error when parsing %q: %s", s, err)
+		t.Fatalf("Unexpected error when parsing %q: %v", s, err)
 	}
 	delta := f - expectedF
 	if delta < 0 {
@@ -298,7 +298,7 @@ func testParseUintError(t *testing.T, s string) {
 func testParseUintSuccess(t *testing.T, s string, expectedN int) {
 	n, err := ParseUint([]byte(s))
 	if err != nil {
-		t.Fatalf("Unexpected error when parsing %q: %s", s, err)
+		t.Fatalf("Unexpected error when parsing %q: %v", s, err)
 	}
 	if n != expectedN {
 		t.Fatalf("Unexpected value %d. Expected %d. num=%q", n, expectedN, s)

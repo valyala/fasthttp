@@ -237,7 +237,7 @@ func TestArgsWriteTo(t *testing.T) {
 	var w bytebufferpool.ByteBuffer
 	n, err := a.WriteTo(&w)
 	if err != nil {
-		t.Fatalf("unexpected error: %s", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if n != int64(len(s)) {
 		t.Fatalf("unexpected n: %d. Expecting %d", n, len(s))
@@ -594,7 +594,7 @@ func TestArgsDeleteAll(t *testing.T) {
 	a.Add("q2", "1234")
 	a.Del("q1")
 	if a.Len() != 1 || a.Has("q1") {
-		t.Fatalf("Expected q1 arg to be completely deleted. Current Args: %s", a.String())
+		t.Fatalf("Expected q1 arg to be completely deleted. Current Args: %q", a.String())
 	}
 }
 

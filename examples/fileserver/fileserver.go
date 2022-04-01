@@ -63,7 +63,7 @@ func main() {
 		log.Printf("Starting HTTP server on %q", *addr)
 		go func() {
 			if err := fasthttp.ListenAndServe(*addr, requestHandler); err != nil {
-				log.Fatalf("error in ListenAndServe: %s", err)
+				log.Fatalf("error in ListenAndServe: %v", err)
 			}
 		}()
 	}
@@ -73,7 +73,7 @@ func main() {
 		log.Printf("Starting HTTPS server on %q", *addrTLS)
 		go func() {
 			if err := fasthttp.ListenAndServeTLS(*addrTLS, *certFile, *keyFile, requestHandler); err != nil {
-				log.Fatalf("error in ListenAndServeTLS: %s", err)
+				log.Fatalf("error in ListenAndServeTLS: %v", err)
 			}
 		}()
 	}
