@@ -114,11 +114,13 @@ func (cc *LBClient) RemoveClients(rc func(BalancingClient) bool) int {
 	n := 0
 	for _, cs := range cc.cs {
 		if rc(cs.c) {
-			cs = nil
 			continue
 		}
 		cc.cs[n] = cs
 		n++
+	}
+	for i := n; i < len(cc.cs); i++ {
+		cc.cs[i] = nil
 	}
 	cc.cs = cc.cs[:n]
 
