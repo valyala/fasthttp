@@ -1994,41 +1994,42 @@ func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
 // ErrTLSHandshakeTimeout indicates there is a timeout from tls handshake.
 var ErrTLSHandshakeTimeout = errors.New("tls handshake timed out")
 
-var timeoutErrorChPool sync.Pool
-
-func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
-	tc := AcquireTimer(timeout)
-	defer ReleaseTimer(tc)
-
-	var ch chan error
-	chv := timeoutErrorChPool.Get()
-	if chv == nil {
-		chv = make(chan error)
-	}
-	ch = chv.(chan error)
-	defer timeoutErrorChPool.Put(chv)
-
+func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time) (net.Conn, error) {
 	conn := tls.Client(rawConn, tlsConfig)
-
-	go func() {
-		ch <- conn.Handshake()
-	}()
-
-	select {
-	case <-tc.C:
+	err := conn.SetReadDeadline(deadline)
+	if err != nil {
 		rawConn.Close()
-		<-ch
-		return nil, ErrTLSHandshakeTimeout
-	case err := <-ch:
-		if err != nil {
-			rawConn.Close()
-			return nil, err
-		}
-		return conn, nil
+		return nil, err
 	}
+	err = conn.SetWriteDeadline(deadline)
+	if err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	err = conn.Handshake()
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		rawConn.Close()
+		return nil, ErrTLSHandshakeTimeout
+	}
+	if err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	err = conn.SetReadDeadline(time.Time{})
+	if err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	err = conn.SetWriteDeadline(time.Time{})
+	if err != nil {
+		rawConn.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
+	deadline := time.Now().Add(timeout)
 	if dial == nil {
 		if dialDualStack {
 			dial = DialDualStack
@@ -2049,7 +2050,7 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 		if timeout == 0 {
 			return tls.Client(conn, tlsConfig), nil
 		}
-		return tlsClientHandshake(conn, tlsConfig, timeout)
+		return tlsClientHandshake(conn, tlsConfig, deadline)
 	}
 	return conn, nil
 }
