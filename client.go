@@ -2001,11 +2001,7 @@ func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.T
 		}
 	}()
 	conn := tls.Client(rawConn, tlsConfig)
-	err := conn.SetReadDeadline(deadline)
-	if err != nil {
-		return nil, err
-	}
-	err = conn.SetWriteDeadline(deadline)
+	err := conn.SetDeadline(deadline)
 	if err != nil {
 		return nil, err
 	}
@@ -2016,11 +2012,7 @@ func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.T
 	if err != nil {
 		return nil, err
 	}
-	err = conn.SetReadDeadline(time.Time{})
-	if err != nil {
-		return nil, err
-	}
-	err = conn.SetWriteDeadline(time.Time{})
+	err = conn.SetDeadline(time.Time{})
 	if err != nil {
 		return nil, err
 	}
