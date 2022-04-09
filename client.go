@@ -1994,35 +1994,35 @@ func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
 // ErrTLSHandshakeTimeout indicates there is a timeout from tls handshake.
 var ErrTLSHandshakeTimeout = errors.New("tls handshake timed out")
 
-func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time) (net.Conn, error) {
-	conn := tls.Client(rawConn, tlsConfig)
-	err := conn.SetReadDeadline(deadline)
+func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time) (conn net.Conn, err error) {
+	defer func() {
+		if err != nil {
+			rawConn.Close()
+			return nil, err
+		}
+	}()
+	conn = tls.Client(rawConn, tlsConfig)
+	err = conn.SetReadDeadline(deadline)
 	if err != nil {
-		rawConn.Close()
 		return nil, err
 	}
 	err = conn.SetWriteDeadline(deadline)
 	if err != nil {
-		rawConn.Close()
 		return nil, err
 	}
 	err = conn.Handshake()
 	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-		rawConn.Close()
 		return nil, ErrTLSHandshakeTimeout
 	}
 	if err != nil {
-		rawConn.Close()
 		return nil, err
 	}
 	err = conn.SetReadDeadline(time.Time{})
 	if err != nil {
-		rawConn.Close()
 		return nil, err
 	}
 	err = conn.SetWriteDeadline(time.Time{})
 	if err != nil {
-		rawConn.Close()
 		return nil, err
 	}
 	return conn, nil
