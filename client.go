@@ -1994,14 +1994,14 @@ func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
 // ErrTLSHandshakeTimeout indicates there is a timeout from tls handshake.
 var ErrTLSHandshakeTimeout = errors.New("tls handshake timed out")
 
-func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time) (_ net.Conn, err error) {
+func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time) (_ net.Conn, retErr error) {
 	defer func() {
-		if err != nil {
+		if retErr != nil {
 			rawConn.Close()
 		}
 	}()
-	conn = tls.Client(rawConn, tlsConfig)
-	err = conn.SetReadDeadline(deadline)
+	conn := tls.Client(rawConn, tlsConfig)
+	err := conn.SetReadDeadline(deadline)
 	if err != nil {
 		return nil, err
 	}
