@@ -1998,7 +1998,6 @@ func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.T
 	defer func() {
 		if err != nil {
 			rawConn.Close()
-			return nil, err
 		}
 	}()
 	conn = tls.Client(rawConn, tlsConfig)
