@@ -12,18 +12,18 @@ type serverDateUpdater struct {
 	date       atomic.Value
 	stopCh     chan struct{}
 
-	zeroLenBuffer   []byte
+	zeroLenBuffer []byte
 
 	slowPathBufferMtx sync.Mutex
-	slowPathBuffer   []byte
-	slowPathLastTime time.Time
+	slowPathBuffer    []byte
+	slowPathLastTime  time.Time
 }
 
 var (
 	serverDateUpdaterData = serverDateUpdater{
-		useCounter:        0,
+		useCounter: 0,
 
-		zeroLenBuffer:     make([]byte, 0),
+		zeroLenBuffer: make([]byte, 0),
 
 		slowPathBuffer:    make([]byte, 0),
 		slowPathBufferMtx: sync.Mutex{},
@@ -68,7 +68,6 @@ func updateServerDate() {
 		}
 	}()
 }
-
 
 func refreshServerDate() {
 	b := AppendHTTPDate(nil, time.Now())
