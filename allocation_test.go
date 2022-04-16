@@ -47,7 +47,9 @@ func TestAllocationClient(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 		},
 	}
-	go s.Serve(ln) //nolint:errcheck
+	go func() {
+		_ = s.Serve(ln) //nolint:errcheck
+	}()
 
 	c := &Client{}
 	url := "http://test:test@" + ln.Addr().String() + "/foo?bar=baz"

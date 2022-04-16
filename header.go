@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -1761,7 +1759,7 @@ func (h *ResponseHeader) Cookie(cookie *Cookie) bool {
 	if v == nil {
 		return false
 	}
-	cookie.ParseBytes(v) //nolint:errcheck
+	_ = cookie.ParseBytes(v) //nolint:errcheck
 	return true
 }
 
@@ -2043,26 +2041,6 @@ func isOnlyCRLF(b []byte) bool {
 	return true
 }
 
-func updateServerDate() {
-	refreshServerDate()
-	go func() {
-		for {
-			time.Sleep(time.Second)
-			refreshServerDate()
-		}
-	}()
-}
-
-var (
-	serverDate     atomic.Value
-	serverDateOnce sync.Once // serverDateOnce.Do(updateServerDate)
-)
-
-func refreshServerDate() {
-	b := AppendHTTPDate(nil, time.Now())
-	serverDate.Store(b)
-}
-
 // Write writes response header to w.
 func (h *ResponseHeader) Write(w *bufio.Writer) error {
 	_, err := w.Write(h.Header())
@@ -2138,8 +2116,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	}
 
 	if !h.noDefaultDate {
-		serverDateOnce.Do(updateServerDate)
-		dst = appendHeaderLine(dst, strDate, serverDate.Load().([]byte))
+		dst = appendHeaderLine(dst, strDate, getServerDate())
 	}
 
 	// Append Content-Type only for non-zero responses

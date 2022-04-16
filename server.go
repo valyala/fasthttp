@@ -519,9 +519,9 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
 		if ctx.Request.Header.HasAcceptEncodingBytes(strGzip) {
-			ctx.Response.gzipBody(level) //nolint:errcheck
+			_ = ctx.Response.gzipBody(level) //nolint:errcheck
 		} else if ctx.Request.Header.HasAcceptEncodingBytes(strDeflate) {
-			ctx.Response.deflateBody(level) //nolint:errcheck
+			_ = ctx.Response.deflateBody(level) //nolint:errcheck
 		}
 	}
 }
@@ -548,11 +548,11 @@ func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) R
 	return func(ctx *RequestCtx) {
 		h(ctx)
 		if ctx.Request.Header.HasAcceptEncodingBytes(strBr) {
-			ctx.Response.brotliBody(brotliLevel) //nolint:errcheck
+			_ = ctx.Response.brotliBody(brotliLevel) //nolint:errcheck
 		} else if ctx.Request.Header.HasAcceptEncodingBytes(strGzip) {
-			ctx.Response.gzipBody(otherLevel) //nolint:errcheck
+			_ = ctx.Response.gzipBody(otherLevel) //nolint:errcheck
 		} else if ctx.Request.Header.HasAcceptEncodingBytes(strDeflate) {
-			ctx.Response.deflateBody(otherLevel) //nolint:errcheck
+			_ = ctx.Response.deflateBody(otherLevel) //nolint:errcheck
 		}
 	}
 }
@@ -1570,12 +1570,12 @@ func (ln tcpKeepaliveListener) Accept() (net.Conn, error) {
 		return nil, err
 	}
 	if err := tc.SetKeepAlive(ln.keepalive); err != nil {
-		tc.Close() //nolint:errcheck
+		_ = tc.Close() //nolint:errcheck
 		return nil, err
 	}
 	if ln.keepalivePeriod > 0 {
 		if err := tc.SetKeepAlivePeriod(ln.keepalivePeriod); err != nil {
-			tc.Close() //nolint:errcheck
+			_ = tc.Close() //nolint:errcheck
 			return nil, err
 		}
 	}
@@ -1790,6 +1790,9 @@ func (s *Server) Serve(ln net.Listener) error {
 	var c net.Conn
 	var err error
 
+	startServerDateUpdater()
+	defer stopServerDateUpdater()
+
 	maxWorkersCount := s.getConcurrency()
 
 	s.mu.Lock()
@@ -1836,7 +1839,7 @@ func (s *Server) Serve(ln net.Listener) error {
 			atomic.AddInt32(&s.open, -1)
 			s.writeFastError(c, StatusServiceUnavailable,
 				"The connection cannot be served because Server.Concurrency limit exceeded")
-			c.Close()
+			_ = c.Close()
 			s.setState(c, StateClosed)
 			if time.Since(lastOverflowErrorTime) > time.Minute {
 				s.logger().Printf("The incoming connection cannot be served, because %d concurrent connections are served. "+
@@ -1954,7 +1957,7 @@ func wrapPerIPConn(s *Server, c net.Conn) net.Conn {
 	if n > s.MaxConnsPerIP {
 		s.perIPConnCounter.Unregister(ip)
 		s.writeFastError(c, StatusTooManyRequests, "The number of connections from your ip exceeds MaxConnsPerIP")
-		c.Close()
+		_ = c.Close()
 		return nil
 	}
 	return acquirePerIPConn(c, ip, &s.perIPConnCounter)
@@ -2001,7 +2004,7 @@ func (s *Server) ServeConn(c net.Conn) error {
 	if n > uint32(s.getConcurrency()) {
 		atomic.AddUint32(&s.concurrency, ^uint32(0))
 		s.writeFastError(c, StatusServiceUnavailable, "The connection cannot be served because Server.Concurrency limit exceeded")
-		c.Close()
+		_ = c.Close()
 		return ErrConcurrencyLimit
 	}
 
@@ -2129,7 +2132,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		connectionClose bool
 		isHTTP11        bool
 
-		continueReadingRequest bool = true
+		continueReadingRequest = true
 	)
 	for {
 		connRequestNum++
@@ -2481,7 +2484,7 @@ func hijackConnHandler(ctx *RequestCtx, r io.Reader, c net.Conn, s *Server, h Hi
 		releaseReader(s, br)
 	}
 	if !s.KeepHijackedConns {
-		c.Close()
+		_ = c.Close()
 		s.releaseHijackConn(hjc)
 	}
 	s.releaseCtx(ctx)
@@ -2748,11 +2751,11 @@ func (fa *fakeAddrer) LocalAddr() net.Addr {
 	return fa.laddr
 }
 
-func (fa *fakeAddrer) Read(p []byte) (int, error) {
+func (fa *fakeAddrer) Read(_ []byte) (int, error) {
 	panic("BUG: unexpected Read call")
 }
 
-func (fa *fakeAddrer) Write(p []byte) (int, error) {
+func (fa *fakeAddrer) Write(_ []byte) (int, error) {
 	panic("BUG: unexpected Write call")
 }
 
@@ -2785,7 +2788,7 @@ func (s *Server) getServerName() []byte {
 }
 
 func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
-	w.Write(formatStatusLine(nil, strHTTP11, statusCode, s2b(StatusMessage(statusCode)))) //nolint:errcheck
+	_, _ = w.Write(formatStatusLine(nil, strHTTP11, statusCode, s2b(StatusMessage(statusCode)))) //nolint:errcheck
 
 	server := ""
 	if !s.NoDefaultServerHeader {
@@ -2794,11 +2797,10 @@ func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 
 	date := ""
 	if !s.NoDefaultDate {
-		serverDateOnce.Do(updateServerDate)
-		date = fmt.Sprintf("Date: %s\r\n", serverDate.Load())
+		date = fmt.Sprintf("Date: %s\r\n", string(getServerDate()))
 	}
 
-	fmt.Fprintf(w, "Connection: close\r\n"+
+	_, _ = fmt.Fprintf(w, "Connection: close\r\n"+
 		server+
 		date+
 		"Content-Type: text/plain\r\n"+
@@ -2834,9 +2836,9 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 		bw = acquireWriter(ctx)
 	}
 
-	writeResponse(ctx, bw) //nolint:errcheck
+	_ = writeResponse(ctx, bw) //nolint:errcheck
 	ctx.Response.Reset()
-	bw.Flush()
+	_ = bw.Flush()
 
 	return bw
 }
