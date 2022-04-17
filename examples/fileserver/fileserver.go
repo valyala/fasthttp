@@ -81,8 +81,10 @@ func main() {
 	log.Printf("Serving files from directory %q", *dir)
 	log.Printf("See stats at http://%s/stats", *addr)
 
-	// Wait forever.
-	select {}
+	// Wait for interuption|kill.
+	sc := make(chan os.Signal)
+	signal.Notify(sc, os.Kill, os.Interrupt)
+	<-sc
 }
 
 func updateFSCounters(ctx *fasthttp.RequestCtx) {
