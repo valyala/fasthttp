@@ -579,13 +579,16 @@ func decodeArgAppend(dst, src []byte) []byte {
 // The function is copy-pasted from decodeArgAppend due to the performance
 // reasons only.
 func decodeArgAppendNoPlus(dst, src []byte) []byte {
-	if bytes.IndexByte(src, '%') < 0 {
+	idx := bytes.IndexByte(src, '%')
+	if idx < 0 {
 		// fast path: src doesn't contain encoded chars
 		return append(dst, src...)
+	} else {
+		dst = append(dst, src[:idx]...)
 	}
 
 	// slow path
-	for i := 0; i < len(src); i++ {
+	for i := idx; i < len(src); i++ {
 		c := src[i]
 		if c == '%' {
 			if i+2 >= len(src) {
