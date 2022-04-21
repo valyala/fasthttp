@@ -544,13 +544,22 @@ func (s *argsScanner) next(kv *argsKV) bool {
 }
 
 func decodeArgAppend(dst, src []byte) []byte {
-	if bytes.IndexByte(src, '%') < 0 && bytes.IndexByte(src, '+') < 0 {
+	idxPercent := bytes.IndexByte(src, '%')
+	idxPlus := bytes.IndexByte(src, '+')
+	if idxPercent < 0 && idxPlus < 0 {
 		// fast path: src doesn't contain encoded chars
 		return append(dst, src...)
 	}
 
+	idx := min(idxPercent, idxPlus)
+	if idx > 0 {
+		dst := append(dst, src[:idx]...)
+	} else {
+		idx = 0
+	}
+
 	// slow path
-	for i := 0; i < len(src); i++ {
+	for i := idx; i < len(src); i++ {
 		c := src[i]
 		if c == '%' {
 			if i+2 >= len(src) {
@@ -571,6 +580,13 @@ func decodeArgAppend(dst, src []byte) []byte {
 		}
 	}
 	return dst
+}
+
+func min(a, b int) int {
+	if a <= b {
+		return a
+	}
+	return b
 }
 
 // decodeArgAppendNoPlus is almost identical to decodeArgAppend, but it doesn't
