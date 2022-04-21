@@ -553,7 +553,7 @@ func decodeArgAppend(dst, src []byte) []byte {
 
 	idx := min(idxPercent, idxPlus)
 	if idx > 0 {
-		dst := append(dst, src[:idx]...)
+		dst = append(dst, src[:idx]...)
 	} else {
 		idx = 0
 	}
