@@ -544,13 +544,28 @@ func (s *argsScanner) next(kv *argsKV) bool {
 }
 
 func decodeArgAppend(dst, src []byte) []byte {
-	if bytes.IndexByte(src, '%') < 0 && bytes.IndexByte(src, '+') < 0 {
+	idxPercent := bytes.IndexByte(src, '%')
+	idxPlus := bytes.IndexByte(src, '+')
+	if idxPercent == -1 && idxPlus == -1 {
 		// fast path: src doesn't contain encoded chars
 		return append(dst, src...)
 	}
 
+	idx := 0
+	if idxPercent == -1 {
+		idx = idxPlus
+	} else if idxPlus == -1 {
+		idx = idxPercent
+	} else if idxPercent > idxPlus {
+		idx = idxPlus
+	} else {
+		idx = idxPercent
+	}
+
+	dst = append(dst, src[:idx]...)
+
 	// slow path
-	for i := 0; i < len(src); i++ {
+	for i := idx; i < len(src); i++ {
 		c := src[i]
 		if c == '%' {
 			if i+2 >= len(src) {
