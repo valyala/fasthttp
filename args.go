@@ -551,12 +551,21 @@ func decodeArgAppend(dst, src []byte) []byte {
 		return append(dst, src...)
 	}
 
-	idx := min(idxPercent, idxPlus)
-	if idx > 0 {
-		dst = append(dst, src[:idx]...)
-	} else {
-		idx = 0
+	idx := 0
+	if idxPercent < 0 {
+		idx = idxPlus
 	}
+	if idxPlus < 0 {
+		idx = idxPercent
+	}
+	if idxPercent > 0 && idxPlus > 0 {
+		if idxPercent > idxPlus {
+			idx = idxPlus
+		} else {
+			idx = idxPercent
+		}
+	}
+	dst = append(dst, src[:idx]...)
 
 	// slow path
 	for i := idx; i < len(src); i++ {
@@ -580,13 +589,6 @@ func decodeArgAppend(dst, src []byte) []byte {
 		}
 	}
 	return dst
-}
-
-func min(a, b int) int {
-	if a <= b {
-		return a
-	}
-	return b
 }
 
 // decodeArgAppendNoPlus is almost identical to decodeArgAppend, but it doesn't
