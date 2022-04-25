@@ -783,6 +783,14 @@ func swapRequestBody(a, b *Request) {
 	a.body, b.body = b.body, a.body
 	a.bodyRaw, b.bodyRaw = b.bodyRaw, a.bodyRaw
 	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
+
+	// This code assumes that if a requestStream was swapped the headers are also swapped or copied.
+	if rs, ok := a.bodyStream.(*requestStream); ok {
+		rs.header = &a.Header
+	}
+	if rs, ok := b.bodyStream.(*requestStream); ok {
+		rs.header = &b.Header
+	}
 }
 
 func swapResponseBody(a, b *Response) {
@@ -1880,6 +1888,9 @@ func (req *Request) closeBodyStream() error {
 	var err error
 	if bsc, ok := req.bodyStream.(io.Closer); ok {
 		err = bsc.Close()
+	}
+	if rs, ok := req.bodyStream.(*requestStream); ok {
+		releaseRequestStream(rs)
 	}
 	req.bodyStream = nil
 	return err

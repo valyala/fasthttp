@@ -2440,6 +2440,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			if rs, ok := ctx.Request.bodyStream.(*requestStream); ok {
 				releaseRequestStream(rs)
 			}
+			ctx.Request.bodyStream = nil
 		}
 
 		s.setState(c, StateIdle)
