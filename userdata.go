@@ -81,7 +81,7 @@ func (d *userData) Remove(key string) {
 		kv := &args[i]
 		if string(kv.key) == key {
 			n--
-			args[i] = args[n]
+			args[i], args[n] = args[n], args[i]
 			args[n].value = nil
 			args = args[:n]
 			*d = args
