@@ -128,6 +128,7 @@ var (
 	rootFSOnce sync.Once
 	rootFS     = &FS{
 		Root:               "",
+		AllowEmptyRoot:     true,
 		GenerateIndexPages: true,
 		Compress:           true,
 		CompressBrotli:     true,
@@ -228,6 +229,12 @@ type FS struct {
 
 	// Path to the root directory to serve files from.
 	Root string
+
+	// Empty root specifications are always filled with the absolute path which exists in the current execution location of the application
+	// with this setting you can prevent this, for example if you want to handle absolute and relative paths with the requestUri
+	//
+	// By default the setting is false
+	AllowEmptyRoot bool
 
 	// List of index file names to try opening during directory access.
 	//
@@ -384,16 +391,13 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 func (fs *FS) initRequestHandler() {
 	root := fs.Root
 
-	// rootFS' handleRequest will do special treatment of absolute and relative paths
-	if fs != rootFS {
-		// serve files from the current working directory if root is empty
-		if len(root) == 0 || !filepath.IsAbs(root) {
-			path, err := os.Getwd()
-			if err != nil {
-				path = "."
-			}
-			root = path + "/" + root
+	// serve files from the current working directory if root is empty
+	if (!fs.AllowEmptyRoot && len(root) == 0) || (len(root) > 0 && !filepath.IsAbs(root)) {
+		path, err := os.Getwd()
+		if err != nil {
+			path = "."
 		}
+		root = path + "/" + root
 		// convert the root directory slashes to the native format
 		root = filepath.FromSlash(root)
 	}
