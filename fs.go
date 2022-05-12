@@ -398,9 +398,9 @@ func (fs *FS) initRequestHandler() {
 			path = "."
 		}
 		root = path + "/" + root
-		// convert the root directory slashes to the native format
-		root = filepath.FromSlash(root)
 	}
+	// convert the root directory slashes to the native format
+	root = filepath.FromSlash(root)
 
 	// strip trailing slashes from the root path
 	for len(root) > 0 && root[len(root)-1] == os.PathSeparator {
