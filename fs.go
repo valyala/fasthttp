@@ -391,7 +391,7 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 func (fs *FS) initRequestHandler() {
 	root := fs.Root
 
-	// serve files from the current working directory if root is empty
+	// Serve files from the current working directory if Root is empty or if Root is a relative path.
 	if (!fs.AllowEmptyRoot && len(root) == 0) || (len(root) > 0 && !filepath.IsAbs(root)) {
 		path, err := os.Getwd()
 		if err != nil {
