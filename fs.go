@@ -128,6 +128,7 @@ var (
 	rootFSOnce sync.Once
 	rootFS     = &FS{
 		Root:               "",
+		AllowEmptyRoot:     true,
 		GenerateIndexPages: true,
 		Compress:           true,
 		CompressBrotli:     true,
@@ -228,6 +229,12 @@ type FS struct {
 
 	// Path to the root directory to serve files from.
 	Root string
+
+	// AllowEmptyRoot controls what happens when Root is empty. When false (default) it will default to the
+	// current working directory. An empty root is mostly useful when you want to use absolute paths
+	// on windows that are on different filesystems. On linux setting your Root to "/" already allows you to use
+	// absolute paths on any filesystem.
+	AllowEmptyRoot bool
 
 	// List of index file names to try opening during directory access.
 	//
@@ -384,19 +391,16 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 func (fs *FS) initRequestHandler() {
 	root := fs.Root
 
-	// rootFS' handleRequest will do special treatment of absolute and relative paths
-	if fs != rootFS {
-		// serve files from the current working directory if root is empty
-		if len(root) == 0 || !filepath.IsAbs(root) {
-			path, err := os.Getwd()
-			if err != nil {
-				path = "."
-			}
-			root = path + "/" + root
+	// Serve files from the current working directory if Root is empty or if Root is a relative path.
+	if (!fs.AllowEmptyRoot && len(root) == 0) || (len(root) > 0 && !filepath.IsAbs(root)) {
+		path, err := os.Getwd()
+		if err != nil {
+			path = "."
 		}
-		// convert the root directory slashes to the native format
-		root = filepath.FromSlash(root)
+		root = path + "/" + root
 	}
+	// convert the root directory slashes to the native format
+	root = filepath.FromSlash(root)
 
 	// strip trailing slashes from the root path
 	for len(root) > 0 && root[len(root)-1] == os.PathSeparator {
