@@ -230,10 +230,10 @@ type FS struct {
 	// Path to the root directory to serve files from.
 	Root string
 
-	// Empty root specifications are always filled with the absolute path which exists in the current execution location of the application
-	// with this setting you can prevent this, for example if you want to handle absolute and relative paths with the requestUri
-	//
-	// By default the setting is false
+	// AllowEmptyRoot controls what happens when Root is empty. When false (default) it will default to the
+	// current working directory. An empty root is mostly useful when you want to use absolute paths
+	// on windows that are on different filesystems. On linux setting your Root to "/" already allows you to use
+	// absolute paths on any filesystem.
 	AllowEmptyRoot bool
 
 	// List of index file names to try opening during directory access.
