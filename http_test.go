@@ -1383,7 +1383,7 @@ func testResponseDeflateExt(t *testing.T, r *Response, s string) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce := r1.Header.Peek(HeaderContentEncoding)
+	ce := r1.Header.ContentEncoding()
 	var body []byte
 	if isCompressible {
 		if string(ce) != "deflate" {
@@ -1436,7 +1436,7 @@ func testResponseGzipExt(t *testing.T, r *Response, s string) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce := r1.Header.Peek(HeaderContentEncoding)
+	ce := r1.Header.ContentEncoding()
 	var body []byte
 	if isCompressible {
 		if string(ce) != "gzip" {
@@ -1992,7 +1992,7 @@ func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBod
 	if len(resp.Body()) != 0 {
 		t.Fatalf("Unexpected response body %q. Expected %q. response=%q", resp.Body(), "", s)
 	}
-	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContentType)
+	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContentType, "")
 	verifyResponseTrailer(t, &resp.Header, expectedTrailer)
 
 	// verify that ordinal response is read after null-body response
@@ -2269,7 +2269,7 @@ func testResponseReadSuccess(t *testing.T, resp *Response, response string, expe
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContentType)
+	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContentType, "")
 	if !bytes.Equal(resp.Body(), []byte(expectedBody)) {
 		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), []byte(expectedBody))
 	}

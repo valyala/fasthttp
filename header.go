@@ -39,8 +39,9 @@ type ResponseHeader struct {
 	contentLengthBytes    []byte
 	secureErrorLogMessage bool
 
-	contentType []byte
-	server      []byte
+	contentType     []byte
+	contentEncoding []byte
+	server          []byte
 
 	h       []argsKV
 	trailer []argsKV
@@ -323,6 +324,21 @@ func (h *ResponseHeader) SetContentType(contentType string) {
 // SetContentTypeBytes sets Content-Type header value.
 func (h *ResponseHeader) SetContentTypeBytes(contentType []byte) {
 	h.contentType = append(h.contentType[:0], contentType...)
+}
+
+// ContentEncoding returns Content-Encoding header value.
+func (h *ResponseHeader) ContentEncoding() []byte {
+	return h.contentEncoding
+}
+
+// SetContentEncoding sets Content-Encoding header value.
+func (h *ResponseHeader) SetContentEncoding(contentEncoding string) {
+	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
+}
+
+// SetContentEncodingBytes sets Content-Encoding header value.
+func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
+	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
 }
 
 // Server returns Server header value.
@@ -937,6 +953,7 @@ func (h *ResponseHeader) resetSkipNormalize() {
 	h.contentLengthBytes = h.contentLengthBytes[:0]
 
 	h.contentType = h.contentType[:0]
+	h.contentEncoding = h.contentEncoding[:0]
 	h.server = h.server[:0]
 
 	h.h = h.h[:0]
@@ -994,6 +1011,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)
 	dst.contentType = append(dst.contentType, h.contentType...)
+	dst.contentEncoding = append(dst.contentEncoding, h.contentEncoding...)
 	dst.server = append(dst.server, h.server...)
 	dst.h = copyArgs(dst.h, h.h)
 	dst.cookies = copyArgs(dst.cookies, h.cookies)
@@ -1034,6 +1052,10 @@ func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
 	contentType := h.ContentType()
 	if len(contentType) > 0 {
 		f(strContentType, contentType)
+	}
+	contentEncoding := h.ContentEncoding()
+	if len(contentEncoding) > 0 {
+		f(strContentEncoding, contentEncoding)
 	}
 	server := h.Server()
 	if len(server) > 0 {
@@ -1158,6 +1180,8 @@ func (h *ResponseHeader) del(key []byte) {
 	switch string(key) {
 	case HeaderContentType:
 		h.contentType = h.contentType[:0]
+	case HeaderContentEncoding:
+		h.contentEncoding = h.contentEncoding[:0]
 	case HeaderServer:
 		h.server = h.server[:0]
 	case HeaderSetCookie:
@@ -1223,6 +1247,9 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 				h.contentLength = contentLength
 				h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
 			}
+			return true
+		} else if caseInsensitiveCompare(strContentEncoding, key) {
+			h.SetContentEncodingBytes(value)
 			return true
 		} else if caseInsensitiveCompare(strConnection, key) {
 			if bytes.Equal(strClose, value) {
@@ -1696,6 +1723,8 @@ func (h *ResponseHeader) peek(key []byte) []byte {
 	switch string(key) {
 	case HeaderContentType:
 		return h.ContentType()
+	case HeaderContentEncoding:
+		return h.ContentEncoding()
 	case HeaderServer:
 		return h.Server()
 	case HeaderConnection:
@@ -2150,6 +2179,10 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		if len(contentType) > 0 {
 			dst = appendHeaderLine(dst, strContentType, contentType)
 		}
+	}
+	contentEncoding := h.ContentEncoding()
+	if len(contentEncoding) > 0 {
+		dst = appendHeaderLine(dst, strContentEncoding, contentEncoding)
 	}
 
 	if len(h.contentLengthBytes) > 0 {
@@ -2614,6 +2647,10 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			case 'c':
 				if caseInsensitiveCompare(s.key, strContentType) {
 					h.contentType = append(h.contentType[:0], s.value...)
+					continue
+				}
+				if caseInsensitiveCompare(s.key, strContentEncoding) {
+					h.contentEncoding = append(h.contentEncoding[:0], s.value...)
 					continue
 				}
 				if caseInsensitiveCompare(s.key, strContentLength) {

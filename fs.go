@@ -898,9 +898,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	hdr := &ctx.Response.Header
 	if ff.compressed {
 		if fileEncoding == "br" {
-			hdr.SetCanonical(strContentEncoding, strBr)
+			hdr.SetContentEncodingBytes(strBr)
 		} else if fileEncoding == "gzip" {
-			hdr.SetCanonical(strContentEncoding, strGzip)
+			hdr.SetContentEncodingBytes(strGzip)
 		}
 	}
 
