@@ -2372,7 +2372,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		connectionClose = connectionClose || ctx.Response.Header.ConnectionClose() ||
 			(s.CloseOnShutdown && atomic.LoadInt32(&s.stop) == 1)
 		if connectionClose {
-			ctx.Response.Header.SetCanonical(strConnection, strClose)
+			ctx.Response.Header.SetConnectionClose()
 		} else if !ctx.Request.Header.IsHTTP11() {
 			// Set 'Connection: keep-alive' response header for non-HTTP/1.1 request.
 			// There is no need in setting this header for http/1.1, since in http/1.1
