@@ -2127,7 +2127,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		hijackNoResponse bool
 
 		connectionClose bool
-		isHTTP11        bool
 
 		continueReadingRequest bool = true
 	)
@@ -2324,7 +2323,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		}
 
 		connectionClose = s.DisableKeepalive || ctx.Request.Header.ConnectionClose()
-		isHTTP11 = ctx.Request.Header.IsHTTP11()
 
 		if serverName != nil {
 			ctx.Response.Header.SetServerBytes(serverName)
@@ -2355,7 +2353,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		ctx.hijackNoResponse = false
 
 		if s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn) {
-			ctx.SetConnectionClose()
+			ctx.Response.Header.SetConnectionClose()
 		}
 
 		if writeTimeout > 0 {
@@ -2371,10 +2369,11 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			previousWriteTimeout = 0
 		}
 
-		connectionClose = connectionClose || ctx.Response.ConnectionClose() || (s.CloseOnShutdown && atomic.LoadInt32(&s.stop) == 1)
+		connectionClose = connectionClose || ctx.Response.Header.ConnectionClose() ||
+			(s.CloseOnShutdown && atomic.LoadInt32(&s.stop) == 1)
 		if connectionClose {
 			ctx.Response.Header.SetCanonical(strConnection, strClose)
-		} else if !isHTTP11 {
+		} else if !ctx.Request.Header.IsHTTP11() {
 			// Set 'Connection: keep-alive' response header for non-HTTP/1.1 request.
 			// There is no need in setting this header for http/1.1, since in http/1.1
 			// connections are keep-alive by default.
