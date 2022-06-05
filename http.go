@@ -1568,7 +1568,7 @@ func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
 }
 
 func (resp *Response) brotliBody(level int) error {
-	if len(resp.Header.peek(strContentEncoding)) > 0 {
+	if len(resp.Header.ContentEncoding()) > 0 {
 		// It looks like the body is already compressed.
 		// Do not compress it again.
 		return nil
@@ -1618,12 +1618,12 @@ func (resp *Response) brotliBody(level int) error {
 		resp.body = w
 		resp.bodyRaw = nil
 	}
-	resp.Header.SetCanonical(strContentEncoding, strBr)
+	resp.Header.SetContentEncodingBytes(strBr)
 	return nil
 }
 
 func (resp *Response) gzipBody(level int) error {
-	if len(resp.Header.peek(strContentEncoding)) > 0 {
+	if len(resp.Header.ContentEncoding()) > 0 {
 		// It looks like the body is already compressed.
 		// Do not compress it again.
 		return nil
@@ -1673,12 +1673,12 @@ func (resp *Response) gzipBody(level int) error {
 		resp.body = w
 		resp.bodyRaw = nil
 	}
-	resp.Header.SetCanonical(strContentEncoding, strGzip)
+	resp.Header.SetContentEncodingBytes(strGzip)
 	return nil
 }
 
 func (resp *Response) deflateBody(level int) error {
-	if len(resp.Header.peek(strContentEncoding)) > 0 {
+	if len(resp.Header.ContentEncoding()) > 0 {
 		// It looks like the body is already compressed.
 		// Do not compress it again.
 		return nil
@@ -1728,7 +1728,7 @@ func (resp *Response) deflateBody(level int) error {
 		resp.body = w
 		resp.bodyRaw = nil
 	}
-	resp.Header.SetCanonical(strContentEncoding, strDeflate)
+	resp.Header.SetContentEncodingBytes(strDeflate)
 	return nil
 }
 

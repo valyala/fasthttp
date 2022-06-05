@@ -133,7 +133,7 @@ func TestServeFileHead(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce := resp.Header.Peek(HeaderContentEncoding)
+	ce := resp.Header.ContentEncoding()
 	if len(ce) > 0 {
 		t.Fatalf("Unexpected 'Content-Encoding' %q", ce)
 	}
@@ -225,7 +225,7 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce := resp.Header.Peek(HeaderContentEncoding)
+	ce := resp.Header.ContentEncoding()
 	if string(ce) != "gzip" {
 		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "gzip")
 	}
@@ -254,7 +254,7 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "br" {
 		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "br")
 	}
@@ -290,7 +290,7 @@ func TestServeFileUncompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce := resp.Header.Peek(HeaderContentEncoding)
+	ce := resp.Header.ContentEncoding()
 	if len(ce) > 0 {
 		t.Fatalf("Unexpected 'Content-Encoding' %q", ce)
 	}
@@ -567,7 +567,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	if resp.StatusCode() != StatusOK {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
-	ce := resp.Header.Peek(HeaderContentEncoding)
+	ce := resp.Header.ContentEncoding()
 	if string(ce) != "" {
 		t.Errorf("unexpected content-encoding %q. Expecting empty string. filePath=%q", ce, filePath)
 	}
@@ -586,7 +586,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	if resp.StatusCode() != StatusOK {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "gzip" {
 		t.Errorf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "gzip", filePath)
 	}
@@ -611,7 +611,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	if resp.StatusCode() != StatusOK {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "br" {
 		t.Errorf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "br", filePath)
 	}
