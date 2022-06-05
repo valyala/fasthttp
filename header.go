@@ -104,7 +104,7 @@ func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
 	b = AppendUint(b, contentLength)
 	h.bufKV.value = b
 
-	h.SetCanonical(strContentRange, h.bufKV.value)
+	h.setNonSpecial(strContentRange, h.bufKV.value)
 }
 
 // SetByteRange sets 'Range: bytes=startPos-endPos' header.
@@ -126,7 +126,7 @@ func (h *RequestHeader) SetByteRange(startPos, endPos int) {
 	}
 	h.bufKV.value = b
 
-	h.SetCanonical(strRange, h.bufKV.value)
+	h.setNonSpecial(strRange, h.bufKV.value)
 }
 
 // StatusCode returns response status code.
@@ -168,7 +168,7 @@ func (h *ResponseHeader) SetProtocol(protocol []byte) {
 // SetLastModified sets 'Last-Modified' header to the given value.
 func (h *ResponseHeader) SetLastModified(t time.Time) {
 	h.bufKV.value = AppendHTTPDate(h.bufKV.value[:0], t)
-	h.SetCanonical(strLastModified, h.bufKV.value)
+	h.setNonSpecial(strLastModified, h.bufKV.value)
 }
 
 // ConnectionClose returns true if 'Connection: close' header is set.
@@ -596,7 +596,7 @@ func (h *RequestHeader) SetReferer(referer string) {
 
 // SetRefererBytes sets Referer header value.
 func (h *RequestHeader) SetRefererBytes(referer []byte) {
-	h.SetCanonical(strReferer, referer)
+	h.setNonSpecial(strReferer, referer)
 }
 
 // Method returns HTTP request method.
@@ -1256,7 +1256,7 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 				h.SetConnectionClose()
 			} else {
 				h.ResetConnectionClose()
-				h.h = setArgBytes(h.h, key, value, argsHasValue)
+				h.setNonSpecial(key, value)
 			}
 			return true
 		}
@@ -1289,6 +1289,11 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 	return false
 }
 
+// setNonSpecial directly put into map i.e. not a basic header
+func (h *ResponseHeader) setNonSpecial(key []byte, value []byte) {
+	h.h = setArgBytes(h.h, key, value, argsHasValue)
+}
+
 // setSpecialHeader handles special headers and return true when a header is processed.
 func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 	if len(key) == 0 {
@@ -1311,7 +1316,7 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 				h.SetConnectionClose()
 			} else {
 				h.ResetConnectionClose()
-				h.h = setArgBytes(h.h, key, value, argsHasValue)
+				h.setNonSpecial(key, value)
 			}
 			return true
 		} else if caseInsensitiveCompare(strCookie, key) {
@@ -1340,6 +1345,11 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 	}
 
 	return false
+}
+
+// setNonSpecial directly put into map i.e. not a basic header
+func (h *RequestHeader) setNonSpecial(key []byte, value []byte) {
+	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
 
 // Add adds the given 'key: value' header.
@@ -1461,8 +1471,7 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	if h.setSpecialHeader(key, value) {
 		return
 	}
-
-	h.h = setArgBytes(h.h, key, value, argsHasValue)
+	h.setNonSpecial(key, value)
 }
 
 // SetCookie sets the given response cookie.
@@ -1673,8 +1682,7 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 	if h.setSpecialHeader(key, value) {
 		return
 	}
-
-	h.h = setArgBytes(h.h, key, value, argsHasValue)
+	h.setNonSpecial(key, value)
 }
 
 // Peek returns header value for the given key.
