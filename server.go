@@ -2127,7 +2127,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		hijackNoResponse bool
 
 		connectionClose bool
-		isHTTP11        bool
 
 		continueReadingRequest bool = true
 	)
@@ -2323,8 +2322,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			}
 		}
 
+		// store req.ConnectionClose so even if it was changed inside of handler
 		connectionClose = s.DisableKeepalive || ctx.Request.Header.ConnectionClose()
-		isHTTP11 = ctx.Request.Header.IsHTTP11()
 
 		if serverName != nil {
 			ctx.Response.Header.SetServerBytes(serverName)
@@ -2354,10 +2353,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		hijackNoResponse = ctx.hijackNoResponse && hijackHandler != nil
 		ctx.hijackNoResponse = false
 
-		if s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn) {
-			ctx.SetConnectionClose()
-		}
-
 		if writeTimeout > 0 {
 			if err := c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
 				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%v): %v", writeTimeout, err))
@@ -2371,11 +2366,14 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			previousWriteTimeout = 0
 		}
 
-		connectionClose = connectionClose || ctx.Response.ConnectionClose() || (s.CloseOnShutdown && atomic.LoadInt32(&s.stop) == 1)
+		connectionClose = connectionClose ||
+			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) ||
+			ctx.Response.Header.ConnectionClose() ||
+			(s.CloseOnShutdown && atomic.LoadInt32(&s.stop) == 1)
 		if connectionClose {
-			ctx.Response.Header.SetCanonical(strConnection, strClose)
-		} else if !isHTTP11 {
-			// Set 'Connection: keep-alive' response header for non-HTTP/1.1 request.
+			ctx.Response.Header.SetConnectionClose()
+		} else if !ctx.Request.Header.IsHTTP11() {
+			// Set 'Connection: keep-alive' response header for HTTP/1.0 request.
 			// There is no need in setting this header for http/1.1, since in http/1.1
 			// connections are keep-alive by default.
 			ctx.Response.Header.SetCanonical(strConnection, strKeepAlive)
