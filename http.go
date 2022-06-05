@@ -486,6 +486,48 @@ func inflateData(p []byte) ([]byte, error) {
 	return bb.B, nil
 }
 
+var ErrContentEncodingUnsupported = errors.New("unsupported Content-Encoding")
+
+// BodyUncompressed returns body data and if needed decompress it from gzip, deflate or Brotli.
+//
+// This method may be used if the response header contains
+// 'Content-Encoding' for reading uncompressed request body.
+// Use Body for reading the raw request body.
+func (req *Request) BodyUncompressed() ([]byte, error) {
+	switch string(req.Header.ContentEncoding()) {
+	case "":
+		return req.Body(), nil
+	case "deflate":
+		return req.BodyInflate()
+	case "gzip":
+		return req.BodyGunzip()
+	case "br":
+		return req.BodyUnbrotli()
+	default:
+		return nil, ErrContentEncodingUnsupported
+	}
+}
+
+// BodyUncompressed returns body data and if needed decompress it from gzip, deflate or Brotli.
+//
+// This method may be used if the response header contains
+// 'Content-Encoding' for reading uncompressed response body.
+// Use Body for reading the raw response body.
+func (resp *Response) BodyUncompressed() ([]byte, error) {
+	switch string(resp.Header.ContentEncoding()) {
+	case "":
+		return resp.Body(), nil
+	case "deflate":
+		return resp.BodyInflate()
+	case "gzip":
+		return resp.BodyGunzip()
+	case "br":
+		return resp.BodyUnbrotli()
+	default:
+		return nil, ErrContentEncodingUnsupported
+	}
+}
+
 // BodyWriteTo writes request body to w.
 func (req *Request) BodyWriteTo(w io.Writer) error {
 	if req.bodyStream != nil {
