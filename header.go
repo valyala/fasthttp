@@ -371,6 +371,21 @@ func (h *RequestHeader) SetContentTypeBytes(contentType []byte) {
 	h.contentType = append(h.contentType[:0], contentType...)
 }
 
+// ContentEncoding returns Content-Encoding header value.
+func (h *RequestHeader) ContentEncoding() []byte {
+	return peekArgBytes(h.h, strContentEncoding)
+}
+
+// SetContentEncoding sets Content-Encoding header value.
+func (h *RequestHeader) SetContentEncoding(contentEncoding string) {
+	h.SetBytesK(strContentEncoding, contentEncoding)
+}
+
+// SetContentEncodingBytes sets Content-Encoding header value.
+func (h *RequestHeader) SetContentEncodingBytes(contentEncoding []byte) {
+	h.setNonSpecial(strContentEncoding, contentEncoding)
+}
+
 // SetMultipartFormBoundary sets the following Content-Type:
 // 'multipart/form-data; boundary=...'
 // where ... is substituted by the given boundary.
