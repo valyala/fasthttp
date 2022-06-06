@@ -586,7 +586,7 @@ func (h *RequestHeader) SetUserAgentBytes(userAgent []byte) {
 
 // Referer returns Referer header value.
 func (h *RequestHeader) Referer() []byte {
-	return h.PeekBytes(strReferer)
+	return peekArgBytes(h.h, strReferer)
 }
 
 // SetReferer sets Referer header value.
