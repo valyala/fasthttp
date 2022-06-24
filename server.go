@@ -428,6 +428,8 @@ type Server struct {
 	open int32
 	stop int32
 	done chan struct{}
+
+	wp *workerPool
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -1756,7 +1758,7 @@ func (s *Server) Serve(ln net.Listener) error {
 	}
 	s.mu.Unlock()
 
-	wp := &workerPool{
+	s.wp = &workerPool{
 		WorkerFunc:            s.serveConn,
 		MaxWorkersCount:       maxWorkersCount,
 		LogAllErrors:          s.LogAllErrors,
@@ -1764,7 +1766,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		Logger:                s.logger(),
 		connState:             s.setState,
 	}
-	wp.Start()
+	s.wp.Start()
 
 	// Count our waiting to accept a connection as an open connection.
 	// This way we can't get into any weird state where just after accepting
@@ -1775,7 +1777,7 @@ func (s *Server) Serve(ln net.Listener) error {
 
 	for {
 		if c, err = acceptConn(s, ln, &lastPerIPErrorTime); err != nil {
-			wp.Stop()
+			s.wp.Stop()
 			if err == io.EOF {
 				return nil
 			}
@@ -1783,7 +1785,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		}
 		s.setState(c, StateNew)
 		atomic.AddInt32(&s.open, 1)
-		if !wp.Serve(c) {
+		if !s.wp.Serve(c) {
 			atomic.AddInt32(&s.open, -1)
 			s.writeFastError(c, StatusServiceUnavailable,
 				"The connection cannot be served because Server.Concurrency limit exceeded")
@@ -1840,19 +1842,7 @@ func (s *Server) Shutdown() error {
 	}
 
 	s.closeIdleConns()
-
-	// Closing the listener will make Serve() call Stop on the worker pool.
-	// Setting .stop to 1 will make serveConn() break out of its loop.
-	// Now we just have to wait until all workers are done.
-	for {
-		if open := atomic.LoadInt32(&s.open); open == 0 {
-			break
-		}
-		// This is not an optimal solution but using a sync.WaitGroup
-		// here causes data races as it's hard to prevent Add() to be called
-		// while Wait() is waiting.
-		time.Sleep(time.Millisecond * 100)
-	}
+	<-s.wp.stopCh
 
 	s.done = nil
 	s.ln = nil

@@ -75,7 +75,6 @@ func (wp *workerPool) Stop() {
 		panic("BUG: workerPool wasn't started")
 	}
 	close(wp.stopCh)
-	wp.stopCh = nil
 
 	// Stop all the workers waiting for incoming connections.
 	// Do not wait for busy workers - they will stop after
