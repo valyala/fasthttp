@@ -421,7 +421,7 @@ type Server struct {
 	// We need to know our listeners and idle connections so we can close them in Shutdown().
 	ln []net.Listener
 
-	idleConns   map[net.Conn]struct{}
+	idleConns   map[net.Conn]time.Time
 	idleConnsMu sync.Mutex
 
 	mu   sync.Mutex
@@ -1839,12 +1839,12 @@ func (s *Server) Shutdown() error {
 		close(s.done)
 	}
 
-	s.closeIdleConns()
-
 	// Closing the listener will make Serve() call Stop on the worker pool.
 	// Setting .stop to 1 will make serveConn() break out of its loop.
 	// Now we just have to wait until all workers are done.
 	for {
+		s.closeIdleConns()
+
 		if open := atomic.LoadInt32(&s.open); open == 0 {
 			break
 		}
@@ -2816,9 +2816,16 @@ func (s *Server) trackConn(c net.Conn, state ConnState) {
 	switch state {
 	case StateIdle:
 		if s.idleConns == nil {
-			s.idleConns = make(map[net.Conn]struct{})
+			s.idleConns = make(map[net.Conn]time.Time)
 		}
-		s.idleConns[c] = struct{}{}
+		s.idleConns[c] = time.Now()
+	case StateNew:
+		if s.idleConns == nil {
+			s.idleConns = make(map[net.Conn]time.Time)
+		}
+		// Count the connection as Idle after 5 seconds.
+		// Same as net/http.Server: https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
+		s.idleConns[c] = time.Now().Add(time.Second * 5)
 
 	default:
 		delete(s.idleConns, c)
@@ -2828,10 +2835,13 @@ func (s *Server) trackConn(c net.Conn, state ConnState) {
 
 func (s *Server) closeIdleConns() {
 	s.idleConnsMu.Lock()
-	for c := range s.idleConns {
-		_ = c.Close()
+	now := time.Now()
+	for c, t := range s.idleConns {
+		if now.Sub(t) >= 0 {
+			_ = c.Close()
+			delete(s.idleConns, c)
+		}
 	}
-	s.idleConns = nil
 	s.idleConnsMu.Unlock()
 }
 
