@@ -19,7 +19,7 @@ var listenConfig = net.ListenConfig{
 	},
 }
 
-// Listen returns TCP listener with SO_REUSEADDR and SO_REUSEPORT option set, so it uses
+// Listen returns a TCP listener with the SO_REUSEADDR and SO_REUSEPORT options set.
 func Listen(network, addr string) (net.Listener, error) {
 	return listenConfig.Listen(context.Background(), network, addr)
 }
