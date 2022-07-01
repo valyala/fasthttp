@@ -1432,7 +1432,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 
 	if c.WriteTimeout > 0 {
 		wdeadline := time.Now().Add(c.WriteTimeout)
-		if deadline <= 0 || wdeadline.Since(deadline) < 0 {
+		if deadline <= 0 || wdeadline.Sub(deadline) < 0 {
 			deadline = wdeadline
 		}
 	}
@@ -1471,7 +1471,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 
 	if c.ReadTimeout > 0 {
 		rdeadline := time.Now().Add(c.ReadTimeout)
-		if deadline <= 0 || rdeadline.Since(deadline) < 0 {
+		if deadline <= 0 || rdeadline.Sub(deadline) < 0 {
 			deadline = rdeadline
 		}
 	}
