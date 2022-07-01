@@ -1418,6 +1418,10 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		return err == nil, err
 	}
 
+	var deadline time.Time
+	if req.timeout > 0 {
+		deadline = time.Now().Add(req.timeout)
+	}
 	cc, err := c.acquireConn(req.timeout, req.ConnectionClose())
 	if err != nil {
 		return false, err
@@ -1427,10 +1431,16 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	resp.parseNetConn(conn)
 
 	if c.WriteTimeout > 0 {
+		wdeadline := time.Now().Add(c.WriteTimeout)
+		if deadline <= 0 || wdeadline.Sub(deadline) < 0 {
+			deadline = wdeadline
+		}
+	}
+	if deadline > 0 {
 		// Set Deadline every time, since golang has fixed the performance issue
 		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
 		currentTime := time.Now()
-		if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
+		if err = conn.SetWriteDeadline(deadline); err != nil {
 			c.closeConn(cc)
 			return true, err
 		}
@@ -1460,10 +1470,16 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	}
 
 	if c.ReadTimeout > 0 {
+		rdeadline := time.Now().Add(c.ReadTimeout)
+		if deadline <= 0 || rdeadline.Sub(deadline) < 0 {
+			deadline = rdeadline
+		}
+	}
+
+	if deadline > 0 {
 		// Set Deadline every time, since golang has fixed the performance issue
 		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
-		currentTime := time.Now()
-		if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
+		if err = conn.SetReadDeadline(deadline); err != nil {
 			c.closeConn(cc)
 			return true, err
 		}
