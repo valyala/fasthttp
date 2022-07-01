@@ -276,6 +276,10 @@ type FS struct {
 	// Brotli encoding is disabled by default.
 	CompressBrotli bool
 
+	// Path to the compressed root directory to serve files from. If this value
+	// is empty, Root is used.
+	CompressRoot string
+
 	// Enables byte range requests if set to true.
 	//
 	// Byte range requests are disabled by default.
@@ -388,9 +392,7 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 	return fs.h
 }
 
-func (fs *FS) initRequestHandler() {
-	root := fs.Root
-
+func (fs *FS) normalizeRoot(root string) string {
 	// Serve files from the current working directory if Root is empty or if Root is a relative path.
 	if (!fs.AllowEmptyRoot && len(root) == 0) || (len(root) > 0 && !filepath.IsAbs(root)) {
 		path, err := os.Getwd()
@@ -405,6 +407,18 @@ func (fs *FS) initRequestHandler() {
 	// strip trailing slashes from the root path
 	for len(root) > 0 && root[len(root)-1] == os.PathSeparator {
 		root = root[:len(root)-1]
+	}
+	return root
+}
+
+func (fs *FS) initRequestHandler() {
+	root := fs.normalizeRoot(fs.Root)
+
+	compressRoot := fs.CompressRoot
+	if len(compressRoot) == 0 {
+		compressRoot = root
+	} else {
+		compressRoot = fs.normalizeRoot(compressRoot)
 	}
 
 	cacheDuration := fs.CacheDuration
@@ -430,6 +444,7 @@ func (fs *FS) initRequestHandler() {
 		generateIndexPages:     fs.GenerateIndexPages,
 		compress:               fs.Compress,
 		compressBrotli:         fs.CompressBrotli,
+		compressRoot:           compressRoot,
 		pathNotFound:           fs.PathNotFound,
 		acceptByteRange:        fs.AcceptByteRange,
 		cacheDuration:          cacheDuration,
@@ -478,6 +493,7 @@ type fsHandler struct {
 	generateIndexPages     bool
 	compress               bool
 	compressBrotli         bool
+	compressRoot           string
 	acceptByteRange        bool
 	cacheDuration          time.Duration
 	compressedFileSuffixes map[string]string
@@ -834,19 +850,19 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		filePath := filepath.FromSlash(h.root + pathStr)
 
 		var err error
-		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+		ff, err = h.openFSFile(pathStr, filePath, mustCompress, fileEncoding)
 		if mustCompress && err == errNoCreatePermission {
 			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
 				"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
 			mustCompress = false
-			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+			ff, err = h.openFSFile(pathStr, filePath, mustCompress, fileEncoding)
 		}
 		if err == errDirIndexRequired {
 			if !hasTrailingSlash {
 				ctx.RedirectBytes(append(path, '/'), StatusFound)
 				return
 			}
-			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
+			ff, err = h.openIndexFile(ctx, pathStr, filePath, mustCompress, fileEncoding)
 			if err != nil {
 				ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
 				ctx.Error("Directory index is forbidden", StatusForbidden)
@@ -1012,10 +1028,11 @@ func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, 
 	return startPos, endPos, nil
 }
 
-func (h *fsHandler) openIndexFile(ctx *RequestCtx, dirPath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) openIndexFile(ctx *RequestCtx, path, dirPath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
 	for _, indexName := range h.indexNames {
-		indexFilePath := dirPath + "/" + indexName
-		ff, err := h.openFSFile(indexFilePath, mustCompress, fileEncoding)
+		indexPath := path + "/" + indexName
+		indexFilePath := filepath.Join(dirPath, indexName)
+		ff, err := h.openFSFile(indexPath, indexFilePath, mustCompress, fileEncoding)
 		if err == nil {
 			return ff, nil
 		}
@@ -1130,7 +1147,7 @@ const (
 	fsMaxCompressibleFileSize = 8 * 1024 * 1024
 )
 
-func (h *fsHandler) compressAndOpenFSFile(filePath string, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) compressAndOpenFSFile(path, filePath string, fileEncoding string) (*fsFile, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -1153,7 +1170,17 @@ func (h *fsHandler) compressAndOpenFSFile(filePath string, fileEncoding string) 
 		return h.newFSFile(f, fileInfo, false, "")
 	}
 
-	compressedFilePath := filePath + h.compressedFileSuffixes[fileEncoding]
+	var compressedFilePath string
+	if h.root == h.compressRoot {
+		compressedFilePath = filePath
+	} else {
+		compressedFilePath = filepath.FromSlash(h.compressRoot + path)
+		if err := os.MkdirAll(filepath.Dir(compressedFilePath), os.ModePerm); err != nil {
+			return nil, err
+		}
+	}
+	compressedFilePath += h.compressedFileSuffixes[fileEncoding]
+
 	absPath, err := filepath.Abs(compressedFilePath)
 	if err != nil {
 		_ = f.Close()
@@ -1232,7 +1259,7 @@ func (h *fsHandler) newCompressedFSFile(filePath string, fileEncoding string) (*
 	return h.newFSFile(f, fileInfo, true, fileEncoding)
 }
 
-func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) openFSFile(path string, filePath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
 	filePathOriginal := filePath
 	if mustCompress {
 		filePath += h.compressedFileSuffixes[fileEncoding]
@@ -1241,7 +1268,7 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 	f, err := os.Open(filePath)
 	if err != nil {
 		if mustCompress && os.IsNotExist(err) {
-			return h.compressAndOpenFSFile(filePathOriginal, fileEncoding)
+			return h.compressAndOpenFSFile(path, filePathOriginal, fileEncoding)
 		}
 		return nil, err
 	}
@@ -1275,7 +1302,7 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 			// The compressed file became stale. Re-create it.
 			_ = f.Close()
 			_ = os.Remove(filePath)
-			return h.compressAndOpenFSFile(filePathOriginal, fileEncoding)
+			return h.compressAndOpenFSFile(path, filePathOriginal, fileEncoding)
 		}
 	}
 
