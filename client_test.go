@@ -1635,9 +1635,13 @@ func TestClientDoTimeoutSuccessConcurrent(t *testing.T) {
 func TestClientGetTimeoutError(t *testing.T) {
 	t.Parallel()
 
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer s.Stop()
+
+	testConn, _ := net.Dial("tcp", s.ln.Addr().String())
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
-			return &readTimeoutConn{t: time.Second}, nil
+			return &readTimeoutConn{Conn: testConn, t: time.Second}, nil
 		},
 	}
 
@@ -1647,9 +1651,13 @@ func TestClientGetTimeoutError(t *testing.T) {
 func TestClientGetTimeoutErrorConcurrent(t *testing.T) {
 	t.Parallel()
 
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer s.Stop()
+
+	testConn, _ := net.Dial("tcp", s.ln.Addr().String())
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
-			return &readTimeoutConn{t: time.Second}, nil
+			return &readTimeoutConn{Conn: testConn, t: time.Second}, nil
 		},
 		MaxConnsPerHost: 1000,
 	}
@@ -1668,9 +1676,13 @@ func TestClientGetTimeoutErrorConcurrent(t *testing.T) {
 func TestClientDoTimeoutError(t *testing.T) {
 	t.Parallel()
 
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer s.Stop()
+
+	testConn, _ := net.Dial("tcp", s.ln.Addr().String())
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
-			return &readTimeoutConn{t: time.Second}, nil
+			return &readTimeoutConn{Conn: testConn, t: time.Second}, nil
 		},
 	}
 
@@ -1680,9 +1692,13 @@ func TestClientDoTimeoutError(t *testing.T) {
 func TestClientDoTimeoutErrorConcurrent(t *testing.T) {
 	t.Parallel()
 
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer s.Stop()
+
+	testConn, _ := net.Dial("tcp", s.ln.Addr().String())
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
-			return &readTimeoutConn{t: time.Second}, nil
+			return &readTimeoutConn{Conn: testConn, t: time.Second}, nil
 		},
 		MaxConnsPerHost: 1000,
 	}
