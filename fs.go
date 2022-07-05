@@ -1174,7 +1174,7 @@ func (h *fsHandler) compressAndOpenFSFile(path, filePath string, fileEncoding st
 	if h.root == h.compressRoot {
 		compressedFilePath = filePath
 	} else {
-		compressedFilePath = filepath.FromSlash(h.compressRoot + path)
+		compressedFilePath = h.compressRoot + path
 		if err := os.MkdirAll(filepath.Dir(compressedFilePath), os.ModePerm); err != nil {
 			return nil, err
 		}
