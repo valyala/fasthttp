@@ -1427,10 +1427,14 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	resp.parseNetConn(conn)
 
 	if c.WriteTimeout > 0 {
+		to := c.WriteTimeout
+		if req.timeout > 0 && req.timeout < c.WriteTimeout {
+			to = req.timeout
+		}
 		// Set Deadline every time, since golang has fixed the performance issue
 		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
 		currentTime := time.Now()
-		if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
+		if err = conn.SetWriteDeadline(currentTime.Add(to)); err != nil {
 			c.closeConn(cc)
 			return true, err
 		}
@@ -1460,10 +1464,14 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	}
 
 	if c.ReadTimeout > 0 {
+		to := c.ReadTimeout
+		if req.timeout > 0 && req.timeout < c.ReadTimeout {
+			to = req.timeout
+		}
 		// Set Deadline every time, since golang has fixed the performance issue
 		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
 		currentTime := time.Now()
-		if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
+		if err = conn.SetReadDeadline(currentTime.Add(to)); err != nil {
 			c.closeConn(cc)
 			return true, err
 		}
