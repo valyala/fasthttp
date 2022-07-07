@@ -796,6 +796,20 @@ func cleanCacheNolock(cache map[string]*fsFile, pendingFiles, filesToRelease []*
 	return pendingFiles, filesToRelease
 }
 
+func (h *fsHandler) pathToFilePath(path string) string {
+	return h.root + filepath.FromSlash(path)
+}
+
+func (h *fsHandler) filePathToCompressed(filePath string) string {
+	if h.root == h.compressRoot {
+		return filePath
+	}
+	if !strings.HasPrefix(filePath, h.root) {
+		return filePath
+	}
+	return h.compressRoot + filePath[len(h.root):]
+}
+
 func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	var path []byte
 	if h.pathRewrite != nil {
@@ -847,15 +861,15 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 
 	if !ok {
 		pathStr := string(path)
-		filePath := filepath.FromSlash(h.root + pathStr)
+		filePath := h.pathToFilePath(pathStr)
 
 		var err error
-		ff, err = h.openFSFile(pathStr, filePath, mustCompress, fileEncoding)
+		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
 		if mustCompress && err == errNoCreatePermission {
 			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
 				"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
 			mustCompress = false
-			ff, err = h.openFSFile(pathStr, filePath, mustCompress, fileEncoding)
+			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
 		}
 		if err == errDirIndexRequired {
 			if !hasTrailingSlash {
@@ -1030,9 +1044,8 @@ func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, 
 
 func (h *fsHandler) openIndexFile(ctx *RequestCtx, path, dirPath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
 	for _, indexName := range h.indexNames {
-		indexPath := path + "/" + indexName
 		indexFilePath := filepath.Join(dirPath, indexName)
-		ff, err := h.openFSFile(indexPath, indexFilePath, mustCompress, fileEncoding)
+		ff, err := h.openFSFile(indexFilePath, mustCompress, fileEncoding)
 		if err == nil {
 			return ff, nil
 		}
@@ -1147,7 +1160,7 @@ const (
 	fsMaxCompressibleFileSize = 8 * 1024 * 1024
 )
 
-func (h *fsHandler) compressAndOpenFSFile(path, filePath string, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) compressAndOpenFSFile(filePath string, fileEncoding string) (*fsFile, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -1170,11 +1183,8 @@ func (h *fsHandler) compressAndOpenFSFile(path, filePath string, fileEncoding st
 		return h.newFSFile(f, fileInfo, false, "")
 	}
 
-	var compressedFilePath string
-	if h.root == h.compressRoot {
-		compressedFilePath = filePath
-	} else {
-		compressedFilePath = h.compressRoot + path
+	compressedFilePath := h.filePathToCompressed(filePath)
+	if compressedFilePath != filePath {
 		if err := os.MkdirAll(filepath.Dir(compressedFilePath), os.ModePerm); err != nil {
 			return nil, err
 		}
@@ -1259,7 +1269,7 @@ func (h *fsHandler) newCompressedFSFile(filePath string, fileEncoding string) (*
 	return h.newFSFile(f, fileInfo, true, fileEncoding)
 }
 
-func (h *fsHandler) openFSFile(path string, filePath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
 	filePathOriginal := filePath
 	if mustCompress {
 		filePath += h.compressedFileSuffixes[fileEncoding]
@@ -1268,7 +1278,7 @@ func (h *fsHandler) openFSFile(path string, filePath string, mustCompress bool, 
 	f, err := os.Open(filePath)
 	if err != nil {
 		if mustCompress && os.IsNotExist(err) {
-			return h.compressAndOpenFSFile(path, filePathOriginal, fileEncoding)
+			return h.compressAndOpenFSFile(filePathOriginal, fileEncoding)
 		}
 		return nil, err
 	}
@@ -1302,7 +1312,7 @@ func (h *fsHandler) openFSFile(path string, filePath string, mustCompress bool, 
 			// The compressed file became stale. Re-create it.
 			_ = f.Close()
 			_ = os.Remove(filePath)
-			return h.compressAndOpenFSFile(path, filePathOriginal, fileEncoding)
+			return h.compressAndOpenFSFile(filePathOriginal, fileEncoding)
 		}
 	}
 
