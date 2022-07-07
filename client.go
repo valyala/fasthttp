@@ -930,6 +930,7 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 
 	go func() {
 		req := AcquireRequest()
+		req.Timeout = timeout
 
 		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirectsBuffer(req, dst, url, c)
 		mu.Lock()
@@ -1241,7 +1242,7 @@ func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c client
 	var timedout, responded bool
 
 	go func() {
-		reqCopy.timeout = timeout
+		reqCopy.Timeout = timeout
 		errDo := c.Do(reqCopy, respCopy)
 		mu.Lock()
 		{
@@ -1419,11 +1420,11 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	}
 
 	var deadline time.Time
-	if req.timeout > 0 {
-		deadline = time.Now().Add(req.timeout)
+	if req.Timeout > 0 {
+		deadline = time.Now().Add(req.Timeout)
 	}
 
-	cc, err := c.acquireConn(req.timeout, req.ConnectionClose())
+	cc, err := c.acquireConn(req.Timeout, req.ConnectionClose())
 	if err != nil {
 		return false, err
 	}

@@ -67,7 +67,7 @@ type Request struct {
 
 	// Request timeout. Usually set by DoDeadline or DoTimeout
 	// if <= 0, means not set
-	timeout time.Duration
+	Timeout time.Duration
 
 	// Use Host header (request.Header.SetHost) instead of the host from SetRequestURI, SetHost, or URI().SetHost
 	UseHostHeader bool
@@ -1030,7 +1030,7 @@ func (req *Request) Reset() {
 	}
 	req.Header.Reset()
 	req.resetSkipHeader()
-	req.timeout = 0
+	req.Timeout = 0
 	req.UseHostHeader = false
 }
 
