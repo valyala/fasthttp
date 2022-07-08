@@ -876,7 +876,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 				ctx.RedirectBytes(append(path, '/'), StatusFound)
 				return
 			}
-			ff, err = h.openIndexFile(ctx, pathStr, filePath, mustCompress, fileEncoding)
+			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
 			if err != nil {
 				ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
 				ctx.Error("Directory index is forbidden", StatusForbidden)
@@ -1042,9 +1042,9 @@ func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, 
 	return startPos, endPos, nil
 }
 
-func (h *fsHandler) openIndexFile(ctx *RequestCtx, path, dirPath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) openIndexFile(ctx *RequestCtx, dirPath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
 	for _, indexName := range h.indexNames {
-		indexFilePath := filepath.Join(dirPath, indexName)
+		indexFilePath := dirPath + "/" + indexName
 		ff, err := h.openFSFile(indexFilePath, mustCompress, fileEncoding)
 		if err == nil {
 			return ff, nil
