@@ -353,6 +353,9 @@ func (resp *Response) Body() []byte {
 
 // BodyStream returns the response body as a stream.
 func (resp *Response) BodyStream() io.Reader {
+	if resp.bodyStream == nil {
+		return bytes.NewReader(resp.bodyBytes())
+	}
 	return resp.bodyStream
 }
 
@@ -479,6 +482,9 @@ func (resp *Response) BodyInflate() ([]byte, error) {
 }
 
 func (ctx *RequestCtx) RequestBodyStream() io.Reader {
+	if ctx.Request.bodyStream == nil {
+		return bytes.NewReader(ctx.Request.Body())
+	}
 	return ctx.Request.bodyStream
 }
 
