@@ -240,6 +240,80 @@ func TestClientGetWithBody(t *testing.T) {
 	}
 }
 
+func TestClientGetWithBodyStream(t *testing.T) {
+	t.Parallel()
+	t.Run("body set as string", func(t *testing.T) {
+		t.Parallel()
+		testClientGetWithBodyStream(t, "test", func(req *Request) {
+			req.SetBodyString("test")
+		})
+	})
+	t.Run("body set as stream", func(t *testing.T) {
+		t.Parallel()
+		testClientGetWithBodyStream(t, "test", func(req *Request) {
+			req.SetBodyStream(strings.NewReader("test"), -1)
+		})
+	})
+	t.Run("body set as stream with length", func(t *testing.T) {
+		t.Parallel()
+		testClientGetWithBodyStream(t, "test", func(req *Request) {
+			req.SetBodyStream(strings.NewReader("test"), 4)
+		})
+	})
+	t.Run("large body set as string", func(t *testing.T) {
+		t.Parallel()
+		expect := string(createFixedBody(10000))
+		testClientGetWithBodyStream(t, expect, func(req *Request) {
+			req.SetBodyString(expect)
+		})
+	})
+	t.Run("large body set as stream", func(t *testing.T) {
+		t.Parallel()
+		expect := string(createFixedBody(10000))
+		testClientGetWithBodyStream(t, expect, func(req *Request) {
+			req.SetBodyStream(strings.NewReader(expect), -1)
+		})
+	})
+}
+
+func testClientGetWithBodyStream(t *testing.T, expect string, setBody func(req *Request)) {
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Response.SetBodyStream(ctx.RequestBodyStream(), -1)
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req, res := AcquireRequest(), AcquireResponse()
+	defer func() {
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+	}()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	setBody(req)
+	err := c.Do(req, res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.BodyStream()
+	if r == nil {
+		t.Fatal("response BodyStream returned nil")
+	}
+	body, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal("unexpected error", err)
+	}
+	if string(body) != expect {
+		t.Fatalf("response body '%s' is not the expected '%s'", string(body), expect)
+	}
+}
+
 func TestClientURLAuth(t *testing.T) {
 	t.Parallel()
 

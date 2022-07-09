@@ -305,6 +305,43 @@ func TestServeFileUncompressed(t *testing.T) {
 	}
 }
 
+func TestServeFileUncompressedAsStream(t *testing.T) {
+	// This test can't run parallel as files in / might by changed by other tests.
+
+	var ctx RequestCtx
+	var req Request
+	req.SetRequestURI("http://foobar.com/baz")
+	req.Header.Set(HeaderAcceptEncoding, "gzip")
+	ctx.Init(&req, nil, nil)
+
+	ServeFileUncompressed(&ctx, "fs.go")
+
+	var resp Response
+	s := ctx.Response.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ce := resp.Header.ContentEncoding()
+	if len(ce) > 0 {
+		t.Fatalf("Unexpected 'Content-Encoding' %q", ce)
+	}
+
+	r := resp.BodyStream()
+	body, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectedBody, err := getFileContents("/fs.go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.Equal(body, expectedBody) {
+		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
+	}
+}
+
 func TestFSByteRangeConcurrent(t *testing.T) {
 	// This test can't run parallel as files in / might by changed by other tests.
 
