@@ -351,6 +351,11 @@ func (resp *Response) Body() []byte {
 	return resp.bodyBytes()
 }
 
+// BodyStream returns the response body as a stream.
+func (resp *Response) BodyStream() io.Reader {
+	return resp.bodyStream
+}
+
 func (resp *Response) bodyBytes() []byte {
 	if resp.bodyRaw != nil {
 		return resp.bodyRaw

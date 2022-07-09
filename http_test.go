@@ -1772,6 +1772,14 @@ func TestSetResponseBodyStreamFixedSize(t *testing.T) {
 	testSetResponseBodyStream(t, string(createFixedBody(100500)))
 }
 
+func TestReadResponseBodyStream(t *testing.T) {
+	t.Parallel()
+
+	testReadResponseBodyStream(t, "a")
+	testReadResponseBodyStream(t, string(createFixedBody(4097)))
+	testReadResponseBodyStream(t, string(createFixedBody(100500)))
+}
+
 func TestSetRequestBodyStreamChunked(t *testing.T) {
 	t.Parallel()
 
@@ -1903,6 +1911,31 @@ func testSetResponseBodyStream(t *testing.T, body string) {
 	}
 	if string(resp1.Body()) != body {
 		t.Fatalf("unexpected body %q. Expecting %q", resp1.Body(), body)
+	}
+}
+
+func testReadResponseBodyStream(t *testing.T, body string) {
+	var resp Response
+	bodySize := len(body)
+	if resp.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return false")
+	}
+	resp.SetBodyStream(bytes.NewBufferString(body), bodySize)
+	if !resp.IsBodyStream() {
+		t.Fatalf("IsBodyStream must return true")
+	}
+
+	r := resp.BodyStream()
+	if r == nil {
+		t.Fatalf("response BodyStream must not be nil")
+	}
+
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("unexpected error when reading response body stream: %v", err)
+	}
+	if string(b) != body {
+		t.Fatalf("unexpected body %q. Expecting %q", string(b), body)
 	}
 }
 
