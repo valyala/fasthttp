@@ -797,7 +797,7 @@ func cleanCacheNolock(cache map[string]*fsFile, pendingFiles, filesToRelease []*
 }
 
 func (h *fsHandler) pathToFilePath(path string) string {
-	return h.root + filepath.FromSlash(path)
+	return filepath.FromSlash(h.root + path)
 }
 
 func (h *fsHandler) filePathToCompressed(filePath string) string {
@@ -807,7 +807,7 @@ func (h *fsHandler) filePathToCompressed(filePath string) string {
 	if !strings.HasPrefix(filePath, h.root) {
 		return filePath
 	}
-	return h.compressRoot + filePath[len(h.root):]
+	return filepath.FromSlash(h.compressRoot + filePath[len(h.root):])
 }
 
 func (h *fsHandler) handleRequest(ctx *RequestCtx) {
