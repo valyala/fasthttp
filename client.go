@@ -2456,6 +2456,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	w := acquirePipelineWork(&c.workPool, timeout)
 	w.respCopy.Header.disableNormalizing = c.DisableHeaderNamesNormalizing
 	w.req = &w.reqCopy
+	w.req.Timeout = timeout
 	w.resp = &w.respCopy
 
 	// Make a copy of the request in order to avoid data races on timeouts
@@ -2734,7 +2735,6 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}) error
 	defer bw.Flush()
 	chR := c.chR
 	chW := c.chW
-	writeTimeout := c.WriteTimeout
 
 	maxIdleConnDuration := c.MaxIdleConnDuration
 	if maxIdleConnDuration <= 0 {
@@ -2783,11 +2783,17 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}) error
 
 		w.resp.parseNetConn(conn)
 
-		if writeTimeout > 0 {
+		writeDeadline := w.deadline
+		if c.WriteTimeout > 0 {
+			tmpWriteDeadline := time.Now().Add(c.WriteTimeout)
+			if writeDeadline.IsZero() || tmpWriteDeadline.Before(writeDeadline) {
+				writeDeadline = tmpWriteDeadline
+			}
+		}
+		if !writeDeadline.IsZero() {
 			// Set Deadline every time, since golang has fixed the performance issue
 			// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
-			currentTime := time.Now()
-			if err = conn.SetWriteDeadline(currentTime.Add(writeTimeout)); err != nil {
+			if err = conn.SetWriteDeadline(writeDeadline); err != nil {
 				w.err = err
 				w.done <- struct{}{}
 				return err
@@ -2839,7 +2845,6 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}) error
 	}
 	br := bufio.NewReaderSize(conn, readBufferSize)
 	chR := c.chR
-	readTimeout := c.ReadTimeout
 
 	var (
 		w   *pipelineWork
@@ -2858,11 +2863,17 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}) error
 			}
 		}
 
-		if readTimeout > 0 {
+		readDeadline := w.deadline
+		if c.ReadTimeout > 0 {
+			tmpReadDeadline := time.Now().Add(c.ReadTimeout)
+			if readDeadline.IsZero() || tmpReadDeadline.Before(readDeadline) {
+				readDeadline = tmpReadDeadline
+			}
+		}
+		if !readDeadline.IsZero() {
 			// Set Deadline every time, since golang has fixed the performance issue
 			// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
-			currentTime := time.Now()
-			if err = conn.SetReadDeadline(currentTime.Add(readTimeout)); err != nil {
+			if err = conn.SetReadDeadline(readDeadline); err != nil {
 				w.err = err
 				w.done <- struct{}{}
 				return err
