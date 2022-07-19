@@ -515,7 +515,7 @@ func BenchmarkNetHTTPClientEndToEndBigResponse10Inmemory(b *testing.B) {
 
 func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
 	bigResponse := createFixedBody(1024 * 1024)
-	h := func(w http.ResponseWriter, r *http.Request) {
+	h := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(HeaderContentType, "text/plain")
 		w.Write(bigResponse) //nolint:errcheck
 	}

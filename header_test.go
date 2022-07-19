@@ -1942,7 +1942,7 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek(HeaderSetCookie), "foo=bar")
 	}
 	cookieSeen := false
-	h.VisitAll(func(key, value []byte) {
+	h.VisitAll(func(key, _ []byte) {
 		switch string(key) {
 		case HeaderSetCookie:
 			cookieSeen = true
@@ -1963,7 +1963,7 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek(HeaderSetCookie), "foo=bar")
 	}
 	cookieSeen = false
-	h.VisitAll(func(key, value []byte) {
+	h.VisitAll(func(key, _ []byte) {
 		switch string(key) {
 		case HeaderSetCookie:
 			cookieSeen = true
@@ -1987,7 +1987,7 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek(HeaderCookie), "foo=bar")
 	}
 	cookieSeen := false
-	h.VisitAll(func(key, value []byte) {
+	h.VisitAll(func(key, _ []byte) {
 		switch string(key) {
 		case HeaderCookie:
 			cookieSeen = true
@@ -2005,7 +2005,7 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek(HeaderCookie), "foo=bar")
 	}
 	cookieSeen = false
-	h.VisitAll(func(key, value []byte) {
+	h.VisitAll(func(key, _ []byte) {
 		switch string(key) {
 		case HeaderCookie:
 			cookieSeen = true

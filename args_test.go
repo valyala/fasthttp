@@ -329,7 +329,7 @@ func TestArgsCopyTo(t *testing.T) {
 
 func testCopyTo(t *testing.T, a *Args) {
 	keys := make(map[string]struct{})
-	a.VisitAll(func(k, v []byte) {
+	a.VisitAll(func(k, _ []byte) {
 		keys[string(k)] = struct{}{}
 	})
 
@@ -340,7 +340,7 @@ func testCopyTo(t *testing.T, a *Args) {
 		t.Fatalf("ArgsCopyTo fail, a: \n%+v\nb: \n%+v\n", *a, b) //nolint
 	}
 
-	b.VisitAll(func(k, v []byte) {
+	b.VisitAll(func(k, _ []byte) {
 		if _, ok := keys[string(k)]; !ok {
 			t.Fatalf("unexpected key %q after copying from %q", k, a.String())
 		}
