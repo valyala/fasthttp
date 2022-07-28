@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -1963,6 +1964,7 @@ func TestRound2(t *testing.T) {
 	testRound2(t, 8, 8)
 	testRound2(t, 9, 16)
 	testRound2(t, 0x10001, 0x20000)
+	testRound2(t, math.MaxInt32-1, math.MaxInt32)
 }
 
 func testRound2(t *testing.T, n, expectedRound2 int) {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net"
 	"os"
@@ -2277,6 +2278,11 @@ func round2(n int) int {
 	x |= x >> 4
 	x |= x >> 8
 	x |= x >> 16
+
+	// Make sure we don't return 0 due to overflow, even on 32 bit systems
+	if x >= uint32(math.MaxInt32) {
+		return math.MaxInt32
+	}
 
 	return int(x + 1)
 }
