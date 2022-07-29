@@ -868,7 +868,7 @@ func (h *RequestHeader) HasAcceptEncodingBytes(acceptEncoding []byte) bool {
 // i.e. the number of times f is called in VisitAll.
 func (h *ResponseHeader) Len() int {
 	n := 0
-	h.VisitAll(func(k, v []byte) { n++ })
+	h.VisitAll(func(_, _ []byte) { n++ })
 	return n
 }
 
@@ -876,7 +876,7 @@ func (h *ResponseHeader) Len() int {
 // i.e. the number of times f is called in VisitAll.
 func (h *RequestHeader) Len() int {
 	n := 0
-	h.VisitAll(func(k, v []byte) { n++ })
+	h.VisitAll(func(_, _ []byte) { n++ })
 	return n
 }
 
@@ -1077,7 +1077,7 @@ func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
 		f(strServer, server)
 	}
 	if len(h.cookies) > 0 {
-		visitArgs(h.cookies, func(k, v []byte) {
+		visitArgs(h.cookies, func(_, v []byte) {
 			f(strSetCookie, v)
 		})
 	}
