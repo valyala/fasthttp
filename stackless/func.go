@@ -12,9 +12,9 @@ import (
 // The wrapper may save a lot of stack space if the following conditions
 // are met:
 //
-//     - f doesn't contain blocking calls on network, I/O or channels;
-//     - f uses a lot of stack space;
-//     - the wrapper is called from high number of concurrent goroutines.
+//   - f doesn't contain blocking calls on network, I/O or channels;
+//   - f uses a lot of stack space;
+//   - the wrapper is called from high number of concurrent goroutines.
 //
 // The stackless wrapper returns false if the call cannot be processed
 // at the moment due to high load.

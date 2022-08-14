@@ -1467,7 +1467,7 @@ func (e *timeoutError) Error() string {
 // Only implement the Timeout() function of the net.Error interface.
 // This allows for checks like:
 //
-//   if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
+//	if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
 func (e *timeoutError) Timeout() bool {
 	return true
 }

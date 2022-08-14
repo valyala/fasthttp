@@ -24,6 +24,7 @@ const (
 // the the env(HTTP_PROXY, HTTPS_PROXY and NO_PROXY) configured HTTP proxy.
 //
 // Example usage:
+//
 //	c := &fasthttp.Client{
 //		Dial: FasthttpProxyHTTPDialer(),
 //	}
@@ -35,6 +36,7 @@ func FasthttpProxyHTTPDialer() fasthttp.DialFunc {
 // the env(HTTP_PROXY, HTTPS_PROXY and NO_PROXY) configured HTTP proxy using the given timeout.
 //
 // Example usage:
+//
 //	c := &fasthttp.Client{
 //		Dial: FasthttpProxyHTTPDialerTimeout(time.Second * 2),
 //	}
