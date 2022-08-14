@@ -15,11 +15,11 @@ import (
 // it has the following drawbacks comparing to using manually written fasthttp
 // request handler:
 //
-//     * A lot of useful functionality provided by fasthttp is missing
-//       from net/http handler.
-//     * net/http -> fasthttp handler conversion has some overhead,
-//       so the returned handler will be always slower than manually written
-//       fasthttp handler.
+//   - A lot of useful functionality provided by fasthttp is missing
+//     from net/http handler.
+//   - net/http -> fasthttp handler conversion has some overhead,
+//     so the returned handler will be always slower than manually written
+//     fasthttp handler.
 //
 // So it is advisable using this function only for quick net/http -> fasthttp
 // switching. Then manually convert net/http handlers to fasthttp handlers
@@ -35,11 +35,11 @@ func NewFastHTTPHandlerFunc(h http.HandlerFunc) fasthttp.RequestHandler {
 // it has the following drawbacks comparing to using manually written fasthttp
 // request handler:
 //
-//     * A lot of useful functionality provided by fasthttp is missing
-//       from net/http handler.
-//     * net/http -> fasthttp handler conversion has some overhead,
-//       so the returned handler will be always slower than manually written
-//       fasthttp handler.
+//   - A lot of useful functionality provided by fasthttp is missing
+//     from net/http handler.
+//   - net/http -> fasthttp handler conversion has some overhead,
+//     so the returned handler will be always slower than manually written
+//     fasthttp handler.
 //
 // So it is advisable using this function only for quick net/http -> fasthttp
 // switching. Then manually convert net/http handlers to fasthttp handlers

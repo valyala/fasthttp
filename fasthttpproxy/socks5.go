@@ -12,6 +12,7 @@ import (
 // the provided SOCKS5 proxy.
 //
 // Example usage:
+//
 //	c := &fasthttp.Client{
 //		Dial: fasthttpproxy.FasthttpSocksDialer("socks5://localhost:9050"),
 //	}

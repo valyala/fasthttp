@@ -61,8 +61,8 @@ func ServeFileUncompressed(ctx *RequestCtx, path string) {
 //
 // HTTP response may contain uncompressed file contents in the following cases:
 //
-//   * Missing 'Accept-Encoding: gzip' request header.
-//   * No write access to directory containing the file.
+//   - Missing 'Accept-Encoding: gzip' request header.
+//   - No write access to directory containing the file.
 //
 // Directory contents is returned if path points to directory.
 //
@@ -83,8 +83,8 @@ func ServeFileBytes(ctx *RequestCtx, path []byte) {
 //
 // HTTP response may contain uncompressed file contents in the following cases:
 //
-//   * Missing 'Accept-Encoding: gzip' request header.
-//   * No write access to directory containing the file.
+//   - Missing 'Accept-Encoding: gzip' request header.
+//   - No write access to directory containing the file.
 //
 // Directory contents is returned if path points to directory.
 //
@@ -155,12 +155,11 @@ type PathRewriteFunc func(ctx *RequestCtx) []byte
 //
 // Examples:
 //
-//   * host=foobar.com, slashesCount=0, original path="/foo/bar".
+//   - host=foobar.com, slashesCount=0, original path="/foo/bar".
 //     Resulting path: "/foobar.com/foo/bar"
 //
-//   * host=img.aaa.com, slashesCount=1, original path="/images/123/456.jpg"
+//   - host=img.aaa.com, slashesCount=1, original path="/images/123/456.jpg"
 //     Resulting path: "/img.aaa.com/123/456.jpg"
-//
 func NewVHostPathRewriter(slashesCount int) PathRewriteFunc {
 	return func(ctx *RequestCtx) []byte {
 		path := stripLeadingSlashes(ctx.Path(), slashesCount)
@@ -189,9 +188,9 @@ var strInvalidHost = []byte("invalid-host")
 //
 // Examples:
 //
-//   * slashesCount = 0, original path: "/foo/bar", result: "/foo/bar"
-//   * slashesCount = 1, original path: "/foo/bar", result: "/bar"
-//   * slashesCount = 2, original path: "/foo/bar", result: ""
+//   - slashesCount = 0, original path: "/foo/bar", result: "/foo/bar"
+//   - slashesCount = 1, original path: "/foo/bar", result: "/bar"
+//   - slashesCount = 2, original path: "/foo/bar", result: ""
 //
 // The returned path rewriter may be used as FS.PathRewrite .
 func NewPathSlashesStripper(slashesCount int) PathRewriteFunc {
@@ -205,9 +204,9 @@ func NewPathSlashesStripper(slashesCount int) PathRewriteFunc {
 //
 // Examples:
 //
-//   * prefixSize = 0, original path: "/foo/bar", result: "/foo/bar"
-//   * prefixSize = 3, original path: "/foo/bar", result: "o/bar"
-//   * prefixSize = 7, original path: "/foo/bar", result: "r"
+//   - prefixSize = 0, original path: "/foo/bar", result: "/foo/bar"
+//   - prefixSize = 3, original path: "/foo/bar", result: "o/bar"
+//   - prefixSize = 7, original path: "/foo/bar", result: "r"
 //
 // The returned path rewriter may be used as FS.PathRewrite .
 func NewPathPrefixStripper(prefixSize int) PathRewriteFunc {
@@ -350,9 +349,9 @@ const FSHandlerCacheDuration = 10 * time.Second
 // from requested path before searching requested file in the root folder.
 // Examples:
 //
-//   * stripSlashes = 0, original path: "/foo/bar", result: "/foo/bar"
-//   * stripSlashes = 1, original path: "/foo/bar", result: "/bar"
-//   * stripSlashes = 2, original path: "/foo/bar", result: ""
+//   - stripSlashes = 0, original path: "/foo/bar", result: "/foo/bar"
+//   - stripSlashes = 1, original path: "/foo/bar", result: "/bar"
+//   - stripSlashes = 2, original path: "/foo/bar", result: ""
 //
 // The returned request handler automatically generates index pages
 // for directories without index.html.

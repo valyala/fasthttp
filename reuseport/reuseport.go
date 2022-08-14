@@ -21,8 +21,8 @@ import (
 // The returned listener tries enabling the following TCP options, which usually
 // have positive impact on performance:
 //
-// - TCP_DEFER_ACCEPT. This option expects that the server reads from accepted
-//   connections before writing to them.
+//   - TCP_DEFER_ACCEPT. This option expects that the server reads from accepted
+//     connections before writing to them.
 //
 // - TCP_FASTOPEN. See https://lwn.net/Articles/508865/ for details.
 //
