@@ -2201,6 +2201,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					}
 					if reqConf.WriteTimeout > 0 {
 						writeTimeout = reqConf.WriteTimeout
+					} else {
+						writeTimeout = s.WriteTimeout
 					}
 				}
 				// read body
