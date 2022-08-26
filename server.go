@@ -1861,21 +1861,21 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 		var c net.Conn
 		var err error
 		if tl, ok := ln.(*net.TCPListener); ok && s.TCPKeepalive {
-			tc, err := tl.AcceptTCP()
-			if err != nil {
-				return nil, err
-			}
-			if err := tc.SetKeepAlive(s.TCPKeepalive); err != nil {
-				tc.Close() //nolint:errcheck
-				return nil, err
-			}
-			if s.TCPKeepalivePeriod > 0 {
-				if err := tc.SetKeepAlivePeriod(s.TCPKeepalivePeriod); err != nil {
+			var tc *net.TCPConn
+			tc, err = tl.AcceptTCP()
+			if err == nil {
+				if err := tc.SetKeepAlive(s.TCPKeepalive); err != nil {
 					tc.Close() //nolint:errcheck
 					return nil, err
 				}
+				if s.TCPKeepalivePeriod > 0 {
+					if err := tc.SetKeepAlivePeriod(s.TCPKeepalivePeriod); err != nil {
+						tc.Close() //nolint:errcheck
+						return nil, err
+					}
+				}
+				c = tc
 			}
-			c = tc
 		} else {
 			c, err = ln.Accept()
 		}
