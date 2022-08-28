@@ -1844,10 +1844,6 @@ func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 		c = c.Clone()
 	}
 
-	if c.ClientSessionCache == nil {
-		c.ClientSessionCache = tls.NewLRUClientSessionCache(0)
-	}
-
 	if len(c.ServerName) == 0 {
 		serverName := tlsServerName(addr)
 		if serverName == "*" {
