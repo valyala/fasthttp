@@ -48,8 +48,10 @@ type perIPConn struct {
 func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) *perIPConn {
 	v := counter.pool.Get()
 	if v == nil {
-		v = &perIPConn{
+		return &perIPConn{
 			perIPConnCounter: counter,
+			Conn:             conn,
+			ip:               ip,
 		}
 	}
 	c := v.(*perIPConn)

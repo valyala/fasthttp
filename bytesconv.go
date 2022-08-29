@@ -252,9 +252,7 @@ var (
 )
 
 func readHexInt(r *bufio.Reader) (int, error) {
-	n := 0
-	i := 0
-	var k int
+	var k, i, n int
 	for {
 		c, err := r.ReadByte()
 		if err != nil {
