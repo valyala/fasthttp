@@ -1976,7 +1976,11 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 	if conn == nil {
 		panic("BUG: DialFunc returned (nil, nil)")
 	}
-	_, isTLSAlready := conn.(*tls.Conn)
+
+	// We assume that any conn that has the Handshake() method is a TLS conn already.
+	// This doesn't cover just tls.Conn but also other TLS implementations.
+	_, isTLSAlready := conn.(interface{ Handshake() error })
+
 	if isTLS && !isTLSAlready {
 		if timeout == 0 {
 			return tls.Client(conn, tlsConfig), nil
