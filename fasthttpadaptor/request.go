@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"unsafe"
 
 	"github.com/valyala/fasthttp"
 )
@@ -13,20 +14,20 @@ import (
 // forServer should be set to true when the http.Request is going to passed to a http.Handler.
 func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) error {
 	body := ctx.PostBody()
-	strRequestURI := string(ctx.RequestURI())
+	strRequestURI := b2s(ctx.RequestURI())
 
 	rURL, err := url.ParseRequestURI(strRequestURI)
 	if err != nil {
 		return err
 	}
 
-	r.Method = string(ctx.Method())
+	r.Method = b2s(ctx.Method())
 	r.Proto = "HTTP/1.1"
 	r.ProtoMajor = 1
 	r.ProtoMinor = 1
 	r.ContentLength = int64(len(body))
 	r.RemoteAddr = ctx.RemoteAddr().String()
-	r.Host = string(ctx.Host())
+	r.Host = b2s(ctx.Host())
 	r.TLS = ctx.TLSConnectionState()
 	r.Body = ioutil.NopCloser(bytes.NewReader(body))
 	r.URL = rURL
@@ -44,8 +45,8 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	}
 
 	ctx.Request.Header.VisitAll(func(k, v []byte) {
-		sk := string(k)
-		sv := string(v)
+		sk := b2s(k)
+		sv := b2s(v)
 
 		switch sk {
 		case "Transfer-Encoding":
@@ -56,4 +57,8 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	})
 
 	return nil
+}
+
+func b2s(b []byte) string {
+	return *(*string)(unsafe.Pointer(&b))
 }
