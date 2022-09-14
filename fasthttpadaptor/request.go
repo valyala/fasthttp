@@ -2,11 +2,12 @@ package fasthttpadaptor
 
 import (
 	"bytes"
-	"github.com/valyala/fasthttp"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"unsafe"
+
+	"github.com/valyala/fasthttp"
 )
 
 // ConvertRequest convert a fasthttp.Request to an http.Request
