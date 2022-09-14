@@ -2,12 +2,11 @@ package fasthttpadaptor
 
 import (
 	"bytes"
+	"github.com/valyala/fasthttp"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"unsafe"
-
-	"github.com/valyala/fasthttp"
 )
 
 // ConvertRequest convert a fasthttp.Request to an http.Request
@@ -60,5 +59,6 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 }
 
 func b2s(b []byte) string {
+	/* #nosec G103 */
 	return *(*string)(unsafe.Pointer(&b))
 }
