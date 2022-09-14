@@ -338,6 +338,11 @@ func (a *Args) GetUfloatOrZero(key string) float64 {
 	return f
 }
 
+// GetString returns string value for the given key.
+func (a *Args) GetString(key string) string {
+	return string(a.Peek(key))
+}
+
 // GetBool returns boolean value for the given key.
 //
 // true is returned for "1", "t", "T", "true", "TRUE", "True", "y", "yes", "Y", "YES", "Yes",
