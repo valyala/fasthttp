@@ -17,10 +17,12 @@ func BenchmarkConvertRequest(b *testing.B) {
 	}
 	ctx.Request.Header.SetMethod("GET")
 	ctx.Request.Header.Set("x", "test")
+	ctx.Request.Header.Set("y", "test")
 	ctx.Request.SetRequestURI("/test")
 	ctx.Request.SetHost("test")
+	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		ConvertRequest(ctx, &httpReq, true)
+		_ = ConvertRequest(ctx, &httpReq, true)
 	}
 }
