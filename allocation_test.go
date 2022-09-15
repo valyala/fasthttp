@@ -5,7 +5,6 @@ package fasthttp
 
 import (
 	"net"
-
 	"testing"
 )
 

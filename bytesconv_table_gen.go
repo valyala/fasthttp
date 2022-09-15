@@ -6,7 +6,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"log"
 )
 
@@ -107,7 +106,7 @@ func main() {
 	fmt.Fprintf(w, "const quotedArgShouldEscapeTable = %q\n", quotedArgShouldEscapeTable)
 	fmt.Fprintf(w, "const quotedPathShouldEscapeTable = %q\n", quotedPathShouldEscapeTable)
 
-	if err := ioutil.WriteFile("bytesconv_table.go", w.Bytes(), 0660); err != nil {
+	if err := os.WriteFile("bytesconv_table.go", w.Bytes(), 0660); err != nil {
 		log.Fatal(err)
 	}
 }

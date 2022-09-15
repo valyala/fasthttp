@@ -4,7 +4,7 @@
 package fasthttp
 
 import (
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -146,7 +146,7 @@ func benchmarkNetHTTPClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism
 				if resp.StatusCode != http.StatusOK {
 					b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
 				}
-				body, err := ioutil.ReadAll(resp.Body)
+				body, err := io.ReadAll(resp.Body)
 				resp.Body.Close()
 				if err != nil {
 					b.Fatalf("unexpected error when reading response body: %v", err)

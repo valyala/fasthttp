@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"mime/multipart"
 	"net/http"
@@ -655,7 +654,7 @@ tailfoobar`
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	tail, err := ioutil.ReadAll(br)
+	tail, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1241,7 +1240,7 @@ func TestRequestReadPostNoBody(t *testing.T) {
 		t.Fatalf("unexpected content-length: %d. Expecting 0", r.Header.ContentLength())
 	}
 
-	tail, err := ioutil.ReadAll(br)
+	tail, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1272,7 +1271,7 @@ func TestRequestContinueReadBody(t *testing.T) {
 		t.Fatalf("unexpected body %q. Expecting %q", body, "abcde")
 	}
 
-	tail, err := ioutil.ReadAll(br)
+	tail, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

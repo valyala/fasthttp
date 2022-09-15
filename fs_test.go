@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"path"
@@ -158,13 +157,13 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 
 	teststr := "hello, world!"
 
-	tempdir, err := ioutil.TempDir("", "httpexpect")
+	tempdir, err := os.MkdirTemp("", "httpexpect")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tempdir)
 
-	if err := ioutil.WriteFile(
+	if err := os.WriteFile(
 		path.Join(tempdir, "hello"), []byte(teststr), 0666); err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +411,7 @@ func getFileContents(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	return ioutil.ReadAll(f)
+	return io.ReadAll(f)
 }
 
 func TestParseByteRangeSuccess(t *testing.T) {
@@ -703,7 +702,7 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 			f.Close()
 			continue
 		}
-		data, err := ioutil.ReadAll(f)
+		data, err := io.ReadAll(f)
 		f.Close()
 		if err != nil {
 			t.Fatalf("cannot read file contents %q: %v", name, err)
@@ -714,7 +713,7 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 		if ctx.Response.bodyStream == nil {
 			t.Fatalf("response body stream must be non-empty")
 		}
-		body, err := ioutil.ReadAll(ctx.Response.bodyStream)
+		body, err := io.ReadAll(ctx.Response.bodyStream)
 		if err != nil {
 			t.Fatalf("error when reading response body stream: %v", err)
 		}
@@ -733,7 +732,7 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 	if ctx.Response.bodyStream == nil {
 		t.Fatalf("response body stream must be non-empty")
 	}
-	body, err := ioutil.ReadAll(ctx.Response.bodyStream)
+	body, err := io.ReadAll(ctx.Response.bodyStream)
 	if err != nil {
 		t.Fatalf("error when reading response body stream: %v", err)
 	}
