@@ -1,5 +1,3 @@
-// go:build !windows || !race
-
 package fasthttp
 
 import (
