@@ -5,7 +5,6 @@ package fasthttp
 
 import (
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"strings"
@@ -32,7 +31,7 @@ func TestRstConnResponseWhileSending(t *testing.T) {
 
 			// Read at least one byte of the header
 			// Otherwise we would have an unsolicited response
-			_, err = ioutil.ReadAll(io.LimitReader(conn, 1))
+			_, err = io.ReadAll(io.LimitReader(conn, 1))
 			if err != nil {
 				t.Error(err)
 			}
@@ -94,7 +93,7 @@ func TestRstConnClosedWithoutResponse(t *testing.T) {
 
 			// Read at least one byte of the header
 			// Otherwise we would have an unsolicited response
-			_, err = ioutil.ReadAll(io.LimitReader(conn, 1))
+			_, err = io.ReadAll(io.LimitReader(conn, 1))
 			if err != nil {
 				t.Error(err)
 			}

@@ -9,9 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/net/http/httpproxy"
-
 	"github.com/valyala/fasthttp"
+	"golang.org/x/net/http/httpproxy"
 )
 
 const (
@@ -32,7 +31,7 @@ func FasthttpProxyHTTPDialer() fasthttp.DialFunc {
 	return FasthttpProxyHTTPDialerTimeout(0)
 }
 
-// FasthttpProxyHTTPDialer returns a fasthttp.DialFunc that dials using
+// FasthttpProxyHTTPDialerTimeout returns a fasthttp.DialFunc that dials using
 // the env(HTTP_PROXY, HTTPS_PROXY and NO_PROXY) configured HTTP proxy using the given timeout.
 //
 // Example usage:

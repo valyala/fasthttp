@@ -2,7 +2,7 @@ package fasthttpadaptor
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -28,7 +28,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	r.RemoteAddr = ctx.RemoteAddr().String()
 	r.Host = string(ctx.Host())
 	r.TLS = ctx.TLSConnectionState()
-	r.Body = ioutil.NopCloser(bytes.NewReader(body))
+	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.URL = rURL
 
 	if forServer {

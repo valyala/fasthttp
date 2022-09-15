@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"io/ioutil"
 	"mime"
 	"net/http"
 	"os"
@@ -1377,7 +1376,7 @@ func readFileHeader(f *os.File, compressed bool, fileEncoding string) ([]byte, e
 		R: r,
 		N: 512,
 	}
-	data, err := ioutil.ReadAll(lr)
+	data, err := io.ReadAll(lr)
 	if _, err := f.Seek(0, 0); err != nil {
 		return nil, err
 	}

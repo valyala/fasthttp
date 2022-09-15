@@ -2,7 +2,7 @@ package fasthttpadaptor
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -66,7 +66,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		if r.RemoteAddr != expectedRemoteAddr {
 			t.Fatalf("unexpected remoteAddr %q. Expecting %q", r.RemoteAddr, expectedRemoteAddr)
 		}
-		body, err := ioutil.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
 		r.Body.Close()
 		if err != nil {
 			t.Fatalf("unexpected error when reading request body: %v", err)

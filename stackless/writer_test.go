@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"testing"
 	"time"
 )
@@ -96,7 +95,7 @@ func testWriterReuse(w Writer, r io.Reader, newReader func(io.Reader) io.Reader)
 	w.Close()
 
 	zr := newReader(r)
-	data, err := ioutil.ReadAll(zr)
+	data, err := io.ReadAll(zr)
 	if err != nil {
 		return fmt.Errorf("unexpected error: %w, data=%q", err, data)
 	}
