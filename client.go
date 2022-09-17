@@ -297,6 +297,9 @@ type Client struct {
 	// By default will use isIdempotent function
 	RetryIf RetryIfFunc
 
+	// Connection pool strategy. Can be either LIFO or FIFO (default).
+	ConnPoolStrategy ConnPoolStrategyType
+
 	// ConfigureClient configures the fasthttp.HostClient.
 	ConfigureClient func(hc *HostClient) error
 
@@ -384,7 +387,8 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 // If requests take too long and the connection pool gets filled up please
 // try setting a ReadTimeout.
 func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
-	return clientDoTimeout(req, resp, timeout, c)
+	req.timeout = timeout
+	return c.Do(req, resp)
 }
 
 // DoDeadline performs the given request and waits for response until
@@ -411,7 +415,8 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
-	return clientDoDeadline(req, resp, deadline, c)
+	req.timeout = time.Until(deadline)
+	return c.Do(req, resp)
 }
 
 // DoRedirects performs the given http request and fills the given http response,
@@ -510,6 +515,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			DisablePathNormalizing:        c.DisablePathNormalizing,
 			MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
 			RetryIf:                       c.RetryIf,
+			ConnPoolStrategy:              c.ConnPoolStrategy,
 			clientReaderPool:              &c.readerPool,
 			clientWriterPool:              &c.writerPool,
 		}
@@ -1146,7 +1152,8 @@ func ReleaseResponse(resp *Response) {
 // If requests take too long and the connection pool gets filled up please
 // try setting a ReadTimeout.
 func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
-	return clientDoTimeout(req, resp, timeout, c)
+	req.timeout = timeout
+	return c.Do(req, resp)
 }
 
 // DoDeadline performs the given request and waits for response until
@@ -1168,7 +1175,8 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
-	return clientDoDeadline(req, resp, deadline, c)
+	req.timeout = time.Until(deadline)
+	return c.Do(req, resp)
 }
 
 // DoRedirects performs the given http request and fills the given http response,
@@ -1194,93 +1202,6 @@ func (c *HostClient) DoRedirects(req *Request, resp *Response, maxRedirectsCount
 	_, _, err := doRequestFollowRedirects(req, resp, req.URI().String(), maxRedirectsCount, c)
 	return err
 }
-
-func clientDoTimeout(req *Request, resp *Response, timeout time.Duration, c clientDoer) error {
-	deadline := time.Now().Add(timeout)
-	return clientDoDeadline(req, resp, deadline, c)
-}
-
-func clientDoDeadline(req *Request, resp *Response, deadline time.Time, c clientDoer) error {
-	timeout := -time.Since(deadline)
-	if timeout <= 0 {
-		return ErrTimeout
-	}
-
-	var ch chan error
-	chv := errorChPool.Get()
-	if chv == nil {
-		chv = make(chan error, 1)
-	}
-	ch = chv.(chan error)
-
-	// Make req and resp copies, since on timeout they no longer
-	// may be accessed.
-	reqCopy := AcquireRequest()
-	req.copyToSkipBody(reqCopy)
-	swapRequestBody(req, reqCopy)
-	respCopy := AcquireResponse()
-	if resp != nil {
-		// Not calling resp.copyToSkipBody(respCopy) here to avoid
-		// unexpected messing with headers
-		respCopy.SkipBody = resp.SkipBody
-	}
-
-	// Note that the request continues execution on ErrTimeout until
-	// client-specific ReadTimeout exceeds. This helps limiting load
-	// on slow hosts by MaxConns* concurrent requests.
-	//
-	// Without this 'hack' the load on slow host could exceed MaxConns*
-	// concurrent requests, since timed out requests on client side
-	// usually continue execution on the host.
-
-	var mu sync.Mutex
-	var timedout, responded bool
-
-	go func() {
-		reqCopy.timeout = timeout
-		errDo := c.Do(reqCopy, respCopy)
-		mu.Lock()
-		{
-			if !timedout {
-				if resp != nil {
-					respCopy.copyToSkipBody(resp)
-					swapResponseBody(resp, respCopy)
-				}
-				swapRequestBody(reqCopy, req)
-				ch <- errDo
-				responded = true
-			}
-		}
-		mu.Unlock()
-
-		ReleaseResponse(respCopy)
-		ReleaseRequest(reqCopy)
-	}()
-
-	tc := AcquireTimer(timeout)
-	var err error
-	select {
-	case err = <-ch:
-	case <-tc.C:
-		mu.Lock()
-		{
-			if responded {
-				err = <-ch
-			} else {
-				timedout = true
-				err = ErrTimeout
-			}
-		}
-		mu.Unlock()
-	}
-	ReleaseTimer(tc)
-
-	errorChPool.Put(chv)
-
-	return err
-}
-
-var errorChPool sync.Pool
 
 // Do performs the given http request and sets the corresponding response.
 //
@@ -1414,6 +1335,11 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		return err == nil, err
 	}
 
+	var deadline time.Time
+	if req.timeout > 0 {
+		deadline = time.Now().Add(req.timeout)
+	}
+
 	cc, err := c.acquireConn(req.timeout, req.ConnectionClose())
 	if err != nil {
 		return false, err
@@ -1422,11 +1348,17 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 
 	resp.parseNetConn(conn)
 
+	writeDeadline := deadline
 	if c.WriteTimeout > 0 {
+		tmpWriteDeadline := time.Now().Add(c.WriteTimeout)
+		if writeDeadline.IsZero() || tmpWriteDeadline.Before(writeDeadline) {
+			writeDeadline = tmpWriteDeadline
+		}
+	}
+	if !writeDeadline.IsZero() {
 		// Set Deadline every time, since golang has fixed the performance issue
 		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
-		currentTime := time.Now()
-		if err = conn.SetWriteDeadline(currentTime.Add(c.WriteTimeout)); err != nil {
+		if err = conn.SetWriteDeadline(writeDeadline); err != nil {
 			c.closeConn(cc)
 			return true, err
 		}
@@ -1449,17 +1381,29 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		err = bw.Flush()
 	}
 	c.releaseWriter(bw)
+
+	// Return ErrTimeout on any timeout.
+	if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
+		err = ErrTimeout
+	}
+
 	isConnRST := isConnectionReset(err)
 	if err != nil && !isConnRST {
 		c.closeConn(cc)
 		return true, err
 	}
 
+	readDeadline := deadline
 	if c.ReadTimeout > 0 {
+		tmpReadDeadline := time.Now().Add(c.ReadTimeout)
+		if readDeadline.IsZero() || tmpReadDeadline.Before(readDeadline) {
+			readDeadline = tmpReadDeadline
+		}
+	}
+	if !readDeadline.IsZero() {
 		// Set Deadline every time, since golang has fixed the performance issue
 		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
-		currentTime := time.Now()
-		if err = conn.SetReadDeadline(currentTime.Add(c.ReadTimeout)); err != nil {
+		if err = conn.SetReadDeadline(readDeadline); err != nil {
 			c.closeConn(cc)
 			return true, err
 		}
@@ -1523,7 +1467,7 @@ func (e *timeoutError) Error() string {
 // Only implement the Timeout() function of the net.Error interface.
 // This allows for checks like:
 //
-//   if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
+//	if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
 func (e *timeoutError) Timeout() bool {
 	return true
 }
@@ -1900,10 +1844,6 @@ func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 		c = c.Clone()
 	}
 
-	if c.ClientSessionCache == nil {
-		c.ClientSessionCache = tls.NewLRUClientSessionCache(0)
-	}
-
 	if len(c.ServerName) == 0 {
 		serverName := tlsServerName(addr)
 		if serverName == "*" {
@@ -2036,7 +1976,11 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 	if conn == nil {
 		panic("BUG: DialFunc returned (nil, nil)")
 	}
-	_, isTLSAlready := conn.(*tls.Conn)
+
+	// We assume that any conn that has the Handshake() method is a TLS conn already.
+	// This doesn't cover just tls.Conn but also other TLS implementations.
+	_, isTLSAlready := conn.(interface{ Handshake() error })
+
 	if isTLS && !isTLSAlready {
 		if timeout == 0 {
 			return tls.Client(conn, tlsConfig), nil

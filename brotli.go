@@ -92,10 +92,10 @@ var (
 //
 // Supported compression levels are:
 //
-//    * CompressBrotliNoCompression
-//    * CompressBrotliBestSpeed
-//    * CompressBrotliBestCompression
-//    * CompressBrotliDefaultCompression
+//   - CompressBrotliNoCompression
+//   - CompressBrotliBestSpeed
+//   - CompressBrotliBestCompression
+//   - CompressBrotliDefaultCompression
 func AppendBrotliBytesLevel(dst, src []byte, level int) []byte {
 	w := &byteSliceWriter{dst}
 	WriteBrotliLevel(w, src, level) //nolint:errcheck
@@ -107,10 +107,10 @@ func AppendBrotliBytesLevel(dst, src []byte, level int) []byte {
 //
 // Supported compression levels are:
 //
-//    * CompressBrotliNoCompression
-//    * CompressBrotliBestSpeed
-//    * CompressBrotliBestCompression
-//    * CompressBrotliDefaultCompression
+//   - CompressBrotliNoCompression
+//   - CompressBrotliBestSpeed
+//   - CompressBrotliBestCompression
+//   - CompressBrotliDefaultCompression
 func WriteBrotliLevel(w io.Writer, p []byte, level int) (int, error) {
 	switch w.(type) {
 	case *byteSliceWriter,

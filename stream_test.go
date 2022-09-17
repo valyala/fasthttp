@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"testing"
 	"time"
 )
@@ -19,7 +18,7 @@ func TestNewStreamReader(t *testing.T) {
 		close(ch)
 	})
 
-	data, err := ioutil.ReadAll(r)
+	data, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -88,7 +87,7 @@ func TestStreamReaderClose(t *testing.T) {
 
 	// read trailing data
 	go func() {
-		if _, err := ioutil.ReadAll(r); err != nil {
+		if _, err := io.ReadAll(r); err != nil {
 			ch <- fmt.Errorf("unexpected error when reading trailing data: %w", err)
 			return
 		}

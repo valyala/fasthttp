@@ -15,6 +15,7 @@ import (
 // the provided HTTP proxy.
 //
 // Example usage:
+//
 //	c := &fasthttp.Client{
 //		Dial: fasthttpproxy.FasthttpHTTPDialer("username:password@localhost:9050"),
 //	}
@@ -26,6 +27,7 @@ func FasthttpHTTPDialer(proxy string) fasthttp.DialFunc {
 // the provided HTTP proxy using the given timeout.
 //
 // Example usage:
+//
 //	c := &fasthttp.Client{
 //		Dial: fasthttpproxy.FasthttpHTTPDialerTimeout("username:password@localhost:9050", time.Second * 2),
 //	}

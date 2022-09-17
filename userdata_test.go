@@ -104,3 +104,18 @@ func TestUserDataDelete(t *testing.T) {
 	}
 
 }
+
+func TestUserDataSetAndRemove(t *testing.T) {
+	var (
+		u        userData
+		shortKey = "[]"
+		longKey  = "[  ]"
+	)
+
+	u.Set(shortKey, "")
+	u.Set(longKey, "")
+	u.Remove(shortKey)
+	u.Set(shortKey, "")
+	testUserDataGet(t, &u, []byte(shortKey), "")
+	testUserDataGet(t, &u, []byte(longKey), "")
+}

@@ -343,7 +343,7 @@ func (a *Args) GetUfloatOrZero(key string) float64 {
 // true is returned for "1", "t", "T", "true", "TRUE", "True", "y", "yes", "Y", "YES", "Yes",
 // otherwise false is returned.
 func (a *Args) GetBool(key string) bool {
-	switch b2s(a.Peek(key)) {
+	switch string(a.Peek(key)) {
 	// Support the same true cases as strconv.ParseBool
 	// See: https://github.com/golang/go/blob/4e1b11e2c9bdb0ddea1141eed487be1a626ff5be/src/strconv/atob.go#L12
 	// and Y and Yes versions.
@@ -544,13 +544,28 @@ func (s *argsScanner) next(kv *argsKV) bool {
 }
 
 func decodeArgAppend(dst, src []byte) []byte {
-	if bytes.IndexByte(src, '%') < 0 && bytes.IndexByte(src, '+') < 0 {
+	idxPercent := bytes.IndexByte(src, '%')
+	idxPlus := bytes.IndexByte(src, '+')
+	if idxPercent == -1 && idxPlus == -1 {
 		// fast path: src doesn't contain encoded chars
 		return append(dst, src...)
 	}
 
+	idx := 0
+	if idxPercent == -1 {
+		idx = idxPlus
+	} else if idxPlus == -1 {
+		idx = idxPercent
+	} else if idxPercent > idxPlus {
+		idx = idxPlus
+	} else {
+		idx = idxPercent
+	}
+
+	dst = append(dst, src[:idx]...)
+
 	// slow path
-	for i := 0; i < len(src); i++ {
+	for i := idx; i < len(src); i++ {
 		c := src[i]
 		if c == '%' {
 			if i+2 >= len(src) {
@@ -579,13 +594,16 @@ func decodeArgAppend(dst, src []byte) []byte {
 // The function is copy-pasted from decodeArgAppend due to the performance
 // reasons only.
 func decodeArgAppendNoPlus(dst, src []byte) []byte {
-	if bytes.IndexByte(src, '%') < 0 {
+	idx := bytes.IndexByte(src, '%')
+	if idx < 0 {
 		// fast path: src doesn't contain encoded chars
 		return append(dst, src...)
+	} else {
+		dst = append(dst, src[:idx]...)
 	}
 
 	// slow path
-	for i := 0; i < len(src); i++ {
+	for i := idx; i < len(src); i++ {
 		c := src[i]
 		if c == '%' {
 			if i+2 >= len(src) {

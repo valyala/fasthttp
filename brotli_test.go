@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"testing"
 )
 
@@ -91,7 +91,7 @@ func testBrotliCompressSingleCase(s string) error {
 	if err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
 	}
-	body, err := ioutil.ReadAll(zr)
+	body, err := io.ReadAll(zr)
 	if err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
 	}
@@ -120,7 +120,7 @@ func TestCompressHandlerBrotliLevel(t *testing.T) {
 	if err := resp.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ce := resp.Header.Peek(HeaderContentEncoding)
+	ce := resp.Header.ContentEncoding()
 	if string(ce) != "" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
 	}
@@ -140,7 +140,7 @@ func TestCompressHandlerBrotliLevel(t *testing.T) {
 	if err := resp.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "gzip" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "gzip")
 	}
@@ -163,7 +163,7 @@ func TestCompressHandlerBrotliLevel(t *testing.T) {
 	if err := resp.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "br" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "br")
 	}

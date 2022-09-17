@@ -98,6 +98,7 @@ func releaseRequestStream(rs *requestStream) {
 	rs.totalBytesRead = 0
 	rs.chunkLeft = 0
 	rs.reader = nil
+	rs.header = nil
 	requestStreamPool.Put(rs)
 }
 

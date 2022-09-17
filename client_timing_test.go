@@ -3,7 +3,7 @@ package fasthttp
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"runtime"
@@ -169,7 +169,7 @@ func BenchmarkNetHTTPClientDoFastServer(b *testing.B) {
 			if resp.StatusCode != http.StatusOK {
 				b.Fatalf("unexpected status code: %d", resp.StatusCode)
 			}
-			respBody, err := ioutil.ReadAll(resp.Body)
+			respBody, err := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
 				b.Fatalf("unexpected error when reading response body: %v", err)
@@ -297,7 +297,7 @@ func benchmarkNetHTTPClientGetEndToEndTCP(b *testing.B, parallelism int) {
 			if resp.StatusCode != http.StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
 			}
-			body, err := ioutil.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
 				b.Fatalf("unexpected error when reading response body: %v", err)
@@ -427,7 +427,7 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 			if resp.StatusCode != http.StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
 			}
-			body, err := ioutil.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
 				b.Fatalf("unexpected error when reading response body: %v", err)
@@ -515,7 +515,7 @@ func BenchmarkNetHTTPClientEndToEndBigResponse10Inmemory(b *testing.B) {
 
 func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
 	bigResponse := createFixedBody(1024 * 1024)
-	h := func(w http.ResponseWriter, r *http.Request) {
+	h := func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(HeaderContentType, "text/plain")
 		w.Write(bigResponse) //nolint:errcheck
 	}
@@ -554,7 +554,7 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 			if resp.StatusCode != http.StatusOK {
 				b.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
 			}
-			body, err := ioutil.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
 			resp.Body.Close()
 			if err != nil {
 				b.Fatalf("unexpected error when reading response body: %v", err)

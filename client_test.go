@@ -181,7 +181,7 @@ func TestClientInvalidURI(t *testing.T) {
 	ln := fasthttputil.NewInmemoryListener()
 	requests := int64(0)
 	s := &Server{
-		Handler: func(ctx *RequestCtx) {
+		Handler: func(_ *RequestCtx) {
 			atomic.AddInt64(&requests, 1)
 		},
 	}
@@ -636,7 +636,7 @@ func TestClientReadTimeout(t *testing.T) {
 
 	timeout := false
 	s := &Server{
-		Handler: func(ctx *RequestCtx) {
+		Handler: func(_ *RequestCtx) {
 			if timeout {
 				time.Sleep(time.Second)
 			} else {
@@ -1191,7 +1191,7 @@ func TestHostClientPendingRequests(t *testing.T) {
 	doneCh := make(chan struct{})
 	readyCh := make(chan struct{}, concurrency)
 	s := &Server{
-		Handler: func(ctx *RequestCtx) {
+		Handler: func(_ *RequestCtx) {
 			readyCh <- struct{}{}
 			<-doneCh
 		},
@@ -1635,9 +1635,13 @@ func TestClientDoTimeoutSuccessConcurrent(t *testing.T) {
 func TestClientGetTimeoutError(t *testing.T) {
 	t.Parallel()
 
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer s.Stop()
+
+	testConn, _ := net.Dial("tcp", s.ln.Addr().String())
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
-			return &readTimeoutConn{t: time.Second}, nil
+			return &readTimeoutConn{Conn: testConn, t: time.Second}, nil
 		},
 	}
 
@@ -1647,9 +1651,13 @@ func TestClientGetTimeoutError(t *testing.T) {
 func TestClientGetTimeoutErrorConcurrent(t *testing.T) {
 	t.Parallel()
 
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer s.Stop()
+
+	testConn, _ := net.Dial("tcp", s.ln.Addr().String())
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
-			return &readTimeoutConn{t: time.Second}, nil
+			return &readTimeoutConn{Conn: testConn, t: time.Second}, nil
 		},
 		MaxConnsPerHost: 1000,
 	}
@@ -1668,9 +1676,13 @@ func TestClientGetTimeoutErrorConcurrent(t *testing.T) {
 func TestClientDoTimeoutError(t *testing.T) {
 	t.Parallel()
 
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer s.Stop()
+
+	testConn, _ := net.Dial("tcp", s.ln.Addr().String())
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
-			return &readTimeoutConn{t: time.Second}, nil
+			return &readTimeoutConn{Conn: testConn, t: time.Second}, nil
 		},
 	}
 
@@ -1680,9 +1692,13 @@ func TestClientDoTimeoutError(t *testing.T) {
 func TestClientDoTimeoutErrorConcurrent(t *testing.T) {
 	t.Parallel()
 
+	s := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer s.Stop()
+
+	testConn, _ := net.Dial("tcp", s.ln.Addr().String())
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
-			return &readTimeoutConn{t: time.Second}, nil
+			return &readTimeoutConn{Conn: testConn, t: time.Second}, nil
 		},
 		MaxConnsPerHost: 1000,
 	}
@@ -1734,16 +1750,19 @@ func testClientGetTimeoutError(t *testing.T, c *Client, n int) {
 
 type readTimeoutConn struct {
 	net.Conn
-	t time.Duration
+	t  time.Duration
+	wc chan struct{}
+	rc chan struct{}
 }
 
 func (r *readTimeoutConn) Read(p []byte) (int, error) {
-	time.Sleep(r.t)
-	return 0, io.EOF
+	<-r.rc
+	return 0, os.ErrDeadlineExceeded
 }
 
 func (r *readTimeoutConn) Write(p []byte) (int, error) {
-	return len(p), nil
+	<-r.wc
+	return 0, os.ErrDeadlineExceeded
 }
 
 func (r *readTimeoutConn) Close() error {
@@ -1758,12 +1777,30 @@ func (r *readTimeoutConn) RemoteAddr() net.Addr {
 	return nil
 }
 
+func (r *readTimeoutConn) SetReadDeadline(d time.Time) error {
+	r.rc = make(chan struct{}, 1)
+	go func() {
+		time.Sleep(time.Until(d))
+		r.rc <- struct{}{}
+	}()
+	return nil
+}
+
+func (r *readTimeoutConn) SetWriteDeadline(d time.Time) error {
+	r.wc = make(chan struct{}, 1)
+	go func() {
+		time.Sleep(time.Until(d))
+		r.wc <- struct{}{}
+	}()
+	return nil
+}
+
 func TestClientNonIdempotentRetry(t *testing.T) {
 	t.Parallel()
 
 	dialsCount := 0
 	c := &Client{
-		Dial: func(addr string) (net.Conn, error) {
+		Dial: func(_ string) (net.Conn, error) {
 			dialsCount++
 			switch dialsCount {
 			case 1, 2:
@@ -1813,7 +1850,7 @@ func TestClientNonIdempotentRetry_BodyStream(t *testing.T) {
 
 	dialsCount := 0
 	c := &Client{
-		Dial: func(addr string) (net.Conn, error) {
+		Dial: func(_ string) (net.Conn, error) {
 			dialsCount++
 			switch dialsCount {
 			case 1, 2:
@@ -1850,7 +1887,7 @@ func TestClientIdempotentRequest(t *testing.T) {
 
 	dialsCount := 0
 	c := &Client{
-		Dial: func(addr string) (net.Conn, error) {
+		Dial: func(_ string) (net.Conn, error) {
 			dialsCount++
 			switch dialsCount {
 			case 1:
@@ -1906,7 +1943,7 @@ func TestClientRetryRequestWithCustomDecider(t *testing.T) {
 
 	dialsCount := 0
 	c := &Client{
-		Dial: func(addr string) (net.Conn, error) {
+		Dial: func(_ string) (net.Conn, error) {
 			dialsCount++
 			switch dialsCount {
 			case 1:
@@ -2742,6 +2779,7 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 			time.Sleep(sleep)
 			ctx.WriteString("foo") //nolint:errcheck
 		},
+		Logger: &testLogger{}, // Don't print connection closed errors.
 	}
 	serverStopCh := make(chan struct{})
 	go func() {

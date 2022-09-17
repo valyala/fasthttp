@@ -127,11 +127,11 @@ var (
 //
 // Supported compression levels are:
 //
-//    * CompressNoCompression
-//    * CompressBestSpeed
-//    * CompressBestCompression
-//    * CompressDefaultCompression
-//    * CompressHuffmanOnly
+//   - CompressNoCompression
+//   - CompressBestSpeed
+//   - CompressBestCompression
+//   - CompressDefaultCompression
+//   - CompressHuffmanOnly
 func AppendGzipBytesLevel(dst, src []byte, level int) []byte {
 	w := &byteSliceWriter{dst}
 	WriteGzipLevel(w, src, level) //nolint:errcheck
@@ -143,11 +143,11 @@ func AppendGzipBytesLevel(dst, src []byte, level int) []byte {
 //
 // Supported compression levels are:
 //
-//    * CompressNoCompression
-//    * CompressBestSpeed
-//    * CompressBestCompression
-//    * CompressDefaultCompression
-//    * CompressHuffmanOnly
+//   - CompressNoCompression
+//   - CompressBestSpeed
+//   - CompressBestCompression
+//   - CompressDefaultCompression
+//   - CompressHuffmanOnly
 func WriteGzipLevel(w io.Writer, p []byte, level int) (int, error) {
 	switch w.(type) {
 	case *byteSliceWriter,
@@ -223,11 +223,11 @@ func AppendGunzipBytes(dst, src []byte) ([]byte, error) {
 //
 // Supported compression levels are:
 //
-//    * CompressNoCompression
-//    * CompressBestSpeed
-//    * CompressBestCompression
-//    * CompressDefaultCompression
-//    * CompressHuffmanOnly
+//   - CompressNoCompression
+//   - CompressBestSpeed
+//   - CompressBestCompression
+//   - CompressDefaultCompression
+//   - CompressHuffmanOnly
 func AppendDeflateBytesLevel(dst, src []byte, level int) []byte {
 	w := &byteSliceWriter{dst}
 	WriteDeflateLevel(w, src, level) //nolint:errcheck
@@ -239,11 +239,11 @@ func AppendDeflateBytesLevel(dst, src []byte, level int) []byte {
 //
 // Supported compression levels are:
 //
-//    * CompressNoCompression
-//    * CompressBestSpeed
-//    * CompressBestCompression
-//    * CompressDefaultCompression
-//    * CompressHuffmanOnly
+//   - CompressNoCompression
+//   - CompressBestSpeed
+//   - CompressBestCompression
+//   - CompressDefaultCompression
+//   - CompressHuffmanOnly
 func WriteDeflateLevel(w io.Writer, p []byte, level int) (int, error) {
 	switch w.(type) {
 	case *byteSliceWriter,

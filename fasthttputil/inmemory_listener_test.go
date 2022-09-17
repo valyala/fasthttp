@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"sync"
@@ -147,7 +146,7 @@ func testInmemoryListenerHTTPSingle(t *testing.T, client *http.Client, content s
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	b, err := ioutil.ReadAll(res.Body)
+	b, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

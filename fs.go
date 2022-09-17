@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"html"
 	"io"
-	"io/ioutil"
 	"mime"
 	"net/http"
 	"os"
@@ -61,8 +60,8 @@ func ServeFileUncompressed(ctx *RequestCtx, path string) {
 //
 // HTTP response may contain uncompressed file contents in the following cases:
 //
-//   * Missing 'Accept-Encoding: gzip' request header.
-//   * No write access to directory containing the file.
+//   - Missing 'Accept-Encoding: gzip' request header.
+//   - No write access to directory containing the file.
 //
 // Directory contents is returned if path points to directory.
 //
@@ -83,8 +82,8 @@ func ServeFileBytes(ctx *RequestCtx, path []byte) {
 //
 // HTTP response may contain uncompressed file contents in the following cases:
 //
-//   * Missing 'Accept-Encoding: gzip' request header.
-//   * No write access to directory containing the file.
+//   - Missing 'Accept-Encoding: gzip' request header.
+//   - No write access to directory containing the file.
 //
 // Directory contents is returned if path points to directory.
 //
@@ -128,6 +127,7 @@ var (
 	rootFSOnce sync.Once
 	rootFS     = &FS{
 		Root:               "",
+		AllowEmptyRoot:     true,
 		GenerateIndexPages: true,
 		Compress:           true,
 		CompressBrotli:     true,
@@ -154,12 +154,11 @@ type PathRewriteFunc func(ctx *RequestCtx) []byte
 //
 // Examples:
 //
-//   * host=foobar.com, slashesCount=0, original path="/foo/bar".
+//   - host=foobar.com, slashesCount=0, original path="/foo/bar".
 //     Resulting path: "/foobar.com/foo/bar"
 //
-//   * host=img.aaa.com, slashesCount=1, original path="/images/123/456.jpg"
+//   - host=img.aaa.com, slashesCount=1, original path="/images/123/456.jpg"
 //     Resulting path: "/img.aaa.com/123/456.jpg"
-//
 func NewVHostPathRewriter(slashesCount int) PathRewriteFunc {
 	return func(ctx *RequestCtx) []byte {
 		path := stripLeadingSlashes(ctx.Path(), slashesCount)
@@ -188,9 +187,9 @@ var strInvalidHost = []byte("invalid-host")
 //
 // Examples:
 //
-//   * slashesCount = 0, original path: "/foo/bar", result: "/foo/bar"
-//   * slashesCount = 1, original path: "/foo/bar", result: "/bar"
-//   * slashesCount = 2, original path: "/foo/bar", result: ""
+//   - slashesCount = 0, original path: "/foo/bar", result: "/foo/bar"
+//   - slashesCount = 1, original path: "/foo/bar", result: "/bar"
+//   - slashesCount = 2, original path: "/foo/bar", result: ""
 //
 // The returned path rewriter may be used as FS.PathRewrite .
 func NewPathSlashesStripper(slashesCount int) PathRewriteFunc {
@@ -204,9 +203,9 @@ func NewPathSlashesStripper(slashesCount int) PathRewriteFunc {
 //
 // Examples:
 //
-//   * prefixSize = 0, original path: "/foo/bar", result: "/foo/bar"
-//   * prefixSize = 3, original path: "/foo/bar", result: "o/bar"
-//   * prefixSize = 7, original path: "/foo/bar", result: "r"
+//   - prefixSize = 0, original path: "/foo/bar", result: "/foo/bar"
+//   - prefixSize = 3, original path: "/foo/bar", result: "o/bar"
+//   - prefixSize = 7, original path: "/foo/bar", result: "r"
 //
 // The returned path rewriter may be used as FS.PathRewrite .
 func NewPathPrefixStripper(prefixSize int) PathRewriteFunc {
@@ -228,6 +227,12 @@ type FS struct {
 
 	// Path to the root directory to serve files from.
 	Root string
+
+	// AllowEmptyRoot controls what happens when Root is empty. When false (default) it will default to the
+	// current working directory. An empty root is mostly useful when you want to use absolute paths
+	// on windows that are on different filesystems. On linux setting your Root to "/" already allows you to use
+	// absolute paths on any filesystem.
+	AllowEmptyRoot bool
 
 	// List of index file names to try opening during directory access.
 	//
@@ -268,6 +273,10 @@ type FS struct {
 	//
 	// Brotli encoding is disabled by default.
 	CompressBrotli bool
+
+	// Path to the compressed root directory to serve files from. If this value
+	// is empty, Root is used.
+	CompressRoot string
 
 	// Enables byte range requests if set to true.
 	//
@@ -339,9 +348,9 @@ const FSHandlerCacheDuration = 10 * time.Second
 // from requested path before searching requested file in the root folder.
 // Examples:
 //
-//   * stripSlashes = 0, original path: "/foo/bar", result: "/foo/bar"
-//   * stripSlashes = 1, original path: "/foo/bar", result: "/bar"
-//   * stripSlashes = 2, original path: "/foo/bar", result: ""
+//   - stripSlashes = 0, original path: "/foo/bar", result: "/foo/bar"
+//   - stripSlashes = 1, original path: "/foo/bar", result: "/bar"
+//   - stripSlashes = 2, original path: "/foo/bar", result: ""
 //
 // The returned request handler automatically generates index pages
 // for directories without index.html.
@@ -381,26 +390,33 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 	return fs.h
 }
 
-func (fs *FS) initRequestHandler() {
-	root := fs.Root
-
-	// rootFS' handleRequest will do special treatment of absolute and relative paths
-	if fs != rootFS {
-		// serve files from the current working directory if root is empty
-		if len(root) == 0 || !filepath.IsAbs(root) {
-			path, err := os.Getwd()
-			if err != nil {
-				path = "."
-			}
-			root = path + "/" + root
+func (fs *FS) normalizeRoot(root string) string {
+	// Serve files from the current working directory if Root is empty or if Root is a relative path.
+	if (!fs.AllowEmptyRoot && len(root) == 0) || (len(root) > 0 && !filepath.IsAbs(root)) {
+		path, err := os.Getwd()
+		if err != nil {
+			path = "."
 		}
-		// convert the root directory slashes to the native format
-		root = filepath.FromSlash(root)
+		root = path + "/" + root
 	}
+	// convert the root directory slashes to the native format
+	root = filepath.FromSlash(root)
 
 	// strip trailing slashes from the root path
 	for len(root) > 0 && root[len(root)-1] == os.PathSeparator {
 		root = root[:len(root)-1]
+	}
+	return root
+}
+
+func (fs *FS) initRequestHandler() {
+	root := fs.normalizeRoot(fs.Root)
+
+	compressRoot := fs.CompressRoot
+	if len(compressRoot) == 0 {
+		compressRoot = root
+	} else {
+		compressRoot = fs.normalizeRoot(compressRoot)
 	}
 
 	cacheDuration := fs.CacheDuration
@@ -426,6 +442,7 @@ func (fs *FS) initRequestHandler() {
 		generateIndexPages:     fs.GenerateIndexPages,
 		compress:               fs.Compress,
 		compressBrotli:         fs.CompressBrotli,
+		compressRoot:           compressRoot,
 		pathNotFound:           fs.PathNotFound,
 		acceptByteRange:        fs.AcceptByteRange,
 		cacheDuration:          cacheDuration,
@@ -474,6 +491,7 @@ type fsHandler struct {
 	generateIndexPages     bool
 	compress               bool
 	compressBrotli         bool
+	compressRoot           string
 	acceptByteRange        bool
 	cacheDuration          time.Duration
 	compressedFileSuffixes map[string]string
@@ -776,6 +794,20 @@ func cleanCacheNolock(cache map[string]*fsFile, pendingFiles, filesToRelease []*
 	return pendingFiles, filesToRelease
 }
 
+func (h *fsHandler) pathToFilePath(path string) string {
+	return filepath.FromSlash(h.root + path)
+}
+
+func (h *fsHandler) filePathToCompressed(filePath string) string {
+	if h.root == h.compressRoot {
+		return filePath
+	}
+	if !strings.HasPrefix(filePath, h.root) {
+		return filePath
+	}
+	return filepath.FromSlash(h.compressRoot + filePath[len(h.root):])
+}
+
 func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	var path []byte
 	if h.pathRewrite != nil {
@@ -827,7 +859,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 
 	if !ok {
 		pathStr := string(path)
-		filePath := filepath.FromSlash(h.root + pathStr)
+		filePath := h.pathToFilePath(pathStr)
 
 		var err error
 		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
@@ -894,16 +926,16 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	hdr := &ctx.Response.Header
 	if ff.compressed {
 		if fileEncoding == "br" {
-			hdr.SetCanonical(strContentEncoding, strBr)
+			hdr.SetContentEncodingBytes(strBr)
 		} else if fileEncoding == "gzip" {
-			hdr.SetCanonical(strContentEncoding, strGzip)
+			hdr.SetContentEncodingBytes(strGzip)
 		}
 	}
 
 	statusCode := StatusOK
 	contentLength := ff.contentLength
 	if h.acceptByteRange {
-		hdr.SetCanonical(strAcceptRanges, strBytes)
+		hdr.setNonSpecial(strAcceptRanges, strBytes)
 		if len(byteRange) > 0 {
 			startPos, endPos, err := ParseByteRange(byteRange, contentLength)
 			if err != nil {
@@ -926,7 +958,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	hdr.SetCanonical(strLastModified, ff.lastModifiedStr)
+	hdr.setNonSpecial(strLastModified, ff.lastModifiedStr)
 	if !ctx.IsHead() {
 		ctx.SetBodyStream(r, contentLength)
 	} else {
@@ -1149,7 +1181,14 @@ func (h *fsHandler) compressAndOpenFSFile(filePath string, fileEncoding string) 
 		return h.newFSFile(f, fileInfo, false, "")
 	}
 
-	compressedFilePath := filePath + h.compressedFileSuffixes[fileEncoding]
+	compressedFilePath := h.filePathToCompressed(filePath)
+	if compressedFilePath != filePath {
+		if err := os.MkdirAll(filepath.Dir(compressedFilePath), os.ModePerm); err != nil {
+			return nil, err
+		}
+	}
+	compressedFilePath += h.compressedFileSuffixes[fileEncoding]
+
 	absPath, err := filepath.Abs(compressedFilePath)
 	if err != nil {
 		_ = f.Close()
@@ -1337,7 +1376,7 @@ func readFileHeader(f *os.File, compressed bool, fileEncoding string) ([]byte, e
 		R: r,
 		N: 512,
 	}
-	data, err := ioutil.ReadAll(lr)
+	data, err := io.ReadAll(lr)
 	if _, err := f.Seek(0, 0); err != nil {
 		return nil, err
 	}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net"
 	"os"
@@ -254,9 +255,9 @@ func (resp *Response) IsBodyStream() bool {
 //
 // This function may be used in the following cases:
 //
-//     * if request body is too big (more than 10MB).
-//     * if request body is streamed from slow external sources.
-//     * if request body must be streamed to the server in chunks
+//   - if request body is too big (more than 10MB).
+//   - if request body is streamed from slow external sources.
+//   - if request body must be streamed to the server in chunks
 //     (aka `http client push` or `chunked transfer-encoding`).
 //
 // Note that GET and HEAD requests cannot have body.
@@ -271,9 +272,9 @@ func (req *Request) SetBodyStreamWriter(sw StreamWriter) {
 //
 // This function may be used in the following cases:
 //
-//     * if response body is too big (more than 10MB).
-//     * if response body is streamed from slow external sources.
-//     * if response body must be streamed to the client in chunks
+//   - if response body is too big (more than 10MB).
+//   - if response body is streamed from slow external sources.
+//   - if response body must be streamed to the client in chunks
 //     (aka `http server push` or `chunked transfer-encoding`).
 //
 // See also SetBodyStream.
@@ -484,6 +485,48 @@ func inflateData(p []byte) ([]byte, error) {
 		return nil, err
 	}
 	return bb.B, nil
+}
+
+var ErrContentEncodingUnsupported = errors.New("unsupported Content-Encoding")
+
+// BodyUncompressed returns body data and if needed decompress it from gzip, deflate or Brotli.
+//
+// This method may be used if the response header contains
+// 'Content-Encoding' for reading uncompressed request body.
+// Use Body for reading the raw request body.
+func (req *Request) BodyUncompressed() ([]byte, error) {
+	switch string(req.Header.ContentEncoding()) {
+	case "":
+		return req.Body(), nil
+	case "deflate":
+		return req.BodyInflate()
+	case "gzip":
+		return req.BodyGunzip()
+	case "br":
+		return req.BodyUnbrotli()
+	default:
+		return nil, ErrContentEncodingUnsupported
+	}
+}
+
+// BodyUncompressed returns body data and if needed decompress it from gzip, deflate or Brotli.
+//
+// This method may be used if the response header contains
+// 'Content-Encoding' for reading uncompressed response body.
+// Use Body for reading the raw response body.
+func (resp *Response) BodyUncompressed() ([]byte, error) {
+	switch string(resp.Header.ContentEncoding()) {
+	case "":
+		return resp.Body(), nil
+	case "deflate":
+		return resp.BodyInflate()
+	case "gzip":
+		return resp.BodyGunzip()
+	case "br":
+		return resp.BodyUnbrotli()
+	default:
+		return nil, ErrContentEncodingUnsupported
+	}
 }
 
 // BodyWriteTo writes request body to w.
@@ -783,6 +826,14 @@ func swapRequestBody(a, b *Request) {
 	a.body, b.body = b.body, a.body
 	a.bodyRaw, b.bodyRaw = b.bodyRaw, a.bodyRaw
 	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
+
+	// This code assumes that if a requestStream was swapped the headers are also swapped or copied.
+	if rs, ok := a.bodyStream.(*requestStream); ok {
+		rs.header = &a.Header
+	}
+	if rs, ok := b.bodyStream.(*requestStream); ok {
+		rs.header = &b.Header
+	}
 }
 
 func swapResponseBody(a, b *Response) {
@@ -1030,11 +1081,11 @@ func (resp *Response) resetSkipHeader() {
 //
 // If MayContinue returns true, the caller must:
 //
-//     - Either send StatusExpectationFailed response if request headers don't
-//       satisfy the caller.
-//     - Or send StatusContinue response before reading request body
-//       with ContinueReadBody.
-//     - Or close the connection.
+//   - Either send StatusExpectationFailed response if request headers don't
+//     satisfy the caller.
+//   - Or send StatusContinue response before reading request body
+//     with ContinueReadBody.
+//   - Or close the connection.
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (req *Request) Read(r *bufio.Reader) error {
@@ -1058,11 +1109,11 @@ var ErrGetOnly = errors.New("non-GET request received")
 //
 // If MayContinue returns true, the caller must:
 //
-//     - Either send StatusExpectationFailed response if request headers don't
-//       satisfy the caller.
-//     - Or send StatusContinue response before reading request body
-//       with ContinueReadBody.
-//     - Or close the connection.
+//   - Either send StatusExpectationFailed response if request headers don't
+//     satisfy the caller.
+//   - Or send StatusContinue response before reading request body
+//     with ContinueReadBody.
+//   - Or close the connection.
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
@@ -1115,11 +1166,11 @@ func (req *Request) readBodyStream(r *bufio.Reader, maxBodySize int, getOnly boo
 //
 // The caller must do one of the following actions if MayContinue returns true:
 //
-//     - Either send StatusExpectationFailed response if request headers don't
-//       satisfy the caller.
-//     - Or send StatusContinue response before reading request body
-//       with ContinueReadBody.
-//     - Or close the connection.
+//   - Either send StatusExpectationFailed response if request headers don't
+//     satisfy the caller.
+//   - Or send StatusContinue response before reading request body
+//     with ContinueReadBody.
+//   - Or close the connection.
 func (req *Request) MayContinue() bool {
 	return bytes.Equal(req.Header.peek(strExpect), str100Continue)
 }
@@ -1511,11 +1562,11 @@ func (resp *Response) WriteGzip(w *bufio.Writer) error {
 //
 // Level is the desired compression level:
 //
-//     * CompressNoCompression
-//     * CompressBestSpeed
-//     * CompressBestCompression
-//     * CompressDefaultCompression
-//     * CompressHuffmanOnly
+//   - CompressNoCompression
+//   - CompressBestSpeed
+//   - CompressBestCompression
+//   - CompressDefaultCompression
+//   - CompressHuffmanOnly
 //
 // The method gzips response body and sets 'Content-Encoding: gzip'
 // header before writing response to w.
@@ -1542,11 +1593,11 @@ func (resp *Response) WriteDeflate(w *bufio.Writer) error {
 //
 // Level is the desired compression level:
 //
-//     * CompressNoCompression
-//     * CompressBestSpeed
-//     * CompressBestCompression
-//     * CompressDefaultCompression
-//     * CompressHuffmanOnly
+//   - CompressNoCompression
+//   - CompressBestSpeed
+//   - CompressBestCompression
+//   - CompressDefaultCompression
+//   - CompressHuffmanOnly
 //
 // The method deflates response body and sets 'Content-Encoding: deflate'
 // header before writing response to w.
@@ -1560,7 +1611,7 @@ func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
 }
 
 func (resp *Response) brotliBody(level int) error {
-	if len(resp.Header.peek(strContentEncoding)) > 0 {
+	if len(resp.Header.ContentEncoding()) > 0 {
 		// It looks like the body is already compressed.
 		// Do not compress it again.
 		return nil
@@ -1610,12 +1661,12 @@ func (resp *Response) brotliBody(level int) error {
 		resp.body = w
 		resp.bodyRaw = nil
 	}
-	resp.Header.SetCanonical(strContentEncoding, strBr)
+	resp.Header.SetContentEncodingBytes(strBr)
 	return nil
 }
 
 func (resp *Response) gzipBody(level int) error {
-	if len(resp.Header.peek(strContentEncoding)) > 0 {
+	if len(resp.Header.ContentEncoding()) > 0 {
 		// It looks like the body is already compressed.
 		// Do not compress it again.
 		return nil
@@ -1665,12 +1716,12 @@ func (resp *Response) gzipBody(level int) error {
 		resp.body = w
 		resp.bodyRaw = nil
 	}
-	resp.Header.SetCanonical(strContentEncoding, strGzip)
+	resp.Header.SetContentEncodingBytes(strGzip)
 	return nil
 }
 
 func (resp *Response) deflateBody(level int) error {
-	if len(resp.Header.peek(strContentEncoding)) > 0 {
+	if len(resp.Header.ContentEncoding()) > 0 {
 		// It looks like the body is already compressed.
 		// Do not compress it again.
 		return nil
@@ -1720,7 +1771,7 @@ func (resp *Response) deflateBody(level int) error {
 		resp.body = w
 		resp.bodyRaw = nil
 	}
-	resp.Header.SetCanonical(strContentEncoding, strDeflate)
+	resp.Header.SetContentEncodingBytes(strDeflate)
 	return nil
 }
 
@@ -1880,6 +1931,9 @@ func (req *Request) closeBodyStream() error {
 	var err error
 	if bsc, ok := req.bodyStream.(io.Closer); ok {
 		err = bsc.Close()
+	}
+	if rs, ok := req.bodyStream.(*requestStream); ok {
+		releaseRequestStream(rs)
 	}
 	req.bodyStream = nil
 	return err
@@ -2224,6 +2278,11 @@ func round2(n int) int {
 	x |= x >> 4
 	x |= x >> 8
 	x |= x >> 16
+
+	// Make sure we don't return 0 due to overflow, even on 32 bit systems
+	if x >= uint32(math.MaxInt32) {
+		return math.MaxInt32
+	}
 
 	return int(x + 1)
 }

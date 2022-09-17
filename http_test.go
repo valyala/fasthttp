@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -347,6 +347,12 @@ func testResponseBodyStreamDeflate(t *testing.T, body []byte, bodySize int) {
 	if !bytes.Equal(respBody, body) {
 		t.Fatalf("unexpected body: %q. Expecting %q", respBody, body)
 	}
+	// check for invalid
+	resp.SetBodyRaw([]byte("invalid"))
+	_, errDeflate := resp.BodyInflate()
+	if errDeflate == nil || errDeflate.Error() != "zlib: invalid header" {
+		t.Fatalf("expected error: 'zlib: invalid header' but was %v", errDeflate)
+	}
 }
 
 func testResponseBodyStreamGzip(t *testing.T, body []byte, bodySize int) {
@@ -375,6 +381,12 @@ func testResponseBodyStreamGzip(t *testing.T, body []byte, bodySize int) {
 	if !bytes.Equal(respBody, body) {
 		t.Fatalf("unexpected body: %q. Expecting %q", respBody, body)
 	}
+	// check for invalid
+	resp.SetBodyRaw([]byte("invalid"))
+	_, errUnzip := resp.BodyGunzip()
+	if errUnzip == nil || errUnzip.Error() != "unexpected EOF" {
+		t.Fatalf("expected error: 'unexpected EOF' but was %v", errUnzip)
+	}
 }
 
 func TestResponseWriteGzipNilBody(t *testing.T) {
@@ -402,6 +414,46 @@ func TestResponseWriteDeflateNilBody(t *testing.T) {
 	}
 	if err := bw.Flush(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResponseBodyUncompressed(t *testing.T) {
+	body := "body"
+	var r Response
+	r.SetBodyStream(bytes.NewReader([]byte(body)), len(body))
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := r.WriteDeflate(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp Response
+	br := bufio.NewReader(w)
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ce := resp.Header.ContentEncoding()
+	if string(ce) != "deflate" {
+		t.Fatalf("unexpected Content-Encoding: %s", ce)
+	}
+	respBody, err := resp.BodyUncompressed()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(respBody) != body {
+		t.Fatalf("unexpected body: %q. Expecting %q", respBody, body)
+	}
+
+	// check for invalid encoding
+	resp.Header.SetContentEncoding("invalid")
+	_, decodeErr := resp.BodyUncompressed()
+	if decodeErr != ErrContentEncodingUnsupported {
+		t.Fatalf("unexpected error: %v", decodeErr)
 	}
 }
 
@@ -602,7 +654,7 @@ tailfoobar`
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	tail, err := ioutil.ReadAll(br)
+	tail, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1145,8 +1197,8 @@ func TestRequestReadGzippedBody(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if string(r.Header.Peek(HeaderContentEncoding)) != "gzip" {
-		t.Fatalf("unexpected content-encoding: %q. Expecting %q", r.Header.Peek(HeaderContentEncoding), "gzip")
+	if string(r.Header.ContentEncoding()) != "gzip" {
+		t.Fatalf("unexpected content-encoding: %q. Expecting %q", r.Header.ContentEncoding(), "gzip")
 	}
 	if r.Header.ContentLength() != len(body) {
 		t.Fatalf("unexpected content-length: %d. Expecting %d", r.Header.ContentLength(), len(body))
@@ -1188,7 +1240,7 @@ func TestRequestReadPostNoBody(t *testing.T) {
 		t.Fatalf("unexpected content-length: %d. Expecting 0", r.Header.ContentLength())
 	}
 
-	tail, err := ioutil.ReadAll(br)
+	tail, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1219,7 +1271,7 @@ func TestRequestContinueReadBody(t *testing.T) {
 		t.Fatalf("unexpected body %q. Expecting %q", body, "abcde")
 	}
 
-	tail, err := ioutil.ReadAll(br)
+	tail, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1383,7 +1435,7 @@ func testResponseDeflateExt(t *testing.T, r *Response, s string) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce := r1.Header.Peek(HeaderContentEncoding)
+	ce := r1.Header.ContentEncoding()
 	var body []byte
 	if isCompressible {
 		if string(ce) != "deflate" {
@@ -1436,7 +1488,7 @@ func testResponseGzipExt(t *testing.T, r *Response, s string) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce := r1.Header.Peek(HeaderContentEncoding)
+	ce := r1.Header.ContentEncoding()
 	var body []byte
 	if isCompressible {
 		if string(ce) != "gzip" {
@@ -1911,6 +1963,7 @@ func TestRound2(t *testing.T) {
 	testRound2(t, 8, 8)
 	testRound2(t, 9, 16)
 	testRound2(t, 0x10001, 0x20000)
+	testRound2(t, math.MaxInt32-1, math.MaxInt32)
 }
 
 func testRound2(t *testing.T, n, expectedRound2 int) {
@@ -1992,7 +2045,7 @@ func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBod
 	if len(resp.Body()) != 0 {
 		t.Fatalf("Unexpected response body %q. Expected %q. response=%q", resp.Body(), "", s)
 	}
-	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContentType)
+	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContentType, "")
 	verifyResponseTrailer(t, &resp.Header, expectedTrailer)
 
 	// verify that ordinal response is read after null-body response
@@ -2269,7 +2322,7 @@ func testResponseReadSuccess(t *testing.T, resp *Response, response string, expe
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContentType)
+	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContentType, "")
 	if !bytes.Equal(resp.Body(), []byte(expectedBody)) {
 		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), []byte(expectedBody))
 	}

@@ -1,6 +1,3 @@
-// go:build !windows
-// Don't run FS tests on windows as it isn't compatible for now.
-
 package fasthttp
 
 import (
@@ -8,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"path"
@@ -133,7 +129,7 @@ func TestServeFileHead(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce := resp.Header.Peek(HeaderContentEncoding)
+	ce := resp.Header.ContentEncoding()
 	if len(ce) > 0 {
 		t.Fatalf("Unexpected 'Content-Encoding' %q", ce)
 	}
@@ -158,13 +154,13 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 
 	teststr := "hello, world!"
 
-	tempdir, err := ioutil.TempDir("", "httpexpect")
+	tempdir, err := os.MkdirTemp("", "httpexpect")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tempdir)
 
-	if err := ioutil.WriteFile(
+	if err := os.WriteFile(
 		path.Join(tempdir, "hello"), []byte(teststr), 0666); err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +221,7 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce := resp.Header.Peek(HeaderContentEncoding)
+	ce := resp.Header.ContentEncoding()
 	if string(ce) != "gzip" {
 		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "gzip")
 	}
@@ -254,7 +250,7 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "br" {
 		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "br")
 	}
@@ -290,7 +286,7 @@ func TestServeFileUncompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	ce := resp.Header.Peek(HeaderContentEncoding)
+	ce := resp.Header.ContentEncoding()
 	if len(ce) > 0 {
 		t.Fatalf("Unexpected 'Content-Encoding' %q", ce)
 	}
@@ -412,7 +408,7 @@ func getFileContents(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	return ioutil.ReadAll(f)
+	return io.ReadAll(f)
 }
 
 func TestParseByteRangeSuccess(t *testing.T) {
@@ -567,7 +563,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	if resp.StatusCode() != StatusOK {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
-	ce := resp.Header.Peek(HeaderContentEncoding)
+	ce := resp.Header.ContentEncoding()
 	if string(ce) != "" {
 		t.Errorf("unexpected content-encoding %q. Expecting empty string. filePath=%q", ce, filePath)
 	}
@@ -586,7 +582,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	if resp.StatusCode() != StatusOK {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "gzip" {
 		t.Errorf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "gzip", filePath)
 	}
@@ -611,7 +607,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	if resp.StatusCode() != StatusOK {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "br" {
 		t.Errorf("unexpected content-encoding %q. Expecting %q. filePath=%q", ce, "br", filePath)
 	}
@@ -703,7 +699,7 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 			f.Close()
 			continue
 		}
-		data, err := ioutil.ReadAll(f)
+		data, err := io.ReadAll(f)
 		f.Close()
 		if err != nil {
 			t.Fatalf("cannot read file contents %q: %v", name, err)
@@ -714,7 +710,7 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 		if ctx.Response.bodyStream == nil {
 			t.Fatalf("response body stream must be non-empty")
 		}
-		body, err := ioutil.ReadAll(ctx.Response.bodyStream)
+		body, err := io.ReadAll(ctx.Response.bodyStream)
 		if err != nil {
 			t.Fatalf("error when reading response body stream: %v", err)
 		}
@@ -733,7 +729,7 @@ func fsHandlerTest(t *testing.T, requestHandler RequestHandler, filenames []stri
 	if ctx.Response.bodyStream == nil {
 		t.Fatalf("response body stream must be non-empty")
 	}
-	body, err := ioutil.ReadAll(ctx.Response.bodyStream)
+	body, err := io.ReadAll(ctx.Response.bodyStream)
 	if err != nil {
 		t.Fatalf("error when reading response body stream: %v", err)
 	}

@@ -39,8 +39,9 @@ type ResponseHeader struct {
 	contentLengthBytes    []byte
 	secureErrorLogMessage bool
 
-	contentType []byte
-	server      []byte
+	contentType     []byte
+	contentEncoding []byte
+	server          []byte
 
 	h       []argsKV
 	trailer []argsKV
@@ -103,13 +104,13 @@ func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
 	b = AppendUint(b, contentLength)
 	h.bufKV.value = b
 
-	h.SetCanonical(strContentRange, h.bufKV.value)
+	h.setNonSpecial(strContentRange, h.bufKV.value)
 }
 
 // SetByteRange sets 'Range: bytes=startPos-endPos' header.
 //
-//     * If startPos is negative, then 'bytes=-startPos' value is set.
-//     * If endPos is negative, then 'bytes=startPos-' value is set.
+//   - If startPos is negative, then 'bytes=-startPos' value is set.
+//   - If endPos is negative, then 'bytes=startPos-' value is set.
 func (h *RequestHeader) SetByteRange(startPos, endPos int) {
 	b := h.bufKV.value[:0]
 	b = append(b, strBytes...)
@@ -125,7 +126,7 @@ func (h *RequestHeader) SetByteRange(startPos, endPos int) {
 	}
 	h.bufKV.value = b
 
-	h.SetCanonical(strRange, h.bufKV.value)
+	h.setNonSpecial(strRange, h.bufKV.value)
 }
 
 // StatusCode returns response status code.
@@ -167,7 +168,7 @@ func (h *ResponseHeader) SetProtocol(protocol []byte) {
 // SetLastModified sets 'Last-Modified' header to the given value.
 func (h *ResponseHeader) SetLastModified(t time.Time) {
 	h.bufKV.value = AppendHTTPDate(h.bufKV.value[:0], t)
-	h.SetCanonical(strLastModified, h.bufKV.value)
+	h.setNonSpecial(strLastModified, h.bufKV.value)
 }
 
 // ConnectionClose returns true if 'Connection: close' header is set.
@@ -325,6 +326,21 @@ func (h *ResponseHeader) SetContentTypeBytes(contentType []byte) {
 	h.contentType = append(h.contentType[:0], contentType...)
 }
 
+// ContentEncoding returns Content-Encoding header value.
+func (h *ResponseHeader) ContentEncoding() []byte {
+	return h.contentEncoding
+}
+
+// SetContentEncoding sets Content-Encoding header value.
+func (h *ResponseHeader) SetContentEncoding(contentEncoding string) {
+	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
+}
+
+// SetContentEncodingBytes sets Content-Encoding header value.
+func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
+	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
+}
+
 // Server returns Server header value.
 func (h *ResponseHeader) Server() []byte {
 	return h.server
@@ -353,6 +369,21 @@ func (h *RequestHeader) SetContentType(contentType string) {
 // SetContentTypeBytes sets Content-Type header value.
 func (h *RequestHeader) SetContentTypeBytes(contentType []byte) {
 	h.contentType = append(h.contentType[:0], contentType...)
+}
+
+// ContentEncoding returns Content-Encoding header value.
+func (h *RequestHeader) ContentEncoding() []byte {
+	return peekArgBytes(h.h, strContentEncoding)
+}
+
+// SetContentEncoding sets Content-Encoding header value.
+func (h *RequestHeader) SetContentEncoding(contentEncoding string) {
+	h.SetBytesK(strContentEncoding, contentEncoding)
+}
+
+// SetContentEncodingBytes sets Content-Encoding header value.
+func (h *RequestHeader) SetContentEncodingBytes(contentEncoding []byte) {
+	h.setNonSpecial(strContentEncoding, contentEncoding)
 }
 
 // SetMultipartFormBoundary sets the following Content-Type:
@@ -570,7 +601,7 @@ func (h *RequestHeader) SetUserAgentBytes(userAgent []byte) {
 
 // Referer returns Referer header value.
 func (h *RequestHeader) Referer() []byte {
-	return h.PeekBytes(strReferer)
+	return peekArgBytes(h.h, strReferer)
 }
 
 // SetReferer sets Referer header value.
@@ -580,7 +611,7 @@ func (h *RequestHeader) SetReferer(referer string) {
 
 // SetRefererBytes sets Referer header value.
 func (h *RequestHeader) SetRefererBytes(referer []byte) {
-	h.SetCanonical(strReferer, referer)
+	h.setNonSpecial(strReferer, referer)
 }
 
 // Method returns HTTP request method.
@@ -837,7 +868,7 @@ func (h *RequestHeader) HasAcceptEncodingBytes(acceptEncoding []byte) bool {
 // i.e. the number of times f is called in VisitAll.
 func (h *ResponseHeader) Len() int {
 	n := 0
-	h.VisitAll(func(k, v []byte) { n++ })
+	h.VisitAll(func(_, _ []byte) { n++ })
 	return n
 }
 
@@ -845,7 +876,7 @@ func (h *ResponseHeader) Len() int {
 // i.e. the number of times f is called in VisitAll.
 func (h *RequestHeader) Len() int {
 	n := 0
-	h.VisitAll(func(k, v []byte) { n++ })
+	h.VisitAll(func(_, _ []byte) { n++ })
 	return n
 }
 
@@ -856,9 +887,9 @@ func (h *RequestHeader) Len() int {
 // while lowercasing all the other letters.
 // Examples:
 //
-//     * CONNECTION -> Connection
-//     * conteNT-tYPE -> Content-Type
-//     * foo-bar-baz -> Foo-Bar-Baz
+//   - CONNECTION -> Connection
+//   - conteNT-tYPE -> Content-Type
+//   - foo-bar-baz -> Foo-Bar-Baz
 //
 // Disable header names' normalization only if know what are you doing.
 func (h *RequestHeader) DisableNormalizing() {
@@ -872,9 +903,9 @@ func (h *RequestHeader) DisableNormalizing() {
 // the other letters.
 // Examples:
 //
-//     * CONNECTION -> Connection
-//     * conteNT-tYPE -> Content-Type
-//     * foo-bar-baz -> Foo-Bar-Baz
+//   - CONNECTION -> Connection
+//   - conteNT-tYPE -> Content-Type
+//   - foo-bar-baz -> Foo-Bar-Baz
 //
 // This is enabled by default unless disabled using DisableNormalizing()
 func (h *RequestHeader) EnableNormalizing() {
@@ -888,9 +919,9 @@ func (h *RequestHeader) EnableNormalizing() {
 // while lowercasing all the other letters.
 // Examples:
 //
-//     * CONNECTION -> Connection
-//     * conteNT-tYPE -> Content-Type
-//     * foo-bar-baz -> Foo-Bar-Baz
+//   - CONNECTION -> Connection
+//   - conteNT-tYPE -> Content-Type
+//   - foo-bar-baz -> Foo-Bar-Baz
 //
 // Disable header names' normalization only if know what are you doing.
 func (h *ResponseHeader) DisableNormalizing() {
@@ -904,9 +935,9 @@ func (h *ResponseHeader) DisableNormalizing() {
 // the other letters.
 // Examples:
 //
-//     * CONNECTION -> Connection
-//     * conteNT-tYPE -> Content-Type
-//     * foo-bar-baz -> Foo-Bar-Baz
+//   - CONNECTION -> Connection
+//   - conteNT-tYPE -> Content-Type
+//   - foo-bar-baz -> Foo-Bar-Baz
 //
 // This is enabled by default unless disabled using DisableNormalizing()
 func (h *ResponseHeader) EnableNormalizing() {
@@ -937,6 +968,7 @@ func (h *ResponseHeader) resetSkipNormalize() {
 	h.contentLengthBytes = h.contentLengthBytes[:0]
 
 	h.contentType = h.contentType[:0]
+	h.contentEncoding = h.contentEncoding[:0]
 	h.server = h.server[:0]
 
 	h.h = h.h[:0]
@@ -994,6 +1026,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)
 	dst.contentType = append(dst.contentType, h.contentType...)
+	dst.contentEncoding = append(dst.contentEncoding, h.contentEncoding...)
 	dst.server = append(dst.server, h.server...)
 	dst.h = copyArgs(dst.h, h.h)
 	dst.cookies = copyArgs(dst.cookies, h.cookies)
@@ -1035,12 +1068,16 @@ func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
 	if len(contentType) > 0 {
 		f(strContentType, contentType)
 	}
+	contentEncoding := h.ContentEncoding()
+	if len(contentEncoding) > 0 {
+		f(strContentEncoding, contentEncoding)
+	}
 	server := h.Server()
 	if len(server) > 0 {
 		f(strServer, server)
 	}
 	if len(h.cookies) > 0 {
-		visitArgs(h.cookies, func(k, v []byte) {
+		visitArgs(h.cookies, func(_, v []byte) {
 			f(strSetCookie, v)
 		})
 	}
@@ -1158,6 +1195,8 @@ func (h *ResponseHeader) del(key []byte) {
 	switch string(key) {
 	case HeaderContentType:
 		h.contentType = h.contentType[:0]
+	case HeaderContentEncoding:
+		h.contentEncoding = h.contentEncoding[:0]
 	case HeaderServer:
 		h.server = h.server[:0]
 	case HeaderSetCookie:
@@ -1224,12 +1263,15 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 				h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
 			}
 			return true
+		} else if caseInsensitiveCompare(strContentEncoding, key) {
+			h.SetContentEncodingBytes(value)
+			return true
 		} else if caseInsensitiveCompare(strConnection, key) {
 			if bytes.Equal(strClose, value) {
 				h.SetConnectionClose()
 			} else {
 				h.ResetConnectionClose()
-				h.h = setArgBytes(h.h, key, value, argsHasValue)
+				h.setNonSpecial(key, value)
 			}
 			return true
 		}
@@ -1262,6 +1304,11 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 	return false
 }
 
+// setNonSpecial directly put into map i.e. not a basic header
+func (h *ResponseHeader) setNonSpecial(key []byte, value []byte) {
+	h.h = setArgBytes(h.h, key, value, argsHasValue)
+}
+
 // setSpecialHeader handles special headers and return true when a header is processed.
 func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 	if len(key) == 0 {
@@ -1284,7 +1331,7 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 				h.SetConnectionClose()
 			} else {
 				h.ResetConnectionClose()
-				h.h = setArgBytes(h.h, key, value, argsHasValue)
+				h.setNonSpecial(key, value)
 			}
 			return true
 		} else if caseInsensitiveCompare(strCookie, key) {
@@ -1313,6 +1360,11 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 	}
 
 	return false
+}
+
+// setNonSpecial directly put into map i.e. not a basic header
+func (h *RequestHeader) setNonSpecial(key []byte, value []byte) {
+	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
 
 // Add adds the given 'key: value' header.
@@ -1434,8 +1486,7 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	if h.setSpecialHeader(key, value) {
 		return
 	}
-
-	h.h = setArgBytes(h.h, key, value, argsHasValue)
+	h.setNonSpecial(key, value)
 }
 
 // SetCookie sets the given response cookie.
@@ -1465,13 +1516,13 @@ func (h *RequestHeader) SetCookieBytesKV(key, value []byte) {
 // This doesn't work for a cookie with specific domain or path,
 // you should delete it manually like:
 //
-//      c := AcquireCookie()
-//      c.SetKey(key)
-//      c.SetDomain("example.com")
-//      c.SetPath("/path")
-//      c.SetExpire(CookieExpireDelete)
-//      h.SetCookie(c)
-//      ReleaseCookie(c)
+//	c := AcquireCookie()
+//	c.SetKey(key)
+//	c.SetDomain("example.com")
+//	c.SetPath("/path")
+//	c.SetExpire(CookieExpireDelete)
+//	h.SetCookie(c)
+//	ReleaseCookie(c)
 //
 // Use DelCookie if you want just removing the cookie from response header.
 func (h *ResponseHeader) DelClientCookie(key string) {
@@ -1488,13 +1539,13 @@ func (h *ResponseHeader) DelClientCookie(key string) {
 // This doesn't work for a cookie with specific domain or path,
 // you should delete it manually like:
 //
-//      c := AcquireCookie()
-//      c.SetKey(key)
-//      c.SetDomain("example.com")
-//      c.SetPath("/path")
-//      c.SetExpire(CookieExpireDelete)
-//      h.SetCookie(c)
-//      ReleaseCookie(c)
+//	c := AcquireCookie()
+//	c.SetKey(key)
+//	c.SetDomain("example.com")
+//	c.SetPath("/path")
+//	c.SetExpire(CookieExpireDelete)
+//	h.SetCookie(c)
+//	ReleaseCookie(c)
 //
 // Use DelCookieBytes if you want just removing the cookie from response header.
 func (h *ResponseHeader) DelClientCookieBytes(key []byte) {
@@ -1646,8 +1697,7 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 	if h.setSpecialHeader(key, value) {
 		return
 	}
-
-	h.h = setArgBytes(h.h, key, value, argsHasValue)
+	h.setNonSpecial(key, value)
 }
 
 // Peek returns header value for the given key.
@@ -1696,6 +1746,8 @@ func (h *ResponseHeader) peek(key []byte) []byte {
 	switch string(key) {
 	case HeaderContentType:
 		return h.ContentType()
+	case HeaderContentEncoding:
+		return h.ContentEncoding()
 	case HeaderServer:
 		return h.Server()
 	case HeaderConnection:
@@ -2150,6 +2202,10 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		if len(contentType) > 0 {
 			dst = appendHeaderLine(dst, strContentType, contentType)
 		}
+	}
+	contentEncoding := h.ContentEncoding()
+	if len(contentEncoding) > 0 {
+		dst = appendHeaderLine(dst, strContentEncoding, contentEncoding)
 	}
 
 	if len(h.contentLengthBytes) > 0 {
@@ -2614,6 +2670,10 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			case 'c':
 				if caseInsensitiveCompare(s.key, strContentType) {
 					h.contentType = append(h.contentType[:0], s.value...)
+					continue
+				}
+				if caseInsensitiveCompare(s.key, strContentEncoding) {
+					h.contentEncoding = append(h.contentEncoding[:0], s.value...)
 					continue
 				}
 				if caseInsensitiveCompare(s.key, strContentLength) {
@@ -3116,9 +3176,9 @@ func removeNewLines(raw []byte) []byte {
 // after dashes are also uppercased. All the other letters are lowercased.
 // Examples:
 //
-//   * coNTENT-TYPe -> Content-Type
-//   * HOST -> Host
-//   * foo-bar-baz -> Foo-Bar-Baz
+//   - coNTENT-TYPe -> Content-Type
+//   - HOST -> Host
+//   - foo-bar-baz -> Foo-Bar-Baz
 func AppendNormalizedHeaderKey(dst []byte, key string) []byte {
 	dst = append(dst, key...)
 	normalizeHeaderKey(dst[len(dst)-len(key):], false)
@@ -3132,9 +3192,9 @@ func AppendNormalizedHeaderKey(dst []byte, key string) []byte {
 // after dashes are also uppercased. All the other letters are lowercased.
 // Examples:
 //
-//   * coNTENT-TYPe -> Content-Type
-//   * HOST -> Host
-//   * foo-bar-baz -> Foo-Bar-Baz
+//   - coNTENT-TYPe -> Content-Type
+//   - HOST -> Host
+//   - foo-bar-baz -> Foo-Bar-Baz
 func AppendNormalizedHeaderKeyBytes(dst, key []byte) []byte {
 	return AppendNormalizedHeaderKey(dst, b2s(key))
 }

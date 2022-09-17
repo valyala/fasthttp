@@ -1,5 +1,3 @@
-// go:build !windows || !race
-
 package fasthttp
 
 import (
@@ -10,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime/multipart"
 	"net"
 	"os"
@@ -254,7 +251,7 @@ func TestServerConnState(t *testing.T) {
 	states := make([]string, 0)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {},
-		ConnState: func(conn net.Conn, state ConnState) {
+		ConnState: func(_ net.Conn, state ConnState) {
 			states = append(states, state.String())
 		},
 	}
@@ -351,7 +348,7 @@ func TestSaveMultipartFile(t *testing.T) {
 	}
 	defer os.Remove("filea.txt")
 
-	if c, err := ioutil.ReadFile("filea.txt"); err != nil {
+	if c, err := os.ReadFile("filea.txt"); err != nil {
 		t.Fatal(err)
 	} else if string(c) != filea {
 		t.Fatalf("filea changed expected %q got %q", filea, c)
@@ -371,7 +368,7 @@ func TestSaveMultipartFile(t *testing.T) {
 	}
 	defer os.Remove("fileb.txt")
 
-	if c, err := ioutil.ReadFile("fileb.txt"); err != nil {
+	if c, err := os.ReadFile("fileb.txt"); err != nil {
 		t.Fatal(err)
 	} else if string(c) != fileb {
 		t.Fatalf("fileb changed expected %q got %q", fileb, c)
@@ -394,7 +391,7 @@ func TestServerName(t *testing.T) {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 
-		resp, err := ioutil.ReadAll(&rw.w)
+		resp, err := io.ReadAll(&rw.w)
 		if err != nil {
 			t.Fatalf("Unexpected error from ReadAll: %v", err)
 		}
@@ -738,7 +735,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 		}
 		close(readyCh)
 
-		tail, err := ioutil.ReadAll(br)
+		tail, err := io.ReadAll(br)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -811,7 +808,7 @@ func TestServerDisableKeepalive(t *testing.T) {
 		}
 
 		// make sure the connection is closed
-		data, err := ioutil.ReadAll(br)
+		data, err := io.ReadAll(br)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -1584,7 +1581,7 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 
 	tailCh := make(chan struct{})
 	go func() {
-		tail, err := ioutil.ReadAll(br)
+		tail, err := io.ReadAll(br)
 		if err != nil {
 			t.Errorf("error when reading tail: %v", err)
 		}
@@ -1659,7 +1656,7 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 
 	tailCh := make(chan struct{})
 	go func() {
-		tail, err := ioutil.ReadAll(br)
+		tail, err := io.ReadAll(br)
 		if err != nil {
 			t.Errorf("error when reading tail: %v", err)
 		}
@@ -1795,7 +1792,7 @@ func TestServerHeadRequest(t *testing.T) {
 		t.Fatalf("unexpected content-type %q. Expecting %q", resp.Header.ContentType(), "aaa/bbb")
 	}
 
-	data, err := ioutil.ReadAll(br)
+	data, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
@@ -1836,7 +1833,7 @@ func TestServerExpect100Continue(t *testing.T) {
 	br := bufio.NewReader(&rw.w)
 	verifyResponse(t, br, StatusOK, string(defaultContentType), "foobar")
 
-	data, err := ioutil.ReadAll(br)
+	data, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
@@ -1892,7 +1889,7 @@ func TestServerContinueHandler(t *testing.T) {
 		br := bufio.NewReader(&rw.w)
 		verifyResponse(t, br, expectedStatusCode, string(defaultContentType), expectedResponse)
 
-		data, err := ioutil.ReadAll(br)
+		data, err := io.ReadAll(br)
 		if err != nil {
 			t.Fatalf("Unexpected error when reading remaining data: %v", err)
 		}
@@ -1943,7 +1940,7 @@ func TestCompressHandler(t *testing.T) {
 	if err := resp.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ce := resp.Header.Peek(HeaderContentEncoding)
+	ce := resp.Header.ContentEncoding()
 	if string(ce) != "" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
 	}
@@ -1963,7 +1960,7 @@ func TestCompressHandler(t *testing.T) {
 	if err := resp.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "gzip" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "gzip")
 	}
@@ -1986,7 +1983,7 @@ func TestCompressHandler(t *testing.T) {
 	if err := resp.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "gzip" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "gzip")
 	}
@@ -2009,7 +2006,7 @@ func TestCompressHandler(t *testing.T) {
 	if err := resp.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ce = resp.Header.Peek(HeaderContentEncoding)
+	ce = resp.Header.ContentEncoding()
 	if string(ce) != "deflate" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "deflate")
 	}
@@ -2103,7 +2100,7 @@ func TestServerErrorHandler(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {},
-		ErrorHandler: func(ctx *RequestCtx, err error) {
+		ErrorHandler: func(ctx *RequestCtx, _ error) {
 			resultReqStr = ctx.Request.String()
 			resultRespStr = ctx.Response.String()
 		},
@@ -2235,7 +2232,7 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 		t.Fatal("expecting Connection: close")
 	}
 
-	data, err := ioutil.ReadAll(br)
+	data, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
@@ -2377,7 +2374,7 @@ func TestRequestCtxSendFileModified(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot open file: %v", err)
 	}
-	body, err := ioutil.ReadAll(f)
+	body, err := io.ReadAll(f)
 	f.Close()
 	if err != nil {
 		t.Fatalf("error when reading file: %v", err)
@@ -2420,7 +2417,7 @@ func TestRequestCtxSendFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot open file: %v", err)
 	}
-	body, err := ioutil.ReadAll(f)
+	body, err := io.ReadAll(f)
 	f.Close()
 	if err != nil {
 		t.Fatalf("error when reading file: %v", err)
@@ -2521,7 +2518,7 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 			br := bufio.NewReader(&rw.w)
 			verifyResponse(t, br, StatusOK, "foo/bar", "hijack it!")
 
-			data, err := ioutil.ReadAll(br)
+			data, err := io.ReadAll(br)
 			if err != nil {
 				t.Errorf("[iter: %d] Unexpected error when reading remaining data: %v", id, err)
 
@@ -2884,7 +2881,7 @@ func TestServerTimeoutErrorWithResponse(t *testing.T) {
 	verifyResponse(t, br, 456, "foo/bar", "path=/foo")
 	verifyResponse(t, br, 456, "foo/bar", "path=/bar")
 
-	data, err := ioutil.ReadAll(br)
+	data, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
@@ -2918,7 +2915,7 @@ func TestServerTimeoutErrorWithCode(t *testing.T) {
 	verifyResponse(t, br, StatusBadRequest, string(defaultContentType), "stolen ctx")
 	verifyResponse(t, br, StatusBadRequest, string(defaultContentType), "stolen ctx")
 
-	data, err := ioutil.ReadAll(br)
+	data, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
@@ -2952,7 +2949,7 @@ func TestServerTimeoutError(t *testing.T) {
 	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "stolen ctx")
 	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "stolen ctx")
 
-	data, err := ioutil.ReadAll(br)
+	data, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
@@ -2985,9 +2982,9 @@ func TestServerMaxRequestsPerConn(t *testing.T) {
 	if !resp.ConnectionClose() {
 		t.Fatal("Response must have 'connection: close' header")
 	}
-	verifyResponseHeader(t, &resp.Header, 200, 0, string(defaultContentType))
+	verifyResponseHeader(t, &resp.Header, 200, 0, string(defaultContentType), "")
 
-	data, err := ioutil.ReadAll(br)
+	data, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
@@ -3023,7 +3020,7 @@ func TestServerConnectionClose(t *testing.T) {
 		t.Fatal("expecting Connection: close header")
 	}
 
-	data, err := ioutil.ReadAll(br)
+	data, err := io.ReadAll(br)
 	if err != nil {
 		t.Fatalf("Unexpected error when reading remaining data: %v", err)
 	}
@@ -3681,11 +3678,12 @@ func TestStreamRequestBody(t *testing.T) {
 			checkReader(t, ctx.RequestBodyStream(), part2)
 		},
 		StreamRequestBody: true,
+		Logger:            &testLogger{},
 	}
 
 	pipe := fasthttputil.NewPipeConns()
 	cc, sc := pipe.Conn1(), pipe.Conn2()
-	//write headers and part1 body
+	// write headers and part1 body
 	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n", contentLength))); err != nil {
 		t.Fatal(err)
 	}
@@ -3742,7 +3740,7 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 
 	pipe := fasthttputil.NewPipeConns()
 	cc, sc := pipe.Conn1(), pipe.Conn2()
-	//write headers and part1 body
+	// write headers and part1 body
 	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
 		t.Error(err)
 	}
@@ -3828,7 +3826,7 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 
 	headers := []byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n", 5*1024))
 	s := &Server{
-		Handler: func(ctx *RequestCtx) {
+		Handler: func(_ *RequestCtx) {
 			t.Error("shouldn't reach handler")
 		},
 		HeaderReceived: func(header *RequestHeader) RequestConfig {
@@ -3844,12 +3842,12 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 	pipe := fasthttputil.NewPipeConns()
 	cc, sc := pipe.Conn1(), pipe.Conn2()
 	go func() {
-		//write headers
+		// write headers
 		_, err := cc.Write(headers)
 		if err != nil {
 			t.Error(err)
 		}
-		//write body
+		// write body
 		for i := 0; i < 5*1024; i++ {
 			time.Sleep(time.Millisecond)
 			cc.Write([]byte{'a'}) //nolint:errcheck
@@ -3898,7 +3896,7 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 
 	var resp Response
 	go func() {
-		//write headers
+		// write headers
 		_, err := cc.Write(headers)
 		if err != nil {
 			t.Error(err)
@@ -3971,7 +3969,7 @@ func TestServerChunkedResponse(t *testing.T) {
 				if err := w.Flush(); err != nil {
 					t.Errorf("unexpected error: %v", err)
 				}
-				time.Sleep(time.Second)
+				time.Sleep(time.Millisecond * 100)
 			}
 		})
 		for k, v := range trailer {
@@ -4017,7 +4015,7 @@ func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expec
 	if !bytes.Equal(resp.Body(), []byte(expectedBody)) {
 		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), []byte(expectedBody))
 	}
-	verifyResponseHeader(t, &resp.Header, expectedStatusCode, len(resp.Body()), expectedContentType)
+	verifyResponseHeader(t, &resp.Header, expectedStatusCode, len(resp.Body()), expectedContentType, "")
 	return &resp
 }
 
