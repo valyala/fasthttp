@@ -230,6 +230,16 @@ type Server struct {
 	// is zero, the value of ReadTimeout is used.
 	IdleTimeout time.Duration
 
+	// MinimumReadThroughputKbps is the minimum read rate accepted
+	// for the request in order to avoid slowloris attacks. Set to
+	// zero, to disable.
+	MinimumReadThroughputKbps float32
+
+	// MinimumReadThroughputKbps is the minimum write rate accepted
+	// for the response in order to avoid slowloris attacks. Set to
+	// zero, to disable.
+	MinimumWriteThroughputKbps float32
+
 	// Maximum number of concurrent client connections allowed per IP.
 	//
 	// By default unlimited number of concurrent connections
@@ -413,10 +423,11 @@ type Server struct {
 	perIPConnCounter perIPConnCounter
 	serverName       atomic.Value
 
-	ctxPool        sync.Pool
-	readerPool     sync.Pool
-	writerPool     sync.Pool
-	hijackConnPool sync.Pool
+	ctxPool            sync.Pool
+	readerPool         sync.Pool
+	writerPool         sync.Pool
+	hijackConnPool     sync.Pool
+	slowlorisCheckPool sync.Pool
 
 	// We need to know our listeners and idle connections so we can close them in Shutdown().
 	ln []net.Listener
@@ -741,14 +752,20 @@ func (ctx *RequestCtx) IsTLS() bool {
 	//
 	//     // other custom fields here
 	// }
+	c := ctx.c
+
+	// slowlorisCheck wraps the net.Conn in the Conn field
+	if sc, ok := c.(*slowlorisCheck); ok {
+		c = sc.Conn
+	}
 
 	// perIPConn wraps the net.Conn in the Conn field
-	if pic, ok := ctx.c.(*perIPConn); ok {
+	if pic, ok := c.(*perIPConn); ok {
 		_, ok := pic.Conn.(connTLSer)
 		return ok
 	}
 
-	_, ok := ctx.c.(connTLSer)
+	_, ok := c.(connTLSer)
 	return ok
 }
 
@@ -1965,6 +1982,8 @@ func (s *Server) ServeConn(c net.Conn) error {
 		c = pic
 	}
 
+	c = wrapSlowlorisCheck(s, c, s.MinimumReadThroughputKbps, s.MinimumWriteThroughputKbps)
+
 	n := atomic.AddUint32(&s.concurrency, 1)
 	if n > uint32(s.getConcurrency()) {
 		atomic.AddUint32(&s.concurrency, ^uint32(0))
@@ -2083,6 +2102,9 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 	writeTimeout := s.WriteTimeout
 	previousWriteTimeout := time.Duration(0)
 
+	slowloris, _ := c.(*slowlorisCheck)
+	var stopSlowlorisMonitor chan struct{}
+
 	ctx := s.acquireCtx(c)
 	ctx.connTime = connTime
 	isTLS := ctx.IsTLS()
@@ -2098,6 +2120,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		continueReadingRequest bool = true
 	)
+
 	for {
 		connRequestNum++
 
@@ -2168,12 +2191,18 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			// If we have pipline response in the outgoing buffer,
 			// we only want to try and read the next headers once.
 			// If we have to wait for the next request we flush the
-			// outgoing buffer first so it doesn't have to wait.
+			// outgoing buffer first, so it doesn't have to wait.
+			if slowloris != nil {
+				stopSlowlorisMonitor = slowloris.Monitor(false)
+			}
 			if bw != nil && bw.Buffered() > 0 {
 				err = ctx.Request.Header.readLoop(br, false)
 				if err == errNeedMore {
 					err = bw.Flush()
 					if err != nil {
+						if slowloris != nil {
+							close(stopSlowlorisMonitor)
+						}
 						break
 					}
 
@@ -2181,6 +2210,9 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 				}
 			} else {
 				err = ctx.Request.Header.Read(br)
+			}
+			if slowloris != nil {
+				close(stopSlowlorisMonitor)
 			}
 
 			if err == nil {
@@ -2206,10 +2238,16 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					}
 				}
 				// read body
+				if slowloris != nil {
+					stopSlowlorisMonitor = slowloris.Monitor(false)
+				}
 				if s.StreamRequestBody {
 					err = ctx.Request.readBodyStream(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
 				} else {
 					err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
+				}
+				if slowloris != nil {
+					close(stopSlowlorisMonitor)
 				}
 			}
 
@@ -2224,7 +2262,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 				err = nil
 			} else if nr, ok := err.(ErrNothingRead); ok {
 				if connRequestNum > 1 {
-					// This is not the first request and we haven't read a single byte
+					// This is not the first request, and we haven't read a single byte
 					// of a new request yet. This means it's just a keep-alive connection
 					// closing down either because the remote closed it or because
 					// or a read timeout on our side. Either way just close the connection
@@ -2280,11 +2318,18 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					br = acquireReader(ctx)
 				}
 
+				if slowloris != nil {
+					stopSlowlorisMonitor = slowloris.Monitor(false)
+				}
 				if s.StreamRequestBody {
 					err = ctx.Request.ContinueReadBodyStream(br, maxRequestBodySize, !s.DisablePreParseMultipartForm)
 				} else {
 					err = ctx.Request.ContinueReadBody(br, maxRequestBodySize, !s.DisablePreParseMultipartForm)
 				}
+				if slowloris != nil {
+					close(stopSlowlorisMonitor)
+				}
+
 				if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
 					releaseReader(s, br)
 					br = nil
@@ -2333,7 +2378,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			}
 			previousWriteTimeout = writeTimeout
 		} else if previousWriteTimeout > 0 {
-			// We don't want a write timeout but we previously set one, remove it.
+			// We don't want a write timeout, but we previously set one, remove it.
 			if err := c.SetWriteDeadline(zeroTime); err != nil {
 				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(zeroTime): %v", err))
 			}
