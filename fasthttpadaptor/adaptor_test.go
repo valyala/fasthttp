@@ -91,7 +91,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		w.Header().Set("Header1", "value1")
 		w.Header().Set("Header2", "value2")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write(body) // nolint:errcheck
+		w.Write(body) //nolint:errcheck
 	}
 	fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH))
 	fasthttpH = setContextValueMiddleware(fasthttpH, expectedContextKey, expectedContextValue)
