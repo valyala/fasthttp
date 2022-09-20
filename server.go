@@ -1816,6 +1816,17 @@ func (s *Server) Serve(ln net.Listener) error {
 //
 // Shutdown does not close keepalive connections so its recommended to set ReadTimeout and IdleTimeout to something else than 0.
 func (s *Server) Shutdown() error {
+	return s.ShutdownWithContext(context.Background())
+}
+
+// ShutdownWithContext gracefully shuts down the server without interrupting any active connections.
+// ShutdownWithContext works by first closing all open listeners and then waiting for all connections to return to idle or context timeout and then shut down.
+//
+// When ShutdownWithContext is called, Serve, ListenAndServe, and ListenAndServeTLS immediately return nil.
+// Make sure the program doesn't exit and waits instead for Shutdown to return.
+//
+// ShutdownWithContext does not close keepalive connections so its recommended to set ReadTimeout and IdleTimeout to something else than 0.
+func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -1827,7 +1838,7 @@ func (s *Server) Shutdown() error {
 	}
 
 	for _, ln := range s.ln {
-		if err := ln.Close(); err != nil {
+		if err = ln.Close(); err != nil {
 			return err
 		}
 	}
@@ -1838,7 +1849,10 @@ func (s *Server) Shutdown() error {
 
 	// Closing the listener will make Serve() call Stop on the worker pool.
 	// Setting .stop to 1 will make serveConn() break out of its loop.
-	// Now we just have to wait until all workers are done.
+	// Now we just have to wait until all workers are done or timeout.
+	ticker := time.NewTicker(time.Millisecond * 100)
+	defer ticker.Stop()
+END:
 	for {
 		s.closeIdleConns()
 
@@ -1848,12 +1862,18 @@ func (s *Server) Shutdown() error {
 		// This is not an optimal solution but using a sync.WaitGroup
 		// here causes data races as it's hard to prevent Add() to be called
 		// while Wait() is waiting.
-		time.Sleep(time.Millisecond * 100)
+		select {
+		case <-ctx.Done():
+			err = ctx.Err()
+			break END
+		case <-ticker.C:
+			continue
+		}
 	}
 
 	s.done = nil
 	s.ln = nil
-	return nil
+	return err
 }
 
 func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.Conn, error) {

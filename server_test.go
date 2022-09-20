@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3594,6 +3595,57 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 		if err != nil {
 			t.Errorf("unexepcted error: %v", err)
 		}
+	}
+}
+
+func TestShutdownWithContext(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			time.Sleep(5 * time.Second)
+			ctx.Success("aaa/bbb", []byte("real response"))
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexepcted error: %v", err)
+		}
+	}()
+	time.Sleep(1 * time.Second)
+	go func() {
+		conn, err := ln.Dial()
+		if err != nil {
+			t.Errorf("unexepcted error: %v", err)
+		}
+
+		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		br := bufio.NewReader(conn)
+		verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+	}()
+
+	time.Sleep(1 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	defer cancel()
+	shutdownErr := make(chan error)
+	go func() {
+		shutdownErr <- s.ShutdownWithContext(ctx)
+	}()
+
+	timer := time.NewTimer(time.Second)
+	select {
+	case <-timer.C:
+		t.Fatal("idle connections not closed on shutdown")
+	case err := <-shutdownErr:
+		if err == nil || err != context.DeadlineExceeded {
+			t.Fatalf("unexpected err %v. Expecting %v", err, context.DeadlineExceeded)
+		}
+	}
+	if atomic.LoadInt32(&s.open) != 1 {
+		t.Fatalf("unexpected open connection num: %#v. Expecting %#v", atomic.LoadInt32(&s.open), 1)
 	}
 }
 
