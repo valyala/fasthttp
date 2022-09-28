@@ -105,7 +105,7 @@ func (a *Args) ParseBytes(b []byte) {
 
 // String returns string representation of query args.
 func (a *Args) String() string {
-	return string(a.QueryString())
+	return b2s(a.QueryString())
 }
 
 // QueryString returns query string for the args.

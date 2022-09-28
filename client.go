@@ -492,10 +492,11 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			c.m = m
 		}
 	}
-	hc := m[string(host)]
+	host_str := b2s(host)
+	hc := m[host_str]
 	if hc == nil {
 		hc = &HostClient{
-			Addr:                          addMissingPort(string(host), isTLS),
+			Addr:                          addMissingPort(host_str, isTLS),
 			Name:                          c.Name,
 			NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 			Dial:                          c.Dial,
@@ -526,7 +527,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			}
 		}
 
-		m[string(host)] = hc
+		m[host_str] = hc
 		if len(m) == 1 {
 			startCleaner = true
 		}
