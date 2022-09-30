@@ -670,7 +670,7 @@ func (ctx *RequestCtx) Hijacked() bool {
 // All the values are removed from ctx after returning from the top
 // RequestHandler. Additionally, Close method is called on each value
 // implementing io.Closer before removing the value from ctx.
-func (ctx *RequestCtx) SetUserValue(key string, value interface{}) {
+func (ctx *RequestCtx) SetUserValue(key interface{}, value interface{}) {
 	ctx.userValues.Set(key, value)
 }
 
@@ -688,7 +688,7 @@ func (ctx *RequestCtx) SetUserValueBytes(key []byte, value interface{}) {
 }
 
 // UserValue returns the value stored via SetUserValue* under the given key.
-func (ctx *RequestCtx) UserValue(key string) interface{} {
+func (ctx *RequestCtx) UserValue(key interface{}) interface{} {
 	return ctx.userValues.Get(key)
 }
 
@@ -698,11 +698,24 @@ func (ctx *RequestCtx) UserValueBytes(key []byte) interface{} {
 	return ctx.userValues.GetBytes(key)
 }
 
-// VisitUserValues calls visitor for each existing userValue.
+// VisitUserValues calls visitor for each existing userValue with a key that is a string or []byte.
 //
 // visitor must not retain references to key and value after returning.
 // Make key and/or value copies if you need storing them after returning.
 func (ctx *RequestCtx) VisitUserValues(visitor func([]byte, interface{})) {
+	for i, n := 0, len(ctx.userValues); i < n; i++ {
+		kv := &ctx.userValues[i]
+		if _, ok := kv.key.(string); ok {
+			visitor(s2b(kv.key.(string)), kv.value)
+		}
+	}
+}
+
+// VisitUserValuesAll calls visitor for each existing userValue.
+//
+// visitor must not retain references to key and value after returning.
+// Make key and/or value copies if you need storing them after returning.
+func (ctx *RequestCtx) VisitUserValuesAll(visitor func(interface{}, interface{})) {
 	for i, n := 0, len(ctx.userValues); i < n; i++ {
 		kv := &ctx.userValues[i]
 		visitor(kv.key, kv.value)
@@ -715,7 +728,7 @@ func (ctx *RequestCtx) ResetUserValues() {
 }
 
 // RemoveUserValue removes the given key and the value under it in ctx.
-func (ctx *RequestCtx) RemoveUserValue(key string) {
+func (ctx *RequestCtx) RemoveUserValue(key interface{}) {
 	ctx.userValues.Remove(key)
 }
 
@@ -2696,10 +2709,7 @@ func (ctx *RequestCtx) Err() error {
 // This method is present to make RequestCtx implement the context interface.
 // This method is the same as calling ctx.UserValue(key)
 func (ctx *RequestCtx) Value(key interface{}) interface{} {
-	if keyString, ok := key.(string); ok {
-		return ctx.UserValue(keyString)
-	}
-	return nil
+	return ctx.UserValue(key)
 }
 
 var fakeServer = &Server{

@@ -1737,7 +1737,7 @@ func TestRequestCtxUserValue(t *testing.T) {
 	vlen := 0
 	ctx.VisitUserValues(func(key []byte, value interface{}) {
 		vlen++
-		v := ctx.UserValueBytes(key)
+		v := ctx.UserValue(key)
 		if v != value {
 			t.Fatalf("unexpected value obtained from VisitUserValues for key: %q, expecting: %#v but got: %#v", key, v, value)
 		}
