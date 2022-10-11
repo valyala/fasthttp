@@ -2861,3 +2861,65 @@ func verifyTrailer(t *testing.T, r *bufio.Reader, expectedTrailers map[string]st
 	}
 	verifyResponseTrailer(t, &resp.Header, expectedTrailers)
 }
+
+func TestRequestHeader_PeekAll(t *testing.T) {
+	t.Parallel()
+	h := &RequestHeader{}
+	h.Add(HeaderConnection, "keep-alive")
+	h.Add("Content-Type", "aaa")
+	h.Add(HeaderHost, "aaabbb")
+	h.Add("User-Agent", "asdfas")
+	h.Add("Content-Length", "1123")
+	h.Add("Cookie", "foobar=baz")
+	h.Add(HeaderTrailer, "foo, bar")
+	h.Add("aaa", "aaa")
+	h.Add("aaa", "bbb")
+
+	expectRequestHeaderAll(t, h, HeaderConnection, [][]byte{s2b("keep-alive")})
+	expectRequestHeaderAll(t, h, "Content-Type", [][]byte{s2b("aaa")})
+	expectRequestHeaderAll(t, h, HeaderHost, [][]byte{s2b("aaabbb")})
+	expectRequestHeaderAll(t, h, "User-Agent", [][]byte{s2b("asdfas")})
+	expectRequestHeaderAll(t, h, "Content-Length", [][]byte{s2b("1123")})
+	expectRequestHeaderAll(t, h, "Cookie", [][]byte{s2b("foobar=baz")})
+	expectRequestHeaderAll(t, h, HeaderTrailer, [][]byte{s2b("Foo, Bar")})
+	expectRequestHeaderAll(t, h, "aaa", [][]byte{s2b("aaa"), s2b("bbb")})
+}
+func expectRequestHeaderAll(t *testing.T, h *RequestHeader, key string, expectedValue [][]byte) {
+	if len(h.PeekAll(key)) != len(expectedValue) {
+		t.Fatalf("Unexpected size for key %q: %d. Expected %d", key, len(h.PeekAll(key)), len(expectedValue))
+	}
+	if !reflect.DeepEqual(h.PeekAll(key), expectedValue) {
+		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.PeekAll(key), expectedValue)
+	}
+}
+
+func TestResponseHeader_PeekAll(t *testing.T) {
+	t.Parallel()
+
+	h := &ResponseHeader{}
+	h.Add(HeaderContentType, "aaa/bbb")
+	h.Add(HeaderContentEncoding, "gzip")
+	h.Add(HeaderConnection, "close")
+	h.Add(HeaderContentLength, "1234")
+	h.Add(HeaderServer, "aaaa")
+	h.Add(HeaderSetCookie, "cccc")
+	h.Add("aaa", "aaa")
+	h.Add("aaa", "bbb")
+
+	expectResponseHeaderAll(t, h, HeaderContentType, [][]byte{s2b("aaa/bbb")})
+	expectResponseHeaderAll(t, h, HeaderContentEncoding, [][]byte{s2b("gzip")})
+	expectResponseHeaderAll(t, h, HeaderConnection, [][]byte{s2b("close")})
+	expectResponseHeaderAll(t, h, HeaderContentLength, [][]byte{s2b("1234")})
+	expectResponseHeaderAll(t, h, HeaderServer, [][]byte{s2b("aaaa")})
+	expectResponseHeaderAll(t, h, HeaderSetCookie, [][]byte{s2b("cccc")})
+	expectResponseHeaderAll(t, h, "aaa", [][]byte{s2b("aaa"), s2b("bbb")})
+}
+
+func expectResponseHeaderAll(t *testing.T, h *ResponseHeader, key string, expectedValue [][]byte) {
+	if len(h.PeekAll(key)) != len(expectedValue) {
+		t.Fatalf("Unexpected size for key %q: %d. Expected %d", key, len(h.PeekAll(key)), len(expectedValue))
+	}
+	if !reflect.DeepEqual(h.PeekAll(key), expectedValue) {
+		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.PeekAll(key), expectedValue)
+	}
+}
