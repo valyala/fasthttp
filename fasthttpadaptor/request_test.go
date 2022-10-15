@@ -1,9 +1,10 @@
 package fasthttpadaptor
 
 import (
-	"github.com/valyala/fasthttp"
 	"net/http"
 	"testing"
+
+	"github.com/valyala/fasthttp"
 )
 
 func BenchmarkConvertRequest(b *testing.B) {

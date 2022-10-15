@@ -623,3 +623,13 @@ func decodeArgAppendNoPlus(dst, src []byte) []byte {
 	}
 	return dst
 }
+
+func peekAllArgBytesToDst(dst [][]byte, h []argsKV, k []byte) [][]byte {
+	for i, n := 0, len(h); i < n; i++ {
+		kv := &h[i]
+		if bytes.Equal(kv.key, k) {
+			dst = append(dst, kv.value)
+		}
+	}
+	return dst
+}

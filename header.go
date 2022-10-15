@@ -42,6 +42,7 @@ type ResponseHeader struct {
 	contentType     []byte
 	contentEncoding []byte
 	server          []byte
+	mulHeader       [][]byte
 
 	h       []argsKV
 	trailer []argsKV
@@ -79,6 +80,7 @@ type RequestHeader struct {
 	host        []byte
 	contentType []byte
 	userAgent   []byte
+	mulHeader   [][]byte
 
 	h       []argsKV
 	trailer []argsKV
@@ -974,6 +976,7 @@ func (h *ResponseHeader) resetSkipNormalize() {
 	h.h = h.h[:0]
 	h.cookies = h.cookies[:0]
 	h.trailer = h.trailer[:0]
+	h.mulHeader = h.mulHeader[:0]
 }
 
 // SetNoDefaultContentType allows you to control if a default Content-Type header will be set (false) or not (true).
@@ -1002,6 +1005,7 @@ func (h *RequestHeader) resetSkipNormalize() {
 	h.contentType = h.contentType[:0]
 	h.userAgent = h.userAgent[:0]
 	h.trailer = h.trailer[:0]
+	h.mulHeader = h.mulHeader[:0]
 
 	h.h = h.h[:0]
 	h.cookies = h.cookies[:0]
@@ -1791,6 +1795,85 @@ func (h *RequestHeader) peek(key []byte) []byte {
 	default:
 		return peekArgBytes(h.h, key)
 	}
+}
+
+// PeekAll returns all header value for the given key.
+//
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
+// Do not store references to returned value. Make copies instead.
+func (h *RequestHeader) PeekAll(key string) [][]byte {
+	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
+	return h.peekAll(k)
+}
+
+func (h *RequestHeader) peekAll(key []byte) [][]byte {
+	h.mulHeader = h.mulHeader[:0]
+	switch string(key) {
+	case HeaderHost:
+		h.mulHeader = append(h.mulHeader, h.Host())
+	case HeaderContentType:
+		h.mulHeader = append(h.mulHeader, h.ContentType())
+	case HeaderUserAgent:
+		h.mulHeader = append(h.mulHeader, h.UserAgent())
+	case HeaderConnection:
+		if h.ConnectionClose() {
+			h.mulHeader = append(h.mulHeader, strClose)
+		} else {
+			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+		}
+	case HeaderContentLength:
+		h.mulHeader = append(h.mulHeader, h.contentLengthBytes)
+	case HeaderCookie:
+		if h.cookiesCollected {
+			h.mulHeader = append(h.mulHeader, appendRequestCookieBytes(nil, h.cookies))
+			return [][]byte{appendRequestCookieBytes(nil, h.cookies)}
+		} else {
+			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+		}
+	case HeaderTrailer:
+		h.mulHeader = append(h.mulHeader, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+	default:
+		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+	}
+	return h.mulHeader
+}
+
+// PeekAll returns all header value for the given key.
+//
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
+// Do not store references to returned value. Make copies instead.
+func (h *ResponseHeader) PeekAll(key string) [][]byte {
+	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
+	return h.peekAll(k)
+}
+
+func (h *ResponseHeader) peekAll(key []byte) [][]byte {
+	h.mulHeader = h.mulHeader[:0]
+	switch string(key) {
+	case HeaderContentType:
+		h.mulHeader = append(h.mulHeader, h.ContentType())
+	case HeaderContentEncoding:
+		h.mulHeader = append(h.mulHeader, h.ContentEncoding())
+	case HeaderServer:
+		h.mulHeader = append(h.mulHeader, h.Server())
+	case HeaderConnection:
+		if h.ConnectionClose() {
+			h.mulHeader = append(h.mulHeader, strClose)
+		} else {
+			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+		}
+	case HeaderContentLength:
+		h.mulHeader = append(h.mulHeader, h.contentLengthBytes)
+	case HeaderSetCookie:
+		h.mulHeader = append(h.mulHeader, appendResponseCookieBytes(nil, h.cookies))
+	case HeaderTrailer:
+		h.mulHeader = append(h.mulHeader, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+	default:
+		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+	}
+	return h.mulHeader
 }
 
 // Cookie returns cookie for the given key.
