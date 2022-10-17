@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
+	"io/fs"
 	"sync"
 
 	"github.com/klauspost/compress/flate"
@@ -412,7 +412,7 @@ func newCompressWriterPoolMap() []*sync.Pool {
 	return m
 }
 
-func isFileCompressible(f *os.File, minCompressRatio float64) bool {
+func isFileCompressible(f fs.File, minCompressRatio float64) bool {
 	// Try compressing the first 4kb of of the file
 	// and see if it can be compressed by more than
 	// the given minCompressRatio.
@@ -424,7 +424,12 @@ func isFileCompressible(f *os.File, minCompressRatio float64) bool {
 	}
 	_, err := copyZeroAlloc(zw, lr)
 	releaseStacklessGzipWriter(zw, CompressDefaultCompression)
-	f.Seek(0, 0) //nolint:errcheck
+
+	seeker, ok := f.(io.Seeker)
+	if !ok {
+		return false
+	}
+	seeker.Seek(0, io.SeekStart) //nolint:errcheck
 	if err != nil {
 		return false
 	}
