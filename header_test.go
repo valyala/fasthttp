@@ -974,7 +974,7 @@ func TestRequestHeaderSetByteRange(t *testing.T) {
 
 func testRequestHeaderSetByteRange(t *testing.T, startPos, endPos int, expectedV string) {
 	var h RequestHeader
-	h.SetByteRange(startPos, endPos)
+	h.SetByteRange([]int{startPos}, []int{endPos})
 	v := h.Peek(HeaderRange)
 	if string(v) != expectedV {
 		t.Fatalf("unexpected range: %q. Expecting %q. startPos=%d, endPos=%d", v, expectedV, startPos, endPos)
