@@ -137,6 +137,16 @@ var (
 	rootFSHandler RequestHandler
 )
 
+// ServeFS returns HTTP response containing compressed file contents from the given fs.FS's path.
+//
+// HTTP response may contain uncompressed file contents in the following cases:
+//
+//   - Missing 'Accept-Encoding: gzip' request header.
+//   - No write access to directory containing the file.
+//
+// Directory contents is returned if path points to directory.
+//
+// See also ServeFile.
 func ServeFS(ctx *RequestCtx, filesystem fs.FS, path string) {
 	f := &FS{
 		FS:                 filesystem,
@@ -242,6 +252,7 @@ func NewPathPrefixStripper(prefixSize int) PathRewriteFunc {
 type FS struct {
 	noCopy noCopy //nolint:unused,structcheck
 
+	// FS is filesystem to serve files from. eg: embed.FS os.DirFS
 	FS fs.FS
 
 	// Path to the root directory to serve files from.
@@ -410,6 +421,7 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 }
 
 func (fs *FS) normalizeRoot(root string) string {
+	// fs.FS uses relative paths, that paths are slash-separated on all systems, even Windows.
 	if fs.FS == nil {
 		// Serve files from the current working directory if Root is empty or if Root is a relative path.
 		if (!fs.AllowEmptyRoot && len(root) == 0) || (len(root) > 0 && !filepath.IsAbs(root)) {
@@ -474,7 +486,7 @@ func (fs *FS) initRequestHandler() {
 		cacheGzip:              make(map[string]*fsFile),
 	}
 	if h.fs == nil {
-		h.fs = osFS{}
+		h.fs = osFS{} // It provides os.Open.
 	}
 
 	go func() {
@@ -533,7 +545,7 @@ type fsHandler struct {
 type fsFile struct {
 	h             *fsHandler
 	f             fs.File
-	filename      string
+	filename      string // fs.FileInfo.Name() return filename, isn't filepath.
 	dirIndex      []byte
 	contentType   string
 	contentLength int
@@ -579,7 +591,7 @@ const maxSmallFileSize = 2 * 4096
 
 func (ff *fsFile) isBig() bool {
 	if _, ok := ff.h.fs.(osFS); !ok {
-		return ff.f != nil
+		return ff.f != nil // fs.FS only uses bigFileReader, memory cache uses fsSmallFileReader
 	}
 	return ff.contentLength > maxSmallFileSize && len(ff.dirIndex) == 0
 }
@@ -1312,6 +1324,7 @@ func (h *fsHandler) compressFileNolock(f fs.File, fileInfo fs.FileInfo, filePath
 	return h.newCompressedFSFile(compressedFilePath, fileEncoding)
 }
 
+// newCompressedFSFileCache use memory cache compressed files
 func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, filePath, fileEncoding string) (*fsFile, error) {
 	var (
 		w   = &bytebufferpool.ByteBuffer{}
