@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"embed"
 	"os"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -171,7 +173,10 @@ func TestFSFSByteRangeSingleThread(t *testing.T) {
 }
 
 func TestFSFSCompressConcurrent(t *testing.T) {
-	t.Parallel()
+	// go 1.16 timeout may occur
+	if strings.HasPrefix(runtime.Version(), "go1.16") {
+		t.SkipNow()
+	}
 
 	stop := make(chan struct{})
 	defer close(stop)
