@@ -977,7 +977,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	statusCode := StatusOK
 	contentLength := ff.contentLength
 	if h.acceptByteRange {
-		hdr.SetCanonical(strAcceptRanges, strBytes)
+		hdr.setNonSpecial(strAcceptRanges, strBytes)
 		if len(byteRange) > 0 {
 			staList, endList, err := ParseByteRanges(byteRange, contentLength)
 			if err != nil {

@@ -113,7 +113,7 @@ func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
 //
 //   - If startPos is negative, then 'bytes=-startPos' value is set.
 //   - If endPos is negative, then 'bytes=startPos-' value is set.
-func (h *RequestHeader) SetByteRange(startPos, endPos []int) {
+func (h *RequestHeader) SetByteRanges(startPos, endPos []int) {
 	b := h.bufKV.value[:0]
 	b = append(b, strBytes...)
 	b = append(b, '=')
@@ -134,6 +134,10 @@ func (h *RequestHeader) SetByteRange(startPos, endPos []int) {
 	h.bufKV.value = b
 
 	h.setNonSpecial(strRange, h.bufKV.value)
+}
+
+func (h *RequestHeader) SetByteRange(startPos, endPos int) {
+	h.SetByteRanges([]int{startPos}, []int{endPos})
 }
 
 // StatusCode returns response status code.

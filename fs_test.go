@@ -377,7 +377,7 @@ func testFSSingleByteRangeOfRead(t *testing.T, h RequestHandler, filePath string
 	endPos = append(endPos, end)
 
 	ctx.Request.SetRequestURI(filePath)
-	ctx.Request.Header.SetByteRange(startPos, endPos)
+	ctx.Request.Header.SetByteRanges(startPos, endPos)
 	h(&ctx)
 
 	var resp Response
@@ -430,7 +430,7 @@ func testFSSingleByteRangeOfWriteTo(t *testing.T, h RequestHandler, filePath str
 	endPos = append(endPos, end)
 
 	ctx.Request.SetRequestURI(filePath)
-	ctx.Request.Header.SetByteRange(startPos, endPos)
+	ctx.Request.Header.SetByteRanges(startPos, endPos)
 	h(&ctx)
 
 	bodySize := end - start + 1
@@ -555,7 +555,7 @@ func testFSMultiByteRangeOfWriteTo(t *testing.T, h RequestHandler, filePath stri
 	}
 
 	ctx.Request.SetRequestURI(filePath)
-	ctx.Request.Header.SetByteRange(startPos, endPos)
+	ctx.Request.Header.SetByteRanges(startPos, endPos)
 	h(&ctx)
 
 	var body string
@@ -596,7 +596,7 @@ func testFSMultiByteRangeOfWriteTo(t *testing.T, h RequestHandler, filePath stri
 		var ctx1 RequestCtx
 		ctx1.Init(&Request{}, nil, nil)
 		ctx1.Request.SetRequestURI(filePath)
-		ctx1.Request.Header.SetByteRange([]int{startPos[i]}, []int{endPos[i]})
+		ctx1.Request.Header.SetByteRanges([]int{startPos[i]}, []int{endPos[i]})
 		h(&ctx1)
 
 		var r1 Response
@@ -671,7 +671,7 @@ func testFSMultiByteRangeOfRead(t *testing.T, h RequestHandler, filePath string)
 	}
 
 	ctx.Request.SetRequestURI(filePath)
-	ctx.Request.Header.SetByteRange(startPos, endPos)
+	ctx.Request.Header.SetByteRanges(startPos, endPos)
 	h(&ctx)
 
 	var resp Response
@@ -707,7 +707,7 @@ func testFSMultiByteRangeOfRead(t *testing.T, h RequestHandler, filePath string)
 		var ctx1 RequestCtx
 		ctx1.Init(&Request{}, nil, nil)
 		ctx1.Request.SetRequestURI(filePath)
-		ctx1.Request.Header.SetByteRange([]int{startPos[i]}, []int{endPos[i]})
+		ctx1.Request.Header.SetByteRanges([]int{startPos[i]}, []int{endPos[i]})
 		h(&ctx1)
 
 		var r1 Response
