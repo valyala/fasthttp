@@ -1811,11 +1811,17 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 	h.mulHeader = h.mulHeader[:0]
 	switch string(key) {
 	case HeaderHost:
-		h.mulHeader = append(h.mulHeader, h.Host())
+		if host := h.Host(); len(host) > 0 {
+			h.mulHeader = append(h.mulHeader, host)
+		}
 	case HeaderContentType:
-		h.mulHeader = append(h.mulHeader, h.ContentType())
+		if contentType := h.ContentType(); len(contentType) > 0 {
+			h.mulHeader = append(h.mulHeader, contentType)
+		}
 	case HeaderUserAgent:
-		h.mulHeader = append(h.mulHeader, h.UserAgent())
+		if ua := h.UserAgent(); len(ua) > 0 {
+			h.mulHeader = append(h.mulHeader, ua)
+		}
 	case HeaderConnection:
 		if h.ConnectionClose() {
 			h.mulHeader = append(h.mulHeader, strClose)
@@ -1827,7 +1833,6 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 	case HeaderCookie:
 		if h.cookiesCollected {
 			h.mulHeader = append(h.mulHeader, appendRequestCookieBytes(nil, h.cookies))
-			return [][]byte{appendRequestCookieBytes(nil, h.cookies)}
 		} else {
 			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 		}
@@ -1853,11 +1858,17 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 	h.mulHeader = h.mulHeader[:0]
 	switch string(key) {
 	case HeaderContentType:
-		h.mulHeader = append(h.mulHeader, h.ContentType())
+		if contentType := h.ContentType(); len(contentType) > 0 {
+			h.mulHeader = append(h.mulHeader, contentType)
+		}
 	case HeaderContentEncoding:
-		h.mulHeader = append(h.mulHeader, h.ContentEncoding())
+		if contentEncoding := h.ContentEncoding(); len(contentEncoding) > 0 {
+			h.mulHeader = append(h.mulHeader, contentEncoding)
+		}
 	case HeaderServer:
-		h.mulHeader = append(h.mulHeader, h.Server())
+		if server := h.Server(); len(server) > 0 {
+			h.mulHeader = append(h.mulHeader, server)
+		}
 	case HeaderConnection:
 		if h.ConnectionClose() {
 			h.mulHeader = append(h.mulHeader, strClose)
