@@ -2883,6 +2883,13 @@ func TestRequestHeader_PeekAll(t *testing.T) {
 	expectRequestHeaderAll(t, h, "Cookie", [][]byte{s2b("foobar=baz")})
 	expectRequestHeaderAll(t, h, HeaderTrailer, [][]byte{s2b("Foo, Bar")})
 	expectRequestHeaderAll(t, h, "aaa", [][]byte{s2b("aaa"), s2b("bbb")})
+
+	h.Del("Content-Type")
+	h.Del(HeaderHost)
+	h.Del("aaa")
+	expectRequestHeaderAll(t, h, "Content-Type", [][]byte{})
+	expectRequestHeaderAll(t, h, HeaderHost, [][]byte{})
+	expectRequestHeaderAll(t, h, "aaa", [][]byte{})
 }
 func expectRequestHeaderAll(t *testing.T, h *RequestHeader, key string, expectedValue [][]byte) {
 	if len(h.PeekAll(key)) != len(expectedValue) {
@@ -2913,6 +2920,11 @@ func TestResponseHeader_PeekAll(t *testing.T) {
 	expectResponseHeaderAll(t, h, HeaderServer, [][]byte{s2b("aaaa")})
 	expectResponseHeaderAll(t, h, HeaderSetCookie, [][]byte{s2b("cccc")})
 	expectResponseHeaderAll(t, h, "aaa", [][]byte{s2b("aaa"), s2b("bbb")})
+
+	h.Del(HeaderContentType)
+	h.Del(HeaderContentEncoding)
+	expectResponseHeaderAll(t, h, HeaderContentType, [][]byte{defaultContentType})
+	expectResponseHeaderAll(t, h, HeaderContentEncoding, [][]byte{})
 }
 
 func expectResponseHeaderAll(t *testing.T, h *ResponseHeader, key string, expectedValue [][]byte) {
