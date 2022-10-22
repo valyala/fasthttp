@@ -2935,3 +2935,43 @@ func expectResponseHeaderAll(t *testing.T, h *ResponseHeader, key string, expect
 		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.PeekAll(key), expectedValue)
 	}
 }
+
+func TestRequestHeader_Keys(t *testing.T) {
+	h := &RequestHeader{}
+	h.Add(HeaderConnection, "keep-alive")
+	h.Add("Content-Type", "aaa")
+	err := h.SetTrailer("aaa,bbb,ccc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualKeys := h.PeekKeys()
+	expectedKeys := [][]byte{s2b("keep-alive"), s2b("aaa")}
+	if reflect.DeepEqual(actualKeys, expectedKeys) {
+		t.Fatalf("Unexpected value %q. Expected %q", actualKeys, expectedKeys)
+	}
+	actualTrailerKeys := h.PeekTrailerKeys()
+	expectedTrailerKeys := [][]byte{s2b("aaa"), s2b("bbb"), s2b("ccc")}
+	if reflect.DeepEqual(actualTrailerKeys, expectedTrailerKeys) {
+		t.Fatalf("Unexpected value %q. Expected %q", actualTrailerKeys, expectedTrailerKeys)
+	}
+}
+
+func TestResponseHeader_Keys(t *testing.T) {
+	h := &ResponseHeader{}
+	h.Add(HeaderConnection, "keep-alive")
+	h.Add("Content-Type", "aaa")
+	err := h.SetTrailer("aaa,bbb,ccc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualKeys := h.PeekKeys()
+	expectedKeys := [][]byte{s2b("keep-alive"), s2b("aaa")}
+	if reflect.DeepEqual(actualKeys, expectedKeys) {
+		t.Fatalf("Unexpected value %q. Expected %q", actualKeys, expectedKeys)
+	}
+	actualTrailerKeys := h.PeekTrailerKeys()
+	expectedTrailerKeys := [][]byte{s2b("aaa"), s2b("bbb"), s2b("ccc")}
+	if reflect.DeepEqual(actualTrailerKeys, expectedTrailerKeys) {
+		t.Fatalf("Unexpected value %q. Expected %q", actualTrailerKeys, expectedTrailerKeys)
+	}
+}

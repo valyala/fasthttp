@@ -1801,6 +1801,7 @@ func (h *RequestHeader) peek(key []byte) []byte {
 //
 // The returned value is valid until the request is released,
 // either though ReleaseRequest or your request handler returning.
+// Any call to the Peek* function will change the return values.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) PeekAll(key string) [][]byte {
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
@@ -1847,7 +1848,8 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 // PeekAll returns all header value for the given key.
 //
 // The returned value is valid until the request is released,
-// either though ReleaseRequest or your request handler returning.
+// either though ReleaseResponse or your request handler returning.
+// Any call to the Peek* function will change the return values.
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) PeekAll(key string) [][]byte {
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
@@ -1884,6 +1886,54 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 	default:
 		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 	}
+	return h.mulHeader
+}
+
+// PeekKeys return all header keys.
+//
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
+// Any call to the Peek* function will change the return values.
+// Do not store references to returned value. Make copies instead.
+func (h *RequestHeader) PeekKeys() [][]byte {
+	h.mulHeader = h.mulHeader[:0]
+	h.mulHeader = peekArgsKeys(h.mulHeader, h.h)
+	return h.mulHeader
+}
+
+// PeekTrailerKeys return all trailer keys.
+//
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
+// Any call to the Peek* function will change the return value.
+// Do not store references to returned value. Make copies instead.
+func (h *RequestHeader) PeekTrailerKeys() [][]byte {
+	h.mulHeader = h.mulHeader[:0]
+	h.mulHeader = peekArgsKeys(h.mulHeader, h.trailer)
+	return h.mulHeader
+}
+
+// PeekKeys return all header keys.
+//
+// The returned value is valid until the request is released,
+// either though ReleaseResponse or your request handler returning.
+// Any call to the Peek* function will change the return values.
+// Do not store references to returned value. Make copies instead.
+func (h *ResponseHeader) PeekKeys() [][]byte {
+	h.mulHeader = h.mulHeader[:0]
+	h.mulHeader = peekArgsKeys(h.mulHeader, h.h)
+	return h.mulHeader
+}
+
+// PeekTrailerKeys return all trailer keys.
+//
+// The returned value is valid until the request is released,
+// either though ReleaseResponse or your request handler returning.
+// Any call to the Peek* function will change the return values.
+// Do not store references to returned value. Make copies instead.
+func (h *ResponseHeader) PeekTrailerKeys() [][]byte {
+	h.mulHeader = h.mulHeader[:0]
+	h.mulHeader = peekArgsKeys(h.mulHeader, h.trailer)
 	return h.mulHeader
 }
 
