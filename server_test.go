@@ -763,6 +763,112 @@ func TestServerResponseBodyStream(t *testing.T) {
 	}
 }
 
+func TestServerResponseBodyStreamProxy(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	lnProxy := fasthttputil.NewInmemoryListener()
+
+	h := func(ctx *RequestCtx) {
+		ctx.SetConnectionClose()
+		body := []byte("body")
+		ctx.SetBodyStream(bytes.NewBuffer(body), len(body))
+	}
+
+	hProxy := func(ctx *RequestCtx) {
+		ctx.SetConnectionClose()
+
+		cli := Client{
+			Dial: func(addr string) (net.Conn, error) {
+				return lnProxy.Dial()
+			},
+		}
+		err := cli.Do(&ctx.Request, &ctx.Response)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		responseBodyStream := ctx.ResponseBodyStream()
+		ctx.Response.Body()
+		body, _ := io.ReadAll(responseBodyStream)
+		body = append(body, []byte(" append")...)
+		ctx.SetBodyStream(bytes.NewBuffer(body), len(body))
+	}
+
+	serverCh := make(chan struct{})
+	go func() {
+		if err := Serve(lnProxy, h); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverCh)
+	}()
+
+	serverProxyCh := make(chan struct{})
+	go func() {
+		if err := Serve(ln, hProxy); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverProxyCh)
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		br := bufio.NewReader(c)
+		var respH ResponseHeader
+		if err = respH.Read(br); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if respH.StatusCode() != StatusOK {
+			t.Errorf("unexpected status code: %d. Expecting %d", respH.StatusCode(), StatusOK)
+		}
+
+		buf := make([]byte, 1024)
+		n, err := br.Read(buf)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		b := buf[:n]
+		if string(b) != "body append" {
+			t.Errorf("unexpected result %q. Expecting %q", b, "body append")
+		}
+
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+
+	if err := lnProxy.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case <-serverProxyCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case <-serverCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
 func TestServerDisableKeepalive(t *testing.T) {
 	t.Parallel()
 

@@ -478,6 +478,13 @@ func (ctx *RequestCtx) RequestBodyStream() io.Reader {
 	return ctx.Request.bodyStream
 }
 
+func (ctx *RequestCtx) ResponseBodyStream() io.Reader {
+	if ctx.Response.bodyStream != nil {
+		return ctx.Response.bodyStream
+	}
+	return bytes.NewReader(ctx.Response.bodyBytes())
+}
+
 func inflateData(p []byte) ([]byte, error) {
 	var bb bytebufferpool.ByteBuffer
 	_, err := WriteInflate(&bb, p)
