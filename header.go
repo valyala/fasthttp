@@ -2520,8 +2520,8 @@ func (h *ResponseHeader) parseTrailer(buf []byte) (int, error) {
 				err = fmt.Errorf("forbidden trailer key %q", s.key)
 				continue
 			}
+			h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
 		}
-		h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
 	}
 	if s.err != nil {
 		return 0, s.err
