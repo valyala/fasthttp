@@ -1287,6 +1287,8 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 		// the end of body is determined by connection close.
 		// So just ignore request body for requests without
 		// 'Content-Length' and 'Transfer-Encoding' headers.
+
+		// refer to https://tools.ietf.org/html/rfc7230#section-3.3.2
 		if !req.Header.ignoreBody() {
 			req.Header.SetContentLength(0)
 		}
