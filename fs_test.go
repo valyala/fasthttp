@@ -539,7 +539,7 @@ func testFSMultiByteRangeOfWriteTo(t *testing.T, h RequestHandler, filePath stri
 		t.Fatalf("cannot read file %q: %s", filePath, err)
 	}
 
-	num := rand.Intn(20) + 2
+	num := rand.Intn(5) + 2
 
 	fileSize := len(expectedBody)
 	startPos, endPos := make([]int, 0), make([]int, 0)
@@ -655,7 +655,7 @@ func testFSMultiByteRangeOfRead(t *testing.T, h RequestHandler, filePath string)
 		t.Fatalf("cannot read file %q: %s", filePath, err)
 	}
 
-	num := rand.Intn(50) + 2
+	num := rand.Intn(5) + 2
 
 	fileSize := len(expectedBody)
 	startPos, endPos := make([]int, 0), make([]int, 0)
