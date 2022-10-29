@@ -1801,7 +1801,7 @@ func (h *RequestHeader) peek(key []byte) []byte {
 //
 // The returned value is valid until the request is released,
 // either though ReleaseRequest or your request handler returning.
-// Any call to the Peek* function will change the return values.
+// Any future calls to the Peek* will modify the returned value.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) PeekAll(key string) [][]byte {
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
@@ -1849,7 +1849,7 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 //
 // The returned value is valid until the request is released,
 // either though ReleaseResponse or your request handler returning.
-// Any call to the Peek* function will change the return values.
+// Any future calls to the Peek* will modify the returned value.
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) PeekAll(key string) [][]byte {
 	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
@@ -1893,7 +1893,7 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 //
 // The returned value is valid until the request is released,
 // either though ReleaseRequest or your request handler returning.
-// Any call to the Peek* function will change the return values.
+// Any future calls to the Peek* will modify the returned value.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) PeekKeys() [][]byte {
 	h.mulHeader = h.mulHeader[:0]
@@ -1905,7 +1905,7 @@ func (h *RequestHeader) PeekKeys() [][]byte {
 //
 // The returned value is valid until the request is released,
 // either though ReleaseRequest or your request handler returning.
-// Any call to the Peek* function will change the return value.
+// Any future calls to the Peek* will modify the returned value.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) PeekTrailerKeys() [][]byte {
 	h.mulHeader = h.mulHeader[:0]
@@ -1917,7 +1917,7 @@ func (h *RequestHeader) PeekTrailerKeys() [][]byte {
 //
 // The returned value is valid until the request is released,
 // either though ReleaseResponse or your request handler returning.
-// Any call to the Peek* function will change the return values.
+// Any future calls to the Peek* will modify the returned value.
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) PeekKeys() [][]byte {
 	h.mulHeader = h.mulHeader[:0]
@@ -1929,7 +1929,7 @@ func (h *ResponseHeader) PeekKeys() [][]byte {
 //
 // The returned value is valid until the request is released,
 // either though ReleaseResponse or your request handler returning.
-// Any call to the Peek* function will change the return values.
+// Any future calls to the Peek* will modify the returned value.
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) PeekTrailerKeys() [][]byte {
 	h.mulHeader = h.mulHeader[:0]
