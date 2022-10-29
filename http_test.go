@@ -1660,10 +1660,10 @@ func TestRequestReadLimitBody(t *testing.T) {
 }
 
 func testResponseReadLimitBodyError(t *testing.T, s string, maxBodySize int, expectedErr error) {
-	var req Response
+	var resp Response
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
-	err := req.ReadLimitBody(br, maxBodySize)
+	err := resp.ReadLimitBody(br, maxBodySize)
 	if err == nil {
 		t.Fatalf("expecting error. s=%q, maxBodySize=%d", s, maxBodySize)
 	}
@@ -1673,10 +1673,10 @@ func testResponseReadLimitBodyError(t *testing.T, s string, maxBodySize int, exp
 }
 
 func testResponseReadLimitBodySuccess(t *testing.T, s string, maxBodySize int) {
-	var req Response
+	var resp Response
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
-	if err := req.ReadLimitBody(br, maxBodySize); err != nil {
+	if err := resp.ReadLimitBody(br, maxBodySize); err != nil {
 		t.Fatalf("unexpected error: %v. s=%q, maxBodySize=%d", err, s, maxBodySize)
 	}
 }
