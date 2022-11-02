@@ -2290,3 +2290,7 @@ func round2(n int) int {
 
 	return int(x + 1)
 }
+
+func (req *Request) SetTimeout(t time.Duration) {
+	req.timeout = t
+}
