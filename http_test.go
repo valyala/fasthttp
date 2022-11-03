@@ -2949,3 +2949,87 @@ func TestResponseBodyStreamErrorOnPanicDuringClose(t *testing.T) {
 		t.Fatalf("unexpected error value, got: %+v.", e.Error())
 	}
 }
+
+func TestRequestMultipartFormPipeEmptyFormField(t *testing.T) {
+	t.Parallel()
+
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+
+	errs := make(chan error, 1)
+
+	go func() {
+		defer func() {
+			err := mw.Close()
+			if err != nil {
+				errs <- err
+			}
+			err = pw.Close()
+			if err != nil {
+				errs <- err
+			}
+			close(errs)
+		}()
+
+		if err := mw.WriteField("emptyField", ""); err != nil {
+			errs <- err
+		}
+	}()
+
+	var b bytes.Buffer
+	bw := bufio.NewWriter(&b)
+	err := writeBodyChunked(bw, pr)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for e := range errs {
+		t.Fatalf("unexpected error in goroutine multiwriter: %v", e)
+	}
+
+	testRequestMultipartFormPipeEmptyFormField(t, mw.Boundary(), b.Bytes(), 1)
+}
+
+func testRequestMultipartFormPipeEmptyFormField(t *testing.T, boundary string, formData []byte, partsCount int) []byte {
+	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=%s\r\nTransfer-Encoding: chunked\r\n\r\n%s",
+		boundary, formData)
+
+	var req Request
+
+	r := bytes.NewBufferString(s)
+	br := bufio.NewReader(r)
+	if err := req.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	f, err := req.MultipartForm()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer req.RemoveMultipartFormFiles()
+
+	if len(f.File) > 0 {
+		t.Fatalf("unexpected files found in the multipart form: %d", len(f.File))
+	}
+
+	if len(f.Value) != partsCount {
+		t.Fatalf("unexpected number of values found: %d. Expecting %d", len(f.Value), partsCount)
+	}
+
+	for k, vv := range f.Value {
+		if len(vv) != 1 {
+			t.Fatalf("unexpected number of values found for key=%q: %d. Expecting 1", k, len(vv))
+		}
+		if k != "emptyField" {
+			t.Fatalf("unexpected key=%q. Expecting %q", k, "emptyField")
+		}
+
+		v := vv[0]
+		if v != "" {
+			t.Fatalf("unexpected value=%q. expecting %q", v, "")
+		}
+	}
+
+	return req.Body()
+}
