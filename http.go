@@ -2001,7 +2001,7 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 		n, err = r.Read(buf)
 		if n == 0 {
 			if err == nil {
-				panic("BUG: io.Reader returned 0, nil")
+				continue
 			}
 			if err == io.EOF {
 				if err = writeChunk(w, buf[:0]); err != nil {
