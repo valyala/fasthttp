@@ -2290,3 +2290,11 @@ func round2(n int) int {
 
 	return int(x + 1)
 }
+
+// SetTimeout sets timeout for the request.
+//
+// req.SetTimeout(t); c.Do(&req, &resp) is equivalent to
+// c.DoTimeout(&req, &resp, t)
+func (req *Request) SetTimeout(t time.Duration) {
+	req.timeout = t
+}
