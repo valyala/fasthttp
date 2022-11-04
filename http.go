@@ -92,6 +92,10 @@ type Response struct {
 	// Relevant for bodyStream only.
 	ImmediateHeaderFlush bool
 
+	// StreamBody enables response body streaming.
+	// Response.BodyStream() get response body.
+	StreamBody bool
+
 	bodyStream io.Reader
 	w          responseBodyWriter
 	body       *bytebufferpool.ByteBuffer
@@ -291,6 +295,40 @@ func (resp *Response) SetBodyStreamWriter(sw StreamWriter) {
 func (resp *Response) BodyWriter() io.Writer {
 	resp.w.r = resp
 	return &resp.w
+}
+
+// BodyStream returns io.Reader
+//
+// You must close it after you use it.
+func (resp *Response) BodyStream() io.ReadCloser {
+	if resp.bodyStream == nil {
+		resp.bodyStream = bytes.NewReader(resp.Body())
+	}
+	return newCloseReader(resp.bodyStream, resp.closeBodyStream)
+}
+
+type closeReader struct {
+	io.Reader
+	closeFunc func() error
+	closeOnce sync.Once
+	err       error
+}
+
+func newCloseReader(r io.Reader, closeFunc func() error) io.ReadCloser {
+	if r == nil {
+		panic(`BUG: reader is nil`)
+	}
+	return &closeReader{Reader: r, closeFunc: closeFunc}
+}
+
+func (c *closeReader) Close() error {
+	if c.closeFunc == nil {
+		return nil
+	}
+	c.closeOnce.Do(func() {
+		c.err = c.closeFunc()
+	})
+	return c.err
 }
 
 // BodyWriter returns writer for populating request body.
@@ -1067,6 +1105,7 @@ func (resp *Response) Reset() {
 	resp.raddr = nil
 	resp.laddr = nil
 	resp.ImmediateHeaderFlush = false
+	resp.StreamBody = false
 }
 
 func (resp *Response) resetSkipHeader() {
@@ -1359,7 +1398,7 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		}
 	}
 
-	if resp.Header.ContentLength() == -1 {
+	if resp.Header.ContentLength() == -1 && !resp.StreamBody {
 		err = resp.Header.ReadTrailer(r)
 		if err != nil && err != io.EOF {
 			if isConnectionReset(err) {
@@ -1382,13 +1421,22 @@ func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
 	contentLength := resp.Header.ContentLength()
 	if contentLength >= 0 {
 		bodyBuf.B, err = readBody(r, contentLength, maxBodySize, bodyBuf.B)
-
+		if err == ErrBodyTooLarge && resp.StreamBody {
+			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
+			err = nil
+		}
 	} else if contentLength == -1 {
-		bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
-
+		if resp.StreamBody {
+			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
+		} else {
+			bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
+		}
 	} else {
 		bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
 		resp.Header.SetContentLength(len(bodyBuf.B))
+	}
+	if resp.StreamBody && resp.bodyStream == nil {
+		resp.bodyStream = bytes.NewBuffer(bodyBuf.B)
 	}
 	return err
 }
@@ -1950,6 +1998,9 @@ func (resp *Response) closeBodyStream() error {
 	var err error
 	if bsc, ok := resp.bodyStream.(io.Closer); ok {
 		err = bsc.Close()
+	}
+	if bsr, ok := resp.bodyStream.(*requestStream); ok {
+		releaseRequestStream(bsr)
 	}
 	resp.bodyStream = nil
 	return err
