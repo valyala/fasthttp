@@ -9,11 +9,13 @@ import (
 	"github.com/valyala/bytebufferpool"
 )
 
+type headerInterface interface {
+	ContentLength() int
+	ReadTrailer(r *bufio.Reader) error
+}
+
 type requestStream struct {
-	header interface {
-		ContentLength() int
-		ReadTrailer(r *bufio.Reader) error
-	}
+	header          headerInterface
 	prefetchedBytes *bytes.Reader
 	reader          *bufio.Reader
 	totalBytesRead  int
@@ -88,10 +90,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h interface {
-	ContentLength() int
-	ReadTrailer(r *bufio.Reader) error
-}) *requestStream {
+func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h headerInterface) *requestStream {
 	rs := requestStreamPool.Get().(*requestStream)
 	rs.prefetchedBytes = bytes.NewReader(b.B)
 	rs.reader = r
