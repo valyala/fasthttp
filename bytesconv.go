@@ -332,14 +332,12 @@ func b2s(b []byte) string {
 // Note it may break if string and/or slice header will change
 // in the future go versions.
 func s2b(s string) (b []byte) {
-	/* #nosec G103 */
-	bh := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	/* #nosec G103 */
-	sh := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	bh.Data = sh.Data
-	bh.Cap = sh.Len
-	bh.Len = sh.Len
-	return b
+	if s == "" {
+		return nil // or []byte{}
+	}
+	return (*[0x7fff0000]byte)(unsafe.Pointer(
+		(*reflect.StringHeader)(unsafe.Pointer(&s)).Data),
+	)[:len(s):len(s)]
 }
 
 // AppendUnquotedArg appends url-decoded src to dst and returns appended dst.
