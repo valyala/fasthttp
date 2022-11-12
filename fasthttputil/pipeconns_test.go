@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"testing"
 	"time"
@@ -162,7 +161,7 @@ func testPipeConnsCloseWhileReadWrite(t *testing.T) {
 	readCh := make(chan error)
 	go func() {
 		var err error
-		if _, err = io.Copy(ioutil.Discard, c1); err != nil {
+		if _, err = io.Copy(io.Discard, c1); err != nil {
 			if err != errConnectionClosed {
 				err = fmt.Errorf("unexpected error: %w", err)
 			} else {

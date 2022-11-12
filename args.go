@@ -343,7 +343,7 @@ func (a *Args) GetUfloatOrZero(key string) float64 {
 // true is returned for "1", "t", "T", "true", "TRUE", "True", "y", "yes", "Y", "YES", "Yes",
 // otherwise false is returned.
 func (a *Args) GetBool(key string) bool {
-	switch b2s(a.Peek(key)) {
+	switch string(a.Peek(key)) {
 	// Support the same true cases as strconv.ParseBool
 	// See: https://github.com/golang/go/blob/4e1b11e2c9bdb0ddea1141eed487be1a626ff5be/src/strconv/atob.go#L12
 	// and Y and Yes versions.
@@ -620,6 +620,24 @@ func decodeArgAppendNoPlus(dst, src []byte) []byte {
 		} else {
 			dst = append(dst, c)
 		}
+	}
+	return dst
+}
+
+func peekAllArgBytesToDst(dst [][]byte, h []argsKV, k []byte) [][]byte {
+	for i, n := 0, len(h); i < n; i++ {
+		kv := &h[i]
+		if bytes.Equal(kv.key, k) {
+			dst = append(dst, kv.value)
+		}
+	}
+	return dst
+}
+
+func peekArgsKeys(dst [][]byte, h []argsKV) [][]byte {
+	for i, n := 0, len(h); i < n; i++ {
+		kv := &h[i]
+		dst = append(dst, kv.key)
 	}
 	return dst
 }

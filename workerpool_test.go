@@ -1,7 +1,7 @@
 package fasthttp
 
 import (
-	"io/ioutil"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -118,7 +118,7 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 			if _, err = conn.Write([]byte("foobar")); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			data, err := ioutil.ReadAll(conn)
+			data, err := io.ReadAll(conn)
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}

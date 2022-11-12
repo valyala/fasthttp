@@ -1,8 +1,7 @@
 package fasthttpadaptor
 
 import (
-	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -20,7 +19,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	expectedProtoMajor := 1
 	expectedProtoMinor := 1
 	expectedRequestURI := "/foo/bar?baz=123"
-	expectedBody := "body 123 foo bar baz"
+	expectedBody := "<!doctype html><html>"
 	expectedContentLength := len(expectedBody)
 	expectedHost := "foobar.com"
 	expectedRemoteAddr := "1.2.3.4:6789"
@@ -35,6 +34,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	}
 	expectedContextKey := "contextKey"
 	expectedContextValue := "contextValue"
+	expectedContentType := "text/html; charset=utf-8"
 
 	callsCount := 0
 	nethttpH := func(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +66,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		if r.RemoteAddr != expectedRemoteAddr {
 			t.Fatalf("unexpected remoteAddr %q. Expecting %q", r.RemoteAddr, expectedRemoteAddr)
 		}
-		body, err := ioutil.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
 		r.Body.Close()
 		if err != nil {
 			t.Fatalf("unexpected error when reading request body: %v", err)
@@ -91,7 +91,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		w.Header().Set("Header1", "value1")
 		w.Header().Set("Header2", "value2")
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "request body is %q", body)
+		w.Write(body) //nolint:errcheck
 	}
 	fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH))
 	fasthttpH = setContextValueMiddleware(fasthttpH, expectedContextKey, expectedContextValue)
@@ -129,9 +129,11 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	if string(resp.Header.Peek("Header2")) != "value2" {
 		t.Fatalf("unexpected header value: %q. Expecting %q", resp.Header.Peek("Header2"), "value2")
 	}
-	expectedResponseBody := fmt.Sprintf("request body is %q", expectedBody)
-	if string(resp.Body()) != expectedResponseBody {
-		t.Fatalf("unexpected response body %q. Expecting %q", resp.Body(), expectedResponseBody)
+	if string(resp.Body()) != expectedBody {
+		t.Fatalf("unexpected response body %q. Expecting %q", resp.Body(), expectedBody)
+	}
+	if string(resp.Header.Peek("Content-Type")) != expectedContentType {
+		t.Fatalf("unexpected response content-type %q. Expecting %q", string(resp.Header.Peek("Content-Type")), expectedBody)
 	}
 }
 
@@ -139,34 +141,5 @@ func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value i
 	return func(ctx *fasthttp.RequestCtx) {
 		ctx.SetUserValue(key, value)
 		next(ctx)
-	}
-}
-
-func TestContentType(t *testing.T) {
-	t.Parallel()
-
-	nethttpH := func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("<!doctype html><html>")) //nolint:errcheck
-	}
-	fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH))
-
-	var ctx fasthttp.RequestCtx
-	var req fasthttp.Request
-
-	req.SetRequestURI("http://example.com")
-
-	remoteAddr, err := net.ResolveTCPAddr("tcp", "1.2.3.4:80")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	ctx.Init(&req, remoteAddr, nil)
-
-	fasthttpH(&ctx)
-
-	resp := &ctx.Response
-	got := string(resp.Header.Peek("Content-Type"))
-	expected := "text/html; charset=utf-8"
-	if got != expected {
-		t.Errorf("expected %q got %q", expected, got)
 	}
 }

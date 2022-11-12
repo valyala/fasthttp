@@ -33,6 +33,26 @@ func TestResponseHeaderAddContentType(t *testing.T) {
 	}
 }
 
+func TestResponseHeaderAddContentEncoding(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	h.Add("Content-Encoding", "test")
+
+	got := string(h.Peek("Content-Encoding"))
+	expected := "test"
+	if got != expected {
+		t.Errorf("expected %q got %q", expected, got)
+	}
+
+	var buf bytes.Buffer
+	h.WriteTo(&buf) //nolint:errcheck
+
+	if n := strings.Count(buf.String(), "Content-Encoding: "); n != 1 {
+		t.Errorf("Content-Encoding occurred %d times", n)
+	}
+}
+
 func TestResponseHeaderMultiLineValue(t *testing.T) {
 	t.Parallel()
 
@@ -600,6 +620,7 @@ func TestResponseHeaderDel(t *testing.T) {
 	h.Set("aaa", "bbb")
 	h.Set(HeaderConnection, "keep-alive")
 	h.Set(HeaderContentType, "aaa")
+	h.Set(HeaderContentEncoding, "gzip")
 	h.Set(HeaderServer, "aaabbb")
 	h.Set(HeaderContentLength, "1123")
 	h.Set(HeaderTrailer, "foo, bar")
@@ -632,6 +653,10 @@ func TestResponseHeaderDel(t *testing.T) {
 	hv = h.Peek(HeaderContentType)
 	if string(hv) != string(defaultContentType) {
 		t.Fatalf("unexpected content-type: %q. Expecting %q", hv, defaultContentType)
+	}
+	hv = h.Peek(HeaderContentEncoding)
+	if string(hv) != ("gzip") {
+		t.Fatalf("unexpected content-encoding: %q. Expecting %q", hv, "gzip")
 	}
 	hv = h.Peek(HeaderServer)
 	if len(hv) > 0 {
@@ -949,7 +974,7 @@ func TestRequestHeaderSetByteRange(t *testing.T) {
 
 func testRequestHeaderSetByteRange(t *testing.T, startPos, endPos int, expectedV string) {
 	var h RequestHeader
-	h.SetByteRange(startPos, endPos)
+	h.SetByteRanges([]int{startPos}, []int{endPos})
 	v := h.Peek(HeaderRange)
 	if string(v) != expectedV {
 		t.Fatalf("unexpected range: %q. Expecting %q. startPos=%d, endPos=%d", v, expectedV, startPos, endPos)
@@ -1274,6 +1299,7 @@ func TestResponseHeaderCopyTo(t *testing.T) {
 
 	h.Set(HeaderSetCookie, "foo=bar")
 	h.Set(HeaderContentType, "foobar")
+	h.Set(HeaderContentEncoding, "gzip")
 	h.Set("AAA-BBB", "aaaa")
 	h.Set(HeaderTrailer, "foo, bar")
 
@@ -1284,6 +1310,9 @@ func TestResponseHeaderCopyTo(t *testing.T) {
 	}
 	if !bytes.Equal(h1.Peek(HeaderContentType), h.Peek(HeaderContentType)) {
 		t.Fatalf("unexpected content-type %q. Expected %q", h1.Peek("content-type"), h.Peek("content-type"))
+	}
+	if !bytes.Equal(h1.Peek(HeaderContentEncoding), h.Peek(HeaderContentEncoding)) {
+		t.Fatalf("unexpected content-encoding %q. Expected %q", h1.Peek("content-encoding"), h.Peek("content-encoding"))
 	}
 	if !bytes.Equal(h1.Peek("aaa-bbb"), h.Peek("AAA-BBB")) {
 		t.Fatalf("unexpected aaa-bbb %q. Expected %q", h1.Peek("aaa-bbb"), h.Peek("aaa-bbb"))
@@ -1308,6 +1337,7 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 
 	h.Set(HeaderCookie, "aa=bb; cc=dd")
 	h.Set(HeaderContentType, "foobar")
+	h.Set(HeaderContentEncoding, "gzip")
 	h.Set(HeaderHost, "aaaa")
 	h.Set("aaaxxx", "123")
 	h.Set(HeaderTrailer, "foo, bar")
@@ -1319,6 +1349,9 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	}
 	if !bytes.Equal(h1.Peek("content-type"), h.Peek(HeaderContentType)) {
 		t.Fatalf("unexpected content-type %q. Expected %q", h1.Peek("content-type"), h.Peek("content-type"))
+	}
+	if !bytes.Equal(h1.Peek("content-encoding"), h.Peek(HeaderContentEncoding)) {
+		t.Fatalf("unexpected content-encoding %q. Expected %q", h1.Peek("content-encoding"), h.Peek("content-encoding"))
 	}
 	if !bytes.Equal(h1.Peek("host"), h.Peek("host")) {
 		t.Fatalf("unexpected host %q. Expected %q", h1.Peek("host"), h.Peek("host"))
@@ -1513,17 +1546,18 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 
 	var h ResponseHeader
 
-	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 123\r\nSet-Cookie: aa=bb; path=/foo/bar\r\nSet-Cookie: ccc\r\nTrailer: Foo, Bar\r\n\r\n")
+	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: 123\r\nSet-Cookie: aa=bb; path=/foo/bar\r\nSet-Cookie: ccc\r\nTrailer: Foo, Bar\r\n\r\n")
 	br := bufio.NewReader(r)
 	if err := h.Read(br); err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	if h.Len() != 5 {
-		t.Fatalf("Unexpected number of headers: %d. Expected 5", h.Len())
+	if h.Len() != 6 {
+		t.Fatalf("Unexpected number of headers: %d. Expected 6", h.Len())
 	}
 	contentLengthCount := 0
 	contentTypeCount := 0
+	contentEncodingCount := 0
 	cookieCount := 0
 	h.VisitAll(func(key, value []byte) {
 		k := string(key)
@@ -1539,6 +1573,11 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 				t.Fatalf("Unexpected content-type: %q. Expected %q", v, h.Peek(k))
 			}
 			contentTypeCount++
+		case HeaderContentEncoding:
+			if v != string(h.Peek(k)) {
+				t.Fatalf("Unexpected content-encoding: %q. Expected %q", v, h.Peek(k))
+			}
+			contentEncodingCount++
 		case HeaderSetCookie:
 			if cookieCount == 0 && v != "aa=bb; path=/foo/bar" {
 				t.Fatalf("unexpected cookie header: %q. Expected %q", v, "aa=bb; path=/foo/bar")
@@ -1560,6 +1599,9 @@ func TestResponseHeaderVisitAll(t *testing.T) {
 	}
 	if contentTypeCount != 1 {
 		t.Fatalf("unexpected number of content-type headers: %d. Expected 1", contentTypeCount)
+	}
+	if contentEncodingCount != 1 {
+		t.Fatalf("unexpected number of content-encoding headers: %d. Expected 1", contentEncodingCount)
 	}
 	if cookieCount != 2 {
 		t.Fatalf("unexpected number of cookie header: %d. Expected 2", cookieCount)
@@ -1900,7 +1942,7 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek(HeaderSetCookie), "foo=bar")
 	}
 	cookieSeen := false
-	h.VisitAll(func(key, value []byte) {
+	h.VisitAll(func(key, _ []byte) {
 		switch string(key) {
 		case HeaderSetCookie:
 			cookieSeen = true
@@ -1921,7 +1963,7 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek(HeaderSetCookie), "foo=bar")
 	}
 	cookieSeen = false
-	h.VisitAll(func(key, value []byte) {
+	h.VisitAll(func(key, _ []byte) {
 		switch string(key) {
 		case HeaderSetCookie:
 			cookieSeen = true
@@ -1945,7 +1987,7 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek(HeaderCookie), "foo=bar")
 	}
 	cookieSeen := false
-	h.VisitAll(func(key, value []byte) {
+	h.VisitAll(func(key, _ []byte) {
 		switch string(key) {
 		case HeaderCookie:
 			cookieSeen = true
@@ -1963,7 +2005,7 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek(HeaderCookie), "foo=bar")
 	}
 	cookieSeen = false
-	h.VisitAll(func(key, value []byte) {
+	h.VisitAll(func(key, _ []byte) {
 		switch string(key) {
 		case HeaderCookie:
 			cookieSeen = true
@@ -2081,6 +2123,7 @@ func TestResponseHeaderSetGet(t *testing.T) {
 	h := &ResponseHeader{}
 	h.Set("foo", "bar")
 	h.Set("content-type", "aaa/bbb")
+	h.Set("content-encoding", "gzip")
 	h.Set("connection", "close")
 	h.Set("content-length", "1234")
 	h.Set(HeaderServer, "aaaa")
@@ -2089,6 +2132,7 @@ func TestResponseHeaderSetGet(t *testing.T) {
 
 	expectResponseHeaderGet(t, h, "Foo", "bar")
 	expectResponseHeaderGet(t, h, HeaderContentType, "aaa/bbb")
+	expectResponseHeaderGet(t, h, HeaderContentEncoding, "gzip")
 	expectResponseHeaderGet(t, h, HeaderConnection, "close")
 	expectResponseHeaderGet(t, h, HeaderContentLength, "1234")
 	expectResponseHeaderGet(t, h, "seRVer", "aaaa")
@@ -2127,6 +2171,7 @@ func TestResponseHeaderSetGet(t *testing.T) {
 
 	expectResponseHeaderGet(t, &h1, "Foo", "bar")
 	expectResponseHeaderGet(t, &h1, HeaderContentType, "aaa/bbb")
+	expectResponseHeaderGet(t, &h1, HeaderContentEncoding, "gzip")
 	expectResponseHeaderGet(t, &h1, HeaderConnection, "close")
 	expectResponseHeaderGet(t, &h1, "seRVer", "aaaa")
 	expectResponseHeaderGet(t, &h1, "baz", "xxxxx")
@@ -2244,14 +2289,14 @@ func TestResponseHeaderBufioPeek(t *testing.T) {
 	t.Parallel()
 
 	r := &bufioPeekReader{
-		s: "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nContent-Type: aaa\r\n" + getHeaders(10) + "\r\n0123456789",
+		s: "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\n" + getHeaders(10) + "\r\n0123456789",
 	}
 	br := bufio.NewReaderSize(r, 4096)
 	h := &ResponseHeader{}
 	if err := h.Read(br); err != nil {
 		t.Fatalf("Unexpected error when reading response: %v", err)
 	}
-	verifyResponseHeader(t, h, 200, 10, "aaa")
+	verifyResponseHeader(t, h, 200, 10, "text/plain", "gzip")
 }
 
 func getHeaders(n int) string {
@@ -2720,7 +2765,7 @@ func testResponseHeaderReadSuccess(t *testing.T, h *ResponseHeader, headers stri
 	if err != nil {
 		t.Fatalf("Unexpected error when parsing response headers: %v. headers=%q", err, headers)
 	}
-	verifyResponseHeader(t, h, expectedStatusCode, expectedContentLength, expectedContentType)
+	verifyResponseHeader(t, h, expectedStatusCode, expectedContentLength, expectedContentType, "")
 }
 
 func testRequestHeaderReadSuccess(t *testing.T, h *RequestHeader, headers string, expectedContentLength int,
@@ -2734,15 +2779,18 @@ func testRequestHeaderReadSuccess(t *testing.T, h *RequestHeader, headers string
 	verifyRequestHeader(t, h, expectedContentLength, expectedRequestURI, expectedHost, expectedReferer, expectedContentType)
 }
 
-func verifyResponseHeader(t *testing.T, h *ResponseHeader, expectedStatusCode, expectedContentLength int, expectedContentType string) {
+func verifyResponseHeader(t *testing.T, h *ResponseHeader, expectedStatusCode, expectedContentLength int, expectedContentType, expectedContentEncoding string) {
 	if h.StatusCode() != expectedStatusCode {
 		t.Fatalf("Unexpected status code %d. Expected %d", h.StatusCode(), expectedStatusCode)
 	}
 	if h.ContentLength() != expectedContentLength {
 		t.Fatalf("Unexpected content length %d. Expected %d", h.ContentLength(), expectedContentLength)
 	}
-	if string(h.Peek(HeaderContentType)) != expectedContentType {
-		t.Fatalf("Unexpected content type %q. Expected %q", h.Peek(HeaderContentType), expectedContentType)
+	if string(h.ContentType()) != expectedContentType {
+		t.Fatalf("Unexpected content type %q. Expected %q", h.ContentType(), expectedContentType)
+	}
+	if string(h.ContentEncoding()) != expectedContentEncoding {
+		t.Fatalf("Unexpected content encoding %q. Expected %q", h.ContentEncoding(), expectedContentEncoding)
 	}
 }
 
@@ -2812,4 +2860,118 @@ func verifyTrailer(t *testing.T, r *bufio.Reader, expectedTrailers map[string]st
 		t.Fatalf("Cannot read trailer: %v", err)
 	}
 	verifyResponseTrailer(t, &resp.Header, expectedTrailers)
+}
+
+func TestRequestHeader_PeekAll(t *testing.T) {
+	t.Parallel()
+	h := &RequestHeader{}
+	h.Add(HeaderConnection, "keep-alive")
+	h.Add("Content-Type", "aaa")
+	h.Add(HeaderHost, "aaabbb")
+	h.Add("User-Agent", "asdfas")
+	h.Add("Content-Length", "1123")
+	h.Add("Cookie", "foobar=baz")
+	h.Add(HeaderTrailer, "foo, bar")
+	h.Add("aaa", "aaa")
+	h.Add("aaa", "bbb")
+
+	expectRequestHeaderAll(t, h, HeaderConnection, [][]byte{s2b("keep-alive")})
+	expectRequestHeaderAll(t, h, "Content-Type", [][]byte{s2b("aaa")})
+	expectRequestHeaderAll(t, h, HeaderHost, [][]byte{s2b("aaabbb")})
+	expectRequestHeaderAll(t, h, "User-Agent", [][]byte{s2b("asdfas")})
+	expectRequestHeaderAll(t, h, "Content-Length", [][]byte{s2b("1123")})
+	expectRequestHeaderAll(t, h, "Cookie", [][]byte{s2b("foobar=baz")})
+	expectRequestHeaderAll(t, h, HeaderTrailer, [][]byte{s2b("Foo, Bar")})
+	expectRequestHeaderAll(t, h, "aaa", [][]byte{s2b("aaa"), s2b("bbb")})
+
+	h.Del("Content-Type")
+	h.Del(HeaderHost)
+	h.Del("aaa")
+	expectRequestHeaderAll(t, h, "Content-Type", [][]byte{})
+	expectRequestHeaderAll(t, h, HeaderHost, [][]byte{})
+	expectRequestHeaderAll(t, h, "aaa", [][]byte{})
+}
+func expectRequestHeaderAll(t *testing.T, h *RequestHeader, key string, expectedValue [][]byte) {
+	if len(h.PeekAll(key)) != len(expectedValue) {
+		t.Fatalf("Unexpected size for key %q: %d. Expected %d", key, len(h.PeekAll(key)), len(expectedValue))
+	}
+	if !reflect.DeepEqual(h.PeekAll(key), expectedValue) {
+		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.PeekAll(key), expectedValue)
+	}
+}
+
+func TestResponseHeader_PeekAll(t *testing.T) {
+	t.Parallel()
+
+	h := &ResponseHeader{}
+	h.Add(HeaderContentType, "aaa/bbb")
+	h.Add(HeaderContentEncoding, "gzip")
+	h.Add(HeaderConnection, "close")
+	h.Add(HeaderContentLength, "1234")
+	h.Add(HeaderServer, "aaaa")
+	h.Add(HeaderSetCookie, "cccc")
+	h.Add("aaa", "aaa")
+	h.Add("aaa", "bbb")
+
+	expectResponseHeaderAll(t, h, HeaderContentType, [][]byte{s2b("aaa/bbb")})
+	expectResponseHeaderAll(t, h, HeaderContentEncoding, [][]byte{s2b("gzip")})
+	expectResponseHeaderAll(t, h, HeaderConnection, [][]byte{s2b("close")})
+	expectResponseHeaderAll(t, h, HeaderContentLength, [][]byte{s2b("1234")})
+	expectResponseHeaderAll(t, h, HeaderServer, [][]byte{s2b("aaaa")})
+	expectResponseHeaderAll(t, h, HeaderSetCookie, [][]byte{s2b("cccc")})
+	expectResponseHeaderAll(t, h, "aaa", [][]byte{s2b("aaa"), s2b("bbb")})
+
+	h.Del(HeaderContentType)
+	h.Del(HeaderContentEncoding)
+	expectResponseHeaderAll(t, h, HeaderContentType, [][]byte{defaultContentType})
+	expectResponseHeaderAll(t, h, HeaderContentEncoding, [][]byte{})
+}
+
+func expectResponseHeaderAll(t *testing.T, h *ResponseHeader, key string, expectedValue [][]byte) {
+	if len(h.PeekAll(key)) != len(expectedValue) {
+		t.Fatalf("Unexpected size for key %q: %d. Expected %d", key, len(h.PeekAll(key)), len(expectedValue))
+	}
+	if !reflect.DeepEqual(h.PeekAll(key), expectedValue) {
+		t.Fatalf("Unexpected value for key %q: %q. Expected %q", key, h.PeekAll(key), expectedValue)
+	}
+}
+
+func TestRequestHeader_Keys(t *testing.T) {
+	h := &RequestHeader{}
+	h.Add(HeaderConnection, "keep-alive")
+	h.Add("Content-Type", "aaa")
+	err := h.SetTrailer("aaa,bbb,ccc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualKeys := h.PeekKeys()
+	expectedKeys := [][]byte{s2b("keep-alive"), s2b("aaa")}
+	if reflect.DeepEqual(actualKeys, expectedKeys) {
+		t.Fatalf("Unexpected value %q. Expected %q", actualKeys, expectedKeys)
+	}
+	actualTrailerKeys := h.PeekTrailerKeys()
+	expectedTrailerKeys := [][]byte{s2b("aaa"), s2b("bbb"), s2b("ccc")}
+	if reflect.DeepEqual(actualTrailerKeys, expectedTrailerKeys) {
+		t.Fatalf("Unexpected value %q. Expected %q", actualTrailerKeys, expectedTrailerKeys)
+	}
+}
+
+func TestResponseHeader_Keys(t *testing.T) {
+	h := &ResponseHeader{}
+	h.Add(HeaderConnection, "keep-alive")
+	h.Add("Content-Type", "aaa")
+	err := h.SetTrailer("aaa,bbb,ccc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualKeys := h.PeekKeys()
+	expectedKeys := [][]byte{s2b("keep-alive"), s2b("aaa")}
+	if reflect.DeepEqual(actualKeys, expectedKeys) {
+		t.Fatalf("Unexpected value %q. Expected %q", actualKeys, expectedKeys)
+	}
+	actualTrailerKeys := h.PeekTrailerKeys()
+	expectedTrailerKeys := [][]byte{s2b("aaa"), s2b("bbb"), s2b("ccc")}
+	if reflect.DeepEqual(actualTrailerKeys, expectedTrailerKeys) {
+		t.Fatalf("Unexpected value %q. Expected %q", actualTrailerKeys, expectedTrailerKeys)
+	}
 }

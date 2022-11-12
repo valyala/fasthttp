@@ -3,6 +3,7 @@
 package fasthttpadaptor
 
 import (
+	"io"
 	"net/http"
 
 	"github.com/valyala/fasthttp"
@@ -15,11 +16,11 @@ import (
 // it has the following drawbacks comparing to using manually written fasthttp
 // request handler:
 //
-//     * A lot of useful functionality provided by fasthttp is missing
-//       from net/http handler.
-//     * net/http -> fasthttp handler conversion has some overhead,
-//       so the returned handler will be always slower than manually written
-//       fasthttp handler.
+//   - A lot of useful functionality provided by fasthttp is missing
+//     from net/http handler.
+//   - net/http -> fasthttp handler conversion has some overhead,
+//     so the returned handler will be always slower than manually written
+//     fasthttp handler.
 //
 // So it is advisable using this function only for quick net/http -> fasthttp
 // switching. Then manually convert net/http handlers to fasthttp handlers
@@ -35,11 +36,11 @@ func NewFastHTTPHandlerFunc(h http.HandlerFunc) fasthttp.RequestHandler {
 // it has the following drawbacks comparing to using manually written fasthttp
 // request handler:
 //
-//     * A lot of useful functionality provided by fasthttp is missing
-//       from net/http handler.
-//     * net/http -> fasthttp handler conversion has some overhead,
-//       so the returned handler will be always slower than manually written
-//       fasthttp handler.
+//   - A lot of useful functionality provided by fasthttp is missing
+//     from net/http handler.
+//   - net/http -> fasthttp handler conversion has some overhead,
+//     so the returned handler will be always slower than manually written
+//     fasthttp handler.
 //
 // So it is advisable using this function only for quick net/http -> fasthttp
 // switching. Then manually convert net/http handlers to fasthttp handlers
@@ -53,7 +54,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			return
 		}
 
-		var w netHTTPResponseWriter
+		w := netHTTPResponseWriter{w: ctx.Response.BodyWriter()}
 		h.ServeHTTP(&w, r.WithContext(ctx))
 
 		ctx.SetStatusCode(w.StatusCode())
@@ -72,19 +73,19 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// If the Header does not contain a Content-Type line, Write adds a Content-Type set
 			// to the result of passing the initial 512 bytes of written data to DetectContentType.
 			l := 512
-			if len(w.body) < 512 {
-				l = len(w.body)
+			b := ctx.Response.Body()
+			if len(b) < 512 {
+				l = len(b)
 			}
-			ctx.Response.Header.Set(fasthttp.HeaderContentType, http.DetectContentType(w.body[:l]))
+			ctx.Response.Header.Set(fasthttp.HeaderContentType, http.DetectContentType(b[:l]))
 		}
-		ctx.Write(w.body) //nolint:errcheck
 	}
 }
 
 type netHTTPResponseWriter struct {
 	statusCode int
 	h          http.Header
-	body       []byte
+	w          io.Writer
 }
 
 func (w *netHTTPResponseWriter) StatusCode() int {
@@ -106,6 +107,5 @@ func (w *netHTTPResponseWriter) WriteHeader(statusCode int) {
 }
 
 func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
-	w.body = append(w.body, p...)
-	return len(p), nil
+	return w.w.Write(p)
 }

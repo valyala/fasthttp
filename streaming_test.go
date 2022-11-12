@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -36,7 +36,7 @@ aaaaaaaaaa`
 			if string(ctx.Path()) == "/one" {
 				body = string(ctx.PostBody())
 			} else {
-				all, err := ioutil.ReadAll(ctx.RequestBodyStream())
+				all, err := io.ReadAll(ctx.RequestBodyStream())
 				if err != nil {
 					t.Error(err)
 				}
@@ -106,9 +106,9 @@ func getChunkedTestEnv(t testing.TB) (*fasthttputil.InmemoryListener, []byte) {
 	chunkedBody := createChunkedBody(body, nil, true)
 
 	testHandler := func(ctx *RequestCtx) {
-		bodyBytes, err := ioutil.ReadAll(ctx.RequestBodyStream())
+		bodyBytes, err := io.ReadAll(ctx.RequestBodyStream())
 		if err != nil {
-			t.Logf("ioutil read returned err=%v", err)
+			t.Logf("io read returned err=%v", err)
 			t.Error("unexpected error while reading request body stream")
 		}
 
@@ -164,7 +164,7 @@ Trailer: Foo, Bar
 	s := &Server{
 		StreamRequestBody: true,
 		Handler: func(ctx *RequestCtx) {
-			all, err := ioutil.ReadAll(ctx.RequestBodyStream())
+			all, err := io.ReadAll(ctx.RequestBodyStream())
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
