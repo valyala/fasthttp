@@ -371,9 +371,10 @@ func visitArgsKey(args []argsKV, f func(k []byte)) {
 func copyArgs(dst, src []argsKV) []argsKV {
 	if cap(dst) < len(src) {
 		tmp := make([]argsKV, len(src))
+		dstLen := len(dst)
 		dst = dst[:cap(dst)] // copy all of dst.
 		copy(tmp, dst)
-		for i := len(dst); i < len(tmp); i++ {
+		for i := dstLen; i < len(tmp); i++ {
 			// Make sure nothing is nil.
 			tmp[i].key = []byte{}
 			tmp[i].value = []byte{}
