@@ -907,7 +907,7 @@ type clientURLResponse struct {
 }
 
 func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDoer) (statusCode int, body []byte, err error) {
-	timeout := -time.Since(deadline)
+	timeout := time.Until(deadline)
 	if timeout <= 0 {
 		return 0, dst, ErrTimeout
 	}
@@ -2361,7 +2361,7 @@ func (c *PipelineClient) DoDeadline(req *Request, resp *Response, deadline time.
 func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	c.init()
 
-	timeout := -time.Since(deadline)
+	timeout := time.Until(deadline)
 	if timeout < 0 {
 		return ErrTimeout
 	}

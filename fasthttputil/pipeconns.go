@@ -266,7 +266,7 @@ func updateTimer(t *time.Timer, deadline time.Time) <-chan time.Time {
 	if deadline.IsZero() {
 		return nil
 	}
-	d := -time.Since(deadline)
+	d := time.Until(deadline)
 	if d <= 0 {
 		return closedDeadlineCh
 	}
