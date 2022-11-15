@@ -1975,6 +1975,8 @@ func (resp *Response) String() string {
 
 func getHTTPString(hw httpWriter) string {
 	w := bytebufferpool.Get()
+	defer bytebufferpool.Put(w)
+
 	bw := bufio.NewWriter(w)
 	if err := hw.Write(bw); err != nil {
 		return err.Error()
@@ -1983,7 +1985,6 @@ func getHTTPString(hw httpWriter) string {
 		return err.Error()
 	}
 	s := string(w.B)
-	bytebufferpool.Put(w)
 	return s
 }
 
