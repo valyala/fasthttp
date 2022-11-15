@@ -1871,27 +1871,7 @@ func (s *Server) Shutdown() error {
 
 func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.Conn, error) {
 	for {
-		var c net.Conn
-		var err error
-		if tl, ok := ln.(*net.TCPListener); ok && s.TCPKeepalive {
-			var tc *net.TCPConn
-			tc, err = tl.AcceptTCP()
-			if err == nil {
-				if err := tc.SetKeepAlive(s.TCPKeepalive); err != nil {
-					tc.Close() //nolint:errcheck
-					return nil, err
-				}
-				if s.TCPKeepalivePeriod > 0 {
-					if err := tc.SetKeepAlivePeriod(s.TCPKeepalivePeriod); err != nil {
-						tc.Close() //nolint:errcheck
-						return nil, err
-					}
-				}
-				c = tc
-			}
-		} else {
-			c, err = ln.Accept()
-		}
+		c, err := ln.Accept()
 		if err != nil {
 			if c != nil {
 				panic("BUG: net.Listener returned non-nil conn and non-nil error")
@@ -1910,6 +1890,20 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 		if c == nil {
 			panic("BUG: net.Listener returned (nil, nil)")
 		}
+
+		if tc, ok := c.(*net.TCPConn); ok && s.TCPKeepalive {
+			if err := tc.SetKeepAlive(s.TCPKeepalive); err != nil {
+				tc.Close() //nolint:errcheck
+				return nil, err
+			}
+			if s.TCPKeepalivePeriod > 0 {
+				if err := tc.SetKeepAlivePeriod(s.TCPKeepalivePeriod); err != nil {
+					tc.Close() //nolint:errcheck
+					return nil, err
+				}
+			}
+		}
+
 		if s.MaxConnsPerIP > 0 {
 			pic := wrapPerIPConn(s, c)
 			if pic == nil {
