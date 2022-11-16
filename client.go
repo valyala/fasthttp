@@ -983,6 +983,8 @@ var clientURLResponseChPool sync.Pool
 
 func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (statusCode int, body []byte, err error) {
 	req := AcquireRequest()
+	defer ReleaseRequest(req)
+
 	req.Header.SetMethod(MethodPost)
 	req.Header.SetContentTypeBytes(strPostArgsContentType)
 	if postArgs != nil {
@@ -993,7 +995,6 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 
 	statusCode, body, err = doRequestFollowRedirectsBuffer(req, dst, url, c)
 
-	ReleaseRequest(req)
 	return statusCode, body, err
 }
 
