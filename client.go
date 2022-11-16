@@ -2411,6 +2411,11 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		releasePipelineWork(&c.workPool, w)
 	case <-w.t.C:
 		err = ErrTimeout
+		go func() {
+			// Wait for the response in background.
+			<-w.done
+			releasePipelineWork(&c.workPool, w)
+		}()
 	}
 
 	return err
