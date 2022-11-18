@@ -109,7 +109,7 @@ func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
 	h.setNonSpecial(strContentRange, h.bufKV.value)
 }
 
-// SetByteRange sets 'Range: bytes=startPos-endPos' header.
+// SetByteRanges sets 'Range: bytes=startPos-endPos' header.
 //
 //   - If startPos is negative, then 'bytes=-startPos' value is set.
 //   - If endPos is negative, then 'bytes=startPos-' value is set.

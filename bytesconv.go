@@ -234,7 +234,7 @@ func ParseUfloat(buf []byte) (float64, error) {
 				if err != nil {
 					return -1, errInvalidFloatExponent
 				}
-				return float64(v) * offset * math.Pow10(minus*int(vv)), nil
+				return float64(v) * offset * math.Pow10(minus*vv), nil
 			}
 			return -1, errUnexpectedFloatChar
 		}
