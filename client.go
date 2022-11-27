@@ -495,7 +495,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	hc := m[string(host)]
 	if hc == nil {
 		hc = &HostClient{
-			Addr:                          addMissingPort(string(host), isTLS),
+			Addr:                          AddMissingPort(string(host), isTLS),
 			Name:                          c.Name,
 			NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 			Dial:                          c.Dial,
@@ -1968,7 +1968,7 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 		} else {
 			dial = Dial
 		}
-		addr = addMissingPort(addr, isTLS)
+		addr = AddMissingPort(addr, isTLS)
 	}
 	conn, err := dial(addr)
 	if err != nil {
@@ -2006,7 +2006,10 @@ func (c *HostClient) getClientName() []byte {
 	return clientName
 }
 
-func addMissingPort(addr string, isTLS bool) string {
+// AddMissingPort adds a port to a host if it is missing.
+// A literal IPv6 address in hostport must be enclosed in square
+// brackets, as in "[::1]:80", "[::1%lo0]:80".
+func AddMissingPort(addr string, isTLS bool) string {
 	n := strings.Index(addr, ":")
 	if n >= 0 {
 		return addr
