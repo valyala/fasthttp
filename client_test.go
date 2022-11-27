@@ -2971,3 +2971,63 @@ func TestHttpsRequestWithoutParsedURL(t *testing.T) {
 		t.Fatal("https requests with IsTLS client must succeed")
 	}
 }
+
+func Test_AddMissingPort(t *testing.T) {
+	type args struct {
+		addr  string
+		isTLS bool
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			args: args{"127.1", false}, // 127.1 is a short form of 127.0.0.1
+			want: "127.1:80",
+		},
+		{
+			args: args{"127.0.0.1", false},
+			want: "127.0.0.1:80",
+		},
+		{
+			args: args{"127.0.0.1", true},
+			want: "127.0.0.1:443",
+		},
+		{
+			args: args{"[::1]", false},
+			want: "[::1]:80",
+		},
+		{
+			args: args{"::1", false},
+			want: "::1", // keep as is
+		},
+		{
+			args: args{"[::1]", true},
+			want: "[::1]:443",
+		},
+		{
+			args: args{"127.0.0.1:8080", false},
+			want: "127.0.0.1:8080",
+		},
+		{
+			args: args{"127.0.0.1:8443", true},
+			want: "127.0.0.1:8443",
+		},
+		{
+			args: args{"[::1]:8080", false},
+			want: "[::1]:8080",
+		},
+		{
+			args: args{"[::1]:8443", true},
+			want: "[::1]:8443",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := AddMissingPort(tt.args.addr, tt.args.isTLS); got != tt.want {
+				t.Errorf("AddMissingPort() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
