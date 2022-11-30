@@ -48,6 +48,15 @@ type PipeConns struct {
 	stopChLock sync.Mutex
 }
 
+// SetAddresses sets the local and remote addresses for the connection.
+func (pc *PipeConns) SetAddresses(localAddr1, remoteAddr1, localAddr2, remoteAddr2 net.Addr) {
+	pc.c1.localAddr = localAddr1
+	pc.c1.remoteAddr = remoteAddr1
+
+	pc.c2.localAddr = localAddr2
+	pc.c2.remoteAddr = remoteAddr2
+}
+
 // Conn1 returns the first end of bi-directional pipe.
 //
 // Data written to Conn1 may be read from Conn2.
@@ -92,6 +101,9 @@ type pipeConn struct {
 	writeDeadlineCh <-chan time.Time
 
 	readDeadlineChLock sync.Mutex
+
+	localAddr  net.Addr
+	remoteAddr net.Addr
 }
 
 func (c *pipeConn) Write(p []byte) (int, error) {
@@ -224,10 +236,18 @@ func (c *pipeConn) Close() error {
 }
 
 func (c *pipeConn) LocalAddr() net.Addr {
+	if c.localAddr != nil {
+		return c.localAddr
+	}
+
 	return pipeAddr(0)
 }
 
 func (c *pipeConn) RemoteAddr() net.Addr {
+	if c.remoteAddr != nil {
+		return c.remoteAddr
+	}
+
 	return pipeAddr(0)
 }
 
