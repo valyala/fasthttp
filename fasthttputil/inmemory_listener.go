@@ -18,6 +18,7 @@ type InmemoryListener struct {
 	closed       bool
 	conns        chan acceptConn
 	listenerAddr net.Addr
+	addrLock     sync.RWMutex
 }
 
 type acceptConn struct {
@@ -34,6 +35,9 @@ func NewInmemoryListener() *InmemoryListener {
 
 // SetLocalAddr sets the (simulated) local address for the listener.
 func (ln *InmemoryListener) SetLocalAddr(localAddr net.Addr) {
+	ln.addrLock.Lock()
+	defer ln.addrLock.Unlock()
+
 	ln.listenerAddr = localAddr
 }
 
@@ -78,6 +82,9 @@ func (inmemoryAddr) String() string {
 
 // Addr implements net.Listener's Addr.
 func (ln *InmemoryListener) Addr() net.Addr {
+	ln.addrLock.RLock()
+	defer ln.addrLock.RUnlock()
+
 	if ln.listenerAddr != nil {
 		return ln.listenerAddr
 	}
