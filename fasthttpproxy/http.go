@@ -34,9 +34,12 @@ func FasthttpHTTPDialer(proxy string) fasthttp.DialFunc {
 func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.DialFunc {
 	var auth string
 	if strings.Contains(proxy, "@") {
-		split := strings.Split(proxy, "@")
-		auth = base64.StdEncoding.EncodeToString([]byte(split[0]))
-		proxy = split[1]
+		index := strings.LastIndex(proxy, "@")
+		auth = base64.StdEncoding.EncodeToString([]byte(proxy[:index]))
+		proxy = proxy[index:][1:]
+		//split := strings.Split(proxy, "@")
+		//auth = base64.StdEncoding.EncodeToString([]byte(split[0]))
+		//proxy = split[1]
 	}
 
 	return func(addr string) (net.Conn, error) {
