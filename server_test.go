@@ -1713,6 +1713,20 @@ func TestRequestCtxFormValue(t *testing.T) {
 	}
 }
 
+func TestSetStandardFormValueFunc(t *testing.T) {
+	t.Parallel()
+	var ctx RequestCtx
+	var req Request
+	req.SetRequestURI("/foo/bar?aaa=bbb")
+	req.SetBodyString("aaa=port")
+	req.Header.SetContentType("application/x-www-form-urlencoded")
+	ctx.Init(&req, nil, nil)
+	ctx.formValueFunc = NetHttpFormValueFunc
+	v := ctx.FormValue("aaa")
+	if string(v) != "port" {
+		t.Fatalf("unexpected value %q. Expecting %q", v, "port")
+	}
+}
 func TestRequestCtxUserValue(t *testing.T) {
 	t.Parallel()
 
@@ -3285,6 +3299,28 @@ func TestServeConnSingleRequest(t *testing.T) {
 
 	br := bufio.NewReader(&rw.w)
 	verifyResponse(t, br, 200, "aaa", "requestURI=/foo/bar?baz, host=google.com")
+}
+
+func TestServerSetFormValueFunc(t *testing.T) {
+	t.Parallel()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Success("aaa", ctx.FormValue("aaa"))
+		},
+		FormValueFunc: func(ctx *RequestCtx, s string) []byte {
+			return []byte(s)
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo/bar?baz HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, 200, "aaa", "aaa")
 }
 
 func TestServeConnMultiRequests(t *testing.T) {

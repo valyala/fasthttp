@@ -406,6 +406,12 @@ type Server struct {
 	// instead.
 	TLSConfig *tls.Config
 
+	// FormValueFunc, which is used by RequestCtx.FormValue and support for customising
+	// the behaviour of the RequestCtx.FormValue function.
+	//
+	// NetHttpFormValueFunc gives a FormValueFunc func implementation that is consistent with net/http.
+	FormValueFunc FormValueFunc
+
 	nextProtos map[string]ServeHandler
 
 	concurrency      uint32
@@ -604,6 +610,7 @@ type RequestCtx struct {
 
 	hijackHandler    HijackHandler
 	hijackNoResponse bool
+	formValueFunc    FormValueFunc
 }
 
 // HijackHandler must process the hijacked connection c.
@@ -1108,23 +1115,54 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
 //
 // The returned value is valid until your request handler returns.
 func (ctx *RequestCtx) FormValue(key string) []byte {
-	v := ctx.QueryArgs().Peek(key)
-	if len(v) > 0 {
-		return v
+	if ctx.formValueFunc != nil {
+		return ctx.formValueFunc(ctx, key)
 	}
-	v = ctx.PostArgs().Peek(key)
-	if len(v) > 0 {
-		return v
-	}
-	mf, err := ctx.MultipartForm()
-	if err == nil && mf.Value != nil {
-		vv := mf.Value[key]
-		if len(vv) > 0 {
-			return []byte(vv[0])
-		}
-	}
-	return nil
+	return defaultFormValue(ctx, key)
 }
+
+type FormValueFunc func(*RequestCtx, string) []byte
+
+var (
+	defaultFormValue = func(ctx *RequestCtx, key string) []byte {
+		v := ctx.QueryArgs().Peek(key)
+		if len(v) > 0 {
+			return v
+		}
+		v = ctx.PostArgs().Peek(key)
+		if len(v) > 0 {
+			return v
+		}
+		mf, err := ctx.MultipartForm()
+		if err == nil && mf.Value != nil {
+			vv := mf.Value[key]
+			if len(vv) > 0 {
+				return []byte(vv[0])
+			}
+		}
+		return nil
+	}
+
+	// NetHttpFormValueFunc gives consistent behavior with net/http. POST and PUT body parameters take precedence over URL query string values.
+	NetHttpFormValueFunc = func(ctx *RequestCtx, key string) []byte {
+		v := ctx.PostArgs().Peek(key)
+		if len(v) > 0 {
+			return v
+		}
+		mf, err := ctx.MultipartForm()
+		if err == nil && mf.Value != nil {
+			vv := mf.Value[key]
+			if len(vv) > 0 {
+				return []byte(vv[0])
+			}
+		}
+		v = ctx.QueryArgs().Peek(key)
+		if len(v) > 0 {
+			return v
+		}
+		return nil
+	}
+)
 
 // IsGet returns true if request method is GET.
 func (ctx *RequestCtx) IsGet() bool {
@@ -2638,7 +2676,9 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 	} else {
 		ctx = v.(*RequestCtx)
 	}
-
+	if s.FormValueFunc != nil {
+		ctx.formValueFunc = s.FormValueFunc
+	}
 	ctx.c = c
 
 	return ctx
