@@ -2697,6 +2697,9 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // Done returns a channel that's closed when work done on behalf of this
 // context should be canceled. Done may return nil if this context can
 // never be canceled. Successive calls to Done return the same value.
+//
+// Note: Because creating a new channel for every request is just too expensive, so
+// RequestCtx.s.done is only closed when the server is shutting down
 func (ctx *RequestCtx) Done() <-chan struct{} {
 	return ctx.s.done
 }
@@ -2707,6 +2710,9 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 // If Done is closed, Err returns a non-nil error explaining why:
 // Canceled if the context was canceled (via server Shutdown)
 // or DeadlineExceeded if the context's deadline passed.
+//
+// Note: Because creating a new channel for every request is just too expensive, so
+// RequestCtx.s.done is only closed when the server is shutting down
 func (ctx *RequestCtx) Err() error {
 	select {
 	case <-ctx.s.done:

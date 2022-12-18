@@ -320,6 +320,23 @@ with fasthttp support:
   fasthttp.ListenAndServe(":80", m)
   ```
 
+* Because creating a new channel for every request is just too expensive, so the channel returned by RequestCtx.Done() is only closed when the server is shutting down.
+
+  ```go
+  func main() {
+	fasthttp.ListenAndServe(":8080", fasthttp.TimeoutHandler(func(ctx *fasthttp.RequestCtx) {
+		select {
+		case <-ctx.Done():
+			// ctx.Done() is only closed when the server is shutting down.
+			log.Println("context cancelled")
+			return
+		case <-time.After(10 * time.Second):
+			log.Println("process finished ok")
+		}
+	}, time.Second*2, "timeout"))
+  }
+  ```
+
 * net/http -> fasthttp conversion table:
 
   * All the pseudocode below assumes w, r and ctx have these types:
