@@ -1129,7 +1129,7 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 	// Do not reset the request here - the caller must reset it before
 	// calling this method.
 
-	if getOnly && !req.Header.IsGet() {
+	if getOnly && !req.Header.IsGet() && !req.Header.IsHead() {
 		return ErrGetOnly
 	}
 
@@ -1147,7 +1147,7 @@ func (req *Request) readBodyStream(r *bufio.Reader, maxBodySize int, getOnly boo
 	// Do not reset the request here - the caller must reset it before
 	// calling this method.
 
-	if getOnly && !req.Header.IsGet() {
+	if getOnly && !req.Header.IsGet() && !req.Header.IsHead() {
 		return ErrGetOnly
 	}
 
