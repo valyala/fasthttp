@@ -292,7 +292,7 @@ type Server struct {
 	// Rejects all non-GET requests if set to true.
 	//
 	// This option is useful as anti-DoS protection for servers
-	// accepting only GET requests. The request size is limited
+	// accepting only GET requests and HEAD requests. The request size is limited
 	// by ReadBufferSize if GetOnly is set.
 	//
 	// Server accepts all the requests by default.
