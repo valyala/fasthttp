@@ -109,3 +109,5 @@ func (w *netHTTPResponseWriter) WriteHeader(statusCode int) {
 func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 	return w.w.Write(p)
 }
+
+func (w *netHTTPResponseWriter) Flush() {}
