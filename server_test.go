@@ -3677,7 +3677,7 @@ func TestShutdownWithContext(t *testing.T) {
 			t.Fatalf("unexpected err %v. Expecting %v", err, context.DeadlineExceeded)
 		}
 	}
-	if atomic.LoadInt32(&s.open) != 1 {
+	if atomic.LoadInt32(&s.open) < 1 {
 		t.Fatalf("unexpected open connection num: %#v. Expecting %#v", atomic.LoadInt32(&s.open), 1)
 	}
 }
