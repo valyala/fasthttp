@@ -569,6 +569,7 @@ func (c *Client) mCleaner(m map[string]*HostClient) {
 	}
 
 	for {
+		time.Sleep(sleep)
 		c.mLock.Lock()
 		for k, v := range m {
 			v.connsLock.Lock()
@@ -585,7 +586,6 @@ func (c *Client) mCleaner(m map[string]*HostClient) {
 		if mustStop {
 			break
 		}
-		time.Sleep(sleep)
 	}
 }
 
