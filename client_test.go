@@ -724,7 +724,7 @@ func TestClientDefaultUserAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if userAgentSeen != string(defaultUserAgent) {
+	if userAgentSeen != defaultUserAgent {
 		t.Fatalf("User-Agent defers %q != %q", userAgentSeen, defaultUserAgent)
 	}
 }
