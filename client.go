@@ -788,7 +788,6 @@ type HostClient struct {
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
 
-	clientName  atomic.Value
 	lastUseTime uint32
 
 	connsLock  sync.Mutex
@@ -1327,9 +1326,14 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
-		req.Header.userAgent = append(req.Header.userAgent[:0], c.getClientName()...)
+		userAgent := c.Name
+		if userAgent == "" && !c.NoDefaultUserAgentHeader {
+			userAgent = defaultUserAgent
+		}
+		if userAgent != "" {
+			req.Header.userAgent = append(req.Header.userAgent[:], userAgent...)
+		}
 	}
-
 	if c.Transport != nil {
 		err := c.Transport(req, resp)
 		return err == nil, err
@@ -1990,21 +1994,6 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 	return conn, nil
 }
 
-func (c *HostClient) getClientName() []byte {
-	v := c.clientName.Load()
-	var clientName []byte
-	if v == nil {
-		clientName = []byte(c.Name)
-		if len(clientName) == 0 && !c.NoDefaultUserAgentHeader {
-			clientName = defaultUserAgent
-		}
-		c.clientName.Store(clientName)
-	} else {
-		clientName = v.([]byte)
-	}
-	return clientName
-}
-
 // AddMissingPort adds a port to a host if it is missing.
 // A literal IPv6 address in hostport must be enclosed in square
 // brackets, as in "[::1]:80", "[::1%lo0]:80".
@@ -2318,7 +2307,6 @@ type pipelineConnClient struct {
 
 	tlsConfigLock sync.Mutex
 	tlsConfig     *tls.Config
-	clientName    atomic.Value
 }
 
 type pipelineWork struct {
@@ -2389,7 +2377,13 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
-		req.Header.userAgent = append(req.Header.userAgent[:0], c.getClientName()...)
+		userAgent := c.Name
+		if userAgent == "" && !c.NoDefaultUserAgentHeader {
+			userAgent = defaultUserAgent
+		}
+		if userAgent != "" {
+			req.Header.userAgent = append(req.Header.userAgent[:], userAgent...)
+		}
 	}
 
 	w := c.acquirePipelineWork(timeout)
@@ -2490,7 +2484,13 @@ func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
-		req.Header.userAgent = append(req.Header.userAgent[:0], c.getClientName()...)
+		userAgent := c.Name
+		if userAgent == "" && !c.NoDefaultUserAgentHeader {
+			userAgent = defaultUserAgent
+		}
+		if userAgent != "" {
+			req.Header.userAgent = append(req.Header.userAgent[:], userAgent...)
+		}
 	}
 
 	w := c.acquirePipelineWork(0)
@@ -2884,21 +2884,6 @@ func (c *pipelineConnClient) PendingRequests() int {
 	n := len(c.chR) + len(c.chW)
 	c.chLock.Unlock()
 	return n
-}
-
-func (c *pipelineConnClient) getClientName() []byte {
-	v := c.clientName.Load()
-	var clientName []byte
-	if v == nil {
-		clientName = []byte(c.Name)
-		if len(clientName) == 0 && !c.NoDefaultUserAgentHeader {
-			clientName = defaultUserAgent
-		}
-		c.clientName.Store(clientName)
-	} else {
-		clientName = v.([]byte)
-	}
-	return clientName
 }
 
 var errPipelineConnStopped = errors.New("pipeline connection has been stopped")
