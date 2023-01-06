@@ -401,8 +401,8 @@ func TestServerName(t *testing.T) {
 	}
 
 	resp := getReponse()
-	if !bytes.Contains(resp, []byte("\r\nServer: "+string(defaultServerName)+"\r\n")) {
-		t.Fatalf("Unexpected response %q expected Server: "+string(defaultServerName), resp)
+	if !bytes.Contains(resp, []byte("\r\nServer: "+defaultServerName+"\r\n")) {
+		t.Fatalf("Unexpected response %q expected Server: "+defaultServerName, resp)
 	}
 
 	// We can't just overwrite s.Name as fasthttp caches the name in an atomic.Value

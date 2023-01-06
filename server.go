@@ -417,7 +417,6 @@ type Server struct {
 	concurrency      uint32
 	concurrencyCh    chan struct{}
 	perIPConnCounter perIPConnCounter
-	serverName       atomic.Value
 
 	ctxPool        sync.Pool
 	readerPool     sync.Pool
@@ -2134,10 +2133,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		return handler(c)
 	}
 
-	var serverName []byte
-	if !s.NoDefaultServerHeader {
-		serverName = s.getServerName()
-	}
+	serverName := s.getServerName()
 	connRequestNum := uint64(0)
 	connID := nextConnID()
 	connTime := time.Now()
@@ -2364,8 +2360,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		// store req.ConnectionClose so even if it was changed inside of handler
 		connectionClose = s.DisableKeepalive || ctx.Request.Header.ConnectionClose()
 
-		if serverName != nil {
-			ctx.Response.Header.SetServerBytes(serverName)
+		if serverName != "" {
+			ctx.Response.Header.SetServer(serverName)
 		}
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
@@ -2418,8 +2414,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			ctx.Response.Header.setNonSpecial(strConnection, strKeepAlive)
 		}
 
-		if serverName != nil && len(ctx.Response.Header.Server()) == 0 {
-			ctx.Response.Header.SetServerBytes(serverName)
+		if serverName != "" && len(ctx.Response.Header.Server()) == 0 {
+			ctx.Response.Header.SetServer(serverName)
 		}
 
 		if !hijackNoResponse {
@@ -2812,17 +2808,12 @@ func (s *Server) releaseCtx(ctx *RequestCtx) {
 	s.ctxPool.Put(ctx)
 }
 
-func (s *Server) getServerName() []byte {
-	v := s.serverName.Load()
-	var serverName []byte
-	if v == nil {
-		serverName = []byte(s.Name)
-		if len(serverName) == 0 {
+func (s *Server) getServerName() string {
+	serverName := s.Name
+	if serverName == "" {
+		if !s.NoDefaultServerHeader {
 			serverName = defaultServerName
 		}
-		s.serverName.Store(serverName)
-	} else {
-		serverName = v.([]byte)
 	}
 	return serverName
 }
@@ -2830,11 +2821,10 @@ func (s *Server) getServerName() []byte {
 func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 	w.Write(formatStatusLine(nil, strHTTP11, statusCode, s2b(StatusMessage(statusCode)))) //nolint:errcheck
 
-	server := ""
-	if !s.NoDefaultServerHeader {
-		server = fmt.Sprintf("Server: %s\r\n", s.getServerName())
+	server := s.getServerName()
+	if server != "" {
+		server = fmt.Sprintf("Server: %s\r\n", server)
 	}
-
 	date := ""
 	if !s.NoDefaultDate {
 		serverDateOnce.Do(updateServerDate)
@@ -2861,7 +2851,7 @@ func defaultErrorHandler(ctx *RequestCtx, err error) {
 	}
 }
 
-func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverName []byte, err error) *bufio.Writer {
+func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverName string, err error) *bufio.Writer {
 	errorHandler := defaultErrorHandler
 	if s.ErrorHandler != nil {
 		errorHandler = s.ErrorHandler
@@ -2869,8 +2859,8 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 
 	errorHandler(ctx, err)
 
-	if serverName != nil {
-		ctx.Response.Header.SetServerBytes(serverName)
+	if serverName != "" {
+		ctx.Response.Header.SetServer(serverName)
 	}
 	ctx.SetConnectionClose()
 	if bw == nil {
