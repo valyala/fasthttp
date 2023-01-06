@@ -14,7 +14,7 @@ jobs:
     env:
       GO111MODULE: on
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Run Gosec Security Scanner
         uses: securego/gosec@v2.12.0
         with:
