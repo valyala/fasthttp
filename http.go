@@ -771,7 +771,7 @@ func (req *Request) ResetBody() {
 func (req *Request) CopyTo(dst *Request) {
 	req.copyToSkipBody(dst)
 	if req.bodyRaw != nil {
-		dst.bodyRaw = req.bodyRaw
+		dst.bodyRaw = append(dst.bodyRaw, req.bodyRaw...)
 		if dst.body != nil {
 			dst.body.Reset()
 		}
@@ -803,7 +803,7 @@ func (req *Request) copyToSkipBody(dst *Request) {
 func (resp *Response) CopyTo(dst *Response) {
 	resp.copyToSkipBody(dst)
 	if resp.bodyRaw != nil {
-		dst.bodyRaw = resp.bodyRaw
+		dst.bodyRaw = append(dst.bodyRaw, resp.bodyRaw...)
 		if dst.body != nil {
 			dst.body.Reset()
 		}

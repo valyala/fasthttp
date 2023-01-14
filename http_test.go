@@ -3033,3 +3033,35 @@ func testRequestMultipartFormPipeEmptyFormField(t *testing.T, boundary string, f
 
 	return req.Body()
 }
+
+func TestReqCopeToRace(t *testing.T) {
+	req := AcquireRequest()
+	reqs := make([]*Request, 1000)
+	for i := 0; i < 1000; i++ {
+		req.SetBodyRaw([]byte(strconv.Itoa(i)))
+		tmpReq := AcquireRequest()
+		req.CopyTo(tmpReq)
+		reqs[i] = tmpReq
+	}
+	for i := 0; i < 1000; i++ {
+		if strconv.Itoa(i) != string(reqs[i].Body()) {
+			t.Fatalf("Unexpected req body %s. Expected %s", string(reqs[i].Body()), strconv.Itoa(i))
+		}
+	}
+}
+
+func TestRespCopeToRace(t *testing.T) {
+	resp := AcquireResponse()
+	resps := make([]*Response, 1000)
+	for i := 0; i < 1000; i++ {
+		resp.SetBodyRaw([]byte(strconv.Itoa(i)))
+		tmpResq := AcquireResponse()
+		resp.CopyTo(tmpResq)
+		resps[i] = tmpResq
+	}
+	for i := 0; i < 1000; i++ {
+		if strconv.Itoa(i) != string(resps[i].Body()) {
+			t.Fatalf("Unexpected resp body %s. Expected %s", string(resps[i].Body()), strconv.Itoa(i))
+		}
+	}
+}
