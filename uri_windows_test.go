@@ -12,4 +12,7 @@ func TestURIPathNormalizeIssue86(t *testing.T) {
 	var u URI
 
 	testURIPathNormalize(t, &u, `C:\a\b\c\fs.go`, `C:\a\b\c\fs.go`)
+
+	// only "a"
+	testURIPathNormalize(t, &u, `a/b`, `/a/b`)
 }
