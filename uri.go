@@ -631,7 +631,6 @@ func normalizePath(dst, src []byte) []byte {
 
 	if filepath.Separator == '\\' {
 		// remove \.\ parts
-		b = dst
 		for {
 			n := bytes.Index(b, strBackSlashDotBackSlash)
 			if n < 0 {
@@ -652,7 +651,8 @@ func normalizePath(dst, src []byte) []byte {
 			if nn < 0 {
 				nn = 0
 			}
-			n += len(strSlashDotDotBackSlash) - 1
+			nn++
+			n += len(strSlashDotDotBackSlash)
 			copy(b[nn:], b[n:])
 			b = b[:len(b)-n+nn]
 		}
