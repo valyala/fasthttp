@@ -546,8 +546,8 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
   * [kratgo](https://github.com/savsgio/kratgo) - Simple, lightweight and ultra-fast HTTP Cache to speed up your websites.
   * [kit-plugins](https://github.com/wencan/kit-plugins/tree/master/transport/fasthttp) - go-kit transport implementation for fasthttp.
   * [Fiber](https://github.com/gofiber/fiber) - An Expressjs inspired web framework running on Fasthttp
-  * [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization
-
+  * [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization 
+  * [http2curl](https://github.com/li-jin-gou/http2curl) - A tool to convert fasthttp requests to curl command line
 
 ## FAQ
 
