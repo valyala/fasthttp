@@ -1,6 +1,6 @@
 module github.com/valyala/fasthttp
 
-go 1.16
+go 1.20
 
 require (
 	github.com/andybalholm/brotli v1.0.4
@@ -11,3 +11,5 @@ require (
 	golang.org/x/net v0.0.0-20220906165146-f3363e06e74c
 	golang.org/x/sys v0.0.0-20220728004956-3c1f35247d10
 )
+
+require golang.org/x/text v0.3.7 // indirect
