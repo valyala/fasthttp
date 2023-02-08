@@ -1234,7 +1234,7 @@ func (ctx *RequestCtx) RemoteAddr() net.Addr {
 
 // SetRemoteAddr sets remote address to the given value.
 //
-// Set nil value to resore default behaviour for using
+// Set nil value to restore default behaviour for using
 // connection remote address.
 func (ctx *RequestCtx) SetRemoteAddr(remoteAddr net.Addr) {
 	ctx.remoteAddr = remoteAddr
