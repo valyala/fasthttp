@@ -148,7 +148,7 @@ type ServeHandler func(c net.Conn) error
 //
 // It is safe to call Server methods from concurrently running goroutines.
 type Server struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	// Handler for processing incoming requests.
 	//
@@ -577,7 +577,7 @@ func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) R
 // running goroutines. The only exception is TimeoutError*, which may be called
 // while other goroutines accessing RequestCtx.
 type RequestCtx struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	// Incoming request.
 	//
@@ -1950,12 +1950,12 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 
 		if tc, ok := c.(*net.TCPConn); ok && s.TCPKeepalive {
 			if err := tc.SetKeepAlive(s.TCPKeepalive); err != nil {
-				tc.Close() //nolint:errcheck
+				tc.Close()
 				return nil, err
 			}
 			if s.TCPKeepalivePeriod > 0 {
 				if err := tc.SetKeepAlivePeriod(s.TCPKeepalivePeriod); err != nil {
-					tc.Close() //nolint:errcheck
+					tc.Close()
 					return nil, err
 				}
 			}
