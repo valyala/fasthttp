@@ -171,6 +171,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 	if !ok {
 		t.Fatal("expected fsSmallFileReader")
 	}
+	defer reader.ff.Release()
 
 	buf := bytes.NewBuffer(nil)
 
