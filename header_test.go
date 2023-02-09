@@ -1883,7 +1883,7 @@ func TestRequestHeaderCookie(t *testing.T) {
 	h.SetCookie("привет", "мир")
 
 	if string(h.Cookie("foo")) != "bar" {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.Cookie("foo"), "bar")
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h.Cookie("foo"), "bar")
 	}
 	if string(h.Cookie("привет")) != "мир" {
 		t.Fatalf("Unexpected cookie value %q. Expected %q", h.Cookie("привет"), "мир")
@@ -1905,7 +1905,7 @@ func TestRequestHeaderCookie(t *testing.T) {
 	}
 
 	if !bytes.Equal(h1.Cookie("foo"), h.Cookie("foo")) {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h1.Cookie("foo"), h.Cookie("foo"))
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h1.Cookie("foo"), h.Cookie("foo"))
 	}
 	h1.DelCookie("foo")
 	if len(h1.Cookie("foo")) > 0 {
@@ -1956,7 +1956,7 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 	c.SetKey("foo")
 	h.Cookie(c)
 	if string(c.Value()) != "bar" {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", c.Value(), "bar")
+		t.Fatalf("Unexpected cookie value %q. Expected %q", c.Value(), "bar")
 	}
 
 	if string(h.Peek(HeaderSetCookie)) != "foo=bar" {
@@ -1998,7 +1998,7 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 	}
 
 	if string(h.Cookie("foo")) != "bar" {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.Cookie("foo"), "bar")
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h.Cookie("foo"), "bar")
 	}
 
 	if string(h.Peek(HeaderCookie)) != "foo=bar" {

@@ -1916,7 +1916,7 @@ func TestServerContinueHandler(t *testing.T) {
 	// The same server should not fail when handling the three different types of requests
 	// Regular requests
 	// Expect 100 continue accepted
-	// Exepect 100 continue denied
+	// Expect 100 continue denied
 	rw := &readWriter{}
 	for i := 0; i < 25; i++ {
 
@@ -1925,7 +1925,7 @@ func TestServerContinueHandler(t *testing.T) {
 		rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
 		sendRequest(rw, StatusOK, "foobar")
 
-		// Regular Expect 100 continue reqeuests that are accepted
+		// Regular Expect 100 continue requests that are accepted
 		rw.r.Reset()
 		rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
 		sendRequest(rw, StatusOK, "foobar")
@@ -2666,7 +2666,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 	serverCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(serverCh)
 	}()
@@ -2677,7 +2677,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 		go func() {
 			conn, err := ln.Dial()
 			if err != nil {
-				t.Errorf("unexepcted error: %v", err)
+				t.Errorf("unexpected error: %v", err)
 			}
 			if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -2724,7 +2724,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	serverCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		close(serverCh)
 	}()
@@ -2789,7 +2789,7 @@ func TestTimeoutHandlerTimeoutReuse(t *testing.T) {
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 
@@ -3358,7 +3358,7 @@ func TestShutdown(t *testing.T) {
 	serveCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		_, err := ln.Dial()
 		if err == nil {
@@ -3370,7 +3370,7 @@ func TestShutdown(t *testing.T) {
 	go func() {
 		conn, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -3384,7 +3384,7 @@ func TestShutdown(t *testing.T) {
 	shutdownCh := make(chan struct{})
 	go func() {
 		if err := s.Shutdown(); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		shutdownCh <- struct{}{}
 	}()
@@ -3420,7 +3420,7 @@ func TestCloseOnShutdown(t *testing.T) {
 	serveCh := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		_, err := ln.Dial()
 		if err == nil {
@@ -3432,7 +3432,7 @@ func TestCloseOnShutdown(t *testing.T) {
 	go func() {
 		conn, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -3446,7 +3446,7 @@ func TestCloseOnShutdown(t *testing.T) {
 	shutdownCh := make(chan struct{})
 	go func() {
 		if err := s.Shutdown(); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 		shutdownCh <- struct{}{}
 	}()
@@ -3481,12 +3481,12 @@ func TestShutdownReuse(t *testing.T) {
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3494,17 +3494,17 @@ func TestShutdownReuse(t *testing.T) {
 	br := bufio.NewReader(conn)
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 	if err := s.Shutdown(); err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	ln = fasthttputil.NewInmemoryListener()
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 	conn, err = ln.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3512,7 +3512,7 @@ func TestShutdownReuse(t *testing.T) {
 	br = bufio.NewReader(conn)
 	verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 	if err := s.Shutdown(); err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -3528,12 +3528,12 @@ func TestShutdownDone(t *testing.T) {
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3542,7 +3542,7 @@ func TestShutdownDone(t *testing.T) {
 		// Shutdown won't return if the connection doesn't close,
 		// which doesn't happen until we read the response.
 		if err := s.Shutdown(); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 	// We can only reach this point and get a valid response
@@ -3567,12 +3567,12 @@ func TestShutdownErr(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3581,7 +3581,7 @@ func TestShutdownErr(t *testing.T) {
 		// Shutdown won't return if the connection doesn't close,
 		// which doesn't happen until we read the response.
 		if err := s.Shutdown(); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 	// We can only reach this point and get a valid response
@@ -3601,12 +3601,12 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 	conn, err := ln.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
@@ -3626,7 +3626,7 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 		t.Fatal("idle connections not closed on shutdown")
 	case err = <-shutdownErr:
 		if err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}
 }
@@ -3643,14 +3643,14 @@ func TestShutdownWithContext(t *testing.T) {
 	}
 	go func() {
 		if err := s.Serve(ln); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 	time.Sleep(1 * time.Second)
 	go func() {
 		conn, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 
 		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
@@ -3696,18 +3696,18 @@ func TestMultipleServe(t *testing.T) {
 
 	go func() {
 		if err := s.Serve(ln1); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 	go func() {
 		if err := s.Serve(ln2); err != nil {
-			t.Errorf("unexepcted error: %v", err)
+			t.Errorf("unexpected error: %v", err)
 		}
 	}()
 
 	conn, err := ln1.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3717,7 +3717,7 @@ func TestMultipleServe(t *testing.T) {
 
 	conn, err = ln2.Dial()
 	if err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 		t.Fatalf("unexpected error: %v", err)

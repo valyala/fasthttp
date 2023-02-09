@@ -1750,7 +1750,7 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var req1 Request
@@ -2382,7 +2382,7 @@ func TestReadBodyChunked(t *testing.T) {
 	// big body
 	testReadBodyChunked(t, 3*1024*1024)
 
-	// smaler body after big one
+	// smaller body after big one
 	testReadBodyChunked(t, 12343)
 }
 
@@ -2762,7 +2762,7 @@ func TestResponseImmediateHeaderFlushFixedLength(t *testing.T) {
 	}
 
 	if strings.Contains(w.String(), "xxx") {
-		t.Fatalf("Did not expext body to be written yet")
+		t.Fatalf("Did not expect body to be written yet")
 	}
 
 	<-cb
@@ -2844,7 +2844,7 @@ func TestResponseImmediateHeaderFlushChunked(t *testing.T) {
 	}
 
 	if strings.Contains(w.String(), "xxx") {
-		t.Fatalf("Did not expext body to be written yet")
+		t.Fatalf("Did not expect body to be written yet")
 	}
 
 	<-cb

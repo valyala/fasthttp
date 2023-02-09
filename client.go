@@ -811,7 +811,7 @@ type HostClient struct {
 	pendingRequests int32
 
 	// pendingClientRequests counts the number of requests that a Client is currently running using this HostClient.
-	// It will be incremented ealier than pendingRequests and will be used by Client to see if the HostClient is still in use.
+	// It will be incremented earlier than pendingRequests and will be used by Client to see if the HostClient is still in use.
 	pendingClientRequests int32
 
 	connsCleanerRun bool
