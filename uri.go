@@ -217,11 +217,11 @@ func (u *URI) SetSchemeBytes(scheme []byte) {
 	lowercaseBytes(u.scheme)
 }
 
-func (u *URI) isHttps() bool {
+func (u *URI) isHTTPS() bool {
 	return bytes.Equal(u.scheme, strHTTPS)
 }
 
-func (u *URI) isHttp() bool {
+func (u *URI) isHTTP() bool {
 	return len(u.scheme) == 0 || bytes.Equal(u.scheme, strHTTP)
 }
 
