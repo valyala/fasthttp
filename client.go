@@ -470,9 +470,9 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	host := uri.Host()
 
 	isTLS := false
-	if uri.isHttps() {
+	if uri.isHTTPS() {
 		isTLS = true
-	} else if !uri.isHttp() {
+	} else if !uri.isHTTP() {
 		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
 	}
 
@@ -1308,7 +1308,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.secureErrorLogMessage = c.SecureErrorLogMessage
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
-	if c.IsTLS != req.URI().isHttps() {
+	if c.IsTLS != req.URI().isHTTPS() {
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 
@@ -2003,11 +2003,11 @@ func AddMissingPort(addr string, isTLS bool) string {
 		return addr
 	}
 
-	isIp6 := addr[0] == '['
-	if isIp6 {
+	isIP6 := addr[0] == '['
+	if isIP6 {
 		// if the IPv6 has opening bracket but closing bracket is the last char then it doesn't have a port
-		isIp6WithoutPort := addr[addrLen-1] == ']'
-		if !isIp6WithoutPort {
+		isIP6WithoutPort := addr[addrLen-1] == ']'
+		if !isIP6WithoutPort {
 			return addr
 		}
 	} else { // IPv4
