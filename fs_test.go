@@ -153,12 +153,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 	t.Parallel()
 
 	teststr := "hello, world!"
-
-	tempdir, err := os.MkdirTemp("", "httpexpect")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tempdir)
+	tempdir := t.TempDir()
 
 	if err := os.WriteFile(
 		path.Join(tempdir, "hello"), []byte(teststr), 0666); err != nil {
@@ -176,6 +171,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 	if !ok {
 		t.Fatal("expected fsSmallFileReader")
 	}
+	defer reader.ff.Release()
 
 	buf := bytes.NewBuffer(nil)
 
