@@ -179,7 +179,7 @@ var defaultClient Client
 //
 // The fields of a Client should not be changed while it is in use.
 type Client struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	// Client name. Used in User-Agent request header.
 	//
@@ -642,7 +642,7 @@ const (
 //
 // It is safe calling HostClient methods from concurrently running goroutines.
 type HostClient struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	// Comma-separated list of upstream HTTP server host addresses,
 	// which are passed to Dial in a round-robin manner.
@@ -2165,7 +2165,7 @@ func (q *wantConnQueue) clearFront() (cleaned bool) {
 // It is safe calling PipelineClient methods from concurrently running
 // goroutines.
 type PipelineClient struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	// Address of the host to connect to.
 	Addr string
@@ -2279,7 +2279,7 @@ type PipelineClient struct {
 }
 
 type pipelineConnClient struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	Addr                          string
 	Name                          string

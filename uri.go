@@ -40,7 +40,7 @@ var uriPool = &sync.Pool{
 //
 // URI instance MUST NOT be used from concurrently running goroutines.
 type URI struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	pathOriginal []byte
 	scheme       []byte
