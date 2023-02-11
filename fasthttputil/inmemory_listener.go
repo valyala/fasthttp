@@ -121,8 +121,8 @@ func (ln *InmemoryListener) DialWithLocalAddr(local net.Addr) (net.Conn, error) 
 		// Wait until the connection has been accepted.
 		<-accepted
 	} else {
-		sConn.Close()
-		cConn.Close()
+		_ = sConn.Close()
+		_ = cConn.Close()
 		cConn = nil
 	}
 	ln.lock.Unlock()

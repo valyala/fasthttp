@@ -1370,10 +1370,10 @@ func TestResponseGzipStream(t *testing.T) {
 		fmt.Fprintf(w, "foo")
 		w.Flush()
 		time.Sleep(time.Millisecond)
-		w.Write([]byte("barbaz")) //nolint:errcheck
-		w.Flush()
+		_, _ = w.Write([]byte("barbaz"))
+		_ = w.Flush()
 		time.Sleep(time.Millisecond)
-		fmt.Fprintf(w, "1234")
+		_, _ = fmt.Fprintf(w, "1234")
 		if err := w.Flush(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1392,11 +1392,11 @@ func TestResponseDeflateStream(t *testing.T) {
 		t.Fatalf("IsBodyStream must return false")
 	}
 	r.SetBodyStreamWriter(func(w *bufio.Writer) {
-		w.Write([]byte("foo")) //nolint:errcheck
-		w.Flush()
-		fmt.Fprintf(w, "barbaz")
-		w.Flush()
-		w.Write([]byte("1234")) //nolint:errcheck
+		_, _ = w.Write([]byte("foo"))
+		_ = w.Flush()
+		_, _ = fmt.Fprintf(w, "barbaz")
+		_ = w.Flush()
+		_, _ = w.Write([]byte("1234"))
 		if err := w.Flush(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
