@@ -111,7 +111,7 @@ func TestResponseHeaderMultiLineName(t *testing.T) {
 	t.Parallel()
 
 	s := "HTTP/1.1 200 OK\r\n" +
-		"Host: golang.org\r\n" +
+		"Host: go.dev\r\n" +
 		"Gopher-New-\r\n" +
 		" Line: This is a header on multiple lines\r\n" +
 		"\r\n"

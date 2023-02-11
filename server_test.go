@@ -58,9 +58,9 @@ func TestServerCRNLAfterPost_Pipeline(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	defer c.Close()
-	if _, err = c.Write([]byte("POST / HTTP/1.1\r\nHost: golang.org\r\nContent-Length: 3\r\n\r\nABC" +
+	if _, err = c.Write([]byte("POST / HTTP/1.1\r\nHost: go.dev\r\nContent-Length: 3\r\n\r\nABC" +
 		"\r\n\r\n" + // <-- this stuff is bogus, but we'll ignore it
-		"GET / HTTP/1.1\r\nHost: golang.org\r\n\r\n")); err != nil {
+		"GET / HTTP/1.1\r\nHost: go.dev\r\n\r\n")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,7 +104,7 @@ func TestServerCRNLAfterPost(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	defer c.Close()
-	if _, err = c.Write([]byte("POST / HTTP/1.1\r\nHost: golang.org\r\nContent-Length: 3\r\n\r\nABC" +
+	if _, err = c.Write([]byte("POST / HTTP/1.1\r\nHost: go.dev\r\nContent-Length: 3\r\n\r\nABC" +
 		"\r\n\r\n", // <-- this stuff is bogus, but we'll ignore it
 	)); err != nil {
 		t.Fatal(err)
