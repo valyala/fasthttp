@@ -402,7 +402,7 @@ var (
 
 func newCompressWriterPoolMap() []*sync.Pool {
 	// Initialize pools for all the compression levels defined
-	// in https://golang.org/pkg/compress/flate/#pkg-constants .
+	// in https://pkg.go.dev/compress/flate#pkg-constants .
 	// Compression levels are normalized with normalizeCompressLevel,
 	// so the fit [0..11].
 	var m []*sync.Pool

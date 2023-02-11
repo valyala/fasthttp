@@ -1,6 +1,6 @@
 ### TL;DR
 
-We use a simplified version of [Golang Security Policy](https://golang.org/security).
+We use a simplified version of [Golang Security Policy](https://go.dev/security).
 For example, for now we skip CVE assignment.
 
 ### Reporting a Security Bug

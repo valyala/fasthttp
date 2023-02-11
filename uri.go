@@ -504,7 +504,7 @@ func unescape(s []byte, mode encoding) ([]byte, error) {
 // appearing in a URL string, according to RFC 3986.
 //
 // Please be informed that for now shouldEscape does not check all
-// reserved characters correctly. See golang.org/issue/5684.
+// reserved characters correctly. See https://github.com/golang/go/issues/5684.
 //
 // Based on https://github.com/golang/go/blob/8ac5cbe05d61df0a7a7c9a38ff33305d4dcfea32/src/net/url/url.go#L100
 func shouldEscape(c byte, mode encoding) bool {

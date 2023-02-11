@@ -104,7 +104,7 @@ func updateFSCounters(ctx *fasthttp.RequestCtx) {
 	}
 }
 
-// Various counters - see https://golang.org/pkg/expvar/ for details.
+// Various counters - see https://pkg.go.dev/expvar for details.
 var (
 	// Counter for total number of fs calls
 	fsCalls = expvar.NewInt("fsCalls")
