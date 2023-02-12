@@ -11,7 +11,7 @@ import (
 )
 
 // ConvertRequest convert a fasthttp.Request to an http.Request
-// forServer should be set to true when the http.Request is going to passed to a http.Handler.
+// forServer should be set to true when the http.Request is going to be passed to a http.Handler.
 //
 // The http.Request must not be used after the fasthttp handler has returned!
 // Memory in use by the http.Request will be reused after your handler has returned!

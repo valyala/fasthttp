@@ -687,7 +687,7 @@ type HostClient struct {
 	// listed in Addr.
 	//
 	// You can change this value while the HostClient is being used
-	// using HostClient.SetMaxConns(value)
+	// with HostClient.SetMaxConns(value)
 	//
 	// DefaultMaxConnsPerHost is used if not set.
 	MaxConns int

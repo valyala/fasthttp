@@ -893,7 +893,7 @@ func (req *Request) parsePostArgs() {
 // isn't 'multipart/form-data'.
 var ErrNoMultipartForm = errors.New("request has no multipart/form-data Content-Type")
 
-// MultipartForm returns requests's multipart form.
+// MultipartForm returns request's multipart form.
 //
 // Returns ErrNoMultipartForm if request's Content-Type
 // isn't 'multipart/form-data'.

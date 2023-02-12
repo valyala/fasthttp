@@ -111,7 +111,7 @@ func TestPathNotFoundFunc(t *testing.T) {
 }
 
 func TestServeFileHead(t *testing.T) {
-	// This test can't run parallel as files in / might by changed by other tests.
+	// This test can't run parallel as files in / might be changed by other tests.
 
 	var ctx RequestCtx
 	var req Request
@@ -199,7 +199,7 @@ func (pw pureWriter) Write(p []byte) (nn int, err error) {
 }
 
 func TestServeFileCompressed(t *testing.T) {
-	// This test can't run parallel as files in / might by changed by other tests.
+	// This test can't run parallel as files in / might be changed by other tests.
 
 	var ctx RequestCtx
 	ctx.Init(&Request{}, nil, nil)
@@ -265,7 +265,7 @@ func TestServeFileCompressed(t *testing.T) {
 }
 
 func TestServeFileUncompressed(t *testing.T) {
-	// This test can't run parallel as files in / might by changed by other tests.
+	// This test can't run parallel as files in / might be changed by other tests.
 
 	var ctx RequestCtx
 	var req Request
@@ -298,7 +298,7 @@ func TestServeFileUncompressed(t *testing.T) {
 }
 
 func TestFSByteRangeConcurrent(t *testing.T) {
-	// This test can't run parallel as files in / might by changed by other tests.
+	// This test can't run parallel as files in / might be changed by other tests.
 
 	stop := make(chan struct{})
 	defer close(stop)
@@ -332,7 +332,7 @@ func TestFSByteRangeConcurrent(t *testing.T) {
 }
 
 func TestFSByteRangeSingleThread(t *testing.T) {
-	// This test can't run parallel as files in / might by changed by other tests.
+	// This test can't run parallel as files in / might be changed by other tests.
 
 	stop := make(chan struct{})
 	defer close(stop)
@@ -475,7 +475,7 @@ func testParseByteRangeError(t *testing.T, v string, contentLength int) {
 }
 
 func TestFSCompressConcurrent(t *testing.T) {
-	// Don't run this test on Windows, the Windows Github actions are to slow and timeout too often.
+	// Don't run this test on Windows, the Windows GitHub actions are too slow and timeout too often.
 	if runtime.GOOS == "windows" {
 		t.SkipNow()
 	}
@@ -517,7 +517,7 @@ func TestFSCompressConcurrent(t *testing.T) {
 }
 
 func TestFSCompressSingleThread(t *testing.T) {
-	// This test can't run parallel as files in / might by changed by other tests.
+	// This test can't run parallel as files in / might be changed by other tests.
 
 	stop := make(chan struct{})
 	defer close(stop)
@@ -617,7 +617,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 }
 
 func TestFSHandlerSingleThread(t *testing.T) {
-	// This test can't run parallel as files in / might by changed by other tests.
+	// This test can't run parallel as files in / might be changed by other tests.
 
 	requestHandler := FSHandler(".", 0)
 
@@ -639,7 +639,7 @@ func TestFSHandlerSingleThread(t *testing.T) {
 }
 
 func TestFSHandlerConcurrent(t *testing.T) {
-	// This test can't run parallel as files in / might by changed by other tests.
+	// This test can't run parallel as files in / might be changed by other tests.
 
 	requestHandler := FSHandler(".", 0)
 
@@ -787,7 +787,7 @@ func testFileExtension(t *testing.T, path string, compressed bool, compressedFil
 }
 
 func TestServeFileContentType(t *testing.T) {
-	// This test can't run parallel as files in / might by changed by other tests.
+	// This test can't run parallel as files in / might be changed by other tests.
 
 	var ctx RequestCtx
 	var req Request

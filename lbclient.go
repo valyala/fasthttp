@@ -70,7 +70,7 @@ func (cc *LBClient) DoTimeout(req *Request, resp *Response, timeout time.Duratio
 	return cc.get().DoDeadline(req, resp, deadline)
 }
 
-// Do calls calculates deadline using LBClient.Timeout and calls DoDeadline
+// Do calculates timeout using LBClient.Timeout and calls DoTimeout
 // on the least loaded client.
 func (cc *LBClient) Do(req *Request, resp *Response) error {
 	timeout := cc.Timeout
