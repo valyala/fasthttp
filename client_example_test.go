@@ -7,7 +7,7 @@ import (
 )
 
 func ExampleHostClient() {
-	// Perpare a client, which fetches webpages via HTTP proxy listening
+	// Prepare a client, which fetches webpages via HTTP proxy listening
 	// on the localhost:8080.
 	c := &fasthttp.HostClient{
 		Addr: "localhost:8080",

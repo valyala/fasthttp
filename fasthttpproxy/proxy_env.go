@@ -20,7 +20,7 @@ const (
 )
 
 // FasthttpProxyHTTPDialer returns a fasthttp.DialFunc that dials using
-// the the env(HTTP_PROXY, HTTPS_PROXY and NO_PROXY) configured HTTP proxy.
+// the env(HTTP_PROXY, HTTPS_PROXY and NO_PROXY) configured HTTP proxy.
 //
 // Example usage:
 //

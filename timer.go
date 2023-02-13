@@ -18,7 +18,7 @@ func initTimer(t *time.Timer, timeout time.Duration) *time.Timer {
 func stopTimer(t *time.Timer) {
 	if !t.Stop() {
 		// Collect possibly added time from the channel
-		// if timer has been stopped and nobody collected its' value.
+		// if timer has been stopped and nobody collected its value.
 		select {
 		case <-t.C:
 		default:
@@ -44,7 +44,7 @@ func AcquireTimer(timeout time.Duration) *time.Timer {
 // ReleaseTimer returns the time.Timer acquired via AcquireTimer to the pool
 // and prevents the Timer from firing.
 //
-// Do not access the released time.Timer or read from it's channel otherwise
+// Do not access the released time.Timer or read from its channel otherwise
 // data races may occur.
 func ReleaseTimer(t *time.Timer) {
 	stopTimer(t)

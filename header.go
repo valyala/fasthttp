@@ -1495,7 +1495,7 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 
 // SetCookie sets the given response cookie.
 //
-// It is save re-using the cookie after the function returns.
+// It is safe re-using the cookie after the function returns.
 func (h *ResponseHeader) SetCookie(cookie *Cookie) {
 	h.cookies = setArgBytes(h.cookies, cookie.Key(), cookie.Cookie(), argsHasValue)
 }

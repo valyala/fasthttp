@@ -1304,7 +1304,7 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 		}
 
 		// Only re-create the compressed file if there was more than a second between the mod times.
-		// On MacOS the gzip seems to truncate the nanoseconds in the mod time causing the original file
+		// On macOS the gzip seems to truncate the nanoseconds in the mod time causing the original file
 		// to look newer than the gzipped file.
 		if fileInfoOriginal.ModTime().Sub(fileInfo.ModTime()) >= time.Second {
 			// The compressed file became stale. Re-create it.

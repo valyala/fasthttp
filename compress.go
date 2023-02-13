@@ -413,7 +413,7 @@ func newCompressWriterPoolMap() []*sync.Pool {
 }
 
 func isFileCompressible(f *os.File, minCompressRatio float64) bool {
-	// Try compressing the first 4kb of of the file
+	// Try compressing the first 4kb of the file
 	// and see if it can be compressed by more than
 	// the given minCompressRatio.
 	b := bytebufferpool.Get()
