@@ -20,8 +20,7 @@ import (
 var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 
 var (
-	// ErrAlreadyServing is returned when calling Serve on a Server
-	// that is already serving connections.
+	// Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
 	ErrAlreadyServing = errors.New("Server is already serving connections")
 )
 
