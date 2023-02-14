@@ -37,7 +37,7 @@ func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
 //
 // Request instance MUST NOT be used from concurrently running goroutines.
 type Request struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	// Request header
 	//
@@ -81,7 +81,7 @@ type Request struct {
 //
 // Response instance MUST NOT be used from concurrently running goroutines.
 type Response struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	// Response header
 	//
@@ -771,7 +771,7 @@ func (req *Request) ResetBody() {
 func (req *Request) CopyTo(dst *Request) {
 	req.copyToSkipBody(dst)
 	if req.bodyRaw != nil {
-		dst.bodyRaw = req.bodyRaw
+		dst.bodyRaw = append(dst.bodyRaw[:0], req.bodyRaw...)
 		if dst.body != nil {
 			dst.body.Reset()
 		}
@@ -803,7 +803,7 @@ func (req *Request) copyToSkipBody(dst *Request) {
 func (resp *Response) CopyTo(dst *Response) {
 	resp.copyToSkipBody(dst)
 	if resp.bodyRaw != nil {
-		dst.bodyRaw = resp.bodyRaw
+		dst.bodyRaw = append(dst.bodyRaw, resp.bodyRaw...)
 		if dst.body != nil {
 			dst.body.Reset()
 		}
@@ -852,9 +852,9 @@ func (req *Request) URI() *URI {
 // Use this method if a single URI may be reused across multiple requests.
 // Otherwise, you can just use SetRequestURI() and it will be parsed as new URI.
 // The URI is copied and can be safely modified later.
-func (req *Request) SetURI(newUri *URI) {
-	if newUri != nil {
-		newUri.CopyTo(&req.uri)
+func (req *Request) SetURI(newURI *URI) {
+	if newURI != nil {
+		newURI.CopyTo(&req.uri)
 		req.parsedURI = true
 		return
 	}
@@ -893,7 +893,7 @@ func (req *Request) parsePostArgs() {
 // isn't 'multipart/form-data'.
 var ErrNoMultipartForm = errors.New("request has no multipart/form-data Content-Type")
 
-// MultipartForm returns requests's multipart form.
+// MultipartForm returns request's multipart form.
 //
 // Returns ErrNoMultipartForm if request's Content-Type
 // isn't 'multipart/form-data'.
@@ -1129,7 +1129,7 @@ func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly bool
 	// Do not reset the request here - the caller must reset it before
 	// calling this method.
 
-	if getOnly && !req.Header.IsGet() {
+	if getOnly && !req.Header.IsGet() && !req.Header.IsHead() {
 		return ErrGetOnly
 	}
 
@@ -1147,7 +1147,7 @@ func (req *Request) readBodyStream(r *bufio.Reader, maxBodySize int, getOnly boo
 	// Do not reset the request here - the caller must reset it before
 	// calling this method.
 
-	if getOnly && !req.Header.IsGet() {
+	if getOnly && !req.Header.IsGet() && !req.Header.IsHead() {
 		return ErrGetOnly
 	}
 
@@ -1975,6 +1975,8 @@ func (resp *Response) String() string {
 
 func getHTTPString(hw httpWriter) string {
 	w := bytebufferpool.Get()
+	defer bytebufferpool.Put(w)
+
 	bw := bufio.NewWriter(w)
 	if err := hw.Write(bw); err != nil {
 		return err.Error()
@@ -1983,7 +1985,6 @@ func getHTTPString(hw httpWriter) string {
 		return err.Error()
 	}
 	s := string(w.B)
-	bytebufferpool.Put(w)
 	return s
 }
 

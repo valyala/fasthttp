@@ -111,7 +111,7 @@ func TestResponseHeaderMultiLineName(t *testing.T) {
 	t.Parallel()
 
 	s := "HTTP/1.1 200 OK\r\n" +
-		"Host: golang.org\r\n" +
+		"Host: go.dev\r\n" +
 		"Gopher-New-\r\n" +
 		" Line: This is a header on multiple lines\r\n" +
 		"\r\n"
@@ -974,7 +974,7 @@ func TestRequestHeaderSetByteRange(t *testing.T) {
 
 func testRequestHeaderSetByteRange(t *testing.T, startPos, endPos int, expectedV string) {
 	var h RequestHeader
-	h.SetByteRanges([]int{startPos}, []int{endPos})
+	h.SetByteRange(startPos, endPos)
 	v := h.Peek(HeaderRange)
 	if string(v) != expectedV {
 		t.Fatalf("unexpected range: %q. Expecting %q. startPos=%d, endPos=%d", v, expectedV, startPos, endPos)
@@ -1883,7 +1883,7 @@ func TestRequestHeaderCookie(t *testing.T) {
 	h.SetCookie("привет", "мир")
 
 	if string(h.Cookie("foo")) != "bar" {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.Cookie("foo"), "bar")
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h.Cookie("foo"), "bar")
 	}
 	if string(h.Cookie("привет")) != "мир" {
 		t.Fatalf("Unexpected cookie value %q. Expected %q", h.Cookie("привет"), "мир")
@@ -1905,7 +1905,7 @@ func TestRequestHeaderCookie(t *testing.T) {
 	}
 
 	if !bytes.Equal(h1.Cookie("foo"), h.Cookie("foo")) {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h1.Cookie("foo"), h.Cookie("foo"))
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h1.Cookie("foo"), h.Cookie("foo"))
 	}
 	h1.DelCookie("foo")
 	if len(h1.Cookie("foo")) > 0 {
@@ -1956,7 +1956,7 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 	c.SetKey("foo")
 	h.Cookie(c)
 	if string(c.Value()) != "bar" {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", c.Value(), "bar")
+		t.Fatalf("Unexpected cookie value %q. Expected %q", c.Value(), "bar")
 	}
 
 	if string(h.Peek(HeaderSetCookie)) != "foo=bar" {
@@ -1998,7 +1998,7 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 	}
 
 	if string(h.Cookie("foo")) != "bar" {
-		t.Fatalf("Unexpected cookie value %q. Exepcted %q", h.Cookie("foo"), "bar")
+		t.Fatalf("Unexpected cookie value %q. Expected %q", h.Cookie("foo"), "bar")
 	}
 
 	if string(h.Peek(HeaderCookie)) != "foo=bar" {

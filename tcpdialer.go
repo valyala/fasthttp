@@ -309,7 +309,7 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 }
 
 func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyCh chan struct{}) (net.Conn, error) {
-	timeout := -time.Since(deadline)
+	timeout := time.Until(deadline)
 	if timeout <= 0 {
 		return nil, ErrDialTimeout
 	}
@@ -338,8 +338,8 @@ func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Tim
 		dialer.LocalAddr = d.LocalAddr
 	}
 
-	ctx, cancel_ctx := context.WithDeadline(context.Background(), deadline)
-	defer cancel_ctx()
+	ctx, cancelCtx := context.WithDeadline(context.Background(), deadline)
+	defer cancelCtx()
 	conn, err := dialer.DialContext(ctx, network, addr.String())
 	if err != nil && ctx.Err() == context.DeadlineExceeded {
 		return nil, ErrDialTimeout

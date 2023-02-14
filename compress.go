@@ -402,7 +402,7 @@ var (
 
 func newCompressWriterPoolMap() []*sync.Pool {
 	// Initialize pools for all the compression levels defined
-	// in https://golang.org/pkg/compress/flate/#pkg-constants .
+	// in https://pkg.go.dev/compress/flate#pkg-constants .
 	// Compression levels are normalized with normalizeCompressLevel,
 	// so the fit [0..11].
 	var m []*sync.Pool
@@ -413,7 +413,7 @@ func newCompressWriterPoolMap() []*sync.Pool {
 }
 
 func isFileCompressible(f *os.File, minCompressRatio float64) bool {
-	// Try compressing the first 4kb of of the file
+	// Try compressing the first 4kb of the file
 	// and see if it can be compressed by more than
 	// the given minCompressRatio.
 	b := bytebufferpool.Get()

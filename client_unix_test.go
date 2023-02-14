@@ -51,7 +51,7 @@ func TestRstConnResponseWhileSending(t *testing.T) {
 		}
 	}()
 
-	svrUrl := "http://" + srv.Addr().String()
+	srvURL := "http://" + srv.Addr().String()
 	client := HostClient{Addr: srv.Addr().String()}
 
 	for i := 0; i < 100; i++ {
@@ -62,7 +62,7 @@ func TestRstConnResponseWhileSending(t *testing.T) {
 
 		req.Header.SetMethod("POST")
 		req.SetBodyStream(strings.NewReader(payload), len(payload))
-		req.SetRequestURI(svrUrl)
+		req.SetRequestURI(srvURL)
 
 		err = client.Do(req, resp)
 		if err != nil {
@@ -113,7 +113,7 @@ func TestRstConnClosedWithoutResponse(t *testing.T) {
 		}
 	}()
 
-	svrUrl := "http://" + srv.Addr().String()
+	srvURL := "http://" + srv.Addr().String()
 	client := HostClient{Addr: srv.Addr().String()}
 
 	for i := 0; i < 100; i++ {
@@ -124,7 +124,7 @@ func TestRstConnClosedWithoutResponse(t *testing.T) {
 
 		req.Header.SetMethod("POST")
 		req.SetBodyStream(strings.NewReader(payload), len(payload))
-		req.SetRequestURI(svrUrl)
+		req.SetRequestURI(srvURL)
 
 		err = client.Do(req, resp)
 

@@ -314,35 +314,35 @@ func testURIParseScheme(t *testing.T, uri, expectedScheme, expectedHost, expecte
 		t.Fatalf("Unexpected scheme %q. Expecting %q for uri %q", u.Scheme(), expectedScheme, uri)
 	}
 	if string(u.Host()) != expectedHost {
-		t.Fatalf("Unexepcted host %q. Expecting %q for uri %q", u.Host(), expectedHost, uri)
+		t.Fatalf("Unexpected host %q. Expecting %q for uri %q", u.Host(), expectedHost, uri)
 	}
 	if string(u.RequestURI()) != expectedRequestURI {
-		t.Fatalf("Unexepcted requestURI %q. Expecting %q for uri %q", u.RequestURI(), expectedRequestURI, uri)
+		t.Fatalf("Unexpected requestURI %q. Expecting %q for uri %q", u.RequestURI(), expectedRequestURI, uri)
 	}
 	if string(u.hash) != expectedHash {
-		t.Fatalf("Unexepcted hash %q. Expecting %q for uri %q", u.hash, expectedHash, uri)
+		t.Fatalf("Unexpected hash %q. Expecting %q for uri %q", u.hash, expectedHash, uri)
 	}
 }
 
 func TestIsHttp(t *testing.T) {
 	var u URI
-	if !u.isHttp() || u.isHttps() {
+	if !u.isHTTP() || u.isHTTPS() {
 		t.Fatalf("http scheme is assumed by default and not https")
 	}
 	u.SetSchemeBytes([]byte{})
-	if !u.isHttp() || u.isHttps() {
+	if !u.isHTTP() || u.isHTTPS() {
 		t.Fatalf("empty scheme must be threaten as http and not https")
 	}
 	u.SetScheme("http")
-	if !u.isHttp() || u.isHttps() {
+	if !u.isHTTP() || u.isHTTPS() {
 		t.Fatalf("scheme must be threaten as http and not https")
 	}
 	u.SetScheme("https")
-	if !u.isHttps() || u.isHttp() {
+	if !u.isHTTPS() || u.isHTTP() {
 		t.Fatalf("scheme must be threaten as https and not http")
 	}
 	u.SetScheme("dav")
-	if u.isHttps() || u.isHttp() {
+	if u.isHTTPS() || u.isHTTP() {
 		t.Fatalf("scheme must be threaten as not http and not https")
 	}
 }

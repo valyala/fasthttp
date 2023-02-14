@@ -1370,10 +1370,10 @@ func TestResponseGzipStream(t *testing.T) {
 		fmt.Fprintf(w, "foo")
 		w.Flush()
 		time.Sleep(time.Millisecond)
-		w.Write([]byte("barbaz")) //nolint:errcheck
-		w.Flush()                 //nolint:errcheck
+		_, _ = w.Write([]byte("barbaz"))
+		_ = w.Flush()
 		time.Sleep(time.Millisecond)
-		fmt.Fprintf(w, "1234") //nolint:errcheck
+		_, _ = fmt.Fprintf(w, "1234")
 		if err := w.Flush(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1392,11 +1392,11 @@ func TestResponseDeflateStream(t *testing.T) {
 		t.Fatalf("IsBodyStream must return false")
 	}
 	r.SetBodyStreamWriter(func(w *bufio.Writer) {
-		w.Write([]byte("foo"))   //nolint:errcheck
-		w.Flush()                //nolint:errcheck
-		fmt.Fprintf(w, "barbaz") //nolint:errcheck
-		w.Flush()                //nolint:errcheck
-		w.Write([]byte("1234"))  //nolint:errcheck
+		_, _ = w.Write([]byte("foo"))
+		_ = w.Flush()
+		_, _ = fmt.Fprintf(w, "barbaz")
+		_ = w.Flush()
+		_, _ = w.Write([]byte("1234"))
 		if err := w.Flush(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1750,7 +1750,7 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if err := bw.Flush(); err != nil {
-		t.Fatalf("unexepcted error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	var req1 Request
@@ -2382,7 +2382,7 @@ func TestReadBodyChunked(t *testing.T) {
 	// big body
 	testReadBodyChunked(t, 3*1024*1024)
 
-	// smaler body after big one
+	// smaller body after big one
 	testReadBodyChunked(t, 12343)
 }
 
@@ -2762,7 +2762,7 @@ func TestResponseImmediateHeaderFlushFixedLength(t *testing.T) {
 	}
 
 	if strings.Contains(w.String(), "xxx") {
-		t.Fatalf("Did not expext body to be written yet")
+		t.Fatalf("Did not expect body to be written yet")
 	}
 
 	<-cb
@@ -2844,7 +2844,7 @@ func TestResponseImmediateHeaderFlushChunked(t *testing.T) {
 	}
 
 	if strings.Contains(w.String(), "xxx") {
-		t.Fatalf("Did not expext body to be written yet")
+		t.Fatalf("Did not expect body to be written yet")
 	}
 
 	<-cb
@@ -3032,4 +3032,36 @@ func testRequestMultipartFormPipeEmptyFormField(t *testing.T, boundary string, f
 	}
 
 	return req.Body()
+}
+
+func TestReqCopeToRace(t *testing.T) {
+	req := AcquireRequest()
+	reqs := make([]*Request, 1000)
+	for i := 0; i < 1000; i++ {
+		req.SetBodyRaw([]byte(strconv.Itoa(i)))
+		tmpReq := AcquireRequest()
+		req.CopyTo(tmpReq)
+		reqs[i] = tmpReq
+	}
+	for i := 0; i < 1000; i++ {
+		if strconv.Itoa(i) != string(reqs[i].Body()) {
+			t.Fatalf("Unexpected req body %s. Expected %s", string(reqs[i].Body()), strconv.Itoa(i))
+		}
+	}
+}
+
+func TestRespCopeToRace(t *testing.T) {
+	resp := AcquireResponse()
+	resps := make([]*Response, 1000)
+	for i := 0; i < 1000; i++ {
+		resp.SetBodyRaw([]byte(strconv.Itoa(i)))
+		tmpResq := AcquireResponse()
+		resp.CopyTo(tmpResq)
+		resps[i] = tmpResq
+	}
+	for i := 0; i < 1000; i++ {
+		if strconv.Itoa(i) != string(resps[i].Body()) {
+			t.Fatalf("Unexpected resp body %s. Expected %s", string(resps[i].Body()), strconv.Itoa(i))
+		}
+	}
 }

@@ -25,7 +25,7 @@ type BalancingClient interface {
 //
 // It is safe calling LBClient methods from concurrently running goroutines.
 type LBClient struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	// Clients must contain non-zero clients list.
 	// Incoming requests are balanced among these clients.
@@ -70,7 +70,7 @@ func (cc *LBClient) DoTimeout(req *Request, resp *Response, timeout time.Duratio
 	return cc.get().DoDeadline(req, resp, deadline)
 }
 
-// Do calls calculates deadline using LBClient.Timeout and calls DoDeadline
+// Do calculates timeout using LBClient.Timeout and calls DoTimeout
 // on the least loaded client.
 func (cc *LBClient) Do(req *Request, resp *Response) error {
 	timeout := cc.Timeout

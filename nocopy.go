@@ -5,7 +5,7 @@ package fasthttp
 //
 // See https://github.com/golang/go/issues/8005#issuecomment-190753527 for details.
 // and also: https://stackoverflow.com/questions/52494458/nocopy-minimal-example
-type noCopy struct{} //nolint:unused
+type noCopy struct{}
 
-func (*noCopy) Lock()   {} //nolint:unused
-func (*noCopy) Unlock() {} //nolint:unused
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}
