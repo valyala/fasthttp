@@ -146,6 +146,7 @@ func testInmemoryListenerHTTPSingle(t *testing.T, client *http.Client, content s
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	defer func() { _ = res.Body.Close() }()
 	b, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

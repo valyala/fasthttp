@@ -71,6 +71,7 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse response using net/http failed, %v", err)
 	}
+	defer func() { _ = response.Body.Close() }()
 
 	if !bytes.Equal(header.StatusMessage(), []byte("SuperOK")) {
 		t.Errorf("parse status line with non-default value failed, got: '%q' want: 'SuperOK'", header.StatusMessage())
