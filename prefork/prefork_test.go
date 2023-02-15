@@ -21,7 +21,7 @@ func tearDown() {
 }
 
 func getAddr() string {
-	return fmt.Sprintf("0.0.0.0:%d", rand.Intn(9000-3000)+3000)
+	return fmt.Sprintf("127.0.0.1:%d", rand.Intn(9000-3000)+3000)
 }
 
 func Test_IsChild(t *testing.T) {
