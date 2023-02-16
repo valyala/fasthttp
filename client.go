@@ -374,6 +374,7 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 //
 // ErrTimeout is returned if the response wasn't returned during
 // the given timeout.
+// Immediately returns ErrTimeout if timeout value is negative.
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
 // to the requested host are busy.
@@ -387,6 +388,9 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 // try setting a ReadTimeout.
 func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	req.timeout = timeout
+	if req.timeout < 0 {
+		return ErrTimeout
+	}
 	return c.Do(req, resp)
 }
 
@@ -407,6 +411,7 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 //
 // ErrTimeout is returned if the response wasn't returned until
 // the given deadline.
+// Immediately returns ErrTimeout if the deadline has already been reached.
 //
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
 // to the requested host are busy.
@@ -415,6 +420,9 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	req.timeout = time.Until(deadline)
+	if req.timeout < 0 {
+		return ErrTimeout
+	}
 	return c.Do(req, resp)
 }
 
@@ -1139,6 +1147,7 @@ func ReleaseResponse(resp *Response) {
 //
 // ErrTimeout is returned if the response wasn't returned during
 // the given timeout.
+// Immediately returns ErrTimeout if timeout value is negative.
 //
 // ErrNoFreeConns is returned if all HostClient.MaxConns connections
 // to the host are busy.
@@ -1152,6 +1161,9 @@ func ReleaseResponse(resp *Response) {
 // try setting a ReadTimeout.
 func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	req.timeout = timeout
+	if req.timeout < 0 {
+		return ErrTimeout
+	}
 	return c.Do(req, resp)
 }
 
@@ -1167,6 +1179,7 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 //
 // ErrTimeout is returned if the response wasn't returned until
 // the given deadline.
+// Immediately returns ErrTimeout if the deadline has already been reached.
 //
 // ErrNoFreeConns is returned if all HostClient.MaxConns connections
 // to the host are busy.
@@ -1175,6 +1188,9 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	req.timeout = time.Until(deadline)
+	if req.timeout < 0 {
+		return ErrTimeout
+	}
 	return c.Do(req, resp)
 }
 
