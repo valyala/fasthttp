@@ -120,6 +120,32 @@ func testPipelineClientSetUserAgent(t *testing.T, timeout time.Duration) {
 	}
 }
 
+func TestHostClientNegativeTimeout(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &HostClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	if err := c.DoTimeout(req, nil, -time.Second); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	if err := c.DoDeadline(req, nil, time.Now().Add(-time.Second)); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	ln.Close()
+}
+
 func TestPipelineClientIssue832(t *testing.T) {
 	t.Parallel()
 
@@ -302,6 +328,32 @@ func TestClientNilResp(t *testing.T) {
 	}
 	if err := c.DoTimeout(req, nil, time.Second); err != nil {
 		t.Fatal(err)
+	}
+	ln.Close()
+}
+
+func TestClientNegativeTimeout(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	if err := c.DoTimeout(req, nil, -time.Second); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	if err := c.DoDeadline(req, nil, time.Now().Add(-time.Second)); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
 	}
 	ln.Close()
 }
