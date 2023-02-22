@@ -93,7 +93,7 @@ type Response struct {
 	ImmediateHeaderFlush bool
 
 	// StreamBody enables response body streaming.
-	// Response.BodyStream() get response body.
+	// Use SetBodyStream to set the body stream.
 	StreamBody bool
 
 	bodyStream io.Reader
