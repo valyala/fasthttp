@@ -2225,7 +2225,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 			// Reading Headers.
 			//
-			// If we have pipline response in the outgoing buffer,
+			// If we have pipeline response in the outgoing buffer,
 			// we only want to try and read the next headers once.
 			// If we have to wait for the next request we flush the
 			// outgoing buffer first so it doesn't have to wait.
