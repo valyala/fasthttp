@@ -606,7 +606,7 @@ func TestRequestHeaderDel(t *testing.T) {
 
 	cv := h.Cookie("foobar")
 	if len(cv) > 0 {
-		t.Fatalf("unexpected cookie obtianed: %q", cv)
+		t.Fatalf("unexpected cookie obtained: %q", cv)
 	}
 	if h.ContentLength() != 0 {
 		t.Fatalf("unexpected content-length: %d. Expecting 0", h.ContentLength())
@@ -673,7 +673,7 @@ func TestResponseHeaderDel(t *testing.T) {
 	}
 
 	if h.Cookie(&c) {
-		t.Fatalf("unexpected cookie obtianed: %q", &c)
+		t.Fatalf("unexpected cookie obtained: %q", &c)
 	}
 	if h.ContentLength() != 0 {
 		t.Fatalf("unexpected content-length: %d. Expecting 0", h.ContentLength())
