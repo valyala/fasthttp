@@ -90,7 +90,7 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 			auth := authBarrierStorage.Load()
 			if auth == nil {
 				authBarrier := base64.StdEncoding.EncodeToString([]byte(proxyURL.User.String()))
-				auth := &authBarrier
+				auth = &authBarrier
 				authBarrierStorage.Store(auth)
 			}
 
