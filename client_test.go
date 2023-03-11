@@ -2734,6 +2734,30 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestClientConfigureClientFailed(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{
+		ConfigureClient: func(hc *HostClient) error {
+			return fmt.Errorf("failed to configure")
+		},
+	}
+
+	req := Request{}
+	req.SetRequestURI("http://example.com")
+
+	err := c.Do(&req, &Response{})
+	if err == nil {
+		t.Fatal("expected error (failed to configure)")
+	}
+
+	c.ConfigureClient = nil
+	err = c.Do(&req, &Response{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 	t.Parallel()
 

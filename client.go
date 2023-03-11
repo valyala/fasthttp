@@ -527,6 +527,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 
 		if c.ConfigureClient != nil {
 			if err := c.ConfigureClient(hc); err != nil {
+				c.mLock.Unlock()
 				return err
 			}
 		}
