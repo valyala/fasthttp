@@ -11,7 +11,7 @@ import (
 )
 
 // ConvertRequest convert a fasthttp.Request to an http.Request
-// forServer should be set to true when the http.Request is going to passed to a http.Handler.
+// forServer should be set to true when the http.Request is going to be passed to a http.Handler.
 //
 // The http.Request must not be used after the fasthttp handler has returned!
 // Memory in use by the http.Request will be reused after your handler has returned!
@@ -25,8 +25,12 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	}
 
 	r.Method = b2s(ctx.Method())
-	r.Proto = "HTTP/1.1"
-	r.ProtoMajor = 1
+	r.Proto = b2s(ctx.Request.Header.Protocol())
+	if r.Proto == "HTTP/2" {
+		r.ProtoMajor = 2
+	} else {
+		r.ProtoMajor = 1
+	}
 	r.ProtoMinor = 1
 	r.ContentLength = int64(len(body))
 	r.RemoteAddr = ctx.RemoteAddr().String()

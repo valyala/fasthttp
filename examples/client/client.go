@@ -85,7 +85,7 @@ func sendPostRequest() {
 			if err == io.EOF || err == nil {
 				fmt.Printf("DEBUG Parsed Response: %v\n", respEntity)
 			} else {
-				fmt.Fprintf(os.Stderr, "ERR failed to parse reponse: %v\n", err)
+				fmt.Fprintf(os.Stderr, "ERR failed to parse response: %v\n", err)
 			}
 		} else {
 			fmt.Fprintf(os.Stderr, "ERR invalid HTTP response code: %d\n", statusCode)

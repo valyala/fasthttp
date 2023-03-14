@@ -20,12 +20,12 @@ const (
 )
 
 // FasthttpProxyHTTPDialer returns a fasthttp.DialFunc that dials using
-// the the env(HTTP_PROXY, HTTPS_PROXY and NO_PROXY) configured HTTP proxy.
+// the env(HTTP_PROXY, HTTPS_PROXY and NO_PROXY) configured HTTP proxy.
 //
 // Example usage:
 //
 //	c := &fasthttp.Client{
-//		Dial: FasthttpProxyHTTPDialer(),
+//		Dial: fasthttp.FasthttpProxyHTTPDialer(),
 //	}
 func FasthttpProxyHTTPDialer() fasthttp.DialFunc {
 	return FasthttpProxyHTTPDialerTimeout(0)
@@ -37,7 +37,7 @@ func FasthttpProxyHTTPDialer() fasthttp.DialFunc {
 // Example usage:
 //
 //	c := &fasthttp.Client{
-//		Dial: FasthttpProxyHTTPDialerTimeout(time.Second * 2),
+//		Dial: fasthttp.FasthttpProxyHTTPDialerTimeout(time.Second * 2),
 //	}
 func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 	proxier := httpproxy.FromEnvironment().ProxyFunc()
@@ -90,7 +90,7 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 			auth := authBarrierStorage.Load()
 			if auth == nil {
 				authBarrier := base64.StdEncoding.EncodeToString([]byte(proxyURL.User.String()))
-				auth := &authBarrier
+				auth = &authBarrier
 				authBarrierStorage.Store(auth)
 			}
 

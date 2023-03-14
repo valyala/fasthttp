@@ -24,7 +24,7 @@ const (
 // ResponseHeader instance MUST NOT be used from concurrently running
 // goroutines.
 type ResponseHeader struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	disableNormalizing   bool
 	noHTTP11             bool
@@ -59,7 +59,7 @@ type ResponseHeader struct {
 // RequestHeader instance MUST NOT be used from concurrently running
 // goroutines.
 type RequestHeader struct {
-	noCopy noCopy //nolint:unused,structcheck
+	noCopy noCopy
 
 	disableNormalizing   bool
 	noHTTP11             bool
@@ -113,31 +113,22 @@ func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
 //
 //   - If startPos is negative, then 'bytes=-startPos' value is set.
 //   - If endPos is negative, then 'bytes=startPos-' value is set.
-func (h *RequestHeader) SetByteRanges(startPos, endPos []int) {
+func (h *RequestHeader) SetByteRange(startPos, endPos int) {
 	b := h.bufKV.value[:0]
 	b = append(b, strBytes...)
 	b = append(b, '=')
-	for i := range startPos {
-		if i > 0 {
-			b = append(b, ',')
-		}
-		if startPos[i] >= 0 {
-			b = AppendUint(b, startPos[i])
-		} else {
-			endPos[i] = -startPos[i]
-		}
-		b = append(b, '-')
-		if endPos[i] >= 0 {
-			b = AppendUint(b, endPos[i])
-		}
+	if startPos >= 0 {
+		b = AppendUint(b, startPos)
+	} else {
+		endPos = -startPos
+	}
+	b = append(b, '-')
+	if endPos >= 0 {
+		b = AppendUint(b, endPos)
 	}
 	h.bufKV.value = b
 
 	h.setNonSpecial(strRange, h.bufKV.value)
-}
-
-func (h *RequestHeader) SetByteRange(startPos, endPos int) {
-	h.SetByteRanges([]int{startPos}, []int{endPos})
 }
 
 // StatusCode returns response status code.
@@ -1504,7 +1495,7 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 
 // SetCookie sets the given response cookie.
 //
-// It is save re-using the cookie after the function returns.
+// It is safe re-using the cookie after the function returns.
 func (h *ResponseHeader) SetCookie(cookie *Cookie) {
 	h.cookies = setArgBytes(h.cookies, cookie.Key(), cookie.Cookie(), argsHasValue)
 }
@@ -3092,7 +3083,7 @@ func (s *headerScanner) next() bool {
 	n++
 	for len(s.b) > n && s.b[n] == ' ' {
 		n++
-		// the newline index is a relative index, and lines below trimed `s.b` by `n`,
+		// the newline index is a relative index, and lines below trimmed `s.b` by `n`,
 		// so the relative newline index also shifted forward. it's safe to decrease
 		// to a minus value, it means it's invalid, and will find the newline again.
 		s.nextNewLine--

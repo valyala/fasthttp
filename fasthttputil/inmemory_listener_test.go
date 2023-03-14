@@ -146,6 +146,7 @@ func testInmemoryListenerHTTPSingle(t *testing.T, client *http.Client, content s
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	defer func() { _ = res.Body.Close() }()
 	b, err := io.ReadAll(res.Body)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -188,4 +189,97 @@ func TestInmemoryListenerHTTPConcurrent(t *testing.T) {
 		}
 		wg.Wait()
 	})
+}
+
+func acceptLoop(ln net.Listener) {
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			panic(err)
+		}
+
+		conn.Close()
+	}
+}
+
+func TestInmemoryListenerAddrDefault(t *testing.T) {
+	t.Parallel()
+
+	ln := NewInmemoryListener()
+
+	verifyAddr(t, ln.Addr(), inmemoryAddr(0))
+
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			panic(err)
+		}
+
+		c.Close()
+	}()
+
+	lc, err := ln.Accept()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	verifyAddr(t, lc.LocalAddr(), inmemoryAddr(0))
+	verifyAddr(t, lc.RemoteAddr(), pipeAddr(0))
+
+	go acceptLoop(ln)
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	verifyAddr(t, c.LocalAddr(), pipeAddr(0))
+	verifyAddr(t, c.RemoteAddr(), inmemoryAddr(0))
+}
+
+func verifyAddr(t *testing.T, got, expected net.Addr) {
+	if got != expected {
+		t.Fatalf("unexpected addr: %v. Expecting %v", got, expected)
+	}
+}
+
+func TestInmemoryListenerAddrCustom(t *testing.T) {
+	t.Parallel()
+
+	ln := NewInmemoryListener()
+
+	listenerAddr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 12345}
+
+	ln.SetLocalAddr(listenerAddr)
+
+	verifyAddr(t, ln.Addr(), listenerAddr)
+
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			panic(err)
+		}
+
+		c.Close()
+	}()
+
+	lc, err := ln.Accept()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	verifyAddr(t, lc.LocalAddr(), listenerAddr)
+	verifyAddr(t, lc.RemoteAddr(), pipeAddr(0))
+
+	go acceptLoop(ln)
+
+	clientAddr := &net.TCPAddr{IP: net.IPv4(127, 0, 0, 2), Port: 65432}
+
+	c, err := ln.DialWithLocalAddr(clientAddr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	verifyAddr(t, c.LocalAddr(), clientAddr)
+	verifyAddr(t, c.RemoteAddr(), listenerAddr)
 }

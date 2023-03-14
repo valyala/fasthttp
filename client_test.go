@@ -120,6 +120,32 @@ func testPipelineClientSetUserAgent(t *testing.T, timeout time.Duration) {
 	}
 }
 
+func TestHostClientNegativeTimeout(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &HostClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	if err := c.DoTimeout(req, nil, -time.Second); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	if err := c.DoDeadline(req, nil, time.Now().Add(-time.Second)); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	ln.Close()
+}
+
 func TestPipelineClientIssue832(t *testing.T) {
 	t.Parallel()
 
@@ -302,6 +328,32 @@ func TestClientNilResp(t *testing.T) {
 	}
 	if err := c.DoTimeout(req, nil, time.Second); err != nil {
 		t.Fatal(err)
+	}
+	ln.Close()
+}
+
+func TestClientNegativeTimeout(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	if err := c.DoTimeout(req, nil, -time.Second); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	if err := c.DoDeadline(req, nil, time.Now().Add(-time.Second)); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
 	}
 	ln.Close()
 }
@@ -724,7 +776,7 @@ func TestClientDefaultUserAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if userAgentSeen != string(defaultUserAgent) {
+	if userAgentSeen != defaultUserAgent {
 		t.Fatalf("User-Agent defers %q != %q", userAgentSeen, defaultUserAgent)
 	}
 }
@@ -2682,6 +2734,30 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestClientConfigureClientFailed(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{
+		ConfigureClient: func(hc *HostClient) error {
+			return fmt.Errorf("failed to configure")
+		},
+	}
+
+	req := Request{}
+	req.SetRequestURI("http://example.com")
+
+	err := c.Do(&req, &Response{})
+	if err == nil {
+		t.Fatal("expected error (failed to configure)")
+	}
+
+	c.ConfigureClient = nil
+	err = c.Do(&req, &Response{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 	t.Parallel()
 
@@ -2969,5 +3045,65 @@ func TestHttpsRequestWithoutParsedURL(t *testing.T) {
 	_, err := client.doNonNilReqResp(req, &Response{})
 	if err != nil {
 		t.Fatal("https requests with IsTLS client must succeed")
+	}
+}
+
+func Test_AddMissingPort(t *testing.T) {
+	type args struct {
+		addr  string
+		isTLS bool
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			args: args{"127.1", false}, // 127.1 is a short form of 127.0.0.1
+			want: "127.1:80",
+		},
+		{
+			args: args{"127.0.0.1", false},
+			want: "127.0.0.1:80",
+		},
+		{
+			args: args{"127.0.0.1", true},
+			want: "127.0.0.1:443",
+		},
+		{
+			args: args{"[::1]", false},
+			want: "[::1]:80",
+		},
+		{
+			args: args{"::1", false},
+			want: "::1", // keep as is
+		},
+		{
+			args: args{"[::1]", true},
+			want: "[::1]:443",
+		},
+		{
+			args: args{"127.0.0.1:8080", false},
+			want: "127.0.0.1:8080",
+		},
+		{
+			args: args{"127.0.0.1:8443", true},
+			want: "127.0.0.1:8443",
+		},
+		{
+			args: args{"[::1]:8080", false},
+			want: "[::1]:8080",
+		},
+		{
+			args: args{"[::1]:8443", true},
+			want: "[::1]:8443",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			if got := AddMissingPort(tt.args.addr, tt.args.isTLS); got != tt.want {
+				t.Errorf("AddMissingPort() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
