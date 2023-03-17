@@ -3008,8 +3008,27 @@ func TestResponseBodyStream(t *testing.T) {
 		}))
 
 		defer server.Close()
-		t.Run("simple-max size", func(t *testing.T) {
-			client := Client{StreamResponseBody: true, MaxResponseBodySize: 5}
+
+		t.Run("normal request", func(t *testing.T) {
+			client := Client{StreamResponseBody: true}
+			resp := AcquireResponse()
+			request := AcquireRequest()
+			request.SetRequestURI(server.URL)
+			if err := client.Do(request, resp); err != nil {
+				t.Fatal(err)
+			}
+			stream := resp.BodyStream()
+			defer func() {
+				ReleaseResponse(resp)
+			}()
+			content, _ := io.ReadAll(stream)
+			if string(content) != "hello world" {
+				t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "hello world")
+			}
+		})
+
+		t.Run("limit response body size size", func(t *testing.T) {
+			client := Client{StreamResponseBody: true, MaxResponseBodySize: 20}
 			resp := AcquireResponse()
 			request := AcquireRequest()
 			request.SetRequestURI(server.URL)

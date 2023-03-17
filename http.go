@@ -328,9 +328,6 @@ func newCloseReader(r io.Reader, closeFunc func() error) io.ReadCloser {
 	if r == nil {
 		panic(`BUG: reader is nil`)
 	}
-	if rv, isOk := r.(io.ReadCloser); isOk {
-		return rv
-	}
 	return &closeReader{Reader: r, closeFunc: closeFunc}
 }
 
@@ -1446,8 +1443,8 @@ func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
 		bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
 		resp.Header.SetContentLength(len(bodyBuf.B))
 	}
-	if resp.StreamBody && resp.bodyStream == nil {
-		resp.bodyStream = bytes.NewBuffer(bodyBuf.B)
+	if err == nil && resp.StreamBody && resp.bodyStream == nil {
+		resp.bodyStream = bytes.NewReader(bodyBuf.B)
 	}
 	return err
 }
