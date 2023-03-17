@@ -1534,6 +1534,7 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 			c.conns[n-1] = nil
 			c.conns = c.conns[:n-1]
 		default:
+			c.connsLock.Unlock()
 			return nil, ErrConnPoolStrategyNotImpl
 		}
 	}
