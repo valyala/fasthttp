@@ -299,24 +299,37 @@ func (resp *Response) BodyWriter() io.Writer {
 
 // BodyStream returns io.Reader
 //
-// You must close it after you use it.
-func (resp *Response) BodyStream() io.ReadCloser {
-	if resp.bodyStream == nil {
-		resp.bodyStream = bytes.NewReader(resp.Body())
-	}
-	return newCloseReader(resp.bodyStream, resp.closeBodyStream)
+// You must CloseBodyStream or ReleaseRequest after you use it.
+func (req *Request) BodyStream() io.Reader {
+	return req.bodyStream
+}
+
+func (req *Request) CloseBodyStream() error {
+	return req.closeBodyStream()
+}
+
+// BodyStream returns io.Reader
+//
+// You must CloseBodyStream or ReleaseResponse after you use it.
+func (resp *Response) BodyStream() io.Reader {
+	return resp.bodyStream
+}
+
+func (resp *Response) CloseBodyStream() error {
+	return resp.closeBodyStream()
 }
 
 type closeReader struct {
 	io.Reader
 	closeFunc func() error
-	closeOnce sync.Once
-	err       error
 }
 
 func newCloseReader(r io.Reader, closeFunc func() error) io.ReadCloser {
 	if r == nil {
 		panic(`BUG: reader is nil`)
+	}
+	if rv, isOk := r.(io.ReadCloser); isOk {
+		return rv
 	}
 	return &closeReader{Reader: r, closeFunc: closeFunc}
 }
@@ -325,10 +338,7 @@ func (c *closeReader) Close() error {
 	if c.closeFunc == nil {
 		return nil
 	}
-	c.closeOnce.Do(func() {
-		c.err = c.closeFunc()
-	})
-	return c.err
+	return c.closeFunc()
 }
 
 // BodyWriter returns writer for populating request body.

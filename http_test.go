@@ -2982,7 +2982,7 @@ func TestResponseBodyStream(t *testing.T) {
 		}
 		body := resp.BodyStream()
 		defer func() {
-			if err := body.Close(); err != nil {
+			if err := resp.CloseBodyStream(); err != nil {
 				t.Fatalf("close body stream err: %v", err)
 			}
 		}()
@@ -3009,16 +3009,16 @@ func TestResponseBodyStream(t *testing.T) {
 
 		defer server.Close()
 		t.Run("simple-max size", func(t *testing.T) {
+			client := Client{StreamResponseBody: true, MaxResponseBodySize: 5}
 			resp := AcquireResponse()
-			resp.StreamBody = true
 			request := AcquireRequest()
 			request.SetRequestURI(server.URL)
-			if err := (&Client{MaxResponseBodySize: 5}).Do(request, resp); err != nil {
+			if err := client.Do(request, resp); err != nil {
 				t.Fatal(err)
 			}
 			stream := resp.BodyStream()
 			defer func() {
-				if err := stream.Close(); err != nil {
+				if err := resp.CloseBodyStream(); err != nil {
 					t.Fatalf("close stream err: %v", err)
 				}
 			}()
@@ -3029,16 +3029,16 @@ func TestResponseBodyStream(t *testing.T) {
 		})
 
 		t.Run("chunked", func(t *testing.T) {
+			client := Client{StreamResponseBody: true}
 			resp := AcquireResponse()
-			resp.StreamBody = true
 			request := AcquireRequest()
 			request.SetRequestURI(server.URL + "?chunked=true")
-			if err := Do(request, resp); err != nil {
+			if err := client.Do(request, resp); err != nil {
 				t.Fatal(err)
 			}
 			stream := resp.BodyStream()
 			defer func() {
-				if err := stream.Close(); err != nil {
+				if err := resp.CloseBodyStream(); err != nil {
 					t.Fatalf("close stream err: %v", err)
 				}
 			}()
