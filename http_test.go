@@ -2740,8 +2740,7 @@ func TestResponseImmediateHeaderFlushFixedLength(t *testing.T) {
 
 	r.SetBodyStream(buf, 3)
 
-	b := []byte{}
-	w := bytes.NewBuffer(b)
+	w := &bytes.Buffer{}
 	bb := bufio.NewWriter(w)
 
 	bw := &r
@@ -2786,8 +2785,7 @@ func TestResponseImmediateHeaderFlushFixedLengthSkipBody(t *testing.T) {
 
 	r.SetBodyStream(buf, 0)
 
-	b := []byte{}
-	w := bytes.NewBuffer(b)
+	w := &bytes.Buffer{}
 	bb := bufio.NewWriter(w)
 
 	var headersOnClose string
@@ -2821,8 +2819,7 @@ func TestResponseImmediateHeaderFlushChunked(t *testing.T) {
 
 	r.SetBodyStream(buf, -1)
 
-	b := []byte{}
-	w := bytes.NewBuffer(b)
+	w := &bytes.Buffer{}
 	bb := bufio.NewWriter(w)
 
 	bw := &r
@@ -2868,8 +2865,7 @@ func TestResponseImmediateHeaderFlushChunkedNoBody(t *testing.T) {
 
 	r.SetBodyStream(buf, -1)
 
-	b := []byte{}
-	w := bytes.NewBuffer(b)
+	w := &bytes.Buffer{}
 	bb := bufio.NewWriter(w)
 
 	var headersOnClose string
