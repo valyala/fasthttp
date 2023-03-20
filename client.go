@@ -1989,7 +1989,7 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 		return nil, err
 	}
 	if conn == nil {
-		panic("BUG: DialFunc returned (nil, nil)")
+		return nil, errors.New("dialling unsuccessful. Please report this bug!")
 	}
 
 	// We assume that any conn that has the Handshake() method is a TLS conn already.
