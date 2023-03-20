@@ -101,7 +101,14 @@ func acquireRealGzipWriter(w io.Writer, level int) *gzip.Writer {
 	if v == nil {
 		zw, err := gzip.NewWriterLevel(w, level)
 		if err != nil {
-			panic(fmt.Sprintf("BUG: unexpected error from gzip.NewWriterLevel(%d): %v", level, err))
+			// gzip.NewWriterLevel only errors for invalid
+			// compression levels. Clamp it to be min or max.
+			if level < gzip.HuffmanOnly {
+				level = gzip.HuffmanOnly
+			} else {
+				level = gzip.BestCompression
+			}
+			zw, _ = gzip.NewWriterLevel(w, level)
 		}
 		return zw
 	}
@@ -379,7 +386,14 @@ func acquireRealDeflateWriter(w io.Writer, level int) *zlib.Writer {
 	if v == nil {
 		zw, err := zlib.NewWriterLevel(w, level)
 		if err != nil {
-			panic(fmt.Sprintf("BUG: unexpected error from zlib.NewWriterLevel(%d): %v", level, err))
+			// zlib.NewWriterLevel only errors for invalid
+			// compression levels. Clamp it to be min or max.
+			if level < zlib.HuffmanOnly {
+				level = zlib.HuffmanOnly
+			} else {
+				level = zlib.BestCompression
+			}
+			zw, _ = zlib.NewWriterLevel(w, level)
 		}
 		return zw
 	}
