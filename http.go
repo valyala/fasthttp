@@ -963,7 +963,7 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	// Do not care about memory allocations here, since multipart
 	// form processing is slow.
 	if len(boundary) == 0 {
-		panic("BUG: form boundary cannot be empty")
+		return errors.New("form boundary cannot be empty")
 	}
 
 	mw := multipart.NewWriter(w)
