@@ -3,7 +3,9 @@
 package fasthttpadaptor
 
 import (
+	"bufio"
 	"io"
+	"net"
 	"net/http"
 
 	"github.com/valyala/fasthttp"
@@ -53,8 +55,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 			return
 		}
-
-		w := netHTTPResponseWriter{w: ctx.Response.BodyWriter()}
+		w := netHTTPResponseWriter{w: ctx.Response.BodyWriter(), r: ctx.RequestBodyStream(), conn: ctx.Conn()}
 		h.ServeHTTP(&w, r.WithContext(ctx))
 
 		ctx.SetStatusCode(w.StatusCode())
@@ -86,6 +87,8 @@ type netHTTPResponseWriter struct {
 	statusCode int
 	h          http.Header
 	w          io.Writer
+	r          io.Reader
+	conn       net.Conn
 }
 
 func (w *netHTTPResponseWriter) StatusCode() int {
@@ -111,3 +114,7 @@ func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 }
 
 func (w *netHTTPResponseWriter) Flush() {}
+
+func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return w.conn, &bufio.ReadWriter{Reader: bufio.NewReader(w.r), Writer: bufio.NewWriter(w.w)}, nil
+}
