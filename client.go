@@ -1294,17 +1294,12 @@ func isIdempotent(req *Request) bool {
 }
 
 func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
-	nilResp := false
 	if resp == nil {
-		nilResp = true
 		resp = AcquireResponse()
+		defer ReleaseResponse(resp)
 	}
 
 	ok, err := c.doNonNilReqResp(req, resp)
-
-	if nilResp {
-		ReleaseResponse(resp)
-	}
 
 	return ok, err
 }
