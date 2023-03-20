@@ -2134,13 +2134,14 @@ func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, err
 	for {
 		nn, err := r.Read(dst[offset:])
 		if nn <= 0 {
-			if err != nil {
-				if err == io.EOF {
-					return dst[:offset], nil
-				}
+			switch {
+			case errors.Is(err, io.EOF):
+				return dst[:offset], nil
+			case err != nil:
 				return dst[:offset], err
+			default:
+				return dst[:offset], fmt.Errorf("bufio.Read() returned (%d, nil)", nn)
 			}
-			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
 		}
 		offset += nn
 		if maxBodySize > 0 && offset > maxBodySize {
@@ -2175,13 +2176,14 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	for {
 		nn, err := r.Read(dst[offset:])
 		if nn <= 0 {
-			if err != nil {
-				if err == io.EOF {
-					err = io.ErrUnexpectedEOF
-				}
+			switch {
+			case errors.Is(err, io.EOF):
+				return dst[:offset], io.ErrUnexpectedEOF
+			case err != nil:
 				return dst[:offset], err
+			default:
+				return dst[:offset], fmt.Errorf("bufio.Read() returned (%d, nil)", nn)
 			}
-			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
 		}
 		offset += nn
 		if offset == dstLen {
