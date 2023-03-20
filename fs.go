@@ -602,7 +602,7 @@ func (ff *fsFile) decReadersCount() {
 	ff.h.cacheLock.Lock()
 	ff.readersCount--
 	if ff.readersCount < 0 {
-		panic("BUG: negative fsFile.readersCount!")
+		ff.readersCount = 0
 	}
 	ff.h.cacheLock.Unlock()
 }
