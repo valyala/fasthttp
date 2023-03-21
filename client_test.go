@@ -3048,6 +3048,47 @@ func TestHttpsRequestWithoutParsedURL(t *testing.T) {
 	}
 }
 
+func TestHostClientErrConnPoolStrategyNotImpl(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	server := &Server{
+		Handler: func(ctx *RequestCtx) {},
+	}
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := server.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverStopCh)
+	}()
+
+	client := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		ConnPoolStrategy: ConnPoolStrategyType(100),
+	}
+
+	req := AcquireRequest()
+	req.SetRequestURI("http://foobar/baz")
+
+	if err := client.Do(req, AcquireResponse()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := client.Do(req, &Response{}); err != ErrConnPoolStrategyNotImpl {
+		t.Errorf("expected ErrConnPoolStrategyNotImpl error, got %v", err)
+	}
+	if err := client.Do(req, &Response{}); err != ErrConnPoolStrategyNotImpl {
+		t.Errorf("expected ErrConnPoolStrategyNotImpl error, got %v", err)
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func Test_AddMissingPort(t *testing.T) {
 	type args struct {
 		addr  string
