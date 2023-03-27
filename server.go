@@ -1929,9 +1929,6 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			if c != nil {
-				panic("BUG: net.Listener returned non-nil conn and non-nil error")
-			}
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				s.logger().Printf("Timeout error when accepting new connections: %v", netErr)
 				time.Sleep(time.Second)
@@ -1942,9 +1939,6 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 				return nil, err
 			}
 			return nil, io.EOF
-		}
-		if c == nil {
-			panic("BUG: net.Listener returned (nil, nil)")
 		}
 
 		if tc, ok := c.(*net.TCPConn); ok && s.TCPKeepalive {
