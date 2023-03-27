@@ -2572,7 +2572,7 @@ func (ctx *RequestCtx) LastTimeoutErrorResponse() *Response {
 
 func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 	if ctx.timeoutResponse != nil {
-		panic("BUG: cannot write timed out response")
+		return errors.New("cannot write timed out response")
 	}
 	err := ctx.Response.Write(w)
 
