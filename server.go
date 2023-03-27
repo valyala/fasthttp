@@ -2590,8 +2590,8 @@ func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
 	c := ctx.c
 	s.releaseCtx(ctx)
 
-	// Make GC happy, so it could garbage collect ctx
-	// while we waiting for the next request.
+	// Make GC happy, so it could garbage collect ctx while we wait for the
+	// next request.
 	ctx = nil
 	*ctxP = nil
 
