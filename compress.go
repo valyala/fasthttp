@@ -66,6 +66,7 @@ func releaseFlateReader(zr io.ReadCloser) {
 func resetFlateReader(zr io.ReadCloser, r io.Reader) error {
 	zrr, ok := zr.(zlib.Resetter)
 	if !ok {
+		// sanity check. should only be called with a zlib.Reader
 		panic("BUG: zlib.Reader doesn't implement zlib.Resetter???")
 	}
 	return zrr.Reset(r, nil)

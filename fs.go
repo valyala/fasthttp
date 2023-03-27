@@ -1395,6 +1395,7 @@ func readFileHeader(f *os.File, compressed bool, fileEncoding string) ([]byte, e
 func stripLeadingSlashes(path []byte, stripSlashes int) []byte {
 	for stripSlashes > 0 && len(path) > 0 {
 		if path[0] != '/' {
+			// developer sanity-check
 			panic("BUG: path must start with slash")
 		}
 		n := bytes.IndexByte(path[1:], '/')

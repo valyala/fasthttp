@@ -26,6 +26,7 @@ func (cc *perIPConnCounter) Unregister(ip uint32) {
 	cc.lock.Lock()
 	defer cc.lock.Unlock()
 	if cc.m == nil {
+		// developer safeguard
 		panic("BUG: perIPConnCounter.Register() wasn't called")
 	}
 	n := cc.m[ip] - 1
