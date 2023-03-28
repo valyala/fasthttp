@@ -112,15 +112,13 @@ func (cc *LBClient) AddClient(c BalancingClient) int {
 func (cc *LBClient) RemoveClients(rc func(BalancingClient) bool) int {
 	cc.mu.Lock()
 	n := 0
-	for _, cs := range cc.cs {
+	for idx, cs := range cc.cs {
+		cc.cs[idx] = nil
 		if rc(cs.c) {
 			continue
 		}
 		cc.cs[n] = cs
 		n++
-	}
-	for i := n; i < len(cc.cs); i++ {
-		cc.cs[i] = nil
 	}
 	cc.cs = cc.cs[:n]
 
