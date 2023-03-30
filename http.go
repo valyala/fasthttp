@@ -963,7 +963,7 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	// Do not care about memory allocations here, since multipart
 	// form processing is slow.
 	if len(boundary) == 0 {
-		panic("BUG: form boundary cannot be empty")
+		return errors.New("form boundary cannot be empty")
 	}
 
 	mw := multipart.NewWriter(w)
@@ -2134,13 +2134,14 @@ func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, err
 	for {
 		nn, err := r.Read(dst[offset:])
 		if nn <= 0 {
-			if err != nil {
-				if err == io.EOF {
-					return dst[:offset], nil
-				}
+			switch {
+			case errors.Is(err, io.EOF):
+				return dst[:offset], nil
+			case err != nil:
 				return dst[:offset], err
+			default:
+				return dst[:offset], fmt.Errorf("bufio.Read() returned (%d, nil)", nn)
 			}
-			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
 		}
 		offset += nn
 		if maxBodySize > 0 && offset > maxBodySize {
@@ -2175,13 +2176,14 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	for {
 		nn, err := r.Read(dst[offset:])
 		if nn <= 0 {
-			if err != nil {
-				if err == io.EOF {
-					err = io.ErrUnexpectedEOF
-				}
+			switch {
+			case errors.Is(err, io.EOF):
+				return dst[:offset], io.ErrUnexpectedEOF
+			case err != nil:
 				return dst[:offset], err
+			default:
+				return dst[:offset], fmt.Errorf("bufio.Read() returned (%d, nil)", nn)
 			}
-			panic(fmt.Sprintf("BUG: bufio.Read() returned (%d, nil)", nn))
 		}
 		offset += nn
 		if offset == dstLen {
@@ -2197,6 +2199,8 @@ type ErrBrokenChunk struct {
 
 func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, error) {
 	if len(dst) > 0 {
+		// data integrity might be in danger. No idea what we received,
+		// but nothing we should write to.
 		panic("BUG: expected zero-length buffer")
 	}
 

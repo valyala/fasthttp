@@ -1929,9 +1929,6 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			if c != nil {
-				panic("BUG: net.Listener returned non-nil conn and non-nil error")
-			}
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				s.logger().Printf("Timeout error when accepting new connections: %v", netErr)
 				time.Sleep(time.Second)
@@ -1942,9 +1939,6 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 				return nil, err
 			}
 			return nil, io.EOF
-		}
-		if c == nil {
-			panic("BUG: net.Listener returned (nil, nil)")
 		}
 
 		if tc, ok := c.(*net.TCPConn); ok && s.TCPKeepalive {
@@ -2578,7 +2572,7 @@ func (ctx *RequestCtx) LastTimeoutErrorResponse() *Response {
 
 func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 	if ctx.timeoutResponse != nil {
-		panic("BUG: cannot write timed out response")
+		return errors.New("cannot write timed out response")
 	}
 	err := ctx.Response.Write(w)
 
@@ -2596,8 +2590,8 @@ func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
 	c := ctx.c
 	s.releaseCtx(ctx)
 
-	// Make GC happy, so it could garbage collect ctx
-	// while we waiting for the next request.
+	// Make GC happy, so it could garbage collect ctx while we wait for the
+	// next request.
 	ctx = nil
 	*ctxP = nil
 
@@ -2612,6 +2606,7 @@ func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
 		return nil, io.EOF
 	}
 	if n != 1 {
+		// developer sanity-check
 		panic("BUG: Reader must return at least one byte")
 	}
 
@@ -2787,19 +2782,23 @@ func (fa *fakeAddrer) LocalAddr() net.Addr {
 }
 
 func (fa *fakeAddrer) Read(p []byte) (int, error) {
+	// developer sanity-check
 	panic("BUG: unexpected Read call")
 }
 
 func (fa *fakeAddrer) Write(p []byte) (int, error) {
+	// developer sanity-check
 	panic("BUG: unexpected Write call")
 }
 
 func (fa *fakeAddrer) Close() error {
+	// developer sanity-check
 	panic("BUG: unexpected Close call")
 }
 
 func (s *Server) releaseCtx(ctx *RequestCtx) {
 	if ctx.timeoutResponse != nil {
+		// developer sanity-check
 		panic("BUG: cannot release timed out RequestCtx")
 	}
 

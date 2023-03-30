@@ -79,6 +79,7 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	copy(dst, net.IPv4zero)
 	dst = dst.To4()
 	if dst == nil {
+		// developer sanity-check
 		panic("BUG: dst must not be nil")
 	}
 
@@ -126,6 +127,7 @@ func ParseHTTPDate(date []byte) (time.Time, error) {
 // AppendUint appends n to dst and returns the extended dst.
 func AppendUint(dst []byte, n int) []byte {
 	if n < 0 {
+		// developer sanity-check
 		panic("BUG: int must be positive")
 	}
 
@@ -281,6 +283,7 @@ var hexIntBufPool sync.Pool
 
 func writeHexInt(w *bufio.Writer, n int) error {
 	if n < 0 {
+		// developer sanity-check
 		panic("BUG: int must be positive")
 	}
 

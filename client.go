@@ -1294,26 +1294,23 @@ func isIdempotent(req *Request) bool {
 }
 
 func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
-	nilResp := false
 	if resp == nil {
-		nilResp = true
 		resp = AcquireResponse()
+		defer ReleaseResponse(resp)
 	}
 
 	ok, err := c.doNonNilReqResp(req, resp)
-
-	if nilResp {
-		ReleaseResponse(resp)
-	}
 
 	return ok, err
 }
 
 func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error) {
 	if req == nil {
+		// for debugging purposes
 		panic("BUG: req cannot be nil")
 	}
 	if resp == nil {
+		// for debugging purposes
 		panic("BUG: resp cannot be nil")
 	}
 
@@ -1994,7 +1991,7 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 		return nil, err
 	}
 	if conn == nil {
-		panic("BUG: DialFunc returned (nil, nil)")
+		return nil, errors.New("dialling unsuccessful. Please report this bug!")
 	}
 
 	// We assume that any conn that has the Handshake() method is a TLS conn already.

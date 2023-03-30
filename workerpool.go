@@ -47,7 +47,7 @@ type workerChan struct {
 
 func (wp *workerPool) Start() {
 	if wp.stopCh != nil {
-		panic("BUG: workerPool already started")
+		return
 	}
 	wp.stopCh = make(chan struct{})
 	stopCh := wp.stopCh
@@ -72,7 +72,7 @@ func (wp *workerPool) Start() {
 
 func (wp *workerPool) Stop() {
 	if wp.stopCh == nil {
-		panic("BUG: workerPool wasn't started")
+		return
 	}
 	close(wp.stopCh)
 	wp.stopCh = nil
