@@ -51,7 +51,7 @@ func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.Dia
 			return nil, err
 		}
 
-		req := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", addr, addr)
+		req := "CONNECT " + addr + "HTTP/1.1\nHost: " + addr + "\r\n"
 		if auth != "" {
 			req += "Proxy-Authorization: Basic " + auth + "\r\n"
 		}
