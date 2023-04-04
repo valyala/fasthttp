@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nautilus73/limitio"
 	"github.com/valyala/bytebufferpool"
 )
 
@@ -408,7 +409,7 @@ var (
 // 'Content-Encoding: gzip' for reading un-gzipped body.
 // Use Body for reading gzipped request body.
 func (req *Request) BodyGunzip() ([]byte, error) {
-	return gunzipData(req.Body())
+	return gunzipData(req.Body(), 0)
 }
 
 // BodyGunzip returns un-gzipped body data.
@@ -417,12 +418,20 @@ func (req *Request) BodyGunzip() ([]byte, error) {
 // 'Content-Encoding: gzip' for reading un-gzipped body.
 // Use Body for reading gzipped response body.
 func (resp *Response) BodyGunzip() ([]byte, error) {
-	return gunzipData(resp.Body())
+	return gunzipData(resp.Body(), 0)
 }
 
-func gunzipData(p []byte) ([]byte, error) {
+func (req *Request) BodyGunzipWithMaxOutputSize(maxOutputSize int) ([]byte, error) {
+	return gunzipData(req.Body(), maxOutputSize)
+}
+
+func gunzipData(p []byte, maxOutputSize int) ([]byte, error) {
 	var bb bytebufferpool.ByteBuffer
-	_, err := WriteGunzip(&bb, p)
+	var w io.Writer = &bb
+	if maxOutputSize > 0 {
+		w = limitio.NewWriter(w, maxOutputSize, false)
+	}
+	_, err := WriteGunzip(w, p)
 	if err != nil {
 		return nil, err
 	}
@@ -435,7 +444,11 @@ func gunzipData(p []byte) ([]byte, error) {
 // 'Content-Encoding: br' for reading un-brotlied body.
 // Use Body for reading brotlied request body.
 func (req *Request) BodyUnbrotli() ([]byte, error) {
-	return unBrotliData(req.Body())
+	return unBrotliData(req.Body(), 0)
+}
+
+func (req *Request) BodyUnbrotliWithMaxOutputSize(maxOutputSize int) ([]byte, error) {
+	return unBrotliData(req.Body(), maxOutputSize)
 }
 
 // BodyUnbrotli returns un-brotlied body data.
@@ -444,12 +457,16 @@ func (req *Request) BodyUnbrotli() ([]byte, error) {
 // 'Content-Encoding: br' for reading un-brotlied body.
 // Use Body for reading brotlied response body.
 func (resp *Response) BodyUnbrotli() ([]byte, error) {
-	return unBrotliData(resp.Body())
+	return unBrotliData(resp.Body(), 0)
 }
 
-func unBrotliData(p []byte) ([]byte, error) {
+func unBrotliData(p []byte, maxOutputSize int) ([]byte, error) {
 	var bb bytebufferpool.ByteBuffer
-	_, err := WriteUnbrotli(&bb, p)
+	var w io.Writer = &bb
+	if maxOutputSize > 0 {
+		w = limitio.NewWriter(w, maxOutputSize, false)
+	}
+	_, err := WriteUnbrotli(w, p)
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +479,11 @@ func unBrotliData(p []byte) ([]byte, error) {
 // 'Content-Encoding: deflate' for reading inflated request body.
 // Use Body for reading deflated request body.
 func (req *Request) BodyInflate() ([]byte, error) {
-	return inflateData(req.Body())
+	return inflateData(req.Body(), 0)
+}
+
+func (req *Request) BodyInflateWithMaxOutputSize(maxOutputSize int) ([]byte, error) {
+	return inflateData(req.Body(), maxOutputSize)
 }
 
 // BodyInflate returns inflated body data.
@@ -471,16 +492,20 @@ func (req *Request) BodyInflate() ([]byte, error) {
 // 'Content-Encoding: deflate' for reading inflated response body.
 // Use Body for reading deflated response body.
 func (resp *Response) BodyInflate() ([]byte, error) {
-	return inflateData(resp.Body())
+	return inflateData(resp.Body(), 0)
 }
 
 func (ctx *RequestCtx) RequestBodyStream() io.Reader {
 	return ctx.Request.bodyStream
 }
 
-func inflateData(p []byte) ([]byte, error) {
+func inflateData(p []byte, maxOutputSize int) ([]byte, error) {
 	var bb bytebufferpool.ByteBuffer
-	_, err := WriteInflate(&bb, p)
+	var w io.Writer = &bb
+	if maxOutputSize > 0 {
+		w = limitio.NewWriter(w, maxOutputSize, false)
+	}
+	_, err := WriteInflate(w, p)
 	if err != nil {
 		return nil, err
 	}
@@ -504,6 +529,21 @@ func (req *Request) BodyUncompressed() ([]byte, error) {
 		return req.BodyGunzip()
 	case "br":
 		return req.BodyUnbrotli()
+	default:
+		return nil, ErrContentEncodingUnsupported
+	}
+}
+
+func (req *Request) BodyUncompressedWithMaxOutputSize(maxOutputSize int) ([]byte, error) {
+	switch string(req.Header.ContentEncoding()) {
+	case "":
+		return req.Body(), nil
+	case "deflate":
+		return req.BodyInflateWithMaxOutputSize(maxOutputSize)
+	case "gzip":
+		return req.BodyGunzipWithMaxOutputSize(maxOutputSize)
+	case "br":
+		return req.BodyUnbrotliWithMaxOutputSize(maxOutputSize)
 	default:
 		return nil, ErrContentEncodingUnsupported
 	}
