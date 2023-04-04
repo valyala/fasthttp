@@ -64,8 +64,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				haveContentType = true
 			}
 
-			for i := range vv {
-				ctx.Response.Header.Add(k, vv[i])
+			for _, v := range vv {
+				ctx.Response.Header.Add(k, v)
 			}
 		}
 		if !haveContentType {

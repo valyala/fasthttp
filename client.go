@@ -1636,8 +1636,8 @@ func (c *HostClient) CloseIdleConnections() {
 	c.conns = c.conns[:0]
 	c.connsLock.Unlock()
 
-	for i := range scratch {
-		c.closeConn(scratch[i])
+	for _, cc := range scratch {
+		c.closeConn(cc)
 	}
 }
 
