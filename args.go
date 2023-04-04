@@ -63,7 +63,6 @@ func (a *Args) Reset() {
 
 // CopyTo copies all args to dst.
 func (a *Args) CopyTo(dst *Args) {
-	dst.Reset()
 	dst.args = copyArgs(dst.args, a.args)
 }
 
