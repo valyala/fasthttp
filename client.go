@@ -1617,8 +1617,7 @@ func (c *HostClient) dialConnFor(w *wantConn) {
 	}
 
 	cc := acquireClientConn(conn)
-	delivered := w.tryDeliver(cc, nil)
-	if !delivered {
+	if !w.tryDeliver(cc, nil) {
 		// not delivered, return idle connection
 		c.releaseConn(cc)
 	}
