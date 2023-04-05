@@ -297,6 +297,9 @@ type Client struct {
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
 
+	// StreamResponseBody enables response body streaming
+	StreamResponseBody bool
+
 	// ConfigureClient configures the fasthttp.HostClient.
 	ConfigureClient func(hc *HostClient) error
 
@@ -521,6 +524,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 			MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
 			RetryIf:                       c.RetryIf,
 			ConnPoolStrategy:              c.ConnPoolStrategy,
+			StreamResponseBody:            c.StreamResponseBody,
 			clientReaderPool:              &c.readerPool,
 			clientWriterPool:              &c.writerPool,
 		}
@@ -794,6 +798,9 @@ type HostClient struct {
 
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
+
+	// StreamResponseBody enables response body streaming
+	StreamResponseBody bool
 
 	lastUseTime uint32
 
@@ -1331,8 +1338,10 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 
 	// backing up SkipBody in case it was set explicitly
 	customSkipBody := resp.SkipBody
+	customStreamBody := resp.StreamBody || c.StreamResponseBody
 	resp.Reset()
 	resp.SkipBody = customSkipBody
+	resp.StreamBody = customStreamBody
 
 	req.URI().DisablePathNormalizing = c.DisablePathNormalizing
 
@@ -1442,12 +1451,28 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		return retry, err
 	}
 
-	if resetConnection || req.ConnectionClose() || resp.ConnectionClose() || isConnRST {
+	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose() || isConnRST
+	if customStreamBody && resp.bodyStream != nil {
+		rbs := resp.bodyStream
+		resp.bodyStream = newCloseReader(rbs, func() error {
+			if r, ok := rbs.(*requestStream); ok {
+				releaseRequestStream(r)
+			}
+			if closeConn {
+				c.closeConn(cc)
+			} else {
+				c.releaseConn(cc)
+			}
+			return nil
+		})
+		return false, nil
+	}
+
+	if closeConn {
 		c.closeConn(cc)
 	} else {
 		c.releaseConn(cc)
 	}
-
 	return false, nil
 }
 
