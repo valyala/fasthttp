@@ -1613,7 +1613,7 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 		go c.connsCleaner()
 	}
 
-	conn, err := c.dialHostHard()
+	conn, err := c.dialHostHard(reqTimeout)
 	if err != nil {
 		c.decConnsCount()
 		return nil, err
@@ -1634,7 +1634,7 @@ func (c *HostClient) queueForIdle(w *wantConn) {
 }
 
 func (c *HostClient) dialConnFor(w *wantConn) {
-	conn, err := c.dialHostHard()
+	conn, err := c.dialHostHard(0)
 	if err != nil {
 		w.tryDeliver(nil, err)
 		c.decConnsCount()
@@ -1921,7 +1921,8 @@ func (c *HostClient) nextAddr() string {
 	return addr
 }
 
-func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
+func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err error) {
+	// use dialTimeout to control the timeout of each dial. It does not work if dialTimeout is 0 or dial has been set.
 	// attempt to dial all the available hosts before giving up.
 
 	c.addrsLock.Lock()
@@ -1933,6 +1934,13 @@ func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
 		n = 1
 	}
 
+	dial := c.Dial
+	if dialTimeout != 0 && dial == nil {
+		dial = func(addr string) (net.Conn, error) {
+			return DialTimeout(addr, dialTimeout)
+		}
+	}
+
 	timeout := c.ReadTimeout + c.WriteTimeout
 	if timeout <= 0 {
 		timeout = DefaultDialTimeout
@@ -1941,7 +1949,7 @@ func (c *HostClient) dialHostHard() (conn net.Conn, err error) {
 	for n > 0 {
 		addr := c.nextAddr()
 		tlsConfig := c.cachedTLSConfig(addr)
-		conn, err = dialAddr(addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, c.WriteTimeout)
+		conn, err = dialAddr(addr, dial, c.DialDualStack, c.IsTLS, tlsConfig, c.WriteTimeout)
 		if err == nil {
 			return conn, nil
 		}
