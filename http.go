@@ -1268,7 +1268,7 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 		return err
 	}
 
-	if req.Header.ContentLength() == -1 {
+	if contentLength == -1 {
 		err = req.Header.ReadTrailer(r)
 		if err != nil && err != io.EOF {
 			return err
@@ -1290,6 +1290,9 @@ func (req *Request) ReadBody(r *bufio.Reader, contentLength int, maxBodySize int
 
 	} else if contentLength == -1 {
 		bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
+		if err == nil && len(bodyBuf.B) == 0 {
+			req.Header.SetContentLength(0)
+		}
 
 	} else {
 		bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
