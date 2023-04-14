@@ -1342,6 +1342,7 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	h.Set(HeaderHost, "aaaa")
 	h.Set("aaaxxx", "123")
 	h.Set(HeaderTrailer, "foo, bar")
+	h.noDefaultContentType = true
 
 	var h1 RequestHeader
 	h.CopyTo(&h1)

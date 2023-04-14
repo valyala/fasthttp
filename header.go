@@ -1044,6 +1044,7 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.disableNormalizing = h.disableNormalizing
 	dst.noHTTP11 = h.noHTTP11
 	dst.connectionClose = h.connectionClose
+	dst.noDefaultContentType = h.noDefaultContentType
 
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)
