@@ -77,7 +77,7 @@ func sendPostRequest() {
 	resp := fasthttp.AcquireResponse()
 	err := client.DoTimeout(req, resp, reqTimeout)
 	fasthttp.ReleaseRequest(req)
-	defer func() { fasthttp.ReleaseResponse(resp) }()
+	defer fasthttp.ReleaseResponse(resp)
 
 	if err != nil {
 		errName, known := httpConnError(err)
