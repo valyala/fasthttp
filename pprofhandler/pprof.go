@@ -1,9 +1,9 @@
 package pprofhandler
 
 import (
+	"bytes"
 	"net/http/pprof"
 	rtp "runtime/pprof"
-	"strings"
 
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
@@ -22,18 +22,19 @@ var (
 // See https://pkg.go.dev/net/http/pprof for details.
 func PprofHandler(ctx *fasthttp.RequestCtx) {
 	ctx.Response.Header.Set("Content-Type", "text/html")
-	if strings.HasPrefix(string(ctx.Path()), "/debug/pprof/cmdline") {
+	switch {
+	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/cmdline")):
 		cmdline(ctx)
-	} else if strings.HasPrefix(string(ctx.Path()), "/debug/pprof/profile") {
+	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/profile")):
 		profile(ctx)
-	} else if strings.HasPrefix(string(ctx.Path()), "/debug/pprof/symbol") {
+	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/symbol")):
 		symbol(ctx)
-	} else if strings.HasPrefix(string(ctx.Path()), "/debug/pprof/trace") {
+	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/trace")):
 		trace(ctx)
-	} else {
+	default:
 		for _, v := range rtp.Profiles() {
 			ppName := v.Name()
-			if strings.HasPrefix(string(ctx.Path()), "/debug/pprof/"+ppName) {
+			if bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/"+ppName)) {
 				namedHandler := fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Handler(ppName).ServeHTTP)
 				namedHandler(ctx)
 				return
