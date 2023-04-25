@@ -833,17 +833,15 @@ func TestUseHostHeader2(t *testing.T) {
 	req.Header.SetHost("SomeHost")
 	if err := client.DoTimeout(req, resp, 1*time.Second); err != nil {
 		t.Fatalf("DoTimeout returned an error '%v'", err)
-	} else {
-		if resp.StatusCode() != http.StatusOK {
-			t.Fatalf("DoTimeout: %v", resp.body)
-		}
+	}
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("DoTimeout: %v", resp.body)
 	}
 	if err := client.Do(req, resp); err != nil {
 		t.Fatalf("DoTimeout returned an error '%v'", err)
-	} else {
-		if resp.StatusCode() != http.StatusOK {
-			t.Fatalf("Do: %q", resp.body)
-		}
+	}
+	if resp.StatusCode() != http.StatusOK {
+		t.Fatalf("Do: %q", resp.body)
 	}
 }
 
@@ -2588,7 +2586,7 @@ func TestWriteMultipartForm(t *testing.T) {
 	t.Parallel()
 
 	var w bytes.Buffer
-	s := strings.Replace(`--foo
+	s := strings.ReplaceAll(`--foo
 Content-Disposition: form-data; name="key"
 
 value
@@ -2598,7 +2596,7 @@ Content-Type: application/json
 
 {"foo": "bar"}
 --foo--
-`, "\n", "\r\n", -1)
+`, "\n", "\r\n")
 	mr := multipart.NewReader(strings.NewReader(s), "foo")
 	form, err := mr.ReadForm(1024)
 	if err != nil {
