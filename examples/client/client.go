@@ -118,7 +118,7 @@ func httpConnError(err error) (string, bool) {
 	switch {
 	case errors.Is(err, fasthttp.ErrTimeout):
 		errName = "timeout"
-	case errors.Is(err, fasthttp.ErrTimeout):
+	case errors.Is(err, fasthttp.ErrNoFreeConns):
 		errName = "conn_limit"
 	case errors.Is(err, fasthttp.ErrConnectionClosed):
 		errName = "conn_close"
