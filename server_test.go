@@ -1942,7 +1942,7 @@ func TestCompressHandler(t *testing.T) {
 
 	expectedBody := string(createFixedBody(2e4))
 	h := CompressHandler(func(ctx *RequestCtx) {
-		ctx.Write([]byte(expectedBody)) //nolint:errcheck
+		ctx.WriteString(expectedBody) //nolint:errcheck
 	})
 
 	var ctx RequestCtx
@@ -2610,7 +2610,7 @@ func TestRequestCtxNoHijackNoResponse(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			io.WriteString(ctx, "test") //nolint:errcheck
+			ctx.WriteString("test") //nolint:errcheck
 			ctx.HijackSetNoResponse(true)
 		},
 	}
