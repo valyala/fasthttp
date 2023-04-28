@@ -107,7 +107,7 @@ func TestCompressHandlerBrotliLevel(t *testing.T) {
 
 	expectedBody := string(createFixedBody(2e4))
 	h := CompressHandlerBrotliLevel(func(ctx *RequestCtx) {
-		ctx.Write([]byte(expectedBody)) //nolint:errcheck
+		ctx.WriteString(expectedBody) //nolint:errcheck
 	}, CompressBrotliDefaultCompression, CompressDefaultCompression)
 
 	var ctx RequestCtx
