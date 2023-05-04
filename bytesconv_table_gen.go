@@ -99,8 +99,7 @@ func main() {
 		return a
 	}()
 
-	w := new(bytes.Buffer)
-	w.WriteString(pre)
+	w := bytes.NewBufferString(pre)
 	fmt.Fprintf(w, "const hex2intTable = %q\n", hex2intTable)
 	fmt.Fprintf(w, "const toLowerTable = %q\n", toLowerTable)
 	fmt.Fprintf(w, "const toUpperTable = %q\n", toUpperTable)

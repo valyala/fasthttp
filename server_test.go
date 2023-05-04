@@ -384,7 +384,7 @@ func TestServerName(t *testing.T) {
 		},
 	}
 
-	getReponse := func() []byte {
+	getResponse := func() []byte {
 		rw := &readWriter{}
 		rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
@@ -400,7 +400,7 @@ func TestServerName(t *testing.T) {
 		return resp
 	}
 
-	resp := getReponse()
+	resp := getResponse()
 	if !bytes.Contains(resp, []byte("\r\nServer: "+defaultServerName+"\r\n")) {
 		t.Fatalf("Unexpected response %q expected Server: "+defaultServerName, resp)
 	}
@@ -412,7 +412,7 @@ func TestServerName(t *testing.T) {
 		Name: "foobar",
 	}
 
-	resp = getReponse()
+	resp = getResponse()
 	if !bytes.Contains(resp, []byte("\r\nServer: foobar\r\n")) {
 		t.Fatalf("Unexpected response %q expected Server: foobar", resp)
 	}
@@ -425,7 +425,7 @@ func TestServerName(t *testing.T) {
 		NoDefaultDate:         true,
 	}
 
-	resp = getReponse()
+	resp = getResponse()
 	if bytes.Contains(resp, []byte("\r\nServer: ")) {
 		t.Fatalf("Unexpected response %q expected no Server header", resp)
 	}
@@ -1942,7 +1942,7 @@ func TestCompressHandler(t *testing.T) {
 
 	expectedBody := string(createFixedBody(2e4))
 	h := CompressHandler(func(ctx *RequestCtx) {
-		ctx.Write([]byte(expectedBody)) //nolint:errcheck
+		ctx.WriteString(expectedBody) //nolint:errcheck
 	})
 
 	var ctx RequestCtx
@@ -2610,7 +2610,7 @@ func TestRequestCtxNoHijackNoResponse(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			io.WriteString(ctx, "test") //nolint:errcheck
+			ctx.WriteString("test") //nolint:errcheck
 			ctx.HijackSetNoResponse(true)
 		},
 	}
@@ -3772,7 +3772,7 @@ func TestStreamRequestBody(t *testing.T) {
 	pipe := fasthttputil.NewPipeConns()
 	cc, sc := pipe.Conn1(), pipe.Conn2()
 	// write headers and part1 body
-	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n", contentLength))); err != nil {
+	if _, err := fmt.Fprintf(cc, "POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n", contentLength); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cc.Write([]byte(part1)); err != nil {
@@ -3829,7 +3829,7 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 	pipe := fasthttputil.NewPipeConns()
 	cc, sc := pipe.Conn1(), pipe.Conn2()
 	// write headers and part1 body
-	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1))); err != nil {
+	if _, err := fmt.Fprintf(cc, "POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, part1); err != nil {
 		t.Error(err)
 	}
 
@@ -3876,7 +3876,7 @@ func TestStreamBodyRequestContentLength(t *testing.T) {
 
 	pipe := fasthttputil.NewPipeConns()
 	cc, sc := pipe.Conn1(), pipe.Conn2()
-	if _, err := cc.Write([]byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, content))); err != nil {
+	if _, err := fmt.Fprintf(cc, "POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, content); err != nil {
 		t.Fatal(err)
 	}
 

@@ -84,6 +84,7 @@ func (cc *LBClient) init() {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 	if len(cc.Clients) == 0 {
+		// developer sanity-check
 		panic("BUG: LBClient.Clients cannot be empty")
 	}
 	for _, c := range cc.Clients {
@@ -112,15 +113,13 @@ func (cc *LBClient) AddClient(c BalancingClient) int {
 func (cc *LBClient) RemoveClients(rc func(BalancingClient) bool) int {
 	cc.mu.Lock()
 	n := 0
-	for _, cs := range cc.cs {
+	for idx, cs := range cc.cs {
+		cc.cs[idx] = nil
 		if rc(cs.c) {
 			continue
 		}
 		cc.cs[n] = cs
 		n++
-	}
-	for i := n; i < len(cc.cs); i++ {
-		cc.cs[i] = nil
 	}
 	cc.cs = cc.cs[:n]
 

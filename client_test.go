@@ -120,6 +120,32 @@ func testPipelineClientSetUserAgent(t *testing.T, timeout time.Duration) {
 	}
 }
 
+func TestHostClientNegativeTimeout(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &HostClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	if err := c.DoTimeout(req, nil, -time.Second); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	if err := c.DoDeadline(req, nil, time.Now().Add(-time.Second)); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	ln.Close()
+}
+
 func TestPipelineClientIssue832(t *testing.T) {
 	t.Parallel()
 
@@ -302,6 +328,32 @@ func TestClientNilResp(t *testing.T) {
 	}
 	if err := c.DoTimeout(req, nil, time.Second); err != nil {
 		t.Fatal(err)
+	}
+	ln.Close()
+}
+
+func TestClientNegativeTimeout(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	if err := c.DoTimeout(req, nil, -time.Second); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	if err := c.DoDeadline(req, nil, time.Now().Add(-time.Second)); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
 	}
 	ln.Close()
 }
@@ -2682,6 +2734,30 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestClientConfigureClientFailed(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{
+		ConfigureClient: func(hc *HostClient) error {
+			return fmt.Errorf("failed to configure")
+		},
+	}
+
+	req := Request{}
+	req.SetRequestURI("http://example.com")
+
+	err := c.Do(&req, &Response{})
+	if err == nil {
+		t.Fatal("expected error (failed to configure)")
+	}
+
+	c.ConfigureClient = nil
+	err = c.Do(&req, &Response{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 	t.Parallel()
 
@@ -2969,6 +3045,47 @@ func TestHttpsRequestWithoutParsedURL(t *testing.T) {
 	_, err := client.doNonNilReqResp(req, &Response{})
 	if err != nil {
 		t.Fatal("https requests with IsTLS client must succeed")
+	}
+}
+
+func TestHostClientErrConnPoolStrategyNotImpl(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	server := &Server{
+		Handler: func(ctx *RequestCtx) {},
+	}
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := server.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverStopCh)
+	}()
+
+	client := &HostClient{
+		Addr: "foobar",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		ConnPoolStrategy: ConnPoolStrategyType(100),
+	}
+
+	req := AcquireRequest()
+	req.SetRequestURI("http://foobar/baz")
+
+	if err := client.Do(req, AcquireResponse()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := client.Do(req, &Response{}); err != ErrConnPoolStrategyNotImpl {
+		t.Errorf("expected ErrConnPoolStrategyNotImpl error, got %v", err)
+	}
+	if err := client.Do(req, &Response{}); err != ErrConnPoolStrategyNotImpl {
+		t.Errorf("expected ErrConnPoolStrategyNotImpl error, got %v", err)
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

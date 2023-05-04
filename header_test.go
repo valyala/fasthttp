@@ -71,6 +71,7 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse response using net/http failed, %v", err)
 	}
+	defer func() { _ = response.Body.Close() }()
 
 	if !bytes.Equal(header.StatusMessage(), []byte("SuperOK")) {
 		t.Errorf("parse status line with non-default value failed, got: '%q' want: 'SuperOK'", header.StatusMessage())
@@ -605,7 +606,7 @@ func TestRequestHeaderDel(t *testing.T) {
 
 	cv := h.Cookie("foobar")
 	if len(cv) > 0 {
-		t.Fatalf("unexpected cookie obtianed: %q", cv)
+		t.Fatalf("unexpected cookie obtained: %q", cv)
 	}
 	if h.ContentLength() != 0 {
 		t.Fatalf("unexpected content-length: %d. Expecting 0", h.ContentLength())
@@ -672,7 +673,7 @@ func TestResponseHeaderDel(t *testing.T) {
 	}
 
 	if h.Cookie(&c) {
-		t.Fatalf("unexpected cookie obtianed: %q", &c)
+		t.Fatalf("unexpected cookie obtained: %q", &c)
 	}
 	if h.ContentLength() != 0 {
 		t.Fatalf("unexpected content-length: %d. Expecting 0", h.ContentLength())
@@ -1341,6 +1342,7 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	h.Set(HeaderHost, "aaaa")
 	h.Set("aaaxxx", "123")
 	h.Set(HeaderTrailer, "foo, bar")
+	h.noDefaultContentType = true
 
 	var h1 RequestHeader
 	h.CopyTo(&h1)

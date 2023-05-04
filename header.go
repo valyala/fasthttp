@@ -109,7 +109,7 @@ func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
 	h.setNonSpecial(strContentRange, h.bufKV.value)
 }
 
-// SetByteRanges sets 'Range: bytes=startPos-endPos' header.
+// SetByteRange sets 'Range: bytes=startPos-endPos' header.
 //
 //   - If startPos is negative, then 'bytes=-startPos' value is set.
 //   - If endPos is negative, then 'bytes=startPos-' value is set.
@@ -1044,6 +1044,7 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.disableNormalizing = h.disableNormalizing
 	dst.noHTTP11 = h.noHTTP11
 	dst.connectionClose = h.connectionClose
+	dst.noDefaultContentType = h.noDefaultContentType
 
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)

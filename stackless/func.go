@@ -20,6 +20,7 @@ import (
 // at the moment due to high load.
 func NewFunc(f func(ctx interface{})) func(ctx interface{}) bool {
 	if f == nil {
+		// developer sanity-check
 		panic("BUG: f cannot be nil")
 	}
 
