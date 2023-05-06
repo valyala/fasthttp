@@ -3632,13 +3632,13 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 }
 
 func TestShutdownWithContext(t *testing.T) {
-	t.Parallel()
-
+	done := make(chan struct{})
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			time.Sleep(5 * time.Second)
+			time.Sleep(4 * time.Second)
 			ctx.Success("aaa/bbb", []byte("real response"))
+			close(done)
 		},
 	}
 	go func() {
@@ -3646,7 +3646,8 @@ func TestShutdownWithContext(t *testing.T) {
 			t.Errorf("unexpected error: %v", err)
 		}
 	}()
-	time.Sleep(1 * time.Second)
+
+	time.Sleep(1 * time.Millisecond * 500)
 	go func() {
 		conn, err := ln.Dial()
 		if err != nil {
@@ -3660,8 +3661,8 @@ func TestShutdownWithContext(t *testing.T) {
 		verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
 	}()
 
-	time.Sleep(1 * time.Second)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+	time.Sleep(1 * time.Millisecond * 500)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	shutdownErr := make(chan error)
 	go func() {
@@ -3677,9 +3678,10 @@ func TestShutdownWithContext(t *testing.T) {
 			t.Fatalf("unexpected err %v. Expecting %v", err, context.DeadlineExceeded)
 		}
 	}
-	if atomic.LoadInt32(&s.open) != 1 {
-		t.Fatalf("unexpected open connection num: %#v. Expecting %#v", atomic.LoadInt32(&s.open), 1)
+	if o := atomic.LoadInt32(&s.open); o != 1 {
+		t.Fatalf("unexpected open connection num: %#v. Expecting %#v", o, 1)
 	}
+	<-done
 }
 
 func TestMultipleServe(t *testing.T) {
@@ -3859,7 +3861,6 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 }
 
 func TestStreamBodyRequestContentLength(t *testing.T) {
-	t.Parallel()
 	content := strings.Repeat("1", 1<<15) // 32K
 	contentLength := len(content)
 
