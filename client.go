@@ -311,16 +311,6 @@ type Client struct {
 	writerPool sync.Pool
 }
 
-// GetHostClients return the map of Http HostClient
-func (c *Client) GetHostClients() map[string]*HostClient {
-	return c.m
-}
-
-// GetHttpsHostClients return the map of Https HostClient
-func (c *Client) GetHttpsHostClients() map[string]*HostClient {
-	return c.ms
-}
-
 // Get returns the status code and body of url.
 //
 // The contents of dst will be replaced by the body and returned, if the dst
