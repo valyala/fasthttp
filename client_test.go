@@ -2838,8 +2838,6 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 }
 
 func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
-	t.Parallel()
-
 	var (
 		emptyBodyCount uint8
 		ln             = fasthttputil.NewInmemoryListener()
@@ -2902,6 +2900,8 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+
+	time.Sleep(time.Millisecond * 100)
 
 	// Prevent a race condition with the conns cleaner that might still be running.
 	c.connsLock.Lock()
@@ -3090,6 +3090,8 @@ func TestHostClientErrConnPoolStrategyNotImpl(t *testing.T) {
 }
 
 func Test_AddMissingPort(t *testing.T) {
+	t.Parallel()
+
 	type args struct {
 		addr  string
 		isTLS bool

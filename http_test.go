@@ -3008,6 +3008,8 @@ func TestResponseBodyStream(t *testing.T) {
 		}
 	})
 	t.Run("http client", func(t *testing.T) {
+		t.Parallel()
+
 		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			if request.URL.Query().Get("chunked") == "true" {
 				for x := 0; x < 10; x++ {
@@ -3020,9 +3022,11 @@ func TestResponseBodyStream(t *testing.T) {
 			writer.Write([]byte(`hello world`)) //nolint:errcheck
 		}))
 
-		defer server.Close()
+		t.Cleanup(server.Close)
 
 		t.Run("normal request", func(t *testing.T) {
+			t.Parallel()
+
 			client := Client{StreamResponseBody: true}
 			resp := AcquireResponse()
 			request := AcquireRequest()
@@ -3041,6 +3045,8 @@ func TestResponseBodyStream(t *testing.T) {
 		})
 
 		t.Run("limit response body size size", func(t *testing.T) {
+			t.Parallel()
+
 			client := Client{StreamResponseBody: true, MaxResponseBodySize: 20}
 			resp := AcquireResponse()
 			request := AcquireRequest()
@@ -3061,6 +3067,8 @@ func TestResponseBodyStream(t *testing.T) {
 		})
 
 		t.Run("chunked", func(t *testing.T) {
+			t.Parallel()
+
 			client := Client{StreamResponseBody: true}
 			resp := AcquireResponse()
 			request := AcquireRequest()
