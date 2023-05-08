@@ -487,8 +487,10 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	}
 
 	c.mOnce.Do(func() {
+		c.mLock.Lock()
 		c.m = make(map[string]*HostClient)
 		c.ms = make(map[string]*HostClient)
+		c.mLock.Unlock()
 	})
 
 	startCleaner := false
