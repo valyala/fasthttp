@@ -598,9 +598,8 @@ func decodeArgAppendNoPlus(dst, src []byte) []byte {
 	if idx < 0 {
 		// fast path: src doesn't contain encoded chars
 		return append(dst, src...)
-	} else {
-		dst = append(dst, src[:idx]...)
 	}
+	dst = append(dst, src[:idx]...)
 
 	// slow path
 	for i := idx; i < len(src); i++ {
