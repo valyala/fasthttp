@@ -72,16 +72,15 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 			return n, io.EOF
 		}
 		return n, err
-	} else {
-		left := rs.header.ContentLength() - rs.totalBytesRead
-		if len(p) > left {
-			p = p[:left]
-		}
-		n, err = rs.reader.Read(p)
-		rs.totalBytesRead += n
-		if err != nil {
-			return n, err
-		}
+	}
+	left := rs.header.ContentLength() - rs.totalBytesRead
+	if len(p) > left {
+		p = p[:left]
+	}
+	n, err = rs.reader.Read(p)
+	rs.totalBytesRead += n
+	if err != nil {
+		return n, err
 	}
 
 	if rs.totalBytesRead == rs.header.ContentLength() {

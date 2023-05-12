@@ -501,10 +501,6 @@ func (c *Client) Do(req *Request, resp *Response) error {
 		m = c.ms
 	}
 	hc := m[string(host)]
-	if hc != nil {
-		atomic.AddInt32(&hc.pendingClientRequests, 1)
-		defer atomic.AddInt32(&hc.pendingClientRequests, -1)
-	}
 	c.mLock.RUnlock()
 	if hc == nil {
 		c.mLock.Lock()
@@ -549,10 +545,11 @@ func (c *Client) Do(req *Request, resp *Response) error {
 				startCleaner = true
 			}
 		}
-		atomic.AddInt32(&hc.pendingClientRequests, 1)
-		defer atomic.AddInt32(&hc.pendingClientRequests, -1)
 		c.mLock.Unlock()
 	}
+
+	atomic.AddInt32(&hc.pendingClientRequests, 1)
+	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
 
 	if startCleaner {
 		go c.mCleaner(m)
