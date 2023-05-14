@@ -1387,13 +1387,10 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 			writeDeadline = tmpWriteDeadline
 		}
 	}
-	if !writeDeadline.IsZero() {
-		// Set Deadline every time, since golang has fixed the performance issue
-		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
-		if err = conn.SetWriteDeadline(writeDeadline); err != nil {
-			c.closeConn(cc)
-			return true, err
-		}
+
+	if err = conn.SetWriteDeadline(writeDeadline); err != nil {
+		c.closeConn(cc)
+		return true, err
 	}
 
 	resetConnection := false
@@ -1432,13 +1429,10 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 			readDeadline = tmpReadDeadline
 		}
 	}
-	if !readDeadline.IsZero() {
-		// Set Deadline every time, since golang has fixed the performance issue
-		// See https://github.com/golang/go/issues/15133#issuecomment-271571395 for details
-		if err = conn.SetReadDeadline(readDeadline); err != nil {
-			c.closeConn(cc)
-			return true, err
-		}
+
+	if err = conn.SetReadDeadline(readDeadline); err != nil {
+		c.closeConn(cc)
+		return true, err
 	}
 
 	if customSkipBody || req.Header.IsHead() {
