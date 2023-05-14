@@ -2252,8 +2252,10 @@ func (r *singleReadConn) RemoteAddr() net.Addr {
 
 type singleEchoConn struct {
 	net.Conn
-	b []byte
-	n int
+	b  []byte
+	n  int
+	wc chan struct{}
+	rc chan struct{}
 }
 
 func (r *singleEchoConn) Read(p []byte) (int, error) {
@@ -2279,6 +2281,24 @@ func (r *singleEchoConn) LocalAddr() net.Addr {
 }
 
 func (r *singleEchoConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (r *singleEchoConn) SetReadDeadline(d time.Time) error {
+	r.rc = make(chan struct{}, 1)
+	go func() {
+		time.Sleep(time.Until(d))
+		r.rc <- struct{}{}
+	}()
+	return nil
+}
+
+func (r *singleEchoConn) SetWriteDeadline(d time.Time) error {
+	r.wc = make(chan struct{}, 1)
+	go func() {
+		time.Sleep(time.Until(d))
+		r.wc <- struct{}{}
+	}()
 	return nil
 }
 

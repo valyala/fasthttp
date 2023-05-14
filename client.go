@@ -1380,11 +1380,10 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 			writeDeadline = tmpWriteDeadline
 		}
 	}
-	
-	// fix Deadline is reused
+
 	if err = conn.SetWriteDeadline(writeDeadline); err != nil {
-	      c.closeConn(cc)
-	      return true, err
+		c.closeConn(cc)
+		return true, err
 	}
 
 	resetConnection := false
@@ -1423,8 +1422,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 			readDeadline = tmpReadDeadline
 		}
 	}
-	
-	// fix Deadline is reused
+
 	if err = conn.SetReadDeadline(readDeadline); err != nil {
 		c.closeConn(cc)
 		return true, err
