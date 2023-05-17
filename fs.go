@@ -427,7 +427,12 @@ func (fs *FS) initRequestHandler() {
 	compressedFileSuffixes := fs.CompressedFileSuffixes
 	if len(compressedFileSuffixes["br"]) == 0 || len(compressedFileSuffixes["gzip"]) == 0 ||
 		compressedFileSuffixes["br"] == compressedFileSuffixes["gzip"] {
-		compressedFileSuffixes = FSCompressedFileSuffixes
+		// Copy global map
+		origMap := FSCompressedFileSuffixes
+		compressedFileSuffixes = make(map[string]string, len(origMap))
+		for k, v := range origMap {
+			compressedFileSuffixes[k] = v
+		}
 	}
 
 	if len(fs.CompressedFileSuffix) > 0 {
