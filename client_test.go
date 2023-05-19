@@ -2195,6 +2195,14 @@ func (w *writeErrorConn) RemoteAddr() net.Addr {
 	return nil
 }
 
+func (r *writeErrorConn) SetReadDeadline(_ time.Time) error {
+	return nil
+}
+
+func (r *writeErrorConn) SetWriteDeadline(_ time.Time) error {
+	return nil
+}
+
 type readErrorConn struct {
 	net.Conn
 }
@@ -2216,6 +2224,14 @@ func (r *readErrorConn) LocalAddr() net.Addr {
 }
 
 func (r *readErrorConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (r *readErrorConn) SetReadDeadline(_ time.Time) error {
+	return nil
+}
+
+func (r *readErrorConn) SetWriteDeadline(_ time.Time) error {
 	return nil
 }
 
@@ -2250,6 +2266,14 @@ func (r *singleReadConn) RemoteAddr() net.Addr {
 	return nil
 }
 
+func (r *singleReadConn) SetReadDeadline(_ time.Time) error {
+	return nil
+}
+
+func (r *singleReadConn) SetWriteDeadline(_ time.Time) error {
+	return nil
+}
+
 type singleEchoConn struct {
 	net.Conn
 	b []byte
@@ -2279,6 +2303,14 @@ func (r *singleEchoConn) LocalAddr() net.Addr {
 }
 
 func (r *singleEchoConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (r *singleEchoConn) SetReadDeadline(_ time.Time) error {
+	return nil
+}
+
+func (r *singleEchoConn) SetWriteDeadline(_ time.Time) error {
 	return nil
 }
 
