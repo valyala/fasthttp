@@ -3810,8 +3810,6 @@ func TestStreamRequestBody(t *testing.T) {
 }
 
 func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
-	t.Parallel()
-
 	part1 := strings.Repeat("1", 1<<18)
 	part2 := strings.Repeat("2", 1<<20-1<<18)
 	contentLength := len(part1) + len(part2)
