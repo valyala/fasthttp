@@ -82,6 +82,14 @@ type RequestHeader struct {
 	userAgent   []byte
 	mulHeader   [][]byte
 
+	explicitHost          bool
+	explicitUserAgent     bool
+	explicitContentType   bool
+	explicitContentLength bool
+	explicitCookies       bool
+	explicitTrailer       bool
+	explicitConnection    bool
+
 	h       []argsKV
 	trailer []argsKV
 	bufKV   argsKV
@@ -1135,33 +1143,47 @@ func (h *RequestHeader) VisitAllCookie(f func(key, value []byte)) {
 //
 // To get the headers in order they were received use VisitAllInOrder.
 func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
-	host := h.Host()
-	if len(host) > 0 {
-		f(strHost, host)
+	if !h.explicitHost {
+		host := h.Host()
+		if len(host) > 0 {
+			f(strHost, host)
+		}
 	}
-	if len(h.contentLengthBytes) > 0 {
-		f(strContentLength, h.contentLengthBytes)
+	if !h.explicitContentLength {
+		if len(h.contentLengthBytes) > 0 {
+			f(strContentLength, h.contentLengthBytes)
+		}
 	}
-	contentType := h.ContentType()
-	if len(contentType) > 0 {
-		f(strContentType, contentType)
+	if !h.explicitContentType {
+		contentType := h.ContentType()
+		if len(contentType) > 0 {
+			f(strContentType, contentType)
+		}
 	}
-	userAgent := h.UserAgent()
-	if len(userAgent) > 0 {
-		f(strUserAgent, userAgent)
+	if !h.explicitUserAgent {
+		userAgent := h.UserAgent()
+		if len(userAgent) > 0 {
+			f(strUserAgent, userAgent)
+		}
 	}
-	if len(h.trailer) > 0 {
-		f(strTrailer, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+	if !h.explicitTrailer {
+		if len(h.trailer) > 0 {
+			f(strTrailer, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+		}
 	}
 
-	h.collectCookies()
-	if len(h.cookies) > 0 {
-		h.bufKV.value = appendRequestCookieBytes(h.bufKV.value[:0], h.cookies)
-		f(strCookie, h.bufKV.value)
+	if !h.explicitCookies {
+		h.collectCookies()
+		if len(h.cookies) > 0 {
+			h.bufKV.value = appendRequestCookieBytes(h.bufKV.value[:0], h.cookies)
+			f(strCookie, h.bufKV.value)
+		}
 	}
 	visitArgs(h.h, f)
-	if h.ConnectionClose() {
-		f(strConnection, strClose)
+	if !h.explicitConnection {
+		if h.ConnectionClose() {
+			f(strConnection, strClose)
+		}
 	}
 }
 
@@ -1234,24 +1256,31 @@ func (h *RequestHeader) del(key []byte) {
 	switch string(key) {
 	case HeaderHost:
 		h.host = h.host[:0]
+		h.explicitHost = false
 	case HeaderContentType:
 		h.contentType = h.contentType[:0]
+		h.explicitContentType = false
 	case HeaderUserAgent:
 		h.userAgent = h.userAgent[:0]
+		h.explicitUserAgent = false
 	case HeaderCookie:
 		h.cookies = h.cookies[:0]
+		h.explicitCookies = false
 	case HeaderContentLength:
 		h.contentLength = 0
 		h.contentLengthBytes = h.contentLengthBytes[:0]
+		h.explicitContentLength = false
 	case HeaderConnection:
 		h.connectionClose = false
+		h.explicitConnection = false
 	case HeaderTrailer:
 		h.trailer = h.trailer[:0]
+		h.explicitTrailer = false
 	}
 	h.h = delAllArgsBytes(h.h, key)
 }
 
-// setSpecialHeader handles special headers and return true when a header is processed.
+// setSpecialHeader handles special headers.
 func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 	if len(key) == 0 {
 		return false
@@ -1315,22 +1344,24 @@ func (h *ResponseHeader) setNonSpecial(key []byte, value []byte) {
 }
 
 // setSpecialHeader handles special headers and return true when a header is processed.
-func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
+func (h *RequestHeader) setSpecialHeader(key, value []byte) {
 	if len(key) == 0 {
-		return false
+		return
 	}
 
 	switch key[0] | 0x20 {
 	case 'c':
 		if caseInsensitiveCompare(strContentType, key) {
 			h.SetContentTypeBytes(value)
-			return true
+			h.explicitContentType = true
+			return
 		} else if caseInsensitiveCompare(strContentLength, key) {
 			if contentLength, err := parseContentLength(value); err == nil {
 				h.contentLength = contentLength
 				h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
+				h.explicitContentLength = true
 			}
-			return true
+			return
 		} else if caseInsensitiveCompare(strConnection, key) {
 			if bytes.Equal(strClose, value) {
 				h.SetConnectionClose()
@@ -1338,33 +1369,36 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 				h.ResetConnectionClose()
 				h.setNonSpecial(key, value)
 			}
-			return true
+			h.explicitConnection = true
+			return
 		} else if caseInsensitiveCompare(strCookie, key) {
 			h.collectCookies()
 			h.cookies = parseRequestCookies(h.cookies, value)
-			return true
+			h.explicitCookies = true
+			return
 		}
 	case 't':
 		if caseInsensitiveCompare(strTransferEncoding, key) {
 			// Transfer-Encoding is managed automatically.
-			return true
+			return
 		} else if caseInsensitiveCompare(strTrailer, key) {
 			_ = h.SetTrailerBytes(value)
-			return true
+			h.explicitTrailer = true
+			return
 		}
 	case 'h':
 		if caseInsensitiveCompare(strHost, key) {
 			h.SetHostBytes(value)
-			return true
+			h.explicitHost = true
+			return
 		}
 	case 'u':
 		if caseInsensitiveCompare(strUserAgent, key) {
 			h.SetUserAgentBytes(value)
-			return true
+			h.explicitUserAgent = true
+			return
 		}
 	}
-
-	return false
 }
 
 // setNonSpecial directly put into map i.e. not a basic header
@@ -1640,10 +1674,7 @@ func (h *RequestHeader) AddBytesV(key string, value []byte) {
 // If the header is set as a Trailer (forbidden trailers will not be set, see AddTrailer for more details),
 // it will be sent after the chunked request body.
 func (h *RequestHeader) AddBytesKV(key, value []byte) {
-	if h.setSpecialHeader(key, value) {
-		return
-	}
-
+	h.setSpecialHeader(key, value)
 	k := getHeaderKeyBytes(&h.bufKV, b2s(key), h.disableNormalizing)
 	h.h = appendArgBytes(h.h, k, value, argsHasValue)
 }
@@ -1699,9 +1730,7 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked request body.
 func (h *RequestHeader) SetCanonical(key, value []byte) {
-	if h.setSpecialHeader(key, value) {
-		return
-	}
+	h.setSpecialHeader(key, value)
 	h.setNonSpecial(key, value)
 }
 
@@ -2470,25 +2499,33 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	dst = append(dst, h.Protocol()...)
 	dst = append(dst, strCRLF...)
 
-	userAgent := h.UserAgent()
-	if len(userAgent) > 0 {
-		dst = appendHeaderLine(dst, strUserAgent, userAgent)
+	if !h.explicitUserAgent {
+		userAgent := h.UserAgent()
+		if len(userAgent) > 0 {
+			dst = appendHeaderLine(dst, strUserAgent, userAgent)
+		}
 	}
 
-	host := h.Host()
-	if len(host) > 0 {
-		dst = appendHeaderLine(dst, strHost, host)
+	if !h.explicitHost {
+		host := h.Host()
+		if len(host) > 0 {
+			dst = appendHeaderLine(dst, strHost, host)
+		}
 	}
 
-	contentType := h.ContentType()
-	if !h.noDefaultContentType && len(contentType) == 0 && !h.ignoreBody() {
-		contentType = strDefaultContentType
+	if !h.explicitContentType {
+		contentType := h.ContentType()
+		if !h.noDefaultContentType && len(contentType) == 0 && !h.ignoreBody() {
+			contentType = strDefaultContentType
+		}
+		if len(contentType) > 0 {
+			dst = appendHeaderLine(dst, strContentType, contentType)
+		}
 	}
-	if len(contentType) > 0 {
-		dst = appendHeaderLine(dst, strContentType, contentType)
-	}
-	if len(h.contentLengthBytes) > 0 {
-		dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
+	if !h.explicitContentLength {
+		if len(h.contentLengthBytes) > 0 {
+			dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
+		}
 	}
 
 	for i, n := 0, len(h.h); i < n; i++ {
@@ -2506,22 +2543,28 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 		}
 	}
 
-	if len(h.trailer) > 0 {
-		dst = appendHeaderLine(dst, strTrailer, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+	if !h.explicitTrailer {
+		if len(h.trailer) > 0 {
+			dst = appendHeaderLine(dst, strTrailer, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+		}
 	}
 
-	// there is no need in h.collectCookies() here, since if cookies aren't collected yet,
-	// they all are located in h.h.
-	n := len(h.cookies)
-	if n > 0 {
-		dst = append(dst, strCookie...)
-		dst = append(dst, strColonSpace...)
-		dst = appendRequestCookieBytes(dst, h.cookies)
-		dst = append(dst, strCRLF...)
+	if !h.explicitCookies {
+		// there is no need in h.collectCookies() here, since if cookies aren't collected yet,
+		// they all are located in h.h.
+		n := len(h.cookies)
+		if n > 0 {
+			dst = append(dst, strCookie...)
+			dst = append(dst, strColonSpace...)
+			dst = appendRequestCookieBytes(dst, h.cookies)
+			dst = append(dst, strCRLF...)
+		}
 	}
 
-	if h.ConnectionClose() {
-		dst = appendHeaderLine(dst, strConnection, strClose)
+	if !h.explicitConnection {
+		if h.ConnectionClose() {
+			dst = appendHeaderLine(dst, strConnection, strClose)
+		}
 	}
 
 	return append(dst, strCRLF...)
