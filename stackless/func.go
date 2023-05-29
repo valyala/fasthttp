@@ -18,7 +18,7 @@ import (
 //
 // The stackless wrapper returns false if the call cannot be processed
 // at the moment due to high load.
-func NewFunc(f func(ctx interface{})) func(ctx interface{}) bool {
+func NewFunc(f func(ctx any)) func(ctx any) bool {
 	if f == nil {
 		// developer sanity-check
 		panic("BUG: f cannot be nil")
@@ -33,7 +33,7 @@ func NewFunc(f func(ctx interface{})) func(ctx interface{}) bool {
 	}
 	var once sync.Once
 
-	return func(ctx interface{}) bool {
+	return func(ctx any) bool {
 		once.Do(onceInit)
 		fw := getFuncWork()
 		fw.ctx = ctx
@@ -50,7 +50,7 @@ func NewFunc(f func(ctx interface{})) func(ctx interface{}) bool {
 	}
 }
 
-func funcWorker(funcWorkCh <-chan *funcWork, f func(ctx interface{})) {
+func funcWorker(funcWorkCh <-chan *funcWork, f func(ctx any)) {
 	for fw := range funcWorkCh {
 		f(fw.ctx)
 		fw.done <- struct{}{}
@@ -75,6 +75,6 @@ func putFuncWork(fw *funcWork) {
 var funcWorkPool sync.Pool
 
 type funcWork struct {
-	ctx  interface{}
+	ctx  any
 	done chan struct{}
 }
