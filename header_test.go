@@ -348,6 +348,43 @@ func TestRequestRawHeaders(t *testing.T) {
 	})
 }
 
+func TestRequestDisableSpecialHeaders(t *testing.T) {
+	t.Parallel()
+
+	kvs := "Host: foobar\r\n" +
+		"User-Agent: ua\r\n" +
+		"non-special:  val\r\n" +
+		"\r\n"
+
+	var h RequestHeader
+	h.DisableSpecialHeader()
+
+	s := "GET / HTTP/1.0\r\n" + kvs
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Host and User-Agent are parsed
+	if string(h.Host()) != "foobar" {
+		t.Fatalf("unexpected: %q. Expecting %q", h.Host(), "foobar")
+	}
+	if string(h.UserAgent()) != "ua" {
+		t.Fatalf("unexpected: %q. Expecting %q", h.UserAgent(), "ua")
+	}
+	if strings.Contains(h.String(), "Host") {
+		t.Fatalf("special header Host in headers: %q", h.String())
+	}
+	h.SetCanonical([]byte("host"), []byte("notfoobar"))
+	// h.Host() stays the same
+	if string(h.Host()) != "foobar" {
+		t.Fatalf("unexpected: %q. Expecting %q", h.Host(), "notfoobar")
+	}
+	// host is at the end of h.String()
+	if !strings.HasSuffix(h.String(), "host: notfoobar\r\n\r\n") {
+		t.Fatalf("special header ordering failed: %q", h.String())
+	}
+}
+
 func TestRequestHeaderSetCookieWithSpecialChars(t *testing.T) {
 	t.Parallel()
 
