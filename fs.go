@@ -95,10 +95,6 @@ func ServeFileBytes(ctx *RequestCtx, path []byte) {
 // WARNING: if path is based on user input users will be able to request
 // any file on your filesystem! Use fasthttp.FS with a sane Root instead.
 func ServeFile(ctx *RequestCtx, path string) {
-	rootFSOnce.Do(func() {
-		rootFSHandler = rootFS.NewRequestHandler()
-	})
-
 	if len(path) == 0 || !filepath.IsAbs(path) {
 		// extend relative path to absolute path
 		hasTrailingSlash := len(path) > 0 && (path[len(path)-1] == '/' || path[len(path)-1] == '\\')
@@ -135,6 +131,12 @@ var (
 	}
 	rootFSHandler RequestHandler
 )
+
+func init() {
+	rootFSOnce.Do(func() {
+		rootFSHandler = rootFS.NewRequestHandler()
+	})
+}
 
 // PathRewriteFunc must return new request path based on arbitrary ctx
 // info such as ctx.Path().
