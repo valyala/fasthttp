@@ -361,6 +361,9 @@ func (h *ResponseHeader) SetServerBytes(server []byte) {
 
 // ContentType returns Content-Type header value.
 func (h *RequestHeader) ContentType() []byte {
+	// if h.disableSpecialHeader {
+	// 	return h.Peek(HeaderContentType)
+	// }
 	return h.contentType
 }
 
@@ -574,6 +577,9 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 
 // Host returns Host header value.
 func (h *RequestHeader) Host() []byte {
+	if h.disableSpecialHeader {
+		return peekArgBytes(h.h, []byte("Host"))
+	}
 	return h.host
 }
 
@@ -589,6 +595,9 @@ func (h *RequestHeader) SetHostBytes(host []byte) {
 
 // UserAgent returns User-Agent header value.
 func (h *RequestHeader) UserAgent() []byte {
+	if h.disableSpecialHeader {
+		return peekArgBytes(h.h, []byte("Host"))
+	}
 	return h.userAgent
 }
 
@@ -886,8 +895,7 @@ func (h *RequestHeader) Len() int {
 // DisableSpecialHeader disables special header processing.
 // fasthttp will not set any special headers for you, such as Host, Content-Type, User-Agent, etc.
 // You must set everything yourself.
-// If *RequestHeader.Read() is called, special headers will be parsed but not sent.
-// e.g. *RequestHeader.Host() will return something, but the header will not be set when the request is sent.
+// If RequestHeader.Read() is called, special headers will be ignored.
 // This can be used to control case and order of special headers.
 // This is generally not recommended.
 func (h *RequestHeader) DisableSpecialHeader() {
