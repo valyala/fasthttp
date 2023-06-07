@@ -361,9 +361,9 @@ func (h *ResponseHeader) SetServerBytes(server []byte) {
 
 // ContentType returns Content-Type header value.
 func (h *RequestHeader) ContentType() []byte {
-	// if h.disableSpecialHeader {
-	// 	return h.Peek(HeaderContentType)
-	// }
+	if h.disableSpecialHeader {
+		return h.Peek(HeaderContentType)
+	}
 	return h.contentType
 }
 
