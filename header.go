@@ -362,7 +362,7 @@ func (h *ResponseHeader) SetServerBytes(server []byte) {
 // ContentType returns Content-Type header value.
 func (h *RequestHeader) ContentType() []byte {
 	if h.disableSpecialHeader {
-		return h.Peek(HeaderContentType)
+		return peekArgBytes(h.h, []byte(HeaderContentType))
 	}
 	return h.contentType
 }
@@ -578,7 +578,7 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 // Host returns Host header value.
 func (h *RequestHeader) Host() []byte {
 	if h.disableSpecialHeader {
-		return peekArgBytes(h.h, []byte("Host"))
+		return peekArgBytes(h.h, []byte(HeaderHost))
 	}
 	return h.host
 }
@@ -596,7 +596,7 @@ func (h *RequestHeader) SetHostBytes(host []byte) {
 // UserAgent returns User-Agent header value.
 func (h *RequestHeader) UserAgent() []byte {
 	if h.disableSpecialHeader {
-		return peekArgBytes(h.h, []byte("Host"))
+		return peekArgBytes(h.h, []byte(HeaderUserAgent))
 	}
 	return h.userAgent
 }
