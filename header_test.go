@@ -353,7 +353,7 @@ func TestRequestDisableSpecialHeaders(t *testing.T) {
 
 	kvs := "Host: foobar\r\n" +
 		"User-Agent: ua\r\n" +
-		"non-special:  val\r\n" +
+		"Non-Special: val\r\n" +
 		"\r\n"
 
 	var h RequestHeader
@@ -364,27 +364,15 @@ func TestRequestDisableSpecialHeaders(t *testing.T) {
 	if err := h.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Host and User-Agent are not parsed
-	if h.Host() != nil {
-		t.Fatalf("unexpected: %q. Expecting nil", h.Host())
+	// assert order of all headers preserved
+	if h.String() != s {
+		t.Fatalf("Headers not equal: %q. Expecting %q", h.String(), s)
 	}
-	if h.Host() != nil {
-		t.Fatalf("unexpected: %q. Expecting nil", h.UserAgent())
-	}
-	if strings.Contains(h.String(), "Host") {
-		t.Fatalf("special header Host in headers: %q", h.String())
-	}
-	// Host() returns nil, since canonical name was not used
 	h.SetCanonical([]byte("host"), []byte("notfoobar"))
-	if h.Host() != nil {
-		t.Fatalf("unexpected: %q. Expecting %q", h.Host(), "")
-	}
-	// add Host
-	h.SetCanonical([]byte("Host"), []byte("foobar"))
 	if string(h.Host()) != "foobar" {
 		t.Fatalf("unexpected: %q. Expecting %q", h.Host(), "foobar")
 	}
-	if h.String() != "GET / HTTP/1.0\r\nNon-Special: val\r\nhost: notfoobar\r\nHost: foobar\r\n\r\n" {
+	if h.String() != "GET / HTTP/1.0\r\nHost: foobar\r\nUser-Agent: ua\r\nNon-Special: val\r\nhost: notfoobar\r\n\r\n" {
 		t.Fatalf("custom special header ordering failed: %q", h.String())
 	}
 }

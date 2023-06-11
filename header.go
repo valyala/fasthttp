@@ -2931,6 +2931,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 
+			if h.disableSpecialHeader {
+				h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+				continue
+			}
+
 			switch s.key[0] | 0x20 {
 			case 'h':
 				if caseInsensitiveCompare(s.key, strHost) {
