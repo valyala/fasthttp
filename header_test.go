@@ -348,6 +348,35 @@ func TestRequestRawHeaders(t *testing.T) {
 	})
 }
 
+func TestRequestDisableSpecialHeaders(t *testing.T) {
+	t.Parallel()
+
+	kvs := "Host: foobar\r\n" +
+		"User-Agent: ua\r\n" +
+		"Non-Special: val\r\n" +
+		"\r\n"
+
+	var h RequestHeader
+	h.DisableSpecialHeader()
+
+	s := "GET / HTTP/1.0\r\n" + kvs
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// assert order of all headers preserved
+	if h.String() != s {
+		t.Fatalf("Headers not equal: %q. Expecting %q", h.String(), s)
+	}
+	h.SetCanonical([]byte("host"), []byte("notfoobar"))
+	if string(h.Host()) != "foobar" {
+		t.Fatalf("unexpected: %q. Expecting %q", h.Host(), "foobar")
+	}
+	if h.String() != "GET / HTTP/1.0\r\nHost: foobar\r\nUser-Agent: ua\r\nNon-Special: val\r\nhost: notfoobar\r\n\r\n" {
+		t.Fatalf("custom special header ordering failed: %q", h.String())
+	}
+}
+
 func TestRequestHeaderSetCookieWithSpecialChars(t *testing.T) {
 	t.Parallel()
 
