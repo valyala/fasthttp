@@ -2636,15 +2636,6 @@ type clientGetter interface {
 	Get(dst []byte, uri string) (int, []byte, error)
 }
 
-func createEchoClient(t *testing.T, network, addr string) *HostClient {
-	return &HostClient{
-		Addr: addr,
-		Dial: func(addr string) (net.Conn, error) {
-			return net.Dial(network, addr)
-		},
-	}
-}
-
 type testEchoServer struct {
 	s  *Server
 	ln net.Listener

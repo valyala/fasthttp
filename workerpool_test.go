@@ -12,7 +12,7 @@ import (
 func TestWorkerPoolStartStopSerial(t *testing.T) {
 	t.Parallel()
 
-	testWorkerPoolStartStop(t)
+	testWorkerPoolStartStop()
 }
 
 func TestWorkerPoolStartStopConcurrent(t *testing.T) {
@@ -22,7 +22,7 @@ func TestWorkerPoolStartStopConcurrent(t *testing.T) {
 	ch := make(chan struct{}, concurrency)
 	for i := 0; i < concurrency; i++ {
 		go func() {
-			testWorkerPoolStartStop(t)
+			testWorkerPoolStartStop()
 			ch <- struct{}{}
 		}()
 	}
@@ -35,7 +35,7 @@ func TestWorkerPoolStartStopConcurrent(t *testing.T) {
 	}
 }
 
-func testWorkerPoolStartStop(t *testing.T) {
+func testWorkerPoolStartStop() {
 	wp := &workerPool{
 		WorkerFunc:      func(conn net.Conn) error { return nil },
 		MaxWorkersCount: 10,
