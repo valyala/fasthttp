@@ -102,7 +102,6 @@ func TestUserDataDelete(t *testing.T) {
 		u.Set(key, i)
 		testUserDataGet(t, &u, []byte(key), i)
 	}
-
 }
 
 func TestUserDataSetAndRemove(t *testing.T) {

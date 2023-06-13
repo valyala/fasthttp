@@ -411,7 +411,6 @@ func (c *Cookie) ParseBytes(src []byte) error {
 					}
 				}
 			}
-
 		} else if len(kv.value) != 0 {
 			// Case insensitive switch on first char
 			switch kv.value[0] | 0x20 {

@@ -182,7 +182,7 @@ func TestArgsEscape(t *testing.T) {
 
 	// Test all characters
 	k := "f.o,1:2/4"
-	var v = make([]byte, 256)
+	v := make([]byte, 256)
 	for i := 0; i < 256; i++ {
 		v[i] = byte(i)
 	}
@@ -210,7 +210,7 @@ func TestPathEscape(t *testing.T) {
 	testPathEscape(t, "*") // See https://github.com/golang/go/issues/11202
 
 	// Test all characters
-	var pathSegment = make([]byte, 256)
+	pathSegment := make([]byte, 256)
 	for i := 0; i < 256; i++ {
 		pathSegment[i] = byte(i)
 	}

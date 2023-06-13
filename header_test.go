@@ -1518,7 +1518,6 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 	if string(h1.Peek(HeaderConnection)) != "close" {
 		t.Fatalf("unexpected connection value: %q. Expecting %q", h.Peek("Connection"), "close")
 	}
-
 }
 
 func TestRequestHeaderSetCookie(t *testing.T) {
@@ -1753,7 +1752,6 @@ func TestResponseHeaderAddTrailerError(t *testing.T) {
 	if trailer := string(h.Peek(HeaderTrailer)); trailer != expectedTrailer {
 		t.Fatalf("unexpected trailer %q. Expected %q", trailer, expectedTrailer)
 	}
-
 }
 
 func TestRequestHeaderAddTrailerError(t *testing.T) {
@@ -1769,7 +1767,6 @@ func TestRequestHeaderAddTrailerError(t *testing.T) {
 	if trailer := string(h.Peek(HeaderTrailer)); trailer != expectedTrailer {
 		t.Fatalf("unexpected trailer %q. Expected %q", trailer, expectedTrailer)
 	}
-
 }
 
 func TestResponseHeaderCookie(t *testing.T) {
@@ -2789,7 +2786,8 @@ func testRequestHeaderReadSecuredError(t *testing.T, h *RequestHeader, headers s
 }
 
 func testResponseHeaderReadSuccess(t *testing.T, h *ResponseHeader, headers string, expectedStatusCode, expectedContentLength int,
-	expectedContentType string) {
+	expectedContentType string,
+) {
 	r := bytes.NewBufferString(headers)
 	br := bufio.NewReader(r)
 	err := h.Read(br)
@@ -2800,7 +2798,8 @@ func testResponseHeaderReadSuccess(t *testing.T, h *ResponseHeader, headers stri
 }
 
 func testRequestHeaderReadSuccess(t *testing.T, h *RequestHeader, headers string, expectedContentLength int,
-	expectedRequestURI, expectedHost, expectedReferer, expectedContentType string, expectedTrailer map[string]string) {
+	expectedRequestURI, expectedHost, expectedReferer, expectedContentType string, expectedTrailer map[string]string,
+) {
 	r := bytes.NewBufferString(headers)
 	br := bufio.NewReader(r)
 	err := h.Read(br)
@@ -2832,7 +2831,8 @@ func verifyResponseHeaderConnection(t *testing.T, h *ResponseHeader, expectConne
 }
 
 func verifyRequestHeader(t *testing.T, h *RequestHeader, expectedContentLength int,
-	expectedRequestURI, expectedHost, expectedReferer, expectedContentType string) {
+	expectedRequestURI, expectedHost, expectedReferer, expectedContentType string,
+) {
 	if h.ContentLength() != expectedContentLength {
 		t.Fatalf("Unexpected Content-Length %d. Expected %d", h.ContentLength(), expectedContentLength)
 	}
@@ -2922,6 +2922,7 @@ func TestRequestHeader_PeekAll(t *testing.T) {
 	expectRequestHeaderAll(t, h, HeaderHost, [][]byte{})
 	expectRequestHeaderAll(t, h, "aaa", [][]byte{})
 }
+
 func expectRequestHeaderAll(t *testing.T, h *RequestHeader, key string, expectedValue [][]byte) {
 	if len(h.PeekAll(key)) != len(expectedValue) {
 		t.Fatalf("Unexpected size for key %q: %d. Expected %d", key, len(h.PeekAll(key)), len(expectedValue))

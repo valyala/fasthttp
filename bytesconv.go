@@ -204,7 +204,7 @@ func ParseUfloat(buf []byte) (float64, error) {
 	}
 	b := buf
 	var v uint64
-	var offset = 1.0
+	offset := 1.0
 	var pointFound bool
 	for i, c := range b {
 		if c < '0' || c > '9' {

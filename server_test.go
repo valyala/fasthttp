@@ -1727,6 +1727,7 @@ func TestSetStandardFormValueFunc(t *testing.T) {
 		t.Fatalf("unexpected value %q. Expecting %q", v, "port")
 	}
 }
+
 func TestRequestCtxUserValue(t *testing.T) {
 	t.Parallel()
 
@@ -2082,7 +2083,8 @@ func TestServeConnKeepRequestAndResponseUntilResetUserValues(t *testing.T) {
 					resultRespStr = closerCtx.Response.String()
 
 					return nil
-				}})
+				},
+			})
 		})
 		if err != nil {
 			t.Errorf("unexpected error in ServeConn: %v", err)
@@ -2178,7 +2180,8 @@ func TestServeConnHijackResetUserValues(t *testing.T) {
 					close(ch)
 
 					return nil
-				}},
+				},
+			},
 			)
 		})
 		if err != nil {

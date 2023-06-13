@@ -2070,7 +2070,8 @@ func TestResponseReadWithoutBody(t *testing.T) {
 }
 
 func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBody bool,
-	expectedStatusCode, expectedContentLength int, expectedContentType string, expectedTrailer map[string]string) {
+	expectedStatusCode, expectedContentLength int, expectedContentType string, expectedTrailer map[string]string,
+) {
 	r := bytes.NewBufferString(s)
 	rb := bufio.NewReader(r)
 	resp.SkipBody = skipBody
@@ -2140,7 +2141,8 @@ func TestResponseSuccess(t *testing.T) {
 }
 
 func testResponseSuccess(t *testing.T, statusCode int, contentType, serverName, body string,
-	expectedStatusCode int, expectedContentType, expectedServerName string) {
+	expectedStatusCode int, expectedContentType, expectedServerName string,
+) {
 	var resp Response
 	resp.SetStatusCode(statusCode)
 	resp.Header.Set("Content-Type", contentType)
@@ -2310,7 +2312,6 @@ func TestResponseReadSuccess(t *testing.T) {
 	// chunked response with chunk extension
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n3;ext\r\naaa\r\n0\r\nFoo6: bar6\r\n\r\n",
 		200, -1, "text/html", "aaa", map[string]string{"Foo6": "bar6"})
-
 }
 
 func TestResponseReadError(t *testing.T) {
@@ -2349,8 +2350,8 @@ func testResponseReadError(t *testing.T, resp *Response, response string) {
 }
 
 func testResponseReadSuccess(t *testing.T, resp *Response, response string, expectedStatusCode, expectedContentLength int,
-	expectedContentType, expectedBody string, expectedTrailer map[string]string) {
-
+	expectedContentType, expectedBody string, expectedTrailer map[string]string,
+) {
 	r := bytes.NewBufferString(response)
 	rb := bufio.NewReader(r)
 	err := resp.Read(rb)
@@ -3119,7 +3120,6 @@ func TestRequestMultipartFormPipeEmptyFormField(t *testing.T) {
 	var b bytes.Buffer
 	bw := bufio.NewWriter(&b)
 	err := writeBodyChunked(bw, pr)
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
