@@ -73,7 +73,6 @@ func Test_listen(t *testing.T) {
 	addr := getAddr()
 
 	ln, err := p.listen(addr)
-
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -106,7 +105,6 @@ func Test_setTCPListenerFiles(t *testing.T) {
 	addr := getAddr()
 
 	err := p.setTCPListenerFiles(addr)
-
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

@@ -1287,13 +1287,11 @@ func (req *Request) ReadBody(r *bufio.Reader, contentLength int, maxBodySize int
 
 	if contentLength >= 0 {
 		bodyBuf.B, err = readBody(r, contentLength, maxBodySize, bodyBuf.B)
-
 	} else if contentLength == -1 {
 		bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
 		if err == nil && len(bodyBuf.B) == 0 {
 			req.Header.SetContentLength(0)
 		}
-
 	} else {
 		bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
 		req.Header.SetContentLength(len(bodyBuf.B))

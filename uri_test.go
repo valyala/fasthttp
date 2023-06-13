@@ -239,7 +239,6 @@ func TestURICopyTo(t *testing.T) {
 	if !reflect.DeepEqual(u, copyU) { //nolint:govet
 		t.Fatalf("URICopyTo fail, u: \n%+v\ncopyu: \n%+v\n", u, copyU) //nolint:govet
 	}
-
 }
 
 func TestURIFullURI(t *testing.T) {
@@ -417,7 +416,8 @@ func TestURIParse(t *testing.T) {
 }
 
 func testURIParse(t *testing.T, u *URI, host, uri,
-	expectedURI, expectedHost, expectedPath, expectedPathOriginal, expectedArgs, expectedHash string) {
+	expectedURI, expectedHost, expectedPath, expectedPathOriginal, expectedArgs, expectedHash string,
+) {
 	u.Parse([]byte(host), []byte(uri)) //nolint:errcheck
 
 	if !bytes.Equal(u.FullURI(), []byte(expectedURI)) {

@@ -19,10 +19,8 @@ import (
 
 var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 
-var (
-	// Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
-	ErrAlreadyServing = errors.New("Server is already serving connections")
-)
+// Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
+var ErrAlreadyServing = errors.New("Server is already serving connections")
 
 // ServeConn serves HTTP requests from the given connection
 // using the given handler.

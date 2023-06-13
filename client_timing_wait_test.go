@@ -40,7 +40,6 @@ func benchmarkClientGetEndToEndWaitConnInmemory(b *testing.B, parallelism int) {
 	ch := make(chan struct{})
 	sleepDuration := 50 * time.Millisecond
 	go func() {
-
 		if err := Serve(ln, newFasthttpSleepEchoHandler(sleepDuration)); err != nil {
 			b.Errorf("error when serving requests: %v", err)
 		}

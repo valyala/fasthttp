@@ -13,9 +13,8 @@ jobs:
       with:
         go-version: 1.20.x
     - run: go version
-    - run: diff -u <(echo -n) <(gofmt -d .)
     - name: Run golangci-lint
       uses: golangci/golangci-lint-action@v3
       with:
         version: v1.51.1
-        args: --enable=nolintlint,gochecknoinits,bodyclose --verbose
+        args: --enable=nolintlint,gochecknoinits,bodyclose,gofumpt --verbose

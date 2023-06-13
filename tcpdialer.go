@@ -116,9 +116,7 @@ func DialDualStackTimeout(addr string, timeout time.Duration) (net.Conn, error) 
 	return defaultDialer.DialDualStackTimeout(addr, timeout)
 }
 
-var (
-	defaultDialer = &TCPDialer{Concurrency: 1000}
-)
+var defaultDialer = &TCPDialer{Concurrency: 1000}
 
 // Resolver represents interface of the tcp resolver.
 type Resolver interface {
