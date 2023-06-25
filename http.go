@@ -21,6 +21,7 @@ import (
 var (
 	requestBodyPoolSizeLimit  = -1
 	responseBodyPoolSizeLimit = -1
+	addVaryHeaderForCompress  = false
 )
 
 // SetBodySizePoolLimit set the max body size for bodies to be returned to the pool.
@@ -28,6 +29,12 @@ var (
 func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
 	requestBodyPoolSizeLimit = reqBodyLimit
 	responseBodyPoolSizeLimit = respBodyLimit
+}
+
+// SetAddVaryHeaderForCompression enables(or disables if enable is false) the
+// 'Vary: Accept-Encoding' header when compression is used.
+func SetAddVaryHeaderForCompression(enable bool) {
+	addVaryHeaderForCompress = enable
 }
 
 // Request represents HTTP request.
@@ -1723,6 +1730,9 @@ func (resp *Response) brotliBody(level int) error {
 		resp.bodyRaw = nil
 	}
 	resp.Header.SetContentEncodingBytes(strBr)
+	if addVaryHeaderForCompress {
+		resp.Header.Set("Vary", "Accept-Encoding")
+	}
 	return nil
 }
 
@@ -1778,6 +1788,9 @@ func (resp *Response) gzipBody(level int) error {
 		resp.bodyRaw = nil
 	}
 	resp.Header.SetContentEncodingBytes(strGzip)
+	if addVaryHeaderForCompress {
+		resp.Header.Set("Vary", "Accept-Encoding")
+	}
 	return nil
 }
 
@@ -1833,6 +1846,9 @@ func (resp *Response) deflateBody(level int) error {
 		resp.bodyRaw = nil
 	}
 	resp.Header.SetContentEncodingBytes(strDeflate)
+	if addVaryHeaderForCompress {
+		resp.Header.Set("Vary", "Accept-Encoding")
+	}
 	return nil
 }
 
