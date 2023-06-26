@@ -944,15 +944,13 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 
 		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirectsBuffer(req, dst, url, c)
 		mu.Lock()
-		{
-			if !timedout {
-				ch <- clientURLResponse{
-					statusCode: statusCodeCopy,
-					body:       bodyCopy,
-					err:        errCopy,
-				}
-				responded = true
+		if !timedout {
+			ch <- clientURLResponse{
+				statusCode: statusCodeCopy,
+				body:       bodyCopy,
+				err:        errCopy,
 			}
+			responded = true
 		}
 		mu.Unlock()
 
@@ -967,17 +965,15 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 		err = resp.err
 	case <-tc.C:
 		mu.Lock()
-		{
-			if responded {
-				resp := <-ch
-				statusCode = resp.statusCode
-				body = resp.body
-				err = resp.err
-			} else {
-				timedout = true
-				err = ErrTimeout
-				body = dst
-			}
+		if responded {
+			resp := <-ch
+			statusCode = resp.statusCode
+			body = resp.body
+			err = resp.err
+		} else {
+			timedout = true
+			err = ErrTimeout
+			body = dst
 		}
 		mu.Unlock()
 	}

@@ -1788,15 +1788,12 @@ func (s *Server) Serve(ln net.Listener) error {
 	maxWorkersCount := s.getConcurrency()
 
 	s.mu.Lock()
-	{
-		s.ln = append(s.ln, ln)
-		if s.done == nil {
-			s.done = make(chan struct{})
-		}
-
-		if s.concurrencyCh == nil {
-			s.concurrencyCh = make(chan struct{}, maxWorkersCount)
-		}
+	s.ln = append(s.ln, ln)
+	if s.done == nil {
+		s.done = make(chan struct{})
+	}
+	if s.concurrencyCh == nil {
+		s.concurrencyCh = make(chan struct{}, maxWorkersCount)
 	}
 	s.mu.Unlock()
 
