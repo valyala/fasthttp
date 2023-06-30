@@ -1960,10 +1960,6 @@ func TestCompressHandler(t *testing.T) {
 	if string(ce) != "" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
 	}
-	vary := resp.Header.Peek("Vary")
-	if string(vary) != "" {
-		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "")
-	}
 	body := resp.Body()
 	if string(body) != expectedBody {
 		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
@@ -1983,10 +1979,6 @@ func TestCompressHandler(t *testing.T) {
 	ce = resp.Header.ContentEncoding()
 	if string(ce) != "gzip" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "gzip")
-	}
-	vary = resp.Header.Peek("Vary")
-	if string(vary) != "" {
-		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "")
 	}
 	body, err := resp.BodyGunzip()
 	if err != nil {
@@ -2011,10 +2003,6 @@ func TestCompressHandler(t *testing.T) {
 	if string(ce) != "gzip" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "gzip")
 	}
-	vary = resp.Header.Peek("Vary")
-	if string(vary) != "" {
-		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "")
-	}
 	body, err = resp.BodyGunzip()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2038,10 +2026,6 @@ func TestCompressHandler(t *testing.T) {
 	if string(ce) != "deflate" {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "deflate")
 	}
-	vary = resp.Header.Peek("Vary")
-	if string(vary) != "" {
-		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "")
-	}
 	body, err = resp.BodyInflate()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -2055,10 +2039,6 @@ func TestCompressHandlerVary(t *testing.T) {
 	t.Parallel()
 
 	expectedBody := string(createFixedBody(2e4))
-	// enable 'Vary' header
-	SetAddVaryHeaderForCompression(true)
-	// Restore default value
-	defer SetAddVaryHeaderForCompression(false)
 
 	h := CompressHandlerBrotliLevel(func(ctx *RequestCtx) {
 		ctx.WriteString(expectedBody) //nolint:errcheck
