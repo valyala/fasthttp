@@ -3007,3 +3007,65 @@ func TestResponseHeader_Keys(t *testing.T) {
 		t.Fatalf("Unexpected value %q. Expected %q", actualTrailerKeys, expectedTrailerKeys)
 	}
 }
+
+func TestAddVaryHeader(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+
+	h.AddVaryBytes([]byte("Accept-Encoding"))
+	got := string(h.Peek("Vary"))
+	expected := "Accept-Encoding"
+	if got != expected {
+		t.Errorf("expected %q got %q", expected, got)
+	}
+
+	var buf bytes.Buffer
+	h.WriteTo(&buf) //nolint:errcheck
+
+	if n := strings.Count(buf.String(), "Vary: "); n != 1 {
+		t.Errorf("Vary occurred %d times", n)
+	}
+}
+
+func TestAddVaryHeaderExisting(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+
+	h.Set("Vary", "Accept")
+	h.AddVaryBytes([]byte("Accept-Encoding"))
+	got := string(h.Peek("Vary"))
+	expected := "Accept,Accept-Encoding"
+	if got != expected {
+		t.Errorf("expected %q got %q", expected, got)
+	}
+
+	var buf bytes.Buffer
+	h.WriteTo(&buf) //nolint:errcheck
+
+	if n := strings.Count(buf.String(), "Vary: "); n != 1 {
+		t.Errorf("Vary occurred %d times", n)
+	}
+}
+
+func TestAddVaryHeaderExistingAcceptEncoding(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+
+	h.Set("Vary", "Accept-Encoding")
+	h.AddVaryBytes([]byte("Accept-Encoding"))
+	got := string(h.Peek("Vary"))
+	expected := "Accept-Encoding"
+	if got != expected {
+		t.Errorf("expected %q got %q", expected, got)
+	}
+
+	var buf bytes.Buffer
+	h.WriteTo(&buf) //nolint:errcheck
+
+	if n := strings.Count(buf.String(), "Vary: "); n != 1 {
+		t.Errorf("Vary occurred %d times", n)
+	}
+}
