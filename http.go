@@ -1723,7 +1723,7 @@ func (resp *Response) brotliBody(level int) error {
 		resp.bodyRaw = nil
 	}
 	resp.Header.SetContentEncodingBytes(strBr)
-	resp.Header.AddVaryBytes(strAcceptEncoding)
+	resp.Header.addVaryBytes(strAcceptEncoding)
 	return nil
 }
 
@@ -1779,7 +1779,7 @@ func (resp *Response) gzipBody(level int) error {
 		resp.bodyRaw = nil
 	}
 	resp.Header.SetContentEncodingBytes(strGzip)
-	resp.Header.AddVaryBytes(strAcceptEncoding)
+	resp.Header.addVaryBytes(strAcceptEncoding)
 	return nil
 }
 
@@ -1835,7 +1835,7 @@ func (resp *Response) deflateBody(level int) error {
 		resp.bodyRaw = nil
 	}
 	resp.Header.SetContentEncodingBytes(strDeflate)
-	resp.Header.AddVaryBytes(strAcceptEncoding)
+	resp.Header.addVaryBytes(strAcceptEncoding)
 	return nil
 }
 

@@ -344,8 +344,8 @@ func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
 	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
 }
 
-// AddVaryBytes add value to the 'Vary' header if it's not included
-func (h *ResponseHeader) AddVaryBytes(value []byte) {
+// addVaryBytes add value to the 'Vary' header if it's not included
+func (h *ResponseHeader) addVaryBytes(value []byte) {
 	v := h.peek(strVary)
 	if len(v) == 0 {
 		// 'Vary' is not set

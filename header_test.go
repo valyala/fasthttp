@@ -3013,7 +3013,7 @@ func TestAddVaryHeader(t *testing.T) {
 
 	var h ResponseHeader
 
-	h.AddVaryBytes([]byte("Accept-Encoding"))
+	h.addVaryBytes([]byte("Accept-Encoding"))
 	got := string(h.Peek("Vary"))
 	expected := "Accept-Encoding"
 	if got != expected {
@@ -3034,7 +3034,7 @@ func TestAddVaryHeaderExisting(t *testing.T) {
 	var h ResponseHeader
 
 	h.Set("Vary", "Accept")
-	h.AddVaryBytes([]byte("Accept-Encoding"))
+	h.addVaryBytes([]byte("Accept-Encoding"))
 	got := string(h.Peek("Vary"))
 	expected := "Accept,Accept-Encoding"
 	if got != expected {
@@ -3055,7 +3055,7 @@ func TestAddVaryHeaderExistingAcceptEncoding(t *testing.T) {
 	var h ResponseHeader
 
 	h.Set("Vary", "Accept-Encoding")
-	h.AddVaryBytes([]byte("Accept-Encoding"))
+	h.addVaryBytes([]byte("Accept-Encoding"))
 	got := string(h.Peek("Vary"))
 	expected := "Accept-Encoding"
 	if got != expected {
