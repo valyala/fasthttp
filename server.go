@@ -110,7 +110,6 @@ func ListenAndServeTLS(addr, certFile, keyFile string, handler RequestHandler) e
 	s := &Server{
 		Handler: handler,
 	}
-	s.configTLS()
 	return s.ListenAndServeTLS(addr, certFile, keyFile)
 }
 
@@ -122,7 +121,6 @@ func ListenAndServeTLSEmbed(addr string, certData, keyData []byte, handler Reque
 	s := &Server{
 		Handler: handler,
 	}
-	s.configTLS()
 	return s.ListenAndServeTLSEmbed(addr, certData, keyData)
 }
 
@@ -1679,7 +1677,7 @@ func (s *Server) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) e
 // the function will use previously added TLS configuration.
 func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	s.mu.Lock()
-
+	s.configTLS()
 	config := s.TLSConfig.Clone()
 	var err error
 	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
@@ -1710,7 +1708,7 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 // the function will use previously added TLS configuration.
 func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error {
 	s.mu.Lock()
-
+	s.configTLS()
 	config := s.TLSConfig.Clone()
 	var err error
 	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
