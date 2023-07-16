@@ -110,6 +110,7 @@ func ListenAndServeTLS(addr, certFile, keyFile string, handler RequestHandler) e
 	s := &Server{
 		Handler: handler,
 	}
+    s.configTLS()
 	return s.ListenAndServeTLS(addr, certFile, keyFile)
 }
 
@@ -121,6 +122,7 @@ func ListenAndServeTLSEmbed(addr string, certData, keyData []byte, handler Reque
 	s := &Server{
 		Handler: handler,
 	}
+    s.configTLS()
 	return s.ListenAndServeTLSEmbed(addr, certData, keyData)
 }
 
@@ -1677,14 +1679,16 @@ func (s *Server) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) e
 // the function will use previously added TLS configuration.
 func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	s.mu.Lock()
-	err := s.AppendCert(certFile, keyFile)
-	if err != nil && err != errNoCertOrKeyProvided {
-		s.mu.Unlock()
-		return err
-	}
-	if s.TLSConfig == nil {
-		s.mu.Unlock()
-		return errNoCertOrKeyProvided
+
+	config := s.TLSConfig.Clone()
+	var err error
+	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
+	if !configHasCert || certFile != "" || keyFile != "" {
+		err = s.AppendCert(certFile, keyFile)
+		if err != nil && err != errNoCertOrKeyProvided {
+			s.mu.Unlock()
+			return err
+		}
 	}
 
 	// BuildNameToCertificate has been deprecated since 1.14.
@@ -1707,14 +1711,15 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error {
 	s.mu.Lock()
 
-	err := s.AppendCertEmbed(certData, keyData)
-	if err != nil && err != errNoCertOrKeyProvided {
-		s.mu.Unlock()
-		return err
-	}
-	if s.TLSConfig == nil {
-		s.mu.Unlock()
-		return errNoCertOrKeyProvided
+	config := s.TLSConfig.Clone()
+	var err error
+	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
+	if !configHasCert || len(certData) != 0 || len(keyData) != 0 {
+		err = s.AppendCertEmbed(certData, keyData)
+		if err != nil && err != errNoCertOrKeyProvided {
+			s.mu.Unlock()
+			return err
+		}
 	}
 
 	// BuildNameToCertificate has been deprecated since 1.14.
@@ -1742,7 +1747,6 @@ func (s *Server) AppendCert(certFile, keyFile string) error {
 		return fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %w", certFile, keyFile, err)
 	}
 
-	s.configTLS()
 	s.TLSConfig.Certificates = append(s.TLSConfig.Certificates, cert)
 
 	return nil
@@ -1760,7 +1764,6 @@ func (s *Server) AppendCertEmbed(certData, keyData []byte) error {
 			len(certData), len(keyData), err)
 	}
 
-	s.configTLS()
 	s.TLSConfig.Certificates = append(s.TLSConfig.Certificates, cert)
 
 	return nil
