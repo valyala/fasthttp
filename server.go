@@ -110,7 +110,7 @@ func ListenAndServeTLS(addr, certFile, keyFile string, handler RequestHandler) e
 	s := &Server{
 		Handler: handler,
 	}
-    s.configTLS()
+	s.configTLS()
 	return s.ListenAndServeTLS(addr, certFile, keyFile)
 }
 
@@ -122,7 +122,7 @@ func ListenAndServeTLSEmbed(addr string, certData, keyData []byte, handler Reque
 	s := &Server{
 		Handler: handler,
 	}
-    s.configTLS()
+	s.configTLS()
 	return s.ListenAndServeTLSEmbed(addr, certData, keyData)
 }
 
