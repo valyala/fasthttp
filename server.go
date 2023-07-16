@@ -1685,7 +1685,7 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
 	if !configHasCert || certFile != "" || keyFile != "" {
 		err = s.AppendCert(certFile, keyFile)
-		if err != nil && err != errNoCertOrKeyProvided {
+		if err != nil {
 			s.mu.Unlock()
 			return err
 		}
@@ -1716,7 +1716,7 @@ func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error 
 	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
 	if !configHasCert || len(certData) != 0 || len(keyData) != 0 {
 		err = s.AppendCertEmbed(certData, keyData)
-		if err != nil && err != errNoCertOrKeyProvided {
+		if err != nil {
 			s.mu.Unlock()
 			return err
 		}
