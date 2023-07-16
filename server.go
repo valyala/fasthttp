@@ -1682,8 +1682,7 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	var err error
 	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
 	if !configHasCert || certFile != "" || keyFile != "" {
-		err = s.AppendCert(certFile, keyFile)
-		if err != nil {
+		if err := s.AppendCert(certFile, keyFile); err != nil {
 			s.mu.Unlock()
 			return err
 		}
