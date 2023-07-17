@@ -1679,7 +1679,6 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	s.mu.Lock()
 	s.configTLS()
 	config := s.TLSConfig.Clone()
-	var err error
 	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
 	if !configHasCert || certFile != "" || keyFile != "" {
 		if err := s.AppendCert(certFile, keyFile); err != nil {
@@ -1709,11 +1708,9 @@ func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error 
 	s.mu.Lock()
 	s.configTLS()
 	config := s.TLSConfig.Clone()
-	var err error
 	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
 	if !configHasCert || len(certData) != 0 || len(keyData) != 0 {
-		err = s.AppendCertEmbed(certData, keyData)
-		if err != nil {
+		if err := s.AppendCertEmbed(certData, keyData); err != nil {
 			s.mu.Unlock()
 			return err
 		}
@@ -1744,6 +1741,7 @@ func (s *Server) AppendCert(certFile, keyFile string) error {
 		return fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %w", certFile, keyFile, err)
 	}
 
+	s.configTLS()
 	s.TLSConfig.Certificates = append(s.TLSConfig.Certificates, cert)
 
 	return nil
@@ -1761,6 +1759,7 @@ func (s *Server) AppendCertEmbed(certData, keyData []byte) error {
 			len(certData), len(keyData), err)
 	}
 
+	s.configTLS()
 	s.TLSConfig.Certificates = append(s.TLSConfig.Certificates, cert)
 
 	return nil
