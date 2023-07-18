@@ -1678,8 +1678,7 @@ func (s *Server) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) e
 func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	s.mu.Lock()
 	s.configTLS()
-	config := s.TLSConfig.Clone()
-	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
+	configHasCert := len(s.TLSConfig.Certificates) > 0 || s.TLSConfig.GetCertificate != nil
 	if !configHasCert || certFile != "" || keyFile != "" {
 		if err := s.AppendCert(certFile, keyFile); err != nil {
 			s.mu.Unlock()
@@ -1707,8 +1706,7 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error {
 	s.mu.Lock()
 	s.configTLS()
-	config := s.TLSConfig.Clone()
-	configHasCert := len(config.Certificates) > 0 || config.GetCertificate != nil
+	configHasCert := len(s.TLSConfig.Certificates) > 0 || s.TLSConfig.GetCertificate != nil
 	if !configHasCert || len(certData) != 0 || len(keyData) != 0 {
 		if err := s.AppendCertEmbed(certData, keyData); err != nil {
 			s.mu.Unlock()
