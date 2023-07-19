@@ -42,11 +42,23 @@ func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.Dia
 	return func(addr string) (net.Conn, error) {
 		var conn net.Conn
 		var err error
-		if timeout == 0 {
-			conn, err = fasthttp.Dial(proxy)
+
+		if strings.HasPrefix(proxy, "[") {
+			// ipv6
+			if timeout == 0 {
+				conn, err = fasthttp.DialDualStack(proxy)
+			} else {
+				conn, err = fasthttp.DialDualStackTimeout(proxy, timeout)
+			}
 		} else {
-			conn, err = fasthttp.DialTimeout(proxy, timeout)
+			// ipv4
+			if timeout == 0 {
+				conn, err = fasthttp.Dial(proxy)
+			} else {
+				conn, err = fasthttp.DialTimeout(proxy, timeout)
+			}
 		}
+
 		if err != nil {
 			return nil, err
 		}
