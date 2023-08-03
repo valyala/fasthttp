@@ -3192,3 +3192,75 @@ func Test_AddMissingPort(t *testing.T) {
 		})
 	}
 }
+
+type TransportWrapper struct {
+	base  RoundTripper
+	count *int
+	t     *testing.T
+}
+
+func (tw *TransportWrapper) RoundTrip(hc *HostClient, req *Request, resp *Response) (bool, error) {
+	req.Header.Set("trace-id", "123")
+	tw.assertRequestLog(req.String())
+	retry, err := tw.transport().RoundTrip(hc, req, resp)
+	resp.Header.Set("trace-id", "124")
+	tw.assertResponseLog(resp.String())
+	*tw.count++
+	return retry, err
+}
+
+func (tw *TransportWrapper) transport() RoundTripper {
+	if tw.base == nil {
+		return DefaultTransport
+	}
+	return tw.base
+}
+
+func (tw *TransportWrapper) assertRequestLog(reqLog string) {
+	if !strings.Contains(reqLog, "Trace-Id: 123") {
+		tw.t.Errorf("request log should contains: %v", "Trace-Id: 123")
+	}
+}
+
+func (tw *TransportWrapper) assertResponseLog(respLog string) {
+	if !strings.Contains(respLog, "Trace-Id: 124") {
+		tw.t.Errorf("response log should contains: %v", "Trace-Id: 124")
+	}
+}
+
+func TestClientTransportEx(t *testing.T) {
+	sHTTP := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer sHTTP.Stop()
+
+	sHTTPS := startEchoServerTLS(t, "tcp", "127.0.0.1:")
+	defer sHTTPS.Stop()
+
+	count := 0
+	c := &Client{
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+		ConfigureClient: func(hc *HostClient) error {
+			hc.Transport = &TransportWrapper{base: hc.Transport, count: &count, t: t}
+			return nil
+		},
+	}
+	// test transport
+	const loopCount = 4
+	const getCount = 20
+	const postCount = 10
+	for i := 0; i < loopCount; i++ {
+		addr := "http://" + sHTTP.Addr()
+		if i&1 != 0 {
+			addr = "https://" + sHTTPS.Addr()
+		}
+		// test get
+		testClientGet(t, c, addr, getCount)
+		// test post
+		testClientPost(t, c, addr, postCount)
+	}
+	roundTripCount := loopCount * (getCount + postCount)
+	if count != roundTripCount {
+		t.Errorf("round trip count should be: %v", roundTripCount)
+	}
+}
