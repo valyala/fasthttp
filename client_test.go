@@ -2111,6 +2111,22 @@ func TestClientRetryRequestWithCustomDecider(t *testing.T) {
 	}
 }
 
+type TransportDemo struct {
+	br *bufio.Reader
+	bw *bufio.Writer
+}
+
+func (t TransportDemo) RoundTrip(hc *HostClient, req *Request, res *Response) (retry bool, err error) {
+	if err = req.Write(t.bw); err != nil {
+		return false, err
+	}
+	if err = t.bw.Flush(); err != nil {
+		return false, err
+	}
+	err = res.Read(t.br)
+	return err != nil, err
+}
+
 func TestHostClientTransport(t *testing.T) {
 	t.Parallel()
 
@@ -2131,23 +2147,13 @@ func TestHostClientTransport(t *testing.T) {
 
 	c := &HostClient{
 		Addr: "foobar",
-		Transport: func() TransportFunc {
+		Transport: func() RoundTripper {
 			c, _ := ln.Dial()
 
 			br := bufio.NewReader(c)
 			bw := bufio.NewWriter(c)
 
-			return func(req *Request, res *Response) error {
-				if err := req.Write(bw); err != nil {
-					return err
-				}
-
-				if err := bw.Flush(); err != nil {
-					return err
-				}
-
-				return res.Read(br)
-			}
+			return TransportDemo{br: br, bw: bw}
 		}(),
 	}
 
@@ -3060,14 +3066,18 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 	}
 }
 
+type TransportEmpty struct{}
+
+func (t TransportEmpty) RoundTrip(hc *HostClient, req *Request, res *Response) (retry bool, err error) {
+	return false, nil
+}
+
 func TestHttpsRequestWithoutParsedURL(t *testing.T) {
 	t.Parallel()
 
 	client := HostClient{
-		IsTLS: true,
-		Transport: func(r1 *Request, r2 *Response) error {
-			return nil
-		},
+		IsTLS:     true,
+		Transport: TransportEmpty{},
 	}
 
 	req := &Request{}
