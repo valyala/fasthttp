@@ -2808,11 +2808,11 @@ func (c *pipelineConnClient) PendingRequests() int {
 
 var errPipelineConnStopped = errors.New("pipeline connection has been stopped")
 
-var DefaultTransport RoundTripper = &Transport{}
+var DefaultTransport RoundTripper = &transport{}
 
-type Transport struct{}
+type transport struct{}
 
-func (t *Transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
+func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
 	customSkipBody := resp.SkipBody
 	customStreamBody := resp.StreamBody
 
