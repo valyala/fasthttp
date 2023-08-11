@@ -1106,8 +1106,8 @@ func (resp *Response) Reset() {
 	if responseBodyPoolSizeLimit >= 0 && resp.body != nil {
 		resp.ReleaseBody(responseBodyPoolSizeLimit)
 	}
-	resp.Header.Reset()
 	resp.resetSkipHeader()
+	resp.Header.Reset()
 	resp.SkipBody = false
 	resp.raddr = nil
 	resp.laddr = nil
