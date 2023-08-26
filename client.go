@@ -581,6 +581,7 @@ func (c *Client) mCleaner(m map[string]*HostClient) {
 		c.mLock.Lock()
 		for k, v := range m {
 			v.connsLock.Lock()
+			/* #nosec G601 */
 			if v.connsCount == 0 && atomic.LoadInt32(&v.pendingClientRequests) == 0 {
 				delete(m, k)
 			}
