@@ -90,7 +90,7 @@ func main() {
 		// meaning to individual path segments. This package
 		// only manipulates the path as a whole, so we allow those
 		// last three as well. That leaves only ? to escape.
-		var a = quotedArgShouldEscapeTable
+		a := quotedArgShouldEscapeTable
 
 		for _, v := range `$&+,/:;=@` {
 			a[v] = 0
@@ -106,7 +106,7 @@ func main() {
 	fmt.Fprintf(w, "const quotedArgShouldEscapeTable = %q\n", quotedArgShouldEscapeTable)
 	fmt.Fprintf(w, "const quotedPathShouldEscapeTable = %q\n", quotedPathShouldEscapeTable)
 
-	if err := os.WriteFile("bytesconv_table.go", w.Bytes(), 0660); err != nil {
+	if err := os.WriteFile("bytesconv_table.go", w.Bytes(), 0o660); err != nil {
 		log.Fatal(err)
 	}
 }

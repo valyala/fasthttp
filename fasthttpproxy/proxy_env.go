@@ -47,7 +47,6 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 	authHTTPSStorage := &atomic.Value{}
 
 	return func(addr string) (net.Conn, error) {
-
 		port, _, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, fmt.Errorf("unexpected addr format: %w", err)

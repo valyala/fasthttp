@@ -156,7 +156,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 	tempdir := t.TempDir()
 
 	if err := os.WriteFile(
-		path.Join(tempdir, "hello"), []byte(teststr), 0666); err != nil {
+		path.Join(tempdir, "hello"), []byte(teststr), 0o666); err != nil {
 		t.Fatal(err)
 	}
 
