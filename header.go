@@ -1298,19 +1298,20 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 
 	switch key[0] | 0x20 {
 	case 'c':
-		if caseInsensitiveCompare(strContentType, key) {
+		switch {
+		case caseInsensitiveCompare(strContentType, key):
 			h.SetContentTypeBytes(value)
 			return true
-		} else if caseInsensitiveCompare(strContentLength, key) {
+		case caseInsensitiveCompare(strContentLength, key):
 			if contentLength, err := parseContentLength(value); err == nil {
 				h.contentLength = contentLength
 				h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
 			}
 			return true
-		} else if caseInsensitiveCompare(strContentEncoding, key) {
+		case caseInsensitiveCompare(strContentEncoding, key):
 			h.SetContentEncodingBytes(value)
 			return true
-		} else if caseInsensitiveCompare(strConnection, key) {
+		case caseInsensitiveCompare(strConnection, key):
 			if bytes.Equal(strClose, value) {
 				h.SetConnectionClose()
 			} else {
@@ -1361,16 +1362,17 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 
 	switch key[0] | 0x20 {
 	case 'c':
-		if caseInsensitiveCompare(strContentType, key) {
+		switch {
+		case caseInsensitiveCompare(strContentType, key):
 			h.SetContentTypeBytes(value)
 			return true
-		} else if caseInsensitiveCompare(strContentLength, key) {
+		case caseInsensitiveCompare(strContentLength, key):
 			if contentLength, err := parseContentLength(value); err == nil {
 				h.contentLength = contentLength
 				h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
 			}
 			return true
-		} else if caseInsensitiveCompare(strConnection, key) {
+		case caseInsensitiveCompare(strConnection, key):
 			if bytes.Equal(strClose, value) {
 				h.SetConnectionClose()
 			} else {
@@ -1378,7 +1380,7 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 				h.setNonSpecial(key, value)
 			}
 			return true
-		} else if caseInsensitiveCompare(strCookie, key) {
+		case caseInsensitiveCompare(strCookie, key):
 			h.collectCookies()
 			h.cookies = parseRequestCookies(h.cookies, value)
 			return true
@@ -2791,16 +2793,17 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	protoStr := strHTTP11
 	// parse requestURI
 	n = bytes.LastIndexByte(b, ' ')
-	if n < 0 {
+	switch {
+	case n < 0:
 		h.noHTTP11 = true
 		n = len(b)
 		protoStr = strHTTP10
-	} else if n == 0 {
+	case n == 0:
 		if h.secureErrorLogMessage {
 			return 0, fmt.Errorf("requestURI cannot be empty")
 		}
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
-	} else if !bytes.Equal(b[n+1:], strHTTP11) {
+	case !bytes.Equal(b[n+1:], strHTTP11):
 		h.noHTTP11 = true
 		protoStr = b[n+1:]
 	}
@@ -3268,15 +3271,16 @@ func normalizeHeaderValue(ov, ob []byte, headerLength int) (nv, nb []byte, nhl i
 	lineStart := false
 	for read := 0; read < length; read++ {
 		c := ov[read]
-		if c == rChar || c == nChar {
+		switch {
+		case c == rChar || c == nChar:
 			shrunk++
 			if c == nChar {
 				lineStart = true
 			}
 			continue
-		} else if lineStart && c == '\t' {
+		case lineStart && c == '\t':
 			c = ' '
-		} else {
+		default:
 			lineStart = false
 		}
 		nv[write] = c
@@ -3335,15 +3339,16 @@ func removeNewLines(raw []byte) []byte {
 	foundN := bytes.IndexByte(raw, nChar)
 	start := 0
 
-	if foundN != -1 {
+	switch {
+	case foundN != -1:
 		if foundR > foundN {
 			start = foundN
 		} else if foundR != -1 {
 			start = foundR
 		}
-	} else if foundR != -1 {
+	case foundR != -1:
 		start = foundR
-	} else {
+	default:
 		return raw
 	}
 

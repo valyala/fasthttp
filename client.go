@@ -1343,7 +1343,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 			userAgent = defaultUserAgent
 		}
 		if userAgent != "" {
-			req.Header.userAgent = append(req.Header.userAgent[:], userAgent...)
+			req.Header.userAgent = append(req.Header.userAgent[:0], userAgent...)
 		}
 	}
 
@@ -2303,7 +2303,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 			userAgent = defaultUserAgent
 		}
 		if userAgent != "" {
-			req.Header.userAgent = append(req.Header.userAgent[:], userAgent...)
+			req.Header.userAgent = append(req.Header.userAgent[:0], userAgent...)
 		}
 	}
 
@@ -2410,7 +2410,7 @@ func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
 			userAgent = defaultUserAgent
 		}
 		if userAgent != "" {
-			req.Header.userAgent = append(req.Header.userAgent[:], userAgent...)
+			req.Header.userAgent = append(req.Header.userAgent[:0], userAgent...)
 		}
 	}
 

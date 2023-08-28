@@ -1977,8 +1977,7 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 	}
 	cookieSeen := false
 	h.VisitAll(func(key, _ []byte) {
-		switch string(key) {
-		case HeaderSetCookie:
+		if string(key) == HeaderSetCookie {
 			cookieSeen = true
 		}
 	})
@@ -1998,8 +1997,7 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 	}
 	cookieSeen = false
 	h.VisitAll(func(key, _ []byte) {
-		switch string(key) {
-		case HeaderSetCookie:
+		if string(key) == HeaderSetCookie {
 			cookieSeen = true
 		}
 	})
@@ -2022,8 +2020,7 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 	}
 	cookieSeen := false
 	h.VisitAll(func(key, _ []byte) {
-		switch string(key) {
-		case HeaderCookie:
+		if string(key) == HeaderCookie {
 			cookieSeen = true
 		}
 	})
@@ -2040,8 +2037,7 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 	}
 	cookieSeen = false
 	h.VisitAll(func(key, _ []byte) {
-		switch string(key) {
-		case HeaderCookie:
+		if string(key) == HeaderCookie {
 			cookieSeen = true
 		}
 	})
