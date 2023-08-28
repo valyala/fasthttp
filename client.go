@@ -2905,11 +2905,10 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	if customStreamBody && resp.bodyStream != nil {
 		rbs := resp.bodyStream
 		resp.bodyStream = newCloseReader(rbs, func() error {
-			closeConn = closeConn || resp.ConnectionClose()
 			if r, ok := rbs.(*requestStream); ok {
 				releaseRequestStream(r)
 			}
-			if closeConn {
+			if closeConn || resp.ConnectionClose() {
 				hc.closeConn(cc)
 			} else {
 				hc.releaseConn(cc)
