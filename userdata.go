@@ -42,7 +42,8 @@ func (d *userData) Set(key interface{}, value interface{}) {
 	kv := userDataKV{}
 	kv.key = key
 	kv.value = value
-	*d = append(args, kv)
+	args = append(args, kv)
+	*d = args
 }
 
 func (d *userData) SetBytes(key []byte, value interface{}) {

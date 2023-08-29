@@ -688,7 +688,8 @@ func normalizePath(dst, src []byte) []byte {
 func (u *URI) RequestURI() []byte {
 	var dst []byte
 	if u.DisablePathNormalizing {
-		dst = append(u.requestURI[:0], u.PathOriginal()...)
+		dst = u.requestURI[:0]
+		dst = append(dst, u.PathOriginal()...)
 	} else {
 		dst = appendQuotedPath(u.requestURI[:0], u.Path())
 	}
