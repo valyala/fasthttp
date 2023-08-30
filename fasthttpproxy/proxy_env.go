@@ -25,7 +25,7 @@ const (
 // Example usage:
 //
 //	c := &fasthttp.Client{
-//		Dial: fasthttp.FasthttpProxyHTTPDialer(),
+//		Dial: fasthttpproxy.FasthttpProxyHTTPDialer(),
 //	}
 func FasthttpProxyHTTPDialer() fasthttp.DialFunc {
 	return FasthttpProxyHTTPDialerTimeout(0)
@@ -37,7 +37,7 @@ func FasthttpProxyHTTPDialer() fasthttp.DialFunc {
 // Example usage:
 //
 //	c := &fasthttp.Client{
-//		Dial: fasthttp.FasthttpProxyHTTPDialerTimeout(time.Second * 2),
+//		Dial: fasthttpproxy.FasthttpProxyHTTPDialerTimeout(time.Second * 2),
 //	}
 func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 	proxier := httpproxy.FromEnvironment().ProxyFunc()
