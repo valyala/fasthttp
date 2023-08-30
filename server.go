@@ -403,7 +403,7 @@ type Server struct {
 	// instead.
 	TLSConfig *tls.Config
 
-	// FormValueFunc, which is used by RequestCtx.FormValue and support for customising
+	// FormValueFunc, which is used by RequestCtx.FormValue and support for customizing
 	// the behaviour of the RequestCtx.FormValue function.
 	//
 	// NetHttpFormValueFunc gives a FormValueFunc func implementation that is consistent with net/http.
