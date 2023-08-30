@@ -2013,7 +2013,7 @@ func (w *wantConn) cancel(c *HostClient, err error) {
 //
 // inspired by net/http/transport.go
 type wantConnQueue struct {
-	// This is a queue, not a deque.
+	// This is a queue, not a dequeue.
 	// It is split into two stages - head[headPos:] and tail.
 	// popFront is trivial (headPos++) on the first stage, and
 	// pushBack is trivial (append) on the second stage.
