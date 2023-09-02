@@ -2894,8 +2894,8 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 
 	br := hc.acquireReader(conn)
 	err = resp.ReadLimitBody(br, hc.MaxResponseBodySize)
-	hc.releaseReader(br)
 	if err != nil {
+		hc.releaseReader(br)
 		hc.closeConn(cc)
 		// Don't retry in case of ErrBodyTooLarge since we will just get the same again.
 		needRetry := err != ErrBodyTooLarge
@@ -2906,10 +2906,11 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	if customStreamBody && resp.bodyStream != nil {
 		rbs := resp.bodyStream
 		resp.bodyStream = newCloseReader(rbs, func() error {
+			hc.releaseReader(br)
 			if r, ok := rbs.(*requestStream); ok {
 				releaseRequestStream(r)
 			}
-			if closeConn {
+			if closeConn || resp.ConnectionClose() {
 				hc.closeConn(cc)
 			} else {
 				hc.releaseConn(cc)
@@ -2917,6 +2918,8 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 			return nil
 		})
 		return false, nil
+	} else {
+		hc.releaseReader(br)
 	}
 
 	if closeConn {
