@@ -552,13 +552,14 @@ func decodeArgAppend(dst, src []byte) []byte {
 	}
 
 	idx := 0
-	if idxPercent == -1 {
+	switch {
+	case idxPercent == -1:
 		idx = idxPlus
-	} else if idxPlus == -1 {
+	case idxPlus == -1:
 		idx = idxPercent
-	} else if idxPercent > idxPlus {
+	case idxPercent > idxPlus:
 		idx = idxPlus
-	} else {
+	default:
 		idx = idxPercent
 	}
 
@@ -567,7 +568,8 @@ func decodeArgAppend(dst, src []byte) []byte {
 	// slow path
 	for i := idx; i < len(src); i++ {
 		c := src[i]
-		if c == '%' {
+		switch c {
+		case '%':
 			if i+2 >= len(src) {
 				return append(dst, src[i:]...)
 			}
@@ -579,9 +581,9 @@ func decodeArgAppend(dst, src []byte) []byte {
 				dst = append(dst, x1<<4|x2)
 				i += 2
 			}
-		} else if c == '+' {
+		case '+':
 			dst = append(dst, ' ')
-		} else {
+		default:
 			dst = append(dst, c)
 		}
 	}

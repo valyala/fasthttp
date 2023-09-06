@@ -814,14 +814,15 @@ func (req *Request) ResetBody() {
 // CopyTo copies req contents to dst except of body stream.
 func (req *Request) CopyTo(dst *Request) {
 	req.copyToSkipBody(dst)
-	if req.bodyRaw != nil {
+	switch {
+	case req.bodyRaw != nil:
 		dst.bodyRaw = append(dst.bodyRaw[:0], req.bodyRaw...)
 		if dst.body != nil {
 			dst.body.Reset()
 		}
-	} else if req.body != nil {
+	case req.body != nil:
 		dst.bodyBuffer().Set(req.body.B)
-	} else if dst.body != nil {
+	case dst.body != nil:
 		dst.body.Reset()
 	}
 }
@@ -846,14 +847,15 @@ func (req *Request) copyToSkipBody(dst *Request) {
 // CopyTo copies resp contents to dst except of body stream.
 func (resp *Response) CopyTo(dst *Response) {
 	resp.copyToSkipBody(dst)
-	if resp.bodyRaw != nil {
+	switch {
+	case resp.bodyRaw != nil:
 		dst.bodyRaw = append(dst.bodyRaw, resp.bodyRaw...)
 		if dst.body != nil {
 			dst.body.Reset()
 		}
-	} else if resp.body != nil {
+	case resp.body != nil:
 		dst.bodyBuffer().Set(resp.body.B)
-	} else if dst.body != nil {
+	case dst.body != nil:
 		dst.body.Reset()
 	}
 }
@@ -1106,8 +1108,8 @@ func (resp *Response) Reset() {
 	if responseBodyPoolSizeLimit >= 0 && resp.body != nil {
 		resp.ReleaseBody(responseBodyPoolSizeLimit)
 	}
-	resp.Header.Reset()
 	resp.resetSkipHeader()
+	resp.Header.Reset()
 	resp.SkipBody = false
 	resp.raddr = nil
 	resp.laddr = nil
@@ -1284,14 +1286,15 @@ func (req *Request) ReadBody(r *bufio.Reader, contentLength int, maxBodySize int
 	bodyBuf := req.bodyBuffer()
 	bodyBuf.Reset()
 
-	if contentLength >= 0 {
+	switch {
+	case contentLength >= 0:
 		bodyBuf.B, err = readBody(r, contentLength, maxBodySize, bodyBuf.B)
-	} else if contentLength == -1 {
+	case contentLength == -1:
 		bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
 		if err == nil && len(bodyBuf.B) == 0 {
 			req.Header.SetContentLength(0)
 		}
-	} else {
+	default:
 		bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
 		req.Header.SetContentLength(len(bodyBuf.B))
 	}
@@ -1427,19 +1430,20 @@ func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
 	bodyBuf.Reset()
 
 	contentLength := resp.Header.ContentLength()
-	if contentLength >= 0 {
+	switch {
+	case contentLength >= 0:
 		bodyBuf.B, err = readBody(r, contentLength, maxBodySize, bodyBuf.B)
 		if err == ErrBodyTooLarge && resp.StreamBody {
 			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
 			err = nil
 		}
-	} else if contentLength == -1 {
+	case contentLength == -1:
 		if resp.StreamBody {
 			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
 		} else {
 			bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
 		}
-	} else {
+	default:
 		bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
 		resp.Header.SetContentLength(len(bodyBuf.B))
 	}

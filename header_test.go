@@ -1227,7 +1227,7 @@ func TestRequestHeaderProxyWithCookie(t *testing.T) {
 		t.Fatalf("unexpected Foo: %q. Expecting %q", h1.Peek("Foo"), "bar")
 	}
 	if string(h1.Cookie("foo")) != "bar" {
-		t.Fatalf("unexpected coookie foo=%q. Expecting %q", h1.Cookie("foo"), "bar")
+		t.Fatalf("unexpected cookie foo=%q. Expecting %q", h1.Cookie("foo"), "bar")
 	}
 	if string(h1.Cookie("bazzz")) != "aaaaaaa" {
 		t.Fatalf("unexpected cookie bazzz=%q. Expecting %q", h1.Cookie("bazzz"), "aaaaaaa")
@@ -1977,8 +1977,7 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 	}
 	cookieSeen := false
 	h.VisitAll(func(key, _ []byte) {
-		switch string(key) {
-		case HeaderSetCookie:
+		if string(key) == HeaderSetCookie {
 			cookieSeen = true
 		}
 	})
@@ -1998,8 +1997,7 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 	}
 	cookieSeen = false
 	h.VisitAll(func(key, _ []byte) {
-		switch string(key) {
-		case HeaderSetCookie:
+		if string(key) == HeaderSetCookie {
 			cookieSeen = true
 		}
 	})
@@ -2022,8 +2020,7 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 	}
 	cookieSeen := false
 	h.VisitAll(func(key, _ []byte) {
-		switch string(key) {
-		case HeaderCookie:
+		if string(key) == HeaderCookie {
 			cookieSeen = true
 		}
 	})
@@ -2040,8 +2037,7 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 	}
 	cookieSeen = false
 	h.VisitAll(func(key, _ []byte) {
-		switch string(key) {
-		case HeaderCookie:
+		if string(key) == HeaderCookie {
 			cookieSeen = true
 		}
 	})
@@ -2360,14 +2356,14 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 		t.Fatalf("expecting connection: close")
 	}
 
-	// tranfer-encoding: chunked
+	// transfer-encoding: chunked
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 505 Internal error\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n",
 		505, -1, "text/html")
 	if h.ConnectionClose() {
 		t.Fatalf("unexpected connection: close")
 	}
 
-	// reverse order of content-type and tranfer-encoding
+	// reverse order of content-type and transfer-encoding
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 343 foobar\r\nTransfer-Encoding: chunked\r\nContent-Type: text/json\r\n\r\n",
 		343, -1, "text/json")
 

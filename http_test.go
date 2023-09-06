@@ -1556,7 +1556,7 @@ func TestRequestMultipartForm(t *testing.T) {
 		formData = testRequestMultipartForm(t, boundary, formData, 10)
 	}
 
-	// verify request unmarshalling / marshalling
+	// verify request unmarshaling / marshaling
 	s := "POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=foobar\r\nContent-Length: 213\r\n\r\n--foobar\r\nContent-Disposition: form-data; name=\"key_0\"\r\n\r\nvalue_0\r\n--foobar\r\nContent-Disposition: form-data; name=\"key_1\"\r\n\r\nvalue_1\r\n--foobar\r\nContent-Disposition: form-data; name=\"key_2\"\r\n\r\nvalue_2\r\n--foobar--\r\n"
 
 	var req Request

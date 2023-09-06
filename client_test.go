@@ -669,10 +669,12 @@ func TestClientHeaderCase(t *testing.T) {
 
 	code, body, err := c.Get(nil, "http://example.com")
 	if err != nil {
-		t.Error(err)
-	} else if code != 200 {
+		t.Fatal(err)
+	}
+	if code != 200 {
 		t.Errorf("expected status code 200 got %d", code)
-	} else if string(body) != "This is the data in the first chunk and this is the second one " {
+	}
+	if string(body) != "This is the data in the first chunk and this is the second one " {
 		t.Errorf("wrong body: %q", body)
 	}
 }
