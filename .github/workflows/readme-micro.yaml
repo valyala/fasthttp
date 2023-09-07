@@ -1,0 +1,21 @@
+name: ReadMe Micro
+
+# Run workflow for every push to the `master` branch
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v3
+
+      # Run GitHub Action to sync all OpenAPI files in the repo
+      - name: GitHub Action
+        uses: readmeio/readme-micro@v2
+        
+        with:
+          readme-micro: "'**/*.{yaml,yml,json}' --key=${{ secrets.README_MICRO_SECRET }}"
