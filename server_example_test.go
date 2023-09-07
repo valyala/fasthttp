@@ -133,7 +133,7 @@ func ExampleRequestCtx_TimeoutError() {
 			time.Sleep(workDuration)
 
 			fmt.Fprintf(ctx, "ctx has been accessed by long-running task\n")
-			fmt.Fprintf(ctx, "The reuqestHandler may be finished by this time.\n")
+			fmt.Fprintf(ctx, "The requestHandler may be finished by this time.\n")
 
 			close(doneCh)
 		}()

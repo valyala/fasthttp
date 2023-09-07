@@ -669,10 +669,12 @@ func TestClientHeaderCase(t *testing.T) {
 
 	code, body, err := c.Get(nil, "http://example.com")
 	if err != nil {
-		t.Error(err)
-	} else if code != 200 {
+		t.Fatal(err)
+	}
+	if code != 200 {
 		t.Errorf("expected status code 200 got %d", code)
-	} else if string(body) != "This is the data in the first chunk and this is the second one " {
+	}
+	if string(body) != "This is the data in the first chunk and this is the second one " {
 		t.Errorf("wrong body: %q", body)
 	}
 }
@@ -2111,6 +2113,22 @@ func TestClientRetryRequestWithCustomDecider(t *testing.T) {
 	}
 }
 
+type TransportDemo struct {
+	br *bufio.Reader
+	bw *bufio.Writer
+}
+
+func (t TransportDemo) RoundTrip(hc *HostClient, req *Request, res *Response) (retry bool, err error) {
+	if err = req.Write(t.bw); err != nil {
+		return false, err
+	}
+	if err = t.bw.Flush(); err != nil {
+		return false, err
+	}
+	err = res.Read(t.br)
+	return err != nil, err
+}
+
 func TestHostClientTransport(t *testing.T) {
 	t.Parallel()
 
@@ -2131,23 +2149,13 @@ func TestHostClientTransport(t *testing.T) {
 
 	c := &HostClient{
 		Addr: "foobar",
-		Transport: func() TransportFunc {
+		Transport: func() RoundTripper {
 			c, _ := ln.Dial()
 
 			br := bufio.NewReader(c)
 			bw := bufio.NewWriter(c)
 
-			return func(req *Request, res *Response) error {
-				if err := req.Write(bw); err != nil {
-					return err
-				}
-
-				if err := bw.Flush(); err != nil {
-					return err
-				}
-
-				return res.Read(br)
-			}
+			return TransportDemo{br: br, bw: bw}
 		}(),
 	}
 
@@ -3060,14 +3068,18 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 	}
 }
 
+type TransportEmpty struct{}
+
+func (t TransportEmpty) RoundTrip(hc *HostClient, req *Request, res *Response) (retry bool, err error) {
+	return false, nil
+}
+
 func TestHttpsRequestWithoutParsedURL(t *testing.T) {
 	t.Parallel()
 
 	client := HostClient{
-		IsTLS: true,
-		Transport: func(r1 *Request, r2 *Response) error {
-			return nil
-		},
+		IsTLS:     true,
+		Transport: TransportEmpty{},
 	}
 
 	req := &Request{}
@@ -3180,5 +3192,77 @@ func Test_AddMissingPort(t *testing.T) {
 				t.Errorf("AddMissingPort() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+type TransportWrapper struct {
+	base  RoundTripper
+	count *int
+	t     *testing.T
+}
+
+func (tw *TransportWrapper) RoundTrip(hc *HostClient, req *Request, resp *Response) (bool, error) {
+	req.Header.Set("trace-id", "123")
+	tw.assertRequestLog(req.String())
+	retry, err := tw.transport().RoundTrip(hc, req, resp)
+	resp.Header.Set("trace-id", "124")
+	tw.assertResponseLog(resp.String())
+	*tw.count++
+	return retry, err
+}
+
+func (tw *TransportWrapper) transport() RoundTripper {
+	if tw.base == nil {
+		return DefaultTransport
+	}
+	return tw.base
+}
+
+func (tw *TransportWrapper) assertRequestLog(reqLog string) {
+	if !strings.Contains(reqLog, "Trace-Id: 123") {
+		tw.t.Errorf("request log should contains: %v", "Trace-Id: 123")
+	}
+}
+
+func (tw *TransportWrapper) assertResponseLog(respLog string) {
+	if !strings.Contains(respLog, "Trace-Id: 124") {
+		tw.t.Errorf("response log should contains: %v", "Trace-Id: 124")
+	}
+}
+
+func TestClientTransportEx(t *testing.T) {
+	sHTTP := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer sHTTP.Stop()
+
+	sHTTPS := startEchoServerTLS(t, "tcp", "127.0.0.1:")
+	defer sHTTPS.Stop()
+
+	count := 0
+	c := &Client{
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+		ConfigureClient: func(hc *HostClient) error {
+			hc.Transport = &TransportWrapper{base: hc.Transport, count: &count, t: t}
+			return nil
+		},
+	}
+	// test transport
+	const loopCount = 4
+	const getCount = 20
+	const postCount = 10
+	for i := 0; i < loopCount; i++ {
+		addr := "http://" + sHTTP.Addr()
+		if i&1 != 0 {
+			addr = "https://" + sHTTPS.Addr()
+		}
+		// test get
+		testClientGet(t, c, addr, getCount)
+		// test post
+		testClientPost(t, c, addr, postCount)
+	}
+	roundTripCount := loopCount * (getCount + postCount)
+	if count != roundTripCount {
+		t.Errorf("round trip count should be: %v", roundTripCount)
 	}
 }

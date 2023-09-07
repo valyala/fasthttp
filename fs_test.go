@@ -436,7 +436,7 @@ func testParseByteRangeSuccess(t *testing.T, v string, contentLength, startPos, 
 		t.Fatalf("unexpected startPos=%d. Expecting %d. v=%q, contentLength=%d", startPos1, startPos, v, contentLength)
 	}
 	if endPos1 != endPos {
-		t.Fatalf("unexpected endPos=%d. Expectind %d. v=%q, contentLenght=%d", endPos1, endPos, v, contentLength)
+		t.Fatalf("unexpected endPos=%d. Expecting %d. v=%q, contentLength=%d", endPos1, endPos, v, contentLength)
 	}
 }
 

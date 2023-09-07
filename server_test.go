@@ -1830,7 +1830,7 @@ func TestServerExpect100Continue(t *testing.T) {
 			}
 			ct := ctx.Request.Header.ContentType()
 			if string(ct) != "a/b" {
-				t.Errorf("unexpectected content-type: %q. Expecting %q", ct, "a/b")
+				t.Errorf("unexpected content-type: %q. Expecting %q", ct, "a/b")
 			}
 			if string(ctx.PostBody()) != "12345" {
 				t.Errorf("unexpected body: %q. Expecting %q", ctx.PostBody(), "12345")
@@ -1870,7 +1870,7 @@ func TestServerContinueHandler(t *testing.T) {
 
 			ct := headers.ContentType()
 			if string(ct) != "a/b" {
-				t.Errorf("unexpectected content-type: %q. Expecting %q", ct, "a/b")
+				t.Errorf("unexpected content-type: %q. Expecting %q", ct, "a/b")
 			}
 
 			// Pass on any request that isn't the accepted content length
@@ -1888,7 +1888,7 @@ func TestServerContinueHandler(t *testing.T) {
 			}
 			ct := ctx.Request.Header.ContentType()
 			if string(ct) != "a/b" {
-				t.Errorf("unexpectected content-type: %q. Expecting %q", ct, "a/b")
+				t.Errorf("unexpected content-type: %q. Expecting %q", ct, "a/b")
 			}
 			if string(ctx.PostBody()) != "12345" {
 				t.Errorf("unexpected body: %q. Expecting %q", ctx.PostBody(), "12345")
