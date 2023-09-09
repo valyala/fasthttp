@@ -146,6 +146,46 @@ func TestHostClientNegativeTimeout(t *testing.T) {
 	ln.Close()
 }
 
+func TestDoDeadlineRetry(t *testing.T) {
+	t.Parallel()
+
+	tries := 0
+	done := make(chan struct{})
+
+	ln := fasthttputil.NewInmemoryListener()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				close(done)
+				break
+			}
+			tries++
+			br := bufio.NewReader(c)
+			(&RequestHeader{}).Read(br)                      //nolint:errcheck
+			(&Request{}).readBodyStream(br, 0, false, false) //nolint:errcheck
+			time.Sleep(time.Millisecond * 60)
+			c.Close()
+		}
+	}()
+	c := &HostClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	if err := c.DoDeadline(req, nil, time.Now().Add(time.Millisecond*100)); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	ln.Close()
+	<-done
+	if tries != 2 {
+		t.Fatalf("expected 2 tries got %d", tries)
+	}
+}
+
 func TestPipelineClientIssue832(t *testing.T) {
 	t.Parallel()
 
