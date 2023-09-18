@@ -100,7 +100,7 @@ var errHighLoad = errors.New("cannot compress data due to high load")
 
 var stacklessWriterFunc = NewFunc(writerFunc)
 
-func writerFunc(ctx interface{}) {
+func writerFunc(ctx any) {
 	w := ctx.(*writer)
 	switch w.op {
 	case opWrite:

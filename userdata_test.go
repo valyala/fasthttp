@@ -32,7 +32,7 @@ func TestUserData(t *testing.T) {
 	}
 }
 
-func testUserDataGet(t *testing.T, u *userData, key []byte, value interface{}) {
+func testUserDataGet(t *testing.T, u *userData, key []byte, value any) {
 	v := u.GetBytes(key)
 	if v == nil && value != nil {
 		t.Fatalf("cannot obtain value for key=%q", key)

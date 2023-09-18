@@ -1712,7 +1712,7 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 }
 
 func (c *HostClient) acquireWriter(conn net.Conn) *bufio.Writer {
-	var v interface{}
+	var v any
 	if c.clientWriterPool != nil {
 		v = c.clientWriterPool.Get()
 		if v == nil {
@@ -1747,7 +1747,7 @@ func (c *HostClient) releaseWriter(bw *bufio.Writer) {
 }
 
 func (c *HostClient) acquireReader(conn net.Conn) *bufio.Reader {
-	var v interface{}
+	var v any
 	if c.clientReaderPool != nil {
 		v = c.clientReaderPool.Get()
 		if v == nil {

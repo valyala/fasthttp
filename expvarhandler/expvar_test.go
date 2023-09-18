@@ -12,7 +12,7 @@ import (
 func TestExpvarHandlerBasic(t *testing.T) {
 	t.Parallel()
 
-	expvar.Publish("customVar", expvar.Func(func() interface{} {
+	expvar.Publish("customVar", expvar.Func(func() any {
 		return "foobar"
 	}))
 
@@ -24,7 +24,7 @@ func TestExpvarHandlerBasic(t *testing.T) {
 
 	body := ctx.Response.Body()
 
-	var m map[string]interface{}
+	var m map[string]any
 	if err := json.Unmarshal(body, &m); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

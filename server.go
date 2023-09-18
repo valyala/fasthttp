@@ -674,7 +674,7 @@ func (ctx *RequestCtx) Hijacked() bool {
 // All the values are removed from ctx after returning from the top
 // RequestHandler. Additionally, Close method is called on each value
 // implementing io.Closer before removing the value from ctx.
-func (ctx *RequestCtx) SetUserValue(key interface{}, value interface{}) {
+func (ctx *RequestCtx) SetUserValue(key, value any) {
 	ctx.userValues.Set(key, value)
 }
 
@@ -687,18 +687,18 @@ func (ctx *RequestCtx) SetUserValue(key interface{}, value interface{}) {
 // functions involved in request processing.
 //
 // All the values stored in ctx are deleted after returning from RequestHandler.
-func (ctx *RequestCtx) SetUserValueBytes(key []byte, value interface{}) {
+func (ctx *RequestCtx) SetUserValueBytes(key []byte, value any) {
 	ctx.userValues.SetBytes(key, value)
 }
 
 // UserValue returns the value stored via SetUserValue* under the given key.
-func (ctx *RequestCtx) UserValue(key interface{}) interface{} {
+func (ctx *RequestCtx) UserValue(key any) any {
 	return ctx.userValues.Get(key)
 }
 
 // UserValueBytes returns the value stored via SetUserValue*
 // under the given key.
-func (ctx *RequestCtx) UserValueBytes(key []byte) interface{} {
+func (ctx *RequestCtx) UserValueBytes(key []byte) any {
 	return ctx.userValues.GetBytes(key)
 }
 
@@ -706,7 +706,7 @@ func (ctx *RequestCtx) UserValueBytes(key []byte) interface{} {
 //
 // visitor must not retain references to key and value after returning.
 // Make key and/or value copies if you need storing them after returning.
-func (ctx *RequestCtx) VisitUserValues(visitor func([]byte, interface{})) {
+func (ctx *RequestCtx) VisitUserValues(visitor func([]byte, any)) {
 	for i, n := 0, len(ctx.userValues); i < n; i++ {
 		kv := &ctx.userValues[i]
 		if _, ok := kv.key.(string); ok {
@@ -719,7 +719,7 @@ func (ctx *RequestCtx) VisitUserValues(visitor func([]byte, interface{})) {
 //
 // visitor must not retain references to key and value after returning.
 // Make key and/or value copies if you need storing them after returning.
-func (ctx *RequestCtx) VisitUserValuesAll(visitor func(interface{}, interface{})) {
+func (ctx *RequestCtx) VisitUserValuesAll(visitor func(any, any)) {
 	for i, n := 0, len(ctx.userValues); i < n; i++ {
 		kv := &ctx.userValues[i]
 		visitor(kv.key, kv.value)
@@ -732,7 +732,7 @@ func (ctx *RequestCtx) ResetUserValues() {
 }
 
 // RemoveUserValue removes the given key and the value under it in ctx.
-func (ctx *RequestCtx) RemoveUserValue(key interface{}) {
+func (ctx *RequestCtx) RemoveUserValue(key any) {
 	ctx.userValues.Remove(key)
 }
 
@@ -854,7 +854,7 @@ func (r *firstByteReader) Read(b []byte) (int, error) {
 // Logger is used for logging formatted messages.
 type Logger interface {
 	// Printf must have the same semantics as log.Printf.
-	Printf(format string, args ...interface{})
+	Printf(format string, args ...any)
 }
 
 var ctxLoggerLock sync.Mutex
@@ -864,7 +864,7 @@ type ctxLogger struct {
 	logger Logger
 }
 
-func (cl *ctxLogger) Printf(format string, args ...interface{}) {
+func (cl *ctxLogger) Printf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	ctxLoggerLock.Lock()
 	cl.logger.Printf("%.3f %s - %s", time.Since(cl.ctx.ConnTime()).Seconds(), cl.ctx.String(), msg)
@@ -2752,7 +2752,7 @@ func (ctx *RequestCtx) Err() error {
 //
 // This method is present to make RequestCtx implement the context interface.
 // This method is the same as calling ctx.UserValue(key)
-func (ctx *RequestCtx) Value(key interface{}) interface{} {
+func (ctx *RequestCtx) Value(key any) any {
 	return ctx.UserValue(key)
 }
 
