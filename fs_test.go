@@ -7,7 +7,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
-	"path"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"testing"
@@ -152,11 +152,10 @@ func TestServeFileHead(t *testing.T) {
 func TestServeFileSmallNoReadFrom(t *testing.T) {
 	t.Parallel()
 
-	teststr := "hello, world!"
-	tempdir := t.TempDir()
+	expectedStr := "hello, world!"
+	tempFile := filepath.Join(t.TempDir(), "hello")
 
-	if err := os.WriteFile(
-		path.Join(tempdir, "hello"), []byte(teststr), 0o666); err != nil {
+	if err := os.WriteFile(tempFile, []byte(expectedStr), 0o666); err != nil {
 		t.Fatal(err)
 	}
 
@@ -165,7 +164,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 	req.SetRequestURI("http://foobar.com/baz")
 	ctx.Init(&req, nil, nil)
 
-	ServeFile(&ctx, path.Join(tempdir, "hello"))
+	ServeFile(&ctx, tempFile)
 
 	reader, ok := ctx.Response.bodyStream.(*fsSmallFileReader)
 	if !ok {
@@ -180,13 +179,13 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if n != int64(len(teststr)) {
-		t.Fatalf("expected %d bytes, got %d bytes", len(teststr), n)
+	if n != int64(len(expectedStr)) {
+		t.Fatalf("expected %d bytes, got %d bytes", len(expectedStr), n)
 	}
 
 	body := buf.String()
-	if body != teststr {
-		t.Fatalf("expected '%q'", teststr)
+	if body != expectedStr {
+		t.Fatalf("expected '%q'", expectedStr)
 	}
 }
 
