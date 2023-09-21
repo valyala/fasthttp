@@ -177,6 +177,16 @@ func WriteGzipLevel(w io.Writer, p []byte, level int) (int, error) {
 	}
 }
 
+// GetGzipWriter Get a Gzip Writer object from pool. Need to call ReleaseGzipWriter after use
+func GetGzipWriter(w io.Writer, level int) stackless.Writer {
+	return acquireStacklessGzipWriter(w, level)
+}
+
+// ReleaseGzipWriter put a Gzip Writer object to pool
+func ReleaseGzipWriter(w stackless.Writer, level int) {
+	releaseStacklessGzipWriter(w, level)
+}
+
 var stacklessWriteGzip = stackless.NewFunc(nonblockingWriteGzip)
 
 func nonblockingWriteGzip(ctxv interface{}) {
