@@ -65,6 +65,7 @@ type RequestHeader struct {
 	noHTTP11             bool
 	connectionClose      bool
 	noDefaultContentType bool
+	disableSpecialHeader bool
 
 	// These two fields have been moved close to other bool fields
 	// for reducing RequestHeader object size.
@@ -343,6 +344,18 @@ func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
 	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
 }
 
+// addVaryBytes add value to the 'Vary' header if it's not included
+func (h *ResponseHeader) addVaryBytes(value []byte) {
+	v := h.peek(strVary)
+	if len(v) == 0 {
+		// 'Vary' is not set
+		h.SetBytesV(HeaderVary, value)
+	} else if !bytes.Contains(v, value) {
+		// 'Vary' is set and not contains target value
+		h.SetBytesV(HeaderVary, append(append(v, ','), value...))
+	} // else: 'Vary' is set and contains target value
+}
+
 // Server returns Server header value.
 func (h *ResponseHeader) Server() []byte {
 	return h.server
@@ -360,6 +373,9 @@ func (h *ResponseHeader) SetServerBytes(server []byte) {
 
 // ContentType returns Content-Type header value.
 func (h *RequestHeader) ContentType() []byte {
+	if h.disableSpecialHeader {
+		return peekArgBytes(h.h, []byte(HeaderContentType))
+	}
 	return h.contentType
 }
 
@@ -573,6 +589,9 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 
 // Host returns Host header value.
 func (h *RequestHeader) Host() []byte {
+	if h.disableSpecialHeader {
+		return peekArgBytes(h.h, []byte(HeaderHost))
+	}
 	return h.host
 }
 
@@ -588,6 +607,9 @@ func (h *RequestHeader) SetHostBytes(host []byte) {
 
 // UserAgent returns User-Agent header value.
 func (h *RequestHeader) UserAgent() []byte {
+	if h.disableSpecialHeader {
+		return peekArgBytes(h.h, []byte(HeaderUserAgent))
+	}
 	return h.userAgent
 }
 
@@ -882,6 +904,23 @@ func (h *RequestHeader) Len() int {
 	return n
 }
 
+// DisableSpecialHeader disables special header processing.
+// fasthttp will not set any special headers for you, such as Host, Content-Type, User-Agent, etc.
+// You must set everything yourself.
+// If RequestHeader.Read() is called, special headers will be ignored.
+// This can be used to control case and order of special headers.
+// This is generally not recommended.
+func (h *RequestHeader) DisableSpecialHeader() {
+	h.disableSpecialHeader = true
+}
+
+// EnableSpecialHeader enables special header processing.
+// fasthttp will send Host, Content-Type, User-Agent, etc headers for you.
+// This is suggested and enabled by default.
+func (h *RequestHeader) EnableSpecialHeader() {
+	h.disableSpecialHeader = false
+}
+
 // DisableNormalizing disables header names' normalization.
 //
 // By default all the header names are normalized by uppercasing
@@ -986,6 +1025,7 @@ func (h *RequestHeader) SetNoDefaultContentType(noDefaultContentType bool) {
 
 // Reset clears request header.
 func (h *RequestHeader) Reset() {
+	h.disableSpecialHeader = false
 	h.disableNormalizing = false
 	h.SetNoDefaultContentType(false)
 	h.resetSkipNormalize()
@@ -1044,6 +1084,7 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.disableNormalizing = h.disableNormalizing
 	dst.noHTTP11 = h.noHTTP11
 	dst.connectionClose = h.connectionClose
+	dst.noDefaultContentType = h.noDefaultContentType
 
 	dst.contentLength = h.contentLength
 	dst.contentLengthBytes = append(dst.contentLengthBytes, h.contentLengthBytes...)
@@ -1258,19 +1299,20 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 
 	switch key[0] | 0x20 {
 	case 'c':
-		if caseInsensitiveCompare(strContentType, key) {
+		switch {
+		case caseInsensitiveCompare(strContentType, key):
 			h.SetContentTypeBytes(value)
 			return true
-		} else if caseInsensitiveCompare(strContentLength, key) {
+		case caseInsensitiveCompare(strContentLength, key):
 			if contentLength, err := parseContentLength(value); err == nil {
 				h.contentLength = contentLength
 				h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
 			}
 			return true
-		} else if caseInsensitiveCompare(strContentEncoding, key) {
+		case caseInsensitiveCompare(strContentEncoding, key):
 			h.SetContentEncodingBytes(value)
 			return true
-		} else if caseInsensitiveCompare(strConnection, key) {
+		case caseInsensitiveCompare(strConnection, key):
 			if bytes.Equal(strClose, value) {
 				h.SetConnectionClose()
 			} else {
@@ -1315,22 +1357,23 @@ func (h *ResponseHeader) setNonSpecial(key []byte, value []byte) {
 
 // setSpecialHeader handles special headers and return true when a header is processed.
 func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
-	if len(key) == 0 {
+	if len(key) == 0 || h.disableSpecialHeader {
 		return false
 	}
 
 	switch key[0] | 0x20 {
 	case 'c':
-		if caseInsensitiveCompare(strContentType, key) {
+		switch {
+		case caseInsensitiveCompare(strContentType, key):
 			h.SetContentTypeBytes(value)
 			return true
-		} else if caseInsensitiveCompare(strContentLength, key) {
+		case caseInsensitiveCompare(strContentLength, key):
 			if contentLength, err := parseContentLength(value); err == nil {
 				h.contentLength = contentLength
 				h.contentLengthBytes = append(h.contentLengthBytes[:0], value...)
 			}
 			return true
-		} else if caseInsensitiveCompare(strConnection, key) {
+		case caseInsensitiveCompare(strConnection, key):
 			if bytes.Equal(strClose, value) {
 				h.SetConnectionClose()
 			} else {
@@ -1338,7 +1381,7 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 				h.setNonSpecial(key, value)
 			}
 			return true
-		} else if caseInsensitiveCompare(strCookie, key) {
+		case caseInsensitiveCompare(strCookie, key):
 			h.collectCookies()
 			h.cookies = parseRequestCookies(h.cookies, value)
 			return true
@@ -2470,12 +2513,12 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	dst = append(dst, strCRLF...)
 
 	userAgent := h.UserAgent()
-	if len(userAgent) > 0 {
+	if len(userAgent) > 0 && !h.disableSpecialHeader {
 		dst = appendHeaderLine(dst, strUserAgent, userAgent)
 	}
 
 	host := h.Host()
-	if len(host) > 0 {
+	if len(host) > 0 && !h.disableSpecialHeader {
 		dst = appendHeaderLine(dst, strHost, host)
 	}
 
@@ -2483,10 +2526,10 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	if !h.noDefaultContentType && len(contentType) == 0 && !h.ignoreBody() {
 		contentType = strDefaultContentType
 	}
-	if len(contentType) > 0 {
+	if len(contentType) > 0 && !h.disableSpecialHeader {
 		dst = appendHeaderLine(dst, strContentType, contentType)
 	}
-	if len(h.contentLengthBytes) > 0 {
+	if len(h.contentLengthBytes) > 0 && !h.disableSpecialHeader {
 		dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
 	}
 
@@ -2512,14 +2555,14 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	// there is no need in h.collectCookies() here, since if cookies aren't collected yet,
 	// they all are located in h.h.
 	n := len(h.cookies)
-	if n > 0 {
+	if n > 0 && !h.disableSpecialHeader {
 		dst = append(dst, strCookie...)
 		dst = append(dst, strColonSpace...)
 		dst = appendRequestCookieBytes(dst, h.cookies)
 		dst = append(dst, strCRLF...)
 	}
 
-	if h.ConnectionClose() {
+	if h.ConnectionClose() && !h.disableSpecialHeader {
 		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
@@ -2751,16 +2794,17 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	protoStr := strHTTP11
 	// parse requestURI
 	n = bytes.LastIndexByte(b, ' ')
-	if n < 0 {
+	switch {
+	case n < 0:
 		h.noHTTP11 = true
 		n = len(b)
 		protoStr = strHTTP10
-	} else if n == 0 {
+	case n == 0:
 		if h.secureErrorLogMessage {
 			return 0, fmt.Errorf("requestURI cannot be empty")
 		}
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
-	} else if !bytes.Equal(b[n+1:], strHTTP11) {
+	case !bytes.Equal(b[n+1:], strHTTP11):
 		h.noHTTP11 = true
 		protoStr = b[n+1:]
 	}
@@ -2900,6 +2944,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 			// See RFC 7230, Section 3.2.4.
 			if bytes.IndexByte(s.key, ' ') != -1 || bytes.IndexByte(s.key, '\t') != -1 {
 				err = fmt.Errorf("invalid header key %q", s.key)
+				continue
+			}
+
+			if h.disableSpecialHeader {
+				h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
 				continue
 			}
 
@@ -3223,15 +3272,16 @@ func normalizeHeaderValue(ov, ob []byte, headerLength int) (nv, nb []byte, nhl i
 	lineStart := false
 	for read := 0; read < length; read++ {
 		c := ov[read]
-		if c == rChar || c == nChar {
+		switch {
+		case c == rChar || c == nChar:
 			shrunk++
 			if c == nChar {
 				lineStart = true
 			}
 			continue
-		} else if lineStart && c == '\t' {
+		case lineStart && c == '\t':
 			c = ' '
-		} else {
+		default:
 			lineStart = false
 		}
 		nv[write] = c
@@ -3290,15 +3340,16 @@ func removeNewLines(raw []byte) []byte {
 	foundN := bytes.IndexByte(raw, nChar)
 	start := 0
 
-	if foundN != -1 {
+	switch {
+	case foundN != -1:
 		if foundR > foundN {
 			start = foundN
 		} else if foundR != -1 {
 			start = foundR
 		}
-	} else if foundR != -1 {
+	case foundR != -1:
 		start = foundR
-	} else {
+	default:
 		return raw
 	}
 

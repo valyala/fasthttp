@@ -19,10 +19,8 @@ import (
 
 var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 
-var (
-	// Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
-	ErrAlreadyServing = errors.New("Server is already serving connections")
-)
+// Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
+var ErrAlreadyServing = errors.New("Server is already serving connections")
 
 // ServeConn serves HTTP requests from the given connection
 // using the given handler.
@@ -405,7 +403,7 @@ type Server struct {
 	// instead.
 	TLSConfig *tls.Config
 
-	// FormValueFunc, which is used by RequestCtx.FormValue and support for customising
+	// FormValueFunc, which is used by RequestCtx.FormValue and support for customizing
 	// the behaviour of the RequestCtx.FormValue function.
 	//
 	// NetHttpFormValueFunc gives a FormValueFunc func implementation that is consistent with net/http.
@@ -551,11 +549,12 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
-		if ctx.Request.Header.HasAcceptEncodingBytes(strBr) {
+		switch {
+		case ctx.Request.Header.HasAcceptEncodingBytes(strBr):
 			ctx.Response.brotliBody(brotliLevel) //nolint:errcheck
-		} else if ctx.Request.Header.HasAcceptEncodingBytes(strGzip) {
+		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
 			ctx.Response.gzipBody(otherLevel) //nolint:errcheck
-		} else if ctx.Request.Header.HasAcceptEncodingBytes(strDeflate) {
+		case ctx.Request.Header.HasAcceptEncodingBytes(strDeflate):
 			ctx.Response.deflateBody(otherLevel) //nolint:errcheck
 		}
 	}
@@ -1679,14 +1678,13 @@ func (s *Server) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) e
 // the function will use previously added TLS configuration.
 func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	s.mu.Lock()
-	err := s.AppendCert(certFile, keyFile)
-	if err != nil && err != errNoCertOrKeyProvided {
-		s.mu.Unlock()
-		return err
-	}
-	if s.TLSConfig == nil {
-		s.mu.Unlock()
-		return errNoCertOrKeyProvided
+	s.configTLS()
+	configHasCert := len(s.TLSConfig.Certificates) > 0 || s.TLSConfig.GetCertificate != nil
+	if !configHasCert || certFile != "" || keyFile != "" {
+		if err := s.AppendCert(certFile, keyFile); err != nil {
+			s.mu.Unlock()
+			return err
+		}
 	}
 
 	// BuildNameToCertificate has been deprecated since 1.14.
@@ -1708,15 +1706,13 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 // the function will use previously added TLS configuration.
 func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error {
 	s.mu.Lock()
-
-	err := s.AppendCertEmbed(certData, keyData)
-	if err != nil && err != errNoCertOrKeyProvided {
-		s.mu.Unlock()
-		return err
-	}
-	if s.TLSConfig == nil {
-		s.mu.Unlock()
-		return errNoCertOrKeyProvided
+	s.configTLS()
+	configHasCert := len(s.TLSConfig.Certificates) > 0 || s.TLSConfig.GetCertificate != nil
+	if !configHasCert || len(certData) != 0 || len(keyData) != 0 {
+		if err := s.AppendCertEmbed(certData, keyData); err != nil {
+			s.mu.Unlock()
+			return err
+		}
 	}
 
 	// BuildNameToCertificate has been deprecated since 1.14.
@@ -1790,15 +1786,12 @@ func (s *Server) Serve(ln net.Listener) error {
 	maxWorkersCount := s.getConcurrency()
 
 	s.mu.Lock()
-	{
-		s.ln = append(s.ln, ln)
-		if s.done == nil {
-			s.done = make(chan struct{})
-		}
-
-		if s.concurrencyCh == nil {
-			s.concurrencyCh = make(chan struct{}, maxWorkersCount)
-		}
+	s.ln = append(s.ln, ln)
+	if s.done == nil {
+		s.done = make(chan struct{})
+	}
+	if s.concurrencyCh == nil {
+		s.concurrencyCh = make(chan struct{}, maxWorkersCount)
 	}
 	s.mu.Unlock()
 
@@ -2246,11 +2239,12 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 							panic(fmt.Sprintf("BUG: error in SetReadDeadline(%v): %v", deadline, err))
 						}
 					}
-					if reqConf.MaxRequestBodySize > 0 {
+					switch {
+					case reqConf.MaxRequestBodySize > 0:
 						maxRequestBodySize = reqConf.MaxRequestBodySize
-					} else if s.MaxRequestBodySize > 0 {
+					case s.MaxRequestBodySize > 0:
 						maxRequestBodySize = s.MaxRequestBodySize
-					} else {
+					default:
 						maxRequestBodySize = DefaultMaxRequestBodySize
 					}
 					if reqConf.WriteTimeout > 0 {

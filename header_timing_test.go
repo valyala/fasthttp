@@ -186,7 +186,7 @@ func BenchmarkRemoveNewLines(b *testing.B) {
 		expectedValue string
 	}
 
-	var testcases = []testcase{
+	testcases := []testcase{
 		{value: "MaliciousValue", expectedValue: "MaliciousValue"},
 		{value: "MaliciousValue\r\n", expectedValue: "MaliciousValue  "},
 		{value: "Malicious\nValue", expectedValue: "Malicious Value"},

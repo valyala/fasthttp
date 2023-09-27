@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,54 +73,60 @@ func sendPostRequest() {
 	req.Header.SetMethod(fasthttp.MethodPost)
 	req.Header.SetContentTypeBytes(headerContentTypeJson)
 	req.SetBodyRaw(reqEntityBytes)
+
 	resp := fasthttp.AcquireResponse()
 	err := client.DoTimeout(req, resp, reqTimeout)
 	fasthttp.ReleaseRequest(req)
-	if err == nil {
-		statusCode := resp.StatusCode()
-		respBody := resp.Body()
-		fmt.Printf("DEBUG Response: %s\n", respBody)
-		if statusCode == http.StatusOK {
-			respEntity := &Entity{}
-			err = json.Unmarshal(respBody, respEntity)
-			if err == io.EOF || err == nil {
-				fmt.Printf("DEBUG Parsed Response: %v\n", respEntity)
-			} else {
-				fmt.Fprintf(os.Stderr, "ERR failed to parse response: %v\n", err)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "ERR invalid HTTP response code: %d\n", statusCode)
-		}
-	} else {
+	defer fasthttp.ReleaseResponse(resp)
+
+	if err != nil {
 		errName, known := httpConnError(err)
 		if known {
 			fmt.Fprintf(os.Stderr, "WARN conn error: %v\n", errName)
 		} else {
 			fmt.Fprintf(os.Stderr, "ERR conn failure: %v %v\n", errName, err)
 		}
+
+		return
 	}
-	fasthttp.ReleaseResponse(resp)
+
+	statusCode := resp.StatusCode()
+	respBody := resp.Body()
+	fmt.Printf("DEBUG Response: %s\n", respBody)
+
+	if statusCode != http.StatusOK {
+		fmt.Fprintf(os.Stderr, "ERR invalid HTTP response code: %d\n", statusCode)
+
+		return
+	}
+
+	respEntity := &Entity{}
+	err = json.Unmarshal(respBody, respEntity)
+	if err == nil || errors.Is(err, io.EOF) {
+		fmt.Printf("DEBUG Parsed Response: %v\n", respEntity)
+	} else {
+		fmt.Fprintf(os.Stderr, "ERR failed to parse response: %v\n", err)
+	}
 }
 
 func httpConnError(err error) (string, bool) {
-	errName := ""
-	known := false
-	if err == fasthttp.ErrTimeout {
+	var (
+		errName string
+		known   = true
+	)
+
+	switch {
+	case errors.Is(err, fasthttp.ErrTimeout):
 		errName = "timeout"
-		known = true
-	} else if err == fasthttp.ErrNoFreeConns {
+	case errors.Is(err, fasthttp.ErrNoFreeConns):
 		errName = "conn_limit"
-		known = true
-	} else if err == fasthttp.ErrConnectionClosed {
+	case errors.Is(err, fasthttp.ErrConnectionClosed):
 		errName = "conn_close"
-		known = true
-	} else {
-		errName = reflect.TypeOf(err).String()
-		if errName == "*net.OpError" {
-			// Write and Read errors are not so often and in fact they just mean timeout problems
-			errName = "timeout"
-			known = true
-		}
+	case reflect.TypeOf(err).String() == "*net.OpError":
+		errName = "timeout"
+	default:
+		known = false
 	}
+
 	return errName, known
 }

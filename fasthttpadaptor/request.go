@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"unsafe"
 
 	"github.com/valyala/fasthttp"
 )
@@ -64,9 +63,4 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	})
 
 	return nil
-}
-
-func b2s(b []byte) string {
-	/* #nosec G103 */
-	return *(*string)(unsafe.Pointer(&b))
 }

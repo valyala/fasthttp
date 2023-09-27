@@ -82,10 +82,8 @@ func testParseIPv4(t *testing.T, ipStr string, isValid bool) {
 		if s != ipStr {
 			t.Fatalf("unexpected ip parsed %q. Expecting %q", s, ipStr)
 		}
-	} else {
-		if err == nil {
-			t.Fatalf("expecting error when parsing ip %q", ipStr)
-		}
+	} else if err == nil {
+		t.Fatalf("expecting error when parsing ip %q", ipStr)
 	}
 }
 
