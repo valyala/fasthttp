@@ -1025,6 +1025,7 @@ func (h *RequestHeader) SetNoDefaultContentType(noDefaultContentType bool) {
 
 // Reset clears request header.
 func (h *RequestHeader) Reset() {
+	h.disableSpecialHeader = false
 	h.disableNormalizing = false
 	h.SetNoDefaultContentType(false)
 	h.resetSkipNormalize()

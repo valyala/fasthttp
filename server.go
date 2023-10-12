@@ -2551,9 +2551,7 @@ func (c *hijackConn) Close() error {
 		return nil
 	}
 
-	conn := c.Conn
-	c.s.releaseHijackConn(c)
-	return conn.Close()
+	return c.Conn.Close()
 }
 
 // LastTimeoutErrorResponse returns the last timeout response set
