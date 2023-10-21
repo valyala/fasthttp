@@ -1840,6 +1840,9 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 	dial := c.Dial
 	if dialTimeout != 0 && dial == nil {
 		dial = func(addr string) (net.Conn, error) {
+			if c.DialDualStack {
+				return DialDualStackTimeout(addr, dialTimeout)
+			}
 			return DialTimeout(addr, dialTimeout)
 		}
 	}
