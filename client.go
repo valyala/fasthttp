@@ -1064,16 +1064,17 @@ func doRequestFollowRedirects(req *Request, resp *Response, url string, maxRedir
 			err = ErrMissingLocation
 			break
 		}
-		url = getRedirectURL(url, location)
+		url = getRedirectURL(url, location, req.uri.DisablePathNormalizing)
 	}
 
 	return statusCode, body, err
 }
 
-func getRedirectURL(baseURL string, location []byte) string {
+func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool) string {
 	u := AcquireURI()
 	u.Update(baseURL)
 	u.UpdateBytes(location)
+	u.DisablePathNormalizing = disablePathNormalizing
 	redirectURL := u.String()
 	ReleaseURI(u)
 	return redirectURL
