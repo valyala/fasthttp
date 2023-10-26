@@ -1720,6 +1720,7 @@ func TestClientFollowRedirects(t *testing.T) {
 
 		req.SetRequestURI("http://xxx/abc/*/123")
 		req.URI().DisablePathNormalizing = true
+		req.DisableRedirectPathNormalizing = true
 
 		err := c.DoRedirects(req, resp, 16)
 		if err != nil {

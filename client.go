@@ -1064,7 +1064,7 @@ func doRequestFollowRedirects(req *Request, resp *Response, url string, maxRedir
 			err = ErrMissingLocation
 			break
 		}
-		url = getRedirectURL(url, location, req.uri.DisablePathNormalizing)
+		url = getRedirectURL(url, location, req.DisableRedirectPathNormalizing)
 	}
 
 	return statusCode, body, err
