@@ -72,10 +72,7 @@ type Request struct {
 	// Use Host header (request.Header.SetHost) instead of the host from SetRequestURI, SetHost, or URI().SetHost
 	UseHostHeader bool
 
-	// Redirect path values are sent as-is without normalization
-	//
-	// Disabled redirect path normalization may be useful for proxying incoming requests
-	// to servers that are expecting paths to be forwarded as-is.
+	// DisableRedirectPathNormalizing disables redirect path normalization when used with DoRedirects.
 	//
 	// By default redirect path values are normalized, i.e.
 	// extra slashes are removed, special characters are encoded.
