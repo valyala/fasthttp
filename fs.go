@@ -137,7 +137,16 @@ var (
 	rootFSHandler RequestHandler
 )
 
-// ServeFS will serve a file from a fs.FS filesystem.
+// ServeFS returns HTTP response containing compressed file contents from the given fs.FS's path.
+//
+// HTTP response may contain uncompressed file contents in the following cases:
+//
+//   - Missing 'Accept-Encoding: gzip' request header.
+//   - No write access to directory containing the file.
+//
+// Directory contents is returned if path points to directory.
+//
+// See also ServeFile.
 func ServeFS(ctx *RequestCtx, filesystem fs.FS, path string) {
 	f := &FS{
 		FS:                 filesystem,
@@ -243,6 +252,7 @@ func NewPathPrefixStripper(prefixSize int) PathRewriteFunc {
 type FS struct {
 	noCopy noCopy
 
+	// FS is filesystem to serve files from. eg: embed.FS os.DirFS
 	FS fs.FS
 
 	// Path to the root directory to serve files from.
@@ -411,8 +421,9 @@ func (fs *FS) NewRequestHandler() RequestHandler {
 }
 
 func (fs *FS) normalizeRoot(root string) string {
-	// Serve files from the current working directory if Root is empty or if Root is a relative path.
+	// fs.FS uses relative paths, that paths are slash-separated on all systems, even Windows.
 	if fs.FS == nil {
+		// Serve files from the current working directory if Root is empty or if Root is a relative path.
 		if (!fs.AllowEmptyRoot && len(root) == 0) || (len(root) > 0 && !filepath.IsAbs(root)) {
 			path, err := os.Getwd()
 			if err != nil {
@@ -481,7 +492,7 @@ func (fs *FS) initRequestHandler() {
 	}
 
 	if h.fs == nil {
-		h.fs = &osFS{}
+		h.fs = &osFS{} // It provides os.Open and os.Stat
 	}
 
 	go func() {
@@ -540,7 +551,7 @@ type fsHandler struct {
 type fsFile struct {
 	h             *fsHandler
 	f             fs.File
-	filename      string
+	filename      string // fs.FileInfo.Name() return filename, isn't filepath.
 	dirIndex      []byte
 	contentType   string
 	contentLength int
@@ -585,7 +596,7 @@ func (ff *fsFile) smallFileReader() (io.Reader, error) {
 const maxSmallFileSize = 2 * 4096
 
 func (ff *fsFile) isBig() bool {
-	if _, ok := ff.h.fs.(*osFS); !ok {
+	if _, ok := ff.h.fs.(*osFS); !ok { // fs.FS only uses bigFileReader, memory cache uses fsSmallFileReader
 		return ff.f != nil
 	}
 	return ff.contentLength > maxSmallFileSize && len(ff.dirIndex) == 0
@@ -1322,6 +1333,7 @@ func (h *fsHandler) compressFileNolock(f fs.File, fileInfo fs.FileInfo, filePath
 	return h.newCompressedFSFile(compressedFilePath, fileEncoding)
 }
 
+// newCompressedFSFileCache use memory cache compressed files
 func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, filePath, fileEncoding string) (*fsFile, error) {
 	var (
 		w   = &bytebufferpool.ByteBuffer{}
