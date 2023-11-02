@@ -437,7 +437,7 @@ func isFileCompressible(f fs.File, minCompressRatio float64) bool {
 	if !ok {
 		return false
 	}
-	seeker.Seek(0, 0) //nolint:errcheck
+	seeker.Seek(0, io.SeekStart) //nolint:errcheck
 	if err != nil {
 		return false
 	}
