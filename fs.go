@@ -1070,7 +1070,7 @@ func (h *fsHandler) openIndexFile(ctx *RequestCtx, dirPath string, mustCompress 
 		if err == nil {
 			return ff, nil
 		}
-		if !os.IsNotExist(err) {
+		if !errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("cannot open file %q: %w", indexFilePath, err)
 		}
 	}
@@ -1242,7 +1242,7 @@ func (h *fsHandler) compressFileNolock(f fs.File, fileInfo os.FileInfo, filePath
 	zf, err := os.Create(tmpFilePath)
 	if err != nil {
 		_ = f.Close()
-		if !os.IsPermission(err) {
+		if !errors.Is(err, fs.ErrPermission) {
 			return nil, fmt.Errorf("cannot create temporary file %q: %w", tmpFilePath, err)
 		}
 		return nil, errNoCreatePermission
@@ -1298,7 +1298,7 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 
 	f, err := os.Open(filePath)
 	if err != nil {
-		if mustCompress && os.IsNotExist(err) {
+		if mustCompress && errors.Is(err, fs.ErrNotExist) {
 			return h.compressAndOpenFSFile(filePathOriginal, fileEncoding)
 		}
 		return nil, err
