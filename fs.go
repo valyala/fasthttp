@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"io/fs"
 	"mime"
 	"net/http"
 	"os"
@@ -510,7 +511,8 @@ type fsHandler struct {
 
 type fsFile struct {
 	h             *fsHandler
-	f             *os.File
+	f             fs.File
+	filename      string
 	dirIndex      []byte
 	contentType   string
 	contentLength int
@@ -577,7 +579,7 @@ func (ff *fsFile) bigFileReader() (io.Reader, error) {
 		return r, nil
 	}
 
-	f, err := os.Open(ff.f.Name())
+	f, err := os.Open(ff.filename)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open already opened file: %w", err)
 	}
@@ -614,14 +616,18 @@ func (ff *fsFile) decReadersCount() {
 // bigFileReader attempts to trigger sendfile
 // for sending big files over the wire.
 type bigFileReader struct {
-	f  *os.File
+	f  fs.File
 	ff *fsFile
 	r  io.Reader
 	lr io.LimitedReader
 }
 
 func (r *bigFileReader) UpdateByteRange(startPos, endPos int) error {
-	if _, err := r.f.Seek(int64(startPos), 0); err != nil {
+	seeker, ok := r.f.(io.Seeker)
+	if !ok {
+		return errors.New("must implement io.Seeker")
+	}
+	if _, err := seeker.Seek(int64(startPos), 0); err != nil {
 		return err
 	}
 	r.r = &r.lr
@@ -646,7 +652,12 @@ func (r *bigFileReader) WriteTo(w io.Writer) (int64, error) {
 
 func (r *bigFileReader) Close() error {
 	r.r = r.f
-	n, err := r.f.Seek(0, 0)
+	seeker, ok := r.f.(io.Seeker)
+	if !ok {
+		_ = r.f.Close()
+		return errors.New("must implement io.Seeker")
+	}
+	n, err := seeker.Seek(0, 0)
 	if err == nil {
 		if n == 0 {
 			ff := r.ff
@@ -697,7 +708,11 @@ func (r *fsSmallFileReader) Read(p []byte) (int, error) {
 
 	ff := r.ff
 	if ff.f != nil {
-		n, err := ff.f.ReadAt(p, int64(r.startPos))
+		readerAt, ok := ff.f.(io.ReaderAt)
+		if !ok {
+			return 0, errors.New("must implement io.ReaderAt")
+		}
+		n, err := readerAt.ReadAt(p, int64(r.startPos))
 		r.startPos += n
 		return n, err
 	}
@@ -732,7 +747,11 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 		if len(buf) > tailLen {
 			buf = buf[:tailLen]
 		}
-		n, err = ff.f.ReadAt(buf, int64(curPos))
+		readerAt, ok := ff.f.(io.ReaderAt)
+		if !ok {
+			return 0, errors.New("must implement io.ReaderAt")
+		}
+		n, err = readerAt.ReadAt(buf, int64(curPos))
 		nw, errw := w.Write(buf[:n])
 		curPos += nw
 		if errw == nil && nw != n {
@@ -1207,7 +1226,7 @@ func (h *fsHandler) compressAndOpenFSFile(filePath string, fileEncoding string) 
 	return ff, err
 }
 
-func (h *fsHandler) compressFileNolock(f *os.File, fileInfo os.FileInfo, filePath, compressedFilePath string, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) compressFileNolock(f fs.File, fileInfo os.FileInfo, filePath, compressedFilePath string, fileEncoding string) (*fsFile, error) {
 	// Attempt to open compressed file created by another concurrent
 	// goroutine.
 	// It is safe opening such a file, since the file creation
@@ -1321,7 +1340,7 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 	return h.newFSFile(f, fileInfo, mustCompress, fileEncoding)
 }
 
-func (h *fsHandler) newFSFile(f *os.File, fileInfo os.FileInfo, compressed bool, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) newFSFile(f fs.File, fileInfo os.FileInfo, compressed bool, fileEncoding string) (*fsFile, error) {
 	n := fileInfo.Size()
 	contentLength := int(n)
 	if n != int64(contentLength) {
@@ -1329,13 +1348,14 @@ func (h *fsHandler) newFSFile(f *os.File, fileInfo os.FileInfo, compressed bool,
 		return nil, fmt.Errorf("too big file: %d bytes", n)
 	}
 
+	filename := fileInfo.Name()
 	// detect content-type
-	ext := fileExtension(fileInfo.Name(), compressed, h.compressedFileSuffixes[fileEncoding])
+	ext := fileExtension(filename, compressed, h.compressedFileSuffixes[fileEncoding])
 	contentType := mime.TypeByExtension(ext)
 	if len(contentType) == 0 {
 		data, err := readFileHeader(f, compressed, fileEncoding)
 		if err != nil {
-			return nil, fmt.Errorf("cannot read header of the file %q: %w", f.Name(), err)
+			return nil, fmt.Errorf("cannot read header of the file %q: %w", filename, err)
 		}
 		contentType = http.DetectContentType(data)
 	}
@@ -1344,6 +1364,7 @@ func (h *fsHandler) newFSFile(f *os.File, fileInfo os.FileInfo, compressed bool,
 	ff := &fsFile{
 		h:               h,
 		f:               f,
+		filename:        filename,
 		contentType:     contentType,
 		contentLength:   contentLength,
 		compressed:      compressed,
@@ -1355,7 +1376,7 @@ func (h *fsHandler) newFSFile(f *os.File, fileInfo os.FileInfo, compressed bool,
 	return ff, nil
 }
 
-func readFileHeader(f *os.File, compressed bool, fileEncoding string) ([]byte, error) {
+func readFileHeader(f fs.File, compressed bool, fileEncoding string) ([]byte, error) {
 	r := io.Reader(f)
 	var (
 		br *brotli.Reader
@@ -1381,7 +1402,11 @@ func readFileHeader(f *os.File, compressed bool, fileEncoding string) ([]byte, e
 		N: 512,
 	}
 	data, err := io.ReadAll(lr)
-	if _, err := f.Seek(0, 0); err != nil {
+	seeker, ok := f.(io.Seeker)
+	if !ok {
+		return nil, errors.New("must implement io.Seeker")
+	}
+	if _, err := seeker.Seek(0, 0); err != nil {
 		return nil, err
 	}
 
