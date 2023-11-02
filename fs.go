@@ -658,7 +658,7 @@ func (r *bigFileReader) UpdateByteRange(startPos, endPos int) error {
 	if !ok {
 		return errors.New("must implement io.Seeker")
 	}
-	if _, err := seeker.Seek(int64(startPos), 0); err != nil {
+	if _, err := seeker.Seek(int64(startPos), io.SeekStart); err != nil {
 		return err
 	}
 	r.r = &r.lr
@@ -688,7 +688,7 @@ func (r *bigFileReader) Close() error {
 		_ = r.f.Close()
 		return errors.New("must implement io.Seeker")
 	}
-	n, err := seeker.Seek(0, 0)
+	n, err := seeker.Seek(0, io.SeekStart)
 	if err == nil {
 		if n == 0 {
 			ff := r.ff
@@ -697,7 +697,7 @@ func (r *bigFileReader) Close() error {
 			ff.bigFilesLock.Unlock()
 		} else {
 			_ = r.f.Close()
-			err = errors.New("bug: File.Seek(0,0) returned (non-zero, nil)")
+			err = errors.New("bug: File.Seek(0, io.SeekStart) returned (non-zero, nil)")
 		}
 	} else {
 		_ = r.f.Close()
@@ -1512,7 +1512,7 @@ func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, 
 	if !ok {
 		return nil, errors.New("must implement io.Seeker")
 	}
-	if _, err := seeker.Seek(0, 0); err != nil {
+	if _, err := seeker.Seek(0, io.SeekStart); err != nil {
 		return nil, err
 	}
 
