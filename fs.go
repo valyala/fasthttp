@@ -449,40 +449,16 @@ func (fs *FS) initRequestHandler() {
 		compressRoot:           compressRoot,
 		pathNotFound:           fs.PathNotFound,
 		acceptByteRange:        fs.AcceptByteRange,
-		cacheDuration:          cacheDuration,
 		compressedFileSuffixes: compressedFileSuffixes,
-		cache:                  make(map[string]*fsFile),
-		cacheBrotli:            make(map[string]*fsFile),
-		cacheGzip:              make(map[string]*fsFile),
 	}
 
-	go func() {
-		var pendingFiles []*fsFile
+	{
+		cacheManager := newCacheManager(cacheDuration)
 
-		clean := func() {
-			pendingFiles = h.cleanCache(pendingFiles)
-		}
+		go cacheManager.handleCleanCache(fs.CleanStop)
 
-		if fs.CleanStop != nil {
-			t := time.NewTicker(cacheDuration / 2)
-			for {
-				select {
-				case <-t.C:
-					clean()
-				case _, stillOpen := <-fs.CleanStop:
-					// Ignore values send on the channel, only stop when it is closed.
-					if !stillOpen {
-						t.Stop()
-						return
-					}
-				}
-			}
-		}
-		for {
-			time.Sleep(cacheDuration / 2)
-			clean()
-		}
-	}()
+		h.cacheManager = cacheManager
+	}
 
 	fs.h = h.handleRequest
 }
@@ -497,13 +473,9 @@ type fsHandler struct {
 	compressBrotli         bool
 	compressRoot           string
 	acceptByteRange        bool
-	cacheDuration          time.Duration
 	compressedFileSuffixes map[string]string
 
-	cache       map[string]*fsFile
-	cacheBrotli map[string]*fsFile
-	cacheGzip   map[string]*fsFile
-	cacheLock   sync.Mutex
+	cacheManager *cacheManager
 
 	smallFileReaderPool sync.Pool
 }
@@ -603,12 +575,12 @@ func (ff *fsFile) Release() {
 }
 
 func (ff *fsFile) decReadersCount() {
-	ff.h.cacheLock.Lock()
-	ff.readersCount--
-	if ff.readersCount < 0 {
-		ff.readersCount = 0
-	}
-	ff.h.cacheLock.Unlock()
+	ff.h.cacheManager.WithLock(func() {
+		ff.readersCount--
+		if ff.readersCount < 0 {
+			ff.readersCount = 0
+		}
+	})
 }
 
 // bigFileReader attempts to trigger sendfile
@@ -750,10 +722,118 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 	return int64(curPos - r.startPos), err
 }
 
-func (h *fsHandler) cleanCache(pendingFiles []*fsFile) []*fsFile {
+type cacheManager struct {
+	cacheDuration time.Duration
+	cache         map[string]*fsFile
+	cacheBrotli   map[string]*fsFile
+	cacheGzip     map[string]*fsFile
+	cacheLock     sync.Mutex
+}
+
+type CacheKind uint8
+
+const (
+	defaultCacheKind CacheKind = iota
+	brotliCacheKind
+	gzipCacheKind
+)
+
+func newCacheManager(cacheDuration time.Duration) *cacheManager {
+	return &cacheManager{
+		cacheDuration: cacheDuration,
+		cache:         make(map[string]*fsFile),
+		cacheBrotli:   make(map[string]*fsFile),
+		cacheGzip:     make(map[string]*fsFile),
+	}
+}
+
+func (cm *cacheManager) WithLock(work func()) {
+	cm.cacheLock.Lock()
+
+	work()
+
+	cm.cacheLock.Unlock()
+}
+
+func (cm *cacheManager) getFsCache(cacheKind CacheKind) map[string]*fsFile {
+	fileCache := cm.cache
+	switch cacheKind {
+	case brotliCacheKind:
+		fileCache = cm.cacheBrotli
+	case gzipCacheKind:
+		fileCache = cm.cacheGzip
+	}
+
+	return fileCache
+}
+
+func (cm *cacheManager) getFsFileFromCache(cacheKind CacheKind, path string) (*fsFile, bool) {
+	fileCache := cm.getFsCache(cacheKind)
+
+	cm.cacheLock.Lock()
+	ff, ok := fileCache[string(path)]
+	if ok {
+		ff.readersCount++
+	}
+	cm.cacheLock.Unlock()
+
+	return ff, ok
+}
+
+func (cm *cacheManager) setFsFileFromCache(cacheKind CacheKind, path string, ff *fsFile) {
+	fileCache := cm.getFsCache(cacheKind)
+
+	cm.cacheLock.Lock()
+	ff1, ok := fileCache[path]
+	if !ok {
+		fileCache[path] = ff
+		ff.readersCount++
+	} else {
+		ff1.readersCount++
+	}
+	cm.cacheLock.Unlock()
+
+	if ok {
+		// The file has been already opened by another
+		// goroutine, so close the current file and use
+		// the file opened by another goroutine instead.
+		ff.Release()
+		ff = ff1
+	}
+}
+
+func (cm *cacheManager) handleCleanCache(cleanStop chan struct{}) {
+	var pendingFiles []*fsFile
+
+	clean := func() {
+		pendingFiles = cm.cleanCache(pendingFiles)
+	}
+
+	if cleanStop != nil {
+		t := time.NewTicker(cm.cacheDuration / 2)
+		for {
+			select {
+			case <-t.C:
+				clean()
+			case _, stillOpen := <-cleanStop:
+				// Ignore values send on the channel, only stop when it is closed.
+				if !stillOpen {
+					t.Stop()
+					return
+				}
+			}
+		}
+	}
+	for {
+		time.Sleep(cm.cacheDuration / 2)
+		clean()
+	}
+}
+
+func (cm *cacheManager) cleanCache(pendingFiles []*fsFile) []*fsFile {
 	var filesToRelease []*fsFile
 
-	h.cacheLock.Lock()
+	cm.cacheLock.Lock()
 
 	// Close files which couldn't be closed before due to non-zero
 	// readers count on the previous run.
@@ -767,11 +847,11 @@ func (h *fsHandler) cleanCache(pendingFiles []*fsFile) []*fsFile {
 	}
 	pendingFiles = remainingFiles
 
-	pendingFiles, filesToRelease = cleanCacheNolock(h.cache, pendingFiles, filesToRelease, h.cacheDuration)
-	pendingFiles, filesToRelease = cleanCacheNolock(h.cacheBrotli, pendingFiles, filesToRelease, h.cacheDuration)
-	pendingFiles, filesToRelease = cleanCacheNolock(h.cacheGzip, pendingFiles, filesToRelease, h.cacheDuration)
+	pendingFiles, filesToRelease = cleanCacheNolock(cm.cache, pendingFiles, filesToRelease, cm.cacheDuration)
+	pendingFiles, filesToRelease = cleanCacheNolock(cm.cacheBrotli, pendingFiles, filesToRelease, cm.cacheDuration)
+	pendingFiles, filesToRelease = cleanCacheNolock(cm.cacheGzip, pendingFiles, filesToRelease, cm.cacheDuration)
 
-	h.cacheLock.Unlock()
+	cm.cacheLock.Unlock()
 
 	for _, ff := range filesToRelease {
 		ff.Release()
@@ -839,30 +919,25 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	}
 
 	mustCompress := false
-	fileCache := h.cache
+	fileCacheKind := defaultCacheKind
 	fileEncoding := ""
 	byteRange := ctx.Request.Header.peek(strRange)
 	if len(byteRange) == 0 && h.compress {
 		if h.compressBrotli && ctx.Request.Header.HasAcceptEncodingBytes(strBr) {
 			mustCompress = true
-			fileCache = h.cacheBrotli
+			fileCacheKind = brotliCacheKind
 			fileEncoding = "br"
 		} else if ctx.Request.Header.HasAcceptEncodingBytes(strGzip) {
 			mustCompress = true
-			fileCache = h.cacheGzip
+			fileCacheKind = gzipCacheKind
 			fileEncoding = "gzip"
 		}
 	}
 
-	h.cacheLock.Lock()
-	ff, ok := fileCache[string(path)]
-	if ok {
-		ff.readersCount++
-	}
-	h.cacheLock.Unlock()
+	pathStr := string(path)
+	ff, ok := h.cacheManager.getFsFileFromCache(fileCacheKind, pathStr)
 
 	if !ok {
-		pathStr := string(path)
 		filePath := h.pathToFilePath(pathStr)
 
 		var err error
@@ -895,23 +970,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			return
 		}
 
-		h.cacheLock.Lock()
-		ff1, ok := fileCache[pathStr]
-		if !ok {
-			fileCache[pathStr] = ff
-			ff.readersCount++
-		} else {
-			ff1.readersCount++
-		}
-		h.cacheLock.Unlock()
-
-		if ok {
-			// The file has been already opened by another
-			// goroutine, so close the current file and use
-			// the file opened by another goroutine instead.
-			ff.Release()
-			ff = ff1
-		}
+		h.cacheManager.setFsFileFromCache(fileCacheKind, pathStr, ff)
 	}
 
 	if !ctx.IfModifiedSince(ff.lastModified) {
