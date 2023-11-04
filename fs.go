@@ -453,11 +453,7 @@ func (fs *FS) initRequestHandler() {
 	}
 
 	{
-		cacheManager := newCacheManager(cacheDuration)
-
-		go cacheManager.handleCleanCache(fs.CleanStop)
-
-		h.cacheManager = cacheManager
+		h.cacheManager = newInMemoryCacheManager(cacheDuration, fs.CleanStop)
 	}
 
 	fs.h = h.handleRequest
@@ -475,7 +471,7 @@ type fsHandler struct {
 	acceptByteRange        bool
 	compressedFileSuffixes map[string]string
 
-	cacheManager *cacheManager
+	cacheManager cacheManager
 
 	smallFileReaderPool sync.Pool
 }
@@ -722,7 +718,15 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 	return int64(curPos - r.startPos), err
 }
 
-type cacheManager struct {
+type cacheManager interface {
+	WithLock(work func())
+	GetFileFromCache(cacheKind CacheKind, path string) (*fsFile, bool)
+	SetFileToCache(cacheKind CacheKind, path string, ff *fsFile) *fsFile
+}
+
+var _ cacheManager = (*inMemoryCacheManager)(nil)
+
+type inMemoryCacheManager struct {
 	cacheDuration time.Duration
 	cache         map[string]*fsFile
 	cacheBrotli   map[string]*fsFile
@@ -738,16 +742,20 @@ const (
 	gzipCacheKind
 )
 
-func newCacheManager(cacheDuration time.Duration) *cacheManager {
-	return &cacheManager{
+func newInMemoryCacheManager(cacheDuration time.Duration, cleanStop chan struct{}) *inMemoryCacheManager {
+	instance := &inMemoryCacheManager{
 		cacheDuration: cacheDuration,
 		cache:         make(map[string]*fsFile),
 		cacheBrotli:   make(map[string]*fsFile),
 		cacheGzip:     make(map[string]*fsFile),
 	}
+
+	go instance.handleCleanCache(cleanStop)
+
+	return instance
 }
 
-func (cm *cacheManager) WithLock(work func()) {
+func (cm *inMemoryCacheManager) WithLock(work func()) {
 	cm.cacheLock.Lock()
 
 	work()
@@ -755,7 +763,7 @@ func (cm *cacheManager) WithLock(work func()) {
 	cm.cacheLock.Unlock()
 }
 
-func (cm *cacheManager) getFsCache(cacheKind CacheKind) map[string]*fsFile {
+func (cm *inMemoryCacheManager) getFsCache(cacheKind CacheKind) map[string]*fsFile {
 	fileCache := cm.cache
 	switch cacheKind {
 	case brotliCacheKind:
@@ -767,7 +775,7 @@ func (cm *cacheManager) getFsCache(cacheKind CacheKind) map[string]*fsFile {
 	return fileCache
 }
 
-func (cm *cacheManager) getFsFileFromCache(cacheKind CacheKind, path string) (*fsFile, bool) {
+func (cm *inMemoryCacheManager) GetFileFromCache(cacheKind CacheKind, path string) (*fsFile, bool) {
 	fileCache := cm.getFsCache(cacheKind)
 
 	cm.cacheLock.Lock()
@@ -780,7 +788,7 @@ func (cm *cacheManager) getFsFileFromCache(cacheKind CacheKind, path string) (*f
 	return ff, ok
 }
 
-func (cm *cacheManager) setFsFileFromCache(cacheKind CacheKind, path string, ff *fsFile) {
+func (cm *inMemoryCacheManager) SetFileToCache(cacheKind CacheKind, path string, ff *fsFile) *fsFile {
 	fileCache := cm.getFsCache(cacheKind)
 
 	cm.cacheLock.Lock()
@@ -800,9 +808,11 @@ func (cm *cacheManager) setFsFileFromCache(cacheKind CacheKind, path string, ff 
 		ff.Release()
 		ff = ff1
 	}
+
+	return ff
 }
 
-func (cm *cacheManager) handleCleanCache(cleanStop chan struct{}) {
+func (cm *inMemoryCacheManager) handleCleanCache(cleanStop chan struct{}) {
 	var pendingFiles []*fsFile
 
 	clean := func() {
@@ -830,7 +840,7 @@ func (cm *cacheManager) handleCleanCache(cleanStop chan struct{}) {
 	}
 }
 
-func (cm *cacheManager) cleanCache(pendingFiles []*fsFile) []*fsFile {
+func (cm *inMemoryCacheManager) cleanCache(pendingFiles []*fsFile) []*fsFile {
 	var filesToRelease []*fsFile
 
 	cm.cacheLock.Lock()
@@ -935,8 +945,8 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	}
 
 	pathStr := string(path)
-	ff, ok := h.cacheManager.getFsFileFromCache(fileCacheKind, pathStr)
 
+	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, pathStr)
 	if !ok {
 		filePath := h.pathToFilePath(pathStr)
 
@@ -970,7 +980,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			return
 		}
 
-		h.cacheManager.setFsFileFromCache(fileCacheKind, pathStr, ff)
+		ff = h.cacheManager.SetFileToCache(fileCacheKind, pathStr, ff)
 	}
 
 	if !ctx.IfModifiedSince(ff.lastModified) {
