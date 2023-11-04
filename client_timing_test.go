@@ -24,11 +24,11 @@ type fakeClientConn struct {
 }
 
 func (c *fakeClientConn) SetWriteDeadline(t time.Time) error {
-       return nil
+	return nil
 }
 
 func (c *fakeClientConn) SetReadDeadline(t time.Time) error {
-       return nil
+	return nil
 }
 
 func (c *fakeClientConn) Write(b []byte) (int, error) {
