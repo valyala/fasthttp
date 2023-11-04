@@ -296,6 +296,11 @@ type FS struct {
 	// "Cannot open requested path"
 	PathNotFound RequestHandler
 
+	// SkipCache if true, will cache no file handler.
+	//
+	// By default is false.
+	SkipCache bool
+
 	// Expiration duration for inactive file handlers.
 	//
 	// FSHandlerCacheDuration is used by default.
@@ -448,7 +453,7 @@ func (fs *FS) initRequestHandler() {
 	}
 
 	{
-		h.cacheManager = newInMemoryCacheManager(fs)
+		h.cacheManager = newCacheManager(fs)
 	}
 
 	fs.h = h.handleRequest
@@ -719,15 +724,10 @@ type cacheManager interface {
 	SetFileToCache(cacheKind CacheKind, path string, ff *fsFile) *fsFile
 }
 
-var _ cacheManager = (*inMemoryCacheManager)(nil)
-
-type inMemoryCacheManager struct {
-	cacheDuration time.Duration
-	cache         map[string]*fsFile
-	cacheBrotli   map[string]*fsFile
-	cacheGzip     map[string]*fsFile
-	cacheLock     sync.Mutex
-}
+var (
+	_ cacheManager = (*inMemoryCacheManager)(nil)
+	_ cacheManager = (*noopCacheManager)(nil)
+)
 
 type CacheKind uint8
 
@@ -737,7 +737,11 @@ const (
 	gzipCacheKind
 )
 
-func newInMemoryCacheManager(fs *FS) *inMemoryCacheManager {
+func newCacheManager(fs *FS) cacheManager {
+	if fs.SkipCache {
+		return &noopCacheManager{}
+	}
+
 	cacheDuration := fs.CacheDuration
 	if cacheDuration <= 0 {
 		cacheDuration = FSHandlerCacheDuration
@@ -753,6 +757,34 @@ func newInMemoryCacheManager(fs *FS) *inMemoryCacheManager {
 	go instance.handleCleanCache(fs.CleanStop)
 
 	return instance
+}
+
+type noopCacheManager struct {
+	cacheLock sync.Mutex
+}
+
+func (n *noopCacheManager) WithLock(work func()) {
+	n.cacheLock.Lock()
+
+	work()
+
+	n.cacheLock.Unlock()
+}
+
+func (*noopCacheManager) GetFileFromCache(cacheKind CacheKind, path string) (*fsFile, bool) {
+	return nil, false
+}
+
+func (*noopCacheManager) SetFileToCache(cacheKind CacheKind, path string, ff *fsFile) *fsFile {
+	return ff
+}
+
+type inMemoryCacheManager struct {
+	cacheDuration time.Duration
+	cache         map[string]*fsFile
+	cacheBrotli   map[string]*fsFile
+	cacheGzip     map[string]*fsFile
+	cacheLock     sync.Mutex
 }
 
 func (cm *inMemoryCacheManager) WithLock(work func()) {
