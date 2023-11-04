@@ -419,11 +419,6 @@ func (fs *FS) initRequestHandler() {
 		compressRoot = fs.normalizeRoot(compressRoot)
 	}
 
-	cacheDuration := fs.CacheDuration
-	if cacheDuration <= 0 {
-		cacheDuration = FSHandlerCacheDuration
-	}
-
 	compressedFileSuffixes := fs.CompressedFileSuffixes
 	if len(compressedFileSuffixes["br"]) == 0 || len(compressedFileSuffixes["gzip"]) == 0 ||
 		compressedFileSuffixes["br"] == compressedFileSuffixes["gzip"] {
@@ -453,7 +448,7 @@ func (fs *FS) initRequestHandler() {
 	}
 
 	{
-		h.cacheManager = newInMemoryCacheManager(cacheDuration, fs.CleanStop)
+		h.cacheManager = newInMemoryCacheManager(fs)
 	}
 
 	fs.h = h.handleRequest
@@ -742,7 +737,12 @@ const (
 	gzipCacheKind
 )
 
-func newInMemoryCacheManager(cacheDuration time.Duration, cleanStop chan struct{}) *inMemoryCacheManager {
+func newInMemoryCacheManager(fs *FS) *inMemoryCacheManager {
+	cacheDuration := fs.CacheDuration
+	if cacheDuration <= 0 {
+		cacheDuration = FSHandlerCacheDuration
+	}
+
 	instance := &inMemoryCacheManager{
 		cacheDuration: cacheDuration,
 		cache:         make(map[string]*fsFile),
@@ -750,7 +750,7 @@ func newInMemoryCacheManager(cacheDuration time.Duration, cleanStop chan struct{
 		cacheGzip:     make(map[string]*fsFile),
 	}
 
-	go instance.handleCleanCache(cleanStop)
+	go instance.handleCleanCache(fs.CleanStop)
 
 	return instance
 }
