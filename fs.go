@@ -487,9 +487,9 @@ func (fs *FS) initRequestHandler() {
 		compressedFileSuffixes: compressedFileSuffixes,
 	}
 
-	h.cacheManager = newCacheManager(fs
-	
-  if h.fs == nil {
+	h.cacheManager = newCacheManager(fs)
+
+	if h.fs == nil {
 		h.fs = &osFS{} // It provides os.Open and os.Stat
 	}
 
