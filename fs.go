@@ -474,7 +474,7 @@ func (fs *FS) initRequestHandler() {
 	}
 
 	h := &fsHandler{
-		fs:                     fs.FS,
+		filesystem:             fs.FS,
 		root:                   root,
 		indexNames:             fs.IndexNames,
 		pathRewrite:            fs.PathRewrite,
@@ -489,15 +489,15 @@ func (fs *FS) initRequestHandler() {
 
 	h.cacheManager = newCacheManager(fs)
 
-	if h.fs == nil {
-		h.fs = &osFS{} // It provides os.Open and os.Stat
+	if h.filesystem == nil {
+		h.filesystem = &osFS{} // It provides os.Open and os.Stat
 	}
 
 	fs.h = h.handleRequest
 }
 
 type fsHandler struct {
-	fs                     fs.FS
+	filesystem             fs.FS
 	root                   string
 	indexNames             []string
 	pathRewrite            PathRewriteFunc
@@ -562,7 +562,7 @@ func (ff *fsFile) smallFileReader() (io.Reader, error) {
 const maxSmallFileSize = 2 * 4096
 
 func (ff *fsFile) isBig() bool {
-	if _, ok := ff.h.fs.(*osFS); !ok { // fs.FS only uses bigFileReader, memory cache uses fsSmallFileReader
+	if _, ok := ff.h.filesystem.(*osFS); !ok { // fs.FS only uses bigFileReader, memory cache uses fsSmallFileReader
 		return ff.f != nil
 	}
 	return ff.contentLength > maxSmallFileSize && len(ff.dirIndex) == 0
@@ -587,7 +587,7 @@ func (ff *fsFile) bigFileReader() (io.Reader, error) {
 		return r, nil
 	}
 
-	f, err := ff.h.fs.Open(ff.filename)
+	f, err := ff.h.filesystem.Open(ff.filename)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open already opened file: %w", err)
 	}
@@ -980,7 +980,7 @@ func cleanCacheNolock(cache map[string]*fsFile, pendingFiles, filesToRelease []*
 }
 
 func (h *fsHandler) pathToFilePath(path string) string {
-	if _, ok := h.fs.(*osFS); !ok {
+	if _, ok := h.filesystem.(*osFS); !ok {
 		if len(path) < 1 {
 			return path
 		}
@@ -1252,7 +1252,7 @@ func (h *fsHandler) createDirIndex(ctx *RequestCtx, dirPath string, mustCompress
 		_, _ = fmt.Fprintf(w, `<li><a href="%s" class="dir">..</a></li>`, parentPathEscaped)
 	}
 
-	dirEntries, err := fs.ReadDir(h.fs, dirPath)
+	dirEntries, err := fs.ReadDir(h.filesystem, dirPath)
 	if err != nil {
 		return nil, err
 	}
@@ -1332,7 +1332,7 @@ const (
 )
 
 func (h *fsHandler) compressAndOpenFSFile(filePath string, fileEncoding string) (*fsFile, error) {
-	f, err := h.fs.Open(filePath)
+	f, err := h.filesystem.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -1356,7 +1356,7 @@ func (h *fsHandler) compressAndOpenFSFile(filePath string, fileEncoding string) 
 
 	compressedFilePath := h.filePathToCompressed(filePath)
 
-	if _, ok := h.fs.(*osFS); !ok {
+	if _, ok := h.filesystem.(*osFS); !ok {
 		return h.newCompressedFSFileCache(f, fileInfo, compressedFilePath, fileEncoding)
 	}
 
@@ -1496,7 +1496,7 @@ func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, fi
 }
 
 func (h *fsHandler) newCompressedFSFile(filePath string, fileEncoding string) (*fsFile, error) {
-	f, err := h.fs.Open(filePath)
+	f, err := h.filesystem.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open compressed file %q: %w", filePath, err)
 	}
@@ -1514,7 +1514,7 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 		filePath += h.compressedFileSuffixes[fileEncoding]
 	}
 
-	f, err := h.fs.Open(filePath)
+	f, err := h.filesystem.Open(filePath)
 	if err != nil {
 		if mustCompress && errors.Is(err, fs.ErrNotExist) {
 			return h.compressAndOpenFSFile(filePathOriginal, fileEncoding)
@@ -1538,7 +1538,7 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 	}
 
 	if mustCompress {
-		fileInfoOriginal, err := fs.Stat(h.fs, filePathOriginal)
+		fileInfoOriginal, err := fs.Stat(h.filesystem, filePathOriginal)
 		if err != nil {
 			_ = f.Close()
 			return nil, fmt.Errorf("cannot obtain info for original file %q: %w", filePathOriginal, err)
