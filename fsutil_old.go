@@ -4,9 +4,9 @@
 package fasthttp
 
 // Copy global map for fs.go
-func fsMapCopy(FSCompressedFileSuffixes map[string]string) map[string]string {
-	compressedFileSuffixes := make(map[string]string, len(FSCompressedFileSuffixes))
-	for k, v := range FSCompressedFileSuffixes {
+func fsMapCopy(fsCompressedFileSuffixes map[string]string) map[string]string {
+	compressedFileSuffixes := make(map[string]string, len(fsCompressedFileSuffixes))
+	for k, v := range fsCompressedFileSuffixes {
 		compressedFileSuffixes[k] = v
 	}
 	return compressedFileSuffixes
