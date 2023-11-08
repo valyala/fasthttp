@@ -1,6 +1,3 @@
-//go:build windows
-// +build windows
-
 package fasthttp
 
 func addLeadingSlash(dst, src []byte) []byte {
