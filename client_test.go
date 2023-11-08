@@ -149,7 +149,7 @@ func TestHostClientNegativeTimeout(t *testing.T) {
 func TestDoDeadlineRetry(t *testing.T) {
 	t.Parallel()
 
-	tries := 0
+	var tries int32
 	done := make(chan struct{})
 
 	ln := fasthttputil.NewInmemoryListener()
@@ -160,7 +160,7 @@ func TestDoDeadlineRetry(t *testing.T) {
 				close(done)
 				break
 			}
-			tries++
+			atomic.AddInt32(&tries, 1)
 			br := bufio.NewReader(c)
 			(&RequestHeader{}).Read(br)                      //nolint:errcheck
 			(&Request{}).readBodyStream(br, 0, false, false) //nolint:errcheck
