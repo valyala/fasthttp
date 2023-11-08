@@ -1,0 +1,29 @@
+# This file contains configuration options for golangci-lint.
+# https://github.com/golangci/golangci-lint/blob/master/.golangci.reference.yml
+
+run:
+  # Timeout for analysis.
+  timeout: 5m
+
+linters:
+  # Disable all linters to prevent appearing new issues on golangci-lint update.
+  disable-all: true
+  enable:
+    - bodyclose
+    - errcheck
+    - gochecknoinits
+    - gocritic
+    - gofumpt
+    - gosimple
+    - govet
+    - ineffassign
+    - nolintlint
+    - staticcheck
+    - unused
+
+linters-settings:
+  # Show all issues from a linter.
+  max-issues-per-linter: 0
+
+  # Show all issues with the same text.
+  max-same-issues: 0
