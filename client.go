@@ -2542,8 +2542,8 @@ func (c *PipelineClient) newConnClient() *pipelineConnClient {
 }
 
 // ErrPipelineOverflow may be returned from PipelineClient.Do*
-// if the requests' queue is overflown.
-var ErrPipelineOverflow = errors.New("pipelined requests' queue has been overflown. Increase MaxConns and/or MaxPendingRequests")
+// if the requests' queue is overflowed.
+var ErrPipelineOverflow = errors.New("pipelined requests' queue has been overflowed. Increase MaxConns and/or MaxPendingRequests")
 
 // DefaultMaxPendingRequests is the default value
 // for PipelineClient.MaxPendingRequests.
