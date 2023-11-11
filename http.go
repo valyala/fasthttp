@@ -120,6 +120,8 @@ type Response struct {
 	raddr net.Addr
 	// Local TCPAddr from concurrently net.Conn
 	laddr net.Addr
+
+	headersWritten bool
 }
 
 // SetHost sets host for the request.
@@ -1122,6 +1124,7 @@ func (resp *Response) Reset() {
 	resp.laddr = nil
 	resp.ImmediateHeaderFlush = false
 	resp.StreamBody = false
+	resp.headersWritten = false
 }
 
 func (resp *Response) resetSkipHeader() {

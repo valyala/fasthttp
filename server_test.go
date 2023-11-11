@@ -4237,6 +4237,53 @@ func TestServerChunkedResponse(t *testing.T) {
 	}
 }
 
+func TestServerDisableBuffering(t *testing.T) {
+	t.Parallel()
+
+	expectedBody := bytes.Repeat([]byte("a"), 4096)
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.DisableBuffering()
+			ctx.SetStatusCode(StatusOK)
+			ctx.SetContentType("text/html; charset=utf-8")
+			reader := bytes.NewReader(expectedBody)
+			_, err := io.Copy(ctx, reader)
+			if err != nil {
+				t.Fatalf("Unexpected error when copying body: %v", err)
+			}
+		},
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err = conn.Write([]byte("GET /index.html HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	br := bufio.NewReader(conn)
+
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Unexpected error when reading response: %v", err)
+	}
+	if resp.Header.ContentLength() != -1 {
+		t.Fatalf("Unexpected Content-Length %d. Expected %d", resp.Header.ContentLength(), -1)
+	}
+	if !bytes.Equal(resp.Body(), expectedBody) {
+		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), "foobar")
+	}
+}
+
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) *Response {
 	var resp Response
 	if err := resp.Read(r); err != nil {

@@ -608,6 +608,47 @@ type RequestCtx struct {
 	hijackHandler    HijackHandler
 	hijackNoResponse bool
 	formValueFunc    FormValueFunc
+
+	disableBuffering  bool          // disables buffered response body
+	writer            *bufio.Writer // used to send response in non-buffered mode
+	bytesSent         int           // number of bytes sent to client (in non-buffered mode)
+	bodyChunkStarted  bool          // true if the response body chunk has been started
+	bodyLastChunkSent bool          // true if the last chunk of the response body has been sent
+}
+
+// DisableBuffering modifies fasthttp to disable body buffering for this request.
+// This is useful for requests that return large data or stream data.
+//
+// When buffering is disabled you must:
+//  1. Set response status and header values before writing body
+//  2. Set ContentLength is optional. If not set, the server will use chunked encoding.
+//  3. Write body data using methods like ctx.Write or  io.Copy(ctx,src), etc.
+//  4. Optionally call CloseResponse to finalize the response.
+//
+// CLosing the response will finalize the response and send the last chunk.
+// If the handler does not finish the response, it will be called automatically after handler returns.
+// Closing the response will also set BytesSent with the correct number of total bytes sent.
+func (ctx *RequestCtx) DisableBuffering() {
+	ctx.disableBuffering = true
+}
+
+// CloseResponse finalizes non-buffered response dispatch.
+// This method must be called after performing non-buffered responses
+// If the handler does not finish the response, it will be called automatically
+// after the handler function returns.
+func (ctx *RequestCtx) CloseResponse() {
+	if !ctx.disableBuffering || !ctx.bodyChunkStarted || ctx.bodyLastChunkSent {
+		return
+	}
+	if ctx.writer != nil {
+		// finalize chunks
+		if ctx.bodyChunkStarted && ctx.Response.Header.IsHTTP11() && !ctx.bodyLastChunkSent {
+			_, _ = ctx.writer.Write([]byte("0\r\n\r\n"))
+			_ = ctx.writer.Flush()
+			ctx.bytesSent += 5
+		}
+		ctx.bodyLastChunkSent = true
+	}
 }
 
 // HijackHandler must process the hijacked connection c.
@@ -822,6 +863,12 @@ func (ctx *RequestCtx) reset() {
 
 	ctx.hijackHandler = nil
 	ctx.hijackNoResponse = false
+
+	ctx.writer = nil
+	ctx.disableBuffering = false
+	ctx.bytesSent = 0
+	ctx.bodyChunkStarted = false
+	ctx.bodyLastChunkSent = false
 }
 
 type firstByteReader struct {
@@ -1443,8 +1490,56 @@ func (ctx *RequestCtx) NotFound() {
 
 // Write writes p into response body.
 func (ctx *RequestCtx) Write(p []byte) (int, error) {
+	if ctx.disableBuffering {
+		return ctx.writeDirect(p)
+	}
+
 	ctx.Response.AppendBody(p)
 	return len(p), nil
+}
+
+// writeDirect writes p to underlying connection bypassing any buffering.
+func (ctx *RequestCtx) writeDirect(p []byte) (int, error) {
+	// Non buffered response
+	if ctx.writer == nil {
+		ctx.writer = acquireWriter(ctx)
+	}
+
+	// Write headers if not written yet
+	if !ctx.Response.headersWritten {
+		if ctx.Response.Header.contentLength == 0 && ctx.Response.Header.IsHTTP11() {
+			ctx.Response.Header.SetContentLength(-1) // means Transfer-Encoding = chunked
+		}
+		h := ctx.Response.Header.Header()
+		n, err := ctx.writer.Write(h)
+		if err != nil {
+			return 0, err
+		}
+		ctx.bytesSent += n
+		ctx.Response.headersWritten = true
+	}
+
+	// Write body. In chunks if content length is not set.
+	if ctx.Response.Header.contentLength == -1 && ctx.Response.Header.IsHTTP11() {
+		ctx.bodyChunkStarted = true
+		err := writeChunk(ctx.writer, p)
+		if err != nil {
+			return 0, err
+		}
+		ctx.bytesSent += len(p) + 4 + countHexDigits(len(p))
+		return len(p), nil
+	}
+
+	n, err := ctx.writer.Write(p)
+	ctx.bytesSent += n
+
+	return n, err
+}
+
+// BytesSent returns the number of bytes sent to the client after non buffered operation.
+// Includes headers and body length.
+func (ctx *RequestCtx) BytesSent() int {
+	return ctx.bytesSent
 }
 
 // WriteString appends s to response body.
@@ -2357,6 +2452,15 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
 			s.Handler(ctx)
+		}
+
+		if ctx.disableBuffering {
+			ctx.CloseResponse()
+			if ctx.writer != nil {
+				releaseWriter(s, ctx.writer)
+				ctx.writer = nil
+			}
+			break
 		}
 
 		timeoutResponse = ctx.timeoutResponse
