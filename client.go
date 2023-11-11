@@ -1474,6 +1474,7 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 			return nil, ErrNoFreeConns
 		}
 
+		//nolint:dupword
 		// reqTimeout    c.MaxConnWaitTimeout   wait duration
 		//     d1                 d2            min(d1, d2)
 		//  0(not set)            d2            d2

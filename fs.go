@@ -870,7 +870,7 @@ func (cm *inMemoryCacheManager) GetFileFromCache(cacheKind CacheKind, path strin
 	fileCache := cm.getFsCache(cacheKind)
 
 	cm.cacheLock.Lock()
-	ff, ok := fileCache[string(path)]
+	ff, ok := fileCache[path]
 	if ok {
 		ff.readersCount++
 	}
@@ -1594,7 +1594,7 @@ func (h *fsHandler) newFSFile(f fs.File, fileInfo fs.FileInfo, compressed bool, 
 }
 
 func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, error) {
-	r := io.Reader(f)
+	r := f
 	var (
 		br *brotli.Reader
 		zr *gzip.Reader
