@@ -4252,6 +4252,9 @@ func TestServerDisableBuffering(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Unexpected error when copying body: %v", err)
 			}
+			if len(ctx.Response.Body()) > 0 {
+				t.Fatalf("Body was populated when buffer was disabled")
+			}
 		},
 	}
 
