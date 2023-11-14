@@ -66,6 +66,8 @@ func TestNewVHostPathRewriterMaliciousHost(t *testing.T) {
 }
 
 func testPathNotFound(t *testing.T, pathNotFoundFunc RequestHandler) {
+	t.Helper()
+
 	var ctx RequestCtx
 	var req Request
 	req.SetRequestURI("http//some.url/file")
@@ -302,11 +304,30 @@ func TestFSByteRangeConcurrent(t *testing.T) {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	fs := &FS{
+	runFSByteRangeConcurrent(t, &FS{
 		Root:            ".",
 		AcceptByteRange: true,
 		CleanStop:       stop,
-	}
+	})
+}
+
+func TestFSByteRangeConcurrentSkipCache(t *testing.T) {
+	// This test can't run parallel as files in / might be changed by other tests.
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	runFSByteRangeConcurrent(t, &FS{
+		Root:            ".",
+		SkipCache:       true,
+		AcceptByteRange: true,
+		CleanStop:       stop,
+	})
+}
+
+func runFSByteRangeConcurrent(t *testing.T, fs *FS) {
+	t.Helper()
+
 	h := fs.NewRequestHandler()
 
 	concurrency := 10
@@ -336,11 +357,30 @@ func TestFSByteRangeSingleThread(t *testing.T) {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	fs := &FS{
+	runFSByteRangeSingleThread(t, &FS{
 		Root:            ".",
 		AcceptByteRange: true,
 		CleanStop:       stop,
-	}
+	})
+}
+
+func TestFSByteRangeSingleThreadSkipCache(t *testing.T) {
+	// This test can't run parallel as files in / might be changed by other tests.
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	runFSByteRangeSingleThread(t, &FS{
+		Root:            ".",
+		AcceptByteRange: true,
+		SkipCache:       true,
+		CleanStop:       stop,
+	})
+}
+
+func runFSByteRangeSingleThread(t *testing.T, fs *FS) {
+	t.Helper()
+
 	h := fs.NewRequestHandler()
 
 	testFSByteRange(t, h, "/fs.go")
@@ -348,6 +388,8 @@ func TestFSByteRangeSingleThread(t *testing.T) {
 }
 
 func testFSByteRange(t *testing.T, h RequestHandler, filePath string) {
+	t.Helper()
+
 	var ctx RequestCtx
 	ctx.Init(&Request{}, nil, nil)
 
@@ -427,6 +469,8 @@ func TestParseByteRangeSuccess(t *testing.T) {
 }
 
 func testParseByteRangeSuccess(t *testing.T, v string, contentLength, startPos, endPos int) {
+	t.Helper()
+
 	startPos1, endPos1, err := ParseByteRange([]byte(v), contentLength)
 	if err != nil {
 		t.Fatalf("unexpected error: %v. v=%q, contentLength=%d", err, v, contentLength)
@@ -467,6 +511,8 @@ func TestParseByteRangeError(t *testing.T) {
 }
 
 func testParseByteRangeError(t *testing.T, v string, contentLength int) {
+	t.Helper()
+
 	_, _, err := ParseByteRange([]byte(v), contentLength)
 	if err == nil {
 		t.Fatalf("expecting error when parsing byte range %q", v)
@@ -480,17 +526,41 @@ func TestFSCompressConcurrent(t *testing.T) {
 	}
 
 	// This test can't run parallel as files in / might be changed by other tests.
-
 	stop := make(chan struct{})
 	defer close(stop)
 
-	fs := &FS{
+	runFSCompressConcurrent(t, &FS{
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
 		CompressBrotli:     true,
 		CleanStop:          stop,
+	})
+}
+
+func TestFSCompressConcurrentSkipCache(t *testing.T) {
+	// Don't run this test on Windows, the Windows GitHub actions are too slow and timeout too often.
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
 	}
+
+	// This test can't run parallel as files in / might be changed by other tests.
+	stop := make(chan struct{})
+	defer close(stop)
+
+	runFSCompressConcurrent(t, &FS{
+		Root:               ".",
+		GenerateIndexPages: true,
+		SkipCache:          true,
+		Compress:           true,
+		CompressBrotli:     true,
+		CleanStop:          stop,
+	})
+}
+
+func runFSCompressConcurrent(t *testing.T, fs *FS) {
+	t.Helper()
+
 	h := fs.NewRequestHandler()
 
 	concurrency := 4
@@ -521,13 +591,34 @@ func TestFSCompressSingleThread(t *testing.T) {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	fs := &FS{
+	runFSCompressSingleThread(t, &FS{
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
 		CompressBrotli:     true,
 		CleanStop:          stop,
-	}
+	})
+}
+
+func TestFSCompressSingleThreadSkipCache(t *testing.T) {
+	// This test can't run parallel as files in / might be changed by other tests.
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	runFSCompressSingleThread(t, &FS{
+		Root:               ".",
+		GenerateIndexPages: true,
+		SkipCache:          true,
+		Compress:           true,
+		CompressBrotli:     true,
+		CleanStop:          stop,
+	})
+}
+
+func runFSCompressSingleThread(t *testing.T, fs *FS) {
+	t.Helper()
+
 	h := fs.NewRequestHandler()
 
 	testFSCompress(t, h, "/fs.go")
@@ -536,6 +627,8 @@ func TestFSCompressSingleThread(t *testing.T) {
 }
 
 func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
+	t.Helper()
+
 	// File locking is flaky on Windows.
 	if runtime.GOOS == "windows" {
 		t.SkipNow()
@@ -755,6 +848,8 @@ func TestStripPathSlashes(t *testing.T) {
 }
 
 func testStripPathSlashes(t *testing.T, path string, stripSlashes int, expectedPath string) {
+	t.Helper()
+
 	s := stripLeadingSlashes([]byte(path), stripSlashes)
 	s = stripTrailingSlashes(s)
 	if string(s) != expectedPath {
@@ -779,6 +874,8 @@ func TestFileExtension(t *testing.T) {
 }
 
 func testFileExtension(t *testing.T, path string, compressed bool, compressedFileSuffix, expectedExt string) {
+	t.Helper()
+
 	ext := fileExtension(path, compressed, compressedFileSuffix)
 	if ext != expectedExt {
 		t.Fatalf("unexpected file extension for file %q: %q. Expecting %q", path, ext, expectedExt)

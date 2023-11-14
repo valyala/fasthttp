@@ -1,0 +1,70 @@
+# This file contains configuration options for golangci-lint.
+# https://github.com/golangci/golangci-lint/blob/master/.golangci.reference.yml
+
+run:
+  # Timeout for analysis.
+  timeout: 5m
+
+linters:
+  enable-all: true
+  disable:
+    - cyclop
+    - depguard
+    - dupl
+    - errname
+    - errorlint
+    - exhaustive
+    - exhaustruct
+    - forcetypeassert
+    - funlen
+    - gochecknoglobals
+    - gocognit
+    - goconst
+    - gocyclo
+    - godot
+    - goerr113
+    - gomnd
+    - gosec
+    - inamedparam
+    - ireturn
+    - lll
+    - maintidx
+    - nakedret
+    - nestif
+    - nlreturn
+    - noctx
+    - nonamedreturns
+    - paralleltest
+    - perfsprint
+    - revive
+    - stylecheck
+    - testableexamples
+    - testpackage
+    - thelper
+    - tparallel
+    - unparam
+    - usestdlibvars
+    - varnamelen
+    - wastedassign
+    - whitespace
+    - wrapcheck
+    - wsl
+
+    # Deprecated linters
+    - deadcode
+    - exhaustivestruct
+    - golint
+    - ifshort
+    - interfacer
+    - maligned
+    - nosnakecase
+    - scopelint
+    - structcheck
+    - varcheck
+
+linters-settings:
+  # Show all issues from a linter.
+  max-issues-per-linter: 0
+
+  # Show all issues with the same text.
+  max-same-issues: 0

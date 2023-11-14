@@ -37,7 +37,7 @@ func TestAppendHTMLEscape(t *testing.T) {
 		allcases[i] = byte(i)
 	}
 	res := string(AppendHTMLEscape(nil, string(allcases)))
-	expect := string(html.EscapeString(string(allcases)))
+	expect := html.EscapeString(string(allcases))
 	if res != expect {
 		t.Fatalf("unexpected string %q. Expecting %q.", res, expect)
 	}
