@@ -4240,6 +4240,9 @@ func TestServerChunkedResponse(t *testing.T) {
 func TestServerDisableBuffering(t *testing.T) {
 	t.Parallel()
 
+	received := make(chan bool)
+	done := make(chan bool)
+
 	expectedBody := bytes.Repeat([]byte("a"), 4096)
 
 	s := &Server{
@@ -4252,9 +4255,20 @@ func TestServerDisableBuffering(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Unexpected error when copying body: %v", err)
 			}
+			ctx.CloseResponse()
 			if len(ctx.Response.Body()) > 0 {
 				t.Fatalf("Body was populated when buffer was disabled")
 			}
+
+			// wait until body is received by the consumer or stop after 2 seconds timeout
+			select {
+			case <-received:
+			case <-time.After(2 * time.Second):
+				t.Fatal("Body not received by consumer after 2 seconds")
+			}
+
+			// The consumer received the body, so we can finish the test
+			done <- true
 		},
 	}
 
@@ -4285,6 +4299,12 @@ func TestServerDisableBuffering(t *testing.T) {
 	if !bytes.Equal(resp.Body(), expectedBody) {
 		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), "foobar")
 	}
+
+	// Signal that the body was received correctly
+	received <- true
+
+	// Wait until the server has finished
+	<-done
 }
 
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) *Response {
