@@ -1240,6 +1240,29 @@ func TestRequestHeaderProxyWithCookie(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderWithQueryParamsAndNoPath(t *testing.T) {
+	t.Parallel()
+
+	var h1 RequestHeader
+	h1.SetRequestURI("?foo=bar")
+	h1.SetHost("example.com")
+	h1.SetMethod("GET")
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := h1.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedRequestHeader := "GET /?foo=bar HTTP/1.1\r\nHost: example.com\r\n\r\n"
+	if w.String() != expectedRequestHeader {
+		t.Fatalf("unexpected request header: %q. Expecting %q", w, expectedRequestHeader)
+	}
+}
+
 func TestResponseHeaderFirstByteReadEOF(t *testing.T) {
 	t.Parallel()
 
@@ -2493,6 +2516,13 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 		-2, "/foo/bar", "google.com", "", "", nil)
 	if h.ConnectionClose() {
 		t.Fatalf("unexpected connection: close header")
+	}
+
+	// simple headers with query param and no path
+	testRequestHeaderReadSuccess(t, h, "GET /?foo=bar HTTP/1.1\r\nHost: google.com\r\n\r\n",
+		-2, "/?foo=bar", "google.com", "", "", nil)
+	if h.ConnectionClose() {
+		t.Fatalf("incorrect request uri for header %q", h.RequestURI())
 	}
 
 	// simple headers with body

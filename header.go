@@ -681,6 +681,8 @@ func (h *RequestHeader) RequestURI() []byte {
 	requestURI := h.requestURI
 	if len(requestURI) == 0 {
 		requestURI = strSlash
+	} else if requestURI[0] == '?' {
+		requestURI = append(strSlash, requestURI...)
 	}
 	return requestURI
 }
