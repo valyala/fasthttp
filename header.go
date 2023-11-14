@@ -681,8 +681,6 @@ func (h *RequestHeader) RequestURI() []byte {
 	requestURI := h.requestURI
 	if len(requestURI) == 0 {
 		requestURI = strSlash
-	} else if requestURI[0] == '?' {
-		requestURI = append(strSlash, requestURI...)
 	}
 	return requestURI
 }
@@ -691,6 +689,11 @@ func (h *RequestHeader) RequestURI() []byte {
 // RequestURI must be properly encoded.
 // Use URI.RequestURI for constructing proper RequestURI if unsure.
 func (h *RequestHeader) SetRequestURI(requestURI string) {
+	if len(requestURI) > 0 && requestURI[0] == '?' {
+		h.requestURI = append(h.requestURI[:0], strSlash...)
+		h.requestURI = append(h.requestURI, requestURI...)
+		return
+	}
 	h.requestURI = append(h.requestURI[:0], requestURI...)
 }
 
@@ -698,6 +701,11 @@ func (h *RequestHeader) SetRequestURI(requestURI string) {
 // RequestURI must be properly encoded.
 // Use URI.RequestURI for constructing proper RequestURI if unsure.
 func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
+	if len(requestURI) > 0 && requestURI[0] == '?' {
+		h.requestURI = append(h.requestURI[:0], strSlash...)
+		h.requestURI = append(h.requestURI, requestURI...)
+		return
+	}
 	h.requestURI = append(h.requestURI[:0], requestURI...)
 }
 

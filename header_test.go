@@ -1261,6 +1261,26 @@ func TestRequestHeaderWithQueryParamsAndNoPath(t *testing.T) {
 	if w.String() != expectedRequestHeader {
 		t.Fatalf("unexpected request header: %q. Expecting %q", w, expectedRequestHeader)
 	}
+
+	h1.Reset()
+	h1.SetRequestURIBytes([]byte("?foo=bar"))
+	h1.SetHost("example.com")
+	h1.SetMethod("GET")
+
+	w.Reset()
+	bw = bufio.NewWriter(w)
+	if err := h1.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedRequestHeader = "GET /?foo=bar HTTP/1.1\r\nHost: example.com\r\n\r\n"
+	if w.String() != expectedRequestHeader {
+		t.Fatalf("unexpected request header: %q. Expecting %q", w, expectedRequestHeader)
+	}
+
 }
 
 func TestResponseHeaderFirstByteReadEOF(t *testing.T) {
