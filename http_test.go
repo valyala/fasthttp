@@ -3022,7 +3022,7 @@ func TestResponseBodyStream(t *testing.T) {
 			}
 		})
 
-		t.Run("limit response body size size", func(t *testing.T) {
+		t.Run("limit response body size", func(t *testing.T) {
 			t.Parallel()
 
 			client := Client{StreamResponseBody: true, MaxResponseBodySize: 20}

@@ -177,7 +177,17 @@ func WriteGzipLevel(w io.Writer, p []byte, level int) (int, error) {
 	}
 }
 
-var stacklessWriteGzip = stackless.NewFunc(nonblockingWriteGzip)
+var (
+	stacklessWriteGzipOnce sync.Once
+	stacklessWriteGzipFunc func(ctx interface{}) bool
+)
+
+func stacklessWriteGzip(ctx interface{}) {
+	stacklessWriteGzipOnce.Do(func() {
+		stacklessWriteGzipFunc = stackless.NewFunc(nonblockingWriteGzip)
+	})
+	stacklessWriteGzipFunc(ctx)
+}
 
 func nonblockingWriteGzip(ctxv interface{}) {
 	ctx := ctxv.(*compressCtx)
@@ -270,7 +280,17 @@ func WriteDeflateLevel(w io.Writer, p []byte, level int) (int, error) {
 	}
 }
 
-var stacklessWriteDeflate = stackless.NewFunc(nonblockingWriteDeflate)
+var (
+	stacklessWriteDeflateOnce sync.Once
+	stacklessWriteDeflateFunc func(ctx interface{}) bool
+)
+
+func stacklessWriteDeflate(ctx interface{}) {
+	stacklessWriteDeflateOnce.Do(func() {
+		stacklessWriteDeflateFunc = stackless.NewFunc(nonblockingWriteDeflate)
+	})
+	stacklessWriteDeflateFunc(ctx)
+}
 
 func nonblockingWriteDeflate(ctxv interface{}) {
 	ctx := ctxv.(*compressCtx)
