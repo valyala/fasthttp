@@ -551,7 +551,7 @@ func decodeArgAppend(dst, src []byte) []byte {
 		return append(dst, src...)
 	}
 
-	idx := 0
+	var idx int
 	switch {
 	case idxPercent == -1:
 		idx = idxPlus

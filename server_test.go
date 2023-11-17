@@ -1920,7 +1920,6 @@ func TestServerContinueHandler(t *testing.T) {
 	// Expect 100 continue denied
 	rw := &readWriter{}
 	for i := 0; i < 25; i++ {
-
 		// Regular requests without Expect 100 continue header
 		rw.r.Reset()
 		rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
