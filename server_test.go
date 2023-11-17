@@ -1751,7 +1751,7 @@ func TestRequestCtxUserValue(t *testing.T) {
 		}
 	}
 	vlen := 0
-	ctx.VisitUserValues(func(key []byte, value interface{}) {
+	ctx.VisitUserValues(func(key []byte, value any) {
 		vlen++
 		v := ctx.UserValue(key)
 		if v != value {
@@ -4293,7 +4293,7 @@ type testLogger struct {
 	out  string
 }
 
-func (cl *testLogger) Printf(format string, args ...interface{}) {
+func (cl *testLogger) Printf(format string, args ...any) {
 	cl.lock.Lock()
 	cl.out += fmt.Sprintf(format, args...)[6:] + "\n"
 	cl.lock.Unlock()

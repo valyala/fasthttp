@@ -31,7 +31,7 @@ var (
 // Logger is used for logging formatted messages.
 type Logger interface {
 	// Printf must have the same semantics as log.Printf.
-	Printf(format string, args ...interface{})
+	Printf(format string, args ...any)
 }
 
 // Prefork implements fasthttp server prefork
