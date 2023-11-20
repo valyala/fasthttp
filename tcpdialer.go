@@ -133,10 +133,10 @@ type TCPDialer struct {
 	// Changes made after the first Dial will not affect anything.
 	Concurrency int
 
-	// LocalAddr is the local address to use when dialing an
+	// LocalAddrFunc is the local address to use when dialing an
 	// address.
 	// If nil, a local address is automatically chosen.
-	LocalAddr *net.TCPAddr
+	LocalAddrFunc func() *net.TCPAddr
 
 	// This may be used to override DNS resolving policy, like this:
 	// var dialer = &fasthttp.TCPDialer{
@@ -332,8 +332,8 @@ func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Tim
 	}
 
 	dialer := net.Dialer{}
-	if d.LocalAddr != nil {
-		dialer.LocalAddr = d.LocalAddr
+	if d.LocalAddrFunc != nil {
+		dialer.LocalAddr = d.LocalAddrFunc()
 	}
 
 	ctx, cancelCtx := context.WithDeadline(context.Background(), deadline)
