@@ -609,11 +609,10 @@ type RequestCtx struct {
 	hijackNoResponse bool
 	formValueFunc    FormValueFunc
 
-	disableBuffering  bool          // disables buffered response body
-	writer            *bufio.Writer // used to send response in non-buffered mode
-	bytesSent         int           // number of bytes sent to client (in non-buffered mode)
-	bodyChunkStarted  bool          // true if the response body chunk has been started
-	bodyLastChunkSent bool          // true if the last chunk of the response body has been sent
+	disableBuffering    bool                               // disables buffered response body
+	getUnbufferedWriter func(*RequestCtx) UnbufferedWriter // defines how to get unbuffered writer
+	unbufferedWriter    UnbufferedWriter                   // writes directly to underlying connection
+	bytesSent           int                                // number of bytes sent to client using unbuffered operations
 }
 
 // DisableBuffering modifies fasthttp to disable body buffering for this request.
@@ -630,25 +629,27 @@ type RequestCtx struct {
 // Closing the response will also set BytesSent with the correct number of total bytes sent.
 func (ctx *RequestCtx) DisableBuffering() {
 	ctx.disableBuffering = true
+
+	// We need to create a new unbufferedWriter for each unbuffered request.
+	// This way we can allow different implementations and be compatible with http2 protocol
+	if ctx.unbufferedWriter == nil {
+		if ctx.getUnbufferedWriter != nil {
+			ctx.unbufferedWriter = ctx.getUnbufferedWriter(ctx)
+		} else {
+			ctx.unbufferedWriter = NewUnbufferedWriter(ctx)
+		}
+	}
 }
 
 // CloseResponse finalizes non-buffered response dispatch.
 // This method must be called after performing non-buffered responses
 // If the handler does not finish the response, it will be called automatically
 // after the handler function returns.
-func (ctx *RequestCtx) CloseResponse() {
-	if !ctx.disableBuffering || !ctx.bodyChunkStarted || ctx.bodyLastChunkSent {
-		return
+func (ctx *RequestCtx) CloseResponse() error {
+	if !ctx.disableBuffering || ctx.unbufferedWriter == nil {
+		return ErrNotUnbuffered
 	}
-	if ctx.writer != nil {
-		// finalize chunks
-		if ctx.bodyChunkStarted && ctx.Response.Header.IsHTTP11() && !ctx.bodyLastChunkSent {
-			_, _ = ctx.writer.Write([]byte("0\r\n\r\n"))
-			_ = ctx.writer.Flush()
-			ctx.bytesSent += 5
-		}
-		ctx.bodyLastChunkSent = true
-	}
+	return ctx.unbufferedWriter.Close()
 }
 
 // HijackHandler must process the hijacked connection c.
@@ -864,11 +865,10 @@ func (ctx *RequestCtx) reset() {
 	ctx.hijackHandler = nil
 	ctx.hijackNoResponse = false
 
-	ctx.writer = nil
 	ctx.disableBuffering = false
+	ctx.unbufferedWriter = nil
+	ctx.getUnbufferedWriter = nil
 	ctx.bytesSent = 0
-	ctx.bodyChunkStarted = false
-	ctx.bodyLastChunkSent = false
 }
 
 type firstByteReader struct {
@@ -1500,40 +1500,10 @@ func (ctx *RequestCtx) Write(p []byte) (int, error) {
 
 // writeDirect writes p to underlying connection bypassing any buffering.
 func (ctx *RequestCtx) writeDirect(p []byte) (int, error) {
-	// Non buffered response
-	if ctx.writer == nil {
-		ctx.writer = acquireWriter(ctx)
+	if ctx.unbufferedWriter == nil {
+		ctx.unbufferedWriter = NewUnbufferedWriter(ctx)
 	}
-
-	// Write headers if not written yet
-	if !ctx.Response.headersWritten {
-		if ctx.Response.Header.contentLength == 0 && ctx.Response.Header.IsHTTP11() {
-			ctx.Response.Header.SetContentLength(-1) // means Transfer-Encoding = chunked
-		}
-		h := ctx.Response.Header.Header()
-		n, err := ctx.writer.Write(h)
-		if err != nil {
-			return 0, err
-		}
-		ctx.bytesSent += n
-		ctx.Response.headersWritten = true
-	}
-
-	// Write body. In chunks if content length is not set.
-	if ctx.Response.Header.contentLength == -1 && ctx.Response.Header.IsHTTP11() {
-		ctx.bodyChunkStarted = true
-		err := writeChunk(ctx.writer, p)
-		if err != nil {
-			return 0, err
-		}
-		ctx.bytesSent += len(p) + 4 + countHexDigits(len(p))
-		return len(p), nil
-	}
-
-	n, err := ctx.writer.Write(p)
-	ctx.bytesSent += n
-
-	return n, err
+	return ctx.unbufferedWriter.Write(p)
 }
 
 // BytesSent returns the number of bytes sent to the client after non buffered operation.
@@ -2455,11 +2425,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		}
 
 		if ctx.disableBuffering {
-			ctx.CloseResponse()
-			if ctx.writer != nil {
-				releaseWriter(s, ctx.writer)
-				ctx.writer = nil
-			}
+			_ = ctx.CloseResponse()
 			break
 		}
 
