@@ -32,7 +32,7 @@ func ReleaseArgs(a *Args) {
 }
 
 var argsPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &Args{}
 	},
 }

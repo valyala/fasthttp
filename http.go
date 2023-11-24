@@ -2128,7 +2128,7 @@ func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
 }
 
 var copyBufPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return make([]byte, 4096)
 	},
 }

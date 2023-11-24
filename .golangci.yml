@@ -36,7 +36,6 @@ linters:
     - nonamedreturns
     - paralleltest
     - perfsprint
-    - revive
     - stylecheck
     - testableexamples
     - testpackage
@@ -66,3 +65,8 @@ linters-settings:
 
   # Show all issues with the same text.
   max-same-issues: 0
+
+  revive:
+    # https://github.com/mgechev/revive/blob/master/RULES_DESCRIPTIONS.md
+    rules:
+      - name: use-any

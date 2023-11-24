@@ -51,7 +51,7 @@ func (wp *workerPool) Start() {
 	}
 	wp.stopCh = make(chan struct{})
 	stopCh := wp.stopCh
-	wp.workerChanPool.New = func() interface{} {
+	wp.workerChanPool.New = func() any {
 		return &workerChan{
 			ch: make(chan net.Conn, workerChanCap),
 		}
