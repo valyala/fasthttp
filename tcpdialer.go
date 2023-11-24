@@ -375,7 +375,6 @@ func (d *TCPDialer) tcpAddrsClean() {
 			}
 			return true
 		})
-
 	}
 }
 

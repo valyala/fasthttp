@@ -45,8 +45,6 @@ linters:
     - unparam
     - usestdlibvars
     - varnamelen
-    - wastedassign
-    - whitespace
     - wrapcheck
     - wsl
 

@@ -1780,8 +1780,6 @@ const DefaultConcurrency = 256 * 1024
 func (s *Server) Serve(ln net.Listener) error {
 	var lastOverflowErrorTime time.Time
 	var lastPerIPErrorTime time.Time
-	var c net.Conn
-	var err error
 
 	maxWorkersCount := s.getConcurrency()
 
@@ -1813,7 +1811,8 @@ func (s *Server) Serve(ln net.Listener) error {
 	defer atomic.AddInt32(&s.open, -1)
 
 	for {
-		if c, err = acceptConn(s, ln, &lastPerIPErrorTime); err != nil {
+		c, err := acceptConn(s, ln, &lastPerIPErrorTime)
+		if err != nil {
 			wp.Stop()
 			if err == io.EOF {
 				return nil
@@ -1846,7 +1845,6 @@ func (s *Server) Serve(ln net.Listener) error {
 				time.Sleep(s.SleepWhenConcurrencyLimitsExceeded)
 			}
 		}
-		c = nil
 	}
 }
 
@@ -2292,7 +2290,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		// 'Expect: 100-continue' request handling.
 		// See https://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html#sec8.2.3 for details.
 		if ctx.Request.MayContinue() {
-
 			// Allow the ability to deny reading the incoming request body
 			if s.ContinueHandler != nil {
 				if continueReadingRequest = s.ContinueHandler(&ctx.Request.Header); !continueReadingRequest {
@@ -2582,7 +2579,7 @@ func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
 	c := ctx.c
 	s.releaseCtx(ctx)
 
-	// Make GC happy, so it could garbage collect ctx while we wait for the
+	//nolint:wastedassign // Make GC happy, so it could garbage collect ctx while we wait for the
 	// next request.
 	ctx = nil
 	*ctxP = nil
