@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
+	"io/fs"
 	"sync"
 
 	"github.com/klauspost/compress/flate"
@@ -177,9 +177,19 @@ func WriteGzipLevel(w io.Writer, p []byte, level int) (int, error) {
 	}
 }
 
-var stacklessWriteGzip = stackless.NewFunc(nonblockingWriteGzip)
+var (
+	stacklessWriteGzipOnce sync.Once
+	stacklessWriteGzipFunc func(ctx any) bool
+)
 
-func nonblockingWriteGzip(ctxv interface{}) {
+func stacklessWriteGzip(ctx any) {
+	stacklessWriteGzipOnce.Do(func() {
+		stacklessWriteGzipFunc = stackless.NewFunc(nonblockingWriteGzip)
+	})
+	stacklessWriteGzipFunc(ctx)
+}
+
+func nonblockingWriteGzip(ctxv any) {
 	ctx := ctxv.(*compressCtx)
 	zw := acquireRealGzipWriter(ctx.w, ctx.level)
 
@@ -270,9 +280,19 @@ func WriteDeflateLevel(w io.Writer, p []byte, level int) (int, error) {
 	}
 }
 
-var stacklessWriteDeflate = stackless.NewFunc(nonblockingWriteDeflate)
+var (
+	stacklessWriteDeflateOnce sync.Once
+	stacklessWriteDeflateFunc func(ctx any) bool
+)
 
-func nonblockingWriteDeflate(ctxv interface{}) {
+func stacklessWriteDeflate(ctx any) {
+	stacklessWriteDeflateOnce.Do(func() {
+		stacklessWriteDeflateFunc = stackless.NewFunc(nonblockingWriteDeflate)
+	})
+	stacklessWriteDeflateFunc(ctx)
+}
+
+func nonblockingWriteDeflate(ctxv any) {
 	ctx := ctxv.(*compressCtx)
 	zw := acquireRealDeflateWriter(ctx.w, ctx.level)
 
@@ -421,7 +441,7 @@ func newCompressWriterPoolMap() []*sync.Pool {
 	return m
 }
 
-func isFileCompressible(f *os.File, minCompressRatio float64) bool {
+func isFileCompressible(f fs.File, minCompressRatio float64) bool {
 	// Try compressing the first 4kb of the file
 	// and see if it can be compressed by more than
 	// the given minCompressRatio.
@@ -433,7 +453,11 @@ func isFileCompressible(f *os.File, minCompressRatio float64) bool {
 	}
 	_, err := copyZeroAlloc(zw, lr)
 	releaseStacklessGzipWriter(zw, CompressDefaultCompression)
-	f.Seek(0, 0) //nolint:errcheck
+	seeker, ok := f.(io.Seeker)
+	if !ok {
+		return false
+	}
+	seeker.Seek(0, io.SeekStart) //nolint:errcheck
 	if err != nil {
 		return false
 	}

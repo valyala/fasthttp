@@ -380,7 +380,7 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	req.timeout = timeout
-	if req.timeout < 0 {
+	if req.timeout <= 0 {
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -412,7 +412,7 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	req.timeout = time.Until(deadline)
-	if req.timeout < 0 {
+	if req.timeout <= 0 {
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -1064,16 +1064,17 @@ func doRequestFollowRedirects(req *Request, resp *Response, url string, maxRedir
 			err = ErrMissingLocation
 			break
 		}
-		url = getRedirectURL(url, location)
+		url = getRedirectURL(url, location, req.DisableRedirectPathNormalizing)
 	}
 
 	return statusCode, body, err
 }
 
-func getRedirectURL(baseURL string, location []byte) string {
+func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool) string {
 	u := AcquireURI()
 	u.Update(baseURL)
 	u.UpdateBytes(location)
+	u.DisablePathNormalizing = disablePathNormalizing
 	redirectURL := u.String()
 	ReleaseURI(u)
 	return redirectURL
@@ -1158,7 +1159,7 @@ func ReleaseResponse(resp *Response) {
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	req.timeout = timeout
-	if req.timeout < 0 {
+	if req.timeout <= 0 {
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -1185,7 +1186,7 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	req.timeout = time.Until(deadline)
-	if req.timeout < 0 {
+	if req.timeout <= 0 {
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -1243,8 +1244,27 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	attempts := 0
 	hasBodyStream := req.IsBodyStream()
 
+	// If a request has a timeout we store the timeout
+	// and calculate a deadline so we can keep updating the
+	// timeout on each retry.
+	deadline := time.Time{}
+	timeout := req.timeout
+	if timeout > 0 {
+		deadline = time.Now().Add(timeout)
+	}
+
 	atomic.AddInt32(&c.pendingRequests, 1)
 	for {
+		// If the original timeout was set, we need to update
+		// the one set on the request to reflect the remaining time.
+		if timeout > 0 {
+			req.timeout = time.Until(deadline)
+			if req.timeout <= 0 {
+				err = ErrTimeout
+				break
+			}
+		}
+
 		retry, err = c.do(req, resp)
 		if err == nil || !retry {
 			break
@@ -1271,6 +1291,9 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		}
 	}
 	atomic.AddInt32(&c.pendingRequests, -1)
+
+	// Restore the original timeout.
+	req.timeout = timeout
 
 	if err == io.EOF {
 		err = ErrConnectionClosed
@@ -1451,6 +1474,7 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 			return nil, ErrNoFreeConns
 		}
 
+		//nolint:dupword
 		// reqTimeout    c.MaxConnWaitTimeout   wait duration
 		//     d1                 d2            min(d1, d2)
 		//  0(not set)            d2            d2
@@ -1690,7 +1714,7 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 }
 
 func (c *HostClient) acquireWriter(conn net.Conn) *bufio.Writer {
-	var v interface{}
+	var v any
 	if c.clientWriterPool != nil {
 		v = c.clientWriterPool.Get()
 		if v == nil {
@@ -1725,7 +1749,7 @@ func (c *HostClient) releaseWriter(bw *bufio.Writer) {
 }
 
 func (c *HostClient) acquireReader(conn net.Conn) *bufio.Reader {
-	var v interface{}
+	var v any
 	if c.clientReaderPool != nil {
 		v = c.clientReaderPool.Get()
 		if v == nil {
@@ -1818,6 +1842,9 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 	dial := c.Dial
 	if dialTimeout != 0 && dial == nil {
 		dial = func(addr string) (net.Conn, error) {
+			if c.DialDualStack {
+				return DialDualStackTimeout(addr, dialTimeout)
+			}
 			return DialTimeout(addr, dialTimeout)
 		}
 	}
@@ -2288,7 +2315,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	c.init()
 
 	timeout := time.Until(deadline)
-	if timeout < 0 {
+	if timeout <= 0 {
 		return ErrTimeout
 	}
 
@@ -2516,8 +2543,8 @@ func (c *PipelineClient) newConnClient() *pipelineConnClient {
 }
 
 // ErrPipelineOverflow may be returned from PipelineClient.Do*
-// if the requests' queue is overflown.
-var ErrPipelineOverflow = errors.New("pipelined requests' queue has been overflown. Increase MaxConns and/or MaxPendingRequests")
+// if the requests' queue is overflowed.
+var ErrPipelineOverflow = errors.New("pipelined requests' queue has been overflowed. Increase MaxConns and/or MaxPendingRequests")
 
 // DefaultMaxPendingRequests is the default value
 // for PipelineClient.MaxPendingRequests.

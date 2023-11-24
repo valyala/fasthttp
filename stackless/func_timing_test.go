@@ -7,7 +7,7 @@ import (
 
 func BenchmarkFuncOverhead(b *testing.B) {
 	var n uint64
-	f := NewFunc(func(ctx interface{}) {
+	f := NewFunc(func(ctx any) {
 		atomic.AddUint64(&n, *(ctx.(*uint64)))
 	})
 	b.RunParallel(func(pb *testing.PB) {

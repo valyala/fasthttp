@@ -71,6 +71,12 @@ type Request struct {
 
 	// Use Host header (request.Header.SetHost) instead of the host from SetRequestURI, SetHost, or URI().SetHost
 	UseHostHeader bool
+
+	// DisableRedirectPathNormalizing disables redirect path normalization when used with DoRedirects.
+	//
+	// By default redirect path values are normalized, i.e.
+	// extra slashes are removed, special characters are encoded.
+	DisableRedirectPathNormalizing bool
 }
 
 // Response represents HTTP response.
@@ -1080,6 +1086,7 @@ func (req *Request) Reset() {
 	req.resetSkipHeader()
 	req.timeout = 0
 	req.UseHostHeader = false
+	req.DisableRedirectPathNormalizing = false
 }
 
 func (req *Request) resetSkipHeader() {
@@ -2121,7 +2128,7 @@ func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
 }
 
 var copyBufPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return make([]byte, 4096)
 	},
 }

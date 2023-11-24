@@ -146,6 +146,46 @@ func TestHostClientNegativeTimeout(t *testing.T) {
 	ln.Close()
 }
 
+func TestDoDeadlineRetry(t *testing.T) {
+	t.Parallel()
+
+	tries := 0
+	done := make(chan struct{})
+
+	ln := fasthttputil.NewInmemoryListener()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				close(done)
+				break
+			}
+			tries++
+			br := bufio.NewReader(c)
+			(&RequestHeader{}).Read(br)                      //nolint:errcheck
+			(&Request{}).readBodyStream(br, 0, false, false) //nolint:errcheck
+			time.Sleep(time.Millisecond * 60)
+			c.Close()
+		}
+	}()
+	c := &HostClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	if err := c.DoDeadline(req, nil, time.Now().Add(time.Millisecond*100)); err != ErrTimeout {
+		t.Fatalf("expected ErrTimeout error got: %+v", err)
+	}
+	ln.Close()
+	<-done
+	if tries != 2 {
+		t.Fatalf("expected 2 tries got %d", tries)
+	}
+}
+
 func TestPipelineClientIssue832(t *testing.T) {
 	t.Parallel()
 
@@ -1549,6 +1589,10 @@ func TestClientFollowRedirects(t *testing.T) {
 				u := ctx.URI()
 				u.Update("/bar")
 				ctx.Redirect(u.String(), StatusFound)
+			case "/abc/*/123":
+				u := ctx.URI()
+				u.Update("/xyz/*/456")
+				ctx.Redirect(u.String(), StatusFound)
 			default:
 				ctx.Success("text/plain", ctx.Path())
 			}
@@ -1664,6 +1708,31 @@ func TestClientFollowRedirects(t *testing.T) {
 		}
 		if err != ErrTimeout {
 			t.Errorf("unexpected error: %v. Expecting %v", err, ErrTimeout)
+		}
+
+		ReleaseRequest(req)
+		ReleaseResponse(resp)
+	}
+
+	for i := 0; i < 10; i++ {
+		req := AcquireRequest()
+		resp := AcquireResponse()
+
+		req.SetRequestURI("http://xxx/abc/*/123")
+		req.URI().DisablePathNormalizing = true
+		req.DisableRedirectPathNormalizing = true
+
+		err := c.DoRedirects(req, resp, 16)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if statusCode := resp.StatusCode(); statusCode != StatusOK {
+			t.Fatalf("unexpected status code: %d", statusCode)
+		}
+
+		if body := string(resp.Body()); body != "/xyz/*/456" {
+			t.Fatalf("unexpected response %q. Expecting %q", body, "/xyz/*/456")
 		}
 
 		ReleaseRequest(req)
@@ -3264,5 +3333,62 @@ func TestClientTransportEx(t *testing.T) {
 	roundTripCount := loopCount * (getCount + postCount)
 	if count != roundTripCount {
 		t.Errorf("round trip count should be: %v", roundTripCount)
+	}
+}
+
+func Test_getRedirectURL(t *testing.T) {
+	type args struct {
+		baseURL                string
+		location               []byte
+		disablePathNormalizing bool
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "Path normalizing enabled, no special characters in path",
+			args: args{
+				baseURL:                "http://foo.example.com/abc",
+				location:               []byte("http://bar.example.com/def"),
+				disablePathNormalizing: false,
+			},
+			want: "http://bar.example.com/def",
+		},
+		{
+			name: "Path normalizing enabled, special characters in path",
+			args: args{
+				baseURL:                "http://foo.example.com/abc/*/def",
+				location:               []byte("http://bar.example.com/123/*/456"),
+				disablePathNormalizing: false,
+			},
+			want: "http://bar.example.com/123/%2A/456",
+		},
+		{
+			name: "Path normalizing disabled, no special characters in path",
+			args: args{
+				baseURL:                "http://foo.example.com/abc",
+				location:               []byte("http://bar.example.com/def"),
+				disablePathNormalizing: true,
+			},
+			want: "http://bar.example.com/def",
+		},
+		{
+			name: "Path normalizing disabled, special characters in path",
+			args: args{
+				baseURL:                "http://foo.example.com/abc/*/def",
+				location:               []byte("http://bar.example.com/123/*/456"),
+				disablePathNormalizing: true,
+			},
+			want: "http://bar.example.com/123/*/456",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getRedirectURL(tt.args.baseURL, tt.args.location, tt.args.disablePathNormalizing); got != tt.want {
+				t.Errorf("getRedirectURL() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
