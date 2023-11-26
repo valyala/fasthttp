@@ -15,8 +15,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
@@ -433,7 +431,7 @@ type Server struct {
 	stop int32
 
 	done      chan struct{}
-	closeDone func()
+	closeDone sync.Once
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -1793,9 +1791,6 @@ func (s *Server) Serve(ln net.Listener) error {
 	s.ln = append(s.ln, ln)
 	if s.done == nil {
 		s.done = make(chan struct{})
-		s.closeDone = fasthttputil.OnceFunc(func() {
-			close(s.done)
-		})
 	}
 	if s.concurrencyCh == nil {
 		s.concurrencyCh = make(chan struct{}, maxWorkersCount)
@@ -1892,8 +1887,10 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 		}
 	}
 
-	if s.closeDone != nil {
-		s.closeDone()
+	if s.done != nil {
+		s.closeDone.Do(func() {
+			close(s.done)
+		})
 	}
 
 	// Closing the listener will make Serve() call Stop on the worker pool.
