@@ -48,7 +48,7 @@ func Dial(addr string) (net.Conn, error) {
 //     are temporarily unreachable.
 //
 // This dialer is intended for custom code wrapping before passing
-// to Client.Dial or HostClient.Dial.
+// to Client.DialTimeout or HostClient.DialTimeout.
 //
 // For instance, per-host counters and/or limits may be implemented
 // by such wrappers.
@@ -102,7 +102,7 @@ func DialDualStack(addr string) (net.Conn, error) {
 //     are temporarily unreachable.
 //
 // This dialer is intended for custom code wrapping before passing
-// to Client.Dial or HostClient.Dial.
+// to Client.DialTimeout or HostClient.DialTimeout.
 //
 // For instance, per-host counters and/or limits may be implemented
 // by such wrappers.
@@ -199,7 +199,7 @@ func (d *TCPDialer) Dial(addr string) (net.Conn, error) {
 //     are temporarily unreachable.
 //
 // This dialer is intended for custom code wrapping before passing
-// to Client.Dial or HostClient.Dial.
+// to Client.DialTimeout or HostClient.DialTimeout.
 //
 // For instance, per-host counters and/or limits may be implemented
 // by such wrappers.
@@ -253,7 +253,7 @@ func (d *TCPDialer) DialDualStack(addr string) (net.Conn, error) {
 //     are temporarily unreachable.
 //
 // This dialer is intended for custom code wrapping before passing
-// to Client.Dial or HostClient.Dial.
+// to Client.DialTimeout or HostClient.DialTimeout.
 //
 // For instance, per-host counters and/or limits may be implemented
 // by such wrappers.
