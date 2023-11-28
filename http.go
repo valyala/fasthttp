@@ -77,6 +77,9 @@ type Request struct {
 	// By default redirect path values are normalized, i.e.
 	// extra slashes are removed, special characters are encoded.
 	DisableRedirectPathNormalizing bool
+
+	// 是否使用代理
+	UsingProxy bool
 }
 
 // Response represents HTTP response.
@@ -1561,7 +1564,12 @@ func (req *Request) Write(w *bufio.Writer) error {
 		} else if !req.UseHostHeader {
 			req.Header.SetHostBytes(host)
 		}
-		req.Header.SetRequestURIBytes(uri.RequestURI())
+
+		if req.UsingProxy {
+			req.Header.SetRequestURIBytes(uri.FullURI())
+		} else {
+			req.Header.SetRequestURIBytes(uri.RequestURI())
+		}
 
 		if len(uri.username) > 0 {
 			// RequestHeader.SetBytesKV only uses RequestHeader.bufKV.key
