@@ -2415,7 +2415,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			// This benchmark will send 16 pipelined requests. It is faster to pack as many responses
 			// in a TCP packet and send it back at once than waiting for a flush every request.
 			// In real world circumstances this behaviour could be argued as being wrong.
-			if br == nil || br.Buffered() == 0 || connectionClose {
+			if br == nil || br.Buffered() == 0 || connectionClose || (s.ReduceMemoryUsage && hijackHandler == nil) {
 				err = bw.Flush()
 				if err != nil {
 					break
