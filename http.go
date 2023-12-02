@@ -2104,10 +2104,19 @@ func limitedReaderSize(r io.Reader) int64 {
 
 func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
 	if size > maxSmallFileSize {
-		// w buffer must be empty for triggering
-		// sendfile path in bufio.Writer.ReadFrom.
-		if err := w.Flush(); err != nil {
-			return err
+		earlyFlush := false
+		switch r := r.(type) {
+		case *os.File:
+			earlyFlush = true
+		case *io.LimitedReader:
+			_, earlyFlush = r.R.(*os.File)
+		}
+		if earlyFlush {
+			// w buffer must be empty for triggering
+			// sendfile path in bufio.Writer.ReadFrom.
+			if err := w.Flush(); err != nil {
+				return err
+			}
 		}
 	}
 
