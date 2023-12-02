@@ -2120,6 +2120,12 @@ func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
 }
 
 func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
+	if wt, ok := r.(io.WriterTo); ok {
+		return wt.WriteTo(w)
+	}
+	if rt, ok := w.(io.ReaderFrom); ok {
+		return rt.ReadFrom(r)
+	}
 	vbuf := copyBufPool.Get()
 	buf := vbuf.([]byte)
 	n, err := io.CopyBuffer(w, r, buf)
