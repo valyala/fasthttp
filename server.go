@@ -879,7 +879,8 @@ var zeroTCPAddr = &net.TCPAddr{
 //
 // The returned value may be useful for logging.
 func (ctx *RequestCtx) String() string {
-	return fmt.Sprintf("#%016X - %s<->%s - %s %s", ctx.ID(), ctx.LocalAddr(), ctx.RemoteAddr(), ctx.Request.Header.Method(), ctx.URI().FullURI())
+	return fmt.Sprintf("#%016X - %s<->%s - %s %s", ctx.ID(), ctx.LocalAddr(), ctx.RemoteAddr(),
+		ctx.Request.Header.Method(), ctx.URI().FullURI())
 }
 
 // ID returns unique ID of the request.
@@ -1140,7 +1141,8 @@ var (
 		return nil
 	}
 
-	// NetHttpFormValueFunc gives consistent behavior with net/http. POST and PUT body parameters take precedence over URL query string values.
+	// NetHttpFormValueFunc gives consistent behavior with net/http.
+	// POST and PUT body parameters take precedence over URL query string values.
 	NetHttpFormValueFunc = func(ctx *RequestCtx, key string) []byte {
 		v := ctx.PostArgs().Peek(key)
 		if len(v) > 0 {
@@ -1849,7 +1851,8 @@ func (s *Server) Serve(ln net.Listener) error {
 }
 
 // Shutdown gracefully shuts down the server without interrupting any active connections.
-// Shutdown works by first closing all open listeners and then waiting indefinitely for all connections to return to idle and then shut down.
+// Shutdown works by first closing all open listeners and then waiting indefinitely for all connections
+// to return to idle and then shut down.
 //
 // When Shutdown is called, Serve, ListenAndServe, and ListenAndServeTLS immediately return nil.
 // Make sure the program doesn't exit and waits instead for Shutdown to return.
@@ -1860,12 +1863,14 @@ func (s *Server) Shutdown() error {
 }
 
 // ShutdownWithContext gracefully shuts down the server without interrupting any active connections.
-// ShutdownWithContext works by first closing all open listeners and then waiting for all connections to return to idle or context timeout and then shut down.
+// ShutdownWithContext works by first closing all open listeners and then waiting for all connections to return to idle
+// or context timeout and then shut down.
 //
 // When ShutdownWithContext is called, Serve, ListenAndServe, and ListenAndServeTLS immediately return nil.
 // Make sure the program doesn't exit and waits instead for Shutdown to return.
 //
-// ShutdownWithContext does not close keepalive connections so it's recommended to set ReadTimeout and IdleTimeout to something else than 0.
+// ShutdownWithContext does not close keepalive connections so it's recommended to set ReadTimeout and IdleTimeout
+// to something else than 0.
 func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2874,7 +2879,8 @@ func (s *Server) trackConn(c net.Conn, state ConnState) {
 			s.idleConns = make(map[net.Conn]time.Time)
 		}
 		// Count the connection as Idle after 5 seconds.
-		// Same as net/http.Server: https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
+		// Same as net/http.Server:
+		// https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
 		s.idleConns[c] = time.Now().Add(time.Second * 5)
 
 	default:

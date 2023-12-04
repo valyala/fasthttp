@@ -1047,7 +1047,8 @@ var (
 	ErrTooManyRedirects = errors.New("too many redirects detected when doing the request")
 
 	// HostClients are only able to follow redirects to the same protocol.
-	ErrHostClientRedirectToDifferentScheme = errors.New("HostClient can't follow redirects to a different protocol, please use Client instead")
+	ErrHostClientRedirectToDifferentScheme = errors.New("HostClient can't follow redirects to a different protocol," +
+		" please use Client instead")
 )
 
 const defaultMaxRedirectsCount = 16
@@ -1069,7 +1070,9 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	return statusCode, body, err
 }
 
-func doRequestFollowRedirects(req *Request, resp *Response, url string, maxRedirectsCount int, c clientDoer) (statusCode int, body []byte, err error) {
+func doRequestFollowRedirects(
+	req *Request, resp *Response, url string, maxRedirectsCount int, c clientDoer,
+) (statusCode int, body []byte, err error) {
 	redirectsCount := 0
 
 	for {
@@ -1939,7 +1942,10 @@ func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.T
 	return conn, nil
 }
 
-func dialAddr(addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool, tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration) (net.Conn, error) {
+func dialAddr(
+	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool,
+	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
+) (net.Conn, error) {
 	deadline := time.Now().Add(writeTimeout)
 	conn, err := callDialFunc(addr, dial, dialWithTimeout, dialDualStack, isTLS, dialTimeout)
 	if err != nil {
@@ -1962,7 +1968,9 @@ func dialAddr(addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, d
 	return conn, nil
 }
 
-func callDialFunc(addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool, timeout time.Duration) (net.Conn, error) {
+func callDialFunc(
+	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool, timeout time.Duration,
+) (net.Conn, error) {
 	if dialWithTimeout != nil {
 		return dialWithTimeout(addr, timeout)
 	}

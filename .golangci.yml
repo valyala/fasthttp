@@ -27,7 +27,6 @@ linters:
     - gosec
     - inamedparam
     - ireturn
-    - lll
     - maintidx
     - nakedret
     - nestif
@@ -70,3 +69,12 @@ linters-settings:
     # https://github.com/mgechev/revive/blob/master/RULES_DESCRIPTIONS.md
     rules:
       - name: use-any
+  lll:
+    line-length: 130
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files.
+    - path: _test\.go
+      linters:
+        - lll
