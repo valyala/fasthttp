@@ -306,7 +306,9 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 	return nil, err
 }
 
-func (d *TCPDialer) tryDial(network string, addr *net.TCPAddr, deadline time.Time, concurrencyCh chan struct{}) (net.Conn, error) {
+func (d *TCPDialer) tryDial(
+	network string, addr *net.TCPAddr, deadline time.Time, concurrencyCh chan struct{},
+) (net.Conn, error) {
 	timeout := time.Until(deadline)
 	if timeout <= 0 {
 		return nil, ErrDialTimeout
