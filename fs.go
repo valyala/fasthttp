@@ -558,7 +558,7 @@ func (ff *fsFile) smallFileReader() (io.Reader, error) {
 	return r, nil
 }
 
-// files bigger than this size are sent with sendfile
+// Files bigger than this size are sent with sendfile.
 const maxSmallFileSize = 2 * 4096
 
 func (ff *fsFile) isBig() bool {
@@ -1436,7 +1436,7 @@ func (h *fsHandler) compressFileNolock(
 	return h.newCompressedFSFile(compressedFilePath, fileEncoding)
 }
 
-// newCompressedFSFileCache use memory cache compressed files
+// newCompressedFSFileCache use memory cache compressed files.
 func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, filePath, fileEncoding string) (*fsFile, error) {
 	var (
 		w   = &bytebufferpool.ByteBuffer{}

@@ -344,7 +344,7 @@ func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
 	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
 }
 
-// addVaryBytes add value to the 'Vary' header if it's not included
+// addVaryBytes add value to the 'Vary' header if it's not included.
 func (h *ResponseHeader) addVaryBytes(value []byte) {
 	v := h.peek(strVary)
 	if len(v) == 0 {
@@ -948,7 +948,7 @@ func (h *RequestHeader) DisableNormalizing() {
 //   - conteNT-tYPE -> Content-Type
 //   - foo-bar-baz -> Foo-Bar-Baz
 //
-// This is enabled by default unless disabled using DisableNormalizing()
+// This is enabled by default unless disabled using DisableNormalizing().
 func (h *RequestHeader) EnableNormalizing() {
 	h.disableNormalizing = false
 }
@@ -980,7 +980,7 @@ func (h *ResponseHeader) DisableNormalizing() {
 //   - conteNT-tYPE -> Content-Type
 //   - foo-bar-baz -> Foo-Bar-Baz
 //
-// This is enabled by default unless disabled using DisableNormalizing()
+// This is enabled by default unless disabled using DisableNormalizing().
 func (h *ResponseHeader) EnableNormalizing() {
 	h.disableNormalizing = false
 }
@@ -1350,7 +1350,7 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 	return false
 }
 
-// setNonSpecial directly put into map i.e. not a basic header
+// setNonSpecial directly put into map i.e. not a basic header.
 func (h *ResponseHeader) setNonSpecial(key []byte, value []byte) {
 	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
@@ -1409,7 +1409,7 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 	return false
 }
 
-// setNonSpecial directly put into map i.e. not a basic header
+// setNonSpecial directly put into map i.e. not a basic header.
 func (h *RequestHeader) setNonSpecial(key []byte, value []byte) {
 	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
@@ -3332,7 +3332,7 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 	}
 }
 
-// removeNewLines will replace `\r` and `\n` with an empty space
+// removeNewLines will replace `\r` and `\n` with an empty space.
 func removeNewLines(raw []byte) []byte {
 	// check if a `\r` is present and save the position.
 	// if no `\r` is found, check if a `\n` is present.

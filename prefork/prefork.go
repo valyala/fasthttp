@@ -34,11 +34,11 @@ type Logger interface {
 	Printf(format string, args ...any)
 }
 
-// Prefork implements fasthttp server prefork
+// Prefork implements fasthttp server prefork.
 //
 // Preforks master process (with all cores) between several child processes
 // increases performance significantly, because Go doesn't have to share
-// and manage memory between cores
+// and manage memory between cores.
 //
 // WARNING: using prefork prevents the use of any global state!
 // Things like in-memory caches won't work.
@@ -75,7 +75,7 @@ func init() { //nolint:gochecknoinits
 	flag.Bool(preforkChildFlag[1:], false, "Is a child process")
 }
 
-// IsChild checks if the current thread/process is a child
+// IsChild checks if the current thread/process is a child.
 func IsChild() bool {
 	for _, arg := range os.Args[1:] {
 		if arg == preforkChildFlag {
@@ -86,7 +86,7 @@ func IsChild() bool {
 	return false
 }
 
-// New wraps the fasthttp server to run with preforked processes
+// New wraps the fasthttp server to run with preforked processes.
 func New(s *fasthttp.Server) *Prefork {
 	return &Prefork{
 		Network:           defaultNetwork,
@@ -230,7 +230,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 	return
 }
 
-// ListenAndServe serves HTTP requests from the given TCP addr
+// ListenAndServe serves HTTP requests from the given TCP addr.
 func (p *Prefork) ListenAndServe(addr string) error {
 	if IsChild() {
 		ln, err := p.listen(addr)
@@ -246,7 +246,7 @@ func (p *Prefork) ListenAndServe(addr string) error {
 	return p.prefork(addr)
 }
 
-// ListenAndServeTLS serves HTTPS requests from the given TCP addr
+// ListenAndServeTLS serves HTTPS requests from the given TCP addr.
 //
 // certFile and keyFile are paths to TLS certificate and key files.
 func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
@@ -264,7 +264,7 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 	return p.prefork(addr)
 }
 
-// ListenAndServeTLSEmbed serves HTTPS requests from the given TCP addr
+// ListenAndServeTLSEmbed serves HTTPS requests from the given TCP addr.
 //
 // certData and keyData must contain valid TLS certificate and key data.
 func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) error {
