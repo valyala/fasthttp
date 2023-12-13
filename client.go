@@ -226,7 +226,7 @@ type Client struct {
 	// By default connection duration is unlimited.
 	MaxConnDuration time.Duration
 
-	// Maximum number of attempts for idempotent calls
+	// Maximum number of attempts for idempotent calls.
 	//
 	// DefaultMaxIdemponentCallAttempts is used if not set.
 	MaxIdemponentCallAttempts int
@@ -278,7 +278,7 @@ type Client struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
-	// Path values are sent as-is without normalization
+	// Path values are sent as-is without normalization.
 	//
 	// Disabled path normalization may be useful for proxying incoming requests
 	// to servers that are expecting paths to be forwarded as-is.
@@ -289,18 +289,18 @@ type Client struct {
 
 	// Maximum duration for waiting for a free connection.
 	//
-	// By default will not waiting, return ErrNoFreeConns immediately
+	// By default will not waiting, return ErrNoFreeConns immediately.
 	MaxConnWaitTimeout time.Duration
 
 	// RetryIf controls whether a retry should be attempted after an error.
 	//
-	// By default will use isIdempotent function
+	// By default will use isIdempotent function.
 	RetryIf RetryIfFunc
 
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
 
-	// StreamResponseBody enables response body streaming
+	// StreamResponseBody enables response body streaming.
 	StreamResponseBody bool
 
 	// ConfigureClient configures the fasthttp.HostClient.
@@ -648,7 +648,7 @@ type DialFunc func(addr string) (net.Conn, error)
 //   - foobar.com:8080
 type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, error)
 
-// RetryIfFunc signature of retry if function
+// RetryIfFunc signature of retry if function.
 //
 // Request argument passed to RetryIfFunc, if there are any request errors.
 type RetryIfFunc func(request *Request) bool
@@ -658,7 +658,7 @@ type RoundTripper interface {
 	RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error)
 }
 
-// ConnPoolStrategyType define strategy of connection pool enqueue/dequeue
+// ConnPoolStrategyType define strategy of connection pool enqueue/dequeue.
 type ConnPoolStrategyType int
 
 const (
@@ -746,7 +746,7 @@ type HostClient struct {
 	// after DefaultMaxIdleConnDuration.
 	MaxIdleConnDuration time.Duration
 
-	// Maximum number of attempts for idempotent calls
+	// Maximum number of attempts for idempotent calls.
 	//
 	// DefaultMaxIdemponentCallAttempts is used if not set.
 	MaxIdemponentCallAttempts int
@@ -798,7 +798,7 @@ type HostClient struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
-	// Path values are sent as-is without normalization
+	// Path values are sent as-is without normalization.
 	//
 	// Disabled path normalization may be useful for proxying incoming requests
 	// to servers that are expecting paths to be forwarded as-is.
@@ -807,7 +807,7 @@ type HostClient struct {
 	// extra slashes are removed, special characters are encoded.
 	DisablePathNormalizing bool
 
-	// Will not log potentially sensitive content in error logs
+	// Will not log potentially sensitive content in error logs.
 	//
 	// This option is useful for servers that handle sensitive data
 	// in the request/response.
@@ -831,7 +831,7 @@ type HostClient struct {
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
 
-	// StreamResponseBody enables response body streaming
+	// StreamResponseBody enables response body streaming.
 	StreamResponseBody bool
 
 	lastUseTime uint32
@@ -872,7 +872,7 @@ type clientConn struct {
 
 var startTimeUnix = time.Now().Unix()
 
-// LastUseTime returns time the client was last used
+// LastUseTime returns time the client was last used.
 func (c *HostClient) LastUseTime() time.Time {
 	n := atomic.LoadUint32(&c.lastUseTime)
 	return time.Unix(startTimeUnix+int64(n), 0)
@@ -1694,7 +1694,7 @@ func (c *HostClient) decConnsCount() {
 	}
 }
 
-// ConnsCount returns connection count of HostClient
+// ConnsCount returns connection count of HostClient.
 func (c *HostClient) ConnsCount() int {
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
@@ -1952,7 +1952,7 @@ func dialAddr(
 		return nil, err
 	}
 	if conn == nil {
-		return nil, errors.New("dialling unsuccessful. Please report this bug!")
+		return nil, errors.New("dialling unsuccessful. Please report this bug")
 	}
 
 	// We assume that any conn that has the Handshake() method is a TLS conn already.
@@ -2026,7 +2026,7 @@ func AddMissingPort(addr string, isTLS bool) string {
 // These three options are racing against each other and use
 // wantConn to coordinate and agree about the winning outcome.
 //
-// inspired by net/http/transport.go
+// Inspired by net/http/transport.go.
 type wantConn struct {
 	ready chan struct{}
 	mu    sync.Mutex // protects conn, err, close(ready)
@@ -2081,7 +2081,7 @@ func (w *wantConn) cancel(c *HostClient, err error) {
 
 // A wantConnQueue is a queue of wantConns.
 //
-// inspired by net/http/transport.go
+// Inspired by net/http/transport.go.
 type wantConnQueue struct {
 	// This is a queue, not a dequeue.
 	// It is split into two stages - head[headPos:] and tail.

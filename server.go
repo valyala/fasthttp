@@ -19,6 +19,7 @@ import (
 
 var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 
+// ErrAlreadyServing is deprecated.
 // Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
 var ErrAlreadyServing = errors.New("Server is already serving connections")
 
@@ -164,20 +165,20 @@ type Server struct {
 	//   * ErrBrokenChunks
 	ErrorHandler func(ctx *RequestCtx, err error)
 
-	// HeaderReceived is called after receiving the header
+	// HeaderReceived is called after receiving the header.
 	//
-	// non zero RequestConfig field values will overwrite the default configs
+	// Non zero RequestConfig field values will overwrite the default configs
 	HeaderReceived func(header *RequestHeader) RequestConfig
 
-	// ContinueHandler is called after receiving the Expect 100 Continue Header
+	// ContinueHandler is called after receiving the Expect 100 Continue Header.
 	//
 	// https://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html#sec8.2.3
 	// https://www.w3.org/Protocols/rfc2616/rfc2616-sec10.html#sec10.1.1
 	// Using ContinueHandler a server can make decisioning on whether or not
-	// to read a potentially large request body based on the headers
+	// to read a potentially large request body based on the headers.
 	//
 	// The default is to automatically read request bodies of Expect 100 Continue requests
-	// like they are normal requests
+	// like they are normal requests.
 	ContinueHandler func(header *RequestHeader) bool
 
 	// Server name for sending in response headers.
@@ -484,18 +485,18 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 	}
 }
 
-// RequestConfig configure the per request deadline and body limits
+// RequestConfig configure the per request deadline and body limits.
 type RequestConfig struct {
 	// ReadTimeout is the maximum duration for reading the entire
 	// request body.
-	// a zero value means that default values will be honored
+	// A zero value means that default values will be honored.
 	ReadTimeout time.Duration
 	// WriteTimeout is the maximum duration before timing out
 	// writes of the response.
-	// a zero value means that default values will be honored
+	// A zero value means that default values will be honored.
 	WriteTimeout time.Duration
 	// Maximum request body size.
-	// a zero value means that default values will be honored
+	// A zero value means that default values will be honored.
 	MaxRequestBodySize int
 }
 
@@ -726,7 +727,7 @@ func (ctx *RequestCtx) VisitUserValuesAll(visitor func(any, any)) {
 	}
 }
 
-// ResetUserValues allows to reset user values from Request Context
+// ResetUserValues allows to reset user values from Request Context.
 func (ctx *RequestCtx) ResetUserValues() {
 	ctx.userValues.Reset()
 }
@@ -1143,6 +1144,8 @@ var (
 
 	// NetHttpFormValueFunc gives consistent behavior with net/http.
 	// POST and PUT body parameters take precedence over URL query string values.
+	//
+	//nolint:stylecheck // backwards compatibility
 	NetHttpFormValueFunc = func(ctx *RequestCtx, key string) []byte {
 		v := ctx.PostArgs().Peek(key)
 		if len(v) > 0 {
@@ -1731,7 +1734,7 @@ func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error 
 // AppendCert appends certificate and keyfile to TLS Configuration.
 //
 // This function allows programmer to handle multiple domains
-// in one server structure. See examples/multidomain
+// in one server structure. See examples/multidomain.
 func (s *Server) AppendCert(certFile, keyFile string) error {
 	if len(certFile) == 0 && len(keyFile) == 0 {
 		return errNoCertOrKeyProvided
@@ -2050,14 +2053,14 @@ var errHijacked = errors.New("connection has been hijacked")
 // GetCurrentConcurrency returns a number of currently served
 // connections.
 //
-// This function is intended be used by monitoring systems
+// This function is intended be used by monitoring systems.
 func (s *Server) GetCurrentConcurrency() uint32 {
 	return atomic.LoadUint32(&s.concurrency)
 }
 
 // GetOpenConnectionsCount returns a number of opened connections.
 //
-// This function is intended be used by monitoring systems
+// This function is intended be used by monitoring systems.
 func (s *Server) GetOpenConnectionsCount() int32 {
 	if atomic.LoadInt32(&s.stop) == 0 {
 		// Decrement by one to avoid reporting the extra open value that gets
@@ -2723,7 +2726,7 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // never be canceled. Successive calls to Done return the same value.
 //
 // Note: Because creating a new channel for every request is just too expensive, so
-// RequestCtx.s.done is only closed when the server is shutting down
+// RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Done() <-chan struct{} {
 	return ctx.s.done
 }
@@ -2736,7 +2739,7 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 // or DeadlineExceeded if the context's deadline passed.
 //
 // Note: Because creating a new channel for every request is just too expensive, so
-// RequestCtx.s.done is only closed when the server is shutting down
+// RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Err() error {
 	select {
 	case <-ctx.s.done:
@@ -2751,7 +2754,7 @@ func (ctx *RequestCtx) Err() error {
 // the same key returns the same result.
 //
 // This method is present to make RequestCtx implement the context interface.
-// This method is the same as calling ctx.UserValue(key)
+// This method is the same as calling ctx.UserValue(key).
 func (ctx *RequestCtx) Value(key any) any {
 	return ctx.UserValue(key)
 }

@@ -23,7 +23,7 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
-// Make sure RequestCtx implements context.Context
+// Make sure RequestCtx implements context.Context.
 var _ context.Context = &RequestCtx{}
 
 type closerWithRequestCtx struct {

@@ -2273,11 +2273,11 @@ func (w *writeErrorConn) RemoteAddr() net.Addr {
 	return nil
 }
 
-func (r *writeErrorConn) SetReadDeadline(_ time.Time) error {
+func (w *writeErrorConn) SetReadDeadline(_ time.Time) error {
 	return nil
 }
 
-func (r *writeErrorConn) SetWriteDeadline(_ time.Time) error {
+func (w *writeErrorConn) SetWriteDeadline(_ time.Time) error {
 	return nil
 }
 

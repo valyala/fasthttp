@@ -38,7 +38,7 @@ func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
 type Request struct {
 	noCopy noCopy
 
-	// Request header
+	// Request header.
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header RequestHeader
@@ -88,7 +88,7 @@ type Request struct {
 type Response struct {
 	noCopy noCopy
 
-	// Response header
+	// Response header.
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header ResponseHeader
@@ -116,9 +116,9 @@ type Response struct {
 	keepBodyBuffer        bool
 	secureErrorLogMessage bool
 
-	// Remote TCPAddr from concurrently net.Conn
+	// Remote TCPAddr from concurrently net.Conn.
 	raddr net.Addr
-	// Local TCPAddr from concurrently net.Conn
+	// Local TCPAddr from concurrently net.Conn.
 	laddr net.Addr
 }
 
@@ -250,12 +250,12 @@ func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
 	resp.Header.SetContentLength(bodySize)
 }
 
-// IsBodyStream returns true if body is set via SetBodyStream*
+// IsBodyStream returns true if body is set via SetBodyStream*.
 func (req *Request) IsBodyStream() bool {
 	return req.bodyStream != nil
 }
 
-// IsBodyStream returns true if body is set via SetBodyStream*
+// IsBodyStream returns true if body is set via SetBodyStream*.
 func (resp *Response) IsBodyStream() bool {
 	return resp.bodyStream != nil
 }
@@ -302,7 +302,7 @@ func (resp *Response) BodyWriter() io.Writer {
 	return &resp.w
 }
 
-// BodyStream returns io.Reader
+// BodyStream returns io.Reader.
 //
 // You must CloseBodyStream or ReleaseRequest after you use it.
 func (req *Request) BodyStream() io.Reader {
@@ -313,7 +313,7 @@ func (req *Request) CloseBodyStream() error {
 	return req.closeBodyStream()
 }
 
-// BodyStream returns io.Reader
+// BodyStream returns io.Reader.
 //
 // You must CloseBodyStream or ReleaseResponse after you use it.
 func (resp *Response) BodyStream() io.Reader {
@@ -894,13 +894,13 @@ func swapResponseBody(a, b *Response) {
 	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
 }
 
-// URI returns request URI
+// URI returns request URI.
 func (req *Request) URI() *URI {
 	req.parseURI() //nolint:errcheck
 	return &req.uri
 }
 
-// SetURI initializes request URI
+// SetURI initializes request URI.
 // Use this method if a single URI may be reused across multiple requests.
 // Otherwise, you can just use SetRequestURI() and it will be parsed as new URI.
 // The URI is copied and can be safely modified later.
@@ -1849,7 +1849,7 @@ func (resp *Response) deflateBody(level int) error {
 	return nil
 }
 
-// Bodies with sizes smaller than minCompressLen aren't compressed at all
+// Bodies with sizes smaller than minCompressLen aren't compressed at all.
 const minCompressLen = 200
 
 type writeFlusher interface {
@@ -2366,8 +2366,14 @@ func readCrLf(r *bufio.Reader) error {
 
 // SetTimeout sets timeout for the request.
 //
-// req.SetTimeout(t); c.Do(&req, &resp) is equivalent to
-// c.DoTimeout(&req, &resp, t)
+// The following code:
+//
+//	req.SetTimeout(t)
+//	c.Do(&req, &resp)
+//
+// is equivalent to
+//
+//	c.DoTimeout(&req, &resp, t)
 func (req *Request) SetTimeout(t time.Duration) {
 	req.timeout = t
 }
