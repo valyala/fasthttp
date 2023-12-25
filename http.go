@@ -183,6 +183,11 @@ func (resp *Response) IsSuccess() bool {
 	return resp.StatusCode() > 199 && resp.StatusCode() < 300
 }
 
+// IsError method returns true if HTTP status `code >= 400` otherwise false.
+func (resp *Response) IsError() bool {
+	return resp.StatusCode() > 399
+}
+
 // ConnectionClose returns true if 'Connection: close' header is set.
 func (req *Request) ConnectionClose() bool {
 	return req.Header.ConnectionClose()
