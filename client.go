@@ -228,7 +228,11 @@ type Client struct {
 
 	// Maximum number of attempts for idempotent calls.
 	//
-	// DefaultMaxIdemponentCallAttempts is used if not set.
+	// DefaultMaxIdempotentCallAttempts is used if not set.
+	MaxIdempotentCallAttempts int
+
+	// MaxIdemponentCallAttempts is deprecated.
+	// Deprecated: MaxIdemponentCallAttempts is a historical misspelling of MaxIdempotentCallAttempts.
 	MaxIdemponentCallAttempts int
 
 	// Per-connection buffer size for responses' reading.
@@ -508,6 +512,11 @@ func (c *Client) Do(req *Request, resp *Response) error {
 		c.mLock.Lock()
 		hc = m[string(host)]
 		if hc == nil {
+			maxAttempts := c.MaxIdempotentCallAttempts
+			if maxAttempts <= 0 {
+				// backward compatibility to misspelled field
+				maxAttempts = c.MaxIdemponentCallAttempts
+			}
 			hc = &HostClient{
 				Addr:                          AddMissingPort(string(host), isTLS),
 				Name:                          c.Name,
@@ -520,7 +529,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 				MaxConns:                      c.MaxConnsPerHost,
 				MaxIdleConnDuration:           c.MaxIdleConnDuration,
 				MaxConnDuration:               c.MaxConnDuration,
-				MaxIdemponentCallAttempts:     c.MaxIdemponentCallAttempts,
+				MaxIdempotentCallAttempts:     maxAttempts,
 				ReadBufferSize:                c.ReadBufferSize,
 				WriteBufferSize:               c.WriteBufferSize,
 				ReadTimeout:                   c.ReadTimeout,
@@ -616,8 +625,12 @@ const DefaultMaxConnsPerHost = 512
 // connection is closed.
 const DefaultMaxIdleConnDuration = 10 * time.Second
 
-// DefaultMaxIdemponentCallAttempts is the default idempotent calls attempts count.
-const DefaultMaxIdemponentCallAttempts = 5
+// DefaultMaxIdempotentCallAttempts is the default idempotent calls attempts count.
+const DefaultMaxIdempotentCallAttempts = 5
+
+// DefaultMaxIdemponentCallAttempts is deprecated.
+// Deprecated: DefaultMaxIdemponentCallAttempts is a historical misspelling of DefaultMaxIdempotentCallAttempts.
+const DefaultMaxIdemponentCallAttempts = DefaultMaxIdempotentCallAttempts
 
 // DialFunc must establish connection to addr.
 //
@@ -748,7 +761,11 @@ type HostClient struct {
 
 	// Maximum number of attempts for idempotent calls.
 	//
-	// DefaultMaxIdemponentCallAttempts is used if not set.
+	// DefaultMaxIdempotentCallAttempts is used if not set.
+	MaxIdempotentCallAttempts int
+
+	// MaxIdemponentCallAttempts is deprecated.
+	// Deprecated: MaxIdemponentCallAttempts is a historical misspelling of MaxIdempotentCallAttempts.
 	MaxIdemponentCallAttempts int
 
 	// Per-connection buffer size for responses' reading.
@@ -1268,9 +1285,13 @@ func (c *HostClient) DoRedirects(req *Request, resp *Response, maxRedirectsCount
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	var err error
 	var retry bool
-	maxAttempts := c.MaxIdemponentCallAttempts
+	maxAttempts := c.MaxIdempotentCallAttempts
 	if maxAttempts <= 0 {
-		maxAttempts = DefaultMaxIdemponentCallAttempts
+		// backward compatibility to misspelled field
+		maxAttempts = c.MaxIdemponentCallAttempts
+	}
+	if maxAttempts <= 0 {
+		maxAttempts = DefaultMaxIdempotentCallAttempts
 	}
 	isRequestRetryable := isIdempotent
 	if c.RetryIf != nil {
