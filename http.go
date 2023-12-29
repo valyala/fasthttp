@@ -958,7 +958,7 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 	}
 
 	req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-	if len(req.multipartFormBoundary) == 0 {
+	if req.multipartFormBoundary == "" {
 		return nil, ErrNoMultipartForm
 	}
 
@@ -1014,7 +1014,7 @@ func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
 func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	// Do not care about memory allocations here, since multipart
 	// form processing is slow.
-	if len(boundary) == 0 {
+	if boundary == "" {
 		return errors.New("form boundary cannot be empty")
 	}
 

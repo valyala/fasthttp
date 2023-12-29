@@ -2286,7 +2286,7 @@ type bufioPeekReader struct {
 }
 
 func (r *bufioPeekReader) Read(b []byte) (int, error) {
-	if len(r.s) == 0 {
+	if r.s == "" {
 		return 0, io.EOF
 	}
 

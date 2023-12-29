@@ -68,6 +68,9 @@ linters-settings:
       "all",
       "-ST1000", # at least one file in a package should have a package comment
     ]
+  gocritic:
+    enabled-checks:
+      - emptyStringTest
 
 issues:
   # Show all issues from a linter.
