@@ -1825,7 +1825,7 @@ func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 		c = c.Clone()
 	}
 
-	if len(c.ServerName) == 0 {
+	if c.ServerName == "" {
 		serverName := tlsServerName(addr)
 		if serverName == "*" {
 			c.InsecureSkipVerify = true
