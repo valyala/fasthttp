@@ -1061,6 +1061,55 @@ func testRequestHeaderHasAcceptEncoding(t *testing.T, ae, v string, resultExpect
 	}
 }
 
+func TestVisitHeaderParams(t *testing.T) {
+	t.Parallel()
+	testVisitHeaderParams(t, "text/plain;charset=utf-8;q=0.39", [][2]string{{"charset", "utf-8"}, {"q", "0.39"}})
+	testVisitHeaderParams(t, "text/plain;   foo=bar   ;", [][2]string{{"foo", "bar"}})
+	testVisitHeaderParams(t, `text/plain;      foo="bar";   `, [][2]string{{"foo", "bar"}})
+	testVisitHeaderParams(t, `text/plain; foo="text/plain,text/html;charset=\"utf-8\""`, [][2]string{{"foo", `text/plain,text/html;charset=\"utf-8\"`}})
+	testVisitHeaderParams(t, "text/plain foo=bar", [][2]string{})
+	testVisitHeaderParams(t, "text/plain;", [][2]string{})
+	testVisitHeaderParams(t, "text/plain; ", [][2]string{})
+	testVisitHeaderParams(t, "text/plain; foo", [][2]string{})
+	testVisitHeaderParams(t, "text/plain; foo=", [][2]string{})
+	testVisitHeaderParams(t, "text/plain; =bar", [][2]string{})
+	testVisitHeaderParams(t, "text/plain; foo = bar", [][2]string{})
+	testVisitHeaderParams(t, `text/plain; foo="bar`, [][2]string{})
+	testVisitHeaderParams(t, "text/plain;;foo=bar", [][2]string{})
+
+	parsed := make([][2]string, 0)
+	VisitHeaderParams([]byte(`text/plain; foo=bar; charset=utf-8`), func(key, value []byte) bool {
+		parsed = append(parsed, [2]string{string(key), string(value)})
+		return !bytes.Equal(key, []byte("foo"))
+	})
+
+	if len(parsed) != 1 {
+		t.Fatalf("expected 1 HTTP parameter, parsed %v", len(parsed))
+	}
+
+	if parsed[0] != [2]string{"foo", "bar"} {
+		t.Fatalf("unexpected parameter %v=%v. Expecting foo=bar", parsed[0][0], parsed[0][1])
+	}
+}
+
+func testVisitHeaderParams(t *testing.T, header string, expectedParams [][2]string) {
+	parsed := make([][2]string, 0)
+	VisitHeaderParams([]byte(header), func(key, value []byte) bool {
+		parsed = append(parsed, [2]string{string(key), string(value)})
+		return true
+	})
+
+	if len(parsed) != len(expectedParams) {
+		t.Fatalf("expected %v HTTP parameters, parsed %v", len(expectedParams), len(parsed))
+	}
+
+	for i := range expectedParams {
+		if expectedParams[i] != parsed[i] {
+			t.Fatalf("unexpected parameter %v=%v. Expecting %v=%v", parsed[i][0], parsed[i][1], expectedParams[i][0], expectedParams[i][1])
+		}
+	}
+}
+
 func TestRequestMultipartFormBoundary(t *testing.T) {
 	t.Parallel()
 

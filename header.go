@@ -545,6 +545,104 @@ func (h *ResponseHeader) AddTrailerBytes(trailer []byte) error {
 	return err
 }
 
+// validHeaderFieldByte returns true if c is a valid tchar as defined
+// by section 5.6.2 of [RFC9110].
+func validHeaderFieldByte(c byte) bool {
+	return c < 128 && tcharTable[c]
+}
+
+//	 tchar  = "!" / "#" / "$" / "%" / "&" / "'" / "*"
+//			   / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
+//			   / DIGIT / ALPHA
+//
+// See: https://www.rfc-editor.org/rfc/rfc9110#tokens
+var tcharTable = [128]bool{
+	'!': true, '#': true, '$': true, '%': true, '&': true, '\'': true, '*': true, '+': true,
+	'-': true, '.': true, '^': true, '_': true, '`': true, '|': true, '~': true,
+	'0': true, '1': true, '2': true, '3': true, '4': true, '5': true, '6': true, '7': true, '8': true, '9': true,
+	'A': true, 'B': true, 'C': true, 'D': true, 'E': true, 'F': true, 'G': true,
+	'H': true, 'I': true, 'J': true, 'K': true, 'L': true, 'M': true, 'N': true,
+	'O': true, 'P': true, 'Q': true, 'R': true, 'S': true, 'T': true, 'U': true,
+	'V': true, 'W': true, 'X': true, 'Y': true, 'Z': true,
+	'a': true, 'b': true, 'c': true, 'd': true, 'e': true, 'f': true, 'g': true,
+	'h': true, 'i': true, 'j': true, 'k': true, 'l': true, 'm': true, 'n': true,
+	'o': true, 'p': true, 'q': true, 'r': true, 's': true, 't': true, 'u': true,
+	'v': true, 'w': true, 'x': true, 'y': true, 'z': true,
+}
+
+// VisitHeaderParams calls f for each parameter in the given header bytes.
+// It stops processing when f returns false or an invalid parameter is found.
+// Parameter values may be quoted, in which case \ is treated as an escape
+// character, and the value is unquoted before being passed to value.
+// See: https://www.rfc-editor.org/rfc/rfc9110#section-5.6.6
+//
+// f must not retain references to key and/or value after returning.
+// Copy key and/or value contents before returning if you need retaining them.
+func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
+	for len(b) > 0 {
+		idxSemi := 0
+		for idxSemi < len(b) && b[idxSemi] != ';' {
+			idxSemi++
+		}
+		if idxSemi >= len(b) {
+			return
+		}
+		b = b[idxSemi+1:]
+		for len(b) > 0 && b[0] == ' ' {
+			b = b[1:]
+		}
+
+		n := 0
+		if len(b) == 0 || !validHeaderFieldByte(b[n]) {
+			return
+		}
+		n++
+		for n < len(b) && validHeaderFieldByte(b[n]) {
+			n++
+		}
+
+		if n >= len(b)-1 || b[n] != '=' {
+			return
+		}
+		param := b[:n]
+		n++
+
+		switch {
+		case validHeaderFieldByte(b[n]):
+			m := n
+			n++
+			for n < len(b) && validHeaderFieldByte(b[n]) {
+				n++
+			}
+			if !f(param, b[m:n]) {
+				return
+			}
+		case b[n] == '"':
+			foundEndQuote := false
+			escaping := false
+			n++
+			m := n
+			for ; n < len(b); n++ {
+				if b[n] == '"' && !escaping {
+					foundEndQuote = true
+					break
+				}
+				escaping = (b[n] == '\\' && !escaping)
+			}
+			if !foundEndQuote {
+				return
+			}
+			if !f(param, b[m:n]) {
+				return
+			}
+			n++
+		default:
+			return
+		}
+		b = b[n:]
+	}
+}
+
 // MultipartFormBoundary returns boundary part
 // from 'multipart/form-data; boundary=...' Content-Type.
 func (h *RequestHeader) MultipartFormBoundary() []byte {
