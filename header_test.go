@@ -1110,6 +1110,26 @@ func testVisitHeaderParams(t *testing.T, header string, expectedParams [][2]stri
 	}
 }
 
+func FuzzVisitHeaderParams(f *testing.F) {
+	inputs := []string{
+		`application/json; v=1; foo=bar; q=0.938; param=param; param="big fox"; q=0.43`,
+		`*/*`,
+		`\\`,
+		`text/plain; foo="\\\"\'\\''\'"`,
+	}
+	for _, input := range inputs {
+		f.Add([]byte(input))
+	}
+	f.Fuzz(func(t *testing.T, header []byte) {
+		VisitHeaderParams(header, func(key, value []byte) bool {
+			if len(key) == 0 {
+				t.Errorf("Unexpected length zero parameter, failed input was: %s", header)
+			}
+			return true
+		})
+	})
+}
+
 func TestRequestMultipartFormBoundary(t *testing.T) {
 	t.Parallel()
 
