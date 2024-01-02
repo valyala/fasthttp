@@ -180,6 +180,19 @@ func benchmarkNormalizeHeaderKey(b *testing.B, src []byte) {
 	})
 }
 
+func BenchmarkVisitHeaderParams(b *testing.B) {
+	var h RequestHeader
+	h.SetBytesKV(strContentType, []byte(`text/plain  ;  foo=bar  ;   param2="dquote is: [\"], ok?" ; version=1; q=0.324  `))
+
+	header := h.ContentType()
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		VisitHeaderParams(header, func(key, value []byte) bool { return true })
+	}
+}
+
 func BenchmarkRemoveNewLines(b *testing.B) {
 	type testcase struct {
 		value         string
