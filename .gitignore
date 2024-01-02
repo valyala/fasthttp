@@ -6,3 +6,4 @@ tags
 .vscode
 .DS_Store
 vendor/
+testdata/fuzz
