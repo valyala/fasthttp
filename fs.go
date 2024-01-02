@@ -558,7 +558,7 @@ func (ff *fsFile) smallFileReader() (io.Reader, error) {
 	return r, nil
 }
 
-// files bigger than this size are sent with sendfile
+// Files bigger than this size are sent with sendfile.
 const maxSmallFileSize = 2 * 4096
 
 func (ff *fsFile) isBig() bool {
@@ -961,7 +961,9 @@ func (cm *inMemoryCacheManager) cleanCache(pendingFiles []*fsFile) []*fsFile {
 	return pendingFiles
 }
 
-func cleanCacheNolock(cache map[string]*fsFile, pendingFiles, filesToRelease []*fsFile, cacheDuration time.Duration) ([]*fsFile, []*fsFile) {
+func cleanCacheNolock(
+	cache map[string]*fsFile, pendingFiles, filesToRelease []*fsFile, cacheDuration time.Duration,
+) ([]*fsFile, []*fsFile) {
 	t := time.Now()
 	for k, ff := range cache {
 		if t.Sub(ff.t) > cacheDuration {
@@ -1381,7 +1383,9 @@ func (h *fsHandler) compressAndOpenFSFile(filePath string, fileEncoding string) 
 	return ff, err
 }
 
-func (h *fsHandler) compressFileNolock(f fs.File, fileInfo fs.FileInfo, filePath, compressedFilePath string, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) compressFileNolock(
+	f fs.File, fileInfo fs.FileInfo, filePath, compressedFilePath, fileEncoding string,
+) (*fsFile, error) {
 	// Attempt to open compressed file created by another concurrent
 	// goroutine.
 	// It is safe opening such a file, since the file creation
@@ -1432,7 +1436,7 @@ func (h *fsHandler) compressFileNolock(f fs.File, fileInfo fs.FileInfo, filePath
 	return h.newCompressedFSFile(compressedFilePath, fileEncoding)
 }
 
-// newCompressedFSFileCache use memory cache compressed files
+// newCompressedFSFileCache use memory cache compressed files.
 func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, filePath, fileEncoding string) (*fsFile, error) {
 	var (
 		w   = &bytebufferpool.ByteBuffer{}

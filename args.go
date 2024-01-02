@@ -32,7 +32,7 @@ func ReleaseArgs(a *Args) {
 }
 
 var argsPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &Args{}
 	},
 }
@@ -118,7 +118,7 @@ func (a *Args) QueryString() []byte {
 
 // Sort sorts Args by key and then value using 'f' as comparison function.
 //
-// For example args.Sort(bytes.Compare)
+// For example args.Sort(bytes.Compare).
 func (a *Args) Sort(f func(x, y []byte) int) {
 	sort.SliceStable(a.args, func(i, j int) bool {
 		n := f(a.args[i].key, a.args[j].key)
@@ -229,7 +229,7 @@ func (a *Args) SetBytesKV(key, value []byte) {
 
 // SetNoValue sets only 'key' as argument without the '='.
 //
-// Only key in argument, like key1&key2
+// Only key in argument, like key1&key2.
 func (a *Args) SetNoValue(key string) {
 	a.args = setArg(a.args, key, "", argsNoValue)
 }
@@ -551,7 +551,7 @@ func decodeArgAppend(dst, src []byte) []byte {
 		return append(dst, src...)
 	}
 
-	idx := 0
+	var idx int
 	switch {
 	case idxPercent == -1:
 		idx = idxPlus

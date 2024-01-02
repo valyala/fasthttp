@@ -23,16 +23,16 @@ var (
 type CookieSameSite int
 
 const (
-	// CookieSameSiteDisabled removes the SameSite flag
+	// CookieSameSiteDisabled removes the SameSite flag.
 	CookieSameSiteDisabled CookieSameSite = iota
-	// CookieSameSiteDefaultMode sets the SameSite flag
+	// CookieSameSiteDefaultMode sets the SameSite flag.
 	CookieSameSiteDefaultMode
-	// CookieSameSiteLaxMode sets the SameSite flag with the "Lax" parameter
+	// CookieSameSiteLaxMode sets the SameSite flag with the "Lax" parameter.
 	CookieSameSiteLaxMode
-	// CookieSameSiteStrictMode sets the SameSite flag with the "Strict" parameter
+	// CookieSameSiteStrictMode sets the SameSite flag with the "Strict" parameter.
 	CookieSameSiteStrictMode
-	// CookieSameSiteNoneMode sets the SameSite flag with the "None" parameter
-	// see https://tools.ietf.org/html/draft-west-cookie-incrementalism-00
+	// CookieSameSiteNoneMode sets the SameSite flag with the "None" parameter.
+	// See https://tools.ietf.org/html/draft-west-cookie-incrementalism-00
 	CookieSameSiteNoneMode
 )
 
@@ -54,7 +54,7 @@ func ReleaseCookie(c *Cookie) {
 }
 
 var cookiePool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &Cookie{}
 	},
 }
@@ -122,7 +122,7 @@ func (c *Cookie) SameSite() CookieSameSite {
 }
 
 // SetSameSite sets the cookie's SameSite flag to the given value.
-// set value CookieSameSiteNoneMode will set Secure to true also to avoid browser rejection
+// Set value CookieSameSiteNoneMode will set Secure to true also to avoid browser rejection.
 func (c *Cookie) SetSameSite(mode CookieSameSite) {
 	c.sameSite = mode
 	if mode == CookieSameSiteNoneMode {
@@ -172,16 +172,16 @@ func (c *Cookie) MaxAge() int {
 }
 
 // SetMaxAge sets cookie expiration time based on seconds. This takes precedence
-// over any absolute expiry set on the cookie
+// over any absolute expiry set on the cookie.
 //
-// Set max age to 0 to unset
+// Set max age to 0 to unset.
 func (c *Cookie) SetMaxAge(seconds int) {
 	c.maxAge = seconds
 }
 
 // Expire returns cookie expiration time.
 //
-// CookieExpireUnlimited is returned if cookie doesn't expire
+// CookieExpireUnlimited is returned if cookie doesn't expire.
 func (c *Cookie) Expire() time.Time {
 	expire := c.expire
 	if expire.IsZero() {

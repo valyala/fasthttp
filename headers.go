@@ -1,14 +1,14 @@
 package fasthttp
 
-// Headers
+// Headers.
 const (
-	// Authentication
+	// Authentication.
 	HeaderAuthorization      = "Authorization"
 	HeaderProxyAuthenticate  = "Proxy-Authenticate"
 	HeaderProxyAuthorization = "Proxy-Authorization"
 	HeaderWWWAuthenticate    = "WWW-Authenticate"
 
-	// Caching
+	// Caching.
 	HeaderAge           = "Age"
 	HeaderCacheControl  = "Cache-Control"
 	HeaderClearSiteData = "Clear-Site-Data"
@@ -16,7 +16,7 @@ const (
 	HeaderPragma        = "Pragma"
 	HeaderWarning       = "Warning"
 
-	// Client hints
+	// Client hints.
 	HeaderAcceptCH         = "Accept-CH"
 	HeaderAcceptCHLifetime = "Accept-CH-Lifetime"
 	HeaderContentDPR       = "Content-DPR"
@@ -26,7 +26,7 @@ const (
 	HeaderViewportWidth    = "Viewport-Width"
 	HeaderWidth            = "Width"
 
-	// Conditionals
+	// Conditionals.
 	HeaderETag              = "ETag"
 	HeaderIfMatch           = "If-Match"
 	HeaderIfModifiedSince   = "If-Modified-Since"
@@ -35,24 +35,24 @@ const (
 	HeaderLastModified      = "Last-Modified"
 	HeaderVary              = "Vary"
 
-	// Connection management
+	// Connection management.
 	HeaderConnection      = "Connection"
 	HeaderKeepAlive       = "Keep-Alive"
 	HeaderProxyConnection = "Proxy-Connection"
 
-	// Content negotiation
+	// Content negotiation.
 	HeaderAccept         = "Accept"
 	HeaderAcceptCharset  = "Accept-Charset"
 	HeaderAcceptEncoding = "Accept-Encoding"
 	HeaderAcceptLanguage = "Accept-Language"
 
-	// Controls
+	// Controls.
 	HeaderCookie      = "Cookie"
 	HeaderExpect      = "Expect"
 	HeaderMaxForwards = "Max-Forwards"
 	HeaderSetCookie   = "Set-Cookie"
 
-	// CORS
+	// CORS.
 	HeaderAccessControlAllowCredentials = "Access-Control-Allow-Credentials"
 	HeaderAccessControlAllowHeaders     = "Access-Control-Allow-Headers"
 	HeaderAccessControlAllowMethods     = "Access-Control-Allow-Methods"
@@ -65,48 +65,48 @@ const (
 	HeaderTimingAllowOrigin             = "Timing-Allow-Origin"
 	HeaderXPermittedCrossDomainPolicies = "X-Permitted-Cross-Domain-Policies"
 
-	// Do Not Track
+	// Do Not Track.
 	HeaderDNT = "DNT"
 	HeaderTk  = "Tk"
 
-	// Downloads
+	// Downloads.
 	HeaderContentDisposition = "Content-Disposition"
 
-	// Message body information
+	// Message body information.
 	HeaderContentEncoding = "Content-Encoding"
 	HeaderContentLanguage = "Content-Language"
 	HeaderContentLength   = "Content-Length"
 	HeaderContentLocation = "Content-Location"
 	HeaderContentType     = "Content-Type"
 
-	// Proxies
+	// Proxies.
 	HeaderForwarded       = "Forwarded"
 	HeaderVia             = "Via"
 	HeaderXForwardedFor   = "X-Forwarded-For"
 	HeaderXForwardedHost  = "X-Forwarded-Host"
 	HeaderXForwardedProto = "X-Forwarded-Proto"
 
-	// Redirects
+	// Redirects.
 	HeaderLocation = "Location"
 
-	// Request context
+	// Request context.
 	HeaderFrom           = "From"
 	HeaderHost           = "Host"
 	HeaderReferer        = "Referer"
 	HeaderReferrerPolicy = "Referrer-Policy"
 	HeaderUserAgent      = "User-Agent"
 
-	// Response context
+	// Response context.
 	HeaderAllow  = "Allow"
 	HeaderServer = "Server"
 
-	// Range requests
+	// Range requests.
 	HeaderAcceptRanges = "Accept-Ranges"
 	HeaderContentRange = "Content-Range"
 	HeaderIfRange      = "If-Range"
 	HeaderRange        = "Range"
 
-	// Security
+	// Security.
 	HeaderContentSecurityPolicy           = "Content-Security-Policy"
 	HeaderContentSecurityPolicyReportOnly = "Content-Security-Policy-Report-Only"
 	HeaderCrossOriginResourcePolicy       = "Cross-Origin-Resource-Policy"
@@ -122,26 +122,26 @@ const (
 	HeaderXPoweredBy                      = "X-Powered-By"
 	HeaderXXSSProtection                  = "X-XSS-Protection"
 
-	// Server-sent event
+	// Server-sent event.
 	HeaderLastEventID = "Last-Event-ID"
 	HeaderNEL         = "NEL"
 	HeaderPingFrom    = "Ping-From"
 	HeaderPingTo      = "Ping-To"
 	HeaderReportTo    = "Report-To"
 
-	// Transfer coding
+	// Transfer coding.
 	HeaderTE               = "TE"
 	HeaderTrailer          = "Trailer"
 	HeaderTransferEncoding = "Transfer-Encoding"
 
-	// WebSockets
+	// WebSockets.
 	HeaderSecWebSocketAccept     = "Sec-WebSocket-Accept"
 	HeaderSecWebSocketExtensions = "Sec-WebSocket-Extensions" /* #nosec G101 */
 	HeaderSecWebSocketKey        = "Sec-WebSocket-Key"
 	HeaderSecWebSocketProtocol   = "Sec-WebSocket-Protocol"
 	HeaderSecWebSocketVersion    = "Sec-WebSocket-Version"
 
-	// Other
+	// Other.
 	HeaderAcceptPatch         = "Accept-Patch"
 	HeaderAcceptPushPolicy    = "Accept-Push-Policy"
 	HeaderAcceptSignature     = "Accept-Signature"

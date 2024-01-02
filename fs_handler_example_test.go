@@ -7,7 +7,7 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// Setup file handlers (aka 'file server config')
+// Setup file handlers (aka 'file server config').
 var (
 	// Handler for serving images from /img/ path,
 	// i.e. /img/foo/bar.jpg will be served from
@@ -27,7 +27,7 @@ var (
 	filesHandler = fasthttp.FSHandler("/var/www/files", 0)
 )
 
-// Main request handler
+// Main request handler.
 func requestHandler(ctx *fasthttp.RequestCtx) {
 	path := ctx.Path()
 	switch {
