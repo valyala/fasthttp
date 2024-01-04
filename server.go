@@ -1736,7 +1736,7 @@ func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error 
 // This function allows programmer to handle multiple domains
 // in one server structure. See examples/multidomain.
 func (s *Server) AppendCert(certFile, keyFile string) error {
-	if len(certFile) == 0 && len(keyFile) == 0 {
+	if certFile == "" && keyFile == "" {
 		return errNoCertOrKeyProvided
 	}
 
