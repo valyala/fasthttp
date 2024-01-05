@@ -4,17 +4,24 @@ import (
 	"encoding/json"
 	"expvar"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/valyala/fasthttp"
 )
 
+var once sync.Once
+
 func TestExpvarHandlerBasic(t *testing.T) {
 	t.Parallel()
 
-	expvar.Publish("customVar", expvar.Func(func() any {
-		return "foobar"
-	}))
+	// Publish panics if the same var is published more than once,
+	// which can happen if the test is run with -count
+	once.Do(func() {
+		expvar.Publish("customVar", expvar.Func(func() any {
+			return "foobar"
+		}))
+	})
 
 	var ctx fasthttp.RequestCtx
 
