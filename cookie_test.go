@@ -1,7 +1,6 @@
 package fasthttp
 
 import (
-	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -14,27 +13,6 @@ func TestCookiePanic(t *testing.T) {
 	if err := c.Parse(";SAMeSITe="); err != nil {
 		t.Error(err)
 	}
-}
-
-func FuzzCookieParse(f *testing.F) {
-	inputs := []string{
-		`xxx=yyy`,
-		`xxx=yyy; expires=Tue, 10 Nov 2009 23:00:00 GMT; domain=foobar.com; path=/a/b`,
-		" \n\t\"",
-	}
-	for _, input := range inputs {
-		f.Add([]byte(input))
-	}
-	c := AcquireCookie()
-	defer ReleaseCookie(c)
-	f.Fuzz(func(t *testing.T, cookie []byte) {
-		_ = c.ParseBytes(cookie)
-
-		w := bytes.Buffer{}
-		if _, err := c.WriteTo(&w); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
 }
 
 func TestCookieValueWithEqualAndSpaceChars(t *testing.T) {

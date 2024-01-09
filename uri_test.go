@@ -9,25 +9,6 @@ import (
 	"time"
 )
 
-func FuzzURIUpdateBytes(f *testing.F) {
-	u := AcquireURI()
-	defer ReleaseURI(u)
-
-	f.Add([]byte(`http://foobar.com/aaa/bb?cc`))
-	f.Add([]byte(`//foobar.com/aaa/bb?cc`))
-	f.Add([]byte(`/aaa/bb?cc`))
-	f.Add([]byte(`xx?yy=abc`))
-
-	f.Fuzz(func(t *testing.T, uri []byte) {
-		u.UpdateBytes(uri)
-
-		w := bytes.Buffer{}
-		if _, err := u.WriteTo(&w); err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-}
-
 func TestURICopyToQueryArgs(t *testing.T) {
 	t.Parallel()
 

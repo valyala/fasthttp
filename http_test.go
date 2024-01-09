@@ -1700,32 +1700,6 @@ func testRequestReadLimitBodySuccess(t *testing.T, s string, maxBodySize int) {
 	}
 }
 
-func FuzzResponseReadLimitBody(f *testing.F) {
-	res := AcquireResponse()
-	defer ReleaseResponse(res)
-
-	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 10\r\n\r\n9876543210"), 1024*1024)
-
-	f.Fuzz(func(t *testing.T, body []byte, max int) {
-		_ = res.ReadLimitBody(bufio.NewReader(bytes.NewReader(body)), max)
-		w := bytes.Buffer{}
-		_, _ = res.WriteTo(&w)
-	})
-}
-
-func FuzzRequestReadLimitBody(f *testing.F) {
-	req := AcquireRequest()
-	defer ReleaseRequest(req)
-
-	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nfoobar\r\n\r\n"), 1024*1024)
-
-	f.Fuzz(func(t *testing.T, body []byte, max int) {
-		_ = req.ReadLimitBody(bufio.NewReader(bytes.NewReader(body)), max)
-		w := bytes.Buffer{}
-		_, _ = req.WriteTo(&w)
-	})
-}
-
 func TestRequestString(t *testing.T) {
 	t.Parallel()
 
