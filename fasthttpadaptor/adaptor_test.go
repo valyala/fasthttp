@@ -80,7 +80,14 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		if r.Context().Value(expectedContextKey) != expectedContextValue {
 			t.Fatalf("unexpected context value for key %q. Expecting %q", expectedContextKey, expectedContextValue)
 		}
-
+		if h, ok := w.(http.Hijacker); !ok {
+			t.Fatalf("response writer do not support hijack interface")
+		} else if netConn, _, err := h.Hijack(); err != nil {
+			t.Fatalf("invoking Hijack failed: %s", err)
+		} else if netConn == nil {
+			t.Fatalf("invalid conn handler for hijack invokation")
+		}
+		
 		for k, expectedV := range expectedHeader {
 			v := r.Header.Get(k)
 			if v != expectedV {
