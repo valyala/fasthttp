@@ -2958,6 +2958,12 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	if err == nil {
 		err = bw.Flush()
 	}
+
+
+	if req.ConnAcquiredCallback != nil {
+		req.ConnAcquiredCallback(conn)
+	}
+
 	hc.releaseWriter(bw)
 
 	// Return ErrTimeout on any timeout.

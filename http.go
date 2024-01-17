@@ -78,8 +78,11 @@ type Request struct {
 	// extra slashes are removed, special characters are encoded.
 	DisableRedirectPathNormalizing bool
 
-	// 是否使用代理
+	// UsingProxy 是否使用代理
 	UsingProxy bool
+
+	// ConnAcquiredCallback 连接获取后回调，用于获取连接信息（例如 *tls.Conn 中的证书信息等）
+	ConnAcquiredCallback func(conn net.Conn)
 }
 
 // Response represents HTTP response.
