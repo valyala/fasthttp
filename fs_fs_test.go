@@ -364,8 +364,6 @@ func TestFSServeFileDirectoryRedirect(t *testing.T) {
 	}
 }
 
-// //*
-// *//
 var dirTestFilesystem = os.DirFS(".")
 
 func TestDirFSServeFileHead(t *testing.T) {

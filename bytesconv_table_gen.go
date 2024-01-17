@@ -98,12 +98,34 @@ func main() {
 		return a
 	}()
 
+	tcharTable := func() [128]byte {
+		// Should match net/textproto's validHeaderFieldByte(c byte) bool
+		// Defined by RFC 9110 5.6.2
+		//      tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
+		//      "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
+		var a [128]byte
+		for _, v := range "!#$%&'*+-.^_`|~" {
+			a[v] = 1
+		}
+		for i := 'a'; i <= 'z'; i++ {
+			a[i] = 1
+		}
+		for i := 'A'; i <= 'Z'; i++ {
+			a[i] = 1
+		}
+		for i := '0'; i <= '9'; i++ {
+			a[i] = 1
+		}
+		return a
+	}()
+
 	w := bytes.NewBufferString(pre)
 	fmt.Fprintf(w, "const hex2intTable = %q\n", hex2intTable)
 	fmt.Fprintf(w, "const toLowerTable = %q\n", toLowerTable)
 	fmt.Fprintf(w, "const toUpperTable = %q\n", toUpperTable)
 	fmt.Fprintf(w, "const quotedArgShouldEscapeTable = %q\n", quotedArgShouldEscapeTable)
 	fmt.Fprintf(w, "const quotedPathShouldEscapeTable = %q\n", quotedPathShouldEscapeTable)
+	fmt.Fprintf(w, "const tcharTable = %q\n", tcharTable)
 
 	if err := os.WriteFile("bytesconv_table.go", w.Bytes(), 0o660); err != nil {
 		log.Fatal(err)

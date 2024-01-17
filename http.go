@@ -38,7 +38,7 @@ func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
 type Request struct {
 	noCopy noCopy
 
-	// Request header
+	// Request header.
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header RequestHeader
@@ -91,7 +91,7 @@ type Request struct {
 type Response struct {
 	noCopy noCopy
 
-	// Response header
+	// Response header.
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header ResponseHeader
@@ -119,9 +119,9 @@ type Response struct {
 	keepBodyBuffer        bool
 	secureErrorLogMessage bool
 
-	// Remote TCPAddr from concurrently net.Conn
+	// Remote TCPAddr from concurrently net.Conn.
 	raddr net.Addr
-	// Local TCPAddr from concurrently net.Conn
+	// Local TCPAddr from concurrently net.Conn.
 	laddr net.Addr
 }
 
@@ -253,12 +253,12 @@ func (resp *Response) SetBodyStream(bodyStream io.Reader, bodySize int) {
 	resp.Header.SetContentLength(bodySize)
 }
 
-// IsBodyStream returns true if body is set via SetBodyStream*
+// IsBodyStream returns true if body is set via SetBodyStream*.
 func (req *Request) IsBodyStream() bool {
 	return req.bodyStream != nil
 }
 
-// IsBodyStream returns true if body is set via SetBodyStream*
+// IsBodyStream returns true if body is set via SetBodyStream*.
 func (resp *Response) IsBodyStream() bool {
 	return resp.bodyStream != nil
 }
@@ -305,7 +305,7 @@ func (resp *Response) BodyWriter() io.Writer {
 	return &resp.w
 }
 
-// BodyStream returns io.Reader
+// BodyStream returns io.Reader.
 //
 // You must CloseBodyStream or ReleaseRequest after you use it.
 func (req *Request) BodyStream() io.Reader {
@@ -316,7 +316,7 @@ func (req *Request) CloseBodyStream() error {
 	return req.closeBodyStream()
 }
 
-// BodyStream returns io.Reader
+// BodyStream returns io.Reader.
 //
 // You must CloseBodyStream or ReleaseResponse after you use it.
 func (resp *Response) BodyStream() io.Reader {
@@ -897,13 +897,13 @@ func swapResponseBody(a, b *Response) {
 	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
 }
 
-// URI returns request URI
+// URI returns request URI.
 func (req *Request) URI() *URI {
 	req.parseURI() //nolint:errcheck
 	return &req.uri
 }
 
-// SetURI initializes request URI
+// SetURI initializes request URI.
 // Use this method if a single URI may be reused across multiple requests.
 // Otherwise, you can just use SetRequestURI() and it will be parsed as new URI.
 // The URI is copied and can be safely modified later.
@@ -961,7 +961,7 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 	}
 
 	req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-	if len(req.multipartFormBoundary) == 0 {
+	if req.multipartFormBoundary == "" {
 		return nil, ErrNoMultipartForm
 	}
 
@@ -1017,7 +1017,7 @@ func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
 func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	// Do not care about memory allocations here, since multipart
 	// form processing is slow.
-	if len(boundary) == 0 {
+	if boundary == "" {
 		return errors.New("form boundary cannot be empty")
 	}
 
@@ -1857,7 +1857,7 @@ func (resp *Response) deflateBody(level int) error {
 	return nil
 }
 
-// Bodies with sizes smaller than minCompressLen aren't compressed at all
+// Bodies with sizes smaller than minCompressLen aren't compressed at all.
 const minCompressLen = 200
 
 type writeFlusher interface {
@@ -2112,10 +2112,19 @@ func limitedReaderSize(r io.Reader) int64 {
 
 func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
 	if size > maxSmallFileSize {
-		// w buffer must be empty for triggering
-		// sendfile path in bufio.Writer.ReadFrom.
-		if err := w.Flush(); err != nil {
-			return err
+		earlyFlush := false
+		switch r := r.(type) {
+		case *os.File:
+			earlyFlush = true
+		case *io.LimitedReader:
+			_, earlyFlush = r.R.(*os.File)
+		}
+		if earlyFlush {
+			// w buffer must be empty for triggering
+			// sendfile path in bufio.Writer.ReadFrom.
+			if err := w.Flush(); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -2128,6 +2137,12 @@ func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
 }
 
 func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
+	if wt, ok := r.(io.WriterTo); ok {
+		return wt.WriteTo(w)
+	}
+	if rt, ok := w.(io.ReaderFrom); ok {
+		return rt.ReadFrom(r)
+	}
 	vbuf := copyBufPool.Get()
 	buf := vbuf.([]byte)
 	n, err := io.CopyBuffer(w, r, buf)
@@ -2136,7 +2151,7 @@ func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
 }
 
 var copyBufPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return make([]byte, 4096)
 	},
 }
@@ -2359,8 +2374,14 @@ func readCrLf(r *bufio.Reader) error {
 
 // SetTimeout sets timeout for the request.
 //
-// req.SetTimeout(t); c.Do(&req, &resp) is equivalent to
-// c.DoTimeout(&req, &resp, t)
+// The following code:
+//
+//	req.SetTimeout(t)
+//	c.Do(&req, &resp)
+//
+// is equivalent to
+//
+//	c.DoTimeout(&req, &resp, t)
 func (req *Request) SetTimeout(t time.Duration) {
 	req.timeout = t
 }

@@ -2214,7 +2214,7 @@ func testRequestSuccess(t *testing.T, method, requestURI, host, userAgent, body,
 	if string(req1.Header.Method()) != expectedMethod {
 		t.Fatalf("Unexpected method: %q. Expected %q", req1.Header.Method(), expectedMethod)
 	}
-	if len(requestURI) == 0 {
+	if requestURI == "" {
 		requestURI = "/"
 	}
 	if string(req1.Header.RequestURI()) != requestURI {
@@ -2467,7 +2467,7 @@ func testRequestPostArgsError(t *testing.T, req *Request, s string) {
 		t.Fatalf("Unexpected error when reading %q: %v", s, err)
 	}
 	ss := req.PostArgs().String()
-	if len(ss) != 0 {
+	if ss != "" {
 		t.Fatalf("unexpected post args: %q. Expecting empty post args", ss)
 	}
 }

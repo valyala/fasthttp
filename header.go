@@ -344,7 +344,7 @@ func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
 	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
 }
 
-// addVaryBytes add value to the 'Vary' header if it's not included
+// addVaryBytes add value to the 'Vary' header if it's not included.
 func (h *ResponseHeader) addVaryBytes(value []byte) {
 	v := h.peek(strVary)
 	if len(v) == 0 {
@@ -543,6 +543,85 @@ func (h *ResponseHeader) AddTrailerBytes(trailer []byte) error {
 	}
 
 	return err
+}
+
+// validHeaderFieldByte returns true if c is a valid tchar as defined
+// by section 5.6.2 of [RFC9110].
+func validHeaderFieldByte(c byte) bool {
+	return c < 128 && tcharTable[c] == 1
+}
+
+// VisitHeaderParams calls f for each parameter in the given header bytes.
+// It stops processing when f returns false or an invalid parameter is found.
+// Parameter values may be quoted, in which case \ is treated as an escape
+// character, and the value is unquoted before being passed to value.
+// See: https://www.rfc-editor.org/rfc/rfc9110#section-5.6.6
+//
+// f must not retain references to key and/or value after returning.
+// Copy key and/or value contents before returning if you need retaining them.
+func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
+	for len(b) > 0 {
+		idxSemi := 0
+		for idxSemi < len(b) && b[idxSemi] != ';' {
+			idxSemi++
+		}
+		if idxSemi >= len(b) {
+			return
+		}
+		b = b[idxSemi+1:]
+		for len(b) > 0 && b[0] == ' ' {
+			b = b[1:]
+		}
+
+		n := 0
+		if len(b) == 0 || !validHeaderFieldByte(b[n]) {
+			return
+		}
+		n++
+		for n < len(b) && validHeaderFieldByte(b[n]) {
+			n++
+		}
+
+		if n >= len(b)-1 || b[n] != '=' {
+			return
+		}
+		param := b[:n]
+		n++
+
+		switch {
+		case validHeaderFieldByte(b[n]):
+			m := n
+			n++
+			for n < len(b) && validHeaderFieldByte(b[n]) {
+				n++
+			}
+			if !f(param, b[m:n]) {
+				return
+			}
+		case b[n] == '"':
+			foundEndQuote := false
+			escaping := false
+			n++
+			m := n
+			for ; n < len(b); n++ {
+				if b[n] == '"' && !escaping {
+					foundEndQuote = true
+					break
+				}
+				escaping = (b[n] == '\\' && !escaping)
+			}
+			if !foundEndQuote {
+				return
+			}
+			if !f(param, b[m:n]) {
+				return
+			}
+			n++
+		default:
+			return
+		}
+		b = b[n:]
+	}
 }
 
 // MultipartFormBoundary returns boundary part
@@ -948,7 +1027,7 @@ func (h *RequestHeader) DisableNormalizing() {
 //   - conteNT-tYPE -> Content-Type
 //   - foo-bar-baz -> Foo-Bar-Baz
 //
-// This is enabled by default unless disabled using DisableNormalizing()
+// This is enabled by default unless disabled using DisableNormalizing().
 func (h *RequestHeader) EnableNormalizing() {
 	h.disableNormalizing = false
 }
@@ -980,7 +1059,7 @@ func (h *ResponseHeader) DisableNormalizing() {
 //   - conteNT-tYPE -> Content-Type
 //   - foo-bar-baz -> Foo-Bar-Baz
 //
-// This is enabled by default unless disabled using DisableNormalizing()
+// This is enabled by default unless disabled using DisableNormalizing().
 func (h *ResponseHeader) EnableNormalizing() {
 	h.disableNormalizing = false
 }
@@ -1350,7 +1429,7 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 	return false
 }
 
-// setNonSpecial directly put into map i.e. not a basic header
+// setNonSpecial directly put into map i.e. not a basic header.
 func (h *ResponseHeader) setNonSpecial(key []byte, value []byte) {
 	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
@@ -1409,7 +1488,7 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 	return false
 }
 
-// setNonSpecial directly put into map i.e. not a basic header
+// setNonSpecial directly put into map i.e. not a basic header.
 func (h *RequestHeader) setNonSpecial(key []byte, value []byte) {
 	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
@@ -3332,7 +3411,7 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 	}
 }
 
-// removeNewLines will replace `\r` and `\n` with an empty space
+// removeNewLines will replace `\r` and `\n` with an empty space.
 func removeNewLines(raw []byte) []byte {
 	// check if a `\r` is present and save the position.
 	// if no `\r` is found, check if a `\n` is present.

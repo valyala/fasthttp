@@ -31,7 +31,7 @@ aaaaaaaaaa`
 	s := &Server{
 		StreamRequestBody: true,
 		Handler: func(ctx *RequestCtx) {
-			body := ""
+			var body string
 			expected := "aaaaaaaaaa"
 			if string(ctx.Path()) == "/one" {
 				body = string(ctx.PostBody())

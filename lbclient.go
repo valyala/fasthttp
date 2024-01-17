@@ -59,12 +59,12 @@ type LBClient struct {
 // The timeout may be overridden via LBClient.Timeout.
 const DefaultLBClientTimeout = time.Second
 
-// DoDeadline calls DoDeadline on the least loaded client
+// DoDeadline calls DoDeadline on the least loaded client.
 func (cc *LBClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	return cc.get().DoDeadline(req, resp, deadline)
 }
 
-// DoTimeout calculates deadline and calls DoDeadline on the least loaded client
+// DoTimeout calculates deadline and calls DoDeadline on the least loaded client.
 func (cc *LBClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	return cc.get().DoDeadline(req, resp, deadline)
@@ -95,8 +95,8 @@ func (cc *LBClient) init() {
 	}
 }
 
-// AddClient adds a new client to the balanced clients
-// returns the new total number of clients
+// AddClient adds a new client to the balanced clients and
+// returns the new total number of clients.
 func (cc *LBClient) AddClient(c BalancingClient) int {
 	cc.mu.Lock()
 	cc.cs = append(cc.cs, &lbClient{
@@ -107,9 +107,9 @@ func (cc *LBClient) AddClient(c BalancingClient) int {
 	return len(cc.cs)
 }
 
-// RemoveClients removes clients using the provided callback
-// if rc returns true, the passed client will be removed
-// returns the new total number of clients
+// RemoveClients removes clients using the provided callback.
+// If rc returns true, the passed client will be removed.
+// Returns the new total number of clients.
 func (cc *LBClient) RemoveClients(rc func(BalancingClient) bool) int {
 	cc.mu.Lock()
 	n := 0
