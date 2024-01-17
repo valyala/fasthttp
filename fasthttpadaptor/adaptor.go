@@ -47,7 +47,11 @@ func NewFastHTTPHandlerFunc(h http.HandlerFunc) fasthttp.RequestHandler {
 // So it is advisable using this function only for quick net/http -> fasthttp
 // switching. Then manually convert net/http handlers to fasthttp handlers
 // according to https://github.com/valyala/fasthttp#switching-from-nethttp-to-fasthttp .
-func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
+//
+// hijackHandler is used for registering handler for connection hijacking, this is usefull for cases
+// where there is no access to change the server KeepHijackedConns field (which is default as false)
+// it also can be used for additional custom hijacking logic
+func NewFastHTTPHandler(h http.Handler, hijackHandler ...func(net.Conn)) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		var r http.Request
 		if err := ConvertRequest(ctx, &r, true); err != nil {
@@ -55,7 +59,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 			return
 		}
-		w := netHTTPResponseWriter{w: ctx.Response.BodyWriter(), r: ctx.RequestBodyStream(), conn: ctx.Conn()}
+		w := netHTTPResponseWriter{w: ctx.Response.BodyWriter(), r: ctx.RequestBodyStream(), conn: ctx.Conn(), ctx: ctx, hijackHandler: hijackHandler}
 		h.ServeHTTP(&w, r.WithContext(ctx))
 
 		ctx.SetStatusCode(w.StatusCode())
@@ -84,11 +88,13 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 }
 
 type netHTTPResponseWriter struct {
-	statusCode int
-	h          http.Header
-	w          io.Writer
-	r          io.Reader
-	conn       net.Conn
+	statusCode    int
+	h             http.Header
+	w             io.Writer
+	r             io.Reader
+	conn          net.Conn
+	ctx           *fasthttp.RequestCtx
+	hijackHandler []func(net.Conn)
 }
 
 func (w *netHTTPResponseWriter) StatusCode() int {
@@ -116,5 +122,8 @@ func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 func (w *netHTTPResponseWriter) Flush() {}
 
 func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if len(w.hijackHandler) > 0 {
+		w.ctx.Hijack(w.hijackHandler[0])
+	}
 	return w.conn, &bufio.ReadWriter{Reader: bufio.NewReader(w.r), Writer: bufio.NewWriter(w.w)}, nil
 }

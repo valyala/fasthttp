@@ -1,6 +1,7 @@
 package fasthttpadaptor
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/valyala/fasthttp"
+	"golang.org/x/sync/errgroup"
 )
 
 func TestNewFastHTTPHandler(t *testing.T) {
@@ -80,14 +82,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		if r.Context().Value(expectedContextKey) != expectedContextValue {
 			t.Fatalf("unexpected context value for key %q. Expecting %q", expectedContextKey, expectedContextValue)
 		}
-		if h, ok := w.(http.Hijacker); !ok {
-			t.Fatalf("response writer do not support hijack interface")
-		} else if netConn, _, err := h.Hijack(); err != nil {
-			t.Fatalf("invoking Hijack failed: %s", err)
-		} else if netConn == nil {
-			t.Fatalf("invalid conn handler for hijack invokation")
-		}
-		
+
 		for k, expectedV := range expectedHeader {
 			v := r.Header.Get(k)
 			if v != expectedV {
@@ -148,5 +143,79 @@ func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value i
 	return func(ctx *fasthttp.RequestCtx) {
 		ctx.SetUserValue(key, value)
 		next(ctx)
+	}
+}
+
+func TestHijackInterface1(t *testing.T) {
+	g := errgroup.Group{}
+
+	var (
+		reqCtx fasthttp.RequestCtx
+		req    fasthttp.Request
+	)
+
+	client, server := net.Pipe()
+	testmsgc2s := "hello from a client"
+	testmsgs2c := "hello from a hijacked request"
+
+	reqCtx.Init2(server, nil, true)
+	req.CopyTo(&reqCtx.Request)
+
+	nethttpH := func(w http.ResponseWriter, r *http.Request) {
+		if h, ok := w.(http.Hijacker); !ok {
+			t.Fatalf("response writer do not support hijack interface")
+		} else if netConn, _, err := h.Hijack(); err != nil {
+			t.Fatalf("invoking Hijack failed: %s", err)
+		} else if netConn == nil {
+			t.Fatalf("invalid conn handler for hijack invokation")
+		} else {
+			readMsg := make([]byte, len(testmsgc2s))
+			n, err := io.ReadAtLeast(netConn, readMsg, len(testmsgc2s))
+			if err != nil {
+				t.Fatalf("server: error on read from conn: %s", err)
+			}
+			if n != len(testmsgc2s) || testmsgc2s != string(readMsg) {
+				t.Fatalf("server: mismatch on message recieved: expected: (%d)<%s>, actual: (%d)<%s>\n", len(testmsgc2s), testmsgc2s, n, string(readMsg))
+			}
+			n, err = io.WriteString(netConn, testmsgs2c)
+			if err != nil {
+				t.Fatalf("server: error on write to conn: %s", err)
+			}
+			if n != len(testmsgs2c) {
+				t.Fatalf("server: mismatch on message sent size: expected: (%d), actual: (%d)\n", len(testmsgc2s), n)
+			}
+			netConn.Close()
+		}
+	}
+
+	g.Go(func() error {
+		n, err := io.WriteString(client, testmsgc2s)
+		if err != nil {
+			return fmt.Errorf("client: error on write to conn: %s\n", err)
+		}
+		if n != len(testmsgc2s) {
+			return fmt.Errorf("client: mismatch on send all: expected: %d, actual: %d\n", len(testmsgc2s), n)
+		}
+		readMsg := make([]byte, len(testmsgs2c))
+		n, err = io.ReadAtLeast(client, readMsg, len(testmsgs2c))
+		if err != nil {
+			return fmt.Errorf("client: error on read from conn: %s", err)
+		}
+		if n != len(testmsgs2c) || testmsgs2c != string(readMsg) {
+			return fmt.Errorf("client: mismatch on message recieved: expected: (%d)<%s>, actual: (%d)<%s>\n", len(testmsgs2c), testmsgs2c, n, string(readMsg))
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH), func(c net.Conn) {})
+		fasthttpH(&reqCtx)
+		if !reqCtx.Hijacked() {
+			t.Fatal("request was not hijacked")
+		}
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		t.Fatal(err)
 	}
 }
