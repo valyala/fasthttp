@@ -27,8 +27,12 @@ import (
 // So it is advisable using this function only for quick net/http -> fasthttp
 // switching. Then manually convert net/http handlers to fasthttp handlers
 // according to https://github.com/valyala/fasthttp#switching-from-nethttp-to-fasthttp .
-func NewFastHTTPHandlerFunc(h http.HandlerFunc) fasthttp.RequestHandler {
-	return NewFastHTTPHandler(h)
+//
+// hijackHandler is used for registering handler for connection hijacking, this is usefull for cases
+// where there is no access to change the server KeepHijackedConns field (which is default as false)
+// it also can be used for additional custom hijacking logic
+func NewFastHTTPHandlerFunc(h http.HandlerFunc, hijackHandler ...func(net.Conn)) fasthttp.RequestHandler {
+	return NewFastHTTPHandler(h, hijackHandler...)
 }
 
 // NewFastHTTPHandler wraps net/http handler to fasthttp request handler,
