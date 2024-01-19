@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path/filepath"
 	"strconv"
 	"sync"
 )
@@ -574,6 +573,8 @@ func normalizePath(dst, src []byte) []byte {
 	dst = dst[:0]
 	dst = addLeadingSlash(dst, src)
 	dst = decodeArgAppendNoPlus(dst, src)
+	// replacing backslash, if you use windows(backslash)
+	dst = replaceSlashes(dst)
 
 	// remove duplicate slashes
 	b := dst
@@ -626,61 +627,61 @@ func normalizePath(dst, src []byte) []byte {
 		}
 		b = b[:nn+1]
 	}
-
-	if filepath.Separator == '\\' {
-		// remove \.\ parts
-		for {
-			n := bytes.Index(b, strBackSlashDotBackSlash)
-			if n < 0 {
-				break
+	/*
+		if filepath.Separator == '\\' {
+			// remove \.\ parts
+			for {
+				n := bytes.Index(b, strBackSlashDotBackSlash)
+				if n < 0 {
+					break
+				}
+				nn := n + len(strSlashDotSlash) - 1
+				copy(b[n:], b[nn:])
+				b = b[:len(b)-nn+n]
 			}
-			nn := n + len(strSlashDotSlash) - 1
-			copy(b[n:], b[nn:])
-			b = b[:len(b)-nn+n]
+
+			// remove /foo/..\ parts
+			for {
+				n := bytes.Index(b, strSlashDotDotBackSlash)
+				if n < 0 {
+					break
+				}
+				nn := bytes.LastIndexByte(b[:n], '/')
+				if nn < 0 {
+					nn = 0
+				}
+				nn++
+				n += len(strSlashDotDotBackSlash)
+				copy(b[nn:], b[n:])
+				b = b[:len(b)-n+nn]
+			}
+
+			// remove /foo\..\ parts
+			for {
+				n := bytes.Index(b, strBackSlashDotDotBackSlash)
+				if n < 0 {
+					break
+				}
+				nn := bytes.LastIndexByte(b[:n], '/')
+				if nn < 0 {
+					nn = 0
+				}
+				n += len(strBackSlashDotDotBackSlash) - 1
+				copy(b[nn:], b[n:])
+				b = b[:len(b)-n+nn]
+			}
+
+			// remove trailing \foo\..
+			n := bytes.LastIndex(b, strBackSlashDotDot)
+			if n >= 0 && n+len(strSlashDotDot) == len(b) {
+				nn := bytes.LastIndexByte(b[:n], '/')
+				if nn < 0 {
+					return append(dst[:0], strSlash...)
+				}
+				b = b[:nn+1]
+			}
 		}
-
-		// remove /foo/..\ parts
-		for {
-			n := bytes.Index(b, strSlashDotDotBackSlash)
-			if n < 0 {
-				break
-			}
-			nn := bytes.LastIndexByte(b[:n], '/')
-			if nn < 0 {
-				nn = 0
-			}
-			nn++
-			n += len(strSlashDotDotBackSlash)
-			copy(b[nn:], b[n:])
-			b = b[:len(b)-n+nn]
-		}
-
-		// remove /foo\..\ parts
-		for {
-			n := bytes.Index(b, strBackSlashDotDotBackSlash)
-			if n < 0 {
-				break
-			}
-			nn := bytes.LastIndexByte(b[:n], '/')
-			if nn < 0 {
-				nn = 0
-			}
-			n += len(strBackSlashDotDotBackSlash) - 1
-			copy(b[nn:], b[n:])
-			b = b[:len(b)-n+nn]
-		}
-
-		// remove trailing \foo\..
-		n := bytes.LastIndex(b, strBackSlashDotDot)
-		if n >= 0 && n+len(strSlashDotDot) == len(b) {
-			nn := bytes.LastIndexByte(b[:n], '/')
-			if nn < 0 {
-				return append(dst[:0], strSlash...)
-			}
-			b = b[:nn+1]
-		}
-	}
-
+	*/
 	return b
 }
 

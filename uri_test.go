@@ -151,6 +151,62 @@ func testURIUpdate(t *testing.T, base, update, result string) {
 	}
 }
 
+func TestURIPathNormalize_windows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.SkipNow()
+	}
+
+	t.Parallel()
+
+	var u URI
+
+	testURIPathNormalize(t, &u, "\\aa\\\\bb", "/aa/bb")
+
+	// triple slash
+	testURIPathNormalize(t, &u, "\\x\\\\\\y\\", "/x/y/")
+
+	// multi slashes
+	testURIPathNormalize(t, &u, "\\abc\\\\de\\\\\\fg\\\\\\\\", "/abc/de/fg/")
+
+	// encoded slashes
+	testURIPathNormalize(t, &u, "\\xxxx%2fyyy%2f%2F%2F", "/xxxx/yyy/")
+
+	// dotdot
+	testURIPathNormalize(t, &u, "\\aaa\\..", "/")
+
+	// dotdot with trailing slash
+	testURIPathNormalize(t, &u, "\\xxx\\yyy\\..\\", "/xxx/")
+
+	// multi dotdots
+	testURIPathNormalize(t, &u, "\\aaa\\bbb\\ccc\\..\\..\\ddd", "/aaa/ddd")
+
+	// dotdots separated by other data
+	testURIPathNormalize(t, &u, "\\a\\b\\..\\c\\d\\..\\e\\..", "/a/c/")
+
+	// too many dotdots
+	testURIPathNormalize(t, &u, "\\aaa\\..\\..\\..\\..\\xxx", "/xxx")
+	testURIPathNormalize(t, &u, "\\..\\..\\..\\..\\..\\..", "/")
+	testURIPathNormalize(t, &u, "\\..\\..\\..\\..\\..\\..\\", "/")
+
+	// encoded dotdots
+	testURIPathNormalize(t, &u, "\\aaa%2Fbbb%2F%2E.%2Fxxx", "/aaa/xxx")
+
+	// double slash with dotdots
+	testURIPathNormalize(t, &u, "\\aaa\\\\\\\\..\\\\b", "/b")
+
+	// fake dotdot
+	testURIPathNormalize(t, &u, "\\aaa\\..bbb\\ccc\\..", "/aaa/..bbb/")
+
+	// single dot
+	testURIPathNormalize(t, &u, "\\a\\.\\b\\.\\.\\c\\.\\d.html", "/a/b/c/d.html")
+	testURIPathNormalize(t, &u, ".\\foo\\", "/foo/")
+	testURIPathNormalize(t, &u, ".\\..\\..\\.\\..\\..\\aaa\\bbb\\..\\..\\..\\.\\.\\..\\", "/")
+	testURIPathNormalize(t, &u, ".\\a\\.\\..\\.\\..\\b\\.\\foo.html", "/b/foo.html")
+	testURIPathNormalize(t, &u, `.\a\.\../.\..\b\.\foo.html`, "/b/foo.html")
+	testURIPathNormalize(t, &u, `.\a\./..\.\..\b\.\foo.html`, "/b/foo.html")
+	testURIPathNormalize(t, &u, `.\a\./..%5c.\..\b\.\foo.html`, "/b/foo.html")
+}
+
 func TestURIPathNormalize(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.SkipNow()
