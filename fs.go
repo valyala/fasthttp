@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/klauspost/compress/zstd"
 	"html"
 	"io"
 	"io/fs"
@@ -370,6 +371,7 @@ const FSCompressedFileSuffix = ".fasthttp.gz"
 var FSCompressedFileSuffixes = map[string]string{
 	"gzip": ".fasthttp.gz",
 	"br":   ".fasthttp.br",
+	"zstd": ".fasthttp.zst",
 }
 
 // FSHandlerCacheDuration is the default expiration duration for inactive
@@ -460,7 +462,9 @@ func (fs *FS) initRequestHandler() {
 
 	compressedFileSuffixes := fs.CompressedFileSuffixes
 	if compressedFileSuffixes["br"] == "" || compressedFileSuffixes["gzip"] == "" ||
-		compressedFileSuffixes["br"] == compressedFileSuffixes["gzip"] {
+		compressedFileSuffixes["zstd"] == "" || compressedFileSuffixes["br"] == compressedFileSuffixes["gzip"] ||
+		compressedFileSuffixes["br"] == compressedFileSuffixes["zstd"] ||
+		compressedFileSuffixes["gzip"] == compressedFileSuffixes["zstd"] {
 		// Copy global map
 		compressedFileSuffixes = make(map[string]string, len(FSCompressedFileSuffixes))
 		for k, v := range FSCompressedFileSuffixes {
@@ -471,6 +475,7 @@ func (fs *FS) initRequestHandler() {
 	if fs.CompressedFileSuffix != "" {
 		compressedFileSuffixes["gzip"] = fs.CompressedFileSuffix
 		compressedFileSuffixes["br"] = FSCompressedFileSuffixes["br"]
+		compressedFileSuffixes["zstd"] = FSCompressedFileSuffixes["zstd"]
 	}
 
 	h := &fsHandler{
@@ -794,6 +799,7 @@ const (
 	defaultCacheKind CacheKind = iota
 	brotliCacheKind
 	gzipCacheKind
+	zstdCacheKind
 )
 
 func newCacheManager(fs *FS) cacheManager {
@@ -1040,6 +1046,11 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			mustCompress = true
 			fileCacheKind = gzipCacheKind
 			fileEncoding = "gzip"
+		} else if ctx.Request.Header.HasAcceptEncodingBytes(strZstd) {
+			mustCompress = true
+			fileCacheKind = zstdCacheKind
+			fileEncoding = "zstd"
+
 		}
 	}
 
@@ -1101,6 +1112,8 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			hdr.SetContentEncodingBytes(strBr)
 		} else if fileEncoding == "gzip" {
 			hdr.SetContentEncodingBytes(strGzip)
+		} else if fileEncoding == "zstd" {
+			hdr.SetContentEncodingBytes(strZstd)
 		}
 	}
 
@@ -1308,6 +1321,8 @@ nestedContinue:
 			zbuf.B = AppendBrotliBytesLevel(zbuf.B, w.B, CompressDefaultCompression)
 		} else if fileEncoding == "gzip" {
 			zbuf.B = AppendGzipBytesLevel(zbuf.B, w.B, CompressDefaultCompression)
+		} else if fileEncoding == "zstd" {
+			zbuf.B = AppendZstdBytesLevel(zbuf.B, w.B, CompressZstdDefault)
 		}
 		w = &zbuf
 	}
@@ -1420,6 +1435,14 @@ func (h *fsHandler) compressFileNolock(
 			err = err1
 		}
 		releaseStacklessGzipWriter(zw, CompressDefaultCompression)
+	} else if fileEncoding == "zstd" {
+		zw := acquireStacklessZstdWriter(zf, CompressZstdDefault)
+		_, err = copyZeroAlloc(zw, f)
+		if err1 := zw.Flush(); err == nil {
+			err = err1
+		}
+
+		releaseStacklessZstdWriter(zw, CompressZstdDefault)
 	}
 	_ = zf.Close()
 	_ = f.Close()
@@ -1457,6 +1480,13 @@ func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, fi
 			err = err1
 		}
 		releaseStacklessGzipWriter(zw, CompressDefaultCompression)
+	} else if fileEncoding == "zstd" {
+		zw := acquireStacklessZstdWriter(w, CompressZstdDefault)
+		_, err = copyZeroAlloc(zw, f)
+		if err1 := zw.Flush(); err == nil {
+			err = err1
+		}
+		releaseStacklessZstdWriter(zw, CompressZstdDefault)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -1600,8 +1630,9 @@ func (h *fsHandler) newFSFile(f fs.File, fileInfo fs.FileInfo, compressed bool, 
 func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, error) {
 	r := f
 	var (
-		br *brotli.Reader
-		zr *gzip.Reader
+		br  *brotli.Reader
+		zr  *gzip.Reader
+		zsr *zstd.Decoder
 	)
 	if compressed {
 		var err error
@@ -1615,6 +1646,11 @@ func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, 
 				return nil, err
 			}
 			r = zr
+		} else if fileEncoding == "zstd" {
+			if zsr, err = acquireZstdReader(f); err != nil {
+				return nil, err
+			}
+			r = zsr
 		}
 	}
 
@@ -1637,6 +1673,10 @@ func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, 
 
 	if zr != nil {
 		releaseGzipReader(zr)
+	}
+
+	if zsr != nil {
+		releaseZstdReader(zsr)
 	}
 
 	return data, err

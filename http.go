@@ -528,6 +528,23 @@ func (ctx *RequestCtx) RequestBodyStream() io.Reader {
 	return ctx.Request.bodyStream
 }
 
+func (req *Request) BodyUnzstd() ([]byte, error) {
+	return unzstdData(req.Body())
+}
+
+func (resp *Response) BodyUnzstd() ([]byte, error) {
+	return unzstdData(resp.Body())
+}
+
+func unzstdData(p []byte) ([]byte, error) {
+	var bb bytebufferpool.ByteBuffer
+	_, err := WriteUnzstd(&bb, p)
+	if err != nil {
+		return nil, err
+	}
+	return bb.B, nil
+}
+
 func inflateData(p []byte) ([]byte, error) {
 	var bb bytebufferpool.ByteBuffer
 	_, err := WriteInflate(&bb, p)
@@ -554,6 +571,8 @@ func (req *Request) BodyUncompressed() ([]byte, error) {
 		return req.BodyGunzip()
 	case "br":
 		return req.BodyUnbrotli()
+	case "zstd":
+		return req.BodyUnzstd()
 	default:
 		return nil, ErrContentEncodingUnsupported
 	}
@@ -574,6 +593,8 @@ func (resp *Response) BodyUncompressed() ([]byte, error) {
 		return resp.BodyGunzip()
 	case "br":
 		return resp.BodyUnbrotli()
+	case "zstd":
+		return resp.BodyUnzstd()
 	default:
 		return nil, ErrContentEncodingUnsupported
 	}
@@ -1845,6 +1866,55 @@ func (resp *Response) deflateBody(level int) error {
 		resp.bodyRaw = nil
 	}
 	resp.Header.SetContentEncodingBytes(strDeflate)
+	resp.Header.addVaryBytes(strAcceptEncoding)
+	return nil
+}
+
+func (resp *Response) zstdBody(level int) error {
+	if len(resp.Header.ContentEncoding()) > 0 {
+		return nil
+	}
+
+	if !resp.Header.isCompressibleContentType() {
+		return nil
+	}
+
+	if resp.bodyStream != nil {
+		// Reset Content-Length to -1, since it is impossible
+		// to determine body size beforehand of streamed compression.
+		// For
+		resp.Header.SetContentLength(-1)
+
+		// Do not care about memory allocations here, since flate is slow
+		// and allocates a lot of memory by itself.
+		bs := resp.bodyStream
+		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
+			zw := acquireStacklessZstdWriter(sw, level)
+			fw := &flushWriter{
+				wf: zw,
+				bw: sw,
+			}
+			copyZeroAlloc(fw, bs)
+			releaseStacklessZstdWriter(zw, level)
+			if bsc, ok := bs.(io.Closer); ok {
+				bsc.Close()
+			}
+		})
+	} else {
+		bodyBytes := resp.bodyBytes()
+		if len(bodyBytes) < minCompressLen {
+			return nil
+		}
+		w := responseBodyPool.Get()
+		w.B = AppendZstdBytesLevel(w.B, bodyBytes, level)
+
+		if resp.body != nil {
+			responseBodyPool.Put(resp.body)
+		}
+		resp.body = w
+		resp.bodyRaw = nil
+	}
+	resp.Header.SetContentEncodingBytes(strZstd)
 	resp.Header.addVaryBytes(strAcceptEncoding)
 	return nil
 }
