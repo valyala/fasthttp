@@ -1,8 +1,10 @@
 package fasthttp
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/klauspost/compress/zstd"
+	"github.com/valyala/bytebufferpool"
 	"github.com/valyala/fasthttp/stackless"
 	"io"
 	"sync"
@@ -18,20 +20,10 @@ const (
 
 var (
 	zstdDecoderPool            sync.Pool
-	stacklessZstdWriterPoolMap = newStacklessZstdWriterPoolMap()
+	zstdEncoderPool            sync.Pool
+	realZstdWriterPoolMap      = newCompressWriterPoolMap()
+	stacklessZstdWriterPoolMap = newCompressWriterPoolMap()
 )
-
-func newStacklessZstdWriterPoolMap() []*sync.Pool {
-	// Initialize pools for all the compression levels defined
-	// in https://github.com/klauspost/compress/blob/v1.17.4/zstd/encoder_options.go#L146
-	// Compression levels are normalized with normalizeCompressLevel,
-	// so the fit [0..7].
-	p := make([]*sync.Pool, 6)
-	for i := range p {
-		p[i] = &sync.Pool{}
-	}
-	return p
-}
 
 func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 	v := zstdDecoderPool.Get()
@@ -48,8 +40,6 @@ func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 func releaseZstdReader(zr *zstd.Decoder) {
 	zstdDecoderPool.Put(zr)
 }
-
-var zstdEncoderPool sync.Pool
 
 func acquireZstdWriter(w io.Writer, level int) (*zstd.Encoder, error) {
 	v := zstdEncoderPool.Get()
@@ -88,9 +78,9 @@ func releaseStacklessZstdWriter(zf stackless.Writer, zstdDefault int) {
 	p.Put(zf)
 }
 
-func acquireRealZstdWriter(w io.Writer, level int) stackless.Writer {
+func acquireRealZstdWriter(w io.Writer, level int) *zstd.Encoder {
 	nLevel := normalizeZstdCompressLevel(level)
-	p := stacklessZstdWriterPoolMap[nLevel]
+	p := realZstdWriterPoolMap[nLevel]
 	v := p.Get()
 	if v == nil {
 		zw, err := acquireZstdWriter(w, level)
@@ -104,17 +94,56 @@ func acquireRealZstdWriter(w io.Writer, level int) stackless.Writer {
 	return zw
 }
 
+func releaseRealZstdWrter(zw *zstd.Encoder, level int) {
+	zw.Close()
+	nLevel := normalizeZstdCompressLevel(level)
+	p := realZstdWriterPoolMap[nLevel]
+	p.Put(zw)
+}
+
 func AppendZstdBytesLevel(dst, src []byte, level int) []byte {
 	w := &byteSliceWriter{dst}
 	WriteZstdLevel(w, src, level) //nolint:errcheck
 	return w.b
 }
 
-func WriteZstdLevel(w io.Writer, src []byte, level int) (int, error) {
-	zw := acquireStacklessZstdWriter(w, level)
-	n, err := zw.Write(src)
-	releaseStacklessZstdWriter(zw, level)
-	return n, err
+func WriteZstdLevel(w io.Writer, p []byte, level int) (int, error) {
+	switch w.(type) {
+	case *byteSliceWriter,
+		*bytes.Buffer,
+		*bytebufferpool.ByteBuffer:
+		ctx := &compressCtx{
+			w:     w,
+			p:     p,
+			level: level,
+		}
+		stacklessWriteZstd(ctx)
+		return len(p), nil
+	default:
+		zw := acquireStacklessZstdWriter(w, level)
+		n, err := zw.Write(p)
+		releaseStacklessZstdWriter(zw, level)
+		return n, err
+	}
+}
+
+var (
+	stacklessWriteZstdOnce sync.Once
+	stacklessWriteZstdFunc func(ctx any) bool
+)
+
+func stacklessWriteZstd(ctx any) {
+	stacklessWriteZstdOnce.Do(func() {
+		stacklessWriteZstdFunc = stackless.NewFunc(nonblockingWriteZstd)
+	})
+	stacklessWriteZstdFunc(ctx)
+}
+
+func nonblockingWriteZstd(ctxv any) {
+	ctx := ctxv.(*compressCtx)
+	zw := acquireRealZstdWriter(ctx.w, ctx.level)
+	zw.Write(ctx.p) //nolint:errcheck
+	releaseRealZstdWrter(zw, ctx.level)
 }
 
 // AppendZstdBytes appends zstd src to dst and returns the resulting dst.

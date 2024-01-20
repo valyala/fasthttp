@@ -1441,7 +1441,6 @@ func (h *fsHandler) compressFileNolock(
 		if err1 := zw.Flush(); err == nil {
 			err = err1
 		}
-
 		releaseStacklessZstdWriter(zw, CompressZstdDefault)
 	}
 	_ = zf.Close()
