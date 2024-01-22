@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 
 	"github.com/valyala/fasthttp"
 )
@@ -63,8 +64,8 @@ func NewFastHTTPHandler(h http.Handler, hijackHandler ...func(net.Conn)) fasthtt
 			ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 			return
 		}
-		w := netHTTPResponseWriter{w: ctx.Response.BodyWriter(), r: ctx.RequestBodyStream(), conn: ctx.Conn(), ctx: ctx, hijackHandler: hijackHandler}
-		h.ServeHTTP(&w, r.WithContext(ctx))
+		w := NewNetHttpResponseWriter(ctx, hijackHandler...)
+		h.ServeHTTP(w, r.WithContext(ctx))
 
 		ctx.SetStatusCode(w.StatusCode())
 		haveContentType := false
@@ -101,6 +102,16 @@ type netHTTPResponseWriter struct {
 	hijackHandler []func(net.Conn)
 }
 
+func NewNetHttpResponseWriter(ctx *fasthttp.RequestCtx, hijackHandler ...func(net.Conn)) *netHTTPResponseWriter {
+	return &netHTTPResponseWriter{
+		w:             ctx.Response.BodyWriter(),
+		r:             ctx.RequestBodyStream(),
+		conn:          ctx.Conn(),
+		ctx:           ctx,
+		hijackHandler: hijackHandler,
+	}
+}
+
 func (w *netHTTPResponseWriter) StatusCode() int {
 	if w.statusCode == 0 {
 		return http.StatusOK
@@ -125,9 +136,31 @@ func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 
 func (w *netHTTPResponseWriter) Flush() {}
 
+type wrapperConn struct {
+	net.Conn
+	wg   sync.WaitGroup
+	once sync.Once
+}
+
+func (c *wrapperConn) Close() (err error) {
+	c.once.Do(func() {
+		defer c.wg.Done()
+		err = c.Conn.Close()
+	})
+	return
+}
+
 func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if len(w.hijackHandler) > 0 {
-		w.ctx.Hijack(w.hijackHandler[0])
-	}
-	return w.conn, &bufio.ReadWriter{Reader: bufio.NewReader(w.r), Writer: bufio.NewWriter(w.w)}, nil
+	conn := &wrapperConn{Conn: w.conn}
+	conn.wg.Add(1)
+
+	w.ctx.HijackSetNoResponse(true)
+	w.ctx.Hijack(func(c net.Conn) {
+		if len(w.hijackHandler) > 0 {
+			w.hijackHandler[0](c)
+			go conn.Close()
+		}
+		conn.wg.Wait()
+	})
+	return conn, &bufio.ReadWriter{Reader: bufio.NewReader(w.r), Writer: bufio.NewWriter(w.w)}, nil
 }
