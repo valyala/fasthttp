@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strconv"
 	"sync"
 )
@@ -574,7 +575,10 @@ func normalizePath(dst, src []byte) []byte {
 	dst = addLeadingSlash(dst, src)
 	dst = decodeArgAppendNoPlus(dst, src)
 	// replacing backslash, if you use windows(backslash)
-	dst = replaceSlashes(dst)
+	// fix: Path Traversal Attacks on Windows
+	if filepath.Separator == '\\' {
+		dst = replaceSlashes(dst)
+	}
 
 	// remove duplicate slashes
 	b := dst

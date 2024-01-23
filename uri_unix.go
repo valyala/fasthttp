@@ -10,3 +10,7 @@ func addLeadingSlash(dst, src []byte) []byte {
 
 	return dst
 }
+
+func replaceSlashes(dst []byte) []byte {
+	return dst
+}
