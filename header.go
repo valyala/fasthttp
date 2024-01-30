@@ -134,9 +134,6 @@ func (h *RequestHeader) SetByteRange(startPos, endPos int) {
 
 // StatusCode returns response status code.
 func (h *ResponseHeader) StatusCode() int {
-	if h.statusCode == 0 {
-		return StatusOK
-	}
 	return h.statusCode
 }
 
@@ -2835,6 +2832,9 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 			return 0, fmt.Errorf("cannot parse response status code: %w", err)
 		}
 		return 0, fmt.Errorf("cannot parse response status code: %w. Response %q", err, buf)
+	}
+	if h.statusCode == 0 {
+		h.statusCode = 200
 	}
 	if len(b) > n && b[n] != ' ' {
 		if h.secureErrorLogMessage {
