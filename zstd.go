@@ -108,6 +108,7 @@ func AppendZstdBytesLevel(dst, src []byte, level int) []byte {
 }
 
 func WriteZstdLevel(w io.Writer, p []byte, level int) (int, error) {
+	level = normalizeZstdCompressLevel(level)
 	switch w.(type) {
 	case *byteSliceWriter,
 		*bytes.Buffer,
@@ -178,8 +179,6 @@ func AppendUnzstdBytes(dst, src []byte) ([]byte, error) {
 // normalizes compression level into [0..7], so it could be used as an index
 // in *PoolMap.
 func normalizeZstdCompressLevel(level int) int {
-	// -2 is the lowest compression level - CompressHuffmanOnly
-	// 9 is the highest compression level - CompressBestCompression
 	if level < CompressZstdSpeedNotSet || level > CompressZstdBestCompression {
 		level = CompressZstdDefault
 	}
