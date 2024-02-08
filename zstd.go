@@ -8,6 +8,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/bytebufferpool"
+
 	"github.com/valyala/fasthttp/stackless"
 )
 
@@ -149,7 +150,7 @@ func nonblockingWriteZstd(ctxv any) {
 
 // AppendZstdBytes appends zstd src to dst and returns the resulting dst.
 func AppendZstdBytes(dst, src []byte) []byte {
-	return AppendZstdBytesLevel(dst, src, CompressBrotliDefaultCompression)
+	return AppendZstdBytesLevel(dst, src, CompressZstdDefault)
 }
 
 // WriteUnzstd writes unzstd p to w and returns the number of uncompressed
