@@ -28,12 +28,8 @@ import (
 // So it is advisable using this function only for quick net/http -> fasthttp
 // switching. Then manually convert net/http handlers to fasthttp handlers
 // according to https://github.com/valyala/fasthttp#switching-from-nethttp-to-fasthttp .
-//
-// hijackHandler is used for registering handler for connection hijacking, this is usefull for cases
-// where there is no access to change the server KeepHijackedConns field (which is default as false)
-// it also can be used for additional custom hijacking logic
-func NewFastHTTPHandlerFunc(h http.HandlerFunc, hijackHandler ...func(net.Conn)) fasthttp.RequestHandler {
-	return NewFastHTTPHandler(h, hijackHandler...)
+func NewFastHTTPHandlerFunc(h http.HandlerFunc) fasthttp.RequestHandler {
+	return NewFastHTTPHandler(h)
 }
 
 // NewFastHTTPHandler wraps net/http handler to fasthttp request handler,
@@ -52,11 +48,7 @@ func NewFastHTTPHandlerFunc(h http.HandlerFunc, hijackHandler ...func(net.Conn))
 // So it is advisable using this function only for quick net/http -> fasthttp
 // switching. Then manually convert net/http handlers to fasthttp handlers
 // according to https://github.com/valyala/fasthttp#switching-from-nethttp-to-fasthttp .
-//
-// hijackHandler is used for registering handler for connection hijacking, this is usefull for cases
-// where there is no access to change the server KeepHijackedConns field (which is default as false)
-// it also can be used for additional custom hijacking logic
-func NewFastHTTPHandler(h http.Handler, hijackHandler ...func(net.Conn)) fasthttp.RequestHandler {
+func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		var r http.Request
 		if err := ConvertRequest(ctx, &r, true); err != nil {
@@ -64,8 +56,11 @@ func NewFastHTTPHandler(h http.Handler, hijackHandler ...func(net.Conn)) fasthtt
 			ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 			return
 		}
-		w := NewNetHttpResponseWriter(ctx, hijackHandler...)
-		h.ServeHTTP(w, r.WithContext(ctx))
+		w := netHTTPResponseWriter{
+			w:   ctx.Response.BodyWriter(),
+			ctx: ctx,
+		}
+		h.ServeHTTP(&w, r.WithContext(ctx))
 
 		ctx.SetStatusCode(w.StatusCode())
 		haveContentType := false
@@ -93,23 +88,10 @@ func NewFastHTTPHandler(h http.Handler, hijackHandler ...func(net.Conn)) fasthtt
 }
 
 type netHTTPResponseWriter struct {
-	statusCode    int
-	h             http.Header
-	w             io.Writer
-	r             io.Reader
-	conn          net.Conn
-	ctx           *fasthttp.RequestCtx
-	hijackHandler []func(net.Conn)
-}
-
-func NewNetHttpResponseWriter(ctx *fasthttp.RequestCtx, hijackHandler ...func(net.Conn)) *netHTTPResponseWriter {
-	return &netHTTPResponseWriter{
-		w:             ctx.Response.BodyWriter(),
-		r:             ctx.RequestBodyStream(),
-		conn:          ctx.Conn(),
-		ctx:           ctx,
-		hijackHandler: hijackHandler,
-	}
+	statusCode int
+	h          http.Header
+	w          io.Writer
+	ctx        *fasthttp.RequestCtx
 }
 
 func (w *netHTTPResponseWriter) StatusCode() int {
@@ -136,31 +118,42 @@ func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 
 func (w *netHTTPResponseWriter) Flush() {}
 
-type wrapperConn struct {
+type wrappedConn struct {
 	net.Conn
+
 	wg   sync.WaitGroup
 	once sync.Once
 }
 
-func (c *wrapperConn) Close() (err error) {
+func (c *wrappedConn) Close() (err error) {
 	c.once.Do(func() {
-		defer c.wg.Done()
 		err = c.Conn.Close()
+		c.wg.Done()
 	})
 	return
 }
 
 func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	conn := &wrapperConn{Conn: w.conn}
-	conn.wg.Add(1)
-
+	// Hijack assumes control of the connection, so we need to prevent fasthttp from closing it or
+	// doing anything else with it.
 	w.ctx.HijackSetNoResponse(true)
-	w.ctx.Hijack(func(c net.Conn) {
-		if len(w.hijackHandler) > 0 {
-			w.hijackHandler[0](c)
-			go conn.Close()
-		}
+
+	conn := &wrappedConn{Conn: w.ctx.Conn()}
+	conn.wg.Add(1)
+	w.ctx.Hijack(func(net.Conn) {
 		conn.wg.Wait()
 	})
-	return conn, &bufio.ReadWriter{Reader: bufio.NewReader(w.r), Writer: bufio.NewWriter(w.w)}, nil
+
+	bufW := bufio.NewWriter(conn)
+
+	// Write any unflushed body to the hijacked connection buffer.
+	unflushedBody := w.ctx.Response.Body()
+	if len(unflushedBody) > 0 {
+		if _, err := bufW.Write(unflushedBody); err != nil {
+			conn.Close()
+			return nil, nil, err
+		}
+	}
+
+	return conn, &bufio.ReadWriter{Reader: bufio.NewReader(conn), Writer: bufW}, nil
 }

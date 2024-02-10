@@ -1,16 +1,16 @@
 package fasthttpadaptor
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/valyala/fasthttp"
-	"golang.org/x/sync/errgroup"
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 func TestNewFastHTTPHandler(t *testing.T) {
@@ -146,76 +146,73 @@ func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value i
 	}
 }
 
-func TestHijackInterface1(t *testing.T) {
-	g := errgroup.Group{}
-
-	var (
-		reqCtx fasthttp.RequestCtx
-		req    fasthttp.Request
-	)
-
-	client, server := net.Pipe()
-	testmsgc2s := "hello from a client"
-	testmsgs2c := "hello from a hijacked request"
-
-	reqCtx.Init2(server, nil, true)
-	req.CopyTo(&reqCtx.Request)
+func TestHijack(t *testing.T) {
+	t.Parallel()
 
 	nethttpH := func(w http.ResponseWriter, r *http.Request) {
-		if h, ok := w.(http.Hijacker); !ok {
-			t.Fatalf("response writer do not support hijack interface")
-		} else if netConn, _, err := h.Hijack(); err != nil {
-			t.Fatalf("invoking Hijack failed: %s", err)
-		} else if netConn == nil {
-			t.Fatalf("invalid conn handler for hijack invokation")
+		if f, ok := w.(http.Hijacker); !ok {
+			t.Errorf("expected http.ResponseWriter to implement http.Hijacker")
 		} else {
-			readMsg := make([]byte, len(testmsgc2s))
-			n, err := io.ReadAtLeast(netConn, readMsg, len(testmsgc2s))
-			if err != nil {
-				t.Fatalf("server: error on read from conn: %s", err)
+			if _, err := w.Write([]byte("foo")); err != nil {
+				t.Error(err)
 			}
-			if n != len(testmsgc2s) || testmsgc2s != string(readMsg) {
-				t.Fatalf("server: mismatch on message recieved: expected: (%d)<%s>, actual: (%d)<%s>\n", len(testmsgc2s), testmsgc2s, n, string(readMsg))
+
+			if c, rw, err := f.Hijack(); err != nil {
+				t.Error(err)
+			} else {
+				if _, err := rw.Write([]byte("bar")); err != nil {
+					t.Error(err)
+				}
+
+				if err := rw.Flush(); err != nil {
+					t.Error(err)
+				}
+
+				if err := c.Close(); err != nil {
+					t.Error(err)
+				}
 			}
-			n, err = io.WriteString(netConn, testmsgs2c)
-			if err != nil {
-				t.Fatalf("server: error on write to conn: %s", err)
-			}
-			if n != len(testmsgs2c) {
-				t.Fatalf("server: mismatch on message sent size: expected: (%d), actual: (%d)\n", len(testmsgc2s), n)
-			}
-			netConn.Close()
 		}
 	}
 
-	g.Go(func() error {
-		n, err := io.WriteString(client, testmsgc2s)
-		if err != nil {
-			return fmt.Errorf("client: error on write to conn: %s\n", err)
-		}
-		if n != len(testmsgc2s) {
-			return fmt.Errorf("client: mismatch on send all: expected: %d, actual: %d\n", len(testmsgc2s), n)
-		}
-		readMsg := make([]byte, len(testmsgs2c))
-		n, err = io.ReadAtLeast(client, readMsg, len(testmsgs2c))
-		if err != nil {
-			return fmt.Errorf("client: error on read from conn: %s", err)
-		}
-		if n != len(testmsgs2c) || testmsgs2c != string(readMsg) {
-			return fmt.Errorf("client: mismatch on message recieved: expected: (%d)<%s>, actual: (%d)<%s>\n", len(testmsgs2c), testmsgs2c, n, string(readMsg))
-		}
-		return nil
-	})
+	s := &fasthttp.Server{
+		Handler: NewFastHTTPHandler(http.HandlerFunc(nethttpH)),
+	}
 
-	g.Go(func() error {
-		fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH), func(c net.Conn) {})
-		fasthttpH(&reqCtx)
-		if !reqCtx.Hijacked() {
-			t.Fatal("request was not hijacked")
+	ln := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
 		}
-		return nil
-	})
-	if err := g.Wait(); err != nil {
-		t.Fatal(err)
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		buf, err := io.ReadAll(c)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if string(buf) != "foobar" {
+			t.Errorf("unexpected response: %q. Expecting %q", buf, "foobar")
+		}
+
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
 	}
 }
