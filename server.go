@@ -431,6 +431,8 @@ type Server struct {
 	open int32
 	stop int32
 	done chan struct{}
+
+	rejectedRequestsCount uint32
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -1828,6 +1830,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		atomic.AddInt32(&s.open, 1)
 		if !wp.Serve(c) {
 			atomic.AddInt32(&s.open, -1)
+			atomic.AddUint32(&s.rejectedRequestsCount, 1)
 			s.writeFastError(c, StatusServiceUnavailable,
 				"The connection cannot be served because Server.Concurrency limit exceeded")
 			c.Close()
@@ -2071,6 +2074,13 @@ func (s *Server) GetOpenConnectionsCount() int32 {
 	// before we load the value of s.open. However, in the common case
 	// this avoids underreporting open connections by 1 during server shutdown.
 	return atomic.LoadInt32(&s.open)
+}
+
+// GetRejectedConnectionsCount returns a number of rejected connections.
+//
+// This function is intended be used by monitoring systems.
+func (s *Server) GetRejectedConnectionsCount() uint32 {
+	return atomic.LoadUint32(&s.rejectedRequestsCount)
 }
 
 func (s *Server) getConcurrency() int {
