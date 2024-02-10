@@ -3029,6 +3029,8 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	h.contentLength = -2
 
+	contentLengthSeen := false
+
 	var s headerScanner
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
@@ -3064,6 +3066,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 					continue
 				}
 				if caseInsensitiveCompare(s.key, strContentLength) {
+					if contentLengthSeen {
+						return 0, fmt.Errorf("duplicate Content-Length header")
+					}
+					contentLengthSeen = true
+
 					if h.contentLength != -1 {
 						var nerr error
 						if h.contentLength, nerr = parseContentLength(s.value); nerr != nil {
@@ -3088,7 +3095,17 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				}
 			case 't':
 				if caseInsensitiveCompare(s.key, strTransferEncoding) {
-					if !bytes.Equal(s.value, strIdentity) {
+					isIdentity := bytes.Equal(s.value, strIdentity)
+					isChunked := bytes.Equal(s.value, strChunked)
+
+					if !isIdentity && !isChunked {
+						if h.secureErrorLogMessage {
+							return 0, fmt.Errorf("unsupported Transfer-Encoding")
+						}
+						return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
+					}
+
+					if isChunked {
 						h.contentLength = -1
 						h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 					}
