@@ -2618,10 +2618,6 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	testRequestHeaderReadSuccess(t, h, "POST /a HTTP/1.1\r\nHost: aa\r\nContent-Type: ab\r\nContent-Length: 123\r\nContent-Type: xx\r\n\r\n",
 		123, "/a", "aa", "", "xx", nil)
 
-	// post with duplicate content-length
-	testRequestHeaderReadSuccess(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nContent-Type: s\r\nContent-Length: 13\r\nContent-Length: 1\r\n\r\n",
-		1, "/xx", "aa", "", "s", nil)
-
 	// non-post with content-type
 	testRequestHeaderReadSuccess(t, h, "GET /aaa HTTP/1.1\r\nHost: bbb.com\r\nContent-Type: aaab\r\n\r\n",
 		-2, "/aaa", "bbb.com", "", "aaab", nil)
@@ -2756,6 +2752,9 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// forbidden trailer
 	testRequestHeaderReadError(t, h, "POST /a HTTP/1.1\r\nContent-Length: -1\r\nTrailer: Foo, Content-Length\r\n\r\n")
+
+	// post with duplicate content-length
+	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nContent-Type: s\r\nContent-Length: 13\r\nContent-Length: 1\r\n\r\n")
 }
 
 func TestRequestHeaderReadSecuredError(t *testing.T) {
@@ -2805,6 +2804,8 @@ func testResponseHeaderReadSecuredError(t *testing.T, h *ResponseHeader, headers
 }
 
 func testRequestHeaderReadError(t *testing.T, h *RequestHeader, headers string) {
+	t.Helper()
+
 	r := bytes.NewBufferString(headers)
 	br := bufio.NewReader(r)
 	err := h.Read(br)
@@ -2835,6 +2836,8 @@ func testRequestHeaderReadSecuredError(t *testing.T, h *RequestHeader, headers s
 func testResponseHeaderReadSuccess(t *testing.T, h *ResponseHeader, headers string, expectedStatusCode, expectedContentLength int,
 	expectedContentType string,
 ) {
+	t.Helper()
+
 	r := bytes.NewBufferString(headers)
 	br := bufio.NewReader(r)
 	err := h.Read(br)
@@ -2847,6 +2850,8 @@ func testResponseHeaderReadSuccess(t *testing.T, h *ResponseHeader, headers stri
 func testRequestHeaderReadSuccess(t *testing.T, h *RequestHeader, headers string, expectedContentLength int,
 	expectedRequestURI, expectedHost, expectedReferer, expectedContentType string, expectedTrailer map[string]string,
 ) {
+	t.Helper()
+
 	r := bytes.NewBufferString(headers)
 	br := bufio.NewReader(r)
 	err := h.Read(br)
