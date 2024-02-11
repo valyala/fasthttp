@@ -3,11 +3,12 @@ package fasthttp
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"sync"
+
 	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/bytebufferpool"
 	"github.com/valyala/fasthttp/stackless"
-	"io"
-	"sync"
 )
 
 const (
@@ -51,7 +52,7 @@ func acquireZstdWriter(w io.Writer, level int) (*zstd.Encoder, error) {
 	return zw, nil
 }
 
-func releaseZstdWriter(zw *zstd.Encoder) {
+func releaseZstdWriter(zw *zstd.Encoder) { //nolint:unused
 	zw.Close()
 	zstdEncoderPool.Put(zw)
 }
@@ -68,7 +69,6 @@ func acquireStacklessZstdWriter(w io.Writer, compressLevel int) stackless.Writer
 	sw := v.(stackless.Writer)
 	sw.Reset(w)
 	return sw
-
 }
 
 func releaseStacklessZstdWriter(zf stackless.Writer, zstdDefault int) {

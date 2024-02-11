@@ -1894,7 +1894,7 @@ func (resp *Response) zstdBody(level int) error {
 				wf: zw,
 				bw: sw,
 			}
-			copyZeroAlloc(fw, bs)
+			copyZeroAlloc(fw, bs) //nolint:errcheck
 			releaseStacklessZstdWriter(zw, level)
 			if bsc, ok := bs.(io.Closer); ok {
 				bsc.Close()

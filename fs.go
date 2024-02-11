@@ -1050,7 +1050,6 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			mustCompress = true
 			fileCacheKind = zstdCacheKind
 			fileEncoding = "zstd"
-
 		}
 	}
 
