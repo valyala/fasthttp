@@ -3095,8 +3095,8 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				}
 			case 't':
 				if caseInsensitiveCompare(s.key, strTransferEncoding) {
-					isIdentity := bytes.Equal(s.value, strIdentity)
-					isChunked := bytes.Equal(s.value, strChunked)
+					isIdentity := caseInsensitiveCompare(s.value, strIdentity)
+					isChunked := caseInsensitiveCompare(s.value, strChunked)
 
 					if !isIdentity && !isChunked {
 						if h.secureErrorLogMessage {
