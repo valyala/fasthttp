@@ -102,7 +102,7 @@ func ServeFile(ctx *RequestCtx, path string) {
 
 	if path == "" || !filepath.IsAbs(path) {
 		// extend relative path to absolute path
-		hasTrailingSlash := len(path) > 0 && (path[len(path)-1] == '/' || path[len(path)-1] == '\\')
+		hasTrailingSlash := path != "" && (path[len(path)-1] == '/' || path[len(path)-1] == '\\')
 
 		var err error
 		path = filepath.FromSlash(path)
@@ -442,7 +442,7 @@ func (fs *FS) normalizeRoot(root string) string {
 	}
 
 	// strip trailing slashes from the root path
-	for len(root) > 0 && root[len(root)-1] == os.PathSeparator {
+	for root != "" && root[len(root)-1] == os.PathSeparator {
 		root = root[:len(root)-1]
 	}
 	return root
@@ -468,7 +468,7 @@ func (fs *FS) initRequestHandler() {
 		}
 	}
 
-	if len(fs.CompressedFileSuffix) > 0 {
+	if fs.CompressedFileSuffix != "" {
 		compressedFileSuffixes["gzip"] = fs.CompressedFileSuffix
 		compressedFileSuffixes["br"] = FSCompressedFileSuffixes["br"]
 	}

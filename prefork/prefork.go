@@ -152,7 +152,8 @@ func (p *Prefork) doCommand() (*exec.Cmd, error) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.ExtraFiles = p.files
-	return cmd, cmd.Start()
+	err := cmd.Start()
+	return cmd, err
 }
 
 func (p *Prefork) prefork(addr string) (err error) {

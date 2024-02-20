@@ -443,13 +443,13 @@ func TestArgsSetGetDel(t *testing.T) {
 			t.Fatalf("Unexpected value: %q. Expected %q", a.Peek(k), v)
 		}
 		a.Del(k)
-		if string(a.Peek(k)) != "" {
+		if len(a.Peek(k)) != 0 {
 			t.Fatalf("Unexpected value: %q. Expected %q", a.Peek(k), "")
 		}
 	}
 
 	a.Parse("aaa=xxx&bb=aa")
-	if string(a.Peek("foo0")) != "" {
+	if len(a.Peek("foo0")) != 0 {
 		t.Fatalf("Unexpected value %q", a.Peek("foo0"))
 	}
 	if string(a.Peek("aaa")) != "xxx" {
@@ -474,7 +474,7 @@ func TestArgsSetGetDel(t *testing.T) {
 			t.Fatalf("Unexpected value: %q. Expected %q", a.Peek(k), v)
 		}
 		a.Del(k)
-		if string(a.Peek(k)) != "" {
+		if len(a.Peek(k)) != 0 {
 			t.Fatalf("Unexpected value: %q. Expected %q", a.Peek(k), "")
 		}
 	}

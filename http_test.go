@@ -1210,7 +1210,7 @@ func TestRequestReadGzippedBody(t *testing.T) {
 	if r.Header.ContentLength() != len(body) {
 		t.Fatalf("unexpected content-length: %d. Expecting %d", r.Header.ContentLength(), len(body))
 	}
-	if string(r.Body()) != string(body) {
+	if !bytes.Equal(r.Body(), body) {
 		t.Fatalf("unexpected body: %q. Expecting %q", r.Body(), body)
 	}
 
@@ -1323,7 +1323,7 @@ func TestRequestContinueReadBodyDisablePrereadMultipartForm(t *testing.T) {
 		t.Fatalf("The multipartForm of the Request must be nil")
 	}
 
-	if string(formData) != string(r.Body()) {
+	if !bytes.Equal(formData, r.Body()) {
 		t.Fatalf("The body given must equal the body in the Request")
 	}
 }

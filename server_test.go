@@ -2012,7 +2012,7 @@ func TestCompressHandler(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	ce := resp.Header.ContentEncoding()
-	if string(ce) != "" {
+	if len(ce) != 0 {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
 	}
 	body := resp.Body()
@@ -2110,11 +2110,11 @@ func TestCompressHandlerVary(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	ce := resp.Header.ContentEncoding()
-	if string(ce) != "" {
+	if len(ce) != 0 {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
 	}
 	vary := resp.Header.Peek("Vary")
-	if string(vary) != "" {
+	if len(vary) != 0 {
 		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "")
 	}
 	body := resp.Body()

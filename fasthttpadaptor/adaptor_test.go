@@ -160,7 +160,7 @@ func TestHijack(t *testing.T) {
 			if c, rw, err := f.Hijack(); err != nil {
 				t.Error(err)
 			} else {
-				if _, err := rw.Write([]byte("bar")); err != nil {
+				if _, err := rw.WriteString("bar"); err != nil {
 					t.Error(err)
 				}
 
