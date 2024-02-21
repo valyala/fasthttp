@@ -38,7 +38,7 @@ func testZstdBytesSingleCase(s string) error {
 	if !bytes.Equal(ZstdpedS[:len(prefix)], prefix) {
 		return fmt.Errorf("unexpected prefix when compressing %q: %q. Expecting %q", s, ZstdpedS[:len(prefix)], prefix)
 	}
-            
+
 	unZstdedS, err := AppendUnzstdBytes(prefix, ZstdpedS[len(prefix):])
 	if err != nil {
 		return fmt.Errorf("unexpected error when uncompressing %q: %w", s, err)

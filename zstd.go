@@ -8,7 +8,6 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/bytebufferpool"
-
 	"github.com/valyala/fasthttp/stackless"
 )
 
