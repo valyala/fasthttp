@@ -35,7 +35,7 @@ func AppendHTMLEscape(dst []byte, s string) []byte {
 		case '\'':
 			sub = "&#39;" // "&#39;" is shorter than "&apos;" and apos was not in HTML until HTML5.
 		}
-		if len(sub) > 0 {
+		if sub != "" {
 			dst = append(dst, s[prev:i]...)
 			dst = append(dst, sub...)
 			prev = i + 1

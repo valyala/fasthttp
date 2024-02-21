@@ -456,7 +456,7 @@ func TestClientParseConn(t *testing.T) {
 		t.Fatalf("req RemoteAddr parse addr fail: %q, hope: %q", res.RemoteAddr().String(), host)
 	}
 
-	if !regexp.MustCompile(`^127\.0\.0\.1:[0-9]{4,5}$`).MatchString(res.LocalAddr().String()) {
+	if !regexp.MustCompile(`^127\.0\.0\.1:\d{4,5}$`).MatchString(res.LocalAddr().String()) {
 		t.Fatalf("res LocalAddr addr match fail: %q, hope match: %q", res.LocalAddr().String(), "^127.0.0.1:[0-9]{4,5}$")
 	}
 }
@@ -2323,7 +2323,7 @@ func (r *singleReadConn) Read(p []byte) (int, error) {
 	if len(r.s) == r.n {
 		return 0, io.EOF
 	}
-	n := copy(p, []byte(r.s[r.n:]))
+	n := copy(p, r.s[r.n:])
 	r.n += n
 	return n, nil
 }

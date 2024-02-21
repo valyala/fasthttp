@@ -105,9 +105,9 @@ func testBrotliCompressSingleCase(s string) error {
 func TestCompressHandlerBrotliLevel(t *testing.T) {
 	t.Parallel()
 
-	expectedBody := string(createFixedBody(2e4))
+	expectedBody := createFixedBody(2e4)
 	h := CompressHandlerBrotliLevel(func(ctx *RequestCtx) {
-		ctx.WriteString(expectedBody) //nolint:errcheck
+		ctx.Write(expectedBody) //nolint:errcheck
 	}, CompressBrotliDefaultCompression, CompressDefaultCompression)
 
 	var ctx RequestCtx
@@ -121,11 +121,11 @@ func TestCompressHandlerBrotliLevel(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	ce := resp.Header.ContentEncoding()
-	if string(ce) != "" {
+	if len(ce) != 0 {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
 	}
 	body := resp.Body()
-	if string(body) != expectedBody {
+	if !bytes.Equal(body, expectedBody) {
 		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
 	}
 
@@ -148,7 +148,7 @@ func TestCompressHandlerBrotliLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(body) != expectedBody {
+	if !bytes.Equal(body, expectedBody) {
 		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
 	}
 
@@ -171,7 +171,7 @@ func TestCompressHandlerBrotliLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(body) != expectedBody {
+	if !bytes.Equal(body, expectedBody) {
 		t.Fatalf("unexpected body %q. Expecting %q", body, expectedBody)
 	}
 }

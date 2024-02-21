@@ -167,7 +167,7 @@ func TestResponseHeaderEmptyValueFromHeader(t *testing.T) {
 	if err := h.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(h.ContentType()) != string(h1.ContentType()) {
+	if !bytes.Equal(h.ContentType(), h1.ContentType()) {
 		t.Fatalf("unexpected content-type: %q. Expecting %q", h.ContentType(), h1.ContentType())
 	}
 	v1 := h.Peek("EmptyValue1")
@@ -222,7 +222,7 @@ func TestRequestHeaderEmptyValueFromHeader(t *testing.T) {
 	if err := h.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(h.Host()) != string(h1.Host()) {
+	if !bytes.Equal(h.Host(), h1.Host()) {
 		t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), h1.Host())
 	}
 	v1 := h.Peek("EmptyValue1")
@@ -341,7 +341,7 @@ func TestRequestRawHeaders(t *testing.T) {
 		if err := h.Read(br); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if string(h.Host()) != "" {
+		if len(h.Host()) != 0 {
 			t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), "")
 		}
 		v1 := h.Peek("NoKey")
@@ -687,11 +687,11 @@ func TestResponseHeaderDel(t *testing.T) {
 		t.Fatalf("non-zero value: %q", hv)
 	}
 	hv = h.Peek(HeaderContentType)
-	if string(hv) != string(defaultContentType) {
+	if !bytes.Equal(hv, defaultContentType) {
 		t.Fatalf("unexpected content-type: %q. Expecting %q", hv, defaultContentType)
 	}
 	hv = h.Peek(HeaderContentEncoding)
-	if string(hv) != ("gzip") {
+	if string(hv) != "gzip" {
 		t.Fatalf("unexpected content-encoding: %q. Expecting %q", hv, "gzip")
 	}
 	hv = h.Peek(HeaderServer)
@@ -1519,7 +1519,7 @@ func TestRequestContentTypeNoDefault(t *testing.T) {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 
-	if string(h1.contentType) != "" {
+	if len(h1.contentType) != 0 {
 		t.Fatalf("unexpected Content-Type %q. Expecting %q", h1.contentType, "")
 	}
 }
@@ -2121,7 +2121,7 @@ func testRequestHeaderMethod(t *testing.T, expectedMethod string) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	m1 := h1.Method()
-	if string(m) != string(m1) {
+	if !bytes.Equal(m, m1) {
 		t.Fatalf("unexpected method: %q. Expecting %q", m, m1)
 	}
 }

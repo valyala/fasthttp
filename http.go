@@ -1250,7 +1250,7 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 			// This way we limit memory usage for large file uploads, since their contents
 			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
 			req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-			if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
+			if req.multipartFormBoundary != "" && len(req.Header.peek(strContentEncoding)) == 0 {
 				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
 				if err != nil {
 					req.Reset()
@@ -1329,7 +1329,7 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 			// This way we limit memory usage for large file uploads, since their contents
 			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
 			req.multipartFormBoundary = b2s(req.Header.MultipartFormBoundary())
-			if len(req.multipartFormBoundary) > 0 && len(req.Header.peek(strContentEncoding)) == 0 {
+			if req.multipartFormBoundary != "" && len(req.Header.peek(strContentEncoding)) == 0 {
 				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
 				if err != nil {
 					req.Reset()

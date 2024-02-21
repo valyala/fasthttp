@@ -69,8 +69,22 @@ linters-settings:
       "-ST1000", # at least one file in a package should have a package comment
     ]
   gocritic:
-    enabled-checks:
-      - emptyStringTest
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - deferInLoop
+      - httpNoBody
+      - importShadow
+      - initClause
+      - paramTypeCombine
+      - sloppyReassign
+      - typeUnparen
+      - unnamedResult
+      - whyNoLint
 
 issues:
   # Show all issues from a linter.

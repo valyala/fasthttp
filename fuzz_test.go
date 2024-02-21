@@ -44,7 +44,7 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, body []byte, max int) {
 		// Don't do bodies bigger than 10kb.
-		max = max % (10 * 1024)
+		max %= (10 * 1024)
 
 		var res Response
 
@@ -59,7 +59,7 @@ func FuzzRequestReadLimitBody(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, body []byte, max int) {
 		// Don't do bodies bigger than 10kb.
-		max = max % (10 * 1024)
+		max %= (10 * 1024)
 
 		var req Request
 
