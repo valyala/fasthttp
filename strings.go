@@ -72,6 +72,7 @@ var (
 	strClose               = []byte("close")
 	strGzip                = []byte("gzip")
 	strBr                  = []byte("br")
+	strZstd                = []byte("zstd")
 	strDeflate             = []byte("deflate")
 	strKeepAlive           = []byte("keep-alive")
 	strUpgrade             = []byte("Upgrade")

@@ -18,6 +18,7 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/gzip"
+	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/bytebufferpool"
 )
 
@@ -370,6 +371,7 @@ const FSCompressedFileSuffix = ".fasthttp.gz"
 var FSCompressedFileSuffixes = map[string]string{
 	"gzip": ".fasthttp.gz",
 	"br":   ".fasthttp.br",
+	"zstd": ".fasthttp.zst",
 }
 
 // FSHandlerCacheDuration is the default expiration duration for inactive
@@ -460,7 +462,9 @@ func (fs *FS) initRequestHandler() {
 
 	compressedFileSuffixes := fs.CompressedFileSuffixes
 	if compressedFileSuffixes["br"] == "" || compressedFileSuffixes["gzip"] == "" ||
-		compressedFileSuffixes["br"] == compressedFileSuffixes["gzip"] {
+		compressedFileSuffixes["zstd"] == "" || compressedFileSuffixes["br"] == compressedFileSuffixes["gzip"] ||
+		compressedFileSuffixes["br"] == compressedFileSuffixes["zstd"] ||
+		compressedFileSuffixes["gzip"] == compressedFileSuffixes["zstd"] {
 		// Copy global map
 		compressedFileSuffixes = make(map[string]string, len(FSCompressedFileSuffixes))
 		for k, v := range FSCompressedFileSuffixes {
@@ -471,6 +475,7 @@ func (fs *FS) initRequestHandler() {
 	if fs.CompressedFileSuffix != "" {
 		compressedFileSuffixes["gzip"] = fs.CompressedFileSuffix
 		compressedFileSuffixes["br"] = FSCompressedFileSuffixes["br"]
+		compressedFileSuffixes["zstd"] = FSCompressedFileSuffixes["zstd"]
 	}
 
 	h := &fsHandler{
@@ -794,6 +799,7 @@ const (
 	defaultCacheKind CacheKind = iota
 	brotliCacheKind
 	gzipCacheKind
+	zstdCacheKind
 )
 
 func newCacheManager(fs *FS) cacheManager {
@@ -1032,14 +1038,19 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	fileEncoding := ""
 	byteRange := ctx.Request.Header.peek(strRange)
 	if len(byteRange) == 0 && h.compress {
-		if h.compressBrotli && ctx.Request.Header.HasAcceptEncodingBytes(strBr) {
+		switch {
+		case h.compressBrotli && ctx.Request.Header.HasAcceptEncodingBytes(strBr):
 			mustCompress = true
 			fileCacheKind = brotliCacheKind
 			fileEncoding = "br"
-		} else if ctx.Request.Header.HasAcceptEncodingBytes(strGzip) {
+		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
 			mustCompress = true
 			fileCacheKind = gzipCacheKind
 			fileEncoding = "gzip"
+		case ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
+			mustCompress = true
+			fileCacheKind = zstdCacheKind
+			fileEncoding = "zstd"
 		}
 	}
 
@@ -1097,10 +1108,13 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 
 	hdr := &ctx.Response.Header
 	if ff.compressed {
-		if fileEncoding == "br" {
+		switch fileEncoding {
+		case "br":
 			hdr.SetContentEncodingBytes(strBr)
-		} else if fileEncoding == "gzip" {
+		case "gzip":
 			hdr.SetContentEncodingBytes(strGzip)
+		case "zstd":
+			hdr.SetContentEncodingBytes(strZstd)
 		}
 	}
 
@@ -1304,10 +1318,13 @@ nestedContinue:
 
 	if mustCompress {
 		var zbuf bytebufferpool.ByteBuffer
-		if fileEncoding == "br" {
+		switch fileEncoding {
+		case "br":
 			zbuf.B = AppendBrotliBytesLevel(zbuf.B, w.B, CompressDefaultCompression)
-		} else if fileEncoding == "gzip" {
+		case "gzip":
 			zbuf.B = AppendGzipBytesLevel(zbuf.B, w.B, CompressDefaultCompression)
+		case "zstd":
+			zbuf.B = AppendZstdBytesLevel(zbuf.B, w.B, CompressZstdDefault)
 		}
 		w = &zbuf
 	}
@@ -1406,20 +1423,28 @@ func (h *fsHandler) compressFileNolock(
 		}
 		return nil, errNoCreatePermission
 	}
-	if fileEncoding == "br" {
+	switch fileEncoding {
+	case "br":
 		zw := acquireStacklessBrotliWriter(zf, CompressDefaultCompression)
 		_, err = copyZeroAlloc(zw, f)
 		if err1 := zw.Flush(); err == nil {
 			err = err1
 		}
 		releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
-	} else if fileEncoding == "gzip" {
+	case "gzip":
 		zw := acquireStacklessGzipWriter(zf, CompressDefaultCompression)
 		_, err = copyZeroAlloc(zw, f)
 		if err1 := zw.Flush(); err == nil {
 			err = err1
 		}
 		releaseStacklessGzipWriter(zw, CompressDefaultCompression)
+	case "zstd":
+		zw := acquireStacklessZstdWriter(zf, CompressZstdDefault)
+		_, err = copyZeroAlloc(zw, f)
+		if err1 := zw.Flush(); err == nil {
+			err = err1
+		}
+		releaseStacklessZstdWriter(zw, CompressZstdDefault)
 	}
 	_ = zf.Close()
 	_ = f.Close()
@@ -1443,20 +1468,28 @@ func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, fi
 		err error
 	)
 
-	if fileEncoding == "br" {
+	switch fileEncoding {
+	case "br":
 		zw := acquireStacklessBrotliWriter(w, CompressDefaultCompression)
 		_, err = copyZeroAlloc(zw, f)
 		if err1 := zw.Flush(); err == nil {
 			err = err1
 		}
 		releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
-	} else if fileEncoding == "gzip" {
+	case "gzip":
 		zw := acquireStacklessGzipWriter(w, CompressDefaultCompression)
 		_, err = copyZeroAlloc(zw, f)
 		if err1 := zw.Flush(); err == nil {
 			err = err1
 		}
 		releaseStacklessGzipWriter(zw, CompressDefaultCompression)
+	case "zstd":
+		zw := acquireStacklessZstdWriter(w, CompressZstdDefault)
+		_, err = copyZeroAlloc(zw, f)
+		if err1 := zw.Flush(); err == nil {
+			err = err1
+		}
+		releaseStacklessZstdWriter(zw, CompressZstdDefault)
 	}
 	defer func() { _ = f.Close() }()
 
@@ -1600,21 +1633,28 @@ func (h *fsHandler) newFSFile(f fs.File, fileInfo fs.FileInfo, compressed bool, 
 func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, error) {
 	r := f
 	var (
-		br *brotli.Reader
-		zr *gzip.Reader
+		br  *brotli.Reader
+		zr  *gzip.Reader
+		zsr *zstd.Decoder
 	)
 	if compressed {
 		var err error
-		if fileEncoding == "br" {
+		switch fileEncoding {
+		case "br":
 			if br, err = acquireBrotliReader(f); err != nil {
 				return nil, err
 			}
 			r = br
-		} else if fileEncoding == "gzip" {
+		case "gzip":
 			if zr, err = acquireGzipReader(f); err != nil {
 				return nil, err
 			}
 			r = zr
+		case "zstd":
+			if zsr, err = acquireZstdReader(f); err != nil {
+				return nil, err
+			}
+			r = zsr
 		}
 	}
 
@@ -1637,6 +1677,10 @@ func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, 
 
 	if zr != nil {
 		releaseGzipReader(zr)
+	}
+
+	if zsr != nil {
+		releaseZstdReader(zsr)
 	}
 
 	return data, err
