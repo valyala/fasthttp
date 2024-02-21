@@ -43,8 +43,9 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 10\r\n\r\n9876543210"), 1024)
 
 	f.Fuzz(func(t *testing.T, body []byte, max int) {
-		// Don't do bodies bigger than 10kb.
-		max %= (10 * 1024)
+		if len(body) > 10*1024 || max > 10*1024 {
+			return
+		}
 
 		var res Response
 
@@ -58,8 +59,9 @@ func FuzzRequestReadLimitBody(f *testing.F) {
 	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nfoobar\r\n\r\n"), 1024)
 
 	f.Fuzz(func(t *testing.T, body []byte, max int) {
-		// Don't do bodies bigger than 10kb.
-		max %= (10 * 1024)
+		if len(body) > 10*1024 || max > 10*1024 {
+			return
+		}
 
 		var req Request
 
