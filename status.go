@@ -163,7 +163,7 @@ func StatusMessage(statusCode int) string {
 	return unknownStatusCode
 }
 
-func formatStatusLine(dst []byte, protocol []byte, statusCode int, statusText []byte) []byte {
+func formatStatusLine(dst, protocol []byte, statusCode int, statusText []byte) []byte {
 	dst = append(dst, protocol...)
 	dst = append(dst, ' ')
 	dst = strconv.AppendInt(dst, int64(statusCode), 10)

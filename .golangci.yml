@@ -77,12 +77,8 @@ linters-settings:
       - style
     disabled-checks:
       - deferInLoop
-      - httpNoBody
       - importShadow
-      - initClause
-      - paramTypeCombine
       - sloppyReassign
-      - typeUnparen
       - unnamedResult
       - whyNoLint
 
