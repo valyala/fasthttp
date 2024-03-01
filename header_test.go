@@ -1407,8 +1407,8 @@ func TestResponseHeaderCopyTo(t *testing.T) {
 	h.bufKV = argsKV{}
 	h1.bufKV = argsKV{}
 
-	if !reflect.DeepEqual(h, h1) { //nolint:govet
-		t.Fatalf("ResponseHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", h, h1) //nolint:govet
+	if !reflect.DeepEqual(&h, &h1) {
+		t.Fatalf("ResponseHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", &h, &h1)
 	}
 }
 
@@ -1450,8 +1450,8 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	h.bufKV = argsKV{}
 	h1.bufKV = argsKV{}
 
-	if !reflect.DeepEqual(h, h1) { //nolint:govet
-		t.Fatalf("RequestHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", h, h1) //nolint:govet
+	if !reflect.DeepEqual(&h, &h1) {
+		t.Fatalf("RequestHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", &h, &h1)
 	}
 }
 
@@ -1466,7 +1466,7 @@ func TestResponseContentTypeNoDefaultNotEmpty(t *testing.T) {
 	headers := h.String()
 
 	if strings.Contains(headers, "Content-Type: \r\n") {
-		t.Fatalf("ResponseContentTypeNoDefaultNotEmpty fail, response: \n%+v\noutcome: \n%q\n", h, headers) //nolint:govet
+		t.Fatalf("ResponseContentTypeNoDefaultNotEmpty fail, response: \n%+v\noutcome: \n%q\n", &h, headers)
 	}
 }
 
@@ -1534,7 +1534,7 @@ func TestResponseDateNoDefaultNotEmpty(t *testing.T) {
 	headers := h.String()
 
 	if strings.Contains(headers, "\r\nDate: ") {
-		t.Fatalf("ResponseDateNoDefaultNotEmpty fail, response: \n%+v\noutcome: \n%q\n", h, headers) //nolint:govet
+		t.Fatalf("ResponseDateNoDefaultNotEmpty fail, response: \n%+v\noutcome: \n%q\n", &h, headers)
 	}
 }
 
