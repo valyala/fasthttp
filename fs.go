@@ -16,9 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andybalholm/brotli"
-	"github.com/klauspost/compress/gzip"
-	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/bytebufferpool"
 )
 
@@ -1632,28 +1629,28 @@ func (h *fsHandler) newFSFile(f fs.File, fileInfo fs.FileInfo, compressed bool, 
 
 func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, error) {
 	r := f
-	var (
-		br  *brotli.Reader
-		zr  *gzip.Reader
-		zsr *zstd.Decoder
-	)
 	if compressed {
-		var err error
 		switch fileEncoding {
 		case "br":
-			if br, err = acquireBrotliReader(f); err != nil {
+			br, err := acquireBrotliReader(f)
+			if err != nil {
 				return nil, err
 			}
+			defer releaseBrotliReader(br)
 			r = br
 		case "gzip":
-			if zr, err = acquireGzipReader(f); err != nil {
+			zr, err := acquireGzipReader(f)
+			if err != nil {
 				return nil, err
 			}
+			defer releaseGzipReader(zr)
 			r = zr
 		case "zstd":
-			if zsr, err = acquireZstdReader(f); err != nil {
+			zsr, err := acquireZstdReader(f)
+			if err != nil {
 				return nil, err
 			}
+			defer releaseZstdReader(zsr)
 			r = zsr
 		}
 	}
@@ -1669,18 +1666,6 @@ func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, 
 	}
 	if _, err := seeker.Seek(0, io.SeekStart); err != nil {
 		return nil, err
-	}
-
-	if br != nil {
-		releaseBrotliReader(br)
-	}
-
-	if zr != nil {
-		releaseGzipReader(zr)
-	}
-
-	if zsr != nil {
-		releaseZstdReader(zsr)
 	}
 
 	return data, err

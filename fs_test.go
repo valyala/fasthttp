@@ -263,6 +263,35 @@ func TestServeFileCompressed(t *testing.T) {
 	if !bytes.Equal(body, expectedBody) {
 		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
 	}
+
+	// request compressed zstd file
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI("http://foobar.com/baz")
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "zstd")
+	ServeFile(&ctx, "fs.go")
+
+	s = ctx.Response.String()
+	br = bufio.NewReader(bytes.NewBufferString(s))
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	ce = resp.Header.ContentEncoding()
+	if string(ce) != "zstd" {
+		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "zstd")
+	}
+
+	body, err = resp.BodyUnzstd()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expectedBody, err = getFileContents("/fs.go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !bytes.Equal(body, expectedBody) {
+		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
+	}
 }
 
 func TestServeFileUncompressed(t *testing.T) {

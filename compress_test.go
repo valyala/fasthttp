@@ -173,6 +173,7 @@ func testGzipCompressSingleCase(s string) error {
 	if err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
 	}
+	defer releaseGzipReader(zr)
 	body, err := io.ReadAll(zr)
 	if err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
@@ -180,7 +181,6 @@ func testGzipCompressSingleCase(s string) error {
 	if string(body) != s {
 		return fmt.Errorf("unexpected string after decompression: %q. Expecting %q", body, s)
 	}
-	releaseGzipReader(zr)
 	return nil
 }
 

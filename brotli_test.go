@@ -91,6 +91,7 @@ func testBrotliCompressSingleCase(s string) error {
 	if err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
 	}
+	defer releaseBrotliReader(zr)
 	body, err := io.ReadAll(zr)
 	if err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
@@ -98,7 +99,6 @@ func testBrotliCompressSingleCase(s string) error {
 	if string(body) != s {
 		return fmt.Errorf("unexpected string after decompression: %q. Expecting %q", body, s)
 	}
-	releaseBrotliReader(zr)
 	return nil
 }
 
