@@ -2118,7 +2118,7 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 		if err == bufio.ErrBufferFull {
 			if h.secureErrorLogMessage {
 				return &ErrSmallBuffer{
-					error: fmt.Errorf("error when reading response headers"),
+					error: errors.New("error when reading response headers"),
 				}
 			}
 			return &ErrSmallBuffer{
@@ -2170,7 +2170,7 @@ func (h *ResponseHeader) tryReadTrailer(r *bufio.Reader, n int) error {
 		if err == bufio.ErrBufferFull {
 			if h.secureErrorLogMessage {
 				return &ErrSmallBuffer{
-					error: fmt.Errorf("error when reading response trailer"),
+					error: errors.New("error when reading response trailer"),
 				}
 			}
 			return &ErrSmallBuffer{
@@ -2279,7 +2279,7 @@ func (h *RequestHeader) tryReadTrailer(r *bufio.Reader, n int) error {
 		if err == bufio.ErrBufferFull {
 			if h.secureErrorLogMessage {
 				return &ErrSmallBuffer{
-					error: fmt.Errorf("error when reading request trailer"),
+					error: errors.New("error when reading request trailer"),
 				}
 			}
 			return &ErrSmallBuffer{
@@ -2821,7 +2821,7 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	n := bytes.IndexByte(b, ' ')
 	if n < 0 {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("cannot find whitespace in the first line of response")
+			return 0, errors.New("cannot find whitespace in the first line of response")
 		}
 		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
@@ -2838,7 +2838,7 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	}
 	if len(b) > n && b[n] != ' ' {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unexpected char at the end of status code")
+			return 0, errors.New("unexpected char at the end of status code")
 		}
 		return 0, fmt.Errorf("unexpected char at the end of status code. Response %q", buf)
 	}
@@ -2863,7 +2863,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	n := bytes.IndexByte(b, ' ')
 	if n <= 0 {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("cannot find http request method")
+			return 0, errors.New("cannot find http request method")
 		}
 		return 0, fmt.Errorf("cannot find http request method in %q", buf)
 	}
@@ -2876,7 +2876,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		return 0, fmt.Errorf("cannot find whitespace in the first line of request %q", buf)
 	} else if n == 0 {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("requestURI cannot be empty")
+			return 0, errors.New("requestURI cannot be empty")
 		}
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
 	}
@@ -3067,7 +3067,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				}
 				if caseInsensitiveCompare(s.key, strContentLength) {
 					if contentLengthSeen {
-						return 0, fmt.Errorf("duplicate Content-Length header")
+						return 0, errors.New("duplicate Content-Length header")
 					}
 					contentLengthSeen = true
 
@@ -3100,7 +3100,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 
 					if !isIdentity && !isChunked {
 						if h.secureErrorLogMessage {
-							return 0, fmt.Errorf("unsupported Transfer-Encoding")
+							return 0, errors.New("unsupported Transfer-Encoding")
 						}
 						return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
 					}

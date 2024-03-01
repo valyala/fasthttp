@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -454,7 +455,7 @@ func TestResponseHeaderAdd(t *testing.T) {
 	m["bbb"] = struct{}{}
 	m["xxx"] = struct{}{}
 	for i := 0; i < 10; i++ {
-		v := fmt.Sprintf("%d", i)
+		v := strconv.Itoa(i)
 		h.Add("Foo-Bar", v)
 		m[v] = struct{}{}
 	}
@@ -507,7 +508,7 @@ func TestRequestHeaderAdd(t *testing.T) {
 	m["bbb"] = struct{}{}
 	m["xxx"] = struct{}{}
 	for i := 0; i < 10; i++ {
-		v := fmt.Sprintf("%d", i)
+		v := strconv.Itoa(i)
 		h.Add("Foo-Bar", v)
 		m[v] = struct{}{}
 	}
@@ -1294,7 +1295,7 @@ func TestResponseHeaderFirstByteReadEOF(t *testing.T) {
 
 	var h ResponseHeader
 
-	r := &errorReader{fmt.Errorf("non-eof error")}
+	r := &errorReader{errors.New("non-eof error")}
 	br := bufio.NewReader(r)
 	err := h.Read(br)
 	if err == nil {

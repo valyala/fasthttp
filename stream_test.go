@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -55,7 +56,7 @@ func TestStreamReaderClose(t *testing.T) {
 			w.Write(data) //nolint:errcheck
 		}
 		if err := w.Flush(); err == nil {
-			ch <- fmt.Errorf("expecting error on the second flush")
+			ch <- errors.New("expecting error on the second flush")
 		}
 		ch <- nil
 	})

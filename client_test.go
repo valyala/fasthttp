@@ -2258,7 +2258,7 @@ type writeErrorConn struct {
 }
 
 func (w *writeErrorConn) Write(p []byte) (int, error) {
-	return 1, fmt.Errorf("error")
+	return 1, errors.New("error")
 }
 
 func (w *writeErrorConn) Close() error {
@@ -2286,7 +2286,7 @@ type readErrorConn struct {
 }
 
 func (r *readErrorConn) Read(p []byte) (int, error) {
-	return 0, fmt.Errorf("error")
+	return 0, errors.New("error")
 }
 
 func (r *readErrorConn) Write(p []byte) (int, error) {
@@ -2849,7 +2849,7 @@ func TestClientConfigureClientFailed(t *testing.T) {
 
 	c := &Client{
 		ConfigureClient: func(hc *HostClient) error {
-			return fmt.Errorf("failed to configure")
+			return errors.New("failed to configure")
 		},
 	}
 
