@@ -1350,7 +1350,7 @@ const (
 	fsMaxCompressibleFileSize = 8 * 1024 * 1024
 )
 
-func (h *fsHandler) compressAndOpenFSFile(filePath string, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) compressAndOpenFSFile(filePath, fileEncoding string) (*fsFile, error) {
 	f, err := h.filesystem.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -1532,7 +1532,7 @@ func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, fi
 	return ff, nil
 }
 
-func (h *fsHandler) newCompressedFSFile(filePath string, fileEncoding string) (*fsFile, error) {
+func (h *fsHandler) newCompressedFSFile(filePath, fileEncoding string) (*fsFile, error) {
 	f, err := h.filesystem.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open compressed file %q: %w", filePath, err)

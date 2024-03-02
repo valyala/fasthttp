@@ -1430,7 +1430,7 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 }
 
 // setNonSpecial directly put into map i.e. not a basic header.
-func (h *ResponseHeader) setNonSpecial(key []byte, value []byte) {
+func (h *ResponseHeader) setNonSpecial(key, value []byte) {
 	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
 
@@ -1489,7 +1489,7 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 }
 
 // setNonSpecial directly put into map i.e. not a basic header.
-func (h *RequestHeader) setNonSpecial(key []byte, value []byte) {
+func (h *RequestHeader) setNonSpecial(key, value []byte) {
 	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
 

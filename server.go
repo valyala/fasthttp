@@ -682,7 +682,7 @@ func (ctx *RequestCtx) Hijacked() bool {
 // All the values are removed from ctx after returning from the top
 // RequestHandler. Additionally, Close method is called on each value
 // implementing io.Closer before removing the value from ctx.
-func (ctx *RequestCtx) SetUserValue(key any, value any) {
+func (ctx *RequestCtx) SetUserValue(key, value any) {
 	ctx.userValues.Set(key, value)
 }
 

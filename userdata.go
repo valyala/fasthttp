@@ -11,7 +11,7 @@ type userDataKV struct {
 
 type userData []userDataKV
 
-func (d *userData) Set(key any, value any) {
+func (d *userData) Set(key, value any) {
 	if b, ok := key.([]byte); ok {
 		key = string(b)
 	}
