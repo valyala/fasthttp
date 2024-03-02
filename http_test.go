@@ -155,8 +155,8 @@ func testRequestCopyTo(t *testing.T, src *Request) {
 	var dst Request
 	src.CopyTo(&dst)
 
-	if !reflect.DeepEqual(*src, dst) { //nolint:govet
-		t.Fatalf("RequestCopyTo fail, src: \n%+v\ndst: \n%+v\n", *src, dst) //nolint:govet
+	if !reflect.DeepEqual(src, &dst) {
+		t.Fatalf("RequestCopyTo fail, src: \n%+v\ndst: \n%+v\n", src, &dst)
 	}
 }
 
@@ -164,8 +164,8 @@ func testResponseCopyTo(t *testing.T, src *Response) {
 	var dst Response
 	src.CopyTo(&dst)
 
-	if !reflect.DeepEqual(*src, dst) { //nolint:govet
-		t.Fatalf("ResponseCopyTo fail, src: \n%+v\ndst: \n%+v\n", *src, dst) //nolint:govet
+	if !reflect.DeepEqual(src, &dst) {
+		t.Fatalf("ResponseCopyTo fail, src: \n%+v\ndst: \n%+v\n", src, &dst)
 	}
 }
 
