@@ -1633,7 +1633,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 		_, err = w.Write(body)
 	} else if len(body) > 0 {
 		if req.secureErrorLogMessage {
-			return fmt.Errorf("non-zero body for non-POST request")
+			return errors.New("non-zero body for non-POST request")
 		}
 		return fmt.Errorf("non-zero body for non-POST request. body=%q", body)
 	}
@@ -2379,7 +2379,7 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 		}
 		if !bytes.Equal(dst[len(dst)-strCRLFLen:], strCRLF) {
 			return dst, ErrBrokenChunk{
-				error: fmt.Errorf("cannot find crlf at the end of chunk"),
+				error: errors.New("cannot find crlf at the end of chunk"),
 			}
 		}
 		dst = dst[:len(dst)-strCRLFLen]

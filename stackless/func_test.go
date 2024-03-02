@@ -1,7 +1,7 @@
 package stackless
 
 import (
-	"fmt"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -44,7 +44,7 @@ func TestNewFuncMulti(t *testing.T) {
 		var err error
 		for i := 0; i < iterations; i++ {
 			if !f1(3) {
-				err = fmt.Errorf("f1 mustn't return false")
+				err = errors.New("f1 mustn't return false")
 				break
 			}
 		}
@@ -56,7 +56,7 @@ func TestNewFuncMulti(t *testing.T) {
 		var err error
 		for i := 0; i < iterations; i++ {
 			if !f2(5) {
-				err = fmt.Errorf("f2 mustn't return false")
+				err = errors.New("f2 mustn't return false")
 				break
 			}
 		}
