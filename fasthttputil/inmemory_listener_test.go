@@ -1,4 +1,4 @@
-package fasthttputil
+https://github.com/valyala/fasthttp.gitpackage fasthttputil
 
 import (
 	"bytes"
