@@ -7,8 +7,10 @@ import (
 	"net/url"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 func TestNewFastHTTPHandler(t *testing.T) {
@@ -141,5 +143,76 @@ func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value a
 	return func(ctx *fasthttp.RequestCtx) {
 		ctx.SetUserValue(key, value)
 		next(ctx)
+	}
+}
+
+func TestHijack(t *testing.T) {
+	t.Parallel()
+
+	nethttpH := func(w http.ResponseWriter, r *http.Request) {
+		if f, ok := w.(http.Hijacker); !ok {
+			t.Errorf("expected http.ResponseWriter to implement http.Hijacker")
+		} else {
+			if _, err := w.Write([]byte("foo")); err != nil {
+				t.Error(err)
+			}
+
+			if c, rw, err := f.Hijack(); err != nil {
+				t.Error(err)
+			} else {
+				if _, err := rw.WriteString("bar"); err != nil {
+					t.Error(err)
+				}
+
+				if err := rw.Flush(); err != nil {
+					t.Error(err)
+				}
+
+				if err := c.Close(); err != nil {
+					t.Error(err)
+				}
+			}
+		}
+	}
+
+	s := &fasthttp.Server{
+		Handler: NewFastHTTPHandler(http.HandlerFunc(nethttpH)),
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		buf, err := io.ReadAll(c)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if string(buf) != "foobar" {
+			t.Errorf("unexpected response: %q. Expecting %q", buf, "foobar")
+		}
+
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
 	}
 }

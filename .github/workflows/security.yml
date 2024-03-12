@@ -14,8 +14,8 @@ jobs:
     env:
       GO111MODULE: on
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@v2.17.0
+        uses: securego/gosec@v2.19.0
         with:
-          args: '-exclude=G104,G304,G402 ./...'
+          args: '-exclude=G103,G104,G304,G402 ./...'

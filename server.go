@@ -431,6 +431,8 @@ type Server struct {
 	open int32
 	stop int32
 	done chan struct{}
+
+	rejectedRequestsCount uint32
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -521,10 +523,13 @@ func CompressHandler(h RequestHandler) RequestHandler {
 func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
-		if ctx.Request.Header.HasAcceptEncodingBytes(strGzip) {
+		switch {
+		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
 			ctx.Response.gzipBody(level) //nolint:errcheck
-		} else if ctx.Request.Header.HasAcceptEncodingBytes(strDeflate) {
+		case ctx.Request.Header.HasAcceptEncodingBytes(strDeflate):
 			ctx.Response.deflateBody(level) //nolint:errcheck
+		case ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
+			ctx.Response.zstdBody(level) //nolint:errcheck
 		}
 	}
 }
@@ -557,6 +562,8 @@ func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) R
 			ctx.Response.gzipBody(otherLevel) //nolint:errcheck
 		case ctx.Request.Header.HasAcceptEncodingBytes(strDeflate):
 			ctx.Response.deflateBody(otherLevel) //nolint:errcheck
+		case ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
+			ctx.Response.zstdBody(otherLevel) //nolint:errcheck
 		}
 	}
 }
@@ -675,7 +682,7 @@ func (ctx *RequestCtx) Hijacked() bool {
 // All the values are removed from ctx after returning from the top
 // RequestHandler. Additionally, Close method is called on each value
 // implementing io.Closer before removing the value from ctx.
-func (ctx *RequestCtx) SetUserValue(key any, value any) {
+func (ctx *RequestCtx) SetUserValue(key, value any) {
 	ctx.userValues.Set(key, value)
 }
 
@@ -1828,6 +1835,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		atomic.AddInt32(&s.open, 1)
 		if !wp.Serve(c) {
 			atomic.AddInt32(&s.open, -1)
+			atomic.AddUint32(&s.rejectedRequestsCount, 1)
 			s.writeFastError(c, StatusServiceUnavailable,
 				"The connection cannot be served because Server.Concurrency limit exceeded")
 			c.Close()
@@ -2071,6 +2079,13 @@ func (s *Server) GetOpenConnectionsCount() int32 {
 	// before we load the value of s.open. However, in the common case
 	// this avoids underreporting open connections by 1 during server shutdown.
 	return atomic.LoadInt32(&s.open)
+}
+
+// GetRejectedConnectionsCount returns a number of rejected connections.
+//
+// This function is intended be used by monitoring systems.
+func (s *Server) GetRejectedConnectionsCount() uint32 {
+	return atomic.LoadUint32(&s.rejectedRequestsCount)
 }
 
 func (s *Server) getConcurrency() int {

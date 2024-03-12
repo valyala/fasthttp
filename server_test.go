@@ -1016,6 +1016,62 @@ func TestServerConcurrencyLimit(t *testing.T) {
 	}
 }
 
+func TestRejectedRequestsCount(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK") //nolint:errcheck
+		},
+		Concurrency: 1,
+		Logger:      &testLogger{},
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	serverCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverCh)
+	}()
+
+	clientCh := make(chan struct{})
+	expectedCount := 5
+	go func() {
+		for i := 0; i < expectedCount+1; i++ {
+			_, err := ln.Dial()
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		}
+
+		if cnt := s.GetRejectedConnectionsCount(); cnt != uint32(expectedCount) {
+			t.Errorf("unexpected rejected connections count: %d. Expecting %d",
+				cnt, expectedCount)
+		}
+
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case <-serverCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
 func TestServerWriteFastError(t *testing.T) {
 	t.Parallel()
 
@@ -1956,7 +2012,7 @@ func TestCompressHandler(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	ce := resp.Header.ContentEncoding()
-	if string(ce) != "" {
+	if len(ce) != 0 {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
 	}
 	body := resp.Body()
@@ -2054,11 +2110,11 @@ func TestCompressHandlerVary(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	ce := resp.Header.ContentEncoding()
-	if string(ce) != "" {
+	if len(ce) != 0 {
 		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", ce, "")
 	}
 	vary := resp.Header.Peek("Vary")
-	if string(vary) != "" {
+	if len(vary) != 0 {
 		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, "")
 	}
 	body := resp.Body()

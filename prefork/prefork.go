@@ -152,7 +152,8 @@ func (p *Prefork) doCommand() (*exec.Cmd, error) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.ExtraFiles = p.files
-	return cmd, cmd.Start()
+	err := cmd.Start()
+	return cmd, err
 }
 
 func (p *Prefork) prefork(addr string) (err error) {
@@ -209,7 +210,8 @@ func (p *Prefork) prefork(addr string) (err error) {
 		p.logger().Printf("one of the child prefork processes exited with "+
 			"error: %v", sig.err)
 
-		if exitedProcs++; exitedProcs > p.RecoverThreshold {
+		exitedProcs++
+		if exitedProcs > p.RecoverThreshold {
 			p.logger().Printf("child prefork processes exit too many times, "+
 				"which exceeds the value of RecoverThreshold(%d), "+
 				"exiting the master process.\n", exitedProcs)

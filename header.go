@@ -1430,7 +1430,7 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 }
 
 // setNonSpecial directly put into map i.e. not a basic header.
-func (h *ResponseHeader) setNonSpecial(key []byte, value []byte) {
+func (h *ResponseHeader) setNonSpecial(key, value []byte) {
 	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
 
@@ -1489,7 +1489,7 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 }
 
 // setNonSpecial directly put into map i.e. not a basic header.
-func (h *RequestHeader) setNonSpecial(key []byte, value []byte) {
+func (h *RequestHeader) setNonSpecial(key, value []byte) {
 	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
 
@@ -2118,7 +2118,7 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 		if err == bufio.ErrBufferFull {
 			if h.secureErrorLogMessage {
 				return &ErrSmallBuffer{
-					error: fmt.Errorf("error when reading response headers"),
+					error: errors.New("error when reading response headers"),
 				}
 			}
 			return &ErrSmallBuffer{
@@ -2170,7 +2170,7 @@ func (h *ResponseHeader) tryReadTrailer(r *bufio.Reader, n int) error {
 		if err == bufio.ErrBufferFull {
 			if h.secureErrorLogMessage {
 				return &ErrSmallBuffer{
-					error: fmt.Errorf("error when reading response trailer"),
+					error: errors.New("error when reading response trailer"),
 				}
 			}
 			return &ErrSmallBuffer{
@@ -2279,7 +2279,7 @@ func (h *RequestHeader) tryReadTrailer(r *bufio.Reader, n int) error {
 		if err == bufio.ErrBufferFull {
 			if h.secureErrorLogMessage {
 				return &ErrSmallBuffer{
-					error: fmt.Errorf("error when reading request trailer"),
+					error: errors.New("error when reading request trailer"),
 				}
 			}
 			return &ErrSmallBuffer{
@@ -2821,7 +2821,7 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	n := bytes.IndexByte(b, ' ')
 	if n < 0 {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("cannot find whitespace in the first line of response")
+			return 0, errors.New("cannot find whitespace in the first line of response")
 		}
 		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
@@ -2838,7 +2838,7 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	}
 	if len(b) > n && b[n] != ' ' {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unexpected char at the end of status code")
+			return 0, errors.New("unexpected char at the end of status code")
 		}
 		return 0, fmt.Errorf("unexpected char at the end of status code. Response %q", buf)
 	}
@@ -2863,31 +2863,47 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	n := bytes.IndexByte(b, ' ')
 	if n <= 0 {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("cannot find http request method")
+			return 0, errors.New("cannot find http request method")
 		}
 		return 0, fmt.Errorf("cannot find http request method in %q", buf)
 	}
 	h.method = append(h.method[:0], b[:n]...)
 	b = b[n+1:]
 
-	protoStr := strHTTP11
 	// parse requestURI
 	n = bytes.LastIndexByte(b, ' ')
-	switch {
-	case n < 0:
-		h.noHTTP11 = true
-		n = len(b)
-		protoStr = strHTTP10
-	case n == 0:
+	if n < 0 {
+		return 0, fmt.Errorf("cannot find whitespace in the first line of request %q", buf)
+	} else if n == 0 {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("requestURI cannot be empty")
+			return 0, errors.New("requestURI cannot be empty")
 		}
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
-	case !bytes.Equal(b[n+1:], strHTTP11):
-		h.noHTTP11 = true
-		protoStr = b[n+1:]
 	}
 
+	protoStr := b[n+1:]
+
+	// Follow RFCs 7230 and 9112 and require that HTTP versions match the following pattern: HTTP/[0-9]\.[0-9]
+	if len(protoStr) != len(strHTTP11) {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+	}
+	if !bytes.HasPrefix(protoStr, strHTTP11[:5]) {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+	}
+	if protoStr[5] < '0' || protoStr[5] > '9' || protoStr[7] < '0' || protoStr[7] > '9' {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+	}
+
+	h.noHTTP11 = !bytes.Equal(protoStr, strHTTP11)
 	h.proto = append(h.proto[:0], protoStr...)
 	h.requestURI = append(h.requestURI[:0], b[:n]...)
 
@@ -3013,6 +3029,8 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	h.contentLength = -2
 
+	contentLengthSeen := false
+
 	var s headerScanner
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
@@ -3048,6 +3066,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 					continue
 				}
 				if caseInsensitiveCompare(s.key, strContentLength) {
+					if contentLengthSeen {
+						return 0, errors.New("duplicate Content-Length header")
+					}
+					contentLengthSeen = true
+
 					if h.contentLength != -1 {
 						var nerr error
 						if h.contentLength, nerr = parseContentLength(s.value); nerr != nil {
@@ -3072,7 +3095,17 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				}
 			case 't':
 				if caseInsensitiveCompare(s.key, strTransferEncoding) {
-					if !bytes.Equal(s.value, strIdentity) {
+					isIdentity := caseInsensitiveCompare(s.value, strIdentity)
+					isChunked := caseInsensitiveCompare(s.value, strChunked)
+
+					if !isIdentity && !isChunked {
+						if h.secureErrorLogMessage {
+							return 0, errors.New("unsupported Transfer-Encoding")
+						}
+						return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
+					}
+
+					if isChunked {
 						h.contentLength = -1
 						h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 					}

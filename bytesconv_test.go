@@ -3,10 +3,10 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"html"
 	"net"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -118,7 +118,7 @@ func testAppendIPv4(t *testing.T, ipStr string, isValid bool) {
 }
 
 func testAppendUint(t *testing.T, n int) {
-	expectedS := fmt.Sprintf("%d", n)
+	expectedS := strconv.Itoa(n)
 	s := AppendUint(nil, n)
 	if string(s) != expectedS {
 		t.Fatalf("unexpected uint %q. Expecting %q. n=%d", s, expectedS, n)
