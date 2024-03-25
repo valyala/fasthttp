@@ -2044,10 +2044,10 @@ func (s *Server) ServeConn(c net.Conn) error {
 	atomic.AddUint32(&s.concurrency, ^uint32(0))
 
 	if err != errHijacked {
-		err1 := c.Close()
+		errc := c.Close()
 		s.setState(c, StateClosed)
 		if err == nil {
-			err = err1
+			err = errc
 		}
 	} else {
 		err = nil
