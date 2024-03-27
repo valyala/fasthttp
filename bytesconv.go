@@ -355,3 +355,23 @@ func appendQuotedPath(dst, src []byte) []byte {
 	}
 	return dst
 }
+
+// countHexDigits returns the number of hex digits required to represent n when using writeHexInt
+func countHexDigits(n int) int {
+	if n < 0 {
+		// developer sanity-check
+		panic("BUG: int must be positive")
+	}
+
+	if n == 0 {
+		return 1
+	}
+
+	count := 0
+	for n > 0 {
+		n = n >> 4
+		count++
+	}
+
+	return count
+}
