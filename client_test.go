@@ -2472,6 +2472,48 @@ func TestClientHTTPSConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
+func TestClientMaxGreedyConnsPerHost(t *testing.T) {
+	t.Parallel()
+
+	sHTTP := startEchoServer(t, "tcp", "127.0.0.1:")
+	defer sHTTP.Stop()
+
+	testClientMaxGreedyConnsPerHost(t, sHTTP, 0, 10, 1)
+	testClientMaxGreedyConnsPerHost(t, sHTTP, 5, 10, 5)
+	testClientMaxGreedyConnsPerHost(t, sHTTP, 10, 10, 10)
+	testClientMaxGreedyConnsPerHost(t, sHTTP, 15, 10, 10)
+}
+
+func testClientMaxGreedyConnsPerHost(t *testing.T, sHTTP *testEchoServer, maxGreedyConnsPerHost, maxConnsPerHost, expectConnsCount int) {
+	c := &Client{
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+		MaxGreedyConnsPerHost: maxGreedyConnsPerHost,
+		MaxConnsPerHost:       maxConnsPerHost,
+	}
+	defer c.CloseIdleConnections()
+
+	addr := "http://" + sHTTP.Addr()
+	for i := 0; i < c.MaxConnsPerHost; i++ {
+		testClientGet(t, c, addr, 1)
+	}
+	if len(c.m) != 1 {
+		t.Errorf("unexpected host map %d. Expecting 1", len(c.m))
+	}
+
+	var hc *HostClient
+	for _, v := range c.m {
+		hc = v
+	}
+
+	cc := hc.ConnsCount()
+
+	if cc != expectConnsCount {
+		t.Errorf("unexpected ConnsCount %d. Expecting %d", cc, expectConnsCount)
+	}
+}
+
 func TestClientManyServers(t *testing.T) {
 	t.Parallel()
 
