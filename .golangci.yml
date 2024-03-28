@@ -80,6 +80,11 @@ linters-settings:
       - sloppyReassign
       - unnamedResult
       - whyNoLint
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+      - shadow
 
 issues:
   # Show all issues from a linter.
