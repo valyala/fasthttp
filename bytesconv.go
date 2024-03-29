@@ -73,15 +73,11 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	if len(ipStr) == 0 {
 		return dst, errEmptyIPStr
 	}
-	if len(dst) < net.IPv4len {
+	if len(dst) < net.IPv4len || len(dst) > net.IPv4len {
 		dst = make([]byte, net.IPv4len)
 	}
 	copy(dst, net.IPv4zero)
-	dst = dst.To4()
-	if dst == nil {
-		// developer sanity-check
-		panic("BUG: dst must not be nil")
-	}
+	dst = dst.To4() // dst is always non-nil here
 
 	b := ipStr
 	for i := 0; i < 3; i++ {
