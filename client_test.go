@@ -2003,9 +2003,8 @@ func TestClientNonIdempotentRetry(t *testing.T) {
 					s: "HTTP/1.1 345 OK\r\nContent-Type: foobar\r\nContent-Length: 7\r\n\r\n0123456",
 				}, nil
 			default:
-				t.Fatalf("unexpected number of dials: %d", dialsCount)
+				return nil, fmt.Errorf("unexpected number of dials: %d", dialsCount)
 			}
-			panic("unreachable")
 		},
 	}
 
@@ -2053,9 +2052,8 @@ func TestClientNonIdempotentRetry_BodyStream(t *testing.T) {
 					b: []byte("HTTP/1.1 345 OK\r\nContent-Type: foobar\r\n\r\n"),
 				}, nil
 			default:
-				t.Fatalf("unexpected number of dials: %d", dialsCount)
+				return nil, fmt.Errorf("unexpected number of dials: %d", dialsCount)
 			}
-			panic("unreachable")
 		},
 	}
 
@@ -2096,9 +2094,8 @@ func TestClientIdempotentRequest(t *testing.T) {
 					s: "HTTP/1.1 345 OK\r\nContent-Type: foobar\r\nContent-Length: 7\r\n\r\n0123456",
 				}, nil
 			default:
-				t.Fatalf("unexpected number of dials: %d", dialsCount)
+				return nil, fmt.Errorf("unexpected number of dials: %d", dialsCount)
 			}
-			panic("unreachable")
 		},
 	}
 
@@ -2152,9 +2149,8 @@ func TestClientRetryRequestWithCustomDecider(t *testing.T) {
 					s: "HTTP/1.1 345 OK\r\nContent-Type: foobar\r\nContent-Length: 7\r\n\r\n0123456",
 				}, nil
 			default:
-				t.Fatalf("unexpected number of dials: %d", dialsCount)
+				return nil, fmt.Errorf("unexpected number of dials: %d", dialsCount)
 			}
-			panic("unreachable")
 		},
 		RetryIf: func(req *Request) bool {
 			return req.URI().String() == "http://foobar/a/b"
