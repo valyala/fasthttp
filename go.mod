@@ -8,7 +8,7 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0
 	github.com/valyala/tcplisten v1.0.0
 	golang.org/x/crypto v0.21.0
-	golang.org/x/net v0.22.0
+	golang.org/x/net v0.23.0
 	golang.org/x/sys v0.18.0
 )
 
