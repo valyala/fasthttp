@@ -63,6 +63,7 @@ var (
 	strCookiePath           = []byte("path")
 	strCookieHTTPOnly       = []byte("HttpOnly")
 	strCookieSecure         = []byte("secure")
+	strCookiePartitioned    = []byte("Partitioned")
 	strCookieMaxAge         = []byte("max-age")
 	strCookieSameSite       = []byte("SameSite")
 	strCookieSameSiteLax    = []byte("Lax")
