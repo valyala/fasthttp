@@ -132,12 +132,13 @@ func (c *Cookie) SetSameSite(mode CookieSameSite) {
 	}
 }
 
+// Partitioned returns true if the cookie is partitioned.
 func (c *Cookie) Partitioned() bool {
 	return c.partitioned
 }
 
-// SetPartitioned sets the cookie's SameSite flag to the given value.
-// Set value Partitioned will set Secure to true and Path to / also to avoid browser rejection.
+// SetPartitioned sets the cookie's Partitioned flag to the given value.
+// Set value Partitioned to true will set Secure to true and Path to / also to avoid browser rejection.
 func (c *Cookie) SetPartitioned(partitioned bool) {
 	c.partitioned = partitioned
 	if partitioned == true {
