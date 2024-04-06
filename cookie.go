@@ -141,7 +141,7 @@ func (c *Cookie) Partitioned() bool {
 // Set value Partitioned to true will set Secure to true and Path to / also to avoid browser rejection.
 func (c *Cookie) SetPartitioned(partitioned bool) {
 	c.partitioned = partitioned
-	if partitioned == true {
+	if partitioned {
 		c.SetSecure(true)
 		c.SetPath("/")
 	}
