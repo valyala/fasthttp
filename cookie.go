@@ -33,7 +33,7 @@ const (
 	CookieSameSiteStrictMode
 	// CookieSameSiteNoneMode sets the SameSite flag with the "None" parameter.
 	// See https://tools.ietf.org/html/draft-west-cookie-incrementalism-00
-	CookieSameSiteNoneMode
+	CookieSameSiteNoneMode // third-party cookies are phasing out, use Partitioned cookies instead
 )
 
 // AcquireCookie returns an empty Cookie object from the pool.
@@ -74,9 +74,10 @@ type Cookie struct {
 	domain []byte
 	path   []byte
 
-	httpOnly bool
-	secure   bool
-	sameSite CookieSameSite
+	httpOnly    bool
+	secure      bool
+	sameSite    CookieSameSite
+	partitioned bool
 
 	bufKV argsKV
 	buf   []byte
@@ -94,6 +95,7 @@ func (c *Cookie) CopyTo(src *Cookie) {
 	c.httpOnly = src.httpOnly
 	c.secure = src.secure
 	c.sameSite = src.sameSite
+	c.partitioned = src.partitioned
 }
 
 // HTTPOnly returns true if the cookie is http only.
@@ -127,6 +129,21 @@ func (c *Cookie) SetSameSite(mode CookieSameSite) {
 	c.sameSite = mode
 	if mode == CookieSameSiteNoneMode {
 		c.SetSecure(true)
+	}
+}
+
+// Partitioned returns true if the cookie is partitioned.
+func (c *Cookie) Partitioned() bool {
+	return c.partitioned
+}
+
+// SetPartitioned sets the cookie's Partitioned flag to the given value.
+// Set value Partitioned to true will set Secure to true and Path to / also to avoid browser rejection.
+func (c *Cookie) SetPartitioned(partitioned bool) {
+	c.partitioned = partitioned
+	if partitioned {
+		c.SetSecure(true)
+		c.SetPath("/")
 	}
 }
 
@@ -247,6 +264,7 @@ func (c *Cookie) Reset() {
 	c.httpOnly = false
 	c.secure = false
 	c.sameSite = CookieSameSiteDisabled
+	c.partitioned = false
 }
 
 // AppendBytes appends cookie representation to dst and returns
@@ -303,6 +321,10 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 		dst = append(dst, strCookieSameSite...)
 		dst = append(dst, '=')
 		dst = append(dst, strCookieSameSiteNone...)
+	}
+	if c.partitioned {
+		dst = append(dst, ';', ' ')
+		dst = append(dst, strCookiePartitioned...)
 	}
 	return dst
 }
@@ -424,6 +446,10 @@ func (c *Cookie) ParseBytes(src []byte) error {
 					c.secure = true
 				} else if caseInsensitiveCompare(strCookieSameSite, kv.value) {
 					c.sameSite = CookieSameSiteDefaultMode
+				}
+			case 'p': // "partitioned"
+				if caseInsensitiveCompare(strCookiePartitioned, kv.value) {
+					c.partitioned = true
 				}
 			}
 		} // else empty or no match
