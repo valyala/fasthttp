@@ -1734,11 +1734,14 @@ func (resp *Response) brotliBody(level int) error {
 				wf: zw,
 				bw: sw,
 			}
-			copyZeroAlloc(fw, bs) //nolint:errcheck
+			_, wErr := copyZeroAlloc(fw, bs) //nolint:errcheck
 			releaseStacklessBrotliWriter(zw, level)
 			if bsc, ok := bs.(io.Closer); ok {
 				bsc.Close()
+			} else if bsc, ok := bs.(ReadCloserWithError); ok {
+				bsc.CloseWithError(wErr)
 			}
+
 		})
 	} else {
 		bodyBytes := resp.bodyBytes()
@@ -1790,10 +1793,12 @@ func (resp *Response) gzipBody(level int) error {
 				wf: zw,
 				bw: sw,
 			}
-			copyZeroAlloc(fw, bs) //nolint:errcheck
+			_, wErr := copyZeroAlloc(fw, bs) //nolint:errcheck
 			releaseStacklessGzipWriter(zw, level)
 			if bsc, ok := bs.(io.Closer); ok {
 				bsc.Close()
+			} else if bsc, ok := bs.(ReadCloserWithError); ok {
+				bsc.CloseWithError(wErr)
 			}
 		})
 	} else {
@@ -1846,10 +1851,12 @@ func (resp *Response) deflateBody(level int) error {
 				wf: zw,
 				bw: sw,
 			}
-			copyZeroAlloc(fw, bs) //nolint:errcheck
+			_, wErr := copyZeroAlloc(fw, bs) //nolint:errcheck
 			releaseStacklessDeflateWriter(zw, level)
 			if bsc, ok := bs.(io.Closer); ok {
 				bsc.Close()
+			} else if bsc, ok := bs.(ReadCloserWithError); ok {
+				bsc.CloseWithError(wErr)
 			}
 		})
 	} else {
@@ -1899,10 +1906,12 @@ func (resp *Response) zstdBody(level int) error {
 				wf: zw,
 				bw: sw,
 			}
-			copyZeroAlloc(fw, bs) //nolint:errcheck
+			_, wErr := copyZeroAlloc(fw, bs) //nolint:errcheck
 			releaseStacklessZstdWriter(zw, level)
 			if bsc, ok := bs.(io.Closer); ok {
 				bsc.Close()
+			} else if bsc, ok := bs.(ReadCloserWithError); ok {
+				bsc.CloseWithError(wErr)
 			}
 		})
 	} else {
