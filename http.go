@@ -1730,14 +1730,14 @@ func (resp *Response) brotliBody(level int) {
 				wf: zw,
 				bw: sw,
 			}
-			_, wErr := copyZeroAlloc(fw, bs) //nolint:errcheck
+			_, wErr := copyZeroAlloc(fw, bs)
 			releaseStacklessBrotliWriter(zw, level)
-			if bsc, ok := bs.(io.Closer); ok {
-				bsc.Close()
-			} else if bsc, ok := bs.(ReadCloserWithError); ok {
-				bsc.CloseWithError(wErr)
+			switch v := bs.(type) {
+			case io.Closer:
+				v.Close()
+			case ReadCloserWithError:
+				v.CloseWithError(wErr) //nolint:errcheck
 			}
-
 		})
 	} else {
 		bodyBytes := resp.bodyBytes()
@@ -1788,12 +1788,13 @@ func (resp *Response) gzipBody(level int) {
 				wf: zw,
 				bw: sw,
 			}
-			_, wErr := copyZeroAlloc(fw, bs) //nolint:errcheck
+			_, wErr := copyZeroAlloc(fw, bs)
 			releaseStacklessGzipWriter(zw, level)
-			if bsc, ok := bs.(io.Closer); ok {
-				bsc.Close()
-			} else if bsc, ok := bs.(ReadCloserWithError); ok {
-				bsc.CloseWithError(wErr)
+			switch v := bs.(type) {
+			case io.Closer:
+				v.Close()
+			case ReadCloserWithError:
+				v.CloseWithError(wErr) //nolint:errcheck
 			}
 		})
 	} else {
@@ -1845,12 +1846,13 @@ func (resp *Response) deflateBody(level int) {
 				wf: zw,
 				bw: sw,
 			}
-			_, wErr := copyZeroAlloc(fw, bs) //nolint:errcheck
+			_, wErr := copyZeroAlloc(fw, bs)
 			releaseStacklessDeflateWriter(zw, level)
-			if bsc, ok := bs.(io.Closer); ok {
-				bsc.Close()
-			} else if bsc, ok := bs.(ReadCloserWithError); ok {
-				bsc.CloseWithError(wErr)
+			switch v := bs.(type) {
+			case io.Closer:
+				v.Close()
+			case ReadCloserWithError:
+				v.CloseWithError(wErr) //nolint:errcheck
 			}
 		})
 	} else {
@@ -1899,12 +1901,13 @@ func (resp *Response) zstdBody(level int) {
 				wf: zw,
 				bw: sw,
 			}
-			_, wErr := copyZeroAlloc(fw, bs) //nolint:errcheck
+			_, wErr := copyZeroAlloc(fw, bs)
 			releaseStacklessZstdWriter(zw, level)
-			if bsc, ok := bs.(io.Closer); ok {
-				bsc.Close()
-			} else if bsc, ok := bs.(ReadCloserWithError); ok {
-				bsc.CloseWithError(wErr)
+			switch v := bs.(type) {
+			case io.Closer:
+				v.Close()
+			case ReadCloserWithError:
+				v.CloseWithError(wErr) //nolint:errcheck
 			}
 		})
 	} else {
