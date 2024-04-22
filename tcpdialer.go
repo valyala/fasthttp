@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
@@ -302,7 +303,7 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 		if err == nil {
 			return conn, nil
 		}
-		if err == ErrDialTimeout {
+		if errors.Is(err, ErrDialTimeout) {
 			return nil, err
 		}
 		idx++
@@ -316,7 +317,7 @@ func (d *TCPDialer) tryDial(
 ) (net.Conn, error) {
 	timeout := time.Until(deadline)
 	if timeout <= 0 {
-		return nil, ErrDialTimeout
+		return nil, fmt.Errorf("error when dialing %s: %w", addr, ErrDialTimeout)
 	}
 
 	if concurrencyCh != nil {
@@ -332,7 +333,7 @@ func (d *TCPDialer) tryDial(
 			}
 			ReleaseTimer(tc)
 			if isTimeout {
-				return nil, ErrDialTimeout
+				return nil, fmt.Errorf("error when dialing %s: %w", addr, ErrDialTimeout)
 			}
 		}
 		defer func() { <-concurrencyCh }()
@@ -347,7 +348,7 @@ func (d *TCPDialer) tryDial(
 	defer cancelCtx()
 	conn, err := dialer.DialContext(ctx, network, addr)
 	if err != nil && ctx.Err() == context.DeadlineExceeded {
-		return nil, ErrDialTimeout
+		return nil, fmt.Errorf("error when dialing %s: %w", addr, ErrDialTimeout)
 	}
 	return conn, err
 }
