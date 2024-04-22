@@ -525,11 +525,11 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 		h(ctx)
 		switch {
 		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
-			ctx.Response.gzipBody(level) //nolint:errcheck
+			ctx.Response.gzipBody(level)
 		case ctx.Request.Header.HasAcceptEncodingBytes(strDeflate):
-			ctx.Response.deflateBody(level) //nolint:errcheck
+			ctx.Response.deflateBody(level)
 		case ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
-			ctx.Response.zstdBody(level) //nolint:errcheck
+			ctx.Response.zstdBody(level)
 		}
 	}
 }
@@ -557,13 +557,13 @@ func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) R
 		h(ctx)
 		switch {
 		case ctx.Request.Header.HasAcceptEncodingBytes(strBr):
-			ctx.Response.brotliBody(brotliLevel) //nolint:errcheck
+			ctx.Response.brotliBody(brotliLevel)
 		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
-			ctx.Response.gzipBody(otherLevel) //nolint:errcheck
+			ctx.Response.gzipBody(otherLevel)
 		case ctx.Request.Header.HasAcceptEncodingBytes(strDeflate):
-			ctx.Response.deflateBody(otherLevel) //nolint:errcheck
+			ctx.Response.deflateBody(otherLevel)
 		case ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
-			ctx.Response.zstdBody(otherLevel) //nolint:errcheck
+			ctx.Response.zstdBody(otherLevel)
 		}
 	}
 }
