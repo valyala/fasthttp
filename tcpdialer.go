@@ -359,7 +359,7 @@ func (d *TCPDialer) tryDial(
 // ErrDialTimeout is returned when TCP dialing is timed out.
 var ErrDialTimeout = errors.New("dialing to the given TCP address timed out")
 
-// ErrDialWithUpstream wraps dial error with upstream info
+// ErrDialWithUpstream wraps dial error with upstream info.
 type ErrDialWithUpstream struct {
 	Upstream string
 	wrapErr  error
