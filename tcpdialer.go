@@ -366,7 +366,7 @@ type ErrDialWithUpstream struct {
 }
 
 func (e *ErrDialWithUpstream) Error() string {
-	return fmt.Sprintf("error when dialing %s: %s", e.Upstream, e.wrapErr)
+	return fmt.Sprintf("error when dialing %s: %s", e.Upstream, e.wrapErr.Error())
 }
 
 func (e *ErrDialWithUpstream) Unwrap() error {
