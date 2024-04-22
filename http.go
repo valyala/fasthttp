@@ -1670,9 +1670,7 @@ func (resp *Response) WriteGzip(w *bufio.Writer) error {
 //
 // WriteGzipLevel doesn't flush response to w for performance reasons.
 func (resp *Response) WriteGzipLevel(w *bufio.Writer, level int) error {
-	if err := resp.gzipBody(level); err != nil {
-		return err
-	}
+	resp.gzipBody(level)
 	return resp.Write(w)
 }
 
@@ -1701,22 +1699,20 @@ func (resp *Response) WriteDeflate(w *bufio.Writer) error {
 //
 // WriteDeflateLevel doesn't flush response to w for performance reasons.
 func (resp *Response) WriteDeflateLevel(w *bufio.Writer, level int) error {
-	if err := resp.deflateBody(level); err != nil {
-		return err
-	}
+	resp.deflateBody(level)
 	return resp.Write(w)
 }
 
-func (resp *Response) brotliBody(level int) error {
+func (resp *Response) brotliBody(level int) {
 	if len(resp.Header.ContentEncoding()) > 0 {
 		// It looks like the body is already compressed.
 		// Do not compress it again.
-		return nil
+		return
 	}
 
 	if !resp.Header.isCompressibleContentType() {
 		// The content-type cannot be compressed.
-		return nil
+		return
 	}
 
 	if resp.bodyStream != nil {
@@ -1746,7 +1742,7 @@ func (resp *Response) brotliBody(level int) error {
 			// There is no sense in spending CPU time on small body compression,
 			// since there is a very high probability that the compressed
 			// body size will be bigger than the original body size.
-			return nil
+			return
 		}
 		w := responseBodyPool.Get()
 		w.B = AppendBrotliBytesLevel(w.B, bodyBytes, level)
@@ -1760,19 +1756,18 @@ func (resp *Response) brotliBody(level int) error {
 	}
 	resp.Header.SetContentEncodingBytes(strBr)
 	resp.Header.addVaryBytes(strAcceptEncoding)
-	return nil
 }
 
-func (resp *Response) gzipBody(level int) error {
+func (resp *Response) gzipBody(level int) {
 	if len(resp.Header.ContentEncoding()) > 0 {
 		// It looks like the body is already compressed.
 		// Do not compress it again.
-		return nil
+		return
 	}
 
 	if !resp.Header.isCompressibleContentType() {
 		// The content-type cannot be compressed.
-		return nil
+		return
 	}
 
 	if resp.bodyStream != nil {
@@ -1802,7 +1797,7 @@ func (resp *Response) gzipBody(level int) error {
 			// There is no sense in spending CPU time on small body compression,
 			// since there is a very high probability that the compressed
 			// body size will be bigger than the original body size.
-			return nil
+			return
 		}
 		w := responseBodyPool.Get()
 		w.B = AppendGzipBytesLevel(w.B, bodyBytes, level)
@@ -1816,19 +1811,18 @@ func (resp *Response) gzipBody(level int) error {
 	}
 	resp.Header.SetContentEncodingBytes(strGzip)
 	resp.Header.addVaryBytes(strAcceptEncoding)
-	return nil
 }
 
-func (resp *Response) deflateBody(level int) error {
+func (resp *Response) deflateBody(level int) {
 	if len(resp.Header.ContentEncoding()) > 0 {
 		// It looks like the body is already compressed.
 		// Do not compress it again.
-		return nil
+		return
 	}
 
 	if !resp.Header.isCompressibleContentType() {
 		// The content-type cannot be compressed.
-		return nil
+		return
 	}
 
 	if resp.bodyStream != nil {
@@ -1858,7 +1852,7 @@ func (resp *Response) deflateBody(level int) error {
 			// There is no sense in spending CPU time on small body compression,
 			// since there is a very high probability that the compressed
 			// body size will be bigger than the original body size.
-			return nil
+			return
 		}
 		w := responseBodyPool.Get()
 		w.B = AppendDeflateBytesLevel(w.B, bodyBytes, level)
@@ -1872,16 +1866,15 @@ func (resp *Response) deflateBody(level int) error {
 	}
 	resp.Header.SetContentEncodingBytes(strDeflate)
 	resp.Header.addVaryBytes(strAcceptEncoding)
-	return nil
 }
 
-func (resp *Response) zstdBody(level int) error {
+func (resp *Response) zstdBody(level int) {
 	if len(resp.Header.ContentEncoding()) > 0 {
-		return nil
+		return
 	}
 
 	if !resp.Header.isCompressibleContentType() {
-		return nil
+		return
 	}
 
 	if resp.bodyStream != nil {
@@ -1908,7 +1901,7 @@ func (resp *Response) zstdBody(level int) error {
 	} else {
 		bodyBytes := resp.bodyBytes()
 		if len(bodyBytes) < minCompressLen {
-			return nil
+			return
 		}
 		w := responseBodyPool.Get()
 		w.B = AppendZstdBytesLevel(w.B, bodyBytes, level)
@@ -1921,7 +1914,6 @@ func (resp *Response) zstdBody(level int) error {
 	}
 	resp.Header.SetContentEncodingBytes(strZstd)
 	resp.Header.addVaryBytes(strAcceptEncoding)
-	return nil
 }
 
 // Bodies with sizes smaller than minCompressLen aren't compressed at all.
