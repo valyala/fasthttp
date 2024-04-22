@@ -317,7 +317,7 @@ func (d *TCPDialer) tryDial(
 ) (net.Conn, error) {
 	timeout := time.Until(deadline)
 	if timeout <= 0 {
-		return nil, fmt.Errorf("error when dialing %s: %w", addr, ErrDialTimeout)
+		return nil, wrapDialWithUpstream(ErrDialTimeout, addr)
 	}
 
 	if concurrencyCh != nil {
@@ -333,7 +333,7 @@ func (d *TCPDialer) tryDial(
 			}
 			ReleaseTimer(tc)
 			if isTimeout {
-				return nil, fmt.Errorf("error when dialing %s: %w", addr, ErrDialTimeout)
+				return nil, wrapDialWithUpstream(ErrDialTimeout, addr)
 			}
 		}
 		defer func() { <-concurrencyCh }()
@@ -349,15 +349,36 @@ func (d *TCPDialer) tryDial(
 	conn, err := dialer.DialContext(ctx, network, addr)
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return nil, fmt.Errorf("error when dialing %s: %w", addr, ErrDialTimeout)
+			return nil, wrapDialWithUpstream(ErrDialTimeout, addr)
 		}
-		return nil, fmt.Errorf("error when dialing %s: %w", addr, err)
+		return nil, wrapDialWithUpstream(err, addr)
 	}
 	return conn, nil
 }
 
 // ErrDialTimeout is returned when TCP dialing is timed out.
 var ErrDialTimeout = errors.New("dialing to the given TCP address timed out")
+
+// ErrDialWithUpstream wraps dial error with upstream info
+type ErrDialWithUpstream struct {
+	Upstream string
+	wrapErr  error
+}
+
+func (e *ErrDialWithUpstream) Error() string {
+	return fmt.Sprintf("error when dialing %s: %s", e.Upstream, e.wrapErr)
+}
+
+func (e *ErrDialWithUpstream) Unwrap() error {
+	return e.wrapErr
+}
+
+func wrapDialWithUpstream(err error, upstream string) error {
+	return &ErrDialWithUpstream{
+		Upstream: upstream,
+		wrapErr:  err,
+	}
+}
 
 // DefaultDialTimeout is timeout used by Dial and DialDualStack
 // for establishing TCP connections.
