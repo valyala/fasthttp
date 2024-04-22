@@ -347,10 +347,13 @@ func (d *TCPDialer) tryDial(
 	ctx, cancelCtx := context.WithDeadline(context.Background(), deadline)
 	defer cancelCtx()
 	conn, err := dialer.DialContext(ctx, network, addr)
-	if err != nil && ctx.Err() == context.DeadlineExceeded {
-		return nil, fmt.Errorf("error when dialing %s: %w", addr, ErrDialTimeout)
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("error when dialing %s: %w", addr, ErrDialTimeout)
+		}
+		return nil, fmt.Errorf("error when dialing %s: %w", addr, err)
 	}
-	return conn, err
+	return conn, nil
 }
 
 // ErrDialTimeout is returned when TCP dialing is timed out.
