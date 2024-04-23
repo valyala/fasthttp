@@ -1233,6 +1233,12 @@ func (h *fsHandler) openIndexFile(ctx *RequestCtx, dirPath string, mustCompress 
 		if err == nil {
 			return ff, nil
 		}
+        if mustCompress && err == errNoCreatePermission {
+			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
+				"Allow write access to the directory with this file in order to improve fasthttp performance", indexFilePath)
+			mustCompress = false
+			return  h.openFSFile(indexFilePath, mustCompress, fileEncoding)
+		}
 		if !errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("cannot open file %q: %w", indexFilePath, err)
 		}
