@@ -2943,7 +2943,7 @@ func TestResponseBodyStream(t *testing.T) {
 			t.Fatalf("parse response find err: %v", err)
 		}
 		defer func() {
-			if err := response.closeBodyStream(); err != nil {
+			if err := response.closeBodyStream(nil); err != nil {
 				t.Fatalf("close body stream err: %v", err)
 			}
 		}()
