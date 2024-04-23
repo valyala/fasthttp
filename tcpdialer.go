@@ -360,6 +360,14 @@ func (d *TCPDialer) tryDial(
 var ErrDialTimeout = errors.New("dialing to the given TCP address timed out")
 
 // ErrDialWithUpstream wraps dial error with upstream info.
+//
+// Should use errors.As to get upstream information from error:
+//
+// var dialErr *fasthttp.ErrDialWithUpstream
+//
+//	if errors.As(err, &dialErr) {
+//	  upstream = dialErr.Upstream
+//	}
 type ErrDialWithUpstream struct {
 	Upstream string
 	wrapErr  error
