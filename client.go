@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -476,6 +477,10 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	}
 
 	host := uri.Host()
+
+	if bytes.ContainsRune(host, ',') {
+		return fmt.Errorf("invalid host %q. Use HostClient for multiple hosts", host)
+	}
 
 	isTLS := false
 	if uri.isHTTPS() {
