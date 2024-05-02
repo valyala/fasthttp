@@ -363,10 +363,12 @@ var ErrDialTimeout = errors.New("dialing to the given TCP address timed out")
 //
 // Should use errors.As to get upstream information from error:
 //
-// var dialErr *fasthttp.ErrDialWithUpstream
+//	hc := fasthttp.HostClient{Addr: "foo.com,bar.com"}
+//	err := hc.Do(req, res)
 //
+//	var dialErr *fasthttp.ErrDialWithUpstream
 //	if errors.As(err, &dialErr) {
-//	  upstream = dialErr.Upstream
+//		upstream = dialErr.Upstream // 34.206.39.153:80
 //	}
 type ErrDialWithUpstream struct {
 	Upstream string
