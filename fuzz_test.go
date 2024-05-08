@@ -47,11 +47,10 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 			return
 		}
 
-		var res Response
+		res := AcquireResponse()
+		defer ReleaseResponse(res)
 
 		_ = res.ReadLimitBody(bufio.NewReader(bytes.NewReader(body)), max)
-		w := bytes.Buffer{}
-		_, _ = res.WriteTo(&w)
 	})
 }
 
@@ -63,11 +62,10 @@ func FuzzRequestReadLimitBody(f *testing.F) {
 			return
 		}
 
-		var req Request
+		req := AcquireRequest()
+		defer ReleaseRequest(req)
 
 		_ = req.ReadLimitBody(bufio.NewReader(bytes.NewReader(body)), max)
-		w := bytes.Buffer{}
-		_, _ = req.WriteTo(&w)
 	})
 }
 
