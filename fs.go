@@ -1229,7 +1229,11 @@ func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, 
 
 func (h *fsHandler) openIndexFile(ctx *RequestCtx, dirPath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
 	for _, indexName := range h.indexNames {
-		indexFilePath := dirPath + "/" + indexName
+		indexFilePath := indexName
+		if dirPath != "" {
+			indexFilePath = dirPath + "/" + indexName
+		}
+
 		ff, err := h.openFSFile(indexFilePath, mustCompress, fileEncoding)
 		if err == nil {
 			return ff, nil
