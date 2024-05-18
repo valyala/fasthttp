@@ -1068,7 +1068,8 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			mustCompress = false
 			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
 		}
-		if err == errDirIndexRequired {
+
+		if errors.Is(err, errDirIndexRequired) {
 			if !hasTrailingSlash {
 				ctx.RedirectBytes(append(path, '/'), StatusFound)
 				return
@@ -1260,6 +1261,11 @@ func (h *fsHandler) createDirIndex(ctx *RequestCtx, dirPath string, mustCompress
 	w := &bytebufferpool.ByteBuffer{}
 
 	base := ctx.URI()
+
+	// io/fs doesn't support ReadDir with empty path.
+	if dirPath == "" {
+		dirPath = "."
+	}
 
 	basePathEscaped := html.EscapeString(string(base.Path()))
 	_, _ = fmt.Fprintf(w, "<html><head><title>%s</title><style>.dir { font-weight: bold }</style></head><body>", basePathEscaped)
@@ -1556,12 +1562,17 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 	if mustCompress {
 		filePath += h.compressedFileSuffixes[fileEncoding]
 	}
-
 	f, err := h.filesystem.Open(filePath)
 	if err != nil {
 		if mustCompress && errors.Is(err, fs.ErrNotExist) {
 			return h.compressAndOpenFSFile(filePathOriginal, fileEncoding)
 		}
+
+		// If the file is not found and the path is empty, let's return errDirIndexRequired error.
+		if filePath == "" && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrInvalid)) {
+			return nil, errDirIndexRequired
+		}
+
 		return nil, err
 	}
 
