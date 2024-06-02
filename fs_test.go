@@ -569,7 +569,7 @@ func runFSCompressConcurrent(t *testing.T, fs *FS) {
 		go func() {
 			for j := 0; j < 5; j++ {
 				testFSCompress(t, h, "/fs.go")
-				testFSCompress(t, h, "/")
+				testFSCompress(t, h, "/examples/")
 				testFSCompress(t, h, "/README.md")
 			}
 			ch <- struct{}{}

@@ -150,7 +150,7 @@ func TestHostClientNegativeTimeout(t *testing.T) {
 func TestDoDeadlineRetry(t *testing.T) {
 	t.Parallel()
 
-	tries := 0
+	var tries atomic.Int32
 	done := make(chan struct{})
 
 	ln := fasthttputil.NewInmemoryListener()
@@ -161,11 +161,15 @@ func TestDoDeadlineRetry(t *testing.T) {
 				close(done)
 				break
 			}
-			tries++
+			tries.Add(1)
 			br := bufio.NewReader(c)
 			(&RequestHeader{}).Read(br)                      //nolint:errcheck
 			(&Request{}).readBodyStream(br, 0, false, false) //nolint:errcheck
-			time.Sleep(time.Millisecond * 60)
+			if tries.Load() == 1 {
+				time.Sleep(time.Millisecond * 10)
+			} else {
+				time.Sleep(time.Millisecond * 200)
+			}
 			c.Close()
 		}
 	}()
@@ -177,13 +181,13 @@ func TestDoDeadlineRetry(t *testing.T) {
 	req := AcquireRequest()
 	req.Header.SetMethod(MethodGet)
 	req.SetRequestURI("http://example.com")
-	if err := c.DoDeadline(req, nil, time.Now().Add(time.Millisecond*100)); err != ErrTimeout {
+	if err := c.DoDeadline(req, nil, time.Now().Add(time.Millisecond*200)); err != ErrTimeout {
 		t.Fatalf("expected ErrTimeout error got: %+v", err)
 	}
 	ln.Close()
 	<-done
-	if tries != 2 {
-		t.Fatalf("expected 2 tries got %d", tries)
+	if tr := tries.Load(); tr != 2 {
+		t.Fatalf("expected 2 tries got %d", tr)
 	}
 }
 
@@ -2545,7 +2549,7 @@ func TestHostClientGet(t *testing.T) {
 	addr := "TestHostClientGet.unix"
 	s := startEchoServer(t, "unix", addr)
 	defer s.Stop()
-	c := createEchoClient(t, "unix", addr)
+	c := createEchoClient("unix", addr)
 
 	testHostClientGet(t, c, 100)
 }
@@ -2557,7 +2561,7 @@ func TestHostClientPost(t *testing.T) {
 	addr := "./TestHostClientPost.unix"
 	s := startEchoServer(t, "unix", addr)
 	defer s.Stop()
-	c := createEchoClient(t, "unix", addr)
+	c := createEchoClient("unix", addr)
 
 	testHostClientPost(t, c, 100)
 }
@@ -2569,7 +2573,7 @@ func TestHostClientConcurrent(t *testing.T) {
 	addr := "./TestHostClientConcurrent.unix"
 	s := startEchoServer(t, "unix", addr)
 	defer s.Stop()
-	c := createEchoClient(t, "unix", addr)
+	c := createEchoClient("unix", addr)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
@@ -2710,7 +2714,7 @@ type clientGetter interface {
 	Get(dst []byte, uri string) (int, []byte, error)
 }
 
-func createEchoClient(t *testing.T, network, addr string) *HostClient {
+func createEchoClient(network, addr string) *HostClient {
 	return &HostClient{
 		Addr: addr,
 		Dial: func(addr string) (net.Conn, error) {
@@ -3007,7 +3011,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 	}
 	wg.Wait()
 
-	time.Sleep(time.Millisecond * 100)
+	time.Sleep(time.Millisecond * 200)
 
 	// Prevent a race condition with the conns cleaner that might still be running.
 	c.connsLock.Lock()
