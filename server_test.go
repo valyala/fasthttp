@@ -1047,6 +1047,11 @@ func TestRejectedRequestsCount(t *testing.T) {
 			}
 		}
 
+		// The server's worker pool is a separate goroutine, give it
+		// a little bit of time to process the failed connection,
+		// otherwise the test may fail from time to time.
+		time.Sleep(time.Millisecond * 10)
+
 		if cnt := s.GetRejectedConnectionsCount(); cnt != uint32(expectedCount) {
 			t.Errorf("unexpected rejected connections count: %d. Expecting %d",
 				cnt, expectedCount)
