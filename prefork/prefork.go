@@ -2,7 +2,6 @@ package prefork
 
 import (
 	"errors"
-	"flag"
 	"log"
 	"net"
 	"os"
@@ -14,8 +13,8 @@ import (
 )
 
 const (
-	preforkChildFlag = "-prefork-child"
-	defaultNetwork   = "tcp4"
+	preforkChildEnvVariable = "FASTHTTP_PREFORK_CHILD"
+	defaultNetwork          = "tcp4"
 )
 
 var (
@@ -69,21 +68,9 @@ type Prefork struct {
 	files []*os.File
 }
 
-func init() { //nolint:gochecknoinits
-	// Definition flag to not break the program when the user adds their own flags
-	// and runs `flag.Parse()`
-	flag.Bool(preforkChildFlag[1:], false, "Is a child process")
-}
-
 // IsChild checks if the current thread/process is a child.
 func IsChild() bool {
-	for _, arg := range os.Args[1:] {
-		if arg == preforkChildFlag {
-			return true
-		}
-	}
-
-	return false
+	return os.Getenv(preforkChildEnvVariable) == "1"
 }
 
 // New wraps the fasthttp server to run with preforked processes.
@@ -148,9 +135,10 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 
 func (p *Prefork) doCommand() (*exec.Cmd, error) {
 	/* #nosec G204 */
-	cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
+	cmd := exec.Command(os.Args[0], os.Args[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), preforkChildEnvVariable+"=1")
 	cmd.ExtraFiles = p.files
 	err := cmd.Start()
 	return cmd, err

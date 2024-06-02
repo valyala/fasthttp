@@ -13,11 +13,11 @@ import (
 )
 
 func setUp() {
-	os.Args = append(os.Args, preforkChildFlag)
+	os.Setenv(preforkChildEnvVariable, "1")
 }
 
 func tearDown() {
-	os.Args = os.Args[:len(os.Args)-1]
+	os.Unsetenv(preforkChildEnvVariable)
 }
 
 func getAddr() string {
