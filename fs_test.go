@@ -18,7 +18,7 @@ type TestLogger struct {
 	t *testing.T
 }
 
-func (t TestLogger) Printf(format string, args ...interface{}) {
+func (t TestLogger) Printf(format string, args ...any) {
 	t.t.Logf(format, args...)
 }
 
@@ -652,7 +652,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
 	ce := resp.Header.ContentEncoding()
-	if string(ce) != "" {
+	if len(ce) != 0 {
 		t.Errorf("unexpected content-encoding %q. Expecting empty string. filePath=%q", ce, filePath)
 	}
 	body := string(resp.Body())

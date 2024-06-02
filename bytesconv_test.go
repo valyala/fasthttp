@@ -3,10 +3,10 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
-	"fmt"
 	"html"
 	"net"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 
@@ -59,21 +59,27 @@ func testAppendHTMLEscape(t *testing.T, s, expectedS string) {
 func TestParseIPv4(t *testing.T) {
 	t.Parallel()
 
-	testParseIPv4(t, "0.0.0.0", true)
-	testParseIPv4(t, "255.255.255.255", true)
-	testParseIPv4(t, "123.45.67.89", true)
+	testParseIPv4(t, net.IP{0}, "0.0.0.0", true)
+	testParseIPv4(t, nil, "0.0.0.0", true)
+	testParseIPv4(t, net.IP{0, 0, 0, 0, 0}, "0.0.0.0", true)
+	testParseIPv4(t, nil, "255.255.255.255", true)
+	testParseIPv4(t, nil, "123.45.67.89", true)
 
 	// ipv6 shouldn't work
-	testParseIPv4(t, "2001:4860:0:2001::68", false)
+	testParseIPv4(t, nil, "2001:4860:0:2001::68", false)
 
 	// invalid ip
-	testParseIPv4(t, "foobar", false)
-	testParseIPv4(t, "1.2.3", false)
-	testParseIPv4(t, "123.456.789.11", false)
+	testParseIPv4(t, nil, "", false)
+	testParseIPv4(t, nil, "foobar", false)
+	testParseIPv4(t, nil, "1.2.3", false)
+	testParseIPv4(t, nil, "123.456.789.11", false)
+	testParseIPv4(t, nil, "b.1.2.3", false)
+	testParseIPv4(t, nil, "1.2.3.b", false)
+	testParseIPv4(t, nil, "1.2.3.456", false)
 }
 
-func testParseIPv4(t *testing.T, ipStr string, isValid bool) {
-	ip, err := ParseIPv4(nil, []byte(ipStr))
+func testParseIPv4(t *testing.T, dst net.IP, ipStr string, isValid bool) {
+	ip, err := ParseIPv4(dst, []byte(ipStr))
 	if isValid {
 		if err != nil {
 			t.Fatalf("unexpected error when parsing ip %q: %v", ipStr, err)
@@ -118,7 +124,7 @@ func testAppendIPv4(t *testing.T, ipStr string, isValid bool) {
 }
 
 func testAppendUint(t *testing.T, n int) {
-	expectedS := fmt.Sprintf("%d", n)
+	expectedS := strconv.Itoa(n)
 	s := AppendUint(nil, n)
 	if string(s) != expectedS {
 		t.Fatalf("unexpected uint %q. Expecting %q. n=%d", s, expectedS, n)

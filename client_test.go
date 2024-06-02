@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -455,7 +456,7 @@ func TestClientParseConn(t *testing.T) {
 		t.Fatalf("req RemoteAddr parse addr fail: %q, hope: %q", res.RemoteAddr().String(), host)
 	}
 
-	if !regexp.MustCompile(`^127\.0\.0\.1:[0-9]{4,5}$`).MatchString(res.LocalAddr().String()) {
+	if !regexp.MustCompile(`^127\.0\.0\.1:\d{4,5}$`).MatchString(res.LocalAddr().String()) {
 		t.Fatalf("res LocalAddr addr match fail: %q, hope match: %q", res.LocalAddr().String(), "^127.0.0.1:[0-9]{4,5}$")
 	}
 }
@@ -2002,9 +2003,8 @@ func TestClientNonIdempotentRetry(t *testing.T) {
 					s: "HTTP/1.1 345 OK\r\nContent-Type: foobar\r\nContent-Length: 7\r\n\r\n0123456",
 				}, nil
 			default:
-				t.Fatalf("unexpected number of dials: %d", dialsCount)
+				return nil, fmt.Errorf("unexpected number of dials: %d", dialsCount)
 			}
-			panic("unreachable")
 		},
 	}
 
@@ -2052,9 +2052,8 @@ func TestClientNonIdempotentRetry_BodyStream(t *testing.T) {
 					b: []byte("HTTP/1.1 345 OK\r\nContent-Type: foobar\r\n\r\n"),
 				}, nil
 			default:
-				t.Fatalf("unexpected number of dials: %d", dialsCount)
+				return nil, fmt.Errorf("unexpected number of dials: %d", dialsCount)
 			}
-			panic("unreachable")
 		},
 	}
 
@@ -2095,9 +2094,8 @@ func TestClientIdempotentRequest(t *testing.T) {
 					s: "HTTP/1.1 345 OK\r\nContent-Type: foobar\r\nContent-Length: 7\r\n\r\n0123456",
 				}, nil
 			default:
-				t.Fatalf("unexpected number of dials: %d", dialsCount)
+				return nil, fmt.Errorf("unexpected number of dials: %d", dialsCount)
 			}
-			panic("unreachable")
 		},
 	}
 
@@ -2151,9 +2149,8 @@ func TestClientRetryRequestWithCustomDecider(t *testing.T) {
 					s: "HTTP/1.1 345 OK\r\nContent-Type: foobar\r\nContent-Length: 7\r\n\r\n0123456",
 				}, nil
 			default:
-				t.Fatalf("unexpected number of dials: %d", dialsCount)
+				return nil, fmt.Errorf("unexpected number of dials: %d", dialsCount)
 			}
-			panic("unreachable")
 		},
 		RetryIf: func(req *Request) bool {
 			return req.URI().String() == "http://foobar/a/b"
@@ -2257,7 +2254,7 @@ type writeErrorConn struct {
 }
 
 func (w *writeErrorConn) Write(p []byte) (int, error) {
-	return 1, fmt.Errorf("error")
+	return 1, errors.New("error")
 }
 
 func (w *writeErrorConn) Close() error {
@@ -2272,11 +2269,11 @@ func (w *writeErrorConn) RemoteAddr() net.Addr {
 	return nil
 }
 
-func (r *writeErrorConn) SetReadDeadline(_ time.Time) error {
+func (w *writeErrorConn) SetReadDeadline(_ time.Time) error {
 	return nil
 }
 
-func (r *writeErrorConn) SetWriteDeadline(_ time.Time) error {
+func (w *writeErrorConn) SetWriteDeadline(_ time.Time) error {
 	return nil
 }
 
@@ -2285,7 +2282,7 @@ type readErrorConn struct {
 }
 
 func (r *readErrorConn) Read(p []byte) (int, error) {
-	return 0, fmt.Errorf("error")
+	return 0, errors.New("error")
 }
 
 func (r *readErrorConn) Write(p []byte) (int, error) {
@@ -2322,7 +2319,7 @@ func (r *singleReadConn) Read(p []byte) (int, error) {
 	if len(r.s) == r.n {
 		return 0, io.EOF
 	}
-	n := copy(p, []byte(r.s[r.n:]))
+	n := copy(p, r.s[r.n:])
 	r.n += n
 	return n, nil
 }
@@ -2848,7 +2845,7 @@ func TestClientConfigureClientFailed(t *testing.T) {
 
 	c := &Client{
 		ConfigureClient: func(hc *HostClient) error {
-			return fmt.Errorf("failed to configure")
+			return errors.New("failed to configure")
 		},
 	}
 
@@ -3388,6 +3385,97 @@ func Test_getRedirectURL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := getRedirectURL(tt.args.baseURL, tt.args.location, tt.args.disablePathNormalizing); got != tt.want {
 				t.Errorf("getRedirectURL() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+type clientDoTimeOuter interface {
+	DoTimeout(req *Request, resp *Response, timeout time.Duration) error
+}
+
+func TestDialTimeout(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		client         clientDoTimeOuter
+		requestTimeout time.Duration
+		shouldFailFast bool
+	}{
+		{
+			name: "Client should fail after a millisecond due to request timeout",
+			client: &Client{
+				// should be ignored due to DialTimeout
+				Dial: func(addr string) (net.Conn, error) {
+					time.Sleep(time.Second)
+					return nil, errors.New("timeout")
+				},
+				// should be used
+				DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
+					time.Sleep(timeout)
+					return nil, errors.New("timeout")
+				},
+			},
+			requestTimeout: time.Millisecond,
+			shouldFailFast: true,
+		},
+		{
+			name: "Client should fail after a second due to no DialTimeout set",
+			client: &Client{
+				Dial: func(addr string) (net.Conn, error) {
+					time.Sleep(time.Second)
+					return nil, errors.New("timeout")
+				},
+			},
+			requestTimeout: time.Millisecond,
+			shouldFailFast: false,
+		},
+		{
+			name: "HostClient should fail after a millisecond due to request timeout",
+			client: &HostClient{
+				// should be ignored due to DialTimeout
+				Dial: func(addr string) (net.Conn, error) {
+					time.Sleep(time.Second)
+					return nil, errors.New("timeout")
+				},
+				// should be used
+				DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
+					time.Sleep(timeout)
+					return nil, errors.New("timeout")
+				},
+			},
+			requestTimeout: time.Millisecond,
+			shouldFailFast: true,
+		},
+		{
+			name: "HostClient should fail after a second due to no DialTimeout set",
+			client: &HostClient{
+				Dial: func(addr string) (net.Conn, error) {
+					time.Sleep(time.Second)
+					return nil, errors.New("timeout")
+				},
+			},
+			requestTimeout: time.Millisecond,
+			shouldFailFast: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			start := time.Now()
+			err := tt.client.DoTimeout(&Request{}, &Response{}, tt.requestTimeout)
+			if err == nil {
+				t.Fatal("expected error (timeout)")
+			}
+			if tt.shouldFailFast {
+				if time.Since(start) > time.Second {
+					t.Fatal("expected timeout after a millisecond")
+				}
+			} else {
+				if time.Since(start) < time.Second {
+					t.Fatal("expected timeout after a second")
+				}
 			}
 		})
 	}

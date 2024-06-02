@@ -254,7 +254,7 @@ func testFSFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
 	ce := resp.Header.ContentEncoding()
-	if string(ce) != "" {
+	if len(ce) != 0 {
 		t.Errorf("unexpected content-encoding %q. Expecting empty string. filePath=%q", ce, filePath)
 	}
 	body := string(resp.Body())
@@ -364,8 +364,6 @@ func TestFSServeFileDirectoryRedirect(t *testing.T) {
 	}
 }
 
-// //*
-// *//
 var dirTestFilesystem = os.DirFS(".")
 
 func TestDirFSServeFileHead(t *testing.T) {
@@ -637,4 +635,86 @@ func TestDirFSServeFileDirectoryRedirect(t *testing.T) {
 	if ctx.Response.StatusCode() != StatusOK {
 		t.Fatalf("Unexpected status code %d for file '/fs.go'. Expecting %d.", ctx.Response.StatusCode(), StatusOK)
 	}
+}
+
+func TestFSFSGenerateIndexOsDirFS(t *testing.T) {
+	t.Parallel()
+
+	t.Run("dirFS", func(t *testing.T) {
+		t.Parallel()
+
+		fs := &FS{
+			FS:                 dirTestFilesystem,
+			Root:               ".",
+			GenerateIndexPages: true,
+		}
+		h := fs.NewRequestHandler()
+
+		var ctx RequestCtx
+		var req Request
+		ctx.Init(&req, nil, nil)
+
+		h(&ctx)
+
+		cases := []string{"/", "//", ""}
+		for _, c := range cases {
+			ctx.Request.Reset()
+			ctx.Response.Reset()
+
+			req.Header.SetMethod(MethodGet)
+			req.SetRequestURI("http://foobar.com" + c)
+			h(&ctx)
+
+			if ctx.Response.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code %d for path %q. Expecting %d", ctx.Response.StatusCode(), ctx.Response.StatusCode(), StatusOK)
+			}
+
+			if !bytes.Contains(ctx.Response.Body(), []byte("fasthttputil")) {
+				t.Fatalf("unexpected body %q. Expecting to contain %q", ctx.Response.Body(), "fasthttputil")
+			}
+
+			if !bytes.Contains(ctx.Response.Body(), []byte("fs.go")) {
+				t.Fatalf("unexpected body %q. Expecting to contain %q", ctx.Response.Body(), "fs.go")
+			}
+		}
+	})
+
+	t.Run("embedFS", func(t *testing.T) {
+		t.Parallel()
+
+		fs := &FS{
+			FS:                 fsTestFilesystem,
+			Root:               ".",
+			GenerateIndexPages: true,
+		}
+		h := fs.NewRequestHandler()
+
+		var ctx RequestCtx
+		var req Request
+		ctx.Init(&req, nil, nil)
+
+		h(&ctx)
+
+		cases := []string{"/", "//", ""}
+		for _, c := range cases {
+			ctx.Request.Reset()
+			ctx.Response.Reset()
+
+			req.Header.SetMethod(MethodGet)
+			req.SetRequestURI("http://foobar.com" + c)
+			h(&ctx)
+
+			if ctx.Response.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code %d for path %q. Expecting %d", ctx.Response.StatusCode(), ctx.Response.StatusCode(), StatusOK)
+			}
+
+			if !bytes.Contains(ctx.Response.Body(), []byte("fasthttputil")) {
+				t.Fatalf("unexpected body %q. Expecting to contain %q", ctx.Response.Body(), "fasthttputil")
+			}
+
+			if !bytes.Contains(ctx.Response.Body(), []byte("fs.go")) {
+				t.Fatalf("unexpected body %q. Expecting to contain %q", ctx.Response.Body(), "fs.go")
+			}
+		}
+	})
 }

@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+var _ connTLSer = &perIPTLSConn{}
+
 func TestIPxUint32(t *testing.T) {
 	t.Parallel()
 

@@ -51,7 +51,7 @@ func (wp *workerPool) Start() {
 	}
 	wp.stopCh = make(chan struct{})
 	stopCh := wp.stopCh
-	wp.workerChanPool.New = func() interface{} {
+	wp.workerChanPool.New = func() any {
 		return &workerChan{
 			ch: make(chan net.Conn, workerChanCap),
 		}
@@ -110,9 +110,9 @@ func (wp *workerPool) clean(scratch *[]*workerChan) {
 	n := len(ready)
 
 	// Use binary-search algorithm to find out the index of the least recently worker which can be cleaned up.
-	l, r, mid := 0, n-1, 0
+	l, r := 0, n-1
 	for l <= r {
-		mid = (l + r) / 2
+		mid := (l + r) / 2
 		if criticalTime.After(wp.ready[mid].lastUseTime) {
 			l = mid + 1
 		} else {
@@ -238,7 +238,6 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			_ = c.Close()
 			wp.connState(c, StateClosed)
 		}
-		c = nil
 
 		if !wp.release(ch) {
 			break

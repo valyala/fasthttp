@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -185,7 +186,15 @@ type Client struct {
 
 	// Callback for establishing new connections to hosts.
 	//
-	// Default Dial is used if not set.
+	// Default DialTimeout is used if not set.
+	DialTimeout DialFuncWithTimeout
+
+	// Callback for establishing new connections to hosts.
+	//
+	// Note that if Dial is set instead of DialTimeout, Dial will ignore Request timeout.
+	// If you want the tcp dial process to account for request timeouts, use DialTimeout instead.
+	//
+	// If not set, DialTimeout is used.
 	Dial DialFunc
 
 	// Attempt to connect to both ipv4 and ipv6 addresses if set to true.
@@ -218,7 +227,7 @@ type Client struct {
 	// By default connection duration is unlimited.
 	MaxConnDuration time.Duration
 
-	// Maximum number of attempts for idempotent calls
+	// Maximum number of attempts for idempotent calls.
 	//
 	// DefaultMaxIdemponentCallAttempts is used if not set.
 	MaxIdemponentCallAttempts int
@@ -270,7 +279,7 @@ type Client struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
-	// Path values are sent as-is without normalization
+	// Path values are sent as-is without normalization.
 	//
 	// Disabled path normalization may be useful for proxying incoming requests
 	// to servers that are expecting paths to be forwarded as-is.
@@ -281,18 +290,18 @@ type Client struct {
 
 	// Maximum duration for waiting for a free connection.
 	//
-	// By default will not waiting, return ErrNoFreeConns immediately
+	// By default will not waiting, return ErrNoFreeConns immediately.
 	MaxConnWaitTimeout time.Duration
 
 	// RetryIf controls whether a retry should be attempted after an error.
 	//
-	// By default will use isIdempotent function
+	// By default will use isIdempotent function.
 	RetryIf RetryIfFunc
 
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
 
-	// StreamResponseBody enables response body streaming
+	// StreamResponseBody enables response body streaming.
 	StreamResponseBody bool
 
 	// ConfigureClient configures the fasthttp.HostClient.
@@ -469,6 +478,10 @@ func (c *Client) Do(req *Request, resp *Response) error {
 
 	host := uri.Host()
 
+	if bytes.ContainsRune(host, ',') {
+		return fmt.Errorf("invalid host %q. Use HostClient for multiple hosts", host)
+	}
+
 	isTLS := false
 	if uri.isHTTPS() {
 		isTLS = true
@@ -505,6 +518,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 				Name:                          c.Name,
 				NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 				Dial:                          c.Dial,
+				DialTimeout:                   c.DialTimeout,
 				DialDualStack:                 c.DialDualStack,
 				IsTLS:                         isTLS,
 				TLSConfig:                     c.TLSConfig,
@@ -624,7 +638,22 @@ const DefaultMaxIdemponentCallAttempts = 5
 //   - foobar.com:8080
 type DialFunc func(addr string) (net.Conn, error)
 
-// RetryIfFunc signature of retry if function
+// DialFuncWithTimeout must establish connection to addr.
+// Unlike DialFunc, it also accepts a timeout.
+//
+// There is no need in establishing TLS (SSL) connection for https.
+// The client automatically converts connection to TLS
+// if HostClient.IsTLS is set.
+//
+// TCP address passed to DialFuncWithTimeout always contains host and port.
+// Example TCP addr values:
+//
+//   - foobar.com:80
+//   - foobar.com:443
+//   - foobar.com:8080
+type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, error)
+
+// RetryIfFunc signature of retry if function.
 //
 // Request argument passed to RetryIfFunc, if there are any request errors.
 type RetryIfFunc func(request *Request) bool
@@ -634,7 +663,7 @@ type RoundTripper interface {
 	RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error)
 }
 
-// ConnPoolStrategyType define strategy of connection pool enqueue/dequeue
+// ConnPoolStrategyType define strategy of connection pool enqueue/dequeue.
 type ConnPoolStrategyType int
 
 const (
@@ -656,7 +685,7 @@ type HostClient struct {
 	noCopy noCopy
 
 	// Comma-separated list of upstream HTTP server host addresses,
-	// which are passed to Dial in a round-robin manner.
+	// which are passed to Dial or DialTimeout in a round-robin manner.
 	//
 	// Each address may contain port if default dialer is used.
 	// For example,
@@ -673,16 +702,24 @@ type HostClient struct {
 	// User-Agent header to be excluded from the Request.
 	NoDefaultUserAgentHeader bool
 
-	// Callback for establishing new connection to the host.
+	// Callback for establishing new connections to hosts.
 	//
-	// Default Dial is used if not set.
+	// Default DialTimeout is used if not set.
+	DialTimeout DialFuncWithTimeout
+
+	// Callback for establishing new connections to hosts.
+	//
+	// Note that if Dial is set instead of DialTimeout, Dial will ignore Request timeout.
+	// If you want the tcp dial process to account for request timeouts, use DialTimeout instead.
+	//
+	// If not set, DialTimeout is used.
 	Dial DialFunc
 
 	// Attempt to connect to both ipv4 and ipv6 host addresses
 	// if set to true.
 	//
 	// This option is used only if default TCP dialer is used,
-	// i.e. if Dial is blank.
+	// i.e. if Dial and DialTimeout are blank.
 	//
 	// By default client connects only to ipv4 addresses,
 	// since unfortunately ipv6 remains broken in many networks worldwide :)
@@ -714,7 +751,7 @@ type HostClient struct {
 	// after DefaultMaxIdleConnDuration.
 	MaxIdleConnDuration time.Duration
 
-	// Maximum number of attempts for idempotent calls
+	// Maximum number of attempts for idempotent calls.
 	//
 	// DefaultMaxIdemponentCallAttempts is used if not set.
 	MaxIdemponentCallAttempts int
@@ -766,7 +803,7 @@ type HostClient struct {
 	//     * cONTENT-lenGTH -> Content-Length
 	DisableHeaderNamesNormalizing bool
 
-	// Path values are sent as-is without normalization
+	// Path values are sent as-is without normalization.
 	//
 	// Disabled path normalization may be useful for proxying incoming requests
 	// to servers that are expecting paths to be forwarded as-is.
@@ -775,7 +812,7 @@ type HostClient struct {
 	// extra slashes are removed, special characters are encoded.
 	DisablePathNormalizing bool
 
-	// Will not log potentially sensitive content in error logs
+	// Will not log potentially sensitive content in error logs.
 	//
 	// This option is useful for servers that handle sensitive data
 	// in the request/response.
@@ -799,7 +836,7 @@ type HostClient struct {
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
 
-	// StreamResponseBody enables response body streaming
+	// StreamResponseBody enables response body streaming.
 	StreamResponseBody bool
 
 	lastUseTime uint32
@@ -840,7 +877,7 @@ type clientConn struct {
 
 var startTimeUnix = time.Now().Unix()
 
-// LastUseTime returns time the client was last used
+// LastUseTime returns time the client was last used.
 func (c *HostClient) LastUseTime() time.Time {
 	n := atomic.LoadUint32(&c.lastUseTime)
 	return time.Unix(startTimeUnix+int64(n), 0)
@@ -1015,7 +1052,8 @@ var (
 	ErrTooManyRedirects = errors.New("too many redirects detected when doing the request")
 
 	// HostClients are only able to follow redirects to the same protocol.
-	ErrHostClientRedirectToDifferentScheme = errors.New("HostClient can't follow redirects to a different protocol, please use Client instead")
+	ErrHostClientRedirectToDifferentScheme = errors.New("HostClient can't follow redirects to a different protocol," +
+		" please use Client instead")
 )
 
 const defaultMaxRedirectsCount = 16
@@ -1037,7 +1075,9 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	return statusCode, body, err
 }
 
-func doRequestFollowRedirects(req *Request, resp *Response, url string, maxRedirectsCount int, c clientDoer) (statusCode int, body []byte, err error) {
+func doRequestFollowRedirects(
+	req *Request, resp *Response, url string, maxRedirectsCount int, c clientDoer,
+) (statusCode int, body []byte, err error) {
 	redirectsCount := 0
 
 	for {
@@ -1659,7 +1699,7 @@ func (c *HostClient) decConnsCount() {
 	}
 }
 
-// ConnsCount returns connection count of HostClient
+// ConnsCount returns connection count of HostClient.
 func (c *HostClient) ConnsCount() int {
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
@@ -1714,7 +1754,7 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 }
 
 func (c *HostClient) acquireWriter(conn net.Conn) *bufio.Writer {
-	var v interface{}
+	var v any
 	if c.clientWriterPool != nil {
 		v = c.clientWriterPool.Get()
 		if v == nil {
@@ -1749,7 +1789,7 @@ func (c *HostClient) releaseWriter(bw *bufio.Writer) {
 }
 
 func (c *HostClient) acquireReader(conn net.Conn) *bufio.Reader {
-	var v interface{}
+	var v any
 	if c.clientReaderPool != nil {
 		v = c.clientReaderPool.Get()
 		if v == nil {
@@ -1790,7 +1830,7 @@ func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 		c = c.Clone()
 	}
 
-	if len(c.ServerName) == 0 {
+	if c.ServerName == "" {
 		serverName := tlsServerName(addr)
 		if serverName == "*" {
 			c.InsecureSkipVerify = true
@@ -1827,7 +1867,8 @@ func (c *HostClient) nextAddr() string {
 }
 
 func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err error) {
-	// use dialTimeout to control the timeout of each dial. It does not work if dialTimeout is 0 or dial has been set.
+	// use dialTimeout to control the timeout of each dial. It does not work if dialTimeout is 0 or if
+	// c.DialTimeout has not been set and c.Dial has been set.
 	// attempt to dial all the available hosts before giving up.
 
 	c.addrsLock.Lock()
@@ -1839,16 +1880,6 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 		n = 1
 	}
 
-	dial := c.Dial
-	if dialTimeout != 0 && dial == nil {
-		dial = func(addr string) (net.Conn, error) {
-			if c.DialDualStack {
-				return DialDualStackTimeout(addr, dialTimeout)
-			}
-			return DialTimeout(addr, dialTimeout)
-		}
-	}
-
 	timeout := c.ReadTimeout + c.WriteTimeout
 	if timeout <= 0 {
 		timeout = DefaultDialTimeout
@@ -1857,7 +1888,7 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 	for n > 0 {
 		addr := c.nextAddr()
 		tlsConfig := c.cachedTLSConfig(addr)
-		conn, err = dialAddr(addr, dial, c.DialDualStack, c.IsTLS, tlsConfig, c.WriteTimeout)
+		conn, err = dialAddr(addr, c.Dial, c.DialTimeout, c.DialDualStack, c.IsTLS, tlsConfig, dialTimeout, c.WriteTimeout)
 		if err == nil {
 			return conn, nil
 		}
@@ -1916,22 +1947,17 @@ func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.T
 	return conn, nil
 }
 
-func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *tls.Config, timeout time.Duration) (net.Conn, error) {
-	deadline := time.Now().Add(timeout)
-	if dial == nil {
-		if dialDualStack {
-			dial = DialDualStack
-		} else {
-			dial = Dial
-		}
-		addr = AddMissingPort(addr, isTLS)
-	}
-	conn, err := dial(addr)
+func dialAddr(
+	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool,
+	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
+) (net.Conn, error) {
+	deadline := time.Now().Add(writeTimeout)
+	conn, err := callDialFunc(addr, dial, dialWithTimeout, dialDualStack, isTLS, dialTimeout)
 	if err != nil {
 		return nil, err
 	}
 	if conn == nil {
-		return nil, errors.New("dialling unsuccessful. Please report this bug!")
+		return nil, errors.New("dialling unsuccessful. Please report this bug")
 	}
 
 	// We assume that any conn that has the Handshake() method is a TLS conn already.
@@ -1939,12 +1965,34 @@ func dialAddr(addr string, dial DialFunc, dialDualStack, isTLS bool, tlsConfig *
 	_, isTLSAlready := conn.(interface{ Handshake() error })
 
 	if isTLS && !isTLSAlready {
-		if timeout == 0 {
+		if writeTimeout == 0 {
 			return tls.Client(conn, tlsConfig), nil
 		}
 		return tlsClientHandshake(conn, tlsConfig, deadline)
 	}
 	return conn, nil
+}
+
+func callDialFunc(
+	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool, timeout time.Duration,
+) (net.Conn, error) {
+	if dialWithTimeout != nil {
+		return dialWithTimeout(addr, timeout)
+	}
+	if dial != nil {
+		return dial(addr)
+	}
+	addr = AddMissingPort(addr, isTLS)
+	if timeout > 0 {
+		if dialDualStack {
+			return DialDualStackTimeout(addr, timeout)
+		}
+		return DialTimeout(addr, timeout)
+	}
+	if dialDualStack {
+		return DialDualStack(addr)
+	}
+	return Dial(addr)
 }
 
 // AddMissingPort adds a port to a host if it is missing.
@@ -1983,7 +2031,7 @@ func AddMissingPort(addr string, isTLS bool) string {
 // These three options are racing against each other and use
 // wantConn to coordinate and agree about the winning outcome.
 //
-// inspired by net/http/transport.go
+// Inspired by net/http/transport.go.
 type wantConn struct {
 	ready chan struct{}
 	mu    sync.Mutex // protects conn, err, close(ready)
@@ -2038,7 +2086,7 @@ func (w *wantConn) cancel(c *HostClient, err error) {
 
 // A wantConnQueue is a queue of wantConns.
 //
-// inspired by net/http/transport.go
+// Inspired by net/http/transport.go.
 type wantConnQueue struct {
 	// This is a queue, not a dequeue.
 	// It is split into two stages - head[headPos:] and tail.
@@ -2591,7 +2639,7 @@ func (c *pipelineConnClient) init() {
 
 func (c *pipelineConnClient) worker() error {
 	tlsConfig := c.cachedTLSConfig()
-	conn, err := dialAddr(c.Addr, c.Dial, c.DialDualStack, c.IsTLS, tlsConfig, c.WriteTimeout)
+	conn, err := dialAddr(c.Addr, c.Dial, nil, c.DialDualStack, c.IsTLS, tlsConfig, 0, c.WriteTimeout)
 	if err != nil {
 		return err
 	}
@@ -2932,12 +2980,12 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose() || isConnRST
 	if customStreamBody && resp.bodyStream != nil {
 		rbs := resp.bodyStream
-		resp.bodyStream = newCloseReader(rbs, func() error {
+		resp.bodyStream = newCloseReaderWithError(rbs, func(wErr error) error {
 			hc.releaseReader(br)
 			if r, ok := rbs.(*requestStream); ok {
 				releaseRequestStream(r)
 			}
-			if closeConn || resp.ConnectionClose() {
+			if closeConn || resp.ConnectionClose() || wErr != nil {
 				hc.closeConn(cc)
 			} else {
 				hc.releaseConn(cc)

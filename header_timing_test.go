@@ -12,7 +12,7 @@ import (
 
 var strFoobar = []byte("foobar.com")
 
-// it has the same length as Content-Type
+// it has the same length as Content-Type.
 var strNonSpecialHeader = []byte("Dontent-Type")
 
 type benchReadBuf struct {
@@ -99,7 +99,7 @@ func BenchmarkResponseHeaderWrite(b *testing.B) {
 	})
 }
 
-// Result: 2.2 ns/op
+// Result: 2.2 ns/op.
 func BenchmarkRequestHeaderPeekBytesSpecialHeader(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var h RequestHeader
@@ -113,7 +113,7 @@ func BenchmarkRequestHeaderPeekBytesSpecialHeader(b *testing.B) {
 	})
 }
 
-// Result: 2.9 ns/op
+// Result: 2.9 ns/op.
 func BenchmarkRequestHeaderPeekBytesNonSpecialHeader(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var h RequestHeader
@@ -127,7 +127,7 @@ func BenchmarkRequestHeaderPeekBytesNonSpecialHeader(b *testing.B) {
 	})
 }
 
-// Result: 2.3 ns/op
+// Result: 2.3 ns/op.
 func BenchmarkResponseHeaderPeekBytesSpecialHeader(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var h ResponseHeader
@@ -141,7 +141,7 @@ func BenchmarkResponseHeaderPeekBytesSpecialHeader(b *testing.B) {
 	})
 }
 
-// Result: 2.9 ns/op
+// Result: 2.9 ns/op.
 func BenchmarkResponseHeaderPeekBytesNonSpecialHeader(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var h ResponseHeader
@@ -178,6 +178,19 @@ func benchmarkNormalizeHeaderKey(b *testing.B, src []byte) {
 			normalizeHeaderKey(buf, false)
 		}
 	})
+}
+
+func BenchmarkVisitHeaderParams(b *testing.B) {
+	var h RequestHeader
+	h.SetBytesKV(strContentType, []byte(`text/plain  ;  foo=bar  ;   param2="dquote is: [\"], ok?" ; version=1; q=0.324  `))
+
+	header := h.ContentType()
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for n := 0; n < b.N; n++ {
+		VisitHeaderParams(header, func(key, value []byte) bool { return true })
+	}
 }
 
 func BenchmarkRemoveNewLines(b *testing.B) {

@@ -243,6 +243,35 @@ func TestCookieHttpOnly(t *testing.T) {
 	}
 }
 
+func TestCookiePartitioned(t *testing.T) {
+	t.Parallel()
+
+	var c Cookie
+
+	if err := c.Parse("foo=bar; PATH=/; secure; Partitioned"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.Partitioned() {
+		t.Fatalf("Partitioned must be set")
+	}
+	s := c.String()
+	if !strings.Contains(s, "; Partitioned") {
+		t.Fatalf("missing Partitioned flag in cookie %q", s)
+	}
+
+	if !c.Secure() {
+		t.Fatalf("secure must be set")
+	}
+	s = c.String()
+	if !strings.Contains(s, "; secure") {
+		t.Fatalf("missing secure flag in cookie %q", s)
+	}
+
+	if string(c.Path()) != "/" {
+		t.Fatalf("path must be set /")
+	}
+}
+
 func TestCookieAcquireReleaseSequential(t *testing.T) {
 	t.Parallel()
 

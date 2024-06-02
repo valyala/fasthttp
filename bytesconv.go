@@ -35,7 +35,7 @@ func AppendHTMLEscape(dst []byte, s string) []byte {
 		case '\'':
 			sub = "&#39;" // "&#39;" is shorter than "&apos;" and apos was not in HTML until HTML5.
 		}
-		if len(sub) > 0 {
+		if sub != "" {
 			dst = append(dst, s[prev:i]...)
 			dst = append(dst, sub...)
 			prev = i + 1
@@ -73,15 +73,11 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	if len(ipStr) == 0 {
 		return dst, errEmptyIPStr
 	}
-	if len(dst) < net.IPv4len {
+	if len(dst) < net.IPv4len || len(dst) > net.IPv4len {
 		dst = make([]byte, net.IPv4len)
 	}
 	copy(dst, net.IPv4zero)
-	dst = dst.To4()
-	if dst == nil {
-		// developer sanity-check
-		panic("BUG: dst must not be nil")
-	}
+	dst = dst.To4() // dst is always non-nil here
 
 	b := ipStr
 	for i := 0; i < 3; i++ {

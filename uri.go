@@ -28,7 +28,7 @@ func ReleaseURI(u *URI) {
 }
 
 var uriPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &URI{}
 	},
 }
@@ -52,7 +52,7 @@ type URI struct {
 	queryArgs       Args
 	parsedQueryArgs bool
 
-	// Path values are sent as-is without normalization
+	// Path values are sent as-is without normalization.
 	//
 	// Disabled path normalization may be useful for proxying incoming requests
 	// to servers that are expecting paths to be forwarded as-is.
@@ -122,7 +122,7 @@ func (u *URI) SetUsernameBytes(username []byte) {
 	u.username = append(u.username[:0], username...)
 }
 
-// Password returns URI password
+// Password returns URI password.
 //
 // The returned bytes are valid until the next URI method call.
 func (u *URI) Password() []byte {
@@ -554,7 +554,7 @@ func unhex(c byte) byte {
 }
 
 // validOptionalPort reports whether port is either an empty string
-// or matches /^:\d*$/
+// or matches /^:\d*$/.
 func validOptionalPort(port []byte) bool {
 	if len(port) == 0 {
 		return true

@@ -230,14 +230,14 @@ func TestURICopyTo(t *testing.T) {
 	var u URI
 	var copyU URI
 	u.CopyTo(&copyU)
-	if !reflect.DeepEqual(u, copyU) { //nolint:govet
-		t.Fatalf("URICopyTo fail, u: \n%+v\ncopyu: \n%+v\n", u, copyU) //nolint:govet
+	if !reflect.DeepEqual(&u, &copyU) {
+		t.Fatalf("URICopyTo fail, u: \n%+v\ncopyu: \n%+v\n", &u, &copyU)
 	}
 
 	u.UpdateBytes([]byte("https://example.com/foo?bar=baz&baraz#qqqq"))
 	u.CopyTo(&copyU)
-	if !reflect.DeepEqual(u, copyU) { //nolint:govet
-		t.Fatalf("URICopyTo fail, u: \n%+v\ncopyu: \n%+v\n", u, copyU) //nolint:govet
+	if !reflect.DeepEqual(&u, &copyU) {
+		t.Fatalf("URICopyTo fail, u: \n%+v\ncopyu: \n%+v\n", &u, &copyU)
 	}
 }
 

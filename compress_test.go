@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -225,7 +226,7 @@ func testConcurrent(concurrency int, f func() error) error {
 				return err
 			}
 		case <-time.After(time.Second):
-			return fmt.Errorf("timeout")
+			return errors.New("timeout")
 		}
 	}
 	return nil
