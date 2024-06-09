@@ -3039,7 +3039,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 		if len(s.key) > 0 {
 			// Spaces between the header key and colon are not allowed.
 			// See RFC 7230, Section 3.2.4.
-			if bytes.IndexByte(s.key, ' ') != -1 || bytes.IndexByte(s.key, '\t') != -1 {
+			if bytes.IndexByte(s.key, ' ') != -1 || bytes.IndexByte(s.key, '\t') != -1 || bytes.IndexByte(s.key, '\r') != -1 {
 				err = fmt.Errorf("invalid header key %q", s.key)
 				continue
 			}
