@@ -98,7 +98,7 @@ func main() {
 		return a
 	}()
 
-	tcharTable := func() [128]byte {
+	validHeaderFieldByteTable := func() [128]byte {
 		// Should match net/textproto's validHeaderFieldByte(c byte) bool
 		// Defined by RFC 9110 5.6.2
 		//      tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
@@ -125,7 +125,7 @@ func main() {
 	fmt.Fprintf(w, "const toUpperTable = %q\n", toUpperTable)
 	fmt.Fprintf(w, "const quotedArgShouldEscapeTable = %q\n", quotedArgShouldEscapeTable)
 	fmt.Fprintf(w, "const quotedPathShouldEscapeTable = %q\n", quotedPathShouldEscapeTable)
-	fmt.Fprintf(w, "const tcharTable = %q\n", tcharTable)
+	fmt.Fprintf(w, "const validHeaderFieldByteTable = %q\n", validHeaderFieldByteTable)
 
 	if err := os.WriteFile("bytesconv_table.go", w.Bytes(), 0o660); err != nil {
 		log.Fatal(err)
