@@ -2550,21 +2550,21 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 
 	// simple headers
 	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\nHost: google.com\r\n\r\n",
-		-2, "/foo/bar", "google.com", "", "", nil)
+		-2, "/foo/bar", "google.com", "", "")
 	if h.ConnectionClose() {
 		t.Fatalf("unexpected connection: close header")
 	}
 
 	// simple headers with body
 	testRequestHeaderReadSuccess(t, h, "GET /a/bar HTTP/1.1\r\nHost: gole.com\r\nconneCTION: close\r\n\r\nfoobar",
-		-2, "/a/bar", "gole.com", "", "", nil)
+		-2, "/a/bar", "gole.com", "", "")
 	if !h.ConnectionClose() {
 		t.Fatalf("connection: close unset")
 	}
 
 	// ancient http protocol
 	testRequestHeaderReadSuccess(t, h, "GET /bar HTTP/1.0\r\nHost: gole\r\n\r\npppp",
-		-2, "/bar", "gole", "", "", nil)
+		-2, "/bar", "gole", "", "")
 	if h.IsHTTP11() {
 		t.Fatalf("ancient http protocol cannot be http/1.1")
 	}
@@ -2574,7 +2574,7 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 
 	// ancient http protocol with 'Connection: keep-alive' header
 	testRequestHeaderReadSuccess(t, h, "GET /aa HTTP/1.0\r\nHost: bb\r\nConnection: keep-alive\r\n\r\nxxx",
-		-2, "/aa", "bb", "", "", nil)
+		-2, "/aa", "bb", "", "")
 	if h.IsHTTP11() {
 		t.Fatalf("ancient http protocol cannot be http/1.1")
 	}
@@ -2584,7 +2584,7 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 
 	// complex headers with body
 	testRequestHeaderReadSuccess(t, h, "GET /aabar HTTP/1.1\r\nAAA: bbb\r\nHost: ole.com\r\nAA: bb\r\n\r\nzzz",
-		-2, "/aabar", "ole.com", "", "", nil)
+		-2, "/aabar", "ole.com", "", "")
 	if !h.IsHTTP11() {
 		t.Fatalf("expecting http/1.1 protocol")
 	}
@@ -2594,95 +2594,95 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 
 	// lf instead of crlf
 	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\nHost: google.com\n\n",
-		-2, "/foo/bar", "google.com", "", "", nil)
+		-2, "/foo/bar", "google.com", "", "")
 
 	// post method
 	testRequestHeaderReadSuccess(t, h, "POST /aaa?bbb HTTP/1.1\r\nHost: foobar.com\r\nContent-Length: 1235\r\nContent-Type: aaa\r\n\r\nabcdef",
-		1235, "/aaa?bbb", "foobar.com", "", "aaa", nil)
+		1235, "/aaa?bbb", "foobar.com", "", "aaa")
 
 	// zero-length headers with mixed crlf and lf
 	testRequestHeaderReadSuccess(t, h, "GET /a HTTP/1.1\nHost: aaa\r\nZero: \n: Zero-Value\n\r\nxccv",
-		-2, "/a", "aaa", "", "", nil)
+		-2, "/a", "aaa", "", "")
 
 	// no space after colon
 	testRequestHeaderReadSuccess(t, h, "GET /a HTTP/1.1\nHost:aaaxd\n\nsdfds",
-		-2, "/a", "aaaxd", "", "", nil)
+		-2, "/a", "aaaxd", "", "")
 
 	// get with zero content-length
 	testRequestHeaderReadSuccess(t, h, "GET /xxx HTTP/1.1\nHost: aaa.com\nContent-Length: 0\n\n",
-		0, "/xxx", "aaa.com", "", "", nil)
+		0, "/xxx", "aaa.com", "", "")
 
 	// get with non-zero content-length
 	testRequestHeaderReadSuccess(t, h, "GET /xxx HTTP/1.1\nHost: aaa.com\nContent-Length: 123\n\n",
-		123, "/xxx", "aaa.com", "", "", nil)
+		123, "/xxx", "aaa.com", "", "")
 
 	// invalid case
 	testRequestHeaderReadSuccess(t, h, "GET /aaa HTTP/1.1\nhoST: bbb.com\n\naas",
-		-2, "/aaa", "bbb.com", "", "", nil)
+		-2, "/aaa", "bbb.com", "", "")
 
 	// referer
 	testRequestHeaderReadSuccess(t, h, "GET /asdf HTTP/1.1\nHost: aaa.com\nReferer: bb.com\n\naaa",
-		-2, "/asdf", "aaa.com", "bb.com", "", nil)
+		-2, "/asdf", "aaa.com", "bb.com", "")
 
 	// duplicate host
 	testRequestHeaderReadSuccess(t, h, "GET /aa HTTP/1.1\r\nHost: aaaaaa.com\r\nHost: bb.com\r\n\r\n",
-		-2, "/aa", "bb.com", "", "", nil)
+		-2, "/aa", "bb.com", "", "")
 
 	// post with duplicate content-type
 	testRequestHeaderReadSuccess(t, h, "POST /a HTTP/1.1\r\nHost: aa\r\nContent-Type: ab\r\nContent-Length: 123\r\nContent-Type: xx\r\n\r\n",
-		123, "/a", "aa", "", "xx", nil)
+		123, "/a", "aa", "", "xx")
 
 	// non-post with content-type
 	testRequestHeaderReadSuccess(t, h, "GET /aaa HTTP/1.1\r\nHost: bbb.com\r\nContent-Type: aaab\r\n\r\n",
-		-2, "/aaa", "bbb.com", "", "aaab", nil)
+		-2, "/aaa", "bbb.com", "", "aaab")
 
 	// non-post with content-length
 	testRequestHeaderReadSuccess(t, h, "HEAD / HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 123\r\n\r\n",
-		123, "/", "aaa.com", "", "", nil)
+		123, "/", "aaa.com", "", "")
 
 	// non-post with content-type and content-length
 	testRequestHeaderReadSuccess(t, h, "GET /aa HTTP/1.1\r\nHost: aa.com\r\nContent-Type: abd/test\r\nContent-Length: 123\r\n\r\n",
-		123, "/aa", "aa.com", "", "abd/test", nil)
+		123, "/aa", "aa.com", "", "abd/test")
 
 	// request uri with hostname
 	testRequestHeaderReadSuccess(t, h, "GET http://gooGle.com/foO/%20bar?xxx#aaa HTTP/1.1\r\nHost: aa.cOM\r\n\r\ntrail",
-		-2, "http://gooGle.com/foO/%20bar?xxx#aaa", "aa.cOM", "", "", nil)
+		-2, "http://gooGle.com/foO/%20bar?xxx#aaa", "aa.cOM", "", "")
 
 	// blank lines before the first line
 	testRequestHeaderReadSuccess(t, h, "\r\n\n\r\nGET /aaa HTTP/1.1\r\nHost: aaa.com\r\n\r\nsss",
-		-2, "/aaa", "aaa.com", "", "", nil)
+		-2, "/aaa", "aaa.com", "", "")
 
 	// request uri with spaces
 	testRequestHeaderReadSuccess(t, h, "GET /foo/ bar baz HTTP/1.1\r\nHost: aa.com\r\n\r\nxxx",
-		-2, "/foo/ bar baz", "aa.com", "", "", nil)
+		-2, "/foo/ bar baz", "aa.com", "", "")
 
 	// no host
 	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\nFOObar: assdfd\r\n\r\naaa",
-		-2, "/foo/bar", "", "", "", nil)
+		-2, "/foo/bar", "", "", "")
 
 	// no host, no headers
 	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\n\r\nfoobar",
-		-2, "/foo/bar", "", "", "", nil)
+		-2, "/foo/bar", "", "", "")
 
 	// post without content-length and content-type
 	testRequestHeaderReadSuccess(t, h, "POST /aaa HTTP/1.1\r\nHost: aaa.com\r\n\r\nzxc",
-		-2, "/aaa", "aaa.com", "", "", nil)
+		-2, "/aaa", "aaa.com", "", "")
 
 	// post without content-type
 	testRequestHeaderReadSuccess(t, h, "POST /abc HTTP/1.1\r\nHost: aa.com\r\nContent-Length: 123\r\n\r\npoiuy",
-		123, "/abc", "aa.com", "", "", nil)
+		123, "/abc", "aa.com", "", "")
 
 	// post without content-length
 	testRequestHeaderReadSuccess(t, h, "POST /abc HTTP/1.1\r\nHost: aa.com\r\nContent-Type: adv\r\n\r\n123456",
-		-2, "/abc", "aa.com", "", "adv", nil)
+		-2, "/abc", "aa.com", "", "adv")
 
 	// invalid method
 	testRequestHeaderReadSuccess(t, h, "POST /foo/bar HTTP/1.1\r\nHost: google.com\r\n\r\nmnbv",
-		-2, "/foo/bar", "google.com", "", "", nil)
+		-2, "/foo/bar", "google.com", "", "")
 
 	// put request
 	testRequestHeaderReadSuccess(t, h, "PUT /faa HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 123\r\nContent-Type: aaa\r\n\r\nxwwere",
-		123, "/faa", "aaa.com", "", "aaa", nil)
+		123, "/faa", "aaa.com", "", "aaa")
 }
 
 func TestResponseHeaderReadError(t *testing.T) {
@@ -2829,7 +2829,7 @@ func testRequestHeaderReadError(t *testing.T, h *RequestHeader, headers string) 
 
 	// make sure request header works after error
 	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\nHost: aaaa\r\n\r\nxxx",
-		-2, "/foo/bar", "aaaa", "", "", nil)
+		-2, "/foo/bar", "aaaa", "", "")
 }
 
 func testRequestHeaderReadSecuredError(t *testing.T, h *RequestHeader, headers string) {
@@ -2844,7 +2844,7 @@ func testRequestHeaderReadSecuredError(t *testing.T, h *RequestHeader, headers s
 	}
 	// make sure request header works after error
 	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\nHost: aaaa\r\n\r\nxxx",
-		-2, "/foo/bar", "aaaa", "", "", nil)
+		-2, "/foo/bar", "aaaa", "", "")
 }
 
 func testResponseHeaderReadSuccess(t *testing.T, h *ResponseHeader, headers string, expectedStatusCode, expectedContentLength int,
@@ -2862,7 +2862,7 @@ func testResponseHeaderReadSuccess(t *testing.T, h *ResponseHeader, headers stri
 }
 
 func testRequestHeaderReadSuccess(t *testing.T, h *RequestHeader, headers string, expectedContentLength int,
-	expectedRequestURI, expectedHost, expectedReferer, expectedContentType string, expectedTrailer map[string]string,
+	expectedRequestURI, expectedHost, expectedReferer, expectedContentType string,
 ) {
 	t.Helper()
 
