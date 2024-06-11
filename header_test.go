@@ -154,6 +154,19 @@ func TestResponseHeaderMultiLinePanicked(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderLooseBackslashR(t *testing.T) {
+	t.Parallel()
+
+	s := "GET / HTTP/1.1\r\n" +
+		"Host: go.dev\r\n" +
+		"\rFoo: bar\r\n" +
+		"\r\n"
+	header := new(RequestHeader)
+	if _, err := header.parse([]byte(s)); err == nil {
+		t.Fatal("expected error, got <nil>")
+	}
+}
+
 func TestResponseHeaderEmptyValueFromHeader(t *testing.T) {
 	t.Parallel()
 

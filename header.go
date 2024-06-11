@@ -548,7 +548,7 @@ func (h *ResponseHeader) AddTrailerBytes(trailer []byte) error {
 // validHeaderFieldByte returns true if c is a valid tchar as defined
 // by section 5.6.2 of [RFC9110].
 func validHeaderFieldByte(c byte) bool {
-	return c < 128 && tcharTable[c] == 1
+	return c < 128 && validHeaderFieldByteTable[c] == 1
 }
 
 // VisitHeaderParams calls f for each parameter in the given header bytes.
@@ -2947,8 +2947,17 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	s.disableNormalizing = h.disableNormalizing
 	var err error
 	var kv *argsKV
+
+outer:
 	for s.next() {
 		if len(s.key) > 0 {
+			for _, ch := range s.key {
+				if !validHeaderFieldByte(ch) {
+					err = fmt.Errorf("invalid header key %q", s.key)
+					continue outer
+				}
+			}
+
 			switch s.key[0] | 0x20 {
 			case 'c':
 				if caseInsensitiveCompare(s.key, strContentType) {
@@ -3035,13 +3044,15 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
 	var err error
+
+outer:
 	for s.next() {
 		if len(s.key) > 0 {
-			// Spaces between the header key and colon are not allowed.
-			// See RFC 7230, Section 3.2.4.
-			if bytes.IndexByte(s.key, ' ') != -1 || bytes.IndexByte(s.key, '\t') != -1 {
-				err = fmt.Errorf("invalid header key %q", s.key)
-				continue
+			for _, ch := range s.key {
+				if !validHeaderFieldByte(ch) {
+					err = fmt.Errorf("invalid header key %q", s.key)
+					continue outer
+				}
 			}
 
 			if h.disableSpecialHeader {
