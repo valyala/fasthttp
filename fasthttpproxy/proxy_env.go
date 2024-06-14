@@ -98,6 +98,9 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 		req += "\r\n"
 
 		if _, err := conn.Write([]byte(req)); err != nil {
+			if connErr := conn.Close(); connErr != nil {
+				return nil, fmt.Errorf("conn close err %v preceded by conn write err %w", connErr, err)
+			}
 			return nil, err
 		}
 
