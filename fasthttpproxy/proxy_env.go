@@ -47,6 +47,7 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 	authHTTPSStorage := &atomic.Value{}
 
 	return func(addr string) (net.Conn, error) {
+		start := time.Now()
 		port, _, err := net.SplitHostPort(addr)
 		if err != nil {
 			return nil, fmt.Errorf("unexpected addr format: %w", err)
@@ -78,6 +79,14 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 			return nil, err
 		}
 
+		if timeout > 0 {
+			if err := conn.SetDeadline(start.Add(timeout)); err != nil {
+				if connErr := conn.Close(); connErr != nil {
+					return nil, fmt.Errorf("conn close err %v precede by set conn deadline %w", connErr, err)
+				}
+			}
+		}
+
 		req := "CONNECT " + addr + " HTTP/1.1\r\n"
 
 		if proxyURL.User != nil {
@@ -98,6 +107,9 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 		req += "\r\n"
 
 		if _, err := conn.Write([]byte(req)); err != nil {
+			if connErr := conn.Close(); connErr != nil {
+				return nil, fmt.Errorf("conn close err %v precede by write conn err %w", connErr, err)
+			}
 			return nil, err
 		}
 
@@ -119,6 +131,14 @@ func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 					connErr, res.StatusCode(), string(res.Body()))
 			}
 			return nil, fmt.Errorf("could not connect to proxy: code: %d body %q", res.StatusCode(), string(res.Body()))
+		}
+		if timeout > 0 {
+			if err := conn.SetDeadline(time.Time{}); err != nil {
+				if connErr := conn.Close(); connErr != nil {
+					return nil, fmt.Errorf("conn close err %v precede by clear conn deadline err %w", connErr, err)
+				}
+				return nil, err
+			}
 		}
 		return conn, nil
 	}

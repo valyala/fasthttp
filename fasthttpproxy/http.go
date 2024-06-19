@@ -42,6 +42,7 @@ func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.Dia
 	return func(addr string) (net.Conn, error) {
 		var conn net.Conn
 		var err error
+		start := time.Now()
 
 		if strings.HasPrefix(proxy, "[") {
 			// ipv6
@@ -63,6 +64,13 @@ func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.Dia
 			return nil, err
 		}
 
+		if timeout > 0 {
+			if err = conn.SetDeadline(start.Add(timeout)); err != nil {
+				conn.Close()
+				return nil, err
+			}
+		}
+
 		req := "CONNECT " + addr + " HTTP/1.1\r\nHost: " + addr + "\r\n"
 		if auth != "" {
 			req += "Proxy-Authorization: Basic " + auth + "\r\n"
@@ -70,6 +78,7 @@ func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.Dia
 		req += "\r\n"
 
 		if _, err := conn.Write([]byte(req)); err != nil {
+			conn.Close()
 			return nil, err
 		}
 
@@ -85,6 +94,12 @@ func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.Dia
 		if res.Header.StatusCode() != 200 {
 			conn.Close()
 			return nil, fmt.Errorf("could not connect to proxy: %s status code: %d", proxy, res.Header.StatusCode())
+		}
+		if timeout > 0 {
+			if err := conn.SetDeadline(time.Time{}); err != nil {
+				conn.Close()
+				return nil, err
+			}
 		}
 		return conn, nil
 	}
