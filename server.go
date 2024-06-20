@@ -430,9 +430,12 @@ type Server struct {
 	mu   sync.Mutex
 	open int32
 	stop int32
+
 	done chan struct{}
 
-	rejectedRequestsCount uint32
+	rerjectedRequestsCount uint32
+  
+  closeDone sync.Once
 }
 
 // TimeoutHandler creates RequestHandler, which returns StatusRequestTimeout
@@ -1900,7 +1903,9 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	}
 
 	if s.done != nil {
-		close(s.done)
+		s.closeDone.Do(func() {
+			close(s.done)
+		})
 	}
 
 	// Closing the listener will make Serve() call Stop on the worker pool.
@@ -1927,7 +1932,6 @@ END:
 		}
 	}
 
-	s.done = nil
 	s.ln = nil
 	return err
 }
