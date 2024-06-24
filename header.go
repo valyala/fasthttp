@@ -545,10 +545,16 @@ func (h *ResponseHeader) AddTrailerBytes(trailer []byte) error {
 	return err
 }
 
-// validHeaderFieldByte returns true if c is a valid tchar as defined
-// by section 5.6.2 of [RFC9110].
+// validHeaderFieldByte returns true if c valid header field byte
+// as defined by RFC 7230.
 func validHeaderFieldByte(c byte) bool {
 	return c < 128 && validHeaderFieldByteTable[c] == 1
+}
+
+// validHeaderValueByte returns true if c valid header value byte
+// as defined by RFC 7230.
+func validHeaderValueByte(c byte) bool {
+	return validHeaderValueByteTable[c] == 1
 }
 
 // VisitHeaderParams calls f for each parameter in the given header bytes.
@@ -2957,6 +2963,12 @@ outer:
 					continue outer
 				}
 			}
+			for _, ch := range s.value {
+				if !validHeaderValueByte(ch) {
+					err = fmt.Errorf("invalid header value %q", s.value)
+					continue outer
+				}
+			}
 
 			switch s.key[0] | 0x20 {
 			case 'c':
@@ -3051,6 +3063,12 @@ outer:
 			for _, ch := range s.key {
 				if !validHeaderFieldByte(ch) {
 					err = fmt.Errorf("invalid header key %q", s.key)
+					continue outer
+				}
+			}
+			for _, ch := range s.value {
+				if !validHeaderValueByte(ch) {
+					err = fmt.Errorf("invalid header value %q", s.value)
 					continue outer
 				}
 			}

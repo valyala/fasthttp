@@ -100,23 +100,50 @@ func main() {
 
 	validHeaderFieldByteTable := func() [128]byte {
 		// Should match net/textproto's validHeaderFieldByte(c byte) bool
-		// Defined by RFC 9110 5.6.2
-		//      tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
-		//      "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
-		var a [128]byte
-		for _, v := range "!#$%&'*+-.^_`|~" {
-			a[v] = 1
+		// Defined by RFC 7230:
+		//
+		//	header-field   = field-name ":" OWS field-value OWS
+		//	field-name     = token
+		//	tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
+		//	        "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
+		//	token = 1*tchar
+		var table [128]byte
+		for c := 0; c < 128; c++ {
+			if (c >= '0' && c <= '9') ||
+				(c >= 'a' && c <= 'z') ||
+				(c >= 'A' && c <= 'Z') ||
+				c == '!' || c == '#' || c == '$' || c == '%' || c == '&' ||
+				c == '\'' || c == '*' || c == '+' || c == '-' || c == '.' ||
+				c == '^' || c == '_' || c == '`' || c == '|' || c == '~' {
+				table[c] = 1
+			}
 		}
-		for i := 'a'; i <= 'z'; i++ {
-			a[i] = 1
+		return table
+	}()
+
+	validHeaderValueByteTable := func() [256]byte {
+		// Should match net/textproto's validHeaderValueByte(c byte) bool
+		// Defined by RFC 7230:
+		//
+		//	field-content  = field-vchar [ 1*( SP / HTAB ) field-vchar ]
+		//	field-vchar    = VCHAR / obs-text
+		//	obs-text       = %x80-FF
+		//
+		// RFC 5234:
+		//
+		//	HTAB           =  %x09
+		//	SP             =  %x20
+		//	VCHAR          =  %x21-7E
+		var table [256]byte
+		for c := 0; c < 256; c++ {
+			if (c >= 0x21 && c <= 0x7E) || // VCHAR
+				c == 0x20 || // SP
+				c == 0x09 || // HTAB
+				c >= 0x80 { // obs-text
+				table[c] = 1
+			}
 		}
-		for i := 'A'; i <= 'Z'; i++ {
-			a[i] = 1
-		}
-		for i := '0'; i <= '9'; i++ {
-			a[i] = 1
-		}
-		return a
+		return table
 	}()
 
 	w := bytes.NewBufferString(pre)
@@ -126,6 +153,7 @@ func main() {
 	fmt.Fprintf(w, "const quotedArgShouldEscapeTable = %q\n", quotedArgShouldEscapeTable)
 	fmt.Fprintf(w, "const quotedPathShouldEscapeTable = %q\n", quotedPathShouldEscapeTable)
 	fmt.Fprintf(w, "const validHeaderFieldByteTable = %q\n", validHeaderFieldByteTable)
+	fmt.Fprintf(w, "const validHeaderValueByteTable = %q\n", validHeaderValueByteTable)
 
 	if err := os.WriteFile("bytesconv_table.go", w.Bytes(), 0o660); err != nil {
 		log.Fatal(err)
