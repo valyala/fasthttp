@@ -2439,10 +2439,6 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\nContent-Length: 123\nContent-Type: text/html\n\n",
 		200, 123, "text/html")
 
-	// Zero-length headers with mixed crlf and lf
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\nContent-Length: 345\nZero-Value: \r\nContent-Type: aaa\n: zero-key\r\n\r\nooa",
-		400, 345, "aaa")
-
 	// No space after colon
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\nContent-Length:34\nContent-Type: sss\n\naaaa",
 		200, 34, "sss")
@@ -2600,10 +2596,6 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	testRequestHeaderReadSuccess(t, h, "POST /aaa?bbb HTTP/1.1\r\nHost: foobar.com\r\nContent-Length: 1235\r\nContent-Type: aaa\r\n\r\nabcdef",
 		1235, "/aaa?bbb", "foobar.com", "", "aaa")
 
-	// zero-length headers with mixed crlf and lf
-	testRequestHeaderReadSuccess(t, h, "GET /a HTTP/1.1\nHost: aaa\r\nZero: \n: Zero-Value\n\r\nxccv",
-		-2, "/a", "aaa", "", "")
-
 	// no space after colon
 	testRequestHeaderReadSuccess(t, h, "GET /a HTTP/1.1\nHost:aaaxd\n\nsdfds",
 		-2, "/a", "aaaxd", "", "")
@@ -2719,6 +2711,9 @@ func TestResponseHeaderReadError(t *testing.T) {
 
 	// no protocol in the first line
 	testResponseHeaderReadError(t, h, "GET /foo/bar\r\nHost: google.com\r\n\r\nisdD")
+
+	// zero-length headers
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\n: zero-key\r\n\r\n")
 }
 
 func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
@@ -2769,6 +2764,9 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// post with duplicate content-length
 	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nContent-Type: s\r\nContent-Length: 13\r\nContent-Length: 1\r\n\r\n")
+
+	// Zero-length header
+	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\n: zero-key\r\n\r\n")
 }
 
 func TestRequestHeaderReadSecuredError(t *testing.T) {
