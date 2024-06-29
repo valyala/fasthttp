@@ -2951,81 +2951,90 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	var s headerScanner
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
-	var err error
 	var kv *argsKV
 
-outer:
 	for s.next() {
-		if len(s.key) > 0 {
-			for _, ch := range s.key {
-				if !validHeaderFieldByte(ch) {
-					err = fmt.Errorf("invalid header key %q", s.key)
-					continue outer
-				}
-			}
-			for _, ch := range s.value {
-				if !validHeaderValueByte(ch) {
-					err = fmt.Errorf("invalid header value %q", s.value)
-					continue outer
-				}
-			}
-
-			switch s.key[0] | 0x20 {
-			case 'c':
-				if caseInsensitiveCompare(s.key, strContentType) {
-					h.contentType = append(h.contentType[:0], s.value...)
-					continue
-				}
-				if caseInsensitiveCompare(s.key, strContentEncoding) {
-					h.contentEncoding = append(h.contentEncoding[:0], s.value...)
-					continue
-				}
-				if caseInsensitiveCompare(s.key, strContentLength) {
-					if h.contentLength != -1 {
-						if h.contentLength, err = parseContentLength(s.value); err != nil {
-							h.contentLength = -2
-						} else {
-							h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
-						}
-					}
-					continue
-				}
-				if caseInsensitiveCompare(s.key, strConnection) {
-					if bytes.Equal(s.value, strClose) {
-						h.connectionClose = true
-					} else {
-						h.connectionClose = false
-						h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
-					}
-					continue
-				}
-			case 's':
-				if caseInsensitiveCompare(s.key, strServer) {
-					h.server = append(h.server[:0], s.value...)
-					continue
-				}
-				if caseInsensitiveCompare(s.key, strSetCookie) {
-					h.cookies, kv = allocArg(h.cookies)
-					kv.key = getCookieKey(kv.key, s.value)
-					kv.value = append(kv.value[:0], s.value...)
-					continue
-				}
-			case 't':
-				if caseInsensitiveCompare(s.key, strTransferEncoding) {
-					if len(s.value) > 0 && !bytes.Equal(s.value, strIdentity) {
-						h.contentLength = -1
-						h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
-					}
-					continue
-				}
-				if caseInsensitiveCompare(s.key, strTrailer) {
-					err = h.SetTrailerBytes(s.value)
-					continue
-				}
-			}
-			h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+		if len(s.key) == 0 {
+			h.connectionClose = true
+			return 0, fmt.Errorf("invalid header key %q", s.key)
 		}
+
+		for _, ch := range s.key {
+			if !validHeaderFieldByte(ch) {
+				h.connectionClose = true
+				return 0, fmt.Errorf("invalid header key %q", s.key)
+			}
+		}
+		for _, ch := range s.value {
+			if !validHeaderValueByte(ch) {
+				h.connectionClose = true
+				return 0, fmt.Errorf("invalid header value %q", s.value)
+			}
+		}
+
+		switch s.key[0] | 0x20 {
+		case 'c':
+			if caseInsensitiveCompare(s.key, strContentType) {
+				h.contentType = append(h.contentType[:0], s.value...)
+				continue
+			}
+			if caseInsensitiveCompare(s.key, strContentEncoding) {
+				h.contentEncoding = append(h.contentEncoding[:0], s.value...)
+				continue
+			}
+			if caseInsensitiveCompare(s.key, strContentLength) {
+				if h.contentLength != -1 {
+					var err error
+					h.contentLength, err = parseContentLength(s.value)
+					if err != nil {
+						h.contentLength = -2
+						h.connectionClose = true
+						return 0, err
+					}
+					h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
+				}
+				continue
+			}
+			if caseInsensitiveCompare(s.key, strConnection) {
+				if bytes.Equal(s.value, strClose) {
+					h.connectionClose = true
+				} else {
+					h.connectionClose = false
+					h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+				}
+				continue
+			}
+		case 's':
+			if caseInsensitiveCompare(s.key, strServer) {
+				h.server = append(h.server[:0], s.value...)
+				continue
+			}
+			if caseInsensitiveCompare(s.key, strSetCookie) {
+				h.cookies, kv = allocArg(h.cookies)
+				kv.key = getCookieKey(kv.key, s.value)
+				kv.value = append(kv.value[:0], s.value...)
+				continue
+			}
+		case 't':
+			if caseInsensitiveCompare(s.key, strTransferEncoding) {
+				if len(s.value) > 0 && !bytes.Equal(s.value, strIdentity) {
+					h.contentLength = -1
+					h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
+				}
+				continue
+			}
+			if caseInsensitiveCompare(s.key, strTrailer) {
+				err := h.SetTrailerBytes(s.value)
+				if err != nil {
+					h.connectionClose = true
+					return 0, err
+				}
+				continue
+			}
+		}
+		h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
 	}
+
 	if s.err != nil {
 		h.connectionClose = true
 		return 0, s.err
@@ -3044,7 +3053,7 @@ outer:
 		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
 	}
 
-	return len(buf) - len(s.b), err
+	return len(buf) - len(s.b), nil
 }
 
 func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
@@ -3055,109 +3064,109 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	var s headerScanner
 	s.b = buf
 	s.disableNormalizing = h.disableNormalizing
-	var err error
 
-outer:
 	for s.next() {
-		if len(s.key) > 0 {
-			for _, ch := range s.key {
-				if !validHeaderFieldByte(ch) {
-					err = fmt.Errorf("invalid header key %q", s.key)
-					continue outer
-				}
-			}
-			for _, ch := range s.value {
-				if !validHeaderValueByte(ch) {
-					err = fmt.Errorf("invalid header value %q", s.value)
-					continue outer
-				}
-			}
+		if len(s.key) == 0 {
+			h.connectionClose = true
+			return 0, fmt.Errorf("invalid header key %q", s.key)
+		}
 
-			if h.disableSpecialHeader {
-				h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+		for _, ch := range s.key {
+			if !validHeaderFieldByte(ch) {
+				h.connectionClose = true
+				return 0, fmt.Errorf("invalid header key %q", s.key)
+			}
+		}
+		for _, ch := range s.value {
+			if !validHeaderValueByte(ch) {
+				h.connectionClose = true
+				return 0, fmt.Errorf("invalid header value %q", s.value)
+			}
+		}
+
+		if h.disableSpecialHeader {
+			h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+			continue
+		}
+
+		switch s.key[0] | 0x20 {
+		case 'h':
+			if caseInsensitiveCompare(s.key, strHost) {
+				h.host = append(h.host[:0], s.value...)
 				continue
 			}
+		case 'u':
+			if caseInsensitiveCompare(s.key, strUserAgent) {
+				h.userAgent = append(h.userAgent[:0], s.value...)
+				continue
+			}
+		case 'c':
+			if caseInsensitiveCompare(s.key, strContentType) {
+				h.contentType = append(h.contentType[:0], s.value...)
+				continue
+			}
+			if caseInsensitiveCompare(s.key, strContentLength) {
+				if contentLengthSeen {
+					h.connectionClose = true
+					return 0, errors.New("duplicate Content-Length header")
+				}
+				contentLengthSeen = true
 
-			switch s.key[0] | 0x20 {
-			case 'h':
-				if caseInsensitiveCompare(s.key, strHost) {
-					h.host = append(h.host[:0], s.value...)
-					continue
-				}
-			case 'u':
-				if caseInsensitiveCompare(s.key, strUserAgent) {
-					h.userAgent = append(h.userAgent[:0], s.value...)
-					continue
-				}
-			case 'c':
-				if caseInsensitiveCompare(s.key, strContentType) {
-					h.contentType = append(h.contentType[:0], s.value...)
-					continue
-				}
-				if caseInsensitiveCompare(s.key, strContentLength) {
-					if contentLengthSeen {
-						return 0, errors.New("duplicate Content-Length header")
-					}
-					contentLengthSeen = true
-
-					if h.contentLength != -1 {
-						var nerr error
-						if h.contentLength, nerr = parseContentLength(s.value); nerr != nil {
-							if err == nil {
-								err = nerr
-							}
-							h.contentLength = -2
-						} else {
-							h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
-						}
-					}
-					continue
-				}
-				if caseInsensitiveCompare(s.key, strConnection) {
-					if bytes.Equal(s.value, strClose) {
+				if h.contentLength != -1 {
+					var err error
+					h.contentLength, err = parseContentLength(s.value)
+					if err != nil {
+						h.contentLength = -2
 						h.connectionClose = true
-					} else {
-						h.connectionClose = false
-						h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+						return 0, err
 					}
-					continue
+					h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
 				}
-			case 't':
-				if caseInsensitiveCompare(s.key, strTransferEncoding) {
-					isIdentity := caseInsensitiveCompare(s.value, strIdentity)
-					isChunked := caseInsensitiveCompare(s.value, strChunked)
+				continue
+			}
+			if caseInsensitiveCompare(s.key, strConnection) {
+				if bytes.Equal(s.value, strClose) {
+					h.connectionClose = true
+				} else {
+					h.connectionClose = false
+					h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+				}
+				continue
+			}
+		case 't':
+			if caseInsensitiveCompare(s.key, strTransferEncoding) {
+				isIdentity := caseInsensitiveCompare(s.value, strIdentity)
+				isChunked := caseInsensitiveCompare(s.value, strChunked)
 
-					if !isIdentity && !isChunked {
-						if h.secureErrorLogMessage {
-							return 0, errors.New("unsupported Transfer-Encoding")
-						}
-						return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
+				if !isIdentity && !isChunked {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, errors.New("unsupported Transfer-Encoding")
 					}
+					return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
+				}
 
-					if isChunked {
-						h.contentLength = -1
-						h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
-					}
-					continue
+				if isChunked {
+					h.contentLength = -1
+					h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 				}
-				if caseInsensitiveCompare(s.key, strTrailer) {
-					if nerr := h.SetTrailerBytes(s.value); nerr != nil {
-						if err == nil {
-							err = nerr
-						}
-					}
-					continue
+				continue
+			}
+			if caseInsensitiveCompare(s.key, strTrailer) {
+				err := h.SetTrailerBytes(s.value)
+				if err != nil {
+					h.connectionClose = true
+					return 0, err
 				}
+				continue
 			}
 		}
 		h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
 	}
-	if s.err != nil && err == nil {
-		err = s.err
-	}
-	if err != nil {
+
+	if s.err != nil {
 		h.connectionClose = true
-		return 0, err
+		return 0, s.err
 	}
 
 	if h.contentLength < 0 {

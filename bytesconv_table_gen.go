@@ -100,7 +100,7 @@ func main() {
 
 	validHeaderFieldByteTable := func() [128]byte {
 		// Should match net/textproto's validHeaderFieldByte(c byte) bool
-		// Defined by RFC 7230:
+		// Defined by RFC 7230 and 9110:
 		//
 		//	header-field   = field-name ":" OWS field-value OWS
 		//	field-name     = token
@@ -123,7 +123,7 @@ func main() {
 
 	validHeaderValueByteTable := func() [256]byte {
 		// Should match net/textproto's validHeaderValueByte(c byte) bool
-		// Defined by RFC 7230:
+		// Defined by RFC 7230 and 9110:
 		//
 		//	field-content  = field-vchar [ 1*( SP / HTAB ) field-vchar ]
 		//	field-vchar    = VCHAR / obs-text
