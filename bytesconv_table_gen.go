@@ -146,6 +146,101 @@ func main() {
 		return table
 	}()
 
+	validMethodValueByteTable := [256]byte{
+		/*
+				Same as net/http
+
+			     Method         = "OPTIONS"                ; Section 9.2
+			                    | "GET"                    ; Section 9.3
+			                    | "HEAD"                   ; Section 9.4
+			                    | "POST"                   ; Section 9.5
+			                    | "PUT"                    ; Section 9.6
+			                    | "DELETE"                 ; Section 9.7
+			                    | "TRACE"                  ; Section 9.8
+			                    | "CONNECT"                ; Section 9.9
+			                    | extension-method
+			   extension-method = token
+			     token          = 1*<any CHAR except CTLs or separators>
+		*/
+		'!':  1,
+		'#':  1,
+		'$':  1,
+		'%':  1,
+		'&':  1,
+		'\'': 1,
+		'*':  1,
+		'+':  1,
+		'-':  1,
+		'.':  1,
+		'0':  1,
+		'1':  1,
+		'2':  1,
+		'3':  1,
+		'4':  1,
+		'5':  1,
+		'6':  1,
+		'7':  1,
+		'8':  1,
+		'9':  1,
+		'A':  1,
+		'B':  1,
+		'C':  1,
+		'D':  1,
+		'E':  1,
+		'F':  1,
+		'G':  1,
+		'H':  1,
+		'I':  1,
+		'J':  1,
+		'K':  1,
+		'L':  1,
+		'M':  1,
+		'N':  1,
+		'O':  1,
+		'P':  1,
+		'Q':  1,
+		'R':  1,
+		'S':  1,
+		'T':  1,
+		'U':  1,
+		'W':  1,
+		'V':  1,
+		'X':  1,
+		'Y':  1,
+		'Z':  1,
+		'^':  1,
+		'_':  1,
+		'`':  1,
+		'a':  1,
+		'b':  1,
+		'c':  1,
+		'd':  1,
+		'e':  1,
+		'f':  1,
+		'g':  1,
+		'h':  1,
+		'i':  1,
+		'j':  1,
+		'k':  1,
+		'l':  1,
+		'm':  1,
+		'n':  1,
+		'o':  1,
+		'p':  1,
+		'q':  1,
+		'r':  1,
+		's':  1,
+		't':  1,
+		'u':  1,
+		'v':  1,
+		'w':  1,
+		'x':  1,
+		'y':  1,
+		'z':  1,
+		'|':  1,
+		'~':  1,
+	}
+
 	w := bytes.NewBufferString(pre)
 	fmt.Fprintf(w, "const hex2intTable = %q\n", hex2intTable)
 	fmt.Fprintf(w, "const toLowerTable = %q\n", toLowerTable)
@@ -154,6 +249,7 @@ func main() {
 	fmt.Fprintf(w, "const quotedPathShouldEscapeTable = %q\n", quotedPathShouldEscapeTable)
 	fmt.Fprintf(w, "const validHeaderFieldByteTable = %q\n", validHeaderFieldByteTable)
 	fmt.Fprintf(w, "const validHeaderValueByteTable = %q\n", validHeaderValueByteTable)
+	fmt.Fprintf(w, "const validMethodValueByteTable = %q\n", validMethodValueByteTable)
 
 	if err := os.WriteFile("bytesconv_table.go", w.Bytes(), 0o660); err != nil {
 		log.Fatal(err)

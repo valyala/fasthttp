@@ -2855,6 +2855,15 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	return len(buf) - len(bNext), nil
 }
 
+func isValidMethod(method []byte) bool {
+	for _, ch := range method {
+		if validMethodValueByteTable[ch] == 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	bNext := buf
 	var b []byte
@@ -2874,6 +2883,14 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		return 0, fmt.Errorf("cannot find http request method in %q", buf)
 	}
 	h.method = append(h.method[:0], b[:n]...)
+
+	if !isValidMethod(h.method) {
+		if h.secureErrorLogMessage {
+			return 0, errors.New("unsupported http request method")
+		}
+		return 0, fmt.Errorf("unsupported http request method %q in %q", h.method, buf)
+	}
+
 	b = b[n+1:]
 
 	// parse requestURI
