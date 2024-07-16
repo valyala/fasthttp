@@ -2731,8 +2731,8 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // Note: Because creating a new channel for every request is just too expensive, so
 // RequestCtx.s.done is only closed when the server is shutting down
 func (ctx *RequestCtx) Done() <-chan struct{} {
-	//fix  Use locks to prevent concurrent modifications,
-	//and use new variables to prevent panic caused by modifying the original done chan to nil.
+	// fix  Use locks to prevent concurrent modifications,
+	// and use new variables to prevent panic caused by modifying the original done chan to nil.
 	ctx.s.mu.Lock()
 	defer ctx.s.mu.Unlock()
 	if ctx.s.done == nil {
