@@ -2755,7 +2755,7 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 // RequestCtx.s.done is only closed when the server is shutting down
 func (ctx *RequestCtx) Err() error {
 	select {
-	case <-ctx.Done(): //fix  Use unified functions instead of reference variables to converge fetching into one place
+	case <-ctx.Done(): // fix  Use unified functions instead of reference variables to converge fetching into one place
 		return context.Canceled
 	default:
 		return nil
