@@ -2731,7 +2731,17 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // Note: Because creating a new channel for every request is just too expensive, so
 // RequestCtx.s.done is only closed when the server is shutting down
 func (ctx *RequestCtx) Done() <-chan struct{} {
-	return ctx.s.done
+	//fix  Use locks to prevent concurrent modifications,
+	//and use new variables to prevent panic caused by modifying the original done chan to nil.
+	ctx.s.mu.Lock()
+	defer ctx.s.mu.Unlock()
+	if ctx.s.done == nil {
+		done := make(chan struct{}, 1)
+		done <- struct{}{}
+		return done
+	}
+	done := ctx.s.done
+	return done
 }
 
 // Err returns a non-nil error value after Done is closed,
@@ -2745,7 +2755,7 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 // RequestCtx.s.done is only closed when the server is shutting down
 func (ctx *RequestCtx) Err() error {
 	select {
-	case <-ctx.s.done:
+	case <-ctx.Done(): //fix  Use unified functions instead of reference variables to converge fetching into one place
 		return context.Canceled
 	default:
 		return nil
