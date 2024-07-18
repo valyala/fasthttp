@@ -77,6 +77,12 @@ type Request struct {
 	// By default redirect path values are normalized, i.e.
 	// extra slashes are removed, special characters are encoded.
 	DisableRedirectPathNormalizing bool
+
+	// UsingProxy 是否使用代理
+	UsingProxy bool
+
+	// ConnAcquiredCallback 连接获取后回调，用于获取连接信息（例如 *tls.Conn 中的证书信息等）
+	ConnAcquiredCallback func(conn net.Conn)
 }
 
 // Response represents HTTP response.
@@ -1587,7 +1593,12 @@ func (req *Request) Write(w *bufio.Writer) error {
 		} else if !req.UseHostHeader {
 			req.Header.SetHostBytes(host)
 		}
-		req.Header.SetRequestURIBytes(uri.RequestURI())
+
+		if req.UsingProxy {
+			req.Header.SetRequestURIBytes(uri.FullURI())
+		} else {
+			req.Header.SetRequestURIBytes(uri.RequestURI())
+		}
 
 		if len(uri.username) > 0 {
 			// RequestHeader.SetBytesKV only uses RequestHeader.bufKV.key
