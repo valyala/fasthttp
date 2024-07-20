@@ -180,10 +180,6 @@ type Client struct {
 	// Default client name is used if not set.
 	Name string
 
-	// NoDefaultUserAgentHeader when set to true, causes the default
-	// User-Agent header to be excluded from the Request.
-	NoDefaultUserAgentHeader bool
-
 	// Callback for establishing new connections to hosts.
 	//
 	// Default DialTimeout is used if not set.
@@ -196,15 +192,6 @@ type Client struct {
 	//
 	// If not set, DialTimeout is used.
 	Dial DialFunc
-
-	// Attempt to connect to both ipv4 and ipv6 addresses if set to true.
-	//
-	// This option is used only if default TCP dialer is used,
-	// i.e. if Dial is blank.
-	//
-	// By default client connects only to ipv4 addresses,
-	// since unfortunately ipv6 remains broken in many networks worldwide :)
-	DialDualStack bool
 
 	// TLS config for https connections.
 	//
@@ -261,6 +248,19 @@ type Client struct {
 	// By default response body size is unlimited.
 	MaxResponseBodySize int
 
+	// NoDefaultUserAgentHeader when set to true, causes the default
+	// User-Agent header to be excluded from the Request.
+	NoDefaultUserAgentHeader bool
+
+	// Attempt to connect to both ipv4 and ipv6 addresses if set to true.
+	//
+	// This option is used only if default TCP dialer is used,
+	// i.e. if Dial is blank.
+	//
+	// By default client connects only to ipv4 addresses,
+	// since unfortunately ipv6 remains broken in many networks worldwide :)
+	DialDualStack bool
+
 	// Header names are passed as-is without normalization
 	// if this option is set.
 	//
@@ -288,6 +288,9 @@ type Client struct {
 	// extra slashes are removed, special characters are encoded.
 	DisablePathNormalizing bool
 
+	// StreamResponseBody enables response body streaming.
+	StreamResponseBody bool
+
 	// Maximum duration for waiting for a free connection.
 	//
 	// By default will not waiting, return ErrNoFreeConns immediately.
@@ -300,9 +303,6 @@ type Client struct {
 
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
-
-	// StreamResponseBody enables response body streaming.
-	StreamResponseBody bool
 
 	// ConfigureClient configures the fasthttp.HostClient.
 	ConfigureClient func(hc *HostClient) error
@@ -698,10 +698,6 @@ type HostClient struct {
 	// Client name. Used in User-Agent request header.
 	Name string
 
-	// NoDefaultUserAgentHeader when set to true, causes the default
-	// User-Agent header to be excluded from the Request.
-	NoDefaultUserAgentHeader bool
-
 	// Callback for establishing new connections to hosts.
 	//
 	// Default DialTimeout is used if not set.
@@ -714,19 +710,6 @@ type HostClient struct {
 	//
 	// If not set, DialTimeout is used.
 	Dial DialFunc
-
-	// Attempt to connect to both ipv4 and ipv6 host addresses
-	// if set to true.
-	//
-	// This option is used only if default TCP dialer is used,
-	// i.e. if Dial and DialTimeout are blank.
-	//
-	// By default client connects only to ipv4 addresses,
-	// since unfortunately ipv6 remains broken in many networks worldwide :)
-	DialDualStack bool
-
-	// Whether to use TLS (aka SSL or HTTPS) for host connections.
-	IsTLS bool
 
 	// Optional TLS config.
 	TLSConfig *tls.Config
@@ -785,6 +768,64 @@ type HostClient struct {
 	// By default response body size is unlimited.
 	MaxResponseBodySize int
 
+	// Maximum duration for waiting for a free connection.
+	//
+	// By default will not waiting, return ErrNoFreeConns immediately
+	MaxConnWaitTimeout time.Duration
+
+	// RetryIf controls whether a retry should be attempted after an error.
+	//
+	// By default will use isIdempotent function
+	RetryIf RetryIfFunc
+
+	// Transport defines a transport-like mechanism that wraps every request/response.
+	Transport RoundTripper
+
+	// Connection pool strategy. Can be either LIFO or FIFO (default).
+	ConnPoolStrategy ConnPoolStrategyType
+
+	connsLock  sync.Mutex
+	connsCount int
+	conns      []*clientConn
+	connsWait  *wantConnQueue
+
+	addrsLock   sync.Mutex
+	addrs       []string
+	addrIdx     uint32
+	lastUseTime uint32
+
+	tlsConfigMap     map[string]*tls.Config
+	tlsConfigMapLock sync.Mutex
+
+	readerPool sync.Pool
+	writerPool sync.Pool
+
+	clientReaderPool *sync.Pool
+	clientWriterPool *sync.Pool
+
+	pendingRequests int32
+
+	// pendingClientRequests counts the number of requests that a Client is currently running using this HostClient.
+	// It will be incremented earlier than pendingRequests and will be used by Client to see if the HostClient is still in use.
+	pendingClientRequests int32
+
+	// NoDefaultUserAgentHeader when set to true, causes the default
+	// User-Agent header to be excluded from the Request.
+	NoDefaultUserAgentHeader bool
+
+	// Attempt to connect to both ipv4 and ipv6 host addresses
+	// if set to true.
+	//
+	// This option is used only if default TCP dialer is used,
+	// i.e. if Dial and DialTimeout are blank.
+	//
+	// By default client connects only to ipv4 addresses,
+	// since unfortunately ipv6 remains broken in many networks worldwide :)
+	DialDualStack bool
+
+	// Whether to use TLS (aka SSL or HTTPS) for host connections.
+	IsTLS bool
+
 	// Header names are passed as-is without normalization
 	// if this option is set.
 	//
@@ -820,50 +861,8 @@ type HostClient struct {
 	// Client logs full errors by default.
 	SecureErrorLogMessage bool
 
-	// Maximum duration for waiting for a free connection.
-	//
-	// By default will not waiting, return ErrNoFreeConns immediately
-	MaxConnWaitTimeout time.Duration
-
-	// RetryIf controls whether a retry should be attempted after an error.
-	//
-	// By default will use isIdempotent function
-	RetryIf RetryIfFunc
-
-	// Transport defines a transport-like mechanism that wraps every request/response.
-	Transport RoundTripper
-
-	// Connection pool strategy. Can be either LIFO or FIFO (default).
-	ConnPoolStrategy ConnPoolStrategyType
-
 	// StreamResponseBody enables response body streaming.
 	StreamResponseBody bool
-
-	lastUseTime uint32
-
-	connsLock  sync.Mutex
-	connsCount int
-	conns      []*clientConn
-	connsWait  *wantConnQueue
-
-	addrsLock sync.Mutex
-	addrs     []string
-	addrIdx   uint32
-
-	tlsConfigMap     map[string]*tls.Config
-	tlsConfigMapLock sync.Mutex
-
-	readerPool sync.Pool
-	writerPool sync.Pool
-
-	clientReaderPool *sync.Pool
-	clientWriterPool *sync.Pool
-
-	pendingRequests int32
-
-	// pendingClientRequests counts the number of requests that a Client is currently running using this HostClient.
-	// It will be incremented earlier than pendingRequests and will be used by Client to see if the HostClient is still in use.
-	pendingClientRequests int32
 
 	connsCleanerRun bool
 }
@@ -2174,10 +2173,6 @@ type PipelineClient struct {
 	// PipelineClient name. Used in User-Agent request header.
 	Name string
 
-	// NoDefaultUserAgentHeader when set to true, causes the default
-	// User-Agent header to be excluded from the Request.
-	NoDefaultUserAgentHeader bool
-
 	// The maximum number of concurrent connections to the Addr.
 	//
 	// A single connection is used by default.
@@ -2199,6 +2194,10 @@ type PipelineClient struct {
 	//
 	// Default Dial is used if not set.
 	Dial DialFunc
+
+	// NoDefaultUserAgentHeader when set to true, causes the default
+	// User-Agent header to be excluded from the Request.
+	NoDefaultUserAgentHeader bool
 
 	// Attempt to connect to both ipv4 and ipv6 host addresses
 	// if set to true.
@@ -2284,10 +2283,10 @@ type pipelineConnClient struct {
 
 	Addr                          string
 	Name                          string
-	NoDefaultUserAgentHeader      bool
 	MaxPendingRequests            int
 	MaxBatchDelay                 time.Duration
 	Dial                          DialFunc
+	NoDefaultUserAgentHeader      bool
 	DialDualStack                 bool
 	DisableHeaderNamesNormalizing bool
 	DisablePathNormalizing        bool

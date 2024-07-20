@@ -53,6 +53,11 @@ type Request struct {
 
 	multipartForm         *multipart.Form
 	multipartFormBoundary string
+
+	// Request timeout. Usually set by DoDeadline or DoTimeout
+	// if <= 0, means not set
+	timeout time.Duration
+
 	secureErrorLogMessage bool
 
 	// Group bool members in order to reduce Request object size.
@@ -64,10 +69,6 @@ type Request struct {
 	// Used by Server to indicate the request was received on a HTTPS endpoint.
 	// Client/HostClient shouldn't use this field but should depend on the uri.scheme instead.
 	isTLS bool
-
-	// Request timeout. Usually set by DoDeadline or DoTimeout
-	// if <= 0, means not set
-	timeout time.Duration
 
 	// Use Host header (request.Header.SetHost) instead of the host from SetRequestURI, SetHost, or URI().SetHost
 	UseHostHeader bool
@@ -101,11 +102,6 @@ type Response struct {
 	// Use SetBodyStream to set the body stream.
 	StreamBody bool
 
-	bodyStream io.Reader
-	w          responseBodyWriter
-	body       *bytebufferpool.ByteBuffer
-	bodyRaw    []byte
-
 	// Response.Read() skips reading body if set to true.
 	// Use it for reading HEAD responses.
 	//
@@ -115,6 +111,11 @@ type Response struct {
 
 	keepBodyBuffer        bool
 	secureErrorLogMessage bool
+
+	bodyStream io.Reader
+	w          responseBodyWriter
+	body       *bytebufferpool.ByteBuffer
+	bodyRaw    []byte
 
 	// Remote TCPAddr from concurrently net.Conn.
 	raddr net.Addr

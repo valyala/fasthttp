@@ -26,18 +26,18 @@ const (
 type ResponseHeader struct {
 	noCopy noCopy
 
-	disableNormalizing   bool
-	noHTTP11             bool
-	connectionClose      bool
-	noDefaultContentType bool
-	noDefaultDate        bool
-
-	statusCode            int
-	statusMessage         []byte
-	protocol              []byte
-	contentLength         int
-	contentLengthBytes    []byte
+	disableNormalizing    bool
+	noHTTP11              bool
+	connectionClose       bool
+	noDefaultContentType  bool
+	noDefaultDate         bool
 	secureErrorLogMessage bool
+
+	statusCode         int
+	statusMessage      []byte
+	protocol           []byte
+	contentLength      int
+	contentLengthBytes []byte
 
 	contentType     []byte
 	contentEncoding []byte
@@ -71,9 +71,9 @@ type RequestHeader struct {
 	// for reducing RequestHeader object size.
 	cookiesCollected bool
 
+	secureErrorLogMessage bool
 	contentLength         int
 	contentLengthBytes    []byte
-	secureErrorLogMessage bool
 
 	method      []byte
 	requestURI  []byte
@@ -3239,8 +3239,6 @@ type headerScanner struct {
 	// hLen stores header subslice len
 	hLen int
 
-	disableNormalizing bool
-
 	// by checking whether the next line contains a colon or not to tell
 	// it's a header entry or a multi line value of current header entry.
 	// the side effect of this operation is that we know the index of the
@@ -3249,7 +3247,8 @@ type headerScanner struct {
 	nextColon   int
 	nextNewLine int
 
-	initialized bool
+	disableNormalizing bool
+	initialized        bool
 }
 
 func (s *headerScanner) next() bool {

@@ -74,9 +74,9 @@ type Cookie struct {
 	domain []byte
 	path   []byte
 
+	sameSite    CookieSameSite
 	httpOnly    bool
 	secure      bool
-	sameSite    CookieSameSite
 	partitioned bool
 
 	bufKV argsKV

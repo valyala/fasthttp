@@ -22,6 +22,7 @@ type workerPool struct {
 	MaxWorkersCount int
 
 	LogAllErrors bool
+	mustStop     bool
 
 	MaxIdleWorkerDuration time.Duration
 
@@ -29,7 +30,6 @@ type workerPool struct {
 
 	lock         sync.Mutex
 	workersCount int
-	mustStop     bool
 
 	ready []*workerChan
 

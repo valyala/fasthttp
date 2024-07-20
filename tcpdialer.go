@@ -152,14 +152,15 @@ type TCPDialer struct {
 	// }
 	Resolver Resolver
 
-	// DisableDNSResolution may be used to disable DNS resolution
-	DisableDNSResolution bool
 	// DNSCacheDuration may be used to override the default DNS cache duration (DefaultDNSCacheDuration)
 	DNSCacheDuration time.Duration
 
 	tcpAddrsMap sync.Map
 
 	concurrencyCh chan struct{}
+
+	// DisableDNSResolution may be used to disable DNS resolution
+	DisableDNSResolution bool
 
 	once sync.Once
 }
