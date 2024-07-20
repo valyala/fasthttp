@@ -259,12 +259,6 @@ type FS struct {
 	// Path to the root directory to serve files from.
 	Root string
 
-	// AllowEmptyRoot controls what happens when Root is empty. When false (default) it will default to the
-	// current working directory. An empty root is mostly useful when you want to use absolute paths
-	// on windows that are on different filesystems. On linux setting your Root to "/" already allows you to use
-	// absolute paths on any filesystem.
-	AllowEmptyRoot bool
-
 	// List of index file names to try opening during directory access.
 	//
 	// For example:
@@ -275,6 +269,36 @@ type FS struct {
 	//
 	// By default the list is empty.
 	IndexNames []string
+
+	// Path to the compressed root directory to serve files from. If this value
+	// is empty, Root is used.
+	CompressRoot string
+
+	// Path rewriting function.
+	//
+	// By default request path is not modified.
+	PathRewrite PathRewriteFunc
+
+	// PathNotFound fires when file is not found in filesystem
+	// this functions tries to replace "Cannot open requested path"
+	// server response giving to the programmer the control of server flow.
+	//
+	// By default PathNotFound returns
+	// "Cannot open requested path"
+	PathNotFound RequestHandler
+
+	// AllowEmptyRoot controls what happens when Root is empty. When false (default) it will default to the
+	// current working directory. An empty root is mostly useful when you want to use absolute paths
+	// on windows that are on different filesystems. On linux setting your Root to "/" already allows you to use
+	// absolute paths on any filesystem.
+	AllowEmptyRoot bool
+
+	// Uses brotli encoding and fallbacks to gzip in responses if set to true, uses gzip if set to false.
+	//
+	// This value has sense only if Compress is set.
+	//
+	// Brotli encoding is disabled by default.
+	CompressBrotli bool
 
 	// Index pages for directories without files matching IndexNames
 	// are automatically generated if set.
@@ -298,34 +322,10 @@ type FS struct {
 	// Transparent compression is disabled by default.
 	Compress bool
 
-	// Uses brotli encoding and fallbacks to gzip in responses if set to true, uses gzip if set to false.
-	//
-	// This value has sense only if Compress is set.
-	//
-	// Brotli encoding is disabled by default.
-	CompressBrotli bool
-
-	// Path to the compressed root directory to serve files from. If this value
-	// is empty, Root is used.
-	CompressRoot string
-
 	// Enables byte range requests if set to true.
 	//
 	// Byte range requests are disabled by default.
 	AcceptByteRange bool
-
-	// Path rewriting function.
-	//
-	// By default request path is not modified.
-	PathRewrite PathRewriteFunc
-
-	// PathNotFound fires when file is not found in filesystem
-	// this functions tries to replace "Cannot open requested path"
-	// server response giving to the programmer the control of server flow.
-	//
-	// By default PathNotFound returns
-	// "Cannot open requested path"
-	PathNotFound RequestHandler
 
 	// SkipCache if true, will cache no file handler.
 	//
@@ -510,8 +510,8 @@ type fsHandler struct {
 	generateIndexPages     bool
 	compress               bool
 	compressBrotli         bool
-	compressRoot           string
 	acceptByteRange        bool
+	compressRoot           string
 	compressedFileSuffixes map[string]string
 
 	cacheManager cacheManager
