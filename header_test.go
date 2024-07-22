@@ -67,6 +67,11 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 		"Foo: Bar\r\n" +
 		"Multi-Line: one;\r\n two\r\n" +
 		"Values: v1;\r\n v2; v3;\r\n v4;\tv5\r\n" +
+		// issue #1808
+		"WithTabs: \t v1 \t\r\n" +
+		"WithTabs-Start: \t \t v1 \r\n" +
+		"WithTabs-End: v1 \t \t\t\t\r\n" +
+		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n" +
 		"\r\n"
 	header := new(ResponseHeader)
 	if _, err := header.parse([]byte(s)); err != nil {
