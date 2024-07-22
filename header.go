@@ -3358,10 +3358,6 @@ func (s *headerScanner) next() bool {
 		s.value, s.b, s.hLen = normalizeHeaderValue(s.value, oldB, s.hLen)
 	}
 
-	for len(s.b) > 0 && (s.b[0] == ' ' || s.b[0] == '\t') {
-		s.b = s.b[1:]
-	}
-
 	return true
 }
 
