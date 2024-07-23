@@ -2743,7 +2743,15 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // Note: Because creating a new channel for every request is just too expensive, so
 // RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Done() <-chan struct{} {
-	return ctx.s.done
+	// fix use new variables to prevent panic caused by modifying the original done chan to nil.
+	done := ctx.s.done
+
+	if done == nil {
+		done = make(chan struct{}, 1)
+		done <- struct{}{}
+		return done
+	}
+	return done
 }
 
 // Err returns a non-nil error value after Done is closed,
@@ -2757,7 +2765,7 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 // RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Err() error {
 	select {
-	case <-ctx.s.done:
+	case <-ctx.Done():
 		return context.Canceled
 	default:
 		return nil
