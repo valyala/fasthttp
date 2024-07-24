@@ -67,11 +67,6 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 		"Foo: Bar\r\n" +
 		"Multi-Line: one;\r\n two\r\n" +
 		"Values: v1;\r\n v2; v3;\r\n v4;\tv5\r\n" +
-		// issue #1808
-		"WithTabs: \t v1 \t\r\n" +
-		"WithTabs-Start: \t \t v1 \r\n" +
-		"WithTabs-End: v1 \t \t\t\t\r\n" +
-		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n" +
 		"\r\n"
 	header := new(ResponseHeader)
 	if _, err := header.parse([]byte(s)); err != nil {
@@ -114,6 +109,53 @@ func TestResponseHeaderMultiLineValue(t *testing.T) {
 
 		if got != want {
 			t.Errorf("unexpected %q got: %q want: %q", name, got, want)
+		}
+	}
+}
+
+func TestIssue1808(t *testing.T) {
+	t.Parallel()
+
+	s := "HTTP/1.1 200\r\n" +
+		"WithTabs: \t v1 \t\r\n" + // "v1"
+		"WithTabs-Start: \t \t v1 \r\n" + // "v1"
+		"WithTabs-End: v1 \t \t\t\t\r\n" + // "v1"
+		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n" + // "v1 \t; v2 \t; v3"
+		"\r\n"
+
+	resHeader := new(ResponseHeader)
+	if _, err := resHeader.parse([]byte(s)); err != nil {
+		t.Fatalf("parse headers with tabs values failed, %v", err)
+	}
+
+	groundTruth := map[string]string{
+		"WithTabs":            "v1",
+		"WithTabs-Start":      "v1",
+		"WithTabs-End":        "v1",
+		"WithTabs-Multi-Line": "v1 \t; v2 \t; v3",
+	}
+
+	for name, want := range groundTruth {
+		if got := b2s(resHeader.Peek(name)); got != want {
+			t.Errorf("ResponseHeader.parser() unexpected %q got: %q want: %q", name, got, want)
+		}
+	}
+
+	s = "GET / HTTP/1.1\r\n" +
+		"WithTabs: \t v1 \t\r\n" + // "v1"
+		"WithTabs-Start: \t \t v1 \r\n" + // "v1"
+		"WithTabs-End: v1 \t \t\t\t\r\n" + // "v1"
+		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n" + // "v1 \t; v2 \t; v3"
+		"\r\n"
+
+	reqHeader := new(RequestHeader)
+	if _, err := reqHeader.parse([]byte(s)); err != nil {
+		t.Fatalf("parse headers with tabs values failed, %v", err)
+	}
+
+	for name, want := range groundTruth {
+		if got := b2s(reqHeader.Peek(name)); got != want {
+			t.Errorf("RequestHeader.parser() unexpected %q got: %q want: %q", name, got, want)
 		}
 	}
 }
