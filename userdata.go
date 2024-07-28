@@ -77,6 +77,8 @@ func (d *userData) Reset() {
 		if vc, ok := v.(io.Closer); ok {
 			vc.Close()
 		}
+		(*d)[i].value = nil
+		(*d)[i].key = nil
 	}
 	*d = (*d)[:0]
 }
@@ -92,6 +94,7 @@ func (d *userData) Remove(key any) {
 		if kv.key == key {
 			n--
 			args[i], args[n] = args[n], args[i]
+			args[n].key = nil
 			args[n].value = nil
 			args = args[:n]
 			*d = args

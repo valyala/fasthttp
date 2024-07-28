@@ -3,7 +3,9 @@ package fasthttp
 import (
 	"fmt"
 	"reflect"
+	"runtime"
 	"testing"
+	"time"
 )
 
 func TestUserData(t *testing.T) {
@@ -117,4 +119,33 @@ func TestUserDataSetAndRemove(t *testing.T) {
 	u.Set(shortKey, "")
 	testUserDataGet(t, &u, []byte(shortKey), "")
 	testUserDataGet(t, &u, []byte(longKey), "")
+}
+
+func TestUserData_GC(t *testing.T) {
+	t.Parallel()
+
+	var u userData
+	key := "foo"
+	final := make(chan struct{})
+
+	func() {
+		val := &RequestHeader{}
+		runtime.SetFinalizer(val, func(v *RequestHeader) {
+			close(final)
+		})
+
+		u.Set(key, val)
+	}()
+
+	u.Reset()
+	runtime.GC()
+
+	select {
+	case <-final:
+	case <-time.After(time.Second):
+		t.Fatalf("value is garbage collected")
+	}
+
+	// Keep u alive, otherwise val will always get garbage collected.
+	u.Set("bar", 1)
 }
