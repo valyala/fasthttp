@@ -3296,7 +3296,7 @@ func (s *headerScanner) next() bool {
 	s.key = s.b[:n]
 	normalizeHeaderKey(s.key, s.disableNormalizing)
 	n++
-	for len(s.b) > n && s.b[n] == ' ' {
+	for len(s.b) > n && (s.b[n] == ' ' || s.b[n] == '\t') {
 		n++
 		// the newline index is a relative index, and lines below trimmed `s.b` by `n`,
 		// so the relative newline index also shifted forward. it's safe to decrease
@@ -3350,13 +3350,14 @@ func (s *headerScanner) next() bool {
 	if n > 0 && s.value[n-1] == rChar {
 		n--
 	}
-	for n > 0 && s.value[n-1] == ' ' {
+	for n > 0 && (s.value[n-1] == ' ' || s.value[n-1] == '\t') {
 		n--
 	}
 	s.value = s.value[:n]
 	if isMultiLineValue {
 		s.value, s.b, s.hLen = normalizeHeaderValue(s.value, oldB, s.hLen)
 	}
+
 	return true
 }
 
@@ -3435,6 +3436,7 @@ func normalizeHeaderValue(ov, ob []byte, headerLength int) (nv, nb []byte, nhl i
 	}
 	write := 0
 	shrunk := 0
+	once := false
 	lineStart := false
 	for read := 0; read < length; read++ {
 		c := ov[read]
@@ -3443,10 +3445,17 @@ func normalizeHeaderValue(ov, ob []byte, headerLength int) (nv, nb []byte, nhl i
 			shrunk++
 			if c == nChar {
 				lineStart = true
+				once = false
 			}
 			continue
-		case lineStart && c == '\t':
-			c = ' '
+		case lineStart && (c == '\t' || c == ' '):
+			if !once {
+				c = ' '
+				once = true
+			} else {
+				shrunk++
+				continue
+			}
 		default:
 			lineStart = false
 		}
