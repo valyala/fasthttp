@@ -250,12 +250,12 @@ func (c *fakeServerConn) SetWriteDeadline(t time.Time) error {
 }
 
 type fakeListener struct {
-	lock            sync.Mutex
-	requestsCount   int
-	requestsPerConn int
-	request         []byte
 	ch              chan *fakeServerConn
 	done            chan struct{}
+	request         []byte
+	requestsCount   int
+	requestsPerConn int
+	lock            sync.Mutex
 	closed          bool
 }
 

@@ -175,10 +175,8 @@ var defaultClient Client
 type Client struct {
 	noCopy noCopy
 
-	// Client name. Used in User-Agent request header.
-	//
-	// Default client name is used if not set.
-	Name string
+	readerPool sync.Pool
+	writerPool sync.Pool
 
 	// Callback for establishing new connections to hosts.
 	//
@@ -197,6 +195,22 @@ type Client struct {
 	//
 	// Default TLS config is used if not set.
 	TLSConfig *tls.Config
+
+	// RetryIf controls whether a retry should be attempted after an error.
+	//
+	// By default will use isIdempotent function.
+	RetryIf RetryIfFunc
+
+	// ConfigureClient configures the fasthttp.HostClient.
+	ConfigureClient func(hc *HostClient) error
+
+	m  map[string]*HostClient
+	ms map[string]*HostClient
+
+	// Client name. Used in User-Agent request header.
+	//
+	// Default client name is used if not set.
+	Name string
 
 	// Maximum number of connections per each host which may be established.
 	//
@@ -248,6 +262,17 @@ type Client struct {
 	// By default response body size is unlimited.
 	MaxResponseBodySize int
 
+	// Maximum duration for waiting for a free connection.
+	//
+	// By default will not waiting, return ErrNoFreeConns immediately.
+	MaxConnWaitTimeout time.Duration
+
+	// Connection pool strategy. Can be either LIFO or FIFO (default).
+	ConnPoolStrategy ConnPoolStrategyType
+
+	mLock sync.RWMutex
+	mOnce sync.Once
+
 	// NoDefaultUserAgentHeader when set to true, causes the default
 	// User-Agent header to be excluded from the Request.
 	NoDefaultUserAgentHeader bool
@@ -290,29 +315,6 @@ type Client struct {
 
 	// StreamResponseBody enables response body streaming.
 	StreamResponseBody bool
-
-	// Maximum duration for waiting for a free connection.
-	//
-	// By default will not waiting, return ErrNoFreeConns immediately.
-	MaxConnWaitTimeout time.Duration
-
-	// RetryIf controls whether a retry should be attempted after an error.
-	//
-	// By default will use isIdempotent function.
-	RetryIf RetryIfFunc
-
-	// Connection pool strategy. Can be either LIFO or FIFO (default).
-	ConnPoolStrategy ConnPoolStrategyType
-
-	// ConfigureClient configures the fasthttp.HostClient.
-	ConfigureClient func(hc *HostClient) error
-
-	mLock      sync.RWMutex
-	mOnce      sync.Once
-	m          map[string]*HostClient
-	ms         map[string]*HostClient
-	readerPool sync.Pool
-	writerPool sync.Pool
 }
 
 // Get returns the status code and body of url.
@@ -684,19 +686,11 @@ const (
 type HostClient struct {
 	noCopy noCopy
 
-	// Comma-separated list of upstream HTTP server host addresses,
-	// which are passed to Dial or DialTimeout in a round-robin manner.
-	//
-	// Each address may contain port if default dialer is used.
-	// For example,
-	//
-	//    - foobar.com:80
-	//    - foobar.com:443
-	//    - foobar.com:8080
-	Addr string
+	readerPool sync.Pool
+	writerPool sync.Pool
 
-	// Client name. Used in User-Agent request header.
-	Name string
+	// Transport defines a transport-like mechanism that wraps every request/response.
+	Transport RoundTripper
 
 	// Callback for establishing new connections to hosts.
 	//
@@ -713,6 +707,35 @@ type HostClient struct {
 
 	// Optional TLS config.
 	TLSConfig *tls.Config
+
+	// RetryIf controls whether a retry should be attempted after an error.
+	//
+	// By default will use isIdempotent function
+	RetryIf RetryIfFunc
+
+	connsWait *wantConnQueue
+
+	tlsConfigMap map[string]*tls.Config
+
+	clientReaderPool *sync.Pool
+	clientWriterPool *sync.Pool
+
+	// Comma-separated list of upstream HTTP server host addresses,
+	// which are passed to Dial or DialTimeout in a round-robin manner.
+	//
+	// Each address may contain port if default dialer is used.
+	// For example,
+	//
+	//    - foobar.com:80
+	//    - foobar.com:443
+	//    - foobar.com:8080
+	Addr string
+
+	// Client name. Used in User-Agent request header.
+	Name string
+
+	conns []*clientConn
+	addrs []string
 
 	// Maximum number of connections which may be established to all hosts
 	// listed in Addr.
@@ -773,35 +796,18 @@ type HostClient struct {
 	// By default will not waiting, return ErrNoFreeConns immediately
 	MaxConnWaitTimeout time.Duration
 
-	// RetryIf controls whether a retry should be attempted after an error.
-	//
-	// By default will use isIdempotent function
-	RetryIf RetryIfFunc
-
-	// Transport defines a transport-like mechanism that wraps every request/response.
-	Transport RoundTripper
-
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
 
-	connsLock  sync.Mutex
 	connsCount int
-	conns      []*clientConn
-	connsWait  *wantConnQueue
 
-	addrsLock   sync.Mutex
-	addrs       []string
-	addrIdx     uint32
-	lastUseTime uint32
+	connsLock sync.Mutex
 
-	tlsConfigMap     map[string]*tls.Config
+	addrsLock        sync.Mutex
 	tlsConfigMapLock sync.Mutex
 
-	readerPool sync.Pool
-	writerPool sync.Pool
-
-	clientReaderPool *sync.Pool
-	clientWriterPool *sync.Pool
+	addrIdx     uint32
+	lastUseTime uint32
 
 	pendingRequests int32
 
@@ -949,9 +955,9 @@ func clientGetURLTimeout(dst []byte, url string, timeout time.Duration, c client
 }
 
 type clientURLResponse struct {
-	statusCode int
-	body       []byte
 	err        error
+	body       []byte
+	statusCode int
 }
 
 func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDoer) (statusCode int, body []byte, err error) {
@@ -2032,10 +2038,10 @@ func AddMissingPort(addr string, isTLS bool) string {
 //
 // Inspired by net/http/transport.go.
 type wantConn struct {
-	ready chan struct{}
-	mu    sync.Mutex // protects conn, err, close(ready)
-	conn  *clientConn
 	err   error
+	ready chan struct{}
+	conn  *clientConn
+	mu    sync.Mutex // protects conn, err, close(ready)
 }
 
 // waiting reports whether w is still waiting for an answer (connection or error).
@@ -2098,8 +2104,8 @@ type wantConnQueue struct {
 	// in Okasaki's purely functional queue but without the
 	// overhead of reversing the list when swapping stages.
 	head    []*wantConn
-	headPos int
 	tail    []*wantConn
+	headPos int
 }
 
 // len returns the number of items in the queue.
@@ -2167,11 +2173,26 @@ func (q *wantConnQueue) clearFront() (cleaned bool) {
 type PipelineClient struct {
 	noCopy noCopy
 
+	// Logger for logging client errors.
+	//
+	// By default standard logger from log package is used.
+	Logger Logger
+
+	// Callback for connection establishing to the host.
+	//
+	// Default Dial is used if not set.
+	Dial DialFunc
+
+	// Optional TLS config.
+	TLSConfig *tls.Config
+
 	// Address of the host to connect to.
 	Addr string
 
 	// PipelineClient name. Used in User-Agent request header.
 	Name string
+
+	connClients []*pipelineConnClient
 
 	// The maximum number of concurrent connections to the Addr.
 	//
@@ -2190,10 +2211,34 @@ type PipelineClient struct {
 	// By default requests are sent immediately to the server.
 	MaxBatchDelay time.Duration
 
-	// Callback for connection establishing to the host.
+	// Idle connection to the host is closed after this duration.
 	//
-	// Default Dial is used if not set.
-	Dial DialFunc
+	// By default idle connection is closed after
+	// DefaultMaxIdleConnDuration.
+	MaxIdleConnDuration time.Duration
+
+	// Buffer size for responses' reading.
+	// This also limits the maximum header size.
+	//
+	// Default buffer size is used if 0.
+	ReadBufferSize int
+
+	// Buffer size for requests' writing.
+	//
+	// Default buffer size is used if 0.
+	WriteBufferSize int
+
+	// Maximum duration for full response reading (including body).
+	//
+	// By default response read timeout is unlimited.
+	ReadTimeout time.Duration
+
+	// Maximum duration for full request writing (including body).
+	//
+	// By default request write timeout is unlimited.
+	WriteTimeout time.Duration
+
+	connClientsLock sync.Mutex
 
 	// NoDefaultUserAgentHeader when set to true, causes the default
 	// User-Agent header to be excluded from the Request.
@@ -2238,86 +2283,51 @@ type PipelineClient struct {
 
 	// Whether to use TLS (aka SSL or HTTPS) for host connections.
 	IsTLS bool
-
-	// Optional TLS config.
-	TLSConfig *tls.Config
-
-	// Idle connection to the host is closed after this duration.
-	//
-	// By default idle connection is closed after
-	// DefaultMaxIdleConnDuration.
-	MaxIdleConnDuration time.Duration
-
-	// Buffer size for responses' reading.
-	// This also limits the maximum header size.
-	//
-	// Default buffer size is used if 0.
-	ReadBufferSize int
-
-	// Buffer size for requests' writing.
-	//
-	// Default buffer size is used if 0.
-	WriteBufferSize int
-
-	// Maximum duration for full response reading (including body).
-	//
-	// By default response read timeout is unlimited.
-	ReadTimeout time.Duration
-
-	// Maximum duration for full request writing (including body).
-	//
-	// By default request write timeout is unlimited.
-	WriteTimeout time.Duration
-
-	// Logger for logging client errors.
-	//
-	// By default standard logger from log package is used.
-	Logger Logger
-
-	connClients     []*pipelineConnClient
-	connClientsLock sync.Mutex
 }
 
 type pipelineConnClient struct {
 	noCopy noCopy
 
-	Addr                          string
-	Name                          string
-	MaxPendingRequests            int
-	MaxBatchDelay                 time.Duration
-	Dial                          DialFunc
+	workPool sync.Pool
+
+	Logger Logger
+
+	Dial      DialFunc
+	TLSConfig *tls.Config
+	chW       chan *pipelineWork
+	chR       chan *pipelineWork
+
+	tlsConfig *tls.Config
+
+	Addr                string
+	Name                string
+	MaxPendingRequests  int
+	MaxBatchDelay       time.Duration
+	MaxIdleConnDuration time.Duration
+	ReadBufferSize      int
+	WriteBufferSize     int
+	ReadTimeout         time.Duration
+	WriteTimeout        time.Duration
+
+	chLock sync.Mutex
+
+	tlsConfigLock                 sync.Mutex
 	NoDefaultUserAgentHeader      bool
 	DialDualStack                 bool
 	DisableHeaderNamesNormalizing bool
 	DisablePathNormalizing        bool
 	IsTLS                         bool
-	TLSConfig                     *tls.Config
-	MaxIdleConnDuration           time.Duration
-	ReadBufferSize                int
-	WriteBufferSize               int
-	ReadTimeout                   time.Duration
-	WriteTimeout                  time.Duration
-	Logger                        Logger
-
-	workPool sync.Pool
-
-	chLock sync.Mutex
-	chW    chan *pipelineWork
-	chR    chan *pipelineWork
-
-	tlsConfigLock sync.Mutex
-	tlsConfig     *tls.Config
 }
 
 type pipelineWork struct {
-	reqCopy  Request
 	respCopy Response
+	deadline time.Time
+	err      error
 	req      *Request
 	resp     *Response
 	t        *time.Timer
-	deadline time.Time
-	err      error
 	done     chan struct{}
+	reqCopy  Request
 }
 
 // DoTimeout performs the given request and waits for response during

@@ -67,20 +67,22 @@ var cookiePool = &sync.Pool{
 type Cookie struct {
 	noCopy noCopy
 
+	expire time.Time
+
 	key    []byte
 	value  []byte
-	expire time.Time
-	maxAge int
 	domain []byte
 	path   []byte
+
+	buf []byte
+
+	bufKV  argsKV
+	maxAge int
 
 	sameSite    CookieSameSite
 	httpOnly    bool
 	secure      bool
 	partitioned bool
-
-	bufKV argsKV
-	buf   []byte
 }
 
 // CopyTo copies src cookie to c.

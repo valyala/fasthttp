@@ -141,7 +141,7 @@ var (
 //   - CompressDefaultCompression
 //   - CompressHuffmanOnly
 func AppendGzipBytesLevel(dst, src []byte, level int) []byte {
-	w := &byteSliceWriter{dst}
+	w := &byteSliceWriter{b: dst}
 	WriteGzipLevel(w, src, level) //nolint:errcheck
 	return w.b
 }
@@ -212,7 +212,7 @@ func AppendGzipBytes(dst, src []byte) []byte {
 // WriteGunzip writes ungzipped p to w and returns the number of uncompressed
 // bytes written to w.
 func WriteGunzip(w io.Writer, p []byte) (int, error) {
-	r := &byteSliceReader{p}
+	r := &byteSliceReader{b: p}
 	zr, err := acquireGzipReader(r)
 	if err != nil {
 		return 0, err
@@ -228,7 +228,7 @@ func WriteGunzip(w io.Writer, p []byte) (int, error) {
 
 // AppendGunzipBytes appends gunzipped src to dst and returns the resulting dst.
 func AppendGunzipBytes(dst, src []byte) ([]byte, error) {
-	w := &byteSliceWriter{dst}
+	w := &byteSliceWriter{b: dst}
 	_, err := WriteGunzip(w, src)
 	return w.b, err
 }
@@ -244,7 +244,7 @@ func AppendGunzipBytes(dst, src []byte) ([]byte, error) {
 //   - CompressDefaultCompression
 //   - CompressHuffmanOnly
 func AppendDeflateBytesLevel(dst, src []byte, level int) []byte {
-	w := &byteSliceWriter{dst}
+	w := &byteSliceWriter{b: dst}
 	WriteDeflateLevel(w, src, level) //nolint:errcheck
 	return w.b
 }
@@ -321,7 +321,7 @@ func AppendDeflateBytes(dst, src []byte) []byte {
 // WriteInflate writes inflated p to w and returns the number of uncompressed
 // bytes written to w.
 func WriteInflate(w io.Writer, p []byte) (int, error) {
-	r := &byteSliceReader{p}
+	r := &byteSliceReader{b: p}
 	zr, err := acquireFlateReader(r)
 	if err != nil {
 		return 0, err
@@ -337,7 +337,7 @@ func WriteInflate(w io.Writer, p []byte) (int, error) {
 
 // AppendInflateBytes appends inflated src to dst and returns the resulting dst.
 func AppendInflateBytes(dst, src []byte) ([]byte, error) {
-	w := &byteSliceWriter{dst}
+	w := &byteSliceWriter{b: dst}
 	_, err := WriteInflate(w, src)
 	return w.b, err
 }

@@ -1947,9 +1947,9 @@ func testClientRequestSetTimeoutError(t *testing.T, c *Client, n int) {
 
 type readTimeoutConn struct {
 	net.Conn
-	t  time.Duration
 	wc chan struct{}
 	rc chan struct{}
+	t  time.Duration
 }
 
 func (r *readTimeoutConn) Read(p []byte) (int, error) {
@@ -3212,47 +3212,47 @@ func Test_AddMissingPort(t *testing.T) {
 	}
 	tests := []struct {
 		name string
-		args args
 		want string
+		args args
 	}{
 		{
-			args: args{"127.1", false}, // 127.1 is a short form of 127.0.0.1
+			args: args{addr: "127.1", isTLS: false}, // 127.1 is a short form of 127.0.0.1
 			want: "127.1:80",
 		},
 		{
-			args: args{"127.0.0.1", false},
+			args: args{addr: "127.0.0.1", isTLS: false},
 			want: "127.0.0.1:80",
 		},
 		{
-			args: args{"127.0.0.1", true},
+			args: args{addr: "127.0.0.1", isTLS: true},
 			want: "127.0.0.1:443",
 		},
 		{
-			args: args{"[::1]", false},
+			args: args{addr: "[::1]", isTLS: false},
 			want: "[::1]:80",
 		},
 		{
-			args: args{"::1", false},
+			args: args{addr: "::1", isTLS: false},
 			want: "::1", // keep as is
 		},
 		{
-			args: args{"[::1]", true},
+			args: args{addr: "[::1]", isTLS: true},
 			want: "[::1]:443",
 		},
 		{
-			args: args{"127.0.0.1:8080", false},
+			args: args{addr: "127.0.0.1:8080", isTLS: false},
 			want: "127.0.0.1:8080",
 		},
 		{
-			args: args{"127.0.0.1:8443", true},
+			args: args{addr: "127.0.0.1:8443", isTLS: true},
 			want: "127.0.0.1:8443",
 		},
 		{
-			args: args{"[::1]:8080", false},
+			args: args{addr: "[::1]:8080", isTLS: false},
 			want: "[::1]:8080",
 		},
 		{
-			args: args{"[::1]:8443", true},
+			args: args{addr: "[::1]:8443", isTLS: true},
 			want: "[::1]:8443",
 		},
 	}
@@ -3345,8 +3345,8 @@ func Test_getRedirectURL(t *testing.T) {
 	}
 	tests := []struct {
 		name string
-		args args
 		want string
+		args args
 	}{
 		{
 			name: "Path normalizing enabled, no special characters in path",
@@ -3402,8 +3402,8 @@ func TestDialTimeout(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name           string
 		client         clientDoTimeOuter
+		name           string
 		requestTimeout time.Duration
 		shouldFailFast bool
 	}{

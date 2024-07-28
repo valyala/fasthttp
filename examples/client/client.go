@@ -18,8 +18,8 @@ var headerContentTypeJson = []byte("application/json")
 var client *fasthttp.Client
 
 type Entity struct {
-	Id   int
 	Name string
+	Id   int
 }
 
 func main() {
