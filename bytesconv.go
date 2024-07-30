@@ -128,7 +128,7 @@ func AppendUint(dst []byte, n int) []byte {
 		panic("BUG: int must be positive")
 	}
 
-	return strconv.AppendUInt(dst, uint64(n), 10)
+	return strconv.AppendUint(dst, uint64(n), 10)
 }
 
 // ParseUint parses uint from buf.
