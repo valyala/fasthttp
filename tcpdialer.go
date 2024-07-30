@@ -126,7 +126,6 @@ type Resolver interface {
 
 // TCPDialer contains options to control a group of Dial calls.
 type TCPDialer struct {
-
 	// This may be used to override DNS resolving policy, like this:
 	// var dialer = &fasthttp.TCPDialer{
 	// 	Resolver: &net.Resolver{

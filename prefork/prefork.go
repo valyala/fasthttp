@@ -42,7 +42,6 @@ type Logger interface {
 // WARNING: using prefork prevents the use of any global state!
 // Things like in-memory caches won't work.
 type Prefork struct {
-
 	// By default standard logger from log package is used.
 	Logger Logger
 
