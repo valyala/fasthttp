@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -127,21 +128,7 @@ func AppendUint(dst []byte, n int) []byte {
 		panic("BUG: int must be positive")
 	}
 
-	var b [20]byte
-	buf := b[:]
-	i := len(buf)
-	var q int
-	for n >= 10 {
-		i--
-		q = n / 10
-		buf[i] = '0' + byte(n-q*10)
-		n = q
-	}
-	i--
-	buf[i] = '0' + byte(n)
-
-	dst = append(dst, buf[i:]...)
-	return dst
+	return strconv.AppendUint(dst, uint64(n), 10)
 }
 
 // ParseUint parses uint from buf.
