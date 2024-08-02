@@ -14,11 +14,11 @@ var ErrInmemoryListenerClosed = errors.New("InmemoryListener is already closed: 
 // It may be used either for fast in-process client<->server communications
 // without network stack overhead or for client<->server tests.
 type InmemoryListener struct {
+	listenerAddr net.Addr
+	conns        chan acceptConn
+	addrLock     sync.RWMutex
 	lock         sync.Mutex
 	closed       bool
-	conns        chan acceptConn
-	listenerAddr net.Addr
-	addrLock     sync.RWMutex
 }
 
 type acceptConn struct {
@@ -117,7 +117,7 @@ func (ln *InmemoryListener) DialWithLocalAddr(local net.Addr) (net.Conn, error) 
 	ln.lock.Lock()
 	accepted := make(chan struct{})
 	if !ln.closed {
-		ln.conns <- acceptConn{sConn, accepted}
+		ln.conns <- acceptConn{conn: sConn, accepted: accepted}
 		// Wait until the connection has been accepted.
 		<-accepted
 	} else {

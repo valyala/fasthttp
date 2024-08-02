@@ -18,9 +18,9 @@ import (
 
 type fakeClientConn struct {
 	net.Conn
+	ch chan struct{}
 	s  []byte
 	n  int
-	ch chan struct{}
 }
 
 func (c *fakeClientConn) SetWriteDeadline(t time.Time) error {

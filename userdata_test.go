@@ -54,7 +54,7 @@ func TestUserDataValueClose(t *testing.T) {
 	// store values implementing io.Closer
 	for i := 0; i < 5; i++ {
 		key := fmt.Sprintf("key_%d", i)
-		u.Set(key, &closerValue{&closeCalls})
+		u.Set(key, &closerValue{closeCalls: &closeCalls})
 	}
 
 	// store values without io.Closer

@@ -38,21 +38,23 @@ func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
 type Request struct {
 	noCopy noCopy
 
+	bodyStream io.Reader
+	w          requestBodyWriter
+	body       *bytebufferpool.ByteBuffer
+
+	multipartForm         *multipart.Form
+	multipartFormBoundary string
+
+	postArgs Args
+
+	bodyRaw []byte
+
+	uri URI
+
 	// Request header.
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
 	Header RequestHeader
-
-	uri      URI
-	postArgs Args
-
-	bodyStream io.Reader
-	w          requestBodyWriter
-	body       *bytebufferpool.ByteBuffer
-	bodyRaw    []byte
-
-	multipartForm         *multipart.Form
-	multipartFormBoundary string
 
 	// Request timeout. Usually set by DoDeadline or DoTimeout
 	// if <= 0, means not set
@@ -89,6 +91,17 @@ type Request struct {
 type Response struct {
 	noCopy noCopy
 
+	bodyStream io.Reader
+
+	// Remote TCPAddr from concurrently net.Conn.
+	raddr net.Addr
+	// Local TCPAddr from concurrently net.Conn.
+	laddr net.Addr
+	w     responseBodyWriter
+	body  *bytebufferpool.ByteBuffer
+
+	bodyRaw []byte
+
 	// Response header.
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
@@ -111,16 +124,6 @@ type Response struct {
 
 	keepBodyBuffer        bool
 	secureErrorLogMessage bool
-
-	bodyStream io.Reader
-	w          responseBodyWriter
-	body       *bytebufferpool.ByteBuffer
-	bodyRaw    []byte
-
-	// Remote TCPAddr from concurrently net.Conn.
-	raddr net.Addr
-	// Local TCPAddr from concurrently net.Conn.
-	laddr net.Addr
 }
 
 // SetHost sets host for the request.

@@ -123,7 +123,7 @@ func testInmemoryListenerHTTP(t *testing.T, f func(t *testing.T, client *http.Cl
 	}
 
 	server := &http.Server{
-		Handler: &echoServerHandler{t},
+		Handler: &echoServerHandler{t: t},
 	}
 
 	go func() {

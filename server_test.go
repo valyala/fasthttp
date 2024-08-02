@@ -1296,10 +1296,10 @@ func TestServerMultipartFormDataRequest(t *testing.T) {
 		StreamRequestBody            bool
 		DisablePreParseMultipartForm bool
 	}{
-		{false, false},
-		{false, true},
-		{true, false},
-		{true, true},
+		{StreamRequestBody: false, DisablePreParseMultipartForm: false},
+		{StreamRequestBody: false, DisablePreParseMultipartForm: true},
+		{StreamRequestBody: true, DisablePreParseMultipartForm: false},
+		{StreamRequestBody: true, DisablePreParseMultipartForm: true},
 	} {
 		reqS := `POST /upload HTTP/1.1
 Host: qwerty.com
@@ -2651,8 +2651,8 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 	t.Helper()
 
 	type hijackSignal struct {
-		id int
 		rw *readWriter
+		id int
 	}
 
 	wg := sync.WaitGroup{}
@@ -2719,7 +2719,7 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 				t.Errorf("[iter: %d] Unexpected error from serveConn: %v", id, err)
 			}
 
-			hijackStartCh <- &hijackSignal{id, rw}
+			hijackStartCh <- &hijackSignal{id: id, rw: rw}
 		}(t, i)
 	}
 
@@ -4349,8 +4349,8 @@ func (rw *readWriter) SetWriteDeadline(t time.Time) error {
 }
 
 type testLogger struct {
-	lock sync.Mutex
 	out  string
+	lock sync.Mutex
 }
 
 func (cl *testLogger) Printf(format string, args ...any) {

@@ -88,10 +88,10 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 }
 
 type netHTTPResponseWriter struct {
-	statusCode int
-	h          http.Header
 	w          io.Writer
+	h          http.Header
 	ctx        *fasthttp.RequestCtx
+	statusCode int
 }
 
 func (w *netHTTPResponseWriter) StatusCode() int {

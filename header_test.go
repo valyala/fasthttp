@@ -1355,7 +1355,7 @@ func TestResponseHeaderFirstByteReadEOF(t *testing.T) {
 
 	var h ResponseHeader
 
-	r := &errorReader{errors.New("non-eof error")}
+	r := &errorReader{err: errors.New("non-eof error")}
 	br := bufio.NewReader(r)
 	err := h.Read(br)
 	if err == nil {

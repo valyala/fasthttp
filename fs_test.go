@@ -71,7 +71,7 @@ func testPathNotFound(t *testing.T, pathNotFoundFunc RequestHandler) {
 	var ctx RequestCtx
 	var req Request
 	req.SetRequestURI("http//some.url/file")
-	ctx.Init(&req, nil, TestLogger{t})
+	ctx.Init(&req, nil, TestLogger{t: t})
 
 	stop := make(chan struct{})
 	defer close(stop)
@@ -176,7 +176,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 
 	buf := bytes.NewBuffer(nil)
 
-	n, err := reader.WriteTo(pureWriter{buf})
+	n, err := reader.WriteTo(pureWriter{w: buf})
 	if err != nil {
 		t.Fatal(err)
 	}

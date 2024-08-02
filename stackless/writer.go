@@ -41,12 +41,13 @@ func NewWriter(dstW io.Writer, newWriter NewWriterFunc) Writer {
 type writer struct {
 	dstW io.Writer
 	zw   Writer
-	xw   xWriter
 
 	err error
-	n   int
+	xw  xWriter
 
-	p  []byte
+	p []byte
+	n int
+
 	op op
 }
 

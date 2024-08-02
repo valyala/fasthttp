@@ -97,7 +97,7 @@ var (
 //   - CompressBrotliBestCompression
 //   - CompressBrotliDefaultCompression
 func AppendBrotliBytesLevel(dst, src []byte, level int) []byte {
-	w := &byteSliceWriter{dst}
+	w := &byteSliceWriter{b: dst}
 	WriteBrotliLevel(w, src, level) //nolint:errcheck
 	return w.b
 }
@@ -167,7 +167,7 @@ func AppendBrotliBytes(dst, src []byte) []byte {
 // WriteUnbrotli writes unbrotlied p to w and returns the number of uncompressed
 // bytes written to w.
 func WriteUnbrotli(w io.Writer, p []byte) (int, error) {
-	r := &byteSliceReader{p}
+	r := &byteSliceReader{b: p}
 	zr, err := acquireBrotliReader(r)
 	if err != nil {
 		return 0, err
@@ -183,7 +183,7 @@ func WriteUnbrotli(w io.Writer, p []byte) (int, error) {
 
 // AppendUnbrotliBytes appends unbrotlied src to dst and returns the resulting dst.
 func AppendUnbrotliBytes(dst, src []byte) ([]byte, error) {
-	w := &byteSliceWriter{dst}
+	w := &byteSliceWriter{b: dst}
 	_, err := WriteUnbrotli(w, src)
 	return w.b, err
 }

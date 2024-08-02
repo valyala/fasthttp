@@ -102,7 +102,7 @@ func releaseRealZstdWrter(zw *zstd.Encoder, level int) {
 }
 
 func AppendZstdBytesLevel(dst, src []byte, level int) []byte {
-	w := &byteSliceWriter{dst}
+	w := &byteSliceWriter{b: dst}
 	WriteZstdLevel(w, src, level) //nolint:errcheck
 	return w.b
 }
@@ -155,7 +155,7 @@ func AppendZstdBytes(dst, src []byte) []byte {
 // WriteUnzstd writes unzstd p to w and returns the number of uncompressed
 // bytes written to w.
 func WriteUnzstd(w io.Writer, p []byte) (int, error) {
-	r := &byteSliceReader{p}
+	r := &byteSliceReader{b: p}
 	zr, err := acquireZstdReader(r)
 	if err != nil {
 		return 0, err
@@ -171,7 +171,7 @@ func WriteUnzstd(w io.Writer, p []byte) (int, error) {
 
 // AppendUnzstdBytes appends unzstd src to dst and returns the resulting dst.
 func AppendUnzstdBytes(dst, src []byte) ([]byte, error) {
-	w := &byteSliceWriter{dst}
+	w := &byteSliceWriter{b: dst}
 	_, err := WriteUnzstd(w, src)
 	return w.b, err
 }

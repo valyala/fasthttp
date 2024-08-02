@@ -42,6 +42,8 @@ var uriPool = &sync.Pool{
 type URI struct {
 	noCopy noCopy
 
+	queryArgs Args
+
 	pathOriginal []byte
 	scheme       []byte
 	path         []byte
@@ -49,7 +51,11 @@ type URI struct {
 	hash         []byte
 	host         []byte
 
-	queryArgs       Args
+	fullURI    []byte
+	requestURI []byte
+
+	username        []byte
+	password        []byte
 	parsedQueryArgs bool
 
 	// Path values are sent as-is without normalization.
@@ -60,12 +66,6 @@ type URI struct {
 	// By default path values are normalized, i.e.
 	// extra slashes are removed, special characters are encoded.
 	DisablePathNormalizing bool
-
-	fullURI    []byte
-	requestURI []byte
-
-	username []byte
-	password []byte
 }
 
 // CopyTo copies uri contents to dst.

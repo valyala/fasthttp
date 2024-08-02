@@ -26,17 +26,8 @@ const (
 type ResponseHeader struct {
 	noCopy noCopy
 
-	disableNormalizing    bool
-	noHTTP11              bool
-	connectionClose       bool
-	noDefaultContentType  bool
-	noDefaultDate         bool
-	secureErrorLogMessage bool
-
-	statusCode         int
 	statusMessage      []byte
 	protocol           []byte
-	contentLength      int
 	contentLengthBytes []byte
 
 	contentType     []byte
@@ -46,9 +37,19 @@ type ResponseHeader struct {
 
 	h       []argsKV
 	trailer []argsKV
-	bufKV   argsKV
 
 	cookies []argsKV
+	bufKV   argsKV
+
+	statusCode    int
+	contentLength int
+
+	disableNormalizing    bool
+	noHTTP11              bool
+	connectionClose       bool
+	noDefaultContentType  bool
+	noDefaultDate         bool
+	secureErrorLogMessage bool
 }
 
 // RequestHeader represents HTTP request header.
@@ -61,19 +62,7 @@ type ResponseHeader struct {
 type RequestHeader struct {
 	noCopy noCopy
 
-	disableNormalizing   bool
-	noHTTP11             bool
-	connectionClose      bool
-	noDefaultContentType bool
-	disableSpecialHeader bool
-
-	// These two fields have been moved close to other bool fields
-	// for reducing RequestHeader object size.
-	cookiesCollected bool
-
-	secureErrorLogMessage bool
-	contentLength         int
-	contentLengthBytes    []byte
+	contentLengthBytes []byte
 
 	method      []byte
 	requestURI  []byte
@@ -85,13 +74,27 @@ type RequestHeader struct {
 
 	h       []argsKV
 	trailer []argsKV
-	bufKV   argsKV
 
 	cookies []argsKV
 
 	// stores an immutable copy of headers as they were received from the
 	// wire.
 	rawHeaders []byte
+	bufKV      argsKV
+
+	contentLength int
+
+	disableNormalizing   bool
+	noHTTP11             bool
+	connectionClose      bool
+	noDefaultContentType bool
+	disableSpecialHeader bool
+
+	// These two fields have been moved close to other bool fields
+	// for reducing RequestHeader object size.
+	cookiesCollected bool
+
+	secureErrorLogMessage bool
 }
 
 // SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
@@ -2329,7 +2332,7 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		// n == 1 on the first read for the request.
 		if n == 1 {
 			// We didn't read a single byte.
-			return ErrNothingRead{err}
+			return ErrNothingRead{error: err}
 		}
 
 		return fmt.Errorf("error when reading request headers: %w", err)
@@ -3231,10 +3234,11 @@ func parseContentLength(b []byte) (int, error) {
 }
 
 type headerScanner struct {
+	err error
+
 	b     []byte
 	key   []byte
 	value []byte
-	err   error
 
 	// hLen stores header subslice len
 	hLen int

@@ -27,10 +27,6 @@ type BalancingClient interface {
 type LBClient struct {
 	noCopy noCopy
 
-	// Clients must contain non-zero clients list.
-	// Incoming requests are balanced among these clients.
-	Clients []BalancingClient
-
 	// HealthCheck is a callback called after each request.
 	//
 	// The request, response and the error returned by the client
@@ -42,15 +38,20 @@ type LBClient struct {
 	// By default HealthCheck returns false if err != nil.
 	HealthCheck func(req *Request, resp *Response, err error) bool
 
+	// Clients must contain non-zero clients list.
+	// Incoming requests are balanced among these clients.
+	Clients []BalancingClient
+
+	cs []*lbClient
+
 	// Timeout is the request timeout used when calling LBClient.Do.
 	//
 	// DefaultLBClientTimeout is used by default.
 	Timeout time.Duration
 
-	cs []*lbClient
+	mu sync.RWMutex
 
 	once sync.Once
-	mu   sync.RWMutex
 }
 
 // DefaultLBClientTimeout is the default request timeout used by LBClient

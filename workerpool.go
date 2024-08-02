@@ -15,29 +15,30 @@ import (
 //
 // Such a scheme keeps CPU caches hot (in theory).
 type workerPool struct {
+	workerChanPool sync.Pool
+
+	Logger Logger
+
 	// Function for serving server connections.
 	// It must leave c unclosed.
 	WorkerFunc ServeHandler
 
-	MaxWorkersCount int
+	stopCh chan struct{}
 
-	LogAllErrors bool
-	mustStop     bool
-
-	MaxIdleWorkerDuration time.Duration
-
-	Logger Logger
-
-	lock         sync.Mutex
-	workersCount int
+	connState func(net.Conn, ConnState)
 
 	ready []*workerChan
 
-	stopCh chan struct{}
+	MaxWorkersCount int
 
-	workerChanPool sync.Pool
+	MaxIdleWorkerDuration time.Duration
 
-	connState func(net.Conn, ConnState)
+	workersCount int
+
+	lock sync.Mutex
+
+	LogAllErrors bool
+	mustStop     bool
 }
 
 type workerChan struct {
