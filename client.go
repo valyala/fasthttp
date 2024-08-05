@@ -656,9 +656,17 @@ type DialFunc func(addr string) (net.Conn, error)
 type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, error)
 
 // RetryIfFunc signature of retry if function.
+// request or error are passed to the RetryIfFunc if there are any request errors.
 //
-// Request argument passed to RetryIfFunc, if there are any request errors.
-type RetryIfFunc func(request *Request) bool
+// There are 3 types the RetryIfFunc supports:
+//
+//   - func(request *Request) bool
+//   - func(err error) bool
+//   - func(request *Request, err error) bool
+type RetryIfFunc interface {
+	// See issue #1744
+	// func(request *Request) bool | func(err error) bool | func(request *Request, err error) bool
+}
 
 // RoundTripper wraps every request/response.
 type RoundTripper interface {
@@ -1282,7 +1290,8 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultMaxIdemponentCallAttempts
 	}
-	isRequestRetryable := isIdempotent
+	var isRequestRetryable RetryIfFunc
+	isRequestRetryable = isIdempotent
 	if c.RetryIf != nil {
 		isRequestRetryable = c.RetryIf
 	}
@@ -1318,7 +1327,18 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		if hasBodyStream {
 			break
 		}
-		if !isRequestRetryable(req) {
+
+		switch f := isRequestRetryable.(type) {
+		case func(*Request) bool:
+			retry = f(req)
+		case func(error) bool:
+			retry = f(err)
+		case func(*Request, error) bool:
+			retry = f(req, err)
+		default:
+			panic("Unexpected RetryIfFunc")
+		}
+		if !retry {
 			// Retry non-idempotent requests if the server closes
 			// the connection before sending the response.
 			//
