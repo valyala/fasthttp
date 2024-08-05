@@ -658,15 +658,12 @@ type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, err
 // RetryIfFunc signature of retry if function.
 // request or error are passed to the RetryIfFunc if there are any request errors.
 //
-// There are 3 types the RetryIfFunc supports:
+// There are 3 types the RetryIfFunc supports: (issue #1744)
 //
 //   - func(request *Request) bool
 //   - func(err error) bool
 //   - func(request *Request, err error) bool
-type RetryIfFunc interface {
-	// See issue #1744
-	// func(request *Request) bool | func(err error) bool | func(request *Request, err error) bool
-}
+type RetryIfFunc any
 
 // RoundTripper wraps every request/response.
 type RoundTripper interface {
