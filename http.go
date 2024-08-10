@@ -1600,10 +1600,10 @@ func (req *Request) Write(w *bufio.Writer) error {
 			nl := len(uri.username) + len(uri.password) + 1
 			nb := nl + len(strBasicSpace)
 			tl := nb + base64.StdEncoding.EncodedLen(nl)
-			if tl > cap(req.Header.bufKV.value) {
-				req.Header.bufKV.value = make([]byte, 0, tl)
+			if tl > cap(req.Header.bufV) {
+				req.Header.bufV = make([]byte, 0, tl)
 			}
-			buf := req.Header.bufKV.value[:0]
+			buf := req.Header.bufV[:0]
 			buf = append(buf, uri.username...)
 			buf = append(buf, strColon...)
 			buf = append(buf, uri.password...)
