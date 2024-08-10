@@ -2290,7 +2290,6 @@ func readBodyWithStreaming(r *bufio.Reader, contentLength, maxBodySize int, dst 
 	// be handled with this single branch. by the way,
 	// fix issue: https://github.com/valyala/fasthttp/issues/1816
 	b, err = appendBodyFixedSize(r, dst, readN)
-
 	if err != nil {
 		return b, err
 	}
