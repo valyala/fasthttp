@@ -41,7 +41,6 @@ type ResponseHeader struct {
 	cookies []argsKV
 	bufK    []byte
 	bufV    []byte
-	// bufKV   argsKV
 
 	statusCode    int
 	contentLength int
@@ -84,7 +83,6 @@ type RequestHeader struct {
 	rawHeaders []byte
 	bufK       []byte
 	bufV       []byte
-	// bufKV      argsKV
 
 	contentLength int
 
