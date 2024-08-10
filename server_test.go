@@ -4387,7 +4387,6 @@ func TestRequestBodyStreamReadIssue1816(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	//
 	server := Server{StreamRequestBody: true, MaxRequestBodySize: 5, Handler: func(ctx *RequestCtx) {
 		r := ctx.RequestBodyStream()
 		p := make([]byte, 1300)
