@@ -2021,25 +2021,27 @@ func TestResponseReadWithoutBody(t *testing.T) {
 	var resp Response
 
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 304 Not Modified\r\nContent-Type: aa\r\nContent-Length: 1235\r\n\r\n", false,
-		304, 1235, "aa", nil)
+		304, 1235, "aa")
 
-	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 204 Foo Bar\r\nContent-Type: aab\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nFoo: bar\r\n\r\n", false,
-		204, -1, "aab", map[string]string{"Foo": "bar"})
+	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 204 Foo Bar\r\nContent-Type: aab\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n", false,
+		204, -1, "aab")
 
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 123 AAA\r\nContent-Type: xxx\r\nContent-Length: 3434\r\n\r\n", false,
-		123, 3434, "xxx", nil)
+		123, 3434, "xxx")
 
 	testResponseReadWithoutBody(t, &resp, "HTTP 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 123\r\n\r\nfoobar\r\n", true,
-		200, 123, "text/xml", nil)
+		200, 123, "text/xml")
 
 	// '100 Continue' must be skipped.
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 100 Continue\r\nFoo-bar: baz\r\n\r\nHTTP/1.1 329 aaa\r\nContent-Type: qwe\r\nContent-Length: 894\r\n\r\n", true,
-		329, 894, "qwe", nil)
+		329, 894, "qwe")
 }
 
 func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBody bool,
-	expectedStatusCode, expectedContentLength int, expectedContentType string, expectedTrailer map[string]string,
+	expectedStatusCode, expectedContentLength int, expectedContentType string,
 ) {
+	t.Helper()
+
 	r := bytes.NewBufferString(s)
 	rb := bufio.NewReader(r)
 	resp.SkipBody = skipBody
@@ -2051,7 +2053,6 @@ func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBod
 		t.Fatalf("Unexpected response body %q. Expected %q. response=%q", resp.Body(), "", s)
 	}
 	verifyResponseHeader(t, &resp.Header, expectedStatusCode, expectedContentLength, expectedContentType, "")
-	verifyResponseTrailer(t, &resp.Header, expectedTrailer)
 
 	// verify that ordinal response is read after null-body response
 	resp.SkipBody = false

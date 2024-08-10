@@ -1446,7 +1446,8 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		}
 	}
 
-	if resp.Header.ContentLength() == -1 && !resp.StreamBody {
+	// A response without a body can't have trailers.
+	if resp.Header.ContentLength() == -1 && !resp.StreamBody && !resp.mustSkipBody() {
 		err = resp.Header.ReadTrailer(r)
 		if err != nil && err != io.EOF {
 			if isConnectionReset(err) {
