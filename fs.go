@@ -819,6 +819,7 @@ func newCacheManager(fs *FS) cacheManager {
 		cache:         make(map[string]*fsFile),
 		cacheBrotli:   make(map[string]*fsFile),
 		cacheGzip:     make(map[string]*fsFile),
+		cacheZstd:     make(map[string]*fsFile),
 	}
 
 	go instance.handleCleanCache(fs.CleanStop)
@@ -850,6 +851,7 @@ type inMemoryCacheManager struct {
 	cache         map[string]*fsFile
 	cacheBrotli   map[string]*fsFile
 	cacheGzip     map[string]*fsFile
+	cacheZstd     map[string]*fsFile
 	cacheDuration time.Duration
 	cacheLock     sync.Mutex
 }
@@ -869,6 +871,8 @@ func (cm *inMemoryCacheManager) getFsCache(cacheKind CacheKind) map[string]*fsFi
 		fileCache = cm.cacheBrotli
 	case gzipCacheKind:
 		fileCache = cm.cacheGzip
+	case zstdCacheKind:
+		fileCache = cm.cacheZstd
 	}
 
 	return fileCache
@@ -959,6 +963,7 @@ func (cm *inMemoryCacheManager) cleanCache(pendingFiles []*fsFile) []*fsFile {
 	pendingFiles, filesToRelease = cleanCacheNolock(cm.cache, pendingFiles, filesToRelease, cm.cacheDuration)
 	pendingFiles, filesToRelease = cleanCacheNolock(cm.cacheBrotli, pendingFiles, filesToRelease, cm.cacheDuration)
 	pendingFiles, filesToRelease = cleanCacheNolock(cm.cacheGzip, pendingFiles, filesToRelease, cm.cacheDuration)
+	pendingFiles, filesToRelease = cleanCacheNolock(cm.cacheZstd, pendingFiles, filesToRelease, cm.cacheDuration)
 
 	cm.cacheLock.Unlock()
 
