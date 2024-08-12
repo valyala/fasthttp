@@ -1749,7 +1749,17 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 			w := q.popFront()
 			if w.waiting() {
 				delivered = w.tryDeliver(cc, nil)
-				break
+				// This is the last resort to hand over conCount sema.
+				// We must ensure that there are no valid waiters in connsWait
+				// when we exit this loop.
+				//
+				// We did not apply the same looping pattern in the decConnsCount
+				// method because it needs to create a new time-spent connection,
+				// and the decConnsCount call chain will inevitably reach this point.
+				// When MaxConnWaitTimeout>0.
+				if delivered {
+					break
+				}
 			}
 		}
 	}
