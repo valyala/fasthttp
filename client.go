@@ -1552,6 +1552,7 @@ func (c *HostClient) acquireConn(reqTimeout time.Duration, connectionClose bool)
 		case <-w.ready:
 			return w.conn, w.err
 		case <-tc.C:
+			c.connsWait.failedWaiters.Add(1)
 			if timeoutOverridden {
 				return nil, ErrTimeout
 			}
@@ -1697,6 +1698,7 @@ func (c *HostClient) decConnsCount() {
 				dialed = true
 				break
 			}
+			c.connsWait.failedWaiters.Add(-1)
 		}
 	}
 	if !dialed {
@@ -1751,6 +1753,7 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 				delivered = w.tryDeliver(cc, nil)
 				break
 			}
+			c.connsWait.failedWaiters.Add(-1)
 		}
 	}
 	if !delivered {
@@ -2106,11 +2109,17 @@ type wantConnQueue struct {
 	head    []*wantConn
 	tail    []*wantConn
 	headPos int
+	// failedWaiters is the number of waiters in the head or tail queue,
+	// but is invalid.
+	// These state waiters cannot truly be considered as waiters; the current
+	// implementation does not immediately remove them when they become
+	// invalid but instead only marks them.
+	failedWaiters atomic.Int64
 }
 
 // len returns the number of items in the queue.
 func (q *wantConnQueue) len() int {
-	return len(q.head) - q.headPos + len(q.tail)
+	return len(q.head) - q.headPos + len(q.tail) - int(q.failedWaiters.Load())
 }
 
 // pushBack adds w to the back of the queue.
@@ -2154,6 +2163,7 @@ func (q *wantConnQueue) clearFront() (cleaned bool) {
 			return cleaned
 		}
 		q.popFront()
+		q.failedWaiters.Add(-1)
 		cleaned = true
 	}
 }
