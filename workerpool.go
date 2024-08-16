@@ -35,7 +35,8 @@ type workerPool struct {
 
 	workersCount int32
 
-	mustStop     atomic.Bool
+	mustStop atomic.Bool
+
 	LogAllErrors bool
 }
 
@@ -48,27 +49,36 @@ type workerChan struct {
 }
 
 type workerChanStack struct {
-	head, tail *workerChan
+	head, tail atomic.Pointer[workerChan]
 }
 
 func (s *workerChanStack) push(ch *workerChan) {
-	ch.next = s.head
-	s.head = ch
-	if s.tail == nil {
-		s.tail = ch
+	for {
+		oldHead := s.head.Load()
+		ch.next = oldHead
+		if s.head.CompareAndSwap(oldHead, ch) {
+			break
+		}
+	}
+
+	if s.tail.Load() == nil {
+		s.tail.Store(ch)
 	}
 }
-
 func (s *workerChanStack) pop() *workerChan {
-	head := s.head
-	if head == nil {
-		return nil
+	for {
+		oldHead := s.head.Load()
+		if oldHead == nil {
+			return nil
+		}
+
+		if s.head.CompareAndSwap(oldHead, oldHead.next) {
+			if s.head.Load() == nil {
+				s.tail.Store(nil)
+			}
+			return oldHead
+		}
 	}
-	s.head = head.next
-	if s.head == nil {
-		s.tail = nil
-	}
-	return head
 }
 
 func (wp *workerPool) Start() {
@@ -129,19 +139,22 @@ func (wp *workerPool) clean() {
 	maxIdleWorkerDuration := wp.getMaxIdleWorkerDuration()
 	criticalTime := time.Now().Add(-maxIdleWorkerDuration).UnixNano()
 
-	current := wp.ready.head
-	for current != nil {
-		next := current.next
-		if current.lastUseTime < criticalTime {
-			current.ch <- nil
-			wp.workerChanPool.Put(current)
-		} else {
-			wp.ready.head = current
+	for {
+		current := wp.ready.head.Load()
+		if current == nil || current.lastUseTime >= criticalTime {
 			break
 		}
-		current = next
+
+		next := current.next
+		if wp.ready.head.CompareAndSwap(current, next) {
+			current.ch <- nil
+			wp.workerChanPool.Put(current)
+		}
 	}
-	wp.ready.tail = wp.ready.head
+
+	if wp.ready.head.Load() == nil {
+		wp.ready.tail.Store(nil)
+	}
 }
 
 func (wp *workerPool) Serve(c net.Conn) bool {
