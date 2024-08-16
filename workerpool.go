@@ -22,13 +22,12 @@ type workerPool struct {
 
 	// Function for serving server connections.
 	// It must leave c unclosed.
+	ready      workerChanStack
 	WorkerFunc ServeHandler
 
 	stopCh chan struct{}
 
 	connState func(net.Conn, ConnState)
-
-	ready workerChanStack
 
 	MaxWorkersCount int
 
@@ -36,8 +35,8 @@ type workerPool struct {
 
 	workersCount int32
 
-	LogAllErrors bool
 	mustStop     atomic.Bool
+	LogAllErrors bool
 }
 
 type workerChan struct {
