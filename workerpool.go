@@ -169,15 +169,15 @@ var workerChanCap = func() int {
 
 func (wp *workerPool) getCh() *workerChan {
 	var ch *workerChan
-	var createWorker bool
+	var createWorker atomic.Bool
 
 	ch = wp.ready.pop()
 	if ch == nil && atomic.LoadInt32(&wp.workersCount) < int32(wp.MaxWorkersCount) {
 		atomic.AddInt32(&wp.workersCount, 1)
-		createWorker = true
+		createWorker.Store(true)
 	}
 
-	if ch == nil && createWorker {
+	if ch == nil && createWorker.Load() {
 		vch := wp.workerChanPool.Get()
 		ch = vch.(*workerChan)
 		go func() {
