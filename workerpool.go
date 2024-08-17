@@ -185,9 +185,17 @@ func (wp *workerPool) getCh() *workerChan {
 	var createWorker atomic.Bool
 
 	ch = wp.ready.pop()
-	if ch == nil && atomic.LoadInt32(&wp.workersCount) < int32(wp.MaxWorkersCount) {
-		atomic.AddInt32(&wp.workersCount, 1)
-		createWorker.Store(true)
+	if ch == nil {
+		for {
+			currentworkers := atomic.LoadInt32(&wp.workersCount)
+			if currentworkers >= int32(wp.MaxWorkersCount) {
+				break
+			}
+			if atomic.CompareAndSwapInt32(&wp.workersCount, currentworkers, currentworkers+1) {
+				createWorker.Store(true)
+				break
+			}
+		}
 	}
 
 	if ch == nil && createWorker.Load() {
