@@ -3484,3 +3484,52 @@ func TestDialTimeout(t *testing.T) {
 		})
 	}
 }
+
+func TestClientHeadWithBody(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			t.Error(err)
+		}
+		c.Write([]byte("HTTP/1.1 200 OK\r\n" + //nolint:errcheck
+			"content-type: text/plain\r\n" +
+			"transfer-encoding: chunked\r\n\r\n" +
+			"24\r\nThis is the data in the first chunk \r\n" +
+			"1B\r\nand this is the second one \r\n" +
+			"0\r\n\r\n",
+		))
+	}()
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		ReadTimeout:               time.Millisecond * 10,
+		MaxIdemponentCallAttempts: 1,
+	}
+
+	req := AcquireRequest()
+	req.SetRequestURI("http://127.0.0.1:7070")
+	req.Header.SetMethod(MethodHead)
+
+	resp := AcquireResponse()
+
+	err := c.Do(req, resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The second request on the same connection is going to give a timeout as it can't find
+	// a proper request in what is left on the connection.
+	err = c.Do(req, resp)
+	if err == nil {
+		t.Error("expected timeout error")
+	} else if err != ErrTimeout {
+		t.Error(err)
+	}
+}

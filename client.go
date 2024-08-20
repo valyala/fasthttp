@@ -1365,9 +1365,7 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 		defer ReleaseResponse(resp)
 	}
 
-	ok, err := c.doNonNilReqResp(req, resp)
-
-	return ok, err
+	return c.doNonNilReqResp(req, resp)
 }
 
 func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error) {

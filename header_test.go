@@ -2965,6 +2965,8 @@ func verifyRequestHeader(t *testing.T, h *RequestHeader, expectedContentLength i
 }
 
 func verifyResponseTrailer(t *testing.T, h *ResponseHeader, expectedTrailers map[string]string) {
+	t.Helper()
+
 	for k, v := range expectedTrailers {
 		got := h.Peek(k)
 		if !bytes.Equal(got, []byte(v)) {
