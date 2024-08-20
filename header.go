@@ -39,7 +39,8 @@ type ResponseHeader struct {
 	trailer []argsKV
 
 	cookies []argsKV
-	bufKV   argsKV
+	bufK    []byte
+	bufV    []byte
 
 	statusCode    int
 	contentLength int
@@ -80,7 +81,8 @@ type RequestHeader struct {
 	// stores an immutable copy of headers as they were received from the
 	// wire.
 	rawHeaders []byte
-	bufKV      argsKV
+	bufK       []byte
+	bufV       []byte
 
 	contentLength int
 
@@ -100,7 +102,7 @@ type RequestHeader struct {
 // SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
 // header.
 func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
-	b := h.bufKV.value[:0]
+	b := h.bufV[:0]
 	b = append(b, strBytes...)
 	b = append(b, ' ')
 	b = AppendUint(b, startPos)
@@ -108,9 +110,9 @@ func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
 	b = AppendUint(b, endPos)
 	b = append(b, '/')
 	b = AppendUint(b, contentLength)
-	h.bufKV.value = b
+	h.bufV = b
 
-	h.setNonSpecial(strContentRange, h.bufKV.value)
+	h.setNonSpecial(strContentRange, h.bufV)
 }
 
 // SetByteRange sets 'Range: bytes=startPos-endPos' header.
@@ -118,7 +120,7 @@ func (h *ResponseHeader) SetContentRange(startPos, endPos, contentLength int) {
 //   - If startPos is negative, then 'bytes=-startPos' value is set.
 //   - If endPos is negative, then 'bytes=startPos-' value is set.
 func (h *RequestHeader) SetByteRange(startPos, endPos int) {
-	b := h.bufKV.value[:0]
+	b := h.bufV[:0]
 	b = append(b, strBytes...)
 	b = append(b, '=')
 	if startPos >= 0 {
@@ -130,9 +132,9 @@ func (h *RequestHeader) SetByteRange(startPos, endPos int) {
 	if endPos >= 0 {
 		b = AppendUint(b, endPos)
 	}
-	h.bufKV.value = b
+	h.bufV = b
 
-	h.setNonSpecial(strRange, h.bufKV.value)
+	h.setNonSpecial(strRange, h.bufV)
 }
 
 // StatusCode returns response status code.
@@ -173,8 +175,8 @@ func (h *ResponseHeader) SetProtocol(protocol []byte) {
 
 // SetLastModified sets 'Last-Modified' header to the given value.
 func (h *ResponseHeader) SetLastModified(t time.Time) {
-	h.bufKV.value = AppendHTTPDate(h.bufKV.value[:0], t)
-	h.setNonSpecial(strLastModified, h.bufKV.value)
+	h.bufV = AppendHTTPDate(h.bufV[:0], t)
+	h.setNonSpecial(strLastModified, h.bufV)
 }
 
 // ConnectionClose returns true if 'Connection: close' header is set.
@@ -411,30 +413,30 @@ func (h *RequestHeader) SetContentEncodingBytes(contentEncoding []byte) {
 // 'multipart/form-data; boundary=...'
 // where ... is substituted by the given boundary.
 func (h *RequestHeader) SetMultipartFormBoundary(boundary string) {
-	b := h.bufKV.value[:0]
+	b := h.bufV[:0]
 	b = append(b, strMultipartFormData...)
 	b = append(b, ';', ' ')
 	b = append(b, strBoundary...)
 	b = append(b, '=')
 	b = append(b, boundary...)
-	h.bufKV.value = b
+	h.bufV = b
 
-	h.SetContentTypeBytes(h.bufKV.value)
+	h.SetContentTypeBytes(h.bufV)
 }
 
 // SetMultipartFormBoundaryBytes sets the following Content-Type:
 // 'multipart/form-data; boundary=...'
 // where ... is substituted by the given boundary.
 func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
-	b := h.bufKV.value[:0]
+	b := h.bufV[:0]
 	b = append(b, strMultipartFormData...)
 	b = append(b, ';', ' ')
 	b = append(b, strBoundary...)
 	b = append(b, '=')
 	b = append(b, boundary...)
-	h.bufKV.value = b
+	h.bufV = b
 
-	h.SetContentTypeBytes(h.bufKV.value)
+	h.SetContentTypeBytes(h.bufV)
 }
 
 // SetTrailer sets header Trailer value for chunked response
@@ -540,9 +542,9 @@ func (h *ResponseHeader) AddTrailerBytes(trailer []byte) error {
 			err = ErrBadTrailer
 			continue
 		}
-		h.bufKV.key = append(h.bufKV.key[:0], key...)
-		normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-		h.trailer = appendArgBytes(h.trailer, h.bufKV.key, nil, argsNoValue)
+		h.bufK = append(h.bufK[:0], key...)
+		normalizeHeaderKey(h.bufK, h.disableNormalizing)
+		h.trailer = appendArgBytes(h.trailer, h.bufK, nil, argsNoValue)
 	}
 
 	return err
@@ -888,9 +890,9 @@ func (h *RequestHeader) AddTrailerBytes(trailer []byte) error {
 			err = ErrBadTrailer
 			continue
 		}
-		h.bufKV.key = append(h.bufKV.key[:0], key...)
-		normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-		h.trailer = appendArgBytes(h.trailer, h.bufKV.key, nil, argsNoValue)
+		h.bufK = append(h.bufK[:0], key...)
+		normalizeHeaderKey(h.bufK, h.disableNormalizing)
+		h.trailer = appendArgBytes(h.trailer, h.bufK, nil, argsNoValue)
 	}
 
 	return err
@@ -954,8 +956,8 @@ func (h *ResponseHeader) IsHTTP11() bool {
 // HasAcceptEncoding returns true if the header contains
 // the given Accept-Encoding value.
 func (h *RequestHeader) HasAcceptEncoding(acceptEncoding string) bool {
-	h.bufKV.value = append(h.bufKV.value[:0], acceptEncoding...)
-	return h.HasAcceptEncodingBytes(h.bufKV.value)
+	h.bufV = append(h.bufV[:0], acceptEncoding...)
+	return h.HasAcceptEncodingBytes(h.bufV)
 }
 
 // HasAcceptEncodingBytes returns true if the header contains
@@ -1284,8 +1286,8 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 
 	h.collectCookies()
 	if len(h.cookies) > 0 {
-		h.bufKV.value = appendRequestCookieBytes(h.bufKV.value[:0], h.cookies)
-		f(strCookie, h.bufKV.value)
+		h.bufV = appendRequestCookieBytes(h.bufV[:0], h.cookies)
+		f(strCookie, h.bufV)
 	}
 	visitArgs(h.h, f)
 	if h.ConnectionClose() {
@@ -1313,15 +1315,15 @@ func (h *RequestHeader) VisitAllInOrder(f func(key, value []byte)) {
 
 // Del deletes header with the given key.
 func (h *ResponseHeader) Del(key string) {
-	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
-	h.del(k)
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	h.del(h.bufK)
 }
 
 // DelBytes deletes header with the given key.
 func (h *ResponseHeader) DelBytes(key []byte) {
-	h.bufKV.key = append(h.bufKV.key[:0], key...)
-	normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-	h.del(h.bufKV.key)
+	h.bufK = append(h.bufK[:0], key...)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
+	h.del(h.bufK)
 }
 
 func (h *ResponseHeader) del(key []byte) {
@@ -1347,15 +1349,15 @@ func (h *ResponseHeader) del(key []byte) {
 
 // Del deletes header with the given key.
 func (h *RequestHeader) Del(key string) {
-	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
-	h.del(k)
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	h.del(h.bufK)
 }
 
 // DelBytes deletes header with the given key.
 func (h *RequestHeader) DelBytes(key []byte) {
-	h.bufKV.key = append(h.bufKV.key[:0], key...)
-	normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-	h.del(h.bufKV.key)
+	h.bufK = append(h.bufK[:0], key...)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
+	h.del(h.bufK)
 }
 
 func (h *RequestHeader) del(key []byte) {
@@ -1563,8 +1565,8 @@ func (h *ResponseHeader) AddBytesKV(key, value []byte) {
 		return
 	}
 
-	k := getHeaderKeyBytes(&h.bufKV, b2s(key), h.disableNormalizing)
-	h.h = appendArgBytes(h.h, k, value, argsHasValue)
+	h.bufK = getHeaderKeyBytes(h.bufK, b2s(key), h.disableNormalizing)
+	h.h = appendArgBytes(h.h, h.bufK, value, argsHasValue)
 }
 
 // Set sets the given 'key: value' header.
@@ -1574,8 +1576,8 @@ func (h *ResponseHeader) AddBytesKV(key, value []byte) {
 //
 // Use Add for setting multiple header values under the same key.
 func (h *ResponseHeader) Set(key, value string) {
-	initHeaderKV(&h.bufKV, key, value, h.disableNormalizing)
-	h.SetCanonical(h.bufKV.key, h.bufKV.value)
+	h.bufK, h.bufV = initHeaderKV(h.bufK, h.bufV, key, value, h.disableNormalizing)
+	h.SetCanonical(h.bufK, h.bufV)
 }
 
 // SetBytesK sets the given 'key: value' header.
@@ -1585,8 +1587,8 @@ func (h *ResponseHeader) Set(key, value string) {
 //
 // Use AddBytesK for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesK(key []byte, value string) {
-	h.bufKV.value = append(h.bufKV.value[:0], value...)
-	h.SetBytesKV(key, h.bufKV.value)
+	h.bufV = append(h.bufV[:0], value...)
+	h.SetBytesKV(key, h.bufV)
 }
 
 // SetBytesV sets the given 'key: value' header.
@@ -1596,8 +1598,8 @@ func (h *ResponseHeader) SetBytesK(key []byte, value string) {
 //
 // Use AddBytesV for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesV(key string, value []byte) {
-	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
-	h.SetCanonical(k, value)
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	h.SetCanonical(h.bufK, value)
 }
 
 // SetBytesKV sets the given 'key: value' header.
@@ -1607,9 +1609,9 @@ func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 //
 // Use AddBytesKV for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesKV(key, value []byte) {
-	h.bufKV.key = append(h.bufKV.key[:0], key...)
-	normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-	h.SetCanonical(h.bufKV.key, value)
+	h.bufK = append(h.bufK[:0], key...)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
+	h.SetCanonical(h.bufK, value)
 }
 
 // SetCanonical sets the given 'key: value' header assuming that
@@ -1774,8 +1776,8 @@ func (h *RequestHeader) AddBytesKV(key, value []byte) {
 		return
 	}
 
-	k := getHeaderKeyBytes(&h.bufKV, b2s(key), h.disableNormalizing)
-	h.h = appendArgBytes(h.h, k, value, argsHasValue)
+	h.bufK = getHeaderKeyBytes(h.bufK, b2s(key), h.disableNormalizing)
+	h.h = appendArgBytes(h.h, h.bufK, value, argsHasValue)
 }
 
 // Set sets the given 'key: value' header.
@@ -1785,8 +1787,8 @@ func (h *RequestHeader) AddBytesKV(key, value []byte) {
 //
 // Use Add for setting multiple header values under the same key.
 func (h *RequestHeader) Set(key, value string) {
-	initHeaderKV(&h.bufKV, key, value, h.disableNormalizing)
-	h.SetCanonical(h.bufKV.key, h.bufKV.value)
+	h.bufK, h.bufV = initHeaderKV(h.bufK, h.bufV, key, value, h.disableNormalizing)
+	h.SetCanonical(h.bufK, h.bufV)
 }
 
 // SetBytesK sets the given 'key: value' header.
@@ -1796,8 +1798,8 @@ func (h *RequestHeader) Set(key, value string) {
 //
 // Use AddBytesK for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesK(key []byte, value string) {
-	h.bufKV.value = append(h.bufKV.value[:0], value...)
-	h.SetBytesKV(key, h.bufKV.value)
+	h.bufV = append(h.bufV[:0], value...)
+	h.SetBytesKV(key, h.bufV)
 }
 
 // SetBytesV sets the given 'key: value' header.
@@ -1807,8 +1809,8 @@ func (h *RequestHeader) SetBytesK(key []byte, value string) {
 //
 // Use AddBytesV for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesV(key string, value []byte) {
-	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
-	h.SetCanonical(k, value)
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	h.SetCanonical(h.bufK, value)
 }
 
 // SetBytesKV sets the given 'key: value' header.
@@ -1818,9 +1820,9 @@ func (h *RequestHeader) SetBytesV(key string, value []byte) {
 //
 // Use AddBytesKV for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesKV(key, value []byte) {
-	h.bufKV.key = append(h.bufKV.key[:0], key...)
-	normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-	h.SetCanonical(h.bufKV.key, value)
+	h.bufK = append(h.bufK[:0], key...)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
+	h.SetCanonical(h.bufK, value)
 }
 
 // SetCanonical sets the given 'key: value' header assuming that
@@ -1841,8 +1843,8 @@ func (h *RequestHeader) SetCanonical(key, value []byte) {
 // either though ReleaseResponse or your request handler returning.
 // Do not store references to the returned value. Make copies instead.
 func (h *ResponseHeader) Peek(key string) []byte {
-	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
-	return h.peek(k)
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	return h.peek(h.bufK)
 }
 
 // PeekBytes returns header value for the given key.
@@ -1851,9 +1853,9 @@ func (h *ResponseHeader) Peek(key string) []byte {
 // either though ReleaseResponse or your request handler returning.
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) PeekBytes(key []byte) []byte {
-	h.bufKV.key = append(h.bufKV.key[:0], key...)
-	normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-	return h.peek(h.bufKV.key)
+	h.bufK = append(h.bufK[:0], key...)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
+	return h.peek(h.bufK)
 }
 
 // Peek returns header value for the given key.
@@ -1862,8 +1864,8 @@ func (h *ResponseHeader) PeekBytes(key []byte) []byte {
 // either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) Peek(key string) []byte {
-	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
-	return h.peek(k)
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	return h.peek(h.bufK)
 }
 
 // PeekBytes returns header value for the given key.
@@ -1872,9 +1874,9 @@ func (h *RequestHeader) Peek(key string) []byte {
 // either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) PeekBytes(key []byte) []byte {
-	h.bufKV.key = append(h.bufKV.key[:0], key...)
-	normalizeHeaderKey(h.bufKV.key, h.disableNormalizing)
-	return h.peek(h.bufKV.key)
+	h.bufK = append(h.bufK[:0], key...)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
+	return h.peek(h.bufK)
 }
 
 func (h *ResponseHeader) peek(key []byte) []byte {
@@ -1935,8 +1937,8 @@ func (h *RequestHeader) peek(key []byte) []byte {
 // Any future calls to the Peek* will modify the returned value.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) PeekAll(key string) [][]byte {
-	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
-	return h.peekAll(k)
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	return h.peekAll(h.bufK)
 }
 
 func (h *RequestHeader) peekAll(key []byte) [][]byte {
@@ -1983,8 +1985,8 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 // Any future calls to the Peek* will modify the returned value.
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) PeekAll(key string) [][]byte {
-	k := getHeaderKeyBytes(&h.bufKV, key, h.disableNormalizing)
-	return h.peekAll(k)
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	return h.peekAll(h.bufK)
 }
 
 func (h *ResponseHeader) peekAll(key []byte) [][]byte {
@@ -2412,8 +2414,8 @@ func (h *ResponseHeader) WriteTo(w io.Writer) (int64, error) {
 // either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) Header() []byte {
-	h.bufKV.value = h.AppendBytes(h.bufKV.value[:0])
-	return h.bufKV.value
+	h.bufV = h.AppendBytes(h.bufV[:0])
+	return h.bufV
 }
 
 // writeTrailer writes response trailer to w.
@@ -2430,13 +2432,13 @@ func (h *ResponseHeader) writeTrailer(w *bufio.Writer) error {
 // either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) TrailerHeader() []byte {
-	h.bufKV.value = h.bufKV.value[:0]
+	h.bufV = h.bufV[:0]
 	for _, t := range h.trailer {
 		value := h.peek(t.key)
-		h.bufKV.value = appendHeaderLine(h.bufKV.value, t.key, value)
+		h.bufV = appendHeaderLine(h.bufV, t.key, value)
 	}
-	h.bufKV.value = append(h.bufKV.value, strCRLF...)
-	return h.bufKV.value
+	h.bufV = append(h.bufV, strCRLF...)
+	return h.bufV
 }
 
 // String returns response header representation.
@@ -2544,8 +2546,8 @@ func (h *RequestHeader) WriteTo(w io.Writer) (int64, error) {
 // either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) Header() []byte {
-	h.bufKV.value = h.AppendBytes(h.bufKV.value[:0])
-	return h.bufKV.value
+	h.bufV = h.AppendBytes(h.bufV[:0])
+	return h.bufV
 }
 
 // writeTrailer writes request trailer to w.
@@ -2562,13 +2564,13 @@ func (h *RequestHeader) writeTrailer(w *bufio.Writer) error {
 // either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) TrailerHeader() []byte {
-	h.bufKV.value = h.bufKV.value[:0]
+	h.bufV = h.bufV[:0]
 	for _, t := range h.trailer {
 		value := h.peek(t.key)
-		h.bufKV.value = appendHeaderLine(h.bufKV.value, t.key, value)
+		h.bufV = appendHeaderLine(h.bufV, t.key, value)
 	}
-	h.bufKV.value = append(h.bufKV.value, strCRLF...)
-	return h.bufKV.value
+	h.bufV = append(h.bufV, strCRLF...)
+	return h.bufV
 }
 
 // RawHeaders returns raw header key/value bytes.
@@ -3419,17 +3421,18 @@ func nextLine(b []byte) ([]byte, []byte, error) {
 	return b[:n], b[nNext+1:], nil
 }
 
-func initHeaderKV(kv *argsKV, key, value string, disableNormalizing bool) {
-	kv.key = getHeaderKeyBytes(kv, key, disableNormalizing)
+func initHeaderKV(bufK, bufV []byte, key, value string, disableNormalizing bool) ([]byte, []byte) {
+	bufK = getHeaderKeyBytes(bufK, key, disableNormalizing)
 	// https://tools.ietf.org/html/rfc7230#section-3.2.4
-	kv.value = append(kv.value[:0], value...)
-	kv.value = removeNewLines(kv.value)
+	bufV = append(bufV[:0], value...)
+	bufV = removeNewLines(bufV)
+	return bufK, bufV
 }
 
-func getHeaderKeyBytes(kv *argsKV, key string, disableNormalizing bool) []byte {
-	kv.key = append(kv.key[:0], key...)
-	normalizeHeaderKey(kv.key, disableNormalizing)
-	return kv.key
+func getHeaderKeyBytes(bufK []byte, key string, disableNormalizing bool) []byte {
+	bufK = append(bufK[:0], key...)
+	normalizeHeaderKey(bufK, disableNormalizing)
+	return bufK
 }
 
 func normalizeHeaderValue(ov, ob []byte, headerLength int) (nv, nb []byte, nhl int) {

@@ -1465,8 +1465,10 @@ func TestResponseHeaderCopyTo(t *testing.T) {
 	}
 
 	// flush buf
-	h.bufKV = argsKV{}
-	h1.bufKV = argsKV{}
+	h.bufK = []byte{}
+	h.bufV = []byte{}
+	h1.bufK = []byte{}
+	h1.bufV = []byte{}
 
 	if !reflect.DeepEqual(&h, &h1) {
 		t.Fatalf("ResponseHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", &h, &h1)
@@ -1508,8 +1510,10 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	}
 
 	// flush buf
-	h.bufKV = argsKV{}
-	h1.bufKV = argsKV{}
+	h.bufK = []byte{}
+	h.bufV = []byte{}
+	h1.bufK = []byte{}
+	h1.bufV = []byte{}
 
 	if !reflect.DeepEqual(&h, &h1) {
 		t.Fatalf("RequestHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", &h, &h1)
