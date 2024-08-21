@@ -49,7 +49,7 @@ type workerChan struct {
 }
 
 type workerChanStack struct {
-	head, tail atomic.Pointer[workerChan]
+	head atomic.Pointer[workerChan]
 }
 
 func (s *workerChanStack) push(ch *workerChan) {
@@ -61,9 +61,6 @@ func (s *workerChanStack) push(ch *workerChan) {
 		}
 	}
 
-	if s.tail.Load() == nil {
-		s.tail.Store(ch)
-	}
 }
 func (s *workerChanStack) pop() *workerChan {
 	for {
@@ -73,9 +70,7 @@ func (s *workerChanStack) pop() *workerChan {
 		}
 
 		if s.head.CompareAndSwap(oldHead, oldHead.next) {
-			if s.head.Load() == nil {
-				s.tail.Store(nil)
-			}
+
 			return oldHead
 		}
 	}
@@ -152,9 +147,6 @@ func (wp *workerPool) clean() {
 		}
 	}
 
-	if wp.ready.head.Load() == nil {
-		wp.ready.tail.Store(nil)
-	}
 }
 
 func (wp *workerPool) Serve(c net.Conn) bool {
