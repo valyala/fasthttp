@@ -60,8 +60,8 @@ func (s *workerChanStack) push(ch *workerChan) {
 			break
 		}
 	}
-
 }
+
 func (s *workerChanStack) pop() *workerChan {
 	for {
 		oldHead := s.head.Load()
@@ -70,12 +70,10 @@ func (s *workerChanStack) pop() *workerChan {
 		}
 
 		if s.head.CompareAndSwap(oldHead, oldHead.next) {
-
 			return oldHead
 		}
 	}
 }
-
 func (wp *workerPool) Start() {
 	if wp.stopCh != nil {
 		return
@@ -146,7 +144,6 @@ func (wp *workerPool) clean() {
 			wp.workerChanPool.Put(current)
 		}
 	}
-
 }
 
 func (wp *workerPool) Serve(c net.Conn) bool {
@@ -173,32 +170,27 @@ var workerChanCap = func() int {
 }()
 
 func (wp *workerPool) getCh() *workerChan {
-	var ch *workerChan
-	var createWorker atomic.Bool
+	ch := wp.ready.pop()
+	if ch != nil {
+		return ch
+	}
 
-	ch = wp.ready.pop()
-	if ch == nil {
-		for {
-			currentworkers := atomic.LoadInt32(&wp.workersCount)
-			if currentworkers >= int32(wp.MaxWorkersCount) {
-				break
+	for {
+		currentWorkers := atomic.LoadInt32(&wp.workersCount)
+		if currentWorkers < int32(wp.MaxWorkersCount) {
+			if atomic.CompareAndSwapInt32(&wp.workersCount, currentWorkers, currentWorkers+1) {
+				ch = wp.workerChanPool.Get().(*workerChan)
+				go func() {
+					wp.workerFunc(ch)
+					wp.workerChanPool.Put(ch)
+				}()
+				return ch
 			}
-			if atomic.CompareAndSwapInt32(&wp.workersCount, currentworkers, currentworkers+1) {
-				createWorker.Store(true)
-				break
-			}
+		} else {
+			break
 		}
 	}
-
-	if ch == nil && createWorker.Load() {
-		vch := wp.workerChanPool.Get()
-		ch = vch.(*workerChan)
-		go func() {
-			wp.workerFunc(ch)
-			wp.workerChanPool.Put(vch)
-		}()
-	}
-	return ch
+	return nil
 }
 
 func (wp *workerPool) release(ch *workerChan) bool {
