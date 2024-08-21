@@ -228,6 +228,13 @@ type Client struct {
 	// By default connection duration is unlimited.
 	MaxConnDuration time.Duration
 
+	// TCPKeepalivePeriod is the duration the connection needs to
+	// remain idle before TCP starts sending keepalive probes.
+	//
+	// This field is only effective when TCPKeepalive is set to true.
+	// A zero value indicates that the operating system's default setting will be used.
+	TCPKeepalivePeriod time.Duration
+
 	// Maximum number of attempts for idempotent calls.
 	//
 	// DefaultMaxIdemponentCallAttempts is used if not set.
@@ -315,6 +322,14 @@ type Client struct {
 
 	// StreamResponseBody enables response body streaming.
 	StreamResponseBody bool
+
+	// Whether the operating system should send tcp keep-alive messages on the tcp connection.
+	//
+	// By default tcp keep-alive connections are disabled.
+	//
+	// This option is used only if default TCP dialer is used,
+	// i.e. if Dial and DialTimeout are blank.
+	TCPKeepalive bool
 }
 
 // Get returns the status code and body of url.
@@ -527,6 +542,8 @@ func (c *Client) Do(req *Request, resp *Response) error {
 				MaxConns:                      c.MaxConnsPerHost,
 				MaxIdleConnDuration:           c.MaxIdleConnDuration,
 				MaxConnDuration:               c.MaxConnDuration,
+				TCPKeepalivePeriod:            c.TCPKeepalivePeriod,
+				TCPKeepalive:                  c.TCPKeepalive,
 				MaxIdemponentCallAttempts:     c.MaxIdemponentCallAttempts,
 				ReadBufferSize:                c.ReadBufferSize,
 				WriteBufferSize:               c.WriteBufferSize,
@@ -796,6 +813,13 @@ type HostClient struct {
 	// By default will not waiting, return ErrNoFreeConns immediately
 	MaxConnWaitTimeout time.Duration
 
+	// TCPKeepalivePeriod is the duration the connection needs to
+	// remain idle before TCP starts sending keepalive probes.
+	//
+	// This field is only effective when TCPKeepalive is set to true.
+	// A zero value indicates that the operating system's default setting will be used.
+	TCPKeepalivePeriod time.Duration
+
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
 
@@ -871,6 +895,16 @@ type HostClient struct {
 	StreamResponseBody bool
 
 	connsCleanerRun bool
+
+	// Whether to enable tcp keep-alive connections.
+	//
+	// Whether the operating system should send tcp keep-alive messages on the tcp connection.
+	//
+	// By default tcp keep-alive connections are disabled.
+	//
+	// This option is used only if default TCP dialer is used,
+	// i.e. if Dial and DialTimeout are blank.
+	TCPKeepalive bool
 }
 
 type clientConn struct {
@@ -1886,6 +1920,22 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 	// use dialTimeout to control the timeout of each dial. It does not work if dialTimeout is 0 or if
 	// c.DialTimeout has not been set and c.Dial has been set.
 	// attempt to dial all the available hosts before giving up.
+	if c.Dial == nil && c.DialTimeout == nil && c.TCPKeepalive {
+		d := &TCPDialer{Concurrency: defaultDialer.Concurrency, TCPKeepalive: true, TCPKeepalivePeriod: c.TCPKeepalivePeriod}
+		if dialTimeout > 0 {
+			if c.DialDualStack {
+				c.DialTimeout = d.DialDualStackTimeout
+			} else {
+				c.DialTimeout = d.DialTimeout
+			}
+		} else {
+			if c.DialDualStack {
+				c.Dial = d.DialDualStack
+			} else {
+				c.Dial = d.Dial
+			}
+		}
+	}
 
 	c.addrsLock.Lock()
 	n := len(c.addrs)
@@ -2326,6 +2376,12 @@ type pipelineConnClient struct {
 	WriteBufferSize     int
 	ReadTimeout         time.Duration
 	WriteTimeout        time.Duration
+	// TCPKeepalivePeriod is the duration the connection needs to
+	// remain idle before TCP starts sending keepalive probes.
+	//
+	// This field is only effective when TCPKeepalive is set to true.
+	// A zero value indicates that the operating system's default setting will be used.
+	TCPKeepalivePeriod time.Duration
 
 	chLock sync.Mutex
 
@@ -2335,6 +2391,14 @@ type pipelineConnClient struct {
 	DisableHeaderNamesNormalizing bool
 	DisablePathNormalizing        bool
 	IsTLS                         bool
+
+	// Whether the operating system should send tcp keep-alive messages on the tcp connection.
+	//
+	// By default tcp keep-alive connections are disabled.
+	//
+	// This option is used only if default TCP dialer is used,
+	// i.e. if Dial is blank.
+	TCPKeepalive bool
 }
 
 type pipelineWork struct {
@@ -2666,6 +2730,14 @@ func (c *pipelineConnClient) init() {
 
 func (c *pipelineConnClient) worker() error {
 	tlsConfig := c.cachedTLSConfig()
+	if c.TCPKeepalive && c.Dial == nil {
+		d := &TCPDialer{Concurrency: defaultDialer.Concurrency, TCPKeepalive: true, TCPKeepalivePeriod: c.TCPKeepalivePeriod}
+		if c.DialDualStack {
+			c.Dial = d.DialDualStack
+		} else {
+			c.Dial = d.Dial
+		}
+	}
 	conn, err := dialAddr(c.Addr, c.Dial, nil, c.DialDualStack, c.IsTLS, tlsConfig, 0, c.WriteTimeout)
 	if err != nil {
 		return err
