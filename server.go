@@ -1597,14 +1597,14 @@ func (s *Server) NextProto(key string, nph ServeHandler) {
 func (s *Server) getNextProto(c net.Conn) (proto string, err error) {
 	if tlsConn, ok := c.(connTLSer); ok {
 		if s.ReadTimeout > 0 {
-			if err := c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetReadDeadline(%v): %v", s.ReadTimeout, err))
+			if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
+				return
 			}
 		}
 
 		if s.WriteTimeout > 0 {
-			if err := c.SetWriteDeadline(time.Now().Add(s.WriteTimeout)); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%v): %v", s.WriteTimeout, err))
+			if err = c.SetWriteDeadline(time.Now().Add(s.WriteTimeout)); err != nil {
+				return
 			}
 		}
 
@@ -2137,8 +2137,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		// Remove read or write deadlines that might have previously been set.
 		// The next handler is responsible for setting its own deadlines.
 		if s.ReadTimeout > 0 || s.WriteTimeout > 0 {
-			if err := c.SetDeadline(zeroTime); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetDeadline(zeroTime): %v", err))
+			if err = c.SetDeadline(zeroTime); err != nil {
+				return
 			}
 		}
 
@@ -2177,7 +2177,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		// If this is a keep-alive connection set the idle timeout.
 		if connRequestNum > 1 {
 			if d := s.idleTimeout(); d > 0 {
-				if err := c.SetReadDeadline(time.Now().Add(d)); err != nil {
+				if err = c.SetReadDeadline(time.Now().Add(d)); err != nil {
 					break
 				}
 			}
@@ -2221,13 +2221,13 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			s.setState(c, StateActive)
 
 			if s.ReadTimeout > 0 {
-				if err := c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
+				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					break
 				}
 			} else if s.IdleTimeout > 0 && connRequestNum > 1 {
 				// If this was an idle connection and the server has an IdleTimeout but
 				// no ReadTimeout then we should remove the ReadTimeout.
-				if err := c.SetReadDeadline(zeroTime); err != nil {
+				if err = c.SetReadDeadline(zeroTime); err != nil {
 					break
 				}
 			}
@@ -2261,8 +2261,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					reqConf := onHdrRecv(&ctx.Request.Header)
 					if reqConf.ReadTimeout > 0 {
 						deadline := time.Now().Add(reqConf.ReadTimeout)
-						if err := c.SetReadDeadline(deadline); err != nil {
-							panic(fmt.Sprintf("BUG: error in SetReadDeadline(%v): %v", deadline, err))
+						if err = c.SetReadDeadline(deadline); err != nil {
+							break
 						}
 					}
 					switch {
@@ -2401,14 +2401,14 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		ctx.hijackNoResponse = false
 
 		if writeTimeout > 0 {
-			if err := c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(%v): %v", writeTimeout, err))
+			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+				break
 			}
 			previousWriteTimeout = writeTimeout
 		} else if previousWriteTimeout > 0 {
 			// We don't want a write timeout but we previously set one, remove it.
-			if err := c.SetWriteDeadline(zeroTime); err != nil {
-				panic(fmt.Sprintf("BUG: error in SetWriteDeadline(zeroTime): %v", err))
+			if err = c.SetWriteDeadline(zeroTime); err != nil {
+				break
 			}
 			previousWriteTimeout = 0
 		}
