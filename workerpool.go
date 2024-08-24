@@ -74,6 +74,7 @@ func (s *workerChanStack) pop() *workerChan {
 		}
 	}
 }
+
 func (wp *workerPool) Start() {
 	if wp.stopCh != nil {
 		return
