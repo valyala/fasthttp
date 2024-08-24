@@ -118,7 +118,6 @@ func (wp *workerPool) Stop() {
 		ch.ch <- nil
 	}
 	wp.mustStop.Store(true)
-
 }
 
 func (wp *workerPool) getMaxIdleWorkerDuration() time.Duration {
