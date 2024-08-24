@@ -194,7 +194,6 @@ func (wp *workerPool) release(ch *workerChan) bool {
 	if wp.mustStop.Load() {
 		return false
 	}
-
 	wp.ready.push(ch)
 	return true
 }
