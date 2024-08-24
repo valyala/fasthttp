@@ -133,7 +133,7 @@ func (wp *workerPool) clean() {
 
 	for {
 		current := wp.ready.head.Load()
-		if current == nil || current.lastUseTime >= criticalTime {
+		if current == nil || atomic.LoadInt64(&current.lastUseTime) >= criticalTime {
 			break
 		}
 
@@ -190,7 +190,7 @@ func (wp *workerPool) getCh() *workerChan {
 }
 
 func (wp *workerPool) release(ch *workerChan) bool {
-	ch.lastUseTime = time.Now().UnixNano()
+	atomic.StoreInt64(&ch.lastUseTime, time.Now().UnixNano())
 	if wp.mustStop.Load() {
 		return false
 	}
