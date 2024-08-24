@@ -87,7 +87,6 @@ func (wp *workerPool) Start() {
 		}
 	}
 	go func() {
-
 		for {
 			wp.clean()
 			select {
