@@ -655,10 +655,12 @@ type DialFunc func(addr string) (net.Conn, error)
 //   - foobar.com:8080
 type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, error)
 
+// RetryIfFunc defines the signature of the retry if function.
 // Request argument passed to RetryIfFunc, if there are any request errors.
 type RetryIfFunc func(request *Request) bool
 
-// request and error passed to RetryIfFunc, if there are any request errors.
+// RetryIfErrFunc defines the signature of the retry if error function.
+// request and error passed to RetryIfErrFunc, if there are any request errors.
 type RetryIfErrFunc func(request *Request, err error) bool
 
 // RoundTripper wraps every request/response.
@@ -1328,11 +1330,12 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 			break
 		}
 
-		if c.RetryIf != nil {
+		switch {
+		case c.RetryIf != nil:
 			retry = c.RetryIf(req)
-		} else if c.RetryIfErr != nil {
+		case c.RetryIfErr != nil:
 			retry = c.RetryIfErr(req, err)
-		} else {
+		default:
 			retry = isIdempotent(req)
 		}
 
