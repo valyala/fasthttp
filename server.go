@@ -2286,8 +2286,9 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 					err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
 				}
 			}
-
-			if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
+			// When StreamRequestBody is set to true, we cannot safely release br.
+			// For example, when using chunked encoding, it's possible that br has only read the request headers.
+			if (!s.StreamRequestBody && s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
 				releaseReader(s, br)
 				br = nil
 			}
@@ -2358,7 +2359,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 				} else {
 					err = ctx.Request.ContinueReadBody(br, maxRequestBodySize, !s.DisablePreParseMultipartForm)
 				}
-				if (s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
+				if (!s.StreamRequestBody && s.ReduceMemoryUsage && br.Buffered() == 0) || err != nil {
 					releaseReader(s, br)
 					br = nil
 				}
