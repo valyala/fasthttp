@@ -197,9 +197,15 @@ type Client struct {
 	TLSConfig *tls.Config
 
 	// RetryIf controls whether a retry should be attempted after an error.
+	// By default, it uses the isIdempotent function.
 	//
-	// By default will use isIdempotent function.
+	// Deprecated: Use RetryIfErr instead.
+	// Panics if both RetryIf and RetryIfErr are set.
 	RetryIf RetryIfFunc
+
+	// RetryIfErr controls whether a retry should be attempted after an error.
+	// By default, it uses the isIdempotent function.
+	RetryIfErr RetryIfErrFunc
 
 	// ConfigureClient configures the fasthttp.HostClient.
 	ConfigureClient func(hc *HostClient) error
@@ -537,6 +543,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 				DisablePathNormalizing:        c.DisablePathNormalizing,
 				MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
 				RetryIf:                       c.RetryIf,
+				RetryIfErr:                    c.RetryIfErr,
 				ConnPoolStrategy:              c.ConnPoolStrategy,
 				StreamResponseBody:            c.StreamResponseBody,
 				clientReaderPool:              &c.readerPool,

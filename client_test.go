@@ -2156,7 +2156,7 @@ func TestClientRetryRequestWithCustomDecider(t *testing.T) {
 				return nil, fmt.Errorf("unexpected number of dials: %d", dialsCount)
 			}
 		},
-		RetryIf: func(req *Request) bool {
+		RetryIfErr: func(req *Request, err error) bool {
 			return req.URI().String() == "http://foobar/a/b"
 		},
 	}
