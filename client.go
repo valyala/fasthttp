@@ -655,15 +655,11 @@ type DialFunc func(addr string) (net.Conn, error)
 //   - foobar.com:8080
 type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, error)
 
-// RetryIfFunc signature of retry if function.
-// request or error are passed to the RetryIfFunc if there are any request errors.
-//
-// There are 3 types the RetryIfFunc supports: (issue #1744)
-//
-//   - func(request *Request) bool
-//   - func(err error) bool
-//   - func(request *Request, err error) bool
-type RetryIfFunc any
+// Request argument passed to RetryIfFunc, if there are any request errors.
+type RetryIfFunc func(request *Request) bool
+
+// request and error passed to RetryIfFunc, if there are any request errors.
+type RetryIfErrFunc func(request *Request, err error) bool
 
 // RoundTripper wraps every request/response.
 type RoundTripper interface {
@@ -714,9 +710,15 @@ type HostClient struct {
 	TLSConfig *tls.Config
 
 	// RetryIf controls whether a retry should be attempted after an error.
+	// By default, it uses the isIdempotent function.
 	//
-	// By default will use isIdempotent function
+	// Deprecated: Use RetryIfErr instead.
+	// Panics if both RetryIf and RetryIfErr are set.
 	RetryIf RetryIfFunc
+
+	// RetryIfErr controls whether a retry should be attempted after an error.
+	// By default, it uses the isIdempotent function.
+	RetryIfErr RetryIfErrFunc
 
 	connsWait *wantConnQueue
 
@@ -1283,14 +1285,15 @@ func (c *HostClient) DoRedirects(req *Request, resp *Response, maxRedirectsCount
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	var err error
 	var retry bool
+	// Based on issue #1744, we added the RetryIfErr field.
+	// To avoid ambiguous semantics due to mixed usage,
+	// only one of the fields can be set at a time.
+	if c.RetryIf != nil && c.RetryIfErr != nil {
+		panic("RetryIf and RetryIfErr must not be set at the same time")
+	}
 	maxAttempts := c.MaxIdemponentCallAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultMaxIdemponentCallAttempts
-	}
-	var isRequestRetryable RetryIfFunc
-	isRequestRetryable = isIdempotent
-	if c.RetryIf != nil {
-		isRequestRetryable = c.RetryIf
 	}
 	attempts := 0
 	hasBodyStream := req.IsBodyStream()
@@ -1325,16 +1328,14 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 			break
 		}
 
-		switch f := isRequestRetryable.(type) {
-		case func(*Request) bool:
-			retry = f(req)
-		case func(error) bool:
-			retry = f(err)
-		case func(*Request, error) bool:
-			retry = f(req, err)
-		default:
-			panic("Unexpected RetryIfFunc")
+		if c.RetryIf != nil {
+			retry = c.RetryIf(req)
+		} else if c.RetryIfErr != nil {
+			retry = c.RetryIfErr(req, err)
+		} else {
+			retry = isIdempotent(req)
 		}
+
 		if !retry {
 			// Retry non-idempotent requests if the server closes
 			// the connection before sending the response.
