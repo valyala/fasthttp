@@ -140,7 +140,6 @@ func (wp *workerPool) clean() {
 		next := current.next
 		if wp.ready.head.CompareAndSwap(current, next) {
 			current.ch <- nil
-			wp.workerChanPool.Put(current)
 		}
 	}
 }
@@ -179,7 +178,10 @@ func (wp *workerPool) getCh() *workerChan {
 		if currentWorkers < int32(wp.MaxWorkersCount) {
 			if atomic.CompareAndSwapInt32(&wp.workersCount, currentWorkers, currentWorkers+1) {
 				ch = wp.workerChanPool.Get().(*workerChan)
-				go wp.workerFunc(ch)
+				go func() {
+					wp.workerFunc(ch)
+					wp.workerChanPool.Put(ch)
+				}()
 				return ch
 			}
 		} else {
