@@ -1465,8 +1465,10 @@ func TestResponseHeaderCopyTo(t *testing.T) {
 	}
 
 	// flush buf
-	h.bufKV = argsKV{}
-	h1.bufKV = argsKV{}
+	h.bufK = []byte{}
+	h.bufV = []byte{}
+	h1.bufK = []byte{}
+	h1.bufV = []byte{}
 
 	if !reflect.DeepEqual(&h, &h1) {
 		t.Fatalf("ResponseHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", &h, &h1)
@@ -1508,8 +1510,10 @@ func TestRequestHeaderCopyTo(t *testing.T) {
 	}
 
 	// flush buf
-	h.bufKV = argsKV{}
-	h1.bufKV = argsKV{}
+	h.bufK = []byte{}
+	h.bufV = []byte{}
+	h1.bufK = []byte{}
+	h1.bufV = []byte{}
 
 	if !reflect.DeepEqual(&h, &h1) {
 		t.Fatalf("RequestHeaderCopyTo fail, src: \n%+v\ndst: \n%+v\n", &h, &h1)
@@ -2961,6 +2965,8 @@ func verifyRequestHeader(t *testing.T, h *RequestHeader, expectedContentLength i
 }
 
 func verifyResponseTrailer(t *testing.T, h *ResponseHeader, expectedTrailers map[string]string) {
+	t.Helper()
+
 	for k, v := range expectedTrailers {
 		got := h.Peek(k)
 		if !bytes.Equal(got, []byte(v)) {

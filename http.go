@@ -1446,7 +1446,8 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		}
 	}
 
-	if resp.Header.ContentLength() == -1 && !resp.StreamBody {
+	// A response without a body can't have trailers.
+	if resp.Header.ContentLength() == -1 && !resp.StreamBody && !resp.mustSkipBody() {
 		err = resp.Header.ReadTrailer(r)
 		if err != nil && err != io.EOF {
 			if isConnectionReset(err) {
@@ -1600,10 +1601,10 @@ func (req *Request) Write(w *bufio.Writer) error {
 			nl := len(uri.username) + len(uri.password) + 1
 			nb := nl + len(strBasicSpace)
 			tl := nb + base64.StdEncoding.EncodedLen(nl)
-			if tl > cap(req.Header.bufKV.value) {
-				req.Header.bufKV.value = make([]byte, 0, tl)
+			if tl > cap(req.Header.bufV) {
+				req.Header.bufV = make([]byte, 0, tl)
 			}
-			buf := req.Header.bufKV.value[:0]
+			buf := req.Header.bufV[:0]
 			buf = append(buf, uri.username...)
 			buf = append(buf, strColon...)
 			buf = append(buf, uri.password...)
@@ -2283,12 +2284,13 @@ func readBodyWithStreaming(r *bufio.Reader, contentLength, maxBodySize int, dst 
 		readN = 8 * 1024
 	}
 
-	if contentLength >= 0 && maxBodySize >= contentLength {
-		b, err = appendBodyFixedSize(r, dst, readN)
-	} else {
-		b, err = readBodyIdentity(r, readN, dst)
-	}
-
+	// A fixed-length pre-read function should be used here; otherwise,
+	// it may read content beyond the request body into areas outside
+	// the br buffer. This could affect the handling of the next request
+	// in the br buffer, if there is one. The original two branches can
+	// be handled with this single branch. by the way,
+	// fix issue: https://github.com/valyala/fasthttp/issues/1816
+	b, err = appendBodyFixedSize(r, dst, readN)
 	if err != nil {
 		return b, err
 	}
