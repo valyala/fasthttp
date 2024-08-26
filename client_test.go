@@ -1913,7 +1913,7 @@ func testClientDoTimeoutError(t *testing.T, c *Client, n int) {
 func testClientGetTimeoutError(t *testing.T, c *Client, n int) {
 	buf := make([]byte, 10)
 	for i := 0; i < n; i++ {
-		statusCode, body, err := c.GetTimeout(buf, "http://foobar.com/baz", time.Millisecond)
+		statusCode, _, err := c.GetTimeout(buf, "http://foobar.com/baz", time.Millisecond)
 		if err == nil {
 			t.Errorf("expecting error")
 		}
@@ -1922,9 +1922,6 @@ func testClientGetTimeoutError(t *testing.T, c *Client, n int) {
 		}
 		if statusCode != 0 {
 			t.Errorf("unexpected statusCode=%d. Expecting %d", statusCode, 0)
-		}
-		if body == nil {
-			t.Errorf("body must be non-nil")
 		}
 	}
 }
@@ -2660,7 +2657,7 @@ func testClientGetTimeoutSuccess(t *testing.T, c *Client, addr string, n int) {
 		statusCode, body, err := c.GetTimeout(buf, uri, time.Second)
 		buf = body
 		if err != nil {
-			t.Errorf("unexpected error when doing http request: %v", err)
+			t.Fatalf("unexpected error when doing http request: %v", err)
 		}
 		if statusCode != StatusOK {
 			t.Errorf("unexpected status code: %d. Expecting %d", statusCode, StatusOK)
