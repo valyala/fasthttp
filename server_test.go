@@ -4141,7 +4141,10 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 		// write body
 		for i := 0; i < 5*1024; i++ {
 			time.Sleep(time.Millisecond)
-			cc.Write([]byte{'a'}) //nolint:errcheck
+			_, err = cc.Write([]byte{'a'})
+			if err != nil {
+				return
+			}
 		}
 	}()
 	ch := make(chan error)
@@ -4168,7 +4171,10 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 			ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
 				var buf [192]byte
 				for {
-					w.Write(buf[:]) //nolint:errcheck
+					_, err := w.Write(buf[:])
+					if err != nil {
+						return
+					}
 				}
 			})
 		},
@@ -4201,7 +4207,10 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 		var chunk [192]byte
 		for {
 			time.Sleep(time.Millisecond)
-			br.Read(chunk[:]) //nolint:errcheck
+			_, err = br.Read(chunk[:])
+			if err != nil {
+				return
+			}
 		}
 	}()
 	ch := make(chan error)
