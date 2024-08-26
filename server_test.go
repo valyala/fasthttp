@@ -3836,13 +3836,14 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 }
 
 func TestShutdownWithContext(t *testing.T) {
+	t.Parallel()
 	done := make(chan struct{})
+	defer close(done)
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			time.Sleep(4 * time.Second)
+			<-done
 			ctx.Success("aaa/bbb", []byte("real response"))
-			close(done)
 		},
 	}
 	go func() {
@@ -3885,7 +3886,6 @@ func TestShutdownWithContext(t *testing.T) {
 	if o := atomic.LoadInt32(&s.open); o != 1 {
 		t.Fatalf("unexpected open connection num: %#v. Expecting %#v", o, 1)
 	}
-	<-done
 }
 
 func TestMultipleServe(t *testing.T) {
