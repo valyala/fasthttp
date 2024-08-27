@@ -199,7 +199,16 @@ type Client struct {
 	// RetryIf controls whether a retry should be attempted after an error.
 	//
 	// By default will use isIdempotent function.
+	//
+	// Deprecated: Use RetryIfErr instead.
+	// This field is only effective when the `RetryIfErr` field is not set.
 	RetryIf RetryIfFunc
+
+	// When the client encounters an error during a request, the behavior—whether to retry,
+	// whether to retry later, or whether to reset the request timeout—should be determined
+	// based on the return value of this field.
+	// This field is only effective within the range of MaxIdemponentCallAttempts.
+	RetryIfErr RetryIfErrFunc
 
 	// ConfigureClient configures the fasthttp.HostClient.
 	ConfigureClient func(hc *HostClient) error
@@ -537,6 +546,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 				DisablePathNormalizing:        c.DisablePathNormalizing,
 				MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
 				RetryIf:                       c.RetryIf,
+				RetryIfErr:                    c.RetryIfErr,
 				ConnPoolStrategy:              c.ConnPoolStrategy,
 				StreamResponseBody:            c.StreamResponseBody,
 				clientReaderPool:              &c.readerPool,
@@ -659,9 +669,23 @@ type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, err
 // Request argument passed to RetryIfFunc, if there are any request errors.
 type RetryIfFunc func(request *Request) bool
 
-// RetryIfErrFunc defines the signature of the retry if error function.
-// request and error passed to RetryIfErrFunc, if there are any request errors.
-type RetryIfErrFunc func(request *Request, err error) bool
+// RetryIfErrFunc defines an interface used for implementing the following functionality:
+// When the client encounters an error during a request, the behavior—whether to retry,
+// or whether to reset the request timeout—should be determined
+// based on the return value of this interface.
+//
+// attempt indicates which attempt the current retry is due to a failure of.
+// The first request counts as the first attempt.
+//
+// err represents the error encountered while attempting the `attempts`-th request.
+//
+// resetTimeout indicates whether to reuse the `Request`'s timeout as the timeout interval,
+// rather than using the timeout after subtracting the time spent on previous failed requests.
+// This return value is meaningful only when you use `Request.SetTimeout`, `DoTimeout`, or `DoDeadline`.
+//
+// retry indicates whether to retry the current request. If it is false,
+// the request function will immediately return with the `err`.
+type RetryIfErrFunc func(request *Request, attempts int, err error) (resetTimeout bool, retry bool)
 
 // RoundTripper wraps every request/response.
 type RoundTripper interface {
@@ -715,12 +739,16 @@ type HostClient struct {
 	// By default, it uses the isIdempotent function.
 	//
 	// Deprecated: Use RetryIfErr instead.
-	// Panics if both RetryIf and RetryIfErr are set.
+	// This field is only effective when the `RetryIfErr` field is not set.
 	RetryIf RetryIfFunc
 
-	// RetryIfErr controls whether a retry should be attempted after an error.
-	// By default, it uses the isIdempotent function.
+	// When the client encounters an error during a request, the behavior—whether to retry,
+	// or whether to reset the request timeout—should be determined
+	// based on the return value of this field.
+	// This field is only effective within the range of MaxIdemponentCallAttempts.
 	RetryIfErr RetryIfErrFunc
+	// Whether the timeout resets before retrying.
+	RetryResetTimeout bool
 
 	connsWait *wantConnQueue
 
@@ -768,7 +796,10 @@ type HostClient struct {
 
 	// Maximum number of attempts for idempotent calls.
 	//
-	// DefaultMaxIdemponentCallAttempts is used if not set.
+	// A value of 0 or a negative value represents using DefaultMaxIdemponentCallAttempts.
+	// For example, a value of 1 means the request will be executed only once,
+	// while 2 means the request will be executed at most twice.
+	// The RetryIfErr and RetryIf fields can invalidate remaining attempts.
 	MaxIdemponentCallAttempts int
 
 	// Per-connection buffer size for responses' reading.
@@ -1285,14 +1316,11 @@ func (c *HostClient) DoRedirects(req *Request, resp *Response, maxRedirectsCount
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) Do(req *Request, resp *Response) error {
-	var err error
-	var retry bool
-	// Based on issue #1744, we added the RetryIfErr field.
-	// To avoid ambiguous semantics due to mixed usage,
-	// only one of the fields can be set at a time.
-	if c.RetryIf != nil && c.RetryIfErr != nil {
-		panic("RetryIf and RetryIfErr must not be set at the same time")
-	}
+	var (
+		err          error
+		retry        bool
+		resetTimeout bool
+	)
 	maxAttempts := c.MaxIdemponentCallAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultMaxIdemponentCallAttempts
@@ -1307,6 +1335,10 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	timeout := req.timeout
 	if timeout > 0 {
 		deadline = time.Now().Add(timeout)
+	}
+	retryFunc := c.RetryIf
+	if retryFunc == nil {
+		retryFunc = isIdempotent
 	}
 
 	atomic.AddInt32(&c.pendingRequests, 1)
@@ -1329,31 +1361,22 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		if hasBodyStream {
 			break
 		}
-
-		switch {
-		case c.RetryIf != nil:
-			retry = c.RetryIf(req)
-		case c.RetryIfErr != nil:
-			retry = c.RetryIfErr(req, err)
-		default:
-			retry = isIdempotent(req)
-		}
-
-		if !retry {
-			// Retry non-idempotent requests if the server closes
-			// the connection before sending the response.
-			//
-			// This case is possible if the server closes the idle
-			// keep-alive connection on timeout.
-			//
-			// Apache and nginx usually do this.
-			if err != io.EOF {
-				break
-			}
-		}
+		// Path prioritization based on ease of computation
 		attempts++
+
 		if attempts >= maxAttempts {
 			break
+		}
+		if c.RetryIfErr != nil {
+			resetTimeout, retry = c.RetryIfErr(req, attempts, err)
+		} else {
+			retry = retryFunc(req)
+		}
+		if !retry {
+			break
+		}
+		if timeout > 0 && resetTimeout {
+			deadline = time.Now().Add(timeout)
 		}
 	}
 	atomic.AddInt32(&c.pendingRequests, -1)
