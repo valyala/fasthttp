@@ -2989,8 +2989,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		err = ErrTimeout
 	}
 
-	isConnRST := isConnectionReset(err)
-	if err != nil && !isConnRST {
+	if err != nil {
 		hc.closeConn(cc)
 		return true, err
 	}
@@ -3025,7 +3024,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		return needRetry, err
 	}
 
-	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose() || isConnRST
+	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
 	if customStreamBody && resp.bodyStream != nil {
 		rbs := resp.bodyStream
 		resp.bodyStream = newCloseReaderWithError(rbs, func(wErr error) error {
