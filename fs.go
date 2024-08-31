@@ -1022,7 +1022,6 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		path = ctx.Path()
 	}
 	hasTrailingSlash := len(path) > 0 && path[len(path)-1] == '/'
-	path = stripTrailingSlashes(path)
 
 	if n := bytes.IndexByte(path, 0); n >= 0 {
 		ctx.Logger().Printf("cannot serve path with nil byte at position %d: %q", n, path)
@@ -1061,9 +1060,13 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	pathStr := string(path)
+	originalPathStr := string(path)
+	pathStr := originalPathStr
+	if hasTrailingSlash {
+		pathStr = originalPathStr[:len(originalPathStr)-1]
+	}
 
-	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, pathStr)
+	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, originalPathStr)
 	if !ok {
 		filePath := h.pathToFilePath(pathStr)
 
@@ -1098,7 +1101,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			return
 		}
 
-		ff = h.cacheManager.SetFileToCache(fileCacheKind, pathStr, ff)
+		ff = h.cacheManager.SetFileToCache(fileCacheKind, originalPathStr, ff)
 	}
 
 	if !ctx.IfModifiedSince(ff.lastModified) {
