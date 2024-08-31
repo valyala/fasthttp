@@ -1432,6 +1432,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 						continue
 					}
 					t.Errorf("unexpected error: %v", err)
+					return
 				}
 				break
 			}
