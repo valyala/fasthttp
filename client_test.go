@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -3530,4 +3532,71 @@ func TestClientHeadWithBody(t *testing.T) {
 	} else if err != ErrTimeout {
 		t.Error(err)
 	}
+}
+
+func TestRevertPull1233(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+	t.Parallel()
+	const expectedStatus = http.StatusTeapot
+	ln, err := net.Listen("tcp", "127.0.0.1:8089")
+	defer func() { ln.Close() }()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				if !strings.Contains(err.Error(), "closed") {
+					t.Errorf(err.Error())
+				}
+				return
+			}
+			_, err = conn.Write([]byte("HTTP/1.1 418 Teapot\r\n\r\n"))
+			if err != nil {
+				t.Error(err)
+			}
+			err = conn.(*net.TCPConn).SetLinger(0)
+			if err != nil {
+				t.Errorf(err.Error())
+			}
+			conn.Close()
+		}
+	}()
+
+	reqURL := "http://" + ln.Addr().String()
+	reqStrBody := "hello 2323 23323 2323 2323 232323 323 2323 2333333 hello 2323 23323 2323 2323 232323 323 2323 2333333 hello 2323 23323 2323 2323 232323 323 2323 2333333 hello 2323 23323 2323 2323 232323 323 2323 2333333 hello 2323 23323 2323 2323 232323 323 2323 2333333"
+	req2 := AcquireRequest()
+	resp2 := AcquireResponse()
+	defer func() {
+		ReleaseRequest(req2)
+		ReleaseResponse(resp2)
+	}()
+	req2.SetRequestURI(reqURL)
+	req2.SetBodyStream(F{strings.NewReader(reqStrBody)}, -1)
+	cli2 := Client{}
+	err = cli2.Do(req2, resp2)
+	if !errors.Is(err, syscall.EPIPE) && !errors.Is(err, syscall.ECONNRESET) {
+		t.Errorf("expected error %v or %v, but got nil", syscall.EPIPE, syscall.ECONNRESET)
+	}
+	if expectedStatus == resp2.StatusCode() {
+		t.Errorf("Not Expected status code %d", resp2.StatusCode())
+	}
+}
+
+type F struct {
+	*strings.Reader
+}
+
+func (f F) Read(p []byte) (n int, err error) {
+	if len(p) > 10 {
+		p = p[:10]
+	}
+	// Ensure that subsequent segments can see the RST packet caused by sending previous
+	// segments to a closed connection.
+	time.Sleep(500 * time.Microsecond)
+	return f.Reader.Read(p)
 }
