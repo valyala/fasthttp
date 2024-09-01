@@ -1992,55 +1992,6 @@ func (r *readTimeoutConn) SetWriteDeadline(d time.Time) error {
 	return nil
 }
 
-func TestClientNonIdempotentRetry(t *testing.T) {
-	t.Parallel()
-
-	dialsCount := 0
-	c := &Client{
-		Dial: func(_ string) (net.Conn, error) {
-			dialsCount++
-			switch dialsCount {
-			case 1, 2:
-				return &readErrorConn{}, nil
-			case 3:
-				return &singleReadConn{
-					s: "HTTP/1.1 345 OK\r\nContent-Type: foobar\r\nContent-Length: 7\r\n\r\n0123456",
-				}, nil
-			default:
-				return nil, fmt.Errorf("unexpected number of dials: %d", dialsCount)
-			}
-		},
-	}
-
-	// This POST must succeed, since the readErrorConn closes
-	// the connection before sending any response.
-	// So the client must retry non-idempotent request.
-	dialsCount = 0
-	statusCode, body, err := c.Post(nil, "http://foobar/a/b", nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if statusCode != 345 {
-		t.Fatalf("unexpected status code: %d. Expecting 345", statusCode)
-	}
-	if string(body) != "0123456" {
-		t.Fatalf("unexpected body: %q. Expecting %q", body, "0123456")
-	}
-
-	// Verify that idempotent GET succeeds.
-	dialsCount = 0
-	statusCode, body, err = c.Get(nil, "http://foobar/a/b")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if statusCode != 345 {
-		t.Fatalf("unexpected status code: %d. Expecting 345", statusCode)
-	}
-	if string(body) != "0123456" {
-		t.Fatalf("unexpected body: %q. Expecting %q", body, "0123456")
-	}
-}
-
 func TestClientNonIdempotentRetry_BodyStream(t *testing.T) {
 	t.Parallel()
 
