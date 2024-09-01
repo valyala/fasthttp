@@ -204,8 +204,8 @@ type Client struct {
 	// This field is only effective when the `RetryIfErr` field is not set.
 	RetryIf RetryIfFunc
 
-	// When the client encounters an error during a request, the behavior—whether to retry,
-	// whether to retry later, or whether to reset the request timeout—should be determined
+	// When the client encounters an error during a request, the behavior—whether to retry
+	// and whether to reset the request timeout—should be determined
 	// based on the return value of this field.
 	// This field is only effective within the range of MaxIdemponentCallAttempts.
 	RetryIfErr RetryIfErrFunc
@@ -670,8 +670,8 @@ type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, err
 type RetryIfFunc func(request *Request) bool
 
 // RetryIfErrFunc defines an interface used for implementing the following functionality:
-// When the client encounters an error during a request, the behavior—whether to retry,
-// or whether to reset the request timeout—should be determined
+// When the client encounters an error during a request, the behavior—whether to retry
+// and whether to reset the request timeout—should be determined
 // based on the return value of this interface.
 //
 // attempt indicates which attempt the current retry is due to a failure of.
@@ -742,13 +742,11 @@ type HostClient struct {
 	// This field is only effective when the `RetryIfErr` field is not set.
 	RetryIf RetryIfFunc
 
-	// When the client encounters an error during a request, the behavior—whether to retry,
-	// or whether to reset the request timeout—should be determined
+	// When the client encounters an error during a request, the behavior—whether to retry
+	// and whether to reset the request timeout—should be determined
 	// based on the return value of this field.
 	// This field is only effective within the range of MaxIdemponentCallAttempts.
 	RetryIfErr RetryIfErrFunc
-	// Whether the timeout resets before retrying.
-	RetryResetTimeout bool
 
 	connsWait *wantConnQueue
 
