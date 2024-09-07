@@ -607,7 +607,6 @@ func (c *Client) mCleaner(m map[string]*HostClient) {
 		c.mLock.Lock()
 		for k, v := range m {
 			v.connsLock.Lock()
-			/* #nosec G601 */
 			if v.connsCount == 0 && atomic.LoadInt32(&v.pendingClientRequests) == 0 {
 				delete(m, k)
 			}
@@ -1430,7 +1429,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 
-	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix))
+	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix)) // #nosec G115
 
 	// Free up resources occupied by response before sending the request,
 	// so the GC may reclaim these resources (e.g. response body).
@@ -1917,7 +1916,7 @@ func (c *HostClient) nextAddr() string {
 	}
 	addr := c.addrs[0]
 	if len(c.addrs) > 1 {
-		addr = c.addrs[c.addrIdx%uint32(len(c.addrs))]
+		addr = c.addrs[c.addrIdx%uint32(len(c.addrs))] // #nosec G115
 		c.addrIdx++
 	}
 	c.addrsLock.Unlock()

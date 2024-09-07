@@ -28,7 +28,7 @@ func main() {
 	}
 
 	// Let's Encrypt tls-alpn-01 only works on port 443.
-	ln, err := net.Listen("tcp4", "0.0.0.0:443") /* #nosec G102 */
+	ln, err := net.Listen("tcp4", "0.0.0.0:443") // #nosec G102
 	if err != nil {
 		panic(err)
 	}

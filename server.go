@@ -2034,8 +2034,8 @@ func (s *Server) ServeConn(c net.Conn) error {
 		c = pic
 	}
 
-	n := atomic.AddUint32(&s.concurrency, 1)
-	if n > uint32(s.getConcurrency()) {
+	n := int(atomic.AddUint32(&s.concurrency, 1)) // #nosec G115
+	if n > s.getConcurrency() {
 		atomic.AddUint32(&s.concurrency, ^uint32(0))
 		s.writeFastError(c, StatusServiceUnavailable, "The connection cannot be served because Server.Concurrency limit exceeded")
 		c.Close()
@@ -2415,7 +2415,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		}
 
 		connectionClose = connectionClose ||
-			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) ||
+			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
 			ctx.Response.Header.ConnectionClose() ||
 			(s.CloseOnShutdown && atomic.LoadInt32(&s.stop) == 1)
 		if connectionClose {

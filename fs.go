@@ -1406,7 +1406,7 @@ func (h *fsHandler) compressAndOpenFSFile(filePath, fileEncoding string) (*fsFil
 	}
 
 	if compressedFilePath != filePath {
-		if err := os.MkdirAll(filepath.Dir(compressedFilePath), os.ModePerm); err != nil {
+		if err := os.MkdirAll(filepath.Dir(compressedFilePath), 0o750); err != nil {
 			return nil, err
 		}
 	}

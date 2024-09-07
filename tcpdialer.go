@@ -298,7 +298,7 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 		return nil, err
 	}
 	var conn net.Conn
-	n := uint32(len(addrs))
+	n := uint32(len(addrs)) // #nosec G115
 	for n > 0 {
 		conn, err = d.tryDial(network, addrs[idx%n].String(), deadline, d.concurrencyCh)
 		if err == nil {
