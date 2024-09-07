@@ -12,12 +12,12 @@ func roundUpForSliceCap(n int) int {
 		return n
 	}
 
-	x := uint64(n - 1)
+	x := uint64(n - 1) // #nosec G115
 	x |= x >> 1
 	x |= x >> 2
 	x |= x >> 4
 	x |= x >> 8
 	x |= x >> 16
 
-	return int(x + 1)
+	return int(x + 1) // #nosec G115
 }

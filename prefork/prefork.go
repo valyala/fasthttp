@@ -135,7 +135,7 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 }
 
 func (p *Prefork) doCommand() (*exec.Cmd, error) {
-	/* #nosec G204 */
+	// #nosec G204
 	cmd := exec.Command(os.Args[0], os.Args[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -176,7 +176,7 @@ func (wp *workerPool) getCh() *workerChan {
 		}
 
 		currentWorkers := atomic.LoadInt32(&wp.workersCount)
-		if currentWorkers < int32(wp.MaxWorkersCount) {
+		if int(currentWorkers) < wp.MaxWorkersCount {
 			if atomic.CompareAndSwapInt32(&wp.workersCount, currentWorkers, currentWorkers+1) {
 				ch = wp.workerChanPool.Get().(*workerChan)
 				go wp.workerFunc(ch)
