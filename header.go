@@ -1286,8 +1286,9 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 
 	h.collectCookies()
 	if len(h.cookies) > 0 {
-		h.bufV = appendRequestCookieBytes(h.bufV[:0], h.cookies)
-		f(strCookie, h.bufV)
+		buf := make([]byte, 0)
+		buf = appendRequestCookieBytes(buf[:0], h.cookies)
+		f(strCookie, buf)
 	}
 	visitArgs(h.h, f)
 	if h.ConnectionClose() {

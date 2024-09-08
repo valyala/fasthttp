@@ -139,7 +139,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	}
 }
 
-func TestNewFastHTTPHandlerWithMiddleware(t *testing.T) {
+func TestNewFastHTTPHandlerWithCookies(t *testing.T) {
 	expectedMethod := fasthttp.MethodPost
 	expectedRequestURI := "/foo/bar?baz=123"
 	expectedHost := "foobar.com"
