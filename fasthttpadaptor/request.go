@@ -59,8 +59,10 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 		case "Transfer-Encoding":
 			r.TransferEncoding = append(r.TransferEncoding, sv)
 		default:
-			svCopy := strings.Clone(sv)
-			r.Header.Set(sk, svCopy)
+			if sk == fasthttp.HeaderCookie {
+				sv = strings.Clone(sv)
+			}
+			r.Header.Set(sk, sv)
 		}
 	})
 
