@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/valyala/fasthttp"
 )
@@ -58,6 +59,9 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 		case "Transfer-Encoding":
 			r.TransferEncoding = append(r.TransferEncoding, sv)
 		default:
+			if sk == fasthttp.HeaderCookie {
+				sv = strings.Clone(sv)
+			}
 			r.Header.Set(sk, sv)
 		}
 	})
