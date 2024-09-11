@@ -55,17 +55,17 @@ type perIPTLSConn struct {
 }
 
 func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) net.Conn {
-	if tlcConn, ok := conn.(*tls.Conn); ok {
+	if tlsConn, ok := conn.(*tls.Conn); ok {
 		v := counter.perIPTLSConnPool.Get()
 		if v == nil {
 			return &perIPTLSConn{
 				perIPConnCounter: counter,
-				Conn:             tlcConn,
+				Conn:             tlsConn,
 				ip:               ip,
 			}
 		}
-		c := v.(*perIPConn)
-		c.Conn = conn
+		c := v.(*perIPTLSConn)
+		c.Conn = tlsConn
 		c.ip = ip
 		return c
 	}
