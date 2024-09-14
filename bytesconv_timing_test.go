@@ -179,7 +179,10 @@ func BenchmarkParseUfloat(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			for i := range src {
-				ParseUfloat(src[i])
+				_, err := ParseUfloat(src[i])
+				if err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
 			}
 		}
 	})
