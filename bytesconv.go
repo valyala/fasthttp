@@ -187,7 +187,7 @@ func ParseUfloat(buf []byte) (float64, error) {
 	}
 	b := buf
 	var v uint64
-	offset := 1.0
+	offset := 0
 	var pointFound bool
 	for i, c := range b {
 		if c < '0' || c > '9' {
@@ -217,16 +217,16 @@ func ParseUfloat(buf []byte) (float64, error) {
 				if err != nil {
 					return -1, errInvalidFloatExponent
 				}
-				return float64(v) * offset * math.Pow10(minus*vv), nil
+				return float64(v) * math.Pow10(minus*vv+offset), nil
 			}
 			return -1, errUnexpectedFloatChar
 		}
 		v = 10*v + uint64(c-'0')
 		if pointFound {
-			offset /= 10
+			offset--
 		}
 	}
-	return float64(v) * offset, nil
+	return float64(v) * math.Pow10(offset), nil
 }
 
 var (
