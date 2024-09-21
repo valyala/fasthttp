@@ -2973,7 +2973,7 @@ const (
 	StateClosed
 )
 
-var stateName = map[ConnState]string{
+var stateName = []string{
 	StateNew:      "new",
 	StateActive:   "active",
 	StateIdle:     "idle",
