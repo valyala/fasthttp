@@ -234,6 +234,12 @@ func TestParseUfloatSuccess(t *testing.T) {
 	testParseUfloatSuccess(t, "1234e2", 1234e2)
 	testParseUfloatSuccess(t, "1234E-5", 1234e-5)
 	testParseUfloatSuccess(t, "1.234e+3", 1.234e+3)
+	testParseUfloatSuccess(t, "1234e23", 1234e23)
+	testParseUfloatSuccess(t, "1.234e+32", 1.234e+32)
+	testParseUfloatSuccess(t, "123456789123456789.987654321", 123456789123456789.987654321)
+	testParseUfloatSuccess(t, "1.23456789123456789987654321", 1.23456789123456789987654321)
+	testParseUfloatSuccess(t, "340282346638528859811704183484516925440", 340282346638528859811704183484516925440)
+	testParseUfloatSuccess(t, "00000000000000000001", 1)
 }
 
 func TestParseUfloatError(t *testing.T) {
@@ -263,6 +269,10 @@ func TestParseUfloatError(t *testing.T) {
 
 	// missing exponent
 	testParseUfloatError(t, "123534e")
+
+	// negative number
+	testParseUfloatError(t, "-1")
+	testParseUfloatError(t, "-Inf")
 }
 
 func testParseUfloatError(t *testing.T, s string) {

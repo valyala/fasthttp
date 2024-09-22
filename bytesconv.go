@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
 	"strconv"
 	"sync"
@@ -172,61 +171,19 @@ func parseUintBuf(b []byte) (int, int, error) {
 	return v, n, nil
 }
 
-var (
-	errEmptyFloat           = errors.New("empty float number")
-	errDuplicateFloatPoint  = errors.New("duplicate point found in float number")
-	errUnexpectedFloatEnd   = errors.New("unexpected end of float number")
-	errInvalidFloatExponent = errors.New("invalid float number exponent")
-	errUnexpectedFloatChar  = errors.New("unexpected char found in float number")
-)
-
 // ParseUfloat parses unsigned float from buf.
 func ParseUfloat(buf []byte) (float64, error) {
-	if len(buf) == 0 {
-		return -1, errEmptyFloat
+	// The implementation of parsing a float string is not easy.
+	// We believe that the conservative approach is to call strconv.ParseFloat.
+	// https://github.com/valyala/fasthttp/pull/1865
+	res, err := strconv.ParseFloat(b2s(buf), 64)
+	if res < 0 {
+		return -1, errors.New("negative input is invalid")
 	}
-	b := buf
-	var v uint64
-	offset := 1.0
-	var pointFound bool
-	for i, c := range b {
-		if c < '0' || c > '9' {
-			if c == '.' {
-				if pointFound {
-					return -1, errDuplicateFloatPoint
-				}
-				pointFound = true
-				continue
-			}
-			if c == 'e' || c == 'E' {
-				if i+1 >= len(b) {
-					return -1, errUnexpectedFloatEnd
-				}
-				b = b[i+1:]
-				minus := -1
-				switch b[0] {
-				case '+':
-					b = b[1:]
-					minus = 1
-				case '-':
-					b = b[1:]
-				default:
-					minus = 1
-				}
-				vv, err := ParseUint(b)
-				if err != nil {
-					return -1, errInvalidFloatExponent
-				}
-				return float64(v) * offset * math.Pow10(minus*vv), nil
-			}
-			return -1, errUnexpectedFloatChar
-		}
-		v = 10*v + uint64(c-'0')
-		if pointFound {
-			offset /= 10
-		}
+	if err != nil {
+		return -1, err
 	}
-	return float64(v) * offset, nil
+	return res, err
 }
 
 var (
