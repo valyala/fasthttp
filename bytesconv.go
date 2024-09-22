@@ -221,9 +221,14 @@ func ParseUfloat(buf []byte) (float64, error) {
 			}
 			return -1, errUnexpectedFloatChar
 		}
-		v = 10*v + uint64(c-'0')
-		if pointFound {
-			offset--
+		// v is limited by the uint64 upper bound, and can safely handle up to 19 digits at most.
+		if i < 19 {
+			v = 10*v + uint64(c-'0')
+			if pointFound {
+				offset--
+			}
+		} else if !pointFound {
+			offset++
 		}
 	}
 	return float64(v) * math.Pow10(offset), nil
