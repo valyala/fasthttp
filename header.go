@@ -1509,9 +1509,9 @@ func (h *RequestHeader) setNonSpecial(key, value []byte) {
 // Multiple headers with the same key may be added with this function.
 // Use Set for setting a single header for the given key.
 //
-// the Content-Type, Content-Length, Connection, Server, Set-Cookie,
-// Transfer-Encoding and Date headers can only be set once and will
-// overwrite the previous value.
+// the Content-Type, Content-Length, Connection, Server, Transfer-Encoding
+// and Date headers can only be set once and will overwrite the previous value,
+// while Set-Cookie will not clear previous cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see AddTrailer for more details),
 // it will be sent after the chunked response body.
@@ -1524,9 +1524,9 @@ func (h *ResponseHeader) Add(key, value string) {
 // Multiple headers with the same key may be added with this function.
 // Use SetBytesK for setting a single header for the given key.
 //
-// the Content-Type, Content-Length, Connection, Server, Set-Cookie,
-// Transfer-Encoding and Date headers can only be set once and will
-// overwrite the previous value.
+// the Content-Type, Content-Length, Connection, Server, Transfer-Encoding
+// and Date headers can only be set once and will overwrite the previous value,
+// while Set-Cookie will not clear previous cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see AddTrailer for more details),
 // it will be sent after the chunked response body.
@@ -1539,9 +1539,9 @@ func (h *ResponseHeader) AddBytesK(key []byte, value string) {
 // Multiple headers with the same key may be added with this function.
 // Use SetBytesV for setting a single header for the given key.
 //
-// the Content-Type, Content-Length, Connection, Server, Set-Cookie,
-// Transfer-Encoding and Date headers can only be set once and will
-// overwrite the previous value.
+// the Content-Type, Content-Length, Connection, Server, Transfer-Encoding
+// and Date headers can only be set once and will overwrite the previous value,
+// while Set-Cookie will not clear previous cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see AddTrailer for more details),
 // it will be sent after the chunked response body.
@@ -1554,9 +1554,9 @@ func (h *ResponseHeader) AddBytesV(key string, value []byte) {
 // Multiple headers with the same key may be added with this function.
 // Use SetBytesKV for setting a single header for the given key.
 //
-// the Content-Type, Content-Length, Connection, Server, Set-Cookie,
-// Transfer-Encoding and Date headers can only be set once and will
-// overwrite the previous value.
+// the Content-Type, Content-Length, Connection, Server, Transfer-Encoding
+// and Date headers can only be set once and will overwrite the previous value,
+// while the Set-Cookie header will not clear previous cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see AddTrailer for more details),
 // it will be sent after the chunked response body.
@@ -1571,6 +1571,9 @@ func (h *ResponseHeader) AddBytesKV(key, value []byte) {
 
 // Set sets the given 'key: value' header.
 //
+// Please note that the Set-Cookie header will not clear previous cookies,
+// use SetCookie instead to reset cookies.
+//
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked response body.
 //
@@ -1581,6 +1584,9 @@ func (h *ResponseHeader) Set(key, value string) {
 }
 
 // SetBytesK sets the given 'key: value' header.
+//
+// Please note that the Set-Cookie header will not clear previous cookies,
+// use SetCookie instead to reset cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked response body.
@@ -1593,6 +1599,9 @@ func (h *ResponseHeader) SetBytesK(key []byte, value string) {
 
 // SetBytesV sets the given 'key: value' header.
 //
+// Please note that the Set-Cookie header will not clear previous cookies,
+// use SetCookie instead to reset cookies.
+//
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked response body.
 //
@@ -1603,6 +1612,9 @@ func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 }
 
 // SetBytesKV sets the given 'key: value' header.
+//
+// Please note that the Set-Cookie header will not clear previous cookies,
+// use SetCookie instead to reset cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked response body.
@@ -1616,6 +1628,9 @@ func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 
 // SetCanonical sets the given 'key: value' header assuming that
 // key is in canonical form.
+//
+// Please note that the Set-Cookie header will not clear previous cookies,
+// use SetCookie instead to reset cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked response body.
@@ -1765,9 +1780,9 @@ func (h *RequestHeader) AddBytesV(key string, value []byte) {
 // Multiple headers with the same key may be added with this function.
 // Use SetBytesKV for setting a single header for the given key.
 //
-// the Content-Type, Content-Length, Connection, Cookie,
-// Transfer-Encoding, Host and User-Agent headers can only be set once
-// and will overwrite the previous value.
+// the Content-Type, Content-Length, Connection, Transfer-Encoding,
+// Host and User-Agent headers can only be set once and will overwrite
+// the previous value, while the Cookie header will not clear previous cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see AddTrailer for more details),
 // it will be sent after the chunked request body.
@@ -1782,6 +1797,9 @@ func (h *RequestHeader) AddBytesKV(key, value []byte) {
 
 // Set sets the given 'key: value' header.
 //
+// Please note that the Cookie header will not clear previous cookies,
+// delete cookies before calling in order to reset cookies.
+//
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked request body.
 //
@@ -1792,6 +1810,9 @@ func (h *RequestHeader) Set(key, value string) {
 }
 
 // SetBytesK sets the given 'key: value' header.
+//
+// Please note that the Cookie header will not clear previous cookies,
+// delete cookies before calling in order to reset cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked request body.
@@ -1804,6 +1825,9 @@ func (h *RequestHeader) SetBytesK(key []byte, value string) {
 
 // SetBytesV sets the given 'key: value' header.
 //
+// Please note that the Cookie header will not clear previous cookies,
+// delete cookies before calling in order to reset cookies.
+//
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked request body.
 //
@@ -1814,6 +1838,9 @@ func (h *RequestHeader) SetBytesV(key string, value []byte) {
 }
 
 // SetBytesKV sets the given 'key: value' header.
+//
+// Please note that the Cookie header will not clear previous cookies,
+// delete cookies before calling in order to reset cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked request body.
@@ -1827,6 +1854,9 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 
 // SetCanonical sets the given 'key: value' header assuming that
 // key is in canonical form.
+//
+// Please note that the Cookie header will not clear previous cookies,
+// delete cookies before calling in order to reset cookies.
 //
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked request body.
