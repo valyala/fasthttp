@@ -1,10 +1,10 @@
 module github.com/valyala/fasthttp
 
-go 1.20
+go 1.21
 
 require (
 	github.com/andybalholm/brotli v1.1.0
-	github.com/klauspost/compress v1.17.9
+	github.com/klauspost/compress v1.17.10
 	github.com/valyala/bytebufferpool v1.0.0
 	github.com/valyala/tcplisten v1.0.0
 	golang.org/x/crypto v0.27.0
