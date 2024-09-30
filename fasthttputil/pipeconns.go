@@ -42,9 +42,9 @@ func NewPipeConns() *PipeConns {
 //
 // PipeConns is NOT safe for concurrent use by multiple goroutines!
 type PipeConns struct {
+	stopCh     chan struct{}
 	c1         pipeConn
 	c2         pipeConn
-	stopCh     chan struct{}
 	stopChLock sync.Mutex
 }
 
@@ -93,8 +93,9 @@ func (pc *PipeConns) Close() error {
 }
 
 type pipeConn struct {
-	b  *byteBuffer
-	bb []byte
+	localAddr  net.Addr
+	remoteAddr net.Addr
+	b          *byteBuffer
 
 	rCh chan *byteBuffer
 	wCh chan *byteBuffer
@@ -106,11 +107,11 @@ type pipeConn struct {
 	readDeadlineCh  <-chan time.Time
 	writeDeadlineCh <-chan time.Time
 
-	readDeadlineChLock sync.Mutex
+	bb []byte
 
-	localAddr  net.Addr
-	remoteAddr net.Addr
-	addrLock   sync.RWMutex
+	addrLock sync.RWMutex
+
+	readDeadlineChLock sync.Mutex
 }
 
 func (c *pipeConn) Write(p []byte) (int, error) {
@@ -335,7 +336,7 @@ func releaseByteBuffer(b *byteBuffer) {
 }
 
 var byteBufferPool = &sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return &byteBuffer{
 			b: make([]byte, 1024),
 		}

@@ -163,3 +163,27 @@ func BenchmarkAppendUnquotedArgSlowPath(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkParseUfloat(b *testing.B) {
+	src := [][]byte{
+		[]byte("0"),
+		[]byte("1234566789."),
+		[]byte(".1234556778"),
+		[]byte("123.456"),
+		[]byte("123456789"),
+		[]byte("1234e23"),
+		[]byte("1234E-51"),
+		[]byte("1.234e+32"),
+		[]byte("123456789123456789.987654321"),
+	}
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			for i := range src {
+				_, err := ParseUfloat(src[i])
+				if err != nil {
+					b.Fatalf("unexpected error: %v", err)
+				}
+			}
+		}
+	})
+}

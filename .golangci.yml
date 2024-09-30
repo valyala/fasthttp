@@ -1,0 +1,103 @@
+# This file contains configuration options for golangci-lint.
+# https://github.com/golangci/golangci-lint/blob/master/.golangci.reference.yml
+
+run:
+  # Timeout for analysis.
+  timeout: 5m
+
+linters:
+  enable-all: true
+  disable:
+    - cyclop
+    - depguard
+    - dupl
+    - errname
+    - errorlint
+    - exhaustive
+    - exhaustruct
+    - forcetypeassert
+    - funlen
+    - gochecknoglobals
+    - gocognit
+    - goconst
+    - gocyclo
+    - goerr113
+    - gomnd
+    - gosec
+    - inamedparam
+    - ireturn
+    - maintidx
+    - nakedret
+    - nestif
+    - nlreturn
+    - noctx
+    - nonamedreturns
+    - paralleltest
+    - testableexamples
+    - testpackage
+    - thelper
+    - tparallel
+    - unparam
+    - usestdlibvars
+    - varnamelen
+    - wrapcheck
+    - wsl
+
+    # Deprecated linters
+    - deadcode
+    - exhaustivestruct
+    - golint
+    - ifshort
+    - interfacer
+    - maligned
+    - nosnakecase
+    - scopelint
+    - structcheck
+    - varcheck
+
+linters-settings:
+  revive:
+    # https://github.com/mgechev/revive/blob/master/RULES_DESCRIPTIONS.md
+    rules:
+      - name: use-any
+  lll:
+    line-length: 130
+  stylecheck:
+    checks: [
+      "all",
+      "-ST1000", # at least one file in a package should have a package comment
+    ]
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - deferInLoop
+      - importShadow
+      - sloppyReassign
+      - unnamedResult
+      - whyNoLint
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+      - shadow
+
+issues:
+  # Show all issues from a linter.
+  max-issues-per-linter: 0
+
+  # Show all issues with the same text.
+  max-same-issues: 0
+
+  include:
+    - EXC0011 # include issues about comments from `stylecheck`
+
+  exclude-rules:
+    # Exclude some linters from running on tests files.
+    - path: _test\.go
+      linters:
+        - lll

@@ -2,7 +2,6 @@ package prefork
 
 import (
 	"errors"
-	"flag"
 	"log"
 	"net"
 	"os"
@@ -14,8 +13,8 @@ import (
 )
 
 const (
-	preforkChildFlag = "-prefork-child"
-	defaultNetwork   = "tcp4"
+	preforkChildEnvVariable = "FASTHTTP_PREFORK_CHILD"
+	defaultNetwork          = "tcp4"
 )
 
 var (
@@ -31,62 +30,51 @@ var (
 // Logger is used for logging formatted messages.
 type Logger interface {
 	// Printf must have the same semantics as log.Printf.
-	Printf(format string, args ...interface{})
+	Printf(format string, args ...any)
 }
 
-// Prefork implements fasthttp server prefork
+// Prefork implements fasthttp server prefork.
 //
 // Preforks master process (with all cores) between several child processes
 // increases performance significantly, because Go doesn't have to share
-// and manage memory between cores
+// and manage memory between cores.
 //
 // WARNING: using prefork prevents the use of any global state!
 // Things like in-memory caches won't work.
 type Prefork struct {
+	// By default standard logger from log package is used.
+	Logger Logger
+
+	ln net.Listener
+
+	ServeFunc         func(ln net.Listener) error
+	ServeTLSFunc      func(ln net.Listener, certFile, keyFile string) error
+	ServeTLSEmbedFunc func(ln net.Listener, certData, keyData []byte) error
+
 	// The network must be "tcp", "tcp4" or "tcp6".
 	//
 	// By default is "tcp4"
 	Network string
+
+	files []*os.File
+
+	// Child prefork processes may exit with failure and will be started over until the times reach
+	// the value of RecoverThreshold, then it will return and terminate the server.
+	RecoverThreshold int
 
 	// Flag to use a listener with reuseport, if not a file Listener will be used
 	// See: https://www.nginx.com/blog/socket-sharding-nginx-release-1-9-1/
 	//
 	// It's disabled by default
 	Reuseport bool
-
-	// Child prefork processes may exit with failure and will be started over until the times reach
-	// the value of RecoverThreshold, then it will return and terminate the server.
-	RecoverThreshold int
-
-	// By default standard logger from log package is used.
-	Logger Logger
-
-	ServeFunc         func(ln net.Listener) error
-	ServeTLSFunc      func(ln net.Listener, certFile, keyFile string) error
-	ServeTLSEmbedFunc func(ln net.Listener, certData, keyData []byte) error
-
-	ln    net.Listener
-	files []*os.File
 }
 
-func init() { //nolint:gochecknoinits
-	// Definition flag to not break the program when the user adds their own flags
-	// and runs `flag.Parse()`
-	flag.Bool(preforkChildFlag[1:], false, "Is a child process")
-}
-
-// IsChild checks if the current thread/process is a child
+// IsChild checks if the current thread/process is a child.
 func IsChild() bool {
-	for _, arg := range os.Args[1:] {
-		if arg == preforkChildFlag {
-			return true
-		}
-	}
-
-	return false
+	return os.Getenv(preforkChildEnvVariable) == "1"
 }
 
-// New wraps the fasthttp server to run with preforked processes
+// New wraps the fasthttp server to run with preforked processes.
 func New(s *fasthttp.Server) *Prefork {
 	return &Prefork{
 		Network:           defaultNetwork,
@@ -147,12 +135,14 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 }
 
 func (p *Prefork) doCommand() (*exec.Cmd, error) {
-	/* #nosec G204 */
-	cmd := exec.Command(os.Args[0], append(os.Args[1:], preforkChildFlag)...)
+	// #nosec G204
+	cmd := exec.Command(os.Args[0], os.Args[1:]...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), preforkChildEnvVariable+"=1")
 	cmd.ExtraFiles = p.files
-	return cmd, cmd.Start()
+	err := cmd.Start()
+	return cmd, err
 }
 
 func (p *Prefork) prefork(addr string) (err error) {
@@ -175,8 +165,8 @@ func (p *Prefork) prefork(addr string) (err error) {
 	}
 
 	type procSig struct {
-		pid int
 		err error
+		pid int
 	}
 
 	goMaxProcs := runtime.GOMAXPROCS(0)
@@ -198,7 +188,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 
 		childProcs[cmd.Process.Pid] = cmd
 		go func() {
-			sigCh <- procSig{cmd.Process.Pid, cmd.Wait()}
+			sigCh <- procSig{pid: cmd.Process.Pid, err: cmd.Wait()}
 		}()
 	}
 
@@ -209,7 +199,8 @@ func (p *Prefork) prefork(addr string) (err error) {
 		p.logger().Printf("one of the child prefork processes exited with "+
 			"error: %v", sig.err)
 
-		if exitedProcs++; exitedProcs > p.RecoverThreshold {
+		exitedProcs++
+		if exitedProcs > p.RecoverThreshold {
 			p.logger().Printf("child prefork processes exit too many times, "+
 				"which exceeds the value of RecoverThreshold(%d), "+
 				"exiting the master process.\n", exitedProcs)
@@ -223,14 +214,14 @@ func (p *Prefork) prefork(addr string) (err error) {
 		}
 		childProcs[cmd.Process.Pid] = cmd
 		go func() {
-			sigCh <- procSig{cmd.Process.Pid, cmd.Wait()}
+			sigCh <- procSig{pid: cmd.Process.Pid, err: cmd.Wait()}
 		}()
 	}
 
 	return
 }
 
-// ListenAndServe serves HTTP requests from the given TCP addr
+// ListenAndServe serves HTTP requests from the given TCP addr.
 func (p *Prefork) ListenAndServe(addr string) error {
 	if IsChild() {
 		ln, err := p.listen(addr)
@@ -246,7 +237,7 @@ func (p *Prefork) ListenAndServe(addr string) error {
 	return p.prefork(addr)
 }
 
-// ListenAndServeTLS serves HTTPS requests from the given TCP addr
+// ListenAndServeTLS serves HTTPS requests from the given TCP addr.
 //
 // certFile and keyFile are paths to TLS certificate and key files.
 func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
@@ -264,7 +255,7 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 	return p.prefork(addr)
 }
 
-// ListenAndServeTLSEmbed serves HTTPS requests from the given TCP addr
+// ListenAndServeTLSEmbed serves HTTPS requests from the given TCP addr.
 //
 // certData and keyData must contain valid TLS certificate and key data.
 func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) error {

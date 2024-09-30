@@ -250,12 +250,12 @@ func (c *fakeServerConn) SetWriteDeadline(t time.Time) error {
 }
 
 type fakeListener struct {
-	lock            sync.Mutex
-	requestsCount   int
-	requestsPerConn int
-	request         []byte
 	ch              chan *fakeServerConn
 	done            chan struct{}
+	request         []byte
+	requestsCount   int
+	requestsPerConn int
+	lock            sync.Mutex
 	closed          bool
 }
 
@@ -319,7 +319,7 @@ var (
 		"Referer: http://example.com/aaa?bbb=ccc\r\nCookie: foo=bar; baz=baraz; aa=aakslsdweriwereowriewroire\r\n\r\n"
 	postRequest = fmt.Sprintf("POST /foobar?baz HTTP/1.1\r\nHost: google.com\r\nContent-Type: foo/bar\r\nContent-Length: %d\r\n"+
 		"User-Agent: Opera Chrome MSIE Firefox and other/1.2.34\r\nReferer: http://google.com/aaaa/bbb/ccc\r\n"+
-		"Cookie: foo=bar; baz=baraz; aa=aakslsdweriwereowriewroire\r\n\r\n%q",
+		"Cookie: foo=bar; baz=baraz; aa=aakslsdweriwereowriewroire\r\n\r\n%s",
 		len(fakeResponse), fakeResponse)
 )
 

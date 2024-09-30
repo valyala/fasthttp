@@ -8,8 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -35,7 +35,7 @@ func AppendHTMLEscape(dst []byte, s string) []byte {
 		case '\'':
 			sub = "&#39;" // "&#39;" is shorter than "&apos;" and apos was not in HTML until HTML5.
 		}
-		if len(sub) > 0 {
+		if sub != "" {
 			dst = append(dst, s[prev:i]...)
 			dst = append(dst, sub...)
 			prev = i + 1
@@ -73,15 +73,11 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	if len(ipStr) == 0 {
 		return dst, errEmptyIPStr
 	}
-	if len(dst) < net.IPv4len {
+	if len(dst) < net.IPv4len || len(dst) > net.IPv4len {
 		dst = make([]byte, net.IPv4len)
 	}
 	copy(dst, net.IPv4zero)
-	dst = dst.To4()
-	if dst == nil {
-		// developer sanity-check
-		panic("BUG: dst must not be nil")
-	}
+	dst = dst.To4() // dst is always non-nil here
 
 	b := ipStr
 	for i := 0; i < 3; i++ {
@@ -131,21 +127,7 @@ func AppendUint(dst []byte, n int) []byte {
 		panic("BUG: int must be positive")
 	}
 
-	var b [20]byte
-	buf := b[:]
-	i := len(buf)
-	var q int
-	for n >= 10 {
-		i--
-		q = n / 10
-		buf[i] = '0' + byte(n-q*10)
-		n = q
-	}
-	i--
-	buf[i] = '0' + byte(n)
-
-	dst = append(dst, buf[i:]...)
-	return dst
+	return strconv.AppendUint(dst, uint64(n), 10)
 }
 
 // ParseUint parses uint from buf.
@@ -189,61 +171,19 @@ func parseUintBuf(b []byte) (int, int, error) {
 	return v, n, nil
 }
 
-var (
-	errEmptyFloat           = errors.New("empty float number")
-	errDuplicateFloatPoint  = errors.New("duplicate point found in float number")
-	errUnexpectedFloatEnd   = errors.New("unexpected end of float number")
-	errInvalidFloatExponent = errors.New("invalid float number exponent")
-	errUnexpectedFloatChar  = errors.New("unexpected char found in float number")
-)
-
 // ParseUfloat parses unsigned float from buf.
 func ParseUfloat(buf []byte) (float64, error) {
-	if len(buf) == 0 {
-		return -1, errEmptyFloat
+	// The implementation of parsing a float string is not easy.
+	// We believe that the conservative approach is to call strconv.ParseFloat.
+	// https://github.com/valyala/fasthttp/pull/1865
+	res, err := strconv.ParseFloat(b2s(buf), 64)
+	if res < 0 {
+		return -1, errors.New("negative input is invalid")
 	}
-	b := buf
-	var v uint64
-	offset := 1.0
-	var pointFound bool
-	for i, c := range b {
-		if c < '0' || c > '9' {
-			if c == '.' {
-				if pointFound {
-					return -1, errDuplicateFloatPoint
-				}
-				pointFound = true
-				continue
-			}
-			if c == 'e' || c == 'E' {
-				if i+1 >= len(b) {
-					return -1, errUnexpectedFloatEnd
-				}
-				b = b[i+1:]
-				minus := -1
-				switch b[0] {
-				case '+':
-					b = b[1:]
-					minus = 1
-				case '-':
-					b = b[1:]
-				default:
-					minus = 1
-				}
-				vv, err := ParseUint(b)
-				if err != nil {
-					return -1, errInvalidFloatExponent
-				}
-				return float64(v) * offset * math.Pow10(minus*vv), nil
-			}
-			return -1, errUnexpectedFloatChar
-		}
-		v = 10*v + uint64(c-'0')
-		if pointFound {
-			offset /= 10
-		}
+	if err != nil {
+		return -1, err
 	}
-	return float64(v) * offset, nil
+	return res, err
 }
 
 var (

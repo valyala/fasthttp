@@ -5,13 +5,13 @@ import (
 )
 
 type userDataKV struct {
-	key   interface{}
-	value interface{}
+	key   any
+	value any
 }
 
 type userData []userDataKV
 
-func (d *userData) Set(key interface{}, value interface{}) {
+func (d *userData) Set(key, value any) {
 	if b, ok := key.([]byte); ok {
 		key = string(b)
 	}
@@ -46,11 +46,11 @@ func (d *userData) Set(key interface{}, value interface{}) {
 	*d = args
 }
 
-func (d *userData) SetBytes(key []byte, value interface{}) {
+func (d *userData) SetBytes(key []byte, value any) {
 	d.Set(key, value)
 }
 
-func (d *userData) Get(key interface{}) interface{} {
+func (d *userData) Get(key any) any {
 	if b, ok := key.([]byte); ok {
 		key = b2s(b)
 	}
@@ -65,7 +65,7 @@ func (d *userData) Get(key interface{}) interface{} {
 	return nil
 }
 
-func (d *userData) GetBytes(key []byte) interface{} {
+func (d *userData) GetBytes(key []byte) any {
 	return d.Get(key)
 }
 
@@ -77,11 +77,13 @@ func (d *userData) Reset() {
 		if vc, ok := v.(io.Closer); ok {
 			vc.Close()
 		}
+		(*d)[i].value = nil
+		(*d)[i].key = nil
 	}
 	*d = (*d)[:0]
 }
 
-func (d *userData) Remove(key interface{}) {
+func (d *userData) Remove(key any) {
 	if b, ok := key.([]byte); ok {
 		key = b2s(b)
 	}
@@ -92,6 +94,7 @@ func (d *userData) Remove(key interface{}) {
 		if kv.key == key {
 			n--
 			args[i], args[n] = args[n], args[i]
+			args[n].key = nil
 			args[n].value = nil
 			args = args[:n]
 			*d = args

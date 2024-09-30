@@ -7,8 +7,10 @@ import (
 	"net/url"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 func TestNewFastHTTPHandler(t *testing.T) {
@@ -137,9 +139,127 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	}
 }
 
-func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value interface{}) fasthttp.RequestHandler {
+func TestNewFastHTTPHandlerWithCookies(t *testing.T) {
+	expectedMethod := fasthttp.MethodPost
+	expectedRequestURI := "/foo/bar?baz=123"
+	expectedHost := "foobar.com"
+	expectedRemoteAddr := "1.2.3.4:6789"
+
+	var ctx fasthttp.RequestCtx
+	var req fasthttp.Request
+
+	req.Header.SetMethod(expectedMethod)
+	req.SetRequestURI(expectedRequestURI)
+	req.Header.SetHost(expectedHost)
+	req.Header.SetCookie("cookieOne", "valueCookieOne")
+	req.Header.SetCookie("cookieTwo", "valueCookieTwo")
+
+	remoteAddr, err := net.ResolveTCPAddr("tcp", expectedRemoteAddr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ctx.Init(&req, remoteAddr, nil)
+
+	nethttpH := func(w http.ResponseWriter, r *http.Request) {
+		// real handler warped by middleware, in this example do nothing
+	}
+	fasthttpH := NewFastHTTPHandler(http.HandlerFunc(nethttpH))
+
+	netMiddleware := func(_ http.ResponseWriter, r *http.Request) {
+		// assume middleware do some change on r, such as reset header's host
+		r.Header.Set("Host", "example.com")
+		// convert ctx again in case request may modify by middleware
+		ctx.Request.Header.Set("Host", r.Header.Get("Host"))
+		// since cookies of r are not changed, expect "cookieOne=valueCookieOne"
+		cookie, _ := r.Cookie("cookieOne")
+		if err != nil {
+			// will error, but if line 172 is commented, then no error will happen
+			t.Errorf("should not error")
+		}
+		if cookie.Value != "valueCookieOne" {
+			t.Errorf("cookie error, expect %s, find %s", "valueCookieOne", cookie.Value)
+		}
+		// instead of using responseWriter and r, use ctx again, like what have done in fiber
+		fasthttpH(&ctx)
+	}
+	fastMiddleware := NewFastHTTPHandler(http.HandlerFunc(netMiddleware))
+	fastMiddleware(&ctx)
+}
+
+func setContextValueMiddleware(next fasthttp.RequestHandler, key string, value any) fasthttp.RequestHandler {
 	return func(ctx *fasthttp.RequestCtx) {
 		ctx.SetUserValue(key, value)
 		next(ctx)
+	}
+}
+
+func TestHijack(t *testing.T) {
+	t.Parallel()
+
+	nethttpH := func(w http.ResponseWriter, r *http.Request) {
+		if f, ok := w.(http.Hijacker); !ok {
+			t.Errorf("expected http.ResponseWriter to implement http.Hijacker")
+		} else {
+			if _, err := w.Write([]byte("foo")); err != nil {
+				t.Error(err)
+			}
+
+			if c, rw, err := f.Hijack(); err != nil {
+				t.Error(err)
+			} else {
+				if _, err := rw.WriteString("bar"); err != nil {
+					t.Error(err)
+				}
+
+				if err := rw.Flush(); err != nil {
+					t.Error(err)
+				}
+
+				if err := c.Close(); err != nil {
+					t.Error(err)
+				}
+			}
+		}
+	}
+
+	s := &fasthttp.Server{
+		Handler: NewFastHTTPHandler(http.HandlerFunc(nethttpH)),
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		buf, err := io.ReadAll(c)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if string(buf) != "foobar" {
+			t.Errorf("unexpected response: %q. Expecting %q", buf, "foobar")
+		}
+
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
 	}
 }

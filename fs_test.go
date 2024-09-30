@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -18,7 +19,7 @@ type TestLogger struct {
 	t *testing.T
 }
 
-func (t TestLogger) Printf(format string, args ...interface{}) {
+func (t TestLogger) Printf(format string, args ...any) {
 	t.t.Logf(format, args...)
 }
 
@@ -66,10 +67,12 @@ func TestNewVHostPathRewriterMaliciousHost(t *testing.T) {
 }
 
 func testPathNotFound(t *testing.T, pathNotFoundFunc RequestHandler) {
+	t.Helper()
+
 	var ctx RequestCtx
 	var req Request
 	req.SetRequestURI("http//some.url/file")
-	ctx.Init(&req, nil, TestLogger{t})
+	ctx.Init(&req, nil, TestLogger{t: t})
 
 	stop := make(chan struct{})
 	defer close(stop)
@@ -174,7 +177,7 @@ func TestServeFileSmallNoReadFrom(t *testing.T) {
 
 	buf := bytes.NewBuffer(nil)
 
-	n, err := reader.WriteTo(pureWriter{buf})
+	n, err := reader.WriteTo(pureWriter{w: buf})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,11 +305,30 @@ func TestFSByteRangeConcurrent(t *testing.T) {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	fs := &FS{
+	runFSByteRangeConcurrent(t, &FS{
 		Root:            ".",
 		AcceptByteRange: true,
 		CleanStop:       stop,
-	}
+	})
+}
+
+func TestFSByteRangeConcurrentSkipCache(t *testing.T) {
+	// This test can't run parallel as files in / might be changed by other tests.
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	runFSByteRangeConcurrent(t, &FS{
+		Root:            ".",
+		SkipCache:       true,
+		AcceptByteRange: true,
+		CleanStop:       stop,
+	})
+}
+
+func runFSByteRangeConcurrent(t *testing.T, fs *FS) {
+	t.Helper()
+
 	h := fs.NewRequestHandler()
 
 	concurrency := 10
@@ -336,11 +358,30 @@ func TestFSByteRangeSingleThread(t *testing.T) {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	fs := &FS{
+	runFSByteRangeSingleThread(t, &FS{
 		Root:            ".",
 		AcceptByteRange: true,
 		CleanStop:       stop,
-	}
+	})
+}
+
+func TestFSByteRangeSingleThreadSkipCache(t *testing.T) {
+	// This test can't run parallel as files in / might be changed by other tests.
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	runFSByteRangeSingleThread(t, &FS{
+		Root:            ".",
+		AcceptByteRange: true,
+		SkipCache:       true,
+		CleanStop:       stop,
+	})
+}
+
+func runFSByteRangeSingleThread(t *testing.T, fs *FS) {
+	t.Helper()
+
 	h := fs.NewRequestHandler()
 
 	testFSByteRange(t, h, "/fs.go")
@@ -348,6 +389,8 @@ func TestFSByteRangeSingleThread(t *testing.T) {
 }
 
 func testFSByteRange(t *testing.T, h RequestHandler, filePath string) {
+	t.Helper()
+
 	var ctx RequestCtx
 	ctx.Init(&Request{}, nil, nil)
 
@@ -427,6 +470,8 @@ func TestParseByteRangeSuccess(t *testing.T) {
 }
 
 func testParseByteRangeSuccess(t *testing.T, v string, contentLength, startPos, endPos int) {
+	t.Helper()
+
 	startPos1, endPos1, err := ParseByteRange([]byte(v), contentLength)
 	if err != nil {
 		t.Fatalf("unexpected error: %v. v=%q, contentLength=%d", err, v, contentLength)
@@ -467,6 +512,8 @@ func TestParseByteRangeError(t *testing.T) {
 }
 
 func testParseByteRangeError(t *testing.T, v string, contentLength int) {
+	t.Helper()
+
 	_, _, err := ParseByteRange([]byte(v), contentLength)
 	if err == nil {
 		t.Fatalf("expecting error when parsing byte range %q", v)
@@ -480,17 +527,41 @@ func TestFSCompressConcurrent(t *testing.T) {
 	}
 
 	// This test can't run parallel as files in / might be changed by other tests.
-
 	stop := make(chan struct{})
 	defer close(stop)
 
-	fs := &FS{
+	runFSCompressConcurrent(t, &FS{
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
 		CompressBrotli:     true,
 		CleanStop:          stop,
+	})
+}
+
+func TestFSCompressConcurrentSkipCache(t *testing.T) {
+	// Don't run this test on Windows, the Windows GitHub actions are too slow and timeout too often.
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
 	}
+
+	// This test can't run parallel as files in / might be changed by other tests.
+	stop := make(chan struct{})
+	defer close(stop)
+
+	runFSCompressConcurrent(t, &FS{
+		Root:               ".",
+		GenerateIndexPages: true,
+		SkipCache:          true,
+		Compress:           true,
+		CompressBrotli:     true,
+		CleanStop:          stop,
+	})
+}
+
+func runFSCompressConcurrent(t *testing.T, fs *FS) {
+	t.Helper()
+
 	h := fs.NewRequestHandler()
 
 	concurrency := 4
@@ -499,7 +570,7 @@ func TestFSCompressConcurrent(t *testing.T) {
 		go func() {
 			for j := 0; j < 5; j++ {
 				testFSCompress(t, h, "/fs.go")
-				testFSCompress(t, h, "/")
+				testFSCompress(t, h, "/examples/")
 				testFSCompress(t, h, "/README.md")
 			}
 			ch <- struct{}{}
@@ -521,13 +592,34 @@ func TestFSCompressSingleThread(t *testing.T) {
 	stop := make(chan struct{})
 	defer close(stop)
 
-	fs := &FS{
+	runFSCompressSingleThread(t, &FS{
 		Root:               ".",
 		GenerateIndexPages: true,
 		Compress:           true,
 		CompressBrotli:     true,
 		CleanStop:          stop,
-	}
+	})
+}
+
+func TestFSCompressSingleThreadSkipCache(t *testing.T) {
+	// This test can't run parallel as files in / might be changed by other tests.
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	runFSCompressSingleThread(t, &FS{
+		Root:               ".",
+		GenerateIndexPages: true,
+		SkipCache:          true,
+		Compress:           true,
+		CompressBrotli:     true,
+		CleanStop:          stop,
+	})
+}
+
+func runFSCompressSingleThread(t *testing.T, fs *FS) {
+	t.Helper()
+
 	h := fs.NewRequestHandler()
 
 	testFSCompress(t, h, "/fs.go")
@@ -536,6 +628,8 @@ func TestFSCompressSingleThread(t *testing.T) {
 }
 
 func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
+	t.Helper()
+
 	// File locking is flaky on Windows.
 	if runtime.GOOS == "windows" {
 		t.SkipNow()
@@ -559,7 +653,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Errorf("unexpected status code: %d. Expecting %d. filePath=%q", resp.StatusCode(), StatusOK, filePath)
 	}
 	ce := resp.Header.ContentEncoding()
-	if string(ce) != "" {
+	if len(ce) != 0 {
 		t.Errorf("unexpected content-encoding %q. Expecting empty string. filePath=%q", ce, filePath)
 	}
 	body := string(resp.Body())
@@ -755,6 +849,8 @@ func TestStripPathSlashes(t *testing.T) {
 }
 
 func testStripPathSlashes(t *testing.T, path string, stripSlashes int, expectedPath string) {
+	t.Helper()
+
 	s := stripLeadingSlashes([]byte(path), stripSlashes)
 	s = stripTrailingSlashes(s)
 	if string(s) != expectedPath {
@@ -779,6 +875,8 @@ func TestFileExtension(t *testing.T) {
 }
 
 func testFileExtension(t *testing.T, path string, compressed bool, compressedFileSuffix, expectedExt string) {
+	t.Helper()
+
 	ext := fileExtension(path, compressed, compressedFileSuffix)
 	if ext != expectedExt {
 		t.Fatalf("unexpected file extension for file %q: %q. Expecting %q", path, ext, expectedExt)
@@ -840,5 +938,68 @@ func TestServeFileDirectoryRedirect(t *testing.T) {
 	ServeFile(&ctx, "fs.go")
 	if ctx.Response.StatusCode() != StatusOK {
 		t.Fatalf("Unexpected status code %d for file '/fs.go'. Expecting %d.", ctx.Response.StatusCode(), StatusOK)
+	}
+}
+
+func TestFileCacheForZstd(t *testing.T) {
+	f, err := os.CreateTemp(os.TempDir(), "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := bytes.Repeat([]byte("1"), 1000)
+	changedData := bytes.Repeat([]byte("2"), 1000)
+	_, err = f.Write(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.Sync()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs := FS{Root: os.TempDir(), Compress: true, CacheDuration: time.Second * 60}
+	h := fs.NewRequestHandler()
+	var ctx RequestCtx
+	var req Request
+	req.Header.Set("Accept-Encoding", "zstd")
+	req.SetRequestURI("http://foobar.com/" + strings.TrimPrefix(f.Name(), os.TempDir()))
+	ctx.Init(&req, nil, nil)
+	h(&ctx)
+	if !bytes.Equal(ctx.Response.Header.ContentEncoding(), []byte("zstd")) {
+		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ctx.Response.Header.ContentEncoding(), "zstd")
+	}
+	ctx.Response.Reset()
+	_, err = f.Seek(0, io.SeekStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.Write(changedData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	h(&ctx)
+	if !bytes.Equal(ctx.Response.Header.ContentEncoding(), []byte("zstd")) {
+		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ctx.Response.Header.ContentEncoding(), "zstd")
+	}
+	d, err := acquireZstdReader(strings.NewReader(string(ctx.Response.Body())))
+	if err != nil {
+		t.Fatalf("invalid zstd reader")
+	}
+	plainText, err := io.ReadAll(d)
+	d.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(plainText, data) {
+		t.Fatalf("Unexpected response body %q. Expecting %q . Zstd cache doesn't work", plainText, data)
+	}
+	ctx.Request.Header.Del("Accept-Encoding")
+	ctx.Response.Reset()
+	h(&ctx)
+	if !bytes.Equal(ctx.Response.Header.ContentEncoding(), []byte("")) {
+		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ctx.Response.Header.ContentEncoding(), "")
+	}
+	if !bytes.Equal(ctx.Response.Body(), changedData) {
+		t.Fatalf("Unexpected response body %q. Expecting %q", ctx.Response.Body(), data)
 	}
 }

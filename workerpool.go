@@ -15,29 +15,30 @@ import (
 //
 // Such a scheme keeps CPU caches hot (in theory).
 type workerPool struct {
+	workerChanPool sync.Pool
+
+	Logger Logger
+
 	// Function for serving server connections.
 	// It must leave c unclosed.
 	WorkerFunc ServeHandler
 
-	MaxWorkersCount int
+	stopCh chan struct{}
 
-	LogAllErrors bool
-
-	MaxIdleWorkerDuration time.Duration
-
-	Logger Logger
-
-	lock         sync.Mutex
-	workersCount int
-	mustStop     bool
+	connState func(net.Conn, ConnState)
 
 	ready []*workerChan
 
-	stopCh chan struct{}
+	MaxWorkersCount int
 
-	workerChanPool sync.Pool
+	MaxIdleWorkerDuration time.Duration
 
-	connState func(net.Conn, ConnState)
+	workersCount int
+
+	lock sync.Mutex
+
+	LogAllErrors bool
+	mustStop     bool
 }
 
 type workerChan struct {
@@ -51,7 +52,7 @@ func (wp *workerPool) Start() {
 	}
 	wp.stopCh = make(chan struct{})
 	stopCh := wp.stopCh
-	wp.workerChanPool.New = func() interface{} {
+	wp.workerChanPool.New = func() any {
 		return &workerChan{
 			ch: make(chan net.Conn, workerChanCap),
 		}
@@ -110,9 +111,9 @@ func (wp *workerPool) clean(scratch *[]*workerChan) {
 	n := len(ready)
 
 	// Use binary-search algorithm to find out the index of the least recently worker which can be cleaned up.
-	l, r, mid := 0, n-1, 0
+	l, r := 0, n-1
 	for l <= r {
-		mid = (l + r) / 2
+		mid := (l + r) / 2
 		if criticalTime.After(wp.ready[mid].lastUseTime) {
 			l = mid + 1
 		} else {
@@ -238,7 +239,6 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			_ = c.Close()
 			wp.connState(c, StateClosed)
 		}
-		c = nil
 
 		if !wp.release(ch) {
 			break
