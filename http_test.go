@@ -3174,3 +3174,28 @@ func TestRespCopeToRace(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestGetTimeOut(t *testing.T) {
+
+	tests := []struct {
+		name     string
+		timeout  time.Duration
+		expected string
+	}{
+		{"Timeout set to 0", 0, "0s"},
+		{"Timeout set to 5s", 5 * time.Second, "5s"},
+		{"Timeout set to 1m", 1 * time.Minute, "1m0s"},
+		{"Timeout set to 500ms", 500 * time.Millisecond, "500ms"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+
+			req := &Request{timeout: test.timeout}
+
+			if got := req.GetTimeOut(); got != test.expected {
+				t.Errorf("GetTimeOut() = %v, want %v", got, test.expected)
+			}
+		})
+	}
+}
