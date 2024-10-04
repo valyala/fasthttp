@@ -192,9 +192,9 @@ func (req *Request) SetConnectionClose() {
 	req.Header.SetConnectionClose()
 }
 
-// Get Request timeout as string
-func (req *Request) GetTimeOut() string {
-	return req.timeout.String()
+// Get Request timeout
+func (req *Request) GetTimeOut() time.Duration {
+	return req.timeout
 }
 
 // SendFile registers file on the given path to be used as response body
