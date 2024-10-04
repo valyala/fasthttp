@@ -192,7 +192,12 @@ func (req *Request) SetConnectionClose() {
 	req.Header.SetConnectionClose()
 }
 
-// Get Request timeout
+// GetTimeOut retrieves the timeout duration set for the Request.
+//
+// This method returns a time.Duration that determines how long the request
+// can wait before it times out. In the default use case, the timeout applies
+// to the entire request lifecycle, including both receiving the response
+// headers and the response body.
 func (req *Request) GetTimeOut() time.Duration {
 	return req.timeout
 }
