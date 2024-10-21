@@ -3502,7 +3502,7 @@ func TestRevertPull1233(t *testing.T) {
 			conn, err := ln.Accept()
 			if err != nil {
 				if !strings.Contains(err.Error(), "closed") {
-					t.Errorf(err.Error())
+					t.Error(err)
 				}
 				return
 			}
@@ -3512,7 +3512,7 @@ func TestRevertPull1233(t *testing.T) {
 			}
 			err = conn.(*net.TCPConn).SetLinger(0)
 			if err != nil {
-				t.Errorf(err.Error())
+				t.Error(err)
 			}
 			conn.Close()
 		}

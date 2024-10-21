@@ -9,8 +9,10 @@ linters:
   enable-all: true
   disable:
     - cyclop
+    - copyloopvar
     - depguard
     - dupl
+    - err113
     - errname
     - errorlint
     - exhaustive
@@ -25,8 +27,10 @@ linters:
     - gomnd
     - gosec
     - inamedparam
+    - intrange
     - ireturn
     - maintidx
+    - mnd
     - nakedret
     - nestif
     - nlreturn
@@ -46,6 +50,8 @@ linters:
     # Deprecated linters
     - deadcode
     - exhaustivestruct
+    - exportloopref
+    - execinquery
     - golint
     - ifshort
     - interfacer
