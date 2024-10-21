@@ -1,9 +1,8 @@
 package fasthttpproxy
 
 import (
-	"golang.org/x/net/http/httpproxy"
-
 	"github.com/valyala/fasthttp"
+	"golang.org/x/net/http/httpproxy"
 )
 
 // FasthttpSocksDialer returns a fasthttp.DialFunc that dials using

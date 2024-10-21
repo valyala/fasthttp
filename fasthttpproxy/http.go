@@ -3,9 +3,8 @@ package fasthttpproxy
 import (
 	"time"
 
-	"golang.org/x/net/http/httpproxy"
-
 	"github.com/valyala/fasthttp"
+	"golang.org/x/net/http/httpproxy"
 )
 
 // FasthttpHTTPDialer returns a fasthttp.DialFunc that dials using
@@ -57,7 +56,10 @@ func FasthttpHTTPDialerDualStack(proxy string) fasthttp.DialFunc {
 //		Dial: fasthttpproxy.FasthttpHTTPDialerDualStackTimeout("username:password@localhost:9050", time.Second * 2),
 //	}
 func FasthttpHTTPDialerDualStackTimeout(proxy string, timeout time.Duration) fasthttp.DialFunc {
-	d := Dialer{Config: httpproxy.Config{HTTPProxy: proxy, HTTPSProxy: proxy}, Timeout: timeout, ConnectTimeout: timeout, DialDualStack: true}
+	d := Dialer{
+		Config: httpproxy.Config{HTTPProxy: proxy, HTTPSProxy: proxy}, Timeout: timeout, ConnectTimeout: timeout,
+		DialDualStack: true,
+	}
 	dialFunc, _ := d.GetDialFunc(false)
 	return dialFunc
 }
