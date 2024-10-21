@@ -57,7 +57,10 @@ func FasthttpHTTPDialerDualStack(proxy string) fasthttp.DialFunc {
 //		Dial: fasthttpproxy.FasthttpHTTPDialerDualStackTimeout("username:password@localhost:9050", time.Second * 2),
 //	}
 func FasthttpHTTPDialerDualStackTimeout(proxy string, timeout time.Duration) fasthttp.DialFunc {
-	d := Dialer{Config: httpproxy.Config{HTTPProxy: proxy, HTTPSProxy: proxy}, Timeout: timeout, ConnectTimeout: timeout, DialDualStack: true}
+	d := Dialer{
+		Config: httpproxy.Config{HTTPProxy: proxy, HTTPSProxy: proxy}, Timeout: timeout, ConnectTimeout: timeout,
+		DialDualStack: true,
+	}
 	dialFunc, _ := d.GetDialFunc(false)
 	return dialFunc
 }
