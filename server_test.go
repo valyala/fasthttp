@@ -4414,3 +4414,13 @@ func TestRequestBodyStreamReadIssue1816(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
+	var r Request
+	var requestCtx RequestCtx
+	requestCtx.Init(&r, nil, nil)
+	err := requestCtx.Err()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
