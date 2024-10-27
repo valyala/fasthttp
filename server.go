@@ -2789,6 +2789,7 @@ func (ctx *RequestCtx) Value(key any) any {
 }
 
 var fakeServer = &Server{
+	done: make(chan struct{}),
 	// Initialize concurrencyCh for TimeoutHandler
 	concurrencyCh: make(chan struct{}, DefaultConcurrency),
 }
