@@ -65,6 +65,7 @@ linters-settings:
   revive:
     # https://github.com/mgechev/revive/blob/master/RULES_DESCRIPTIONS.md
     rules:
+      - name: indent-error-flow
       - name: use-any
   lll:
     line-length: 130

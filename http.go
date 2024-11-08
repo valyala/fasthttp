@@ -1590,9 +1590,8 @@ func (req *Request) Write(w *bufio.Writer) error {
 		if len(req.Header.Host()) == 0 {
 			if len(host) == 0 {
 				return errRequestHostRequired
-			} else {
-				req.Header.SetHostBytes(host)
 			}
+			req.Header.SetHostBytes(host)
 		} else if !req.UseHostHeader {
 			req.Header.SetHostBytes(host)
 		}

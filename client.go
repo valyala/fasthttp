@@ -3060,9 +3060,8 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 			return nil
 		})
 		return false, nil
-	} else {
-		hc.releaseReader(br)
 	}
+	hc.releaseReader(br)
 
 	if closeConn {
 		hc.closeConn(cc)
