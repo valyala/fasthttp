@@ -1217,7 +1217,7 @@ func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
 		})
 	}
 	if len(h.trailer) > 0 {
-		f(strTrailer, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+		f(strTrailer, appendArgsKeyBytes(h.trailer, strCommaSpace))
 	}
 	visitArgs(h.h, f)
 	if h.ConnectionClose() {
@@ -1281,7 +1281,7 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 		f(strUserAgent, userAgent)
 	}
 	if len(h.trailer) > 0 {
-		f(strTrailer, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+		f(strTrailer, appendArgsKeyBytes(h.trailer, strCommaSpace))
 	}
 
 	h.collectCookies()
@@ -1927,7 +1927,7 @@ func (h *ResponseHeader) peek(key []byte) []byte {
 	case HeaderSetCookie:
 		return appendResponseCookieBytes(nil, h.cookies)
 	case HeaderTrailer:
-		return appendArgsKeyBytes(nil, h.trailer, strCommaSpace)
+		return appendArgsKeyBytes(h.trailer, strCommaSpace)
 	default:
 		return peekArgBytes(h.h, key)
 	}
@@ -1954,7 +1954,7 @@ func (h *RequestHeader) peek(key []byte) []byte {
 		}
 		return peekArgBytes(h.h, key)
 	case HeaderTrailer:
-		return appendArgsKeyBytes(nil, h.trailer, strCommaSpace)
+		return appendArgsKeyBytes(h.trailer, strCommaSpace)
 	default:
 		return peekArgBytes(h.h, key)
 	}
@@ -2001,7 +2001,7 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 		}
 	case HeaderTrailer:
-		h.mulHeader = append(h.mulHeader, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+		h.mulHeader = append(h.mulHeader, appendArgsKeyBytes(h.trailer, strCommaSpace))
 	default:
 		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 	}
@@ -2045,7 +2045,7 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 	case HeaderSetCookie:
 		h.mulHeader = append(h.mulHeader, appendResponseCookieBytes(nil, h.cookies))
 	case HeaderTrailer:
-		h.mulHeader = append(h.mulHeader, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+		h.mulHeader = append(h.mulHeader, appendArgsKeyBytes(h.trailer, strCommaSpace))
 	default:
 		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 	}
@@ -2536,7 +2536,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	}
 
 	if len(h.trailer) > 0 {
-		dst = appendHeaderLine(dst, strTrailer, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+		dst = appendHeaderLine(dst, strTrailer, appendArgsKeyBytes(h.trailer, strCommaSpace))
 	}
 
 	n := len(h.cookies)
@@ -2669,7 +2669,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	}
 
 	if len(h.trailer) > 0 {
-		dst = appendHeaderLine(dst, strTrailer, appendArgsKeyBytes(nil, h.trailer, strCommaSpace))
+		dst = appendHeaderLine(dst, strTrailer, appendArgsKeyBytes(h.trailer, strCommaSpace))
 	}
 
 	// there is no need in h.collectCookies() here, since if cookies aren't collected yet,
@@ -3606,7 +3606,8 @@ func AppendNormalizedHeaderKeyBytes(dst, key []byte) []byte {
 	return AppendNormalizedHeaderKey(dst, b2s(key))
 }
 
-func appendArgsKeyBytes(dst []byte, args []argsKV, sep []byte) []byte {
+func appendArgsKeyBytes(args []argsKV, sep []byte) []byte {
+	var dst []byte
 	for i, n := 0, len(args); i < n; i++ {
 		kv := &args[i]
 		dst = append(dst, kv.key...)
