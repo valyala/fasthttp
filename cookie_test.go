@@ -213,6 +213,13 @@ func TestCookieMaxAge(t *testing.T) {
 	if s != "foo=bar; expires=Thu, 01 Jan 1970 00:01:40 GMT" {
 		t.Fatalf("missing expires %q", s)
 	}
+
+	c.SetMaxAge(-100)
+	result := strings.ToLower(c.String())
+	const expectedMaxAge0 = "max-age=0"
+	if !strings.Contains(result, expectedMaxAge0) {
+		t.Fatalf("Unexpected cookie %q. Should contain %q", result, expectedMaxAge0)
+	}
 }
 
 func TestCookieHttpOnly(t *testing.T) {
