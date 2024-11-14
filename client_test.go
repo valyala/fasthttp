@@ -750,7 +750,7 @@ func TestClientReadTimeout(t *testing.T) {
 
 	c := &HostClient{
 		ReadTimeout:               time.Millisecond * 400,
-		MaxIdemponentCallAttempts: 1,
+		MaxIdempotentCallAttempts: 1,
 		Dial: func(addr string) (net.Conn, error) {
 			return ln.Dial()
 		},
@@ -793,7 +793,7 @@ func TestClientReadTimeout(t *testing.T) {
 	case <-done:
 		// This shouldn't take longer than the timeout times the number of requests it is going to try to do.
 		// Give it an extra second just to be sure.
-	case <-time.After(c.ReadTimeout*time.Duration(c.MaxIdemponentCallAttempts) + time.Second):
+	case <-time.After(c.ReadTimeout*time.Duration(c.MaxIdempotentCallAttempts) + time.Second):
 		t.Fatal("Client.ReadTimeout didn't work")
 	}
 }
@@ -3461,7 +3461,7 @@ func TestClientHeadWithBody(t *testing.T) {
 			return ln.Dial()
 		},
 		ReadTimeout:               time.Millisecond * 10,
-		MaxIdemponentCallAttempts: 1,
+		MaxIdempotentCallAttempts: 1,
 	}
 
 	req := AcquireRequest()

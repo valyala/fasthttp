@@ -207,7 +207,7 @@ type Client struct {
 	// When the client encounters an error during a request, the behavior—whether to retry
 	// and whether to reset the request timeout—should be determined
 	// based on the return value of this field.
-	// This field is only effective within the range of MaxIdemponentCallAttempts.
+	// This field is only effective within the range of MaxIdempotentCallAttempts.
 	RetryIfErr RetryIfErrFunc
 
 	// ConfigureClient configures the fasthttp.HostClient.
@@ -239,8 +239,8 @@ type Client struct {
 
 	// Maximum number of attempts for idempotent calls.
 	//
-	// DefaultMaxIdemponentCallAttempts is used if not set.
-	MaxIdemponentCallAttempts int
+	// DefaultMaxIdempotentCallAttempts is used if not set.
+	MaxIdempotentCallAttempts int
 
 	// Per-connection buffer size for responses' reading.
 	// This also limits the maximum header size.
@@ -536,7 +536,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 				MaxConns:                      c.MaxConnsPerHost,
 				MaxIdleConnDuration:           c.MaxIdleConnDuration,
 				MaxConnDuration:               c.MaxConnDuration,
-				MaxIdemponentCallAttempts:     c.MaxIdemponentCallAttempts,
+				MaxIdempotentCallAttempts:     c.MaxIdempotentCallAttempts,
 				ReadBufferSize:                c.ReadBufferSize,
 				WriteBufferSize:               c.WriteBufferSize,
 				ReadTimeout:                   c.ReadTimeout,
@@ -632,8 +632,8 @@ const DefaultMaxConnsPerHost = 512
 // connection is closed.
 const DefaultMaxIdleConnDuration = 10 * time.Second
 
-// DefaultMaxIdemponentCallAttempts is the default idempotent calls attempts count.
-const DefaultMaxIdemponentCallAttempts = 5
+// DefaultMaxIdempotentCallAttempts is the default idempotent calls attempts count.
+const DefaultMaxIdempotentCallAttempts = 5
 
 // DialFunc must establish connection to addr.
 //
@@ -744,7 +744,7 @@ type HostClient struct {
 	// When the client encounters an error during a request, the behavior—whether to retry
 	// and whether to reset the request timeout—should be determined
 	// based on the return value of this field.
-	// This field is only effective within the range of MaxIdemponentCallAttempts.
+	// This field is only effective within the range of MaxIdempotentCallAttempts.
 	RetryIfErr RetryIfErrFunc
 
 	connsWait *wantConnQueue
@@ -793,11 +793,11 @@ type HostClient struct {
 
 	// Maximum number of attempts for idempotent calls.
 	//
-	// A value of 0 or a negative value represents using DefaultMaxIdemponentCallAttempts.
+	// A value of 0 or a negative value represents using DefaultMaxIdempotentCallAttempts.
 	// For example, a value of 1 means the request will be executed only once,
 	// while 2 means the request will be executed at most twice.
 	// The RetryIfErr and RetryIf fields can invalidate remaining attempts.
-	MaxIdemponentCallAttempts int
+	MaxIdempotentCallAttempts int
 
 	// Per-connection buffer size for responses' reading.
 	// This also limits the maximum header size.
@@ -1318,9 +1318,9 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		retry        bool
 		resetTimeout bool
 	)
-	maxAttempts := c.MaxIdemponentCallAttempts
+	maxAttempts := c.MaxIdempotentCallAttempts
 	if maxAttempts <= 0 {
-		maxAttempts = DefaultMaxIdemponentCallAttempts
+		maxAttempts = DefaultMaxIdempotentCallAttempts
 	}
 	attempts := 0
 	hasBodyStream := req.IsBodyStream()
