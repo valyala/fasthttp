@@ -77,6 +77,9 @@ type Cookie struct {
 	bufK []byte
 	bufV []byte
 
+	// maxAge=0 means no 'max-age' attribute specified.
+	// maxAge<0 means delete cookie now, equivalently 'max-age=0'
+	// maxAge>0 means 'max-age' attribute present and given in seconds
 	maxAge int
 
 	sameSite    CookieSameSite
@@ -193,7 +196,10 @@ func (c *Cookie) MaxAge() int {
 // SetMaxAge sets cookie expiration time based on seconds. This takes precedence
 // over any absolute expiry set on the cookie.
 //
-// Set max age to 0 to unset.
+// 'max-age' is set when the maxAge is non-zero. That is, if maxAge = 0,
+// the 'max-age' is unset. If maxAge < 0, it indicates that the cookie should
+// be deleted immediately, equivalent to 'max-age=0'. This behavior is
+// consistent with the Go standard library's net/http package.
 func (c *Cookie) SetMaxAge(seconds int) {
 	c.maxAge = seconds
 }
@@ -278,11 +284,16 @@ func (c *Cookie) AppendBytes(dst []byte) []byte {
 	}
 	dst = append(dst, c.value...)
 
-	if c.maxAge > 0 {
+	if c.maxAge != 0 {
 		dst = append(dst, ';', ' ')
 		dst = append(dst, strCookieMaxAge...)
 		dst = append(dst, '=')
-		dst = AppendUint(dst, c.maxAge)
+		if c.maxAge < 0 {
+			// See https://github.com/valyala/fasthttp/issues/1900
+			dst = AppendUint(dst, 0)
+		} else {
+			dst = AppendUint(dst, c.maxAge)
+		}
 	} else if !c.expire.IsZero() {
 		c.bufV = AppendHTTPDate(c.bufV[:0], c.expire)
 		dst = append(dst, ';', ' ')
