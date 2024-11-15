@@ -2515,7 +2515,7 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 			// This can lead to request smuggling issues with some reverse proxies.
 			if c == '\n' {
 				return -1, ErrBrokenChunk{
-					error: fmt.Errorf("invalid character '\\n' after chunk size"),
+					error: errors.New("invalid character '\\n' after chunk size"),
 				}
 			}
 			continue
