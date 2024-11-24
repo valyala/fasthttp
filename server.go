@@ -2753,8 +2753,8 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 	done := ctx.s.done
 
 	if done == nil {
-		done = make(chan struct{}, 1)
-		done <- struct{}{}
+		done = make(chan struct{})
+		close(done)
 		return done
 	}
 	return done
