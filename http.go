@@ -2505,17 +2505,24 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 		c, err := r.ReadByte()
 		if err != nil {
 			return -1, ErrBrokenChunk{
-				error: fmt.Errorf("cannot read '\r' char at the end of chunk size: %w", err),
+				error: fmt.Errorf("cannot read '\\r' char at the end of chunk size: %w", err),
 			}
 		}
 		// Skip chunk extension after chunk size.
 		// Add support later if anyone needs it.
 		if c != '\r' {
+			// Security: Don't allow newlines in chunk extensions.
+			// This can lead to request smuggling issues with some reverse proxies.
+			if c == '\n' {
+				return -1, ErrBrokenChunk{
+					error: errors.New("invalid character '\\n' after chunk size"),
+				}
+			}
 			continue
 		}
 		if err := r.UnreadByte(); err != nil {
 			return -1, ErrBrokenChunk{
-				error: fmt.Errorf("cannot unread '\r' char at the end of chunk size: %w", err),
+				error: fmt.Errorf("cannot unread '\\r' char at the end of chunk size: %w", err),
 			}
 		}
 		break
