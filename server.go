@@ -1911,30 +1911,25 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	// Now we just have to wait until all workers are done or timeout.
 	ticker := time.NewTicker(time.Millisecond * 100)
 	defer ticker.Stop()
-END:
+
 	for {
 		s.closeIdleConns()
 
 		if open := atomic.LoadInt32(&s.open); open == 0 {
-			err = lnerr
 			// There may be a pending request to call ctx.Done(). Therefore, we only set it to nil when open == 0.
 			s.done = nil
-			break
+			return lnerr
 		}
 		// This is not an optimal solution but using a sync.WaitGroup
 		// here causes data races as it's hard to prevent Add() to be called
 		// while Wait() is waiting.
 		select {
 		case <-ctx.Done():
-			err = ctx.Err()
-			break END
+			return ctx.Err()
 		case <-ticker.C:
 			continue
 		}
 	}
-
-	s.ln = nil
-	return err
 }
 
 func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.Conn, error) {
@@ -2933,6 +2928,7 @@ func (s *Server) closeListenersLocked() error {
 			err = cerr
 		}
 	}
+	s.ln = nil
 	return err
 }
 
