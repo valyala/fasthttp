@@ -1900,11 +1900,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 		return nil
 	}
 
-	for _, ln := range s.ln {
-		if err = ln.Close(); err != nil {
-			return err
-		}
-	}
+	lnerr := s.closeListenersLocked()
 
 	if s.done != nil {
 		close(s.done)
@@ -1920,6 +1916,9 @@ END:
 		s.closeIdleConns()
 
 		if open := atomic.LoadInt32(&s.open); open == 0 {
+			err = lnerr
+			// There may be a pending request to call ctx.Done(). Therefore, we only set it to nil when open == 0.
+			s.done = nil
 			break
 		}
 		// This is not an optimal solution but using a sync.WaitGroup
@@ -1934,10 +1933,6 @@ END:
 		}
 	}
 
-	// There may be a surviving request to call ctx.Done().
-	if err == nil {
-		s.done = nil
-	}
 	s.ln = nil
 	return err
 }
@@ -2929,6 +2924,16 @@ func (s *Server) closeIdleConns() {
 		}
 	}
 	s.idleConnsMu.Unlock()
+}
+
+func (s *Server) closeListenersLocked() error {
+	var err error
+	for _, ln := range s.ln {
+		if cerr := ln.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
+	return err
 }
 
 // A ConnState represents the state of a client connection to a server.
