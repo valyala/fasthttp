@@ -1887,6 +1887,8 @@ func (s *Server) Shutdown() error {
 //
 // ShutdownWithContext does not close keepalive connections so it's recommended to set ReadTimeout and IdleTimeout
 // to something else than 0.
+//
+// When ShutdownWithContext returns errors, any operation to the Server is unavailable.
 func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1932,7 +1934,10 @@ END:
 		}
 	}
 
-	s.done = nil
+	// There may be a surviving request to call ctx.Done().
+	if err == nil {
+		s.done = nil
+	}
 	s.ln = nil
 	return err
 }
@@ -2749,15 +2754,7 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // Note: Because creating a new channel for every request is just too expensive, so
 // RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Done() <-chan struct{} {
-	// fix use new variables to prevent panic caused by modifying the original done chan to nil.
-	done := ctx.s.done
-
-	if done == nil {
-		done = make(chan struct{}, 1)
-		done <- struct{}{}
-		return done
-	}
-	return done
+	return ctx.s.done
 }
 
 // Err returns a non-nil error value after Done is closed,
