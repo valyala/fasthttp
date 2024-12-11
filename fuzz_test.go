@@ -3,6 +3,8 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -91,6 +93,38 @@ func FuzzURIUpdateBytes(f *testing.F) {
 		w := bytes.Buffer{}
 		if _, err := u.WriteTo(&w); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func FuzzURIParse(f *testing.F) {
+	f.Add(`http://foobar.com/aaa/bb?cc#dd`)
+	f.Add(`http://google.com?github.com`)
+	f.Add(`http://google.com#@github.com`)
+
+	f.Fuzz(func(t *testing.T, uri string) {
+		var u URI
+
+		uri = strings.ToLower(uri)
+
+		if !strings.HasPrefix(uri, "http://") && !strings.HasPrefix(uri, "https://") {
+			return
+		}
+
+		if u.Parse(nil, []byte(uri)) != nil {
+			return
+		}
+
+		nu, err := url.Parse(uri)
+		if err != nil {
+			return
+		}
+
+		if string(u.Host()) != nu.Host {
+			t.Fatalf("%q: unexpected host: %q. Expecting %q", uri, u.Host(), nu.Host)
+		}
+		if string(u.QueryString()) != nu.RawQuery {
+			t.Fatalf("%q: unexpected query string: %q. Expecting %q", uri, u.QueryString(), nu.RawQuery)
 		}
 	})
 }

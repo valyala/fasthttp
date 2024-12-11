@@ -484,3 +484,17 @@ func TestNoOverwriteInput(t *testing.T) {
 		t.Errorf("%q", u.String())
 	}
 }
+
+func TestFragmentInHost(t *testing.T) {
+	url := "http://google.com#@github.com"
+	u := AcquireURI()
+	defer ReleaseURI(u)
+
+	if err := u.Parse(nil, []byte(url)); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := string(u.Host()); got != "google.com" {
+		t.Fatalf("Unexpected host %q. Expected %q", got, "google.com")
+	}
+}
