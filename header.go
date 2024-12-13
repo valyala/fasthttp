@@ -3011,11 +3011,19 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			return 0, fmt.Errorf("invalid header key %q", s.key)
 		}
 
+		spaceIncluded := false
 		for _, ch := range s.key {
 			if !validHeaderFieldByte(ch) {
+				if ch == ' ' {
+					spaceIncluded = true
+					break
+				}
 				h.connectionClose = true
 				return 0, fmt.Errorf("invalid header key %q", s.key)
 			}
+		}
+		if spaceIncluded {
+			continue
 		}
 		for _, ch := range s.value {
 			if !validHeaderValueByte(ch) {
