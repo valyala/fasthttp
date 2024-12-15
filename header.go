@@ -252,15 +252,13 @@ func (h *ResponseHeader) SetContentLength(contentLength int) {
 	if contentLength >= 0 {
 		h.contentLengthBytes = AppendUint(h.contentLengthBytes[:0], contentLength)
 		h.h = delAllArgsBytes(h.h, strTransferEncoding)
-	} else {
+		return
+	} else if contentLength == -1 {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
-		value := strChunked
-		if contentLength == -2 {
-			h.SetConnectionClose()
-			value = strIdentity
-		}
-		h.h = setArgBytes(h.h, strTransferEncoding, value, argsHasValue)
+		h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
+		return
 	}
+	h.SetConnectionClose()
 }
 
 func (h *ResponseHeader) mustSkipContentLength() bool {
@@ -3096,7 +3094,11 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}
 	if h.contentLength == -2 && !h.ConnectionUpgrade() && !h.mustSkipContentLength() {
-		h.h = setArgBytes(h.h, strTransferEncoding, strIdentity, argsHasValue)
+		// According to modern HTTP/1.1 specifications (RFC 7230):
+		// `identity` as a value for `Transfer-Encoding` was removed
+		// in the errata to RFC 2616.
+		// Therefore, we do not include `Transfer-Encoding: identity` in the header.
+		// See: https://github.com/valyala/fasthttp/issues/1909
 		h.connectionClose = true
 	}
 	if h.noHTTP11 && !h.connectionClose {

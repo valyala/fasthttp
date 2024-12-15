@@ -2551,6 +2551,10 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	if !h.ConnectionClose() {
 		t.Fatalf("expecting connection: close for identity response")
 	}
+	// See https://github.com/valyala/fasthttp/issues/1909
+	if hasArg(h.h, HeaderTransferEncoding) {
+		t.Fatalf("unexpected header: 'Transfer-Encoding' should not be present in parsed headers")
+	}
 
 	// no content-type
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\r\nContent-Length: 123\r\n\r\nfoiaaa",
