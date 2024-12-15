@@ -1147,6 +1147,10 @@ func doRequestFollowRedirects(
 			break
 		}
 		url = getRedirectURL(url, location, req.DisableRedirectPathNormalizing)
+
+		if string(req.Header.Method()) == "POST" && (statusCode == 301 || statusCode == 302) {
+			req.Header.SetMethod(MethodGet)
+		}
 	}
 
 	return statusCode, body, err
