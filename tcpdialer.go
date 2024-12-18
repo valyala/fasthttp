@@ -159,10 +159,22 @@ type TCPDialer struct {
 	// DNSCacheDuration may be used to override the default DNS cache duration (DefaultDNSCacheDuration)
 	DNSCacheDuration time.Duration
 
+	// TCPKeepalivePeriod is the duration the connection needs to
+	// remain idle before TCP starts sending keepalive probes.
+	//
+	// This field is only effective when TCPKeepalive is set to true.
+	// A zero value indicates that the operating system's default setting will be used.
+	TCPKeepalivePeriod time.Duration
+
 	once sync.Once
 
 	// DisableDNSResolution may be used to disable DNS resolution
 	DisableDNSResolution bool
+
+	// Whether the operating system should send tcp keep-alive messages on the tcp connection.
+	//
+	// By default tcp keep-alive connections are disabled.
+	TCPKeepalive bool
 }
 
 // Dial dials the given TCP addr using tcp4.
@@ -344,6 +356,9 @@ func (d *TCPDialer) tryDial(
 	if d.LocalAddr != nil {
 		dialer.LocalAddr = d.LocalAddr
 	}
+	// Overriding the default behavior of net.Dialer,
+	// whether TCP keepalive is enabled is determined by Dialer.KeepAlive.
+	dialer.KeepAlive = -1
 
 	ctx, cancelCtx := context.WithDeadline(context.Background(), deadline)
 	defer cancelCtx()
@@ -353,6 +368,18 @@ func (d *TCPDialer) tryDial(
 			return nil, wrapDialWithUpstream(ErrDialTimeout, addr)
 		}
 		return nil, wrapDialWithUpstream(err, addr)
+	}
+	if tc, ok := conn.(*net.TCPConn); ok && d.TCPKeepalive {
+		if err = tc.SetKeepAlive(d.TCPKeepalive); err != nil {
+			_ = tc.Close()
+			return nil, err
+		}
+		if d.TCPKeepalivePeriod > 0 {
+			if err = tc.SetKeepAlivePeriod(d.TCPKeepalivePeriod); err != nil {
+				_ = tc.Close()
+				return nil, err
+			}
+		}
 	}
 	return conn, nil
 }
