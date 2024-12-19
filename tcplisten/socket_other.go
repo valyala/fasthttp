@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build linux || dragonfly || freebsd || netbsd || openbsd || rumprun
 
 package tcplisten
 

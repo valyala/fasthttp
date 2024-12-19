@@ -1,3 +1,5 @@
+//go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd || rumprun
+
 package tcplisten
 
 import (
@@ -37,8 +39,10 @@ func TestConfigBacklog(t *testing.T) {
 }
 
 func testConfig(t *testing.T, cfg Config) {
-	testConfigV(t, cfg, "tcp4", "localhost:10081")
-	testConfigV(t, cfg, "tcp6", "ip6-localhost:10081")
+	testConfigV(t, cfg, "tcp", "localhost:10083")
+	testConfigV(t, cfg, "tcp", "[::1]:10083")
+	testConfigV(t, cfg, "tcp4", "localhost:10083")
+	testConfigV(t, cfg, "tcp6", "[::1]:10083")
 }
 
 func testConfigV(t *testing.T, cfg Config, network, addr string) {
@@ -122,7 +126,7 @@ func serveEcho(t *testing.T, ln net.Listener) {
 		}
 		req, err := io.ReadAll(c)
 		if err != nil {
-			t.Fatalf("unepxected error when reading request: %s", err)
+			t.Fatalf("unexpected error when reading request: %s", err)
 		}
 		if _, err = c.Write(req); err != nil {
 			t.Fatalf("unexpected error when writing response: %s", err)

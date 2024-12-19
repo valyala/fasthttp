@@ -1,3 +1,5 @@
+//go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd || rumprun
+
 package tcplisten
 
 import (
