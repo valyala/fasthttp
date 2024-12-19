@@ -2112,7 +2112,7 @@ func (h *ResponseHeader) PeekKeys() [][]byte {
 func (h *ResponseHeader) PeekTrailerKeys() [][]byte {
 	h.mulHeader = h.mulHeader[:0]
 	for i, n := 0, len(h.trailer); i < n; i++ {
-		h.mulHeader = append(h.mulHeader, []byte(h.trailer[i]))
+		h.mulHeader = append(h.mulHeader, h.trailer[i])
 	}
 	return h.mulHeader
 }
