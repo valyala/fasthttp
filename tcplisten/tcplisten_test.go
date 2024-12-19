@@ -2,7 +2,7 @@ package tcplisten
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"testing"
 	"time"
@@ -78,7 +78,7 @@ func testConfigV(t *testing.T, cfg Config, network, addr string) {
 		var resp []byte
 		ch := make(chan struct{})
 		go func() {
-			if resp, err = ioutil.ReadAll(c); err != nil {
+			if resp, err = io.ReadAll(c); err != nil {
 				t.Fatalf("%d. unexpected error when reading response: %s", i, err)
 			}
 			close(ch)
@@ -118,7 +118,7 @@ func serveEcho(t *testing.T, ln net.Listener) {
 		if err != nil {
 			break
 		}
-		req, err := ioutil.ReadAll(c)
+		req, err := io.ReadAll(c)
 		if err != nil {
 			t.Fatalf("unepxected error when reading request: %s", err)
 		}
