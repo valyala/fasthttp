@@ -106,9 +106,9 @@ func maxAckBacklog(n int) int {
 		size = 32
 	}
 
-	var maxUint uint = 1<<size - 1
-	if uint(n) > maxUint {
-		n = int(maxUint)
+	u := 1<<size - 1
+	if n > u {
+		n = u
 	}
 	return n
 }
