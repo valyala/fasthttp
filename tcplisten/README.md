@@ -1,7 +1,4 @@
-[![Build Status](https://travis-ci.org/valyala/tcplisten.svg)](https://travis-ci.org/valyala/tcplisten)
-[![GoDoc](https://godoc.org/github.com/valyala/tcplisten?status.svg)](http://godoc.org/github.com/valyala/tcplisten)
-[![Go Report](https://goreportcard.com/badge/github.com/valyala/tcplisten)](https://goreportcard.com/report/github.com/valyala/tcplisten)
-
+# TCPListen
 
 Package tcplisten provides customizable TCP net.Listener with various
 performance-related options:
@@ -15,7 +12,4 @@ performance-related options:
 
  * TCP_FASTOPEN. See https://lwn.net/Articles/508865/ for details.
 
-
-[Documentation](https://godoc.org/github.com/valyala/tcplisten).
-
-The package is derived from [go_reuseport](https://github.com/kavu/go_reuseport).
+The package is derived from [go_reuseport](https://github.com/valyala/tcplisten).
