@@ -1,4 +1,4 @@
-// +build linux darwin dragonfly freebsd netbsd openbsd rumprun
+//go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd || rumprun
 
 // Package tcplisten provides customizable TCP net.Listener with various
 // performance-related options:
@@ -12,7 +12,7 @@
 //
 //   - TCP_FASTOPEN. See https://lwn.net/Articles/508865/ for details.
 //
-// The package is derived from https://github.com/kavu/go_reuseport .
+// The package is derived from https://github.com/valyala/tcplisten
 package tcplisten
 
 import (
@@ -129,10 +129,6 @@ func (cfg *Config) fdSetup(fd int, sa syscall.Sockaddr, addr string) error {
 }
 
 func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err error) {
-	if network != "tcp4" && network != "tcp6" {
-		return nil, -1, errors.New("only tcp4 and tcp6 network is supported")
-	}
-
 	tcpAddr, err := net.ResolveTCPAddr(network, addr)
 	if err != nil {
 		return nil, -1, err
@@ -156,7 +152,22 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 			sa6.ZoneId = uint32(ifi.Index)
 		}
 		return &sa6, syscall.AF_INET6, nil
+	case "tcp":
+		var sa6 syscall.SockaddrInet6
+		sa6.Port = tcpAddr.Port
+		if tcpAddr.IP == nil {
+			tcpAddr.IP = net.IPv4(0, 0, 0, 0)
+		}
+		copy(sa6.Addr[:], tcpAddr.IP.To16())
+		if tcpAddr.Zone != "" {
+			ifi, err := net.InterfaceByName(tcpAddr.Zone)
+			if err != nil {
+				return nil, -1, err
+			}
+			sa6.ZoneId = uint32(ifi.Index)
+		}
+		return &sa6, syscall.AF_INET6, nil
 	default:
-		return nil, -1, errors.New("Unknown network type " + network)
+		return nil, -1, errors.New("only tcp, tcp4, or tcp6 is supported: " + network)
 	}
 }
