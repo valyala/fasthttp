@@ -43,7 +43,7 @@ func testConfig(t *testing.T, cfg Config) {
 
 func testConfigV(t *testing.T, cfg Config, network, addr string) {
 	const requestsCount = 1000
-	var serversCount = 1
+	serversCount := 1
 	if cfg.ReusePort {
 		serversCount = 10
 	}

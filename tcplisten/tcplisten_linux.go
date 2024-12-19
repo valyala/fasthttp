@@ -54,7 +54,8 @@ func soMaxConn() (int, error) {
 	}
 	return n, nil
 }
-func kernelVersion() (major int, minor int) {
+
+func kernelVersion() (major, minor int) {
 	var uname syscall.Utsname
 	if err := syscall.Uname(&uname); err != nil {
 		return
@@ -105,9 +106,9 @@ func maxAckBacklog(n int) int {
 		size = 32
 	}
 
-	var max uint = 1<<size - 1
-	if uint(n) > max {
-		n = int(max)
+	var maxUint uint = 1<<size - 1
+	if uint(n) > maxUint {
+		n = int(maxUint)
 	}
 	return n
 }
