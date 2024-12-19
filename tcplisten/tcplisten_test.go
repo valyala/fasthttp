@@ -76,15 +76,17 @@ func testConfigV(t *testing.T, cfg Config, network, addr string) {
 		}
 
 		var resp []byte
-		ch := make(chan struct{})
+		ch := make(chan error)
 		go func() {
-			if resp, err = io.ReadAll(c); err != nil {
-				t.Fatalf("%d. unexpected error when reading response: %s", i, err)
-			}
+			resp, err = io.ReadAll(c)
+			ch <- err
 			close(ch)
 		}()
 		select {
-		case <-ch:
+		case err := <-ch:
+			if err != nil {
+				t.Fatalf("%d. unexpected error when reading response: %s", i, err)
+			}
 		case <-time.After(200 * time.Millisecond):
 			t.Fatalf("%d. timeout when waiting for response: %s", i, err)
 		}
