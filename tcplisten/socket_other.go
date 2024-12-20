@@ -4,16 +4,17 @@ package tcplisten
 
 import (
 	"fmt"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 func newSocketCloexec(domain, typ, proto int) (int, error) {
-	fd, err := syscall.Socket(domain, typ|syscall.SOCK_NONBLOCK|syscall.SOCK_CLOEXEC, proto)
+	fd, err := unix.Socket(domain, typ|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, proto)
 	if err == nil {
 		return fd, nil
 	}
 
-	if err == syscall.EPROTONOSUPPORT || err == syscall.EINVAL {
+	if err == unix.EPROTONOSUPPORT || err == unix.EINVAL {
 		return newSocketCloexecOld(domain, typ, proto)
 	}
 

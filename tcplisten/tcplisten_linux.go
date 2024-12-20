@@ -7,7 +7,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -16,14 +17,14 @@ const (
 )
 
 func enableDeferAccept(fd int) error {
-	if err := syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_DEFER_ACCEPT, 1); err != nil {
+	if err := unix.SetsockoptInt(fd, unix.IPPROTO_TCP, unix.TCP_DEFER_ACCEPT, 1); err != nil {
 		return fmt.Errorf("cannot enable TCP_DEFER_ACCEPT: %s", err)
 	}
 	return nil
 }
 
 func enableFastOpen(fd int) error {
-	if err := syscall.SetsockoptInt(fd, syscall.SOL_TCP, tcpFastOpen, fastOpenQlen); err != nil {
+	if err := unix.SetsockoptInt(fd, unix.SOL_TCP, tcpFastOpen, fastOpenQlen); err != nil {
 		return fmt.Errorf("cannot enable TCP_FASTOPEN(qlen=%d): %s", fastOpenQlen, err)
 	}
 	return nil
@@ -36,7 +37,7 @@ func soMaxConn() (int, error) {
 	if err != nil {
 		// This error may trigger on travis build. Just use SOMAXCONN
 		if os.IsNotExist(err) {
-			return syscall.SOMAXCONN, nil
+			return unix.SOMAXCONN, nil
 		}
 		return -1, err
 	}
@@ -56,8 +57,8 @@ func soMaxConn() (int, error) {
 }
 
 func kernelVersion() (major, minor int) {
-	var uname syscall.Utsname
-	if err := syscall.Uname(&uname); err != nil {
+	var uname unix.Utsname
+	if err := unix.Uname(&uname); err != nil {
 		return
 	}
 

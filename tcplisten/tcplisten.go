@@ -21,7 +21,8 @@ import (
 	"math"
 	"net"
 	"os"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // Config provides options to enable on the returned listener.
@@ -55,13 +56,13 @@ func (cfg *Config) NewListener(network, addr string) (net.Listener, error) {
 		return nil, err
 	}
 
-	fd, err := newSocketCloexec(soType, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
+	fd, err := newSocketCloexec(soType, unix.SOCK_STREAM, unix.IPPROTO_TCP)
 	if err != nil {
 		return nil, err
 	}
 
 	if err = cfg.fdSetup(fd, sa, addr); err != nil {
-		syscall.Close(fd)
+		unix.Close(fd)
 		return nil, err
 	}
 
@@ -81,21 +82,21 @@ func (cfg *Config) NewListener(network, addr string) (net.Listener, error) {
 	return ln, nil
 }
 
-func (cfg *Config) fdSetup(fd int, sa syscall.Sockaddr, addr string) error {
+func (cfg *Config) fdSetup(fd int, sa unix.Sockaddr, addr string) error {
 	var err error
 
-	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
+	if err = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil {
 		return fmt.Errorf("cannot enable SO_REUSEADDR: %w", err)
 	}
 
 	// This should disable Nagle's algorithm in all accepted sockets by default.
 	// Users may enable it with net.TCPConn.SetNoDelay(false).
-	if err = syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1); err != nil {
+	if err = unix.SetsockoptInt(fd, unix.IPPROTO_TCP, unix.TCP_NODELAY, 1); err != nil {
 		return fmt.Errorf("cannot disable Nagle's algorithm: %w", err)
 	}
 
 	if cfg.ReusePort {
-		if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, soReusePort, 1); err != nil {
+		if err = unix.SetsockoptInt(fd, unix.SOL_SOCKET, soReusePort, 1); err != nil {
 			return fmt.Errorf("cannot enable SO_REUSEPORT: %w", err)
 		}
 	}
@@ -112,7 +113,7 @@ func (cfg *Config) fdSetup(fd int, sa syscall.Sockaddr, addr string) error {
 		}
 	}
 
-	if err = syscall.Bind(fd, sa); err != nil {
+	if err = unix.Bind(fd, sa); err != nil {
 		return fmt.Errorf("cannot bind to %q: %w", addr, err)
 	}
 
@@ -122,14 +123,14 @@ func (cfg *Config) fdSetup(fd int, sa syscall.Sockaddr, addr string) error {
 			return fmt.Errorf("cannot determine backlog to pass to listen(2): %w", err)
 		}
 	}
-	if err = syscall.Listen(fd, backlog); err != nil {
+	if err = unix.Listen(fd, backlog); err != nil {
 		return fmt.Errorf("cannot listen on %q: %w", addr, err)
 	}
 
 	return nil
 }
 
-func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err error) {
+func getSockaddr(network, addr string) (sa unix.Sockaddr, soType int, err error) {
 	tcpAddr, err := net.ResolveTCPAddr(network, addr)
 	if err != nil {
 		return nil, -1, err
@@ -137,12 +138,12 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 
 	switch network {
 	case "tcp4":
-		var sa4 syscall.SockaddrInet4
+		var sa4 unix.SockaddrInet4
 		sa4.Port = tcpAddr.Port
 		copy(sa4.Addr[:], tcpAddr.IP.To4())
-		return &sa4, syscall.AF_INET, nil
+		return &sa4, unix.AF_INET, nil
 	case "tcp6":
-		var sa6 syscall.SockaddrInet6
+		var sa6 unix.SockaddrInet6
 		sa6.Port = tcpAddr.Port
 		copy(sa6.Addr[:], tcpAddr.IP.To16())
 		if tcpAddr.Zone != "" {
@@ -155,9 +156,9 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 				return nil, -1, fmt.Errorf("unexpected convert net interface index int to uint32: %w", err)
 			}
 		}
-		return &sa6, syscall.AF_INET6, nil
+		return &sa6, unix.AF_INET6, nil
 	case "tcp":
-		var sa6 syscall.SockaddrInet6
+		var sa6 unix.SockaddrInet6
 		sa6.Port = tcpAddr.Port
 		if tcpAddr.IP == nil {
 			tcpAddr.IP = net.IPv4(0, 0, 0, 0)
@@ -173,7 +174,7 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 				return nil, -1, fmt.Errorf("unexpected convert net interface index int to uint32: %w", err)
 			}
 		}
-		return &sa6, syscall.AF_INET6, nil
+		return &sa6, unix.AF_INET6, nil
 	default:
 		return nil, -1, errors.New("only tcp, tcp4, or tcp6 is supported " + network)
 	}
