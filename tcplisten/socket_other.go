@@ -17,5 +17,5 @@ func newSocketCloexec(domain, typ, proto int) (int, error) {
 		return newSocketCloexecOld(domain, typ, proto)
 	}
 
-	return -1, fmt.Errorf("cannot create listening unblocked socket: %s", err)
+	return -1, fmt.Errorf("cannot create listening unblocked socket: %w", err)
 }

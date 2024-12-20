@@ -18,6 +18,7 @@ package tcplisten
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"syscall"
@@ -84,18 +85,18 @@ func (cfg *Config) fdSetup(fd int, sa syscall.Sockaddr, addr string) error {
 	var err error
 
 	if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_REUSEADDR, 1); err != nil {
-		return fmt.Errorf("cannot enable SO_REUSEADDR: %s", err)
+		return fmt.Errorf("cannot enable SO_REUSEADDR: %w", err)
 	}
 
 	// This should disable Nagle's algorithm in all accepted sockets by default.
 	// Users may enable it with net.TCPConn.SetNoDelay(false).
 	if err = syscall.SetsockoptInt(fd, syscall.IPPROTO_TCP, syscall.TCP_NODELAY, 1); err != nil {
-		return fmt.Errorf("cannot disable Nagle's algorithm: %s", err)
+		return fmt.Errorf("cannot disable Nagle's algorithm: %w", err)
 	}
 
 	if cfg.ReusePort {
 		if err = syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, soReusePort, 1); err != nil {
-			return fmt.Errorf("cannot enable SO_REUSEPORT: %s", err)
+			return fmt.Errorf("cannot enable SO_REUSEPORT: %w", err)
 		}
 	}
 
@@ -112,17 +113,17 @@ func (cfg *Config) fdSetup(fd int, sa syscall.Sockaddr, addr string) error {
 	}
 
 	if err = syscall.Bind(fd, sa); err != nil {
-		return fmt.Errorf("cannot bind to %q: %s", addr, err)
+		return fmt.Errorf("cannot bind to %q: %w", addr, err)
 	}
 
 	backlog := cfg.Backlog
 	if backlog <= 0 {
 		if backlog, err = soMaxConn(); err != nil {
-			return fmt.Errorf("cannot determine backlog to pass to listen(2): %s", err)
+			return fmt.Errorf("cannot determine backlog to pass to listen(2): %w", err)
 		}
 	}
 	if err = syscall.Listen(fd, backlog); err != nil {
-		return fmt.Errorf("cannot listen on %q: %s", addr, err)
+		return fmt.Errorf("cannot listen on %q: %w", addr, err)
 	}
 
 	return nil
@@ -149,7 +150,10 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 			if err != nil {
 				return nil, -1, err
 			}
-			sa6.ZoneId = uint32(ifi.Index)
+			sa6.ZoneId, err = safeIntToUint32(ifi.Index)
+			if err != nil {
+				return nil, -1, fmt.Errorf("unexpected convert net interface index int to uint32: %w", err)
+			}
 		}
 		return &sa6, syscall.AF_INET6, nil
 	case "tcp":
@@ -164,10 +168,23 @@ func getSockaddr(network, addr string) (sa syscall.Sockaddr, soType int, err err
 			if err != nil {
 				return nil, -1, err
 			}
-			sa6.ZoneId = uint32(ifi.Index)
+			sa6.ZoneId, err = safeIntToUint32(ifi.Index)
+			if err != nil {
+				return nil, -1, fmt.Errorf("unexpected convert net interface index int to uint32: %w", err)
+			}
 		}
 		return &sa6, syscall.AF_INET6, nil
 	default:
-		return nil, -1, errors.New("only tcp, tcp4, or tcp6 is supported: " + network)
+		return nil, -1, errors.New("only tcp, tcp4, or tcp6 is supported " + network)
 	}
+}
+
+func safeIntToUint32(i int) (uint32, error) {
+	if i < 0 {
+		return 0, errors.New("value is negative, cannot convert to uint32")
+	}
+	if i > math.MaxUint32 {
+		return 0, errors.New("value exceeds uint32 max value")
+	}
+	return uint32(i), nil
 }
