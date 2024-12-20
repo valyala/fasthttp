@@ -6,11 +6,15 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"testing"
 	"time"
 )
 
 func TestConfigDeferAccept(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip()
+	}
 	testConfig(t, Config{DeferAccept: true})
 }
 
@@ -19,10 +23,16 @@ func TestConfigReusePort(t *testing.T) {
 }
 
 func TestConfigFastOpen(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip()
+	}
 	testConfig(t, Config{FastOpen: true})
 }
 
 func TestConfigAll(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip()
+	}
 	cfg := Config{
 		ReusePort:   true,
 		DeferAccept: true,
