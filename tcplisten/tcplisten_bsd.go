@@ -1,4 +1,4 @@
-//go:build darwin || dragonfly || freebsd || netbsd || openbsd || rumprun
+//go:build darwin || dragonfly || freebsd || netbsd || openbsd || rumprun || (zos && s390x)
 
 package tcplisten
 

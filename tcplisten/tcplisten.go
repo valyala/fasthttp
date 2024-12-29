@@ -1,4 +1,4 @@
-//go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd || rumprun
+//go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd || rumprun || (zos && s390x)
 
 // Package tcplisten provides customizable TCP net.Listener with various
 // performance-related options:
