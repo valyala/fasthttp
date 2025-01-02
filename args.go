@@ -6,8 +6,6 @@ import (
 	"io"
 	"sort"
 	"sync"
-
-	"github.com/valyala/bytebufferpool"
 )
 
 const (
@@ -295,10 +293,8 @@ func (a *Args) GetUint(key string) (int, error) {
 
 // SetUint sets uint value for the given key.
 func (a *Args) SetUint(key string, value int) {
-	bb := bytebufferpool.Get()
-	bb.B = AppendUint(bb.B[:0], value)
-	a.SetBytesV(key, bb.B)
-	bytebufferpool.Put(bb)
+	a.buf = AppendUint(a.buf[:0], value)
+	a.SetBytesV(key, a.buf)
 }
 
 // SetUintBytes sets uint value for the given key.
