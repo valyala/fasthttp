@@ -12,7 +12,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/valyala/tcplisten"
+	"github.com/valyala/fasthttp/tcplisten"
 )
 
 // Listen returns TCP listener with SO_REUSEPORT option set.
@@ -23,10 +23,7 @@ import (
 //   - TCP_DEFER_ACCEPT. This option expects that the server reads from accepted
 //     connections before writing to them.
 //
-// - TCP_FASTOPEN. See https://lwn.net/Articles/508865/ for details.
-//
-// Use https://github.com/valyala/tcplisten if you want customizing
-// these options.
+//   - TCP_FASTOPEN. See https://lwn.net/Articles/508865/ for details.
 //
 // Only tcp4 and tcp6 networks are supported.
 //
