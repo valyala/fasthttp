@@ -386,7 +386,7 @@ func (w *requestBodyWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (resp *Response) parseNetConn(conn net.Conn) {
+func (resp *Response) ParseNetConn(conn net.Conn) {
 	resp.raddr = conn.RemoteAddr()
 	resp.laddr = conn.LocalAddr()
 }
