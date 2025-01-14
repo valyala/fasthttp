@@ -178,6 +178,9 @@ type Client struct {
 	readerPool sync.Pool
 	writerPool sync.Pool
 
+	// Transport defines a transport-like mechanism that wraps every request/response.
+	Transport RoundTripper
+
 	// Callback for establishing new connections to hosts.
 	//
 	// Default DialTimeout is used if not set.
@@ -526,6 +529,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 		if hc == nil {
 			hc = &HostClient{
 				Addr:                          AddMissingPort(string(host), isTLS),
+				Transport:                     c.Transport,
 				Name:                          c.Name,
 				NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 				Dial:                          c.Dial,
