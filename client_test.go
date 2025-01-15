@@ -2802,6 +2802,11 @@ func TestClientConfigureClientFailed(t *testing.T) {
 		ConfigureClient: func(hc *HostClient) error {
 			return errors.New("failed to configure")
 		},
+		Dial: func(addr string) (net.Conn, error) {
+			return &singleEchoConn{
+				b: []byte("HTTP/1.1 345 OK\r\nContent-Type: foobar\r\n\r\n"),
+			}, nil
+		},
 	}
 
 	req := Request{}

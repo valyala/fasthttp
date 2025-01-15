@@ -23,7 +23,7 @@ func TestDialer_GetDialFunc(t *testing.T) {
 	}()
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:"+proxyListenPorts[2])
 	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:"+proxyListenPorts[3])
-	t.Setenv("NO_PROXY", "example.com")
+	t.Setenv("NO_PROXY", "github.com")
 	type fields struct {
 		httpProxy  string
 		httpsProxy string
@@ -45,78 +45,78 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: false,
 			},
 			wantCounts: []int64{0, 1, 0, 0},
-			dialAddr:   "www.google.com:443",
+			dialAddr:   "github.io:443",
 		},
 		{
 			name: "proxy information comes from the configuration. dial http host",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: false,
 			},
 			wantCounts: []int64{1, 0, 0, 0},
-			dialAddr:   "www.google.com:80",
+			dialAddr:   "github.io:80",
 		},
 		{
 			name: "proxy information comes from the configuration. dial http host matched with noProxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: false,
 			},
 			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "example.com:80",
+			dialAddr:   "github.com:80",
 		},
 		{
 			name: "proxy information comes from the configuration. dial https host matched with noProxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: false,
 			},
 			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "example.com:443",
+			dialAddr:   "github.com:443",
 		},
 		{
 			name: "proxy information comes from the env. dial http host",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: true,
 			},
 			wantCounts: []int64{0, 0, 1, 0},
-			dialAddr:   "www.google.com:80",
+			dialAddr:   "github.io:80",
 		},
 		{
 			name: "proxy information comes from the env. dial https host",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: true,
 			},
 			wantCounts: []int64{0, 0, 0, 1},
-			dialAddr:   "www.google.com:443",
+			dialAddr:   "github.io:443",
 		},
 
 		{
@@ -124,78 +124,78 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: true,
 			},
 			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "example.com:80",
+			dialAddr:   "github.com:80",
 		},
 		{
 			name: "proxy information comes from the env. dial https host matched with noProxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: true,
 			},
 			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "example.com:443",
+			dialAddr:   "github.com:443",
 		},
 		{
 			name: "proxy information comes from the configuration and httpProxy same with httpsProxy. dial http host",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[0],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: false,
 			},
 			wantCounts: []int64{1, 0, 0, 0},
-			dialAddr:   "www.google.com:80",
+			dialAddr:   "github.io:80",
 		},
 		{
 			name: "proxy information comes from the configuration and httpProxy same with httpsProxy. dial https host",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[0],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: false,
 			},
 			wantCounts: []int64{1, 0, 0, 0},
-			dialAddr:   "www.google.com:443",
+			dialAddr:   "github.io:443",
 		},
 		{
 			name: "proxy information comes from the configuration and httpProxy same with httpsProxy. dial http host matched with noProxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[0],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: false,
 			},
 			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "example.com:80",
+			dialAddr:   "github.com:80",
 		},
 		{
 			name: "proxy information comes from the configuration and httpProxy same with httpsProxy. dial https host matched with noProxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[0],
-				noProxy:    "example.com",
+				noProxy:    "github.com",
 			},
 			args: args{
 				useEnv: false,
 			},
 			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "example.com:443",
+			dialAddr:   "github.com:443",
 		},
 		{
 			name: "return an error for unsupported proxy protocols.",
@@ -207,7 +207,7 @@ func TestDialer_GetDialFunc(t *testing.T) {
 				useEnv: false,
 			},
 			wantCounts:     []int64{0, 0, 0, 0},
-			dialAddr:       "www.google.com:80",
+			dialAddr:       "github.io:80",
 			wantErrMessage: "proxy: unknown scheme: socket6",
 		},
 	}
