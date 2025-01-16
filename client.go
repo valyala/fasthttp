@@ -921,6 +921,21 @@ type clientConn struct {
 	lastUseTime time.Time
 }
 
+// CreatedTime returns net.Conn the client.
+func (cc *clientConn) Conn() net.Conn {
+	return cc.c
+}
+
+// CreatedTime returns time the client was created.
+func (cc *clientConn) CreatedTime() time.Time {
+	return cc.createdTime
+}
+
+// LastUseTime returns time the client was last used.
+func (cc *clientConn) LastUseTime() time.Time {
+	return cc.lastUseTime
+}
+
 var startTimeUnix = time.Now().Unix()
 
 // LastUseTime returns time the client was last used.
