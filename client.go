@@ -111,6 +111,9 @@ func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
+	if defaultClient.DisablePathNormalizing {
+		req.URI().DisablePathNormalizing = true
+	}
 	_, _, err := doRequestFollowRedirects(req, resp, req.URI().String(), maxRedirectsCount, &defaultClient)
 	return err
 }
@@ -461,6 +464,9 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
+	if c.DisablePathNormalizing {
+		req.URI().DisablePathNormalizing = true
+	}
 	_, _, err := doRequestFollowRedirects(req, resp, req.URI().String(), maxRedirectsCount, c)
 	return err
 }
@@ -1317,6 +1323,9 @@ func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
+	if c.DisablePathNormalizing {
+		req.URI().DisablePathNormalizing = true
+	}
 	_, _, err := doRequestFollowRedirects(req, resp, req.URI().String(), maxRedirectsCount, c)
 	return err
 }
