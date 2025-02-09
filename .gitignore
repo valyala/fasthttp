@@ -1,7 +1,8 @@
 tags
 *.pprof
-*.fasthttp.gz
 *.fasthttp.br
+*.fasthttp.zst
+*.fasthttp.gz
 .idea
 .vscode
 .DS_Store
