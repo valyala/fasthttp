@@ -956,7 +956,7 @@ func TestFileCacheForZstd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fs := FS{Root: os.TempDir(), Compress: true, CacheDuration: time.Second * 60}
+	fs := FS{Root: os.TempDir(), Compress: true, CompressZstd: true, CacheDuration: time.Second * 60}
 	h := fs.NewRequestHandler()
 	var ctx RequestCtx
 	var req Request
