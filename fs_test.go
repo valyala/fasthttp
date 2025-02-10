@@ -232,6 +232,11 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected 'Content-Encoding': %q. Expecting %q", string(ce), "br")
 	}
 
+	vary := resp.Header.PeekBytes(strVary)
+	if !bytes.Equal(vary, strAcceptEncoding) {
+		t.Fatalf("unexpected 'Vary': %q. Expecting %q", string(vary), HeaderAcceptEncoding)
+	}
+
 	body, err := resp.BodyUnbrotli()
 	if err != nil {
 		t.Fatalf("unexpected error on unbrotli response body: %v", err)
@@ -260,6 +265,11 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected 'Content-Encoding' %q. Expecting %q", string(ce), "zstd")
 	}
 
+	vary = resp.Header.PeekBytes(strVary)
+	if !bytes.Equal(vary, strAcceptEncoding) {
+		t.Fatalf("unexpected 'Vary': %q. Expecting %q", string(vary), HeaderAcceptEncoding)
+	}
+
 	body, err = resp.BodyUnzstd()
 	if err != nil {
 		t.Fatalf("unexpected error on unzstd response body: %v", err)
@@ -286,6 +296,11 @@ func TestServeFileCompressed(t *testing.T) {
 	ce = resp.Header.ContentEncoding()
 	if string(ce) != "gzip" {
 		t.Fatalf("unexpected 'Content-Encoding' %q. Expecting %q", string(ce), "gzip")
+	}
+
+	vary = resp.Header.PeekBytes(strVary)
+	if !bytes.Equal(vary, strAcceptEncoding) {
+		t.Fatalf("unexpected 'Vary': %q. Expecting %q", string(vary), HeaderAcceptEncoding)
 	}
 
 	body, err = resp.BodyGunzip()
@@ -326,6 +341,11 @@ func TestServeFileUncompressed(t *testing.T) {
 	ce := resp.Header.ContentEncoding()
 	if len(ce) > 0 {
 		t.Fatalf("unexpected 'Content-Encoding': %q. Expecting \"\"", string(ce))
+	}
+
+	vary := resp.Header.PeekBytes(strVary)
+	if len(vary) > 0 {
+		t.Fatalf("unexpected 'Vary': %q. Expecting \"\"", string(vary))
 	}
 
 	body := resp.Body()
@@ -697,6 +717,11 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected 'Content-Encoding': %q. Expecting \"\"", string(ce))
 	}
 
+	vary := resp.Header.PeekBytes(strVary)
+	if len(vary) > 0 {
+		t.Fatalf("unexpected 'Vary': %q. Expecting \"\"", string(vary))
+	}
+
 	expectedBody := bytes.Clone(resp.Body())
 
 	// should prefer brotli over zstd, gzip and ignore unknown encoding
@@ -717,6 +742,11 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	ce = resp.Header.ContentEncoding()
 	if string(ce) != "br" {
 		t.Fatalf("unexpected 'Content-Encoding': %q. Expecting %q. filePath=%q", string(ce), "br", filePath)
+	}
+
+	vary = resp.Header.PeekBytes(strVary)
+	if !bytes.Equal(vary, strAcceptEncoding) {
+		t.Fatalf("unexpected 'Vary': %q. Expecting %q", string(vary), HeaderAcceptEncoding)
 	}
 
 	body, err := resp.BodyUnbrotli()
@@ -747,6 +777,11 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected 'Content-Encoding': %q. Expecting %q. filePath=%q", string(ce), "zstd", filePath)
 	}
 
+	vary = resp.Header.PeekBytes(strVary)
+	if !bytes.Equal(vary, strAcceptEncoding) {
+		t.Fatalf("unexpected 'Vary': %q. Expecting %q", string(vary), HeaderAcceptEncoding)
+	}
+
 	body, err = resp.BodyUnzstd()
 	if err != nil {
 		t.Fatalf("unexpected error on unzstd response body: %v. filePath=%q", err, filePath)
@@ -773,6 +808,11 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 	ce = resp.Header.ContentEncoding()
 	if string(ce) != "gzip" {
 		t.Fatalf("unexpected 'Content-Encoding': %q. Expecting %q. filePath=%q", string(ce), "gzip", filePath)
+	}
+
+	vary = resp.Header.PeekBytes(strVary)
+	if !bytes.Equal(vary, strAcceptEncoding) {
+		t.Fatalf("unexpected 'Vary': %q. Expecting %q", string(vary), HeaderAcceptEncoding)
 	}
 
 	body, err = resp.BodyGunzip()

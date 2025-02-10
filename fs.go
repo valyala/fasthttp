@@ -1133,10 +1133,13 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		switch fileEncoding {
 		case "br":
 			hdr.SetContentEncodingBytes(strBr)
+			hdr.addVaryBytes(strAcceptEncoding)
 		case "gzip":
 			hdr.SetContentEncodingBytes(strGzip)
+			hdr.addVaryBytes(strAcceptEncoding)
 		case "zstd":
 			hdr.SetContentEncodingBytes(strZstd)
+			hdr.addVaryBytes(strAcceptEncoding)
 		}
 	}
 
