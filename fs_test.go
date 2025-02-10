@@ -213,7 +213,7 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// request compressed brotli over zstd, gzip and unknown encoding
+	// should prefer brotli over zstd, gzip and ignore unknown encoding
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, zstd, br, wompwomp")
 	ServeFile(&ctx, "fs.go")
@@ -240,7 +240,7 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected body: len=%d. Expecting len=%d", len(body), len(expectedBody))
 	}
 
-	// should prefer zstd over gzip and unknown encoding
+	// should prefer zstd over gzip and ignore unknown encoding
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, zstd, wompwomp")
@@ -268,7 +268,7 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected body: len=%d. Expecting len=%d", len(body), len(expectedBody))
 	}
 
-	// lastly, fallback to gzip and ignore unknown encoding
+	// should prefer gzip and ignore unknown encoding
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, wompwomp")
@@ -321,7 +321,7 @@ func TestServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected body: len=%d. Expecting len=%d", len(body), len(expectedBody))
 	}
 
-	// return uncompressed
+	// lastly, return uncompressed
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
 	ServeFile(&ctx, "fs.go")
@@ -729,7 +729,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// request compressed brotli over zstd, gzip and unknown encoding
+	// should prefer brotli over zstd, gzip and ignore unknown encoding
 	ctx.Request.SetRequestURI(filePath)
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, zstd, br, wompwomp")
 	h(&ctx)
@@ -756,7 +756,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected body: len=%d. Expecting len=%d. filePath=%q", len(body), len(expectedBody), filePath)
 	}
 
-	// request compressed zstd over gzip and unknown encoding
+	// should prefer zstd over gzip and ignore unknown encoding
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI(filePath)
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, zstd, wompwomp")
@@ -784,7 +784,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected body: len=%d. Expecting len=%d. filePath=%q", len(body), len(expectedBody), filePath)
 	}
 
-	// lastly, request compressed gzip and ignore unknown encoding
+	// should prefer gzip and ignore unknown encoding
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI(filePath)
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, wompwomp")
@@ -837,7 +837,7 @@ func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected body: len=%d. Expecting len=%d. filePath=%q", len(body), len(expectedBody), filePath)
 	}
 
-	// return uncompressed
+	// lastly, return uncompressed
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI(filePath)
 	h(&ctx)

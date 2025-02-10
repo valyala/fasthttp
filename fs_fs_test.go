@@ -66,7 +66,7 @@ func TestFSServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// request compressed brotli over zstd, gzip and unknown encoding
+	// should prefer brotli over zstd, gzip and ignore unknown encoding
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, zstd, br, wompwomp")
 	ServeFS(&ctx, fsTestFilesystem, "fs.go")
@@ -93,7 +93,7 @@ func TestFSServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected body: len=%d. Expected len=%d", len(body), len(expectedBody))
 	}
 
-	// should prefer zstd over gzip and unknown encoding
+	// should prefer zstd over gzip and ignore unknown encoding
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, zstd, wompwomp")
@@ -121,7 +121,7 @@ func TestFSServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected body: len=%d. Expected len=%d", len(body), len(expectedBody))
 	}
 
-	// lastly, fallback to gzip and ignore unknown encoding
+	// should prefer gzip and ignore unknown encoding
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, wompwomp")
@@ -174,7 +174,7 @@ func TestFSServeFileCompressed(t *testing.T) {
 		t.Fatalf("unexpected body: len=%d. Expected len=%d", len(body), len(expectedBody))
 	}
 
-	// return uncompressed
+	// lastly, return uncompressed
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
 	ServeFS(&ctx, fsTestFilesystem, "fs.go")
@@ -328,7 +328,7 @@ func testFSFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// request compressed brotli over zstd, gzip and unknown encoding
+	// should prefer brotli over zstd, gzip and ignore unknown encoding
 	ctx.Request.SetRequestURI(filePath)
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, zstd, br, wompwomp")
 	h(&ctx)
@@ -352,10 +352,10 @@ func testFSFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected error on unbrotli response body: %v. filePath=%q", err, filePath)
 	}
 	if !bytes.Equal(body, expectedBody) {
-		t.Fatalf("unexpected body: len=%d. Expected len=%d. filePath=%q", len(body), len(expectedBody), filePath)
+		t.Fatalf("unexpected body: len=%d. Expecting len=%d. filePath=%q", len(body), len(expectedBody), filePath)
 	}
 
-	// request compressed zstd over gzip and unknown encoding
+	// should prefer zstd over gzip and ignore unknown encoding
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI(filePath)
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, zstd, wompwomp")
@@ -380,10 +380,10 @@ func testFSFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected error on unzstd response body: %v. filePath=%q", err, filePath)
 	}
 	if !bytes.Equal(body, expectedBody) {
-		t.Fatalf("unexpected body: len=%d. Expected len=%d. filePath=%q", len(body), len(expectedBody), filePath)
+		t.Fatalf("unexpected body: len=%d. Expecting len=%d. filePath=%q", len(body), len(expectedBody), filePath)
 	}
 
-	// lastly, request compressed gzip and ignore unknown encoding
+	// should prefer gzip and ignore unknown encoding
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI(filePath)
 	ctx.Request.Header.Set(HeaderAcceptEncoding, "wompwomp, gzip")
@@ -408,7 +408,7 @@ func testFSFSCompress(t *testing.T, h RequestHandler, filePath string) {
 		t.Fatalf("unexpected error on gunzip response body: %v. filePath=%q", err, filePath)
 	}
 	if !bytes.Equal(body, expectedBody) {
-		t.Fatalf("unexpected body: len=%d. Expected len=%d. filePath=%q", len(body), len(expectedBody), filePath)
+		t.Fatalf("unexpected body: len=%d. Expecting len=%d. filePath=%q", len(body), len(expectedBody), filePath)
 	}
 
 	// ignore unknown encoding and return uncompressed
@@ -433,10 +433,10 @@ func testFSFSCompress(t *testing.T, h RequestHandler, filePath string) {
 
 	body = resp.Body()
 	if !bytes.Equal(body, expectedBody) {
-		t.Fatalf("unexpected body: len=%d. Expected len=%d. filePath=%q", len(body), len(expectedBody), filePath)
+		t.Fatalf("unexpected body: len=%d. Expecting len=%d. filePath=%q", len(body), len(expectedBody), filePath)
 	}
 
-	// return uncompressed
+	// lastly, return uncompressed
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI(filePath)
 	h(&ctx)
@@ -457,7 +457,7 @@ func testFSFSCompress(t *testing.T, h RequestHandler, filePath string) {
 
 	body = resp.Body()
 	if !bytes.Equal(body, expectedBody) {
-		t.Fatalf("unexpected body: len=%d. Expected len=%d. filePath=%q", len(body), len(expectedBody), filePath)
+		t.Fatalf("unexpected body: len=%d. Expecting len=%d. filePath=%q", len(body), len(expectedBody), filePath)
 	}
 }
 
@@ -564,61 +564,141 @@ func TestDirFSServeFileCompressed(t *testing.T) {
 
 	var resp Response
 
-	// request compressed gzip file
-	ctx.Request.SetRequestURI("http://foobar.com/baz")
-	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip")
-	ServeFS(&ctx, dirTestFilesystem, "fs.go")
-
-	s := ctx.Response.String()
-	br := bufio.NewReader(bytes.NewBufferString(s))
-	if err := resp.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	ce := resp.Header.ContentEncoding()
-	if string(ce) != "gzip" {
-		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "gzip")
-	}
-
-	body, err := resp.BodyGunzip()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	expectedBody, err := getFileContents("/fs.go")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !bytes.Equal(body, expectedBody) {
-		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
+
+	// should prefer brotli over zstd, gzip and ignore unknown encoding
+	ctx.Request.SetRequestURI("http://foobar.com/baz")
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, zstd, br, wompwomp")
+	ServeFS(&ctx, dirTestFilesystem, "fs.go")
+
+	s := ctx.Response.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 	}
 
-	// request compressed brotli file
+	ce := resp.Header.ContentEncoding()
+	if string(ce) != "br" {
+		t.Fatalf("unexpected 'Content-Encoding' %q. Expecting %q", string(ce), "br")
+	}
+
+	body, err := resp.BodyUnbrotli()
+	if err != nil {
+		t.Fatalf("unexpected error on unbrotli response body: %v", err)
+	}
+	if !bytes.Equal(body, expectedBody) {
+		t.Fatalf("unexpected body: len=%d. Expecting len=%d", len(body), len(expectedBody))
+	}
+
+	// should prefer zstd over gzip and ignore unknown encoding
 	ctx.Request.Reset()
 	ctx.Request.SetRequestURI("http://foobar.com/baz")
-	ctx.Request.Header.Set(HeaderAcceptEncoding, "br")
-	ServeFS(&ctx, fsTestFilesystem, "fs.go")
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, zstd, wompwomp")
+	ServeFS(&ctx, dirTestFilesystem, "fs.go")
 
 	s = ctx.Response.String()
 	br = bufio.NewReader(bytes.NewBufferString(s))
 	if err = resp.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
 
 	ce = resp.Header.ContentEncoding()
-	if string(ce) != "br" {
-		t.Fatalf("Unexpected 'Content-Encoding' %q. Expecting %q", ce, "br")
+	if string(ce) != "zstd" {
+		t.Fatalf("unexpected 'Content-Encoding' %q. Expecting %q", string(ce), "zstd")
 	}
 
-	body, err = resp.BodyUnbrotli()
+	body, err = resp.BodyUnzstd()
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	expectedBody, err = getFileContents("/fs.go")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("unexpected error on unzstd response body: %v", err)
 	}
 	if !bytes.Equal(body, expectedBody) {
-		t.Fatalf("unexpected body %q. expecting %q", body, expectedBody)
+		t.Fatalf("unexpected body: len=%d. Expecting len=%d", len(body), len(expectedBody))
+	}
+
+	// should prefer gzip and ignore unknown encoding
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI("http://foobar.com/baz")
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip, wompwomp")
+	ServeFS(&ctx, dirTestFilesystem, "fs.go")
+
+	s = ctx.Response.String()
+	br = bufio.NewReader(bytes.NewBufferString(s))
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+
+	ce = resp.Header.ContentEncoding()
+	if string(ce) != "gzip" {
+		t.Fatalf("unexpected 'Content-Encoding' %q. Expecting %q", string(ce), "gzip")
+	}
+
+	body, err = resp.BodyGunzip()
+	if err != nil {
+		t.Fatalf("unexpected error on gunzip response body: %v", err)
+	}
+	if !bytes.Equal(body, expectedBody) {
+		t.Fatalf("unexpected body: len=%d. Expecting len=%d", len(body), len(expectedBody))
+	}
+
+	// ignore unknown encoding and return uncompressed
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI("http://foobar.com/baz")
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "wompwomp")
+	ServeFS(&ctx, dirTestFilesystem, "fs.go")
+
+	s = ctx.Response.String()
+	br = bufio.NewReader(bytes.NewBufferString(s))
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+
+	ce = resp.Header.ContentEncoding()
+	if len(ce) > 0 {
+		t.Fatalf("unexpected 'Content-Encoding': %q. Expecting \"\"", string(ce))
+	}
+
+	body = resp.Body()
+	if !bytes.Equal(body, expectedBody) {
+		t.Fatalf("unexpected body: len=%d. Expecting len=%d", len(body), len(expectedBody))
+	}
+
+	// lastly, return uncompressed
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI("http://foobar.com/baz")
+	ServeFS(&ctx, dirTestFilesystem, "fs.go")
+
+	s = ctx.Response.String()
+	br = bufio.NewReader(bytes.NewBufferString(s))
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+
+	ce = resp.Header.ContentEncoding()
+	if len(ce) > 0 {
+		t.Fatalf("unexpected 'Content-Encoding': %q. Expecting \"\"", string(ce))
+	}
+
+	body = resp.Body()
+	if !bytes.Equal(body, expectedBody) {
+		t.Fatalf("unexpected body: len=%d. Expecting len=%d", len(body), len(expectedBody))
 	}
 }
 
