@@ -327,6 +327,7 @@ func TestRequestRawHeaders(t *testing.T) {
 
 	kvs := "hOsT: foobar\r\n" +
 		"value:  b\r\n" +
+		"uSeR agent: agent\r\n" +
 		"\r\n"
 	t.Run("normalized", func(t *testing.T) {
 		s := "GET / HTTP/1.1\r\n" + kvs
@@ -342,6 +343,12 @@ func TestRequestRawHeaders(t *testing.T) {
 		v2 := h.Peek("Value")
 		if !bytes.Equal(v2, []byte{'b'}) {
 			t.Fatalf("expecting non empty value. Got %q", v2)
+		}
+		// We accept invalid headers with a space.
+		// See: https://github.com/valyala/fasthttp/issues/1917
+		v3 := h.Peek("uSeR agent")
+		if !bytes.Equal(v3, []byte("agent")) {
+			t.Fatalf("expecting non empty value. Got %q", v3)
 		}
 		if raw := h.RawHeaders(); string(raw) != exp {
 			t.Fatalf("expected header %q, got %q", exp, raw)
@@ -1860,8 +1867,8 @@ func TestResponseHeaderAddTrailerError(t *testing.T) {
 	t.Parallel()
 
 	var h ResponseHeader
-	err := h.AddTrailer("Foo,   Content-Length , Bar,Transfer-Encoding,")
-	expectedTrailer := "Foo, Bar"
+	err := h.AddTrailer("Foo,   Content-Length , bAr,Transfer-Encoding, uSer aGent")
+	expectedTrailer := "Foo, Bar, uSer aGent"
 
 	if !errors.Is(err, ErrBadTrailer) {
 		t.Fatalf("unexpected err %q. Expected %q", err, ErrBadTrailer)
