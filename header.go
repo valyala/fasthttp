@@ -2689,7 +2689,7 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 	return m + n, nil
 }
 
-func addTrailerBytes(src []byte, buf []byte, trailers [][]byte, disableNormalizing bool) ([]byte, [][]byte, error) {
+func addTrailerBytes(src, buf []byte, trailers [][]byte, disableNormalizing bool) ([]byte, [][]byte, error) {
 	var err error
 	for i := -1; i+1 < len(src); {
 		src = src[i+1:]
