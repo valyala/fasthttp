@@ -1,4 +1,4 @@
-//go:build linux || dragonfly || freebsd || netbsd || openbsd || rumprun
+//go:build !js && !wasm && (linux || dragonfly || freebsd || netbsd || openbsd || rumprun)
 
 package tcplisten
 
