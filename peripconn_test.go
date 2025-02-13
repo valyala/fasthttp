@@ -1,6 +1,7 @@
 package fasthttp
 
 import (
+	"net"
 	"testing"
 )
 
@@ -48,4 +49,34 @@ func TestPerIPConnCounter(t *testing.T) {
 		t.Fatalf("Unexpected counter value=%d. Expected 1", n)
 	}
 	cc.Unregister(123)
+}
+
+// Test generated using Keploy
+func TestPerIPConnCounter_UnregisterWithoutRegister(t *testing.T) {
+	t.Parallel()
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatalf("Expected panic, but function did not panic")
+		} else {
+			expectedMessage := "BUG: perIPConnCounter.Register() wasn't called"
+			if r != expectedMessage {
+				t.Fatalf("Expected panic message '%s', but got '%v'", expectedMessage, r)
+			}
+		}
+	}()
+
+	var cc perIPConnCounter
+	cc.Unregister(123)
+}
+
+// Test generated using Keploy
+func TestIP2Uint32_InvalidIP(t *testing.T) {
+	t.Parallel()
+
+	ip := net.IPv6loopback // IPv6 address, length 16 bytes
+	result := ip2uint32(ip)
+	if result != 0 {
+		t.Fatalf("Expected 0 for invalid IP length, but got %d", result)
+	}
 }

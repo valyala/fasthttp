@@ -1,15 +1,15 @@
 package prefork
 
 import (
-	"fmt"
-	"math/rand"
-	"net"
-	"os"
-	"reflect"
-	"runtime"
-	"testing"
+    "fmt"
+    "math/rand"
+    "net"
+    "os"
+    "reflect"
+    "runtime"
+    "testing"
 
-	"github.com/valyala/fasthttp"
+    "github.com/valyala/fasthttp"
 )
 
 func setUp() {
@@ -223,4 +223,52 @@ func Test_ListenAndServeTLSEmbed(t *testing.T) {
 	if p.ln == nil {
 		t.Error("Prefork.ln is nil")
 	}
+}
+
+
+// Test generated using Keploy
+func Test_Prefork_LoggerFallback(t *testing.T) {
+    p := &Prefork{}
+    logger := p.logger()
+    if logger == nil {
+        t.Error("Expected default logger, got nil")
+    }
+}
+
+
+// Test generated using Keploy
+func Test_Prefork_DoCommand(t *testing.T) {
+    p := &Prefork{}
+    cmd, err := p.doCommand()
+    if err != nil {
+        t.Fatalf("Unexpected error: %v", err)
+    }
+
+    if cmd == nil {
+        t.Fatal("Expected a valid exec.Cmd, got nil")
+    }
+
+    found := false
+    for _, env := range cmd.Env {
+        if env == preforkChildEnvVariable+"=1" {
+            found = true
+            break
+        }
+    }
+
+    if !found {
+        t.Error("Expected environment variable FASTHTTP_PREFORK_CHILD=1, not found")
+    }
+}
+
+
+// Test generated using Keploy
+func Test_Prefork_SetTCPListenerFiles_ErrorHandling(t *testing.T) {
+    p := &Prefork{}
+    invalidAddr := "invalid:address"
+
+    err := p.setTCPListenerFiles(invalidAddr)
+    if err == nil {
+        t.Error("Expected an error for invalid address, got nil")
+    }
 }

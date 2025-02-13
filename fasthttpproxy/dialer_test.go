@@ -8,6 +8,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"errors"
+	"net/url"
+
 	"github.com/valyala/fasthttp"
 	"golang.org/x/net/http/httpproxy"
 )
@@ -303,4 +306,53 @@ func countsEqual(a, b []int64) bool {
 		}
 	}
 	return true
+}
+
+// Test generated using Keploy
+func TestDialer_Dial_UnsupportedNetwork(t *testing.T) {
+	d := &Dialer{}
+	_, err := d.Dial("unsupported", "example.com:80")
+	if err == nil || !strings.Contains(err.Error(), "dont support the network") {
+		t.Fatalf("Expected error for unsupported network, got: %v", err)
+	}
+}
+
+// Test generated using Keploy
+func TestHttpProxyDial_ProxyConnectionFailure(t *testing.T) {
+	proxyDialer := DialerFunc(func(network, addr string) (net.Conn, error) {
+		return nil, errors.New("proxy connection failed")
+	})
+	_, err := httpProxyDial(proxyDialer, "tcp", "example.com:80", "127.0.0.1:8080", "")
+	if err == nil || !strings.Contains(err.Error(), "proxy connection failed") {
+		t.Fatalf("Expected error for failed proxy connection, got: %v", err)
+	}
+}
+
+// Test generated using Keploy
+func TestAddrAndAuth_Caching(t *testing.T) {
+	proxyURL, _ := url.Parse("http://user:pass@127.0.0.1:8080")
+	addr1, auth1 := addrAndAuth(proxyURL)
+	addr2, auth2 := addrAndAuth(proxyURL)
+
+	if addr1 != addr2 || auth1 != auth2 {
+		t.Fatalf("Expected cached values to match, got addr1: %s, addr2: %s, auth1: %s, auth2: %s", addr1, addr2, auth1, auth2)
+	}
+}
+
+// Test generated using Keploy
+func TestHttpProxyDial_Non200StatusCode(t *testing.T) {
+	proxyDialer := DialerFunc(func(network, addr string) (net.Conn, error) {
+		server, client := net.Pipe()
+		go func() {
+			defer server.Close()
+			buf := make([]byte, 1024)
+			server.Read(buf)
+			server.Write([]byte("HTTP/1.1 403 Forbidden\r\n\r\n"))
+		}()
+		return client, nil
+	})
+	_, err := httpProxyDial(proxyDialer, "tcp", "example.com:80", "127.0.0.1:8080", "")
+	if err == nil || !strings.Contains(err.Error(), "status code: 403") {
+		t.Fatalf("Expected error for non-200 status code, got: %v", err)
+	}
 }
