@@ -1,4 +1,4 @@
-//go:build linux || darwin || dragonfly || freebsd || netbsd || openbsd || rumprun || (zos && s390x)
+//go:build !js && !wasm && (linux || darwin || dragonfly || freebsd || netbsd || openbsd || rumprun || (zos && s390x))
 
 package tcplisten
 
