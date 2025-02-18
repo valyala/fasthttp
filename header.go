@@ -2738,27 +2738,28 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 	s.b = src
 
 	for s.next() {
-		if len(s.key) > 0 {
-			disable := disableNormalizing
-			for _, ch := range s.key {
-				if !validHeaderFieldByte(ch) {
-					// We accept invalid headers with a space before the
-					// colon, but must not canonicalize them.
-					// See: https://github.com/valyala/fasthttp/issues/1917
-					if ch == ' ' {
-						disable = true
-						continue
-					}
-					return dest, 0, fmt.Errorf("invalid trailer key %q", s.key)
-				}
-			}
-			// Forbidden by RFC 7230, section 4.1.2
-			if isBadTrailer(s.key) {
-				return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
-			}
-			normalizeHeaderKey(s.key, disable)
-			dest = appendArgBytes(dest, s.key, s.value, argsHasValue)
+		if len(s.key) == 0 {
+			continue
 		}
+		disable := disableNormalizing
+		for _, ch := range s.key {
+			if !validHeaderFieldByte(ch) {
+				// We accept invalid headers with a space before the
+				// colon, but must not canonicalize them.
+				// See: https://github.com/valyala/fasthttp/issues/1917
+				if ch == ' ' {
+					disable = true
+					continue
+				}
+				return dest, 0, fmt.Errorf("invalid trailer key %q", s.key)
+			}
+		}
+		// Forbidden by RFC 7230, section 4.1.2
+		if isBadTrailer(s.key) {
+			return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
+		}
+		normalizeHeaderKey(s.key, disable)
+		dest = appendArgBytes(dest, s.key, s.value, argsHasValue)
 	}
 	if s.err != nil {
 		return dest, 0, s.err
