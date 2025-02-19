@@ -189,8 +189,8 @@ func TestServerInvalidHeader(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			if ctx.Request.Header.Peek("Foo") != nil || ctx.Request.Header.Peek("Foo ") != nil {
-				t.Error("expected Foo header")
+			if ctx.Request.Header.Peek("Foő") != nil || ctx.Request.Header.Peek("Foő ") != nil {
+				t.Error("expected Foő header")
 			}
 		},
 		Logger: &testLogger{},
@@ -208,7 +208,7 @@ func TestServerInvalidHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err = c.Write([]byte("POST /foo HTTP/1.1\r\nHost: gle.com\r\nFoo : bar\r\nContent-Length: 5\r\n\r\n12345")); err != nil {
+	if _, err = c.Write([]byte("POST /foo HTTP/1.1\r\nHost: gle.com\r\nFoő : bar\r\nContent-Length: 5\r\n\r\n12345")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -225,7 +225,7 @@ func TestServerInvalidHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err = c.Write([]byte("GET /foo HTTP/1.1\r\nHost: gle.com\r\nFoo : bar\r\n\r\n")); err != nil {
+	if _, err = c.Write([]byte("GET /foo HTTP/1.1\r\nHost: gle.com\r\nFoő : bar\r\n\r\n")); err != nil {
 		t.Fatal(err)
 	}
 
