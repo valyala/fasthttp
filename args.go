@@ -155,12 +155,12 @@ func (a *Args) WriteTo(w io.Writer) (int64, error) {
 
 // Del deletes argument with the given key from query args.
 func (a *Args) Del(key string) {
-	a.args = delAllArgs(a.args, key)
+	a.args = delAllArgsStable(a.args, key)
 }
 
 // DelBytes deletes argument with the given key from query args.
 func (a *Args) DelBytes(key []byte) {
-	a.args = delAllArgs(a.args, b2s(key))
+	a.args = delAllArgsStable(a.args, b2s(key))
 }
 
 // Add adds 'key=value' argument.
@@ -385,11 +385,7 @@ func copyArgs(dst, src []argsKV) []argsKV {
 	return dst
 }
 
-func delAllArgsBytes(args []argsKV, key []byte) []argsKV {
-	return delAllArgs(args, b2s(key))
-}
-
-func delAllArgs(args []argsKV, key string) []argsKV {
+func delAllArgsStable(args []argsKV, key string) []argsKV {
 	for i, n := 0, len(args); i < n; i++ {
 		kv := &args[i]
 		if key == string(kv.key) {
@@ -402,6 +398,18 @@ func delAllArgs(args []argsKV, key string) []argsKV {
 		}
 	}
 	return args
+}
+
+func delAllArgs(args []argsKV, key string) []argsKV {
+	n := len(args)
+	for i := 0; i < n; i++ {
+		if key == string(args[i].key) {
+			args[i], args[n-1] = args[n-1], args[i]
+			n--
+			i--
+		}
+	}
+	return args[:n]
 }
 
 func setArgBytes(h []argsKV, key, value []byte, noValue bool) []argsKV {
