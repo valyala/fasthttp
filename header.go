@@ -3331,7 +3331,6 @@ func (s *headerScanner) next() bool {
 		s.err = errNeedMore
 		return false
 	}
-	isMultiLineValue := false
 	for {
 		if n+1 >= len(s.b) {
 			break
@@ -3351,14 +3350,12 @@ func (s *headerScanner) next() bool {
 			s.nextNewLine = d - c - 1
 			break
 		}
-		isMultiLineValue = true
 		n = e
 	}
 	if n >= len(s.b) {
 		s.err = errNeedMore
 		return false
 	}
-	oldB := s.b
 	s.value = s.b[:n]
 	s.hLen += n + 1
 	s.b = s.b[n+1:]
@@ -3370,8 +3367,8 @@ func (s *headerScanner) next() bool {
 		n--
 	}
 	s.value = s.value[:n]
-	if isMultiLineValue {
-		s.value, s.b, s.hLen = normalizeHeaderValue(s.value, oldB, s.hLen)
+	if bytes.Contains(s.b, strCRLF) {
+		s.value = normalizeHeaderValue(s.value)
 	}
 
 	return true
@@ -3445,7 +3442,7 @@ func getHeaderKeyBytes(bufK []byte, key string, disableNormalizing bool) []byte 
 	return bufK
 }
 
-func normalizeHeaderValue(ov, ob []byte, headerLength int) (nv, nb []byte, nhl int) {
+func normalizeHeaderValue(ov []byte) (nv []byte) {
 	nv = ov
 	length := len(ov)
 	if length <= 0 {
@@ -3480,23 +3477,8 @@ func normalizeHeaderValue(ov, ob []byte, headerLength int) (nv, nb []byte, nhl i
 		write++
 	}
 
-	nv = nv[:write]
-	copy(ob[write:], ob[write+shrunk:])
+	nv = nv[:length-shrunk]
 
-	// Check if we need to skip \r\n or just \n
-	skip := 0
-	if ob[write] == rChar {
-		if ob[write+1] == nChar {
-			skip += 2
-		} else {
-			skip++
-		}
-	} else if ob[write] == nChar {
-		skip++
-	}
-
-	nb = ob[write+skip : len(ob)-shrunk]
-	nhl = headerLength - shrunk
 	return
 }
 
