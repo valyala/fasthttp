@@ -536,7 +536,7 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
     performance fasthttp request router that scales well.
   * [fastws](https://github.com/fasthttp/fastws) - Bloatless WebSocket package made for fasthttp
     to handle Read/Write operations concurrently.
-  * [gramework](https://github.com/gramework/gramework) - a web framework made by one of fasthttp maintainers
+  * [gramework](https://github.com/gramework/gramework) - a web framework made by one of fasthttp maintainers.
   * [lu](https://github.com/vincentLiuxiang/lu) - a high performance
     go middleware web framework which is based on fasthttp.
   * [websocket](https://github.com/fasthttp/websocket) - Gorilla-based
@@ -547,9 +547,10 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
   * [atreugo](https://github.com/savsgio/atreugo) - High performance and extensible micro web framework with zero memory allocations in hot paths.
   * [kratgo](https://github.com/savsgio/kratgo) - Simple, lightweight and ultra-fast HTTP Cache to speed up your websites.
   * [kit-plugins](https://github.com/wencan/kit-plugins/tree/master/transport/fasthttp) - go-kit transport implementation for fasthttp.
-  * [Fiber](https://github.com/gofiber/fiber) - An Expressjs inspired web framework running on Fasthttp
-  * [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization
-  * [http2curl](https://github.com/li-jin-gou/http2curl) - A tool to convert fasthttp requests to curl command line
+  * [Fiber](https://github.com/gofiber/fiber) - An Expressjs inspired web framework running on Fasthttp.
+  * [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization.
+  * [http2curl](https://github.com/li-jin-gou/http2curl) - A tool to convert fasthttp requests to curl command line.
+  * [OpenTelemetry Golang Compile Time Instrumentation](https://github.com/alibaba/opentelemetry-go-auto-instrumentation) - A tool to monitor fasthttp application without changing any code with OpenTelemetry APIs.
 
 ## FAQ
 
