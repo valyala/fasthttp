@@ -1,7 +1,8 @@
 module github.com/valyala/fasthttp
 
 go 1.22
-toolchain go1.23.6
+
+toolchain go1.22
 
 require (
 	github.com/andybalholm/brotli v1.1.1
