@@ -1704,10 +1704,6 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 		}
 	}
 
-	// BuildNameToCertificate has been deprecated since 1.14.
-	// But since we also support older versions we'll keep this here.
-	s.TLSConfig.BuildNameToCertificate() //nolint:staticcheck
-
 	s.mu.Unlock()
 
 	return s.Serve(
@@ -1731,10 +1727,6 @@ func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error 
 			return err
 		}
 	}
-
-	// BuildNameToCertificate has been deprecated since 1.14.
-	// But since we also support older versions we'll keep this here.
-	s.TLSConfig.BuildNameToCertificate() //nolint:staticcheck
 
 	s.mu.Unlock()
 

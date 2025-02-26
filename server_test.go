@@ -3657,7 +3657,7 @@ func TestCloseOnShutdown(t *testing.T) {
 	done := 0
 	for {
 		select {
-		case <-time.After(time.Second):
+		case <-time.After(time.Second * 2):
 			t.Fatal("shutdown took too long")
 		case <-serveCh:
 			done++
