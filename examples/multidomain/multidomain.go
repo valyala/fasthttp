@@ -37,7 +37,7 @@ func main() {
 		panic(err)
 	}
 	domains["localhost:8080"] = func(ctx *fasthttp.RequestCtx) {
-		ctx.WriteString("You are accessing to localhost:8080\n")
+		ctx.WriteString("You are accessing to localhost:8080\n") //nolint:errcheck
 	}
 
 	err = server.AppendCertEmbed(cert, priv)
@@ -51,7 +51,7 @@ func main() {
 		panic(err)
 	}
 	domains["127.0.0.1:8080"] = func(ctx *fasthttp.RequestCtx) {
-		ctx.WriteString("You are accessing to 127.0.0.1:8080\n")
+		ctx.WriteString("You are accessing to 127.0.0.1:8080\n") //nolint:errcheck
 	}
 
 	err = server.AppendCertEmbed(cert, priv)

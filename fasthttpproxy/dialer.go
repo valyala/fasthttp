@@ -79,10 +79,7 @@ func (d *Dialer) GetDialFunc(useEnv bool) (dialFunc fasthttp.DialFunc, err error
 	if useEnv {
 		config = httpproxy.FromEnvironment()
 	}
-	proxyURLIsSame := false
-	if config.HTTPSProxy == config.HTTPProxy && config.NoProxy == "" {
-		proxyURLIsSame = true
-	}
+	proxyURLIsSame := config.HTTPSProxy == config.HTTPProxy && config.NoProxy == ""
 	network := "tcp4"
 	if d.DialDualStack {
 		network = "tcp"
@@ -158,13 +155,13 @@ func (d *Dialer) GetDialFunc(useEnv bool) (dialFunc fasthttp.DialFunc, err error
 func (d *Dialer) Dial(network, addr string) (conn net.Conn, err error) {
 	if network == "tcp4" {
 		if d.Timeout > 0 {
-			return d.TCPDialer.DialTimeout(addr, d.Timeout)
+			return d.DialTimeout(addr, d.Timeout)
 		}
 		return d.TCPDialer.Dial(addr)
 	}
 	if network == "tcp" {
 		if d.Timeout > 0 {
-			return d.TCPDialer.DialDualStackTimeout(addr, d.Timeout)
+			return d.DialDualStackTimeout(addr, d.Timeout)
 		}
 		return d.TCPDialer.DialDualStack(addr)
 	}

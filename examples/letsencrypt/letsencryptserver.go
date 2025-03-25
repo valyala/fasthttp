@@ -33,9 +33,9 @@ func main() {
 		panic(err)
 	}
 
-	lnTls := tls.NewListener(ln, cfg)
+	lnTLS := tls.NewListener(ln, cfg)
 
-	if err := fasthttp.Serve(lnTls, requestHandler); err != nil {
+	if err := fasthttp.Serve(lnTLS, requestHandler); err != nil {
 		panic(err)
 	}
 }

@@ -1157,7 +1157,7 @@ var (
 	// NetHttpFormValueFunc gives consistent behavior with net/http.
 	// POST and PUT body parameters take precedence over URL query string values.
 	//
-	//nolint:stylecheck // backwards compatibility
+	//nolint:staticcheck // backwards compatibility
 	NetHttpFormValueFunc = func(ctx *RequestCtx, key string) []byte {
 		v := ctx.PostArgs().Peek(key)
 		if len(v) > 0 {

@@ -1,3 +1,4 @@
+// Package pprofhandler provides a fasthttp handler similar to net/http/pprof.
 package pprofhandler
 
 import (
