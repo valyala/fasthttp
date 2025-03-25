@@ -15,14 +15,14 @@ import (
 
 var (
 	addr               = flag.String("addr", "localhost:8080", "TCP address to listen to")
-	addrTLS            = flag.String("addrTLS", "", "TCP address to listen to TLS (aka SSL or HTTPS) requests. Leave empty for disabling TLS")
+	addrTLS            = flag.String("addrTLS", "", "TCP address to listen to TLS (aka SSL or HTTPS) requests. Leave empty for disabling TLS") //nolint:lll
 	byteRange          = flag.Bool("byteRange", false, "Enables byte range requests if set to true")
 	certFile           = flag.String("certFile", "./ssl-cert.pem", "Path to TLS certificate file")
 	compress           = flag.Bool("compress", false, "Enables transparent response compression if set to true")
 	dir                = flag.String("dir", "/usr/share/nginx/html", "Directory to serve static files from")
 	generateIndexPages = flag.Bool("generateIndexPages", true, "Whether to generate directory index pages")
 	keyFile            = flag.String("keyFile", "./ssl-cert.key", "Path to TLS key file")
-	vhost              = flag.Bool("vhost", false, "Enables virtual hosting by prepending the requested path with the requested hostname")
+	vhost              = flag.Bool("vhost", false, "Enables virtual hosting by prepending the requested path with the requested hostname") //nolint:lll
 )
 
 func main() {
@@ -59,7 +59,7 @@ func main() {
 	}
 
 	// Start HTTP server.
-	if len(*addr) > 0 {
+	if *addr != "" {
 		log.Printf("Starting HTTP server on %q", *addr)
 		go func() {
 			if err := fasthttp.ListenAndServe(*addr, requestHandler); err != nil {
@@ -69,7 +69,7 @@ func main() {
 	}
 
 	// Start HTTPS server.
-	if len(*addrTLS) > 0 {
+	if *addrTLS != "" {
 		log.Printf("Starting HTTPS server on %q", *addrTLS)
 		go func() {
 			if err := fasthttp.ListenAndServeTLS(*addrTLS, *certFile, *keyFile, requestHandler); err != nil {
@@ -106,10 +106,10 @@ func updateFSCounters(ctx *fasthttp.RequestCtx) {
 
 // Various counters - see https://pkg.go.dev/expvar for details.
 var (
-	// Counter for total number of fs calls
+	// Counter for total number of fs calls.
 	fsCalls = expvar.NewInt("fsCalls")
 
-	// Counters for various response status codes
+	// Counters for various response status codes.
 	fsOKResponses          = expvar.NewInt("fsOKResponses")
 	fsNotModifiedResponses = expvar.NewInt("fsNotModifiedResponses")
 	fsNotFoundResponses    = expvar.NewInt("fsNotFoundResponses")

@@ -13,13 +13,13 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-var headerContentTypeJson = []byte("application/json")
+var headerContentTypeJSON = []byte("application/json")
 
 var client *fasthttp.Client
 
 type Entity struct {
-	Name string
-	Id   int
+	Name string `json:"name"`
+	ID   int    `json:"id"`
 }
 
 func main() {
@@ -66,12 +66,12 @@ func sendPostRequest() {
 	reqEntity := &Entity{
 		Name: "New entity",
 	}
-	reqEntityBytes, _ := json.Marshal(reqEntity)
+	reqEntityBytes, _ := json.Marshal(reqEntity) //nolint:errchkjson
 
 	req := fasthttp.AcquireRequest()
 	req.SetRequestURI("http://localhost:8080/")
 	req.Header.SetMethod(fasthttp.MethodPost)
-	req.Header.SetContentTypeBytes(headerContentTypeJson)
+	req.Header.SetContentTypeBytes(headerContentTypeJSON)
 	req.SetBodyRaw(reqEntityBytes)
 
 	resp := fasthttp.AcquireResponse()

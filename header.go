@@ -3331,10 +3331,7 @@ func (s *headerScanner) next() bool {
 		s.err = errNeedMore
 		return false
 	}
-	for {
-		if n+1 >= len(s.b) {
-			break
-		}
+	for n+1 < len(s.b) {
 		if s.b[n+1] != ' ' && s.b[n+1] != '\t' {
 			break
 		}

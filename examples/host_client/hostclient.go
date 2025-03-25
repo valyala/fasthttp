@@ -10,7 +10,7 @@ import (
 func main() {
 	// Get URI from a pool
 	url := fasthttp.AcquireURI()
-	url.Parse(nil, []byte("http://localhost:8080/"))
+	url.Parse(nil, []byte("http://localhost:8080/")) //nolint:errcheck
 	url.SetUsername("Aladdin")
 	url.SetPassword("Open Sesame")
 

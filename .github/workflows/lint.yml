@@ -23,7 +23,7 @@ jobs:
         go-version: 1.24.x
     - run: go version
     - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v6
+      uses: golangci/golangci-lint-action@v7
       with:
-        version: v1.64.5
+        version: v2.0.1
         args: --verbose

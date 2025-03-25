@@ -1,3 +1,4 @@
+// Package prefork provides a way to prefork a fasthttp server.
 package prefork
 
 import (
