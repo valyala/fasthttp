@@ -219,7 +219,7 @@ type Server struct {
 
 	concurrencyCh chan struct{}
 
-	idleConns map[net.Conn]time.Time
+	idleConns map[net.Conn]*atomic.Int64
 	done      chan struct{}
 
 	// Server name for sending in response headers.
@@ -2132,6 +2132,26 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		return handler(c)
 	}
 
+	s.idleConnsMu.Lock()
+	if s.idleConns == nil {
+		s.idleConns = make(map[net.Conn]*atomic.Int64)
+	}
+	idleConnTime, ok := s.idleConns[c]
+	if !ok {
+		v := idleConnTimePool.Get()
+		if v == nil {
+			v = &atomic.Int64{}
+		}
+		idleConnTime = v.(*atomic.Int64)
+		s.idleConns[c] = idleConnTime
+	}
+
+	// Count the connection as Idle after 5 seconds.
+	// Same as net/http.Server:
+	// https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
+	idleConnTime.Store(time.Now().Add(time.Second * 5).Unix())
+	s.idleConnsMu.Unlock()
+
 	serverName := s.getServerName()
 	connRequestNum := uint64(0)
 	connID := nextConnID()
@@ -2206,6 +2226,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 
 		if err == nil {
 			s.setState(c, StateActive)
+
+			idleConnTime.Store(0)
 
 			if s.ReadTimeout > 0 {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
@@ -2485,6 +2507,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			err = nil
 			break
 		}
+
+		idleConnTime.Store(time.Now().Unix())
 	}
 
 	if br != nil {
@@ -2497,11 +2521,18 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		s.releaseCtx(ctx)
 	}
 
+	s.idleConnsMu.Lock()
+	ic, ok := s.idleConns[c]
+	if ok {
+		idleConnTimePool.Put(ic)
+		delete(s.idleConns, c)
+	}
+	s.idleConnsMu.Unlock()
+
 	return
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {
-	s.trackConn(nc, state)
 	if hook := s.ConnState; hook != nil {
 		hook(nc, state)
 	}
@@ -2878,36 +2909,17 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 	return bw
 }
 
-func (s *Server) trackConn(c net.Conn, state ConnState) {
-	s.idleConnsMu.Lock()
-	switch state {
-	case StateIdle:
-		if s.idleConns == nil {
-			s.idleConns = make(map[net.Conn]time.Time)
-		}
-		s.idleConns[c] = time.Now()
-	case StateNew:
-		if s.idleConns == nil {
-			s.idleConns = make(map[net.Conn]time.Time)
-		}
-		// Count the connection as Idle after 5 seconds.
-		// Same as net/http.Server:
-		// https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
-		s.idleConns[c] = time.Now().Add(time.Second * 5)
-
-	default:
-		delete(s.idleConns, c)
-	}
-	s.idleConnsMu.Unlock()
-}
+var idleConnTimePool sync.Pool
 
 func (s *Server) closeIdleConns() {
 	s.idleConnsMu.Lock()
-	now := time.Now()
-	for c, t := range s.idleConns {
-		if now.Sub(t) >= 0 {
+	now := time.Now().Unix()
+	for c, ict := range s.idleConns {
+		t := ict.Load()
+		if t != 0 && now-t >= 0 {
 			_ = c.Close()
 			delete(s.idleConns, c)
+			idleConnTimePool.Put(ict)
 		}
 	}
 	s.idleConnsMu.Unlock()

@@ -3832,6 +3832,10 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
+
+		if _, err := conn.Read(make([]byte, 1)); err == nil {
+			t.Fatal("connection not closed")
+		}
 	}
 }
 
