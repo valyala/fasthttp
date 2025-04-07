@@ -16,6 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@v2.22.2
+        uses: securego/gosec@v2.22.3
         with:
           args: '-exclude=G103,G104,G304,G402 ./...'
