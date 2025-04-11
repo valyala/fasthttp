@@ -43,7 +43,8 @@ type perIPConn struct {
 
 	perIPConnCounter *perIPConnCounter
 
-	ip uint32
+	ip   uint32
+	lock sync.Mutex
 }
 
 type perIPTLSConn struct {
@@ -51,7 +52,8 @@ type perIPTLSConn struct {
 
 	perIPConnCounter *perIPConnCounter
 
-	ip uint32
+	ip   uint32
+	lock sync.Mutex
 }
 
 func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) net.Conn {
@@ -85,17 +87,33 @@ func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) net.C
 }
 
 func (c *perIPConn) Close() error {
-	err := c.Conn.Close()
-	c.perIPConnCounter.Unregister(c.ip)
+	c.lock.Lock()
+	cc := c.Conn
 	c.Conn = nil
+	c.lock.Unlock()
+
+	if cc == nil {
+		return nil
+	}
+
+	err := cc.Close()
+	c.perIPConnCounter.Unregister(c.ip)
 	c.perIPConnCounter.perIPConnPool.Put(c)
 	return err
 }
 
 func (c *perIPTLSConn) Close() error {
-	err := c.Conn.Close()
-	c.perIPConnCounter.Unregister(c.ip)
+	c.lock.Lock()
+	cc := c.Conn
 	c.Conn = nil
+	c.lock.Unlock()
+
+	if cc == nil {
+		return nil
+	}
+
+	err := cc.Close()
+	c.perIPConnCounter.Unregister(c.ip)
 	c.perIPConnCounter.perIPTLSConnPool.Put(c)
 	return err
 }
