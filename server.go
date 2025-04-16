@@ -623,6 +623,42 @@ type RequestCtx struct {
 	hijackNoResponse bool
 }
 
+// EarlyHints allows the server to hint to the browser what resources a page would need
+// so the browser can preload them while waiting for the server's full response.
+//
+// hints is a map with keys corresponding to a uri reference and the values corresponding
+// to semi-colon separated key-value pairs.
+//
+// This is a HTTP/2+ feature but all browsers will either understand it or safely ignore it.
+//
+// NOTE: Older HTTP/1.1 non-browser clients may face compatibility issues.
+//
+// See: https://developer.chrome.com/docs/web-platform/early-hints and
+// https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Link#syntax
+func (ctx *RequestCtx) EarlyHints(hints map[string]string) {
+	c := ctx.Conn()
+
+	c.Write(strEarlyHints) //nolint:errcheck // no way to handle this error anyway
+	for k, v := range hints {
+		if k == "" {
+			continue
+		}
+		var hint string
+		if k[0] == '<' {
+			hint = k + b2s(strSemiColon) + v // k;v
+		} else {
+			hint = b2s(strAngleLeft) + k + b2s(strAngleRight) + b2s(strSemiColon) + v // <k>;v
+		}
+		c.Write(strLink)   //nolint:errcheck // no way to handle this error anyway
+		c.Write(strColon)  //nolint:errcheck // no way to handle this error anyway
+		c.Write(strSpace)  //nolint:errcheck // no way to handle this error anyway
+		c.Write(s2b(hint)) //nolint:errcheck // no way to handle this error anyway
+		c.Write(strCRLF)   //nolint:errcheck // no way to handle this error anyway
+		ctx.Response.Header.AddBytesKV(strLink, s2b(hint))
+	}
+	c.Write(strCRLF) //nolint:errcheck // no way to handle this error anyway
+}
+
 // HijackHandler must process the hijacked connection c.
 //
 // If KeepHijackedConns is disabled, which is by default,
