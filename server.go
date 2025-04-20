@@ -15,7 +15,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
+
+const idleConnListCount = 16 // Keep this a multiple of 2.
 
 var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 
@@ -219,8 +222,9 @@ type Server struct {
 
 	concurrencyCh chan struct{}
 
-	idleConns map[net.Conn]*atomic.Int64
-	done      chan struct{}
+	idleConns [idleConnListCount]idleConnList
+
+	done chan struct{}
 
 	// Server name for sending in response headers.
 	//
@@ -310,8 +314,6 @@ type Server struct {
 	// the concurrency limit in exceeded (default [when is 0]: don't sleep
 	// and accept new connections immediately).
 	SleepWhenConcurrencyLimitsExceeded time.Duration
-
-	idleConnsMu sync.Mutex
 
 	mu sync.Mutex
 
@@ -2132,25 +2134,17 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		return handler(c)
 	}
 
-	s.idleConnsMu.Lock()
-	if s.idleConns == nil {
-		s.idleConns = make(map[net.Conn]*atomic.Int64)
-	}
-	idleConnTime, ok := s.idleConns[c]
-	if !ok {
-		v := idleConnTimePool.Get()
-		if v == nil {
-			v = &atomic.Int64{}
-		}
-		idleConnTime = v.(*atomic.Int64)
-		s.idleConns[c] = idleConnTime
+	idleConnSlot := (int(uintptr(unsafe.Pointer(&c))) >> 3) & (idleConnListCount - 1)
+	idleConnItem := idleConnListItem{
+		c: c,
 	}
 
 	// Count the connection as Idle after 5 seconds.
 	// Same as net/http.Server:
 	// https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
-	idleConnTime.Store(time.Now().Add(time.Second * 5).Unix())
-	s.idleConnsMu.Unlock()
+	idleConnItem.connTime.Store(time.Now().Add(time.Second * 5).Unix())
+
+	s.idleConns[idleConnSlot].insertBack(uintptr(unsafe.Pointer(&idleConnItem)))
 
 	serverName := s.getServerName()
 	connRequestNum := uint64(0)
@@ -2227,7 +2221,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		if err == nil {
 			s.setState(c, StateActive)
 
-			idleConnTime.Store(0)
+			idleConnItem.connTime.Store(0)
 
 			if s.ReadTimeout > 0 {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
@@ -2508,7 +2502,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 			break
 		}
 
-		idleConnTime.Store(time.Now().Unix())
+		idleConnItem.connTime.Store(time.Now().Unix())
 	}
 
 	if br != nil {
@@ -2521,13 +2515,8 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		s.releaseCtx(ctx)
 	}
 
-	s.idleConnsMu.Lock()
-	ic, ok := s.idleConns[c]
-	if ok {
-		idleConnTimePool.Put(ic)
-		delete(s.idleConns, c)
-	}
-	s.idleConnsMu.Unlock()
+	s.idleConns[idleConnSlot].remove(uintptr(unsafe.Pointer(&idleConnItem)))
+	idleConnItem.c = nil
 
 	return
 }
@@ -2909,20 +2898,17 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 	return bw
 }
 
-var idleConnTimePool sync.Pool
-
 func (s *Server) closeIdleConns() {
-	s.idleConnsMu.Lock()
 	now := time.Now().Unix()
-	for c, ict := range s.idleConns {
-		t := ict.Load()
-		if t != 0 && now-t >= 0 {
-			_ = c.Close()
-			delete(s.idleConns, c)
-			idleConnTimePool.Put(ict)
-		}
+
+	for idx := range s.idleConns {
+		s.idleConns[idx].forEach(func(item *idleConnListItem) {
+			t := item.connTime.Load()
+			if t != 0 && now-t >= 0 {
+				_ = item.c.Close()
+			}
+		})
 	}
-	s.idleConnsMu.Unlock()
 }
 
 func (s *Server) closeListenersLocked() error {
