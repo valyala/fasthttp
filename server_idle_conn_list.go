@@ -26,12 +26,14 @@ func (l *idleConnList) insertBack(itemPtr uintptr) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
-	item.prevItem = l.lastItem
-	if item.prevItem != nil {
-		item.prevItem.nextItem = item
+	if l.lastItem == nil {
+		l.firstItem = item
+		l.lastItem = item
+	} else {
+		l.lastItem.nextItem = item
+		item.prevItem = l.lastItem
+		l.lastItem = item
 	}
-	item.nextItem = nil
-	l.lastItem = item
 }
 
 func (l *idleConnList) remove(itemPtr uintptr) {
