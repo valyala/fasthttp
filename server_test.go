@@ -1919,6 +1919,49 @@ func TestServerExpect100Continue(t *testing.T) {
 	}
 }
 
+func TestServerExpect103EarlyHints(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		NoDefaultContentType:  true,
+		NoDefaultDate:         true,
+		NoDefaultServerHeader: true,
+		Handler: func(ctx *RequestCtx) {
+			ctx.Response.Header.Add("Link", "<https://cdn.com>; rel=preload; as=script")
+			ctx.EarlyHints() //nolint:errcheck
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+
+	scanner := bufio.NewScanner(&rw.w)
+	expected := []string{
+		"HTTP/1.1 103 Early Hints",
+		"Link: <https://cdn.com>; rel=preload; as=script",
+		"",
+		"HTTP/1.1 200 OK",
+		"Content-Length: 0",
+		"Link: <https://cdn.com>; rel=preload; as=script",
+	}
+
+	i := 0
+	for scanner.Scan() {
+		if i >= len(expected) {
+			break
+		}
+		line := scanner.Text()
+		if line != expected[i] {
+			t.Fatalf("unexpected data: %s. Expecting %s", line, expected[i])
+		}
+		i++
+	}
+}
+
 func TestServerContinueHandler(t *testing.T) {
 	t.Parallel()
 
