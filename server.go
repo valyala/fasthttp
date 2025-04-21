@@ -623,6 +623,72 @@ type RequestCtx struct {
 	hijackNoResponse bool
 }
 
+// EarlyHints allows the server to hint to the browser what resources a page would need
+// so the browser can preload them while waiting for the server's full response. Only Link
+// headers already written to the response will be transmitted as Early Hints.
+//
+// This is a HTTP/2+ feature but all browsers will either understand it or safely ignore it.
+//
+// NOTE: Older HTTP/1.1 non-browser clients may face compatibility issues.
+//
+// See: https://developer.chrome.com/docs/web-platform/early-hints and
+// https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Link#syntax
+//
+// Example:
+//
+//	func(ctx *fasthttp.RequestCtx) {
+//	   ctx.Response.Header.Add("Link", "<https://fonts.google.com>; rel=preconnect")
+//	   ctx.EarlyHints()
+//	   time.Sleep(5*time.Second) // some time-consuming task
+//	   ctx.SetStatusCode(fasthttp.StatusOK)
+//	   ctx.SetBody([]byte("<html><head></head><body><h1>Hello from Fasthttp</h1></body></html>"))
+//	}
+func (ctx *RequestCtx) EarlyHints() error {
+	links := ctx.Response.Header.PeekAll(b2s(strLink))
+	if len(links) > 0 {
+		c := acquireWriter(ctx)
+		defer releaseWriter(ctx.s, c)
+		_, err := c.Write(strEarlyHints)
+		if err != nil {
+			return err
+		}
+		for _, l := range links {
+			if len(l) == 0 {
+				continue
+			}
+			_, err = c.Write(strLink)
+			if err != nil {
+				return err
+			}
+			_, err = c.Write(strColon)
+			if err != nil {
+				return err
+			}
+			_, err = c.Write(strSpace)
+			if err != nil {
+				return err
+			}
+			_, err = c.Write(l)
+			if err != nil {
+				return err
+			}
+			_, err = c.Write(strCRLF)
+			if err != nil {
+				return err
+			}
+		}
+		_, err = c.Write(strCRLF)
+		if err != nil {
+			return err
+		}
+		err = c.Flush()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // HijackHandler must process the hijacked connection c.
 //
 // If KeepHijackedConns is disabled, which is by default,

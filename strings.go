@@ -25,8 +25,10 @@ var (
 	strColonSpace               = []byte(": ")
 	strCommaSpace               = []byte(", ")
 	strGMT                      = []byte("GMT")
+	strSpace                    = []byte(" ")
 
 	strResponseContinue = []byte("HTTP/1.1 100 Continue\r\n\r\n")
+	strEarlyHints       = []byte("HTTP/1.1 103 Early Hints\r\n")
 
 	strExpect             = []byte(HeaderExpect)
 	strConnection         = []byte(HeaderConnection)
@@ -86,6 +88,7 @@ var (
 	strBoundary            = []byte("boundary")
 	strBytes               = []byte("bytes")
 	strBasicSpace          = []byte("Basic ")
+	strLink                = []byte("Link")
 
 	strApplicationSlash = []byte("application/")
 	strImageSVG         = []byte("image/svg")
