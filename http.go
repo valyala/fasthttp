@@ -1486,8 +1486,12 @@ func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
 			bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
 		}
 	default:
-		bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
-		resp.Header.SetContentLength(len(bodyBuf.B))
+		if resp.StreamBody {
+			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
+		} else {
+			bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
+			resp.Header.SetContentLength(len(bodyBuf.B))
+		}
 	}
 	if err == nil && resp.StreamBody && resp.bodyStream == nil {
 		resp.bodyStream = bytes.NewReader(bodyBuf.B)
