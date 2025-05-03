@@ -611,8 +611,6 @@ type RequestCtx struct {
 	formValueFunc FormValueFunc
 	fbr           firstByteReader
 
-	userValues userData
-
 	// Incoming request.
 	//
 	// Copying Request by value is forbidden. Use pointer to Request instead.
@@ -743,42 +741,42 @@ func (ctx *RequestCtx) Hijacked() bool {
 }
 
 // SetUserValue stores the given value (arbitrary object)
-// under the given key in ctx.
+// under the given key in Request.
 //
-// The value stored in ctx may be obtained by UserValue*.
+// The value stored in Request may be obtained by UserValue*.
 //
 // This functionality may be useful for passing arbitrary values between
 // functions involved in request processing.
 //
-// All the values are removed from ctx after returning from the top
+// All the values are removed from Request after returning from the top
 // RequestHandler. Additionally, Close method is called on each value
-// implementing io.Closer before removing the value from ctx.
+// implementing io.Closer before removing the value from Request.
 func (ctx *RequestCtx) SetUserValue(key, value any) {
-	ctx.userValues.Set(key, value)
+	ctx.Request.SetUserValue(key, value)
 }
 
 // SetUserValueBytes stores the given value (arbitrary object)
-// under the given key in ctx.
+// under the given key in Request.
 //
-// The value stored in ctx may be obtained by UserValue*.
+// The value stored in Request may be obtained by UserValue*.
 //
 // This functionality may be useful for passing arbitrary values between
 // functions involved in request processing.
 //
-// All the values stored in ctx are deleted after returning from RequestHandler.
+// All the values stored in Request are deleted after returning from RequestHandler.
 func (ctx *RequestCtx) SetUserValueBytes(key []byte, value any) {
-	ctx.userValues.SetBytes(key, value)
+	ctx.Request.SetUserValueBytes(key, value)
 }
 
 // UserValue returns the value stored via SetUserValue* under the given key.
 func (ctx *RequestCtx) UserValue(key any) any {
-	return ctx.userValues.Get(key)
+	return ctx.Request.UserValue(key)
 }
 
 // UserValueBytes returns the value stored via SetUserValue*
 // under the given key.
 func (ctx *RequestCtx) UserValueBytes(key []byte) any {
-	return ctx.userValues.GetBytes(key)
+	return ctx.Request.UserValueBytes(key)
 }
 
 // VisitUserValues calls visitor for each existing userValue with a key that is a string or []byte.
@@ -786,12 +784,7 @@ func (ctx *RequestCtx) UserValueBytes(key []byte) any {
 // visitor must not retain references to key and value after returning.
 // Make key and/or value copies if you need storing them after returning.
 func (ctx *RequestCtx) VisitUserValues(visitor func([]byte, any)) {
-	for i, n := 0, len(ctx.userValues); i < n; i++ {
-		kv := &ctx.userValues[i]
-		if _, ok := kv.key.(string); ok {
-			visitor(s2b(kv.key.(string)), kv.value)
-		}
-	}
+	ctx.Request.VisitUserValues(visitor)
 }
 
 // VisitUserValuesAll calls visitor for each existing userValue.
@@ -799,25 +792,22 @@ func (ctx *RequestCtx) VisitUserValues(visitor func([]byte, any)) {
 // visitor must not retain references to key and value after returning.
 // Make key and/or value copies if you need storing them after returning.
 func (ctx *RequestCtx) VisitUserValuesAll(visitor func(any, any)) {
-	for i, n := 0, len(ctx.userValues); i < n; i++ {
-		kv := &ctx.userValues[i]
-		visitor(kv.key, kv.value)
-	}
+	ctx.Request.VisitUserValuesAll(visitor)
 }
 
-// ResetUserValues allows to reset user values from Request Context.
+// ResetUserValues allows to reset user values from Request.
 func (ctx *RequestCtx) ResetUserValues() {
-	ctx.userValues.Reset()
+	ctx.Request.ResetUserValues()
 }
 
-// RemoveUserValue removes the given key and the value under it in ctx.
+// RemoveUserValue removes the given key and the value under it in Request.
 func (ctx *RequestCtx) RemoveUserValue(key any) {
-	ctx.userValues.Remove(key)
+	ctx.Request.RemoveUserValue(key)
 }
 
-// RemoveUserValueBytes removes the given key and the value under it in ctx.
+// RemoveUserValueBytes removes the given key and the value under it in Request.
 func (ctx *RequestCtx) RemoveUserValueBytes(key []byte) {
-	ctx.userValues.RemoveBytes(key)
+	ctx.Request.RemoveUserValueBytes(key)
 }
 
 type connTLSer interface {
@@ -873,7 +863,6 @@ func (ctx *RequestCtx) Conn() net.Conn {
 }
 
 func (ctx *RequestCtx) reset() {
-	ctx.userValues.Reset()
 	ctx.Request.Reset()
 	ctx.Response.Reset()
 	ctx.fbr.reset()
@@ -2565,7 +2554,6 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		}
 
 		s.setState(c, StateIdle)
-		ctx.userValues.Reset()
 		ctx.Request.Reset()
 		ctx.Response.Reset()
 

@@ -45,7 +45,8 @@ type Request struct {
 	multipartForm         *multipart.Form
 	multipartFormBoundary string
 
-	postArgs Args
+	postArgs   Args
+	userValues userData
 
 	bodyRaw []byte
 
@@ -1119,6 +1120,7 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 
 // Reset clears request contents.
 func (req *Request) Reset() {
+	req.userValues.Reset() // it should be at the top, since some values might implement io.Closer interface
 	if requestBodyPoolSizeLimit >= 0 && req.body != nil {
 		req.ReleaseBody(requestBodyPoolSizeLimit)
 	}
@@ -2138,6 +2140,84 @@ func (req *Request) String() string {
 // Use Write instead of String for performance-critical code.
 func (resp *Response) String() string {
 	return getHTTPString(resp)
+}
+
+// SetUserValue stores the given value (arbitrary object)
+// under the given key in Request.
+//
+// The value stored in Request may be obtained by UserValue*.
+//
+// This functionality may be useful for passing arbitrary values between
+// functions involved in request processing.
+//
+// All the values are removed from Request after returning from the top
+// RequestHandler. Additionally, Close method is called on each value
+// implementing io.Closer before removing the value from Request.
+func (req *Request) SetUserValue(key, value any) {
+	req.userValues.Set(key, value)
+}
+
+// SetUserValueBytes stores the given value (arbitrary object)
+// under the given key in Request.
+//
+// The value stored in Request may be obtained by UserValue*.
+//
+// This functionality may be useful for passing arbitrary values between
+// functions involved in request processing.
+//
+// All the values stored in Request are deleted after returning from RequestHandler.
+func (req *Request) SetUserValueBytes(key []byte, value any) {
+	req.userValues.SetBytes(key, value)
+}
+
+// UserValue returns the value stored via SetUserValue* under the given key.
+func (req *Request) UserValue(key any) any {
+	return req.userValues.Get(key)
+}
+
+// UserValueBytes returns the value stored via SetUserValue*
+// under the given key.
+func (req *Request) UserValueBytes(key []byte) any {
+	return req.userValues.GetBytes(key)
+}
+
+// VisitUserValues calls visitor for each existing userValue with a key that is a string or []byte.
+//
+// visitor must not retain references to key and value after returning.
+// Make key and/or value copies if you need storing them after returning.
+func (req *Request) VisitUserValues(visitor func([]byte, any)) {
+	for i, n := 0, len(req.userValues); i < n; i++ {
+		kv := &req.userValues[i]
+		if _, ok := kv.key.(string); ok {
+			visitor(s2b(kv.key.(string)), kv.value)
+		}
+	}
+}
+
+// VisitUserValuesAll calls visitor for each existing userValue.
+//
+// visitor must not retain references to key and value after returning.
+// Make key and/or value copies if you need storing them after returning.
+func (req *Request) VisitUserValuesAll(visitor func(any, any)) {
+	for i, n := 0, len(req.userValues); i < n; i++ {
+		kv := &req.userValues[i]
+		visitor(kv.key, kv.value)
+	}
+}
+
+// ResetUserValues allows to reset user values from Request Context.
+func (req *Request) ResetUserValues() {
+	req.userValues.Reset()
+}
+
+// RemoveUserValue removes the given key and the value under it in Request.
+func (req *Request) RemoveUserValue(key any) {
+	req.userValues.Remove(key)
+}
+
+// RemoveUserValueBytes removes the given key and the value under it in Request.
+func (req *Request) RemoveUserValueBytes(key []byte) {
+	req.userValues.RemoveBytes(key)
 }
 
 func getHTTPString(hw httpWriter) string {
