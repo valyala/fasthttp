@@ -3057,6 +3057,31 @@ func TestResponseBodyStream(t *testing.T) {
 				t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "0123456789")
 			}
 		})
+
+		t.Run("identity", func(t *testing.T) {
+			t.Parallel()
+
+			client := Client{StreamResponseBody: true, DisablePathNormalizing: true}
+			resp := AcquireResponse()
+			request := AcquireRequest()
+			request.SetRequestURI(server.URL + "?400BadRequest")
+			if err := client.Do(request, resp); err != nil {
+				t.Fatal(err)
+			}
+			stream := resp.BodyStream()
+			defer func() {
+				if err := resp.CloseBodyStream(); err != nil {
+					t.Fatalf("close stream err: %v", err)
+				}
+			}()
+			content, err := io.ReadAll(stream)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(content) != "400 Bad Request" {
+				t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "400 Bad Request")
+			}
+		})
 	})
 }
 
