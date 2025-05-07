@@ -1979,6 +1979,12 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	}
 }
 
+type connKeepAliveer interface {
+	SetKeepAlive(keepalive bool) error
+	SetKeepAlivePeriod(d time.Duration) error
+	io.Closer
+}
+
 func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.Conn, error) {
 	for {
 		c, err := ln.Accept()
@@ -1995,7 +2001,7 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 			return nil, io.EOF
 		}
 
-		if tc, ok := c.(*net.TCPConn); ok && s.TCPKeepalive {
+		if tc, ok := c.(connKeepAliveer); ok && s.TCPKeepalive {
 			if err := tc.SetKeepAlive(s.TCPKeepalive); err != nil {
 				_ = tc.Close()
 				return nil, err
