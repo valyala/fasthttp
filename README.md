@@ -47,9 +47,10 @@ connections per physical server.
 In short, fasthttp server is up to 10 times faster than net/http.
 Below are benchmark results.
 
-*GOMAXPROCS=1*
+_GOMAXPROCS=1_
 
 net/http server:
+
 ```
 $ GOMAXPROCS=1 go test -bench=NetHTTPServerGet -benchmem -benchtime=10s
 BenchmarkNetHTTPServerGet1ReqPerConn                	 1000000	     12052 ns/op	    2297 B/op	      29 allocs/op
@@ -63,6 +64,7 @@ BenchmarkNetHTTPServerGet100ReqPerConn10KClients    	 1000000	     13484 ns/op	 
 ```
 
 fasthttp server:
+
 ```
 $ GOMAXPROCS=1 go test -bench=kServerGet -benchmem -benchtime=10s
 BenchmarkServerGet1ReqPerConn                       	10000000	      1559 ns/op	       0 B/op	       0 allocs/op
@@ -75,9 +77,10 @@ BenchmarkServerGet10ReqPerConn10KClients            	20000000	       789 ns/op	 
 BenchmarkServerGet100ReqPerConn10KClients           	20000000	       604 ns/op	       0 B/op	       0 allocs/op
 ```
 
-*GOMAXPROCS=4*
+_GOMAXPROCS=4_
 
 net/http server:
+
 ```
 $ GOMAXPROCS=4 go test -bench=NetHTTPServerGet -benchmem -benchtime=10s
 BenchmarkNetHTTPServerGet1ReqPerConn-4                  	 3000000	      4529 ns/op	    2389 B/op	      29 allocs/op
@@ -91,6 +94,7 @@ BenchmarkNetHTTPServerGet100ReqPerConn10KClients-4      	 5000000	      3435 ns/
 ```
 
 fasthttp server:
+
 ```
 $ GOMAXPROCS=4 go test -bench=kServerGet -benchmem -benchtime=10s
 BenchmarkServerGet1ReqPerConn-4                         	10000000	      1141 ns/op	       0 B/op	       0 allocs/op
@@ -108,9 +112,10 @@ BenchmarkServerGet100ReqPerConn10KClients-4             	50000000	       282 ns/
 In short, fasthttp client is up to 10 times faster than net/http.
 Below are benchmark results.
 
-*GOMAXPROCS=1*
+_GOMAXPROCS=1_
 
 net/http client:
+
 ```
 $ GOMAXPROCS=1 go test -bench='HTTPClient(Do|GetEndToEnd)' -benchmem -benchtime=10s
 BenchmarkNetHTTPClientDoFastServer                  	 1000000	     12567 ns/op	    2616 B/op	      35 allocs/op
@@ -124,6 +129,7 @@ BenchmarkNetHTTPClientGetEndToEnd1000Inmemory       	  500000	     39511 ns/op	 
 ```
 
 fasthttp client:
+
 ```
 $ GOMAXPROCS=1 go test -bench='kClient(Do|GetEndToEnd)' -benchmem -benchtime=10s
 BenchmarkClientDoFastServer                         	20000000	       865 ns/op	       0 B/op	       0 allocs/op
@@ -136,9 +142,10 @@ BenchmarkClientGetEndToEnd100Inmemory               	 5000000	      3396 ns/op	 
 BenchmarkClientGetEndToEnd1000Inmemory              	 5000000	      3306 ns/op	       2 B/op	       0 allocs/op
 ```
 
-*GOMAXPROCS=4*
+_GOMAXPROCS=4_
 
 net/http client:
+
 ```
 $ GOMAXPROCS=4 go test -bench='HTTPClient(Do|GetEndToEnd)' -benchmem -benchtime=10s
 BenchmarkNetHTTPClientDoFastServer-4                    	 2000000	      8774 ns/op	    2619 B/op	      35 allocs/op
@@ -152,6 +159,7 @@ BenchmarkNetHTTPClientGetEndToEnd1000Inmemory-4         	 1000000	     11132 ns/
 ```
 
 fasthttp client:
+
 ```
 $ GOMAXPROCS=4 go test -bench='kClient(Do|GetEndToEnd)' -benchmem -benchtime=10s
 BenchmarkClientDoFastServer-4                           	50000000	       397 ns/op	       0 B/op	       0 allocs/op
@@ -164,13 +172,11 @@ BenchmarkClientGetEndToEnd100Inmemory-4                 	10000000	      1329 ns/
 BenchmarkClientGetEndToEnd1000Inmemory-4                	10000000	      1316 ns/op	       5 B/op	       0 allocs/op
 ```
 
-
 ## Install
 
 ```
 go get -u github.com/valyala/fasthttp
 ```
-
 
 ## Switching from net/http to fasthttp
 
@@ -182,9 +188,9 @@ all of the fasthttp advantages (especially high performance :) ).
 
 Important points:
 
-* Fasthttp works with [RequestHandler functions](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler)
-instead of objects implementing [Handler interface](https://pkg.go.dev/net/http#Handler).
-Fortunately, it is easy to pass bound struct methods to fasthttp:
+- Fasthttp works with [RequestHandler functions](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler)
+  instead of objects implementing [Handler interface](https://pkg.go.dev/net/http#Handler).
+  Fortunately, it is easy to pass bound struct methods to fasthttp:
 
   ```go
   type MyHandler struct {
@@ -213,11 +219,11 @@ Fortunately, it is easy to pass bound struct methods to fasthttp:
   fasthttp.ListenAndServe(":8081", fastHTTPHandler)
   ```
 
-* The [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler)
-accepts only one argument - [RequestCtx](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx).
-It contains all the functionality required for http request processing
-and response writing. Below is an example of a simple request handler conversion
-from net/http to fasthttp.
+- The [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler)
+  accepts only one argument - [RequestCtx](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx).
+  It contains all the functionality required for http request processing
+  and response writing. Below is an example of a simple request handler conversion
+  from net/http to fasthttp.
 
   ```go
   // net/http request handler
@@ -247,9 +253,9 @@ from net/http to fasthttp.
   }
   ```
 
-* Fasthttp allows setting response headers and writing response body
-in an arbitrary order. There is no 'headers first, then body' restriction
-like in net/http. The following code is valid for fasthttp:
+- Fasthttp allows setting response headers and writing response body
+  in an arbitrary order. There is no 'headers first, then body' restriction
+  like in net/http. The following code is valid for fasthttp:
 
   ```go
   requestHandler := func(ctx *fasthttp.RequestCtx) {
@@ -280,16 +286,16 @@ like in net/http. The following code is valid for fasthttp:
   }
   ```
 
-* Fasthttp doesn't provide [ServeMux](https://pkg.go.dev/net/http#ServeMux),
-but there are more powerful third-party routers and web frameworks
-with fasthttp support:
+- Fasthttp doesn't provide [ServeMux](https://pkg.go.dev/net/http#ServeMux),
+  but there are more powerful third-party routers and web frameworks
+  with fasthttp support:
 
-  * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
-  * [router](https://github.com/fasthttp/router)
-  * [lu](https://github.com/vincentLiuxiang/lu)
-  * [atreugo](https://github.com/savsgio/atreugo)
-  * [Fiber](https://github.com/gofiber/fiber)
-  * [Gearbox](https://github.com/gogearbox/gearbox)
+  - [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
+  - [router](https://github.com/fasthttp/router)
+  - [lu](https://github.com/vincentLiuxiang/lu)
+  - [atreugo](https://github.com/savsgio/atreugo)
+  - [Fiber](https://github.com/gofiber/fiber)
+  - [Gearbox](https://github.com/gogearbox/gearbox)
 
   Net/http code with simple ServeMux is trivially converted to fasthttp code:
 
@@ -322,83 +328,85 @@ with fasthttp support:
   fasthttp.ListenAndServe(":80", m)
   ```
 
-* Because creating a new channel for every request is just too expensive, so the channel returned by RequestCtx.Done() is only closed when the server is shutting down.
+- Because creating a new channel for every request is just too expensive, so the channel returned by RequestCtx.Done() is only closed when the server is shutting down.
 
   ```go
   func main() {
-	fasthttp.ListenAndServe(":8080", fasthttp.TimeoutHandler(func(ctx *fasthttp.RequestCtx) {
-		select {
-		case <-ctx.Done():
-			// ctx.Done() is only closed when the server is shutting down.
-			log.Println("context cancelled")
-			return
-		case <-time.After(10 * time.Second):
-			log.Println("process finished ok")
-		}
-	}, time.Second*2, "timeout"))
+  fasthttp.ListenAndServe(":8080", fasthttp.TimeoutHandler(func(ctx *fasthttp.RequestCtx) {
+  	select {
+  	case <-ctx.Done():
+  		// ctx.Done() is only closed when the server is shutting down.
+  		log.Println("context cancelled")
+  		return
+  	case <-time.After(10 * time.Second):
+  		log.Println("process finished ok")
+  	}
+  }, time.Second*2, "timeout"))
   }
   ```
 
-* net/http -> fasthttp conversion table:
+- net/http -> fasthttp conversion table:
 
-  * All the pseudocode below assumes w, r and ctx have these types:
+  - All the pseudocode below assumes w, r and ctx have these types:
+
   ```go
-	var (
-		w http.ResponseWriter
-		r *http.Request
-		ctx *fasthttp.RequestCtx
-	)
+  var (
+  	w http.ResponseWriter
+  	r *http.Request
+  	ctx *fasthttp.RequestCtx
+  )
   ```
-  * r.Body -> [ctx.PostBody()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostBody)
-  * r.URL.Path -> [ctx.Path()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Path)
-  * r.URL -> [ctx.URI()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.URI)
-  * r.Method -> [ctx.Method()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Method)
-  * r.Header -> [ctx.Request.Header](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader)
-  * r.Header.Get() -> [ctx.Request.Header.Peek()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader.Peek)
-  * r.Host -> [ctx.Host()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Host)
-  * r.Form -> [ctx.QueryArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.QueryArgs) +
-  [ctx.PostArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostArgs)
-  * r.PostForm -> [ctx.PostArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostArgs)
-  * r.FormValue() -> [ctx.FormValue()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormValue)
-  * r.FormFile() -> [ctx.FormFile()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormFile)
-  * r.MultipartForm -> [ctx.MultipartForm()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.MultipartForm)
-  * r.RemoteAddr -> [ctx.RemoteAddr()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RemoteAddr)
-  * r.RequestURI -> [ctx.RequestURI()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RequestURI)
-  * r.TLS -> [ctx.IsTLS()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.IsTLS)
-  * r.Cookie() -> [ctx.Request.Header.Cookie()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader.Cookie)
-  * r.Referer() -> [ctx.Referer()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Referer)
-  * r.UserAgent() -> [ctx.UserAgent()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.UserAgent)
-  * w.Header() -> [ctx.Response.Header](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader)
-  * w.Header().Set() -> [ctx.Response.Header.Set()](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader.Set)
-  * w.Header().Set("Content-Type") -> [ctx.SetContentType()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetContentType)
-  * w.Header().Set("Set-Cookie") -> [ctx.Response.Header.SetCookie()](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader.SetCookie)
-  * w.Write() -> [ctx.Write()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Write),
-  [ctx.SetBody()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetBody),
-  [ctx.SetBodyStream()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetBodyStream),
-  [ctx.SetBodyStreamWriter()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetBodyStreamWriter)
-  * w.WriteHeader() -> [ctx.SetStatusCode()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetStatusCode)
-  * w.(http.Hijacker).Hijack() -> [ctx.Hijack()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Hijack)
-  * http.Error() -> [ctx.Error()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Error)
-  * http.FileServer() -> [fasthttp.FSHandler()](https://pkg.go.dev/github.com/valyala/fasthttp#FSHandler),
-  [fasthttp.FS](https://pkg.go.dev/github.com/valyala/fasthttp#FS)
-  * http.ServeFile() -> [fasthttp.ServeFile()](https://pkg.go.dev/github.com/valyala/fasthttp#ServeFile)
-  * http.Redirect() -> [ctx.Redirect()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Redirect)
-  * http.NotFound() -> [ctx.NotFound()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.NotFound)
-  * http.StripPrefix() -> [fasthttp.PathRewriteFunc](https://pkg.go.dev/github.com/valyala/fasthttp#PathRewriteFunc)
 
-* *VERY IMPORTANT!* Fasthttp disallows holding references
-to [RequestCtx](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx) or to its'
-members after returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler).
-Otherwise [data races](http://go.dev/blog/race-detector) are inevitable.
-Carefully inspect all the net/http request handlers converted to fasthttp whether
-they retain references to RequestCtx or to its' members after returning.
-RequestCtx provides the following _band aids_ for this case:
+  - r.Body -> [ctx.PostBody()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostBody)
+  - r.URL.Path -> [ctx.Path()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Path)
+  - r.URL -> [ctx.URI()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.URI)
+  - r.Method -> [ctx.Method()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Method)
+  - r.Header -> [ctx.Request.Header](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader)
+  - r.Header.Get() -> [ctx.Request.Header.Peek()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader.Peek)
+  - r.Host -> [ctx.Host()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Host)
+  - r.Form -> [ctx.QueryArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.QueryArgs) +
+    [ctx.PostArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostArgs)
+  - r.PostForm -> [ctx.PostArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostArgs)
+  - r.FormValue() -> [ctx.FormValue()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormValue)
+  - r.FormFile() -> [ctx.FormFile()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormFile)
+  - r.MultipartForm -> [ctx.MultipartForm()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.MultipartForm)
+  - r.RemoteAddr -> [ctx.RemoteAddr()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RemoteAddr)
+  - r.RequestURI -> [ctx.RequestURI()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RequestURI)
+  - r.TLS -> [ctx.IsTLS()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.IsTLS)
+  - r.Cookie() -> [ctx.Request.Header.Cookie()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader.Cookie)
+  - r.Referer() -> [ctx.Referer()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Referer)
+  - r.UserAgent() -> [ctx.UserAgent()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.UserAgent)
+  - w.Header() -> [ctx.Response.Header](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader)
+  - w.Header().Set() -> [ctx.Response.Header.Set()](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader.Set)
+  - w.Header().Set("Content-Type") -> [ctx.SetContentType()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetContentType)
+  - w.Header().Set("Set-Cookie") -> [ctx.Response.Header.SetCookie()](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader.SetCookie)
+  - w.Write() -> [ctx.Write()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Write),
+    [ctx.SetBody()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetBody),
+    [ctx.SetBodyStream()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetBodyStream),
+    [ctx.SetBodyStreamWriter()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetBodyStreamWriter)
+  - w.WriteHeader() -> [ctx.SetStatusCode()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetStatusCode)
+  - w.(http.Hijacker).Hijack() -> [ctx.Hijack()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Hijack)
+  - http.Error() -> [ctx.Error()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Error)
+  - http.FileServer() -> [fasthttp.FSHandler()](https://pkg.go.dev/github.com/valyala/fasthttp#FSHandler),
+    [fasthttp.FS](https://pkg.go.dev/github.com/valyala/fasthttp#FS)
+  - http.ServeFile() -> [fasthttp.ServeFile()](https://pkg.go.dev/github.com/valyala/fasthttp#ServeFile)
+  - http.Redirect() -> [ctx.Redirect()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Redirect)
+  - http.NotFound() -> [ctx.NotFound()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.NotFound)
+  - http.StripPrefix() -> [fasthttp.PathRewriteFunc](https://pkg.go.dev/github.com/valyala/fasthttp#PathRewriteFunc)
 
-  * Wrap RequestHandler into [TimeoutHandler](https://pkg.go.dev/github.com/valyala/fasthttp#TimeoutHandler).
-  * Call [TimeoutError](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
-  before returning from RequestHandler if there are references to RequestCtx or to its' members.
-  See [the example](https://pkg.go.dev/github.com/valyala/fasthttp#example-RequestCtx-TimeoutError)
-  for more details.
+- _VERY IMPORTANT!_ Fasthttp disallows holding references
+  to [RequestCtx](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx) or to its'
+  members after returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler).
+  Otherwise [data races](http://go.dev/blog/race-detector) are inevitable.
+  Carefully inspect all the net/http request handlers converted to fasthttp whether
+  they retain references to RequestCtx or to its' members after returning.
+  RequestCtx provides the following _band aids_ for this case:
+
+  - Wrap RequestHandler into [TimeoutHandler](https://pkg.go.dev/github.com/valyala/fasthttp#TimeoutHandler).
+  - Call [TimeoutError](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
+    before returning from RequestHandler if there are references to RequestCtx or to its' members.
+    See [the example](https://pkg.go.dev/github.com/valyala/fasthttp#example-RequestCtx-TimeoutError)
+    for more details.
 
 Use this brilliant tool - [race detector](http://go.dev/blog/race-detector) -
 for detecting and eliminating data races in your program. If you detected
@@ -406,54 +414,52 @@ data race related to fasthttp in your program, then there is high probability
 you forgot calling [TimeoutError](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
 before returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler).
 
-* Blind switching from net/http to fasthttp won't give you performance boost.
-While fasthttp is optimized for speed, its' performance may be easily saturated
-by slow [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler).
-So [profile](http://go.dev/blog/pprof) and optimize your
-code after switching to fasthttp. For instance, use [quicktemplate](https://github.com/valyala/quicktemplate)
-instead of [html/template](https://pkg.go.dev/html/template).
+- Blind switching from net/http to fasthttp won't give you performance boost.
+  While fasthttp is optimized for speed, its' performance may be easily saturated
+  by slow [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler).
+  So [profile](http://go.dev/blog/pprof) and optimize your
+  code after switching to fasthttp. For instance, use [quicktemplate](https://github.com/valyala/quicktemplate)
+  instead of [html/template](https://pkg.go.dev/html/template).
 
-* See also [fasthttputil](https://pkg.go.dev/github.com/valyala/fasthttp/fasthttputil),
-[fasthttpadaptor](https://pkg.go.dev/github.com/valyala/fasthttp/fasthttpadaptor) and
-[expvarhandler](https://pkg.go.dev/github.com/valyala/fasthttp/expvarhandler).
-
+- See also [fasthttputil](https://pkg.go.dev/github.com/valyala/fasthttp/fasthttputil),
+  [fasthttpadaptor](https://pkg.go.dev/github.com/valyala/fasthttp/fasthttpadaptor) and
+  [expvarhandler](https://pkg.go.dev/github.com/valyala/fasthttp/expvarhandler).
 
 ## Performance optimization tips for multi-core systems
 
-* Use [reuseport](https://pkg.go.dev/github.com/valyala/fasthttp/reuseport) listener.
-* Run a separate server instance per CPU core with GOMAXPROCS=1.
-* Pin each server instance to a separate CPU core using [taskset](http://linux.die.net/man/1/taskset).
-* Ensure the interrupts of multiqueue network card are evenly distributed between CPU cores.
+- Use [reuseport](https://pkg.go.dev/github.com/valyala/fasthttp/reuseport) listener.
+- Run a separate server instance per CPU core with GOMAXPROCS=1.
+- Pin each server instance to a separate CPU core using [taskset](http://linux.die.net/man/1/taskset).
+- Ensure the interrupts of multiqueue network card are evenly distributed between CPU cores.
   See [this article](https://blog.cloudflare.com/how-to-achieve-low-latency/) for details.
-* Use the latest version of Go as each version contains performance improvements.
-
+- Use the latest version of Go as each version contains performance improvements.
 
 ## Fasthttp best practices
 
-* Do not allocate objects and `[]byte` buffers - just reuse them as much
+- Do not allocate objects and `[]byte` buffers - just reuse them as much
   as possible. Fasthttp API design encourages this.
-* [sync.Pool](https://pkg.go.dev/sync#Pool) is your best friend.
-* [Profile your program](http://go.dev/blog/pprof)
+- [sync.Pool](https://pkg.go.dev/sync#Pool) is your best friend.
+- [Profile your program](http://go.dev/blog/pprof)
   in production.
   `go tool pprof --alloc_objects your-program mem.pprof` usually gives better
   insights for optimization opportunities than `go tool pprof your-program cpu.pprof`.
-* Write [tests and benchmarks](https://pkg.go.dev/testing) for hot paths.
-* Avoid conversion between `[]byte` and `string`, since this may result in memory
+- Write [tests and benchmarks](https://pkg.go.dev/testing) for hot paths.
+- Avoid conversion between `[]byte` and `string`, since this may result in memory
   allocation+copy. Fasthttp API provides functions for both `[]byte` and `string` -
   use these functions instead of converting manually between `[]byte` and `string`.
   There are some exceptions - see [this wiki page](https://github.com/golang/go/wiki/CompilerOptimizations#string-and-byte)
   for more details.
-* Verify your tests and production code under
+- Verify your tests and production code under
   [race detector](https://go.dev/doc/articles/race_detector.html) on a regular basis.
-* Prefer [quicktemplate](https://github.com/valyala/quicktemplate) instead of
+- Prefer [quicktemplate](https://github.com/valyala/quicktemplate) instead of
   [html/template](https://pkg.go.dev/html/template) in your webserver.
-
 
 ## Tricks with `[]byte` buffers
 
 The following tricks are used by fasthttp. Use them in your code too.
 
-* Standard Go functions accept nil buffers
+- Standard Go functions accept nil buffers
+
 ```go
 var (
 	// both buffers are uninitialized
@@ -473,6 +479,7 @@ for i, ch := range src {
 ```
 
 So throw away nil checks for `[]byte` buffers from you code. For example,
+
 ```go
 srcLen := 0
 if src != nil {
@@ -486,25 +493,29 @@ becomes
 srcLen := len(src)
 ```
 
-* String may be appended to `[]byte` buffer with `append`
+- String may be appended to `[]byte` buffer with `append`
+
 ```go
 dst = append(dst, "foobar"...)
 ```
 
-* `[]byte` buffer may be extended to its' capacity.
+- `[]byte` buffer may be extended to its' capacity.
+
 ```go
 buf := make([]byte, 100)
 a := buf[:10]  // len(a) == 10, cap(a) == 100.
 b := a[:100]  // is valid, since cap(a) == 100.
 ```
 
-* All fasthttp functions accept nil `[]byte` buffer
+- All fasthttp functions accept nil `[]byte` buffer
+
 ```go
 statusCode, body, err := fasthttp.Get(nil, "http://google.com/")
 uintBuf := fasthttp.AppendUint(nil, 1234)
 ```
 
-* String and `[]byte` buffers may converted without memory allocations
+- String and `[]byte` buffers may converted without memory allocations
+
 ```go
 func b2s(b []byte) string {
     return *(*string)(unsafe.Pointer(&b))
@@ -521,123 +532,125 @@ func s2b(s string) (b []byte) {
 ```
 
 ### Warning:
+
 This is an **unsafe** way, the result string and `[]byte` buffer share the same bytes.
 
 **Please make sure not to modify the bytes in the `[]byte` buffer if the string still survives!**
 
 ## Related projects
 
-  * [fasthttp](https://github.com/fasthttp) - various useful
-    helpers for projects based on fasthttp.
-  * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) - fast and
-    powerful routing package for fasthttp servers.
-  * [http2](https://github.com/dgrr/http2) - HTTP/2 implementation for fasthttp.
-  * [router](https://github.com/fasthttp/router) - a high
-    performance fasthttp request router that scales well.
-  * [fastws](https://github.com/fasthttp/fastws) - Bloatless WebSocket package made for fasthttp
-    to handle Read/Write operations concurrently.
-  * [gramework](https://github.com/gramework/gramework) - a web framework made by one of fasthttp maintainers.
-  * [lu](https://github.com/vincentLiuxiang/lu) - a high performance
-    go middleware web framework which is based on fasthttp.
-  * [websocket](https://github.com/fasthttp/websocket) - Gorilla-based
-    websocket implementation for fasthttp.
-  * [websocket](https://github.com/dgrr/websocket) - Event-based high-performance WebSocket library for zero-allocation
-    websocket servers and clients.
-  * [fasthttpsession](https://github.com/phachon/fasthttpsession) - a fast and powerful session package for fasthttp servers.
-  * [atreugo](https://github.com/savsgio/atreugo) - High performance and extensible micro web framework with zero memory allocations in hot paths.
-  * [kratgo](https://github.com/savsgio/kratgo) - Simple, lightweight and ultra-fast HTTP Cache to speed up your websites.
-  * [kit-plugins](https://github.com/wencan/kit-plugins/tree/master/transport/fasthttp) - go-kit transport implementation for fasthttp.
-  * [Fiber](https://github.com/gofiber/fiber) - An Expressjs inspired web framework running on Fasthttp.
-  * [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization.
-  * [http2curl](https://github.com/li-jin-gou/http2curl) - A tool to convert fasthttp requests to curl command line.
-  * [OpenTelemetry Golang Compile Time Instrumentation](https://github.com/alibaba/opentelemetry-go-auto-instrumentation) - A tool to monitor fasthttp application without changing any code with OpenTelemetry APIs.
+- [fasthttp](https://github.com/fasthttp) - various useful
+  helpers for projects based on fasthttp.
+- [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) - fast and
+  powerful routing package for fasthttp servers.
+- [http2](https://github.com/dgrr/http2) - HTTP/2 implementation for fasthttp.
+- [router](https://github.com/fasthttp/router) - a high
+  performance fasthttp request router that scales well.
+- [fastws](https://github.com/fasthttp/fastws) - Bloatless WebSocket package made for fasthttp
+  to handle Read/Write operations concurrently.
+- [gramework](https://github.com/gramework/gramework) - a web framework made by one of fasthttp maintainers.
+- [lu](https://github.com/vincentLiuxiang/lu) - a high performance
+  go middleware web framework which is based on fasthttp.
+- [websocket](https://github.com/fasthttp/websocket) - Gorilla-based
+  websocket implementation for fasthttp.
+- [websocket](https://github.com/dgrr/websocket) - Event-based high-performance WebSocket library for zero-allocation
+  websocket servers and clients.
+- [fasthttpsession](https://github.com/phachon/fasthttpsession) - a fast and powerful session package for fasthttp servers.
+- [atreugo](https://github.com/savsgio/atreugo) - High performance and extensible micro web framework with zero memory allocations in hot paths.
+- [kratgo](https://github.com/savsgio/kratgo) - Simple, lightweight and ultra-fast HTTP Cache to speed up your websites.
+- [kit-plugins](https://github.com/wencan/kit-plugins/tree/master/transport/fasthttp) - go-kit transport implementation for fasthttp.
+- [Fiber](https://github.com/gofiber/fiber) - An Expressjs inspired web framework running on Fasthttp.
+- [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization.
+- [http2curl](https://github.com/li-jin-gou/http2curl) - A tool to convert fasthttp requests to curl command line.
+- [OpenTelemetry Golang Compile Time Instrumentation](https://github.com/alibaba/opentelemetry-go-auto-instrumentation) - A tool to monitor fasthttp application without changing any code with OpenTelemetry APIs.
 
 ## FAQ
 
-* *Why creating yet another http package instead of optimizing net/http?*
+- _Why creating yet another http package instead of optimizing net/http?_
 
   Because net/http API limits many optimization opportunities.
   For example:
-  * net/http Request object lifetime isn't limited by request handler execution
+
+  - net/http Request object lifetime isn't limited by request handler execution
     time. So the server must create a new request object per each request instead
     of reusing existing objects like fasthttp does.
-  * net/http headers are stored in a `map[string][]string`. So the server
+  - net/http headers are stored in a `map[string][]string`. So the server
     must parse all the headers, convert them from `[]byte` to `string` and put
     them into the map before calling user-provided request handler.
     This all requires unnecessary memory allocations avoided by fasthttp.
-  * net/http client API requires creating a new response object per each request.
+  - net/http client API requires creating a new response object per each request.
 
-* *Why fasthttp API is incompatible with net/http?*
+- _Why fasthttp API is incompatible with net/http?_
 
   Because net/http API limits many optimization opportunities. See the answer
   above for more details. Also certain net/http API parts are suboptimal
   for use:
-  * Compare [net/http connection hijacking](https://pkg.go.dev/net/http#Hijacker)
+
+  - Compare [net/http connection hijacking](https://pkg.go.dev/net/http#Hijacker)
     to [fasthttp connection hijacking](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Hijack).
-  * Compare [net/http Request.Body reading](https://pkg.go.dev/net/http#Request)
+  - Compare [net/http Request.Body reading](https://pkg.go.dev/net/http#Request)
     to [fasthttp request body reading](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostBody).
 
-* *Why fasthttp doesn't support HTTP/2.0 and WebSockets?*
+- _Why fasthttp doesn't support HTTP/2.0 and WebSockets?_
 
   [HTTP/2.0 support](https://github.com/fasthttp/http2) is in progress. [WebSockets](https://github.com/fasthttp/websockets) has been done already.
   Third parties also may use [RequestCtx.Hijack](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Hijack)
   for implementing these goodies.
 
-* *Are there known net/http advantages comparing to fasthttp?*
+- _Are there known net/http advantages comparing to fasthttp?_
 
   Yes:
-  * net/http supports [HTTP/2.0 starting from go1.6](https://pkg.go.dev/golang.org/x/net/http2).
-  * net/http API is stable, while fasthttp API constantly evolves.
-  * net/http handles more HTTP corner cases.
-  * net/http can stream both request and response bodies
-  * net/http can handle bigger bodies as it doesn't read the whole body into memory
-  * net/http should contain less bugs, since it is used and tested by much
+
+  - net/http supports [HTTP/2.0 starting from go1.6](https://pkg.go.dev/golang.org/x/net/http2).
+  - net/http API is stable, while fasthttp API constantly evolves.
+  - net/http handles more HTTP corner cases.
+  - net/http can stream both request and response bodies
+  - net/http can handle bigger bodies as it doesn't read the whole body into memory
+  - net/http should contain less bugs, since it is used and tested by much
     wider audience.
 
-* *Why fasthttp API prefers returning `[]byte` instead of `string`?*
+- _Why fasthttp API prefers returning `[]byte` instead of `string`?_
 
   Because `[]byte` to `string` conversion isn't free - it requires memory
   allocation and copy. Feel free wrapping returned `[]byte` result into
   `string()` if you prefer working with strings instead of byte slices.
   But be aware that this has non-zero overhead.
 
-* *Which GO versions are supported by fasthttp?*
+- _Which GO versions are supported by fasthttp?_
 
   We support the same versions the Go team supports.
   Currently that is Go 1.23.x and newer.
   Older versions might work, but won't officially be supported.
 
-* *Please provide real benchmark data and server information*
+- _Please provide real benchmark data and server information_
 
   See [this issue](https://github.com/valyala/fasthttp/issues/4).
 
-* *Are there plans to add request routing to fasthttp?*
+- _Are there plans to add request routing to fasthttp?_
 
   There are no plans to add request routing into fasthttp.
   Use third-party routers and web frameworks with fasthttp support:
 
-    * [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
-    * [router](https://github.com/fasthttp/router)
-    * [gramework](https://github.com/gramework/gramework)
-    * [lu](https://github.com/vincentLiuxiang/lu)
-    * [atreugo](https://github.com/savsgio/atreugo)
-    * [Fiber](https://github.com/gofiber/fiber)
-    * [Gearbox](https://github.com/gogearbox/gearbox)
+  - [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing)
+  - [router](https://github.com/fasthttp/router)
+  - [gramework](https://github.com/gramework/gramework)
+  - [lu](https://github.com/vincentLiuxiang/lu)
+  - [atreugo](https://github.com/savsgio/atreugo)
+  - [Fiber](https://github.com/gofiber/fiber)
+  - [Gearbox](https://github.com/gogearbox/gearbox)
 
-  See also [this issue](https://github.com/valyala/fasthttp/issues/9) for more info.
-
-* *I detected data race in fasthttp!*
+- _I detected data race in fasthttp!_
 
   Cool! [File a bug](https://github.com/valyala/fasthttp/issues/new). But before
   doing this check the following in your code:
 
-  * Make sure there are no references to [RequestCtx](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx)
-  or to its' members after returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler).
-  * Make sure you call [TimeoutError](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
-  before returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler)
-  if there are references to [RequestCtx](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx)
-  or to its' members, which may be accessed by other goroutines.
+  - Make sure there are no references to [RequestCtx](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx)
+    or to its' members after returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler).
+  - Make sure you call [TimeoutError](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.TimeoutError)
+    before returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHandler)
+    if there are references to [RequestCtx](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx)
+    or to its' members, which may be accessed by other goroutines.
 
-* *I didn't find an answer for my question here*
+- _I didn't find an answer for my question here_
 
   Try exploring [these questions](https://github.com/valyala/fasthttp/issues?q=label%3Aquestion).
