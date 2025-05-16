@@ -445,7 +445,9 @@ before returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fas
   insights for optimization opportunities than `go tool pprof your-program cpu.pprof`.
 - Write [tests and benchmarks](https://pkg.go.dev/testing) for hot paths.
 - Avoid conversion between `[]byte` and `string`, since this may result in memory
-  allocation+copy. There are some exceptions - see [this wiki page](https://github.com/golang/go/wiki/CompilerOptimizations#string-and-byte)
+  allocation+copy. Fasthttp API provides functions for both `[]byte` and `string` -
+  use these functions instead of converting manually between `[]byte` and `string`.
+  There are some exceptions - see [this wiki page](https://github.com/golang/go/wiki/CompilerOptimizations#string-and-byte)
   for more details.
 - Verify your tests and production code under
   [race detector](https://go.dev/doc/articles/race_detector.html) on a regular basis.
