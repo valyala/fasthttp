@@ -171,9 +171,9 @@ func TestResponseHeaderMultiLineName(t *testing.T) {
 	header := new(ResponseHeader)
 	if _, err := header.parse([]byte(s)); err != errInvalidName {
 		m := make(map[string]string)
-		header.VisitAll(func(key, value []byte) {
-			m[string(key)] = string(value)
-		})
+		for k, v := range header.All() {
+			m[string(k)] = string(v)
+		}
 		t.Errorf("expected error, got %q (%v)", m, err)
 	}
 
@@ -530,7 +530,7 @@ func TestResponseHeaderAdd(t *testing.T) {
 		t.Fatalf("unexpected header len %d. Expecting 12", h.Len())
 	}
 
-	h.VisitAll(func(k, v []byte) {
+	for k, v := range h.All() {
 		switch string(k) {
 		case "Aaa", "Foo-Bar", "Content-Type":
 			if _, ok := m[string(v)]; !ok {
@@ -540,7 +540,7 @@ func TestResponseHeaderAdd(t *testing.T) {
 		default:
 			t.Fatalf("unexpected key found: %q", k)
 		}
-	})
+	}
 	if len(m) > 0 {
 		t.Fatalf("%d headers are missed", len(m))
 	}
@@ -552,14 +552,14 @@ func TestResponseHeaderAdd(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	h.VisitAll(func(k, v []byte) {
+	for k, v := range h.All() {
 		switch string(k) {
 		case "Aaa", "Foo-Bar", "Content-Type":
 			m[string(v)] = struct{}{}
 		default:
 			t.Fatalf("unexpected key found: %q", k)
 		}
-	})
+	}
 	if len(m) != 12 {
 		t.Fatalf("unexpected number of headers: %d. Expecting 12", len(m))
 	}
@@ -583,7 +583,7 @@ func TestRequestHeaderAdd(t *testing.T) {
 		t.Fatalf("unexpected header len %d. Expecting 12", h.Len())
 	}
 
-	h.VisitAll(func(k, v []byte) {
+	for k, v := range h.All() {
 		switch string(k) {
 		case "Aaa", "Foo-Bar", "User-Agent":
 			if _, ok := m[string(v)]; !ok {
@@ -593,7 +593,7 @@ func TestRequestHeaderAdd(t *testing.T) {
 		default:
 			t.Fatalf("unexpected key found: %q", k)
 		}
-	})
+	}
 	if len(m) > 0 {
 		t.Fatalf("%d headers are missed", len(m))
 	}
@@ -605,14 +605,14 @@ func TestRequestHeaderAdd(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	h.VisitAll(func(k, v []byte) {
+	for k, v := range h.All() {
 		switch string(k) {
 		case "Aaa", "Foo-Bar", "User-Agent":
 			m[string(v)] = struct{}{}
 		default:
 			t.Fatalf("unexpected key found: %q", k)
 		}
-	})
+	}
 	if len(m) != 12 {
 		t.Fatalf("unexpected number of headers: %d. Expecting 12", len(m))
 	}
@@ -1933,7 +1933,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 		t.Fatalf("unexpected cookie\n%v\nExpected\n%v\n", &c, &expectedC2)
 	}
 
-	h.VisitAllCookie(func(key, value []byte) {
+	for key, value := range h.Cookies() {
 		var cc Cookie
 		if err := cc.ParseBytes(value); err != nil {
 			t.Fatal(err)
@@ -1953,7 +1953,7 @@ func TestResponseHeaderCookie(t *testing.T) {
 		default:
 			t.Fatalf("unexpected cookie key %q", key)
 		}
-	})
+	}
 
 	w := &bytes.Buffer{}
 	bw := bufio.NewWriter(w)
@@ -2094,11 +2094,12 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek(HeaderSetCookie), "foo=bar")
 	}
 	cookieSeen := false
-	h.VisitAll(func(key, _ []byte) {
+	for key := range h.All() {
 		if string(key) == HeaderSetCookie {
 			cookieSeen = true
+			break
 		}
-	})
+	}
 	if !cookieSeen {
 		t.Fatalf("Set-Cookie not present in VisitAll")
 	}
@@ -2114,11 +2115,12 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 		t.Fatalf("Unexpected Set-Cookie header %q. Expected %q", h.Peek(HeaderSetCookie), "foo=bar")
 	}
 	cookieSeen = false
-	h.VisitAll(func(key, _ []byte) {
+	for key := range h.All() {
 		if string(key) == HeaderSetCookie {
 			cookieSeen = true
+			break
 		}
-	})
+	}
 	if !cookieSeen {
 		t.Fatalf("Set-Cookie not present in VisitAll")
 	}
@@ -2137,11 +2139,12 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek(HeaderCookie), "foo=bar")
 	}
 	cookieSeen := false
-	h.VisitAll(func(key, _ []byte) {
+	for key := range h.All() {
 		if string(key) == HeaderCookie {
 			cookieSeen = true
+			break
 		}
-	})
+	}
 	if !cookieSeen {
 		t.Fatalf("Cookie not present in VisitAll")
 	}
@@ -2154,11 +2157,12 @@ func TestRequestHeaderCookieIssue313(t *testing.T) {
 		t.Fatalf("Unexpected Cookie header %q. Expected %q", h.Peek(HeaderCookie), "foo=bar")
 	}
 	cookieSeen = false
-	h.VisitAll(func(key, _ []byte) {
+	for key := range h.All() {
 		if string(key) == HeaderCookie {
 			cookieSeen = true
+			break
 		}
-	})
+	}
 	if !cookieSeen {
 		t.Fatalf("Cookie not present in VisitAll")
 	}

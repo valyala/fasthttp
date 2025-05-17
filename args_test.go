@@ -68,7 +68,7 @@ func TestArgsAdd(t *testing.T) {
 	}
 
 	var barFound, bazFound, oneFound, emptyFound1, emptyFound2, baFound bool
-	a1.VisitAll(func(k, v []byte) {
+	for k, v := range a1.All() {
 		switch string(k) {
 		case "foo":
 			switch string(v) {
@@ -95,7 +95,7 @@ func TestArgsAdd(t *testing.T) {
 		default:
 			t.Fatalf("unexpected key found %q", k)
 		}
-	})
+	}
 	if !barFound || !bazFound || !oneFound || !emptyFound1 || !emptyFound2 || !baFound {
 		t.Fatalf("something is missing: %v, %v, %v, %v, %v, %v", barFound, bazFound, oneFound, emptyFound1, emptyFound2, baFound)
 	}
@@ -329,9 +329,9 @@ func TestArgsCopyTo(t *testing.T) {
 
 func testCopyTo(t *testing.T, a *Args) {
 	keys := make(map[string]struct{})
-	a.VisitAll(func(k, _ []byte) {
+	for k := range a.All() {
 		keys[string(k)] = struct{}{}
-	})
+	}
 
 	var b Args
 	a.CopyTo(&b)
@@ -340,12 +340,12 @@ func testCopyTo(t *testing.T, a *Args) {
 		t.Fatalf("ArgsCopyTo fail, a: \n%+v\nb: \n%+v\n", a, &b)
 	}
 
-	b.VisitAll(func(k, _ []byte) {
+	for k := range b.All() {
 		if _, ok := keys[string(k)]; !ok {
 			t.Fatalf("unexpected key %q after copying from %q", k, a.String())
 		}
 		delete(keys, string(k))
-	})
+	}
 	if len(keys) > 0 {
 		t.Fatalf("missing keys %#v after copying from %q", keys, a.String())
 	}

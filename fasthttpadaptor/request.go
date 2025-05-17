@@ -51,7 +51,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 		}
 	}
 
-	ctx.Request.Header.VisitAll(func(k, v []byte) {
+	for k, v := range ctx.Request.Header.All() {
 		sk := b2s(k)
 		sv := b2s(v)
 
@@ -64,7 +64,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 			}
 			r.Header.Set(sk, sv)
 		}
-	})
+	}
 
 	return nil
 }

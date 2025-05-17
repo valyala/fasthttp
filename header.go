@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -934,7 +935,9 @@ func (h *RequestHeader) HasAcceptEncodingBytes(acceptEncoding []byte) bool {
 // i.e. the number of times f is called in VisitAll.
 func (h *ResponseHeader) Len() int {
 	n := 0
-	h.VisitAll(func(_, _ []byte) { n++ })
+	for range h.All() {
+		n++
+	}
 	return n
 }
 
@@ -942,7 +945,9 @@ func (h *ResponseHeader) Len() int {
 // i.e. the number of times f is called in VisitAll.
 func (h *RequestHeader) Len() int {
 	n := 0
-	h.VisitAll(func(_, _ []byte) { n++ })
+	for range h.All() {
+		n++
+	}
 	return n
 }
 
@@ -1143,55 +1148,129 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.rawHeaders = append(dst.rawHeaders, h.rawHeaders...)
 }
 
+// All returns an iterator over key-value pairs in h.
+//
+// The key and value may invalid outside the iteration loop.
+// Copy key and/or value contents for each iteration if you need retaining
+// them.
+func (h *ResponseHeader) All() iter.Seq2[[]byte, []byte] {
+	return func(yield func([]byte, []byte) bool) {
+		if len(h.contentLengthBytes) > 0 && !yield(strContentLength, h.contentLengthBytes) {
+			return
+		}
+		if contentType := h.ContentType(); len(contentType) > 0 && !yield(strContentType, contentType) {
+			return
+		}
+
+		if contentEncoding := h.ContentEncoding(); len(contentEncoding) > 0 && !yield(strContentEncoding, contentEncoding) {
+			return
+		}
+
+		if server := h.Server(); len(server) > 0 && !yield(strServer, server) {
+			return
+		}
+
+		for i := range h.cookies {
+			if !yield(strSetCookie, h.cookies[i].value) {
+				return
+			}
+		}
+
+		if len(h.trailer) > 0 && !yield(strTrailer, appendTrailerBytes(nil, h.trailer, strCommaSpace)) {
+			return
+		}
+
+		for i := range h.h {
+			if !yield(h.h[i].key, h.h[i].value) {
+				return
+			}
+		}
+
+		if h.ConnectionClose() && !yield(strConnection, strClose) {
+			return
+		}
+	}
+}
+
 // VisitAll calls f for each header.
 //
 // f must not retain references to key and/or value after returning.
 // Copy key and/or value contents before returning if you need retaining them.
+//
+// Deprecated: Use All instead.
 func (h *ResponseHeader) VisitAll(f func(key, value []byte)) {
-	if len(h.contentLengthBytes) > 0 {
-		f(strContentLength, h.contentLengthBytes)
-	}
-	contentType := h.ContentType()
-	if len(contentType) > 0 {
-		f(strContentType, contentType)
-	}
-	contentEncoding := h.ContentEncoding()
-	if len(contentEncoding) > 0 {
-		f(strContentEncoding, contentEncoding)
-	}
-	server := h.Server()
-	if len(server) > 0 {
-		f(strServer, server)
-	}
-	if len(h.cookies) > 0 {
-		visitArgs(h.cookies, func(_, v []byte) {
-			f(strSetCookie, v)
-		})
-	}
-	if len(h.trailer) > 0 {
-		f(strTrailer, appendTrailerBytes(nil, h.trailer, strCommaSpace))
-	}
-	visitArgs(h.h, f)
-	if h.ConnectionClose() {
-		f(strConnection, strClose)
+	h.All()(func(key, value []byte) bool {
+		f(key, value)
+		return true
+	})
+}
+
+// Trailers returns an iterator over trailers in h.
+//
+// The value of trailer may invalid outside the iteration loop.
+func (h *ResponseHeader) Trailers() iter.Seq[[]byte] {
+	return func(yield func([]byte) bool) {
+		for i := range h.trailer {
+			if !yield(h.trailer[i]) {
+				break
+			}
+		}
 	}
 }
 
 // VisitAllTrailer calls f for each response Trailer.
 //
 // f must not retain references to value after returning.
+//
+// Deprecated: Use Trailers instead.
 func (h *ResponseHeader) VisitAllTrailer(f func(value []byte)) {
-	for i := range h.trailer {
-		f(h.trailer[i])
+	h.Trailers()(func(v []byte) bool {
+		f(v)
+		return true
+	})
+}
+
+// Trailers returns an iterator over trailers in h.
+//
+// The value of trailer may invalid outside the iteration loop.
+func (h *RequestHeader) Trailers() iter.Seq[[]byte] {
+	return func(yield func([]byte) bool) {
+		for i := range h.trailer {
+			if !yield(h.trailer[i]) {
+				break
+			}
+		}
 	}
 }
 
 // VisitAllTrailer calls f for each request Trailer.
 //
 // f must not retain references to value after returning.
+//
+// Deprecated: Use Trailers instead.
 func (h *RequestHeader) VisitAllTrailer(f func(value []byte)) {
-	for i := range h.trailer {
-		f(h.trailer[i])
+	h.Trailers()(func(v []byte) bool {
+		f(v)
+		return true
+	})
+}
+
+// Cookies returns an iterator over key-value paired response cookie in h.
+//
+// Cookie name is passed in key and the whole Set-Cookie header value
+// is passed in value for each iteration. Value may be parsed with
+// Cookie.ParseBytes().
+//
+// The key and value may invalid outside the iteration loop.
+// Copy key and/or value contents for each iteration if you need retaining
+// them.
+func (h *ResponseHeader) Cookies() iter.Seq2[[]byte, []byte] {
+	return func(yield func([]byte, []byte) bool) {
+		for i := range h.cookies {
+			if !yield(h.cookies[i].key, h.cookies[i].value) {
+				break
+			}
+		}
 	}
 }
 
@@ -1202,16 +1281,89 @@ func (h *RequestHeader) VisitAllTrailer(f func(value []byte)) {
 // with Cookie.ParseBytes().
 //
 // f must not retain references to key and/or value after returning.
+//
+// Deprecated: Use Cookies instead.
 func (h *ResponseHeader) VisitAllCookie(f func(key, value []byte)) {
-	visitArgs(h.cookies, f)
+	h.Cookies()(func(key, value []byte) bool {
+		f(key, value)
+		return true
+	})
+}
+
+// Cookies returns an iterator over key-value pairs request cookie in h.
+//
+// The key and value may invalid outside the iteration loop.
+// Copy key and/or value contents for each iteration if you need retaining
+// them.
+func (h *RequestHeader) Cookies() iter.Seq2[[]byte, []byte] {
+	return func(yield func([]byte, []byte) bool) {
+		h.collectCookies()
+		for i := range h.cookies {
+			if !yield(h.cookies[i].key, h.cookies[i].value) {
+				break
+			}
+		}
+	}
 }
 
 // VisitAllCookie calls f for each request cookie.
 //
 // f must not retain references to key and/or value after returning.
+//
+// Deprecated: Use Cookies instead.
 func (h *RequestHeader) VisitAllCookie(f func(key, value []byte)) {
-	h.collectCookies()
-	visitArgs(h.cookies, f)
+	h.Cookies()(func(key, value []byte) bool {
+		f(key, value)
+		return true
+	})
+}
+
+// All returns an iterator over key-value pairs in h.
+//
+// The key and value may invalid outside the iteration loop.
+// Copy key and/or value contents for each iteration if you need retaining
+// them.
+//
+// To get the headers in order they were received use AllInOrder.
+func (h *RequestHeader) All() iter.Seq2[[]byte, []byte] {
+	return func(yield func([]byte, []byte) bool) {
+		if host := h.Host(); len(host) > 0 && !yield(strHost, host) {
+			return
+		}
+		if len(h.contentLengthBytes) > 0 && !yield(strContentLength, h.contentLengthBytes) {
+			return
+		}
+
+		if contentType := h.ContentType(); len(contentType) > 0 && !yield(strContentType, contentType) {
+			return
+		}
+
+		if userAgent := h.UserAgent(); len(userAgent) > 0 && !yield(strUserAgent, userAgent) {
+			return
+		}
+
+		if len(h.trailer) > 0 && !yield(strTrailer, appendTrailerBytes(nil, h.trailer, strCommaSpace)) {
+			return
+		}
+
+		h.collectCookies()
+
+		if len(h.cookies) > 0 {
+			h.bufV = appendRequestCookieBytes(h.bufV[:0], h.cookies)
+			if !yield(strCookie, h.bufV) {
+				return
+			}
+		}
+
+		for i := range h.h {
+			if !yield(h.h[i].key, h.h[i].value) {
+				return
+			}
+		}
+		if h.ConnectionClose() && !yield(strConnection, strClose) {
+			return
+		}
+	}
 }
 
 // VisitAll calls f for each header.
@@ -1220,34 +1372,36 @@ func (h *RequestHeader) VisitAllCookie(f func(key, value []byte)) {
 // Copy key and/or value contents before returning if you need retaining them.
 //
 // To get the headers in order they were received use VisitAllInOrder.
+//
+// Deprecated: Use All instead.
 func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
-	host := h.Host()
-	if len(host) > 0 {
-		f(strHost, host)
-	}
-	if len(h.contentLengthBytes) > 0 {
-		f(strContentLength, h.contentLengthBytes)
-	}
-	contentType := h.ContentType()
-	if len(contentType) > 0 {
-		f(strContentType, contentType)
-	}
-	userAgent := h.UserAgent()
-	if len(userAgent) > 0 {
-		f(strUserAgent, userAgent)
-	}
-	if len(h.trailer) > 0 {
-		f(strTrailer, appendTrailerBytes(nil, h.trailer, strCommaSpace))
-	}
+	h.All()(func(key, value []byte) bool {
+		f(key, value)
+		return true
+	})
+}
 
-	h.collectCookies()
-	if len(h.cookies) > 0 {
-		h.bufV = appendRequestCookieBytes(h.bufV[:0], h.cookies)
-		f(strCookie, h.bufV)
-	}
-	visitArgs(h.h, f)
-	if h.ConnectionClose() {
-		f(strConnection, strClose)
+// AllInOrder returns an iterator over key-value pairs in h in the order they
+// were received.
+//
+// The key and value may invalid outside the iteration loop.
+// Copy key and/or value contents for each iteration if you need retaining
+// them.
+//
+// The returned iterator is slightly slower than All because it has to reparse
+// the raw headers to get the order.
+func (h *RequestHeader) AllInOrder() iter.Seq2[[]byte, []byte] {
+	return func(yield func([]byte, []byte) bool) {
+		var s headerScanner
+		s.b = h.rawHeaders
+		for s.next() {
+			normalizeHeaderKey(s.key, h.disableNormalizing || bytes.IndexByte(s.key, ' ') != -1)
+			if len(s.key) > 0 {
+				if !yield(s.key, s.value) {
+					break
+				}
+			}
+		}
 	}
 }
 
@@ -1258,15 +1412,13 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 //
 // This function is slightly slower than VisitAll because it has to reparse the
 // raw headers to get the order.
+//
+// Deprecated: Use AllInOrder instead.
 func (h *RequestHeader) VisitAllInOrder(f func(key, value []byte)) {
-	var s headerScanner
-	s.b = h.rawHeaders
-	for s.next() {
-		normalizeHeaderKey(s.key, h.disableNormalizing || bytes.IndexByte(s.key, ' ') != -1)
-		if len(s.key) > 0 {
-			f(s.key, s.value)
-		}
-	}
+	h.AllInOrder()(func(key, value []byte) bool {
+		f(key, value)
+		return true
+	})
 }
 
 // Del deletes header with the given key.
