@@ -452,6 +452,42 @@ before returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fas
 - Prefer [quicktemplate](https://github.com/valyala/quicktemplate) instead of
   [html/template](https://pkg.go.dev/html/template) in your webserver.
 
+## Unsafe Zero-Allocation Conversions
+
+In performance-critical code, converting between `[]byte` and `string` using standard Go allocations can be inefficient. To address this, `fasthttp` uses **unsafe**, zero-allocation helpers:
+
+> ⚠️ **Warning:** These conversions break Go's type safety. Use only when you're certain the converted value will not be mutated, as violating immutability can cause undefined behavior.
+
+### `UnsafeString(b []byte) string`
+
+Converts a `[]byte` to a `string` **without memory allocation**.
+
+```go
+// UnsafeString returns a string pointer without allocation
+func UnsafeString(b []byte) string {
+    // #nosec G103
+    return *(*string)(unsafe.Pointer(&b))
+}
+```
+
+### `UnsafeBytes(s string) []byte`
+
+Converts a `string` to a `[]byte` **without memory allocation**.
+
+```go
+// UnsafeBytes returns a byte pointer without allocation.
+func UnsafeBytes(s string) []byte {
+    // #nosec G103
+    return unsafe.Slice(unsafe.StringData(s), len(s))
+}
+```
+
+### Use Cases & Caveats
+
+- These functions are ideal for performance-sensitive scenarios where allocations must be avoided (e.g., request/response processing loops).
+- **Do not** mutate the `[]byte` returned from `UnsafeBytes(s string)` if the original string is still in use, as strings are immutable in Go and may be shared across the runtime.
+- Use samples guarded with `#nosec G103` comments to suppress static analysis warnings about unsafe operations.
+
 ## Tricks with `[]byte` buffers
 
 The following tricks are used by fasthttp. Use them in your code too.
