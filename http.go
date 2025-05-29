@@ -347,13 +347,14 @@ type ReadCloserWithError interface {
 type CloseReader struct {
 	io.Reader
 	closeFunc func(err error) error
+	RBS       io.Reader
 }
 
 func newCloseReaderWithError(rbs io.Reader, closeFunc func(err error) error) ReadCloserWithError {
 	if rbs == nil {
 		panic(`BUG: Reader is nil`)
 	}
-	return &CloseReader{Reader: rbs, closeFunc: closeFunc}
+	return &CloseReader{Reader: rbs, closeFunc: closeFunc, RBS: rbs}
 }
 
 func (c *CloseReader) CloseWithError(err error) error {
