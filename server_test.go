@@ -4152,7 +4152,7 @@ func TestStreamBodyRequestContentLength(t *testing.T) {
 func checkReader(t *testing.T, r io.Reader, expected string) {
 	b := make([]byte, len(expected))
 	if _, err := io.ReadFull(r, b); err != nil {
-		t.Fatalf("Unexpected error from reader: %v", err)
+		t.Fatalf("Unexpected error from Reader: %v", err)
 	}
 	if string(b) != expected {
 		t.Fatal("incorrect request body")

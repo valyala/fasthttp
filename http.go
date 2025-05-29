@@ -344,19 +344,19 @@ type ReadCloserWithError interface {
 	CloseWithError(err error) error
 }
 
-type closeReader struct {
+type CloseReader struct {
 	io.Reader
 	closeFunc func(err error) error
 }
 
-func newCloseReaderWithError(r io.Reader, closeFunc func(err error) error) ReadCloserWithError {
-	if r == nil {
-		panic(`BUG: reader is nil`)
+func newCloseReaderWithError(rbs io.Reader, closeFunc func(err error) error) ReadCloserWithError {
+	if rbs == nil {
+		panic(`BUG: Reader is nil`)
 	}
-	return &closeReader{Reader: r, closeFunc: closeFunc}
+	return &CloseReader{Reader: rbs, closeFunc: closeFunc}
 }
 
-func (c *closeReader) CloseWithError(err error) error {
+func (c *CloseReader) CloseWithError(err error) error {
 	if c.closeFunc == nil {
 		return nil
 	}
@@ -920,11 +920,11 @@ func swapRequestBody(a, b *Request) {
 	a.bodyRaw, b.bodyRaw = b.bodyRaw, a.bodyRaw
 	a.bodyStream, b.bodyStream = b.bodyStream, a.bodyStream
 
-	// This code assumes that if a requestStream was swapped the headers are also swapped or copied.
-	if rs, ok := a.bodyStream.(*requestStream); ok {
+	// This code assumes that if a RequestStream was swapped the headers are also swapped or copied.
+	if rs, ok := a.bodyStream.(*RequestStream); ok {
 		rs.header = &a.Header
 	}
-	if rs, ok := b.bodyStream.(*requestStream); ok {
+	if rs, ok := b.bodyStream.(*RequestStream); ok {
 		rs.header = &b.Header
 	}
 }
@@ -1435,21 +1435,21 @@ func (resp *Response) Read(r *bufio.Reader) error {
 // then ErrBodyTooLarge is returned.
 //
 // io.EOF is returned if r is closed before reading the first header byte.
-func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
+func (resp *Response) ReadLimitBody(br *bufio.Reader, maxBodySize int) error {
 	resp.resetSkipHeader()
-	err := resp.Header.Read(r)
+	err := resp.Header.Read(br)
 	if err != nil {
 		return err
 	}
 	if resp.Header.StatusCode() == StatusContinue {
 		// Read the next response according to http://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html .
-		if err = resp.Header.Read(r); err != nil {
+		if err = resp.Header.Read(br); err != nil {
 			return err
 		}
 	}
 
 	if !resp.mustSkipBody() {
-		err = resp.ReadBody(r, maxBodySize)
+		err = resp.ReadBody(br, maxBodySize)
 		if err != nil {
 			return err
 		}
@@ -1457,7 +1457,7 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 
 	// A response without a body can't have trailers.
 	if resp.Header.ContentLength() == -1 && !resp.StreamBody && !resp.mustSkipBody() {
-		err = resp.Header.ReadTrailer(r)
+		err = resp.Header.ReadTrailer(br)
 		if err != nil && err != io.EOF {
 			return err
 		}
@@ -1469,29 +1469,29 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
-func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
+func (resp *Response) ReadBody(br *bufio.Reader, maxBodySize int) (err error) {
 	bodyBuf := resp.bodyBuffer()
 	bodyBuf.Reset()
 
 	contentLength := resp.Header.ContentLength()
 	switch {
 	case contentLength >= 0:
-		bodyBuf.B, err = readBody(r, contentLength, maxBodySize, bodyBuf.B)
+		bodyBuf.B, err = readBody(br, contentLength, maxBodySize, bodyBuf.B)
 		if err == ErrBodyTooLarge && resp.StreamBody {
-			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
+			resp.bodyStream = acquireRequestStream(bodyBuf, br, &resp.Header)
 			err = nil
 		}
 	case contentLength == -1:
 		if resp.StreamBody {
-			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
+			resp.bodyStream = acquireRequestStream(bodyBuf, br, &resp.Header)
 		} else {
-			bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
+			bodyBuf.B, err = readBodyChunked(br, maxBodySize, bodyBuf.B)
 		}
 	default:
 		if resp.StreamBody {
-			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
+			resp.bodyStream = acquireRequestStream(bodyBuf, br, &resp.Header)
 		} else {
-			bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
+			bodyBuf.B, err = readBodyIdentity(br, maxBodySize, bodyBuf.B)
 			resp.Header.SetContentLength(len(bodyBuf.B))
 		}
 	}
@@ -2099,7 +2099,7 @@ func (req *Request) closeBodyStream() error {
 	if bsc, ok := req.bodyStream.(io.Closer); ok {
 		err = bsc.Close()
 	}
-	if rs, ok := req.bodyStream.(*requestStream); ok {
+	if rs, ok := req.bodyStream.(*RequestStream); ok {
 		releaseRequestStream(rs)
 	}
 	req.bodyStream = nil
@@ -2117,7 +2117,7 @@ func (resp *Response) closeBodyStream(wErr error) error {
 	if bsc, ok := resp.bodyStream.(ReadCloserWithError); ok {
 		err = bsc.CloseWithError(wErr)
 	}
-	if bsr, ok := resp.bodyStream.(*requestStream); ok {
+	if bsr, ok := resp.bodyStream.(*RequestStream); ok {
 		releaseRequestStream(bsr)
 	}
 	resp.bodyStream = nil
@@ -2303,7 +2303,7 @@ func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
 }
 
 // copyZeroAlloc optimizes io.Copy by calling ReadFrom or WriteTo only when
-// copying between os.File and net.TCPConn. If the reader has a WriteTo
+// copying between os.File and net.TCPConn. If the Reader has a WriteTo
 // method, it uses WriteTo for copying; if the writer has a ReadFrom method,
 // it uses ReadFrom for copying. If neither method is available, it gets a
 // buffer from sync.Pool to perform the copy.
@@ -2446,7 +2446,7 @@ var errChunkedStream = errors.New("chunked stream")
 
 func readBodyWithStreaming(r *bufio.Reader, contentLength, maxBodySize int, dst []byte) (b []byte, err error) {
 	if contentLength == -1 {
-		// handled in requestStream.Read()
+		// handled in RequestStream.Read()
 		return b, errChunkedStream
 	}
 

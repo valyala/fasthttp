@@ -2744,7 +2744,7 @@ func (c *pipelineConnClient) worker() error {
 		return err
 	}
 
-	// Start reader and writer
+	// Start Reader and writer
 	stopW := make(chan struct{})
 	doneW := make(chan error)
 	go func() {
@@ -2756,7 +2756,7 @@ func (c *pipelineConnClient) worker() error {
 		doneR <- c.reader(conn, stopR)
 	}()
 
-	// Wait until reader and writer are stopped
+	// Wait until Reader and writer are stopped
 	select {
 	case err = <-doneW:
 		conn.Close()
@@ -3081,7 +3081,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		rbs := resp.bodyStream
 		resp.bodyStream = newCloseReaderWithError(rbs, func(wErr error) error {
 			hc.ReleaseReader(br)
-			if r, ok := rbs.(*requestStream); ok {
+			if r, ok := rbs.(*RequestStream); ok {
 				releaseRequestStream(r)
 			}
 			if closeConn || resp.ConnectionClose() || wErr != nil {

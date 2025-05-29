@@ -80,10 +80,10 @@ func TestStreamReaderClose(t *testing.T) {
 	select {
 	case err := <-ch:
 		if err != nil {
-			t.Fatalf("error returned from stream reader: %v", err)
+			t.Fatalf("error returned from stream Reader: %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatalf("timeout when waiting for stream reader")
+		t.Fatalf("timeout when waiting for stream Reader")
 	}
 
 	// read trailing data

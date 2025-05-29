@@ -1098,7 +1098,7 @@ func TestFileCacheForZstd(t *testing.T) {
 	}
 	d, err := acquireZstdReader(strings.NewReader(string(ctx.Response.Body())))
 	if err != nil {
-		t.Fatalf("invalid zstd reader")
+		t.Fatalf("invalid zstd Reader")
 	}
 	plainText, err := io.ReadAll(d)
 	d.Close()

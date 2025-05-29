@@ -1123,7 +1123,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 
 	r, err := ff.NewReader()
 	if err != nil {
-		ctx.Logger().Printf("cannot obtain file reader for path=%q: %v", path, err)
+		ctx.Logger().Printf("cannot obtain file Reader for path=%q: %v", path, err)
 		ctx.Error("Internal Server Error", StatusInternalServerError)
 		return
 	}
@@ -1178,7 +1178,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.Response.Header.SetContentLength(contentLength)
 		if rc, ok := r.(io.Closer); ok {
 			if err := rc.Close(); err != nil {
-				ctx.Logger().Printf("cannot close file reader: %v", err)
+				ctx.Logger().Printf("cannot close file Reader: %v", err)
 				ctx.Error("Internal Server Error", StatusInternalServerError)
 				return
 			}

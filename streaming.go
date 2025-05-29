@@ -14,27 +14,27 @@ type headerInterface interface {
 	ReadTrailer(r *bufio.Reader) error
 }
 
-type requestStream struct {
+type RequestStream struct {
 	header          headerInterface
-	prefetchedBytes *bytes.Reader
-	reader          *bufio.Reader
+	PrefetchedBytes *bytes.Reader
+	Reader          *bufio.Reader
 	totalBytesRead  int
 	chunkLeft       int
 }
 
-func (rs *requestStream) Read(p []byte) (int, error) {
+func (rs *RequestStream) Read(p []byte) (int, error) {
 	var (
 		n   int
 		err error
 	)
 	if rs.header.ContentLength() == -1 {
 		if rs.chunkLeft == 0 {
-			chunkSize, err := parseChunkSize(rs.reader)
+			chunkSize, err := parseChunkSize(rs.Reader)
 			if err != nil {
 				return 0, err
 			}
 			if chunkSize == 0 {
-				err = rs.header.ReadTrailer(rs.reader)
+				err = rs.header.ReadTrailer(rs.Reader)
 				if err != nil && err != io.EOF {
 					return 0, err
 				}
@@ -46,27 +46,27 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		if rs.chunkLeft < len(p) {
 			bytesToRead = rs.chunkLeft
 		}
-		n, err = rs.reader.Read(p[:bytesToRead])
+		n, err = rs.Reader.Read(p[:bytesToRead])
 		rs.totalBytesRead += n
 		rs.chunkLeft -= n
 		if err == io.EOF {
 			err = io.ErrUnexpectedEOF
 		}
 		if err == nil && rs.chunkLeft == 0 {
-			err = readCrLf(rs.reader)
+			err = readCrLf(rs.Reader)
 		}
 		return n, err
 	}
 	if rs.totalBytesRead == rs.header.ContentLength() {
 		return 0, io.EOF
 	}
-	prefetchedSize := int(rs.prefetchedBytes.Size())
+	prefetchedSize := int(rs.PrefetchedBytes.Size())
 	if prefetchedSize > rs.totalBytesRead {
 		left := prefetchedSize - rs.totalBytesRead
 		if len(p) > left {
 			p = p[:left]
 		}
-		n, err := rs.prefetchedBytes.Read(p)
+		n, err := rs.PrefetchedBytes.Read(p)
 		rs.totalBytesRead += n
 		if n == rs.header.ContentLength() {
 			return n, io.EOF
@@ -77,7 +77,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 	if left > 0 && len(p) > left {
 		p = p[:left]
 	}
-	n, err = rs.reader.Read(p)
+	n, err = rs.Reader.Read(p)
 	rs.totalBytesRead += n
 	if err != nil {
 		return n, err
@@ -89,25 +89,25 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h headerInterface) *requestStream {
-	rs := requestStreamPool.Get().(*requestStream)
-	rs.prefetchedBytes = bytes.NewReader(b.B)
-	rs.reader = r
+func acquireRequestStream(b *bytebufferpool.ByteBuffer, br *bufio.Reader, h headerInterface) *RequestStream {
+	rs := requestStreamPool.Get().(*RequestStream)
+	rs.PrefetchedBytes = bytes.NewReader(b.B)
+	rs.Reader = br
 	rs.header = h
 	return rs
 }
 
-func releaseRequestStream(rs *requestStream) {
-	rs.prefetchedBytes = nil
+func releaseRequestStream(rs *RequestStream) {
+	rs.PrefetchedBytes = nil
 	rs.totalBytesRead = 0
 	rs.chunkLeft = 0
-	rs.reader = nil
+	rs.Reader = nil
 	rs.header = nil
 	requestStreamPool.Put(rs)
 }
 
 var requestStreamPool = sync.Pool{
 	New: func() any {
-		return &requestStream{}
+		return &RequestStream{}
 	},
 }

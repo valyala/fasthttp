@@ -2553,7 +2553,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		}
 
 		if ctx.Request.bodyStream != nil {
-			if rs, ok := ctx.Request.bodyStream.(*requestStream); ok {
+			if rs, ok := ctx.Request.bodyStream.(*RequestStream); ok {
 				releaseRequestStream(rs)
 			}
 			ctx.Request.bodyStream = nil
