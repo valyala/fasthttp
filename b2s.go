@@ -1,6 +1,4 @@
-//go:build go1.20
-
-package fasthttpadaptor
+package fasthttp
 
 import "unsafe"
 
