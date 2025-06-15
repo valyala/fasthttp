@@ -67,6 +67,13 @@ func (w *writer) Write(p []byte) (int, error) {
 	return w.n, err
 }
 
+func (w *writer) WriteString(s string) (int, error) {
+	w.p = s2b(s)
+	err := w.do(opWrite)
+	w.p = nil
+	return w.n, err
+}
+
 func (w *writer) Flush() error {
 	return w.do(opFlush)
 }
