@@ -142,6 +142,10 @@ func (c *pipeConn) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (c *pipeConn) WriteString(s string) (int, error) {
+	return c.Write(s2b(s))
+}
+
 func (c *pipeConn) Read(p []byte) (int, error) {
 	mayBlock := true
 	nn := 0

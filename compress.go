@@ -351,6 +351,11 @@ func (w *byteSliceWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (w *byteSliceWriter) WriteString(s string) (int, error) {
+	w.b = append(w.b, s...)
+	return len(s), nil
+}
+
 type byteSliceReader struct {
 	b []byte
 }
