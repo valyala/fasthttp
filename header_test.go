@@ -14,32 +14,6 @@ import (
 	"testing"
 )
 
-func TestNewlineBackwardsCompatibleWarning(t *testing.T) {
-	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: foo/bar\nContent-Length: 12345\r\n\r\nsss")
-	br := bufio.NewReader(r)
-	tl := &testLogger{}
-	h := &ResponseHeader{
-		maybeServer: &Server{
-			Logger: tl,
-		},
-	}
-
-	warnedAboutDeprecatedNewlineSeparatorLimiter.Store(0)
-
-	err := h.Read(br)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e := h.Peek(HeaderContentType)
-	if string(e) != "foo/bar" {
-		t.Fatalf("Unexpected Content-Type %q. Expected %q", e, "foo/bar")
-	}
-	expected := "Deprecated newline separator found in header \"Content-Type: foo/bar\\nContent-Length: 123\"\n"
-	if tl.out != expected {
-		t.Errorf("Expected %q, got %q", expected, tl.out)
-	}
-}
-
 func TestResponseHeaderAddContentType(t *testing.T) {
 	t.Parallel()
 
@@ -183,36 +157,6 @@ func TestIssue1808(t *testing.T) {
 		if got := b2s(reqHeader.Peek(name)); got != want {
 			t.Errorf("RequestHeader.parser() unexpected %q got: %q want: %q", name, got, want)
 		}
-	}
-}
-
-func TestResponseHeaderMultiLineName(t *testing.T) {
-	t.Parallel()
-
-	s := "HTTP/1.1 200 OK\r\n" +
-		"Host: go.dev\r\n" +
-		"Gopher-New-\r\n" +
-		" Line: This is a header on multiple lines\r\n" +
-		"\r\n"
-	header := new(ResponseHeader)
-	if _, err := header.parse([]byte(s)); err != errInvalidName {
-		m := make(map[string]string)
-		for k, v := range header.All() {
-			m[string(k)] = string(v)
-		}
-		t.Errorf("expected error, got %q (%v)", m, err)
-	}
-
-	if !bytes.Equal(header.StatusMessage(), []byte("OK")) {
-		t.Errorf("expected default status line, got: %q", header.StatusMessage())
-	}
-
-	if !bytes.Equal(header.Protocol(), []byte("HTTP/1.1")) {
-		t.Errorf("expected default protocol, got: %q", header.Protocol())
-	}
-
-	if !bytes.Equal(header.appendStatusLine(nil), []byte("HTTP/1.1 200 OK\r\n")) {
-		t.Errorf("parse status line with non-default value failed, got: %q want: HTTP/1.1 200 OK", header.Protocol())
 	}
 }
 
@@ -825,7 +769,7 @@ func TestResponseHeaderSetTrailerGetBytes(t *testing.T) {
 	}
 
 	if string(headerBytes[n:]) != "Foo: bar\r\nTrailer: Baz\r\n\r\n" {
-		t.Fatalf("Unexpected header: %q. Expected %q", headerBytes[n:], "Foo: bar\nTrailer: Baz\n\n")
+		t.Fatalf("Unexpected header: %q. Expected %q", headerBytes[n:], "Foo: bar\r\nTrailer: Baz\r\n\r\n")
 	}
 	if string(h.TrailerHeader()) != "Baz: test\r\n\r\n" {
 		t.Fatalf("Unexpected trailer header: %q. Expected %q", h.TrailerHeader(), "Baz: test\r\n\r\n")
@@ -847,7 +791,7 @@ func TestRequestHeaderSetTrailerGetBytes(t *testing.T) {
 	}
 
 	if string(headerBytes[n:]) != "Foo: bar\r\nTrailer: Baz\r\n\r\n" {
-		t.Fatalf("Unexpected header: %q. Expected %q", headerBytes[n:], "Foo: bar\nTrailer: Baz\n\n")
+		t.Fatalf("Unexpected header: %q. Expected %q", headerBytes[n:], "Foo: bar\nTrailer: Baz\r\n\r\n")
 	}
 	if string(h.TrailerHeader()) != "Baz: test\r\n\r\n" {
 		t.Fatalf("Unexpected trailer header: %q. Expected %q", h.TrailerHeader(), "Baz: test\r\n\r\n")
@@ -2524,15 +2468,19 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 		300, 123, "text/html")
 
 	// lf instead of crlf
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\nContent-Length: 123\nContent-Type: text/html\n\n",
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n\r\n",
 		200, 123, "text/html")
 
 	// No space after colon
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\nContent-Length:34\nContent-Type: sss\n\naaaa",
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\nContent-Length:34\nContent-Type: sss\r\n\r\naaaa",
 		200, 34, "sss")
 
+	// space in multiline value with \r\n\r\n as body separator
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 34\r\nContent-Type: sss\r\n vvv\r\n\r\naaaa",
+		200, 34, "sss vvv")
+
 	// invalid case
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\nconTEnt-leNGTH: 123\nConTENT-TYPE: ass\n\n",
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\nconTEnt-leNGTH: 123\nConTENT-TYPE: ass\r\n\r\n",
 		400, 123, "ass")
 
 	// duplicate content-length
@@ -2680,32 +2628,28 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 		t.Fatalf("unexpected connection: close")
 	}
 
-	// lf instead of crlf
-	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\nHost: google.com\n\n",
-		-2, "/foo/bar", "google.com", "", "")
-
 	// post method
 	testRequestHeaderReadSuccess(t, h, "POST /aaa?bbb HTTP/1.1\r\nHost: foobar.com\r\nContent-Length: 1235\r\nContent-Type: aaa\r\n\r\nabcdef",
 		1235, "/aaa?bbb", "foobar.com", "", "aaa")
 
 	// no space after colon
-	testRequestHeaderReadSuccess(t, h, "GET /a HTTP/1.1\nHost:aaaxd\n\nsdfds",
+	testRequestHeaderReadSuccess(t, h, "GET /a HTTP/1.1\r\nHost:aaaxd\r\n\r\nsdfds",
 		-2, "/a", "aaaxd", "", "")
 
 	// get with zero content-length
-	testRequestHeaderReadSuccess(t, h, "GET /xxx HTTP/1.1\nHost: aaa.com\nContent-Length: 0\n\n",
+	testRequestHeaderReadSuccess(t, h, "GET /xxx HTTP/1.1\r\nHost: aaa.com\nContent-Length: 0\r\n\r\n",
 		0, "/xxx", "aaa.com", "", "")
 
 	// get with non-zero content-length
-	testRequestHeaderReadSuccess(t, h, "GET /xxx HTTP/1.1\nHost: aaa.com\nContent-Length: 123\n\n",
+	testRequestHeaderReadSuccess(t, h, "GET /xxx HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 123\r\n\r\n",
 		123, "/xxx", "aaa.com", "", "")
 
 	// invalid case
-	testRequestHeaderReadSuccess(t, h, "GET /aaa HTTP/1.1\nhoST: bbb.com\n\naas",
+	testRequestHeaderReadSuccess(t, h, "GET /aaa HTTP/1.1\r\nhoST: bbb.com\r\n\r\naas",
 		-2, "/aaa", "bbb.com", "", "")
 
 	// referer
-	testRequestHeaderReadSuccess(t, h, "GET /asdf HTTP/1.1\nHost: aaa.com\nReferer: bb.com\n\naaa",
+	testRequestHeaderReadSuccess(t, h, "GET /asdf HTTP/1.1\r\nHost: aaa.com\r\nReferer: bb.com\r\n\r\naaa",
 		-2, "/asdf", "aaa.com", "bb.com", "")
 
 	// duplicate host
@@ -2802,6 +2746,9 @@ func TestResponseHeaderReadError(t *testing.T) {
 
 	// zero-length headers
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\n: zero-key\r\n\r\n")
+
+	// Space before header name
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\n foo: bar\r\n\r\n")
 }
 
 func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
@@ -2858,6 +2805,9 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// Invalid method
 	testRequestHeaderReadError(t, h, "G(ET /foo/bar HTTP/1.1\r\n: zero-key\r\n\r\n")
+
+	// Space before header name
+	testRequestHeaderReadError(t, h, "G(ET /foo/bar HTTP/1.1\r\n foo: bar\r\n\r\n")
 }
 
 func TestRequestHeaderReadSecuredError(t *testing.T) {
@@ -2965,6 +2915,8 @@ func testRequestHeaderReadSuccess(t *testing.T, h *RequestHeader, headers string
 }
 
 func verifyResponseHeader(t *testing.T, h *ResponseHeader, expectedStatusCode, expectedContentLength int, expectedContentType, expectedContentEncoding string) {
+	t.Helper()
+
 	if h.StatusCode() != expectedStatusCode {
 		t.Fatalf("Unexpected status code %d. Expected %d", h.StatusCode(), expectedStatusCode)
 	}
@@ -3005,49 +2957,17 @@ func verifyRequestHeader(t *testing.T, h *RequestHeader, expectedContentLength i
 	}
 }
 
-func verifyResponseTrailer(t *testing.T, h *ResponseHeader, expectedTrailers map[string]string) {
-	t.Helper()
+type peeker interface {
+	Peek(key string) []byte
+}
 
+func verifyTrailer(t *testing.T, h peeker, expectedTrailers map[string]string) {
 	for k, v := range expectedTrailers {
 		got := h.Peek(k)
 		if !bytes.Equal(got, []byte(v)) {
 			t.Fatalf("Unexpected trailer %q. Expected %q. Got %q", k, v, got)
 		}
 	}
-}
-
-func verifyRequestTrailer(t *testing.T, h *RequestHeader, expectedTrailers map[string]string) {
-	for k, v := range expectedTrailers {
-		got := h.Peek(k)
-		if !bytes.Equal(got, []byte(v)) {
-			t.Fatalf("Unexpected trailer %q. Expected %q. Got %q", k, v, got)
-		}
-	}
-}
-
-func verifyTrailer(t *testing.T, r *bufio.Reader, expectedTrailers map[string]string, isReq bool) {
-	if isReq {
-		req := Request{}
-		err := req.Header.ReadTrailer(r)
-		if err == io.EOF && expectedTrailers == nil {
-			return
-		}
-		if err != nil {
-			t.Fatalf("Cannot read trailer: %v", err)
-		}
-		verifyRequestTrailer(t, &req.Header, expectedTrailers)
-		return
-	}
-
-	resp := Response{}
-	err := resp.Header.ReadTrailer(r)
-	if err == io.EOF && expectedTrailers == nil {
-		return
-	}
-	if err != nil {
-		t.Fatalf("Cannot read trailer: %v", err)
-	}
-	verifyResponseTrailer(t, &resp.Header, expectedTrailers)
 }
 
 func TestRequestHeader_PeekAll(t *testing.T) {
