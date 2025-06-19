@@ -378,6 +378,11 @@ func (w *responseBodyWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (w *responseBodyWriter) WriteString(s string) (int, error) {
+	w.r.AppendBodyString(s)
+	return len(s), nil
+}
+
 type requestBodyWriter struct {
 	r *Request
 }
@@ -385,6 +390,11 @@ type requestBodyWriter struct {
 func (w *requestBodyWriter) Write(p []byte) (int, error) {
 	w.r.AppendBody(p)
 	return len(p), nil
+}
+
+func (w *requestBodyWriter) WriteString(s string) (int, error) {
+	w.r.AppendBodyString(s)
+	return len(s), nil
 }
 
 func (resp *Response) ParseNetConn(conn net.Conn) {
@@ -1544,6 +1554,12 @@ func (w *statsWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
+func (w *statsWriter) WriteString(s string) (int, error) {
+	n, err := w.w.Write(s2b(s))
+	w.bytesWritten += int64(n)
+	return n, err
+}
+
 func acquireStatsWriter(w io.Writer) *statsWriter {
 	v := statsWriterPool.Get()
 	if v == nil {
@@ -1967,6 +1983,10 @@ func (w *flushWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return n, nil
+}
+
+func (w *flushWriter) WriteString(s string) (int, error) {
+	return w.Write(s2b(s))
 }
 
 // Write writes response to w.
