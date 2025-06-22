@@ -2781,9 +2781,8 @@ func TestResponseHeaderReadError(t *testing.T) {
 func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
 	t.Parallel()
 
-	h := &ResponseHeader{
-		secureErrorLogMessage: true,
-	}
+	h := &ResponseHeader{}
+	h.secureErrorLogMessage = true
 
 	// incorrect first line
 	testResponseHeaderReadSecuredError(t, h, "fo")
@@ -2837,9 +2836,8 @@ func TestRequestHeaderReadError(t *testing.T) {
 func TestRequestHeaderReadSecuredError(t *testing.T) {
 	t.Parallel()
 
-	h := &RequestHeader{
-		secureErrorLogMessage: true,
-	}
+	h := &RequestHeader{}
+	h.secureErrorLogMessage = true
 
 	// incorrect first line
 	testRequestHeaderReadSecuredError(t, h, "fo")
