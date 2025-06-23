@@ -4471,3 +4471,45 @@ func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRequestCtxSwapTime(t *testing.T) {
+	var r Request
+	var requestCtx RequestCtx
+
+	requestCtx.Init(&r, nil, nil)
+
+	now := time.Date(2025, 6, 20, 0, 0, 0, 0, time.UTC)
+
+	previousRequestCtxTime := RequestCtxSwapTime(&requestCtx, now)
+
+	if !previousRequestCtxTime.IsZero() {
+		t.Fatalf("request ctx time after init should be zero, instead %v", previousRequestCtxTime)
+	}
+
+	requestCtxTime := requestCtx.Time()
+
+	if requestCtxTime != now {
+		t.Fatalf("request ctx time should be 2025/06/20, instead %v", requestCtxTime)
+	}
+}
+
+func TestRequestCtxSwapConnTime(t *testing.T) {
+	var r Request
+	var requestCtx RequestCtx
+
+	requestCtx.Init(&r, nil, nil)
+
+	now := time.Date(2025, 6, 20, 0, 0, 0, 0, time.UTC)
+
+	previousRequestCtxConnTime := RequestCtxSwapConnTime(&requestCtx, now)
+
+	if previousRequestCtxConnTime.IsZero() {
+		t.Fatalf("request ctx conn time after init should be zero, instead %v", previousRequestCtxConnTime)
+	}
+
+	connTime := requestCtx.ConnTime()
+
+	if connTime != now {
+		t.Fatalf("request ctx conn time should be 2025/06/20, instead %v", connTime)
+	}
+}

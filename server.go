@@ -3047,3 +3047,23 @@ var stateName = []string{
 func (c ConnState) String() string {
 	return stateName[c]
 }
+
+// RequestCtxSwapTime is a helper function that allows swap the request time,
+// returning the old value.
+func RequestCtxSwapTime(ctx *RequestCtx, time time.Time) time.Time {
+	old := ctx.Time()
+
+	ctx.time = time
+
+	return old
+}
+
+// RequestCtxSwapConnTime is a helper function that allows swap the connection time,
+// returning the old value.
+func RequestCtxSwapConnTime(ctx *RequestCtx, connTime time.Time) time.Time {
+	old := ctx.ConnTime()
+
+	ctx.connTime = connTime
+
+	return old
+}
