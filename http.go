@@ -1291,7 +1291,7 @@ func (req *Request) MayContinue() bool {
 // then ErrBodyTooLarge is returned.
 func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
 	var err error
-	contentLength := req.Header.realContentLength()
+	contentLength := req.Header.ContentLength()
 	if contentLength > 0 {
 		if maxBodySize > 0 && contentLength > maxBodySize {
 			return ErrBodyTooLarge
@@ -1374,7 +1374,7 @@ func (req *Request) ReadBody(r *bufio.Reader, contentLength, maxBodySize int) (e
 // then ErrBodyTooLarge is returned.
 func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
 	var err error
-	contentLength := req.Header.realContentLength()
+	contentLength := req.Header.ContentLength()
 	if contentLength > 0 {
 		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
 			// Pre-read multipart form data of known length.
