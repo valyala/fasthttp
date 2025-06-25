@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"io"
+	"net/http"
 	"strconv"
 	"testing"
 
@@ -34,13 +35,55 @@ func BenchmarkRequestHeaderRead(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var h RequestHeader
 		buf := &benchReadBuf{
-			s: []byte("GET /foo/bar HTTP/1.1\r\nHost: foobar.com\r\nUser-Agent: aaa.bbb\r\nReferer: http://google.com/aaa/bbb\r\n\r\n"),
+			s: []byte(
+				"GET /foo/bar HTTP/1.1\r\n" +
+					"Host: foobar.com\r\n" +
+					"User-Agent: aaa.bbb\r\n" +
+					"Referer: http://google.com/aaa/bbb\r\n" +
+					"Content-Type: text/html\r\n" +
+					"Server: aaa 1/2.3\r\n" +
+					"Test: 1.2.3\r\n" +
+					"Foo: bar\r\n" +
+					"X-Forwarded-For: 1.2.3.4\r\n" +
+					"X-Forwarded-Proto: https\r\n" +
+					"\r\n",
+			),
 		}
 		br := bufio.NewReader(buf)
 		for pb.Next() {
 			buf.n = 0
 			br.Reset(buf)
+			h.Reset()
 			if err := h.Read(br); err != nil {
+				b.Fatalf("unexpected error when reading header: %v", err)
+			}
+		}
+	})
+}
+
+// Benchmark net/http as a comparison.
+func BenchmarkRequestHeaderReadNetHttp(b *testing.B) {
+	b.RunParallel(func(pb *testing.PB) {
+		buf := &benchReadBuf{
+			s: []byte(
+				"GET /foo/bar HTTP/1.1\r\n" +
+					"Host: foobar.com\r\n" +
+					"User-Agent: aaa.bbb\r\n" +
+					"Referer: http://google.com/aaa/bbb\r\n" +
+					"Content-Type: text/html\r\n" +
+					"Test: 1.2.3\r\n" +
+					"Foo: bar\r\n" +
+					"X-Forwarded-For: 1.2.3.4\r\n" +
+					"X-Forwarded-Proto: https\r\n" +
+					"\r\n",
+			),
+		}
+		br := bufio.NewReader(buf)
+		for pb.Next() {
+			buf.n = 0
+			br.Reset(buf)
+
+			if _, err := http.ReadRequest(br); err != nil {
 				b.Fatalf("unexpected error when reading header: %v", err)
 			}
 		}
@@ -51,12 +94,23 @@ func BenchmarkResponseHeaderRead(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var h ResponseHeader
 		buf := &benchReadBuf{
-			s: []byte("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 1256\r\nServer: aaa 1/2.3\r\nTest: 1.2.3\r\n\r\n"),
+			s: []byte(
+				"HTTP/1.1 200 OK\r\n" +
+					"Content-Type: text/html\r\n" +
+					"Server: aaa 1/2.3\r\n" +
+					"Test: 1.2.3\r\n" +
+					"Foo: bar\r\n" +
+					"Content-Length: 1256\r\n" +
+					"Content-Encoding: gzip\r\n" +
+					"Cache-Control: no-cache\r\n" +
+					"\r\n",
+			),
 		}
 		br := bufio.NewReader(buf)
 		for pb.Next() {
 			buf.n = 0
 			br.Reset(buf)
+			h.Reset()
 			if err := h.Read(br); err != nil {
 				b.Fatalf("unexpected error when reading header: %v", err)
 			}
