@@ -14,6 +14,32 @@ import (
 	"testing"
 )
 
+func TestNewlineBackwardsCompatibleWarning(t *testing.T) {
+	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: foo/bar\nContent-Length: 12345\r\n\r\nsss")
+	br := bufio.NewReader(r)
+	tl := &testLogger{}
+	h := &ResponseHeader{
+		maybeServer: &Server{
+			Logger: tl,
+		},
+	}
+
+	warnedAboutDeprecatedNewlineSeparatorLimiter.Store(0)
+
+	err := h.Read(br)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := h.Peek(HeaderContentType)
+	if string(e) != "foo/bar" {
+		t.Fatalf("Unexpected Content-Type %q. Expected %q", e, "foo/bar")
+	}
+	expected := "Deprecated newline separator found in header \"Content-Type: foo/bar\\nContent-Length: 123\"\n"
+	if tl.out != expected {
+		t.Errorf("Expected %q, got %q", expected, tl.out)
+	}
+}
+
 func TestResponseHeaderAddContentType(t *testing.T) {
 	t.Parallel()
 

@@ -4411,7 +4411,9 @@ type testLogger struct {
 
 func (cl *testLogger) Printf(format string, args ...any) {
 	cl.lock.Lock()
-	cl.out += fmt.Sprintf(format, args...)[6:] + "\n"
+	line := fmt.Sprintf(format, args...)
+	space := strings.IndexByte(line, ' ') + 1
+	cl.out += line[space:] + "\n"
 	cl.lock.Unlock()
 }
 
