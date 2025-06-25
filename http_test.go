@@ -615,12 +615,7 @@ func TestRequestContentTypeWithCharsetIssue100(t *testing.T) {
 func TestRequestReadMultipartFormWithFile(t *testing.T) {
 	t.Parallel()
 
-	s := `POST /upload HTTP/1.1
-Host: localhost:10000
-Content-Length: 521
-Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryJwfATyF8tmxSJnLg
-
-------WebKitFormBoundaryJwfATyF8tmxSJnLg
+	b := strings.ReplaceAll(`------WebKitFormBoundaryJwfATyF8tmxSJnLg
 Content-Disposition: form-data; name="f1"
 
 value1
@@ -635,7 +630,14 @@ Content-Type: application/octet-stream
 - HTTP/2.0. See https://tools.ietf.org/html/rfc7540 .
 
 ------WebKitFormBoundaryJwfATyF8tmxSJnLg--
-tailfoobar`
+`, "\n", "\r\n")
+
+	s := fmt.Sprintf(strings.ReplaceAll(`POST /upload HTTP/1.1
+Host: localhost:10000
+Content-Length: %d
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryJwfATyF8tmxSJnLg
+
+%stailfoobar`, "\n", "\r\n"), len(b), b)
 
 	br := bufio.NewReader(bytes.NewBufferString(s))
 
@@ -1622,7 +1624,6 @@ func TestResponseReadLimitBody(t *testing.T) {
 	testResponseReadLimitBodySuccess(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 9)
 	testResponseReadLimitBodySuccess(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nFoo: bar\r\n\r\n", 9)
 	testResponseReadLimitBodySuccess(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 100)
-	testResponseReadLimitBodySuccess(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nfoobar\r\n\r\n", 100)
 	testResponseReadLimitBodyError(t, "HTTP/1.1 200 OK\r\nContent-Type: aa\r\nTransfer-Encoding: chunked\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 2, ErrBodyTooLarge)
 
 	// identity response
@@ -1643,7 +1644,6 @@ func TestRequestReadLimitBody(t *testing.T) {
 	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 9)
 	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\nHost: a.com\nTransfer-Encoding: chunked\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nFoo: bar\r\n\r\n", 9)
 	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 999)
-	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nfoobar\r\n\r\n", 999)
 	testRequestReadLimitBodyError(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 8, ErrBodyTooLarge)
 }
 
@@ -1661,6 +1661,8 @@ func testResponseReadLimitBodyError(t *testing.T, s string, maxBodySize int, exp
 }
 
 func testResponseReadLimitBodySuccess(t *testing.T, s string, maxBodySize int) {
+	t.Helper()
+
 	var resp Response
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
@@ -1683,6 +1685,8 @@ func testRequestReadLimitBodyError(t *testing.T, s string, maxBodySize int, expe
 }
 
 func testRequestReadLimitBodySuccess(t *testing.T, s string, maxBodySize int) {
+	t.Helper()
+
 	var req Request
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
@@ -1962,7 +1966,7 @@ func TestRequestReadChunked(t *testing.T) {
 
 	var req Request
 
-	s := "POST /foo HTTP/1.1\r\nHost: google.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa/bb\r\n\r\n3\r\nabc\r\n5\r\n12345\r\n0\r\n\r\nTrail: test\r\n\r\n"
+	s := "POST /foo HTTP/1.1\r\nHost: google.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa/bb\r\nTrailer: Trail\r\n\r\n3\r\nabc\r\n5\r\n12345\r\n0\r\nTrail: test\r\n\r\n"
 	r := bytes.NewBufferString(s)
 	rb := bufio.NewReader(r)
 	err := req.Read(rb)
@@ -1974,7 +1978,7 @@ func TestRequestReadChunked(t *testing.T) {
 		t.Fatalf("Unexpected body %q. Expected %q", req.Body(), expectedBody)
 	}
 	verifyRequestHeader(t, &req.Header, -1, "/foo", "google.com", "", "aa/bb")
-	verifyTrailer(t, rb, map[string]string{"Trail": "test"}, true)
+	verifyTrailer(t, &req.Header, map[string]string{"Trail": "test"})
 }
 
 func TestRequestChunkedEmpty(t *testing.T) {
@@ -2332,7 +2336,7 @@ func testResponseReadSuccess(t *testing.T, resp *Response, response string, expe
 	if !bytes.Equal(resp.Body(), []byte(expectedBody)) {
 		t.Fatalf("Unexpected body %q. Expected %q", resp.Body(), []byte(expectedBody))
 	}
-	verifyResponseTrailer(t, &resp.Header, expectedTrailer)
+	verifyTrailer(t, &resp.Header, expectedTrailer)
 }
 
 func TestReadBodyFixedSize(t *testing.T) {
@@ -2501,7 +2505,6 @@ func testReadBodyChunked(t *testing.T, bodySize int) {
 	if !bytes.Equal(b, body) {
 		t.Fatalf("Unexpected response read for bodySize=%d: %q. Expected %q. chunkedBody=%q", bodySize, b, body, chunkedBody)
 	}
-	verifyTrailer(t, br, expectedTrailer, false)
 }
 
 func testReadBodyFixedSize(t *testing.T, bodySize int) {
@@ -2515,7 +2518,6 @@ func testReadBodyFixedSize(t *testing.T, bodySize int) {
 	if !bytes.Equal(b, body) {
 		t.Fatalf("Unexpected response read for bodySize=%d: %q. Expected %q", bodySize, b, body)
 	}
-	verifyTrailer(t, br, nil, false)
 }
 
 func createFixedBody(bodySize int) []byte {
