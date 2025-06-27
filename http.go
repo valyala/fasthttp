@@ -1451,7 +1451,7 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	if err != nil {
 		return err
 	}
-	if resp.Header.StatusCode() == StatusContinue {
+	if resp.Header.statusCode == StatusContinue {
 		// Read the next response according to http://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html .
 		if err = resp.Header.Read(r); err != nil {
 			return err
