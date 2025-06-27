@@ -52,6 +52,10 @@ type ResponseHeader struct {
 	noDefaultContentType  bool
 	noDefaultDate         bool
 	secureErrorLogMessage bool
+
+	// This is only used to print the deprecated newline separator warning in headerScanner.
+	// TODO: Remove this again once the newline separator is removed.
+	maybeServer *Server
 }
 
 // RequestHeader represents HTTP request header.
@@ -98,6 +102,10 @@ type RequestHeader struct {
 	cookiesCollected bool
 
 	secureErrorLogMessage bool
+
+	// This is only used to print the deprecated newline separator warning in headerScanner.
+	// TODO: Remove this again once the newline separator is removed.
+	maybeServer *Server
 }
 
 // SetContentRange sets 'Content-Range: bytes startPos-endPos/contentLength'
@@ -1394,6 +1402,7 @@ func (h *RequestHeader) AllInOrder() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		var s headerScanner
 		s.b = h.rawHeaders
+		s.maybeServer = h.maybeServer
 		for s.next() {
 			normalizeHeaderKey(s.key, h.disableNormalizing || bytes.IndexByte(s.key, ' ') != -1)
 			if len(s.key) > 0 {
@@ -3117,6 +3126,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 
 	var s headerScanner
 	s.b = buf
+	s.maybeServer = h.maybeServer
 	var kv *argsKV
 
 	for s.next() {
@@ -3418,7 +3428,14 @@ type headerScanner struct {
 	nextNewLine int
 
 	initialized bool
+
+	// This is only used to print the deprecated newline separator warning.
+	// TODO: Remove this again once the newline separator is removed.
+	maybeServer *Server
+	warned      bool
 }
+
+var warnedAboutDeprecatedNewlineSeparatorLimiter atomic.Int64
 
 func (s *headerScanner) next() bool {
 	if !s.initialized {
@@ -3456,6 +3473,23 @@ func (s *headerScanner) next() bool {
 			// There was a \n before the :
 			s.err = errInvalidName
 			return false
+		}
+
+		// If the character before '\n' isn't '\r', print a warning.
+		if !s.warned && s.maybeServer != nil && x > 1 && s.b[x-1] != rChar {
+			// Only warn once per second.
+			now := time.Now().Unix()
+			if warnedAboutDeprecatedNewlineSeparatorLimiter.Load() < now {
+				if warnedAboutDeprecatedNewlineSeparatorLimiter.Swap(now) < now {
+					// Include 20 characters after the '\n'.
+					xx := x + 20
+					if len(s.b) < xx {
+						xx = len(s.b)
+					}
+					s.maybeServer.logger().Printf("WARNING: Deprecated newline separator found in header %q", s.b[:xx])
+					s.warned = true
+				}
+			}
 		}
 	}
 	if n < 0 {

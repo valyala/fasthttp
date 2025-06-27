@@ -2758,6 +2758,8 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 		ctx = new(RequestCtx)
 		ctx.Request.keepBodyBuffer = keepBodyBuffer
 		ctx.Response.keepBodyBuffer = keepBodyBuffer
+		ctx.Request.Header.maybeServer = s
+		ctx.Response.Header.maybeServer = s
 		ctx.s = s
 	} else {
 		ctx = v.(*RequestCtx)
