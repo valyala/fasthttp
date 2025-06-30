@@ -344,7 +344,22 @@ func (h *RequestHeader) SetContentEncodingBytes(contentEncoding []byte) {
 // SetMultipartFormBoundary sets the following Content-Type:
 // 'multipart/form-data; boundary=...'
 // where ... is substituted by the given boundary.
-func (h *header) SetMultipartFormBoundary(boundary string) {
+func (h *RequestHeader) SetMultipartFormBoundary(boundary string) {
+	b := h.bufV[:0]
+	b = append(b, strMultipartFormData...)
+	b = append(b, ';', ' ')
+	b = append(b, strBoundary...)
+	b = append(b, '=')
+	b = append(b, boundary...)
+	h.bufV = b
+
+	h.SetContentTypeBytes(h.bufV)
+}
+
+// SetMultipartFormBoundaryBytes sets the following Content-Type:
+// 'multipart/form-data; boundary=...'
+// where ... is substituted by the given boundary.
+func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
 	b := h.bufV[:0]
 	b = append(b, strMultipartFormData...)
 	b = append(b, ';', ' ')
