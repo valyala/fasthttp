@@ -693,14 +693,14 @@ func (h *header) Protocol() []byte {
 }
 
 // SetProtocol sets HTTP request protocol.
-func (h *RequestHeader) SetProtocol(method string) {
-	h.protocol = append(h.protocol[:0], method...)
+func (h *RequestHeader) SetProtocol(protocol string) {
+	h.protocol = append(h.protocol[:0], protocol...)
 	h.noHTTP11 = !bytes.Equal(h.protocol, strHTTP11)
 }
 
 // SetProtocolBytes sets HTTP request protocol.
-func (h *RequestHeader) SetProtocolBytes(method []byte) {
-	h.protocol = append(h.protocol[:0], method...)
+func (h *RequestHeader) SetProtocolBytes(protocol []byte) {
+	h.protocol = append(h.protocol[:0], protocol...)
 	h.noHTTP11 = !bytes.Equal(h.protocol, strHTTP11)
 }
 
