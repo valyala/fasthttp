@@ -3,10 +3,12 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -14,29 +16,67 @@ import (
 	"testing"
 )
 
-func TestNewlineBackwardsCompatibleWarning(t *testing.T) {
-	r := bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: foo/bar\nContent-Length: 12345\r\n\r\nsss")
-	br := bufio.NewReader(r)
-	tl := &testLogger{}
-	h := &ResponseHeader{
-		maybeServer: &Server{
-			Logger: tl,
-		},
-	}
+type slogTestHandler struct {
+	out string
+}
 
+func (s *slogTestHandler) Enabled(_ context.Context, level slog.Level) bool {
+	return true
+}
+
+func (s *slogTestHandler) Handle(ctx context.Context, record slog.Record) error { //nolint:gocritic
+	s.out += record.Message
+	for r := range record.Attrs {
+		s.out += " " + r.Key + ":" + r.Value.String()
+	}
+	return nil
+}
+
+func (s *slogTestHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	for _, attr := range attrs {
+		s.out += attr.String()
+	}
+	return &slogTestHandler{out: s.out}
+}
+
+func (s *slogTestHandler) WithGroup(name string) slog.Handler {
+	return &slogTestHandler{out: s.out}
+}
+
+func TestNewlineBackwardsCompatibleWarning(t *testing.T) {
+	h := &ResponseHeader{}
+
+	l := slog.Default()
+	ll := &slogTestHandler{}
+	slog.SetDefault(slog.New(ll))
+	defer slog.SetDefault(l)
+
+	DeprecatedNewlineIncludeContext.Store(true)
 	warnedAboutDeprecatedNewlineSeparatorLimiter.Store(0)
 
-	err := h.Read(br)
-	if err != nil {
+	if err := h.Read(bufio.NewReader(bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: foo/bar\nContent-Length: 12345\r\n\r\nsss"))); err != nil {
 		t.Fatal(err)
 	}
 	e := h.Peek(HeaderContentType)
 	if string(e) != "foo/bar" {
 		t.Fatalf("Unexpected Content-Type %q. Expected %q", e, "foo/bar")
 	}
-	expected := "Deprecated newline separator found in header \"Content-Type: foo/bar\\nContent-Length: 123\"\n"
-	if tl.out != expected {
-		t.Errorf("Expected %q, got %q", expected, tl.out)
+	expected := "Deprecated newline only separator found in header context:\"Content-Type: foo/bar\\nContent-Length: 123\""
+	if ll.out != expected {
+		t.Errorf("Expected %q, got %q", expected, ll.out)
+	}
+
+	ll.out = ""
+
+	DeprecatedNewlineIncludeContext.Store(false)
+	warnedAboutDeprecatedNewlineSeparatorLimiter.Store(0)
+
+	if err := h.Read(bufio.NewReader(bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: foo/bar\nContent-Length: 12345\r\n\r\nsss"))); err != nil {
+		t.Fatal(err)
+	}
+	expected = "Deprecated newline only separator found in header"
+	if ll.out != expected {
+		t.Errorf("Expected %q, got %q", expected, ll.out)
 	}
 }
 
