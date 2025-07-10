@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -3100,7 +3101,20 @@ type headerScanner struct {
 	nextNewLine int
 
 	initialized bool
+
+	// This is only used to print the deprecated newline separator warning.
+	// TODO: Remove this again once the newline separator is removed.
+	warned bool
 }
+
+// DeprecatedNewlineIncludeContext is used to control whether the context of the
+// header is included in the warning message about the deprecated newline
+// separator.
+// Warning: this can potentially leak sensitive information such as auth headers.
+var DeprecatedNewlineIncludeContext atomic.Bool
+
+// TODO: Remove this again once the newline separator is removed.
+var warnedAboutDeprecatedNewlineSeparatorLimiter atomic.Int64
 
 func (s *headerScanner) next() bool {
 	if !s.initialized {
@@ -3138,6 +3152,27 @@ func (s *headerScanner) next() bool {
 			// There was a \n before the :
 			s.err = errInvalidName
 			return false
+		}
+
+		// If the character before '\n' isn't '\r', print a warning.
+		if !s.warned && x > 1 && s.b[x-1] != rChar {
+			// Only warn once per second.
+			now := time.Now().Unix()
+			if warnedAboutDeprecatedNewlineSeparatorLimiter.Load() < now {
+				if warnedAboutDeprecatedNewlineSeparatorLimiter.Swap(now) < now {
+					if DeprecatedNewlineIncludeContext.Load() {
+						// Include 20 characters after the '\n'.
+						xx := x + 20
+						if len(s.b) < xx {
+							xx = len(s.b)
+						}
+						slog.Error("Deprecated newline only separator found in header", "context", fmt.Sprintf("%q", s.b[:xx]))
+					} else {
+						slog.Error("Deprecated newline only separator found in header")
+					}
+					s.warned = true
+				}
+			}
 		}
 	}
 	if n < 0 {
