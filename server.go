@@ -294,9 +294,11 @@ type Server struct {
 	// worker pool of the Server. Idle workers beyond this time will be cleared.
 	MaxIdleWorkerDuration time.Duration
 
-	// Period between tcp keep-alive messages.
+	// TCPKeepalivePeriod is the duration the connection needs to
+	// remain idle before TCP starts sending keepalive probes.
 	//
-	// TCP keep-alive period is determined by operation system by default.
+	// This field is only effective when TCPKeepalive is set to true.
+	// A zero value indicates that the operating system's default setting will be used.
 	TCPKeepalivePeriod time.Duration
 
 	// Maximum request body size.
@@ -329,11 +331,14 @@ type Server struct {
 	// By default keep-alive connections are enabled.
 	DisableKeepalive bool
 
-	// Whether to enable tcp keep-alive connections.
-	//
 	// Whether the operating system should send tcp keep-alive messages on the tcp connection.
 	//
-	// By default tcp keep-alive connections are disabled.
+	// When this field is set to false, it is only effective if the net.Listener
+	// is created by this package itself. i.e. listened by ListenAndServe, ListenAndServeUNIX,
+	// ListenAndServeTLS and  ListenAndServeTLSEmbed method.
+	//
+	// If you have created a net.Listener yourself and configured TCP keepalive,
+	// this field should be set to false to avoid redundant additional system calls.
 	TCPKeepalive bool
 
 	// Aggressively reduces memory usage at the cost of higher CPU usage
@@ -1678,7 +1683,7 @@ func (s *Server) getNextProto(c net.Conn) (proto string, err error) {
 //
 // Accepted connections are configured to enable TCP keep-alives.
 func (s *Server) ListenAndServe(addr string) error {
-	ln, err := net.Listen("tcp4", addr)
+	ln, err := createTCPListener("tcp4", addr)
 	if err != nil {
 		return err
 	}
@@ -1694,7 +1699,7 @@ func (s *Server) ListenAndServeUNIX(addr string, mode os.FileMode) error {
 	if err := os.Remove(addr); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("unexpected error when trying to remove unix socket file %q: %w", addr, err)
 	}
-	ln, err := net.Listen("unix", addr)
+	ln, err := createTCPListener("unix", addr)
 	if err != nil {
 		return err
 	}
@@ -1716,7 +1721,7 @@ func (s *Server) ListenAndServeUNIX(addr string, mode os.FileMode) error {
 //
 // Accepted connections are configured to enable TCP keep-alives.
 func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
-	ln, err := net.Listen("tcp4", addr)
+	ln, err := createTCPListener("tcp4", addr)
 	if err != nil {
 		return err
 	}
@@ -1735,7 +1740,7 @@ func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
 //
 // Accepted connections are configured to enable TCP keep-alives.
 func (s *Server) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) error {
-	ln, err := net.Listen("tcp4", addr)
+	ln, err := createTCPListener("tcp4", addr)
 	if err != nil {
 		return err
 	}
@@ -3046,4 +3051,20 @@ var stateName = []string{
 
 func (c ConnState) String() string {
 	return stateName[c]
+}
+
+// If the net.Listener is created by us, we override the default TCP
+// keepalive behavior of net.ListenConfig, so that whether TCP keepalive is
+// enabled is entirely determined by Server.KeepAlive.
+//
+// In the implementation of the net package, TCPListener
+// by default always enables KeepAlive for new connections.
+func createTCPListener(network, addr string) (ln net.Listener, err error) {
+	var lc net.ListenConfig
+	// Overriding the default TCP keepalive behavior of
+	// net.ListenConfig, whether TCP keepalive is enabled
+	// is determined by Server.KeepAlive.
+	lc.KeepAlive = -1
+	ln, err = lc.Listen(context.Background(), network, addr)
+	return
 }
