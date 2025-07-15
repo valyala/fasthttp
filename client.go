@@ -513,8 +513,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 		c.m = make(map[string]*HostClient)
 		c.ms = make(map[string]*HostClient)
 	})
-
-	hc, err := c.hostClient(string(host), isTLS)
+	hc, err := c.hostClient(host, isTLS)
 	if err != nil {
 		return err
 	}
@@ -524,25 +523,26 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	return hc.Do(req, resp)
 }
 
-func (c *Client) hostClient(host string, isTLS bool) (*HostClient, error) {
+func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
 	m := c.m
 	if isTLS {
 		m = c.ms
 	}
+
 	c.mLock.RLock()
-	hc, exist := m[host]
+	hc, exist := m[string(host)]
 	c.mLock.RUnlock()
 	if exist {
 		return hc, nil
 	}
 	c.mLock.Lock()
 	defer c.mLock.Unlock()
-	hc, exist = m[host]
+	hc, exist = m[string(host)]
 	if exist {
 		return hc, nil
 	}
 	hc = &HostClient{
-		Addr:                          AddMissingPort(host, isTLS),
+		Addr:                          AddMissingPort(string(host), isTLS),
 		Transport:                     c.Transport,
 		Name:                          c.Name,
 		NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
@@ -577,7 +577,7 @@ func (c *Client) hostClient(host string, isTLS bool) (*HostClient, error) {
 		}
 	}
 
-	m[host] = hc
+	m[string(host)] = hc
 	if len(m) == 1 {
 		go c.mCleaner(m)
 	}
