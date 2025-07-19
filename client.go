@@ -510,81 +510,78 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	}
 
 	c.mOnce.Do(func() {
-		c.mLock.Lock()
 		c.m = make(map[string]*HostClient)
 		c.ms = make(map[string]*HostClient)
-		c.mLock.Unlock()
 	})
+	hc, err := c.hostClient(host, isTLS)
+	if err != nil {
+		return err
+	}
 
-	startCleaner := false
+	atomic.AddInt32(&hc.pendingClientRequests, 1)
+	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
+	return hc.Do(req, resp)
+}
 
-	c.mLock.RLock()
+func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
 	m := c.m
 	if isTLS {
 		m = c.ms
 	}
-	hc := m[string(host)]
-	if hc != nil {
-		atomic.AddInt32(&hc.pendingClientRequests, 1)
-		defer atomic.AddInt32(&hc.pendingClientRequests, -1)
-	}
+
+	c.mLock.RLock()
+	hc, exist := m[string(host)]
 	c.mLock.RUnlock()
-	if hc == nil {
-		c.mLock.Lock()
-		hc = m[string(host)]
-		if hc == nil {
-			hc = &HostClient{
-				Addr:                          AddMissingPort(string(host), isTLS),
-				Transport:                     c.Transport,
-				Name:                          c.Name,
-				NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
-				Dial:                          c.Dial,
-				DialTimeout:                   c.DialTimeout,
-				DialDualStack:                 c.DialDualStack,
-				IsTLS:                         isTLS,
-				TLSConfig:                     c.TLSConfig,
-				MaxConns:                      c.MaxConnsPerHost,
-				MaxIdleConnDuration:           c.MaxIdleConnDuration,
-				MaxConnDuration:               c.MaxConnDuration,
-				MaxIdemponentCallAttempts:     c.MaxIdemponentCallAttempts,
-				ReadBufferSize:                c.ReadBufferSize,
-				WriteBufferSize:               c.WriteBufferSize,
-				ReadTimeout:                   c.ReadTimeout,
-				WriteTimeout:                  c.WriteTimeout,
-				MaxResponseBodySize:           c.MaxResponseBodySize,
-				DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
-				DisablePathNormalizing:        c.DisablePathNormalizing,
-				MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
-				RetryIf:                       c.RetryIf,
-				RetryIfErr:                    c.RetryIfErr,
-				ConnPoolStrategy:              c.ConnPoolStrategy,
-				StreamResponseBody:            c.StreamResponseBody,
-				clientReaderPool:              &c.readerPool,
-				clientWriterPool:              &c.writerPool,
-			}
-
-			if c.ConfigureClient != nil {
-				if err := c.ConfigureClient(hc); err != nil {
-					c.mLock.Unlock()
-					return err
-				}
-			}
-
-			m[string(host)] = hc
-			if len(m) == 1 {
-				startCleaner = true
-			}
-		}
-		atomic.AddInt32(&hc.pendingClientRequests, 1)
-		defer atomic.AddInt32(&hc.pendingClientRequests, -1)
-		c.mLock.Unlock()
+	if exist {
+		return hc, nil
+	}
+	c.mLock.Lock()
+	defer c.mLock.Unlock()
+	hc, exist = m[string(host)]
+	if exist {
+		return hc, nil
+	}
+	hc = &HostClient{
+		Addr:                          AddMissingPort(string(host), isTLS),
+		Transport:                     c.Transport,
+		Name:                          c.Name,
+		NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
+		Dial:                          c.Dial,
+		DialTimeout:                   c.DialTimeout,
+		DialDualStack:                 c.DialDualStack,
+		IsTLS:                         isTLS,
+		TLSConfig:                     c.TLSConfig,
+		MaxConns:                      c.MaxConnsPerHost,
+		MaxIdleConnDuration:           c.MaxIdleConnDuration,
+		MaxConnDuration:               c.MaxConnDuration,
+		MaxIdemponentCallAttempts:     c.MaxIdemponentCallAttempts,
+		ReadBufferSize:                c.ReadBufferSize,
+		WriteBufferSize:               c.WriteBufferSize,
+		ReadTimeout:                   c.ReadTimeout,
+		WriteTimeout:                  c.WriteTimeout,
+		MaxResponseBodySize:           c.MaxResponseBodySize,
+		DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
+		DisablePathNormalizing:        c.DisablePathNormalizing,
+		MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
+		RetryIf:                       c.RetryIf,
+		RetryIfErr:                    c.RetryIfErr,
+		ConnPoolStrategy:              c.ConnPoolStrategy,
+		StreamResponseBody:            c.StreamResponseBody,
+		clientReaderPool:              &c.readerPool,
+		clientWriterPool:              &c.writerPool,
 	}
 
-	if startCleaner {
+	if c.ConfigureClient != nil {
+		if err := c.ConfigureClient(hc); err != nil {
+			return nil, err
+		}
+	}
+
+	m[string(host)] = hc
+	if len(m) == 1 {
 		go c.mCleaner(m)
 	}
-
-	return hc.Do(req, resp)
+	return hc, nil
 }
 
 // CloseIdleConnections closes any connections which were previously
@@ -1846,22 +1843,15 @@ func (c *HostClient) AcquireWriter(conn net.Conn) *bufio.Writer {
 	var v any
 	if c.clientWriterPool != nil {
 		v = c.clientWriterPool.Get()
-		if v == nil {
-			n := c.WriteBufferSize
-			if n <= 0 {
-				n = defaultWriteBufferSize
-			}
-			return bufio.NewWriterSize(conn, n)
-		}
 	} else {
 		v = c.writerPool.Get()
-		if v == nil {
-			n := c.WriteBufferSize
-			if n <= 0 {
-				n = defaultWriteBufferSize
-			}
-			return bufio.NewWriterSize(conn, n)
+	}
+	if v == nil {
+		n := c.WriteBufferSize
+		if n <= 0 {
+			n = defaultWriteBufferSize
 		}
+		return bufio.NewWriterSize(conn, n)
 	}
 
 	bw := v.(*bufio.Writer)
@@ -1881,22 +1871,15 @@ func (c *HostClient) AcquireReader(conn net.Conn) *bufio.Reader {
 	var v any
 	if c.clientReaderPool != nil {
 		v = c.clientReaderPool.Get()
-		if v == nil {
-			n := c.ReadBufferSize
-			if n <= 0 {
-				n = defaultReadBufferSize
-			}
-			return bufio.NewReaderSize(conn, n)
-		}
 	} else {
 		v = c.readerPool.Get()
-		if v == nil {
-			n := c.ReadBufferSize
-			if n <= 0 {
-				n = defaultReadBufferSize
-			}
-			return bufio.NewReaderSize(conn, n)
+	}
+	if v == nil {
+		n := c.ReadBufferSize
+		if n <= 0 {
+			n = defaultReadBufferSize
 		}
+		return bufio.NewReaderSize(conn, n)
 	}
 
 	br := v.(*bufio.Reader)
