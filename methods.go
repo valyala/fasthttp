@@ -12,3 +12,15 @@ const (
 	MethodOptions = "OPTIONS" // RFC 7231, 4.3.7
 	MethodTrace   = "TRACE"   // RFC 7231, 4.3.8
 )
+
+var (
+	methodGetBytes     = []byte(MethodGet)
+	methodHeadBytes    = []byte(MethodHead)
+	methodPostBytes    = []byte(MethodPost)
+	methodPutBytes     = []byte(MethodPut)
+	methodPatchBytes   = []byte(MethodPatch)
+	methodDeleteBytes  = []byte(MethodDelete)
+	methodConnectBytes = []byte(MethodConnect)
+	methodOptionsBytes = []byte(MethodOptions)
+	methodTraceBytes   = []byte(MethodTrace)
+)

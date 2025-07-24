@@ -730,47 +730,47 @@ func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
 
 // IsGet returns true if request method is GET.
 func (h *RequestHeader) IsGet() bool {
-	return string(h.Method()) == MethodGet
+	return bytes.Equal(h.Method(), methodGetBytes)
 }
 
 // IsPost returns true if request method is POST.
 func (h *RequestHeader) IsPost() bool {
-	return string(h.Method()) == MethodPost
+	return bytes.Equal(h.Method(), methodPostBytes)
 }
 
 // IsPut returns true if request method is PUT.
 func (h *RequestHeader) IsPut() bool {
-	return string(h.Method()) == MethodPut
+	return bytes.Equal(h.Method(), methodPutBytes)
 }
 
 // IsHead returns true if request method is HEAD.
 func (h *RequestHeader) IsHead() bool {
-	return string(h.Method()) == MethodHead
+	return bytes.Equal(h.Method(), methodHeadBytes)
 }
 
 // IsDelete returns true if request method is DELETE.
 func (h *RequestHeader) IsDelete() bool {
-	return string(h.Method()) == MethodDelete
+	return bytes.Equal(h.Method(), methodDeleteBytes)
 }
 
 // IsConnect returns true if request method is CONNECT.
 func (h *RequestHeader) IsConnect() bool {
-	return string(h.Method()) == MethodConnect
+	return bytes.Equal(h.Method(), methodConnectBytes)
 }
 
 // IsOptions returns true if request method is OPTIONS.
 func (h *RequestHeader) IsOptions() bool {
-	return string(h.Method()) == MethodOptions
+	return bytes.Equal(h.Method(), methodOptionsBytes)
 }
 
 // IsTrace returns true if request method is TRACE.
 func (h *RequestHeader) IsTrace() bool {
-	return string(h.Method()) == MethodTrace
+	return bytes.Equal(h.Method(), methodTraceBytes)
 }
 
 // IsPatch returns true if request method is PATCH.
 func (h *RequestHeader) IsPatch() bool {
-	return string(h.Method()) == MethodPatch
+	return bytes.Equal(h.Method(), methodPatchBytes)
 }
 
 // IsHTTP11 returns true if the header is HTTP/1.1.
