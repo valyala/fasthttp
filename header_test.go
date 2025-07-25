@@ -1959,6 +1959,175 @@ func TestRequestHeaderAddTrailerError(t *testing.T) {
 	}
 }
 
+// Security tests for trailer handling vulnerability fix.
+func TestTrailerSecurityVulnerabilityFix(t *testing.T) {
+	t.Parallel()
+
+	// Test cases for headers that should be blocked in trailers
+	dangerousHeaders := []struct {
+		name        string
+		header      string
+		description string
+	}{
+		{"Content-Type", "Content-Type", "off-by-one fix: exactly 'Content-Type' should be blocked"},
+		{"Cookie", "Cookie", "session hijacking prevention"},
+		{"Set-Cookie", "Set-Cookie", "session hijacking prevention"},
+		{"Location", "Location", "redirect attack prevention"},
+		{"X-Forwarded-For", "X-Forwarded-For", "IP spoofing prevention"},
+		{"X-Forwarded-Host", "X-Forwarded-Host", "IP spoofing prevention"},
+		{"X-Forwarded-Proto", "X-Forwarded-Proto", "IP spoofing prevention"},
+		{"X-Real-IP", "X-Real-IP", "IP spoofing prevention"},
+		{"X-Real-Ip", "X-Real-Ip", "IP spoofing prevention (case insensitive)"},
+		{"Authorization", "Authorization", "auth bypass prevention"},
+		{"Host", "Host", "host header attack prevention"},
+		{"Connection", "Connection", "connection control prevention"},
+	}
+
+	// Test RequestHeader AddTrailer blocking dangerous headers.
+	for _, tc := range dangerousHeaders {
+		t.Run("RequestHeader_"+tc.name, func(t *testing.T) {
+			var h RequestHeader
+			err := h.AddTrailer(tc.header)
+			if !errors.Is(err, ErrBadTrailer) {
+				t.Fatalf("Expected ErrBadTrailer for %s (%s), got: %v", tc.header, tc.description, err)
+			}
+
+			// Verify trailer header is empty since the dangerous header was rejected
+			if trailer := string(h.Peek(HeaderTrailer)); trailer != "" {
+				t.Fatalf("Expected empty trailer after rejecting %s, got: %q", tc.header, trailer)
+			}
+		})
+	}
+
+	// Test ResponseHeader AddTrailer blocking dangerous headers
+	for _, tc := range dangerousHeaders {
+		t.Run("ResponseHeader_"+tc.name, func(t *testing.T) {
+			var h ResponseHeader
+			err := h.AddTrailer(tc.header)
+
+			if !errors.Is(err, ErrBadTrailer) {
+				t.Fatalf("Expected ErrBadTrailer for %s (%s), got: %v", tc.header, tc.description, err)
+			}
+
+			// Verify trailer header is empty since the dangerous header was rejected
+			if trailer := string(h.Peek(HeaderTrailer)); trailer != "" {
+				t.Fatalf("Expected empty trailer after rejecting %s, got: %q", tc.header, trailer)
+			}
+		})
+	}
+
+	// Test that safe headers are still allowed
+	safeHeaders := []string{"Foo", "X-Custom-Safe", "My-App-Trailer", "Debug-Info"}
+
+	for _, header := range safeHeaders {
+		t.Run("Safe_RequestHeader_"+header, func(t *testing.T) {
+			var h RequestHeader
+			err := h.AddTrailer(header)
+			if err != nil {
+				t.Fatalf("Expected no error for safe header %s, got: %v", header, err)
+			}
+
+			// Verify the safe header was added to trailer
+			if trailer := string(h.Peek(HeaderTrailer)); trailer != header {
+				t.Fatalf("Expected trailer %q for safe header, got: %q", header, trailer)
+			}
+		})
+
+		t.Run("Safe_ResponseHeader_"+header, func(t *testing.T) {
+			var h ResponseHeader
+			err := h.AddTrailer(header)
+			if err != nil {
+				t.Fatalf("Expected no error for safe header %s, got: %v", header, err)
+			}
+
+			// Verify the safe header was added to trailer
+			if trailer := string(h.Peek(HeaderTrailer)); trailer != header {
+				t.Fatalf("Expected trailer %q for safe header, got: %q", header, trailer)
+			}
+		})
+	}
+}
+
+func TestTrailerParsingSecurityFix(t *testing.T) {
+	t.Parallel()
+
+	// Test the specific vulnerability scenario: malicious trailers should be rejected
+	// Test that dangerous trailers in chunked body are properly blocked
+
+	dangerousTrailers := []string{
+		"Content-Type: text/malicious\r\n\r\n",
+		"X-Forwarded-For: attacker.com\r\n\r\n",
+		"X-Real-IP: 1.1.1.1\r\n\r\n",
+		"Cookie: evil\r\n\r\n",
+		"Location: http://evil.com\r\n\r\n",
+	}
+
+	for i, trailer := range dangerousTrailers {
+		t.Run("Request_"+strconv.Itoa(i), func(t *testing.T) {
+			var h RequestHeader
+			r := bytes.NewBufferString(trailer)
+			br := bufio.NewReader(r)
+
+			err := h.ReadTrailer(br)
+			if err == nil {
+				t.Fatalf("Expected error when reading dangerous trailer, but got none: %s", trailer)
+			}
+
+			// The error should mention forbidden trailer
+			if !strings.Contains(err.Error(), "forbidden trailer") {
+				t.Fatalf("Expected 'forbidden trailer' error for %s, got: %v", trailer, err)
+			}
+		})
+
+		t.Run("Response_"+strconv.Itoa(i), func(t *testing.T) {
+			var h ResponseHeader
+			r := bytes.NewBufferString(trailer)
+			br := bufio.NewReader(r)
+
+			err := h.ReadTrailer(br)
+			if err == nil {
+				t.Fatalf("Expected error when reading dangerous trailer, but got none: %s", trailer)
+			}
+
+			// The error should mention forbidden trailer
+			if !strings.Contains(err.Error(), "forbidden trailer") {
+				t.Fatalf("Expected 'forbidden trailer' error for %s, got: %v", trailer, err)
+			}
+		})
+	}
+
+	// Test that safe trailers still work
+	safeTrailers := []string{
+		"Foo: bar\r\n\r\n",
+		"X-Custom-Header: value\r\n\r\n",
+		"Debug-Info: test\r\n\r\n",
+	}
+
+	for i, trailer := range safeTrailers {
+		t.Run("Safe_Request_"+strconv.Itoa(i), func(t *testing.T) {
+			var h RequestHeader
+			r := bytes.NewBufferString(trailer)
+			br := bufio.NewReader(r)
+
+			err := h.ReadTrailer(br)
+			if err != nil && err != io.EOF {
+				t.Fatalf("Expected no error for safe trailer %s, got: %v", trailer, err)
+			}
+		})
+
+		t.Run("Safe_Response_"+strconv.Itoa(i), func(t *testing.T) {
+			var h ResponseHeader
+			r := bytes.NewBufferString(trailer)
+			br := bufio.NewReader(r)
+
+			err := h.ReadTrailer(br)
+			if err != nil && err != io.EOF {
+				t.Fatalf("Expected no error for safe trailer %s, got: %v", trailer, err)
+			}
+		})
+	}
+}
+
 func TestResponseHeaderCookie(t *testing.T) {
 	t.Parallel()
 
