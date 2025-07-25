@@ -491,6 +491,7 @@ func TestRequestRawHeaders(t *testing.T) {
 func TestRequestDisableSpecialHeaders(t *testing.T) {
 	t.Parallel()
 
+	// Test original header functionality
 	kvs := "Host: foobar\r\n" +
 		"User-Agent: ua\r\n" +
 		"Non-Special: val\r\n" +
@@ -514,6 +515,90 @@ func TestRequestDisableSpecialHeaders(t *testing.T) {
 	}
 	if h.String() != "GET / HTTP/1.0\r\nHost: foobar\r\nUser-Agent: ua\r\nNon-Special: val\r\nhost: notfoobar\r\n\r\n" {
 		t.Fatalf("custom special header ordering failed: %q", h.String())
+	}
+
+	// Test body parsing with DisableSpecialHeader - should work correctly after fix
+	testBody := "a=b&test=123"
+	rawRequest := "POST /test HTTP/1.1\r\n" +
+		"Host: example.com\r\n" +
+		"Content-Type: application/x-www-form-urlencoded\r\n" +
+		"Content-Length: " + strconv.Itoa(len(testBody)) + "\r\n" +
+		"\r\n" +
+		testBody
+
+	var req Request
+	req.Header.DisableSpecialHeader()
+
+	br2 := bufio.NewReader(bytes.NewBufferString(rawRequest))
+	if err := req.ReadLimitBody(br2, 0); err != nil {
+		t.Fatalf("unexpected error reading request: %v", err)
+	}
+
+	// Verify Content-Length is correctly parsed with DisableSpecialHeader
+	if req.Header.ContentLength() != len(testBody) {
+		t.Fatalf("ContentLength() incorrect with DisableSpecialHeader: got %d, expected %d",
+			req.Header.ContentLength(), len(testBody))
+	}
+
+	// Verify body is preserved with DisableSpecialHeader
+	if string(req.Body()) != testBody {
+		t.Fatalf("body content incorrect with DisableSpecialHeader: got %q, expected %q",
+			string(req.Body()), testBody)
+	}
+}
+
+func TestRequestDisableSpecialHeadersChunked(t *testing.T) {
+	t.Parallel()
+
+	testBody := "chunked-test"
+	rawRequest := "POST /test HTTP/1.1\r\n" +
+		"Host: example.com\r\n" +
+		"Transfer-Encoding: chunked\r\n" +
+		"\r\n" +
+		"c\r\n" +
+		testBody + "\r\n" +
+		"0\r\n\r\n"
+
+	var req Request
+	req.Header.DisableSpecialHeader()
+
+	br := bufio.NewReader(bytes.NewBufferString(rawRequest))
+	if err := req.ReadLimitBody(br, 0); err != nil {
+		t.Fatalf("unexpected error reading chunked request: %v", err)
+	}
+
+	// Verify chunked encoding is detected
+	if req.Header.ContentLength() != -1 {
+		t.Fatalf("chunked encoding not detected with DisableSpecialHeader: got %d, expected -1",
+			req.Header.ContentLength())
+	}
+
+	// Verify chunked body is preserved
+	if string(req.Body()) != testBody {
+		t.Fatalf("chunked body incorrect with DisableSpecialHeader: got %q, expected %q",
+			string(req.Body()), testBody)
+	}
+}
+
+func TestRequestDisableSpecialHeadersIdentity(t *testing.T) {
+	t.Parallel()
+
+	rawRequest := "GET /test HTTP/1.1\r\n" +
+		"Host: example.com\r\n" +
+		"\r\n"
+
+	var req Request
+	req.Header.DisableSpecialHeader()
+
+	br := bufio.NewReader(bytes.NewBufferString(rawRequest))
+	if err := req.ReadLimitBody(br, 0); err != nil {
+		t.Fatalf("unexpected error reading identity request: %v", err)
+	}
+
+	// Verify identity encoding is detected
+	if req.Header.ContentLength() != -2 {
+		t.Fatalf("identity encoding not detected with DisableSpecialHeader: got %d, expected -2",
+			req.Header.ContentLength())
 	}
 }
 
