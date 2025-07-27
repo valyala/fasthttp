@@ -2611,24 +2611,30 @@ func isBadTrailer(key []byte) bool {
 	case 'a':
 		return caseInsensitiveCompare(key, strAuthorization)
 	case 'c':
-		if len(key) > len(HeaderContentType) && caseInsensitiveCompare(key[:8], strContentType[:8]) {
+		// Security fix: Changed > to >= to properly block Content-Type header in trailers
+		if len(key) >= len(HeaderContentType) && caseInsensitiveCompare(key[:8], strContentType[:8]) {
 			// skip compare prefix 'Content-'
 			return caseInsensitiveCompare(key[8:], strContentEncoding[8:]) ||
 				caseInsensitiveCompare(key[8:], strContentLength[8:]) ||
 				caseInsensitiveCompare(key[8:], strContentType[8:]) ||
 				caseInsensitiveCompare(key[8:], strContentRange[8:])
 		}
-		return caseInsensitiveCompare(key, strConnection)
+		return caseInsensitiveCompare(key, strConnection) ||
+			// Security: Block Cookie header in trailers to prevent session hijacking
+			caseInsensitiveCompare(key, strCookie)
 	case 'e':
 		return caseInsensitiveCompare(key, strExpect)
 	case 'h':
 		return caseInsensitiveCompare(key, strHost)
 	case 'k':
 		return caseInsensitiveCompare(key, strKeepAlive)
+	case 'l':
+		// Security: Block Location header in trailers to prevent redirect attacks
+		return caseInsensitiveCompare(key, strLocation)
 	case 'm':
 		return caseInsensitiveCompare(key, strMaxForwards)
 	case 'p':
-		if len(key) > len(HeaderProxyConnection) && caseInsensitiveCompare(key[:6], strProxyConnection[:6]) {
+		if len(key) >= len(HeaderProxyConnection) && caseInsensitiveCompare(key[:6], strProxyConnection[:6]) {
 			// skip compare prefix 'Proxy-'
 			return caseInsensitiveCompare(key[6:], strProxyConnection[6:]) ||
 				caseInsensitiveCompare(key[6:], strProxyAuthenticate[6:]) ||
@@ -2636,12 +2642,19 @@ func isBadTrailer(key []byte) bool {
 		}
 	case 'r':
 		return caseInsensitiveCompare(key, strRange)
+	case 's':
+		// Security: Block Set-Cookie header in trailers
+		return caseInsensitiveCompare(key, strSetCookie)
 	case 't':
 		return caseInsensitiveCompare(key, strTE) ||
 			caseInsensitiveCompare(key, strTrailer) ||
 			caseInsensitiveCompare(key, strTransferEncoding)
 	case 'w':
 		return caseInsensitiveCompare(key, strWWWAuthenticate)
+	case 'x':
+		// Security: Block X-Forwarded-* and X-Real-IP headers to prevent IP spoofing
+		return (len(key) >= 11 && caseInsensitiveCompare(key[:11], []byte("x-forwarded"))) ||
+			(len(key) >= 9 && caseInsensitiveCompare(key[:9], []byte("x-real-ip")))
 	}
 	return false
 }
