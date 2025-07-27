@@ -17,6 +17,7 @@ var (
 	strSlashDotDotBackSlash     = []byte(`/..\`)
 	strBackSlashDotDotBackSlash = []byte(`\..\`)
 	strCRLF                     = []byte("\r\n")
+	strCRLFCRLF                 = []byte("\r\n\r\n")
 	strHTTP                     = []byte("http")
 	strHTTPS                    = []byte("https")
 	strHTTP11                   = []byte("HTTP/1.1")

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 func TestStreamingPipeline(t *testing.T) {
 	t.Parallel()
 
-	reqS := `POST /one HTTP/1.1
+	reqS := strings.ReplaceAll(`POST /one HTTP/1.1
 Host: example.com
 Content-Length: 10
 
@@ -24,7 +25,7 @@ POST /two HTTP/1.1
 Host: example.com
 Content-Length: 10
 
-aaaaaaaaaa`
+aaaaaaaaaa`, "\n", "\r\n")
 
 	ln := fasthttputil.NewInmemoryListener()
 
@@ -152,15 +153,16 @@ func TestRequestStreamChunkedWithTrailer(t *testing.T) {
 		"Bar": "bartest",
 	}
 	chunkedBody := createChunkedBody(body, expectedTrailer, true)
-	req := fmt.Sprintf(`POST / HTTP/1.1
+	req := fmt.Sprintf(strings.ReplaceAll(`POST / HTTP/1.1
 Host: example.com
 Transfer-Encoding: chunked
 Trailer: Foo, Bar
 
 %s
-`, chunkedBody)
+`, "\n", "\r\n"), chunkedBody)
 
 	ln := fasthttputil.NewInmemoryListener()
+	ch := make(chan struct{})
 	s := &Server{
 		StreamRequestBody: true,
 		Handler: func(ctx *RequestCtx) {
@@ -178,15 +180,16 @@ Trailer: Foo, Bar
 					t.Errorf("unexpected trailer %q. Expecting %q. Got %q", k, v, r)
 				}
 			}
+			close(ch)
 		},
 	}
 
-	ch := make(chan struct{})
+	ch2 := make(chan struct{})
 	go func() {
 		if err := s.Serve(ln); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
-		close(ch)
+		close(ch2)
 	}()
 
 	conn, err := ln.Dial()
@@ -202,8 +205,13 @@ Trailer: Foo, Bar
 
 	select {
 	case <-ch:
+		select {
+		case <-ch2:
+		case <-time.After(time.Second):
+			t.Fatal("timeout when waiting for the server to stop")
+		}
 	case <-time.After(time.Second):
-		t.Fatal("timeout when waiting for the server to stop")
+		t.Fatal("timeout when waiting for the request to be processed")
 	}
 }
 
