@@ -1007,10 +1007,7 @@ func cleanCacheNolock(
 
 func (h *fsHandler) pathToFilePath(path string) string {
 	if _, ok := h.filesystem.(*osFS); !ok {
-		if len(path) < 1 {
-			return path
-		}
-		return path[1:]
+		return filepath.Join(h.root, path)
 	}
 	return filepath.FromSlash(h.root + path)
 }
