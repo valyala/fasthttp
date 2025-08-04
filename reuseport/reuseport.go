@@ -1,4 +1,4 @@
-//go:build !windows && !aix
+//go:build !windows && !aix && !solaris
 
 // Package reuseport provides TCP net.Listener with SO_REUSEPORT support.
 //
