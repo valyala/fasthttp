@@ -10,9 +10,9 @@ import (
 func TestNewFuncSimple(t *testing.T) {
 	t.Parallel()
 
-	var n uint64
+	var n atomic.Uint64
 	f := NewFunc(func(ctx any) {
-		atomic.AddUint64(&n, uint64(ctx.(int)))
+		n.Add(uint64(ctx.(int)))
 	})
 
 	iterations := 4 * 1024
@@ -21,20 +21,20 @@ func TestNewFuncSimple(t *testing.T) {
 			t.Fatalf("f mustn't return false")
 		}
 	}
-	if n != uint64(2*iterations) {
-		t.Fatalf("Unexpected n: %d. Expecting %d", n, 2*iterations)
+	if got := n.Load(); got != uint64(2*iterations) {
+		t.Fatalf("Unexpected n: %d. Expecting %d", got, 2*iterations)
 	}
 }
 
 func TestNewFuncMulti(t *testing.T) {
 	t.Parallel()
 
-	var n1, n2 uint64
+	var n1, n2 atomic.Uint64
 	f1 := NewFunc(func(ctx any) {
-		atomic.AddUint64(&n1, uint64(ctx.(int)))
+		n1.Add(uint64(ctx.(int)))
 	})
 	f2 := NewFunc(func(ctx any) {
-		atomic.AddUint64(&n2, uint64(ctx.(int)))
+		n2.Add(uint64(ctx.(int)))
 	})
 
 	iterations := 4 * 1024
@@ -81,10 +81,10 @@ func TestNewFuncMulti(t *testing.T) {
 		t.Fatalf("timeout")
 	}
 
-	if n1 != uint64(3*iterations) {
-		t.Fatalf("unexpected n1: %d. Expecting %d", n1, 3*iterations)
+	if got1 := n1.Load(); got1 != uint64(3*iterations) {
+		t.Fatalf("unexpected n1: %d. Expecting %d", got1, 3*iterations)
 	}
-	if n2 != uint64(5*iterations) {
-		t.Fatalf("unexpected n2: %d. Expecting %d", n2, 5*iterations)
+	if got2 := n2.Load(); got2 != uint64(5*iterations) {
+		t.Fatalf("unexpected n2: %d. Expecting %d", got2, 5*iterations)
 	}
 }

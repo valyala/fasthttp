@@ -170,11 +170,11 @@ func BenchmarkServerTimeoutError(b *testing.B) {
 	clientsCount := 10
 	requestsPerConn := 1
 	ch := make(chan struct{}, b.N)
-	n := uint32(0)
+	var n atomic.Uint32
 	responseBody := []byte("123")
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			if atomic.AddUint32(&n, 1)&7 == 0 {
+			if n.Add(1)&7 == 0 {
 				ctx.TimeoutError("xxx")
 				go func() {
 					ctx.Success("foobar", responseBody)
@@ -196,7 +196,7 @@ type fakeServerConn struct {
 	ln            *fakeListener
 	requestsCount int
 	pos           int
-	closed        uint32
+	closed        atomic.Bool
 }
 
 func (c *fakeServerConn) Read(b []byte) (int, error) {
@@ -235,7 +235,7 @@ func (c *fakeServerConn) RemoteAddr() net.Addr {
 }
 
 func (c *fakeServerConn) Close() error {
-	if atomic.AddUint32(&c.closed, 1) == 1 {
+	if c.closed.CompareAndSwap(false, true) {
 		c.ln.ch <- c
 	}
 	return nil
@@ -283,7 +283,7 @@ func (ln *fakeListener) Accept() (net.Conn, error) {
 
 	c := <-ln.ch
 	c.requestsCount = requestsCount
-	c.closed = 0
+	c.closed.Store(false)
 	c.pos = 0
 
 	return c, nil

@@ -7,31 +7,31 @@ import (
 )
 
 func BenchmarkCoarseTimeNow(b *testing.B) {
-	var zeroTimeCount uint64
+	var zeroTimeCount atomic.Uint64
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			t := CoarseTimeNow()
 			if t.IsZero() {
-				atomic.AddUint64(&zeroTimeCount, 1)
+				zeroTimeCount.Add(1)
 			}
 		}
 	})
-	if zeroTimeCount > 0 {
+	if zeroTimeCount.Load() > 0 {
 		b.Fatalf("zeroTimeCount must be zero")
 	}
 }
 
 func BenchmarkTimeNow(b *testing.B) {
-	var zeroTimeCount uint64
+	var zeroTimeCount atomic.Uint64
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			t := time.Now()
 			if t.IsZero() {
-				atomic.AddUint64(&zeroTimeCount, 1)
+				zeroTimeCount.Add(1)
 			}
 		}
 	})
-	if zeroTimeCount > 0 {
+	if zeroTimeCount.Load() > 0 {
 		b.Fatalf("zeroTimeCount must be zero")
 	}
 }

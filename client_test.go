@@ -252,10 +252,10 @@ func TestClientInvalidURI(t *testing.T) {
 	t.Parallel()
 
 	ln := fasthttputil.NewInmemoryListener()
-	requests := int64(0)
+	var requests atomic.Int64
 	s := &Server{
 		Handler: func(_ *RequestCtx) {
-			atomic.AddInt64(&requests, 1)
+			requests.Add(1)
 		},
 	}
 	go s.Serve(ln) //nolint:errcheck
@@ -275,7 +275,7 @@ func TestClientInvalidURI(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error (missing required Host header in request)")
 	}
-	if n := atomic.LoadInt64(&requests); n != 0 {
+	if n := requests.Load(); n != 0 {
 		t.Fatalf("0 requests expected, got %d", n)
 	}
 }
@@ -1470,12 +1470,12 @@ func TestHostClientMaxConnDuration(t *testing.T) {
 
 	ln := fasthttputil.NewInmemoryListener()
 
-	connectionCloseCount := uint32(0)
+	var connectionCloseCount atomic.Uint32
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			ctx.WriteString("abcd") //nolint:errcheck
 			if ctx.Request.ConnectionClose() {
-				atomic.AddUint32(&connectionCloseCount, 1)
+				connectionCloseCount.Add(1)
 			}
 		},
 	}
@@ -1518,7 +1518,7 @@ func TestHostClientMaxConnDuration(t *testing.T) {
 		t.Fatalf("timeout")
 	}
 
-	if connectionCloseCount == 0 {
+	if connectionCloseCount.Load() == 0 {
 		t.Fatalf("expecting at least one 'Connection: close' request header")
 	}
 }
@@ -2936,7 +2936,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 		MaxConnWaitTimeout: 10 * time.Millisecond,
 	}
 
-	var errNoFreeConnsCount uint32
+	var errNoFreeConnsCount atomic.Uint32
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func() {
@@ -2952,7 +2952,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 				if err != ErrNoFreeConns {
 					t.Errorf("unexpected error: %v. Expecting %v", err, ErrNoFreeConns)
 				}
-				atomic.AddUint32(&errNoFreeConnsCount, 1)
+				errNoFreeConnsCount.Add(1)
 			} else {
 				if resp.StatusCode() != StatusOK {
 					t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -2976,8 +2976,8 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 	if c.connsWait.len() > 0 {
 		t.Errorf("connsWait has %v items remaining", c.connsWait.len())
 	}
-	if errNoFreeConnsCount == 0 {
-		t.Errorf("unexpected errorCount: %d. Expecting > 0", errNoFreeConnsCount)
+	if count := errNoFreeConnsCount.Load(); count == 0 {
+		t.Errorf("unexpected errorCount: %d. Expecting > 0", count)
 	}
 	if err := ln.Close(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -3033,7 +3033,7 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 		MaxConnWaitTimeout: maxConnWaitTimeout,
 	}
 
-	var errTimeoutCount uint32
+	var errTimeoutCount atomic.Uint32
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
 		go func() {
@@ -3049,7 +3049,7 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 				if err != ErrTimeout {
 					t.Errorf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 				}
-				atomic.AddUint32(&errTimeoutCount, 1)
+				errTimeoutCount.Add(1)
 			} else {
 				if resp.StatusCode() != StatusOK {
 					t.Errorf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
@@ -3077,8 +3077,8 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 		w.mu.Unlock()
 	}
 	c.connsLock.Unlock()
-	if errTimeoutCount == 0 {
-		t.Errorf("unexpected errTimeoutCount: %d. Expecting > 0", errTimeoutCount)
+	if count := errTimeoutCount.Load(); count == 0 {
+		t.Errorf("unexpected errTimeoutCount: %d. Expecting > 0", count)
 	}
 	if err := ln.Close(); err != nil {
 		t.Fatalf("unexpected error: %v", err)

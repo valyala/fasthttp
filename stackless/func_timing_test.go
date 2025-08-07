@@ -6,9 +6,9 @@ import (
 )
 
 func BenchmarkFuncOverhead(b *testing.B) {
-	var n uint64
+	var n atomic.Uint64
 	f := NewFunc(func(ctx any) {
-		atomic.AddUint64(&n, *(ctx.(*uint64)))
+		n.Add(*(ctx.(*uint64)))
 	})
 	b.RunParallel(func(pb *testing.PB) {
 		x := uint64(1)
@@ -18,15 +18,15 @@ func BenchmarkFuncOverhead(b *testing.B) {
 			}
 		}
 	})
-	if n != uint64(b.N) {
-		b.Fatalf("unexpected n: %d. Expecting %d", n, b.N)
+	if got := n.Load(); got != uint64(b.N) {
+		b.Fatalf("unexpected n: %d. Expecting %d", got, b.N)
 	}
 }
 
 func BenchmarkFuncPure(b *testing.B) {
-	var n uint64
+	var n atomic.Uint64
 	f := func(x *uint64) {
-		atomic.AddUint64(&n, *x)
+		n.Add(*x)
 	}
 	b.RunParallel(func(pb *testing.PB) {
 		x := uint64(1)
@@ -34,7 +34,7 @@ func BenchmarkFuncPure(b *testing.B) {
 			f(&x)
 		}
 	})
-	if n != uint64(b.N) {
-		b.Fatalf("unexpected n: %d. Expecting %d", n, b.N)
+	if got := n.Load(); got != uint64(b.N) {
+		b.Fatalf("unexpected n: %d. Expecting %d", got, b.N)
 	}
 }
