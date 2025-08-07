@@ -101,9 +101,9 @@ func BenchmarkClientGetTimeoutFastServer(b *testing.B) {
 		},
 	}
 
-	nn := uint32(0)
+	var nn atomic.Uint32
 	b.RunParallel(func(pb *testing.PB) {
-		url := fmt.Sprintf("http://foobar%d.com/aaa/bbb", atomic.AddUint32(&nn, 1))
+		url := fmt.Sprintf("http://foobar%d.com/aaa/bbb", nn.Add(1))
 		var statusCode int
 		var bodyBuf []byte
 		var err error
@@ -132,11 +132,11 @@ func BenchmarkClientDoFastServer(b *testing.B) {
 		MaxConnsPerHost: runtime.GOMAXPROCS(-1),
 	}
 
-	nn := uint32(0)
+	var nn atomic.Uint32
 	b.RunParallel(func(pb *testing.PB) {
 		var req Request
 		var resp Response
-		req.Header.SetRequestURI(fmt.Sprintf("http://foobar%d.com/aaa/bbb", atomic.AddUint32(&nn, 1)))
+		req.Header.SetRequestURI(fmt.Sprintf("http://foobar%d.com/aaa/bbb", nn.Add(1)))
 		for pb.Next() {
 			if err := c.Do(&req, &resp); err != nil {
 				b.Fatalf("unexpected error: %v", err)
@@ -163,9 +163,9 @@ func BenchmarkNetHTTPClientDoFastServer(b *testing.B) {
 		},
 	}
 
-	nn := uint32(0)
+	var nn atomic.Uint32
 	b.RunParallel(func(pb *testing.PB) {
-		req, err := http.NewRequest(MethodGet, fmt.Sprintf("http://foobar%d.com/aaa/bbb", atomic.AddUint32(&nn, 1)), http.NoBody)
+		req, err := http.NewRequest(MethodGet, fmt.Sprintf("http://foobar%d.com/aaa/bbb", nn.Add(1)), http.NoBody)
 		if err != nil {
 			b.Fatalf("unexpected error: %v", err)
 		}
