@@ -81,3 +81,31 @@ func TestAllocationURI(t *testing.T) {
 		t.Fatalf("expected 0 allocations, got %f", n)
 	}
 }
+
+func TestAllocationFS(t *testing.T) {
+	// Create a simple test filesystem handler
+	fs := &FS{
+		Root:               ".",
+		GenerateIndexPages: false,
+		Compress:           false,
+		AcceptByteRange:    false,
+	}
+	h := fs.NewRequestHandler()
+
+	ctx := &RequestCtx{}
+
+	n := testing.AllocsPerRun(100, func() {
+		ctx.Request.Reset()
+		ctx.Response.Reset()
+		ctx.Request.SetRequestURI("/allocation_test.go")
+		ctx.Request.Header.Set("Host", "localhost")
+
+		h(ctx)
+	})
+
+	t.Logf("FS operations allocate %f times per request", n)
+
+	if n > 0 {
+		t.Fatalf("expected 0 allocations, got %f", n)
+	}
+}
