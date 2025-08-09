@@ -644,11 +644,3 @@ func peekAllArgBytesToDst(dst [][]byte, h []argsKV, k []byte) [][]byte {
 	}
 	return dst
 }
-
-func peekArgsKeys(dst [][]byte, h []argsKV) [][]byte {
-	for i, n := 0, len(h); i < n; i++ {
-		kv := &h[i]
-		dst = append(dst, kv.key)
-	}
-	return dst
-}

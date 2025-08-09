@@ -1992,9 +1992,25 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 // either though ReleaseRequest or your request handler returning.
 // Any future calls to the Peek* will modify the returned value.
 // Do not store references to returned value. Make copies instead.
-func (h *header) PeekKeys() [][]byte {
+func (h *RequestHeader) PeekKeys() [][]byte {
 	h.mulHeader = h.mulHeader[:0]
-	h.mulHeader = peekArgsKeys(h.mulHeader, h.h)
+	for key := range h.All() {
+		h.mulHeader = append(h.mulHeader, key)
+	}
+	return h.mulHeader
+}
+
+// PeekKeys return all header keys.
+//
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
+// Any future calls to the Peek* will modify the returned value.
+// Do not store references to returned value. Make copies instead.
+func (h *ResponseHeader) PeekKeys() [][]byte {
+	h.mulHeader = h.mulHeader[:0]
+	for key := range h.All() {
+		h.mulHeader = append(h.mulHeader, key)
+	}
 	return h.mulHeader
 }
 
