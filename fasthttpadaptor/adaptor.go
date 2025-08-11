@@ -70,7 +70,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 
 		select {
 		case <-doneCh:
-			// No flush occured before the handler returned.
+			// No flush occurred before the handler returned.
 			// Send the data as one chunk.
 			ctx.SetStatusCode(w.StatusCode())
 			haveContentType := false
@@ -101,7 +101,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			}
 
 		case <-w.flushedCh:
-			// Flush occured before handler returned.
+			// Flush occurred before handler returned.
 			// Send the first 512 bytes and start streaming
 			// the rest of the first chunk and new data as it arrives.
 			ctx.SetStatusCode(w.StatusCode())
@@ -154,7 +154,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 					n, err := w.r.Read(chunk)
 					if err != nil {
 						// Handler ended due to an io.EOF
-						// or an error occured.
+						// or an error occurred.
 						return
 					}
 
