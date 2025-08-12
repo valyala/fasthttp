@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
+	"net/textproto"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -136,6 +139,96 @@ func FuzzURIParse(f *testing.F) {
 		}
 		if string(u.QueryString()) != nu.RawQuery {
 			t.Fatalf("%q: unexpected query string: %q. Expecting %q", uri, u.QueryString(), nu.RawQuery)
+		}
+	})
+}
+
+func FuzzTestHeaderScanner(f *testing.F) {
+	f.Add([]byte("Host: example.com\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate\r\n\r\n"))
+	f.Add([]byte("Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 27\r\n\r\nname=John+Doe&age=30"))
+
+	f.Fuzz(func(t *testing.T, data []byte) {
+		if !bytes.Contains(data, []byte("\r\n\r\n")) {
+			return
+		}
+
+		t.Logf("%q", data)
+
+		tmp, herr := textproto.NewReader(bufio.NewReader(bytes.NewReader(data))).ReadMIMEHeader()
+		h := map[string][]string(tmp)
+
+		var s headerScanner
+		s.b = data
+		f := make(map[string][]string)
+		for s.next() {
+			// ReadMIMEHeader normalizes header keys, headerScanner doesn't by default.
+			normalizeHeaderKey(s.key, false)
+
+			// textproto.ReadMIMEHeader will validate the header value, since we compare
+			// errors we should do this as well.
+			for _, c := range s.value {
+				if !validHeaderValueByte(c) {
+					s.err = fmt.Errorf("malformed MIME header: invalid byte %q in value %q for key %q", c, s.value, s.key)
+				}
+			}
+			if s.err != nil {
+				break
+			}
+
+			key := string(s.key)
+			value := string(s.value)
+
+			if _, ok := f[key]; !ok {
+				f[key] = []string{}
+			}
+			f[key] = append(f[key], value)
+		}
+
+		if s.err != nil && herr == nil {
+			t.Errorf("unexpected error from headerScanner: %v: %v", s.err, h)
+		} else if s.err == nil && herr != nil {
+			t.Errorf("unexpected error from textproto.NewReader: %v: %v", herr, f)
+		}
+
+		if !reflect.DeepEqual(h, f) {
+			t.Errorf("headers mismatch:\ntextproto: %v\nfasthttp: %v", h, f)
+		}
+	})
+}
+
+func FuzzRequestReadLimitBodyAllocations(f *testing.F) {
+	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nfoobar\r\n\r\n"), 1024)
+	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nWithTabs: \t v1 \t\r\nWithTabs-Start: \t \t v1 \r\nWithTabs-End: v1 \t \t\t\t\r\nWithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n\r\n"), 1024)
+
+	f.Fuzz(func(t *testing.T, body []byte, maxBodySize int) {
+		if len(body) > 1024*1024 || maxBodySize > 1024*1024 {
+			return
+		}
+		// Only test with a max for the body, otherwise a very large Content-Length will just OOM.
+		if maxBodySize <= 0 {
+			return
+		}
+
+		t.Logf("%d %q", maxBodySize, body)
+
+		req := Request{}
+		a := bytes.NewReader(body)
+		b := bufio.NewReader(a)
+
+		if err := req.ReadLimitBody(b, maxBodySize); err != nil {
+			return
+		}
+
+		n := testing.AllocsPerRun(200, func() {
+			req.Reset()
+			a.Reset(body)
+			b.Reset(a)
+
+			_ = req.ReadLimitBody(b, maxBodySize)
+		})
+
+		if n != 0 {
+			t.Fatalf("expected 0 allocations, got %f", n)
 		}
 	})
 }
