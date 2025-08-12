@@ -179,14 +179,17 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			go func() {
 				defer wg.Done()
 				_, _ = io.Copy(ctx.Conn(), w.handlerConn)
+
+				// Close the fasthttp connection when
+				// the net/http connection closes
 				_ = ctx.Conn().Close()
 			}()
 			go func() {
 				defer wg.Done()
 				_, _ = io.Copy(w.handlerConn, ctx.Conn())
-				_ = w.handlerConn.Close()
+				// Note: Only the net/http handler
+				// should close the connection.
 			}()
-
 			wg.Wait()
 		}
 	}
