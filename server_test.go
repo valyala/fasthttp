@@ -543,7 +543,7 @@ func TestRequestCtxRedirectHTTPSSchemeless(t *testing.T) {
 
 	var ctx RequestCtx
 
-	s := "GET /foo/bar?baz HTTP/1.1\nHost: aaa.com\n\n"
+	s := "GET /foo/bar?baz HTTP/1.1\r\nHost: aaa.com\r\n\r\n"
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := ctx.Request.Read(br); err != nil {
 		t.Fatalf("cannot read request: %v", err)
@@ -1301,12 +1301,7 @@ func TestServerMultipartFormDataRequest(t *testing.T) {
 		{StreamRequestBody: true, DisablePreParseMultipartForm: false},
 		{StreamRequestBody: true, DisablePreParseMultipartForm: true},
 	} {
-		reqS := `POST /upload HTTP/1.1
-Host: qwerty.com
-Content-Length: 521
-Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryJwfATyF8tmxSJnLg
-
-------WebKitFormBoundaryJwfATyF8tmxSJnLg
+		b := strings.ReplaceAll(`------WebKitFormBoundaryJwfATyF8tmxSJnLg
 Content-Disposition: form-data; name="f1"
 
 value1
@@ -1321,12 +1316,21 @@ Content-Type: application/octet-stream
 - HTTP/2.0. See https://tools.ietf.org/html/rfc7540 .
 
 ------WebKitFormBoundaryJwfATyF8tmxSJnLg--
+`, "\n", "\r\n")
+
+		reqS := fmt.Sprintf(strings.ReplaceAll(`POST /upload HTTP/1.1
+Host: qwerty.com
+Content-Length: %d
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundaryJwfATyF8tmxSJnLg
+
+%s
 
 GET / HTTP/1.1
 Host: asbd
 Connection: close
 
-`
+`, "\n", "\r\n"), len(b), b)
+
 		ln := fasthttputil.NewInmemoryListener()
 
 		s := &Server{
@@ -4347,13 +4351,15 @@ func TestServerChunkedResponse(t *testing.T) {
 	}
 	for k, v := range trailer {
 		h := resp.Header.Peek(k)
-		if !bytes.Equal(resp.Header.Peek(k), []byte(v)) {
+		if !bytes.Equal(h, []byte(v)) {
 			t.Fatalf("Unexpected trailer %q. Expected %q. Got %q", k, v, h)
 		}
 	}
 }
 
 func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expectedContentType, expectedBody string) *Response {
+	t.Helper()
+
 	var resp Response
 	if err := resp.Read(r); err != nil {
 		t.Fatalf("Unexpected error when parsing response: %v", err)
@@ -4411,7 +4417,9 @@ type testLogger struct {
 
 func (cl *testLogger) Printf(format string, args ...any) {
 	cl.lock.Lock()
-	cl.out += fmt.Sprintf(format, args...)[6:] + "\n"
+	line := fmt.Sprintf(format, args...)
+	space := strings.IndexByte(line, ' ') + 1
+	cl.out += line[space:] + "\n"
 	cl.lock.Unlock()
 }
 

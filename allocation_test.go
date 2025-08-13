@@ -10,6 +10,9 @@ import (
 func TestAllocationServeConn(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(StatusOK)
+			ctx.SetBodyString("Hello, World!")
+			ctx.Response.Header.Set("Content-Type", "text/plain; charset=utf-8")
 		},
 	}
 
@@ -43,6 +46,9 @@ func TestAllocationClient(t *testing.T) {
 
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetStatusCode(StatusOK)
+			ctx.SetBodyString("Hello, World!")
+			ctx.Response.Header.Set("Content-Type", "text/plain; charset=utf-8")
 		},
 	}
 	go s.Serve(ln) //nolint:errcheck
@@ -55,6 +61,7 @@ func TestAllocationClient(t *testing.T) {
 		res := AcquireResponse()
 
 		req.SetRequestURI(url)
+		req.Header.Add("Foo", "bar")
 		if err := c.Do(req, res); err != nil {
 			t.Fatal(err)
 		}
@@ -105,7 +112,27 @@ func TestAllocationFS(t *testing.T) {
 
 	t.Logf("FS operations allocate %f times per request", n)
 
-	if n > 0 {
+	if n != 0 {
+		t.Fatalf("expected 0 allocations, got %f", n)
+	}
+}
+
+func TestAllocationsHeaderScanner(t *testing.T) {
+	body := []byte("Host: a.com\r\nCookie: foo=bar\r\nWithTabs: \t v1 \t\r\nWithTabs-Start: \t \t v1 \r\nWithTabs-End: v1 \t \t\t\t\r\nWithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n\r\n")
+
+	n := testing.AllocsPerRun(100, func() {
+		var s headerScanner
+		s.b = body
+
+		for s.next() {
+		}
+
+		if s.err != nil {
+			t.Fatal(s.err)
+		}
+	})
+
+	if n != 0 {
 		t.Fatalf("expected 0 allocations, got %f", n)
 	}
 }
