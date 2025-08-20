@@ -89,16 +89,19 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				// If the Header does not contain a Content-Type line, Write adds a Content-Type set
 				// to the result of passing the initial 512 bytes of written data to DetectContentType.
 				l := 512
-				b := w.firstChunk
+				b := w.responseBody
 				if len(b) < 512 {
 					l = len(b)
 				}
 				ctx.Response.Header.Set(fasthttp.HeaderContentType, http.DetectContentType(b[:l]))
 			}
 
-			if len(w.firstChunk) > 0 {
-				ctx.Response.SetBodyRaw(append([]byte(nil), w.firstChunk...))
+			w.responseMutex.Lock()
+			if len(w.responseBody) > 0 {
+				ctx.Response.SetBodyRaw(w.responseBody)
+				w.responseBody = nil
 			}
+			w.responseMutex.Unlock()
 
 		case <-w.flushedCh:
 			// Flush occurred before handler returned.
@@ -122,12 +125,13 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				}
 			}
 
+			w.responseMutex.Lock()
 			if !haveContentType {
 				// From net/http.ResponseWriter.Write:
 				// If the Header does not contain a Content-Type line, Write adds a Content-Type set
 				// to the result of passing the initial 512 bytes of written data to DetectContentType.
 				l := 512
-				b := w.firstChunk
+				b := w.responseBody
 				if len(b) < 512 {
 					l = len(b)
 				}
@@ -137,11 +141,12 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// Start streaming mode on return.
 			ctx.SetBodyStreamWriter(func(bw *bufio.Writer) {
 				// Stream the first chunk.
-				if len(w.firstChunk) > 0 {
-					_, _ = bw.Write(w.firstChunk)
+				if len(w.responseBody) > 0 {
+					_, _ = bw.Write(w.responseBody)
 					_ = bw.Flush()
-					w.firstChunk = nil
+					w.responseBody = nil
 				}
+				w.responseMutex.Unlock()
 
 				// Stream the rest of the data that is read
 				// from the net/http handler in 32 KiB chunks.
@@ -196,16 +201,18 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 }
 
 type netHTTPResponseWriter struct {
-	handlerConn net.Conn
-	ctx         *fasthttp.RequestCtx
-	h           http.Header
-	r           *io.PipeReader
-	w           *io.PipeWriter
-	flushedCh   chan struct{}
-	streamingCh chan struct{}
-	hijackedCh  chan struct{}
-	firstChunk  []byte
-	statusCode  int
+	handlerConn   net.Conn
+	ctx           *fasthttp.RequestCtx
+	h             http.Header
+	r             *io.PipeReader
+	w             *io.PipeWriter
+	flushedCh     chan struct{}
+	streamingCh   chan struct{}
+	hijackedCh    chan struct{}
+	responseBody  []byte
+	statusMutex   sync.Mutex
+	responseMutex sync.Mutex
+	statusCode    int
 }
 
 func newNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
@@ -222,6 +229,9 @@ func newNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
 }
 
 func (w *netHTTPResponseWriter) StatusCode() int {
+	w.statusMutex.Lock()
+	defer w.statusMutex.Unlock()
+
 	if w.statusCode == 0 {
 		return http.StatusOK
 	}
@@ -233,6 +243,9 @@ func (w *netHTTPResponseWriter) Header() http.Header {
 }
 
 func (w *netHTTPResponseWriter) WriteHeader(statusCode int) {
+	w.statusMutex.Lock()
+	defer w.statusMutex.Unlock()
+
 	w.statusCode = statusCode
 }
 
@@ -245,7 +258,9 @@ func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 	default:
 		// Streaming mode is off.
 		// Write to the first chunk for flushing later.
-		w.firstChunk = append(w.firstChunk, p...)
+		w.responseMutex.Lock()
+		w.responseBody = append(w.responseBody, p...)
+		w.responseMutex.Unlock()
 		return len(p), nil
 	}
 }
@@ -280,13 +295,17 @@ func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	bufW := bufio.NewReadWriter(bufio.NewReader(netHTTPConn), bufio.NewWriter(netHTTPConn))
 
 	// Write any unflushed body to the hijacked connection buffer.
-	if len(w.firstChunk) > 0 {
-		_, _ = bufW.Write(w.firstChunk)
-		w.firstChunk = nil
+	if len(w.responseBody) > 0 {
+		w.responseMutex.Lock()
+		_, _ = bufW.Write(w.responseBody)
+		w.responseBody = nil
+		w.responseMutex.Unlock()
 	}
 	return netHTTPConn, bufW, nil
 }
 
 func (w *netHTTPResponseWriter) Close() error {
-	return w.w.Close()
+	_ = w.w.Close()
+	_ = w.r.Close()
+	return nil
 }
