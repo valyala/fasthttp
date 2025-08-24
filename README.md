@@ -580,6 +580,7 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
 - [http2](https://github.com/dgrr/http2) - HTTP/2 implementation for fasthttp.
 - [router](https://github.com/fasthttp/router) - a high
   performance fasthttp request router that scales well.
+- [fasthttp-auth](https://github.com/casbin/fasthttp-auth) - Authorization middleware for fasthttp using Casbin.
 - [fastws](https://github.com/fasthttp/fastws) - Bloatless WebSocket package made for fasthttp
   to handle Read/Write operations concurrently.
 - [gramework](https://github.com/gramework/gramework) - a web framework made by one of fasthttp maintainers.
