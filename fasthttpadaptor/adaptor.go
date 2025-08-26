@@ -63,13 +63,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		// Concurrently serve the net/http handler.
 		doneCh := make(chan struct{})
 		go func() {
-			defer func() {
-				close(doneCh)
-				_ = w.Close()
-
-				releaseNetHTTPResponseWriter(w)
-			}()
 			h.ServeHTTP(w, r.WithContext(ctx))
+			close(doneCh)
+			_ = w.Close()
 		}()
 
 		select {
@@ -106,6 +102,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				w.responseBody = nil
 			}
 			w.responseMutex.Unlock()
+
+			// Release after sending response.
+			releaseNetHTTPResponseWriter(w)
 
 		case <-w.flushedCh:
 			// Flush occurred before handler returned.
@@ -164,6 +163,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 					if err != nil {
 						// Handler ended due to an io.EOF
 						// or an error occurred.
+						//
+						// Release the response writer for reuse.
+						releaseNetHTTPResponseWriter(w)
 						return
 					}
 
@@ -192,7 +194,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				_, _ = io.Copy(ctx.Conn(), w.handlerConn)
 
 				// Close the fasthttp connection when
-				// the net/http connection closes
+				// the net/http connection closes.
 				_ = ctx.Conn().Close()
 			}()
 			go func() {
@@ -202,6 +204,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				// should close the connection.
 			}()
 			wg.Wait()
+			releaseNetHTTPResponseWriter(w)
 		}
 	}
 }
@@ -334,6 +337,8 @@ func (w *netHTTPResponseWriter) Close() error {
 }
 
 func (w *netHTTPResponseWriter) reset() {
+	// Note: reset() must only run after a fasthttp handler finishes
+	// proxying the full net/http handler response to ensure no data races.
 	w.ctx = nil
 	w.handlerConn = nil
 	w.statusCode = 0
