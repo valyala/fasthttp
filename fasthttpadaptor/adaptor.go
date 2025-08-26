@@ -5,6 +5,7 @@ package fasthttpadaptor
 import (
 	"bufio"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -56,7 +57,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			ctx.Error("Internal Server Error", fasthttp.StatusInternalServerError)
 			return
 		}
-		w := newNetHTTPResponseWriter(ctx)
+
+		w := acquireNetHTTPResponseWriter(ctx)
 
 		// Concurrently serve the net/http handler.
 		doneCh := make(chan struct{})
@@ -64,6 +66,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			defer func() {
 				close(doneCh)
 				_ = w.Close()
+
+				releaseNetHTTPResponseWriter(w)
 			}()
 			h.ServeHTTP(w, r.WithContext(ctx))
 		}()
@@ -170,6 +174,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 					}
 				}
 			})
+			// Activate streaming mode for consequent `w.Flush()`
+			// by net/http handler.
 			close(w.streamingCh)
 
 		case <-w.hijackedCh:
@@ -200,6 +206,20 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 	}
 }
 
+var writerPool = &sync.Pool{
+	New: func() any {
+		pr, pw := io.Pipe()
+		return &netHTTPResponseWriter{
+			h:           make(http.Header),
+			r:           pr,
+			w:           pw,
+			flushedCh:   make(chan struct{}),
+			streamingCh: make(chan struct{}),
+			hijackedCh:  make(chan struct{}),
+		}
+	},
+}
+
 type netHTTPResponseWriter struct {
 	handlerConn   net.Conn
 	ctx           *fasthttp.RequestCtx
@@ -215,17 +235,19 @@ type netHTTPResponseWriter struct {
 	statusCode    int
 }
 
-func newNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
-	pr, pw := io.Pipe()
-	return &netHTTPResponseWriter{
-		ctx:         ctx,
-		h:           make(http.Header),
-		r:           pr,
-		w:           pw,
-		flushedCh:   make(chan struct{}),
-		streamingCh: make(chan struct{}),
-		hijackedCh:  make(chan struct{}),
+func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
+	w, ok := writerPool.Get().(*netHTTPResponseWriter)
+	if !ok {
+		log.Panic("cannot get from writerPool")
 	}
+	w.reset()
+
+	w.ctx = ctx
+	return w
+}
+
+func releaseNetHTTPResponseWriter(w *netHTTPResponseWriter) {
+	writerPool.Put(w)
 }
 
 func (w *netHTTPResponseWriter) StatusCode() int {
@@ -298,6 +320,7 @@ func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if len(w.responseBody) > 0 {
 		w.responseMutex.Lock()
 		_, _ = bufW.Write(w.responseBody)
+		_ = bufW.Flush()
 		w.responseBody = nil
 		w.responseMutex.Unlock()
 	}
@@ -308,4 +331,30 @@ func (w *netHTTPResponseWriter) Close() error {
 	_ = w.w.Close()
 	_ = w.r.Close()
 	return nil
+}
+
+func (w *netHTTPResponseWriter) reset() {
+	w.ctx = nil
+	w.handlerConn = nil
+	w.statusCode = 0
+
+	// Open new bidirectional pipes
+	_ = w.r.Close()
+	_ = w.w.Close()
+	pr, pw := io.Pipe()
+	w.r = pr
+	w.w = pw
+
+	// Clear the http Header
+	for key := range w.h {
+		delete(w.h, key)
+	}
+
+	// Create new open channels
+	w.flushedCh = make(chan struct{})
+	w.streamingCh = make(chan struct{})
+	w.hijackedCh = make(chan struct{})
+
+	// Free response body memory for reuse
+	w.responseBody = w.responseBody[:0]
 }
