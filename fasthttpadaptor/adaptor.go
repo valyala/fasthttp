@@ -5,7 +5,6 @@ package fasthttpadaptor
 import (
 	"bufio"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -89,7 +88,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				// If the Header does not contain a Content-Type line, Write adds a Content-Type set
 				// to the result of passing the initial 512 bytes of written data to DetectContentType.
 				l := 512
-				b := w.responseBody
+				b := *w.responseBody
 				if len(b) < 512 {
 					l = len(b)
 				}
@@ -97,9 +96,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			}
 
 			w.responseMutex.Lock()
-			if len(w.responseBody) > 0 {
-				ctx.Response.SetBodyRaw(w.responseBody)
-				w.responseBody = nil
+			if len(*w.responseBody) > 0 {
+				ctx.Response.SetBody(*w.responseBody)
 			}
 			w.responseMutex.Unlock()
 
@@ -134,7 +132,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				// If the Header does not contain a Content-Type line, Write adds a Content-Type set
 				// to the result of passing the initial 512 bytes of written data to DetectContentType.
 				l := 512
-				b := w.responseBody
+				b := *w.responseBody
 				if len(b) < 512 {
 					l = len(b)
 				}
@@ -144,10 +142,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// Start streaming mode on return.
 			ctx.SetBodyStreamWriter(func(bw *bufio.Writer) {
 				// Stream the first chunk.
-				if len(w.responseBody) > 0 {
-					_, _ = bw.Write(w.responseBody)
+				if len(*w.responseBody) > 0 {
+					_, _ = bw.Write(*w.responseBody)
 					_ = bw.Flush()
-					w.responseBody = nil
 				}
 				w.responseMutex.Unlock()
 
@@ -156,22 +153,23 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				//
 				// Note: Data must be manually copied in chunks
 				// as data comes in.
-				chunk := make([]byte, 32*1024)
+				chunk := acquireBuffer()
 				for {
 					// Read net/http handler chunk.
-					n, err := w.r.Read(chunk)
+					n, err := w.r.Read(*chunk)
 					if err != nil {
 						// Handler ended due to an io.EOF
 						// or an error occurred.
 						//
 						// Release the response writer for reuse.
+						releaseBuffer(chunk)
 						releaseNetHTTPResponseWriter(w)
 						return
 					}
 
 					// Copy chunk to fasthttp response
 					if n > 0 {
-						_, _ = bw.Write(chunk[:n])
+						_, _ = bw.Write((*chunk)[:n])
 						_ = bw.Flush()
 					}
 				}
@@ -209,16 +207,24 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 	}
 }
 
+var bufferPool = &sync.Pool{
+	New: func() any {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
 var writerPool = &sync.Pool{
 	New: func() any {
 		pr, pw := io.Pipe()
 		return &netHTTPResponseWriter{
-			h:           make(http.Header),
-			r:           pr,
-			w:           pw,
-			flushedCh:   make(chan struct{}),
-			streamingCh: make(chan struct{}),
-			hijackedCh:  make(chan struct{}),
+			h:            make(http.Header),
+			r:            pr,
+			w:            pw,
+			flushedCh:    make(chan struct{}),
+			streamingCh:  make(chan struct{}),
+			hijackedCh:   make(chan struct{}),
+			responseBody: acquireBuffer(),
 		}
 	},
 }
@@ -232,7 +238,7 @@ type netHTTPResponseWriter struct {
 	flushedCh     chan struct{}
 	streamingCh   chan struct{}
 	hijackedCh    chan struct{}
-	responseBody  []byte
+	responseBody  *[]byte
 	statusMutex   sync.Mutex
 	responseMutex sync.Mutex
 	statusCode    int
@@ -241,7 +247,7 @@ type netHTTPResponseWriter struct {
 func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
 	w, ok := writerPool.Get().(*netHTTPResponseWriter)
 	if !ok {
-		log.Panic("cannot get from writerPool")
+		panic("fasthttpadaptor: cannot get *netHTTPResponseWriter from writerPool")
 	}
 	w.reset()
 
@@ -250,7 +256,22 @@ func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWrit
 }
 
 func releaseNetHTTPResponseWriter(w *netHTTPResponseWriter) {
+	releaseBuffer(w.responseBody)
 	writerPool.Put(w)
+}
+
+func acquireBuffer() *[]byte {
+	buf, ok := bufferPool.Get().(*[]byte)
+	if !ok {
+		panic("fasthttpadaptor: cannot get *[]byte from bufferPool")
+	}
+
+	*buf = (*buf)[:0]
+	return buf
+}
+
+func releaseBuffer(buf *[]byte) {
+	bufferPool.Put(buf)
 }
 
 func (w *netHTTPResponseWriter) StatusCode() int {
@@ -284,7 +305,7 @@ func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 		// Streaming mode is off.
 		// Write to the first chunk for flushing later.
 		w.responseMutex.Lock()
-		w.responseBody = append(w.responseBody, p...)
+		*w.responseBody = append(*w.responseBody, p...)
 		w.responseMutex.Unlock()
 		return len(p), nil
 	}
@@ -320,11 +341,10 @@ func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	bufW := bufio.NewReadWriter(bufio.NewReader(netHTTPConn), bufio.NewWriter(netHTTPConn))
 
 	// Write any unflushed body to the hijacked connection buffer.
-	if len(w.responseBody) > 0 {
+	if len(*w.responseBody) > 0 {
 		w.responseMutex.Lock()
-		_, _ = bufW.Write(w.responseBody)
+		_, _ = bufW.Write(*w.responseBody)
 		_ = bufW.Flush()
-		w.responseBody = nil
 		w.responseMutex.Unlock()
 	}
 	return netHTTPConn, bufW, nil
@@ -360,6 +380,6 @@ func (w *netHTTPResponseWriter) reset() {
 	w.streamingCh = make(chan struct{})
 	w.hijackedCh = make(chan struct{})
 
-	// Free response body memory for reuse
-	w.responseBody = w.responseBody[:0]
+	// Get a new buffer for the response body
+	w.responseBody = acquireBuffer()
 }
