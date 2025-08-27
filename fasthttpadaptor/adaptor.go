@@ -202,6 +202,11 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				// should close the connection.
 			}()
 			wg.Wait()
+
+			// Wait for the net/http handler to finish
+			// writing to the hijacked connection prior to releasing
+			// the writer into the writer pool.
+			<-doneCh
 			releaseNetHTTPResponseWriter(w)
 		}
 	}
