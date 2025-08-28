@@ -315,11 +315,11 @@ type Server struct {
 
 	mu sync.Mutex
 
-	concurrency uint32
-	open        int32
-	stop        int32
+	concurrency atomic.Uint32
+	open        atomic.Int32
+	stop        atomic.Int32
 
-	rejectedRequestsCount uint32
+	rejectedRequestsCount atomic.Uint32
 
 	// Whether to disable keep-alive connections.
 	//
@@ -1871,8 +1871,8 @@ func (s *Server) Serve(ln net.Listener) error {
 	// This way we can't get into any weird state where just after accepting
 	// a connection Shutdown is called which reads open as 0 because it isn't
 	// incremented yet.
-	atomic.AddInt32(&s.open, 1)
-	defer atomic.AddInt32(&s.open, -1)
+	s.open.Add(1)
+	defer s.open.Add(-1)
 
 	for {
 		c, err := acceptConn(s, ln, &lastPerIPErrorTime)
@@ -1884,10 +1884,10 @@ func (s *Server) Serve(ln net.Listener) error {
 			return err
 		}
 		s.setState(c, StateNew)
-		atomic.AddInt32(&s.open, 1)
+		s.open.Add(1)
 		if !wp.Serve(c) {
-			atomic.AddInt32(&s.open, -1)
-			atomic.AddUint32(&s.rejectedRequestsCount, 1)
+			s.open.Add(-1)
+			s.rejectedRequestsCount.Add(1)
 			s.writeFastError(c, StatusServiceUnavailable,
 				"The connection cannot be served because Server.Concurrency limit exceeded")
 			c.Close()
@@ -1940,8 +1940,8 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	atomic.StoreInt32(&s.stop, 1)
-	defer atomic.StoreInt32(&s.stop, 0)
+	s.stop.Store(1)
+	defer s.stop.Store(0)
 
 	if s.ln == nil {
 		return nil
@@ -1962,7 +1962,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	for {
 		s.closeIdleConns()
 
-		if open := atomic.LoadInt32(&s.open); open == 0 {
+		if open := s.open.Load(); open == 0 {
 			// There may be a pending request to call ctx.Done(). Therefore, we only set it to nil when open == 0.
 			s.done = nil
 			return lnerr
@@ -2082,19 +2082,19 @@ func (s *Server) ServeConn(c net.Conn) error {
 		c = pic
 	}
 
-	n := int(atomic.AddUint32(&s.concurrency, 1)) // #nosec G115
+	n := int(s.concurrency.Add(1)) // #nosec G115
 	if n > s.getConcurrency() {
-		atomic.AddUint32(&s.concurrency, ^uint32(0))
+		s.concurrency.Add(^uint32(0))
 		s.writeFastError(c, StatusServiceUnavailable, "The connection cannot be served because Server.Concurrency limit exceeded")
 		c.Close()
 		return ErrConcurrencyLimit
 	}
 
-	atomic.AddInt32(&s.open, 1)
+	s.open.Add(1)
 
 	err := s.serveConn(c)
 
-	atomic.AddUint32(&s.concurrency, ^uint32(0))
+	s.concurrency.Add(^uint32(0))
 
 	if err != errHijacked {
 		errc := c.Close()
@@ -2116,29 +2116,29 @@ var errHijacked = errors.New("connection has been hijacked")
 //
 // This function is intended be used by monitoring systems.
 func (s *Server) GetCurrentConcurrency() uint32 {
-	return atomic.LoadUint32(&s.concurrency)
+	return s.concurrency.Load()
 }
 
 // GetOpenConnectionsCount returns a number of opened connections.
 //
 // This function is intended be used by monitoring systems.
 func (s *Server) GetOpenConnectionsCount() int32 {
-	if atomic.LoadInt32(&s.stop) == 0 {
+	if s.stop.Load() == 0 {
 		// Decrement by one to avoid reporting the extra open value that gets
 		// counted while the server is listening.
-		return atomic.LoadInt32(&s.open) - 1
+		return s.open.Load() - 1
 	}
 	// This is not perfect, because s.stop could have changed to zero
 	// before we load the value of s.open. However, in the common case
 	// this avoids underreporting open connections by 1 during server shutdown.
-	return atomic.LoadInt32(&s.open)
+	return s.open.Load()
 }
 
 // GetRejectedConnectionsCount returns a number of rejected connections.
 //
 // This function is intended be used by monitoring systems.
 func (s *Server) GetRejectedConnectionsCount() uint32 {
-	return atomic.LoadUint32(&s.rejectedRequestsCount)
+	return s.rejectedRequestsCount.Load()
 }
 
 func (s *Server) getConcurrency() int {
@@ -2169,13 +2169,13 @@ func (s *Server) idleTimeout() time.Duration {
 }
 
 func (s *Server) serveConnCleanup() {
-	atomic.AddInt32(&s.open, -1)
-	atomic.AddUint32(&s.concurrency, ^uint32(0))
+	s.open.Add(-1)
+	s.concurrency.Add(^uint32(0))
 }
 
 func (s *Server) serveConn(c net.Conn) (err error) {
 	defer s.serveConnCleanup()
-	atomic.AddUint32(&s.concurrency, 1)
+	s.concurrency.Add(1)
 
 	var proto string
 	if proto, err = s.getNextProto(c); err != nil {
@@ -2487,7 +2487,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		connectionClose = connectionClose ||
 			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
 			ctx.Response.Header.ConnectionClose() ||
-			(s.CloseOnShutdown && atomic.LoadInt32(&s.stop) == 1)
+			(s.CloseOnShutdown && s.stop.Load() == 1)
 		if connectionClose {
 			ctx.Response.Header.SetConnectionClose()
 		} else if !ctx.Request.Header.IsHTTP11() {
@@ -2563,7 +2563,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 		ctx.Request.Reset()
 		ctx.Response.Reset()
 
-		if atomic.LoadInt32(&s.stop) == 1 {
+		if s.stop.Load() == 1 {
 			err = nil
 			break
 		}

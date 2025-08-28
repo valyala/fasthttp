@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3934,7 +3933,7 @@ func TestShutdownWithContext(t *testing.T) {
 			t.Fatalf("unexpected err %v. Expecting %v", err, context.DeadlineExceeded)
 		}
 	}
-	if o := atomic.LoadInt32(&s.open); o != 1 {
+	if o := s.open.Load(); o != 1 {
 		t.Fatalf("unexpected open connection num: %#v. Expecting %#v", o, 1)
 	}
 }
