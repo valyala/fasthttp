@@ -343,16 +343,16 @@ func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		close(w.hijackedCh)
 	}
 
-	bufW := bufio.NewReadWriter(bufio.NewReader(netHTTPConn), bufio.NewWriter(netHTTPConn))
+	bufRW := bufio.NewReadWriter(bufio.NewReader(netHTTPConn), bufio.NewWriter(netHTTPConn))
 
 	// Write any unflushed body to the hijacked connection buffer.
 	if len(*w.responseBody) > 0 {
 		w.responseMutex.Lock()
-		_, _ = bufW.Write(*w.responseBody)
-		_ = bufW.Flush()
+		_, _ = bufRW.Write(*w.responseBody)
+		_ = bufRW.Flush()
 		w.responseMutex.Unlock()
 	}
-	return netHTTPConn, bufW, nil
+	return netHTTPConn, bufRW, nil
 }
 
 func (w *netHTTPResponseWriter) Close() error {
