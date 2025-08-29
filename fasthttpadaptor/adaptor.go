@@ -126,6 +126,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				}
 			}
 
+			// Lock the current response body until
+			// it is sent in the StreamWriter function.
 			w.responseMutex.Lock()
 			if !haveContentType {
 				// From net/http.ResponseWriter.Write:
@@ -146,6 +148,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 					_, _ = bw.Write(*w.responseBody)
 					_ = bw.Flush()
 				}
+				// The current response body is no longer used
+				// past this point.
 				w.responseMutex.Unlock()
 
 				// Stream the rest of the data that is read
@@ -346,12 +350,12 @@ func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	bufRW := bufio.NewReadWriter(bufio.NewReader(netHTTPConn), bufio.NewWriter(netHTTPConn))
 
 	// Write any unflushed body to the hijacked connection buffer.
+	w.responseMutex.Lock()
 	if len(*w.responseBody) > 0 {
-		w.responseMutex.Lock()
 		_, _ = bufRW.Write(*w.responseBody)
 		_ = bufRW.Flush()
-		w.responseMutex.Unlock()
 	}
+	w.responseMutex.Unlock()
 	return netHTTPConn, bufRW, nil
 }
 
