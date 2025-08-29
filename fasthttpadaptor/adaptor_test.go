@@ -1,6 +1,7 @@
 package fasthttpadaptor
 
 import (
+	"bufio"
 	"io"
 	"net"
 	"net/http"
@@ -135,7 +136,7 @@ func TestNewFastHTTPHandler(t *testing.T) {
 		t.Fatalf("unexpected response body %q. Expecting %q", resp.Body(), expectedBody)
 	}
 	if string(resp.Header.Peek("Content-Type")) != expectedContentType {
-		t.Fatalf("unexpected response content-type %q. Expecting %q", string(resp.Header.Peek("Content-Type")), expectedBody)
+		t.Fatalf("unexpected response content-type %q. Expecting %q", string(resp.Header.Peek("Content-Type")), expectedContentType)
 	}
 }
 
@@ -245,6 +246,172 @@ func TestHijack(t *testing.T) {
 			t.Errorf("unexpected error: %v", err)
 		}
 
+		buf, err := io.ReadAll(c)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if string(buf) != "foobar" {
+			t.Errorf("unexpected response: %q. Expecting %q", buf, "foobar")
+		}
+
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestFlushHandler(t *testing.T) {
+	t.Parallel()
+
+	nethttpH := func(w http.ResponseWriter, r *http.Request) {
+		if f, ok := w.(http.Flusher); !ok {
+			t.Errorf("expected http.ResponseWriter to implement http.Flusher")
+		} else {
+			if _, err := w.Write([]byte("foo")); err != nil {
+				t.Error(err)
+			}
+
+			f.Flush()
+
+			time.Sleep(time.Second)
+
+			if _, err := w.Write([]byte("bar")); err != nil {
+				t.Error(err)
+			}
+
+			f.Flush()
+		}
+	}
+
+	s := &fasthttp.Server{
+		Handler: NewFastHTTPHandler(http.HandlerFunc(nethttpH)),
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		time.AfterFunc(500*time.Millisecond, func() {
+			c.Close()
+		})
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		if err != nil {
+			t.Errorf("unexpected error reading response: %v", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
+		}
+
+		if resp.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
+			t.Errorf("unexpected Content-Type header: %q. Expecting %q", resp.Header.Get("Content-Type"), "text/plain; charset=utf-8")
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil && err != io.ErrUnexpectedEOF {
+			t.Errorf("unexpected error reading body: %v", err)
+		}
+
+		if string(body) != "foo" {
+			t.Errorf("unexpected response body: %q. Expecting %q", body, "foo")
+		}
+
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestHijackFlush(t *testing.T) {
+	t.Parallel()
+
+	nethttpH := func(w http.ResponseWriter, r *http.Request) {
+		if f, ok := w.(http.Hijacker); !ok {
+			t.Errorf("expected http.ResponseWriter to implement http.Hijacker")
+		} else {
+			if _, err := w.Write([]byte("foo")); err != nil {
+				t.Error(err)
+			}
+
+			if c, rw, err := f.Hijack(); err != nil {
+				t.Error(err)
+			} else {
+				if _, err := rw.WriteString("bar"); err != nil {
+					t.Error(err)
+				}
+
+				if err := rw.Flush(); err != nil {
+					t.Error(err)
+				}
+
+				time.Sleep(time.Second)
+
+				if _, err := rw.WriteString("bazz"); err != nil {
+					t.Error(err)
+				}
+
+				if err := rw.Flush(); err != nil {
+					t.Error(err)
+				}
+
+				if err := c.Close(); err != nil {
+					t.Error(err)
+				}
+			}
+		}
+	}
+
+	s := &fasthttp.Server{
+		Handler: NewFastHTTPHandler(http.HandlerFunc(nethttpH)),
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		time.AfterFunc(500*time.Millisecond, func() {
+			c.Close()
+		})
 		buf, err := io.ReadAll(c)
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
