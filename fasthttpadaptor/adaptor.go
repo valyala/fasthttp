@@ -158,6 +158,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				// Note: Data must be manually copied in chunks
 				// as data comes in.
 				chunk := acquireBuffer()
+				*chunk = (*chunk)[:minBufferSize]
 				for {
 					// Read net/http handler chunk.
 					n, err := w.r.Read(*chunk)
@@ -216,9 +217,12 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 	}
 }
 
+// Use a minimum buffer size of 32 KiB
+const minBufferSize = 32 * 1024
+
 var bufferPool = &sync.Pool{
 	New: func() any {
-		b := make([]byte, 32*1024)
+		b := make([]byte, minBufferSize)
 		return &b
 	},
 }
