@@ -272,6 +272,7 @@ type netHTTPResponseWriter struct {
 	responseBody  *[]byte
 	statusMutex   sync.Mutex
 	responseMutex sync.Mutex
+	connMutex     sync.Mutex
 	statusCode    int
 }
 
@@ -385,9 +386,12 @@ func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func (w *netHTTPResponseWriter) Close() error {
 	_ = w.w.Close()
 	_ = w.r.Close()
+
+	w.connMutex.Lock()
 	if w.handlerConn != nil {
 		w.handlerConn.Close()
 	}
+	w.connMutex.Unlock()
 	return nil
 }
 
@@ -395,7 +399,9 @@ func (w *netHTTPResponseWriter) reset() {
 	// Note: reset() must only run after a fasthttp handler finishes
 	// proxying the full net/http handler response to ensure no data races.
 	w.ctx = nil
+	w.connMutex.Lock()
 	w.handlerConn = nil
+	w.connMutex.Unlock()
 	w.statusCode = 0
 
 	// Open new bidirectional pipes
