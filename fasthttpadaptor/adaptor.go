@@ -389,7 +389,7 @@ func (w *netHTTPResponseWriter) Close() error {
 
 	w.connMutex.Lock()
 	if w.handlerConn != nil {
-		w.handlerConn.Close()
+		_ = w.handlerConn.Close()
 	}
 	w.connMutex.Unlock()
 	return nil
