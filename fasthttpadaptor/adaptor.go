@@ -174,8 +174,27 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 
 					// Copy chunk to fasthttp response
 					if n > 0 {
-						_, _ = bw.Write((*chunk)[:n])
-						_ = bw.Flush()
+						_, err = bw.Write((*chunk)[:n])
+						if err != nil {
+							// Handler ended due to an io.ErrPipeClosed
+							// or an error occurred.
+							//
+							// Release the response writer for reuse.
+							releaseBuffer(chunk)
+							releaseNetHTTPResponseWriter(w)
+							return
+						}
+
+						err = bw.Flush()
+						if err != nil {
+							// Handler ended due to an io.ErrPipeClosed
+							// or an error occurred.
+							//
+							// Release the response writer for reuse.
+							releaseBuffer(chunk)
+							releaseNetHTTPResponseWriter(w)
+							return
+						}
 					}
 				}
 			})
@@ -206,12 +225,11 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				// Note: Only the net/http handler
 				// should close the connection.
 			}()
-			wg.Wait()
 
 			// Wait for the net/http handler to finish
 			// writing to the hijacked connection prior to releasing
 			// the writer into the writer pool.
-			<-doneCh
+			wg.Wait()
 			releaseNetHTTPResponseWriter(w)
 		}
 	}
@@ -270,6 +288,7 @@ func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWrit
 
 func releaseNetHTTPResponseWriter(w *netHTTPResponseWriter) {
 	releaseBuffer(w.responseBody)
+	w.Close()
 	writerPool.Put(w)
 }
 
@@ -366,6 +385,9 @@ func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 func (w *netHTTPResponseWriter) Close() error {
 	_ = w.w.Close()
 	_ = w.r.Close()
+	if w.handlerConn != nil {
+		w.handlerConn.Close()
+	}
 	return nil
 }
 
@@ -377,8 +399,6 @@ func (w *netHTTPResponseWriter) reset() {
 	w.statusCode = 0
 
 	// Open new bidirectional pipes
-	_ = w.r.Close()
-	_ = w.w.Close()
 	pr, pw := io.Pipe()
 	w.r = pr
 	w.w = pw
