@@ -3403,6 +3403,7 @@ func TestAddVaryHeaderExistingAcceptEncoding(t *testing.T) {
 		t.Errorf("Vary occurred %d times", n)
 	}
 }
+
 func TestRequestHeaderExtraWhitespace(t *testing.T) {
 	var h RequestHeader
 
@@ -3422,7 +3423,7 @@ func TestRequestHeaderExtraWhitespace(t *testing.T) {
 		if err == nil {
 			t.Errorf("Test case %d should have failed but didn't. Request: %q", i, testCase)
 		}
-		if !bytes.Contains([]byte(err.Error()), []byte("extra whitespace")) {
+		if !strings.Contains(err.Error(), "extra whitespace") {
 			t.Errorf("Test case %d should have failed with 'extra whitespace' error but got: %v", i, err)
 		}
 	}
