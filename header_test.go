@@ -3408,12 +3408,12 @@ func TestRequestHeaderExtraWhitespace(t *testing.T) {
 
 	// Test cases that should fail due to extra whitespace
 	testCases := []string{
-		"GET  /foo HTTP/1.1\r\nHost: example.com\r\n\r\n",     // Extra space after method
-		"GET   /foo HTTP/1.1\r\nHost: example.com\r\n\r\n",    // Multiple spaces after method
-		"GET /foo  HTTP/1.1\r\nHost: example.com\r\n\r\n",     // Extra space before HTTP version
-		"GET /foo   HTTP/1.1\r\nHost: example.com\r\n\r\n",    // Multiple spaces before HTTP version
-		"GET  /foo  HTTP/1.1\r\nHost: example.com\r\n\r\n",    // Extra spaces in both places
-		"GET   /foo   HTTP/1.1\r\nHost: example.com\r\n\r\n",  // Multiple extra spaces in both places
+		"GET  /foo HTTP/1.1\r\nHost: example.com\r\n\r\n",    // Extra space after method
+		"GET   /foo HTTP/1.1\r\nHost: example.com\r\n\r\n",   // Multiple spaces after method
+		"GET /foo  HTTP/1.1\r\nHost: example.com\r\n\r\n",    // Extra space before HTTP version
+		"GET /foo   HTTP/1.1\r\nHost: example.com\r\n\r\n",   // Multiple spaces before HTTP version
+		"GET  /foo  HTTP/1.1\r\nHost: example.com\r\n\r\n",   // Extra spaces in both places
+		"GET   /foo   HTTP/1.1\r\nHost: example.com\r\n\r\n", // Multiple extra spaces in both places
 	}
 
 	for i, testCase := range testCases {
@@ -3461,11 +3461,11 @@ func TestRequestHeaderValidWhitespace(t *testing.T) {
 			t.Errorf("Test case %d should have succeeded but failed with: %v. Request: %q", i, err, testCase.request)
 			continue
 		}
-		
+
 		if string(h.Method()) != testCase.expectedMethod {
 			t.Errorf("Test case %d: expected method %q but got %q", i, testCase.expectedMethod, h.Method())
 		}
-		
+
 		if string(h.RequestURI()) != testCase.expectedURI {
 			t.Errorf("Test case %d: expected URI %q but got %q", i, testCase.expectedURI, h.RequestURI())
 		}

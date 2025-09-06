@@ -2808,7 +2808,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	}
 
 	b = b[n+1:]
-	
+
 	// Check for extra whitespace after method - only one space should separate method from URI
 	if len(b) > 0 && b[0] == ' ' {
 		if h.secureErrorLogMessage {
@@ -2827,7 +2827,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
 	}
-	
+
 	// Check for extra whitespace - only one space should separate URI from HTTP version
 	if n+1 < len(b) && b[n+1] == ' ' {
 		if h.secureErrorLogMessage {
