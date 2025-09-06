@@ -2934,9 +2934,8 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	testRequestHeaderReadSuccess(t, h, "\r\n\n\r\nGET /aaa HTTP/1.1\r\nHost: aaa.com\r\n\r\nsss",
 		-2, "/aaa", "aaa.com", "", "")
 
-	// request uri with spaces
-	testRequestHeaderReadSuccess(t, h, "GET /foo/ bar baz HTTP/1.1\r\nHost: aa.com\r\n\r\nxxx",
-		-2, "/foo/ bar baz", "aa.com", "", "")
+	// request uri with spaces - should be rejected per RFC 9112
+	testRequestHeaderReadError(t, h, "GET /foo/ bar baz HTTP/1.1\r\nHost: aa.com\r\n\r\nxxx")
 
 	// no host
 	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\nFOObar: assdfd\r\n\r\naaa",
@@ -3402,5 +3401,73 @@ func TestAddVaryHeaderExistingAcceptEncoding(t *testing.T) {
 
 	if n := strings.Count(buf.String(), "Vary: "); n != 1 {
 		t.Errorf("Vary occurred %d times", n)
+	}
+}
+func TestRequestHeaderExtraWhitespace(t *testing.T) {
+	var h RequestHeader
+
+	// Test cases that should fail due to extra whitespace
+	testCases := []string{
+		"GET  /foo HTTP/1.1\r\nHost: example.com\r\n\r\n",     // Extra space after method
+		"GET   /foo HTTP/1.1\r\nHost: example.com\r\n\r\n",    // Multiple spaces after method
+		"GET /foo  HTTP/1.1\r\nHost: example.com\r\n\r\n",     // Extra space before HTTP version
+		"GET /foo   HTTP/1.1\r\nHost: example.com\r\n\r\n",    // Multiple spaces before HTTP version
+		"GET  /foo  HTTP/1.1\r\nHost: example.com\r\n\r\n",    // Extra spaces in both places
+		"GET   /foo   HTTP/1.1\r\nHost: example.com\r\n\r\n",  // Multiple extra spaces in both places
+	}
+
+	for i, testCase := range testCases {
+		br := bufio.NewReader(bytes.NewBufferString(testCase))
+		err := h.Read(br)
+		if err == nil {
+			t.Errorf("Test case %d should have failed but didn't. Request: %q", i, testCase)
+		}
+		if !bytes.Contains([]byte(err.Error()), []byte("extra whitespace")) {
+			t.Errorf("Test case %d should have failed with 'extra whitespace' error but got: %v", i, err)
+		}
+	}
+}
+
+func TestRequestHeaderValidWhitespace(t *testing.T) {
+	var h RequestHeader
+
+	// Test cases that should succeed (proper single space separation)
+	testCases := []struct {
+		request        string
+		expectedMethod string
+		expectedURI    string
+	}{
+		{
+			"GET /foo HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			"GET",
+			"/foo",
+		},
+		{
+			"POST /api/v1/users HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			"POST",
+			"/api/v1/users",
+		},
+		{
+			"PUT /resource HTTP/1.0\r\nHost: example.com\r\n\r\n",
+			"PUT",
+			"/resource",
+		},
+	}
+
+	for i, testCase := range testCases {
+		br := bufio.NewReader(bytes.NewBufferString(testCase.request))
+		err := h.Read(br)
+		if err != nil {
+			t.Errorf("Test case %d should have succeeded but failed with: %v. Request: %q", i, err, testCase.request)
+			continue
+		}
+		
+		if string(h.Method()) != testCase.expectedMethod {
+			t.Errorf("Test case %d: expected method %q but got %q", i, testCase.expectedMethod, h.Method())
+		}
+		
+		if string(h.RequestURI()) != testCase.expectedURI {
+			t.Errorf("Test case %d: expected URI %q but got %q", i, testCase.expectedURI, h.RequestURI())
+		}
 	}
 }
