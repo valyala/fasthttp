@@ -2809,8 +2809,16 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 
 	b = b[n+1:]
 
-	// parse requestURI
-	n = bytes.LastIndexByte(b, ' ')
+	// Check for extra whitespace after method - only one space should separate method from URI
+	if len(b) > 0 && b[0] == ' ' {
+		if h.secureErrorLogMessage {
+			return 0, errors.New("extra whitespace in request line")
+		}
+		return 0, fmt.Errorf("extra whitespace in request line %q", buf)
+	}
+
+	// parse requestURI - RFC 9112 requires exactly one space between components
+	n = bytes.IndexByte(b, ' ')
 	if n < 0 {
 		return 0, fmt.Errorf("cannot find whitespace in the first line of request %q", buf)
 	} else if n == 0 {
@@ -2818,6 +2826,14 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 			return 0, errors.New("requestURI cannot be empty")
 		}
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
+	}
+
+	// Check for extra whitespace - only one space should separate URI from HTTP version
+	if n+1 < len(b) && b[n+1] == ' ' {
+		if h.secureErrorLogMessage {
+			return 0, errors.New("extra whitespace in request line")
+		}
+		return 0, fmt.Errorf("extra whitespace in request line %q", buf)
 	}
 
 	protoStr := b[n+1:]
