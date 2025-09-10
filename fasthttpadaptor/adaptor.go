@@ -352,14 +352,14 @@ func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 		// Streaming mode is on.
 		// Stream directly to the conn writer.
 		return w.w.Write(p)
-	} else {
-		// Streaming mode is off.
-		// Write to the first chunk for flushing later.
-		w.responseMutex.Lock()
-		*w.responseBody = append(*w.responseBody, p...)
-		w.responseMutex.Unlock()
-		return len(p), nil
 	}
+
+	// Streaming mode is off.
+	// Write to the first chunk for flushing later.
+	w.responseMutex.Lock()
+	*w.responseBody = append(*w.responseBody, p...)
+	w.responseMutex.Unlock()
+	return len(p), nil
 }
 
 func (w *netHTTPResponseWriter) Flush() {
