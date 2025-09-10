@@ -108,7 +108,6 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// Release after sending response.
 			releaseNetHTTPResponseWriter(w)
 
-		// case <-w.flushedCh:
 		case modeFlushed:
 			// Flush occurred before handler returned.
 			// Send the first 512 bytes and start streaming
@@ -210,7 +209,6 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			w.streamCond.Signal()
 			w.streamCond.L.Unlock()
 
-		// case <-w.hijackedCh:
 		case modeHijacked:
 			// The net/http handler called w.Hijack().
 			// Copy data bidirectionally between the
@@ -350,7 +348,6 @@ func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 	w.streamCond.L.Lock()
 	defer w.streamCond.L.Unlock()
 
-	// select {
 	if w.isStreaming {
 		// Streaming mode is on.
 		// Stream directly to the conn writer.
