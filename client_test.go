@@ -1947,6 +1947,7 @@ func testClientRequestSetTimeoutError(t *testing.T, c *Client, n int) {
 
 type readTimeoutConn struct {
 	net.Conn
+
 	wc chan struct{}
 	rc chan struct{}
 	t  time.Duration
@@ -2266,6 +2267,7 @@ func (r *readErrorConn) SetWriteDeadline(_ time.Time) error {
 
 type singleReadConn struct {
 	net.Conn
+
 	s string
 	n int
 }
@@ -2305,6 +2307,7 @@ func (r *singleReadConn) SetWriteDeadline(_ time.Time) error {
 
 type singleEchoConn struct {
 	net.Conn
+
 	b []byte
 	n int
 }

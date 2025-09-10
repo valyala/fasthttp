@@ -47,8 +47,9 @@ type header struct {
 // ResponseHeader instance MUST NOT be used from concurrently running
 // goroutines.
 type ResponseHeader struct {
-	noCopy noCopy
 	header
+
+	noCopy noCopy
 
 	statusMessage   []byte
 	contentEncoding []byte
@@ -67,8 +68,9 @@ type ResponseHeader struct {
 // RequestHeader instance MUST NOT be used from concurrently running
 // goroutines.
 type RequestHeader struct {
-	noCopy noCopy
 	header
+
+	noCopy noCopy
 
 	method     []byte
 	requestURI []byte

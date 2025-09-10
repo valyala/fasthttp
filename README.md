@@ -654,7 +654,7 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
 - _Which GO versions are supported by fasthttp?_
 
   We support the same versions the Go team supports.
-  Currently that is Go 1.23.x and newer.
+  Currently that is Go 1.24.x and newer.
   Older versions might work, but won't officially be supported.
 
 - _Please provide real benchmark data and server information_

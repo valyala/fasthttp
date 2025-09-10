@@ -4,9 +4,10 @@ package fasthttp
 
 import (
 	"context"
-	"github.com/valyala/fasthttp/fasthttputil"
 	"math"
 	"testing"
+
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 func TestServerDoneRace(t *testing.T) {
@@ -39,7 +40,7 @@ func TestServerDoneRace(t *testing.T) {
 		"GET / HTTP/1.1\r\nHost: go.dev\r\n\r\n")); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancelFunc := context.WithCancel(context.Background())
+	ctx, cancelFunc := context.WithCancel(t.Context())
 	cancelFunc()
 
 	s.ShutdownWithContext(ctx)
