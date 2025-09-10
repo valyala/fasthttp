@@ -242,7 +242,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 	}
 }
 
-// Use a minimum buffer size of 32 KiB
+// Use a minimum buffer size of 32 KiB.
 const minBufferSize = 32 * 1024
 
 var bufferPool = &sync.Pool{
