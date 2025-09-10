@@ -18,6 +18,7 @@ import (
 
 type fakeClientConn struct {
 	net.Conn
+
 	ch chan struct{}
 	s  []byte
 	n  int

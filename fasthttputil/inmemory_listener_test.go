@@ -134,7 +134,7 @@ func testInmemoryListenerHTTP(t *testing.T, f func(t *testing.T, client *http.Cl
 
 	f(t, client)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Millisecond*100)
 	defer cancel()
 	server.Shutdown(ctx) //nolint:errcheck
 }
