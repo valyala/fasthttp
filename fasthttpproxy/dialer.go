@@ -54,6 +54,7 @@ type Dialer struct {
 	// A best effort is made to parse the string and errors are
 	// ignored.
 	httpproxy.Config
+
 	// Attempt to connect to both ipv4 and ipv6 addresses if set to true.
 	// By default, dial only to ipv4 addresses,
 	// since unfortunately ipv6 remains broken in many networks worldwide :)

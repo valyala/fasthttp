@@ -525,6 +525,7 @@ func TestRequestCtxIsTLS(t *testing.T) {
 	// overridden tls.Conn
 	ctx.c = &struct {
 		*tls.Conn
+
 		fooBar bool
 	}{}
 	if !ctx.IsTLS() {
@@ -3471,6 +3472,7 @@ func TestServerCustomRemoteAddr(t *testing.T) {
 
 type readWriterRemoteAddr struct {
 	net.Conn
+
 	rw   io.ReadWriteCloser
 	addr net.Addr
 }
@@ -3917,7 +3919,7 @@ func TestShutdownWithContext(t *testing.T) {
 	}()
 
 	time.Sleep(1 * time.Millisecond * 500)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	shutdownErr := make(chan error)
 	go func() {
@@ -4373,6 +4375,7 @@ func verifyResponse(t *testing.T, r *bufio.Reader, expectedStatusCode int, expec
 
 type readWriter struct {
 	net.Conn
+
 	r bytes.Buffer
 	w bytes.Buffer
 }

@@ -2636,6 +2636,7 @@ func (s *Server) releaseHijackConn(hjc *hijackConn) {
 
 type hijackConn struct {
 	net.Conn
+
 	r io.Reader
 	s *Server
 }
@@ -2866,6 +2867,7 @@ var fakeServer = &Server{
 
 type fakeAddrer struct {
 	net.Conn
+
 	laddr net.Addr
 	raddr net.Addr
 }

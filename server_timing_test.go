@@ -193,6 +193,7 @@ func BenchmarkServerTimeoutError(b *testing.B) {
 
 type fakeServerConn struct {
 	net.TCPConn
+
 	ln            *fakeListener
 	requestsCount int
 	pos           int

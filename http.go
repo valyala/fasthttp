@@ -346,6 +346,7 @@ type ReadCloserWithError interface {
 
 type closeReader struct {
 	io.Reader
+
 	closeFunc func(err error) error
 }
 
