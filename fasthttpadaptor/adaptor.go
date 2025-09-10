@@ -60,15 +60,19 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		w := acquireNetHTTPResponseWriter(ctx)
 
 		// Concurrently serve the net/http handler.
-		doneCh := make(chan struct{})
 		go func() {
 			h.ServeHTTP(w, r.WithContext(ctx))
-			close(doneCh)
+			select {
+			case w.modeCh <- modeDone:
+			default:
+			}
 			_ = w.Close()
 		}()
 
-		select {
-		case <-doneCh:
+		mode := <-w.modeCh
+
+		switch mode {
+		case modeDone:
 			// No flush occurred before the handler returned.
 			// Send the data as one chunk.
 			ctx.SetStatusCode(w.StatusCode())
@@ -104,7 +108,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// Release after sending response.
 			releaseNetHTTPResponseWriter(w)
 
-		case <-w.flushedCh:
+		// case <-w.flushedCh:
+		case modeFlushed:
 			// Flush occurred before handler returned.
 			// Send the first 512 bytes and start streaming
 			// the rest of the first chunk and new data as it arrives.
@@ -200,9 +205,13 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			})
 			// Activate streaming mode for consequent `w.Flush()`
 			// by net/http handler.
-			close(w.streamingCh)
+			w.streamCond.L.Lock()
+			w.isStreaming = true
+			w.streamCond.Signal()
+			w.streamCond.L.Unlock()
 
-		case <-w.hijackedCh:
+		// case <-w.hijackedCh:
+		case modeHijacked:
 			// The net/http handler called w.Hijack().
 			// Copy data bidirectionally between the
 			// net/http and fasthttp connections.
@@ -252,13 +261,21 @@ var writerPool = &sync.Pool{
 			h:            make(http.Header),
 			r:            pr,
 			w:            pw,
-			flushedCh:    make(chan struct{}),
-			streamingCh:  make(chan struct{}),
-			hijackedCh:   make(chan struct{}),
+			modeCh:       make(chan ModeType),
 			responseBody: acquireBuffer(),
+			streamCond:   sync.NewCond(&sync.Mutex{}),
 		}
 	},
 }
+
+type ModeType int
+
+const (
+	modeUnknown ModeType = iota
+	modeDone
+	modeFlushed
+	modeHijacked
+)
 
 type netHTTPResponseWriter struct {
 	handlerConn   net.Conn
@@ -266,14 +283,15 @@ type netHTTPResponseWriter struct {
 	h             http.Header
 	r             *io.PipeReader
 	w             *io.PipeWriter
-	flushedCh     chan struct{}
-	streamingCh   chan struct{}
-	hijackedCh    chan struct{}
+	modeCh        chan ModeType
 	responseBody  *[]byte
+	streamCond    *sync.Cond
+	statusCode    int
+	once          sync.Once
 	statusMutex   sync.Mutex
 	responseMutex sync.Mutex
 	connMutex     sync.Mutex
-	statusCode    int
+	isStreaming   bool
 }
 
 func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
@@ -329,12 +347,15 @@ func (w *netHTTPResponseWriter) WriteHeader(statusCode int) {
 }
 
 func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
-	select {
-	case <-w.streamingCh:
+	w.streamCond.L.Lock()
+	defer w.streamCond.L.Unlock()
+
+	// select {
+	if w.isStreaming {
 		// Streaming mode is on.
 		// Stream directly to the conn writer.
 		return w.w.Write(p)
-	default:
+	} else {
 		// Streaming mode is off.
 		// Write to the first chunk for flushing later.
 		w.responseMutex.Lock()
@@ -346,14 +367,16 @@ func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 
 func (w *netHTTPResponseWriter) Flush() {
 	// Trigger streaming mode setup.
-	select {
-	case <-w.flushedCh:
-	default:
-		close(w.flushedCh)
-	}
+	w.once.Do(func() {
+		w.modeCh <- modeFlushed
+	})
 
 	// Wait for streaming mode.
-	<-w.streamingCh
+	w.streamCond.L.Lock()
+	defer w.streamCond.L.Unlock()
+	for !w.isStreaming {
+		w.streamCond.Wait()
+	}
 }
 
 func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
@@ -365,11 +388,9 @@ func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	w.handlerConn = fasthttpConn
 
 	// Trigger hijacked mode.
-	select {
-	case <-w.hijackedCh:
-	default:
-		close(w.hijackedCh)
-	}
+	w.once.Do(func() {
+		w.modeCh <- modeHijacked
+	})
 
 	bufRW := bufio.NewReadWriter(bufio.NewReader(netHTTPConn), bufio.NewWriter(netHTTPConn))
 
@@ -414,11 +435,11 @@ func (w *netHTTPResponseWriter) reset() {
 		delete(w.h, key)
 	}
 
-	// Create new open channels
-	w.flushedCh = make(chan struct{})
-	w.streamingCh = make(chan struct{})
-	w.hijackedCh = make(chan struct{})
-
 	// Get a new buffer for the response body
 	w.responseBody = acquireBuffer()
+
+	w.once = sync.Once{}
+	w.streamCond.L.Lock()
+	w.isStreaming = false
+	w.streamCond.L.Unlock()
 }
