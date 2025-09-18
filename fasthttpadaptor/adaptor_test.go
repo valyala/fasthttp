@@ -577,7 +577,6 @@ func TestResourceRecyclingUnderLoad_OneEndpoint(t *testing.T) {
 	expectedBody := "Hello World!"
 
 	ln := fasthttputil.NewInmemoryListener()
-	defer ln.Close()
 
 	go func() {
 		if err := s.Serve(ln); err != nil {
@@ -670,7 +669,6 @@ func TestResourceRecyclingUnderLoad_MultipleEndpoints(t *testing.T) {
 	responseTimeout := 500 * time.Millisecond
 
 	ln := fasthttputil.NewInmemoryListener()
-	defer ln.Close()
 
 	go func() {
 		if err := s.Serve(ln); err != nil {
