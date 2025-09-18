@@ -60,18 +60,21 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		w := acquireNetHTTPResponseWriter(ctx)
 
 		// Concurrently serve the net/http handler.
+		w.wg.Add(1)
 		go func() {
 			h.ServeHTTP(w, r.WithContext(ctx))
 			select {
 			case w.modeCh <- modeDone:
 			default:
 			}
-			_ = w.Close()
+
+			// Wait for net/http handler to finish using the
+			// response writer.
+			w.wg.Wait()
+			releaseNetHTTPResponseWriter(w)
 		}()
 
-		mode := <-w.modeCh
-
-		switch mode {
+		switch <-w.modeCh {
 		case modeDone:
 			// No flush occurred before the handler returned.
 			// Send the data as one chunk.
@@ -105,8 +108,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			}
 			w.responseMutex.Unlock()
 
-			// Release after sending response.
-			releaseNetHTTPResponseWriter(w)
+			// Signal that the net/http -> fasthttp copy is complete.
+			w.wg.Done()
 
 		case modeFlushed:
 			// Flush occurred before handler returned.
@@ -147,6 +150,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 
 			// Start streaming mode on return.
 			ctx.SetBodyStreamWriter(func(bw *bufio.Writer) {
+				// Signal that streaming completed on return.
+				defer w.wg.Done()
+
 				// Stream the first chunk.
 				if len(*w.responseBody) > 0 {
 					_, _ = bw.Write(*w.responseBody)
@@ -170,9 +176,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 						// Handler ended due to an io.EOF
 						// or an error occurred.
 						//
-						// Release the response writer for reuse.
+						// Release the buffer for reuse.
 						releaseBuffer(chunk)
-						releaseNetHTTPResponseWriter(w)
 						return
 					}
 
@@ -183,9 +188,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 							// Handler ended due to an io.ErrPipeClosed
 							// or an error occurred.
 							//
-							// Release the response writer for reuse.
+							// Release the buffer for reuse.
 							releaseBuffer(chunk)
-							releaseNetHTTPResponseWriter(w)
 							return
 						}
 
@@ -194,9 +198,8 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 							// Handler ended due to an io.ErrPipeClosed
 							// or an error occurred.
 							//
-							// Release the response writer for reuse.
+							// Release the buffer for reuse.
 							releaseBuffer(chunk)
-							releaseNetHTTPResponseWriter(w)
 							return
 						}
 					}
@@ -213,13 +216,12 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// The net/http handler called w.Hijack().
 			// Copy data bidirectionally between the
 			// net/http and fasthttp connections.
-			var wg sync.WaitGroup
-			wg.Add(2)
+			w.hijackedWg.Add(2)
 
 			// Note: It is safe to assume that net.Conn automatically
 			// flushes data while copying.
 			go func() {
-				defer wg.Done()
+				defer w.hijackedWg.Done()
 				_, _ = io.Copy(ctx.Conn(), w.handlerConn)
 
 				// Close the fasthttp connection when
@@ -227,17 +229,15 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				_ = ctx.Conn().Close()
 			}()
 			go func() {
-				defer wg.Done()
+				defer w.hijackedWg.Done()
 				_, _ = io.Copy(w.handlerConn, ctx.Conn())
 				// Note: Only the net/http handler
 				// should close the connection.
 			}()
+			w.hijackedWg.Wait()
 
-			// Wait for the net/http handler to finish
-			// writing to the hijacked connection prior to releasing
-			// the writer into the writer pool.
-			wg.Wait()
-			releaseNetHTTPResponseWriter(w)
+			// Signal that the hijacked connection was closed.
+			w.wg.Done()
 		}
 	}
 }
@@ -290,6 +290,8 @@ type netHTTPResponseWriter struct {
 	responseMutex sync.Mutex
 	connMutex     sync.Mutex
 	isStreaming   bool
+	wg            sync.WaitGroup
+	hijackedWg    sync.WaitGroup
 }
 
 func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
@@ -304,6 +306,10 @@ func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWrit
 }
 
 func releaseNetHTTPResponseWriter(w *netHTTPResponseWriter) {
+	// Wait for the net/http handler to complete before releasing.
+	// (e.g. wait for hijacked connection)
+	w.wg.Wait()
+
 	releaseBuffer(w.responseBody)
 	w.Close()
 	writerPool.Put(w)
