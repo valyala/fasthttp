@@ -279,7 +279,6 @@ type netHTTPResponseWriter struct {
 	statusCode   int
 	chOnce       sync.Once
 	closeOnce    sync.Once
-	statusMutex  sync.Mutex
 	isStreaming  bool
 	wg           sync.WaitGroup
 	hijackedWg   sync.WaitGroup
@@ -316,9 +315,6 @@ func releaseBuffer(buf *[]byte) {
 }
 
 func (w *netHTTPResponseWriter) StatusCode() int {
-	// w.statusMutex.Lock()
-	// defer w.statusMutex.Unlock()
-
 	if w.statusCode == 0 {
 		return http.StatusOK
 	}
@@ -330,9 +326,6 @@ func (w *netHTTPResponseWriter) Header() http.Header {
 }
 
 func (w *netHTTPResponseWriter) WriteHeader(statusCode int) {
-	// w.statusMutex.Lock()
-	// defer w.statusMutex.Unlock()
-
 	w.statusCode = statusCode
 }
 

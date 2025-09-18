@@ -585,7 +585,7 @@ func TestResourceRecyclingUnderLoad_OneEndpoint(t *testing.T) {
 	}()
 
 	for reqID := 1; reqID <= requestCount; reqID++ {
-		req := httptest.NewRequest("GET", "/", nil)
+		req := httptest.NewRequest("GET", "/", http.NoBody)
 		resp, err := sendRequest(ln, req, responseTimeout)
 		if err != nil {
 			t.Errorf("[%d] unexpected error sending request: %v", reqID, err)
@@ -678,7 +678,7 @@ func TestResourceRecyclingUnderLoad_MultipleEndpoints(t *testing.T) {
 
 	for range repeatCount {
 		for _, handler := range handlers {
-			req := httptest.NewRequest("GET", handler.endpoint, nil)
+			req := httptest.NewRequest("GET", handler.endpoint, http.NoBody)
 			resp, err := sendRequest(ln, req, responseTimeout)
 			if err != nil {
 				t.Errorf("[%s] unexpected error sending request: %v", handler.endpoint, err)
