@@ -3400,6 +3400,41 @@ func TestServerLogger(t *testing.T) {
 	}
 }
 
+func TestServerBodyWarning(t *testing.T) {
+	// Test that Body() methods log warnings when used with streaming bodies in server context
+	cl := &testLogger{}
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			// Set a body stream on the response to trigger the warning path
+			resp := &ctx.Response
+			resp.SetBodyStream(bytes.NewReader([]byte("response body")), -1)
+
+			// Trigger warning by calling Body() method on streaming body
+			_ = resp.Body()    // Should warn
+
+			ctx.Success("text/plain", []byte("ok"))
+		},
+		Logger: cl,
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /test HTTP/1.1\r\nHost: example.com\r\n\r\n")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, 200, "text/plain", "ok")
+
+	// Check that warning was logged (note: testLogger strips the prefix)
+	expectedWarning := "Response.Body() reads entire body into memory. Consider using BodyStream() for large payloads to avoid OOM."
+
+	if !strings.Contains(cl.out, expectedWarning) {
+		t.Errorf("Expected warning not found in log output: %q\nActual output: %q", expectedWarning, cl.out)
+	}
+}
+
 func TestServerRemoteAddr(t *testing.T) {
 	t.Parallel()
 

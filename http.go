@@ -81,6 +81,10 @@ type Request struct {
 	// By default redirect path values are normalized, i.e.
 	// extra slashes are removed, special characters are encoded.
 	DisableRedirectPathNormalizing bool
+
+	// serverLogger is used internally to log warnings when Body() is called
+	// in server context. This is set by the server when processing requests.
+	serverLogger Logger
 }
 
 // Response represents HTTP response.
@@ -125,6 +129,10 @@ type Response struct {
 
 	keepBodyBuffer        bool
 	secureErrorLogMessage bool
+
+	// serverLogger is used internally to log warnings when Body() is called
+	// in server context. This is set by the server when processing requests.
+	serverLogger Logger
 }
 
 // SetHost sets host for the request.
@@ -422,6 +430,11 @@ func (resp *Response) LocalAddr() net.Addr {
 // Do not store references to returned value. Make copies instead.
 func (resp *Response) Body() []byte {
 	if resp.bodyStream != nil {
+		// Log warning if used in server context - this is the dangerous path that can cause OOM
+		if resp.serverLogger != nil {
+			resp.serverLogger.Printf("Warning: Response.Body() reads entire body into memory. Consider using BodyStream() for large payloads to avoid OOM.")
+		}
+
 		bodyBuf := resp.bodyBuffer()
 		bodyBuf.Reset()
 		_, err := copyZeroAlloc(bodyBuf, resp.bodyStream)
@@ -448,6 +461,11 @@ func (req *Request) bodyBytes() []byte {
 		return req.bodyRaw
 	}
 	if req.bodyStream != nil {
+		// Log warning if used in server context - this is the dangerous path that can cause OOM
+		if req.serverLogger != nil {
+			req.serverLogger.Printf("Warning: Request.Body() reads entire body into memory. Consider using BodyStream() for large payloads to avoid OOM.")
+		}
+
 		bodyBuf := req.bodyBuffer()
 		bodyBuf.Reset()
 		_, err := copyZeroAlloc(bodyBuf, req.bodyStream)
@@ -1140,6 +1158,7 @@ func (req *Request) Reset() {
 	req.timeout = 0
 	req.UseHostHeader = false
 	req.DisableRedirectPathNormalizing = false
+	req.serverLogger = nil
 }
 
 func (req *Request) resetSkipHeader() {
@@ -1175,6 +1194,7 @@ func (resp *Response) Reset() {
 	resp.laddr = nil
 	resp.ImmediateHeaderFlush = false
 	resp.StreamBody = false
+	resp.serverLogger = nil
 }
 
 func (resp *Response) resetSkipHeader() {

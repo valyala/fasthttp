@@ -2768,6 +2768,10 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 	}
 	ctx.c = c
 
+	// Inject server logger for Body() warning messages
+	ctx.Request.serverLogger = s.Logger
+	ctx.Response.serverLogger = s.Logger
+
 	return ctx
 }
 
