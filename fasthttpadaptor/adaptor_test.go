@@ -644,7 +644,7 @@ func TestResourceRecyclingUnderLoad_MultipleEndpoints(t *testing.T) {
 					}
 					defer conn.Close()
 					rw.WriteString("hijacked") //nolint:errcheck
-					rw.Flush()                 //nolint:errcheck
+					rw.Flush()
 				} else {
 					http.Error(w, "Hijacker not supported", http.StatusInternalServerError)
 				}
