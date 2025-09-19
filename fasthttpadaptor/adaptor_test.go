@@ -683,12 +683,12 @@ func TestResourceRecyclingUnderLoad_MultipleEndpoints(t *testing.T) {
 			if err != nil {
 				t.Errorf("[%s] unexpected error sending request: %v", handler.endpoint, err)
 			}
-			defer resp.Body.Close()
-
 			body, err := io.ReadAll(resp.Body)
 			if err != nil && err != io.ErrUnexpectedEOF {
 				t.Errorf("[%s] unexpected error reading body: %v", handler.endpoint, err)
 			}
+			resp.Body.Close()
+
 			if string(body) != handler.expectedBody {
 				t.Errorf("[%s] unexpected response: %q. Expecting %q", handler.endpoint, body, handler.expectedBody)
 			}
