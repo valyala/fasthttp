@@ -68,7 +68,6 @@ func releaseNetHTTPResponseWriter(w *responseWriter) {
 	writerPool.Put(w)
 }
 
-
 // Header returns the current response header.
 func (w *responseWriter) Header() http.Header {
 	return w.h
