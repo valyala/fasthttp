@@ -10,13 +10,23 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-type ModeType int
+// modeType are all possible responseWriter modes.
+type modeType int
 
 const (
-	modeUnknown ModeType = iota
-	modeBuffered
-	modeFlushed
-	modeHijacked
+	modeUnknown modeType = iota //nolint:unused
+
+	// modeCopy means a response should directly copy the
+	// net/http data into fashttp.RequestCtx on completion.
+	modeCopy
+
+	// modeStream means a response should send a buffered stream
+	// of data every time responseWriter.Flush() is called.
+	modeStream
+
+	// modeHijack means that a response should do nothing else but
+	// copy data directly into the client's raw connection.
+	modeHijack
 )
 
 var writerPool = &sync.Pool{
@@ -26,7 +36,7 @@ var writerPool = &sync.Pool{
 			h:            make(http.Header),
 			r:            pr,
 			w:            pw,
-			modeCh:       make(chan ModeType),
+			modeCh:       make(chan modeType),
 			responseBody: acquireBuffer(),
 			streamCond:   sync.NewCond(&sync.Mutex{}),
 		}
@@ -41,7 +51,7 @@ type responseWriter struct {
 	h            http.Header
 	r            *io.PipeReader
 	w            *io.PipeWriter
-	modeCh       chan ModeType
+	modeCh       chan modeType
 	responseBody *[]byte
 	streamCond   *sync.Cond
 	statusCode   int
@@ -52,6 +62,8 @@ type responseWriter struct {
 	hijackedWg   sync.WaitGroup
 }
 
+// acquireResponseWriter returns a pointer to a slice of 0 length and
+// at least minBufferSize capacity.
 func acquireResponseWriter(ctx *fasthttp.RequestCtx) *responseWriter {
 	w, ok := writerPool.Get().(*responseWriter)
 	if !ok {
@@ -63,7 +75,8 @@ func acquireResponseWriter(ctx *fasthttp.RequestCtx) *responseWriter {
 	return w
 }
 
-func releaseNetHTTPResponseWriter(w *responseWriter) {
+// releaseResponseWriter recycles the buffer for reuse.
+func releaseResponseWriter(w *responseWriter) {
 	releaseBuffer(w.responseBody)
 	writerPool.Put(w)
 }
@@ -114,7 +127,7 @@ func (w *responseWriter) StatusCode() int {
 func (w *responseWriter) Flush() {
 	// Trigger streaming mode setup.
 	w.chOnce.Do(func() {
-		w.modeCh <- modeFlushed
+		w.modeCh <- modeStream
 	})
 
 	// Wait for streaming mode.
@@ -138,7 +151,7 @@ func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 	// Trigger hijacked mode.
 	w.chOnce.Do(func() {
-		w.modeCh <- modeHijacked
+		w.modeCh <- modeHijack
 	})
 
 	bufRW := bufio.NewReadWriter(bufio.NewReader(netHTTPConn), bufio.NewWriter(netHTTPConn))

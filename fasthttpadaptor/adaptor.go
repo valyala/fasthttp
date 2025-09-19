@@ -1,4 +1,4 @@
-// Package fasthttpadaptor provides helper functions for converting net/http
+// Package fasthttpadaptor provides helper functions for converting net/httpG
 // request handlers to fasthttp request handlers.
 package fasthttpadaptor
 
@@ -62,18 +62,18 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		go func() {
 			h.ServeHTTP(w, r.WithContext(ctx))
 			w.chOnce.Do(func() {
-				w.modeCh <- modeBuffered
+				w.modeCh <- modeCopy
 			})
 			w.close()
 
 			// Wait for the net/http handler to complete before releasing.
 			// (e.g. wait for hijacked connection)
 			w.wg.Wait()
-			releaseNetHTTPResponseWriter(w)
+			releaseResponseWriter(w)
 		}()
 
 		switch <-w.modeCh {
-		case modeBuffered:
+		case modeCopy:
 			// No flush occurred before the handler returned.
 			// Send the data as one chunk.
 			ctx.SetStatusCode(w.StatusCode())
@@ -107,7 +107,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// Signal that the net/http -> fasthttp copy is complete.
 			w.wg.Done()
 
-		case modeFlushed:
+		case modeStream:
 			// Flush occurred before handler returned.
 			// Send the first 512 bytes and start streaming
 			// the rest of the first chunk and new data as it arrives.
@@ -202,7 +202,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			w.streamCond.Signal()
 			w.streamCond.L.Unlock()
 
-		case modeHijacked:
+		case modeHijack:
 			// The net/http handler called w.Hijack().
 			// Copy data bidirectionally between the
 			// net/http and fasthttp connections.
