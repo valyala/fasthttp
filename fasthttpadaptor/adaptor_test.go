@@ -590,12 +590,12 @@ func TestResourceRecyclingUnderLoad_OneEndpoint(t *testing.T) {
 		if err != nil {
 			t.Errorf("[%d] unexpected error sending request: %v", reqID, err)
 		}
-		defer resp.Body.Close()
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			t.Errorf("[%d] unexpected error reading body: %v", reqID, err)
 		}
+		resp.Body.Close()
 
 		if string(body) != expectedBody {
 			t.Errorf("[%d] unexpected response: %q. Expecting %q", reqID, body, expectedBody)
