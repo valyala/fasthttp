@@ -5,9 +5,7 @@ package fasthttpadaptor
 import (
 	"bufio"
 	"io"
-	"net"
 	"net/http"
-	"sync"
 
 	"github.com/valyala/fasthttp"
 )
@@ -57,16 +55,16 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			return
 		}
 
-		w := acquireNetHTTPResponseWriter(ctx)
+		w := acquireResponseWriter(ctx)
 
 		// Concurrently serve the net/http handler.
 		w.wg.Add(1)
 		go func() {
 			h.ServeHTTP(w, r.WithContext(ctx))
 			w.chOnce.Do(func() {
-				w.modeCh <- modeDone
+				w.modeCh <- modeBuffered
 			})
-			w.Close()
+			w.close()
 
 			// Wait for the net/http handler to complete before releasing.
 			// (e.g. wait for hijacked connection)
@@ -75,7 +73,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		}()
 
 		switch <-w.modeCh {
-		case modeDone:
+		case modeBuffered:
 			// No flush occurred before the handler returned.
 			// Send the data as one chunk.
 			ctx.SetStatusCode(w.StatusCode())
@@ -232,184 +230,4 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			w.wg.Done()
 		}
 	}
-}
-
-// Use a minimum buffer size of 32 KiB.
-const minBufferSize = 32 * 1024
-
-var bufferPool = &sync.Pool{
-	New: func() any {
-		b := make([]byte, minBufferSize)
-		return &b
-	},
-}
-
-var writerPool = &sync.Pool{
-	New: func() any {
-		pr, pw := io.Pipe()
-		return &netHTTPResponseWriter{
-			h:            make(http.Header),
-			r:            pr,
-			w:            pw,
-			modeCh:       make(chan ModeType),
-			responseBody: acquireBuffer(),
-			streamCond:   sync.NewCond(&sync.Mutex{}),
-		}
-	},
-}
-
-type ModeType int
-
-const (
-	modeUnknown ModeType = iota
-	modeDone
-	modeFlushed
-	modeHijacked
-)
-
-type netHTTPResponseWriter struct {
-	handlerConn  net.Conn
-	ctx          *fasthttp.RequestCtx
-	h            http.Header
-	r            *io.PipeReader
-	w            *io.PipeWriter
-	modeCh       chan ModeType
-	responseBody *[]byte
-	streamCond   *sync.Cond
-	statusCode   int
-	chOnce       sync.Once
-	closeOnce    sync.Once
-	isStreaming  bool
-	wg           sync.WaitGroup
-	hijackedWg   sync.WaitGroup
-}
-
-func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
-	w, ok := writerPool.Get().(*netHTTPResponseWriter)
-	if !ok {
-		panic("fasthttpadaptor: cannot get *netHTTPResponseWriter from writerPool")
-	}
-	w.reset()
-
-	w.ctx = ctx
-	return w
-}
-
-func releaseNetHTTPResponseWriter(w *netHTTPResponseWriter) {
-	releaseBuffer(w.responseBody)
-	writerPool.Put(w)
-}
-
-func acquireBuffer() *[]byte {
-	buf, ok := bufferPool.Get().(*[]byte)
-	if !ok {
-		panic("fasthttpadaptor: cannot get *[]byte from bufferPool")
-	}
-
-	*buf = (*buf)[:0]
-	return buf
-}
-
-func releaseBuffer(buf *[]byte) {
-	bufferPool.Put(buf)
-}
-
-func (w *netHTTPResponseWriter) StatusCode() int {
-	if w.statusCode == 0 {
-		return http.StatusOK
-	}
-	return w.statusCode
-}
-
-func (w *netHTTPResponseWriter) Header() http.Header {
-	return w.h
-}
-
-func (w *netHTTPResponseWriter) WriteHeader(statusCode int) {
-	w.statusCode = statusCode
-}
-
-func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
-	w.streamCond.L.Lock()
-	defer w.streamCond.L.Unlock()
-
-	if w.isStreaming {
-		// Streaming mode is on.
-		// Stream directly to the conn writer.
-		return w.w.Write(p)
-	}
-
-	// Streaming mode is off.
-	// Write to the first chunk for flushing later.
-	*w.responseBody = append(*w.responseBody, p...)
-	return len(p), nil
-}
-
-func (w *netHTTPResponseWriter) Flush() {
-	// Trigger streaming mode setup.
-	w.chOnce.Do(func() {
-		w.modeCh <- modeFlushed
-	})
-
-	// Wait for streaming mode.
-	w.streamCond.L.Lock()
-	defer w.streamCond.L.Unlock()
-	for !w.isStreaming {
-		w.streamCond.Wait()
-	}
-}
-
-func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	// Hijack assumes control of the connection, so we need to prevent fasthttp from closing it or
-	// doing anything else with it.
-	w.ctx.HijackSetNoResponse(true)
-
-	netHTTPConn, fasthttpConn := net.Pipe()
-	w.handlerConn = fasthttpConn
-
-	// Trigger hijacked mode.
-	w.chOnce.Do(func() {
-		w.modeCh <- modeHijacked
-	})
-
-	bufRW := bufio.NewReadWriter(bufio.NewReader(netHTTPConn), bufio.NewWriter(netHTTPConn))
-
-	// Write any unflushed body to the hijacked connection buffer.
-	if len(*w.responseBody) > 0 {
-		_, _ = bufRW.Write(*w.responseBody)
-		_ = bufRW.Flush()
-	}
-	return netHTTPConn, bufRW, nil
-}
-
-func (w *netHTTPResponseWriter) Close() error {
-	w.closeOnce.Do(func() {
-		if w.w != nil {
-			_ = w.w.Close()
-		}
-	})
-	return nil
-}
-
-func (w *netHTTPResponseWriter) reset() {
-	// Note: reset() must only run after a fasthttp handler finishes
-	// proxying the full net/http handler response to ensure no data races.
-	w.ctx = nil
-	w.statusCode = 0
-
-	w.w = nil
-	w.r = nil
-	w.handlerConn = nil
-
-	// Clear the http Header
-	for key := range w.h {
-		delete(w.h, key)
-	}
-
-	// Get a new buffer for the response body
-	w.responseBody = acquireBuffer()
-
-	w.chOnce = sync.Once{}
-	w.closeOnce = sync.Once{}
-	w.isStreaming = false
 }
