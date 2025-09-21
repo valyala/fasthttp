@@ -271,6 +271,36 @@ func (d *TCPDialer) DialDualStackTimeout(addr string, timeout time.Duration) (ne
 	return d.dial(addr, true, timeout)
 }
 
+// FlushDNSCache clears all cached DNS entries, forcing fresh DNS lookups on subsequent dials.
+// This is useful when you want to ensure fresh DNS resolution, for example after network changes.
+func (d *TCPDialer) FlushDNSCache() {
+	d.tcpAddrsMap.Range(func(k, v any) bool {
+		d.tcpAddrsMap.Delete(k)
+		return true
+	})
+}
+
+// CleanDNSCache removes expired DNS cache entries based on DNSCacheDuration.
+// This is useful when you have set a longer DNSCacheDuration and want to manually
+// trigger cleanup of expired entries without waiting for the automatic cleanup.
+func (d *TCPDialer) CleanDNSCache() {
+	d.cleanExpiredDNSEntries()
+}
+
+// FlushDNSCache clears all cached DNS entries for the default dialer,
+// forcing fresh DNS lookups on subsequent Dial* calls.
+// This is useful when you want to ensure fresh DNS resolution, for example after network changes.
+func FlushDNSCache() {
+	defaultDialer.FlushDNSCache()
+}
+
+// CleanDNSCache removes expired DNS cache entries for the default dialer.
+// This is useful when you have set a longer DNSCacheDuration and want to manually
+// trigger cleanup of expired entries without waiting for the automatic cleanup.
+func CleanDNSCache() {
+	defaultDialer.CleanDNSCache()
+}
+
 func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (net.Conn, error) {
 	d.once.Do(func() {
 		if d.Concurrency > 0 {
@@ -406,17 +436,24 @@ type tcpAddrEntry struct {
 // by Dial* functions.
 const DefaultDNSCacheDuration = time.Minute
 
-func (d *TCPDialer) tcpAddrsClean() {
+// cleanExpiredDNSEntries removes expired DNS cache entries based on DNSCacheDuration.
+// This is the core cleanup logic used by both the background cleaner and manual cleanup.
+func (d *TCPDialer) cleanExpiredDNSEntries() {
 	expireDuration := 2 * d.DNSCacheDuration
+
+	t := time.Now()
+	d.tcpAddrsMap.Range(func(k, v any) bool {
+		if e, ok := v.(*tcpAddrEntry); ok && t.Sub(e.resolveTime) > expireDuration {
+			d.tcpAddrsMap.Delete(k)
+		}
+		return true
+	})
+}
+
+func (d *TCPDialer) tcpAddrsClean() {
 	for {
 		time.Sleep(time.Second)
-		t := time.Now()
-		d.tcpAddrsMap.Range(func(k, v any) bool {
-			if e, ok := v.(*tcpAddrEntry); ok && t.Sub(e.resolveTime) > expireDuration {
-				d.tcpAddrsMap.Delete(k)
-			}
-			return true
-		})
+		d.cleanExpiredDNSEntries()
 	}
 }
 
