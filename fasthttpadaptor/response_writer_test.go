@@ -18,7 +18,7 @@ func TestResponseWriter_Reset(t *testing.T) {
 
 	w.WriteHeader(http.StatusMethodNotAllowed)
 	w.Header().Set("Content-Type", "text/plain")
-	w.Write([]byte("test"))
+	_, _ = w.Write([]byte("test"))
 
 	w.reset()
 
@@ -186,7 +186,7 @@ func TestResponseWriter_Hijack(t *testing.T) {
 
 	// Verify that hijack's returned connection can read from the bufRW.
 	readBuf := make([]byte, len(data))
-	w.handlerConn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	_ = w.handlerConn.SetReadDeadline(time.Now().Add(1 * time.Second))
 	n, err := w.handlerConn.Read(readBuf)
 	if err != nil {
 		t.Fatalf("unexpected error reading from connection: %v", err)
