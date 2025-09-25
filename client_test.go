@@ -3609,47 +3609,6 @@ func TestTCPDialerFlushDNSCache(t *testing.T) {
 	}
 }
 
-func TestTCPDialerCleanDNSCache(t *testing.T) {
-	resolver := &testResolver{
-		lookupCountByHost: make(map[string]int),
-		resolver:          net.DefaultResolver,
-	}
-
-	// Test CleanDNSCache with short cache duration
-	dialer := &TCPDialer{
-		DNSCacheDuration: 1 * time.Nanosecond, // Very short cache
-		Resolver:         resolver,
-	}
-
-	// First dial - should trigger DNS lookup
-	conn1, err := dialer.DialTimeout("httpbin.org:80", 5*time.Second)
-	if err != nil {
-		t.Skip("Dial failed:", err)
-	}
-	conn1.Close()
-
-	if resolver.lookupCountByHost["httpbin.org"] != 1 {
-		t.Errorf("Expected 1 DNS lookup after first dial, got %d", resolver.lookupCountByHost["httpbin.org"])
-	}
-
-	// Wait for cache to expire
-	time.Sleep(1 * time.Millisecond)
-
-	// Clean expired entries
-	dialer.CleanDNSCache()
-
-	// Next dial should trigger new lookup since expired entry was cleaned
-	conn2, err := dialer.DialTimeout("httpbin.org:80", 5*time.Second)
-	if err != nil {
-		t.Skip("Second dial failed:", err)
-	}
-	conn2.Close()
-
-	if resolver.lookupCountByHost["httpbin.org"] != 2 {
-		t.Errorf("Expected 2 DNS lookups after cache clean, got %d", resolver.lookupCountByHost["httpbin.org"])
-	}
-}
-
 // Simple test resolver that implements the Resolver interface
 type testResolver struct {
 	resolver          *net.Resolver

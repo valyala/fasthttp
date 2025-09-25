@@ -280,25 +280,11 @@ func (d *TCPDialer) FlushDNSCache() {
 	})
 }
 
-// CleanDNSCache removes expired DNS cache entries based on DNSCacheDuration.
-// This is useful when you have set a longer DNSCacheDuration and want to manually
-// trigger cleanup of expired entries without waiting for the automatic cleanup.
-func (d *TCPDialer) CleanDNSCache() {
-	d.cleanExpiredDNSEntries()
-}
-
 // FlushDNSCache clears all cached DNS entries for the default dialer,
 // forcing fresh DNS lookups on subsequent Dial* calls.
 // This is useful when you want to ensure fresh DNS resolution, for example after network changes.
 func FlushDNSCache() {
 	defaultDialer.FlushDNSCache()
-}
-
-// CleanDNSCache removes expired DNS cache entries for the default dialer.
-// This is useful when you have set a longer DNSCacheDuration and want to manually
-// trigger cleanup of expired entries without waiting for the automatic cleanup.
-func CleanDNSCache() {
-	defaultDialer.CleanDNSCache()
 }
 
 func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (net.Conn, error) {
