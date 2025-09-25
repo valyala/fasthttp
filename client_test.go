@@ -3609,7 +3609,7 @@ func TestTCPDialerFlushDNSCache(t *testing.T) {
 	}
 }
 
-// Simple test resolver that implements the Resolver interface
+// Simple test resolver that implements the Resolver interface.
 type testResolver struct {
 	resolver          *net.Resolver
 	lookupCountByHost map[string]int
