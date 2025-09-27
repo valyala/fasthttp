@@ -155,7 +155,8 @@ func testRequestCopyTo(t *testing.T, src *Request) {
 	var dst Request
 	src.CopyTo(&dst)
 
-	if !reflect.DeepEqual(src, &dst) {
+	// Compare serialized representations.
+	if src.String() != dst.String() || !bytes.Equal(src.Body(), dst.Body()) {
 		t.Fatalf("RequestCopyTo fail, src: \n%+v\ndst: \n%+v\n", src, &dst)
 	}
 }

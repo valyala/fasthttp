@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1871,6 +1872,38 @@ func TestServerHeadRequest(t *testing.T) {
 	}
 	if string(resp.Header.ContentType()) != "aaa/bbb" {
 		t.Fatalf("unexpected content-type %q. Expecting %q", resp.Header.ContentType(), "aaa/bbb")
+	}
+
+	data, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
+	}
+	if len(data) > 0 {
+		t.Fatalf("unexpected remaining data %q", data)
+	}
+}
+
+func TestServerRejectsBackslashInAbsoluteURI(t *testing.T) {
+	t.Parallel()
+
+	var handlerCalled atomic.Bool
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			handlerCalled.Store(true)
+			ctx.Success("text/plain", []byte("ok"))
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET http://vulndetector.com\\\\admin\\\\api HTTP/1.1\r\nHost: example.com\r\n\r\n")
+
+	_ = s.ServeConn(rw)
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusBadRequest, string(defaultContentType), "Error when parsing request")
+
+	if handlerCalled.Load() {
+		t.Fatal("handler should not run for invalid absolute URI")
 	}
 
 	data, err := io.ReadAll(br)
