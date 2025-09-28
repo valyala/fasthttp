@@ -273,7 +273,7 @@ func startProxyServer(t *testing.T, ports []string, counts []atomic.Int64) (lns 
 			fasthttp.ReleaseRequest(req)
 		}()
 	}
-	return
+	return lns
 }
 
 func getDialer(httpProxy, httpsProxy, noProxy string) *Dialer {
@@ -290,7 +290,7 @@ func getCounts(counts []atomic.Int64) (r []int64) {
 	for i := 0; i < len(counts); i++ {
 		r = append(r, counts[i].Load())
 	}
-	return
+	return r
 }
 
 func countsEqual(a, b []int64) bool {

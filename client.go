@@ -924,7 +924,7 @@ type clientConn struct {
 	lastUseTime time.Time
 }
 
-// CreatedTime returns net.Conn the client.
+// Conn returns the underlying net.Conn associated with the client connection.
 func (cc *clientConn) Conn() net.Conn {
 	return cc.c
 }
@@ -1115,7 +1115,7 @@ var (
 	// exceed the max count.
 	ErrTooManyRedirects = errors.New("too many redirects detected when doing the request")
 
-	// HostClients are only able to follow redirects to the same protocol.
+	// ErrHostClientRedirectToDifferentScheme is returned when a HostClient follows a redirect to a different protocol.
 	ErrHostClientRedirectToDifferentScheme = errors.New("HostClient can't follow redirects to a different protocol," +
 		" please use Client instead")
 )
@@ -1522,7 +1522,7 @@ func (e *timeoutError) Error() string {
 	return "timeout"
 }
 
-// Only implement the Timeout() function of the net.Error interface.
+// Timeout implements the Timeout behavior of the net.Error interface.
 // This allows for checks like:
 //
 //	if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {

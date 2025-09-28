@@ -103,7 +103,7 @@ func (d *Dialer) GetDialFunc(useEnv bool) (dialFunc fasthttp.DialFunc, err error
 		case "socks5", "socks5h":
 			proxyDialer, err = proxy.FromURL(proxyURL, d)
 			if err != nil {
-				return
+				return nil, err
 			}
 		case "http":
 			proxyAddr, auth := addrAndAuth(proxyURL)
@@ -128,7 +128,7 @@ func (d *Dialer) GetDialFunc(useEnv bool) (dialFunc fasthttp.DialFunc, err error
 		reqURL := &url.URL{Host: addr, Scheme: scheme}
 		proxyURL, err = proxyFunc(reqURL)
 		if err != nil {
-			return
+			return nil, err
 		}
 		if proxyURL == nil {
 			// dial directly
@@ -138,7 +138,7 @@ func (d *Dialer) GetDialFunc(useEnv bool) (dialFunc fasthttp.DialFunc, err error
 		case "socks5", "socks5h":
 			proxyDialer, err = proxy.FromURL(proxyURL, d)
 			if err != nil {
-				return
+				return nil, err
 			}
 		case "http":
 			proxyAddr, auth := addrAndAuth(proxyURL)
@@ -167,7 +167,7 @@ func (d *Dialer) Dial(network, addr string) (conn net.Conn, err error) {
 		return d.TCPDialer.DialDualStack(addr)
 	}
 	err = errors.New("dont support the network: " + network)
-	return
+	return nil, err
 }
 
 func (d *Dialer) connectTimeout() time.Duration {
@@ -193,7 +193,7 @@ func (d DialerFunc) Dial(network, addr string) (net.Conn, error) {
 func httpProxyDial(dialer proxy.Dialer, network, addr, proxyAddr, auth string) (conn net.Conn, err error) {
 	conn, err = dialer.Dial(network, proxyAddr)
 	if err != nil {
-		return
+		return nil, err
 	}
 	var connectTimeout time.Duration
 	hp, ok := dialer.(httpProxyDialer)
@@ -218,21 +218,21 @@ func httpProxyDial(dialer proxy.Dialer, network, addr, proxyAddr, auth string) (
 	_, err = conn.Write([]byte(req))
 	if err != nil {
 		_ = conn.Close()
-		return
+		return nil, err
 	}
 	res := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(res)
 	res.SkipBody = true
 	if err = res.Read(bufio.NewReaderSize(conn, 1024)); err != nil {
 		_ = conn.Close()
-		return
+		return nil, err
 	}
 	if res.Header.StatusCode() != 200 {
 		_ = conn.Close()
 		err = fmt.Errorf("could not connect to proxyAddr: %s status code: %d", proxyAddr, res.Header.StatusCode())
-		return
+		return nil, err
 	}
-	return
+	return conn, err
 }
 
 // Cache authentication information for HTTP proxies.
@@ -244,7 +244,7 @@ type proxyInfo struct {
 func addrAndAuth(pu *url.URL) (proxyAddr, auth string) {
 	if pu.User == nil {
 		proxyAddr = pu.Host + pu.Path
-		return
+		return proxyAddr, auth
 	}
 	var info *proxyInfo
 	v, ok := authCache.Load(pu)

@@ -1123,14 +1123,14 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
 	)
 	f, err = fh.Open()
 	if err != nil {
-		return
+		return err
 	}
 
 	var ok bool
 	if ff, ok = f.(*os.File); ok {
 		// Windows can't rename files that are opened.
 		if err = f.Close(); err != nil {
-			return
+			return err
 		}
 
 		// If renaming fails we try the normal copying method.
@@ -1141,7 +1141,7 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
 
 		// Reopen f for the code below.
 		if f, err = fh.Open(); err != nil {
-			return
+			return err
 		}
 	}
 
@@ -1153,7 +1153,7 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
 	}()
 
 	if ff, err = os.Create(path); err != nil {
-		return
+		return err
 	}
 	defer func() {
 		e := ff.Close()
@@ -1162,7 +1162,7 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
 		}
 	}()
 	_, err = copyZeroAlloc(ff, f)
-	return
+	return err
 }
 
 // FormValue returns form value associated with the given key.
@@ -1649,26 +1649,26 @@ func (s *Server) NextProto(key string, nph ServeHandler) {
 	s.nextProtos[key] = nph
 }
 
-func (s *Server) getNextProto(c net.Conn) (proto string, err error) {
+func (s *Server) getNextProto(c net.Conn) (string, error) {
 	if tlsConn, ok := c.(connTLSer); ok {
 		if s.ReadTimeout > 0 {
-			if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
-				return
+			if err := c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
+				return "", err
 			}
 		}
 
 		if s.WriteTimeout > 0 {
-			if err = c.SetWriteDeadline(time.Now().Add(s.WriteTimeout)); err != nil {
-				return
+			if err := c.SetWriteDeadline(time.Now().Add(s.WriteTimeout)); err != nil {
+				return "", err
 			}
 		}
 
-		err = tlsConn.Handshake()
+		err := tlsConn.Handshake()
 		if err == nil {
-			proto = tlsConn.ConnectionState().NegotiatedProtocol
+			return tlsConn.ConnectionState().NegotiatedProtocol, nil
 		}
 	}
-	return
+	return "", nil
 }
 
 // ListenAndServe serves HTTP requests from the given TCP4 addr.
@@ -2173,20 +2173,20 @@ func (s *Server) serveConnCleanup() {
 	s.concurrency.Add(^uint32(0))
 }
 
-func (s *Server) serveConn(c net.Conn) (err error) {
+func (s *Server) serveConn(c net.Conn) error {
 	defer s.serveConnCleanup()
 	s.concurrency.Add(1)
 
-	var proto string
-	if proto, err = s.getNextProto(c); err != nil {
-		return
+	proto, err := s.getNextProto(c)
+	if err != nil {
+		return err
 	}
 	if handler, ok := s.nextProtos[proto]; ok {
 		// Remove read or write deadlines that might have previously been set.
 		// The next handler is responsible for setting its own deadlines.
 		if s.ReadTimeout > 0 || s.WriteTimeout > 0 {
-			if err = c.SetDeadline(zeroTime); err != nil {
-				return
+			if err := c.SetDeadline(zeroTime); err != nil {
+				return err
 			}
 		}
 
@@ -2589,7 +2589,7 @@ func (s *Server) serveConn(c net.Conn) (err error) {
 	}
 	s.idleConnsMu.Unlock()
 
-	return
+	return err
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {
@@ -2818,7 +2818,7 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 // This method always returns 0, false and is only present to make
 // RequestCtx implement the context interface.
 func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
-	return
+	return time.Time{}, false
 }
 
 // Done returns a channel that's closed when work done on behalf of this

@@ -59,7 +59,7 @@ func soMaxConn() (int, error) {
 func kernelVersion() (major, minor int) {
 	var uname unix.Utsname
 	if err := unix.Uname(&uname); err != nil {
-		return
+		return 0, 0
 	}
 
 	rl := uname.Release
@@ -87,7 +87,7 @@ func kernelVersion() (major, minor int) {
 	case 2:
 		return values[0], values[1]
 	}
-	return
+	return major, minor
 }
 
 // Linux stores the backlog as:

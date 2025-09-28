@@ -153,7 +153,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 		}
 
 		if err = p.setTCPListenerFiles(addr); err != nil {
-			return
+			return err
 		}
 
 		// defer for closing the net.Listener opened by setTCPListenerFiles.
@@ -184,7 +184,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 		var cmd *exec.Cmd
 		if cmd, err = p.doCommand(); err != nil {
 			p.logger().Printf("failed to start a child prefork process, error: %v\n", err)
-			return
+			return err
 		}
 
 		childProcs[cmd.Process.Pid] = cmd
@@ -219,7 +219,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 		}()
 	}
 
-	return
+	return err
 }
 
 // ListenAndServe serves HTTP requests from the given TCP addr.
