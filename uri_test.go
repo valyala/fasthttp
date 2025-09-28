@@ -145,6 +145,27 @@ func TestURIRejectInvalidScheme(t *testing.T) {
 	}
 }
 
+func TestURIRejectMultiplePorts(t *testing.T) {
+	t.Parallel()
+
+	testcases := []string{
+		"http://192.168.1.1:1111:2222/",
+		"http://example.com:80:8080/",
+	}
+
+	for _, raw := range testcases {
+		var u URI
+		if err := u.Parse(nil, []byte(raw)); err == nil {
+			t.Fatalf("expected Parse to fail for %q", raw)
+		}
+	}
+
+	var valid URI
+	if err := valid.Parse(nil, []byte("http://192.168.1.1:1111/")); err != nil {
+		t.Fatalf("unexpected error for valid uri: %v", err)
+	}
+}
+
 func TestURIUpdate(t *testing.T) {
 	t.Parallel()
 
