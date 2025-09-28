@@ -2,9 +2,12 @@ package fasthttpadaptor
 
 import (
 	"bufio"
+	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"reflect"
 	"testing"
@@ -272,6 +275,93 @@ func TestFlushHandler(t *testing.T) {
 		if f, ok := w.(http.Flusher); !ok {
 			t.Errorf("expected http.ResponseWriter to implement http.Flusher")
 		} else {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Length", "6")
+			w.Header().Set("X-Foo", "bar")
+
+			if _, err := w.Write([]byte("foo")); err != nil {
+				t.Error(err)
+			}
+
+			f.Flush()
+
+			time.Sleep(time.Millisecond * 500)
+
+			if _, err := w.Write([]byte("bar")); err != nil {
+				t.Error(err)
+			}
+
+			f.Flush()
+		}
+	}
+
+	s := &fasthttp.Server{
+		Handler: NewFastHTTPHandler(http.HandlerFunc(nethttpH)),
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	clientCh := make(chan struct{})
+	go func() {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		if err != nil {
+			t.Errorf("unexpected error reading response: %v", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("unexpected status code: %d. Expecting %d", resp.StatusCode, http.StatusOK)
+		}
+
+		if resp.Header.Get("Content-Type") != "text/plain; charset=utf-8" {
+			t.Errorf("unexpected Content-Type header: %q. Expecting %q", resp.Header.Get("Content-Type"), "text/plain; charset=utf-8")
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil && err != io.ErrUnexpectedEOF {
+			t.Errorf("unexpected error reading body: %v", err)
+		}
+
+		if string(body) != "foobar" {
+			t.Errorf("unexpected response body: %q. Expecting %q", body, "foobar")
+		}
+
+		close(clientCh)
+	}()
+
+	select {
+	case <-clientCh:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestFlushHandlerClosed(t *testing.T) {
+	t.Parallel()
+
+	nethttpH := func(w http.ResponseWriter, r *http.Request) {
+		if f, ok := w.(http.Flusher); !ok {
+			t.Errorf("expected http.ResponseWriter to implement http.Flusher")
+		} else {
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Length", "6")
+			w.Header().Set("X-Foo", "bar")
+
 			if _, err := w.Write([]byte("foo")); err != nil {
 				t.Error(err)
 			}
@@ -429,4 +519,159 @@ func TestHijackFlush(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
 	}
+}
+
+func TestResourceRecyclingUnderLoad_OneEndpoint(t *testing.T) {
+	t.Parallel()
+
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "Hello World!")
+	}
+
+	s := &fasthttp.Server{
+		Handler: NewFastHTTPHandler(http.HandlerFunc(handler)),
+	}
+
+	requestCount := 10
+	responseTimeout := 500 * time.Millisecond
+	expectedBody := "Hello World!"
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	for reqID := 1; reqID <= requestCount; reqID++ {
+		req := httptest.NewRequest("GET", "/", http.NoBody)
+		body, err := sendRequest(ln, req, responseTimeout)
+		if err != nil {
+			t.Errorf("[%d] unexpected error sending request: %v", reqID, err)
+		}
+		if string(body) != expectedBody {
+			t.Errorf("[%d] unexpected response: %q. Expecting %q", reqID, body, expectedBody)
+		}
+	}
+}
+
+func TestResourceRecyclingUnderLoad_MultipleEndpoints(t *testing.T) {
+	t.Parallel()
+
+	handlers := []struct {
+		endpoint     string
+		handler      fasthttp.RequestHandler
+		expectedBody string
+	}{
+		{
+			endpoint: "/done",
+			handler: NewFastHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, "Hello World!")
+			})),
+			expectedBody: "Hello World!",
+		},
+		{
+			endpoint: "/flush",
+			handler: NewFastHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if f, ok := w.(http.Flusher); ok {
+					w.Write([]byte("foo")) //nolint:errcheck
+					f.Flush()
+					time.Sleep(250 * time.Millisecond)
+					w.Write([]byte("bar")) //nolint:errcheck
+					f.Flush()
+				} else {
+					http.Error(w, "Flusher not supported", http.StatusInternalServerError)
+				}
+			})),
+			expectedBody: "foobar",
+		},
+		{
+			endpoint: "/hijack",
+			handler: NewFastHTTPHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if hj, ok := w.(http.Hijacker); ok {
+					conn, rw, err := hj.Hijack()
+					if err != nil {
+						t.Errorf("unexpected error: %v", err)
+						return
+					}
+					defer conn.Close()
+					rw.WriteString("hijacked") //nolint:errcheck
+					rw.Flush()
+				} else {
+					http.Error(w, "Hijacker not supported", http.StatusInternalServerError)
+				}
+			})),
+			expectedBody: "hijacked",
+		},
+	}
+
+	s := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			for _, h := range handlers {
+				if string(ctx.Path()) == h.endpoint {
+					h.handler(ctx)
+					return
+				}
+			}
+			ctx.Error("Not Found", fasthttp.StatusNotFound)
+		},
+	}
+
+	repeatCount := 3
+	responseTimeout := 500 * time.Millisecond
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	for range repeatCount {
+		for _, handler := range handlers {
+			req := httptest.NewRequest("GET", handler.endpoint, http.NoBody)
+			body, err := sendRequest(ln, req, responseTimeout)
+			if err != nil {
+				t.Errorf("[%s] unexpected error sending request: %v", handler.endpoint, err)
+			}
+			if string(body) != handler.expectedBody {
+				t.Errorf("[%s] unexpected response: %q. Expecting %q", handler.endpoint, body, handler.expectedBody)
+			}
+		}
+	}
+}
+
+func sendRequest(ln *fasthttputil.InmemoryListener, req *http.Request, responseTimeout time.Duration) ([]byte, error) {
+	c, err := ln.Dial()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := req.Write(c); err != nil {
+		return nil, err
+	}
+
+	time.AfterFunc(responseTimeout, func() {
+		c.Close()
+	})
+	response, err := io.ReadAll(c)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(response)), nil)
+	if err != nil {
+		// Hijacked response, return the full response instead of the parsed body.
+		return response, nil
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return body, nil
 }
