@@ -246,11 +246,8 @@ var bufferPool = &sync.Pool{
 
 var writerPool = &sync.Pool{
 	New: func() any {
-		pr, pw := io.Pipe()
 		return &netHTTPResponseWriter{
 			h:            make(http.Header),
-			r:            pr,
-			w:            pw,
 			modeCh:       make(chan modeType),
 			responseBody: acquireBuffer(),
 			streamCond:   sync.NewCond(&sync.Mutex{}),
