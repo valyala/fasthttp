@@ -5,16 +5,19 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"runtime"
 	"strconv"
 	"testing"
 
 	"github.com/valyala/bytebufferpool"
 )
 
-var strFoobar = []byte("foobar.com")
+var (
+	strFoobar           = []byte("foobar.com")
+	strNonSpecialHeader = []byte("Dontent-Type")
+)
 
 // it has the same length as Content-Type.
-var strNonSpecialHeader = []byte("Dontent-Type")
 
 type benchReadBuf struct {
 	s []byte
@@ -207,6 +210,23 @@ func BenchmarkResponseHeaderPeekBytesNonSpecialHeader(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkCopyTrailer(b *testing.B) {
+	src := make([][]byte, 16)
+	for i := range src {
+		ch := byte('a' + i%26)
+		src[i] = bytes.Repeat([]byte{ch}, 8*(i+1))
+	}
+	dst := make([][]byte, len(src), len(src)*2)
+
+	runtime.GC()
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		dst = copyTrailer(dst, src)
+	}
 }
 
 func BenchmarkNormalizeHeaderKeyCommonCase(b *testing.B) {
