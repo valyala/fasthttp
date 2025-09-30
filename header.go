@@ -3359,9 +3359,18 @@ func copyTrailer(dst, src [][]byte) [][]byte {
 		dst = append(dst[:0], src...)
 	}
 
+	var totalSrcLen int
 	for i := range dst {
-		dst[i] = make([]byte, len(src[i]))
-		copy(dst[i], src[i])
+		totalSrcLen += len(src[i])
+	}
+
+	// allocating single buffer for all trailer values
+	buf := make([]byte, totalSrcLen)
+	bufPos := 0
+	for i := range dst {
+		n := copy(buf[bufPos:], src[i])
+		dst[i] = buf[bufPos : bufPos+n : bufPos+n]
+		bufPos += n
 	}
 	return dst
 }
