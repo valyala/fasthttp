@@ -247,7 +247,7 @@ var bufferPool = &sync.Pool{
 var writerPool = &sync.Pool{
 	New: func() any {
 		pr, pw := io.Pipe()
-		return &responseWriter{
+		return &netHTTPResponseWriter{
 			h:            make(http.Header),
 			r:            pr,
 			w:            pw,
@@ -269,7 +269,7 @@ const (
 	modeDone
 
 	// modeFlushed means a response should send a buffered stream
-	// of data every time responseWriter.Flush() is called.
+	// of data every time netHTTPResponseWriter.Flush() is called.
 	modeFlushed
 
 	// modeHijacked means that a response should do nothing else but
@@ -277,9 +277,9 @@ const (
 	modeHijacked
 )
 
-// responseWriter represents a net/http adaptor that implements
+// netHTTPResponseWriter represents a net/http adaptor that implements
 // the http.ResponseWriter, http.Flusher, and http.Hijacker interfaces.
-type responseWriter struct {
+type netHTTPResponseWriter struct {
 	handlerConn  net.Conn
 	ctx          *fasthttp.RequestCtx
 	h            http.Header
@@ -298,8 +298,8 @@ type responseWriter struct {
 
 // acquireResponseWriter returns a pointer to a slice of 0 length and
 // at least minBufferSize capacity.
-func acquireResponseWriter(ctx *fasthttp.RequestCtx) *responseWriter {
-	w, ok := writerPool.Get().(*responseWriter)
+func acquireResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
+	w, ok := writerPool.Get().(*netHTTPResponseWriter)
 	if !ok {
 		panic("fasthttpadaptor: cannot get *responseWriter from writerPool")
 	}
@@ -310,7 +310,7 @@ func acquireResponseWriter(ctx *fasthttp.RequestCtx) *responseWriter {
 }
 
 // releaseResponseWriter recycles the buffer for reuse.
-func releaseResponseWriter(w *responseWriter) {
+func releaseResponseWriter(w *netHTTPResponseWriter) {
 	releaseBuffer(w.responseBody)
 	writerPool.Put(w)
 }
@@ -335,7 +335,7 @@ func releaseBuffer(buf *[]byte) {
 // StatusCode returns the response's status code.
 //
 // If no status code is set, it returns http.StatusOK by default.
-func (w *responseWriter) StatusCode() int {
+func (w *netHTTPResponseWriter) StatusCode() int {
 	if w.statusCode == 0 {
 		return http.StatusOK
 	}
@@ -343,19 +343,19 @@ func (w *responseWriter) StatusCode() int {
 }
 
 // Header returns the current response header.
-func (w *responseWriter) Header() http.Header {
+func (w *netHTTPResponseWriter) Header() http.Header {
 	return w.h
 }
 
 // WriteHeader sets the response's status code.
-func (w *responseWriter) WriteHeader(statusCode int) {
+func (w *netHTTPResponseWriter) WriteHeader(statusCode int) {
 	w.statusCode = statusCode
 }
 
 // Write writes the data to the connection.
 //
 // Write supports both buffered mode and streaming mode.
-func (w *responseWriter) Write(p []byte) (int, error) {
+func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 	w.streamCond.L.Lock()
 	defer w.streamCond.L.Unlock()
 
@@ -375,7 +375,7 @@ func (w *responseWriter) Write(p []byte) (int, error) {
 //
 // To ensure proper setup when using responseWriter.Write,
 // Flush blocks until streaming mode is ready.
-func (w *responseWriter) Flush() {
+func (w *netHTTPResponseWriter) Flush() {
 	// Trigger streaming mode setup.
 	w.chOnce.Do(func() {
 		w.modeCh <- modeFlushed
@@ -392,7 +392,7 @@ func (w *responseWriter) Flush() {
 // Hijack signals hijack mode.
 //
 // When called, the net/http handler assumes full control over the returned connection.
-func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	// Prevent fasthttp from closing it or
 	// doing anything else with it.
 	w.ctx.HijackSetNoResponse(true)
@@ -420,7 +420,7 @@ func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 //
 // When called in streaming mode, the responseWriter can flush the remaining unread data
 // and Close the client connection. Otherwise, this method does nothing.
-func (w *responseWriter) Close() error {
+func (w *netHTTPResponseWriter) Close() error {
 	w.closeOnce.Do(func() {
 		if w.w != nil {
 			_ = w.w.Close()
@@ -430,7 +430,7 @@ func (w *responseWriter) Close() error {
 }
 
 // reset clears data from a recycled responseWriter.
-func (w *responseWriter) reset() {
+func (w *netHTTPResponseWriter) reset() {
 	// Note: reset() must only run after a fasthttp handler finishes
 	// proxying the full net/http handler response to ensure no data races.
 	w.ctx = nil
