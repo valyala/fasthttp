@@ -734,8 +734,8 @@ func TestNetHTTPResponseWriter_Reset(t *testing.T) {
 	t.Parallel()
 
 	var ctx fasthttp.RequestCtx
-	w := acquireResponseWriter(&ctx)
-	defer releaseResponseWriter(w)
+	w := acquireNetHTTPResponseWriter(&ctx)
+	defer releaseNetHTTPResponseWriter(w)
 
 	w.WriteHeader(http.StatusMethodNotAllowed)
 	w.Header().Set("Content-Type", "text/plain")
@@ -767,8 +767,8 @@ func TestNetHTTPResponseWriter_Pool(t *testing.T) {
 	t.Parallel()
 
 	ctx := new(fasthttp.RequestCtx)
-	w := acquireResponseWriter(ctx)
-	defer releaseResponseWriter(w)
+	w := acquireNetHTTPResponseWriter(ctx)
+	defer releaseNetHTTPResponseWriter(w)
 
 	if w.ctx != ctx {
 		t.Fatalf("Passed in context did not match the current context.")
@@ -798,8 +798,8 @@ func TestNetHTTPResponseWriter_Write(t *testing.T) {
 	t.Parallel()
 
 	var ctx fasthttp.RequestCtx
-	w := acquireResponseWriter(&ctx)
-	defer releaseResponseWriter(w)
+	w := acquireNetHTTPResponseWriter(&ctx)
+	defer releaseNetHTTPResponseWriter(w)
 
 	data := []byte("Hello, World!")
 	n, err := w.Write(data)
@@ -818,8 +818,8 @@ func TestNetHTTPResponseWriter_WriteHeader(t *testing.T) {
 	t.Parallel()
 
 	var ctx fasthttp.RequestCtx
-	w := acquireResponseWriter(&ctx)
-	defer releaseResponseWriter(w)
+	w := acquireNetHTTPResponseWriter(&ctx)
+	defer releaseNetHTTPResponseWriter(w)
 
 	statusCode := http.StatusNotFound
 	w.WriteHeader(statusCode)
@@ -833,8 +833,8 @@ func TestNetHTTPResponseWriter_Header(t *testing.T) {
 	t.Parallel()
 
 	var ctx fasthttp.RequestCtx
-	w := acquireResponseWriter(&ctx)
-	defer releaseResponseWriter(w)
+	w := acquireNetHTTPResponseWriter(&ctx)
+	defer releaseNetHTTPResponseWriter(w)
 
 	w.Header().Set("Content-Type", "application/json")
 	if w.Header().Get("Content-Type") != "application/json" {
@@ -846,8 +846,8 @@ func TestNetHTTPResponseWriter_Flush(t *testing.T) {
 	t.Parallel()
 
 	var ctx fasthttp.RequestCtx
-	w := acquireResponseWriter(&ctx)
-	defer releaseResponseWriter(w)
+	w := acquireNetHTTPResponseWriter(&ctx)
+	defer releaseNetHTTPResponseWriter(w)
 
 	done := make(chan struct{})
 
@@ -887,8 +887,8 @@ func TestNetHTTPResponseWriter_Hijack(t *testing.T) {
 	t.Parallel()
 
 	var ctx fasthttp.RequestCtx
-	w := acquireResponseWriter(&ctx)
-	defer releaseResponseWriter(w)
+	w := acquireNetHTTPResponseWriter(&ctx)
+	defer releaseNetHTTPResponseWriter(w)
 
 	data := []byte("Hijacked data")
 	go func() {

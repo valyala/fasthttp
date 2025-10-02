@@ -57,7 +57,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			return
 		}
 
-		w := acquireResponseWriter(ctx)
+		w := acquireNetHTTPResponseWriter(ctx)
 
 		// Concurrently serve the net/http handler.
 		w.wg.Add(1)
@@ -71,7 +71,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// Wait for the net/http handler to complete before releasing.
 			// (e.g. wait for hijacked connection)
 			w.wg.Wait()
-			releaseResponseWriter(w)
+			releaseNetHTTPResponseWriter(w)
 		}()
 
 		switch <-w.modeCh {
@@ -293,9 +293,9 @@ type netHTTPResponseWriter struct {
 	hijackedWg   sync.WaitGroup
 }
 
-// acquireResponseWriter returns a pointer to a slice of 0 length and
+// acquireNetHTTPResponseWriter returns a pointer to a slice of 0 length and
 // at least minBufferSize capacity.
-func acquireResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
+func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
 	w, ok := writerPool.Get().(*netHTTPResponseWriter)
 	if !ok {
 		panic("fasthttpadaptor: cannot get *responseWriter from writerPool")
@@ -306,8 +306,8 @@ func acquireResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
 	return w
 }
 
-// releaseResponseWriter recycles the buffer for reuse.
-func releaseResponseWriter(w *netHTTPResponseWriter) {
+// releaseNetHTTPResponseWriter recycles the buffer for reuse.
+func releaseNetHTTPResponseWriter(w *netHTTPResponseWriter) {
 	releaseBuffer(w.responseBody)
 	writerPool.Put(w)
 }
