@@ -66,6 +66,7 @@ type Request struct {
 	// Group bool members in order to reduce Request object size.
 	parsedURI      bool
 	parsedPostArgs bool
+	uriParseErr    error
 
 	keepBodyBuffer bool
 
@@ -146,12 +147,14 @@ func (req *Request) Host() []byte {
 func (req *Request) SetRequestURI(requestURI string) {
 	req.Header.SetRequestURI(requestURI)
 	req.parsedURI = false
+	req.uriParseErr = nil
 }
 
 // SetRequestURIBytes sets RequestURI.
 func (req *Request) SetRequestURIBytes(requestURI []byte) {
 	req.Header.SetRequestURIBytes(requestURI)
 	req.parsedURI = false
+	req.uriParseErr = nil
 }
 
 // RequestURI returns request's URI.
@@ -891,6 +894,7 @@ func (req *Request) copyToSkipBody(dst *Request) {
 
 	req.uri.CopyTo(&dst.uri)
 	dst.parsedURI = req.parsedURI
+	dst.uriParseErr = req.uriParseErr
 
 	req.postArgs.CopyTo(&dst.postArgs)
 	dst.parsedPostArgs = req.parsedPostArgs
@@ -960,19 +964,22 @@ func (req *Request) SetURI(newURI *URI) {
 	if newURI != nil {
 		newURI.CopyTo(&req.uri)
 		req.parsedURI = true
+		req.uriParseErr = nil
 		return
 	}
 	req.uri.Reset()
 	req.parsedURI = false
+	req.uriParseErr = nil
 }
 
 func (req *Request) parseURI() error {
 	if req.parsedURI {
-		return nil
+		return req.uriParseErr
 	}
-	req.parsedURI = true
 
-	return req.uri.parse(req.Header.Host(), req.Header.RequestURI(), req.isTLS)
+	req.parsedURI = true
+	req.uriParseErr = req.uri.parse(req.Header.Host(), req.Header.RequestURI(), req.isTLS)
+	return req.uriParseErr
 }
 
 // PostArgs returns POST arguments.
@@ -1146,6 +1153,7 @@ func (req *Request) resetSkipHeader() {
 	req.ResetBody()
 	req.uri.Reset()
 	req.parsedURI = false
+	req.uriParseErr = nil
 	req.postArgs.Reset()
 	req.parsedPostArgs = false
 	req.isTLS = false
