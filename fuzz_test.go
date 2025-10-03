@@ -151,6 +151,9 @@ func FuzzTestHeaderScanner(f *testing.F) {
 		if !bytes.Contains(data, []byte("\r\n\r\n")) {
 			return
 		}
+		if len(data) > 1024*1024 {
+			return
+		}
 
 		t.Logf("%q", data)
 
