@@ -397,10 +397,15 @@ func parseHost(host []byte) ([]byte, error) {
 			}
 			return append(host1, append(host2, host3...)...), nil
 		}
-	} else if i := bytes.LastIndexByte(host, ':'); i != -1 {
-		colonPort := host[i:]
-		if !validOptionalPort(colonPort) {
-			return nil, fmt.Errorf("invalid port %q after host", colonPort)
+	} else {
+		if bytes.IndexByte(host, '[') != -1 || bytes.IndexByte(host, ']') != -1 {
+			return nil, fmt.Errorf("invalid host %q", host)
+		}
+		if i := bytes.LastIndexByte(host, ':'); i != -1 {
+			colonPort := host[i:]
+			if !validOptionalPort(colonPort) {
+				return nil, fmt.Errorf("invalid port %q after host", colonPort)
+			}
 		}
 	}
 
