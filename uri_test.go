@@ -104,6 +104,20 @@ func testURIPathEscape(t *testing.T, path, expectedRequestURI string) {
 	}
 }
 
+func TestURIRejectInvalidScheme(t *testing.T) {
+	t.Parallel()
+
+	var u URI
+	if err := u.Parse(nil, []byte("https>://vulndetector.com/path")); err == nil {
+		t.Fatalf("expected invalid scheme error, got nil")
+	}
+
+	var relative URI
+	if err := relative.Parse(nil, []byte("/relative")); err != nil {
+		t.Fatalf("unexpected error for relative path: %v", err)
+	}
+}
+
 func TestURIUpdate(t *testing.T) {
 	t.Parallel()
 
