@@ -151,6 +151,44 @@ func testURIUpdate(t *testing.T, base, update, result string) {
 	}
 }
 
+func TestURIRejectInvalidUserinfo(t *testing.T) {
+	t.Parallel()
+
+	bad := []string{
+		"http://[normal.com@]vulndetector.com/",
+		"http://normal.com[user@vulndetector].com/",
+		"http://normal.com[@]vulndetector.com/",
+	}
+
+	for _, raw := range bad {
+		var u URI
+		if err := u.Parse(nil, []byte(raw)); err == nil {
+			t.Fatalf("expected error parsing %q", raw)
+		}
+	}
+}
+
+func TestURIAllowAtInUserinfo(t *testing.T) {
+	t.Parallel()
+
+	var u URI
+	if err := u.Parse(nil, []byte("http://user:p@ss@example.com/")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got := string(u.Host()); got != "example.com" {
+		t.Fatalf("unexpected host %q", got)
+	}
+
+	if got := string(u.Username()); got != "user" {
+		t.Fatalf("unexpected username %q", got)
+	}
+
+	if got := string(u.Password()); got != "p@ss" {
+		t.Fatalf("unexpected password %q", got)
+	}
+}
+
 func TestURIPathNormalize(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.SkipNow()

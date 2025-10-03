@@ -298,8 +298,11 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		u.SetSchemeBytes(strHTTPS)
 	}
 
-	if n := bytes.IndexByte(host, '@'); n >= 0 {
+	if n := bytes.LastIndexByte(host, '@'); n >= 0 {
 		auth := host[:n]
+		if !validUserinfo(auth) {
+			return ErrorInvalidURI
+		}
 		host = host[n+1:]
 
 		if n := bytes.IndexByte(auth, ':'); n >= 0 {
@@ -354,6 +357,26 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 	u.hash = append(u.hash, b[fragmentIndex+1:]...)
 
 	return nil
+}
+
+func validUserinfo(userinfo []byte) bool {
+	for _, c := range userinfo {
+		switch {
+		case 'A' <= c && c <= 'Z':
+			continue
+		case 'a' <= c && c <= 'z':
+			continue
+		case '0' <= c && c <= '9':
+			continue
+		}
+		switch c {
+		case '-', '.', '_', ':', '~', '!', '$', '&', '\'', '(', ')', '*', '+', ',', ';', '=', '%', '@':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // parseHost parses host as an authority without user
