@@ -104,6 +104,33 @@ func testURIPathEscape(t *testing.T, path, expectedRequestURI string) {
 	}
 }
 
+func TestURIRejectInvalidIPv6(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{
+		"http://[0:0::vulndetector.com]:80",
+		"http://[2001:db8::vulndetector.com]/",
+		"http://[vulndetector.com]/",
+		"http://[::ffff:192.0.2.300]/",
+	} {
+		var u URI
+		if err := u.Parse(nil, []byte(raw)); err == nil {
+			t.Errorf("expected Parse to fail for %q", raw)
+		}
+	}
+
+	for _, raw := range []string{
+		"http://[2001:db8::1]/",
+		"http://[fe80::1%25en0]/",
+		"http://[::ffff:192.0.2.1]/",
+	} {
+		var u URI
+		if err := u.Parse(nil, []byte(raw)); err != nil {
+			t.Errorf("unexpected error for %q: %v", raw, err)
+		}
+	}
+}
+
 func TestURIUpdate(t *testing.T) {
 	t.Parallel()
 

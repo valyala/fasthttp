@@ -408,6 +408,9 @@ func parseHost(host []byte) ([]byte, error) {
 	if host, err = unescape(host, encodeHost); err != nil {
 		return nil, err
 	}
+	if err = validateIPv6Literal(host); err != nil {
+		return nil, err
+	}
 	return host, nil
 }
 
