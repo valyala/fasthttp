@@ -60,18 +60,21 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		w := acquireNetHTTPResponseWriter(ctx)
 
 		// Concurrently serve the net/http handler.
+		w.wg.Add(1)
 		go func() {
 			h.ServeHTTP(w, r.WithContext(ctx))
-			select {
-			case w.modeCh <- modeDone:
-			default:
-			}
-			_ = w.Close()
+			w.chOnce.Do(func() {
+				w.modeCh <- modeDone
+			})
+			w.Close()
+
+			// Wait for the net/http handler to complete before releasing.
+			// (e.g. wait for hijacked connection)
+			w.wg.Wait()
+			releaseNetHTTPResponseWriter(w)
 		}()
 
-		mode := <-w.modeCh
-
-		switch mode {
+		switch <-w.modeCh {
 		case modeDone:
 			// No flush occurred before the handler returned.
 			// Send the data as one chunk.
@@ -99,14 +102,12 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				ctx.Response.Header.Set(fasthttp.HeaderContentType, http.DetectContentType(b[:l]))
 			}
 
-			w.responseMutex.Lock()
 			if len(*w.responseBody) > 0 {
 				ctx.Response.SetBody(*w.responseBody)
 			}
-			w.responseMutex.Unlock()
 
-			// Release after sending response.
-			releaseNetHTTPResponseWriter(w)
+			// Signal that the net/http -> fasthttp copy is complete.
+			w.wg.Done()
 
 		case modeFlushed:
 			// Flush occurred before handler returned.
@@ -132,7 +133,6 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 
 			// Lock the current response body until
 			// it is sent in the StreamWriter function.
-			w.responseMutex.Lock()
 			if !haveContentType {
 				// From net/http.ResponseWriter.Write:
 				// If the Header does not contain a Content-Type line, Write adds a Content-Type set
@@ -146,7 +146,14 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			}
 
 			// Start streaming mode on return.
+			w.r, w.w = io.Pipe()
 			ctx.SetBodyStreamWriter(func(bw *bufio.Writer) {
+				// Signal that streaming completed on return.
+				defer func() {
+					w.r.Close()
+					w.wg.Done()
+				}()
+
 				// Stream the first chunk.
 				if len(*w.responseBody) > 0 {
 					_, _ = bw.Write(*w.responseBody)
@@ -154,7 +161,6 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				}
 				// The current response body is no longer used
 				// past this point.
-				w.responseMutex.Unlock()
 
 				// Stream the rest of the data that is read
 				// from the net/http handler in 32 KiB chunks.
@@ -163,16 +169,13 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				// as data comes in.
 				chunk := acquireBuffer()
 				*chunk = (*chunk)[:minBufferSize]
+				defer releaseBuffer(chunk)
 				for {
 					// Read net/http handler chunk.
 					n, err := w.r.Read(*chunk)
 					if err != nil {
 						// Handler ended due to an io.EOF
 						// or an error occurred.
-						//
-						// Release the response writer for reuse.
-						releaseBuffer(chunk)
-						releaseNetHTTPResponseWriter(w)
 						return
 					}
 
@@ -182,10 +185,6 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 						if err != nil {
 							// Handler ended due to an io.ErrPipeClosed
 							// or an error occurred.
-							//
-							// Release the response writer for reuse.
-							releaseBuffer(chunk)
-							releaseNetHTTPResponseWriter(w)
 							return
 						}
 
@@ -193,10 +192,6 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 						if err != nil {
 							// Handler ended due to an io.ErrPipeClosed
 							// or an error occurred.
-							//
-							// Release the response writer for reuse.
-							releaseBuffer(chunk)
-							releaseNetHTTPResponseWriter(w)
 							return
 						}
 					}
@@ -213,13 +208,12 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// The net/http handler called w.Hijack().
 			// Copy data bidirectionally between the
 			// net/http and fasthttp connections.
-			var wg sync.WaitGroup
-			wg.Add(2)
+			w.hijackedWg.Add(2)
 
 			// Note: It is safe to assume that net.Conn automatically
 			// flushes data while copying.
 			go func() {
-				defer wg.Done()
+				defer w.hijackedWg.Done()
 				_, _ = io.Copy(ctx.Conn(), w.handlerConn)
 
 				// Close the fasthttp connection when
@@ -227,17 +221,15 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				_ = ctx.Conn().Close()
 			}()
 			go func() {
-				defer wg.Done()
+				defer w.hijackedWg.Done()
 				_, _ = io.Copy(w.handlerConn, ctx.Conn())
 				// Note: Only the net/http handler
 				// should close the connection.
 			}()
+			w.hijackedWg.Wait()
 
-			// Wait for the net/http handler to finish
-			// writing to the hijacked connection prior to releasing
-			// the writer into the writer pool.
-			wg.Wait()
-			releaseNetHTTPResponseWriter(w)
+			// Signal that the hijacked connection was closed.
+			w.wg.Done()
 		}
 	}
 }
@@ -254,48 +246,59 @@ var bufferPool = &sync.Pool{
 
 var writerPool = &sync.Pool{
 	New: func() any {
-		pr, pw := io.Pipe()
 		return &netHTTPResponseWriter{
 			h:            make(http.Header),
-			r:            pr,
-			w:            pw,
-			modeCh:       make(chan ModeType),
+			modeCh:       make(chan modeType),
 			responseBody: acquireBuffer(),
 			streamCond:   sync.NewCond(&sync.Mutex{}),
 		}
 	},
 }
 
-type ModeType int
+// modeType are all possible responseWriter modes.
+type modeType int
 
 const (
-	modeUnknown ModeType = iota
+	modeUnknown modeType = iota //nolint:unused
+
+	// modeDone means a response should directly copy the
+	// net/http data into fashttp.RequestCtx on completion.
 	modeDone
+
+	// modeFlushed means a response should send a buffered stream
+	// of data every time netHTTPResponseWriter.Flush() is called.
 	modeFlushed
+
+	// modeHijacked means that a response should do nothing else but
+	// copy data directly into the client's raw connection.
 	modeHijacked
 )
 
+// netHTTPResponseWriter represents a net/http adaptor that implements
+// the http.ResponseWriter, http.Flusher, and http.Hijacker interfaces.
 type netHTTPResponseWriter struct {
-	handlerConn   net.Conn
-	ctx           *fasthttp.RequestCtx
-	h             http.Header
-	r             *io.PipeReader
-	w             *io.PipeWriter
-	modeCh        chan ModeType
-	responseBody  *[]byte
-	streamCond    *sync.Cond
-	statusCode    int
-	once          sync.Once
-	statusMutex   sync.Mutex
-	responseMutex sync.Mutex
-	connMutex     sync.Mutex
-	isStreaming   bool
+	handlerConn  net.Conn
+	ctx          *fasthttp.RequestCtx
+	h            http.Header
+	r            *io.PipeReader
+	w            *io.PipeWriter
+	modeCh       chan modeType
+	responseBody *[]byte
+	streamCond   *sync.Cond
+	statusCode   int
+	chOnce       sync.Once
+	closeOnce    sync.Once
+	isStreaming  bool
+	wg           sync.WaitGroup
+	hijackedWg   sync.WaitGroup
 }
 
+// acquireNetHTTPResponseWriter returns a pointer to a slice of 0 length and
+// at least minBufferSize capacity.
 func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWriter {
 	w, ok := writerPool.Get().(*netHTTPResponseWriter)
 	if !ok {
-		panic("fasthttpadaptor: cannot get *netHTTPResponseWriter from writerPool")
+		panic("fasthttpadaptor: cannot get *responseWriter from writerPool")
 	}
 	w.reset()
 
@@ -303,12 +306,14 @@ func acquireNetHTTPResponseWriter(ctx *fasthttp.RequestCtx) *netHTTPResponseWrit
 	return w
 }
 
+// releaseNetHTTPResponseWriter recycles the buffer for reuse.
 func releaseNetHTTPResponseWriter(w *netHTTPResponseWriter) {
 	releaseBuffer(w.responseBody)
-	w.Close()
 	writerPool.Put(w)
 }
 
+// acquireBuffer returns a pointer to a slice of 0 length and
+// at least minBufferSize capacity.
 func acquireBuffer() *[]byte {
 	buf, ok := bufferPool.Get().(*[]byte)
 	if !ok {
@@ -319,31 +324,34 @@ func acquireBuffer() *[]byte {
 	return buf
 }
 
+// releaseBuffer recycles the buffer for reuse.
 func releaseBuffer(buf *[]byte) {
 	bufferPool.Put(buf)
 }
 
+// StatusCode returns the response's status code.
+//
+// If no status code is set, it returns http.StatusOK by default.
 func (w *netHTTPResponseWriter) StatusCode() int {
-	w.statusMutex.Lock()
-	defer w.statusMutex.Unlock()
-
 	if w.statusCode == 0 {
 		return http.StatusOK
 	}
 	return w.statusCode
 }
 
+// Header returns the current response header.
 func (w *netHTTPResponseWriter) Header() http.Header {
 	return w.h
 }
 
+// WriteHeader sets the response's status code.
 func (w *netHTTPResponseWriter) WriteHeader(statusCode int) {
-	w.statusMutex.Lock()
-	defer w.statusMutex.Unlock()
-
 	w.statusCode = statusCode
 }
 
+// Write writes the data to the connection.
+//
+// Write supports both buffered mode and streaming mode.
 func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 	w.streamCond.L.Lock()
 	defer w.streamCond.L.Unlock()
@@ -355,16 +363,18 @@ func (w *netHTTPResponseWriter) Write(p []byte) (int, error) {
 	}
 
 	// Streaming mode is off.
-	// Write to the first chunk for flushing later.
-	w.responseMutex.Lock()
+	// Write to the response body buffer for flushing later.
 	*w.responseBody = append(*w.responseBody, p...)
-	w.responseMutex.Unlock()
 	return len(p), nil
 }
 
+// Flush signals streaming mode.
+//
+// To ensure proper setup when using responseWriter.Write,
+// Flush blocks until streaming mode is ready.
 func (w *netHTTPResponseWriter) Flush() {
 	// Trigger streaming mode setup.
-	w.once.Do(func() {
+	w.chOnce.Do(func() {
 		w.modeCh <- modeFlushed
 	})
 
@@ -376,8 +386,11 @@ func (w *netHTTPResponseWriter) Flush() {
 	}
 }
 
+// Hijack signals hijack mode.
+//
+// When called, the net/http handler assumes full control over the returned connection.
 func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	// Hijack assumes control of the connection, so we need to prevent fasthttp from closing it or
+	// Prevent fasthttp from closing it or
 	// doing anything else with it.
 	w.ctx.HijackSetNoResponse(true)
 
@@ -385,47 +398,44 @@ func (w *netHTTPResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	w.handlerConn = fasthttpConn
 
 	// Trigger hijacked mode.
-	w.once.Do(func() {
+	w.chOnce.Do(func() {
 		w.modeCh <- modeHijacked
 	})
 
 	bufRW := bufio.NewReadWriter(bufio.NewReader(netHTTPConn), bufio.NewWriter(netHTTPConn))
 
 	// Write any unflushed body to the hijacked connection buffer.
-	w.responseMutex.Lock()
 	if len(*w.responseBody) > 0 {
 		_, _ = bufRW.Write(*w.responseBody)
 		_ = bufRW.Flush()
 	}
-	w.responseMutex.Unlock()
 	return netHTTPConn, bufRW, nil
 }
 
+// Close signals that the net/http handler
+// finished using the writer.
+//
+// When called in streaming mode, the responseWriter can flush the remaining unread data
+// and Close the client connection. Otherwise, this method does nothing.
 func (w *netHTTPResponseWriter) Close() error {
-	_ = w.w.Close()
-	_ = w.r.Close()
-
-	w.connMutex.Lock()
-	if w.handlerConn != nil {
-		_ = w.handlerConn.Close()
-	}
-	w.connMutex.Unlock()
+	w.closeOnce.Do(func() {
+		if w.w != nil {
+			_ = w.w.Close()
+		}
+	})
 	return nil
 }
 
+// reset clears data from a recycled responseWriter.
 func (w *netHTTPResponseWriter) reset() {
 	// Note: reset() must only run after a fasthttp handler finishes
 	// proxying the full net/http handler response to ensure no data races.
 	w.ctx = nil
-	w.connMutex.Lock()
-	w.handlerConn = nil
-	w.connMutex.Unlock()
 	w.statusCode = 0
 
-	// Open new bidirectional pipes
-	pr, pw := io.Pipe()
-	w.r = pr
-	w.w = pw
+	w.w = nil
+	w.r = nil
+	w.handlerConn = nil
 
 	// Clear the http Header
 	for key := range w.h {
@@ -435,8 +445,7 @@ func (w *netHTTPResponseWriter) reset() {
 	// Get a new buffer for the response body
 	w.responseBody = acquireBuffer()
 
-	w.once = sync.Once{}
-	w.streamCond.L.Lock()
+	w.chOnce = sync.Once{}
+	w.closeOnce = sync.Once{}
 	w.isStreaming = false
-	w.streamCond.L.Unlock()
 }
