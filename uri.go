@@ -289,6 +289,9 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 
 	if len(host) == 0 || bytes.Contains(uri, strColonSlashSlash) {
 		scheme, newHost, newURI := splitHostURI(host, uri)
+		if len(scheme) > 0 && !isValidScheme(scheme) {
+			return fmt.Errorf("invalid scheme %q", scheme)
+		}
 		u.SetSchemeBytes(scheme)
 		host = newHost
 		uri = newURI
@@ -375,6 +378,28 @@ func validUserinfo(userinfo []byte) bool {
 		default:
 			return false
 		}
+	}
+	return true
+}
+
+func isValidScheme(scheme []byte) bool {
+	if len(scheme) == 0 {
+		return false
+	}
+	first := scheme[0]
+	if (first < 'a' || first > 'z') && (first < 'A' || first > 'Z') {
+		return false
+	}
+	for i := 1; i < len(scheme); i++ {
+		c := scheme[i]
+		if ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || ('0' <= c && c <= '9') {
+			continue
+		}
+		switch c {
+		case '+', '-', '.':
+			continue
+		}
+		return false
 	}
 	return true
 }
