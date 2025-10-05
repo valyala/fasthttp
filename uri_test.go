@@ -203,6 +203,22 @@ func TestURIUpdate(t *testing.T) {
 	testURIUpdate(t, "http://example.net/", "//example.com:8080/", "http://example.com:8080/")
 }
 
+func TestURIRejectsMixedBracketHost(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"http://127.0.0.1[192.168.0.1]/",
+		"http://example.com[fd00::1]/",
+	}
+
+	for _, raw := range tests {
+		var u URI
+		if err := u.Parse(nil, []byte(raw)); err == nil {
+			t.Fatalf("expected error for %q", raw)
+		}
+	}
+}
+
 func testURIUpdate(t *testing.T, base, update, result string) {
 	var u URI
 	u.Parse(nil, []byte(base)) //nolint:errcheck
