@@ -2349,11 +2349,21 @@ func (s *Server) serveConn(c net.Conn) error {
 						writeTimeout = s.WriteTimeout
 					}
 				}
-				// read body
-				if s.StreamRequestBody {
-					err = ctx.Request.readBodyStream(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
-				} else {
-					err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
+
+				if err == nil {
+					if err = ctx.Request.parseURI(); err != nil {
+						bw = s.writeErrorResponse(bw, ctx, serverName, err)
+						break
+					}
+				}
+
+				if err == nil {
+					// read body
+					if s.StreamRequestBody {
+						err = ctx.Request.readBodyStream(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
+					} else {
+						err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
+					}
 				}
 			}
 			// When StreamRequestBody is set to true, we cannot safely release br.
