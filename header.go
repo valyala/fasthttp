@@ -2051,8 +2051,7 @@ func (h *ResponseHeader) PeekKeys() [][]byte {
 // Any future calls to the Peek* will modify the returned value.
 // Do not store references to returned value. Make copies instead.
 func (h *header) PeekTrailerKeys() [][]byte {
-	h.mulHeader = copyTrailer(h.mulHeader, h.trailer)
-	return h.mulHeader
+	return h.trailer
 }
 
 // Cookie returns cookie for the given key.
@@ -3353,14 +3352,19 @@ func appendTrailerBytes(dst []byte, trailer [][]byte, sep []byte) []byte {
 }
 
 func copyTrailer(dst, src [][]byte) [][]byte {
-	if cap(dst) > len(src) {
+	if cap(dst) >= len(src) {
 		dst = dst[:len(src)]
 	} else {
 		dst = append(dst[:0], src...)
 	}
 
 	for i := range dst {
-		dst[i] = make([]byte, len(src[i]))
+		l := len(src[i])
+		if cap(dst[i]) >= l {
+			dst[i] = dst[i][:l]
+		} else {
+			dst[i] = make([]byte, l)
+		}
 		copy(dst[i], src[i])
 	}
 	return dst
