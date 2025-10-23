@@ -75,7 +75,7 @@ type Dialer struct {
 
 // GetDialFunc method returns a fasthttp-style dial function. The useEnv parameter
 // determines whether the proxy address comes from Dialer.Config or from environment variables.
-func (d *Dialer) GetDialFunc(useEnv bool) (dialFunc fasthttp.DialFunc, err error) {
+func (d *Dialer) GetDialFunc(useEnv bool) (fasthttp.DialFunc, error) {
 	config := &d.Config
 	if useEnv {
 		config = httpproxy.FromEnvironment()
@@ -89,7 +89,7 @@ func (d *Dialer) GetDialFunc(useEnv bool) (dialFunc fasthttp.DialFunc, err error
 	if proxyURLIsSame {
 		var proxyURL *url.URL
 		var proxyDialer proxy.Dialer
-		proxyURL, err = proxyFunc(tmpURL)
+		proxyURL, err := proxyFunc(tmpURL)
 		if err != nil {
 			return nil, err
 		}
@@ -153,7 +153,7 @@ func (d *Dialer) GetDialFunc(useEnv bool) (dialFunc fasthttp.DialFunc, err error
 }
 
 // Dial is solely for implementing the proxy.Dialer interface.
-func (d *Dialer) Dial(network, addr string) (conn net.Conn, err error) {
+func (d *Dialer) Dial(network, addr string) (net.Conn, error) {
 	if network == "tcp4" {
 		if d.Timeout > 0 {
 			return d.DialTimeout(addr, d.Timeout)
@@ -166,7 +166,7 @@ func (d *Dialer) Dial(network, addr string) (conn net.Conn, err error) {
 		}
 		return d.TCPDialer.DialDualStack(addr)
 	}
-	err = errors.New("dont support the network: " + network)
+	err := errors.New("dont support the network: " + network)
 	return nil, err
 }
 
@@ -190,8 +190,8 @@ func (d DialerFunc) Dial(network, addr string) (net.Conn, error) {
 }
 
 // Establish a connection through an HTTP proxy.
-func httpProxyDial(dialer proxy.Dialer, network, addr, proxyAddr, auth string) (conn net.Conn, err error) {
-	conn, err = dialer.Dial(network, proxyAddr)
+func httpProxyDial(dialer proxy.Dialer, network, addr, proxyAddr, auth string) (net.Conn, error) {
+	conn, err := dialer.Dial(network, proxyAddr)
 	if err != nil {
 		return nil, err
 	}
