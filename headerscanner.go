@@ -27,7 +27,7 @@ func (s *headerScanner) next() bool {
 
 		i := bytes.Index(s.b, strCRLFCRLF)
 		if i < 0 {
-			s.err = errNeedMore
+			s.err = ErrNeedMore
 			return false
 		}
 		i += 4

@@ -2314,7 +2314,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			// outgoing buffer first so it doesn't have to wait.
 			if bw != nil && bw.Buffered() > 0 {
 				err = ctx.Request.Header.readLoop(br, false)
-				if err == errNeedMore {
+				if err == ErrNeedMore {
 					err = bw.Flush()
 					if err != nil {
 						break
