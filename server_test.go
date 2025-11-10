@@ -500,7 +500,7 @@ func TestServerErrSmallBuffer(t *testing.T) {
 		t.Fatal("missing 'Connection: close' response header")
 	}
 
-	expectedErr := errSmallBuffer.Error()
+	expectedErr := ErrSmallReadBuffer.Error()
 	if !strings.Contains(serverErr.Error(), expectedErr) {
 		t.Fatalf("unexpected log output: %v. Expecting %q", serverErr, expectedErr)
 	}
