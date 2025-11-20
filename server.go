@@ -618,6 +618,12 @@ type RequestCtx struct {
 
 	connID           uint64
 	connRequestNum   uint64
+	
+	// Connection-level user value for rate limiting and connection tracking.
+	// This value persists across multiple requests on the same connection.
+	// Use SetConnUserValue/ConnUserValue for thread-safe access.
+	connUserValue    atomic.Value
+	
 	hijackNoResponse bool
 }
 
@@ -869,6 +875,7 @@ func (ctx *RequestCtx) reset() {
 
 	ctx.connID = 0
 	ctx.connRequestNum = 0
+	ctx.connUserValue = atomic.Value{} // Reset connection-level user value
 	ctx.connTime = zeroTime
 	ctx.remoteAddr = nil
 	ctx.time = zeroTime
@@ -2867,6 +2874,35 @@ func (ctx *RequestCtx) Err() error {
 // This method is the same as calling ctx.UserValue(key).
 func (ctx *RequestCtx) Value(key any) any {
 	return ctx.UserValue(key)
+}
+
+// SetConnUserValue stores a value at the connection level.
+// This value persists across all requests on the same connection.
+func (ctx *RequestCtx) SetConnUserValue(value any) {
+	ctx.connUserValue.Store(value)
+}
+
+// ConnUserValue returns the connection-level user value.
+// Returns nil if no value was set.
+func (ctx *RequestCtx) ConnUserValue() any {
+	return ctx.connUserValue.Load()
+}
+
+// SetConnUserValueUint64 stores a uint64 value at the connection level.
+// Optimized for rate limiting and connection counters.
+func (ctx *RequestCtx) SetConnUserValueUint64(value uint64) {
+	ctx.connUserValue.Store(value)
+}
+
+// ConnUserValueUint64 returns the connection-level value as uint64.
+// Returns 0 if no value was set or if the value is not uint64.
+func (ctx *RequestCtx) ConnUserValueUint64() uint64 {
+	if v := ctx.connUserValue.Load(); v != nil {
+		if val, ok := v.(uint64); ok {
+			return val
+		}
+	}
+	return 0
 }
 
 var fakeServer = &Server{
