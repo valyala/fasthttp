@@ -4514,3 +4514,48 @@ func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRequestCtxConnUserValue(t *testing.T) {
+	t.Run("string", func(t *testing.T) {
+		var ctx RequestCtx
+		
+		if val := ctx.ConnUserValue(); val != nil {
+			t.Fatalf("expected nil, got %v", val)
+		}
+		
+		testStr := "test-value"
+		ctx.SetConnUserValue(testStr)
+		if val := ctx.ConnUserValue(); val != testStr {
+			t.Fatalf("expected %q, got %v", testStr, val)
+		}
+		
+		if val := ctx.ConnUserValueUint64(); val != 0 {
+			t.Fatalf("expected 0 for non-uint64 value, got %d", val)
+		}
+	})
+	
+	// Test uint64 values 
+	t.Run("uint64", func(t *testing.T) {
+		var ctx RequestCtx
+		
+		var testUint uint64 = 42
+		ctx.SetConnUserValueUint64(testUint)
+		if val := ctx.ConnUserValueUint64(); val != testUint {
+			t.Fatalf("expected %d, got %d", testUint, val)
+		}
+		
+		if val := ctx.ConnUserValue(); val != testUint {
+			t.Fatalf("expected %d, got %v", testUint, val)
+		}
+	})
+	
+	// Test reset functionality
+	t.Run("reset", func(t *testing.T) {
+		var ctx RequestCtx
+		ctx.SetConnUserValue("test")
+		ctx.reset()
+		if val := ctx.ConnUserValue(); val != nil {
+			t.Fatalf("expected nil after reset, got %v", val)
+		}
+	})
+}
