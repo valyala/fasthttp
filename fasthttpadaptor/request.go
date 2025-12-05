@@ -3,8 +3,10 @@ package fasthttpadaptor
 import (
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/valyala/fasthttp"
@@ -67,4 +69,63 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	}
 
 	return nil
+}
+
+// ConvertNetHttpToFastHttp converts an http.Request to a fasthttp.RequestCtx.
+// The caller is responsible for the lifecycle of the fasthttp.RequestCtx.
+func ConvertNetHttpRequestToFastHttpRequest(r *http.Request, ctx *fasthttp.RequestCtx) error {
+	ctx.Request.Header.SetMethod(r.Method)
+
+	if r.RequestURI != "" {
+		ctx.Request.SetRequestURI(r.RequestURI)
+	} else if r.URL != nil {
+		ctx.Request.SetRequestURI(r.URL.RequestURI())
+	}
+
+	ctx.Request.Header.SetProtocol(r.Proto)
+	ctx.Request.SetHost(r.Host)
+
+	for k, values := range r.Header {
+		for i, v := range values {
+			if i == 0 {
+				ctx.Request.Header.Set(k, v)
+			} else {
+				ctx.Request.Header.Add(k, v)
+			}
+		}
+	}
+
+	if r.Body != nil {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return err
+		}
+		ctx.Request.SetBody(body)
+	}
+
+	if r.RemoteAddr != "" {
+		addr := parseRemoteAddr(r.RemoteAddr)
+		ctx.SetRemoteAddr(addr)
+	}
+
+	return nil
+}
+
+func parseRemoteAddr(addr string) net.Addr {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return &net.TCPAddr{IP: net.ParseIP(addr)}
+	}
+	return &net.TCPAddr{
+		IP:   net.ParseIP(host),
+		Port: parsePort(port),
+	}
+}
+
+func parsePort(port string) int {
+	p, err := strconv.Atoi(port)
+	if err != nil {
+		return 0
+	}
+	return p
 }
