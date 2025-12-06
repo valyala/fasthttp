@@ -96,11 +96,7 @@ func ConvertNetHttpRequestToFastHttpRequest(r *http.Request, ctx *fasthttp.Reque
 	}
 
 	if r.Body != nil {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			return err
-		}
-		ctx.Request.SetBody(body)
+		ctx.Request.SetBodyStream(r.Body, int(r.ContentLength))
 	}
 
 	if r.RemoteAddr != "" {
