@@ -174,12 +174,13 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		t.Parallel()
 		bodyContent := []byte("test body content")
 		httpReq := &http.Request{
-			Method:     "POST",
-			RequestURI: "/",
-			Proto:      "HTTP/1.1",
-			Host:       "example.com",
-			Header:     http.Header{},
-			Body:       io.NopCloser(bytes.NewReader(bodyContent)),
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(bytes.NewReader(bodyContent)),
+			ContentLength: int64(len(bodyContent)),
 		}
 
 		ctx := &fasthttp.RequestCtx{}
@@ -264,18 +265,24 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 	t.Run("body read error", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{
-			Method:     "POST",
-			RequestURI: "/",
-			Proto:      "HTTP/1.1",
-			Host:       "example.com",
-			Header:     http.Header{},
-			Body:       io.NopCloser(errReader{}),
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(errReader{}),
+			ContentLength: 10,
 		}
 
 		ctx := &fasthttp.RequestCtx{}
 		err := ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		if err != nil {
+			t.Fatalf("unexpected error during conversion: %v", err)
+		}
+
+		_, err = io.ReadAll(ctx.RequestBodyStream())
 		if err == nil {
-			t.Fatal("expected error, got nil")
+			t.Fatal("expected error when reading body stream, got nil")
 		}
 	})
 }
