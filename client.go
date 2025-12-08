@@ -1295,7 +1295,7 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	req.timeout = time.Until(deadline)
 	if req.timeout <= 0 {
-		return ErrTimeout
+		return wrapErrWithUpstream(ErrTimeout, c.Addr)
 	}
 	return c.Do(req, resp)
 }
@@ -1374,7 +1374,7 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		if timeout > 0 {
 			req.timeout = time.Until(deadline)
 			if req.timeout <= 0 {
-				err = ErrTimeout
+				err = wrapErrWithUpstream(ErrTimeout, c.Addr)
 				break
 			}
 		}

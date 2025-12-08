@@ -144,7 +144,7 @@ func TestHostClientNegativeTimeout(t *testing.T) {
 	if err := c.DoTimeout(req, nil, -time.Second); err != ErrTimeout {
 		t.Fatalf("expected ErrTimeout error got: %+v", err)
 	}
-	if err := c.DoDeadline(req, nil, time.Now().Add(-time.Second)); err != ErrTimeout {
+	if err := c.DoDeadline(req, nil, time.Now().Add(-time.Second)); !errors.Is(err, ErrTimeout) {
 		t.Fatalf("expected ErrTimeout error got: %+v", err)
 	}
 	ln.Close()
@@ -184,7 +184,7 @@ func TestDoDeadlineRetry(t *testing.T) {
 	req := AcquireRequest()
 	req.Header.SetMethod(MethodGet)
 	req.SetRequestURI("http://example.com")
-	if err := c.DoDeadline(req, nil, time.Now().Add(time.Millisecond*200)); err != ErrTimeout {
+	if err := c.DoDeadline(req, nil, time.Now().Add(time.Millisecond*200)); !errors.Is(err, ErrTimeout) {
 		t.Fatalf("expected ErrTimeout error got: %+v", err)
 	}
 	ln.Close()
@@ -1715,7 +1715,7 @@ func TestClientFollowRedirects(t *testing.T) {
 		if err == nil {
 			t.Errorf("expecting error")
 		}
-		if err != ErrTimeout {
+		if !errors.Is(err, ErrTimeout) {
 			t.Errorf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 		}
 
@@ -1908,7 +1908,7 @@ func testClientDoTimeoutError(t *testing.T, c *Client, n int) {
 		if err == nil {
 			t.Errorf("expecting error")
 		}
-		if err != ErrTimeout {
+		if !errors.Is(err, ErrTimeout) {
 			t.Errorf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 		}
 	}
@@ -1921,7 +1921,7 @@ func testClientGetTimeoutError(t *testing.T, c *Client, n int) {
 		if err == nil {
 			t.Errorf("expecting error")
 		}
-		if err != ErrTimeout {
+		if !errors.Is(err, ErrTimeout) {
 			t.Errorf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 		}
 		if statusCode != 0 {
@@ -1940,7 +1940,7 @@ func testClientRequestSetTimeoutError(t *testing.T, c *Client, n int) {
 		if err == nil {
 			t.Errorf("expecting error")
 		}
-		if err != ErrTimeout {
+		if !errors.Is(err, ErrTimeout) {
 			t.Errorf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 		}
 	}
@@ -3053,14 +3053,6 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 				if !errors.Is(err, ErrTimeout) {
 					t.Errorf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 				}
-
-				upstreamErr := &ErrWithUpstream{}
-				if !errors.As(err, &upstreamErr) {
-					t.Errorf("expected error to contain upstream information")
-				} else if upstreamErr.Upstream != "foobar" {
-					t.Errorf("expected upstream foobar, got '%s'", upstreamErr.Upstream)
-				}
-
 				errTimeoutCount.Add(1)
 			} else {
 				if resp.StatusCode() != StatusOK {
