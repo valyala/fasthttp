@@ -1540,9 +1540,9 @@ func (e *timeoutError) Timeout() bool {
 //	hc := fasthttp.HostClient{Addr: "foo.com,bar.com"}
 //	err := hc.Do(req, res)
 //
-//	var dialErr *fasthttp.ErrWithUpstream
-//	if errors.As(err, &dialErr) {
-//		upstream = dialErr.Upstream // 34.206.39.153:80
+//	var upstreamErr *fasthttp.ErrWithUpstream
+//	if errors.As(err, &upstreamErr) {
+//		upstream = upstreamErr.Upstream // 34.206.39.153:80
 //	}
 type ErrWithUpstream struct {
 	wrapErr  error

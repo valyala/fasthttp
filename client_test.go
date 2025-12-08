@@ -3050,9 +3050,17 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 			resp := AcquireResponse()
 
 			if err := c.DoDeadline(req, resp, time.Now().Add(timeout)); err != nil {
-				if err != ErrTimeout {
+				if !errors.Is(err, ErrTimeout) {
 					t.Errorf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 				}
+
+				upstreamErr := &ErrWithUpstream{}
+				if !errors.As(err, &upstreamErr) {
+					t.Errorf("expected error to contain upstream information")
+				} else if upstreamErr.Upstream != "foobar" {
+					t.Errorf("expected upstream foobar, got '%s'", upstreamErr.Upstream)
+				}
+
 				errTimeoutCount.Add(1)
 			} else {
 				if resp.StatusCode() != StatusOK {
