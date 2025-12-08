@@ -1393,6 +1393,9 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		if attempts >= maxAttempts {
 			break
 		}
+
+		err = wrapErrWithUpstream(err, c.Addr)
+
 		if c.RetryIfErr != nil {
 			resetTimeout, retry = c.RetryIfErr(req, attempts, err)
 		} else {
@@ -1528,6 +1531,37 @@ func (e *timeoutError) Error() string {
 //	if x, ok := err.(interface{ Timeout() bool }); ok && x.Timeout() {
 func (e *timeoutError) Timeout() bool {
 	return true
+}
+
+// ErrWithUpstream wraps errors with upstream information where upstream info exists.
+//
+// Should use errors.As to get upstream information from error:
+//
+//	hc := fasthttp.HostClient{Addr: "foo.com,bar.com"}
+//	err := hc.Do(req, res)
+//
+//	var dialErr *fasthttp.ErrWithUpstream
+//	if errors.As(err, &dialErr) {
+//		upstream = dialErr.Upstream // 34.206.39.153:80
+//	}
+type ErrWithUpstream struct {
+	wrapErr  error
+	Upstream string
+}
+
+func (e *ErrWithUpstream) Error() string {
+	return fmt.Sprintf("error on upstream %s: %s", e.Upstream, e.wrapErr.Error())
+}
+
+func (e *ErrWithUpstream) Unwrap() error {
+	return e.wrapErr
+}
+
+func wrapErrWithUpstream(err error, upstream string) *ErrWithUpstream {
+	return &ErrWithUpstream{
+		wrapErr:  err,
+		Upstream: upstream,
+	}
 }
 
 // ErrTimeout is returned from timed out calls.
