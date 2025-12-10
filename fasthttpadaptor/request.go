@@ -73,7 +73,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 
 // ConvertNetHttpToFastHttp converts an http.Request to a fasthttp.RequestCtx.
 // The caller is responsible for the lifecycle of the fasthttp.RequestCtx.
-func ConvertNetHttpRequestToFastHttpRequest(r *http.Request, ctx *fasthttp.RequestCtx) error {
+func ConvertNetHttpRequestToFastHttpRequest(r *http.Request, ctx *fasthttp.RequestCtx) {
 	ctx.Request.Header.SetMethod(r.Method)
 
 	if r.RequestURI != "" {
@@ -104,7 +104,6 @@ func ConvertNetHttpRequestToFastHttpRequest(r *http.Request, ctx *fasthttp.Reque
 		ctx.SetRemoteAddr(addr)
 	}
 
-	return nil
 }
 
 func parseRemoteAddr(addr string) net.Addr {
