@@ -75,7 +75,7 @@ func BenchmarkConvertNetHttpRequestToFastHttpRequest(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = ConvertNetHttpRequestToFastHttpRequest(&httpReq, ctx)
+		ConvertNetHttpRequestToFastHttpRequest(&httpReq, ctx)
 	}
 }
 
@@ -100,10 +100,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		err := ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
 
 		if string(ctx.Method()) != "POST" {
 			t.Errorf("expected method POST, got %s", ctx.Method())
@@ -134,10 +131,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		err := ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
 
 		if string(ctx.RequestURI()) != "/fallback/path?foo=bar" {
 			t.Errorf("expected URI /fallback/path?foo=bar, got %s", ctx.RequestURI())
@@ -157,10 +151,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		err := ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
 
 		if string(ctx.Request.Header.Peek("X-Custom-Header")) != "custom-value" {
 			t.Errorf("expected header value custom-value, got %s", ctx.Request.Header.Peek("X-Custom-Header"))
@@ -180,10 +171,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		err := ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
 
 		// Check all header values are present
 		var values []string
@@ -212,10 +200,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		err := ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
 
 		if !bytes.Equal(ctx.Request.Body(), bodyContent) {
 			t.Errorf("expected body %q, got %q", bodyContent, ctx.Request.Body())
@@ -234,10 +219,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		err := ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
 
 		if len(ctx.Request.Body()) != 0 {
 			t.Errorf("expected empty body, got %q", ctx.Request.Body())
@@ -256,10 +238,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		err := ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
 
 		remoteAddr := ctx.RemoteAddr().String()
 		if remoteAddr != "192.168.1.100:8080" {
@@ -279,10 +258,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		err := ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
 
 		remoteAddr := ctx.RemoteAddr().String()
 		if remoteAddr != "192.168.1.100:0" {
@@ -303,12 +279,9 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		err := ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
-		if err != nil {
-			t.Fatalf("unexpected error during conversion: %v", err)
-		}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
 
-		_, err = io.ReadAll(ctx.RequestBodyStream())
+		_, err := io.ReadAll(ctx.RequestBodyStream())
 		if err == nil {
 			t.Fatal("expected error when reading body stream, got nil")
 		}
