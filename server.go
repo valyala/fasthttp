@@ -2718,7 +2718,7 @@ func acquireByteReader(ctxP **RequestCtx) (*bufio.Reader, error) {
 	}
 
 	ctx.fbr.c = c
-	ctx.fbr.ch = b[0]
+	ctx.fbr.ch = b[0] // #nosec G602
 	ctx.fbr.byteRead = false
 	r := acquireReader(ctx)
 	r.Reset(&ctx.fbr)
