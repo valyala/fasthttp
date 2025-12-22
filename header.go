@@ -2839,12 +2839,16 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 
 	protoStr := b[n+1:]
 
-	// Follow RFCs 7230 and 9112 and require that HTTP versions match the following pattern: HTTP/[0-9]\.[0-9]
 	if len(protoStr) != len(strHTTP11) {
-		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+		n = bytes.LastIndexByte(b, ' ')
+		protoStr = b[n+1:]
+		// Follow RFCs 7230 and 9112 and require that HTTP versions match the following pattern: HTTP/[0-9]\.[0-9]
+		if len(protoStr) != len(strHTTP11) {
+			if h.secureErrorLogMessage {
+				return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+			}
+			return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
 		}
-		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
 	}
 	if !bytes.HasPrefix(protoStr, strHTTP11[:5]) {
 		if h.secureErrorLogMessage {
