@@ -1562,7 +1562,7 @@ func (e *ErrWithUpstream) Unwrap() error {
 	return e.wrapErr
 }
 
-func wrapErrWithUpstream(err error, upstream string) *ErrWithUpstream {
+func wrapErrWithUpstream(err error, upstream string) error {
 	if err == nil {
 		return nil
 	}

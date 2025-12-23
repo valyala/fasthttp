@@ -615,7 +615,7 @@ func TestClientRedirectHostClientChangingSchemaHttp2Https(t *testing.T) {
 	}
 
 	_, _, err = reqClient.GetTimeout(nil, destURL, 4000*time.Millisecond)
-	if err != ErrHostClientRedirectToDifferentScheme {
+	if !errors.Is(err, ErrHostClientRedirectToDifferentScheme) {
 		t.Fatal("expected HostClient error")
 	}
 }
@@ -781,7 +781,7 @@ func TestClientReadTimeout(t *testing.T) {
 		req.SetRequestURI("http://localhost")
 		req.SetConnectionClose()
 
-		if err := c.Do(req, res); err != ErrTimeout {
+		if err := c.Do(req, res); !errors.Is(err, ErrTimeout) {
 			t.Errorf("expected ErrTimeout got %#v", err)
 		}
 
@@ -1430,7 +1430,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 
 			for {
 				if err := c.DoDeadline(req, resp, time.Now().Add(timeout)); err != nil {
-					if err == ErrNoFreeConns {
+					if errors.Is(err, ErrNoFreeConns) {
 						time.Sleep(time.Millisecond)
 						continue
 					}
@@ -2794,7 +2794,7 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 		t.Fatal("tlsClientHandshake completed successfully")
 	}
 
-	if err != ErrTLSHandshakeTimeout {
+	if !errors.Is(err, ErrTLSHandshakeTimeout) {
 		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
 	}
 }
@@ -2953,7 +2953,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 			resp := AcquireResponse()
 
 			if err := c.Do(req, resp); err != nil {
-				if err != ErrNoFreeConns {
+				if !errors.Is(err, ErrNoFreeConns) {
 					t.Errorf("unexpected error: %v. Expecting %v", err, ErrNoFreeConns)
 				}
 				errNoFreeConnsCount.Add(1)
@@ -3151,10 +3151,10 @@ func TestHostClientErrConnPoolStrategyNotImpl(t *testing.T) {
 	if err := client.Do(req, AcquireResponse()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if err := client.Do(req, &Response{}); err != ErrConnPoolStrategyNotImpl {
+	if err := client.Do(req, &Response{}); !errors.Is(err, ErrConnPoolStrategyNotImpl) {
 		t.Errorf("expected ErrConnPoolStrategyNotImpl error, got %v", err)
 	}
-	if err := client.Do(req, &Response{}); err != ErrConnPoolStrategyNotImpl {
+	if err := client.Do(req, &Response{}); !errors.Is(err, ErrConnPoolStrategyNotImpl) {
 		t.Errorf("expected ErrConnPoolStrategyNotImpl error, got %v", err)
 	}
 
@@ -3489,7 +3489,7 @@ func TestClientHeadWithBody(t *testing.T) {
 	err = c.Do(req, resp)
 	if err == nil {
 		t.Error("expected timeout error")
-	} else if err != ErrTimeout {
+	} else if !errors.Is(err, ErrTimeout) {
 		t.Error(err)
 	}
 }
