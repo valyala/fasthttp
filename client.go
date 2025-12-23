@@ -752,6 +752,9 @@ type HostClient struct {
 	// and whether to reset the request timeout—should be determined
 	// based on the return value of this field.
 	// This field is only effective within the range of MaxIdemponentCallAttempts.
+	//
+	// Check errors matches with errors.Is/errors.As, since errors are wrapped with upstream information.
+	// To get upstream information from the error, check ErrWithUpstream.
 	RetryIfErr RetryIfErrFunc
 
 	connsWait *wantConnQueue
@@ -1380,6 +1383,9 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		}
 
 		retry, err = c.do(req, resp)
+
+		err = wrapErrWithUpstream(err, c.Addr)
+
 		if err == nil || !retry {
 			break
 		}
@@ -1393,8 +1399,6 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		if attempts >= maxAttempts {
 			break
 		}
-
-		err = wrapErrWithUpstream(err, c.Addr)
 
 		if c.RetryIfErr != nil {
 			resetTimeout, retry = c.RetryIfErr(req, attempts, err)
@@ -1534,6 +1538,7 @@ func (e *timeoutError) Timeout() bool {
 }
 
 // ErrWithUpstream wraps errors with upstream information where upstream info exists.
+// Root error can be obtained via errors.Unwrap. Use errors.Is to check if root error matches.
 //
 // Should use errors.As to get upstream information from error:
 //
@@ -1558,6 +1563,10 @@ func (e *ErrWithUpstream) Unwrap() error {
 }
 
 func wrapErrWithUpstream(err error, upstream string) *ErrWithUpstream {
+	if err == nil {
+		return nil
+	}
+
 	return &ErrWithUpstream{
 		wrapErr:  err,
 		Upstream: upstream,
