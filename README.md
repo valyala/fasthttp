@@ -366,42 +366,42 @@ Important points:
   )
   ```
 
-  - r.Body -> [ctx.PostBody()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostBody)
-  - r.URL.Path -> [ctx.Path()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Path)
-  - r.URL -> [ctx.URI()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.URI)
-  - r.Method -> [ctx.Method()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Method)
-  - r.Header -> [ctx.Request.Header](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader)
-  - r.Header.Get() -> [ctx.Request.Header.Peek()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader.Peek)
-  - r.Host -> [ctx.Host()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Host)
-  - r.Form -> [ctx.QueryArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.QueryArgs) +
+  - [r.Body](https://pkg.go.dev/net/http#Request) **➜** [ctx.PostBody()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostBody)
+  - [r.URL.Path](https://pkg.go.dev/net/url#URL) **➜** [ctx.Path()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Path)
+  - [r.URL](https://pkg.go.dev/net/http#Request) **➜** [ctx.URI()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.URI)
+  - [r.Method](https://pkg.go.dev/net/http#Request) **➜** [ctx.Method()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Method)
+  - [r.Header](https://pkg.go.dev/net/http#Request) **➜** [ctx.Request.Header](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader)
+  - [r.Header.Get()](https://pkg.go.dev/net/http#Header.Get) **➜** [ctx.Request.Header.Peek()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader.Peek)
+  - [r.Host](https://pkg.go.dev/net/http#Request) **➜** [ctx.Host()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Host)
+  - [r.Form](https://pkg.go.dev/net/http#Request) **➜** [ctx.QueryArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.QueryArgs) +
     [ctx.PostArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostArgs)
-  - r.PostForm -> [ctx.PostArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostArgs)
-  - r.FormValue() -> [ctx.FormValue()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormValue)
-  - r.FormFile() -> [ctx.FormFile()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormFile)
-  - r.MultipartForm -> [ctx.MultipartForm()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.MultipartForm)
-  - r.RemoteAddr -> [ctx.RemoteAddr()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RemoteAddr)
-  - r.RequestURI -> [ctx.RequestURI()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RequestURI)
-  - r.TLS -> [ctx.IsTLS()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.IsTLS)
-  - r.Cookie() -> [ctx.Request.Header.Cookie()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader.Cookie)
-  - r.Referer() -> [ctx.Referer()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Referer)
-  - r.UserAgent() -> [ctx.UserAgent()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.UserAgent)
-  - w.Header() -> [ctx.Response.Header](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader)
-  - w.Header().Set() -> [ctx.Response.Header.Set()](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader.Set)
-  - w.Header().Set("Content-Type") -> [ctx.SetContentType()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetContentType)
-  - w.Header().Set("Set-Cookie") -> [ctx.Response.Header.SetCookie()](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader.SetCookie)
-  - w.Write() -> [ctx.Write()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Write),
+  - [r.PostForm](https://pkg.go.dev/net/http#Request) **➜** [ctx.PostArgs()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostArgs)
+  - [r.FormValue()](https://pkg.go.dev/net/http#Request.FormValue) **➜** [ctx.FormValue()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormValue)
+  - [r.FormFile()](https://pkg.go.dev/net/http#Request.FormFile) **➜** [ctx.FormFile()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormFile)
+  - [r.MultipartForm](https://pkg.go.dev/net/http#Request) **➜** [ctx.MultipartForm()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.MultipartForm)
+  - [r.RemoteAddr](https://pkg.go.dev/net/http#Request) **➜** [ctx.RemoteAddr()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RemoteAddr)
+  - [r.RequestURI](https://pkg.go.dev/net/http#Request) **➜** [ctx.RequestURI()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RequestURI)
+  - [r.TLS](https://pkg.go.dev/net/http#Request) **➜** [ctx.IsTLS()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.IsTLS)
+  - [r.Cookie()](https://pkg.go.dev/net/http#Request.Cookie) **➜** [ctx.Request.Header.Cookie()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestHeader.Cookie)
+  - [r.Referer()](https://pkg.go.dev/net/http#Request.Referer) **➜** [ctx.Referer()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Referer)
+  - [r.UserAgent()](https://pkg.go.dev/net/http#Request.UserAgent) **➜** [ctx.UserAgent()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.UserAgent)
+  - [w.Header()](https://pkg.go.dev/net/http#ResponseWriter) **➜** [ctx.Response.Header](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader)
+  - [w.Header().Set()](https://pkg.go.dev/net/http#Header.Set) **➜** [ctx.Response.Header.Set()](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader.Set)
+  - [w.Header().Set("Content-Type")](https://pkg.go.dev/net/http#Header.Set) **➜** [ctx.SetContentType()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetContentType)
+  - [w.Header().Set("Set-Cookie")](https://pkg.go.dev/net/http#Header.Set) **➜** [ctx.Response.Header.SetCookie()](https://pkg.go.dev/github.com/valyala/fasthttp#ResponseHeader.SetCookie)
+  - [w.Write()](https://pkg.go.dev/net/http#ResponseWriter) **➜** [ctx.Write()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Write),
     [ctx.SetBody()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetBody),
     [ctx.SetBodyStream()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetBodyStream),
     [ctx.SetBodyStreamWriter()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetBodyStreamWriter)
-  - w.WriteHeader() -> [ctx.SetStatusCode()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetStatusCode)
-  - w.(http.Hijacker).Hijack() -> [ctx.Hijack()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Hijack)
-  - http.Error() -> [ctx.Error()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Error)
-  - http.FileServer() -> [fasthttp.FSHandler()](https://pkg.go.dev/github.com/valyala/fasthttp#FSHandler),
+  - [w.WriteHeader()](https://pkg.go.dev/net/http#ResponseWriter) **➜** [ctx.SetStatusCode()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.SetStatusCode)
+  - [w.(http.Hijacker).Hijack()](https://pkg.go.dev/net/http#Hijacker) **➜** [ctx.Hijack()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Hijack)
+  - [http.Error()](https://pkg.go.dev/net/http#Error) **➜** [ctx.Error()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Error)
+  - [http.FileServer()](https://pkg.go.dev/net/http#FileServer) **➜** [fasthttp.FSHandler()](https://pkg.go.dev/github.com/valyala/fasthttp#FSHandler),
     [fasthttp.FS](https://pkg.go.dev/github.com/valyala/fasthttp#FS)
-  - http.ServeFile() -> [fasthttp.ServeFile()](https://pkg.go.dev/github.com/valyala/fasthttp#ServeFile)
-  - http.Redirect() -> [ctx.Redirect()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Redirect)
-  - http.NotFound() -> [ctx.NotFound()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.NotFound)
-  - http.StripPrefix() -> [fasthttp.PathRewriteFunc](https://pkg.go.dev/github.com/valyala/fasthttp#PathRewriteFunc)
+  - [http.ServeFile()](https://pkg.go.dev/net/http#ServeFile) **➜** [fasthttp.ServeFile()](https://pkg.go.dev/github.com/valyala/fasthttp#ServeFile)
+  - [http.Redirect()](https://pkg.go.dev/net/http#Redirect) **➜** [ctx.Redirect()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Redirect)
+  - [http.NotFound()](https://pkg.go.dev/net/http#NotFound) **➜** [ctx.NotFound()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.NotFound)
+  - [http.StripPrefix()](https://pkg.go.dev/net/http#StripPrefix) **➜** [fasthttp.PathRewriteFunc](https://pkg.go.dev/github.com/valyala/fasthttp#PathRewriteFunc)
 
 - _VERY IMPORTANT!_ Fasthttp disallows holding references
   to [RequestCtx](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx) or to its'
