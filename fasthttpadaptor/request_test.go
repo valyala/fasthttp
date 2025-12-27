@@ -238,6 +238,106 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 	})
 
+	t.Run("IPv6 remote address with port", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			RemoteAddr: "[2001:db8::1]:8080",
+		}
+
+		ctx := &fasthttp.RequestCtx{}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+
+		remoteAddr := ctx.RemoteAddr().String()
+		if remoteAddr != "[2001:db8::1]:8080" {
+			t.Errorf("expected remote addr [2001:db8::1]:8080, got %s", remoteAddr)
+		}
+	})
+
+	t.Run("IPv6 remote address without port", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			RemoteAddr: "2001:db8::1",
+		}
+
+		ctx := &fasthttp.RequestCtx{}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+
+		remoteAddr := ctx.RemoteAddr().String()
+		if remoteAddr != "[2001:db8::1]:0" {
+			t.Errorf("expected remote addr [2001:db8::1]:0, got %s", remoteAddr)
+		}
+	})
+
+	t.Run("IPv6 remote address with zone and port", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			RemoteAddr: "[fe80::1%eth0]:9090",
+		}
+
+		ctx := &fasthttp.RequestCtx{}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+
+		remoteAddr := ctx.RemoteAddr().String()
+		if remoteAddr != "[fe80::1%eth0]:9090" {
+			t.Errorf("expected remote addr [fe80::1%%eth0]:9090, got %s", remoteAddr)
+		}
+	})
+
+	t.Run("IPv6 remote address with zone without port", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			RemoteAddr: "fe80::1%eth0",
+		}
+
+		ctx := &fasthttp.RequestCtx{}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+
+		remoteAddr := ctx.RemoteAddr().String()
+		if remoteAddr != "[fe80::1%eth0]:0" {
+			t.Errorf("expected remote addr [fe80::1%%eth0]:0, got %s", remoteAddr)
+		}
+	})
+
+	t.Run("IPv6 loopback with port", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			RemoteAddr: "[::1]:3000",
+		}
+
+		ctx := &fasthttp.RequestCtx{}
+		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+
+		remoteAddr := ctx.RemoteAddr().String()
+		if remoteAddr != "[::1]:3000" {
+			t.Errorf("expected remote addr [::1]:3000, got %s", remoteAddr)
+		}
+	})
+
 	t.Run("body read error", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{
