@@ -3,10 +3,10 @@ package fasthttpadaptor
 import (
 	"bytes"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"github.com/valyala/fasthttp"
@@ -111,7 +111,12 @@ func ConvertNetHttpRequestToFastHttpRequest(r *http.Request, ctx *fasthttp.Reque
 	}
 
 	if r.Body != nil {
-		ctx.Request.SetBodyStream(r.Body, int(r.ContentLength))
+		contentLength := int(r.ContentLength)
+		if r.ContentLength >= int64(math.MaxInt) {
+			contentLength = -1
+		}
+
+		ctx.Request.SetBodyStream(r.Body, contentLength)
 	}
 
 	if r.RemoteAddr != "" {
@@ -133,12 +138,4 @@ func parseRemoteAddr(addr string) net.Addr {
 
 	host := strings.Trim(addr, "[]")
 	return &net.TCPAddr{IP: net.ParseIP(host)}
-}
-
-func parsePort(port string) int {
-	p, err := strconv.Atoi(port)
-	if err != nil {
-		return 0
-	}
-	return p
 }
