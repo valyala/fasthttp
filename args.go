@@ -149,7 +149,7 @@ func (a *Args) Sort(f func(x, y []byte) int) {
 
 // SortKeys sorts Args by key only using 'f' as comparison function.
 //
-// For example args.Sort(bytes.Compare).
+// For example args.SortKeys(bytes.Compare).
 func (a *Args) SortKeys(f func(x, y []byte) int) {
 	sort.SliceStable(a.args, func(i, j int) bool {
 		return f(a.args[i].key, a.args[j].key) == -1
