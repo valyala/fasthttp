@@ -71,7 +71,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	return nil
 }
 
-// ConvertNetHttpRequestToFastHttpRequest converts an http.Request to a fasthttp.RequestCtx.
+// ConvertNetHTTPRequestToFastHTTPRequest converts an http.Request to a fasthttp.RequestCtx.
 //
 // The caller is responsible for the lifecycle of the fasthttp.RequestCtx and the
 // underlying fasthttp.Request. The ctx (and its Request) must only be used for
@@ -88,7 +88,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 //
 // After calling this function, you should treat r.Body as effectively owned by
 // ctx.Request for the lifetime of that context.
-func ConvertNetHttpRequestToFastHttpRequest(r *http.Request, ctx *fasthttp.RequestCtx) {
+func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, ctx *fasthttp.RequestCtx) {
 	ctx.Request.Header.SetMethod(r.Method)
 
 	if r.RequestURI != "" {

@@ -32,8 +32,8 @@ func BenchmarkConvertRequest(b *testing.B) {
 	}
 }
 
-func BenchmarkConvertNetHttpRequestToFastHttpRequest(b *testing.B) {
-	var httpReq http.Request = http.Request{
+func BenchmarkConvertNetHTTPRequestToFastHTTPRequest(b *testing.B) {
+	httpReq := http.Request{
 		Method:     "GET",
 		RequestURI: "/test",
 		Host:       "test",
@@ -47,7 +47,7 @@ func BenchmarkConvertNetHttpRequestToFastHttpRequest(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ConvertNetHttpRequestToFastHttpRequest(&httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(&httpReq, ctx)
 	}
 }
 
@@ -58,7 +58,7 @@ func (errReader) Read([]byte) (int, error) {
 	return 0, errors.New("read error")
 }
 
-func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
+func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 	t.Parallel()
 
 	t.Run("basic conversion", func(t *testing.T) {
@@ -72,7 +72,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		if string(ctx.Method()) != "POST" {
 			t.Errorf("expected method POST, got %s", ctx.Method())
@@ -103,7 +103,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		if string(ctx.RequestURI()) != "/fallback/path?foo=bar" {
 			t.Errorf("expected URI /fallback/path?foo=bar, got %s", ctx.RequestURI())
@@ -123,7 +123,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		if string(ctx.Request.Header.Peek("X-Custom-Header")) != "custom-value" {
 			t.Errorf("expected header value custom-value, got %s", ctx.Request.Header.Peek("X-Custom-Header"))
@@ -143,14 +143,15 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		// Check all header values are present
 		var values []string
-		ctx.Request.Header.VisitAll(func(key, value []byte) {
+		ctx.Request.Header.All()(func(key, value []byte) bool {
 			if string(key) == "Accept" {
 				values = append(values, string(value))
 			}
+			return true
 		})
 
 		if len(values) != 3 {
@@ -172,7 +173,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		if !bytes.Equal(ctx.Request.Body(), bodyContent) {
 			t.Errorf("expected body %q, got %q", bodyContent, ctx.Request.Body())
@@ -191,7 +192,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		if len(ctx.Request.Body()) != 0 {
 			t.Errorf("expected empty body, got %q", ctx.Request.Body())
@@ -210,7 +211,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		remoteAddr := ctx.RemoteAddr().String()
 		if remoteAddr != "192.168.1.100:8080" {
@@ -230,7 +231,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		remoteAddr := ctx.RemoteAddr().String()
 		if remoteAddr != "192.168.1.100:0" {
@@ -250,7 +251,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		remoteAddr := ctx.RemoteAddr().String()
 		if remoteAddr != "[2001:db8::1]:8080" {
@@ -270,7 +271,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		remoteAddr := ctx.RemoteAddr().String()
 		if remoteAddr != "[2001:db8::1]:0" {
@@ -290,7 +291,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		remoteAddr := ctx.RemoteAddr().String()
 		if remoteAddr != "[fe80::1%eth0]:9090" {
@@ -310,7 +311,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		remoteAddr := ctx.RemoteAddr().String()
 		if remoteAddr != "[fe80::1%eth0]:0" {
@@ -330,7 +331,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		remoteAddr := ctx.RemoteAddr().String()
 		if remoteAddr != "[::1]:3000" {
@@ -351,7 +352,7 @@ func TestConvertNetHttpRequestToFastHttpRequest(t *testing.T) {
 		}
 
 		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHttpRequestToFastHttpRequest(httpReq, ctx)
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
 
 		_, err := io.ReadAll(ctx.RequestBodyStream())
 		if err == nil {
