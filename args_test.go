@@ -101,6 +101,22 @@ func TestArgsAdd(t *testing.T) {
 	}
 }
 
+func TestArgsSortKeys(t *testing.T) {
+	t.Parallel()
+
+	var a Args
+	a.Add("a", "789")
+	a.Add("b", "456")
+	a.Add("a", "123")
+	a.SortKeys(bytes.Compare)
+
+	s := a.String()
+	expectedS := "a=789&a=123&b=456"
+	if s != expectedS {
+		t.Fatalf("unexpected result: %q. Expecting %q", s, expectedS)
+	}
+}
+
 func TestArgsAcquireReleaseSequential(t *testing.T) {
 	testArgsAcquireRelease(t)
 }
