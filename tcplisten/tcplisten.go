@@ -16,12 +16,11 @@
 package tcplisten
 
 import (
-	"errors"
 	"fmt"
-	"math"
 	"net"
 	"os"
 
+	"github.com/valyala/fasthttp/internal/listensocket"
 	"golang.org/x/sys/unix"
 )
 
@@ -56,7 +55,7 @@ func (cfg *Config) NewListener(network, addr string) (net.Listener, error) {
 		return nil, err
 	}
 
-	fd, err := newSocketCloexec(soType, unix.SOCK_STREAM, unix.IPPROTO_TCP)
+	fd, err := listensocket.NewSocketCloexec(soType, unix.SOCK_STREAM, unix.IPPROTO_TCP)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +150,7 @@ func getSockaddr(network, addr string) (sa unix.Sockaddr, soType int, err error)
 			if err != nil {
 				return nil, -1, err
 			}
-			sa6.ZoneId, err = safeIntToUint32(ifi.Index)
+			sa6.ZoneId, err = listensocket.SafeIntToUint32(ifi.Index)
 			if err != nil {
 				return nil, -1, fmt.Errorf("unexpected convert net interface index int to uint32: %w", err)
 			}
@@ -169,24 +168,13 @@ func getSockaddr(network, addr string) (sa unix.Sockaddr, soType int, err error)
 			if err != nil {
 				return nil, -1, err
 			}
-			sa6.ZoneId, err = safeIntToUint32(ifi.Index)
+			sa6.ZoneId, err = listensocket.SafeIntToUint32(ifi.Index)
 			if err != nil {
 				return nil, -1, fmt.Errorf("unexpected convert net interface index int to uint32: %w", err)
 			}
 		}
 		return &sa6, unix.AF_INET6, nil
 	default:
-		return nil, -1, errors.New("only tcp, tcp4, or tcp6 is supported " + network)
+		return nil, -1, fmt.Errorf("only tcp, tcp4, or tcp6 is supported %s", network)
 	}
-}
-
-func safeIntToUint32(i int) (uint32, error) {
-	if i < 0 {
-		return 0, errors.New("value is negative, cannot convert to uint32")
-	}
-	ui := uint64(i)
-	if ui > math.MaxUint32 {
-		return 0, errors.New("value exceeds uint32 max value")
-	}
-	return uint32(ui), nil
 }

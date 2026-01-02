@@ -1,6 +1,6 @@
 //go:build zos && s390x
 
-package tcplisten
+package listensocket
 
 import (
 	"fmt"
@@ -8,7 +8,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func newSocketCloexec(domain, typ, proto int) (int, error) {
+// NewSocketCloexec creates a non-blocking socket on z/OS.
+func NewSocketCloexec(domain, typ, proto int) (int, error) {
 	fd, err := unix.Socket(domain, typ, proto)
 	_, err = unix.FcntlInt(uintptr(fd), unix.F_SETFD, unix.FD_CLOEXEC)
 	_, err = unix.FcntlInt(uintptr(fd), unix.F_SETFL, unix.O_NONBLOCK)
