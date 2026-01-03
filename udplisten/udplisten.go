@@ -52,7 +52,11 @@ func (cfg *Config) NewPacketConn(network, addr string) (net.PacketConn, error) {
 		return nil, err
 	}
 
-	name := fmt.Sprintf("reuseport.%d.%s.%s", os.Getpid(), network, addr)
+	prefix := "udp"
+	if cfg.ReusePort {
+		prefix = "udp-reuseport"
+	}
+	name := fmt.Sprintf("%s.%d.%s.%s", prefix, os.Getpid(), network, addr)
 	file := os.NewFile(uintptr(fd), name)
 	pc, err := net.FilePacketConn(file)
 	if err != nil {
