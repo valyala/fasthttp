@@ -126,11 +126,18 @@ func getSockaddr(network, addr string) (sa unix.Sockaddr, soType int, err error)
 		}
 		return &sa6, unix.AF_INET6, nil
 	case "udp":
+		if ip4 := udpAddr.IP.To4(); ip4 != nil || udpAddr.IP == nil {
+			var sa4 unix.SockaddrInet4
+			sa4.Port = udpAddr.Port
+			if udpAddr.IP == nil {
+				ip4 = net.IPv4zero
+			}
+			copy(sa4.Addr[:], ip4.To4())
+			return &sa4, unix.AF_INET, nil
+		}
+
 		var sa6 unix.SockaddrInet6
 		sa6.Port = udpAddr.Port
-		if udpAddr.IP == nil {
-			udpAddr.IP = net.IPv4(0, 0, 0, 0)
-		}
 		copy(sa6.Addr[:], udpAddr.IP.To16())
 		if udpAddr.Zone != "" {
 			ifi, err := net.InterfaceByName(udpAddr.Zone)
