@@ -1054,6 +1054,9 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 // The key and value may invalid outside the iteration loop.
 // Copy key and/or value contents for each iteration if you need retaining
 // them.
+//
+// Making modifications to the ResponseHeader during the iteration loop leads to undefined
+// behavior and can cause panics.
 func (h *ResponseHeader) All() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		if len(h.contentLengthBytes) > 0 && !yield(strContentLength, h.contentLengthBytes) {
@@ -1140,6 +1143,9 @@ func (h *header) VisitAllTrailer(f func(value []byte)) {
 // The key and value may invalid outside the iteration loop.
 // Copy key and/or value contents for each iteration if you need retaining
 // them.
+//
+// Making modifications to the ResponseHeader during the iteration loop leads to undefined
+// behavior and can cause panics.
 func (h *ResponseHeader) Cookies() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		for i := range h.cookies {
@@ -1171,6 +1177,9 @@ func (h *ResponseHeader) VisitAllCookie(f func(key, value []byte)) {
 // The key and value may invalid outside the iteration loop.
 // Copy key and/or value contents for each iteration if you need retaining
 // them.
+//
+// Making modifications to the RequestHeader during the iteration loop leads to undefined
+// behavior and can cause panics.
 func (h *RequestHeader) Cookies() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		h.collectCookies()
@@ -1201,6 +1210,9 @@ func (h *RequestHeader) VisitAllCookie(f func(key, value []byte)) {
 // them.
 //
 // To get the headers in order they were received use AllInOrder.
+//
+// Making modifications to the RequestHeader during the iteration loop leads to undefined
+// behavior and can cause panics.
 func (h *RequestHeader) All() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		if host := h.Host(); len(host) > 0 && !yield(strHost, host) {
@@ -1266,6 +1278,9 @@ func (h *RequestHeader) VisitAll(f func(key, value []byte)) {
 //
 // The returned iterator is slightly slower than All because it has to reparse
 // the raw headers to get the order.
+//
+// Making modifications to the RequestHeader during the iteration loop leads to undefined
+// behavior and can cause panics.
 func (h *RequestHeader) AllInOrder() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		var s headerScanner
