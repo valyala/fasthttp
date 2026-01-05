@@ -69,6 +69,9 @@ func (a *Args) CopyTo(dst *Args) {
 //
 // The key and value may invalid outside the iteration loop.
 // Make copies if you need to use them after the loop ends.
+//
+// Making modifications to the Args during the iteration loop leads to undefined
+// behavior and can cause panics.
 func (a *Args) All() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		for i := range a.args {
