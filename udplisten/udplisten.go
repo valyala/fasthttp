@@ -35,7 +35,7 @@ type Config struct {
 // The function may be called many times for creating distinct PacketConns
 // with the given config.
 //
-// Only udp4 and udp6 networks are supported.
+// Only udp, udp4, and udp6 networks are supported.
 func (cfg *Config) NewPacketConn(network, addr string) (net.PacketConn, error) {
 	sa, soType, err := getSockaddr(network, addr)
 	if err != nil {
@@ -125,7 +125,7 @@ func getSockaddr(network, addr string) (sa unix.Sockaddr, soType int, err error)
 			}
 			sa6.ZoneId, err = listensocket.SafeIntToUint32(ifi.Index)
 			if err != nil {
-				return nil, -1, fmt.Errorf("unexpected convert net interface index int to uint32: %w", err)
+				return nil, -1, fmt.Errorf("unexpected conversion of net interface index int to uint32: %w", err)
 			}
 		}
 		return &sa6, unix.AF_INET6, nil
@@ -150,11 +150,11 @@ func getSockaddr(network, addr string) (sa unix.Sockaddr, soType int, err error)
 			}
 			sa6.ZoneId, err = listensocket.SafeIntToUint32(ifi.Index)
 			if err != nil {
-				return nil, -1, fmt.Errorf("unexpected convert net interface index int to uint32: %w", err)
+				return nil, -1, fmt.Errorf("unexpected conversion of net interface index int to uint32: %w", err)
 			}
 		}
 		return &sa6, unix.AF_INET6, nil
 	default:
-		return nil, -1, fmt.Errorf("only udp, udp4, or udp6 is supported %s", network)
+		return nil, -1, fmt.Errorf("only udp, udp4, or udp6 is supported, got: %s", network)
 	}
 }

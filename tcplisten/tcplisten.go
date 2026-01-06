@@ -152,7 +152,7 @@ func getSockaddr(network, addr string) (sa unix.Sockaddr, soType int, err error)
 			}
 			sa6.ZoneId, err = listensocket.SafeIntToUint32(ifi.Index)
 			if err != nil {
-				return nil, -1, fmt.Errorf("unexpected convert net interface index int to uint32: %w", err)
+				return nil, -1, fmt.Errorf("unexpected conversion of net interface index int to uint32: %w", err)
 			}
 		}
 		return &sa6, unix.AF_INET6, nil
@@ -170,11 +170,11 @@ func getSockaddr(network, addr string) (sa unix.Sockaddr, soType int, err error)
 			}
 			sa6.ZoneId, err = listensocket.SafeIntToUint32(ifi.Index)
 			if err != nil {
-				return nil, -1, fmt.Errorf("unexpected convert net interface index int to uint32: %w", err)
+				return nil, -1, fmt.Errorf("unexpected conversion of net interface index int to uint32: %w", err)
 			}
 		}
 		return &sa6, unix.AF_INET6, nil
 	default:
-		return nil, -1, fmt.Errorf("only tcp, tcp4, or tcp6 is supported %s", network)
+		return nil, -1, fmt.Errorf("only tcp, tcp4, or tcp6 is supported, got: %s", network)
 	}
 }
