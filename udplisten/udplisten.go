@@ -121,11 +121,11 @@ func getSockaddr(network, addr string) (sa unix.Sockaddr, soType int, err error)
 	case "udp6":
 		var sa6 unix.SockaddrInet6
 		sa6.Port = udpAddr.Port
-		if ip := udpAddr.IP; ip != nil {
-			if ip16 := ip.To16(); ip16 != nil {
-				copy(sa6.Addr[:], ip16)
-			}
+		ip16 := udpAddr.IP.To16()
+		if ip16 == nil {
+			ip16 = net.IPv6zero
 		}
+		copy(sa6.Addr[:], ip16)
 		if udpAddr.Zone != "" {
 			ifi, err := net.InterfaceByName(udpAddr.Zone)
 			if err != nil {
