@@ -35,6 +35,19 @@ func TestConfigBufferSizesWithReusePort(t *testing.T) {
 	})
 }
 
+// verifySocketBufferSize checks if the given socket option value meets the minimum required size.
+func verifySocketBufferSize(fd uintptr, optname int, optStr string, minSize int) (int, error) {
+	actualSize, err := unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, optname)
+	if err != nil {
+		return 0, err
+	}
+	// The kernel may double the value we set, so check it's at least what we requested
+	if actualSize < minSize {
+		return 0, fmt.Errorf("%s is %d, expected at least %d", optStr, actualSize, minSize)
+	}
+	return actualSize, nil
+}
+
 func testBufferSizes(t *testing.T, cfg Config) {
 	networks := []struct {
 		network string
@@ -68,25 +81,15 @@ func testBufferSizes(t *testing.T, cfg Config) {
 				var ctrlErr error
 				err = rawConn.Control(func(fd uintptr) {
 					if cfg.RecvBufferSize > 0 {
-						recvBufSize, ctrlErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_RCVBUF)
+						recvBufSize, ctrlErr = verifySocketBufferSize(fd, unix.SO_RCVBUF, "SO_RCVBUF", cfg.RecvBufferSize)
 						if ctrlErr != nil {
-							return
-						}
-						// The kernel may double the value we set, so check it's at least what we requested
-						if recvBufSize < cfg.RecvBufferSize {
-							ctrlErr = fmt.Errorf("SO_RCVBUF is %d, expected at least %d", recvBufSize, cfg.RecvBufferSize)
 							return
 						}
 					}
 
 					if cfg.SendBufferSize > 0 {
-						sendBufSize, ctrlErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_SNDBUF)
+						sendBufSize, ctrlErr = verifySocketBufferSize(fd, unix.SO_SNDBUF, "SO_SNDBUF", cfg.SendBufferSize)
 						if ctrlErr != nil {
-							return
-						}
-						// The kernel may double the value we set, so check it's at least what we requested
-						if sendBufSize < cfg.SendBufferSize {
-							ctrlErr = fmt.Errorf("SO_SNDBUF is %d, expected at least %d", sendBufSize, cfg.SendBufferSize)
 							return
 						}
 					}
