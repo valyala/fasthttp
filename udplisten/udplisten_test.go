@@ -8,6 +8,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestConfigDefault(t *testing.T) {
@@ -33,6 +35,19 @@ func TestConfigBufferSizesWithReusePort(t *testing.T) {
 	})
 }
 
+// verifySocketBufferSize checks if the given socket option value meets the minimum required size.
+func verifySocketBufferSize(fd uintptr, optname int, optStr string, minSize int) (int, error) {
+	actualSize, err := unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, optname)
+	if err != nil {
+		return 0, err
+	}
+	// The kernel may double the value we set, so check it's at least what we requested
+	if actualSize < minSize {
+		return 0, fmt.Errorf("%s is %d, expected at least %d", optStr, actualSize, minSize)
+	}
+	return actualSize, nil
+}
+
 func testBufferSizes(t *testing.T, cfg Config) {
 	networks := []struct {
 		network string
@@ -49,6 +64,50 @@ func testBufferSizes(t *testing.T, cfg Config) {
 				t.Fatalf("cannot create packet conn using Config %#v: %s", &cfg, err)
 			}
 			defer pc.Close()
+
+			// Verify buffer sizes are set correctly
+			if cfg.RecvBufferSize > 0 || cfg.SendBufferSize > 0 {
+				conn, ok := pc.(*net.UDPConn)
+				if !ok {
+					t.Fatalf("expected *net.UDPConn, got %T", pc)
+				}
+
+				rawConn, err := conn.SyscallConn()
+				if err != nil {
+					t.Fatalf("failed to get raw conn: %s", err)
+				}
+
+				var recvBufSize, sendBufSize int
+				var ctrlErr error
+				err = rawConn.Control(func(fd uintptr) {
+					if cfg.RecvBufferSize > 0 {
+						recvBufSize, ctrlErr = verifySocketBufferSize(fd, unix.SO_RCVBUF, "SO_RCVBUF", cfg.RecvBufferSize)
+						if ctrlErr != nil {
+							return
+						}
+					}
+
+					if cfg.SendBufferSize > 0 {
+						sendBufSize, ctrlErr = verifySocketBufferSize(fd, unix.SO_SNDBUF, "SO_SNDBUF", cfg.SendBufferSize)
+						if ctrlErr != nil {
+							return
+						}
+					}
+				})
+				if err != nil {
+					t.Fatalf("failed to control raw conn: %s", err)
+				}
+				if ctrlErr != nil {
+					t.Fatalf("failed to verify buffer sizes: %s", ctrlErr)
+				}
+
+				if cfg.RecvBufferSize > 0 {
+					t.Logf("Verified SO_RCVBUF=%d (requested %d)", recvBufSize, cfg.RecvBufferSize)
+				}
+				if cfg.SendBufferSize > 0 {
+					t.Logf("Verified SO_SNDBUF=%d (requested %d)", sendBufSize, cfg.SendBufferSize)
+				}
+			}
 
 			// Test that the connection works with basic echo
 			bindAddr := pc.LocalAddr().String()
