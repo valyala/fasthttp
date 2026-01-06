@@ -89,9 +89,6 @@ func testBufferSizes(t *testing.T, cfg Config) {
 
 					if cfg.SendBufferSize > 0 {
 						sendBufSize, ctrlErr = verifySocketBufferSize(fd, unix.SO_SNDBUF, "SO_SNDBUF", cfg.SendBufferSize)
-						if ctrlErr != nil {
-							return
-						}
 					}
 				})
 				if err != nil {
@@ -101,8 +98,14 @@ func testBufferSizes(t *testing.T, cfg Config) {
 					t.Fatalf("failed to verify buffer sizes: %s", ctrlErr)
 				}
 
-				t.Logf("Verified buffer sizes: SO_RCVBUF=%d (requested %d), SO_SNDBUF=%d (requested %d)",
-					recvBufSize, cfg.RecvBufferSize, sendBufSize, cfg.SendBufferSize)
+				if cfg.RecvBufferSize > 0 && cfg.SendBufferSize > 0 {
+					t.Logf("Verified buffer sizes: SO_RCVBUF=%d (requested %d), SO_SNDBUF=%d (requested %d)",
+						recvBufSize, cfg.RecvBufferSize, sendBufSize, cfg.SendBufferSize)
+				} else if cfg.RecvBufferSize > 0 {
+					t.Logf("Verified buffer size: SO_RCVBUF=%d (requested %d)", recvBufSize, cfg.RecvBufferSize)
+				} else {
+					t.Logf("Verified buffer size: SO_SNDBUF=%d (requested %d)", sendBufSize, cfg.SendBufferSize)
+				}
 			}
 
 			// Test that the connection works with basic echo
