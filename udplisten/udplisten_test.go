@@ -101,7 +101,6 @@ func testBufferSizes(t *testing.T, cfg Config) {
 	}
 }
 
-
 func testConfig(t *testing.T, cfg Config) {
 	testConfigV(t, cfg, "udp", "127.0.0.1:0")
 	testConfigV(t, cfg, "udp4", "127.0.0.1:0")
