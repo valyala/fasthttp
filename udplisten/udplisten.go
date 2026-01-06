@@ -144,7 +144,7 @@ func getSockaddr(network, addr string) (sa unix.Sockaddr, soType int, err error)
 			if udpAddr.IP == nil {
 				ip4 = net.IPv4zero
 			}
-			copy(sa4.Addr[:], ip4.To4())
+			copy(sa4.Addr[:], ip4)
 			return &sa4, unix.AF_INET, nil
 		}
 
