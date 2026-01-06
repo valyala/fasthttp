@@ -8,6 +8,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestConfigDefault(t *testing.T) {
@@ -49,6 +51,56 @@ func testBufferSizes(t *testing.T, cfg Config) {
 				t.Fatalf("cannot create packet conn using Config %#v: %s", &cfg, err)
 			}
 			defer pc.Close()
+
+			// Verify buffer sizes are set correctly
+			if cfg.RecvBufferSize > 0 || cfg.SendBufferSize > 0 {
+				conn, ok := pc.(*net.UDPConn)
+				if !ok {
+					t.Fatalf("expected *net.UDPConn, got %T", pc)
+				}
+
+				rawConn, err := conn.SyscallConn()
+				if err != nil {
+					t.Fatalf("failed to get raw conn: %s", err)
+				}
+
+				var recvBufSize, sendBufSize int
+				var ctrlErr error
+				err = rawConn.Control(func(fd uintptr) {
+					if cfg.RecvBufferSize > 0 {
+						recvBufSize, ctrlErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_RCVBUF)
+						if ctrlErr != nil {
+							return
+						}
+						// The kernel may double the value we set, so check it's at least what we requested
+						if recvBufSize < cfg.RecvBufferSize {
+							ctrlErr = fmt.Errorf("SO_RCVBUF is %d, expected at least %d", recvBufSize, cfg.RecvBufferSize)
+							return
+						}
+					}
+
+					if cfg.SendBufferSize > 0 {
+						sendBufSize, ctrlErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_SNDBUF)
+						if ctrlErr != nil {
+							return
+						}
+						// The kernel may double the value we set, so check it's at least what we requested
+						if sendBufSize < cfg.SendBufferSize {
+							ctrlErr = fmt.Errorf("SO_SNDBUF is %d, expected at least %d", sendBufSize, cfg.SendBufferSize)
+							return
+						}
+					}
+				})
+				if err != nil {
+					t.Fatalf("failed to control raw conn: %s", err)
+				}
+				if ctrlErr != nil {
+					t.Fatalf("failed to verify buffer sizes: %s", ctrlErr)
+				}
+
+				t.Logf("Verified buffer sizes: SO_RCVBUF=%d (requested %d), SO_SNDBUF=%d (requested %d)",
+					recvBufSize, cfg.RecvBufferSize, sendBufSize, cfg.SendBufferSize)
+			}
 
 			// Test that the connection works with basic echo
 			bindAddr := pc.LocalAddr().String()
