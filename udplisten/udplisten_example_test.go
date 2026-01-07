@@ -31,7 +31,7 @@ func ExampleConfig_NewPacketConn() {
 
 	<-ready
 	// Give the goroutine time to reach ReadFrom and start blocking
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(1 * time.Second)
 	conn, err := net.Dial("udp", pc.LocalAddr().String())
 	if err != nil {
 		panic(err)
