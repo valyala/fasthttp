@@ -900,15 +900,21 @@ func (h *RequestHeader) Len() int {
 // If RequestHeader.Read() is called, special headers will be ignored.
 // This can be used to control case and order of special headers.
 // This is generally not recommended.
-func (h *RequestHeader) DisableSpecialHeader() {
+// The previous setting is returned.
+func (h *RequestHeader) DisableSpecialHeader() bool {
+	orig := h.disableSpecialHeader
 	h.disableSpecialHeader = true
+	return orig
 }
 
 // EnableSpecialHeader enables special header processing.
 // fasthttp will send Host, Content-Type, User-Agent, etc headers for you.
 // This is suggested and enabled by default.
-func (h *RequestHeader) EnableSpecialHeader() {
+// The previous setting is returned.
+func (h *RequestHeader) EnableSpecialHeader() bool {
+	orig := h.disableSpecialHeader
 	h.disableSpecialHeader = false
+	return orig
 }
 
 // DisableNormalizing disables header names' normalization.
@@ -923,8 +929,11 @@ func (h *RequestHeader) EnableSpecialHeader() {
 //   - foo-bar-baz -> Foo-Bar-Baz
 //
 // Disable header names' normalization only if know what are you doing.
-func (h *header) DisableNormalizing() {
+// The previous setting is returned.
+func (h *header) DisableNormalizing() bool {
+	orig := h.disableNormalizing
 	h.disableNormalizing = true
+	return orig
 }
 
 // EnableNormalizing enables header names' normalization.
@@ -939,8 +948,11 @@ func (h *header) DisableNormalizing() {
 //   - foo-bar-baz -> Foo-Bar-Baz
 //
 // This is enabled by default unless disabled using DisableNormalizing().
-func (h *header) EnableNormalizing() {
+// The previous setting is returned.
+func (h *header) EnableNormalizing() bool {
+	orig := h.disableNormalizing
 	h.disableNormalizing = false
+	return orig
 }
 
 // SetNoDefaultContentType allows you to control if a default Content-Type header will be set (false) or not (true).
