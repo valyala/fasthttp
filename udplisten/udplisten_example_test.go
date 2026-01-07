@@ -5,7 +5,6 @@ package udplisten
 import (
 	"fmt"
 	"net"
-	"time"
 )
 
 func ExampleConfig_NewPacketConn() {
@@ -18,20 +17,17 @@ func ExampleConfig_NewPacketConn() {
 	}
 	defer pc.Close()
 
-	ready := make(chan struct{})
+	// Use a channel to wait for the echo to complete
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		buf := make([]byte, 64)
-		close(ready)
 		n, addr, err := pc.ReadFrom(buf)
 		if err != nil {
 			return
 		}
 		_, _ = pc.WriteTo(buf[:n], addr)
 	}()
-
-	<-ready
-	// Give the goroutine time to reach ReadFrom and start blocking
-	time.Sleep(1 * time.Second)
 	conn, err := net.Dial("udp", pc.LocalAddr().String())
 	if err != nil {
 		panic(err)
@@ -48,5 +44,7 @@ func ExampleConfig_NewPacketConn() {
 		panic(err)
 	}
 	fmt.Printf("response: %s\n", buf[:n])
+
+	<-done // Wait for the echo goroutine to complete
 	// Output: response: echo
 }
