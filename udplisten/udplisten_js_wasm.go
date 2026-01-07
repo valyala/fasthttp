@@ -1,5 +1,3 @@
-//go:build js || wasm
-
 package udplisten
 
 import "net"
