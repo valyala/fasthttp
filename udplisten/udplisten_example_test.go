@@ -5,6 +5,7 @@ package udplisten
 import (
 	"fmt"
 	"net"
+	"time"
 )
 
 func ExampleConfig_NewPacketConn() {
@@ -29,6 +30,8 @@ func ExampleConfig_NewPacketConn() {
 	}()
 
 	<-ready
+	// Give the goroutine time to reach ReadFrom and start blocking
+	time.Sleep(10 * time.Millisecond)
 	conn, err := net.Dial("udp", pc.LocalAddr().String())
 	if err != nil {
 		panic(err)
