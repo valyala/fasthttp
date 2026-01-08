@@ -18,15 +18,16 @@ func ExampleConfig_NewPacketConn() {
 	defer pc.Close()
 
 	// Use a channel to wait for the echo to complete
-	done := make(chan struct{})
+	done := make(chan error)
 	go func() {
-		defer close(done)
 		buf := make([]byte, 64)
 		n, addr, err := pc.ReadFrom(buf)
 		if err != nil {
+			done <- err
 			return
 		}
-		_, _ = pc.WriteTo(buf[:n], addr)
+		_, err = pc.WriteTo(buf[:n], addr)
+		done <- err
 	}()
 	conn, err := net.Dial("udp", pc.LocalAddr().String())
 	if err != nil {
@@ -45,6 +46,8 @@ func ExampleConfig_NewPacketConn() {
 	}
 	fmt.Printf("response: %s\n", buf[:n])
 
-	<-done // Wait for the echo goroutine to complete
+	if err := <-done; err != nil {
+		panic(err)
+	}
 	// Output: response: echo
 }
