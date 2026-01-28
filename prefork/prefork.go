@@ -95,6 +95,13 @@ type Prefork struct {
 	//
 	// This callback is non-blocking and its error return value is ignored.
 	OnChildRecover func(pid int) error
+
+	// CommandProducer is called to create child process commands.
+	// If nil, the default implementation using os.Args is used.
+	// This is useful for testing or customizing child process behavior.
+	//
+	// The function receives the files to be passed as ExtraFiles to the child process.
+	CommandProducer func(files []*os.File) (*exec.Cmd, error)
 }
 
 // IsChild checks if the current thread/process is a child.
@@ -168,6 +175,12 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 }
 
 func (p *Prefork) doCommand() (*exec.Cmd, error) {
+	// Use custom CommandProducer if provided
+	if p.CommandProducer != nil {
+		return p.CommandProducer(p.files)
+	}
+
+	// Default implementation
 	// #nosec G204
 	cmd := exec.Command(os.Args[0], os.Args[1:]...)
 	cmd.Stdout = os.Stdout

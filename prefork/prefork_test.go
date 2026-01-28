@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"os/exec"
 	"reflect"
 	"runtime"
 	"testing"
@@ -454,5 +455,50 @@ func Test_OnMasterReady_ReceivesPIDs(t *testing.T) {
 		if receivedPIDs[i] != pid {
 			t.Errorf("PID[%d] == %d, want %d", i, receivedPIDs[i], pid)
 		}
+	}
+}
+
+func Test_CommandProducer(t *testing.T) {
+	t.Parallel()
+
+	var producerCalled bool
+	p := &Prefork{
+		CommandProducer: func(files []*os.File) (*exec.Cmd, error) {
+			producerCalled = true
+			// Return a simple command that exits quickly
+			cmd := exec.Command("go", "version")
+			cmd.ExtraFiles = files
+			err := cmd.Start()
+			return cmd, err
+		},
+	}
+
+	// Verify CommandProducer is set
+	if p.CommandProducer == nil {
+		t.Error("CommandProducer should not be nil")
+	}
+
+	// Call doCommand and verify our producer was used
+	cmd, err := p.doCommand()
+	if err != nil {
+		t.Fatalf("doCommand failed: %v", err)
+	}
+
+	// Wait for the command to finish
+	_ = cmd.Wait()
+
+	if !producerCalled {
+		t.Error("CommandProducer was not called")
+	}
+}
+
+func Test_CommandProducer_Nil_UsesDefault(t *testing.T) {
+	t.Parallel()
+
+	p := &Prefork{}
+
+	// Verify default CommandProducer is nil
+	if p.CommandProducer != nil {
+		t.Error("CommandProducer should be nil by default")
 	}
 }
