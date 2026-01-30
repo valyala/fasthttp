@@ -117,6 +117,13 @@ func FuzzURIParse(f *testing.F) {
 	f.Add(`http://google.com#@github.com`)
 
 	f.Fuzz(func(t *testing.T, uri string) {
+		// Limit the size of the URI to avoid OOMs or timeouts.
+		// When using Server or Client the maximum URI is dicated by the maximum header size,
+		// which defaults to defaultReadBufferSize (4096 bytes).
+		if len(uri) > defaultReadBufferSize {
+			return
+		}
+
 		var u URI
 
 		uri = strings.ToLower(uri)
