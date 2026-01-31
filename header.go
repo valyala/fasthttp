@@ -3107,6 +3107,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	h.contentLength = -2
 
 	contentLengthSeen := false
+	hostSeen := false
 
 	var s headerScanner
 	s.b = buf
@@ -3145,6 +3146,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 		switch s.key[0] | 0x20 {
 		case 'h':
 			if caseInsensitiveCompare(s.key, strHost) {
+				if hostSeen {
+					h.connectionClose = true
+					return 0, errors.New("too many Host headers")
+				}
+				hostSeen = true
 				h.host = append(h.host[:0], s.value...)
 				continue
 			}
