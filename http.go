@@ -2626,6 +2626,7 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 		return -1, err
 	}
 	inExt := false
+	sawOWS := false
 	for {
 		c, err := r.ReadByte()
 		if err != nil {
@@ -2653,8 +2654,14 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 		}
 		switch c {
 		case ' ', '\t':
+			sawOWS = true
 			continue
 		case ';':
+			if sawOWS {
+				return -1, ErrBrokenChunk{
+					error: fmt.Errorf("invalid character %q after chunk size", c),
+				}
+			}
 			inExt = true
 			continue
 		default:
