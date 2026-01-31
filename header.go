@@ -2892,6 +2892,13 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
 	}
 
+	if err := validateRequestURI(h.method, b[:n]); err != nil {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("invalid requestURI %q", b[:n])
+		}
+		return 0, fmt.Errorf("invalid requestURI %q in %q: %w", b[:n], buf, err)
+	}
+
 	// Check for extra whitespace - only one space should separate URI from HTTP version
 	if n+1 < len(b) && b[n+1] == ' ' {
 		if h.secureErrorLogMessage {
@@ -2927,6 +2934,29 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	h.requestURI = append(h.requestURI[:0], b[:n]...)
 
 	return len(buf) - len(bNext), nil
+}
+
+func validateRequestURI(method, requestURI []byte) error {
+	if stringContainsCTLByte(requestURI) {
+		return ErrorInvalidURI
+	}
+	if len(requestURI) == 1 && requestURI[0] == '*' {
+		return nil
+	}
+	if len(requestURI) > 0 && requestURI[0] == '/' {
+		return nil
+	}
+	if i := bytes.Index(requestURI, strColonSlashSlash); i >= 0 {
+		if !isValidScheme(requestURI[:i]) {
+			return ErrorInvalidURI
+		}
+		return nil
+	}
+	// net/http treats CONNECT request-targets without a leading slash as authority-form.
+	if bytes.Equal(method, strConnect) {
+		return nil
+	}
+	return ErrorInvalidURI
 }
 
 func readRawHeaders(dst, buf []byte) ([]byte, int, error) {

@@ -90,6 +90,7 @@ var (
 	strBytes               = []byte("bytes")
 	strBasicSpace          = []byte("Basic ")
 	strLink                = []byte("Link")
+	strConnect             = []byte("CONNECT")
 
 	strApplicationSlash = []byte("application/")
 	strImageSVG         = []byte("image/svg")
