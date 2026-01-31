@@ -2741,10 +2741,6 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\nconTEnt-leNGTH: 123\nConTENT-TYPE: ass\r\n\r\n",
 		400, 123, "ass")
 
-	// duplicate content-length
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 456\r\nContent-Type: foo/bar\r\nContent-Length: 321\r\n\r\n",
-		200, 321, "foo/bar")
-
 	// duplicate content-type
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 234\r\nContent-Type: foo/bar\r\nContent-Type: baz/bar\r\n\r\n",
 		200, 234, "baz/bar")
@@ -3002,6 +2998,9 @@ func TestResponseHeaderReadError(t *testing.T) {
 
 	// Space before header name
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\n foo: bar\r\n\r\n")
+
+	// duplicate content-length
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 456\r\nContent-Type: foo/bar\r\nContent-Length: 321\r\n\r\n")
 }
 
 func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
