@@ -2910,10 +2910,6 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	testRequestHeaderReadSuccess(t, h, "GET /asdf HTTP/1.1\r\nHost: aaa.com\r\nReferer: bb.com\r\n\r\naaa",
 		-2, "/asdf", "aaa.com", "bb.com", "")
 
-	// duplicate host
-	testRequestHeaderReadSuccess(t, h, "GET /aa HTTP/1.1\r\nHost: aaaaaa.com\r\nHost: bb.com\r\n\r\n",
-		-2, "/aa", "bb.com", "", "")
-
 	// post with duplicate content-type
 	testRequestHeaderReadSuccess(t, h, "POST /a HTTP/1.1\r\nHost: aa\r\nContent-Type: ab\r\nContent-Length: 123\r\nContent-Type: xx\r\n\r\n",
 		123, "/a", "aa", "", "xx")
@@ -3064,6 +3060,9 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// Space before header name
 	testRequestHeaderReadError(t, h, "G(ET /foo/bar HTTP/1.1\r\n foo: bar\r\n\r\n")
+
+	// Duplicate host header
+	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\nHost: aaa.com\r\nhost: bbb.com\r\n\r\n")
 }
 
 func TestRequestHeaderReadSecuredError(t *testing.T) {
