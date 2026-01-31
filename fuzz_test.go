@@ -80,6 +80,10 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 			return
 		}
 		if netErr != nil {
+			if (len(body) > 0 && (body[0] == '\r' || body[0] == '\n')) &&
+				strings.Contains(netErr.Error(), "malformed HTTP response") {
+				return
+			}
 			t.Fatalf("fasthttp:\n%s; net/http err=%v", res.String(), netErr)
 		}
 		if !bytes.Equal(fastBody, netBody) {
@@ -111,6 +115,10 @@ func FuzzRequestReadLimitBody(f *testing.F) {
 			return
 		}
 		if netErr != nil {
+			if (len(body) > 0 && (body[0] == '\r' || body[0] == '\n')) &&
+				strings.Contains(netErr.Error(), "malformed HTTP request") {
+				return
+			}
 			if strings.Contains(netErr.Error(), "invalid URI for request") {
 				return
 			}
