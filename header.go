@@ -2697,6 +2697,11 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 		if isBadTrailer(s.key) {
 			return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
 		}
+		for _, ch := range s.value {
+			if !validHeaderValueByte(ch) {
+				return dest, 0, fmt.Errorf("invalid trailer value %q", s.value)
+			}
+		}
 		normalizeHeaderKey(s.key, disable)
 		dest = appendArgBytes(dest, s.key, s.value, argsHasValue)
 	}
