@@ -1115,6 +1115,11 @@ func TestResponseHeaderOldVersion(t *testing.T) {
 		t.Fatalf("expecting 'Connection: close' for the response with old http protocol")
 	}
 
+	// Discard the body of the first response.
+	if n, err := br.Discard(h.ContentLength()); err != nil || n != h.ContentLength() {
+		t.Fatalf("unexpected discard: n=%d, want=%d, err=%v", n, h.ContentLength(), err)
+	}
+
 	if err := h.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1452,7 +1457,6 @@ func TestResponseHeaderHTTPVer(t *testing.T) {
 	// non-http/1.1
 	testResponseHeaderHTTPVer(t, "HTTP/1.0 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
 	testResponseHeaderHTTPVer(t, "HTTP/0.9 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
-	testResponseHeaderHTTPVer(t, "foobar 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
 
 	// http/1.1
 	testResponseHeaderHTTPVer(t, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", false)

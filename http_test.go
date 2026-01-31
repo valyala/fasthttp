@@ -21,14 +21,14 @@ import (
 func TestInvalidTrailers(t *testing.T) {
 	t.Parallel()
 
-	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader(" 0\nTransfer-Encoding:\xff\n\n0\r\n0"))); !errors.Is(err, io.EOF) {
-		t.Fatalf("%#v", err)
+	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200\r\nTransfer-Encoding:\xff\n\n0\r\n0"))); !errors.Is(err, io.EOF) {
+		t.Errorf("%#v", err)
 	}
-	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("\xff \nTRaILeR:,\n\n"))); !errors.Is(err, errEmptyInt) {
-		t.Fatal(err)
+	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\nTRaILeR:,\r\n\r\n"))); !errors.Is(err, ErrBadTrailer) {
+		t.Error(err)
 	}
-	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("TRaILeR:,\n\n"))); !strings.Contains(err.Error(), "cannot find whitespace in the first line of response") {
-		t.Fatal(err)
+	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("TRaILeR:,\r\n\r\n"))); !strings.Contains(err.Error(), "cannot find whitespace in the first line of response") {
+		t.Error(err)
 	}
 }
 
@@ -586,7 +586,7 @@ func TestRequestContentTypeWithCharsetIssue100(t *testing.T) {
 
 	expectedContentType := "application/x-www-form-urlencoded; charset=UTF-8"
 	expectedBody := "0123=56789"
-	s := fmt.Sprintf("POST / HTTP/1.1\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: example.com\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
 		expectedContentType, len(expectedBody), expectedBody)
 
 	br := bufio.NewReader(bytes.NewBufferString(s))
@@ -1032,7 +1032,7 @@ func TestRequestReadNoBody(t *testing.T) {
 
 	var r Request
 
-	br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\n\r\n"))
+	br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))
 	err := r.Read(br)
 	r.SetHost("foobar")
 	if err != nil {
@@ -1200,7 +1200,7 @@ func TestRequestReadGzippedBody(t *testing.T) {
 
 	bodyOriginal := "foo bar baz compress me better!"
 	body := AppendGzipBytes(nil, []byte(bodyOriginal))
-	s := fmt.Sprintf("POST /foobar HTTP/1.1\r\nContent-Type: foo/bar\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s",
+	s := fmt.Sprintf("POST /foobar HTTP/1.1\r\nHost: example.com\r\nContent-Type: foo/bar\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s",
 		len(body), body)
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := r.Read(br); err != nil {
@@ -1231,7 +1231,7 @@ func TestRequestReadPostNoBody(t *testing.T) {
 
 	var r Request
 
-	s := "POST /foo/bar HTTP/1.1\r\nContent-Type: aaa/bbb\r\n\r\naaaa"
+	s := "POST /foo/bar HTTP/1.1\r\nHost: example.com\r\nContent-Type: aaa/bbb\r\n\r\naaaa"
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := r.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1262,7 +1262,7 @@ func TestRequestReadPostNoBody(t *testing.T) {
 func TestRequestContinueReadBody(t *testing.T) {
 	t.Parallel()
 
-	s := "PUT /foo/bar HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: foo/bar\r\n\r\nabcdef4343"
+	s := "PUT /foo/bar HTTP/1.1\r\nHost: example.org\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: foo/bar\r\n\r\nabcdef4343"
 	br := bufio.NewReader(bytes.NewBufferString(s))
 
 	var r Request
@@ -2034,7 +2034,7 @@ func TestResponseReadWithoutBody(t *testing.T) {
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 123 AAA\r\nContent-Type: xxx\r\nContent-Length: 3434\r\n\r\n", false,
 		123, 3434, "xxx")
 
-	testResponseReadWithoutBody(t, &resp, "HTTP 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 123\r\n\r\nfoobar\r\n", true,
+	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 123\r\n\r\nfoobar\r\n", true,
 		200, 123, "text/xml")
 
 	// '100 Continue' must be skipped.
@@ -3118,6 +3118,12 @@ func TestRequestMultipartFormPipeEmptyFormField(t *testing.T) {
 	bw := bufio.NewWriter(&b)
 	err := writeBodyChunked(bw, pr)
 	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err = bw.Write(strCRLF); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err = bw.Flush(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
