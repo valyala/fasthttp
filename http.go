@@ -1353,6 +1353,11 @@ func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		return err
 	}
 
+	// Host header is mandatory in HTTP/1.1 requests.
+	if req.Header.IsHTTP11() && len(req.Header.Host()) == 0 {
+		return errRequestHostRequired
+	}
+
 	return req.readLimitBody(r, maxBodySize, false, true)
 }
 
@@ -1454,7 +1459,10 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 
 	if contentLength == -1 {
 		err = req.Header.ReadTrailer(r)
-		if err != nil && err != io.EOF {
+		if err != nil {
+			if err == io.EOF {
+				return ErrBrokenChunk{error: io.ErrUnexpectedEOF}
+			}
 			return err
 		}
 	}
@@ -1592,7 +1600,10 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	// A response without a body can't have trailers.
 	if resp.Header.ContentLength() == -1 && !resp.StreamBody && !resp.mustSkipBody() {
 		err = resp.Header.ReadTrailer(r)
-		if err != nil && err != io.EOF {
+		if err != nil {
+			if err == io.EOF {
+				return ErrBrokenChunk{error: io.ErrUnexpectedEOF}
+			}
 			return err
 		}
 	}
@@ -2743,6 +2754,7 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 	if err != nil {
 		return -1, err
 	}
+	inExt := false
 	for {
 		c, err := r.ReadByte()
 		if err != nil {
@@ -2750,24 +2762,35 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 				error: fmt.Errorf("cannot read '\\r' char at the end of chunk size: %w", err),
 			}
 		}
-		// Skip chunk extension after chunk size.
-		// Add support later if anyone needs it.
-		if c != '\r' {
-			// Security: Don't allow newlines in chunk extensions.
-			// This can lead to request smuggling issues with some reverse proxies.
-			if c == '\n' {
+		if c == '\r' {
+			if err := r.UnreadByte(); err != nil {
 				return -1, ErrBrokenChunk{
-					error: errors.New("invalid character '\\n' after chunk size"),
+					error: fmt.Errorf("cannot unread '\\r' char at the end of chunk size: %w", err),
 				}
 			}
-			continue
+			break
 		}
-		if err := r.UnreadByte(); err != nil {
+		// Security: Don't allow newlines in chunk extensions.
+		// This can lead to request smuggling issues with some reverse proxies.
+		if c == '\n' {
 			return -1, ErrBrokenChunk{
-				error: fmt.Errorf("cannot unread '\\r' char at the end of chunk size: %w", err),
+				error: errors.New("invalid character '\\n' after chunk size"),
 			}
 		}
-		break
+		if inExt {
+			continue
+		}
+		switch c {
+		case ' ', '\t':
+			continue
+		case ';':
+			inExt = true
+			continue
+		default:
+			return -1, ErrBrokenChunk{
+				error: fmt.Errorf("invalid character %q after chunk size", c),
+			}
+		}
 	}
 	err = readCrLf(r)
 	if err != nil {

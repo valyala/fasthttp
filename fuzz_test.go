@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
+	"io"
+	"net/http"
 	"net/textproto"
 	"net/url"
 	"reflect"
@@ -67,10 +69,22 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 			return
 		}
 
-		res := AcquireResponse()
-		defer ReleaseResponse(res)
+		t.Logf("%q %d", body, maxBodySize)
 
-		_ = res.ReadLimitBody(bufio.NewReader(bytes.NewReader(body)), maxBodySize)
+		var res Response
+		fastErr := res.ReadLimitBody(bufio.NewReader(bytes.NewReader(body)), maxBodySize)
+		fastBody := res.Body()
+
+		netBody, netErr := readResponseBodyNetHTTPLimit(body, maxBodySize)
+		if fastErr != nil {
+			return
+		}
+		if netErr != nil {
+			t.Fatalf("fasthttp:\n%s; net/http err=%v", res.String(), netErr)
+		}
+		if !bytes.Equal(fastBody, netBody) {
+			t.Fatalf("body mismatch: fasthttp=%q net/http=%q", fastBody, netBody)
+		}
 	})
 }
 
@@ -86,11 +100,64 @@ func FuzzRequestReadLimitBody(f *testing.F) {
 			return
 		}
 
-		req := AcquireRequest()
-		defer ReleaseRequest(req)
+		t.Logf("%q %d", body, maxBodySize)
 
-		_ = req.ReadLimitBody(bufio.NewReader(bytes.NewReader(body)), maxBodySize)
+		var req Request
+		fastErr := req.ReadLimitBody(bufio.NewReader(bytes.NewReader(body)), maxBodySize)
+		fastBody := req.Body()
+
+		netBody, netErr := readRequestBodyNetHTTPLimit(body, maxBodySize)
+		if fastErr != nil {
+			return
+		}
+		if netErr != nil {
+			if strings.Contains(netErr.Error(), "invalid URI for request") {
+				return
+			}
+			t.Fatalf("fasthttp:\n%s; net/http err=%v", req.String(), netErr)
+		}
+		if !bytes.Equal(fastBody, netBody) {
+			t.Fatalf("body mismatch: fasthttp=%q net/http=%q", fastBody, netBody)
+		}
 	})
+}
+
+func readResponseBodyNetHTTPLimit(raw []byte, maxBodySize int) ([]byte, error) {
+	br := bufio.NewReader(bytes.NewReader(raw))
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	return readBodyWithLimit(resp.Body, maxBodySize)
+}
+
+func readRequestBodyNetHTTPLimit(raw []byte, maxBodySize int) ([]byte, error) {
+	br := bufio.NewReader(bytes.NewReader(raw))
+	req, err := http.ReadRequest(br)
+	if err != nil {
+		return nil, err
+	}
+	defer req.Body.Close()
+
+	return readBodyWithLimit(req.Body, maxBodySize)
+}
+
+func readBodyWithLimit(r io.Reader, maxBodySize int) ([]byte, error) {
+	if maxBodySize <= 0 {
+		return io.ReadAll(r)
+	}
+
+	limit := int64(maxBodySize) + 1
+	body, err := io.ReadAll(io.LimitReader(r, limit))
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > maxBodySize {
+		return nil, ErrBodyTooLarge
+	}
+	return body, nil
 }
 
 func FuzzURIUpdateBytes(f *testing.F) {

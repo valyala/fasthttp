@@ -2790,7 +2790,22 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
-	h.noHTTP11 = !bytes.Equal(b[:n], strHTTP11)
+	if n == 0 {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", b[:n])
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", b[:n], buf)
+	}
+	protoStr := b[:n]
+	if len(protoStr) != len(strHTTP11) || !bytes.HasPrefix(protoStr, strHTTP11[:5]) || protoStr[6] != '.' ||
+		protoStr[5] < '0' || protoStr[5] > '9' || protoStr[7] < '0' || protoStr[7] > '9' {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+	}
+	h.noHTTP11 = !bytes.Equal(protoStr, strHTTP11)
+	h.protocol = append(h.protocol[:0], protoStr...)
 	b = b[n+1:]
 
 	// parse status code
@@ -2800,6 +2815,12 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 			return 0, fmt.Errorf("cannot parse response status code: %w", err)
 		}
 		return 0, fmt.Errorf("cannot parse response status code: %w. Response %q", err, buf)
+	}
+	if n != 3 {
+		if h.secureErrorLogMessage {
+			return 0, ErrUnexpectedStatusCodeChar
+		}
+		return 0, fmt.Errorf("invalid response status code %q. Response %q", b[:n], buf)
 	}
 	if len(b) > n && b[n] != ' ' {
 		if h.secureErrorLogMessage {
@@ -2894,7 +2915,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
 	}
-	if protoStr[5] < '0' || protoStr[5] > '9' || protoStr[7] < '0' || protoStr[7] > '9' {
+	if protoStr[6] != '.' || protoStr[5] < '0' || protoStr[5] > '9' || protoStr[7] < '0' || protoStr[7] > '9' {
 		if h.secureErrorLogMessage {
 			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
 		}
