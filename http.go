@@ -1239,7 +1239,7 @@ func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	}
 
 	// Host header is mandatory in HTTP/1.1 requests.
-	if req.Header.IsHTTP11() && len(req.Header.Host()) == 0 {
+	if len(req.Header.Host()) == 0 {
 		return errRequestHostRequired
 	}
 
