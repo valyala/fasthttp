@@ -2673,15 +2673,6 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 }
 
 func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV, int, error) {
-	// Skip any 0 length chunk.
-	if src[0] == '0' {
-		skip := len(strCRLF) + 1
-		if len(src) < skip {
-			return dest, 0, io.EOF
-		}
-		src = src[skip:]
-	}
-
 	var s headerScanner
 	s.b = src
 
