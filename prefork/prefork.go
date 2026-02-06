@@ -274,7 +274,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 		if exitedProcs > p.RecoverThreshold {
 			p.logger().Printf("child prefork processes exit too many times, "+
 				"which exceeds the value of RecoverThreshold(%d), "+
-				"exiting the master process.\n", exitedProcs)
+				"exiting the master process.\n", p.RecoverThreshold)
 			err = ErrOverRecovery
 			break
 		}
@@ -287,7 +287,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 		pid := cmd.Process.Pid
 		childProcs[pid] = cmd
 
-		// Call OnChildRecover callback (non-blocking, error ignored)
+		// Call OnChildRecover callback and ignore its returned error.
 		if p.OnChildRecover != nil {
 			_ = p.OnChildRecover(pid)
 		}
