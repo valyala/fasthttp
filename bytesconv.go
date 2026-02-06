@@ -117,7 +117,123 @@ func AppendHTTPDate(dst []byte, date time.Time) []byte {
 
 // ParseHTTPDate parses HTTP-compliant (RFC1123) date.
 func ParseHTTPDate(date []byte) (time.Time, error) {
+	if t, ok := parseRFC1123DateGMT(date); ok {
+		return t, nil
+	}
 	return time.Parse(time.RFC1123, b2s(date))
+}
+
+func parseRFC1123DateGMT(b []byte) (time.Time, bool) {
+	// Expects "Mon, 02 Jan 2006 15:04:05 GMT".
+	if len(b) != 29 {
+		return time.Time{}, false
+	}
+	if b[3] != ',' || b[4] != ' ' || b[7] != ' ' || b[11] != ' ' ||
+		b[16] != ' ' || b[19] != ':' || b[22] != ':' || b[25] != ' ' {
+		return time.Time{}, false
+	}
+	if (b[26]|0x20) != 'g' || (b[27]|0x20) != 'm' || (b[28]|0x20) != 't' {
+		return time.Time{}, false
+	}
+
+	day, ok := parse2Digits(b[5], b[6])
+	if !ok || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+	month, ok := parseMonth3(b[8], b[9], b[10])
+	if !ok {
+		return time.Time{}, false
+	}
+	year, ok := parse4Digits(b[12], b[13], b[14], b[15])
+	if !ok {
+		return time.Time{}, false
+	}
+	hour, ok := parse2Digits(b[17], b[18])
+	if !ok || hour > 23 {
+		return time.Time{}, false
+	}
+	minute, ok := parse2Digits(b[20], b[21])
+	if !ok || minute > 59 {
+		return time.Time{}, false
+	}
+	second, ok := parse2Digits(b[23], b[24])
+	if !ok || second > 59 {
+		return time.Time{}, false
+	}
+
+	return time.Date(year, month, day, hour, minute, second, 0, time.UTC), true
+}
+
+func parse2Digits(a, b byte) (int, bool) {
+	if a < '0' || a > '9' || b < '0' || b > '9' {
+		return 0, false
+	}
+	return int(a-'0')*10 + int(b-'0'), true
+}
+
+func parse4Digits(a, b, c, d byte) (int, bool) {
+	v1, ok := parse2Digits(a, b)
+	if !ok {
+		return 0, false
+	}
+	v2, ok := parse2Digits(c, d)
+	if !ok {
+		return 0, false
+	}
+	return v1*100 + v2, true
+}
+
+func parseMonth3(a, b, c byte) (time.Month, bool) {
+	a |= 0x20
+	b |= 0x20
+	c |= 0x20
+	switch a {
+	case 'j':
+		if b == 'a' && c == 'n' {
+			return time.January, true
+		}
+		if b == 'u' && c == 'n' {
+			return time.June, true
+		}
+		if b == 'u' && c == 'l' {
+			return time.July, true
+		}
+	case 'f':
+		if b == 'e' && c == 'b' {
+			return time.February, true
+		}
+	case 'm':
+		if b == 'a' && c == 'r' {
+			return time.March, true
+		}
+		if b == 'a' && c == 'y' {
+			return time.May, true
+		}
+	case 'a':
+		if b == 'p' && c == 'r' {
+			return time.April, true
+		}
+		if b == 'u' && c == 'g' {
+			return time.August, true
+		}
+	case 's':
+		if b == 'e' && c == 'p' {
+			return time.September, true
+		}
+	case 'o':
+		if b == 'c' && c == 't' {
+			return time.October, true
+		}
+	case 'n':
+		if b == 'o' && c == 'v' {
+			return time.November, true
+		}
+	case 'd':
+		if b == 'e' && c == 'c' {
+			return time.December, true
+		}
+	}
+	return 0, false
 }
 
 // AppendUint appends n to dst and returns the extended dst.

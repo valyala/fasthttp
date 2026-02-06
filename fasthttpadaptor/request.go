@@ -18,9 +18,7 @@ import (
 func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) error {
 	body := ctx.PostBody()
 	strRequestURI := b2s(ctx.RequestURI())
-
-	rURL, err := url.ParseRequestURI(strRequestURI)
-	if err != nil {
+	if err := parseRequestURI(r, strRequestURI); err != nil {
 		return err
 	}
 
@@ -36,12 +34,19 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	r.RemoteAddr = ctx.RemoteAddr().String()
 	r.Host = b2s(ctx.Host())
 	r.TLS = ctx.TLSConnectionState()
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	r.URL = rURL
+	if len(body) == 0 {
+		r.Body = http.NoBody
+	} else {
+		r.Body = io.NopCloser(bytes.NewReader(body))
+	}
 
 	if forServer {
 		r.RequestURI = strRequestURI
+	} else {
+		r.RequestURI = ""
 	}
+
+	r.TransferEncoding = r.TransferEncoding[:0]
 
 	if r.Header == nil {
 		r.Header = make(http.Header)
@@ -66,5 +71,30 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 		}
 	}
 
+	return nil
+}
+
+func parseRequestURI(r *http.Request, requestURI string) error {
+	// Fast path for the common origin-form request URI that doesn't require unescaping.
+	if len(requestURI) > 0 && requestURI[0] == '/' && !strings.ContainsAny(requestURI, "%#") {
+		if r.URL == nil {
+			r.URL = &url.URL{}
+		} else {
+			*r.URL = url.URL{}
+		}
+		if n := strings.IndexByte(requestURI, '?'); n >= 0 {
+			r.URL.Path = requestURI[:n]
+			r.URL.RawQuery = requestURI[n+1:]
+		} else {
+			r.URL.Path = requestURI
+		}
+		return nil
+	}
+
+	rURL, err := url.ParseRequestURI(requestURI)
+	if err != nil {
+		return err
+	}
+	r.URL = rURL
 	return nil
 }

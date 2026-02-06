@@ -379,20 +379,21 @@ func (c *Cookie) ParseBytes(src []byte) error {
 	var s cookieScanner
 	s.b = src
 
-	if !s.next(&c.bufK, &c.bufV) {
+	var k, v []byte
+	if !s.nextRaw(&k, &v) {
 		return errNoCookies
 	}
 
-	c.key = append(c.key, c.bufK...)
-	c.value = append(c.value, c.bufV...)
+	c.key = append(c.key, k...)
+	c.value = append(c.value, v...)
 
-	for s.next(&c.bufK, &c.bufV) {
-		if len(c.bufK) != 0 {
+	for s.nextRaw(&k, &v) {
+		if len(k) != 0 {
 			// Case insensitive switch on first char
-			switch c.bufK[0] | 0x20 {
+			switch k[0] | 0x20 {
 			case 'm':
-				if caseInsensitiveCompare(strCookieMaxAge, c.bufK) {
-					maxAge, err := ParseUint(c.bufV)
+				if cookieTokenEqual(k, strCookieMaxAge) {
+					maxAge, err := ParseUint(v)
 					if err != nil {
 						return err
 					}
@@ -400,67 +401,68 @@ func (c *Cookie) ParseBytes(src []byte) error {
 				}
 
 			case 'e': // "expires"
-				if caseInsensitiveCompare(strCookieExpires, c.bufK) {
-					v := b2s(c.bufV)
-					// Try the same two formats as net/http
-					// See: https://github.com/golang/go/blob/00379be17e63a5b75b3237819392d2dc3b313a27/src/net/http/cookie.go#L133-L135
-					exptime, err := time.ParseInLocation(time.RFC1123, v, time.UTC)
-					if err != nil {
-						exptime, err = time.Parse("Mon, 02-Jan-2006 15:04:05 MST", v)
+				if cookieTokenEqual(k, strCookieExpires) {
+					exptime, err := ParseHTTPDate(v)
+					if err == nil {
+						c.expire = exptime
+					} else {
+						vs := b2s(v)
+						// Keep legacy cookie date compatibility used by net/http.
+						exptime, err = time.Parse("Mon, 02-Jan-2006 15:04:05 MST", vs)
 						if err != nil {
 							return err
 						}
+						c.expire = exptime
 					}
-					c.expire = exptime
 				}
 
 			case 'd': // "domain"
-				if caseInsensitiveCompare(strCookieDomain, c.bufK) {
-					c.domain = append(c.domain, c.bufV...)
+				if cookieTokenEqual(k, strCookieDomain) {
+					c.domain = append(c.domain, v...)
 				}
 
 			case 'p': // "path"
-				if caseInsensitiveCompare(strCookiePath, c.bufK) {
-					c.path = append(c.path, c.bufV...)
+				if cookieTokenEqual(k, strCookiePath) {
+					c.path = append(c.path, v...)
 				}
 
 			case 's': // "samesite"
-				if caseInsensitiveCompare(strCookieSameSite, c.bufK) {
-					if len(c.bufV) > 0 {
+				if cookieTokenEqual(k, strCookieSameSite) {
+					if len(v) > 0 {
 						// Case insensitive switch on first char
-						switch c.bufV[0] | 0x20 {
+						switch v[0] | 0x20 {
 						case 'l': // "lax"
-							if caseInsensitiveCompare(strCookieSameSiteLax, c.bufV) {
+							if cookieTokenEqual(v, strCookieSameSiteLax) {
 								c.sameSite = CookieSameSiteLaxMode
 							}
 						case 's': // "strict"
-							if caseInsensitiveCompare(strCookieSameSiteStrict, c.bufV) {
+							if cookieTokenEqual(v, strCookieSameSiteStrict) {
 								c.sameSite = CookieSameSiteStrictMode
 							}
 						case 'n': // "none"
-							if caseInsensitiveCompare(strCookieSameSiteNone, c.bufV) {
+							if cookieTokenEqual(v, strCookieSameSiteNone) {
 								c.sameSite = CookieSameSiteNoneMode
 							}
 						}
 					}
 				}
 			}
-		} else if len(c.bufV) != 0 {
+		} else if len(v) != 0 {
 			// Case insensitive switch on first char
-			switch c.bufV[0] | 0x20 {
+			switch v[0] | 0x20 {
 			case 'h': // "httponly"
-				if caseInsensitiveCompare(strCookieHTTPOnly, c.bufV) {
+				if cookieTokenEqual(v, strCookieHTTPOnly) {
 					c.httpOnly = true
 				}
 
 			case 's': // "secure"
-				if caseInsensitiveCompare(strCookieSecure, c.bufV) {
+				if cookieTokenEqual(v, strCookieSecure) {
 					c.secure = true
-				} else if caseInsensitiveCompare(strCookieSameSite, c.bufV) {
+				} else if cookieTokenEqual(v, strCookieSameSite) {
 					c.sameSite = CookieSameSiteDefaultMode
 				}
 			case 'p': // "partitioned"
-				if caseInsensitiveCompare(strCookiePartitioned, c.bufV) {
+				if cookieTokenEqual(v, strCookiePartitioned) {
 					c.partitioned = true
 				}
 			}
@@ -529,6 +531,44 @@ type cookieScanner struct {
 	b []byte
 }
 
+func (s *cookieScanner) nextRaw(key, val *[]byte) bool {
+	b := s.b
+	if len(b) == 0 {
+		return false
+	}
+
+	isKey := true
+	k := 0
+	for i, c := range b {
+		switch c {
+		case '=':
+			if isKey {
+				isKey = false
+				*key = trimCookieArgNoCopy(b[:i], false)
+				k = i + 1
+			}
+		case ';':
+			if isKey {
+				*key = (*key)[:0]
+			}
+			*val = trimCookieArgNoCopy(b[k:i], true)
+			j := i + 1
+			if j < len(b) && b[j] == ' ' {
+				j++
+			}
+			s.b = b[j:]
+			return true
+		}
+	}
+
+	if isKey {
+		*key = (*key)[:0]
+	}
+	*val = trimCookieArgNoCopy(b[k:], true)
+	s.b = b[len(b):]
+	return true
+}
+
 func (s *cookieScanner) next(key, val *[]byte) bool {
 	b := s.b
 	if len(b) == 0 {
@@ -550,7 +590,11 @@ func (s *cookieScanner) next(key, val *[]byte) bool {
 				*key = (*key)[:0]
 			}
 			*val = decodeCookieArg(*val, b[k:i], true)
-			s.b = b[i+1:]
+			j := i + 1
+			if j < len(b) && b[j] == ' ' {
+				j++
+			}
+			s.b = b[j:]
 			return true
 		}
 	}
@@ -564,6 +608,12 @@ func (s *cookieScanner) next(key, val *[]byte) bool {
 }
 
 func decodeCookieArg(dst, src []byte, skipQuotes bool) []byte {
+	// Fast path: already trimmed and not quoted.
+	if n := len(src); n > 0 && src[0] != ' ' && src[n-1] != ' ' &&
+		(!skipQuotes || n < 2 || src[0] != '"' || src[n-1] != '"') {
+		return append(dst[:0], src...)
+	}
+
 	for len(src) > 0 && src[0] == ' ' {
 		src = src[1:]
 	}
@@ -578,6 +628,19 @@ func decodeCookieArg(dst, src []byte, skipQuotes bool) []byte {
 	return append(dst[:0], src...)
 }
 
+func trimCookieArgNoCopy(src []byte, skipQuotes bool) []byte {
+	for len(src) > 0 && src[0] == ' ' {
+		src = src[1:]
+	}
+	for len(src) > 0 && src[len(src)-1] == ' ' {
+		src = src[:len(src)-1]
+	}
+	if skipQuotes && len(src) > 1 && src[0] == '"' && src[len(src)-1] == '"' {
+		src = src[1 : len(src)-1]
+	}
+	return src
+}
+
 // caseInsensitiveCompare does a case insensitive equality comparison of
 // two []byte. Assumes only letters need to be matched.
 func caseInsensitiveCompare(a, b []byte) bool {
@@ -590,4 +653,8 @@ func caseInsensitiveCompare(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+func cookieTokenEqual(a, b []byte) bool {
+	return bytes.Equal(a, b) || caseInsensitiveCompare(a, b)
 }
