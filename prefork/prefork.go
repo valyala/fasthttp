@@ -93,14 +93,15 @@ type Prefork struct {
 	// OnChildRecover is called in the master process when a child process is restarted
 	// after a crash. It receives the PID of the newly recovered child process.
 	//
-	// This callback is non-blocking and its error return value is ignored.
+	// The callback's error return value is ignored.
 	OnChildRecover func(pid int) error
 
 	// CommandProducer is called to create child process commands.
 	// If nil, the default implementation using os.Args is used.
-	// This is useful for testing or customizing child process behavior.
+	// This can be used for testing or customizing child process behavior.
 	//
-	// The function receives the files to be passed as ExtraFiles to the child process.
+	// The function receives the files to be passed as ExtraFiles to the child process
+	// and must return a started command.
 	CommandProducer func(files []*os.File) (*exec.Cmd, error)
 }
 
@@ -319,7 +320,7 @@ func (p *Prefork) ListenAndServe(addr string) error {
 // ListenAndServeTLS serves HTTPS requests from the given TCP addr.
 //
 // certFile and keyFile are paths to TLS certificate and key files.
-func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
+func (p *Prefork) ListenAndServeTLS(addr, certFile, keyFile string) error {
 	if IsChild() {
 		ln, err := p.listen(addr)
 		if err != nil {
@@ -328,7 +329,7 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 
 		p.ln = ln
 
-		return p.ServeTLSFunc(ln, certFile, certKey)
+		return p.ServeTLSFunc(ln, certFile, keyFile)
 	}
 
 	return p.prefork(addr)
@@ -371,7 +372,10 @@ func watchMaster() {
 	// Unix/Linux implementation
 	// If parent PID becomes 1 (init), it means the master process has died
 	// and this child process has been adopted by init
-	for range time.NewTicker(watchInterval).C {
+	ticker := time.NewTicker(watchInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
 		if os.Getppid() == 1 {
 			os.Exit(1) //nolint:revive // Exiting child process is intentional
 		}
