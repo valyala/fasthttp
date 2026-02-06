@@ -76,7 +76,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 
 func parseRequestURI(r *http.Request, requestURI string) error {
 	// Fast path for the common origin-form request URI that doesn't require unescaping.
-	if len(requestURI) > 0 && requestURI[0] == '/' && !strings.ContainsAny(requestURI, "%#") {
+	if requestURI != "" && requestURI[0] == '/' && !strings.ContainsAny(requestURI, "%#") {
 		if r.URL == nil {
 			r.URL = &url.URL{}
 		} else {
