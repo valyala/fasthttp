@@ -181,8 +181,7 @@ func formatStatusLine(dst, protocol []byte, statusCode int, statusText []byte) [
 func statusCodeLen(statusCode int) int {
 	switch {
 	case statusCode < 0:
-		// Avoid Itoa allocation: 1 byte for '-' plus digits of magnitude.
-		return 1 + digits10Uint64(uint64(-(statusCode+1))+1)
+		return digits10Int(statusCode)
 	case statusCode < 10:
 		return 1
 	case statusCode < 100:
@@ -190,13 +189,13 @@ func statusCodeLen(statusCode int) int {
 	case statusCode < 1000:
 		return 3
 	default:
-		return digits10Uint64(uint64(statusCode))
+		return digits10Int(statusCode)
 	}
 }
 
-func digits10Uint64(v uint64) int {
+func digits10Int(v int) int {
 	n := 1
-	for v >= 10 {
+	for v <= -10 || v >= 10 {
 		v /= 10
 		n++
 	}
