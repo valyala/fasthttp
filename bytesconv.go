@@ -161,7 +161,12 @@ func parseRFC1123DateGMT(b []byte) (time.Time, bool) {
 		return time.Time{}, false
 	}
 
-	return time.Date(year, month, day, hour, minute, second, 0, time.UTC), true
+	t := time.Date(year, month, day, hour, minute, second, 0, time.UTC)
+	// Reject calendar-invalid dates like "31 Feb", which time.Date normalizes.
+	if t.Year() != year || t.Month() != month || t.Day() != day {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 func parse2Digits(a, b byte) (int, bool) {

@@ -200,6 +200,47 @@ func TestAppendHTTPDate(t *testing.T) {
 	}
 }
 
+func TestParseHTTPDate(t *testing.T) {
+	t.Parallel()
+
+	valid := []string{
+		"Tue, 10 Nov 2009 23:00:00 GMT",
+		"Mon, 29 Feb 2016 12:34:56 GMT", // leap year
+		"Fri, 31 Dec 1999 23:59:59 GMT",
+		"Tue, 10 Nov 2009 23:00:00 UTC", // fallback path should match time.Parse behavior
+	}
+	for _, s := range valid {
+		got, err := ParseHTTPDate([]byte(s))
+		if err != nil {
+			t.Fatalf("unexpected error parsing %q: %v", s, err)
+		}
+		want, err := time.Parse(time.RFC1123, s)
+		if err != nil {
+			t.Fatalf("unexpected reference parse error for %q: %v", s, err)
+		}
+		if !got.Equal(want) {
+			t.Fatalf("unexpected parsed time for %q: got=%v want=%v", s, got, want)
+		}
+	}
+}
+
+func TestParseHTTPDateInvalid(t *testing.T) {
+	t.Parallel()
+
+	invalid := []string{
+		"Tue, 31 Feb 2009 23:00:00 GMT", // invalid day-of-month
+		"Tue, 10 Foo 2009 23:00:00 GMT", // invalid month
+		"Tue 10 Nov 2009 23:00:00 GMT",  // missing comma separator
+		"Tue, 10 Nov 2009 23-00-00 GMT", // invalid time separators
+		"Tue, 29 Feb 2019 23:00:00 GMT", // non-leap-year date
+	}
+	for _, s := range invalid {
+		if _, err := ParseHTTPDate([]byte(s)); err == nil {
+			t.Fatalf("expected error for invalid http date %q", s)
+		}
+	}
+}
+
 func TestParseUintError(t *testing.T) {
 	t.Parallel()
 
