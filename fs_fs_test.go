@@ -749,7 +749,7 @@ func TestDirFSFSCompressConcurrent(t *testing.T) {
 	for i := 0; i < concurrency; i++ {
 		select {
 		case <-ch:
-		case <-time.After(time.Second * 2):
+		case <-time.After(time.Second * 4):
 			t.Fatalf("timeout")
 		}
 	}

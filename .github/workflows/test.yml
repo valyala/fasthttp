@@ -9,8 +9,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go-version: [1.24.x]
-        os: [ubuntu-latest, macos-latest, windows-latest, macos-14]
+        go-version: [1.24.x, 1.25.x]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6

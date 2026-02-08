@@ -1,6 +1,6 @@
 //go:build !js && !wasm && (linux || dragonfly || freebsd || netbsd || openbsd || rumprun)
 
-package tcplisten
+package listensocket
 
 import (
 	"fmt"
@@ -8,7 +8,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func newSocketCloexec(domain, typ, proto int) (int, error) {
+// NewSocketCloexec creates a non-blocking CLOEXEC socket, falling back to
+// SetNonblock+CloseOnExec on older kernels that do not support flags.
+func NewSocketCloexec(domain, typ, proto int) (int, error) {
 	fd, err := unix.Socket(domain, typ|unix.SOCK_NONBLOCK|unix.SOCK_CLOEXEC, proto)
 	if err == nil {
 		return fd, nil
