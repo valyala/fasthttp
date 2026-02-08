@@ -2263,16 +2263,26 @@ func headerErrorMsg(typ string, err error, b []byte, secureErrorLogMessage bool)
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) Read(r *bufio.Reader) error {
-	return h.readLoop(r, true)
+	return h.readLoopExt(r, true, true)
 }
 
 // readLoop reads request header from r optionally loops until it has enough data.
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) readLoop(r *bufio.Reader, waitForMore bool) error {
+	return h.readLoopExt(r, waitForMore, true)
+}
+
+// readLoopNoLeadingEmptyLines reads request headers while rejecting
+// leading empty lines before the request line (net/http-compatible mode).
+func (h *RequestHeader) readLoopNoLeadingEmptyLines(r *bufio.Reader, waitForMore bool) error {
+	return h.readLoopExt(r, waitForMore, false)
+}
+
+func (h *RequestHeader) readLoopExt(r *bufio.Reader, waitForMore, allowLeadingEmptyLines bool) error {
 	n := 1
 	for {
-		err := h.tryRead(r, n)
+		err := h.tryRead(r, n, allowLeadingEmptyLines)
 		if err == nil {
 			return nil
 		}
@@ -2284,7 +2294,7 @@ func (h *RequestHeader) readLoop(r *bufio.Reader, waitForMore bool) error {
 	}
 }
 
-func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
+func (h *RequestHeader) tryRead(r *bufio.Reader, n int, allowLeadingEmptyLines bool) error {
 	h.resetSkipNormalize()
 	b, err := r.Peek(n)
 	if len(b) == 0 {
@@ -2312,7 +2322,7 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		return fmt.Errorf("error when reading request headers: %w", err)
 	}
 	b = mustPeekBuffered(r)
-	headersLen, errParse := h.parse(b)
+	headersLen, errParse := h.parseExt(b, allowLeadingEmptyLines)
 	if errParse != nil {
 		return headerError("request", err, errParse, b, h.secureErrorLogMessage)
 	}
@@ -2655,7 +2665,11 @@ func (h *RequestHeader) ignoreBody() bool {
 }
 
 func (h *RequestHeader) parse(buf []byte) (int, error) {
-	m, err := h.parseFirstLine(buf)
+	return h.parseExt(buf, true)
+}
+
+func (h *RequestHeader) parseExt(buf []byte, allowLeadingEmptyLines bool) (int, error) {
+	m, err := h.parseFirstLineExt(buf, allowLeadingEmptyLines)
 	if err != nil {
 		return 0, err
 	}
@@ -2845,12 +2859,25 @@ func isValidMethod(method []byte) bool {
 }
 
 func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
+	return h.parseFirstLineExt(buf, true)
+}
+
+func (h *RequestHeader) parseFirstLineExt(buf []byte, allowLeadingEmptyLines bool) (int, error) {
 	bNext := buf
 	var b []byte
 	var err error
-	for len(b) == 0 {
+	for {
 		if b, bNext, err = nextLine(bNext); err != nil {
 			return 0, err
+		}
+		if len(b) > 0 {
+			break
+		}
+		if !allowLeadingEmptyLines {
+			if h.secureErrorLogMessage {
+				return 0, ErrMissingRequestMethod
+			}
+			return 0, fmt.Errorf("cannot find http request method in %q", buf)
 		}
 	}
 
