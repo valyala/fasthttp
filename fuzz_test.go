@@ -52,6 +52,20 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 10\r\n\r\n9876543210"), 1024)
 	f.Add([]byte(" 0\nTrAnsfer-EnCoding:0\n\n0\r\n1:0\n        00\n 000\n\n"), 24922)
 	f.Add([]byte(" 0\n0:\n 0\n :\n"), 1048532)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3;ext=1\r\nabc\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1;ext=\"ok\" \r\nx\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1;ext=\"a\\\\\\\"b\";foo=bar\r\nx\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTrailer: Foo\r\n\r\n3\r\nabc\r\n0\r\nFoo: bar\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nA\r\n0123456789\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3 \t\r\nabc\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.0 200 OK\r\nContent-Length: 5\r\n\r\nhello"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: 5\r\n\r\nhello"), 1024)
+	f.Add([]byte("HTTP/1.0 200 OK\r\nConnection: close\r\n\r\nBody here\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\n\r\nBody here\n"), 1024)
+	f.Add([]byte("HTTP/1.0 303 \r\n\r\n"), 1024)
 
 	// Case found by OSS-Fuzz.
 	b, err := base64.StdEncoding.DecodeString("oeYAdyAyClRyYW5zZmVyLUVuY29kaW5nOmlka7AKCjANCiA6MAogOgogOgogPgAAAAAAAAAgICAhICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiA6CiA6CiAgOgogOgogYDogCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogOgogOgogIDoKIDoKIGA6IAoKIDoKBSAgOgogOgogOgogOgogIDoKIDoKIGA6IAAgIAA6CiA6CiA6CjoKIDoKIDoWCiAyIOgKIDogugogOjAKIDoKIDoKBSAgOgogOgogOgogOgogIDoKIDoKIGA6IAAgIAAAAAAAAABaYQ==")
@@ -80,10 +94,10 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 			return
 		}
 		if netErr != nil {
-			if (len(body) > 0 && (body[0] == '\r' || body[0] == '\n')) &&
+			/*if (len(body) > 0 && (body[0] == '\r' || body[0] == '\n')) &&
 				strings.Contains(netErr.Error(), "malformed HTTP response") {
 				return
-			}
+			}*/
 			t.Fatalf("fasthttp:\n%s; net/http err=%v", res.String(), netErr)
 		}
 		if !bytes.Equal(fastBody, netBody) {
@@ -94,6 +108,20 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 
 func FuzzRequestReadLimitBody(f *testing.F) {
 	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nfoobar\r\n\r\n"), 1024)
+	f.Add([]byte("POST / HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\n3;ext=1\r\nabc\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("POST / HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\n1;ext=\"ok\" \r\nx\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("POST / HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\n1;ext=\"a\\\\\\\"b\";foo=bar\r\nx\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("POST / HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nTrailer: Foo\r\n\r\n3\r\nabc\r\n0\r\nFoo: bar\r\n\r\n"), 1024)
+	f.Add([]byte("POST / HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\nA\r\n0123456789\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("POST / HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\n3 \t\r\nabc\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("GET /foo?bar=baz HTTP/1.1\r\nHost: a.com\r\nUser-Agent: fuzz\r\nAccept: */*\r\n\r\n"), 1024)
+	f.Add([]byte("GET http://a.com/abs/path?x=1 HTTP/1.1\r\nHost: a.com\r\n\r\n"), 1024)
+	f.Add([]byte("OPTIONS * HTTP/1.1\r\nHost: a.com\r\n\r\n"), 1024)
+	f.Add([]byte("CONNECT a.com:443 HTTP/1.1\r\nHost: a.com:443\r\n\r\n"), 1024)
+	f.Add([]byte("POST /submit HTTP/1.1\r\nHost: a.com\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 7\r\n\r\nname=aa"), 1024)
+	f.Add([]byte("GET http://user@a.com/path HTTP/1.1\r\nHost: a.com\r\n\r\n"), 1024)
+	f.Add([]byte("GET http://[fe80::1%25en0]/ HTTP/1.1\r\nHost: [fe80::1%25en0]\r\n\r\n"), 1024)
+	f.Add([]byte("CONNECT user@a.com:443 HTTP/1.1\r\nHost: a.com:443\r\n\r\n"), 1024)
 
 	f.Fuzz(func(t *testing.T, body []byte, maxBodySize int) {
 		if len(body) > 1024*1024 || maxBodySize > 1024*1024 {
@@ -115,13 +143,6 @@ func FuzzRequestReadLimitBody(f *testing.F) {
 			return
 		}
 		if netErr != nil {
-			if (len(body) > 0 && (body[0] == '\r' || body[0] == '\n')) &&
-				strings.Contains(netErr.Error(), "malformed HTTP request") {
-				return
-			}
-			if strings.Contains(netErr.Error(), "invalid URI for request") {
-				return
-			}
 			t.Fatalf("fasthttp:\n%s; net/http err=%v", req.String(), netErr)
 		}
 		if !bytes.Equal(fastBody, netBody) {
@@ -228,6 +249,10 @@ func FuzzURIParse(f *testing.F) {
 func FuzzTestHeaderScanner(f *testing.F) {
 	f.Add([]byte("Host: example.com\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate\r\n\r\n"))
 	f.Add([]byte("Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 27\r\n\r\nname=John+Doe&age=30"))
+	f.Add([]byte("X-Empty:\r\n\r\n"))
+	f.Add([]byte("X-WS: \t \t\r\n\r\n"))
+	f.Add([]byte("X-Quoted: \"a,b\"; q=1\r\n\r\n"))
+	f.Add([]byte("Set-Cookie: a=b; Path=/; HttpOnly\r\nSet-Cookie: c=d\r\n\r\n"))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if !bytes.Contains(data, []byte("\r\n\r\n")) {
@@ -284,6 +309,9 @@ func FuzzTestHeaderScanner(f *testing.F) {
 func FuzzRequestReadLimitBodyAllocations(f *testing.F) {
 	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nfoobar\r\n\r\n"), 1024)
 	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nWithTabs: \t v1 \t\r\nWithTabs-Start: \t \t v1 \r\nWithTabs-End: v1 \t \t\t\t\r\nWithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n\r\n"), 1024)
+	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\n3;ext=1\r\nabc\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\nA\r\n0123456789\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("POST /submit HTTP/1.1\r\nHost: a.com\r\nContent-Length: 7\r\n\r\nname=aa"), 1024)
 
 	f.Fuzz(func(t *testing.T, body []byte, maxBodySize int) {
 		if len(body) > 1024*1024 || maxBodySize > 1024*1024 {

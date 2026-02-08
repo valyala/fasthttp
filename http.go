@@ -2621,60 +2621,67 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 }
 
 func parseChunkSize(r *bufio.Reader) (int, error) {
-	n, err := readHexInt(r)
+	line, err := readChunkLine(r)
 	if err != nil {
 		return -1, err
 	}
-	inExt := false
-	sawOWS := false
-	for {
-		c, err := r.ReadByte()
-		if err != nil {
-			return -1, ErrBrokenChunk{
-				error: fmt.Errorf("cannot read '\\r' char at the end of chunk size: %w", err),
-			}
-		}
-		if c == '\r' {
-			if err := r.UnreadByte(); err != nil {
-				return -1, ErrBrokenChunk{
-					error: fmt.Errorf("cannot unread '\\r' char at the end of chunk size: %w", err),
-				}
-			}
-			break
-		}
-		// Security: Don't allow newlines in chunk extensions.
-		// This can lead to request smuggling issues with some reverse proxies.
-		if c == '\n' {
-			return -1, ErrBrokenChunk{
-				error: errors.New("invalid character '\\n' after chunk size"),
-			}
-		}
-		if inExt {
-			continue
-		}
-		switch c {
-		case ' ', '\t':
-			sawOWS = true
-			continue
-		case ';':
-			if sawOWS {
-				return -1, ErrBrokenChunk{
-					error: fmt.Errorf("invalid character %q after chunk size", c),
-				}
-			}
-			inExt = true
-			continue
-		default:
-			return -1, ErrBrokenChunk{
-				error: fmt.Errorf("invalid character %q after chunk size", c),
-			}
-		}
+	line = trimTrailingWhitespace(line)
+	if n := bytes.IndexByte(line, ';'); n >= 0 {
+		line = line[:n]
 	}
-	err = readCrLf(r)
-	if err != nil {
-		return -1, err
+	if len(line) == 0 {
+		return -1, errEmptyHexNum
+	}
+	if len(line) > maxHexIntChars {
+		return -1, errTooLargeHexNum
+	}
+	var n int
+	for i := 0; i < len(line); i++ {
+		k := int(hex2intTable[line[i]])
+		if k == 16 {
+			return -1, ErrBrokenChunk{
+				error: fmt.Errorf("invalid character %q after chunk size", line[i]),
+			}
+		}
+		n = (n << 4) | k
 	}
 	return n, nil
+}
+
+const maxChunkLineLength = 4096
+
+var errChunkLineTooLong = errors.New("chunked line too long")
+var errMissingChunkCRLF = errors.New("missing CRLF after chunk size")
+
+func readChunkLine(r *bufio.Reader) ([]byte, error) {
+	line, err := r.ReadSlice('\n')
+	if err == bufio.ErrBufferFull {
+		return nil, ErrBrokenChunk{error: errChunkLineTooLong}
+	}
+	if err != nil {
+		return nil, ErrBrokenChunk{error: err}
+	}
+	if len(line) >= maxChunkLineLength {
+		return nil, ErrBrokenChunk{error: errChunkLineTooLong}
+	}
+	if len(line) < 2 || line[len(line)-2] != '\r' {
+		return nil, ErrBrokenChunk{error: errMissingChunkCRLF}
+	}
+	if bytes.IndexByte(line[:len(line)-2], '\r') >= 0 {
+		return nil, ErrBrokenChunk{error: errMissingChunkCRLF}
+	}
+	return line[:len(line)-2], nil
+}
+
+func trimTrailingWhitespace(b []byte) []byte {
+	for len(b) > 0 {
+		c := b[len(b)-1]
+		if c != ' ' && c != '\t' {
+			break
+		}
+		b = b[:len(b)-1]
+	}
+	return b
 }
 
 func readCrLf(r *bufio.Reader) error {

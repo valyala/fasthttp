@@ -2942,17 +2942,114 @@ func validateRequestURI(method, requestURI []byte) error {
 	if len(requestURI) > 0 && requestURI[0] == '/' {
 		return nil
 	}
+	if bytes.Equal(method, strConnect) {
+		if len(requestURI) == 0 || requestURI[0] == '/' {
+			return nil
+		}
+		return validateAuthorityForm(requestURI)
+	}
 	if i := bytes.Index(requestURI, strColonSlashSlash); i >= 0 {
 		if !isValidScheme(requestURI[:i]) {
 			return ErrorInvalidURI
 		}
-		return nil
-	}
-	// net/http treats CONNECT request-targets without a leading slash as authority-form.
-	if bytes.Equal(method, strConnect) {
+		authority := requestURI[i+len(strColonSlashSlash):]
+		for i, c := range authority {
+			if c == '/' || c == '?' || c == '#' {
+				authority = authority[:i]
+				break
+			}
+		}
+		if err := validateAuthorityForm(authority); err != nil {
+			return err
+		}
 		return nil
 	}
 	return ErrorInvalidURI
+}
+
+func validateAuthorityForm(authority []byte) error {
+	if i := bytes.LastIndexByte(authority, '@'); i >= 0 {
+		authority = authority[i+1:]
+	}
+	return validateHostPort(authority)
+}
+
+func validateHostPort(host []byte) error {
+	if len(host) > 0 && host[0] == '[' {
+		i := bytes.LastIndexByte(host, ']')
+		if i < 0 {
+			return errors.New("missing ']' in host")
+		}
+		colonPort := host[i+1:]
+		if !validOptionalPort(colonPort) {
+			return fmt.Errorf("invalid port %q after host", colonPort)
+		}
+		if zone := bytes.Index(host[:i], []byte("%25")); zone >= 0 {
+			if err := validateEscapedHost(host[:zone], encodeHost); err != nil {
+				return err
+			}
+			if err := validateEscapedHost(host[zone:i], encodeZone); err != nil {
+				return err
+			}
+			if err := validateEscapedHost(host[i:], encodeHost); err != nil {
+				return err
+			}
+		} else if err := validateEscapedHost(host, encodeHost); err != nil {
+			return err
+		}
+	} else {
+		if bytes.ContainsAny(host, "[]") {
+			return fmt.Errorf("invalid host %q", host)
+		}
+		if i := bytes.LastIndexByte(host, ':'); i != -1 {
+			if bytes.IndexByte(host[:i], ':') != -1 {
+				return fmt.Errorf("invalid host %q with multiple port delimiters", host)
+			}
+			colonPort := host[i:]
+			if !validOptionalPort(colonPort) {
+				return fmt.Errorf("invalid port %q after host", colonPort)
+			}
+		}
+		if err := validateEscapedHost(host, encodeHost); err != nil {
+			return err
+		}
+	}
+	if err := validateIPv6Literal(host); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateEscapedHost(s []byte, mode encoding) error {
+	for i := 0; i < len(s); {
+		switch s[i] {
+		case '%':
+			if i+2 >= len(s) || !ishex(s[i+1]) || !ishex(s[i+2]) {
+				b := s[i:]
+				if len(b) > 3 {
+					b = b[:3]
+				}
+				return EscapeError(b)
+			}
+			if mode == encodeHost && unhex(s[i+1]) < 8 && !bytes.Equal(s[i:i+3], []byte("%25")) {
+				return EscapeError(s[i : i+3])
+			}
+			if mode == encodeZone {
+				v := unhex(s[i+1])<<4 | unhex(s[i+2])
+				if !bytes.Equal(s[i:i+3], []byte("%25")) && v != ' ' && shouldEscape(v, encodeHost) {
+					return EscapeError(s[i : i+3])
+				}
+			}
+			i += 3
+			continue
+		default:
+			if (mode == encodeHost || mode == encodeZone) && s[i] < 0x80 && shouldEscape(s[i], mode) {
+				return InvalidHostError(s[i : i+1])
+			}
+			i++
+		}
+	}
+	return nil
 }
 
 func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
@@ -3072,7 +3169,18 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			}
 		case 't':
 			if caseInsensitiveCompare(s.key, strTransferEncoding) {
-				if len(s.value) > 0 && !bytes.Equal(s.value, strIdentity) {
+				isIdentity := caseInsensitiveCompare(s.value, strIdentity)
+				isChunked := caseInsensitiveCompare(s.value, strChunked)
+
+				if !isIdentity && !isChunked {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, ErrUnsupportedTransferEncoding
+					}
+					return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
+				}
+
+				if isChunked {
 					h.contentLength = -1
 					h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 				}

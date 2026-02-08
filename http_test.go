@@ -40,11 +40,8 @@ func TestResponseEmptyTransferEncoding(t *testing.T) {
 	body := "Some body"
 	br := bufio.NewReader(bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: \r\nContent-Length: 9\r\n\r\n" + body))
 	err := r.Read(br)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(r.Body()); got != body {
-		t.Fatalf("expected %q got %q", body, got)
+	if err == nil {
+		t.Fatalf("expected error for empty Transfer-Encoding, got body %q", r.Body())
 	}
 }
 
@@ -2271,10 +2268,6 @@ func TestResponseReadSuccess(t *testing.T) {
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nqwer\r\n2\r\nty\r\n0\r\nFoo2: bar2\r\n\r\n",
 		200, -1, "text/html", "qwerty", map[string]string{"Foo2": "bar2"})
 
-	// chunked response with non-chunked Transfer-Encoding.
-	testResponseReadSuccess(t, resp, "HTTP/1.1 230 OK\r\nContent-Type: text\r\nTransfer-Encoding: aaabbb\r\n\r\n2\r\ner\r\n2\r\nty\r\n0\r\nFoo3: bar3\r\n\r\n",
-		230, -1, "text", "erty", map[string]string{"Foo3": "bar3"})
-
 	// chunked response with content-length
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: foo/bar\r\nContent-Length: 123\r\nTransfer-Encoding: chunked\r\n\r\n4\r\ntest\r\n0\r\nFoo4:bar4\r\n\r\n",
 		200, -1, "foo/bar", "test", map[string]string{"Foo4": "bar4"})
@@ -2309,6 +2302,9 @@ func TestResponseReadError(t *testing.T) {
 	testResponseReadError(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: chunked\r\n\r\nfoo")
 
 	testResponseReadError(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nfoo")
+
+	// unsupported transfer-encoding
+	testResponseReadError(t, resp, "HTTP/1.1 230 OK\r\nContent-Type: text\r\nTransfer-Encoding: aaabbb\r\n\r\n2\r\ner\r\n2\r\nty\r\n0\r\nFoo3: bar3\r\n\r\n")
 }
 
 func testResponseReadError(t *testing.T, resp *Response, response string) {
