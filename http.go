@@ -2652,8 +2652,10 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 
 const maxChunkLineLength = 4096
 
-var errChunkLineTooLong = errors.New("chunked line too long")
-var errMissingChunkCRLF = errors.New("missing CRLF after chunk size")
+var (
+	errChunkLineTooLong = errors.New("chunked line too long")
+	errMissingChunkCRLF = errors.New("missing CRLF after chunk size")
+)
 
 func readChunkLine(r *bufio.Reader) ([]byte, error) {
 	line, err := r.ReadSlice('\n')
