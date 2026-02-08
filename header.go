@@ -2772,10 +2772,14 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	bNext := buf
 	var b []byte
 	var err error
-	for len(b) == 0 {
-		if b, bNext, err = nextLine(bNext); err != nil {
-			return 0, err
+	if b, bNext, err = nextLine(bNext); err != nil {
+		return 0, err
+	}
+	if len(b) == 0 {
+		if h.secureErrorLogMessage {
+			return 0, ErrResponseFirstLineMissingSpace
 		}
+		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
 
 	// parse protocol
@@ -2936,6 +2940,9 @@ func validateRequestURI(method, requestURI []byte) error {
 	if stringContainsCTLByte(requestURI) {
 		return ErrorInvalidURI
 	}
+	if err := validatePercentEscapes(requestURI); err != nil {
+		return err
+	}
 	if len(requestURI) == 1 && requestURI[0] == '*' {
 		return nil
 	}
@@ -2954,7 +2961,7 @@ func validateRequestURI(method, requestURI []byte) error {
 		}
 		authority := requestURI[i+len(strColonSlashSlash):]
 		for i, c := range authority {
-			if c == '/' || c == '?' || c == '#' {
+			if c == '/' || c == '?' {
 				authority = authority[:i]
 				break
 			}
@@ -2967,8 +2974,24 @@ func validateRequestURI(method, requestURI []byte) error {
 	return ErrorInvalidURI
 }
 
+func validatePercentEscapes(s []byte) error {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '%' {
+			continue
+		}
+		if i+2 >= len(s) || !ishex(s[i+1]) || !ishex(s[i+2]) {
+			return ErrorInvalidURI
+		}
+		i += 2
+	}
+	return nil
+}
+
 func validateAuthorityForm(authority []byte) error {
 	if i := bytes.LastIndexByte(authority, '@'); i >= 0 {
+		if !validUserinfo(authority[:i]) {
+			return ErrorInvalidURI
+		}
 		authority = authority[i+1:]
 	}
 	return validateHostPort(authority)
@@ -2980,11 +3003,19 @@ func validateHostPort(host []byte) error {
 		if i < 0 {
 			return errors.New("missing ']' in host")
 		}
+		// Bracketed hosts must contain exactly one closing bracket and no nested '['.
+		if bytes.IndexByte(host[1:i], ']') >= 0 || bytes.IndexByte(host[1:i], '[') >= 0 {
+			return fmt.Errorf("invalid host %q", host)
+		}
 		colonPort := host[i+1:]
 		if !validOptionalPort(colonPort) {
 			return fmt.Errorf("invalid port %q after host", colonPort)
 		}
 		if zone := bytes.Index(host[:i], []byte("%25")); zone >= 0 {
+			// Zone marker must be followed by at least one zone byte.
+			if zone+3 >= i {
+				return errInvalidIPv6Zone
+			}
 			if err := validateEscapedHost(host[:zone], encodeHost); err != nil {
 				return err
 			}
@@ -3050,6 +3081,22 @@ func validateEscapedHost(s []byte, mode encoding) error {
 		}
 	}
 	return nil
+}
+
+func protoAtLeastHTTP11ForTransfer(proto []byte) bool {
+	if len(proto) != len(strHTTP11) || !bytes.HasPrefix(proto, strHTTP11[:5]) || proto[6] != '.' ||
+		proto[5] < '0' || proto[5] > '9' || proto[7] < '0' || proto[7] > '9' {
+		return false
+	}
+
+	major := proto[5]
+	minor := proto[7]
+
+	// Match net/http transferReader defaulting HTTP/0.0 to HTTP/1.1 semantics.
+	if major == '0' && minor == '0' {
+		return true
+	}
+	return major > '1' || (major == '1' && minor >= '1')
 }
 
 func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
@@ -3169,6 +3216,11 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			}
 		case 't':
 			if caseInsensitiveCompare(s.key, strTransferEncoding) {
+				// Keep net/http behavior: ignore Transfer-Encoding on HTTP/1.0 and older.
+				if !protoAtLeastHTTP11ForTransfer(h.protocol) {
+					continue
+				}
+
 				isIdentity := caseInsensitiveCompare(s.value, strIdentity)
 				isChunked := caseInsensitiveCompare(s.value, strChunked)
 
@@ -3314,6 +3366,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 			}
 		case 't':
 			if caseInsensitiveCompare(s.key, strTransferEncoding) {
+				// Keep net/http behavior: ignore Transfer-Encoding on HTTP/1.0 and older.
+				if !protoAtLeastHTTP11ForTransfer(h.protocol) {
+					continue
+				}
+
 				isIdentity := caseInsensitiveCompare(s.value, strIdentity)
 				isChunked := caseInsensitiveCompare(s.value, strChunked)
 

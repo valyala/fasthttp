@@ -66,6 +66,18 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 	f.Add([]byte("HTTP/1.0 200 OK\r\nConnection: close\r\n\r\nBody here\n"), 1024)
 	f.Add([]byte("HTTP/1.1 200 OK\r\n\r\nBody here\n"), 1024)
 	f.Add([]byte("HTTP/1.0 303 \r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Length: 256\r\nConnection: keep-alive, close\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.0 200 OK\r\nTransfer-Encoding: bogus\r\n\r\nBody here\n"), 1024)
+	f.Add([]byte("HTTP/1.0 200 OK\r\nTransfer-Encoding: bogus\r\nContent-Length: 10\r\n\r\nBody here\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\n Content-type: text/html\r\nFoo: bar\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nContent-Length: 10\r\nContent-Length: 7\r\n\r\nGopher hey\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 204 No Content\r\n\r\nBody should not be read!\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: Chunked\r\n\r\n1\r\na\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked \r\n\r\n1\r\na\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0;ext=done\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTrailer: Foo, Bar\r\n\r\n1\r\nx\r\n0\r\nFoo: 1\r\nBar: 2\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nf;note=v\r\n0123456789abcde\r\n0\r\n\r\n"), 1024)
 
 	// Case found by OSS-Fuzz.
 	b, err := base64.StdEncoding.DecodeString("oeYAdyAyClRyYW5zZmVyLUVuY29kaW5nOmlka7AKCjANCiA6MAogOgogOgogPgAAAAAAAAAgICAhICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgCiA6CiA6CiAgOgogOgogYDogCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIAogOgogOgogIDoKIDoKIGA6IAoKIDoKBSAgOgogOgogOgogOgogIDoKIDoKIGA6IAAgIAA6CiA6CiA6CjoKIDoKIDoWCiAyIOgKIDogugogOjAKIDoKIDoKBSAgOgogOgogOgogOgogIDoKIDoKIGA6IAAgIAAAAAAAAABaYQ==")
@@ -122,6 +134,17 @@ func FuzzRequestReadLimitBody(f *testing.F) {
 	f.Add([]byte("GET http://user@a.com/path HTTP/1.1\r\nHost: a.com\r\n\r\n"), 1024)
 	f.Add([]byte("GET http://[fe80::1%25en0]/ HTTP/1.1\r\nHost: [fe80::1%25en0]\r\n\r\n"), 1024)
 	f.Add([]byte("CONNECT user@a.com:443 HTTP/1.1\r\nHost: a.com:443\r\n\r\n"), 1024)
+	f.Add([]byte("GET http://a.com HTTP/1.1\r\nHost: ignored.com\r\n\r\n"), 1024)
+	f.Add([]byte("GET http://gooGle.com/foO/%20bar?xxx#aaa HTTP/1.1\r\nHost: aa.cOM\r\n\r\ntrail"), 1024)
+	f.Add([]byte("GET A://#0000000 HTTP/0.0\nHost:0\r\n\r\n"), 1024)
+	f.Add([]byte("0 /% HTTP/0.0\nHost:0\r\n\r\n"), 1024)
+	f.Add([]byte("GET / HTTP/1.1\r\nHost: aaa.com\r\nhost: bbb.com\r\n\r\n"), 1024)
+	f.Add([]byte("GET /foo/bar HTTP/1.1\r\n foo: bar\r\n\r\n"), 1024)
+	f.Add([]byte("CONNECT /rpc HTTP/1.1\r\nHost: a.com\r\n\r\n"), 1024)
+	f.Add([]byte("CONNECT [::1]:443 HTTP/1.1\r\nHost: [::1]:443\r\n\r\n"), 1024)
+	f.Add([]byte("POST / HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: Chunked\r\n\r\n1\r\na\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("POST / HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\n0;ext=done\r\n\r\n"), 1024)
+	f.Add([]byte("POST / HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nTrailer: Foo, Bar\r\n\r\n1\r\nx\r\n0\r\nFoo: 1\r\nBar: 2\r\n\r\n"), 1024)
 
 	f.Fuzz(func(t *testing.T, body []byte, maxBodySize int) {
 		if len(body) > 1024*1024 || maxBodySize > 1024*1024 {
@@ -312,6 +335,8 @@ func FuzzRequestReadLimitBodyAllocations(f *testing.F) {
 	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\n3;ext=1\r\nabc\r\n0\r\n\r\n"), 1024)
 	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\nA\r\n0123456789\r\n0\r\n\r\n"), 1024)
 	f.Add([]byte("POST /submit HTTP/1.1\r\nHost: a.com\r\nContent-Length: 7\r\n\r\nname=aa"), 1024)
+	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: Chunked\r\n\r\n1\r\na\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\n\r\n0;ext=done\r\n\r\n"), 1024)
 
 	f.Fuzz(func(t *testing.T, body []byte, maxBodySize int) {
 		if len(body) > 1024*1024 || maxBodySize > 1024*1024 {
