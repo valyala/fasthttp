@@ -74,6 +74,7 @@ func FuzzResponseReadLimitBody(f *testing.F) {
 	f.Add([]byte("HTTP/1.1 204 No Content\r\n\r\nBody should not be read!\n"), 1024)
 	f.Add([]byte("HTTP/1.1 200\r\nContent-Length: 0\r\n\r\n"), 1024)
 	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: Chunked\r\n\r\n1\r\na\r\n0\r\n\r\n"), 1024)
+	f.Add([]byte("HTTP/1.1 000\nTrAnsfer-EnCoding:Chunked\nTrAnsfer-EnCoding:Chunked\n\n0\r\n\r\n"), 998)
 	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked \r\n\r\n1\r\na\r\n0\r\n\r\n"), 1024)
 	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0;ext=done\r\n\r\n"), 1024)
 	f.Add([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTrailer: Foo, Bar\r\n\r\n1\r\nx\r\n0\r\nFoo: 1\r\nBar: 2\r\n\r\n"), 1024)
