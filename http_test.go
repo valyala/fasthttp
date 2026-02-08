@@ -1643,6 +1643,14 @@ func TestRequestReadLimitBody(t *testing.T) {
 	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\nHost: a.com\nTransfer-Encoding: chunked\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nFoo: bar\r\n\r\n", 9)
 	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 999)
 	testRequestReadLimitBodyError(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 8, ErrBodyTooLarge)
+
+	// Keep Request.ReadLimitBody net/http-compatible: reject leading
+	// empty lines before the request line.
+	var req Request
+	br := bufio.NewReader(bytes.NewBufferString("\n0 * HTTP/0.0\nHost:0\r\n\r\n"))
+	if err := req.ReadLimitBody(br, 1024); err == nil {
+		t.Fatalf("expecting error for request with leading empty line")
+	}
 }
 
 func testResponseReadLimitBodyError(t *testing.T, s string, maxBodySize int, expectedErr error) {

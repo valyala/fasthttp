@@ -1234,7 +1234,9 @@ var ErrGetOnly = errors.New("non-GET request received")
 // io.EOF is returned if r is closed before reading the first header byte.
 func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	req.resetSkipHeader()
-	if err := req.Header.Read(r); err != nil {
+	// Keep Request.Read* behavior net/http-compatible: reject leading
+	// empty lines before the request line.
+	if err := req.Header.readLoopNoLeadingEmptyLines(r, true); err != nil {
 		return err
 	}
 

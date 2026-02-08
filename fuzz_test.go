@@ -138,6 +138,7 @@ func FuzzRequestReadLimitBody(f *testing.F) {
 	f.Add([]byte("GET http://gooGle.com/foO/%20bar?xxx#aaa HTTP/1.1\r\nHost: aa.cOM\r\n\r\ntrail"), 1024)
 	f.Add([]byte("GET A://#0000000 HTTP/0.0\nHost:0\r\n\r\n"), 1024)
 	f.Add([]byte("0 /% HTTP/0.0\nHost:0\r\n\r\n"), 1024)
+	f.Add([]byte("\n0 * HTTP/0.0\nHost:0\r\n\r\n"), 1024)
 	f.Add([]byte("GET / HTTP/1.1\r\nHost: aaa.com\r\nhost: bbb.com\r\n\r\n"), 1024)
 	f.Add([]byte("GET /foo/bar HTTP/1.1\r\n foo: bar\r\n\r\n"), 1024)
 	f.Add([]byte("CONNECT /rpc HTTP/1.1\r\nHost: a.com\r\n\r\n"), 1024)
