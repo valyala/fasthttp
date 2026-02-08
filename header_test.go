@@ -974,13 +974,13 @@ func TestResponseHeaderTrailingCRLFSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// try reading the trailing CRLF. It must return EOF
+	// Reading standalone CRLFs as a response must fail.
 	err := r.Read(br)
 	if err == nil {
 		t.Fatalf("expecting error")
 	}
-	if err != io.EOF {
-		t.Fatalf("unexpected error: %v. Expecting %v", err, io.EOF)
+	if err == io.EOF {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -2756,13 +2756,6 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 456\r\nContent-Type: xxx/yyy\r\nContent-Length: 134\r\n\r\naaaxxx",
 		456, 134, "xxx/yyy")
 
-	// blank lines before the first line
-	testResponseHeaderReadSuccess(t, h, "\r\nHTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 0\r\n\r\nsss",
-		200, 0, "aa")
-	if h.ConnectionClose() {
-		t.Fatalf("unexpected connection: close")
-	}
-
 	// no content-length (informational responses)
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 101 OK\r\n\r\n",
 		101, -2, "text/plain; charset=utf-8")
@@ -3001,6 +2994,9 @@ func TestResponseHeaderReadError(t *testing.T) {
 
 	// duplicate content-length
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 456\r\nContent-Type: foo/bar\r\nContent-Length: 321\r\n\r\n")
+
+	// blank lines before the status line
+	testResponseHeaderReadError(t, h, "\r\nHTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 0\r\n\r\nsss")
 }
 
 func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
@@ -3041,6 +3037,9 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// missing RequestURI
 	testRequestHeaderReadError(t, h, "GET  HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	// invalid URL escape in requestURI
+	testRequestHeaderReadError(t, h, "GET /% HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	// post with invalid content-length
 	testRequestHeaderReadError(t, h, "POST /a HTTP/1.1\r\nHost: bb\r\nContent-Type: aa\r\nContent-Length: dff\r\n\r\nqwerty")
