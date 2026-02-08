@@ -2748,10 +2748,6 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 300 OK\r\nContent-Type: foo/barr\r\nTransfer-Encoding: chunked\r\nContent-Length: 354\r\n\r\n",
 		300, -1, "foo/barr")
 
-	// duplicate transfer-encoding: chunked
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n",
-		200, -1, "text/html")
-
 	// no reason string in the first line
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 456\r\nContent-Type: xxx/yyy\r\nContent-Length: 134\r\n\r\naaaxxx",
 		456, 134, "xxx/yyy")
@@ -2997,6 +2993,9 @@ func TestResponseHeaderReadError(t *testing.T) {
 
 	// blank lines before the status line
 	testResponseHeaderReadError(t, h, "\r\nHTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 0\r\n\r\nsss")
+
+	// duplicate transfer-encoding
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n")
 }
 
 func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
@@ -3061,6 +3060,9 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// Duplicate host header
 	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\nHost: aaa.com\r\nhost: bbb.com\r\n\r\n")
+
+	// duplicate transfer-encoding
+	testRequestHeaderReadError(t, h, "POST /foo/bar HTTP/1.1\r\nHost: aaa.com\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n")
 }
 
 func TestRequestHeaderReadSecuredError(t *testing.T) {

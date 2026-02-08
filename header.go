@@ -3159,6 +3159,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	h.contentLength = -2
 
 	contentLengthSeen := false
+	transferEncodingSeen := false
 
 	var s headerScanner
 	s.b = buf
@@ -3248,10 +3249,16 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					continue
 				}
 
-				isIdentity := caseInsensitiveCompare(s.value, strIdentity)
-				isChunked := caseInsensitiveCompare(s.value, strChunked)
+				if transferEncodingSeen {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, ErrUnsupportedTransferEncoding
+					}
+					return 0, fmt.Errorf("too many transfer encodings: %q", s.value)
+				}
+				transferEncodingSeen = true
 
-				if !isIdentity && !isChunked {
+				if !caseInsensitiveCompare(s.value, strChunked) {
 					h.connectionClose = true
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
@@ -3259,10 +3266,8 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
 				}
 
-				if isChunked {
-					h.contentLength = -1
-					h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
-				}
+				h.contentLength = -1
+				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strTrailer) {
@@ -3307,6 +3312,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 
 	contentLengthSeen := false
 	hostSeen := false
+	transferEncodingSeen := false
 
 	var s headerScanner
 	s.b = buf
@@ -3398,10 +3404,16 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 					continue
 				}
 
-				isIdentity := caseInsensitiveCompare(s.value, strIdentity)
-				isChunked := caseInsensitiveCompare(s.value, strChunked)
+				if transferEncodingSeen {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, ErrUnsupportedTransferEncoding
+					}
+					return 0, fmt.Errorf("too many transfer encodings: %q", s.value)
+				}
+				transferEncodingSeen = true
 
-				if !isIdentity && !isChunked {
+				if !caseInsensitiveCompare(s.value, strChunked) {
 					h.connectionClose = true
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
@@ -3409,10 +3421,8 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 					return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
 				}
 
-				if isChunked {
-					h.contentLength = -1
-					h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
-				}
+				h.contentLength = -1
+				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strTrailer) {
