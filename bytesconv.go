@@ -178,17 +178,16 @@ func isWeekday3(a, b, c byte) bool {
 	a |= 0x20
 	b |= 0x20
 	c |= 0x20
-	switch a {
-	case 'm':
-		return b == 'o' && c == 'n'
-	case 't':
-		return (b == 'u' && c == 'e') || (b == 'h' && c == 'u')
-	case 'w':
-		return b == 'e' && c == 'd'
-	case 'f':
-		return b == 'r' && c == 'i'
-	case 's':
-		return (b == 'a' && c == 't') || (b == 'u' && c == 'n')
+	k := uint32(a)<<16 | uint32(b)<<8 | uint32(c)
+	switch k {
+	case uint32('m')<<16 | uint32('o')<<8 | uint32('n'),
+		uint32('t')<<16 | uint32('u')<<8 | uint32('e'),
+		uint32('w')<<16 | uint32('e')<<8 | uint32('d'),
+		uint32('t')<<16 | uint32('h')<<8 | uint32('u'),
+		uint32('f')<<16 | uint32('r')<<8 | uint32('i'),
+		uint32('s')<<16 | uint32('a')<<8 | uint32('t'),
+		uint32('s')<<16 | uint32('u')<<8 | uint32('n'):
+		return true
 	default:
 		return false
 	}
@@ -217,51 +216,32 @@ func parseMonth3(a, b, c byte) (time.Month, bool) {
 	a |= 0x20
 	b |= 0x20
 	c |= 0x20
-	switch a {
-	case 'j':
-		if b == 'a' && c == 'n' {
-			return time.January, true
-		}
-		if b == 'u' && c == 'n' {
-			return time.June, true
-		}
-		if b == 'u' && c == 'l' {
-			return time.July, true
-		}
-	case 'f':
-		if b == 'e' && c == 'b' {
-			return time.February, true
-		}
-	case 'm':
-		if b == 'a' && c == 'r' {
-			return time.March, true
-		}
-		if b == 'a' && c == 'y' {
-			return time.May, true
-		}
-	case 'a':
-		if b == 'p' && c == 'r' {
-			return time.April, true
-		}
-		if b == 'u' && c == 'g' {
-			return time.August, true
-		}
-	case 's':
-		if b == 'e' && c == 'p' {
-			return time.September, true
-		}
-	case 'o':
-		if b == 'c' && c == 't' {
-			return time.October, true
-		}
-	case 'n':
-		if b == 'o' && c == 'v' {
-			return time.November, true
-		}
-	case 'd':
-		if b == 'e' && c == 'c' {
-			return time.December, true
-		}
+	k := uint32(a)<<16 | uint32(b)<<8 | uint32(c)
+	switch k {
+	case uint32('j')<<16 | uint32('a')<<8 | uint32('n'):
+		return time.January, true
+	case uint32('f')<<16 | uint32('e')<<8 | uint32('b'):
+		return time.February, true
+	case uint32('m')<<16 | uint32('a')<<8 | uint32('r'):
+		return time.March, true
+	case uint32('a')<<16 | uint32('p')<<8 | uint32('r'):
+		return time.April, true
+	case uint32('m')<<16 | uint32('a')<<8 | uint32('y'):
+		return time.May, true
+	case uint32('j')<<16 | uint32('u')<<8 | uint32('n'):
+		return time.June, true
+	case uint32('j')<<16 | uint32('u')<<8 | uint32('l'):
+		return time.July, true
+	case uint32('a')<<16 | uint32('u')<<8 | uint32('g'):
+		return time.August, true
+	case uint32('s')<<16 | uint32('e')<<8 | uint32('p'):
+		return time.September, true
+	case uint32('o')<<16 | uint32('c')<<8 | uint32('t'):
+		return time.October, true
+	case uint32('n')<<16 | uint32('o')<<8 | uint32('v'):
+		return time.November, true
+	case uint32('d')<<16 | uint32('e')<<8 | uint32('c'):
+		return time.December, true
 	}
 	return 0, false
 }
