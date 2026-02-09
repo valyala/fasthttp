@@ -200,44 +200,56 @@ func TestAppendHTTPDate(t *testing.T) {
 	}
 }
 
-func TestParseHTTPDate(t *testing.T) {
+func TestParseHTTPDateCompatibility(t *testing.T) {
 	t.Parallel()
 
-	valid := []string{
-		"Tue, 10 Nov 2009 23:00:00 GMT",
-		"Mon, 29 Feb 2016 12:34:56 GMT", // leap year
-		"Fri, 31 Dec 1999 23:59:59 GMT",
-		"Tue, 10 Nov 2009 23:00:00 UTC", // fallback path should match time.Parse behavior
+	testCases := []struct {
+		name      string
+		value     string
+		hasError  bool
+		roundTrip bool
+	}{
+		{name: "gmt-fast-path", value: "Tue, 10 Nov 2009 23:00:00 GMT", roundTrip: true},
+		{name: "epoch", value: "Thu, 01 Jan 1970 00:00:00 GMT", roundTrip: true},
+		{name: "year-boundary", value: "Fri, 31 Dec 1999 23:59:59 GMT", roundTrip: true},
+		{name: "leap-year", value: "Mon, 29 Feb 2016 12:34:56 GMT", roundTrip: true},
+		{name: "utc-fallback", value: "Tue, 10 Nov 2009 23:00:00 UTC"},
+		{name: "mixedcase-weekday-month", value: "tUe, 10 nOv 2009 23:00:00 GMT"},
+		{name: "day-zero", value: "Tue, 00 Nov 2009 23:00:00 GMT", hasError: true},
+		{name: "invalid-day", value: "Tue, 31 Feb 2009 23:00:00 GMT", hasError: true},
+		{name: "invalid-weekday", value: "Xxx, 10 Nov 2009 23:00:00 GMT", hasError: true},
+		{name: "invalid-month", value: "Tue, 10 Foo 2009 23:00:00 GMT", hasError: true},
+		{name: "invalid-hour", value: "Tue, 10 Nov 2009 24:00:00 GMT", hasError: true},
+		{name: "invalid-minute", value: "Tue, 10 Nov 2009 23:60:00 GMT", hasError: true},
+		{name: "invalid-second", value: "Tue, 10 Nov 2009 23:00:60 GMT", hasError: true},
+		{name: "invalid-separator", value: "Tue 10 Nov 2009 23:00:00 GMT", hasError: true},
+		{name: "invalid-time-separator", value: "Tue, 10 Nov 2009 23-00-00 GMT", hasError: true},
+		{name: "non-leap-year", value: "Tue, 29 Feb 2019 23:00:00 GMT", hasError: true},
 	}
-	for _, s := range valid {
-		got, err := ParseHTTPDate([]byte(s))
-		if err != nil {
-			t.Fatalf("unexpected error parsing %q: %v", s, err)
-		}
-		want, err := time.Parse(time.RFC1123, s)
-		if err != nil {
-			t.Fatalf("unexpected reference parse error for %q: %v", s, err)
-		}
-		if !got.Equal(want) {
-			t.Fatalf("unexpected parsed time for %q: got=%v want=%v", s, got, want)
-		}
-	}
-}
 
-func TestParseHTTPDateInvalid(t *testing.T) {
-	t.Parallel()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	invalid := []string{
-		"Tue, 31 Feb 2009 23:00:00 GMT", // invalid day-of-month
-		"Tue, 10 Foo 2009 23:00:00 GMT", // invalid month
-		"Tue 10 Nov 2009 23:00:00 GMT",  // missing comma separator
-		"Tue, 10 Nov 2009 23-00-00 GMT", // invalid time separators
-		"Tue, 29 Feb 2019 23:00:00 GMT", // non-leap-year date
-	}
-	for _, s := range invalid {
-		if _, err := ParseHTTPDate([]byte(s)); err == nil {
-			t.Fatalf("expected error for invalid http date %q", s)
-		}
+			got, gotErr := ParseHTTPDate([]byte(tc.value))
+			want, wantErr := time.ParseInLocation(time.RFC1123, tc.value, time.UTC)
+
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("error mismatch for %q: ParseHTTPDate err=%v, ParseInLocation err=%v", tc.value, gotErr, wantErr)
+			}
+			if tc.hasError != (gotErr != nil) {
+				t.Fatalf("unexpected error state for %q: gotErr=%v, expectedError=%v", tc.value, gotErr, tc.hasError)
+			}
+			if gotErr != nil {
+				return
+			}
+			if !got.Equal(want) {
+				t.Fatalf("parsed time mismatch for %q: got=%v want=%v", tc.value, got, want)
+			}
+			if tc.roundTrip && got.Format(time.RFC1123) != tc.value {
+				t.Fatalf("unexpected formatted date %q. Expecting %q", got.Format(time.RFC1123), tc.value)
+			}
+		})
 	}
 }
 

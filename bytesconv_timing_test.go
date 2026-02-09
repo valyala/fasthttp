@@ -5,7 +5,6 @@ import (
 	"html"
 	"net"
 	"testing"
-	"time"
 
 	"github.com/valyala/bytebufferpool"
 )
@@ -184,35 +183,6 @@ func BenchmarkParseUfloat(b *testing.B) {
 				if err != nil {
 					b.Fatalf("unexpected error: %v", err)
 				}
-			}
-		}
-	})
-}
-
-func BenchmarkAppendHTTPDate(b *testing.B) {
-	ts := time.Date(2026, time.February, 6, 22, 0, 0, 0, time.UTC)
-	want := "Fri, 06 Feb 2026 22:00:00 GMT"
-	b.RunParallel(func(pb *testing.PB) {
-		var buf []byte
-		for pb.Next() {
-			buf = AppendHTTPDate(buf[:0], ts)
-			if string(buf) != want {
-				b.Fatalf("unexpected date: %q. Expecting %q", buf, want)
-			}
-		}
-	})
-}
-
-func BenchmarkAppendHTTPDateLocal(b *testing.B) {
-	loc := time.FixedZone("UTC+3", 3*60*60)
-	ts := time.Date(2026, time.February, 7, 1, 0, 0, 0, loc)
-	want := "Fri, 06 Feb 2026 22:00:00 GMT"
-	b.RunParallel(func(pb *testing.PB) {
-		var buf []byte
-		for pb.Next() {
-			buf = AppendHTTPDate(buf[:0], ts)
-			if string(buf) != want {
-				b.Fatalf("unexpected date: %q. Expecting %q", buf, want)
 			}
 		}
 	})

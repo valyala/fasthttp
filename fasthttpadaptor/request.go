@@ -85,6 +85,7 @@ func parseRequestURI(r *http.Request, requestURI string) error {
 		if n := strings.IndexByte(requestURI, '?'); n >= 0 {
 			r.URL.Path = requestURI[:n]
 			r.URL.RawQuery = requestURI[n+1:]
+			r.URL.ForceQuery = n == len(requestURI)-1
 		} else {
 			r.URL.Path = requestURI
 		}

@@ -68,6 +68,8 @@ func AppendIPv4(dst []byte, ip net.IP) []byte {
 
 var errEmptyIPStr = errors.New("empty ip address string")
 
+var httpDateGMT = time.FixedZone("GMT", 0)
+
 // ParseIPv4 parses ip address from ipStr into dst and returns the extended dst.
 func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	if len(ipStr) == 0 {
@@ -128,6 +130,9 @@ func parseRFC1123DateGMT(b []byte) (time.Time, bool) {
 	if len(b) != 29 {
 		return time.Time{}, false
 	}
+	if !isWeekday3(b[0], b[1], b[2]) {
+		return time.Time{}, false
+	}
 	if b[3] != ',' || b[4] != ' ' || b[7] != ' ' || b[11] != ' ' ||
 		b[16] != ' ' || b[19] != ':' || b[22] != ':' || b[25] != ' ' {
 		return time.Time{}, false
@@ -161,12 +166,32 @@ func parseRFC1123DateGMT(b []byte) (time.Time, bool) {
 		return time.Time{}, false
 	}
 
-	t := time.Date(year, month, day, hour, minute, second, 0, time.UTC)
+	t := time.Date(year, month, day, hour, minute, second, 0, httpDateGMT)
 	// Reject calendar-invalid dates like "31 Feb", which time.Date normalizes.
 	if t.Year() != year || t.Month() != month || t.Day() != day {
 		return time.Time{}, false
 	}
 	return t, true
+}
+
+func isWeekday3(a, b, c byte) bool {
+	a |= 0x20
+	b |= 0x20
+	c |= 0x20
+	switch a {
+	case 'm':
+		return b == 'o' && c == 'n'
+	case 't':
+		return (b == 'u' && c == 'e') || (b == 'h' && c == 'u')
+	case 'w':
+		return b == 'e' && c == 'd'
+	case 'f':
+		return b == 'r' && c == 'i'
+	case 's':
+		return (b == 'a' && c == 't') || (b == 'u' && c == 'n')
+	default:
+		return false
+	}
 }
 
 func parse2Digits(a, b byte) (int, bool) {
