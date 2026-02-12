@@ -164,14 +164,61 @@ func StatusMessage(statusCode int) string {
 }
 
 func formatStatusLine(dst, protocol []byte, statusCode int, statusText []byte) []byte {
+	if len(statusText) == 0 {
+		statusText = s2b(StatusMessage(statusCode))
+	}
+	need := len(protocol) + 1 + statusCodeLen(statusCode) + 1 + len(statusText) + len(strCRLF)
+	dst = growBytes(dst, need)
+
 	dst = append(dst, protocol...)
 	dst = append(dst, ' ')
-	dst = strconv.AppendInt(dst, int64(statusCode), 10)
+	dst = appendStatusCode(dst, statusCode)
 	dst = append(dst, ' ')
-	if len(statusText) == 0 {
-		dst = append(dst, s2b(StatusMessage(statusCode))...)
-	} else {
-		dst = append(dst, statusText...)
-	}
+	dst = append(dst, statusText...)
 	return append(dst, strCRLF...)
+}
+
+func statusCodeLen(statusCode int) int {
+	switch {
+	case statusCode < 0:
+		return digits10Int(statusCode)
+	case statusCode < 10:
+		return 1
+	case statusCode < 100:
+		return 2
+	case statusCode < 1000:
+		return 3
+	default:
+		return digits10Int(statusCode)
+	}
+}
+
+func digits10Int(v int) int {
+	n := 1
+	for v <= -10 || v >= 10 {
+		v /= 10
+		n++
+	}
+	return n
+}
+
+func appendStatusCode(dst []byte, statusCode int) []byte {
+	if statusCode >= 100 && statusCode <= 999 {
+		dst = append(dst,
+			byte('0'+statusCode/100),
+			byte('0'+(statusCode/10)%10),
+			byte('0'+statusCode%10),
+		)
+		return dst
+	}
+	return strconv.AppendInt(dst, int64(statusCode), 10)
+}
+
+func growBytes(dst []byte, n int) []byte {
+	if cap(dst)-len(dst) >= n {
+		return dst
+	}
+	ndst := make([]byte, len(dst), len(dst)+n)
+	copy(ndst, dst)
+	return ndst
 }
