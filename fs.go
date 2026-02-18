@@ -7,6 +7,7 @@ import (
 	"html"
 	"io"
 	"io/fs"
+	"maps"
 	"mime"
 	"net/http"
 	"os"
@@ -476,10 +477,7 @@ func (fs *FS) initRequestHandler() {
 		compressedFileSuffixes["br"] == compressedFileSuffixes["zstd"] ||
 		compressedFileSuffixes["gzip"] == compressedFileSuffixes["zstd"] {
 		// Copy global map
-		compressedFileSuffixes = make(map[string]string, len(FSCompressedFileSuffixes))
-		for k, v := range FSCompressedFileSuffixes {
-			compressedFileSuffixes[k] = v
-		}
+		compressedFileSuffixes = maps.Clone(FSCompressedFileSuffixes)
 	}
 
 	if fs.CompressedFileSuffix != "" {
