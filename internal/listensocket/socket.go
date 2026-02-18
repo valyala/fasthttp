@@ -1,6 +1,6 @@
 //go:build !js && !wasm && (linux || darwin || dragonfly || freebsd || netbsd || openbsd || rumprun || (zos && s390x))
 
-package tcplisten
+package listensocket
 
 import (
 	"fmt"
