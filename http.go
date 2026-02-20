@@ -1234,8 +1234,15 @@ var ErrGetOnly = errors.New("non-GET request received")
 // io.EOF is returned if r is closed before reading the first header byte.
 func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	req.resetSkipHeader()
-	if err := req.Header.Read(r); err != nil {
+	// Keep Request.Read* behavior net/http-compatible: reject leading
+	// empty lines before the request line.
+	if err := req.Header.readLoopNoLeadingEmptyLines(r, true); err != nil {
 		return err
+	}
+
+	// Host header is mandatory in HTTP/1.1 requests.
+	if len(req.Header.Host()) == 0 {
+		return errRequestHostRequired
 	}
 
 	return req.readLimitBody(r, maxBodySize, false, true)
@@ -1339,7 +1346,10 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 
 	if contentLength == -1 {
 		err = req.Header.ReadTrailer(r)
-		if err != nil && err != io.EOF {
+		if err != nil {
+			if err == io.EOF {
+				return ErrBrokenChunk{error: io.ErrUnexpectedEOF}
+			}
 			return err
 		}
 	}
@@ -1477,7 +1487,10 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	// A response without a body can't have trailers.
 	if resp.Header.ContentLength() == -1 && !resp.StreamBody && !resp.mustSkipBody() {
 		err = resp.Header.ReadTrailer(r)
-		if err != nil && err != io.EOF {
+		if err != nil {
+			if err == io.EOF {
+				return ErrBrokenChunk{error: io.ErrUnexpectedEOF}
+			}
 			return err
 		}
 	}
@@ -2610,41 +2623,69 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 }
 
 func parseChunkSize(r *bufio.Reader) (int, error) {
-	n, err := readHexInt(r)
+	line, err := readChunkLine(r)
 	if err != nil {
 		return -1, err
 	}
-	for {
-		c, err := r.ReadByte()
-		if err != nil {
-			return -1, ErrBrokenChunk{
-				error: fmt.Errorf("cannot read '\\r' char at the end of chunk size: %w", err),
-			}
-		}
-		// Skip chunk extension after chunk size.
-		// Add support later if anyone needs it.
-		if c != '\r' {
-			// Security: Don't allow newlines in chunk extensions.
-			// This can lead to request smuggling issues with some reverse proxies.
-			if c == '\n' {
-				return -1, ErrBrokenChunk{
-					error: errors.New("invalid character '\\n' after chunk size"),
-				}
-			}
-			continue
-		}
-		if err := r.UnreadByte(); err != nil {
-			return -1, ErrBrokenChunk{
-				error: fmt.Errorf("cannot unread '\\r' char at the end of chunk size: %w", err),
-			}
-		}
-		break
+	line = trimTrailingWhitespace(line)
+	if n := bytes.IndexByte(line, ';'); n >= 0 {
+		line = line[:n]
 	}
-	err = readCrLf(r)
-	if err != nil {
-		return -1, err
+	if len(line) == 0 {
+		return -1, errEmptyHexNum
+	}
+	if len(line) > maxHexIntChars {
+		return -1, errTooLargeHexNum
+	}
+	var n int
+	for i := 0; i < len(line); i++ {
+		k := int(hex2intTable[line[i]])
+		if k == 16 {
+			return -1, ErrBrokenChunk{
+				error: fmt.Errorf("invalid character %q after chunk size", line[i]),
+			}
+		}
+		n = (n << 4) | k
 	}
 	return n, nil
+}
+
+const maxChunkLineLength = 4096
+
+var (
+	errChunkLineTooLong = errors.New("chunked line too long")
+	errMissingChunkCRLF = errors.New("missing CRLF after chunk size")
+)
+
+func readChunkLine(r *bufio.Reader) ([]byte, error) {
+	line, err := r.ReadSlice('\n')
+	if err == bufio.ErrBufferFull {
+		return nil, ErrBrokenChunk{error: errChunkLineTooLong}
+	}
+	if err != nil {
+		return nil, ErrBrokenChunk{error: err}
+	}
+	if len(line) >= maxChunkLineLength {
+		return nil, ErrBrokenChunk{error: errChunkLineTooLong}
+	}
+	if len(line) < 2 || line[len(line)-2] != '\r' {
+		return nil, ErrBrokenChunk{error: errMissingChunkCRLF}
+	}
+	if bytes.IndexByte(line[:len(line)-2], '\r') >= 0 {
+		return nil, ErrBrokenChunk{error: errMissingChunkCRLF}
+	}
+	return line[:len(line)-2], nil
+}
+
+func trimTrailingWhitespace(b []byte) []byte {
+	for len(b) > 0 {
+		c := b[len(b)-1]
+		if c != ' ' && c != '\t' {
+			break
+		}
+		b = b[:len(b)-1]
+	}
+	return b
 }
 
 func readCrLf(r *bufio.Reader) error {

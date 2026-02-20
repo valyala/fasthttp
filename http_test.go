@@ -21,14 +21,14 @@ import (
 func TestInvalidTrailers(t *testing.T) {
 	t.Parallel()
 
-	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader(" 0\nTransfer-Encoding:\xff\n\n0\r\n0"))); !errors.Is(err, io.EOF) {
-		t.Fatalf("%#v", err)
+	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200\r\nTransfer-Encoding:\xff\n\n0\r\n0"))); !errors.Is(err, io.EOF) {
+		t.Errorf("%#v", err)
 	}
-	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("\xff \nTRaILeR:,\n\n"))); !errors.Is(err, errEmptyInt) {
-		t.Fatal(err)
+	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\nTRaILeR:,\r\n\r\n"))); !errors.Is(err, ErrBadTrailer) {
+		t.Error(err)
 	}
-	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("TRaILeR:,\n\n"))); !strings.Contains(err.Error(), "cannot find whitespace in the first line of response") {
-		t.Fatal(err)
+	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("TRaILeR:,\r\n\r\n"))); !strings.Contains(err.Error(), "cannot find whitespace in the first line of response") {
+		t.Error(err)
 	}
 }
 
@@ -40,11 +40,8 @@ func TestResponseEmptyTransferEncoding(t *testing.T) {
 	body := "Some body"
 	br := bufio.NewReader(bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: \r\nContent-Length: 9\r\n\r\n" + body))
 	err := r.Read(br)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := string(r.Body()); got != body {
-		t.Fatalf("expected %q got %q", body, got)
+	if err == nil {
+		t.Fatalf("expected error for empty Transfer-Encoding, got body %q", r.Body())
 	}
 }
 
@@ -586,7 +583,7 @@ func TestRequestContentTypeWithCharsetIssue100(t *testing.T) {
 
 	expectedContentType := "application/x-www-form-urlencoded; charset=UTF-8"
 	expectedBody := "0123=56789"
-	s := fmt.Sprintf("POST / HTTP/1.1\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: example.com\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
 		expectedContentType, len(expectedBody), expectedBody)
 
 	br := bufio.NewReader(bytes.NewBufferString(s))
@@ -1032,7 +1029,7 @@ func TestRequestReadNoBody(t *testing.T) {
 
 	var r Request
 
-	br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\n\r\n"))
+	br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"))
 	err := r.Read(br)
 	r.SetHost("foobar")
 	if err != nil {
@@ -1200,7 +1197,7 @@ func TestRequestReadGzippedBody(t *testing.T) {
 
 	bodyOriginal := "foo bar baz compress me better!"
 	body := AppendGzipBytes(nil, []byte(bodyOriginal))
-	s := fmt.Sprintf("POST /foobar HTTP/1.1\r\nContent-Type: foo/bar\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s",
+	s := fmt.Sprintf("POST /foobar HTTP/1.1\r\nHost: example.com\r\nContent-Type: foo/bar\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s",
 		len(body), body)
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := r.Read(br); err != nil {
@@ -1231,7 +1228,7 @@ func TestRequestReadPostNoBody(t *testing.T) {
 
 	var r Request
 
-	s := "POST /foo/bar HTTP/1.1\r\nContent-Type: aaa/bbb\r\n\r\naaaa"
+	s := "POST /foo/bar HTTP/1.1\r\nHost: example.com\r\nContent-Type: aaa/bbb\r\n\r\naaaa"
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := r.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1262,7 +1259,7 @@ func TestRequestReadPostNoBody(t *testing.T) {
 func TestRequestContinueReadBody(t *testing.T) {
 	t.Parallel()
 
-	s := "PUT /foo/bar HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: foo/bar\r\n\r\nabcdef4343"
+	s := "PUT /foo/bar HTTP/1.1\r\nHost: example.org\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: foo/bar\r\n\r\nabcdef4343"
 	br := bufio.NewReader(bytes.NewBufferString(s))
 
 	var r Request
@@ -1646,6 +1643,14 @@ func TestRequestReadLimitBody(t *testing.T) {
 	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\nHost: a.com\nTransfer-Encoding: chunked\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nFoo: bar\r\n\r\n", 9)
 	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 999)
 	testRequestReadLimitBodyError(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 8, ErrBodyTooLarge)
+
+	// Keep Request.ReadLimitBody net/http-compatible: reject leading
+	// empty lines before the request line.
+	var req Request
+	br := bufio.NewReader(bytes.NewBufferString("\n0 * HTTP/0.0\nHost:0\r\n\r\n"))
+	if err := req.ReadLimitBody(br, 1024); err == nil {
+		t.Fatalf("expecting error for request with leading empty line")
+	}
 }
 
 func testResponseReadLimitBodyError(t *testing.T, s string, maxBodySize int, expectedErr error) {
@@ -2034,7 +2039,7 @@ func TestResponseReadWithoutBody(t *testing.T) {
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 123 AAA\r\nContent-Type: xxx\r\nContent-Length: 3434\r\n\r\n", false,
 		123, 3434, "xxx")
 
-	testResponseReadWithoutBody(t, &resp, "HTTP 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 123\r\n\r\nfoobar\r\n", true,
+	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 123\r\n\r\nfoobar\r\n", true,
 		200, 123, "text/xml")
 
 	// '100 Continue' must be skipped.
@@ -2271,10 +2276,6 @@ func TestResponseReadSuccess(t *testing.T) {
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nqwer\r\n2\r\nty\r\n0\r\nFoo2: bar2\r\n\r\n",
 		200, -1, "text/html", "qwerty", map[string]string{"Foo2": "bar2"})
 
-	// chunked response with non-chunked Transfer-Encoding.
-	testResponseReadSuccess(t, resp, "HTTP/1.1 230 OK\r\nContent-Type: text\r\nTransfer-Encoding: aaabbb\r\n\r\n2\r\ner\r\n2\r\nty\r\n0\r\nFoo3: bar3\r\n\r\n",
-		230, -1, "text", "erty", map[string]string{"Foo3": "bar3"})
-
 	// chunked response with content-length
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: foo/bar\r\nContent-Length: 123\r\nTransfer-Encoding: chunked\r\n\r\n4\r\ntest\r\n0\r\nFoo4:bar4\r\n\r\n",
 		200, -1, "foo/bar", "test", map[string]string{"Foo4": "bar4"})
@@ -2309,6 +2310,9 @@ func TestResponseReadError(t *testing.T) {
 	testResponseReadError(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: chunked\r\n\r\nfoo")
 
 	testResponseReadError(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nfoo")
+
+	// unsupported transfer-encoding
+	testResponseReadError(t, resp, "HTTP/1.1 230 OK\r\nContent-Type: text\r\nTransfer-Encoding: aaabbb\r\n\r\n2\r\ner\r\n2\r\nty\r\n0\r\nFoo3: bar3\r\n\r\n")
 }
 
 func testResponseReadError(t *testing.T, resp *Response, response string) {
@@ -3118,6 +3122,12 @@ func TestRequestMultipartFormPipeEmptyFormField(t *testing.T) {
 	bw := bufio.NewWriter(&b)
 	err := writeBodyChunked(bw, pr)
 	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err = bw.Write(strCRLF); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err = bw.Flush(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

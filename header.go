@@ -2263,16 +2263,26 @@ func headerErrorMsg(typ string, err error, b []byte, secureErrorLogMessage bool)
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) Read(r *bufio.Reader) error {
-	return h.readLoop(r, true)
+	return h.readLoopExt(r, true, true)
 }
 
 // readLoop reads request header from r optionally loops until it has enough data.
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) readLoop(r *bufio.Reader, waitForMore bool) error {
+	return h.readLoopExt(r, waitForMore, true)
+}
+
+// readLoopNoLeadingEmptyLines reads request headers while rejecting
+// leading empty lines before the request line (net/http-compatible mode).
+func (h *RequestHeader) readLoopNoLeadingEmptyLines(r *bufio.Reader, waitForMore bool) error {
+	return h.readLoopExt(r, waitForMore, false)
+}
+
+func (h *RequestHeader) readLoopExt(r *bufio.Reader, waitForMore, allowLeadingEmptyLines bool) error {
 	n := 1
 	for {
-		err := h.tryRead(r, n)
+		err := h.tryRead(r, n, allowLeadingEmptyLines)
 		if err == nil {
 			return nil
 		}
@@ -2284,7 +2294,7 @@ func (h *RequestHeader) readLoop(r *bufio.Reader, waitForMore bool) error {
 	}
 }
 
-func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
+func (h *RequestHeader) tryRead(r *bufio.Reader, n int, allowLeadingEmptyLines bool) error {
 	h.resetSkipNormalize()
 	b, err := r.Peek(n)
 	if len(b) == 0 {
@@ -2312,7 +2322,7 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		return fmt.Errorf("error when reading request headers: %w", err)
 	}
 	b = mustPeekBuffered(r)
-	headersLen, errParse := h.parse(b)
+	headersLen, errParse := h.parseExt(b, allowLeadingEmptyLines)
 	if errParse != nil {
 		return headerError("request", err, errParse, b, h.secureErrorLogMessage)
 	}
@@ -2655,7 +2665,11 @@ func (h *RequestHeader) ignoreBody() bool {
 }
 
 func (h *RequestHeader) parse(buf []byte) (int, error) {
-	m, err := h.parseFirstLine(buf)
+	return h.parseExt(buf, true)
+}
+
+func (h *RequestHeader) parseExt(buf []byte, allowLeadingEmptyLines bool) (int, error) {
+	m, err := h.parseFirstLineExt(buf, allowLeadingEmptyLines)
 	if err != nil {
 		return 0, err
 	}
@@ -2673,15 +2687,6 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 }
 
 func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV, int, error) {
-	// Skip any 0 length chunk.
-	if src[0] == '0' {
-		skip := len(strCRLF) + 1
-		if len(src) < skip {
-			return dest, 0, io.EOF
-		}
-		src = src[skip:]
-	}
-
 	var s headerScanner
 	s.b = src
 
@@ -2705,6 +2710,11 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 		// Forbidden by RFC 7230, section 4.1.2
 		if isBadTrailer(s.key) {
 			return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
+		}
+		for _, ch := range s.value {
+			if !validHeaderValueByte(ch) {
+				return dest, 0, fmt.Errorf("invalid trailer value %q", s.value)
+			}
 		}
 		normalizeHeaderKey(s.key, disable)
 		dest = appendArgBytes(dest, s.key, s.value, argsHasValue)
@@ -2776,10 +2786,14 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	bNext := buf
 	var b []byte
 	var err error
-	for len(b) == 0 {
-		if b, bNext, err = nextLine(bNext); err != nil {
-			return 0, err
+	if b, bNext, err = nextLine(bNext); err != nil {
+		return 0, err
+	}
+	if len(b) == 0 {
+		if h.secureErrorLogMessage {
+			return 0, ErrResponseFirstLineMissingSpace
 		}
+		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
 
 	// parse protocol
@@ -2790,7 +2804,22 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
-	h.noHTTP11 = !bytes.Equal(b[:n], strHTTP11)
+	if n == 0 {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", b[:n])
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", b[:n], buf)
+	}
+	protoStr := b[:n]
+	if len(protoStr) != len(strHTTP11) || !bytes.HasPrefix(protoStr, strHTTP11[:5]) || protoStr[6] != '.' ||
+		protoStr[5] < '0' || protoStr[5] > '9' || protoStr[7] < '0' || protoStr[7] > '9' {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+	}
+	h.noHTTP11 = !bytes.Equal(protoStr, strHTTP11)
+	h.protocol = append(h.protocol[:0], protoStr...)
 	b = b[n+1:]
 
 	// parse status code
@@ -2800,6 +2829,12 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 			return 0, fmt.Errorf("cannot parse response status code: %w", err)
 		}
 		return 0, fmt.Errorf("cannot parse response status code: %w. Response %q", err, buf)
+	}
+	if n != 3 {
+		if h.secureErrorLogMessage {
+			return 0, ErrUnexpectedStatusCodeChar
+		}
+		return 0, fmt.Errorf("invalid response status code %q. Response %q", b[:n], buf)
 	}
 	if len(b) > n && b[n] != ' ' {
 		if h.secureErrorLogMessage {
@@ -2824,12 +2859,25 @@ func isValidMethod(method []byte) bool {
 }
 
 func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
+	return h.parseFirstLineExt(buf, true)
+}
+
+func (h *RequestHeader) parseFirstLineExt(buf []byte, allowLeadingEmptyLines bool) (int, error) {
 	bNext := buf
 	var b []byte
 	var err error
-	for len(b) == 0 {
+	for {
 		if b, bNext, err = nextLine(bNext); err != nil {
 			return 0, err
+		}
+		if len(b) > 0 {
+			break
+		}
+		if !allowLeadingEmptyLines {
+			if h.secureErrorLogMessage {
+				return 0, ErrMissingRequestMethod
+			}
+			return 0, fmt.Errorf("cannot find http request method in %q", buf)
 		}
 	}
 
@@ -2871,6 +2919,13 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
 	}
 
+	if err := validateRequestURI(h.method, b[:n]); err != nil {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("invalid requestURI %q", b[:n])
+		}
+		return 0, fmt.Errorf("invalid requestURI %q in %q: %w", b[:n], buf, err)
+	}
+
 	// Check for extra whitespace - only one space should separate URI from HTTP version
 	if n+1 < len(b) && b[n+1] == ' ' {
 		if h.secureErrorLogMessage {
@@ -2894,7 +2949,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
 	}
-	if protoStr[5] < '0' || protoStr[5] > '9' || protoStr[7] < '0' || protoStr[7] > '9' {
+	if protoStr[6] != '.' || protoStr[5] < '0' || protoStr[5] > '9' || protoStr[7] < '0' || protoStr[7] > '9' {
 		if h.secureErrorLogMessage {
 			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
 		}
@@ -2906,6 +2961,169 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	h.requestURI = append(h.requestURI[:0], b[:n]...)
 
 	return len(buf) - len(bNext), nil
+}
+
+func validateRequestURI(method, requestURI []byte) error {
+	if stringContainsCTLByte(requestURI) {
+		return ErrorInvalidURI
+	}
+	if err := validatePercentEscapes(requestURI); err != nil {
+		return err
+	}
+	if len(requestURI) == 1 && requestURI[0] == '*' {
+		return nil
+	}
+	if len(requestURI) > 0 && requestURI[0] == '/' {
+		return nil
+	}
+	if bytes.Equal(method, strConnect) {
+		if len(requestURI) == 0 || requestURI[0] == '/' {
+			return nil
+		}
+		return validateAuthorityForm(requestURI)
+	}
+	if i := bytes.Index(requestURI, strColonSlashSlash); i >= 0 {
+		if !isValidScheme(requestURI[:i]) {
+			return ErrorInvalidURI
+		}
+		authority := requestURI[i+len(strColonSlashSlash):]
+		for i, c := range authority {
+			if c == '/' || c == '?' {
+				authority = authority[:i]
+				break
+			}
+		}
+		if err := validateAuthorityForm(authority); err != nil {
+			return err
+		}
+		return nil
+	}
+	return ErrorInvalidURI
+}
+
+func validatePercentEscapes(s []byte) error {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '%' {
+			continue
+		}
+		if i+2 >= len(s) || !ishex(s[i+1]) || !ishex(s[i+2]) {
+			return ErrorInvalidURI
+		}
+		i += 2
+	}
+	return nil
+}
+
+func validateAuthorityForm(authority []byte) error {
+	if i := bytes.LastIndexByte(authority, '@'); i >= 0 {
+		if !validUserinfo(authority[:i]) {
+			return ErrorInvalidURI
+		}
+		authority = authority[i+1:]
+	}
+	return validateHostPort(authority)
+}
+
+func validateHostPort(host []byte) error {
+	if len(host) > 0 && host[0] == '[' {
+		i := bytes.LastIndexByte(host, ']')
+		if i < 0 {
+			return errors.New("missing ']' in host")
+		}
+		// Bracketed hosts must contain exactly one closing bracket and no nested '['.
+		if bytes.IndexByte(host[1:i], ']') >= 0 || bytes.IndexByte(host[1:i], '[') >= 0 {
+			return fmt.Errorf("invalid host %q", host)
+		}
+		colonPort := host[i+1:]
+		if !validOptionalPort(colonPort) {
+			return fmt.Errorf("invalid port %q after host", colonPort)
+		}
+		if zone := bytes.Index(host[:i], []byte("%25")); zone >= 0 {
+			// Zone marker must be followed by at least one zone byte.
+			if zone+3 >= i {
+				return errInvalidIPv6Zone
+			}
+			if err := validateEscapedHost(host[:zone], encodeHost); err != nil {
+				return err
+			}
+			if err := validateEscapedHost(host[zone:i], encodeZone); err != nil {
+				return err
+			}
+			if err := validateEscapedHost(host[i:], encodeHost); err != nil {
+				return err
+			}
+		} else if err := validateEscapedHost(host, encodeHost); err != nil {
+			return err
+		}
+	} else {
+		if bytes.ContainsAny(host, "[]") {
+			return fmt.Errorf("invalid host %q", host)
+		}
+		if i := bytes.LastIndexByte(host, ':'); i != -1 {
+			if bytes.IndexByte(host[:i], ':') != -1 {
+				return fmt.Errorf("invalid host %q with multiple port delimiters", host)
+			}
+			colonPort := host[i:]
+			if !validOptionalPort(colonPort) {
+				return fmt.Errorf("invalid port %q after host", colonPort)
+			}
+		}
+		if err := validateEscapedHost(host, encodeHost); err != nil {
+			return err
+		}
+	}
+	if err := validateIPv6Literal(host); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateEscapedHost(s []byte, mode encoding) error {
+	for i := 0; i < len(s); {
+		switch s[i] {
+		case '%':
+			if i+2 >= len(s) || !ishex(s[i+1]) || !ishex(s[i+2]) {
+				b := s[i:]
+				if len(b) > 3 {
+					b = b[:3]
+				}
+				return EscapeError(b)
+			}
+			if mode == encodeHost && unhex(s[i+1]) < 8 && !bytes.Equal(s[i:i+3], []byte("%25")) {
+				return EscapeError(s[i : i+3])
+			}
+			if mode == encodeZone {
+				v := unhex(s[i+1])<<4 | unhex(s[i+2])
+				if !bytes.Equal(s[i:i+3], []byte("%25")) && v != ' ' && shouldEscape(v, encodeHost) {
+					return EscapeError(s[i : i+3])
+				}
+			}
+			i += 3
+			continue
+		default:
+			if (mode == encodeHost || mode == encodeZone) && s[i] < 0x80 && shouldEscape(s[i], mode) {
+				return InvalidHostError(s[i : i+1])
+			}
+			i++
+		}
+	}
+	return nil
+}
+
+func protoAtLeastHTTP11ForTransfer(proto []byte) bool {
+	if len(proto) != len(strHTTP11) || !bytes.HasPrefix(proto, strHTTP11[:5]) || proto[6] != '.' ||
+		proto[5] < '0' || proto[5] > '9' || proto[7] < '0' || proto[7] > '9' {
+		return false
+	}
+
+	major := proto[5]
+	minor := proto[7]
+
+	// Match net/http transferReader defaulting HTTP/0.0 to HTTP/1.1 semantics.
+	if major == '0' && minor == '0' {
+		return true
+	}
+	return major > '1' || (major == '1' && minor >= '1')
 }
 
 func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
@@ -2939,6 +3157,9 @@ func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
 func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	// 'identity' content-length by default
 	h.contentLength = -2
+
+	contentLengthSeen := false
+	transferEncodingSeen := false
 
 	var s headerScanner
 	s.b = buf
@@ -2984,6 +3205,11 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strContentLength) {
+				if contentLengthSeen {
+					h.connectionClose = true
+					return 0, ErrDuplicateContentLength
+				}
+				contentLengthSeen = true
 				if h.contentLength != -1 {
 					var err error
 					h.contentLength, err = parseContentLength(s.value)
@@ -3018,10 +3244,30 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			}
 		case 't':
 			if caseInsensitiveCompare(s.key, strTransferEncoding) {
-				if len(s.value) > 0 && !bytes.Equal(s.value, strIdentity) {
-					h.contentLength = -1
-					h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
+				// Keep net/http behavior: ignore Transfer-Encoding on HTTP/1.0 and older.
+				if !protoAtLeastHTTP11ForTransfer(h.protocol) {
+					continue
 				}
+
+				if transferEncodingSeen {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, ErrUnsupportedTransferEncoding
+					}
+					return 0, fmt.Errorf("too many transfer encodings: %q", s.value)
+				}
+				transferEncodingSeen = true
+
+				if !caseInsensitiveCompare(s.value, strChunked) {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, ErrUnsupportedTransferEncoding
+					}
+					return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
+				}
+
+				h.contentLength = -1
+				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strTrailer) {
@@ -3065,6 +3311,8 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	h.contentLength = -2
 
 	contentLengthSeen := false
+	hostSeen := false
+	transferEncodingSeen := false
 
 	var s headerScanner
 	s.b = buf
@@ -3103,6 +3351,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 		switch s.key[0] | 0x20 {
 		case 'h':
 			if caseInsensitiveCompare(s.key, strHost) {
+				if hostSeen {
+					h.connectionClose = true
+					return 0, errors.New("too many Host headers")
+				}
+				hostSeen = true
 				h.host = append(h.host[:0], s.value...)
 				continue
 			}
@@ -3146,10 +3399,21 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 			}
 		case 't':
 			if caseInsensitiveCompare(s.key, strTransferEncoding) {
-				isIdentity := caseInsensitiveCompare(s.value, strIdentity)
-				isChunked := caseInsensitiveCompare(s.value, strChunked)
+				// Keep net/http behavior: ignore Transfer-Encoding on HTTP/1.0 and older.
+				if !protoAtLeastHTTP11ForTransfer(h.protocol) {
+					continue
+				}
 
-				if !isIdentity && !isChunked {
+				if transferEncodingSeen {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, ErrUnsupportedTransferEncoding
+					}
+					return 0, fmt.Errorf("too many transfer encodings: %q", s.value)
+				}
+				transferEncodingSeen = true
+
+				if !caseInsensitiveCompare(s.value, strChunked) {
 					h.connectionClose = true
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
@@ -3157,10 +3421,8 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 					return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
 				}
 
-				if isChunked {
-					h.contentLength = -1
-					h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
-				}
+				h.contentLength = -1
+				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strTrailer) {

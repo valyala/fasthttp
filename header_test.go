@@ -974,13 +974,13 @@ func TestResponseHeaderTrailingCRLFSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// try reading the trailing CRLF. It must return EOF
+	// Reading standalone CRLFs as a response must fail.
 	err := r.Read(br)
 	if err == nil {
 		t.Fatalf("expecting error")
 	}
-	if err != io.EOF {
-		t.Fatalf("unexpected error: %v. Expecting %v", err, io.EOF)
+	if err == io.EOF {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -1113,6 +1113,11 @@ func TestResponseHeaderOldVersion(t *testing.T) {
 	}
 	if !h.ConnectionClose() {
 		t.Fatalf("expecting 'Connection: close' for the response with old http protocol")
+	}
+
+	// Discard the body of the first response.
+	if n, err := br.Discard(h.ContentLength()); err != nil || n != h.ContentLength() {
+		t.Fatalf("unexpected discard: n=%d, want=%d, err=%v", n, h.ContentLength(), err)
 	}
 
 	if err := h.Read(br); err != nil {
@@ -1452,7 +1457,6 @@ func TestResponseHeaderHTTPVer(t *testing.T) {
 	// non-http/1.1
 	testResponseHeaderHTTPVer(t, "HTTP/1.0 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
 	testResponseHeaderHTTPVer(t, "HTTP/0.9 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
-	testResponseHeaderHTTPVer(t, "foobar 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", true)
 
 	// http/1.1
 	testResponseHeaderHTTPVer(t, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nContent-Length: 123\r\n\r\n", false)
@@ -2737,10 +2741,6 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\nconTEnt-leNGTH: 123\nConTENT-TYPE: ass\r\n\r\n",
 		400, 123, "ass")
 
-	// duplicate content-length
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 456\r\nContent-Type: foo/bar\r\nContent-Length: 321\r\n\r\n",
-		200, 321, "foo/bar")
-
 	// duplicate content-type
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 234\r\nContent-Type: foo/bar\r\nContent-Type: baz/bar\r\n\r\n",
 		200, 234, "baz/bar")
@@ -2748,20 +2748,9 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 300 OK\r\nContent-Type: foo/barr\r\nTransfer-Encoding: chunked\r\nContent-Length: 354\r\n\r\n",
 		300, -1, "foo/barr")
 
-	// duplicate transfer-encoding: chunked
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n",
-		200, -1, "text/html")
-
 	// no reason string in the first line
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 456\r\nContent-Type: xxx/yyy\r\nContent-Length: 134\r\n\r\naaaxxx",
 		456, 134, "xxx/yyy")
-
-	// blank lines before the first line
-	testResponseHeaderReadSuccess(t, h, "\r\nHTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 0\r\n\r\nsss",
-		200, 0, "aa")
-	if h.ConnectionClose() {
-		t.Fatalf("unexpected connection: close")
-	}
 
 	// no content-length (informational responses)
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 101 OK\r\n\r\n",
@@ -2906,10 +2895,6 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	testRequestHeaderReadSuccess(t, h, "GET /asdf HTTP/1.1\r\nHost: aaa.com\r\nReferer: bb.com\r\n\r\naaa",
 		-2, "/asdf", "aaa.com", "bb.com", "")
 
-	// duplicate host
-	testRequestHeaderReadSuccess(t, h, "GET /aa HTTP/1.1\r\nHost: aaaaaa.com\r\nHost: bb.com\r\n\r\n",
-		-2, "/aa", "bb.com", "", "")
-
 	// post with duplicate content-type
 	testRequestHeaderReadSuccess(t, h, "POST /a HTTP/1.1\r\nHost: aa\r\nContent-Type: ab\r\nContent-Length: 123\r\nContent-Type: xx\r\n\r\n",
 		123, "/a", "aa", "", "xx")
@@ -3002,6 +2987,15 @@ func TestResponseHeaderReadError(t *testing.T) {
 
 	// Space before header name
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\n foo: bar\r\n\r\n")
+
+	// duplicate content-length
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 456\r\nContent-Type: foo/bar\r\nContent-Length: 321\r\n\r\n")
+
+	// blank lines before the status line
+	testResponseHeaderReadError(t, h, "\r\nHTTP/1.1 200 OK\r\nContent-Type: aa\r\nContent-Length: 0\r\n\r\nsss")
+
+	// duplicate transfer-encoding
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n")
 }
 
 func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
@@ -3043,6 +3037,9 @@ func TestRequestHeaderReadError(t *testing.T) {
 	// missing RequestURI
 	testRequestHeaderReadError(t, h, "GET  HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
+	// invalid URL escape in requestURI
+	testRequestHeaderReadError(t, h, "GET /% HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
 	// post with invalid content-length
 	testRequestHeaderReadError(t, h, "POST /a HTTP/1.1\r\nHost: bb\r\nContent-Type: aa\r\nContent-Length: dff\r\n\r\nqwerty")
 
@@ -3060,6 +3057,12 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// Space before header name
 	testRequestHeaderReadError(t, h, "G(ET /foo/bar HTTP/1.1\r\n foo: bar\r\n\r\n")
+
+	// Duplicate host header
+	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\nHost: aaa.com\r\nhost: bbb.com\r\n\r\n")
+
+	// duplicate transfer-encoding
+	testRequestHeaderReadError(t, h, "POST /foo/bar HTTP/1.1\r\nHost: aaa.com\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n")
 }
 
 func TestRequestHeaderReadSecuredError(t *testing.T) {
