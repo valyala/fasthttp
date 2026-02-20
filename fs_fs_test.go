@@ -4,10 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"embed"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 )
 
@@ -911,4 +914,92 @@ func TestFSFSGenerateIndexOsDirFS(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestFSRootEnforcement(t *testing.T) {
+	t.Parallel()
+
+	memFS := fstest.MapFS{
+		"public/index.html":  {Data: []byte("<h1>Public</h1>")},
+		"secret/admin.json":  {Data: []byte(`{"admin": true, "key": "s3cret"}`)},
+		"public/nested/info": {Data: []byte("nested")},
+	}
+
+	tmpDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(tmpDir, "public"), 0o755); err != nil {
+		t.Fatalf("cannot create public dir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, "secret"), 0o755); err != nil {
+		t.Fatalf("cannot create secret dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "public", "index.html"), []byte("<h1>Public</h1>"), 0o644); err != nil {
+		t.Fatalf("cannot create public index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "secret", "admin.json"), []byte(`{"admin": true, "key": "s3cret"}`), 0o644); err != nil {
+		t.Fatalf("cannot create secret admin file: %v", err)
+	}
+
+	type testCase struct {
+		name        string
+		root        string
+		filesystem  fs.FS
+		pathRewrite PathRewriteFunc
+	}
+
+	cases := make([]testCase, 0, 9)
+	for _, root := range []string{"public", "public/", "./public", "/public"} {
+		cases = append(
+			cases,
+			testCase{
+				name:       "mapfs/" + root,
+				root:       root,
+				filesystem: memFS,
+			}, testCase{
+				name:       "dirfs/" + root,
+				root:       root,
+				filesystem: os.DirFS(tmpDir),
+			},
+		)
+	}
+
+	cases = append(cases, testCase{
+		name:       "mapfs/pathrewrite-no-leading-slash",
+		root:       "./public/",
+		filesystem: memFS,
+		pathRewrite: func(ctx *RequestCtx) []byte {
+			return bytes.TrimPrefix(ctx.Path(), []byte("/"))
+		},
+	})
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stop := make(chan struct{})
+			defer close(stop)
+
+			fs := &FS{
+				Root:           tc.root,
+				FS:             tc.filesystem,
+				AllowEmptyRoot: true,
+				CleanStop:      stop,
+				PathRewrite:    tc.pathRewrite,
+			}
+			h := fs.NewRequestHandler()
+
+			var ctx RequestCtx
+			ctx.Init(&Request{}, nil, TestLogger{t: t})
+
+			checkStatus := func(uri string, expected int) {
+				ctx.Request.Reset()
+				ctx.Response.Reset()
+				ctx.Request.SetRequestURI(uri)
+				h(&ctx)
+				if ctx.Response.StatusCode() != expected {
+					t.Fatalf("unexpected status code for %s: %d. Expecting %d", uri, ctx.Response.StatusCode(), expected)
+				}
+			}
+
+			checkStatus("http://localhost/index.html", StatusOK)
+			checkStatus("http://localhost/secret/admin.json", StatusNotFound)
+		})
+	}
 }
