@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -451,6 +452,22 @@ func (fs *FS) normalizeRoot(root string) string {
 
 		// convert the root directory slashes to the native format
 		root = filepath.FromSlash(root)
+	} else {
+		if root == "" {
+			return root
+		}
+
+		// Normalize fs.FS roots to slash-separated relative paths.
+		root = strings.ReplaceAll(root, "\\", "/")
+		root = strings.TrimLeft(root, "/")
+		if root == "" {
+			return root
+		}
+		root = path.Clean(root)
+		if root == "." {
+			return "."
+		}
+		return root
 	}
 
 	// strip trailing slashes from the root path
@@ -1006,16 +1023,43 @@ func cleanCacheNolock(
 }
 
 func (h *fsHandler) pathToFilePath(path []byte, hasTrailingSlash bool) string {
+	if hasTrailingSlash {
+		path = path[:len(path)-1]
+	}
+	hasLeadingSlash := len(path) > 0 && path[0] == '/'
+
 	if _, ok := h.filesystem.(*osFS); !ok {
-		if len(path) < 1 {
-			return ""
-		} else if len(path) == 1 && path[0] == '/' {
-			return ""
+		root := h.root
+		if root == "." {
+			root = ""
 		}
-		if hasTrailingSlash {
-			return string(path[1 : len(path)-1])
+		if len(path) < 1 || (hasLeadingSlash && len(path) == 1) {
+			if h.root == "." {
+				return "."
+			}
+			return root
 		}
-		return string(path[1:])
+
+		if root == "" {
+			if hasLeadingSlash {
+				return string(path[1:])
+			}
+			return string(path)
+		}
+
+		// Use byte buffer pool to avoid string concatenation allocations.
+		b := bytebufferpool.Get()
+		defer bytebufferpool.Put(b)
+
+		b.B = append(b.B, root...)
+		b.B = append(b.B, '/')
+		if hasLeadingSlash {
+			b.B = append(b.B, path[1:]...)
+		} else {
+			b.B = append(b.B, path...)
+		}
+
+		return string(b.B)
 	}
 
 	// Use byte buffer pool to avoid string concatenation allocations
@@ -1023,9 +1067,12 @@ func (h *fsHandler) pathToFilePath(path []byte, hasTrailingSlash bool) string {
 	defer bytebufferpool.Put(b)
 
 	b.B = append(b.B, h.root...)
-	if hasTrailingSlash {
-		b.B = append(b.B, path[:len(path)-1]...)
+	if hasLeadingSlash {
+		b.B = append(b.B, path...)
 	} else {
+		if h.root != "" && len(path) > 0 {
+			b.B = append(b.B, '/')
+		}
 		b.B = append(b.B, path...)
 	}
 
