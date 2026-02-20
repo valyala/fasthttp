@@ -17,10 +17,6 @@ import (
 )
 
 var (
-	// Used for caching authentication information when using an HTTP proxy,
-	// it helps avoid re-encoding the authentication details when the ProxyURL
-	// changes along with the request URL.
-	authCache    = sync.Map{}
 	colonTLSPort = ":443"
 	tmpURL       = &url.URL{Scheme: httpsScheme, Host: "example.com"}
 )
@@ -106,7 +102,7 @@ func (d *Dialer) GetDialFunc(useEnv bool) (fasthttp.DialFunc, error) {
 				return nil, err
 			}
 		case "http":
-			proxyAddr, auth := addrAndAuth(proxyURL)
+			proxyAddr, auth := addrAndAuth(proxyURL, nil)
 			proxyDialer = DialerFunc(func(network, addr string) (conn net.Conn, err error) {
 				return httpProxyDial(d, network, addr, proxyAddr, auth)
 			})
@@ -118,6 +114,7 @@ func (d *Dialer) GetDialFunc(useEnv bool) (fasthttp.DialFunc, error) {
 		}, nil
 	}
 	// slow path when the proxyURL changes along with the request URL.
+	var authCache sync.Map
 	return func(addr string) (conn net.Conn, err error) {
 		var proxyDialer proxy.Dialer
 		var proxyURL *url.URL
@@ -141,7 +138,7 @@ func (d *Dialer) GetDialFunc(useEnv bool) (fasthttp.DialFunc, error) {
 				return nil, err
 			}
 		case "http":
-			proxyAddr, auth := addrAndAuth(proxyURL)
+			proxyAddr, auth := addrAndAuth(proxyURL, &authCache)
 			proxyDialer = DialerFunc(func(network, addr string) (conn net.Conn, err error) {
 				return httpProxyDial(d, network, addr, proxyAddr, auth)
 			})
@@ -241,21 +238,23 @@ type proxyInfo struct {
 	addr string
 }
 
-func addrAndAuth(pu *url.URL) (proxyAddr, auth string) {
+func addrAndAuth(pu *url.URL, authCache *sync.Map) (proxyAddr, auth string) {
 	if pu.User == nil {
 		proxyAddr = pu.Host + pu.Path
 		return proxyAddr, auth
 	}
-	var info *proxyInfo
-	v, ok := authCache.Load(pu)
-	if ok {
-		info = v.(*proxyInfo)
-		return info.addr, info.auth
+	if authCache != nil {
+		if v, ok := authCache.Load(pu); ok {
+			info := v.(*proxyInfo)
+			return info.addr, info.auth
+		}
 	}
-	info = &proxyInfo{
+	info := &proxyInfo{
 		auth: base64.StdEncoding.EncodeToString([]byte(pu.User.String())),
 		addr: pu.Host + pu.Path,
 	}
-	authCache.Store(pu, info)
+	if authCache != nil {
+		authCache.Store(pu, info)
+	}
 	return info.addr, info.auth
 }
