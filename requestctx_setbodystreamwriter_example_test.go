@@ -19,7 +19,7 @@ func ExampleRequestCtx_SetBodyStreamWriter() {
 func responseStreamHandler(ctx *fasthttp.RequestCtx) {
 	// Send the response in chunks and wait for a second between each chunk.
 	ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			fmt.Fprintf(w, "this is a message number %d", i)
 
 			// Do not forget flushing streamed data to the client.

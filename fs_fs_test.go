@@ -223,9 +223,9 @@ func TestFSFSByteRangeConcurrent(t *testing.T) {
 
 	concurrency := 10
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
-			for j := 0; j < 5; j++ {
+			for range 5 {
 				testFSByteRange(t, h, "/fs.go")
 				testFSByteRange(t, h, "/README.md")
 			}
@@ -233,7 +233,7 @@ func TestFSFSByteRangeConcurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-time.After(time.Second):
 			t.Fatalf("timeout")
@@ -283,9 +283,9 @@ func TestFSFSCompressConcurrent(t *testing.T) {
 
 	concurrency := 4
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
-			for j := 0; j < 5; j++ {
+			for range 5 {
 				testFSFSCompress(t, h, "/fs.go")
 				testFSFSCompress(t, h, "/examples/")
 				testFSFSCompress(t, h, "/README.md")
@@ -294,7 +294,7 @@ func TestFSFSCompressConcurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-ch:
 		case <-time.After(time.Second * 4):
@@ -679,9 +679,9 @@ func TestDirFSFSByteRangeConcurrent(t *testing.T) {
 
 	concurrency := 10
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
-			for j := 0; j < 5; j++ {
+			for range 5 {
 				testFSByteRange(t, h, "/fs.go")
 				testFSByteRange(t, h, "/README.md")
 			}
@@ -689,7 +689,7 @@ func TestDirFSFSByteRangeConcurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-time.After(time.Second):
 			t.Fatalf("timeout")
@@ -735,9 +735,9 @@ func TestDirFSFSCompressConcurrent(t *testing.T) {
 
 	concurrency := 4
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
-			for j := 0; j < 5; j++ {
+			for range 5 {
 				testFSFSCompress(t, h, "/fs.go")
 				testFSFSCompress(t, h, "/examples/")
 				testFSFSCompress(t, h, "/README.md")
@@ -746,7 +746,7 @@ func TestDirFSFSCompressConcurrent(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-ch:
 		case <-time.After(time.Second * 2):

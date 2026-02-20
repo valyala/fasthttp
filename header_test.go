@@ -576,7 +576,7 @@ func TestResponseHeaderAdd(t *testing.T) {
 	h.Add("content-type", "xxx")
 	m["bbb"] = struct{}{}
 	m["xxx"] = struct{}{}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		v := strconv.Itoa(i)
 		h.Add("Foo-Bar", v)
 		m[v] = struct{}{}
@@ -629,7 +629,7 @@ func TestRequestHeaderAdd(t *testing.T) {
 	h.Add("user-agent", "xxx")
 	m["bbb"] = struct{}{}
 	m["xxx"] = struct{}{}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		v := strconv.Itoa(i)
 		h.Add("Foo-Bar", v)
 		m[v] = struct{}{}
@@ -939,7 +939,7 @@ func TestBufferSnippet(t *testing.T) {
 	b := string(createFixedBody(199))
 	bExpected := fmt.Sprintf("%q", b)
 	testBufferSnippet(t, b, bExpected)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		b += "foobar"
 		bExpected = fmt.Sprintf("%q", b)
 		testBufferSnippet(t, b, bExpected)
@@ -948,7 +948,7 @@ func TestBufferSnippet(t *testing.T) {
 	b = string(createFixedBody(400))
 	bExpected = fmt.Sprintf("%q", b)
 	testBufferSnippet(t, b, bExpected)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		b += "sadfqwer"
 		bExpected = fmt.Sprintf("%q...%q", b[:200], b[len(b)-200:])
 		testBufferSnippet(t, b, bExpected)
@@ -2637,10 +2637,7 @@ func (r *bufioPeekReader) Read(b []byte) (int, error) {
 	}
 
 	r.n++
-	n := r.n
-	if len(r.s) < n {
-		n = len(r.s)
-	}
+	n := min(len(r.s), r.n)
 	src := []byte(r.s[:n])
 	r.s = r.s[n:]
 	n = copy(b, src)
@@ -2676,8 +2673,8 @@ func TestResponseHeaderBufioPeek(t *testing.T) {
 }
 
 func getHeaders(n int) string {
-	var h []string
-	for i := 0; i < n; i++ {
+	h := make([]string, 0, n)
+	for i := range n {
 		h = append(h, fmt.Sprintf("Header_%d: Value_%d\r\n", i, i))
 	}
 	return strings.Join(h, "")

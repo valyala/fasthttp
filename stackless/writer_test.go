@@ -70,7 +70,7 @@ func testWriter(newWriter NewWriterFunc, newReader func(io.Reader) io.Reader) er
 	dstW := &bytes.Buffer{}
 	w := NewWriter(dstW, newWriter)
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := testWriterReuse(w, dstW, newReader); err != nil {
 			return fmt.Errorf("unexpected error when re-using writer on iteration %d: %w", i, err)
 		}
@@ -84,7 +84,7 @@ func testWriter(newWriter NewWriterFunc, newReader func(io.Reader) io.Reader) er
 func testWriterReuse(w Writer, r io.Reader, newReader func(io.Reader) io.Reader) error {
 	wantW := &bytes.Buffer{}
 	mw := io.MultiWriter(w, wantW)
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		fmt.Fprintf(mw, "foobar %d\n", i)
 		if i%13 == 0 {
 			if err := w.Flush(); err != nil {
@@ -110,12 +110,12 @@ func testWriterReuse(w Writer, r io.Reader, newReader func(io.Reader) io.Reader)
 
 func testConcurrent(testFunc func() error, concurrency int) error {
 	ch := make(chan error, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			ch <- testFunc()
 		}()
 	}
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		select {
 		case err := <-ch:
 			if err != nil {

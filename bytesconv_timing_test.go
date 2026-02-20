@@ -15,7 +15,7 @@ func BenchmarkAppendHTMLEscape(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var buf []byte
 		for pb.Next() {
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				buf = AppendHTMLEscape(buf[:0], sOrig)
 				if string(buf) != sExpected {
 					b.Fatalf("unexpected escaped string: %q. Expecting %q", buf, sExpected)
@@ -31,7 +31,7 @@ func BenchmarkHTMLEscapeString(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		var s string
 		for pb.Next() {
-			for i := 0; i < 10; i++ {
+			for range 10 {
 				s = html.EscapeString(sOrig)
 				if s != sExpected {
 					b.Fatalf("unexpected escaped string: %q. Expecting %q", s, sExpected)

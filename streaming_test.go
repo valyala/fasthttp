@@ -240,7 +240,7 @@ func BenchmarkRequestStreamE2E(b *testing.B) {
 
 	wg := &sync.WaitGroup{}
 	wg.Add(4)
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		go func(wg *sync.WaitGroup) {
 			for i := 0; i < b.N/4; i++ {
 				c, err := ln.Dial()

@@ -499,7 +499,7 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver, deadline ti
 
 	n := len(ipaddrs)
 	addrs := make([]net.TCPAddr, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		ip := ipaddrs[i]
 		if !dualStack && ip.IP.To4() == nil {
 			continue

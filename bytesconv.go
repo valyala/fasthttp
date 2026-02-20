@@ -80,7 +80,7 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	dst = dst.To4() // dst is always non-nil here
 
 	b := ipStr
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		n := bytes.IndexByte(b, '.')
 		if n < 0 {
 			return dst, fmt.Errorf("cannot find dot in ipStr %q", ipStr)
@@ -152,7 +152,7 @@ func parseUintBuf(b []byte) (int, int, error) {
 		return -1, 0, errEmptyInt
 	}
 	v := 0
-	for i := 0; i < n; i++ {
+	for i := range n {
 		c := b[i]
 		k := c - '0'
 		if k > 9 {
@@ -252,7 +252,7 @@ const (
 )
 
 func lowercaseBytes(b []byte) {
-	for i := 0; i < len(b); i++ {
+	for i := range b {
 		p := &b[i]
 		*p = toLowerTable[*p]
 	}

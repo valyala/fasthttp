@@ -275,7 +275,7 @@ func TestServerConnState(t *testing.T) {
 		}
 		br := bufio.NewReader(c)
 		// Send 2 requests on the same connection.
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
@@ -1470,7 +1470,7 @@ func TestServerDisableHeaderNamesNormalizing(t *testing.T) {
 	}
 
 	rw := &readWriter{}
-	rw.r.WriteString(fmt.Sprintf("GET / HTTP/1.1\r\n%s: %s\r\nHost: google.com\r\n\r\n", headerName, headerValue))
+	fmt.Fprintf(&rw.r, "GET / HTTP/1.1\r\n%s: %s\r\nHost: google.com\r\n\r\n", headerName, headerValue)
 
 	if err := s.ServeConn(rw); err != nil {
 		t.Fatalf("Unexpected error from serveConn: %v", err)
@@ -1543,13 +1543,13 @@ func TestServerReduceMemoryUsageConcurrent(t *testing.T) {
 	}()
 
 	gCh := make(chan struct{})
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			testServerRequests(t, ln)
 			gCh <- struct{}{}
 		}()
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		select {
 		case <-gCh:
 		case <-time.After(time.Second):
@@ -1576,7 +1576,7 @@ func testServerRequests(t *testing.T, ln *fasthttputil.InmemoryListener) {
 
 	br := bufio.NewReader(conn)
 	var resp Response
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if _, err = fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: aaa\r\n\r\n"); err != nil {
 			t.Fatalf("unexpected error on iteration %d: %v", i, err)
 		}
@@ -1799,7 +1799,7 @@ func TestRequestCtxUserValue(t *testing.T) {
 
 	var ctx RequestCtx
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		k := fmt.Sprintf("key-%d", i)
 		ctx.SetUserValue(k, i)
 	}
@@ -1808,7 +1808,7 @@ func TestRequestCtxUserValue(t *testing.T) {
 		ctx.SetUserValueBytes([]byte(k), i)
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := fmt.Sprintf("key-%d", i)
 		v := ctx.UserValue(k)
 		n, ok := v.(int)
@@ -1829,7 +1829,7 @@ func TestRequestCtxUserValue(t *testing.T) {
 	}
 
 	ctx.ResetUserValues()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := fmt.Sprintf("key-%d", i)
 		v := ctx.UserValue(k)
 		if v != nil {
@@ -2060,7 +2060,7 @@ func TestServerContinueHandler(t *testing.T) {
 	// Expect 100 continue accepted
 	// Expect 100 continue denied
 	rw := &readWriter{}
-	for i := 0; i < 25; i++ {
+	for range 25 {
 		// Regular requests without Expect 100 continue header
 		rw.r.Reset()
 		rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
@@ -2410,7 +2410,7 @@ func TestServerErrorHandler(t *testing.T) {
 
 	rw := &readWriter{}
 
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		body := strings.Repeat("@", s.MaxRequestBodySize+1)
 		path := fmt.Sprintf("/%d", i)
 
@@ -2785,7 +2785,7 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 
 	hijackedString := "foobar baz hijacked!!!"
 
-	for i := 0; i < totalConns; i++ {
+	for i := range totalConns {
 		wg.Add(1)
 
 		go func(t *testing.T, id int) {
@@ -2957,7 +2957,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 
 	concurrency := 20
 	clientCh := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			conn, err := ln.Dial()
 			if err != nil {
@@ -2972,7 +2972,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-clientCh:
 		case <-time.After(time.Second):
@@ -3015,7 +3015,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 
 	concurrency := 20
 	clientCh := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			conn, err := ln.Dial()
 			if err != nil {
@@ -3030,7 +3030,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-clientCh:
 		case <-time.After(time.Second):
@@ -3039,7 +3039,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	}
 
 	close(readyCh)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-doneCh:
 		case <-time.After(time.Second):
@@ -3394,8 +3394,8 @@ func TestServerLogger(t *testing.T) {
 			logger := ctx.Logger()
 			h := &ctx.Request.Header
 			logger.Printf("begin")
-			ctx.Success("text/html", []byte(fmt.Sprintf("requestURI=%s, body=%q, remoteAddr=%s",
-				h.RequestURI(), ctx.Request.Body(), ctx.RemoteAddr())))
+			ctx.Success("text/html", fmt.Appendf(nil, "requestURI=%s, body=%q, remoteAddr=%s",
+				h.RequestURI(), ctx.Request.Body(), ctx.RemoteAddr()))
 			logger.Printf("end")
 		},
 		Logger: cl,
@@ -3439,8 +3439,8 @@ func TestServerRemoteAddr(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
-			ctx.Success("text/html", []byte(fmt.Sprintf("requestURI=%s, remoteAddr=%s, remoteIP=%s",
-				h.RequestURI(), ctx.RemoteAddr(), ctx.RemoteIP())))
+			ctx.Success("text/html", fmt.Appendf(nil, "requestURI=%s, remoteAddr=%s, remoteIP=%s",
+				h.RequestURI(), ctx.RemoteAddr(), ctx.RemoteIP()))
 		},
 	}
 
@@ -3479,8 +3479,8 @@ func TestServerCustomRemoteAddr(t *testing.T) {
 	s := &Server{
 		Handler: customRemoteAddrHandler(func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
-			ctx.Success("text/html", []byte(fmt.Sprintf("requestURI=%s, remoteAddr=%s, remoteIP=%s",
-				h.RequestURI(), ctx.RemoteAddr(), ctx.RemoteIP())))
+			ctx.Success("text/html", fmt.Appendf(nil, "requestURI=%s, remoteAddr=%s, remoteIP=%s",
+				h.RequestURI(), ctx.RemoteAddr(), ctx.RemoteIP()))
 		}),
 	}
 
@@ -3571,7 +3571,7 @@ func TestServeConnSingleRequest(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
-			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Peek(HeaderHost))))
+			ctx.Success("aaa", fmt.Appendf(nil, "requestURI=%s, host=%s", h.RequestURI(), h.Peek(HeaderHost)))
 		},
 	}
 
@@ -3614,7 +3614,7 @@ func TestServeConnMultiRequests(t *testing.T) {
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			h := &ctx.Request.Header
-			ctx.Success("aaa", []byte(fmt.Sprintf("requestURI=%s, host=%s", h.RequestURI(), h.Peek(HeaderHost))))
+			ctx.Success("aaa", fmt.Appendf(nil, "requestURI=%s, host=%s", h.RequestURI(), h.Peek(HeaderHost)))
 		},
 	}
 
@@ -4035,7 +4035,7 @@ func TestMaxBodySizePerRequest(t *testing.T) {
 	}
 
 	rw := &readWriter{}
-	rw.r.WriteString(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", (5<<10)+1, strings.Repeat("a", (5<<10)+1)))
+	fmt.Fprintf(&rw.r, "POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", (5<<10)+1, strings.Repeat("a", (5<<10)+1))
 
 	if err := s.ServeConn(rw); err != ErrBodyTooLarge {
 		t.Fatalf("Unexpected error from serveConn: %v", err)
@@ -4200,7 +4200,7 @@ func checkReader(t *testing.T, r io.Reader, expected string) {
 func TestMaxReadTimeoutPerRequest(t *testing.T) {
 	t.Parallel()
 
-	headers := []byte(fmt.Sprintf("POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n", 5*1024))
+	headers := fmt.Appendf(nil, "POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n", 5*1024)
 	s := &Server{
 		Handler: func(_ *RequestCtx) {
 			t.Error("shouldn't reach handler")
@@ -4224,7 +4224,7 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 			t.Error(err)
 		}
 		// write body
-		for i := 0; i < 5*1024; i++ {
+		for range 5 * 1024 {
 			time.Sleep(time.Millisecond)
 			_, err = cc.Write([]byte{'a'})
 			if err != nil {
@@ -4349,7 +4349,7 @@ func TestServerChunkedResponse(t *testing.T) {
 			}
 		}
 		ctx.Response.SetBodyStreamWriter(func(w *bufio.Writer) {
-			for i := 0; i < 3; i++ {
+			for i := range 3 {
 				fmt.Fprintf(w, "message %d", i)
 				if err := w.Flush(); err != nil {
 					t.Errorf("unexpected error: %v", err)
@@ -4468,8 +4468,8 @@ func TestRequestBodyStreamReadIssue1816(t *testing.T) {
 		req.Header.SetMethod("POST")
 		req.SetRequestURI("http://localhsot:8080")
 		req.SetBodyRaw(bytes.Repeat([]byte{'1'}, 10))
-		var pipelineReqBody []byte
 		reqBody := req.String()
+		pipelineReqBody := make([]byte, 0, len(reqBody)*2)
 		pipelineReqBody = append(pipelineReqBody, reqBody...)
 		pipelineReqBody = append(pipelineReqBody, reqBody...)
 		_, err := cliCon.Write(pipelineReqBody)

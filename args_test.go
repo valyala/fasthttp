@@ -123,13 +123,13 @@ func TestArgsAcquireReleaseSequential(t *testing.T) {
 
 func TestArgsAcquireReleaseConcurrent(t *testing.T) {
 	ch := make(chan struct{}, 10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			testArgsAcquireRelease(t)
 			ch <- struct{}{}
 		}()
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):
@@ -141,7 +141,7 @@ func TestArgsAcquireReleaseConcurrent(t *testing.T) {
 func testArgsAcquireRelease(t *testing.T) {
 	a := AcquireArgs()
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := fmt.Sprintf("key_%d", i)
 		v := fmt.Sprintf("value_%d", i*3+123)
 		a.Set(k, v)
@@ -151,7 +151,7 @@ func testArgsAcquireRelease(t *testing.T) {
 	a.Reset()
 	a.Parse(s)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := fmt.Sprintf("key_%d", i)
 		expectedV := fmt.Sprintf("value_%d", i*3+123)
 		v := a.Peek(k)
@@ -199,7 +199,7 @@ func TestArgsEscape(t *testing.T) {
 	// Test all characters
 	k := "f.o,1:2/4"
 	v := make([]byte, 256)
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		v[i] = byte(i)
 	}
 	u := url.Values{}
@@ -227,7 +227,7 @@ func TestPathEscape(t *testing.T) {
 
 	// Test all characters
 	pathSegment := make([]byte, 256)
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		pathSegment[i] = byte(i)
 	}
 	testPathEscape(t, "/foo/"+string(pathSegment))
@@ -442,8 +442,8 @@ func TestArgsSetGetDel(t *testing.T) {
 	}
 	a.Del("xxx")
 
-	for j := 0; j < 3; j++ {
-		for i := 0; i < 10; i++ {
+	for range 3 {
+		for i := range 10 {
 			k := fmt.Sprintf("foo%d", i)
 			v := fmt.Sprintf("bar_%d", i)
 			a.Set(k, v)
@@ -452,7 +452,7 @@ func TestArgsSetGetDel(t *testing.T) {
 			}
 		}
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := fmt.Sprintf("foo%d", i)
 		v := fmt.Sprintf("bar_%d", i)
 		if string(a.Peek(k)) != v {
@@ -475,7 +475,7 @@ func TestArgsSetGetDel(t *testing.T) {
 		t.Fatalf("Unexpected value %q. Expected %q", a.Peek("bb"), "aa")
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := fmt.Sprintf("xx%d", i)
 		v := fmt.Sprintf("yy%d", i)
 		a.Set(k, v)

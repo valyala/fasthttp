@@ -31,7 +31,7 @@ func TestPipeConnsWriteTimeout(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, err := c1.Write(data)
 		if err == nil {
 			t.Fatalf("expecting error")
@@ -56,7 +56,7 @@ func TestPipeConnsWriteTimeout(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, err := c2.Read(data)
 		if err == nil {
 			t.Fatalf("expecting error")
@@ -91,7 +91,7 @@ func testPipeConnsReadTimeout(t *testing.T, timeout time.Duration) {
 	}
 
 	var buf [1]byte
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		_, err := c1.Read(buf[:])
 		if err == nil {
 			t.Fatalf("expecting error on iteration %d", i)
@@ -125,14 +125,14 @@ func TestPipeConnsCloseWhileReadWriteConcurrent(t *testing.T) {
 
 	concurrency := 4
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			testPipeConnsCloseWhileReadWriteSerial(t)
 			ch <- struct{}{}
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-ch:
 		case <-time.After(5 * time.Second):
@@ -148,7 +148,7 @@ func TestPipeConnsCloseWhileReadWriteSerial(t *testing.T) {
 }
 
 func testPipeConnsCloseWhileReadWriteSerial(t *testing.T) {
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		testPipeConnsCloseWhileReadWrite(t)
 	}
 }
@@ -238,7 +238,7 @@ func testPipeConnsReadWrite(t *testing.T, c1, c2 net.Conn) {
 	defer c2.Close()
 
 	var buf [32]byte
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		// The first write
 		s1 := fmt.Sprintf("foo_%d", i)
 		n, err := c1.Write([]byte(s1))
@@ -301,7 +301,7 @@ func testPipeConnsClose(t *testing.T, c1, c2 net.Conn) {
 	var buf [10]byte
 
 	// attempt writing to closed conn
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		n, err := c1.Write(buf[:])
 		if err == nil {
 			t.Fatalf("expecting error")
@@ -312,7 +312,7 @@ func testPipeConnsClose(t *testing.T, c1, c2 net.Conn) {
 	}
 
 	// attempt reading from closed conn
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		n, err := c2.Read(buf[:])
 		if err == nil {
 			t.Fatalf("expecting error")
@@ -330,7 +330,7 @@ func testPipeConnsClose(t *testing.T, c1, c2 net.Conn) {
 	}
 
 	// attempt closing already closed conns
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if err := c1.Close(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -342,14 +342,14 @@ func testPipeConnsClose(t *testing.T, c1, c2 net.Conn) {
 
 func testConcurrency(t *testing.T, concurrency int, f func(*testing.T)) {
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			f(t)
 			ch <- struct{}{}
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):
