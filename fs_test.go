@@ -388,9 +388,9 @@ func runFSByteRangeConcurrent(t *testing.T, fs *FS) {
 
 	concurrency := 10
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
-			for j := 0; j < 5; j++ {
+			for range 5 {
 				testFSByteRange(t, h, "/fs.go")
 				testFSByteRange(t, h, "/README.md")
 			}
@@ -398,7 +398,7 @@ func runFSByteRangeConcurrent(t *testing.T, fs *FS) {
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-time.After(time.Second):
 			t.Fatalf("timeout")
@@ -623,9 +623,9 @@ func runFSCompressConcurrent(t *testing.T, fs *FS) {
 
 	concurrency := 4
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
-			for j := 0; j < 5; j++ {
+			for range 5 {
 				testFSCompress(t, h, "/fs.go")
 				testFSCompress(t, h, "/examples/")
 				testFSCompress(t, h, "/README.md")
@@ -634,7 +634,7 @@ func runFSCompressConcurrent(t *testing.T, fs *FS) {
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-ch:
 		case <-time.After(time.Second * 2):
@@ -841,7 +841,7 @@ func TestFSHandlerSingleThread(t *testing.T) {
 	}
 	sort.Strings(filenames)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		fsHandlerTest(t, requestHandler, filenames)
 	}
 }
@@ -865,16 +865,16 @@ func TestFSHandlerConcurrent(t *testing.T) {
 
 	concurrency := 10
 	ch := make(chan struct{}, concurrency)
-	for j := 0; j < concurrency; j++ {
+	for range concurrency {
 		go func() {
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				fsHandlerTest(t, requestHandler, filenames)
 			}
 			ch <- struct{}{}
 		}()
 	}
 
-	for j := 0; j < concurrency; j++ {
+	for range concurrency {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):

@@ -31,10 +31,7 @@ func (cc *perIPConnCounter) Unregister(ip uint32) {
 		// developer safeguard
 		panic("BUG: perIPConnCounter.Register() wasn't called")
 	}
-	n := cc.m[ip] - 1
-	if n < 0 {
-		n = 0
-	}
+	n := max(cc.m[ip]-1, 0)
 	cc.m[ip] = n
 }
 

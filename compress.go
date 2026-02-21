@@ -439,8 +439,8 @@ func newCompressWriterPoolMap() []*sync.Pool {
 	// in https://pkg.go.dev/compress/flate#pkg-constants .
 	// Compression levels are normalized with normalizeCompressLevel,
 	// so the fit [0..11].
-	var m []*sync.Pool
-	for i := 0; i < 12; i++ {
+	m := make([]*sync.Pool, 0, 12)
+	for range 12 {
 		m = append(m, &sync.Pool{})
 	}
 	return m

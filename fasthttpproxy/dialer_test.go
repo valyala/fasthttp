@@ -233,7 +233,7 @@ func TestDialer_GetDialFunc(t *testing.T) {
 				t.Errorf("GetDialFunc() counts = %v, want %v", getCounts(counts), tt.wantCounts)
 			}
 		})
-		for i := 0; i < len(counts); i++ {
+		for i := range counts {
 			counts[i].Store(0)
 		}
 	}
@@ -287,7 +287,7 @@ func getDialer(httpProxy, httpsProxy, noProxy string) *Dialer {
 }
 
 func getCounts(counts []atomic.Int64) (r []int64) {
-	for i := 0; i < len(counts); i++ {
+	for i := range counts {
 		r = append(r, counts[i].Load())
 	}
 	return r

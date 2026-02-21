@@ -2483,7 +2483,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 
 	n := len(h.cookies)
 	if n > 0 {
-		for i := 0; i < n; i++ {
+		for i := range n {
 			kv := &h.cookies[i]
 			dst = appendHeaderLine(dst, strSetCookie, kv.value)
 		}
@@ -3232,14 +3232,14 @@ func (s *headerValueScanner) next() bool {
 	if len(b) == 0 {
 		return false
 	}
-	n := bytes.IndexByte(b, ',')
-	if n < 0 {
+	before, after, ok := bytes.Cut(b, []byte{','})
+	if !ok {
 		s.value = stripSpace(b)
 		s.b = b[len(b):]
 		return true
 	}
-	s.value = stripSpace(b[:n])
-	s.b = b[n+1:]
+	s.value = stripSpace(before)
+	s.b = after
 	return true
 }
 

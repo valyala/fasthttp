@@ -76,7 +76,7 @@ func testConfigV(t *testing.T, cfg Config, network, addr string) {
 		lns = append(lns, ln)
 	}
 
-	for i := 0; i < requestsCount; i++ {
+	for i := range requestsCount {
 		c, err := net.Dial(network, addr)
 		if err != nil {
 			t.Fatalf("%d. unexpected error when dialing: %s", i, err)

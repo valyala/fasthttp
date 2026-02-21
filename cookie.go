@@ -584,7 +584,7 @@ func caseInsensitiveCompare(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := 0; i < len(a); i++ {
+	for i := range a {
 		if a[i]|0x20 != b[i]|0x20 {
 			return false
 		}

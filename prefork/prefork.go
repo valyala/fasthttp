@@ -180,7 +180,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 		}
 	}()
 
-	for i := 0; i < goMaxProcs; i++ {
+	for range goMaxProcs {
 		var cmd *exec.Cmd
 		if cmd, err = p.doCommand(); err != nil {
 			p.logger().Printf("failed to start a child prefork process, error: %v\n", err)

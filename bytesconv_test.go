@@ -18,7 +18,7 @@ func TestAppendQuotedArg(t *testing.T) {
 
 	// Sync with url.QueryEscape
 	allcases := make([]byte, 256)
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		allcases[i] = byte(i)
 	}
 	res := string(AppendQuotedArg(nil, allcases))
@@ -33,7 +33,7 @@ func TestAppendHTMLEscape(t *testing.T) {
 
 	// Sync with html.EscapeString
 	allcases := make([]byte, 256)
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		allcases[i] = byte(i)
 	}
 	res := string(AppendHTMLEscape(nil, string(allcases)))

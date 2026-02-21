@@ -458,14 +458,14 @@ func TestResponseSwapBodyConcurrent(t *testing.T) {
 	t.Parallel()
 
 	ch := make(chan struct{})
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			testResponseSwapBody(t)
 			ch <- struct{}{}
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):
@@ -477,7 +477,7 @@ func TestResponseSwapBodyConcurrent(t *testing.T) {
 func testResponseSwapBody(t *testing.T) {
 	var b []byte
 	r := AcquireResponse()
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		bOrig := r.Body()
 		b = r.SwapBody(b)
 		if !bytes.Equal(bOrig, b) {
@@ -488,7 +488,7 @@ func testResponseSwapBody(t *testing.T) {
 
 	s := "aaaabbbbcccc"
 	b = b[:0]
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		r.SetBodyStream(bytes.NewBufferString(s), len(s))
 		b = r.SwapBody(b)
 		if string(b) != s {
@@ -512,14 +512,14 @@ func TestRequestSwapBodyConcurrent(t *testing.T) {
 	t.Parallel()
 
 	ch := make(chan struct{})
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			testRequestSwapBody(t)
 			ch <- struct{}{}
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):
@@ -531,7 +531,7 @@ func TestRequestSwapBodyConcurrent(t *testing.T) {
 func testRequestSwapBody(t *testing.T) {
 	var b []byte
 	r := AcquireRequest()
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		bOrig := r.Body()
 		b = r.SwapBody(b)
 		if !bytes.Equal(bOrig, b) {
@@ -542,7 +542,7 @@ func testRequestSwapBody(t *testing.T) {
 
 	s := "aaaabbbbcccc"
 	b = b[:0]
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		r.SetBodyStream(bytes.NewBufferString(s), len(s))
 		b = r.SwapBody(b)
 		if string(b) != s {
@@ -864,7 +864,7 @@ func TestRequestBodyStreamMultipleBodyCalls(t *testing.T) {
 	if !r.IsBodyStream() {
 		t.Fatalf("IsBodyStream must return true")
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		body := r.Body()
 		if string(body) != s {
 			t.Fatalf("unexpected body %q. Expecting %q. iteration %d", body, s, i)
@@ -885,7 +885,7 @@ func TestResponseBodyStreamMultipleBodyCalls(t *testing.T) {
 	if !r.IsBodyStream() {
 		t.Fatalf("IsBodyStream must return true")
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		body := r.Body()
 		if string(body) != s {
 			t.Fatalf("unexpected body %q. Expecting %q. iteration %d", body, s, i)
@@ -1295,7 +1295,7 @@ func TestRequestContinueReadBodyDisablePrereadMultipartForm(t *testing.T) {
 
 	var w bytes.Buffer
 	mw := multipart.NewWriter(&w)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := fmt.Sprintf("key_%d", i)
 		v := fmt.Sprintf("value_%d", i)
 		if err := mw.WriteField(k, v); err != nil {
@@ -1533,7 +1533,7 @@ func TestRequestMultipartForm(t *testing.T) {
 
 	var w bytes.Buffer
 	mw := multipart.NewWriter(&w)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := fmt.Sprintf("key_%d", i)
 		v := fmt.Sprintf("value_%d", i)
 		if err := mw.WriteField(k, v); err != nil {
@@ -1546,7 +1546,7 @@ func TestRequestMultipartForm(t *testing.T) {
 	}
 
 	formData := w.Bytes()
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		formData = testRequestMultipartForm(t, boundary, formData, 10)
 	}
 
@@ -1711,7 +1711,7 @@ func TestRequestString(t *testing.T) {
 func TestRequestBodyWriter(t *testing.T) {
 	var r Request
 	w := r.BodyWriter()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		fmt.Fprintf(w, "%d", i)
 	}
 	if string(r.Body()) != "0123456789" {
@@ -1724,7 +1724,7 @@ func TestResponseBodyWriter(t *testing.T) {
 
 	var r Response
 	w := r.BodyWriter()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		fmt.Fprintf(w, "%d", i)
 	}
 	if string(r.Body()) != "0123456789" {
@@ -2522,8 +2522,8 @@ func testReadBodyFixedSize(t *testing.T, bodySize int) {
 }
 
 func createFixedBody(bodySize int) []byte {
-	var b []byte
-	for i := 0; i < bodySize; i++ {
+	b := make([]byte, 0, bodySize)
+	for i := range bodySize {
 		b = append(b, byte(i%10)+'0')
 	}
 	return b
@@ -2536,7 +2536,7 @@ func createChunkedBody(body []byte, trailer map[string]string, withEnd bool) []b
 		if chunkSize > len(body) {
 			chunkSize = len(body)
 		}
-		b = append(b, []byte(fmt.Sprintf("%x\r\n", chunkSize))...)
+		b = append(b, fmt.Appendf(nil, "%x\r\n", chunkSize)...)
 		b = append(b, body[:chunkSize]...)
 		b = append(b, []byte("\r\n")...)
 		body = body[chunkSize:]
@@ -2676,7 +2676,7 @@ func (r *testReader) Read(b []byte) (int, error) {
 
 	r.cb <- struct{}{}
 
-	for i := 0; i < read; i++ {
+	for i := range read {
 		b[i] = 'x'
 	}
 
@@ -2985,7 +2985,7 @@ func TestResponseBodyStream(t *testing.T) {
 
 		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			if request.URL.Query().Get("chunked") == "true" {
-				for x := 0; x < 10; x++ {
+				for x := range 10 {
 					time.Sleep(time.Millisecond)
 					writer.Write([]byte(strconv.Itoa(x))) //nolint:errcheck
 					writer.(http.Flusher).Flush()
@@ -3174,13 +3174,13 @@ func testRequestMultipartFormPipeEmptyFormField(t *testing.T, boundary string, f
 func TestReqCopeToRace(t *testing.T) {
 	req := AcquireRequest()
 	reqs := make([]*Request, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		req.SetBodyRaw([]byte(strconv.Itoa(i)))
 		tmpReq := AcquireRequest()
 		req.CopyTo(tmpReq)
 		reqs[i] = tmpReq
 	}
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		if strconv.Itoa(i) != string(reqs[i].Body()) {
 			t.Fatalf("Unexpected req body %s. Expected %s", string(reqs[i].Body()), strconv.Itoa(i))
 		}
@@ -3190,13 +3190,13 @@ func TestReqCopeToRace(t *testing.T) {
 func TestRespCopeToRace(t *testing.T) {
 	resp := AcquireResponse()
 	resps := make([]*Response, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		resp.SetBodyRaw([]byte(strconv.Itoa(i)))
 		tmpResq := AcquireResponse()
 		resp.CopyTo(tmpResq)
 		resps[i] = tmpResq
 	}
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		if strconv.Itoa(i) != string(resps[i].Body()) {
 			t.Fatalf("Unexpected resp body %s. Expected %s", string(resps[i].Body()), strconv.Itoa(i))
 		}

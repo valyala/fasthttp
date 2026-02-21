@@ -35,14 +35,14 @@ func TestURIAcquireReleaseConcurrent(t *testing.T) {
 	t.Parallel()
 
 	ch := make(chan struct{}, 10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			testURIAcquireRelease(t)
 			ch <- struct{}{}
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):
@@ -52,7 +52,7 @@ func TestURIAcquireReleaseConcurrent(t *testing.T) {
 }
 
 func testURIAcquireRelease(t *testing.T) {
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		u := AcquireURI()
 		host := fmt.Sprintf("host.%d.com", i*23)
 		path := fmt.Sprintf("/foo/%d/bar", i*17)

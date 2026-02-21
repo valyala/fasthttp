@@ -308,9 +308,9 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		}
 		host = host[n+1:]
 
-		if n := bytes.IndexByte(auth, ':'); n >= 0 {
-			u.username = append(u.username[:0], auth[:n]...)
-			u.password = append(u.password[:0], auth[n+1:]...)
+		if before, after, ok := bytes.Cut(auth, []byte{':'}); ok {
+			u.username = append(u.username[:0], before...)
+			u.password = append(u.password[:0], after...)
 		} else {
 			u.username = append(u.username[:0], auth...)
 			u.password = u.password[:0]
@@ -659,10 +659,7 @@ func normalizePath(dst, src []byte) []byte {
 		if n < 0 {
 			break
 		}
-		nn := bytes.LastIndexByte(b[:n], '/')
-		if nn < 0 {
-			nn = 0
-		}
+		nn := max(bytes.LastIndexByte(b[:n], '/'), 0)
 		n += len(strSlashDotDotSlash) - 1
 		copy(b[nn:], b[n:])
 		b = b[:len(b)-n+nn]
@@ -696,10 +693,7 @@ func normalizePath(dst, src []byte) []byte {
 			if n < 0 {
 				break
 			}
-			nn := bytes.LastIndexByte(b[:n], '/')
-			if nn < 0 {
-				nn = 0
-			}
+			nn := max(bytes.LastIndexByte(b[:n], '/'), 0)
 			nn++
 			n += len(strSlashDotDotBackSlash)
 			copy(b[nn:], b[n:])
@@ -712,10 +706,7 @@ func normalizePath(dst, src []byte) []byte {
 			if n < 0 {
 				break
 			}
-			nn := bytes.LastIndexByte(b[:n], '/')
-			if nn < 0 {
-				nn = 0
-			}
+			nn := max(bytes.LastIndexByte(b[:n], '/'), 0)
 			n += len(strBackSlashDotDotBackSlash) - 1
 			copy(b[nn:], b[n:])
 			b = b[:len(b)-n+nn]
@@ -951,7 +942,7 @@ func (u *URI) parseQueryArgs() {
 
 // stringContainsCTLByte reports whether s contains any ASCII control character.
 func stringContainsCTLByte(s []byte) bool {
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		b := s[i]
 		if b < ' ' || b == 0x7f {
 			return true

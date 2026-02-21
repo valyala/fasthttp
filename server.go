@@ -20,6 +20,7 @@ import (
 var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 
 // ErrAlreadyServing is deprecated.
+//
 // Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
 var ErrAlreadyServing = errors.New("Server is already serving connections")
 
@@ -287,6 +288,7 @@ type Server struct {
 	MaxRequestsPerConn int
 
 	// MaxKeepaliveDuration is a no-op and only left here for backwards compatibility.
+	//
 	// Deprecated: Use IdleTimeout instead.
 	MaxKeepaliveDuration time.Duration
 

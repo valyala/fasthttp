@@ -2481,13 +2481,8 @@ func readBodyWithStreaming(r *bufio.Reader, contentLength, maxBodySize int, dst 
 
 	dst = dst[:0]
 
-	readN := maxBodySize
-	if readN > contentLength {
-		readN = contentLength
-	}
-	if readN > 8*1024 {
-		readN = 8 * 1024
-	}
+	readN := min(maxBodySize, contentLength)
+	readN = min(readN, 8*1024)
 
 	// A fixed-length pre-read function should be used here; otherwise,
 	// it may read content beyond the request body into areas outside
