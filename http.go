@@ -654,7 +654,8 @@ func inflateData(p []byte, maxBodySize int) ([]byte, error) {
 
 var ErrContentEncodingUnsupported = errors.New("unsupported Content-Encoding")
 
-// BodyUncompressed returns body data and if needed decompress it from gzip, deflate or Brotli.
+// BodyUncompressed returns body data and if needed decompresses it from gzip,
+// deflate, brotli or zstd.
 //
 // This method may be used if the response header contains
 // 'Content-Encoding' for reading uncompressed request body.
@@ -684,7 +685,8 @@ func (req *Request) BodyUncompressedWithLimit(maxBodySize int) ([]byte, error) {
 	}
 }
 
-// BodyUncompressed returns body data and if needed decompress it from gzip, deflate or Brotli.
+// BodyUncompressed returns body data and if needed decompresses it from gzip,
+// deflate, brotli or zstd.
 //
 // This method may be used if the response header contains
 // 'Content-Encoding' for reading uncompressed response body.
