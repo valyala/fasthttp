@@ -210,10 +210,14 @@ type Server struct {
 	// instead.
 	TLSConfig *tls.Config
 
-	// FormValueFunc, which is used by RequestCtx.FormValue and support for customizing
-	// the behaviour of the RequestCtx.FormValue function.
+	// FormValueFunc customizes the behavior of RequestCtx.FormValue.
 	//
-	// NetHttpFormValueFunc gives a FormValueFunc func implementation that is consistent with net/http.
+	// For multipart requests, the default FormValue path calls MultipartForm()
+	// without a body size limit. If you need a limit for multipart parsing,
+	// provide a custom FormValueFunc and call MultipartFormWithLimit() there.
+	//
+	// NetHttpFormValueFunc gives a FormValueFunc implementation that is
+	// consistent with net/http.
 	FormValueFunc FormValueFunc
 
 	nextProtos map[string]ServeHandler
@@ -1077,6 +1081,9 @@ func (ctx *RequestCtx) PostArgs() *Args {
 // Returns ErrNoMultipartForm if request's content-type
 // isn't 'multipart/form-data'.
 //
+// This method is equivalent to MultipartFormWithLimit(0), i.e. no body size
+// limit is applied during multipart parsing.
+//
 // All uploaded temporary files are automatically deleted after
 // returning from RequestHandler. Either move or copy uploaded files
 // into new place if you want retaining them.
@@ -1090,6 +1097,17 @@ func (ctx *RequestCtx) MultipartForm() (*multipart.Form, error) {
 	return ctx.Request.MultipartForm()
 }
 
+// MultipartFormWithLimit returns request's multipart form and limits the read
+// multipart body size to maxBodySize bytes.
+//
+// If maxBodySize <= 0, then no limit is applied.
+//
+// Call this method before FormValue/FormFile if you need a limit for
+// multipart parsing.
+func (ctx *RequestCtx) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, error) {
+	return ctx.Request.MultipartFormWithLimit(maxBodySize)
+}
+
 // FormFile returns uploaded file associated with the given multipart form key.
 //
 // The file is automatically deleted after returning from RequestHandler,
@@ -1098,6 +1116,9 @@ func (ctx *RequestCtx) MultipartForm() (*multipart.Form, error) {
 // Use SaveMultipartFile function for permanently saving uploaded file.
 //
 // The returned file header is valid until your request handler returns.
+//
+// For multipart requests with untrusted input, call MultipartFormWithLimit()
+// before FormFile.
 func (ctx *RequestCtx) FormFile(key string) (*multipart.FileHeader, error) {
 	mf, err := ctx.MultipartForm()
 	if err != nil {
@@ -1182,6 +1203,10 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
 //   - FormFile for obtaining uploaded files.
 //
 // The returned value is valid until your request handler returns.
+//
+// For multipart requests with untrusted input, either call
+// MultipartFormWithLimit() before FormValue or provide a custom
+// Server.FormValueFunc that uses MultipartFormWithLimit().
 func (ctx *RequestCtx) FormValue(key string) []byte {
 	if ctx.formValueFunc != nil {
 		return ctx.formValueFunc(ctx, key)
@@ -1189,6 +1214,7 @@ func (ctx *RequestCtx) FormValue(key string) []byte {
 	return defaultFormValue(ctx, key)
 }
 
+// FormValueFunc customizes how RequestCtx.FormValue resolves a value.
 type FormValueFunc func(*RequestCtx, string) []byte
 
 var (

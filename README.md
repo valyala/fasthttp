@@ -379,6 +379,7 @@ Important points:
   - [r.FormValue()](https://pkg.go.dev/net/http#Request.FormValue) **➜** [ctx.FormValue()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormValue)
   - [r.FormFile()](https://pkg.go.dev/net/http#Request.FormFile) **➜** [ctx.FormFile()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormFile)
   - [r.MultipartForm](https://pkg.go.dev/net/http#Request) **➜** [ctx.MultipartForm()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.MultipartForm)
+    For untrusted multipart input, use [ctx.MultipartFormWithLimit()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.MultipartFormWithLimit) (or a custom [Server.FormValueFunc](https://pkg.go.dev/github.com/valyala/fasthttp#Server)) to enforce a parsing size limit.
   - [r.RemoteAddr](https://pkg.go.dev/net/http#Request) **➜** [ctx.RemoteAddr()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RemoteAddr)
   - [r.RequestURI](https://pkg.go.dev/net/http#Request) **➜** [ctx.RequestURI()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RequestURI)
   - [r.TLS](https://pkg.go.dev/net/http#Request) **➜** [ctx.IsTLS()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.IsTLS)
