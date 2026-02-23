@@ -392,7 +392,7 @@ func (c *Cookie) ParseBytes(src []byte) error {
 			// Case insensitive switch on first char
 			switch k[0] | 0x20 {
 			case 'm':
-				if cookieTokenEqual(k, strCookieMaxAge) {
+				if caseInsensitiveCompare(strCookieMaxAge, k) {
 					maxAge, err := ParseUint(v)
 					if err != nil {
 						return err
@@ -401,7 +401,7 @@ func (c *Cookie) ParseBytes(src []byte) error {
 				}
 
 			case 'e': // "expires"
-				if cookieTokenEqual(k, strCookieExpires) {
+				if caseInsensitiveCompare(strCookieExpires, k) {
 					exptime, err := ParseHTTPDate(v)
 					if err == nil {
 						c.expire = exptime
@@ -417,30 +417,30 @@ func (c *Cookie) ParseBytes(src []byte) error {
 				}
 
 			case 'd': // "domain"
-				if cookieTokenEqual(k, strCookieDomain) {
+				if caseInsensitiveCompare(strCookieDomain, k) {
 					c.domain = append(c.domain, v...)
 				}
 
 			case 'p': // "path"
-				if cookieTokenEqual(k, strCookiePath) {
+				if caseInsensitiveCompare(strCookiePath, k) {
 					c.path = append(c.path, v...)
 				}
 
 			case 's': // "samesite"
-				if cookieTokenEqual(k, strCookieSameSite) {
+				if caseInsensitiveCompare(strCookieSameSite, k) {
 					if len(v) > 0 {
 						// Case insensitive switch on first char
 						switch v[0] | 0x20 {
 						case 'l': // "lax"
-							if cookieTokenEqual(v, strCookieSameSiteLax) {
+							if caseInsensitiveCompare(strCookieSameSiteLax, v) {
 								c.sameSite = CookieSameSiteLaxMode
 							}
 						case 's': // "strict"
-							if cookieTokenEqual(v, strCookieSameSiteStrict) {
+							if caseInsensitiveCompare(strCookieSameSiteStrict, v) {
 								c.sameSite = CookieSameSiteStrictMode
 							}
 						case 'n': // "none"
-							if cookieTokenEqual(v, strCookieSameSiteNone) {
+							if caseInsensitiveCompare(strCookieSameSiteNone, v) {
 								c.sameSite = CookieSameSiteNoneMode
 							}
 						}
@@ -451,18 +451,18 @@ func (c *Cookie) ParseBytes(src []byte) error {
 			// Case insensitive switch on first char
 			switch v[0] | 0x20 {
 			case 'h': // "httponly"
-				if cookieTokenEqual(v, strCookieHTTPOnly) {
+				if caseInsensitiveCompare(strCookieHTTPOnly, v) {
 					c.httpOnly = true
 				}
 
 			case 's': // "secure"
-				if cookieTokenEqual(v, strCookieSecure) {
+				if caseInsensitiveCompare(strCookieSecure, v) {
 					c.secure = true
-				} else if cookieTokenEqual(v, strCookieSameSite) {
+				} else if caseInsensitiveCompare(strCookieSameSite, v) {
 					c.sameSite = CookieSameSiteDefaultMode
 				}
 			case 'p': // "partitioned"
-				if cookieTokenEqual(v, strCookiePartitioned) {
+				if caseInsensitiveCompare(strCookiePartitioned, v) {
 					c.partitioned = true
 				}
 			}
@@ -653,8 +653,4 @@ func caseInsensitiveCompare(a, b []byte) bool {
 		}
 	}
 	return true
-}
-
-func cookieTokenEqual(a, b []byte) bool {
-	return bytes.Equal(a, b) || caseInsensitiveCompare(a, b)
 }

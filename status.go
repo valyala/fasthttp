@@ -168,7 +168,11 @@ func formatStatusLine(dst, protocol []byte, statusCode int, statusText []byte) [
 		statusText = s2b(StatusMessage(statusCode))
 	}
 	need := len(protocol) + 1 + statusCodeLen(statusCode) + 1 + len(statusText) + len(strCRLF)
-	dst = growBytes(dst, need)
+	if cap(dst)-len(dst) < need {
+		ndst := make([]byte, len(dst), len(dst)+need)
+		copy(ndst, dst)
+		dst = ndst
+	}
 
 	dst = append(dst, protocol...)
 	dst = append(dst, ' ')
@@ -212,13 +216,4 @@ func appendStatusCode(dst []byte, statusCode int) []byte {
 		return dst
 	}
 	return strconv.AppendInt(dst, int64(statusCode), 10)
-}
-
-func growBytes(dst []byte, n int) []byte {
-	if cap(dst)-len(dst) >= n {
-		return dst
-	}
-	ndst := make([]byte, len(dst), len(dst)+n)
-	copy(ndst, dst)
-	return ndst
 }

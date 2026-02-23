@@ -18,9 +18,11 @@ import (
 func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) error {
 	body := ctx.PostBody()
 	strRequestURI := b2s(ctx.RequestURI())
-	if err := parseRequestURI(r, strRequestURI); err != nil {
+	rURL, err := url.ParseRequestURI(strRequestURI)
+	if err != nil {
 		return err
 	}
+	r.URL = rURL
 
 	r.Method = b2s(ctx.Method())
 	r.Proto = b2s(ctx.Request.Header.Protocol())
@@ -71,31 +73,5 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 		}
 	}
 
-	return nil
-}
-
-func parseRequestURI(r *http.Request, requestURI string) error {
-	// Fast path for the common origin-form request URI that doesn't require unescaping.
-	if requestURI != "" && requestURI[0] == '/' && !strings.ContainsAny(requestURI, "%#") {
-		if r.URL == nil {
-			r.URL = &url.URL{}
-		} else {
-			*r.URL = url.URL{}
-		}
-		if n := strings.IndexByte(requestURI, '?'); n >= 0 {
-			r.URL.Path = requestURI[:n]
-			r.URL.RawQuery = requestURI[n+1:]
-			r.URL.ForceQuery = n == len(requestURI)-1
-		} else {
-			r.URL.Path = requestURI
-		}
-		return nil
-	}
-
-	rURL, err := url.ParseRequestURI(requestURI)
-	if err != nil {
-		return err
-	}
-	r.URL = rURL
 	return nil
 }
