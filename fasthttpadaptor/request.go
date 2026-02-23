@@ -18,11 +18,11 @@ import (
 func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) error {
 	body := ctx.PostBody()
 	strRequestURI := b2s(ctx.RequestURI())
+
 	rURL, err := url.ParseRequestURI(strRequestURI)
 	if err != nil {
 		return err
 	}
-	r.URL = rURL
 
 	r.Method = b2s(ctx.Method())
 	r.Proto = b2s(ctx.Request.Header.Protocol())
@@ -36,19 +36,12 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	r.RemoteAddr = ctx.RemoteAddr().String()
 	r.Host = b2s(ctx.Host())
 	r.TLS = ctx.TLSConnectionState()
-	if len(body) == 0 {
-		r.Body = http.NoBody
-	} else {
-		r.Body = io.NopCloser(bytes.NewReader(body))
-	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.URL = rURL
 
 	if forServer {
 		r.RequestURI = strRequestURI
-	} else {
-		r.RequestURI = ""
 	}
-
-	r.TransferEncoding = r.TransferEncoding[:0]
 
 	if r.Header == nil {
 		r.Header = make(http.Header)
