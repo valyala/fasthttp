@@ -2,7 +2,8 @@
 // and exit instead of becoming orphans.
 //
 // It uses a two-level subprocess chain:
-//   test (grandparent) → helper "master" (parent) → helper "child"
+//
+//	test (grandparent) -> helper "master" (parent) -> helper "child"
 //
 // The test kills the master and verifies the child exits.
 
@@ -35,14 +36,15 @@ func init() {
 	}
 }
 
-func TestHelperProcess(t *testing.T) {
+func Test_HelperProcess(t *testing.T) {
+	t.Parallel()
 	// No-op. The real work happens in init().
-	// Exists so the test binary can be re-invoked with -test.run=TestHelperProcess.
+	// Exists so the test binary can be re-invoked with -test.run=Test_HelperProcess.
 }
 
 // helperMaster is the intermediate "master" process. It spawns a child
 // that runs watchMaster, passes the child's PID back to the test via
-// a pipe, then sleeps forever (waiting to be killed).
+// a pipe, then blocks until killed.
 func helperMaster() {
 	// The test passed us pipes as extra files:
 	//   fd 3 = pipe to report child PID
@@ -89,20 +91,27 @@ func helperMaster() {
 // helperChild runs watchMaster and blocks. If watchMaster works correctly,
 // this process will exit when the master (helperMaster) is killed.
 func helperChild() {
-	p := &Prefork{}
-	go p.watchMaster()
+	// Record the master PID before launching the goroutine and signaling
+	// readiness, so there is no race between the PPID snapshot and the
+	// test killing the master.
+	masterPID := os.Getppid()
 
-	// Signal to the test that we're running and have recorded our PPID.
+	p := &Prefork{}
+	go p.watchMaster(masterPID)
+
+	// Signal to the test that we are running and have recorded our PPID.
 	readyfd, _ := strconv.Atoi(os.Getenv(envReadyPipeFD))
 	readyPipe := os.NewFile(uintptr(readyfd), "ready-pipe")
 	_, _ = readyPipe.WriteString("ready")
 	readyPipe.Close()
 
-	// Block forever — watchMaster should call os.Exit when the parent dies.
+	// Block forever. watchMaster should call os.Exit when the parent dies.
 	select {}
 }
 
 func Test_watchMaster_detectsParentDeath(t *testing.T) {
+	t.Parallel()
+
 	if os.Getenv(envWatchMasterRole) != "" {
 		return // skip when running as subprocess helper
 	}
@@ -112,7 +121,7 @@ func Test_watchMaster_detectsParentDeath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Pipe for the child to signal it's ready (PPID recorded).
+	// Pipe for the child to signal it is ready (PPID recorded).
 	readyR, readyW, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +130,7 @@ func Test_watchMaster_detectsParentDeath(t *testing.T) {
 	// Spawn the master helper.
 	// ExtraFiles: fd 3 = pidW, fd 4 = readyW
 	// #nosec G204
-	master := exec.Command(os.Args[0], "-test.run=^TestHelperProcess$")
+	master := exec.Command(os.Args[0], "-test.run=^Test_HelperProcess$")
 	master.Env = append(os.Environ(),
 		envWatchMasterRole+"=master",
 		envChildPipeFD+"=3",
@@ -149,7 +158,7 @@ func Test_watchMaster_detectsParentDeath(t *testing.T) {
 		t.Fatalf("invalid child PID: %v", err)
 	}
 
-	// Wait for the child to signal it's ready.
+	// Wait for the child to signal it is ready.
 	readyBuf := make([]byte, 16)
 	_, err = readyR.Read(readyBuf)
 	readyR.Close()
@@ -181,10 +190,10 @@ func Test_watchMaster_detectsParentDeath(t *testing.T) {
 		select {
 		case <-deadline:
 			_ = childProc.Kill()
-			t.Fatal("child process did not exit after master was killed — watchMaster failed to detect parent death")
+			t.Fatal("child process did not exit after master was killed")
 		case <-ticker.C:
 			if err := childProc.Signal(syscall.Signal(0)); err != nil {
-				// Process is gone — success.
+				// Process is gone, watchMaster detected parent death.
 				return
 			}
 		}

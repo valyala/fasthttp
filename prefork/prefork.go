@@ -95,8 +95,7 @@ func (p *Prefork) logger() Logger {
 	return defaultLogger
 }
 
-func (p *Prefork) watchMaster() {
-	masterPID := os.Getppid()
+func (p *Prefork) watchMaster(masterPID int) {
 	for range time.NewTicker(500 * time.Millisecond).C {
 		if os.Getppid() != masterPID {
 			p.logger().Printf("master process died, exiting child\n")
@@ -243,7 +242,7 @@ func (p *Prefork) ListenAndServe(addr string) error {
 
 		p.ln = ln
 
-		go p.watchMaster()
+		go p.watchMaster(os.Getppid())
 
 		return p.ServeFunc(ln)
 	}
@@ -263,7 +262,7 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 
 		p.ln = ln
 
-		go p.watchMaster()
+		go p.watchMaster(os.Getppid())
 
 		return p.ServeTLSFunc(ln, certFile, certKey)
 	}
@@ -283,7 +282,7 @@ func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) 
 
 		p.ln = ln
 
-		go p.watchMaster()
+		go p.watchMaster(os.Getppid())
 
 		return p.ServeTLSEmbedFunc(ln, certData, keyData)
 	}
