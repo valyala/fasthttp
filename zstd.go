@@ -67,7 +67,7 @@ func acquireRealZstdWriter(w io.Writer, level int) *zstd.Encoder {
 	p := realZstdWriterPoolMap[nLevel]
 	v := p.Get()
 	if v == nil {
-		zw, err := zstd.NewWriter(w, zstd.WithEncoderLevel(zstd.EncoderLevel(level)))
+		zw, err := zstd.NewWriter(w, zstd.WithEncoderLevel(zstd.EncoderLevel(nLevel)))
 		if err != nil {
 			panic(err)
 		}
