@@ -1803,13 +1803,6 @@ func stripLeadingSlashes(path []byte, stripSlashes int) []byte {
 	return path
 }
 
-func stripTrailingSlashes(path []byte) []byte {
-	for len(path) > 0 && path[len(path)-1] == '/' {
-		path = path[:len(path)-1]
-	}
-	return path
-}
-
 func fileExtension(path string, compressed bool, compressedFileSuffix string) string {
 	if compressed && strings.HasSuffix(path, compressedFileSuffix) {
 		path = path[:len(path)-len(compressedFileSuffix)]

@@ -947,7 +947,6 @@ func TestStripPathSlashes(t *testing.T) {
 
 	testStripPathSlashes(t, "", 0, "")
 	testStripPathSlashes(t, "", 10, "")
-	testStripPathSlashes(t, "/", 0, "")
 	testStripPathSlashes(t, "/", 1, "")
 	testStripPathSlashes(t, "/", 10, "")
 	testStripPathSlashes(t, "/foo/bar/baz", 0, "/foo/bar/baz")
@@ -955,19 +954,12 @@ func TestStripPathSlashes(t *testing.T) {
 	testStripPathSlashes(t, "/foo/bar/baz", 2, "/baz")
 	testStripPathSlashes(t, "/foo/bar/baz", 3, "")
 	testStripPathSlashes(t, "/foo/bar/baz", 10, "")
-
-	// trailing slash
-	testStripPathSlashes(t, "/foo/bar/", 0, "/foo/bar")
-	testStripPathSlashes(t, "/foo/bar/", 1, "/bar")
-	testStripPathSlashes(t, "/foo/bar/", 2, "")
-	testStripPathSlashes(t, "/foo/bar/", 3, "")
 }
 
 func testStripPathSlashes(t *testing.T, path string, stripSlashes int, expectedPath string) {
 	t.Helper()
 
 	s := stripLeadingSlashes([]byte(path), stripSlashes)
-	s = stripTrailingSlashes(s)
 	if string(s) != expectedPath {
 		t.Fatalf("unexpected path after stripping %q with stripSlashes=%d: %q. Expecting %q", path, stripSlashes, s, expectedPath)
 	}
