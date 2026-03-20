@@ -136,13 +136,24 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 }
 
 func (p *Prefork) doCommand() (*exec.Cmd, error) {
-	// #nosec G204
-	cmd := exec.Command(os.Args[0], os.Args[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), preforkChildEnvVariable+"=1")
-	cmd.ExtraFiles = p.files
-	err := cmd.Start()
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+
+	args := make([]string, len(os.Args))
+	args[0] = executable
+	copy(args[1:], os.Args[1:])
+
+	cmd := &exec.Cmd{
+		Path:       executable,
+		Args:       args,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
+		Env:        append(os.Environ(), preforkChildEnvVariable+"=1"),
+		ExtraFiles: p.files,
+	}
+	err = cmd.Start()
 	return cmd, err
 }
 

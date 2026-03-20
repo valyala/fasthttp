@@ -85,24 +85,24 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 		if n < 0 {
 			return dst, fmt.Errorf("cannot find dot in ipStr %q", ipStr)
 		}
-		v, err := ParseUint(b[:n])
+		octet, parsed, err := parseIPv4Octet(b[:n])
 		if err != nil {
+			if errors.Is(err, errIPv4PartTooLarge) {
+				return dst, fmt.Errorf("cannot parse ipStr %q: ip part cannot exceed 255: parsed %d", ipStr, parsed)
+			}
 			return dst, fmt.Errorf("cannot parse ipStr %q: %w", ipStr, err)
 		}
-		if v > 255 {
-			return dst, fmt.Errorf("cannot parse ipStr %q: ip part cannot exceed 255: parsed %d", ipStr, v)
-		}
-		dst[i] = byte(v)
+		dst[i] = octet
 		b = b[n+1:]
 	}
-	v, err := ParseUint(b)
+	octet, parsed, err := parseIPv4Octet(b)
 	if err != nil {
+		if errors.Is(err, errIPv4PartTooLarge) {
+			return dst, fmt.Errorf("cannot parse ipStr %q: ip part cannot exceed 255: parsed %d", ipStr, parsed)
+		}
 		return dst, fmt.Errorf("cannot parse ipStr %q: %w", ipStr, err)
 	}
-	if v > 255 {
-		return dst, fmt.Errorf("cannot parse ipStr %q: ip part cannot exceed 255: parsed %d", ipStr, v)
-	}
-	dst[3] = byte(v)
+	dst[3] = octet
 
 	return dst, nil
 }
@@ -141,6 +141,7 @@ func ParseUint(buf []byte) (int, error) {
 
 var (
 	errEmptyInt               = errors.New("empty integer")
+	errIPv4PartTooLarge       = errors.New("ip part cannot exceed 255")
 	errUnexpectedFirstChar    = errors.New("unexpected first char found. Expecting 0-9")
 	errUnexpectedTrailingChar = errors.New("unexpected trailing char found. Expecting 0-9")
 	errTooLongInt             = errors.New("too long int")
@@ -169,6 +170,33 @@ func parseUintBuf(b []byte) (int, int, error) {
 		v = vNew
 	}
 	return v, n, nil
+}
+
+func parseIPv4Octet(b []byte) (byte, int, error) {
+	if len(b) == 0 {
+		return 0, 0, errEmptyInt
+	}
+
+	var (
+		octet  byte
+		parsed int
+	)
+	for i := range len(b) {
+		c := b[i]
+		k := c - '0'
+		if k > 9 {
+			if i == 0 {
+				return 0, parsed, errUnexpectedFirstChar
+			}
+			return 0, parsed, errUnexpectedTrailingChar
+		}
+		parsed = parsed*10 + int(k)
+		if octet > 25 || (octet == 25 && k > 5) {
+			return 0, parsed, errIPv4PartTooLarge
+		}
+		octet = octet*10 + k
+	}
+	return octet, parsed, nil
 }
 
 // ParseUfloat parses unsigned float from buf.
