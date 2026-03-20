@@ -68,6 +68,8 @@ func AppendIPv4(dst []byte, ip net.IP) []byte {
 
 var errEmptyIPStr = errors.New("empty ip address string")
 
+var httpDateGMT = time.FixedZone("GMT", 0)
+
 // ParseIPv4 parses ip address from ipStr into dst and returns the extended dst.
 func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	if len(ipStr) == 0 {
@@ -117,7 +119,131 @@ func AppendHTTPDate(dst []byte, date time.Time) []byte {
 
 // ParseHTTPDate parses HTTP-compliant (RFC1123) date.
 func ParseHTTPDate(date []byte) (time.Time, error) {
+	if t, ok := parseRFC1123DateGMT(date); ok {
+		return t, nil
+	}
 	return time.Parse(time.RFC1123, b2s(date))
+}
+
+func parseRFC1123DateGMT(b []byte) (time.Time, bool) {
+	// Expects "Mon, 02 Jan 2006 15:04:05 GMT".
+	if len(b) != 29 {
+		return time.Time{}, false
+	}
+	if !isWeekday3(b[0], b[1], b[2]) {
+		return time.Time{}, false
+	}
+	if b[3] != ',' || b[4] != ' ' || b[7] != ' ' || b[11] != ' ' ||
+		b[16] != ' ' || b[19] != ':' || b[22] != ':' || b[25] != ' ' {
+		return time.Time{}, false
+	}
+	if (b[26]|0x20) != 'g' || (b[27]|0x20) != 'm' || (b[28]|0x20) != 't' {
+		return time.Time{}, false
+	}
+
+	day, ok := parse2Digits(b[5], b[6])
+	if !ok || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+	month, ok := parseMonth3(b[8], b[9], b[10])
+	if !ok {
+		return time.Time{}, false
+	}
+	year, ok := parse4Digits(b[12], b[13], b[14], b[15])
+	if !ok {
+		return time.Time{}, false
+	}
+	hour, ok := parse2Digits(b[17], b[18])
+	if !ok || hour > 23 {
+		return time.Time{}, false
+	}
+	minute, ok := parse2Digits(b[20], b[21])
+	if !ok || minute > 59 {
+		return time.Time{}, false
+	}
+	second, ok := parse2Digits(b[23], b[24])
+	if !ok || second > 59 {
+		return time.Time{}, false
+	}
+
+	t := time.Date(year, month, day, hour, minute, second, 0, httpDateGMT)
+	// Reject calendar-invalid dates like "31 Feb", which time.Date normalizes.
+	if t.Year() != year || t.Month() != month || t.Day() != day {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+func isWeekday3(a, b, c byte) bool {
+	a |= 0x20
+	b |= 0x20
+	c |= 0x20
+	k := uint32(a)<<16 | uint32(b)<<8 | uint32(c)
+	switch k {
+	case uint32('m')<<16 | uint32('o')<<8 | uint32('n'),
+		uint32('t')<<16 | uint32('u')<<8 | uint32('e'),
+		uint32('w')<<16 | uint32('e')<<8 | uint32('d'),
+		uint32('t')<<16 | uint32('h')<<8 | uint32('u'),
+		uint32('f')<<16 | uint32('r')<<8 | uint32('i'),
+		uint32('s')<<16 | uint32('a')<<8 | uint32('t'),
+		uint32('s')<<16 | uint32('u')<<8 | uint32('n'):
+		return true
+	default:
+		return false
+	}
+}
+
+func parse2Digits(a, b byte) (int, bool) {
+	if a < '0' || a > '9' || b < '0' || b > '9' {
+		return 0, false
+	}
+	return int(a-'0')*10 + int(b-'0'), true
+}
+
+func parse4Digits(a, b, c, d byte) (int, bool) {
+	v1, ok := parse2Digits(a, b)
+	if !ok {
+		return 0, false
+	}
+	v2, ok := parse2Digits(c, d)
+	if !ok {
+		return 0, false
+	}
+	return v1*100 + v2, true
+}
+
+func parseMonth3(a, b, c byte) (time.Month, bool) {
+	a |= 0x20
+	b |= 0x20
+	c |= 0x20
+	k := uint32(a)<<16 | uint32(b)<<8 | uint32(c)
+	switch k {
+	case uint32('j')<<16 | uint32('a')<<8 | uint32('n'):
+		return time.January, true
+	case uint32('f')<<16 | uint32('e')<<8 | uint32('b'):
+		return time.February, true
+	case uint32('m')<<16 | uint32('a')<<8 | uint32('r'):
+		return time.March, true
+	case uint32('a')<<16 | uint32('p')<<8 | uint32('r'):
+		return time.April, true
+	case uint32('m')<<16 | uint32('a')<<8 | uint32('y'):
+		return time.May, true
+	case uint32('j')<<16 | uint32('u')<<8 | uint32('n'):
+		return time.June, true
+	case uint32('j')<<16 | uint32('u')<<8 | uint32('l'):
+		return time.July, true
+	case uint32('a')<<16 | uint32('u')<<8 | uint32('g'):
+		return time.August, true
+	case uint32('s')<<16 | uint32('e')<<8 | uint32('p'):
+		return time.September, true
+	case uint32('o')<<16 | uint32('c')<<8 | uint32('t'):
+		return time.October, true
+	case uint32('n')<<16 | uint32('o')<<8 | uint32('v'):
+		return time.November, true
+	case uint32('d')<<16 | uint32('e')<<8 | uint32('c'):
+		return time.December, true
+	}
+	return 0, false
 }
 
 // AppendUint appends n to dst and returns the extended dst.
