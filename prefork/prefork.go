@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"time"
 
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/reuseport"
@@ -92,6 +93,15 @@ func (p *Prefork) logger() Logger {
 		return p.Logger
 	}
 	return defaultLogger
+}
+
+func (p *Prefork) watchMaster(masterPID int) {
+	for range time.NewTicker(500 * time.Millisecond).C {
+		if os.Getppid() != masterPID {
+			p.logger().Printf("master process died, exiting child\n")
+			os.Exit(1)
+		}
+	}
 }
 
 func (p *Prefork) listen(addr string) (net.Listener, error) {
@@ -243,6 +253,8 @@ func (p *Prefork) ListenAndServe(addr string) error {
 
 		p.ln = ln
 
+		go p.watchMaster(os.Getppid())
+
 		return p.ServeFunc(ln)
 	}
 
@@ -261,6 +273,8 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 
 		p.ln = ln
 
+		go p.watchMaster(os.Getppid())
+
 		return p.ServeTLSFunc(ln, certFile, certKey)
 	}
 
@@ -278,6 +292,8 @@ func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) 
 		}
 
 		p.ln = ln
+
+		go p.watchMaster(os.Getppid())
 
 		return p.ServeTLSEmbedFunc(ln, certData, keyData)
 	}
