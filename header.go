@@ -2170,7 +2170,9 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 	if errParse != nil {
 		return headerError("response", err, errParse, b, h.secureErrorLogMessage)
 	}
-	mustDiscard(r, headersLen)
+	if err := discardHeader(r, headersLen); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -2226,7 +2228,9 @@ func (h *header) tryReadTrailer(r *bufio.Reader, n int) error {
 		}
 		return headerError("response", err, errParse, b, h.secureErrorLogMessage)
 	}
-	mustDiscard(r, headersLen)
+	if err := discardHeader(r, headersLen); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -2316,7 +2320,9 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 	if errParse != nil {
 		return headerError("request", err, errParse, b, h.secureErrorLogMessage)
 	}
-	mustDiscard(r, headersLen)
+	if err := discardHeader(r, headersLen); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -3433,8 +3439,9 @@ func mustPeekBuffered(r *bufio.Reader) []byte {
 	return buf
 }
 
-func mustDiscard(r *bufio.Reader, n int) {
+func discardHeader(r *bufio.Reader, n int) error {
 	if _, err := r.Discard(n); err != nil {
-		panic(fmt.Sprintf("bufio.Reader.Discard(%d) failed: %v", n, err))
+		return fmt.Errorf("bufio.Reader.Discard(%d) failed: %w", n, err)
 	}
+	return nil
 }
