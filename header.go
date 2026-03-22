@@ -296,12 +296,12 @@ func (h *ResponseHeader) ContentType() []byte {
 
 // SetContentType sets Content-Type header value.
 func (h *header) SetContentType(contentType string) {
-	h.contentType = append(h.contentType[:0], contentType...)
+	h.contentType = initHeaderValueString(h.contentType, contentType)
 }
 
 // SetContentTypeBytes sets Content-Type header value.
 func (h *header) SetContentTypeBytes(contentType []byte) {
-	h.contentType = append(h.contentType[:0], contentType...)
+	h.contentType = initHeaderValueBytes(h.contentType, contentType)
 }
 
 // ContentEncoding returns Content-Encoding header value.
@@ -311,12 +311,12 @@ func (h *ResponseHeader) ContentEncoding() []byte {
 
 // SetContentEncoding sets Content-Encoding header value.
 func (h *ResponseHeader) SetContentEncoding(contentEncoding string) {
-	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
+	h.contentEncoding = initHeaderValueString(h.contentEncoding, contentEncoding)
 }
 
 // SetContentEncodingBytes sets Content-Encoding header value.
 func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
-	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
+	h.contentEncoding = initHeaderValueBytes(h.contentEncoding, contentEncoding)
 }
 
 // addVaryBytes add value to the 'Vary' header if it's not included.
@@ -338,12 +338,12 @@ func (h *ResponseHeader) Server() []byte {
 
 // SetServer sets Server header value.
 func (h *ResponseHeader) SetServer(server string) {
-	h.server = append(h.server[:0], server...)
+	h.server = initHeaderValueString(h.server, server)
 }
 
 // SetServerBytes sets Server header value.
 func (h *ResponseHeader) SetServerBytes(server []byte) {
-	h.server = append(h.server[:0], server...)
+	h.server = initHeaderValueBytes(h.server, server)
 }
 
 // ContentType returns Content-Type header value.
@@ -366,7 +366,8 @@ func (h *RequestHeader) SetContentEncoding(contentEncoding string) {
 
 // SetContentEncodingBytes sets Content-Encoding header value.
 func (h *RequestHeader) SetContentEncodingBytes(contentEncoding []byte) {
-	h.setNonSpecial(strContentEncoding, contentEncoding)
+	h.bufV = initHeaderValueBytes(h.bufV, contentEncoding)
+	h.setNonSpecial(strContentEncoding, h.bufV)
 }
 
 // SetMultipartFormBoundary sets the following Content-Type:
@@ -697,12 +698,12 @@ func (h *RequestHeader) Host() []byte {
 
 // SetHost sets Host header value.
 func (h *RequestHeader) SetHost(host string) {
-	h.host = append(h.host[:0], host...)
+	h.host = initHeaderValueString(h.host, host)
 }
 
 // SetHostBytes sets Host header value.
 func (h *RequestHeader) SetHostBytes(host []byte) {
-	h.host = append(h.host[:0], host...)
+	h.host = initHeaderValueBytes(h.host, host)
 }
 
 // UserAgent returns User-Agent header value.
@@ -715,12 +716,12 @@ func (h *RequestHeader) UserAgent() []byte {
 
 // SetUserAgent sets User-Agent header value.
 func (h *RequestHeader) SetUserAgent(userAgent string) {
-	h.userAgent = append(h.userAgent[:0], userAgent...)
+	h.userAgent = initHeaderValueString(h.userAgent, userAgent)
 }
 
 // SetUserAgentBytes sets User-Agent header value.
 func (h *RequestHeader) SetUserAgentBytes(userAgent []byte) {
-	h.userAgent = append(h.userAgent[:0], userAgent...)
+	h.userAgent = initHeaderValueBytes(h.userAgent, userAgent)
 }
 
 // Referer returns Referer header value.
@@ -735,7 +736,8 @@ func (h *RequestHeader) SetReferer(referer string) {
 
 // SetRefererBytes sets Referer header value.
 func (h *RequestHeader) SetRefererBytes(referer []byte) {
-	h.setNonSpecial(strReferer, referer)
+	h.bufV = initHeaderValueBytes(h.bufV, referer)
+	h.setNonSpecial(strReferer, h.bufV)
 }
 
 // Method returns HTTP request method.
@@ -1567,12 +1569,12 @@ func (h *ResponseHeader) AddBytesV(key string, value []byte) {
 // If the header is set as a Trailer (forbidden trailers will not be set, see AddTrailer for more details),
 // it will be sent after the chunked response body.
 func (h *ResponseHeader) AddBytesKV(key, value []byte) {
-	if h.setSpecialHeader(key, value) {
+	h.bufK, h.bufV = initHeaderKV(h.bufK, h.bufV, b2s(key), b2s(value), h.disableNormalizing)
+	if h.setSpecialHeader(h.bufK, h.bufV) {
 		return
 	}
 
-	h.bufK = getHeaderKeyBytes(h.bufK, b2s(key), h.disableNormalizing)
-	h.h = appendArgBytes(h.h, h.bufK, value, argsHasValue)
+	h.h = appendArgBytes(h.h, h.bufK, h.bufV, argsHasValue)
 }
 
 // Set sets the given 'key: value' header.
@@ -1641,10 +1643,11 @@ func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked response body.
 func (h *ResponseHeader) SetCanonical(key, value []byte) {
-	if h.setSpecialHeader(key, value) {
+	h.bufV = initHeaderValueBytes(h.bufV, value)
+	if h.setSpecialHeader(key, h.bufV) {
 		return
 	}
-	h.setNonSpecial(key, value)
+	h.setNonSpecial(key, h.bufV)
 }
 
 // SetCookie sets the given response cookie.
@@ -1793,12 +1796,12 @@ func (h *RequestHeader) AddBytesV(key string, value []byte) {
 // If the header is set as a Trailer (forbidden trailers will not be set, see AddTrailer for more details),
 // it will be sent after the chunked request body.
 func (h *RequestHeader) AddBytesKV(key, value []byte) {
-	if h.setSpecialHeader(key, value) {
+	h.bufK, h.bufV = initHeaderKV(h.bufK, h.bufV, b2s(key), b2s(value), h.disableNormalizing)
+	if h.setSpecialHeader(h.bufK, h.bufV) {
 		return
 	}
 
-	h.bufK = getHeaderKeyBytes(h.bufK, b2s(key), h.disableNormalizing)
-	h.h = appendArgBytes(h.h, h.bufK, value, argsHasValue)
+	h.h = appendArgBytes(h.h, h.bufK, h.bufV, argsHasValue)
 }
 
 // Set sets the given 'key: value' header.
@@ -1867,10 +1870,11 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked request body.
 func (h *RequestHeader) SetCanonical(key, value []byte) {
-	if h.setSpecialHeader(key, value) {
+	h.bufV = initHeaderValueBytes(h.bufV, value)
+	if h.setSpecialHeader(key, h.bufV) {
 		return
 	}
-	h.setNonSpecial(key, value)
+	h.setNonSpecial(key, h.bufV)
 }
 
 // Peek returns header value for the given key.
@@ -3278,10 +3282,19 @@ func nextLine(b []byte) ([]byte, []byte, error) {
 
 func initHeaderKV(bufK, bufV []byte, key, value string, disableNormalizing bool) ([]byte, []byte) {
 	bufK = getHeaderKeyBytes(bufK, key, disableNormalizing)
+	bufV = initHeaderValueString(bufV, value)
+	return bufK, bufV
+}
+
+func initHeaderValueString(bufV []byte, value string) []byte {
+	return initHeaderValueBytes(bufV, s2b(value))
+}
+
+func initHeaderValueBytes(bufV, value []byte) []byte {
 	// https://tools.ietf.org/html/rfc7230#section-3.2.4
 	bufV = append(bufV[:0], value...)
 	bufV = removeNewLines(bufV)
-	return bufK, bufV
+	return bufV
 }
 
 func getHeaderKeyBytes(bufK []byte, key string, disableNormalizing bool) []byte {
