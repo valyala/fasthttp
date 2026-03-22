@@ -570,24 +570,29 @@ func TestResponseHeaderDelClientCookie(t *testing.T) {
 func TestResponseHeaderAdd(t *testing.T) {
 	t.Parallel()
 
+	const raw = "foo\r\nX-Injected: yes"
+	const sanitized = "foo  X-Injected: yes"
+
 	m := make(map[string]struct{})
 	var h ResponseHeader
 	h.Add("aaa", "bbb")
 	h.Add("content-type", "xxx")
+	h.Add("x-newline", raw)
 	m["bbb"] = struct{}{}
 	m["xxx"] = struct{}{}
+	m[sanitized] = struct{}{}
 	for i := range 10 {
 		v := strconv.Itoa(i)
 		h.Add("Foo-Bar", v)
 		m[v] = struct{}{}
 	}
-	if h.Len() != 12 {
-		t.Fatalf("unexpected header len %d. Expecting 12", h.Len())
+	if h.Len() != 13 {
+		t.Fatalf("unexpected header len %d. Expecting 13", h.Len())
 	}
 
 	for k, v := range h.All() {
 		switch string(k) {
-		case "Aaa", "Foo-Bar", "Content-Type":
+		case "Aaa", "Foo-Bar", "Content-Type", "X-Newline":
 			if _, ok := m[string(v)]; !ok {
 				t.Fatalf("unexpected value found %q. key %q", v, k)
 			}
@@ -599,8 +604,14 @@ func TestResponseHeaderAdd(t *testing.T) {
 	if len(m) > 0 {
 		t.Fatalf("%d headers are missed", len(m))
 	}
+	if got := string(h.Peek("x-newline")); got != sanitized {
+		t.Fatalf("unexpected sanitized value %q. Expecting %q", got, sanitized)
+	}
 
 	s := h.String()
+	if strings.Contains(s, "\r\nX-Injected: yes\r\n") {
+		t.Fatalf("serialized response header contains injected header line: %q", s)
+	}
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	var h1 ResponseHeader
 	if err := h1.Read(br); err != nil {
@@ -609,38 +620,43 @@ func TestResponseHeaderAdd(t *testing.T) {
 
 	for k, v := range h.All() {
 		switch string(k) {
-		case "Aaa", "Foo-Bar", "Content-Type":
+		case "Aaa", "Foo-Bar", "Content-Type", "X-Newline":
 			m[string(v)] = struct{}{}
 		default:
 			t.Fatalf("unexpected key found: %q", k)
 		}
 	}
-	if len(m) != 12 {
-		t.Fatalf("unexpected number of headers: %d. Expecting 12", len(m))
+	if len(m) != 13 {
+		t.Fatalf("unexpected number of headers: %d. Expecting 13", len(m))
 	}
 }
 
 func TestRequestHeaderAdd(t *testing.T) {
 	t.Parallel()
 
+	const raw = "foo\r\nX-Injected: yes"
+	const sanitized = "foo  X-Injected: yes"
+
 	m := make(map[string]struct{})
 	var h RequestHeader
 	h.Add("aaa", "bbb")
 	h.Add("user-agent", "xxx")
+	h.Add("x-newline", raw)
 	m["bbb"] = struct{}{}
 	m["xxx"] = struct{}{}
+	m[sanitized] = struct{}{}
 	for i := range 10 {
 		v := strconv.Itoa(i)
 		h.Add("Foo-Bar", v)
 		m[v] = struct{}{}
 	}
-	if h.Len() != 12 {
-		t.Fatalf("unexpected header len %d. Expecting 12", h.Len())
+	if h.Len() != 13 {
+		t.Fatalf("unexpected header len %d. Expecting 13", h.Len())
 	}
 
 	for k, v := range h.All() {
 		switch string(k) {
-		case "Aaa", "Foo-Bar", "User-Agent":
+		case "Aaa", "Foo-Bar", "User-Agent", "X-Newline":
 			if _, ok := m[string(v)]; !ok {
 				t.Fatalf("unexpected value found %q. key %q", v, k)
 			}
@@ -652,8 +668,14 @@ func TestRequestHeaderAdd(t *testing.T) {
 	if len(m) > 0 {
 		t.Fatalf("%d headers are missed", len(m))
 	}
+	if got := string(h.Peek("x-newline")); got != sanitized {
+		t.Fatalf("unexpected sanitized value %q. Expecting %q", got, sanitized)
+	}
 
 	s := h.String()
+	if strings.Contains(s, "\r\nX-Injected: yes\r\n") {
+		t.Fatalf("serialized request header contains injected header line: %q", s)
+	}
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	var h1 RequestHeader
 	if err := h1.Read(br); err != nil {
@@ -662,14 +684,14 @@ func TestRequestHeaderAdd(t *testing.T) {
 
 	for k, v := range h.All() {
 		switch string(k) {
-		case "Aaa", "Foo-Bar", "User-Agent":
+		case "Aaa", "Foo-Bar", "User-Agent", "X-Newline":
 			m[string(v)] = struct{}{}
 		default:
 			t.Fatalf("unexpected key found: %q", k)
 		}
 	}
-	if len(m) != 12 {
-		t.Fatalf("unexpected number of headers: %d. Expecting 12", len(m))
+	if len(m) != 13 {
+		t.Fatalf("unexpected number of headers: %d. Expecting 13", len(m))
 	}
 	s1 := h1.String()
 	if s != s1 {
