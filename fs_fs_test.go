@@ -56,6 +56,62 @@ func TestFSServeFileHead(t *testing.T) {
 	}
 }
 
+func TestServeFSLiteral(t *testing.T) {
+	t.Parallel()
+
+	testFS := fstest.MapFS{
+		"space name.txt":     {Data: []byte("space")},
+		"hash#name.txt":      {Data: []byte("hash")},
+		"percent%61name.txt": {Data: []byte("percent")},
+		"query?name.txt":     {Data: []byte("query")},
+	}
+
+	for name, file := range testFS {
+		t.Run(name, func(t *testing.T) {
+			var ctx RequestCtx
+			var req Request
+			req.SetRequestURI("http://foobar.com/original")
+			ctx.Init(&req, nil, nil)
+
+			ServeFSLiteral(&ctx, testFS, name)
+
+			resp := readResponseFromCtx(t, &ctx, false)
+			if resp.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code %d. expecting %d", resp.StatusCode(), StatusOK)
+			}
+			if !bytes.Equal(resp.Body(), file.Data) {
+				t.Fatalf("unexpected body %q. expecting %q", resp.Body(), file.Data)
+			}
+		})
+	}
+}
+
+func TestServeFSSpecialCharsNotLiteral(t *testing.T) {
+	t.Parallel()
+
+	testFS := fstest.MapFS{
+		"hash#name.txt":      {Data: []byte("hash")},
+		"percent%61name.txt": {Data: []byte("percent")},
+		"query?name.txt":     {Data: []byte("query")},
+	}
+
+	for name := range testFS {
+		t.Run(name, func(t *testing.T) {
+			var ctx RequestCtx
+			var req Request
+			req.SetRequestURI("http://foobar.com/original")
+			ctx.Init(&req, nil, nil)
+
+			ServeFS(&ctx, testFS, name)
+
+			resp := readResponseFromCtx(t, &ctx, false)
+			if resp.StatusCode() == StatusOK {
+				t.Fatalf("ServeFS should fail for special-character path %q without literal mode, but got 200", name)
+			}
+		})
+	}
+}
+
 func TestFSServeFileCompressed(t *testing.T) {
 	t.Parallel()
 
@@ -667,6 +723,10 @@ func TestDirFSServeFileCompressed(t *testing.T) {
 }
 
 func TestDirFSFSByteRangeConcurrent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip()
+	}
+
 	t.Parallel()
 
 	stop := make(chan struct{})
@@ -925,18 +985,24 @@ func TestFSRootEnforcement(t *testing.T) {
 		"public/nested/info": {Data: []byte("nested")},
 	}
 
-	tmpDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(tmpDir, "public"), 0o755); err != nil {
-		t.Fatalf("cannot create public dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(tmpDir, "secret"), 0o755); err != nil {
-		t.Fatalf("cannot create secret dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "public", "index.html"), []byte("<h1>Public</h1>"), 0o644); err != nil {
-		t.Fatalf("cannot create public index: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(tmpDir, "secret", "admin.json"), []byte(`{"admin": true, "key": "s3cret"}`), 0o644); err != nil {
-		t.Fatalf("cannot create secret admin file: %v", err)
+	// Skip dirfs subtests on Windows: the FS handler pools open file handles
+	// (via bigFileReader) which prevents t.TempDir cleanup.
+	// The mapfs subtests exercise the same root enforcement logic.
+	var tmpDir string
+	if runtime.GOOS != "windows" {
+		tmpDir = t.TempDir()
+		if err := os.MkdirAll(filepath.Join(tmpDir, "public"), 0o755); err != nil {
+			t.Fatalf("cannot create public dir: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(tmpDir, "secret"), 0o755); err != nil {
+			t.Fatalf("cannot create secret dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "public", "index.html"), []byte("<h1>Public</h1>"), 0o644); err != nil {
+			t.Fatalf("cannot create public index: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, "secret", "admin.json"), []byte(`{"admin": true, "key": "s3cret"}`), 0o644); err != nil {
+			t.Fatalf("cannot create secret admin file: %v", err)
+		}
 	}
 
 	type testCase struct {
@@ -948,18 +1014,18 @@ func TestFSRootEnforcement(t *testing.T) {
 
 	cases := make([]testCase, 0, 9)
 	for _, root := range []string{"public", "public/", "./public", "/public"} {
-		cases = append(
-			cases,
-			testCase{
-				name:       "mapfs/" + root,
-				root:       root,
-				filesystem: memFS,
-			}, testCase{
+		cases = append(cases, testCase{
+			name:       "mapfs/" + root,
+			root:       root,
+			filesystem: memFS,
+		})
+		if tmpDir != "" {
+			cases = append(cases, testCase{
 				name:       "dirfs/" + root,
 				root:       root,
 				filesystem: os.DirFS(tmpDir),
-			},
-		)
+			})
+		}
 	}
 
 	cases = append(cases, testCase{

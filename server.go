@@ -1487,13 +1487,33 @@ func (ctx *RequestCtx) ResetBody() {
 //
 // SendFile logs all the errors via ctx.Logger.
 //
-// See also ServeFile, FSHandler and FS.
+// SendFile interprets path as a URI path internally. Percent-encoded
+// sequences may be decoded, and '?' or '#' may be treated as URI delimiters.
+// Use SendFileLiteral if you need literal path semantics.
+//
+// See also ServeFile, SendFileLiteral, FSHandler and FS.
 //
 // WARNING: do not pass any user supplied paths to this function!
 // WARNING: if path is based on user input users will be able to request
 // any file on your filesystem! Use fasthttp.FS with a sane Root instead.
 func (ctx *RequestCtx) SendFile(path string) {
 	ServeFile(ctx, path)
+}
+
+// SendFileLiteral sends local file contents from the given path as response body
+// using literal path semantics.
+//
+// This is a shortcut to ServeFileLiteral(ctx, path).
+//
+// SendFileLiteral logs all the errors via ctx.Logger.
+//
+// See also ServeFileLiteral, SendFile, FSHandler and FS.
+//
+// WARNING: do not pass any user supplied paths to this function!
+// WARNING: if path is based on user input users will be able to request
+// any file on your filesystem! Use fasthttp.FS with a sane Root instead.
+func (ctx *RequestCtx) SendFileLiteral(path string) {
+	ServeFileLiteral(ctx, path)
 }
 
 // SendFileBytes sends local file contents from the given path as response body.
