@@ -23,6 +23,19 @@ func (t TestLogger) Printf(format string, args ...any) {
 	t.t.Logf(format, args...)
 }
 
+func readResponseFromCtx(t *testing.T, ctx *RequestCtx, skipBody bool) *Response {
+	t.Helper()
+
+	resp := &Response{}
+	resp.SkipBody = skipBody
+	s := ctx.Response.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return resp
+}
+
 func TestNewVHostPathRewriter(t *testing.T) {
 	t.Parallel()
 
@@ -149,6 +162,89 @@ func TestServeFileHead(t *testing.T) {
 	contentLength := resp.Header.ContentLength()
 	if contentLength != len(expectedBody) {
 		t.Fatalf("unexpected Content-Length: %d. expecting %d", contentLength, len(expectedBody))
+	}
+}
+
+func TestServeFileLiteral(t *testing.T) {
+	// Skip on Windows: the global rootFS handler caches open file handles,
+	// which prevents t.TempDir cleanup. TestServeFSLiteral (using MapFS)
+	// provides coverage on Windows.
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
+	t.Parallel()
+
+	testCases := []string{
+		"space name.txt",
+		"hash#name.txt",
+		"percent%61name.txt",
+		"query?name.txt",
+	}
+
+	for _, name := range testCases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			filePath := filepath.Join(dir, name)
+			expectedBody := []byte("body:" + name)
+			if err := os.WriteFile(filePath, expectedBody, 0o644); err != nil {
+				t.Fatalf("cannot create %q: %v", filePath, err)
+			}
+
+			var ctx RequestCtx
+			var req Request
+			req.SetRequestURI("http://foobar.com/original")
+			ctx.Init(&req, nil, nil)
+
+			ServeFileLiteral(&ctx, filePath)
+
+			resp := readResponseFromCtx(t, &ctx, false)
+			if resp.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code %d. expecting %d", resp.StatusCode(), StatusOK)
+			}
+			if !bytes.Equal(resp.Body(), expectedBody) {
+				t.Fatalf("unexpected body %q. expecting %q", resp.Body(), expectedBody)
+			}
+		})
+	}
+}
+
+func TestServeFileSpecialCharsNotLiteral(t *testing.T) {
+	// Skip on Windows: the global rootFS handler caches open file handles,
+	// which prevents t.TempDir cleanup. TestServeFSSpecialCharsNotLiteral
+	// provides coverage on Windows.
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
+	t.Parallel()
+
+	testCases := []string{
+		"hash#name.txt",
+		"percent%61name.txt",
+		"query?name.txt",
+	}
+
+	for _, name := range testCases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			filePath := filepath.Join(dir, name)
+			if err := os.WriteFile(filePath, []byte("body"), 0o644); err != nil {
+				t.Fatalf("cannot create %q: %v", filePath, err)
+			}
+
+			var ctx RequestCtx
+			var req Request
+			req.SetRequestURI("http://foobar.com/original")
+			ctx.Init(&req, nil, nil)
+
+			ServeFile(&ctx, filePath)
+
+			resp := readResponseFromCtx(t, &ctx, false)
+			if resp.StatusCode() == StatusOK {
+				t.Fatalf("ServeFile should fail for special-character path %q without literal mode, but got 200", name)
+			}
+		})
 	}
 }
 

@@ -72,7 +72,7 @@ func ServeFileUncompressed(ctx *RequestCtx, path string) {
 // Use ServeFileBytesUncompressed is you don't need serving compressed
 // file contents.
 //
-// See also RequestCtx.SendFileBytes.
+// See also RequestCtx.SendFileBytes, ServeFileLiteral.
 //
 // WARNING: do not pass any user supplied paths to this function!
 // WARNING: if path is based on user input users will be able to request
@@ -93,7 +93,11 @@ func ServeFileBytes(ctx *RequestCtx, path []byte) {
 //
 // Use ServeFileUncompressed is you don't need serving compressed file contents.
 //
-// See also RequestCtx.SendFile.
+// ServeFile interprets path as a URI path internally. Percent-encoded
+// sequences may be decoded, and '?' or '#' may be treated as URI delimiters.
+// Use ServeFileLiteral if you need literal path semantics.
+//
+// See also RequestCtx.SendFile, ServeFileLiteral.
 //
 // WARNING: do not pass any user supplied paths to this function!
 // WARNING: if path is based on user input users will be able to request
@@ -103,27 +107,44 @@ func ServeFile(ctx *RequestCtx, path string) {
 		rootFSHandler = rootFS.NewRequestHandler()
 	})
 
-	if path == "" || !filepath.IsAbs(path) {
-		// extend relative path to absolute path
-		hasTrailingSlash := path != "" && (path[len(path)-1] == '/' || path[len(path)-1] == '\\')
-
-		var err error
-		path = filepath.FromSlash(path)
-		if path, err = filepath.Abs(path); err != nil {
-			ctx.Logger().Printf("cannot resolve path %q to absolute file path: %v", path, err)
-			ctx.Error("Internal Server Error", StatusInternalServerError)
-			return
-		}
-		if hasTrailingSlash {
-			path += "/"
-		}
+	path, ok := normalizeServeFilePath(ctx, path)
+	if !ok {
+		return
 	}
-
-	// convert the path to forward slashes regardless the OS in order to set the URI properly
-	// the handler will convert back to OS path separator before opening the file
-	path = filepath.ToSlash(path)
-
 	ctx.Request.SetRequestURI(path)
+	rootFSHandler(ctx)
+}
+
+// ServeFileLiteral returns HTTP response containing compressed file contents
+// from the given path using literal path semantics.
+//
+// Reserved URI characters in path such as '%', '?' and '#' are preserved
+// instead of being interpreted during internal request URI processing.
+//
+// HTTP response may contain uncompressed file contents in the following cases:
+//
+//   - Missing 'Accept-Encoding: gzip' request header.
+//   - No write access to directory containing the file.
+//
+// Directory contents is returned if path points to directory.
+//
+// Use ServeFileUncompressed if you don't need serving compressed file contents.
+//
+// See also RequestCtx.SendFileLiteral, ServeFile.
+//
+// WARNING: do not pass any user supplied paths to this function!
+// WARNING: if path is based on user input users will be able to request
+// any file on your filesystem! Use fasthttp.FS with a sane Root instead.
+func ServeFileLiteral(ctx *RequestCtx, path string) {
+	rootFSOnce.Do(func() {
+		rootFSHandler = rootFS.NewRequestHandler()
+	})
+
+	path, ok := normalizeServeFilePath(ctx, path)
+	if !ok {
+		return
+	}
+	ctx.Request.SetRequestURIBytes(appendQuotedPath(nil, s2b(path)))
 	rootFSHandler(ctx)
 }
 
@@ -150,8 +171,34 @@ var (
 //
 // Directory contents is returned if path points to directory.
 //
-// See also ServeFile.
+// ServeFS interprets path as a URI path internally. Percent-encoded
+// sequences may be decoded, and '?' or '#' may be treated as URI delimiters.
+// Use ServeFSLiteral if you need literal path semantics.
+//
+// See also ServeFile, ServeFSLiteral.
 func ServeFS(ctx *RequestCtx, filesystem fs.FS, path string) {
+	serveFS(ctx, filesystem, path, false)
+}
+
+// ServeFSLiteral returns HTTP response containing compressed file contents
+// from the given fs.FS's path using literal path semantics.
+//
+// Reserved URI characters in path such as '%', '?' and '#' are preserved
+// instead of being interpreted during internal request URI processing.
+//
+// HTTP response may contain uncompressed file contents in the following cases:
+//
+//   - Missing 'Accept-Encoding: gzip' request header.
+//   - No write access to directory containing the file.
+//
+// Directory contents is returned if path points to directory.
+//
+// See also ServeFS, ServeFileLiteral.
+func ServeFSLiteral(ctx *RequestCtx, filesystem fs.FS, path string) {
+	serveFS(ctx, filesystem, path, true)
+}
+
+func serveFS(ctx *RequestCtx, filesystem fs.FS, path string, literal bool) {
 	f := &FS{
 		FS:                 filesystem,
 		Root:               "",
@@ -164,8 +211,34 @@ func ServeFS(ctx *RequestCtx, filesystem fs.FS, path string) {
 	}
 	handler := f.NewRequestHandler()
 
-	ctx.Request.SetRequestURI(path)
+	if literal {
+		ctx.Request.SetRequestURIBytes(appendQuotedPath(nil, s2b(path)))
+	} else {
+		ctx.Request.SetRequestURI(path)
+	}
 	handler(ctx)
+}
+
+func normalizeServeFilePath(ctx *RequestCtx, path string) (string, bool) {
+	if path == "" || !filepath.IsAbs(path) {
+		// extend relative path to absolute path
+		hasTrailingSlash := path != "" && (path[len(path)-1] == '/' || path[len(path)-1] == '\\')
+
+		var err error
+		path = filepath.FromSlash(path)
+		if path, err = filepath.Abs(path); err != nil {
+			ctx.Logger().Printf("cannot resolve path %q to absolute file path: %v", path, err)
+			ctx.Error("Internal Server Error", StatusInternalServerError)
+			return "", false
+		}
+		if hasTrailingSlash {
+			path += "/"
+		}
+	}
+
+	// convert the path to forward slashes regardless the OS in order to set the URI properly
+	// the handler will convert back to OS path separator before opening the file
+	return filepath.ToSlash(path), true
 }
 
 // PathRewriteFunc must return new request path based on arbitrary ctx
