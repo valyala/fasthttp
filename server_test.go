@@ -1970,7 +1970,7 @@ func TestServerExpect103EarlyHints(t *testing.T) {
 	}
 
 	rw := &readWriter{}
-	rw.r.WriteString("GET /foo HTTP/1.1\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
 
 	if err := s.ServeConn(rw); err != nil {
 		t.Fatalf("Unexpected error from serveConn: %v", err)
@@ -1996,6 +1996,30 @@ func TestServerExpect103EarlyHints(t *testing.T) {
 			t.Fatalf("unexpected data: %s. Expecting %s", line, expected[i])
 		}
 		i++
+	}
+}
+
+func TestServerRejectsMissingHostHTTP11(t *testing.T) {
+	t.Parallel()
+
+	var handlerCalled atomic.Bool
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			handlerCalled.Store(true)
+			ctx.Success("text/plain", []byte("ok"))
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.1\r\n\r\n")
+
+	_ = s.ServeConn(rw)
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusBadRequest, string(defaultContentType), "Error when parsing request")
+
+	if handlerCalled.Load() {
+		t.Fatal("handler should not run for HTTP/1.1 request without Host")
 	}
 }
 

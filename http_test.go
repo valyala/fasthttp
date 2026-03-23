@@ -711,7 +711,7 @@ func TestRequestContentTypeWithCharsetIssue100(t *testing.T) {
 
 	expectedContentType := "application/x-www-form-urlencoded; charset=UTF-8"
 	expectedBody := "0123=56789"
-	s := fmt.Sprintf("POST / HTTP/1.1\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: example.com\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
 		expectedContentType, len(expectedBody), expectedBody)
 
 	br := bufio.NewReader(bytes.NewBufferString(s))
@@ -1157,7 +1157,7 @@ func TestRequestReadNoBody(t *testing.T) {
 
 	var r Request
 
-	br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\n\r\n"))
+	br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: foobar\r\n\r\n"))
 	err := r.Read(br)
 	r.SetHost("foobar")
 	if err != nil {
@@ -1325,7 +1325,7 @@ func TestRequestReadGzippedBody(t *testing.T) {
 
 	bodyOriginal := "foo bar baz compress me better!"
 	body := AppendGzipBytes(nil, []byte(bodyOriginal))
-	s := fmt.Sprintf("POST /foobar HTTP/1.1\r\nContent-Type: foo/bar\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s",
+	s := fmt.Sprintf("POST /foobar HTTP/1.1\r\nHost: example.com\r\nContent-Type: foo/bar\r\nContent-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s",
 		len(body), body)
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := r.Read(br); err != nil {
@@ -1356,7 +1356,7 @@ func TestRequestReadPostNoBody(t *testing.T) {
 
 	var r Request
 
-	s := "POST /foo/bar HTTP/1.1\r\nContent-Type: aaa/bbb\r\n\r\naaaa"
+	s := "POST /foo/bar HTTP/1.1\r\nHost: example.com\r\nContent-Type: aaa/bbb\r\n\r\naaaa"
 	br := bufio.NewReader(bytes.NewBufferString(s))
 	if err := r.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1387,7 +1387,7 @@ func TestRequestReadPostNoBody(t *testing.T) {
 func TestRequestContinueReadBody(t *testing.T) {
 	t.Parallel()
 
-	s := "PUT /foo/bar HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: foo/bar\r\n\r\nabcdef4343"
+	s := "PUT /foo/bar HTTP/1.1\r\nHost: example.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: foo/bar\r\n\r\nabcdef4343"
 	br := bufio.NewReader(bytes.NewBufferString(s))
 
 	var r Request
@@ -1771,6 +1771,10 @@ func TestRequestReadLimitBody(t *testing.T) {
 	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\nHost: a.com\nTransfer-Encoding: chunked\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nFoo: bar\r\n\r\n", 9)
 	testRequestReadLimitBodySuccess(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 999)
 	testRequestReadLimitBodyError(t, "POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\n\r\n", 8, ErrBodyTooLarge)
+
+	// missing Host header is invalid in HTTP/1.1, but still allowed in HTTP/1.0
+	testRequestReadLimitBodyError(t, "GET /foo HTTP/1.1\r\n\r\n", 0, errRequestHostRequired)
+	testRequestReadLimitBodySuccess(t, "GET /foo HTTP/1.0\r\n\r\n", 0)
 }
 
 func testResponseReadLimitBodyError(t *testing.T, s string, maxBodySize int, expectedErr error) {
@@ -1798,6 +1802,8 @@ func testResponseReadLimitBodySuccess(t *testing.T, s string, maxBodySize int) {
 }
 
 func testRequestReadLimitBodyError(t *testing.T, s string, maxBodySize int, expectedErr error) {
+	t.Helper()
+
 	var req Request
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
@@ -1805,7 +1811,7 @@ func testRequestReadLimitBodyError(t *testing.T, s string, maxBodySize int, expe
 	if err == nil {
 		t.Fatalf("expecting error. s=%q, maxBodySize=%d", s, maxBodySize)
 	}
-	if err != expectedErr {
+	if !errors.Is(err, expectedErr) {
 		t.Fatalf("unexpected error: %v. Expecting %v. s=%q, maxBodySize=%d", err, expectedErr, s, maxBodySize)
 	}
 }
