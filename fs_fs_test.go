@@ -100,7 +100,7 @@ func TestServeFSSpecialCharsNotLiteral(t *testing.T) {
 			var ctx RequestCtx
 			var req Request
 			req.SetRequestURI("http://foobar.com/original")
-			ctx.Init(&req, nil, nil)
+			ctx.Init(&req, nil, TestLogger{t})
 
 			ServeFS(&ctx, testFS, name)
 

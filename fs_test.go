@@ -236,7 +236,7 @@ func TestServeFileSpecialCharsNotLiteral(t *testing.T) {
 			var ctx RequestCtx
 			var req Request
 			req.SetRequestURI("http://foobar.com/original")
-			ctx.Init(&req, nil, nil)
+			ctx.Init(&req, nil, TestLogger{t})
 
 			ServeFile(&ctx, filePath)
 
