@@ -96,7 +96,7 @@ func helperChild() {
 	// test killing the master.
 	masterPID := os.Getppid()
 
-	p := &Prefork{}
+	p := &Prefork{OnMasterDeath: DefaultOnMasterDeath}
 	go p.watchMaster(masterPID)
 
 	// Signal to the test that we are running and have recorded our PPID.
