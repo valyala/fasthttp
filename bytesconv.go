@@ -137,7 +137,7 @@ func parseRFC1123DateGMT(b []byte) (time.Time, bool) {
 		b[16] != ' ' || b[19] != ':' || b[22] != ':' || b[25] != ' ' {
 		return time.Time{}, false
 	}
-	if (b[26]|0x20) != 'g' || (b[27]|0x20) != 'm' || (b[28]|0x20) != 't' {
+	if b[26] != 'G' || b[27] != 'M' || b[28] != 'T' {
 		return time.Time{}, false
 	}
 

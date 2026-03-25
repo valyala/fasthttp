@@ -253,6 +253,75 @@ func TestParseHTTPDateCompatibility(t *testing.T) {
 	}
 }
 
+func BenchmarkParseHTTPDate(b *testing.B) {
+	date := []byte("Tue, 10 Nov 2009 23:00:00 GMT")
+
+	b.Run("fast-path", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			ParseHTTPDate(date)
+		}
+	})
+
+	b.Run("stdlib-only", func(b *testing.B) {
+		b.ReportAllocs()
+		s := string(date)
+		for range b.N {
+			time.Parse(time.RFC1123, s)
+		}
+	})
+}
+
+func FuzzParseHTTPDate(f *testing.F) {
+	// Seed corpus: valid RFC1123 dates.
+	seeds := []string{
+		"Tue, 10 Nov 2009 23:00:00 GMT",
+		"Thu, 01 Jan 1970 00:00:00 GMT",
+		"Fri, 31 Dec 1999 23:59:59 GMT",
+		"Mon, 29 Feb 2016 12:34:56 GMT",
+		"Sun, 06 Nov 1994 08:49:37 GMT",
+		// Invalid inputs to exercise rejection paths.
+		"Tue, 10 Nov 2009 23:00:00 UTC",
+		"Tue, 31 Feb 2009 23:00:00 GMT",
+		"Xxx, 10 Nov 2009 23:00:00 GMT",
+		"Tue, 00 Nov 2009 23:00:00 GMT",
+		"Tue, 10 Nov 2009 24:00:00 GMT",
+		"not a date at all",
+		"",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		b := []byte(s)
+
+		// Reference: time.Parse is what ParseHTTPDate falls back to.
+		stdTime, stdErr := time.Parse(time.RFC1123, s)
+
+		// The fast path must never accept a string that time.Parse
+		// rejects, and when it accepts, the result must be identical.
+		fastTime, fastOK := parseRFC1123DateGMT(b)
+		if fastOK {
+			if stdErr != nil {
+				t.Fatalf("parseRFC1123DateGMT accepted %q but time.Parse rejected it: %v", s, stdErr)
+			}
+			if !fastTime.Equal(stdTime) {
+				t.Fatalf("time mismatch for %q: fast=%v std=%v", s, fastTime, stdTime)
+			}
+		}
+
+		// The public API must always agree with time.Parse.
+		got, gotErr := ParseHTTPDate(b)
+		if (gotErr != nil) != (stdErr != nil) {
+			t.Fatalf("ParseHTTPDate error mismatch for %q: got err=%v, std err=%v", s, gotErr, stdErr)
+		}
+		if gotErr == nil && !got.Equal(stdTime) {
+			t.Fatalf("ParseHTTPDate time mismatch for %q: got=%v std=%v", s, got, stdTime)
+		}
+	})
+}
+
 func TestParseUintError(t *testing.T) {
 	t.Parallel()
 
