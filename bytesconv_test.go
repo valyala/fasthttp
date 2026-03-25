@@ -259,7 +259,7 @@ func BenchmarkParseHTTPDate(b *testing.B) {
 	b.Run("fast-path", func(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
-			ParseHTTPDate(date)
+			_, _ = ParseHTTPDate(date)
 		}
 	})
 
@@ -267,7 +267,7 @@ func BenchmarkParseHTTPDate(b *testing.B) {
 		b.ReportAllocs()
 		s := string(date)
 		for range b.N {
-			time.Parse(time.RFC1123, s)
+			_, _ = time.Parse(time.RFC1123, s)
 		}
 	})
 }
