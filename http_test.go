@@ -1777,6 +1777,28 @@ func TestRequestReadLimitBody(t *testing.T) {
 	testRequestReadLimitBodySuccess(t, "GET /foo HTTP/1.0\r\n\r\n", 0)
 }
 
+func TestRequestReadLimitBodyWhitespaceBeforeColonFramingHeaders(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	r := bytes.NewBufferString("POST /foo HTTP/1.1\r\nHost: a.com\r\nContent-Length : 4\r\n\r\ntestNEXT")
+	br := bufio.NewReader(r)
+	if err := req.ReadLimitBody(br, 10); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := string(req.Body()); got != "test" {
+		t.Fatalf("unexpected body %q", got)
+	}
+
+	rest, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("unexpected read error: %v", err)
+	}
+	if got := string(rest); got != "NEXT" {
+		t.Fatalf("unexpected buffered bytes %q", got)
+	}
+}
+
 func testResponseReadLimitBodyError(t *testing.T, s string, maxBodySize int, expectedErr error) {
 	var resp Response
 	r := bytes.NewBufferString(s)

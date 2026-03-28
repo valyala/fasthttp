@@ -133,7 +133,7 @@ func getChunkedTestEnv(t testing.TB) (*fasthttputil.InmemoryListener, []byte) {
 	}()
 
 	req := Request{}
-	req.SetHost("localhost")
+	req.Header.SetHost("localhost")
 	req.Header.SetMethod("POST")
 	req.Header.Set("transfer-encoding", "chunked")
 	req.Header.SetContentLength(-1)
