@@ -371,7 +371,7 @@ func TestRequestRawHeaders(t *testing.T) {
 		}
 	})
 	t.Run("no-kvs", func(t *testing.T) {
-		s := "GET / HTTP/1.1\r\n\r\n"
+		s := "GET / HTTP/1.0\r\n\r\n"
 		exp := ""
 		var h RequestHeader
 		h.DisableNormalizing()
@@ -512,6 +512,7 @@ func TestRequestHeaderSetCookieWithSpecialChars(t *testing.T) {
 	var h RequestHeader
 	h.Set("Cookie", "ID&14")
 	s := h.String()
+	s = strings.Replace(s, "\r\n", "\r\nHost: example.com\r\n", 1)
 
 	if !strings.Contains(s, "Cookie: ID&14") {
 		t.Fatalf("Missing cookie in request header: %q", s)
@@ -676,7 +677,8 @@ func TestRequestHeaderAdd(t *testing.T) {
 	if strings.Contains(s, "\r\nX-Injected: yes\r\n") {
 		t.Fatalf("serialized request header contains injected header line: %q", s)
 	}
-	br := bufio.NewReader(bytes.NewBufferString(s))
+	sWithHost := strings.Replace(s, "User-Agent: xxx\r\n", "User-Agent: xxx\r\nHost: example.com\r\n", 1)
+	br := bufio.NewReader(bytes.NewBufferString(sWithHost))
 	var h1 RequestHeader
 	if err := h1.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -694,8 +696,8 @@ func TestRequestHeaderAdd(t *testing.T) {
 		t.Fatalf("unexpected number of headers: %d. Expecting 13", len(m))
 	}
 	s1 := h1.String()
-	if s != s1 {
-		t.Fatalf("unexpected headers %q. Expecting %q", s1, s)
+	if sWithHost != s1 {
+		t.Fatalf("unexpected headers %q. Expecting %q", s1, sWithHost)
 	}
 }
 
@@ -1284,6 +1286,10 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 }
 
 func testRequestMultipartFormBoundary(t *testing.T, s, boundary string) {
+	if strings.HasPrefix(s, "POST / HTTP/1.1\r\n") && !strings.Contains(s, "\r\nHost: ") {
+		s = strings.Replace(s, "\r\n", "\r\nHost: example.com\r\n", 1)
+	}
+
 	var h RequestHeader
 	r := bytes.NewBufferString(s)
 	br := bufio.NewReader(r)
@@ -1624,6 +1630,7 @@ func TestRequestContentTypeDefaultNotEmpty(t *testing.T) {
 
 	var h RequestHeader
 	h.SetMethod(MethodPost)
+	h.SetHost("example.com")
 	h.SetContentLength(5)
 
 	w := &bytes.Buffer{}
@@ -1651,6 +1658,7 @@ func TestRequestContentTypeNoDefault(t *testing.T) {
 
 	var h RequestHeader
 	h.SetMethod(MethodDelete)
+	h.SetHost("example.com")
 	h.SetNoDefaultContentType(true)
 
 	w := &bytes.Buffer{}
@@ -2431,6 +2439,7 @@ func TestRequestHeaderMethod(t *testing.T) {
 func testRequestHeaderMethod(t *testing.T, expectedMethod string) {
 	var h RequestHeader
 	h.SetMethod(expectedMethod)
+	h.SetHost("example.com")
 	m := h.Method()
 	if string(m) != expectedMethod {
 		t.Fatalf("unexpected method: %q. Expecting %q", m, expectedMethod)
@@ -2881,6 +2890,16 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 		t.Fatalf("expecting connectionClose for ancient http protocol")
 	}
 
+	// ancient http protocol without Host
+	testRequestHeaderReadSuccess(t, h, "GET /bar HTTP/1.0\r\n\r\npppp",
+		-2, "/bar", "", "", "")
+	if h.IsHTTP11() {
+		t.Fatalf("ancient http protocol cannot be http/1.1")
+	}
+	if !h.ConnectionClose() {
+		t.Fatalf("expecting connectionClose for ancient http protocol")
+	}
+
 	// ancient http protocol with 'Connection: keep-alive' header
 	testRequestHeaderReadSuccess(t, h, "GET /aa HTTP/1.0\r\nHost: bb\r\nConnection: keep-alive\r\n\r\nxxx",
 		-2, "/aa", "bb", "", "")
@@ -2925,10 +2944,6 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	testRequestHeaderReadSuccess(t, h, "GET /asdf HTTP/1.1\r\nHost: aaa.com\r\nReferer: bb.com\r\n\r\naaa",
 		-2, "/asdf", "aaa.com", "bb.com", "")
 
-	// duplicate host
-	testRequestHeaderReadSuccess(t, h, "GET /aa HTTP/1.1\r\nHost: aaaaaa.com\r\nHost: bb.com\r\n\r\n",
-		-2, "/aa", "bb.com", "", "")
-
 	// post with duplicate content-type
 	testRequestHeaderReadSuccess(t, h, "POST /a HTTP/1.1\r\nHost: aa\r\nContent-Type: ab\r\nContent-Length: 123\r\nContent-Type: xx\r\n\r\n",
 		123, "/a", "aa", "", "xx")
@@ -2957,12 +2972,10 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	testRequestHeaderReadError(t, h, "GET /foo/ bar baz HTTP/1.1\r\nHost: aa.com\r\n\r\nxxx")
 
 	// no host
-	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\nFOObar: assdfd\r\n\r\naaa",
-		-2, "/foo/bar", "", "", "")
+	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\nFOObar: assdfd\r\n\r\naaa")
 
 	// no host, no headers
-	testRequestHeaderReadSuccess(t, h, "GET /foo/bar HTTP/1.1\r\n\r\nfoobar",
-		-2, "/foo/bar", "", "", "")
+	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\n\r\nfoobar")
 
 	// post without content-length and content-type
 	testRequestHeaderReadSuccess(t, h, "POST /aaa HTTP/1.1\r\nHost: aaa.com\r\n\r\nzxc",
@@ -3079,6 +3092,12 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// Space before header name
 	testRequestHeaderReadError(t, h, "G(ET /foo/bar HTTP/1.1\r\n foo: bar\r\n\r\n")
+
+	// Duplicate host header
+	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\nHost: aaa.com\r\nhost: bbb.com\r\n\r\n")
+
+	// Missing host header
+	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\n\r\n")
 }
 
 func TestRequestHeaderReadSecuredError(t *testing.T) {
