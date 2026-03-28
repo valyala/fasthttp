@@ -200,6 +200,128 @@ func TestAppendHTTPDate(t *testing.T) {
 	}
 }
 
+func TestParseHTTPDateCompatibility(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name      string
+		value     string
+		hasError  bool
+		roundTrip bool
+	}{
+		{name: "gmt-fast-path", value: "Tue, 10 Nov 2009 23:00:00 GMT", roundTrip: true},
+		{name: "epoch", value: "Thu, 01 Jan 1970 00:00:00 GMT", roundTrip: true},
+		{name: "year-boundary", value: "Fri, 31 Dec 1999 23:59:59 GMT", roundTrip: true},
+		{name: "leap-year", value: "Mon, 29 Feb 2016 12:34:56 GMT", roundTrip: true},
+		{name: "utc-fallback", value: "Tue, 10 Nov 2009 23:00:00 UTC"},
+		{name: "mixedcase-weekday-month", value: "tUe, 10 nOv 2009 23:00:00 GMT"},
+		{name: "day-zero", value: "Tue, 00 Nov 2009 23:00:00 GMT", hasError: true},
+		{name: "invalid-day", value: "Tue, 31 Feb 2009 23:00:00 GMT", hasError: true},
+		{name: "invalid-weekday", value: "Xxx, 10 Nov 2009 23:00:00 GMT", hasError: true},
+		{name: "invalid-month", value: "Tue, 10 Foo 2009 23:00:00 GMT", hasError: true},
+		{name: "invalid-hour", value: "Tue, 10 Nov 2009 24:00:00 GMT", hasError: true},
+		{name: "invalid-minute", value: "Tue, 10 Nov 2009 23:60:00 GMT", hasError: true},
+		{name: "invalid-second", value: "Tue, 10 Nov 2009 23:00:60 GMT", hasError: true},
+		{name: "invalid-separator", value: "Tue 10 Nov 2009 23:00:00 GMT", hasError: true},
+		{name: "invalid-time-separator", value: "Tue, 10 Nov 2009 23-00-00 GMT", hasError: true},
+		{name: "non-leap-year", value: "Tue, 29 Feb 2019 23:00:00 GMT", hasError: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, gotErr := ParseHTTPDate([]byte(tc.value))
+			want, wantErr := time.ParseInLocation(time.RFC1123, tc.value, time.UTC)
+
+			if (gotErr != nil) != (wantErr != nil) {
+				t.Fatalf("error mismatch for %q: ParseHTTPDate err=%v, ParseInLocation err=%v", tc.value, gotErr, wantErr)
+			}
+			if tc.hasError != (gotErr != nil) {
+				t.Fatalf("unexpected error state for %q: gotErr=%v, expectedError=%v", tc.value, gotErr, tc.hasError)
+			}
+			if gotErr != nil {
+				return
+			}
+			if !got.Equal(want) {
+				t.Fatalf("parsed time mismatch for %q: got=%v want=%v", tc.value, got, want)
+			}
+			if tc.roundTrip && got.Format(time.RFC1123) != tc.value {
+				t.Fatalf("unexpected formatted date %q. Expecting %q", got.Format(time.RFC1123), tc.value)
+			}
+		})
+	}
+}
+
+func BenchmarkParseHTTPDate(b *testing.B) {
+	date := []byte("Tue, 10 Nov 2009 23:00:00 GMT")
+
+	b.Run("fast-path", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			_, _ = ParseHTTPDate(date)
+		}
+	})
+
+	b.Run("stdlib-only", func(b *testing.B) {
+		b.ReportAllocs()
+		s := string(date)
+		for range b.N {
+			_, _ = time.Parse(time.RFC1123, s)
+		}
+	})
+}
+
+func FuzzParseHTTPDate(f *testing.F) {
+	// Seed corpus: valid RFC1123 dates.
+	seeds := []string{
+		"Tue, 10 Nov 2009 23:00:00 GMT",
+		"Thu, 01 Jan 1970 00:00:00 GMT",
+		"Fri, 31 Dec 1999 23:59:59 GMT",
+		"Mon, 29 Feb 2016 12:34:56 GMT",
+		"Sun, 06 Nov 1994 08:49:37 GMT",
+		// Invalid inputs to exercise rejection paths.
+		"Tue, 10 Nov 2009 23:00:00 UTC",
+		"Tue, 31 Feb 2009 23:00:00 GMT",
+		"Xxx, 10 Nov 2009 23:00:00 GMT",
+		"Tue, 00 Nov 2009 23:00:00 GMT",
+		"Tue, 10 Nov 2009 24:00:00 GMT",
+		"not a date at all",
+		"",
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+
+	f.Fuzz(func(t *testing.T, s string) {
+		b := []byte(s)
+
+		// Reference: time.Parse is what ParseHTTPDate falls back to.
+		stdTime, stdErr := time.Parse(time.RFC1123, s)
+
+		// The fast path must never accept a string that time.Parse
+		// rejects, and when it accepts, the result must be identical.
+		fastTime, fastOK := parseRFC1123DateGMT(b)
+		if fastOK {
+			if stdErr != nil {
+				t.Fatalf("parseRFC1123DateGMT accepted %q but time.Parse rejected it: %v", s, stdErr)
+			}
+			if !fastTime.Equal(stdTime) {
+				t.Fatalf("time mismatch for %q: fast=%v std=%v", s, fastTime, stdTime)
+			}
+		}
+
+		// The public API must always agree with time.Parse.
+		got, gotErr := ParseHTTPDate(b)
+		if (gotErr != nil) != (stdErr != nil) {
+			t.Fatalf("ParseHTTPDate error mismatch for %q: got err=%v, std err=%v", s, gotErr, stdErr)
+		}
+		if gotErr == nil && !got.Equal(stdTime) {
+			t.Fatalf("ParseHTTPDate time mismatch for %q: got=%v std=%v", s, got, stdTime)
+		}
+	})
+}
+
 func TestParseUintError(t *testing.T) {
 	t.Parallel()
 
