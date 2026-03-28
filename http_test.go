@@ -3245,6 +3245,12 @@ func TestRequestMultipartFormPipeEmptyFormField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if _, err = bw.Write(strCRLF); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err = bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	for e := range errs {
 		t.Fatalf("unexpected error in goroutine multiwriter: %v", e)
