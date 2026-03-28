@@ -2779,6 +2779,14 @@ func isBadTrailer(key []byte) bool {
 	return false
 }
 
+func isHTTPVersion(proto []byte) bool {
+	return len(proto) == len(strHTTP11) &&
+		bytes.HasPrefix(proto, strHTTP11[:5]) &&
+		proto[6] == '.' &&
+		proto[5] >= '0' && proto[5] <= '9' &&
+		proto[7] >= '0' && proto[7] <= '9'
+}
+
 func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	bNext := buf
 	var b []byte
@@ -2797,25 +2805,42 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
-	h.noHTTP11 = !bytes.Equal(b[:n], strHTTP11)
+	protoStr := b[:n]
 	b = b[n+1:]
+	for len(b) > 0 && b[0] == ' ' {
+		b = b[1:]
+	}
 
 	// parse status code
-	h.statusCode, n, err = parseUintBuf(b)
-	if err != nil {
-		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("cannot parse response status code: %w", err)
-		}
-		return 0, fmt.Errorf("cannot parse response status code: %w. Response %q", err, buf)
+	statusCode := b
+	statusMessage := []byte(nil)
+	if n = bytes.IndexByte(b, ' '); n >= 0 {
+		statusCode = b[:n]
+		statusMessage = b[n+1:]
 	}
-	if len(b) > n && b[n] != ' ' {
+	if len(statusCode) != 3 {
 		if h.secureErrorLogMessage {
 			return 0, ErrUnexpectedStatusCodeChar
 		}
-		return 0, fmt.Errorf("unexpected char at the end of status code. Response %q", buf)
+		return 0, fmt.Errorf("invalid response status code %q. Response %q", statusCode, buf)
 	}
-	if len(b) > n+1 {
-		h.SetStatusMessage(b[n+1:])
+	h.statusCode, n, err = parseUintBuf(statusCode)
+	if err != nil || n != 3 {
+		if h.secureErrorLogMessage {
+			return 0, ErrUnexpectedStatusCodeChar
+		}
+		return 0, fmt.Errorf("invalid response status code %q. Response %q", statusCode, buf)
+	}
+	if !isHTTPVersion(protoStr) {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+	}
+	h.noHTTP11 = !bytes.Equal(protoStr, strHTTP11)
+	h.protocol = append(h.protocol[:0], protoStr...)
+	if len(statusMessage) > 0 {
+		h.SetStatusMessage(statusMessage)
 	}
 
 	return len(buf) - len(bNext), nil
@@ -2858,20 +2883,21 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	}
 
 	b = b[n+1:]
-
-	// Check for extra whitespace after method - only one space should separate method from URI
-	if len(b) > 0 && b[0] == ' ' {
-		if h.secureErrorLogMessage {
-			return 0, ErrExtraWhitespaceInRequestLine
-		}
-		return 0, fmt.Errorf("extra whitespace in request line %q", buf)
-	}
-
-	// parse requestURI - RFC 9112 requires exactly one space between components
 	n = bytes.IndexByte(b, ' ')
 	if n < 0 {
 		return 0, fmt.Errorf("cannot find whitespace in the first line of request %q", buf)
-	} else if n == 0 {
+	}
+
+	protoStr := b[n+1:]
+
+	if !isHTTPVersion(protoStr) {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+	}
+
+	if n == 0 {
 		if h.secureErrorLogMessage {
 			return 0, ErrEmptyRequestURI
 		}
@@ -2883,36 +2909,6 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 			return 0, fmt.Errorf("invalid requestURI %q", b[:n])
 		}
 		return 0, fmt.Errorf("invalid requestURI %q in %q: %w", b[:n], buf, err)
-	}
-
-	// Check for extra whitespace - only one space should separate URI from HTTP version
-	if n+1 < len(b) && b[n+1] == ' ' {
-		if h.secureErrorLogMessage {
-			return 0, ErrExtraWhitespaceInRequestLine
-		}
-		return 0, fmt.Errorf("extra whitespace in request line %q", buf)
-	}
-
-	protoStr := b[n+1:]
-
-	// Follow RFCs 7230 and 9112 and require that HTTP versions match the following pattern: HTTP/[0-9]\.[0-9]
-	if len(protoStr) != len(strHTTP11) {
-		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
-		}
-		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
-	}
-	if !bytes.HasPrefix(protoStr, strHTTP11[:5]) {
-		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
-		}
-		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
-	}
-	if protoStr[5] < '0' || protoStr[5] > '9' || protoStr[7] < '0' || protoStr[7] > '9' {
-		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
-		}
-		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
 	}
 
 	h.noHTTP11 = !bytes.Equal(protoStr, strHTTP11)
