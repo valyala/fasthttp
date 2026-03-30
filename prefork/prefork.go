@@ -74,9 +74,8 @@ type Prefork struct {
 	// in child processes. If the master process dies unexpectedly, this
 	// callback is invoked. This allows custom cleanup before shutdown.
 	//
-	// Use DefaultOnMasterDeath for the default behavior of calling os.Exit(1).
-	//
-	// It's disabled (nil) by default for backwards compatibility.
+	// It is recommended to set this to func() { os.Exit(1) } if no custom
+	// cleanup is needed.
 	OnMasterDeath func()
 }
 
@@ -104,19 +103,13 @@ func (p *Prefork) logger() Logger {
 	return defaultLogger
 }
 
-// DefaultOnMasterDeath is the default OnMasterDeath handler that logs and
-// exits the child process immediately.
-func DefaultOnMasterDeath() {
-	os.Exit(1)
-}
-
 func (p *Prefork) watchMaster(masterPID int) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
 	for range ticker.C {
 		if os.Getppid() != masterPID {
-			p.logger().Printf("master process died, exiting child\n")
+			p.logger().Printf("master process died\n")
 			p.OnMasterDeath()
 			return
 		}
