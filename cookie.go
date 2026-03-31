@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -402,18 +403,11 @@ func (c *Cookie) ParseBytes(src []byte) error {
 
 			case 'e': // "expires"
 				if caseInsensitiveCompare(strCookieExpires, k) {
-					exptime, err := ParseHTTPDate(v)
-					if err == nil {
-						c.expire = exptime
-					} else {
-						vs := b2s(v)
-						// Keep legacy cookie date compatibility used by net/http.
-						exptime, err = time.Parse("Mon, 02-Jan-2006 15:04:05 MST", vs)
-						if err != nil {
-							return err
-						}
-						c.expire = exptime
+					exptime, err := parseCookieExpires(v)
+					if err != nil {
+						return err
 					}
+					c.expire = exptime
 				}
 
 			case 'd': // "domain"
@@ -643,6 +637,23 @@ func trimCookieArgNoCopy(src []byte, skipQuotes bool) []byte {
 
 // caseInsensitiveCompare does a case insensitive equality comparison of
 // two []byte. Assumes only letters need to be matched.
+func parseCookieExpires(src []byte) (time.Time, error) {
+	if t, ok := parseRFC1123DateGMT(src); ok {
+		return t, nil
+	}
+
+	s := b2s(src)
+
+	// UTC-anchored RFC1123 parsing behavior for non-GMT.
+	t, err := time.ParseInLocation(http.TimeFormat, s, time.UTC)
+	if err == nil {
+		return t, nil
+	}
+
+	// Legacy cookie date compatibility used by net/http.
+	return time.Parse("Mon, 02-Jan-2006 15:04:05 MST", s)
+}
+
 func caseInsensitiveCompare(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false

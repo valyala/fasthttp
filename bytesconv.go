@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"strconv"
 	"sync"
 	"time"
@@ -122,7 +123,7 @@ func ParseHTTPDate(date []byte) (time.Time, error) {
 	if t, ok := parseRFC1123DateGMT(date); ok {
 		return t, nil
 	}
-	return time.Parse(time.RFC1123, b2s(date))
+	return time.Parse(http.TimeFormat, b2s(date))
 }
 
 func parseRFC1123DateGMT(b []byte) (time.Time, bool) {

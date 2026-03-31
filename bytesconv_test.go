@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"html"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"testing"
@@ -213,7 +214,7 @@ func TestParseHTTPDateCompatibility(t *testing.T) {
 		{name: "epoch", value: "Thu, 01 Jan 1970 00:00:00 GMT", roundTrip: true},
 		{name: "year-boundary", value: "Fri, 31 Dec 1999 23:59:59 GMT", roundTrip: true},
 		{name: "leap-year", value: "Mon, 29 Feb 2016 12:34:56 GMT", roundTrip: true},
-		{name: "utc-fallback", value: "Tue, 10 Nov 2009 23:00:00 UTC"},
+		{name: "utc-fallback", value: "Tue, 10 Nov 2009 23:00:00 UTC", hasError: true},
 		{name: "mixedcase-weekday-month", value: "tUe, 10 nOv 2009 23:00:00 GMT"},
 		{name: "day-zero", value: "Tue, 00 Nov 2009 23:00:00 GMT", hasError: true},
 		{name: "invalid-day", value: "Tue, 31 Feb 2009 23:00:00 GMT", hasError: true},
@@ -232,7 +233,7 @@ func TestParseHTTPDateCompatibility(t *testing.T) {
 			t.Parallel()
 
 			got, gotErr := ParseHTTPDate([]byte(tc.value))
-			want, wantErr := time.ParseInLocation(time.RFC1123, tc.value, time.UTC)
+			want, wantErr := time.Parse(http.TimeFormat, tc.value)
 
 			if (gotErr != nil) != (wantErr != nil) {
 				t.Fatalf("error mismatch for %q: ParseHTTPDate err=%v, ParseInLocation err=%v", tc.value, gotErr, wantErr)
@@ -267,7 +268,7 @@ func BenchmarkParseHTTPDate(b *testing.B) {
 		b.ReportAllocs()
 		s := string(date)
 		for range b.N {
-			_, _ = time.Parse(time.RFC1123, s)
+			_, _ = time.Parse(http.TimeFormat, s)
 		}
 	})
 }
@@ -296,20 +297,8 @@ func FuzzParseHTTPDate(f *testing.F) {
 	f.Fuzz(func(t *testing.T, s string) {
 		b := []byte(s)
 
-		// Reference: time.Parse is what ParseHTTPDate falls back to.
-		stdTime, stdErr := time.Parse(time.RFC1123, s)
-
-		// The fast path must never accept a string that time.Parse
-		// rejects, and when it accepts, the result must be identical.
-		fastTime, fastOK := parseRFC1123DateGMT(b)
-		if fastOK {
-			if stdErr != nil {
-				t.Fatalf("parseRFC1123DateGMT accepted %q but time.Parse rejected it: %v", s, stdErr)
-			}
-			if !fastTime.Equal(stdTime) {
-				t.Fatalf("time mismatch for %q: fast=%v std=%v", s, fastTime, stdTime)
-			}
-		}
+		// Reference: time.Parse with http.TimeFormat is what ParseHTTPDate falls back to.
+		stdTime, stdErr := time.Parse(http.TimeFormat, s)
 
 		// The public API must always agree with time.Parse.
 		got, gotErr := ParseHTTPDate(b)
