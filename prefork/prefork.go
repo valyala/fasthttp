@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"time"
 
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/reuseport"
@@ -68,6 +69,14 @@ type Prefork struct {
 	//
 	// It's disabled by default
 	Reuseport bool
+
+	// OnMasterDeath, when non-nil, enables monitoring of the master process
+	// in child processes. If the master process dies unexpectedly, this
+	// callback is invoked. This allows custom cleanup before shutdown.
+	//
+	// It is recommended to set this to func() { os.Exit(1) } if no custom
+	// cleanup is needed.
+	OnMasterDeath func()
 }
 
 // IsChild checks if the current thread/process is a child.
@@ -92,6 +101,19 @@ func (p *Prefork) logger() Logger {
 		return p.Logger
 	}
 	return defaultLogger
+}
+
+func (p *Prefork) watchMaster(masterPID int) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if os.Getppid() != masterPID {
+			p.logger().Printf("master process died\n")
+			p.OnMasterDeath()
+			return
+		}
+	}
 }
 
 func (p *Prefork) listen(addr string) (net.Listener, error) {
@@ -243,6 +265,10 @@ func (p *Prefork) ListenAndServe(addr string) error {
 
 		p.ln = ln
 
+		if p.OnMasterDeath != nil {
+			go p.watchMaster(os.Getppid())
+		}
+
 		return p.ServeFunc(ln)
 	}
 
@@ -261,6 +287,10 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 
 		p.ln = ln
 
+		if p.OnMasterDeath != nil {
+			go p.watchMaster(os.Getppid())
+		}
+
 		return p.ServeTLSFunc(ln, certFile, certKey)
 	}
 
@@ -278,6 +308,10 @@ func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) 
 		}
 
 		p.ln = ln
+
+		if p.OnMasterDeath != nil {
+			go p.watchMaster(os.Getppid())
+		}
 
 		return p.ServeTLSEmbedFunc(ln, certData, keyData)
 	}
