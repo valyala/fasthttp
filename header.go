@@ -2713,7 +2713,7 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 		if isBadTrailer(s.key) {
 			return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
 		}
-		normalizeHeaderKey(s.key, disable)
+		normalizeHeaderKeyValidated(s.key, disable)
 		dest = appendArgBytes(dest, s.key, s.value, argsHasValue)
 	}
 	if s.err != nil {
@@ -2997,7 +2997,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				return 0, fmt.Errorf("invalid header key %q", s.key)
 			}
 		}
-		normalizeHeaderKey(s.key, disableNormalizing)
+		normalizeHeaderKeyValidated(s.key, disableNormalizing)
 
 		for _, ch := range s.value {
 			if !validHeaderValueByte(ch) {
@@ -3120,7 +3120,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				return 0, fmt.Errorf("invalid header key %q", s.key)
 			}
 		}
-		normalizeHeaderKey(s.key, disableNormalizing)
+		normalizeHeaderKeyValidated(s.key, disableNormalizing)
 
 		for _, ch := range s.value {
 			if !validHeaderValueByte(ch) {
@@ -3353,6 +3353,19 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 		if !validHeaderFieldByte(c) {
 			return
 		}
+	}
+
+	normalizeHeaderKeyValidated(b, false)
+}
+
+func normalizeHeaderKeyValidated(b []byte, disableNormalizing bool) {
+	if disableNormalizing {
+		return
+	}
+
+	n := len(b)
+	if n == 0 {
+		return
 	}
 
 	upper := true
