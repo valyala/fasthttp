@@ -188,6 +188,10 @@ func (d DialerFunc) Dial(network, addr string) (net.Conn, error) {
 
 // Establish a connection through an HTTP proxy.
 func httpProxyDial(dialer proxy.Dialer, network, addr, proxyAddr, auth string) (net.Conn, error) {
+	if strings.ContainsAny(addr, "\r\n") {
+		return nil, fmt.Errorf("proxy dial target address contains CR or LF: %q", addr)
+	}
+
 	conn, err := dialer.Dial(network, proxyAddr)
 	if err != nil {
 		return nil, err
