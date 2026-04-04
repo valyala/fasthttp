@@ -53,7 +53,6 @@ func (s *headerScanner) next() bool {
 		s.err = fmt.Errorf("malformed MIME header line: %q", kv)
 		return false
 	}
-	k = trimTrailingSpace(k)
 	if !isValidHeaderKey(k) {
 		s.err = fmt.Errorf("malformed MIME header line: %q", kv)
 		return false
