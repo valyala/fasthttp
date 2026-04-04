@@ -1300,6 +1300,7 @@ func (h *RequestHeader) AllInOrder() iter.Seq2[[]byte, []byte] {
 		var s headerScanner
 		s.b = h.rawHeaders
 		for s.next() {
+			s.key = trimTrailingSpace(s.key)
 			normalizeHeaderKey(s.key, h.disableNormalizing || bytes.IndexByte(s.key, ' ') != -1)
 			if len(s.key) > 0 {
 				if !yield(s.key, s.value) {
@@ -2693,6 +2694,10 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 	s.b = src
 
 	for s.next() {
+		// Trim trailing whitespace before the colon to normalize headers
+		// like "Content-Length :" to "Content-Length:".
+		s.key = trimTrailingSpace(s.key)
+
 		if len(s.key) == 0 {
 			continue
 		}
@@ -2978,6 +2983,10 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	var kv *argsKV
 
 	for s.next() {
+		// Trim trailing whitespace before the colon to normalize headers
+		// like "Content-Length :" to "Content-Length:".
+		s.key = trimTrailingSpace(s.key)
+
 		if len(s.key) == 0 {
 			h.connectionClose = true
 			return 0, fmt.Errorf("invalid header key %q", s.key)
@@ -3104,6 +3113,10 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	s.b = buf
 
 	for s.next() {
+		// Trim trailing whitespace before the colon to normalize headers
+		// like "Content-Length :" to "Content-Length:".
+		s.key = trimTrailingSpace(s.key)
+
 		if len(s.key) == 0 {
 			h.connectionClose = true
 			return 0, fmt.Errorf("invalid header key %q", s.key)
