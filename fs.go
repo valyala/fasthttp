@@ -247,7 +247,7 @@ func normalizeServeFilePath(ctx *RequestCtx, path string) (string, bool) {
 // Path rewriter is used in FS for translating the current request
 // to the local filesystem path relative to FS.Root.
 //
-// The returned path must not contain '/../' substrings due to security reasons,
+// The returned path must not contain '..' path segments due to security reasons,
 // since such paths may refer files outside FS.Root.
 //
 // The returned path may refer to ctx members. For example, ctx.Path().
@@ -1176,11 +1176,11 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		return
 	}
 	if h.pathRewrite != nil {
-		// There is no need to check for '/../' if path = ctx.Path(),
+		// There is no need to check rewritten paths if path = ctx.Path(),
 		// since ctx.Path must normalize and sanitize the path.
 
-		if n := bytes.Index(path, strSlashDotDotSlash); n >= 0 {
-			ctx.Logger().Printf("cannot serve path with '/../' at position %d due to security reasons: %q", n, path)
+		if hasDotDotPathSegment(path) {
+			ctx.Logger().Printf("cannot serve rewritten path with '..' path segment due to security reasons: %q", path)
 			ctx.Error("Internal Server Error", StatusInternalServerError)
 			return
 		}
@@ -1874,6 +1874,27 @@ func stripLeadingSlashes(path []byte, stripSlashes int) []byte {
 		stripSlashes--
 	}
 	return path
+}
+
+func hasDotDotPathSegment(path []byte) bool {
+	segmentStart := 0
+	for i := 0; i <= len(path); i++ {
+		isSeparator := i == len(path)
+		if i < len(path) {
+			isSeparator = path[i] == '/'
+			if filepath.Separator == '\\' && path[i] == '\\' {
+				isSeparator = true
+			}
+		}
+		if !isSeparator {
+			continue
+		}
+		if i-segmentStart == 2 && path[segmentStart] == '.' && path[segmentStart+1] == '.' {
+			return true
+		}
+		segmentStart = i + 1
+	}
+	return false
 }
 
 func fileExtension(path string, compressed bool, compressedFileSuffix string) string {

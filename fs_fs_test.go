@@ -1069,3 +1069,126 @@ func TestFSRootEnforcement(t *testing.T) {
 		})
 	}
 }
+
+func TestHasDotDotPathSegment(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		path string
+		want bool
+	}{
+		{path: "", want: false},
+		{path: ".", want: false},
+		{path: "..", want: true},
+		{path: "../secret.txt", want: true},
+		{path: "/../secret.txt", want: true},
+		{path: "nested/../info", want: true},
+		{path: "nested/..", want: true},
+		{path: "nested/..hidden/info", want: false},
+		{path: "nested..", want: false},
+		{path: "/index.html", want: false},
+	}
+
+	if filepath.Separator == '\\' {
+		testCases = append(testCases,
+			struct {
+				path string
+				want bool
+			}{path: `..\secret.txt`, want: true},
+			struct {
+				path string
+				want bool
+			}{path: `nested\..\info`, want: true},
+		)
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.path, func(t *testing.T) {
+			t.Parallel()
+
+			if got := hasDotDotPathSegment([]byte(tc.path)); got != tc.want {
+				t.Fatalf("unexpected result for %q: got %v want %v", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFSPathRewriteRejectsDotDotSegments(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	publicDir := filepath.Join(tmpDir, "public")
+	if err := os.MkdirAll(publicDir, 0o755); err != nil {
+		t.Fatalf("cannot create public dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(publicDir, "index.html"), []byte("<h1>Public</h1>"), 0o644); err != nil {
+		t.Fatalf("cannot create public index: %v", err)
+	}
+	secretPath := filepath.Join(tmpDir, "secret.txt")
+	if err := os.WriteFile(secretPath, []byte("TOP_SECRET"), 0o644); err != nil {
+		t.Fatalf("cannot create secret file: %v", err)
+	}
+
+	type testCase struct {
+		name        string
+		pathRewrite PathRewriteFunc
+		requestURI  string
+	}
+
+	testCases := []testCase{
+		{
+			name:        "prefix-stripper-leading-dotdot",
+			pathRewrite: NewPathPrefixStripper(len("/static/")),
+			requestURI:  "http://localhost/aaaaaaa../secret.txt",
+		},
+		{
+			name: "custom-leading-dotdot",
+			pathRewrite: func(ctx *RequestCtx) []byte {
+				return []byte("../secret.txt")
+			},
+			requestURI: "http://localhost/ignored",
+		},
+		{
+			name: "custom-trailing-dotdot",
+			pathRewrite: func(ctx *RequestCtx) []byte {
+				return []byte("nested/..")
+			},
+			requestURI: "http://localhost/ignored",
+		},
+		{
+			name: "custom-exact-dotdot",
+			pathRewrite: func(ctx *RequestCtx) []byte {
+				return []byte("..")
+			},
+			requestURI: "http://localhost/ignored",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			stop := make(chan struct{})
+			defer close(stop)
+
+			fs := &FS{
+				Root:           publicDir,
+				AllowEmptyRoot: true,
+				CleanStop:      stop,
+				PathRewrite:    tc.pathRewrite,
+			}
+			h := fs.NewRequestHandler()
+
+			var ctx RequestCtx
+			ctx.Init(&Request{}, nil, TestLogger{t: t})
+			ctx.Request.SetRequestURI(tc.requestURI)
+
+			h(&ctx)
+
+			if ctx.Response.StatusCode() != StatusInternalServerError {
+				t.Fatalf("unexpected status code for %s: %d. Expecting %d", tc.name, ctx.Response.StatusCode(), StatusInternalServerError)
+			}
+			if bytes.Contains(ctx.Response.Body(), []byte("TOP_SECRET")) {
+				t.Fatalf("unexpected secret disclosure for %s", tc.name)
+			}
+		})
+	}
+}
