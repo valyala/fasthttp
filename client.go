@@ -216,6 +216,10 @@ type Client struct {
 	// This field is only effective within the range of MaxIdemponentCallAttempts.
 	RetryIfErr RetryIfErrFunc
 
+	// RetryIfErrUpstream works just like RetryIfErr but also provides information about upstream if known.
+	// Upstream information is a <host>:<port> format.
+	RetryIfErrUpstream RetryIfErrUpstreamFunc
+
 	// ConfigureClient configures the fasthttp.HostClient.
 	ConfigureClient func(hc *HostClient) error
 
@@ -565,6 +569,7 @@ func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
 		MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
 		RetryIf:                       c.RetryIf,
 		RetryIfErr:                    c.RetryIfErr,
+		RetryIfErrUpstream:            c.RetryIfErrUpstream,
 		ConnPoolStrategy:              c.ConnPoolStrategy,
 		StreamResponseBody:            c.StreamResponseBody,
 		clientReaderPool:              &c.readerPool,
@@ -693,6 +698,10 @@ type RetryIfFunc func(request *Request) bool
 // the request function will immediately return with the `err`.
 type RetryIfErrFunc func(request *Request, attempts int, err error) (resetTimeout bool, retry bool)
 
+// RetryIfErrUpstreamFunc works just like a RetryIfErrFunc and also provides information about upstream caused problems if known.
+// Upstream information is a <host>:<port> format.
+type RetryIfErrUpstreamFunc func(request *Request, attempts int, err error, upstream string) (resetTimeout bool, retry bool)
+
 // RoundTripper wraps every request/response.
 type RoundTripper interface {
 	RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error)
@@ -706,16 +715,7 @@ const (
 	LIFO
 )
 
-// HostClient balances http requests among hosts listed in Addr.
-//
-// HostClient may be used for balancing load among multiple upstream hosts.
-// While multiple addresses passed to HostClient.Addr may be used for balancing
-// load among them, it would be better using LBClient instead, since HostClient
-// may unevenly balance load among upstream hosts.
-//
-// It is forbidden copying HostClient instances. Create new instances instead.
-//
-// It is safe calling HostClient methods from concurrently running goroutines.
+// HostClient represents a high-performance HTTP client optimized for low-level control and customization.
 type HostClient struct {
 	noCopy noCopy
 
@@ -753,6 +753,10 @@ type HostClient struct {
 	// based on the return value of this field.
 	// This field is only effective within the range of MaxIdemponentCallAttempts.
 	RetryIfErr RetryIfErrFunc
+
+	// RetryIfErrUpstream works just like RetryIfErr but also provides information about upstream if known.
+	// Upstream information is a <host>:<port> format.
+	RetryIfErrUpstream RetryIfErrUpstreamFunc
 
 	connsWait *wantConnQueue
 
@@ -1393,7 +1397,13 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		if attempts >= maxAttempts {
 			break
 		}
-		if c.RetryIfErr != nil {
+		if c.RetryIfErrUpstream != nil {
+			upstream := ""
+			if resp.RemoteAddr() != nil {
+				upstream = resp.RemoteAddr().String()
+			}
+			resetTimeout, retry = c.RetryIfErrUpstream(req, attempts, err, upstream)
+		} else if c.RetryIfErr != nil {
 			resetTimeout, retry = c.RetryIfErr(req, attempts, err)
 		} else {
 			retry = retryFunc(req)
