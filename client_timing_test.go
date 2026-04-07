@@ -95,7 +95,7 @@ var fakeClientConnPool sync.Pool
 
 func BenchmarkClientGetTimeoutFastServer(b *testing.B) {
 	body := []byte("123456789099")
-	s := []byte(fmt.Sprintf("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body))
+	s := fmt.Appendf(nil, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
 	c := &Client{
 		Dial: func(addr string) (net.Conn, error) {
 			return acquireFakeServerConn(s), nil

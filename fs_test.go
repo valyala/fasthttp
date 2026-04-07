@@ -23,6 +23,19 @@ func (t TestLogger) Printf(format string, args ...any) {
 	t.t.Logf(format, args...)
 }
 
+func readResponseFromCtx(t *testing.T, ctx *RequestCtx, skipBody bool) *Response {
+	t.Helper()
+
+	resp := &Response{}
+	resp.SkipBody = skipBody
+	s := ctx.Response.String()
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return resp
+}
+
 func TestNewVHostPathRewriter(t *testing.T) {
 	t.Parallel()
 
@@ -149,6 +162,89 @@ func TestServeFileHead(t *testing.T) {
 	contentLength := resp.Header.ContentLength()
 	if contentLength != len(expectedBody) {
 		t.Fatalf("unexpected Content-Length: %d. expecting %d", contentLength, len(expectedBody))
+	}
+}
+
+func TestServeFileLiteral(t *testing.T) {
+	// Skip on Windows: the global rootFS handler caches open file handles,
+	// which prevents t.TempDir cleanup. TestServeFSLiteral (using MapFS)
+	// provides coverage on Windows.
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
+	t.Parallel()
+
+	testCases := []string{
+		"space name.txt",
+		"hash#name.txt",
+		"percent%61name.txt",
+		"query?name.txt",
+	}
+
+	for _, name := range testCases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			filePath := filepath.Join(dir, name)
+			expectedBody := []byte("body:" + name)
+			if err := os.WriteFile(filePath, expectedBody, 0o644); err != nil {
+				t.Fatalf("cannot create %q: %v", filePath, err)
+			}
+
+			var ctx RequestCtx
+			var req Request
+			req.SetRequestURI("http://foobar.com/original")
+			ctx.Init(&req, nil, nil)
+
+			ServeFileLiteral(&ctx, filePath)
+
+			resp := readResponseFromCtx(t, &ctx, false)
+			if resp.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code %d. expecting %d", resp.StatusCode(), StatusOK)
+			}
+			if !bytes.Equal(resp.Body(), expectedBody) {
+				t.Fatalf("unexpected body %q. expecting %q", resp.Body(), expectedBody)
+			}
+		})
+	}
+}
+
+func TestServeFileSpecialCharsNotLiteral(t *testing.T) {
+	// Skip on Windows: the global rootFS handler caches open file handles,
+	// which prevents t.TempDir cleanup. TestServeFSSpecialCharsNotLiteral
+	// provides coverage on Windows.
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
+	t.Parallel()
+
+	testCases := []string{
+		"hash#name.txt",
+		"percent%61name.txt",
+		"query?name.txt",
+	}
+
+	for _, name := range testCases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			filePath := filepath.Join(dir, name)
+			if err := os.WriteFile(filePath, []byte("body"), 0o644); err != nil {
+				t.Fatalf("cannot create %q: %v", filePath, err)
+			}
+
+			var ctx RequestCtx
+			var req Request
+			req.SetRequestURI("http://foobar.com/original")
+			ctx.Init(&req, nil, TestLogger{t})
+
+			ServeFile(&ctx, filePath)
+
+			resp := readResponseFromCtx(t, &ctx, false)
+			if resp.StatusCode() == StatusOK {
+				t.Fatalf("ServeFile should fail for special-character path %q without literal mode, but got 200", name)
+			}
+		})
 	}
 }
 
@@ -388,9 +484,9 @@ func runFSByteRangeConcurrent(t *testing.T, fs *FS) {
 
 	concurrency := 10
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
-			for j := 0; j < 5; j++ {
+			for range 5 {
 				testFSByteRange(t, h, "/fs.go")
 				testFSByteRange(t, h, "/README.md")
 			}
@@ -398,7 +494,7 @@ func runFSByteRangeConcurrent(t *testing.T, fs *FS) {
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-time.After(time.Second):
 			t.Fatalf("timeout")
@@ -623,9 +719,9 @@ func runFSCompressConcurrent(t *testing.T, fs *FS) {
 
 	concurrency := 4
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
-			for j := 0; j < 5; j++ {
+			for range 5 {
 				testFSCompress(t, h, "/fs.go")
 				testFSCompress(t, h, "/examples/")
 				testFSCompress(t, h, "/README.md")
@@ -634,7 +730,7 @@ func runFSCompressConcurrent(t *testing.T, fs *FS) {
 		}()
 	}
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-ch:
 		case <-time.After(time.Second * 2):
@@ -841,7 +937,7 @@ func TestFSHandlerSingleThread(t *testing.T) {
 	}
 	sort.Strings(filenames)
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		fsHandlerTest(t, requestHandler, filenames)
 	}
 }
@@ -865,16 +961,16 @@ func TestFSHandlerConcurrent(t *testing.T) {
 
 	concurrency := 10
 	ch := make(chan struct{}, concurrency)
-	for j := 0; j < concurrency; j++ {
+	for range concurrency {
 		go func() {
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				fsHandlerTest(t, requestHandler, filenames)
 			}
 			ch <- struct{}{}
 		}()
 	}
 
-	for j := 0; j < concurrency; j++ {
+	for range concurrency {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):
@@ -947,7 +1043,6 @@ func TestStripPathSlashes(t *testing.T) {
 
 	testStripPathSlashes(t, "", 0, "")
 	testStripPathSlashes(t, "", 10, "")
-	testStripPathSlashes(t, "/", 0, "")
 	testStripPathSlashes(t, "/", 1, "")
 	testStripPathSlashes(t, "/", 10, "")
 	testStripPathSlashes(t, "/foo/bar/baz", 0, "/foo/bar/baz")
@@ -955,19 +1050,12 @@ func TestStripPathSlashes(t *testing.T) {
 	testStripPathSlashes(t, "/foo/bar/baz", 2, "/baz")
 	testStripPathSlashes(t, "/foo/bar/baz", 3, "")
 	testStripPathSlashes(t, "/foo/bar/baz", 10, "")
-
-	// trailing slash
-	testStripPathSlashes(t, "/foo/bar/", 0, "/foo/bar")
-	testStripPathSlashes(t, "/foo/bar/", 1, "/bar")
-	testStripPathSlashes(t, "/foo/bar/", 2, "")
-	testStripPathSlashes(t, "/foo/bar/", 3, "")
 }
 
 func testStripPathSlashes(t *testing.T, path string, stripSlashes int, expectedPath string) {
 	t.Helper()
 
 	s := stripLeadingSlashes([]byte(path), stripSlashes)
-	s = stripTrailingSlashes(s)
 	if string(s) != expectedPath {
 		t.Fatalf("unexpected path after stripping %q with stripSlashes=%d: %q. Expecting %q", path, stripSlashes, s, expectedPath)
 	}

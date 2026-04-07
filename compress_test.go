@@ -10,11 +10,12 @@ import (
 )
 
 var compressTestcases = func() []string {
-	a := []string{
+	a := make([]string, 0, 4)
+	a = append(a,
 		"",
 		"foobar",
 		"выфаодлодл одлфываыв sd2 k34",
-	}
+	)
 	bigS := createFixedBody(1e4)
 	a = append(a, string(bigS))
 	return a
@@ -210,7 +211,7 @@ func testFlateCompressSingleCase(s string) error {
 
 func testConcurrent(concurrency int, f func() error) error {
 	ch := make(chan error, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		go func(idx int) {
 			err := f()
 			if err != nil {
@@ -219,7 +220,7 @@ func testConcurrent(concurrency int, f func() error) error {
 			ch <- nil
 		}(i)
 	}
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case err := <-ch:
 			if err != nil {

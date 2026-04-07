@@ -27,7 +27,7 @@ func ExampleLBClient() {
 	// Send requests to load-balanced servers
 	var req fasthttp.Request
 	var resp fasthttp.Response
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		url := fmt.Sprintf("http://abcedfg/foo/bar/%d", i)
 		req.SetRequestURI(url)
 		if err := lbc.Do(&req, &resp); err != nil {

@@ -72,7 +72,7 @@ func kernelVersion() (int, int) {
 		} else {
 			// Note that we're assuming N.N.N here.  If we see anything else we are likely to
 			// mis-parse it.
-			values[vi] = value
+			values[vi] = value // #nosec G602
 			vi++
 			if vi >= len(values) {
 				break
@@ -85,7 +85,7 @@ func kernelVersion() (int, int) {
 	case 1:
 		return values[0], 0
 	case 2:
-		return values[0], values[1]
+		return values[0], values[1] // #nosec G602
 	}
 	return 0, 0
 }

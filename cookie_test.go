@@ -289,13 +289,13 @@ func TestCookieAcquireReleaseConcurrent(t *testing.T) {
 	t.Parallel()
 
 	ch := make(chan struct{}, 10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			testCookieAcquireRelease(t)
 			ch <- struct{}{}
 		}()
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):

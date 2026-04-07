@@ -275,10 +275,7 @@ func (ln *fakeListener) Accept() (net.Conn, error) {
 		ln.lock.Unlock()
 		return nil, io.EOF
 	}
-	requestsCount := ln.requestsPerConn
-	if requestsCount > ln.requestsCount {
-		requestsCount = ln.requestsCount
-	}
+	requestsCount := min(ln.requestsPerConn, ln.requestsCount)
 	ln.requestsCount -= requestsCount
 	ln.lock.Unlock()
 
@@ -306,7 +303,7 @@ func newFakeListener(requestsCount, clientsCount, requestsPerConn int, request s
 		ch:              make(chan *fakeServerConn, clientsCount),
 		done:            make(chan struct{}),
 	}
-	for i := 0; i < clientsCount; i++ {
+	for range clientsCount {
 		ln.ch <- &fakeServerConn{
 			ln: ln,
 		}

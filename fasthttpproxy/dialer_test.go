@@ -2,6 +2,7 @@ package fasthttpproxy
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -233,9 +234,30 @@ func TestDialer_GetDialFunc(t *testing.T) {
 				t.Errorf("GetDialFunc() counts = %v, want %v", getCounts(counts), tt.wantCounts)
 			}
 		})
-		for i := 0; i < len(counts); i++ {
+		for i := range counts {
 			counts[i].Store(0)
 		}
+	}
+}
+
+func TestHTTPProxyDialRejectsTargetAddrContainingNewlines(t *testing.T) {
+	var dialed atomic.Bool
+
+	conn, err := httpProxyDial(DialerFunc(func(network, addr string) (net.Conn, error) {
+		dialed.Store(true)
+		return nil, errors.New("unexpected proxy dial")
+	}), "tcp4", "victim.example:443\r\nX-Injected: yes", "127.0.0.1:8080", "")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if conn != nil {
+		t.Fatalf("expected nil conn, got %#v", conn)
+	}
+	if !strings.Contains(err.Error(), "CR or LF") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dialed.Load() {
+		t.Fatal("proxy dialer must not be invoked for invalid target addresses")
 	}
 }
 
@@ -287,7 +309,7 @@ func getDialer(httpProxy, httpsProxy, noProxy string) *Dialer {
 }
 
 func getCounts(counts []atomic.Int64) (r []int64) {
-	for i := 0; i < len(counts); i++ {
+	for i := range counts {
 		r = append(r, counts[i].Load())
 	}
 	return r

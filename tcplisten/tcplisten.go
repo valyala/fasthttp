@@ -66,8 +66,14 @@ func (cfg *Config) NewListener(network, addr string) (net.Listener, error) {
 		return nil, err
 	}
 
+	fdUintptr, err := safeIntToUintptr(fd)
+	if err != nil {
+		unix.Close(fd)
+		return nil, fmt.Errorf("unexpected convert socket fd int to uintptr: %w", err)
+	}
+
 	name := fmt.Sprintf("reuseport.%d.%s.%s", os.Getpid(), network, addr)
-	file := os.NewFile(uintptr(fd), name)
+	file := os.NewFile(fdUintptr, name)
 	ln, err := net.FileListener(file)
 	if err != nil {
 		file.Close()
@@ -189,4 +195,11 @@ func safeIntToUint32(i int) (uint32, error) {
 		return 0, errors.New("value exceeds uint32 max value")
 	}
 	return uint32(ui), nil
+}
+
+func safeIntToUintptr(i int) (uintptr, error) {
+	if i < 0 {
+		return 0, errors.New("value is negative, cannot convert to uintptr")
+	}
+	return uintptr(i), nil
 }

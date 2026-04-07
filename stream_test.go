@@ -52,7 +52,7 @@ func TestStreamReaderClose(t *testing.T) {
 		}
 
 		data := createFixedBody(4000)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			w.Write(data) //nolint:errcheck
 		}
 		if err := w.Flush(); err == nil {

@@ -117,6 +117,13 @@ func FuzzURIParse(f *testing.F) {
 	f.Add(`http://google.com#@github.com`)
 
 	f.Fuzz(func(t *testing.T, uri string) {
+		// Limit the size of the URI to avoid OOMs or timeouts.
+		// When using Server or Client the maximum URI is dicated by the maximum header size,
+		// which defaults to defaultReadBufferSize (4096 bytes).
+		if len(uri) > defaultReadBufferSize {
+			return
+		}
+
 		var u URI
 
 		uri = strings.ToLower(uri)
@@ -146,6 +153,7 @@ func FuzzURIParse(f *testing.F) {
 func FuzzTestHeaderScanner(f *testing.F) {
 	f.Add([]byte("Host: example.com\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate\r\n\r\n"))
 	f.Add([]byte("Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 27\r\n\r\nname=John+Doe&age=30"))
+	f.Add([]byte(" 3 :\r\n\r\n"))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if !bytes.Contains(data, []byte("\r\n\r\n")) {
