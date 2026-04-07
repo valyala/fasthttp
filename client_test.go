@@ -3626,7 +3626,7 @@ func (t *TransportMock) RoundTrip(hc *HostClient, req *Request, resp *Response) 
 
 func TestClient_RetryIfErrUpstream(t *testing.T) {
 	t.Parallel()
-	upstreamErr := fmt.Errorf("upstream error")
+	upstreamErr := errors.New("upstream error")
 
 	t.Run("upstream_known", func(t *testing.T) {
 		retryIfErrCalled := false

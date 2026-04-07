@@ -1397,15 +1397,16 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		if attempts >= maxAttempts {
 			break
 		}
-		if c.RetryIfErrUpstream != nil {
+		switch {
+		case c.RetryIfErrUpstream != nil:
 			upstream := ""
 			if resp.RemoteAddr() != nil {
 				upstream = resp.RemoteAddr().String()
 			}
 			resetTimeout, retry = c.RetryIfErrUpstream(req, attempts, err, upstream)
-		} else if c.RetryIfErr != nil {
+		case c.RetryIfErr != nil:
 			resetTimeout, retry = c.RetryIfErr(req, attempts, err)
-		} else {
+		default:
 			retry = retryFunc(req)
 		}
 		if !retry {
