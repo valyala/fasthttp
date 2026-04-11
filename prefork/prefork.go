@@ -366,8 +366,8 @@ func (p *Prefork) ListenAndServe(addr string) error {
 
 // ListenAndServeTLS serves HTTPS requests from the given TCP addr.
 //
-// certFile and certKey are paths to TLS certificate and key files.
-func (p *Prefork) ListenAndServeTLS(addr, certFile, certKey string) error {
+// certKey and certFile are paths to TLS key and certificate files.
+func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 	if IsChild() {
 		ln, err := p.listenAsChild(addr)
 		if err != nil {
