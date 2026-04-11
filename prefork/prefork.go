@@ -130,6 +130,22 @@ func (p *Prefork) logger() Logger {
 }
 
 func (p *Prefork) watchMaster(masterPID int) {
+	if runtime.GOOS == "windows" {
+		// On Windows, os.Getppid() returns a static PID that doesn't change
+		// when the parent exits (no reparenting). Use FindProcess+Wait instead.
+		proc, err := os.FindProcess(masterPID)
+		if err == nil {
+			_, _ = proc.Wait()
+		}
+		p.logger().Printf("master process died\n")
+		p.OnMasterDeath()
+		return
+	}
+
+	// Unix/Linux/macOS: When the master exits, the OS reparents the child
+	// to another process, causing Getppid() to change. Comparing against
+	// the original masterPID (instead of hardcoding 1) ensures this works
+	// correctly when the master itself is PID 1 (e.g. in Docker containers).
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
