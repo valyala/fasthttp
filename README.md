@@ -379,6 +379,7 @@ Important points:
   - [r.FormValue()](https://pkg.go.dev/net/http#Request.FormValue) **➜** [ctx.FormValue()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormValue)
   - [r.FormFile()](https://pkg.go.dev/net/http#Request.FormFile) **➜** [ctx.FormFile()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.FormFile)
   - [r.MultipartForm](https://pkg.go.dev/net/http#Request) **➜** [ctx.MultipartForm()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.MultipartForm)
+    For untrusted multipart input, use [ctx.MultipartFormWithLimit()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.MultipartFormWithLimit) (or a custom [Server.FormValueFunc](https://pkg.go.dev/github.com/valyala/fasthttp#Server)) to enforce a parsing size limit.
   - [r.RemoteAddr](https://pkg.go.dev/net/http#Request) **➜** [ctx.RemoteAddr()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RemoteAddr)
   - [r.RequestURI](https://pkg.go.dev/net/http#Request) **➜** [ctx.RequestURI()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.RequestURI)
   - [r.TLS](https://pkg.go.dev/net/http#Request) **➜** [ctx.IsTLS()](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.IsTLS)
@@ -607,6 +608,7 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
 - [Gearbox](https://github.com/gogearbox/gearbox) - :gear: gearbox is a web framework written in Go with a focus on high performance and memory optimization.
 - [http2curl](https://github.com/li-jin-gou/http2curl) - A tool to convert fasthttp requests to curl command line.
 - [OpenTelemetry Golang Compile Time Instrumentation](https://github.com/alibaba/opentelemetry-go-auto-instrumentation) - A tool to monitor fasthttp application without changing any code with OpenTelemetry APIs.
+- [protoc-gen-httpgo](https://github.com/MUlt1mate/protoc-gen-httpgo) - A protoc plugin that generates fasthttp server and client code.
 
 ## FAQ
 

@@ -67,7 +67,7 @@ func acquireRealZstdWriter(w io.Writer, level int) *zstd.Encoder {
 	p := realZstdWriterPoolMap[nLevel]
 	v := p.Get()
 	if v == nil {
-		zw, err := zstd.NewWriter(w, zstd.WithEncoderLevel(zstd.EncoderLevel(level)))
+		zw, err := zstd.NewWriter(w, zstd.WithEncoderLevel(zstd.EncoderLevel(nLevel)))
 		if err != nil {
 			panic(err)
 		}
@@ -139,12 +139,16 @@ func AppendZstdBytes(dst, src []byte) []byte {
 // WriteUnzstd writes unzstd p to w and returns the number of uncompressed
 // bytes written to w.
 func WriteUnzstd(w io.Writer, p []byte) (int, error) {
+	return writeUnzstd(w, p, 0)
+}
+
+func writeUnzstd(w io.Writer, p []byte, maxBodySize int) (int, error) {
 	r := &byteSliceReader{b: p}
 	zr, err := acquireZstdReader(r)
 	if err != nil {
 		return 0, err
 	}
-	n, err := copyZeroAlloc(w, zr)
+	n, err := copyZeroAllocWithLimit(w, zr, maxBodySize)
 	releaseZstdReader(zr)
 	nn := int(n)
 	if int64(nn) != n {

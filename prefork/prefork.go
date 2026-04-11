@@ -17,8 +17,6 @@ import (
 const (
 	preforkChildEnvVariable = "FASTHTTP_PREFORK_CHILD"
 	defaultNetwork          = "tcp4"
-	windowsOS               = "windows"
-	watchInterval           = 500 * time.Millisecond
 )
 
 var (
@@ -72,11 +70,13 @@ type Prefork struct {
 	// It's disabled by default
 	Reuseport bool
 
-	// WatchMaster enables monitoring of the master process.
-	// If enabled, child processes will automatically exit when the master process dies.
+	// OnMasterDeath, when non-nil, enables monitoring of the master process
+	// in child processes. If the master process dies unexpectedly, this
+	// callback is invoked. This allows custom cleanup before shutdown.
 	//
-	// It's disabled by default
-	WatchMaster bool
+	// It is recommended to set this to func() { os.Exit(1) } if no custom
+	// cleanup is needed.
+	OnMasterDeath func()
 
 	// OnChildSpawn is called in the master process whenever a new child process is spawned.
 	// It receives the PID of the newly spawned child process.
@@ -97,7 +97,7 @@ type Prefork struct {
 	OnChildRecover func(pid int) error
 
 	// CommandProducer is called to create child process commands.
-	// If nil, the default implementation using os.Args is used.
+	// If nil, the default implementation using os.Executable() is used.
 	// This can be used for testing or customizing child process behavior.
 	//
 	// The function receives the files to be passed as ExtraFiles to the child process
@@ -129,16 +129,24 @@ func (p *Prefork) logger() Logger {
 	return defaultLogger
 }
 
+func (p *Prefork) watchMaster(masterPID int) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		if os.Getppid() != masterPID {
+			p.logger().Printf("master process died\n")
+			p.OnMasterDeath()
+			return
+		}
+	}
+}
+
 func (p *Prefork) listen(addr string) (net.Listener, error) {
 	runtime.GOMAXPROCS(1)
 
 	if p.Network == "" {
 		p.Network = defaultNetwork
-	}
-
-	// Start watching master process if enabled
-	if p.WatchMaster {
-		go watchMaster()
 	}
 
 	if p.Reuseport {
@@ -181,14 +189,25 @@ func (p *Prefork) doCommand() (*exec.Cmd, error) {
 		return p.CommandProducer(p.files)
 	}
 
-	// Default implementation
-	// #nosec G204
-	cmd := exec.Command(os.Args[0], os.Args[1:]...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), preforkChildEnvVariable+"=1")
-	cmd.ExtraFiles = p.files
-	err := cmd.Start()
+	// Default implementation using os.Executable() for reliable path resolution
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+
+	args := make([]string, len(os.Args))
+	args[0] = executable
+	copy(args[1:], os.Args[1:])
+
+	cmd := &exec.Cmd{
+		Path:       executable,
+		Args:       args,
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
+		Env:        append(os.Environ(), preforkChildEnvVariable+"=1"),
+		ExtraFiles: p.files,
+	}
+	err = cmd.Start()
 	return cmd, err
 }
 
@@ -218,7 +237,6 @@ func (p *Prefork) prefork(addr string) (err error) {
 
 	goMaxProcs := runtime.GOMAXPROCS(0)
 	sigCh := make(chan procSig, goMaxProcs)
-	// Pre-allocate map with expected capacity for better performance
 	childProcs := make(map[int]*exec.Cmd, goMaxProcs)
 
 	defer func() {
@@ -227,12 +245,12 @@ func (p *Prefork) prefork(addr string) (err error) {
 		}
 	}()
 
-	// Pre-allocate slice with expected capacity for OnMasterReady callback
+	// Collect child PIDs for OnMasterReady callback
 	childPIDs := make([]int, 0, goMaxProcs)
 
-	for i := 0; i < goMaxProcs; i++ {
-		cmd, err := p.doCommand()
-		if err != nil {
+	for range goMaxProcs {
+		var cmd *exec.Cmd
+		if cmd, err = p.doCommand(); err != nil {
 			p.logger().Printf("failed to start a child prefork process, error: %v\n", err)
 			return err
 		}
@@ -249,7 +267,6 @@ func (p *Prefork) prefork(addr string) (err error) {
 			}
 		}
 
-		// Pass cmd to goroutine to avoid closure capture bug
 		go func(c *exec.Cmd, pid int) {
 			sigCh <- procSig{pid: pid, err: c.Wait()}
 		}(cmd, pid)
@@ -292,7 +309,6 @@ func (p *Prefork) prefork(addr string) (err error) {
 			_ = p.OnChildRecover(pid)
 		}
 
-		// Pass cmd to goroutine to avoid closure capture bug
 		go func(c *exec.Cmd, pid int) {
 			sigCh <- procSig{pid: pid, err: c.Wait()}
 		}(cmd, pid)
@@ -311,6 +327,10 @@ func (p *Prefork) ListenAndServe(addr string) error {
 
 		p.ln = ln
 
+		if p.OnMasterDeath != nil {
+			go p.watchMaster(os.Getppid())
+		}
+
 		return p.ServeFunc(ln)
 	}
 
@@ -319,8 +339,8 @@ func (p *Prefork) ListenAndServe(addr string) error {
 
 // ListenAndServeTLS serves HTTPS requests from the given TCP addr.
 //
-// certFile and keyFile are paths to TLS certificate and key files.
-func (p *Prefork) ListenAndServeTLS(addr, certFile, keyFile string) error {
+// certFile and certKey are paths to TLS certificate and key files.
+func (p *Prefork) ListenAndServeTLS(addr, certFile, certKey string) error {
 	if IsChild() {
 		ln, err := p.listen(addr)
 		if err != nil {
@@ -329,7 +349,11 @@ func (p *Prefork) ListenAndServeTLS(addr, certFile, keyFile string) error {
 
 		p.ln = ln
 
-		return p.ServeTLSFunc(ln, certFile, keyFile)
+		if p.OnMasterDeath != nil {
+			go p.watchMaster(os.Getppid())
+		}
+
+		return p.ServeTLSFunc(ln, certFile, certKey)
 	}
 
 	return p.prefork(addr)
@@ -347,37 +371,12 @@ func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) 
 
 		p.ln = ln
 
+		if p.OnMasterDeath != nil {
+			go p.watchMaster(os.Getppid())
+		}
+
 		return p.ServeTLSEmbedFunc(ln, certData, keyData)
 	}
 
 	return p.prefork(addr)
-}
-
-// watchMaster monitors the master process and exits the child process if the master dies.
-// This ensures that orphaned child processes are properly cleaned up.
-//
-// On Windows: Uses os.FindProcess and Wait() to detect master process exit.
-// On Unix/Linux: Periodically checks if parent PID is 1 (init process), indicating orphan status.
-func watchMaster() {
-	// Windows implementation
-	if runtime.GOOS == windowsOS {
-		// Find parent process
-		p, err := os.FindProcess(os.Getppid())
-		if err == nil {
-			_, _ = p.Wait() // Wait for parent to exit
-		}
-		os.Exit(1) //nolint:revive // Exiting child process is intentional
-	}
-
-	// Unix/Linux implementation
-	// If parent PID becomes 1 (init), it means the master process has died
-	// and this child process has been adopted by init
-	ticker := time.NewTicker(watchInterval)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		if os.Getppid() == 1 {
-			os.Exit(1) //nolint:revive // Exiting child process is intentional
-		}
-	}
 }

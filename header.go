@@ -296,12 +296,12 @@ func (h *ResponseHeader) ContentType() []byte {
 
 // SetContentType sets Content-Type header value.
 func (h *header) SetContentType(contentType string) {
-	h.contentType = append(h.contentType[:0], contentType...)
+	h.contentType = initHeaderValueString(h.contentType, contentType)
 }
 
 // SetContentTypeBytes sets Content-Type header value.
 func (h *header) SetContentTypeBytes(contentType []byte) {
-	h.contentType = append(h.contentType[:0], contentType...)
+	h.contentType = initHeaderValueBytes(h.contentType, contentType)
 }
 
 // ContentEncoding returns Content-Encoding header value.
@@ -311,12 +311,12 @@ func (h *ResponseHeader) ContentEncoding() []byte {
 
 // SetContentEncoding sets Content-Encoding header value.
 func (h *ResponseHeader) SetContentEncoding(contentEncoding string) {
-	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
+	h.contentEncoding = initHeaderValueString(h.contentEncoding, contentEncoding)
 }
 
 // SetContentEncodingBytes sets Content-Encoding header value.
 func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
-	h.contentEncoding = append(h.contentEncoding[:0], contentEncoding...)
+	h.contentEncoding = initHeaderValueBytes(h.contentEncoding, contentEncoding)
 }
 
 // addVaryBytes add value to the 'Vary' header if it's not included.
@@ -338,12 +338,12 @@ func (h *ResponseHeader) Server() []byte {
 
 // SetServer sets Server header value.
 func (h *ResponseHeader) SetServer(server string) {
-	h.server = append(h.server[:0], server...)
+	h.server = initHeaderValueString(h.server, server)
 }
 
 // SetServerBytes sets Server header value.
 func (h *ResponseHeader) SetServerBytes(server []byte) {
-	h.server = append(h.server[:0], server...)
+	h.server = initHeaderValueBytes(h.server, server)
 }
 
 // ContentType returns Content-Type header value.
@@ -366,7 +366,8 @@ func (h *RequestHeader) SetContentEncoding(contentEncoding string) {
 
 // SetContentEncodingBytes sets Content-Encoding header value.
 func (h *RequestHeader) SetContentEncodingBytes(contentEncoding []byte) {
-	h.setNonSpecial(strContentEncoding, contentEncoding)
+	h.bufV = initHeaderValueBytes(h.bufV, contentEncoding)
+	h.setNonSpecial(strContentEncoding, h.bufV)
 }
 
 // SetMultipartFormBoundary sets the following Content-Type:
@@ -697,12 +698,12 @@ func (h *RequestHeader) Host() []byte {
 
 // SetHost sets Host header value.
 func (h *RequestHeader) SetHost(host string) {
-	h.host = append(h.host[:0], host...)
+	h.host = initHeaderValueString(h.host, host)
 }
 
 // SetHostBytes sets Host header value.
 func (h *RequestHeader) SetHostBytes(host []byte) {
-	h.host = append(h.host[:0], host...)
+	h.host = initHeaderValueBytes(h.host, host)
 }
 
 // UserAgent returns User-Agent header value.
@@ -715,12 +716,12 @@ func (h *RequestHeader) UserAgent() []byte {
 
 // SetUserAgent sets User-Agent header value.
 func (h *RequestHeader) SetUserAgent(userAgent string) {
-	h.userAgent = append(h.userAgent[:0], userAgent...)
+	h.userAgent = initHeaderValueString(h.userAgent, userAgent)
 }
 
 // SetUserAgentBytes sets User-Agent header value.
 func (h *RequestHeader) SetUserAgentBytes(userAgent []byte) {
-	h.userAgent = append(h.userAgent[:0], userAgent...)
+	h.userAgent = initHeaderValueBytes(h.userAgent, userAgent)
 }
 
 // Referer returns Referer header value.
@@ -735,7 +736,8 @@ func (h *RequestHeader) SetReferer(referer string) {
 
 // SetRefererBytes sets Referer header value.
 func (h *RequestHeader) SetRefererBytes(referer []byte) {
-	h.setNonSpecial(strReferer, referer)
+	h.bufV = initHeaderValueBytes(h.bufV, referer)
+	h.setNonSpecial(strReferer, h.bufV)
 }
 
 // Method returns HTTP request method.
@@ -1298,6 +1300,7 @@ func (h *RequestHeader) AllInOrder() iter.Seq2[[]byte, []byte] {
 		var s headerScanner
 		s.b = h.rawHeaders
 		for s.next() {
+			s.key = trimTrailingSpace(s.key)
 			normalizeHeaderKey(s.key, h.disableNormalizing || bytes.IndexByte(s.key, ' ') != -1)
 			if len(s.key) > 0 {
 				if !yield(s.key, s.value) {
@@ -1567,12 +1570,12 @@ func (h *ResponseHeader) AddBytesV(key string, value []byte) {
 // If the header is set as a Trailer (forbidden trailers will not be set, see AddTrailer for more details),
 // it will be sent after the chunked response body.
 func (h *ResponseHeader) AddBytesKV(key, value []byte) {
-	if h.setSpecialHeader(key, value) {
+	h.bufK, h.bufV = initHeaderKV(h.bufK, h.bufV, b2s(key), b2s(value), h.disableNormalizing)
+	if h.setSpecialHeader(h.bufK, h.bufV) {
 		return
 	}
 
-	h.bufK = getHeaderKeyBytes(h.bufK, b2s(key), h.disableNormalizing)
-	h.h = appendArgBytes(h.h, h.bufK, value, argsHasValue)
+	h.h = appendArgBytes(h.h, h.bufK, h.bufV, argsHasValue)
 }
 
 // Set sets the given 'key: value' header.
@@ -1641,10 +1644,11 @@ func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked response body.
 func (h *ResponseHeader) SetCanonical(key, value []byte) {
-	if h.setSpecialHeader(key, value) {
+	h.bufV = initHeaderValueBytes(h.bufV, value)
+	if h.setSpecialHeader(key, h.bufV) {
 		return
 	}
-	h.setNonSpecial(key, value)
+	h.setNonSpecial(key, h.bufV)
 }
 
 // SetCookie sets the given response cookie.
@@ -1793,12 +1797,12 @@ func (h *RequestHeader) AddBytesV(key string, value []byte) {
 // If the header is set as a Trailer (forbidden trailers will not be set, see AddTrailer for more details),
 // it will be sent after the chunked request body.
 func (h *RequestHeader) AddBytesKV(key, value []byte) {
-	if h.setSpecialHeader(key, value) {
+	h.bufK, h.bufV = initHeaderKV(h.bufK, h.bufV, b2s(key), b2s(value), h.disableNormalizing)
+	if h.setSpecialHeader(h.bufK, h.bufV) {
 		return
 	}
 
-	h.bufK = getHeaderKeyBytes(h.bufK, b2s(key), h.disableNormalizing)
-	h.h = appendArgBytes(h.h, h.bufK, value, argsHasValue)
+	h.h = appendArgBytes(h.h, h.bufK, h.bufV, argsHasValue)
 }
 
 // Set sets the given 'key: value' header.
@@ -1867,10 +1871,11 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 // If the header is set as a Trailer (forbidden trailers will not be set, see SetTrailer for more details),
 // it will be sent after the chunked request body.
 func (h *RequestHeader) SetCanonical(key, value []byte) {
-	if h.setSpecialHeader(key, value) {
+	h.bufV = initHeaderValueBytes(h.bufV, value)
+	if h.setSpecialHeader(key, h.bufV) {
 		return
 	}
-	h.setNonSpecial(key, value)
+	h.setNonSpecial(key, h.bufV)
 }
 
 // Peek returns header value for the given key.
@@ -2316,7 +2321,19 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 	if errParse != nil {
 		return headerError("request", err, errParse, b, h.secureErrorLogMessage)
 	}
+	if errValidate := h.validate(); errValidate != nil {
+		return headerError("request", err, errValidate, b, h.secureErrorLogMessage)
+	}
 	mustDiscard(r, headersLen)
+	return nil
+}
+
+func (h *RequestHeader) validate() error {
+	// Host header is mandatory in HTTP/1.1 requests.
+	if h.IsHTTP11() && len(h.Host()) == 0 {
+		h.connectionClose = true
+		return errRequestHostRequired
+	}
 	return nil
 }
 
@@ -2483,7 +2500,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 
 	n := len(h.cookies)
 	if n > 0 {
-		for i := 0; i < n; i++ {
+		for i := range n {
 			kv := &h.cookies[i]
 			dst = appendHeaderLine(dst, strSetCookie, kv.value)
 		}
@@ -2673,19 +2690,14 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 }
 
 func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV, int, error) {
-	// Skip any 0 length chunk.
-	if src[0] == '0' {
-		skip := len(strCRLF) + 1
-		if len(src) < skip {
-			return dest, 0, io.EOF
-		}
-		src = src[skip:]
-	}
-
 	var s headerScanner
 	s.b = src
 
 	for s.next() {
+		// Trim trailing whitespace before the colon to normalize headers
+		// like "Content-Length :" to "Content-Length:".
+		s.key = trimTrailingSpace(s.key)
+
 		if len(s.key) == 0 {
 			continue
 		}
@@ -2706,7 +2718,7 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 		if isBadTrailer(s.key) {
 			return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
 		}
-		normalizeHeaderKey(s.key, disable)
+		normalizeHeaderKeyValidated(s.key, disable)
 		dest = appendArgBytes(dest, s.key, s.value, argsHasValue)
 	}
 	if s.err != nil {
@@ -2772,6 +2784,14 @@ func isBadTrailer(key []byte) bool {
 	return false
 }
 
+func isHTTPVersion(proto []byte) bool {
+	return len(proto) == len(strHTTP11) &&
+		bytes.HasPrefix(proto, strHTTP11[:5]) &&
+		proto[6] == '.' &&
+		proto[5] >= '0' && proto[5] <= '9' &&
+		proto[7] >= '0' && proto[7] <= '9'
+}
+
 func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 	bNext := buf
 	var b []byte
@@ -2790,25 +2810,42 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 		return 0, fmt.Errorf("cannot find whitespace in the first line of response %q", buf)
 	}
-	h.noHTTP11 = !bytes.Equal(b[:n], strHTTP11)
+	protoStr := b[:n]
 	b = b[n+1:]
+	for len(b) > 0 && b[0] == ' ' {
+		b = b[1:]
+	}
 
 	// parse status code
-	h.statusCode, n, err = parseUintBuf(b)
-	if err != nil {
-		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("cannot parse response status code: %w", err)
-		}
-		return 0, fmt.Errorf("cannot parse response status code: %w. Response %q", err, buf)
+	statusCode := b
+	statusMessage := []byte(nil)
+	if n = bytes.IndexByte(b, ' '); n >= 0 {
+		statusCode = b[:n]
+		statusMessage = b[n+1:]
 	}
-	if len(b) > n && b[n] != ' ' {
+	if len(statusCode) != 3 {
 		if h.secureErrorLogMessage {
 			return 0, ErrUnexpectedStatusCodeChar
 		}
-		return 0, fmt.Errorf("unexpected char at the end of status code. Response %q", buf)
+		return 0, fmt.Errorf("invalid response status code %q. Response %q", statusCode, buf)
 	}
-	if len(b) > n+1 {
-		h.SetStatusMessage(b[n+1:])
+	h.statusCode, n, err = parseUintBuf(statusCode)
+	if err != nil || n != 3 {
+		if h.secureErrorLogMessage {
+			return 0, ErrUnexpectedStatusCodeChar
+		}
+		return 0, fmt.Errorf("invalid response status code %q. Response %q", statusCode, buf)
+	}
+	if !isHTTPVersion(protoStr) {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+	}
+	h.noHTTP11 = !bytes.Equal(protoStr, strHTTP11)
+	h.protocol = append(h.protocol[:0], protoStr...)
+	if len(statusMessage) > 0 {
+		h.SetStatusMessage(statusMessage)
 	}
 
 	return len(buf) - len(bNext), nil
@@ -2851,54 +2888,32 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	}
 
 	b = b[n+1:]
-
-	// Check for extra whitespace after method - only one space should separate method from URI
-	if len(b) > 0 && b[0] == ' ' {
-		if h.secureErrorLogMessage {
-			return 0, ErrExtraWhitespaceInRequestLine
-		}
-		return 0, fmt.Errorf("extra whitespace in request line %q", buf)
-	}
-
-	// parse requestURI - RFC 9112 requires exactly one space between components
 	n = bytes.IndexByte(b, ' ')
 	if n < 0 {
 		return 0, fmt.Errorf("cannot find whitespace in the first line of request %q", buf)
-	} else if n == 0 {
+	}
+
+	protoStr := b[n+1:]
+
+	if !isHTTPVersion(protoStr) {
+		if h.secureErrorLogMessage {
+			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+		}
+		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+	}
+
+	if n == 0 {
 		if h.secureErrorLogMessage {
 			return 0, ErrEmptyRequestURI
 		}
 		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
 	}
 
-	// Check for extra whitespace - only one space should separate URI from HTTP version
-	if n+1 < len(b) && b[n+1] == ' ' {
+	if err := validateRequestURI(h.method, b[:n]); err != nil {
 		if h.secureErrorLogMessage {
-			return 0, ErrExtraWhitespaceInRequestLine
+			return 0, fmt.Errorf("invalid requestURI %q", b[:n])
 		}
-		return 0, fmt.Errorf("extra whitespace in request line %q", buf)
-	}
-
-	protoStr := b[n+1:]
-
-	// Follow RFCs 7230 and 9112 and require that HTTP versions match the following pattern: HTTP/[0-9]\.[0-9]
-	if len(protoStr) != len(strHTTP11) {
-		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
-		}
-		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
-	}
-	if !bytes.HasPrefix(protoStr, strHTTP11[:5]) {
-		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
-		}
-		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
-	}
-	if protoStr[5] < '0' || protoStr[5] > '9' || protoStr[7] < '0' || protoStr[7] > '9' {
-		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
-		}
-		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+		return 0, fmt.Errorf("invalid requestURI %q in %q: %w", b[:n], buf, err)
 	}
 
 	h.noHTTP11 = !bytes.Equal(protoStr, strHTTP11)
@@ -2906,6 +2921,29 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	h.requestURI = append(h.requestURI[:0], b[:n]...)
 
 	return len(buf) - len(bNext), nil
+}
+
+func validateRequestURI(method, requestURI []byte) error {
+	if stringContainsCTLByte(requestURI) {
+		return ErrorInvalidURI
+	}
+	if len(requestURI) == 1 && requestURI[0] == '*' {
+		return nil
+	}
+	if len(requestURI) > 0 && requestURI[0] == '/' {
+		return nil
+	}
+	if before, _, ok := bytes.Cut(requestURI, strColonSlashSlash); ok {
+		if !isValidScheme(before) {
+			return ErrorInvalidURI
+		}
+		return nil
+	}
+	// net/http treats CONNECT request-targets without a leading slash as authority-form.
+	if bytes.Equal(method, strConnect) {
+		return nil
+	}
+	return ErrorInvalidURI
 }
 
 func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
@@ -2945,6 +2983,10 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	var kv *argsKV
 
 	for s.next() {
+		// Trim trailing whitespace before the colon to normalize headers
+		// like "Content-Length :" to "Content-Length:".
+		s.key = trimTrailingSpace(s.key)
+
 		if len(s.key) == 0 {
 			h.connectionClose = true
 			return 0, fmt.Errorf("invalid header key %q", s.key)
@@ -2964,7 +3006,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				return 0, fmt.Errorf("invalid header key %q", s.key)
 			}
 		}
-		normalizeHeaderKey(s.key, disableNormalizing)
+		normalizeHeaderKeyValidated(s.key, disableNormalizing)
 
 		for _, ch := range s.value {
 			if !validHeaderValueByte(ch) {
@@ -3065,11 +3107,16 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	h.contentLength = -2
 
 	contentLengthSeen := false
+	hostSeen := false
 
 	var s headerScanner
 	s.b = buf
 
 	for s.next() {
+		// Trim trailing whitespace before the colon to normalize headers
+		// like "Content-Length :" to "Content-Length:".
+		s.key = trimTrailingSpace(s.key)
+
 		if len(s.key) == 0 {
 			h.connectionClose = true
 			return 0, fmt.Errorf("invalid header key %q", s.key)
@@ -3086,7 +3133,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				return 0, fmt.Errorf("invalid header key %q", s.key)
 			}
 		}
-		normalizeHeaderKey(s.key, disableNormalizing)
+		normalizeHeaderKeyValidated(s.key, disableNormalizing)
 
 		for _, ch := range s.value {
 			if !validHeaderValueByte(ch) {
@@ -3103,6 +3150,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 		switch s.key[0] | 0x20 {
 		case 'h':
 			if caseInsensitiveCompare(s.key, strHost) {
+				if hostSeen {
+					h.connectionClose = true
+					return 0, errors.New("too many Host headers")
+				}
+				hostSeen = true
 				h.host = append(h.host[:0], s.value...)
 				continue
 			}
@@ -3232,14 +3284,14 @@ func (s *headerValueScanner) next() bool {
 	if len(b) == 0 {
 		return false
 	}
-	n := bytes.IndexByte(b, ',')
-	if n < 0 {
+	before, after, ok := bytes.Cut(b, []byte{','})
+	if !ok {
 		s.value = stripSpace(b)
 		s.b = b[len(b):]
 		return true
 	}
-	s.value = stripSpace(b[:n])
-	s.b = b[n+1:]
+	s.value = stripSpace(before)
+	s.b = after
 	return true
 }
 
@@ -3278,10 +3330,19 @@ func nextLine(b []byte) ([]byte, []byte, error) {
 
 func initHeaderKV(bufK, bufV []byte, key, value string, disableNormalizing bool) ([]byte, []byte) {
 	bufK = getHeaderKeyBytes(bufK, key, disableNormalizing)
+	bufV = initHeaderValueString(bufV, value)
+	return bufK, bufV
+}
+
+func initHeaderValueString(bufV []byte, value string) []byte {
+	return initHeaderValueBytes(bufV, s2b(value))
+}
+
+func initHeaderValueBytes(bufV, value []byte) []byte {
 	// https://tools.ietf.org/html/rfc7230#section-3.2.4
 	bufV = append(bufV[:0], value...)
 	bufV = removeNewLines(bufV)
-	return bufK, bufV
+	return bufV
 }
 
 func getHeaderKeyBytes(bufK []byte, key string, disableNormalizing bool) []byte {
@@ -3305,6 +3366,19 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 		if !validHeaderFieldByte(c) {
 			return
 		}
+	}
+
+	normalizeHeaderKeyValidated(b, false)
+}
+
+func normalizeHeaderKeyValidated(b []byte, disableNormalizing bool) {
+	if disableNormalizing {
+		return
+	}
+
+	n := len(b)
+	if n == 0 {
+		return
 	}
 
 	upper := true

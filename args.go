@@ -396,7 +396,7 @@ func copyArgs(dst, src []argsKV) []argsKV {
 	}
 	n := len(src)
 	dst = dst[:n]
-	for i := 0; i < n; i++ {
+	for i := range n {
 		dstKV := &dst[i]
 		srcKV := &src[i]
 		dstKV.key = append(dstKV.key[:0], srcKV.key...)
@@ -443,7 +443,7 @@ func setArgBytes(h []argsKV, key, value []byte, noValue bool) []argsKV {
 
 func setArg(h []argsKV, key, value string, noValue bool) []argsKV {
 	n := len(h)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		kv := &h[i]
 		if key == string(kv.key) {
 			if noValue {

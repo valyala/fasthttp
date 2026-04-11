@@ -16,7 +16,7 @@ func TestNewFuncSimple(t *testing.T) {
 	})
 
 	iterations := 4 * 1024
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		if !f(2) {
 			t.Fatalf("f mustn't return false")
 		}
@@ -42,7 +42,7 @@ func TestNewFuncMulti(t *testing.T) {
 	f1Done := make(chan error, 1)
 	go func() {
 		var err error
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			if !f1(3) {
 				err = errors.New("f1 mustn't return false")
 				break
@@ -54,7 +54,7 @@ func TestNewFuncMulti(t *testing.T) {
 	f2Done := make(chan error, 1)
 	go func() {
 		var err error
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			if !f2(5) {
 				err = errors.New("f2 mustn't return false")
 				break

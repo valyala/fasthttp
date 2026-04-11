@@ -212,12 +212,16 @@ func AppendGzipBytes(dst, src []byte) []byte {
 // WriteGunzip writes ungzipped p to w and returns the number of uncompressed
 // bytes written to w.
 func WriteGunzip(w io.Writer, p []byte) (int, error) {
+	return writeGunzip(w, p, 0)
+}
+
+func writeGunzip(w io.Writer, p []byte, maxBodySize int) (int, error) {
 	r := &byteSliceReader{b: p}
 	zr, err := acquireGzipReader(r)
 	if err != nil {
 		return 0, err
 	}
-	n, err := copyZeroAlloc(w, zr)
+	n, err := copyZeroAllocWithLimit(w, zr, maxBodySize)
 	releaseGzipReader(zr)
 	nn := int(n)
 	if int64(nn) != n {
@@ -321,12 +325,16 @@ func AppendDeflateBytes(dst, src []byte) []byte {
 // WriteInflate writes inflated p to w and returns the number of uncompressed
 // bytes written to w.
 func WriteInflate(w io.Writer, p []byte) (int, error) {
+	return writeInflate(w, p, 0)
+}
+
+func writeInflate(w io.Writer, p []byte, maxBodySize int) (int, error) {
 	r := &byteSliceReader{b: p}
 	zr, err := acquireFlateReader(r)
 	if err != nil {
 		return 0, err
 	}
-	n, err := copyZeroAlloc(w, zr)
+	n, err := copyZeroAllocWithLimit(w, zr, maxBodySize)
 	releaseFlateReader(zr)
 	nn := int(n)
 	if int64(nn) != n {
@@ -439,8 +447,8 @@ func newCompressWriterPoolMap() []*sync.Pool {
 	// in https://pkg.go.dev/compress/flate#pkg-constants .
 	// Compression levels are normalized with normalizeCompressLevel,
 	// so the fit [0..11].
-	var m []*sync.Pool
-	for i := 0; i < 12; i++ {
+	m := make([]*sync.Pool, 0, 12)
+	for range 12 {
 		m = append(m, &sync.Pool{})
 	}
 	return m

@@ -20,13 +20,13 @@ func TestWorkerPoolStartStopConcurrent(t *testing.T) {
 
 	concurrency := 10
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			testWorkerPoolStartStop()
 			ch <- struct{}{}
 		}()
 	}
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-ch:
 		case <-time.After(time.Second):
@@ -41,7 +41,7 @@ func testWorkerPoolStartStop() {
 		MaxWorkersCount: 10,
 		Logger:          defaultLogger,
 	}
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wp.Start()
 		wp.Stop()
 	}
@@ -58,13 +58,13 @@ func TestWorkerPoolMaxWorkersCountConcurrent(t *testing.T) {
 
 	concurrency := 4
 	ch := make(chan struct{}, concurrency)
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		go func() {
 			testWorkerPoolMaxWorkersCountMulti(t)
 			ch <- struct{}{}
 		}()
 	}
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		select {
 		case <-ch:
 		case <-time.After(time.Second * 2):
@@ -74,7 +74,7 @@ func TestWorkerPoolMaxWorkersCountConcurrent(t *testing.T) {
 }
 
 func testWorkerPoolMaxWorkersCountMulti(t *testing.T) {
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		testWorkerPoolMaxWorkersCount(t)
 	}
 }
@@ -151,7 +151,7 @@ func testWorkerPoolMaxWorkersCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		if wp.Serve(conn) {
 			t.Fatalf("worker pool must be full")
 		}

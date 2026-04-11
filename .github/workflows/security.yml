@@ -8,7 +8,7 @@ jobs:
   test:
     strategy:
       matrix:
-        go-version: [1.20.x]
+        go-version: [1.25.x]
         platform: [ubuntu-latest]
     runs-on: ${{ matrix.platform }}
     env:
@@ -16,6 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Run Gosec Security Scanner
-        uses: securego/gosec@v2.22.11
+        uses: securego/gosec@v2.25.0
         with:
           args: '-exclude=G103,G104,G304,G402 ./...'

@@ -42,10 +42,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 			}
 			rs.chunkLeft = chunkSize
 		}
-		bytesToRead := len(p)
-		if rs.chunkLeft < len(p) {
-			bytesToRead = rs.chunkLeft
-		}
+		bytesToRead := min(rs.chunkLeft, len(p))
 		n, err = rs.reader.Read(p[:bytesToRead])
 		rs.totalBytesRead += n
 		rs.chunkLeft -= n

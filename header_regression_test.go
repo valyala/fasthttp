@@ -58,6 +58,7 @@ func testIssue6RequestHeaderSetContentType(t *testing.T, method string) {
 	var h RequestHeader
 	h.SetMethod(method)
 	h.SetRequestURI("http://localhost/test")
+	h.SetHost("localhost")
 	h.SetContentType(contentType)
 	h.SetContentLength(contentLength)
 

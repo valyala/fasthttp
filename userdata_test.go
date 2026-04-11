@@ -13,23 +13,23 @@ func TestUserData(t *testing.T) {
 
 	var u userData
 
-	for i := 0; i < 10; i++ {
-		key := []byte(fmt.Sprintf("key_%d", i))
+	for i := range 10 {
+		key := fmt.Appendf(nil, "key_%d", i)
 		u.SetBytes(key, i+5)
 		testUserDataGet(t, &u, key, i+5)
 		u.SetBytes(key, i)
 		testUserDataGet(t, &u, key, i)
 	}
 
-	for i := 0; i < 10; i++ {
-		key := []byte(fmt.Sprintf("key_%d", i))
+	for i := range 10 {
+		key := fmt.Appendf(nil, "key_%d", i)
 		testUserDataGet(t, &u, key, i)
 	}
 
 	u.Reset()
 
-	for i := 0; i < 10; i++ {
-		key := []byte(fmt.Sprintf("key_%d", i))
+	for i := range 10 {
+		key := fmt.Appendf(nil, "key_%d", i)
 		testUserDataGet(t, &u, key, nil)
 	}
 }
@@ -52,13 +52,13 @@ func TestUserDataValueClose(t *testing.T) {
 	closeCalls := 0
 
 	// store values implementing io.Closer
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		key := fmt.Sprintf("key_%d", i)
 		u.Set(key, &closerValue{closeCalls: &closeCalls})
 	}
 
 	// store values without io.Closer
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		key := fmt.Sprintf("key_noclose_%d", i)
 		u.Set(key, i)
 	}
@@ -84,7 +84,7 @@ func TestUserDataDelete(t *testing.T) {
 
 	var u userData
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		key := fmt.Sprintf("key_%d", i)
 		u.Set(key, i)
 		testUserDataGet(t, &u, []byte(key), i)
@@ -99,7 +99,7 @@ func TestUserDataDelete(t *testing.T) {
 		kk := fmt.Sprintf("key_%d", i+1)
 		testUserDataGet(t, &u, []byte(kk), i+1)
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		key := fmt.Sprintf("key_new_%d", i)
 		u.Set(key, i)
 		testUserDataGet(t, &u, []byte(key), i)

@@ -254,17 +254,26 @@ func (l *testLogger) Printf(format string, args ...any) {
 	l.messages = append(l.messages, fmt.Sprintf(format, args...))
 }
 
-func Test_Prefork_WatchMaster(t *testing.T) {
+func Test_Prefork_OnMasterDeath(t *testing.T) {
 	t.Parallel()
 
+	var called bool
 	p := &Prefork{
-		Reuseport:   true,
-		WatchMaster: true,
+		Reuseport: true,
+		OnMasterDeath: func() {
+			called = true
+		},
 	}
 
-	// Verify WatchMaster is set
-	if !p.WatchMaster {
-		t.Error("WatchMaster should be true")
+	// Verify OnMasterDeath is set
+	if p.OnMasterDeath == nil {
+		t.Error("OnMasterDeath should not be nil")
+	}
+
+	// Verify it can be called
+	p.OnMasterDeath()
+	if !called {
+		t.Error("OnMasterDeath was not called")
 	}
 }
 
@@ -375,15 +384,15 @@ func Test_ErrOnlyReuseportOnWindows(t *testing.T) {
 	}
 }
 
-func Test_Listen_WithWatchMaster(t *testing.T) {
+func Test_Listen_WithOnMasterDeath(t *testing.T) {
 	// This test can't run parallel as it modifies env.
 
 	setUp()
 	defer tearDown()
 
 	p := &Prefork{
-		Reuseport:   true,
-		WatchMaster: true,
+		Reuseport:     true,
+		OnMasterDeath: func() { os.Exit(1) },
 	}
 	addr := getAddr()
 
