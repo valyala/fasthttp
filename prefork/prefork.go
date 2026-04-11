@@ -169,7 +169,25 @@ func (p *Prefork) listen(addr string) (net.Listener, error) {
 		return reuseport.Listen(p.Network, addr)
 	}
 
+	// File descriptor 3 is the first ExtraFiles entry passed by the master process.
 	return net.FileListener(os.NewFile(3, ""))
+}
+
+// listenAsChild performs the common child process setup: creates the listener
+// and starts watching the master process if OnMasterDeath is configured.
+func (p *Prefork) listenAsChild(addr string) (net.Listener, error) {
+	ln, err := p.listen(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	p.ln = ln
+
+	if p.OnMasterDeath != nil {
+		go p.watchMaster(os.Getppid())
+	}
+
+	return ln, nil
 }
 
 func (p *Prefork) setTCPListenerFiles(addr string) error {
@@ -336,17 +354,10 @@ func (p *Prefork) prefork(addr string) (err error) {
 // ListenAndServe serves HTTP requests from the given TCP addr.
 func (p *Prefork) ListenAndServe(addr string) error {
 	if IsChild() {
-		ln, err := p.listen(addr)
+		ln, err := p.listenAsChild(addr)
 		if err != nil {
 			return err
 		}
-
-		p.ln = ln
-
-		if p.OnMasterDeath != nil {
-			go p.watchMaster(os.Getppid())
-		}
-
 		return p.ServeFunc(ln)
 	}
 
@@ -358,17 +369,10 @@ func (p *Prefork) ListenAndServe(addr string) error {
 // certFile and certKey are paths to TLS certificate and key files.
 func (p *Prefork) ListenAndServeTLS(addr, certFile, certKey string) error {
 	if IsChild() {
-		ln, err := p.listen(addr)
+		ln, err := p.listenAsChild(addr)
 		if err != nil {
 			return err
 		}
-
-		p.ln = ln
-
-		if p.OnMasterDeath != nil {
-			go p.watchMaster(os.Getppid())
-		}
-
 		return p.ServeTLSFunc(ln, certFile, certKey)
 	}
 
@@ -380,17 +384,10 @@ func (p *Prefork) ListenAndServeTLS(addr, certFile, certKey string) error {
 // certData and keyData must contain valid TLS certificate and key data.
 func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) error {
 	if IsChild() {
-		ln, err := p.listen(addr)
+		ln, err := p.listenAsChild(addr)
 		if err != nil {
 			return err
 		}
-
-		p.ln = ln
-
-		if p.OnMasterDeath != nil {
-			go p.watchMaster(os.Getppid())
-		}
-
 		return p.ServeTLSEmbedFunc(ln, certData, keyData)
 	}
 
