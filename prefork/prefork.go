@@ -77,6 +77,32 @@ type Prefork struct {
 	// It is recommended to set this to func() { os.Exit(1) } if no custom
 	// cleanup is needed.
 	OnMasterDeath func()
+
+	// OnChildSpawn is called in the master process whenever a new child process is spawned.
+	// It receives the PID of the newly spawned child process.
+	//
+	// If this callback returns an error, the prefork operation will be aborted.
+	OnChildSpawn func(pid int) error
+
+	// OnMasterReady is called in the master process after all child processes have been spawned.
+	// It receives a slice of all child process PIDs.
+	//
+	// If this callback returns an error, the prefork operation will be aborted.
+	OnMasterReady func(childPIDs []int) error
+
+	// OnChildRecover is called in the master process when a child process is restarted
+	// after a crash. It receives the PID of the newly recovered child process.
+	//
+	// The callback's error return value is ignored.
+	OnChildRecover func(pid int) error
+
+	// CommandProducer is called to create child process commands.
+	// If nil, the default implementation using os.Executable() is used.
+	// This can be used for testing or customizing child process behavior.
+	//
+	// The function receives the files to be passed as ExtraFiles to the child process
+	// and must return a started command.
+	CommandProducer func(files []*os.File) (*exec.Cmd, error)
 }
 
 // IsChild checks if the current thread/process is a child.
@@ -104,6 +130,22 @@ func (p *Prefork) logger() Logger {
 }
 
 func (p *Prefork) watchMaster(masterPID int) {
+	if runtime.GOOS == "windows" {
+		// On Windows, os.Getppid() returns a static PID that doesn't change
+		// when the parent exits (no reparenting). Use FindProcess+Wait instead.
+		proc, err := os.FindProcess(masterPID)
+		if err == nil {
+			_, _ = proc.Wait()
+		}
+		p.logger().Printf("master process died\n")
+		p.OnMasterDeath()
+		return
+	}
+
+	// Unix/Linux/macOS: When the master exits, the OS reparents the child
+	// to another process, causing Getppid() to change. Comparing against
+	// the original masterPID (instead of hardcoding 1) ensures this works
+	// correctly when the master itself is PID 1 (e.g. in Docker containers).
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -127,7 +169,25 @@ func (p *Prefork) listen(addr string) (net.Listener, error) {
 		return reuseport.Listen(p.Network, addr)
 	}
 
+	// File descriptor 3 is the first ExtraFiles entry passed by the master process.
 	return net.FileListener(os.NewFile(3, ""))
+}
+
+// listenAsChild performs the common child process setup: creates the listener
+// and starts watching the master process if OnMasterDeath is configured.
+func (p *Prefork) listenAsChild(addr string) (net.Listener, error) {
+	ln, err := p.listen(addr)
+	if err != nil {
+		return nil, err
+	}
+
+	p.ln = ln
+
+	if p.OnMasterDeath != nil {
+		go p.watchMaster(os.Getppid())
+	}
+
+	return ln, nil
 }
 
 func (p *Prefork) setTCPListenerFiles(addr string) error {
@@ -158,6 +218,12 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 }
 
 func (p *Prefork) doCommand() (*exec.Cmd, error) {
+	// Use custom CommandProducer if provided
+	if p.CommandProducer != nil {
+		return p.CommandProducer(p.files)
+	}
+
+	// Default implementation using os.Executable() for reliable path resolution
 	executable, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -205,13 +271,16 @@ func (p *Prefork) prefork(addr string) (err error) {
 
 	goMaxProcs := runtime.GOMAXPROCS(0)
 	sigCh := make(chan procSig, goMaxProcs)
-	childProcs := make(map[int]*exec.Cmd)
+	childProcs := make(map[int]*exec.Cmd, goMaxProcs)
 
 	defer func() {
 		for _, proc := range childProcs {
 			_ = proc.Process.Kill()
 		}
 	}()
+
+	// Collect child PIDs for OnMasterReady callback
+	childPIDs := make([]int, 0, goMaxProcs)
 
 	for range goMaxProcs {
 		var cmd *exec.Cmd
@@ -220,10 +289,29 @@ func (p *Prefork) prefork(addr string) (err error) {
 			return err
 		}
 
-		childProcs[cmd.Process.Pid] = cmd
-		go func() {
-			sigCh <- procSig{pid: cmd.Process.Pid, err: cmd.Wait()}
-		}()
+		pid := cmd.Process.Pid
+		childProcs[pid] = cmd
+		childPIDs = append(childPIDs, pid)
+
+		// Call OnChildSpawn callback
+		if p.OnChildSpawn != nil {
+			if err = p.OnChildSpawn(pid); err != nil {
+				p.logger().Printf("OnChildSpawn callback failed for PID %d: %v\n", pid, err)
+				return err
+			}
+		}
+
+		go func(c *exec.Cmd, pid int) {
+			sigCh <- procSig{pid: pid, err: c.Wait()}
+		}(cmd, pid)
+	}
+
+	// Call OnMasterReady callback after all children are spawned
+	if p.OnMasterReady != nil {
+		if err = p.OnMasterReady(childPIDs); err != nil {
+			p.logger().Printf("OnMasterReady callback failed: %v\n", err)
+			return err
+		}
 	}
 
 	var exitedProcs int
@@ -237,19 +325,27 @@ func (p *Prefork) prefork(addr string) (err error) {
 		if exitedProcs > p.RecoverThreshold {
 			p.logger().Printf("child prefork processes exit too many times, "+
 				"which exceeds the value of RecoverThreshold(%d), "+
-				"exiting the master process.\n", exitedProcs)
+				"exiting the master process.\n", p.RecoverThreshold)
 			err = ErrOverRecovery
 			break
 		}
 
 		var cmd *exec.Cmd
-		if cmd, err = p.doCommand(); err != nil {
+		cmd, err = p.doCommand()
+		if err != nil {
 			break
 		}
-		childProcs[cmd.Process.Pid] = cmd
-		go func() {
-			sigCh <- procSig{pid: cmd.Process.Pid, err: cmd.Wait()}
-		}()
+		pid := cmd.Process.Pid
+		childProcs[pid] = cmd
+
+		// Call OnChildRecover callback and ignore its returned error.
+		if p.OnChildRecover != nil {
+			_ = p.OnChildRecover(pid)
+		}
+
+		go func(c *exec.Cmd, pid int) {
+			sigCh <- procSig{pid: pid, err: c.Wait()}
+		}(cmd, pid)
 	}
 
 	return err
@@ -258,17 +354,10 @@ func (p *Prefork) prefork(addr string) (err error) {
 // ListenAndServe serves HTTP requests from the given TCP addr.
 func (p *Prefork) ListenAndServe(addr string) error {
 	if IsChild() {
-		ln, err := p.listen(addr)
+		ln, err := p.listenAsChild(addr)
 		if err != nil {
 			return err
 		}
-
-		p.ln = ln
-
-		if p.OnMasterDeath != nil {
-			go p.watchMaster(os.Getppid())
-		}
-
 		return p.ServeFunc(ln)
 	}
 
@@ -277,20 +366,13 @@ func (p *Prefork) ListenAndServe(addr string) error {
 
 // ListenAndServeTLS serves HTTPS requests from the given TCP addr.
 //
-// certFile and keyFile are paths to TLS certificate and key files.
+// certKey and certFile are paths to TLS key and certificate files.
 func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 	if IsChild() {
-		ln, err := p.listen(addr)
+		ln, err := p.listenAsChild(addr)
 		if err != nil {
 			return err
 		}
-
-		p.ln = ln
-
-		if p.OnMasterDeath != nil {
-			go p.watchMaster(os.Getppid())
-		}
-
 		return p.ServeTLSFunc(ln, certFile, certKey)
 	}
 
@@ -302,17 +384,10 @@ func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 // certData and keyData must contain valid TLS certificate and key data.
 func (p *Prefork) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) error {
 	if IsChild() {
-		ln, err := p.listen(addr)
+		ln, err := p.listenAsChild(addr)
 		if err != nil {
 			return err
 		}
-
-		p.ln = ln
-
-		if p.OnMasterDeath != nil {
-			go p.watchMaster(os.Getppid())
-		}
-
 		return p.ServeTLSEmbedFunc(ln, certData, keyData)
 	}
 
