@@ -220,7 +220,14 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 func (p *Prefork) doCommand() (*exec.Cmd, error) {
 	// Use custom CommandProducer if provided
 	if p.CommandProducer != nil {
-		return p.CommandProducer(p.files)
+		cmd, err := p.CommandProducer(p.files)
+		if err != nil {
+			return nil, err
+		}
+		if cmd == nil || cmd.Process == nil {
+			return nil, errors.New("prefork: CommandProducer must return a started command")
+		}
+		return cmd, nil
 	}
 
 	// Default implementation using os.Executable() for reliable path resolution
@@ -366,7 +373,11 @@ func (p *Prefork) ListenAndServe(addr string) error {
 
 // ListenAndServeTLS serves HTTPS requests from the given TCP addr.
 //
-// certKey and certFile are paths to TLS key and certificate files.
+// certKey is the path to the TLS private key file.
+// certFile is the path to the TLS certificate file.
+//
+// Note: parameter order is (addr, certKey, certFile) — key before cert.
+// Internally forwards to ServeTLSFunc as (certFile, certKey).
 func (p *Prefork) ListenAndServeTLS(addr, certKey, certFile string) error {
 	if IsChild() {
 		ln, err := p.listenAsChild(addr)

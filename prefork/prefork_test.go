@@ -1,6 +1,7 @@
 package prefork
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"net"
@@ -259,18 +260,15 @@ func Test_Prefork_OnMasterDeath(t *testing.T) {
 
 	var called bool
 	p := &Prefork{
-		Reuseport: true,
 		OnMasterDeath: func() {
 			called = true
 		},
 	}
 
-	// Verify OnMasterDeath is set
 	if p.OnMasterDeath == nil {
 		t.Error("OnMasterDeath should not be nil")
 	}
 
-	// Verify it can be called
 	p.OnMasterDeath()
 	if !called {
 		t.Error("OnMasterDeath was not called")
@@ -384,15 +382,14 @@ func Test_ErrOnlyReuseportOnWindows(t *testing.T) {
 	}
 }
 
-func Test_Listen_WithOnMasterDeath(t *testing.T) {
+func Test_Listen_ChildCreatesListener(t *testing.T) {
 	// This test can't run parallel as it modifies env.
 
 	setUp()
 	defer tearDown()
 
 	p := &Prefork{
-		Reuseport:     true,
-		OnMasterDeath: func() { os.Exit(1) },
+		Reuseport: true,
 	}
 	addr := getAddr()
 
@@ -402,7 +399,6 @@ func Test_Listen_WithOnMasterDeath(t *testing.T) {
 	}
 	defer ln.Close()
 
-	// Verify listener was created
 	if ln == nil {
 		t.Error("Listener should not be nil")
 	}
@@ -411,7 +407,7 @@ func Test_Listen_WithOnMasterDeath(t *testing.T) {
 func Test_OnChildSpawn_Error(t *testing.T) {
 	t.Parallel()
 
-	errExpected := fmt.Errorf("spawn callback error")
+	errExpected := errors.New("spawn callback error")
 	p := &Prefork{
 		OnChildSpawn: func(pid int) error {
 			return errExpected
@@ -428,7 +424,7 @@ func Test_OnChildSpawn_Error(t *testing.T) {
 func Test_OnMasterReady_Error(t *testing.T) {
 	t.Parallel()
 
-	errExpected := fmt.Errorf("master ready callback error")
+	errExpected := errors.New("master ready callback error")
 	p := &Prefork{
 		OnMasterReady: func(childPIDs []int) error {
 			return errExpected
@@ -474,26 +470,24 @@ func Test_CommandProducer(t *testing.T) {
 	p := &Prefork{
 		CommandProducer: func(files []*os.File) (*exec.Cmd, error) {
 			producerCalled = true
-			// Return a simple command that exits quickly
-			cmd := exec.Command("go", "version")
+			// Re-exec the test binary with a no-op flag for hermetic testing
+			cmd := exec.Command(os.Args[0], "-test.run=^$")
 			cmd.ExtraFiles = files
+			cmd.Env = append(os.Environ(), preforkChildEnvVariable+"=1")
 			err := cmd.Start()
 			return cmd, err
 		},
 	}
 
-	// Verify CommandProducer is set
 	if p.CommandProducer == nil {
 		t.Error("CommandProducer should not be nil")
 	}
 
-	// Call doCommand and verify our producer was used
 	cmd, err := p.doCommand()
 	if err != nil {
 		t.Fatalf("doCommand failed: %v", err)
 	}
 
-	// Wait for the command to finish
 	_ = cmd.Wait()
 
 	if !producerCalled {
