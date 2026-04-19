@@ -698,8 +698,9 @@ type RetryIfFunc func(request *Request) bool
 // the request function will immediately return with the `err`.
 type RetryIfErrFunc func(request *Request, attempts int, err error) (resetTimeout bool, retry bool)
 
-// RetryIfErrUpstreamFunc works just like a RetryIfErrFunc and also provides 
+// RetryIfErrUpstreamFunc works just like a RetryIfErrFunc and also provides
 // information about which upstream caused the error, if known.
+//
 // Upstream information is a <host>:<port> format.
 type RetryIfErrUpstreamFunc func(request *Request, attempts int, err error, upstream string) (resetTimeout bool, retry bool)
 
