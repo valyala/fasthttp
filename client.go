@@ -1903,25 +1903,19 @@ func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 	}
 
 	if c.ServerName == "" {
-		serverName := tlsServerName(addr)
-		if serverName == "*" {
-			c.InsecureSkipVerify = true
-		} else {
+		if serverName, ok := tlsServerName(addr); ok {
 			c.ServerName = serverName
 		}
 	}
 	return c
 }
 
-func tlsServerName(addr string) string {
-	if !strings.Contains(addr, ":") {
-		return addr
-	}
-	host, _, err := net.SplitHostPort(addr)
+func tlsServerName(addr string) (string, bool) {
+	host, _, err := net.SplitHostPort(AddMissingPort(addr, true))
 	if err != nil {
-		return "*"
+		return "", false
 	}
-	return host
+	return host, true
 }
 
 func (c *HostClient) nextAddr() string {
