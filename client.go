@@ -1143,6 +1143,7 @@ func doRequestFollowRedirects(
 	req *Request, resp *Response, url string, maxRedirectsCount int, c clientDoer,
 ) (statusCode int, body []byte, err error) {
 	redirectsCount := 0
+	initialHost := hostnameFromURLString(url)
 
 	for {
 		req.SetRequestURI(url)
@@ -1168,7 +1169,10 @@ func doRequestFollowRedirects(
 			err = ErrMissingLocation
 			break
 		}
-		url = getRedirectURL(url, location, req.DisableRedirectPathNormalizing)
+		redirectURI := AcquireURI()
+		url = getRedirectURL(url, location, req.DisableRedirectPathNormalizing, redirectURI)
+		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
+		ReleaseURI(redirectURI)
 
 		if string(req.Header.Method()) == "POST" && (statusCode == 301 || statusCode == 302) {
 			req.Header.SetMethod(MethodGet)
@@ -1178,14 +1182,91 @@ func doRequestFollowRedirects(
 	return statusCode, body, err
 }
 
-func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool) string {
-	u := AcquireURI()
-	u.Update(baseURL)
-	u.UpdateBytes(location)
-	u.DisablePathNormalizing = disablePathNormalizing
-	redirectURL := u.String()
-	ReleaseURI(u)
-	return redirectURL
+func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool, dst *URI) string {
+	dst.Update(baseURL)
+	dst.UpdateBytes(location)
+	dst.DisablePathNormalizing = disablePathNormalizing
+	return dst.String()
+}
+
+// Redirect handling reuses the original Request, so sensitive request
+// headers must be cleared before following redirects that net/http treats
+// as untrusted.
+func stripSensitiveHeadersOnRedirect(req *Request, initialHost []byte, redirectURI *URI) {
+	if !shouldStripSensitiveHeadersOnRedirect(initialHost, redirectURI.Host()) {
+		return
+	}
+
+	req.Header.Del(HeaderAuthorization)
+	req.Header.Del(HeaderCookie)
+	req.Header.Del(HeaderCookie2) // Match net/http behavior.
+	req.Header.Del(HeaderProxyAuthenticate)
+	req.Header.Del(HeaderProxyAuthorization)
+	req.Header.Del(HeaderWWWAuthenticate)
+}
+
+// shouldStripSensitiveHeadersOnRedirect defines the trust boundary for
+// caller-supplied credentials during redirect handling.
+//
+// net/http forwards sensitive headers only to trusted redirect targets and
+// documents that policy in the Client redirect handling:
+// https://github.com/golang/go/blob/go1.24.1/src/net/http/client.go#L41-L49
+// https://github.com/golang/go/blob/go1.24.1/src/net/http/client.go#L1005-L1021
+//
+// Match that behavior here by anchoring the trust decision to the initial
+// request host, ignoring ports and scheme, and allowing exact-host or
+// subdomain redirects to keep caller-supplied credentials.
+func shouldStripSensitiveHeadersOnRedirect(initialHost, redirectHostPort []byte) bool {
+	return !isDomainOrSubdomainBytes(hostnameFromHostPortBytes(redirectHostPort), initialHost)
+}
+
+func hostnameFromURLString(url string) []byte {
+	_, host, _ := splitHostURI(nil, s2b(url))
+	if n := bytes.LastIndexByte(host, '@'); n >= 0 {
+		host = host[n+1:]
+	}
+	return hostnameFromHostPortBytes(host)
+}
+
+func hostnameFromHostPortBytes(hostPort []byte) []byte {
+	host, _ := splitHostPortBytes(hostPort)
+	if len(host) >= 2 && host[0] == '[' && host[len(host)-1] == ']' {
+		return host[1 : len(host)-1]
+	}
+	return host
+}
+
+func isDomainOrSubdomainBytes(sub, parent []byte) bool {
+	if bytes.EqualFold(sub, parent) {
+		return true
+	}
+	if len(sub) <= len(parent) || bytes.IndexByte(sub, ':') >= 0 || bytes.IndexByte(sub, '%') >= 0 {
+		return false
+	}
+	if !bytes.EqualFold(sub[len(sub)-len(parent):], parent) {
+		return false
+	}
+	return sub[len(sub)-len(parent)-1] == '.'
+}
+
+func splitHostPortBytes(hostPort []byte) ([]byte, []byte) {
+	if len(hostPort) == 0 {
+		return hostPort, nil
+	}
+
+	if hostPort[0] == '[' {
+		n := bytes.LastIndexByte(hostPort, ']')
+		if n >= 0 && n+1 < len(hostPort) && hostPort[n+1] == ':' {
+			return hostPort[:n+1], hostPort[n+2:]
+		}
+		return hostPort, nil
+	}
+
+	n := bytes.LastIndexByte(hostPort, ':')
+	if n < 0 || bytes.IndexByte(hostPort[:n], ':') >= 0 {
+		return hostPort, nil
+	}
+	return hostPort[:n], hostPort[n+1:]
 }
 
 // StatusCodeIsRedirect returns true if the status code indicates a redirect.

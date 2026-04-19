@@ -37,6 +37,7 @@ const (
 	HeaderContentSecurityPolicyReportOnly = "Content-Security-Policy-Report-Only"
 	HeaderContentType                     = "Content-Type"
 	HeaderCookie                          = "Cookie"
+	HeaderCookie2                         = "Cookie2"
 	HeaderCrossOriginResourcePolicy       = "Cross-Origin-Resource-Policy"
 	HeaderDate                            = "Date"
 	HeaderDNT                             = "DNT"
