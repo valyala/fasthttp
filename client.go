@@ -1200,7 +1200,9 @@ func stripSensitiveHeadersOnRedirect(req *Request, initialHost []byte, redirectU
 	req.Header.Del(HeaderAuthorization)
 	req.Header.Del(HeaderCookie)
 	req.Header.Del(HeaderCookie2) // Match net/http behavior.
+	req.Header.Del(HeaderProxyAuthenticate)
 	req.Header.Del(HeaderProxyAuthorization)
+	req.Header.Del(HeaderWWWAuthenticate)
 }
 
 // shouldStripSensitiveHeadersOnRedirect defines the trust boundary for
