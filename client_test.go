@@ -1761,6 +1761,73 @@ func TestClientFollowRedirects(t *testing.T) {
 	ReleaseResponse(resp)
 }
 
+func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name        string
+		initialURL  string
+		redirectURL string
+		want        bool
+	}{
+		{
+			name:        "same host keeps headers",
+			initialURL:  "http://example.com/foo",
+			redirectURL: "http://example.com/bar",
+			want:        false,
+		},
+		{
+			name:        "subdomain keeps headers",
+			initialURL:  "http://example.com/foo",
+			redirectURL: "https://sub.example.com:8443/bar",
+			want:        false,
+		},
+		{
+			name:        "same host different port keeps headers",
+			initialURL:  "http://example.com/foo",
+			redirectURL: "http://example.com:8080/bar",
+			want:        false,
+		},
+		{
+			name:        "http upgrade keeps headers",
+			initialURL:  "http://example.com/foo",
+			redirectURL: "https://example.com/bar",
+			want:        false,
+		},
+		{
+			name:        "https downgrade keeps headers",
+			initialURL:  "https://example.com/foo",
+			redirectURL: "http://example.com/bar",
+			want:        false,
+		},
+		{
+			name:        "parent domain strips when initial host is subdomain",
+			initialURL:  "http://sub.example.com/foo",
+			redirectURL: "http://example.com/bar",
+			want:        true,
+		},
+		{
+			name:        "unrelated host strips headers",
+			initialURL:  "http://example.com/foo",
+			redirectURL: "http://example.net/bar",
+			want:        true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			initialHost := hostnameFromURLString(tc.initialURL)
+
+			var redirectURI URI
+			redirectURI.Update(tc.redirectURL)
+
+			if got := shouldStripSensitiveHeadersOnRedirect(initialHost, redirectURI.Host()); got != tc.want {
+				t.Fatalf("unexpected redirect stripping decision: got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestClientGetTimeoutSuccess(t *testing.T) {
 	t.Parallel()
 
@@ -3343,7 +3410,10 @@ func Test_getRedirectURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := getRedirectURL(tt.args.baseURL, tt.args.location, tt.args.disablePathNormalizing); got != tt.want {
+			redirectURI := AcquireURI()
+			got := getRedirectURL(tt.args.baseURL, tt.args.location, tt.args.disablePathNormalizing, redirectURI)
+			ReleaseURI(redirectURI)
+			if got != tt.want {
 				t.Errorf("getRedirectURL() = %v, want %v", got, tt.want)
 			}
 		})
