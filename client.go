@@ -216,7 +216,7 @@ type Client struct {
 	// This field is only effective within the range of MaxIdemponentCallAttempts.
 	RetryIfErr RetryIfErrFunc
 
-	// RetryIfErrUpstream works just like RetryIfErr but also provides information about upstream if known.
+	// RetryIfErrUpstream works just like RetryIfErr but also provides information about which upstream caused the error, if known.
 	// Upstream information is a <host>:<port> format.
 	RetryIfErrUpstream RetryIfErrUpstreamFunc
 
@@ -698,7 +698,7 @@ type RetryIfFunc func(request *Request) bool
 // the request function will immediately return with the `err`.
 type RetryIfErrFunc func(request *Request, attempts int, err error) (resetTimeout bool, retry bool)
 
-// RetryIfErrUpstreamFunc works just like a RetryIfErrFunc and also provides information about upstream caused problems if known.
+// RetryIfErrUpstreamFunc works just like a RetryIfErrFunc and also provides information about which upstream caused the error, if known.
 // Upstream information is a <host>:<port> format.
 type RetryIfErrUpstreamFunc func(request *Request, attempts int, err error, upstream string) (resetTimeout bool, retry bool)
 
@@ -715,7 +715,16 @@ const (
 	LIFO
 )
 
-// HostClient represents a high-performance HTTP client optimized for low-level control and customization.
+// HostClient balances http requests among hosts listed in Addr.
+//
+// HostClient may be used for balancing load among multiple upstream hosts.
+// While multiple addresses passed to HostClient.Addr may be used for balancing
+// load among them, it would be better using LBClient instead, since HostClient
+// may unevenly balance load among upstream hosts.
+//
+// It is forbidden copying HostClient instances. Create new instances instead.
+//
+// It is safe calling HostClient methods from concurrently running goroutines.
 type HostClient struct {
 	noCopy noCopy
 
@@ -754,7 +763,7 @@ type HostClient struct {
 	// This field is only effective within the range of MaxIdemponentCallAttempts.
 	RetryIfErr RetryIfErrFunc
 
-	// RetryIfErrUpstream works just like RetryIfErr but also provides information about upstream if known.
+	// RetryIfErrUpstream works just like RetryIfErr but also provides information about which upstream causes the error, if known.
 	// Upstream information is a <host>:<port> format.
 	RetryIfErrUpstream RetryIfErrUpstreamFunc
 
