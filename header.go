@@ -143,12 +143,12 @@ func (h *ResponseHeader) StatusMessage() []byte {
 
 // SetStatusMessage sets response status message bytes.
 func (h *ResponseHeader) SetStatusMessage(statusMessage []byte) {
-	h.statusMessage = append(h.statusMessage[:0], statusMessage...)
+	h.statusMessage = initHeaderValueBytes(h.statusMessage, statusMessage)
 }
 
 // SetProtocol sets response protocol bytes.
 func (h *ResponseHeader) SetProtocol(protocol []byte) {
-	h.protocol = append(h.protocol[:0], protocol...)
+	h.protocol = initHeaderValueBytes(h.protocol, protocol)
 }
 
 // SetLastModified sets 'Last-Modified' header to the given value.
@@ -750,12 +750,12 @@ func (h *RequestHeader) Method() []byte {
 
 // SetMethod sets HTTP request method.
 func (h *RequestHeader) SetMethod(method string) {
-	h.method = append(h.method[:0], method...)
+	h.method = initHeaderValueString(h.method, method)
 }
 
 // SetMethodBytes sets HTTP request method.
 func (h *RequestHeader) SetMethodBytes(method []byte) {
-	h.method = append(h.method[:0], method...)
+	h.method = initHeaderValueBytes(h.method, method)
 }
 
 // Protocol returns HTTP protocol.
@@ -768,13 +768,13 @@ func (h *header) Protocol() []byte {
 
 // SetProtocol sets HTTP request protocol.
 func (h *RequestHeader) SetProtocol(protocol string) {
-	h.protocol = append(h.protocol[:0], protocol...)
+	h.protocol = initHeaderValueString(h.protocol, protocol)
 	h.noHTTP11 = !bytes.Equal(h.protocol, strHTTP11)
 }
 
 // SetProtocolBytes sets HTTP request protocol.
 func (h *RequestHeader) SetProtocolBytes(protocol []byte) {
-	h.protocol = append(h.protocol[:0], protocol...)
+	h.protocol = initHeaderValueBytes(h.protocol, protocol)
 	h.noHTTP11 = !bytes.Equal(h.protocol, strHTTP11)
 }
 
@@ -791,14 +791,14 @@ func (h *RequestHeader) RequestURI() []byte {
 // RequestURI must be properly encoded.
 // Use URI.RequestURI for constructing proper RequestURI if unsure.
 func (h *RequestHeader) SetRequestURI(requestURI string) {
-	h.requestURI = append(h.requestURI[:0], requestURI...)
+	h.requestURI = initHeaderValueString(h.requestURI, requestURI)
 }
 
 // SetRequestURIBytes sets RequestURI for the first HTTP request line.
 // RequestURI must be properly encoded.
 // Use URI.RequestURI for constructing proper RequestURI if unsure.
 func (h *RequestHeader) SetRequestURIBytes(requestURI []byte) {
-	h.requestURI = append(h.requestURI[:0], requestURI...)
+	h.requestURI = initHeaderValueBytes(h.requestURI, requestURI)
 }
 
 // IsGet returns true if request method is GET.
