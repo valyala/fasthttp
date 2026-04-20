@@ -273,11 +273,86 @@ func TestClientInvalidURI(t *testing.T) {
 	req.Header.SetMethod(MethodGet)
 	req.SetRequestURI("http://example.com\r\n\r\nGET /\r\n\r\n")
 	err := c.Do(req, res)
-	if err == nil {
-		t.Fatal("expected error (missing required Host header in request)")
+	if err == nil && res.StatusCode() != StatusBadRequest {
+		t.Fatalf("expected invalid URI to be rejected, got status code %d", res.StatusCode())
 	}
 	if n := requests.Load(); n != 0 {
 		t.Fatalf("0 requests expected, got %d", n)
+	}
+}
+
+func TestClientRequestProtocolSetterSanitizesNewlines(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	var requests atomic.Int64
+	s := &Server{
+		Handler: func(_ *RequestCtx) {
+			requests.Add(1)
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	req, res := AcquireRequest(), AcquireResponse()
+	defer func() {
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+	}()
+
+	req.SetRequestURI("http://example.com/")
+	req.Header.SetProtocol("HTTP/1.1\r\nX-Injected-Protocol: true")
+
+	if err := c.Do(req, res); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := res.StatusCode(); got != StatusBadRequest {
+		t.Fatalf("unexpected status code: %d. Expected %d", got, StatusBadRequest)
+	}
+	if n := requests.Load(); n != 0 {
+		t.Fatalf("expected malformed request to be rejected before reaching handler, got %d handled requests", n)
+	}
+}
+
+func TestClientResponseStatusMessageSetterSanitizesNewlines(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Response.Header.SetStatusCode(StatusOK)
+			ctx.Response.Header.SetStatusMessage([]byte("OK\r\nX-Injected-Status: true"))
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	req, res := AcquireRequest(), AcquireResponse()
+	defer func() {
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+	}()
+
+	req.SetRequestURI("http://example.com/")
+
+	if err := c.Do(req, res); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := string(res.Header.StatusMessage()); got != "OK  X-Injected-Status: true" {
+		t.Fatalf("unexpected status message: %q. Expected %q", got, "OK  X-Injected-Status: true")
+	}
+	if got := string(res.Header.Peek("X-Injected-Status")); got != "" {
+		t.Fatalf("unexpected injected response header value: %q", got)
 	}
 }
 
