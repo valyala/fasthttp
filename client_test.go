@@ -3615,3 +3615,79 @@ func (r *testResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPA
 	r.lookupCountByHost[host]++
 	return r.resolver.LookupIPAddr(ctx, host)
 }
+
+type TransportMock struct {
+	wrapperFunc func(hc *HostClient, req *Request, resp *Response) (retry bool, err error)
+}
+
+func (t *TransportMock) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
+	return t.wrapperFunc(hc, req, resp)
+}
+
+func TestClient_RetryIfErrUpstream(t *testing.T) {
+	t.Parallel()
+	upstreamErr := errors.New("upstream error")
+
+	t.Run("upstream_known", func(t *testing.T) {
+		retryIfErrCalled := false
+		c := &Client{
+			Transport: &TransportMock{
+				wrapperFunc: func(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
+					resp.raddr = &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8080}
+					return true, upstreamErr
+				},
+			},
+			RetryIfErrUpstream: func(request *Request, attempts int, err error, upstream string) (resetTimeout bool, retry bool) {
+				retryIfErrCalled = true
+				if upstream != "127.0.0.1:8080" {
+					t.Errorf("expected upstream to be 127.0.0.1:8080, got %s", upstream)
+				}
+
+				return false, false
+			},
+		}
+		req := AcquireRequest()
+		res := AcquireResponse()
+
+		req.SetRequestURI("http://example.com")
+
+		err := c.Do(req, res)
+		if !errors.Is(err, upstreamErr) {
+			t.Fatal(err)
+		}
+		if !retryIfErrCalled {
+			t.Fatal("RetryIfErrUpstream should be called")
+		}
+	})
+
+	t.Run("no_upstream", func(t *testing.T) {
+		retryIfErrCalled := false
+		c := &Client{
+			Transport: &TransportMock{
+				wrapperFunc: func(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
+					return true, upstreamErr
+				},
+			},
+			RetryIfErrUpstream: func(request *Request, attempts int, err error, upstream string) (resetTimeout bool, retry bool) {
+				retryIfErrCalled = true
+				if upstream != "" {
+					t.Errorf("expected upstream to be empty, got %s", upstream)
+				}
+
+				return false, false
+			},
+		}
+		req := AcquireRequest()
+		res := AcquireResponse()
+
+		req.SetRequestURI("http://example.com")
+
+		err := c.Do(req, res)
+		if !errors.Is(err, upstreamErr) {
+			t.Fatal(err)
+		}
+		if !retryIfErrCalled {
+			t.Fatal("RetryIfErrUpstream should be called")
+		}
+	})
+}

@@ -216,6 +216,10 @@ type Client struct {
 	// This field is only effective within the range of MaxIdemponentCallAttempts.
 	RetryIfErr RetryIfErrFunc
 
+	// RetryIfErrUpstream works just like RetryIfErr but also provides information about which upstream caused the error, if known.
+	// Upstream information is a <host>:<port> format.
+	RetryIfErrUpstream RetryIfErrUpstreamFunc
+
 	// ConfigureClient configures the fasthttp.HostClient.
 	ConfigureClient func(hc *HostClient) error
 
@@ -565,6 +569,7 @@ func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
 		MaxConnWaitTimeout:            c.MaxConnWaitTimeout,
 		RetryIf:                       c.RetryIf,
 		RetryIfErr:                    c.RetryIfErr,
+		RetryIfErrUpstream:            c.RetryIfErrUpstream,
 		ConnPoolStrategy:              c.ConnPoolStrategy,
 		StreamResponseBody:            c.StreamResponseBody,
 		clientReaderPool:              &c.readerPool,
@@ -693,6 +698,12 @@ type RetryIfFunc func(request *Request) bool
 // the request function will immediately return with the `err`.
 type RetryIfErrFunc func(request *Request, attempts int, err error) (resetTimeout bool, retry bool)
 
+// RetryIfErrUpstreamFunc works just like a RetryIfErrFunc and also provides
+// information about which upstream caused the error, if known.
+//
+// Upstream information is a <host>:<port> format.
+type RetryIfErrUpstreamFunc func(request *Request, attempts int, err error, upstream string) (resetTimeout bool, retry bool)
+
 // RoundTripper wraps every request/response.
 type RoundTripper interface {
 	RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error)
@@ -753,6 +764,10 @@ type HostClient struct {
 	// based on the return value of this field.
 	// This field is only effective within the range of MaxIdemponentCallAttempts.
 	RetryIfErr RetryIfErrFunc
+
+	// RetryIfErrUpstream works just like RetryIfErr but also provides information about which upstream causes the error, if known.
+	// Upstream information is a <host>:<port> format.
+	RetryIfErrUpstream RetryIfErrUpstreamFunc
 
 	connsWait *wantConnQueue
 
@@ -1393,9 +1408,16 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		if attempts >= maxAttempts {
 			break
 		}
-		if c.RetryIfErr != nil {
+		switch {
+		case c.RetryIfErrUpstream != nil:
+			upstream := ""
+			if resp.RemoteAddr() != nil {
+				upstream = resp.RemoteAddr().String()
+			}
+			resetTimeout, retry = c.RetryIfErrUpstream(req, attempts, err, upstream)
+		case c.RetryIfErr != nil:
 			resetTimeout, retry = c.RetryIfErr(req, attempts, err)
-		} else {
+		default:
 			retry = retryFunc(req)
 		}
 		if !retry {
