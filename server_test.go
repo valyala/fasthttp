@@ -2107,17 +2107,17 @@ func TestServerExpectHandler(t *testing.T) {
 
 	acceptContentLength := 5
 	s := &Server{
-		ExpectHandler: func(headers *RequestHeader) int {
-			if !headers.IsPost() {
-				t.Errorf("unexpected method %q. Expecting POST", headers.Method())
+		ExpectHandler: func(ctx *RequestCtx) int {
+			if !ctx.IsPost() {
+				t.Errorf("unexpected method %q. Expecting POST", ctx.Method())
 			}
 
-			ct := headers.ContentType()
+			ct := ctx.Request.Header.ContentType()
 			if string(ct) != "a/b" {
 				t.Errorf("unexpected content-type: %q. Expecting %q", ct, "a/b")
 			}
 
-			if headers.contentLength == acceptContentLength {
+			if ctx.Request.Header.contentLength == acceptContentLength {
 				return StatusContinue
 			}
 			return StatusExpectationFailed
@@ -2183,9 +2183,9 @@ func TestServerExpectHandlerCustomStatusCode(t *testing.T) {
 	t.Parallel()
 
 	s := &Server{
-		ExpectHandler: func(headers *RequestHeader) int {
+		ExpectHandler: func(ctx *RequestCtx) int {
 			// Reject with 413 Request Entity Too Large for large bodies
-			if headers.ContentLength() > 5 {
+			if ctx.Request.Header.ContentLength() > 5 {
 				return StatusRequestEntityTooLarge
 			}
 			return StatusContinue
@@ -2218,8 +2218,8 @@ func TestServerExpectHandlerConnectionClose(t *testing.T) {
 	t.Parallel()
 
 	s := &Server{
-		ExpectHandler: func(headers *RequestHeader) int {
-			if headers.ContentLength() > 5 {
+		ExpectHandler: func(ctx *RequestCtx) int {
+			if ctx.Request.Header.ContentLength() > 5 {
 				return StatusExpectationFailed
 			}
 			return StatusContinue
@@ -2273,7 +2273,7 @@ func TestServerExpectHandlerPrecedence(t *testing.T) {
 			continueHandlerCalled = true
 			return true
 		},
-		ExpectHandler: func(headers *RequestHeader) int {
+		ExpectHandler: func(ctx *RequestCtx) int {
 			return StatusRequestEntityTooLarge
 		},
 		Handler: func(ctx *RequestCtx) {
@@ -2293,6 +2293,32 @@ func TestServerExpectHandlerPrecedence(t *testing.T) {
 	if continueHandlerCalled {
 		t.Fatal("ContinueHandler should not be called when ExpectHandler is set")
 	}
+}
+
+func TestServerExpectHandlerRemoteAddr(t *testing.T) {
+	t.Parallel()
+
+	// ExpectHandler can use ctx.RemoteAddr() for IP-based filtering.
+	// readWriter returns zeroTCPAddr (0.0.0.0:0) as the remote address.
+	s := &Server{
+		ExpectHandler: func(ctx *RequestCtx) int {
+			if ctx.RemoteAddr().String() == "0.0.0.0:0" {
+				return StatusForbidden
+			}
+			return StatusContinue
+		},
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("ok") //nolint:errcheck
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusForbidden, string(defaultContentType), "")
 }
 
 func TestCompressHandler(t *testing.T) {

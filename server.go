@@ -206,12 +206,16 @@ type Server struct {
 	// non-100 status code, the response is also sent and the connection is closed,
 	// since the client may have already started sending the request body.
 	//
+	// The ctx provides access to request headers and connection metadata (e.g.
+	// RemoteAddr for IP-based filtering). The response must not be modified —
+	// only the returned status code is used.
+	//
 	// If both ExpectHandler and ContinueHandler are set, ExpectHandler
 	// takes precedence.
 	//
 	// The default behavior (when neither handler is set) is to automatically accept
 	// the request body.
-	ExpectHandler func(header *RequestHeader) int
+	ExpectHandler func(ctx *RequestCtx) int
 
 	// ConnState specifies an optional callback function that is
 	// called when a client connection changes state. See the
@@ -2468,7 +2472,7 @@ func (s *Server) serveConn(c net.Conn) error {
 		if ctx.Request.MayContinue() {
 			// Allow the ability to deny reading the incoming request body.
 			if s.ExpectHandler != nil {
-				if expectStatus := s.ExpectHandler(&ctx.Request.Header); expectStatus != StatusContinue {
+				if expectStatus := s.ExpectHandler(ctx); expectStatus != StatusContinue {
 					continueReadingRequest = false
 					if br != nil {
 						br.Reset(ctx.c)
