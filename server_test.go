@@ -1215,6 +1215,53 @@ func TestServerTLSReadTimeout(t *testing.T) {
 	}
 }
 
+func TestServerReduceMemoryUsageReadTimeoutOnFirstByte(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			t.Error("shouldn't reach handler")
+		},
+		ReduceMemoryUsage: true,
+		ReadTimeout:       100 * time.Millisecond,
+		Logger:            &testLogger{},
+	}
+
+	pipe := fasthttputil.NewPipeConns()
+	cc, sc := pipe.Conn1(), pipe.Conn2()
+	defer cc.Close()
+
+	serveErrCh := make(chan error, 1)
+	go func() {
+		serveErrCh <- s.ServeConn(sc)
+	}()
+
+	readErrCh := make(chan error, 1)
+	go func() {
+		var b [1]byte
+		_, err := cc.Read(b[:])
+		readErrCh <- err
+	}()
+
+	select {
+	case err := <-readErrCh:
+		if err == nil {
+			t.Fatal("server didn't close connection after first-byte timeout")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server didn't close connection after first-byte timeout")
+	}
+
+	select {
+	case err := <-serveErrCh:
+		if err != nil {
+			t.Fatalf("unexpected error from ServeConn: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for ServeConn")
+	}
+}
+
 func TestServerServeTLSEmbed(t *testing.T) {
 	t.Parallel()
 
