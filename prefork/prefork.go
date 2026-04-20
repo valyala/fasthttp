@@ -92,16 +92,19 @@ type Prefork struct {
 
 	// OnChildRecover is called in the master process when a child process is restarted
 	// after a crash. It receives the PID of the newly recovered child process.
-	//
-	// The callback's error return value is ignored.
-	OnChildRecover func(pid int) error
+	OnChildRecover func(pid int)
 
-	// CommandProducer is called to create child process commands.
-	// If nil, the default implementation using os.Executable() is used.
-	// This can be used for testing or customizing child process behavior.
+	// CommandProducer creates and starts a child process command.
+	// If nil, the default implementation re-executes the current binary
+	// with FASTHTTP_PREFORK_CHILD=1 in the environment.
 	//
-	// The function receives the files to be passed as ExtraFiles to the child process
-	// and must return a started command.
+	// The producer receives the files to pass as ExtraFiles and must return
+	// an already started command (i.e. cmd.Start() must have been called).
+	// The caller is responsible for setting Stdout, Stderr, Env, and ExtraFiles
+	// on the command before starting it.
+	//
+	// This is primarily useful for testing (injecting dummy commands)
+	// or for frameworks that need custom child process setup.
 	CommandProducer func(files []*os.File) (*exec.Cmd, error)
 }
 
@@ -134,8 +137,12 @@ func (p *Prefork) watchMaster(masterPID int) {
 		// On Windows, os.Getppid() returns a static PID that doesn't change
 		// when the parent exits (no reparenting). Use FindProcess+Wait instead.
 		proc, err := os.FindProcess(masterPID)
-		if err == nil {
-			_, _ = proc.Wait()
+		if err != nil {
+			p.logger().Printf("watchMaster: failed to find master process %d: %v\n", masterPID, err)
+			return
+		}
+		if _, err = proc.Wait(); err != nil {
+			p.logger().Printf("watchMaster: error waiting for master process %d: %v\n", masterPID, err)
 		}
 		p.logger().Printf("master process died\n")
 		p.OnMasterDeath()
@@ -300,7 +307,9 @@ func (p *Prefork) prefork(addr string) (err error) {
 		childProcs[pid] = cmd
 		childPIDs = append(childPIDs, pid)
 
-		// Call OnChildSpawn callback
+		// Call OnChildSpawn callback.
+		// On error we return early — the child is already in childProcs
+		// and will be killed by the deferred cleanup above.
 		if p.OnChildSpawn != nil {
 			if err = p.OnChildSpawn(pid); err != nil {
 				p.logger().Printf("OnChildSpawn callback failed for PID %d: %v\n", pid, err)
@@ -345,9 +354,8 @@ func (p *Prefork) prefork(addr string) (err error) {
 		pid := cmd.Process.Pid
 		childProcs[pid] = cmd
 
-		// Call OnChildRecover callback and ignore its returned error.
 		if p.OnChildRecover != nil {
-			_ = p.OnChildRecover(pid)
+			p.OnChildRecover(pid)
 		}
 
 		go func(c *exec.Cmd, pid int) {

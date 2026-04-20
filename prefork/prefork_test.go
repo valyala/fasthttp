@@ -291,9 +291,8 @@ func Test_Prefork_Callbacks_NotNil(t *testing.T) {
 			readyCalled = true
 			return nil
 		},
-		OnChildRecover: func(pid int) error {
+		OnChildRecover: func(pid int) {
 			recoverCalled = true
-			return nil
 		},
 	}
 
@@ -311,7 +310,7 @@ func Test_Prefork_Callbacks_NotNil(t *testing.T) {
 	// Test that callbacks can be called
 	_ = p.OnChildSpawn(1234)
 	_ = p.OnMasterReady([]int{1234, 5678})
-	_ = p.OnChildRecover(9999)
+	p.OnChildRecover(9999)
 
 	if !spawnCalled {
 		t.Error("OnChildSpawn was not called")
