@@ -2017,7 +2017,7 @@ func TestResponseHeaderAddTrailerError(t *testing.T) {
 
 	var h ResponseHeader
 	err := h.AddTrailer("Foo,   Content-Length , bAr,Transfer-Encoding, uSer aGent")
-	expectedTrailer := "Foo, Bar, uSer aGent"
+	expectedTrailer := "Foo, Bar"
 
 	if !errors.Is(err, ErrBadTrailer) {
 		t.Fatalf("unexpected err %q. Expected %q", err, ErrBadTrailer)
@@ -2040,6 +2040,105 @@ func TestRequestHeaderAddTrailerError(t *testing.T) {
 	if trailer := string(h.Peek(HeaderTrailer)); trailer != expectedTrailer {
 		t.Fatalf("unexpected trailer %q. Expected %q", trailer, expectedTrailer)
 	}
+}
+
+func TestResponseHeaderAddTrailerRejectsInvalidNames(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name    string
+		trailer string
+	}{
+		{"crlf", "X-Ok\r\nInjected: yes"},
+		{"cr", "X-Ok\rInjected"},
+		{"lf", "X-Ok\nInjected"},
+		{"tab_inside", "X\tOk"},
+		{"space_inside", "X Ok"},
+		{"colon", "X-Ok: Injected"},
+		{"non_ascii", "X-\xff"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var h ResponseHeader
+			h.noDefaultDate = true
+			err := h.AddTrailer(tc.trailer)
+			if !errors.Is(err, ErrBadTrailer) {
+				t.Fatalf("unexpected err %q. Expected %q", err, ErrBadTrailer)
+			}
+			if trailer := string(h.Peek(HeaderTrailer)); trailer != "" {
+				t.Fatalf("unexpected trailer %q. Expected empty trailer", trailer)
+			}
+			if header := string(h.Header()); strings.Contains(header, "\r\nInjected") {
+				t.Fatalf("unexpected injected header in %q", header)
+			}
+		})
+	}
+}
+
+func TestRequestHeaderAddTrailerRejectsInvalidNames(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name    string
+		trailer string
+	}{
+		{"crlf", "X-Ok\r\nInjected: yes"},
+		{"cr", "X-Ok\rInjected"},
+		{"lf", "X-Ok\nInjected"},
+		{"tab_inside", "X\tOk"},
+		{"space_inside", "X Ok"},
+		{"colon", "X-Ok: Injected"},
+		{"non_ascii", "X-\xff"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var h RequestHeader
+			err := h.AddTrailer(tc.trailer)
+			if !errors.Is(err, ErrBadTrailer) {
+				t.Fatalf("unexpected err %q. Expected %q", err, ErrBadTrailer)
+			}
+			if trailer := string(h.Peek(HeaderTrailer)); trailer != "" {
+				t.Fatalf("unexpected trailer %q. Expected empty trailer", trailer)
+			}
+			if header := string(h.Header()); strings.Contains(header, "\r\nInjected") {
+				t.Fatalf("unexpected injected header in %q", header)
+			}
+		})
+	}
+}
+
+func TestHeaderAddTrailerTrimsOWS(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ResponseHeader", func(t *testing.T) {
+		t.Parallel()
+
+		var h ResponseHeader
+		if err := h.AddTrailer("\tfoo\t, \tbar \t"); err != nil {
+			t.Fatalf("unexpected err %q", err)
+		}
+		if trailer := string(h.Peek(HeaderTrailer)); trailer != "Foo, Bar" {
+			t.Fatalf("unexpected trailer %q. Expected %q", trailer, "Foo, Bar")
+		}
+	})
+
+	t.Run("RequestHeader", func(t *testing.T) {
+		t.Parallel()
+
+		var h RequestHeader
+		if err := h.AddTrailer("\tfoo\t, \tbar \t"); err != nil {
+			t.Fatalf("unexpected err %q", err)
+		}
+		if trailer := string(h.Peek(HeaderTrailer)); trailer != "Foo, Bar" {
+			t.Fatalf("unexpected trailer %q. Expected %q", trailer, "Foo, Bar")
+		}
+	})
 }
 
 // Security tests for trailer handling vulnerability fix.
