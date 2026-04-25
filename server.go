@@ -2667,7 +2667,9 @@ func hijackConnHandler(ctx *RequestCtx, r io.Reader, c net.Conn, s *Server, h Hi
 	hjc := s.acquireHijackConn(r, c)
 	h(hjc)
 
-	if br, ok := r.(*bufio.Reader); ok {
+	// When the caller keeps using the hijacked connection after return,
+	// the buffered reader must remain owned by that escaped connection.
+	if br, ok := r.(*bufio.Reader); ok && !s.KeepHijackedConns {
 		releaseReader(s, br)
 	}
 	if !s.KeepHijackedConns {

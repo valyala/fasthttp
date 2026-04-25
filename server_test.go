@@ -2925,6 +2925,51 @@ func TestRequestCtxHijackReduceMemoryUsage(t *testing.T) {
 	})
 }
 
+func TestRequestCtxHijackKeepHijackedConnsKeepsReaderOutOfPool(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		KeepHijackedConns: true,
+	}
+	ctx := &RequestCtx{s: s}
+
+	firstConn := &readWriter{}
+	firstConn.r.WriteString("first")
+	secondConn := &readWriter{}
+	secondConn.r.WriteString("second")
+
+	br := bufio.NewReaderSize(firstConn, 1)
+
+	var hijacked net.Conn
+	hijackConnHandler(ctx, br, firstConn, s, func(c net.Conn) {
+		hijacked = c
+	})
+
+	if hijacked == nil {
+		t.Fatal("expected hijacked connection")
+	}
+
+	if v := s.readerPool.Get(); v != nil {
+		v.(*bufio.Reader).Reset(secondConn)
+	}
+
+	buf := make([]byte, len("first"))
+	if _, err := io.ReadFull(hijacked, buf); err != nil {
+		t.Fatalf("unexpected read error from hijacked connection: %v", err)
+	}
+	if string(buf) != "first" {
+		t.Fatalf("unexpected hijacked data %q. Expecting %q", buf, "first")
+	}
+
+	if err := hijacked.Close(); err != nil {
+		t.Fatalf("unexpected close error from hijacked connection: %v", err)
+	}
+
+	if v := s.readerPool.Get(); v != nil {
+		t.Fatal("did not expect hijacked reader to be released after close")
+	}
+}
+
 func TestRequestCtxHijackNoResponse(t *testing.T) {
 	t.Parallel()
 
