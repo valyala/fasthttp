@@ -3273,6 +3273,12 @@ func TestRequestHeaderReadError(t *testing.T) {
 	// Space before header name
 	testRequestHeaderReadError(t, h, "G(ET /foo/bar HTTP/1.1\r\n foo: bar\r\n\r\n")
 
+	// Whitespace before the colon in request header fields
+	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\nHost: aaa.com\r\nFoo : bar\r\n\r\n")
+	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\nHost : aaa.com\r\n\r\n")
+	testRequestHeaderReadError(t, h, "POST /foo/bar HTTP/1.1\r\nHost: aaa.com\r\nContent-Length : 4\r\n\r\ntest")
+	testRequestHeaderReadError(t, h, "POST /foo/bar HTTP/1.1\r\nHost: aaa.com\r\nTransfer-Encoding : chunked\r\n\r\n4\r\ntest\r\n0\r\n\r\n")
+
 	// Duplicate host header
 	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\nHost: aaa.com\r\nhost: bbb.com\r\n\r\n")
 

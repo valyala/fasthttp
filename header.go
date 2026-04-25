@@ -3113,9 +3113,12 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	s.b = buf
 
 	for s.next() {
-		// Trim trailing whitespace before the colon to normalize headers
-		// like "Content-Length :" to "Content-Length:".
+		key := s.key
 		s.key = trimTrailingSpace(s.key)
+		if len(s.key) != len(key) {
+			h.connectionClose = true
+			return 0, fmt.Errorf("invalid header key %q", key)
+		}
 
 		if len(s.key) == 0 {
 			h.connectionClose = true
