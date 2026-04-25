@@ -2398,6 +2398,64 @@ func TestRequestHeaderCookie(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderSetCookieSanitizesNewLines(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.SetRequestURI("/")
+	h.SetHost("example.com")
+	h.SetCookie("sid\r\nX-Injected-Key: 1", "abc\r\nX-Injected-Value: 1")
+
+	header := string(h.Header())
+	if strings.Contains(header, "\r\nX-Injected") {
+		t.Fatalf("unexpected injected header in %q", header)
+	}
+	if n := strings.Count(header, "\r\nCookie: "); n != 1 {
+		t.Fatalf("unexpected Cookie header count %d in %q", n, header)
+	}
+}
+
+func TestResponseHeaderSetCookieSanitizesNewLines(t *testing.T) {
+	t.Parallel()
+
+	var c Cookie
+	c.SetKey("sid")
+	c.SetValue("abc\r\nSet-Cookie: admin=1; Path=/; HttpOnly")
+
+	var h ResponseHeader
+	h.SetStatusCode(StatusOK)
+	h.SetCookie(&c)
+
+	header := string(h.Header())
+	if strings.Contains(header, "\r\nSet-Cookie: admin=1") {
+		t.Fatalf("unexpected injected Set-Cookie header in %q", header)
+	}
+	if n := strings.Count(header, "\r\nSet-Cookie: "); n != 1 {
+		t.Fatalf("unexpected Set-Cookie header count %d in %q", n, header)
+	}
+}
+
+func TestResponseHeaderSetParsedCookieSanitizesNewLines(t *testing.T) {
+	t.Parallel()
+
+	var c Cookie
+	err := c.Parse("sid=abc\r\nSet-Cookie: admin=1; Path=/")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var h ResponseHeader
+	h.SetCookie(&c)
+
+	header := string(h.Header())
+	if strings.Contains(header, "\r\nSet-Cookie: admin=1") {
+		t.Fatalf("unexpected injected Set-Cookie header in %q", header)
+	}
+	if n := strings.Count(header, "\r\nSet-Cookie: "); n != 1 {
+		t.Fatalf("unexpected Set-Cookie header count %d in %q", n, header)
+	}
+}
+
 func TestResponseHeaderCookieIssue4(t *testing.T) {
 	t.Parallel()
 

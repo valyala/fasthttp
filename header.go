@@ -1655,13 +1655,17 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 //
 // It is safe re-using the cookie after the function returns.
 func (h *ResponseHeader) SetCookie(cookie *Cookie) {
-	h.cookies = setArgBytes(h.cookies, cookie.Key(), cookie.Cookie(), argsHasValue)
+	h.bufK = initHeaderValueBytes(h.bufK, cookie.Key())
+	h.bufV = initHeaderValueBytes(h.bufV, cookie.Cookie())
+	h.cookies = setArgBytes(h.cookies, h.bufK, h.bufV, argsHasValue)
 }
 
 // SetCookie sets 'key: value' cookies.
 func (h *RequestHeader) SetCookie(key, value string) {
 	h.collectCookies()
-	h.cookies = setArg(h.cookies, key, value, argsHasValue)
+	h.bufK = initHeaderValueString(h.bufK, key)
+	h.bufV = initHeaderValueString(h.bufV, value)
+	h.cookies = setArgBytes(h.cookies, h.bufK, h.bufV, argsHasValue)
 }
 
 // SetCookieBytesK sets 'key: value' cookies.
