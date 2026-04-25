@@ -58,6 +58,64 @@ func TestResponseHeaderAddContentEncoding(t *testing.T) {
 	}
 }
 
+func TestResponseHeaderFirstLineSettersSanitizeNewlines(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name          string
+		set           func(*ResponseHeader)
+		value         func(*ResponseHeader) []byte
+		wantValue     string
+		wantFirstLine string
+	}{
+		{
+			name: "SetStatusMessage",
+			set: func(h *ResponseHeader) {
+				h.SetStatusMessage([]byte("OK\r\nInjected-Status: true"))
+			},
+			value:         func(h *ResponseHeader) []byte { return h.StatusMessage() },
+			wantValue:     "OK  Injected-Status: true",
+			wantFirstLine: "HTTP/1.1 200 OK  Injected-Status: true",
+		},
+		{
+			name: "SetProtocol",
+			set: func(h *ResponseHeader) {
+				h.SetProtocol([]byte("HTTP/1.1\r\nInjected-Protocol: true"))
+			},
+			value:         func(h *ResponseHeader) []byte { return h.Protocol() },
+			wantValue:     "HTTP/1.1  Injected-Protocol: true",
+			wantFirstLine: "HTTP/1.1  Injected-Protocol: true 200 OK",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var h ResponseHeader
+			h.SetStatusCode(StatusOK)
+			h.SetStatusMessage([]byte("OK"))
+
+			tc.set(&h)
+
+			if got := string(tc.value(&h)); got != tc.wantValue {
+				t.Fatalf("unexpected sanitized value: %q. Expected %q", got, tc.wantValue)
+			}
+
+			firstLine, _, ok := bytes.Cut(h.Header(), strCRLF)
+			if !ok {
+				t.Fatalf("missing response first line terminator in header %q", h.Header())
+			}
+			if got := string(firstLine); got != tc.wantFirstLine {
+				t.Fatalf("unexpected response first line: %q. Expected %q", got, tc.wantFirstLine)
+			}
+			if bytes.Contains(h.Header(), []byte("\r\nInjected-")) {
+				t.Fatalf("unexpected injected header line in %q", h.Header())
+			}
+		})
+	}
+}
+
 func TestResponseHeaderMultiLineValue(t *testing.T) {
 	t.Parallel()
 
@@ -2440,6 +2498,122 @@ func TestRequestHeaderMethod(t *testing.T) {
 	// non-http methods
 	testRequestHeaderMethod(t, "foobar")
 	testRequestHeaderMethod(t, "ABC")
+}
+
+func TestRequestHeaderFirstLineSettersSanitizeNewlines(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name          string
+		set           func(*RequestHeader)
+		value         func(*RequestHeader) []byte
+		wantValue     string
+		wantFirstLine string
+		wantNoHTTP11  bool
+	}{
+		{
+			name: "SetMethod",
+			set: func(h *RequestHeader) {
+				h.SetMethod("GET\r\nInjected-Method: true")
+			},
+			value:         func(h *RequestHeader) []byte { return h.Method() },
+			wantValue:     "GET  Injected-Method: true",
+			wantFirstLine: "GET  Injected-Method: true / HTTP/1.1",
+		},
+		{
+			name: "SetMethodBytes",
+			set: func(h *RequestHeader) {
+				h.SetMethodBytes([]byte("GET\r\nInjected-Method-Bytes: true"))
+			},
+			value:         func(h *RequestHeader) []byte { return h.Method() },
+			wantValue:     "GET  Injected-Method-Bytes: true",
+			wantFirstLine: "GET  Injected-Method-Bytes: true / HTTP/1.1",
+		},
+		{
+			name: "SetRequestURI",
+			set: func(h *RequestHeader) {
+				h.SetRequestURI("/\r\nInjected-URI: true")
+			},
+			value:         func(h *RequestHeader) []byte { return h.RequestURI() },
+			wantValue:     "/  Injected-URI: true",
+			wantFirstLine: "GET /  Injected-URI: true HTTP/1.1",
+		},
+		{
+			name: "SetRequestURIBytes",
+			set: func(h *RequestHeader) {
+				h.SetRequestURIBytes([]byte("/\r\nInjected-URI-Bytes: true"))
+			},
+			value:         func(h *RequestHeader) []byte { return h.RequestURI() },
+			wantValue:     "/  Injected-URI-Bytes: true",
+			wantFirstLine: "GET /  Injected-URI-Bytes: true HTTP/1.1",
+		},
+		{
+			name: "SetProtocol",
+			set: func(h *RequestHeader) {
+				h.SetProtocol("HTTP/1.1\r\nInjected-Protocol: true")
+			},
+			value:         func(h *RequestHeader) []byte { return h.Protocol() },
+			wantValue:     "HTTP/1.1  Injected-Protocol: true",
+			wantFirstLine: "GET / HTTP/1.1  Injected-Protocol: true",
+			wantNoHTTP11:  true,
+		},
+		{
+			name: "SetProtocolBytes",
+			set: func(h *RequestHeader) {
+				h.SetProtocolBytes([]byte("HTTP/1.1\r\nInjected-Protocol-Bytes: true"))
+			},
+			value:         func(h *RequestHeader) []byte { return h.Protocol() },
+			wantValue:     "HTTP/1.1  Injected-Protocol-Bytes: true",
+			wantFirstLine: "GET / HTTP/1.1  Injected-Protocol-Bytes: true",
+			wantNoHTTP11:  true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var h RequestHeader
+			h.SetMethod(MethodGet)
+			h.SetRequestURI("/")
+			h.SetProtocol("HTTP/1.1")
+			h.SetHost("example.com")
+
+			tc.set(&h)
+
+			if got := string(tc.value(&h)); got != tc.wantValue {
+				t.Fatalf("unexpected sanitized value: %q. Expected %q", got, tc.wantValue)
+			}
+
+			firstLine, _, ok := bytes.Cut(h.Header(), strCRLF)
+			if !ok {
+				t.Fatalf("missing request first line terminator in header %q", h.Header())
+			}
+			if got := string(firstLine); got != tc.wantFirstLine {
+				t.Fatalf("unexpected request first line: %q. Expected %q", got, tc.wantFirstLine)
+			}
+			if bytes.Contains(h.Header(), []byte("\r\nInjected-")) {
+				t.Fatalf("unexpected injected header line in %q", h.Header())
+			}
+			if h.noHTTP11 != tc.wantNoHTTP11 {
+				t.Fatalf("unexpected noHTTP11 flag: %v. Expected %v", h.noHTTP11, tc.wantNoHTTP11)
+			}
+		})
+	}
+}
+
+func TestRequestHeaderSetProtocolKeepsHTTP11FlagForSanitizedHTTP11(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.SetProtocolBytes([]byte("HTTP/1.1"))
+
+	if h.noHTTP11 {
+		t.Fatalf("expected noHTTP11 to remain false for HTTP/1.1")
+	}
+	if got := string(h.Protocol()); got != "HTTP/1.1" {
+		t.Fatalf("unexpected protocol: %q. Expected %q", got, "HTTP/1.1")
+	}
 }
 
 func testRequestHeaderMethod(t *testing.T, expectedMethod string) {
