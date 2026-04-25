@@ -567,12 +567,14 @@ func TestRequestCtxRedirect(t *testing.T) {
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "#aaa", "http://qqq/foo/bar?baz=111#aaa")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "?abc=de&f", "http://qqq/foo/bar?abc=de&f")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "?abc=de&f#sf", "http://qqq/foo/bar?abc=de&f#sf")
+	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "?\r\nInjected: yes", "http://qqq/foo/bar?  Injected: yes")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "x.html", "http://qqq/foo/x.html")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "x.html?a=1", "http://qqq/foo/x.html?a=1")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "x.html#aaa=bbb&cc=ddd", "http://qqq/foo/x.html#aaa=bbb&cc=ddd")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "x.html?b=1#aaa=bbb&cc=ddd", "http://qqq/foo/x.html?b=1#aaa=bbb&cc=ddd")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "/x.html", "http://qqq/x.html")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "/x.html#aaa=bbb&cc=ddd", "http://qqq/x.html#aaa=bbb&cc=ddd")
+	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "#\r\nInjected: yes", "http://qqq/foo/bar?baz=111#  Injected: yes")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "http://foo.bar/baz", "http://foo.bar/baz")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "https://foo.bar/baz", "https://foo.bar/baz")
 	testRequestCtxRedirect(t, "https://foo.com/bar?aaa", "//google.com/aaa?bb", "https://google.com/aaa?bb")
@@ -594,6 +596,12 @@ func testRequestCtxRedirect(t *testing.T, origURL, redirectURL, expectedURL stri
 	loc := ctx.Response.Header.Peek(HeaderLocation)
 	if string(loc) != expectedURL {
 		t.Fatalf("unexpected redirect url %q. Expecting %q. origURL=%q, redirectURL=%q", loc, expectedURL, origURL, redirectURL)
+	}
+	if strings.ContainsAny(redirectURL, "\r\n") {
+		s := ctx.Response.String()
+		if strings.Contains(s, "\r\nInjected: yes\r\n") {
+			t.Fatalf("serialized response contains injected header line: %q", s)
+		}
 	}
 }
 

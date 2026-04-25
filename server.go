@@ -1450,7 +1450,7 @@ func (ctx *RequestCtx) RedirectBytes(uri []byte, statusCode int) {
 }
 
 func (ctx *RequestCtx) redirect(uri []byte, statusCode int) {
-	ctx.Response.Header.setNonSpecial(strLocation, uri)
+	ctx.Response.Header.SetCanonical(strLocation, uri)
 	statusCode = getRedirectStatusCode(statusCode)
 	ctx.Response.SetStatusCode(statusCode)
 }
