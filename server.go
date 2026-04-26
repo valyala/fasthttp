@@ -201,10 +201,8 @@ type Server struct {
 	// ExpectHandler provides more control than ContinueHandler by allowing
 	// the server to respond with any final status code. The handler should return
 	// StatusContinue (100) to accept the request and proceed to read the body,
-	// or any other status code to reject it. If StatusExpectationFailed (417) is
-	// returned, the response is sent and the connection is closed. For any other
-	// non-100 status code, the response is also sent and the connection is closed,
-	// since the client may have already started sending the request body.
+	// or any other status code to reject it and close the connection since the
+	// client may have already started sending the request body.
 	//
 	// The ctx provides access to request headers and connection metadata (e.g.
 	// RemoteAddr for IP-based filtering). The response must not be modified —
