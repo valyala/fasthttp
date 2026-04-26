@@ -205,8 +205,7 @@ type Server struct {
 	// client may have already started sending the request body.
 	//
 	// The ctx provides access to request headers and connection metadata (e.g.
-	// RemoteAddr for IP-based filtering). The response must not be modified —
-	// only the returned status code is used.
+	// RemoteAddr for IP-based filtering). The response must not be modified.
 	//
 	// If both ExpectHandler and ContinueHandler are set, ExpectHandler
 	// takes precedence.
