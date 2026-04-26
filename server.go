@@ -2290,8 +2290,15 @@ func (s *Server) serveConn(c net.Conn) error {
 	for {
 		connRequestNum++
 
-		// If this is a keep-alive connection set the idle timeout.
-		if connRequestNum > 1 {
+		if connRequestNum == 1 {
+			// Apply ReadTimeout to the first request byte.
+			if s.ReadTimeout > 0 {
+				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
+					break
+				}
+			}
+		} else {
+			// If this is a keep-alive connection set the idle timeout.
 			if d := s.idleTimeout(); d > 0 {
 				if err = c.SetReadDeadline(time.Now().Add(d)); err != nil {
 					break
@@ -2318,8 +2325,8 @@ func (s *Server) serveConn(c net.Conn) error {
 				}
 			}
 		} else {
-			// If this is a keep-alive connection acquireByteReader will try to peek
-			// a couple of bytes already so the idle timeout will already be used.
+			// On keep-alive connections acquireByteReader will read the first byte
+			// while the idle timeout is active.
 			br, err = acquireByteReader(&ctx)
 		}
 

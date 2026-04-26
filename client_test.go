@@ -273,11 +273,86 @@ func TestClientInvalidURI(t *testing.T) {
 	req.Header.SetMethod(MethodGet)
 	req.SetRequestURI("http://example.com\r\n\r\nGET /\r\n\r\n")
 	err := c.Do(req, res)
-	if err == nil {
-		t.Fatal("expected error (missing required Host header in request)")
+	if err == nil && res.StatusCode() != StatusBadRequest {
+		t.Fatalf("expected invalid URI to be rejected, got status code %d", res.StatusCode())
 	}
 	if n := requests.Load(); n != 0 {
 		t.Fatalf("0 requests expected, got %d", n)
+	}
+}
+
+func TestClientRequestProtocolSetterSanitizesNewlines(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	var requests atomic.Int64
+	s := &Server{
+		Handler: func(_ *RequestCtx) {
+			requests.Add(1)
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	req, res := AcquireRequest(), AcquireResponse()
+	defer func() {
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+	}()
+
+	req.SetRequestURI("http://example.com/")
+	req.Header.SetProtocol("HTTP/1.1\r\nX-Injected-Protocol: true")
+
+	if err := c.Do(req, res); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := res.StatusCode(); got != StatusBadRequest {
+		t.Fatalf("unexpected status code: %d. Expected %d", got, StatusBadRequest)
+	}
+	if n := requests.Load(); n != 0 {
+		t.Fatalf("expected malformed request to be rejected before reaching handler, got %d handled requests", n)
+	}
+}
+
+func TestClientResponseStatusMessageSetterSanitizesNewlines(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Response.Header.SetStatusCode(StatusOK)
+			ctx.Response.Header.SetStatusMessage([]byte("OK\r\nX-Injected-Status: true"))
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	req, res := AcquireRequest(), AcquireResponse()
+	defer func() {
+		ReleaseRequest(req)
+		ReleaseResponse(res)
+	}()
+
+	req.SetRequestURI("http://example.com/")
+
+	if err := c.Do(req, res); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := string(res.Header.StatusMessage()); got != "OK  X-Injected-Status: true" {
+		t.Fatalf("unexpected status message: %q. Expected %q", got, "OK  X-Injected-Status: true")
+	}
+	if got := string(res.Header.Peek("X-Injected-Status")); got != "" {
+		t.Fatalf("unexpected injected response header value: %q", got)
 	}
 }
 
@@ -1759,6 +1834,73 @@ func TestClientFollowRedirects(t *testing.T) {
 
 	ReleaseRequest(req)
 	ReleaseResponse(resp)
+}
+
+func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name        string
+		initialURL  string
+		redirectURL string
+		want        bool
+	}{
+		{
+			name:        "same host keeps headers",
+			initialURL:  "http://example.com/foo",
+			redirectURL: "http://example.com/bar",
+			want:        false,
+		},
+		{
+			name:        "subdomain keeps headers",
+			initialURL:  "http://example.com/foo",
+			redirectURL: "https://sub.example.com:8443/bar",
+			want:        false,
+		},
+		{
+			name:        "same host different port keeps headers",
+			initialURL:  "http://example.com/foo",
+			redirectURL: "http://example.com:8080/bar",
+			want:        false,
+		},
+		{
+			name:        "http upgrade keeps headers",
+			initialURL:  "http://example.com/foo",
+			redirectURL: "https://example.com/bar",
+			want:        false,
+		},
+		{
+			name:        "https downgrade keeps headers",
+			initialURL:  "https://example.com/foo",
+			redirectURL: "http://example.com/bar",
+			want:        false,
+		},
+		{
+			name:        "parent domain strips when initial host is subdomain",
+			initialURL:  "http://sub.example.com/foo",
+			redirectURL: "http://example.com/bar",
+			want:        true,
+		},
+		{
+			name:        "unrelated host strips headers",
+			initialURL:  "http://example.com/foo",
+			redirectURL: "http://example.net/bar",
+			want:        true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			initialHost := hostnameFromURLString(tc.initialURL)
+
+			var redirectURI URI
+			redirectURI.Update(tc.redirectURL)
+
+			if got := shouldStripSensitiveHeadersOnRedirect(initialHost, redirectURI.Host()); got != tc.want {
+				t.Fatalf("unexpected redirect stripping decision: got %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestClientGetTimeoutSuccess(t *testing.T) {
@@ -3343,7 +3485,10 @@ func Test_getRedirectURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := getRedirectURL(tt.args.baseURL, tt.args.location, tt.args.disablePathNormalizing); got != tt.want {
+			redirectURI := AcquireURI()
+			got := getRedirectURL(tt.args.baseURL, tt.args.location, tt.args.disablePathNormalizing, redirectURI)
+			ReleaseURI(redirectURI)
+			if got != tt.want {
 				t.Errorf("getRedirectURL() = %v, want %v", got, tt.want)
 			}
 		})
@@ -3614,4 +3759,80 @@ type testResolver struct {
 func (r *testResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	r.lookupCountByHost[host]++
 	return r.resolver.LookupIPAddr(ctx, host)
+}
+
+type TransportMock struct {
+	wrapperFunc func(hc *HostClient, req *Request, resp *Response) (retry bool, err error)
+}
+
+func (t *TransportMock) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
+	return t.wrapperFunc(hc, req, resp)
+}
+
+func TestClient_RetryIfErrUpstream(t *testing.T) {
+	t.Parallel()
+	upstreamErr := errors.New("upstream error")
+
+	t.Run("upstream_known", func(t *testing.T) {
+		retryIfErrCalled := false
+		c := &Client{
+			Transport: &TransportMock{
+				wrapperFunc: func(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
+					resp.raddr = &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 8080}
+					return true, upstreamErr
+				},
+			},
+			RetryIfErrUpstream: func(request *Request, attempts int, err error, upstream string) (resetTimeout bool, retry bool) {
+				retryIfErrCalled = true
+				if upstream != "127.0.0.1:8080" {
+					t.Errorf("expected upstream to be 127.0.0.1:8080, got %s", upstream)
+				}
+
+				return false, false
+			},
+		}
+		req := AcquireRequest()
+		res := AcquireResponse()
+
+		req.SetRequestURI("http://example.com")
+
+		err := c.Do(req, res)
+		if !errors.Is(err, upstreamErr) {
+			t.Fatal(err)
+		}
+		if !retryIfErrCalled {
+			t.Fatal("RetryIfErrUpstream should be called")
+		}
+	})
+
+	t.Run("no_upstream", func(t *testing.T) {
+		retryIfErrCalled := false
+		c := &Client{
+			Transport: &TransportMock{
+				wrapperFunc: func(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
+					return true, upstreamErr
+				},
+			},
+			RetryIfErrUpstream: func(request *Request, attempts int, err error, upstream string) (resetTimeout bool, retry bool) {
+				retryIfErrCalled = true
+				if upstream != "" {
+					t.Errorf("expected upstream to be empty, got %s", upstream)
+				}
+
+				return false, false
+			},
+		}
+		req := AcquireRequest()
+		res := AcquireResponse()
+
+		req.SetRequestURI("http://example.com")
+
+		err := c.Do(req, res)
+		if !errors.Is(err, upstreamErr) {
+			t.Fatal(err)
+		}
+		if !retryIfErrCalled {
+			t.Fatal("RetryIfErrUpstream should be called")
+		}
+	})
 }
