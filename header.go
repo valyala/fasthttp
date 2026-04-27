@@ -2989,6 +2989,8 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	// 'identity' content-length by default
 	h.contentLength = -2
 
+	contentLengthSeen := false
+
 	var s headerScanner
 	s.b = buf
 	var kv *argsKV
@@ -3037,6 +3039,12 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strContentLength) {
+				if contentLengthSeen {
+					h.connectionClose = true
+					return 0, ErrDuplicateContentLength
+				}
+				contentLengthSeen = true
+
 				var err error
 				contentLength, err := parseContentLength(s.value)
 				if err != nil {

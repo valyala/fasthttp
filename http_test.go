@@ -2486,6 +2486,9 @@ func TestResponseReadError(t *testing.T) {
 	// invalid chunked body
 	testResponseReadError(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nContent-Length: 1234\r\n\r\nshort")
 
+	// duplicate content-length
+	testResponseReadError(t, resp, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 7\r\n\r\nABCDEFG")
+
 	// chunked body without end chunk
 	testResponseReadError(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: chunked\r\n\r\nfoo")
 

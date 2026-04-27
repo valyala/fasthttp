@@ -3112,10 +3112,6 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 400 OK\nconTEnt-leNGTH: 123\nConTENT-TYPE: ass\r\n\r\n",
 		400, 123, "ass")
 
-	// duplicate content-length
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 456\r\nContent-Type: foo/bar\r\nContent-Length: 321\r\n\r\n",
-		200, 321, "foo/bar")
-
 	// duplicate content-type
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 234\r\nContent-Type: foo/bar\r\nContent-Type: baz/bar\r\n\r\n",
 		200, 234, "baz/bar")
@@ -3363,6 +3359,11 @@ func TestResponseHeaderReadError(t *testing.T) {
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: faaa\r\nContent-Type: text/html\r\n\r\nfoobar")
 	testResponseHeaderReadError(t, h, "HTTP/1.1 201 OK\r\nContent-Length: 123aa\r\nContent-Type: text/ht\r\n\r\naaa")
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: aa124\r\nContent-Type: html\r\n\r\nxx")
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 5, 5\r\nContent-Type: html\r\n\r\n")
+
+	// duplicate content-length
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 456\r\nContent-Type: foo/bar\r\nContent-Length: 321\r\n\r\n")
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 456\r\nContent-Type: foo/bar\r\nContent-Length: 456\r\n\r\n")
 
 	// no headers
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\n")
@@ -3384,6 +3385,16 @@ func TestResponseHeaderReadError(t *testing.T) {
 
 	// Space before header name
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\n foo: bar\r\n\r\n")
+}
+
+func TestResponseHeaderReadDuplicateContentLengthError(t *testing.T) {
+	t.Parallel()
+
+	h := &ResponseHeader{}
+	err := h.Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Length: 7\r\n\r\n")))
+	if !errors.Is(err, ErrDuplicateContentLength) {
+		t.Fatalf("unexpected error %v. Expecting ErrDuplicateContentLength", err)
+	}
 }
 
 func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
