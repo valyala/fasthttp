@@ -1777,25 +1777,23 @@ func TestRequestReadLimitBody(t *testing.T) {
 	testRequestReadLimitBodySuccess(t, "GET /foo HTTP/1.0\r\n\r\n", 0)
 }
 
-func TestRequestReadLimitBodyWhitespaceBeforeColonFramingHeaders(t *testing.T) {
+func TestRequestReadLimitBodyRejectWhitespaceBeforeColonFramingHeaders(t *testing.T) {
 	t.Parallel()
 
-	var req Request
-	r := bytes.NewBufferString("POST /foo HTTP/1.1\r\nHost: a.com\r\nContent-Length : 4\r\n\r\ntestNEXT")
-	br := bufio.NewReader(r)
-	if err := req.ReadLimitBody(br, 10); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := string(req.Body()); got != "test" {
-		t.Fatalf("unexpected body %q", got)
+	tests := []string{
+		"POST /foo HTTP/1.1\r\nHost: a.com\r\nContent-Length : 4\r\n\r\ntestNEXT",
+		"POST /foo HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding : chunked\r\n\r\n4\r\ntest\r\n0\r\n\r\n",
 	}
 
-	rest, err := io.ReadAll(br)
-	if err != nil {
-		t.Fatalf("unexpected read error: %v", err)
-	}
-	if got := string(rest); got != "NEXT" {
-		t.Fatalf("unexpected buffered bytes %q", got)
+	for _, s := range tests {
+		var req Request
+		br := bufio.NewReader(bytes.NewBufferString(s))
+		if err := req.ReadLimitBody(br, 10); err == nil {
+			t.Fatalf("expecting error for %q", s)
+		}
+		if body := req.Body(); len(body) != 0 {
+			t.Fatalf("unexpected body %q for %q", body, s)
+		}
 	}
 }
 
