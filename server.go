@@ -1159,6 +1159,10 @@ func (ctx *RequestCtx) FormFile(key string) (*multipart.FileHeader, error) {
 var ErrMissingFile = errors.New("there is no uploaded file associated with the given key")
 
 // SaveMultipartFile saves multipart file fh under the given filename path.
+//
+// The path is used as-is and must be a server-trusted destination filename.
+// Do not pass the attacker-controlled fh.Filename directly without validating
+// it and constraining it to the intended destination directory.
 func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
 	var (
 		f  multipart.File
