@@ -2991,6 +2991,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	var s headerScanner
 	s.b = buf
 	var kv *argsKV
+	transferEncodingSeen := false
 
 	for s.next() {
 		// Trim trailing whitespace before the colon to normalize headers
@@ -3070,10 +3071,26 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			}
 		case 't':
 			if caseInsensitiveCompare(s.key, strTransferEncoding) {
-				if len(s.value) > 0 && !bytes.Equal(s.value, strIdentity) {
-					h.contentLength = -1
-					h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
+				if h.noHTTP11 {
+					continue
 				}
+				if transferEncodingSeen {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, ErrUnsupportedTransferEncoding
+					}
+					return 0, errors.New("too many Transfer-Encoding headers")
+				}
+				transferEncodingSeen = true
+				if !caseInsensitiveCompare(s.value, strChunked) {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, ErrUnsupportedTransferEncoding
+					}
+					return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
+				}
+				h.contentLength = -1
+				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strTrailer) {

@@ -3113,9 +3113,9 @@ func TestResponseHeaderReadSuccess(t *testing.T) {
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 300 OK\r\nContent-Type: foo/barr\r\nTransfer-Encoding: chunked\r\nContent-Length: 354\r\n\r\n",
 		300, -1, "foo/barr")
 
-	// duplicate transfer-encoding: chunked
-	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n",
-		200, -1, "text/html")
+	// HTTP/1.0 ignores Transfer-Encoding.
+	testResponseHeaderReadSuccess(t, h, "HTTP/1.0 200 OK\r\nTransfer-Encoding: deflate\r\nContent-Length: 5\r\n\r\n",
+		200, 5, string(defaultContentType))
 
 	// no reason string in the first line
 	testResponseHeaderReadSuccess(t, h, "HTTP/1.1 456\r\nContent-Type: xxx/yyy\r\nContent-Length: 134\r\n\r\naaaxxx",
@@ -3363,6 +3363,13 @@ func TestResponseHeaderReadError(t *testing.T) {
 	// forbidden trailer
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: -1\r\nTrailer: Foo, Content-Length\r\n\r\n")
 
+	// unsupported transfer-encoding
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nTransfer-Encoding: deflate\r\nContent-Length: 5\r\n\r\n")
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nTransfer-Encoding: identity\r\nContent-Length: 5\r\n\r\n")
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nTransfer-Encoding: \r\nContent-Length: 5\r\n\r\n")
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, gzip\r\n\r\n")
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n")
+
 	// no protocol in the first line
 	testResponseHeaderReadError(t, h, "GET /foo/bar\r\nHost: google.com\r\n\r\nisdD")
 
@@ -3396,6 +3403,9 @@ func TestResponseHeaderReadErrorSecureLog(t *testing.T) {
 
 	// no trailing crlf
 	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 200 OK\r\nContent-Length: 123\r\nContent-Type: text/html\r\n")
+
+	// unsupported transfer-encoding
+	testResponseHeaderReadSecuredError(t, h, "HTTP/1.1 200 OK\r\nTransfer-Encoding: deflate\r\nContent-Length: 5\r\n\r\n")
 }
 
 func TestRequestHeaderReadError(t *testing.T) {

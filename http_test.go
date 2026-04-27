@@ -32,19 +32,30 @@ func TestInvalidTrailers(t *testing.T) {
 	}
 }
 
-func TestResponseEmptyTransferEncoding(t *testing.T) {
+func TestResponseEmptyTransferEncodingError(t *testing.T) {
 	t.Parallel()
 
 	var r Response
 
-	body := "Some body"
-	br := bufio.NewReader(bytes.NewBufferString("HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: \r\nContent-Length: 9\r\n\r\n" + body))
-	err := r.Read(br)
-	if err != nil {
-		t.Fatal(err)
+	response := "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: \r\nContent-Length: 9\r\n\r\nSome body"
+	br := bufio.NewReader(bytes.NewBufferString(response))
+	if err := r.Read(br); err == nil {
+		t.Fatal("expected an error")
 	}
-	if got := string(r.Body()); got != body {
-		t.Fatalf("expected %q got %q", body, got)
+	expectNetHTTPReadResponseError(t, response, "net/http accepted response with empty Transfer-Encoding")
+}
+
+func expectNetHTTPReadResponseError(t *testing.T, response, msg string) {
+	t.Helper()
+
+	resp, err := http.ReadResponse(bufio.NewReader(strings.NewReader(response)), nil)
+	if resp != nil && resp.Body != nil {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Fatalf("cannot close response body: %v", closeErr)
+		}
+	}
+	if err == nil {
+		t.Fatal(msg)
 	}
 }
 
@@ -2422,10 +2433,6 @@ func TestResponseReadSuccess(t *testing.T) {
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nqwer\r\n2\r\nty\r\n0\r\nFoo2: bar2\r\n\r\n",
 		200, -1, "text/html", "qwerty", map[string]string{"Foo2": "bar2"})
 
-	// chunked response with non-chunked Transfer-Encoding.
-	testResponseReadSuccess(t, resp, "HTTP/1.1 230 OK\r\nContent-Type: text\r\nTransfer-Encoding: aaabbb\r\n\r\n2\r\ner\r\n2\r\nty\r\n0\r\nFoo3: bar3\r\n\r\n",
-		230, -1, "text", "erty", map[string]string{"Foo3": "bar3"})
-
 	// chunked response with content-length
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: foo/bar\r\nContent-Length: 123\r\nTransfer-Encoding: chunked\r\n\r\n4\r\ntest\r\n0\r\nFoo4:bar4\r\n\r\n",
 		200, -1, "foo/bar", "test", map[string]string{"Foo4": "bar4"})
@@ -2437,6 +2444,42 @@ func TestResponseReadSuccess(t *testing.T) {
 	// chunked response with chunk extension
 	testResponseReadSuccess(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nTransfer-Encoding: chunked\r\n\r\n3;ext\r\naaa\r\n0\r\nFoo6: bar6\r\n\r\n",
 		200, -1, "text/html", "aaa", map[string]string{"Foo6": "bar6"})
+}
+
+func TestResponseReadUnsupportedTransferEncoding(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		response string
+	}{
+		{
+			name:     "deflate",
+			response: "HTTP/1.1 200 OK\r\nTransfer-Encoding: deflate\r\nContent-Length: 5\r\n\r\nABCDE",
+		},
+		{
+			name:     "identity",
+			response: "HTTP/1.1 200 OK\r\nTransfer-Encoding: identity\r\nContent-Length: 5\r\n\r\nABCDE",
+		},
+		{
+			name:     "compound",
+			response: "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, gzip\r\n\r\n0\r\n\r\n",
+		},
+		{
+			name:     "duplicate",
+			response: "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var resp Response
+			if err := resp.Read(bufio.NewReader(strings.NewReader(tt.response))); err == nil {
+				t.Fatal("expected an error")
+			}
+			expectNetHTTPReadResponseError(t, tt.response, "net/http accepted response")
+		})
+	}
 }
 
 func TestResponseReadError(t *testing.T) {
