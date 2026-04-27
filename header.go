@@ -206,14 +206,15 @@ func (h *ResponseHeader) ContentLength() int {
 // -2 means Transfer-Encoding: identity.
 func (h *RequestHeader) ContentLength() int {
 	if h.disableSpecialHeader {
-		// Parse Content-Length from raw headers when special headers are disabled
+		// Parse framing headers from raw headers when special headers are disabled.
+		// Transfer-Encoding takes precedence over Content-Length, matching
+		// the normal parser path.
+		te := peekArgBytes(h.h, strTransferEncoding)
+		if caseInsensitiveCompare(te, strChunked) {
+			return -1 // chunked
+		}
 		v := peekArgBytes(h.h, strContentLength)
 		if len(v) == 0 {
-			// Check for Transfer-Encoding: chunked
-			te := peekArgBytes(h.h, strTransferEncoding)
-			if bytes.Equal(te, strChunked) {
-				return -1 // chunked
-			}
 			return -2 // identity
 		}
 		n, err := parseContentLength(v)
@@ -3036,14 +3037,15 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strContentLength) {
+				var err error
+				contentLength, err := parseContentLength(s.value)
+				if err != nil {
+					h.contentLength = -2
+					h.connectionClose = true
+					return 0, err
+				}
 				if h.contentLength != -1 {
-					var err error
-					h.contentLength, err = parseContentLength(s.value)
-					if err != nil {
-						h.contentLength = -2
-						h.connectionClose = true
-						return 0, err
-					}
+					h.contentLength = contentLength
 					h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
 				}
 				continue
@@ -3155,6 +3157,32 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 			}
 		}
 
+		isContentLength := false
+		isTransferEncoding := false
+		contentLength := 0
+		switch s.key[0] | 0x20 {
+		case 'c':
+			if caseInsensitiveCompare(s.key, strContentLength) {
+				isContentLength = true
+				if contentLengthSeen {
+					h.connectionClose = true
+					return 0, ErrDuplicateContentLength
+				}
+				contentLengthSeen = true
+				var err error
+				contentLength, err = parseContentLength(s.value)
+				if err != nil {
+					h.contentLength = -2
+					h.connectionClose = true
+					return 0, err
+				}
+			}
+		case 't':
+			if caseInsensitiveCompare(s.key, strTransferEncoding) {
+				isTransferEncoding = true
+			}
+		}
+
 		if h.disableSpecialHeader {
 			h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
 			continue
@@ -3181,21 +3209,9 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				h.contentType = append(h.contentType[:0], s.value...)
 				continue
 			}
-			if caseInsensitiveCompare(s.key, strContentLength) {
-				if contentLengthSeen {
-					h.connectionClose = true
-					return 0, ErrDuplicateContentLength
-				}
-				contentLengthSeen = true
-
+			if isContentLength {
 				if h.contentLength != -1 {
-					var err error
-					h.contentLength, err = parseContentLength(s.value)
-					if err != nil {
-						h.contentLength = -2
-						h.connectionClose = true
-						return 0, err
-					}
+					h.contentLength = contentLength
 					h.contentLengthBytes = append(h.contentLengthBytes[:0], s.value...)
 				}
 				continue
@@ -3210,7 +3226,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 		case 't':
-			if caseInsensitiveCompare(s.key, strTransferEncoding) {
+			if isTransferEncoding {
 				isIdentity := caseInsensitiveCompare(s.value, strIdentity)
 				isChunked := caseInsensitiveCompare(s.value, strChunked)
 
