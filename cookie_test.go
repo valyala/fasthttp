@@ -15,6 +15,84 @@ func TestCookiePanic(t *testing.T) {
 	}
 }
 
+func TestCookieSettersSanitizeNewLines(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name string
+		set  func(c *Cookie)
+	}{
+		{
+			name: "SetKey",
+			set:  func(c *Cookie) { c.SetKey("sid\r\nSet-Cookie: admin=1") },
+		},
+		{
+			name: "SetKeyBytes",
+			set:  func(c *Cookie) { c.SetKeyBytes([]byte("sid\r\nSet-Cookie: admin=1")) },
+		},
+		{
+			name: "SetValue",
+			set:  func(c *Cookie) { c.SetValue("abc\r\nSet-Cookie: admin=1") },
+		},
+		{
+			name: "SetValueBytes",
+			set:  func(c *Cookie) { c.SetValueBytes([]byte("abc\r\nSet-Cookie: admin=1")) },
+		},
+		{
+			name: "SetDomain",
+			set:  func(c *Cookie) { c.SetDomain("example.com\r\nSet-Cookie: admin=1") },
+		},
+		{
+			name: "SetDomainBytes",
+			set:  func(c *Cookie) { c.SetDomainBytes([]byte("example.com\r\nSet-Cookie: admin=1")) },
+		},
+		{
+			name: "SetPath",
+			set:  func(c *Cookie) { c.SetPath("/account\r\nSet-Cookie: admin=1") },
+		},
+		{
+			name: "SetPathBytes",
+			set:  func(c *Cookie) { c.SetPathBytes([]byte("/account\r\nSet-Cookie: admin=1")) },
+		},
+		{
+			name: "SetPathEncodedNewLine",
+			set:  func(c *Cookie) { c.SetPath("/account%0d%0aSet-Cookie:%20admin=1") },
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var c Cookie
+			c.SetKey("sid")
+			c.SetValue("abc")
+			c.SetDomain("example.com")
+			c.SetPath("/")
+
+			tc.set(&c)
+
+			s := c.String()
+			if strings.ContainsAny(s, "\r\n") {
+				t.Fatalf("unexpected newline in cookie %q", s)
+			}
+		})
+	}
+}
+
+func TestCookieParseSanitizesNewLines(t *testing.T) {
+	t.Parallel()
+
+	var c Cookie
+	err := c.Parse("sid=abc\r\nSet-Cookie: admin=1; Domain=example.com\r\nSet-Cookie: admin=1; Path=/account\r\nSet-Cookie: admin=1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	s := c.String()
+	if strings.ContainsAny(s, "\r\n") {
+		t.Fatalf("unexpected newline in cookie %q", s)
+	}
+}
+
 func TestCookieValueWithEqualAndSpaceChars(t *testing.T) {
 	t.Parallel()
 

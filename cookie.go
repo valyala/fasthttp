@@ -162,12 +162,14 @@ func (c *Cookie) Path() []byte {
 func (c *Cookie) SetPath(path string) {
 	c.bufK = append(c.bufK[:0], path...)
 	c.path = normalizePath(c.path, c.bufK)
+	c.path = removeNewLines(c.path)
 }
 
 // SetPathBytes sets cookie path.
 func (c *Cookie) SetPathBytes(path []byte) {
 	c.bufK = append(c.bufK[:0], path...)
 	c.path = normalizePath(c.path, c.bufK)
+	c.path = removeNewLines(c.path)
 }
 
 // Domain returns cookie domain.
@@ -180,12 +182,12 @@ func (c *Cookie) Domain() []byte {
 
 // SetDomain sets cookie domain.
 func (c *Cookie) SetDomain(domain string) {
-	c.domain = append(c.domain[:0], domain...)
+	c.domain = initHeaderValueString(c.domain, domain)
 }
 
 // SetDomainBytes sets cookie domain.
 func (c *Cookie) SetDomainBytes(domain []byte) {
-	c.domain = append(c.domain[:0], domain...)
+	c.domain = initHeaderValueBytes(c.domain, domain)
 }
 
 // MaxAge returns the seconds until the cookie is meant to expire or 0
@@ -236,12 +238,12 @@ func (c *Cookie) Value() []byte {
 
 // SetValue sets cookie value.
 func (c *Cookie) SetValue(value string) {
-	c.value = append(c.value[:0], value...)
+	c.value = initHeaderValueString(c.value, value)
 }
 
 // SetValueBytes sets cookie value.
 func (c *Cookie) SetValueBytes(value []byte) {
-	c.value = append(c.value[:0], value...)
+	c.value = initHeaderValueBytes(c.value, value)
 }
 
 // Key returns cookie name.
@@ -254,12 +256,12 @@ func (c *Cookie) Key() []byte {
 
 // SetKey sets cookie name.
 func (c *Cookie) SetKey(key string) {
-	c.key = append(c.key[:0], key...)
+	c.key = initHeaderValueString(c.key, key)
 }
 
 // SetKeyBytes sets cookie name.
 func (c *Cookie) SetKeyBytes(key []byte) {
-	c.key = append(c.key[:0], key...)
+	c.key = initHeaderValueBytes(c.key, key)
 }
 
 // Reset clears the cookie.
@@ -385,8 +387,8 @@ func (c *Cookie) ParseBytes(src []byte) error {
 		return errNoCookies
 	}
 
-	c.key = append(c.key, k...)
-	c.value = append(c.value, v...)
+	c.key = initHeaderValueBytes(c.key, k)
+	c.value = initHeaderValueBytes(c.value, v)
 
 	for s.nextRaw(&k, &v) {
 		if len(k) != 0 {
@@ -412,12 +414,12 @@ func (c *Cookie) ParseBytes(src []byte) error {
 
 			case 'd': // "domain"
 				if caseInsensitiveCompare(strCookieDomain, k) {
-					c.domain = append(c.domain, v...)
+					c.domain = initHeaderValueBytes(c.domain, v)
 				}
 
 			case 'p': // "path"
 				if caseInsensitiveCompare(strCookiePath, k) {
-					c.path = append(c.path, v...)
+					c.path = initHeaderValueBytes(c.path, v)
 				}
 
 			case 's': // "samesite"
