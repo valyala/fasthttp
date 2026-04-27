@@ -505,20 +505,14 @@ func (h *header) AddTrailerBytes(trailer []byte) (err error) {
 		if i < 0 {
 			i = len(trailer)
 		}
-		key := trailer[:i]
-		for len(key) > 0 && key[0] == ' ' {
-			key = key[1:]
-		}
-		for len(key) > 0 && key[len(key)-1] == ' ' {
-			key = key[:len(key)-1]
-		}
+		key := trim(trailer[:i])
 		// Forbidden by RFC 7230, section 4.1.2
-		if isBadTrailer(key) {
+		if !isValidTrailerKey(key) || isBadTrailer(key) {
 			err = ErrBadTrailer
 			continue
 		}
 		h.bufK = append(h.bufK[:0], key...)
-		normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(h.bufK, ' ') != -1)
+		normalizeHeaderKeyValidated(h.bufK, h.disableNormalizing)
 		if cap(h.trailer) > len(h.trailer) {
 			h.trailer = h.trailer[:len(h.trailer)+1]
 			h.trailer[len(h.trailer)-1] = append(h.trailer[len(h.trailer)-1][:0], h.bufK...)
@@ -530,6 +524,18 @@ func (h *header) AddTrailerBytes(trailer []byte) (err error) {
 	}
 
 	return err
+}
+
+func isValidTrailerKey(key []byte) bool {
+	if len(key) == 0 {
+		return false
+	}
+	for _, c := range key {
+		if !validHeaderFieldByte(c) {
+			return false
+		}
+	}
+	return true
 }
 
 // validHeaderFieldByte returns true if c valid header field byte
