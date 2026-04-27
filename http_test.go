@@ -2163,11 +2163,73 @@ func TestRequestChunkedWhitespace(t *testing.T) {
 	rb := bufio.NewReader(r)
 	err := req.Read(rb)
 	if err != nil {
-		t.Fatalf("Unexpected error when reading chunked request: %v", err)
+		t.Fatalf("unexpected error when reading chunked request: %v", err)
 	}
 	expectedBody := "abc"
 	if string(req.Body()) != expectedBody {
-		t.Fatalf("Unexpected body %q. Expected %q", req.Body(), expectedBody)
+		t.Fatalf("unexpected body %q. Expected %q", req.Body(), expectedBody)
+	}
+}
+
+func TestParseChunkSize(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name string
+		line string
+		size int
+	}{
+		{
+			name: "without extension",
+			line: "3\r\n",
+			size: 3,
+		},
+		{
+			name: "with extension",
+			line: "3;ext\r\n",
+			size: 3,
+		},
+		{
+			name: "trailing space",
+			line: "3 \r\n",
+			size: 3,
+		},
+		{
+			name: "trailing tab",
+			line: "3\t\r\n",
+			size: 3,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			rb := bufio.NewReader(bytes.NewBufferString(test.line))
+			size, err := parseChunkSize(rb)
+			if err != nil {
+				t.Fatalf("unexpected error when reading chunk size %q: %v", test.line, err)
+			}
+			if size != test.size {
+				t.Fatalf("unexpected chunk size %d. Expected %d", size, test.size)
+			}
+		})
+	}
+}
+
+func TestParseChunkSizeWhitespaceError(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []string{
+		"3 ;ext\r\n",
+		"3\t;ext\r\n",
+	} {
+		t.Run(fmt.Sprintf("%q", test), func(t *testing.T) {
+			t.Parallel()
+
+			rb := bufio.NewReader(bytes.NewBufferString(test))
+			if _, err := parseChunkSize(rb); err == nil {
+				t.Fatalf("expecting error when reading chunk size %q", test)
+			}
+		})
 	}
 }
 
