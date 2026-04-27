@@ -2157,6 +2157,225 @@ func TestServerContinueHandler(t *testing.T) {
 	}
 }
 
+func TestServerExpectHandler(t *testing.T) {
+	t.Parallel()
+
+	acceptContentLength := 5
+	s := &Server{
+		ExpectHandler: func(ctx *RequestCtx) int {
+			if !ctx.IsPost() {
+				t.Errorf("unexpected method %q. Expecting POST", ctx.Method())
+			}
+
+			ct := ctx.Request.Header.ContentType()
+			if string(ct) != "a/b" {
+				t.Errorf("unexpected content-type: %q. Expecting %q", ct, "a/b")
+			}
+
+			if ctx.Request.Header.contentLength == acceptContentLength {
+				return StatusContinue
+			}
+			return StatusExpectationFailed
+		},
+		Handler: func(ctx *RequestCtx) {
+			if ctx.Request.Header.contentLength != acceptContentLength {
+				t.Errorf("all requests with content-length other than %d should be denied", acceptContentLength)
+			}
+			if !ctx.IsPost() {
+				t.Errorf("unexpected method %q. Expecting POST", ctx.Method())
+			}
+			if string(ctx.Path()) != "/foo" {
+				t.Errorf("unexpected path %q. Expecting %q", ctx.Path(), "/foo")
+			}
+			ct := ctx.Request.Header.ContentType()
+			if string(ct) != "a/b" {
+				t.Errorf("unexpected content-type: %q. Expecting %q", ct, "a/b")
+			}
+			if string(ctx.PostBody()) != "12345" {
+				t.Errorf("unexpected body: %q. Expecting %q", ctx.PostBody(), "12345")
+			}
+			ctx.WriteString("foobar") //nolint:errcheck
+		},
+	}
+
+	sendRequest := func(rw *readWriter, expectedStatusCode int, expectedResponse string) {
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatalf("Unexpected error from serveConn: %v", err)
+		}
+
+		br := bufio.NewReader(&rw.w)
+		verifyResponse(t, br, expectedStatusCode, string(defaultContentType), expectedResponse)
+
+		data, err := io.ReadAll(br)
+		if err != nil {
+			t.Fatalf("Unexpected error when reading remaining data: %v", err)
+		}
+		if len(data) > 0 {
+			t.Fatalf("unexpected remaining data %q", data)
+		}
+	}
+
+	rw := &readWriter{}
+	for range 25 {
+		// Regular requests without Expect header
+		rw.r.Reset()
+		rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+		sendRequest(rw, StatusOK, "foobar")
+
+		// Expect 100-continue requests that are accepted
+		rw.r.Reset()
+		rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+		sendRequest(rw, StatusOK, "foobar")
+
+		// Requests rejected with 417
+		rw.r.Reset()
+		rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 6\r\nContent-Type: a/b\r\n\r\n123456")
+		sendRequest(rw, StatusExpectationFailed, "")
+	}
+}
+
+func TestServerExpectHandlerCustomStatusCode(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		ExpectHandler: func(ctx *RequestCtx) int {
+			// Reject with 413 Request Entity Too Large for large bodies
+			if ctx.Request.Header.ContentLength() > 5 {
+				return StatusRequestEntityTooLarge
+			}
+			return StatusContinue
+		},
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("ok") //nolint:errcheck
+		},
+	}
+
+	// Accepted request
+	rw := &readWriter{}
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusOK, string(defaultContentType), "ok")
+
+	// Rejected request with 413 — connection should be closed
+	rw = &readWriter{}
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 6\r\nContent-Type: a/b\r\n\r\n123456")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+	br = bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusRequestEntityTooLarge, string(defaultContentType), "")
+}
+
+func TestServerExpectHandlerConnectionClose(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		ExpectHandler: func(ctx *RequestCtx) int {
+			if ctx.Request.Header.ContentLength() > 5 {
+				return StatusExpectationFailed
+			}
+			return StatusContinue
+		},
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("ok") //nolint:errcheck
+		},
+	}
+
+	// When rejected, the response should have Connection: close and
+	// subsequent pipelined requests should NOT be processed.
+	rw := &readWriter{}
+	// Send two pipelined requests: one rejected, one that should never be processed.
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 6\r\nContent-Type: a/b\r\n\r\n123456")
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Unexpected error when reading response: %v", err)
+	}
+	if resp.StatusCode() != StatusExpectationFailed {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusExpectationFailed)
+	}
+	if !resp.Header.ConnectionClose() {
+		t.Fatal("response should have Connection: close header")
+	}
+
+	// Verify no second response was sent (connection was closed after first rejection).
+	data, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
+	}
+	if len(data) > 0 {
+		t.Fatalf("unexpected remaining data %q. Connection should have been closed", data)
+	}
+}
+
+func TestServerExpectHandlerPrecedence(t *testing.T) {
+	t.Parallel()
+
+	// When both ExpectHandler and ContinueHandler are set,
+	// ExpectHandler should take precedence.
+	continueHandlerCalled := false
+	s := &Server{
+		ContinueHandler: func(headers *RequestHeader) bool {
+			continueHandlerCalled = true
+			return true
+		},
+		ExpectHandler: func(ctx *RequestCtx) int {
+			return StatusRequestEntityTooLarge
+		},
+		Handler: func(ctx *RequestCtx) {
+			t.Error("handler should not be called when ExpectHandler rejects")
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusRequestEntityTooLarge, string(defaultContentType), "")
+
+	if continueHandlerCalled {
+		t.Fatal("ContinueHandler should not be called when ExpectHandler is set")
+	}
+}
+
+func TestServerExpectHandlerRemoteAddr(t *testing.T) {
+	t.Parallel()
+
+	// ExpectHandler can use ctx.RemoteAddr() for IP-based filtering.
+	// readWriter returns zeroTCPAddr (0.0.0.0:0) as the remote address.
+	s := &Server{
+		ExpectHandler: func(ctx *RequestCtx) int {
+			if ctx.RemoteAddr().String() == "0.0.0.0:0" {
+				return StatusForbidden
+			}
+			return StatusContinue
+		},
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("ok") //nolint:errcheck
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusForbidden, string(defaultContentType), "")
+}
+
 func TestCompressHandler(t *testing.T) {
 	t.Parallel()
 

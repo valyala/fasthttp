@@ -194,6 +194,26 @@ type Server struct {
 	// like they are normal requests.
 	ContinueHandler func(header *RequestHeader) bool
 
+	// ExpectHandler is called after receiving the Expect 100 Continue Header.
+	//
+	// https://www.rfc-editor.org/rfc/rfc9110.html#field.expect
+	//
+	// ExpectHandler provides more control than ContinueHandler by allowing
+	// the server to respond with any final status code. The handler should return
+	// StatusContinue (100) to accept the request and proceed to read the body,
+	// or any other status code to reject it and close the connection since the
+	// client may have already started sending the request body.
+	//
+	// The ctx provides access to request headers and connection metadata (e.g.
+	// RemoteAddr for IP-based filtering). The response must not be modified.
+	//
+	// If both ExpectHandler and ContinueHandler are set, ExpectHandler
+	// takes precedence.
+	//
+	// The default behavior (when neither handler is set) is to automatically accept
+	// the request body.
+	ExpectHandler func(ctx *RequestCtx) int
+
 	// ConnState specifies an optional callback function that is
 	// called when a client connection changes state. See the
 	// ConnState type and associated constants for details.
@@ -2452,10 +2472,20 @@ func (s *Server) serveConn(c net.Conn) error {
 		}
 
 		// 'Expect: 100-continue' request handling.
-		// See https://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html#sec8.2.3 for details.
+		// See https://www.rfc-editor.org/rfc/rfc9110.html#field.expect for details.
 		if ctx.Request.MayContinue() {
-			// Allow the ability to deny reading the incoming request body
-			if s.ContinueHandler != nil {
+			// Allow the ability to deny reading the incoming request body.
+			if s.ExpectHandler != nil {
+				if expectStatus := s.ExpectHandler(ctx); expectStatus != StatusContinue {
+					continueReadingRequest = false
+					if br != nil {
+						br.Reset(ctx.c)
+					}
+					ctx.SetStatusCode(expectStatus)
+					// Close connection since client may have already started sending body data.
+					connectionClose = true
+				}
+			} else if s.ContinueHandler != nil {
 				if continueReadingRequest = s.ContinueHandler(&ctx.Request.Header); !continueReadingRequest {
 					if br != nil {
 						br.Reset(ctx.c)
@@ -2505,8 +2535,9 @@ func (s *Server) serveConn(c net.Conn) error {
 			}
 		}
 
-		// store req.ConnectionClose so even if it was changed inside of handler
-		connectionClose = s.DisableKeepalive || ctx.Request.Header.ConnectionClose()
+		// store req.ConnectionClose so even if it was changed inside of handler.
+		// Preserve connectionClose if already set (e.g., by ExpectHandler).
+		connectionClose = connectionClose || s.DisableKeepalive || ctx.Request.Header.ConnectionClose()
 
 		if serverName != "" {
 			ctx.Response.Header.SetServer(serverName)
