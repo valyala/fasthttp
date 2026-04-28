@@ -1788,6 +1788,36 @@ func TestRequestReadLimitBody(t *testing.T) {
 	testRequestReadLimitBodySuccess(t, "GET /foo HTTP/1.0\r\n\r\n", 0)
 }
 
+func TestRequestReadLimitBodyContentLengthAndTransferEncoding(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"POST /foo HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n4\r\ntest\r\n0\r\n\r\nNEXT",
+		"POST /foo HTTP/1.1\r\nHost: aaa.com\r\nTransfer-Encoding: chunked\r\nContent-Length: 1\r\n\r\n4\r\ntest\r\n0\r\n\r\nNEXT",
+	}
+
+	for _, s := range tests {
+		var req Request
+		br := bufio.NewReader(bytes.NewBufferString(s))
+		if err := req.ReadLimitBody(br, 0); err != nil {
+			t.Fatalf("unexpected error: %v. s=%q", err, s)
+		}
+		if body := string(req.Body()); body != "test" {
+			t.Fatalf("unexpected body %q. Expecting %q. s=%q", body, "test", s)
+		}
+		b, err := br.Peek(4)
+		if err != nil {
+			t.Fatalf("unexpected error reading remaining bytes: %v. s=%q", err, s)
+		}
+		if string(b) != "NEXT" {
+			t.Fatalf("unexpected remaining bytes %q. Expecting %q. s=%q", b, "NEXT", s)
+		}
+	}
+
+	testRequestReadLimitBodyError(t, "POST /foo HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: 1nope\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n", 0, ErrNonNumericChars)
+	testRequestReadLimitBodyError(t, "POST /foo HTTP/1.1\r\nHost: aaa.com\r\nTransfer-Encoding: chunked\r\nContent-Length: 1nope\r\n\r\n0\r\n\r\n", 0, ErrNonNumericChars)
+}
+
 func TestRequestReadLimitBodyRejectWhitespaceBeforeColonFramingHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -2565,6 +2595,8 @@ func TestResponseReadError(t *testing.T) {
 	testResponseReadError(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: chunked\r\n\r\nfoo")
 
 	testResponseReadError(t, resp, "HTTP/1.1 200 OK\r\nContent-Type: aaa\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nfoo")
+
+	testResponseReadError(t, resp, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: nope\r\n\r\n0\r\n\r\n")
 }
 
 func testResponseReadError(t *testing.T, resp *Response, response string) {

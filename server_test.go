@@ -2078,6 +2078,39 @@ func TestServerRejectsMissingHostHTTP11(t *testing.T) {
 	}
 }
 
+func TestServerRejectsInvalidContentLengthWithTransferEncoding(t *testing.T) {
+	t.Parallel()
+
+	var handlerCalled atomic.Bool
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			handlerCalled.Store(true)
+			ctx.Success("text/plain", []byte("ok"))
+		},
+		Logger: &testLogger{},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: nope\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+
+	_ = s.ServeConn(rw)
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusBadRequest, string(defaultContentType), "Error when parsing request")
+
+	if handlerCalled.Load() {
+		t.Fatal("handler should not run for request with invalid Content-Length")
+	}
+
+	data, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
+	}
+	if len(data) > 0 {
+		t.Fatalf("unexpected remaining data %q", data)
+	}
+}
+
 func TestServerContinueHandler(t *testing.T) {
 	t.Parallel()
 

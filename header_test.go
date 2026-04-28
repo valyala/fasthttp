@@ -507,6 +507,16 @@ func TestRequestDisableSpecialHeaders(t *testing.T) {
 		t.Fatalf("body content incorrect with DisableSpecialHeader: got %q, expected %q",
 			string(req.Body()), testBody)
 	}
+
+	var ambiguous Request
+	ambiguous.Header.DisableSpecialHeader()
+	br3 := bufio.NewReader(bytes.NewBufferString("POST /test HTTP/1.1\r\nHost: example.com\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n4\r\ntest\r\n0\r\n\r\n"))
+	if err := ambiguous.ReadLimitBody(br3, 0); err != nil {
+		t.Fatalf("unexpected error reading ambiguous request: %v", err)
+	}
+	if body := string(ambiguous.Body()); body != "test" {
+		t.Fatalf("body content incorrect with ambiguous framing: got %q, expected %q", body, "test")
+	}
 }
 
 func TestRequestDisableSpecialHeadersChunked(t *testing.T) {
@@ -3370,6 +3380,9 @@ func TestResponseHeaderReadError(t *testing.T) {
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, gzip\r\n\r\n")
 	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n")
 
+	// invalid Content-Length with Transfer-Encoding
+	testResponseHeaderReadError(t, h, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: nope\r\n\r\n")
+
 	// no protocol in the first line
 	testResponseHeaderReadError(t, h, "GET /foo/bar\r\nHost: google.com\r\n\r\nisdD")
 
@@ -3430,6 +3443,10 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// post with duplicate content-length
 	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nContent-Type: s\r\nContent-Length: 13\r\nContent-Length: 1\r\n\r\n")
+
+	// invalid Content-Length with Transfer-Encoding
+	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nContent-Length: nope\r\nTransfer-Encoding: chunked\r\n\r\n")
+	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nTransfer-Encoding: chunked\r\nContent-Length: nope\r\n\r\n")
 
 	// Zero-length header
 	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\n: zero-key\r\n\r\n")
