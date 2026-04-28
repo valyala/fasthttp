@@ -1731,16 +1731,26 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 		}
 	}
 
-	if startCleaner {
-		go c.connsCleaner()
-	}
-
 	conn, err := c.dialHostHard(reqTimeout)
 	if err != nil {
 		c.decConnsCount()
+		// Reset cleaner flag if connsCount dropped to 0, allowing the next
+		// connection attempt to start the cleaner. This prevents zombie
+		// goroutines when dial fails. See issue #2171.
+		if startCleaner {
+			c.connsLock.Lock()
+			if c.connsCount == 0 {
+				c.connsCleanerRun = false
+			}
+			c.connsLock.Unlock()
+		}
 		return nil, err
 	}
 	cc = acquireClientConn(conn)
+
+	if startCleaner {
+		go c.connsCleaner()
+	}
 
 	return cc, nil
 }
