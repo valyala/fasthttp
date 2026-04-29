@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"reflect"
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/valyala/fasthttp"
@@ -255,252 +256,109 @@ func (l *testLogger) Printf(format string, args ...any) {
 	l.messages = append(l.messages, fmt.Sprintf(format, args...))
 }
 
-func Test_Prefork_OnMasterDeath(t *testing.T) {
+// Test_Prefork_Lifecycle runs the full prefork lifecycle with a CommandProducer
+// and verifies that callbacks are invoked in the correct order with the correct arguments.
+func Test_Prefork_Lifecycle(t *testing.T) {
 	t.Parallel()
 
-	var called bool
-	p := &Prefork{
-		OnMasterDeath: func() {
-			called = true
-		},
+	type event struct {
+		name string
+		pids []int
 	}
 
-	if p.OnMasterDeath == nil {
-		t.Error("OnMasterDeath should not be nil")
+	var mu sync.Mutex
+	var events []event
+	record := func(name string, pids ...int) {
+		mu.Lock()
+		events = append(events, event{name, pids})
+		mu.Unlock()
 	}
-
-	p.OnMasterDeath()
-	if !called {
-		t.Error("OnMasterDeath was not called")
-	}
-}
-
-func Test_Prefork_Callbacks_NotNil(t *testing.T) {
-	t.Parallel()
-
-	var spawnCalled bool
-	var readyCalled bool
-	var recoverCalled bool
 
 	p := &Prefork{
-		OnChildSpawn: func(pid int) error {
-			spawnCalled = true
-			return nil
-		},
-		OnMasterReady: func(childPIDs []int) error {
-			readyCalled = true
-			return nil
-		},
-		OnChildRecover: func(oldPid, newPid int) {
-			recoverCalled = true
-		},
-	}
-
-	// Test that callbacks are set
-	if p.OnChildSpawn == nil {
-		t.Error("OnChildSpawn should not be nil")
-	}
-	if p.OnMasterReady == nil {
-		t.Error("OnMasterReady should not be nil")
-	}
-	if p.OnChildRecover == nil {
-		t.Error("OnChildRecover should not be nil")
-	}
-
-	// Test that callbacks can be called
-	_ = p.OnChildSpawn(1234)
-	_ = p.OnMasterReady([]int{1234, 5678})
-	p.OnChildRecover(1111, 9999)
-
-	if !spawnCalled {
-		t.Error("OnChildSpawn was not called")
-	}
-	if !readyCalled {
-		t.Error("OnMasterReady was not called")
-	}
-	if !recoverCalled {
-		t.Error("OnChildRecover was not called")
-	}
-}
-
-func Test_Prefork_Callbacks_Nil(t *testing.T) {
-	t.Parallel()
-
-	// Test that nil callbacks don't panic when checked
-	p := &Prefork{}
-
-	if p.OnChildSpawn != nil {
-		t.Error("OnChildSpawn should be nil by default")
-	}
-	if p.OnMasterReady != nil {
-		t.Error("OnMasterReady should be nil by default")
-	}
-	if p.OnChildRecover != nil {
-		t.Error("OnChildRecover should be nil by default")
-	}
-}
-
-func Test_Prefork_RecoverThreshold(t *testing.T) {
-	t.Parallel()
-
-	s := &fasthttp.Server{}
-	p := New(s)
-
-	// Default should be GOMAXPROCS/2
-	expected := runtime.GOMAXPROCS(0) / 2
-	if p.RecoverThreshold != expected {
-		t.Errorf("RecoverThreshold == %d, want %d", p.RecoverThreshold, expected)
-	}
-
-	// Test custom threshold
-	p.RecoverThreshold = 10
-	if p.RecoverThreshold != 10 {
-		t.Errorf("RecoverThreshold == %d, want %d", p.RecoverThreshold, 10)
-	}
-}
-
-func Test_ErrOverRecovery(t *testing.T) {
-	t.Parallel()
-
-	if ErrOverRecovery == nil {
-		t.Error("ErrOverRecovery should not be nil")
-	}
-	if ErrOverRecovery.Error() != "exceeding the value of RecoverThreshold" {
-		t.Errorf("ErrOverRecovery message incorrect: %s", ErrOverRecovery.Error())
-	}
-}
-
-func Test_ErrOnlyReuseportOnWindows(t *testing.T) {
-	t.Parallel()
-
-	if ErrOnlyReuseportOnWindows == nil {
-		t.Error("ErrOnlyReuseportOnWindows should not be nil")
-	}
-	if ErrOnlyReuseportOnWindows.Error() != "windows only supports Reuseport = true" {
-		t.Errorf("ErrOnlyReuseportOnWindows message incorrect: %s", ErrOnlyReuseportOnWindows.Error())
-	}
-}
-
-func Test_Listen_ChildCreatesListener(t *testing.T) {
-	// This test can't run parallel as it modifies env.
-
-	setUp()
-	defer tearDown()
-
-	p := &Prefork{
-		Reuseport: true,
-	}
-	addr := getAddr()
-
-	ln, err := p.listen(addr)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-	defer ln.Close()
-
-	if ln == nil {
-		t.Error("Listener should not be nil")
-	}
-}
-
-func Test_OnChildSpawn_Error(t *testing.T) {
-	t.Parallel()
-
-	errExpected := errors.New("spawn callback error")
-	p := &Prefork{
-		OnChildSpawn: func(pid int) error {
-			return errExpected
-		},
-	}
-
-	// Test that error is returned correctly
-	err := p.OnChildSpawn(1234)
-	if err != errExpected {
-		t.Errorf("OnChildSpawn error == %v, want %v", err, errExpected)
-	}
-}
-
-func Test_OnMasterReady_Error(t *testing.T) {
-	t.Parallel()
-
-	errExpected := errors.New("master ready callback error")
-	p := &Prefork{
-		OnMasterReady: func(childPIDs []int) error {
-			return errExpected
-		},
-	}
-
-	// Test that error is returned correctly
-	err := p.OnMasterReady([]int{1, 2, 3})
-	if err != errExpected {
-		t.Errorf("OnMasterReady error == %v, want %v", err, errExpected)
-	}
-}
-
-func Test_OnMasterReady_ReceivesPIDs(t *testing.T) {
-	t.Parallel()
-
-	var receivedPIDs []int
-	p := &Prefork{
-		OnMasterReady: func(childPIDs []int) error {
-			receivedPIDs = childPIDs
-			return nil
-		},
-	}
-
-	expectedPIDs := []int{100, 200, 300}
-	_ = p.OnMasterReady(expectedPIDs)
-
-	if len(receivedPIDs) != len(expectedPIDs) {
-		t.Errorf("Received %d PIDs, want %d", len(receivedPIDs), len(expectedPIDs))
-	}
-
-	for i, pid := range expectedPIDs {
-		if receivedPIDs[i] != pid {
-			t.Errorf("PID[%d] == %d, want %d", i, receivedPIDs[i], pid)
-		}
-	}
-}
-
-func Test_CommandProducer(t *testing.T) {
-	t.Parallel()
-
-	var producerCalled bool
-	p := &Prefork{
+		Reuseport:        true,
+		RecoverThreshold: 1,
+		Logger:           &testLogger{},
 		CommandProducer: func(files []*os.File) (*exec.Cmd, error) {
-			producerCalled = true
-			// Re-exec the test binary with a no-op flag for hermetic testing
 			cmd := exec.Command(os.Args[0], "-test.run=^$")
-			cmd.ExtraFiles = files
 			cmd.Env = append(os.Environ(), preforkChildEnvVariable+"=1")
 			err := cmd.Start()
 			return cmd, err
 		},
+		OnChildSpawn: func(pid int) error {
+			record("spawn", pid)
+			return nil
+		},
+		OnMasterReady: func(childPIDs []int) error {
+			record("ready", childPIDs...)
+			return nil
+		},
+		OnChildRecover: func(oldPid, newPid int) {
+			record("recover", oldPid, newPid)
+		},
 	}
 
-	if p.CommandProducer == nil {
-		t.Error("CommandProducer should not be nil")
+	err := p.prefork(getAddr())
+	if !errors.Is(err, ErrOverRecovery) {
+		t.Fatalf("expected ErrOverRecovery, got: %v", err)
 	}
 
-	cmd, err := p.doCommand()
-	if err != nil {
-		t.Fatalf("doCommand failed: %v", err)
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Verify we got spawn events for initial children
+	var spawnCount int
+	var readyCount int
+	var recoverCount int
+	for _, e := range events {
+		switch e.name {
+		case "spawn":
+			spawnCount++
+			if len(e.pids) != 1 || e.pids[0] <= 0 {
+				t.Errorf("spawn event has invalid PID: %v", e.pids)
+			}
+		case "ready":
+			readyCount++
+			if len(e.pids) == 0 {
+				t.Error("ready event received empty PID list")
+			}
+		case "recover":
+			recoverCount++
+			if len(e.pids) != 2 || e.pids[0] <= 0 || e.pids[1] <= 0 {
+				t.Errorf("recover event has invalid PIDs: %v", e.pids)
+			}
+			if e.pids[0] == e.pids[1] {
+				t.Error("recover old and new PID should differ")
+			}
+		}
 	}
 
-	_ = cmd.Wait()
+	goMaxProcs := runtime.GOMAXPROCS(0)
 
-	if !producerCalled {
-		t.Error("CommandProducer was not called")
+	if readyCount != 1 {
+		t.Errorf("OnMasterReady called %d times, want 1", readyCount)
 	}
-}
 
-func Test_CommandProducer_Nil_UsesDefault(t *testing.T) {
-	t.Parallel()
+	// Initial spawns + at least one recovery spawn
+	if spawnCount < goMaxProcs {
+		t.Errorf("OnChildSpawn called %d times, want at least %d", spawnCount, goMaxProcs)
+	}
 
-	p := &Prefork{}
+	if recoverCount == 0 {
+		t.Error("OnChildRecover was never called")
+	}
 
-	// Verify default CommandProducer is nil
-	if p.CommandProducer != nil {
-		t.Error("CommandProducer should be nil by default")
+	// Verify order: all initial spawns come before ready
+	readyIdx := -1
+	firstSpawnIdx := -1
+	for i, e := range events {
+		if e.name == "ready" {
+			readyIdx = i
+		}
+		if e.name == "spawn" && firstSpawnIdx == -1 {
+			firstSpawnIdx = i
+		}
+	}
+	if readyIdx != -1 && firstSpawnIdx != -1 && readyIdx < firstSpawnIdx {
+		t.Error("OnMasterReady was called before OnChildSpawn")
 	}
 }

@@ -294,6 +294,7 @@ func (p *Prefork) prefork(addr string) (err error) {
 	defer func() {
 		for _, proc := range childProcs {
 			_ = proc.Process.Kill()
+			_, _ = proc.Process.Wait() // avoid zombie processes after Kill
 		}
 	}()
 
@@ -311,19 +312,18 @@ func (p *Prefork) prefork(addr string) (err error) {
 		childProcs[pid] = cmd
 		childPIDs = append(childPIDs, pid)
 
-		// Call OnChildSpawn callback.
-		// On error we return early — the child is already in childProcs
-		// and will be killed by the deferred cleanup above.
+		// Start Wait goroutine before OnChildSpawn so that if OnChildSpawn
+		// fails and the deferred Kill() runs, Wait() will collect the child.
+		go func(c *exec.Cmd, pid int) {
+			sigCh <- procSig{pid: pid, err: c.Wait()}
+		}(cmd, pid)
+
 		if p.OnChildSpawn != nil {
 			if err = p.OnChildSpawn(pid); err != nil {
 				p.logger().Printf("OnChildSpawn callback failed for PID %d: %v\n", pid, err)
 				return err
 			}
 		}
-
-		go func(c *exec.Cmd, pid int) {
-			sigCh <- procSig{pid: pid, err: c.Wait()}
-		}(cmd, pid)
 	}
 
 	// Call OnMasterReady callback after all children are spawned
@@ -358,21 +358,22 @@ func (p *Prefork) prefork(addr string) (err error) {
 		newPid := cmd.Process.Pid
 		childProcs[newPid] = cmd
 
+		// Start Wait goroutine before callbacks to avoid zombie processes
+		// if a callback fails and the deferred Kill() runs.
+		go func(c *exec.Cmd, pid int) {
+			sigCh <- procSig{pid: pid, err: c.Wait()}
+		}(cmd, newPid)
+
 		if p.OnChildRecover != nil {
 			p.OnChildRecover(sig.pid, newPid)
 		}
 
-		// A recovered child is still a spawned child.
 		if p.OnChildSpawn != nil {
 			if err = p.OnChildSpawn(newPid); err != nil {
 				p.logger().Printf("OnChildSpawn callback failed for recovered PID %d: %v\n", newPid, err)
 				break
 			}
 		}
-
-		go func(c *exec.Cmd, pid int) {
-			sigCh <- procSig{pid: pid, err: c.Wait()}
-		}(cmd, newPid)
 	}
 
 	return err
