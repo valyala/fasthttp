@@ -28,7 +28,7 @@ func getAddr() string {
 }
 
 func Test_IsChild(t *testing.T) {
-	// This test can't run parallel as it modifies os.Args.
+	// This test can't run parallel as it modifies the process environment.
 
 	v := IsChild()
 	if v {
@@ -83,7 +83,10 @@ func Test_defaultRecoverThreshold_SingleCore(t *testing.T) {
 }
 
 func Test_listen(t *testing.T) {
-	t.Parallel()
+	prev := runtime.GOMAXPROCS(0)
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(prev)
+	})
 
 	p := &Prefork{
 		Reuseport: true,
@@ -148,7 +151,7 @@ func Test_setTCPListenerFiles(t *testing.T) {
 }
 
 func Test_ListenAndServe(t *testing.T) {
-	// This test can't run parallel as it modifies os.Args.
+	// This test can't run parallel as it modifies the process environment.
 
 	setUp()
 	defer tearDown()
@@ -180,7 +183,7 @@ func Test_ListenAndServe(t *testing.T) {
 }
 
 func Test_ListenAndServeTLS(t *testing.T) {
-	// This test can't run parallel as it modifies os.Args.
+	// This test can't run parallel as it modifies the process environment.
 
 	setUp()
 	defer tearDown()
@@ -212,7 +215,7 @@ func Test_ListenAndServeTLS(t *testing.T) {
 }
 
 func Test_ListenAndServeTLSEmbed(t *testing.T) {
-	// This test can't run parallel as it modifies os.Args.
+	// This test can't run parallel as it modifies the process environment.
 
 	setUp()
 	defer tearDown()
@@ -274,7 +277,10 @@ func (l *testLogger) Printf(format string, args ...any) {
 // Test_Prefork_Lifecycle runs the full prefork lifecycle with a CommandProducer
 // and verifies that callbacks are invoked in the correct order with the correct arguments.
 func Test_Prefork_Lifecycle(t *testing.T) {
-	t.Parallel()
+	prev := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(prev)
+	})
 
 	type event struct {
 		name string
@@ -293,7 +299,7 @@ func Test_Prefork_Lifecycle(t *testing.T) {
 		Reuseport:        true,
 		RecoverThreshold: 1,
 		Logger:           &testLogger{},
-		CommandProducer: func(files []*os.File) (*exec.Cmd, error) {
+		CommandProducer: func(_ []*os.File) (*exec.Cmd, error) {
 			cmd := exec.Command(os.Args[0], "-test.run=^$")
 			cmd.Env = append(os.Environ(), preforkChildEnvVariable+"=1")
 			err := cmd.Start()
