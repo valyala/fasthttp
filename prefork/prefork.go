@@ -120,12 +120,16 @@ func IsChild() bool {
 func New(s *fasthttp.Server) *Prefork {
 	return &Prefork{
 		Network:           defaultNetwork,
-		RecoverThreshold:  runtime.GOMAXPROCS(0) / 2,
+		RecoverThreshold:  defaultRecoverThreshold(),
 		Logger:            s.Logger,
 		ServeFunc:         s.Serve,
 		ServeTLSFunc:      s.ServeTLS,
 		ServeTLSEmbedFunc: s.ServeTLSEmbed,
 	}
+}
+
+func defaultRecoverThreshold() int {
+	return max(1, runtime.GOMAXPROCS(0)/2)
 }
 
 func (p *Prefork) logger() Logger {

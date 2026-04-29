@@ -54,6 +54,10 @@ func Test_New(t *testing.T) {
 		t.Errorf("Prefork.Network == %q, want %q", p.Network, defaultNetwork)
 	}
 
+	if p.RecoverThreshold != defaultRecoverThreshold() {
+		t.Errorf("Prefork.RecoverThreshold == %d, want %d", p.RecoverThreshold, defaultRecoverThreshold())
+	}
+
 	if reflect.ValueOf(p.ServeFunc).Pointer() != reflect.ValueOf(s.Serve).Pointer() {
 		t.Errorf("Prefork.ServeFunc == %p, want %p", p.ServeFunc, s.Serve)
 	}
@@ -64,6 +68,17 @@ func Test_New(t *testing.T) {
 
 	if reflect.ValueOf(p.ServeTLSEmbedFunc).Pointer() != reflect.ValueOf(s.ServeTLSEmbed).Pointer() {
 		t.Errorf("Prefork.ServeTLSFunc == %p, want %p", p.ServeTLSEmbedFunc, s.ServeTLSEmbed)
+	}
+}
+
+func Test_defaultRecoverThreshold_SingleCore(t *testing.T) {
+	prev := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(prev)
+	})
+
+	if threshold := defaultRecoverThreshold(); threshold != 1 {
+		t.Errorf("defaultRecoverThreshold() == %d, want 1", threshold)
 	}
 }
 
@@ -347,18 +362,38 @@ func Test_Prefork_Lifecycle(t *testing.T) {
 		t.Error("OnChildRecover was never called")
 	}
 
-	// Verify order: all initial spawns come before ready
 	readyIdx := -1
-	firstSpawnIdx := -1
+	spawnsBeforeReady := 0
 	for i, e := range events {
 		if e.name == "ready" {
 			readyIdx = i
+			break
 		}
-		if e.name == "spawn" && firstSpawnIdx == -1 {
-			firstSpawnIdx = i
+		if e.name == "spawn" {
+			spawnsBeforeReady++
 		}
 	}
-	if readyIdx != -1 && firstSpawnIdx != -1 && readyIdx < firstSpawnIdx {
-		t.Error("OnMasterReady was called before OnChildSpawn")
+
+	if readyIdx == -1 {
+		t.Fatal("OnMasterReady was never called")
+	}
+	if spawnsBeforeReady != goMaxProcs {
+		t.Errorf("OnMasterReady called after %d initial spawns, want %d", spawnsBeforeReady, goMaxProcs)
+	}
+
+	recoveredSpawnByPID := make(map[int]bool)
+	recoveredPIDs := make(map[int]bool)
+	for _, e := range events[readyIdx+1:] {
+		if e.name == "spawn" {
+			recoveredSpawnByPID[e.pids[0]] = true
+		}
+		if e.name == "recover" {
+			recoveredPIDs[e.pids[1]] = true
+		}
+	}
+	for pid := range recoveredPIDs {
+		if !recoveredSpawnByPID[pid] {
+			t.Errorf("OnChildRecover for PID %d did not have a matching OnChildSpawn", pid)
+		}
 	}
 }
