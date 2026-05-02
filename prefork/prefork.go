@@ -206,12 +206,12 @@ func (p *Prefork) logger() Logger {
 }
 
 // invokeHook runs fn under a panic recovery, returning the panic as an error
-// so a misbehaving callback never tears down the master.
+// so a misbehaving callback never tears down the master. Diagnostic logging
+// is left to the call site so the same condition is not reported twice.
 func (p *Prefork) invokeHook(name string, fn func() error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("prefork: %s panicked: %v", name, r)
-			p.logger().Printf("%v", err)
 		}
 	}()
 	return fn()
@@ -265,7 +265,22 @@ func (p *Prefork) listen(addr string) (net.Listener, error) {
 	// fd inheritedListenerFD is the first ExtraFiles entry passed by the
 	// master process when Reuseport is false. Naming the file gives clearer
 	// errors from net.FileListener if the fd is invalid.
-	return net.FileListener(os.NewFile(inheritedListenerFD, "fasthttp-prefork-listener"))
+	//
+	// net.FileListener dups the fd, so we close the wrapping *os.File after
+	// it returns to avoid leaking the original descriptor. The returned
+	// listener owns its own dup'd fd and is unaffected by this close.
+	f := os.NewFile(inheritedListenerFD, "fasthttp-prefork-listener")
+	ln, err := net.FileListener(f)
+	if closeErr := f.Close(); closeErr != nil && err == nil {
+		err = fmt.Errorf("prefork: close inherited listener fd: %w", closeErr)
+	}
+	if err != nil {
+		if ln != nil {
+			_ = ln.Close()
+		}
+		return nil, err
+	}
+	return ln, nil
 }
 
 // listenAsChild performs the common child process setup: creates the listener
@@ -300,13 +315,16 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 		return fmt.Errorf("prefork: listen tcp %s: %w", addr, err)
 	}
 
-	p.ln = tcpListener
-
 	listenerFile, err := tcpListener.File()
 	if err != nil {
+		// Close the bound listener so we don't leak the socket/fd when
+		// File() fails. p.ln is intentionally only assigned after this
+		// point so the caller never sees a half-initialised state.
+		_ = tcpListener.Close()
 		return fmt.Errorf("prefork: dup listener fd: %w", err)
 	}
 
+	p.ln = tcpListener
 	p.files = []*os.File{listenerFile}
 
 	return nil
@@ -549,9 +567,13 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 			}
 
 			if p.RecoverInterval > 0 {
+				timer := time.NewTimer(p.RecoverInterval)
 				select {
-				case <-time.After(p.RecoverInterval):
+				case <-timer.C:
 				case <-signalCh:
+					if !timer.Stop() {
+						<-timer.C
+					}
 					return nil
 				}
 			}
