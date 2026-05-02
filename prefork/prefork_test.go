@@ -539,8 +539,8 @@ func Test_Prefork_HookPanicSurfaces(t *testing.T) {
 	}
 }
 
-// Test_Prefork_RecoverInterval verifies the optional backoff actually delays
-// the respawn — without rabbit-holing into hard wallclock assertions.
+// Test_Prefork_RecoverInterval verifies the optional backoff delays the
+// respawn without relying on brittle wallclock assertions.
 func Test_Prefork_RecoverInterval(t *testing.T) {
 	prev := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })

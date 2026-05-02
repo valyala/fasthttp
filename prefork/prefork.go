@@ -572,7 +572,10 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 				case <-timer.C:
 				case <-signalCh:
 					if !timer.Stop() {
-						<-timer.C
+						select {
+						case <-timer.C:
+						default:
+						}
 					}
 					return nil
 				}
