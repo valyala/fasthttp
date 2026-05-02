@@ -279,6 +279,8 @@ type Client struct {
 	// and response body is greater than the limit.
 	//
 	// By default response body size is unlimited.
+	//
+	// Note that if StreamResponseBody is true, MaxResponseBodySize is ignored.
 	MaxResponseBodySize int
 
 	// Maximum duration for waiting for a free connection.
