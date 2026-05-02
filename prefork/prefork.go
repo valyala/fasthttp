@@ -81,7 +81,8 @@ type Prefork struct {
 	// OnChildSpawn is called in the master process whenever a new child process is spawned.
 	// It receives the PID of the newly spawned child process.
 	//
-	// If this callback returns an error, the prefork operation will be aborted.
+	// If this callback returns an error, all child processes are killed and the
+	// prefork operation returns that error.
 	OnChildSpawn func(pid int) error
 
 	// OnMasterReady is called in the master process after all child processes have been spawned.
@@ -298,7 +299,6 @@ func (p *Prefork) prefork(addr string) (err error) {
 	defer func() {
 		for _, proc := range childProcs {
 			_ = proc.Process.Kill()
-			_, _ = proc.Process.Wait() // avoid zombie processes after Kill
 		}
 	}()
 
@@ -368,15 +368,15 @@ func (p *Prefork) prefork(addr string) (err error) {
 			sigCh <- procSig{pid: pid, err: c.Wait()}
 		}(cmd, newPid)
 
-		if p.OnChildRecover != nil {
-			p.OnChildRecover(sig.pid, newPid)
-		}
-
 		if p.OnChildSpawn != nil {
 			if err = p.OnChildSpawn(newPid); err != nil {
 				p.logger().Printf("OnChildSpawn callback failed for recovered PID %d: %v\n", newPid, err)
-				break
+				return err
 			}
+		}
+
+		if p.OnChildRecover != nil {
+			p.OnChildRecover(sig.pid, newPid)
 		}
 	}
 

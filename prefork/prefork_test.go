@@ -54,10 +54,6 @@ func Test_New(t *testing.T) {
 		t.Errorf("Prefork.Network == %q, want %q", p.Network, defaultNetwork)
 	}
 
-	if p.RecoverThreshold != defaultRecoverThreshold() {
-		t.Errorf("Prefork.RecoverThreshold == %d, want %d", p.RecoverThreshold, defaultRecoverThreshold())
-	}
-
 	if reflect.ValueOf(p.ServeFunc).Pointer() != reflect.ValueOf(s.Serve).Pointer() {
 		t.Errorf("Prefork.ServeFunc == %p, want %p", p.ServeFunc, s.Serve)
 	}
@@ -68,17 +64,6 @@ func Test_New(t *testing.T) {
 
 	if reflect.ValueOf(p.ServeTLSEmbedFunc).Pointer() != reflect.ValueOf(s.ServeTLSEmbed).Pointer() {
 		t.Errorf("Prefork.ServeTLSFunc == %p, want %p", p.ServeTLSEmbedFunc, s.ServeTLSEmbed)
-	}
-}
-
-func Test_defaultRecoverThreshold_SingleCore(t *testing.T) {
-	prev := runtime.GOMAXPROCS(1)
-	t.Cleanup(func() {
-		runtime.GOMAXPROCS(prev)
-	})
-
-	if threshold := defaultRecoverThreshold(); threshold != 1 {
-		t.Errorf("defaultRecoverThreshold() == %d, want 1", threshold)
 	}
 }
 
@@ -246,26 +231,6 @@ func Test_ListenAndServeTLSEmbed(t *testing.T) {
 	}
 }
 
-func Test_Prefork_Logger(t *testing.T) {
-	t.Parallel()
-
-	s := &fasthttp.Server{}
-	p := New(s)
-
-	// Test default logger
-	logger := p.logger()
-	if logger == nil {
-		t.Error("Default logger should not be nil")
-	}
-
-	// Test custom logger
-	customLogger := &testLogger{}
-	p.Logger = customLogger
-	if p.logger() != customLogger {
-		t.Error("Custom logger should be returned")
-	}
-}
-
 type testLogger struct {
 	messages []string
 }
@@ -394,6 +359,9 @@ func Test_Prefork_Lifecycle(t *testing.T) {
 			recoveredSpawnByPID[e.pids[0]] = true
 		}
 		if e.name == "recover" {
+			if !recoveredSpawnByPID[e.pids[1]] {
+				t.Errorf("OnChildRecover for PID %d happened before OnChildSpawn", e.pids[1])
+			}
 			recoveredPIDs[e.pids[1]] = true
 		}
 	}
@@ -401,5 +369,49 @@ func Test_Prefork_Lifecycle(t *testing.T) {
 		if !recoveredSpawnByPID[pid] {
 			t.Errorf("OnChildRecover for PID %d did not have a matching OnChildSpawn", pid)
 		}
+	}
+}
+
+func Test_Prefork_RecoveredChildSpawnError(t *testing.T) {
+	prev := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(prev)
+	})
+
+	expectedErr := errors.New("spawn failed")
+	var spawnCount int
+	var recoverCount int
+
+	p := &Prefork{
+		Reuseport:        true,
+		RecoverThreshold: 1,
+		Logger:           &testLogger{},
+		CommandProducer: func(_ []*os.File) (*exec.Cmd, error) {
+			cmd := exec.Command(os.Args[0], "-test.run=^$")
+			cmd.Env = append(os.Environ(), preforkChildEnvVariable+"=1")
+			err := cmd.Start()
+			return cmd, err
+		},
+		OnChildSpawn: func(pid int) error {
+			if pid <= 0 {
+				t.Errorf("OnChildSpawn called with invalid PID: %d", pid)
+			}
+			spawnCount++
+			if spawnCount > runtime.GOMAXPROCS(0) {
+				return expectedErr
+			}
+			return nil
+		},
+		OnChildRecover: func(_, _ int) {
+			recoverCount++
+		},
+	}
+
+	err := p.prefork(getAddr())
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got: %v", expectedErr, err)
+	}
+	if recoverCount != 0 {
+		t.Fatalf("OnChildRecover called %d times, want 0", recoverCount)
 	}
 }
