@@ -9,7 +9,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
 	"runtime"
 	"sync"
 	"syscall"
@@ -131,8 +130,7 @@ type Prefork struct {
 	// killed and the prefork operation returns that error.
 	//
 	// Threading: invoked synchronously from the master goroutine. Must not
-	// block; must not call Prefork methods. Panics are recovered and surfaced
-	// as the returned error.
+	// block; must not call Prefork methods.
 	OnChildSpawn func(pid int) error
 
 	// OnMasterReady is called in the master process exactly once, after all
@@ -143,20 +141,16 @@ type Prefork struct {
 	// returns that error after killing the children.
 	//
 	// Threading: invoked synchronously from the master goroutine. The slice
-	// is owned by the caller after the call returns. Panics are recovered.
+	// is owned by the caller after the call returns.
 	OnMasterReady func(childPIDs []int) error
 
 	// OnChildRecover is called in the master after a crashed child has been
 	// replaced. It receives the PID of the old (crashed) process and the PID
 	// of its replacement.
 	//
-	// If this callback returns an error, all running children are killed and
-	// the prefork operation returns that error.
-	//
 	// Threading: invoked synchronously from the master goroutine, after
-	// OnChildSpawn for the new child. Panics are recovered and surfaced as
-	// the returned error.
-	OnChildRecover func(oldPID, newPID int) error
+	// OnChildSpawn for the new child.
+	OnChildRecover func(oldPID, newPID int)
 
 	// CommandProducer creates and starts a child process command.
 	// If nil, the default implementation re-executes the current binary
@@ -203,18 +197,6 @@ func (p *Prefork) logger() Logger {
 		return p.Logger
 	}
 	return defaultLogger
-}
-
-// invokeHook runs fn under a panic recovery, returning the panic as an error
-// so a misbehaving callback never tears down the master. Diagnostic logging
-// is left to the call site so the same condition is not reported twice.
-func (p *Prefork) invokeHook(name string, fn func() error) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("prefork: %s panicked: %v", name, r)
-		}
-	}()
-	return fn()
 }
 
 func (p *Prefork) watchMaster(masterPID int) {
@@ -403,15 +385,22 @@ func (p *Prefork) shutdownChildren(
 		grace = defaultShutdownGracePeriod
 	}
 
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS == "windows" {
 		for pid, proc := range childProcs {
-			if proc == nil || proc.Process == nil {
-				continue
-			}
-			if termErr := proc.Process.Signal(syscall.SIGTERM); termErr != nil &&
-				!errors.Is(termErr, os.ErrProcessDone) {
-				p.logger().Printf("prefork: SIGTERM child %d: %v", pid, termErr)
-			}
+			p.killChild(pid, proc)
+		}
+		cancel()
+		wg.Wait()
+		return
+	}
+
+	for pid, proc := range childProcs {
+		if proc == nil || proc.Process == nil {
+			continue
+		}
+		if termErr := proc.Process.Signal(syscall.SIGTERM); termErr != nil &&
+			!errors.Is(termErr, os.ErrProcessDone) {
+			p.logger().Printf("prefork: SIGTERM child %d: %v", pid, termErr)
 		}
 	}
 
@@ -430,19 +419,23 @@ func (p *Prefork) shutdownChildren(
 	}
 
 	for pid, proc := range childProcs {
-		if proc == nil || proc.Process == nil {
-			continue
-		}
-		if killErr := proc.Process.Kill(); killErr != nil &&
-			!errors.Is(killErr, os.ErrProcessDone) {
-			p.logger().Printf("prefork: kill child %d: %v", pid, killErr)
-		}
+		p.killChild(pid, proc)
 	}
 
 	// Cancel the per-Wait goroutines' send-context so any still blocked on
 	// sigCh send unblock cleanly, then wait for all of them to exit.
 	cancel()
 	wg.Wait()
+}
+
+func (p *Prefork) killChild(pid int, proc *exec.Cmd) {
+	if proc == nil || proc.Process == nil {
+		return
+	}
+	if killErr := proc.Process.Kill(); killErr != nil &&
+		!errors.Is(killErr, os.ErrProcessDone) {
+		p.logger().Printf("prefork: kill child %d: %v", pid, killErr)
+	}
 }
 
 func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
@@ -473,12 +466,6 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 	// once the supervision loop is gone.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	// Catch SIGTERM/SIGINT in the master so we run our shutdown path instead
-	// of being killed by the OS without children getting a graceful chance.
-	signalCh := make(chan os.Signal, 1)
-	signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
-	defer signal.Stop(signalCh)
 
 	goMaxProcs := runtime.GOMAXPROCS(0)
 	// Buffer is sized to initial fleet; per-child goroutines fall back to a
@@ -521,10 +508,7 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 		startWait(cmd, pid)
 
 		if p.OnChildSpawn != nil {
-			pid := pid
-			if hookErr := p.invokeHook("OnChildSpawn", func() error {
-				return p.OnChildSpawn(pid)
-			}); hookErr != nil {
+			if hookErr := p.OnChildSpawn(pid); hookErr != nil {
 				p.logger().Printf("prefork: OnChildSpawn for PID %d: %v", pid, hookErr)
 				return hookErr
 			}
@@ -533,9 +517,7 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 
 	if p.OnMasterReady != nil {
 		pids := append([]int(nil), childPIDs...)
-		if hookErr := p.invokeHook("OnMasterReady", func() error {
-			return p.OnMasterReady(pids)
-		}); hookErr != nil {
+		if hookErr := p.OnMasterReady(pids); hookErr != nil {
 			p.logger().Printf("prefork: OnMasterReady: %v", hookErr)
 			return hookErr
 		}
@@ -544,10 +526,6 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 	var exitedProcs int
 	for {
 		select {
-		case sig := <-signalCh:
-			p.logger().Printf("prefork: received signal %v, shutting down", sig)
-			return nil
-
 		case sig := <-sigCh:
 			delete(childProcs, sig.pid)
 
@@ -567,18 +545,7 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 			}
 
 			if p.RecoverInterval > 0 {
-				timer := time.NewTimer(p.RecoverInterval)
-				select {
-				case <-timer.C:
-				case <-signalCh:
-					if !timer.Stop() {
-						select {
-						case <-timer.C:
-						default:
-						}
-					}
-					return nil
-				}
+				time.Sleep(p.RecoverInterval)
 			}
 
 			cmd, doErr := p.doCommand()
@@ -592,24 +559,14 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 			startWait(cmd, newPID)
 
 			if p.OnChildSpawn != nil {
-				newPID := newPID
-				if hookErr := p.invokeHook("OnChildSpawn", func() error {
-					return p.OnChildSpawn(newPID)
-				}); hookErr != nil {
+				if hookErr := p.OnChildSpawn(newPID); hookErr != nil {
 					p.logger().Printf("prefork: OnChildSpawn for recovered PID %d: %v", newPID, hookErr)
 					return hookErr
 				}
 			}
 
 			if p.OnChildRecover != nil {
-				oldPID := sig.pid
-				newPID := newPID
-				if hookErr := p.invokeHook("OnChildRecover", func() error {
-					return p.OnChildRecover(oldPID, newPID)
-				}); hookErr != nil {
-					p.logger().Printf("prefork: OnChildRecover (%d -> %d): %v", oldPID, newPID, hookErr)
-					return hookErr
-				}
+				p.OnChildRecover(sig.pid, newPID)
 			}
 		}
 	}

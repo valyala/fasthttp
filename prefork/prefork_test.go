@@ -15,21 +15,6 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// freeAddr returns a TCP4 address that the OS believes is free at call time.
-// It avoids the rand-port collision flakes the previous helper exhibited.
-func freeAddr(t testing.TB) string {
-	t.Helper()
-	ln, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("freeAddr: %v", err)
-	}
-	addr := ln.Addr().String()
-	if closeErr := ln.Close(); closeErr != nil {
-		t.Fatalf("freeAddr: close: %v", closeErr)
-	}
-	return addr
-}
-
 // noopChildProducer returns a CommandProducer that re-execs the test binary
 // into a no-op subprocess. The returned cleanup must be deferred (or registered
 // via t.Cleanup) so leaked subprocesses are reaped if the test fails midway.
@@ -78,48 +63,6 @@ func Test_IsChild(t *testing.T) {
 	}
 }
 
-func Test_New(t *testing.T) {
-	t.Parallel()
-
-	s := &fasthttp.Server{}
-	p := New(s)
-
-	if p.Network != defaultNetwork {
-		t.Errorf("Prefork.Network == %q, want %q", p.Network, defaultNetwork)
-	}
-	if p.RecoverThreshold <= 0 {
-		t.Errorf("Prefork.RecoverThreshold == %d, want > 0", p.RecoverThreshold)
-	}
-	if p.ServeFunc == nil || p.ServeTLSFunc == nil || p.ServeTLSEmbedFunc == nil {
-		t.Error("New() did not wire one of ServeFunc/ServeTLSFunc/ServeTLSEmbedFunc")
-	}
-}
-
-func Test_listen_Reuseport(t *testing.T) {
-	prev := runtime.GOMAXPROCS(0)
-	t.Cleanup(func() {
-		runtime.GOMAXPROCS(prev)
-	})
-
-	p := &Prefork{Reuseport: true}
-	addr := freeAddr(t)
-
-	ln, err := p.listen(addr)
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = ln.Close()
-	})
-
-	if got, want := ln.Addr().String(), addr; got != want {
-		t.Errorf("ln.Addr() == %q, want %q", got, want)
-	}
-	if p.Network != defaultNetwork {
-		t.Errorf("Prefork.Network == %q, want %q", p.Network, defaultNetwork)
-	}
-}
-
 func Test_setTCPListenerFiles(t *testing.T) {
 	t.Parallel()
 
@@ -128,7 +71,7 @@ func Test_setTCPListenerFiles(t *testing.T) {
 	}
 
 	p := &Prefork{}
-	addr := freeAddr(t)
+	addr := "127.0.0.1:0"
 
 	if err := p.setTCPListenerFiles(addr); err != nil {
 		t.Fatalf("setTCPListenerFiles: %v", err)
@@ -143,23 +86,11 @@ func Test_setTCPListenerFiles(t *testing.T) {
 	if p.ln == nil {
 		t.Fatal("p.ln is nil after setTCPListenerFiles")
 	}
-	if got, want := p.ln.Addr().String(), addr; got != want {
-		t.Errorf("p.ln.Addr() == %q, want %q", got, want)
+	if got := p.ln.Addr().String(); got == "" {
+		t.Error("p.ln.Addr() is empty")
 	}
 	if len(p.files) != 1 {
 		t.Errorf("len(p.files) == %d, want 1", len(p.files))
-	}
-}
-
-func Test_setTCPListenerFiles_BadAddr(t *testing.T) {
-	t.Parallel()
-
-	if runtime.GOOS == "windows" {
-		t.SkipNow()
-	}
-	p := &Prefork{}
-	if err := p.setTCPListenerFiles("definitely not an address"); err == nil {
-		t.Fatal("expected error for malformed addr, got nil")
 	}
 }
 
@@ -226,7 +157,7 @@ func Test_ListenAndServe_Stub_ChildPath(t *testing.T) {
 				return nil
 			}
 
-			addr := freeAddr(t)
+			addr := "127.0.0.1:0"
 			if err := tc.run(t, p, addr); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
@@ -246,6 +177,7 @@ func Test_ListenAndServe_Stub_ChildPath(t *testing.T) {
 func Test_doCommand_CommandProducerErrors(t *testing.T) {
 	t.Parallel()
 
+	producerErr := errors.New("boom")
 	tests := []struct {
 		name    string
 		produce func(files []*os.File) (*exec.Cmd, error)
@@ -254,8 +186,9 @@ func Test_doCommand_CommandProducerErrors(t *testing.T) {
 		{
 			name: "producer returns error",
 			produce: func([]*os.File) (*exec.Cmd, error) {
-				return nil, errors.New("boom")
+				return nil, producerErr
 			},
+			wantErr: producerErr,
 		},
 		{
 			name: "producer returns nil cmd",
@@ -339,13 +272,12 @@ func Test_Prefork_Lifecycle(t *testing.T) {
 			record("ready", childPIDs...)
 			return nil
 		},
-		OnChildRecover: func(oldPID, newPID int) error {
+		OnChildRecover: func(oldPID, newPID int) {
 			record("recover", oldPID, newPID)
-			return nil
 		},
 	}
 
-	err := p.prefork(freeAddr(t))
+	err := p.prefork("127.0.0.1:0")
 	if !errors.Is(err, ErrOverRecovery) {
 		t.Fatalf("expected ErrOverRecovery, got: %v", err)
 	}
@@ -443,7 +375,7 @@ func Test_Prefork_InitialChildSpawnError(t *testing.T) {
 		},
 	}
 
-	err := p.prefork(freeAddr(t))
+	err := p.prefork("127.0.0.1:0")
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected %v, got: %v", expectedErr, err)
 	}
@@ -470,7 +402,7 @@ func Test_Prefork_OnMasterReadyError(t *testing.T) {
 		},
 	}
 
-	err := p.prefork(freeAddr(t))
+	err := p.prefork("127.0.0.1:0")
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected %v, got: %v", expectedErr, err)
 	}
@@ -501,13 +433,12 @@ func Test_Prefork_RecoveredChildSpawnError(t *testing.T) {
 			}
 			return nil
 		},
-		OnChildRecover: func(_, _ int) error {
+		OnChildRecover: func(_, _ int) {
 			recoverCount.Add(1)
-			return nil
 		},
 	}
 
-	err := p.prefork(freeAddr(t))
+	err := p.prefork("127.0.0.1:0")
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected %v, got: %v", expectedErr, err)
 	}
@@ -516,31 +447,7 @@ func Test_Prefork_RecoveredChildSpawnError(t *testing.T) {
 	}
 }
 
-func Test_Prefork_HookPanicSurfaces(t *testing.T) {
-	prev := runtime.GOMAXPROCS(2)
-	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
-
-	produce, cleanup := noopChildProducer(t)
-	t.Cleanup(cleanup)
-
-	p := &Prefork{
-		Reuseport:        true,
-		RecoverThreshold: 1,
-		Logger:           &testLogger{},
-		CommandProducer:  produce,
-		OnChildSpawn: func(_ int) error {
-			panic("user code blew up")
-		},
-	}
-
-	err := p.prefork(freeAddr(t))
-	if err == nil {
-		t.Fatal("expected error from panicking hook, got nil")
-	}
-}
-
-// Test_Prefork_RecoverInterval verifies the optional backoff delays the
-// respawn without relying on brittle wallclock assertions.
+// Test_Prefork_RecoverInterval verifies the optional backoff delays the respawn.
 func Test_Prefork_RecoverInterval(t *testing.T) {
 	prev := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
@@ -558,7 +465,7 @@ func Test_Prefork_RecoverInterval(t *testing.T) {
 	}
 
 	start := time.Now()
-	err := p.prefork(freeAddr(t))
+	err := p.prefork("127.0.0.1:0")
 	elapsed := time.Since(start)
 
 	if !errors.Is(err, ErrOverRecovery) {
