@@ -524,52 +524,50 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 	}
 
 	var exitedProcs int
-	for {
-		select {
-		case sig := <-sigCh:
-			delete(childProcs, sig.pid)
+	for sig := range sigCh {
+		delete(childProcs, sig.pid)
 
-			if sig.err != nil {
-				p.logger().Printf("prefork: child PID %d exited: %v", sig.pid, sig.err)
-			} else {
-				p.logger().Printf("prefork: child PID %d exited cleanly", sig.pid)
-			}
+		if sig.err != nil {
+			p.logger().Printf("prefork: child PID %d exited: %v", sig.pid, sig.err)
+		} else {
+			p.logger().Printf("prefork: child PID %d exited cleanly", sig.pid)
+		}
 
-			exitedProcs++
-			if exitedProcs > p.RecoverThreshold {
-				p.logger().Printf(
-					"prefork: child exits (%d) exceed RecoverThreshold (%d), terminating master",
-					exitedProcs, p.RecoverThreshold,
-				)
-				return ErrOverRecovery
-			}
+		exitedProcs++
+		if exitedProcs > p.RecoverThreshold {
+			p.logger().Printf(
+				"prefork: child exits (%d) exceed RecoverThreshold (%d), terminating master",
+				exitedProcs, p.RecoverThreshold,
+			)
+			return ErrOverRecovery
+		}
 
-			if p.RecoverInterval > 0 {
-				time.Sleep(p.RecoverInterval)
-			}
+		if p.RecoverInterval > 0 {
+			time.Sleep(p.RecoverInterval)
+		}
 
-			cmd, doErr := p.doCommand()
-			if doErr != nil {
-				p.logger().Printf("prefork: recovery doCommand: %v", doErr)
-				return doErr
-			}
-			newPID := cmd.Process.Pid
-			childProcs[newPID] = cmd
+		cmd, doErr := p.doCommand()
+		if doErr != nil {
+			p.logger().Printf("prefork: recovery doCommand: %v", doErr)
+			return doErr
+		}
+		newPID := cmd.Process.Pid
+		childProcs[newPID] = cmd
 
-			startWait(cmd, newPID)
+		startWait(cmd, newPID)
 
-			if p.OnChildSpawn != nil {
-				if hookErr := p.OnChildSpawn(newPID); hookErr != nil {
-					p.logger().Printf("prefork: OnChildSpawn for recovered PID %d: %v", newPID, hookErr)
-					return hookErr
-				}
-			}
-
-			if p.OnChildRecover != nil {
-				p.OnChildRecover(sig.pid, newPID)
+		if p.OnChildSpawn != nil {
+			if hookErr := p.OnChildSpawn(newPID); hookErr != nil {
+				p.logger().Printf("prefork: OnChildSpawn for recovered PID %d: %v", newPID, hookErr)
+				return hookErr
 			}
 		}
+
+		if p.OnChildRecover != nil {
+			p.OnChildRecover(sig.pid, newPID)
+		}
 	}
+	return nil
 }
 
 // ListenAndServe serves HTTP requests from the given TCP addr.
