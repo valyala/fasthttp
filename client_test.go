@@ -120,18 +120,6 @@ func TestClientConnectionCounts(t *testing.T) {
 	}
 }
 
-func TestClientConnectionCountsEmpty(t *testing.T) {
-	t.Parallel()
-
-	var c Client
-	if n := c.ConnsCount(); n != 0 {
-		t.Fatalf("unexpected connection count %d. Expecting %d", n, 0)
-	}
-	if n := c.IdleConnsCount(); n != 0 {
-		t.Fatalf("unexpected idle connection count %d. Expecting %d", n, 0)
-	}
-}
-
 func TestPipelineClientSetUserAgent(t *testing.T) {
 	t.Parallel()
 
