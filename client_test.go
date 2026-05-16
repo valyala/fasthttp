@@ -1493,9 +1493,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 	}
 
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := AcquireRequest()
 			req.SetRequestURI("http://foobar/baz")
 			req.Header.SetMethod(MethodPost)
@@ -1522,7 +1520,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 			if string(body) != "foo" {
 				t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -1920,11 +1918,9 @@ func TestClientGetTimeoutSuccessConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testClientGetTimeoutSuccess(t, &defaultClient, "http://"+s.Addr(), 100)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -1947,12 +1943,10 @@ func TestClientDoTimeoutSuccessConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testClientDoTimeoutSuccess(t, &defaultClient, "http://"+s.Addr(), 100)
 			testClientRequestSetTimeoutSuccess(t, &defaultClient, "http://"+s.Addr(), 100)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -1989,11 +1983,9 @@ func TestClientGetTimeoutErrorConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testClientGetTimeoutError(t, c, 100)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -2031,11 +2023,9 @@ func TestClientDoTimeoutErrorConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testClientDoTimeoutError(t, c, 100)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -2618,12 +2608,10 @@ func TestClientConcurrent(t *testing.T) {
 	addr := "http://" + s.Addr()
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testClientGet(t, &defaultClient, addr, 30)
 			testClientPost(t, &defaultClient, addr, 10)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -2673,12 +2661,10 @@ func TestHostClientConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testHostClientGet(t, c, 30)
 			testHostClientPost(t, c, 10)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -3005,9 +2991,7 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 	}
 
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := AcquireRequest()
 			req.SetRequestURI("http://foobar/baz")
 			req.Header.SetMethod(MethodPost)
@@ -3026,7 +3010,7 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 			if string(body) != "foo" {
 				t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -3082,9 +3066,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 
 	var errNoFreeConnsCount atomic.Uint32
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := AcquireRequest()
 			req.SetRequestURI("http://foobar/baz")
 			req.Header.SetMethod(MethodPost)
@@ -3106,7 +3088,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 					t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -3178,9 +3160,7 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 
 	var errTimeoutCount atomic.Uint32
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := AcquireRequest()
 			req.SetRequestURI("http://foobar/baz")
 			req.Header.SetMethod(MethodPost)
@@ -3202,7 +3182,7 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 					t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
