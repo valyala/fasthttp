@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -527,6 +528,13 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	atomic.AddInt32(&hc.pendingClientRequests, 1)
 	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
 	return hc.Do(req, resp)
+}
+
+// DoContext is like Do but uses ctx for deadline and cancellation.
+// If ctx is cancelled, the underlying connection is closed to interrupt
+// any in-flight read or write.
+func (c *Client) DoContext(ctx context.Context, req *Request, resp *Response) error {
+	return doContext(ctx, req, resp, c.Do)
 }
 
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
@@ -1547,6 +1555,39 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 
 	if err == io.EOF {
 		err = ErrConnectionClosed
+	}
+	return err
+}
+
+// DoContext is like Do but uses ctx for deadline and cancellation.
+func (c *HostClient) DoContext(ctx context.Context, req *Request, resp *Response) error {
+	return doContext(ctx, req, resp, c.Do)
+}
+
+func doContext( //nolint:contextcheck
+	ctx context.Context,
+	req *Request,
+	resp *Response,
+	do func(*Request, *Response) error,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if d, ok := ctx.Deadline(); ok {
+		ctxTimeout := time.Until(d)
+		if ctxTimeout <= 0 {
+			return context.DeadlineExceeded
+		}
+		if req.timeout <= 0 || ctxTimeout < req.timeout {
+			req.timeout = ctxTimeout
+		}
+	}
+	prevCtx := req.ctx
+	req.ctx = ctx
+	defer func() { req.ctx = prevCtx }()
+	err := do(req, resp)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
 	}
 	return err
 }
@@ -3128,6 +3169,18 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		return false, err
 	}
 	conn := cc.c
+
+	if reqCtx := req.ctx; reqCtx != nil && reqCtx.Done() != nil {
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			select {
+			case <-reqCtx.Done():
+				conn.Close()
+			case <-stop:
+			}
+		}()
+	}
 
 	resp.ParseNetConn(conn)
 

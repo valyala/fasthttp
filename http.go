@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -60,6 +61,8 @@ type Request struct {
 	// Request timeout. Usually set by DoDeadline or DoTimeout
 	// if <= 0, means not set
 	timeout time.Duration
+
+	ctx context.Context //nolint:containedctx
 
 	secureErrorLogMessage bool
 
@@ -1260,6 +1263,7 @@ func (req *Request) Reset() {
 	req.Header.Reset()
 	req.resetSkipHeader()
 	req.timeout = 0
+	req.ctx = nil
 	req.UseHostHeader = false
 	req.DisableRedirectPathNormalizing = false
 }

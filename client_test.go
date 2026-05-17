@@ -527,6 +527,72 @@ func TestClientNegativeTimeout(t *testing.T) {
 	ln.Close()
 }
 
+func TestClientDoContext(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+
+	if err := c.DoContext(context.Background(), req, nil); err != nil {
+		t.Fatalf("unexpected error: %+v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := c.DoContext(ctx, req, nil); err != context.Canceled {
+		t.Fatalf("expected context.Canceled error got: %+v", err)
+	}
+
+	ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if err := c.DoContext(ctx, req, nil); err != context.DeadlineExceeded {
+		t.Fatalf("expected context.DeadlineExceeded error got: %+v", err)
+	}
+
+	ln.Close()
+}
+
+func TestClientDoContextCancel(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			time.Sleep(500 * time.Millisecond)
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+	req := AcquireRequest()
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("http://example.com")
+	req.timeout = time.Second
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	if err := c.DoContext(ctx, req, AcquireResponse()); err != context.Canceled {
+		t.Fatalf("expected context.Canceled error got: %+v", err)
+	}
+
+	ln.Close()
+}
+
 func TestPipelineClientNilResp(t *testing.T) {
 	t.Parallel()
 
