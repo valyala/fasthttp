@@ -606,6 +606,36 @@ func (c *Client) CloseIdleConnections() {
 	c.mLock.RUnlock()
 }
 
+// ConnsCount returns total connection count across all HostClients managed by Client.
+func (c *Client) ConnsCount() int {
+	c.mLock.RLock()
+	defer c.mLock.RUnlock()
+
+	n := 0
+	for _, v := range c.m {
+		n += v.ConnsCount()
+	}
+	for _, v := range c.ms {
+		n += v.ConnsCount()
+	}
+	return n
+}
+
+// IdleConnsCount returns total idle connection count across all HostClients managed by Client.
+func (c *Client) IdleConnsCount() int {
+	c.mLock.RLock()
+	defer c.mLock.RUnlock()
+
+	n := 0
+	for _, v := range c.m {
+		n += v.IdleConnsCount()
+	}
+	for _, v := range c.ms {
+		n += v.IdleConnsCount()
+	}
+	return n
+}
+
 func (c *Client) mCleaner(m map[string]*HostClient) {
 	mustStop := false
 
@@ -1885,6 +1915,14 @@ func (c *HostClient) ConnsCount() int {
 	defer c.connsLock.Unlock()
 
 	return c.connsCount
+}
+
+// IdleConnsCount returns idle connection count of HostClient.
+func (c *HostClient) IdleConnsCount() int {
+	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
+
+	return len(c.conns)
 }
 
 func acquireClientConn(conn net.Conn) *clientConn {

@@ -74,6 +74,52 @@ func TestCloseIdleConnections(t *testing.T) {
 	}
 }
 
+func TestClientConnectionCounts(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	if n := c.ConnsCount(); n != 0 {
+		t.Errorf("unexpected connection count %d. Expecting %d", n, 0)
+	}
+	if n := c.IdleConnsCount(); n != 0 {
+		t.Errorf("unexpected idle connection count %d. Expecting %d", n, 0)
+	}
+
+	if _, _, err := c.Get(nil, "http://google.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := c.ConnsCount(); n != 1 {
+		t.Errorf("unexpected connection count %d. Expecting %d", n, 1)
+	}
+	if n := c.IdleConnsCount(); n != 1 {
+		t.Errorf("unexpected idle connection count %d. Expecting %d", n, 1)
+	}
+
+	c.CloseIdleConnections()
+
+	if n := c.IdleConnsCount(); n != 0 {
+		t.Errorf("unexpected idle connection count %d. Expecting %d", n, 0)
+	}
+}
+
 func TestPipelineClientSetUserAgent(t *testing.T) {
 	t.Parallel()
 
