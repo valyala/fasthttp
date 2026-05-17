@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -527,6 +528,12 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	atomic.AddInt32(&hc.pendingClientRequests, 1)
 	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
 	return hc.Do(req, resp)
+}
+
+// DoContext is like Do but uses ctx for deadline and cancellation.
+// Cancellation is bounded by req.timeout or ctx.Deadline().
+func (c *Client) DoContext(ctx context.Context, req *Request, resp *Response) error {
+	return doContext(ctx, req, resp, c.Do)
 }
 
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
@@ -1547,6 +1554,29 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 
 	if err == io.EOF {
 		err = ErrConnectionClosed
+	}
+	return err
+}
+
+// DoContext is like Do but uses ctx for deadline and cancellation.
+func (c *HostClient) DoContext(ctx context.Context, req *Request, resp *Response) error {
+	return doContext(ctx, req, resp, c.Do)
+}
+
+func doContext(ctx context.Context, req *Request, resp *Response, do func(*Request, *Response) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if d, ok := ctx.Deadline(); ok {
+		timeout := time.Until(d)
+		if timeout <= 0 {
+			return context.DeadlineExceeded
+		}
+		req.timeout = timeout
+	}
+	err := do(req, resp)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return ctxErr
 	}
 	return err
 }
