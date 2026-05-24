@@ -7,7 +7,7 @@ require (
 	github.com/klauspost/compress v1.18.6
 	github.com/valyala/bytebufferpool v1.0.0
 	golang.org/x/crypto v0.52.0
-	golang.org/x/net v0.54.0
+	golang.org/x/net v0.55.0
 	golang.org/x/sys v0.45.0
 )
 
