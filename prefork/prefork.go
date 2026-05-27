@@ -97,8 +97,11 @@ type Prefork struct {
 	// terminate the master after the very first child crash.
 	RecoverThreshold int
 
-	// RecoverInterval, when > 0, makes the master sleep for the given duration
-	// before respawning a crashed child. Useful as crash-loop backoff.
+	// RecoverInterval, when > 0, delays respawning a crashed child by the given
+	// duration. The backoff is per child and does not block recovery of the
+	// others, so children that crash at the same time each restart
+	// RecoverInterval after they exit instead of serially. Useful as crash-loop
+	// backoff.
 	RecoverInterval time.Duration
 
 	// ShutdownGracePeriod is the time the master waits for children to exit
@@ -141,7 +144,8 @@ type Prefork struct {
 	// returns that error after killing the children.
 	//
 	// Threading: invoked synchronously from the master goroutine. The slice
-	// is owned by the caller after the call returns.
+	// is only valid for the duration of the call; copy it if you need to
+	// retain the PIDs after the callback returns.
 	OnMasterReady func(childPIDs []int) error
 
 	// OnChildRecover is called in the master after a crashed child has been
@@ -479,6 +483,23 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 		go func() {
 			defer wg.Done()
 			result := childExit{pid: pid, err: cmd.Wait()}
+
+			// Apply the crash-loop backoff here, per child, before reporting
+			// the exit. Sleeping in the supervision loop instead would
+			// serialize the wait across all crashed children, so N children
+			// dying at once would restart RecoverInterval apart rather than
+			// each one RecoverInterval after it quit. The wait is interruptible
+			// so shutdown does not have to outlast a full interval.
+			if p.RecoverInterval > 0 {
+				timer := time.NewTimer(p.RecoverInterval)
+				select {
+				case <-timer.C:
+				case <-ctx.Done():
+					timer.Stop()
+					return
+				}
+			}
+
 			select {
 			case sigCh <- result:
 			case <-ctx.Done():
@@ -516,8 +537,7 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 	}
 
 	if p.OnMasterReady != nil {
-		pids := append([]int(nil), childPIDs...)
-		if hookErr := p.OnMasterReady(pids); hookErr != nil {
+		if hookErr := p.OnMasterReady(childPIDs); hookErr != nil {
 			p.logger().Printf("prefork: OnMasterReady: %v", hookErr)
 			return hookErr
 		}
@@ -542,10 +562,9 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 			return ErrOverRecovery
 		}
 
-		if p.RecoverInterval > 0 {
-			time.Sleep(p.RecoverInterval)
-		}
-
+		// The RecoverInterval backoff is applied in the per-child Wait
+		// goroutine (see startWait) before the exit is reported, so it does
+		// not block recovery of other children here.
 		cmd, doErr := p.doCommand()
 		if doErr != nil {
 			p.logger().Printf("prefork: recovery doCommand: %v", doErr)
