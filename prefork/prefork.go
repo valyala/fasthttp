@@ -480,7 +480,7 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 	var wg sync.WaitGroup
 	startWait := func(cmd *exec.Cmd, pid int) {
 		wg.Add(1)
-		go func() {
+		go func() { //nolint:modernize // WaitGroup.Go needs go1.25; module targets go1.24
 			defer wg.Done()
 			result := childExit{pid: pid, err: cmd.Wait()}
 
