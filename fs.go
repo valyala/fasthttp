@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"html"
 	"io"
 	"io/fs"
@@ -1926,12 +1927,18 @@ func fsModTime(t time.Time) time.Time {
 	return t.In(time.UTC).Truncate(time.Second)
 }
 
-var filesLockMap sync.Map
+// filesLockShards is a fixed-size pool of mutexes that serializes
+// concurrent generation of the same compressed file. Sharding by path
+// hash keeps memory bounded; distinct paths that happen to share a
+// mutex only contend briefly on the cache-miss path.
+const filesLockShardsCount = 1024
+
+var filesLockShards [filesLockShardsCount]sync.Mutex
 
 func getFileLock(absPath string) *sync.Mutex {
-	v, _ := filesLockMap.LoadOrStore(absPath, &sync.Mutex{})
-	filelock := v.(*sync.Mutex)
-	return filelock
+	h := fnv.New64a()
+	_, _ = h.Write(s2b(absPath))
+	return &filesLockShards[h.Sum64()&(filesLockShardsCount-1)]
 }
 
 var _ fs.FS = (*osFS)(nil)

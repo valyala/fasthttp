@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1204,5 +1205,82 @@ func TestFileCacheForZstd(t *testing.T) {
 	}
 	if !bytes.Equal(ctx.Response.Body(), changedData) {
 		t.Fatalf("Unexpected response body %q. Expecting %q", ctx.Response.Body(), data)
+	}
+}
+
+func TestGetFileLockSamePath(t *testing.T) {
+	t.Parallel()
+
+	const path = "/var/www/static/index.html.gz"
+	a := getFileLock(path)
+	b := getFileLock(path)
+	if a != b {
+		t.Fatalf("getFileLock(%q) returned different mutex instances on repeat calls", path)
+	}
+}
+
+func TestGetFileLockBounded(t *testing.T) {
+	t.Parallel()
+
+	// Acquire locks for many distinct paths and verify the number of
+	// unique mutex instances never exceeds the shard pool size. This is
+	// the regression guard for #2256 (unbounded growth of filesLockMap).
+	seen := make(map[*sync.Mutex]struct{})
+	for i := range 100 * filesLockShardsCount {
+		seen[getFileLock(fmt.Sprintf("/var/www/static/file-%d.html.gz", i))] = struct{}{}
+	}
+	if len(seen) > filesLockShardsCount {
+		t.Fatalf("unique mutex count %d exceeds shard pool size %d", len(seen), filesLockShardsCount)
+	}
+}
+
+func TestGetFileLockDistribution(t *testing.T) {
+	t.Parallel()
+
+	// Verify the hash distributes across shards rather than collapsing to
+	// a tiny subset. With N >> shardCount distinct paths we expect close
+	// to full shard coverage; allow a generous lower bound so the test is
+	// not flaky on edge-case hash behavior.
+	const n = 50 * filesLockShardsCount
+	seen := make(map[*sync.Mutex]struct{})
+	for i := range n {
+		seen[getFileLock(fmt.Sprintf("/srv/cache/asset-%d.br", i))] = struct{}{}
+	}
+	if len(seen) < filesLockShardsCount/2 {
+		t.Fatalf("hash distribution too narrow: only %d/%d shards used", len(seen), filesLockShardsCount)
+	}
+}
+
+func TestGetFileLockConcurrent(t *testing.T) {
+	t.Parallel()
+
+	// Same path across goroutines must serialize: the mutex returned by
+	// getFileLock is the actual synchronization primitive used by the
+	// compression slow path.
+	const (
+		path        = "/tmp/concurrent-getfilelock.gz"
+		goroutines  = 32
+		incsPerG    = 500
+		expectedSum = goroutines * incsPerG
+	)
+	var (
+		counter int
+		wg      sync.WaitGroup
+	)
+	wg.Add(goroutines)
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			for range incsPerG {
+				mu := getFileLock(path)
+				mu.Lock()
+				counter++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if counter != expectedSum {
+		t.Fatalf("counter race: got %d, want %d", counter, expectedSum)
 	}
 }
