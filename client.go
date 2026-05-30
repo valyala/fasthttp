@@ -2038,7 +2038,7 @@ func (c *HostClient) ReleaseReader(br *bufio.Reader) {
 	}
 }
 
-func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
+func newClientTLSConfig(c *tls.Config, addr string) (*tls.Config, error) {
 	if c == nil {
 		c = &tls.Config{}
 	} else {
@@ -2046,25 +2046,27 @@ func newClientTLSConfig(c *tls.Config, addr string) *tls.Config {
 	}
 
 	if c.ServerName == "" {
-		serverName := tlsServerName(addr)
-		if serverName == "*" {
-			c.InsecureSkipVerify = true
-		} else {
-			c.ServerName = serverName
+		serverName, err := tlsServerName(addr)
+		if err != nil {
+			if c.InsecureSkipVerify {
+				return c, nil
+			}
+			return nil, fmt.Errorf("cannot determine TLS server name from addr %q: %w", addr, err)
 		}
+		c.ServerName = serverName
 	}
-	return c
+	return c, nil
 }
 
-func tlsServerName(addr string) string {
+func tlsServerName(addr string) (string, error) {
 	if !strings.Contains(addr, ":") {
-		return addr
+		return addr, nil
 	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
-		return "*"
+		return "", err
 	}
-	return host
+	return host, nil
 }
 
 func (c *HostClient) nextAddr() string {
@@ -2102,7 +2104,14 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 	deadline := time.Now().Add(timeout)
 	for n > 0 {
 		addr := c.nextAddr()
-		tlsConfig := c.cachedTLSConfig(addr)
+		var tlsConfig *tls.Config
+		if c.IsTLS {
+			tlsConfig, err = c.cachedTLSConfig(addr)
+			if err != nil {
+				n--
+				continue
+			}
+		}
 		conn, err = dialAddr(addr, c.Dial, c.DialTimeout, c.DialDualStack, c.IsTLS, tlsConfig, dialTimeout, c.WriteTimeout)
 		if err == nil {
 			return conn, nil
@@ -2115,23 +2124,24 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 	return nil, err
 }
 
-func (c *HostClient) cachedTLSConfig(addr string) *tls.Config {
-	if !c.IsTLS {
-		return nil
-	}
-
+func (c *HostClient) cachedTLSConfig(addr string) (*tls.Config, error) {
 	c.tlsConfigMapLock.Lock()
 	if c.tlsConfigMap == nil {
 		c.tlsConfigMap = make(map[string]*tls.Config)
 	}
 	cfg := c.tlsConfigMap[addr]
 	if cfg == nil {
-		cfg = newClientTLSConfig(c.TLSConfig, addr)
+		var err error
+		cfg, err = newClientTLSConfig(c.TLSConfig, addr)
+		if err != nil {
+			c.tlsConfigMapLock.Unlock()
+			return nil, err
+		}
 		c.tlsConfigMap[addr] = cfg
 	}
 	c.tlsConfigMapLock.Unlock()
 
-	return cfg
+	return cfg, nil
 }
 
 // ErrTLSHandshakeTimeout indicates there is a timeout from tls handshake.
@@ -2595,6 +2605,9 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	if timeout <= 0 {
 		return ErrTimeout
 	}
+	if err := c.ensureTLSConfig(); err != nil {
+		return err
+	}
 
 	chs := c.acquirePipelineConnChannels()
 	defer c.releasePipelineConnChannels(chs)
@@ -2704,6 +2717,10 @@ func (c *PipelineClient) Do(req *Request, resp *Response) error {
 }
 
 func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
+	if err := c.ensureTLSConfig(); err != nil {
+		return err
+	}
+
 	chs := c.acquirePipelineConnChannels()
 	defer c.releasePipelineConnChannels(chs)
 
@@ -2883,7 +2900,14 @@ func (c *pipelineConnClient) tryRetirePipelineConnChannels(chs *pipelineConnChan
 }
 
 func (c *pipelineConnClient) worker(chs *pipelineConnChannels) error {
-	tlsConfig := c.cachedTLSConfig()
+	var tlsConfig *tls.Config
+	if c.IsTLS {
+		var err error
+		tlsConfig, err = c.cachedTLSConfig()
+		if err != nil {
+			return err
+		}
+	}
 	conn, err := dialAddr(c.Addr, c.Dial, nil, c.DialDualStack, c.IsTLS, tlsConfig, 0, c.WriteTimeout)
 	if err != nil {
 		return err
@@ -2923,20 +2947,29 @@ func (c *pipelineConnClient) worker(chs *pipelineConnChannels) error {
 	return err
 }
 
-func (c *pipelineConnClient) cachedTLSConfig() *tls.Config {
-	if !c.IsTLS {
-		return nil
-	}
-
+func (c *pipelineConnClient) cachedTLSConfig() (*tls.Config, error) {
 	c.tlsConfigLock.Lock()
 	cfg := c.tlsConfig
 	if cfg == nil {
-		cfg = newClientTLSConfig(c.TLSConfig, c.Addr)
+		var err error
+		cfg, err = newClientTLSConfig(c.TLSConfig, c.Addr)
+		if err != nil {
+			c.tlsConfigLock.Unlock()
+			return nil, err
+		}
 		c.tlsConfig = cfg
 	}
 	c.tlsConfigLock.Unlock()
 
-	return cfg
+	return cfg, nil
+}
+
+func (c *pipelineConnClient) ensureTLSConfig() error {
+	if !c.IsTLS {
+		return nil
+	}
+	_, err := c.cachedTLSConfig()
+	return err
 }
 
 func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *pipelineConnChannels) error {
