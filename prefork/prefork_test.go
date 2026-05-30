@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/valyala/fasthttp"
 )
@@ -132,6 +133,89 @@ func Test_setTCPListenerFiles(t *testing.T) {
 
 	if len(p.files) != 1 {
 		t.Errorf("Prefork.files == %d, want %d", len(p.files), 1)
+	}
+}
+
+func Test_preforkClosesParentListenerFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
+	prev := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(prev)
+	})
+
+	stopErr := errors.New("stop prefork")
+	var parentFile *os.File
+	p := &Prefork{
+		CommandProducer: func(files []*os.File) (*exec.Cmd, error) {
+			if len(files) != 1 {
+				t.Fatalf("unexpected files count: %d. Expecting 1", len(files))
+			}
+			if _, err := files[0].Stat(); err != nil {
+				t.Fatalf("listener file must be open while starting child: %v", err)
+			}
+			parentFile = files[0]
+
+			cmd := exec.Command(os.Args[0], "-test.run=^$")
+			cmd.Env = append(os.Environ(), preforkChildEnvVariable+"=1")
+			err := cmd.Start()
+			return cmd, err
+		},
+		OnChildSpawn: func(pid int) error {
+			return stopErr
+		},
+	}
+
+	if err := p.prefork(getAddr()); !errors.Is(err, stopErr) {
+		t.Fatalf("Unexpected error: %v. Expecting %v", err, stopErr)
+	}
+	if parentFile == nil {
+		t.Fatal("listener file was not passed to child command")
+	}
+	if _, err := parentFile.Stat(); err == nil {
+		t.Fatal("parent listener file was not closed")
+	}
+}
+
+func Test_setTCPListenerFilesClosesListenerOnFileError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
+	fileErr := errors.New("file error")
+	oldTCPListenerFile := tcpListenerFile
+	tcpListenerFile = func(*net.TCPListener) (*os.File, error) {
+		return nil, fileErr
+	}
+	t.Cleanup(func() {
+		tcpListenerFile = oldTCPListenerFile
+	})
+
+	p := &Prefork{}
+	err := p.setTCPListenerFiles(getAddr())
+	if !errors.Is(err, fileErr) {
+		t.Fatalf("Unexpected error: %v. Expecting %v", err, fileErr)
+	}
+	if p.files != nil {
+		t.Fatalf("Prefork.files = %v, want nil", p.files)
+	}
+	if p.ln == nil {
+		return
+	}
+
+	closeErrCh := make(chan error, 1)
+	go func() {
+		closeErrCh <- p.ln.Close()
+	}()
+	select {
+	case err := <-closeErrCh:
+		if err == nil {
+			t.Fatal("listener remained open after File error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout closing listener")
 	}
 }
 
