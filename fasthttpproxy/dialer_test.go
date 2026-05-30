@@ -261,6 +261,65 @@ func TestHTTPProxyDialRejectsTargetAddrContainingNewlines(t *testing.T) {
 	}
 }
 
+func TestProxyDialerConstructorsReturnErroringDialFunc(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "socket6://127.0.0.1:8080")
+	t.Setenv("HTTPS_PROXY", "socket6://127.0.0.1:8080")
+	t.Setenv("NO_PROXY", "")
+
+	tests := []struct {
+		name string
+		fn   func() fasthttp.DialFunc
+	}{
+		{
+			name: "http",
+			fn: func() fasthttp.DialFunc {
+				return FasthttpHTTPDialer("socket6://127.0.0.1:8080")
+			},
+		},
+		{
+			name: "http dual stack",
+			fn: func() fasthttp.DialFunc {
+				return FasthttpHTTPDialerDualStack("socket6://127.0.0.1:8080")
+			},
+		},
+		{
+			name: "socks",
+			fn: func() fasthttp.DialFunc {
+				return FasthttpSocksDialer("socket6://127.0.0.1:8080")
+			},
+		},
+		{
+			name: "socks dual stack",
+			fn: func() fasthttp.DialFunc {
+				return FasthttpSocksDialerDualStack("socket6://127.0.0.1:8080")
+			},
+		},
+		{
+			name: "env",
+			fn:   FasthttpProxyHTTPDialer,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dialFunc := tt.fn()
+			if dialFunc == nil {
+				t.Fatalf("unexpected nil dial func")
+			}
+			conn, err := dialFunc("example.com:80")
+			if conn != nil {
+				conn.Close()
+			}
+			if err == nil {
+				t.Fatalf("expected error")
+			}
+			if err.Error() != "proxy: unknown scheme: socket6" {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func startProxyServer(t *testing.T, ports []string, counts []atomic.Int64) (lns []net.Listener) {
 	for i, port := range ports {
 		ln, err := net.Listen("tcp", ":"+port)
