@@ -295,6 +295,115 @@ func TestPipelineClientIssue832(t *testing.T) {
 	}
 }
 
+func TestPipelineClientRestartsAfterIdle(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK") //nolint:errcheck
+		},
+	}
+
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &PipelineClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxIdleConnDuration: 10 * time.Millisecond,
+		MaxPendingRequests:  1,
+		Logger:              &testLogger{},
+	}
+
+	testPipelineClientDoOnce(t, c)
+	time.Sleep(50 * time.Millisecond)
+	testPipelineClientDoOnce(t, c)
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
+func TestPipelineClientChannelLifecycleRace(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK") //nolint:errcheck
+		},
+	}
+
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &PipelineClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxIdleConnDuration: time.Millisecond,
+		MaxPendingRequests:  2,
+		Logger:              &testLogger{},
+	}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 20 {
+				testPipelineClientDoOnce(t, c)
+				time.Sleep(time.Millisecond)
+			}
+		})
+	}
+	wg.Wait()
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
+func testPipelineClientDoOnce(t *testing.T, c *PipelineClient) {
+	t.Helper()
+
+	req := AcquireRequest()
+	req.SetRequestURI("http://foobar/baz")
+	resp := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(resp)
+
+	if err := c.DoTimeout(req, resp, time.Second); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+	if body := string(resp.Body()); body != "OK" {
+		t.Fatalf("unexpected body: %q. Expecting %q", body, "OK")
+	}
+}
+
 func TestClientInvalidURI(t *testing.T) {
 	t.Parallel()
 
