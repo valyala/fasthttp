@@ -1825,16 +1825,19 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	s.configTLS()
 	configHasCert := len(s.TLSConfig.Certificates) > 0 || s.TLSConfig.GetCertificate != nil
 	if !configHasCert || certFile != "" || keyFile != "" {
-		if err := s.AppendCert(certFile, keyFile); err != nil {
+		cert, err := loadX509KeyPair(certFile, keyFile)
+		if err != nil {
 			s.mu.Unlock()
 			return err
 		}
+		s.appendCertLocked(&cert)
 	}
+	tlsConfig := s.TLSConfig.Clone()
 
 	s.mu.Unlock()
 
 	return s.Serve(
-		tls.NewListener(ln, s.TLSConfig.Clone()),
+		tls.NewListener(ln, tlsConfig),
 	)
 }
 
@@ -1849,16 +1852,19 @@ func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error 
 	s.configTLS()
 	configHasCert := len(s.TLSConfig.Certificates) > 0 || s.TLSConfig.GetCertificate != nil
 	if !configHasCert || len(certData) != 0 || len(keyData) != 0 {
-		if err := s.AppendCertEmbed(certData, keyData); err != nil {
+		cert, err := x509KeyPair(certData, keyData)
+		if err != nil {
 			s.mu.Unlock()
 			return err
 		}
+		s.appendCertLocked(&cert)
 	}
+	tlsConfig := s.TLSConfig.Clone()
 
 	s.mu.Unlock()
 
 	return s.Serve(
-		tls.NewListener(ln, s.TLSConfig.Clone()),
+		tls.NewListener(ln, tlsConfig),
 	)
 }
 
@@ -1867,37 +1873,60 @@ func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error 
 // This function allows programmer to handle multiple domains
 // in one server structure. See examples/multidomain.
 func (s *Server) AppendCert(certFile, keyFile string) error {
-	if certFile == "" && keyFile == "" {
-		return errNoCertOrKeyProvided
-	}
-
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	cert, err := loadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %w", certFile, keyFile, err)
+		return err
 	}
 
-	s.configTLS()
-	s.TLSConfig.Certificates = append(s.TLSConfig.Certificates, cert)
+	s.mu.Lock()
+	s.appendCertLocked(&cert)
+	s.mu.Unlock()
 
 	return nil
 }
 
+func loadX509KeyPair(certFile, keyFile string) (tls.Certificate, error) {
+	if certFile == "" && keyFile == "" {
+		return tls.Certificate{}, errNoCertOrKeyProvided
+	}
+
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %w", certFile, keyFile, err)
+	}
+	return cert, nil
+}
+
 // AppendCertEmbed does the same as AppendCert but using in-memory data.
 func (s *Server) AppendCertEmbed(certData, keyData []byte) error {
+	cert, err := x509KeyPair(certData, keyData)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.appendCertLocked(&cert)
+	s.mu.Unlock()
+
+	return nil
+}
+
+func x509KeyPair(certData, keyData []byte) (tls.Certificate, error) {
 	if len(certData) == 0 && len(keyData) == 0 {
-		return errNoCertOrKeyProvided
+		return tls.Certificate{}, errNoCertOrKeyProvided
 	}
 
 	cert, err := tls.X509KeyPair(certData, keyData)
 	if err != nil {
-		return fmt.Errorf("cannot load TLS key pair from the provided certData(%d) and keyData(%d): %w",
+		return tls.Certificate{}, fmt.Errorf("cannot load TLS key pair from the provided certData(%d) and keyData(%d): %w",
 			len(certData), len(keyData), err)
 	}
+	return cert, nil
+}
 
+func (s *Server) appendCertLocked(cert *tls.Certificate) {
 	s.configTLS()
-	s.TLSConfig.Certificates = append(s.TLSConfig.Certificates, cert)
-
-	return nil
+	s.TLSConfig.Certificates = append(s.TLSConfig.Certificates, *cert)
 }
 
 func (s *Server) configTLS() {
