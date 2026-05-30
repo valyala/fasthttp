@@ -3962,6 +3962,34 @@ func TestServeConnSingleRequest(t *testing.T) {
 	verifyResponse(t, br, 200, "aaa", "requestURI=/foo/bar?baz, host=google.com")
 }
 
+func TestServeConnCountsConcurrencyOnce(t *testing.T) {
+	t.Parallel()
+
+	var s *Server
+	s = &Server{
+		Concurrency: 1,
+		Handler: func(ctx *RequestCtx) {
+			if n := s.GetCurrentConcurrency(); n != 1 {
+				t.Errorf("unexpected concurrency %d. Expecting 1", n)
+			}
+			ctx.Success("text/plain", []byte("OK"))
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from ServeConn: %v", err)
+	}
+	if n := s.GetCurrentConcurrency(); n != 0 {
+		t.Fatalf("unexpected concurrency after ServeConn: %d. Expecting 0", n)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, 200, "text/plain", "OK")
+}
+
 func TestServerSetFormValueFunc(t *testing.T) {
 	t.Parallel()
 	s := &Server{
