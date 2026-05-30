@@ -3,6 +3,7 @@ package fasthttputil
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -94,6 +95,95 @@ func TestInmemoryListener(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatalf("timeout")
 	}
+}
+
+func TestInmemoryListenerCloseUnblocksPendingDial(t *testing.T) {
+	ln := NewInmemoryListener()
+
+	dialCh := make(chan error, 1)
+	go func() {
+		conn, err := ln.Dial()
+		if conn != nil {
+			conn.Close()
+		}
+		dialCh <- err
+	}()
+
+	waitForPendingInmemoryDial(t, ln)
+
+	closeCh := make(chan error, 1)
+	go func() {
+		closeCh <- ln.Close()
+	}()
+
+	select {
+	case err := <-closeCh:
+		if err != nil {
+			t.Fatalf("unexpected close error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for Close")
+	}
+
+	select {
+	case err := <-dialCh:
+		if !errors.Is(err, ErrInmemoryListenerClosed) {
+			t.Fatalf("unexpected dial error: %v. Expecting %v", err, ErrInmemoryListenerClosed)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for Dial")
+	}
+}
+
+func TestInmemoryListenerCloseDropsQueuedDial(t *testing.T) {
+	ln := NewInmemoryListener()
+
+	dialCh := make(chan error, 1)
+	go func() {
+		conn, err := ln.Dial()
+		if conn != nil {
+			conn.Close()
+		}
+		dialCh <- err
+	}()
+
+	waitForPendingInmemoryDial(t, ln)
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected close error: %v", err)
+	}
+	if queued := len(ln.conns); queued != 0 {
+		t.Fatalf("unexpected queued conns after Close: %d. Expecting 0", queued)
+	}
+
+	conn, err := ln.Accept()
+	if conn != nil {
+		conn.Close()
+	}
+	if !errors.Is(err, ErrInmemoryListenerClosed) {
+		t.Fatalf("unexpected accept error: %v. Expecting %v", err, ErrInmemoryListenerClosed)
+	}
+
+	select {
+	case err := <-dialCh:
+		if !errors.Is(err, ErrInmemoryListenerClosed) {
+			t.Fatalf("unexpected dial error: %v. Expecting %v", err, ErrInmemoryListenerClosed)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for Dial")
+	}
+}
+
+func waitForPendingInmemoryDial(t *testing.T, ln *InmemoryListener) {
+	t.Helper()
+
+	for range 100 {
+		if len(ln.conns) > 0 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timeout waiting for pending dial")
 }
 
 // echoServerHandler implements http.Handler.
