@@ -2024,6 +2024,139 @@ func TestClientFollowRedirects(t *testing.T) {
 	ReleaseResponse(resp)
 }
 
+func TestClientRedirectMethodSwitch(t *testing.T) {
+	t.Parallel()
+
+	// /redirect-NNN replies with the given status code and a Location
+	// pointing at /landing. /landing echoes back the method and body it
+	// received, so the test can verify how the redirect was followed.
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/redirect-301":
+				ctx.Redirect("/landing", StatusMovedPermanently)
+			case "/redirect-302":
+				ctx.Redirect("/landing", StatusFound)
+			case "/redirect-303":
+				ctx.Redirect("/landing", StatusSeeOther)
+			case "/redirect-307":
+				ctx.Redirect("/landing", StatusTemporaryRedirect)
+			case "/landing":
+				ctx.SetBodyString(string(ctx.Method()) + "|" + string(ctx.PostBody()))
+			default:
+				ctx.Error("not found", StatusNotFound)
+			}
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	c := &HostClient{
+		Addr: "xxx",
+		Dial: func(addr string) (net.Conn, error) { return ln.Dial() },
+	}
+
+	tests := []struct {
+		method   string
+		path     string
+		wantBody string
+	}{
+		// 303 must always switch a POST to a body-less GET.
+		{MethodPost, "/redirect-303", "GET|"},
+		// 303 must also drop the body of an original GET request.
+		{MethodGet, "/redirect-303", "GET|"},
+		// 301/302 historically switch POST to GET (without forcing a body drop).
+		{MethodPost, "/redirect-301", "GET|hello"},
+		{MethodPost, "/redirect-302", "GET|hello"},
+		// 307 must preserve both the method and the body.
+		{MethodPost, "/redirect-307", "POST|hello"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := AcquireRequest()
+			resp := AcquireResponse()
+			defer ReleaseRequest(req)
+			defer ReleaseResponse(resp)
+
+			req.Header.SetMethod(tc.method)
+			req.SetRequestURI("http://xxx" + tc.path)
+			req.SetBodyString("hello")
+
+			if err := c.DoRedirects(req, resp, 16); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := resp.StatusCode(); got != StatusOK {
+				t.Fatalf("unexpected status code: %d", got)
+			}
+			if got := string(resp.Body()); got != tc.wantBody {
+				t.Fatalf("unexpected landing echo %q. Expecting %q", got, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestClientRedirect303DropsBodyFramingHeaders(t *testing.T) {
+	t.Parallel()
+
+	// /landing echoes back the body-framing headers it received so the test
+	// can verify that none of them survived the 303 body drop.
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/redirect":
+				ctx.Redirect("/landing", StatusSeeOther)
+			case "/landing":
+				ctx.SetBodyString("te=" + string(ctx.Request.Header.Peek(HeaderTransferEncoding)) +
+					"|trailer=" + string(ctx.Request.Header.Peek(HeaderTrailer)) +
+					"|body=" + string(ctx.PostBody()))
+			default:
+				ctx.Error("not found", StatusNotFound)
+			}
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	c := &HostClient{
+		Addr: "xxx",
+		Dial: func(addr string) (net.Conn, error) { return ln.Dial() },
+	}
+
+	req := AcquireRequest()
+	resp := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(resp)
+
+	// Original chunked POST carrying a trailer; the 303 must turn it into a
+	// body-less GET with no Transfer-Encoding/Trailer left behind.
+	req.Header.SetMethod(MethodPost)
+	req.SetRequestURI("http://xxx/redirect")
+	req.Header.Set(HeaderTransferEncoding, "chunked")
+	if err := req.Header.SetTrailer("X-Sum"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	req.SetBodyString("hello")
+
+	if err := c.DoRedirects(req, resp, 16); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := resp.StatusCode(); got != StatusOK {
+		t.Fatalf("unexpected status code: %d", got)
+	}
+	if got, want := string(resp.Body()), "te=|trailer=|body="; got != want {
+		t.Fatalf("unexpected landing echo %q. Expecting %q", got, want)
+	}
+}
+
 func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
 	t.Parallel()
 
