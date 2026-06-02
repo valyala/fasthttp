@@ -1,6 +1,7 @@
 package fasthttpproxy
 
 import (
+	"net"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -30,7 +31,10 @@ func FasthttpHTTPDialer(proxy string) fasthttp.DialFunc {
 //	}
 func FasthttpHTTPDialerTimeout(proxy string, timeout time.Duration) fasthttp.DialFunc {
 	d := Dialer{Config: httpproxy.Config{HTTPProxy: proxy, HTTPSProxy: proxy}, Timeout: timeout, ConnectTimeout: timeout}
-	dialFunc, _ := d.GetDialFunc(false)
+	dialFunc, err := d.GetDialFunc(false)
+	if err != nil {
+		return func(addr string) (net.Conn, error) { return nil, err }
+	}
 	return dialFunc
 }
 
@@ -60,6 +64,9 @@ func FasthttpHTTPDialerDualStackTimeout(proxy string, timeout time.Duration) fas
 		Config: httpproxy.Config{HTTPProxy: proxy, HTTPSProxy: proxy}, Timeout: timeout, ConnectTimeout: timeout,
 		DialDualStack: true,
 	}
-	dialFunc, _ := d.GetDialFunc(false)
+	dialFunc, err := d.GetDialFunc(false)
+	if err != nil {
+		return func(addr string) (net.Conn, error) { return nil, err }
+	}
 	return dialFunc
 }

@@ -1,6 +1,8 @@
 package fasthttpproxy
 
 import (
+	"net"
+
 	"github.com/valyala/fasthttp"
 	"golang.org/x/net/http/httpproxy"
 )
@@ -15,7 +17,10 @@ import (
 //	}
 func FasthttpSocksDialer(proxyAddr string) fasthttp.DialFunc {
 	d := Dialer{Config: httpproxy.Config{HTTPProxy: proxyAddr, HTTPSProxy: proxyAddr}}
-	dialFunc, _ := d.GetDialFunc(false)
+	dialFunc, err := d.GetDialFunc(false)
+	if err != nil {
+		return func(addr string) (net.Conn, error) { return nil, err }
+	}
 	return dialFunc
 }
 
@@ -29,6 +34,9 @@ func FasthttpSocksDialer(proxyAddr string) fasthttp.DialFunc {
 //	}
 func FasthttpSocksDialerDualStack(proxyAddr string) fasthttp.DialFunc {
 	d := Dialer{Config: httpproxy.Config{HTTPProxy: proxyAddr, HTTPSProxy: proxyAddr}, DialDualStack: true}
-	dialFunc, _ := d.GetDialFunc(false)
+	dialFunc, err := d.GetDialFunc(false)
+	if err != nil {
+		return func(addr string) (net.Conn, error) { return nil, err }
+	}
 	return dialFunc
 }
