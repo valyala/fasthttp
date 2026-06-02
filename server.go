@@ -1145,7 +1145,7 @@ func (ctx *RequestCtx) FormFile(key string) (*multipart.FileHeader, error) {
 		return nil, err
 	}
 	if mf.File == nil {
-		return nil, err
+		return nil, ErrMissingFile
 	}
 	fhh := mf.File[key]
 	if fhh == nil {
