@@ -3,8 +3,10 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -780,6 +782,42 @@ func runFSCompressSingleThread(t *testing.T, fs *FS) {
 	testFSCompress(t, h, "/fs.go")
 	testFSCompress(t, h, "/")
 	testFSCompress(t, h, "/README.md")
+}
+
+// errReadFile is an fs.File whose Read always fails, used to force the
+// compression step in compressFileNolock to return an error.
+type errReadFile struct {
+	fi iofs.FileInfo
+}
+
+func (f *errReadFile) Stat() (iofs.FileInfo, error) { return f.fi, nil }
+func (f *errReadFile) Read([]byte) (int, error)     { return 0, errors.New("forced read error") }
+func (f *errReadFile) Close() error                 { return nil }
+
+func TestFSCompressTmpFileRemovedOnError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	// Use this test file as the source for a valid fs.FileInfo.
+	fi, err := os.Stat("fs_test.go")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	h := &fsHandler{}
+	compressedFilePath := filepath.Join(dir, "out.gz")
+	tmpFilePath := compressedFilePath + ".tmp"
+
+	_, err = h.compressFileNolock(
+		&errReadFile{fi: fi}, fi, "fs_test.go", compressedFilePath, "gzip")
+	if err == nil {
+		t.Fatalf("expecting error when compression fails")
+	}
+
+	if _, err := os.Stat(tmpFilePath); !os.IsNotExist(err) {
+		t.Fatalf("temporary file %q must be removed on compression error, stat err: %v", tmpFilePath, err)
+	}
 }
 
 func testFSCompress(t *testing.T, h RequestHandler, filePath string) {
