@@ -271,3 +271,33 @@ func TestInmemoryListenerAddrCustom(t *testing.T) {
 	verifyAddr(t, c.LocalAddr(), clientAddr)
 	verifyAddr(t, c.RemoteAddr(), listenerAddr)
 }
+func TestInmemoryListener_Deadlock_Fix(t *testing.T) {
+	ln := NewInmemoryListener()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 1500; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = ln.Dial()
+		}()
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- ln.Close()
+	}()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Logf("Listener closed successfully (expected): %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ln.Close() timed out because the mutex is held by a blocked Dial goroutine")
+	}
+
+	wg.Wait()
+}

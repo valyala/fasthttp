@@ -19,6 +19,7 @@ type InmemoryListener struct {
 	addrLock     sync.RWMutex
 	lock         sync.Mutex
 	closed       bool
+	stopCh       chan struct{}
 }
 
 type acceptConn struct {
@@ -29,7 +30,8 @@ type acceptConn struct {
 // NewInmemoryListener returns new in-memory dialer<->net.Listener.
 func NewInmemoryListener() *InmemoryListener {
 	return &InmemoryListener{
-		conns: make(chan acceptConn, 1024),
+		conns:  make(chan acceptConn, 1024),
+		stopCh: make(chan struct{}),
 	}
 }
 
@@ -47,12 +49,22 @@ func (ln *InmemoryListener) SetLocalAddr(localAddr net.Addr) {
 //
 // Accept returns new connection per each Dial call.
 func (ln *InmemoryListener) Accept() (net.Conn, error) {
-	c, ok := <-ln.conns
-	if !ok {
+	ln.lock.Lock()
+	if ln.closed {
+		ln.lock.Unlock()
 		return nil, ErrInmemoryListenerClosed
 	}
-	close(c.accepted)
-	return c.conn, nil
+	ln.lock.Unlock()
+	select {
+	case c, ok := <-ln.conns:
+		if !ok {
+			return nil, ErrInmemoryListenerClosed
+		}
+		close(c.accepted)
+		return c.conn, nil
+	case <-ln.stopCh:
+		return nil, ErrInmemoryListenerClosed
+	}
 }
 
 // Close implements net.Listener's Close.
@@ -61,7 +73,8 @@ func (ln *InmemoryListener) Close() error {
 
 	ln.lock.Lock()
 	if !ln.closed {
-		close(ln.conns)
+		// close(ln.conns)
+		close(ln.stopCh)
 		ln.closed = true
 	} else {
 		err = ErrInmemoryListenerClosed
@@ -109,26 +122,36 @@ func (ln *InmemoryListener) Dial() (net.Conn, error) {
 // It is safe calling Dial from concurrently running goroutines.
 func (ln *InmemoryListener) DialWithLocalAddr(local net.Addr) (net.Conn, error) {
 	pc := NewPipeConns()
-
 	pc.SetAddresses(local, ln.Addr(), ln.Addr(), local)
 
 	cConn := pc.Conn1()
 	sConn := pc.Conn2()
+
 	ln.lock.Lock()
-	accepted := make(chan struct{})
-	if !ln.closed {
-		ln.conns <- acceptConn{conn: sConn, accepted: accepted}
-		// Wait until the connection has been accepted.
-		<-accepted
-	} else {
+	if ln.closed {
+		ln.lock.Unlock()
 		_ = sConn.Close()
 		_ = cConn.Close()
-		cConn = nil
+		return nil, ErrInmemoryListenerClosed
 	}
 	ln.lock.Unlock()
 
-	if cConn == nil {
+	accepted := make(chan struct{})
+	req := acceptConn{conn: sConn, accepted: accepted}
+
+	select {
+	case ln.conns <- req:
+		select {
+		case <-accepted:
+			return cConn, nil
+		case <-ln.stopCh:
+			_ = sConn.Close()
+			_ = cConn.Close()
+			return nil, ErrInmemoryListenerClosed
+		}
+	case <-ln.stopCh:
+		_ = sConn.Close()
+		_ = cConn.Close()
 		return nil, ErrInmemoryListenerClosed
 	}
-	return cConn, nil
 }
