@@ -1221,8 +1221,11 @@ func doRequestFollowRedirects(
 		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
 		ReleaseURI(redirectURI)
 
-		if string(req.Header.Method()) == "POST" && (statusCode == 301 || statusCode == 302) {
+		if string(req.Header.Method()) == MethodPost &&
+			(statusCode == StatusMovedPermanently || statusCode == StatusFound || statusCode == StatusSeeOther) {
 			req.Header.SetMethod(MethodGet)
+			req.ResetBody()
+			req.Header.SetContentLength(0)
 		}
 	}
 

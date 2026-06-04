@@ -1880,6 +1880,82 @@ func TestClientFollowRedirects(t *testing.T) {
 	ReleaseResponse(resp)
 }
 
+func TestClientPostRedirectSeeOtherUsesGetWithoutBody(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/start":
+				if string(ctx.Method()) != MethodPost {
+					ctx.Error(fmt.Sprintf("unexpected start method %q", ctx.Method()), StatusInternalServerError)
+					return
+				}
+				if string(ctx.PostBody()) != "payload" {
+					ctx.Error(fmt.Sprintf("unexpected start body %q", ctx.PostBody()), StatusInternalServerError)
+					return
+				}
+
+				u := ctx.URI()
+				u.Update("/target")
+				ctx.Redirect(u.String(), StatusSeeOther)
+			case "/target":
+				if string(ctx.Method()) != MethodGet {
+					ctx.Error(fmt.Sprintf("unexpected redirected method %q", ctx.Method()), StatusInternalServerError)
+					return
+				}
+				if len(ctx.Request.Body()) != 0 {
+					ctx.Error(fmt.Sprintf("unexpected redirected body %q", ctx.Request.Body()), StatusInternalServerError)
+					return
+				}
+
+				ctx.Success("text/plain", []byte("ok"))
+			default:
+				ctx.NotFound()
+			}
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	serverStopCh := make(chan struct{})
+	defer func() {
+		_ = ln.Close()
+		<-serverStopCh
+	}()
+
+	go func() {
+		if err := s.Serve(ln); err != nil && err != fasthttputil.ErrInmemoryListenerClosed {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &HostClient{
+		Addr: "xxx",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	req := AcquireRequest()
+	resp := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(resp)
+
+	req.SetRequestURI("http://xxx/start")
+	req.Header.SetMethod(MethodPost)
+	req.SetBodyString("payload")
+
+	if err := c.DoRedirects(req, resp, 16); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusCode := resp.StatusCode(); statusCode != StatusOK {
+		t.Fatalf("unexpected status code: %d, body=%q", statusCode, resp.Body())
+	}
+	if body := string(resp.Body()); body != "ok" {
+		t.Fatalf("unexpected response %q. Expecting %q", body, "ok")
+	}
+}
+
 func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
 	t.Parallel()
 
