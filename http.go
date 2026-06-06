@@ -12,21 +12,22 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/valyala/bytebufferpool"
 )
 
 var (
-	requestBodyPoolSizeLimit  = -1
-	responseBodyPoolSizeLimit = -1
+	requestBodyPoolSizeLimit  int64 = -1
+	responseBodyPoolSizeLimit int64 = -1
 )
 
 // SetBodySizePoolLimit set the max body size for bodies to be returned to the pool.
 // If the body size is larger it will be released instead of put back into the pool for reuse.
 func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
-	requestBodyPoolSizeLimit = reqBodyLimit
-	responseBodyPoolSizeLimit = respBodyLimit
+	atomic.StoreInt64(&requestBodyPoolSizeLimit, int64(reqBodyLimit))
+	atomic.StoreInt64(&responseBodyPoolSizeLimit, int64(respBodyLimit))
 }
 
 // Request represents HTTP request.
@@ -1254,8 +1255,8 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 // Reset clears request contents.
 func (req *Request) Reset() {
 	req.userValues.Reset() // it should be at the top, since some values might implement io.Closer interface
-	if requestBodyPoolSizeLimit >= 0 && req.body != nil {
-		req.ReleaseBody(requestBodyPoolSizeLimit)
+	if bodyPoolSizeLimit := int(atomic.LoadInt64(&requestBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && req.body != nil {
+		req.ReleaseBody(bodyPoolSizeLimit)
 	}
 	req.Header.Reset()
 	req.resetSkipHeader()
@@ -1288,8 +1289,8 @@ func (req *Request) RemoveMultipartFormFiles() {
 
 // Reset clears response contents.
 func (resp *Response) Reset() {
-	if responseBodyPoolSizeLimit >= 0 && resp.body != nil {
-		resp.ReleaseBody(responseBodyPoolSizeLimit)
+	if bodyPoolSizeLimit := int(atomic.LoadInt64(&responseBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && resp.body != nil {
+		resp.ReleaseBody(bodyPoolSizeLimit)
 	}
 	resp.resetSkipHeader()
 	resp.Header.Reset()
