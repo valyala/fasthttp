@@ -1171,6 +1171,33 @@ func TestServerTLS(t *testing.T) {
 	}
 }
 
+func TestServerAppendCertEmbedConcurrent(t *testing.T) {
+	t.Parallel()
+
+	certData, keyData, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var s Server
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			if err := s.AppendCertEmbed(certData, keyData); err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+
+	s.mu.Lock()
+	certs := len(s.TLSConfig.Certificates)
+	s.mu.Unlock()
+	if certs != 10 {
+		t.Fatalf("unexpected certificate count: %d. Expecting 10", certs)
+	}
+}
+
 func TestServerTLSReadTimeout(t *testing.T) {
 	t.Parallel()
 
