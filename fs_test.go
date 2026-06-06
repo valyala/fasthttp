@@ -772,6 +772,106 @@ func TestFSCompressSingleThreadSkipCache(t *testing.T) {
 	})
 }
 
+func TestFileLockRefCountUsesPathLock(t *testing.T) {
+	path := "/tmp/" + t.Name()
+	otherPath := path + "-other"
+	t.Cleanup(func() {
+		filesLockMu.Lock()
+		delete(filesLockMap, path)
+		delete(filesLockMap, otherPath)
+		filesLockMu.Unlock()
+	})
+
+	firstLock := acquireFileLock(path)
+	secondLock := acquireFileLock(path)
+	if firstLock != secondLock {
+		t.Fatalf("same path must return same lock")
+	}
+
+	otherLock := acquireFileLock(otherPath)
+	if firstLock == otherLock {
+		t.Fatalf("different paths must not share locks")
+	}
+
+	releaseFileLock(path, firstLock)
+	filesLockMu.Lock()
+	remainingRefs := 0
+	if lock := filesLockMap[path]; lock != nil {
+		remainingRefs = lock.refs
+	}
+	filesLockMu.Unlock()
+	if remainingRefs != 1 {
+		t.Fatalf("unexpected remaining refs %d. Expecting 1", remainingRefs)
+	}
+
+	releaseFileLock(path, secondLock)
+	filesLockMu.Lock()
+	_, ok := filesLockMap[path]
+	filesLockMu.Unlock()
+	if ok {
+		t.Fatalf("lock was not removed")
+	}
+
+	releaseFileLock(otherPath, otherLock)
+	filesLockMu.Lock()
+	_, ok = filesLockMap[otherPath]
+	filesLockMu.Unlock()
+	if ok {
+		t.Fatalf("other lock was not removed")
+	}
+}
+
+func TestFileLockWaiterKeepsEntry(t *testing.T) {
+	path := "/tmp/" + t.Name()
+	t.Cleanup(func() {
+		filesLockMu.Lock()
+		delete(filesLockMap, path)
+		filesLockMu.Unlock()
+	})
+
+	firstLock := acquireFileLock(path)
+	firstLock.mu.Lock()
+	waiterReady := make(chan *fileLock, 1)
+	waiterDone := make(chan struct{})
+	go func() {
+		waitingLock := acquireFileLock(path)
+		waiterReady <- waitingLock
+		waitingLock.mu.Lock()
+		defer close(waiterDone)
+		defer releaseFileLock(path, waitingLock)
+		defer waitingLock.mu.Unlock()
+	}()
+
+	waitingLock := <-waiterReady
+	filesLockMu.Lock()
+	currentLock := filesLockMap[path]
+	currentRefs := 0
+	if currentLock != nil {
+		currentRefs = currentLock.refs
+	}
+	filesLockMu.Unlock()
+	if waitingLock != firstLock {
+		t.Errorf("waiter used different lock")
+	}
+	if currentLock != firstLock {
+		t.Errorf("map entry changed while lock had a waiter")
+	}
+	if currentRefs != 2 {
+		t.Errorf("unexpected refs %d. Expecting 2", currentRefs)
+	}
+
+	firstLock.mu.Unlock()
+	releaseFileLock(path, firstLock)
+	<-waiterDone
+
+	filesLockMu.Lock()
+	_, ok := filesLockMap[path]
+	filesLockMu.Unlock()
+	if ok {
+		t.Fatalf("lock was not removed")
+	}
+}
+
 func runFSCompressSingleThread(t *testing.T, fs *FS) {
 	t.Helper()
 

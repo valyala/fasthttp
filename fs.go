@@ -1682,12 +1682,13 @@ func (h *fsHandler) compressAndOpenFSFile(filePath, fileEncoding string) (*fsFil
 		return nil, fmt.Errorf("cannot determine absolute path for %q: %v", compressedFilePath, err)
 	}
 
-	flock := getFileLock(absPath)
-	flock.Lock()
-	ff, err := h.compressFileNolock(f, fileInfo, filePath, compressedFilePath, fileEncoding)
-	flock.Unlock()
-
-	return ff, err
+	flock := acquireFileLock(absPath)
+	flock.mu.Lock()
+	defer func() {
+		flock.mu.Unlock()
+		releaseFileLock(absPath, flock)
+	}()
+	return h.compressFileNolock(f, fileInfo, filePath, compressedFilePath, fileEncoding)
 }
 
 func (h *fsHandler) compressFileNolock(
@@ -2048,12 +2049,36 @@ func fsModTime(t time.Time) time.Time {
 	return t.In(time.UTC).Truncate(time.Second)
 }
 
-var filesLockMap sync.Map
+var (
+	filesLockMu  sync.Mutex
+	filesLockMap = make(map[string]*fileLock)
+)
 
-func getFileLock(absPath string) *sync.Mutex {
-	v, _ := filesLockMap.LoadOrStore(absPath, &sync.Mutex{})
-	filelock := v.(*sync.Mutex)
-	return filelock
+type fileLock struct {
+	mu sync.Mutex
+	// refs counts goroutines that hold or are waiting on mu.
+	refs int
+}
+
+func acquireFileLock(absPath string) *fileLock {
+	filesLockMu.Lock()
+	flock := filesLockMap[absPath]
+	if flock == nil {
+		flock = &fileLock{}
+		filesLockMap[absPath] = flock
+	}
+	flock.refs++
+	filesLockMu.Unlock()
+	return flock
+}
+
+func releaseFileLock(absPath string, flock *fileLock) {
+	filesLockMu.Lock()
+	flock.refs--
+	if flock.refs == 0 && filesLockMap[absPath] == flock {
+		delete(filesLockMap, absPath)
+	}
+	filesLockMu.Unlock()
 }
 
 var _ fs.FS = (*osFS)(nil)
