@@ -3885,6 +3885,72 @@ func TestTCPDialerFlushDNSCache(t *testing.T) {
 	}
 }
 
+func TestTCPDialerDNSCleanerStopsAndRestarts(t *testing.T) {
+	interval := atomic.LoadInt64(&tcpAddrsCleanInterval)
+	atomic.StoreInt64(&tcpAddrsCleanInterval, int64(time.Millisecond))
+	defer func() {
+		atomic.StoreInt64(&tcpAddrsCleanInterval, interval)
+	}()
+
+	dialer := &TCPDialer{
+		DNSCacheDuration: time.Hour,
+		Resolver: &staticResolver{
+			addrs: []net.IPAddr{{IP: net.IPv4(127, 0, 0, 1)}},
+		},
+	}
+
+	dialForDNSCache(t, dialer)
+	waitForTCPDialerCleanerState(t, dialer, true)
+
+	dialer.FlushDNSCache()
+	waitForTCPDialerCleanerState(t, dialer, false)
+
+	dialForDNSCache(t, dialer)
+	waitForTCPDialerCleanerState(t, dialer, true)
+
+	dialer.FlushDNSCache()
+	waitForTCPDialerCleanerState(t, dialer, false)
+}
+
+func dialForDNSCache(t *testing.T, dialer *TCPDialer) {
+	t.Helper()
+
+	conn, err := dialer.DialTimeout("example.com:1", 50*time.Millisecond)
+	if conn != nil {
+		conn.Close()
+	}
+	if err == nil {
+		return
+	}
+
+	var dialErr *ErrDialWithUpstream
+	if !errors.As(err, &dialErr) {
+		t.Fatalf("unexpected dial error: %v", err)
+	}
+}
+
+func waitForTCPDialerCleanerState(t *testing.T, dialer *TCPDialer, running bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		isRunning := dialer.cleanerRunning.Load()
+		if isRunning == running {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("unexpected TCPDialer cleaner state: running=%v, want %v", dialer.cleanerRunning.Load(), running)
+}
+
+type staticResolver struct {
+	addrs []net.IPAddr
+}
+
+func (r *staticResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return r.addrs, nil
+}
+
 // Simple test resolver that implements the Resolver interface.
 type testResolver struct {
 	resolver          *net.Resolver

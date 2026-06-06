@@ -146,7 +146,8 @@ type TCPDialer struct {
 
 	concurrencyCh chan struct{}
 
-	tcpAddrsMap sync.Map
+	tcpAddrsMap    sync.Map
+	cleanerRunning atomic.Bool
 
 	// Concurrency controls the maximum number of concurrent Dials
 	// that can be performed using this object.
@@ -296,10 +297,6 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 		if d.DNSCacheDuration == 0 {
 			d.DNSCacheDuration = DefaultDNSCacheDuration
 		}
-
-		if !d.DisableDNSResolution {
-			go d.tcpAddrsClean()
-		}
 	})
 	deadline := time.Now().Add(timeout)
 	network := "tcp4"
@@ -313,6 +310,7 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 	if err != nil {
 		return nil, err
 	}
+	d.startTCPAddrsClean()
 	var conn net.Conn
 	n := uint32(len(addrs)) // #nosec G115
 	for range n {
@@ -424,22 +422,57 @@ const DefaultDNSCacheDuration = time.Minute
 
 // cleanExpiredDNSEntries removes expired DNS cache entries based on DNSCacheDuration.
 // This is the core cleanup logic used by both the background cleaner and manual cleanup.
-func (d *TCPDialer) cleanExpiredDNSEntries() {
+func (d *TCPDialer) cleanExpiredDNSEntries() bool {
 	expireDuration := 2 * d.DNSCacheDuration
 
 	t := time.Now()
+	hasEntries := false
 	d.tcpAddrsMap.Range(func(k, v any) bool {
 		if e, ok := v.(*tcpAddrEntry); ok && t.Sub(e.resolveTime) > expireDuration {
 			d.tcpAddrsMap.Delete(k)
+		} else {
+			hasEntries = true
 		}
 		return true
 	})
+	return hasEntries
 }
 
+func (d *TCPDialer) startTCPAddrsClean() {
+	if d.cleanerRunning.CompareAndSwap(false, true) {
+		go d.tcpAddrsClean()
+	}
+}
+
+func (d *TCPDialer) hasTCPAddrsEntries() bool {
+	hasEntries := false
+	d.tcpAddrsMap.Range(func(k, v any) bool {
+		hasEntries = true
+		return false
+	})
+	return hasEntries
+}
+
+var tcpAddrsCleanInterval = int64(time.Second)
+
 func (d *TCPDialer) tcpAddrsClean() {
-	for {
-		time.Sleep(time.Second)
-		d.cleanExpiredDNSEntries()
+	t := time.NewTicker(time.Duration(atomic.LoadInt64(&tcpAddrsCleanInterval)))
+	defer t.Stop()
+
+	for range t.C {
+		if !d.cleanExpiredDNSEntries() {
+			d.cleanerRunning.Store(false)
+			// A dial may store a new DNS entry while cleanerRunning is still
+			// true and skip starting a cleaner. Reclaim ownership in that case.
+			if !d.hasTCPAddrsEntries() {
+				return
+			}
+			if d.cleanerRunning.CompareAndSwap(false, true) {
+				continue
+			}
+			// Another dial already claimed ownership and started a cleaner.
+			return
+		}
 	}
 }
 
