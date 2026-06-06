@@ -10,10 +10,18 @@ import (
 
 func newSocketCloexec(domain, typ, proto int) (int, error) {
 	fd, err := unix.Socket(domain, typ, proto)
-	_, err = unix.FcntlInt(uintptr(fd), unix.F_SETFD, unix.FD_CLOEXEC)
-	_, err = unix.FcntlInt(uintptr(fd), unix.F_SETFL, unix.O_NONBLOCK)
-	if err == nil {
-		return fd, nil
+	if err != nil {
+		return -1, fmt.Errorf("cannot create listening socket: %w", err)
 	}
-	return -1, fmt.Errorf("cannot create listening unblocked socket: %s", err)
+	_, err = unix.FcntlInt(uintptr(fd), unix.F_SETFD, unix.FD_CLOEXEC)
+	if err != nil {
+		unix.Close(fd) //nolint:errcheck
+		return -1, fmt.Errorf("cannot mark listening socket close-on-exec: %w", err)
+	}
+	_, err = unix.FcntlInt(uintptr(fd), unix.F_SETFL, unix.O_NONBLOCK)
+	if err != nil {
+		unix.Close(fd) //nolint:errcheck
+		return -1, fmt.Errorf("cannot mark listening socket nonblocking: %w", err)
+	}
+	return fd, nil
 }
