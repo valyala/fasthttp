@@ -2154,19 +2154,16 @@ func (s *Server) ServeConn(c net.Conn) error {
 		c = pic
 	}
 
-	n := int(s.concurrency.Add(1)) // #nosec G115
-	if n > s.getConcurrency() {
-		s.concurrency.Add(^uint32(0))
+	if !s.tryAcquireConcurrency() {
 		s.writeFastError(c, StatusServiceUnavailable, "The connection cannot be served because Server.Concurrency limit exceeded")
 		c.Close()
 		return ErrConcurrencyLimit
 	}
+	defer s.releaseConcurrency()
 
 	s.open.Add(1)
 
-	err := s.serveConn(c)
-
-	s.concurrency.Add(^uint32(0))
+	err := s.serveConnCounted(c, false)
 
 	if err != errHijacked {
 		errc := c.Close()
@@ -2179,6 +2176,19 @@ func (s *Server) ServeConn(c net.Conn) error {
 		s.setState(c, StateHijacked)
 	}
 	return err
+}
+
+func (s *Server) tryAcquireConcurrency() bool {
+	n := int(s.concurrency.Add(1)) // #nosec G115
+	if n <= s.getConcurrency() {
+		return true
+	}
+	s.releaseConcurrency()
+	return false
+}
+
+func (s *Server) releaseConcurrency() {
+	s.concurrency.Add(^uint32(0))
 }
 
 var errHijacked = errors.New("connection has been hijacked")
@@ -2240,14 +2250,22 @@ func (s *Server) idleTimeout() time.Duration {
 	return s.ReadTimeout
 }
 
-func (s *Server) serveConnCleanup() {
+func (s *Server) serveConnCleanup(countConcurrency bool) {
 	s.open.Add(-1)
-	s.concurrency.Add(^uint32(0))
+	if countConcurrency {
+		s.releaseConcurrency()
+	}
 }
 
 func (s *Server) serveConn(c net.Conn) error {
-	defer s.serveConnCleanup()
-	s.concurrency.Add(1)
+	return s.serveConnCounted(c, true)
+}
+
+func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
+	defer s.serveConnCleanup(countConcurrency)
+	if countConcurrency {
+		s.concurrency.Add(1)
+	}
 
 	proto, err := s.getNextProto(c)
 	if err != nil {
