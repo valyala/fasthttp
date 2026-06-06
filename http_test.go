@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -3374,6 +3375,171 @@ func TestResponseBodyStream(t *testing.T) {
 			}
 		})
 	})
+}
+
+func TestResponseCompressedBodyStreamCloseClosesOriginal(t *testing.T) {
+	t.Parallel()
+
+	bodyStream := &blockingCloseReader{
+		closed: make(chan struct{}),
+	}
+
+	var resp Response
+	resp.Header.SetContentType("text/plain")
+	resp.SetBodyStream(bodyStream, -1)
+	resp.gzipBody(CompressDefaultCompression)
+
+	if err := resp.CloseBodyStream(); err != nil {
+		t.Fatalf("unexpected close error: %v", err)
+	}
+
+	select {
+	case <-bodyStream.closed:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for original body stream close")
+	}
+}
+
+func TestResponseCompressedBodyStreamCloseKeepsWriteError(t *testing.T) {
+	t.Parallel()
+
+	readCh := make(chan struct{})
+	closeErrCh := make(chan error, 1)
+	bodyStream := newCloseReaderWithError(&gatedReader{
+		readCh: readCh,
+		data:   []byte(strings.Repeat("body", 1024)),
+	}, func(err error) error {
+		closeErrCh <- err
+		return nil
+	})
+
+	var resp Response
+	resp.Header.SetContentType("text/plain")
+	resp.SetBodyStream(bodyStream, -1)
+	resp.gzipBody(CompressDefaultCompression)
+
+	if err := resp.CloseBodyStream(); err != nil {
+		t.Fatalf("unexpected close error: %v", err)
+	}
+	close(readCh)
+
+	select {
+	case err := <-closeErrCh:
+		if err == nil {
+			t.Fatalf("unexpected nil close error")
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for original body stream close")
+	}
+}
+
+func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadDone(t *testing.T) {
+	t.Parallel()
+
+	reader := &blockingOnceReader{
+		reading: make(chan struct{}),
+		unblock: make(chan struct{}),
+	}
+
+	var bodyBuf bytebufferpool.ByteBuffer
+	rs := acquireRequestStream(&bodyBuf, bufio.NewReader(reader), fixedRequestStreamHeader{contentLength: 1})
+
+	var resp Response
+	resp.Header.SetContentType("text/plain")
+	resp.SetBodyStream(rs, -1)
+	resp.gzipBody(CompressDefaultCompression)
+	compressedStream := resp.bodyStream.(*compressedBodyStream)
+
+	select {
+	case <-reader.reading:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for request stream read")
+	}
+
+	if err := resp.CloseBodyStream(); err != nil {
+		t.Fatalf("unexpected close error: %v", err)
+	}
+	if rs.reader == nil {
+		t.Fatalf("request stream was released while compression was still reading it")
+	}
+
+	close(reader.unblock)
+	select {
+	case <-compressedStream.done:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for compressed stream cleanup")
+	}
+	if rs.reader != nil {
+		t.Fatalf("request stream was not released after compression finished")
+	}
+}
+
+type blockingCloseReader struct {
+	closeOnce sync.Once
+	closed    chan struct{}
+}
+
+func (r *blockingCloseReader) Read(p []byte) (int, error) {
+	<-r.closed
+	return 0, io.EOF
+}
+
+func (r *blockingCloseReader) Close() error {
+	r.closeOnce.Do(func() {
+		close(r.closed)
+	})
+	return nil
+}
+
+type gatedReader struct {
+	readCh <-chan struct{}
+	data   []byte
+	done   bool
+}
+
+func (r *gatedReader) Read(p []byte) (int, error) {
+	<-r.readCh
+	if r.done {
+		return 0, io.EOF
+	}
+	r.done = true
+	return copy(p, r.data), nil
+}
+
+type fixedRequestStreamHeader struct {
+	contentLength int
+}
+
+func (h fixedRequestStreamHeader) ContentLength() int {
+	return h.contentLength
+}
+
+func (fixedRequestStreamHeader) ReadTrailer(r *bufio.Reader) error {
+	return nil
+}
+
+type blockingOnceReader struct {
+	reading   chan struct{}
+	unblock   chan struct{}
+	readOnce  sync.Once
+	valueOnce sync.Once
+}
+
+func (r *blockingOnceReader) Read(p []byte) (int, error) {
+	r.readOnce.Do(func() {
+		close(r.reading)
+	})
+	<-r.unblock
+
+	wrote := false
+	r.valueOnce.Do(func() {
+		p[0] = 'x'
+		wrote = true
+	})
+	if !wrote {
+		return 0, io.EOF
+	}
+	return 1, nil
 }
 
 func TestRequestMultipartFormPipeEmptyFormField(t *testing.T) {
