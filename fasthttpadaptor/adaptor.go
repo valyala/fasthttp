@@ -174,6 +174,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			close(w.streamReady)
 
 		case modeHijacked:
+			releaseWriter(w)
 			return
 
 		case modePanicked:
@@ -260,6 +261,12 @@ func (w *writer) Write(p []byte) (int, error) {
 	}
 
 	w.mu.Lock()
+	select {
+	case <-w.streamReady:
+		w.mu.Unlock()
+		return w.pw.Write(p)
+	default:
+	}
 	defer w.mu.Unlock()
 
 	if w.responseBody == nil {

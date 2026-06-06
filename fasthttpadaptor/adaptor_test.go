@@ -703,3 +703,49 @@ func TestNewFastHTTPHandlerPanic(t *testing.T) {
 
 	t.Error("expected panic, but it didn't happen")
 }
+
+func TestWriterWriteRechecksStreamingReadyAfterLock(t *testing.T) {
+	var ctx fasthttp.RequestCtx
+	w := acquireWriter(&ctx)
+	defer releaseWriter(w)
+
+	w.mu.Lock()
+	writeCh := make(chan error, 1)
+	go func() {
+		_, err := w.Write([]byte("late"))
+		writeCh <- err
+	}()
+
+	time.Sleep(10 * time.Millisecond)
+	close(w.streamReady)
+
+	readCh := make(chan []byte, 1)
+	go func() {
+		buf := make([]byte, len("late"))
+		if _, err := io.ReadFull(w.pr, buf); err != nil {
+			readCh <- nil
+			return
+		}
+		readCh <- buf
+	}()
+
+	w.mu.Unlock()
+
+	select {
+	case body := <-readCh:
+		if string(body) != "late" {
+			t.Fatalf("unexpected streamed body %q. Expecting %q", body, "late")
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for streamed write")
+	}
+
+	select {
+	case err := <-writeCh:
+		if err != nil {
+			t.Fatalf("unexpected write error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for Write")
+	}
+}
