@@ -3473,6 +3473,59 @@ func TestTimeoutHandlerTimeoutReuse(t *testing.T) {
 	}
 }
 
+func TestServerConnStateSeesIdleMarkers(t *testing.T) {
+	t.Parallel()
+
+	activeCh := make(chan int64, 1)
+	idleCh := make(chan int64, 1)
+
+	var s *Server
+	s = &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Success("text/plain", []byte("OK"))
+		},
+		ConnState: func(c net.Conn, state ConnState) {
+			switch state {
+			case StateActive:
+				s.idleConnsMu.Lock()
+				idleConnTime := s.idleConns[c]
+				activeCh <- idleConnTime.Load()
+				s.idleConnsMu.Unlock()
+			case StateIdle:
+				s.idleConnsMu.Lock()
+				idleConnTime := s.idleConns[c]
+				idleCh <- idleConnTime.Load()
+				s.idleConnsMu.Unlock()
+			}
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from ServeConn: %v", err)
+	}
+
+	select {
+	case active := <-activeCh:
+		if active != 0 {
+			t.Fatalf("unexpected active marker: %d. Expecting 0", active)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for active state")
+	}
+
+	select {
+	case idle := <-idleCh:
+		if idle == 0 {
+			t.Fatalf("unexpected idle marker: %d. Expecting non-zero", idle)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for idle state")
+	}
+}
+
 func TestServerGetOnly(t *testing.T) {
 	t.Parallel()
 

@@ -2383,9 +2383,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
 		if err == nil {
-			s.setState(c, StateActive)
-
 			idleConnTime.Store(0)
+			s.setState(c, StateActive)
 
 			if s.ReadTimeout > 0 {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
@@ -2677,6 +2676,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.Request.bodyStream = nil
 		}
 
+		idleConnTime.Store(time.Now().Unix())
 		s.setState(c, StateIdle)
 		ctx.Request.Reset()
 		ctx.Response.Reset()
@@ -2685,8 +2685,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			err = nil
 			break
 		}
-
-		idleConnTime.Store(time.Now().Unix())
 	}
 
 	if br != nil {
