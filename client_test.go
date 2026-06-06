@@ -404,6 +404,41 @@ func testPipelineClientDoOnce(t *testing.T, c *PipelineClient) {
 	}
 }
 
+func TestPipelineClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
+	t.Parallel()
+
+	c := &PipelineClient{
+		Addr:  "::1",
+		IsTLS: true,
+		Dial: func(addr string) (net.Conn, error) {
+			t.Fatalf("Dial must not be called for malformed TLS addr %q", addr)
+			return nil, errors.New("unexpected dial")
+		},
+		Logger: &testLogger{},
+	}
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("https://foobar/baz")
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.Do(&req, &resp)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatalf("expected error")
+		}
+		if !strings.Contains(err.Error(), "cannot determine TLS server name") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for PipelineClient.Do")
+	}
+}
+
 func TestClientInvalidURI(t *testing.T) {
 	t.Parallel()
 
@@ -2679,6 +2714,65 @@ func TestClientHTTPSInvalidServerName(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expecting TLS error")
 		}
+	}
+}
+
+func TestHostClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
+	t.Parallel()
+
+	c := &HostClient{
+		Addr:  "::1",
+		IsTLS: true,
+		Dial: func(addr string) (net.Conn, error) {
+			t.Fatalf("Dial must not be called for malformed TLS addr %q", addr)
+			return nil, errors.New("unexpected dial")
+		},
+	}
+
+	_, err := c.dialHostHard(time.Second)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot determine TLS server name") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHostClientTLSMalformedAddrAllowsExplicitServerName(t *testing.T) {
+	t.Parallel()
+
+	dialErr := errors.New("dial called")
+	c := &HostClient{
+		Addr:      "::1",
+		IsTLS:     true,
+		TLSConfig: &tls.Config{ServerName: "localhost"},
+		Dial: func(addr string) (net.Conn, error) {
+			return nil, dialErr
+		},
+	}
+
+	_, err := c.dialHostHard(time.Second)
+	if !errors.Is(err, dialErr) {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, dialErr)
+	}
+}
+
+func TestHostClientTLSMalformedAddrAllowsExplicitInsecureSkipVerify(t *testing.T) {
+	t.Parallel()
+
+	dialErr := errors.New("dial called")
+	c := &HostClient{
+		Addr:      "::1",
+		IsTLS:     true,
+		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+		Dial: func(addr string) (net.Conn, error) {
+			return nil, dialErr
+		},
+	}
+
+	_, err := c.dialHostHard(time.Second)
+	if !errors.Is(err, dialErr) {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, dialErr)
 	}
 }
 
