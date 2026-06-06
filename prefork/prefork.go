@@ -20,7 +20,8 @@ const (
 )
 
 var (
-	defaultLogger = Logger(log.New(os.Stderr, "", log.LstdFlags))
+	defaultLogger   = Logger(log.New(os.Stderr, "", log.LstdFlags))
+	tcpListenerFile = (*net.TCPListener).File
 	// ErrOverRecovery is returned when the times of starting over child prefork processes exceed
 	// the threshold.
 	ErrOverRecovery = errors.New("exceeding the value of RecoverThreshold")
@@ -223,8 +224,10 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 
 	p.ln = tcplistener
 
-	fl, err := tcplistener.File()
+	fl, err := tcpListenerFile(tcplistener)
 	if err != nil {
+		_ = tcplistener.Close()
+		p.ln = nil
 		return err
 	}
 
@@ -280,6 +283,11 @@ func (p *Prefork) prefork(addr string) (err error) {
 
 		// defer for closing the net.Listener opened by setTCPListenerFiles.
 		defer func() {
+			for _, f := range p.files {
+				_ = f.Close()
+			}
+			p.files = nil
+
 			e := p.ln.Close()
 			if err == nil {
 				err = e
