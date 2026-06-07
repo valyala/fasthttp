@@ -3350,6 +3350,73 @@ func TestResponseBodyStream(t *testing.T) {
 			}
 		})
 
+		t.Run("direct close with error releases client stream", func(t *testing.T) {
+			t.Parallel()
+
+			client := Client{StreamResponseBody: true, MaxConnsPerHost: 1}
+			resp := AcquireResponse()
+			defer ReleaseResponse(resp)
+			request := AcquireRequest()
+			defer ReleaseRequest(request)
+			request.SetRequestURI(server.URL + "?chunked=true")
+			if err := client.Do(request, resp); err != nil {
+				t.Fatal(err)
+			}
+			stream, ok := resp.BodyStream().(ReadCloserWithError)
+			if !ok {
+				t.Fatalf("unexpected body stream type %T", resp.BodyStream())
+			}
+			if err := stream.CloseWithError(errors.New("client closed")); err != nil {
+				t.Fatalf("close body stream err: %v", err)
+			}
+			if err := stream.CloseWithError(errors.New("client closed again")); err != nil {
+				t.Fatalf("close body stream twice err: %v", err)
+			}
+
+			resp2 := AcquireResponse()
+			defer ReleaseResponse(resp2)
+			request2 := AcquireRequest()
+			defer ReleaseRequest(request2)
+			request2.SetRequestURI(server.URL)
+			if err := client.Do(request2, resp2); err != nil {
+				t.Fatalf("second request err: %v", err)
+			}
+		})
+
+		t.Run("compressed write releases client stream", func(t *testing.T) {
+			t.Parallel()
+
+			client := Client{StreamResponseBody: true, MaxConnsPerHost: 1}
+
+			resp := AcquireResponse()
+			defer ReleaseResponse(resp)
+			request := AcquireRequest()
+			defer ReleaseRequest(request)
+
+			request.SetRequestURI(server.URL)
+			if err := client.Do(request, resp); err != nil {
+				t.Fatal(err)
+			}
+
+			bw := bufio.NewWriter(io.Discard)
+			if err := resp.WriteGzip(bw); err != nil {
+				t.Fatalf("write gzip response err: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("flush gzip response err: %v", err)
+			}
+
+			resp2 := AcquireResponse()
+			defer ReleaseResponse(resp2)
+			request2 := AcquireRequest()
+			defer ReleaseRequest(request2)
+
+			request2.SetRequestURI(server.URL)
+			if err := client.Do(request2, resp2); err != nil {
+				t.Fatalf("second request err: %v", err)
+			}
+		})
+
 		t.Run("identity", func(t *testing.T) {
 			t.Parallel()
 

@@ -3258,7 +3258,11 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
 	if customStreamBody && resp.bodyStream != nil {
 		rbs := resp.bodyStream
+		var closed atomic.Bool
 		resp.bodyStream = newCloseReaderWithError(rbs, func(wErr error) error {
+			if !closed.CompareAndSwap(false, true) {
+				return nil
+			}
 			hc.ReleaseReader(br)
 			if r, ok := rbs.(*requestStream); ok {
 				releaseRequestStream(r)
