@@ -56,6 +56,46 @@ func TestFSServeFileHead(t *testing.T) {
 	}
 }
 
+func TestServeFSDoesNotLeakCacheCleaner(t *testing.T) {
+	testFS := fstest.MapFS{
+		"index.txt": {Data: []byte("body")},
+	}
+
+	runtime.GC()
+	before := runtime.NumGoroutine()
+
+	const calls = 25
+	for range calls {
+		var ctx RequestCtx
+		var req Request
+		req.SetRequestURI("http://foobar.com/original")
+		ctx.Init(&req, nil, TestLogger{t})
+
+		ServeFS(&ctx, testFS, "index.txt")
+		if ctx.Response.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code %d. expecting %d", ctx.Response.StatusCode(), StatusOK)
+		}
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		runtime.Gosched()
+
+		after := runtime.NumGoroutine()
+		if leaked := after - before; leaked <= 3 {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	after := runtime.NumGoroutine()
+	if leaked := after - before; leaked > 3 {
+		t.Fatalf("ServeFS left %d persistent goroutines; expected no cache cleaner goroutine leak", leaked)
+	}
+}
+
 func TestServeFSLiteral(t *testing.T) {
 	t.Parallel()
 

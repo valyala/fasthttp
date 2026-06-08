@@ -39,6 +39,10 @@ const (
 var (
 	defaultLogger = Logger(log.New(os.Stderr, "", log.LstdFlags))
 
+	// tcpListenerFile is a hook for (*net.TCPListener).File so tests can
+	// inject failure paths without binding a real socket.
+	tcpListenerFile = (*net.TCPListener).File
+
 	// ErrOverRecovery is returned when child prefork process restarts exceed
 	// the value of RecoverThreshold.
 	ErrOverRecovery = errors.New("exceeding the value of RecoverThreshold")
@@ -301,7 +305,7 @@ func (p *Prefork) setTCPListenerFiles(addr string) error {
 		return fmt.Errorf("prefork: listen tcp %s: %w", addr, err)
 	}
 
-	listenerFile, err := tcpListener.File()
+	listenerFile, err := tcpListenerFile(tcpListener)
 	if err != nil {
 		// Close the bound listener so we don't leak the socket/fd when
 		// File() fails. p.ln is intentionally only assigned after this

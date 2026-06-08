@@ -94,6 +94,96 @@ func Test_setTCPListenerFiles(t *testing.T) {
 	}
 }
 
+// Test_setTCPListenerFilesClosesListenerOnFileError verifies that
+// setTCPListenerFiles closes the bound listener and leaves Prefork.files nil
+// when the duplicate-fd step fails. Injects the failure through tcpListenerFile
+// so no real socket is leaked.
+func Test_setTCPListenerFilesClosesListenerOnFileError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
+	fileErr := errors.New("file error")
+	oldTCPListenerFile := tcpListenerFile
+	tcpListenerFile = func(*net.TCPListener) (*os.File, error) {
+		return nil, fileErr
+	}
+	t.Cleanup(func() {
+		tcpListenerFile = oldTCPListenerFile
+	})
+
+	p := &Prefork{}
+	err := p.setTCPListenerFiles("127.0.0.1:0")
+	if !errors.Is(err, fileErr) {
+		t.Fatalf("Unexpected error: %v. Expecting %v", err, fileErr)
+	}
+	if p.files != nil {
+		t.Fatalf("Prefork.files = %v, want nil", p.files)
+	}
+	if p.ln == nil {
+		return
+	}
+
+	closeErrCh := make(chan error, 1)
+	go func() {
+		closeErrCh <- p.ln.Close()
+	}()
+	select {
+	case err := <-closeErrCh:
+		if err == nil {
+			t.Fatal("listener remained open after File error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout closing listener")
+	}
+}
+
+// Test_preforkClosesParentListenerFiles asserts the master closes the duped
+// listener fd it passed to the child after prefork() returns, so the parent
+// process does not leak file descriptors across restarts.
+func Test_preforkClosesParentListenerFiles(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
+	prev := runtime.GOMAXPROCS(1)
+	t.Cleanup(func() {
+		runtime.GOMAXPROCS(prev)
+	})
+
+	stopErr := errors.New("stop prefork")
+	var parentFile *os.File
+	p := &Prefork{
+		CommandProducer: func(files []*os.File) (*exec.Cmd, error) {
+			if len(files) != 1 {
+				t.Fatalf("unexpected files count: %d. Expecting 1", len(files))
+			}
+			if _, err := files[0].Stat(); err != nil {
+				t.Fatalf("listener file must be open while starting child: %v", err)
+			}
+			parentFile = files[0]
+
+			cmd := exec.Command(os.Args[0], "-test.run=^$")
+			cmd.Env = append(os.Environ(), preforkChildEnvVariable+"="+preforkChildEnvValue)
+			err := cmd.Start()
+			return cmd, err
+		},
+		OnChildSpawn: func(_ int) error {
+			return stopErr
+		},
+	}
+
+	if err := p.prefork("127.0.0.1:0"); !errors.Is(err, stopErr) {
+		t.Fatalf("Unexpected error: %v. Expecting %v", err, stopErr)
+	}
+	if parentFile == nil {
+		t.Fatal("listener file was not passed to child command")
+	}
+	if _, err := parentFile.Stat(); err == nil {
+		t.Fatal("parent listener file was not closed")
+	}
+}
+
 // Test_ListenAndServe_Stub_ChildPath drives the child branch of all three
 // ListenAndServe* entry points using a stubbed Serve function. It replaces the
 // previous trio of near-identical tests that only validated field assignment.

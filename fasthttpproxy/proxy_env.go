@@ -34,6 +34,6 @@ func FasthttpProxyHTTPDialer() fasthttp.DialFunc {
 //	}
 func FasthttpProxyHTTPDialerTimeout(timeout time.Duration) fasthttp.DialFunc {
 	d := Dialer{Timeout: timeout, ConnectTimeout: timeout}
-	dialFunc, _ := d.GetDialFunc(true)
-	return dialFunc
+	dialFunc, err := d.GetDialFunc(true)
+	return dialFuncOrError(dialFunc, err)
 }

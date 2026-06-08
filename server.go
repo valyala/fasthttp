@@ -1145,7 +1145,7 @@ func (ctx *RequestCtx) FormFile(key string) (*multipart.FileHeader, error) {
 		return nil, err
 	}
 	if mf.File == nil {
-		return nil, err
+		return nil, ErrMissingFile
 	}
 	fhh := mf.File[key]
 	if fhh == nil {
@@ -1825,16 +1825,19 @@ func (s *Server) ServeTLS(ln net.Listener, certFile, keyFile string) error {
 	s.configTLS()
 	configHasCert := len(s.TLSConfig.Certificates) > 0 || s.TLSConfig.GetCertificate != nil
 	if !configHasCert || certFile != "" || keyFile != "" {
-		if err := s.AppendCert(certFile, keyFile); err != nil {
+		cert, err := loadX509KeyPair(certFile, keyFile)
+		if err != nil {
 			s.mu.Unlock()
 			return err
 		}
+		s.appendCertLocked(&cert)
 	}
+	tlsConfig := s.TLSConfig.Clone()
 
 	s.mu.Unlock()
 
 	return s.Serve(
-		tls.NewListener(ln, s.TLSConfig.Clone()),
+		tls.NewListener(ln, tlsConfig),
 	)
 }
 
@@ -1849,16 +1852,19 @@ func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error 
 	s.configTLS()
 	configHasCert := len(s.TLSConfig.Certificates) > 0 || s.TLSConfig.GetCertificate != nil
 	if !configHasCert || len(certData) != 0 || len(keyData) != 0 {
-		if err := s.AppendCertEmbed(certData, keyData); err != nil {
+		cert, err := x509KeyPair(certData, keyData)
+		if err != nil {
 			s.mu.Unlock()
 			return err
 		}
+		s.appendCertLocked(&cert)
 	}
+	tlsConfig := s.TLSConfig.Clone()
 
 	s.mu.Unlock()
 
 	return s.Serve(
-		tls.NewListener(ln, s.TLSConfig.Clone()),
+		tls.NewListener(ln, tlsConfig),
 	)
 }
 
@@ -1867,37 +1873,60 @@ func (s *Server) ServeTLSEmbed(ln net.Listener, certData, keyData []byte) error 
 // This function allows programmer to handle multiple domains
 // in one server structure. See examples/multidomain.
 func (s *Server) AppendCert(certFile, keyFile string) error {
-	if certFile == "" && keyFile == "" {
-		return errNoCertOrKeyProvided
-	}
-
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	cert, err := loadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %w", certFile, keyFile, err)
+		return err
 	}
 
-	s.configTLS()
-	s.TLSConfig.Certificates = append(s.TLSConfig.Certificates, cert)
+	s.mu.Lock()
+	s.appendCertLocked(&cert)
+	s.mu.Unlock()
 
 	return nil
 }
 
+func loadX509KeyPair(certFile, keyFile string) (tls.Certificate, error) {
+	if certFile == "" && keyFile == "" {
+		return tls.Certificate{}, errNoCertOrKeyProvided
+	}
+
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %w", certFile, keyFile, err)
+	}
+	return cert, nil
+}
+
 // AppendCertEmbed does the same as AppendCert but using in-memory data.
 func (s *Server) AppendCertEmbed(certData, keyData []byte) error {
+	cert, err := x509KeyPair(certData, keyData)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.appendCertLocked(&cert)
+	s.mu.Unlock()
+
+	return nil
+}
+
+func x509KeyPair(certData, keyData []byte) (tls.Certificate, error) {
 	if len(certData) == 0 && len(keyData) == 0 {
-		return errNoCertOrKeyProvided
+		return tls.Certificate{}, errNoCertOrKeyProvided
 	}
 
 	cert, err := tls.X509KeyPair(certData, keyData)
 	if err != nil {
-		return fmt.Errorf("cannot load TLS key pair from the provided certData(%d) and keyData(%d): %w",
+		return tls.Certificate{}, fmt.Errorf("cannot load TLS key pair from the provided certData(%d) and keyData(%d): %w",
 			len(certData), len(keyData), err)
 	}
+	return cert, nil
+}
 
+func (s *Server) appendCertLocked(cert *tls.Certificate) {
 	s.configTLS()
-	s.TLSConfig.Certificates = append(s.TLSConfig.Certificates, cert)
-
-	return nil
+	s.TLSConfig.Certificates = append(s.TLSConfig.Certificates, *cert)
 }
 
 func (s *Server) configTLS() {
@@ -2154,19 +2183,16 @@ func (s *Server) ServeConn(c net.Conn) error {
 		c = pic
 	}
 
-	n := int(s.concurrency.Add(1)) // #nosec G115
-	if n > s.getConcurrency() {
-		s.concurrency.Add(^uint32(0))
+	if !s.tryAcquireConcurrency() {
 		s.writeFastError(c, StatusServiceUnavailable, "The connection cannot be served because Server.Concurrency limit exceeded")
 		c.Close()
 		return ErrConcurrencyLimit
 	}
+	defer s.releaseConcurrency()
 
 	s.open.Add(1)
 
-	err := s.serveConn(c)
-
-	s.concurrency.Add(^uint32(0))
+	err := s.serveConnCounted(c, false)
 
 	if err != errHijacked {
 		errc := c.Close()
@@ -2179,6 +2205,19 @@ func (s *Server) ServeConn(c net.Conn) error {
 		s.setState(c, StateHijacked)
 	}
 	return err
+}
+
+func (s *Server) tryAcquireConcurrency() bool {
+	n := int(s.concurrency.Add(1)) // #nosec G115
+	if n <= s.getConcurrency() {
+		return true
+	}
+	s.releaseConcurrency()
+	return false
+}
+
+func (s *Server) releaseConcurrency() {
+	s.concurrency.Add(^uint32(0))
 }
 
 var errHijacked = errors.New("connection has been hijacked")
@@ -2240,14 +2279,22 @@ func (s *Server) idleTimeout() time.Duration {
 	return s.ReadTimeout
 }
 
-func (s *Server) serveConnCleanup() {
+func (s *Server) serveConnCleanup(countConcurrency bool) {
 	s.open.Add(-1)
-	s.concurrency.Add(^uint32(0))
+	if countConcurrency {
+		s.releaseConcurrency()
+	}
 }
 
 func (s *Server) serveConn(c net.Conn) error {
-	defer s.serveConnCleanup()
-	s.concurrency.Add(1)
+	return s.serveConnCounted(c, true)
+}
+
+func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
+	defer s.serveConnCleanup(countConcurrency)
+	if countConcurrency {
+		s.concurrency.Add(1)
+	}
 
 	proto, err := s.getNextProto(c)
 	if err != nil {
@@ -2365,9 +2412,8 @@ func (s *Server) serveConn(c net.Conn) error {
 		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
 		if err == nil {
-			s.setState(c, StateActive)
-
 			idleConnTime.Store(0)
+			s.setState(c, StateActive)
 
 			if s.ReadTimeout > 0 {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
@@ -2659,6 +2705,7 @@ func (s *Server) serveConn(c net.Conn) error {
 			ctx.Request.bodyStream = nil
 		}
 
+		idleConnTime.Store(time.Now().Unix())
 		s.setState(c, StateIdle)
 		ctx.Request.Reset()
 		ctx.Response.Reset()
@@ -2667,8 +2714,6 @@ func (s *Server) serveConn(c net.Conn) error {
 			err = nil
 			break
 		}
-
-		idleConnTime.Store(time.Now().Unix())
 	}
 
 	if br != nil {

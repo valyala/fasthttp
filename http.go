@@ -12,21 +12,22 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/valyala/bytebufferpool"
 )
 
 var (
-	requestBodyPoolSizeLimit  = -1
-	responseBodyPoolSizeLimit = -1
+	requestBodyPoolSizeLimit  int64 = -1
+	responseBodyPoolSizeLimit int64 = -1
 )
 
 // SetBodySizePoolLimit set the max body size for bodies to be returned to the pool.
 // If the body size is larger it will be released instead of put back into the pool for reuse.
 func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
-	requestBodyPoolSizeLimit = reqBodyLimit
-	responseBodyPoolSizeLimit = respBodyLimit
+	atomic.StoreInt64(&requestBodyPoolSizeLimit, int64(reqBodyLimit))
+	atomic.StoreInt64(&responseBodyPoolSizeLimit, int64(respBodyLimit))
 }
 
 // Request represents HTTP request.
@@ -1254,8 +1255,8 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 // Reset clears request contents.
 func (req *Request) Reset() {
 	req.userValues.Reset() // it should be at the top, since some values might implement io.Closer interface
-	if requestBodyPoolSizeLimit >= 0 && req.body != nil {
-		req.ReleaseBody(requestBodyPoolSizeLimit)
+	if bodyPoolSizeLimit := int(atomic.LoadInt64(&requestBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && req.body != nil {
+		req.ReleaseBody(bodyPoolSizeLimit)
 	}
 	req.Header.Reset()
 	req.resetSkipHeader()
@@ -1288,8 +1289,8 @@ func (req *Request) RemoveMultipartFormFiles() {
 
 // Reset clears response contents.
 func (resp *Response) Reset() {
-	if responseBodyPoolSizeLimit >= 0 && resp.body != nil {
-		resp.ReleaseBody(responseBodyPoolSizeLimit)
+	if bodyPoolSizeLimit := int(atomic.LoadInt64(&responseBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && resp.body != nil {
+		resp.ReleaseBody(bodyPoolSizeLimit)
 	}
 	resp.resetSkipHeader()
 	resp.Header.Reset()
@@ -1883,22 +1884,7 @@ func (resp *Response) brotliBody(level int) {
 
 		// Do not care about memory allocations here, since brotli is slow
 		// and allocates a lot of memory by itself.
-		bs := resp.bodyStream
-		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
-			zw := acquireStacklessBrotliWriter(sw, level)
-			fw := &flushWriter{
-				wf: zw,
-				bw: sw,
-			}
-			_, wErr := copyZeroAlloc(fw, bs)
-			releaseStacklessBrotliWriter(zw, level)
-			switch v := bs.(type) {
-			case io.Closer:
-				v.Close()
-			case ReadCloserWithError:
-				v.CloseWithError(wErr) //nolint:errcheck
-			}
-		})
+		resp.bodyStream = newCompressedBodyStream(resp.bodyStream, level, compressBrotliBodyStream)
 	} else {
 		bodyBytes := resp.bodyBytes()
 		if len(bodyBytes) < minCompressLen {
@@ -1941,22 +1927,7 @@ func (resp *Response) gzipBody(level int) {
 
 		// Do not care about memory allocations here, since gzip is slow
 		// and allocates a lot of memory by itself.
-		bs := resp.bodyStream
-		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
-			zw := acquireStacklessGzipWriter(sw, level)
-			fw := &flushWriter{
-				wf: zw,
-				bw: sw,
-			}
-			_, wErr := copyZeroAlloc(fw, bs)
-			releaseStacklessGzipWriter(zw, level)
-			switch v := bs.(type) {
-			case io.Closer:
-				v.Close()
-			case ReadCloserWithError:
-				v.CloseWithError(wErr) //nolint:errcheck
-			}
-		})
+		resp.bodyStream = newCompressedBodyStream(resp.bodyStream, level, compressGzipBodyStream)
 	} else {
 		bodyBytes := resp.bodyBytes()
 		if len(bodyBytes) < minCompressLen {
@@ -1999,22 +1970,7 @@ func (resp *Response) deflateBody(level int) {
 
 		// Do not care about memory allocations here, since flate is slow
 		// and allocates a lot of memory by itself.
-		bs := resp.bodyStream
-		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
-			zw := acquireStacklessDeflateWriter(sw, level)
-			fw := &flushWriter{
-				wf: zw,
-				bw: sw,
-			}
-			_, wErr := copyZeroAlloc(fw, bs)
-			releaseStacklessDeflateWriter(zw, level)
-			switch v := bs.(type) {
-			case io.Closer:
-				v.Close()
-			case ReadCloserWithError:
-				v.CloseWithError(wErr) //nolint:errcheck
-			}
-		})
+		resp.bodyStream = newCompressedBodyStream(resp.bodyStream, level, compressDeflateBodyStream)
 	} else {
 		bodyBytes := resp.bodyBytes()
 		if len(bodyBytes) < minCompressLen {
@@ -2054,22 +2010,7 @@ func (resp *Response) zstdBody(level int) {
 
 		// Do not care about memory allocations here, since flate is slow
 		// and allocates a lot of memory by itself.
-		bs := resp.bodyStream
-		resp.bodyStream = NewStreamReader(func(sw *bufio.Writer) {
-			zw := acquireStacklessZstdWriter(sw, level)
-			fw := &flushWriter{
-				wf: zw,
-				bw: sw,
-			}
-			_, wErr := copyZeroAlloc(fw, bs)
-			releaseStacklessZstdWriter(zw, level)
-			switch v := bs.(type) {
-			case io.Closer:
-				v.Close()
-			case ReadCloserWithError:
-				v.CloseWithError(wErr) //nolint:errcheck
-			}
-		})
+		resp.bodyStream = newCompressedBodyStream(resp.bodyStream, level, compressZstdBodyStream)
 	} else {
 		bodyBytes := resp.bodyBytes()
 		if len(bodyBytes) < minCompressLen {
@@ -2086,6 +2027,156 @@ func (resp *Response) zstdBody(level int) {
 	}
 	resp.Header.SetContentEncodingBytes(strZstd)
 	resp.Header.addVaryBytes(strAcceptEncoding)
+}
+
+type compressedBodyStream struct {
+	io.ReadCloser
+
+	bodyStream io.Reader
+	level      int
+	compress   compressBodyStream
+
+	done chan struct{}
+
+	closeReadOnce sync.Once
+	closeReadErr  error
+
+	originalLock   sync.Mutex
+	originalClosed bool
+	closeErr       error
+}
+
+func (s *compressedBodyStream) Close() error {
+	s.closeReadOnce.Do(func() {
+		s.closeReadErr = s.ReadCloser.Close()
+		if err := s.closeOriginalForDiscard(); s.closeReadErr == nil {
+			s.closeReadErr = err
+		}
+	})
+	err := s.closeReadErr
+	select {
+	case <-s.done:
+		if err == nil {
+			err = s.closeErr
+		}
+	default:
+	}
+	return err
+}
+
+func (s *compressedBodyStream) write(sw *bufio.Writer) {
+	s.closeErr = s.closeOriginal(s.compress(sw, s.bodyStream, s.level))
+	close(s.done)
+}
+
+func (s *compressedBodyStream) closeOriginal(wErr error) error {
+	s.originalLock.Lock()
+	defer s.originalLock.Unlock()
+
+	var err error
+	if !s.originalClosed {
+		if bsc, ok := s.bodyStream.(io.Closer); ok {
+			err = bsc.Close()
+		}
+		s.originalClosed = true
+	}
+	if bsc, ok := s.bodyStream.(ReadCloserWithError); ok {
+		if errc := bsc.CloseWithError(wErr); err == nil {
+			err = errc
+		}
+	}
+	if bsr, ok := s.bodyStream.(*requestStream); ok {
+		releaseRequestStream(bsr)
+	}
+	return err
+}
+
+func (s *compressedBodyStream) closeOriginalForDiscard() error {
+	s.originalLock.Lock()
+	defer s.originalLock.Unlock()
+
+	if s.originalClosed {
+		return nil
+	}
+	bsc, ok := s.bodyStream.(io.Closer)
+	if !ok {
+		return nil
+	}
+	s.originalClosed = true
+	return bsc.Close()
+}
+
+type compressBodyStream func(sw *bufio.Writer, bodyStream io.Reader, level int) error
+
+func newCompressedBodyStream(bodyStream io.Reader, level int, compress compressBodyStream) io.ReadCloser {
+	s := &compressedBodyStream{
+		bodyStream: bodyStream,
+		level:      level,
+		compress:   compress,
+		done:       make(chan struct{}),
+	}
+	s.ReadCloser = NewStreamReader(s.write)
+	return s
+}
+
+func compressBrotliBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) error {
+	zw := acquireStacklessBrotliWriter(sw, level)
+	fw := &flushWriter{
+		wf: zw,
+		bw: sw,
+	}
+	_, wErr := copyZeroAlloc(fw, bodyStream)
+	releaseStacklessBrotliWriter(zw, level)
+	return wErr
+}
+
+func compressGzipBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) error {
+	zw := acquireStacklessGzipWriter(sw, level)
+	fw := &flushWriter{
+		wf: zw,
+		bw: sw,
+	}
+	_, wErr := copyZeroAlloc(fw, bodyStream)
+	releaseStacklessGzipWriter(zw, level)
+	return wErr
+}
+
+func compressDeflateBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) error {
+	zw := acquireStacklessDeflateWriter(sw, level)
+	fw := &flushWriter{
+		wf: zw,
+		bw: sw,
+	}
+	_, wErr := copyZeroAlloc(fw, bodyStream)
+	releaseStacklessDeflateWriter(zw, level)
+	return wErr
+}
+
+func compressZstdBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) error {
+	zw := acquireStacklessZstdWriter(sw, level)
+	fw := &flushWriter{
+		wf: zw,
+		bw: sw,
+	}
+	_, wErr := copyZeroAlloc(fw, bodyStream)
+	releaseStacklessZstdWriter(zw, level)
+	return wErr
+}
+
+func closeBodyStreamReader(bodyStream io.Reader, wErr error) error {
+	var err error
+	if bsc, ok := bodyStream.(io.Closer); ok {
+		err = bsc.Close()
+	}
+	if bsc, ok := bodyStream.(ReadCloserWithError); ok {
+		if errc := bsc.CloseWithError(wErr); err == nil {
+			err = errc
+		}
+	}
+	if bsr, ok := bodyStream.(*requestStream); ok {
+		releaseRequestStream(bsr)
+	}
+	return err
 }
 
 // Bodies with sizes smaller than minCompressLen aren't compressed at all.
@@ -2260,16 +2351,7 @@ func (resp *Response) closeBodyStream(wErr error) error {
 	if resp.bodyStream == nil {
 		return nil
 	}
-	var err error
-	if bsc, ok := resp.bodyStream.(io.Closer); ok {
-		err = bsc.Close()
-	}
-	if bsc, ok := resp.bodyStream.(ReadCloserWithError); ok {
-		err = bsc.CloseWithError(wErr)
-	}
-	if bsr, ok := resp.bodyStream.(*requestStream); ok {
-		releaseRequestStream(bsr)
-	}
+	err := closeBodyStreamReader(resp.bodyStream, wErr)
 	resp.bodyStream = nil
 	return err
 }

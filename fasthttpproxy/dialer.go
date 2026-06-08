@@ -21,6 +21,15 @@ var (
 	tmpURL       = &url.URL{Scheme: httpsScheme, Host: "example.com"}
 )
 
+func dialFuncOrError(dialFunc fasthttp.DialFunc, err error) fasthttp.DialFunc {
+	if err == nil {
+		return dialFunc
+	}
+	return func(addr string) (net.Conn, error) {
+		return nil, err
+	}
+}
+
 // Dialer embeds both fasthttp.TCPDialer and httpproxy.Config, allowing it
 // to take advantage of the optimizations provided by fasthttp for dialing while also
 // utilizing the finer-grained configuration options offered by httpproxy.

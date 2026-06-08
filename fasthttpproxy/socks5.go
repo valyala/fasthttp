@@ -15,8 +15,8 @@ import (
 //	}
 func FasthttpSocksDialer(proxyAddr string) fasthttp.DialFunc {
 	d := Dialer{Config: httpproxy.Config{HTTPProxy: proxyAddr, HTTPSProxy: proxyAddr}}
-	dialFunc, _ := d.GetDialFunc(false)
-	return dialFunc
+	dialFunc, err := d.GetDialFunc(false)
+	return dialFuncOrError(dialFunc, err)
 }
 
 // FasthttpSocksDialerDualStack returns a fasthttp.DialFunc that dials using
@@ -29,6 +29,6 @@ func FasthttpSocksDialer(proxyAddr string) fasthttp.DialFunc {
 //	}
 func FasthttpSocksDialerDualStack(proxyAddr string) fasthttp.DialFunc {
 	d := Dialer{Config: httpproxy.Config{HTTPProxy: proxyAddr, HTTPSProxy: proxyAddr}, DialDualStack: true}
-	dialFunc, _ := d.GetDialFunc(false)
-	return dialFunc
+	dialFunc, err := d.GetDialFunc(false)
+	return dialFuncOrError(dialFunc, err)
 }

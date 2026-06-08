@@ -74,6 +74,52 @@ func TestCloseIdleConnections(t *testing.T) {
 	}
 }
 
+func TestClientConnectionCounts(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	if n := c.ConnsCount(); n != 0 {
+		t.Errorf("unexpected connection count %d. Expecting %d", n, 0)
+	}
+	if n := c.IdleConnsCount(); n != 0 {
+		t.Errorf("unexpected idle connection count %d. Expecting %d", n, 0)
+	}
+
+	if _, _, err := c.Get(nil, "http://google.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := c.ConnsCount(); n != 1 {
+		t.Errorf("unexpected connection count %d. Expecting %d", n, 1)
+	}
+	if n := c.IdleConnsCount(); n != 1 {
+		t.Errorf("unexpected idle connection count %d. Expecting %d", n, 1)
+	}
+
+	c.CloseIdleConnections()
+
+	if n := c.IdleConnsCount(); n != 0 {
+		t.Errorf("unexpected idle connection count %d. Expecting %d", n, 0)
+	}
+}
+
 func TestPipelineClientSetUserAgent(t *testing.T) {
 	t.Parallel()
 
@@ -246,6 +292,150 @@ func TestPipelineClientIssue832(t *testing.T) {
 	case <-time.After(time.Second * 2):
 		t.Fatal("PipelineClient did not restart worker")
 	case <-done:
+	}
+}
+
+func TestPipelineClientRestartsAfterIdle(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK") //nolint:errcheck
+		},
+	}
+
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &PipelineClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxIdleConnDuration: 10 * time.Millisecond,
+		MaxPendingRequests:  1,
+		Logger:              &testLogger{},
+	}
+
+	testPipelineClientDoOnce(t, c)
+	time.Sleep(50 * time.Millisecond)
+	testPipelineClientDoOnce(t, c)
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
+func TestPipelineClientChannelLifecycleRace(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK") //nolint:errcheck
+		},
+	}
+
+	serverStopCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverStopCh)
+	}()
+
+	c := &PipelineClient{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxIdleConnDuration: time.Millisecond,
+		MaxPendingRequests:  2,
+		Logger:              &testLogger{},
+	}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Go(func() {
+			for range 20 {
+				testPipelineClientDoOnce(t, c)
+				time.Sleep(time.Millisecond)
+			}
+		})
+	}
+	wg.Wait()
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case <-serverStopCh:
+	case <-time.After(time.Second):
+		t.Fatalf("timeout")
+	}
+}
+
+func testPipelineClientDoOnce(t *testing.T, c *PipelineClient) {
+	t.Helper()
+
+	req := AcquireRequest()
+	req.SetRequestURI("http://foobar/baz")
+	resp := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(resp)
+
+	if err := c.DoTimeout(req, resp, time.Second); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+	if body := string(resp.Body()); body != "OK" {
+		t.Fatalf("unexpected body: %q. Expecting %q", body, "OK")
+	}
+}
+
+func TestPipelineClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
+	t.Parallel()
+
+	c := &PipelineClient{
+		Addr:  "::1",
+		IsTLS: true,
+		Dial: func(addr string) (net.Conn, error) {
+			t.Fatalf("Dial must not be called for malformed TLS addr %q", addr)
+			return nil, errors.New("unexpected dial")
+		},
+		Logger: &testLogger{},
+	}
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("https://foobar/baz")
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- c.Do(&req, &resp)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatalf("expected error")
+		}
+		if !strings.Contains(err.Error(), "cannot determine TLS server name") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for PipelineClient.Do")
 	}
 }
 
@@ -1493,9 +1683,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 	}
 
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := AcquireRequest()
 			req.SetRequestURI("http://foobar/baz")
 			req.Header.SetMethod(MethodPost)
@@ -1522,7 +1710,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 			if string(body) != "foo" {
 				t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -1836,6 +2024,139 @@ func TestClientFollowRedirects(t *testing.T) {
 	ReleaseResponse(resp)
 }
 
+func TestClientRedirectMethodSwitch(t *testing.T) {
+	t.Parallel()
+
+	// /redirect-NNN replies with the given status code and a Location
+	// pointing at /landing. /landing echoes back the method and body it
+	// received, so the test can verify how the redirect was followed.
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/redirect-301":
+				ctx.Redirect("/landing", StatusMovedPermanently)
+			case "/redirect-302":
+				ctx.Redirect("/landing", StatusFound)
+			case "/redirect-303":
+				ctx.Redirect("/landing", StatusSeeOther)
+			case "/redirect-307":
+				ctx.Redirect("/landing", StatusTemporaryRedirect)
+			case "/landing":
+				ctx.SetBodyString(string(ctx.Method()) + "|" + string(ctx.PostBody()))
+			default:
+				ctx.Error("not found", StatusNotFound)
+			}
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	c := &HostClient{
+		Addr: "xxx",
+		Dial: func(addr string) (net.Conn, error) { return ln.Dial() },
+	}
+
+	tests := []struct {
+		method   string
+		path     string
+		wantBody string
+	}{
+		// 303 must always switch a POST to a body-less GET.
+		{MethodPost, "/redirect-303", "GET|"},
+		// 303 must also drop the body of an original GET request.
+		{MethodGet, "/redirect-303", "GET|"},
+		// 301/302 historically switch POST to GET (without forcing a body drop).
+		{MethodPost, "/redirect-301", "GET|hello"},
+		{MethodPost, "/redirect-302", "GET|hello"},
+		// 307 must preserve both the method and the body.
+		{MethodPost, "/redirect-307", "POST|hello"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := AcquireRequest()
+			resp := AcquireResponse()
+			defer ReleaseRequest(req)
+			defer ReleaseResponse(resp)
+
+			req.Header.SetMethod(tc.method)
+			req.SetRequestURI("http://xxx" + tc.path)
+			req.SetBodyString("hello")
+
+			if err := c.DoRedirects(req, resp, 16); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := resp.StatusCode(); got != StatusOK {
+				t.Fatalf("unexpected status code: %d", got)
+			}
+			if got := string(resp.Body()); got != tc.wantBody {
+				t.Fatalf("unexpected landing echo %q. Expecting %q", got, tc.wantBody)
+			}
+		})
+	}
+}
+
+func TestClientRedirect303DropsBodyFramingHeaders(t *testing.T) {
+	t.Parallel()
+
+	// /landing echoes back the body-framing headers it received so the test
+	// can verify that none of them survived the 303 body drop.
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/redirect":
+				ctx.Redirect("/landing", StatusSeeOther)
+			case "/landing":
+				ctx.SetBodyString("te=" + string(ctx.Request.Header.Peek(HeaderTransferEncoding)) +
+					"|trailer=" + string(ctx.Request.Header.Peek(HeaderTrailer)) +
+					"|body=" + string(ctx.PostBody()))
+			default:
+				ctx.Error("not found", StatusNotFound)
+			}
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	c := &HostClient{
+		Addr: "xxx",
+		Dial: func(addr string) (net.Conn, error) { return ln.Dial() },
+	}
+
+	req := AcquireRequest()
+	resp := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(resp)
+
+	// Original chunked POST carrying a trailer; the 303 must turn it into a
+	// body-less GET with no Transfer-Encoding/Trailer left behind.
+	req.Header.SetMethod(MethodPost)
+	req.SetRequestURI("http://xxx/redirect")
+	req.Header.Set(HeaderTransferEncoding, "chunked")
+	if err := req.Header.SetTrailer("X-Sum"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	req.SetBodyString("hello")
+
+	if err := c.DoRedirects(req, resp, 16); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := resp.StatusCode(); got != StatusOK {
+		t.Fatalf("unexpected status code: %d", got)
+	}
+	if got, want := string(resp.Body()), "te=|trailer=|body="; got != want {
+		t.Fatalf("unexpected landing echo %q. Expecting %q", got, want)
+	}
+}
+
 func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
 	t.Parallel()
 
@@ -1920,11 +2241,9 @@ func TestClientGetTimeoutSuccessConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testClientGetTimeoutSuccess(t, &defaultClient, "http://"+s.Addr(), 100)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -1947,12 +2266,10 @@ func TestClientDoTimeoutSuccessConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testClientDoTimeoutSuccess(t, &defaultClient, "http://"+s.Addr(), 100)
 			testClientRequestSetTimeoutSuccess(t, &defaultClient, "http://"+s.Addr(), 100)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -1989,11 +2306,9 @@ func TestClientGetTimeoutErrorConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testClientGetTimeoutError(t, c, 100)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -2031,11 +2346,9 @@ func TestClientDoTimeoutErrorConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testClientDoTimeoutError(t, c, 100)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -2537,6 +2850,65 @@ func TestClientHTTPSInvalidServerName(t *testing.T) {
 	}
 }
 
+func TestHostClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
+	t.Parallel()
+
+	c := &HostClient{
+		Addr:  "::1",
+		IsTLS: true,
+		Dial: func(addr string) (net.Conn, error) {
+			t.Fatalf("Dial must not be called for malformed TLS addr %q", addr)
+			return nil, errors.New("unexpected dial")
+		},
+	}
+
+	_, err := c.dialHostHard(time.Second)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot determine TLS server name") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestHostClientTLSMalformedAddrAllowsExplicitServerName(t *testing.T) {
+	t.Parallel()
+
+	dialErr := errors.New("dial called")
+	c := &HostClient{
+		Addr:      "::1",
+		IsTLS:     true,
+		TLSConfig: &tls.Config{ServerName: "localhost"},
+		Dial: func(addr string) (net.Conn, error) {
+			return nil, dialErr
+		},
+	}
+
+	_, err := c.dialHostHard(time.Second)
+	if !errors.Is(err, dialErr) {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, dialErr)
+	}
+}
+
+func TestHostClientTLSMalformedAddrAllowsExplicitInsecureSkipVerify(t *testing.T) {
+	t.Parallel()
+
+	dialErr := errors.New("dial called")
+	c := &HostClient{
+		Addr:      "::1",
+		IsTLS:     true,
+		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+		Dial: func(addr string) (net.Conn, error) {
+			return nil, dialErr
+		},
+	}
+
+	_, err := c.dialHostHard(time.Second)
+	if !errors.Is(err, dialErr) {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, dialErr)
+	}
+}
+
 func TestClientHTTPSConcurrent(t *testing.T) {
 	t.Parallel()
 
@@ -2618,12 +2990,10 @@ func TestClientConcurrent(t *testing.T) {
 	addr := "http://" + s.Addr()
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testClientGet(t, &defaultClient, addr, 30)
 			testClientPost(t, &defaultClient, addr, 10)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -2673,12 +3043,10 @@ func TestHostClientConcurrent(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 10 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			testHostClientGet(t, c, 30)
 			testHostClientPost(t, c, 10)
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -3005,9 +3373,7 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 	}
 
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := AcquireRequest()
 			req.SetRequestURI("http://foobar/baz")
 			req.Header.SetMethod(MethodPost)
@@ -3026,7 +3392,7 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 			if string(body) != "foo" {
 				t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -3082,9 +3448,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 
 	var errNoFreeConnsCount atomic.Uint32
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := AcquireRequest()
 			req.SetRequestURI("http://foobar/baz")
 			req.Header.SetMethod(MethodPost)
@@ -3106,7 +3470,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 					t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -3178,9 +3542,7 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 
 	var errTimeoutCount atomic.Uint32
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			req := AcquireRequest()
 			req.SetRequestURI("http://foobar/baz")
 			req.Header.SetMethod(MethodPost)
@@ -3202,7 +3564,7 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 					t.Errorf("unexpected body %q. Expecting %q", body, "abcd")
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -3748,6 +4110,72 @@ func TestTCPDialerFlushDNSCache(t *testing.T) {
 	if resolver.lookupCountByHost["httpbin.org"] != 2 {
 		t.Errorf("Expected 2 DNS lookups after cache flush, got %d", resolver.lookupCountByHost["httpbin.org"])
 	}
+}
+
+func TestTCPDialerDNSCleanerStopsAndRestarts(t *testing.T) {
+	interval := atomic.LoadInt64(&tcpAddrsCleanInterval)
+	atomic.StoreInt64(&tcpAddrsCleanInterval, int64(time.Millisecond))
+	defer func() {
+		atomic.StoreInt64(&tcpAddrsCleanInterval, interval)
+	}()
+
+	dialer := &TCPDialer{
+		DNSCacheDuration: time.Hour,
+		Resolver: &staticResolver{
+			addrs: []net.IPAddr{{IP: net.IPv4(127, 0, 0, 1)}},
+		},
+	}
+
+	dialForDNSCache(t, dialer)
+	waitForTCPDialerCleanerState(t, dialer, true)
+
+	dialer.FlushDNSCache()
+	waitForTCPDialerCleanerState(t, dialer, false)
+
+	dialForDNSCache(t, dialer)
+	waitForTCPDialerCleanerState(t, dialer, true)
+
+	dialer.FlushDNSCache()
+	waitForTCPDialerCleanerState(t, dialer, false)
+}
+
+func dialForDNSCache(t *testing.T, dialer *TCPDialer) {
+	t.Helper()
+
+	conn, err := dialer.DialTimeout("example.com:1", 50*time.Millisecond)
+	if conn != nil {
+		conn.Close()
+	}
+	if err == nil {
+		return
+	}
+
+	var dialErr *ErrDialWithUpstream
+	if !errors.As(err, &dialErr) {
+		t.Fatalf("unexpected dial error: %v", err)
+	}
+}
+
+func waitForTCPDialerCleanerState(t *testing.T, dialer *TCPDialer, running bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		isRunning := dialer.cleanerRunning.Load()
+		if isRunning == running {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("unexpected TCPDialer cleaner state: running=%v, want %v", dialer.cleanerRunning.Load(), running)
+}
+
+type staticResolver struct {
+	addrs []net.IPAddr
+}
+
+func (r *staticResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	return r.addrs, nil
 }
 
 // Simple test resolver that implements the Resolver interface.

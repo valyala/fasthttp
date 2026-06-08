@@ -1171,6 +1171,33 @@ func TestServerTLS(t *testing.T) {
 	}
 }
 
+func TestServerAppendCertEmbedConcurrent(t *testing.T) {
+	t.Parallel()
+
+	certData, keyData, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var s Server
+	var wg sync.WaitGroup
+	for range 10 {
+		wg.Go(func() {
+			if err := s.AppendCertEmbed(certData, keyData); err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+	wg.Wait()
+
+	s.mu.Lock()
+	certs := len(s.TLSConfig.Certificates)
+	s.mu.Unlock()
+	if certs != 10 {
+		t.Fatalf("unexpected certificate count: %d. Expecting 10", certs)
+	}
+}
+
 func TestServerTLSReadTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -3473,6 +3500,59 @@ func TestTimeoutHandlerTimeoutReuse(t *testing.T) {
 	}
 }
 
+func TestServerConnStateSeesIdleMarkers(t *testing.T) {
+	t.Parallel()
+
+	activeCh := make(chan int64, 1)
+	idleCh := make(chan int64, 1)
+
+	var s *Server
+	s = &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Success("text/plain", []byte("OK"))
+		},
+		ConnState: func(c net.Conn, state ConnState) {
+			switch state {
+			case StateActive:
+				s.idleConnsMu.Lock()
+				idleConnTime := s.idleConns[c]
+				activeCh <- idleConnTime.Load()
+				s.idleConnsMu.Unlock()
+			case StateIdle:
+				s.idleConnsMu.Lock()
+				idleConnTime := s.idleConns[c]
+				idleCh <- idleConnTime.Load()
+				s.idleConnsMu.Unlock()
+			}
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from ServeConn: %v", err)
+	}
+
+	select {
+	case active := <-activeCh:
+		if active != 0 {
+			t.Fatalf("unexpected active marker: %d. Expecting 0", active)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for active state")
+	}
+
+	select {
+	case idle := <-idleCh:
+		if idle == 0 {
+			t.Fatalf("unexpected idle marker: %d. Expecting non-zero", idle)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timeout waiting for idle state")
+	}
+}
+
 func TestServerGetOnly(t *testing.T) {
 	t.Parallel()
 
@@ -3960,6 +4040,34 @@ func TestServeConnSingleRequest(t *testing.T) {
 
 	br := bufio.NewReader(&rw.w)
 	verifyResponse(t, br, 200, "aaa", "requestURI=/foo/bar?baz, host=google.com")
+}
+
+func TestServeConnCountsConcurrencyOnce(t *testing.T) {
+	t.Parallel()
+
+	var s *Server
+	s = &Server{
+		Concurrency: 1,
+		Handler: func(ctx *RequestCtx) {
+			if n := s.GetCurrentConcurrency(); n != 1 {
+				t.Errorf("unexpected concurrency %d. Expecting 1", n)
+			}
+			ctx.Success("text/plain", []byte("OK"))
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from ServeConn: %v", err)
+	}
+	if n := s.GetCurrentConcurrency(); n != 0 {
+		t.Fatalf("unexpected concurrency after ServeConn: %d. Expecting 0", n)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, 200, "text/plain", "OK")
 }
 
 func TestServerSetFormValueFunc(t *testing.T) {
