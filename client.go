@@ -1221,7 +1221,29 @@ func doRequestFollowRedirects(
 		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
 		ReleaseURI(redirectURI)
 
-		if string(req.Header.Method()) == "POST" && (statusCode == 301 || statusCode == 302) {
+		switch {
+		case statusCode == StatusSeeOther:
+			// RFC 9110 section 15.4.4: a 303 (See Other) response redirects
+			// the user agent to retrieve the new URI with a GET (or HEAD)
+			// request, regardless of the original method, and without the
+			// original request body. Drop the body together with every header
+			// that frames it: per RFC 9112 a body is signaled by Content-Length
+			// or Transfer-Encoding, and a Trailer only applies to a chunked
+			// body, so all of them must go once the body is gone.
+			if !req.Header.IsGet() && !req.Header.IsHead() {
+				req.Header.SetMethod(MethodGet)
+			}
+			req.Header.Del(HeaderContentLength)
+			req.Header.Del(HeaderContentType)
+			req.Header.Del(HeaderTransferEncoding)
+			req.Header.Del(HeaderTrailer)
+			req.ResetBody()
+			req.postArgs.Reset()
+			req.parsedPostArgs = false
+		case req.Header.IsPost() && (statusCode == StatusMovedPermanently || statusCode == StatusFound):
+			// RFC 9110 sections 15.4.2/15.4.3 Note: for historical reasons a
+			// user agent MAY change the request method from POST to GET for a
+			// 301 (Moved Permanently) or 302 (Found) response.
 			req.Header.SetMethod(MethodGet)
 		}
 	}
