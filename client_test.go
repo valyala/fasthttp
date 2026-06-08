@@ -2943,12 +2943,20 @@ func TestClientHTTPSConcurrent(t *testing.T) {
 func TestClientManyServers(t *testing.T) {
 	t.Parallel()
 
+	servers := make([]*testEchoServer, 0, 10)
 	addrs := make([]string, 0, 10)
 	for range 10 {
 		s := startEchoServer(t, "tcp", "127.0.0.1:")
-		defer s.Stop()
+		servers = append(servers, s)
 		addrs = append(addrs, s.Addr())
 	}
+	// All servers must stay up until the test ends, so stop them with a single
+	// deferred loop rather than deferring inside the loop above.
+	defer func() {
+		for _, s := range servers {
+			s.Stop()
+		}
+	}()
 
 	var wg sync.WaitGroup
 	for i := range 4 {
