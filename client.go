@@ -1963,6 +1963,9 @@ func (c *HostClient) ReleaseConn(cc *clientConn) {
 	if q := c.connsWait; q != nil && q.len() > 0 {
 		for q.len() > 0 {
 			w := q.popFront()
+			if w == nil {
+				break
+			}
 			if w.waiting() {
 				delivered = w.tryDeliver(cc, nil)
 				// This is the last resort to hand over conCount sema.

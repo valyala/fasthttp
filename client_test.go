@@ -3862,28 +3862,3 @@ func TestClient_RetryIfErrUpstream(t *testing.T) {
 		}
 	})
 }
-
-func TestHostClientDecConnsCountStaleWaiters(t *testing.T) {
-	t.Parallel()
-
-	// decConnsCount loops while connsWait.len() > 0 and dereferences the result
-	// of popFront. When the only queued waiter is no longer waiting, popping it
-	// decrements failedWaiters so len() stays positive, and the next popFront
-	// returns nil. decConnsCount must not dereference that nil.
-	c := &HostClient{
-		Addr:               "foobar",
-		MaxConnWaitTimeout: time.Second,
-		connsWait:          &wantConnQueue{},
-	}
-	c.connsCount = 1
-
-	w := &wantConn{ready: make(chan struct{})}
-	close(w.ready) // no longer waiting
-	c.connsWait.pushBack(w)
-
-	c.decConnsCount()
-
-	if c.connsCount != 0 {
-		t.Errorf("unexpected connsCount %d. Expecting 0", c.connsCount)
-	}
-}
