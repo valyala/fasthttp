@@ -541,6 +541,42 @@ func runFSByteRangeSingleThread(t *testing.T, fs *FS) {
 	testFSByteRange(t, h, "/README.md")
 }
 
+func TestFSByteRangeZeroLengthSuffixRange(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "empty.txt"), nil, 0o600); err != nil {
+		t.Fatalf("cannot create empty test file: %v", err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	fs := &FS{
+		Root:            dir,
+		AcceptByteRange: true,
+		CleanStop:       stop,
+	}
+	h := fs.NewRequestHandler()
+
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, nil)
+	ctx.Request.SetRequestURI("/empty.txt")
+	ctx.Request.Header.SetByteRange(-5, -1)
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("unexpected panic for suffix range on empty file: %v", r)
+		}
+	}()
+	h(&ctx)
+
+	resp := readResponseFromCtx(t, &ctx, false)
+	if resp.StatusCode() != StatusRequestedRangeNotSatisfiable {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusRequestedRangeNotSatisfiable)
+	}
+}
+
 func testFSByteRange(t *testing.T, h RequestHandler, filePath string) {
 	t.Helper()
 
@@ -659,6 +695,9 @@ func TestParseByteRangeError(t *testing.T) {
 
 	// byte range exceeding contentLength
 	testParseByteRangeError(t, "bytes=123-", 12)
+
+	// suffix byte range for empty content
+	testParseByteRangeError(t, "bytes=-5", 0)
 
 	// startPos exceeding endPos
 	testParseByteRangeError(t, "bytes=123-34", 1234)

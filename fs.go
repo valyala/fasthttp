@@ -1473,6 +1473,9 @@ func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, 
 		if err != nil {
 			return 0, 0, err
 		}
+		if contentLength <= 0 {
+			return 0, 0, fmt.Errorf("byte range %q is invalid for empty content", byteRange)
+		}
 		startPos := max(contentLength-v, 0)
 		return startPos, contentLength - 1, nil
 	}
