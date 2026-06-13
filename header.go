@@ -3515,7 +3515,7 @@ func copyTrailer(dst, src [][]byte) [][]byte {
 	if cap(dst) >= len(src) {
 		dst = dst[:len(src)]
 	} else {
-		dst = append(dst[:0], src...)
+		dst = make([][]byte, len(src))
 	}
 
 	for i := range dst {

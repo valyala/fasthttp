@@ -3724,6 +3724,27 @@ func TestRequestHeader_Keys(t *testing.T) {
 	}
 }
 
+func TestResponseHeaderCopyToCopiesTrailerKeys(t *testing.T) {
+	t.Parallel()
+
+	var src ResponseHeader
+	var dst ResponseHeader
+
+	if err := src.SetTrailer("X-Foo"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	src.CopyTo(&dst)
+	if err := src.SetTrailer("Y-Bar"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := dst.PeekTrailerKeys()
+	want := [][]byte{[]byte("X-Foo")}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected copied trailer keys %q. Expecting %q", got, want)
+	}
+}
+
 func TestResponseHeader_Keys(t *testing.T) {
 	h := &ResponseHeader{}
 	h.Add(HeaderConnection, "keep-alive")
