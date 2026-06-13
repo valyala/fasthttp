@@ -86,6 +86,11 @@ type Prefork struct {
 
 	ln net.Listener
 
+	// ServeFunc, ServeTLSFunc and ServeTLSEmbedFunc serve the inherited
+	// listener inside each child process. New() wires them to the matching
+	// *fasthttp.Server methods. When constructing a Prefork directly, set the
+	// one matching the ListenAndServe* entry point you call; otherwise the
+	// child panics on a nil call.
 	ServeFunc         func(ln net.Listener) error
 	ServeTLSFunc      func(ln net.Listener, certFile, keyFile string) error
 	ServeTLSEmbedFunc func(ln net.Listener, certData, keyData []byte) error
@@ -101,11 +106,13 @@ type Prefork struct {
 	// terminate the master after the very first child crash.
 	RecoverThreshold int
 
-	// RecoverInterval, when > 0, delays respawning a crashed child by the given
-	// duration. The backoff is per child and does not block recovery of the
-	// others, so children that crash at the same time each restart
-	// RecoverInterval after they exit instead of serially. Useful as crash-loop
-	// backoff.
+	// RecoverInterval, when > 0, delays the respawn of a crashed child by the
+	// given duration. The delay is applied per child in that child's own Wait
+	// goroutine before its exit is reported, so simultaneous crashes are not
+	// serialized: each child is respawned roughly RecoverInterval after it
+	// exits, independently of the others. The wait is interruptible, so a
+	// shutdown does not have to outlast a pending interval. Useful as
+	// crash-loop backoff.
 	RecoverInterval time.Duration
 
 	// ShutdownGracePeriod is the time the master waits for children to exit
@@ -154,10 +161,12 @@ type Prefork struct {
 
 	// OnChildRecover is called in the master after a crashed child has been
 	// replaced. It receives the PID of the old (crashed) process and the PID
-	// of its replacement.
+	// of its replacement. This is a notification only: unlike OnChildSpawn it
+	// cannot abort recovery.
 	//
 	// Threading: invoked synchronously from the master goroutine, after
-	// OnChildSpawn for the new child.
+	// OnChildSpawn for the new child. Must not block; must not call Prefork
+	// methods.
 	OnChildRecover func(oldPID, newPID int)
 
 	// CommandProducer creates and starts a child process command.
@@ -378,11 +387,14 @@ type childExit struct {
 	pid int
 }
 
-// shutdownChildren signals every entry in childProcs first with SIGTERM (on
-// platforms where it is supported) and waits up to grace for them to exit.
-// Survivors are then killed unconditionally. wg tracks the per-child Wait
-// goroutines and must be drained before returning so no goroutine outlives
-// prefork().
+// shutdownChildren tears down every entry in childProcs. It first cancels the
+// per-child Wait goroutines' context so any parked on a RecoverInterval backoff
+// or a sigCh send return immediately; cmd.Wait() is not tied to the context, so
+// this only strips the artificial delay from the shutdown path while still
+// letting us wait for the children to actually exit. Children are then sent
+// SIGTERM (on platforms where it is supported) and given up to grace to exit
+// before survivors are killed unconditionally. wg tracks the per-child Wait
+// goroutines and is drained before returning so no goroutine outlives prefork().
 func (p *Prefork) shutdownChildren(
 	childProcs map[int]*exec.Cmd,
 	wg *sync.WaitGroup,
@@ -393,11 +405,18 @@ func (p *Prefork) shutdownChildren(
 		grace = defaultShutdownGracePeriod
 	}
 
+	// Cancel up front, before waiting on wg. A child that already exited may
+	// have its Wait goroutine parked on the RecoverInterval backoff or a sigCh
+	// send; without this, shutdown could block for a full RecoverInterval (or
+	// until ShutdownGracePeriod expires) even though that child is already gone.
+	// cmd.Wait() is independent of ctx, so the graceful wait below still tracks
+	// the real process exits.
+	cancel()
+
 	if runtime.GOOS == "windows" {
 		for pid, proc := range childProcs {
 			p.killChild(pid, proc)
 		}
-		cancel()
 		wg.Wait()
 		return
 	}
@@ -423,6 +442,8 @@ func (p *Prefork) shutdownChildren(
 	defer timer.Stop()
 	select {
 	case <-graceful:
+		// All children exited within grace; nothing left to kill.
+		return
 	case <-timer.C:
 	}
 
@@ -430,9 +451,6 @@ func (p *Prefork) shutdownChildren(
 		p.killChild(pid, proc)
 	}
 
-	// Cancel the per-Wait goroutines' send-context so any still blocked on
-	// sigCh send unblock cleanly, then wait for all of them to exit.
-	cancel()
 	wg.Wait()
 }
 
@@ -483,9 +501,7 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 
 	var wg sync.WaitGroup
 	startWait := func(cmd *exec.Cmd, pid int) {
-		wg.Add(1)
-		go func() { //nolint:modernize // WaitGroup.Go needs go1.25; module targets go1.24
-			defer wg.Done()
+		wg.Go(func() {
 			result := childExit{pid: pid, err: cmd.Wait()}
 
 			// Apply the crash-loop backoff here, per child, before reporting
@@ -508,7 +524,7 @@ func (p *Prefork) prefork(addr string) (err error) { //nolint:gocyclo
 			case sigCh <- result:
 			case <-ctx.Done():
 			}
-		}()
+		})
 	}
 
 	defer func() {

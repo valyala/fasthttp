@@ -120,21 +120,43 @@ func Test_setTCPListenerFilesClosesListenerOnFileError(t *testing.T) {
 	if p.files != nil {
 		t.Fatalf("Prefork.files = %v, want nil", p.files)
 	}
-	if p.ln == nil {
-		return
+	// setTCPListenerFiles assigns p.ln only after File() succeeds, so on the
+	// File() error path the bound listener must have been closed and p.ln left
+	// nil rather than exposing a half-initialised state.
+	if p.ln != nil {
+		t.Fatalf("Prefork.ln = %v, want nil after File error", p.ln)
+	}
+}
+
+// Test_childEnv verifies the child environment carries exactly one canonical
+// prefork marker: a pre-existing marker (any value) is stripped and replaced,
+// while an unrelated variable that merely shares the prefix is left untouched.
+func Test_childEnv(t *testing.T) {
+	t.Setenv(preforkChildEnvVariable, "stale")
+	t.Setenv(preforkChildEnvVariable+"_SIBLING", "keep")
+
+	prefix := preforkChildEnvVariable + "="
+	want := prefix + preforkChildEnvValue
+
+	var markerCount, canonicalCount, siblingCount int
+	for _, kv := range childEnv() {
+		switch {
+		case len(kv) >= len(prefix) && kv[:len(prefix)] == prefix:
+			markerCount++
+			if kv == want {
+				canonicalCount++
+			}
+		case kv == preforkChildEnvVariable+"_SIBLING=keep":
+			siblingCount++
+		}
 	}
 
-	closeErrCh := make(chan error, 1)
-	go func() {
-		closeErrCh <- p.ln.Close()
-	}()
-	select {
-	case err := <-closeErrCh:
-		if err == nil {
-			t.Fatal("listener remained open after File error")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timeout closing listener")
+	if markerCount != 1 || canonicalCount != 1 {
+		t.Fatalf("childEnv() marker entries = %d (canonical %d), want exactly 1 canonical %q",
+			markerCount, canonicalCount, want)
+	}
+	if siblingCount != 1 {
+		t.Fatalf("childEnv() sibling-prefixed var count = %d, want 1 (must not be stripped)", siblingCount)
 	}
 }
 
@@ -190,6 +212,11 @@ func Test_preforkClosesParentListenerFiles(t *testing.T) {
 func Test_ListenAndServe_Stub_ChildPath(t *testing.T) {
 	// child env mutation precludes t.Parallel.
 	t.Setenv(preforkChildEnvVariable, preforkChildEnvValue)
+
+	// listen() sets GOMAXPROCS(1) on the child path; restore it so the value
+	// does not leak into later tests and make their fleet size ordering-dependent.
+	prevGOMAXPROCS := runtime.GOMAXPROCS(0)
+	t.Cleanup(func() { runtime.GOMAXPROCS(prevGOMAXPROCS) })
 
 	type call struct {
 		listener bool
@@ -564,5 +591,47 @@ func Test_Prefork_RecoverInterval(t *testing.T) {
 	// At least one recover interval must have elapsed before threshold fired.
 	if elapsed < interval {
 		t.Errorf("elapsed %v < interval %v; backoff did not apply", elapsed, interval)
+	}
+}
+
+// Test_Prefork_ShutdownDoesNotBlockOnRecoverInterval guards against a child
+// that already exited (and whose Wait goroutine is parked on the RecoverInterval
+// backoff) holding up shutdown. prefork() returns immediately via an
+// OnMasterReady error while the noop children are sitting in a long backoff;
+// shutdown must cancel the backoff and return promptly instead of waiting for
+// RecoverInterval or ShutdownGracePeriod to elapse.
+func Test_Prefork_ShutdownDoesNotBlockOnRecoverInterval(t *testing.T) {
+	prev := runtime.GOMAXPROCS(2)
+	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
+
+	produce, cleanup := noopChildProducer(t)
+	t.Cleanup(cleanup)
+
+	const longWait = 10 * time.Second
+	expectedErr := errors.New("ready rejected")
+	p := &Prefork{
+		Reuseport:           true,
+		RecoverThreshold:    1,
+		RecoverInterval:     longWait,
+		ShutdownGracePeriod: longWait,
+		Logger:              &testLogger{},
+		CommandProducer:     produce,
+		OnMasterReady: func([]int) error {
+			return expectedErr
+		},
+	}
+
+	start := time.Now()
+	err := p.prefork("127.0.0.1:0")
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got: %v", expectedErr, err)
+	}
+	// With the backoff cancelled up front, shutdown is near-instant. Allow a
+	// generous margin for subprocess spawn/teardown but well below longWait so a
+	// regression (blocking on RecoverInterval / ShutdownGracePeriod) is caught.
+	if elapsed >= longWait/2 {
+		t.Fatalf("shutdown took %v; it blocked on the RecoverInterval backoff", elapsed)
 	}
 }
