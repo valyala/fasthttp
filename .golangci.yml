@@ -47,7 +47,6 @@ linters:
   settings:
     gocritic:
       disabled-checks:
-        - deferInLoop
         - importShadow
         - sloppyReassign
         - unnamedResult

@@ -57,24 +57,26 @@ func TestInmemoryListener(t *testing.T) {
 				close(serverCh)
 				return
 			}
-			defer conn.Close()
-			buf := make([]byte, 30)
-			n, err := conn.Read(buf)
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			buf = buf[:n]
-			if !bytes.HasPrefix(buf, []byte("request_")) {
-				t.Errorf("unexpected request prefix %q. Expecting %q", buf, "request_")
-			}
-			resp := fmt.Sprintf("response_%s", buf[len("request_"):])
-			n, err = conn.Write([]byte(resp))
-			if err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if n != len(resp) {
-				t.Errorf("unexpected number of bytes written: %d. Expecting %d", n, len(resp))
-			}
+			func() {
+				defer conn.Close()
+				buf := make([]byte, 30)
+				n, err := conn.Read(buf)
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				buf = buf[:n]
+				if !bytes.HasPrefix(buf, []byte("request_")) {
+					t.Errorf("unexpected request prefix %q. Expecting %q", buf, "request_")
+				}
+				resp := fmt.Sprintf("response_%s", buf[len("request_"):])
+				n, err = conn.Write([]byte(resp))
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if n != len(resp) {
+					t.Errorf("unexpected number of bytes written: %d. Expecting %d", n, len(resp))
+				}
+			}()
 		}
 	}()
 
