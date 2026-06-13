@@ -4179,8 +4179,10 @@ func TestCloseOnShutdown(t *testing.T) {
 	t.Parallel()
 
 	ln := fasthttputil.NewInmemoryListener()
+	handlerStarted := make(chan struct{})
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			close(handlerStarted)
 			time.Sleep(time.Millisecond * 500)
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
@@ -4211,7 +4213,11 @@ func TestCloseOnShutdown(t *testing.T) {
 		verifyResponseHeaderConnection(t, &resp.Header, "close")
 		clientCh <- struct{}{}
 	}()
-	time.Sleep(time.Millisecond * 100)
+	select {
+	case <-handlerStarted:
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("handler didn't start")
+	}
 	shutdownCh := make(chan struct{})
 	go func() {
 		if err := s.Shutdown(); err != nil {
@@ -4222,7 +4228,7 @@ func TestCloseOnShutdown(t *testing.T) {
 	done := 0
 	for {
 		select {
-		case <-time.After(time.Second * 2):
+		case <-time.After(testTimeout(time.Second * 2)):
 			t.Fatal("shutdown took too long")
 		case <-serveCh:
 			done++
@@ -4407,10 +4413,13 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 func TestShutdownWithContext(t *testing.T) {
 	t.Parallel()
 	done := make(chan struct{})
-	defer close(done)
+	var closeDone sync.Once
+	defer closeDone.Do(func() { close(done) })
+	handlerStarted := make(chan struct{})
 	ln := fasthttputil.NewInmemoryListener()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			close(handlerStarted)
 			<-done
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
@@ -4421,21 +4430,33 @@ func TestShutdownWithContext(t *testing.T) {
 		}
 	}()
 
-	time.Sleep(1 * time.Millisecond * 500)
+	clientErr := make(chan error, 1)
 	go func() {
 		conn, err := ln.Dial()
 		if err != nil {
-			t.Errorf("unexpected error: %v", err)
+			clientErr <- fmt.Errorf("unexpected error: %w", err)
+			return
 		}
 
 		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
-			t.Errorf("unexpected error: %v", err)
+			clientErr <- fmt.Errorf("unexpected error: %w", err)
+			return
 		}
 		br := bufio.NewReader(conn)
 		verifyResponse(t, br, StatusOK, "aaa/bbb", "real response")
+		clientErr <- nil
 	}()
 
-	time.Sleep(1 * time.Millisecond * 500)
+	select {
+	case <-handlerStarted:
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Fatal("client finished before handler started")
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("handler didn't start")
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
 	shutdownErr := make(chan error)
@@ -4454,6 +4475,15 @@ func TestShutdownWithContext(t *testing.T) {
 	}
 	if o := s.open.Load(); o != 1 {
 		t.Fatalf("unexpected open connection num: %#v. Expecting %#v", o, 1)
+	}
+	closeDone.Do(func() { close(done) })
+	select {
+	case err := <-clientErr:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("client didn't receive response")
 	}
 }
 
@@ -4640,6 +4670,9 @@ func TestStreamBodyRequestContentLength(t *testing.T) {
 			realContentLength := ctx.Request.Header.ContentLength()
 			if realContentLength != contentLength {
 				t.Fatal("incorrect content length")
+			}
+			if _, err := io.Copy(io.Discard, ctx.RequestBodyStream()); err != nil {
+				t.Fatalf("unexpected error when reading request body: %v", err)
 			}
 		},
 		MaxRequestBodySize: 1 * 1024 * 1024, // 1M

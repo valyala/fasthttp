@@ -3033,7 +3033,10 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *
 			select {
 			case w = <-chW:
 			case <-stopTimer.C:
-				return nil
+				if c.canStopPipelineConn(chs) {
+					return nil
+				}
+				goto againChW
 			case <-stopCh:
 				return nil
 			case <-flushTimerCh:
@@ -3100,6 +3103,13 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *
 			}
 		}
 	}
+}
+
+func (c *pipelineConnClient) canStopPipelineConn(chs *pipelineConnChannels) bool {
+	c.chLock.Lock()
+	canStop := c.chs == chs && chs.users == 0
+	c.chLock.Unlock()
+	return canStop && len(chs.chR) == 0 && len(chs.chW) == 0
 }
 
 func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *pipelineConnChannels) error {
