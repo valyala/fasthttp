@@ -216,6 +216,7 @@ func testConcurrent(concurrency int, f func() error) error {
 			err := f()
 			if err != nil {
 				ch <- fmt.Errorf("error in goroutine %d: %w", idx, err)
+				return
 			}
 			ch <- nil
 		}(i)
@@ -226,7 +227,7 @@ func testConcurrent(concurrency int, f func() error) error {
 			if err != nil {
 				return err
 			}
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			return errors.New("timeout")
 		}
 	}
