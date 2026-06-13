@@ -1,10 +1,15 @@
 package fasthttp
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// ErrNoAvailableClients is returned by LBClient methods when no clients are
+// available, for example after every client has been removed.
+var ErrNoAvailableClients = errors.New("no available clients")
 
 // BalancingClient is the interface for clients, which may be passed
 // to LBClient.Clients.
@@ -62,13 +67,21 @@ const DefaultLBClientTimeout = time.Second
 
 // DoDeadline calls DoDeadline on the least loaded client.
 func (cc *LBClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
-	return cc.get().DoDeadline(req, resp, deadline)
+	c := cc.get()
+	if c == nil {
+		return ErrNoAvailableClients
+	}
+	return c.DoDeadline(req, resp, deadline)
 }
 
 // DoTimeout calculates deadline and calls DoDeadline on the least loaded client.
 func (cc *LBClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
-	return cc.get().DoDeadline(req, resp, deadline)
+	c := cc.get()
+	if c == nil {
+		return ErrNoAvailableClients
+	}
+	return c.DoDeadline(req, resp, deadline)
 }
 
 // Do calculates timeout using LBClient.Timeout and calls DoTimeout
@@ -100,11 +113,11 @@ func (cc *LBClient) init() {
 // returns the new total number of clients.
 func (cc *LBClient) AddClient(c BalancingClient) int {
 	cc.mu.Lock()
+	defer cc.mu.Unlock()
 	cc.cs = append(cc.cs, &lbClient{
 		c:           c,
 		healthCheck: cc.HealthCheck,
 	})
-	cc.mu.Unlock()
 	return len(cc.cs)
 }
 
@@ -113,18 +126,24 @@ func (cc *LBClient) AddClient(c BalancingClient) int {
 // Returns the new total number of clients.
 func (cc *LBClient) RemoveClients(rc func(BalancingClient) bool) int {
 	cc.mu.Lock()
+	// defer so a panic in the user-supplied rc can't leak the lock.
+	defer cc.mu.Unlock()
 	n := 0
-	for idx, cs := range cc.cs {
-		cc.cs[idx] = nil
+	for _, cs := range cc.cs {
 		if rc(cs.c) {
 			continue
 		}
 		cc.cs[n] = cs
 		n++
 	}
+	// Nil out the now-unused tail so removed clients can be garbage collected.
+	// This is done only after the loop so a panic in rc can't leave cc.cs with
+	// nil holes that would later crash get().
+	for i := n; i < len(cc.cs); i++ {
+		cc.cs[i] = nil
+	}
 	cc.cs = cc.cs[:n]
 
-	cc.mu.Unlock()
 	return len(cc.cs)
 }
 
@@ -132,7 +151,13 @@ func (cc *LBClient) get() *lbClient {
 	cc.once.Do(cc.init)
 
 	cc.mu.RLock()
+	defer cc.mu.RUnlock()
+
 	cs := cc.cs
+	if len(cs) == 0 {
+		// No clients (e.g. all removed): avoid panicking on cs[0].
+		return nil
+	}
 
 	minC := cs[0]
 	minN := minC.PendingRequests()
@@ -146,7 +171,6 @@ func (cc *LBClient) get() *lbClient {
 			minT = t
 		}
 	}
-	cc.mu.RUnlock()
 	return minC
 }
 
