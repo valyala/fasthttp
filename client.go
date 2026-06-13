@@ -1093,9 +1093,10 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 	go func() {
 		req := AcquireRequest()
 
-		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirectsBuffer(req, dst, url, c)
+		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirectsBuffer(req, nil, url, c)
 		mu.Lock()
 		if !timedout {
+			bodyCopy = append(dst[:0], bodyCopy...)
 			ch <- clientURLResponse{
 				statusCode: statusCodeCopy,
 				body:       bodyCopy,

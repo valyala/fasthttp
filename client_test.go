@@ -2290,6 +2290,56 @@ func TestClientGetTimeoutError(t *testing.T) {
 	testClientGetTimeoutError(t, c, 100)
 }
 
+func TestClientGetURLDeadlineDoesNotMutateDstAfterTimeout(t *testing.T) {
+	t.Parallel()
+
+	d := &delayedBodyDoer{
+		unblock: make(chan struct{}),
+		done:    make(chan struct{}),
+		body:    "mutated!",
+	}
+	dst := []byte("original")
+
+	statusCode, body, err := clientGetURLDeadline(dst, "http://example.com/", time.Now().Add(time.Millisecond), d)
+	if err != ErrTimeout {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, ErrTimeout)
+	}
+	if statusCode != 0 {
+		t.Fatalf("unexpected status code: %d. Expecting 0", statusCode)
+	}
+	if string(body) != "original" {
+		t.Fatalf("unexpected timeout body %q. Expecting %q", body, "original")
+	}
+
+	close(d.unblock)
+	select {
+	case <-d.done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for background request to finish")
+	}
+
+	if string(dst) != "original" {
+		t.Fatalf("dst was mutated after timeout: %q. Expecting %q", dst, "original")
+	}
+	if string(body) != "original" {
+		t.Fatalf("returned body was mutated after timeout: %q. Expecting %q", body, "original")
+	}
+}
+
+type delayedBodyDoer struct {
+	unblock chan struct{}
+	done    chan struct{}
+	body    string
+}
+
+func (d *delayedBodyDoer) Do(req *Request, resp *Response) error {
+	<-d.unblock
+	resp.SetStatusCode(StatusOK)
+	resp.SetBodyString(d.body)
+	close(d.done)
+	return nil
+}
+
 func TestClientGetTimeoutErrorConcurrent(t *testing.T) {
 	t.Parallel()
 
