@@ -2993,6 +2993,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	s.b = buf
 	var kv *argsKV
 	transferEncodingSeen := false
+	contentLengthSeen := false
 
 	for s.next() {
 		// Trim trailing whitespace before the colon to normalize headers
@@ -3038,6 +3039,11 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strContentLength) {
+				if contentLengthSeen {
+					h.connectionClose = true
+					return 0, ErrDuplicateContentLength
+				}
+				contentLengthSeen = true
 				var err error
 				contentLength, err := parseContentLength(s.value)
 				if err != nil {
