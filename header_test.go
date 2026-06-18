@@ -116,6 +116,69 @@ func TestResponseHeaderFirstLineSettersSanitizeNewlines(t *testing.T) {
 	}
 }
 
+func TestResponseHeaderKeySettersSanitizeNewlines(t *testing.T) {
+	t.Parallel()
+
+	const badKey = "X-Foo\r\nInjected: true"
+
+	testCases := []struct {
+		name string
+		set  func(*ResponseHeader)
+	}{
+		{name: "Set", set: func(h *ResponseHeader) { h.Set(badKey, "bar") }},
+		{name: "Add", set: func(h *ResponseHeader) { h.Add(badKey, "bar") }},
+		{name: "SetBytesV", set: func(h *ResponseHeader) { h.SetBytesV(badKey, []byte("bar")) }},
+		{name: "SetBytesKV", set: func(h *ResponseHeader) { h.SetBytesKV([]byte(badKey), []byte("bar")) }},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var h ResponseHeader
+			h.SetStatusCode(StatusOK)
+			h.SetContentLength(0)
+			tc.set(&h)
+
+			if bytes.Contains(h.Header(), []byte("\r\nInjected:")) {
+				t.Fatalf("header key injection reached the wire in %q", h.Header())
+			}
+		})
+	}
+}
+
+func TestRequestHeaderKeySettersSanitizeNewlines(t *testing.T) {
+	t.Parallel()
+
+	const badKey = "X-Foo\r\nInjected: true"
+
+	testCases := []struct {
+		name string
+		set  func(*RequestHeader)
+	}{
+		{name: "Set", set: func(h *RequestHeader) { h.Set(badKey, "bar") }},
+		{name: "Add", set: func(h *RequestHeader) { h.Add(badKey, "bar") }},
+		{name: "SetBytesV", set: func(h *RequestHeader) { h.SetBytesV(badKey, []byte("bar")) }},
+		{name: "SetBytesKV", set: func(h *RequestHeader) { h.SetBytesKV([]byte(badKey), []byte("bar")) }},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var h RequestHeader
+			h.SetMethod(MethodGet)
+			h.SetRequestURI("/")
+			h.SetHost("example.com")
+			tc.set(&h)
+
+			if bytes.Contains(h.Header(), []byte("\r\nInjected:")) {
+				t.Fatalf("header key injection reached the wire in %q", h.Header())
+			}
+		})
+	}
+}
+
 func TestResponseHeaderMultiLineValue(t *testing.T) {
 	t.Parallel()
 
