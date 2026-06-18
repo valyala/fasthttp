@@ -1755,6 +1755,33 @@ func TestRequestContentTypeNoDefault(t *testing.T) {
 	}
 }
 
+func TestRequestWriteDeleteNoDefaultContentType(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.Header.SetMethod(MethodDelete)
+	req.Header.SetHost("example.com")
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := req.Write(bw); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	var h RequestHeader
+	br := bufio.NewReader(w)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if len(h.contentType) != 0 {
+		t.Fatalf("unexpected Content-Type %q. Expecting %q", h.contentType, "")
+	}
+}
+
 func TestResponseDateNoDefaultNotEmpty(t *testing.T) {
 	t.Parallel()
 
