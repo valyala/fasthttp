@@ -1919,6 +1919,9 @@ func (c *HostClient) decConnsCount() {
 	if q := c.connsWait; q != nil && q.len() > 0 {
 		for q.len() > 0 {
 			w := q.popFront()
+			if w == nil {
+				break
+			}
 			if w.waiting() {
 				go c.dialConnFor(w)
 				dialed = true
