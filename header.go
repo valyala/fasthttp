@@ -3404,6 +3404,12 @@ func getHeaderKeyBytes(bufK []byte, key string, disableNormalizing bool) []byte 
 }
 
 func normalizeHeaderKey(b []byte, disableNormalizing bool) {
+	// Neutralise any CR/LF in the key so a header name can't break the
+	// message framing, mirroring the value handling in initHeaderValueBytes.
+	// This runs before the early returns below because a key carrying a space
+	// or an otherwise invalid byte skips normalization entirely.
+	b = removeNewLines(b)
+
 	if disableNormalizing {
 		return
 	}
