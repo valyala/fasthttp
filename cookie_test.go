@@ -78,6 +78,81 @@ func TestCookieSettersSanitizeNewLines(t *testing.T) {
 	}
 }
 
+func TestCookieSettersSanitizeSemicolons(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name string
+		set  func(c *Cookie)
+		get  func(c *Cookie) []byte
+	}{
+		{
+			name: "SetKey",
+			set:  func(c *Cookie) { c.SetKey("sid; Secure") },
+			get:  (*Cookie).Key,
+		},
+		{
+			name: "SetKeyBytes",
+			set:  func(c *Cookie) { c.SetKeyBytes([]byte("sid; Secure")) },
+			get:  (*Cookie).Key,
+		},
+		{
+			name: "SetValue",
+			set:  func(c *Cookie) { c.SetValue("abc; Secure") },
+			get:  (*Cookie).Value,
+		},
+		{
+			name: "SetValueBytes",
+			set:  func(c *Cookie) { c.SetValueBytes([]byte("abc; Secure")) },
+			get:  (*Cookie).Value,
+		},
+		{
+			name: "SetDomain",
+			set:  func(c *Cookie) { c.SetDomain("example.com; Secure") },
+			get:  (*Cookie).Domain,
+		},
+		{
+			name: "SetDomainBytes",
+			set:  func(c *Cookie) { c.SetDomainBytes([]byte("example.com; Secure")) },
+			get:  (*Cookie).Domain,
+		},
+		{
+			name: "SetPath",
+			set:  func(c *Cookie) { c.SetPath("/account; Secure") },
+			get:  (*Cookie).Path,
+		},
+		{
+			name: "SetPathBytes",
+			set:  func(c *Cookie) { c.SetPathBytes([]byte("/account; Secure")) },
+			get:  (*Cookie).Path,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var c Cookie
+			c.SetKey("sid")
+			c.SetValue("abc")
+			c.SetDomain("example.com")
+			c.SetPath("/")
+
+			tc.set(&c)
+
+			if strings.Contains(string(tc.get(&c)), ";") {
+				t.Fatalf("%s left a ';' that can inject attributes: %q", tc.name, c.Cookie())
+			}
+
+			var got Cookie
+			if err := got.ParseBytes(c.Cookie()); err != nil {
+				t.Fatalf("cannot parse produced cookie %q: %v", c.Cookie(), err)
+			}
+			if got.Secure() {
+				t.Fatalf("%s injected a Secure attribute: %q", tc.name, c.Cookie())
+			}
+		})
+	}
+}
+
 func TestCookieParseSanitizesNewLines(t *testing.T) {
 	t.Parallel()
 
