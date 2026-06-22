@@ -454,6 +454,11 @@ const FSCompressedFileSuffix = ".fasthttp.gz"
 // FSCompressedFileSuffixes is the suffixes FS adds to the original file names depending on encoding
 // when trying to store compressed file under the new file name.
 // See FS.Compress for details.
+//
+// This map is read during FSHandler initialization (which runs in a sync.Once).
+// It is not safe for concurrent modification. Set any custom suffixes in an
+// init() function or before the first call to FS.NewRequestHandler, and do not
+// modify the map afterwards.
 var FSCompressedFileSuffixes = map[string]string{
 	"gzip": ".fasthttp.gz",
 	"br":   ".fasthttp.br",
