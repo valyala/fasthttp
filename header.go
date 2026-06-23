@@ -2613,7 +2613,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	}
 
 	contentType := h.ContentType()
-	if !h.noDefaultContentType && len(contentType) == 0 && h.ContentLength() != 0 {
+	if !h.noDefaultContentType && len(contentType) == 0 && h.ContentLength() > 0 {
 		contentType = strDefaultContentType
 	}
 	if len(contentType) > 0 && !h.disableSpecialHeader {
