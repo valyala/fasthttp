@@ -2383,6 +2383,50 @@ func TestTrailerParsingSecurityFix(t *testing.T) {
 	}
 }
 
+func TestTrailerValueControlBytesRejected(t *testing.T) {
+	t.Parallel()
+
+	// Trailer values carrying control bytes must be rejected, matching the
+	// validation the regular header parsers apply to header values. Without
+	// this an undeclared trailer is merged into the header set and re-emitted
+	// verbatim, so a bare CR slips into the serialised header block.
+	badTrailers := []string{
+		"X-Foo: a\rb\r\n\r\n",
+		"X-Foo: a\x00b\r\n\r\n",
+		"X-Foo: a\x01b\r\n\r\n",
+	}
+
+	for i, trailer := range badTrailers {
+		t.Run("Request_"+strconv.Itoa(i), func(t *testing.T) {
+			var h RequestHeader
+			err := h.ReadTrailer(bufio.NewReader(bytes.NewBufferString(trailer)))
+			if err == nil {
+				t.Fatalf("expected error for trailer value with control byte: %q", trailer)
+			}
+			if !strings.Contains(err.Error(), "invalid trailer value") {
+				t.Fatalf("expected 'invalid trailer value' error for %q, got: %v", trailer, err)
+			}
+		})
+
+		t.Run("Response_"+strconv.Itoa(i), func(t *testing.T) {
+			var h ResponseHeader
+			err := h.ReadTrailer(bufio.NewReader(bytes.NewBufferString(trailer)))
+			if err == nil {
+				t.Fatalf("expected error for trailer value with control byte: %q", trailer)
+			}
+			if !strings.Contains(err.Error(), "invalid trailer value") {
+				t.Fatalf("expected 'invalid trailer value' error for %q, got: %v", trailer, err)
+			}
+		})
+	}
+
+	// A normal trailer value is still accepted.
+	var h RequestHeader
+	if err := h.ReadTrailer(bufio.NewReader(bytes.NewBufferString("X-Foo: bar\r\n\r\n"))); err != nil && err != io.EOF {
+		t.Fatalf("unexpected error for safe trailer value: %v", err)
+	}
+}
+
 func TestResponseHeaderCookie(t *testing.T) {
 	t.Parallel()
 
