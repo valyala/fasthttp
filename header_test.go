@@ -3506,6 +3506,9 @@ func TestRequestHeaderReadError(t *testing.T) {
 	// post with duplicate content-length
 	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nContent-Type: s\r\nContent-Length: 13\r\nContent-Length: 1\r\n\r\n")
 
+	// post with duplicate transfer-encoding
+	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+
 	// invalid Content-Length with Transfer-Encoding
 	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nContent-Length: nope\r\nTransfer-Encoding: chunked\r\n\r\n")
 	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nTransfer-Encoding: chunked\r\nContent-Length: nope\r\n\r\n")

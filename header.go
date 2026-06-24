@@ -3142,6 +3142,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 	h.contentLength = -2
 
 	contentLengthSeen := false
+	transferEncodingSeen := false
 	hostSeen := false
 
 	var s headerScanner
@@ -3203,6 +3204,14 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 		case 't':
 			if caseInsensitiveCompare(s.key, strTransferEncoding) {
 				isTransferEncoding = true
+				if transferEncodingSeen {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, ErrUnsupportedTransferEncoding
+					}
+					return 0, errors.New("too many Transfer-Encoding headers")
+				}
+				transferEncodingSeen = true
 			}
 		}
 
