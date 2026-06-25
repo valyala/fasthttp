@@ -1771,6 +1771,9 @@ func (s *Server) ListenAndServeUNIX(addr string, mode os.FileMode) error {
 		return err
 	}
 	if err = os.Chmod(addr, mode); err != nil {
+		// Close the listener so the unix socket file descriptor is not
+		// leaked when chmod fails before Serve takes ownership of it.
+		_ = ln.Close()
 		return fmt.Errorf("cannot chmod %#o for %q: %w", mode, addr, err)
 	}
 	return s.Serve(ln)
@@ -1792,7 +1795,14 @@ func (s *Server) ListenAndServeTLS(addr, certFile, keyFile string) error {
 	if err != nil {
 		return err
 	}
-	return s.ServeTLS(ln, certFile, keyFile)
+	// ServeTLS only takes ownership of ln on the serving path; close it
+	// here when it returns an error (e.g. cert loading) so the listener
+	// is not leaked.
+	if err := s.ServeTLS(ln, certFile, keyFile); err != nil {
+		_ = ln.Close()
+		return err
+	}
+	return nil
 }
 
 // ListenAndServeTLSEmbed serves HTTPS requests from the given TCP4 addr.
@@ -1811,7 +1821,14 @@ func (s *Server) ListenAndServeTLSEmbed(addr string, certData, keyData []byte) e
 	if err != nil {
 		return err
 	}
-	return s.ServeTLSEmbed(ln, certData, keyData)
+	// ServeTLSEmbed only takes ownership of ln on the serving path; close
+	// it here when it returns an error (e.g. cert loading) so the listener
+	// is not leaked.
+	if err := s.ServeTLSEmbed(ln, certData, keyData); err != nil {
+		_ = ln.Close()
+		return err
+	}
+	return nil
 }
 
 // ServeTLS serves HTTPS requests from the given listener.
