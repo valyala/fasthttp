@@ -62,7 +62,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 			if sk == fasthttp.HeaderCookie {
 				sv = strings.Clone(sv)
 			}
-			r.Header.Set(sk, sv)
+			r.Header.Add(sk, sv)
 		}
 	}
 
