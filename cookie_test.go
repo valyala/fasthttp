@@ -168,6 +168,26 @@ func TestCookieParseSanitizesNewLines(t *testing.T) {
 	}
 }
 
+func TestCookieParseRejectsInvalidQuotedValue(t *testing.T) {
+	t.Parallel()
+
+	testCases := []string{
+		`session="abc; Domain=evil.com`,
+		`session=abc"; Domain=evil.com`,
+		`session="abc\"; Domain=evil.com`,
+	}
+
+	for _, tc := range testCases {
+		var c Cookie
+		if err := c.Parse(tc); err != ErrInvalidCookieValue {
+			t.Fatalf("unexpected error %v. Expecting %v. Cookie %q", err, ErrInvalidCookieValue, tc)
+		}
+		if len(c.Domain()) != 0 {
+			t.Fatalf("unexpected domain %q parsed from invalid cookie %q", c.Domain(), tc)
+		}
+	}
+}
+
 func TestCookieValueWithEqualAndSpaceChars(t *testing.T) {
 	t.Parallel()
 
@@ -558,6 +578,14 @@ func TestParseRequestCookies(t *testing.T) {
 	testParseRequestCookies(t, "xxx=aa;bb=c; =d; ;;e=g", "xxx=aa; bb=c; d; e=g")
 	testParseRequestCookies(t, "a;b;c; d=1;d=2", "a; b; c; d=1; d=2")
 	testParseRequestCookies(t, "   %D0%B8%D0%B2%D0%B5%D1%82=a%20b%3Bc   ;s%20s=aaa  ", "%D0%B8%D0%B2%D0%B5%D1%82=a%20b%3Bc; s%20s=aaa")
+}
+
+func TestParseRequestCookiesSkipsInvalidQuotedValues(t *testing.T) {
+	t.Parallel()
+
+	testParseRequestCookies(t, `session="abc; admin=true`, "admin=true")
+	testParseRequestCookies(t, `session=abc"; admin=true`, "admin=true")
+	testParseRequestCookies(t, `session="abc\"; admin=true`, "admin=true")
 }
 
 func testParseRequestCookies(t *testing.T, s, expectedS string) {

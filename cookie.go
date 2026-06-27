@@ -375,7 +375,10 @@ func (c *Cookie) WriteTo(w io.Writer) (int64, error) {
 	return int64(n), err
 }
 
-var errNoCookies = errors.New("no cookies found")
+var (
+	ErrNoCookies          = errors.New("no cookies found")
+	ErrInvalidCookieValue = errors.New("invalid cookie value")
+)
 
 // Parse parses Set-Cookie header.
 func (c *Cookie) Parse(src string) error {
@@ -392,7 +395,10 @@ func (c *Cookie) ParseBytes(src []byte) error {
 
 	var k, v []byte
 	if !s.nextRaw(&k, &v) {
-		return errNoCookies
+		return ErrNoCookies
+	}
+	if !validCookieValue(v) {
+		return ErrInvalidCookieValue
 	}
 
 	c.key = initHeaderValueBytes(c.key, k)
@@ -540,7 +546,9 @@ func parseRequestCookies(cookies []argsKV, src []byte) []argsKV {
 	cookies, kv = allocArg(cookies)
 	for s.next(&kv.key, &kv.value) {
 		if len(kv.key) > 0 || len(kv.value) > 0 {
-			cookies, kv = allocArg(cookies)
+			if validCookieValue(kv.value) {
+				cookies, kv = allocArg(cookies)
+			}
 		}
 	}
 	return releaseArg(cookies)
@@ -645,6 +653,10 @@ func decodeCookieArg(dst, src []byte, skipQuotes bool) []byte {
 		}
 	}
 	return append(dst[:0], src...)
+}
+
+func validCookieValue(value []byte) bool {
+	return !bytes.ContainsAny(value, "\";\\")
 }
 
 func trimCookieArgNoCopy(src []byte, skipQuotes bool) []byte {
