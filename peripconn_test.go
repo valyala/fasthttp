@@ -6,22 +6,6 @@ import (
 
 var _ connTLSer = &perIPTLSConn{}
 
-func TestIPxUint32(t *testing.T) {
-	t.Parallel()
-
-	testIPxUint32(t, 0)
-	testIPxUint32(t, 10)
-	testIPxUint32(t, 0x12892392)
-}
-
-func testIPxUint32(t *testing.T, n uint32) {
-	ip := uint322ip(n)
-	nn := ip2uint32(ip)
-	if n != nn {
-		t.Fatalf("Unexpected value=%d for ip=%q. Expected %d", nn, ip, n)
-	}
-}
-
 func TestPerIPConnCounter(t *testing.T) {
 	t.Parallel()
 

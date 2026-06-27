@@ -2,7 +2,6 @@ package fasthttp
 
 import (
 	"crypto/tls"
-	"encoding/binary"
 	"net"
 	"sync"
 )
@@ -117,7 +116,12 @@ func (c *perIPTLSConn) Close() error {
 }
 
 func getUint32IP(c net.Conn) uint32 {
-	return ip2uint32(getConnIP4(c))
+	ip := getConnIP4(c)
+
+	if len(ip) != 4 {
+		return 0
+	}
+	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
 }
 
 func getConnIP4(c net.Conn) net.IP {
@@ -127,17 +131,4 @@ func getConnIP4(c net.Conn) net.IP {
 		return net.IPv4zero
 	}
 	return ipAddr.IP.To4()
-}
-
-func ip2uint32(ip net.IP) uint32 {
-	if len(ip) != 4 {
-		return 0
-	}
-	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
-}
-
-func uint322ip(ip uint32) net.IP {
-	b := make(net.IP, net.IPv4len)
-	binary.BigEndian.PutUint32(b, ip)
-	return b
 }
