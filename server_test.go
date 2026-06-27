@@ -1372,6 +1372,75 @@ func TestServerServeTLSEmbed(t *testing.T) {
 	}
 }
 
+func TestServerListenAndServeTLSClosesListenerOnCertError(t *testing.T) {
+	// Not parallel on purpose: the test binds a specific address and then
+	// rebinds the same address to verify that the listener allocated by
+	// ListenAndServeTLS is closed when ServeTLS fails before handing
+	// ownership of the listener over to Serve.
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err = ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	s := &Server{
+		Handler: func(*RequestCtx) {},
+	}
+
+	// Missing certificate files make ServeTLS return an error before Serve
+	// takes ownership of the listener created by ListenAndServeTLS.
+	if err = s.ListenAndServeTLS(addr, "does-not-exist-cert", "does-not-exist-key"); err == nil {
+		t.Fatal("expected error when serving TLS with missing certificate files")
+	}
+
+	// The listener must have been closed on the error path; otherwise the
+	// address is still in use and rebinding it fails.
+	ln, err = net.Listen("tcp4", addr)
+	if err != nil {
+		t.Fatalf("listener leaked: address %q still in use after serve error: %v", addr, err)
+	}
+	if err = ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestServerListenAndServeTLSEmbedClosesListenerOnCertError(t *testing.T) {
+	// Not parallel on purpose: see TestServerListenAndServeTLSClosesListenerOnCertError.
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	addr := ln.Addr().String()
+	if err = ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	s := &Server{
+		Handler: func(*RequestCtx) {},
+	}
+
+	// Invalid certificate data makes ServeTLSEmbed return an error before
+	// Serve takes ownership of the listener created by ListenAndServeTLSEmbed.
+	if err = s.ListenAndServeTLSEmbed(addr, []byte("invalid cert"), []byte("invalid key")); err == nil {
+		t.Fatal("expected error when serving TLS with invalid certificate data")
+	}
+
+	// The listener must have been closed on the error path; otherwise the
+	// address is still in use and rebinding it fails.
+	ln, err = net.Listen("tcp4", addr)
+	if err != nil {
+		t.Fatalf("listener leaked: address %q still in use after serve error: %v", addr, err)
+	}
+	if err = ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestServerMultipartFormDataRequest(t *testing.T) {
 	t.Parallel()
 
