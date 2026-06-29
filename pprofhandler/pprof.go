@@ -25,9 +25,6 @@ var (
 	tracePath   = []byte("/debug/pprof/trace")
 )
 
-// pprofPrefix is the common prefix for all pprof paths.
-var pprofPrefix = []byte("/debug/pprof/")
-
 // matchPprofPath checks whether path exactly matches a pprof endpoint.
 // It accepts the exact path (e.g. /debug/pprof/heap) or the path with a
 // trailing slash (e.g. /debug/pprof/heap/), matching the behaviour of
