@@ -15,7 +15,7 @@ func TestMatchPprofPath(t *testing.T) {
 		want     bool
 	}{
 		{"exact match", "/debug/pprof/cmdline", "/debug/pprof/cmdline", true},
-		{"trailing slash", "/debug/pprof/cmdline/", "/debug/pprof/cmdline", true},
+		{"trailing slash should not match", "/debug/pprof/cmdline/", "/debug/pprof/cmdline", false},
 		{"prefix mismatch", "/debug/pprof/cmdlineFoo", "/debug/pprof/cmdline", false},
 		{"prefix mismatch profile", "/debug/pprof/profileX", "/debug/pprof/profile", false},
 		{"prefix mismatch symbol", "/debug/pprof/symbolExtra", "/debug/pprof/symbol", false},
@@ -86,25 +86,22 @@ func TestPprofHandlerAcceptsValidPaths(t *testing.T) {
 	}
 }
 
-func TestPprofHandlerAcceptsTrailingSlash(t *testing.T) {
-	// Trailing slash should still route to the correct handler
-	paths := []struct {
-		path        string
-		contentType string
-	}{
-		{"/debug/pprof/cmdline/", "text/plain; charset=utf-8"},
-		{"/debug/pprof/symbol/", "text/plain; charset=utf-8"},
+func TestPprofHandlerRejectsTrailingSlash(t *testing.T) {
+	// Trailing slash should return 404, matching net/http/pprof behavior
+	// which does not register handlers for paths ending in /.
+	paths := []string{
+		"/debug/pprof/cmdline/",
+		"/debug/pprof/symbol/",
 	}
 
-	for _, tt := range paths {
-		t.Run(tt.path, func(t *testing.T) {
+	for _, path := range paths {
+		t.Run(path, func(t *testing.T) {
 			var ctx fasthttp.RequestCtx
-			ctx.Request.SetRequestURI(tt.path)
+			ctx.Request.SetRequestURI(path)
 			PprofHandler(&ctx)
 
-			ct := string(ctx.Response.Header.ContentType())
-			if ct != tt.contentType {
-				t.Errorf("path %q: expected content-type %q, got %q", tt.path, tt.contentType, ct)
+			if ctx.Response.StatusCode() != 404 {
+				t.Errorf("path %q: expected status 404, got %d", path, ctx.Response.StatusCode())
 			}
 		})
 	}
