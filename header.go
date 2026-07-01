@@ -551,33 +551,29 @@ func validHeaderValueByte(c byte) bool {
 	return validHeaderValueByteTable[c] == 1
 }
 
-// isValidHeaderKey returns true if a is a valid header key.
-func isValidHeaderKey(a []byte) bool {
+// isValidHeaderKey returns whether a is a valid header key, and whether a
+// contains a space before its last non-space byte. Such a space survives
+// trailing-whitespace trimming, and a key carrying it is accepted but must
+// not be canonicalized. See https://go.dev/issue/34540 and
+// https://github.com/valyala/fasthttp/issues/1917.
+func isValidHeaderKey(a []byte) (valid, innerSpace bool) {
 	if len(a) == 0 {
-		return false
+		return false, false
 	}
-
-	// See if a looks like a header key. If not, return it unchanged.
-	noCanon := false
+	seenSpace := false
 	for _, c := range a {
-		if validHeaderFieldByte(c) {
-			continue
-		}
-		// Don't canonicalize.
 		if c == ' ' {
-			// We accept invalid headers with a space before the
-			// colon, but must not canonicalize them.
-			// See https://go.dev/issue/34540.
-			noCanon = true
+			seenSpace = true
 			continue
 		}
-		return false
+		if !validHeaderFieldByte(c) {
+			return false, false
+		}
+		if seenSpace {
+			innerSpace = true
+		}
 	}
-	if noCanon {
-		return true
-	}
-
-	return true
+	return true, innerSpace
 }
 
 // VisitHeaderParams calls f for each parameter in the given header bytes.
@@ -1306,9 +1302,10 @@ func (h *RequestHeader) AllInOrder() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		var s headerScanner
 		s.b = h.rawHeaders
+		s.blockEnd = len(h.rawHeaders)
 		for s.next() {
 			s.key = trimTrailingSpace(s.key)
-			normalizeHeaderKey(s.key, h.disableNormalizing || bytes.IndexByte(s.key, ' ') != -1)
+			normalizeHeaderKey(s.key, h.disableNormalizing)
 			if len(s.key) > 0 {
 				if !yield(s.key, s.value) {
 					break
@@ -1343,7 +1340,7 @@ func (h *ResponseHeader) Del(key string) {
 // DelBytes deletes header with the given key.
 func (h *ResponseHeader) DelBytes(key []byte) {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	h.del(h.bufK)
 }
 
@@ -1377,7 +1374,7 @@ func (h *RequestHeader) Del(key string) {
 // DelBytes deletes header with the given key.
 func (h *RequestHeader) DelBytes(key []byte) {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	h.del(h.bufK)
 }
 
@@ -1638,7 +1635,7 @@ func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 // Use AddBytesKV for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	h.SetCanonical(h.bufK, value)
 }
 
@@ -1869,7 +1866,7 @@ func (h *RequestHeader) SetBytesV(key string, value []byte) {
 // Use AddBytesKV for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesKV(key, value []byte) {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	h.SetCanonical(h.bufK, value)
 }
 
@@ -1906,7 +1903,7 @@ func (h *ResponseHeader) Peek(key string) []byte {
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) PeekBytes(key []byte) []byte {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	return h.peek(h.bufK)
 }
 
@@ -1927,7 +1924,7 @@ func (h *RequestHeader) Peek(key string) []byte {
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) PeekBytes(key []byte) []byte {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	return h.peek(h.bufK)
 }
 
@@ -2688,12 +2685,12 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 		return 0, err
 	}
 
-	h.rawHeaders, _, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
+	var rawEnd int
+	h.rawHeaders, rawEnd, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
 	if err != nil {
 		return 0, err
 	}
-	var n int
-	n, err = h.parseHeaders(buf[m:])
+	n, err := h.parseHeaders(buf[m:], rawEnd)
 	if err != nil {
 		return 0, err
 	}
@@ -2712,19 +2709,8 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 		if len(s.key) == 0 {
 			continue
 		}
-		disable := disableNormalizing
-		for _, ch := range s.key {
-			if !validHeaderFieldByte(ch) {
-				// We accept invalid headers with a space before the
-				// colon, but must not canonicalize them.
-				// See: https://github.com/valyala/fasthttp/issues/1917
-				if ch == ' ' {
-					disable = true
-					continue
-				}
-				return dest, 0, fmt.Errorf("invalid trailer key %q", s.key)
-			}
-		}
+		// Key bytes were already validated by the scanner.
+		disable := disableNormalizing || s.keyHasSpace
 		// Forbidden by RFC 7230, section 4.1.2
 		if isBadTrailer(s.key) {
 			return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
@@ -3010,19 +2996,13 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			return 0, fmt.Errorf("invalid header key %q", s.key)
 		}
 
+		// Key bytes were already validated by the scanner. A key containing
+		// a space is tolerated, but must not be canonicalized and closes
+		// the connection.
 		disableNormalizing := h.disableNormalizing
-		for _, ch := range s.key {
-			if !validHeaderFieldByte(ch) {
-				h.connectionClose = true
-				// We accept invalid headers with a space before the
-				// colon, but must not canonicalize them.
-				// See: https://github.com/valyala/fasthttp/issues/1917
-				if ch == ' ' {
-					disableNormalizing = true
-					continue
-				}
-				return 0, fmt.Errorf("invalid header key %q", s.key)
-			}
+		if s.keyHasSpace {
+			h.connectionClose = true
+			disableNormalizing = true
 		}
 		normalizeHeaderKeyValidated(s.key, disableNormalizing)
 
@@ -3143,7 +3123,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	return s.r, nil
 }
 
-func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
+func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 	h.contentLength = -2
 
 	contentLengthSeen := false
@@ -3152,6 +3132,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 
 	var s headerScanner
 	s.b = buf
+	s.blockEnd = blockEnd
 
 	for s.next() {
 		key := s.key
@@ -3166,18 +3147,8 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 			return 0, fmt.Errorf("invalid header key %q", s.key)
 		}
 
-		disableNormalizing := h.disableNormalizing
-		for _, ch := range s.key {
-			if !validHeaderFieldByte(ch) {
-				if ch == ' ' {
-					disableNormalizing = true
-					continue
-				}
-				h.connectionClose = true
-				return 0, fmt.Errorf("invalid header key %q", s.key)
-			}
-		}
-		normalizeHeaderKeyValidated(s.key, disableNormalizing)
+		// Key bytes were already validated by the scanner.
+		normalizeHeaderKeyValidated(s.key, h.disableNormalizing || s.keyHasSpace)
 
 		for _, ch := range s.value {
 			if !validHeaderValueByte(ch) {
@@ -3413,7 +3384,7 @@ func initHeaderValueBytes(bufV, value []byte) []byte {
 
 func getHeaderKeyBytes(bufK []byte, key string, disableNormalizing bool) []byte {
 	bufK = append(bufK[:0], key...)
-	normalizeHeaderKey(bufK, disableNormalizing || bytes.IndexByte(bufK, ' ') != -1)
+	normalizeHeaderKey(bufK, disableNormalizing)
 	return bufK
 }
 
