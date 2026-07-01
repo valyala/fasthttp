@@ -12,6 +12,11 @@ type headerScanner struct {
 	b []byte
 	r int
 
+	// blockEnd is the end of the header block in b when the caller has
+	// already found it (see readRawHeaders), 0 otherwise. next only trusts
+	// it if the block really ends in CRLFCRLF there.
+	blockEnd int
+
 	key   []byte
 	value []byte
 
@@ -25,14 +30,20 @@ func (s *headerScanner) next() bool {
 			return false
 		}
 
-		i := bytes.Index(s.b, strCRLFCRLF)
-		if i < 0 {
-			s.err = ErrNeedMore
-			return false
+		if s.blockEnd >= 4 && s.blockEnd <= len(s.b) &&
+			bytes.Equal(s.b[s.blockEnd-4:s.blockEnd], strCRLFCRLF) {
+			// The caller already found the end of the block, no need to
+			// search for it again. The first CRLFCRLF can only sit at
+			// blockEnd-4 since readRawHeaders stops at the first blank line.
+			s.b = s.b[:s.blockEnd]
+		} else {
+			i := bytes.Index(s.b, strCRLFCRLF)
+			if i < 0 {
+				s.err = ErrNeedMore
+				return false
+			}
+			s.b = s.b[:i+4]
 		}
-		i += 4
-
-		s.b = s.b[:i]
 		if len(s.b) > 0 && (s.b[0] == ' ' || s.b[0] == '\t') {
 			s.err = errors.New("invalid headers, headers cannot start with space or tab")
 			return false
@@ -58,8 +69,11 @@ func (s *headerScanner) next() bool {
 		return false
 	}
 
-	// Skip initial spaces in value.
-	v = bytes.TrimLeft(v, " \t")
+	// Skip initial spaces in value, without bytes.TrimLeft: it would
+	// rebuild its ASCII set on every call.
+	for len(v) > 0 && (v[0] == ' ' || v[0] == '\t') {
+		v = v[1:]
+	}
 
 	s.key = k
 	s.value = v

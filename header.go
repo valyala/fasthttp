@@ -556,27 +556,14 @@ func isValidHeaderKey(a []byte) bool {
 	if len(a) == 0 {
 		return false
 	}
-
-	// See if a looks like a header key. If not, return it unchanged.
-	noCanon := false
 	for _, c := range a {
-		if validHeaderFieldByte(c) {
-			continue
+		// A space is accepted here: we allow invalid headers with a space
+		// before the colon, but they must not be canonicalized.
+		// See https://go.dev/issue/34540.
+		if !validHeaderFieldByte(c) && c != ' ' {
+			return false
 		}
-		// Don't canonicalize.
-		if c == ' ' {
-			// We accept invalid headers with a space before the
-			// colon, but must not canonicalize them.
-			// See https://go.dev/issue/34540.
-			noCanon = true
-			continue
-		}
-		return false
 	}
-	if noCanon {
-		return true
-	}
-
 	return true
 }
 
@@ -1306,9 +1293,10 @@ func (h *RequestHeader) AllInOrder() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		var s headerScanner
 		s.b = h.rawHeaders
+		s.blockEnd = len(h.rawHeaders)
 		for s.next() {
 			s.key = trimTrailingSpace(s.key)
-			normalizeHeaderKey(s.key, h.disableNormalizing || bytes.IndexByte(s.key, ' ') != -1)
+			normalizeHeaderKey(s.key, h.disableNormalizing)
 			if len(s.key) > 0 {
 				if !yield(s.key, s.value) {
 					break
@@ -1343,7 +1331,7 @@ func (h *ResponseHeader) Del(key string) {
 // DelBytes deletes header with the given key.
 func (h *ResponseHeader) DelBytes(key []byte) {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	h.del(h.bufK)
 }
 
@@ -1377,7 +1365,7 @@ func (h *RequestHeader) Del(key string) {
 // DelBytes deletes header with the given key.
 func (h *RequestHeader) DelBytes(key []byte) {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	h.del(h.bufK)
 }
 
@@ -1638,7 +1626,7 @@ func (h *ResponseHeader) SetBytesV(key string, value []byte) {
 // Use AddBytesKV for setting multiple header values under the same key.
 func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	h.SetCanonical(h.bufK, value)
 }
 
@@ -1869,7 +1857,7 @@ func (h *RequestHeader) SetBytesV(key string, value []byte) {
 // Use AddBytesKV for setting multiple header values under the same key.
 func (h *RequestHeader) SetBytesKV(key, value []byte) {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	h.SetCanonical(h.bufK, value)
 }
 
@@ -1906,7 +1894,7 @@ func (h *ResponseHeader) Peek(key string) []byte {
 // Do not store references to returned value. Make copies instead.
 func (h *ResponseHeader) PeekBytes(key []byte) []byte {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	return h.peek(h.bufK)
 }
 
@@ -1927,7 +1915,7 @@ func (h *RequestHeader) Peek(key string) []byte {
 // Do not store references to returned value. Make copies instead.
 func (h *RequestHeader) PeekBytes(key []byte) []byte {
 	h.bufK = append(h.bufK[:0], key...)
-	normalizeHeaderKey(h.bufK, h.disableNormalizing || bytes.IndexByte(key, ' ') != -1)
+	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	return h.peek(h.bufK)
 }
 
@@ -2688,12 +2676,12 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 		return 0, err
 	}
 
-	h.rawHeaders, _, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
+	var rawEnd int
+	h.rawHeaders, rawEnd, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
 	if err != nil {
 		return 0, err
 	}
-	var n int
-	n, err = h.parseHeaders(buf[m:])
+	n, err := h.parseHeaders(buf[m:], rawEnd)
 	if err != nil {
 		return 0, err
 	}
@@ -3143,7 +3131,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	return s.r, nil
 }
 
-func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
+func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 	h.contentLength = -2
 
 	contentLengthSeen := false
@@ -3152,6 +3140,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 
 	var s headerScanner
 	s.b = buf
+	s.blockEnd = blockEnd
 
 	for s.next() {
 		key := s.key
@@ -3413,7 +3402,7 @@ func initHeaderValueBytes(bufV, value []byte) []byte {
 
 func getHeaderKeyBytes(bufK []byte, key string, disableNormalizing bool) []byte {
 	bufK = append(bufK[:0], key...)
-	normalizeHeaderKey(bufK, disableNormalizing || bytes.IndexByte(bufK, ' ') != -1)
+	normalizeHeaderKey(bufK, disableNormalizing)
 	return bufK
 }
 
