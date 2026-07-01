@@ -551,20 +551,29 @@ func validHeaderValueByte(c byte) bool {
 	return validHeaderValueByteTable[c] == 1
 }
 
-// isValidHeaderKey returns true if a is a valid header key.
-func isValidHeaderKey(a []byte) bool {
+// isValidHeaderKey returns whether a is a valid header key, and whether a
+// contains a space before its last non-space byte. Such a space survives
+// trailing-whitespace trimming, and a key carrying it is accepted but must
+// not be canonicalized. See https://go.dev/issue/34540 and
+// https://github.com/valyala/fasthttp/issues/1917.
+func isValidHeaderKey(a []byte) (valid, innerSpace bool) {
 	if len(a) == 0 {
-		return false
+		return false, false
 	}
+	seenSpace := false
 	for _, c := range a {
-		// A space is accepted here: we allow invalid headers with a space
-		// before the colon, but they must not be canonicalized.
-		// See https://go.dev/issue/34540.
-		if !validHeaderFieldByte(c) && c != ' ' {
-			return false
+		if c == ' ' {
+			seenSpace = true
+			continue
+		}
+		if !validHeaderFieldByte(c) {
+			return false, false
+		}
+		if seenSpace {
+			innerSpace = true
 		}
 	}
-	return true
+	return true, innerSpace
 }
 
 // VisitHeaderParams calls f for each parameter in the given header bytes.
@@ -2700,19 +2709,8 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 		if len(s.key) == 0 {
 			continue
 		}
-		disable := disableNormalizing
-		for _, ch := range s.key {
-			if !validHeaderFieldByte(ch) {
-				// We accept invalid headers with a space before the
-				// colon, but must not canonicalize them.
-				// See: https://github.com/valyala/fasthttp/issues/1917
-				if ch == ' ' {
-					disable = true
-					continue
-				}
-				return dest, 0, fmt.Errorf("invalid trailer key %q", s.key)
-			}
-		}
+		// Key bytes were already validated by the scanner.
+		disable := disableNormalizing || s.keyHasSpace
 		// Forbidden by RFC 7230, section 4.1.2
 		if isBadTrailer(s.key) {
 			return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
@@ -2998,19 +2996,13 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			return 0, fmt.Errorf("invalid header key %q", s.key)
 		}
 
+		// Key bytes were already validated by the scanner. A key containing
+		// a space is tolerated, but must not be canonicalized and closes
+		// the connection.
 		disableNormalizing := h.disableNormalizing
-		for _, ch := range s.key {
-			if !validHeaderFieldByte(ch) {
-				h.connectionClose = true
-				// We accept invalid headers with a space before the
-				// colon, but must not canonicalize them.
-				// See: https://github.com/valyala/fasthttp/issues/1917
-				if ch == ' ' {
-					disableNormalizing = true
-					continue
-				}
-				return 0, fmt.Errorf("invalid header key %q", s.key)
-			}
+		if s.keyHasSpace {
+			h.connectionClose = true
+			disableNormalizing = true
 		}
 		normalizeHeaderKeyValidated(s.key, disableNormalizing)
 
@@ -3155,18 +3147,8 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 			return 0, fmt.Errorf("invalid header key %q", s.key)
 		}
 
-		disableNormalizing := h.disableNormalizing
-		for _, ch := range s.key {
-			if !validHeaderFieldByte(ch) {
-				if ch == ' ' {
-					disableNormalizing = true
-					continue
-				}
-				h.connectionClose = true
-				return 0, fmt.Errorf("invalid header key %q", s.key)
-			}
-		}
-		normalizeHeaderKeyValidated(s.key, disableNormalizing)
+		// Key bytes were already validated by the scanner.
+		normalizeHeaderKeyValidated(s.key, h.disableNormalizing || s.keyHasSpace)
 
 		for _, ch := range s.value {
 			if !validHeaderValueByte(ch) {

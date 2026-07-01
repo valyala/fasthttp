@@ -20,6 +20,10 @@ type headerScanner struct {
 	key   []byte
 	value []byte
 
+	// keyHasSpace reports whether key contains a space that survives
+	// trailing-whitespace trimming; such keys must not be canonicalized.
+	keyHasSpace bool
+
 	err error
 }
 
@@ -52,22 +56,20 @@ func (s *headerScanner) next() bool {
 		s.initialized = true
 	}
 
-	kv, err := s.readContinuedLineSlice()
+	kv, colon, err := s.readContinuedLineSlice()
 	if len(kv) == 0 {
 		s.err = err
 		return false
 	}
 
-	// Key ends at first colon.
-	k, v, ok := bytes.Cut(kv, strColon)
-	if !ok {
+	// Key ends at the first colon, already found by readContinuedLineSlice.
+	k, v := kv[:colon], kv[colon+1:]
+	valid, innerSpace := isValidHeaderKey(k)
+	if !valid {
 		s.err = fmt.Errorf("malformed MIME header line: %q", kv)
 		return false
 	}
-	if !isValidHeaderKey(k) {
-		s.err = fmt.Errorf("malformed MIME header line: %q", kv)
-		return false
-	}
+	s.keyHasSpace = innerSpace
 
 	// Skip initial spaces in value, without bytes.TrimLeft: it would
 	// rebuild its ASCII set on every call.
@@ -86,54 +88,45 @@ func (s *headerScanner) next() bool {
 	return true
 }
 
-// readLine reads a line from b, starting at s.r, and returns it.
-func (s *headerScanner) readLine() (line []byte) {
-	searchStart := 0
-
-	for {
-		if i := bytes.IndexByte(s.b[s.r+searchStart:], '\n'); i >= 0 {
-			i += searchStart
-			line = s.b[s.r : s.r+i+1]
-			s.r += i + 1
-			break
-		}
-
-		searchStart = len(s.b) - s.r
-	}
-
-	if len(line) == 0 {
+// readLine reads a line from b, starting at s.r, and returns it with the
+// trailing \n and a possible preceding \r dropped. b is truncated at the
+// header block terminator, so every line ends in \n.
+func (s *headerScanner) readLine() []byte {
+	i := bytes.IndexByte(s.b[s.r:], '\n')
+	if i < 0 {
 		return nil
 	}
-
-	// drop \n and possible preceding \r
-	if line[len(line)-1] == '\n' {
-		drop := 1
-		if len(line) > 1 && line[len(line)-2] == '\r' {
-			drop = 2
-		}
-		line = line[:len(line)-drop]
+	line := s.b[s.r : s.r+i]
+	s.r += i + 1
+	if i > 0 && line[i-1] == '\r' {
+		line = line[:i-1]
 	}
 	return line
 }
 
 // readContinuedLineSlice reads continued lines from b until it finds a line
 // that does not start with a space or tab, or it reaches the end of b.
-func (s *headerScanner) readContinuedLineSlice() ([]byte, error) {
+// It also returns the position of the first colon in the returned line:
+// the line can never start with a space or tab (the scanner rejects that for
+// the first line and joins such lines into the previous header), so trimming
+// it doesn't shift the colon.
+func (s *headerScanner) readContinuedLineSlice() ([]byte, int, error) {
 	line := s.readLine()
 	if len(line) == 0 { // blank line - no continuation
-		return line, nil
+		return line, -1, nil
 	}
 
-	if bytes.IndexByte(line, ':') < 0 {
-		return nil, fmt.Errorf("malformed MIME header: missing colon: %q", line)
+	colon := bytes.IndexByte(line, ':')
+	if colon < 0 {
+		return nil, -1, fmt.Errorf("malformed MIME header: missing colon: %q", line)
 	}
 
-	// If the line doesn't start with a space or tab, we are done.
+	// If the next line doesn't start with a space or tab, we are done.
 	if len(s.b)-s.r > 1 {
 		peek := s.b[s.r : s.r+2]
 		if len(peek) > 0 && (isASCIILetter(peek[0]) || peek[0] == '\n') ||
 			len(peek) == 2 && peek[0] == '\r' && peek[1] == '\n' {
-			return trim(line), nil
+			return trim(line), colon, nil
 		}
 	}
 
@@ -145,7 +138,7 @@ func (s *headerScanner) readContinuedLineSlice() ([]byte, error) {
 		line := s.readLine()
 		mline = append(mline, trim(line)...)
 	}
-	return mline, nil
+	return mline, colon, nil
 }
 
 // skipSpace skips one or multiple spaces and tabs in b.
