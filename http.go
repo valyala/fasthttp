@@ -2471,7 +2471,36 @@ type httpWriter interface {
 	Write(w *bufio.Writer) error
 }
 
+type chunkedBodyWriter struct {
+	w   *bufio.Writer
+	err error
+}
+
+func (cw *chunkedBodyWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil // an empty chunk marks end-of-stream
+	}
+	if err := writeChunk(cw.w, p); err != nil {
+		cw.err = err
+		return 0, err
+	}
+	return len(p), nil
+}
+
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
+	// Frame buffers directly from an io.WriterTo body to avoid copying
+	// through copyBufPool.
+	if wt, ok := r.(io.WriterTo); ok {
+		cw := chunkedBodyWriter{w: w}
+		if _, err := wt.WriteTo(&cw); err != nil {
+			return err
+		}
+		if cw.err != nil {
+			return cw.err
+		}
+		return writeChunk(w, nil)
+	}
+
 	vbuf := copyBufPool.Get()
 	buf := vbuf.([]byte)
 
