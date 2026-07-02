@@ -115,6 +115,10 @@ func FuzzURIParse(f *testing.F) {
 	f.Add(`http://foobar.com/aaa/bb?cc#dd`)
 	f.Add(`http://google.com?github.com`)
 	f.Add(`http://google.com#@github.com`)
+	// Hosts hiding an uppercase letter and a non-UTF-8 byte behind
+	// percent-encoding, see the host comparison below.
+	f.Add(`http://[%255%2c%2c%2c%2c%4c%2c2c%2c%2c]`)
+	f.Add(`http://aa0aaa%80000000000`)
 
 	f.Fuzz(func(t *testing.T, uri string) {
 		// Limit the size of the URI to avoid OOMs or timeouts.
@@ -141,8 +145,15 @@ func FuzzURIParse(f *testing.F) {
 			return
 		}
 
-		if string(u.Host()) != nu.Host {
-			t.Fatalf("%q: unexpected host: %q. Expecting %q", uri, u.Host(), nu.Host)
+		// fasthttp lowercases the host after unescaping it, net/url keeps
+		// the case of percent-decoded bytes, and the ToLower above cannot
+		// reach them ("%4c" decodes to 'L'). Lower the expectation the same
+		// way fasthttp does; strings.ToLower would mangle non-UTF-8 bytes
+		// like a decoded "%80".
+		expectedHost := []byte(nu.Host)
+		lowercaseBytes(expectedHost)
+		if !bytes.Equal(u.Host(), expectedHost) {
+			t.Fatalf("%q: unexpected host: %q. Expecting %q", uri, u.Host(), expectedHost)
 		}
 		if string(u.QueryString()) != nu.RawQuery {
 			t.Fatalf("%q: unexpected query string: %q. Expecting %q", uri, u.QueryString(), nu.RawQuery)
