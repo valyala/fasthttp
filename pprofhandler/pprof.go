@@ -23,19 +23,22 @@ var (
 // See https://pkg.go.dev/net/http/pprof for details.
 func PprofHandler(ctx *fasthttp.RequestCtx) {
 	ctx.Response.Header.Set("Content-Type", "text/html")
+	path := ctx.Path()
 	switch {
-	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/cmdline")):
+	case bytes.Equal(path, []byte("/debug/pprof/cmdline")):
 		cmdline(ctx)
-	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/profile")):
+	case bytes.Equal(path, []byte("/debug/pprof/profile")):
 		profile(ctx)
-	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/symbol")):
+	case bytes.Equal(path, []byte("/debug/pprof/symbol")):
 		symbol(ctx)
-	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/trace")):
+	case bytes.Equal(path, []byte("/debug/pprof/trace")):
 		trace(ctx)
 	default:
 		for _, v := range rtp.Profiles() {
 			ppName := v.Name()
-			if bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/"+ppName)) {
+			ppPath := "/debug/pprof/" + ppName
+			if bytes.Equal(path, []byte(ppPath)) ||
+				bytes.HasPrefix(path, []byte(ppPath+"/")) {
 				namedHandler := fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Handler(ppName).ServeHTTP)
 				namedHandler(ctx)
 				return
