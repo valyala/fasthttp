@@ -653,7 +653,7 @@ func inflateData(p []byte, maxBodySize int) ([]byte, error) {
 	return bb.B, nil
 }
 
-var ErrContentEncodingUnsupported = errors.New("unsupported Content-Encoding")
+var ErrContentEncodingUnsupported = errors.New("fasthttp: unsupported content-encoding")
 
 // BodyUncompressed returns body data and if needed decompresses it from gzip,
 // deflate, brotli or zstd.
@@ -1085,7 +1085,7 @@ func (req *Request) parsePostArgs() {
 
 // ErrNoMultipartForm means that the request's Content-Type
 // isn't 'multipart/form-data'.
-var ErrNoMultipartForm = errors.New("request Content-Type has bad boundary or is not multipart/form-data")
+var ErrNoMultipartForm = errors.New("fasthttp: request content-type has bad boundary or is not multipart/form-data")
 
 // MultipartForm returns request's multipart form.
 //
@@ -1328,7 +1328,7 @@ const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
 
 // ErrGetOnly is returned when server expects only GET requests,
 // but some other type of request came (Server.GetOnly option is true).
-var ErrGetOnly = errors.New("non-GET request received")
+var ErrGetOnly = errors.New("fasthttp: non-get request received")
 
 // ReadLimitBody reads request from the given r, limiting the body size.
 //
@@ -2665,7 +2665,7 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 
 // ErrBodyTooLarge is returned if either request or response body exceeds
 // the given limit.
-var ErrBodyTooLarge = errors.New("body size exceeds the given limit")
+var ErrBodyTooLarge = errors.New("fasthttp: body size exceeds the given limit")
 
 func copyZeroAllocWithLimit(w io.Writer, r io.Reader, maxBodySize int) (int64, error) {
 	if maxBodySize <= 0 {

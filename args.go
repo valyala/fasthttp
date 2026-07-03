@@ -312,7 +312,7 @@ func (a *Args) HasBytes(key []byte) bool {
 }
 
 // ErrNoArgValue is returned when Args value with the given key is missing.
-var ErrNoArgValue = errors.New("no Args value for the given key")
+var ErrNoArgValue = errors.New("fasthttp: no args value for the given key")
 
 // GetUint returns uint value for the given key.
 func (a *Args) GetUint(key string) (int, error) {
