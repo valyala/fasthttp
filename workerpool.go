@@ -192,7 +192,7 @@ func (wp *workerPool) getCh() *workerChan {
 			return nil
 		}
 		vch := wp.workerChanPool.Get()
-		ch = vch.(*workerChan)
+		ch = vch.(*workerChan) //nolint:forcetypeassert
 		go func() {
 			wp.workerFunc(ch)
 			wp.workerChanPool.Put(vch)

@@ -15,7 +15,7 @@ import (
 // Release the URI with ReleaseURI after the URI is no longer needed.
 // This allows reducing GC load.
 func AcquireURI() *URI {
-	return uriPool.Get().(*URI)
+	return uriPool.Get().(*URI) //nolint:forcetypeassert
 }
 
 // ReleaseURI releases the URI acquired via AcquireURI.

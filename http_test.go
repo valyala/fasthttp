@@ -3277,7 +3277,7 @@ func TestResponseBodyStream(t *testing.T) {
 				for x := range 10 {
 					time.Sleep(time.Millisecond)
 					writer.Write([]byte(strconv.Itoa(x))) //nolint:errcheck
-					writer.(http.Flusher).Flush()
+					writer.(http.Flusher).Flush()         //nolint:forcetypeassert
 				}
 				return
 			}
@@ -3515,7 +3515,7 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 	resp.Header.SetContentType("text/plain")
 	resp.SetBodyStream(rs, -1)
 	resp.gzipBody(CompressDefaultCompression)
-	compressedStream := resp.bodyStream.(*compressedBodyStream)
+	compressedStream := resp.bodyStream.(*compressedBodyStream) //nolint:forcetypeassert
 
 	select {
 	case <-reader.reading:

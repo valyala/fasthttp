@@ -667,7 +667,7 @@ func (ff *fsFile) smallFileReader() io.Reader {
 	if v == nil {
 		v = &fsSmallFileReader{}
 	}
-	r := v.(*fsSmallFileReader)
+	r := v.(*fsSmallFileReader) //nolint:forcetypeassert
 	r.ff = ff
 	r.endPos = ff.contentLength
 	if r.startPos > 0 {
@@ -859,7 +859,7 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 
 	curPos := r.startPos
 	bufv := copyBufPool.Get()
-	buf := bufv.([]byte)
+	buf := bufv.([]byte) //nolint:forcetypeassert
 	for err == nil {
 		tailLen := r.endPos - curPos
 		if tailLen <= 0 {
@@ -1408,14 +1408,14 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		if len(byteRange) > 0 {
 			startPos, endPos, err := ParseByteRange(byteRange, contentLength)
 			if err != nil {
-				_ = r.(io.Closer).Close()
+				_ = r.(io.Closer).Close() //nolint:forcetypeassert
 				ctx.Logger().Printf("cannot parse byte range %q for path=%q: %v", byteRange, path, err)
 				ctx.Error("Range Not Satisfiable", StatusRequestedRangeNotSatisfiable)
 				return
 			}
 
-			if err = r.(byteRangeUpdater).UpdateByteRange(startPos, endPos); err != nil {
-				_ = r.(io.Closer).Close()
+			if err = r.(byteRangeUpdater).UpdateByteRange(startPos, endPos); err != nil { //nolint:forcetypeassert
+				_ = r.(io.Closer).Close() //nolint:forcetypeassert
 				ctx.Logger().Printf("cannot seek byte range %q for path=%q: %v", byteRange, path, err)
 				ctx.Error("Internal Server Error", StatusInternalServerError)
 				return

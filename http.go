@@ -1698,7 +1698,7 @@ func acquireStatsWriter(w io.Writer) *statsWriter {
 			w: w,
 		}
 	}
-	sw := v.(*statsWriter)
+	sw := v.(*statsWriter) //nolint:forcetypeassert
 	sw.w = w
 	return sw
 }
@@ -1716,7 +1716,7 @@ func acquireBufioWriter(w io.Writer) *bufio.Writer {
 	if v == nil {
 		return bufio.NewWriter(w)
 	}
-	bw := v.(*bufio.Writer)
+	bw := v.(*bufio.Writer) //nolint:forcetypeassert
 	bw.Reset(w)
 	return bw
 }
@@ -2420,8 +2420,8 @@ func (req *Request) UserValueBytes(key []byte) any {
 func (req *Request) VisitUserValues(visitor func([]byte, any)) {
 	for i, n := 0, len(req.userValues); i < n; i++ {
 		kv := &req.userValues[i]
-		if _, ok := kv.key.(string); ok {
-			visitor(s2b(kv.key.(string)), kv.value)
+		if key, ok := kv.key.(string); ok {
+			visitor(s2b(key), kv.value)
 		}
 	}
 }
@@ -2473,7 +2473,7 @@ type httpWriter interface {
 
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	vbuf := copyBufPool.Get()
-	buf := vbuf.([]byte)
+	buf := vbuf.([]byte) //nolint:forcetypeassert
 
 	var err error
 	var n int
@@ -2598,7 +2598,7 @@ func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
 	}
 
 	vbuf := copyBufPool.Get()
-	buf := vbuf.([]byte)
+	buf := vbuf.([]byte) //nolint:forcetypeassert
 	n, err := copyBuffer(w, r, buf)
 	copyBufPool.Put(vbuf)
 	return n, err

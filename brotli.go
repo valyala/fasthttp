@@ -28,7 +28,7 @@ func acquireBrotliReader(r io.Reader) (*brotli.Reader, error) {
 	if v == nil {
 		return brotli.NewReader(r), nil
 	}
-	zr := v.(*brotli.Reader)
+	zr := v.(*brotli.Reader) //nolint:forcetypeassert
 	if err := zr.Reset(r); err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func acquireStacklessBrotliWriter(w io.Writer, level int) stackless.Writer {
 			return acquireRealBrotliWriter(w, level)
 		})
 	}
-	sw := v.(stackless.Writer)
+	sw := v.(stackless.Writer) //nolint:forcetypeassert
 	sw.Reset(w)
 	return sw
 }
@@ -70,7 +70,7 @@ func acquireRealBrotliWriter(w io.Writer, level int) *brotli.Writer {
 		zw := brotli.NewWriterLevel(w, level)
 		return zw
 	}
-	zw := v.(*brotli.Writer)
+	zw := v.(*brotli.Writer) //nolint:forcetypeassert
 	zw.Reset(w)
 	return zw
 }
@@ -145,7 +145,7 @@ func stacklessWriteBrotli(ctx any) {
 }
 
 func nonblockingWriteBrotli(ctxv any) {
-	ctx := ctxv.(*compressCtx)
+	ctx := ctxv.(*compressCtx) //nolint:forcetypeassert
 	zw := acquireRealBrotliWriter(ctx.w, ctx.level)
 
 	zw.Write(ctx.p) //nolint:errcheck // no way to handle this error anyway

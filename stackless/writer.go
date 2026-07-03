@@ -120,7 +120,7 @@ func stacklessWriterFunc(ctx any) bool {
 }
 
 func writerFunc(ctx any) {
-	w := ctx.(*writer)
+	w := ctx.(*writer) //nolint:forcetypeassert
 	switch w.op {
 	case opWrite:
 		w.n, w.err = w.zw.Write(w.p)

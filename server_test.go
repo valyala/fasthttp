@@ -3306,7 +3306,7 @@ func TestRequestCtxHijackKeepHijackedConnsKeepsReaderOutOfPool(t *testing.T) {
 	}
 
 	if v := s.readerPool.Get(); v != nil {
-		v.(*bufio.Reader).Reset(secondConn)
+		v.(*bufio.Reader).Reset(secondConn) //nolint:forcetypeassert
 	}
 
 	buf := make([]byte, len("first"))

@@ -1077,7 +1077,7 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 	if chv == nil {
 		chv = make(chan clientURLResponse, 1)
 	}
-	ch = chv.(chan clientURLResponse)
+	ch = chv.(chan clientURLResponse) //nolint:forcetypeassert
 
 	// Note that the request continues execution on ErrTimeout until
 	// client-specific ReadTimeout exceeds. This helps limiting load
@@ -1363,7 +1363,7 @@ func AcquireRequest() *Request {
 	if v == nil {
 		return &Request{}
 	}
-	return v.(*Request)
+	return v.(*Request) //nolint:forcetypeassert
 }
 
 // ReleaseRequest returns req acquired via AcquireRequest to request pool.
@@ -1385,7 +1385,7 @@ func AcquireResponse() *Response {
 	if v == nil {
 		return &Response{}
 	}
-	return v.(*Response)
+	return v.(*Response) //nolint:forcetypeassert
 }
 
 // ReleaseResponse return resp acquired via AcquireResponse to response pool.
@@ -1951,7 +1951,7 @@ func acquireClientConn(conn net.Conn) *clientConn {
 	if v == nil {
 		v = &clientConn{}
 	}
-	cc := v.(*clientConn)
+	cc := v.(*clientConn) //nolint:forcetypeassert
 	cc.c = conn
 	cc.createdTime = time.Now()
 	return cc
@@ -2017,7 +2017,7 @@ func (c *HostClient) AcquireWriter(conn net.Conn) *bufio.Writer {
 		return bufio.NewWriterSize(conn, n)
 	}
 
-	bw := v.(*bufio.Writer)
+	bw := v.(*bufio.Writer) //nolint:forcetypeassert
 	bw.Reset(conn)
 	return bw
 }
@@ -2045,7 +2045,7 @@ func (c *HostClient) AcquireReader(conn net.Conn) *bufio.Reader {
 		return bufio.NewReaderSize(conn, n)
 	}
 
-	br := v.(*bufio.Reader)
+	br := v.(*bufio.Reader) //nolint:forcetypeassert
 	br.Reset(conn)
 	return br
 }
@@ -2683,7 +2683,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 func (c *pipelineConnClient) acquirePipelineWork(timeout time.Duration) (w *pipelineWork) {
 	v := c.workPool.Get()
 	if v != nil {
-		w = v.(*pipelineWork)
+		w = v.(*pipelineWork) //nolint:forcetypeassert
 	} else {
 		w = &pipelineWork{
 			done: make(chan struct{}, 1),

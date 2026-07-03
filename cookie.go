@@ -42,7 +42,7 @@ const (
 // The returned object may be returned back to the pool with ReleaseCookie.
 // This allows reducing GC load.
 func AcquireCookie() *Cookie {
-	return cookiePool.Get().(*Cookie)
+	return cookiePool.Get().(*Cookie) //nolint:forcetypeassert
 }
 
 // ReleaseCookie returns the Cookie object acquired with AcquireCookie back
