@@ -22,7 +22,7 @@ var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 // ErrAlreadyServing is deprecated.
 //
 // Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
-var ErrAlreadyServing = errors.New("Server is already serving connections")
+var ErrAlreadyServing = errors.New("server is already serving connections")
 
 // ServeConn serves HTTP requests from the given connection
 // using the given handler.
@@ -1909,7 +1909,7 @@ func loadX509KeyPair(certFile, keyFile string) (tls.Certificate, error) {
 
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %w", certFile, keyFile, err)
+		return tls.Certificate{}, fmt.Errorf("cannot load tls key pair from cert file=%q and key file=%q: %w", certFile, keyFile, err)
 	}
 	return cert, nil
 }
@@ -1935,7 +1935,7 @@ func x509KeyPair(certData, keyData []byte) (tls.Certificate, error) {
 
 	cert, err := tls.X509KeyPair(certData, keyData)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("cannot load TLS key pair from the provided certData(%d) and keyData(%d): %w",
+		return tls.Certificate{}, fmt.Errorf("cannot load tls key pair from the provided cert data(%d) and key data(%d): %w",
 			len(certData), len(keyData), err)
 	}
 	return cert, nil
@@ -2179,7 +2179,7 @@ var (
 
 	// ErrConcurrencyLimit may be returned from ServeConn if the number
 	// of concurrently served connections exceeds Server.Concurrency.
-	ErrConcurrencyLimit = errors.New("cannot serve the connection because Server.Concurrency concurrent connections are served")
+	ErrConcurrencyLimit = errors.New("cannot serve the connection because server concurrency limit is reached")
 )
 
 // ServeConn serves HTTP requests from the given connection.

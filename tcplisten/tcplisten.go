@@ -92,18 +92,18 @@ func (cfg *Config) fdSetup(fd int, sa unix.Sockaddr, addr string) error {
 	var err error
 
 	if err = unix.SetsockoptInt(fd, unix.SOL_SOCKET, unix.SO_REUSEADDR, 1); err != nil {
-		return fmt.Errorf("cannot enable SO_REUSEADDR: %w", err)
+		return fmt.Errorf("cannot enable so_reuseaddr: %w", err)
 	}
 
 	// This should disable Nagle's algorithm in all accepted sockets by default.
 	// Users may enable it with net.TCPConn.SetNoDelay(false).
 	if err = unix.SetsockoptInt(fd, unix.IPPROTO_TCP, unix.TCP_NODELAY, 1); err != nil {
-		return fmt.Errorf("cannot disable Nagle's algorithm: %w", err)
+		return fmt.Errorf("cannot disable nagle's algorithm: %w", err)
 	}
 
 	if cfg.ReusePort {
 		if err = unix.SetsockoptInt(fd, unix.SOL_SOCKET, soReusePort, 1); err != nil {
-			return fmt.Errorf("cannot enable SO_REUSEPORT: %w", err)
+			return fmt.Errorf("cannot enable so_reuseport: %w", err)
 		}
 	}
 

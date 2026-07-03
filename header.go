@@ -474,12 +474,12 @@ var (
 	ErrMissingRequestMethod          = errors.New("cannot find http request method")
 	ErrUnsupportedRequestMethod      = errors.New("unsupported http request method")
 	ErrExtraWhitespaceInRequestLine  = errors.New("extra whitespace in request line")
-	ErrEmptyRequestURI               = errors.New("requestURI cannot be empty")
-	ErrDuplicateContentLength        = errors.New("duplicate Content-Length header")
-	ErrUnsupportedTransferEncoding   = errors.New("unsupported Transfer-Encoding")
+	ErrEmptyRequestURI               = errors.New("request uri cannot be empty")
+	ErrDuplicateContentLength        = errors.New("duplicate content-length header")
+	ErrUnsupportedTransferEncoding   = errors.New("unsupported transfer-encoding")
 	ErrNonNumericChars               = errors.New("non-numeric chars found")
 	ErrNeedMore                      = errors.New("need more data: cannot find trailing lf")
-	ErrSmallReadBuffer               = errors.New("small read buffer. Increase ReadBufferSize")
+	ErrSmallReadBuffer               = errors.New("small read buffer: increase read buffer size")
 )
 
 // AddTrailerBytes add Trailer header value for chunked response
@@ -2270,9 +2270,9 @@ func headerError(typ string, err, errParse error, b []byte, secureErrorLogMessag
 
 func headerErrorMsg(typ string, err error, b []byte, secureErrorLogMessage bool) error {
 	if secureErrorLogMessage {
-		return fmt.Errorf("error when reading %s headers: %w. Buffer size=%d", typ, err, len(b))
+		return fmt.Errorf("error when reading %s headers: %w: buffer size=%d", typ, err, len(b))
 	}
-	return fmt.Errorf("error when reading %s headers: %w. Buffer size=%d, contents: %s", typ, err, len(b), bufferSnippet(b))
+	return fmt.Errorf("error when reading %s headers: %w: buffer size=%d, contents: %s", typ, err, len(b), bufferSnippet(b))
 }
 
 // Read reads request header from r.
@@ -2315,7 +2315,7 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		// This is for go 1.6 bug. See https://github.com/golang/go/issues/14121 .
 		if err == bufio.ErrBufferFull {
 			return &ErrSmallBuffer{
-				error: fmt.Errorf("error when reading request headers: %w (n=%d, r.Buffered()=%d)", ErrSmallReadBuffer, n, r.Buffered()),
+				error: fmt.Errorf("error when reading request headers: %w (n=%d, reader buffered=%d)", ErrSmallReadBuffer, n, r.Buffered()),
 			}
 		}
 
@@ -2843,20 +2843,20 @@ func (h *ResponseHeader) parseFirstLine(buf []byte) (int, error) {
 		if h.secureErrorLogMessage {
 			return 0, ErrUnexpectedStatusCodeChar
 		}
-		return 0, fmt.Errorf("invalid response status code %q. Response %q", statusCode, buf)
+		return 0, fmt.Errorf("invalid response status code %q: response %q", statusCode, buf)
 	}
 	h.statusCode, n, err = parseUintBuf(statusCode)
 	if err != nil || n != 3 {
 		if h.secureErrorLogMessage {
 			return 0, ErrUnexpectedStatusCodeChar
 		}
-		return 0, fmt.Errorf("invalid response status code %q. Response %q", statusCode, buf)
+		return 0, fmt.Errorf("invalid response status code %q: response %q", statusCode, buf)
 	}
 	if !isHTTPVersion(protoStr) {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+			return 0, fmt.Errorf("unsupported http version %q", protoStr)
 		}
-		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+		return 0, fmt.Errorf("unsupported http version %q in %q", protoStr, buf)
 	}
 	h.noHTTP11 = !bytes.Equal(protoStr, strHTTP11)
 	h.protocol = append(h.protocol[:0], protoStr...)
@@ -2913,23 +2913,23 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 
 	if !isHTTPVersion(protoStr) {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("unsupported HTTP version %q", protoStr)
+			return 0, fmt.Errorf("unsupported http version %q", protoStr)
 		}
-		return 0, fmt.Errorf("unsupported HTTP version %q in %q", protoStr, buf)
+		return 0, fmt.Errorf("unsupported http version %q in %q", protoStr, buf)
 	}
 
 	if n == 0 {
 		if h.secureErrorLogMessage {
 			return 0, ErrEmptyRequestURI
 		}
-		return 0, fmt.Errorf("requestURI cannot be empty in %q", buf)
+		return 0, fmt.Errorf("request uri cannot be empty in %q", buf)
 	}
 
 	if err := validateRequestURI(h.method, b[:n]); err != nil {
 		if h.secureErrorLogMessage {
-			return 0, fmt.Errorf("invalid requestURI %q", b[:n])
+			return 0, fmt.Errorf("invalid request uri %q", b[:n])
 		}
-		return 0, fmt.Errorf("invalid requestURI %q in %q: %w", b[:n], buf, err)
+		return 0, fmt.Errorf("invalid request uri %q in %q: %w", b[:n], buf, err)
 	}
 
 	h.noHTTP11 = !bytes.Equal(protoStr, strHTTP11)
@@ -3092,7 +3092,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, errors.New("too many Transfer-Encoding headers")
+					return 0, errors.New("too many transfer-encoding headers")
 				}
 				transferEncodingSeen = true
 				if !caseInsensitiveCompare(s.value, strChunked) {
@@ -3100,7 +3100,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
+					return 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
 				}
 				h.contentLength = -1
 				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
@@ -3214,7 +3214,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, errors.New("too many Transfer-Encoding headers")
+					return 0, errors.New("too many transfer-encoding headers")
 				}
 				transferEncodingSeen = true
 			}
@@ -3230,7 +3230,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 			if caseInsensitiveCompare(s.key, strHost) {
 				if hostSeen {
 					h.connectionClose = true
-					return 0, errors.New("too many Host headers")
+					return 0, errors.New("too many host headers")
 				}
 				hostSeen = true
 				h.host = append(h.host[:0], s.value...)
@@ -3272,7 +3272,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (int, error) {
 					if h.secureErrorLogMessage {
 						return 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, fmt.Errorf("unsupported Transfer-Encoding: %q", s.value)
+					return 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
 				}
 
 				if isChunked {
@@ -3332,10 +3332,10 @@ func (h *RequestHeader) collectCookies() {
 func parseContentLength(b []byte) (int, error) {
 	v, n, err := parseUintBuf(b)
 	if err != nil {
-		return -1, fmt.Errorf("cannot parse Content-Length: %w", err)
+		return -1, fmt.Errorf("cannot parse content-length: %w", err)
 	}
 	if n != len(b) {
-		return -1, fmt.Errorf("cannot parse Content-Length: %w", ErrNonNumericChars)
+		return -1, fmt.Errorf("cannot parse content-length: %w", ErrNonNumericChars)
 	}
 	return v, nil
 }

@@ -45,18 +45,18 @@ var (
 
 	// ErrOverRecovery is returned when child prefork process restarts exceed
 	// the value of RecoverThreshold.
-	ErrOverRecovery = errors.New("exceeding the value of RecoverThreshold")
+	ErrOverRecovery = errors.New("exceeding the value of recover threshold")
 
 	// ErrOnlyReuseportOnWindows is returned when running on Windows without Reuseport.
-	ErrOnlyReuseportOnWindows = errors.New("windows only supports Reuseport = true")
+	ErrOnlyReuseportOnWindows = errors.New("windows only supports reuseport = true")
 
 	// ErrCommandProducerNilCmd is returned when a CommandProducer returns
 	// (nil, nil) instead of a started command.
-	ErrCommandProducerNilCmd = errors.New("prefork: CommandProducer returned nil command")
+	ErrCommandProducerNilCmd = errors.New("prefork: command producer returned nil command")
 
 	// ErrCommandProducerNotStarted is returned when a CommandProducer returns
 	// an *exec.Cmd whose Process is nil (i.e. cmd.Start() was not called).
-	ErrCommandProducerNotStarted = errors.New("prefork: CommandProducer must return a started command")
+	ErrCommandProducerNotStarted = errors.New("prefork: command producer must return a started command")
 )
 
 // Logger is used for logging formatted messages. Its method set is intentionally
@@ -350,7 +350,7 @@ func (p *Prefork) doCommand() (*exec.Cmd, error) {
 	if p.CommandProducer != nil {
 		cmd, err := p.CommandProducer(p.files)
 		if err != nil {
-			return nil, fmt.Errorf("prefork: CommandProducer: %w", err)
+			return nil, fmt.Errorf("prefork: command producer: %w", err)
 		}
 		if cmd == nil {
 			return nil, ErrCommandProducerNilCmd

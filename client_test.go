@@ -431,7 +431,7 @@ func TestPipelineClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected error")
 		}
-		if !strings.Contains(err.Error(), "cannot determine TLS server name") {
+		if !strings.Contains(err.Error(), "cannot determine tls server name") {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	case <-time.After(time.Second):
@@ -2916,7 +2916,7 @@ func TestHostClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error")
 	}
-	if !strings.Contains(err.Error(), "cannot determine TLS server name") {
+	if !strings.Contains(err.Error(), "cannot determine tls server name") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

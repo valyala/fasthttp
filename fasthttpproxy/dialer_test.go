@@ -253,7 +253,7 @@ func TestHTTPProxyDialRejectsTargetAddrContainingNewlines(t *testing.T) {
 	if conn != nil {
 		t.Fatalf("expected nil conn, got %#v", conn)
 	}
-	if !strings.Contains(err.Error(), "CR or LF") {
+	if !strings.Contains(err.Error(), "cr or lf") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if dialed.Load() {

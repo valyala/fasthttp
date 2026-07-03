@@ -50,11 +50,11 @@ func (s *headerScanner) next() bool {
 	// Key ends at first colon.
 	k, v, ok := bytes.Cut(kv, strColon)
 	if !ok {
-		s.err = fmt.Errorf("malformed MIME header line: %q", kv)
+		s.err = fmt.Errorf("malformed mime header line: %q", kv)
 		return false
 	}
 	if !isValidHeaderKey(k) {
-		s.err = fmt.Errorf("malformed MIME header line: %q", kv)
+		s.err = fmt.Errorf("malformed mime header line: %q", kv)
 		return false
 	}
 
@@ -111,7 +111,7 @@ func (s *headerScanner) readContinuedLineSlice() ([]byte, error) {
 	}
 
 	if bytes.IndexByte(line, ':') < 0 {
-		return nil, fmt.Errorf("malformed MIME header: missing colon: %q", line)
+		return nil, fmt.Errorf("malformed mime header: missing colon: %q", line)
 	}
 
 	// If the line doesn't start with a space or tab, we are done.

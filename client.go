@@ -505,7 +505,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	host := uri.Host()
 
 	if bytes.ContainsRune(host, ',') {
-		return fmt.Errorf("invalid host %q. Use HostClient for multiple hosts", host)
+		return fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
 	}
 
 	isTLS := false
@@ -1158,14 +1158,14 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 var (
 	// ErrMissingLocation is returned by clients when the Location header is missing on
 	// an HTTP response with a redirect status code.
-	ErrMissingLocation = errors.New("missing Location header for http redirect")
+	ErrMissingLocation = errors.New("missing location header for http redirect")
 	// ErrTooManyRedirects is returned by clients when the number of redirects followed
 	// exceed the max count.
 	ErrTooManyRedirects = errors.New("too many redirects detected when doing the request")
 
 	// ErrHostClientRedirectToDifferentScheme is returned when a HostClient follows a redirect to a different protocol.
-	ErrHostClientRedirectToDifferentScheme = errors.New("HostClient can't follow redirects to a different protocol," +
-		" please use Client instead")
+	ErrHostClientRedirectToDifferentScheme = errors.New("host client can't follow redirects to a different protocol," +
+		" please use client instead")
 )
 
 const defaultMaxRedirectsCount = 16
@@ -1667,7 +1667,7 @@ var (
 	// or add 'Connection: close' request header before sending requests
 	// to broken server.
 	ErrConnectionClosed = errors.New("the server closed connection before returning the first response byte. " +
-		"Make sure the server returns 'Connection: close' response header before closing the connection")
+		"make sure the server returns 'connection: close' response header before closing the connection")
 
 	// ErrConnPoolStrategyNotImpl is returned when HostClient.ConnPoolStrategy is not implement yet.
 	// If you see this error, then you need to check your HostClient configuration.
@@ -2071,7 +2071,7 @@ func newClientTLSConfig(c *tls.Config, addr string) (*tls.Config, error) {
 			if c.InsecureSkipVerify {
 				return c, nil
 			}
-			return nil, fmt.Errorf("cannot determine TLS server name from addr %q: %w", addr, err)
+			return nil, fmt.Errorf("cannot determine tls server name from addr %q: %w", addr, err)
 		}
 		c.ServerName = serverName
 	}
@@ -2202,7 +2202,7 @@ func dialAddr(
 		return nil, err
 	}
 	if conn == nil {
-		return nil, errors.New("dialling unsuccessful. Please report this bug")
+		return nil, errors.New("dialling unsuccessful: please report this bug")
 	}
 
 	// We assume that any conn that has the Handshake() method is a TLS conn already.
@@ -2855,7 +2855,8 @@ func (c *PipelineClient) newConnClient() *pipelineConnClient {
 
 // ErrPipelineOverflow may be returned from PipelineClient.Do*
 // if the requests' queue is overflowed.
-var ErrPipelineOverflow = errors.New("pipelined requests' queue has been overflowed. Increase MaxConns and/or MaxPendingRequests")
+var ErrPipelineOverflow = errors.New("pipelined requests' queue has been overflowed: " +
+	"increase max conns and/or max pending requests")
 
 // DefaultMaxPendingRequests is the default value
 // for PipelineClient.MaxPendingRequests.
