@@ -502,7 +502,7 @@ func TestBodyDecodeWithLimitTooLarge(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		t.Run(testCase.name+"_request_uncompressed", func(t *testing.T) {
+		t.Run(testCase.name+"/request uncompressed", func(t *testing.T) {
 			var req Request
 			req.Header.SetContentEncoding(testCase.encoding)
 			req.SetBodyRaw(testCase.encode(body))
@@ -512,7 +512,7 @@ func TestBodyDecodeWithLimitTooLarge(t *testing.T) {
 			}
 		})
 
-		t.Run(testCase.name+"_response_uncompressed", func(t *testing.T) {
+		t.Run(testCase.name+"/response uncompressed", func(t *testing.T) {
 			var resp Response
 			resp.Header.SetContentEncoding(testCase.encoding)
 			resp.SetBodyRaw(testCase.encode(body))
@@ -539,7 +539,7 @@ func TestRequestMultipartFormWithLimitGzip(t *testing.T) {
 	formBody := formBodyBuffer.Bytes()
 	gzippedBody := AppendGzipBytes(nil, formBody)
 
-	t.Run("buffered_too_large", func(t *testing.T) {
+	t.Run("buffered too large", func(t *testing.T) {
 		var req Request
 		req.Header.SetMultipartFormBoundary(boundary)
 		req.Header.SetContentEncoding("gzip")
@@ -551,7 +551,7 @@ func TestRequestMultipartFormWithLimitGzip(t *testing.T) {
 		}
 	})
 
-	t.Run("streamed_too_large", func(t *testing.T) {
+	t.Run("streamed too large", func(t *testing.T) {
 		var req Request
 		req.Header.SetMultipartFormBoundary(boundary)
 		req.Header.SetContentEncoding("gzip")
@@ -563,7 +563,7 @@ func TestRequestMultipartFormWithLimitGzip(t *testing.T) {
 		}
 	})
 
-	t.Run("buffered_success", func(t *testing.T) {
+	t.Run("buffered success", func(t *testing.T) {
 		var req Request
 		req.Header.SetMultipartFormBoundary(boundary)
 		req.Header.SetContentEncoding("gzip")
@@ -3736,10 +3736,10 @@ func TestRequestGetTimeOut(t *testing.T) {
 		timeout  time.Duration
 		expected time.Duration
 	}{
-		{"Timeout set to 0", 0, 0},
-		{"Timeout set to 5s", 5 * time.Second, 5 * time.Second},
-		{"Timeout set to 1m", 1 * time.Minute, 1 * time.Minute},
-		{"Timeout set to 500ms", 500 * time.Millisecond, 500 * time.Millisecond},
+		{"timeout set to 0", 0, 0},
+		{"timeout set to 5s", 5 * time.Second, 5 * time.Second},
+		{"timeout set to 1m", 1 * time.Minute, 1 * time.Minute},
+		{"timeout set to 500ms", 500 * time.Millisecond, 500 * time.Millisecond},
 	}
 
 	for _, test := range tests {

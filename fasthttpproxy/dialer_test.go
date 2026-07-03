@@ -13,7 +13,7 @@ import (
 	"golang.org/x/net/http/httpproxy"
 )
 
-func TestDialer_GetDialFunc(t *testing.T) {
+func TestDialerGetDialFunc(t *testing.T) {
 	counts := make([]atomic.Int64, 4)
 	proxyListenPorts := []string{"8001", "8002", "8003", "8004"}
 	lns := startProxyServer(t, proxyListenPorts, counts)
@@ -34,12 +34,12 @@ func TestDialer_GetDialFunc(t *testing.T) {
 		useEnv bool
 	}
 	tests := []struct {
-		name           string
-		fields         fields
-		args           args
-		wantCounts     []int64
-		dialAddr       string
-		wantErrMessage string
+		name               string
+		fields             fields
+		args               args
+		expectedCounts     []int64
+		dialAddr           string
+		expectedErrMessage string
 	}{
 		{
 			name: "proxy information comes from the configuration. dial https host",
@@ -51,8 +51,8 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: false,
 			},
-			wantCounts: []int64{0, 1, 0, 0},
-			dialAddr:   "github.io:443",
+			expectedCounts: []int64{0, 1, 0, 0},
+			dialAddr:       "github.io:443",
 		},
 		{
 			name: "proxy information comes from the configuration. dial http host",
@@ -64,11 +64,11 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: false,
 			},
-			wantCounts: []int64{1, 0, 0, 0},
-			dialAddr:   "github.io:80",
+			expectedCounts: []int64{1, 0, 0, 0},
+			dialAddr:       "github.io:80",
 		},
 		{
-			name: "proxy information comes from the configuration. dial http host matched with noProxy",
+			name: "proxy information comes from the configuration. dial http host matched with no proxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
@@ -77,11 +77,11 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: false,
 			},
-			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "github.com:80",
+			expectedCounts: []int64{0, 0, 0, 0},
+			dialAddr:       "github.com:80",
 		},
 		{
-			name: "proxy information comes from the configuration. dial https host matched with noProxy",
+			name: "proxy information comes from the configuration. dial https host matched with no proxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
@@ -90,8 +90,8 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: false,
 			},
-			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "github.com:443",
+			expectedCounts: []int64{0, 0, 0, 0},
+			dialAddr:       "github.com:443",
 		},
 		{
 			name: "proxy information comes from the env. dial http host",
@@ -103,8 +103,8 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: true,
 			},
-			wantCounts: []int64{0, 0, 1, 0},
-			dialAddr:   "github.io:80",
+			expectedCounts: []int64{0, 0, 1, 0},
+			dialAddr:       "github.io:80",
 		},
 		{
 			name: "proxy information comes from the env. dial https host",
@@ -116,12 +116,12 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: true,
 			},
-			wantCounts: []int64{0, 0, 0, 1},
-			dialAddr:   "github.io:443",
+			expectedCounts: []int64{0, 0, 0, 1},
+			dialAddr:       "github.io:443",
 		},
 
 		{
-			name: "proxy information comes from the env. dial http host matched with noProxy",
+			name: "proxy information comes from the env. dial http host matched with no proxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
@@ -130,11 +130,11 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: true,
 			},
-			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "github.com:80",
+			expectedCounts: []int64{0, 0, 0, 0},
+			dialAddr:       "github.com:80",
 		},
 		{
-			name: "proxy information comes from the env. dial https host matched with noProxy",
+			name: "proxy information comes from the env. dial https host matched with no proxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[1],
@@ -143,11 +143,11 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: true,
 			},
-			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "github.com:443",
+			expectedCounts: []int64{0, 0, 0, 0},
+			dialAddr:       "github.com:443",
 		},
 		{
-			name: "proxy information comes from the configuration and httpProxy same with httpsProxy. dial http host",
+			name: "proxy information comes from the configuration and http proxy same with https proxy. dial http host",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[0],
@@ -156,11 +156,11 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: false,
 			},
-			wantCounts: []int64{1, 0, 0, 0},
-			dialAddr:   "github.io:80",
+			expectedCounts: []int64{1, 0, 0, 0},
+			dialAddr:       "github.io:80",
 		},
 		{
-			name: "proxy information comes from the configuration and httpProxy same with httpsProxy. dial https host",
+			name: "proxy information comes from the configuration and http proxy same with https proxy. dial https host",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[0],
@@ -169,11 +169,11 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: false,
 			},
-			wantCounts: []int64{1, 0, 0, 0},
-			dialAddr:   "github.io:443",
+			expectedCounts: []int64{1, 0, 0, 0},
+			dialAddr:       "github.io:443",
 		},
 		{
-			name: "proxy information comes from the configuration and httpProxy same with httpsProxy. dial http host matched with noProxy",
+			name: "proxy information comes from the configuration and http proxy same with https proxy. dial http host matched with no proxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[0],
@@ -182,11 +182,11 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: false,
 			},
-			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "github.com:80",
+			expectedCounts: []int64{0, 0, 0, 0},
+			dialAddr:       "github.com:80",
 		},
 		{
-			name: "proxy information comes from the configuration and httpProxy same with httpsProxy. dial https host matched with noProxy",
+			name: "proxy information comes from the configuration and http proxy same with https proxy. dial https host matched with no proxy",
 			fields: fields{
 				httpProxy:  "http://127.0.0.1:" + proxyListenPorts[0],
 				httpsProxy: "http://127.0.0.1:" + proxyListenPorts[0],
@@ -195,8 +195,8 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: false,
 			},
-			wantCounts: []int64{0, 0, 0, 0},
-			dialAddr:   "github.com:443",
+			expectedCounts: []int64{0, 0, 0, 0},
+			dialAddr:       "github.com:443",
 		},
 		{
 			name: "return an error for unsupported proxy protocols.",
@@ -207,22 +207,22 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			args: args{
 				useEnv: false,
 			},
-			wantCounts:     []int64{0, 0, 0, 0},
-			dialAddr:       "github.io:80",
-			wantErrMessage: "proxy: unknown scheme: socket6",
+			expectedCounts:     []int64{0, 0, 0, 0},
+			dialAddr:           "github.io:80",
+			expectedErrMessage: "proxy: unknown scheme: socket6",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := getDialer(tt.fields.httpProxy, tt.fields.httpsProxy, tt.fields.noProxy)
 			dialFunc, err := d.GetDialFunc(tt.args.useEnv)
-			if (err != nil) != (tt.wantErrMessage != "") {
-				t.Fatalf("GetDialFunc() error = %v, wantErr %v", err, tt.wantErrMessage)
+			if (err != nil) != (tt.expectedErrMessage != "") {
+				t.Fatalf("GetDialFunc() error = %v, expectedErr %v", err, tt.expectedErrMessage)
 				return
 			}
-			if tt.wantErrMessage != "" {
-				if err.Error() != tt.wantErrMessage {
-					t.Fatalf("want error message: %s, got: %s", err.Error(), tt.wantErrMessage)
+			if tt.expectedErrMessage != "" {
+				if err.Error() != tt.expectedErrMessage {
+					t.Fatalf("expected error message: %s, got: %s", tt.expectedErrMessage, err.Error())
 				}
 				return
 			}
@@ -230,8 +230,8 @@ func TestDialer_GetDialFunc(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !countsEqual(getCounts(counts), tt.wantCounts) {
-				t.Errorf("GetDialFunc() counts = %v, want %v", getCounts(counts), tt.wantCounts)
+			if !countsEqual(getCounts(counts), tt.expectedCounts) {
+				t.Errorf("GetDialFunc() counts = %v, expected %v", getCounts(counts), tt.expectedCounts)
 			}
 		})
 		for i := range counts {

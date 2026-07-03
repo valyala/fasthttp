@@ -51,7 +51,7 @@ func noopChildProducer(t testing.TB) (func(files []*os.File) (*exec.Cmd, error),
 	return produce, cleanup
 }
 
-func Test_IsChild(t *testing.T) {
+func TestIsChild(t *testing.T) {
 	// This test cannot run in parallel — IsChild() reads a process-global env var.
 	if IsChild() {
 		t.Fatal("test starts as child unexpectedly")
@@ -63,7 +63,7 @@ func Test_IsChild(t *testing.T) {
 	}
 }
 
-func Test_setTCPListenerFiles(t *testing.T) {
+func TestSetTCPListenerFiles(t *testing.T) {
 	t.Parallel()
 
 	if runtime.GOOS == "windows" {
@@ -94,11 +94,11 @@ func Test_setTCPListenerFiles(t *testing.T) {
 	}
 }
 
-// Test_setTCPListenerFilesClosesListenerOnFileError verifies that
+// TestSetTCPListenerFilesClosesListenerOnFileError verifies that
 // setTCPListenerFiles closes the bound listener and leaves Prefork.files nil
 // when the duplicate-fd step fails. Injects the failure through tcpListenerFile
 // so no real socket is leaked.
-func Test_setTCPListenerFilesClosesListenerOnFileError(t *testing.T) {
+func TestSetTCPListenerFilesClosesListenerOnFileError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.SkipNow()
 	}
@@ -128,10 +128,10 @@ func Test_setTCPListenerFilesClosesListenerOnFileError(t *testing.T) {
 	}
 }
 
-// Test_childEnv verifies the child environment carries exactly one canonical
+// TestChildEnv verifies the child environment carries exactly one canonical
 // prefork marker: a pre-existing marker (any value) is stripped and replaced,
 // while an unrelated variable that merely shares the prefix is left untouched.
-func Test_childEnv(t *testing.T) {
+func TestChildEnv(t *testing.T) {
 	t.Setenv(preforkChildEnvVariable, "stale")
 	t.Setenv(preforkChildEnvVariable+"_SIBLING", "keep")
 
@@ -160,10 +160,10 @@ func Test_childEnv(t *testing.T) {
 	}
 }
 
-// Test_preforkClosesParentListenerFiles asserts the master closes the duped
+// TestPreforkClosesParentListenerFiles asserts the master closes the duped
 // listener fd it passed to the child after prefork() returns, so the parent
 // process does not leak file descriptors across restarts.
-func Test_preforkClosesParentListenerFiles(t *testing.T) {
+func TestPreforkClosesParentListenerFiles(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.SkipNow()
 	}
@@ -206,10 +206,10 @@ func Test_preforkClosesParentListenerFiles(t *testing.T) {
 	}
 }
 
-// Test_ListenAndServe_Stub_ChildPath drives the child branch of all three
+// TestListenAndServeStubChildPath drives the child branch of all three
 // ListenAndServe* entry points using a stubbed Serve function. It replaces the
 // previous trio of near-identical tests that only validated field assignment.
-func Test_ListenAndServe_Stub_ChildPath(t *testing.T) {
+func TestListenAndServeStubChildPath(t *testing.T) {
 	// child env mutation precludes t.Parallel.
 	t.Setenv(preforkChildEnvVariable, preforkChildEnvValue)
 
@@ -227,28 +227,28 @@ func Test_ListenAndServe_Stub_ChildPath(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		run  func(t *testing.T, p *Prefork, addr string) error
-		want call
+		name     string
+		run      func(t *testing.T, p *Prefork, addr string) error
+		expected call
 	}{
 		{
-			name: "ListenAndServe",
-			run:  func(_ *testing.T, p *Prefork, addr string) error { return p.ListenAndServe(addr) },
-			want: call{listener: true},
+			name:     "listen and serve",
+			run:      func(_ *testing.T, p *Prefork, addr string) error { return p.ListenAndServe(addr) },
+			expected: call{listener: true},
 		},
 		{
-			name: "ListenAndServeTLS",
+			name: "listen and serve tls",
 			run: func(_ *testing.T, p *Prefork, addr string) error {
 				return p.ListenAndServeTLS(addr, "./key", "./cert")
 			},
-			want: call{listener: true, certFile: "./cert", keyFile: "./key"},
+			expected: call{listener: true, certFile: "./cert", keyFile: "./key"},
 		},
 		{
-			name: "ListenAndServeTLSEmbed",
+			name: "listen and serve tls embed",
 			run: func(_ *testing.T, p *Prefork, addr string) error {
 				return p.ListenAndServeTLSEmbed(addr, []byte("certPEM"), []byte("keyPEM"))
 			},
-			want: call{listener: true, certData: "certPEM", keyData: "keyPEM"},
+			expected: call{listener: true, certData: "certPEM", keyData: "keyPEM"},
 		},
 	}
 
@@ -284,28 +284,28 @@ func Test_ListenAndServe_Stub_ChildPath(t *testing.T) {
 				}
 			})
 
-			if got != tc.want {
-				t.Errorf("%s call = %+v, want %+v", tc.name, got, tc.want)
+			if got != tc.expected {
+				t.Errorf("%s call = %+v, expected %+v", tc.name, got, tc.expected)
 			}
 		})
 	}
 }
 
-func Test_doCommand_CommandProducerErrors(t *testing.T) {
+func TestDoCommandCommandProducerErrors(t *testing.T) {
 	t.Parallel()
 
 	producerErr := errors.New("boom")
 	tests := []struct {
-		name    string
-		produce func(files []*os.File) (*exec.Cmd, error)
-		wantErr error
+		name        string
+		produce     func(files []*os.File) (*exec.Cmd, error)
+		expectedErr error
 	}{
 		{
 			name: "producer returns error",
 			produce: func([]*os.File) (*exec.Cmd, error) {
 				return nil, producerErr
 			},
-			wantErr: producerErr,
+			expectedErr: producerErr,
 		},
 		{
 			name: "producer returns nil cmd",
@@ -313,14 +313,14 @@ func Test_doCommand_CommandProducerErrors(t *testing.T) {
 			produce: func([]*os.File) (*exec.Cmd, error) {
 				return nil, nil
 			},
-			wantErr: ErrCommandProducerNilCmd,
+			expectedErr: ErrCommandProducerNilCmd,
 		},
 		{
 			name: "producer returns unstarted cmd",
 			produce: func([]*os.File) (*exec.Cmd, error) {
 				return &exec.Cmd{}, nil
 			},
-			wantErr: ErrCommandProducerNotStarted,
+			expectedErr: ErrCommandProducerNotStarted,
 		},
 	}
 
@@ -335,8 +335,8 @@ func Test_doCommand_CommandProducerErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
-				t.Errorf("err = %v, want errors.Is %v", err, tc.wantErr)
+			if tc.expectedErr != nil && !errors.Is(err, tc.expectedErr) {
+				t.Errorf("err = %v, expected errors.Is %v", err, tc.expectedErr)
 			}
 		})
 	}
@@ -354,9 +354,9 @@ func (l *testLogger) Printf(format string, args ...any) {
 	l.mu.Unlock()
 }
 
-// Test_Prefork_Lifecycle drives prefork() to ErrOverRecovery via
+// TestPreforkLifecycle drives prefork() to ErrOverRecovery via
 // short-lived no-op children and asserts the callback ordering / arguments.
-func Test_Prefork_Lifecycle(t *testing.T) {
+func TestPreforkLifecycle(t *testing.T) {
 	prev := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
 
@@ -471,7 +471,7 @@ func Test_Prefork_Lifecycle(t *testing.T) {
 	}
 }
 
-func Test_Prefork_InitialChildSpawnError(t *testing.T) {
+func TestPreforkInitialChildSpawnError(t *testing.T) {
 	prev := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
 
@@ -501,7 +501,7 @@ func Test_Prefork_InitialChildSpawnError(t *testing.T) {
 	}
 }
 
-func Test_Prefork_OnMasterReadyError(t *testing.T) {
+func TestPreforkOnMasterReadyError(t *testing.T) {
 	prev := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
 
@@ -525,7 +525,7 @@ func Test_Prefork_OnMasterReadyError(t *testing.T) {
 	}
 }
 
-func Test_Prefork_RecoveredChildSpawnError(t *testing.T) {
+func TestPreforkRecoveredChildSpawnError(t *testing.T) {
 	prev := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
 
@@ -564,8 +564,8 @@ func Test_Prefork_RecoveredChildSpawnError(t *testing.T) {
 	}
 }
 
-// Test_Prefork_RecoverInterval verifies the optional backoff delays the respawn.
-func Test_Prefork_RecoverInterval(t *testing.T) {
+// TestPreforkRecoverInterval verifies the optional backoff delays the respawn.
+func TestPreforkRecoverInterval(t *testing.T) {
 	prev := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
 
@@ -594,13 +594,13 @@ func Test_Prefork_RecoverInterval(t *testing.T) {
 	}
 }
 
-// Test_Prefork_ShutdownDoesNotBlockOnRecoverInterval guards against a child
+// TestPreforkShutdownDoesNotBlockOnRecoverInterval guards against a child
 // that already exited (and whose Wait goroutine is parked on the RecoverInterval
 // backoff) holding up shutdown. prefork() returns immediately via an
 // OnMasterReady error while the noop children are sitting in a long backoff;
 // shutdown must cancel the backoff and return promptly instead of waiting for
 // RecoverInterval or ShutdownGracePeriod to elapse.
-func Test_Prefork_ShutdownDoesNotBlockOnRecoverInterval(t *testing.T) {
+func TestPreforkShutdownDoesNotBlockOnRecoverInterval(t *testing.T) {
 	prev := runtime.GOMAXPROCS(2)
 	t.Cleanup(func() { runtime.GOMAXPROCS(prev) })
 

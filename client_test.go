@@ -2061,9 +2061,9 @@ func TestClientRedirectMethodSwitch(t *testing.T) {
 	}
 
 	tests := []struct {
-		method   string
-		path     string
-		wantBody string
+		method       string
+		path         string
+		expectedBody string
 	}{
 		// 303 must always switch a POST to a body-less GET.
 		{MethodPost, "/redirect-303", "GET|"},
@@ -2093,8 +2093,8 @@ func TestClientRedirectMethodSwitch(t *testing.T) {
 			if got := resp.StatusCode(); got != StatusOK {
 				t.Fatalf("unexpected status code: %d", got)
 			}
-			if got := string(resp.Body()); got != tc.wantBody {
-				t.Fatalf("unexpected landing echo %q. Expecting %q", got, tc.wantBody)
+			if got := string(resp.Body()); got != tc.expectedBody {
+				t.Fatalf("unexpected landing echo %q. Expecting %q", got, tc.expectedBody)
 			}
 		})
 	}
@@ -2164,49 +2164,49 @@ func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
 		name        string
 		initialURL  string
 		redirectURL string
-		want        bool
+		expected    bool
 	}{
 		{
 			name:        "same host keeps headers",
 			initialURL:  "http://example.com/foo",
 			redirectURL: "http://example.com/bar",
-			want:        false,
+			expected:    false,
 		},
 		{
 			name:        "subdomain keeps headers",
 			initialURL:  "http://example.com/foo",
 			redirectURL: "https://sub.example.com:8443/bar",
-			want:        false,
+			expected:    false,
 		},
 		{
 			name:        "same host different port keeps headers",
 			initialURL:  "http://example.com/foo",
 			redirectURL: "http://example.com:8080/bar",
-			want:        false,
+			expected:    false,
 		},
 		{
 			name:        "http upgrade keeps headers",
 			initialURL:  "http://example.com/foo",
 			redirectURL: "https://example.com/bar",
-			want:        false,
+			expected:    false,
 		},
 		{
 			name:        "https downgrade keeps headers",
 			initialURL:  "https://example.com/foo",
 			redirectURL: "http://example.com/bar",
-			want:        false,
+			expected:    false,
 		},
 		{
 			name:        "parent domain strips when initial host is subdomain",
 			initialURL:  "http://sub.example.com/foo",
 			redirectURL: "http://example.com/bar",
-			want:        true,
+			expected:    true,
 		},
 		{
 			name:        "unrelated host strips headers",
 			initialURL:  "http://example.com/foo",
 			redirectURL: "http://example.net/bar",
-			want:        true,
+			expected:    true,
 		},
 	}
 
@@ -2217,8 +2217,8 @@ func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
 			var redirectURI URI
 			redirectURI.Update(tc.redirectURL)
 
-			if got := shouldStripSensitiveHeadersOnRedirect(initialHost, redirectURI.Host()); got != tc.want {
-				t.Fatalf("unexpected redirect stripping decision: got %v, want %v", got, tc.want)
+			if got := shouldStripSensitiveHeadersOnRedirect(initialHost, redirectURI.Host()); got != tc.expected {
+				t.Fatalf("unexpected redirect stripping decision: got %v, expected %v", got, tc.expected)
 			}
 		})
 	}
@@ -2498,7 +2498,7 @@ func (r *readTimeoutConn) SetWriteDeadline(d time.Time) error {
 	return nil
 }
 
-func TestClientNonIdempotentRetry_BodyStream(t *testing.T) {
+func TestClientNonIdempotentRetryBodyStream(t *testing.T) {
 	t.Parallel()
 
 	dialsCount := 0
@@ -3721,7 +3721,7 @@ func TestHostClientErrConnPoolStrategyNotImpl(t *testing.T) {
 	}
 }
 
-func Test_AddMissingPort(t *testing.T) {
+func TestAddMissingPort(t *testing.T) {
 	t.Parallel()
 
 	type args struct {
@@ -3729,55 +3729,55 @@ func Test_AddMissingPort(t *testing.T) {
 		isTLS bool
 	}
 	tests := []struct {
-		name string
-		want string
-		args args
+		name     string
+		expected string
+		args     args
 	}{
 		{
-			args: args{addr: "127.1", isTLS: false}, // 127.1 is a short form of 127.0.0.1
-			want: "127.1:80",
+			args:     args{addr: "127.1", isTLS: false}, // 127.1 is a short form of 127.0.0.1
+			expected: "127.1:80",
 		},
 		{
-			args: args{addr: "127.0.0.1", isTLS: false},
-			want: "127.0.0.1:80",
+			args:     args{addr: "127.0.0.1", isTLS: false},
+			expected: "127.0.0.1:80",
 		},
 		{
-			args: args{addr: "127.0.0.1", isTLS: true},
-			want: "127.0.0.1:443",
+			args:     args{addr: "127.0.0.1", isTLS: true},
+			expected: "127.0.0.1:443",
 		},
 		{
-			args: args{addr: "[::1]", isTLS: false},
-			want: "[::1]:80",
+			args:     args{addr: "[::1]", isTLS: false},
+			expected: "[::1]:80",
 		},
 		{
-			args: args{addr: "::1", isTLS: false},
-			want: "::1", // keep as is
+			args:     args{addr: "::1", isTLS: false},
+			expected: "::1", // keep as is
 		},
 		{
-			args: args{addr: "[::1]", isTLS: true},
-			want: "[::1]:443",
+			args:     args{addr: "[::1]", isTLS: true},
+			expected: "[::1]:443",
 		},
 		{
-			args: args{addr: "127.0.0.1:8080", isTLS: false},
-			want: "127.0.0.1:8080",
+			args:     args{addr: "127.0.0.1:8080", isTLS: false},
+			expected: "127.0.0.1:8080",
 		},
 		{
-			args: args{addr: "127.0.0.1:8443", isTLS: true},
-			want: "127.0.0.1:8443",
+			args:     args{addr: "127.0.0.1:8443", isTLS: true},
+			expected: "127.0.0.1:8443",
 		},
 		{
-			args: args{addr: "[::1]:8080", isTLS: false},
-			want: "[::1]:8080",
+			args:     args{addr: "[::1]:8080", isTLS: false},
+			expected: "[::1]:8080",
 		},
 		{
-			args: args{addr: "[::1]:8443", isTLS: true},
-			want: "[::1]:8443",
+			args:     args{addr: "[::1]:8443", isTLS: true},
+			expected: "[::1]:8443",
 		},
 	}
 	for _, tt := range tests {
-		t.Run(tt.want, func(t *testing.T) {
-			if got := AddMissingPort(tt.args.addr, tt.args.isTLS); got != tt.want {
-				t.Errorf("AddMissingPort() = %v, want %v", got, tt.want)
+		t.Run(tt.expected, func(t *testing.T) {
+			if got := AddMissingPort(tt.args.addr, tt.args.isTLS); got != tt.expected {
+				t.Errorf("AddMissingPort() = %v, expected %v", got, tt.expected)
 			}
 		})
 	}
@@ -3855,52 +3855,52 @@ func TestClientTransportEx(t *testing.T) {
 	}
 }
 
-func Test_getRedirectURL(t *testing.T) {
+func TestGetRedirectURL(t *testing.T) {
 	type args struct {
 		baseURL                string
 		location               []byte
 		disablePathNormalizing bool
 	}
 	tests := []struct {
-		name string
-		want string
-		args args
+		name     string
+		expected string
+		args     args
 	}{
 		{
-			name: "Path normalizing enabled, no special characters in path",
+			name: "path normalizing enabled, no special characters in path",
 			args: args{
 				baseURL:                "http://foo.example.com/abc",
 				location:               []byte("http://bar.example.com/def"),
 				disablePathNormalizing: false,
 			},
-			want: "http://bar.example.com/def",
+			expected: "http://bar.example.com/def",
 		},
 		{
-			name: "Path normalizing enabled, special characters in path",
+			name: "path normalizing enabled, special characters in path",
 			args: args{
 				baseURL:                "http://foo.example.com/abc/*/def",
 				location:               []byte("http://bar.example.com/123/*/456"),
 				disablePathNormalizing: false,
 			},
-			want: "http://bar.example.com/123/%2A/456",
+			expected: "http://bar.example.com/123/%2A/456",
 		},
 		{
-			name: "Path normalizing disabled, no special characters in path",
+			name: "path normalizing disabled, no special characters in path",
 			args: args{
 				baseURL:                "http://foo.example.com/abc",
 				location:               []byte("http://bar.example.com/def"),
 				disablePathNormalizing: true,
 			},
-			want: "http://bar.example.com/def",
+			expected: "http://bar.example.com/def",
 		},
 		{
-			name: "Path normalizing disabled, special characters in path",
+			name: "path normalizing disabled, special characters in path",
 			args: args{
 				baseURL:                "http://foo.example.com/abc/*/def",
 				location:               []byte("http://bar.example.com/123/*/456"),
 				disablePathNormalizing: true,
 			},
-			want: "http://bar.example.com/123/*/456",
+			expected: "http://bar.example.com/123/*/456",
 		},
 	}
 	for _, tt := range tests {
@@ -3908,8 +3908,8 @@ func Test_getRedirectURL(t *testing.T) {
 			redirectURI := AcquireURI()
 			got := getRedirectURL(tt.args.baseURL, tt.args.location, tt.args.disablePathNormalizing, redirectURI)
 			ReleaseURI(redirectURI)
-			if got != tt.want {
-				t.Errorf("getRedirectURL() = %v, want %v", got, tt.want)
+			if got != tt.expected {
+				t.Errorf("getRedirectURL() = %v, expected %v", got, tt.expected)
 			}
 		})
 	}
@@ -3929,7 +3929,7 @@ func TestDialTimeout(t *testing.T) {
 		shouldFailFast bool
 	}{
 		{
-			name: "Client should fail after a millisecond due to request timeout",
+			name: "client should fail after a millisecond due to request timeout",
 			client: &Client{
 				// should be ignored due to DialTimeout
 				Dial: func(addr string) (net.Conn, error) {
@@ -3946,7 +3946,7 @@ func TestDialTimeout(t *testing.T) {
 			shouldFailFast: true,
 		},
 		{
-			name: "Client should fail after a second due to no DialTimeout set",
+			name: "client should fail after a second due to no dial timeout set",
 			client: &Client{
 				Dial: func(addr string) (net.Conn, error) {
 					time.Sleep(time.Second)
@@ -3957,7 +3957,7 @@ func TestDialTimeout(t *testing.T) {
 			shouldFailFast: false,
 		},
 		{
-			name: "HostClient should fail after a millisecond due to request timeout",
+			name: "host client should fail after a millisecond due to request timeout",
 			client: &HostClient{
 				// should be ignored due to DialTimeout
 				Dial: func(addr string) (net.Conn, error) {
@@ -3974,7 +3974,7 @@ func TestDialTimeout(t *testing.T) {
 			shouldFailFast: true,
 		},
 		{
-			name: "HostClient should fail after a second due to no DialTimeout set",
+			name: "host client should fail after a second due to no dial timeout set",
 			client: &HostClient{
 				Dial: func(addr string) (net.Conn, error) {
 					time.Sleep(time.Second)
@@ -4255,11 +4255,11 @@ func (t *TransportMock) RoundTrip(hc *HostClient, req *Request, resp *Response) 
 	return t.wrapperFunc(hc, req, resp)
 }
 
-func TestClient_RetryIfErrUpstream(t *testing.T) {
+func TestClientRetryIfErrUpstream(t *testing.T) {
 	t.Parallel()
 	upstreamErr := errors.New("upstream error")
 
-	t.Run("upstream_known", func(t *testing.T) {
+	t.Run("upstream known", func(t *testing.T) {
 		retryIfErrCalled := false
 		c := &Client{
 			Transport: &TransportMock{
@@ -4291,7 +4291,7 @@ func TestClient_RetryIfErrUpstream(t *testing.T) {
 		}
 	})
 
-	t.Run("no_upstream", func(t *testing.T) {
+	t.Run("no upstream", func(t *testing.T) {
 		retryIfErrCalled := false
 		c := &Client{
 			Transport: &TransportMock{

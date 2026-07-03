@@ -150,7 +150,7 @@ func FuzzURIParse(f *testing.F) {
 	})
 }
 
-func FuzzTestHeaderScanner(f *testing.F) {
+func FuzzHeaderScanner(f *testing.F) {
 	f.Add([]byte("Host: example.com\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate\r\n\r\n"))
 	f.Add([]byte("Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 27\r\n\r\nname=John+Doe&age=30"))
 	f.Add([]byte(" 3 :\r\n\r\n"))

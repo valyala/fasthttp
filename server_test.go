@@ -35,7 +35,7 @@ func (c *closerWithRequestCtx) Close() error {
 	return c.closeFunc(c.ctx)
 }
 
-func TestServerCRNLAfterPost_Pipeline(t *testing.T) {
+func TestServerCRNLAfterPostPipeline(t *testing.T) {
 	t.Parallel()
 
 	s := &Server{
