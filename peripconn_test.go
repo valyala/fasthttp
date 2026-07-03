@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-var _ connTLSer = &perIPTLSConn{}
+var _ tlsConn = &perIPTLSConn{}
 
 func TestPerIPConnCounter(t *testing.T) {
 	t.Parallel()

@@ -836,7 +836,7 @@ func (ctx *RequestCtx) RemoveUserValueBytes(key []byte) {
 	ctx.Request.RemoveUserValueBytes(key)
 }
 
-type connTLSer interface {
+type tlsConn interface {
 	Handshake() error
 	ConnectionState() tls.ConnectionState
 }
@@ -845,7 +845,7 @@ type connTLSer interface {
 //
 // tls.Conn is an encrypted connection (aka SSL, HTTPS).
 func (ctx *RequestCtx) IsTLS() bool {
-	// cast to (connTLSer) instead of (*tls.Conn), since it catches
+	// cast to (tlsConn) instead of (*tls.Conn), since it catches
 	// cases with overridden tls.Conn such as:
 	//
 	// type customConn struct {
@@ -856,11 +856,11 @@ func (ctx *RequestCtx) IsTLS() bool {
 
 	// perIPConn wraps the net.Conn in the Conn field
 	if pic, ok := ctx.c.(*perIPConn); ok {
-		_, ok := pic.Conn.(connTLSer)
+		_, ok := pic.Conn.(tlsConn)
 		return ok
 	}
 
-	_, ok := ctx.c.(connTLSer)
+	_, ok := ctx.c.(tlsConn)
 	return ok
 }
 
@@ -871,11 +871,11 @@ func (ctx *RequestCtx) IsTLS() bool {
 // The returned state may be used for verifying TLS version, client certificates,
 // etc.
 func (ctx *RequestCtx) TLSConnectionState() *tls.ConnectionState {
-	tlsConn, ok := ctx.c.(connTLSer)
+	tc, ok := ctx.c.(tlsConn)
 	if !ok {
 		return nil
 	}
-	state := tlsConn.ConnectionState()
+	state := tc.ConnectionState()
 	return &state
 }
 
@@ -1722,7 +1722,7 @@ func (s *Server) NextProto(key string, nph ServeHandler) {
 }
 
 func (s *Server) getNextProto(c net.Conn) (string, error) {
-	if tlsConn, ok := c.(connTLSer); ok {
+	if tc, ok := c.(tlsConn); ok {
 		if s.ReadTimeout > 0 {
 			if err := c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 				return "", err
@@ -1735,9 +1735,9 @@ func (s *Server) getNextProto(c net.Conn) (string, error) {
 			}
 		}
 
-		err := tlsConn.Handshake()
+		err := tc.Handshake()
 		if err == nil {
-			return tlsConn.ConnectionState().NegotiatedProtocol, nil
+			return tc.ConnectionState().NegotiatedProtocol, nil
 		}
 	}
 	return "", nil
@@ -2097,7 +2097,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	}
 }
 
-type connKeepAliveer interface {
+type keepAliveConn interface {
 	SetKeepAlive(keepalive bool) error
 	SetKeepAlivePeriod(d time.Duration) error
 	io.Closer
@@ -2119,7 +2119,7 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 			return nil, io.EOF
 		}
 
-		if tc, ok := c.(connKeepAliveer); ok && s.TCPKeepalive {
+		if tc, ok := c.(keepAliveConn); ok && s.TCPKeepalive {
 			if err := tc.SetKeepAlive(s.TCPKeepalive); err != nil {
 				_ = tc.Close()
 				return nil, err
