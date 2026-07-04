@@ -813,6 +813,48 @@ func TestFSCompressSingleThreadSkipCache(t *testing.T) {
 	})
 }
 
+func TestFSCompressTmpFileSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks needs extra privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	served := filepath.Join(dir, "index.html")
+	if err := os.WriteFile(served, bytes.Repeat([]byte("compressible-data-"), 1000), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	victimDir := t.TempDir()
+	victim := filepath.Join(victimDir, "victim.txt")
+	const original = "victim-original-content"
+	if err := os.WriteFile(victim, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Plant a symlink at the temp path the compressor is about to write.
+	if err := os.Symlink(victim, served+".fasthttp.gz.tmp"); err != nil {
+		t.Fatal(err)
+	}
+
+	h := (&FS{Root: dir, Compress: true}).NewRequestHandler()
+
+	var ctx RequestCtx
+	var req Request
+	req.SetRequestURI("/index.html")
+	req.Header.SetMethod(MethodGet)
+	req.Header.Set(HeaderAcceptEncoding, "gzip")
+	ctx.Init(&req, nil, nil)
+	h(&ctx)
+
+	got, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Fatalf("victim file was overwritten through the temp-path symlink: %q", got)
+	}
+}
+
 func TestFileLockRefCountUsesPathLock(t *testing.T) {
 	path := "/tmp/" + t.Name()
 	otherPath := path + "-other"
