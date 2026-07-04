@@ -1190,6 +1190,7 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
 		if f, err = fh.Open(); err != nil {
 			return err
 		}
+		defer os.Remove(ff.Name())
 	}
 
 	defer func() {
