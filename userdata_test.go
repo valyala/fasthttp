@@ -121,7 +121,7 @@ func TestUserDataSetAndRemove(t *testing.T) {
 	testUserDataGet(t, &u, []byte(longKey), "")
 }
 
-func TestUserData_GC(t *testing.T) {
+func TestUserDataGC(t *testing.T) {
 	t.Parallel()
 
 	var u userData

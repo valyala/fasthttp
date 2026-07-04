@@ -937,7 +937,7 @@ func TestDirFSServeFileDirectoryRedirect(t *testing.T) {
 func TestFSFSGenerateIndexOsDirFS(t *testing.T) {
 	t.Parallel()
 
-	t.Run("dirFS", func(t *testing.T) {
+	t.Run("dir fs", func(t *testing.T) {
 		t.Parallel()
 
 		fs := &FS{
@@ -976,7 +976,7 @@ func TestFSFSGenerateIndexOsDirFS(t *testing.T) {
 		}
 	})
 
-	t.Run("embedFS", func(t *testing.T) {
+	t.Run("embed fs", func(t *testing.T) {
 		t.Parallel()
 
 		fs := &FS{
@@ -1114,31 +1114,31 @@ func TestHasDotDotPathSegment(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		path string
-		want bool
+		path     string
+		expected bool
 	}{
-		{path: "", want: false},
-		{path: ".", want: false},
-		{path: "..", want: true},
-		{path: "../secret.txt", want: true},
-		{path: "/../secret.txt", want: true},
-		{path: "nested/../info", want: true},
-		{path: "nested/..", want: true},
-		{path: "nested/..hidden/info", want: false},
-		{path: "nested..", want: false},
-		{path: "/index.html", want: false},
+		{path: "", expected: false},
+		{path: ".", expected: false},
+		{path: "..", expected: true},
+		{path: "../secret.txt", expected: true},
+		{path: "/../secret.txt", expected: true},
+		{path: "nested/../info", expected: true},
+		{path: "nested/..", expected: true},
+		{path: "nested/..hidden/info", expected: false},
+		{path: "nested..", expected: false},
+		{path: "/index.html", expected: false},
 	}
 
 	if filepath.Separator == '\\' {
 		testCases = append(testCases,
 			struct {
-				path string
-				want bool
-			}{path: `..\secret.txt`, want: true},
+				path     string
+				expected bool
+			}{path: `..\secret.txt`, expected: true},
 			struct {
-				path string
-				want bool
-			}{path: `nested\..\info`, want: true},
+				path     string
+				expected bool
+			}{path: `nested\..\info`, expected: true},
 		)
 	}
 
@@ -1146,8 +1146,8 @@ func TestHasDotDotPathSegment(t *testing.T) {
 		t.Run(tc.path, func(t *testing.T) {
 			t.Parallel()
 
-			if got := hasDotDotPathSegment([]byte(tc.path)); got != tc.want {
-				t.Fatalf("unexpected result for %q: got %v want %v", tc.path, got, tc.want)
+			if got := hasDotDotPathSegment([]byte(tc.path)); got != tc.expected {
+				t.Fatalf("unexpected result for %q: got %v expected %v", tc.path, got, tc.expected)
 			}
 		})
 	}
