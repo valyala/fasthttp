@@ -515,7 +515,7 @@ func TestHijackFlush(t *testing.T) {
 	}
 }
 
-func TestResourceRecyclingUnderLoad_OneEndpoint(t *testing.T) {
+func TestResourceRecyclingUnderLoadOneEndpoint(t *testing.T) {
 	t.Parallel()
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -550,7 +550,7 @@ func TestResourceRecyclingUnderLoad_OneEndpoint(t *testing.T) {
 	}
 }
 
-func TestResourceRecyclingUnderLoad_MultipleEndpoints(t *testing.T) {
+func TestResourceRecyclingUnderLoadMultipleEndpoints(t *testing.T) {
 	t.Parallel()
 
 	handlers := []struct {

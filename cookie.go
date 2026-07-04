@@ -42,7 +42,7 @@ const (
 // The returned object may be returned back to the pool with ReleaseCookie.
 // This allows reducing GC load.
 func AcquireCookie() *Cookie {
-	return cookiePool.Get().(*Cookie)
+	return cookiePool.Get().(*Cookie) //nolint:forcetypeassert
 }
 
 // ReleaseCookie returns the Cookie object acquired with AcquireCookie back
@@ -376,8 +376,8 @@ func (c *Cookie) WriteTo(w io.Writer) (int64, error) {
 }
 
 var (
-	ErrNoCookies          = errors.New("no cookies found")
-	ErrInvalidCookieValue = errors.New("invalid cookie value")
+	ErrNoCookies          = errors.New("fasthttp: no cookies found")
+	ErrInvalidCookieValue = errors.New("fasthttp: invalid cookie value")
 )
 
 // Parse parses Set-Cookie header.

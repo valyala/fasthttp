@@ -18,24 +18,52 @@ var (
 	index   = fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Index)
 )
 
+var (
+	cmdlinePath = []byte("/debug/pprof/cmdline")
+	profilePath = []byte("/debug/pprof/profile")
+	symbolPath  = []byte("/debug/pprof/symbol")
+	tracePath   = []byte("/debug/pprof/trace")
+)
+
+// matchPprofPath checks whether path exactly matches a pprof endpoint.
+// It only accepts the exact path (e.g. /debug/pprof/heap) and rejects
+// paths with a trailing slash, matching the behaviour of net/http/pprof
+// which returns 404 for paths ending in /.
+func matchPprofPath(path, endpoint []byte) bool {
+	return bytes.Equal(path, endpoint)
+}
+
 // PprofHandler serves server runtime profiling data in the format expected by the pprof visualization tool.
 //
 // See https://pkg.go.dev/net/http/pprof for details.
+//
+// Paths ending in a trailing slash (e.g. /debug/pprof/heap/) return 404,
+// matching the behaviour of net/http/pprof's DefaultServeMux which does
+// not register handlers for paths ending in /.
 func PprofHandler(ctx *fasthttp.RequestCtx) {
+	path := ctx.Path()
+
+	// Reject paths ending in / — net/http/pprof returns 404 for these.
+	if len(path) > 1 && path[len(path)-1] == '/' {
+		ctx.SetStatusCode(404)
+		return
+	}
+
 	ctx.Response.Header.Set("Content-Type", "text/html")
 	switch {
-	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/cmdline")):
+	case matchPprofPath(path, cmdlinePath):
 		cmdline(ctx)
-	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/profile")):
+	case matchPprofPath(path, profilePath):
 		profile(ctx)
-	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/symbol")):
+	case matchPprofPath(path, symbolPath):
 		symbol(ctx)
-	case bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/trace")):
+	case matchPprofPath(path, tracePath):
 		trace(ctx)
 	default:
 		for _, v := range rtp.Profiles() {
 			ppName := v.Name()
-			if bytes.HasPrefix(ctx.Path(), []byte("/debug/pprof/"+ppName)) {
+			endpoint := []byte("/debug/pprof/" + ppName)
+			if matchPprofPath(path, endpoint) {
 				namedHandler := fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Handler(ppName).ServeHTTP)
 				namedHandler(ctx)
 				return

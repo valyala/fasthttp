@@ -15,7 +15,7 @@ import (
 // Release the URI with ReleaseURI after the URI is no longer needed.
 // This allows reducing GC load.
 func AcquireURI() *URI {
-	return uriPool.Get().(*URI)
+	return uriPool.Get().(*URI) //nolint:forcetypeassert
 }
 
 // ReleaseURI releases the URI acquired via AcquireURI.
@@ -268,7 +268,7 @@ func (u *URI) SetHostBytes(host []byte) {
 	lowercaseBytes(u.host)
 }
 
-var ErrorInvalidURI = errors.New("invalid uri")
+var ErrorInvalidURI = errors.New("fasthttp: invalid uri")
 
 // Parse initializes URI from the given host and uri.
 //

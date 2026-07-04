@@ -653,7 +653,7 @@ func inflateData(p []byte, maxBodySize int) ([]byte, error) {
 	return bb.B, nil
 }
 
-var ErrContentEncodingUnsupported = errors.New("unsupported content-encoding")
+var ErrContentEncodingUnsupported = errors.New("fasthttp: unsupported content-encoding")
 
 // BodyUncompressed returns body data and if needed decompresses it from gzip,
 // deflate, brotli or zstd.
@@ -1085,7 +1085,7 @@ func (req *Request) parsePostArgs() {
 
 // ErrNoMultipartForm means that the request's Content-Type
 // isn't 'multipart/form-data'.
-var ErrNoMultipartForm = errors.New("request content-type has bad boundary or is not multipart/form-data")
+var ErrNoMultipartForm = errors.New("fasthttp: request content-type has bad boundary or is not multipart/form-data")
 
 // MultipartForm returns request's multipart form.
 //
@@ -1328,7 +1328,7 @@ const defaultMaxInMemoryFileSize = 16 * 1024 * 1024
 
 // ErrGetOnly is returned when server expects only GET requests,
 // but some other type of request came (Server.GetOnly option is true).
-var ErrGetOnly = errors.New("non-get request received")
+var ErrGetOnly = errors.New("fasthttp: non-get request received")
 
 // ReadLimitBody reads request from the given r, limiting the body size.
 //
@@ -1698,7 +1698,7 @@ func acquireStatsWriter(w io.Writer) *statsWriter {
 			w: w,
 		}
 	}
-	sw := v.(*statsWriter)
+	sw := v.(*statsWriter) //nolint:forcetypeassert
 	sw.w = w
 	return sw
 }
@@ -1716,7 +1716,7 @@ func acquireBufioWriter(w io.Writer) *bufio.Writer {
 	if v == nil {
 		return bufio.NewWriter(w)
 	}
-	bw := v.(*bufio.Writer)
+	bw := v.(*bufio.Writer) //nolint:forcetypeassert
 	bw.Reset(w)
 	return bw
 }
@@ -2420,8 +2420,8 @@ func (req *Request) UserValueBytes(key []byte) any {
 func (req *Request) VisitUserValues(visitor func([]byte, any)) {
 	for i, n := 0, len(req.userValues); i < n; i++ {
 		kv := &req.userValues[i]
-		if _, ok := kv.key.(string); ok {
-			visitor(s2b(kv.key.(string)), kv.value)
+		if key, ok := kv.key.(string); ok {
+			visitor(s2b(key), kv.value)
 		}
 	}
 }
@@ -2473,7 +2473,7 @@ type httpWriter interface {
 
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	vbuf := copyBufPool.Get()
-	buf := vbuf.([]byte)
+	buf := vbuf.([]byte) //nolint:forcetypeassert
 
 	var err error
 	var n int
@@ -2598,7 +2598,7 @@ func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
 	}
 
 	vbuf := copyBufPool.Get()
-	buf := vbuf.([]byte)
+	buf := vbuf.([]byte) //nolint:forcetypeassert
 	n, err := copyBuffer(w, r, buf)
 	copyBufPool.Put(vbuf)
 	return n, err
@@ -2665,7 +2665,7 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 
 // ErrBodyTooLarge is returned if either request or response body exceeds
 // the given limit.
-var ErrBodyTooLarge = errors.New("body size exceeds the given limit")
+var ErrBodyTooLarge = errors.New("fasthttp: body size exceeds the given limit")
 
 func copyZeroAllocWithLimit(w io.Writer, r io.Reader, maxBodySize int) (int64, error) {
 	if maxBodySize <= 0 {

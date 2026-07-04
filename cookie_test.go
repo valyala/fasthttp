@@ -23,39 +23,39 @@ func TestCookieSettersSanitizeNewLines(t *testing.T) {
 		set  func(c *Cookie)
 	}{
 		{
-			name: "SetKey",
+			name: "set key",
 			set:  func(c *Cookie) { c.SetKey("sid\r\nSet-Cookie: admin=1") },
 		},
 		{
-			name: "SetKeyBytes",
+			name: "set key bytes",
 			set:  func(c *Cookie) { c.SetKeyBytes([]byte("sid\r\nSet-Cookie: admin=1")) },
 		},
 		{
-			name: "SetValue",
+			name: "set value",
 			set:  func(c *Cookie) { c.SetValue("abc\r\nSet-Cookie: admin=1") },
 		},
 		{
-			name: "SetValueBytes",
+			name: "set value bytes",
 			set:  func(c *Cookie) { c.SetValueBytes([]byte("abc\r\nSet-Cookie: admin=1")) },
 		},
 		{
-			name: "SetDomain",
+			name: "set domain",
 			set:  func(c *Cookie) { c.SetDomain("example.com\r\nSet-Cookie: admin=1") },
 		},
 		{
-			name: "SetDomainBytes",
+			name: "set domain bytes",
 			set:  func(c *Cookie) { c.SetDomainBytes([]byte("example.com\r\nSet-Cookie: admin=1")) },
 		},
 		{
-			name: "SetPath",
+			name: "set path",
 			set:  func(c *Cookie) { c.SetPath("/account\r\nSet-Cookie: admin=1") },
 		},
 		{
-			name: "SetPathBytes",
+			name: "set path bytes",
 			set:  func(c *Cookie) { c.SetPathBytes([]byte("/account\r\nSet-Cookie: admin=1")) },
 		},
 		{
-			name: "SetPathEncodedNewLine",
+			name: "set path encoded new line",
 			set:  func(c *Cookie) { c.SetPath("/account%0d%0aSet-Cookie:%20admin=1") },
 		},
 	}
@@ -87,42 +87,42 @@ func TestCookieSettersSanitizeSemicolons(t *testing.T) {
 		get  func(c *Cookie) []byte
 	}{
 		{
-			name: "SetKey",
+			name: "set key",
 			set:  func(c *Cookie) { c.SetKey("sid; Secure") },
 			get:  (*Cookie).Key,
 		},
 		{
-			name: "SetKeyBytes",
+			name: "set key bytes",
 			set:  func(c *Cookie) { c.SetKeyBytes([]byte("sid; Secure")) },
 			get:  (*Cookie).Key,
 		},
 		{
-			name: "SetValue",
+			name: "set value",
 			set:  func(c *Cookie) { c.SetValue("abc; Secure") },
 			get:  (*Cookie).Value,
 		},
 		{
-			name: "SetValueBytes",
+			name: "set value bytes",
 			set:  func(c *Cookie) { c.SetValueBytes([]byte("abc; Secure")) },
 			get:  (*Cookie).Value,
 		},
 		{
-			name: "SetDomain",
+			name: "set domain",
 			set:  func(c *Cookie) { c.SetDomain("example.com; Secure") },
 			get:  (*Cookie).Domain,
 		},
 		{
-			name: "SetDomainBytes",
+			name: "set domain bytes",
 			set:  func(c *Cookie) { c.SetDomainBytes([]byte("example.com; Secure")) },
 			get:  (*Cookie).Domain,
 		},
 		{
-			name: "SetPath",
+			name: "set path",
 			set:  func(c *Cookie) { c.SetPath("/account; Secure") },
 			get:  (*Cookie).Path,
 		},
 		{
-			name: "SetPathBytes",
+			name: "set path bytes",
 			set:  func(c *Cookie) { c.SetPathBytes([]byte("/account; Secure")) },
 			get:  (*Cookie).Path,
 		},

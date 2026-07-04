@@ -63,7 +63,7 @@ func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) net.C
 				ip:               ip,
 			}
 		}
-		c := v.(*perIPTLSConn)
+		c := v.(*perIPTLSConn) //nolint:forcetypeassert
 		c.Conn = tlsConn
 		c.ip = ip
 		return c
@@ -77,7 +77,7 @@ func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) net.C
 			ip:               ip,
 		}
 	}
-	c := v.(*perIPConn)
+	c := v.(*perIPConn) //nolint:forcetypeassert
 	c.Conn = conn
 	c.ip = ip
 	return c

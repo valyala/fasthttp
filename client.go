@@ -1077,7 +1077,7 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 	if chv == nil {
 		chv = make(chan clientURLResponse, 1)
 	}
-	ch = chv.(chan clientURLResponse)
+	ch = chv.(chan clientURLResponse) //nolint:forcetypeassert
 
 	// Note that the request continues execution on ErrTimeout until
 	// client-specific ReadTimeout exceeds. This helps limiting load
@@ -1158,13 +1158,13 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 var (
 	// ErrMissingLocation is returned by clients when the Location header is missing on
 	// an HTTP response with a redirect status code.
-	ErrMissingLocation = errors.New("missing location header for http redirect")
+	ErrMissingLocation = errors.New("fasthttp: missing location header for http redirect")
 	// ErrTooManyRedirects is returned by clients when the number of redirects followed
 	// exceed the max count.
-	ErrTooManyRedirects = errors.New("too many redirects detected when doing the request")
+	ErrTooManyRedirects = errors.New("fasthttp: too many redirects detected when doing the request")
 
 	// ErrHostClientRedirectToDifferentScheme is returned when a HostClient follows a redirect to a different protocol.
-	ErrHostClientRedirectToDifferentScheme = errors.New("host client can't follow redirects to a different protocol," +
+	ErrHostClientRedirectToDifferentScheme = errors.New("fasthttp: hostclient can't follow redirects to a different protocol," +
 		" please use client instead")
 )
 
@@ -1363,7 +1363,7 @@ func AcquireRequest() *Request {
 	if v == nil {
 		return &Request{}
 	}
-	return v.(*Request)
+	return v.(*Request) //nolint:forcetypeassert
 }
 
 // ReleaseRequest returns req acquired via AcquireRequest to request pool.
@@ -1385,7 +1385,7 @@ func AcquireResponse() *Response {
 	if v == nil {
 		return &Response{}
 	}
-	return v.(*Response)
+	return v.(*Response) //nolint:forcetypeassert
 }
 
 // ReleaseResponse return resp acquired via AcquireResponse to response pool.
@@ -1657,7 +1657,7 @@ var (
 	//
 	// Increase the allowed number of connections per host if you
 	// see this error.
-	ErrNoFreeConns = errors.New("no free connections available to host")
+	ErrNoFreeConns = errors.New("fasthttp: no free connections available to host")
 
 	// ErrConnectionClosed may be returned from client methods if the server
 	// closes connection before returning the first response byte.
@@ -1666,18 +1666,18 @@ var (
 	// 'Connection: close' response header before closing the connection
 	// or add 'Connection: close' request header before sending requests
 	// to broken server.
-	ErrConnectionClosed = errors.New("the server closed connection before returning the first response byte. " +
+	ErrConnectionClosed = errors.New("fasthttp: the server closed connection before returning the first response byte. " +
 		"make sure the server returns 'connection: close' response header before closing the connection")
 
 	// ErrConnPoolStrategyNotImpl is returned when HostClient.ConnPoolStrategy is not implement yet.
 	// If you see this error, then you need to check your HostClient configuration.
-	ErrConnPoolStrategyNotImpl = errors.New("connection pool strategy is not implement")
+	ErrConnPoolStrategyNotImpl = errors.New("fasthttp: connection pool strategy is not implement")
 )
 
 type timeoutError struct{}
 
 func (e *timeoutError) Error() string {
-	return "timeout"
+	return "fasthttp: timeout"
 }
 
 // Timeout implements the Timeout behavior of the net.Error interface.
@@ -1951,7 +1951,7 @@ func acquireClientConn(conn net.Conn) *clientConn {
 	if v == nil {
 		v = &clientConn{}
 	}
-	cc := v.(*clientConn)
+	cc := v.(*clientConn) //nolint:forcetypeassert
 	cc.c = conn
 	cc.createdTime = time.Now()
 	return cc
@@ -2017,7 +2017,7 @@ func (c *HostClient) AcquireWriter(conn net.Conn) *bufio.Writer {
 		return bufio.NewWriterSize(conn, n)
 	}
 
-	bw := v.(*bufio.Writer)
+	bw := v.(*bufio.Writer) //nolint:forcetypeassert
 	bw.Reset(conn)
 	return bw
 }
@@ -2045,7 +2045,7 @@ func (c *HostClient) AcquireReader(conn net.Conn) *bufio.Reader {
 		return bufio.NewReaderSize(conn, n)
 	}
 
-	br := v.(*bufio.Reader)
+	br := v.(*bufio.Reader) //nolint:forcetypeassert
 	br.Reset(conn)
 	return br
 }
@@ -2165,7 +2165,7 @@ func (c *HostClient) cachedTLSConfig(addr string) (*tls.Config, error) {
 }
 
 // ErrTLSHandshakeTimeout indicates there is a timeout from tls handshake.
-var ErrTLSHandshakeTimeout = errors.New("tls handshake timed out")
+var ErrTLSHandshakeTimeout = errors.New("fasthttp: tls handshake timed out")
 
 func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time) (_ net.Conn, retErr error) {
 	defer func() {
@@ -2683,7 +2683,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 func (c *pipelineConnClient) acquirePipelineWork(timeout time.Duration) (w *pipelineWork) {
 	v := c.workPool.Get()
 	if v != nil {
-		w = v.(*pipelineWork)
+		w = v.(*pipelineWork) //nolint:forcetypeassert
 	} else {
 		w = &pipelineWork{
 			done: make(chan struct{}, 1),
@@ -2855,8 +2855,8 @@ func (c *PipelineClient) newConnClient() *pipelineConnClient {
 
 // ErrPipelineOverflow may be returned from PipelineClient.Do*
 // if the requests' queue is overflowed.
-var ErrPipelineOverflow = errors.New("pipelined requests' queue has been overflowed: " +
-	"increase max conns and/or max pending requests")
+var ErrPipelineOverflow = errors.New("fasthttp: pipelined requests' queue has been overflowed. " +
+	"increase maxconns and/or maxpendingrequests")
 
 // DefaultMaxPendingRequests is the default value
 // for PipelineClient.MaxPendingRequests.

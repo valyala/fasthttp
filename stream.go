@@ -36,7 +36,7 @@ func NewStreamReader(sw StreamWriter) io.ReadCloser {
 	if v == nil {
 		bw = bufio.NewWriter(pw)
 	} else {
-		bw = v.(*bufio.Writer)
+		bw = v.(*bufio.Writer) //nolint:forcetypeassert
 		bw.Reset(pw)
 	}
 

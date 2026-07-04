@@ -45,18 +45,18 @@ var (
 
 	// ErrOverRecovery is returned when child prefork process restarts exceed
 	// the value of RecoverThreshold.
-	ErrOverRecovery = errors.New("exceeding the value of recover threshold")
+	ErrOverRecovery = errors.New("prefork: exceeding the value of recoverthreshold")
 
 	// ErrOnlyReuseportOnWindows is returned when running on Windows without Reuseport.
-	ErrOnlyReuseportOnWindows = errors.New("windows only supports reuseport = true")
+	ErrOnlyReuseportOnWindows = errors.New("prefork: windows only supports reuseport = true")
 
 	// ErrCommandProducerNilCmd is returned when a CommandProducer returns
 	// (nil, nil) instead of a started command.
-	ErrCommandProducerNilCmd = errors.New("prefork: command producer returned nil command")
+	ErrCommandProducerNilCmd = errors.New("prefork: commandproducer returned nil command")
 
 	// ErrCommandProducerNotStarted is returned when a CommandProducer returns
 	// an *exec.Cmd whose Process is nil (i.e. cmd.Start() was not called).
-	ErrCommandProducerNotStarted = errors.New("prefork: command producer must return a started command")
+	ErrCommandProducerNotStarted = errors.New("prefork: commandproducer must return a started command")
 )
 
 // Logger is used for logging formatted messages. Its method set is intentionally

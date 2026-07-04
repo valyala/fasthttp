@@ -22,7 +22,7 @@ var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 // ErrAlreadyServing is deprecated.
 //
 // Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
-var ErrAlreadyServing = errors.New("server is already serving connections")
+var ErrAlreadyServing = errors.New("fasthttp: server is already serving connections")
 
 // ServeConn serves HTTP requests from the given connection
 // using the given handler.
@@ -39,7 +39,7 @@ func ServeConn(c net.Conn, handler RequestHandler) error {
 	if v == nil {
 		v = &Server{}
 	}
-	s := v.(*Server)
+	s := v.(*Server) //nolint:forcetypeassert
 	s.Handler = handler
 	err := s.ServeConn(c)
 	s.Handler = nil
@@ -1156,7 +1156,7 @@ func (ctx *RequestCtx) FormFile(key string) (*multipart.FileHeader, error) {
 
 // ErrMissingFile may be returned from FormFile when the is no uploaded file
 // associated with the given multipart form key.
-var ErrMissingFile = errors.New("there is no uploaded file associated with the given key")
+var ErrMissingFile = errors.New("fasthttp: there is no uploaded file associated with the given key")
 
 // SaveMultipartFile saves multipart file fh under the given filename path.
 //
@@ -1190,6 +1190,7 @@ func SaveMultipartFile(fh *multipart.FileHeader, path string) (err error) {
 		if f, err = fh.Open(); err != nil {
 			return err
 		}
+		defer os.Remove(ff.Name())
 	}
 
 	defer func() {
@@ -2175,11 +2176,12 @@ func (s *Server) logger() Logger {
 var (
 	// ErrPerIPConnLimit may be returned from ServeConn if the number of connections
 	// per ip exceeds Server.MaxConnsPerIP.
-	ErrPerIPConnLimit = errors.New("too many connections per ip")
+	ErrPerIPConnLimit = errors.New("fasthttp: too many connections per ip")
 
 	// ErrConcurrencyLimit may be returned from ServeConn if the number
 	// of concurrently served connections exceeds Server.Concurrency.
-	ErrConcurrencyLimit = errors.New("cannot serve the connection because server concurrency limit is reached")
+	ErrConcurrencyLimit = errors.New("fasthttp: cannot serve the connection because server.concurrency " +
+		"concurrent connections are served")
 )
 
 // ServeConn serves HTTP requests from the given connection.
@@ -2339,7 +2341,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		if v == nil {
 			v = &atomic.Int64{}
 		}
-		idleConnTime = v.(*atomic.Int64)
+		idleConnTime = v.(*atomic.Int64) //nolint:forcetypeassert
 		s.idleConns[c] = idleConnTime
 	}
 
@@ -2786,7 +2788,7 @@ func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
 		}
 		return hjc
 	}
-	hjc := v.(*hijackConn)
+	hjc := v.(*hijackConn) //nolint:forcetypeassert
 	hjc.Conn = c
 	hjc.r = r
 	return hjc
@@ -2888,7 +2890,7 @@ func acquireReader(ctx *RequestCtx) *bufio.Reader {
 		}
 		return bufio.NewReaderSize(ctx.c, n)
 	}
-	r := v.(*bufio.Reader)
+	r := v.(*bufio.Reader) //nolint:forcetypeassert
 	r.Reset(ctx.c)
 	return r
 }
@@ -2906,7 +2908,7 @@ func acquireWriter(ctx *RequestCtx) *bufio.Writer {
 		}
 		return bufio.NewWriterSize(ctx.c, n)
 	}
-	w := v.(*bufio.Writer)
+	w := v.(*bufio.Writer) //nolint:forcetypeassert
 	w.Reset(ctx.c)
 	return w
 }
@@ -2925,7 +2927,7 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 		ctx.Response.keepBodyBuffer = keepBodyBuffer
 		ctx.s = s
 	} else {
-		ctx = v.(*RequestCtx)
+		ctx = v.(*RequestCtx) //nolint:forcetypeassert
 	}
 	if s.FormValueFunc != nil {
 		ctx.formValueFunc = s.FormValueFunc

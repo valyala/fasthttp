@@ -667,7 +667,7 @@ func (ff *fsFile) smallFileReader() io.Reader {
 	if v == nil {
 		v = &fsSmallFileReader{}
 	}
-	r := v.(*fsSmallFileReader)
+	r := v.(*fsSmallFileReader) //nolint:forcetypeassert
 	r.ff = ff
 	r.endPos = ff.contentLength
 	if r.startPos > 0 {
@@ -859,7 +859,7 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 
 	curPos := r.startPos
 	bufv := copyBufPool.Get()
-	buf := bufv.([]byte)
+	buf := bufv.([]byte) //nolint:forcetypeassert
 	for err == nil {
 		tailLen := r.endPos - curPos
 		if tailLen <= 0 {
@@ -1408,14 +1408,14 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		if len(byteRange) > 0 {
 			startPos, endPos, err := ParseByteRange(byteRange, contentLength)
 			if err != nil {
-				_ = r.(io.Closer).Close()
+				_ = r.(io.Closer).Close() //nolint:forcetypeassert
 				ctx.Logger().Printf("cannot parse byte range %q for path=%q: %v", byteRange, path, err)
 				ctx.Error("Range Not Satisfiable", StatusRequestedRangeNotSatisfiable)
 				return
 			}
 
-			if err = r.(byteRangeUpdater).UpdateByteRange(startPos, endPos); err != nil {
-				_ = r.(io.Closer).Close()
+			if err = r.(byteRangeUpdater).UpdateByteRange(startPos, endPos); err != nil { //nolint:forcetypeassert
+				_ = r.(io.Closer).Close() //nolint:forcetypeassert
 				ctx.Logger().Printf("cannot seek byte range %q for path=%q: %v", byteRange, path, err)
 				ctx.Error("Internal Server Error", StatusInternalServerError)
 				return
@@ -1713,15 +1713,20 @@ func (h *fsHandler) compressFileNolock(
 
 	// Create temporary file, so concurrent goroutines don't use
 	// it until it is created.
-	tmpFilePath := compressedFilePath + ".tmp"
-	zf, err := os.Create(tmpFilePath)
+	//
+	// os.CreateTemp gives the file a random name and opens it with O_EXCL and
+	// 0600, so a symlink pre-planted at the otherwise predictable temp path
+	// can't be followed to truncate an arbitrary file, and the cache file
+	// isn't left group/world-readable.
+	zf, err := os.CreateTemp(filepath.Dir(compressedFilePath), filepath.Base(compressedFilePath)+".tmp-*")
 	if err != nil {
 		_ = f.Close()
 		if !errors.Is(err, fs.ErrPermission) {
-			return nil, fmt.Errorf("cannot create temporary file %q: %w", tmpFilePath, err)
+			return nil, fmt.Errorf("cannot create temporary file for %q: %w", compressedFilePath, err)
 		}
 		return nil, errNoCreatePermission
 	}
+	tmpFilePath := zf.Name()
 	switch fileEncoding {
 	case "br":
 		zw := acquireStacklessBrotliWriter(zf, CompressDefaultCompression)

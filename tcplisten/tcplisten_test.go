@@ -85,7 +85,7 @@ func testConfigV(t *testing.T, cfg Config, network, addr string) {
 		if _, err = c.Write([]byte(req)); err != nil {
 			t.Fatalf("%d. unexpected error when writing request: %s", i, err)
 		}
-		if err = c.(*net.TCPConn).CloseWrite(); err != nil {
+		if err = c.(*net.TCPConn).CloseWrite(); err != nil { //nolint:forcetypeassert
 			t.Fatalf("%d. unexpected error when closing write end of the connection: %s", i, err)
 		}
 

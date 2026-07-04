@@ -30,7 +30,7 @@ func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 	if v == nil {
 		return zstd.NewReader(r)
 	}
-	zr := v.(*zstd.Decoder)
+	zr := v.(*zstd.Decoder) //nolint:forcetypeassert
 	if err := zr.Reset(r); err != nil {
 		return nil, err
 	}
@@ -50,7 +50,7 @@ func acquireStacklessZstdWriter(w io.Writer, compressLevel int) stackless.Writer
 			return acquireRealZstdWriter(w, compressLevel)
 		})
 	}
-	sw := v.(stackless.Writer)
+	sw := v.(stackless.Writer) //nolint:forcetypeassert
 	sw.Reset(w)
 	return sw
 }
@@ -73,7 +73,7 @@ func acquireRealZstdWriter(w io.Writer, level int) *zstd.Encoder {
 		}
 		return zw
 	}
-	zw := v.(*zstd.Encoder)
+	zw := v.(*zstd.Encoder) //nolint:forcetypeassert
 	zw.Reset(w)
 	return zw
 }
@@ -125,7 +125,7 @@ func stacklessWriteZstd(ctx any) {
 }
 
 func nonblockingWriteZstd(ctxv any) {
-	ctx := ctxv.(*compressCtx)
+	ctx := ctxv.(*compressCtx) //nolint:forcetypeassert
 	zw := acquireRealZstdWriter(ctx.w, ctx.level)
 	zw.Write(ctx.p) //nolint:errcheck
 	releaseRealZstdWriter(zw, ctx.level)

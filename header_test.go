@@ -62,29 +62,29 @@ func TestResponseHeaderFirstLineSettersSanitizeNewlines(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name          string
-		set           func(*ResponseHeader)
-		value         func(*ResponseHeader) []byte
-		wantValue     string
-		wantFirstLine string
+		name              string
+		set               func(*ResponseHeader)
+		value             func(*ResponseHeader) []byte
+		expectedValue     string
+		expectedFirstLine string
 	}{
 		{
-			name: "SetStatusMessage",
+			name: "set status message",
 			set: func(h *ResponseHeader) {
 				h.SetStatusMessage([]byte("OK\r\nInjected-Status: true"))
 			},
-			value:         func(h *ResponseHeader) []byte { return h.StatusMessage() },
-			wantValue:     "OK  Injected-Status: true",
-			wantFirstLine: "HTTP/1.1 200 OK  Injected-Status: true",
+			value:             func(h *ResponseHeader) []byte { return h.StatusMessage() },
+			expectedValue:     "OK  Injected-Status: true",
+			expectedFirstLine: "HTTP/1.1 200 OK  Injected-Status: true",
 		},
 		{
-			name: "SetProtocol",
+			name: "set protocol",
 			set: func(h *ResponseHeader) {
 				h.SetProtocol([]byte("HTTP/1.1\r\nInjected-Protocol: true"))
 			},
-			value:         func(h *ResponseHeader) []byte { return h.Protocol() },
-			wantValue:     "HTTP/1.1  Injected-Protocol: true",
-			wantFirstLine: "HTTP/1.1  Injected-Protocol: true 200 OK",
+			value:             func(h *ResponseHeader) []byte { return h.Protocol() },
+			expectedValue:     "HTTP/1.1  Injected-Protocol: true",
+			expectedFirstLine: "HTTP/1.1  Injected-Protocol: true 200 OK",
 		},
 	}
 
@@ -98,16 +98,16 @@ func TestResponseHeaderFirstLineSettersSanitizeNewlines(t *testing.T) {
 
 			tc.set(&h)
 
-			if got := string(tc.value(&h)); got != tc.wantValue {
-				t.Fatalf("unexpected sanitized value: %q. Expected %q", got, tc.wantValue)
+			if got := string(tc.value(&h)); got != tc.expectedValue {
+				t.Fatalf("unexpected sanitized value: %q. Expected %q", got, tc.expectedValue)
 			}
 
 			firstLine, _, ok := bytes.Cut(h.Header(), strCRLF)
 			if !ok {
 				t.Fatalf("missing response first line terminator in header %q", h.Header())
 			}
-			if got := string(firstLine); got != tc.wantFirstLine {
-				t.Fatalf("unexpected response first line: %q. Expected %q", got, tc.wantFirstLine)
+			if got := string(firstLine); got != tc.expectedFirstLine {
+				t.Fatalf("unexpected response first line: %q. Expected %q", got, tc.expectedFirstLine)
 			}
 			if bytes.Contains(h.Header(), []byte("\r\nInjected-")) {
 				t.Fatalf("unexpected injected header line in %q", h.Header())
@@ -125,10 +125,10 @@ func TestResponseHeaderKeySettersSanitizeNewlines(t *testing.T) {
 		name string
 		set  func(*ResponseHeader)
 	}{
-		{name: "Set", set: func(h *ResponseHeader) { h.Set(badKey, "bar") }},
-		{name: "Add", set: func(h *ResponseHeader) { h.Add(badKey, "bar") }},
-		{name: "SetBytesV", set: func(h *ResponseHeader) { h.SetBytesV(badKey, []byte("bar")) }},
-		{name: "SetBytesKV", set: func(h *ResponseHeader) { h.SetBytesKV([]byte(badKey), []byte("bar")) }},
+		{name: "set", set: func(h *ResponseHeader) { h.Set(badKey, "bar") }},
+		{name: "add", set: func(h *ResponseHeader) { h.Add(badKey, "bar") }},
+		{name: "set bytes v", set: func(h *ResponseHeader) { h.SetBytesV(badKey, []byte("bar")) }},
+		{name: "set bytes kv", set: func(h *ResponseHeader) { h.SetBytesKV([]byte(badKey), []byte("bar")) }},
 	}
 
 	for _, tc := range testCases {
@@ -156,10 +156,10 @@ func TestRequestHeaderKeySettersSanitizeNewlines(t *testing.T) {
 		name string
 		set  func(*RequestHeader)
 	}{
-		{name: "Set", set: func(h *RequestHeader) { h.Set(badKey, "bar") }},
-		{name: "Add", set: func(h *RequestHeader) { h.Add(badKey, "bar") }},
-		{name: "SetBytesV", set: func(h *RequestHeader) { h.SetBytesV(badKey, []byte("bar")) }},
-		{name: "SetBytesKV", set: func(h *RequestHeader) { h.SetBytesKV([]byte(badKey), []byte("bar")) }},
+		{name: "set", set: func(h *RequestHeader) { h.Set(badKey, "bar") }},
+		{name: "add", set: func(h *RequestHeader) { h.Add(badKey, "bar") }},
+		{name: "set bytes v", set: func(h *RequestHeader) { h.SetBytesV(badKey, []byte("bar")) }},
+		{name: "set bytes kv", set: func(h *RequestHeader) { h.SetBytesKV([]byte(badKey), []byte("bar")) }},
 	}
 
 	for _, tc := range testCases {
@@ -411,6 +411,47 @@ func TestRequestHeaderEmptyValueFromString(t *testing.T) {
 	if len(v2) > 0 {
 		t.Fatalf("expecting empty value. Got %q", v2)
 	}
+}
+
+func TestRequestHeaderReadMixedLineEndings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lf-line-crlf-terminator", func(t *testing.T) {
+		// The raw header block ends with CRLFCRLF, so the scanner takes the
+		// blockEnd fast path even though a header line uses a bare LF.
+		var h RequestHeader
+		br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: a\nFoo: bar\r\n\r\n"))
+		if err := h.Read(br); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(h.Host()) != "a" {
+			t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), "a")
+		}
+		if string(h.Peek("Foo")) != "bar" {
+			t.Fatalf("unexpected Foo value: %q. Expecting %q", h.Peek("Foo"), "bar")
+		}
+	})
+	t.Run("lf-terminated-block-with-crlf-following", func(t *testing.T) {
+		// readRawHeaders ends the block at "\n\r\n", which is not CRLFCRLF,
+		// so the scanner falls back to scanning for the terminator itself.
+		var h RequestHeader
+		br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: a\n\r\n\r\n"))
+		if err := h.Read(br); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(h.Host()) != "a" {
+			t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), "a")
+		}
+	})
+	t.Run("lf-only-terminator", func(t *testing.T) {
+		// A header block terminated only by "\n\n" contains no CRLFCRLF and
+		// must be rejected, not accepted via the blockEnd fast path.
+		var h RequestHeader
+		br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: a\n\n"))
+		if err := h.Read(br); err == nil {
+			t.Fatal("expecting error when header block is terminated by bare LFs")
+		}
+	})
 }
 
 func TestRequestRawHeaders(t *testing.T) {
@@ -2216,7 +2257,7 @@ func TestRequestHeaderAddTrailerRejectsInvalidNames(t *testing.T) {
 func TestHeaderAddTrailerTrimsOWS(t *testing.T) {
 	t.Parallel()
 
-	t.Run("ResponseHeader", func(t *testing.T) {
+	t.Run("response header", func(t *testing.T) {
 		t.Parallel()
 
 		var h ResponseHeader
@@ -2228,7 +2269,7 @@ func TestHeaderAddTrailerTrimsOWS(t *testing.T) {
 		}
 	})
 
-	t.Run("RequestHeader", func(t *testing.T) {
+	t.Run("request header", func(t *testing.T) {
 		t.Parallel()
 
 		var h RequestHeader
@@ -2251,23 +2292,23 @@ func TestTrailerSecurityVulnerabilityFix(t *testing.T) {
 		header      string
 		description string
 	}{
-		{"Content-Type", "Content-Type", "off-by-one fix: exactly 'Content-Type' should be blocked"},
-		{"Cookie", "Cookie", "session hijacking prevention"},
-		{"Set-Cookie", "Set-Cookie", "session hijacking prevention"},
-		{"Location", "Location", "redirect attack prevention"},
-		{"X-Forwarded-For", "X-Forwarded-For", "IP spoofing prevention"},
-		{"X-Forwarded-Host", "X-Forwarded-Host", "IP spoofing prevention"},
-		{"X-Forwarded-Proto", "X-Forwarded-Proto", "IP spoofing prevention"},
-		{"X-Real-IP", "X-Real-IP", "IP spoofing prevention"},
-		{"X-Real-Ip", "X-Real-Ip", "IP spoofing prevention (case insensitive)"},
-		{"Authorization", "Authorization", "auth bypass prevention"},
-		{"Host", "Host", "host header attack prevention"},
-		{"Connection", "Connection", "connection control prevention"},
+		{"content-type", "Content-Type", "off-by-one fix: exactly 'Content-Type' should be blocked"},
+		{"cookie", "Cookie", "session hijacking prevention"},
+		{"set-cookie", "Set-Cookie", "session hijacking prevention"},
+		{"location", "Location", "redirect attack prevention"},
+		{"x-forwarded-for", "X-Forwarded-For", "IP spoofing prevention"},
+		{"x-forwarded-host", "X-Forwarded-Host", "IP spoofing prevention"},
+		{"x-forwarded-proto", "X-Forwarded-Proto", "IP spoofing prevention"},
+		{"x-real-ip", "X-Real-IP", "IP spoofing prevention"},
+		{"x-real-ip case insensitive", "X-Real-Ip", "IP spoofing prevention (case insensitive)"},
+		{"authorization", "Authorization", "auth bypass prevention"},
+		{"host", "Host", "host header attack prevention"},
+		{"connection", "Connection", "connection control prevention"},
 	}
 
 	// Test RequestHeader AddTrailer blocking dangerous headers.
 	for _, tc := range dangerousHeaders {
-		t.Run("RequestHeader_"+tc.name, func(t *testing.T) {
+		t.Run("request header/"+tc.name, func(t *testing.T) {
 			var h RequestHeader
 			err := h.AddTrailer(tc.header)
 			if !errors.Is(err, ErrBadTrailer) {
@@ -2283,7 +2324,7 @@ func TestTrailerSecurityVulnerabilityFix(t *testing.T) {
 
 	// Test ResponseHeader AddTrailer blocking dangerous headers
 	for _, tc := range dangerousHeaders {
-		t.Run("ResponseHeader_"+tc.name, func(t *testing.T) {
+		t.Run("response header/"+tc.name, func(t *testing.T) {
 			var h ResponseHeader
 			err := h.AddTrailer(tc.header)
 
@@ -2302,7 +2343,7 @@ func TestTrailerSecurityVulnerabilityFix(t *testing.T) {
 	safeHeaders := []string{"Foo", "X-Custom-Safe", "My-App-Trailer", "Debug-Info"}
 
 	for _, header := range safeHeaders {
-		t.Run("Safe_RequestHeader_"+header, func(t *testing.T) {
+		t.Run("safe request header/"+strings.ToLower(header), func(t *testing.T) {
 			var h RequestHeader
 			err := h.AddTrailer(header)
 			if err != nil {
@@ -2315,7 +2356,7 @@ func TestTrailerSecurityVulnerabilityFix(t *testing.T) {
 			}
 		})
 
-		t.Run("Safe_ResponseHeader_"+header, func(t *testing.T) {
+		t.Run("safe response header/"+strings.ToLower(header), func(t *testing.T) {
 			var h ResponseHeader
 			err := h.AddTrailer(header)
 			if err != nil {
@@ -2345,7 +2386,7 @@ func TestTrailerParsingSecurityFix(t *testing.T) {
 	}
 
 	for i, trailer := range dangerousTrailers {
-		t.Run("Request_"+strconv.Itoa(i), func(t *testing.T) {
+		t.Run("request/"+strconv.Itoa(i), func(t *testing.T) {
 			var h RequestHeader
 			r := bytes.NewBufferString(trailer)
 			br := bufio.NewReader(r)
@@ -2361,7 +2402,7 @@ func TestTrailerParsingSecurityFix(t *testing.T) {
 			}
 		})
 
-		t.Run("Response_"+strconv.Itoa(i), func(t *testing.T) {
+		t.Run("response/"+strconv.Itoa(i), func(t *testing.T) {
 			var h ResponseHeader
 			r := bytes.NewBufferString(trailer)
 			br := bufio.NewReader(r)
@@ -2386,7 +2427,7 @@ func TestTrailerParsingSecurityFix(t *testing.T) {
 	}
 
 	for i, trailer := range safeTrailers {
-		t.Run("Safe_Request_"+strconv.Itoa(i), func(t *testing.T) {
+		t.Run("safe request/"+strconv.Itoa(i), func(t *testing.T) {
 			var h RequestHeader
 			r := bytes.NewBufferString(trailer)
 			br := bufio.NewReader(r)
@@ -2397,7 +2438,7 @@ func TestTrailerParsingSecurityFix(t *testing.T) {
 			}
 		})
 
-		t.Run("Safe_Response_"+strconv.Itoa(i), func(t *testing.T) {
+		t.Run("safe response/"+strconv.Itoa(i), func(t *testing.T) {
 			var h ResponseHeader
 			r := bytes.NewBufferString(trailer)
 			br := bufio.NewReader(r)
@@ -2424,7 +2465,7 @@ func TestTrailerValueControlBytesRejected(t *testing.T) {
 	}
 
 	for i, trailer := range badTrailers {
-		t.Run("Request_"+strconv.Itoa(i), func(t *testing.T) {
+		t.Run("request/"+strconv.Itoa(i), func(t *testing.T) {
 			var h RequestHeader
 			err := h.ReadTrailer(bufio.NewReader(bytes.NewBufferString(trailer)))
 			if err == nil {
@@ -2435,7 +2476,7 @@ func TestTrailerValueControlBytesRejected(t *testing.T) {
 			}
 		})
 
-		t.Run("Response_"+strconv.Itoa(i), func(t *testing.T) {
+		t.Run("response/"+strconv.Itoa(i), func(t *testing.T) {
 			var h ResponseHeader
 			err := h.ReadTrailer(bufio.NewReader(bytes.NewBufferString(trailer)))
 			if err == nil {
@@ -2805,68 +2846,68 @@ func TestRequestHeaderFirstLineSettersSanitizeNewlines(t *testing.T) {
 	t.Parallel()
 
 	testCases := []struct {
-		name          string
-		set           func(*RequestHeader)
-		value         func(*RequestHeader) []byte
-		wantValue     string
-		wantFirstLine string
-		wantNoHTTP11  bool
+		name              string
+		set               func(*RequestHeader)
+		value             func(*RequestHeader) []byte
+		expectedValue     string
+		expectedFirstLine string
+		expectedNoHTTP11  bool
 	}{
 		{
-			name: "SetMethod",
+			name: "set method",
 			set: func(h *RequestHeader) {
 				h.SetMethod("GET\r\nInjected-Method: true")
 			},
-			value:         func(h *RequestHeader) []byte { return h.Method() },
-			wantValue:     "GET  Injected-Method: true",
-			wantFirstLine: "GET  Injected-Method: true / HTTP/1.1",
+			value:             func(h *RequestHeader) []byte { return h.Method() },
+			expectedValue:     "GET  Injected-Method: true",
+			expectedFirstLine: "GET  Injected-Method: true / HTTP/1.1",
 		},
 		{
-			name: "SetMethodBytes",
+			name: "set method bytes",
 			set: func(h *RequestHeader) {
 				h.SetMethodBytes([]byte("GET\r\nInjected-Method-Bytes: true"))
 			},
-			value:         func(h *RequestHeader) []byte { return h.Method() },
-			wantValue:     "GET  Injected-Method-Bytes: true",
-			wantFirstLine: "GET  Injected-Method-Bytes: true / HTTP/1.1",
+			value:             func(h *RequestHeader) []byte { return h.Method() },
+			expectedValue:     "GET  Injected-Method-Bytes: true",
+			expectedFirstLine: "GET  Injected-Method-Bytes: true / HTTP/1.1",
 		},
 		{
-			name: "SetRequestURI",
+			name: "set request uri",
 			set: func(h *RequestHeader) {
 				h.SetRequestURI("/\r\nInjected-URI: true")
 			},
-			value:         func(h *RequestHeader) []byte { return h.RequestURI() },
-			wantValue:     "/  Injected-URI: true",
-			wantFirstLine: "GET /  Injected-URI: true HTTP/1.1",
+			value:             func(h *RequestHeader) []byte { return h.RequestURI() },
+			expectedValue:     "/  Injected-URI: true",
+			expectedFirstLine: "GET /  Injected-URI: true HTTP/1.1",
 		},
 		{
-			name: "SetRequestURIBytes",
+			name: "set request uri bytes",
 			set: func(h *RequestHeader) {
 				h.SetRequestURIBytes([]byte("/\r\nInjected-URI-Bytes: true"))
 			},
-			value:         func(h *RequestHeader) []byte { return h.RequestURI() },
-			wantValue:     "/  Injected-URI-Bytes: true",
-			wantFirstLine: "GET /  Injected-URI-Bytes: true HTTP/1.1",
+			value:             func(h *RequestHeader) []byte { return h.RequestURI() },
+			expectedValue:     "/  Injected-URI-Bytes: true",
+			expectedFirstLine: "GET /  Injected-URI-Bytes: true HTTP/1.1",
 		},
 		{
-			name: "SetProtocol",
+			name: "set protocol",
 			set: func(h *RequestHeader) {
 				h.SetProtocol("HTTP/1.1\r\nInjected-Protocol: true")
 			},
-			value:         func(h *RequestHeader) []byte { return h.Protocol() },
-			wantValue:     "HTTP/1.1  Injected-Protocol: true",
-			wantFirstLine: "GET / HTTP/1.1  Injected-Protocol: true",
-			wantNoHTTP11:  true,
+			value:             func(h *RequestHeader) []byte { return h.Protocol() },
+			expectedValue:     "HTTP/1.1  Injected-Protocol: true",
+			expectedFirstLine: "GET / HTTP/1.1  Injected-Protocol: true",
+			expectedNoHTTP11:  true,
 		},
 		{
-			name: "SetProtocolBytes",
+			name: "set protocol bytes",
 			set: func(h *RequestHeader) {
 				h.SetProtocolBytes([]byte("HTTP/1.1\r\nInjected-Protocol-Bytes: true"))
 			},
-			value:         func(h *RequestHeader) []byte { return h.Protocol() },
-			wantValue:     "HTTP/1.1  Injected-Protocol-Bytes: true",
-			wantFirstLine: "GET / HTTP/1.1  Injected-Protocol-Bytes: true",
-			wantNoHTTP11:  true,
+			value:             func(h *RequestHeader) []byte { return h.Protocol() },
+			expectedValue:     "HTTP/1.1  Injected-Protocol-Bytes: true",
+			expectedFirstLine: "GET / HTTP/1.1  Injected-Protocol-Bytes: true",
+			expectedNoHTTP11:  true,
 		},
 	}
 
@@ -2882,22 +2923,22 @@ func TestRequestHeaderFirstLineSettersSanitizeNewlines(t *testing.T) {
 
 			tc.set(&h)
 
-			if got := string(tc.value(&h)); got != tc.wantValue {
-				t.Fatalf("unexpected sanitized value: %q. Expected %q", got, tc.wantValue)
+			if got := string(tc.value(&h)); got != tc.expectedValue {
+				t.Fatalf("unexpected sanitized value: %q. Expected %q", got, tc.expectedValue)
 			}
 
 			firstLine, _, ok := bytes.Cut(h.Header(), strCRLF)
 			if !ok {
 				t.Fatalf("missing request first line terminator in header %q", h.Header())
 			}
-			if got := string(firstLine); got != tc.wantFirstLine {
-				t.Fatalf("unexpected request first line: %q. Expected %q", got, tc.wantFirstLine)
+			if got := string(firstLine); got != tc.expectedFirstLine {
+				t.Fatalf("unexpected request first line: %q. Expected %q", got, tc.expectedFirstLine)
 			}
 			if bytes.Contains(h.Header(), []byte("\r\nInjected-")) {
 				t.Fatalf("unexpected injected header line in %q", h.Header())
 			}
-			if h.noHTTP11 != tc.wantNoHTTP11 {
-				t.Fatalf("unexpected noHTTP11 flag: %v. Expected %v", h.noHTTP11, tc.wantNoHTTP11)
+			if h.noHTTP11 != tc.expectedNoHTTP11 {
+				t.Fatalf("unexpected noHTTP11 flag: %v. Expected %v", h.noHTTP11, tc.expectedNoHTTP11)
 			}
 		})
 	}
@@ -3765,7 +3806,7 @@ func verifyTrailer(t *testing.T, h peeker, expectedTrailers map[string]string) {
 	}
 }
 
-func TestRequestHeader_PeekAll(t *testing.T) {
+func TestRequestHeaderPeekAll(t *testing.T) {
 	t.Parallel()
 	h := &RequestHeader{}
 	h.Add(HeaderConnection, "keep-alive")
@@ -3804,7 +3845,7 @@ func expectRequestHeaderAll(t *testing.T, h *RequestHeader, key string, expected
 	}
 }
 
-func TestResponseHeader_PeekAll(t *testing.T) {
+func TestResponseHeaderPeekAll(t *testing.T) {
 	t.Parallel()
 
 	h := &ResponseHeader{}
@@ -3840,7 +3881,7 @@ func expectResponseHeaderAll(t *testing.T, h *ResponseHeader, key string, expect
 	}
 }
 
-func TestRequestHeader_Keys(t *testing.T) {
+func TestRequestHeaderKeys(t *testing.T) {
 	h := &RequestHeader{}
 	h.Add(HeaderConnection, "keep-alive")
 	h.Add("Content-Type", "aaa")
@@ -3881,7 +3922,7 @@ func TestResponseHeaderCopyToCopiesTrailerKeys(t *testing.T) {
 	}
 }
 
-func TestResponseHeader_Keys(t *testing.T) {
+func TestResponseHeaderKeys(t *testing.T) {
 	h := &ResponseHeader{}
 	h.Add(HeaderConnection, "keep-alive")
 	h.Add("Content-Type", "aaa")

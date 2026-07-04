@@ -9,7 +9,7 @@ import (
 
 // ErrNoAvailableClients is returned by LBClient methods when no clients are
 // available, for example after every client has been removed.
-var ErrNoAvailableClients = errors.New("no available clients")
+var ErrNoAvailableClients = errors.New("fasthttp: no available clients")
 
 // BalancingClient is the interface for clients, which may be passed
 // to LBClient.Clients.

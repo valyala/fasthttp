@@ -12,7 +12,7 @@ func TestNewFuncSimple(t *testing.T) {
 
 	var n atomic.Uint64
 	f := NewFunc(func(ctx any) {
-		n.Add(uint64(ctx.(int)))
+		n.Add(uint64(ctx.(int))) //nolint:forcetypeassert
 	})
 
 	iterations := 4 * 1024
@@ -31,10 +31,10 @@ func TestNewFuncMulti(t *testing.T) {
 
 	var n1, n2 atomic.Uint64
 	f1 := NewFunc(func(ctx any) {
-		n1.Add(uint64(ctx.(int)))
+		n1.Add(uint64(ctx.(int))) //nolint:forcetypeassert
 	})
 	f2 := NewFunc(func(ctx any) {
-		n2.Add(uint64(ctx.(int)))
+		n2.Add(uint64(ctx.(int))) //nolint:forcetypeassert
 	})
 
 	iterations := 4 * 1024

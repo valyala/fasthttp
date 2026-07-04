@@ -87,7 +87,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 }
 
 func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h headerInterface) *requestStream {
-	rs := requestStreamPool.Get().(*requestStream)
+	rs := requestStreamPool.Get().(*requestStream) //nolint:forcetypeassert
 	rs.prefetchedBytes = bytes.NewReader(b.B)
 	rs.reader = r
 	rs.header = h

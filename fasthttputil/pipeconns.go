@@ -221,12 +221,12 @@ func (c *pipeConn) readNextByteBuffer(mayBlock bool) error {
 var errWouldBlock = errors.New("would block")
 
 // ErrConnectionClosed indicates that the underlying connection is closed. It could mean that the client has disconnected.
-var ErrConnectionClosed = errors.New("connection closed")
+var ErrConnectionClosed = errors.New("fasthttputil: connection closed")
 
 type timeoutError struct{}
 
 func (e *timeoutError) Error() string {
-	return "timeout"
+	return "fasthttputil: timeout"
 }
 
 // Timeout implements the Timeout method of the net.Error interface.
@@ -330,7 +330,7 @@ type byteBuffer struct {
 }
 
 func acquireByteBuffer() *byteBuffer {
-	return byteBufferPool.Get().(*byteBuffer)
+	return byteBufferPool.Get().(*byteBuffer) //nolint:forcetypeassert
 }
 
 func releaseByteBuffer(b *byteBuffer) {

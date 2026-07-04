@@ -386,7 +386,7 @@ func writeHexInt(w *bufio.Writer, n int) error {
 	if v == nil {
 		v = make([]byte, maxHexIntChars+1)
 	}
-	buf := v.([]byte)
+	buf := v.([]byte) //nolint:forcetypeassert
 	i := len(buf) - 1
 	for {
 		buf[i] = lowerhex[n&0xf]

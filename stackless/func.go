@@ -64,7 +64,7 @@ func getFuncWork() *funcWork {
 			done: make(chan struct{}, 1),
 		}
 	}
-	return v.(*funcWork)
+	return v.(*funcWork) //nolint:forcetypeassert
 }
 
 func putFuncWork(fw *funcWork) {
