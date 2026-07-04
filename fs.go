@@ -1713,15 +1713,20 @@ func (h *fsHandler) compressFileNolock(
 
 	// Create temporary file, so concurrent goroutines don't use
 	// it until it is created.
-	tmpFilePath := compressedFilePath + ".tmp"
-	zf, err := os.Create(tmpFilePath)
+	//
+	// os.CreateTemp gives the file a random name and opens it with O_EXCL and
+	// 0600, so a symlink pre-planted at the otherwise predictable temp path
+	// can't be followed to truncate an arbitrary file, and the cache file
+	// isn't left group/world-readable.
+	zf, err := os.CreateTemp(filepath.Dir(compressedFilePath), filepath.Base(compressedFilePath)+".tmp-*")
 	if err != nil {
 		_ = f.Close()
 		if !errors.Is(err, fs.ErrPermission) {
-			return nil, fmt.Errorf("cannot create temporary file %q: %w", tmpFilePath, err)
+			return nil, fmt.Errorf("cannot create temporary file for %q: %w", compressedFilePath, err)
 		}
 		return nil, errNoCreatePermission
 	}
+	tmpFilePath := zf.Name()
 	switch fileEncoding {
 	case "br":
 		zw := acquireStacklessBrotliWriter(zf, CompressDefaultCompression)
