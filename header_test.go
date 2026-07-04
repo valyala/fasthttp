@@ -413,6 +413,47 @@ func TestRequestHeaderEmptyValueFromString(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderReadMixedLineEndings(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lf-line-crlf-terminator", func(t *testing.T) {
+		// The raw header block ends with CRLFCRLF, so the scanner takes the
+		// blockEnd fast path even though a header line uses a bare LF.
+		var h RequestHeader
+		br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: a\nFoo: bar\r\n\r\n"))
+		if err := h.Read(br); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(h.Host()) != "a" {
+			t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), "a")
+		}
+		if string(h.Peek("Foo")) != "bar" {
+			t.Fatalf("unexpected Foo value: %q. Expecting %q", h.Peek("Foo"), "bar")
+		}
+	})
+	t.Run("lf-terminated-block-with-crlf-following", func(t *testing.T) {
+		// readRawHeaders ends the block at "\n\r\n", which is not CRLFCRLF,
+		// so the scanner falls back to scanning for the terminator itself.
+		var h RequestHeader
+		br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: a\n\r\n\r\n"))
+		if err := h.Read(br); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(h.Host()) != "a" {
+			t.Fatalf("unexpected host: %q. Expecting %q", h.Host(), "a")
+		}
+	})
+	t.Run("lf-only-terminator", func(t *testing.T) {
+		// A header block terminated only by "\n\n" contains no CRLFCRLF and
+		// must be rejected, not accepted via the blockEnd fast path.
+		var h RequestHeader
+		br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: a\n\n"))
+		if err := h.Read(br); err == nil {
+			t.Fatal("expecting error when header block is terminated by bare LFs")
+		}
+	})
+}
+
 func TestRequestRawHeaders(t *testing.T) {
 	t.Parallel()
 
