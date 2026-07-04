@@ -39,7 +39,7 @@ func ServeConn(c net.Conn, handler RequestHandler) error {
 	if v == nil {
 		v = &Server{}
 	}
-	s := v.(*Server)
+	s := v.(*Server) //nolint:forcetypeassert
 	s.Handler = handler
 	err := s.ServeConn(c)
 	s.Handler = nil
@@ -2340,7 +2340,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		if v == nil {
 			v = &atomic.Int64{}
 		}
-		idleConnTime = v.(*atomic.Int64)
+		idleConnTime = v.(*atomic.Int64) //nolint:forcetypeassert
 		s.idleConns[c] = idleConnTime
 	}
 
@@ -2787,7 +2787,7 @@ func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {
 		}
 		return hjc
 	}
-	hjc := v.(*hijackConn)
+	hjc := v.(*hijackConn) //nolint:forcetypeassert
 	hjc.Conn = c
 	hjc.r = r
 	return hjc
@@ -2889,7 +2889,7 @@ func acquireReader(ctx *RequestCtx) *bufio.Reader {
 		}
 		return bufio.NewReaderSize(ctx.c, n)
 	}
-	r := v.(*bufio.Reader)
+	r := v.(*bufio.Reader) //nolint:forcetypeassert
 	r.Reset(ctx.c)
 	return r
 }
@@ -2907,7 +2907,7 @@ func acquireWriter(ctx *RequestCtx) *bufio.Writer {
 		}
 		return bufio.NewWriterSize(ctx.c, n)
 	}
-	w := v.(*bufio.Writer)
+	w := v.(*bufio.Writer) //nolint:forcetypeassert
 	w.Reset(ctx.c)
 	return w
 }
@@ -2926,7 +2926,7 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 		ctx.Response.keepBodyBuffer = keepBodyBuffer
 		ctx.s = s
 	} else {
-		ctx = v.(*RequestCtx)
+		ctx = v.(*RequestCtx) //nolint:forcetypeassert
 	}
 	if s.FormValueFunc != nil {
 		ctx.formValueFunc = s.FormValueFunc

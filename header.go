@@ -2465,7 +2465,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 
 	if !h.noDefaultDate {
 		serverDateOnce.Do(updateServerDate)
-		dst = appendHeaderLine(dst, strDate, serverDate.Load().([]byte))
+		dst = appendHeaderLine(dst, strDate, serverDate.Load().([]byte)) //nolint:forcetypeassert
 	}
 
 	// Append Content-Type only for non-zero responses

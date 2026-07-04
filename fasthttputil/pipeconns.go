@@ -330,7 +330,7 @@ type byteBuffer struct {
 }
 
 func acquireByteBuffer() *byteBuffer {
-	return byteBufferPool.Get().(*byteBuffer)
+	return byteBufferPool.Get().(*byteBuffer) //nolint:forcetypeassert
 }
 
 func releaseByteBuffer(b *byteBuffer) {

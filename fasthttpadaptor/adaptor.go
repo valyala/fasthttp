@@ -151,7 +151,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				}
 
 				// Stream subsequent writes from the pipe until EOF.
-				buf := bufferPool.Get().(*[]byte)
+				buf := bufferPool.Get().(*[]byte) //nolint:forcetypeassert
 				defer bufferPool.Put(buf)
 
 				for {
@@ -270,7 +270,7 @@ func (w *writer) Write(p []byte) (int, error) {
 	defer w.mu.Unlock()
 
 	if w.responseBody == nil {
-		w.bufPool = bufferPool.Get().(*[]byte)
+		w.bufPool = bufferPool.Get().(*[]byte) //nolint:forcetypeassert
 		w.responseBody = (*w.bufPool)[:0]
 	}
 	w.responseBody = append(w.responseBody, p...)

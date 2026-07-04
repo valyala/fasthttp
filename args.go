@@ -19,7 +19,7 @@ const (
 // The returned Args may be returned to the pool with ReleaseArgs
 // when no longer needed. This allows reducing GC load.
 func AcquireArgs() *Args {
-	return argsPool.Get().(*Args)
+	return argsPool.Get().(*Args) //nolint:forcetypeassert
 }
 
 // ReleaseArgs returns the object acquired via AcquireArgs to the pool.

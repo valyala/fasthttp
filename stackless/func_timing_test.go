@@ -8,7 +8,7 @@ import (
 func BenchmarkFuncOverhead(b *testing.B) {
 	var n atomic.Uint64
 	f := NewFunc(func(ctx any) {
-		n.Add(*(ctx.(*uint64)))
+		n.Add(*(ctx.(*uint64))) //nolint:forcetypeassert
 	})
 	b.RunParallel(func(pb *testing.PB) {
 		x := uint64(1)

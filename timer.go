@@ -37,7 +37,7 @@ func AcquireTimer(timeout time.Duration) *time.Timer {
 	if v == nil {
 		return time.NewTimer(timeout)
 	}
-	t := v.(*time.Timer)
+	t := v.(*time.Timer) //nolint:forcetypeassert
 	initTimer(t, timeout)
 	return t
 }

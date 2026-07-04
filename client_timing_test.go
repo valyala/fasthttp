@@ -88,7 +88,7 @@ func acquireFakeServerConn(s []byte) *fakeClientConn {
 		}
 		return c
 	}
-	return v.(*fakeClientConn)
+	return v.(*fakeClientConn) //nolint:forcetypeassert
 }
 
 var fakeClientConnPool sync.Pool

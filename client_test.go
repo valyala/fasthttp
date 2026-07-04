@@ -4080,7 +4080,7 @@ func TestRevertPull1233(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
-			err = conn.(*net.TCPConn).SetLinger(0)
+			err = conn.(*net.TCPConn).SetLinger(0) //nolint:forcetypeassert
 			if err != nil {
 				t.Error(err)
 			}

@@ -258,7 +258,7 @@ func addrAndAuth(pu *url.URL, authCache *sync.Map) (proxyAddr, auth string) {
 	}
 	if authCache != nil {
 		if v, ok := authCache.Load(pu); ok {
-			info := v.(*proxyInfo)
+			info := v.(*proxyInfo) //nolint:forcetypeassert
 			return info.addr, info.auth
 		}
 	}
