@@ -1158,14 +1158,14 @@ func clientPostURL(dst []byte, url string, postArgs *Args, c clientDoer) (status
 var (
 	// ErrMissingLocation is returned by clients when the Location header is missing on
 	// an HTTP response with a redirect status code.
-	ErrMissingLocation = errors.New("missing Location header for http redirect")
+	ErrMissingLocation = errors.New("fasthttp: missing location header for http redirect")
 	// ErrTooManyRedirects is returned by clients when the number of redirects followed
 	// exceed the max count.
-	ErrTooManyRedirects = errors.New("too many redirects detected when doing the request")
+	ErrTooManyRedirects = errors.New("fasthttp: too many redirects detected when doing the request")
 
 	// ErrHostClientRedirectToDifferentScheme is returned when a HostClient follows a redirect to a different protocol.
-	ErrHostClientRedirectToDifferentScheme = errors.New("HostClient can't follow redirects to a different protocol," +
-		" please use Client instead")
+	ErrHostClientRedirectToDifferentScheme = errors.New("fasthttp: hostclient can't follow redirects to a different protocol," +
+		" please use client instead")
 )
 
 const defaultMaxRedirectsCount = 16
@@ -1657,7 +1657,7 @@ var (
 	//
 	// Increase the allowed number of connections per host if you
 	// see this error.
-	ErrNoFreeConns = errors.New("no free connections available to host")
+	ErrNoFreeConns = errors.New("fasthttp: no free connections available to host")
 
 	// ErrConnectionClosed may be returned from client methods if the server
 	// closes connection before returning the first response byte.
@@ -1666,18 +1666,18 @@ var (
 	// 'Connection: close' response header before closing the connection
 	// or add 'Connection: close' request header before sending requests
 	// to broken server.
-	ErrConnectionClosed = errors.New("the server closed connection before returning the first response byte. " +
-		"Make sure the server returns 'Connection: close' response header before closing the connection")
+	ErrConnectionClosed = errors.New("fasthttp: the server closed connection before returning the first response byte. " +
+		"make sure the server returns 'connection: close' response header before closing the connection")
 
 	// ErrConnPoolStrategyNotImpl is returned when HostClient.ConnPoolStrategy is not implement yet.
 	// If you see this error, then you need to check your HostClient configuration.
-	ErrConnPoolStrategyNotImpl = errors.New("connection pool strategy is not implement")
+	ErrConnPoolStrategyNotImpl = errors.New("fasthttp: connection pool strategy is not implement")
 )
 
 type timeoutError struct{}
 
 func (e *timeoutError) Error() string {
-	return "timeout"
+	return "fasthttp: timeout"
 }
 
 // Timeout implements the Timeout behavior of the net.Error interface.
@@ -2165,7 +2165,7 @@ func (c *HostClient) cachedTLSConfig(addr string) (*tls.Config, error) {
 }
 
 // ErrTLSHandshakeTimeout indicates there is a timeout from tls handshake.
-var ErrTLSHandshakeTimeout = errors.New("tls handshake timed out")
+var ErrTLSHandshakeTimeout = errors.New("fasthttp: tls handshake timed out")
 
 func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time) (_ net.Conn, retErr error) {
 	defer func() {
@@ -2855,7 +2855,8 @@ func (c *PipelineClient) newConnClient() *pipelineConnClient {
 
 // ErrPipelineOverflow may be returned from PipelineClient.Do*
 // if the requests' queue is overflowed.
-var ErrPipelineOverflow = errors.New("pipelined requests' queue has been overflowed. Increase MaxConns and/or MaxPendingRequests")
+var ErrPipelineOverflow = errors.New("fasthttp: pipelined requests' queue has been overflowed. " +
+	"increase maxconns and/or maxpendingrequests")
 
 // DefaultMaxPendingRequests is the default value
 // for PipelineClient.MaxPendingRequests.

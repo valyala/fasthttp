@@ -4673,7 +4673,7 @@ func TestStreamRequestBody(t *testing.T) {
 
 	select {
 	case err := <-ch:
-		if err != nil && err.Error() != "connection closed" { // fasthttputil.errConnectionClosed is private so do a string match.
+		if err != nil && err.Error() != fasthttputil.ErrConnectionClosed.Error() {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(500 * time.Millisecond):
@@ -4765,7 +4765,7 @@ func TestStreamBodyRequestContentLength(t *testing.T) {
 
 	select {
 	case err := <-ch:
-		if err == nil || err.Error() != "connection closed" { // fasthttputil.errConnectionClosed is private so do a string match.
+		if err == nil || err.Error() != fasthttputil.ErrConnectionClosed.Error() {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(time.Second):
@@ -4825,7 +4825,7 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 
 	select {
 	case err := <-ch:
-		if err == nil || !strings.EqualFold(err.Error(), "timeout") {
+		if err == nil || !strings.EqualFold(err.Error(), fasthttputil.ErrTimeout.Error()) {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(time.Second):
@@ -4891,7 +4891,7 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 
 	select {
 	case err := <-ch:
-		if err == nil || !strings.EqualFold(err.Error(), "timeout") {
+		if err == nil || !strings.EqualFold(err.Error(), fasthttputil.ErrTimeout.Error()) {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(time.Second):

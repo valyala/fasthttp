@@ -376,8 +376,8 @@ func (c *Cookie) WriteTo(w io.Writer) (int64, error) {
 }
 
 var (
-	ErrNoCookies          = errors.New("no cookies found")
-	ErrInvalidCookieValue = errors.New("invalid cookie value")
+	ErrNoCookies          = errors.New("fasthttp: no cookies found")
+	ErrInvalidCookieValue = errors.New("fasthttp: invalid cookie value")
 )
 
 // Parse parses Set-Cookie header.

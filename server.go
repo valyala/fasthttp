@@ -22,7 +22,7 @@ var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 // ErrAlreadyServing is deprecated.
 //
 // Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
-var ErrAlreadyServing = errors.New("Server is already serving connections")
+var ErrAlreadyServing = errors.New("fasthttp: server is already serving connections")
 
 // ServeConn serves HTTP requests from the given connection
 // using the given handler.
@@ -1156,7 +1156,7 @@ func (ctx *RequestCtx) FormFile(key string) (*multipart.FileHeader, error) {
 
 // ErrMissingFile may be returned from FormFile when the is no uploaded file
 // associated with the given multipart form key.
-var ErrMissingFile = errors.New("there is no uploaded file associated with the given key")
+var ErrMissingFile = errors.New("fasthttp: there is no uploaded file associated with the given key")
 
 // SaveMultipartFile saves multipart file fh under the given filename path.
 //
@@ -2176,11 +2176,12 @@ func (s *Server) logger() Logger {
 var (
 	// ErrPerIPConnLimit may be returned from ServeConn if the number of connections
 	// per ip exceeds Server.MaxConnsPerIP.
-	ErrPerIPConnLimit = errors.New("too many connections per ip")
+	ErrPerIPConnLimit = errors.New("fasthttp: too many connections per ip")
 
 	// ErrConcurrencyLimit may be returned from ServeConn if the number
 	// of concurrently served connections exceeds Server.Concurrency.
-	ErrConcurrencyLimit = errors.New("cannot serve the connection because Server.Concurrency concurrent connections are served")
+	ErrConcurrencyLimit = errors.New("fasthttp: cannot serve the connection because server.concurrency " +
+		"concurrent connections are served")
 )
 
 // ServeConn serves HTTP requests from the given connection.
