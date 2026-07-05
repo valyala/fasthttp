@@ -6,9 +6,9 @@ import (
 )
 
 var (
-	errInvalidIPv6Host    = errors.New("invalid IPv6 host")
-	errInvalidIPv6Zone    = errors.New("invalid IPv6 zone")
-	errInvalidIPv6Address = errors.New("invalid IPv6 address")
+	errInvalidIPv6Host    = errors.New("invalid ipv6 host")
+	errInvalidIPv6Zone    = errors.New("invalid ipv6 zone")
+	errInvalidIPv6Address = errors.New("invalid ipv6 address")
 )
 
 func validateIPv6Literal(host []byte) error {

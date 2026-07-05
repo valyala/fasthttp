@@ -18,14 +18,14 @@ const (
 
 func enableDeferAccept(fd int) error {
 	if err := unix.SetsockoptInt(fd, unix.IPPROTO_TCP, unix.TCP_DEFER_ACCEPT, 1); err != nil {
-		return fmt.Errorf("cannot enable TCP_DEFER_ACCEPT: %s", err)
+		return fmt.Errorf("cannot enable tcp_defer_accept: %s", err)
 	}
 	return nil
 }
 
 func enableFastOpen(fd int) error {
 	if err := unix.SetsockoptInt(fd, unix.SOL_TCP, tcpFastOpen, fastOpenQlen); err != nil {
-		return fmt.Errorf("cannot enable TCP_FASTOPEN(qlen=%d): %s", fastOpenQlen, err)
+		return fmt.Errorf("cannot enable tcp_fastopen(qlen=%d): %s", fastOpenQlen, err)
 	}
 	return nil
 }

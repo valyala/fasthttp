@@ -1132,7 +1132,7 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 				return nil, fmt.Errorf("cannot gunzip request body: %w", err)
 			}
 		} else if len(ce) > 0 {
-			return nil, fmt.Errorf("unsupported Content-Encoding: %q", ce)
+			return nil, fmt.Errorf("unsupported content-encoding: %q", ce)
 		}
 		if maxBodySize > 0 {
 			lr = &io.LimitedReader{
@@ -1161,7 +1161,7 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 				return nil, fmt.Errorf("cannot gunzip request body: %w", err)
 			}
 		} else if len(ce) > 0 {
-			return nil, fmt.Errorf("unsupported Content-Encoding: %q", ce)
+			return nil, fmt.Errorf("unsupported content-encoding: %q", ce)
 		}
 		if maxBodySize > 0 && len(body) > maxBodySize {
 			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", ErrBodyTooLarge)
@@ -1241,7 +1241,7 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 	// in multipart/form-data requests.
 
 	if size <= 0 {
-		return nil, fmt.Errorf("form size must be greater than 0. Given %d", size)
+		return nil, fmt.Errorf("form size must be greater than 0: given %d", size)
 	}
 	lr := io.LimitReader(r, int64(size))
 	mr := multipart.NewReader(lr, boundary)
@@ -1646,7 +1646,7 @@ func (resp *Response) mustSkipBody() bool {
 	return resp.SkipBody || resp.Header.mustSkipContentLength()
 }
 
-var errRequestHostRequired = errors.New("missing required Host header in request")
+var errRequestHostRequired = errors.New("missing required host header in request")
 
 // WriteTo writes request to w. It implements io.WriterTo.
 func (req *Request) WriteTo(w io.Writer) (int64, error) {
@@ -1799,9 +1799,9 @@ func (req *Request) Write(w *bufio.Writer) error {
 		_, err = w.Write(body)
 	} else if len(body) > 0 {
 		if req.secureErrorLogMessage {
-			return errors.New("non-zero body for non-POST request")
+			return errors.New("non-zero body for non-post request")
 		}
-		return fmt.Errorf("non-zero body for non-POST request. body=%q", body)
+		return fmt.Errorf("non-zero body for non-post request: body=%q", body)
 	}
 	return err
 }
@@ -2737,7 +2737,7 @@ func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, err
 			case err != nil:
 				return dst[:offset], err
 			default:
-				return dst[:offset], fmt.Errorf("bufio.Read() returned (%d, nil)", nn)
+				return dst[:offset], fmt.Errorf("bufio read returned (%d, nil)", nn)
 			}
 		}
 		offset += nn
@@ -2779,7 +2779,7 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 			case err != nil:
 				return dst[:offset], err
 			default:
-				return dst[:offset], fmt.Errorf("bufio.Read() returned (%d, nil)", nn)
+				return dst[:offset], fmt.Errorf("bufio read returned (%d, nil)", nn)
 			}
 		}
 		offset += nn
@@ -2893,7 +2893,7 @@ func readCrLf(r *bufio.Reader) error {
 		}
 		if c != exp {
 			return ErrBrokenChunk{
-				error: fmt.Errorf("unexpected char %q at the end of chunk size. Expected %q", c, exp),
+				error: fmt.Errorf("unexpected char %q at the end of chunk size: expected %q", c, exp),
 			}
 		}
 	}

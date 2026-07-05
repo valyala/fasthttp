@@ -688,7 +688,7 @@ func (ff *fsFile) isBig() bool {
 
 func (ff *fsFile) bigFileReader() (io.Reader, error) {
 	if ff.f == nil {
-		return nil, errors.New("bug: ff.f must be non-nil in bigFileReader")
+		return nil, errors.New("bug: ff.f must be non-nil in big file reader")
 	}
 
 	var r io.Reader
@@ -746,7 +746,7 @@ type bigFileReader struct {
 func (r *bigFileReader) UpdateByteRange(startPos, endPos int) error {
 	seeker, ok := r.f.(io.Seeker)
 	if !ok {
-		return errors.New("must implement io.Seeker")
+		return errors.New("must implement seek")
 	}
 	if _, err := seeker.Seek(int64(startPos), io.SeekStart); err != nil {
 		return err
@@ -776,7 +776,7 @@ func (r *bigFileReader) Close() error {
 	seeker, ok := r.f.(io.Seeker)
 	if !ok {
 		_ = r.f.Close()
-		return errors.New("must implement io.Seeker")
+		return errors.New("must implement seek")
 	}
 	n, err := seeker.Seek(0, io.SeekStart)
 	if err == nil {
@@ -787,7 +787,7 @@ func (r *bigFileReader) Close() error {
 			ff.bigFilesLock.Unlock()
 		} else {
 			_ = r.f.Close()
-			err = errors.New("bug: File.Seek(0, io.SeekStart) returned (non-zero, nil)")
+			err = errors.New("bug: seek to start returned (non-zero, nil)")
 		}
 	} else {
 		_ = r.f.Close()
@@ -831,7 +831,7 @@ func (r *fsSmallFileReader) Read(p []byte) (int, error) {
 	if ff.f != nil {
 		ra, ok := ff.f.(io.ReaderAt)
 		if !ok {
-			return 0, errors.New("must implement io.ReaderAt")
+			return 0, errors.New("must implement readat")
 		}
 		n, err := ra.ReadAt(p, int64(r.startPos))
 		r.startPos += n
@@ -870,13 +870,13 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 		}
 		ra, ok := ff.f.(io.ReaderAt)
 		if !ok {
-			return 0, errors.New("must implement io.ReaderAt")
+			return 0, errors.New("must implement readat")
 		}
 		n, err = ra.ReadAt(buf, int64(curPos))
 		nw, errw := w.Write(buf[:n])
 		curPos += nw
 		if errw == nil && nw != n {
-			errw = errors.New("bug: Write(p) returned (n, nil), where n != len(p)")
+			errw = errors.New("bug: write returned (n, nil), where n != len(p)")
 		}
 		if err == nil {
 			err = errw
@@ -1459,7 +1459,7 @@ type byteRangeUpdater interface {
 func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, err error) {
 	b := byteRange
 	if !bytes.HasPrefix(b, strBytes) {
-		return 0, 0, fmt.Errorf("unsupported range units: %q. Expecting %q", byteRange, strBytes)
+		return 0, 0, fmt.Errorf("unsupported range units: %q: expecting %q", byteRange, strBytes)
 	}
 
 	b = b[len(strBytes):]
@@ -1532,7 +1532,7 @@ func (h *fsHandler) openIndexFile(ctx *RequestCtx, dirPath string, mustCompress 
 	}
 
 	if !h.generateIndexPages {
-		return nil, fmt.Errorf("cannot access directory without index page. Directory %q", dirPath)
+		return nil, fmt.Errorf("cannot access directory without index page: directory %q", dirPath)
 	}
 
 	return h.createDirIndex(ctx, dirPath, mustCompress, fileEncoding)
@@ -1806,7 +1806,7 @@ func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, fi
 
 	seeker, ok := f.(io.Seeker)
 	if !ok {
-		return nil, errors.New("not implemented io.Seeker")
+		return nil, errors.New("seek is not implemented")
 	}
 	if _, err = seeker.Seek(0, io.SeekStart); err != nil {
 		return nil, err
@@ -1880,7 +1880,7 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 	if fileInfo.IsDir() {
 		_ = f.Close()
 		if mustCompress {
-			return nil, fmt.Errorf("directory with unexpected suffix found: %q. Suffix: %q",
+			return nil, fmt.Errorf("directory with unexpected suffix found: %q: suffix: %q",
 				filePath, h.compressedFileSuffixes[fileEncoding])
 		}
 		return nil, errDirIndexRequired
@@ -1977,7 +1977,7 @@ func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, 
 	data, err := io.ReadAll(lr)
 	seeker, ok := f.(io.Seeker)
 	if !ok {
-		return nil, errors.New("must implement io.Seeker")
+		return nil, errors.New("must implement seek")
 	}
 	if _, err := seeker.Seek(0, io.SeekStart); err != nil {
 		return nil, err

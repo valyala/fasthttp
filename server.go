@@ -1910,7 +1910,7 @@ func loadX509KeyPair(certFile, keyFile string) (tls.Certificate, error) {
 
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("cannot load TLS key pair from certFile=%q and keyFile=%q: %w", certFile, keyFile, err)
+		return tls.Certificate{}, fmt.Errorf("cannot load tls key pair from cert file=%q and key file=%q: %w", certFile, keyFile, err)
 	}
 	return cert, nil
 }
@@ -1936,7 +1936,7 @@ func x509KeyPair(certData, keyData []byte) (tls.Certificate, error) {
 
 	cert, err := tls.X509KeyPair(certData, keyData)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("cannot load TLS key pair from the provided certData(%d) and keyData(%d): %w",
+		return tls.Certificate{}, fmt.Errorf("cannot load tls key pair from the provided cert data(%d) and key data(%d): %w",
 			len(certData), len(keyData), err)
 	}
 	return cert, nil

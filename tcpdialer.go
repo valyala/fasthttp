@@ -549,4 +549,4 @@ func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver, deadline ti
 	return addrs, nil
 }
 
-var errNoDNSEntries = errors.New("couldn't find DNS entries for the given domain. Try using DialDualStack")
+var errNoDNSEntries = errors.New("couldn't find dns entries for the given domain: try using dual-stack dialing")

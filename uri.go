@@ -482,7 +482,7 @@ const (
 type EscapeError string
 
 func (e EscapeError) Error() string {
-	return "invalid URL escape " + strconv.Quote(string(e))
+	return "invalid url escape " + strconv.Quote(string(e))
 }
 
 type InvalidHostError string

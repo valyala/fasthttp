@@ -505,7 +505,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	host := uri.Host()
 
 	if bytes.ContainsRune(host, ',') {
-		return fmt.Errorf("invalid host %q. Use HostClient for multiple hosts", host)
+		return fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
 	}
 
 	isTLS := false
@@ -2071,7 +2071,7 @@ func newClientTLSConfig(c *tls.Config, addr string) (*tls.Config, error) {
 			if c.InsecureSkipVerify {
 				return c, nil
 			}
-			return nil, fmt.Errorf("cannot determine TLS server name from addr %q: %w", addr, err)
+			return nil, fmt.Errorf("cannot determine tls server name from addr %q: %w", addr, err)
 		}
 		c.ServerName = serverName
 	}
@@ -2202,7 +2202,7 @@ func dialAddr(
 		return nil, err
 	}
 	if conn == nil {
-		return nil, errors.New("dialling unsuccessful. Please report this bug")
+		return nil, errors.New("dialling unsuccessful: please report this bug")
 	}
 
 	// We assume that any conn that has the Handshake() method is a TLS conn already.

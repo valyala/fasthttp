@@ -350,7 +350,7 @@ func (p *Prefork) doCommand() (*exec.Cmd, error) {
 	if p.CommandProducer != nil {
 		cmd, err := p.CommandProducer(p.files)
 		if err != nil {
-			return nil, fmt.Errorf("prefork: CommandProducer: %w", err)
+			return nil, fmt.Errorf("prefork: command producer: %w", err)
 		}
 		if cmd == nil {
 			return nil, ErrCommandProducerNilCmd
