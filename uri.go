@@ -446,7 +446,7 @@ func parseHost(host []byte) ([]byte, error) {
 			return append(host1, append(host2, host3...)...), nil
 		}
 	} else {
-		if bytes.ContainsAny(host, "[]") {
+		if bytes.IndexByte(host, '[') >= 0 || bytes.IndexByte(host, ']') >= 0 {
 			return nil, fmt.Errorf("invalid host %q", host)
 		}
 
@@ -641,8 +641,13 @@ func normalizePath(dst, src []byte) []byte {
 	}
 	dst = dst[:bSize]
 
-	// remove /./ parts
+	// No '.' means no "/./", "/../" or "/.." to remove.
 	b = dst
+	if bytes.IndexByte(b, '.') < 0 {
+		return b
+	}
+
+	// remove /./ parts
 	for {
 		n := bytes.Index(b, strSlashDotSlash)
 		if n < 0 {
