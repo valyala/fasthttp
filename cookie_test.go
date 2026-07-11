@@ -188,6 +188,71 @@ func TestCookieParseRejectsInvalidQuotedValue(t *testing.T) {
 	}
 }
 
+func TestCookieParseRejectsInvalidAttributeValue(t *testing.T) {
+	t.Parallel()
+
+	// Domain values reject the quoted-string bytes (" ; \), the same set as the
+	// primary cookie value, since none are legal in a hostname.
+	domainCases := []string{
+		`sid=ok; Domain=victim.example"`,
+		`sid=ok; Domain=e"vil.example`,
+		`sid=ok; Domain=e\vil.example`,
+	}
+	for _, tc := range domainCases {
+		var c Cookie
+		if err := c.Parse(tc); err != ErrInvalidCookieValue {
+			t.Fatalf("unexpected error %v. Expecting %v. Cookie %q", err, ErrInvalidCookieValue, tc)
+		}
+		if len(c.Domain()) != 0 {
+			t.Fatalf("unexpected domain %q parsed from invalid cookie %q", c.Domain(), tc)
+		}
+	}
+
+	// Path values reject the ';' separator and every byte outside 0x20-0x7e,
+	// matching net/http's validCookiePathByte; '"' and '\' stay valid there.
+	pathCases := []string{
+		"sid=ok; Path=/a\x01b",
+		"sid=ok; Path=/a\x7fb",
+		"sid=ok; Path=/a\x80b",
+		"sid=ok; Path=/caf\xc3\xa9",
+		"sid=ok; Path=/a\xffb",
+	}
+	for _, tc := range pathCases {
+		var c Cookie
+		if err := c.Parse(tc); err != ErrInvalidCookieValue {
+			t.Fatalf("unexpected error %v. Expecting %v. Cookie %q", err, ErrInvalidCookieValue, tc)
+		}
+		if len(c.Path()) != 0 {
+			t.Fatalf("unexpected path %q parsed from invalid cookie %q", c.Path(), tc)
+		}
+	}
+
+	// A backslash in Path is accepted and round-trips, matching SetPath.
+	var rt Cookie
+	rt.SetKey("sid")
+	rt.SetValue("ok")
+	rt.SetPath(`/a\b`)
+	var parsed Cookie
+	if err := parsed.ParseBytes(rt.Cookie()); err != nil {
+		t.Fatalf("unexpected error %v round-tripping a backslash path", err)
+	}
+	if string(parsed.Path()) != `/a\b` {
+		t.Fatalf("unexpected path %q, expecting %q", parsed.Path(), `/a\b`)
+	}
+
+	// A balanced quoted attribute is unquoted during the trim pass and stays valid.
+	var c Cookie
+	if err := c.Parse(`sid=ok; Domain="trusted.example"; Path="/app"`); err != nil {
+		t.Fatalf("unexpected error %v for balanced quoted attributes", err)
+	}
+	if string(c.Domain()) != "trusted.example" {
+		t.Fatalf("unexpected domain %q", c.Domain())
+	}
+	if string(c.Path()) != "/app" {
+		t.Fatalf("unexpected path %q", c.Path())
+	}
+}
+
 func TestCookieValueWithEqualAndSpaceChars(t *testing.T) {
 	t.Parallel()
 

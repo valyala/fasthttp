@@ -428,11 +428,17 @@ func (c *Cookie) ParseBytes(src []byte) error {
 
 			case 'd': // "domain"
 				if caseInsensitiveCompare(strCookieDomain, k) {
+					if !validCookieValue(v) {
+						return ErrInvalidCookieValue
+					}
 					c.domain = initHeaderValueBytes(c.domain, v)
 				}
 
 			case 'p': // "path"
 				if caseInsensitiveCompare(strCookiePath, k) {
+					if !validCookiePathValue(v) {
+						return ErrInvalidCookieValue
+					}
 					c.path = initHeaderValueBytes(c.path, v)
 				}
 
@@ -658,6 +664,26 @@ func decodeCookieArg(dst, src []byte, skipQuotes bool) []byte {
 func validCookieValue(value []byte) bool {
 	for _, c := range value {
 		if c == '"' || c == ';' || c == '\\' {
+			return false
+		}
+	}
+	return true
+}
+
+// validCookiePathValue reports whether value is acceptable as a cookie Path.
+//
+// Unlike validCookieValue it permits '"' and '\', which are legal path
+// characters accepted by SetPath and net/http's Cookie.String. It rejects the
+// ';' attribute separator and every byte outside 0x20-0x7e, matching
+// net/http's validCookiePathByte. CR and LF are tolerated here because
+// initHeaderValueBytes strips them afterwards, the same as for the primary
+// cookie value.
+func validCookiePathValue(value []byte) bool {
+	for _, b := range value {
+		if b == '\r' || b == '\n' {
+			continue
+		}
+		if b < 0x20 || b >= 0x7f || b == ';' {
 			return false
 		}
 	}
