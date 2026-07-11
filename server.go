@@ -2331,6 +2331,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		return handler(c)
 	}
 
+	connTime := time.Now()
+
 	s.idleConnsMu.Lock()
 	if s.idleConns == nil {
 		s.idleConns = make(map[net.Conn]*atomic.Int64)
@@ -2348,13 +2350,12 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	// Count the connection as Idle after 5 seconds.
 	// Same as net/http.Server:
 	// https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
-	idleConnTime.Store(time.Now().Add(time.Second * 5).Unix())
+	idleConnTime.Store(connTime.Add(time.Second * 5).Unix())
 	s.idleConnsMu.Unlock()
 
 	serverName := s.getServerName()
 	connRequestNum := uint64(0)
 	connID := nextConnID()
-	connTime := time.Now()
 	maxRequestBodySize := s.MaxRequestBodySize
 	if maxRequestBodySize <= 0 {
 		maxRequestBodySize = DefaultMaxRequestBodySize
@@ -2724,7 +2725,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.Request.bodyStream = nil
 		}
 
-		idleConnTime.Store(time.Now().Unix())
+		idleConnTime.Store(ctx.time.Unix())
 		s.setState(c, StateIdle)
 		ctx.Request.Reset()
 		ctx.Response.Reset()
@@ -3091,7 +3092,7 @@ func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 	date := ""
 	if !s.NoDefaultDate {
 		serverDateOnce.Do(updateServerDate)
-		date = fmt.Sprintf("Date: %s\r\n", serverDate.Load())
+		date = fmt.Sprintf("Date: %s\r\n", *serverDate.Load())
 	}
 
 	fmt.Fprintf(w, "Connection: close\r\n"+

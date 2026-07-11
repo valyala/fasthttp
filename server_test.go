@@ -1119,6 +1119,10 @@ func TestServerWriteFastError(t *testing.T) {
 	if !resp.Header.ConnectionClose() {
 		t.Fatal("expecting 'Connection: close' response header")
 	}
+	date := string(resp.Header.Peek(HeaderDate))
+	if _, err := time.Parse(time.RFC1123, date); err != nil {
+		t.Fatalf("invalid date header %q: %v", date, err)
+	}
 }
 
 func TestServerTLS(t *testing.T) {

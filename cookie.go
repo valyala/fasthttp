@@ -656,7 +656,12 @@ func decodeCookieArg(dst, src []byte, skipQuotes bool) []byte {
 }
 
 func validCookieValue(value []byte) bool {
-	return !bytes.ContainsAny(value, "\";\\")
+	for _, c := range value {
+		if c == '"' || c == ';' || c == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 func trimCookieArgNoCopy(src []byte, skipQuotes bool) []byte {
