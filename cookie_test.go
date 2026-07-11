@@ -208,11 +208,14 @@ func TestCookieParseRejectsInvalidAttributeValue(t *testing.T) {
 		}
 	}
 
-	// Path values only reject the ';' separator and control bytes, matching
-	// net/http's path rules; '"' and '\' stay valid there.
+	// Path values reject the ';' separator and every byte outside 0x20-0x7e,
+	// matching net/http's validCookiePathByte; '"' and '\' stay valid there.
 	pathCases := []string{
 		"sid=ok; Path=/a\x01b",
 		"sid=ok; Path=/a\x7fb",
+		"sid=ok; Path=/a\x80b",
+		"sid=ok; Path=/caf\xc3\xa9",
+		"sid=ok; Path=/a\xffb",
 	}
 	for _, tc := range pathCases {
 		var c Cookie

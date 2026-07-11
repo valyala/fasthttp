@@ -669,15 +669,16 @@ func validCookieValue(value []byte) bool {
 //
 // Unlike validCookieValue it permits '"' and '\', which are legal path
 // characters accepted by SetPath and net/http's Cookie.String. It rejects the
-// ';' attribute separator and control bytes, matching net/http's cookie path
-// rules. CR and LF are tolerated here because initHeaderValueBytes strips them
-// afterwards, the same as for the primary cookie value.
+// ';' attribute separator and every byte outside 0x20-0x7e, matching
+// net/http's validCookiePathByte. CR and LF are tolerated here because
+// initHeaderValueBytes strips them afterwards, the same as for the primary
+// cookie value.
 func validCookiePathValue(value []byte) bool {
 	for _, b := range value {
 		if b == '\r' || b == '\n' {
 			continue
 		}
-		if b < 0x20 || b == 0x7f || b == ';' {
+		if b < 0x20 || b >= 0x7f || b == ';' {
 			return false
 		}
 	}
