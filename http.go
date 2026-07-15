@@ -2268,6 +2268,18 @@ type httpWriter interface {
 	Write(w *bufio.Writer) error
 }
 
+// ChunkedBodyWriterTo lets a body opt into zero-copy chunked framing via
+// WriteTo, skipping the copy through a pool buffer.
+//
+// The marker method is required rather than a bare io.WriterTo check: a
+// WriteTo promoted from an embedded reader would otherwise opt in by accident
+// and bypass an overridden Read. Implement only when WriteTo and Read emit
+// the same bytes.
+type ChunkedBodyWriterTo interface {
+	io.WriterTo
+	ChunkedBodyWriterTo()
+}
+
 type chunkedBodyWriter struct {
 	w   *bufio.Writer
 	err error
@@ -2285,9 +2297,8 @@ func (cw *chunkedBodyWriter) Write(p []byte) (int, error) {
 }
 
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
-	// Frame buffers directly from an io.WriterTo body to avoid copying
-	// through copyBufPool.
-	if wt, ok := r.(io.WriterTo); ok {
+	// An opted-in body frames its WriteTo output directly, skipping copyBufPool.
+	if wt, ok := r.(ChunkedBodyWriterTo); ok {
 		cw := chunkedBodyWriter{w: w}
 		if _, err := wt.WriteTo(&cw); err != nil {
 			return err
