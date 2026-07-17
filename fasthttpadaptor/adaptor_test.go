@@ -756,7 +756,7 @@ func TestNewFastHTTPHandlerPreservesPresetStatusCode(t *testing.T) {
 	// Verify that a status code set on ctx before calling NewFastHTTPHandler
 	// is preserved when the net/http handler does not call WriteHeader.
 	nethttpH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 
 	fasthttpH := NewFastHTTPHandler(nethttpH)
@@ -784,7 +784,7 @@ func TestNewFastHTTPHandlerPresetStatusCodeOverriddenByHandler(t *testing.T) {
 	// over any pre-set status code.
 	nethttpH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("not found"))
+		_, _ = w.Write([]byte("not found"))
 	})
 
 	fasthttpH := NewFastHTTPHandler(nethttpH)
