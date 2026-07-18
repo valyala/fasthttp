@@ -749,3 +749,55 @@ func TestWriterWriteRechecksStreamingReadyAfterLock(t *testing.T) {
 		t.Fatalf("timeout waiting for Write")
 	}
 }
+
+func TestNewFastHTTPHandlerPreservesPresetStatusCode(t *testing.T) {
+	t.Parallel()
+
+	// Verify that a status code set on ctx before calling NewFastHTTPHandler
+	// is preserved when the net/http handler does not call WriteHeader.
+	nethttpH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	fasthttpH := NewFastHTTPHandler(nethttpH)
+
+	var ctx fasthttp.RequestCtx
+	ctx.Request.SetRequestURI("/test")
+	// Pre-set a status code that should survive through the adaptor.
+	ctx.Response.SetStatusCode(fasthttp.StatusForbidden)
+
+	fasthttpH(&ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusForbidden {
+		t.Fatalf("unexpected status code: %d. Expecting %d (pre-set code should be preserved)",
+			ctx.Response.StatusCode(), fasthttp.StatusForbidden)
+	}
+	if string(ctx.Response.Body()) != "ok" {
+		t.Fatalf("unexpected body: %q. Expecting %q", string(ctx.Response.Body()), "ok")
+	}
+}
+
+func TestNewFastHTTPHandlerPresetStatusCodeOverriddenByHandler(t *testing.T) {
+	t.Parallel()
+
+	// If the net/http handler explicitly calls WriteHeader, that should take precedence
+	// over any pre-set status code.
+	nethttpH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("not found"))
+	})
+
+	fasthttpH := NewFastHTTPHandler(nethttpH)
+
+	var ctx fasthttp.RequestCtx
+	ctx.Request.SetRequestURI("/test")
+	ctx.Response.SetStatusCode(fasthttp.StatusForbidden)
+
+	fasthttpH(&ctx)
+
+	// WriteHeader(404) should override the pre-set 403.
+	if ctx.Response.StatusCode() != fasthttp.StatusNotFound {
+		t.Fatalf("unexpected status code: %d. Expecting %d (handler's WriteHeader should win)",
+			ctx.Response.StatusCode(), fasthttp.StatusNotFound)
+	}
+}

@@ -347,6 +347,11 @@ func (w *writer) Close() error {
 func (w *writer) status() int {
 	code := int(w.statusCode.Load())
 	if code == 0 {
+		// No WriteHeader was called; check if ctx already has a status code set
+		// by a caller before NewFastHTTPHandler ran.
+		if ctxCode := w.ctx.Response.StatusCode(); ctxCode != 0 {
+			return ctxCode
+		}
 		return http.StatusOK
 	}
 	return code
