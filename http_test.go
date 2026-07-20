@@ -3243,7 +3243,7 @@ func (b *chunkedOptInBody) WriteTo(w io.Writer) (int64, error) {
 	return b.r.WriteTo(w)
 }
 
-func (b *chunkedOptInBody) ChunkedBodyWriterTo() {}
+func (b *chunkedOptInBody) SupportsChunkedBodyWriteTo() bool { return true }
 
 func TestWriteBodyChunkedWriterToOptIn(t *testing.T) {
 	t.Parallel()
@@ -3345,5 +3345,107 @@ func TestWriteBodyChunkedPromotedWriterToNotOptIn(t *testing.T) {
 	}
 	if string(resp1.Body()) != body {
 		t.Fatalf("unexpected body of len %d. Expecting len %d", len(resp1.Body()), len(body))
+	}
+}
+
+// optInInner supports zero-copy framing; optOutBody embeds it but overrides
+// SupportsChunkedBodyWriteTo to return false, opting back out.
+type optInInner struct {
+	r        *bytes.Reader
+	writeCnt int
+}
+
+func (e *optInInner) Read(p []byte) (int, error) { return e.r.Read(p) }
+
+func (e *optInInner) WriteTo(w io.Writer) (int64, error) {
+	e.writeCnt++
+	return e.r.WriteTo(w)
+}
+
+func (e *optInInner) SupportsChunkedBodyWriteTo() bool { return true }
+
+type optOutBody struct {
+	*optInInner
+	readCnt int
+}
+
+func (b *optOutBody) Read(p []byte) (int, error) {
+	b.readCnt++
+	return b.optInInner.Read(p)
+}
+
+func (b *optOutBody) SupportsChunkedBodyWriteTo() bool { return false }
+
+func TestWriteBodyChunkedOptOutOverride(t *testing.T) {
+	t.Parallel()
+
+	body := string(createFixedBody(10001))
+	inner := &optInInner{r: bytes.NewReader([]byte(body))}
+	stream := &optOutBody{optInInner: inner}
+
+	// stream implements ChunkedBodyWriterTo (the method is promoted/overridden),
+	// but its SupportsChunkedBodyWriteTo returns false, so it must use Read.
+	if _, ok := any(stream).(ChunkedBodyWriterTo); !ok {
+		t.Fatal("test setup: stream must implement ChunkedBodyWriterTo")
+	}
+
+	var resp Response
+	resp.SetBodyStream(stream, -1)
+
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	if err := resp.Write(bw); err != nil {
+		t.Fatalf("unexpected error when writing response: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error when flushing response: %v", err)
+	}
+
+	if stream.readCnt == 0 {
+		t.Fatal("Read must be used when the body opted back out")
+	}
+	if inner.writeCnt != 0 {
+		t.Fatalf("WriteTo must not be called after opting out, got %d", inner.writeCnt)
+	}
+
+	var resp1 Response
+	if err := resp1.Read(bufio.NewReader(&w)); err != nil {
+		t.Fatalf("unexpected error when reading response: %v", err)
+	}
+	if string(resp1.Body()) != body {
+		t.Fatalf("unexpected body of len %d. Expecting len %d", len(resp1.Body()), len(body))
+	}
+}
+
+// Standard bytes types take the zero-copy path without implementing
+// ChunkedBodyWriterTo; the output must still be correct.
+func TestWriteBodyChunkedConcreteTypes(t *testing.T) {
+	t.Parallel()
+
+	body := string(createFixedBody(10001))
+	newReaders := []func() io.Reader{
+		func() io.Reader { return bytes.NewReader([]byte(body)) },
+		func() io.Reader { return bytes.NewBufferString(body) },
+	}
+	for _, newReader := range newReaders {
+		var resp Response
+		resp.SetBodyStream(newReader(), -1)
+
+		var w bytes.Buffer
+		bw := bufio.NewWriter(&w)
+		if err := resp.Write(bw); err != nil {
+			t.Fatalf("unexpected error when writing response: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error when flushing response: %v", err)
+		}
+
+		var resp1 Response
+		if err := resp1.Read(bufio.NewReader(&w)); err != nil {
+			t.Fatalf("unexpected error when reading response: %v", err)
+		}
+		if string(resp1.Body()) != body {
+			t.Fatalf("unexpected body of len %d. Expecting len %d", len(resp1.Body()), len(body))
+		}
 	}
 }
