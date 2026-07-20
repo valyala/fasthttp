@@ -404,6 +404,26 @@ func testPipelineClientDoOnce(t *testing.T, c *PipelineClient) {
 	}
 }
 
+func TestPipelineClientDialScheme(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("dial stopped")
+	c := &PipelineClient{
+		IsTLS: true,
+		DialScheme: func(_ string, isTLS bool) (net.Conn, error) {
+			if !isTLS {
+				t.Fatal("DialScheme did not receive PipelineClient.IsTLS")
+			}
+			return nil, wantErr
+		},
+	}
+	cc := c.newConnClient()
+	_, err := callDialFunc(cc.Addr, cc.Dial, nil, cc.DialScheme, cc.DialDualStack, cc.IsTLS, 0)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("unexpected error %v; want %v", err, wantErr)
+	}
+}
+
 func TestPipelineClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
 	t.Parallel()
 
@@ -3917,6 +3937,45 @@ func TestGetRedirectURL(t *testing.T) {
 
 type clientDoTimeOuter interface {
 	DoTimeout(req *Request, resp *Response, timeout time.Duration) error
+}
+
+func TestClientDialScheme(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		uri       string
+		wantAddr  string
+		wantIsTLS bool
+	}{
+		{uri: "https://example.com:8443/", wantAddr: "example.com:8443", wantIsTLS: true},
+		{uri: "http://example.com:443/", wantAddr: "example.com:443", wantIsTLS: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.uri, func(t *testing.T) {
+			t.Parallel()
+
+			wantErr := errors.New("dial stopped")
+			var gotAddr string
+			var gotIsTLS bool
+			c := &Client{
+				DialScheme: func(addr string, isTLS bool) (net.Conn, error) {
+					gotAddr = addr
+					gotIsTLS = isTLS
+					return nil, wantErr
+				},
+				MaxIdemponentCallAttempts: 1,
+			}
+			var req Request
+			var resp Response
+			req.SetRequestURI(tt.uri)
+			if err := c.DoTimeout(&req, &resp, time.Second); !errors.Is(err, wantErr) {
+				t.Fatalf("unexpected error %v; want %v", err, wantErr)
+			}
+			if gotAddr != tt.wantAddr || gotIsTLS != tt.wantIsTLS {
+				t.Fatalf("DialScheme(%q, %v); want (%q, %v)", gotAddr, gotIsTLS, tt.wantAddr, tt.wantIsTLS)
+			}
+		})
+	}
 }
 
 func TestDialTimeout(t *testing.T) {

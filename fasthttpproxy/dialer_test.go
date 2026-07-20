@@ -240,6 +240,57 @@ func TestDialerGetDialFunc(t *testing.T) {
 	}
 }
 
+func TestDialerGetDialFuncWithScheme(t *testing.T) {
+	counts := make([]atomic.Int64, 2)
+	lns := startProxyServer(t, []string{"0", "0"}, counts)
+	defer func() {
+		for _, ln := range lns {
+			ln.Close()
+		}
+	}()
+
+	_, httpPort, err := net.SplitHostPort(lns[0].Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, httpsPort, err := net.SplitHostPort(lns[1].Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := getDialer("http://127.0.0.1:"+httpPort, "http://127.0.0.1:"+httpsPort, "")
+	dial, err := d.GetDialFuncWithScheme(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		addr     string
+		isTLS    bool
+		expected []int64
+	}{
+		{name: "HTTPS on non-default port", addr: "example.com:8443", isTLS: true, expected: []int64{0, 1}},
+		{name: "HTTP on port 443", addr: "example.com:443", isTLS: false, expected: []int64{1, 0}},
+		{name: "HTTPS on port 443", addr: "example.com:443", isTLS: true, expected: []int64{0, 1}},
+		{name: "HTTP on port 80", addr: "example.com:80", isTLS: false, expected: []int64{1, 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn, err := dial(tt.addr, tt.isTLS)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn.Close()
+			if got := getCounts(counts); !countsEqual(got, tt.expected) {
+				t.Fatalf("proxy counts %v; want %v", got, tt.expected)
+			}
+		})
+		for i := range counts {
+			counts[i].Store(0)
+		}
+	}
+}
+
 func TestHTTPProxyDialRejectsTargetAddrContainingNewlines(t *testing.T) {
 	var dialed atomic.Bool
 

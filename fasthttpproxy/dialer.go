@@ -80,6 +80,11 @@ type Dialer struct {
 
 // GetDialFunc method returns a fasthttp-style dial function. The useEnv parameter
 // determines whether the proxy address comes from Dialer.Config or from environment variables.
+//
+// The returned DialFunc cannot observe the request scheme. When HTTPProxy and
+// HTTPSProxy differ, it assumes port 443 is HTTPS and every other port is HTTP.
+// Use GetDialFuncWithScheme when the request scheme and port may not use their
+// conventional pairing.
 func (d *Dialer) GetDialFunc(useEnv bool) (fasthttp.DialFunc, error) {
 	config := &d.Config
 	if useEnv {
@@ -149,6 +154,84 @@ func (d *Dialer) GetDialFunc(useEnv bool) (fasthttp.DialFunc, error) {
 		case "http":
 			proxyAddr, auth := addrAndAuth(proxyURL, &authCache)
 			proxyDialer = DialerFunc(func(network, addr string) (conn net.Conn, err error) {
+				return httpProxyDial(d, network, addr, proxyAddr, auth)
+			})
+		default:
+			return nil, errors.New("proxy: unknown scheme: " + proxyURL.Scheme)
+		}
+		return proxyDialer.Dial(network, addr)
+	}, nil
+}
+
+// GetDialFuncWithScheme returns a dial function that selects HTTPProxy or
+// HTTPSProxy from isTLS instead of inferring the scheme from addr's port.
+// Assign it to Client.DialScheme, HostClient.DialScheme, or
+// PipelineClient.DialScheme.
+func (d *Dialer) GetDialFuncWithScheme(useEnv bool) (fasthttp.DialFuncWithScheme, error) {
+	config := &d.Config
+	if useEnv {
+		config = httpproxy.FromEnvironment()
+	}
+	network := "tcp4"
+	if d.DialDualStack {
+		network = "tcp"
+	}
+	if config.HTTPSProxy == config.HTTPProxy && config.NoProxy == "" {
+		proxyURL, err := config.ProxyFunc()(tmpURL)
+		if err != nil {
+			return nil, err
+		}
+		if proxyURL == nil {
+			return func(addr string, _ bool) (net.Conn, error) {
+				return d.Dial(network, addr)
+			}, nil
+		}
+
+		var proxyDialer proxy.Dialer
+		switch proxyURL.Scheme {
+		case "socks5", "socks5h":
+			proxyDialer, err = proxy.FromURL(proxyURL, d)
+			if err != nil {
+				return nil, err
+			}
+		case "http":
+			proxyAddr, auth := addrAndAuth(proxyURL, nil)
+			proxyDialer = DialerFunc(func(network, addr string) (net.Conn, error) {
+				return httpProxyDial(d, network, addr, proxyAddr, auth)
+			})
+		default:
+			return nil, errors.New("proxy: unknown scheme: " + proxyURL.Scheme)
+		}
+		return func(addr string, _ bool) (net.Conn, error) {
+			return proxyDialer.Dial(network, addr)
+		}, nil
+	}
+
+	proxyFunc := config.ProxyFunc()
+	var authCache sync.Map
+	return func(addr string, isTLS bool) (net.Conn, error) {
+		scheme := httpScheme
+		if isTLS {
+			scheme = httpsScheme
+		}
+		proxyURL, err := proxyFunc(&url.URL{Host: addr, Scheme: scheme})
+		if err != nil {
+			return nil, err
+		}
+		if proxyURL == nil {
+			return d.Dial(network, addr)
+		}
+
+		var proxyDialer proxy.Dialer
+		switch proxyURL.Scheme {
+		case "socks5", "socks5h":
+			proxyDialer, err = proxy.FromURL(proxyURL, d)
+			if err != nil {
+				return nil, err
+			}
+		case "http":
+			proxyAddr, auth := addrAndAuth(proxyURL, &authCache)
+			proxyDialer = DialerFunc(func(network, addr string) (net.Conn, error) {
 				return httpProxyDial(d, network, addr, proxyAddr, auth)
 			})
 		default:

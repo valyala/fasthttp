@@ -197,6 +197,12 @@ type Client struct {
 	// If not set, DialTimeout is used.
 	Dial DialFunc
 
+	// Callback for establishing new connections to hosts.
+	//
+	// DialScheme receives the TLS requirement for the request. If set, it
+	// takes precedence over Dial and DialTimeout.
+	DialScheme DialFuncWithScheme
+
 	// TLS config for https connections.
 	//
 	// Default TLS config is used if not set.
@@ -554,6 +560,7 @@ func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
 		NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 		Dial:                          c.Dial,
 		DialTimeout:                   c.DialTimeout,
+		DialScheme:                    c.DialScheme,
 		DialDualStack:                 c.DialDualStack,
 		IsTLS:                         isTLS,
 		TLSConfig:                     c.TLSConfig,
@@ -708,6 +715,13 @@ type DialFunc func(addr string) (net.Conn, error)
 //   - foobar.com:8080
 type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, error)
 
+// DialFuncWithScheme must establish connection to addr.
+// isTLS reports whether the client will use TLS for the connection.
+//
+// There is no need to establish the TLS connection. The client automatically
+// converts the returned connection to TLS when isTLS is true.
+type DialFuncWithScheme func(addr string, isTLS bool) (net.Conn, error)
+
 // RetryIfFunc defines the signature of the retry if function.
 // Request argument passed to RetryIfFunc, if there are any request errors.
 type RetryIfFunc func(request *Request) bool
@@ -780,6 +794,12 @@ type HostClient struct {
 	//
 	// If not set, DialTimeout is used.
 	Dial DialFunc
+
+	// Callback for establishing new connections to hosts.
+	//
+	// DialScheme receives IsTLS. If set, it takes precedence over Dial and
+	// DialTimeout.
+	DialScheme DialFuncWithScheme
 
 	// Optional TLS config.
 	TLSConfig *tls.Config
@@ -2132,7 +2152,9 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 				continue
 			}
 		}
-		conn, err = dialAddr(addr, c.Dial, c.DialTimeout, c.DialDualStack, c.IsTLS, tlsConfig, dialTimeout, c.WriteTimeout)
+		conn, err = dialAddr(
+			addr, c.Dial, c.DialTimeout, c.DialScheme, c.DialDualStack, c.IsTLS, tlsConfig, dialTimeout, c.WriteTimeout,
+		)
 		if err == nil {
 			return conn, nil
 		}
@@ -2193,11 +2215,11 @@ func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.T
 }
 
 func dialAddr(
-	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool,
+	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialScheme DialFuncWithScheme, dialDualStack, isTLS bool,
 	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
 ) (net.Conn, error) {
 	deadline := time.Now().Add(writeTimeout)
-	conn, err := callDialFunc(addr, dial, dialWithTimeout, dialDualStack, isTLS, dialTimeout)
+	conn, err := callDialFunc(addr, dial, dialWithTimeout, dialScheme, dialDualStack, isTLS, dialTimeout)
 	if err != nil {
 		return nil, err
 	}
@@ -2219,8 +2241,12 @@ func dialAddr(
 }
 
 func callDialFunc(
-	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool, timeout time.Duration,
+	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialScheme DialFuncWithScheme,
+	dialDualStack, isTLS bool, timeout time.Duration,
 ) (net.Conn, error) {
+	if dialScheme != nil {
+		return dialScheme(addr, isTLS)
+	}
 	if dialWithTimeout != nil {
 		return dialWithTimeout(addr, timeout)
 	}
@@ -2423,6 +2449,11 @@ type PipelineClient struct {
 	// Default Dial is used if not set.
 	Dial DialFunc
 
+	// Callback for connection establishing to the host.
+	//
+	// DialScheme receives IsTLS. If set, it takes precedence over Dial.
+	DialScheme DialFuncWithScheme
+
 	// Optional TLS config.
 	TLSConfig *tls.Config
 
@@ -2532,8 +2563,9 @@ type pipelineConnClient struct {
 
 	Logger Logger
 
-	Dial      DialFunc
-	TLSConfig *tls.Config
+	Dial       DialFunc
+	DialScheme DialFuncWithScheme
+	TLSConfig  *tls.Config
 
 	tlsConfig *tls.Config
 	chs       *pipelineConnChannels
@@ -2837,6 +2869,7 @@ func (c *PipelineClient) newConnClient() *pipelineConnClient {
 		MaxPendingRequests:            c.MaxPendingRequests,
 		MaxBatchDelay:                 c.MaxBatchDelay,
 		Dial:                          c.Dial,
+		DialScheme:                    c.DialScheme,
 		DialDualStack:                 c.DialDualStack,
 		DisableHeaderNamesNormalizing: c.DisableHeaderNamesNormalizing,
 		DisablePathNormalizing:        c.DisablePathNormalizing,
@@ -2922,7 +2955,7 @@ func (c *pipelineConnClient) worker(chs *pipelineConnChannels) error {
 			return err
 		}
 	}
-	conn, err := dialAddr(c.Addr, c.Dial, nil, c.DialDualStack, c.IsTLS, tlsConfig, 0, c.WriteTimeout)
+	conn, err := dialAddr(c.Addr, c.Dial, nil, c.DialScheme, c.DialDualStack, c.IsTLS, tlsConfig, 0, c.WriteTimeout)
 	if err != nil {
 		return err
 	}
