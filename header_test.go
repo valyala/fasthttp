@@ -3428,6 +3428,10 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 		t.Fatalf("unexpected 'connection: close' for ancient http protocol")
 	}
 
+	// HTTP/1.1 still frames a chunked body.
+	testRequestHeaderReadSuccess(t, h, "POST /te HTTP/1.1\r\nHost: aa\r\nTransfer-Encoding: chunked\r\n\r\n",
+		-1, "/te", "aa", "", "")
+
 	// complex headers with body
 	testRequestHeaderReadSuccess(t, h, "GET /aabar HTTP/1.1\r\nAAA: bbb\r\nHost: ole.com\r\nAA: bb\r\n\r\nzzz",
 		-2, "/aabar", "ole.com", "", "")
@@ -3620,6 +3624,10 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// post with duplicate transfer-encoding
 	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+
+	// transfer-encoding on http/1.0, with and without content-length
+	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.0\r\nHost: aa\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.0\r\nHost: aa\r\nTransfer-Encoding: chunked\r\nContent-Length: 5\r\n\r\nhello")
 
 	// invalid Content-Length with Transfer-Encoding
 	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nContent-Length: nope\r\nTransfer-Encoding: chunked\r\n\r\n")
