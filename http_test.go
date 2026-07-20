@@ -2286,8 +2286,8 @@ func TestResponseReadWithoutBody(t *testing.T) {
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 204 Foo Bar\r\nContent-Type: aab\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n", false,
 		204, -1, "aab")
 
-	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 123 AAA\r\nContent-Type: xxx\r\nContent-Length: 3434\r\n\r\n", false,
-		123, 3434, "xxx")
+	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 123 AAA\r\nContent-Type: xxx\r\n\r\nHTTP/1.1 250 BBB\r\nContent-Type: yyy\r\nContent-Length: 0\r\n\r\n", false,
+		250, 0, "yyy")
 
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 123\r\n\r\nfoobar\r\n", true,
 		200, 123, "text/xml")
@@ -2295,6 +2295,44 @@ func TestResponseReadWithoutBody(t *testing.T) {
 	// '100 Continue' must be skipped.
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 100 Continue\r\nFoo-bar: baz\r\n\r\nHTTP/1.1 329 aaa\r\nContent-Type: qwe\r\nContent-Length: 894\r\n\r\n", true,
 		329, 894, "qwe")
+}
+
+func TestResponseReadSwitchingProtocolsIsTerminal(t *testing.T) {
+	t.Parallel()
+
+	r := bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\nUPGRADE-DATA",
+	))
+	var resp Response
+	if err := resp.Read(r); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != StatusSwitchingProtocols {
+		t.Fatalf("unexpected status code %d; want %d", resp.StatusCode(), StatusSwitchingProtocols)
+	}
+	remaining, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read upgrade data: %v", err)
+	}
+	if string(remaining) != "UPGRADE-DATA" {
+		t.Fatalf("unexpected upgrade data %q", remaining)
+	}
+}
+
+func TestResponseReadLimitsInterimResponses(t *testing.T) {
+	t.Parallel()
+
+	var s strings.Builder
+	for range maxInterimResponses + 1 {
+		s.WriteString("HTTP/1.1 103 Early Hints\r\n\r\n")
+	}
+	s.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+
+	var resp Response
+	err := resp.Read(bufio.NewReader(strings.NewReader(s.String())))
+	if !errors.Is(err, errTooManyInterimResponses) {
+		t.Fatalf("unexpected error %v; want %v", err, errTooManyInterimResponses)
+	}
 }
 
 func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBody bool,

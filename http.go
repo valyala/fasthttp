@@ -1564,8 +1564,15 @@ func (resp *Response) Read(r *bufio.Reader) error {
 	return resp.ReadLimitBody(r, 0)
 }
 
+const maxInterimResponses = 100
+
+var errTooManyInterimResponses = errors.New("fasthttp: too many 1xx informational responses received")
+
 // ReadLimitBody reads response headers from the given r,
 // then reads the body using the ReadBody function and limiting the body size.
+//
+// Informational responses other than "101 Switching Protocols" are consumed
+// before the final response is read.
 //
 // If resp.SkipBody is true then it skips reading the response body.
 //
@@ -1579,8 +1586,12 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 	if err != nil {
 		return err
 	}
-	if resp.Header.statusCode == StatusContinue {
-		// Read the next response according to http://www.w3.org/Protocols/rfc2616/rfc2616-sec8.html .
+
+	for n := 0; resp.Header.statusCode >= 100 && resp.Header.statusCode <= 199 &&
+		resp.Header.statusCode != StatusSwitchingProtocols; n++ {
+		if n >= maxInterimResponses {
+			return errTooManyInterimResponses
+		}
 		if err = resp.Header.Read(r); err != nil {
 			return err
 		}
