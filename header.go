@@ -210,7 +210,7 @@ func (h *RequestHeader) ContentLength() int {
 		// Transfer-Encoding takes precedence over Content-Length, matching
 		// the normal parser path.
 		te := peekArgBytes(h.h, strTransferEncoding)
-		if caseInsensitiveCompare(te, strChunked) {
+		if !h.noHTTP11 && caseInsensitiveCompare(te, strChunked) {
 			return -1 // chunked
 		}
 		v := peekArgBytes(h.h, strContentLength)
@@ -3235,6 +3235,15 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 			}
 		case 't':
 			if isTransferEncoding {
+				// Transfer-Encoding is undefined for HTTP/1.0, so an HTTP/1.0
+				// hop drops it and frames the body by Content-Length instead.
+				// Honouring chunked here would desync fasthttp from such a hop
+				// (request smuggling), so ignore it, mirroring the response
+				// parser above and net/http.
+				if h.noHTTP11 {
+					continue
+				}
+
 				isIdentity := caseInsensitiveCompare(s.value, strIdentity)
 				isChunked := caseInsensitiveCompare(s.value, strChunked)
 
