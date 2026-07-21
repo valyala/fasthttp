@@ -2471,7 +2471,55 @@ type httpWriter interface {
 	Write(w *bufio.Writer) error
 }
 
+// ChunkedBodyWriterTo lets a body opt into zero-copy chunked framing via
+// WriteTo. Return true only when WriteTo and Read emit the same bytes; a bare
+// io.WriterTo check is avoided because a WriteTo promoted from an embedded
+// reader would opt in by accident and bypass an overridden Read.
+type ChunkedBodyWriterTo interface {
+	io.WriterTo
+	SupportsChunkedBodyWriteTo() bool
+}
+
+type chunkedBodyWriter struct {
+	w   *bufio.Writer
+	err error
+}
+
+func (cw *chunkedBodyWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil // an empty chunk marks end-of-stream
+	}
+	if err := writeChunk(cw.w, p); err != nil {
+		cw.err = err
+		return 0, err
+	}
+	return len(p), nil
+}
+
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
+	// Frame WriteTo output directly, skipping copyBufPool, for bodies whose
+	// WriteTo is known to match reading.
+	useWriteTo := false
+	switch r.(type) {
+	case *bytes.Reader, *bytes.Buffer:
+		useWriteTo = true
+	default:
+		if cw, ok := r.(ChunkedBodyWriterTo); ok {
+			useWriteTo = cw.SupportsChunkedBodyWriteTo()
+		}
+	}
+	if useWriteTo {
+		wt := r.(io.WriterTo)
+		cw := chunkedBodyWriter{w: w}
+		if _, err := wt.WriteTo(&cw); err != nil {
+			return err
+		}
+		if cw.err != nil {
+			return cw.err
+		}
+		return writeChunk(w, nil)
+	}
+
 	vbuf := copyBufPool.Get()
 	buf := vbuf.([]byte) //nolint:forcetypeassert
 
