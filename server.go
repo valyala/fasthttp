@@ -146,6 +146,28 @@ type ServeHandler func(c net.Conn) error
 // instead.
 //
 // It is safe to call Server methods from concurrently running goroutines.
+
+// StatusContinueDeferred may be returned by Server.ExpectHandler to defer the
+// "100 Continue" response instead of sending it eagerly before the request
+// handler runs.
+//
+// When ExpectHandler returns StatusContinueDeferred the request handler is
+// invoked immediately, but the request body is NOT read and no "100 Continue"
+// response is sent yet. The handler must call RequestCtx.ContinueRequestBody
+// before it reads the body: that call sends the pending "100 Continue" response
+// and reads the body. If the handler responds without calling
+// ContinueRequestBody (for example, to reject the request after authentication),
+// "100 Continue" is never sent, so a well-behaved client never uploads the body.
+//
+// This realizes the purpose of the Expect: 100-continue mechanism — letting the
+// server reject a request before the client transmits a (potentially large)
+// body — for decisions that can only be made inside the request handler (after
+// routing, authentication, etc.) rather than from request headers alone.
+//
+// The value is intentionally not a valid HTTP status code so it cannot collide
+// with a real status returned by ExpectHandler to reject the request.
+const StatusContinueDeferred = -1
+
 type Server struct {
 	noCopy noCopy
 
@@ -203,6 +225,11 @@ type Server struct {
 	// StatusContinue (100) to accept the request and proceed to read the body,
 	// or any other status code to reject it and close the connection since the
 	// client may have already started sending the request body.
+	//
+	// Returning StatusContinueDeferred defers the "100 Continue" response until
+	// the request handler asks for the body via RequestCtx.ContinueRequestBody,
+	// so a handler can reject a request after routing/authentication without the
+	// client ever uploading the body. See StatusContinueDeferred for details.
 	//
 	// The ctx provides access to request headers and connection metadata (e.g.
 	// RemoteAddr for IP-based filtering). The response must not be modified.
@@ -645,6 +672,52 @@ type RequestCtx struct {
 	connID           uint64
 	connRequestNum   uint64
 	hijackNoResponse bool
+
+	// deferredContinue is armed by the connection loop when ExpectHandler
+	// returns StatusContinueDeferred. It carries the reader/writer the handler
+	// needs so ContinueRequestBody can send the pending "100 Continue" response
+	// and read the body on demand. It is nil for non-deferred requests.
+	deferredContinue *deferredContinue
+}
+
+// deferredContinue holds the state required to send a deferred "100 Continue"
+// response and read the request body from inside the request handler.
+type deferredContinue struct {
+	br                    *bufio.Reader
+	bw                    *bufio.Writer
+	maxBodySize           int
+	preParseMultipartForm bool
+	sent                  bool
+}
+
+// ContinueRequestBody sends the pending "100 Continue" response and reads the
+// request body. It must be called by the request handler before reading the
+// body of a request whose ExpectHandler returned StatusContinueDeferred.
+//
+// It is a no-op (returning nil) when the request did not defer continue or when
+// the body was already requested, so it is safe to call unconditionally. For a
+// deferred request that the handler rejects, simply not calling
+// ContinueRequestBody means "100 Continue" is never sent and a well-behaved
+// client never uploads the body.
+func (ctx *RequestCtx) ContinueRequestBody() error {
+	dc := ctx.deferredContinue
+	if dc == nil || dc.sent {
+		return nil
+	}
+	dc.sent = true
+
+	// Send the deferred "HTTP/1.1 100 Continue" response, then read the body.
+	if _, err := dc.bw.Write(strResponseContinue); err != nil {
+		return err
+	}
+	if err := dc.bw.Flush(); err != nil {
+		return err
+	}
+
+	if ctx.s.StreamRequestBody {
+		return ctx.Request.ContinueReadBodyStream(dc.br, dc.maxBodySize, dc.preParseMultipartForm)
+	}
+	return ctx.Request.ContinueReadBody(dc.br, dc.maxBodySize, dc.preParseMultipartForm)
 }
 
 // EarlyHints allows the server to hint to the browser what resources a page would need
@@ -892,6 +965,7 @@ func (ctx *RequestCtx) reset() {
 	ctx.Request.Reset()
 	ctx.Response.Reset()
 	ctx.fbr.reset()
+	ctx.deferredContinue = nil
 
 	ctx.connID = 0
 	ctx.connRequestNum = 0
@@ -2544,9 +2618,18 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		// 'Expect: 100-continue' request handling.
 		// See https://www.rfc-editor.org/rfc/rfc9110.html#field.expect for details.
 		if ctx.Request.MayContinue() {
+			deferContinue := false
+
 			// Allow the ability to deny reading the incoming request body.
 			if s.ExpectHandler != nil {
-				if expectStatus := s.ExpectHandler(ctx); expectStatus != StatusContinue {
+				switch expectStatus := s.ExpectHandler(ctx); expectStatus {
+				case StatusContinue:
+					// Accept the body: send 100-continue eagerly below.
+				case StatusContinueDeferred:
+					// Defer 100-continue: run the handler first and send it (and
+					// read the body) only if the handler calls ContinueRequestBody.
+					deferContinue = true
+				default:
 					continueReadingRequest = false
 					if br != nil {
 						br.Reset(ctx.c)
@@ -2565,7 +2648,24 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				}
 			}
 
-			if continueReadingRequest {
+			if continueReadingRequest && deferContinue {
+				// Arm ContinueRequestBody with the reader/writer it needs. Nothing
+				// is written or read until the handler requests the body, so a
+				// handler that rejects the request never sends 100-continue and a
+				// well-behaved client never uploads the body.
+				if bw == nil {
+					bw = acquireWriter(ctx)
+				}
+				if br == nil {
+					br = acquireReader(ctx)
+				}
+				ctx.deferredContinue = &deferredContinue{
+					br:                    br,
+					bw:                    bw,
+					maxBodySize:           maxRequestBodySize,
+					preParseMultipartForm: !s.DisablePreParseMultipartForm,
+				}
+			} else if continueReadingRequest {
 				if bw == nil {
 					bw = acquireWriter(ctx)
 				}
@@ -2653,7 +2753,12 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		connectionClose = connectionClose ||
 			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
 			ctx.Response.Header.ConnectionClose() ||
-			(s.CloseOnShutdown && s.stop.Load() == 1)
+			(s.CloseOnShutdown && s.stop.Load() == 1) ||
+			// A deferred-continue request whose handler never asked for the body:
+			// 100-continue was not sent, so a well-behaved client uploaded nothing
+			// and the socket can be closed gracefully. Closing also protects
+			// against a client that started uploading after its expect timeout.
+			(ctx.deferredContinue != nil && !ctx.deferredContinue.sent)
 		if connectionClose {
 			ctx.Response.Header.SetConnectionClose()
 		} else if !ctx.Request.Header.IsHTTP11() {
@@ -2729,6 +2834,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		s.setState(c, StateIdle)
 		ctx.Request.Reset()
 		ctx.Response.Reset()
+		ctx.deferredContinue = nil
 
 		if s.stop.Load() == 1 {
 			err = nil

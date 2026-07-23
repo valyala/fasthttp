@@ -2509,6 +2509,69 @@ func TestServerExpectHandlerRemoteAddr(t *testing.T) {
 	verifyResponse(t, br, StatusForbidden, string(defaultContentType), "")
 }
 
+func TestServerExpectHandlerDeferredContinue(t *testing.T) {
+	t.Parallel()
+
+	const body = "hello world"
+	const continuePrefix = "HTTP/1.1 100 Continue\r\n\r\n"
+
+	s := &Server{
+		ExpectHandler: func(_ *RequestCtx) int {
+			// Defer the 100-continue decision to the request handler.
+			return StatusContinueDeferred
+		},
+		Handler: func(ctx *RequestCtx) {
+			if string(ctx.Path()) == "/reject" {
+				// Reject without reading the body: 100-continue must not be sent.
+				ctx.SetStatusCode(StatusNotFound)
+				return
+			}
+			// Accept: request the body (sends 100-continue), then echo it.
+			if err := ctx.ContinueRequestBody(); err != nil {
+				t.Errorf("ContinueRequestBody: %v", err)
+				return
+			}
+			ctx.Write(ctx.PostBody()) //nolint:errcheck
+		},
+	}
+
+	// Accept path: 100-continue is sent, the body is read and echoed.
+	rw := &readWriter{}
+	rw.r.WriteString("POST /accept HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 11\r\nContent-Type: a/b\r\n\r\n" + body)
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+	out := rw.w.String()
+	if !strings.HasPrefix(out, continuePrefix) {
+		t.Fatalf("accepted deferred request must start with a 100-continue response, got %q", out)
+	}
+	br := bufio.NewReader(strings.NewReader(strings.TrimPrefix(out, continuePrefix)))
+	verifyResponse(t, br, StatusOK, string(defaultContentType), body)
+
+	// Reject path: no 100-continue is sent, the response is 404 with
+	// Connection: close, and the body is never consumed.
+	rw = &readWriter{}
+	rw.r.WriteString("POST /reject HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 11\r\nContent-Type: a/b\r\n\r\n" + body)
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+	out = rw.w.String()
+	if strings.Contains(out, "100 Continue") {
+		t.Fatalf("rejected deferred request must not send 100-continue, got %q", out)
+	}
+	br = bufio.NewReader(strings.NewReader(out))
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Unexpected error when reading response: %v", err)
+	}
+	if resp.StatusCode() != StatusNotFound {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotFound)
+	}
+	if !resp.Header.ConnectionClose() {
+		t.Fatal("rejected deferred request should close the connection")
+	}
+}
+
 func TestCompressHandler(t *testing.T) {
 	t.Parallel()
 
