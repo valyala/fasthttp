@@ -589,14 +589,14 @@ func decodeArgAppend(dst, src []byte) []byte {
 
 	// slow path
 	for i := idx; i < len(src); i++ {
-		c := src[i]
+		c := byteAtUnchecked(src, i)
 		switch c {
 		case '%':
-			if i+2 >= len(src) {
+			if uint(i)+2 >= uint(len(src)) {
 				return append(dst, src[i:]...)
 			}
-			x2 := hex2intTable[src[i+2]]
-			x1 := hex2intTable[src[i+1]]
+			x2 := hex2intTable[byteAtUnchecked(src, i+2)]
+			x1 := hex2intTable[byteAtUnchecked(src, i+1)]
 			if x1 == 16 || x2 == 16 {
 				dst = append(dst, '%')
 			} else {
@@ -627,13 +627,13 @@ func decodeArgAppendNoPlus(dst, src []byte) []byte {
 
 	// slow path
 	for i := idx; i < len(src); i++ {
-		c := src[i]
+		c := byteAtUnchecked(src, i)
 		if c == '%' {
-			if i+2 >= len(src) {
+			if uint(i)+2 >= uint(len(src)) {
 				return append(dst, src[i:]...)
 			}
-			x2 := hex2intTable[src[i+2]]
-			x1 := hex2intTable[src[i+1]]
+			x2 := hex2intTable[byteAtUnchecked(src, i+2)]
+			x1 := hex2intTable[byteAtUnchecked(src, i+1)]
 			if x1 == 16 || x2 == 16 {
 				dst = append(dst, '%')
 			} else {

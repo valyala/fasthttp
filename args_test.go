@@ -28,6 +28,35 @@ func TestDecodeArgAppend(t *testing.T) {
 		"f.o,1:2/4=~`!@#$%^&*()_-=+\\|/[]{};:'\"<>,./?")
 }
 
+func TestDecodeArgAppendNoPlus(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"%", "%"},
+		{"%a", "%a"},
+		{"%zz", "%zz"},
+		{"%20", " "},
+		{"%2B+", "++"},
+		{"x%20y%", "x y%"},
+	}
+	for _, testCase := range testCases {
+		got := decodeArgAppendNoPlus(nil, []byte(testCase.input))
+		if string(got) != testCase.want {
+			t.Fatalf("unexpected decodeArgAppendNoPlus(%q)=%q; expecting %q", testCase.input, got, testCase.want)
+		}
+
+		inPlace := []byte(testCase.input)
+		got = decodeArgAppendNoPlus(inPlace[:0], inPlace)
+		if string(got) != testCase.want {
+			t.Fatalf("unexpected in-place decodeArgAppendNoPlus(%q)=%q; expecting %q", testCase.input, got, testCase.want)
+		}
+	}
+}
+
 func testDecodeArgAppend(t *testing.T, s, expectedResult string) {
 	result := decodeArgAppend(nil, []byte(s))
 	if string(result) != expectedResult {
