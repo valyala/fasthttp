@@ -1232,3 +1232,59 @@ func TestFSPathRewriteRejectsDotDotSegments(t *testing.T) {
 		})
 	}
 }
+
+// On Windows a '\' also separates path components. ctx.Path()'s normalization
+// rewrites some backslash '..' sequences (`\..\`, `/..\`), but a `\../` segment
+// survives it, so without the guard filepath.FromSlash later turns it into a
+// real parent-directory jump outside Root.
+// See https://github.com/valyala/fasthttp/issues/1691.
+func TestFSServeRejectsBackslashDotDotSegments(t *testing.T) {
+	if filepath.Separator != '\\' {
+		t.Skip("backslash path separator is Windows only")
+	}
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	publicDir := filepath.Join(tmpDir, "public")
+	if err := os.MkdirAll(publicDir, 0o755); err != nil {
+		t.Fatalf("cannot create public dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(publicDir, "index.html"), []byte("<h1>Public</h1>"), 0o644); err != nil {
+		t.Fatalf("cannot create public index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, "secret.txt"), []byte("TOP_SECRET"), 0o644); err != nil {
+		t.Fatalf("cannot create secret file: %v", err)
+	}
+
+	requestURIs := []string{
+		`http://localhost/\../secret.txt`,
+		`http://localhost/\../\../secret.txt`,
+		`http://localhost/public/\../\../secret.txt`,
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	fs := &FS{
+		Root:      publicDir,
+		CleanStop: stop,
+	}
+	h := fs.NewRequestHandler()
+
+	for _, uri := range requestURIs {
+		t.Run(uri, func(t *testing.T) {
+			var ctx RequestCtx
+			ctx.Init(&Request{}, nil, TestLogger{t: t})
+			ctx.Request.SetRequestURI(uri)
+
+			h(&ctx)
+
+			if ctx.Response.StatusCode() != StatusInternalServerError {
+				t.Fatalf("unexpected status code for %q: %d. Expecting %d", uri, ctx.Response.StatusCode(), StatusInternalServerError)
+			}
+			if bytes.Contains(ctx.Response.Body(), []byte("TOP_SECRET")) {
+				t.Fatalf("unexpected secret disclosure for %q", uri)
+			}
+		})
+	}
+}

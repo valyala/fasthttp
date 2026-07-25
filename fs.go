@@ -1302,12 +1302,15 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.Error("Are you a hacker?", StatusBadRequest)
 		return
 	}
-	if h.pathRewrite != nil {
-		// There is no need to check rewritten paths if path = ctx.Path(),
-		// since ctx.Path must normalize and sanitize the path.
-
+	// Rewritten paths bypass ctx.Path()'s normalization, so they must be
+	// checked for '..' segments here. On Windows every path is checked
+	// regardless: ctx.Path() normalization only treats '/' as a separator,
+	// so backslash traversal such as `\..\` and `\../` survives it and
+	// filepath.FromSlash later turns it into a real parent-directory jump
+	// (https://github.com/valyala/fasthttp/issues/1691).
+	if h.pathRewrite != nil || filepath.Separator == '\\' {
 		if hasDotDotPathSegment(path) {
-			ctx.Logger().Printf("cannot serve rewritten path with '..' path segment due to security reasons: %q", path)
+			ctx.Logger().Printf("cannot serve path with '..' path segment due to security reasons: %q", path)
 			ctx.Error("Internal Server Error", StatusInternalServerError)
 			return
 		}
