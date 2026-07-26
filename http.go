@@ -1564,6 +1564,8 @@ func (resp *Response) Read(r *bufio.Reader) error {
 	return resp.ReadLimitBody(r, 0)
 }
 
+// maxInterimResponses limits the number of consecutive informational responses
+// accepted before ReadLimitBody returns errTooManyInterimResponses.
 const maxInterimResponses = 100
 
 var errTooManyInterimResponses = errors.New("fasthttp: too many 1xx informational responses received")
@@ -1587,8 +1589,12 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		return err
 	}
 
-	for n := 0; resp.Header.statusCode >= 100 && resp.Header.statusCode <= 199 &&
-		resp.Header.statusCode != StatusSwitchingProtocols; n++ {
+	for n := 0; ; n++ {
+		if resp.Header.statusCode < 100 ||
+			resp.Header.statusCode > 199 ||
+			resp.Header.statusCode == StatusSwitchingProtocols {
+			break
+		}
 		if n >= maxInterimResponses {
 			return errTooManyInterimResponses
 		}
