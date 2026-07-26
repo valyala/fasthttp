@@ -1705,6 +1705,36 @@ func TestRequestMultipartForm(t *testing.T) {
 	testRequestMultipartForm(t, "foobar", req.Body(), 3)
 }
 
+func TestRequestMultipartFormEpilogue(t *testing.T) {
+	t.Parallel()
+
+	// Bytes the sender put between the closing boundary and Content-Length.
+	// They belong to this request's body, so they must not show up as the
+	// next request on the connection.
+	body := "--foobar\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--foobar--\r\n" +
+		strings.Repeat("z", 8*1024)
+	next := "GET /next HTTP/1.1\r\nHost: aaa\r\n\r\n"
+
+	s := fmt.Sprintf("POST /first HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=foobar\r\nContent-Length: %d\r\n\r\n%s%s",
+		len(body), body, next)
+
+	br := bufio.NewReader(bytes.NewBufferString(s))
+
+	var req Request
+	if err := req.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	req.RemoveMultipartFormFiles()
+
+	var req2 Request
+	if err := req2.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(req2.URI().Path()) != "/next" {
+		t.Fatalf("unexpected path %q; expecting %q", req2.URI().Path(), "/next")
+	}
+}
+
 func testRequestMultipartForm(t *testing.T, boundary string, formData []byte, partsCount int) []byte {
 	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=%s\r\nContent-Length: %d\r\n\r\n%s",
 		boundary, len(formData), formData)

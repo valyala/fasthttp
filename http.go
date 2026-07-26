@@ -1249,6 +1249,14 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 	if err != nil {
 		return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 	}
+	// ReadForm stops at the closing boundary, so anything the sender placed
+	// between it and Content-Length is still unread on r. Discard it, since
+	// on a keep-alive connection those bytes are otherwise read back as the
+	// beginning of the next request.
+	if _, err = copyZeroAlloc(io.Discard, lr); err != nil {
+		f.RemoveAll() //nolint:errcheck
+		return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
+	}
 	return f, nil
 }
 
