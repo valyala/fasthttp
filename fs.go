@@ -2028,15 +2028,8 @@ func stripLeadingSlashes(path []byte, stripSlashes int) []byte {
 
 func hasDotDotPathSegment(path []byte) bool {
 	segmentStart := 0
-	for i := 0; i <= len(path); i++ {
-		isSeparator := i == len(path)
-		if i < len(path) {
-			isSeparator = path[i] == '/'
-			if filepath.Separator == '\\' && path[i] == '\\' {
-				isSeparator = true
-			}
-		}
-		if !isSeparator {
+	for i, c := range path {
+		if c != '/' && (filepath.Separator != '\\' || c != '\\') {
 			continue
 		}
 		if i-segmentStart == 2 && path[segmentStart] == '.' && path[segmentStart+1] == '.' {
@@ -2044,7 +2037,9 @@ func hasDotDotPathSegment(path []byte) bool {
 		}
 		segmentStart = i + 1
 	}
-	return false
+	return len(path)-segmentStart == 2 &&
+		path[segmentStart] == '.' &&
+		path[segmentStart+1] == '.'
 }
 
 func fileExtension(path string, compressed bool, compressedFileSuffix string) string {

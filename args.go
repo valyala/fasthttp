@@ -161,8 +161,9 @@ func (a *Args) SortKeys(f func(x, y []byte) int) {
 
 // AppendBytes appends query string to dst and returns the extended dst.
 func (a *Args) AppendBytes(dst []byte) []byte {
-	for i, n := 0, len(a.args); i < n; i++ {
-		kv := &a.args[i]
+	args := a.args
+	for i, n := 0, len(args); i < n; i++ {
+		kv := &args[i]
 		dst = AppendQuotedArg(dst, kv.key)
 		if !kv.noValue {
 			dst = append(dst, '=')
@@ -588,15 +589,17 @@ func decodeArgAppend(dst, src []byte) []byte {
 	dst = append(dst, src[:idx]...)
 
 	// slow path
-	for i := idx; i < len(src); i++ {
-		c := byteAtUnchecked(src, i)
+	for i := uint(idx); i < uint(len(src)); i++ {
+		c := src[i]
 		switch c {
 		case '%':
-			if uint(i)+2 >= uint(len(src)) {
+			end := i + 3
+			if end > uint(len(src)) {
 				return append(dst, src[i:]...)
 			}
-			x2 := hex2intTable[byteAtUnchecked(src, i+2)]
-			x1 := hex2intTable[byteAtUnchecked(src, i+1)]
+			chunk := src[i:end]
+			x2 := hex2intTable[chunk[2]]
+			x1 := hex2intTable[chunk[1]]
 			if x1 == 16 || x2 == 16 {
 				dst = append(dst, '%')
 			} else {
@@ -626,14 +629,16 @@ func decodeArgAppendNoPlus(dst, src []byte) []byte {
 	dst = append(dst, src[:idx]...)
 
 	// slow path
-	for i := idx; i < len(src); i++ {
-		c := byteAtUnchecked(src, i)
+	for i := uint(idx); i < uint(len(src)); i++ {
+		c := src[i]
 		if c == '%' {
-			if uint(i)+2 >= uint(len(src)) {
+			end := i + 3
+			if end > uint(len(src)) {
 				return append(dst, src[i:]...)
 			}
-			x2 := hex2intTable[byteAtUnchecked(src, i+2)]
-			x1 := hex2intTable[byteAtUnchecked(src, i+1)]
+			chunk := src[i:end]
+			x2 := hex2intTable[chunk[2]]
+			x1 := hex2intTable[chunk[1]]
 			if x1 == 16 || x2 == 16 {
 				dst = append(dst, '%')
 			} else {

@@ -55,7 +55,7 @@ func AppendHTMLEscapeBytes(dst, s []byte) []byte {
 // and returns the extended dst.
 func AppendIPv4(dst []byte, ip net.IP) []byte {
 	ip = ip.To4()
-	if ip == nil {
+	if len(ip) != net.IPv4len {
 		return append(dst, "non-v4 ip passed to AppendIPv4"...)
 	}
 
@@ -85,7 +85,7 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	b := ipStr
 	for i := range 3 {
 		n := bytes.IndexByte(b, '.')
-		if n < 0 {
+		if uint(n) >= uint(len(b)) {
 			return dst, fmt.Errorf("cannot find dot in ip string %q", ipStr)
 		}
 		octet, parsed, err := parseIPv4Octet(b[:n])
