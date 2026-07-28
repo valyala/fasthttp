@@ -209,6 +209,10 @@ func serveFS(ctx *RequestCtx, filesystem fs.FS, path string, literal bool) {
 		CompressBrotli:     true,
 		CompressZstd:       true,
 		AcceptByteRange:    true,
+		// This FS serves exactly one request, so its cache can never be hit
+		// again. Skipping it drops a cleaner goroutine per call and releases the
+		// file when the response body closes instead of at GC time.
+		SkipCache: true,
 	}
 	handler := f.NewRequestHandler()
 
@@ -602,6 +606,12 @@ func (fs *FS) initRequestHandler() {
 
 	if h.filesystem == nil {
 		h.filesystem = &osFS{} // It provides os.Open and os.Stat
+	}
+
+	if fs.SkipCache {
+		// noopCacheManager.Close is a no-op, so there is nothing to stop.
+		fs.h = h.handleRequest
+		return
 	}
 
 	// Use a >16-byte backing array so the cleanup owner doesn't fall under

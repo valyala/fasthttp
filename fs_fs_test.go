@@ -56,7 +56,7 @@ func TestFSServeFileHead(t *testing.T) {
 	}
 }
 
-func TestServeFSDoesNotLeakCacheCleaner(t *testing.T) {
+func TestServeFSCreatesNoCacheCleaner(t *testing.T) {
 	testFS := fstest.MapFS{
 		"index.txt": {Data: []byte("body")},
 	}
@@ -77,22 +77,52 @@ func TestServeFSDoesNotLeakCacheCleaner(t *testing.T) {
 		}
 	}
 
+	// ServeFS skips the cache, so the expected delta is 0 without any GC. The
+	// slack absorbs unrelated test goroutines dying around the sample.
+	if leaked := runtime.NumGoroutine() - before; leaked > 3 {
+		t.Fatalf("ServeFS started %d cache cleaner goroutines; expected none", leaked)
+	}
+}
+
+func TestFSCacheCleanerIsReclaimed(t *testing.T) {
+	testFS := fstest.MapFS{
+		"index.txt": {Data: []byte("body")},
+	}
+
+	runtime.GC()
+	before := runtime.NumGoroutine()
+
+	const handlers = 25
+	for range handlers {
+		h := (&FS{FS: testFS, AllowEmptyRoot: true}).NewRequestHandler()
+
+		var ctx RequestCtx
+		var req Request
+		req.SetRequestURI("http://foobar.com/index.txt")
+		ctx.Init(&req, nil, TestLogger{t})
+
+		h(&ctx)
+		if ctx.Response.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code %d. expecting %d", ctx.Response.StatusCode(), StatusOK)
+		}
+	}
+
+	// A cached FS does start a cleaner, so this one has to wait for the cleanup
+	// registered in initRequestHandler to run.
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
 		runtime.GC()
 		runtime.Gosched()
 
-		after := runtime.NumGoroutine()
-		if leaked := after - before; leaked <= 3 {
+		if leaked := runtime.NumGoroutine() - before; leaked <= 3 {
 			return
 		}
 
 		time.Sleep(10 * time.Millisecond)
 	}
 
-	after := runtime.NumGoroutine()
-	if leaked := after - before; leaked > 3 {
-		t.Fatalf("ServeFS left %d persistent goroutines; expected no cache cleaner goroutine leak", leaked)
+	if leaked := runtime.NumGoroutine() - before; leaked > 3 {
+		t.Fatalf("cache cleaners of %d discarded handlers were not reclaimed; %d goroutines left", handlers, leaked)
 	}
 }
 
