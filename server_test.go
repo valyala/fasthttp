@@ -4364,6 +4364,43 @@ func TestShutdownReuse(t *testing.T) {
 	}
 }
 
+func TestCloseIdleConnsKeepsTimestampOwnedByItsConn(t *testing.T) {
+	// Drain the pool so a hit below is unambiguous, and hand everything back
+	// afterwards so concurrent tests keep their pooled counters.
+	var drained []any
+	for {
+		v := idleConnTimePool.Get()
+		if v == nil {
+			break
+		}
+		drained = append(drained, v)
+	}
+	defer func() {
+		for _, v := range drained {
+			idleConnTimePool.Put(v)
+		}
+	}()
+
+	c, peer := net.Pipe()
+	defer c.Close()
+	defer peer.Close()
+
+	// serveConnCounted keeps storing into this counter after closeIdleConns
+	// reaps the connection, so closeIdleConns must not hand it out again.
+	ict := &atomic.Int64{}
+	ict.Store(time.Now().Unix() - 10)
+
+	s := &Server{idleConns: map[net.Conn]*atomic.Int64{c: ict}}
+	s.closeIdleConns()
+
+	if _, ok := s.idleConns[c]; ok {
+		t.Fatal("closeIdleConns did not drop the reaped connection")
+	}
+	if v := idleConnTimePool.Get(); v == any(ict) {
+		t.Fatal("closeIdleConns recycled a timestamp that its connection still owns")
+	}
+}
+
 func TestShutdownDone(t *testing.T) {
 	t.Parallel()
 
