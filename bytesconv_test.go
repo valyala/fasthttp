@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -332,6 +333,66 @@ func TestParseUintError(t *testing.T) {
 	// too big num
 	testParseUintError(t, "12345678901234567890")
 	testParseUintError(t, "1234567890123456789012")
+}
+
+// ParseUint must agree with the standard library about which decimal strings
+// name an int and about the value when they do. A table of round hostile
+// numbers is not enough: the overflow this pins only shows up in a narrow band
+// of values where 10*v wraps back above v.
+func TestParseUintMatchesStrconv(t *testing.T) {
+	t.Parallel()
+
+	values := []string{
+		"0", "1", "9", "10", "255", "1000", "0123", "00000000000000000001",
+		"9223372036854775806", "9223372036854775807", "9223372036854775808",
+		"18446744073709551615", "18446744073709551616",
+		"21000000000000000000", "22000000000000000000", "23000000000000000000",
+		"24000000000000000000", "25000000000000000000", "26000000000000000000",
+		"27000000000000000000", "41000000000000000000",
+		"210000000000000000000", "230000000000000000000", "410000000000000000000",
+		"4100000000000000000000",
+		"99999999999999999999", "100000000000000000000",
+	}
+
+	for _, s := range values {
+		got, gotErr := ParseUint([]byte(s))
+		want, wantErr := strconv.ParseInt(s, 10, strconv.IntSize)
+
+		if (gotErr != nil) != (wantErr != nil) {
+			t.Fatalf("ParseUint(%q) = (%d, %v), strconv.ParseInt = (%d, %v): "+
+				"they disagree about whether the value is in range", s, got, gotErr, want, wantErr)
+		}
+		if gotErr == nil && int64(got) != want {
+			t.Fatalf("ParseUint(%q) = %d. Expecting %d", s, got, want)
+		}
+	}
+}
+
+// The parsed length must not be trusted as an int when it never fit one: a
+// Content-Length that overflows is an error on both the request and the
+// response side, not a wrapped value.
+func TestParseContentLengthRejectsOverflow(t *testing.T) {
+	t.Parallel()
+
+	for _, cl := range []string{"25000000000000000000", "41000000000000000000", "9223372036854775808"} {
+		if n, err := parseContentLength([]byte(cl)); err == nil {
+			t.Fatalf("parseContentLength(%q) = %d with no error. Expecting an error", cl, n)
+		}
+
+		var h RequestHeader
+		raw := "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: " + cl + "\r\n\r\n"
+		if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err == nil {
+			t.Fatalf("RequestHeader.Read accepted Content-Length %q as %d. Expecting an error",
+				cl, h.ContentLength())
+		}
+
+		var rh ResponseHeader
+		rawResp := "HTTP/1.1 200 OK\r\nContent-Length: " + cl + "\r\n\r\n"
+		if err := rh.Read(bufio.NewReader(strings.NewReader(rawResp))); err == nil {
+			t.Fatalf("ResponseHeader.Read accepted Content-Length %q as %d. Expecting an error",
+				cl, rh.ContentLength())
+		}
+	}
 }
 
 func TestParseUfloatSuccess(t *testing.T) {

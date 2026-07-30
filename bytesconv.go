@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -258,6 +259,10 @@ func AppendUint(dst []byte, n int) []byte {
 }
 
 // ParseUint parses uint from buf.
+//
+// A value too large for an int is an error rather than a wrapped result, so the
+// set of strings ParseUint accepts is the set strconv.ParseInt accepts for the
+// platform's int size.
 func ParseUint(buf []byte) (int, error) {
 	v, n, err := parseUintBuf(buf)
 	if n != len(buf) {
@@ -289,12 +294,18 @@ func parseUintBuf(b []byte) (int, int, error) {
 			}
 			return v, i, nil
 		}
-		vNew := 10*v + int(k)
-		// Test for overflow.
-		if vNew < v {
+		// Test for overflow before it happens. Comparing the product against
+		// the accumulator afterwards is not enough: 10*v wraps modulo 2^64 and
+		// can land back above v, in which case the overflow goes unnoticed and
+		// a wrong value is returned instead of an error.
+		if v > math.MaxInt/10 {
 			return -1, i, errTooLongInt
 		}
-		v = vNew
+		v *= 10
+		if v > math.MaxInt-int(k) {
+			return -1, i, errTooLongInt
+		}
+		v += int(k)
 	}
 	return v, n, nil
 }
