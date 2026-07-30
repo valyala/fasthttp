@@ -239,6 +239,10 @@ func (resp *Response) SendFile(path string) error {
 //
 // If bodySize < 0, then bodyStream is read until io.EOF.
 //
+// When bodySize < 0 (chunked transfer encoding), fasthttp may frame the body
+// using WriteTo instead of Read for *bytes.Reader, *bytes.Buffer, and streams
+// implementing ChunkedBodyWriterTo.
+//
 // bodyStream.Close() is called after finishing reading all body data
 // if it implements io.Closer.
 //
@@ -257,6 +261,10 @@ func (req *Request) SetBodyStream(bodyStream io.Reader, bodySize int) {
 // before returning io.EOF.
 //
 // If bodySize < 0, then bodyStream is read until io.EOF.
+//
+// When bodySize < 0 (chunked transfer encoding), fasthttp may frame the body
+// using WriteTo instead of Read for *bytes.Reader, *bytes.Buffer, and streams
+// implementing ChunkedBodyWriterTo.
 //
 // bodyStream.Close() is called after finishing reading all body data
 // if it implements io.Closer.
@@ -2269,9 +2277,15 @@ type httpWriter interface {
 }
 
 // ChunkedBodyWriterTo lets a body opt into zero-copy chunked framing via
-// WriteTo. Return true only when WriteTo and Read emit the same bytes; a bare
-// io.WriterTo check is avoided because a WriteTo promoted from an embedded
-// reader would opt in by accident and bypass an overridden Read.
+// WriteTo. It is consulted only for unknown-size bodies (bodySize < 0) written
+// with chunked transfer encoding.
+//
+// SupportsChunkedBodyWriteTo must return true only when WriteTo can safely
+// replace Read, including any pacing, accounting, transformations, or other
+// observable side effects Read performs — emitting the same eventual bytes is
+// not enough. A bare io.WriterTo check is avoided because a WriteTo promoted
+// from an embedded reader would opt in by accident and bypass an overridden
+// Read; the bool also lets an embedding type opt back out.
 type ChunkedBodyWriterTo interface {
 	io.WriterTo
 	SupportsChunkedBodyWriteTo() bool

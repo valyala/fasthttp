@@ -3296,7 +3296,8 @@ func (e *embeddedWriterTo) WriteTo(w io.Writer) (int64, error) {
 
 type promotedWriterToBody struct {
 	*embeddedWriterTo // WriteTo is promoted from here
-	readCnt           int
+
+	readCnt int
 }
 
 func (b *promotedWriterToBody) Read(p []byte) (int, error) {
@@ -3366,6 +3367,7 @@ func (e *optInInner) SupportsChunkedBodyWriteTo() bool { return true }
 
 type optOutBody struct {
 	*optInInner
+
 	readCnt int
 }
 
