@@ -1578,6 +1578,86 @@ Connection: close
 	}
 }
 
+// oneByteReadWriter hands out a single byte per Read, so the multipart reader
+// cannot buffer past the closing boundary.
+type oneByteReadWriter struct{ readWriter }
+
+func (rw *oneByteReadWriter) Read(p []byte) (int, error) {
+	if len(p) > 1 {
+		p = p[:1]
+	}
+	return rw.readWriter.Read(p)
+}
+
+func TestServerDoesNotParseStreamedMultipartEpilogueAsRequest(t *testing.T) {
+	t.Parallel()
+
+	form := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := form + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				if _, err := ctx.MultipartForm(); err != nil {
+					t.Error(err)
+				}
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
+func TestServerRejectsTruncatedMultipartBody(t *testing.T) {
+	t.Parallel()
+
+	body := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+
+	rw := &readWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST / HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body)+1, body,
+	)
+
+	called := false
+	s := Server{
+		Handler: func(*RequestCtx) {
+			called = true
+		},
+	}
+
+	err := s.ServeConn(rw)
+
+	if called {
+		t.Error("handler was called for a truncated request body")
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("ServeConn error = %v; want unexpected EOF", err)
+	}
+}
+
 func TestServerGetWithContent(t *testing.T) {
 	t.Parallel()
 

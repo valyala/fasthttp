@@ -1154,6 +1154,14 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 			req.RemoveMultipartFormFiles()
 			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", ErrBodyTooLarge)
 		}
+		// ReadForm stops at the closing boundary, so the rest of the declared
+		// body is still pending on the stream. Discard it, otherwise those
+		// bytes are read back as the beginning of the next request on a
+		// keep-alive connection.
+		if _, err = copyZeroAlloc(io.Discard, req.bodyStream); err != nil {
+			req.RemoveMultipartFormFiles()
+			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
+		}
 	} else {
 		body := req.bodyBytes()
 		if bytes.Equal(ce, strGzip) {
@@ -1243,7 +1251,7 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 	if size <= 0 {
 		return nil, fmt.Errorf("form size must be greater than 0: given %d", size)
 	}
-	lr := io.LimitReader(r, int64(size))
+	lr := &io.LimitedReader{R: r, N: int64(size)}
 	mr := multipart.NewReader(lr, boundary)
 	f, err := mr.ReadForm(int64(maxInMemoryFileSize))
 	if err != nil {
@@ -1253,7 +1261,11 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 	// between it and Content-Length is still unread on r. Discard it, since
 	// on a keep-alive connection those bytes are otherwise read back as the
 	// beginning of the next request.
-	if _, err = copyZeroAlloc(io.Discard, lr); err != nil {
+	if _, err = copyZeroAlloc(io.Discard, lr); err == nil && lr.N > 0 {
+		// r ended before the declared body size was reached.
+		err = io.ErrUnexpectedEOF
+	}
+	if err != nil {
 		f.RemoveAll() //nolint:errcheck
 		return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 	}
