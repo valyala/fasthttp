@@ -201,6 +201,12 @@ func TestURIUpdate(t *testing.T) {
 	testURIUpdate(t, "http://example.net/dir/path1.html", "//example.com/dir/path2.html", "http://example.com/dir/path2.html")
 	// host with port
 	testURIUpdate(t, "http://example.net/", "//example.com:8080/", "http://example.com:8080/")
+
+	// "//" that isn't preceded by a scheme stays part of the reference
+	testURIUpdate(t, "http://example.net/dir/path1.html", "https//example.com/x", "http://example.net/dir/https/example.com/x")
+	testURIUpdate(t, "http://example.net/dir/path1.html", "a//b", "http://example.net/dir/a/b")
+	testURIUpdate(t, "http://example.net/dir/path1.html", "/a//b", "http://example.net/a/b")
+	testURIUpdate(t, "http://example.net/dir/path1.html?p=1", "?q=//example.com", "http://example.net/dir/path1.html?q=//example.com")
 }
 
 func TestURIRejectsMixedBracketHost(t *testing.T) {
