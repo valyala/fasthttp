@@ -272,6 +272,8 @@ func TestServerConnState(t *testing.T) {
 		c, err := ln.Dial()
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
+
+			return
 		}
 		br := bufio.NewReader(c)
 		// Send 2 requests on the same connection.
@@ -640,6 +642,8 @@ func TestServerResponseServerHeader(t *testing.T) {
 		c, err := ln.Dial()
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
+
+			return
 		}
 		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -721,6 +725,8 @@ func TestServerResponseBodyStream(t *testing.T) {
 		c, err := ln.Dial()
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
+
+			return
 		}
 		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -798,6 +804,8 @@ func TestServerDisableKeepalive(t *testing.T) {
 		c, err := ln.Dial()
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
+
+			return
 		}
 		if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: aa\r\n\r\n")); err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -875,10 +883,14 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 		c1, err := ln.Dial()
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
+
+			return
 		}
 		c2, err := ln.Dial()
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
+
+			return
 		}
 		br := bufio.NewReader(c2)
 		var resp Response
@@ -976,10 +988,14 @@ func TestServerConcurrencyLimit(t *testing.T) {
 		c1, err := ln.Dial()
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
+
+			return
 		}
 		c2, err := ln.Dial()
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
+
+			return
 		}
 		br := bufio.NewReader(c2)
 		var resp Response
@@ -1053,6 +1069,8 @@ func TestRejectedRequestsCount(t *testing.T) {
 			_, err := ln.Dial()
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
+
+				return
 			}
 		}
 
@@ -3440,6 +3458,8 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 			conn, err := ln.Dial()
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
+
+				return
 			}
 			if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -3498,6 +3518,8 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 			conn, err := ln.Dial()
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
+
+				return
 			}
 			if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -4215,6 +4237,8 @@ func TestShutdown(t *testing.T) {
 		conn, err := ln.Dial()
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
+
+			return
 		}
 		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 			t.Errorf("unexpected error: %v", err)
@@ -4279,6 +4303,8 @@ func TestCloseOnShutdown(t *testing.T) {
 		conn, err := ln.Dial()
 		if err != nil {
 			t.Errorf("unexpected error: %v", err)
+
+			return
 		}
 		if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
 			t.Errorf("unexpected error: %v", err)
