@@ -3147,8 +3147,9 @@ func (s *Server) closeIdleConns() {
 		t := ict.Load()
 		if t != 0 && now-t >= 0 {
 			_ = c.Close()
+			// Don't recycle ict: the connection's own goroutine still holds it
+			// and stores into it, so only that goroutine may return it.
 			delete(s.idleConns, c)
-			idleConnTimePool.Put(ict)
 		}
 	}
 	s.idleConnsMu.Unlock()
