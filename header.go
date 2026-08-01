@@ -3180,6 +3180,14 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 		case 't':
 			if caseInsensitiveCompare(s.key, strTransferEncoding) {
 				isTransferEncoding = true
+				// RFC 9112 section 6.1 requires an HTTP/1.0 message carrying
+				// Transfer-Encoding to be treated as having faulty framing,
+				// even if Content-Length is present, and the connection to be
+				// closed afterwards.
+				if h.noHTTP11 {
+					h.connectionClose = true
+					return 0, ErrUnsupportedTransferEncoding
+				}
 				if transferEncodingSeen {
 					h.connectionClose = true
 					if h.secureErrorLogMessage {
