@@ -87,7 +87,7 @@ func TestServerCRNLAfterPost(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 		},
 		Logger:      &testLogger{},
-		ReadTimeout: time.Millisecond * 100,
+		ReadTimeout: testTimeout(time.Millisecond * 100),
 	}
 
 	ln := fasthttputil.NewInmemoryListener()
@@ -479,7 +479,7 @@ func TestServerErrSmallBuffer(t *testing.T) {
 	var serverErr error
 	select {
 	case serverErr = <-ch:
-	case <-time.After(200 * time.Millisecond):
+	case <-time.After(testTimeout(200 * time.Millisecond)):
 		t.Fatal("timeout")
 	}
 
@@ -3262,8 +3262,10 @@ func testRequestCtxHijack(t *testing.T, s *Server) {
 
 				return
 			}
-		case <-time.After(200 * time.Millisecond):
+		case <-time.After(testTimeout(200 * time.Millisecond)):
 			t.Errorf("timeout")
+
+			return
 		}
 	}
 
@@ -3356,7 +3358,7 @@ func TestRequestCtxHijackNoResponse(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Unexpected error from hijack: %v", err)
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(testTimeout(100 * time.Millisecond)):
 		t.Fatal("timeout")
 	}
 
@@ -3656,7 +3658,7 @@ func TestServerGetOnly(t *testing.T) {
 		if err != ErrGetOnly {
 			t.Fatalf("Unexpected error from serveConn: %v. Expecting %v", err, ErrGetOnly)
 		}
-	case <-time.After(100 * time.Millisecond):
+	case <-time.After(testTimeout(100 * time.Millisecond)):
 		t.Fatal("timeout")
 	}
 
@@ -4324,7 +4326,7 @@ func TestShutdownReuse(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 			ctx.Success("aaa/bbb", []byte("real response"))
 		},
-		ReadTimeout: time.Millisecond * 100,
+		ReadTimeout: testTimeout(time.Millisecond * 100),
 		Logger:      &testLogger{}, // Ignore log output.
 	}
 	go func() {
@@ -4664,7 +4666,7 @@ func TestStreamRequestBody(t *testing.T) {
 
 	select {
 	case <-next:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(testTimeout(500 * time.Millisecond)):
 		t.Fatal("part1 timeout")
 	}
 
@@ -4680,7 +4682,7 @@ func TestStreamRequestBody(t *testing.T) {
 		if err != nil && err.Error() != fasthttputil.ErrConnectionClosed.Error() {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(testTimeout(500 * time.Millisecond)):
 		t.Fatal("part2 timeout")
 	}
 }
@@ -4716,7 +4718,7 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 
 	select {
 	case <-next:
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(testTimeout(500 * time.Millisecond)):
 		t.Fatal("part1 timeout")
 	}
 
@@ -4729,7 +4731,7 @@ func TestStreamRequestBodyExceedMaxSize(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-	case <-time.After(500 * time.Millisecond):
+	case <-time.After(testTimeout(500 * time.Millisecond)):
 		t.Fatal("part2 timeout")
 	}
 }
