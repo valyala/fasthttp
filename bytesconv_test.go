@@ -335,15 +335,37 @@ func TestParseUintError(t *testing.T) {
 	testParseUintError(t, "1234567890123456789012")
 }
 
-// ParseUint must agree with the standard library about which decimal strings
-// name an int and about the value when they do. A table of round hostile
-// numbers is not enough: the overflow this pins only shows up in a narrow band
-// of values where 10*v wraps back above v.
+// The digit gate in parseUintBuf has to be conservative on whatever int size
+// the build targets: a number of exactly maxSafeIntDigits digits must always
+// fit in an int, and one digit more must be able to overflow it.
+func TestMaxSafeIntDigits(t *testing.T) {
+	t.Parallel()
+
+	fits := strings.Repeat("9", maxSafeIntDigits)
+	if _, err := strconv.ParseUint(fits, 10, strconv.IntSize-1); err != nil {
+		t.Fatalf("%d nines must fit in an int on this platform: %v", maxSafeIntDigits, err)
+	}
+	if _, err := strconv.ParseUint(fits+"9", 10, strconv.IntSize-1); err == nil {
+		t.Fatalf("%d nines must not fit in an int on this platform", maxSafeIntDigits+1)
+	}
+}
+
+// ParseUint must agree with the standard library about which unsigned decimal
+// strings fit in an int and about the value when they do. A table of round
+// hostile numbers is not enough: the overflow this pins only shows up in a
+// narrow band of values where 10*v wraps back above v, and that band sits in a
+// different place for each int size, so both are covered below.
 func TestParseUintMatchesStrconv(t *testing.T) {
 	t.Parallel()
 
 	values := []string{
 		"0", "1", "9", "10", "255", "1000", "0123", "00000000000000000001",
+		// Wrap band for a 32-bit int: the pre-fix parser returned 705032704 for
+		// "5000000000" with no error. All of these are in range on a 64-bit
+		// platform, so the oracle decides what correct means for each build.
+		"2147483647", "2147483648", "5000000000", "6000000000", "9999999999",
+		"10000000000", "15000000000", "48000000000",
+		// Wrap band for a 64-bit int.
 		"9223372036854775806", "9223372036854775807", "9223372036854775808",
 		"18446744073709551615", "18446744073709551616",
 		"21000000000000000000", "22000000000000000000", "23000000000000000000",
@@ -356,13 +378,16 @@ func TestParseUintMatchesStrconv(t *testing.T) {
 
 	for _, s := range values {
 		got, gotErr := ParseUint([]byte(s))
-		want, wantErr := strconv.ParseInt(s, 10, strconv.IntSize)
+		// A bit size one below the int size accepts exactly the strings that name
+		// a non-negative int. ParseUint is the oracle rather than ParseInt, which
+		// also accepts the leading sign that fasthttp's ParseUint rejects.
+		want, wantErr := strconv.ParseUint(s, 10, strconv.IntSize-1)
 
 		if (gotErr != nil) != (wantErr != nil) {
-			t.Fatalf("ParseUint(%q) = (%d, %v), strconv.ParseInt = (%d, %v): "+
+			t.Fatalf("ParseUint(%q) = (%d, %v), strconv.ParseUint = (%d, %v): "+
 				"they disagree about whether the value is in range", s, got, gotErr, want, wantErr)
 		}
-		if gotErr == nil && int64(got) != want {
+		if gotErr == nil && uint64(got) != want {
 			t.Fatalf("ParseUint(%q) = %d. Expecting %d", s, got, want)
 		}
 	}
