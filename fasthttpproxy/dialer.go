@@ -80,21 +80,46 @@ type Dialer struct {
 
 // GetDialFunc method returns a fasthttp-style dial function. The useEnv parameter
 // determines whether the proxy address comes from Dialer.Config or from environment variables.
+//
+// The returned DialFunc cannot observe the request scheme. When HTTPProxy and
+// HTTPSProxy differ, it assumes port 443 is HTTPS and every other port is HTTP.
+// Use GetDialFuncForTLS when the request scheme and port may not use their
+// conventional pairing.
 func (d *Dialer) GetDialFunc(useEnv bool) (fasthttp.DialFunc, error) {
+	return d.getDialFunc(useEnv, "")
+}
+
+// GetDialFuncForTLS returns a fasthttp-style dial function that selects
+// HTTPProxy or HTTPSProxy from isTLS instead of inferring the scheme from the
+// destination port. The isTLS value should match fasthttp.HostClient.IsTLS.
+func (d *Dialer) GetDialFuncForTLS(useEnv, isTLS bool) (fasthttp.DialFunc, error) {
+	scheme := httpScheme
+	if isTLS {
+		scheme = httpsScheme
+	}
+	return d.getDialFunc(useEnv, scheme)
+}
+
+func (d *Dialer) getDialFunc(useEnv bool, scheme string) (fasthttp.DialFunc, error) {
 	config := &d.Config
 	if useEnv {
 		config = httpproxy.FromEnvironment()
 	}
-	proxyURLIsSame := config.HTTPSProxy == config.HTTPProxy && config.NoProxy == ""
+	proxyURLIsStatic := config.NoProxy == "" &&
+		(scheme != "" || config.HTTPSProxy == config.HTTPProxy)
 	network := "tcp4"
 	if d.DialDualStack {
 		network = "tcp"
 	}
 	proxyFunc := config.ProxyFunc()
-	if proxyURLIsSame {
+	if proxyURLIsStatic {
 		var proxyURL *url.URL
 		var proxyDialer proxy.Dialer
-		proxyURL, err := proxyFunc(tmpURL)
+		reqURL := tmpURL
+		if scheme != "" {
+			reqURL = &url.URL{Scheme: scheme, Host: tmpURL.Host}
+		}
+		proxyURL, err := proxyFunc(reqURL)
 		if err != nil {
 			return nil, err
 		}
@@ -127,11 +152,14 @@ func (d *Dialer) GetDialFunc(useEnv bool) (fasthttp.DialFunc, error) {
 	return func(addr string) (conn net.Conn, err error) {
 		var proxyDialer proxy.Dialer
 		var proxyURL *url.URL
-		scheme := httpsScheme
-		if !strings.HasSuffix(addr, colonTLSPort) {
-			scheme = httpScheme
+		requestScheme := scheme
+		if requestScheme == "" {
+			requestScheme = httpsScheme
+			if !strings.HasSuffix(addr, colonTLSPort) {
+				requestScheme = httpScheme
+			}
 		}
-		reqURL := &url.URL{Host: addr, Scheme: scheme}
+		reqURL := &url.URL{Host: addr, Scheme: requestScheme}
 		proxyURL, err = proxyFunc(reqURL)
 		if err != nil {
 			return nil, err

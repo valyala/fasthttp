@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/valyala/fasthttp"
 	"golang.org/x/net/http/httpproxy"
@@ -237,6 +238,100 @@ func TestDialerGetDialFunc(t *testing.T) {
 		for i := range counts {
 			counts[i].Store(0)
 		}
+	}
+}
+
+func TestDialerGetDialFuncForTLS(t *testing.T) {
+	counts := make([]atomic.Int64, 2)
+	lns := startProxyServer(t, []string{"0", "0"}, counts)
+	defer func() {
+		for _, ln := range lns {
+			ln.Close()
+		}
+	}()
+
+	_, httpPort, err := net.SplitHostPort(lns[0].Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, httpsPort, err := net.SplitHostPort(lns[1].Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := getDialer("http://127.0.0.1:"+httpPort, "http://127.0.0.1:"+httpsPort, "")
+	tests := []struct {
+		name     string
+		addr     string
+		isTLS    bool
+		expected []int64
+	}{
+		{name: "HTTPS on non-default port", addr: "example.com:8443", isTLS: true, expected: []int64{0, 1}},
+		{name: "HTTP on port 443", addr: "example.com:443", isTLS: false, expected: []int64{1, 0}},
+		{name: "HTTPS on port 443", addr: "example.com:443", isTLS: true, expected: []int64{0, 1}},
+		{name: "HTTP on port 80", addr: "example.com:80", isTLS: false, expected: []int64{1, 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dial, err := d.GetDialFuncForTLS(false, tt.isTLS)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn, err := dial(tt.addr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn.Close()
+			if got := getCounts(counts); !countsEqual(got, tt.expected) {
+				t.Fatalf("proxy counts %v; want %v", got, tt.expected)
+			}
+		})
+		for i := range counts {
+			counts[i].Store(0)
+		}
+	}
+}
+
+func TestDialerGetDialFuncForTLSCGIEnvironment(t *testing.T) {
+	proxyURL := "http://127.0.0.1:8080"
+	t.Setenv("HTTP_PROXY", proxyURL)
+	t.Setenv("HTTPS_PROXY", proxyURL)
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("REQUEST_METHOD", "GET")
+
+	d := &Dialer{}
+	if _, err := d.GetDialFuncForTLS(true, false); err == nil ||
+		!strings.Contains(err.Error(), "refusing to use HTTP_PROXY") {
+		t.Fatalf("expected CGI HTTP proxy error, got %v", err)
+	}
+	if _, err := d.GetDialFuncForTLS(true, true); err != nil {
+		t.Fatalf("unexpected HTTPS proxy error in CGI environment: %v", err)
+	}
+}
+
+func TestDialerGetDialFuncForTLSNoProxy(t *testing.T) {
+	proxyURL := "socket6://proxy.example:8080"
+	directDisabled := getDialer(proxyURL, proxyURL, "")
+	if _, err := directDisabled.GetDialFuncForTLS(false, true); err == nil ||
+		!strings.Contains(err.Error(), "unknown scheme") {
+		t.Fatalf("expected unsupported proxy error without NO_PROXY, got %v", err)
+	}
+
+	d := getDialer(proxyURL, proxyURL, "*")
+	d.Timeout = time.Millisecond
+
+	dial, err := d.GetDialFuncForTLS(false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := dial("192.0.2.1:8443")
+	if conn != nil {
+		conn.Close()
+	}
+	if err == nil {
+		t.Fatal("expected direct dial error")
+	}
+	if strings.Contains(err.Error(), "unknown scheme") {
+		t.Fatalf("NO_PROXY was not applied: %v", err)
 	}
 }
 
