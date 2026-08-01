@@ -404,6 +404,96 @@ func testPipelineClientDoOnce(t *testing.T, c *PipelineClient) {
 	}
 }
 
+func TestPipelineClientSkipsEarlyHints(t *testing.T) {
+	t.Parallel()
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+
+	firstRequestRead := make(chan struct{})
+	serverDone := make(chan error, 1)
+	go func() {
+		defer serverConn.Close()
+
+		br := bufio.NewReader(serverConn)
+		for i := range 2 {
+			var req Request
+			if err := req.Read(br); err != nil {
+				serverDone <- fmt.Errorf("read request %d: %w", i, err)
+				return
+			}
+			if i == 0 {
+				close(firstRequestRead)
+			}
+		}
+
+		_, err := io.WriteString(serverConn,
+			"HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n"+
+				"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nFIRST"+
+				"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nSECOND")
+		serverDone <- err
+	}()
+
+	var dialMu sync.Mutex
+	dialed := false
+	c := &PipelineClient{
+		Dial: func(string) (net.Conn, error) {
+			dialMu.Lock()
+			defer dialMu.Unlock()
+			if dialed {
+				return nil, errors.New("unexpected second dial")
+			}
+			dialed = true
+			return clientConn, nil
+		},
+		MaxPendingRequests:  2,
+		MaxIdleConnDuration: time.Second,
+		Logger:              &testLogger{},
+	}
+
+	type result struct {
+		index  int
+		status int
+		body   string
+		err    error
+	}
+	results := make(chan result, 2)
+	do := func(index int, uri string) {
+		go func() {
+			var req Request
+			var resp Response
+			req.SetRequestURI(uri)
+			err := c.DoTimeout(&req, &resp, time.Second)
+			results <- result{index: index, status: resp.StatusCode(), body: string(resp.Body()), err: err}
+		}()
+	}
+
+	do(0, "http://example.test/first")
+	select {
+	case <-firstRequestRead:
+	case <-time.After(time.Second):
+		t.Fatal("server did not receive first request")
+	}
+	do(1, "http://example.test/second")
+
+	got := make([]result, 2)
+	for range 2 {
+		r := <-results
+		got[r.index] = r
+	}
+	for i, want := range []string{"FIRST", "SECOND"} {
+		if got[i].err != nil {
+			t.Fatalf("request %d failed: %v", i, got[i].err)
+		}
+		if got[i].status != StatusOK || got[i].body != want {
+			t.Fatalf("request %d received status %d and body %q; want 200 and %q", i, got[i].status, got[i].body, want)
+		}
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatalf("server failed: %v", err)
+	}
+}
+
 func TestPipelineClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
 	t.Parallel()
 
