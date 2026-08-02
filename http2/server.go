@@ -1231,6 +1231,14 @@ func (c *serverConn) handleHandlerDone(
 		return nil
 	}
 
+	var bufferedBody []byte
+	if !requestCtx.Response.IsBodyStream() {
+		bufferedBody = requestCtx.Response.Body()
+		if len(requestCtx.Response.Header.Peek(fasthttp.HeaderContentLength)) == 0 &&
+			(!responseMustNotHaveBody(requestCtx) || len(bufferedBody) != 0) {
+			requestCtx.Response.Header.SetContentLength(len(bufferedBody))
+		}
+	}
 	block, err := encodeResponseHeaders(
 		c.encoder,
 		&c.headerBuffer,
@@ -1263,7 +1271,7 @@ func (c *serverConn) handleHandlerDone(
 		return nil
 	}
 
-	body := requestCtx.Response.Body()
+	body := bufferedBody
 	stream.expectedResponse = responseContentLength(&requestCtx.Response.Header)
 	if stream.expectedResponse >= 0 && stream.expectedResponse != int64(len(body)) {
 		return c.resetStream(stream.id, xhttp2.ErrCodeInternal, errors.New("http2: response body length doesn't match content-length"))

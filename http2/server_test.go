@@ -108,6 +108,9 @@ func TestServerRequestResponse(t *testing.T) {
 	if got := resp.Header.Get("X-Method"); got != stdhttp.MethodPost {
 		t.Fatalf("X-Method = %q, want POST", got)
 	}
+	if resp.ContentLength != int64(len(body)) {
+		t.Fatalf("Content-Length = %d, want %d", resp.ContentLength, len(body))
+	}
 }
 
 func TestServerMultiplexesHandlers(t *testing.T) {
