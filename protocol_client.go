@@ -93,6 +93,13 @@ func (ctx *ProtocolClientContext) Deadline() (time.Time, bool) {
 	return ctx.deadline, !ctx.deadline.IsZero()
 }
 
+// RoundTripHTTP1 executes the request with HostClient's configured HTTP/1
+// transport. Protocol transports use it after a host has previously selected
+// HTTP/1 with ALPN.
+func (ctx *ProtocolClientContext) RoundTripHTTP1(req *Request, resp *Response) (bool, error) {
+	return ctx.hostClient.transport().RoundTrip(ctx.hostClient, req, resp)
+}
+
 // AcquireConn reserves one of HostClient's physical connection slots and
 // dials a connection. nextProtos is advertised with ALPN for TLS clients.
 // The caller owns the returned connection until it calls Close or
@@ -144,6 +151,13 @@ func (c *ProtocolClientConn) Conn() net.Conn {
 // connections.
 func (c *ProtocolClientConn) NegotiatedProtocol() string {
 	return c.negotiatedProtocol
+}
+
+// ApplyResponseMetadata records physical-connection metadata on resp.
+func (c *ProtocolClientConn) ApplyResponseMetadata(resp *Response) {
+	if resp != nil {
+		resp.raddr = c.conn.RemoteAddr()
+	}
 }
 
 // Close closes the physical connection and releases its HostClient slot.

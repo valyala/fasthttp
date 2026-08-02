@@ -15,7 +15,16 @@ import (
 // ErrProtocolNotSupported is returned when the protocol serving a request
 // doesn't implement an optional operation such as server push or a
 // bidirectional request stream.
-var ErrProtocolNotSupported = errors.New("fasthttp: protocol operation not supported")
+var (
+	ErrProtocolNotSupported = errors.New("fasthttp: protocol operation not supported")
+	// ErrPushDisabled is returned when either endpoint disabled server push.
+	ErrPushDisabled = errors.New("fasthttp: server push is disabled")
+	// ErrPushLimit is returned when a protocol's promised-stream limit is full.
+	ErrPushLimit = errors.New("fasthttp: server push limit reached")
+	// ErrPushNotAllowed is returned when Push is called after the parent stream
+	// can no longer initiate a promised request.
+	ErrPushNotAllowed = errors.New("fasthttp: server push isn't allowed in this stream state")
+)
 
 // ProtocolHandler serves a connection selected by ALPN or a cleartext
 // connection preface.
@@ -122,6 +131,44 @@ type ProtocolServerContext struct {
 	connID       uint64
 	requestCount atomic.Uint64
 	active       atomic.Int32
+}
+
+// ServeProtocolConn serves c directly with handler while applying Server's
+// connection limits, lifecycle accounting, and ConnState callbacks. It is
+// intended for protocol packages that expose a dedicated prior-knowledge
+// listener.
+//
+// ServeProtocolConn closes c before returning.
+//
+// Experimental: this method may change before it has shipped in two fasthttp
+// minor releases.
+func (s *Server) ServeProtocolConn(c net.Conn, handler ProtocolHandler) error {
+	if isNilProtocolHandler(handler) {
+		return errors.New("fasthttp: protocol handler is nil")
+	}
+	if s.MaxConnsPerIP > 0 {
+		perIPConn := wrapPerIPConn(s, c)
+		if perIPConn == nil {
+			return ErrPerIPConnLimit
+		}
+		c = perIPConn
+	}
+	if !s.tryAcquireConcurrency() {
+		s.writeFastError(c, StatusServiceUnavailable, "The connection cannot be served because Server.Concurrency limit exceeded")
+		_ = c.Close()
+		return ErrConcurrencyLimit
+	}
+	defer s.releaseConcurrency()
+
+	s.open.Add(1)
+	defer s.open.Add(-1)
+	err := s.serveProtocolConn(c, &registeredProtocol{handler: handler})
+	closeErr := c.Close()
+	s.setState(c, StateClosed)
+	if err != nil {
+		return err
+	}
+	return closeErr
 }
 
 // Server returns the Server that dispatched this protocol connection.
