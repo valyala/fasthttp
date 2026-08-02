@@ -40,6 +40,51 @@ connections per physical server.
 
 [FAQ](#faq)
 
+## Experimental HTTP/2
+
+The `github.com/valyala/fasthttp/http2` package provides opt-in, native
+HTTP/2 server and client support. Its API remains experimental for at least
+two fasthttp minor releases. Programs that don't configure the package stay
+on the existing HTTP/1 path.
+
+```go
+server := &fasthttp.Server{Handler: handler}
+if err := http2.ConfigureServer(server, http2.ServerConfig{}); err != nil {
+    log.Fatal(err)
+}
+log.Fatal(server.ListenAndServeTLS(":8443", "cert.pem", "key.pem"))
+```
+
+`ConfigureServer` enables TLS ALPN `h2` and cleartext prior-knowledge
+detection on the same listener. A dedicated cleartext HTTP/2 listener can use
+`http2.ServeConn`. The obsolete `h2c` HTTP/1 Upgrade handshake is deliberately
+not supported.
+
+```go
+client := &fasthttp.HostClient{
+    Addr:  "example.com:443",
+    IsTLS: true,
+}
+if err := http2.ConfigureHostClient(client, http2.ClientConfig{}); err != nil {
+    log.Fatal(err)
+}
+```
+
+TLS clients prefer HTTP/2 by default and reuse the already negotiated
+connection when the server selects HTTP/1.1. `RequireHTTP2` rejects that
+fallback. Cleartext HTTP/2 must be explicitly enabled with `PriorKnowledge`;
+it is never probed against an ordinary cleartext HTTP/1 origin.
+
+Server push and RFC 8441 extended CONNECT are implemented but disabled by
+default. Extended CONNECT uses `RequestCtx.AcceptStream` and
+`HostClient.OpenStream`; it doesn't change `Hijack`'s physical TCP semantics.
+HTTP/3 is not implemented. The protocol lifecycle and stream APIs avoid
+exposing TCP, HTTP/2 frames, HPACK, or HTTP/2 flow-control details so a future
+QUIC/QPACK transport can remain independent.
+
+The connection ownership, security limits, codec provenance, and HTTP/3
+boundary are documented in [`http2/DESIGN.md`](http2/DESIGN.md).
+
 ## HTTP server performance comparison with [net/http](https://pkg.go.dev/net/http)
 
 In short, fasthttp server is up to 6 times faster than net/http.
@@ -587,7 +632,7 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
   helpers for projects based on fasthttp.
 - [fasthttp-routing](https://github.com/qiangxue/fasthttp-routing) - fast and
   powerful routing package for fasthttp servers.
-- [http2](https://github.com/dgrr/http2) - HTTP/2 implementation for fasthttp.
+- [dgrr/http2](https://github.com/dgrr/http2) - legacy third-party HTTP/2 implementation for fasthttp.
 - [router](https://github.com/fasthttp/router) - a high
   performance fasthttp request router that scales well.
 - [fasthttp-auth](https://github.com/casbin/fasthttp-auth) - Authorization middleware for fasthttp using Casbin.
@@ -637,9 +682,11 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
   - Compare [net/http Request.Body reading](https://pkg.go.dev/net/http#Request)
     to [fasthttp request body reading](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostBody).
 
-- _Why fasthttp doesn't support HTTP/2.0 and WebSockets?_
+- _Does fasthttp support HTTP/2.0 and WebSockets?_
 
-  [HTTP/2.0 support](https://github.com/fasthttp/http2) is in progress. [WebSockets](https://github.com/fasthttp/websockets) has been done already.
+  Native, experimental HTTP/2 support is available in the opt-in
+  [`http2`](https://pkg.go.dev/github.com/valyala/fasthttp/http2) package.
+  [WebSockets](https://github.com/fasthttp/websockets) has been done already.
   Third parties also may use [RequestCtx.Hijack](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Hijack)
   for implementing these goodies.
 
@@ -647,7 +694,7 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
 
   Yes:
 
-  - net/http supports [HTTP/2.0 starting from go1.6](https://pkg.go.dev/golang.org/x/net/http2).
+  - net/http enables its mature HTTP/2 support with less explicit configuration.
   - net/http API is stable, while fasthttp API constantly evolves.
   - net/http handles more HTTP corner cases.
   - net/http can stream both request and response bodies

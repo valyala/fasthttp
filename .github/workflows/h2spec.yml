@@ -1,0 +1,34 @@
+name: HTTP/2 conformance
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  h2spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: 1.26.x
+      - name: Download h2spec 2.6.0
+        run: |
+          curl --fail --location --silent --show-error \
+            https://github.com/summerwind/h2spec/releases/download/v2.6.0/h2spec_linux_amd64.tar.gz \
+            --output /tmp/h2spec.tar.gz
+          tar -xzf /tmp/h2spec.tar.gz -C /tmp
+      - name: Run applicable RFC 7540 and RFC 7541 cases
+        run: |
+          go run ./http2/h2specserver -addr 127.0.0.1:8080 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 50); do
+            if (echo > /dev/tcp/127.0.0.1/8080) 2>/dev/null; then
+              break
+            fi
+            sleep 0.1
+          done
+          /tmp/h2spec --host 127.0.0.1 --port 8080 --strict
