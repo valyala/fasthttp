@@ -10,6 +10,19 @@ import (
 	"time"
 )
 
+func TestProtocolClientConnPrepareResponseBody(t *testing.T) {
+	var response Response
+	response.AppendBodyString("prefix")
+	(&ProtocolClientConn{}).PrepareResponseBody(&response, 1024)
+	if got := string(response.Body()); got != "prefix" {
+		t.Fatalf("body = %q, want prefix", got)
+	}
+	if available := cap(response.bodyBuffer().B) - len(response.bodyBuffer().B); available < 1024 {
+		t.Fatalf("available body capacity = %d, want at least 1024", available)
+	}
+	response.ResetBody()
+}
+
 type testProtocolTransport struct {
 	roundTripCalled         atomic.Bool
 	protocolRoundTripCalled atomic.Bool
@@ -66,6 +79,17 @@ func TestHostClientProtocolRoundTripper(t *testing.T) {
 	hc.CloseIdleConnections()
 	if !transport.closeIdleCalled.Load() {
 		t.Fatal("CloseIdleConnections() didn't notify the protocol transport")
+	}
+}
+
+func TestHostClientProtocolTransportRejectsCustomHTTP1Fallback(t *testing.T) {
+	transport := &testProtocolTransport{}
+	hc := &HostClient{
+		Addr:      "example.com:80",
+		Transport: transport,
+	}
+	if err := hc.RegisterProtocolTransport(transport); err == nil {
+		t.Fatal("RegisterProtocolTransport() accepted a custom HTTP/1 fallback")
 	}
 }
 

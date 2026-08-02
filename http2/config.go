@@ -1,8 +1,10 @@
 package http2
 
 import (
+	"crypto/tls"
 	"errors"
 	"net"
+	"reflect"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -11,12 +13,18 @@ import (
 const (
 	clientPreface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
-	defaultMaxConcurrentStreams   = 250
-	defaultHeaderTableSize        = 4096
-	defaultMaxFrameSize           = 16 << 10
-	defaultConnectionWindowSize   = 1 << 20
-	defaultStreamWindowSize       = 1 << 20
-	defaultMaxQueuedControlFrames = 10_000
+	defaultMaxConcurrentStreams    = 250
+	defaultHeaderTableSize         = 4096
+	defaultMaxFrameSize            = 16 << 10
+	defaultWriteBufferSize         = 64 << 10
+	maxResponseBodyPreallocation   = 1 << 20
+	defaultConnectionWindowSize    = 1 << 20
+	defaultStreamWindowSize        = 1 << 20
+	defaultMaxQueuedControlFrames  = 10_000
+	maxConfiguredConcurrentStreams = 1 << 20
+	maxConfiguredHeaderListSize    = 64 << 20
+	maxConfiguredHeaderTableSize   = 64 << 20
+	maxConfiguredControlFrames     = 1_000_000
 )
 
 // ClientMode selects how an HTTP/2 transport negotiates a connection.
@@ -51,8 +59,6 @@ type ClientConfig struct {
 	MaxDecoderHeaderTableSize      uint32
 	MaxEncoderHeaderTableSize      uint32
 	MaxReadFrameSize               uint32
-	MaxUploadBufferPerConnection   int32
-	MaxUploadBufferPerStream       int32
 	MaxResponseBufferPerConnection int32
 	MaxResponseBufferPerStream     int32
 
@@ -84,6 +90,9 @@ func normalizeClientConfig(hc *fasthttp.HostClient, cfg ClientConfig) (clientCon
 	if cfg.Mode > PriorKnowledge {
 		return clientConfig{}, errors.New("http2: invalid client mode")
 	}
+	if isTypedNil(cfg.PushHandler) {
+		return clientConfig{}, errors.New("http2: push handler is nil")
+	}
 	result := clientConfig{
 		mode:                  cfg.Mode,
 		maxConcurrentStreams:  cfg.MaxConcurrentStreams,
@@ -102,6 +111,9 @@ func normalizeClientConfig(hc *fasthttp.HostClient, cfg ClientConfig) (clientCon
 	if result.maxConcurrentStreams == 0 {
 		result.maxConcurrentStreams = defaultMaxConcurrentStreams
 	}
+	if result.maxConcurrentStreams > maxConfiguredConcurrentStreams {
+		return clientConfig{}, errors.New("http2: max concurrent streams exceeds the safety limit")
+	}
 	if result.maxHeaderListSize == 0 {
 		if hc != nil && hc.ReadBufferSize > 0 {
 			result.maxHeaderListSize = uint32(hc.ReadBufferSize)
@@ -111,6 +123,11 @@ func normalizeClientConfig(hc *fasthttp.HostClient, cfg ClientConfig) (clientCon
 	}
 	if result.maxDecoderTableSize == 0 {
 		result.maxDecoderTableSize = defaultHeaderTableSize
+	}
+	if result.maxHeaderListSize > maxConfiguredHeaderListSize ||
+		result.maxDecoderTableSize > maxConfiguredHeaderTableSize ||
+		result.maxEncoderTableSize > maxConfiguredHeaderTableSize {
+		return clientConfig{}, errors.New("http2: configured header memory limit is too large")
 	}
 	if result.maxEncoderTableSize == 0 {
 		result.maxEncoderTableSize = defaultHeaderTableSize
@@ -139,6 +156,19 @@ func normalizeClientConfig(hc *fasthttp.HostClient, cfg ClientConfig) (clientCon
 	return result, nil
 }
 
+func isTypedNil(value any) bool {
+	if value == nil {
+		return false
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
+
 // ServerConfig controls HTTP/2-specific server behavior. The zero value uses
 // bounded production defaults and keeps server push and extended CONNECT
 // disabled.
@@ -151,6 +181,7 @@ type ServerConfig struct {
 	MaxQueuedControlFrames       int
 	MaxPromisedStreams           uint32
 	MaxPushDepth                 uint8
+	MaxRapidResetsPerSecond      uint32
 	MaxUploadBufferPerConnection int32
 	MaxUploadBufferPerStream     int32
 
@@ -165,47 +196,52 @@ type ServerConfig struct {
 }
 
 type serverConfig struct {
-	maxConcurrentStreams   uint32
-	maxHeaderListSize      uint32
-	maxDecoderTableSize    uint32
-	maxEncoderTableSize    uint32
-	maxReadFrameSize       uint32
-	maxQueuedControlFrames int
-	maxPromisedStreams     uint32
-	maxPushDepth           uint8
-	connectionWindowSize   int32
-	streamWindowSize       int32
-	idleTimeout            time.Duration
-	readIdleTimeout        time.Duration
-	pingTimeout            time.Duration
-	writeByteTimeout       time.Duration
-	enablePush             bool
-	enableExtendedConnect  bool
-	countError             func(string)
+	maxConcurrentStreams    uint32
+	maxHeaderListSize       uint32
+	maxDecoderTableSize     uint32
+	maxEncoderTableSize     uint32
+	maxReadFrameSize        uint32
+	maxQueuedControlFrames  int
+	maxPromisedStreams      uint32
+	maxPushDepth            uint8
+	maxRapidResetsPerSecond uint32
+	connectionWindowSize    int32
+	streamWindowSize        int32
+	idleTimeout             time.Duration
+	readIdleTimeout         time.Duration
+	pingTimeout             time.Duration
+	writeByteTimeout        time.Duration
+	enablePush              bool
+	enableExtendedConnect   bool
+	countError              func(string)
 }
 
 func normalizeServerConfig(s *fasthttp.Server, cfg ServerConfig) (serverConfig, error) {
 	result := serverConfig{
-		maxConcurrentStreams:   cfg.MaxConcurrentStreams,
-		maxHeaderListSize:      cfg.MaxHeaderListSize,
-		maxDecoderTableSize:    cfg.MaxDecoderHeaderTableSize,
-		maxEncoderTableSize:    cfg.MaxEncoderHeaderTableSize,
-		maxReadFrameSize:       cfg.MaxReadFrameSize,
-		maxQueuedControlFrames: cfg.MaxQueuedControlFrames,
-		maxPromisedStreams:     cfg.MaxPromisedStreams,
-		maxPushDepth:           cfg.MaxPushDepth,
-		connectionWindowSize:   cfg.MaxUploadBufferPerConnection,
-		streamWindowSize:       cfg.MaxUploadBufferPerStream,
-		idleTimeout:            cfg.IdleTimeout,
-		readIdleTimeout:        cfg.ReadIdleTimeout,
-		pingTimeout:            cfg.PingTimeout,
-		writeByteTimeout:       cfg.WriteByteTimeout,
-		enablePush:             cfg.EnablePush,
-		enableExtendedConnect:  cfg.EnableExtendedConnect,
-		countError:             cfg.CountError,
+		maxConcurrentStreams:    cfg.MaxConcurrentStreams,
+		maxHeaderListSize:       cfg.MaxHeaderListSize,
+		maxDecoderTableSize:     cfg.MaxDecoderHeaderTableSize,
+		maxEncoderTableSize:     cfg.MaxEncoderHeaderTableSize,
+		maxReadFrameSize:        cfg.MaxReadFrameSize,
+		maxQueuedControlFrames:  cfg.MaxQueuedControlFrames,
+		maxPromisedStreams:      cfg.MaxPromisedStreams,
+		maxPushDepth:            cfg.MaxPushDepth,
+		maxRapidResetsPerSecond: cfg.MaxRapidResetsPerSecond,
+		connectionWindowSize:    cfg.MaxUploadBufferPerConnection,
+		streamWindowSize:        cfg.MaxUploadBufferPerStream,
+		idleTimeout:             cfg.IdleTimeout,
+		readIdleTimeout:         cfg.ReadIdleTimeout,
+		pingTimeout:             cfg.PingTimeout,
+		writeByteTimeout:        cfg.WriteByteTimeout,
+		enablePush:              cfg.EnablePush,
+		enableExtendedConnect:   cfg.EnableExtendedConnect,
+		countError:              cfg.CountError,
 	}
 	if result.maxConcurrentStreams == 0 {
 		result.maxConcurrentStreams = defaultMaxConcurrentStreams
+	}
+	if result.maxConcurrentStreams > maxConfiguredConcurrentStreams {
+		return serverConfig{}, errors.New("http2: max concurrent streams exceeds the safety limit")
 	}
 	if result.maxHeaderListSize == 0 {
 		result.maxHeaderListSize = uint32(s.ReadBufferSize)
@@ -219,6 +255,11 @@ func normalizeServerConfig(s *fasthttp.Server, cfg ServerConfig) (serverConfig, 
 	if result.maxEncoderTableSize == 0 {
 		result.maxEncoderTableSize = defaultHeaderTableSize
 	}
+	if result.maxHeaderListSize > maxConfiguredHeaderListSize ||
+		result.maxDecoderTableSize > maxConfiguredHeaderTableSize ||
+		result.maxEncoderTableSize > maxConfiguredHeaderTableSize {
+		return serverConfig{}, errors.New("http2: configured header memory limit is too large")
+	}
 	if result.maxReadFrameSize == 0 {
 		result.maxReadFrameSize = defaultMaxFrameSize
 	}
@@ -228,14 +269,20 @@ func normalizeServerConfig(s *fasthttp.Server, cfg ServerConfig) (serverConfig, 
 	if result.maxQueuedControlFrames == 0 {
 		result.maxQueuedControlFrames = defaultMaxQueuedControlFrames
 	}
-	if result.maxQueuedControlFrames < 1 {
-		return serverConfig{}, errors.New("http2: max queued control frames must be positive")
+	if result.maxQueuedControlFrames < 32 {
+		return serverConfig{}, errors.New("http2: max queued control frames must be at least 32")
+	}
+	if result.maxQueuedControlFrames > maxConfiguredControlFrames {
+		return serverConfig{}, errors.New("http2: max queued control frames exceeds the safety limit")
 	}
 	if result.maxPromisedStreams == 0 {
 		result.maxPromisedStreams = 16
 	}
 	if result.maxPushDepth == 0 {
 		result.maxPushDepth = 1
+	}
+	if result.maxRapidResetsPerSecond == 0 {
+		result.maxRapidResetsPerSecond = 1000
 	}
 	if result.connectionWindowSize == 0 {
 		result.connectionWindowSize = defaultConnectionWindowSize
@@ -251,6 +298,9 @@ func normalizeServerConfig(s *fasthttp.Server, cfg ServerConfig) (serverConfig, 
 	}
 	if result.pingTimeout == 0 {
 		result.pingTimeout = 15 * time.Second
+	}
+	if result.idleTimeout == 0 {
+		result.idleTimeout = s.IdleTimeout
 	}
 	return result, nil
 }
@@ -269,8 +319,16 @@ func ConfigureServer(s *fasthttp.Server, cfg ServerConfig) error {
 	if err != nil {
 		return err
 	}
-	if s.TLSConfig != nil {
+	if s.TLSConfig == nil {
+		s.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	} else {
 		s.TLSConfig = s.TLSConfig.Clone()
+		if s.TLSConfig.MaxVersion != 0 && s.TLSConfig.MaxVersion < tls.VersionTLS12 {
+			return errors.New("http2: TLS maximum version must be at least 1.2")
+		}
+		if s.TLSConfig.MinVersion < tls.VersionTLS12 {
+			s.TLSConfig.MinVersion = tls.VersionTLS12
+		}
 	}
 	return s.RegisterProtocol(fasthttp.ProtocolRegistration{
 		ALPN:             []string{"h2"},

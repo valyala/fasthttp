@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"slices"
 	"sync/atomic"
 	"time"
 )
@@ -58,11 +59,23 @@ func (c *HostClient) RegisterProtocolTransport(transport ProtocolRoundTripper) e
 	if c.protocolTransport != nil {
 		return errors.New("fasthttp: protocol transport is already registered")
 	}
+	http1Transport := c.Transport
+	if http1Transport == nil {
+		http1Transport = DefaultTransport
+	}
+	if !isDefaultRoundTripper(http1Transport) {
+		return errors.New("fasthttp: protocol transport cannot preserve the configured HTTP/1 transport")
+	}
 	if atomic.LoadInt32(&c.pendingRequests) != 0 || c.ConnsCount() != 0 {
 		return errors.New("fasthttp: cannot register a protocol transport after use")
 	}
 	c.protocolTransport = transport
 	return nil
+}
+
+func isDefaultRoundTripper(roundTripper RoundTripper) bool {
+	builtIn, ok := roundTripper.(*transport)
+	return ok && builtIn == defaultTransport
 }
 
 func isNilProtocolTransport(transport ProtocolRoundTripper) bool {
@@ -160,6 +173,17 @@ func (c *ProtocolClientConn) ApplyResponseMetadata(resp *Response) {
 	}
 }
 
+// PrepareResponseBody ensures resp can buffer at least size body bytes without
+// growing its backing buffer. Protocol transports may call it after validating
+// a response Content-Length.
+func (c *ProtocolClientConn) PrepareResponseBody(resp *Response, size int) {
+	if resp == nil || size <= 0 {
+		return
+	}
+	body := resp.bodyBuffer()
+	body.B = slices.Grow(body.B, size)
+}
+
 // Close closes the physical connection and releases its HostClient slot.
 func (c *ProtocolClientConn) Close() error {
 	if !c.isReleased.CompareAndSwap(false, true) {
@@ -183,8 +207,14 @@ func (c *ProtocolClientConn) RoundTripHTTP1(req *Request, resp *Response) (bool,
 
 func (c *HostClient) newProtocolClientContext(req *Request) ProtocolClientContext {
 	ctx := ProtocolClientContext{hostClient: c}
-	if req.timeout > 0 {
-		ctx.deadline = time.Now().Add(req.timeout)
+	timeout := req.timeout
+	for _, configured := range [...]time.Duration{c.ReadTimeout, c.WriteTimeout} {
+		if configured > 0 && (timeout <= 0 || configured < timeout) {
+			timeout = configured
+		}
+	}
+	if timeout > 0 {
+		ctx.deadline = time.Now().Add(timeout)
 	}
 	return ctx
 }
@@ -280,6 +310,9 @@ func (c *HostClient) dialHostHardWithALPN(
 			}
 			tlsConfig = baseConfig.Clone()
 			tlsConfig.NextProtos = mergeNextProtos(nextProtos, tlsConfig.NextProtos)
+			if containsString(nextProtos, "h2") && tlsConfig.MinVersion < tls.VersionTLS12 {
+				tlsConfig.MinVersion = tls.VersionTLS12
+			}
 		}
 
 		conn, err := dialAddr(
@@ -346,14 +379,14 @@ func mergeNextProtos(preferred, existing []string) []string {
 }
 
 // OpenStream opens a bidirectional request stream using the configured
-// transport.
+// transport. resp must be non-nil and remains owned by the caller for the
+// stream lifetime.
 //
 // Experimental: this method may change before it has shipped in two fasthttp
 // minor releases.
 func (c *HostClient) OpenStream(req *Request, resp *Response) (StreamConn, error) {
 	if resp == nil {
-		resp = AcquireResponse()
-		defer ReleaseResponse(resp)
+		return nil, errors.New("fasthttp: OpenStream response cannot be nil")
 	}
 	if err := c.prepareRequestResponse(req, resp); err != nil {
 		return nil, err

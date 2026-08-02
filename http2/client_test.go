@@ -18,7 +18,7 @@ import (
 	xhttp2 "golang.org/x/net/http2"
 )
 
-func newPriorKnowledgeHostClient(t *testing.T, addr string) *fasthttp.HostClient {
+func newPriorKnowledgeHostClient(t testing.TB, addr string) *fasthttp.HostClient {
 	t.Helper()
 	hc := &fasthttp.HostClient{Addr: addr}
 	if err := ConfigureHostClient(hc, ClientConfig{Mode: PriorKnowledge}); err != nil {
@@ -102,6 +102,56 @@ func TestClientMultiplexesRequests(t *testing.T) {
 	}
 }
 
+func TestClientReadTimeoutCancelsOnlyOneStream(t *testing.T) {
+	slowStarted := make(chan struct{})
+	releaseSlow := make(chan struct{})
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			if string(ctx.Path()) == "/slow" {
+				close(slowStarted)
+				<-releaseSlow
+			}
+			ctx.SetBodyString("ok")
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	hc := newPriorKnowledgeHostClient(t, testServer.listener.Addr().String())
+	hc.MaxConns = 1
+	hc.MaxConnWaitTimeout = time.Second
+	hc.ReadTimeout = 30 * time.Millisecond
+
+	slowDone := make(chan error, 1)
+	go func() {
+		req := fasthttp.AcquireRequest()
+		resp := fasthttp.AcquireResponse()
+		defer fasthttp.ReleaseRequest(req)
+		defer fasthttp.ReleaseResponse(resp)
+		req.SetRequestURI(testServer.URL("/slow"))
+		slowDone <- hc.Do(req, resp)
+	}()
+	select {
+	case <-slowStarted:
+	case <-time.After(time.Second):
+		t.Fatal("slow handler didn't start")
+	}
+
+	fastReq := fasthttp.AcquireRequest()
+	fastResp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(fastReq)
+	defer fasthttp.ReleaseResponse(fastResp)
+	fastReq.SetRequestURI(testServer.URL("/fast"))
+	if err := hc.Do(fastReq, fastResp); err != nil {
+		t.Fatalf("fast request error: %v", err)
+	}
+	if got := string(fastResp.Body()); got != "ok" {
+		t.Fatalf("fast response body = %q, want ok", got)
+	}
+	if err := <-slowDone; !errors.Is(err, fasthttp.ErrTimeout) {
+		t.Fatalf("slow request error = %v, want timeout", err)
+	}
+	close(releaseSlow)
+}
+
 func TestClientStreamingResponse(t *testing.T) {
 	body := bytes.Repeat([]byte("streaming-response"), 20_000)
 	server := &fasthttp.Server{
@@ -127,6 +177,26 @@ func TestClientStreamingResponse(t *testing.T) {
 	}
 	if !bytes.Equal(got, body) {
 		t.Fatalf("response body length = %d, want %d", len(got), len(body))
+	}
+}
+
+func TestClientResponseBodyLimitUsesFasthttpSentinel(t *testing.T) {
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			ctx.SetBody(bytes.Repeat([]byte("x"), 1024))
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	hc := newPriorKnowledgeHostClient(t, testServer.listener.Addr().String())
+	hc.MaxResponseBodySize = 16
+
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+	req.SetRequestURI(testServer.URL("/large"))
+	if err := hc.Do(req, resp); !errors.Is(err, fasthttp.ErrBodyTooLarge) {
+		t.Fatalf("Do() error = %v, want ErrBodyTooLarge", err)
 	}
 }
 
@@ -227,6 +297,86 @@ func TestExtendedConnectStream(t *testing.T) {
 	}
 	if !bytes.Equal(got, message) {
 		t.Fatalf("echo length = %d, want %d", len(got), len(message))
+	}
+}
+
+func TestExtendedConnectRequiresPeerSetting(t *testing.T) {
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			if len(ctx.Request.Header.ConnectProtocol()) != 0 {
+				t.Error("server received extended CONNECT without advertising support")
+			}
+			ctx.SetBodyString("ok")
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	hc := &fasthttp.HostClient{Addr: testServer.listener.Addr().String()}
+	if err := ConfigureHostClient(hc, ClientConfig{
+		Mode:                  PriorKnowledge,
+		EnableExtendedConnect: true,
+	}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+	req.Header.SetMethod(fasthttp.MethodConnect)
+	req.Header.SetConnectProtocol("websocket")
+	req.SetRequestURI(testServer.URL("/chat"))
+	if _, err := hc.OpenStream(req, resp); !errors.Is(err, fasthttp.ErrProtocolNotSupported) {
+		t.Fatalf("OpenStream() error = %v, want protocol not supported", err)
+	}
+
+	req.Reset()
+	resp.Reset()
+	req.SetRequestURI(testServer.URL("/regular"))
+	if err := hc.Do(req, resp); err != nil {
+		t.Fatalf("regular request after rejected CONNECT: %v", err)
+	}
+	if got := string(resp.Body()); got != "ok" {
+		t.Fatalf("regular response body = %q, want ok", got)
+	}
+}
+
+func TestRejectedExtendedConnectDoesNotRunStreamHandler(t *testing.T) {
+	streamHandlerCalled := make(chan struct{}, 1)
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			if err := ctx.AcceptStream(func(fasthttp.StreamConn) {
+				streamHandlerCalled <- struct{}{}
+			}); err != nil {
+				t.Errorf("AcceptStream() error: %v", err)
+			}
+			ctx.SetStatusCode(fasthttp.StatusForbidden)
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{EnableExtendedConnect: true})
+	hc := &fasthttp.HostClient{Addr: testServer.listener.Addr().String()}
+	if err := ConfigureHostClient(hc, ClientConfig{
+		Mode:                  PriorKnowledge,
+		EnableExtendedConnect: true,
+	}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+	req.Header.SetMethod(fasthttp.MethodConnect)
+	req.Header.SetConnectProtocol("websocket")
+	req.SetRequestURI(testServer.URL("/chat"))
+	if _, err := hc.OpenStream(req, resp); err == nil {
+		t.Fatal("OpenStream() succeeded for a rejected extended CONNECT")
+	}
+	select {
+	case <-streamHandlerCalled:
+		t.Fatal("stream handler ran for a non-2xx CONNECT response")
+	case <-time.After(20 * time.Millisecond):
 	}
 }
 
@@ -390,8 +540,8 @@ func TestClientRequireHTTP2RejectsHTTP1ALPN(t *testing.T) {
 	defer fasthttp.ReleaseRequest(req)
 	defer fasthttp.ReleaseResponse(resp)
 	req.SetRequestURI("https://localhost/")
-	if err := hc.Do(req, resp); !errors.Is(err, errHTTP2Required) {
-		t.Fatalf("Do() error = %v, want %v", err, errHTTP2Required)
+	if err := hc.Do(req, resp); !errors.Is(err, ErrHTTP2Required) {
+		t.Fatalf("Do() error = %v, want %v", err, ErrHTTP2Required)
 	}
 	if err := <-serverDone; err != nil {
 		t.Fatalf("server handshake error: %v", err)

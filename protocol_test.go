@@ -250,6 +250,68 @@ func TestServerCleartextProtocolFallsBackToHTTP1(t *testing.T) {
 	}
 }
 
+func TestServerShutdownDeadlineClosesProtocolConnections(t *testing.T) {
+	const preface = "PROTOCOL-PREFACE"
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error: %v", err)
+	}
+	handlerStarted := make(chan struct{})
+	handlerDone := make(chan struct{})
+	server := &Server{}
+	if err := server.RegisterProtocol(ProtocolRegistration{
+		CleartextPreface: []byte(preface),
+		Handler: protocolHandlerFunc(func(_ *ProtocolServerContext, conn net.Conn) error {
+			defer close(handlerDone)
+			got := make([]byte, len(preface))
+			if _, err := io.ReadFull(conn, got); err != nil {
+				return err
+			}
+			close(handlerStarted)
+			var one [1]byte
+			_, err := conn.Read(one[:])
+			return err
+		}),
+	}); err != nil {
+		t.Fatalf("RegisterProtocol() error: %v", err)
+	}
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+
+	client, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+	defer client.Close()
+	if _, err := io.WriteString(client, preface); err != nil {
+		t.Fatalf("writing protocol preface: %v", err)
+	}
+	select {
+	case <-handlerStarted:
+	case <-time.After(time.Second):
+		t.Fatal("protocol handler didn't start")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := server.ShutdownWithContext(shutdownCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("ShutdownWithContext() error = %v, want deadline exceeded", err)
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("protocol connection wasn't closed after the shutdown deadline")
+	}
+	select {
+	case err := <-serveDone:
+		if err != nil {
+			t.Fatalf("Serve() error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Serve() didn't return")
+	}
+}
+
 func TestRequestCtxProtocolOperations(t *testing.T) {
 	base, cancel := context.WithCancel(context.Background())
 	stream := &testProtocolStream{Context: base}

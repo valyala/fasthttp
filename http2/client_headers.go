@@ -16,66 +16,79 @@ var errInvalidResponseHeaders = errors.New("http2: invalid response headers")
 func encodeRequestHeaders(
 	encoder *hpack.Encoder,
 	buffer *bytes.Buffer,
+	stringsCache *headerStringCache,
 	req *fasthttp.Request,
 	maxHeaderListSize uint64,
 	enableExtendedConnect bool,
 ) ([]byte, error) {
 	buffer.Reset()
-	method := string(req.Header.Method())
+	method := stringsCache.value(req.Header.Method(), false)
 	if method == "" {
 		method = fasthttp.MethodGet
 	}
 	uri := req.URI()
-	authority := string(req.Header.Host())
-	if authority == "" {
-		authority = string(uri.Host())
+	authorityBytes := req.Header.Host()
+	if len(authorityBytes) == 0 {
+		authorityBytes = uri.Host()
 	}
+	authority := stringsCache.value(authorityBytes, false)
 	if authority == "" {
 		return nil, errors.New("http2: request authority is empty")
 	}
 
-	fields := make([]hpack.HeaderField, 0, 8)
-	fields = append(fields, hpack.HeaderField{Name: ":method", Value: method})
-	connectProtocol := string(req.Header.ConnectProtocol())
+	headerSize := uint64(0)
+	writePseudo := func(name, value string) error {
+		headerSize += uint64(len(name) + len(value) + 32)
+		if maxHeaderListSize != 0 && headerSize > maxHeaderListSize {
+			return errors.New("http2: request header list exceeds peer limit")
+		}
+		return encoder.WriteField(hpack.HeaderField{Name: name, Value: value})
+	}
+	if err := writePseudo(":method", method); err != nil {
+		return nil, err
+	}
+	connectProtocol := stringsCache.value(req.Header.ConnectProtocol(), false)
 	switch {
 	case connectProtocol != "":
 		if !enableExtendedConnect || method != fasthttp.MethodConnect {
 			return nil, errors.New("http2: invalid extended connect request")
 		}
-		fields = append(fields,
-			hpack.HeaderField{Name: ":protocol", Value: connectProtocol},
-			hpack.HeaderField{Name: ":scheme", Value: string(uri.Scheme())},
-			hpack.HeaderField{Name: ":authority", Value: authority},
-			hpack.HeaderField{Name: ":path", Value: string(uri.RequestURI())},
-		)
+		for _, field := range [...]hpack.HeaderField{
+			{Name: ":protocol", Value: connectProtocol},
+			{Name: ":scheme", Value: stringsCache.value(uri.Scheme(), false)},
+			{Name: ":authority", Value: authority},
+			{Name: ":path", Value: stringsCache.value(uri.RequestURI(), false)},
+		} {
+			if err := writePseudo(field.Name, field.Value); err != nil {
+				return nil, err
+			}
+		}
 	case method == fasthttp.MethodConnect:
-		fields = append(fields, hpack.HeaderField{Name: ":authority", Value: authority})
+		if err := writePseudo(":authority", authority); err != nil {
+			return nil, err
+		}
 	default:
-		scheme := string(uri.Scheme())
+		scheme := stringsCache.value(uri.Scheme(), false)
 		if scheme == "" {
 			scheme = "http"
 		}
-		path := string(uri.RequestURI())
+		path := stringsCache.value(uri.RequestURI(), false)
 		if path == "" {
 			path = "/"
 		}
-		fields = append(fields,
-			hpack.HeaderField{Name: ":scheme", Value: scheme},
-			hpack.HeaderField{Name: ":authority", Value: authority},
-			hpack.HeaderField{Name: ":path", Value: path},
-		)
-	}
-
-	headerSize := uint64(0)
-	for _, field := range fields {
-		headerSize += uint64(len(field.Name) + len(field.Value) + 32)
-		if err := encoder.WriteField(field); err != nil {
-			return nil, err
+		for _, field := range [...]hpack.HeaderField{
+			{Name: ":scheme", Value: scheme},
+			{Name: ":authority", Value: authority},
+			{Name: ":path", Value: path},
+		} {
+			if err := writePseudo(field.Name, field.Value); err != nil {
+				return nil, err
+			}
 		}
 	}
 	var encodeErr error
 	req.Header.All()(func(key, value []byte) bool {
-		name := strings.ToLower(string(key))
+		name := stringsCache.name(key)
 		switch name {
 		case "host", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade":
 			return true
@@ -91,17 +104,18 @@ func encodeRequestHeaders(
 			return false
 		}
 		headerSize += fieldSize
+		sensitive := isSensitiveHeader(name)
 		encodeErr = encoder.WriteField(hpack.HeaderField{
 			Name:      name,
-			Value:     string(value),
-			Sensitive: isSensitiveHeader(name),
+			Value:     stringsCache.value(value, sensitive),
+			Sensitive: sensitive,
 		})
 		return encodeErr == nil
 	})
 	if encodeErr != nil {
 		return nil, encodeErr
 	}
-	return bytes.Clone(buffer.Bytes()), nil
+	return buffer.Bytes(), nil
 }
 
 func populateResponse(
@@ -147,6 +161,31 @@ func populateResponse(
 	resp.Header.SetStatusCode(statusCode)
 	resp.Header.SetProtocol([]byte("HTTP/2"))
 	return statusCode, contentLength, nil
+}
+
+func responseStatus(fields []hpack.HeaderField) (int, error) {
+	status := ""
+	for _, field := range fields {
+		if field.IsPseudo() {
+			if field.Name != ":status" || status != "" {
+				return 0, errInvalidResponseHeaders
+			}
+			status = field.Value
+			continue
+		}
+		if isConnectionSpecificHeader(field.Name) {
+			return 0, errInvalidResponseHeaders
+		}
+	}
+	if len(status) != 3 || status[0] < '1' || status[0] > '9' ||
+		status[1] < '0' || status[1] > '9' || status[2] < '0' || status[2] > '9' {
+		return 0, errInvalidResponseHeaders
+	}
+	value, err := strconv.Atoi(status)
+	if err != nil {
+		return 0, errInvalidResponseHeaders
+	}
+	return value, nil
 }
 
 func populateResponseTrailers(resp *fasthttp.Response, fields []hpack.HeaderField) error {

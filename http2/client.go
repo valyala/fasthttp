@@ -1,13 +1,13 @@
 package http2
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"math"
 	"net"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,11 +18,73 @@ import (
 )
 
 var (
-	errHTTP2Required        = errors.New("http2: server didn't negotiate h2")
-	errClientConnClosed     = errors.New("http2: client connection closed")
-	errClientStreamClosed   = errors.New("http2: client stream closed")
-	errResponseBodyTooLarge = errors.New("http2: response body too large")
+	// ErrHTTP2Required is returned when RequireHTTP2 is configured and TLS
+	// negotiation doesn't select h2.
+	ErrHTTP2Required      = errors.New("http2: server didn't negotiate h2")
+	errClientConnClosed   = errors.New("http2: client connection closed")
+	errClientStreamClosed = errors.New("http2: client stream closed")
 )
+
+type clientConnectionWriteError struct {
+	err error
+}
+
+func (e *clientConnectionWriteError) Error() string { return e.err.Error() }
+func (e *clientConnectionWriteError) Unwrap() error { return e.err }
+
+var clientResultChannelPool sync.Pool
+var clientStreamPool sync.Pool
+var clientHeaderWaiterPool sync.Pool
+
+type clientHeaderWaiter struct {
+	ready chan struct{}
+}
+
+func acquireClientHeaderWaiter() *clientHeaderWaiter {
+	if value := clientHeaderWaiterPool.Get(); value != nil {
+		waiter := value.(*clientHeaderWaiter) //nolint:forcetypeassert
+		select {
+		case <-waiter.ready:
+		default:
+		}
+		return waiter
+	}
+	return &clientHeaderWaiter{ready: make(chan struct{}, 1)}
+}
+
+func releaseClientHeaderWaiter(waiter *clientHeaderWaiter) {
+	select {
+	case <-waiter.ready:
+	default:
+	}
+	clientHeaderWaiterPool.Put(waiter)
+}
+
+func acquireClientResultChannel() chan clientResult {
+	if value := clientResultChannelPool.Get(); value != nil {
+		return value.(chan clientResult) //nolint:forcetypeassert
+	}
+	return make(chan clientResult, 1)
+}
+
+func releaseClientResultChannel(resultChannel chan clientResult) {
+	clientResultChannelPool.Put(resultChannel)
+}
+
+func acquireClientStream() *clientStream {
+	if value := clientStreamPool.Get(); value != nil {
+		return value.(*clientStream) //nolint:forcetypeassert
+	}
+	return &clientStream{}
+}
+
+func releaseClientStream(stream *clientStream) {
+	if stream.headerWaiter != nil {
+		releaseClientHeaderWaiter(stream.headerWaiter)
+	}
+	*stream = clientStream{}
+	clientStreamPool.Put(stream)
+}
 
 type clientResult struct {
 	streamConn fasthttp.StreamConn
@@ -36,11 +98,10 @@ type clientStream struct {
 	req  *fasthttp.Request
 	resp *fasthttp.Response
 
-	result     chan clientResult
-	done       chan struct{}
-	resultSent bool
-	doneClosed bool
-	timer      *time.Timer
+	result       chan clientResult
+	headerWaiter *clientHeaderWaiter
+	resultSent   bool
+	timer        *time.Timer
 
 	requestStarted bool
 	requestBytes   int64
@@ -51,18 +112,23 @@ type clientStream struct {
 	isOpenStream   bool
 	isStreaming    bool
 
-	sendWindow int64
-	recvWindow int64
+	sendWindow          int64
+	recvWindow          int64
+	pendingWindowUpdate int64
 
 	statusCode            int
 	expectedResponseBytes int64
 	responseBytes         int64
 	maxResponseBodySize   int
 	responseBody          *responseBody
+	discardResponseBody   bool
 	err                   error
 	isPush                bool
 	pushComplete          bool
 	promisedRequest       *fasthttp.Request
+	lifecycleReleased     bool
+	callerDone            bool
+	poolable              bool
 }
 
 type pendingPushBlock struct {
@@ -72,17 +138,19 @@ type pendingPushBlock struct {
 }
 
 type clientConn struct {
-	pool    *clientPool
-	hc      *fasthttp.HostClient
-	config  clientConfig
-	lease   *fasthttp.ProtocolClientConn
-	conn    net.Conn
-	framer  *xhttp2.Framer
-	decoder *hpack.Decoder
+	pool          *clientPool
+	hc            *fasthttp.HostClient
+	config        clientConfig
+	lease         *fasthttp.ProtocolClientConn
+	conn          net.Conn
+	framer        *xhttp2.Framer
+	headerDecoder *headerCodec
 
-	writeMu      sync.Mutex
-	encoder      *hpack.Encoder
-	headerBuffer bytes.Buffer
+	writeMu        sync.Mutex
+	bufferedWriter *bufio.Writer
+	encoder        *hpack.Encoder
+	headerBuffer   bytes.Buffer
+	headerStrings  headerStringCache
 
 	mu                       sync.Mutex
 	streams                  map[uint32]*clientStream
@@ -95,12 +163,15 @@ type clientConn struct {
 	peerMaxFrameSize         int
 	peerMaxHeaderListSize    uint64
 	receiveConnectionWindow  int64
+	pendingConnectionUpdate  int64
 	receivedSettings         bool
+	peerExtendedConnect      bool
 	goAway                   bool
 	goAwayLastStreamID       uint32
 	closed                   bool
 	err                      error
 	notify                   chan struct{}
+	waiters                  int
 	created                  time.Time
 	lastIdle                 time.Time
 	idleTimer                *time.Timer
@@ -113,12 +184,14 @@ type clientPool struct {
 	hc        *fasthttp.HostClient
 	config    clientConfig
 
-	mu      sync.Mutex
-	conns   []*clientConn
-	dialing bool
-	h1Only  bool
-	notify  chan struct{}
-	closed  bool
+	mu        sync.Mutex
+	conns     []*clientConn
+	dialing   bool
+	h1Only    bool
+	notify    chan struct{}
+	waiters   int
+	available chan struct{}
+	closed    bool
 }
 
 // Transport is a native fasthttp HTTP/2 client transport. A Transport may be
@@ -179,9 +252,6 @@ func ConfigureClient(c *fasthttp.Client, config ClientConfig) error {
 }
 
 func configureHostClientTransport(hc *fasthttp.HostClient, transport *Transport) error {
-	if hc.Transport != nil {
-		return errors.New("http2: cannot safely preserve a custom HostClient transport as an HTTP/1 fallback")
-	}
 	if transport.config.Mode == PriorKnowledge && hc.IsTLS {
 		return errors.New("http2: prior knowledge mode requires a cleartext HostClient")
 	}
@@ -212,6 +282,7 @@ func (t *Transport) poolFor(hc *fasthttp.HostClient) (*clientPool, error) {
 		hc:        hc,
 		config:    config,
 		notify:    make(chan struct{}),
+		available: make(chan struct{}, 1),
 	}
 	t.pools[hc] = pool
 	return pool, nil
@@ -312,8 +383,13 @@ func (p *clientPool) acquireStream(
 		}
 		if p.dialing {
 			notify := p.notify
+			p.waiters++
 			p.mu.Unlock()
-			if err := waitForClientEvent(notify, deadline, 0); err != nil {
+			err := waitForClientEvent(notify, deadline, 0)
+			p.mu.Lock()
+			p.waiters--
+			p.mu.Unlock()
+			if err != nil {
 				return nil, nil, err
 			}
 			continue
@@ -328,9 +404,9 @@ func (p *clientPool) acquireStream(
 				p.mu.Unlock()
 				return nil, nil, fasthttp.ErrNoFreeConns
 			}
-			notify := p.notify
 			p.mu.Unlock()
-			if err := waitForClientEvent(notify, deadline, p.hc.MaxConnWaitTimeout); err != nil {
+			err := waitForClientEvent(p.available, deadline, p.hc.MaxConnWaitTimeout)
+			if err != nil {
 				return nil, nil, err
 			}
 			continue
@@ -370,7 +446,7 @@ func (p *clientPool) dial(ctx *fasthttp.ProtocolClientContext) (*clientConn, *fa
 	if p.hc.IsTLS && lease.NegotiatedProtocol() != "h2" {
 		if p.config.mode == RequireHTTP2 {
 			_ = lease.Close()
-			return nil, nil, errHTTP2Required
+			return nil, nil, ErrHTTP2Required
 		}
 		return nil, lease, nil
 	}
@@ -383,14 +459,18 @@ func (p *clientPool) dial(ctx *fasthttp.ProtocolClientContext) (*clientConn, *fa
 }
 
 func (p *clientPool) signalLocked() {
+	if p.waiters == 0 {
+		return
+	}
 	close(p.notify)
 	p.notify = make(chan struct{})
 }
 
 func (p *clientPool) streamAvailable() {
-	p.mu.Lock()
-	p.signalLocked()
-	p.mu.Unlock()
+	select {
+	case p.available <- struct{}{}:
+	default:
+	}
 }
 
 func (p *clientPool) remove(conn *clientConn) {
@@ -444,6 +524,9 @@ func waitForClientEvent(notify <-chan struct{}, deadline time.Time, maxWait time
 }
 
 func newClientConn(pool *clientPool, lease *fasthttp.ProtocolClientConn) (*clientConn, error) {
+	if err := validateTLSConnection(lease.Conn()); err != nil {
+		return nil, err
+	}
 	conn := &clientConn{
 		pool:                     pool,
 		hc:                       pool.hc,
@@ -462,12 +545,14 @@ func newClientConn(pool *clientPool, lease *fasthttp.ProtocolClientConn) (*clien
 		notify:                   make(chan struct{}),
 		created:                  time.Now(),
 	}
-	conn.framer = xhttp2.NewFramer(conn.conn, conn.conn)
-	conn.decoder = hpack.NewDecoder(pool.config.maxDecoderTableSize, nil)
-	conn.decoder.SetAllowedMaxDynamicTableSize(pool.config.maxDecoderTableSize)
-	conn.decoder.SetMaxStringLength(int(pool.config.maxHeaderListSize))
-	conn.framer.ReadMetaHeaders = conn.decoder
-	conn.framer.MaxHeaderListSize = pool.config.maxHeaderListSize
+	writeBufferSize := pool.hc.WriteBufferSize
+	if writeBufferSize <= 0 {
+		writeBufferSize = defaultWriteBufferSize
+	}
+	conn.bufferedWriter = bufio.NewWriterSize(conn.conn, writeBufferSize)
+	conn.framer = xhttp2.NewFramer(conn.bufferedWriter, conn.conn)
+	conn.framer.SetReuseFrames()
+	conn.headerDecoder = newHeaderCodec(pool.config.maxDecoderTableSize, pool.config.maxHeaderListSize)
 	conn.framer.SetMaxReadFrameSize(pool.config.maxReadFrameSize)
 	conn.encoder = hpack.NewEncoder(&conn.headerBuffer)
 	conn.encoder.SetMaxDynamicTableSizeLimit(pool.config.maxEncoderTableSize)
@@ -500,9 +585,11 @@ func (c *clientConn) writePrefaceAndSettings() error {
 	}
 	increment := uint32(c.config.connectionWindowSize - 65535)
 	if increment != 0 {
-		return c.framer.WriteWindowUpdate(0, increment)
+		if err := c.framer.WriteWindowUpdate(0, increment); err != nil {
+			return err
+		}
 	}
-	return nil
+	return c.bufferedWriter.Flush()
 }
 
 func boolSetting(value bool) uint32 {
@@ -531,19 +618,20 @@ func (c *clientConn) reserveStream(
 		c.idleTimer.Stop()
 		c.idleTimer = nil
 	}
-	stream := &clientStream{
+	stream := acquireClientStream()
+	*stream = clientStream{
 		id:                    c.nextStreamID,
 		conn:                  c,
 		req:                   req,
 		resp:                  resp,
-		result:                make(chan clientResult, 1),
-		done:                  make(chan struct{}),
+		result:                acquireClientResultChannel(),
 		isOpenStream:          openStream,
 		isStreaming:           openStream || resp.StreamBody,
 		sendWindow:            c.peerInitialStreamWindow,
 		recvWindow:            int64(c.config.streamWindowSize),
 		expectedResponseBytes: -1,
 		maxResponseBodySize:   c.hc.MaxResponseBodySize,
+		poolable:              !openStream,
 	}
 	c.streams[stream.id] = stream
 	c.nextStreamID += 2
@@ -588,22 +676,46 @@ func (c *clientConn) openStream(
 }
 
 func (c *clientConn) waitResult(stream *clientStream, deadline time.Time) clientResult {
+	resultChannel := stream.result
 	if deadline.IsZero() {
-		return <-stream.result
+		result := <-resultChannel
+		releaseClientResultChannel(resultChannel)
+		if !stream.isOpenStream {
+			c.finishClientStreamUse(stream)
+		}
+		return result
 	}
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
 	select {
-	case result := <-stream.result:
+	case result := <-resultChannel:
+		releaseClientResultChannel(resultChannel)
+		if !stream.isOpenStream {
+			c.finishClientStreamUse(stream)
+		}
 		return result
 	case <-timer.C:
 		c.resetStream(stream.id, xhttp2.ErrCodeCancel, fasthttp.ErrTimeout, false)
-		return <-stream.result
+		result := <-resultChannel
+		releaseClientResultChannel(resultChannel)
+		if !stream.isOpenStream {
+			c.finishClientStreamUse(stream)
+		}
+		return result
 	}
 }
 
 func (c *clientConn) writeRequest(stream *clientStream, keepOpen bool, deadline time.Time) error {
 	req := stream.req
+	if len(req.Header.ConnectProtocol()) != 0 {
+		enabled, err := c.waitForExtendedConnect(deadline)
+		if err != nil {
+			return err
+		}
+		if !enabled {
+			return fasthttp.ErrProtocolNotSupported
+		}
+	}
 	var body []byte
 	var reader io.Reader
 	if req.IsBodyStream() {
@@ -616,7 +728,10 @@ func (c *clientConn) writeRequest(stream *clientStream, keepOpen bool, deadline 
 		return errors.New("http2: request body length doesn't match content-length")
 	}
 	if err := c.writeRequestHeaders(stream, !keepOpen && !hasBody, req, deadline); err != nil {
-		c.fail(err)
+		var connectionError *clientConnectionWriteError
+		if errors.As(err, &connectionError) {
+			c.fail(connectionError.err)
+		}
 		return err
 	}
 	c.mu.Lock()
@@ -663,10 +778,12 @@ func (c *clientConn) writeRequestHeaders(
 		if c.nextHeaderStreamID == stream.id {
 			break
 		}
-		notify := c.notify
-		done := stream.done
+		if stream.headerWaiter == nil {
+			stream.headerWaiter = acquireClientHeaderWaiter()
+		}
+		headerReady := stream.headerWaiter.ready
 		c.mu.Unlock()
-		if err := waitForStreamEvent(notify, done, deadline); err != nil {
+		if err := waitForStreamEvent(headerReady, deadline); err != nil {
 			return err
 		}
 	}
@@ -678,6 +795,7 @@ func (c *clientConn) writeRequestHeaders(
 	block, err := encodeRequestHeaders(
 		c.encoder,
 		&c.headerBuffer,
+		&c.headerStrings,
 		req,
 		maxHeaderListSize,
 		c.config.enableExtendedConnect,
@@ -696,7 +814,7 @@ func (c *clientConn) writeRequestHeaders(
 	}); err != nil {
 		c.writeMu.Unlock()
 		c.advanceHeaderStream(stream, false)
-		return err
+		return &clientConnectionWriteError{err: err}
 	}
 	block = block[first:]
 	for len(block) != 0 {
@@ -704,12 +822,28 @@ func (c *clientConn) writeRequestHeaders(
 		if err := c.framer.WriteContinuation(stream.id, length == len(block), block[:length]); err != nil {
 			c.writeMu.Unlock()
 			c.advanceHeaderStream(stream, false)
-			return err
+			return &clientConnectionWriteError{err: err}
 		}
 		block = block[length:]
 	}
+	c.mu.Lock()
+	if c.streams[stream.id] == stream {
+		stream.requestStarted = true
+	}
+	if c.nextHeaderStreamID == stream.id {
+		c.nextHeaderStreamID += 2
+		c.skipUnavailableHeaderStreamsLocked()
+	}
+	pendingHeaders := c.nextHeaderStreamID < c.nextStreamID
+	c.wakeNextHeaderStreamLocked()
+	c.mu.Unlock()
+	if !pendingHeaders {
+		err = c.bufferedWriter.Flush()
+	}
 	c.writeMu.Unlock()
-	c.advanceHeaderStream(stream, true)
+	if err != nil {
+		return &clientConnectionWriteError{err: err}
+	}
 	return nil
 }
 
@@ -722,8 +856,21 @@ func (c *clientConn) advanceHeaderStream(stream *clientStream, started bool) {
 		c.nextHeaderStreamID += 2
 		c.skipUnavailableHeaderStreamsLocked()
 	}
-	c.signalLocked()
+	c.wakeNextHeaderStreamLocked()
+	flush := c.nextHeaderStreamID >= c.nextStreamID
 	c.mu.Unlock()
+	if flush {
+		c.flushBufferedWrites()
+	}
+}
+
+func (c *clientConn) flushBufferedWrites() {
+	c.writeMu.Lock()
+	err := c.bufferedWriter.Flush()
+	c.writeMu.Unlock()
+	if err != nil {
+		c.fail(err)
+	}
 }
 
 func (c *clientConn) skipUnavailableHeaderStreamsLocked() {
@@ -733,6 +880,17 @@ func (c *clientConn) skipUnavailableHeaderStreamsLocked() {
 			return
 		}
 		c.nextHeaderStreamID += 2
+	}
+}
+
+func (c *clientConn) wakeNextHeaderStreamLocked() {
+	stream := c.streams[c.nextHeaderStreamID]
+	if stream == nil || stream.headerWaiter == nil {
+		return
+	}
+	select {
+	case stream.headerWaiter.ready <- struct{}{}:
+	default:
 	}
 }
 
@@ -782,6 +940,83 @@ func (c *clientConn) sendRequestStream(
 
 func (c *clientConn) sendData(stream *clientStream, data []byte, endStream bool, deadline time.Time) error {
 	for len(data) != 0 || endStream {
+		if err := c.waitForSendWindow(stream, data, deadline); err != nil {
+			return err
+		}
+
+		c.writeMu.Lock()
+		framesWritten := 0
+		finished := false
+		var streamErr error
+		var writeErr error
+		for framesWritten < 16 && (len(data) != 0 || endStream) {
+			c.mu.Lock()
+			current := c.streams[stream.id]
+			if current != stream || stream.err != nil {
+				streamErr = stream.err
+				if streamErr == nil {
+					streamErr = errClientStreamClosed
+				}
+				c.mu.Unlock()
+				break
+			}
+			if stream.localClosed {
+				streamErr = errClientStreamClosed
+				c.mu.Unlock()
+				break
+			}
+			amount := 0
+			if len(data) != 0 && c.peerConnectionWindow > 0 && stream.sendWindow > 0 {
+				amount = min(len(data), c.peerMaxFrameSize, int(c.peerConnectionWindow), int(stream.sendWindow))
+			}
+			if len(data) != 0 && amount == 0 {
+				c.mu.Unlock()
+				break
+			}
+			last := amount == len(data) && endStream
+			c.peerConnectionWindow -= int64(amount)
+			stream.sendWindow -= int64(amount)
+			stream.requestBytes += int64(amount)
+			if last {
+				stream.localClosed = true
+			}
+			c.mu.Unlock()
+
+			writeErr = c.framer.WriteData(stream.id, last, data[:amount])
+			if writeErr != nil {
+				break
+			}
+			data = data[amount:]
+			framesWritten++
+			if last {
+				finished = true
+				break
+			}
+		}
+		if framesWritten != 0 && writeErr == nil {
+			writeErr = c.bufferedWriter.Flush()
+		}
+		c.writeMu.Unlock()
+
+		if writeErr != nil {
+			c.fail(writeErr)
+			return writeErr
+		}
+		if streamErr != nil {
+			return streamErr
+		}
+		if finished {
+			c.mu.Lock()
+			c.maybeFinishStreamLocked(stream)
+			c.mu.Unlock()
+			return nil
+		}
+	}
+	return nil
+}
+
+func (c *clientConn) waitForSendWindow(stream *clientStream, data []byte, deadline time.Time) error {
+	for {
 		c.mu.Lock()
 		current := c.streams[stream.id]
 		if current != stream || stream.err != nil {
@@ -796,73 +1031,79 @@ func (c *clientConn) sendData(stream *clientStream, data []byte, endStream bool,
 			c.mu.Unlock()
 			return errClientStreamClosed
 		}
-		amount := 0
-		if len(data) != 0 && c.peerConnectionWindow > 0 && stream.sendWindow > 0 {
-			amount = min(len(data), c.peerMaxFrameSize, int(c.peerConnectionWindow), int(stream.sendWindow))
-		}
-		if len(data) != 0 && amount == 0 {
-			notify := c.notify
-			done := stream.done
+		if len(data) == 0 || c.peerConnectionWindow > 0 && stream.sendWindow > 0 {
 			c.mu.Unlock()
-			if err := waitForStreamEvent(notify, done, deadline); err != nil {
-				return err
-			}
-			continue
+			return nil
 		}
-		last := amount == len(data) && endStream
-		c.peerConnectionWindow -= int64(amount)
-		stream.sendWindow -= int64(amount)
-		stream.requestBytes += int64(amount)
-		if last {
-			stream.localClosed = true
-		}
+		notify := c.notify
+		c.waiters++
 		c.mu.Unlock()
-
-		c.writeMu.Lock()
-		err := c.framer.WriteData(stream.id, last, data[:amount])
-		c.writeMu.Unlock()
+		err := waitForStreamEvent(notify, deadline)
+		c.mu.Lock()
+		c.waiters--
+		c.mu.Unlock()
 		if err != nil {
-			c.fail(err)
 			return err
 		}
-		data = data[amount:]
-		if last {
-			c.mu.Lock()
-			c.maybeFinishStreamLocked(stream)
-			c.mu.Unlock()
-			return nil
-		}
 	}
-	return nil
 }
 
-func waitForStreamEvent(notify, done <-chan struct{}, deadline time.Time) error {
+func waitForStreamEvent(notify <-chan struct{}, deadline time.Time) error {
 	if deadline.IsZero() {
-		select {
-		case <-notify:
-			return nil
-		case <-done:
-			return errClientStreamClosed
-		}
+		<-notify
+		return nil
 	}
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
 	select {
 	case <-notify:
 		return nil
-	case <-done:
-		return errClientStreamClosed
 	case <-timer.C:
 		return fasthttp.ErrTimeout
 	}
 }
 
 func (c *clientConn) readLoop() {
+	waitingForPing := false
 	for {
+		readTimeout := c.config.readIdleTimeout
+		if waitingForPing {
+			readTimeout = c.config.pingTimeout
+		}
+		if readTimeout > 0 {
+			_ = c.conn.SetReadDeadline(time.Now().Add(readTimeout))
+		}
 		frame, err := c.framer.ReadFrame()
 		if err != nil {
+			if isTimeout(err) && c.config.readIdleTimeout > 0 && !waitingForPing {
+				if pingErr := c.writeControl(func() error {
+					return c.framer.WritePing(false, [8]byte{'f', 'a', 's', 't', 'h', '2', 0, 2})
+				}); pingErr != nil {
+					return
+				}
+				waitingForPing = true
+				continue
+			}
 			c.fail(err)
 			return
+		}
+		waitingForPing = false
+		c.mu.Lock()
+		firstFrame := !c.receivedSettings
+		c.mu.Unlock()
+		if firstFrame {
+			settings, ok := frame.(*xhttp2.SettingsFrame)
+			if !ok || settings.IsAck() {
+				c.fail(errors.New("http2: server's first frame isn't settings"))
+				return
+			}
+		}
+		if headers, ok := frame.(*xhttp2.HeadersFrame); ok {
+			if err := c.processDecodedResponseHeaders(headers); err != nil {
+				c.fail(err)
+				return
+			}
+			continue
 		}
 		if err := c.processFrame(frame); err != nil {
 			c.fail(err)
@@ -884,11 +1125,19 @@ func (c *clientConn) processFrame(frame xhttp2.Frame) error {
 	switch frame := frame.(type) {
 	case *xhttp2.SettingsFrame:
 		return c.processSettings(frame)
-	case *xhttp2.MetaHeadersFrame:
-		return c.processResponseHeaders(frame)
 	case *xhttp2.DataFrame:
 		return c.processResponseData(frame)
 	case *xhttp2.RSTStreamFrame:
+		c.countError("stream_" + strings.ToLower(frame.ErrCode.String()))
+		c.mu.Lock()
+		stream, idle := c.streamStateLocked(frame.StreamID)
+		c.mu.Unlock()
+		if stream == nil {
+			if idle {
+				return errors.New("http2: reset on idle stream")
+			}
+			return nil
+		}
 		retry := frame.ErrCode == xhttp2.ErrCodeRefusedStream
 		c.failStream(frame.StreamID, fmt.Errorf("http2: peer reset stream: %s", frame.ErrCode), retry)
 		return nil
@@ -906,9 +1155,52 @@ func (c *clientConn) processFrame(frame xhttp2.Frame) error {
 		return c.processPushPromise(frame)
 	case *xhttp2.ContinuationFrame:
 		return c.processPushContinuation(frame)
+	case *xhttp2.PriorityFrame:
+		if frame.StreamID == frame.PriorityParam.StreamDep {
+			c.resetStream(frame.StreamID, xhttp2.ErrCodeProtocol, errors.New("http2: stream depends on itself"), false)
+		}
+		return nil
 	default:
 		return nil
 	}
+}
+
+type decodedClientHeaders struct {
+	streamID  uint32
+	endStream bool
+	truncated bool
+	fields    []hpack.HeaderField
+}
+
+func (c *clientConn) processDecodedResponseHeaders(frame *xhttp2.HeadersFrame) error {
+	streamID := frame.StreamID
+	endStream := frame.StreamEnded()
+	selfDependent := frame.HasPriority() && frame.Priority.StreamDep == streamID
+	fieldStorage := acquireIncomingHeaderFields(8)
+	decoded, truncated, invalid, err := c.headerDecoder.decode(
+		c.framer,
+		streamID,
+		frame,
+		fieldStorage.fields,
+	)
+	header := decodedClientHeaders{
+		streamID:  streamID,
+		endStream: endStream,
+		truncated: truncated,
+		fields:    decoded,
+	}
+	event := incomingFrame{fields: decoded, fieldStorage: fieldStorage}
+	defer releaseIncomingFrame(&event)
+	if err != nil {
+		return err
+	}
+	if invalid != nil {
+		return c.rejectHeaderBlock(streamID, xhttp2.ErrCodeProtocol, invalid)
+	}
+	if selfDependent {
+		return c.rejectHeaderBlock(streamID, xhttp2.ErrCodeProtocol, errors.New("http2: stream depends on itself"))
+	}
+	return c.processResponseHeaders(&header)
 }
 
 func (c *clientConn) processSettings(frame *xhttp2.SettingsFrame) error {
@@ -920,6 +1212,10 @@ func (c *clientConn) processSettings(frame *xhttp2.SettingsFrame) error {
 	c.mu.Lock()
 	for i := range frame.NumSettings() {
 		setting := frame.Setting(i)
+		if err := setting.Valid(); err != nil {
+			c.mu.Unlock()
+			return err
+		}
 		switch setting.ID {
 		case xhttp2.SettingHeaderTableSize:
 			value := setting.Val
@@ -944,9 +1240,16 @@ func (c *clientConn) processSettings(frame *xhttp2.SettingsFrame) error {
 			c.peerMaxFrameSize = int(setting.Val)
 		case xhttp2.SettingMaxHeaderListSize:
 			c.peerMaxHeaderListSize = uint64(setting.Val)
+		case xhttp2.SettingEnableConnectProtocol:
+			c.peerExtendedConnect = setting.Val == 1
 		case xhttp2.SettingEnablePush:
 			c.mu.Unlock()
 			return errors.New("http2: server sent SETTINGS_ENABLE_PUSH")
+		case xhttp2.SettingNoRFC7540Priorities:
+			if setting.Val > 1 {
+				c.mu.Unlock()
+				return errors.New("http2: invalid SETTINGS_NO_RFC7540_PRIORITIES")
+			}
 		}
 	}
 	c.receivedSettings = true
@@ -957,6 +1260,9 @@ func (c *clientConn) processSettings(frame *xhttp2.SettingsFrame) error {
 		c.encoder.SetMaxDynamicTableSize(encoderTableSize)
 	}
 	err := c.framer.WriteSettingsAck()
+	if err == nil {
+		err = c.bufferedWriter.Flush()
+	}
 	c.writeMu.Unlock()
 	if err != nil {
 		c.fail(err)
@@ -964,59 +1270,100 @@ func (c *clientConn) processSettings(frame *xhttp2.SettingsFrame) error {
 	return err
 }
 
-func (c *clientConn) processResponseHeaders(frame *xhttp2.MetaHeadersFrame) error {
-	if frame.Truncated {
-		c.resetStream(frame.StreamID, xhttp2.ErrCodeEnhanceYourCalm, errInvalidResponseHeaders, false)
-		return nil
+func (c *clientConn) waitForExtendedConnect(deadline time.Time) (bool, error) {
+	for {
+		c.mu.Lock()
+		if c.closed {
+			err := c.err
+			if err == nil {
+				err = errClientConnClosed
+			}
+			c.mu.Unlock()
+			return false, err
+		}
+		if c.receivedSettings {
+			enabled := c.peerExtendedConnect
+			c.mu.Unlock()
+			return enabled, nil
+		}
+		notify := c.notify
+		c.waiters++
+		c.mu.Unlock()
+		err := waitForStreamEvent(notify, deadline)
+		c.mu.Lock()
+		c.waiters--
+		c.mu.Unlock()
+		if err != nil {
+			return false, err
+		}
+	}
+}
+
+func (c *clientConn) processResponseHeaders(frame *decodedClientHeaders) error {
+	if frame.truncated {
+		return c.rejectHeaderBlock(frame.streamID, xhttp2.ErrCodeEnhanceYourCalm, errInvalidResponseHeaders)
 	}
 	c.mu.Lock()
-	stream := c.streams[frame.StreamID]
+	stream := c.streams[frame.streamID]
 	if stream == nil {
+		_, idle := c.streamStateLocked(frame.streamID)
 		c.mu.Unlock()
+		if idle {
+			return errors.New("http2: response headers on idle stream")
+		}
+		return c.writeControl(func() error {
+			return c.framer.WriteRSTStream(frame.streamID, xhttp2.ErrCodeStreamClosed)
+		})
+	}
+	reject := func(cause error) error {
+		c.mu.Unlock()
+		c.resetStream(frame.streamID, xhttp2.ErrCodeProtocol, cause, false)
 		return nil
 	}
 	if stream.responseHeader {
-		if stream.remoteClosed || !frame.StreamEnded() {
-			c.mu.Unlock()
-			return errors.New("http2: invalid response trailers")
+		if stream.remoteClosed || !frame.endStream {
+			return reject(errors.New("http2: invalid response trailers"))
 		}
-		if err := populateResponseTrailers(stream.resp, frame.Fields); err != nil {
-			c.mu.Unlock()
-			return err
+		if err := populateResponseTrailers(stream.resp, frame.fields); err != nil {
+			return reject(err)
 		}
 		c.endResponseLocked(stream, nil)
 		c.mu.Unlock()
 		return nil
 	}
-	status, err := responseStatus(frame.Fields)
+	status, err := responseStatus(frame.fields)
 	if err != nil {
-		c.mu.Unlock()
-		return err
+		return reject(err)
 	}
 	if status >= 100 && status < 200 {
-		if status == 101 || frame.StreamEnded() {
-			c.mu.Unlock()
-			return errors.New("http2: invalid informational response")
+		if status == 101 || frame.endStream {
+			return reject(errors.New("http2: invalid informational response"))
 		}
 		c.mu.Unlock()
 		return nil
 	}
 	status, contentLength, err := populateResponse(
 		stream.resp,
-		frame.Fields,
+		frame.fields,
 		c.hc.DisableHeaderNamesNormalizing,
 	)
 	if err != nil {
-		c.mu.Unlock()
-		return err
+		return reject(err)
 	}
 	stream.statusCode = status
 	stream.expectedResponseBytes = contentLength
 	stream.responseHeader = true
 	c.lease.ApplyResponseMetadata(stream.resp)
 	if responseHasNoBody(stream) && contentLength > 0 && !stream.req.Header.IsHead() {
+		return reject(errors.New("http2: body-forbidden response has a positive content-length"))
+	}
+	if stream.maxResponseBodySize > 0 && contentLength > int64(stream.maxResponseBodySize) {
 		c.mu.Unlock()
-		return errors.New("http2: body-forbidden response has a positive content-length")
+		c.resetStream(frame.streamID, xhttp2.ErrCodeCancel, fasthttp.ErrBodyTooLarge, false)
+		return nil
+	}
+	if !stream.isStreaming && contentLength > 0 {
+		c.lease.PrepareResponseBody(stream.resp, int(min(contentLength, maxResponseBodyPreallocation)))
 	}
 	if stream.isStreaming {
 		body := newResponseBody(
@@ -1034,9 +1381,16 @@ func (c *clientConn) processResponseHeaders(frame *xhttp2.MetaHeadersFrame) erro
 			stream.resp.Header.Del(fasthttp.HeaderTransferEncoding)
 		}
 	}
+	rejectOpenStream := false
 	if stream.isOpenStream {
 		if status < 200 || status >= 300 {
-			c.sendResultLocked(stream, clientResult{err: fmt.Errorf("http2: extended connect failed with status %d", status)})
+			err := fmt.Errorf("http2: extended connect failed with status %d", status)
+			stream.err = err
+			stream.bodyDone = true
+			stream.localClosed = true
+			stream.responseBody.closeWithError(err)
+			c.sendResultLocked(stream, clientResult{err: err})
+			rejectOpenStream = !frame.endStream
 		} else {
 			streamConn := &clientStreamConn{stream: stream, read: stream.responseBody}
 			c.sendResultLocked(stream, clientResult{streamConn: streamConn})
@@ -1044,27 +1398,30 @@ func (c *clientConn) processResponseHeaders(frame *xhttp2.MetaHeadersFrame) erro
 	} else if stream.isStreaming {
 		c.sendResultLocked(stream, clientResult{})
 	}
-	if frame.StreamEnded() {
+	if frame.endStream {
 		c.endResponseLocked(stream, nil)
 	}
 	c.mu.Unlock()
+	if rejectOpenStream {
+		c.resetStream(frame.streamID, xhttp2.ErrCodeCancel, stream.err, false)
+	}
 	return nil
 }
 
-func responseStatus(fields []hpack.HeaderField) (int, error) {
-	for _, field := range fields {
-		if field.Name == ":status" {
-			if len(field.Value) != 3 {
-				return 0, errInvalidResponseHeaders
-			}
-			value, err := strconv.Atoi(field.Value)
-			if err != nil {
-				return 0, errInvalidResponseHeaders
-			}
-			return value, nil
-		}
+func (c *clientConn) rejectHeaderBlock(streamID uint32, code xhttp2.ErrCode, cause error) error {
+	c.mu.Lock()
+	stream, idle := c.streamStateLocked(streamID)
+	c.mu.Unlock()
+	if stream != nil {
+		c.resetStream(streamID, code, cause, false)
+		return nil
 	}
-	return 0, errInvalidResponseHeaders
+	if idle {
+		return fmt.Errorf("http2: invalid header block on idle stream: %w", cause)
+	}
+	return c.writeControl(func() error {
+		return c.framer.WriteRSTStream(streamID, xhttp2.ErrCodeStreamClosed)
+	})
 }
 
 func responseHasNoBody(stream *clientStream) bool {
@@ -1076,9 +1433,20 @@ func (c *clientConn) processResponseData(frame *xhttp2.DataFrame) error {
 	data := frame.Data()
 	c.mu.Lock()
 	stream := c.streams[frame.StreamID]
-	if stream == nil || !stream.responseHeader || stream.remoteClosed {
+	if stream == nil {
+		_, idle := c.streamStateLocked(frame.StreamID)
 		c.mu.Unlock()
-		return errors.New("http2: data on an invalid response stream")
+		if idle {
+			return errors.New("http2: data on idle response stream")
+		}
+		return c.writeControl(func() error {
+			return c.framer.WriteRSTStream(frame.StreamID, xhttp2.ErrCodeStreamClosed)
+		})
+	}
+	if !stream.responseHeader || stream.remoteClosed {
+		c.mu.Unlock()
+		c.resetStream(frame.StreamID, xhttp2.ErrCodeProtocol, errors.New("http2: data on an invalid response stream"), false)
+		return nil
 	}
 	c.receiveConnectionWindow -= flowLength
 	stream.recvWindow -= flowLength
@@ -1088,7 +1456,8 @@ func (c *clientConn) processResponseData(frame *xhttp2.DataFrame) error {
 	}
 	if responseHasNoBody(stream) && len(data) != 0 {
 		c.mu.Unlock()
-		return errors.New("http2: response body isn't permitted")
+		c.resetStream(frame.StreamID, xhttp2.ErrCodeProtocol, errors.New("http2: response body isn't permitted"), false)
+		return nil
 	}
 	stream.responseBytes += int64(len(data))
 	if stream.expectedResponseBytes >= 0 && stream.responseBytes > stream.expectedResponseBytes {
@@ -1098,17 +1467,20 @@ func (c *clientConn) processResponseData(frame *xhttp2.DataFrame) error {
 	}
 	if stream.maxResponseBodySize > 0 && stream.responseBytes > int64(stream.maxResponseBodySize) {
 		c.mu.Unlock()
-		c.resetStream(frame.StreamID, xhttp2.ErrCodeCancel, errResponseBodyTooLarge, false)
+		c.resetStream(frame.StreamID, xhttp2.ErrCodeCancel, fasthttp.ErrBodyTooLarge, false)
 		return nil
 	}
 	body := stream.responseBody
+	discardBody := stream.discardResponseBody
 	if body == nil {
 		stream.resp.AppendBody(data)
 	}
 	ended := frame.StreamEnded()
 	c.mu.Unlock()
 
-	if body != nil && len(data) != 0 {
+	if discardBody && len(data) != 0 {
+		c.consumeResponseBytes(frame.StreamID, len(data))
+	} else if body != nil && len(data) != 0 {
 		if err := body.write(data); err != nil {
 			c.closeResponseBody(frame.StreamID, len(data))
 			return nil
@@ -1157,17 +1529,36 @@ func (c *clientConn) consumeResponseBytes(streamID uint32, amount int) {
 	}
 	c.mu.Lock()
 	stream := c.streams[streamID]
-	c.receiveConnectionWindow += int64(amount)
+	c.pendingConnectionUpdate += int64(amount)
+	connectionIncrement := int64(0)
+	connectionThreshold := int64(c.config.connectionWindowSize) / 2
+	if c.pendingConnectionUpdate >= connectionThreshold {
+		connectionIncrement = c.pendingConnectionUpdate
+		c.pendingConnectionUpdate = 0
+		c.receiveConnectionWindow += connectionIncrement
+	}
+	streamIncrement := int64(0)
 	if stream != nil {
-		stream.recvWindow += int64(amount)
+		stream.pendingWindowUpdate += int64(amount)
+		streamThreshold := int64(c.config.streamWindowSize) / 2
+		if stream.pendingWindowUpdate >= streamThreshold {
+			streamIncrement = stream.pendingWindowUpdate
+			stream.pendingWindowUpdate = 0
+			stream.recvWindow += streamIncrement
+		}
 	}
 	c.mu.Unlock()
+	if connectionIncrement == 0 && streamIncrement == 0 {
+		return
+	}
 	_ = c.writeControl(func() error {
-		if err := c.framer.WriteWindowUpdate(0, uint32(amount)); err != nil {
-			return err
+		if connectionIncrement != 0 {
+			if err := c.framer.WriteWindowUpdate(0, uint32(connectionIncrement)); err != nil {
+				return err
+			}
 		}
-		if stream != nil {
-			return c.framer.WriteWindowUpdate(streamID, uint32(amount))
+		if streamIncrement != 0 {
+			return c.framer.WriteWindowUpdate(streamID, uint32(streamIncrement))
 		}
 		return nil
 	})
@@ -1180,6 +1571,10 @@ func (c *clientConn) closeResponseBody(streamID uint32, discarded int) {
 	c.mu.Lock()
 	stream := c.streams[streamID]
 	remoteOpen := stream != nil && !stream.remoteClosed
+	if stream != nil && stream.isOpenStream {
+		stream.discardResponseBody = true
+		remoteOpen = false
+	}
 	c.mu.Unlock()
 	if remoteOpen {
 		c.resetStream(streamID, xhttp2.ErrCodeCancel, errClientStreamClosed, false)
@@ -1200,7 +1595,11 @@ func (c *clientConn) processWindowUpdate(frame *xhttp2.WindowUpdateFrame) error 
 	defer c.mu.Unlock()
 	if frame.StreamID == 0 {
 		if c.peerConnectionWindow+int64(frame.Increment) > math.MaxInt32 {
-			return errors.New("http2: connection send window overflow")
+			return fmt.Errorf(
+				"http2: client connection send window overflow: current=%d increment=%d",
+				c.peerConnectionWindow,
+				frame.Increment,
+			)
 		}
 		c.peerConnectionWindow += int64(frame.Increment)
 		c.signalLocked()
@@ -1212,8 +1611,22 @@ func (c *clientConn) processWindowUpdate(frame *xhttp2.WindowUpdateFrame) error 
 		}
 		stream.sendWindow += int64(frame.Increment)
 		c.signalLocked()
+		return nil
+	}
+	if _, idle := c.streamStateLocked(frame.StreamID); idle {
+		return errors.New("http2: window update on idle stream")
 	}
 	return nil
+}
+
+func (c *clientConn) streamStateLocked(streamID uint32) (*clientStream, bool) {
+	if stream := c.streams[streamID]; stream != nil {
+		return stream, false
+	}
+	if streamID&1 == 1 {
+		return nil, streamID >= c.nextStreamID
+	}
+	return nil, streamID > c.lastPromisedStreamID
 }
 
 func (c *clientConn) processGoAway(frame *xhttp2.GoAwayFrame) {
@@ -1226,8 +1639,12 @@ func (c *clientConn) processGoAway(frame *xhttp2.GoAwayFrame) {
 		}
 	}
 	c.signalLocked()
+	closeNow := c.activeStreams == 0
 	c.mu.Unlock()
 	c.pool.streamAvailable()
+	if closeNow {
+		c.closeIfIdle()
+	}
 }
 
 func (c *clientConn) processPushPromise(frame *xhttp2.PushPromiseFrame) error {
@@ -1290,30 +1707,26 @@ func (c *clientConn) processPushContinuation(frame *xhttp2.ContinuationFrame) er
 }
 
 func (c *clientConn) finishPushPromise(pending *pendingPushBlock) error {
-	fields := make([]hpack.HeaderField, 0, 8)
-	headerSize := uint64(0)
-	c.decoder.SetEmitFunc(func(field hpack.HeaderField) {
-		headerSize += uint64(len(field.Name) + len(field.Value) + 32)
-		fields = append(fields, hpack.HeaderField{
-			Name:      strings.Clone(field.Name),
-			Value:     strings.Clone(field.Value),
-			Sensitive: field.Sensitive,
-		})
-	})
-	if _, err := c.decoder.Write(pending.block); err != nil {
+	fieldStorage := acquireIncomingHeaderFields(8)
+	decoded, truncated, invalid, err := c.headerDecoder.decodeComplete(pending.block, fieldStorage.fields)
+	event := incomingFrame{fields: decoded, fieldStorage: fieldStorage}
+	defer releaseIncomingFrame(&event)
+	if err != nil {
 		return err
 	}
-	if err := c.decoder.Close(); err != nil {
-		return err
-	}
-	if headerSize > uint64(c.config.maxHeaderListSize) {
+	if truncated {
 		return c.writeControl(func() error {
 			return c.framer.WriteRSTStream(pending.promisedID, xhttp2.ErrCodeEnhanceYourCalm)
 		})
 	}
+	if invalid != nil {
+		return c.writeControl(func() error {
+			return c.framer.WriteRSTStream(pending.promisedID, xhttp2.ErrCodeProtocol)
+		})
+	}
 
 	promised := fasthttp.AcquireRequest()
-	if err := populatePromisedRequest(promised, fields); err != nil {
+	if err := populatePromisedRequest(promised, decoded); err != nil {
 		fasthttp.ReleaseRequest(promised)
 		return c.writeControl(func() error {
 			return c.framer.WriteRSTStream(pending.promisedID, xhttp2.ErrCodeProtocol)
@@ -1350,13 +1763,12 @@ func (c *clientConn) finishPushPromise(pending *pendingPushBlock) error {
 			return c.framer.WriteRSTStream(pending.promisedID, xhttp2.ErrCodeCancel)
 		})
 	}
-	stream := &clientStream{
+	stream := acquireClientStream()
+	*stream = clientStream{
 		id:                    pending.promisedID,
 		conn:                  c,
 		req:                   promised,
 		resp:                  response,
-		result:                make(chan clientResult, 1),
-		done:                  make(chan struct{}),
 		requestStarted:        true,
 		localClosed:           true,
 		bodyDone:              true,
@@ -1366,6 +1778,8 @@ func (c *clientConn) finishPushPromise(pending *pendingPushBlock) error {
 		maxResponseBodySize:   c.hc.MaxResponseBodySize,
 		isPush:                true,
 		promisedRequest:       promised,
+		callerDone:            true,
+		poolable:              true,
 	}
 	c.streams[stream.id] = stream
 	c.activeStreams++
@@ -1376,6 +1790,9 @@ func (c *clientConn) finishPushPromise(pending *pendingPushBlock) error {
 func (c *clientConn) writeControl(write func() error) error {
 	c.writeMu.Lock()
 	err := write()
+	if err == nil {
+		err = c.bufferedWriter.Flush()
+	}
 	c.writeMu.Unlock()
 	if err != nil {
 		c.fail(err)
@@ -1384,15 +1801,19 @@ func (c *clientConn) writeControl(write func() error) error {
 }
 
 func (c *clientConn) resetStream(streamID uint32, code xhttp2.ErrCode, cause error, retry bool) {
+	c.countError("stream_" + strings.ToLower(code.String()))
 	c.mu.Lock()
 	stream := c.streams[streamID]
 	if stream == nil {
 		c.mu.Unlock()
 		return
 	}
+	requestStarted := stream.requestStarted
 	c.failStreamLocked(stream, cause, retry)
 	c.mu.Unlock()
-	_ = c.writeControl(func() error { return c.framer.WriteRSTStream(streamID, code) })
+	if requestStarted {
+		_ = c.writeControl(func() error { return c.framer.WriteRSTStream(streamID, code) })
+	}
 }
 
 func (c *clientConn) failStream(streamID uint32, cause error, retry bool) {
@@ -1414,8 +1835,18 @@ func (c *clientConn) failStreamLocked(stream *clientStream, cause error, retry b
 	if !stream.isPush {
 		c.sendResultLocked(stream, clientResult{retry: retry && !stream.responseHeader, err: cause})
 	}
+	if stream.headerWaiter != nil {
+		select {
+		case stream.headerWaiter.ready <- struct{}{}:
+		default:
+		}
+	}
 	c.releaseStreamLocked(stream)
 	c.skipUnavailableHeaderStreamsLocked()
+	c.wakeNextHeaderStreamLocked()
+	if c.nextHeaderStreamID >= c.nextStreamID {
+		go c.flushBufferedWrites()
+	}
 }
 
 func (c *clientConn) sendResultLocked(stream *clientStream, result clientResult) {
@@ -1442,11 +1873,10 @@ func (c *clientConn) releaseStreamLocked(stream *clientStream) {
 	}
 	delete(c.streams, stream.id)
 	if stream.timer != nil {
-		stream.timer.Stop()
-	}
-	if !stream.doneClosed {
-		close(stream.done)
-		stream.doneClosed = true
+		if !stream.timer.Stop() {
+			stream.poolable = false
+		}
+		stream.timer = nil
 	}
 	if c.activeStreams > 0 {
 		c.activeStreams--
@@ -1469,19 +1899,39 @@ func (c *clientConn) releaseStreamLocked(stream *clientStream) {
 		stream.req = nil
 		stream.resp = nil
 	}
+	stream.lifecycleReleased = true
+	if stream.callerDone && stream.poolable {
+		releaseClientStream(stream)
+	}
 	c.lastIdle = time.Now()
 	c.signalLocked()
 	if c.activeStreams == 0 {
+		if c.goAway {
+			go c.closeIfIdle()
+			return
+		}
 		idleTimeout := c.hc.MaxIdleConnDuration
 		if idleTimeout <= 0 {
 			idleTimeout = fasthttp.DefaultMaxIdleConnDuration
 		}
 		c.idleTimer = time.AfterFunc(idleTimeout, c.closeIfIdle)
 	}
-	go c.pool.streamAvailable()
+	c.pool.streamAvailable()
+}
+
+func (c *clientConn) finishClientStreamUse(stream *clientStream) {
+	c.mu.Lock()
+	stream.callerDone = true
+	if stream.lifecycleReleased && stream.poolable {
+		releaseClientStream(stream)
+	}
+	c.mu.Unlock()
 }
 
 func (c *clientConn) signalLocked() {
+	if c.waiters == 0 {
+		return
+	}
 	close(c.notify)
 	c.notify = make(chan struct{})
 }
@@ -1502,8 +1952,15 @@ func (c *clientConn) fail(cause error) {
 	}
 	c.signalLocked()
 	c.mu.Unlock()
+	c.countError("connection_error")
 	_ = c.lease.Close()
 	c.pool.remove(c)
+}
+
+func (c *clientConn) countError(errorType string) {
+	if c.config.countError != nil {
+		c.config.countError(errorType)
+	}
 }
 
 func (c *clientConn) closeIfIdle() {

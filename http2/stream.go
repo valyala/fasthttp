@@ -17,13 +17,22 @@ import (
 var errStreamClosed = errors.New("http2: stream closed")
 
 type requestBody struct {
-	mu       sync.Mutex
-	ready    *sync.Cond
-	buffer   bytes.Buffer
-	err      error
-	consume  func(int)
-	isClosed bool
+	mu          sync.Mutex
+	ready       *sync.Cond
+	chunks      []requestBodyChunk
+	chunkOffset int
+	buffered    int
+	err         error
+	consume     func(int)
+	isClosed    bool
 }
+
+type requestBodyChunk struct {
+	data    []byte
+	release func([]byte)
+}
+
+const maxRequestBodyChunks = 128
 
 type responseBody struct {
 	mu        sync.Mutex
@@ -129,10 +138,10 @@ func newRequestBody(consume func(int)) *requestBody {
 
 func (b *requestBody) Read(p []byte) (int, error) {
 	b.mu.Lock()
-	for b.buffer.Len() == 0 && !b.isClosed {
+	for b.buffered == 0 && !b.isClosed {
 		b.ready.Wait()
 	}
-	if b.buffer.Len() == 0 {
+	if b.buffered == 0 {
 		err := b.err
 		if err == nil {
 			err = io.EOF
@@ -140,30 +149,82 @@ func (b *requestBody) Read(p []byte) (int, error) {
 		b.mu.Unlock()
 		return 0, err
 	}
-	n, err := b.buffer.Read(p)
+	n := 0
+	for n < len(p) && len(b.chunks) != 0 {
+		chunk := &b.chunks[0]
+		copied := copy(p[n:], chunk.data[b.chunkOffset:])
+		n += copied
+		b.buffered -= copied
+		b.chunkOffset += copied
+		if b.chunkOffset != len(chunk.data) {
+			break
+		}
+		if chunk.release != nil {
+			chunk.release(chunk.data)
+		}
+		*chunk = requestBodyChunk{}
+		b.chunks = b.chunks[1:]
+		b.chunkOffset = 0
+	}
 	b.mu.Unlock()
 	if n > 0 && b.consume != nil {
 		b.consume(n)
 	}
-	return n, err
+	return n, nil
 }
 
 func (b *requestBody) Close() error {
-	b.closeWithError(errStreamClosed)
+	b.discardWithError(errStreamClosed)
 	return nil
 }
 
-func (b *requestBody) write(p []byte) error {
+func (b *requestBody) writeOwned(p []byte, release func([]byte)) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.isClosed {
+		if release != nil {
+			release(p)
+		}
 		return errStreamClosed
 	}
-	_, err := b.buffer.Write(p)
-	if err == nil {
-		b.ready.Broadcast()
+	if len(p) == 0 {
+		if release != nil {
+			release(p)
+		}
+		return nil
 	}
-	return err
+	if len(b.chunks) >= maxRequestBodyChunks {
+		b.compactLocked(p, release)
+	} else {
+		b.chunks = append(b.chunks, requestBodyChunk{data: p, release: release})
+		b.buffered += len(p)
+	}
+	b.ready.Broadcast()
+	return nil
+}
+
+func (b *requestBody) compactLocked(incoming []byte, releaseIncoming func([]byte)) {
+	data := make([]byte, b.buffered+len(incoming))
+	offset := 0
+	for i := range b.chunks {
+		chunk := &b.chunks[i]
+		start := 0
+		if i == 0 {
+			start = b.chunkOffset
+		}
+		offset += copy(data[offset:], chunk.data[start:])
+		if chunk.release != nil {
+			chunk.release(chunk.data)
+		}
+		*chunk = requestBodyChunk{}
+	}
+	copy(data[offset:], incoming)
+	if releaseIncoming != nil {
+		releaseIncoming(incoming)
+	}
+	b.chunks = append(b.chunks[:0], requestBodyChunk{data: data})
+	b.chunkOffset = 0
+	b.buffered += len(incoming)
 }
 
 func (b *requestBody) closeWithError(err error) {
@@ -176,11 +237,30 @@ func (b *requestBody) closeWithError(err error) {
 	b.mu.Unlock()
 }
 
+func (b *requestBody) discardWithError(err error) {
+	b.mu.Lock()
+	b.isClosed = true
+	b.err = err
+	for i := range b.chunks {
+		chunk := &b.chunks[i]
+		if chunk.release != nil {
+			chunk.release(chunk.data)
+		}
+		*chunk = requestBodyChunk{}
+	}
+	b.chunks = nil
+	b.chunkOffset = 0
+	b.buffered = 0
+	b.ready.Broadcast()
+	b.mu.Unlock()
+}
+
 type serverStream struct {
 	id             uint32
 	conn           *serverConn
-	ctx            context.Context
-	cancel         context.CancelCauseFunc
+	cancelMu       sync.Mutex
+	done           chan struct{}
+	cancelCause    error
 	request        *fasthttp.RequestCtx
 	body           *requestBody
 	maxBody        int
@@ -188,17 +268,19 @@ type serverStream struct {
 	expectedBody   int64
 	unconsumedFlow int64
 
-	remoteClosed   bool
-	localClosed    bool
-	isReset        bool
-	handlerStarted bool
-	handlerDone    bool
-	isPush         bool
-	pushDepth      uint8
-	priority       priority
+	remoteClosed       bool
+	localClosed        bool
+	isReset            bool
+	handlerStarted     bool
+	handlerDone        bool
+	isPush             bool
+	pushDepth          uint8
+	priority           priority
+	discardRequestBody bool
 
-	sendWindow int64
-	recvWindow int64
+	sendWindow          int64
+	recvWindow          int64
+	pendingWindowUpdate int64
 
 	pendingData         []byte
 	pendingAck          chan error
@@ -207,39 +289,96 @@ type serverStream struct {
 	responseHeaderSent  bool
 	responseBytes       int64
 	expectedResponse    int64
+	responsePumpStarted bool
+	responsePumpDone    bool
+	releasePending      bool
 
 	acceptMu      sync.Mutex
 	streamHandler fasthttp.StreamHandler
 }
 
+var serverStreamPool sync.Pool
+
+var closedStreamDone = func() <-chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}()
+
 func newServerStream(conn *serverConn, id uint32) *serverStream {
-	ctx, cancel := context.WithCancelCause(conn.ctx)
-	return &serverStream{
+	var stream *serverStream
+	if value := serverStreamPool.Get(); value != nil {
+		stream = value.(*serverStream) //nolint:forcetypeassert
+	} else {
+		stream = &serverStream{}
+	}
+	*stream = serverStream{
 		id:               id,
 		conn:             conn,
-		ctx:              ctx,
-		cancel:           cancel,
 		sendWindow:       conn.peerInitialStreamWindow,
 		recvWindow:       int64(conn.config.streamWindowSize),
 		expectedBody:     -1,
 		expectedResponse: -1,
 	}
+	return stream
+}
+
+func releaseServerStream(stream *serverStream) {
+	*stream = serverStream{}
+	serverStreamPool.Put(stream)
 }
 
 func (s *serverStream) Deadline() (time.Time, bool) {
-	return s.ctx.Deadline()
+	return time.Time{}, false
 }
 
 func (s *serverStream) Done() <-chan struct{} {
-	return s.ctx.Done()
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if s.cancelCause != nil {
+		return closedStreamDone
+	}
+	if s.done == nil {
+		s.done = make(chan struct{})
+	}
+	return s.done
 }
 
 func (s *serverStream) Err() error {
-	return s.ctx.Err()
+	s.cancelMu.Lock()
+	canceled := s.cancelCause != nil
+	s.cancelMu.Unlock()
+	if canceled {
+		return context.Canceled
+	}
+	return nil
 }
 
 func (s *serverStream) Value(key any) any {
-	return s.ctx.Value(key)
+	return s.conn.ctx.Value(key)
+}
+
+func (s *serverStream) cancel(cause error) {
+	if cause == nil {
+		cause = context.Canceled
+	}
+	s.cancelMu.Lock()
+	if s.cancelCause == nil {
+		s.cancelCause = cause
+		if s.done != nil {
+			close(s.done)
+		}
+	}
+	s.cancelMu.Unlock()
+}
+
+func (s *serverStream) cause() error {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if s.cancelCause == nil {
+		return context.Canceled
+	}
+	return s.cancelCause
 }
 
 func (s *serverStream) WriteInformational(
@@ -261,14 +400,14 @@ func (s *serverStream) WriteInformational(
 	}
 	select {
 	case s.conn.commands <- command:
-	case <-s.ctx.Done():
-		return context.Cause(s.ctx)
+	case <-s.Done():
+		return s.cause()
 	}
 	select {
 	case err := <-result:
 		return err
-	case <-s.ctx.Done():
-		return context.Cause(s.ctx)
+	case <-s.Done():
+		return s.cause()
 	}
 }
 
@@ -291,18 +430,21 @@ func (s *serverStream) Push(target string, opts *fasthttp.PushOptions) error {
 	}
 	select {
 	case s.conn.commands <- command:
-	case <-s.ctx.Done():
-		return context.Cause(s.ctx)
+	case <-s.Done():
+		return s.cause()
 	}
 	select {
 	case err := <-result:
 		return err
-	case <-s.ctx.Done():
-		return context.Cause(s.ctx)
+	case <-s.Done():
+		return s.cause()
 	}
 }
 
 func (s *serverStream) AcceptStream(handler fasthttp.StreamHandler) error {
+	if handler == nil {
+		return errors.New("http2: stream handler is nil")
+	}
 	if !s.conn.config.enableExtendedConnect {
 		return fasthttp.ErrProtocolNotSupported
 	}
@@ -326,10 +468,40 @@ type streamConn struct {
 	readDeadline  time.Time
 	writeDeadline time.Time
 	isClosed      bool
+	readClosed    bool
+	writeClosed   bool
 }
 
 func (c *streamConn) Read(p []byte) (int, error) {
-	return c.read.Read(p)
+	c.mu.Lock()
+	if c.isClosed || c.readClosed {
+		c.mu.Unlock()
+		return 0, net.ErrClosed
+	}
+	deadline := c.readDeadline
+	c.mu.Unlock()
+	if !deadline.IsZero() && time.Until(deadline) <= 0 {
+		return 0, timeoutError{}
+	}
+
+	var expired chan struct{}
+	var timer *time.Timer
+	if !deadline.IsZero() {
+		expired = make(chan struct{})
+		timer = time.AfterFunc(time.Until(deadline), func() {
+			close(expired)
+			c.stream.cancelWithError(timeoutError{})
+		})
+	}
+	n, err := c.read.Read(p)
+	if timer != nil && !timer.Stop() {
+		select {
+		case <-expired:
+			return n, timeoutError{}
+		default:
+		}
+	}
+	return n, err
 }
 
 func (c *streamConn) Write(p []byte) (int, error) {
@@ -338,9 +510,10 @@ func (c *streamConn) Write(p []byte) (int, error) {
 	}
 	c.mu.Lock()
 	isClosed := c.isClosed
+	writeClosed := c.writeClosed
 	deadline := c.writeDeadline
 	c.mu.Unlock()
-	if isClosed {
+	if isClosed || writeClosed {
 		return 0, net.ErrClosed
 	}
 
@@ -358,8 +531,8 @@ func (c *streamConn) Write(p []byte) (int, error) {
 	}
 	select {
 	case c.stream.conn.commands <- command:
-	case <-c.stream.ctx.Done():
-		return 0, context.Cause(c.stream.ctx)
+	case <-c.stream.Done():
+		return 0, c.stream.cause()
 	case <-timer:
 		return 0, timeoutError{}
 	}
@@ -369,8 +542,8 @@ func (c *streamConn) Write(p []byte) (int, error) {
 			return 0, err
 		}
 		return len(p), nil
-	case <-c.stream.ctx.Done():
-		return 0, context.Cause(c.stream.ctx)
+	case <-c.stream.Done():
+		return 0, c.stream.cause()
 	case <-timer:
 		return 0, timeoutError{}
 	}
@@ -383,18 +556,53 @@ func (c *streamConn) Close() error {
 		return nil
 	}
 	c.isClosed = true
+	readClosed := c.readClosed
+	writeClosed := c.writeClosed
 	c.mu.Unlock()
-	return c.CloseWrite()
+	var readErr, writeErr error
+	if !readClosed {
+		readErr = c.CloseRead()
+	}
+	if !writeClosed {
+		writeErr = c.CloseWrite()
+	}
+	return errors.Join(readErr, writeErr)
 }
 
 func (c *streamConn) CloseRead() error {
-	if c.stream.body != nil {
-		return c.stream.body.Close()
+	c.mu.Lock()
+	if c.readClosed {
+		c.mu.Unlock()
+		return nil
 	}
-	return nil
+	c.readClosed = true
+	c.mu.Unlock()
+	result := make(chan error, 1)
+	select {
+	case c.stream.conn.commands <- serverCommand{
+		kind:     serverCommandCloseRead,
+		streamID: c.stream.id,
+		result:   result,
+	}:
+	case <-c.stream.Done():
+		return c.stream.cause()
+	}
+	select {
+	case err := <-result:
+		return err
+	case <-c.stream.Done():
+		return c.stream.cause()
+	}
 }
 
 func (c *streamConn) CloseWrite() error {
+	c.mu.Lock()
+	if c.writeClosed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.writeClosed = true
+	c.mu.Unlock()
 	result := make(chan error, 1)
 	command := serverCommand{
 		kind:     serverCommandResponseEOF,
@@ -403,14 +611,14 @@ func (c *streamConn) CloseWrite() error {
 	}
 	select {
 	case c.stream.conn.commands <- command:
-	case <-c.stream.ctx.Done():
-		return context.Cause(c.stream.ctx)
+	case <-c.stream.Done():
+		return c.stream.cause()
 	}
 	select {
 	case err := <-result:
 		return err
-	case <-c.stream.ctx.Done():
-		return context.Cause(c.stream.ctx)
+	case <-c.stream.Done():
+		return c.stream.cause()
 	}
 }
 
@@ -449,6 +657,19 @@ type timeoutError struct{}
 func (timeoutError) Error() string   { return "http2: stream deadline exceeded" }
 func (timeoutError) Timeout() bool   { return true }
 func (timeoutError) Temporary() bool { return true }
+
+func (s *serverStream) cancelWithError(cause error) {
+	result := make(chan error, 1)
+	select {
+	case s.conn.commands <- serverCommand{
+		kind:     serverCommandCancelStream,
+		streamID: s.id,
+		err:      cause,
+		result:   result,
+	}:
+	case <-s.Done():
+	}
+}
 
 type clientStreamConn struct {
 	stream *clientStream

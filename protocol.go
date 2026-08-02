@@ -168,6 +168,9 @@ func (s *Server) ServeProtocolConn(c net.Conn, handler ProtocolHandler) error {
 	if err != nil {
 		return err
 	}
+	if errors.Is(closeErr, net.ErrClosed) {
+		return nil
+	}
 	return closeErr
 }
 
@@ -180,6 +183,13 @@ func (ctx *ProtocolServerContext) Server() *Server {
 // serving a standalone connection for which shutdown isn't configured.
 func (ctx *ProtocolServerContext) Done() <-chan struct{} {
 	return ctx.server.done
+}
+
+// ServerDate returns the Server's cached RFC 1123 Date header value. The
+// returned bytes are read-only and remain valid until the next cache refresh.
+func (ctx *ProtocolServerContext) ServerDate() []byte {
+	serverDateOnce.Do(updateServerDate)
+	return *serverDate.Load()
 }
 
 // AcquireRequestCtx obtains a RequestCtx owned by the Server and binds it to a
@@ -337,6 +347,8 @@ func (s *Server) serveProtocolConn(c net.Conn, protocol *registeredProtocol) err
 	connTime := time.Now()
 	idleConnTime := s.registerIdleConn(c, connTime.Add(5*time.Second))
 	defer s.unregisterIdleConn(c, idleConnTime)
+	s.registerProtocolConn(c)
+	defer s.unregisterProtocolConn(c)
 
 	ctx := &ProtocolServerContext{
 		server:       s,
@@ -346,6 +358,21 @@ func (s *Server) serveProtocolConn(c net.Conn, protocol *registeredProtocol) err
 		connID:       nextConnID(),
 	}
 	return protocol.handler.ServeConn(ctx, c)
+}
+
+func (s *Server) registerProtocolConn(c net.Conn) {
+	s.idleConnsMu.Lock()
+	if s.protocolConns == nil {
+		s.protocolConns = make(map[net.Conn]struct{})
+	}
+	s.protocolConns[c] = struct{}{}
+	s.idleConnsMu.Unlock()
+}
+
+func (s *Server) unregisterProtocolConn(c net.Conn) {
+	s.idleConnsMu.Lock()
+	delete(s.protocolConns, c)
+	s.idleConnsMu.Unlock()
 }
 
 func (s *Server) registerIdleConn(c net.Conn, idleAt time.Time) *atomic.Int64 {

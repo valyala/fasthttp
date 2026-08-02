@@ -245,8 +245,9 @@ type Server struct {
 
 	concurrencyCh chan struct{}
 
-	idleConns map[net.Conn]*atomic.Int64
-	done      chan struct{}
+	idleConns     map[net.Conn]*atomic.Int64
+	protocolConns map[net.Conn]struct{}
+	done          chan struct{}
 
 	// Server name for sending in response headers.
 	//
@@ -2131,6 +2132,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 		// while Wait() is waiting.
 		select {
 		case <-ctx.Done():
+			s.closeProtocolConns()
 			return ctx.Err()
 		case <-ticker.C:
 			continue
@@ -3225,6 +3227,14 @@ func (s *Server) closeIdleConns() {
 			// and stores into it, so only that goroutine may return it.
 			delete(s.idleConns, c)
 		}
+	}
+	s.idleConnsMu.Unlock()
+}
+
+func (s *Server) closeProtocolConns() {
+	s.idleConnsMu.Lock()
+	for conn := range s.protocolConns {
+		_ = conn.Close()
 	}
 	s.idleConnsMu.Unlock()
 }

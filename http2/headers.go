@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/valyala/fasthttp"
+	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/http2/hpack"
 )
 
@@ -119,8 +119,22 @@ func populateRequest(
 	if authority == "" {
 		return -1, fmt.Errorf("%w: missing authority", errInvalidRequestHeaders)
 	}
+	if !httpguts.ValidHostHeader(authority) {
+		return -1, fmt.Errorf("%w: invalid authority", errInvalidRequestHeaders)
+	}
 	if host != "" && host != authority {
-		return -1, fmt.Errorf("%w: host and authority differ", errInvalidRequestHeaders)
+		if !strings.EqualFold(host, authority) {
+			return -1, fmt.Errorf("%w: host and authority differ", errInvalidRequestHeaders)
+		}
+	}
+	if path != "" && path != "*" && path[0] != '/' {
+		return -1, fmt.Errorf("%w: invalid :path", errInvalidRequestHeaders)
+	}
+	if path == "*" && method != fasthttp.MethodOptions {
+		return -1, fmt.Errorf("%w: asterisk :path requires OPTIONS", errInvalidRequestHeaders)
+	}
+	if scheme != "" && !validScheme(scheme) {
+		return -1, fmt.Errorf("%w: invalid :scheme", errInvalidRequestHeaders)
 	}
 
 	ctx.Request.Header.SetMethod(method)
@@ -136,6 +150,25 @@ func populateRequest(
 		ctx.Request.Header.Set(fasthttp.HeaderCookie, strings.Join(cookies, "; "))
 	}
 	return contentLength, nil
+}
+
+func validScheme(scheme string) bool {
+	if scheme == "" {
+		return false
+	}
+	first := scheme[0]
+	if (first < 'A' || first > 'Z') && (first < 'a' || first > 'z') {
+		return false
+	}
+	for i := 1; i < len(scheme); i++ {
+		value := scheme[i]
+		if value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' ||
+			value >= '0' && value <= '9' || value == '+' || value == '-' || value == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func parseHTTP2ContentLength(value string) (int64, error) {
@@ -157,46 +190,52 @@ func parseHTTP2ContentLength(value string) (int64, error) {
 func encodeTrailerHeaders(
 	encoder *hpack.Encoder,
 	buffer *bytes.Buffer,
+	stringsCache *headerStringCache,
 	header *fasthttp.ResponseHeader,
 ) ([]byte, error) {
 	buffer.Reset()
 	for _, key := range header.PeekTrailerKeys() {
-		name := strings.ToLower(string(key))
+		name := stringsCache.name(key)
 		if isConnectionSpecificHeader(name) {
 			return nil, fmt.Errorf("http2: invalid response trailer %q", name)
 		}
 		values := header.PeekAll(string(key))
 		for _, value := range values {
+			sensitive := isSensitiveHeader(name)
 			if err := encoder.WriteField(hpack.HeaderField{
-				Name:  name,
-				Value: string(value),
+				Name:      name,
+				Value:     stringsCache.value(value, sensitive),
+				Sensitive: sensitive,
 			}); err != nil {
 				return nil, err
 			}
 		}
 	}
-	return bytes.Clone(buffer.Bytes()), nil
+	return buffer.Bytes(), nil
 }
 
 func encodeResponseHeaders(
 	encoder *hpack.Encoder,
 	buffer *bytes.Buffer,
+	stringsCache *headerStringCache,
 	server *fasthttp.Server,
 	response *fasthttp.Response,
 	maxHeaderListSize uint64,
+	serverDate []byte,
 ) ([]byte, error) {
 	buffer.Reset()
 	statusCode := response.StatusCode()
 	if statusCode == 0 {
 		statusCode = fasthttp.StatusOK
 	}
+	status := statusCodeString(statusCode)
 	if err := encoder.WriteField(hpack.HeaderField{
 		Name:  ":status",
-		Value: strconv.Itoa(statusCode),
+		Value: status,
 	}); err != nil {
 		return nil, err
 	}
-	headerSize := uint64(len(":status") + len(strconv.Itoa(statusCode)) + 32)
+	headerSize := uint64(len(":status") + len(status) + 32)
 
 	if len(response.Header.Server()) == 0 && !server.NoDefaultServerHeader {
 		name := server.Name
@@ -206,12 +245,12 @@ func encodeResponseHeaders(
 		response.Header.SetServer(name)
 	}
 	if len(response.Header.Peek(fasthttp.HeaderDate)) == 0 && !server.NoDefaultDate {
-		response.Header.SetBytesV(fasthttp.HeaderDate, fasthttp.AppendHTTPDate(nil, time.Now()))
+		response.Header.SetBytesV(fasthttp.HeaderDate, serverDate)
 	}
 
 	var encodeErr error
 	response.Header.All()(func(key, value []byte) bool {
-		name := strings.ToLower(string(key))
+		name := stringsCache.name(key)
 		if name == "trailer" || isConnectionSpecificHeader(name) {
 			return true
 		}
@@ -221,48 +260,89 @@ func encodeResponseHeaders(
 			return false
 		}
 		headerSize += fieldSize
+		sensitive := name == "set-cookie"
 		encodeErr = encoder.WriteField(hpack.HeaderField{
 			Name:      name,
-			Value:     string(value),
-			Sensitive: name == "set-cookie",
+			Value:     stringsCache.value(value, sensitive),
+			Sensitive: sensitive,
 		})
 		return encodeErr == nil
 	})
 	if encodeErr != nil {
 		return nil, encodeErr
 	}
-	return bytes.Clone(buffer.Bytes()), nil
+	return buffer.Bytes(), nil
 }
 
 func encodeInformationalHeaders(
 	encoder *hpack.Encoder,
 	buffer *bytes.Buffer,
+	stringsCache *headerStringCache,
 	statusCode int,
 	header *fasthttp.ResponseHeader,
 ) ([]byte, error) {
 	buffer.Reset()
 	if err := encoder.WriteField(hpack.HeaderField{
 		Name:  ":status",
-		Value: strconv.Itoa(statusCode),
+		Value: statusCodeString(statusCode),
 	}); err != nil {
 		return nil, err
 	}
 	var encodeErr error
 	header.All()(func(key, value []byte) bool {
-		name := strings.ToLower(string(key))
+		name := stringsCache.name(key)
 		if name == "content-length" || name == "trailer" || isConnectionSpecificHeader(name) {
 			return true
 		}
+		sensitive := isSensitiveHeader(name)
 		encodeErr = encoder.WriteField(hpack.HeaderField{
-			Name:  name,
-			Value: string(value),
+			Name:      name,
+			Value:     stringsCache.value(value, sensitive),
+			Sensitive: sensitive,
 		})
 		return encodeErr == nil
 	})
 	if encodeErr != nil {
 		return nil, encodeErr
 	}
-	return bytes.Clone(buffer.Bytes()), nil
+	return buffer.Bytes(), nil
+}
+
+func statusCodeString(statusCode int) string {
+	switch statusCode {
+	case fasthttp.StatusContinue:
+		return "100"
+	case fasthttp.StatusEarlyHints:
+		return "103"
+	case fasthttp.StatusOK:
+		return "200"
+	case fasthttp.StatusNoContent:
+		return "204"
+	case fasthttp.StatusPartialContent:
+		return "206"
+	case fasthttp.StatusMovedPermanently:
+		return "301"
+	case fasthttp.StatusFound:
+		return "302"
+	case fasthttp.StatusNotModified:
+		return "304"
+	case fasthttp.StatusBadRequest:
+		return "400"
+	case fasthttp.StatusUnauthorized:
+		return "401"
+	case fasthttp.StatusForbidden:
+		return "403"
+	case fasthttp.StatusNotFound:
+		return "404"
+	case fasthttp.StatusInternalServerError:
+		return "500"
+	case fasthttp.StatusBadGateway:
+		return "502"
+	case fasthttp.StatusServiceUnavailable:
+		return "503"
+	default:
+		return strconv.Itoa(statusCode)
+	}
 }
 
 func isConnectionSpecificHeader(name string) bool {
