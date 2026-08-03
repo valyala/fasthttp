@@ -46,7 +46,10 @@ Fasthttp provides the following features:
 
     - Request sequence number for the current connection.
 
- 6. Client supports automatic retry on idempotent requests' failure.
+ 6. Client supports automatic retry on idempotent requests' failure. Client
+    response bodies are buffered by default; set Client.MaxResponseBodySize
+    when requesting untrusted servers, since a non-positive value disables the
+    limit.
 
  7. Fasthttp API is designed with the ability to extend existing client
     and server implementations or to write custom client and server

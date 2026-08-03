@@ -33,6 +33,9 @@ import (
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// The response body size is not limited. Use a Client or HostClient with a
+// positive MaxResponseBodySize when requesting untrusted servers.
 func Do(req *Request, resp *Response) error {
 	return defaultClient.Do(req, resp)
 }
@@ -60,6 +63,9 @@ func Do(req *Request, resp *Response) error {
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// The response body size is not limited. Use a Client or HostClient with a
+// positive MaxResponseBodySize when requesting untrusted servers.
 func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return defaultClient.DoTimeout(req, resp, timeout)
 }
@@ -87,6 +93,9 @@ func DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// The response body size is not limited. Use a Client or HostClient with a
+// positive MaxResponseBodySize when requesting untrusted servers.
 func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	return defaultClient.DoDeadline(req, resp, deadline)
 }
@@ -110,6 +119,9 @@ func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// The response body size is not limited. Use a Client or HostClient with a
+// positive MaxResponseBodySize when requesting untrusted servers.
 func DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
 	if defaultClient.DisablePathNormalizing {
 		req.URI().DisablePathNormalizing = true
@@ -124,6 +136,9 @@ func DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
 // is too small a new slice will be allocated.
 //
 // The function follows redirects. Use Do* for manually handling redirects.
+//
+// The response body size is not limited. Use a Client or HostClient with a
+// positive MaxResponseBodySize when requesting untrusted servers.
 func Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 	return defaultClient.Get(dst, url)
 }
@@ -137,6 +152,9 @@ func Get(dst []byte, url string) (statusCode int, body []byte, err error) {
 //
 // ErrTimeout error is returned if url contents couldn't be fetched
 // during the given timeout.
+//
+// The response body size is not limited. Use a Client or HostClient with a
+// positive MaxResponseBodySize when requesting untrusted servers.
 func GetTimeout(dst []byte, url string, timeout time.Duration) (statusCode int, body []byte, err error) {
 	return defaultClient.GetTimeout(dst, url, timeout)
 }
@@ -150,6 +168,9 @@ func GetTimeout(dst []byte, url string, timeout time.Duration) (statusCode int, 
 //
 // ErrTimeout error is returned if url contents couldn't be fetched
 // until the given deadline.
+//
+// The response body size is not limited. Use a Client or HostClient with a
+// positive MaxResponseBodySize when requesting untrusted servers.
 func GetDeadline(dst []byte, url string, deadline time.Time) (statusCode int, body []byte, err error) {
 	return defaultClient.GetDeadline(dst, url, deadline)
 }
@@ -162,6 +183,9 @@ func GetDeadline(dst []byte, url string, deadline time.Time) (statusCode int, bo
 // The function follows redirects. Use Do* for manually handling redirects.
 //
 // Empty POST body is sent if postArgs is nil.
+//
+// The response body size is not limited. Use a Client or HostClient with a
+// positive MaxResponseBodySize when requesting untrusted servers.
 func Post(dst []byte, url string, postArgs *Args) (statusCode int, body []byte, err error) {
 	return defaultClient.Post(dst, url, postArgs)
 }
@@ -280,7 +304,13 @@ type Client struct {
 	//
 	// By default response body size is unlimited.
 	//
-	// Note that if StreamResponseBody is true, MaxResponseBodySize is ignored.
+	// A value less than or equal to zero disables the limit. In this mode,
+	// buffered responses may consume unbounded memory, including when a peer
+	// sends a very large Content-Length or chunk size. Set a positive limit
+	// when requesting untrusted servers.
+	//
+	// If StreamResponseBody is true, MaxResponseBodySize is ignored. The caller
+	// must limit reads from BodyStream itself.
 	MaxResponseBodySize int
 
 	// Maximum duration for waiting for a free connection.
@@ -880,6 +910,14 @@ type HostClient struct {
 	// and response body is greater than the limit.
 	//
 	// By default response body size is unlimited.
+	//
+	// A value less than or equal to zero disables the limit. In this mode,
+	// buffered responses may consume unbounded memory, including when a peer
+	// sends a very large Content-Length or chunk size. Set a positive limit
+	// when requesting untrusted servers.
+	//
+	// If StreamResponseBody is true, MaxResponseBodySize is ignored. The caller
+	// must limit reads from BodyStream itself.
 	MaxResponseBodySize int
 
 	// Maximum duration for waiting for a free connection.
@@ -2410,6 +2448,10 @@ func (q *wantConnQueue) clearFront() (cleaned bool) {
 //
 // It is safe calling PipelineClient methods from concurrently running
 // goroutines.
+//
+// PipelineClient buffers complete response bodies without a size limit. Use
+// Client or HostClient with a positive MaxResponseBodySize when requesting
+// untrusted servers.
 type PipelineClient struct {
 	noCopy noCopy
 

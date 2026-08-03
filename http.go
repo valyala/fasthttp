@@ -424,6 +424,9 @@ func (resp *Response) LocalAddr() net.Addr {
 // The returned value is valid until the response is released,
 // either though ReleaseResponse or your request handler returning.
 // Do not store references to returned value. Make copies instead.
+//
+// If the body is backed by a stream, Body reads the entire stream into memory.
+// Use BodyStream to read it incrementally.
 func (resp *Response) Body() []byte {
 	if resp.bodyStream != nil {
 		bodyBuf := resp.bodyBuffer()
@@ -895,6 +898,9 @@ func (req *Request) SwapBody(body []byte) []byte {
 // The returned value is valid until the request is released,
 // either though ReleaseRequest or your request handler returning.
 // Do not store references to returned value. Make copies instead.
+//
+// If the body is backed by a stream, Body reads the entire stream into memory.
+// Use BodyStream to read it incrementally.
 func (req *Request) Body() []byte {
 	if req.bodyRaw != nil {
 		return req.bodyRaw
@@ -1307,6 +1313,9 @@ func (resp *Response) resetSkipHeader() {
 
 // Read reads request (including body) from the given r.
 //
+// Read does not limit the request body size. Use ReadLimitBody with a positive
+// maxBodySize when reading requests from untrusted sources.
+//
 // RemoveMultipartFormFiles or Reset must be called after
 // reading multipart/form-data request in order to delete temporarily
 // uploaded files.
@@ -1334,6 +1343,8 @@ var ErrGetOnly = errors.New("fasthttp: non-get request received")
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
+// If maxBodySize <= 0, no limit is applied and the request may consume
+// unbounded memory.
 //
 // RemoveMultipartFormFiles or Reset must be called after
 // reading multipart/form-data request in order to delete temporarily
@@ -1559,6 +1570,9 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 
 // Read reads response (including body) from the given r.
 //
+// Read does not limit the response body size. Use ReadLimitBody with a positive
+// maxBodySize when reading responses from untrusted sources.
+//
 // io.EOF is returned if r is closed before reading the first header byte.
 func (resp *Response) Read(r *bufio.Reader) error {
 	return resp.ReadLimitBody(r, 0)
@@ -1580,6 +1594,8 @@ var errTooManyInterimResponses = errors.New("fasthttp: too many 1xx informationa
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
+// If maxBodySize <= 0, no limit is applied and the response may consume
+// unbounded memory.
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
