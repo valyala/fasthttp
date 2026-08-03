@@ -247,6 +247,10 @@ type Server struct {
 	idleConns map[net.Conn]*atomic.Int64
 	done      chan struct{}
 
+	// Whether done was already closed. A ShutdownWithContext that gives up on
+	// its context leaves it closed but in place, and it must not be closed twice.
+	doneClosed bool
+
 	// Server name for sending in response headers.
 	//
 	// Default server name is used if left blank.
@@ -2068,8 +2072,9 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 
 	lnerr := s.closeListenersLocked()
 
-	if s.done != nil {
+	if s.done != nil && !s.doneClosed {
 		close(s.done)
+		s.doneClosed = true
 	}
 
 	// Closing the listener will make Serve() call Stop on the worker pool.
@@ -2084,6 +2089,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 		if open := s.open.Load(); open == 0 {
 			// There may be a pending request to call ctx.Done(). Therefore, we only set it to nil when open == 0.
 			s.done = nil
+			s.doneClosed = false
 			return lnerr
 		}
 		// This is not an optimal solution but using a sync.WaitGroup

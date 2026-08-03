@@ -4429,6 +4429,75 @@ func TestCloseIdleConnsKeepsTimestampOwnedByItsConn(t *testing.T) {
 	}
 }
 
+func TestShutdownWithContextTimeoutThenShutdownAgain(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	firstInHandler := make(chan struct{})
+	release := make(chan struct{})
+	doneChanged := make(chan bool, 1)
+
+	var served atomic.Int32
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if served.Add(1) == 1 {
+				done := ctx.Done()
+				close(firstInHandler)
+				<-release
+				doneChanged <- done != ctx.Done()
+
+				return
+			}
+			ctx.Success("aaa/bbb", []byte("real response"))
+		},
+		Logger: &testLogger{},
+	}
+	go func() {
+		_ = s.Serve(ln)
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	<-firstInHandler
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(100*time.Millisecond))
+	defer cancel()
+	if err := s.ShutdownWithContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, context.DeadlineExceeded)
+	}
+
+	// Serving again must not change what the request that is still running
+	// observes, so done stays in place rather than being replaced.
+	ln = fasthttputil.NewInmemoryListener()
+	go func() {
+		_ = s.Serve(ln)
+	}()
+
+	conn, err = ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	verifyResponse(t, bufio.NewReader(conn), StatusOK, "aaa/bbb", "real response")
+
+	close(release)
+	if <-doneChanged {
+		t.Fatal("RequestCtx.Done() changed for the request still running after shutdown timed out")
+	}
+
+	// done is already closed at this point, so this must not close it twice.
+	if err := s.Shutdown(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestShutdownDone(t *testing.T) {
 	t.Parallel()
 
