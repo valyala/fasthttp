@@ -1144,21 +1144,26 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 
 		mr := multipart.NewReader(bodyStream, req.multipartFormBoundary)
 		req.multipartForm, err = mr.ReadForm(8 * 1024)
-		if err != nil {
-			if lr != nil && lr.N <= 0 {
-				return nil, fmt.Errorf("cannot read multipart/form-data body: %w", ErrBodyTooLarge)
+
+		// ReadForm stops at the closing boundary, and on a parse error it stops
+		// wherever it gave up, so either way the rest of the declared body is
+		// still pending. Discard it through bodyStream so the leftover keeps
+		// counting towards maxBodySize, then off the raw stream so none of the
+		// declared body is left behind to be read back as the beginning of the
+		// next request on a keep-alive connection.
+		_, drainErr := copyZeroAlloc(io.Discard, bodyStream)
+		if bodyStream != req.bodyStream {
+			if _, rawErr := copyZeroAlloc(io.Discard, req.bodyStream); drainErr == nil {
+				drainErr = rawErr
 			}
-			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
+		}
+		if err == nil {
+			err = drainErr
 		}
 		if lr != nil && lr.N <= 0 {
-			req.RemoveMultipartFormFiles()
-			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", ErrBodyTooLarge)
+			err = ErrBodyTooLarge
 		}
-		// ReadForm stops at the closing boundary, so the rest of the declared
-		// body is still pending on the stream. Discard it, otherwise those
-		// bytes are read back as the beginning of the next request on a
-		// keep-alive connection.
-		if _, err = copyZeroAlloc(io.Discard, req.bodyStream); err != nil {
+		if err != nil {
 			req.RemoveMultipartFormFiles()
 			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 		}

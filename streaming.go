@@ -77,6 +77,10 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 	n, err = rs.reader.Read(p)
 	rs.totalBytesRead += n
 	if err != nil {
+		if err == io.EOF && rs.totalBytesRead < rs.header.ContentLength() {
+			// The peer stopped sending before Content-Length was reached.
+			err = io.ErrUnexpectedEOF
+		}
 		return n, err
 	}
 
