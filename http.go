@@ -2310,17 +2310,18 @@ func (cw *chunkedBodyWriter) Write(p []byte) (int, error) {
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	// Frame WriteTo output directly, skipping copyBufPool, for bodies whose
 	// WriteTo is known to match reading.
-	useWriteTo := false
-	switch r.(type) {
-	case *bytes.Reader, *bytes.Buffer:
-		useWriteTo = true
+	var wt io.WriterTo
+	switch v := r.(type) {
+	case *bytes.Reader:
+		wt = v
+	case *bytes.Buffer:
+		wt = v
 	default:
-		if cw, ok := r.(ChunkedBodyWriterTo); ok {
-			useWriteTo = cw.SupportsChunkedBodyWriteTo()
+		if cw, ok := r.(ChunkedBodyWriterTo); ok && cw.SupportsChunkedBodyWriteTo() {
+			wt = cw
 		}
 	}
-	if useWriteTo {
-		wt := r.(io.WriterTo)
+	if wt != nil {
 		cw := chunkedBodyWriter{w: w}
 		if _, err := wt.WriteTo(&cw); err != nil {
 			return err
