@@ -10,7 +10,8 @@ func ExampleHostClient() {
 	// Prepare a client, which fetches webpages via HTTP proxy listening
 	// on the localhost:8080.
 	c := &fasthttp.HostClient{
-		Addr: "localhost:8080",
+		Addr:                "localhost:8080",
+		MaxResponseBodySize: 10 * 1024 * 1024, // Reject responses larger than 10 MiB.
 	}
 
 	// Fetch google page via local proxy.

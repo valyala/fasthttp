@@ -334,6 +334,8 @@ type Server struct {
 	// The server rejects requests with bodies exceeding this limit.
 	//
 	// Request body size is limited by DefaultMaxRequestBodySize by default.
+	// A value less than or equal to zero selects DefaultMaxRequestBodySize; it
+	// does not disable the limit.
 	MaxRequestBodySize int
 
 	// SleepWhenConcurrencyLimitsExceeded is a duration to be slept of if
@@ -465,6 +467,10 @@ type Server struct {
 	// StreamRequestBody enables request body streaming,
 	// and calls the handler sooner when given body is
 	// larger than the current limit.
+	//
+	// Process large bodies through RequestBodyStream to keep memory usage
+	// bounded. Calling PostBody or Request.Body reads the entire remaining body
+	// into memory.
 	StreamRequestBody bool
 }
 

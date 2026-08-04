@@ -461,6 +461,11 @@ before returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fas
   [race detector](https://go.dev/doc/articles/race_detector.html) on a regular basis.
 - Prefer [quicktemplate](https://github.com/valyala/quicktemplate) instead of
   [html/template](https://pkg.go.dev/html/template) in your webserver.
+- Set [Client.MaxResponseBodySize](https://pkg.go.dev/github.com/valyala/fasthttp#Client.MaxResponseBodySize)
+  or [HostClient.MaxResponseBodySize](https://pkg.go.dev/github.com/valyala/fasthttp#HostClient.MaxResponseBodySize)
+  to a positive limit when requesting untrusted servers. A non-positive value
+  disables the response body limit and buffered responses may consume unbounded
+  memory. PipelineClient does not provide a response body size limit.
 
 ## Unsafe Zero-Allocation Conversions
 
@@ -651,7 +656,9 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
   - net/http API is stable, while fasthttp API constantly evolves.
   - net/http handles more HTTP corner cases.
   - net/http can stream both request and response bodies
-  - net/http can handle bigger bodies as it doesn't read the whole body into memory
+  - net/http can handle bigger bodies as it streams them by default. fasthttp
+    buffers bodies unless streaming is enabled; bound untrusted client responses
+    with `MaxResponseBodySize`.
   - net/http should contain less bugs, since it is used and tested by much
     wider audience.
 
