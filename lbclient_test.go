@@ -56,7 +56,7 @@ func TestLBClientRemoveAllClients(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("AddClient deadlocked after all clients were removed")
 	}
 
@@ -110,7 +110,7 @@ func TestLBClientRemoveClientsCallbackPanic(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("AddClient deadlocked after RemoveClients callback panicked")
 	}
 

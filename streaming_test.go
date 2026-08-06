@@ -89,7 +89,7 @@ aaaaaaaaaa`, "\n", "\r\n")
 
 	select {
 	case <-respCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -99,7 +99,7 @@ aaaaaaaaaa`, "\n", "\r\n")
 
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout when waiting for the server to stop")
 	}
 }
@@ -209,10 +209,10 @@ Trailer: Foo, Bar
 	case <-ch:
 		select {
 		case <-ch2:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatal("timeout when waiting for the server to stop")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout when waiting for the request to be processed")
 	}
 }

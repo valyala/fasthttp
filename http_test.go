@@ -952,7 +952,7 @@ func TestResponseSwapBodyConcurrent(t *testing.T) {
 	for range 10 {
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout")
 		}
 	}
@@ -1006,7 +1006,7 @@ func TestRequestSwapBodyConcurrent(t *testing.T) {
 	for range 10 {
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout")
 		}
 	}
@@ -3940,7 +3940,7 @@ func TestResponseCompressedBodyStreamCloseClosesOriginal(t *testing.T) {
 
 	select {
 	case <-bodyStream.closed:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for original body stream close")
 	}
 }
@@ -3973,7 +3973,7 @@ func TestResponseCompressedBodyStreamCloseKeepsWriteError(t *testing.T) {
 		if err == nil {
 			t.Fatalf("unexpected nil close error")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for original body stream close")
 	}
 }
@@ -3997,7 +3997,7 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 
 	select {
 	case <-reader.reading:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for request stream read")
 	}
 
@@ -4013,7 +4013,7 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 	close(reader.unblock)
 	select {
 	case <-compressedStream.done:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for compressed stream cleanup")
 	}
 }

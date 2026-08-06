@@ -142,7 +142,7 @@ func TestUserDataGC(t *testing.T) {
 
 	select {
 	case <-final:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("value is garbage collected")
 	}
 

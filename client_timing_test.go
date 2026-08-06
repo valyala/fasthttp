@@ -188,7 +188,7 @@ func benchmarkClientGetEndToEndTCP(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -254,7 +254,7 @@ func benchmarkNetHTTPClientGetEndToEndTCP(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -318,7 +318,7 @@ func benchmarkClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -384,7 +384,7 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -443,7 +443,7 @@ func benchmarkClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -511,7 +511,7 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -579,7 +579,7 @@ func benchmarkPipelineClient(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }

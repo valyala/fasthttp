@@ -45,7 +45,7 @@ func TestURIAcquireReleaseConcurrent(t *testing.T) {
 	for range 10 {
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout")
 		}
 	}

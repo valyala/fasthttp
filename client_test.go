@@ -971,7 +971,7 @@ func TestPipelineClientIssue832(t *testing.T) {
 	}()
 
 	select {
-	case <-time.After(time.Second * 2):
+	case <-time.After(testTimeout(time.Second * 2)):
 		t.Fatal("PipelineClient did not restart worker")
 	case <-done:
 	}
@@ -1013,7 +1013,7 @@ func TestPipelineClientRestartsAfterIdle(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 }
@@ -1061,7 +1061,7 @@ func TestPipelineClientChannelLifecycleRace(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 }
@@ -1075,7 +1075,7 @@ func testPipelineClientDoOnce(t *testing.T, c *PipelineClient) {
 	defer ReleaseRequest(req)
 	defer ReleaseResponse(resp)
 
-	if err := c.DoTimeout(req, resp, time.Second); err != nil {
+	if err := c.DoTimeout(req, resp, testTimeout(time.Second)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if resp.StatusCode() != StatusOK {
@@ -1145,7 +1145,7 @@ func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 			var req Request
 			var resp Response
 			req.SetRequestURI(uri)
-			err := c.DoTimeout(&req, &resp, time.Second)
+			err := c.DoTimeout(&req, &resp, testTimeout(time.Second))
 			results <- result{index: index, status: resp.StatusCode(), body: string(resp.Body()), err: err}
 		}()
 	}
@@ -1153,7 +1153,7 @@ func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 	do(0, "http://example.test/first")
 	select {
 	case <-firstRequestRead:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("server did not receive first request")
 	}
 	do(1, "http://example.test/second")
@@ -1356,7 +1356,7 @@ func TestPipelineClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
 		if !strings.Contains(err.Error(), "cannot determine tls server name") {
 			t.Fatalf("unexpected error: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for PipelineClient.Do")
 	}
 }
@@ -1561,7 +1561,7 @@ func TestClientNilResp(t *testing.T) {
 	if err := c.Do(req, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.DoTimeout(req, nil, time.Second); err != nil {
+	if err := c.DoTimeout(req, nil, testTimeout(time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	ln.Close()
@@ -1725,10 +1725,10 @@ func TestPipelineClientNilResp(t *testing.T) {
 	if err := c.Do(req, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.DoTimeout(req, nil, time.Second); err != nil {
+	if err := c.DoTimeout(req, nil, testTimeout(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.DoDeadline(req, nil, time.Now().Add(time.Second)); err != nil {
+	if err := c.DoDeadline(req, nil, time.Now().Add(testTimeout(time.Second))); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -2008,7 +2008,10 @@ func TestClientHeaderCase(t *testing.T) {
 		Dial: func(addr string) (net.Conn, error) {
 			return ln.Dial()
 		},
-		ReadTimeout: time.Millisecond * 10,
+		// A missed deadline must fail the test, not retry: the listener above
+		// accepts once, so a second dial would block forever.
+		ReadTimeout:               testTimeout(200 * time.Millisecond),
+		MaxIdemponentCallAttempts: 1,
 
 		// Even without name normalizing we should parse headers correctly.
 		DisableHeaderNamesNormalizing: true,
@@ -2385,14 +2388,14 @@ func TestClientDoWithCustomHeaders(t *testing.T) {
 
 	var resp Response
 
-	err := c.DoTimeout(&req, &resp, time.Second)
+	err := c.DoTimeout(&req, &resp, testTimeout(time.Second))
 	if err != nil {
 		t.Fatalf("error when doing request: %v", err)
 	}
 
 	select {
 	case <-ch:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testTimeout(5 * time.Second)):
 		t.Fatalf("timeout")
 	}
 }
@@ -2459,7 +2462,7 @@ func testPipelineClientDoConcurrent(t *testing.T, concurrency int, maxBatchDelay
 	for range concurrency {
 		select {
 		case <-clientStopCh:
-		case <-time.After(3 * time.Second):
+		case <-time.After(testTimeout(3 * time.Second)):
 			t.Fatalf("timeout")
 		}
 	}
@@ -2473,7 +2476,7 @@ func testPipelineClientDoConcurrent(t *testing.T, concurrency int, maxBatchDelay
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 }
@@ -2485,7 +2488,7 @@ func testPipelineClientDo(t *testing.T, c *PipelineClient) {
 	resp := AcquireResponse()
 	for i := range 10 {
 		if i&1 == 0 {
-			err = c.DoTimeout(req, resp, time.Second)
+			err = c.DoTimeout(req, resp, testTimeout(time.Second))
 		} else {
 			err = c.Do(req, resp)
 		}
@@ -2578,7 +2581,7 @@ func testPipelineClientDisableHeaderNamesNormalizing(t *testing.T, timeout time.
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 }
@@ -2614,7 +2617,7 @@ func TestClientDoTimeoutDisableHeaderNamesNormalizing(t *testing.T) {
 	req.SetRequestURI("http://aaaai.com/bsdf?sddfsd")
 	var resp Response
 	for range 5 {
-		if err := c.DoTimeout(&req, &resp, time.Second); err != nil {
+		if err := c.DoTimeout(&req, &resp, testTimeout(time.Second)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		hv := resp.Header.Peek("foo-BAR")
@@ -2632,7 +2635,7 @@ func TestClientDoTimeoutDisableHeaderNamesNormalizing(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 }
@@ -2671,7 +2674,7 @@ func TestClientDoTimeoutDisablePathNormalizing(t *testing.T) {
 	req.SetRequestURI(urlWithEncodedPath)
 	var resp Response
 	for range 5 {
-		if err := c.DoTimeout(&req, &resp, time.Second); err != nil {
+		if err := c.DoTimeout(&req, &resp, testTimeout(time.Second)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		hv := resp.Header.Peek("received-uri")
@@ -2685,7 +2688,7 @@ func TestClientDoTimeoutDisablePathNormalizing(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 }
@@ -2730,7 +2733,7 @@ func TestHostClientPendingRequests(t *testing.T) {
 			req.SetRequestURI("http://foobar/baz")
 			resp := AcquireResponse()
 
-			if err := c.DoTimeout(req, resp, 10*time.Second); err != nil {
+			if err := c.DoTimeout(req, resp, testTimeout(10*time.Second)); err != nil {
 				resultCh <- fmt.Errorf("unexpected error: %w", err)
 				return
 			}
@@ -2747,7 +2750,7 @@ func TestHostClientPendingRequests(t *testing.T) {
 	for range concurrency {
 		select {
 		case <-readyCh:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout")
 		}
 	}
@@ -2765,7 +2768,7 @@ func TestHostClientPendingRequests(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout")
 		}
 	}
@@ -2781,7 +2784,7 @@ func TestHostClientPendingRequests(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 }
@@ -2830,7 +2833,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 			resp := AcquireResponse()
 
 			for {
-				if err := c.DoDeadline(req, resp, time.Now().Add(timeout)); err != nil {
+				if err := c.DoDeadline(req, resp, time.Now().Add(testTimeout(timeout))); err != nil {
 					if err == ErrNoFreeConns {
 						time.Sleep(time.Millisecond)
 						continue
@@ -2858,7 +2861,7 @@ func TestHostClientMaxConnsWithDeadline(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 
@@ -2916,7 +2919,7 @@ func TestHostClientMaxConnDuration(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 
@@ -2971,7 +2974,7 @@ func TestHostClientMultipleAddrs(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 
@@ -3080,7 +3083,7 @@ func TestClientFollowRedirects(t *testing.T) {
 
 		req.SetRequestURI("http://xxx/foo")
 
-		req.SetTimeout(time.Second)
+		req.SetTimeout(testTimeout(time.Second))
 		err := c.DoRedirects(req, resp, 16)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -3643,7 +3646,7 @@ func TestClientGetURLDeadlineDoesNotMutateDstAfterTimeout(t *testing.T) {
 	close(d.unblock)
 	select {
 	case <-d.done:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timed out waiting for background request to finish")
 	}
 
@@ -4055,7 +4058,7 @@ func TestHostClientTransport(t *testing.T) {
 
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 }
@@ -4485,7 +4488,7 @@ func testClientDoTimeoutSuccess(t *testing.T, c *Client, addr string, n int) {
 	for i := range n {
 		uri := fmt.Sprintf("%s/foo/%d?bar=baz", addr, i)
 		req.SetRequestURI(uri)
-		if err := c.DoTimeout(&req, &resp, time.Second); err != nil {
+		if err := c.DoTimeout(&req, &resp, testTimeout(time.Second)); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
 		if resp.StatusCode() != StatusOK {
@@ -4508,7 +4511,7 @@ func testClientRequestSetTimeoutSuccess(t *testing.T, c *Client, addr string, n 
 	for i := range n {
 		uri := fmt.Sprintf("%s/foo/%d?bar=baz", addr, i)
 		req.SetRequestURI(uri)
-		req.SetTimeout(time.Second)
+		req.SetTimeout(testTimeout(time.Second))
 		if err := c.Do(&req, &resp); err != nil {
 			t.Errorf("unexpected error: %v", err)
 		}
@@ -4529,7 +4532,7 @@ func testClientGetTimeoutSuccess(t *testing.T, c *Client, addr string, n int) {
 	var buf []byte
 	for i := range n {
 		uri := fmt.Sprintf("%s/foo/%d?bar=baz", addr, i)
-		statusCode, body, err := c.GetTimeout(buf, uri, time.Second)
+		statusCode, body, err := c.GetTimeout(buf, uri, testTimeout(time.Second))
 		buf = body
 		if err != nil {
 			t.Fatalf("unexpected error when doing http request: %v", err)
@@ -4606,7 +4609,7 @@ func (s *testEchoServer) Stop() {
 	s.ln.Close()
 	select {
 	case <-s.ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		s.t.Fatalf("timeout when waiting for server close")
 	}
 }
@@ -4812,7 +4815,7 @@ func TestHostClientMaxConnWaitTimeoutSuccess(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second * 5):
+	case <-time.After(testTimeout(time.Second * 5)):
 		t.Fatalf("timeout")
 	}
 
@@ -4899,7 +4902,7 @@ func TestHostClientMaxConnWaitTimeoutError(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 
@@ -4916,9 +4919,9 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 		ln             = fasthttputil.NewInmemoryListener()
 		wg             sync.WaitGroup
 		// make deadline reach earlier than conns wait timeout
-		sleep              = 100 * time.Millisecond
-		timeout            = 10 * time.Millisecond
-		maxConnWaitTimeout = 50 * time.Millisecond
+		sleep              = testTimeout(100 * time.Millisecond)
+		timeout            = testTimeout(10 * time.Millisecond)
+		maxConnWaitTimeout = testTimeout(50 * time.Millisecond)
 	)
 
 	s := &Server{
@@ -4997,7 +5000,7 @@ func TestHostClientMaxConnWaitTimeoutWithEarlierDeadline(t *testing.T) {
 	}
 	select {
 	case <-serverStopCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 

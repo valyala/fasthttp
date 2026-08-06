@@ -364,7 +364,7 @@ func TestFSFSByteRangeConcurrent(t *testing.T) {
 
 	for range concurrency {
 		select {
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout")
 		case <-ch:
 		}
@@ -426,7 +426,7 @@ func TestFSFSCompressConcurrent(t *testing.T) {
 	for range concurrency {
 		select {
 		case <-ch:
-		case <-time.After(time.Second * 4):
+		case <-time.After(testTimeout(time.Second * 4)):
 			t.Fatalf("timeout")
 		}
 	}
@@ -824,7 +824,7 @@ func TestDirFSFSByteRangeConcurrent(t *testing.T) {
 
 	for range concurrency {
 		select {
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout")
 		case <-ch:
 		}
