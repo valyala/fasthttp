@@ -930,7 +930,9 @@ type HostClient struct {
 
 	connsCount int
 
-	connsLock sync.Mutex
+	connsLock         sync.Mutex
+	connSlotAvailable chan struct{}
+	protocolTransport ProtocolRoundTripper
 
 	addrsLock        sync.Mutex
 	tlsConfigMapLock sync.Mutex
@@ -1635,6 +1637,18 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 }
 
 func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error) {
+	if err := c.prepareRequestResponse(req, resp); err != nil {
+		return false, err
+	}
+
+	if c.protocolTransport != nil {
+		ctx := c.newProtocolClientContext(req)
+		return c.protocolTransport.RoundTripWithContext(&ctx, c, req, resp)
+	}
+	return c.transport().RoundTrip(c, req, resp)
+}
+
+func (c *HostClient) prepareRequestResponse(req *Request, resp *Response) error {
 	if req == nil {
 		// for debugging purposes
 		panic("BUG: req cannot be nil")
@@ -1651,7 +1665,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
 	if c.IsTLS != req.URI().isHTTPS() {
-		return false, ErrHostClientRedirectToDifferentScheme
+		return ErrHostClientRedirectToDifferentScheme
 	}
 
 	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix)) // #nosec G115
@@ -1679,7 +1693,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		}
 	}
 
-	return c.transport().RoundTrip(c, req, resp)
+	return nil
 }
 
 func (c *HostClient) transport() RoundTripper {
@@ -1733,6 +1747,7 @@ var ErrTimeout = &timeoutError{}
 func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Lock()
 	c.MaxConns = newMaxConns
+	c.signalConnSlotAvailableLocked()
 	c.connsLock.Unlock()
 }
 
@@ -1878,6 +1893,9 @@ func (c *HostClient) CloseIdleConnections() {
 	for _, cc := range scratch {
 		c.CloseConn(cc)
 	}
+	if closer, ok := c.protocolTransport.(ProtocolTransportCloser); ok {
+		closer.CloseIdleConnections(c)
+	}
 }
 
 func (c *HostClient) connsCleaner() {
@@ -1946,6 +1964,7 @@ func (c *HostClient) decConnsCount() {
 	if c.MaxConnWaitTimeout <= 0 {
 		c.connsLock.Lock()
 		c.connsCount--
+		c.signalConnSlotAvailableLocked()
 		c.connsLock.Unlock()
 		return
 	}
@@ -1965,6 +1984,7 @@ func (c *HostClient) decConnsCount() {
 	}
 	if !dialed {
 		c.connsCount--
+		c.signalConnSlotAvailableLocked()
 	}
 }
 
@@ -3229,22 +3249,33 @@ func (c *pipelineConnClient) PendingRequests() int {
 
 var errPipelineConnStopped = errors.New("pipeline connection has been stopped")
 
-var DefaultTransport RoundTripper = &transport{}
+var defaultTransport = &transport{}
+
+// DefaultTransport is the transport used by HostClient when Transport is nil.
+var DefaultTransport RoundTripper = defaultTransport
 
 type transport struct{}
 
 func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
+	cc, err := hc.AcquireConn(req.timeout, req.ConnectionClose())
+	if err != nil {
+		return false, err
+	}
+	return t.roundTripConn(hc, cc, req, resp)
+}
+
+func (t *transport) roundTripConn(
+	hc *HostClient,
+	cc *clientConn,
+	req *Request,
+	resp *Response,
+) (retry bool, err error) {
 	customSkipBody := resp.SkipBody
 	customStreamBody := resp.StreamBody
 
 	var deadline time.Time
 	if req.timeout > 0 {
 		deadline = time.Now().Add(req.timeout)
-	}
-
-	cc, err := hc.AcquireConn(req.timeout, req.ConnectionClose())
-	if err != nil {
-		return false, err
 	}
 	conn := cc.c
 
