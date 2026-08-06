@@ -715,7 +715,16 @@ func (ctx *RequestCtx) EarlyHints() error {
 		if !ok {
 			return ErrProtocolNotSupported
 		}
-		return writer.WriteInformational(StatusEarlyHints, &ctx.Response.Header)
+		// HTTP/1 writes only the links; the final response header would leak
+		// unrelated fields, Set-Cookie included, into the 103.
+		var hints ResponseHeader
+		hints.SetNoDefaultContentType(true)
+		for _, link := range links {
+			if len(link) != 0 {
+				hints.AddBytesV(HeaderLink, link)
+			}
+		}
+		return writer.WriteInformational(StatusEarlyHints, &hints)
 	}
 	c := acquireWriter(ctx)
 	defer releaseWriter(ctx.s, c)
@@ -2775,6 +2784,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		if continueReadingRequest {
 			if len(s.protocols) != 0 {
 				if protocol := s.matchProtocolUpgrade(ctx, br); protocol != nil {
+					// The protocol sets its own deadlines; the HTTP/1 request
+					// deadline would kill an otherwise active connection.
+					if err = c.SetReadDeadline(zeroTime); err != nil {
+						break
+					}
 					if handled, upgradeErr := s.serveUpgradedProtocolConn(c, protocol, ctx, idleConnTime); handled {
 						err = upgradeErr
 						break

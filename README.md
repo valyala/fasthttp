@@ -55,10 +55,9 @@ if err := http2.ConfigureServer(server, http2.ServerConfig{}); err != nil {
 log.Fatal(server.ListenAndServeTLS(":8443", "cert.pem", "key.pem"))
 ```
 
-`ConfigureServer` enables TLS ALPN `h2` and cleartext prior-knowledge
-detection on the same listener. A dedicated cleartext HTTP/2 listener can use
-`http2.ServeConn`. The obsolete `h2c` HTTP/1 Upgrade handshake is deliberately
-not supported.
+`ConfigureServer` enables TLS ALPN `h2`, cleartext prior-knowledge detection,
+and the `h2c` HTTP/1 Upgrade handshake on the same listener. A dedicated
+cleartext HTTP/2 listener can use `http2.ServeConn`.
 
 ```go
 client := &fasthttp.HostClient{
