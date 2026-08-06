@@ -6,14 +6,9 @@ import (
 	xhttp2 "golang.org/x/net/http2"
 )
 
-// headersFrame is a HEADERS frame parsed into connection-owned storage.
-//
-// x/net's Framer allocates a *HeadersFrame for every header block it parses --
-// SetReuseFrames caches DATA frames only -- which is one allocation per request
-// on each side of a connection. Framer.ReadFrameHeader already validates the
-// frame length and the HEADERS/CONTINUATION order, and it leaves the payload
-// unread on the reader we own, so readFrame below takes the payload for this
-// one frame type and leaves every other type to x/net.
+// headersFrame is a HEADERS frame parsed into reusable storage, because x/net
+// allocates a *HeadersFrame per header block -- its frame cache holds DATA
+// frames only.
 type headersFrame struct {
 	streamID    uint32
 	flags       xhttp2.Flags
@@ -27,9 +22,9 @@ func (f *headersFrame) HeaderBlockFragment() []byte { return f.fragment }
 func (f *headersFrame) HeadersEnded() bool          { return f.flags.Has(xhttp2.FlagHeadersEndHeaders) }
 func (f *headersFrame) StreamEnded() bool           { return f.flags.Has(xhttp2.FlagHeadersEndStream) }
 
-// frameReader reads frames from conn, keeping one reusable HEADERS frame.
-// The reader must be the same one the Framer was built with, so that a payload
-// skipped by ReadFrameHeader is still waiting here.
+// frameReader takes HEADERS payloads itself and leaves every other type to
+// x/net. conn must be the reader the Framer was built with, so that a payload
+// ReadFrameHeader left behind is still waiting here.
 type frameReader struct {
 	framer  *xhttp2.Framer
 	conn    io.Reader
@@ -40,8 +35,8 @@ func newFrameReader(framer *xhttp2.Framer, conn io.Reader) *frameReader {
 	return &frameReader{framer: framer, conn: conn}
 }
 
-// readFrame returns either a *headersFrame owned by this reader, or a frame
-// owned by the Framer. Both stay valid only until the next call.
+// readFrame returns a *headersFrame or an x/net frame, valid until the next
+// call.
 func (r *frameReader) readFrame() (any, error) {
 	header, err := r.framer.ReadFrameHeader()
 	if err != nil {
@@ -56,8 +51,7 @@ func (r *frameReader) readFrame() (any, error) {
 	return &r.headers, nil
 }
 
-// readHeadersPayload mirrors x/net's parseHeadersFrame, including its error
-// codes, over a buffer that is reused across frames.
+// readHeadersPayload mirrors parseHeadersFrame, error codes included.
 func (r *frameReader) readHeadersPayload(header xhttp2.FrameHeader) error {
 	if header.StreamID == 0 {
 		return xhttp2.ConnectionError(xhttp2.ErrCodeProtocol)

@@ -212,6 +212,8 @@ type Server struct {
 	//
 	// The default behavior (when neither handler is set) is to automatically accept
 	// the request body.
+	//
+	// HTTP/1 only: Expect: 100-continue has no HTTP/2 equivalent.
 	ExpectHandler func(ctx *RequestCtx) int
 
 	// ConnState specifies an optional callback function that is
@@ -275,6 +277,10 @@ type Server struct {
 	//
 	// Concurrency only works if you either call Serve once, or only ServeConn multiple times.
 	// It works with ListenAndServe as well.
+	//
+	// This bounds connections, not requests. A multiplexed protocol runs many
+	// concurrent handlers per connection, so it bounds them by its own limit
+	// on concurrent streams instead.
 	Concurrency int
 
 	// Per-connection buffer size for requests' reading.
@@ -323,6 +329,8 @@ type Server struct {
 	// 'Connection: close' header is added to the last response.
 	//
 	// By default unlimited number of requests may be served per connection.
+	//
+	// HTTP/1 only: a registered protocol enforces its own limit, if any.
 	MaxRequestsPerConn int
 
 	// MaxKeepaliveDuration is a no-op and only left here for backwards compatibility.
@@ -550,6 +558,9 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 }
 
 // RequestConfig configure the per request deadline and body limits.
+//
+// ReadTimeout and WriteTimeout are HTTP/1 only: they become deadlines on the
+// connection, which a multiplexed protocol shares between requests.
 type RequestConfig struct {
 	// ReadTimeout is the maximum duration for reading the entire
 	// request body.

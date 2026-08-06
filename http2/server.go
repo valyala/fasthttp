@@ -1230,7 +1230,6 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 	}
 	switch command.kind {
 	case serverCommandHandlerDone:
-		// The handler has returned, so its worker can take another stream.
 		c.releaseStreamWorker(stream)
 		return c.handleHandlerDone(stream, command.requestCtx)
 	case serverCommandInformational:
