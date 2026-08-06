@@ -238,11 +238,11 @@ func encodeResponseHeaders(
 		}
 		response.Header.SetServer(name)
 	}
-	if len(response.Header.Peek(fasthttp.HeaderDate)) == 0 && !server.NoDefaultDate {
-		response.Header.SetBytesV(fasthttp.HeaderDate, serverDate)
-	}
-
+	defaultDate := !server.NoDefaultDate && len(serverDate) != 0
 	headerSize := uint64(len(":status") + len(status) + 32)
+	if defaultDate {
+		headerSize += uint64(len(fasthttp.HeaderDate) + len(serverDate) + 32)
+	}
 	var validateErr error
 	response.Header.All()(func(key, value []byte) bool {
 		name := stringsCache.name(key)
@@ -251,6 +251,9 @@ func encodeResponseHeaders(
 			return false
 		}
 		if name == "trailer" || isConnectionSpecificHeader(name) {
+			return true
+		}
+		if defaultDate && name == "date" {
 			return true
 		}
 		fieldSize := uint64(len(name) + len(value) + 32)
@@ -272,10 +275,21 @@ func encodeResponseHeaders(
 	}); err != nil {
 		return nil, err
 	}
+	if defaultDate {
+		if err := encoder.WriteField(hpack.HeaderField{
+			Name:  "date",
+			Value: stringsCache.value(serverDate, false),
+		}); err != nil {
+			return nil, err
+		}
+	}
 	var encodeErr error
 	response.Header.All()(func(key, value []byte) bool {
 		name := stringsCache.name(key)
 		if name == "trailer" || isConnectionSpecificHeader(name) {
+			return true
+		}
+		if defaultDate && name == "date" {
 			return true
 		}
 		sensitive := name == "set-cookie"

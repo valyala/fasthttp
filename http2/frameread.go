@@ -1,6 +1,7 @@
 package http2
 
 import (
+	"bufio"
 	"io"
 
 	xhttp2 "golang.org/x/net/http2"
@@ -27,12 +28,27 @@ func (f *headersFrame) StreamEnded() bool           { return f.flags.Has(xhttp2.
 // ReadFrameHeader left behind is still waiting here.
 type frameReader struct {
 	framer  *xhttp2.Framer
-	conn    io.Reader
+	conn    *bufio.Reader
 	headers headersFrame
 }
 
-func newFrameReader(framer *xhttp2.Framer, conn io.Reader) *frameReader {
+func newFrameReader(framer *xhttp2.Framer, conn *bufio.Reader) *frameReader {
 	return &frameReader{framer: framer, conn: conn}
+}
+
+// completeFrameBuffered reports whether the next full frame is already
+// buffered, so reading it cannot block on the socket.
+func (r *frameReader) completeFrameBuffered() bool {
+	buffered := r.conn.Buffered()
+	if buffered < 9 {
+		return false
+	}
+	header, err := r.conn.Peek(3)
+	if err != nil {
+		return false
+	}
+	length := int(header[0])<<16 | int(header[1])<<8 | int(header[2])
+	return buffered >= 9+length
 }
 
 // readFrame returns a *headersFrame or an x/net frame, valid until the next

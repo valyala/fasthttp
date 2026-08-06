@@ -20,6 +20,8 @@ const maxIdleStreamWorkerDuration = 10 * time.Second
 
 func (c *serverConn) startHandler(stream *serverStream) {
 	stream.handlerStarted = true
+	stream.handlerGen = c.handlerGen
+	c.pendingHandlers++
 	worker := c.acquireStreamWorker()
 	stream.worker = worker
 	worker.stream <- stream
@@ -48,7 +50,7 @@ func (c *serverConn) releaseStreamWorker(stream *serverStream) {
 		return
 	}
 	stream.worker = nil
-	worker.lastUseTime = time.Now()
+	worker.lastUseTime = c.cycleTime
 	c.idleWorkers = append(c.idleWorkers, worker)
 }
 

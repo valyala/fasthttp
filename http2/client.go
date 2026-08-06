@@ -1,6 +1,7 @@
 package http2
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -233,8 +234,13 @@ func newClientConn(pool *clientPool, lease *fasthttp.ProtocolClientConn) (*clien
 		conn.config.writeByteTimeout,
 	)
 	conn.bufferedWriter = conn.writer
-	conn.framer = xhttp2.NewFramer(conn.bufferedWriter, conn.conn)
-	conn.frames = newFrameReader(conn.framer, conn.conn)
+	readBufferSize := pool.hc.ReadBufferSize
+	if readBufferSize <= 0 {
+		readBufferSize = defaultReadBufferSize
+	}
+	reader := bufio.NewReaderSize(conn.conn, readBufferSize)
+	conn.framer = xhttp2.NewFramer(conn.bufferedWriter, reader)
+	conn.frames = newFrameReader(conn.framer, reader)
 	conn.framer.SetReuseFrames()
 	conn.headerDecoder = newHeaderCodec(pool.config.maxDecoderTableSize, pool.config.maxHeaderListSize)
 	conn.framer.SetMaxReadFrameSize(pool.config.maxReadFrameSize)

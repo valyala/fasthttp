@@ -55,6 +55,10 @@ type asyncFrameWriter struct {
 	sendMu sync.Mutex
 	active *frameWriteBuffer // owned exclusively by the producer
 
+	// coalesced joins small batches that queued up during the previous write
+	// syscall into the next one. Owned by writeLoop.
+	coalesced []byte
+
 	// deadline bounds how long the current producer waits for queue space. Like
 	// active it is owned exclusively by whichever goroutine holds the
 	// connection's write slot, so it needs no synchronisation.
@@ -309,34 +313,84 @@ func (w *asyncFrameWriter) writeLoop() {
 		w.discardQueued()
 		close(w.done)
 	}()
+	var pending []*frameWriteBuffer
 	for {
 		select {
 		case <-w.stop:
 			return
 		default:
 		}
+		var batch frameWriteBatch
 		select {
 		case <-w.stop:
 			return
-		case batch := <-w.queue:
+		case batch = <-w.queue:
+		}
+		// Batches that queued while the previous syscall was in flight go out
+		// in one write with this one.
+		pending = pending[:0]
+		total := 0
+		var barrier chan error
+		for {
 			select {
 			case w.space <- struct{}{}:
 			default:
 			}
 			if batch.barrier != nil {
-				batch.barrier <- w.err()
-				continue
+				barrier = batch.barrier
+				break
 			}
-			if err := w.writeAll(batch.buffer.data); err != nil {
-				w.releaseBuffer(batch.buffer)
-				w.fail(err)
-				return
+			pending = append(pending, batch.buffer)
+			total += len(batch.buffer.data)
+			if total >= w.batchSize {
+				break
 			}
-			w.releaseBuffer(batch.buffer)
+			received := false
+			select {
+			case batch = <-w.queue:
+				received = true
+			default:
+			}
+			if !received {
+				break
+			}
+		}
+		if err := w.writePending(pending); err != nil {
+			w.fail(err)
+			if barrier != nil {
+				barrier <- w.err()
+			}
+			return
+		}
+		if barrier != nil {
+			barrier <- w.err()
 		}
 	}
 }
 
+func (w *asyncFrameWriter) writePending(pending []*frameWriteBuffer) error {
+	defer func() {
+		for _, buffer := range pending {
+			w.releaseBuffer(buffer)
+		}
+	}()
+	switch len(pending) {
+	case 0:
+		return nil
+	case 1:
+		return w.writeAll(pending[0].data)
+	}
+	// One buffer per write costs a syscall each; under TLS, a record each.
+	w.coalesced = w.coalesced[:0]
+	for _, buffer := range pending {
+		w.coalesced = append(w.coalesced, buffer.data...)
+	}
+	return w.writeAll(w.coalesced)
+}
+
+// writeAll arms the write deadline per attempt and leaves it armed: the next
+// write re-arms before touching the connection, and an armed deadline on an
+// idle connection does nothing.
 func (w *asyncFrameWriter) writeAll(data []byte) error {
 	for len(data) != 0 {
 		if w.noProgressTimeout > 0 {
@@ -354,9 +408,6 @@ func (w *asyncFrameWriter) writeAll(data []byte) error {
 		if n == 0 {
 			return io.ErrNoProgress
 		}
-	}
-	if w.noProgressTimeout > 0 {
-		return w.conn.SetWriteDeadline(time.Time{})
 	}
 	return nil
 }

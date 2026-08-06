@@ -245,6 +245,13 @@ type Server struct {
 	// consistent with net/http.
 	FormValueFunc FormValueFunc
 
+	// MaxProtocolRequestCtxCacheBytes caps the body capacity a multiplexed
+	// protocol connection keeps for reuse. The memory is freed when the
+	// connection closes, not by the GC.
+	//
+	// Zero means 128MB per connection. Negative disables the cache.
+	MaxProtocolRequestCtxCacheBytes int
+
 	nextProtos     map[string]ServeHandler
 	protocols      []registeredProtocol
 	tlsConfigOwner *tls.Config
