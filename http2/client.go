@@ -302,7 +302,6 @@ func (c *clientConn) reserveStream(
 	}
 	if c.idleTimer != nil {
 		c.idleTimer.Stop()
-		c.idleTimer = nil
 	}
 	stream := acquireClientStream()
 	isHead := req.Header.IsHead()
@@ -567,7 +566,12 @@ func (c *clientConn) maybeFinalizeStreamLocked(stream *clientStream) {
 		if idleTimeout <= 0 {
 			idleTimeout = fasthttp.DefaultMaxIdleConnDuration
 		}
-		c.idleTimer = time.AfterFunc(idleTimeout, c.closeIfIdle)
+		// Re-armed, not replaced: one-at-a-time requests idle after every one.
+		if c.idleTimer == nil {
+			c.idleTimer = time.AfterFunc(idleTimeout, c.closeIfIdle)
+		} else {
+			c.idleTimer.Reset(idleTimeout)
+		}
 	}
 	c.pool.streamAvailable()
 }

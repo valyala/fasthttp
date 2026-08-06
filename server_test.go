@@ -5554,3 +5554,83 @@ func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A request number past its 32-bit field must not spill into the connection's.
+func TestRequestCtxIDKeepsRequestNumberInItsField(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		connID, requestNum uint64
+		otherConnID        uint64
+	}{
+		{"one past the field", 0, 1 << 32, 1},
+		{"twice past the field", 5, 2 << 32, 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var overflowed, other RequestCtx
+			overflowed.connID = tc.connID
+			overflowed.connRequestNum = tc.requestNum
+			other.connID = tc.otherConnID
+
+			if overflowed.ID() == other.ID() {
+				t.Fatalf("connection %d request %d has the same ID as connection %d request 0: %#016x",
+					tc.connID, tc.requestNum, tc.otherConnID, other.ID())
+			}
+			if got := overflowed.ID() >> 32; got != tc.connID {
+				t.Fatalf("connection field = %d, want %d", got, tc.connID)
+			}
+		})
+	}
+}
+
+// TimeoutHandler must admit requests on a server driven by ServeConn, which
+// never allocates the concurrency gate that Serve does.
+func TestTimeoutHandlerViaServeConn(t *testing.T) {
+	s := &Server{Handler: TimeoutHandler(func(ctx *RequestCtx) {
+		ctx.SetBodyString("ok")
+	}, time.Second, "timeout")}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: a.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("ServeConn() error: %v", err)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+	t.Logf("status=%d body=%q", resp.StatusCode(), resp.Body())
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("status = %d, want 200 (no requests were in flight)", resp.StatusCode())
+	}
+}
+
+// IsTLS unwraps perIPConn; TLSConnectionState must agree with it.
+func TestTLSConnectionStateThroughPerIPConn(t *testing.T) {
+	certData, keyData, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverSide, clientSide := net.Pipe()
+	defer clientSide.Close()
+	tlsServer := tls.Server(serverSide, &tls.Config{Certificates: []tls.Certificate{cert}})
+	go func() {
+		c := tls.Client(clientSide, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec
+		_ = c.Handshake()
+	}()
+	if err := tlsServer.Handshake(); err != nil {
+		t.Fatal(err)
+	}
+
+	var ctx RequestCtx
+	ctx.c = &perIPConn{Conn: tlsServer}
+	if !ctx.IsTLS() {
+		t.Fatal("IsTLS() = false through perIPConn")
+	}
+	if ctx.TLSConnectionState() == nil {
+		t.Fatal("IsTLS() reports TLS but TLSConnectionState() is nil")
+	}
+}
