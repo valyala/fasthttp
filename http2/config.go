@@ -449,8 +449,9 @@ type serverHandler struct {
 	config serverConfig
 }
 
-// ConfigureServer enables HTTP/2 on s through TLS ALPN and cleartext prior
-// knowledge. Existing TLS settings are preserved.
+// ConfigureServer enables HTTP/2 on s through TLS ALPN, cleartext prior
+// knowledge, and the HTTP/1.1 h2c Upgrade handshake. Existing TLS settings
+// are preserved.
 func ConfigureServer(s *fasthttp.Server, cfg ServerConfig) error { //nolint:gocritic // config by value is the public contract
 	if s == nil {
 		return errors.New("http2: server is nil")
@@ -460,11 +461,12 @@ func ConfigureServer(s *fasthttp.Server, cfg ServerConfig) error { //nolint:gocr
 		return err
 	}
 	return s.RegisterProtocol(fasthttp.ProtocolRegistration{
-		ALPN:             []string{"h2"},
-		FallbackALPN:     []string{"http/1.1"},
-		CleartextPreface: []byte(clientPreface),
-		MinTLSVersion:    tls.VersionTLS12,
-		Handler:          &serverHandler{config: normalized},
+		ALPN:                  []string{"h2"},
+		FallbackALPN:          []string{"http/1.1"},
+		CleartextPreface:      []byte(clientPreface),
+		CleartextUpgradeToken: "h2c",
+		MinTLSVersion:         tls.VersionTLS12,
+		Handler:               &serverHandler{config: normalized},
 	})
 }
 

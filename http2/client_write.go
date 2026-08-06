@@ -56,13 +56,6 @@ func (c *clientConn) writeRequest(stream *clientStream, keepOpen bool, deadline 
 	return c.sendRequestStream(stream, reader, requestContentLength(&req.Header), deadline)
 }
 
-func requestContentLength(header *fasthttp.RequestHeader) int64 {
-	if len(header.Peek(fasthttp.HeaderContentLength)) == 0 {
-		return -1
-	}
-	return int64(header.ContentLength())
-}
-
 func (c *clientConn) writeRequestHeaders(
 	stream *clientStream,
 	endStream bool,
@@ -332,21 +325,6 @@ func (c *clientConn) waitForSendWindow(stream *clientStream, data []byte, deadli
 	}
 }
 
-func waitForStreamEvent(notify <-chan struct{}, deadline time.Time) error {
-	if deadline.IsZero() {
-		<-notify
-		return nil
-	}
-	timer := fasthttp.AcquireTimer(time.Until(deadline))
-	defer fasthttp.ReleaseTimer(timer)
-	select {
-	case <-notify:
-		return nil
-	case <-timer.C:
-		return fasthttp.ErrTimeout
-	}
-}
-
 func (c *clientConn) writeControl(write func() error) error {
 	err := c.lockWrite(time.Time{})
 	if err != nil {
@@ -420,4 +398,26 @@ func (c *clientConn) unlockWrite(writeErr error) error {
 		return fasthttp.ErrTimeout
 	}
 	return writeErr
+}
+
+func requestContentLength(header *fasthttp.RequestHeader) int64 {
+	if len(header.Peek(fasthttp.HeaderContentLength)) == 0 {
+		return -1
+	}
+	return int64(header.ContentLength())
+}
+
+func waitForStreamEvent(notify <-chan struct{}, deadline time.Time) error {
+	if deadline.IsZero() {
+		<-notify
+		return nil
+	}
+	timer := fasthttp.AcquireTimer(time.Until(deadline))
+	defer fasthttp.ReleaseTimer(timer)
+	select {
+	case <-notify:
+		return nil
+	case <-timer.C:
+		return fasthttp.ErrTimeout
+	}
 }

@@ -479,6 +479,65 @@ func TestDrainingStillRejectsEvenStreamIDAsConnectionError(t *testing.T) {
 	}
 }
 
+func flushOrderConn(t *testing.T, incremental bool) []uint32 {
+	t.Helper()
+	var wire bytes.Buffer
+	conn := &serverConn{
+		framer:               xhttp2.NewFramer(&wire, nil),
+		streams:              map[uint32]*serverStream{},
+		peerConnectionWindow: 1 << 30,
+		peerMaxFrameSize:     defaultMaxFrameSize,
+	}
+	for _, streamID := range []uint32{1, 3} {
+		stream := &serverStream{
+			id:          streamID,
+			priority:    priority{urgency: 3, incremental: incremental},
+			sendWindow:  1 << 30,
+			pendingData: bytes.Repeat([]byte{byte(streamID)}, 3*defaultMaxFrameSize),
+		}
+		conn.streams[streamID] = stream
+		conn.queueFlush(stream)
+	}
+	if err := conn.flushResponses(); err != nil {
+		t.Fatalf("flushResponses() error: %v", err)
+	}
+	reader := xhttp2.NewFramer(nil, &wire)
+	var order []uint32
+	for {
+		frame, err := reader.ReadFrame()
+		if err != nil {
+			return order
+		}
+		order = append(order, frame.Header().StreamID)
+	}
+}
+
+func TestFlushServesSequentialResponsesToCompletion(t *testing.T) {
+	order := flushOrderConn(t, false)
+	if len(order) != 6 {
+		t.Fatalf("frames = %d, want 6", len(order))
+	}
+	want := []uint32{1, 1, 1, 3, 3, 3}
+	for i, streamID := range want {
+		if order[i] != streamID {
+			t.Fatalf("frame order = %v, want %v", order, want)
+		}
+	}
+}
+
+func TestFlushInterleavesIncrementalResponses(t *testing.T) {
+	order := flushOrderConn(t, true)
+	if len(order) != 6 {
+		t.Fatalf("frames = %d, want 6", len(order))
+	}
+	want := []uint32{1, 3, 1, 3, 1, 3}
+	for i, streamID := range want {
+		if order[i] != streamID {
+			t.Fatalf("frame order = %v, want %v", order, want)
+		}
+	}
+}
+
 func TestParsePriority(t *testing.T) {
 	tests := []struct {
 		value   string

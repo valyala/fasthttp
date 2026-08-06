@@ -47,19 +47,41 @@ type ProtocolHandler interface {
 // ALPN and CleartextPreface are copied by RegisterProtocol. At least one must
 // be set. CleartextPreface is matched only on non-TLS connections.
 //
+// CleartextUpgradeToken additionally offers the protocol through the HTTP/1.1
+// Upgrade handshake: a non-TLS HTTP/1 request whose Upgrade header equals the
+// token is handed to the Handler, which must implement ProtocolUpgrader.
+//
 // Experimental: this type may change before it has shipped in two fasthttp
 // minor releases.
 type ProtocolRegistration struct {
-	ALPN             []string
-	FallbackALPN     []string
-	CleartextPreface []byte
-	MinTLSVersion    uint16
-	Handler          ProtocolHandler
+	ALPN                  []string
+	FallbackALPN          []string
+	CleartextPreface      []byte
+	CleartextUpgradeToken string
+	MinTLSVersion         uint16
+	Handler               ProtocolHandler
+}
+
+// ProtocolUpgrader accepts HTTP/1.1 Upgrade handshakes for a registered
+// protocol. UpgradeConn reports whether it took over the connection; when
+// false the request is served as ordinary HTTP/1. upgraded is read-only and
+// valid only for the duration of the call.
+//
+// Experimental: this interface may change before it has shipped in two
+// fasthttp minor releases.
+type ProtocolUpgrader interface {
+	UpgradeConn(ctx *ProtocolServerContext, c net.Conn, upgraded *Request) (bool, error)
+}
+
+type tlsConn interface {
+	Handshake() error
+	ConnectionState() tls.ConnectionState
 }
 
 type registeredProtocol struct {
 	alpn             []string
 	cleartextPreface []byte
+	upgradeToken     string
 	handler          ProtocolHandler
 }
 
@@ -307,6 +329,8 @@ func (ctx *ProtocolServerContext) releaseCachedRequestCtxs() {
 	ctx.requestBytes = 0
 	ctx.requestMu.Unlock()
 	for _, requestCtx := range cache {
+		requestCtx.Request.ReleaseBody(0)
+		requestCtx.Response.ReleaseBody(0)
 		ctx.server.ctxPool.Put(requestCtx)
 	}
 }
@@ -368,6 +392,12 @@ func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //n
 		return errors.New("fasthttp: cannot register a protocol after serving starts")
 	}
 
+	if registration.CleartextUpgradeToken != "" {
+		if _, ok := registration.Handler.(ProtocolUpgrader); !ok {
+			return errors.New("fasthttp: protocol upgrade token requires a ProtocolUpgrader handler")
+		}
+	}
+
 	for _, existing := range s.protocols {
 		for _, protocol := range alpn {
 			if existing.matchesALPN(protocol) {
@@ -376,6 +406,9 @@ func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //n
 		}
 		if prefacesConflict(existing.cleartextPreface, preface) {
 			return errors.New("fasthttp: protocol cleartext prefaces conflict")
+		}
+		if registration.CleartextUpgradeToken != "" && existing.upgradeToken == registration.CleartextUpgradeToken {
+			return fmt.Errorf("fasthttp: protocol upgrade token %q is already registered", registration.CleartextUpgradeToken)
 		}
 	}
 
@@ -402,6 +435,7 @@ func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //n
 	s.protocols = append(s.protocols, registeredProtocol{
 		alpn:             alpn,
 		cleartextPreface: preface,
+		upgradeToken:     registration.CleartextUpgradeToken,
 		handler:          registration.Handler,
 	})
 	if tlsConfig != nil {
@@ -518,6 +552,36 @@ func (s *Server) serveProtocolConn(c net.Conn, protocol *registeredProtocol, pre
 	}
 	defer ctx.releaseCachedRequestCtxs()
 	return protocol.handler.ServeConn(ctx, c)
+}
+
+func (s *Server) protocolForUpgradeToken(token []byte) *registeredProtocol {
+	for i := range s.protocols {
+		candidate := &s.protocols[i]
+		if candidate.upgradeToken != "" && string(token) == candidate.upgradeToken {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func (s *Server) serveUpgradedProtocolConn(
+	c net.Conn,
+	protocol *registeredProtocol,
+	requestCtx *RequestCtx,
+	idleConnTime *atomic.Int64,
+) (bool, error) {
+	s.registerProtocolConn(c)
+	defer s.unregisterProtocolConn(c)
+	ctx := &ProtocolServerContext{
+		server:       s,
+		conn:         c,
+		idleConnTime: idleConnTime,
+		connTime:     requestCtx.connTime,
+		connID:       requestCtx.connID,
+	}
+	defer ctx.releaseCachedRequestCtxs()
+	upgrader := protocol.handler.(ProtocolUpgrader) //nolint:forcetypeassert // enforced by RegisterProtocol
+	return upgrader.UpgradeConn(ctx, c, &requestCtx.Request)
 }
 
 func (s *Server) registerProtocolConn(c net.Conn) {

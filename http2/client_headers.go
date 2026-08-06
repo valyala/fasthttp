@@ -201,10 +201,12 @@ func populateResponseTrailers(resp *fasthttp.Response, fields []hpack.HeaderFiel
 		if field.IsPseudo() || isConnectionSpecificHeader(field.Name) || field.Name == "te" {
 			return errInvalidResponseHeaders
 		}
-		if err := resp.Header.AddTrailer(field.Name); err != nil {
-			return err
+		if !hasTrailerKey(resp.Header.PeekTrailerKeys(), field.Name) {
+			if err := resp.Header.AddTrailer(field.Name); err != nil {
+				return err
+			}
 		}
-		resp.Header.Set(field.Name, field.Value)
+		resp.Header.Add(field.Name, field.Value)
 	}
 	return nil
 }
@@ -250,6 +252,15 @@ func populatePromisedRequest(req *fasthttp.Request, fields []hpack.HeaderField) 
 	_ = req.URI()
 	req.Header.SetRequestURI(path)
 	return nil
+}
+
+func hasTrailerKey(keys [][]byte, name string) bool {
+	for _, key := range keys {
+		if len(key) == len(name) && bytes.EqualFold(key, []byte(name)) {
+			return true
+		}
+	}
+	return false
 }
 
 func isSensitiveHeader(name string) bool {

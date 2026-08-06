@@ -194,13 +194,6 @@ func (t *Transport) MinTLSVersion() uint16 {
 	return tls.VersionTLS12
 }
 
-var (
-	_ fasthttp.ProtocolRoundTripper       = (*Transport)(nil)
-	_ fasthttp.StreamRoundTripper         = (*Transport)(nil)
-	_ fasthttp.ProtocolTransportCloser    = (*Transport)(nil)
-	_ interface{ MinTLSVersion() uint16 } = (*Transport)(nil)
-)
-
 // CloseIdleConnections closes idle HTTP/2 connections owned for hc.
 func (t *Transport) CloseIdleConnections(hc *fasthttp.HostClient) {
 	t.mu.Lock()
@@ -355,6 +348,8 @@ func (p *clientPool) remove(conn *clientConn) {
 		}
 	}
 	p.signalLocked()
+	// The freed physical slot also wakes waiters blocked on MaxConns.
+	p.streamAvailable()
 	p.mu.Unlock()
 	p.transport.removePoolIfEmpty(p.hc, p)
 }
@@ -395,3 +390,10 @@ func waitForClientEvent(notify <-chan struct{}, deadline time.Time, maxWait time
 		return fasthttp.ErrNoFreeConns
 	}
 }
+
+var (
+	_ fasthttp.ProtocolRoundTripper       = (*Transport)(nil)
+	_ fasthttp.StreamRoundTripper         = (*Transport)(nil)
+	_ fasthttp.ProtocolTransportCloser    = (*Transport)(nil)
+	_ interface{ MinTLSVersion() uint16 } = (*Transport)(nil)
+)

@@ -930,11 +930,6 @@ func (ctx *RequestCtx) RemoveUserValueBytes(key []byte) {
 	ctx.Request.RemoveUserValueBytes(key)
 }
 
-type tlsConn interface {
-	Handshake() error
-	ConnectionState() tls.ConnectionState
-}
-
 // IsTLS returns true if the underlying connection is tls.Conn.
 //
 // tls.Conn is an encrypted connection (aka SSL, HTTPS).
@@ -2784,6 +2779,14 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
+			if len(s.protocols) != 0 {
+				if protocol := s.matchProtocolUpgrade(ctx, br); protocol != nil {
+					if handled, upgradeErr := s.serveUpgradedProtocolConn(c, protocol, ctx, idleConnTime); handled {
+						err = upgradeErr
+						break
+					}
+				}
+			}
 			s.Handler(ctx)
 		}
 
@@ -2921,6 +2924,25 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	s.idleConnsMu.Unlock()
 
 	return err
+}
+
+func (s *Server) matchProtocolUpgrade(ctx *RequestCtx, br *bufio.Reader) *registeredProtocol {
+	if ctx.IsTLS() || ctx.Request.IsBodyStream() {
+		return nil
+	}
+	// Buffered bytes would be invisible to the protocol, which reads the
+	// connection directly.
+	if br != nil && br.Buffered() != 0 {
+		return nil
+	}
+	if !ctx.Request.Header.ConnectionUpgrade() {
+		return nil
+	}
+	token := ctx.Request.Header.Peek(HeaderUpgrade)
+	if len(token) == 0 {
+		return nil
+	}
+	return s.protocolForUpgradeToken(token)
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {

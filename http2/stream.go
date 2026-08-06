@@ -270,16 +270,6 @@ func (b *requestBody) compactLocked(incoming requestBodyChunk) {
 	b.buffered = len(data)
 }
 
-func releaseRequestBodyChunk(chunk *requestBodyChunk) {
-	if chunk.dataBuffer != nil {
-		releaseIncomingData(chunk.dataBuffer)
-		return
-	}
-	if chunk.release != nil {
-		chunk.release(chunk.data)
-	}
-}
-
 func (b *requestBody) closeWithError(err error) {
 	b.mu.Lock()
 	if !b.isClosed {
@@ -867,3 +857,13 @@ var (
 	_ fasthttp.StreamConn                  = (*streamConn)(nil)
 	_ fasthttp.StreamConn                  = (*clientStreamConn)(nil)
 )
+
+func releaseRequestBodyChunk(chunk *requestBodyChunk) {
+	if chunk.dataBuffer != nil {
+		releaseIncomingData(chunk.dataBuffer)
+		return
+	}
+	if chunk.release != nil {
+		chunk.release(chunk.data)
+	}
+}
