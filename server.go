@@ -241,6 +241,7 @@ type Server struct {
 	FormValueFunc FormValueFunc
 
 	nextProtos map[string]ServeHandler
+	protocols  []registeredProtocol
 
 	concurrencyCh chan struct{}
 
@@ -669,6 +670,8 @@ type RequestCtx struct {
 	connID           uint64
 	connRequestNum   uint64
 	hijackNoResponse bool
+	protocolStream   ProtocolStream
+	protocolOwner    *ProtocolServerContext
 }
 
 // EarlyHints allows the server to hint to the browser what resources a page would need
@@ -693,6 +696,13 @@ type RequestCtx struct {
 //	}
 func (ctx *RequestCtx) EarlyHints() error {
 	links := ctx.Response.Header.PeekAll(b2s(strLink))
+	if len(links) > 0 && ctx.protocolStream != nil {
+		writer, ok := ctx.protocolStream.(InformationalResponseWriter)
+		if !ok {
+			return ErrProtocolNotSupported
+		}
+		return writer.WriteInformational(StatusEarlyHints, &ctx.Response.Header)
+	}
 	if len(links) > 0 {
 		c := acquireWriter(ctx)
 		defer releaseWriter(ctx.s, c)
@@ -735,6 +745,34 @@ func (ctx *RequestCtx) EarlyHints() error {
 		}
 	}
 	return nil
+}
+
+// Push starts a server push request associated with ctx.
+//
+// Experimental: this method may change before it has shipped in two fasthttp
+// minor releases.
+func (ctx *RequestCtx) Push(target string, opts *PushOptions) error {
+	pusher, ok := ctx.protocolStream.(Pusher)
+	if !ok {
+		return ErrProtocolNotSupported
+	}
+	return pusher.Push(target, opts)
+}
+
+// AcceptStream accepts a bidirectional request stream. It does not change the
+// connection-oriented semantics of Hijack.
+//
+// Experimental: this method may change before it has shipped in two fasthttp
+// minor releases.
+func (ctx *RequestCtx) AcceptStream(handler StreamHandler) error {
+	if handler == nil {
+		return errors.New("fasthttp: stream handler is nil")
+	}
+	accepter, ok := ctx.protocolStream.(StreamAccepter)
+	if !ok {
+		return ErrProtocolNotSupported
+	}
+	return accepter.AcceptStream(handler)
 }
 
 // HijackHandler must process the hijacked connection c.
@@ -940,6 +978,8 @@ func (ctx *RequestCtx) reset() {
 
 	ctx.hijackHandler = nil
 	ctx.hijackNoResponse = false
+	ctx.protocolStream = nil
+	ctx.protocolOwner = nil
 }
 
 type firstByteReader struct {
@@ -2370,6 +2410,31 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		return handler(c)
 	}
+	if len(s.protocols) != 0 {
+		if protocol := s.protocolByALPN(proto); protocol != nil {
+			if s.ReadTimeout > 0 || s.WriteTimeout > 0 {
+				if err := c.SetDeadline(zeroTime); err != nil {
+					return err
+				}
+			}
+			return s.serveProtocolConn(c, protocol)
+		}
+		if proto == "" {
+			protocol, detectedConn, detectErr := s.detectCleartextProtocol(c)
+			c = detectedConn
+			if detectErr != nil && protocol == nil {
+				return detectErr
+			}
+			if protocol != nil {
+				if s.ReadTimeout > 0 {
+					if err := c.SetReadDeadline(zeroTime); err != nil {
+						return err
+					}
+				}
+				return s.serveProtocolConn(c, protocol)
+			}
+		}
+	}
 
 	connTime := time.Now()
 	if s.LazyRequestTime {
@@ -3052,6 +3117,9 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 // This method always returns 0, false and is only present to make
 // RequestCtx implement the context interface.
 func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
+	if ctx.protocolStream != nil {
+		return ctx.protocolStream.Deadline()
+	}
 	return time.Time{}, false
 }
 
@@ -3062,6 +3130,9 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // Note: Because creating a new channel for every request is just too expensive, so
 // RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Done() <-chan struct{} {
+	if ctx.protocolStream != nil {
+		return ctx.protocolStream.Done()
+	}
 	if done := ctx.s.done.Load(); done != nil {
 		return *done
 	}
@@ -3078,6 +3149,9 @@ func (ctx *RequestCtx) Done() <-chan struct{} {
 // Note: Because creating a new channel for every request is just too expensive, so
 // RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Err() error {
+	if ctx.protocolStream != nil {
+		return ctx.protocolStream.Err()
+	}
 	select {
 	case <-ctx.Done():
 		return context.Canceled
