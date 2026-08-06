@@ -11,7 +11,4 @@
 // is exposed as a request-scoped fasthttp.StreamConn. Physical connection
 // hijacking is unavailable to multiplexed requests; RequestCtx.TryHijack
 // returns fasthttp.ErrHijackNotSupported.
-//
-// Experimental: the package API may change before it has shipped in two
-// fasthttp minor releases.
 package http2

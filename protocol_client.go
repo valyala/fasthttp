@@ -15,9 +15,6 @@ import (
 
 // ProtocolRoundTripper is an optional extension to RoundTripper for transports
 // that own multiplexed or otherwise protocol-specific connections.
-//
-// Experimental: this interface may change before it has shipped in two
-// fasthttp minor releases.
 type ProtocolRoundTripper interface {
 	RoundTripWithContext(
 		ctx *ProtocolClientContext,
@@ -29,9 +26,6 @@ type ProtocolRoundTripper interface {
 
 // StreamRoundTripper is implemented by transports that can open a
 // bidirectional request stream.
-//
-// Experimental: this interface may change before it has shipped in two
-// fasthttp minor releases.
 type StreamRoundTripper interface {
 	OpenStreamWithContext(
 		ctx *ProtocolClientContext,
@@ -53,9 +47,6 @@ type ProtocolTransportCloser interface {
 //
 // A transport may additionally implement interface{ MinTLSVersion() uint16 }
 // to enforce a minimum TLS version on the connections dialed for it.
-//
-// Experimental: this method may change before it has shipped in two fasthttp
-// minor releases.
 func (c *HostClient) RegisterProtocolTransport(transport ProtocolRoundTripper) error {
 	if isNilProtocolTransport(transport) {
 		return errors.New("fasthttp: protocol transport is nil")
@@ -97,9 +88,6 @@ func isNilProtocolTransport(transport ProtocolRoundTripper) bool {
 
 // ProtocolClientContext supplies one request attempt with its deadline and a
 // HostClient-aware connection dialer.
-//
-// Experimental: this type may change before it has shipped in two fasthttp
-// minor releases.
 type ProtocolClientContext struct {
 	hostClient   *HostClient
 	deadline     time.Time
@@ -166,9 +154,6 @@ func (ctx *ProtocolClientContext) AcquireConn(nextProtos []string) (*ProtocolCli
 }
 
 // ProtocolClientConn is a physical connection leased from a HostClient.
-//
-// Experimental: this type may change before it has shipped in two fasthttp
-// minor releases.
 type ProtocolClientConn struct {
 	hostClient         *HostClient
 	conn               net.Conn
@@ -421,9 +406,6 @@ func mergeNextProtos(preferred, existing []string) []string {
 // OpenStream opens a bidirectional request stream using the configured
 // transport. resp must be non-nil and remains owned by the caller for the
 // stream lifetime.
-//
-// Experimental: this method may change before it has shipped in two fasthttp
-// minor releases.
 func (c *HostClient) OpenStream(req *Request, resp *Response) (StreamConn, error) {
 	if resp == nil {
 		return nil, errors.New("fasthttp: OpenStream response cannot be nil")
@@ -449,9 +431,6 @@ func (c *HostClient) OpenStream(req *Request, resp *Response) (StreamConn, error
 //
 // Per-host clients are created lazily, so the Client.ConfigureClient hook that
 // installs a protocol transport on them must be set before the first request.
-//
-// Experimental: this method may change before it has shipped in two fasthttp
-// minor releases.
 func (c *Client) OpenStream(req *Request, resp *Response) (StreamConn, error) {
 	if req == nil {
 		panic("BUG: req cannot be nil")
