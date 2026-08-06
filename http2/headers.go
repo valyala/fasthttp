@@ -239,6 +239,7 @@ func encodeResponseHeaders(
 		response.Header.SetServer(name)
 	}
 	defaultDate := !server.NoDefaultDate && len(serverDate) != 0
+	trailerKeys := response.Header.PeekTrailerKeys()
 	headerSize := uint64(len(":status") + len(status) + 32)
 	if defaultDate {
 		headerSize += uint64(len(fasthttp.HeaderDate) + len(serverDate) + 32)
@@ -251,6 +252,9 @@ func encodeResponseHeaders(
 			return false
 		}
 		if name == "trailer" || isConnectionSpecificHeader(name) {
+			return true
+		}
+		if len(trailerKeys) != 0 && hasTrailerKey(trailerKeys, name) {
 			return true
 		}
 		if defaultDate && name == "date" {
@@ -287,6 +291,9 @@ func encodeResponseHeaders(
 	response.Header.All()(func(key, value []byte) bool {
 		name := stringsCache.name(key)
 		if name == "trailer" || isConnectionSpecificHeader(name) {
+			return true
+		}
+		if len(trailerKeys) != 0 && hasTrailerKey(trailerKeys, name) {
 			return true
 		}
 		if defaultDate && name == "date" {

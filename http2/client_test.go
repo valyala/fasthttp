@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	stdhttp "net/http"
 	"sync"
@@ -1061,6 +1062,179 @@ func (h *testPushHandler) Accept(_, promised *fasthttp.Request) bool {
 
 func (h *testPushHandler) Handle(_ *fasthttp.Request, response *fasthttp.Response) {
 	h.responseBody <- string(response.Body())
+}
+
+func TestReserveStreamHonorsConfiguredConcurrencyCap(t *testing.T) {
+	conn := &clientConn{
+		hc:                       &fasthttp.HostClient{},
+		config:                   clientConfig{maxConcurrentStreams: 1},
+		peerMaxConcurrentStreams: 100,
+		nextStreamID:             1,
+		streams:                  map[uint32]*clientStream{},
+		activeStreams:            1,
+	}
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+
+	if stream := conn.reserveStream(req, resp, false, time.Time{}, time.Now()); stream != nil {
+		t.Fatal("reserveStream() exceeded ClientConfig.MaxConcurrentStreams")
+	}
+	conn.activeStreams = 0
+	stream := conn.reserveStream(req, resp, false, time.Time{}, time.Now())
+	if stream == nil {
+		t.Fatal("reserveStream() refused a stream under the configured cap")
+	}
+	releaseClientResultChannel(stream.result)
+	releaseClientStream(stream)
+}
+
+func TestPoolRemoveWakesMaxConnsWaiters(t *testing.T) {
+	pool := &clientPool{
+		hc:        &fasthttp.HostClient{},
+		transport: &Transport{},
+		available: make(chan struct{}, 1),
+		notify:    make(chan struct{}),
+	}
+	pool.remove(nil)
+	select {
+	case <-pool.available:
+	default:
+		t.Fatal("remove() didn't signal waiters blocked on MaxConns")
+	}
+}
+
+func TestServerPushDoesNotConsumeClientStreamAllowance(t *testing.T) {
+	releasePush := make(chan struct{})
+	var pushStarted atomic.Bool
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/pushed":
+				pushStarted.Store(true)
+				<-releasePush
+				ctx.SetBodyString("pushed response")
+			case "/parent":
+				if err := ctx.Push("/pushed", nil); err != nil {
+					t.Errorf("Push() error: %v", err)
+				}
+				ctx.SetBodyString("parent response")
+			default:
+				ctx.SetBodyString("second response")
+			}
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{EnablePush: true, MaxConcurrentStreams: 1})
+	defer close(releasePush)
+
+	dials := new(atomic.Int64)
+	hc := &fasthttp.HostClient{
+		Addr: testServer.listener.Addr().String(),
+		Dial: func(addr string) (net.Conn, error) {
+			dials.Add(1)
+			return fasthttp.DialTimeout(addr, time.Second)
+		},
+	}
+	pushHandler := &testPushHandler{
+		t:            t,
+		acceptedPath: make(chan string, 1),
+		responseBody: make(chan string, 1),
+	}
+	if err := ConfigureHostClient(hc, ClientConfig{
+		Mode:        PriorKnowledge,
+		PushHandler: pushHandler,
+	}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+	req.SetRequestURI(testServer.URL("/parent"))
+	if err := hc.Do(req, resp); err != nil {
+		t.Fatalf("Do(/parent) error: %v", err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for !pushStarted.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("push stream never reached its handler")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	req.Reset()
+	resp.Reset()
+	req.SetRequestURI(testServer.URL("/second"))
+	if err := hc.Do(req, resp); err != nil {
+		t.Fatalf("Do(/second) with an active push: %v", err)
+	}
+	if got := string(resp.Body()); got != "second response" {
+		t.Fatalf("second body = %q", got)
+	}
+	if got := dials.Load(); got != 1 {
+		t.Fatalf("dials = %d, want 1: the refused stream was retried on a new connection", got)
+	}
+}
+
+func TestClientRedialsAtStreamIDExhaustion(t *testing.T) {
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) { ctx.SetBodyString("ok") },
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	dials := new(atomic.Int64)
+	hc := &fasthttp.HostClient{
+		Addr: testServer.listener.Addr().String(),
+		Dial: func(addr string) (net.Conn, error) {
+			dials.Add(1)
+			return fasthttp.DialTimeout(addr, time.Second)
+		},
+	}
+	transport := NewTransport(ClientConfig{Mode: PriorKnowledge})
+	if err := hc.RegisterProtocolTransport(transport); err != nil {
+		t.Fatalf("RegisterProtocolTransport() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+	req.SetRequestURI(testServer.URL("/"))
+	if err := hc.Do(req, resp); err != nil {
+		t.Fatalf("Do() error: %v", err)
+	}
+
+	transport.mu.Lock()
+	pool := transport.pools[hc]
+	transport.mu.Unlock()
+	pool.mu.Lock()
+	if len(pool.conns) != 1 {
+		pool.mu.Unlock()
+		t.Fatalf("pool connections = %d, want 1", len(pool.conns))
+	}
+	first := pool.conns[0]
+	first.mu.Lock()
+	first.nextStreamID = math.MaxInt32 - 3
+	first.mu.Unlock()
+	pool.mu.Unlock()
+
+	for i := range 8 {
+		req.Reset()
+		resp.Reset()
+		req.SetRequestURI(testServer.URL("/"))
+		if err := hc.Do(req, resp); err != nil {
+			t.Fatalf("Do() #%d across exhaustion: %v", i, err)
+		}
+		if string(resp.Body()) != "ok" {
+			t.Fatalf("Do() #%d body = %q", i, resp.Body())
+		}
+	}
+	if got := dials.Load(); got != 2 {
+		t.Fatalf("dials = %d, want 2: exhaustion must redial exactly once", got)
+	}
 }
 
 func TestServerPush(t *testing.T) {

@@ -35,6 +35,48 @@ func TestRejectedRequestHeadersKeepHPACKEncoderInSync(t *testing.T) {
 	decodeTestHeaderBlock(t, decoder, block)
 }
 
+func TestResponseHeadersExcludeTrailerFields(t *testing.T) {
+	var encoded bytes.Buffer
+	encoder := hpack.NewEncoder(&encoded)
+	var cache headerStringCache
+	server := &fasthttp.Server{NoDefaultDate: true, NoDefaultServerHeader: true}
+
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseResponse(resp)
+	resp.Header.Set("X-Early", "yes")
+	if err := resp.Header.AddTrailer("Grpc-Status"); err != nil {
+		t.Fatalf("AddTrailer() error: %v", err)
+	}
+	resp.Header.Set("Grpc-Status", "0")
+
+	block, err := encodeResponseHeaders(encoder, &encoded, &cache, server, resp, 1<<20, nil)
+	if err != nil {
+		t.Fatalf("encoding response: %v", err)
+	}
+	fields := decodeTestHeaderFields(t, block)
+	if _, ok := fields["grpc-status"]; ok {
+		t.Fatal("trailer field leaked into the initial header block")
+	}
+	if fields["x-early"] != "yes" {
+		t.Fatalf("headers = %v, missing x-early", fields)
+	}
+}
+
+func decodeTestHeaderFields(t testing.TB, block []byte) map[string]string {
+	t.Helper()
+	fields := map[string]string{}
+	decoder := hpack.NewDecoder(defaultHeaderTableSize, func(field hpack.HeaderField) {
+		fields[field.Name] = field.Value
+	})
+	if _, err := decoder.Write(block); err != nil {
+		t.Fatalf("decoding header block: %v", err)
+	}
+	if err := decoder.Close(); err != nil {
+		t.Fatalf("closing header block: %v", err)
+	}
+	return fields
+}
+
 func TestRejectedResponseHeadersKeepHPACKEncoderInSync(t *testing.T) {
 	var encoded bytes.Buffer
 	encoder := hpack.NewEncoder(&encoded)
@@ -77,6 +119,42 @@ func decodeTestHeaderBlock(t testing.TB, decoder *hpack.Decoder, block []byte) {
 	}
 	if err := decoder.Close(); err != nil {
 		t.Fatalf("closing header block: %v", err)
+	}
+}
+
+func TestRequestTrailersKeepRepeatedFields(t *testing.T) {
+	var header fasthttp.RequestHeader
+	fields := []hpack.HeaderField{
+		{Name: "x-checksum", Value: "one"},
+		{Name: "x-checksum", Value: "two"},
+	}
+	if err := applyRequestTrailers(&header, fields); err != nil {
+		t.Fatalf("applyRequestTrailers() error: %v", err)
+	}
+	values := header.PeekAll("X-Checksum")
+	if len(values) != 2 || string(values[0]) != "one" || string(values[1]) != "two" {
+		t.Fatalf("trailer values = %q, want [one two]", values)
+	}
+	if keys := header.PeekTrailerKeys(); len(keys) != 1 {
+		t.Fatalf("trailer keys = %q, want one entry", keys)
+	}
+}
+
+func TestResponseTrailersKeepRepeatedFields(t *testing.T) {
+	var resp fasthttp.Response
+	fields := []hpack.HeaderField{
+		{Name: "x-checksum", Value: "one"},
+		{Name: "x-checksum", Value: "two"},
+	}
+	if err := populateResponseTrailers(&resp, fields); err != nil {
+		t.Fatalf("populateResponseTrailers() error: %v", err)
+	}
+	values := resp.Header.PeekAll("X-Checksum")
+	if len(values) != 2 || string(values[0]) != "one" || string(values[1]) != "two" {
+		t.Fatalf("trailer values = %q, want [one two]", values)
+	}
+	if keys := resp.Header.PeekTrailerKeys(); len(keys) != 1 {
+		t.Fatalf("trailer keys = %q, want one entry", keys)
 	}
 }
 
