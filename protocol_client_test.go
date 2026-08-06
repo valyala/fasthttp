@@ -10,6 +10,19 @@ import (
 	"time"
 )
 
+func TestProtocolClientConnPrepareResponseBody(t *testing.T) {
+	var response Response
+	response.AppendBodyString("prefix")
+	(&ProtocolClientConn{}).PrepareResponseBody(&response, 1024)
+	if got := string(response.Body()); got != "prefix" {
+		t.Fatalf("body = %q, want prefix", got)
+	}
+	if available := cap(response.bodyBuffer().B) - len(response.bodyBuffer().B); available < 1024 {
+		t.Fatalf("available body capacity = %d, want at least 1024", available)
+	}
+	response.ResetBody()
+}
+
 type testProtocolTransport struct {
 	roundTripCalled         atomic.Bool
 	protocolRoundTripCalled atomic.Bool
@@ -66,6 +79,17 @@ func TestHostClientProtocolRoundTripper(t *testing.T) {
 	hc.CloseIdleConnections()
 	if !transport.closeIdleCalled.Load() {
 		t.Fatal("CloseIdleConnections() didn't notify the protocol transport")
+	}
+}
+
+func TestHostClientProtocolTransportRejectsCustomHTTP1Fallback(t *testing.T) {
+	transport := &testProtocolTransport{}
+	hc := &HostClient{
+		Addr:      "example.com:80",
+		Transport: transport,
+	}
+	if err := hc.RegisterProtocolTransport(transport); err == nil {
+		t.Fatal("RegisterProtocolTransport() accepted a custom HTTP/1 fallback")
 	}
 }
 
@@ -192,4 +216,74 @@ func TestHostClientOpenStreamUnsupported(t *testing.T) {
 	if err != ErrProtocolNotSupported {
 		t.Fatalf("OpenStream() error = %v, want ErrProtocolNotSupported", err)
 	}
+}
+
+func TestReleaseProtocolConnSlotServesHTTP1Waiters(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	server := &Server{Handler: func(*RequestCtx) {}}
+	serveDone := make(chan struct{})
+	go func() {
+		defer close(serveDone)
+		_ = server.Serve(ln)
+	}()
+	t.Cleanup(func() {
+		_ = server.Shutdown()
+		<-serveDone
+		_ = ln.Close()
+	})
+
+	hc := &HostClient{
+		Addr:               ln.Addr().String(),
+		MaxConns:           1,
+		MaxConnWaitTimeout: 2 * time.Second,
+	}
+	// Take the only slot the way a protocol connection would.
+	if err := hc.reserveProtocolConn(0); err != nil {
+		t.Fatalf("reserveProtocolConn() error: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		req := AcquireRequest()
+		resp := AcquireResponse()
+		defer ReleaseRequest(req)
+		defer ReleaseResponse(resp)
+		req.SetRequestURI("http://" + ln.Addr().String() + "/")
+		done <- hc.Do(req, resp)
+	}()
+
+	// Wait until the HTTP/1 request is queued as a connection waiter.
+	deadline := time.Now().Add(time.Second)
+	for {
+		hc.connsLock.Lock()
+		queued := hc.connsWait != nil && hc.connsWait.len() > 0
+		hc.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("HTTP/1 request never queued as a connection waiter")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Freeing the protocol slot must serve the queued HTTP/1 waiter promptly;
+	// both connection kinds share connsCount.
+	released := time.Now()
+	hc.releaseProtocolConnSlot()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("queued request error: %v", err)
+		}
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("queued HTTP/1 request wasn't served after the protocol slot was freed")
+	}
+	if elapsed := time.Since(released); elapsed > 500*time.Millisecond {
+		t.Fatalf("queued request served after %v; want promptly after slot release", elapsed)
+	}
+	hc.CloseIdleConnections()
 }

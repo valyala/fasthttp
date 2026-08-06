@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -49,6 +51,9 @@ type ProtocolTransportCloser interface {
 // HostClient.Transport as its fallback. It must be called before the
 // HostClient is used.
 //
+// A transport may additionally implement interface{ MinTLSVersion() uint16 }
+// to enforce a minimum TLS version on the connections dialed for it.
+//
 // Experimental: this method may change before it has shipped in two fasthttp
 // minor releases.
 func (c *HostClient) RegisterProtocolTransport(transport ProtocolRoundTripper) error {
@@ -58,11 +63,23 @@ func (c *HostClient) RegisterProtocolTransport(transport ProtocolRoundTripper) e
 	if c.protocolTransport != nil {
 		return errors.New("fasthttp: protocol transport is already registered")
 	}
+	http1Transport := c.Transport
+	if http1Transport == nil {
+		http1Transport = DefaultTransport
+	}
+	if !isDefaultRoundTripper(http1Transport) {
+		return errors.New("fasthttp: protocol transport cannot preserve the configured HTTP/1 transport")
+	}
 	if atomic.LoadInt32(&c.pendingRequests) != 0 || c.ConnsCount() != 0 {
 		return errors.New("fasthttp: cannot register a protocol transport after use")
 	}
 	c.protocolTransport = transport
 	return nil
+}
+
+func isDefaultRoundTripper(roundTripper RoundTripper) bool {
+	builtIn, ok := roundTripper.(*transport)
+	return ok && builtIn == defaultTransport
 }
 
 func isNilProtocolTransport(transport ProtocolRoundTripper) bool {
@@ -84,13 +101,37 @@ func isNilProtocolTransport(transport ProtocolRoundTripper) bool {
 // Experimental: this type may change before it has shipped in two fasthttp
 // minor releases.
 type ProtocolClientContext struct {
-	hostClient *HostClient
-	deadline   time.Time
+	hostClient   *HostClient
+	deadline     time.Time
+	readTimeout  time.Duration
+	writeTimeout time.Duration
 }
 
 // Deadline returns the absolute request deadline, if one was configured.
 func (ctx *ProtocolClientContext) Deadline() (time.Time, bool) {
 	return ctx.deadline, !ctx.deadline.IsZero()
+}
+
+// ReadTimeout returns the HostClient read timeout for this request attempt.
+func (ctx *ProtocolClientContext) ReadTimeout() time.Duration {
+	return ctx.readTimeout
+}
+
+// WriteTimeout returns the HostClient write timeout for this request attempt.
+func (ctx *ProtocolClientContext) WriteTimeout() time.Duration {
+	return ctx.writeTimeout
+}
+
+// RoundTripHTTP1 executes the request with HostClient's configured HTTP/1
+// transport. Protocol transports use it after a host has previously selected
+// HTTP/1 with ALPN.
+func (ctx *ProtocolClientContext) RoundTripHTTP1(req *Request, resp *Response) (bool, error) {
+	acquireTimeout := req.timeout
+	if !ctx.deadline.IsZero() {
+		// The h2 attempt already spent part of the budget.
+		acquireTimeout = time.Until(ctx.deadline)
+	}
+	return defaultTransport.roundTripWithDeadline(ctx.hostClient, req, resp, ctx.deadline, acquireTimeout)
 }
 
 // AcquireConn reserves one of HostClient's physical connection slots and
@@ -120,6 +161,7 @@ func (ctx *ProtocolClientContext) AcquireConn(nextProtos []string) (*ProtocolCli
 		conn:               conn,
 		negotiatedProtocol: negotiatedProtocol,
 		createdTime:        time.Now(),
+		deadline:           ctx.deadline,
 	}, nil
 }
 
@@ -132,6 +174,7 @@ type ProtocolClientConn struct {
 	conn               net.Conn
 	negotiatedProtocol string
 	createdTime        time.Time
+	deadline           time.Time
 	isReleased         atomic.Bool
 }
 
@@ -144,6 +187,22 @@ func (c *ProtocolClientConn) Conn() net.Conn {
 // connections.
 func (c *ProtocolClientConn) NegotiatedProtocol() string {
 	return c.negotiatedProtocol
+}
+
+// ApplyResponseMetadata records physical-connection metadata on resp.
+func (c *ProtocolClientConn) ApplyResponseMetadata(resp *Response) {
+	resp.raddr = c.conn.RemoteAddr()
+}
+
+// PrepareResponseBody ensures resp can buffer at least size body bytes without
+// growing its backing buffer. Protocol transports may call it after validating
+// a response Content-Length.
+func (c *ProtocolClientConn) PrepareResponseBody(resp *Response, size int) {
+	if size <= 0 {
+		return
+	}
+	body := resp.bodyBuffer()
+	body.B = slices.Grow(body.B, size)
 }
 
 // Close closes the physical connection and releases its HostClient slot.
@@ -164,15 +223,33 @@ func (c *ProtocolClientConn) RoundTripHTTP1(req *Request, resp *Response) (bool,
 	}
 	cc := acquireClientConn(c.conn)
 	cc.createdTime = c.createdTime
-	return defaultTransport.roundTripConn(c.hostClient, cc, req, resp)
+	return defaultTransport.roundTripConn(c.hostClient, cc, req, resp, c.deadline)
 }
 
-func (c *HostClient) newProtocolClientContext(req *Request) ProtocolClientContext {
-	ctx := ProtocolClientContext{hostClient: c}
+var protocolClientContextPool sync.Pool
+
+// acquireProtocolClientContext pools the context because it escapes: it is
+// only ever reached through an interface method, and a transport must not
+// retain it past the call that receives it.
+func (c *HostClient) acquireProtocolClientContext(req *Request) *ProtocolClientContext {
+	ctx, _ := protocolClientContextPool.Get().(*ProtocolClientContext)
+	if ctx == nil {
+		ctx = &ProtocolClientContext{}
+	}
+	*ctx = ProtocolClientContext{
+		hostClient:   c,
+		readTimeout:  c.ReadTimeout,
+		writeTimeout: c.WriteTimeout,
+	}
 	if req.timeout > 0 {
 		ctx.deadline = time.Now().Add(req.timeout)
 	}
 	return ctx
+}
+
+func releaseProtocolClientContext(ctx *ProtocolClientContext) {
+	*ctx = ProtocolClientContext{}
+	protocolClientContextPool.Put(ctx)
 }
 
 func (c *HostClient) reserveProtocolConn(reqTimeout time.Duration) error {
@@ -220,10 +297,11 @@ func (c *HostClient) reserveProtocolConn(reqTimeout time.Duration) error {
 }
 
 func (c *HostClient) releaseProtocolConnSlot() {
-	c.connsLock.Lock()
-	c.connsCount--
-	c.signalConnSlotAvailableLocked()
-	c.connsLock.Unlock()
+	// Protocol and HTTP/1 connections share connsCount, so a freed protocol
+	// slot must serve a queued HTTP/1 waiter exactly like a freed HTTP/1
+	// connection would; otherwise a waiter under MaxConnWaitTimeout sleeps
+	// until timeout even though a slot is available.
+	c.decConnsCount()
 }
 
 func (c *HostClient) signalConnSlotAvailableLocked() {
@@ -266,6 +344,9 @@ func (c *HostClient) dialHostHardWithALPN(
 			}
 			tlsConfig = baseConfig.Clone()
 			tlsConfig.NextProtos = mergeNextProtos(nextProtos, tlsConfig.NextProtos)
+			if minVersion := protocolMinTLSVersion(c.protocolTransport); tlsConfig.MinVersion < minVersion {
+				tlsConfig.MinVersion = minVersion
+			}
 		}
 
 		conn, err := dialAddr(
@@ -310,10 +391,17 @@ func (c *HostClient) dialHostHardWithALPN(
 		return conn, tlsConnection.ConnectionState().NegotiatedProtocol, nil
 	}
 
-	if lastErr == nil {
-		lastErr = errors.New("fasthttp: protocol dial failed")
-	}
 	return nil, "", fmt.Errorf("dialling protocol connection: %w", lastErr)
+}
+
+// protocolMinTLSVersion reports the minimum TLS version a protocol transport
+// requires for its dialed connections, or zero when it doesn't declare one
+// through the optional interface{ MinTLSVersion() uint16 } interface.
+func protocolMinTLSVersion(transport ProtocolRoundTripper) uint16 {
+	if versioner, ok := transport.(interface{ MinTLSVersion() uint16 }); ok {
+		return versioner.MinTLSVersion()
+	}
+	return 0
 }
 
 func mergeNextProtos(preferred, existing []string) []string {
@@ -332,14 +420,14 @@ func mergeNextProtos(preferred, existing []string) []string {
 }
 
 // OpenStream opens a bidirectional request stream using the configured
-// transport.
+// transport. resp must be non-nil and remains owned by the caller for the
+// stream lifetime.
 //
 // Experimental: this method may change before it has shipped in two fasthttp
 // minor releases.
 func (c *HostClient) OpenStream(req *Request, resp *Response) (StreamConn, error) {
 	if resp == nil {
-		resp = AcquireResponse()
-		defer ReleaseResponse(resp)
+		return nil, errors.New("fasthttp: OpenStream response cannot be nil")
 	}
 	if err := c.prepareRequestResponse(req, resp); err != nil {
 		return nil, err
@@ -351,15 +439,17 @@ func (c *HostClient) OpenStream(req *Request, resp *Response) (StreamConn, error
 	}
 	atomic.AddInt32(&c.pendingRequests, 1)
 	defer atomic.AddInt32(&c.pendingRequests, -1)
-	ctx := c.newProtocolClientContext(req)
-	return transport.OpenStreamWithContext(&ctx, c, req, resp)
+	ctx := c.acquireProtocolClientContext(req)
+	stream, err := transport.OpenStreamWithContext(ctx, c, req, resp)
+	releaseProtocolClientContext(ctx)
+	return stream, err
 }
 
 // OpenStream opens a bidirectional request stream using the HostClient selected
 // from req's URI.
 //
-// ConfigureClient must be called before the first request when a protocol
-// transport is installed through Client.ConfigureClient.
+// Per-host clients are created lazily, so the Client.ConfigureClient hook that
+// installs a protocol transport on them must be set before the first request.
 //
 // Experimental: this method may change before it has shipped in two fasthttp
 // minor releases.
