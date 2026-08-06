@@ -148,6 +148,8 @@ func (ctx *ProtocolClientContext) AcquireConn(nextProtos []string) (*ProtocolCli
 		hostClient:         ctx.hostClient,
 		conn:               conn,
 		negotiatedProtocol: negotiatedProtocol,
+		raddr:              conn.RemoteAddr(),
+		laddr:              conn.LocalAddr(),
 		createdTime:        time.Now(),
 		deadline:           ctx.deadline,
 	}, nil
@@ -158,6 +160,8 @@ type ProtocolClientConn struct {
 	hostClient         *HostClient
 	conn               net.Conn
 	negotiatedProtocol string
+	raddr              net.Addr
+	laddr              net.Addr
 	createdTime        time.Time
 	deadline           time.Time
 	isReleased         atomic.Bool
@@ -174,9 +178,12 @@ func (c *ProtocolClientConn) NegotiatedProtocol() string {
 	return c.negotiatedProtocol
 }
 
-// ApplyResponseMetadata records physical-connection metadata on resp.
+// ApplyResponseMetadata records physical-connection metadata on resp. The
+// addresses are captured once at dial time: they never change for a leased
+// connection, and a multiplexed transport applies them to every response.
 func (c *ProtocolClientConn) ApplyResponseMetadata(resp *Response) {
-	resp.raddr = c.conn.RemoteAddr()
+	resp.raddr = c.raddr
+	resp.laddr = c.laddr
 }
 
 // PrepareResponseBody ensures resp can buffer at least size body bytes without

@@ -22,11 +22,11 @@ const (
 	maxResponseBodyPreallocation   = 1 << 20
 	defaultConnectionWindowSize    = 4 << 20
 	defaultStreamWindowSize        = 1 << 20
-	defaultMaxQueuedControlFrames  = 10_000
+	defaultMaxQueuedCommands       = 10_000
 	maxConfiguredConcurrentStreams = 1 << 20
 	maxConfiguredHeaderListSize    = 64 << 20
 	maxConfiguredHeaderTableSize   = 64 << 20
-	maxConfiguredControlFrames     = 1_000_000
+	maxConfiguredCommands          = 1_000_000
 )
 
 // defaultWriteByteTimeout bounds a write that makes no progress, not a whole
@@ -266,10 +266,12 @@ type ServerConfig struct {
 	// 16384..16777215 range. Zero means 16384.
 	MaxReadFrameSize uint32
 
-	// MaxQueuedControlFrames caps control frames queued for writing before
-	// the connection is treated as abusive and closed, mitigating
-	// CVE-2019-9512-class attacks. Zero means 10000.
-	MaxQueuedControlFrames int
+	// MaxQueuedCommands caps the handler events — response chunks, pushes,
+	// stream completions — queued for the connection's write loop. Producers
+	// block once it fills. Zero means 10000. Peer-solicited control frames
+	// are written inline and never queue here, so a PING or SETTINGS flood
+	// meets read backpressure rather than unbounded buffering.
+	MaxQueuedCommands int
 
 	// MaxPromisedStreams caps concurrent unconsumed PUSH_PROMISE streams per
 	// connection. Zero means 16.
@@ -332,7 +334,7 @@ type serverConfig struct {
 	maxDecoderTableSize     uint32
 	maxEncoderTableSize     uint32
 	maxReadFrameSize        uint32
-	maxQueuedControlFrames  int
+	maxQueuedCommands       int
 	maxPromisedStreams      uint32
 	maxPushDepth            uint8
 	maxRapidResetsPerSecond uint32
@@ -354,7 +356,7 @@ func normalizeServerConfig(s *fasthttp.Server, cfg *ServerConfig) (serverConfig,
 		maxDecoderTableSize:     cfg.MaxDecoderHeaderTableSize,
 		maxEncoderTableSize:     cfg.MaxEncoderHeaderTableSize,
 		maxReadFrameSize:        cfg.MaxReadFrameSize,
-		maxQueuedControlFrames:  cfg.MaxQueuedControlFrames,
+		maxQueuedCommands:       cfg.MaxQueuedCommands,
 		maxPromisedStreams:      cfg.MaxPromisedStreams,
 		maxPushDepth:            cfg.MaxPushDepth,
 		maxRapidResetsPerSecond: cfg.MaxRapidResetsPerSecond,
@@ -397,14 +399,14 @@ func normalizeServerConfig(s *fasthttp.Server, cfg *ServerConfig) (serverConfig,
 	if result.maxReadFrameSize < defaultMaxFrameSize || result.maxReadFrameSize > 1<<24-1 {
 		return serverConfig{}, errors.New("http2: max read frame size must be between 16384 and 16777215")
 	}
-	if result.maxQueuedControlFrames == 0 {
-		result.maxQueuedControlFrames = defaultMaxQueuedControlFrames
+	if result.maxQueuedCommands == 0 {
+		result.maxQueuedCommands = defaultMaxQueuedCommands
 	}
-	if result.maxQueuedControlFrames < 32 {
-		return serverConfig{}, errors.New("http2: max queued control frames must be at least 32")
+	if result.maxQueuedCommands < 32 {
+		return serverConfig{}, errors.New("http2: max queued commands must be at least 32")
 	}
-	if result.maxQueuedControlFrames > maxConfiguredControlFrames {
-		return serverConfig{}, errors.New("http2: max queued control frames exceeds the safety limit")
+	if result.maxQueuedCommands > maxConfiguredCommands {
+		return serverConfig{}, errors.New("http2: max queued commands exceeds the safety limit")
 	}
 	if result.maxPromisedStreams == 0 {
 		result.maxPromisedStreams = 16
