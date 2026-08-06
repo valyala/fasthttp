@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package echo;
+
+message Message {
+  bytes payload = 1;
+}
+
+service Echo {
+  rpc Ping(Message) returns (Message);
+  rpc Chat(stream Message) returns (stream Message);
+}

@@ -34,9 +34,6 @@ var (
 
 // ProtocolHandler serves a connection selected by ALPN or a cleartext
 // connection preface.
-//
-// Experimental: this interface may change before it has shipped in two
-// fasthttp minor releases.
 type ProtocolHandler interface {
 	ServeConn(ctx *ProtocolServerContext, c net.Conn) error
 }
@@ -50,9 +47,6 @@ type ProtocolHandler interface {
 // CleartextUpgradeToken additionally offers the protocol through the HTTP/1.1
 // Upgrade handshake: a non-TLS HTTP/1 request whose Upgrade header equals the
 // token is handed to the Handler, which must implement ProtocolUpgrader.
-//
-// Experimental: this type may change before it has shipped in two fasthttp
-// minor releases.
 type ProtocolRegistration struct {
 	ALPN                  []string
 	FallbackALPN          []string
@@ -66,9 +60,6 @@ type ProtocolRegistration struct {
 // protocol. UpgradeConn reports whether it took over the connection; when
 // false the request is served as ordinary HTTP/1. upgraded is read-only and
 // valid only for the duration of the call.
-//
-// Experimental: this interface may change before it has shipped in two
-// fasthttp minor releases.
 type ProtocolUpgrader interface {
 	UpgradeConn(ctx *ProtocolServerContext, c net.Conn, upgraded *Request) (bool, error)
 }
@@ -87,26 +78,17 @@ type registeredProtocol struct {
 
 // InformationalResponseWriter is implemented by protocols that can write an
 // informational response without completing the request.
-//
-// Experimental: this interface may change before it has shipped in two
-// fasthttp minor releases.
 type InformationalResponseWriter interface {
 	WriteInformational(statusCode int, header *ResponseHeader) error
 }
 
 // Pusher is implemented by protocols that support server push.
-//
-// Experimental: this interface may change before it has shipped in two
-// fasthttp minor releases.
 type Pusher interface {
 	Push(target string, opts *PushOptions) error
 }
 
 // StreamAccepter is implemented by protocols that support accepting a
 // bidirectional stream associated with a request.
-//
-// Experimental: this interface may change before it has shipped in two
-// fasthttp minor releases.
 type StreamAccepter interface {
 	AcceptStream(handler StreamHandler) error
 }
@@ -116,18 +98,12 @@ type StreamAccepter interface {
 //
 // Implementations may additionally implement InformationalResponseWriter,
 // Pusher, and StreamAccepter.
-//
-// Experimental: this interface may change before it has shipped in two
-// fasthttp minor releases.
 type ProtocolStream interface {
 	context.Context
 }
 
 // PushOptions configures a server push request. Method defaults to GET. Header
 // is copied before Push returns.
-//
-// Experimental: this type may change before it has shipped in two fasthttp
-// minor releases.
 type PushOptions struct {
 	Method string
 	Header *RequestHeader
@@ -136,9 +112,6 @@ type PushOptions struct {
 // StreamConn is a request-scoped, bidirectional stream. Closing or applying a
 // deadline to a StreamConn must not affect other streams on the same physical
 // connection.
-//
-// Experimental: this interface may change before it has shipped in two
-// fasthttp minor releases.
 type StreamConn interface {
 	net.Conn
 	CloseRead() error
@@ -150,9 +123,6 @@ type StreamHandler func(StreamConn)
 
 // ProtocolServerContext connects a ProtocolHandler to one Server. A context is
 // valid only for the duration of ProtocolHandler.ServeConn.
-//
-// Experimental: this type may change before it has shipped in two fasthttp
-// minor releases.
 type ProtocolServerContext struct {
 	server       *Server
 	conn         net.Conn
@@ -178,9 +148,6 @@ const (
 // listener.
 //
 // ServeProtocolConn closes c before returning.
-//
-// Experimental: this method may change before it has shipped in two fasthttp
-// minor releases.
 func (s *Server) ServeProtocolConn(c net.Conn, handler ProtocolHandler) error {
 	if isNilProtocolHandler(handler) {
 		return errors.New("fasthttp: protocol handler is nil")
@@ -348,9 +315,6 @@ func requestCtxRetainedBytes(requestCtx *RequestCtx) int {
 
 // RegisterProtocol registers a connection-oriented HTTP protocol. It must be
 // called before the Server starts serving.
-//
-// Experimental: this method may change before it has shipped in two fasthttp
-// minor releases.
 func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //nolint:gocritic
 	if isNilProtocolHandler(registration.Handler) {
 		return errors.New("fasthttp: protocol handler is nil")

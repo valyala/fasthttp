@@ -784,25 +784,16 @@ func (h *RequestHeader) SetProtocolBytes(protocol []byte) {
 
 // ConnectProtocol returns the extended CONNECT protocol. It is empty for a
 // regular request.
-//
-// Experimental: this method may change before it has shipped in two fasthttp
-// minor releases.
 func (h *RequestHeader) ConnectProtocol() []byte {
 	return h.connectProtocol
 }
 
 // SetConnectProtocol sets the extended CONNECT protocol.
-//
-// Experimental: this method may change before it has shipped in two fasthttp
-// minor releases.
 func (h *RequestHeader) SetConnectProtocol(protocol string) {
 	h.connectProtocol = initHeaderValueString(h.connectProtocol, protocol)
 }
 
 // SetConnectProtocolBytes sets the extended CONNECT protocol.
-//
-// Experimental: this method may change before it has shipped in two fasthttp
-// minor releases.
 func (h *RequestHeader) SetConnectProtocolBytes(protocol []byte) {
 	h.connectProtocol = initHeaderValueBytes(h.connectProtocol, protocol)
 }
