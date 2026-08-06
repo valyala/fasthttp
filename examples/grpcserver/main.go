@@ -15,12 +15,16 @@ import (
 	"bufio"
 	"encoding/binary"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 
 	"github.com/valyala/fasthttp"
 	"github.com/valyala/fasthttp/http2"
 )
+
+// maxMessageSize bounds the length prefix, which the peer controls.
+const maxMessageSize = 4 << 20
 
 // frame wraps one message in gRPC's length-prefixed framing.
 func frame(message []byte) []byte {
@@ -35,7 +39,11 @@ func readFrame(r io.Reader) ([]byte, error) {
 	if _, err := io.ReadFull(r, header[:]); err != nil {
 		return nil, err
 	}
-	message := make([]byte, binary.BigEndian.Uint32(header[1:5]))
+	size := binary.BigEndian.Uint32(header[1:5])
+	if size > maxMessageSize {
+		return nil, fmt.Errorf("grpc: message of %d bytes exceeds %d", size, maxMessageSize)
+	}
+	message := make([]byte, size)
 	if _, err := io.ReadFull(r, message); err != nil {
 		return nil, err
 	}

@@ -338,6 +338,7 @@ func TestServerEarlyHints(t *testing.T) {
 	server := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {
 			ctx.Response.Header.Set("Link", "</style.css>; rel=preload")
+			ctx.Response.Header.Set("Set-Cookie", "session=secret")
 			if err := ctx.EarlyHints(); err != nil {
 				t.Errorf("EarlyHints() error: %v", err)
 			}
@@ -352,8 +353,14 @@ func TestServerEarlyHints(t *testing.T) {
 		t.Fatalf("NewRequest() error: %v", err)
 	}
 	trace := &httptrace.ClientTrace{
-		Got1xxResponse: func(code int, _ textproto.MIMEHeader) error {
+		Got1xxResponse: func(code int, header textproto.MIMEHeader) error {
 			gotStatus <- code
+			if got := header.Get("Set-Cookie"); got != "" {
+				t.Errorf("103 response leaked Set-Cookie %q", got)
+			}
+			if got := header.Get("Link"); got != "</style.css>; rel=preload" {
+				t.Errorf("103 Link = %q", got)
+			}
 			return nil
 		},
 	}

@@ -393,12 +393,16 @@ func (s *serverStream) Done() <-chan struct{} {
 
 func (s *serverStream) Err() error {
 	s.cancelMu.Lock()
-	canceled := s.cancelCause != nil
+	cause := s.cancelCause
 	s.cancelMu.Unlock()
-	if canceled {
+	switch {
+	case cause == nil:
+		return nil
+	case errors.Is(cause, fasthttp.ErrTimeout), errors.Is(cause, context.DeadlineExceeded):
+		return context.DeadlineExceeded
+	default:
 		return context.Canceled
 	}
-	return nil
 }
 
 func (s *serverStream) Value(key any) any {
