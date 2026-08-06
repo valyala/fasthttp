@@ -74,6 +74,40 @@ func TestCloseIdleConnections(t *testing.T) {
 	}
 }
 
+func TestHostClientDoTimeoutIncludesDial(t *testing.T) {
+	listener := fasthttputil.NewInmemoryListener()
+	releaseHandler := make(chan struct{})
+	serveDone := make(chan error, 1)
+	server := &Server{Handler: func(*RequestCtx) { <-releaseHandler }}
+	go func() { serveDone <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		close(releaseHandler)
+		_ = listener.Close()
+		<-serveDone
+	})
+
+	const timeout = 600 * time.Millisecond
+	client := &HostClient{
+		Addr: "example.com",
+		Dial: func(string) (net.Conn, error) {
+			time.Sleep(timeout / 2)
+			return listener.Dial()
+		},
+	}
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://example.com/")
+	started := time.Now()
+	err := client.DoTimeout(&req, &resp, timeout)
+	elapsed := time.Since(started)
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("DoTimeout() error = %v, want %v", err, ErrTimeout)
+	}
+	if elapsed > timeout+timeout/3 {
+		t.Fatalf("DoTimeout() elapsed = %v, want at most %v", elapsed, timeout+timeout/3)
+	}
+}
+
 func TestClientConnectionCounts(t *testing.T) {
 	t.Parallel()
 

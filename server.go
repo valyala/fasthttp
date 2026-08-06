@@ -223,9 +223,12 @@ type Server struct {
 	// by ServeTLS, ServeTLSEmbed, ListenAndServeTLS, ListenAndServeTLSEmbed,
 	// AppendCert, AppendCertEmbed and NextProto.
 	//
-	// Note that this value is cloned by ServeTLS, ServeTLSEmbed, ListenAndServeTLS
-	// and ListenAndServeTLSEmbed, so it's not possible to modify the configuration
-	// with methods like tls.Config.SetSessionTicketKeys.
+	// Note that this value is cloned before the server first mutates it — by
+	// ServeTLS, ServeTLSEmbed, ListenAndServeTLS and ListenAndServeTLSEmbed,
+	// and also by AppendCert, AppendCertEmbed, NextProto and RegisterProtocol —
+	// so it's not possible to modify the configuration the server uses with
+	// methods like tls.Config.SetSessionTicketKeys, and mutations made to this
+	// value after such a call aren't observed by the server.
 	// To use SetSessionTicketKeys, use Server.Serve with a TLS Listener
 	// instead.
 	TLSConfig *tls.Config
@@ -240,13 +243,15 @@ type Server struct {
 	// consistent with net/http.
 	FormValueFunc FormValueFunc
 
-	nextProtos map[string]ServeHandler
-	protocols  []registeredProtocol
+	nextProtos     map[string]ServeHandler
+	protocols      []registeredProtocol
+	tlsConfigOwner *tls.Config
 
 	concurrencyCh chan struct{}
 
-	idleConns map[net.Conn]*atomic.Int64
-	done      chan struct{}
+	idleConns     map[net.Conn]*atomic.Int64
+	protocolConns map[net.Conn]struct{}
+	done          chan struct{}
 
 	// Whether done was already closed. A ShutdownWithContext that gives up on
 	// its context leaves it closed but in place, and it must not be closed twice.
@@ -658,6 +663,7 @@ type RequestCtx struct {
 	hijackNoResponse bool
 	protocolStream   ProtocolStream
 	protocolOwner    *ProtocolServerContext
+	protocolError    error
 }
 
 // EarlyHints allows the server to hint to the browser what resources a page would need
@@ -682,53 +688,54 @@ type RequestCtx struct {
 //	}
 func (ctx *RequestCtx) EarlyHints() error {
 	links := ctx.Response.Header.PeekAll(b2s(strLink))
-	if len(links) > 0 && ctx.protocolStream != nil {
+	if len(links) == 0 {
+		return nil
+	}
+	if ctx.protocolStream != nil {
 		writer, ok := ctx.protocolStream.(InformationalResponseWriter)
 		if !ok {
 			return ErrProtocolNotSupported
 		}
 		return writer.WriteInformational(StatusEarlyHints, &ctx.Response.Header)
 	}
-	if len(links) > 0 {
-		c := acquireWriter(ctx)
-		defer releaseWriter(ctx.s, c)
-		_, err := c.Write(strEarlyHints)
+	c := acquireWriter(ctx)
+	defer releaseWriter(ctx.s, c)
+	_, err := c.Write(strEarlyHints)
+	if err != nil {
+		return err
+	}
+	for _, l := range links {
+		if len(l) == 0 {
+			continue
+		}
+		_, err = c.Write(strLink)
 		if err != nil {
 			return err
 		}
-		for _, l := range links {
-			if len(l) == 0 {
-				continue
-			}
-			_, err = c.Write(strLink)
-			if err != nil {
-				return err
-			}
-			_, err = c.Write(strColon)
-			if err != nil {
-				return err
-			}
-			_, err = c.Write(strSpace)
-			if err != nil {
-				return err
-			}
-			_, err = c.Write(l)
-			if err != nil {
-				return err
-			}
-			_, err = c.Write(strCRLF)
-			if err != nil {
-				return err
-			}
+		_, err = c.Write(strColon)
+		if err != nil {
+			return err
+		}
+		_, err = c.Write(strSpace)
+		if err != nil {
+			return err
+		}
+		_, err = c.Write(l)
+		if err != nil {
+			return err
 		}
 		_, err = c.Write(strCRLF)
 		if err != nil {
 			return err
 		}
-		err = c.Flush()
-		if err != nil {
-			return err
-		}
+	}
+	_, err = c.Write(strCRLF)
+	if err != nil {
+		return err
+	}
+	err = c.Flush()
+	if err != nil {
+		return err
 	}
 	return nil
 }
@@ -797,7 +804,27 @@ type HijackHandler func(c net.Conn)
 //   - WebSocket ( https://en.wikipedia.org/wiki/WebSocket )
 //   - HTTP/2.0 ( https://en.wikipedia.org/wiki/HTTP/2 )
 func (ctx *RequestCtx) Hijack(handler HijackHandler) {
+	if err := ctx.TryHijack(handler); err != nil {
+		ctx.protocolError = err
+	}
+}
+
+// TryHijack registers handler for connection hijacking when the current
+// request owns the physical connection. Multiplexed protocols return
+// ErrHijackNotSupported without changing the response.
+func (ctx *RequestCtx) TryHijack(handler HijackHandler) error {
+	if ctx.protocolStream != nil {
+		return ErrHijackNotSupported
+	}
 	ctx.hijackHandler = handler
+	return nil
+}
+
+// LastProtocolError returns an unsupported protocol operation recorded by a
+// legacy API such as Hijack. It is intended for protocol implementations. The
+// recorded error is cleared when the RequestCtx is reset for reuse.
+func (ctx *RequestCtx) LastProtocolError() error {
+	return ctx.protocolError
 }
 
 // HijackSetNoResponse changes the behavior of hijacking a request.
@@ -966,6 +993,7 @@ func (ctx *RequestCtx) reset() {
 	ctx.hijackNoResponse = false
 	ctx.protocolStream = nil
 	ctx.protocolOwner = nil
+	ctx.protocolError = nil
 }
 
 type firstByteReader struct {
@@ -1763,8 +1791,13 @@ func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 // NextProto adds nph to be processed when key is negotiated when TLS
 // connection is established.
 //
-// This function can only be called before the server is started.
+// This function can only be called before the server is started. A key that
+// was already registered through RegisterProtocol must not be reused here:
+// NextProto handlers take dispatch precedence and would silently shadow the
+// registered protocol.
 func (s *Server) NextProto(key string, nph ServeHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.nextProtos == nil {
 		s.nextProtos = make(map[string]ServeHandler)
 	}
@@ -2002,6 +2035,12 @@ func (s *Server) appendCertLocked(cert *tls.Certificate) {
 func (s *Server) configTLS() {
 	if s.TLSConfig == nil {
 		s.TLSConfig = &tls.Config{}
+		s.tlsConfigOwner = s.TLSConfig
+		return
+	}
+	if s.TLSConfig != s.tlsConfigOwner {
+		s.TLSConfig = s.TLSConfig.Clone()
+		s.tlsConfigOwner = s.TLSConfig
 	}
 }
 
@@ -2145,6 +2184,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 		// while Wait() is waiting.
 		select {
 		case <-ctx.Done():
+			s.closeProtocolConns()
 			return ctx.Err()
 		case <-ticker.C:
 			continue
@@ -2370,6 +2410,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	}
 
 	proto, err := s.getNextProto(c)
+	var cleartextPrefix []byte
+	var cleartextReadDeadline time.Time
 	if err != nil {
 		return err
 	}
@@ -2391,12 +2433,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 					return err
 				}
 			}
-			return s.serveProtocolConn(c, protocol)
+			return s.serveProtocolConn(c, protocol, false)
 		}
 		if proto == "" {
-			protocol, detectedConn, detectErr := s.detectCleartextProtocol(c)
-			c = detectedConn
-			if detectErr != nil && protocol == nil {
+			protocol, prefix, deadline, detectErr := s.detectCleartextProtocol(c)
+			if detectErr != nil {
 				return detectErr
 			}
 			if protocol != nil {
@@ -2405,8 +2446,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 						return err
 					}
 				}
-				return s.serveProtocolConn(c, protocol)
+				return s.serveProtocolConn(c, protocol, true)
 			}
+			cleartextPrefix = prefix
+			cleartextReadDeadline = deadline
 		}
 	}
 
@@ -2457,12 +2500,16 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		continueReadingRequest = true
 	)
+	if len(cleartextPrefix) != 0 {
+		br = acquireReader(ctx)
+		br.Reset(&protocolPrefaceReader{conn: c, prefix: cleartextPrefix})
+	}
 	for {
 		connRequestNum++
 
 		if connRequestNum == 1 {
 			// Apply ReadTimeout to the first request byte.
-			if s.ReadTimeout > 0 {
+			if s.ReadTimeout > 0 && cleartextReadDeadline.IsZero() {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					break
 				}
@@ -2514,7 +2561,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			idleConnTime.Store(0)
 			s.setState(c, StateActive)
 
-			if s.ReadTimeout > 0 {
+			if s.ReadTimeout > 0 && (connRequestNum != 1 || cleartextReadDeadline.IsZero()) {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					break
 				}
@@ -3026,6 +3073,9 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage bool) {
 	ctx.c = conn
 	ctx.remoteAddr = nil
+	ctx.protocolStream = nil
+	ctx.protocolOwner = nil
+	ctx.protocolError = nil
 	ctx.logger.logger = logger
 	ctx.connID = nextConnID()
 	ctx.s = fakeServer
@@ -3239,6 +3289,14 @@ func (s *Server) closeIdleConns() {
 			// and stores into it, so only that goroutine may return it.
 			delete(s.idleConns, c)
 		}
+	}
+	s.idleConnsMu.Unlock()
+}
+
+func (s *Server) closeProtocolConns() {
+	s.idleConnsMu.Lock()
+	for conn := range s.protocolConns {
+		_ = conn.Close()
 	}
 	s.idleConnsMu.Unlock()
 }

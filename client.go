@@ -1642,8 +1642,10 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	}
 
 	if c.protocolTransport != nil {
-		ctx := c.newProtocolClientContext(req)
-		return c.protocolTransport.RoundTripWithContext(&ctx, c, req, resp)
+		ctx := c.acquireProtocolClientContext(req)
+		retry, err := c.protocolTransport.RoundTripWithContext(ctx, c, req, resp)
+		releaseProtocolClientContext(ctx)
+		return retry, err
 	}
 	return c.transport().RoundTrip(c, req, resp)
 }
@@ -3257,11 +3259,30 @@ var DefaultTransport RoundTripper = defaultTransport
 type transport struct{}
 
 func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
-	cc, err := hc.AcquireConn(req.timeout, req.ConnectionClose())
+	var deadline time.Time
+	if req.timeout > 0 {
+		deadline = time.Now().Add(req.timeout)
+	}
+	return t.roundTripWithDeadline(hc, req, resp, deadline, req.timeout)
+}
+
+// roundTripWithDeadline runs one HTTP/1 round trip. acquireTimeout bounds only
+// the wait for a connection.
+func (t *transport) roundTripWithDeadline(
+	hc *HostClient,
+	req *Request,
+	resp *Response,
+	deadline time.Time,
+	acquireTimeout time.Duration,
+) (retry bool, err error) {
+	if !deadline.IsZero() && acquireTimeout <= 0 {
+		return false, ErrTimeout
+	}
+	cc, err := hc.AcquireConn(acquireTimeout, req.ConnectionClose())
 	if err != nil {
 		return false, err
 	}
-	return t.roundTripConn(hc, cc, req, resp)
+	return t.roundTripConn(hc, cc, req, resp, deadline)
 }
 
 func (t *transport) roundTripConn(
@@ -3269,14 +3290,11 @@ func (t *transport) roundTripConn(
 	cc *clientConn,
 	req *Request,
 	resp *Response,
+	deadline time.Time,
 ) (retry bool, err error) {
 	customSkipBody := resp.SkipBody
 	customStreamBody := resp.StreamBody
 
-	var deadline time.Time
-	if req.timeout > 0 {
-		deadline = time.Now().Add(req.timeout)
-	}
 	conn := cc.c
 
 	resp.ParseNetConn(conn)

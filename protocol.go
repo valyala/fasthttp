@@ -3,11 +3,14 @@ package fasthttp
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"reflect"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -15,7 +18,19 @@ import (
 // ErrProtocolNotSupported is returned when the protocol serving a request
 // doesn't implement an optional operation such as server push or a
 // bidirectional request stream.
-var ErrProtocolNotSupported = errors.New("fasthttp: protocol operation not supported")
+var (
+	ErrProtocolNotSupported = errors.New("fasthttp: protocol operation not supported")
+	// ErrHijackNotSupported is returned when connection hijacking is attempted
+	// from a multiplexed protocol request.
+	ErrHijackNotSupported = errors.New("fasthttp: connection hijacking isn't supported by this protocol")
+	// ErrPushDisabled is returned when either endpoint disabled server push.
+	ErrPushDisabled = errors.New("fasthttp: server push is disabled")
+	// ErrPushLimit is returned when a protocol's promised-stream limit is full.
+	ErrPushLimit = errors.New("fasthttp: server push limit reached")
+	// ErrPushNotAllowed is returned when Push is called after the parent stream
+	// can no longer initiate a promised request.
+	ErrPushNotAllowed = errors.New("fasthttp: server push isn't allowed in this stream state")
+)
 
 // ProtocolHandler serves a connection selected by ALPN or a cleartext
 // connection preface.
@@ -36,7 +51,9 @@ type ProtocolHandler interface {
 // minor releases.
 type ProtocolRegistration struct {
 	ALPN             []string
+	FallbackALPN     []string
 	CleartextPreface []byte
+	MinTLSVersion    uint16
 	Handler          ProtocolHandler
 }
 
@@ -122,6 +139,56 @@ type ProtocolServerContext struct {
 	connID       uint64
 	requestCount atomic.Uint64
 	active       atomic.Int32
+	prefaceRead  bool
+	requestMu    sync.Mutex
+	requestCache []*RequestCtx
+	requestBytes int
+}
+
+const (
+	maxProtocolRequestCtxCache      = 256
+	maxProtocolRequestCtxCacheBytes = 128 << 20
+)
+
+// ServeProtocolConn serves c directly with handler while applying Server's
+// connection limits, lifecycle accounting, and ConnState callbacks. It is
+// intended for protocol packages that expose a dedicated prior-knowledge
+// listener.
+//
+// ServeProtocolConn closes c before returning.
+//
+// Experimental: this method may change before it has shipped in two fasthttp
+// minor releases.
+func (s *Server) ServeProtocolConn(c net.Conn, handler ProtocolHandler) error {
+	if isNilProtocolHandler(handler) {
+		return errors.New("fasthttp: protocol handler is nil")
+	}
+	if s.MaxConnsPerIP > 0 {
+		perIPConn := wrapPerIPConn(s, c)
+		if perIPConn == nil {
+			return ErrPerIPConnLimit
+		}
+		c = perIPConn
+	}
+	if !s.tryAcquireConcurrency() {
+		s.writeFastError(c, StatusServiceUnavailable, "The connection cannot be served because Server.Concurrency limit exceeded")
+		_ = c.Close()
+		return ErrConcurrencyLimit
+	}
+	defer s.releaseConcurrency()
+
+	s.open.Add(1)
+	defer s.open.Add(-1)
+	err := s.serveProtocolConn(c, &registeredProtocol{handler: handler}, false)
+	closeErr := c.Close()
+	s.setState(c, StateClosed)
+	if err != nil {
+		return err
+	}
+	if errors.Is(closeErr, net.ErrClosed) {
+		return nil
+	}
+	return closeErr
 }
 
 // Server returns the Server that dispatched this protocol connection.
@@ -135,15 +202,26 @@ func (ctx *ProtocolServerContext) Done() <-chan struct{} {
 	return ctx.server.done
 }
 
+// ServerDate returns the Server's cached RFC 1123 Date header value. The
+// returned bytes are read-only and remain valid until the next cache refresh.
+func (ctx *ProtocolServerContext) ServerDate() []byte {
+	serverDateOnce.Do(updateServerDate)
+	return *serverDate.Load()
+}
+
+// CleartextPrefaceConsumed reports whether Server selected this protocol by
+// consuming its registered cleartext preface. When true, ServeConn must start
+// reading immediately after the preface. ALPN and ServeProtocolConn dispatches
+// leave the preface for the protocol handler to read.
+func (ctx *ProtocolServerContext) CleartextPrefaceConsumed() bool {
+	return ctx.prefaceRead
+}
+
 // AcquireRequestCtx obtains a RequestCtx owned by the Server and binds it to a
 // protocol stream. The caller must pair every successful call with
 // ReleaseRequestCtx after all response and stream work is complete.
 func (ctx *ProtocolServerContext) AcquireRequestCtx(c net.Conn, stream ProtocolStream) *RequestCtx {
-	if c == nil {
-		c = ctx.conn
-	}
-
-	requestCtx := ctx.server.acquireCtx(c)
+	requestCtx := ctx.acquireRequestCtx(c)
 	requestCtx.connTime = ctx.connTime
 	requestCtx.time = time.Now()
 	requestCtx.connID = ctx.connID
@@ -166,8 +244,24 @@ func (ctx *ProtocolServerContext) ReleaseRequestCtx(requestCtx *RequestCtx) {
 		panic("BUG: releasing a request context to the wrong protocol server")
 	}
 
-	requestCtx.protocolOwner = nil
-	ctx.server.releaseCtx(requestCtx)
+	if requestCtx.timeoutResponse == nil {
+		requestCtx.protocolOwner = nil
+		requestCtx.reset()
+		retainedBytes := requestCtxRetainedBytes(requestCtx)
+		ctx.requestMu.Lock()
+		if len(ctx.requestCache) < maxProtocolRequestCtxCache &&
+			retainedBytes <= maxProtocolRequestCtxCacheBytes-ctx.requestBytes {
+			ctx.requestCache = append(ctx.requestCache, requestCtx)
+			ctx.requestBytes += retainedBytes
+			requestCtx = nil
+		}
+		ctx.requestMu.Unlock()
+		if requestCtx != nil {
+			requestCtx.Request.ReleaseBody(0)
+			requestCtx.Response.ReleaseBody(0)
+			ctx.server.ctxPool.Put(requestCtx)
+		}
+	}
 	active := ctx.active.Add(-1)
 	if active < 0 {
 		panic("BUG: protocol request context released more than once")
@@ -178,12 +272,54 @@ func (ctx *ProtocolServerContext) ReleaseRequestCtx(requestCtx *RequestCtx) {
 	}
 }
 
+func (ctx *ProtocolServerContext) acquireRequestCtx(c net.Conn) *RequestCtx {
+	ctx.requestMu.Lock()
+	var requestCtx *RequestCtx
+	if last := len(ctx.requestCache) - 1; last >= 0 {
+		requestCtx = ctx.requestCache[last]
+		ctx.requestCache[last] = nil
+		ctx.requestCache = ctx.requestCache[:last]
+		ctx.requestBytes -= requestCtxRetainedBytes(requestCtx)
+	}
+	ctx.requestMu.Unlock()
+	if requestCtx == nil {
+		return ctx.server.acquireCtx(c)
+	}
+	requestCtx.c = c
+	if ctx.server.FormValueFunc != nil {
+		requestCtx.formValueFunc = ctx.server.FormValueFunc
+	}
+	return requestCtx
+}
+
+func (ctx *ProtocolServerContext) releaseCachedRequestCtxs() {
+	ctx.requestMu.Lock()
+	cache := ctx.requestCache
+	ctx.requestCache = nil
+	ctx.requestBytes = 0
+	ctx.requestMu.Unlock()
+	for _, requestCtx := range cache {
+		ctx.server.ctxPool.Put(requestCtx)
+	}
+}
+
+func requestCtxRetainedBytes(requestCtx *RequestCtx) int {
+	retained := 0
+	if requestCtx.Request.body != nil {
+		retained = cap(requestCtx.Request.body.B)
+	}
+	if requestCtx.Response.body != nil {
+		retained += cap(requestCtx.Response.body.B)
+	}
+	return retained
+}
+
 // RegisterProtocol registers a connection-oriented HTTP protocol. It must be
 // called before the Server starts serving.
 //
 // Experimental: this method may change before it has shipped in two fasthttp
 // minor releases.
-func (s *Server) RegisterProtocol(registration ProtocolRegistration) error {
+func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //nolint:gocritic
 	if isNilProtocolHandler(registration.Handler) {
 		return errors.New("fasthttp: protocol handler is nil")
 	}
@@ -192,6 +328,7 @@ func (s *Server) RegisterProtocol(registration ProtocolRegistration) error {
 	}
 
 	alpn := append([]string(nil), registration.ALPN...)
+	fallbackALPN := append([]string(nil), registration.FallbackALPN...)
 	preface := bytes.Clone(registration.CleartextPreface)
 	seenALPN := make(map[string]struct{}, len(alpn))
 	for _, protocol := range alpn {
@@ -202,6 +339,19 @@ func (s *Server) RegisterProtocol(registration ProtocolRegistration) error {
 			return fmt.Errorf("fasthttp: protocol alpn %q is duplicated", protocol)
 		}
 		seenALPN[protocol] = struct{}{}
+	}
+	seenFallback := make(map[string]struct{}, len(fallbackALPN))
+	for _, protocol := range fallbackALPN {
+		if protocol == "" {
+			return errors.New("fasthttp: protocol fallback alpn is empty")
+		}
+		if _, ok := seenALPN[protocol]; ok {
+			return fmt.Errorf("fasthttp: protocol fallback alpn %q is also registered", protocol)
+		}
+		if _, ok := seenFallback[protocol]; ok {
+			return fmt.Errorf("fasthttp: protocol fallback alpn %q is duplicated", protocol)
+		}
+		seenFallback[protocol] = struct{}{}
 	}
 
 	s.mu.Lock()
@@ -227,21 +377,83 @@ func (s *Server) RegisterProtocol(registration ProtocolRegistration) error {
 		}
 	}
 
+	var tlsConfig *tls.Config
+	if len(alpn) != 0 {
+		var err error
+		tlsConfig, err = prepareProtocolTLSConfig(
+			s.TLSConfig,
+			alpn,
+			fallbackALPN,
+			registration.MinTLSVersion,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
 	s.protocols = append(s.protocols, registeredProtocol{
 		alpn:             alpn,
 		cleartextPreface: preface,
 		handler:          registration.Handler,
 	})
-	if len(alpn) != 0 {
-		s.configTLS()
-		for _, protocol := range alpn {
-			if !containsString(s.TLSConfig.NextProtos, protocol) {
-				s.TLSConfig.NextProtos = append(s.TLSConfig.NextProtos, protocol)
-			}
-		}
+	if tlsConfig != nil {
+		s.TLSConfig = tlsConfig
+		s.tlsConfigOwner = tlsConfig
 	}
 
 	return nil
+}
+
+func prepareProtocolTLSConfig(
+	current *tls.Config,
+	alpn []string,
+	fallback []string,
+	minVersion uint16,
+) (*tls.Config, error) {
+	config := &tls.Config{} //nolint:gosec // MinVersion is enforced below from the registrations.
+	if current != nil {
+		config = current.Clone()
+	}
+	if minVersion != 0 {
+		if config.MaxVersion != 0 && config.MaxVersion < minVersion {
+			return nil, errors.New("fasthttp: protocol TLS maximum version is too low")
+		}
+		if config.MinVersion < minVersion {
+			config.MinVersion = minVersion
+		}
+	}
+
+	registered := make(map[string]struct{}, len(alpn))
+	for _, protocol := range alpn {
+		registered[protocol] = struct{}{}
+	}
+	fallbackSet := make(map[string]struct{}, len(fallback))
+	for _, protocol := range fallback {
+		fallbackSet[protocol] = struct{}{}
+	}
+	ordered := make([]string, 0, len(config.NextProtos)+len(alpn)+len(fallback))
+	inserted := false
+	for _, protocol := range config.NextProtos {
+		_, isRegistered := registered[protocol]
+		_, isFallback := fallbackSet[protocol]
+		if !inserted && (isRegistered || isFallback) {
+			ordered = append(ordered, alpn...)
+			inserted = true
+		}
+		if !isRegistered {
+			ordered = append(ordered, protocol)
+		}
+	}
+	if !inserted {
+		ordered = append(ordered, alpn...)
+	}
+	for _, protocol := range fallback {
+		if !containsString(ordered, protocol) {
+			ordered = append(ordered, protocol)
+		}
+	}
+	config.NextProtos = ordered
+	return config, nil
 }
 
 func isNilProtocolHandler(handler ProtocolHandler) bool {
@@ -258,12 +470,7 @@ func isNilProtocolHandler(handler ProtocolHandler) bool {
 }
 
 func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, target)
 }
 
 func prefacesConflict(a, b []byte) bool {
@@ -286,10 +493,12 @@ func (s *Server) protocolByALPN(protocol string) *registeredProtocol {
 	return nil
 }
 
-func (s *Server) serveProtocolConn(c net.Conn, protocol *registeredProtocol) error {
+func (s *Server) serveProtocolConn(c net.Conn, protocol *registeredProtocol, prefaceRead bool) error {
 	connTime := time.Now()
 	idleConnTime := s.registerIdleConn(c, connTime.Add(5*time.Second))
 	defer s.unregisterIdleConn(c, idleConnTime)
+	s.registerProtocolConn(c)
+	defer s.unregisterProtocolConn(c)
 
 	ctx := &ProtocolServerContext{
 		server:       s,
@@ -297,8 +506,25 @@ func (s *Server) serveProtocolConn(c net.Conn, protocol *registeredProtocol) err
 		idleConnTime: idleConnTime,
 		connTime:     connTime,
 		connID:       nextConnID(),
+		prefaceRead:  prefaceRead,
 	}
+	defer ctx.releaseCachedRequestCtxs()
 	return protocol.handler.ServeConn(ctx, c)
+}
+
+func (s *Server) registerProtocolConn(c net.Conn) {
+	s.idleConnsMu.Lock()
+	if s.protocolConns == nil {
+		s.protocolConns = make(map[net.Conn]struct{})
+	}
+	s.protocolConns[c] = struct{}{}
+	s.idleConnsMu.Unlock()
+}
+
+func (s *Server) unregisterProtocolConn(c net.Conn) {
+	s.idleConnsMu.Lock()
+	delete(s.protocolConns, c)
+	s.idleConnsMu.Unlock()
 }
 
 func (s *Server) registerIdleConn(c net.Conn, idleAt time.Time) *atomic.Int64 {
@@ -324,25 +550,28 @@ func (s *Server) registerIdleConn(c net.Conn, idleAt time.Time) *atomic.Int64 {
 
 func (s *Server) unregisterIdleConn(c net.Conn, idleConnTime *atomic.Int64) {
 	s.idleConnsMu.Lock()
-	if s.idleConns[c] == idleConnTime {
-		delete(s.idleConns, c)
-	}
+	delete(s.idleConns, c)
 	s.idleConnsMu.Unlock()
 	idleConnTimePool.Put(idleConnTime)
 }
 
-type replayConn struct {
-	net.Conn
-	reader io.Reader
+type protocolPrefaceReader struct {
+	conn   net.Conn
+	prefix []byte
 }
 
-func (c *replayConn) Read(p []byte) (int, error) {
-	return c.reader.Read(p)
+func (r *protocolPrefaceReader) Read(p []byte) (int, error) {
+	if len(r.prefix) != 0 {
+		n := copy(p, r.prefix)
+		r.prefix = r.prefix[n:]
+		return n, nil
+	}
+	return r.conn.Read(p)
 }
 
-func (s *Server) detectCleartextProtocol(c net.Conn) (*registeredProtocol, net.Conn, error) {
+func (s *Server) detectCleartextProtocol(c net.Conn) (*registeredProtocol, []byte, time.Time, error) {
 	if _, isTLS := c.(tlsConn); isTLS {
-		return nil, c, nil
+		return nil, nil, time.Time{}, nil
 	}
 
 	candidates := make([]*registeredProtocol, 0, len(s.protocols))
@@ -358,27 +587,30 @@ func (s *Server) detectCleartextProtocol(c net.Conn) (*registeredProtocol, net.C
 		}
 	}
 	if len(candidates) == 0 {
-		return nil, c, nil
+		return nil, nil, time.Time{}, nil
 	}
 
+	var deadline time.Time
 	if s.ReadTimeout > 0 {
-		if err := c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
-			return nil, c, err
+		deadline = time.Now().Add(s.ReadTimeout)
+		if err := c.SetReadDeadline(deadline); err != nil {
+			return nil, nil, time.Time{}, err
 		}
 	}
 
 	prefix := make([]byte, 0, maxPrefaceLen)
 	var one [1]byte
-	for len(candidates) != 0 {
+	emptyReads := 0
+	for {
 		n, err := c.Read(one[:])
 		if n > 0 {
+			emptyReads = 0
 			prefix = append(prefix, one[0])
 			remaining := candidates[:0]
 			for _, candidate := range candidates {
 				preface := candidate.cleartextPreface
 				if bytes.Equal(prefix, preface) {
-					replayed := newReplayConn(c, prefix)
-					return candidate, replayed, nil
+					return candidate, prefix, deadline, nil
 				}
 				if len(prefix) < len(preface) && bytes.Equal(prefix, preface[:len(prefix)]) {
 					remaining = append(remaining, candidate)
@@ -386,20 +618,16 @@ func (s *Server) detectCleartextProtocol(c net.Conn) (*registeredProtocol, net.C
 			}
 			candidates = remaining
 			if len(candidates) == 0 {
-				return nil, newReplayConn(c, prefix), nil
+				return nil, prefix, deadline, nil
+			}
+		} else if err == nil {
+			emptyReads++
+			if emptyReads >= 100 {
+				return nil, prefix, deadline, io.ErrNoProgress
 			}
 		}
 		if err != nil {
-			return nil, newReplayConn(c, prefix), err
+			return nil, prefix, deadline, err
 		}
-	}
-
-	return nil, newReplayConn(c, prefix), nil
-}
-
-func newReplayConn(c net.Conn, prefix []byte) net.Conn {
-	return &replayConn{
-		Conn:   c,
-		reader: io.MultiReader(bytes.NewReader(prefix), c),
 	}
 }
