@@ -25,6 +25,23 @@ Response scheduling uses RFC 9218 urgency. The RFC 7540 dependency tree is not
 maintained — RFC 9113 deprecated it. The `incremental` parameter is parsed and
 validated but the scheduler ignores it today.
 
+### One burst, one write
+
+An HTTP/2 peer sends frames in bursts, and the largest cost at high load is
+losing that shape: flushing the moment the event channel runs dry means
+flushing between two frames of the same burst, and one write syscall per
+response. Two signals keep the batch together. The reader marks each event
+when the next complete frame is already buffered, so the owner knows more
+input is imminent without guessing. The owner also counts the handlers it
+started and holds the flush while completions keep arriving — bounded by 1ms
+of *silence*, not per batch, because under load a batch's handlers take
+longer than 1ms to schedule while never going quiet. Silence writes the
+stragglers off, and handler generations keep a written-off completion from
+consuming the next batch's wait. Batches cap at 64 events per cycle: past
+that, measured throughput falls, because the peer's reply pipeline stalls on
+the batch tail. Neither signal adds latency when the connection is quiet;
+both only defer a flush that would otherwise split work already in flight.
+
 ### The client's stream-ID rule
 
 A client stream gets its ID inside the connection write slot, immediately
@@ -93,21 +110,36 @@ strings, push depth, priority updates, and closed-stream tombstones are all
 bounded. Rapid resets past 1000/second kill the connection with
 `ENHANCE_YOUR_CALM`, and a CONTINUATION run past 64 frames does the same.
 
-Two defaults deserve a second opinion:
+Two memory defaults were measured rather than guessed.
 
-**A 16 MiB connection receive window** (1 MiB per stream). x/net's server uses
-1 MiB; fasthttp's HTTP/1 bound is `MaxRequestBodySize`, 4 MiB by default. So
-this is 4x what an HTTP/1 connection can buffer and 16x what x/net allows,
-traded for throughput on a single fast stream. On the client side the same
-16 MiB is conservative — x/net's transport uses 1 GiB.
+**A 4 MiB connection receive window** (1 MiB per stream), matching HTTP/1's
+`MaxRequestBodySize`. It started at 16 MiB. Dropping it cost nothing measurable
+and helped small requests, which is the opposite of what a bigger window is
+supposed to do -- more buffering, worse locality:
+
+| | 16 MiB | 4 MiB | 1 MiB (x/net's server) |
+| --- | ---: | ---: | ---: |
+| streamed 1 MiB upload | 309 us | 327 us | 394 us |
+| buffered 1 MiB POST | 191 us | 170 us | 205 us |
+| small GET, 100 streams | 5.84 us | 5.28 us | 5.16 us |
+| small GET, 1000 streams | 5.77 us | 5.49 us | 5.45 us |
+
+1 MiB is where streamed uploads start paying (+27%), so 4 MiB is the corner.
+`MaxUploadBufferPerConnection` raises it. The client keeps 4 MiB too, which is
+still conservative next to x/net's 1 GiB transport window.
 
 **A 128 MiB per-connection `RequestCtx` cache** (256 entries max). Released
-contexts are reset and kept on the connection before falling back to the
-Server pool, which keeps large body buffers attached to a busy multiplexed
-connection instead of losing them to the next GC. It measurably helps: 1 MiB
-uploads went from ~1.66 MiB/op to ~1.74 KiB/op. The cost is that unlike
-`Server.ctxPool`, this memory is not GC-reclaimable — it is freed when the
-connection closes, and nowhere else. The ceiling is not configurable today.
+contexts are reset and kept on the connection before falling back to the Server
+pool, which keeps large body buffers attached to a busy multiplexed connection
+instead of losing them to the next GC. Lowering this one is not free -- a 1 MiB
+POST at a 32 MiB ceiling allocates 368 KB/op, and at 8 MiB it allocates 2.8
+MB/op, against 86 B/op at 128 MiB. The cost of keeping it is that unlike
+`Server.ctxPool` this memory is not GC-reclaimable: it is freed when the
+connection closes, and nowhere else. `Server.MaxProtocolRequestCtxCacheBytes`
+sets the ceiling, or disables the cache with a negative value. For comparison,
+x/net/http2 keeps no equivalent: it buffers bodies in fixed pools of at most
+16 KiB chunks, hardcoded, which is why it allocates per request where this
+does not.
 
 ## Stream and connection teardown
 

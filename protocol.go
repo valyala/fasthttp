@@ -146,8 +146,8 @@ type ProtocolServerContext struct {
 }
 
 const (
-	maxProtocolRequestCtxCache      = 256
-	maxProtocolRequestCtxCacheBytes = 128 << 20
+	maxProtocolRequestCtxCache             = 256
+	defaultMaxProtocolRequestCtxCacheBytes = 128 << 20
 )
 
 // ServeProtocolConn serves c directly with handler while applying Server's
@@ -249,8 +249,9 @@ func (ctx *ProtocolServerContext) ReleaseRequestCtx(requestCtx *RequestCtx) {
 		requestCtx.reset()
 		retainedBytes := requestCtxRetainedBytes(requestCtx)
 		ctx.requestMu.Lock()
+		cacheBytes := ctx.requestCtxCacheBytes()
 		if len(ctx.requestCache) < maxProtocolRequestCtxCache &&
-			retainedBytes <= maxProtocolRequestCtxCacheBytes-ctx.requestBytes {
+			retainedBytes <= cacheBytes-ctx.requestBytes {
 			ctx.requestCache = append(ctx.requestCache, requestCtx)
 			ctx.requestBytes += retainedBytes
 			requestCtx = nil
@@ -270,6 +271,13 @@ func (ctx *ProtocolServerContext) ReleaseRequestCtx(requestCtx *RequestCtx) {
 		ctx.idleConnTime.Store(time.Now().Unix())
 		ctx.server.setState(ctx.conn, StateIdle)
 	}
+}
+
+func (ctx *ProtocolServerContext) requestCtxCacheBytes() int {
+	if limit := ctx.server.MaxProtocolRequestCtxCacheBytes; limit != 0 {
+		return limit
+	}
+	return defaultMaxProtocolRequestCtxCacheBytes
 }
 
 func (ctx *ProtocolServerContext) acquireRequestCtx(c net.Conn) *RequestCtx {

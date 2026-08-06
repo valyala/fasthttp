@@ -326,6 +326,8 @@ type serverStream struct {
 	localClosed        bool
 	isReset            bool
 	handlerStarted     bool
+	flushQueued        bool
+	handlerGen         uint32
 	worker             *streamWorker
 	handlerDone        bool
 	isPush             bool

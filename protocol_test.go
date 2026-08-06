@@ -612,3 +612,43 @@ func TestRequestHeaderConnectProtocol(t *testing.T) {
 		t.Fatalf("ConnectProtocol() after Reset = %q, want empty", dst.ConnectProtocol())
 	}
 }
+
+// MaxProtocolRequestCtxCacheBytes bounds what one connection keeps for reuse.
+func TestMaxProtocolRequestCtxCacheBytes(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		limit   int
+		retain  int
+		wantHit bool
+	}{
+		{"default keeps a 1MB body", 0, 1 << 20, true},
+		{"custom limit keeps below it", 4 << 20, 1 << 20, true},
+		{"custom limit drops above it", 4 << 20, 8 << 20, false},
+		{"negative disables the cache", -1, 1024, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := &Server{
+				Handler:                         func(*RequestCtx) {},
+				MaxProtocolRequestCtxCacheBytes: tc.limit,
+			}
+			serverConn, clientConn := net.Pipe()
+			defer serverConn.Close()
+			defer clientConn.Close()
+			ctx := &ProtocolServerContext{
+				server:       server,
+				conn:         serverConn,
+				idleConnTime: &atomic.Int64{},
+			}
+			requestCtx := ctx.AcquireRequestCtx(serverConn, &testProtocolStream{Context: context.Background()})
+			requestCtx.Request.SetBody(make([]byte, tc.retain))
+			ctx.ReleaseRequestCtx(requestCtx)
+
+			ctx.requestMu.Lock()
+			cached := len(ctx.requestCache)
+			ctx.requestMu.Unlock()
+			if got := cached != 0; got != tc.wantHit {
+				t.Fatalf("cached = %v, want %v (limit %d, retained %d)", got, tc.wantHit, tc.limit, tc.retain)
+			}
+		})
+	}
+}

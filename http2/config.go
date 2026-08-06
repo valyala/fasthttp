@@ -18,8 +18,9 @@ const (
 	defaultHeaderTableSize         = 4096
 	defaultMaxFrameSize            = 16 << 10
 	defaultWriteBufferSize         = 64 << 10
+	defaultReadBufferSize          = 16 << 10
 	maxResponseBodyPreallocation   = 1 << 20
-	defaultConnectionWindowSize    = 16 << 20
+	defaultConnectionWindowSize    = 4 << 20
 	defaultStreamWindowSize        = 1 << 20
 	defaultMaxQueuedControlFrames  = 10_000
 	maxConfiguredConcurrentStreams = 1 << 20
@@ -31,6 +32,10 @@ const (
 // defaultWriteByteTimeout bounds a write that makes no progress, not a whole
 // write, so a slow but healthy peer is unaffected.
 const defaultWriteByteTimeout = 15 * time.Second
+
+// flushCoalesceTimeout bounds how long a flush waits for handlers started in
+// the current batch to finish.
+const flushCoalesceTimeout = time.Millisecond
 
 // ClientMode selects how an HTTP/2 transport negotiates a connection.
 type ClientMode uint8
@@ -91,7 +96,7 @@ type ClientConfig struct {
 
 	// MaxResponseBufferPerConnection is the connection-level flow-control
 	// window: the response bytes the server may send before the client
-	// acknowledges consuming them. Zero means 16 MiB; values below 65535 are
+	// acknowledges consuming them. Zero means 4 MiB; values below 65535 are
 	// rejected.
 	MaxResponseBufferPerConnection int32
 
@@ -281,7 +286,7 @@ type ServerConfig struct {
 
 	// MaxUploadBufferPerConnection is the connection-level flow-control
 	// window: the request-body bytes a client may send before the server
-	// acknowledges consuming them. Zero means 16 MiB; values below 65535 are
+	// acknowledges consuming them. Zero means 4 MiB; values below 65535 are
 	// rejected.
 	MaxUploadBufferPerConnection int32
 
