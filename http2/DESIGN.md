@@ -1,193 +1,170 @@
-# Native HTTP/2 design
+# HTTP/2 design notes
 
-This package speaks HTTP/2 directly to fasthttp's `Request`, `Response`, and
-`RequestCtx`. There is no `net/http` conversion layer. The exported API is
-experimental and may change for two more minor releases.
+The `http2` package implements HTTP/2 directly on fasthttp's `Request`,
+`Response` and `RequestCtx`. It does not go through `net/http`.
 
-## One owner per connection
+## Concurrency model
 
-Everything else follows from this rule: exactly one goroutine mutates a
-connection's state. Stream table, SETTINGS, HPACK tables, flow-control
-windows, GOAWAY state, response schedule — all of it belongs to that goroutine
-alone, so none of it needs a lock.
+One goroutine (the "owner") holds all connection state: stream table,
+settings, HPACK tables, flow control windows, GOAWAY state and the response
+schedule. There are no locks around this state.
 
-Three other roles exist around it:
+The other goroutines per connection are:
 
-- A reader parked in `ReadFrame`, which turns frames into bounded events.
-- A writer that owns `net.Conn.Write` and nothing else. It receives byte
-  batches that are already ordered and already accounted for; it knows nothing
-  about streams, HPACK, or credit. A batch it accepts is in flight — credit is
-  never re-reserved or refunded behind its back.
-- One goroutine per stream running the handler, so a slow handler stalls its
-  own stream and no others.
+- a reader, blocked in `ReadFrame`, which sends frames to the owner over a
+  bounded channel
+- a writer, which only calls `net.Conn.Write` on byte batches prepared by the
+  owner
+- one worker goroutine per active stream to run the handler; workers are
+  reused between streams
 
-Response scheduling uses RFC 9218 urgency. The RFC 7540 dependency tree is not
-maintained — RFC 9113 deprecated it. The `incremental` parameter is parsed and
-validated but the scheduler ignores it today.
+Response scheduling uses RFC 9218 urgency. Within the same urgency,
+non-incremental responses are sent one at a time in stream ID order and
+incremental responses are interleaved. The RFC 7540 priority tree is not
+implemented (deprecated by RFC 9113).
 
-### One burst, one write
+### Write batching
 
-An HTTP/2 peer sends frames in bursts, and the largest cost at high load is
-losing that shape: flushing the moment the event channel runs dry means
-flushing between two frames of the same burst, and one write syscall per
-response. Two signals keep the batch together. The reader marks each event
-when the next complete frame is already buffered, so the owner knows more
-input is imminent without guessing. The owner also counts the handlers it
-started and holds the flush while completions keep arriving — bounded by 1ms
-of *silence*, not per batch, because under load a batch's handlers take
-longer than 1ms to schedule while never going quiet. Silence writes the
-stragglers off, and handler generations keep a written-off completion from
-consuming the next batch's wait. Batches cap at 64 events per cycle: past
-that, measured throughput falls, because the peer's reply pipeline stalls on
-the batch tail. Neither signal adds latency when the connection is quiet;
-both only defer a flush that would otherwise split work already in flight.
+Design goal: one read syscall per incoming burst, one write syscall per
+outgoing burst.
 
-### The client's stream-ID rule
+- The reader uses a buffered reader and marks each event if the next frame is
+  already in the buffer, so the owner knows more input is coming.
+- The owner counts started handlers and delays the flush while their
+  completions keep arriving. The wait is bounded by 1ms of silence. Streams
+  written off by the timeout are tagged with a generation counter so their
+  late completions don't extend the next batch's wait.
+- A batch is capped at 64 events. Larger batches benchmarked slower.
+- The write loop collects all batches queued during the previous syscall and
+  writes them with a single syscall.
+- The flusher iterates a queue of streams with pending output, not the whole
+  stream table.
 
-A client stream gets its ID inside the connection write slot, immediately
-before its HEADERS reach the writer — not when the request is admitted. That
-one placement buys three properties for free:
+### Client stream IDs
 
-- Wire order of request HEADERS equals ID order, by construction.
-- A stream cancelled while waiting for the slot never consumes an ID and never
-  puts a byte on the wire.
-- RST_STREAM queues behind the same slot, so it cannot overtake the HEADERS it
-  is cancelling.
+The client assigns a stream ID right before writing HEADERS, while holding
+the connection write slot. Results:
 
-An earlier version assigned IDs at admission and needed roughly a hundred
-lines of claim, skip, and deferred-reset machinery to get the same ordering
-back.
+- HEADERS wire order always matches stream ID order.
+- A request cancelled before reaching the write slot never consumes an ID.
+- RST_STREAM goes through the same slot, so it cannot arrive before its own
+  HEADERS.
 
-A request timeout resets its own stream and never touches the shared TCP
-deadline. There is one deliberate exception: if a deadline expires after part
-of a frame has been copied into a batch, that batch cannot be handed to
-another writer, so the connection dies with it. Requests without a deadline
-hit the same rule via `WriteByteTimeout`, because a producer parked on a full
-queue cannot notice its own stream being cancelled.
+Request timeouts reset only their own stream. Exception: if a deadline
+expires after part of a frame was already copied into a batch, the
+connection is closed, because the remaining bytes can't be written by anyone
+else. `WriteByteTimeout` covers the same case for requests without a
+deadline.
 
-## What we borrowed
+## Dependencies
 
-Wire framing and HPACK primitives come from `golang.org/x/net/http2`'s
-`Framer` and `hpack` (MIT, already a fasthttp dependency). We keep x/net's
-frame validation and skip its `MetaHeadersFrame`: a private codec decodes
-HEADERS and CONTINUATION straight into pooled event storage, which avoids the
-header maps and per-message allocations that path costs.
-
-The state machines, fasthttp mapping, flow control, scheduling, push, and
-stream APIs are written for this repository. Nothing was copied from
-`dgrr/http2`.
+Frame encoding/decoding and HPACK come from `golang.org/x/net/http2`
+(already a fasthttp dependency). `MetaHeadersFrame` is not used: HEADERS and
+CONTINUATION payloads are decoded into pooled buffers by this package,
+because the x/net path allocates per message and its frame cache only covers
+DATA frames.
 
 ## Negotiation
 
-TLS uses ALPN. `PreferHTTP2` offers `h2` and `http/1.1`; if the peer picks
-HTTP/1.1, that same connection is handed to fasthttp's HTTP/1 transport rather
-than dialed again. `RequireHTTP2` fails with `ErrHTTP2Required` instead.
+- TLS: ALPN. `PreferHTTP2` offers `h2` and `http/1.1`; if the peer picks
+  HTTP/1.1 the connection is handed to the HTTP/1 client without redialing.
+  `RequireHTTP2` returns `ErrHTTP2Required` instead.
+- Cleartext server: prior knowledge (preface detection on the same listener
+  as HTTP/1) and the `Upgrade: h2c` handshake. The upgraded request becomes
+  stream 1. The upgrade is declined for TLS connections, streamed request
+  bodies and pipelined requests; those requests are served as HTTP/1.
+- Cleartext client: `PriorKnowledge` only.
 
-Cleartext requires explicit `PriorKnowledge`. A server can tell the 24-byte
-preface from an HTTP/1 request line on one listener; a non-matching prefix is
-pushed back into the HTTP/1 reader without swapping the `net.Conn`.
+## Request/response semantics
 
-`Upgrade: h2c` is not supported and will not be. RFC 9113 dropped it.
+Pseudo-headers map to fasthttp header fields. Rejected: connection-specific
+headers, `TE` other than `trailers`, malformed content lengths, invalid
+trailers, malformed CONNECT, bodies that don't match their content length.
+Header names go on the wire lowercase. Sensitive fields are never-indexed.
+Fields declared as trailers are excluded from the initial header block.
 
-## Semantics
+Push and extended CONNECT exist but are off by default. Push is same-origin
+GET/HEAD, limited by depth and promise count. Extended CONNECT requires the
+peer's `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`. `RequestCtx.AcceptStream` and
+`HostClient.OpenStream` expose the stream as a `fasthttp.StreamConn`.
 
-Pseudo-headers map straight onto fasthttp headers. Connection-specific fields,
-bad `TE`, malformed content lengths, invalid trailers, malformed CONNECT, and
-bodies that disagree with their declared length are all rejected. Wire header
-names are lowercase; sensitive fields encode as never-indexed.
+gRPC works without dedicated API:
 
-Push and extended CONNECT are both off by default. Push is same-origin, GET
-and HEAD only, and bounded by depth and promise count. Extended CONNECT waits
-for the peer's `SETTINGS_ENABLE_CONNECT_PROTOCOL=1` before sending
-`:protocol`; `RequestCtx.AcceptStream` and `HostClient.OpenStream` then expose
-DATA as a `fasthttp.StreamConn` whose close, half-close, and deadlines are
-scoped to that stream.
+- unary: normal handler + `AddTrailer("Grpc-Status")`
+- streaming: `Server.StreamRequestBody` + `ctx.RequestBodyStream()` +
+  `SetBodyStreamWriter`. Every `Flush` produces a DATA frame boundary.
+  Trailers are encoded after the stream writer returns, so the writer may
+  still set trailer values. This ordering is guaranteed.
+- errors without a body: set `grpc-status` as a normal header and don't
+  declare trailers (gRPC "Trailers-Only"). nginx drops trailers on bodyless
+  responses otherwise.
 
-gRPC needs no dedicated API. Unary methods are ordinary handlers plus
-`AddTrailer`; bidirectional streaming composes `Server.StreamRequestBody`,
-`RequestCtx.RequestBodyStream`, and `SetBodyStreamWriter` — each `Flush`
-becomes a DATA boundary, and response trailers are encoded only after the
-body stream writer returns, so the writer may still set their values (this
-ordering is a contract). The official grpc-go interop client passes its
-unary, metadata, status, `ping_pong`, and cancellation cases against such
-handlers on both cleartext and TLS listeners.
+See `examples/grpcserver`.
 
-## Limits, and the two we are least sure about
+## Limits
 
-Concurrency, queue depths, frame size, HPACK tables, header list size, cached
-strings, push depth, priority updates, and closed-stream tombstones are all
-bounded. Rapid resets past 1000/second kill the connection with
-`ENHANCE_YOUR_CALM`, and a CONTINUATION run past 64 frames does the same.
+Bounded: concurrent streams, event/command queues, frame size, HPACK tables,
+header list size, cached header strings, push depth, pending priority
+updates, closed-stream tombstones. More than 1000 RST_STREAM/s from a peer or
+a CONTINUATION run longer than 64 frames closes the connection with
+`ENHANCE_YOUR_CALM`.
 
-Two memory defaults were measured rather than guessed.
+Two defaults were chosen by measurement:
 
-**A 4 MiB connection receive window** (1 MiB per stream), matching HTTP/1's
-`MaxRequestBodySize`. It started at 16 MiB. Dropping it cost nothing measurable
-and helped small requests, which is the opposite of what a bigger window is
-supposed to do -- more buffering, worse locality:
+**Connection receive window: 4 MiB** (1 MiB per stream), same as HTTP/1's
+default `MaxRequestBodySize`. Configurable via
+`MaxUploadBufferPerConnection`.
 
-| | 16 MiB | 4 MiB | 1 MiB (x/net's server) |
+| | 16 MiB | 4 MiB | 1 MiB (x/net default) |
 | --- | ---: | ---: | ---: |
 | streamed 1 MiB upload | 309 us | 327 us | 394 us |
 | buffered 1 MiB POST | 191 us | 170 us | 205 us |
 | small GET, 100 streams | 5.84 us | 5.28 us | 5.16 us |
 | small GET, 1000 streams | 5.77 us | 5.49 us | 5.45 us |
 
-1 MiB is where streamed uploads start paying (+27%), so 4 MiB is the corner.
-`MaxUploadBufferPerConnection` raises it. The client keeps 4 MiB too, which is
-still conservative next to x/net's 1 GiB transport window.
+16 MiB doesn't help anything. 1 MiB makes streamed uploads 27% slower. So
+4 MiB.
 
-**A 128 MiB per-connection `RequestCtx` cache** (256 entries max). Released
-contexts are reset and kept on the connection before falling back to the Server
-pool, which keeps large body buffers attached to a busy multiplexed connection
-instead of losing them to the next GC. Lowering this one is not free -- a 1 MiB
-POST at a 32 MiB ceiling allocates 368 KB/op, and at 8 MiB it allocates 2.8
-MB/op, against 86 B/op at 128 MiB. The cost of keeping it is that unlike
-`Server.ctxPool` this memory is not GC-reclaimable: it is freed when the
-connection closes, and nowhere else. `Server.MaxProtocolRequestCtxCacheBytes`
-sets the ceiling, or disables the cache with a negative value. For comparison,
-x/net/http2 keeps no equivalent: it buffers bodies in fixed pools of at most
-16 KiB chunks, hardcoded, which is why it allocates per request where this
-does not.
+**Per-connection RequestCtx cache: 128 MiB** (max 256 entries). Released
+contexts are cached on the connection before falling back to the shared
+server pool, so a busy connection keeps its body buffers. Measured with 1 MiB
+POSTs: 86 B/op at 128 MiB, 368 KB/op at 32 MiB, 2.8 MB/op at 8 MiB. Downside:
+this memory is only freed when the connection closes, not by GC.
+`Server.MaxProtocolRequestCtxCacheBytes` changes the limit, negative disables
+the cache. x/net buffers bodies in fixed 16 KiB pools instead, which is why
+it allocates on every request.
 
-## Stream and connection teardown
+## Teardown
 
-Every stream ends at one finalizer owned by the connection: normal EOF, reset,
-response-pump completion, extended CONNECT completion, and forced shutdown all
-land there. It pools a stream only once the handler and the response pump are
-done and the wire state is terminal. User-visible body objects keep stable
-stream IDs rather than becoming a second release path.
+All stream ends (EOF, reset, response pump done, extended CONNECT done,
+forced shutdown) go through one finalizer owned by the connection. A stream
+returns to the pool only after the handler and the response pump have
+finished and the wire state is terminal.
 
-Shutdown sends a GOAWAY, uses a PING barrier to pin down the last stream it
-actually accepted, sends the final GOAWAY, then drains. If
-`ShutdownWithContext` runs out of time, connections are closed and the
-remaining streams cancelled.
+Shutdown: send GOAWAY, PING barrier to fix the last accepted stream ID, final
+GOAWAY, drain. If the shutdown context expires first, connections are closed
+and remaining streams cancelled.
 
-## Room for HTTP/3
+## HTTP/3
 
-The root package's protocol hooks cover request lifecycle, cancellation, push,
-informational responses, and bidirectional streams. `ProtocolRegistration` is
-deliberately a connection-oriented bridge for TCP protocols — it is not a
-QUIC abstraction, and no HTTP/2 frame, HPACK table, or HTTP/2 window escapes
-this package.
-
-An HTTP/3 package can therefore use QUIC streams, QPACK, and QUIC flow control
-as RFC 9114 and RFC 9204 describe, without emulating an HTTP/2 connection or
-teaching the root package a closed set of HTTP versions.
+The protocol hooks in the root package (request lifecycle, cancellation,
+push, informational responses, bidirectional streams) don't expose any
+HTTP/2 types. An HTTP/3 package can implement them with QUIC streams and
+QPACK directly.
 
 ## Testing
 
-Interoperability runs both ways against `golang.org/x/net/http2`, plus TLS
-ALPN, HTTP/1 fallback without a second dial, prior knowledge, same-port
-dispatch, streaming bodies, trailers, 103, push, extended CONNECT, half-close,
-GOAWAY, flow control, and rapid reset.
+Interop tests run both directions against `golang.org/x/net/http2`, plus:
+TLS ALPN, HTTP/1 fallback, prior knowledge, h2c upgrade, same-port dispatch,
+streaming, trailers, 103, push, extended CONNECT, GOAWAY, flow control,
+rapid reset. The grpc-go interop client passes directly and through nginx
+`grpc_pass`.
 
-h2spec 2.6.0 in strict mode passes, but it mostly covers RFC 7540/7541 — RFC
-9113 specifics, RFC 9218, RFC 8441, and rapid-reset handling are covered by
-tests here rather than inferred from the h2spec score. One h2spec case
-(`http2/6.9.2/2`) is skipped because it needs the server to still be sending
-when a shrunken window lands; `TestSettingsDecreaseDrivesSendWindowNegative`
-pins that behavior deterministically instead.
+h2spec 2.6.0 strict passes. h2spec mostly covers RFC 7540/7541; RFC 9113
+details, RFC 9218, RFC 8441 and rapid reset are covered by tests in this
+package. One h2spec case (`http2/6.9.2/2`) depends on catching the server
+mid-send and is skipped; `TestSettingsDecreaseDrivesSendWindowNegative`
+tests the same behavior deterministically.
 
-Fuzz targets are run during release validation. The repository's CIFuzz
-workflow does not build them, so it is not coverage for this package.
+Fuzz targets exist but the repo's CIFuzz workflow doesn't build them; they
+are run manually.

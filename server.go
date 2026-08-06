@@ -776,9 +776,6 @@ func (ctx *RequestCtx) EarlyHints() error {
 }
 
 // Push starts a server push request associated with ctx.
-//
-// Experimental: this method may change before it has shipped in two fasthttp
-// minor releases.
 func (ctx *RequestCtx) Push(target string, opts *PushOptions) error {
 	pusher, ok := ctx.protocolStream.(Pusher)
 	if !ok {
@@ -789,9 +786,6 @@ func (ctx *RequestCtx) Push(target string, opts *PushOptions) error {
 
 // AcceptStream accepts a bidirectional request stream. It does not change the
 // connection-oriented semantics of Hijack.
-//
-// Experimental: this method may change before it has shipped in two fasthttp
-// minor releases.
 func (ctx *RequestCtx) AcceptStream(handler StreamHandler) error {
 	if handler == nil {
 		return errors.New("fasthttp: stream handler is nil")

@@ -1,7 +1,7 @@
 // Command h2specserver serves a cleartext prior-knowledge endpoint for local
 // h2spec conformance runs:
 //
-//	go run ./http2/h2specserver -addr 127.0.0.1:8080 &
+//	go run ./examples/h2specserver -addr 127.0.0.1:8080 &
 //	h2spec --host 127.0.0.1 --port 8080 --strict
 package main
 
