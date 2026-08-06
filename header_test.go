@@ -4232,3 +4232,30 @@ func TestRequestHeaderEmptyPathWithQuery(t *testing.T) {
 		t.Fatalf("unexpected request line %q. Expecting %q", firstLine, "GET /?foo=bar HTTP/1.1")
 	}
 }
+
+func TestURIHostMemoIsBounded(t *testing.T) {
+	t.Parallel()
+
+	var u URI
+	big := bytes.Repeat([]byte("a"), 4096)
+	if err := u.Parse(big, []byte("/")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cap(u.hostRaw) > maxMemoizedHostLen || cap(u.hostParsed) > maxMemoizedHostLen {
+		t.Errorf("memo retained %d/%d bytes for a %d byte authority",
+			cap(u.hostRaw), cap(u.hostParsed), len(big))
+	}
+	// A normal authority is still memoized and still parses correctly.
+	if err := u.Parse([]byte("Example.COM:8080"), []byte("/")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(u.Host()) != "example.com:8080" {
+		t.Fatalf("host %q", u.Host())
+	}
+	if err := u.Parse([]byte("Example.COM:8080"), []byte("/")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(u.Host()) != "example.com:8080" {
+		t.Fatalf("memoized host %q", u.Host())
+	}
+}
