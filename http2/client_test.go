@@ -1480,3 +1480,43 @@ func TestFinalizeKeepsStreamOutOfPoolWhileDeadlineCallbackRuns(t *testing.T) {
 			stream.err, stream.resultSent)
 	}
 }
+
+// A connection reaching MaxIdleConnDuration closes itself, including after
+// going idle repeatedly.
+func TestIdleConnectionClosesAfterMaxIdleConnDuration(t *testing.T) {
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) { ctx.SetBodyString("ok") },
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	hc := &fasthttp.HostClient{
+		Addr:                testServer.listener.Addr().String(),
+		MaxIdleConnDuration: 150 * time.Millisecond,
+	}
+	if err := ConfigureHostClient(hc, ClientConfig{Mode: PriorKnowledge}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+
+	// Each request leaves the connection idle and re-arms the timer.
+	for range 3 {
+		request := fasthttp.AcquireRequest()
+		response := fasthttp.AcquireResponse()
+		request.SetRequestURI(testServer.URL("/"))
+		if err := hc.Do(request, response); err != nil {
+			t.Fatalf("Do() error: %v", err)
+		}
+		fasthttp.ReleaseRequest(request)
+		fasthttp.ReleaseResponse(response)
+		if got := hc.ConnsCount(); got != 1 {
+			t.Fatalf("connections = %d after a request, want 1", got)
+		}
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for hc.ConnsCount() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("idle connection outlived MaxIdleConnDuration")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

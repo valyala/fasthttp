@@ -212,6 +212,8 @@ type Server struct {
 	//
 	// The default behavior (when neither handler is set) is to automatically accept
 	// the request body.
+	//
+	// HTTP/1 only: Expect: 100-continue has no HTTP/2 equivalent.
 	ExpectHandler func(ctx *RequestCtx) int
 
 	// ConnState specifies an optional callback function that is
@@ -247,7 +249,8 @@ type Server struct {
 	protocols      []registeredProtocol
 	tlsConfigOwner *tls.Config
 
-	concurrencyCh chan struct{}
+	concurrencyCh     chan struct{}
+	concurrencyChOnce sync.Once
 
 	idleConns     map[net.Conn]*atomic.Int64
 	protocolConns map[net.Conn]struct{}
@@ -271,6 +274,10 @@ type Server struct {
 	//
 	// Concurrency only works if you either call Serve once, or only ServeConn multiple times.
 	// It works with ListenAndServe as well.
+	//
+	// This bounds connections, not requests. A multiplexed protocol runs many
+	// concurrent handlers per connection, so it bounds them by its own limit
+	// on concurrent streams instead.
 	Concurrency int
 
 	// Per-connection buffer size for requests' reading.
@@ -319,6 +326,8 @@ type Server struct {
 	// 'Connection: close' header is added to the last response.
 	//
 	// By default unlimited number of requests may be served per connection.
+	//
+	// HTTP/1 only: a registered protocol enforces its own limit, if any.
 	MaxRequestsPerConn int
 
 	// MaxKeepaliveDuration is a no-op and only left here for backwards compatibility.
@@ -504,7 +513,7 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 	}
 
 	return func(ctx *RequestCtx) {
-		concurrencyCh := ctx.s.concurrencyCh
+		concurrencyCh := ctx.s.getConcurrencyCh()
 		select {
 		case concurrencyCh <- struct{}{}:
 		default:
@@ -533,6 +542,9 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 }
 
 // RequestConfig configure the per request deadline and body limits.
+//
+// ReadTimeout and WriteTimeout are HTTP/1 only: they become deadlines on the
+// connection, which a multiplexed protocol shares between requests.
 type RequestConfig struct {
 	// ReadTimeout is the maximum duration for reading the entire
 	// request body.
@@ -919,6 +931,16 @@ type tlsConn interface {
 // IsTLS returns true if the underlying connection is tls.Conn.
 //
 // tls.Conn is an encrypted connection (aka SSL, HTTPS).
+// tlsConnection unwraps ctx.c to its TLS connection, if it is one.
+func (ctx *RequestCtx) tlsConnection() (tlsConn, bool) {
+	conn := ctx.c
+	if pic, ok := conn.(*perIPConn); ok {
+		conn = pic.Conn
+	}
+	tc, ok := conn.(tlsConn)
+	return tc, ok
+}
+
 func (ctx *RequestCtx) IsTLS() bool {
 	// cast to (tlsConn) instead of (*tls.Conn), since it catches
 	// cases with overridden tls.Conn such as:
@@ -930,12 +952,7 @@ func (ctx *RequestCtx) IsTLS() bool {
 	// }
 
 	// perIPConn wraps the net.Conn in the Conn field
-	if pic, ok := ctx.c.(*perIPConn); ok {
-		_, ok := pic.Conn.(tlsConn)
-		return ok
-	}
-
-	_, ok := ctx.c.(tlsConn)
+	_, ok := ctx.tlsConnection()
 	return ok
 }
 
@@ -946,7 +963,7 @@ func (ctx *RequestCtx) IsTLS() bool {
 // The returned state may be used for verifying TLS version, client certificates,
 // etc.
 func (ctx *RequestCtx) TLSConnectionState() *tls.ConnectionState {
-	tc, ok := ctx.c.(tlsConn)
+	tc, ok := ctx.tlsConnection()
 	if !ok {
 		return nil
 	}
@@ -1056,8 +1073,11 @@ func (ctx *RequestCtx) String() string {
 }
 
 // ID returns unique ID of the request.
+//
+// ConnID occupies the high 32 bits and ConnRequestNum the low 32, so the ID
+// repeats once either passes 2^32. Use those accessors to avoid the wrap.
 func (ctx *RequestCtx) ID() uint64 {
-	return (ctx.connID << 32) | ctx.connRequestNum
+	return (ctx.connID << 32) | (ctx.connRequestNum & 0xffffffff)
 }
 
 // ConnID returns unique connection ID.
@@ -2062,9 +2082,11 @@ func (s *Server) Serve(ln net.Listener) error {
 	if s.done == nil {
 		s.done = make(chan struct{})
 	}
-	if s.concurrencyCh == nil {
-		s.concurrencyCh = make(chan struct{}, maxWorkersCount)
-	}
+	s.concurrencyChOnce.Do(func() {
+		if s.concurrencyCh == nil {
+			s.concurrencyCh = make(chan struct{}, maxWorkersCount)
+		}
+	})
 	s.mu.Unlock()
 
 	wp := &workerPool{
@@ -2371,6 +2393,17 @@ func (s *Server) getConcurrency() int {
 		n = DefaultConcurrency
 	}
 	return n
+}
+
+// getConcurrencyCh returns the gate TimeoutHandler admits requests through.
+// Serve allocates it up front; ServeConn and ServeConnTLS never call Serve.
+func (s *Server) getConcurrencyCh() chan struct{} {
+	s.concurrencyChOnce.Do(func() {
+		if s.concurrencyCh == nil {
+			s.concurrencyCh = make(chan struct{}, s.getConcurrency())
+		}
+	})
+	return s.concurrencyCh
 }
 
 var globalConnID uint64

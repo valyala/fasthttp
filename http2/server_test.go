@@ -1524,8 +1524,7 @@ func TestSettingsDecreaseDrivesSendWindowNegative(t *testing.T) {
 // A connection must not leave handler workers parked after it closes.
 func TestStreamWorkersDoNotLeak(t *testing.T) {
 	before := runtime.NumGoroutine()
-	// Each round runs as a subtest so its server and client shut down before
-	// the next one starts; t.Cleanup would otherwise defer that past the count.
+	// Subtests so each round's cleanup runs before the next one starts.
 	for round := range 5 {
 		t.Run(fmt.Sprintf("round-%d", round), func(t *testing.T) {
 			server := &fasthttp.Server{

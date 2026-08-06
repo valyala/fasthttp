@@ -228,9 +228,8 @@ func (c *ProtocolClientConn) RoundTripHTTP1(req *Request, resp *Response) (bool,
 
 var protocolClientContextPool sync.Pool
 
-// acquireProtocolClientContext pools the context because it escapes: it is
-// only ever reached through an interface method, and a transport must not
-// retain it past the call that receives it.
+// acquireProtocolClientContext pools the context, which escapes because it is
+// only reached through an interface method. Transports must not retain it.
 func (c *HostClient) acquireProtocolClientContext(req *Request) *ProtocolClientContext {
 	ctx, _ := protocolClientContextPool.Get().(*ProtocolClientContext)
 	if ctx == nil {
