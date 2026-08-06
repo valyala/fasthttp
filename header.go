@@ -2352,6 +2352,17 @@ func (h *RequestHeader) readLoop(r *bufio.Reader, waitForMore bool) error {
 
 func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 	h.resetSkipNormalize()
+	if r.Buffered() >= n {
+		headersLen, errParse := h.parse(mustPeekBuffered(r))
+		if errParse != nil {
+			return headerError("request", nil, errParse, mustPeekBuffered(r), h.secureErrorLogMessage)
+		}
+		if errValidate := h.validate(); errValidate != nil {
+			return headerError("request", nil, errValidate, mustPeekBuffered(r), h.secureErrorLogMessage)
+		}
+		mustDiscard(r, headersLen)
+		return nil
+	}
 	b, err := r.Peek(n)
 	if len(b) == 0 {
 		if err == io.EOF {
