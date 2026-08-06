@@ -16,6 +16,12 @@ import (
 
 type protocolHandlerFunc func(*ProtocolServerContext, net.Conn) error
 
+type upgraderHandlerFunc struct{ protocolHandlerFunc }
+
+func (upgraderHandlerFunc) UpgradeConn(*ProtocolServerContext, net.Conn, *Request) (bool, error) {
+	return false, nil
+}
+
 func (f protocolHandlerFunc) ServeConn(ctx *ProtocolServerContext, c net.Conn) error {
 	return f(ctx, c)
 }
@@ -139,6 +145,23 @@ func TestServerRegisterProtocol(t *testing.T) {
 				CleartextPreface: []byte("PROTOCOL"),
 				Handler:          validHandler,
 			}},
+		},
+		{
+			name: "upgrade token without upgrader",
+			registrations: []ProtocolRegistration{{
+				ALPN:                  []string{"example"},
+				CleartextUpgradeToken: "example",
+				Handler:               validHandler,
+			}},
+			wantError: true,
+		},
+		{
+			name: "duplicate upgrade token",
+			registrations: []ProtocolRegistration{
+				{ALPN: []string{"a"}, CleartextUpgradeToken: "example", Handler: upgraderHandlerFunc{validHandler}},
+				{ALPN: []string{"b"}, CleartextUpgradeToken: "example", Handler: upgraderHandlerFunc{validHandler}},
+			},
+			wantError: true,
 		},
 	}
 
@@ -377,6 +400,9 @@ func TestProtocolRequestCtxCacheRetainsBodyCapacity(t *testing.T) {
 	protocolContext.releaseCachedRequestCtxs()
 	if protocolContext.requestBytes != 0 || len(protocolContext.requestCache) != 0 {
 		t.Fatal("connection-local request cache was not drained")
+	}
+	if got := cap(first.Request.Body()); got != 0 {
+		t.Fatalf("drained cache kept %d bytes of body in the server-wide pool", got)
 	}
 }
 

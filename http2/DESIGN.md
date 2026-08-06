@@ -103,6 +103,15 @@ for the peer's `SETTINGS_ENABLE_CONNECT_PROTOCOL=1` before sending
 DATA as a `fasthttp.StreamConn` whose close, half-close, and deadlines are
 scoped to that stream.
 
+gRPC needs no dedicated API. Unary methods are ordinary handlers plus
+`AddTrailer`; bidirectional streaming composes `Server.StreamRequestBody`,
+`RequestCtx.RequestBodyStream`, and `SetBodyStreamWriter` — each `Flush`
+becomes a DATA boundary, and response trailers are encoded only after the
+body stream writer returns, so the writer may still set their values (this
+ordering is a contract). The official grpc-go interop client passes its
+unary, metadata, status, `ping_pong`, and cancellation cases against such
+handlers on both cleartext and TLS listeners.
+
 ## Limits, and the two we are least sure about
 
 Concurrency, queue depths, frame size, HPACK tables, header list size, cached

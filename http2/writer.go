@@ -65,12 +65,6 @@ type asyncFrameWriter struct {
 	deadline time.Time
 }
 
-// setDeadline records the deadline of the goroutine that currently owns the
-// write slot. A zero value waits indefinitely.
-func (w *asyncFrameWriter) setDeadline(deadline time.Time) {
-	w.deadline = deadline
-}
-
 func newAsyncFrameWriter(
 	conn net.Conn,
 	batchSize int,
@@ -90,6 +84,12 @@ func newAsyncFrameWriter(
 	w.active = w.acquireBuffer()
 	go w.writeLoop()
 	return w
+}
+
+// setDeadline records the deadline of the goroutine that currently owns the
+// write slot. A zero value waits indefinitely.
+func (w *asyncFrameWriter) setDeadline(deadline time.Time) {
+	w.deadline = deadline
 }
 
 func (w *asyncFrameWriter) Write(p []byte) (int, error) {
@@ -227,32 +227,6 @@ func (w *asyncFrameWriter) closeAndWait(timeout time.Duration) error {
 	}
 	w.stopOnce.Do(func() { close(w.stop) })
 	return w.waitDone(timeout)
-}
-
-func sendWriteBarrier(
-	queue chan<- frameWriteBatch,
-	stop <-chan struct{},
-	barrier chan error,
-	timeout time.Duration,
-) bool {
-	if timeout <= 0 {
-		select {
-		case queue <- frameWriteBatch{barrier: barrier}:
-			return true
-		case <-stop:
-			return false
-		}
-	}
-	timer := fasthttp.AcquireTimer(timeout)
-	defer fasthttp.ReleaseTimer(timer)
-	select {
-	case queue <- frameWriteBatch{barrier: barrier}:
-		return true
-	case <-stop:
-		return false
-	case <-timer.C:
-		return false
-	}
 }
 
 // waitWriteBarrier waits for the write loop to reach the barrier, or to exit.
@@ -465,3 +439,29 @@ type fasthttpWriteTimeoutError struct{}
 func (fasthttpWriteTimeoutError) Error() string   { return "http2: write timeout" }
 func (fasthttpWriteTimeoutError) Timeout() bool   { return true }
 func (fasthttpWriteTimeoutError) Temporary() bool { return true }
+
+func sendWriteBarrier(
+	queue chan<- frameWriteBatch,
+	stop <-chan struct{},
+	barrier chan error,
+	timeout time.Duration,
+) bool {
+	if timeout <= 0 {
+		select {
+		case queue <- frameWriteBatch{barrier: barrier}:
+			return true
+		case <-stop:
+			return false
+		}
+	}
+	timer := fasthttp.AcquireTimer(timeout)
+	defer fasthttp.ReleaseTimer(timer)
+	select {
+	case queue <- frameWriteBatch{barrier: barrier}:
+		return true
+	case <-stop:
+		return false
+	case <-timer.C:
+		return false
+	}
+}

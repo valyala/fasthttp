@@ -180,6 +180,7 @@ type clientConn struct {
 	streams                  map[uint32]*clientStream
 	nextStreamID             uint32
 	activeStreams            uint32
+	activePushStreams        uint32
 	peerMaxConcurrentStreams uint32
 	peerInitialStreamWindow  int64
 	peerConnectionWindow     int64
@@ -260,8 +261,12 @@ func (c *clientConn) writePrefaceAndSettings() (err error) {
 	if _, err := io.WriteString(c.bufferedWriter, clientPreface); err != nil {
 		return err
 	}
+	enablePush := uint32(0)
+	if c.config.pushHandler != nil {
+		enablePush = 1
+	}
 	settings := []xhttp2.Setting{
-		{ID: xhttp2.SettingEnablePush, Val: boolSetting(c.config.pushHandler != nil)},
+		{ID: xhttp2.SettingEnablePush, Val: enablePush},
 		{ID: xhttp2.SettingMaxConcurrentStreams, Val: c.config.maxConcurrentStreams},
 		{ID: xhttp2.SettingInitialWindowSize, Val: uint32(c.config.streamWindowSize)},
 		{ID: xhttp2.SettingMaxFrameSize, Val: c.config.maxReadFrameSize},
@@ -284,13 +289,6 @@ func (c *clientConn) writePrefaceAndSettings() (err error) {
 	return c.bufferedWriter.Flush()
 }
 
-func boolSetting(value bool) uint32 {
-	if value {
-		return 1
-	}
-	return 0
-}
-
 func (c *clientConn) reserveStream(
 	req *fasthttp.Request,
 	resp *fasthttp.Response,
@@ -300,7 +298,10 @@ func (c *clientConn) reserveStream(
 ) *clientStream {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed || c.goAway || c.nextStreamID > math.MaxInt32 || c.activeStreams >= c.peerMaxConcurrentStreams {
+	// Pushes are peer-initiated; neither limit applies to them here.
+	streamLimit := min(c.config.maxConcurrentStreams, c.peerMaxConcurrentStreams)
+	if c.closed || c.goAway || c.nextStreamID > math.MaxInt32 ||
+		c.activeStreams-c.activePushStreams >= streamLimit {
 		return nil
 	}
 	if c.hc.MaxConnDuration > 0 && now.Sub(c.created) >= c.hc.MaxConnDuration {
@@ -402,17 +403,6 @@ func (c *clientConn) openStream(
 		c.cancelStream(stream, xhttp2.ErrCodeCancel, err, false)
 	}
 	return c.waitResult(stream, phaseDeadline(deadline, ctx.ReadTimeout()))
-}
-
-func phaseDeadline(requestDeadline time.Time, timeout time.Duration) time.Time {
-	if timeout <= 0 {
-		return requestDeadline
-	}
-	deadline := time.Now().Add(timeout)
-	if !requestDeadline.IsZero() && requestDeadline.Before(deadline) {
-		return requestDeadline
-	}
-	return deadline
 }
 
 func (c *clientConn) waitResult(stream *clientStream, deadline time.Time) clientResult {
@@ -540,6 +530,7 @@ func (c *clientConn) maybeFinalizeStreamLocked(stream *clientStream) {
 	}
 	c.activeStreams--
 	if stream.isPush {
+		c.activePushStreams--
 		request := stream.promisedRequest
 		response := stream.resp
 		if stream.pushComplete {
@@ -655,4 +646,15 @@ func (c *clientConn) shutdownWriter(cause error, graceful bool) {
 	}
 	defer c.releaseWrite()
 	_ = c.writer.closeAndWait(gracefulWriterDrainTimeout)
+}
+
+func phaseDeadline(requestDeadline time.Time, timeout time.Duration) time.Time {
+	if timeout <= 0 {
+		return requestDeadline
+	}
+	deadline := time.Now().Add(timeout)
+	if !requestDeadline.IsZero() && requestDeadline.Before(deadline) {
+		return requestDeadline
+	}
+	return deadline
 }

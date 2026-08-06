@@ -12,6 +12,13 @@ import (
 	"golang.org/x/net/http2/hpack"
 )
 
+type decodedClientHeaders struct {
+	streamID  uint32
+	endStream bool
+	truncated bool
+	fields    []hpack.HeaderField
+}
+
 func (c *clientConn) readLoop() {
 	waitingForPing := false
 	awaitingFirstFrame := true
@@ -108,13 +115,6 @@ func (c *clientConn) processFrame(frame xhttp2.Frame) error {
 	default:
 		return nil
 	}
-}
-
-type decodedClientHeaders struct {
-	streamID  uint32
-	endStream bool
-	truncated bool
-	fields    []hpack.HeaderField
 }
 
 func (c *clientConn) processDecodedResponseHeaders(frame *headersFrame) error {
@@ -707,7 +707,7 @@ func (c *clientConn) processPushPromise(frame *xhttp2.PushPromiseFrame) error {
 	}
 	c.lastPromisedStreamID = frame.PromiseID
 	pushDisabled := c.config.pushHandler == nil
-	reject := parent == nil || c.activeStreams >= c.config.maxConcurrentStreams
+	reject := parent == nil || c.activePushStreams >= c.config.maxConcurrentStreams
 	c.mu.Unlock()
 	if pushDisabled {
 		return xhttp2.ConnectionError(xhttp2.ErrCodeProtocol)
@@ -770,7 +770,7 @@ func (c *clientConn) finishPushPromise(
 
 	response := fasthttp.AcquireResponse()
 	c.mu.Lock()
-	if c.closed || c.activeStreams >= c.config.maxConcurrentStreams {
+	if c.closed || c.activePushStreams >= c.config.maxConcurrentStreams {
 		c.mu.Unlock()
 		fasthttp.ReleaseRequest(promised)
 		fasthttp.ReleaseResponse(response)
@@ -798,6 +798,7 @@ func (c *clientConn) finishPushPromise(
 	}
 	c.streams[stream.id] = stream
 	c.activeStreams++
+	c.activePushStreams++
 	c.mu.Unlock()
 	return nil
 }
