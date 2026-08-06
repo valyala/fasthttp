@@ -85,6 +85,7 @@ func (c *serverConn) bootstrapUpgradedStream(request *fasthttp.Request) {
 	requestCtx := c.protocolContext.AcquireRequestCtx(c.conn, stream)
 	stream.request = requestCtx
 	request.CopyTo(&requestCtx.Request)
+	requestCtx.Request.Header.SetProtocol("HTTP/2")
 	requestCtx.Request.Header.Del(fasthttp.HeaderConnection)
 	requestCtx.Request.Header.Del(fasthttp.HeaderUpgrade)
 	requestCtx.Request.Header.Del("HTTP2-Settings")

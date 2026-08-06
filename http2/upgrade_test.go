@@ -20,7 +20,8 @@ func upgradeTestServer(t *testing.T) net.Listener {
 	t.Helper()
 	server := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {
-			fmt.Fprintf(ctx, "%s %s body=%s", ctx.Method(), ctx.Path(), ctx.Request.Body())
+			fmt.Fprintf(ctx, "%s %s %s body=%s",
+				ctx.Method(), ctx.Path(), ctx.Request.Header.Protocol(), ctx.Request.Body())
 		},
 	}
 	if err := ConfigureServer(server, ServerConfig{}); err != nil {
@@ -108,7 +109,7 @@ func TestUpgradeH2C(t *testing.T) {
 				if status != "200" {
 					t.Fatalf("status = %q, want 200", status)
 				}
-				if got, want := body.String(), "POST /up body=abc"; got != want {
+				if got, want := body.String(), "POST /up HTTP/2 body=abc"; got != want {
 					t.Fatalf("body = %q, want %q", got, want)
 				}
 				return
@@ -128,6 +129,28 @@ func TestUpgradeH2CInvalidSettingsServesHTTP1(t *testing.T) {
 
 	fmt.Fprintf(conn, "GET /plain HTTP/1.1\r\nHost: example.com\r\n"+
 		"Connection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: %s\r\n\r\n", "!!!not-base64!!!")
+
+	reader := bufio.NewReader(conn)
+	response := readHTTP1Response(t, reader)
+	if !strings.HasPrefix(response, "HTTP/1.1 200 ") {
+		t.Fatalf("response = %q, want plain HTTP/1 200", response)
+	}
+}
+
+func TestUpgradeH2CIgnoredForHTTP10(t *testing.T) {
+	listener := upgradeTestServer(t)
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	// keep-alive suppresses the Connection: close fasthttp otherwise implies
+	// for HTTP/1.0, which would hide the Upgrade token on its own.
+	fmt.Fprintf(conn, "GET /plain HTTP/1.0\r\nHost: example.com\r\n"+
+		"Connection: keep-alive, Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\n"+
+		"HTTP2-Settings: %s\r\n\r\n", h2SettingsHeader)
 
 	reader := bufio.NewReader(conn)
 	response := readHTTP1Response(t, reader)

@@ -2935,6 +2935,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 }
 
 func (s *Server) matchProtocolUpgrade(ctx *RequestCtx, br *bufio.Reader) *registeredProtocol {
+	// RFC 9110 7.8: an Upgrade field in an HTTP/1.0 request must be ignored.
+	if !ctx.Request.Header.IsHTTP11() {
+		return nil
+	}
 	if ctx.IsTLS() || ctx.Request.IsBodyStream() {
 		return nil
 	}

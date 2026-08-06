@@ -200,7 +200,7 @@ func newServerConn(
 	config *serverConfig,
 ) *serverConn {
 	ctx, cancel := context.WithCancelCause(context.Background())
-	maxCommands := min(int(config.maxConcurrentStreams)*2+32, config.maxQueuedControlFrames)
+	maxCommands := min(int(config.maxConcurrentStreams)*2+32, config.maxQueuedCommands)
 	conn := &serverConn{
 		protocolContext:          protocolContext,
 		server:                   protocolContext.Server(),
@@ -1497,6 +1497,15 @@ func (c *serverConn) handleHandlerDone(
 			errors.New("http2: 204 response cannot contain a body or content-length"),
 		)
 	}
+	// DATA on an established tunnel is tunnel bytes, not a body to measure.
+	establishesTunnel := requestCtx.Request.Header.IsConnect() && statusCode >= 200 && statusCode < 300
+	if establishesTunnel && len(requestCtx.Response.Header.Peek(fasthttp.HeaderContentLength)) != 0 {
+		return c.resetStream(
+			stream.id,
+			xhttp2.ErrCodeInternal,
+			errors.New("http2: 2xx response to CONNECT cannot have content-length"),
+		)
+	}
 
 	stream.acceptMu.Lock()
 	streamHandler := stream.streamHandler
@@ -1534,7 +1543,8 @@ func (c *serverConn) handleHandlerDone(
 	var bufferedBody []byte
 	if !requestCtx.Response.IsBodyStream() {
 		bufferedBody = requestCtx.Response.Body()
-		if len(requestCtx.Response.Header.Peek(fasthttp.HeaderContentLength)) == 0 &&
+		if !establishesTunnel &&
+			len(requestCtx.Response.Header.Peek(fasthttp.HeaderContentLength)) == 0 &&
 			(!responseMustNotHaveBody(requestCtx) || len(bufferedBody) != 0) {
 			requestCtx.Response.Header.SetContentLength(len(bufferedBody))
 		}
