@@ -5554,3 +5554,159 @@ func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestServerDefaultServerHeaderVisibleToHandler(t *testing.T) {
+	t.Parallel()
+
+	for name, h := range map[string]RequestHandler{
+		"Server": func(ctx *RequestCtx) { ctx.SetBody(ctx.Response.Header.Server()) },
+		"Peek":   func(ctx *RequestCtx) { ctx.SetBody(ctx.Response.Header.Peek(HeaderServer)) },
+		"All": func(ctx *RequestCtx) {
+			for k, v := range ctx.Response.Header.All() {
+				if string(k) == HeaderServer {
+					ctx.SetBody(v)
+				}
+			}
+		},
+		"CopyTo": func(ctx *RequestCtx) {
+			var cp ResponseHeader
+			ctx.Response.Header.CopyTo(&cp)
+			ctx.SetBody(cp.Server())
+		},
+	} {
+		s := &Server{Name: "edge", Handler: h}
+		rw := &readWriter{}
+		rw.r.WriteString("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatalf("%s: unexpected error: %v", name, err)
+		}
+		out := rw.w.String()
+		if body := out[strings.Index(out, "\r\n\r\n")+4:]; body != "edge" {
+			t.Errorf("%s: handler saw %q, expecting %q", name, body, "edge")
+		}
+		if !strings.Contains(out, "Server: edge\r\n") {
+			t.Errorf("%s: Server header missing from the response", name)
+		}
+	}
+}
+
+func TestServerDefaultServerHeaderReappliedAfterDel(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{Name: "edge", Handler: func(ctx *RequestCtx) {
+		ctx.Response.Header.Del(HeaderServer)
+		if got := ctx.Response.Header.Server(); len(got) != 0 {
+			t.Errorf("Server()=%q after Del, expecting empty", got)
+		}
+		ctx.SetBodyString("x")
+	}}
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The default is re-applied after the handler, as it always has been.
+	if !strings.Contains(rw.w.String(), "Server: edge\r\n") {
+		t.Error("default Server header was not re-applied")
+	}
+}
+
+func TestServerNameWithNewlinesCannotSplitHeaders(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		Name:    "edge\r\nX-Injected: yes",
+		Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+	}
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: x\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := rw.w.String()
+	if !strings.Contains(out, "Server: edge  X-Injected: yes\r\n") {
+		t.Errorf("Server name was not stripped of newlines: %q", out)
+	}
+	head, _, _ := strings.Cut(out, "\r\n\r\n")
+	if n := strings.Count(head, "\r\n"); n != 4 {
+		t.Errorf("response has %d header lines, expecting 4: %q", n, out)
+	}
+}
+
+func TestServerDefaultServerHeaderCannotBeAppendedInto(t *testing.T) {
+	t.Parallel()
+
+	// The default is served from a line shared by every connection, so a
+	// handler appending to what Server() returns must not reach it.
+	var second string
+	requestNum := 0
+	s := &Server{Name: "edge", Handler: func(ctx *RequestCtx) {
+		requestNum++
+		if requestNum == 1 {
+			_ = append(ctx.Response.Header.Server(), 'X')
+		}
+		ctx.SetBodyString("x")
+	}}
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: x\r\n\r\nGET / HTTP/1.1\r\nHost: x\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := rw.w.String()
+	if i := strings.LastIndex(out, "HTTP/1.1 200"); i >= 0 {
+		second = out[i:]
+	}
+	if !strings.Contains(second, "Server: edge\r\n") {
+		t.Errorf("the shared Server line was corrupted: %q", second)
+	}
+	if strings.Contains(out, "edgeX") {
+		t.Errorf("append reached the cached line: %q", out)
+	}
+}
+
+func TestServerExpectHandlerServerHeaderPrecedence(t *testing.T) {
+	t.Parallel()
+
+	// The configured name replaces a Server value set before the handler runs,
+	// as the per-request Set it used to be did; the handler's own value wins.
+	s := &Server{
+		Name: "configured",
+		ExpectHandler: func(ctx *RequestCtx) int {
+			ctx.Response.Header.SetServer("expect")
+			return StatusContinue
+		},
+		Handler: func(ctx *RequestCtx) {
+			if string(ctx.Response.Header.Server()) != "configured" {
+				t.Errorf("Server()=%q in the handler, expecting configured", ctx.Response.Header.Server())
+			}
+			if string(ctx.Path()) == "/override" {
+				ctx.Response.Header.SetServer("handler")
+			}
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	serverCh := make(chan error, 1)
+	go func() { serverCh <- s.Serve(ln) }()
+
+	for _, tc := range []struct{ path, want string }{{"/", "configured"}, {"/override", "handler"}} {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("POST " + tc.path + " HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\nhello")); err != nil {
+			t.Fatal(err)
+		}
+		var resp Response
+		if err := resp.Read(bufio.NewReader(c)); err != nil {
+			t.Fatal(err)
+		}
+		if got := string(resp.Header.Server()); got != tc.want {
+			t.Errorf("%s: Server=%q, expecting %q", tc.path, got, tc.want)
+		}
+		c.Close()
+	}
+	ln.Close()
+	if err := <-serverCh; err != nil {
+		t.Fatal(err)
+	}
+}
