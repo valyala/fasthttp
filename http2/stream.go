@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -701,23 +702,23 @@ func (timeoutError) Temporary() bool { return true }
 
 // readWithStreamDeadline blocks in one read, cancelling the stream at deadline
 // to unblock it. A read woken that way reports a timeout rather than the
-// closed-stream error the cancellation itself produced.
+// closed-stream error the cancellation itself produced. The read and the
+// deadline race to claim the outcome, so a read that already holds data leaves
+// the stream alive instead of reporting success on a cancelled one.
 func readWithStreamDeadline(read io.Reader, p []byte, deadline time.Time, cancel func()) (int, error) {
 	if time.Until(deadline) <= 0 {
 		return 0, timeoutError{}
 	}
-	expired := make(chan struct{})
+	var claimed atomic.Bool
 	timer := time.AfterFunc(time.Until(deadline), func() {
-		close(expired)
-		cancel()
+		if claimed.CompareAndSwap(false, true) {
+			cancel()
+		}
 	})
 	n, err := read.Read(p)
-	if !timer.Stop() {
-		select {
-		case <-expired:
-			return n, timeoutError{}
-		default:
-		}
+	timer.Stop()
+	if !claimed.CompareAndSwap(false, true) {
+		return n, timeoutError{}
 	}
 	return n, err
 }

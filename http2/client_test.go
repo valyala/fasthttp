@@ -725,6 +725,84 @@ func TestClientInteroperatesWithGoHTTP2Server(t *testing.T) {
 	}
 }
 
+func TestConnectSuccessHasNoContentLength(t *testing.T) {
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			ctx.SetStatusCode(fasthttp.StatusOK)
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	hc := &fasthttp.HostClient{Addr: testServer.listener.Addr().String()}
+	if err := ConfigureHostClient(hc, ClientConfig{Mode: PriorKnowledge}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+	req.Header.SetMethod(fasthttp.MethodConnect)
+	req.SetRequestURI(testServer.URL("/"))
+	if err := hc.Do(req, resp); err != nil {
+		t.Fatalf("Do() error: %v", err)
+	}
+	if got := resp.StatusCode(); got != fasthttp.StatusOK {
+		t.Fatalf("status = %d, want 200", got)
+	}
+	if got := resp.Header.Peek(fasthttp.HeaderContentLength); len(got) != 0 {
+		t.Fatalf("2xx CONNECT response carried content-length = %q", got)
+	}
+}
+
+func TestConnectSuccessRejectsContentLength(t *testing.T) {
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			ctx.SetStatusCode(fasthttp.StatusOK)
+			ctx.Response.Header.SetContentLength(0)
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	peer := dialRawPeer(t, testServer.listener.Addr().String())
+	peer.writeHeaders(1, true,
+		[2]string{":method", fasthttp.MethodConnect},
+		[2]string{":authority", "example.com"},
+	)
+	counts, kind := peer.waitForAny(2*time.Second, "rst_INTERNAL_ERROR", "headers")
+	if kind != "rst_INTERNAL_ERROR" {
+		t.Fatalf("waitForAny() = %q (%v), want rst_INTERNAL_ERROR", kind, counts)
+	}
+}
+
+func TestResponseCarriesConnectionAddrs(t *testing.T) {
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			ctx.SetBodyString("ok")
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	hc := &fasthttp.HostClient{Addr: testServer.listener.Addr().String()}
+	if err := ConfigureHostClient(hc, ClientConfig{Mode: PriorKnowledge}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+	req.SetRequestURI(testServer.URL("/"))
+	if err := hc.Do(req, resp); err != nil {
+		t.Fatalf("Do() error: %v", err)
+	}
+	if resp.RemoteAddr() == nil {
+		t.Fatal("Response.RemoteAddr() is nil")
+	}
+	if resp.LocalAddr() == nil {
+		t.Fatal("Response.LocalAddr() is nil")
+	}
+}
+
 func TestExtendedConnectStream(t *testing.T) {
 	server := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {
