@@ -1,6 +1,7 @@
 package http2
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -53,6 +54,7 @@ type incomingFrame struct {
 	priority        string
 	dependency      uint32
 	hasPriority     bool
+	morePending     bool
 	err             error
 	fieldStorage    *incomingHeaderFieldStorage
 	dataBuffer      *incomingDataBuffer
@@ -102,6 +104,7 @@ const (
 type serverCommand struct {
 	kind       serverCommandKind
 	streamID   uint32
+	handlerGen uint32
 	requestCtx *fasthttp.RequestCtx
 	statusCode int
 	header     *fasthttp.ResponseHeader
@@ -149,6 +152,10 @@ type serverConn struct {
 	workers  sync.WaitGroup
 
 	streams            map[uint32]*serverStream
+	flushQueue         []uint32
+	pendingHandlers    int
+	handlerGen         uint32
+	cycleTime          time.Time
 	lastClientStreamID uint32
 	lastProcessedID    uint32
 	isGoingAway        bool
@@ -260,9 +267,14 @@ func (c *serverConn) serve() (retErr error) {
 		c.config.writeByteTimeout,
 	)
 	c.bufferedWriter = c.writer
-	c.framer = xhttp2.NewFramer(c.bufferedWriter, c.conn)
+	readBufferSize := c.server.ReadBufferSize
+	if readBufferSize <= 0 {
+		readBufferSize = defaultReadBufferSize
+	}
+	reader := bufio.NewReaderSize(c.conn, readBufferSize)
+	c.framer = xhttp2.NewFramer(c.bufferedWriter, reader)
 	c.framer.SetReuseFrames()
-	c.frames = newFrameReader(c.framer, c.conn)
+	c.frames = newFrameReader(c.framer, reader)
 	c.headerDecoder = newHeaderCodec(c.config.maxDecoderTableSize, c.config.maxHeaderListSize)
 	c.framer.SetMaxReadFrameSize(c.config.maxReadFrameSize)
 	if err := c.writeInitialSettings(); err != nil {
@@ -281,17 +293,26 @@ func (c *serverConn) serve() (retErr error) {
 	}
 	idleArmed := idleTimer != nil
 	var shutdownTimer *time.Timer
+	// Owned by this goroutine and never pooled: a pooled 1ms timer expires so
+	// often that releasing it mid-expiry trips initTimer's sanity check.
+	var coalesceTimer *time.Timer
+	coalesceArmed := false
 	defer func() {
 		if shutdownTimer != nil {
 			shutdownTimer.Stop()
+		}
+		if coalesceTimer != nil {
+			coalesceTimer.Stop()
 		}
 	}()
 	for {
 		if c.isGoingAway && len(c.streams) == 0 {
 			return nil
 		}
+		expectMore := false
 		select {
 		case event := <-c.events:
+			expectMore = event.morePending
 			if closeConnection, err := c.handleIncomingEvent(&event); closeConnection {
 				return err
 			}
@@ -326,24 +347,76 @@ func (c *serverConn) serve() (retErr error) {
 		case <-c.ctx.Done():
 			return context.Cause(c.ctx)
 		}
-		// Drain up to 63 more ready events/commands (64 per cycle with the
-		// blocking receive above) before flushing, so one syscall carries a
-		// batch of frames without letting a busy peer starve the flush.
+		// Cycle-grained is plenty for the 10s worker idle reaper.
+		c.cycleTime = time.Now()
+		// Drain up to 63 more events/commands before flushing, so one burst
+		// becomes one write. Dry channels don't end the batch while frames are
+		// still buffered or started handlers haven't reported back; the timer
+		// bounds that wait in case such a handler is slow.
+		coalesceProgress := false
+	drain:
 		for range 63 {
 			select {
 			case event := <-c.events:
+				expectMore = event.morePending
+				coalesceProgress = true
+				if closeConnection, err := c.handleIncomingEvent(&event); closeConnection {
+					return err
+				}
+				continue
+			case command := <-c.commands:
+				coalesceProgress = true
+				if err := c.processCommand(&command); err != nil {
+					return c.failConnection(xhttp2.ErrCodeInternal, err)
+				}
+				continue
+			default:
+			}
+			if !expectMore && c.pendingHandlers == 0 {
+				break
+			}
+			if !coalesceArmed {
+				if coalesceTimer == nil {
+					coalesceTimer = time.NewTimer(flushCoalesceTimeout)
+				} else {
+					coalesceTimer.Reset(flushCoalesceTimeout)
+				}
+				coalesceArmed = true
+				coalesceProgress = false
+			}
+			select {
+			case event := <-c.events:
+				expectMore = event.morePending
+				coalesceProgress = true
 				if closeConnection, err := c.handleIncomingEvent(&event); closeConnection {
 					return err
 				}
 			case command := <-c.commands:
+				coalesceProgress = true
 				if err := c.processCommand(&command); err != nil {
 					return c.failConnection(xhttp2.ErrCodeInternal, err)
 				}
-			default:
-				goto flush
+			case <-coalesceTimer.C:
+				// The bound is on silence, not on the batch: while handlers
+				// keep reporting back, keep collecting them. Silence writes
+				// off the stragglers so they cannot tax later flushes.
+				if coalesceProgress {
+					coalesceProgress = false
+					coalesceTimer.Reset(flushCoalesceTimeout)
+					continue
+				}
+				c.pendingHandlers = 0
+				c.handlerGen++
+				coalesceArmed = false
+				break drain
+			case <-c.ctx.Done():
+				return context.Cause(c.ctx)
 			}
 		}
-	flush:
+		if coalesceArmed {
+			stopTimer(coalesceTimer)
+			coalesceArmed = false
+		}
 		if err := c.flushResponses(); err != nil {
 			return err
 		}
@@ -465,6 +538,8 @@ func (c *serverConn) readLoop() {
 			} else {
 				event = incomingFrameFromWire(frame.(xhttp2.Frame)) //nolint:forcetypeassert
 			}
+			// decodeIncomingHeaders may consume CONTINUATIONs, so check last.
+			event.morePending = c.frames.completeFrameBuffered()
 		}
 		select {
 		case c.events <- event:
@@ -1221,6 +1296,10 @@ func (c *serverConn) compactPriorityUpdateOrder() {
 }
 
 func (c *serverConn) processCommand(command *serverCommand) error {
+	if command.kind == serverCommandHandlerDone &&
+		command.handlerGen == c.handlerGen && c.pendingHandlers > 0 {
+		c.pendingHandlers--
+	}
 	stream := c.streams[command.streamID]
 	if stream == nil {
 		if command.result != nil {
@@ -1276,6 +1355,7 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 		stream.pendingData = command.data
 		stream.pendingAck = command.result
 		stream.responseBytes += int64(len(command.data))
+		c.queueFlush(stream)
 		return nil
 	case serverCommandResponseEOF:
 		if stream.isReset || stream.localClosed {
@@ -1292,6 +1372,7 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 			return c.resetStream(stream.id, xhttp2.ErrCodeInternal, err)
 		}
 		stream.responseEOF = true
+		c.queueFlush(stream)
 		if stream.pendingData == nil {
 			command.result <- nil
 		} else {
@@ -1309,6 +1390,7 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 			return nil
 		}
 		stream.responseEOF = true
+		c.queueFlush(stream)
 		return nil
 	case serverCommandPush:
 		err := c.handlePush(stream, command.target, command.pushOpts)
@@ -1348,6 +1430,7 @@ func (c *serverConn) runHandler(stream *serverStream) {
 	case c.commands <- serverCommand{
 		kind:       serverCommandHandlerDone,
 		streamID:   stream.id,
+		handlerGen: stream.handlerGen,
 		requestCtx: stream.request,
 	}:
 	case <-c.ctx.Done():
@@ -1490,6 +1573,7 @@ func (c *serverConn) handleHandlerDone(
 		stream.pendingData = body
 	}
 	stream.responseEOF = true
+	c.queueFlush(stream)
 	return nil
 }
 
@@ -1595,12 +1679,26 @@ func (c *serverConn) startStreamHandler(
 	})
 }
 
+// queueFlush marks a stream as owing output. Entries are stream IDs, which a
+// connection never reuses, so a stale entry resolves to nil and drops.
+func (c *serverConn) queueFlush(stream *serverStream) {
+	if !stream.flushQueued {
+		stream.flushQueued = true
+		c.flushQueue = append(c.flushQueue, stream.id)
+	}
+}
+
 func (c *serverConn) flushResponses() error {
+	if len(c.flushQueue) == 0 {
+		return nil
+	}
+	defer c.compactFlushQueue()
 	for {
 		madeProgress := false
 		for urgency := uint8(0); urgency <= 7; urgency++ {
-			for _, stream := range c.streams {
-				if stream.priority.urgency != urgency {
+			for _, streamID := range c.flushQueue {
+				stream := c.streams[streamID]
+				if stream == nil || stream.priority.urgency != urgency {
 					continue
 				}
 				if len(stream.pendingData) != 0 && !stream.isReset && !stream.localClosed &&
@@ -1666,6 +1764,24 @@ func (c *serverConn) flushResponses() error {
 			return nil
 		}
 	}
+}
+
+func (c *serverConn) compactFlushQueue() {
+	remaining := c.flushQueue[:0]
+	for _, streamID := range c.flushQueue {
+		stream := c.streams[streamID]
+		if stream == nil {
+			continue
+		}
+		pendingEOF := len(stream.pendingData) == 0 && stream.responseEOF
+		pendingData := len(stream.pendingData) != 0 && !stream.isReset
+		if !stream.localClosed && (pendingData || pendingEOF) {
+			remaining = append(remaining, streamID)
+			continue
+		}
+		stream.flushQueued = false
+	}
+	c.flushQueue = remaining
 }
 
 func (c *serverConn) encodeResponseTrailers(stream *serverStream) ([]byte, error) {

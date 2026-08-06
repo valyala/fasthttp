@@ -1,6 +1,7 @@
 package http2
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -119,6 +120,43 @@ func TestServerRequestResponse(t *testing.T) {
 	}
 	if resp.ContentLength != int64(len(body)) {
 		t.Fatalf("Content-Length = %d, want %d", resp.ContentLength, len(body))
+	}
+}
+
+func TestServerSendsDefaultDate(t *testing.T) {
+	for _, testCase := range []struct {
+		name          string
+		noDefaultDate bool
+	}{
+		{name: "default"},
+		{name: "NoDefaultDate", noDefaultDate: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			server := &fasthttp.Server{
+				NoDefaultDate: testCase.noDefaultDate,
+				Handler:       func(ctx *fasthttp.RequestCtx) { ctx.SetBodyString("ok") },
+			}
+			testServer := newTestServer(t, server, ServerConfig{})
+			resp, err := testServer.client.Get(testServer.URL("/"))
+			if err != nil {
+				t.Fatalf("Get() error: %v", err)
+			}
+			defer resp.Body.Close()
+
+			dates := resp.Header.Values("Date")
+			if testCase.noDefaultDate {
+				if len(dates) != 0 {
+					t.Fatalf("Date = %q, want none", dates)
+				}
+				return
+			}
+			if len(dates) != 1 {
+				t.Fatalf("Date fields = %q, want exactly one", dates)
+			}
+			if _, err := stdhttp.ParseTime(dates[0]); err != nil {
+				t.Fatalf("parsing Date %q: %v", dates[0], err)
+			}
+		})
 	}
 }
 
@@ -354,10 +392,10 @@ func TestServerRapidResetLimit(t *testing.T) {
 }
 
 func TestReadLoopPreservesStreamErrorScope(t *testing.T) {
-	wire := bytes.NewReader([]byte{
+	wire := bufio.NewReader(bytes.NewReader([]byte{
 		0, 0, 4, byte(xhttp2.FrameWindowUpdate), 0, 0, 0, 0, 1,
 		0, 0, 0, 0,
-	})
+	}))
 	ctx, cancel := context.WithCancelCause(context.Background())
 	conn := &serverConn{
 		ctx:    ctx,
