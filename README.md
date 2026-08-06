@@ -40,12 +40,11 @@ connections per physical server.
 
 [FAQ](#faq)
 
-## Experimental HTTP/2
+## HTTP/2
 
 The `github.com/valyala/fasthttp/http2` package provides opt-in, native
-HTTP/2 server and client support. Its API remains experimental for at least
-two fasthttp minor releases. Programs that don't configure the package stay
-on the existing HTTP/1 path.
+HTTP/2 server and client support. Programs that don't configure the package
+stay on the existing HTTP/1 path.
 
 ```go
 server := &fasthttp.Server{Handler: handler}
@@ -689,7 +688,7 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
 
 - _Does fasthttp support HTTP/2.0 and WebSockets?_
 
-  Native, experimental HTTP/2 support is available in the opt-in
+  Native HTTP/2 support is available in the opt-in
   [`http2`](https://pkg.go.dev/github.com/valyala/fasthttp/http2) package.
   [WebSockets](https://github.com/fasthttp/websockets) has been done already.
   Third parties also may use [RequestCtx.Hijack](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Hijack)
@@ -700,7 +699,6 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
 
   Yes:
 
-  - net/http enables its mature HTTP/2 support with less explicit configuration.
   - net/http API is stable, while fasthttp API constantly evolves.
   - net/http handles more HTTP corner cases.
   - net/http can stream both request and response bodies
