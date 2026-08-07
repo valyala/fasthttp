@@ -744,13 +744,13 @@ func BenchmarkRepeatedInitialWindowSettings(b *testing.B) {
 	}
 	var headerBlock bytes.Buffer
 	conn := &serverConn{
-		config:                  serverConfig{maxEncoderTableSize: defaultHeaderTableSize},
-		streams:                 make(map[uint32]*serverStream, 250),
-		peerInitialStreamWindow: 65535,
-		encoder:                 hpack.NewEncoder(&headerBlock),
+		config:        serverConfig{maxEncoderTableSize: defaultHeaderTableSize},
+		streams:       make(map[uint32]*serverStream, 250),
+		connFlowState: connFlowState{peerInitialStreamWindow: 65535},
+		encoder:       hpack.NewEncoder(&headerBlock),
 	}
 	for id := uint32(1); id <= 499; id += 2 {
-		conn.streams[id] = &serverStream{id: id, sendWindow: 65535}
+		conn.streams[id] = &serverStream{id: id, streamFlowState: streamFlowState{sendWindow: 65535}}
 	}
 	b.ReportAllocs()
 	for b.Loop() {

@@ -174,7 +174,7 @@ forever behind a zero send window. The fixed HTTP/2 client preface has its own
 A fully handshaken idle HTTP/2 connection still retains frame, HPACK, read, and
 write state and is materially larger than an idle HTTP/1 connection. Deployments
 must size `Server.Concurrency` and `MaxConnsPerIP` for that footprint and set
-`ReadIdleTimeout` when silent established peers should be reaped. The protocol
+`IdleTimeout` when silent established peers should be reaped. The protocol
 package cannot silently lower the shared server-wide connection limit without
 also changing HTTP/1 capacity on the same listener.
 

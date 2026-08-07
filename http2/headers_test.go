@@ -21,14 +21,14 @@ func TestRejectedRequestHeadersKeepHPACKEncoderInSync(t *testing.T) {
 	defer fasthttp.ReleaseRequest(bad)
 	bad.SetRequestURI("http://example.com/bad")
 	bad.Header.Set("TE", "gzip")
-	if _, err := encodeRequestHeaders(encoder, &encoded, &cache, bad, 1<<20, false); err == nil {
+	if _, err := encodeRequestHeaders(encoder, &encoded, &cache, bad, 1<<20, false, new([]hpack.HeaderField)); err == nil {
 		t.Fatal("invalid TE header was accepted")
 	}
 
 	probe := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(probe)
 	probe.SetRequestURI("http://example.com/probe")
-	block, err := encodeRequestHeaders(encoder, &encoded, &cache, probe, 1<<20, false)
+	block, err := encodeRequestHeaders(encoder, &encoded, &cache, probe, 1<<20, false, new([]hpack.HeaderField))
 	if err != nil {
 		t.Fatalf("encoding probe request: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestResponseHeadersExcludeTrailerFields(t *testing.T) {
 	}
 	resp.Header.Set("Grpc-Status", "0")
 
-	block, err := encodeResponseHeaders(encoder, &encoded, &cache, server, resp, 1<<20, nil)
+	block, err := encodeResponseHeaders(encoder, &encoded, &cache, server, resp, 1<<20, nil, new([]hpack.HeaderField))
 	if err != nil {
 		t.Fatalf("encoding response: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestRejectedResponseHeadersKeepHPACKEncoderInSync(t *testing.T) {
 	warm := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(warm)
 	warm.Header.Set("X-Marker", "canary-value")
-	block, err := encodeResponseHeaders(encoder, &encoded, &cache, server, warm, 1<<20, nil)
+	block, err := encodeResponseHeaders(encoder, &encoded, &cache, server, warm, 1<<20, nil, new([]hpack.HeaderField))
 	if err != nil {
 		t.Fatalf("encoding warm response: %v", err)
 	}
@@ -98,14 +98,14 @@ func TestRejectedResponseHeadersKeepHPACKEncoderInSync(t *testing.T) {
 	for i := range 4 {
 		bad.Header.Set(fmt.Sprintf("X-Large-%d", i), strings.Repeat("x", 128))
 	}
-	if _, err := encodeResponseHeaders(encoder, &encoded, &cache, server, bad, 300, nil); err == nil {
+	if _, err := encodeResponseHeaders(encoder, &encoded, &cache, server, bad, 300, nil, new([]hpack.HeaderField)); err == nil {
 		t.Fatal("oversized response header list was accepted")
 	}
 
 	probe := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(probe)
 	probe.Header.Set("X-Marker", "canary-value")
-	block, err = encodeResponseHeaders(encoder, &encoded, &cache, server, probe, 1<<20, nil)
+	block, err = encodeResponseHeaders(encoder, &encoded, &cache, server, probe, 1<<20, nil, new([]hpack.HeaderField))
 	if err != nil {
 		t.Fatalf("encoding probe response: %v", err)
 	}
@@ -180,13 +180,13 @@ func TestOutboundResponseHeadersRejectTEBeforeHPACK(t *testing.T) {
 	server := &fasthttp.Server{NoDefaultDate: true, NoDefaultServerHeader: true}
 	var response fasthttp.Response
 	response.Header.Set("TE", "trailers")
-	if _, err := encodeResponseHeaders(encoder, &encoded, &cache, server, &response, 1<<20, nil); err == nil {
+	if _, err := encodeResponseHeaders(encoder, &encoded, &cache, server, &response, 1<<20, nil, new([]hpack.HeaderField)); err == nil {
 		t.Fatal("outbound response TE header was accepted")
 	}
 
 	var informational fasthttp.ResponseHeader
 	informational.Set("TE", "trailers")
-	if _, err := encodeInformationalHeaders(encoder, &encoded, &cache, 103, &informational, 1<<20); err == nil {
+	if _, err := encodeInformationalHeaders(encoder, &encoded, &cache, 103, &informational, 1<<20, new([]hpack.HeaderField)); err == nil {
 		t.Fatal("outbound informational TE header was accepted")
 	}
 }

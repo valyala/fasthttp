@@ -19,6 +19,14 @@ var (
 	errResponseHeaderTooLarge = errors.New("http2: response header list too large")
 )
 
+const (
+	pseudoMethod = 1 << iota
+	pseudoScheme
+	pseudoAuthority
+	pseudoPath
+	pseudoProtocol
+)
+
 func populateRequest(
 	ctx *fasthttp.RequestCtx,
 	server *fasthttp.Server,
@@ -36,28 +44,29 @@ func populateRequest(
 	var connectProtocol string
 	var host string
 	var contentLength int64 = -1
-	seenPseudo := make(map[string]struct{}, 5)
+	var seenPseudo uint8
 	cookies := make([]string, 0, 1)
 	for _, field := range fields {
 		if field.IsPseudo() {
-			if _, ok := seenPseudo[field.Name]; ok {
-				return -1, fmt.Errorf("%w: duplicate pseudo-header %q", errInvalidRequestHeaders, field.Name)
-			}
-			seenPseudo[field.Name] = struct{}{}
+			var bit uint8
 			switch field.Name {
 			case ":method":
-				method = field.Value
+				bit, method = pseudoMethod, field.Value
 			case ":scheme":
-				scheme = field.Value
+				bit, scheme = pseudoScheme, field.Value
 			case ":authority":
-				authority = field.Value
+				bit, authority = pseudoAuthority, field.Value
 			case ":path":
-				path = field.Value
+				bit, path = pseudoPath, field.Value
 			case ":protocol":
-				connectProtocol = field.Value
+				bit, connectProtocol = pseudoProtocol, field.Value
 			default:
 				return -1, fmt.Errorf("%w: unknown pseudo-header %q", errInvalidRequestHeaders, field.Name)
 			}
+			if seenPseudo&bit != 0 {
+				return -1, fmt.Errorf("%w: duplicate pseudo-header %q", errInvalidRequestHeaders, field.Name)
+			}
+			seenPseudo |= bit
 			continue
 		}
 
@@ -228,9 +237,8 @@ func encodeResponseHeaders(
 	response *fasthttp.Response,
 	maxHeaderListSize uint64,
 	serverDate []byte,
+	scratch *[]hpack.HeaderField,
 ) ([]byte, error) {
-	status := statusCodeString(response.StatusCode())
-
 	if len(response.Header.Server()) == 0 && !server.NoDefaultServerHeader {
 		name := server.Name
 		if name == "" {
@@ -238,14 +246,68 @@ func encodeResponseHeaders(
 		}
 		response.Header.SetServer(name)
 	}
-	defaultDate := !server.NoDefaultDate && len(serverDate) != 0
-	trailerKeys := response.Header.PeekTrailerKeys()
+	if server.NoDefaultDate {
+		serverDate = nil
+	}
+	return encodeStatusHeaders(
+		encoder,
+		buffer,
+		stringsCache,
+		statusCodeString(response.StatusCode()),
+		&response.Header,
+		serverDate,
+		response.Header.PeekTrailerKeys(),
+		false,
+		maxHeaderListSize,
+		scratch,
+	)
+}
+
+func encodeInformationalHeaders(
+	encoder *hpack.Encoder,
+	buffer *bytes.Buffer,
+	stringsCache *headerStringCache,
+	statusCode int,
+	header *fasthttp.ResponseHeader,
+	maxHeaderListSize uint64,
+	scratch *[]hpack.HeaderField,
+) ([]byte, error) {
+	return encodeStatusHeaders(
+		encoder,
+		buffer,
+		stringsCache,
+		statusCodeString(statusCode),
+		header,
+		nil,
+		nil,
+		true,
+		maxHeaderListSize,
+		scratch,
+	)
+}
+
+// encodeStatusHeaders validates the full field list before anything reaches
+// the stateful HPACK encoder, then encodes it. scratch carries the resolved
+// fields between the two passes so header.All() runs once.
+func encodeStatusHeaders(
+	encoder *hpack.Encoder,
+	buffer *bytes.Buffer,
+	stringsCache *headerStringCache,
+	status string,
+	header *fasthttp.ResponseHeader,
+	serverDate []byte,
+	trailerKeys [][]byte,
+	skipContentLength bool,
+	maxHeaderListSize uint64,
+	scratch *[]hpack.HeaderField,
+) ([]byte, error) {
 	headerSize := uint64(len(":status") + len(status) + 32)
-	if defaultDate {
+	if len(serverDate) != 0 {
 		headerSize += uint64(len(fasthttp.HeaderDate) + len(serverDate) + 32)
 	}
+	fields := (*scratch)[:0]
 	var validateErr error
-	response.Header.All()(func(key, value []byte) bool {
+	header.All()(func(key, value []byte) bool {
 		name := stringsCache.name(key)
 		if name == "te" {
 			validateErr = errors.New("http2: response cannot contain te")
@@ -254,10 +316,13 @@ func encodeResponseHeaders(
 		if name == "trailer" || isConnectionSpecificHeader(name) {
 			return true
 		}
+		if skipContentLength && name == "content-length" {
+			return true
+		}
 		if len(trailerKeys) != 0 && hasTrailerKey(trailerKeys, name) {
 			return true
 		}
-		if defaultDate && name == "date" {
+		if len(serverDate) != 0 && name == "date" {
 			return true
 		}
 		fieldSize := uint64(len(name) + len(value) + 32)
@@ -266,8 +331,15 @@ func encodeResponseHeaders(
 			return false
 		}
 		headerSize += fieldSize
+		sensitive := isSensitiveHeader(name)
+		fields = append(fields, hpack.HeaderField{
+			Name:      name,
+			Value:     stringsCache.value(value, sensitive),
+			Sensitive: sensitive,
+		})
 		return true
 	})
+	*scratch = fields
 	if validateErr != nil {
 		return nil, validateErr
 	}
@@ -279,7 +351,7 @@ func encodeResponseHeaders(
 	}); err != nil {
 		return nil, err
 	}
-	if defaultDate {
+	if len(serverDate) != 0 {
 		if err := encoder.WriteField(hpack.HeaderField{
 			Name:  "date",
 			Value: stringsCache.value(serverDate, false),
@@ -287,84 +359,10 @@ func encodeResponseHeaders(
 			return nil, err
 		}
 	}
-	var encodeErr error
-	response.Header.All()(func(key, value []byte) bool {
-		name := stringsCache.name(key)
-		if name == "trailer" || isConnectionSpecificHeader(name) {
-			return true
+	for _, field := range fields {
+		if err := encoder.WriteField(field); err != nil {
+			return nil, err
 		}
-		if len(trailerKeys) != 0 && hasTrailerKey(trailerKeys, name) {
-			return true
-		}
-		if defaultDate && name == "date" {
-			return true
-		}
-		sensitive := name == "set-cookie"
-		encodeErr = encoder.WriteField(hpack.HeaderField{
-			Name:      name,
-			Value:     stringsCache.value(value, sensitive),
-			Sensitive: sensitive,
-		})
-		return encodeErr == nil
-	})
-	if encodeErr != nil {
-		return nil, encodeErr
-	}
-	return buffer.Bytes(), nil
-}
-
-func encodeInformationalHeaders(
-	encoder *hpack.Encoder,
-	buffer *bytes.Buffer,
-	stringsCache *headerStringCache,
-	statusCode int,
-	header *fasthttp.ResponseHeader,
-	maxHeaderListSize uint64,
-) ([]byte, error) {
-	headerSize := uint64(len(":status") + 3 + 32)
-	var validateErr error
-	header.All()(func(key, value []byte) bool {
-		name := stringsCache.name(key)
-		if name == "te" {
-			validateErr = errors.New("http2: informational response cannot contain te")
-			return false
-		}
-		if name == "content-length" || name == "trailer" || isConnectionSpecificHeader(name) {
-			return true
-		}
-		headerSize += uint64(len(name) + len(value) + 32)
-		if maxHeaderListSize != 0 && headerSize > maxHeaderListSize {
-			validateErr = errResponseHeaderTooLarge
-			return false
-		}
-		return true
-	})
-	if validateErr != nil {
-		return nil, validateErr
-	}
-	buffer.Reset()
-	if err := encoder.WriteField(hpack.HeaderField{
-		Name:  ":status",
-		Value: statusCodeString(statusCode),
-	}); err != nil {
-		return nil, err
-	}
-	var encodeErr error
-	header.All()(func(key, value []byte) bool {
-		name := stringsCache.name(key)
-		if name == "content-length" || name == "trailer" || isConnectionSpecificHeader(name) {
-			return true
-		}
-		sensitive := isSensitiveHeader(name)
-		encodeErr = encoder.WriteField(hpack.HeaderField{
-			Name:      name,
-			Value:     stringsCache.value(value, sensitive),
-			Sensitive: sensitive,
-		})
-		return encodeErr == nil
-	})
-	if encodeErr != nil {
-		return nil, encodeErr
 	}
 	return buffer.Bytes(), nil
 }
@@ -383,41 +381,18 @@ func writeContinuationFrames(framer *xhttp2.Framer, streamID uint32, block []byt
 	return nil
 }
 
-func statusCodeString(statusCode int) string {
-	switch statusCode {
-	case fasthttp.StatusContinue:
-		return "100"
-	case fasthttp.StatusEarlyHints:
-		return "103"
-	case fasthttp.StatusOK:
-		return "200"
-	case fasthttp.StatusNoContent:
-		return "204"
-	case fasthttp.StatusPartialContent:
-		return "206"
-	case fasthttp.StatusMovedPermanently:
-		return "301"
-	case fasthttp.StatusFound:
-		return "302"
-	case fasthttp.StatusNotModified:
-		return "304"
-	case fasthttp.StatusBadRequest:
-		return "400"
-	case fasthttp.StatusUnauthorized:
-		return "401"
-	case fasthttp.StatusForbidden:
-		return "403"
-	case fasthttp.StatusNotFound:
-		return "404"
-	case fasthttp.StatusInternalServerError:
-		return "500"
-	case fasthttp.StatusBadGateway:
-		return "502"
-	case fasthttp.StatusServiceUnavailable:
-		return "503"
-	default:
-		return strconv.Itoa(statusCode)
+var statusStrings = func() (table [600]string) {
+	for code := range table {
+		table[code] = strconv.Itoa(code)
 	}
+	return table
+}()
+
+func statusCodeString(statusCode int) string {
+	if statusCode >= 0 && statusCode < len(statusStrings) {
+		return statusStrings[statusCode]
+	}
+	return strconv.Itoa(statusCode)
 }
 
 func isConnectionSpecificHeader(name string) bool {

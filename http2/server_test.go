@@ -34,7 +34,7 @@ type testServer struct {
 	serveDone chan error
 }
 
-func newTestServer(t testing.TB, server *fasthttp.Server, config ServerConfig) *testServer { //nolint:gocritic // mirrors ConfigureServer's signature
+func newTestServer(t testing.TB, server *fasthttp.Server, config ServerConfig) *testServer {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -657,17 +657,16 @@ func flushOrderConn(t *testing.T, incremental bool) []uint32 {
 	t.Helper()
 	var wire bytes.Buffer
 	conn := &serverConn{
-		framer:               xhttp2.NewFramer(&wire, nil),
-		streams:              map[uint32]*serverStream{},
-		peerConnectionWindow: 1 << 30,
-		peerMaxFrameSize:     defaultMaxFrameSize,
+		framer:        xhttp2.NewFramer(&wire, nil),
+		streams:       map[uint32]*serverStream{},
+		connFlowState: connFlowState{peerConnectionWindow: 1 << 30, peerMaxFrameSize: defaultMaxFrameSize},
 	}
 	for _, streamID := range []uint32{1, 3} {
 		stream := &serverStream{
-			id:          streamID,
-			priority:    priority{urgency: 3, incremental: incremental},
-			sendWindow:  1 << 30,
-			pendingData: bytes.Repeat([]byte{byte(streamID)}, 3*defaultMaxFrameSize),
+			id:              streamID,
+			priority:        priority{urgency: 3, incremental: incremental},
+			streamFlowState: streamFlowState{sendWindow: 1 << 30},
+			pendingData:     bytes.Repeat([]byte{byte(streamID)}, 3*defaultMaxFrameSize),
 		}
 		conn.streams[streamID] = stream
 		conn.queueFlush(stream)
@@ -836,15 +835,15 @@ func TestProcessStreamingDataTransfersOwnershipWithoutConsumingPayload(t *testin
 			connectionWindowSize: windowSize,
 			streamWindowSize:     windowSize,
 		},
-		streams:                 make(map[uint32]*serverStream),
-		receiveConnectionWindow: windowSize,
-		framer:                  xhttp2.NewFramer(io.Discard, nil),
+		streams:       make(map[uint32]*serverStream),
+		connFlowState: connFlowState{receiveConnectionWindow: windowSize},
+		framer:        xhttp2.NewFramer(io.Discard, nil),
 	}
 	stream := &serverStream{
-		id:           1,
-		conn:         conn,
-		recvWindow:   windowSize,
-		expectedBody: -1,
+		id:              1,
+		conn:            conn,
+		streamFlowState: streamFlowState{recvWindow: windowSize},
+		expectedBody:    -1,
 	}
 	stream.body = newRequestBody(func(n int) {
 		if err := conn.consumeRequestBytes(stream, int64(n)); err != nil {
@@ -896,11 +895,11 @@ func TestProcessDataBatchesConnectionCreditForClosedStream(t *testing.T) {
 			streamWindowSize:     int32(windowSize),
 			maxConcurrentStreams: 1,
 		},
-		framer:                  xhttp2.NewFramer(&wire, nil),
-		streams:                 make(map[uint32]*serverStream),
-		closedClientStreams:     make(map[uint32]bool),
-		lastClientStreamID:      1,
-		receiveConnectionWindow: windowSize,
+		framer:              xhttp2.NewFramer(&wire, nil),
+		streams:             make(map[uint32]*serverStream),
+		closedClientStreams: make(map[uint32]bool),
+		lastClientStreamID:  1,
+		connFlowState:       connFlowState{receiveConnectionWindow: windowSize},
 	}
 	event := incomingFrame{
 		kind:       incomingFrameData,
@@ -940,10 +939,10 @@ func TestBufferedRequestBodiesRespectConfiguredBudget(t *testing.T) {
 			maxConcurrentStreams:    2,
 			maxRapidResetsPerSecond: 100,
 		},
-		framer:                  xhttp2.NewFramer(&wire, nil),
-		streams:                 make(map[uint32]*serverStream),
-		closedClientStreams:     make(map[uint32]bool),
-		receiveConnectionWindow: 64,
+		framer:              xhttp2.NewFramer(&wire, nil),
+		streams:             make(map[uint32]*serverStream),
+		closedClientStreams: make(map[uint32]bool),
+		connFlowState:       connFlowState{receiveConnectionWindow: 64},
 	}
 	newStream := func(id uint32) *serverStream {
 		stream := newServerStream(conn, id)
@@ -982,10 +981,10 @@ func TestProcessDataDoesNotDoubleCreditClosedRequestBody(t *testing.T) {
 			streamWindowSize:     int32(windowSize),
 			maxConcurrentStreams: 1,
 		},
-		framer:                  xhttp2.NewFramer(&wire, nil),
-		streams:                 make(map[uint32]*serverStream),
-		closedClientStreams:     make(map[uint32]bool),
-		receiveConnectionWindow: windowSize,
+		framer:              xhttp2.NewFramer(&wire, nil),
+		streams:             make(map[uint32]*serverStream),
+		closedClientStreams: make(map[uint32]bool),
+		connFlowState:       connFlowState{receiveConnectionWindow: windowSize},
 	}
 	stream := newServerStream(conn, 1)
 	stream.handlerStarted = true
@@ -1040,11 +1039,21 @@ func TestPendingPriorityUpdatesStayBounded(t *testing.T) {
 	if got := len(conn.priorityUpdates); got != 4 {
 		t.Fatalf("pending priority updates = %d, want bounded limit 4", got)
 	}
-	if got := len(conn.priorityUpdateOrder); got > 8 {
-		t.Fatalf("priority update order length = %d, want at most 8", got)
+	if _, exists := conn.priorityUpdates[199]; exists {
+		t.Fatal("update past the full hint cache wasn't dropped")
+	}
+
+	// Opening streams moves lastClientStreamID forward; the next insert into a
+	// full cache must prune the expired hints instead of dropping the new one.
+	conn.lastClientStreamID = 9
+	if err := conn.processPriorityUpdate(&incomingFrame{streamID: 11, priority: "u=1"}); err != nil {
+		t.Fatalf("processPriorityUpdate(11) error: %v", err)
+	}
+	if _, exists := conn.priorityUpdates[11]; !exists {
+		t.Fatal("pruning expired hints didn't make room for a new update")
 	}
 	if _, exists := conn.priorityUpdates[1]; exists {
-		t.Fatal("oldest pending priority update wasn't evicted")
+		t.Fatal("expired pending priority update survived pruning")
 	}
 }
 
@@ -1064,8 +1073,8 @@ func TestPriorityUpdateRejectsInvalidFutureStreamID(t *testing.T) {
 func TestPeerGoAwayKeepsControlFramesAlive(t *testing.T) {
 	var wire bytes.Buffer
 	conn := &serverConn{
-		framer:           xhttp2.NewFramer(&wire, nil),
-		receivedSettings: true,
+		framer:        xhttp2.NewFramer(&wire, nil),
+		connFlowState: connFlowState{receivedSettings: true},
 	}
 	if err := conn.processFrame(&incomingFrame{
 		kind:         incomingFrameGoAway,
@@ -1241,10 +1250,9 @@ func TestCancelAcceptedStreamWriteReportsPartialAndDropsRemainder(t *testing.T) 
 			maxRapidResetsPerSecond: 100,
 			writeByteTimeout:        time.Second,
 		},
-		framer:               xhttp2.NewFramer(&wire, nil),
-		streams:              make(map[uint32]*serverStream),
-		peerConnectionWindow: 2,
-		peerMaxFrameSize:     defaultMaxFrameSize,
+		framer:        xhttp2.NewFramer(&wire, nil),
+		streams:       make(map[uint32]*serverStream),
+		connFlowState: connFlowState{peerConnectionWindow: 2, peerMaxFrameSize: defaultMaxFrameSize},
 	}
 	stream := newServerStream(conn, 1)
 	stream.handlerStarted = true
@@ -1259,7 +1267,7 @@ func TestCancelAcceptedStreamWriteReportsPartialAndDropsRemainder(t *testing.T) 
 	if progressed, err := conn.flushStream(stream, false); err != nil || !progressed {
 		t.Fatalf("partial flush = %v, %v; want progress", progressed, err)
 	}
-	deadlineErr := timeoutError{}
+	deadlineErr := errStreamDeadline
 	if err := conn.processCommand(&serverCommand{
 		kind: serverCommandCancelWrite, streamID: 1, write: write, err: deadlineErr,
 	}); err != nil {
@@ -1996,13 +2004,13 @@ func TestSettingsDecreaseDrivesSendWindowNegative(t *testing.T) {
 func TestRepeatedInitialWindowSettingsApplyOneFinalDelta(t *testing.T) {
 	var headerBlock bytes.Buffer
 	conn := &serverConn{
-		config:                  serverConfig{maxEncoderTableSize: defaultHeaderTableSize},
-		streams:                 make(map[uint32]*serverStream),
-		peerInitialStreamWindow: 65535,
-		encoder:                 hpack.NewEncoder(&headerBlock),
+		config:        serverConfig{maxEncoderTableSize: defaultHeaderTableSize},
+		streams:       make(map[uint32]*serverStream),
+		connFlowState: connFlowState{peerInitialStreamWindow: 65535},
+		encoder:       hpack.NewEncoder(&headerBlock),
 	}
 	for id := uint32(1); id <= 499; id += 2 {
-		conn.streams[id] = &serverStream{id: id, sendWindow: 65535}
+		conn.streams[id] = &serverStream{id: id, streamFlowState: streamFlowState{sendWindow: 65535}}
 	}
 	settings := make([]xhttp2.Setting, 2730)
 	for i := range settings {

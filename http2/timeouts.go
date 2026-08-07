@@ -13,21 +13,18 @@ func timerChannel(timer *time.Timer) <-chan time.Time {
 	return timer.C
 }
 
-func stopTimer(timer *time.Timer) {
-	if !timer.Stop() {
-		select {
-		case <-timer.C:
-		default:
-		}
-	}
-}
-
-func resetTimer(timer *time.Timer, duration time.Duration) {
-	stopTimer(timer)
-	timer.Reset(duration)
-}
-
 func isTimeout(err error) bool {
 	var netErr net.Error
 	return errors.As(err, &netErr) && netErr.Timeout()
 }
+
+type timeoutError struct{ msg string }
+
+func (e timeoutError) Error() string { return e.msg }
+func (timeoutError) Timeout() bool   { return true }
+func (timeoutError) Temporary() bool { return true }
+
+var (
+	errStreamDeadline = timeoutError{"http2: stream deadline exceeded"}
+	errWriteTimeout   = timeoutError{"http2: write timeout"}
+)

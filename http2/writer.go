@@ -185,8 +185,8 @@ func (w *asyncFrameWriter) enqueue(batch frameWriteBatch) error {
 			// The producer copied part of a frame into this batch, so the byte
 			// stream cannot be resumed by a later writer. Abandoning it is only
 			// safe if the connection dies with it.
-			w.fail(fasthttpWriteTimeoutError{})
-			return fasthttpWriteTimeoutError{}
+			w.fail(errWriteTimeout)
+			return errWriteTimeout
 		}
 	}
 }
@@ -214,7 +214,7 @@ func (w *asyncFrameWriter) closeAndWait(timeout time.Duration) error {
 	}
 	w.sendMu.Unlock()
 	if !sendWriteBarrier(w.queue, w.stop, barrier, timeout) {
-		w.recordFailure(fasthttpWriteTimeoutError{})
+		w.recordFailure(errWriteTimeout)
 		w.stopOnce.Do(func() { close(w.stop) })
 		_ = w.conn.Close()
 		_ = w.waitDone(timeout)
@@ -249,7 +249,7 @@ func (w *asyncFrameWriter) waitWriteBarrier(barrier <-chan error, timeout time.D
 	case <-w.done:
 		return w.err()
 	case <-timer.C:
-		return fasthttpWriteTimeoutError{}
+		return errWriteTimeout
 	}
 }
 
@@ -264,7 +264,7 @@ func (w *asyncFrameWriter) waitDone(timeout time.Duration) error {
 	case <-w.done:
 		return w.err()
 	case <-timer.C:
-		return fasthttpWriteTimeoutError{}
+		return errWriteTimeout
 	}
 }
 
@@ -431,14 +431,6 @@ func (w *asyncFrameWriter) releaseBuffer(buffer *frameWriteBuffer) {
 	default:
 	}
 }
-
-// fasthttpWriteTimeoutError is private so the writer remains independent of
-// root-package timeout values while still satisfying net.Error.
-type fasthttpWriteTimeoutError struct{}
-
-func (fasthttpWriteTimeoutError) Error() string   { return "http2: write timeout" }
-func (fasthttpWriteTimeoutError) Timeout() bool   { return true }
-func (fasthttpWriteTimeoutError) Temporary() bool { return true }
 
 func sendWriteBarrier(
 	queue chan<- frameWriteBatch,

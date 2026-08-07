@@ -13,24 +13,20 @@ import (
 const (
 	clientPreface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
-	defaultMaxConcurrentStreams = 250
-	defaultMaxHeaderListSize    = 64 << 10
-	defaultHeaderTableSize      = 4096
-	defaultMaxFrameSize         = 16 << 10
-	defaultWriteBufferSize      = 64 << 10
-	defaultReadBufferSize       = 16 << 10
-	// Keep a useful small-response fast path without allowing one large
-	// Content-Length field on every concurrent stream to commit hundreds of
-	// MiB before a single DATA byte arrives.
-	maxResponseBodyPreallocation   = 64 << 10
+	defaultMaxConcurrentStreams    = 250
+	defaultMaxHeaderListSize       = 64 << 10
+	defaultHeaderTableSize         = 4096
+	defaultMaxFrameSize            = 16 << 10
+	defaultWriteBufferSize         = 64 << 10
+	defaultReadBufferSize          = 16 << 10
 	defaultConnectionWindowSize    = 4 << 20
 	defaultStreamWindowSize        = 1 << 20
 	defaultBufferedRequestBodySize = 128 << 20
-	defaultMaxQueuedCommands       = 256
+	maxQueuedCommands              = 256
+	maxPromisedStreams             = 16
 	maxConfiguredConcurrentStreams = 1 << 20
 	maxConfiguredHeaderListSize    = 64 << 20
 	maxConfiguredHeaderTableSize   = 64 << 20
-	maxConfiguredCommands          = 1_000_000
 )
 
 // defaultWriteByteTimeout bounds a write that makes no progress, not a whole
@@ -134,10 +130,6 @@ type ClientConfig struct {
 	// push is disabled through SETTINGS_ENABLE_PUSH=0 and any PUSH_PROMISE is
 	// a connection error.
 	PushHandler PushHandler
-
-	// CountError, when non-nil, is called with a stable error-type tag each
-	// time the client observes a protocol-level error.
-	CountError func(errorType string)
 }
 
 type clientConfig struct {
@@ -154,7 +146,6 @@ type clientConfig struct {
 	writeByteTimeout      time.Duration
 	enableExtendedConnect bool
 	pushHandler           PushHandler
-	countError            func(string)
 }
 
 func normalizeClientConfig(hc *fasthttp.HostClient, cfg *ClientConfig) (clientConfig, error) {
@@ -178,7 +169,6 @@ func normalizeClientConfig(hc *fasthttp.HostClient, cfg *ClientConfig) (clientCo
 		writeByteTimeout:      cfg.WriteByteTimeout,
 		enableExtendedConnect: cfg.EnableExtendedConnect,
 		pushHandler:           cfg.PushHandler,
-		countError:            cfg.CountError,
 	}
 	if result.maxConcurrentStreams == 0 {
 		result.maxConcurrentStreams = defaultMaxConcurrentStreams
@@ -275,21 +265,6 @@ type ServerConfig struct {
 	// 16384..16777215 range. Zero means 16384.
 	MaxReadFrameSize uint32
 
-	// MaxQueuedCommands caps the handler events — response chunks, pushes,
-	// stream completions — queued for the connection's write loop. Producers
-	// block once it fills. Zero means 256. Peer-solicited control frames
-	// are written inline and never queue here, so a PING or SETTINGS flood
-	// meets read backpressure rather than unbounded buffering.
-	MaxQueuedCommands int
-
-	// MaxPromisedStreams caps concurrent unconsumed PUSH_PROMISE streams per
-	// connection. Zero means 16.
-	MaxPromisedStreams uint32
-
-	// MaxPushDepth caps how many levels of pushed responses may themselves
-	// push. Zero means 1: handler-initiated pushes may not push further.
-	MaxPushDepth uint8
-
 	// MaxRapidResetsPerSecond caps peer RST_STREAM frames plus RST_STREAM
 	// responses induced by invalid peer input per second before the connection
 	// is closed with ENHANCE_YOUR_CALM, mitigating rapid-cancellation and
@@ -319,12 +294,8 @@ type ServerConfig struct {
 	// Server.ReadTimeout; if all are zero, idle connections are kept open.
 	IdleTimeout time.Duration
 
-	// ReadIdleTimeout enables a health-check PING when no frame arrives on an
-	// active connection for this long. Zero disables the health check.
-	ReadIdleTimeout time.Duration
-
-	// PingTimeout bounds how long a health-check or shutdown PING may stay
-	// unanswered before the connection is torn down. Zero means 15 seconds.
+	// PingTimeout bounds how long a shutdown PING may stay unanswered before
+	// the connection is torn down. Zero means 15 seconds.
 	PingTimeout time.Duration
 
 	// WriteByteTimeout bounds how long a physical write or an individual
@@ -341,10 +312,6 @@ type ServerConfig struct {
 	// EnableExtendedConnect advertises RFC 8441 extended CONNECT so clients
 	// can open bidirectional streams accepted through RequestCtx.AcceptStream.
 	EnableExtendedConnect bool
-
-	// CountError, when non-nil, is called with a stable error-type tag each
-	// time the server observes a protocol-level error.
-	CountError func(errorType string)
 }
 
 type serverConfig struct {
@@ -353,20 +320,15 @@ type serverConfig struct {
 	maxDecoderTableSize     uint32
 	maxEncoderTableSize     uint32
 	maxReadFrameSize        uint32
-	maxQueuedCommands       int
-	maxPromisedStreams      uint32
-	maxPushDepth            uint8
 	maxRapidResetsPerSecond uint32
 	connectionWindowSize    int32
 	streamWindowSize        int32
 	maxBufferedRequestBody  int32
 	idleTimeout             time.Duration
-	readIdleTimeout         time.Duration
 	pingTimeout             time.Duration
 	writeByteTimeout        time.Duration
 	enablePush              bool
 	enableExtendedConnect   bool
-	countError              func(string)
 }
 
 func normalizeServerConfig(s *fasthttp.Server, cfg *ServerConfig) (serverConfig, error) {
@@ -376,20 +338,15 @@ func normalizeServerConfig(s *fasthttp.Server, cfg *ServerConfig) (serverConfig,
 		maxDecoderTableSize:     cfg.MaxDecoderHeaderTableSize,
 		maxEncoderTableSize:     cfg.MaxEncoderHeaderTableSize,
 		maxReadFrameSize:        cfg.MaxReadFrameSize,
-		maxQueuedCommands:       cfg.MaxQueuedCommands,
-		maxPromisedStreams:      cfg.MaxPromisedStreams,
-		maxPushDepth:            cfg.MaxPushDepth,
 		maxRapidResetsPerSecond: cfg.MaxRapidResetsPerSecond,
 		connectionWindowSize:    cfg.MaxUploadBufferPerConnection,
 		streamWindowSize:        cfg.MaxUploadBufferPerStream,
 		maxBufferedRequestBody:  cfg.MaxBufferedRequestBodyPerConnection,
 		idleTimeout:             cfg.IdleTimeout,
-		readIdleTimeout:         cfg.ReadIdleTimeout,
 		pingTimeout:             cfg.PingTimeout,
 		writeByteTimeout:        cfg.WriteByteTimeout,
 		enablePush:              cfg.EnablePush,
 		enableExtendedConnect:   cfg.EnableExtendedConnect,
-		countError:              cfg.CountError,
 	}
 	if result.maxConcurrentStreams == 0 {
 		result.maxConcurrentStreams = defaultMaxConcurrentStreams
@@ -419,21 +376,6 @@ func normalizeServerConfig(s *fasthttp.Server, cfg *ServerConfig) (serverConfig,
 	}
 	if result.maxReadFrameSize < defaultMaxFrameSize || result.maxReadFrameSize > 1<<24-1 {
 		return serverConfig{}, errors.New("http2: max read frame size must be between 16384 and 16777215")
-	}
-	if result.maxQueuedCommands == 0 {
-		result.maxQueuedCommands = defaultMaxQueuedCommands
-	}
-	if result.maxQueuedCommands < 32 {
-		return serverConfig{}, errors.New("http2: max queued commands must be at least 32")
-	}
-	if result.maxQueuedCommands > maxConfiguredCommands {
-		return serverConfig{}, errors.New("http2: max queued commands exceeds the safety limit")
-	}
-	if result.maxPromisedStreams == 0 {
-		result.maxPromisedStreams = 16
-	}
-	if result.maxPushDepth == 0 {
-		result.maxPushDepth = 1
 	}
 	if result.maxRapidResetsPerSecond == 0 {
 		result.maxRapidResetsPerSecond = 1000
@@ -481,7 +423,7 @@ type serverHandler struct {
 // ConfigureServer enables HTTP/2 on s through TLS ALPN, cleartext prior
 // knowledge, and the HTTP/1.1 h2c Upgrade handshake. Existing TLS settings
 // are preserved.
-func ConfigureServer(s *fasthttp.Server, cfg ServerConfig) error { //nolint:gocritic // config by value is the public contract
+func ConfigureServer(s *fasthttp.Server, cfg ServerConfig) error {
 	if s == nil {
 		return errors.New("http2: server is nil")
 	}
@@ -501,7 +443,7 @@ func ConfigureServer(s *fasthttp.Server, cfg ServerConfig) error { //nolint:gocr
 
 // ServeConn serves one HTTP/2 prior-knowledge connection. It doesn't accept
 // the obsolete h2c Upgrade handshake.
-func ServeConn(s *fasthttp.Server, c net.Conn, cfg ServerConfig) error { //nolint:gocritic
+func ServeConn(s *fasthttp.Server, c net.Conn, cfg ServerConfig) error {
 	if s == nil {
 		return errors.New("http2: server is nil")
 	}
