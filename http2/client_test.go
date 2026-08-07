@@ -1372,6 +1372,64 @@ func TestServerPush(t *testing.T) {
 	}
 }
 
+type rejectingPushHandler struct{ declined atomic.Int64 }
+
+func (h *rejectingPushHandler) Accept(_, _ *fasthttp.Request) bool {
+	h.declined.Add(1)
+	return false
+}
+
+func (*rejectingPushHandler) Handle(*fasthttp.Request, *fasthttp.Response) {
+	panic("rejected push was handled")
+}
+
+func TestDeclinedPushKeepsConnectionReusable(t *testing.T) {
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			if string(ctx.Path()) == "/pushed" {
+				ctx.SetBodyString("pushed")
+				return
+			}
+			if err := ctx.Push("/pushed", nil); err != nil {
+				t.Errorf("Push() error: %v", err)
+			}
+			ctx.SetBodyString("parent")
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{EnablePush: true})
+	pushes := &rejectingPushHandler{}
+	var dials atomic.Int64
+	hc := &fasthttp.HostClient{
+		Addr: testServer.listener.Addr().String(),
+		Dial: func(addr string) (net.Conn, error) {
+			dials.Add(1)
+			return net.Dial("tcp", addr)
+		},
+	}
+	if err := ConfigureHostClient(hc, ClientConfig{Mode: PriorKnowledge, PushHandler: pushes}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+	req := fasthttp.AcquireRequest()
+	resp := fasthttp.AcquireResponse()
+	defer fasthttp.ReleaseRequest(req)
+	defer fasthttp.ReleaseResponse(resp)
+	for i := range 6 {
+		req.Reset()
+		resp.Reset()
+		req.SetRequestURI(testServer.URL("/"))
+		if err := hc.Do(req, resp); err != nil {
+			t.Fatalf("Do() #%d error: %v", i, err)
+		}
+	}
+	if got := pushes.declined.Load(); got != 6 {
+		t.Fatalf("declined pushes = %d, want 6", got)
+	}
+	if got := dials.Load(); got != 1 {
+		t.Fatalf("connection dials = %d, want one reusable connection", got)
+	}
+}
+
 // stalledPeer completes the HTTP/2 handshake, advertises a huge window so the
 // client is limited only by TCP, then stops reading. Its writer goroutine parks
 // in conn.Write, which is what used to wedge every stream on the connection.

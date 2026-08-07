@@ -1,12 +1,42 @@
 package http2
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestRequestBodyCompactsTinyChunksWithoutLosingData(t *testing.T) {
+	body := newRequestBody(nil)
+	want := make([]byte, 64<<10)
+	for i := range want {
+		want[i] = byte(i)
+		if err := body.writeOwned([]byte{want[i]}, nil); err != nil {
+			t.Fatalf("writeOwned(%d) error: %v", i, err)
+		}
+	}
+	body.closeWithError(nil)
+	got, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll() error: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("compacted body differs: got %d bytes, want %d", len(got), len(want))
+	}
+}
+
+func TestStreamConnExpiredWriteDeadlineDoesNotQueueData(t *testing.T) {
+	conn := &streamConn{stream: &serverStream{}}
+	if err := conn.SetWriteDeadline(time.Now().Add(-time.Second)); err != nil {
+		t.Fatalf("SetWriteDeadline() error: %v", err)
+	}
+	if n, err := conn.Write([]byte("data")); n != 0 || !isTimeout(err) {
+		t.Fatalf("Write() = %d, %v; want 0, timeout", n, err)
+	}
+}
 
 type readerFunc func(p []byte) (int, error)
 

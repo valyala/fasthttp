@@ -58,6 +58,17 @@ type emptyReadConn struct {
 	reads int
 }
 
+type readCountingConn struct {
+	net.Conn
+
+	reads int
+}
+
+func (c *readCountingConn) Read(p []byte) (int, error) {
+	c.reads++
+	return c.Conn.Read(p)
+}
+
 func (c *emptyReadConn) Read([]byte) (int, error) {
 	c.reads++
 	return 0, nil
@@ -208,7 +219,7 @@ func TestServerRegisterProtocolCopiesSelectors(t *testing.T) {
 	}
 }
 
-func TestServerRegisterProtocolClonesAndOrdersTLSConfig(t *testing.T) {
+func TestServerRegisterProtocolPreservesAndOrdersTLSConfig(t *testing.T) {
 	original := &tls.Config{NextProtos: []string{"custom", "http/1.1"}} //nolint:gosec
 	server := &Server{TLSConfig: original}
 	err := server.RegisterProtocol(ProtocolRegistration{
@@ -219,14 +230,14 @@ func TestServerRegisterProtocolClonesAndOrdersTLSConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RegisterProtocol() error: %v", err)
 	}
-	if server.TLSConfig == original {
-		t.Fatal("RegisterProtocol() modified the caller's TLS config")
+	if server.TLSConfig != original {
+		t.Fatal("RegisterProtocol() replaced the caller's TLS config")
 	}
 	if got := server.TLSConfig.NextProtos; !slices.Equal(got, []string{"custom", "h2", "http/1.1"}) {
 		t.Fatalf("NextProtos = %v, want [custom h2 http/1.1]", got)
 	}
-	if got := original.NextProtos; !slices.Equal(got, []string{"custom", "http/1.1"}) {
-		t.Fatalf("caller's NextProtos = %v, want [custom http/1.1]", got)
+	if got := original.NextProtos; !slices.Equal(got, []string{"custom", "h2", "http/1.1"}) {
+		t.Fatalf("caller's NextProtos = %v, want [custom h2 http/1.1]", got)
 	}
 }
 
@@ -257,15 +268,15 @@ func TestServerRegisterProtocolTLSFailureDoesNotMutateServer(t *testing.T) {
 	}
 }
 
-func TestServerTLSMutationUsesOwnedClone(t *testing.T) {
+func TestServerTLSMutationPreservesCallerConfig(t *testing.T) {
 	original := &tls.Config{NextProtos: []string{"custom"}, MinVersion: tls.VersionTLS12}
 	server := &Server{TLSConfig: original}
 	server.NextProto("example", func(net.Conn) error { return nil })
-	if server.TLSConfig == original {
-		t.Fatal("NextProto mutated the caller's TLS config directly")
+	if server.TLSConfig != original {
+		t.Fatal("NextProto replaced the caller's TLS config")
 	}
-	if !slices.Equal(original.NextProtos, []string{"custom"}) {
-		t.Fatalf("caller's NextProtos = %v, want [custom]", original.NextProtos)
+	if !slices.Equal(original.NextProtos, []string{"custom", "example"}) {
+		t.Fatalf("caller's NextProtos = %v, want [custom example]", original.NextProtos)
 	}
 	if !slices.Equal(server.TLSConfig.NextProtos, []string{"custom", "example"}) {
 		t.Fatalf("server NextProtos = %v", server.TLSConfig.NextProtos)
@@ -274,11 +285,11 @@ func TestServerTLSMutationUsesOwnedClone(t *testing.T) {
 	replacement := &tls.Config{NextProtos: []string{"replacement"}}
 	server.TLSConfig = replacement
 	server.NextProto("second", func(net.Conn) error { return nil })
-	if server.TLSConfig == replacement {
-		t.Fatal("NextProto didn't clone a caller-replaced TLS config")
+	if server.TLSConfig != replacement {
+		t.Fatal("NextProto replaced a caller-supplied TLS config")
 	}
-	if !slices.Equal(replacement.NextProtos, []string{"replacement"}) {
-		t.Fatalf("replacement NextProtos were modified: %v", replacement.NextProtos)
+	if !slices.Equal(replacement.NextProtos, []string{"replacement", "second"}) {
+		t.Fatalf("replacement NextProtos = %v, want [replacement second]", replacement.NextProtos)
 	}
 }
 
@@ -339,6 +350,34 @@ func TestServerCleartextProtocolDispatch(t *testing.T) {
 	}
 	if got := []ConnState{<-states, <-states}; !slices.Equal(got, []ConnState{StateActive, StateIdle}) {
 		t.Fatalf("connection states = %v, want [active idle]", got)
+	}
+}
+
+func TestDetectCleartextProtocolReadsAvailablePrefixInOneCall(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+	counted := &readCountingConn{Conn: serverConn}
+	server := &Server{protocols: []registeredProtocol{{
+		cleartextPreface: []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"),
+	}}}
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := io.WriteString(clientConn, "PRI * HTTP/2.0\r\n\r\nSX\r\n\r\n")
+		writeDone <- err
+	}()
+	protocol, prefix, _, err := server.detectCleartextProtocol(counted)
+	if err != nil {
+		t.Fatalf("detectCleartextProtocol() error: %v", err)
+	}
+	if protocol != nil || len(prefix) != len("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n") {
+		t.Fatalf("detection = protocol:%v prefix:%q", protocol, prefix)
+	}
+	if counted.reads != 1 {
+		t.Fatalf("connection reads = %d, want 1 for an available 24-byte prefix", counted.reads)
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatalf("writing prefix: %v", err)
 	}
 }
 
@@ -403,6 +442,27 @@ func TestProtocolRequestCtxCacheRetainsBodyCapacity(t *testing.T) {
 	}
 	if got := cap(first.Request.Body()); got != 0 {
 		t.Fatalf("drained cache kept %d bytes of body in the server-wide pool", got)
+	}
+}
+
+func TestProtocolRequestCtxCacheAccountsForHeaderArenas(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	server := &Server{MaxProtocolRequestCtxCacheBytes: 1024}
+	protocolContext := &ProtocolServerContext{
+		server:       server,
+		conn:         serverConn,
+		idleConnTime: new(atomic.Int64),
+	}
+	stream := &testProtocolStream{Context: context.Background()}
+	requestCtx := protocolContext.AcquireRequestCtx(serverConn, stream)
+	requestCtx.Request.Header.Set("X-Large", string(make([]byte, 4<<10)))
+	protocolContext.ReleaseRequestCtx(requestCtx)
+	if len(protocolContext.requestCache) != 0 || protocolContext.requestBytes != 0 {
+		t.Fatalf("oversize header arena was cached: contexts=%d bytes=%d",
+			len(protocolContext.requestCache), protocolContext.requestBytes)
 	}
 }
 

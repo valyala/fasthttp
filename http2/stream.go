@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -251,20 +252,43 @@ func (b *requestBody) writeChunk(incoming requestBodyChunk) error {
 }
 
 func (b *requestBody) compactLocked(incoming requestBodyChunk) {
-	data := make([]byte, b.buffered+len(incoming.data))
-	offset := 0
-	for i := b.chunkHead; i < len(b.chunks); i++ {
-		chunk := &b.chunks[i]
-		start := 0
-		if i == b.chunkHead {
-			start = b.chunkOffset
+	targetLen := b.buffered + len(incoming.data)
+	var data []byte
+	startChunk := b.chunkHead
+	if startChunk < len(b.chunks) {
+		first := &b.chunks[startChunk]
+		// A previous compaction leaves one body-owned chunk at the front.
+		// Grow that chunk geometrically instead of copying the entire buffered
+		// body into an exact-sized allocation every 128 small DATA frames.
+		if first.release == nil && first.dataBuffer == nil {
+			unread := first.data[b.chunkOffset:]
+			if b.chunkOffset != 0 {
+				copy(first.data, unread)
+				unread = first.data[:len(unread)]
+			}
+			data = slices.Grow(unread, targetLen-len(unread))
+			*first = requestBodyChunk{}
+			startChunk++
 		}
-		offset += copy(data[offset:], chunk.data[start:])
+	}
+	if data == nil {
+		data = make([]byte, 0, targetLen)
+	}
+	for i := startChunk; i < len(b.chunks); i++ {
+		chunk := &b.chunks[i]
+		chunkStart := 0
+		if i == b.chunkHead {
+			chunkStart = b.chunkOffset
+		}
+		data = append(data, chunk.data[chunkStart:]...)
 		releaseRequestBodyChunk(chunk)
 		*chunk = requestBodyChunk{}
 	}
-	copy(data[offset:], incoming.data)
+	data = append(data, incoming.data...)
 	releaseRequestBodyChunk(&incoming)
+	if len(data) != targetLen {
+		panic("BUG: compacted HTTP/2 request body has the wrong length")
+	}
 	b.chunks = append(b.chunks[:0], requestBodyChunk{data: data})
 	b.chunkHead = 0
 	b.chunkOffset = 0
@@ -301,8 +325,8 @@ func (b *requestBody) discardWithError(err error) {
 type serverStream struct {
 	id             uint32
 	conn           *serverConn
-	deadline       time.Time
 	readTimer      *time.Timer
+	writeTimer     *time.Timer
 	cancelMu       sync.Mutex
 	done           chan struct{}
 	cancelCause    error
@@ -310,6 +334,7 @@ type serverStream struct {
 	body           *requestBody
 	maxBody        int
 	bodyBytes      int64
+	bufferedBytes  int64
 	expectedBody   int64
 	unconsumedFlow int64
 
@@ -332,6 +357,7 @@ type serverStream struct {
 
 	pendingData         []byte
 	pendingAck          chan error
+	pendingWrite        *streamWrite
 	responseEOF         bool
 	responseHasTrailers bool
 	responseHeaderSent  bool
@@ -377,7 +403,11 @@ func releaseServerStream(stream *serverStream) {
 }
 
 func (s *serverStream) Deadline() (time.Time, bool) {
-	return s.deadline, !s.deadline.IsZero()
+	// Server.ReadTimeout bounds receipt of the request body; it is not an
+	// application deadline. RequestCtx promises that successive Deadline calls
+	// return the same result, so exposing and later clearing that transport
+	// deadline would violate context.Context and race with streaming handlers.
+	return time.Time{}, false
 }
 
 func (s *serverStream) Done() <-chan struct{} {
@@ -554,14 +584,17 @@ func (c *streamConn) Write(p []byte) (int, error) {
 	if isClosed || writeClosed {
 		return 0, net.ErrClosed
 	}
+	if !deadline.IsZero() && time.Until(deadline) <= 0 {
+		return 0, timeoutError{}
+	}
 
-	result := make(chan error, 1)
+	write := &streamWrite{result: make(chan streamWriteResult, 1)}
 	data := bytes.Clone(p)
 	command := serverCommand{
 		kind:     serverCommandResponseData,
 		streamID: c.stream.id,
 		data:     data,
-		result:   result,
+		write:    write,
 	}
 	var expired <-chan time.Time
 	if !deadline.IsZero() {
@@ -577,15 +610,24 @@ func (c *streamConn) Write(p []byte) (int, error) {
 		return 0, timeoutError{}
 	}
 	select {
-	case err := <-result:
-		if err != nil {
-			return 0, err
-		}
-		return len(p), nil
-	case <-c.stream.Done():
-		return 0, c.stream.cause()
+	case result := <-write.result:
+		return result.n, result.err
 	case <-expired:
-		return 0, timeoutError{}
+		// Once accepted by the connection owner, a write cannot simply be
+		// abandoned: its bytes might be flow-control blocked and delivered
+		// later. Ask the same owner to cancel this exact write, then wait for
+		// its authoritative partial-byte count before returning.
+		select {
+		case c.stream.conn.commands <- serverCommand{
+			kind:     serverCommandCancelWrite,
+			streamID: c.stream.id,
+			write:    write,
+			err:      timeoutError{},
+		}:
+		case <-c.stream.conn.ctx.Done():
+		}
+		result := <-write.result
+		return result.n, result.err
 	}
 }
 

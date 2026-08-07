@@ -2,6 +2,7 @@ package http2
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 
 	xhttp2 "golang.org/x/net/http2"
@@ -32,6 +33,16 @@ type frameReader struct {
 	headers headersFrame
 }
 
+type frameReadError struct {
+	frameType xhttp2.FrameType
+	err       error
+}
+
+func (e *frameReadError) Error() string {
+	return fmt.Sprintf("reading %s frame: %v", e.frameType, e.err)
+}
+func (e *frameReadError) Unwrap() error { return e.err }
+
 func newFrameReader(framer *xhttp2.Framer, conn *bufio.Reader) *frameReader {
 	return &frameReader{framer: framer, conn: conn}
 }
@@ -59,7 +70,11 @@ func (r *frameReader) readFrame() (any, error) {
 		return nil, err
 	}
 	if header.Type != xhttp2.FrameHeaders {
-		return r.framer.ReadFrameForHeader(header)
+		frame, readErr := r.framer.ReadFrameForHeader(header)
+		if readErr != nil {
+			return nil, &frameReadError{frameType: header.Type, err: readErr}
+		}
+		return frame, nil
 	}
 	if err := r.readHeadersPayload(header); err != nil {
 		return nil, err
@@ -103,7 +118,10 @@ func (r *frameReader) readHeadersPayload(header xhttp2.FrameHeader) error {
 		payload = payload[5:]
 	}
 	if len(payload) < padLength {
-		return xhttp2.StreamError{StreamID: header.StreamID, Code: xhttp2.ErrCodeProtocol}
+		// The peer's encoder may already have mutated its dynamic table for
+		// bytes hidden behind the invalid padding. Continuing without decoding
+		// them would desynchronize the connection-scoped HPACK state.
+		return xhttp2.ConnectionError(xhttp2.ErrCodeCompression)
 	}
 	frame.fragment = payload[:len(payload)-padLength]
 	return nil
