@@ -69,6 +69,100 @@ func TestHostClientProtocolRoundTripper(t *testing.T) {
 	}
 }
 
+func TestSetMaxConnsWakesQueuedSlotWaiters(t *testing.T) {
+	hc := &HostClient{
+		Addr:               "example.com:80",
+		MaxConns:           1,
+		MaxConnWaitTimeout: 5 * time.Second,
+	}
+	if err := hc.reserveProtocolConn(0); err != nil {
+		t.Fatalf("reserving the only slot: %v", err)
+	}
+
+	result := make(chan error, 1)
+	go func() { result <- hc.reserveProtocolConn(0) }()
+	for i := 0; ; i++ {
+		hc.connsLock.Lock()
+		queued := hc.connsWait != nil && hc.connsWait.len() > 0
+		hc.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if i > 1000 {
+			t.Fatal("slot waiter never queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	hc.SetMaxConns(2)
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("queued reservation error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SetMaxConns() didn't wake the queued slot waiter")
+	}
+	if got := hc.ConnsCount(); got != 2 {
+		t.Fatalf("ConnsCount() = %d, want 2", got)
+	}
+	hc.releaseProtocolConnSlot()
+	hc.releaseProtocolConnSlot()
+}
+
+func TestReleasedSlotsConvergeAfterMaxConnsShrink(t *testing.T) {
+	hc := &HostClient{
+		Addr:               "example.com:80",
+		MaxConns:           2,
+		MaxConnWaitTimeout: 5 * time.Second,
+	}
+	for range 2 {
+		if err := hc.reserveProtocolConn(0); err != nil {
+			t.Fatalf("reserving a slot: %v", err)
+		}
+	}
+
+	result := make(chan error, 1)
+	go func() { result <- hc.reserveProtocolConn(0) }()
+	for i := 0; ; i++ {
+		hc.connsLock.Lock()
+		queued := hc.connsWait != nil && hc.connsWait.len() > 0
+		hc.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if i > 1000 {
+			t.Fatal("slot waiter never queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	hc.SetMaxConns(1)
+	hc.releaseProtocolConnSlot()
+	select {
+	case err := <-result:
+		t.Fatalf("shrunken capacity was handed to a waiter (err=%v)", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := hc.ConnsCount(); got != 1 {
+		t.Fatalf("ConnsCount() after shrink = %d, want 1", got)
+	}
+
+	hc.releaseProtocolConnSlot()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("queued reservation error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waiter wasn't served once the count converged")
+	}
+	if got := hc.ConnsCount(); got != 1 {
+		t.Fatalf("ConnsCount() after handoff = %d, want 1", got)
+	}
+	hc.releaseProtocolConnSlot()
+}
+
 type timeoutRecordingTransport struct {
 	seen time.Duration
 }
