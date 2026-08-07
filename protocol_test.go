@@ -16,12 +16,6 @@ import (
 
 type protocolHandlerFunc func(*ProtocolServerContext, net.Conn) error
 
-type upgraderHandlerFunc struct{ protocolHandlerFunc }
-
-func (upgraderHandlerFunc) UpgradeConn(*ProtocolServerContext, net.Conn, *Request) (bool, error) {
-	return false, nil
-}
-
 func (f protocolHandlerFunc) ServeConn(ctx *ProtocolServerContext, c net.Conn) error {
 	return f(ctx, c)
 }
@@ -81,6 +75,13 @@ type testProtocolStream struct {
 	informationalStatus int
 	pushTarget          string
 	accepted            bool
+	hijackRejected      bool
+}
+
+func (s *testProtocolStream) RejectHijack() {
+	s.mu.Lock()
+	s.hijackRejected = true
+	s.mu.Unlock()
 }
 
 func (s *testProtocolStream) WriteInformational(statusCode int, _ *ResponseHeader) error {
@@ -134,18 +135,10 @@ func TestServerRegisterProtocol(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "duplicate registered alpn",
+			name: "second registration",
 			registrations: []ProtocolRegistration{
 				{ALPN: []string{"example"}, Handler: validHandler},
-				{ALPN: []string{"example"}, Handler: validHandler},
-			},
-			wantError: true,
-		},
-		{
-			name: "conflicting prefaces",
-			registrations: []ProtocolRegistration{
-				{CleartextPreface: []byte("PROTO"), Handler: validHandler},
-				{CleartextPreface: []byte("PROTOCOL"), Handler: validHandler},
+				{ALPN: []string{"other"}, Handler: validHandler},
 			},
 			wantError: true,
 		},
@@ -164,14 +157,6 @@ func TestServerRegisterProtocol(t *testing.T) {
 				CleartextUpgradeToken: "example",
 				Handler:               validHandler,
 			}},
-			wantError: true,
-		},
-		{
-			name: "duplicate upgrade token",
-			registrations: []ProtocolRegistration{
-				{ALPN: []string{"a"}, CleartextUpgradeToken: "example", Handler: upgraderHandlerFunc{validHandler}},
-				{ALPN: []string{"b"}, CleartextUpgradeToken: "example", Handler: upgraderHandlerFunc{validHandler}},
-			},
 			wantError: true,
 		},
 	}
@@ -211,10 +196,10 @@ func TestServerRegisterProtocolCopiesSelectors(t *testing.T) {
 
 	alpn[0] = "changed"
 	preface[0] = 'X'
-	if got := s.protocols[0].alpn[0]; got != "example" {
+	if got := s.protocol.alpn[0]; got != "example" {
 		t.Fatalf("registered ALPN = %q, want %q", got, "example")
 	}
-	if got := string(s.protocols[0].cleartextPreface); got != "PROTOCOL" {
+	if got := string(s.protocol.cleartextPreface); got != "PROTOCOL" {
 		t.Fatalf("registered preface = %q, want %q", got, "PROTOCOL")
 	}
 }
@@ -260,8 +245,8 @@ func TestServerRegisterProtocolTLSFailureDoesNotMutateServer(t *testing.T) {
 	if server.TLSConfig != original {
 		t.Fatal("RegisterProtocol() replaced TLSConfig after a failed registration")
 	}
-	if len(server.protocols) != 0 {
-		t.Fatalf("registered protocols = %d, want 0", len(server.protocols))
+	if server.protocol != nil {
+		t.Fatal("a failed registration left a protocol registered")
 	}
 	if original.MinVersion != tls.VersionTLS10 || !slices.Equal(original.NextProtos, []string{"custom"}) {
 		t.Fatalf("caller's TLS config was modified: min=%#x next=%v", original.MinVersion, original.NextProtos)
@@ -358,9 +343,9 @@ func TestDetectCleartextProtocolReadsAvailablePrefixInOneCall(t *testing.T) {
 	defer serverConn.Close()
 	defer clientConn.Close()
 	counted := &readCountingConn{Conn: serverConn}
-	server := &Server{protocols: []registeredProtocol{{
+	server := &Server{protocol: &registeredProtocol{
 		cleartextPreface: []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"),
-	}}}
+	}}
 	writeDone := make(chan error, 1)
 	go func() {
 		_, err := io.WriteString(clientConn, "PRI * HTTP/2.0\r\n\r\nSX\r\n\r\n")
@@ -658,7 +643,8 @@ func TestRequestCtxProtocolOperations(t *testing.T) {
 }
 
 func TestRequestCtxTryHijackRejectsProtocolStream(t *testing.T) {
-	requestCtx := &RequestCtx{protocolStream: &testProtocolStream{Context: context.Background()}}
+	stream := &testProtocolStream{Context: context.Background()}
+	requestCtx := &RequestCtx{protocolStream: stream}
 	handler := func(net.Conn) {}
 	if err := requestCtx.TryHijack(handler); !errors.Is(err, ErrHijackNotSupported) {
 		t.Fatalf("TryHijack() error = %v, want ErrHijackNotSupported", err)
@@ -668,8 +654,8 @@ func TestRequestCtxTryHijackRejectsProtocolStream(t *testing.T) {
 	}
 
 	requestCtx.Hijack(handler)
-	if !errors.Is(requestCtx.LastProtocolError(), ErrHijackNotSupported) {
-		t.Fatalf("LastProtocolError() = %v, want ErrHijackNotSupported", requestCtx.LastProtocolError())
+	if !stream.hijackRejected {
+		t.Fatal("Hijack() didn't notify the protocol stream")
 	}
 }
 

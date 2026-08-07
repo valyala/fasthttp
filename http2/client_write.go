@@ -114,6 +114,7 @@ func (c *clientConn) writeRequestHeaders(
 		req,
 		maxHeaderListSize,
 		c.config.enableExtendedConnect,
+		&c.headerFields,
 	)
 	if err != nil {
 		// Nothing reached the wire or the encoder, so this is the stream's
@@ -246,18 +247,12 @@ func (c *clientConn) sendData(stream *clientStream, data []byte, endStream bool,
 				c.mu.Unlock()
 				break
 			}
-			amount := 0
-			if len(data) != 0 && c.peerConnectionWindow > 0 && stream.sendWindow > 0 {
-				amount = min(len(data), c.peerMaxFrameSize, int(c.peerConnectionWindow), int(stream.sendWindow))
-			}
+			amount := nextDataChunk(&c.connFlowState, &stream.streamFlowState, len(data))
 			if len(data) != 0 && amount == 0 {
 				c.mu.Unlock()
 				break
 			}
 			last := amount == len(data) && endStream
-			c.peerConnectionWindow -= int64(amount)
-			stream.sendWindow -= int64(amount)
-			stream.requestBytes += int64(amount)
 			if last {
 				stream.localClosed = true
 			}

@@ -19,6 +19,7 @@ func encodeRequestHeaders(
 	req *fasthttp.Request,
 	maxHeaderListSize uint64,
 	enableExtendedConnect bool,
+	scratch *[]hpack.HeaderField,
 ) ([]byte, error) {
 	method := stringsCache.value(req.Header.Method(), false)
 	uri := req.URI()
@@ -69,6 +70,10 @@ func encodeRequestHeaders(
 			return nil, errors.New("http2: request header list exceeds peer limit")
 		}
 	}
+	// Nothing may reach the stateful HPACK encoder until the whole block is
+	// known to fit; scratch carries the resolved fields to the encode pass so
+	// req.Header.All() runs once.
+	fields := (*scratch)[:0]
 	var validateErr error
 	req.Header.All()(func(key, value []byte) bool {
 		name := stringsCache.name(key)
@@ -87,8 +92,15 @@ func encodeRequestHeaders(
 			return false
 		}
 		headerSize += fieldSize
+		sensitive := isSensitiveHeader(name)
+		fields = append(fields, hpack.HeaderField{
+			Name:      name,
+			Value:     stringsCache.value(value, sensitive),
+			Sensitive: sensitive,
+		})
 		return true
 	})
+	*scratch = fields
 	if validateErr != nil {
 		return nil, validateErr
 	}
@@ -99,23 +111,10 @@ func encodeRequestHeaders(
 			return nil, err
 		}
 	}
-	var encodeErr error
-	req.Header.All()(func(key, value []byte) bool {
-		name := stringsCache.name(key)
-		switch name {
-		case "host", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade":
-			return true
+	for _, field := range fields {
+		if err := encoder.WriteField(field); err != nil {
+			return nil, err
 		}
-		sensitive := isSensitiveHeader(name)
-		encodeErr = encoder.WriteField(hpack.HeaderField{
-			Name:      name,
-			Value:     stringsCache.value(value, sensitive),
-			Sensitive: sensitive,
-		})
-		return encodeErr == nil
-	})
-	if encodeErr != nil {
-		return nil, encodeErr
 	}
 	return buffer.Bytes(), nil
 }
@@ -213,25 +212,26 @@ func populateResponseTrailers(resp *fasthttp.Response, fields []hpack.HeaderFiel
 
 func populatePromisedRequest(req *fasthttp.Request, fields []hpack.HeaderField) error {
 	var method, scheme, authority, path string
-	seenPseudo := make(map[string]struct{}, 4)
+	var seenPseudo uint8
 	for _, field := range fields {
 		if field.IsPseudo() {
-			if _, ok := seenPseudo[field.Name]; ok {
-				return errors.New("http2: duplicate promised request pseudo-header")
-			}
-			seenPseudo[field.Name] = struct{}{}
+			var bit uint8
 			switch field.Name {
 			case ":method":
-				method = field.Value
+				bit, method = pseudoMethod, field.Value
 			case ":scheme":
-				scheme = field.Value
+				bit, scheme = pseudoScheme, field.Value
 			case ":authority":
-				authority = field.Value
+				bit, authority = pseudoAuthority, field.Value
 			case ":path":
-				path = field.Value
+				bit, path = pseudoPath, field.Value
 			default:
 				return errors.New("http2: invalid promised request pseudo-header")
 			}
+			if seenPseudo&bit != 0 {
+				return errors.New("http2: duplicate promised request pseudo-header")
+			}
+			seenPseudo |= bit
 			continue
 		}
 		if isConnectionSpecificHeader(field.Name) || field.Name == "host" {

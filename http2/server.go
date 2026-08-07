@@ -3,7 +3,6 @@ package http2
 import (
 	"bufio"
 	"bytes"
-	"container/heap"
 	"context"
 	"errors"
 	"fmt"
@@ -35,33 +34,31 @@ const (
 	incomingFramePriorityUpdate
 	incomingFramePriority
 	incomingFrameInvalidPushPromise
-	incomingFrameReadIdle
 	incomingFrameStreamError
 )
 
 type incomingFrame struct {
-	kind            incomingFrameKind
-	streamID        uint32
-	endStream       bool
-	ack             bool
-	truncated       bool
-	flowLength      int
-	data            []byte
-	fields          []hpack.HeaderField
-	settings        []xhttp2.Setting
-	increment       uint32
-	errCode         xhttp2.ErrCode
-	lastStreamID    uint32
-	pingData        [8]byte
-	priority        string
-	dependency      uint32
-	hasPriority     bool
-	morePending     bool
-	frameType       xhttp2.FrameType
-	err             error
-	fieldStorage    *incomingHeaderFieldStorage
-	dataBuffer      *incomingDataBuffer
-	settingsStorage *incomingSettingsStorage
+	kind         incomingFrameKind
+	streamID     uint32
+	endStream    bool
+	ack          bool
+	truncated    bool
+	flowLength   int
+	data         []byte
+	fields       []hpack.HeaderField
+	settings     []xhttp2.Setting
+	increment    uint32
+	errCode      xhttp2.ErrCode
+	lastStreamID uint32
+	pingData     [8]byte
+	priority     string
+	dependency   uint32
+	hasPriority  bool
+	morePending  bool
+	frameType    xhttp2.FrameType
+	err          error
+	fieldStorage *incomingHeaderFieldStorage
+	dataBuffer   *incomingDataBuffer
 }
 
 type incomingHeaderFieldStorage struct {
@@ -72,33 +69,13 @@ type incomingDataBuffer struct {
 	data []byte
 }
 
-type incomingSettingsStorage struct {
-	settings []xhttp2.Setting
-}
-
 type responsePumpBuffer struct {
 	data []byte
-}
-
-type streamIDHeap []uint32
-
-func (h *streamIDHeap) Len() int           { return len(*h) }
-func (h *streamIDHeap) Less(i, j int) bool { return (*h)[i] < (*h)[j] }
-func (h *streamIDHeap) Swap(i, j int)      { (*h)[i], (*h)[j] = (*h)[j], (*h)[i] }
-func (h *streamIDHeap) Push(value any)     { *h = append(*h, value.(uint32)) } //nolint:forcetypeassert
-func (h *streamIDHeap) Pop() any {
-	old := *h
-	last := len(old) - 1
-	value := old[last]
-	old[last] = 0
-	*h = old[:last]
-	return value
 }
 
 var (
 	incomingHeaderFieldsPool sync.Pool
 	incomingDataPool         sync.Pool
-	incomingSettingsPool     sync.Pool
 	responsePumpBufferPool   sync.Pool
 )
 
@@ -175,6 +152,8 @@ func (e *serverError) Unwrap() error {
 }
 
 type serverConn struct {
+	connFlowState
+
 	protocolContext *fasthttp.ProtocolServerContext
 	server          *fasthttp.Server
 	config          serverConfig
@@ -186,11 +165,11 @@ type serverConn struct {
 	idleWorkers     []*streamWorker
 	allWorkers      []*streamWorker
 	headerDecoder   *headerCodec
-	bufferedWriter  flushWriter
 	writer          *asyncFrameWriter
 	encoder         *hpack.Encoder
 	headerBuffer    bytes.Buffer
 	headerStrings   headerStringCache
+	headerFields    []hpack.HeaderField
 
 	events   chan incomingFrame
 	commands chan serverCommand
@@ -208,23 +187,14 @@ type serverConn struct {
 	peerGoingAway      bool
 	peerGoAwayLastID   uint32
 	isDraining         bool
-	receivedSettings   bool
 
-	peerInitialStreamWindow  int64
-	peerConnectionWindow     int64
-	peerMaxFrameSize         int
-	peerMaxHeaderListSize    uint64
-	peerMaxConcurrentStreams uint32
-	peerAllowsPush           bool
+	peerAllowsPush bool
 
-	receiveConnectionWindow int64
-	pendingConnectionUpdate int64
-	bufferedRequestBytes    int64
-	nextPushStreamID        uint32
-	activePushes            uint32
-	priorityUpdates         map[uint32]priority
-	priorityUpdateOrder     []uint32
-	priorityUpdateHeap      streamIDHeap
+	bufferedRequestBytes   int64
+	nextPushStreamID       uint32
+	activePushes           uint32
+	priorityUpdates        map[uint32]priority
+	prunedPriorityStreamID uint32
 	// closedClientStreams records, per recently closed stream, whether its
 	// STREAM_CLOSED reset was already sent. See markClosedStreamReset.
 	closedClientStreams      map[uint32]bool
@@ -246,23 +216,18 @@ func newServerConn(
 ) *serverConn {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	conn := &serverConn{
-		protocolContext:          protocolContext,
-		server:                   protocolContext.Server(),
-		config:                   *config,
-		conn:                     c,
-		ctx:                      ctx,
-		cancel:                   cancel,
-		streams:                  make(map[uint32]*serverStream),
-		peerInitialStreamWindow:  65535,
-		peerConnectionWindow:     65535,
-		peerMaxFrameSize:         defaultMaxFrameSize,
-		peerMaxHeaderListSize:    math.MaxUint32,
-		peerMaxConcurrentStreams: math.MaxUint32,
-		peerAllowsPush:           true,
-		receiveConnectionWindow:  int64(config.connectionWindowSize),
-		nextPushStreamID:         2,
-		priorityUpdates:          make(map[uint32]priority),
-		closedClientStreams:      make(map[uint32]bool),
+		protocolContext:     protocolContext,
+		server:              protocolContext.Server(),
+		config:              *config,
+		conn:                c,
+		ctx:                 ctx,
+		cancel:              cancel,
+		streams:             make(map[uint32]*serverStream),
+		connFlowState:       newConnFlowState(int64(config.connectionWindowSize)),
+		peerAllowsPush:      true,
+		nextPushStreamID:    2,
+		priorityUpdates:     make(map[uint32]priority),
+		closedClientStreams: make(map[uint32]bool),
 	}
 	conn.encoder = hpack.NewEncoder(&conn.headerBuffer)
 	conn.encoder.SetMaxDynamicTableSizeLimit(config.maxEncoderTableSize)
@@ -273,7 +238,7 @@ func (c *serverConn) initQueues() {
 	if c.events != nil {
 		return
 	}
-	maxCommands := min(int(c.config.maxConcurrentStreams)*2+32, c.config.maxQueuedCommands)
+	maxCommands := min(int(c.config.maxConcurrentStreams)*2+32, maxQueuedCommands)
 	c.events = make(chan incomingFrame, 64)
 	c.commands = make(chan serverCommand, maxCommands)
 }
@@ -310,26 +275,6 @@ func (c *serverConn) serve(upgrade *serverUpgrade) (retErr error) {
 		if err := validateTLSConnection(c.conn); err != nil {
 			return err
 		}
-		if err := c.readClientPreface(); err != nil {
-			_ = c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-			_, _ = io.CopyN(io.Discard, c.conn, 64<<10)
-			return err
-		}
-	} else {
-		direct := directFrameWriter{conn: c.conn, timeout: c.config.writeByteTimeout}
-		if _, err := direct.Write(upgradeResponse); err != nil {
-			return fmt.Errorf("http2: writing upgrade response: %w", err)
-		}
-		c.framer = xhttp2.NewFramer(direct, nil)
-		if err := c.applySettings(upgrade.settings); err != nil {
-			return fmt.Errorf("http2: applying upgrade settings: %w", err)
-		}
-		if err := c.writeInitialSettings(); err != nil {
-			return fmt.Errorf("http2: writing initial settings: %w", err)
-		}
-		if err := c.readClientPreface(); err != nil {
-			return err
-		}
 	}
 
 	writeBufferSize := c.server.WriteBufferSize
@@ -342,23 +287,43 @@ func (c *serverConn) serve(upgrade *serverUpgrade) (retErr error) {
 		defaultWriteQueueBatches,
 		c.config.writeByteTimeout,
 	)
-	c.bufferedWriter = c.writer
 	readBufferSize := c.server.ReadBufferSize
 	if readBufferSize <= 0 {
 		readBufferSize = defaultReadBufferSize
 	}
 	reader := bufio.NewReaderSize(c.conn, readBufferSize)
-	c.framer = xhttp2.NewFramer(c.bufferedWriter, reader)
+	c.framer = xhttp2.NewFramer(c.writer, reader)
 	c.framer.SetReuseFrames()
 	c.frames = newFrameReader(c.framer, reader)
 	c.headerDecoder = newHeaderCodec(c.config.maxDecoderTableSize, c.config.maxHeaderListSize)
 	c.framer.SetMaxReadFrameSize(c.config.maxReadFrameSize)
 	if upgrade == nil {
+		if err := c.readClientPreface(); err != nil {
+			_ = c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			_, _ = io.CopyN(io.Discard, c.conn, 64<<10)
+			return err
+		}
 		if err := c.writeInitialSettings(); err != nil {
 			return fmt.Errorf("http2: writing initial settings: %w", err)
 		}
-		if err := c.bufferedWriter.Flush(); err != nil {
+		if err := c.writer.Flush(); err != nil {
 			return fmt.Errorf("http2: flushing initial settings: %w", err)
+		}
+	} else {
+		if _, err := c.writer.Write(upgradeResponse); err != nil {
+			return fmt.Errorf("http2: writing upgrade response: %w", err)
+		}
+		if err := c.applySettings(upgrade.settings); err != nil {
+			return fmt.Errorf("http2: applying upgrade settings: %w", err)
+		}
+		if err := c.writeInitialSettings(); err != nil {
+			return fmt.Errorf("http2: writing initial settings: %w", err)
+		}
+		if err := c.writer.Flush(); err != nil {
+			return fmt.Errorf("http2: flushing upgrade response: %w", err)
+		}
+		if err := c.readClientPreface(); err != nil {
+			return err
 		}
 	}
 	c.initQueues()
@@ -496,52 +461,26 @@ func (c *serverConn) serve(upgrade *serverUpgrade) (retErr error) {
 			}
 		}
 		if coalesceArmed {
-			stopTimer(coalesceTimer)
+			coalesceTimer.Stop()
 			coalesceArmed = false
 		}
 		if err := c.flushResponses(); err != nil {
 			return err
 		}
-		if err := c.bufferedWriter.Flush(); err != nil {
+		if err := c.writer.Flush(); err != nil {
 			return err
 		}
 		if idleTimer != nil {
 			switch {
 			case len(c.streams) == 0 && !idleArmed:
-				resetTimer(idleTimer, c.config.idleTimeout)
+				idleTimer.Reset(c.config.idleTimeout)
 				idleArmed = true
 			case len(c.streams) != 0 && idleArmed:
-				stopTimer(idleTimer)
+				idleTimer.Stop()
 				idleArmed = false
 			}
 		}
 	}
-}
-
-type directFrameWriter struct {
-	conn    net.Conn
-	timeout time.Duration
-}
-
-func (w directFrameWriter) Write(data []byte) (int, error) {
-	written := 0
-	for len(data) != 0 {
-		if w.timeout > 0 {
-			if err := w.conn.SetWriteDeadline(time.Now().Add(w.timeout)); err != nil {
-				return written, err
-			}
-		}
-		n, err := w.conn.Write(data)
-		written += n
-		data = data[n:]
-		if err != nil {
-			return written, err
-		}
-		if n == 0 {
-			return written, io.ErrNoProgress
-		}
-	}
-	return written, nil
 }
 
 func (c *serverConn) handleIncomingEvent(event *incomingFrame) (bool, error) {
@@ -627,25 +566,8 @@ func (c *serverConn) writeInitialSettings() error {
 }
 
 func (c *serverConn) readLoop() {
-	waitingForPing := false
 	for {
-		readTimeout := c.config.readIdleTimeout
-		if waitingForPing {
-			readTimeout = c.config.pingTimeout
-		}
-		if readTimeout > 0 {
-			_ = c.conn.SetReadDeadline(time.Now().Add(readTimeout))
-		}
 		frame, err := c.frames.readFrame()
-		if err != nil && isTimeout(err) && c.config.readIdleTimeout > 0 && !waitingForPing {
-			select {
-			case c.events <- incomingFrame{kind: incomingFrameReadIdle}:
-			case <-c.ctx.Done():
-				return
-			}
-			waitingForPing = true
-			continue
-		}
 		event := incomingFrame{err: err}
 		if err != nil {
 			var readErr *frameReadError
@@ -659,7 +581,6 @@ func (c *serverConn) readLoop() {
 				event.errCode = streamError.Code
 			}
 		} else {
-			waitingForPing = false
 			if headers, ok := frame.(*headersFrame); ok {
 				event = c.decodeIncomingHeaders(headers)
 			} else {
@@ -721,8 +642,8 @@ func incomingFrameFromWire(frame xhttp2.Frame) incomingFrame {
 		event.kind = incomingFrameSettings
 		event.ack = frame.IsAck()
 		if !event.ack {
-			event.settingsStorage = acquireIncomingSettings(frame.NumSettings())
-			event.settings = event.settingsStorage.settings
+			// SETTINGS arrives once or twice per connection; pooling it is noise.
+			event.settings = make([]xhttp2.Setting, frame.NumSettings())
 			for i := range frame.NumSettings() {
 				event.settings[i] = frame.Setting(i)
 			}
@@ -791,17 +712,6 @@ func acquireIncomingHeaderFields(length int) *incomingHeaderFieldStorage {
 	return &incomingHeaderFieldStorage{fields: make([]hpack.HeaderField, 0, length)}
 }
 
-func acquireIncomingSettings(length int) *incomingSettingsStorage {
-	if value := incomingSettingsPool.Get(); value != nil {
-		storage := value.(*incomingSettingsStorage) //nolint:forcetypeassert
-		if cap(storage.settings) >= length {
-			storage.settings = storage.settings[:length]
-			return storage
-		}
-	}
-	return &incomingSettingsStorage{settings: make([]xhttp2.Setting, length)}
-}
-
 func copyIncomingData(source []byte) *incomingDataBuffer {
 	if len(source) == 0 {
 		return nil
@@ -833,10 +743,6 @@ func releaseIncomingFrame(event *incomingFrame) {
 	}
 	if event.dataBuffer != nil {
 		releaseIncomingData(event.dataBuffer)
-	}
-	if event.settingsStorage != nil && cap(event.settingsStorage.settings) <= 64 {
-		event.settingsStorage.settings = event.settingsStorage.settings[:0]
-		incomingSettingsPool.Put(event.settingsStorage)
 	}
 }
 
@@ -892,8 +798,6 @@ func (c *serverConn) processFrame(event *incomingFrame) error {
 		return nil
 	case incomingFrameInvalidPushPromise:
 		return &serverError{code: xhttp2.ErrCodeProtocol, err: errors.New("http2: client sent push promise")}
-	case incomingFrameReadIdle:
-		return c.framer.WritePing(false, [8]byte{'f', 'a', 's', 't', 'h', '2', 0, 1})
 	case incomingFrameStreamError:
 		return c.processHeaderStreamError(event)
 	default:
@@ -918,12 +822,8 @@ func (c *serverConn) processHeaderStreamError(event *incomingFrame) error {
 		}
 	}
 	c.lastClientStreamID = event.streamID
-	c.prunePriorityUpdates(event.streamID)
 	delete(c.priorityUpdates, event.streamID)
 	c.rememberClosedClientStream(event.streamID)
-	if c.config.countError != nil {
-		c.config.countError("stream_" + strings.ToLower(event.errCode.String()))
-	}
 	if err := c.recordRapidReset(); err != nil {
 		return err
 	}
@@ -1052,7 +952,6 @@ func (c *serverConn) processHeaders(event *incomingFrame) error {
 		return &serverError{code: xhttp2.ErrCodeProtocol, err: errors.New("http2: reused or skipped client stream id")}
 	}
 	c.lastClientStreamID = event.streamID
-	c.prunePriorityUpdates(event.streamID)
 	if event.hasPriority && event.streamID == event.dependency {
 		return c.rejectNewStream(event.streamID, xhttp2.ErrCodeProtocol)
 	}
@@ -1156,9 +1055,6 @@ func (c *serverConn) processHeaders(event *incomingFrame) error {
 func (c *serverConn) rejectNewStream(streamID uint32, code xhttp2.ErrCode) error {
 	delete(c.priorityUpdates, streamID)
 	c.rememberClosedClientStream(streamID)
-	if c.config.countError != nil {
-		c.config.countError("stream_" + strings.ToLower(code.String()))
-	}
 	if err := c.recordRapidReset(); err != nil {
 		return err
 	}
@@ -1177,21 +1073,27 @@ func (c *serverConn) processTrailers(stream *serverStream, event *incomingFrame)
 			return c.resetStream(stream.id, xhttp2.ErrCodeProtocol, errors.New("http2: invalid trailer field"))
 		}
 	}
+	requestHeader := &stream.request.Request.Header
+	if stream.body == nil {
+		// Applying directly can leave a partial trailer set behind on error,
+		// but the stream resets and the RequestCtx is recycled before any
+		// handler could observe it.
+		if err := applyRequestTrailers(requestHeader, event.fields); err != nil {
+			return c.resetStream(stream.id, xhttp2.ErrCodeProtocol, err)
+		}
+		return c.finishRequestBody(stream)
+	}
+	// A streaming body applies trailers only when its reader drains, which is
+	// too late to reject the frame, so validate on a scratch header now and
+	// copy the fields the deferred commit needs.
 	var validationHeader fasthttp.RequestHeader
 	if err := applyRequestTrailers(&validationHeader, event.fields); err != nil {
 		return c.resetStream(stream.id, xhttp2.ErrCodeProtocol, err)
 	}
 	fields := append([]hpack.HeaderField(nil), event.fields...)
-	requestHeader := &stream.request.Request.Header
-	if stream.body == nil {
-		if err := applyRequestTrailers(requestHeader, fields); err != nil {
-			return c.resetStream(stream.id, xhttp2.ErrCodeProtocol, err)
-		}
-	} else {
-		stream.body.setEOFCommit(func() error {
-			return applyRequestTrailers(requestHeader, fields)
-		})
-	}
+	stream.body.setEOFCommit(func() error {
+		return applyRequestTrailers(requestHeader, fields)
+	})
 	return c.finishRequestBody(stream)
 }
 
@@ -1202,8 +1104,7 @@ func (c *serverConn) processData(event *incomingFrame) error {
 	}
 	flowLength := int64(event.flowLength)
 	payloadLength := len(event.data)
-	c.receiveConnectionWindow -= flowLength
-	if c.receiveConnectionWindow < 0 {
+	if !c.debitReceiveWindow(flowLength) {
 		return &serverError{code: xhttp2.ErrCodeFlowControl, err: errors.New("http2: connection receive window exceeded")}
 	}
 	if stream == nil {
@@ -1222,8 +1123,7 @@ func (c *serverConn) processData(event *incomingFrame) error {
 		c.restoreConnectionWindow(flowLength)
 		return c.resetStream(stream.id, xhttp2.ErrCodeStreamClosed, errors.New("http2: data on half-closed remote stream"))
 	}
-	stream.recvWindow -= flowLength
-	if stream.recvWindow < 0 {
+	if !stream.debitReceiveWindow(flowLength) {
 		c.restoreConnectionWindow(flowLength)
 		return c.resetStream(stream.id, xhttp2.ErrCodeFlowControl, errors.New("http2: stream receive window exceeded"))
 	}
@@ -1338,7 +1238,7 @@ func (c *serverConn) armResponseWriteTimeout(stream *serverStream) {
 			case c.commands <- serverCommand{
 				kind:     serverCommandResponseWriteTimeout,
 				streamID: streamID,
-				err:      timeoutError{},
+				err:      errStreamDeadline,
 			}:
 			case <-c.ctx.Done():
 			}
@@ -1362,15 +1262,8 @@ func (c *serverConn) consumeRequestBytes(stream *serverStream, amount int64) err
 	if err := c.consumeConnectionBytes(amount); err != nil {
 		return err
 	}
-	stream.pendingWindowUpdate += amount
-	streamIncrement := int64(0)
-	if stream.pendingWindowUpdate >= int64(c.config.streamWindowSize)/2 {
-		streamIncrement = stream.pendingWindowUpdate
-		stream.pendingWindowUpdate = 0
-		stream.recvWindow += streamIncrement
-	}
-	if streamIncrement != 0 {
-		return c.framer.WriteWindowUpdate(stream.id, uint32(streamIncrement))
+	if increment := stream.consumeReceived(amount, int64(c.config.streamWindowSize)); increment != 0 {
+		return c.framer.WriteWindowUpdate(stream.id, uint32(increment))
 	}
 	return nil
 }
@@ -1379,15 +1272,8 @@ func (c *serverConn) consumeConnectionBytes(amount int64) error {
 	if amount <= 0 {
 		return nil
 	}
-	c.pendingConnectionUpdate += amount
-	connectionIncrement := int64(0)
-	if c.pendingConnectionUpdate >= int64(c.config.connectionWindowSize)/2 {
-		connectionIncrement = c.pendingConnectionUpdate
-		c.pendingConnectionUpdate = 0
-		c.receiveConnectionWindow += connectionIncrement
-	}
-	if connectionIncrement != 0 {
-		return c.framer.WriteWindowUpdate(0, uint32(connectionIncrement))
+	if increment := c.consumeReceived(amount, int64(c.config.connectionWindowSize)); increment != 0 {
+		return c.framer.WriteWindowUpdate(0, uint32(increment))
 	}
 	return nil
 }
@@ -1396,7 +1282,7 @@ func (c *serverConn) restoreConnectionWindow(amount int64) {
 	if amount <= 0 {
 		return
 	}
-	c.receiveConnectionWindow += amount
+	c.restoreReceiveWindow(amount)
 	_ = c.framer.WriteWindowUpdate(0, uint32(amount))
 }
 
@@ -1414,29 +1300,40 @@ func (c *serverConn) processRST(event *incomingFrame) error {
 	if err := c.recordRapidReset(); err != nil {
 		return err
 	}
+	c.teardownStream(stream, fmt.Errorf("http2: peer reset stream: %s", event.errCode), errStreamClosed)
+	return nil
+}
+
+// teardownStream moves stream to its terminal state and unblocks every caller
+// waiting on it. The wire-side RST_STREAM, if any, is the caller's business.
+func (c *serverConn) teardownStream(stream *serverStream, cause, pendingErr error) {
 	stream.isReset = true
 	stream.remoteClosed = true
 	stream.localClosed = true
-	stream.cancel(fmt.Errorf("http2: peer reset stream: %s", event.errCode))
+	stream.cancel(cause)
 	if stream.body != nil {
 		stream.body.discardWithError(errStreamClosed)
 	}
 	c.restoreUnconsumedFlow(stream)
 	if stream.pendingAck != nil {
-		stream.pendingAck <- errStreamClosed
+		stream.pendingAck <- pendingErr
 		stream.pendingAck = nil
 	}
+	if stream.pendingWrite != nil {
+		stream.pendingWrite.complete(pendingErr)
+		stream.pendingWrite = nil
+	}
+	c.stopResponseWriteTimeout(stream)
 	stream.pendingData = nil
 	stream.responseEOF = false
 	if !stream.handlerStarted || stream.handlerDone {
 		c.maybeFinalizeStream(stream)
 	}
-	return nil
 }
 
 func (c *serverConn) processWindowUpdate(event *incomingFrame) error {
 	if event.streamID == 0 {
-		if c.peerConnectionWindow+int64(event.increment) > math.MaxInt32 {
+		if !c.creditSendWindow(event.increment) {
 			return &serverError{
 				code: xhttp2.ErrCodeFlowControl,
 				err: fmt.Errorf(
@@ -1446,7 +1343,6 @@ func (c *serverConn) processWindowUpdate(event *incomingFrame) error {
 				),
 			}
 		}
-		c.peerConnectionWindow += int64(event.increment)
 		return nil
 	}
 	stream := c.streams[event.streamID]
@@ -1456,10 +1352,9 @@ func (c *serverConn) processWindowUpdate(event *incomingFrame) error {
 		}
 		return nil
 	}
-	if stream.sendWindow+int64(event.increment) > math.MaxInt32 {
+	if !stream.creditSendWindow(event.increment) {
 		return c.resetStream(stream.id, xhttp2.ErrCodeFlowControl, errors.New("http2: stream send window overflow"))
 	}
-	stream.sendWindow += int64(event.increment)
 	return nil
 }
 
@@ -1515,54 +1410,26 @@ func (c *serverConn) processPriorityUpdate(event *incomingFrame) error {
 			return nil
 		}
 		limit := int(c.config.maxConcurrentStreams) * 4
+		if len(c.priorityUpdates) >= limit && c.prunedPriorityStreamID < c.lastClientStreamID {
+			c.prunePriorityUpdates()
+			c.prunedPriorityStreamID = c.lastClientStreamID
+		}
 		if len(c.priorityUpdates) >= limit {
-			c.evictOldestPriorityUpdate()
+			// RFC 9218 §7: the signal is advisory, so drop it once the
+			// bounded hint cache is full of still-plausible future streams.
+			return nil
 		}
 		c.priorityUpdates[event.streamID] = updated
-		c.priorityUpdateOrder = append(c.priorityUpdateOrder, event.streamID)
-		heap.Push(&c.priorityUpdateHeap, event.streamID)
-		if len(c.priorityUpdateOrder) > limit*2 || len(c.priorityUpdateHeap) > limit*2 {
-			c.compactPriorityUpdateOrder()
-		}
 	}
 	return nil
 }
 
-func (c *serverConn) prunePriorityUpdates(lastStreamID uint32) {
-	for len(c.priorityUpdateHeap) != 0 && c.priorityUpdateHeap[0] < lastStreamID {
-		streamID := heap.Pop(&c.priorityUpdateHeap).(uint32) //nolint:forcetypeassert
-		delete(c.priorityUpdates, streamID)
-	}
-	limit := int(c.config.maxConcurrentStreams) * 4
-	if len(c.priorityUpdateOrder) > limit*2 || len(c.priorityUpdateHeap) > limit*2 {
-		c.compactPriorityUpdateOrder()
-	}
-}
-
-func (c *serverConn) evictOldestPriorityUpdate() {
-	for len(c.priorityUpdateOrder) != 0 {
-		streamID := c.priorityUpdateOrder[0]
-		c.priorityUpdateOrder = c.priorityUpdateOrder[1:]
-		if _, exists := c.priorityUpdates[streamID]; exists {
-			delete(c.priorityUpdates, streamID)
-			return
-		}
-	}
-}
-
-func (c *serverConn) compactPriorityUpdateOrder() {
-	order := c.priorityUpdateOrder[:0]
-	for _, streamID := range c.priorityUpdateOrder {
-		if _, exists := c.priorityUpdates[streamID]; exists {
-			order = append(order, streamID)
-		}
-	}
-	c.priorityUpdateOrder = order
-	c.priorityUpdateHeap = c.priorityUpdateHeap[:0]
+func (c *serverConn) prunePriorityUpdates() {
 	for streamID := range c.priorityUpdates {
-		c.priorityUpdateHeap = append(c.priorityUpdateHeap, streamID)
+		if streamID <= c.lastClientStreamID {
+			delete(c.priorityUpdates, streamID)
+		}
 	}
-	heap.Init(&c.priorityUpdateHeap)
 }
 
 func (c *serverConn) processCommand(command *serverCommand) error {
@@ -1592,6 +1459,7 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 			command.statusCode,
 			command.header,
 			c.peerMaxHeaderListSize,
+			&c.headerFields,
 		)
 		if err != nil {
 			// Nothing reached the HPACK encoder, so this is the handler's
@@ -1646,7 +1514,6 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 		}
 		stream.responseBytes += int64(len(command.data))
 		c.queueFlush(stream)
-		c.armResponseWriteTimeout(stream)
 		return nil
 	case serverCommandResponseEOF:
 		if stream.isReset || stream.localClosed {
@@ -1707,7 +1574,6 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 		}
 		return c.resetStream(stream.id, xhttp2.ErrCodeCancel, command.err)
 	case serverCommandCancelStream:
-		command.result <- command.err
 		return c.resetStream(stream.id, xhttp2.ErrCodeCancel, command.err)
 	case serverCommandCancelWrite:
 		if command.write == nil || command.write.done {
@@ -1765,7 +1631,7 @@ func (c *serverConn) handleHandlerDone(
 		c.maybeFinalizeStream(stream)
 		return nil
 	}
-	if errors.Is(requestCtx.LastProtocolError(), fasthttp.ErrHijackNotSupported) {
+	if stream.hijackRejected {
 		requestCtx.Response.Reset()
 		requestCtx.Response.SetStatusCode(fasthttp.StatusNotImplemented)
 		requestCtx.Response.SetBodyString("connection hijacking isn't supported for HTTP/2 requests")
@@ -1814,6 +1680,7 @@ func (c *serverConn) handleHandlerDone(
 			&requestCtx.Response,
 			c.peerMaxHeaderListSize,
 			c.protocolContext.ServerDate(),
+			&c.headerFields,
 		)
 		if err != nil {
 			return c.resetStream(stream.id, xhttp2.ErrCodeInternal, err)
@@ -1843,6 +1710,7 @@ func (c *serverConn) handleHandlerDone(
 		&requestCtx.Response,
 		c.peerMaxHeaderListSize,
 		c.protocolContext.ServerDate(),
+		&c.headerFields,
 	)
 	if err != nil {
 		return c.resetStream(stream.id, xhttp2.ErrCodeInternal, err)
@@ -1883,7 +1751,6 @@ func (c *serverConn) handleHandlerDone(
 	}
 	if len(body) != 0 {
 		stream.pendingData = body
-		c.armResponseWriteTimeout(stream)
 	}
 	stream.responseEOF = true
 	c.queueFlush(stream)
@@ -1980,7 +1847,7 @@ func (c *serverConn) startStreamHandler(
 		if stream.body != nil {
 			reader = stream.body
 		}
-		streamConn := &streamConn{stream: stream, read: reader}
+		streamConn := &streamConn{streamConnBase: streamConnBase{netConn: c.conn}, stream: stream, read: reader}
 		handler(streamConn)
 		_ = streamConn.Close()
 		select {
@@ -2055,20 +1922,20 @@ func (c *serverConn) flushResponses() error {
 func (c *serverConn) flushStream(stream *serverStream, drain bool) (bool, error) {
 	progressed := false
 	for {
-		if len(stream.pendingData) != 0 && !stream.isReset && !stream.localClosed &&
-			c.peerConnectionWindow > 0 && stream.sendWindow > 0 {
-			amount := min(
-				len(stream.pendingData),
-				c.peerMaxFrameSize,
-				int(c.peerConnectionWindow),
-				int(stream.sendWindow),
-			)
+		if len(stream.pendingData) != 0 && !stream.isReset && !stream.localClosed {
+			amount := nextDataChunk(&c.connFlowState, &stream.streamFlowState, len(stream.pendingData))
+			if amount == 0 {
+				// Only a flow-control stall needs the write timeout: while the
+				// data merely waits in this loop's queue, no peer is involved.
+				// Arming here instead of at enqueue keeps timers off the fast
+				// path, where every response would allocate one per request.
+				c.armResponseWriteTimeout(stream)
+				return progressed, nil
+			}
 			isLast := amount == len(stream.pendingData) && stream.responseEOF && !stream.responseHasTrailers
 			if err := c.framer.WriteData(stream.id, isLast, stream.pendingData[:amount]); err != nil {
 				return progressed, err
 			}
-			c.peerConnectionWindow -= int64(amount)
-			stream.sendWindow -= int64(amount)
 			stream.pendingData = stream.pendingData[amount:]
 			if stream.pendingWrite != nil {
 				stream.pendingWrite.written += amount
@@ -2086,7 +1953,11 @@ func (c *serverConn) flushStream(stream *serverStream, drain bool) (bool, error)
 				stream.pendingWrite = nil
 			}
 			if len(stream.pendingData) == 0 {
-				c.stopResponseWriteTimeout(stream)
+				// Pause rather than drop the timer: a long response stalls on
+				// flow control repeatedly, and the next stall reuses it.
+				if stream.writeTimer != nil {
+					stream.writeTimer.Stop()
+				}
 			} else {
 				c.armResponseWriteTimeout(stream)
 			}
@@ -2310,13 +2181,11 @@ func (c *serverConn) releaseAllStreams() {
 }
 
 func (c *serverConn) cancelStream(streamID uint32, cause error) {
-	result := make(chan error, 1)
 	select {
 	case c.commands <- serverCommand{
 		kind:     serverCommandCancelStream,
 		streamID: streamID,
 		err:      cause,
-		result:   result,
 	}:
 	case <-c.ctx.Done():
 	}
@@ -2330,35 +2199,11 @@ func (c *serverConn) resetStream(streamID uint32, code xhttp2.ErrCode, cause err
 	if err := c.recordRapidReset(); err != nil {
 		return err
 	}
-	if c.config.countError != nil {
-		c.config.countError("stream_" + strings.ToLower(code.String()))
-	}
 	if err := c.framer.WriteRSTStream(streamID, code); err != nil {
 		return err
 	}
 	if stream != nil {
-		stream.isReset = true
-		stream.remoteClosed = true
-		stream.localClosed = true
-		stream.cancel(cause)
-		if stream.body != nil {
-			stream.body.discardWithError(errStreamClosed)
-		}
-		c.restoreUnconsumedFlow(stream)
-		if stream.pendingAck != nil {
-			stream.pendingAck <- cause
-			stream.pendingAck = nil
-		}
-		if stream.pendingWrite != nil {
-			stream.pendingWrite.complete(cause)
-			stream.pendingWrite = nil
-		}
-		c.stopResponseWriteTimeout(stream)
-		stream.pendingData = nil
-		stream.responseEOF = false
-		if !stream.handlerStarted || stream.handlerDone {
-			c.maybeFinalizeStream(stream)
-		}
+		c.teardownStream(stream, cause, cause)
 	}
 	return nil
 }
@@ -2383,11 +2228,8 @@ func (c *serverConn) finishGracefulShutdown() error {
 }
 
 func (c *serverConn) failConnection(code xhttp2.ErrCode, cause error) error {
-	if c.config.countError != nil {
-		c.config.countError("connection_" + strings.ToLower(code.String()))
-	}
 	_ = c.framer.WriteGoAway(c.lastProcessedID, code, nil)
-	_ = c.bufferedWriter.Flush()
+	_ = c.writer.Flush()
 	return cause
 }
 
@@ -2405,8 +2247,8 @@ func (c *serverConn) handlePush(
 	if parent.isReset || parent.localClosed || parent.responseHeaderSent || parent.handlerDone {
 		return fasthttp.ErrPushNotAllowed
 	}
-	if parent.pushDepth >= c.config.maxPushDepth ||
-		c.activePushes >= c.config.maxPromisedStreams ||
+	if parent.isPush ||
+		c.activePushes >= maxPromisedStreams ||
 		c.activePushes >= c.peerMaxConcurrentStreams {
 		return fasthttp.ErrPushLimit
 	}
@@ -2438,7 +2280,6 @@ func (c *serverConn) handlePush(
 	streamID := c.nextPushStreamID
 	stream := newServerStream(c, streamID)
 	stream.isPush = true
-	stream.pushDepth = parent.pushDepth + 1
 	stream.priority = parent.priority
 	stream.remoteClosed = true
 	stream.maxBody = parent.maxBody
@@ -2461,6 +2302,7 @@ func (c *serverConn) handlePush(
 		&requestCtx.Request,
 		c.peerMaxHeaderListSize,
 		false,
+		&c.headerFields,
 	)
 	if err != nil {
 		c.protocolContext.ReleaseRequestCtx(requestCtx)
@@ -2572,18 +2414,13 @@ func errorCode(err error) xhttp2.ErrCode {
 }
 
 func applyRequestTrailers(header *fasthttp.RequestHeader, fields []hpack.HeaderField) error {
-	known := make(map[string]struct{}, len(header.PeekTrailerKeys())+len(fields))
-	for _, key := range header.PeekTrailerKeys() {
-		known[strings.ToLower(string(key))] = struct{}{}
-	}
 	for _, field := range fields {
-		// HTTP/2 field names are lowercase. Track them once instead of
-		// rescanning every previously registered trailer for every field.
-		if _, exists := known[field.Name]; !exists {
+		// The trailer list is tiny, so a fold-insensitive scan beats building
+		// a map per block; AddTrailer keeps the list current for later fields.
+		if !hasTrailerKey(header.PeekTrailerKeys(), field.Name) {
 			if err := header.AddTrailer(field.Name); err != nil {
 				return err
 			}
-			known[field.Name] = struct{}{}
 		}
 		header.Add(field.Name, field.Value)
 	}
