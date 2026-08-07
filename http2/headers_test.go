@@ -12,7 +12,7 @@ import (
 
 func TestRejectedRequestHeadersKeepHPACKEncoderInSync(t *testing.T) {
 	var enc headerEncoder
-	enc.init(defaultHeaderTableSize)
+	enc.initHeaderEncoder(defaultHeaderTableSize)
 	decoder := hpack.NewDecoder(defaultHeaderTableSize, func(hpack.HeaderField) {})
 
 	bad := fasthttp.AcquireRequest()
@@ -35,7 +35,7 @@ func TestRejectedRequestHeadersKeepHPACKEncoderInSync(t *testing.T) {
 
 func TestResponseHeadersExcludeTrailerFields(t *testing.T) {
 	var enc headerEncoder
-	enc.init(defaultHeaderTableSize)
+	enc.initHeaderEncoder(defaultHeaderTableSize)
 	server := &fasthttp.Server{NoDefaultDate: true, NoDefaultServerHeader: true}
 
 	resp := fasthttp.AcquireResponse()
@@ -76,7 +76,7 @@ func decodeTestHeaderFields(t testing.TB, block []byte) map[string]string {
 
 func TestRejectedResponseHeadersKeepHPACKEncoderInSync(t *testing.T) {
 	var enc headerEncoder
-	enc.init(defaultHeaderTableSize)
+	enc.initHeaderEncoder(defaultHeaderTableSize)
 	decoder := hpack.NewDecoder(defaultHeaderTableSize, func(hpack.HeaderField) {})
 	server := &fasthttp.Server{NoDefaultDate: true, NoDefaultServerHeader: true}
 
@@ -171,7 +171,7 @@ func TestResponseHeadersRejectTE(t *testing.T) {
 
 func TestOutboundResponseHeadersRejectTEBeforeHPACK(t *testing.T) {
 	var enc headerEncoder
-	enc.init(defaultHeaderTableSize)
+	enc.initHeaderEncoder(defaultHeaderTableSize)
 	server := &fasthttp.Server{NoDefaultDate: true, NoDefaultServerHeader: true}
 	var response fasthttp.Response
 	response.Header.Set("TE", "trailers")
@@ -188,7 +188,7 @@ func TestOutboundResponseHeadersRejectTEBeforeHPACK(t *testing.T) {
 
 func TestOutboundResponseTrailersRespectHeaderListLimit(t *testing.T) {
 	var enc headerEncoder
-	enc.init(defaultHeaderTableSize)
+	enc.initHeaderEncoder(defaultHeaderTableSize)
 	var header fasthttp.ResponseHeader
 	if err := header.AddTrailer("X-Large-Trailer"); err != nil {
 		t.Fatal(err)
