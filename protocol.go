@@ -377,7 +377,9 @@ func headerRetainedBytes(header *header) int {
 
 // RegisterProtocol registers a connection-oriented HTTP protocol. It must be
 // called before the Server starts serving.
-func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //nolint:gocritic // registration by value is the public contract
+//
+//nolint:gocritic // registration by value is the public contract
+func (s *Server) RegisterProtocol(registration ProtocolRegistration) error {
 	if isNilOrTypedNil(registration.Handler) {
 		return errors.New("fasthttp: protocol handler is nil")
 	}

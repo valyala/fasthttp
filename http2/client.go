@@ -153,6 +153,7 @@ type clientStream struct {
 
 type clientConn struct {
 	connFlowState
+	headerEncoder
 
 	pool          *clientPool
 	hc            *fasthttp.HostClient
@@ -168,7 +169,6 @@ type clientConn struct {
 	writeSem       chan struct{}
 	bufferedWriter flushWriter
 	writer         *asyncFrameWriter
-	headerEncoder
 
 	mu                sync.Mutex
 	streams           map[uint32]*clientStream
@@ -228,7 +228,7 @@ func newClientConn(pool *clientPool, lease *fasthttp.ProtocolClientConn) (*clien
 	conn.framer.SetReuseFrames()
 	conn.headerDecoder = newHeaderCodec(pool.config.maxDecoderTableSize, pool.config.maxHeaderListSize)
 	conn.framer.SetMaxReadFrameSize(pool.config.maxReadFrameSize)
-	conn.headerEncoder.init(pool.config.maxEncoderTableSize)
+	conn.initHeaderEncoder(pool.config.maxEncoderTableSize)
 	if err := conn.writePrefaceAndSettings(); err != nil {
 		return nil, err
 	}
