@@ -97,9 +97,7 @@ func TestTransportCloseIdleConnectionsRemovesEmptyPool(t *testing.T) {
 	}
 
 	transport.CloseIdleConnections(hostClient)
-	transport.mu.Lock()
-	_, retained := transport.pools[hostClient]
-	transport.mu.Unlock()
+	_, retained := transport.pools.Load(hostClient)
 	if retained {
 		t.Fatal("CloseIdleConnections retained an empty HostClient pool")
 	}
@@ -429,11 +427,11 @@ func TestProcessResponseDataReturnsConnectionCreditForClosedStream(t *testing.T)
 			connectionWindowSize: int32(windowSize),
 			streamWindowSize:     int32(windowSize),
 		},
-		framer:                  xhttp2.NewFramer(writer, nil),
-		bufferedWriter:          writer,
-		streams:                 make(map[uint32]*clientStream),
-		nextStreamID:            3,
-		receiveConnectionWindow: windowSize,
+		framer:         xhttp2.NewFramer(writer, nil),
+		bufferedWriter: writer,
+		streams:        make(map[uint32]*clientStream),
+		nextStreamID:   3,
+		connFlowState:  connFlowState{receiveConnectionWindow: windowSize},
 	}
 	installTestWriter(t, conn)
 	frame := makeClientTestDataFrame(t, 1, bytes.Repeat([]byte{'x'}, flowLength))
@@ -451,7 +449,7 @@ func TestClosedResponseBodyCallbacksCannotAffectLaterStream(t *testing.T) {
 	conn := installTestWriter(t, &clientConn{streams: make(map[uint32]*clientStream)})
 	later := &clientStream{id: 3, conn: conn}
 	conn.streams[later.id] = later
-	body := conn.newClientResponseBody(1)
+	body := newResponseBody(conn, 1)
 	if err := body.Close(); err != nil {
 		t.Fatalf("old response body Close() error: %v", err)
 	}
@@ -466,13 +464,13 @@ func TestClientRefusedStreamReturnsTypedError(t *testing.T) {
 		available: make(chan struct{}, 1),
 	}
 	conn := &clientConn{
-		writeSem:         make(chan struct{}, 1),
-		pool:             pool,
-		hc:               pool.hc,
-		streams:          make(map[uint32]*clientStream),
-		nextStreamID:     5,
-		activeStreams:    2,
-		receivedSettings: true,
+		writeSem:      make(chan struct{}, 1),
+		pool:          pool,
+		hc:            pool.hc,
+		streams:       make(map[uint32]*clientStream),
+		nextStreamID:  5,
+		activeStreams: 2,
+		connFlowState: connFlowState{receivedSettings: true},
 	}
 	installTestWriter(t, conn)
 	pool.conns = []*clientConn{conn}
@@ -1144,12 +1142,12 @@ func (h *testPushHandler) Handle(_ *fasthttp.Request, response *fasthttp.Respons
 
 func TestReserveStreamHonorsConfiguredConcurrencyCap(t *testing.T) {
 	conn := &clientConn{
-		hc:                       &fasthttp.HostClient{},
-		config:                   clientConfig{maxConcurrentStreams: 1},
-		peerMaxConcurrentStreams: 100,
-		nextStreamID:             1,
-		streams:                  map[uint32]*clientStream{},
-		activeStreams:            1,
+		hc:            &fasthttp.HostClient{},
+		config:        clientConfig{maxConcurrentStreams: 1},
+		connFlowState: connFlowState{peerMaxConcurrentStreams: 100},
+		nextStreamID:  1,
+		streams:       map[uint32]*clientStream{},
+		activeStreams: 1,
 	}
 	req := fasthttp.AcquireRequest()
 	resp := fasthttp.AcquireResponse()
@@ -1285,9 +1283,11 @@ func TestClientRedialsAtStreamIDExhaustion(t *testing.T) {
 		t.Fatalf("Do() error: %v", err)
 	}
 
-	transport.mu.Lock()
-	pool := transport.pools[hc]
-	transport.mu.Unlock()
+	poolValue, _ := transport.pools.Load(hc)
+	pool, ok := poolValue.(*clientPool)
+	if !ok {
+		t.Fatalf("pool for %p is %T, expecting *clientPool", hc, poolValue)
+	}
 	pool.mu.Lock()
 	if len(pool.conns) != 1 {
 		pool.mu.Unlock()
@@ -1547,18 +1547,20 @@ func TestStreamCanceledBeforeWriteSlotConsumesNoStreamID(t *testing.T) {
 	bufferedWriter := bufio.NewWriter(&wire)
 	pool := &clientPool{available: make(chan struct{}, 1)}
 	conn := &clientConn{
-		pool:                    pool,
-		hc:                      &fasthttp.HostClient{},
-		writeSem:                make(chan struct{}, 1),
-		bufferedWriter:          bufferedWriter,
-		streams:                 make(map[uint32]*clientStream),
-		nextStreamID:            5,
-		activeStreams:           2,
-		peerMaxFrameSize:        defaultMaxFrameSize,
-		peerMaxHeaderListSize:   1<<32 - 1,
-		peerInitialStreamWindow: 65535,
-		peerConnectionWindow:    65535,
-		receiveConnectionWindow: 65535,
+		pool:           pool,
+		hc:             &fasthttp.HostClient{},
+		writeSem:       make(chan struct{}, 1),
+		bufferedWriter: bufferedWriter,
+		streams:        make(map[uint32]*clientStream),
+		nextStreamID:   5,
+		activeStreams:  2,
+		connFlowState: connFlowState{
+			peerMaxFrameSize:        defaultMaxFrameSize,
+			peerMaxHeaderListSize:   1<<32 - 1,
+			peerInitialStreamWindow: 65535,
+			peerConnectionWindow:    65535,
+			receiveConnectionWindow: 65535,
+		},
 	}
 	installTestWriter(t, conn)
 	conn.framer = xhttp2.NewFramer(bufferedWriter, nil)

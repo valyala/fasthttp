@@ -250,7 +250,7 @@ type Server struct {
 	MaxProtocolRequestCtxCacheBytes int
 
 	nextProtos map[string]ServeHandler
-	protocols  []registeredProtocol
+	protocol   *registeredProtocol
 
 	concurrencyCh     chan struct{}
 	concurrencyChOnce sync.Once
@@ -678,7 +678,6 @@ type RequestCtx struct {
 	hijackNoResponse bool
 	protocolStream   ProtocolStream
 	protocolOwner    *ProtocolServerContext
-	protocolError    error
 }
 
 // EarlyHints allows the server to hint to the browser what resources a page would need
@@ -822,8 +821,10 @@ type HijackHandler func(c net.Conn)
 //   - WebSocket ( https://en.wikipedia.org/wiki/WebSocket )
 //   - HTTP/2.0 ( https://en.wikipedia.org/wiki/HTTP/2 )
 func (ctx *RequestCtx) Hijack(handler HijackHandler) {
-	if err := ctx.TryHijack(handler); err != nil {
-		ctx.protocolError = err
+	if ctx.TryHijack(handler) != nil {
+		if rejecter, ok := ctx.protocolStream.(interface{ RejectHijack() }); ok {
+			rejecter.RejectHijack()
+		}
 	}
 }
 
@@ -836,13 +837,6 @@ func (ctx *RequestCtx) TryHijack(handler HijackHandler) error {
 	}
 	ctx.hijackHandler = handler
 	return nil
-}
-
-// LastProtocolError returns an unsupported protocol operation recorded by a
-// legacy API such as Hijack. It is intended for protocol implementations. The
-// recorded error is cleared when the RequestCtx is reset for reuse.
-func (ctx *RequestCtx) LastProtocolError() error {
-	return ctx.protocolError
 }
 
 // HijackSetNoResponse changes the behavior of hijacking a request.
@@ -1011,7 +1005,6 @@ func (ctx *RequestCtx) reset() {
 	ctx.hijackNoResponse = false
 	ctx.protocolStream = nil
 	ctx.protocolOwner = nil
-	ctx.protocolError = nil
 }
 
 type firstByteReader struct {
@@ -1814,8 +1807,8 @@ func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 //
 // This function can only be called before the server is started. A key that
 // was already registered through RegisterProtocol must not be reused here:
-// NextProto handlers take dispatch precedence and would silently shadow the
-// registered protocol.
+// both share one dispatch table and the later registration would replace the
+// protocol's entry.
 func (s *Server) NextProto(key string, nph ServeHandler) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2454,54 +2447,29 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		return handler(c)
 	}
-	if len(s.protocols) != 0 {
-		if protocol := s.protocolByALPN(proto); protocol != nil {
-			if s.ReadTimeout > 0 || s.WriteTimeout > 0 {
-				if err := c.SetDeadline(zeroTime); err != nil {
+	if s.protocol != nil && proto == "" {
+		protocol, prefix, deadline, detectErr := s.detectCleartextProtocol(c)
+		if detectErr != nil {
+			return detectErr
+		}
+		if protocol != nil {
+			if s.ReadTimeout > 0 {
+				if err := c.SetReadDeadline(zeroTime); err != nil {
 					return err
 				}
 			}
-			return s.serveProtocolConn(c, protocol, false)
+			return s.serveProtocolConn(c, protocol, true)
 		}
-		if proto == "" {
-			protocol, prefix, deadline, detectErr := s.detectCleartextProtocol(c)
-			if detectErr != nil {
-				return detectErr
-			}
-			if protocol != nil {
-				if s.ReadTimeout > 0 {
-					if err := c.SetReadDeadline(zeroTime); err != nil {
-						return err
-					}
-				}
-				return s.serveProtocolConn(c, protocol, true)
-			}
-			cleartextPrefix = prefix
-			cleartextReadDeadline = deadline
-		}
+		cleartextPrefix = prefix
+		cleartextReadDeadline = deadline
 	}
 
 	connTime := time.Now()
 
-	s.idleConnsMu.Lock()
-	if s.idleConns == nil {
-		s.idleConns = make(map[net.Conn]*atomic.Int64)
-	}
-	idleConnTime, ok := s.idleConns[c]
-	if !ok {
-		v := idleConnTimePool.Get()
-		if v == nil {
-			v = &atomic.Int64{}
-		}
-		idleConnTime = v.(*atomic.Int64) //nolint:forcetypeassert
-		s.idleConns[c] = idleConnTime
-	}
-
 	// Count the connection as Idle after 5 seconds.
 	// Same as net/http.Server:
 	// https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
-	idleConnTime.Store(connTime.Add(time.Second * 5).Unix())
-	s.idleConnsMu.Unlock()
+	idleConnTime := s.registerIdleConn(c, connTime.Add(5*time.Second))
 
 	serverName := s.getServerName()
 	connRequestNum := uint64(0)
@@ -2777,7 +2745,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
-			if len(s.protocols) != 0 {
+			if s.protocol != nil {
 				if protocol := s.matchProtocolUpgrade(ctx, br, bw); protocol != nil {
 					// The protocol sets its own deadlines; the HTTP/1 request
 					// deadline would kill an otherwise active connection.
@@ -2918,13 +2886,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		s.releaseCtx(ctx)
 	}
 
-	s.idleConnsMu.Lock()
-	ic, ok := s.idleConns[c]
-	if ok {
-		idleConnTimePool.Put(ic)
-		delete(s.idleConns, c)
-	}
-	s.idleConnsMu.Unlock()
+	s.unregisterIdleConn(c, idleConnTime)
 
 	return err
 }
@@ -3144,7 +3106,6 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.remoteAddr = nil
 	ctx.protocolStream = nil
 	ctx.protocolOwner = nil
-	ctx.protocolError = nil
 	ctx.logger.logger = logger
 	ctx.connID = nextConnID()
 	ctx.s = fakeServer

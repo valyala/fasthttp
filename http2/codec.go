@@ -59,11 +59,6 @@ type headerBlockFrame interface {
 	HeadersEnded() bool
 }
 
-type completeHeaderBlock []byte
-
-func (b completeHeaderBlock) HeaderBlockFragment() []byte { return b }
-func (completeHeaderBlock) HeadersEnded() bool            { return true }
-
 // headerCodec owns the connection-scoped HPACK decoder. It decodes directly
 // into caller-provided pooled storage instead of asking x/net Framer to build a
 // second MetaHeadersFrame field slice for every message.
@@ -154,13 +149,6 @@ func (c *headerCodec) decode(
 	invalid := c.invalid
 	c.resetBlock()
 	return decodedFields, truncated, invalid, nil
-}
-
-func (c *headerCodec) decodeComplete(
-	fragment []byte,
-	fields []hpack.HeaderField,
-) ([]hpack.HeaderField, bool, error, error) {
-	return c.decode(nil, 0, completeHeaderBlock(fragment), fields)
 }
 
 func (c *headerCodec) emit(field hpack.HeaderField) {

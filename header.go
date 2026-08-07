@@ -793,11 +793,6 @@ func (h *RequestHeader) SetConnectProtocol(protocol string) {
 	h.connectProtocol = initHeaderValueString(h.connectProtocol, protocol)
 }
 
-// SetConnectProtocolBytes sets the extended CONNECT protocol.
-func (h *RequestHeader) SetConnectProtocolBytes(protocol []byte) {
-	h.connectProtocol = initHeaderValueBytes(h.connectProtocol, protocol)
-}
-
 // RequestURI returns RequestURI from the first HTTP request line.
 func (h *RequestHeader) RequestURI() []byte {
 	requestURI := h.requestURI

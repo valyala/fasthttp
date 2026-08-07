@@ -1,12 +1,10 @@
 package fasthttp
 
 import (
-	"bytes"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
-	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -48,42 +46,17 @@ type ProtocolTransportCloser interface {
 // A transport may additionally implement interface{ MinTLSVersion() uint16 }
 // to enforce a minimum TLS version on the connections dialed for it.
 func (c *HostClient) RegisterProtocolTransport(transport ProtocolRoundTripper) error {
-	if isNilProtocolTransport(transport) {
+	if isNilInterfaceValue(transport) {
 		return errors.New("fasthttp: protocol transport is nil")
 	}
 	if c.protocolTransport != nil {
 		return errors.New("fasthttp: protocol transport is already registered")
-	}
-	http1Transport := c.Transport
-	if http1Transport == nil {
-		http1Transport = DefaultTransport
-	}
-	if !isDefaultRoundTripper(http1Transport) {
-		return errors.New("fasthttp: protocol transport cannot preserve the configured HTTP/1 transport")
 	}
 	if atomic.LoadInt32(&c.pendingRequests) != 0 || c.ConnsCount() != 0 {
 		return errors.New("fasthttp: cannot register a protocol transport after use")
 	}
 	c.protocolTransport = transport
 	return nil
-}
-
-func isDefaultRoundTripper(roundTripper RoundTripper) bool {
-	builtIn, ok := roundTripper.(*transport)
-	return ok && builtIn == defaultTransport
-}
-
-func isNilProtocolTransport(transport ProtocolRoundTripper) bool {
-	if transport == nil {
-		return true
-	}
-	value := reflect.ValueOf(transport)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
 }
 
 // ProtocolClientContext supplies one request attempt with its deadline and a
@@ -114,12 +87,27 @@ func (ctx *ProtocolClientContext) WriteTimeout() time.Duration {
 // transport. Protocol transports use it after a host has previously selected
 // HTTP/1 with ALPN.
 func (ctx *ProtocolClientContext) RoundTripHTTP1(req *Request, resp *Response) (bool, error) {
-	acquireTimeout := req.timeout
-	if !ctx.deadline.IsZero() {
-		// The h2 attempt already spent part of the budget.
-		acquireTimeout = time.Until(ctx.deadline)
+	return roundTripHTTP1Fallback(ctx.hostClient, req, resp, ctx.deadline)
+}
+
+// roundTripHTTP1Fallback hands the request to the HTTP/1 transport with the
+// remainder of a budget the protocol attempt already spent part of, expressed
+// through the request timeout the RoundTripper interface understands.
+func roundTripHTTP1Fallback(hc *HostClient, req *Request, resp *Response, deadline time.Time) (bool, error) {
+	roundTripper := hc.Transport
+	if roundTripper == nil {
+		roundTripper = DefaultTransport
 	}
-	return defaultTransport.roundTripWithDeadline(ctx.hostClient, req, resp, ctx.deadline, acquireTimeout)
+	if !deadline.IsZero() {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false, ErrTimeout
+		}
+		original := req.timeout
+		req.timeout = remaining
+		defer func() { req.timeout = original }()
+	}
+	return roundTripper.RoundTrip(hc, req, resp)
 }
 
 // AcquireConn reserves one of HostClient's physical connection slots and
@@ -148,8 +136,6 @@ func (ctx *ProtocolClientContext) AcquireConn(nextProtos []string) (*ProtocolCli
 		hostClient:         ctx.hostClient,
 		conn:               conn,
 		negotiatedProtocol: negotiatedProtocol,
-		raddr:              conn.RemoteAddr(),
-		laddr:              conn.LocalAddr(),
 		createdTime:        time.Now(),
 		deadline:           ctx.deadline,
 	}, nil
@@ -160,8 +146,6 @@ type ProtocolClientConn struct {
 	hostClient         *HostClient
 	conn               net.Conn
 	negotiatedProtocol string
-	raddr              net.Addr
-	laddr              net.Addr
 	createdTime        time.Time
 	deadline           time.Time
 	isReleased         atomic.Bool
@@ -176,25 +160,6 @@ func (c *ProtocolClientConn) Conn() net.Conn {
 // connections.
 func (c *ProtocolClientConn) NegotiatedProtocol() string {
 	return c.negotiatedProtocol
-}
-
-// ApplyResponseMetadata records physical-connection metadata on resp. The
-// addresses are captured once at dial time: they never change for a leased
-// connection, and a multiplexed transport applies them to every response.
-func (c *ProtocolClientConn) ApplyResponseMetadata(resp *Response) {
-	resp.raddr = c.raddr
-	resp.laddr = c.laddr
-}
-
-// PrepareResponseBody ensures resp can buffer at least size body bytes without
-// growing its backing buffer. Protocol transports may call it after validating
-// a response Content-Length.
-func (c *ProtocolClientConn) PrepareResponseBody(resp *Response, size int) {
-	if size <= 0 {
-		return
-	}
-	body := resp.bodyBuffer()
-	body.B = slices.Grow(body.B, size)
 }
 
 // Close closes the physical connection and releases its HostClient slot.
@@ -213,9 +178,20 @@ func (c *ProtocolClientConn) RoundTripHTTP1(req *Request, resp *Response) (bool,
 	if !c.isReleased.CompareAndSwap(false, true) {
 		return false, errors.New("fasthttp: protocol client connection is already released")
 	}
-	cc := acquireClientConn(c.conn)
-	cc.createdTime = c.createdTime
-	return defaultTransport.roundTripConn(c.hostClient, cc, req, resp, c.deadline)
+	roundTripper := c.hostClient.Transport
+	if roundTripper == nil {
+		roundTripper = DefaultTransport
+	}
+	if builtIn, ok := roundTripper.(*transport); ok {
+		cc := acquireClientConn(c.conn)
+		cc.createdTime = c.createdTime
+		return builtIn.roundTripConn(c.hostClient, cc, req, resp, c.deadline)
+	}
+	// A custom transport cannot adopt an already-dialed connection; retire it
+	// and let the transport run the request over its own pool.
+	_ = c.conn.Close()
+	c.hostClient.releaseProtocolConnSlot()
+	return roundTripHTTP1Fallback(c.hostClient, req, resp, c.deadline)
 }
 
 var protocolClientContextPool sync.Pool
@@ -244,63 +220,53 @@ func releaseProtocolClientContext(ctx *ProtocolClientContext) {
 }
 
 func (c *HostClient) reserveProtocolConn(reqTimeout time.Duration) error {
-	waitTimeout := c.MaxConnWaitTimeout
-	if reqTimeout > 0 && (waitTimeout <= 0 || reqTimeout < waitTimeout) {
-		waitTimeout = reqTimeout
+	c.connsLock.Lock()
+	maxConns := c.MaxConns
+	if maxConns <= 0 {
+		maxConns = DefaultMaxConnsPerHost
 	}
-
-	var timer *time.Timer
-	if c.MaxConnWaitTimeout > 0 {
-		timer = AcquireTimer(waitTimeout)
-		defer ReleaseTimer(timer)
-	}
-
-	for {
-		c.connsLock.Lock()
-		maxConns := c.MaxConns
-		if maxConns <= 0 {
-			maxConns = DefaultMaxConnsPerHost
-		}
-		if c.connsCount < maxConns {
-			c.connsCount++
-			c.connsLock.Unlock()
-			return nil
-		}
-		if c.MaxConnWaitTimeout <= 0 {
-			c.connsLock.Unlock()
-			return ErrNoFreeConns
-		}
-		if c.connSlotAvailable == nil {
-			c.connSlotAvailable = make(chan struct{})
-		}
-		available := c.connSlotAvailable
+	if c.connsCount < maxConns {
+		c.connsCount++
 		c.connsLock.Unlock()
+		return nil
+	}
+	c.connsLock.Unlock()
+	if c.MaxConnWaitTimeout <= 0 {
+		return ErrNoFreeConns
+	}
 
-		select {
-		case <-available:
-		case <-timer.C:
-			if reqTimeout > 0 && reqTimeout <= c.MaxConnWaitTimeout {
-				return ErrTimeout
-			}
-			return ErrNoFreeConns
+	timeout := c.MaxConnWaitTimeout
+	timeoutOverridden := false
+	if reqTimeout > 0 && reqTimeout < timeout {
+		timeout = reqTimeout
+		timeoutOverridden = true
+	}
+	tc := AcquireTimer(timeout)
+	defer ReleaseTimer(tc)
+
+	// Wait in the same FIFO as HTTP/1 requests: a freed slot or idle
+	// connection is handed to exactly one waiter, in arrival order.
+	w := &wantConn{ready: make(chan struct{}, 1), slotOnly: true}
+	c.queueForIdle(w)
+
+	select {
+	case <-w.ready:
+		return w.err
+	case <-tc.C:
+		w.cancel(c, ErrTimeout)
+		if timeoutOverridden {
+			return ErrTimeout
 		}
+		return ErrNoFreeConns
 	}
 }
 
 func (c *HostClient) releaseProtocolConnSlot() {
 	// Protocol and HTTP/1 connections share connsCount, so a freed protocol
-	// slot must serve a queued HTTP/1 waiter exactly like a freed HTTP/1
-	// connection would; otherwise a waiter under MaxConnWaitTimeout sleeps
-	// until timeout even though a slot is available.
+	// slot must serve a queued waiter exactly like a freed HTTP/1 connection
+	// would; otherwise a waiter under MaxConnWaitTimeout sleeps until timeout
+	// even though a slot is available.
 	c.decConnsCount()
-}
-
-func (c *HostClient) signalConnSlotAvailableLocked() {
-	if c.connSlotAvailable == nil {
-		return
-	}
-	close(c.connSlotAvailable)
-	c.connSlotAvailable = nil
 }
 
 func (c *HostClient) dialHostHardWithALPN(
@@ -361,28 +327,39 @@ func (c *HostClient) dialHostHardWithALPN(
 			return conn, "", nil
 		}
 
-		tlsConnection, ok := conn.(tlsConn)
-		if !ok {
-			_ = conn.Close()
-			return nil, "", errors.New("fasthttp: tls dial returned a connection without handshake support")
-		}
-		if err := conn.SetDeadline(deadline); err != nil {
-			_ = conn.Close()
-			return nil, "", err
-		}
-		if err := tlsConnection.Handshake(); err != nil {
+		negotiated, err := finishTLSHandshake(conn, deadline)
+		if err != nil {
 			_ = conn.Close()
 			lastErr = err
 			continue
 		}
-		if err := conn.SetDeadline(time.Time{}); err != nil {
-			_ = conn.Close()
-			return nil, "", err
-		}
-		return conn, tlsConnection.ConnectionState().NegotiatedProtocol, nil
+		return conn, negotiated, nil
 	}
 
 	return nil, "", fmt.Errorf("dialling protocol connection: %w", lastErr)
+}
+
+// finishTLSHandshake completes the handshake on an already-dialed TLS
+// connection and returns the negotiated ALPN protocol.
+func finishTLSHandshake(conn net.Conn, deadline time.Time) (string, error) {
+	tlsConnection, ok := conn.(tlsConn)
+	if !ok {
+		return "", errors.New("fasthttp: tls dial returned a connection without handshake support")
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		return "", err
+	}
+	err := tlsConnection.Handshake()
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return "", ErrTLSHandshakeTimeout
+	}
+	if err != nil {
+		return "", err
+	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		return "", err
+	}
+	return tlsConnection.ConnectionState().NegotiatedProtocol, nil
 }
 
 // protocolMinTLSVersion reports the minimum TLS version a protocol transport
@@ -398,12 +375,12 @@ func protocolMinTLSVersion(transport ProtocolRoundTripper) uint16 {
 func mergeNextProtos(preferred, existing []string) []string {
 	merged := make([]string, 0, len(preferred)+len(existing))
 	for _, protocol := range preferred {
-		if protocol != "" && !containsString(merged, protocol) {
+		if protocol != "" && !slices.Contains(merged, protocol) {
 			merged = append(merged, protocol)
 		}
 	}
 	for _, protocol := range existing {
-		if protocol != "" && !containsString(merged, protocol) {
+		if protocol != "" && !slices.Contains(merged, protocol) {
 			merged = append(merged, protocol)
 		}
 	}
@@ -442,24 +419,10 @@ func (c *Client) OpenStream(req *Request, resp *Response) (StreamConn, error) {
 	if req == nil {
 		panic("BUG: req cannot be nil")
 	}
-	uri := req.URI()
-	host := uri.Host()
-	if len(host) == 0 {
+	if len(req.URI().Host()) == 0 {
 		return nil, ErrorInvalidURI
 	}
-	if bytes.IndexByte(host, ',') >= 0 {
-		return nil, fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
-	}
-
-	isTLS := uri.isHTTPS()
-	if !isTLS && !uri.isHTTP() {
-		return nil, fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
-	}
-	c.mOnce.Do(func() {
-		c.m = make(map[string]*HostClient)
-		c.ms = make(map[string]*HostClient)
-	})
-	hc, err := c.hostClient(host, isTLS)
+	hc, err := c.selectHostClient(req)
 	if err != nil {
 		return nil, err
 	}

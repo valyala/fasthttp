@@ -9,6 +9,18 @@ import (
 	"golang.org/x/net/http2/hpack"
 )
 
+type completeHeaderBlock []byte
+
+func (b completeHeaderBlock) HeaderBlockFragment() []byte { return b }
+func (completeHeaderBlock) HeadersEnded() bool            { return true }
+
+func (c *headerCodec) decodeComplete(
+	fragment []byte,
+	fields []hpack.HeaderField,
+) ([]hpack.HeaderField, bool, error, error) {
+	return c.decode(nil, 0, completeHeaderBlock(fragment), fields)
+}
+
 func TestHeaderCodecConsumesContinuationAfterSemanticError(t *testing.T) {
 	var encoded bytes.Buffer
 	encoder := hpack.NewEncoder(&encoded)

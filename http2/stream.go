@@ -49,13 +49,12 @@ type responseBody struct {
 	isClosed     bool
 	isDone       bool
 	eofCommitted bool
-	consume      func(int)
-	closeBody    func(int)
-	done         func()
+	conn         *clientConn
+	streamID     uint32
 }
 
-func newResponseBody(consume, closeBody func(int), done func()) *responseBody {
-	body := &responseBody{consume: consume, closeBody: closeBody, done: done}
+func newResponseBody(conn *clientConn, streamID uint32) *responseBody {
+	body := &responseBody{conn: conn, streamID: streamID}
 	body.ready = sync.NewCond(&body.mu)
 	return body
 }
@@ -77,8 +76,8 @@ func (b *responseBody) Read(p []byte) (int, error) {
 		if commit != nil {
 			err = commit()
 		}
-		if done != nil {
-			done()
+		if done {
+			b.conn.responseBodyDone(b.streamID)
 		}
 		if err == nil {
 			err = io.EOF
@@ -89,7 +88,7 @@ func (b *responseBody) Read(p []byte) (int, error) {
 	n, _ := b.buffer.Read(p)
 	b.mu.Unlock()
 	if n > 0 {
-		b.consume(n)
+		b.conn.consumeResponseBytes(b.streamID, n)
 	}
 	return n, nil
 }
@@ -113,9 +112,9 @@ func (b *responseBody) Close() error {
 	b.ready.Broadcast()
 	done := b.markDoneLocked()
 	b.mu.Unlock()
-	b.closeBody(discarded)
-	if done != nil {
-		done()
+	b.conn.closeResponseBody(b.streamID, discarded)
+	if done {
+		b.conn.responseBodyDone(b.streamID)
 	}
 	return nil
 }
@@ -142,12 +141,12 @@ func (b *responseBody) closeWithError(err error) {
 	b.mu.Unlock()
 }
 
-func (b *responseBody) markDoneLocked() func() {
+func (b *responseBody) markDoneLocked() bool {
 	if b.isDone {
-		return nil
+		return false
 	}
 	b.isDone = true
-	return b.done
+	return true
 }
 
 func newRequestBody(consume func(int)) *requestBody {
@@ -323,6 +322,8 @@ func (b *requestBody) discardWithError(err error) {
 }
 
 type serverStream struct {
+	streamFlowState
+
 	id             uint32
 	conn           *serverConn
 	readTimer      *time.Timer
@@ -338,22 +339,20 @@ type serverStream struct {
 	expectedBody   int64
 	unconsumedFlow int64
 
-	remoteClosed       bool
-	localClosed        bool
-	isReset            bool
-	handlerStarted     bool
+	remoteClosed   bool
+	localClosed    bool
+	isReset        bool
+	handlerStarted bool
+	// hijackRejected is written by the handler goroutine and read by the
+	// event loop after the handler-done command establishes ordering.
+	hijackRejected     bool
 	flushQueued        bool
 	handlerGen         uint32
 	worker             *streamWorker
 	handlerDone        bool
 	isPush             bool
-	pushDepth          uint8
 	priority           priority
 	discardRequestBody bool
-
-	sendWindow          int64
-	recvWindow          int64
-	pendingWindowUpdate int64
 
 	pendingData         []byte
 	pendingAck          chan error
@@ -387,10 +386,12 @@ func newServerStream(conn *serverConn, id uint32) *serverStream {
 		stream = &serverStream{}
 	}
 	*stream = serverStream{
-		id:               id,
-		conn:             conn,
-		sendWindow:       conn.peerInitialStreamWindow,
-		recvWindow:       int64(conn.config.streamWindowSize),
+		id:   id,
+		conn: conn,
+		streamFlowState: streamFlowState{
+			sendWindow: conn.peerInitialStreamWindow,
+			recvWindow: int64(conn.config.streamWindowSize),
+		},
 		expectedBody:     -1,
 		expectedResponse: -1,
 	}
@@ -400,6 +401,12 @@ func newServerStream(conn *serverConn, id uint32) *serverStream {
 func releaseServerStream(stream *serverStream) {
 	*stream = serverStream{}
 	serverStreamPool.Put(stream)
+}
+
+// RejectHijack records a handler's hijack attempt so the response can explain
+// that multiplexed protocols don't support it.
+func (s *serverStream) RejectHijack() {
+	s.hijackRejected = true
 }
 
 func (s *serverStream) Deadline() (time.Time, bool) {
@@ -539,9 +546,11 @@ func (s *serverStream) AcceptStream(handler fasthttp.StreamHandler) error {
 	return nil
 }
 
-type streamConn struct {
-	stream *serverStream
-	read   io.Reader
+// streamConnBase carries the deadline and shutdown state shared by the server
+// and client StreamConn implementations, and the physical connection their
+// address methods report.
+type streamConnBase struct {
+	netConn net.Conn
 
 	writeMu       sync.Mutex
 	mu            sync.Mutex
@@ -550,6 +559,43 @@ type streamConn struct {
 	isClosed      bool
 	readClosed    bool
 	writeClosed   bool
+}
+
+func (c *streamConnBase) LocalAddr() net.Addr {
+	return c.netConn.LocalAddr()
+}
+
+func (c *streamConnBase) RemoteAddr() net.Addr {
+	return c.netConn.RemoteAddr()
+}
+
+func (c *streamConnBase) SetDeadline(deadline time.Time) error {
+	c.mu.Lock()
+	c.readDeadline = deadline
+	c.writeDeadline = deadline
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *streamConnBase) SetReadDeadline(deadline time.Time) error {
+	c.mu.Lock()
+	c.readDeadline = deadline
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *streamConnBase) SetWriteDeadline(deadline time.Time) error {
+	c.mu.Lock()
+	c.writeDeadline = deadline
+	c.mu.Unlock()
+	return nil
+}
+
+type streamConn struct {
+	streamConnBase
+
+	stream *serverStream
+	read   io.Reader
 }
 
 func (c *streamConn) Read(p []byte) (int, error) {
@@ -566,7 +612,7 @@ func (c *streamConn) Read(p []byte) (int, error) {
 	conn := c.stream.conn
 	streamID := c.stream.id
 	return readWithStreamDeadline(c.read, p, deadline, func() {
-		conn.cancelStream(streamID, timeoutError{})
+		conn.cancelStream(streamID, errStreamDeadline)
 	})
 }
 
@@ -585,15 +631,16 @@ func (c *streamConn) Write(p []byte) (int, error) {
 		return 0, net.ErrClosed
 	}
 	if !deadline.IsZero() && time.Until(deadline) <= 0 {
-		return 0, timeoutError{}
+		return 0, errStreamDeadline
 	}
 
 	write := &streamWrite{result: make(chan streamWriteResult, 1)}
-	data := bytes.Clone(p)
+	// p is shared, not cloned: the owner completes a write only after its
+	// bytes are copied out or dropped, and Write blocks on that completion.
 	command := serverCommand{
 		kind:     serverCommandResponseData,
 		streamID: c.stream.id,
-		data:     data,
+		data:     p,
 		write:    write,
 	}
 	var expired <-chan time.Time
@@ -607,7 +654,7 @@ func (c *streamConn) Write(p []byte) (int, error) {
 	case <-c.stream.Done():
 		return 0, c.stream.cause()
 	case <-expired:
-		return 0, timeoutError{}
+		return 0, errStreamDeadline
 	}
 	select {
 	case result := <-write.result:
@@ -622,7 +669,7 @@ func (c *streamConn) Write(p []byte) (int, error) {
 			kind:     serverCommandCancelWrite,
 			streamID: c.stream.id,
 			write:    write,
-			err:      timeoutError{},
+			err:      errStreamDeadline,
 		}:
 		case <-c.stream.conn.ctx.Done():
 		}
@@ -706,42 +753,6 @@ func (c *streamConn) CloseWrite() error {
 	}
 }
 
-func (c *streamConn) LocalAddr() net.Addr {
-	return c.stream.conn.conn.LocalAddr()
-}
-
-func (c *streamConn) RemoteAddr() net.Addr {
-	return c.stream.conn.conn.RemoteAddr()
-}
-
-func (c *streamConn) SetDeadline(deadline time.Time) error {
-	c.mu.Lock()
-	c.readDeadline = deadline
-	c.writeDeadline = deadline
-	c.mu.Unlock()
-	return nil
-}
-
-func (c *streamConn) SetReadDeadline(deadline time.Time) error {
-	c.mu.Lock()
-	c.readDeadline = deadline
-	c.mu.Unlock()
-	return nil
-}
-
-func (c *streamConn) SetWriteDeadline(deadline time.Time) error {
-	c.mu.Lock()
-	c.writeDeadline = deadline
-	c.mu.Unlock()
-	return nil
-}
-
-type timeoutError struct{}
-
-func (timeoutError) Error() string   { return "http2: stream deadline exceeded" }
-func (timeoutError) Timeout() bool   { return true }
-func (timeoutError) Temporary() bool { return true }
-
 // readWithStreamDeadline blocks in one read, cancelling the stream at deadline
 // to unblock it. A read woken that way reports a timeout rather than the
 // closed-stream error the cancellation itself produced. The read and the
@@ -749,7 +760,7 @@ func (timeoutError) Temporary() bool { return true }
 // the stream alive instead of reporting success on a cancelled one.
 func readWithStreamDeadline(read io.Reader, p []byte, deadline time.Time, cancel func()) (int, error) {
 	if time.Until(deadline) <= 0 {
-		return 0, timeoutError{}
+		return 0, errStreamDeadline
 	}
 	var claimed atomic.Bool
 	timer := time.AfterFunc(time.Until(deadline), func() {
@@ -760,27 +771,21 @@ func readWithStreamDeadline(read io.Reader, p []byte, deadline time.Time, cancel
 	n, err := read.Read(p)
 	timer.Stop()
 	if !claimed.CompareAndSwap(false, true) {
-		return n, timeoutError{}
+		return n, errStreamDeadline
 	}
 	return n, err
 }
 
 type clientStreamConn struct {
+	streamConnBase
+
 	stream *clientStream
 	read   *responseBody
-
-	writeMu       sync.Mutex
-	mu            sync.Mutex
-	readDeadline  time.Time
-	writeDeadline time.Time
-	readClosed    bool
-	writeClosed   bool
-	closed        bool
 }
 
 func (c *clientStreamConn) Read(p []byte) (int, error) {
 	c.mu.Lock()
-	if c.readClosed || c.closed {
+	if c.readClosed || c.isClosed {
 		c.mu.Unlock()
 		return 0, net.ErrClosed
 	}
@@ -792,7 +797,7 @@ func (c *clientStreamConn) Read(p []byte) (int, error) {
 	conn := c.stream.conn
 	streamID := c.stream.id
 	return readWithStreamDeadline(c.read, p, deadline, func() {
-		conn.resetStream(streamID, xhttp2.ErrCodeCancel, timeoutError{}, false)
+		conn.resetStream(streamID, xhttp2.ErrCodeCancel, errStreamDeadline, false)
 	})
 }
 
@@ -800,7 +805,7 @@ func (c *clientStreamConn) Write(p []byte) (int, error) {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	c.mu.Lock()
-	if c.writeClosed || c.closed {
+	if c.writeClosed || c.isClosed {
 		c.mu.Unlock()
 		return 0, net.ErrClosed
 	}
@@ -808,8 +813,8 @@ func (c *clientStreamConn) Write(p []byte) (int, error) {
 	c.mu.Unlock()
 	if err := c.stream.conn.sendData(c.stream, p, false, deadline); err != nil {
 		if errors.Is(err, fasthttp.ErrTimeout) {
-			c.stream.conn.resetStream(c.stream.id, xhttp2.ErrCodeCancel, timeoutError{}, false)
-			return 0, timeoutError{}
+			c.stream.conn.resetStream(c.stream.id, xhttp2.ErrCodeCancel, errStreamDeadline, false)
+			return 0, errStreamDeadline
 		}
 		return 0, err
 	}
@@ -818,11 +823,11 @@ func (c *clientStreamConn) Write(p []byte) (int, error) {
 
 func (c *clientStreamConn) Close() error {
 	c.mu.Lock()
-	if c.closed {
+	if c.isClosed {
 		c.mu.Unlock()
 		return nil
 	}
-	c.closed = true
+	c.isClosed = true
 	readClosed := c.readClosed
 	writeClosed := c.writeClosed
 	c.readClosed = true
@@ -864,36 +869,6 @@ func (c *clientStreamConn) CloseWrite() error {
 	deadline := c.writeDeadline
 	c.mu.Unlock()
 	return c.stream.conn.sendData(c.stream, nil, true, deadline)
-}
-
-func (c *clientStreamConn) LocalAddr() net.Addr {
-	return c.stream.conn.conn.LocalAddr()
-}
-
-func (c *clientStreamConn) RemoteAddr() net.Addr {
-	return c.stream.conn.conn.RemoteAddr()
-}
-
-func (c *clientStreamConn) SetDeadline(deadline time.Time) error {
-	c.mu.Lock()
-	c.readDeadline = deadline
-	c.writeDeadline = deadline
-	c.mu.Unlock()
-	return nil
-}
-
-func (c *clientStreamConn) SetReadDeadline(deadline time.Time) error {
-	c.mu.Lock()
-	c.readDeadline = deadline
-	c.mu.Unlock()
-	return nil
-}
-
-func (c *clientStreamConn) SetWriteDeadline(deadline time.Time) error {
-	c.mu.Lock()
-	c.writeDeadline = deadline
-	c.mu.Unlock()
-	return nil
 }
 
 var (

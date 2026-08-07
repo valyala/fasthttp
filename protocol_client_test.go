@@ -10,19 +10,6 @@ import (
 	"time"
 )
 
-func TestProtocolClientConnPrepareResponseBody(t *testing.T) {
-	var response Response
-	response.AppendBodyString("prefix")
-	(&ProtocolClientConn{}).PrepareResponseBody(&response, 1024)
-	if got := string(response.Body()); got != "prefix" {
-		t.Fatalf("body = %q, want prefix", got)
-	}
-	if available := cap(response.bodyBuffer().B) - len(response.bodyBuffer().B); available < 1024 {
-		t.Fatalf("available body capacity = %d, want at least 1024", available)
-	}
-	response.ResetBody()
-}
-
 type testProtocolTransport struct {
 	roundTripCalled         atomic.Bool
 	protocolRoundTripCalled atomic.Bool
@@ -82,14 +69,37 @@ func TestHostClientProtocolRoundTripper(t *testing.T) {
 	}
 }
 
-func TestHostClientProtocolTransportRejectsCustomHTTP1Fallback(t *testing.T) {
-	transport := &testProtocolTransport{}
+type timeoutRecordingTransport struct {
+	seen time.Duration
+}
+
+func (t *timeoutRecordingTransport) RoundTrip(_ *HostClient, req *Request, _ *Response) (bool, error) {
+	t.seen = req.timeout
+	return false, nil
+}
+
+func TestHostClientProtocolTransportKeepsCustomHTTP1Fallback(t *testing.T) {
+	roundTripper := &timeoutRecordingTransport{}
 	hc := &HostClient{
 		Addr:      "example.com:80",
-		Transport: transport,
+		Transport: roundTripper,
 	}
-	if err := hc.RegisterProtocolTransport(transport); err == nil {
-		t.Fatal("RegisterProtocolTransport() accepted a custom HTTP/1 fallback")
+	if err := hc.RegisterProtocolTransport(&testProtocolTransport{}); err != nil {
+		t.Fatalf("RegisterProtocolTransport() error: %v", err)
+	}
+
+	var req Request
+	var resp Response
+	req.timeout = 5 * time.Second
+	ctx := &ProtocolClientContext{hostClient: hc, deadline: time.Now().Add(time.Second)}
+	if _, err := ctx.RoundTripHTTP1(&req, &resp); err != nil {
+		t.Fatalf("RoundTripHTTP1() error: %v", err)
+	}
+	if roundTripper.seen <= 0 || roundTripper.seen > time.Second {
+		t.Fatalf("fallback timeout = %v, want the remaining ~1s budget", roundTripper.seen)
+	}
+	if req.timeout != 5*time.Second {
+		t.Fatalf("request timeout = %v after fallback, want restored 5s", req.timeout)
 	}
 }
 

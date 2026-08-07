@@ -135,8 +135,13 @@ type ProtocolServerContext struct {
 	active       atomic.Int32
 	prefaceRead  bool
 	requestMu    sync.Mutex
-	requestCache []*RequestCtx
+	requestCache []cachedRequestCtx
 	requestBytes int
+}
+
+type cachedRequestCtx struct {
+	ctx           *RequestCtx
+	retainedBytes int
 }
 
 const (
@@ -151,7 +156,7 @@ const (
 //
 // ServeProtocolConn closes c before returning.
 func (s *Server) ServeProtocolConn(c net.Conn, handler ProtocolHandler) error {
-	if isNilProtocolHandler(handler) {
+	if isNilInterfaceValue(handler) {
 		return errors.New("fasthttp: protocol handler is nil")
 	}
 	if s.MaxConnsPerIP > 0 {
@@ -243,7 +248,7 @@ func (ctx *ProtocolServerContext) ReleaseRequestCtx(requestCtx *RequestCtx) {
 		cacheBytes := ctx.requestCtxCacheBytes()
 		if len(ctx.requestCache) < maxProtocolRequestCtxCache &&
 			retainedBytes <= cacheBytes-ctx.requestBytes {
-			ctx.requestCache = append(ctx.requestCache, requestCtx)
+			ctx.requestCache = append(ctx.requestCache, cachedRequestCtx{requestCtx, retainedBytes})
 			ctx.requestBytes += retainedBytes
 			requestCtx = nil
 		}
@@ -275,10 +280,11 @@ func (ctx *ProtocolServerContext) acquireRequestCtx(c net.Conn) *RequestCtx {
 	ctx.requestMu.Lock()
 	var requestCtx *RequestCtx
 	if last := len(ctx.requestCache) - 1; last >= 0 {
-		requestCtx = ctx.requestCache[last]
-		ctx.requestCache[last] = nil
+		entry := ctx.requestCache[last]
+		ctx.requestCache[last] = cachedRequestCtx{}
 		ctx.requestCache = ctx.requestCache[:last]
-		ctx.requestBytes -= requestCtxRetainedBytes(requestCtx)
+		ctx.requestBytes -= entry.retainedBytes
+		requestCtx = entry.ctx
 	}
 	ctx.requestMu.Unlock()
 	if requestCtx == nil {
@@ -297,10 +303,10 @@ func (ctx *ProtocolServerContext) releaseCachedRequestCtxs() {
 	ctx.requestCache = nil
 	ctx.requestBytes = 0
 	ctx.requestMu.Unlock()
-	for _, requestCtx := range cache {
-		requestCtx.Request.ReleaseBody(0)
-		requestCtx.Response.ReleaseBody(0)
-		ctx.server.ctxPool.Put(requestCtx)
+	for _, entry := range cache {
+		entry.ctx.Request.ReleaseBody(0)
+		entry.ctx.Response.ReleaseBody(0)
+		ctx.server.ctxPool.Put(entry.ctx)
 	}
 }
 
@@ -364,7 +370,7 @@ func headerRetainedBytes(header *header) int {
 // RegisterProtocol registers a connection-oriented HTTP protocol. It must be
 // called before the Server starts serving.
 func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //nolint:gocritic
-	if isNilProtocolHandler(registration.Handler) {
+	if isNilInterfaceValue(registration.Handler) {
 		return errors.New("fasthttp: protocol handler is nil")
 	}
 	if len(registration.ALPN) == 0 && len(registration.CleartextPreface) == 0 {
@@ -403,24 +409,13 @@ func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //n
 	if len(s.ln) != 0 || s.open.Load() != 0 {
 		return errors.New("fasthttp: cannot register a protocol after serving starts")
 	}
+	if s.protocol != nil {
+		return errors.New("fasthttp: a protocol is already registered")
+	}
 
 	if registration.CleartextUpgradeToken != "" {
 		if _, ok := registration.Handler.(ProtocolUpgrader); !ok {
 			return errors.New("fasthttp: protocol upgrade token requires a ProtocolUpgrader handler")
-		}
-	}
-
-	for _, existing := range s.protocols {
-		for _, protocol := range alpn {
-			if existing.matchesALPN(protocol) {
-				return fmt.Errorf("fasthttp: protocol alpn %q is already registered", protocol)
-			}
-		}
-		if prefacesConflict(existing.cleartextPreface, preface) {
-			return errors.New("fasthttp: protocol cleartext prefaces conflict")
-		}
-		if registration.CleartextUpgradeToken != "" && existing.upgradeToken == registration.CleartextUpgradeToken {
-			return fmt.Errorf("fasthttp: protocol upgrade token %q is already registered", registration.CleartextUpgradeToken)
 		}
 	}
 
@@ -444,12 +439,23 @@ func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //n
 		}
 	}
 
-	s.protocols = append(s.protocols, registeredProtocol{
+	protocol := &registeredProtocol{
 		alpn:             alpn,
 		cleartextPreface: preface,
 		upgradeToken:     registration.CleartextUpgradeToken,
 		handler:          registration.Handler,
-	})
+	}
+	s.protocol = protocol
+	// ALPN dispatch goes through the same table as NextProto handlers; the
+	// TLS NextProtos ordering is owned by prepareProtocolTLSConfig above.
+	if len(alpn) != 0 && s.nextProtos == nil {
+		s.nextProtos = make(map[string]ServeHandler)
+	}
+	for _, proto := range alpn {
+		s.nextProtos[proto] = func(conn net.Conn) error {
+			return s.serveProtocolConn(conn, protocol, false)
+		}
+	}
 	if tlsConfig != nil {
 		s.TLSConfig = tlsConfig
 	}
@@ -501,7 +507,7 @@ func prepareProtocolTLSConfig(
 		ordered = append(ordered, alpn...)
 	}
 	for _, protocol := range fallback {
-		if !containsString(ordered, protocol) {
+		if !slices.Contains(ordered, protocol) {
 			ordered = append(ordered, protocol)
 		}
 	}
@@ -517,41 +523,17 @@ func prepareProtocolTLSConfig(
 	return config, nil
 }
 
-func isNilProtocolHandler(handler ProtocolHandler) bool {
-	if handler == nil {
+func isNilInterfaceValue(v any) bool {
+	if v == nil {
 		return true
 	}
-	value := reflect.ValueOf(handler)
+	value := reflect.ValueOf(v)
 	switch value.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
 		return value.IsNil()
 	default:
 		return false
 	}
-}
-
-func containsString(values []string, target string) bool {
-	return slices.Contains(values, target)
-}
-
-func prefacesConflict(a, b []byte) bool {
-	if len(a) == 0 || len(b) == 0 {
-		return false
-	}
-	return bytes.HasPrefix(a, b) || bytes.HasPrefix(b, a)
-}
-
-func (p *registeredProtocol) matchesALPN(protocol string) bool {
-	return containsString(p.alpn, protocol)
-}
-
-func (s *Server) protocolByALPN(protocol string) *registeredProtocol {
-	for i := range s.protocols {
-		if s.protocols[i].matchesALPN(protocol) {
-			return &s.protocols[i]
-		}
-	}
-	return nil
 }
 
 func (s *Server) serveProtocolConn(c net.Conn, protocol *registeredProtocol, prefaceRead bool) error {
@@ -574,11 +556,8 @@ func (s *Server) serveProtocolConn(c net.Conn, protocol *registeredProtocol, pre
 }
 
 func (s *Server) protocolForUpgradeToken(token []byte) *registeredProtocol {
-	for i := range s.protocols {
-		candidate := &s.protocols[i]
-		if candidate.upgradeToken != "" && string(token) == candidate.upgradeToken {
-			return candidate
-		}
+	if p := s.protocol; p != nil && p.upgradeToken != "" && string(token) == p.upgradeToken {
+		return p
 	}
 	return nil
 }
@@ -668,22 +647,11 @@ func (s *Server) detectCleartextProtocol(c net.Conn) (*registeredProtocol, []byt
 	if _, isTLS := c.(tlsConn); isTLS {
 		return nil, nil, time.Time{}, nil
 	}
-
-	candidates := make([]*registeredProtocol, 0, len(s.protocols))
-	maxPrefaceLen := 0
-	for i := range s.protocols {
-		preface := s.protocols[i].cleartextPreface
-		if len(preface) == 0 {
-			continue
-		}
-		candidates = append(candidates, &s.protocols[i])
-		if len(preface) > maxPrefaceLen {
-			maxPrefaceLen = len(preface)
-		}
-	}
-	if len(candidates) == 0 {
+	protocol := s.protocol
+	if protocol == nil || len(protocol.cleartextPreface) == 0 {
 		return nil, nil, time.Time{}, nil
 	}
+	preface := protocol.cleartextPreface
 
 	var deadline time.Time
 	if s.ReadTimeout > 0 {
@@ -693,37 +661,20 @@ func (s *Server) detectCleartextProtocol(c net.Conn) (*registeredProtocol, []byt
 		}
 	}
 
-	prefix := make([]byte, 0, maxPrefaceLen)
+	// Read at most the preface itself, so a match consumes it exactly and a
+	// mismatch replays only the compared prefix to the HTTP/1 parser.
+	prefix := make([]byte, 0, len(preface))
 	emptyReads := 0
 	for {
-		// Read through the next candidate boundary. This preserves exact
-		// matching when registered prefaces have different lengths, while no
-		// longer forcing one syscall per byte when a full request is ready.
-		nextLen := maxPrefaceLen
-		for _, candidate := range candidates {
-			if length := len(candidate.cleartextPreface); length < nextLen {
-				nextLen = length
-			}
-		}
-		oldLen := len(prefix)
-		prefix = prefix[:nextLen]
-		n, err := c.Read(prefix[oldLen:])
-		prefix = prefix[:oldLen+n]
+		n, err := c.Read(prefix[len(prefix):len(preface)])
+		prefix = prefix[:len(prefix)+n]
 		if n > 0 {
 			emptyReads = 0
-			remaining := candidates[:0]
-			for _, candidate := range candidates {
-				preface := candidate.cleartextPreface
-				if bytes.Equal(prefix, preface) {
-					return candidate, prefix, deadline, nil
-				}
-				if len(prefix) < len(preface) && bytes.Equal(prefix, preface[:len(prefix)]) {
-					remaining = append(remaining, candidate)
-				}
-			}
-			candidates = remaining
-			if len(candidates) == 0 {
+			if !bytes.Equal(prefix, preface[:len(prefix)]) {
 				return nil, prefix, deadline, nil
+			}
+			if len(prefix) == len(preface) {
+				return protocol, prefix, deadline, nil
 			}
 		} else if err == nil {
 			emptyReads++

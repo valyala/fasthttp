@@ -133,16 +133,14 @@ func FuzzFrameSequence(f *testing.F) {
 		framer := xhttp2.NewFramer(io.Discard, bytes.NewReader(data))
 		framer.SetMaxReadFrameSize(1 << 20)
 		conn := &serverConn{
-			server:                  &fasthttp.Server{},
-			config:                  serverConfig{maxConcurrentStreams: 8, maxRapidResetsPerSecond: 1000},
-			framer:                  xhttp2.NewFramer(io.Discard, nil),
-			encoder:                 hpack.NewEncoder(io.Discard),
-			streams:                 make(map[uint32]*serverStream),
-			priorityUpdates:         make(map[uint32]priority),
-			closedClientStreams:     make(map[uint32]bool),
-			peerConnectionWindow:    65535,
-			peerInitialStreamWindow: 65535,
-			receiveConnectionWindow: defaultConnectionWindowSize,
+			server:              &fasthttp.Server{},
+			config:              serverConfig{maxConcurrentStreams: 8, maxRapidResetsPerSecond: 1000},
+			framer:              xhttp2.NewFramer(io.Discard, nil),
+			encoder:             hpack.NewEncoder(io.Discard),
+			streams:             make(map[uint32]*serverStream),
+			priorityUpdates:     make(map[uint32]priority),
+			closedClientStreams: make(map[uint32]bool),
+			connFlowState:       connFlowState{peerConnectionWindow: 65535, peerInitialStreamWindow: 65535, receiveConnectionWindow: defaultConnectionWindowSize},
 		}
 		for range 32 {
 			frame, err := framer.ReadFrame()

@@ -527,29 +527,7 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
-	uri := req.URI()
-	if uri == nil {
-		return ErrorInvalidURI
-	}
-
-	host := uri.Host()
-
-	if bytes.ContainsRune(host, ',') {
-		return fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
-	}
-
-	isTLS := false
-	if uri.isHTTPS() {
-		isTLS = true
-	} else if !uri.isHTTP() {
-		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
-	}
-
-	c.mOnce.Do(func() {
-		c.m = make(map[string]*HostClient)
-		c.ms = make(map[string]*HostClient)
-	})
-	hc, err := c.hostClient(host, isTLS)
+	hc, err := c.selectHostClient(req)
 	if err != nil {
 		return err
 	}
@@ -557,6 +535,32 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	atomic.AddInt32(&hc.pendingClientRequests, 1)
 	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
 	return hc.Do(req, resp)
+}
+
+func (c *Client) selectHostClient(req *Request) (*HostClient, error) {
+	uri := req.URI()
+	if uri == nil {
+		return nil, ErrorInvalidURI
+	}
+
+	host := uri.Host()
+
+	if bytes.ContainsRune(host, ',') {
+		return nil, fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
+	}
+
+	isTLS := false
+	if uri.isHTTPS() {
+		isTLS = true
+	} else if !uri.isHTTP() {
+		return nil, fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
+	}
+
+	c.mOnce.Do(func() {
+		c.m = make(map[string]*HostClient)
+		c.ms = make(map[string]*HostClient)
+	})
+	return c.hostClient(host, isTLS)
 }
 
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
@@ -931,7 +935,6 @@ type HostClient struct {
 	connsCount int
 
 	connsLock         sync.Mutex
-	connSlotAvailable chan struct{}
 	protocolTransport ProtocolRoundTripper
 
 	addrsLock        sync.Mutex
@@ -1749,7 +1752,6 @@ var ErrTimeout = &timeoutError{}
 func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Lock()
 	c.MaxConns = newMaxConns
-	c.signalConnSlotAvailableLocked()
 	c.connsLock.Unlock()
 }
 
@@ -1966,27 +1968,33 @@ func (c *HostClient) decConnsCount() {
 	if c.MaxConnWaitTimeout <= 0 {
 		c.connsLock.Lock()
 		c.connsCount--
-		c.signalConnSlotAvailableLocked()
 		c.connsLock.Unlock()
 		return
 	}
 
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
-	dialed := false
+	handedOff := false
 	if q := c.connsWait; q != nil {
 		for q.len() > 0 {
 			w := q.popFront()
-			if w.waiting() {
-				go c.dialConnFor(w)
-				dialed = true
-				break
+			if !w.waiting() {
+				continue
 			}
+			if w.slotOnly {
+				if w.tryDeliverSlot() {
+					handedOff = true
+					break
+				}
+				continue
+			}
+			go c.dialConnFor(w)
+			handedOff = true
+			break
 		}
 	}
-	if !dialed {
+	if !handedOff {
 		c.connsCount--
-		c.signalConnSlotAvailableLocked()
 	}
 }
 
@@ -2036,29 +2044,45 @@ func (c *HostClient) ReleaseConn(cc *clientConn) {
 
 	// try to deliver an idle connection to a *wantConn
 	c.connsLock.Lock()
-	defer c.connsLock.Unlock()
 	delivered := false
+	retire := false
 	if q := c.connsWait; q != nil {
 		for q.len() > 0 {
 			w := q.popFront()
-			if w.waiting() {
-				delivered = w.tryDeliver(cc, nil)
-				// This is the last resort to hand over conCount sema.
-				// We must ensure that there are no valid waiters in connsWait
-				// when we exit this loop.
-				//
-				// We did not apply the same looping pattern in the decConnsCount
-				// method because it needs to create a new time-spent connection,
-				// and the decConnsCount call chain will inevitably reach this point.
-				// When MaxConnWaitTimeout>0.
-				if delivered {
+			if !w.waiting() {
+				continue
+			}
+			if w.slotOnly {
+				// The waiter inherits cc's slot and dials its own connection;
+				// the idle HTTP/1 connection retires.
+				if w.tryDeliverSlot() {
+					delivered = true
+					retire = true
 					break
 				}
+				continue
+			}
+			delivered = w.tryDeliver(cc, nil)
+			// This is the last resort to hand over conCount sema.
+			// We must ensure that there are no valid waiters in connsWait
+			// when we exit this loop.
+			//
+			// We did not apply the same looping pattern in the decConnsCount
+			// method because it needs to create a new time-spent connection,
+			// and the decConnsCount call chain will inevitably reach this point.
+			// When MaxConnWaitTimeout>0.
+			if delivered {
+				break
 			}
 		}
 	}
 	if !delivered {
 		c.conns = append(c.conns, cc)
+	}
+	c.connsLock.Unlock()
+	if retire {
+		cc.c.Close()
+		releaseClientConn(cc)
 	}
 }
 
@@ -2341,7 +2365,11 @@ type wantConn struct {
 	err   error
 	ready chan struct{}
 	conn  *clientConn
-	mu    sync.Mutex // protects conn, err, close(ready)
+	// slotOnly marks a waiter that wants a connection slot without a dialed
+	// connection: protocol transports dial with their own TLS setup.
+	slotOnly      bool
+	slotDelivered bool
+	mu            sync.Mutex // protects conn, err, slotDelivered, close(ready)
 }
 
 // waiting reports whether w is still waiting for an answer (connection or error).
@@ -2371,21 +2399,40 @@ func (w *wantConn) tryDeliver(conn *clientConn, err error) bool {
 	return true
 }
 
+// tryDeliverSlot transfers ownership of one connection slot to a slotOnly
+// waiter and reports whether it succeeded.
+func (w *wantConn) tryDeliverSlot() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.conn != nil || w.err != nil || w.slotDelivered {
+		return false
+	}
+	w.slotDelivered = true
+	close(w.ready)
+	return true
+}
+
 // cancel marks w as no longer wanting a result (for example, due to cancellation).
-// If a connection has been delivered already, cancel returns it with c.releaseConn.
+// A connection or slot that was delivered already is returned to c.
 func (w *wantConn) cancel(c *HostClient, err error) {
 	w.mu.Lock()
-	if w.conn == nil && w.err == nil {
+	if w.conn == nil && w.err == nil && !w.slotDelivered {
 		close(w.ready) // catch misbehavior in future delivery
 	}
 
 	conn := w.conn
+	slot := w.slotDelivered
 	w.conn = nil
+	w.slotDelivered = false
 	w.err = err
 	w.mu.Unlock()
 
 	if conn != nil {
 		c.ReleaseConn(conn)
+	}
+	if slot {
+		c.decConnsCount()
 	}
 }
 

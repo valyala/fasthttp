@@ -8,7 +8,6 @@ import (
 	"io"
 	"math"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -111,6 +110,8 @@ type clientResult struct {
 }
 
 type clientStream struct {
+	streamFlowState
+
 	// id is assigned in writeRequestHeaders under the connection write slot,
 	// which makes wire order of request HEADERS equal ID order.
 	id   uint32
@@ -124,7 +125,6 @@ type clientStream struct {
 	readTimer  *time.Timer
 
 	requestStarted         bool
-	requestBytes           int64
 	localClosed            bool
 	remoteClosed           bool
 	responseHeader         bool
@@ -137,10 +137,6 @@ type clientStream struct {
 	isHead        bool
 	isConnect     bool
 	parentRequest *fasthttp.Request
-
-	sendWindow          int64
-	recvWindow          int64
-	pendingWindowUpdate int64
 
 	statusCode            int
 	expectedResponseBytes int64
@@ -158,6 +154,8 @@ type clientStream struct {
 }
 
 type clientConn struct {
+	connFlowState
+
 	pool          *clientPool
 	hc            *fasthttp.HostClient
 	config        clientConfig
@@ -175,31 +173,24 @@ type clientConn struct {
 	encoder        *hpack.Encoder
 	headerBuffer   bytes.Buffer
 	headerStrings  headerStringCache
+	headerFields   []hpack.HeaderField
 
-	mu                       sync.Mutex
-	streams                  map[uint32]*clientStream
-	nextStreamID             uint32
-	activeStreams            uint32
-	activePushStreams        uint32
-	peerMaxConcurrentStreams uint32
-	peerInitialStreamWindow  int64
-	peerConnectionWindow     int64
-	peerMaxFrameSize         int
-	peerMaxHeaderListSize    uint64
-	receiveConnectionWindow  int64
-	pendingConnectionUpdate  int64
-	receivedSettings         bool
-	peerExtendedConnect      bool
-	goAway                   bool
-	goAwayLastStreamID       uint32
-	closed                   bool
-	err                      error
-	notify                   chan struct{}
-	waiters                  int
-	created                  time.Time
-	lastIdle                 time.Time
-	idleTimer                *time.Timer
-	lastPromisedStreamID     uint32
+	mu                sync.Mutex
+	streams           map[uint32]*clientStream
+	nextStreamID      uint32
+	activeStreams     uint32
+	activePushStreams uint32
+
+	peerExtendedConnect  bool
+	goAway               bool
+	goAwayLastStreamID   uint32
+	closed               bool
+	err                  error
+	notify               chan struct{}
+	waiters              int
+	created              time.Time
+	idleTimer            *time.Timer
+	lastPromisedStreamID uint32
 }
 
 func newClientConn(pool *clientPool, lease *fasthttp.ProtocolClientConn) (*clientConn, error) {
@@ -207,23 +198,20 @@ func newClientConn(pool *clientPool, lease *fasthttp.ProtocolClientConn) (*clien
 		return nil, err
 	}
 	conn := &clientConn{
-		pool:                     pool,
-		hc:                       pool.hc,
-		config:                   pool.config,
-		lease:                    lease,
-		conn:                     lease.Conn(),
-		streams:                  make(map[uint32]*clientStream),
-		nextStreamID:             1,
-		peerMaxConcurrentStreams: 100,
-		peerInitialStreamWindow:  65535,
-		peerConnectionWindow:     65535,
-		peerMaxFrameSize:         defaultMaxFrameSize,
-		peerMaxHeaderListSize:    math.MaxUint32,
-		receiveConnectionWindow:  int64(pool.config.connectionWindowSize),
-		notify:                   make(chan struct{}),
-		writeSem:                 make(chan struct{}, 1),
-		created:                  time.Now(),
+		pool:          pool,
+		hc:            pool.hc,
+		config:        pool.config,
+		lease:         lease,
+		conn:          lease.Conn(),
+		streams:       make(map[uint32]*clientStream),
+		nextStreamID:  1,
+		connFlowState: newConnFlowState(int64(pool.config.connectionWindowSize)),
+		notify:        make(chan struct{}),
+		writeSem:      make(chan struct{}, 1),
+		created:       time.Now(),
 	}
+	// x/net's pre-SETTINGS assumption for new client connections.
+	conn.peerMaxConcurrentStreams = 100
 	writeBufferSize := pool.hc.WriteBufferSize
 	if writeBufferSize <= 0 {
 		writeBufferSize = defaultWriteBufferSize
@@ -322,7 +310,7 @@ func (c *clientConn) reserveStream(
 		isHead:                isHead,
 		isConnect:             req.Header.IsConnect(),
 		isStreaming:           openStream || resp.StreamBody && !discardResponseBody,
-		recvWindow:            int64(c.config.streamWindowSize),
+		streamFlowState:       streamFlowState{recvWindow: int64(c.config.streamWindowSize)},
 		expectedResponseBytes: -1,
 		maxResponseBodySize:   c.hc.MaxResponseBodySize,
 		discardResponseBody:   discardResponseBody,
@@ -337,7 +325,10 @@ func (c *clientConn) reserveStream(
 		stream.parentRequest = parentRequest
 	}
 	c.activeStreams++
-	if !deadline.IsZero() {
+	// Buffered exchanges are covered end-to-end by waitResult's pooled timer;
+	// only phases that outlive it (streaming bodies, tunnels, a caller-owned
+	// request-body Read) need a standing timer.
+	if !deadline.IsZero() && (stream.isStreaming || req.IsBodyStream()) {
 		// No ID yet, so the timer holds the pointer; maybeFinalizeStreamLocked
 		// keeps a late callback off a pooled stream.
 		stream.timer = time.AfterFunc(time.Until(deadline), func() {
@@ -357,7 +348,7 @@ func (c *clientConn) roundTrip(
 		c.cancelStream(stream, xhttp2.ErrCodeCancel, err, false)
 	}
 	readDeadline := phaseDeadline(deadline, ctx.ReadTimeout())
-	if ctx.ReadTimeout() > 0 {
+	if ctx.ReadTimeout() > 0 && stream.isStreaming {
 		c.armResponseReadTimeout(stream, readDeadline)
 	}
 	result := c.waitResult(stream, readDeadline)
@@ -449,11 +440,6 @@ func (c *clientConn) resetStream(streamID uint32, code xhttp2.ErrCode, cause err
 // the wire. An uncommitted stream just abandons its ID, which RFC 9113 §5.1.1
 // permits.
 func (c *clientConn) cancelStream(stream *clientStream, code xhttp2.ErrCode, cause error, retry bool) {
-	if c.config.countError != nil {
-		// Guarded at the call site: building the tag allocates twice, and every
-		// deadline-driven cancel lands here, so a disabled counter must be free.
-		c.countError("stream_" + strings.ToLower(code.String()))
-	}
 	c.mu.Lock()
 	streamID := stream.id
 	requestStarted := stream.requestStarted
@@ -552,7 +538,6 @@ func (c *clientConn) maybeFinalizeStreamLocked(stream *clientStream) {
 	if stream.callerDone && stream.poolable {
 		releaseClientStream(stream)
 	}
-	c.lastIdle = time.Now()
 	c.signalLocked()
 	if c.activeStreams == 0 {
 		if c.goAway {
@@ -606,16 +591,9 @@ func (c *clientConn) fail(cause error) {
 	}
 	c.signalLocked()
 	c.mu.Unlock()
-	c.countError("connection_error")
 	c.shutdownWriter(cause, false)
 	_ = c.lease.Close()
 	c.pool.remove(c)
-}
-
-func (c *clientConn) countError(errorType string) {
-	if c.config.countError != nil {
-		c.config.countError(errorType)
-	}
 }
 
 func (c *clientConn) closeIfIdle() {

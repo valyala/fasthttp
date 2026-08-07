@@ -30,8 +30,10 @@ type Transport struct {
 	config      ClientConfig
 	configError error
 
+	// mu serialises pool creation and removal; lookups go through the
+	// lock-free fast path of pools.
 	mu    sync.Mutex
-	pools map[*fasthttp.HostClient]*clientPool
+	pools sync.Map // map[*fasthttp.HostClient]*clientPool
 }
 
 // NewTransport constructs an HTTP/2 transport. ConfigureHostClient or
@@ -42,7 +44,6 @@ func NewTransport(config ClientConfig) *Transport { //nolint:gocritic // config 
 	return &Transport{
 		config:      config,
 		configError: err,
-		pools:       make(map[*fasthttp.HostClient]*clientPool),
 	}
 }
 
@@ -98,10 +99,13 @@ func (t *Transport) poolFor(hc *fasthttp.HostClient) (*clientPool, error) {
 	if t.configError != nil {
 		return nil, t.configError
 	}
+	if pool, ok := t.pools.Load(hc); ok {
+		return pool.(*clientPool), nil //nolint:forcetypeassert
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if pool := t.pools[hc]; pool != nil {
-		return pool, nil
+	if pool, ok := t.pools.Load(hc); ok {
+		return pool.(*clientPool), nil //nolint:forcetypeassert
 	}
 	config, err := normalizeClientConfig(hc, &t.config)
 	if err != nil {
@@ -114,7 +118,7 @@ func (t *Transport) poolFor(hc *fasthttp.HostClient) (*clientPool, error) {
 		notify:    make(chan struct{}),
 		available: make(chan struct{}, 1),
 	}
-	t.pools[hc] = pool
+	t.pools.Store(hc, pool)
 	return pool, nil
 }
 
@@ -196,19 +200,20 @@ func (t *Transport) MinTLSVersion() uint16 {
 
 // CloseIdleConnections closes idle HTTP/2 connections owned for hc.
 func (t *Transport) CloseIdleConnections(hc *fasthttp.HostClient) {
-	t.mu.Lock()
-	pool := t.pools[hc]
-	t.mu.Unlock()
-	if pool != nil {
-		pool.closeIdle()
-		t.removePoolIfEmpty(hc, pool)
+	if pool, ok := t.pools.Load(hc); ok {
+		pool.(*clientPool).closeIdle() //nolint:forcetypeassert
+		t.removePoolIfEmpty(hc, pool.(*clientPool))
 	}
 }
 
 func (t *Transport) removePoolIfEmpty(hc *fasthttp.HostClient, pool *clientPool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.pools[hc] != pool {
+	current, ok := t.pools.Load(hc)
+	if !ok {
+		return
+	}
+	if stored, ok := current.(*clientPool); !ok || stored != pool {
 		return
 	}
 	pool.mu.Lock()
@@ -218,7 +223,7 @@ func (t *Transport) removePoolIfEmpty(hc *fasthttp.HostClient, pool *clientPool)
 	}
 	pool.mu.Unlock()
 	if empty {
-		delete(t.pools, hc)
+		t.pools.Delete(hc)
 	}
 }
 
@@ -378,8 +383,8 @@ func waitForClientEvent(notify <-chan struct{}, deadline time.Time, maxWait time
 		<-notify
 		return nil
 	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
+	timer := fasthttp.AcquireTimer(wait)
+	defer fasthttp.ReleaseTimer(timer)
 	select {
 	case <-notify:
 		return nil
