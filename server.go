@@ -822,7 +822,7 @@ type HijackHandler func(c net.Conn)
 //   - HTTP/2.0 ( https://en.wikipedia.org/wiki/HTTP/2 )
 func (ctx *RequestCtx) Hijack(handler HijackHandler) {
 	if ctx.TryHijack(handler) != nil {
-		if rejecter, ok := ctx.protocolStream.(interface{ RejectHijack() }); ok {
+		if rejecter, ok := ctx.protocolStream.(HijackRejecter); ok {
 			rejecter.RejectHijack()
 		}
 	}
