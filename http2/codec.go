@@ -81,10 +81,9 @@ func newHeaderCodec(maxTableSize, maxListSize uint32) *headerCodec {
 	return codec
 }
 
-// decode consumes one header block: HEADERS or PUSH_PROMISE plus its
-// CONTINUATIONs. invalid poisons only this stream, having decoded the whole
-// block to keep the HPACK table in sync (RFC 9113 §4.3); err is fatal to the
-// connection.
+// decode consumes one header block, CONTINUATIONs included, even when invalid,
+// to keep the HPACK table in sync (RFC 9113 §4.3). invalid poisons one stream;
+// err is fatal to the connection.
 func (c *headerCodec) decode(
 	framer *xhttp2.Framer,
 	streamID uint32,

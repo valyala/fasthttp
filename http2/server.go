@@ -81,6 +81,13 @@ var (
 
 var shutdownPingData = [8]byte{'f', 'a', 's', 't', 'h', '2', 'g', 'o'}
 
+var (
+	errDataOnHalfClosedStream    = errors.New("http2: data on half-closed remote stream")
+	errStreamRecvWindowExceeded  = errors.New("http2: stream receive window exceeded")
+	errRequestBodyLengthMismatch = errors.New("http2: request body exceeds content-length")
+	errBufferedBodyLimit         = errors.New("http2: connection buffered request body limit exceeded")
+)
+
 type serverCommandKind uint8
 
 const (
@@ -138,6 +145,16 @@ type serverCommand struct {
 	pushOpts   *fasthttp.PushOptions
 }
 
+// fail reports err through whichever completion path the command carries.
+func (c *serverCommand) fail(err error) {
+	switch {
+	case c.write != nil:
+		c.write.complete(err)
+	case c.result != nil:
+		c.result <- err
+	}
+}
+
 type serverError struct {
 	code xhttp2.ErrCode
 	err  error
@@ -166,10 +183,7 @@ type serverConn struct {
 	allWorkers      []*streamWorker
 	headerDecoder   *headerCodec
 	writer          *asyncFrameWriter
-	encoder         *hpack.Encoder
-	headerBuffer    bytes.Buffer
-	headerStrings   headerStringCache
-	headerFields    []hpack.HeaderField
+	headerEncoder
 
 	events   chan incomingFrame
 	commands chan serverCommand
@@ -190,11 +204,11 @@ type serverConn struct {
 
 	peerAllowsPush bool
 
-	bufferedRequestBytes   int64
-	nextPushStreamID       uint32
-	activePushes           uint32
-	priorityUpdates        map[uint32]priority
-	prunedPriorityStreamID uint32
+	bufferedRequestBytes    int64
+	nextPushStreamID        uint32
+	activePushes            uint32
+	priorityUpdates         map[uint32]priority
+	priorityPrunedThroughID uint32
 	// closedClientStreams records, per recently closed stream, whether its
 	// STREAM_CLOSED reset was already sent. See markClosedStreamReset.
 	closedClientStreams      map[uint32]bool
@@ -229,8 +243,7 @@ func newServerConn(
 		priorityUpdates:     make(map[uint32]priority),
 		closedClientStreams: make(map[uint32]bool),
 	}
-	conn.encoder = hpack.NewEncoder(&conn.headerBuffer)
-	conn.encoder.SetMaxDynamicTableSizeLimit(config.maxEncoderTableSize)
+	conn.headerEncoder.init(config.maxEncoderTableSize)
 	return conn
 }
 
@@ -271,36 +284,69 @@ func (c *serverConn) serve(upgrade *serverUpgrade) (retErr error) {
 		_ = c.conn.Close()
 	}()
 
-	// Nothing heavier than a stack frame may exist until readClientPreface
-	// returns: half-open connections parked before the preface are cheap for a
-	// peer to create, so the async writer, its goroutine, the read buffer, and
-	// the queues are all built after it.
-	if upgrade == nil {
-		if err := validateTLSConnection(c.conn); err != nil {
-			return err
-		}
-		if err := c.readClientPreface(); err != nil {
-			_ = c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-			_, _ = io.CopyN(io.Discard, c.conn, 64<<10)
-			return err
-		}
+	var err error
+	if upgrade != nil {
+		err = c.startUpgraded(upgrade)
 	} else {
-		direct := directFrameWriter{conn: c.conn, timeout: c.config.writeByteTimeout}
-		if _, err := direct.Write(upgradeResponse); err != nil {
-			return fmt.Errorf("http2: writing upgrade response: %w", err)
-		}
-		c.framer = xhttp2.NewFramer(direct, nil)
-		if err := c.applySettings(upgrade.settings); err != nil {
-			return fmt.Errorf("http2: applying upgrade settings: %w", err)
-		}
-		if err := c.writeInitialSettings(); err != nil {
-			return fmt.Errorf("http2: writing initial settings: %w", err)
-		}
-		if err := c.readClientPreface(); err != nil {
-			return err
-		}
+		err = c.startDirect()
+	}
+	if err != nil {
+		return err
 	}
 
+	go c.readLoop()
+	return c.eventLoop()
+}
+
+// startDirect prepares a connection that speaks HTTP/2 from its first byte.
+// Half-open connections parked before the preface are cheap for a peer to
+// create, so nothing is allocated until readClientPreface returns.
+func (c *serverConn) startDirect() error {
+	if err := validateTLSConnection(c.conn); err != nil {
+		return err
+	}
+	if err := c.readClientPreface(); err != nil {
+		_ = c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		_, _ = io.CopyN(io.Discard, c.conn, 64<<10)
+		return err
+	}
+	c.installFramer()
+	if err := c.writeInitialSettings(); err != nil {
+		return fmt.Errorf("http2: writing initial settings: %w", err)
+	}
+	if err := c.writer.Flush(); err != nil {
+		return fmt.Errorf("http2: flushing initial settings: %w", err)
+	}
+	c.initQueues()
+	return nil
+}
+
+// startUpgraded answers an h2c upgrade on the raw connection, then joins the
+// same post-preface setup.
+func (c *serverConn) startUpgraded(upgrade *serverUpgrade) error {
+	direct := directFrameWriter{conn: c.conn, timeout: c.config.writeByteTimeout}
+	if _, err := direct.Write(upgradeResponse); err != nil {
+		return fmt.Errorf("http2: writing upgrade response: %w", err)
+	}
+	c.framer = xhttp2.NewFramer(direct, nil)
+	if err := c.applySettings(upgrade.settings); err != nil {
+		return fmt.Errorf("http2: applying upgrade settings: %w", err)
+	}
+	if err := c.writeInitialSettings(); err != nil {
+		return fmt.Errorf("http2: writing initial settings: %w", err)
+	}
+	if err := c.readClientPreface(); err != nil {
+		return err
+	}
+	c.installFramer()
+	c.initQueues()
+	c.bootstrapUpgradedStream(upgrade.request)
+	return nil
+}
+
+// installFramer builds the async writer, buffered reader, and framer the
+// connection uses once the peer is known to speak HTTP/2.
+func (c *serverConn) installFramer() {
 	writeBufferSize := c.server.WriteBufferSize
 	if writeBufferSize <= 0 {
 		writeBufferSize = defaultWriteBufferSize
@@ -321,20 +367,9 @@ func (c *serverConn) serve(upgrade *serverUpgrade) (retErr error) {
 	c.frames = newFrameReader(c.framer, reader)
 	c.headerDecoder = newHeaderCodec(c.config.maxDecoderTableSize, c.config.maxHeaderListSize)
 	c.framer.SetMaxReadFrameSize(c.config.maxReadFrameSize)
-	if upgrade == nil {
-		if err := c.writeInitialSettings(); err != nil {
-			return fmt.Errorf("http2: writing initial settings: %w", err)
-		}
-		if err := c.writer.Flush(); err != nil {
-			return fmt.Errorf("http2: flushing initial settings: %w", err)
-		}
-	}
-	c.initQueues()
-	if upgrade != nil {
-		c.bootstrapUpgradedStream(upgrade.request)
-	}
+}
 
-	go c.readLoop()
+func (c *serverConn) eventLoop() error {
 	serverDone := c.protocolContext.Done()
 	var idleTimer *time.Timer
 	if c.config.idleTimeout > 0 {
@@ -399,10 +434,8 @@ func (c *serverConn) serve(upgrade *serverUpgrade) (retErr error) {
 		}
 		// Cycle-grained is plenty for the 10s worker idle reaper.
 		c.cycleTime = time.Now()
-		// Drain up to 63 more events/commands before flushing, so one burst
-		// becomes one write. Dry channels don't end the batch while frames are
-		// still buffered or started handlers haven't reported back; the timer
-		// bounds that wait in case such a handler is slow.
+		// One burst becomes one write. Dry channels don't end the batch while
+		// frames are buffered or started handlers haven't reported back.
 		coalesceProgress := false
 	drain:
 		for range 63 {
@@ -897,20 +930,17 @@ func (c *serverConn) applySettings(settings []xhttp2.Setting) error {
 		}
 	}
 
-	// RFC 9113 requires settings to be processed in order and the last value
-	// to win. For INITIAL_WINDOW_SIZE, all intermediate deltas telescope from
-	// the value at frame start. Checking the largest one preserves overflow
-	// detection while walking every open stream exactly once, rather than once
-	// per repeated setting.
+	// Repeated INITIAL_WINDOW_SIZE deltas telescope from the value at frame
+	// start, so checking the largest one preserves overflow detection.
 	if final.hasInitialWindowSize {
 		for _, stream := range c.streams {
-			if stream.sendWindow+maxInitialWindowDelta > math.MaxInt32 {
+			if stream.send.window+maxInitialWindowDelta > math.MaxInt32 {
 				return &serverError{code: xhttp2.ErrCodeFlowControl, err: errors.New("http2: stream send window overflow")}
 			}
 		}
 		finalDelta := int64(final.initialWindowSize) - c.peerInitialStreamWindow
 		for _, stream := range c.streams {
-			stream.sendWindow += finalDelta
+			stream.send.window += finalDelta
 		}
 		c.peerInitialStreamWindow = int64(final.initialWindowSize)
 	}
@@ -1078,17 +1108,15 @@ func (c *serverConn) processTrailers(stream *serverStream, event *incomingFrame)
 	}
 	requestHeader := &stream.request.Request.Header
 	if stream.body == nil {
-		// Applying directly can leave a partial trailer set behind on error,
-		// but the stream resets and the RequestCtx is recycled before any
-		// handler could observe it.
+		// A partial trailer set on error is unobservable: the stream resets and
+		// the RequestCtx is recycled first.
 		if err := applyRequestTrailers(requestHeader, event.fields); err != nil {
 			return c.resetStream(stream.id, xhttp2.ErrCodeProtocol, err)
 		}
 		return c.finishRequestBody(stream)
 	}
-	// A streaming body applies trailers only when its reader drains, which is
-	// too late to reject the frame, so validate on a scratch header now and
-	// copy the fields the deferred commit needs.
+	// A streaming body applies trailers only when its reader drains, too late
+	// to reject the frame.
 	var validationHeader fasthttp.RequestHeader
 	if err := applyRequestTrailers(&validationHeader, event.fields); err != nil {
 		return c.resetStream(stream.id, xhttp2.ErrCodeProtocol, err)
@@ -1100,6 +1128,12 @@ func (c *serverConn) processTrailers(stream *serverStream, event *incomingFrame)
 	return c.finishRequestBody(stream)
 }
 
+// rejectData returns the frame's flow to the connection and resets the stream.
+func (c *serverConn) rejectData(stream *serverStream, flowLength int64, code xhttp2.ErrCode, cause error) error {
+	c.restoreConnectionWindow(flowLength)
+	return c.resetStream(stream.id, code, cause)
+}
+
 func (c *serverConn) processData(event *incomingFrame) error {
 	stream := c.streams[event.streamID]
 	if stream == nil && c.streamIsIdle(event.streamID) {
@@ -1107,7 +1141,7 @@ func (c *serverConn) processData(event *incomingFrame) error {
 	}
 	flowLength := int64(event.flowLength)
 	payloadLength := len(event.data)
-	if !c.debitReceiveWindow(flowLength) {
+	if !c.recv.debit(flowLength) {
 		return &serverError{code: xhttp2.ErrCodeFlowControl, err: errors.New("http2: connection receive window exceeded")}
 	}
 	if stream == nil {
@@ -1123,21 +1157,17 @@ func (c *serverConn) processData(event *incomingFrame) error {
 		return c.framer.WriteRSTStream(event.streamID, xhttp2.ErrCodeStreamClosed)
 	}
 	if stream.remoteClosed {
-		c.restoreConnectionWindow(flowLength)
-		return c.resetStream(stream.id, xhttp2.ErrCodeStreamClosed, errors.New("http2: data on half-closed remote stream"))
+		return c.rejectData(stream, flowLength, xhttp2.ErrCodeStreamClosed, errDataOnHalfClosedStream)
 	}
-	if !stream.debitReceiveWindow(flowLength) {
-		c.restoreConnectionWindow(flowLength)
-		return c.resetStream(stream.id, xhttp2.ErrCodeFlowControl, errors.New("http2: stream receive window exceeded"))
+	if !stream.recv.debit(flowLength) {
+		return c.rejectData(stream, flowLength, xhttp2.ErrCodeFlowControl, errStreamRecvWindowExceeded)
 	}
 	stream.bodyBytes += int64(payloadLength)
 	if stream.expectedBody >= 0 && stream.bodyBytes > stream.expectedBody {
-		c.restoreConnectionWindow(flowLength)
-		return c.resetStream(stream.id, xhttp2.ErrCodeProtocol, errors.New("http2: request body exceeds content-length"))
+		return c.rejectData(stream, flowLength, xhttp2.ErrCodeProtocol, errRequestBodyLengthMismatch)
 	}
 	if stream.maxBody > 0 && stream.bodyBytes > int64(stream.maxBody) {
-		c.restoreConnectionWindow(flowLength)
-		return c.resetStream(stream.id, xhttp2.ErrCodeCancel, errRequestBodyTooLarge)
+		return c.rejectData(stream, flowLength, xhttp2.ErrCodeCancel, errRequestBodyTooLarge)
 	}
 	if stream.discardRequestBody {
 		if err := c.consumeRequestBytes(stream, flowLength); err != nil {
@@ -1160,8 +1190,7 @@ func (c *serverConn) processData(event *incomingFrame) error {
 			err = stream.body.writeOwned(data, nil)
 		}
 		if err != nil {
-			c.restoreConnectionWindow(flowLength)
-			return c.resetStream(stream.id, xhttp2.ErrCodeCancel, err)
+			return c.rejectData(stream, flowLength, xhttp2.ErrCodeCancel, err)
 		}
 		stream.unconsumedFlow += int64(payloadLength)
 		padding := flowLength - int64(payloadLength)
@@ -1174,12 +1203,7 @@ func (c *serverConn) processData(event *incomingFrame) error {
 		payloadBytes := int64(payloadLength)
 		limit := int64(c.config.maxBufferedRequestBody)
 		if payloadBytes > limit-c.bufferedRequestBytes {
-			c.restoreConnectionWindow(flowLength)
-			return c.resetStream(
-				stream.id,
-				xhttp2.ErrCodeEnhanceYourCalm,
-				errors.New("http2: connection buffered request body limit exceeded"),
-			)
+			return c.rejectData(stream, flowLength, xhttp2.ErrCodeEnhanceYourCalm, errBufferedBodyLimit)
 		}
 		stream.request.Request.AppendBody(event.data)
 		stream.bufferedBytes += payloadBytes
@@ -1241,7 +1265,7 @@ func (c *serverConn) armResponseWriteTimeout(stream *serverStream) {
 			case c.commands <- serverCommand{
 				kind:     serverCommandResponseWriteTimeout,
 				streamID: streamID,
-				err:      errStreamDeadline,
+				err:      errStreamTimeout,
 			}:
 			case <-c.ctx.Done():
 			}
@@ -1249,6 +1273,13 @@ func (c *serverConn) armResponseWriteTimeout(stream *serverStream) {
 		return
 	}
 	stream.writeTimer.Reset(c.config.writeByteTimeout)
+}
+
+// pauseResponseWriteTimeout stops the timer but keeps it for the next stall.
+func (c *serverConn) pauseResponseWriteTimeout(stream *serverStream) {
+	if stream.writeTimer != nil {
+		stream.writeTimer.Stop()
+	}
 }
 
 func (c *serverConn) stopResponseWriteTimeout(stream *serverStream) {
@@ -1265,7 +1296,7 @@ func (c *serverConn) consumeRequestBytes(stream *serverStream, amount int64) err
 	if err := c.consumeConnectionBytes(amount); err != nil {
 		return err
 	}
-	if increment := stream.consumeReceived(amount, int64(c.config.streamWindowSize)); increment != 0 {
+	if increment := stream.recv.consume(amount, int64(c.config.streamWindowSize)); increment != 0 {
 		return c.framer.WriteWindowUpdate(stream.id, uint32(increment))
 	}
 	return nil
@@ -1275,7 +1306,7 @@ func (c *serverConn) consumeConnectionBytes(amount int64) error {
 	if amount <= 0 {
 		return nil
 	}
-	if increment := c.consumeReceived(amount, int64(c.config.connectionWindowSize)); increment != 0 {
+	if increment := c.recv.consume(amount, int64(c.config.connectionWindowSize)); increment != 0 {
 		return c.framer.WriteWindowUpdate(0, uint32(increment))
 	}
 	return nil
@@ -1285,7 +1316,7 @@ func (c *serverConn) restoreConnectionWindow(amount int64) {
 	if amount <= 0 {
 		return
 	}
-	c.restoreReceiveWindow(amount)
+	c.recv.restore(amount)
 	_ = c.framer.WriteWindowUpdate(0, uint32(amount))
 }
 
@@ -1336,12 +1367,12 @@ func (c *serverConn) teardownStream(stream *serverStream, cause, pendingErr erro
 
 func (c *serverConn) processWindowUpdate(event *incomingFrame) error {
 	if event.streamID == 0 {
-		if !c.creditSendWindow(event.increment) {
+		if !c.send.credit(event.increment) {
 			return &serverError{
 				code: xhttp2.ErrCodeFlowControl,
 				err: fmt.Errorf(
 					"http2: server connection send window overflow: current=%d increment=%d",
-					c.peerConnectionWindow,
+					c.send.window,
 					event.increment,
 				),
 			}
@@ -1355,7 +1386,7 @@ func (c *serverConn) processWindowUpdate(event *incomingFrame) error {
 		}
 		return nil
 	}
-	if !stream.creditSendWindow(event.increment) {
+	if !stream.send.credit(event.increment) {
 		return c.resetStream(stream.id, xhttp2.ErrCodeFlowControl, errors.New("http2: stream send window overflow"))
 	}
 	return nil
@@ -1413,9 +1444,9 @@ func (c *serverConn) processPriorityUpdate(event *incomingFrame) error {
 			return nil
 		}
 		limit := int(c.config.maxConcurrentStreams) * 4
-		if len(c.priorityUpdates) >= limit && c.prunedPriorityStreamID < c.lastClientStreamID {
+		if len(c.priorityUpdates) >= limit && c.priorityPrunedThroughID < c.lastClientStreamID {
 			c.prunePriorityUpdates()
-			c.prunedPriorityStreamID = c.lastClientStreamID
+			c.priorityPrunedThroughID = c.lastClientStreamID
 		}
 		if len(c.priorityUpdates) >= limit {
 			// RFC 9218 §7: the signal is advisory, so drop it once the
@@ -1442,12 +1473,7 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 	}
 	stream := c.streams[command.streamID]
 	if stream == nil {
-		if command.write != nil {
-			command.write.complete(errStreamClosed)
-		}
-		if command.result != nil {
-			command.result <- errStreamClosed
-		}
+		command.fail(errStreamClosed)
 		return nil
 	}
 	switch command.kind {
@@ -1455,14 +1481,10 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 		c.releaseStreamWorker(stream)
 		return c.handleHandlerDone(stream, command.requestCtx)
 	case serverCommandInformational:
-		block, err := encodeInformationalHeaders(
-			c.encoder,
-			&c.headerBuffer,
-			&c.headerStrings,
+		block, err := c.encodeInformationalHeaders(
 			command.statusCode,
 			command.header,
 			c.peerMaxHeaderListSize,
-			&c.headerFields,
 		)
 		if err != nil {
 			// Nothing reached the HPACK encoder, so this is the handler's
@@ -1484,29 +1506,18 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 		return c.consumeRequestBytes(stream, int64(command.consumed))
 	case serverCommandResponseData:
 		if stream.isReset || stream.localClosed {
-			if command.write != nil {
-				command.write.complete(errStreamClosed)
-			} else {
-				command.result <- errStreamClosed
-			}
+			command.fail(errStreamClosed)
 			return nil
 		}
-		if len(stream.pendingData) != 0 || stream.pendingAck != nil || stream.pendingWrite != nil || stream.responseEOF {
-			err := errors.New("http2: response stream has pending data")
-			if command.write != nil {
-				command.write.complete(err)
-			} else {
-				command.result <- err
-			}
+		responseBusy := len(stream.pendingData) != 0 || stream.pendingAck != nil ||
+			stream.pendingWrite != nil || stream.responseEOF
+		if responseBusy {
+			command.fail(errors.New("http2: response stream has pending data"))
 			return nil
 		}
 		if stream.expectedResponse >= 0 && stream.responseBytes+int64(len(command.data)) > stream.expectedResponse {
 			err := errors.New("http2: response body exceeds content-length")
-			if command.write != nil {
-				command.write.complete(err)
-			} else {
-				command.result <- err
-			}
+			command.fail(err)
 			return c.resetStream(stream.id, xhttp2.ErrCodeInternal, err)
 		}
 		stream.pendingData = command.data
@@ -1675,15 +1686,11 @@ func (c *serverConn) handleHandlerDone(
 			len(requestCtx.Response.Header.Peek(fasthttp.HeaderContentLength)) != 0 {
 			return c.resetStream(stream.id, xhttp2.ErrCodeInternal, errors.New("http2: accepted stream response cannot have an HTTP body"))
 		}
-		block, err := encodeResponseHeaders(
-			c.encoder,
-			&c.headerBuffer,
-			&c.headerStrings,
+		block, err := c.encodeResponseHeaders(
 			c.server,
 			&requestCtx.Response,
 			c.peerMaxHeaderListSize,
 			c.protocolContext.ServerDate(),
-			&c.headerFields,
 		)
 		if err != nil {
 			return c.resetStream(stream.id, xhttp2.ErrCodeInternal, err)
@@ -1705,15 +1712,11 @@ func (c *serverConn) handleHandlerDone(
 			requestCtx.Response.Header.SetContentLength(len(bufferedBody))
 		}
 	}
-	block, err := encodeResponseHeaders(
-		c.encoder,
-		&c.headerBuffer,
-		&c.headerStrings,
+	block, err := c.encodeResponseHeaders(
 		c.server,
 		&requestCtx.Response,
 		c.peerMaxHeaderListSize,
 		c.protocolContext.ServerDate(),
-		&c.headerFields,
 	)
 	if err != nil {
 		return c.resetStream(stream.id, xhttp2.ErrCodeInternal, err)
@@ -1850,7 +1853,7 @@ func (c *serverConn) startStreamHandler(
 		if stream.body != nil {
 			reader = stream.body
 		}
-		streamConn := &streamConn{streamConnBase: streamConnBase{netConn: c.conn}, stream: stream, read: reader}
+		streamConn := &streamConn{streamConnState: streamConnState{netConn: c.conn}, stream: stream, read: reader}
 		handler(streamConn)
 		_ = streamConn.Close()
 		select {
@@ -1896,10 +1899,9 @@ func (c *serverConn) flushResponses() error {
 			}
 		}
 		for urgency := uint8(0); urgency <= 7; urgency++ {
-			// The queue ascends by stream ID: draining non-incremental
-			// responses in place serves them one at a time in stream order,
-			// while incremental ones share the urgency round-robin
-			// (RFC 9218 §10).
+			// The queue ascends by stream ID, so non-incremental responses
+			// drain in stream order while incremental ones share the urgency
+			// round-robin (RFC 9218 §10).
 			for _, streamID := range c.flushBuckets[urgency] {
 				stream := c.streams[streamID]
 				if stream == nil || min(stream.priority.urgency, uint8(7)) != urgency {
@@ -1925,78 +1927,73 @@ func (c *serverConn) flushResponses() error {
 func (c *serverConn) flushStream(stream *serverStream, drain bool) (bool, error) {
 	progressed := false
 	for {
-		if len(stream.pendingData) != 0 && !stream.isReset && !stream.localClosed {
-			amount := nextDataChunk(&c.connFlowState, &stream.streamFlowState, len(stream.pendingData))
-			if amount == 0 {
-				// Only a flow-control stall needs the write timeout: while the
-				// data merely waits in this loop's queue, no peer is involved.
-				// Arming here instead of at enqueue keeps timers off the fast
-				// path, where every response would allocate one per request.
-				c.armResponseWriteTimeout(stream)
-				return progressed, nil
-			}
-			isLast := amount == len(stream.pendingData) && stream.responseEOF && !stream.responseHasTrailers
-			if err := c.framer.WriteData(stream.id, isLast, stream.pendingData[:amount]); err != nil {
-				return progressed, err
-			}
-			stream.pendingData = stream.pendingData[amount:]
-			if stream.pendingWrite != nil {
-				stream.pendingWrite.written += amount
-			}
-			if len(stream.pendingData) == 0 {
-				stream.pendingData = nil
-			}
-			progressed = true
-			if len(stream.pendingData) == 0 && stream.pendingAck != nil {
+		canSendData := len(stream.pendingData) != 0 && !stream.isReset && !stream.localClosed
+		if !canSendData {
+			break
+		}
+		amount := c.reserveDataChunk(&stream.streamFlowState, len(stream.pendingData))
+		if amount == 0 {
+			// Only a flow-control stall waits on the peer, so only it gets
+			// the timeout.
+			c.armResponseWriteTimeout(stream)
+			return progressed, nil
+		}
+		isLast := amount == len(stream.pendingData) && stream.responseEOF && !stream.responseHasTrailers
+		if err := c.framer.WriteData(stream.id, isLast, stream.pendingData[:amount]); err != nil {
+			return progressed, err
+		}
+		progressed = true
+		stream.pendingData = stream.pendingData[amount:]
+		if stream.pendingWrite != nil {
+			stream.pendingWrite.written += amount
+		}
+		if len(stream.pendingData) != 0 {
+			c.armResponseWriteTimeout(stream)
+		} else {
+			stream.pendingData = nil
+			if stream.pendingAck != nil {
 				stream.pendingAck <- nil
 				stream.pendingAck = nil
 			}
-			if len(stream.pendingData) == 0 && stream.pendingWrite != nil {
+			if stream.pendingWrite != nil {
 				stream.pendingWrite.complete(nil)
 				stream.pendingWrite = nil
 			}
-			if len(stream.pendingData) == 0 {
-				// Pause rather than drop the timer: a long response stalls on
-				// flow control repeatedly, and the next stall reuses it.
-				if stream.writeTimer != nil {
-					stream.writeTimer.Stop()
-				}
-			} else {
-				c.armResponseWriteTimeout(stream)
-			}
-			if isLast {
-				stream.localClosed = true
-				return true, c.finishResponse(stream)
-			}
-			if drain {
-				continue
-			}
-			return true, nil
+			c.pauseResponseWriteTimeout(stream)
 		}
-		if len(stream.pendingData) == 0 && stream.responseEOF && !stream.localClosed {
-			if stream.responseHasTrailers {
-				encoded, err := c.encodeResponseTrailers(stream)
-				if err != nil {
-					// Nothing reached the HPACK encoder, so this is the
-					// stream's problem, not the connection's.
-					if resetErr := c.resetStream(stream.id, xhttp2.ErrCodeInternal, err); resetErr != nil {
-						return true, resetErr
-					}
-					return true, nil
-				}
-				if err := c.writeHeaderBlock(stream.id, true, encoded); err != nil {
-					return true, err
-				}
-			} else {
-				if err := c.framer.WriteData(stream.id, true, nil); err != nil {
-					return true, err
-				}
-			}
+		if isLast {
 			stream.localClosed = true
 			return true, c.finishResponse(stream)
 		}
+		if !drain {
+			return true, nil
+		}
+	}
+
+	responseComplete := len(stream.pendingData) == 0 && stream.responseEOF && !stream.localClosed
+	if !responseComplete {
 		return progressed, nil
 	}
+	if !stream.responseHasTrailers {
+		if err := c.framer.WriteData(stream.id, true, nil); err != nil {
+			return true, err
+		}
+		stream.localClosed = true
+		return true, c.finishResponse(stream)
+	}
+	encoded, err := c.encodeResponseTrailers(stream)
+	if err != nil {
+		// Nothing reached the HPACK encoder, so this is the stream's problem.
+		if resetErr := c.resetStream(stream.id, xhttp2.ErrCodeInternal, err); resetErr != nil {
+			return true, resetErr
+		}
+		return true, nil
+	}
+	if err := c.writeHeaderBlock(stream.id, true, encoded); err != nil {
+		return true, err
+	}
+	stream.localClosed = true
+	return true, c.finishResponse(stream)
 }
 
 func (c *serverConn) compactFlushQueue() {
@@ -2018,10 +2015,7 @@ func (c *serverConn) compactFlushQueue() {
 }
 
 func (c *serverConn) encodeResponseTrailers(stream *serverStream) ([]byte, error) {
-	return encodeTrailerHeaders(
-		c.encoder,
-		&c.headerBuffer,
-		&c.headerStrings,
+	return c.encodeTrailerHeaders(
 		&stream.request.Response.Header,
 		c.peerMaxHeaderListSize,
 	)
@@ -2250,9 +2244,9 @@ func (c *serverConn) handlePush(
 	if parent.isReset || parent.localClosed || parent.responseHeaderSent || parent.handlerDone {
 		return fasthttp.ErrPushNotAllowed
 	}
-	if parent.isPush ||
-		c.activePushes >= maxPromisedStreams ||
-		c.activePushes >= c.peerMaxConcurrentStreams {
+	pushExhausted := parent.isPush || c.activePushes >= maxPromisedStreams ||
+		c.activePushes >= c.peerMaxConcurrentStreams
+	if pushExhausted {
 		return fasthttp.ErrPushLimit
 	}
 	if c.nextPushStreamID == 0 || c.nextPushStreamID > math.MaxInt32 {
@@ -2298,14 +2292,10 @@ func (c *serverConn) handlePush(
 	requestCtx.Request.Header.SetProtocol("HTTP/2")
 	requestCtx.Request.Header.SetConnectProtocol("")
 
-	block, err := encodeRequestHeaders(
-		c.encoder,
-		&c.headerBuffer,
-		&c.headerStrings,
+	block, err := c.encodeRequestHeaders(
 		&requestCtx.Request,
 		c.peerMaxHeaderListSize,
 		false,
-		&c.headerFields,
 	)
 	if err != nil {
 		c.protocolContext.ReleaseRequestCtx(requestCtx)
@@ -2414,41 +2404,4 @@ func errorCode(err error) xhttp2.ErrCode {
 		return xhttp2.ErrCode(connectionError)
 	}
 	return xhttp2.ErrCodeProtocol
-}
-
-// trailerIndexThreshold is where trailer deduplication switches from scanning
-// the registered list to a map. The declared list and the block are both
-// peer-controlled and fit thousands of distinct names under the header-list
-// limit, where per-field scans turn quadratic
-// (BenchmarkApplyDistinctRequestTrailers); typical blocks hold a few names
-// and stay on the allocation-free scan.
-const trailerIndexThreshold = 16
-
-func applyRequestTrailers(header *fasthttp.RequestHeader, fields []hpack.HeaderField) error {
-	if len(header.PeekTrailerKeys())+len(fields) <= trailerIndexThreshold {
-		for _, field := range fields {
-			if !hasTrailerKey(header.PeekTrailerKeys(), field.Name) {
-				if err := header.AddTrailer(field.Name); err != nil {
-					return err
-				}
-			}
-			header.Add(field.Name, field.Value)
-		}
-		return nil
-	}
-
-	known := make(map[string]struct{}, len(header.PeekTrailerKeys())+len(fields))
-	for _, key := range header.PeekTrailerKeys() {
-		known[strings.ToLower(string(key))] = struct{}{}
-	}
-	for _, field := range fields {
-		if _, exists := known[field.Name]; !exists {
-			if err := header.AddTrailer(field.Name); err != nil {
-				return err
-			}
-			known[field.Name] = struct{}{}
-		}
-		header.Add(field.Name, field.Value)
-	}
-	return nil
 }

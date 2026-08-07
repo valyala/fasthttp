@@ -102,19 +102,15 @@ func (c *clientConn) writeRequestHeaders(
 	c.streams[stream.id] = stream
 	// After registration, not at reservation: the SETTINGS sweep applying
 	// INITIAL_WINDOW_SIZE deltas only visits registered streams.
-	stream.sendWindow = c.peerInitialStreamWindow
+	stream.send.window = c.peerInitialStreamWindow
 	maxHeaderListSize := c.peerMaxHeaderListSize
 	maxFrameSize := c.peerMaxFrameSize
 	c.mu.Unlock()
 
-	block, err := encodeRequestHeaders(
-		c.encoder,
-		&c.headerBuffer,
-		&c.headerStrings,
+	block, err := c.encodeRequestHeaders(
 		req,
 		maxHeaderListSize,
 		c.config.enableExtendedConnect,
-		&c.headerFields,
 	)
 	if err != nil {
 		// Nothing reached the wire or the encoder, so this is the stream's
@@ -247,7 +243,7 @@ func (c *clientConn) sendData(stream *clientStream, data []byte, endStream bool,
 				c.mu.Unlock()
 				break
 			}
-			amount := nextDataChunk(&c.connFlowState, &stream.streamFlowState, len(data))
+			amount := c.reserveDataChunk(&stream.streamFlowState, len(data))
 			if len(data) != 0 && amount == 0 {
 				c.mu.Unlock()
 				break
@@ -303,7 +299,7 @@ func (c *clientConn) waitForSendWindow(stream *clientStream, data []byte, deadli
 			c.mu.Unlock()
 			return errClientStreamClosed
 		}
-		if len(data) == 0 || c.peerConnectionWindow > 0 && stream.sendWindow > 0 {
+		if len(data) == 0 || c.send.window > 0 && stream.send.window > 0 {
 			c.mu.Unlock()
 			return nil
 		}

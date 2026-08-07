@@ -1,123 +1,14 @@
 package http2
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/valyala/fasthttp"
 	"golang.org/x/net/http2/hpack"
 )
 
 var errInvalidResponseHeaders = errors.New("http2: invalid response headers")
-
-func encodeRequestHeaders(
-	encoder *hpack.Encoder,
-	buffer *bytes.Buffer,
-	stringsCache *headerStringCache,
-	req *fasthttp.Request,
-	maxHeaderListSize uint64,
-	enableExtendedConnect bool,
-	scratch *[]hpack.HeaderField,
-) ([]byte, error) {
-	method := stringsCache.value(req.Header.Method(), false)
-	uri := req.URI()
-	authorityBytes := req.Header.Host()
-	if len(authorityBytes) == 0 {
-		authorityBytes = uri.Host()
-	}
-	authority := stringsCache.value(authorityBytes, false)
-	if authority == "" {
-		return nil, errors.New("http2: request authority is empty")
-	}
-
-	var pseudoFields [5]hpack.HeaderField
-	pseudoCount := 1
-	pseudoFields[0] = hpack.HeaderField{Name: ":method", Value: method}
-	addPseudo := func(name, value string) {
-		pseudoFields[pseudoCount] = hpack.HeaderField{Name: name, Value: value}
-		pseudoCount++
-	}
-
-	connectProtocol := stringsCache.value(req.Header.ConnectProtocol(), false)
-	switch {
-	case connectProtocol != "":
-		if !enableExtendedConnect || method != fasthttp.MethodConnect {
-			return nil, errors.New("http2: invalid extended connect request")
-		}
-		addPseudo(":protocol", connectProtocol)
-		addPseudo(":scheme", stringsCache.value(uri.Scheme(), false))
-		addPseudo(":authority", authority)
-		addPseudo(":path", stringsCache.value(uri.RequestURI(), false))
-	case method == fasthttp.MethodConnect:
-		addPseudo(":authority", authority)
-	default:
-		scheme := stringsCache.value(uri.Scheme(), false)
-		path := stringsCache.value(uri.RequestURI(), false)
-		if path == "" {
-			path = "/"
-		}
-		addPseudo(":scheme", scheme)
-		addPseudo(":authority", authority)
-		addPseudo(":path", path)
-	}
-
-	headerSize := uint64(0)
-	for _, field := range pseudoFields[:pseudoCount] {
-		headerSize += uint64(len(field.Name) + len(field.Value) + 32)
-		if maxHeaderListSize != 0 && headerSize > maxHeaderListSize {
-			return nil, errors.New("http2: request header list exceeds peer limit")
-		}
-	}
-	// Nothing may reach the stateful HPACK encoder until the whole block is
-	// known to fit; scratch carries the resolved fields to the encode pass so
-	// req.Header.All() runs once.
-	fields := (*scratch)[:0]
-	var validateErr error
-	req.Header.All()(func(key, value []byte) bool {
-		name := stringsCache.name(key)
-		switch name {
-		case "host", "connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade":
-			return true
-		case "te":
-			if !strings.EqualFold(strings.TrimSpace(string(value)), "trailers") {
-				validateErr = errors.New("http2: invalid te request header")
-				return false
-			}
-		}
-		fieldSize := uint64(len(name) + len(value) + 32)
-		if maxHeaderListSize != 0 && headerSize+fieldSize > maxHeaderListSize {
-			validateErr = errors.New("http2: request header list exceeds peer limit")
-			return false
-		}
-		headerSize += fieldSize
-		sensitive := isSensitiveHeader(name)
-		fields = append(fields, hpack.HeaderField{
-			Name:      name,
-			Value:     stringsCache.value(value, sensitive),
-			Sensitive: sensitive,
-		})
-		return true
-	})
-	*scratch = fields
-	if validateErr != nil {
-		return nil, validateErr
-	}
-
-	buffer.Reset()
-	for _, field := range pseudoFields[:pseudoCount] {
-		if err := encoder.WriteField(field); err != nil {
-			return nil, err
-		}
-	}
-	for _, field := range fields {
-		if err := encoder.WriteField(field); err != nil {
-			return nil, err
-		}
-	}
-	return buffer.Bytes(), nil
-}
 
 func populateResponse(
 	resp *fasthttp.Response,
@@ -199,31 +90,18 @@ func populateResponseTrailers(resp *fasthttp.Response, fields []hpack.HeaderFiel
 	if err := validateResponseTrailerFields(fields); err != nil {
 		return err
 	}
-	if len(resp.Header.PeekTrailerKeys())+len(fields) <= trailerIndexThreshold {
-		for _, field := range fields {
-			if !hasTrailerKey(resp.Header.PeekTrailerKeys(), field.Name) {
-				if err := resp.Header.AddTrailer(field.Name); err != nil {
-					return err
-				}
-			}
-			resp.Header.Add(field.Name, field.Value)
-		}
-		return nil
-	}
-
-	// Indexed for the same reason as applyRequestTrailers: past the small-
-	// block threshold, a scan per field over the registered list turns
-	// quadratic on peer-controlled input.
-	known := make(map[string]struct{}, len(resp.Header.PeekTrailerKeys())+len(fields))
-	for _, key := range resp.Header.PeekTrailerKeys() {
-		known[strings.ToLower(string(key))] = struct{}{}
-	}
+	known := newTrailerIndex(resp.Header.PeekTrailerKeys(), len(fields))
 	for _, field := range fields {
-		if _, exists := known[field.Name]; !exists {
+		var isNew bool
+		if known != nil {
+			isNew = indexTrailerKey(known, field.Name)
+		} else {
+			isNew = !hasTrailerKey(resp.Header.PeekTrailerKeys(), field.Name)
+		}
+		if isNew {
 			if err := resp.Header.AddTrailer(field.Name); err != nil {
 				return err
 			}
-			known[field.Name] = struct{}{}
 		}
 		resp.Header.Add(field.Name, field.Value)
 	}
@@ -241,10 +119,10 @@ func validateResponseTrailerFields(fields []hpack.HeaderField) error {
 
 func populatePromisedRequest(req *fasthttp.Request, fields []hpack.HeaderField) error {
 	var method, scheme, authority, path string
-	var seenPseudo uint8
+	var seenPseudo pseudoField
 	for _, field := range fields {
 		if field.IsPseudo() {
-			var bit uint8
+			var bit pseudoField
 			switch field.Name {
 			case ":method":
 				bit, method = pseudoMethod, field.Value
@@ -281,22 +159,4 @@ func populatePromisedRequest(req *fasthttp.Request, fields []hpack.HeaderField) 
 	_ = req.URI()
 	req.Header.SetRequestURI(path)
 	return nil
-}
-
-func hasTrailerKey(keys [][]byte, name string) bool {
-	for _, key := range keys {
-		if len(key) == len(name) && bytes.EqualFold(key, []byte(name)) {
-			return true
-		}
-	}
-	return false
-}
-
-func isSensitiveHeader(name string) bool {
-	switch name {
-	case "authorization", "proxy-authorization", "cookie", "set-cookie":
-		return true
-	default:
-		return false
-	}
 }

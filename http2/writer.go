@@ -366,43 +366,8 @@ func (w *asyncFrameWriter) writePending(pending []*frameWriteBuffer) error {
 // write re-arms before touching the connection, and an armed deadline on an
 // idle connection does nothing.
 func (w *asyncFrameWriter) writeAll(data []byte) error {
-	_, err := writeAllDeadline(w.conn, data, w.noProgressTimeout)
+	_, err := writeAllTimeout(w.conn, data, w.noProgressTimeout)
 	return err
-}
-
-// writeAllDeadline writes data fully, re-arming the per-attempt no-progress
-// deadline before each write.
-func writeAllDeadline(conn net.Conn, data []byte, noProgressTimeout time.Duration) (int, error) {
-	written := 0
-	for written < len(data) {
-		if noProgressTimeout > 0 {
-			if err := conn.SetWriteDeadline(time.Now().Add(noProgressTimeout)); err != nil {
-				return written, err
-			}
-		}
-		n, err := conn.Write(data[written:])
-		written += n
-		if err != nil {
-			return written, err
-		}
-		if n == 0 {
-			return written, io.ErrNoProgress
-		}
-	}
-	return written, nil
-}
-
-// directFrameWriter is the synchronous writer for the h2c upgrade response.
-// It exists so a connection carries no async writer, queues, or goroutine
-// until the preface proves the peer actually speaks HTTP/2; half-open
-// upgrades are cheap for a client to create.
-type directFrameWriter struct {
-	conn    net.Conn
-	timeout time.Duration
-}
-
-func (w directFrameWriter) Write(data []byte) (int, error) {
-	return writeAllDeadline(w.conn, data, w.timeout)
 }
 
 func (w *asyncFrameWriter) discardQueued() {
@@ -475,4 +440,34 @@ func sendWriteBarrier(
 	case <-timer.C:
 		return false
 	}
+}
+
+func writeAllTimeout(conn net.Conn, data []byte, noProgressTimeout time.Duration) (int, error) {
+	written := 0
+	for written < len(data) {
+		if noProgressTimeout > 0 {
+			if err := conn.SetWriteDeadline(time.Now().Add(noProgressTimeout)); err != nil {
+				return written, err
+			}
+		}
+		n, err := conn.Write(data[written:])
+		written += n
+		if err != nil {
+			return written, err
+		}
+		if n == 0 {
+			return written, io.ErrNoProgress
+		}
+	}
+	return written, nil
+}
+
+// directFrameWriter writes the h2c upgrade response before any async writer exists.
+type directFrameWriter struct {
+	conn    net.Conn
+	timeout time.Duration
+}
+
+func (w directFrameWriter) Write(data []byte) (int, error) {
+	return writeAllTimeout(w.conn, data, w.timeout)
 }

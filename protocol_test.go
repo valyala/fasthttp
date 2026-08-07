@@ -84,7 +84,7 @@ type testProtocolStream struct {
 	hijackRejected      bool
 }
 
-func (s *testProtocolStream) RejectHijack() {
+func (s *testProtocolStream) HijackRejected() {
 	s.mu.Lock()
 	s.hijackRejected = true
 	s.mu.Unlock()

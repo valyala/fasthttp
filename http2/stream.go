@@ -18,28 +18,6 @@ import (
 
 var errStreamClosed = errors.New("http2: stream closed")
 
-type requestBody struct {
-	mu           sync.Mutex
-	ready        *sync.Cond
-	chunks       []requestBodyChunk
-	chunkHead    int
-	chunkOffset  int
-	buffered     int
-	err          error
-	consume      func(int)
-	eofCommit    func() error
-	eofCommitted bool
-	isClosed     bool
-}
-
-type requestBodyChunk struct {
-	data       []byte
-	release    func([]byte)
-	dataBuffer *incomingDataBuffer
-}
-
-const maxRequestBodyChunks = 128
-
 type responseBody struct {
 	mu           sync.Mutex
 	ready        *sync.Cond
@@ -148,6 +126,28 @@ func (b *responseBody) markDoneLocked() bool {
 	b.isDone = true
 	return true
 }
+
+type requestBody struct {
+	mu           sync.Mutex
+	ready        *sync.Cond
+	chunks       []requestBodyChunk
+	chunkHead    int
+	chunkOffset  int
+	buffered     int
+	err          error
+	consume      func(int)
+	eofCommit    func() error
+	eofCommitted bool
+	isClosed     bool
+}
+
+type requestBodyChunk struct {
+	data       []byte
+	release    func([]byte)
+	dataBuffer *incomingDataBuffer
+}
+
+const maxRequestBodyChunks = 128
 
 func newRequestBody(consume func(int)) *requestBody {
 	body := &requestBody{consume: consume}
@@ -321,6 +321,16 @@ func (b *requestBody) discardWithError(err error) {
 	b.mu.Unlock()
 }
 
+func releaseRequestBodyChunk(chunk *requestBodyChunk) {
+	if chunk.dataBuffer != nil {
+		releaseIncomingData(chunk.dataBuffer)
+		return
+	}
+	if chunk.release != nil {
+		chunk.release(chunk.data)
+	}
+}
+
 type serverStream struct {
 	streamFlowState
 
@@ -389,8 +399,8 @@ func newServerStream(conn *serverConn, id uint32) *serverStream {
 		id:   id,
 		conn: conn,
 		streamFlowState: streamFlowState{
-			sendWindow: conn.peerInitialStreamWindow,
-			recvWindow: int64(conn.config.streamWindowSize),
+			send: sendWindow{window: conn.peerInitialStreamWindow},
+			recv: recvWindow{window: int64(conn.config.streamWindowSize)},
 		},
 		expectedBody:     -1,
 		expectedResponse: -1,
@@ -403,17 +413,15 @@ func releaseServerStream(stream *serverStream) {
 	serverStreamPool.Put(stream)
 }
 
-// RejectHijack records a handler's hijack attempt so the response can explain
+// HijackRejected records a handler's hijack attempt so the response can explain
 // that multiplexed protocols don't support it.
-func (s *serverStream) RejectHijack() {
+func (s *serverStream) HijackRejected() {
 	s.hijackRejected = true
 }
 
 func (s *serverStream) Deadline() (time.Time, bool) {
-	// Server.ReadTimeout bounds receipt of the request body; it is not an
-	// application deadline. RequestCtx promises that successive Deadline calls
-	// return the same result, so exposing and later clearing that transport
-	// deadline would violate context.Context and race with streaming handlers.
+	// Server.ReadTimeout is a transport deadline, and RequestCtx promises
+	// successive Deadline calls agree, so it must not be exposed here.
 	return time.Time{}, false
 }
 
@@ -546,10 +554,9 @@ func (s *serverStream) AcceptStream(handler fasthttp.StreamHandler) error {
 	return nil
 }
 
-// streamConnBase carries the deadline and shutdown state shared by the server
-// and client StreamConn implementations, and the physical connection their
-// address methods report.
-type streamConnBase struct {
+// streamConnState carries the deadline and shutdown state shared by the server
+// and client StreamConn implementations.
+type streamConnState struct {
 	netConn net.Conn
 
 	writeMu       sync.Mutex
@@ -561,15 +568,15 @@ type streamConnBase struct {
 	writeClosed   bool
 }
 
-func (c *streamConnBase) LocalAddr() net.Addr {
+func (c *streamConnState) LocalAddr() net.Addr {
 	return c.netConn.LocalAddr()
 }
 
-func (c *streamConnBase) RemoteAddr() net.Addr {
+func (c *streamConnState) RemoteAddr() net.Addr {
 	return c.netConn.RemoteAddr()
 }
 
-func (c *streamConnBase) SetDeadline(deadline time.Time) error {
+func (c *streamConnState) SetDeadline(deadline time.Time) error {
 	c.mu.Lock()
 	c.readDeadline = deadline
 	c.writeDeadline = deadline
@@ -577,14 +584,14 @@ func (c *streamConnBase) SetDeadline(deadline time.Time) error {
 	return nil
 }
 
-func (c *streamConnBase) SetReadDeadline(deadline time.Time) error {
+func (c *streamConnState) SetReadDeadline(deadline time.Time) error {
 	c.mu.Lock()
 	c.readDeadline = deadline
 	c.mu.Unlock()
 	return nil
 }
 
-func (c *streamConnBase) SetWriteDeadline(deadline time.Time) error {
+func (c *streamConnState) SetWriteDeadline(deadline time.Time) error {
 	c.mu.Lock()
 	c.writeDeadline = deadline
 	c.mu.Unlock()
@@ -592,7 +599,7 @@ func (c *streamConnBase) SetWriteDeadline(deadline time.Time) error {
 }
 
 type streamConn struct {
-	streamConnBase
+	streamConnState
 
 	stream *serverStream
 	read   io.Reader
@@ -612,7 +619,7 @@ func (c *streamConn) Read(p []byte) (int, error) {
 	conn := c.stream.conn
 	streamID := c.stream.id
 	return readWithStreamDeadline(c.read, p, deadline, func() {
-		conn.cancelStream(streamID, errStreamDeadline)
+		conn.cancelStream(streamID, errStreamTimeout)
 	})
 }
 
@@ -631,7 +638,7 @@ func (c *streamConn) Write(p []byte) (int, error) {
 		return 0, net.ErrClosed
 	}
 	if !deadline.IsZero() && time.Until(deadline) <= 0 {
-		return 0, errStreamDeadline
+		return 0, errStreamTimeout
 	}
 
 	write := &streamWrite{result: make(chan streamWriteResult, 1)}
@@ -654,22 +661,20 @@ func (c *streamConn) Write(p []byte) (int, error) {
 	case <-c.stream.Done():
 		return 0, c.stream.cause()
 	case <-expired:
-		return 0, errStreamDeadline
+		return 0, errStreamTimeout
 	}
 	select {
 	case result := <-write.result:
 		return result.n, result.err
 	case <-expired:
-		// Once accepted by the connection owner, a write cannot simply be
-		// abandoned: its bytes might be flow-control blocked and delivered
-		// later. Ask the same owner to cancel this exact write, then wait for
-		// its authoritative partial-byte count before returning.
+		// An accepted write cannot be abandoned: its bytes may still reach the
+		// peer, so only the owner can report the authoritative byte count.
 		select {
 		case c.stream.conn.commands <- serverCommand{
 			kind:     serverCommandCancelWrite,
 			streamID: c.stream.id,
 			write:    write,
-			err:      errStreamDeadline,
+			err:      errStreamTimeout,
 		}:
 		case <-c.stream.conn.ctx.Done():
 		}
@@ -754,13 +759,11 @@ func (c *streamConn) CloseWrite() error {
 }
 
 // readWithStreamDeadline blocks in one read, cancelling the stream at deadline
-// to unblock it. A read woken that way reports a timeout rather than the
-// closed-stream error the cancellation itself produced. The read and the
-// deadline race to claim the outcome, so a read that already holds data leaves
-// the stream alive instead of reporting success on a cancelled one.
+// to unblock it. Read and deadline race to claim the outcome, so a read that
+// already holds data reports the timeout rather than success on a dead stream.
 func readWithStreamDeadline(read io.Reader, p []byte, deadline time.Time, cancel func()) (int, error) {
 	if time.Until(deadline) <= 0 {
-		return 0, errStreamDeadline
+		return 0, errStreamTimeout
 	}
 	var claimed atomic.Bool
 	timer := time.AfterFunc(time.Until(deadline), func() {
@@ -771,13 +774,13 @@ func readWithStreamDeadline(read io.Reader, p []byte, deadline time.Time, cancel
 	n, err := read.Read(p)
 	timer.Stop()
 	if !claimed.CompareAndSwap(false, true) {
-		return n, errStreamDeadline
+		return n, errStreamTimeout
 	}
 	return n, err
 }
 
 type clientStreamConn struct {
-	streamConnBase
+	streamConnState
 
 	stream *clientStream
 	read   *responseBody
@@ -797,7 +800,7 @@ func (c *clientStreamConn) Read(p []byte) (int, error) {
 	conn := c.stream.conn
 	streamID := c.stream.id
 	return readWithStreamDeadline(c.read, p, deadline, func() {
-		conn.resetStream(streamID, xhttp2.ErrCodeCancel, errStreamDeadline, false)
+		conn.resetStream(streamID, xhttp2.ErrCodeCancel, errStreamTimeout, false)
 	})
 }
 
@@ -813,8 +816,8 @@ func (c *clientStreamConn) Write(p []byte) (int, error) {
 	c.mu.Unlock()
 	if err := c.stream.conn.sendData(c.stream, p, false, deadline); err != nil {
 		if errors.Is(err, fasthttp.ErrTimeout) {
-			c.stream.conn.resetStream(c.stream.id, xhttp2.ErrCodeCancel, errStreamDeadline, false)
-			return 0, errStreamDeadline
+			c.stream.conn.resetStream(c.stream.id, xhttp2.ErrCodeCancel, errStreamTimeout, false)
+			return 0, errStreamTimeout
 		}
 		return 0, err
 	}
@@ -876,17 +879,7 @@ var (
 	_ fasthttp.InformationalResponseWriter = (*serverStream)(nil)
 	_ fasthttp.Pusher                      = (*serverStream)(nil)
 	_ fasthttp.StreamAccepter              = (*serverStream)(nil)
-	_ fasthttp.HijackRejecter              = (*serverStream)(nil)
+	_ fasthttp.HijackRejectionNotifier     = (*serverStream)(nil)
 	_ fasthttp.StreamConn                  = (*streamConn)(nil)
 	_ fasthttp.StreamConn                  = (*clientStreamConn)(nil)
 )
-
-func releaseRequestBodyChunk(chunk *requestBodyChunk) {
-	if chunk.dataBuffer != nil {
-		releaseIncomingData(chunk.dataBuffer)
-		return
-	}
-	if chunk.release != nil {
-		chunk.release(chunk.data)
-	}
-}

@@ -104,7 +104,7 @@ See `examples/grpcserver`.
 ## Limits
 
 Bounded: concurrent streams, event/command queues, frame size, HPACK tables,
-header list size, cached header strings, push depth, pending priority
+header list size, cached header strings, push depth (fixed at one level), pending priority
 updates, closed-stream tombstones. More than 1000 peer or peer-induced
 RST_STREAM/s, or a CONTINUATION run longer than 64 frames, closes the
 connection with `ENHANCE_YOUR_CALM`.

@@ -547,7 +547,7 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
-	hc, err := c.selectHostClient(req)
+	hc, err := c.hostClientForRequest(req)
 	if err != nil {
 		return err
 	}
@@ -557,7 +557,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	return hc.Do(req, resp)
 }
 
-func (c *Client) selectHostClient(req *Request) (*HostClient, error) {
+func (c *Client) hostClientForRequest(req *Request) (*HostClient, error) {
 	uri := req.URI()
 	if uri == nil {
 		return nil, ErrorInvalidURI
@@ -569,10 +569,8 @@ func (c *Client) selectHostClient(req *Request) (*HostClient, error) {
 		return nil, fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
 	}
 
-	isTLS := false
-	if uri.isHTTPS() {
-		isTLS = true
-	} else if !uri.isHTTP() {
+	isTLS := uri.isHTTPS()
+	if !isTLS && !uri.isHTTP() {
 		return nil, fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
 	}
 
@@ -2237,30 +2235,29 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 		if q := c.connsWait; q != nil {
 			for q.len() > 0 {
 				w := q.popFront()
-				if !w.waiting() {
-					continue
-				}
-				if w.slotOnly {
-					// The waiter inherits cc's slot and dials its own connection;
-					// the idle HTTP/1 connection retires.
-					if w.tryDeliverSlot() {
-						delivered = true
-						retire = true
+				if w.waiting() {
+					if w.slotOnly {
+						// The waiter inherits cc's slot and dials its own
+						// connection; the idle HTTP/1 connection retires.
+						if w.tryDeliverSlot() {
+							delivered = true
+							retire = true
+							break
+						}
+						continue
+					}
+					delivered = w.tryDeliver(cc, nil)
+					// This is the last resort to hand over conCount sema.
+					// We must ensure that there are no valid waiters in connsWait
+					// when we exit this loop.
+					//
+					// We did not apply the same looping pattern in the decConnsCount
+					// method because it needs to create a new time-spent connection,
+					// and the decConnsCount call chain will inevitably reach this point.
+					// When MaxConnWaitTimeout>0.
+					if delivered {
 						break
 					}
-					continue
-				}
-				delivered = w.tryDeliver(cc, nil)
-				// This is the last resort to hand over conCount sema.
-				// We must ensure that there are no valid waiters in connsWait
-				// when we exit this loop.
-				//
-				// We did not apply the same looping pattern in the decConnsCount
-				// method because it needs to create a new time-spent connection,
-				// and the decConnsCount call chain will inevitably reach this point.
-				// When MaxConnWaitTimeout>0.
-				if delivered {
-					break
 				}
 			}
 		}
@@ -3586,22 +3583,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	if req.timeout > 0 {
 		deadline = time.Now().Add(req.timeout)
 	}
-	return t.roundTripWithDeadline(hc, req, resp, deadline, req.timeout)
-}
-
-// roundTripWithDeadline runs one HTTP/1 round trip. acquireTimeout bounds only
-// the wait for a connection.
-func (t *transport) roundTripWithDeadline(
-	hc *HostClient,
-	req *Request,
-	resp *Response,
-	deadline time.Time,
-	acquireTimeout time.Duration,
-) (retry bool, err error) {
-	if !deadline.IsZero() && acquireTimeout <= 0 {
-		return false, ErrTimeout
-	}
-	cc, err := hc.AcquireConn(acquireTimeout, req.ConnectionClose())
+	cc, err := hc.AcquireConn(req.timeout, req.ConnectionClose())
 	if err != nil {
 		return false, err
 	}

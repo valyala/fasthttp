@@ -136,11 +136,10 @@ func FuzzFrameSequence(f *testing.F) {
 			server:              &fasthttp.Server{},
 			config:              serverConfig{maxConcurrentStreams: 8, maxRapidResetsPerSecond: 1000},
 			framer:              xhttp2.NewFramer(io.Discard, nil),
-			encoder:             hpack.NewEncoder(io.Discard),
 			streams:             make(map[uint32]*serverStream),
 			priorityUpdates:     make(map[uint32]priority),
 			closedClientStreams: make(map[uint32]bool),
-			connFlowState:       connFlowState{peerConnectionWindow: 65535, peerInitialStreamWindow: 65535, receiveConnectionWindow: defaultConnectionWindowSize},
+			connFlowState:       connFlowState{send: sendWindow{window: 65535}, peerInitialStreamWindow: 65535, recv: recvWindow{window: defaultConnectionWindowSize}},
 		}
 		for range 32 {
 			frame, err := framer.ReadFrame()
@@ -158,8 +157,8 @@ func FuzzFrameSequence(f *testing.F) {
 					return
 				}
 			}
-			if conn.peerConnectionWindow < 0 || conn.peerConnectionWindow > 1<<31-1 {
-				t.Fatalf("peer connection window = %d", conn.peerConnectionWindow)
+			if conn.send.window < 0 || conn.send.window > 1<<31-1 {
+				t.Fatalf("peer connection window = %d", conn.send.window)
 			}
 			if len(conn.priorityUpdates) > int(conn.config.maxConcurrentStreams)*4 {
 				t.Fatalf("pending priority updates = %d", len(conn.priorityUpdates))

@@ -2,12 +2,9 @@ package http2
 
 import "time"
 
-// streamWorker runs one stream handler at a time. A stream needs its own
-// goroutine so a slow handler cannot stall frame processing; workers are parked
-// between streams rather than created per request.
-//
-// The free list needs no lock: only the connection owner touches it, both when
-// taking a worker and when the handler's completion command comes back.
+// streamWorker runs one stream handler at a time, parked between streams so a
+// slow handler cannot stall frame processing. The free list needs no lock:
+// only the connection owner touches it.
 type streamWorker struct {
 	conn        *serverConn
 	stream      chan *serverStream

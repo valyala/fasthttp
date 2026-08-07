@@ -11,6 +11,13 @@ import (
 	"golang.org/x/net/http2/hpack"
 )
 
+var (
+	errDataOnInvalidStream          = errors.New("http2: data on an invalid response stream")
+	errResponseStreamWindowExceeded = errors.New("http2: response stream flow-control window exceeded")
+	errResponseBodyNotPermitted     = errors.New("http2: response body isn't permitted")
+	errResponseBodyLengthMismatch   = errors.New("http2: response body exceeds content-length")
+)
+
 type decodedClientHeaders struct {
 	streamID  uint32
 	endStream bool
@@ -164,8 +171,8 @@ func (c *clientConn) processSettings(frame *xhttp2.SettingsFrame) error {
 		case xhttp2.SettingInitialWindowSize:
 			delta := int64(setting.Val) - c.peerInitialStreamWindow
 			for _, stream := range c.streams {
-				stream.sendWindow += delta
-				if stream.sendWindow > math.MaxInt32 {
+				stream.send.window += delta
+				if stream.send.window > math.MaxInt32 {
 					c.mu.Unlock()
 					return errors.New("http2: stream send window overflow")
 				}
@@ -271,8 +278,7 @@ func (c *clientConn) processResponseHeaders(frame *decodedClientHeaders) error {
 			}
 		} else {
 			// A streaming body applies trailers only when its reader drains,
-			// which is too late to reject the frame, so validate on a scratch
-			// response now and copy the fields the deferred commit needs.
+			// too late to reject the frame.
 			var validationResponse fasthttp.Response
 			if err := populateResponseTrailers(&validationResponse, frame.fields); err != nil {
 				return reject(err)
@@ -357,9 +363,9 @@ func (c *clientConn) processResponseHeaders(frame *decodedClientHeaders) error {
 				stream.timer = nil
 			}
 			streamConn := &clientStreamConn{
-				streamConnBase: streamConnBase{netConn: c.lease.Conn()},
-				stream:         stream,
-				read:           stream.responseBody,
+				streamConnState: streamConnState{netConn: c.lease.Conn()},
+				stream:          stream,
+				read:            stream.responseBody,
 			}
 			c.sendResultLocked(stream, clientResult{streamConn: streamConn})
 		}
@@ -418,7 +424,7 @@ func (c *clientConn) processResponseData(frame *xhttp2.DataFrame) error {
 			c.mu.Unlock()
 			return errors.New("http2: data on idle response stream")
 		}
-		if !c.debitReceiveWindow(flowLength) {
+		if !c.recv.debit(flowLength) {
 			c.mu.Unlock()
 			return errors.New("http2: response connection flow-control window exceeded")
 		}
@@ -428,46 +434,34 @@ func (c *clientConn) processResponseData(frame *xhttp2.DataFrame) error {
 			return c.framer.WriteRSTStream(frame.StreamID, xhttp2.ErrCodeStreamClosed)
 		})
 	}
-	if !c.debitReceiveWindow(flowLength) {
+	if !c.recv.debit(flowLength) {
 		c.mu.Unlock()
 		return errors.New("http2: response connection flow-control window exceeded")
 	}
-	if !stream.responseHeader || stream.remoteClosed {
+	// rejectData returns the frame's flow to the connection and resets the
+	// stream; it takes over the lock the caller still holds.
+	rejectData := func(code xhttp2.ErrCode, cause error) error {
 		c.mu.Unlock()
 		c.restoreConnectionWindow(flowLength)
-		c.resetStream(frame.StreamID, xhttp2.ErrCodeProtocol, errors.New("http2: data on an invalid response stream"), false)
+		c.resetStream(frame.StreamID, code, cause, false)
 		return nil
 	}
-	if !stream.debitReceiveWindow(flowLength) {
-		c.mu.Unlock()
-		c.restoreConnectionWindow(flowLength)
-		c.resetStream(
-			frame.StreamID,
-			xhttp2.ErrCodeFlowControl,
-			errors.New("http2: response stream flow-control window exceeded"),
-			false,
-		)
-		return nil
+	if !stream.responseHeader || stream.remoteClosed {
+		return rejectData(xhttp2.ErrCodeProtocol, errDataOnInvalidStream)
+	}
+	if !stream.recv.debit(flowLength) {
+		return rejectData(xhttp2.ErrCodeFlowControl, errResponseStreamWindowExceeded)
 	}
 	if responseHasNoBody(stream) && len(data) != 0 {
-		c.mu.Unlock()
-		c.restoreConnectionWindow(flowLength)
-		c.resetStream(frame.StreamID, xhttp2.ErrCodeProtocol, errors.New("http2: response body isn't permitted"), false)
-		return nil
+		return rejectData(xhttp2.ErrCodeProtocol, errResponseBodyNotPermitted)
 	}
 	stream.responseBytes += int64(len(data))
 	if stream.expectedResponseBytes >= 0 && stream.responseBytes > stream.expectedResponseBytes {
-		c.mu.Unlock()
-		c.restoreConnectionWindow(flowLength)
-		c.resetStream(frame.StreamID, xhttp2.ErrCodeProtocol, errors.New("http2: response body exceeds content-length"), false)
-		return nil
+		return rejectData(xhttp2.ErrCodeProtocol, errResponseBodyLengthMismatch)
 	}
 	if !stream.discardResponseBody && stream.maxResponseBodySize > 0 &&
 		stream.responseBytes > int64(stream.maxResponseBodySize) {
-		c.mu.Unlock()
-		c.restoreConnectionWindow(flowLength)
-		c.resetStream(frame.StreamID, xhttp2.ErrCodeCancel, fasthttp.ErrBodyTooLarge, false)
-		return nil
+		return rejectData(xhttp2.ErrCodeCancel, fasthttp.ErrBodyTooLarge)
 	}
 	body := stream.responseBody
 	discardBody := stream.discardResponseBody
@@ -511,7 +505,7 @@ func (c *clientConn) restoreConnectionWindow(amount int64) {
 		return
 	}
 	c.mu.Lock()
-	c.restoreReceiveWindow(amount)
+	c.recv.restore(amount)
 	c.mu.Unlock()
 	_ = c.writeControl(func() error {
 		return c.framer.WriteWindowUpdate(0, uint32(amount))
@@ -543,10 +537,10 @@ func (c *clientConn) endResponseLocked(stream *clientStream, responseErr error) 
 func (c *clientConn) consumeResponseBytes(streamID uint32, amount int) {
 	c.mu.Lock()
 	stream := c.streams[streamID]
-	connectionIncrement := c.consumeReceived(int64(amount), int64(c.config.connectionWindowSize))
+	connectionIncrement := c.recv.consume(int64(amount), int64(c.config.connectionWindowSize))
 	streamIncrement := int64(0)
 	if stream != nil {
-		streamIncrement = stream.consumeReceived(int64(amount), int64(c.config.streamWindowSize))
+		streamIncrement = stream.recv.consume(int64(amount), int64(c.config.streamWindowSize))
 	}
 	c.mu.Unlock()
 	if connectionIncrement == 0 && streamIncrement == 0 {
@@ -595,10 +589,10 @@ func (c *clientConn) processWindowUpdate(frame *xhttp2.WindowUpdateFrame) error 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if frame.StreamID == 0 {
-		if !c.creditSendWindow(frame.Increment) {
+		if !c.send.credit(frame.Increment) {
 			return fmt.Errorf(
 				"http2: client connection send window overflow: current=%d increment=%d",
-				c.peerConnectionWindow,
+				c.send.window,
 				frame.Increment,
 			)
 		}
@@ -606,7 +600,7 @@ func (c *clientConn) processWindowUpdate(frame *xhttp2.WindowUpdateFrame) error 
 		return nil
 	}
 	if stream := c.streams[frame.StreamID]; stream != nil {
-		if !stream.creditSendWindow(frame.Increment) {
+		if !stream.send.credit(frame.Increment) {
 			return errors.New("http2: stream send window overflow")
 		}
 		c.signalLocked()
@@ -762,8 +756,8 @@ func (c *clientConn) finishPushPromise(
 		localClosed:    true,
 		bodyDone:       true,
 		streamFlowState: streamFlowState{
-			sendWindow: c.peerInitialStreamWindow,
-			recvWindow: int64(c.config.streamWindowSize),
+			send: sendWindow{window: c.peerInitialStreamWindow},
+			recv: recvWindow{window: int64(c.config.streamWindowSize)},
 		},
 		expectedResponseBytes: -1,
 		maxResponseBodySize:   c.hc.MaxResponseBodySize,
