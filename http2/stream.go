@@ -876,6 +876,7 @@ var (
 	_ fasthttp.InformationalResponseWriter = (*serverStream)(nil)
 	_ fasthttp.Pusher                      = (*serverStream)(nil)
 	_ fasthttp.StreamAccepter              = (*serverStream)(nil)
+	_ fasthttp.HijackRejecter              = (*serverStream)(nil)
 	_ fasthttp.StreamConn                  = (*streamConn)(nil)
 	_ fasthttp.StreamConn                  = (*clientStreamConn)(nil)
 )

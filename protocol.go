@@ -95,11 +95,20 @@ type StreamAccepter interface {
 	AcceptStream(handler StreamHandler) error
 }
 
+// HijackRejecter is implemented by protocol streams that want to know when a
+// handler attempted connection hijacking, which multiplexed protocols cannot
+// support. RequestCtx.Hijack reports the rejection through it because that
+// legacy API cannot return an error; TryHijack returns ErrHijackNotSupported
+// directly.
+type HijackRejecter interface {
+	RejectHijack()
+}
+
 // ProtocolStream supplies request-scoped cancellation and optional protocol
 // operations to RequestCtx.
 //
 // Implementations may additionally implement InformationalResponseWriter,
-// Pusher, and StreamAccepter.
+// Pusher, StreamAccepter, and HijackRejecter.
 type ProtocolStream interface {
 	context.Context
 }
