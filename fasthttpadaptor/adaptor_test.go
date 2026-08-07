@@ -717,6 +717,8 @@ func TestWriterWriteRechecksStreamingReadyAfterLock(t *testing.T) {
 	}()
 
 	time.Sleep(10 * time.Millisecond)
+	// Flush builds the pipe before it makes streaming ready; do the same here.
+	w.ensurePipe()
 	close(w.streamReady)
 
 	readCh := make(chan []byte, 1)

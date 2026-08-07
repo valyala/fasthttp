@@ -1589,6 +1589,11 @@ func (h *ResponseHeader) AddBytesV(key string, value []byte) {
 // it will be sent after the chunked response body.
 func (h *ResponseHeader) AddBytesKV(key, value []byte) {
 	h.bufK, h.bufV = initHeaderKV(h.bufK, h.bufV, b2s(key), b2s(value), h.disableNormalizing)
+	// Adding to Trailer extends the announced set; only Set replaces it.
+	if caseInsensitiveCompare(strTrailer, h.bufK) {
+		_ = h.AddTrailerBytes(h.bufV)
+		return
+	}
 	if h.setSpecialHeader(h.bufK, h.bufV) {
 		return
 	}
@@ -1820,6 +1825,11 @@ func (h *RequestHeader) AddBytesV(key string, value []byte) {
 // it will be sent after the chunked request body.
 func (h *RequestHeader) AddBytesKV(key, value []byte) {
 	h.bufK, h.bufV = initHeaderKV(h.bufK, h.bufV, b2s(key), b2s(value), h.disableNormalizing)
+	// Adding to Trailer extends the announced set; only Set replaces it.
+	if caseInsensitiveCompare(strTrailer, h.bufK) {
+		_ = h.AddTrailerBytes(h.bufV)
+		return
+	}
 	if h.setSpecialHeader(h.bufK, h.bufV) {
 		return
 	}
