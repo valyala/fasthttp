@@ -742,16 +742,15 @@ func BenchmarkRepeatedInitialWindowSettings(b *testing.B) {
 	for i := range settings {
 		settings[i] = xhttp2.Setting{ID: xhttp2.SettingInitialWindowSize, Val: 65535}
 	}
-	var headerBlock bytes.Buffer
 	conn := &serverConn{
 		config:        serverConfig{maxEncoderTableSize: defaultHeaderTableSize},
 		streams:       make(map[uint32]*serverStream, 250),
 		connFlowState: connFlowState{peerInitialStreamWindow: 65535},
-		encoder:       hpack.NewEncoder(&headerBlock),
 	}
 	for id := uint32(1); id <= 499; id += 2 {
-		conn.streams[id] = &serverStream{id: id, streamFlowState: streamFlowState{sendWindow: 65535}}
+		conn.streams[id] = &serverStream{id: id, streamFlowState: streamFlowState{send: sendWindow{window: 65535}}}
 	}
+	conn.headerEncoder.init(defaultHeaderTableSize)
 	b.ReportAllocs()
 	for b.Loop() {
 		if err := conn.applySettings(settings); err != nil {

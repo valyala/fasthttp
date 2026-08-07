@@ -2,7 +2,6 @@ package http2
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/valyala/fasthttp"
 	xhttp2 "golang.org/x/net/http2"
-	"golang.org/x/net/http2/hpack"
 )
 
 var (
@@ -170,10 +168,7 @@ type clientConn struct {
 	writeSem       chan struct{}
 	bufferedWriter flushWriter
 	writer         *asyncFrameWriter
-	encoder        *hpack.Encoder
-	headerBuffer   bytes.Buffer
-	headerStrings  headerStringCache
-	headerFields   []hpack.HeaderField
+	headerEncoder
 
 	mu                sync.Mutex
 	streams           map[uint32]*clientStream
@@ -233,8 +228,7 @@ func newClientConn(pool *clientPool, lease *fasthttp.ProtocolClientConn) (*clien
 	conn.framer.SetReuseFrames()
 	conn.headerDecoder = newHeaderCodec(pool.config.maxDecoderTableSize, pool.config.maxHeaderListSize)
 	conn.framer.SetMaxReadFrameSize(pool.config.maxReadFrameSize)
-	conn.encoder = hpack.NewEncoder(&conn.headerBuffer)
-	conn.encoder.SetMaxDynamicTableSizeLimit(pool.config.maxEncoderTableSize)
+	conn.headerEncoder.init(pool.config.maxEncoderTableSize)
 	if err := conn.writePrefaceAndSettings(); err != nil {
 		return nil, err
 	}
@@ -310,7 +304,7 @@ func (c *clientConn) reserveStream(
 		isHead:                isHead,
 		isConnect:             req.Header.IsConnect(),
 		isStreaming:           openStream || resp.StreamBody && !discardResponseBody,
-		streamFlowState:       streamFlowState{recvWindow: int64(c.config.streamWindowSize)},
+		streamFlowState:       streamFlowState{recv: recvWindow{window: int64(c.config.streamWindowSize)}},
 		expectedResponseBytes: -1,
 		maxResponseBodySize:   c.hc.MaxResponseBodySize,
 		discardResponseBody:   discardResponseBody,
@@ -325,9 +319,8 @@ func (c *clientConn) reserveStream(
 		stream.parentRequest = parentRequest
 	}
 	c.activeStreams++
-	// Buffered exchanges are covered end-to-end by waitResult's pooled timer;
-	// only phases that outlive it (streaming bodies, tunnels, a caller-owned
-	// request-body Read) need a standing timer.
+	// waitResult's pooled timer already covers buffered exchanges; only phases
+	// that outlive it need a standing timer.
 	if !deadline.IsZero() && (stream.isStreaming || req.IsBodyStream()) {
 		// No ID yet, so the timer holds the pointer; maybeFinalizeStreamLocked
 		// keeps a late callback off a pooled stream.

@@ -2,109 +2,91 @@ package http2
 
 import "math"
 
-// connFlowState is the flow-control and peer-settings accounting shared by
-// the server and client connections. Methods are pure state transitions: the
-// owner provides its own synchronisation and writes any resulting frames.
+// recvWindow is one direction's receive accounting: the credit the peer may
+// still spend, and the consumed bytes not yet announced back to it.
+type recvWindow struct {
+	window  int64
+	pending int64
+}
+
+// debit reports whether the peer stayed inside the window.
+func (w *recvWindow) debit(length int64) bool {
+	w.window -= length
+	return w.window >= 0
+}
+
+func (w *recvWindow) restore(amount int64) {
+	w.window += amount
+}
+
+// consume returns the WINDOW_UPDATE increment the owner must send, or 0.
+func (w *recvWindow) consume(amount, windowSize int64) int64 {
+	w.pending += amount
+	if w.pending < windowSize/2 {
+		return 0
+	}
+	increment := w.pending
+	w.pending = 0
+	w.window += increment
+	return increment
+}
+
+// sendWindow is the credit this side may still spend.
+type sendWindow struct {
+	window int64
+}
+
+// credit rejects an increment that overflows RFC 9113's 2^31-1 bound.
+func (w *sendWindow) credit(increment uint32) bool {
+	if w.window+int64(increment) > math.MaxInt32 {
+		return false
+	}
+	w.window += int64(increment)
+	return true
+}
+
+// connFlowState is the flow-control and peer-settings accounting shared by the
+// server and client connections. The owner synchronises it and writes frames.
 type connFlowState struct {
+	recv recvWindow
+	send sendWindow
+
 	peerInitialStreamWindow  int64
-	peerConnectionWindow     int64
 	peerMaxFrameSize         int
 	peerMaxHeaderListSize    uint64
 	peerMaxConcurrentStreams uint32
-	receiveConnectionWindow  int64
-	pendingConnectionUpdate  int64
 	receivedSettings         bool
 }
 
-// newConnFlowState seeds the RFC 9113 defaults that apply to a peer before
-// its SETTINGS arrive, and this side's advertised connection window.
+// newConnFlowState seeds the RFC 9113 defaults that apply before the peer's
+// SETTINGS arrive.
 func newConnFlowState(receiveWindow int64) connFlowState {
 	return connFlowState{
+		recv:                     recvWindow{window: receiveWindow},
+		send:                     sendWindow{window: 65535},
 		peerInitialStreamWindow:  65535,
-		peerConnectionWindow:     65535,
 		peerMaxFrameSize:         defaultMaxFrameSize,
 		peerMaxHeaderListSize:    math.MaxUint32,
 		peerMaxConcurrentStreams: math.MaxUint32,
-		receiveConnectionWindow:  receiveWindow,
 	}
 }
 
-// debitReceiveWindow charges an incoming DATA frame against the connection
-// receive window and reports whether the peer stayed within it.
-func (f *connFlowState) debitReceiveWindow(flowLength int64) bool {
-	f.receiveConnectionWindow -= flowLength
-	return f.receiveConnectionWindow >= 0
-}
-
-func (f *connFlowState) restoreReceiveWindow(amount int64) {
-	f.receiveConnectionWindow += amount
-}
-
-// consumeReceived accumulates consumed bytes and, once half the configured
-// window is pending, refills the receive window and returns the increment the
-// owner must announce with a connection-level WINDOW_UPDATE.
-func (f *connFlowState) consumeReceived(amount, windowSize int64) int64 {
-	f.pendingConnectionUpdate += amount
-	if f.pendingConnectionUpdate < windowSize/2 {
+// reserveDataChunk debits both send windows for the amount it returns. Zero
+// with pending data means flow control blocks the stream.
+func (f *connFlowState) reserveDataChunk(stream *streamFlowState, dataLen int) int {
+	blocked := dataLen == 0 || f.send.window <= 0 || stream.send.window <= 0
+	if blocked {
 		return 0
 	}
-	increment := f.pendingConnectionUpdate
-	f.pendingConnectionUpdate = 0
-	f.receiveConnectionWindow += increment
-	return increment
-}
-
-// creditSendWindow applies a peer WINDOW_UPDATE and reports whether the send
-// window stayed within RFC 9113's 2^31-1 bound.
-func (f *connFlowState) creditSendWindow(increment uint32) bool {
-	if f.peerConnectionWindow+int64(increment) > math.MaxInt32 {
-		return false
-	}
-	f.peerConnectionWindow += int64(increment)
-	return true
-}
-
-// streamFlowState is the per-stream window accounting shared by server and
-// client streams, under the owner's synchronisation like connFlowState.
-type streamFlowState struct {
-	sendWindow          int64
-	recvWindow          int64
-	pendingWindowUpdate int64
-}
-
-func (s *streamFlowState) debitReceiveWindow(flowLength int64) bool {
-	s.recvWindow -= flowLength
-	return s.recvWindow >= 0
-}
-
-func (s *streamFlowState) consumeReceived(amount, windowSize int64) int64 {
-	s.pendingWindowUpdate += amount
-	if s.pendingWindowUpdate < windowSize/2 {
-		return 0
-	}
-	increment := s.pendingWindowUpdate
-	s.pendingWindowUpdate = 0
-	s.recvWindow += increment
-	return increment
-}
-
-func (s *streamFlowState) creditSendWindow(increment uint32) bool {
-	if s.sendWindow+int64(increment) > math.MaxInt32 {
-		return false
-	}
-	s.sendWindow += int64(increment)
-	return true
-}
-
-// nextDataChunk sizes the next DATA frame against the peer's frame limit and
-// both send windows, debiting them for the returned amount. Zero with pending
-// data means flow control blocks the stream right now.
-func nextDataChunk(conn *connFlowState, stream *streamFlowState, dataLen int) int {
-	if dataLen == 0 || conn.peerConnectionWindow <= 0 || stream.sendWindow <= 0 {
-		return 0
-	}
-	amount := min(dataLen, conn.peerMaxFrameSize, int(conn.peerConnectionWindow), int(stream.sendWindow))
-	conn.peerConnectionWindow -= int64(amount)
-	stream.sendWindow -= int64(amount)
+	amount := min(dataLen, f.peerMaxFrameSize, int(f.send.window), int(stream.send.window))
+	f.send.window -= int64(amount)
+	stream.send.window -= int64(amount)
 	return amount
+}
+
+// streamFlowState is the per-stream window accounting, synchronised like
+// connFlowState.
+type streamFlowState struct {
+	recv recvWindow
+	send sendWindow
 }

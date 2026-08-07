@@ -405,7 +405,6 @@ func TestClientAcceptsServerEnablePushZero(t *testing.T) {
 		config:         clientConfig{maxEncoderTableSize: defaultHeaderTableSize},
 		framer:         xhttp2.NewFramer(output, nil),
 		bufferedWriter: output,
-		encoder:        hpack.NewEncoder(io.Discard),
 		streams:        make(map[uint32]*clientStream),
 	}
 	installTestWriter(t, conn)
@@ -431,7 +430,7 @@ func TestProcessResponseDataReturnsConnectionCreditForClosedStream(t *testing.T)
 		bufferedWriter: writer,
 		streams:        make(map[uint32]*clientStream),
 		nextStreamID:   3,
-		connFlowState:  connFlowState{receiveConnectionWindow: windowSize},
+		connFlowState:  connFlowState{recv: recvWindow{window: windowSize}},
 	}
 	installTestWriter(t, conn)
 	frame := makeClientTestDataFrame(t, 1, bytes.Repeat([]byte{'x'}, flowLength))
@@ -439,8 +438,8 @@ func TestProcessResponseDataReturnsConnectionCreditForClosedStream(t *testing.T)
 	if err := conn.processResponseData(frame); err != nil {
 		t.Fatalf("processResponseData() error: %v", err)
 	}
-	if conn.receiveConnectionWindow != windowSize {
-		t.Fatalf("connection receive window = %d, want %d", conn.receiveConnectionWindow, windowSize)
+	if conn.recv.window != windowSize {
+		t.Fatalf("connection receive window = %d, want %d", conn.recv.window, windowSize)
 	}
 	requireConnectionWindowUpdate(t, wire.Bytes(), flowLength)
 }
@@ -1558,13 +1557,13 @@ func TestStreamCanceledBeforeWriteSlotConsumesNoStreamID(t *testing.T) {
 			peerMaxFrameSize:        defaultMaxFrameSize,
 			peerMaxHeaderListSize:   1<<32 - 1,
 			peerInitialStreamWindow: 65535,
-			peerConnectionWindow:    65535,
-			receiveConnectionWindow: 65535,
+			send:                    sendWindow{window: 65535},
+			recv:                    recvWindow{window: 65535},
 		},
 	}
 	installTestWriter(t, conn)
 	conn.framer = xhttp2.NewFramer(bufferedWriter, nil)
-	conn.encoder = hpack.NewEncoder(&conn.headerBuffer)
+	conn.headerEncoder.init(defaultHeaderTableSize)
 
 	canceledRequest := &fasthttp.Request{}
 	canceledRequest.Header.SetMethod(fasthttp.MethodGet)
