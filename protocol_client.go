@@ -46,7 +46,7 @@ type ProtocolTransportCloser interface {
 // A transport may additionally implement interface{ MinTLSVersion() uint16 }
 // to enforce a minimum TLS version on the connections dialed for it.
 func (c *HostClient) RegisterProtocolTransport(transport ProtocolRoundTripper) error {
-	if isNilInterfaceValue(transport) {
+	if isNilOrTypedNil(transport) {
 		return errors.New("fasthttp: protocol transport is nil")
 	}
 	if c.protocolTransport != nil {
@@ -88,26 +88,6 @@ func (ctx *ProtocolClientContext) WriteTimeout() time.Duration {
 // HTTP/1 with ALPN.
 func (ctx *ProtocolClientContext) RoundTripHTTP1(req *Request, resp *Response) (bool, error) {
 	return roundTripHTTP1Fallback(ctx.hostClient, req, resp, ctx.deadline)
-}
-
-// roundTripHTTP1Fallback hands the request to the HTTP/1 transport with the
-// remainder of a budget the protocol attempt already spent part of, expressed
-// through the request timeout the RoundTripper interface understands.
-func roundTripHTTP1Fallback(hc *HostClient, req *Request, resp *Response, deadline time.Time) (bool, error) {
-	roundTripper := hc.Transport
-	if roundTripper == nil {
-		roundTripper = DefaultTransport
-	}
-	if !deadline.IsZero() {
-		remaining := time.Until(deadline)
-		if remaining <= 0 {
-			return false, ErrTimeout
-		}
-		original := req.timeout
-		req.timeout = remaining
-		defer func() { req.timeout = original }()
-	}
-	return roundTripper.RoundTrip(hc, req, resp)
 }
 
 // AcquireConn reserves one of HostClient's physical connection slots and
@@ -178,20 +158,30 @@ func (c *ProtocolClientConn) RoundTripHTTP1(req *Request, resp *Response) (bool,
 	if !c.isReleased.CompareAndSwap(false, true) {
 		return false, errors.New("fasthttp: protocol client connection is already released")
 	}
-	roundTripper := c.hostClient.Transport
-	if roundTripper == nil {
-		roundTripper = DefaultTransport
-	}
-	if builtIn, ok := roundTripper.(*transport); ok {
+	if builtIn, ok := c.hostClient.transport().(*transport); ok {
 		cc := acquireClientConn(c.conn)
 		cc.createdTime = c.createdTime
 		return builtIn.roundTripConn(c.hostClient, cc, req, resp, c.deadline)
 	}
-	// A custom transport cannot adopt an already-dialed connection; retire it
-	// and let the transport run the request over its own pool.
+	// A custom transport cannot adopt an already-dialed connection.
 	_ = c.conn.Close()
 	c.hostClient.releaseProtocolConnSlot()
 	return roundTripHTTP1Fallback(c.hostClient, req, resp, c.deadline)
+}
+
+// roundTripHTTP1Fallback runs the request on the HTTP/1 transport with the
+// deadline's remaining time as the request timeout.
+func roundTripHTTP1Fallback(hc *HostClient, req *Request, resp *Response, deadline time.Time) (bool, error) {
+	if !deadline.IsZero() {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false, ErrTimeout
+		}
+		original := req.timeout
+		req.timeout = remaining
+		defer func() { req.timeout = original }()
+	}
+	return hc.transport().RoundTrip(hc, req, resp)
 }
 
 var protocolClientContextPool sync.Pool
@@ -219,33 +209,34 @@ func releaseProtocolClientContext(ctx *ProtocolClientContext) {
 	protocolClientContextPool.Put(ctx)
 }
 
-func (c *HostClient) reserveProtocolConn(reqTimeout time.Duration) error {
+func (c *HostClient) tryReserveConnSlot() bool {
 	c.connsLock.Lock()
-	maxConns := c.MaxConns
-	if maxConns <= 0 {
-		maxConns = DefaultMaxConnsPerHost
+	defer c.connsLock.Unlock()
+	if c.connsCount >= c.maxConnsLocked() {
+		return false
 	}
-	if c.connsCount < maxConns {
-		c.connsCount++
-		c.connsLock.Unlock()
+	c.connsCount++
+	return true
+}
+
+func (c *HostClient) reserveProtocolConn(reqTimeout time.Duration) error {
+	if c.tryReserveConnSlot() {
 		return nil
 	}
-	c.connsLock.Unlock()
 	if c.MaxConnWaitTimeout <= 0 {
 		return ErrNoFreeConns
 	}
 
 	timeout := c.MaxConnWaitTimeout
-	timeoutOverridden := false
+	timeoutErr := ErrNoFreeConns
 	if reqTimeout > 0 && reqTimeout < timeout {
 		timeout = reqTimeout
-		timeoutOverridden = true
+		timeoutErr = ErrTimeout
 	}
 	tc := AcquireTimer(timeout)
 	defer ReleaseTimer(tc)
 
-	// Wait in the same FIFO as HTTP/1 requests: a freed slot or idle
-	// connection is handed to exactly one waiter, in arrival order.
+	// Wait in the same FIFO as HTTP/1 requests.
 	w := &wantConn{ready: make(chan struct{}, 1), slotOnly: true}
 	c.queueForIdle(w)
 
@@ -254,18 +245,13 @@ func (c *HostClient) reserveProtocolConn(reqTimeout time.Duration) error {
 		return w.err
 	case <-tc.C:
 		w.cancel(c, ErrTimeout)
-		if timeoutOverridden {
-			return ErrTimeout
-		}
-		return ErrNoFreeConns
+		return timeoutErr
 	}
 }
 
 func (c *HostClient) releaseProtocolConnSlot() {
-	// Protocol and HTTP/1 connections share connsCount, so a freed protocol
-	// slot must serve a queued waiter exactly like a freed HTTP/1 connection
-	// would; otherwise a waiter under MaxConnWaitTimeout sleeps until timeout
-	// even though a slot is available.
+	// Protocol and HTTP/1 connections share connsCount, so freeing a protocol
+	// slot must serve queued waiters too.
 	c.decConnsCount()
 }
 
@@ -284,10 +270,10 @@ func (c *HostClient) dialHostHardWithALPN(
 	if timeout <= 0 {
 		timeout = DefaultDialTimeout
 	}
-	deadline := time.Now().Add(timeout)
-	if dialTimeout > 0 && time.Now().Add(dialTimeout).Before(deadline) {
-		deadline = time.Now().Add(dialTimeout)
+	if dialTimeout > 0 {
+		timeout = min(timeout, dialTimeout)
 	}
+	deadline := time.Now().Add(timeout)
 
 	var lastErr error
 	for range n {
@@ -349,11 +335,11 @@ func finishTLSHandshake(conn net.Conn, deadline time.Time) (string, error) {
 	if err := conn.SetDeadline(deadline); err != nil {
 		return "", err
 	}
-	err := tlsConnection.Handshake()
-	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-		return "", ErrTLSHandshakeTimeout
-	}
-	if err != nil {
+	if err := tlsConnection.Handshake(); err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return "", ErrTLSHandshakeTimeout
+		}
 		return "", err
 	}
 	if err := conn.SetDeadline(time.Time{}); err != nil {
@@ -422,7 +408,7 @@ func (c *Client) OpenStream(req *Request, resp *Response) (StreamConn, error) {
 	if len(req.URI().Host()) == 0 {
 		return nil, ErrorInvalidURI
 	}
-	hc, err := c.selectHostClient(req)
+	hc, err := c.hostClientForRequest(req)
 	if err != nil {
 		return nil, err
 	}

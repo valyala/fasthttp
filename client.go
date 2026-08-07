@@ -527,7 +527,7 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
-	hc, err := c.selectHostClient(req)
+	hc, err := c.hostClientForRequest(req)
 	if err != nil {
 		return err
 	}
@@ -537,7 +537,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	return hc.Do(req, resp)
 }
 
-func (c *Client) selectHostClient(req *Request) (*HostClient, error) {
+func (c *Client) hostClientForRequest(req *Request) (*HostClient, error) {
 	uri := req.URI()
 	if uri == nil {
 		return nil, ErrorInvalidURI
@@ -549,10 +549,8 @@ func (c *Client) selectHostClient(req *Request) (*HostClient, error) {
 		return nil, fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
 	}
 
-	isTLS := false
-	if uri.isHTTPS() {
-		isTLS = true
-	} else if !uri.isHTTP() {
+	isTLS := uri.isHTTPS()
+	if !isTLS && !uri.isHTTP() {
 		return nil, fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
 	}
 
@@ -1708,6 +1706,28 @@ func (c *HostClient) transport() RoundTripper {
 	return c.Transport
 }
 
+// maxConnsLocked is MaxConns with its default applied. connsLock must be held.
+func (c *HostClient) maxConnsLocked() int {
+	if c.MaxConns <= 0 {
+		return DefaultMaxConnsPerHost
+	}
+	return c.MaxConns
+}
+
+// nextWaiterLocked pops the next waiter still waiting, discarding abandoned
+// ones. connsLock must be held.
+func (c *HostClient) nextWaiterLocked() *wantConn {
+	if c.connsWait == nil {
+		return nil
+	}
+	for c.connsWait.len() > 0 {
+		if w := c.connsWait.popFront(); w.waiting() {
+			return w
+		}
+	}
+	return nil
+}
+
 var (
 	// ErrNoFreeConns is returned when no free connections available
 	// to the given host.
@@ -1751,28 +1771,23 @@ var ErrTimeout = &timeoutError{}
 // SetMaxConns sets up the maximum number of connections which may be established to all hosts listed in Addr.
 func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
 	c.MaxConns = newMaxConns
-	// Grown capacity must reach requests already parked in the wait queue;
-	// without this they sleep until a connection is released or they time out.
-	maxConns := newMaxConns
-	if maxConns <= 0 {
-		maxConns = DefaultMaxConnsPerHost
-	}
-	for c.connsCount < maxConns && c.connsWait != nil && c.connsWait.len() > 0 {
-		w := c.connsWait.popFront()
-		if !w.waiting() {
+	// Grown capacity must reach requests already parked in the wait queue.
+	for c.connsCount < c.maxConnsLocked() {
+		w := c.nextWaiterLocked()
+		if w == nil {
+			return
+		}
+		if !w.slotOnly {
+			c.connsCount++
+			go c.dialConnFor(w)
 			continue
 		}
-		if w.slotOnly {
-			if w.tryDeliverSlot() {
-				c.connsCount++
-			}
-			continue
+		if w.tryDeliverSlot() {
+			c.connsCount++
 		}
-		c.connsCount++
-		go c.dialConnFor(w)
 	}
-	c.connsLock.Unlock()
 }
 
 func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
@@ -1994,38 +2009,22 @@ func (c *HostClient) decConnsCount() {
 
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
-	maxConns := c.MaxConns
-	if maxConns <= 0 {
-		maxConns = DefaultMaxConnsPerHost
-	}
-	if c.connsCount > maxConns {
-		// The limit shrank while this slot was held; retire it so the count
-		// converges on the new cap instead of handing it to a waiter.
+	if c.connsCount > c.maxConnsLocked() {
+		// The limit shrank while this slot was held; retire it instead of
+		// reusing it.
 		c.connsCount--
 		return
 	}
-	handedOff := false
-	if q := c.connsWait; q != nil {
-		for q.len() > 0 {
-			w := q.popFront()
-			if !w.waiting() {
-				continue
-			}
-			if w.slotOnly {
-				if w.tryDeliverSlot() {
-					handedOff = true
-					break
-				}
-				continue
-			}
+	for w := c.nextWaiterLocked(); w != nil; w = c.nextWaiterLocked() {
+		if !w.slotOnly {
 			go c.dialConnFor(w)
-			handedOff = true
-			break
+			return
+		}
+		if w.tryDeliverSlot() {
+			return
 		}
 	}
-	if !handedOff {
-		c.connsCount--
-	}
+	c.connsCount--
 }
 
 // ConnsCount returns connection count of HostClient.
@@ -2076,34 +2075,27 @@ func (c *HostClient) ReleaseConn(cc *clientConn) {
 	c.connsLock.Lock()
 	delivered := false
 	retire := false
-	if q := c.connsWait; q != nil {
-		for q.len() > 0 {
-			w := q.popFront()
-			if !w.waiting() {
-				continue
-			}
-			if w.slotOnly {
-				// The waiter inherits cc's slot and dials its own connection;
-				// the idle HTTP/1 connection retires.
-				if w.tryDeliverSlot() {
-					delivered = true
-					retire = true
-					break
-				}
-				continue
-			}
-			delivered = w.tryDeliver(cc, nil)
-			// This is the last resort to hand over conCount sema.
-			// We must ensure that there are no valid waiters in connsWait
-			// when we exit this loop.
-			//
-			// We did not apply the same looping pattern in the decConnsCount
-			// method because it needs to create a new time-spent connection,
-			// and the decConnsCount call chain will inevitably reach this point.
-			// When MaxConnWaitTimeout>0.
-			if delivered {
+	for w := c.nextWaiterLocked(); w != nil; w = c.nextWaiterLocked() {
+		if w.slotOnly {
+			// The waiter inherits cc's slot and dials its own connection;
+			// the idle HTTP/1 connection retires.
+			if w.tryDeliverSlot() {
+				delivered = true
+				retire = true
 				break
 			}
+			continue
+		}
+		// This is the last resort to hand over conCount sema.
+		// We must ensure that there are no valid waiters in connsWait
+		// when we exit this loop.
+		//
+		// We did not apply the same looping pattern in the decConnsCount
+		// method because it needs to create a new time-spent connection,
+		// and the decConnsCount call chain will inevitably reach this point.
+		// When MaxConnWaitTimeout>0.
+		if delivered = w.tryDeliver(cc, nil); delivered {
+			break
 		}
 	}
 	if !delivered {
@@ -3340,22 +3332,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	if req.timeout > 0 {
 		deadline = time.Now().Add(req.timeout)
 	}
-	return t.roundTripWithDeadline(hc, req, resp, deadline, req.timeout)
-}
-
-// roundTripWithDeadline runs one HTTP/1 round trip. acquireTimeout bounds only
-// the wait for a connection.
-func (t *transport) roundTripWithDeadline(
-	hc *HostClient,
-	req *Request,
-	resp *Response,
-	deadline time.Time,
-	acquireTimeout time.Duration,
-) (retry bool, err error) {
-	if !deadline.IsZero() && acquireTimeout <= 0 {
-		return false, ErrTimeout
-	}
-	cc, err := hc.AcquireConn(acquireTimeout, req.ConnectionClose())
+	cc, err := hc.AcquireConn(req.timeout, req.ConnectionClose())
 	if err != nil {
 		return false, err
 	}

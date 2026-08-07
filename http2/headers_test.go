@@ -1,7 +1,6 @@
 package http2
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,23 +11,22 @@ import (
 )
 
 func TestRejectedRequestHeadersKeepHPACKEncoderInSync(t *testing.T) {
-	var encoded bytes.Buffer
-	encoder := hpack.NewEncoder(&encoded)
+	var enc headerEncoder
+	enc.init(defaultHeaderTableSize)
 	decoder := hpack.NewDecoder(defaultHeaderTableSize, func(hpack.HeaderField) {})
-	var cache headerStringCache
 
 	bad := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(bad)
 	bad.SetRequestURI("http://example.com/bad")
 	bad.Header.Set("TE", "gzip")
-	if _, err := encodeRequestHeaders(encoder, &encoded, &cache, bad, 1<<20, false, new([]hpack.HeaderField)); err == nil {
+	if _, err := enc.encodeRequestHeaders(bad, 1<<20, false); err == nil {
 		t.Fatal("invalid TE header was accepted")
 	}
 
 	probe := fasthttp.AcquireRequest()
 	defer fasthttp.ReleaseRequest(probe)
 	probe.SetRequestURI("http://example.com/probe")
-	block, err := encodeRequestHeaders(encoder, &encoded, &cache, probe, 1<<20, false, new([]hpack.HeaderField))
+	block, err := enc.encodeRequestHeaders(probe, 1<<20, false)
 	if err != nil {
 		t.Fatalf("encoding probe request: %v", err)
 	}
@@ -36,9 +34,8 @@ func TestRejectedRequestHeadersKeepHPACKEncoderInSync(t *testing.T) {
 }
 
 func TestResponseHeadersExcludeTrailerFields(t *testing.T) {
-	var encoded bytes.Buffer
-	encoder := hpack.NewEncoder(&encoded)
-	var cache headerStringCache
+	var enc headerEncoder
+	enc.init(defaultHeaderTableSize)
 	server := &fasthttp.Server{NoDefaultDate: true, NoDefaultServerHeader: true}
 
 	resp := fasthttp.AcquireResponse()
@@ -49,7 +46,7 @@ func TestResponseHeadersExcludeTrailerFields(t *testing.T) {
 	}
 	resp.Header.Set("Grpc-Status", "0")
 
-	block, err := encodeResponseHeaders(encoder, &encoded, &cache, server, resp, 1<<20, nil, new([]hpack.HeaderField))
+	block, err := enc.encodeResponseHeaders(server, resp, 1<<20, nil)
 	if err != nil {
 		t.Fatalf("encoding response: %v", err)
 	}
@@ -78,16 +75,15 @@ func decodeTestHeaderFields(t testing.TB, block []byte) map[string]string {
 }
 
 func TestRejectedResponseHeadersKeepHPACKEncoderInSync(t *testing.T) {
-	var encoded bytes.Buffer
-	encoder := hpack.NewEncoder(&encoded)
+	var enc headerEncoder
+	enc.init(defaultHeaderTableSize)
 	decoder := hpack.NewDecoder(defaultHeaderTableSize, func(hpack.HeaderField) {})
-	var cache headerStringCache
 	server := &fasthttp.Server{NoDefaultDate: true, NoDefaultServerHeader: true}
 
 	warm := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(warm)
 	warm.Header.Set("X-Marker", "canary-value")
-	block, err := encodeResponseHeaders(encoder, &encoded, &cache, server, warm, 1<<20, nil, new([]hpack.HeaderField))
+	block, err := enc.encodeResponseHeaders(server, warm, 1<<20, nil)
 	if err != nil {
 		t.Fatalf("encoding warm response: %v", err)
 	}
@@ -98,14 +94,14 @@ func TestRejectedResponseHeadersKeepHPACKEncoderInSync(t *testing.T) {
 	for i := range 4 {
 		bad.Header.Set(fmt.Sprintf("X-Large-%d", i), strings.Repeat("x", 128))
 	}
-	if _, err := encodeResponseHeaders(encoder, &encoded, &cache, server, bad, 300, nil, new([]hpack.HeaderField)); err == nil {
+	if _, err := enc.encodeResponseHeaders(server, bad, 300, nil); err == nil {
 		t.Fatal("oversized response header list was accepted")
 	}
 
 	probe := fasthttp.AcquireResponse()
 	defer fasthttp.ReleaseResponse(probe)
 	probe.Header.Set("X-Marker", "canary-value")
-	block, err = encodeResponseHeaders(encoder, &encoded, &cache, server, probe, 1<<20, nil, new([]hpack.HeaderField))
+	block, err = enc.encodeResponseHeaders(server, probe, 1<<20, nil)
 	if err != nil {
 		t.Fatalf("encoding probe response: %v", err)
 	}
@@ -174,33 +170,31 @@ func TestResponseHeadersRejectTE(t *testing.T) {
 }
 
 func TestOutboundResponseHeadersRejectTEBeforeHPACK(t *testing.T) {
-	var encoded bytes.Buffer
-	encoder := hpack.NewEncoder(&encoded)
-	var cache headerStringCache
+	var enc headerEncoder
+	enc.init(defaultHeaderTableSize)
 	server := &fasthttp.Server{NoDefaultDate: true, NoDefaultServerHeader: true}
 	var response fasthttp.Response
 	response.Header.Set("TE", "trailers")
-	if _, err := encodeResponseHeaders(encoder, &encoded, &cache, server, &response, 1<<20, nil, new([]hpack.HeaderField)); err == nil {
+	if _, err := enc.encodeResponseHeaders(server, &response, 1<<20, nil); err == nil {
 		t.Fatal("outbound response TE header was accepted")
 	}
 
 	var informational fasthttp.ResponseHeader
 	informational.Set("TE", "trailers")
-	if _, err := encodeInformationalHeaders(encoder, &encoded, &cache, 103, &informational, 1<<20, new([]hpack.HeaderField)); err == nil {
+	if _, err := enc.encodeInformationalHeaders(103, &informational, 1<<20); err == nil {
 		t.Fatal("outbound informational TE header was accepted")
 	}
 }
 
 func TestOutboundResponseTrailersRespectHeaderListLimit(t *testing.T) {
-	var encoded bytes.Buffer
-	encoder := hpack.NewEncoder(&encoded)
-	var cache headerStringCache
+	var enc headerEncoder
+	enc.init(defaultHeaderTableSize)
 	var header fasthttp.ResponseHeader
 	if err := header.AddTrailer("X-Large-Trailer"); err != nil {
 		t.Fatal(err)
 	}
 	header.Set("X-Large-Trailer", strings.Repeat("x", 128))
-	if _, err := encodeTrailerHeaders(encoder, &encoded, &cache, &header, 64); !errors.Is(err, errResponseHeaderTooLarge) {
+	if _, err := enc.encodeTrailerHeaders(&header, 64); !errors.Is(err, errResponseHeaderTooLarge) {
 		t.Fatalf("encodeTrailerHeaders() error = %v, want header list limit error", err)
 	}
 }

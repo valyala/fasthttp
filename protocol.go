@@ -95,20 +95,19 @@ type StreamAccepter interface {
 	AcceptStream(handler StreamHandler) error
 }
 
-// HijackRejecter is implemented by protocol streams that want to know when a
-// handler attempted connection hijacking, which multiplexed protocols cannot
-// support. RequestCtx.Hijack reports the rejection through it because that
-// legacy API cannot return an error; TryHijack returns ErrHijackNotSupported
-// directly.
-type HijackRejecter interface {
-	RejectHijack()
+// HijackRejectionNotifier is implemented by protocol streams that want to be
+// told a handler attempted connection hijacking, which multiplexed protocols
+// cannot support. RequestCtx.Hijack notifies through it because that legacy
+// API cannot return an error; TryHijack returns ErrHijackNotSupported directly.
+type HijackRejectionNotifier interface {
+	HijackRejected()
 }
 
 // ProtocolStream supplies request-scoped cancellation and optional protocol
 // operations to RequestCtx.
 //
 // Implementations may additionally implement InformationalResponseWriter,
-// Pusher, StreamAccepter, and HijackRejecter.
+// Pusher, StreamAccepter, and HijackRejectionNotifier.
 type ProtocolStream interface {
 	context.Context
 }
@@ -165,7 +164,7 @@ const (
 //
 // ServeProtocolConn closes c before returning.
 func (s *Server) ServeProtocolConn(c net.Conn, handler ProtocolHandler) error {
-	if isNilInterfaceValue(handler) {
+	if isNilOrTypedNil(handler) {
 		return errors.New("fasthttp: protocol handler is nil")
 	}
 	if s.MaxConnsPerIP > 0 {
@@ -378,40 +377,20 @@ func headerRetainedBytes(header *header) int {
 
 // RegisterProtocol registers a connection-oriented HTTP protocol. It must be
 // called before the Server starts serving.
-func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //nolint:gocritic
-	if isNilInterfaceValue(registration.Handler) {
+func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //nolint:gocritic // registration by value is the public contract
+	if isNilOrTypedNil(registration.Handler) {
 		return errors.New("fasthttp: protocol handler is nil")
 	}
 	if len(registration.ALPN) == 0 && len(registration.CleartextPreface) == 0 {
 		return errors.New("fasthttp: protocol registration has no selector")
 	}
 
+	if err := validateProtocolALPN(registration.ALPN, registration.FallbackALPN); err != nil {
+		return err
+	}
 	alpn := append([]string(nil), registration.ALPN...)
 	fallbackALPN := append([]string(nil), registration.FallbackALPN...)
 	preface := bytes.Clone(registration.CleartextPreface)
-	seenALPN := make(map[string]struct{}, len(alpn))
-	for _, protocol := range alpn {
-		if protocol == "" {
-			return errors.New("fasthttp: protocol alpn is empty")
-		}
-		if _, ok := seenALPN[protocol]; ok {
-			return fmt.Errorf("fasthttp: protocol alpn %q is duplicated", protocol)
-		}
-		seenALPN[protocol] = struct{}{}
-	}
-	seenFallback := make(map[string]struct{}, len(fallbackALPN))
-	for _, protocol := range fallbackALPN {
-		if protocol == "" {
-			return errors.New("fasthttp: protocol fallback alpn is empty")
-		}
-		if _, ok := seenALPN[protocol]; ok {
-			return fmt.Errorf("fasthttp: protocol fallback alpn %q is also registered", protocol)
-		}
-		if _, ok := seenFallback[protocol]; ok {
-			return fmt.Errorf("fasthttp: protocol fallback alpn %q is duplicated", protocol)
-		}
-		seenFallback[protocol] = struct{}{}
-	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -476,6 +455,34 @@ func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //n
 		s.TLSConfig = tlsConfig
 	}
 
+	return nil
+}
+
+// validateProtocolALPN rejects empty, duplicated, or cross-listed names.
+func validateProtocolALPN(alpn, fallbackALPN []string) error {
+	seenALPN := make(map[string]struct{}, len(alpn))
+	for _, protocol := range alpn {
+		if protocol == "" {
+			return errors.New("fasthttp: protocol alpn is empty")
+		}
+		if _, ok := seenALPN[protocol]; ok {
+			return fmt.Errorf("fasthttp: protocol alpn %q is duplicated", protocol)
+		}
+		seenALPN[protocol] = struct{}{}
+	}
+	seenFallback := make(map[string]struct{}, len(fallbackALPN))
+	for _, protocol := range fallbackALPN {
+		if protocol == "" {
+			return errors.New("fasthttp: protocol fallback alpn is empty")
+		}
+		if _, ok := seenALPN[protocol]; ok {
+			return fmt.Errorf("fasthttp: protocol fallback alpn %q is also registered", protocol)
+		}
+		if _, ok := seenFallback[protocol]; ok {
+			return fmt.Errorf("fasthttp: protocol fallback alpn %q is duplicated", protocol)
+		}
+		seenFallback[protocol] = struct{}{}
+	}
 	return nil
 }
 
@@ -546,7 +553,7 @@ func prepareProtocolTLSConfig(
 	return config, nil
 }
 
-func isNilInterfaceValue(v any) bool {
+func isNilOrTypedNil(v any) bool {
 	if v == nil {
 		return true
 	}
@@ -697,9 +704,8 @@ func (s *Server) detectCleartextProtocol(c net.Conn) (*registeredProtocol, []byt
 		}
 	}
 
-	// Read through the next candidate boundary, never past the longest
-	// preface: a match consumes its preface exactly and a mismatch replays
-	// only the compared prefix to the HTTP/1 parser.
+	// Never read past the next candidate boundary: a mismatch must replay only
+	// the compared prefix to the HTTP/1 parser.
 	prefix := make([]byte, 0, maxPrefaceLen)
 	emptyReads := 0
 	for {
@@ -712,30 +718,45 @@ func (s *Server) detectCleartextProtocol(c net.Conn) (*registeredProtocol, []byt
 		oldLen := len(prefix)
 		n, err := c.Read(prefix[oldLen:nextLen])
 		prefix = prefix[:oldLen+n]
+		if n == 0 && err == nil {
+			emptyReads++
+			if emptyReads >= 100 {
+				return nil, prefix, deadline, io.ErrNoProgress
+			}
+			continue
+		}
 		if n > 0 {
 			emptyReads = 0
-			remaining := candidates[:0]
-			for _, candidate := range candidates {
-				preface := candidate.cleartextPreface
-				if bytes.Equal(prefix, preface) {
-					return candidate, prefix, deadline, nil
-				}
-				if len(prefix) < len(preface) && bytes.Equal(prefix, preface[:len(prefix)]) {
-					remaining = append(remaining, candidate)
-				}
+			matched, remaining := narrowPrefaceCandidates(candidates, prefix)
+			if matched != nil {
+				return matched, prefix, deadline, nil
 			}
 			candidates = remaining
 			if len(candidates) == 0 {
 				return nil, prefix, deadline, nil
-			}
-		} else if err == nil {
-			emptyReads++
-			if emptyReads >= 100 {
-				return nil, prefix, deadline, io.ErrNoProgress
 			}
 		}
 		if err != nil {
 			return nil, prefix, deadline, err
 		}
 	}
+}
+
+// narrowPrefaceCandidates drops the candidates prefix has ruled out and
+// returns the one it matched exactly, if any. It reuses candidates' storage.
+func narrowPrefaceCandidates(
+	candidates []*registeredProtocol,
+	prefix []byte,
+) (*registeredProtocol, []*registeredProtocol) {
+	remaining := candidates[:0]
+	for _, candidate := range candidates {
+		preface := candidate.cleartextPreface
+		if bytes.Equal(prefix, preface) {
+			return candidate, remaining
+		}
+		if len(prefix) < len(preface) && bytes.Equal(prefix, preface[:len(prefix)]) {
+			remaining = append(remaining, candidate)
+		}
+	}
+	return nil, remaining
 }

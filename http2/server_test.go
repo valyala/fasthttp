@@ -659,13 +659,13 @@ func flushOrderConn(t *testing.T, incremental bool) []uint32 {
 	conn := &serverConn{
 		framer:        xhttp2.NewFramer(&wire, nil),
 		streams:       map[uint32]*serverStream{},
-		connFlowState: connFlowState{peerConnectionWindow: 1 << 30, peerMaxFrameSize: defaultMaxFrameSize},
+		connFlowState: connFlowState{send: sendWindow{window: 1 << 30}, peerMaxFrameSize: defaultMaxFrameSize},
 	}
 	for _, streamID := range []uint32{1, 3} {
 		stream := &serverStream{
 			id:              streamID,
 			priority:        priority{urgency: 3, incremental: incremental},
-			streamFlowState: streamFlowState{sendWindow: 1 << 30},
+			streamFlowState: streamFlowState{send: sendWindow{window: 1 << 30}},
 			pendingData:     bytes.Repeat([]byte{byte(streamID)}, 3*defaultMaxFrameSize),
 		}
 		conn.streams[streamID] = stream
@@ -836,13 +836,13 @@ func TestProcessStreamingDataTransfersOwnershipWithoutConsumingPayload(t *testin
 			streamWindowSize:     windowSize,
 		},
 		streams:       make(map[uint32]*serverStream),
-		connFlowState: connFlowState{receiveConnectionWindow: windowSize},
+		connFlowState: connFlowState{recv: recvWindow{window: windowSize}},
 		framer:        xhttp2.NewFramer(io.Discard, nil),
 	}
 	stream := &serverStream{
 		id:              1,
 		conn:            conn,
-		streamFlowState: streamFlowState{recvWindow: windowSize},
+		streamFlowState: streamFlowState{recv: recvWindow{window: windowSize}},
 		expectedBody:    -1,
 	}
 	stream.body = newRequestBody(func(n int) {
@@ -860,8 +860,8 @@ func TestProcessStreamingDataTransfersOwnershipWithoutConsumingPayload(t *testin
 	if err := conn.processData(&event); err != nil {
 		t.Fatalf("processData() error: %v", err)
 	}
-	if conn.pendingConnectionUpdate != 0 {
-		t.Fatalf("pending connection update before body read = %d, want 0", conn.pendingConnectionUpdate)
+	if conn.recv.pending != 0 {
+		t.Fatalf("pending connection update before body read = %d, want 0", conn.recv.pending)
 	}
 	if stream.unconsumedFlow != 4 {
 		t.Fatalf("unconsumed flow = %d, want 4", stream.unconsumedFlow)
@@ -877,8 +877,8 @@ func TestProcessStreamingDataTransfersOwnershipWithoutConsumingPayload(t *testin
 	if string(got) != "body" {
 		t.Fatalf("body = %q, want body", got)
 	}
-	if conn.pendingConnectionUpdate != 4 {
-		t.Fatalf("pending connection update after body read = %d, want 4", conn.pendingConnectionUpdate)
+	if conn.recv.pending != 4 {
+		t.Fatalf("pending connection update after body read = %d, want 4", conn.recv.pending)
 	}
 	stream.body.discardWithError(errStreamClosed)
 }
@@ -899,7 +899,7 @@ func TestProcessDataBatchesConnectionCreditForClosedStream(t *testing.T) {
 		streams:             make(map[uint32]*serverStream),
 		closedClientStreams: make(map[uint32]bool),
 		lastClientStreamID:  1,
-		connFlowState:       connFlowState{receiveConnectionWindow: windowSize},
+		connFlowState:       connFlowState{recv: recvWindow{window: windowSize}},
 	}
 	event := incomingFrame{
 		kind:       incomingFrameData,
@@ -911,19 +911,19 @@ func TestProcessDataBatchesConnectionCreditForClosedStream(t *testing.T) {
 	if err := conn.processData(&event); err != nil {
 		t.Fatalf("processData() error: %v", err)
 	}
-	if want := windowSize - flowLength; conn.receiveConnectionWindow != want {
-		t.Fatalf("connection receive window = %d, want %d", conn.receiveConnectionWindow, want)
+	if want := windowSize - flowLength; conn.recv.window != want {
+		t.Fatalf("connection receive window = %d, want %d", conn.recv.window, want)
 	}
-	if conn.pendingConnectionUpdate != flowLength {
-		t.Fatalf("pending connection update = %d, want %d", conn.pendingConnectionUpdate, flowLength)
+	if conn.recv.pending != flowLength {
+		t.Fatalf("pending connection update = %d, want %d", conn.recv.pending, flowLength)
 	}
 	event.flowLength = int(windowSize/2) - flowLength
 	event.data = bytes.Repeat([]byte{'x'}, event.flowLength)
 	if err := conn.processData(&event); err != nil {
 		t.Fatalf("second processData() error: %v", err)
 	}
-	if conn.receiveConnectionWindow != windowSize {
-		t.Fatalf("connection receive window after batch = %d, want %d", conn.receiveConnectionWindow, windowSize)
+	if conn.recv.window != windowSize {
+		t.Fatalf("connection receive window after batch = %d, want %d", conn.recv.window, windowSize)
 	}
 	requireConnectionWindowUpdate(t, wire.Bytes(), uint32(windowSize/2))
 }
@@ -942,14 +942,14 @@ func TestBufferedRequestBodiesRespectConfiguredBudget(t *testing.T) {
 		framer:              xhttp2.NewFramer(&wire, nil),
 		streams:             make(map[uint32]*serverStream),
 		closedClientStreams: make(map[uint32]bool),
-		connFlowState:       connFlowState{receiveConnectionWindow: 64},
+		connFlowState:       connFlowState{recv: recvWindow{window: 64}},
 	}
 	newStream := func(id uint32) *serverStream {
 		stream := newServerStream(conn, id)
 		stream.request = &fasthttp.RequestCtx{}
 		stream.maxBody = 64
 		stream.expectedBody = -1
-		stream.recvWindow = 64
+		stream.recv.window = 64
 		stream.handlerStarted = true // keep a reset stream inspectable
 		conn.streams[id] = stream
 		return stream
@@ -984,7 +984,7 @@ func TestProcessDataDoesNotDoubleCreditClosedRequestBody(t *testing.T) {
 		framer:              xhttp2.NewFramer(&wire, nil),
 		streams:             make(map[uint32]*serverStream),
 		closedClientStreams: make(map[uint32]bool),
-		connFlowState:       connFlowState{receiveConnectionWindow: windowSize},
+		connFlowState:       connFlowState{recv: recvWindow{window: windowSize}},
 	}
 	stream := newServerStream(conn, 1)
 	stream.handlerStarted = true
@@ -1252,11 +1252,11 @@ func TestCancelAcceptedStreamWriteReportsPartialAndDropsRemainder(t *testing.T) 
 		},
 		framer:        xhttp2.NewFramer(&wire, nil),
 		streams:       make(map[uint32]*serverStream),
-		connFlowState: connFlowState{peerConnectionWindow: 2, peerMaxFrameSize: defaultMaxFrameSize},
+		connFlowState: connFlowState{send: sendWindow{window: 2}, peerMaxFrameSize: defaultMaxFrameSize},
 	}
 	stream := newServerStream(conn, 1)
 	stream.handlerStarted = true
-	stream.sendWindow = 2
+	stream.send.window = 2
 	conn.streams[stream.id] = stream
 	write := &streamWrite{result: make(chan streamWriteResult, 1)}
 	if err := conn.processCommand(&serverCommand{
@@ -1267,7 +1267,7 @@ func TestCancelAcceptedStreamWriteReportsPartialAndDropsRemainder(t *testing.T) 
 	if progressed, err := conn.flushStream(stream, false); err != nil || !progressed {
 		t.Fatalf("partial flush = %v, %v; want progress", progressed, err)
 	}
-	deadlineErr := errStreamDeadline
+	deadlineErr := errStreamTimeout
 	if err := conn.processCommand(&serverCommand{
 		kind: serverCommandCancelWrite, streamID: 1, write: write, err: deadlineErr,
 	}); err != nil {
@@ -2002,16 +2002,15 @@ func TestSettingsDecreaseDrivesSendWindowNegative(t *testing.T) {
 }
 
 func TestRepeatedInitialWindowSettingsApplyOneFinalDelta(t *testing.T) {
-	var headerBlock bytes.Buffer
 	conn := &serverConn{
 		config:        serverConfig{maxEncoderTableSize: defaultHeaderTableSize},
 		streams:       make(map[uint32]*serverStream),
 		connFlowState: connFlowState{peerInitialStreamWindow: 65535},
-		encoder:       hpack.NewEncoder(&headerBlock),
 	}
 	for id := uint32(1); id <= 499; id += 2 {
-		conn.streams[id] = &serverStream{id: id, streamFlowState: streamFlowState{sendWindow: 65535}}
+		conn.streams[id] = &serverStream{id: id, streamFlowState: streamFlowState{send: sendWindow{window: 65535}}}
 	}
+	conn.headerEncoder.init(defaultHeaderTableSize)
 	settings := make([]xhttp2.Setting, 2730)
 	for i := range settings {
 		settings[i] = xhttp2.Setting{ID: xhttp2.SettingInitialWindowSize, Val: 65535}
@@ -2021,8 +2020,8 @@ func TestRepeatedInitialWindowSettingsApplyOneFinalDelta(t *testing.T) {
 		t.Fatalf("applySettings() error: %v", err)
 	}
 	for id, stream := range conn.streams {
-		if stream.sendWindow != 32768 {
-			t.Fatalf("stream %d send window = %d, want 32768", id, stream.sendWindow)
+		if stream.send.window != 32768 {
+			t.Fatalf("stream %d send window = %d, want 32768", id, stream.send.window)
 		}
 	}
 }
