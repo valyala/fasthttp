@@ -271,8 +271,32 @@ func (c *serverConn) serve(upgrade *serverUpgrade) (retErr error) {
 		_ = c.conn.Close()
 	}()
 
+	// Nothing heavier than a stack frame may exist until readClientPreface
+	// returns: half-open connections parked before the preface are cheap for a
+	// peer to create, so the async writer, its goroutine, the read buffer, and
+	// the queues are all built after it.
 	if upgrade == nil {
 		if err := validateTLSConnection(c.conn); err != nil {
+			return err
+		}
+		if err := c.readClientPreface(); err != nil {
+			_ = c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			_, _ = io.CopyN(io.Discard, c.conn, 64<<10)
+			return err
+		}
+	} else {
+		direct := directFrameWriter{conn: c.conn, timeout: c.config.writeByteTimeout}
+		if _, err := direct.Write(upgradeResponse); err != nil {
+			return fmt.Errorf("http2: writing upgrade response: %w", err)
+		}
+		c.framer = xhttp2.NewFramer(direct, nil)
+		if err := c.applySettings(upgrade.settings); err != nil {
+			return fmt.Errorf("http2: applying upgrade settings: %w", err)
+		}
+		if err := c.writeInitialSettings(); err != nil {
+			return fmt.Errorf("http2: writing initial settings: %w", err)
+		}
+		if err := c.readClientPreface(); err != nil {
 			return err
 		}
 	}
@@ -298,32 +322,11 @@ func (c *serverConn) serve(upgrade *serverUpgrade) (retErr error) {
 	c.headerDecoder = newHeaderCodec(c.config.maxDecoderTableSize, c.config.maxHeaderListSize)
 	c.framer.SetMaxReadFrameSize(c.config.maxReadFrameSize)
 	if upgrade == nil {
-		if err := c.readClientPreface(); err != nil {
-			_ = c.conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-			_, _ = io.CopyN(io.Discard, c.conn, 64<<10)
-			return err
-		}
 		if err := c.writeInitialSettings(); err != nil {
 			return fmt.Errorf("http2: writing initial settings: %w", err)
 		}
 		if err := c.writer.Flush(); err != nil {
 			return fmt.Errorf("http2: flushing initial settings: %w", err)
-		}
-	} else {
-		if _, err := c.writer.Write(upgradeResponse); err != nil {
-			return fmt.Errorf("http2: writing upgrade response: %w", err)
-		}
-		if err := c.applySettings(upgrade.settings); err != nil {
-			return fmt.Errorf("http2: applying upgrade settings: %w", err)
-		}
-		if err := c.writeInitialSettings(); err != nil {
-			return fmt.Errorf("http2: writing initial settings: %w", err)
-		}
-		if err := c.writer.Flush(); err != nil {
-			return fmt.Errorf("http2: flushing upgrade response: %w", err)
-		}
-		if err := c.readClientPreface(); err != nil {
-			return err
 		}
 	}
 	c.initQueues()
