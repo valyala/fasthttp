@@ -49,7 +49,9 @@ func NewTransport(config ClientConfig) *Transport { //nolint:gocritic // config 
 
 // ConfigureHostClient enables HTTP/2 on hc while preserving the built-in
 // HTTP/1 transport as its fallback.
-func ConfigureHostClient(hc *fasthttp.HostClient, config ClientConfig) error { //nolint:gocritic // config by value is the public contract
+//
+//nolint:gocritic // config by value is the public contract
+func ConfigureHostClient(hc *fasthttp.HostClient, config ClientConfig) error {
 	if hc == nil {
 		return errors.New("http2: host client is nil")
 	}

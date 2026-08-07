@@ -170,6 +170,7 @@ func (e *serverError) Unwrap() error {
 
 type serverConn struct {
 	connFlowState
+	headerEncoder
 
 	protocolContext *fasthttp.ProtocolServerContext
 	server          *fasthttp.Server
@@ -183,7 +184,6 @@ type serverConn struct {
 	allWorkers      []*streamWorker
 	headerDecoder   *headerCodec
 	writer          *asyncFrameWriter
-	headerEncoder
 
 	events   chan incomingFrame
 	commands chan serverCommand
@@ -243,7 +243,7 @@ func newServerConn(
 		priorityUpdates:     make(map[uint32]priority),
 		closedClientStreams: make(map[uint32]bool),
 	}
-	conn.headerEncoder.init(config.maxEncoderTableSize)
+	conn.initHeaderEncoder(config.maxEncoderTableSize)
 	return conn
 }
 

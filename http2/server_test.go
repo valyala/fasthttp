@@ -2010,7 +2010,7 @@ func TestRepeatedInitialWindowSettingsApplyOneFinalDelta(t *testing.T) {
 	for id := uint32(1); id <= 499; id += 2 {
 		conn.streams[id] = &serverStream{id: id, streamFlowState: streamFlowState{send: sendWindow{window: 65535}}}
 	}
-	conn.headerEncoder.init(defaultHeaderTableSize)
+	conn.initHeaderEncoder(defaultHeaderTableSize)
 	settings := make([]xhttp2.Setting, 2730)
 	for i := range settings {
 		settings[i] = xhttp2.Setting{ID: xhttp2.SettingInitialWindowSize, Val: 65535}

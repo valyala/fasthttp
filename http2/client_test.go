@@ -1563,7 +1563,7 @@ func TestStreamCanceledBeforeWriteSlotConsumesNoStreamID(t *testing.T) {
 	}
 	installTestWriter(t, conn)
 	conn.framer = xhttp2.NewFramer(bufferedWriter, nil)
-	conn.headerEncoder.init(defaultHeaderTableSize)
+	conn.initHeaderEncoder(defaultHeaderTableSize)
 
 	canceledRequest := &fasthttp.Request{}
 	canceledRequest.Header.SetMethod(fasthttp.MethodGet)

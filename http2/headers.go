@@ -52,7 +52,7 @@ type headerEncoder struct {
 	fields  []hpack.HeaderField
 }
 
-func (h *headerEncoder) init(maxTableSize uint32) {
+func (h *headerEncoder) initHeaderEncoder(maxTableSize uint32) {
 	h.encoder = hpack.NewEncoder(&h.buffer)
 	h.encoder.SetMaxDynamicTableSizeLimit(maxTableSize)
 }

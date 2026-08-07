@@ -750,7 +750,7 @@ func BenchmarkRepeatedInitialWindowSettings(b *testing.B) {
 	for id := uint32(1); id <= 499; id += 2 {
 		conn.streams[id] = &serverStream{id: id, streamFlowState: streamFlowState{send: sendWindow{window: 65535}}}
 	}
-	conn.headerEncoder.init(defaultHeaderTableSize)
+	conn.initHeaderEncoder(defaultHeaderTableSize)
 	b.ReportAllocs()
 	for b.Loop() {
 		if err := conn.applySettings(settings); err != nil {
