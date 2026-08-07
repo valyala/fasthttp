@@ -1752,6 +1752,26 @@ var ErrTimeout = &timeoutError{}
 func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Lock()
 	c.MaxConns = newMaxConns
+	// Grown capacity must reach requests already parked in the wait queue;
+	// without this they sleep until a connection is released or they time out.
+	maxConns := newMaxConns
+	if maxConns <= 0 {
+		maxConns = DefaultMaxConnsPerHost
+	}
+	for c.connsCount < maxConns && c.connsWait != nil && c.connsWait.len() > 0 {
+		w := c.connsWait.popFront()
+		if !w.waiting() {
+			continue
+		}
+		if w.slotOnly {
+			if w.tryDeliverSlot() {
+				c.connsCount++
+			}
+			continue
+		}
+		c.connsCount++
+		go c.dialConnFor(w)
+	}
 	c.connsLock.Unlock()
 }
 
@@ -1974,6 +1994,16 @@ func (c *HostClient) decConnsCount() {
 
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
+	maxConns := c.MaxConns
+	if maxConns <= 0 {
+		maxConns = DefaultMaxConnsPerHost
+	}
+	if c.connsCount > maxConns {
+		// The limit shrank while this slot was held; retire it so the count
+		// converges on the new cap instead of handing it to a waiter.
+		c.connsCount--
+		return
+	}
 	handedOff := false
 	if q := c.connsWait; q != nil {
 		for q.len() > 0 {
