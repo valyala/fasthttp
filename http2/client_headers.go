@@ -196,16 +196,45 @@ func statusCodeFromDigits(status string) int {
 }
 
 func populateResponseTrailers(resp *fasthttp.Response, fields []hpack.HeaderField) error {
+	if err := validateResponseTrailerFields(fields); err != nil {
+		return err
+	}
+	if len(resp.Header.PeekTrailerKeys())+len(fields) <= trailerIndexThreshold {
+		for _, field := range fields {
+			if !hasTrailerKey(resp.Header.PeekTrailerKeys(), field.Name) {
+				if err := resp.Header.AddTrailer(field.Name); err != nil {
+					return err
+				}
+			}
+			resp.Header.Add(field.Name, field.Value)
+		}
+		return nil
+	}
+
+	// Indexed for the same reason as applyRequestTrailers: past the small-
+	// block threshold, a scan per field over the registered list turns
+	// quadratic on peer-controlled input.
+	known := make(map[string]struct{}, len(resp.Header.PeekTrailerKeys())+len(fields))
+	for _, key := range resp.Header.PeekTrailerKeys() {
+		known[strings.ToLower(string(key))] = struct{}{}
+	}
+	for _, field := range fields {
+		if _, exists := known[field.Name]; !exists {
+			if err := resp.Header.AddTrailer(field.Name); err != nil {
+				return err
+			}
+			known[field.Name] = struct{}{}
+		}
+		resp.Header.Add(field.Name, field.Value)
+	}
+	return nil
+}
+
+func validateResponseTrailerFields(fields []hpack.HeaderField) error {
 	for _, field := range fields {
 		if field.IsPseudo() || isConnectionSpecificHeader(field.Name) || field.Name == "te" {
 			return errInvalidResponseHeaders
 		}
-		if !hasTrailerKey(resp.Header.PeekTrailerKeys(), field.Name) {
-			if err := resp.Header.AddTrailer(field.Name); err != nil {
-				return err
-			}
-		}
-		resp.Header.Add(field.Name, field.Value)
 	}
 	return nil
 }

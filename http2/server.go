@@ -2416,14 +2416,37 @@ func errorCode(err error) xhttp2.ErrCode {
 	return xhttp2.ErrCodeProtocol
 }
 
+// trailerIndexThreshold is where trailer deduplication switches from scanning
+// the registered list to a map. The declared list and the block are both
+// peer-controlled and fit thousands of distinct names under the header-list
+// limit, where per-field scans turn quadratic
+// (BenchmarkApplyDistinctRequestTrailers); typical blocks hold a few names
+// and stay on the allocation-free scan.
+const trailerIndexThreshold = 16
+
 func applyRequestTrailers(header *fasthttp.RequestHeader, fields []hpack.HeaderField) error {
+	if len(header.PeekTrailerKeys())+len(fields) <= trailerIndexThreshold {
+		for _, field := range fields {
+			if !hasTrailerKey(header.PeekTrailerKeys(), field.Name) {
+				if err := header.AddTrailer(field.Name); err != nil {
+					return err
+				}
+			}
+			header.Add(field.Name, field.Value)
+		}
+		return nil
+	}
+
+	known := make(map[string]struct{}, len(header.PeekTrailerKeys())+len(fields))
+	for _, key := range header.PeekTrailerKeys() {
+		known[strings.ToLower(string(key))] = struct{}{}
+	}
 	for _, field := range fields {
-		// The trailer list is tiny, so a fold-insensitive scan beats building
-		// a map per block; AddTrailer keeps the list current for later fields.
-		if !hasTrailerKey(header.PeekTrailerKeys(), field.Name) {
+		if _, exists := known[field.Name]; !exists {
 			if err := header.AddTrailer(field.Name); err != nil {
 				return err
 			}
+			known[field.Name] = struct{}{}
 		}
 		header.Add(field.Name, field.Value)
 	}
