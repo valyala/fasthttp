@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 )
 
 // ErrProtocolNotSupported is returned when the protocol serving a request
@@ -310,6 +312,52 @@ func requestCtxRetainedBytes(requestCtx *RequestCtx) int {
 	if requestCtx.Response.body != nil {
 		retained += cap(requestCtx.Response.body.B)
 	}
+	retained += requestHeaderRetainedBytes(&requestCtx.Request.Header)
+	retained += responseHeaderRetainedBytes(&requestCtx.Response.Header)
+	return retained
+}
+
+func requestHeaderRetainedBytes(header *RequestHeader) int {
+	return headerRetainedBytes(&header.header) +
+		cap(header.method) + cap(header.requestURI) + cap(header.host) +
+		cap(header.userAgent) + cap(header.connectProtocol) + cap(header.rawHeaders)
+}
+
+func responseHeaderRetainedBytes(header *ResponseHeader) int {
+	return headerRetainedBytes(&header.header) + cap(header.statusMessage) +
+		cap(header.contentEncoding) + cap(header.server)
+}
+
+func headerRetainedBytes(header *header) int {
+	// Large field arrays are expensive to rescan after Reset has truncated
+	// their lengths. They are also exactly the arenas a per-connection cache
+	// should not retain; return a saturating estimate after O(1) checks.
+	if cap(header.h) > 256 || cap(header.cookies) > 256 ||
+		cap(header.mulHeader) > 256 || cap(header.trailer) > 256 {
+		return math.MaxInt / 4
+	}
+	retained := cap(header.h)*int(unsafe.Sizeof(argsKV{})) +
+		cap(header.cookies)*int(unsafe.Sizeof(argsKV{})) +
+		cap(header.mulHeader)*int(unsafe.Sizeof([]byte{})) +
+		cap(header.trailer)*int(unsafe.Sizeof([]byte{})) +
+		cap(header.bufK) + cap(header.bufV) + cap(header.contentLengthBytes) +
+		cap(header.contentType) + cap(header.protocol)
+	fields := header.h[:cap(header.h)]
+	for i := range fields {
+		retained += cap(fields[i].key) + cap(fields[i].value)
+	}
+	cookies := header.cookies[:cap(header.cookies)]
+	for i := range cookies {
+		retained += cap(cookies[i].key) + cap(cookies[i].value)
+	}
+	multi := header.mulHeader[:cap(header.mulHeader)]
+	for i := range multi {
+		retained += cap(multi[i])
+	}
+	trailers := header.trailer[:cap(header.trailer)]
+	for i := range trailers {
+		retained += cap(trailers[i])
+	}
 	return retained
 }
 
@@ -404,7 +452,6 @@ func (s *Server) RegisterProtocol(registration ProtocolRegistration) error { //n
 	})
 	if tlsConfig != nil {
 		s.TLSConfig = tlsConfig
-		s.tlsConfigOwner = tlsConfig
 	}
 
 	return nil
@@ -459,6 +506,14 @@ func prepareProtocolTLSConfig(
 		}
 	}
 	config.NextProtos = ordered
+	if current != nil {
+		// Preserve pointer identity for callers that already constructed a
+		// tls.Listener from Server.TLSConfig. Validation and ordering happen on
+		// the clone above, so a failure still leaves the caller's config intact.
+		current.MinVersion = config.MinVersion
+		current.NextProtos = config.NextProtos
+		return current, nil
+	}
 	return config, nil
 }
 
@@ -536,6 +591,10 @@ func (s *Server) serveUpgradedProtocolConn(
 ) (bool, error) {
 	s.registerProtocolConn(c)
 	defer s.unregisterProtocolConn(c)
+	// The HTTP/1 request is complete while the upgraded protocol waits for its
+	// client preface. Mark that handshake wait idle immediately so Shutdown can
+	// close it instead of waiting for the HTTP/1 initial-connection grace period.
+	idleConnTime.Store(time.Now().Unix())
 	ctx := &ProtocolServerContext{
 		server:       s,
 		conn:         c,
@@ -635,13 +694,23 @@ func (s *Server) detectCleartextProtocol(c net.Conn) (*registeredProtocol, []byt
 	}
 
 	prefix := make([]byte, 0, maxPrefaceLen)
-	var one [1]byte
 	emptyReads := 0
 	for {
-		n, err := c.Read(one[:])
+		// Read through the next candidate boundary. This preserves exact
+		// matching when registered prefaces have different lengths, while no
+		// longer forcing one syscall per byte when a full request is ready.
+		nextLen := maxPrefaceLen
+		for _, candidate := range candidates {
+			if length := len(candidate.cleartextPreface); length < nextLen {
+				nextLen = length
+			}
+		}
+		oldLen := len(prefix)
+		prefix = prefix[:nextLen]
+		n, err := c.Read(prefix[oldLen:])
+		prefix = prefix[:oldLen+n]
 		if n > 0 {
 			emptyReads = 0
-			prefix = append(prefix, one[0])
 			remaining := candidates[:0]
 			for _, candidate := range candidates {
 				preface := candidate.cleartextPreface

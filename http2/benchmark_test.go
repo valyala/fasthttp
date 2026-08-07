@@ -701,3 +701,61 @@ func BenchmarkHTTP1VersusHTTP2(b *testing.B) {
 		assertBenchmarkConnections(b, int64(http2Client.ConnsCount()))
 	})
 }
+
+func BenchmarkRequestBodyTinyChunks(b *testing.B) {
+	for _, size := range []int{128 << 10, 1 << 20} {
+		b.Run(fmt.Sprintf("bytes-%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				body := newRequestBody(nil)
+				for range size {
+					if err := body.writeOwned([]byte{'x'}, nil); err != nil {
+						b.Fatal(err)
+					}
+				}
+				body.discardWithError(errStreamClosed)
+			}
+		})
+	}
+}
+
+func BenchmarkApplyDistinctRequestTrailers(b *testing.B) {
+	const fieldCount = 1724
+	fields := make([]hpack.HeaderField, fieldCount)
+	for i := range fields {
+		fields[i] = hpack.HeaderField{Name: fmt.Sprintf("t%05x", i)}
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		var validation, request fasthttp.RequestHeader
+		if err := applyRequestTrailers(&validation, fields); err != nil {
+			b.Fatal(err)
+		}
+		if err := applyRequestTrailers(&request, fields); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkRepeatedInitialWindowSettings(b *testing.B) {
+	settings := make([]xhttp2.Setting, 2730)
+	for i := range settings {
+		settings[i] = xhttp2.Setting{ID: xhttp2.SettingInitialWindowSize, Val: 65535}
+	}
+	var headerBlock bytes.Buffer
+	conn := &serverConn{
+		config:                  serverConfig{maxEncoderTableSize: defaultHeaderTableSize},
+		streams:                 make(map[uint32]*serverStream, 250),
+		peerInitialStreamWindow: 65535,
+		encoder:                 hpack.NewEncoder(&headerBlock),
+	}
+	for id := uint32(1); id <= 499; id += 2 {
+		conn.streams[id] = &serverStream{id: id, sendWindow: 65535}
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := conn.applySettings(settings); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

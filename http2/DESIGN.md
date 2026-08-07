@@ -105,15 +105,38 @@ See `examples/grpcserver`.
 
 Bounded: concurrent streams, event/command queues, frame size, HPACK tables,
 header list size, cached header strings, push depth, pending priority
-updates, closed-stream tombstones. More than 1000 RST_STREAM/s from a peer or
-a CONTINUATION run longer than 64 frames closes the connection with
-`ENHANCE_YOUR_CALM`.
+updates, closed-stream tombstones. More than 1000 peer or peer-induced
+RST_STREAM/s, or a CONTINUATION run longer than 64 frames, closes the
+connection with `ENHANCE_YOUR_CALM`.
 
-Two defaults were chosen by measurement:
+Two independent upload defaults are intentional:
 
-**Connection receive window: 4 MiB** (1 MiB per stream), same as HTTP/1's
-default `MaxRequestBodySize`. Configurable via
-`MaxUploadBufferPerConnection`.
+**Connection receive flow-control window: 4 MiB** (1 MiB per stream), same as
+the measured HTTP/2 connection-level window used by this implementation.
+`MaxUploadBufferPerConnection` controls this wire-level window only. It limits
+unconsumed DATA in flight and is replenished as the server copies or consumes
+request bytes; it is not a cap on the total size of ordinary buffered bodies.
+
+**Buffered request-body budget: 128 MiB per connection.**
+`MaxBufferedRequestBodyPerConnection` is a separate hard aggregate memory
+budget held until each buffered request's handler and stream are released. A
+stream that would exceed this budget is reset with `ENHANCE_YOUR_CALM`.
+Streaming bodies return budget as handlers consume data. The larger default is
+deliberate: ordinary HTTP/2 multiplexing must allow, for example, eight
+concurrent 1 MiB uploads and thirty-two concurrent 4 MiB uploads without
+turning connection memory pressure into routine request failure. Services with
+larger or more numerous buffered uploads can raise the budget explicitly or
+enable `StreamRequestBody`.
+
+This is a retained-body limit, not a total connection heap limit. The
+independent RequestCtx cache described below can coexist with active bodies;
+deployments with a strict per-connection memory target must size both
+`MaxBufferedRequestBodyPerConnection` and
+`Server.MaxProtocolRequestCtxCacheBytes`.
+
+`Server.MaxRequestBodySize` remains the independent per-request limit and
+defaults to 4 MiB. Increasing the aggregate budget does not make an 8 MiB
+individual request valid unless that server limit is raised too.
 
 | | 16 MiB | 4 MiB | 1 MiB (x/net default) |
 | --- | ---: | ---: | ---: |
@@ -122,17 +145,38 @@ default `MaxRequestBodySize`. Configurable via
 | small GET, 100 streams | 5.84 us | 5.28 us | 5.16 us |
 | small GET, 1000 streams | 5.77 us | 5.49 us | 5.45 us |
 
-16 MiB doesn't help anything. 1 MiB makes streamed uploads 27% slower. So
-4 MiB.
+16 MiB doesn't help the measured flow-control path. 1 MiB makes streamed
+uploads 27% slower. So the wire-level default remains 4 MiB; the independent
+buffered-body budget is 128 MiB so normal multiplexed uploads are not rejected
+at the flow-control window.
 
 **Per-connection RequestCtx cache: 128 MiB** (max 256 entries). Released
 contexts are cached on the connection before falling back to the shared
 server pool, so a busy connection keeps its body buffers. Measured with 1 MiB
-POSTs: 86 B/op at 128 MiB, 368 KB/op at 32 MiB, 2.8 MB/op at 8 MiB. Downside:
-this memory is only freed when the connection closes, not by GC.
+POSTs: 86 B/op at 128 MiB, 368 KB/op at 32 MiB, 2.8 MB/op at 8 MiB. Body and
+header arena capacities both count against the limit. Downside: this memory is
+only freed when the connection closes, not by GC.
 `Server.MaxProtocolRequestCtxCacheBytes` changes the limit, negative disables
 the cache. x/net buffers bodies in fixed 16 KiB pools instead, which is why
 it allocates on every request.
+
+`SETTINGS_MAX_HEADER_LIST_SIZE` uses RFC 9113's name + value + 32 accounting;
+the Go objects materialized for those fields have additional slice and struct
+overhead. Capacity planning therefore must not treat the advertised header
+list size multiplied by concurrent streams as an exact heap ceiling.
+
+`WriteByteTimeout` also bounds a response stream that cannot make DATA
+progress because the peer withholds flow-control credit. The default is 15
+seconds, so completed handlers and body-stream pumps cannot remain pinned
+forever behind a zero send window. The fixed HTTP/2 client preface has its own
+10-second fallback when all server read/idle timeouts are zero.
+
+A fully handshaken idle HTTP/2 connection still retains frame, HPACK, read, and
+write state and is materially larger than an idle HTTP/1 connection. Deployments
+must size `Server.Concurrency` and `MaxConnsPerIP` for that footprint and set
+`ReadIdleTimeout` when silent established peers should be reaped. The protocol
+package cannot silently lower the shared server-wide connection limit without
+also changing HTTP/1 capacity on the same listener.
 
 ## Teardown
 

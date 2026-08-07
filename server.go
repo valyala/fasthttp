@@ -225,14 +225,11 @@ type Server struct {
 	// by ServeTLS, ServeTLSEmbed, ListenAndServeTLS, ListenAndServeTLSEmbed,
 	// AppendCert, AppendCertEmbed and NextProto.
 	//
-	// Note that this value is cloned before the server first mutates it — by
-	// ServeTLS, ServeTLSEmbed, ListenAndServeTLS and ListenAndServeTLSEmbed,
-	// and also by AppendCert, AppendCertEmbed, NextProto and RegisterProtocol —
-	// so it's not possible to modify the configuration the server uses with
-	// methods like tls.Config.SetSessionTicketKeys, and mutations made to this
-	// value after such a call aren't observed by the server.
-	// To use SetSessionTicketKeys, use Server.Serve with a TLS Listener
-	// instead.
+	// ServeTLS, ServeTLSEmbed, ListenAndServeTLS and ListenAndServeTLSEmbed
+	// clone this value for their listener. AppendCert, AppendCertEmbed,
+	// NextProto and RegisterProtocol mutate it in place so a caller that builds
+	// its own tls.Listener from the same config observes certificates and ALPN
+	// registrations, as it did before protocol registration was added.
 	TLSConfig *tls.Config
 
 	// FormValueFunc customizes the behavior of RequestCtx.FormValue.
@@ -252,9 +249,8 @@ type Server struct {
 	// Zero means 128MB per connection. Negative disables the cache.
 	MaxProtocolRequestCtxCacheBytes int
 
-	nextProtos     map[string]ServeHandler
-	protocols      []registeredProtocol
-	tlsConfigOwner *tls.Config
+	nextProtos map[string]ServeHandler
+	protocols  []registeredProtocol
 
 	concurrencyCh     chan struct{}
 	concurrencyChOnce sync.Once
@@ -2060,12 +2056,6 @@ func (s *Server) appendCertLocked(cert *tls.Certificate) {
 func (s *Server) configTLS() {
 	if s.TLSConfig == nil {
 		s.TLSConfig = &tls.Config{}
-		s.tlsConfigOwner = s.TLSConfig
-		return
-	}
-	if s.TLSConfig != s.tlsConfigOwner {
-		s.TLSConfig = s.TLSConfig.Clone()
-		s.tlsConfigOwner = s.TLSConfig
 	}
 }
 
@@ -2596,9 +2586,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
 		if err == nil {
-			idleConnTime.Store(0)
-			s.setState(c, StateActive)
-
 			if s.ReadTimeout > 0 && (connRequestNum != 1 || cleartextReadDeadline.IsZero()) {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					break
@@ -2636,6 +2623,14 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			}
 
 			if err == nil {
+				// The connection counts as active once a request has actually
+				// arrived, which is also what StateActive means. Marking it any
+				// earlier cleared the grace stamp taken when the connection was
+				// accepted, putting a peer that connects and then says nothing
+				// beyond the reach of Shutdown.
+				idleConnTime.Store(0)
+				s.setState(c, StateActive)
+
 				if onHdrRecv := s.HeaderReceived; onHdrRecv != nil {
 					reqConf := onHdrRecv(&ctx.Request.Header)
 					if reqConf.ReadTimeout > 0 {
@@ -2783,10 +2778,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
 			if len(s.protocols) != 0 {
-				if protocol := s.matchProtocolUpgrade(ctx, br); protocol != nil {
+				if protocol := s.matchProtocolUpgrade(ctx, br, bw); protocol != nil {
 					// The protocol sets its own deadlines; the HTTP/1 request
 					// deadline would kill an otherwise active connection.
-					if err = c.SetReadDeadline(zeroTime); err != nil {
+					if err = c.SetDeadline(zeroTime); err != nil {
 						break
 					}
 					if handled, upgradeErr := s.serveUpgradedProtocolConn(c, protocol, ctx, idleConnTime); handled {
@@ -2934,7 +2929,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	return err
 }
 
-func (s *Server) matchProtocolUpgrade(ctx *RequestCtx, br *bufio.Reader) *registeredProtocol {
+func (s *Server) matchProtocolUpgrade(ctx *RequestCtx, br *bufio.Reader, bw *bufio.Writer) *registeredProtocol {
 	// RFC 9110 7.8: an Upgrade field in an HTTP/1.0 request must be ignored.
 	if !ctx.Request.Header.IsHTTP11() {
 		return nil
@@ -2944,7 +2939,7 @@ func (s *Server) matchProtocolUpgrade(ctx *RequestCtx, br *bufio.Reader) *regist
 	}
 	// Buffered bytes would be invisible to the protocol, which reads the
 	// connection directly.
-	if br != nil && br.Buffered() != 0 {
+	if (br != nil && br.Buffered() != 0) || (bw != nil && bw.Buffered() != 0) {
 		return nil
 	}
 	if !ctx.Request.Header.ConnectionUpgrade() {

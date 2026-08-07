@@ -17,6 +17,10 @@ import (
 )
 
 func upgradeTestServer(t *testing.T) net.Listener {
+	return upgradeTestServerConfig(t, &ServerConfig{})
+}
+
+func upgradeTestServerConfig(t *testing.T, config *ServerConfig) net.Listener {
 	t.Helper()
 	server := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {
@@ -24,7 +28,7 @@ func upgradeTestServer(t *testing.T) net.Listener {
 				ctx.Method(), ctx.Path(), ctx.Request.Header.Protocol(), ctx.Request.Body())
 		},
 	}
-	if err := ConfigureServer(server, ServerConfig{}); err != nil {
+	if err := ConfigureServer(server, *config); err != nil {
 		t.Fatalf("ConfigureServer() error: %v", err)
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -34,6 +38,83 @@ func upgradeTestServer(t *testing.T) net.Listener {
 	go server.Serve(listener) //nolint:errcheck
 	t.Cleanup(func() { listener.Close() })
 	return listener
+}
+
+func TestUpgradeH2CPrefaceUsesIdleTimeout(t *testing.T) {
+	listener := upgradeTestServerConfig(t, &ServerConfig{IdleTimeout: 50 * time.Millisecond})
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(time.Second))
+
+	fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: example.com\r\n"+
+		"Connection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\n"+
+		"HTTP2-Settings: %s\r\n\r\n", h2SettingsHeader)
+	reader := bufio.NewReader(conn)
+	if response := readHTTP1Response(t, reader); !strings.HasPrefix(response, "HTTP/1.1 101 ") {
+		t.Fatalf("upgrade response = %q, want 101", response)
+	}
+	framer := xhttp2.NewFramer(nil, reader)
+	for {
+		if _, err := framer.ReadFrame(); err != nil {
+			if isTimeout(err) {
+				t.Fatal("upgraded connection survived past IdleTimeout without a client preface")
+			}
+			return
+		}
+	}
+}
+
+func TestUpgradeH2CShutdownDoesNotWaitForPrefaceGracePeriod(t *testing.T) {
+	server := &fasthttp.Server{}
+	if err := ConfigureServer(server, ServerConfig{}); err != nil {
+		t.Fatalf("ConfigureServer() error: %v", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	defer listener.Close()
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- server.Serve(listener) }()
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		listener.Close()
+		t.Fatalf("dialing: %v", err)
+	}
+	defer conn.Close()
+	defer func() {
+		if err := <-serveDone; err != nil {
+			t.Errorf("Serve() error: %v", err)
+		}
+	}()
+	if _, err := fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: example.com\r\n"+
+		"Connection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\n"+
+		"HTTP2-Settings: %s\r\n\r\n", h2SettingsHeader); err != nil {
+		t.Fatalf("writing upgrade request: %v", err)
+	}
+	reader := bufio.NewReader(conn)
+	if response := readHTTP1Response(t, reader); !strings.HasPrefix(response, "HTTP/1.1 101 ") {
+		t.Fatalf("upgrade response = %q, want 101", response)
+	}
+	start := time.Now()
+	shutdownDone := make(chan error, 1)
+	go func() { shutdownDone <- server.Shutdown() }()
+	select {
+	case err := <-shutdownDone:
+		if err != nil {
+			t.Fatalf("Shutdown() error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		_ = conn.Close()
+		_ = listener.Close()
+		t.Fatal("Shutdown() waited for the fixed h2c preface grace period")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("Shutdown() took %v, want at most 1s", elapsed)
+	}
 }
 
 func readHTTP1Response(t *testing.T, reader *bufio.Reader) string {
