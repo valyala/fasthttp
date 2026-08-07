@@ -13,16 +13,20 @@ import (
 const (
 	clientPreface = "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
 
-	defaultMaxConcurrentStreams    = 250
-	defaultMaxHeaderListSize       = 64 << 10
-	defaultHeaderTableSize         = 4096
-	defaultMaxFrameSize            = 16 << 10
-	defaultWriteBufferSize         = 64 << 10
-	defaultReadBufferSize          = 16 << 10
-	maxResponseBodyPreallocation   = 1 << 20
+	defaultMaxConcurrentStreams = 250
+	defaultMaxHeaderListSize    = 64 << 10
+	defaultHeaderTableSize      = 4096
+	defaultMaxFrameSize         = 16 << 10
+	defaultWriteBufferSize      = 64 << 10
+	defaultReadBufferSize       = 16 << 10
+	// Keep a useful small-response fast path without allowing one large
+	// Content-Length field on every concurrent stream to commit hundreds of
+	// MiB before a single DATA byte arrives.
+	maxResponseBodyPreallocation   = 64 << 10
 	defaultConnectionWindowSize    = 4 << 20
 	defaultStreamWindowSize        = 1 << 20
-	defaultMaxQueuedCommands       = 10_000
+	defaultBufferedRequestBodySize = 128 << 20
+	defaultMaxQueuedCommands       = 256
 	maxConfiguredConcurrentStreams = 1 << 20
 	maxConfiguredHeaderListSize    = 64 << 20
 	maxConfiguredHeaderTableSize   = 64 << 20
@@ -32,6 +36,11 @@ const (
 // defaultWriteByteTimeout bounds a write that makes no progress, not a whole
 // write, so a slow but healthy peer is unaffected.
 const defaultWriteByteTimeout = 15 * time.Second
+
+// The HTTP/2 preface is a fixed handshake message that compliant peers send
+// immediately. Bound it even when the HTTP/1-style server timeouts are zero so
+// h2c upgrades cannot park a fully allocated protocol connection forever.
+const defaultPrefaceTimeout = 10 * time.Second
 
 // flushCoalesceTimeout bounds how long a flush waits for handlers started in
 // the current batch to finish.
@@ -268,7 +277,7 @@ type ServerConfig struct {
 
 	// MaxQueuedCommands caps the handler events — response chunks, pushes,
 	// stream completions — queued for the connection's write loop. Producers
-	// block once it fills. Zero means 10000. Peer-solicited control frames
+	// block once it fills. Zero means 256. Peer-solicited control frames
 	// are written inline and never queue here, so a PING or SETTINGS flood
 	// meets read backpressure rather than unbounded buffering.
 	MaxQueuedCommands int
@@ -281,20 +290,29 @@ type ServerConfig struct {
 	// push. Zero means 1: handler-initiated pushes may not push further.
 	MaxPushDepth uint8
 
-	// MaxRapidResetsPerSecond caps client RST_STREAM frames per second
-	// before the connection is closed with ENHANCE_YOUR_CALM, mitigating
-	// CVE-2023-44487-class attacks. Zero means 1000.
+	// MaxRapidResetsPerSecond caps peer RST_STREAM frames plus RST_STREAM
+	// responses induced by invalid peer input per second before the connection
+	// is closed with ENHANCE_YOUR_CALM, mitigating rapid-cancellation and
+	// reset-oracle attacks. Zero means 1000.
 	MaxRapidResetsPerSecond uint32
 
 	// MaxUploadBufferPerConnection is the connection-level flow-control
-	// window: the request-body bytes a client may send before the server
-	// acknowledges consuming them. Zero means 4 MiB; values below 65535 are
-	// rejected.
+	// window advertised to the peer for request DATA. It limits the amount of
+	// unconsumed DATA in flight, not the total size of ordinary request bodies
+	// retained while handlers are waiting to run. Zero means 4 MiB; values
+	// below 65535 are rejected.
 	MaxUploadBufferPerConnection int32
 
 	// MaxUploadBufferPerStream is the per-stream flow-control window
 	// advertised through SETTINGS_INITIAL_WINDOW_SIZE. Zero means 1 MiB.
 	MaxUploadBufferPerStream int32
+
+	// MaxBufferedRequestBodyPerConnection is the hard aggregate limit for
+	// ordinary request bodies that fasthttp buffers before invoking their
+	// handlers. Once this separate memory budget is occupied, additional
+	// buffered-body streams are reset until earlier handlers return. Streaming
+	// bodies return budget as the handler reads them. Zero means 128 MiB.
+	MaxBufferedRequestBodyPerConnection int32
 
 	// IdleTimeout closes a connection gracefully after it has had no active
 	// streams for this long. Zero falls back to Server.IdleTimeout, then to
@@ -309,8 +327,9 @@ type ServerConfig struct {
 	// unanswered before the connection is torn down. Zero means 15 seconds.
 	PingTimeout time.Duration
 
-	// WriteByteTimeout bounds how long a single physical write may make no
-	// progress before the connection is torn down. Zero falls back to
+	// WriteByteTimeout bounds how long a physical write or an individual
+	// response stream blocked by peer flow control may make no progress before
+	// the connection or stream is torn down. Zero falls back to
 	// Server.WriteTimeout, then to 15 seconds.
 	WriteByteTimeout time.Duration
 
@@ -340,6 +359,7 @@ type serverConfig struct {
 	maxRapidResetsPerSecond uint32
 	connectionWindowSize    int32
 	streamWindowSize        int32
+	maxBufferedRequestBody  int32
 	idleTimeout             time.Duration
 	readIdleTimeout         time.Duration
 	pingTimeout             time.Duration
@@ -362,6 +382,7 @@ func normalizeServerConfig(s *fasthttp.Server, cfg *ServerConfig) (serverConfig,
 		maxRapidResetsPerSecond: cfg.MaxRapidResetsPerSecond,
 		connectionWindowSize:    cfg.MaxUploadBufferPerConnection,
 		streamWindowSize:        cfg.MaxUploadBufferPerStream,
+		maxBufferedRequestBody:  cfg.MaxBufferedRequestBodyPerConnection,
 		idleTimeout:             cfg.IdleTimeout,
 		readIdleTimeout:         cfg.ReadIdleTimeout,
 		pingTimeout:             cfg.PingTimeout,
@@ -422,6 +443,12 @@ func normalizeServerConfig(s *fasthttp.Server, cfg *ServerConfig) (serverConfig,
 	}
 	if result.connectionWindowSize < 65535 {
 		return serverConfig{}, errors.New("http2: connection upload window must be at least 65535")
+	}
+	if result.maxBufferedRequestBody == 0 {
+		result.maxBufferedRequestBody = defaultBufferedRequestBodySize
+	}
+	if result.maxBufferedRequestBody < 1 {
+		return serverConfig{}, errors.New("http2: buffered request body limit must be positive")
 	}
 	if result.streamWindowSize == 0 {
 		result.streamWindowSize = defaultStreamWindowSize

@@ -123,6 +123,77 @@ func TestServerRequestResponse(t *testing.T) {
 	}
 }
 
+func TestConcurrentBufferedUploadsShareConnection(t *testing.T) {
+	testCases := []struct {
+		name      string
+		uploads   int
+		bodyBytes int
+	}{
+		{name: "eight 1 MiB bodies", uploads: 8, bodyBytes: 1 << 20},
+		{name: "four 4 MiB bodies", uploads: 4, bodyBytes: 4 << 20},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			started := make(chan struct{}, testCase.uploads)
+			release := make(chan struct{})
+			server := &fasthttp.Server{
+				Handler: func(ctx *fasthttp.RequestCtx) {
+					started <- struct{}{}
+					<-release
+					ctx.SetBodyString("ok")
+				},
+			}
+			testServer := newTestServer(t, server, ServerConfig{})
+			testServer.transport.StrictMaxConcurrentStreams = true
+
+			var wg sync.WaitGroup
+			errs := make(chan error, testCase.uploads)
+			body := bytes.Repeat([]byte{'x'}, testCase.bodyBytes)
+			for range testCase.uploads {
+				wg.Go(func() {
+					req, err := stdhttp.NewRequest(stdhttp.MethodPost, testServer.URL("/upload"), bytes.NewReader(body))
+					if err != nil {
+						errs <- err
+						return
+					}
+					resp, err := testServer.client.Do(req)
+					if err == nil {
+						_, err = io.Copy(io.Discard, resp.Body)
+						closeErr := resp.Body.Close()
+						if err == nil {
+							err = closeErr
+						}
+					}
+					errs <- err
+				})
+			}
+
+			deadline := time.NewTimer(5 * time.Second)
+			defer deadline.Stop()
+			for i := range testCase.uploads {
+				select {
+				case <-started:
+				case <-deadline.C:
+					close(release)
+					wg.Wait()
+					t.Fatalf("only %d/%d upload handlers started", i, testCase.uploads)
+				}
+			}
+			close(release)
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				if err != nil {
+					t.Fatalf("concurrent buffered upload failed: %v", err)
+				}
+			}
+			if got := testServer.dials.Load(); got != 1 {
+				t.Fatalf("concurrent uploads used %d TCP connections, want one", got)
+			}
+		})
+	}
+}
+
 func TestServerSendsDefaultDate(t *testing.T) {
 	for _, testCase := range []struct {
 		name          string
@@ -192,6 +263,35 @@ func TestNormalizeServerConfigInheritsReadTimeoutForIdleConnections(t *testing.T
 	}
 }
 
+func TestNormalizeServerConfigSeparatesFlowAndBufferedBodyLimits(t *testing.T) {
+	config, err := normalizeServerConfig(&fasthttp.Server{}, &ServerConfig{})
+	if err != nil {
+		t.Fatalf("normalizeServerConfig() error: %v", err)
+	}
+	if config.connectionWindowSize != defaultConnectionWindowSize {
+		t.Fatalf("connection window = %d, want %d", config.connectionWindowSize, defaultConnectionWindowSize)
+	}
+	if config.maxBufferedRequestBody != defaultBufferedRequestBodySize {
+		t.Fatalf("buffered body limit = %d, want %d", config.maxBufferedRequestBody, defaultBufferedRequestBodySize)
+	}
+
+	const (
+		flowWindow = 2 << 20
+		bodyLimit  = 32 << 20
+	)
+	config, err = normalizeServerConfig(&fasthttp.Server{}, &ServerConfig{
+		MaxUploadBufferPerConnection:        flowWindow,
+		MaxBufferedRequestBodyPerConnection: bodyLimit,
+	})
+	if err != nil {
+		t.Fatalf("normalizeServerConfig(custom) error: %v", err)
+	}
+	if config.connectionWindowSize != flowWindow || config.maxBufferedRequestBody != bodyLimit {
+		t.Fatalf("custom limits = {flow:%d buffered:%d}, want {%d %d}",
+			config.connectionWindowSize, config.maxBufferedRequestBody, flowWindow, bodyLimit)
+	}
+}
+
 func TestServerWriteTimeoutBoundsBlockedPeer(t *testing.T) {
 	serverConn, peerConn := net.Pipe()
 	defer peerConn.Close()
@@ -234,9 +334,8 @@ func TestServerReadTimeoutCancelsOnlyRequestStream(t *testing.T) {
 	}
 	stream := &serverStream{id: 3}
 	conn.armRequestReadTimeout(stream)
-	deadline, ok := stream.Deadline()
-	if !ok || time.Until(deadline) <= 0 {
-		t.Fatalf("stream deadline = %v, ok=%v", deadline, ok)
+	if deadline, ok := stream.Deadline(); ok {
+		t.Fatalf("transport read timeout leaked as application deadline %v", deadline)
 	}
 	select {
 	case command := <-conn.commands:
@@ -398,6 +497,53 @@ func TestServerRapidResetLimit(t *testing.T) {
 	}
 }
 
+func TestServerInitiatedResetUsesRapidResetLimit(t *testing.T) {
+	var wire bytes.Buffer
+	conn := &serverConn{
+		config: serverConfig{
+			maxConcurrentStreams:    3,
+			maxRapidResetsPerSecond: 2,
+		},
+		framer:  xhttp2.NewFramer(&wire, nil),
+		streams: make(map[uint32]*serverStream),
+	}
+	for _, streamID := range []uint32{1, 3, 5} {
+		stream := newServerStream(conn, streamID)
+		stream.handlerStarted = true // keep reset streams out of the pool
+		conn.streams[streamID] = stream
+	}
+	for _, streamID := range []uint32{1, 3} {
+		if err := conn.resetStream(streamID, xhttp2.ErrCodeFlowControl, errors.New("peer-triggered")); err != nil {
+			t.Fatalf("resetStream(%d) error: %v", streamID, err)
+		}
+	}
+	err := conn.resetStream(5, xhttp2.ErrCodeFlowControl, errors.New("peer-triggered"))
+	var protocolErr *serverError
+	if !errors.As(err, &protocolErr) || protocolErr.code != xhttp2.ErrCodeEnhanceYourCalm {
+		t.Fatalf("third server reset error = %v, want ENHANCE_YOUR_CALM", err)
+	}
+}
+
+func TestClosedPushFramesAreNotIdleStreamErrors(t *testing.T) {
+	conn := &serverConn{
+		config:             serverConfig{maxRapidResetsPerSecond: 100},
+		streams:            make(map[uint32]*serverStream),
+		lastClientStreamID: 1,
+		nextPushStreamID:   4, // stream 2 was promised and has since closed
+	}
+	if err := conn.processRST(&incomingFrame{streamID: 2, errCode: xhttp2.ErrCodeCancel}); err != nil {
+		t.Fatalf("late reset of pushed stream: %v", err)
+	}
+	if err := conn.processWindowUpdate(&incomingFrame{streamID: 2, increment: 1000}); err != nil {
+		t.Fatalf("late window update of pushed stream: %v", err)
+	}
+	err := conn.processRST(&incomingFrame{streamID: 4, errCode: xhttp2.ErrCodeCancel})
+	var protocolErr *serverError
+	if !errors.As(err, &protocolErr) || protocolErr.code != xhttp2.ErrCodeProtocol {
+		t.Fatalf("reset of unpromised stream error = %v, want PROTOCOL_ERROR", err)
+	}
+}
+
 func TestReadLoopPreservesStreamErrorScope(t *testing.T) {
 	wire := bufio.NewReader(bytes.NewReader([]byte{
 		0, 0, 4, byte(xhttp2.FrameWindowUpdate), 0, 0, 0, 0, 1,
@@ -414,8 +560,29 @@ func TestReadLoopPreservesStreamErrorScope(t *testing.T) {
 	go conn.readLoop()
 	event := <-conn.events
 	cancel(nil)
-	if event.kind != incomingFrameStreamError || event.streamID != 1 || event.errCode != xhttp2.ErrCodeProtocol {
+	if event.kind != incomingFrameStreamError || event.frameType != xhttp2.FrameWindowUpdate ||
+		event.streamID != 1 || event.errCode != xhttp2.ErrCodeProtocol {
 		t.Fatalf("readLoop() event = {kind:%d stream:%d code:%v err:%v}", event.kind, event.streamID, event.errCode, event.err)
+	}
+	state := &serverConn{streams: make(map[uint32]*serverStream)}
+	err := state.processHeaderStreamError(&event)
+	var protocolErr *serverError
+	if !errors.As(err, &protocolErr) || protocolErr.code != xhttp2.ErrCodeProtocol {
+		t.Fatalf("idle WINDOW_UPDATE stream error = %v, want connection PROTOCOL_ERROR", err)
+	}
+}
+
+func TestMalformedHeadersPaddingIsCompressionError(t *testing.T) {
+	wire := bufio.NewReader(bytes.NewReader([]byte{
+		0, 0, 2, byte(xhttp2.FrameHeaders),
+		byte(xhttp2.FlagHeadersPadded | xhttp2.FlagHeadersEndHeaders),
+		0, 0, 0, 1,
+		0xff, 0,
+	}))
+	framer := xhttp2.NewFramer(nil, wire)
+	reader := newFrameReader(framer, wire)
+	if _, err := reader.readFrame(); errorCode(err) != xhttp2.ErrCodeCompression {
+		t.Fatalf("malformed padding error = %v (%v), want COMPRESSION_ERROR", err, errorCode(err))
 	}
 }
 
@@ -717,7 +884,7 @@ func TestProcessStreamingDataTransfersOwnershipWithoutConsumingPayload(t *testin
 	stream.body.discardWithError(errStreamClosed)
 }
 
-func TestProcessDataReturnsConnectionCreditForClosedStream(t *testing.T) {
+func TestProcessDataBatchesConnectionCreditForClosedStream(t *testing.T) {
 	const (
 		windowSize = int64(1024)
 		flowLength = 120
@@ -745,10 +912,65 @@ func TestProcessDataReturnsConnectionCreditForClosedStream(t *testing.T) {
 	if err := conn.processData(&event); err != nil {
 		t.Fatalf("processData() error: %v", err)
 	}
-	if conn.receiveConnectionWindow != windowSize {
-		t.Fatalf("connection receive window = %d, want %d", conn.receiveConnectionWindow, windowSize)
+	if want := windowSize - flowLength; conn.receiveConnectionWindow != want {
+		t.Fatalf("connection receive window = %d, want %d", conn.receiveConnectionWindow, want)
 	}
-	requireConnectionWindowUpdate(t, wire.Bytes(), flowLength)
+	if conn.pendingConnectionUpdate != flowLength {
+		t.Fatalf("pending connection update = %d, want %d", conn.pendingConnectionUpdate, flowLength)
+	}
+	event.flowLength = int(windowSize/2) - flowLength
+	event.data = bytes.Repeat([]byte{'x'}, event.flowLength)
+	if err := conn.processData(&event); err != nil {
+		t.Fatalf("second processData() error: %v", err)
+	}
+	if conn.receiveConnectionWindow != windowSize {
+		t.Fatalf("connection receive window after batch = %d, want %d", conn.receiveConnectionWindow, windowSize)
+	}
+	requireConnectionWindowUpdate(t, wire.Bytes(), uint32(windowSize/2))
+}
+
+func TestBufferedRequestBodiesRespectConfiguredBudget(t *testing.T) {
+	const limit = int64(8)
+	var wire bytes.Buffer
+	conn := &serverConn{
+		config: serverConfig{
+			connectionWindowSize:    64,
+			streamWindowSize:        64,
+			maxBufferedRequestBody:  int32(limit),
+			maxConcurrentStreams:    2,
+			maxRapidResetsPerSecond: 100,
+		},
+		framer:                  xhttp2.NewFramer(&wire, nil),
+		streams:                 make(map[uint32]*serverStream),
+		closedClientStreams:     make(map[uint32]bool),
+		receiveConnectionWindow: 64,
+	}
+	newStream := func(id uint32) *serverStream {
+		stream := newServerStream(conn, id)
+		stream.request = &fasthttp.RequestCtx{}
+		stream.maxBody = 64
+		stream.expectedBody = -1
+		stream.recvWindow = 64
+		stream.handlerStarted = true // keep a reset stream inspectable
+		conn.streams[id] = stream
+		return stream
+	}
+	first := newStream(1)
+	second := newStream(3)
+	if err := conn.processData(&incomingFrame{
+		streamID: 1, flowLength: int(limit), data: bytes.Repeat([]byte{'a'}, int(limit)),
+	}); err != nil {
+		t.Fatalf("filling connection body budget: %v", err)
+	}
+	if err := conn.processData(&incomingFrame{streamID: 3, flowLength: 1, data: []byte{'b'}}); err != nil {
+		t.Fatalf("over-budget body frame: %v", err)
+	}
+	if conn.bufferedRequestBytes != limit || first.bufferedBytes != limit {
+		t.Fatalf("buffered bytes = connection:%d stream:%d, want %d", conn.bufferedRequestBytes, first.bufferedBytes, limit)
+	}
+	if !second.isReset || second.bufferedBytes != 0 {
+		t.Fatalf("over-budget stream = {reset:%v buffered:%d}, want reset with no retained body", second.isReset, second.bufferedBytes)
+	}
 }
 
 func TestProcessDataDoesNotDoubleCreditClosedRequestBody(t *testing.T) {
@@ -795,6 +1017,9 @@ func TestProcessDataDoesNotDoubleCreditClosedRequestBody(t *testing.T) {
 	}
 	if credited != 4 {
 		t.Fatalf("connection credit = %d, want 4", credited)
+	}
+	if !stream.isReset || len(stream.pendingData) != 0 {
+		t.Fatalf("DATA after END_STREAM left stream reset=%v pending=%d; want reset with no response", stream.isReset, len(stream.pendingData))
 	}
 }
 
@@ -1005,6 +1230,80 @@ func TestPeerResetDropsPendingResponseBufferBeforeAcknowledging(t *testing.T) {
 	}
 	if err := conn.flushResponses(); err != nil {
 		t.Fatalf("flushResponses() error: %v", err)
+	}
+}
+
+func TestCancelAcceptedStreamWriteReportsPartialAndDropsRemainder(t *testing.T) {
+	var wire bytes.Buffer
+	conn := &serverConn{
+		config: serverConfig{
+			maxConcurrentStreams:    1,
+			maxRapidResetsPerSecond: 100,
+			writeByteTimeout:        time.Second,
+		},
+		framer:               xhttp2.NewFramer(&wire, nil),
+		streams:              make(map[uint32]*serverStream),
+		peerConnectionWindow: 2,
+		peerMaxFrameSize:     defaultMaxFrameSize,
+	}
+	stream := newServerStream(conn, 1)
+	stream.handlerStarted = true
+	stream.sendWindow = 2
+	conn.streams[stream.id] = stream
+	write := &streamWrite{result: make(chan streamWriteResult, 1)}
+	if err := conn.processCommand(&serverCommand{
+		kind: serverCommandResponseData, streamID: 1, data: []byte("four"), write: write,
+	}); err != nil {
+		t.Fatalf("queueing stream write: %v", err)
+	}
+	if progressed, err := conn.flushStream(stream, false); err != nil || !progressed {
+		t.Fatalf("partial flush = %v, %v; want progress", progressed, err)
+	}
+	deadlineErr := timeoutError{}
+	if err := conn.processCommand(&serverCommand{
+		kind: serverCommandCancelWrite, streamID: 1, write: write, err: deadlineErr,
+	}); err != nil {
+		t.Fatalf("cancelling accepted write: %v", err)
+	}
+	result := <-write.result
+	if result.n != 2 || !isTimeout(result.err) {
+		t.Fatalf("write result = %d, %v; want 2, timeout", result.n, result.err)
+	}
+	if len(stream.pendingData) != 0 || !stream.isReset {
+		t.Fatalf("cancelled write left pending=%d reset=%v", len(stream.pendingData), stream.isReset)
+	}
+}
+
+func TestResponseFlowStallTimeoutResetsStream(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(context.Canceled)
+	var wire bytes.Buffer
+	conn := &serverConn{
+		config: serverConfig{
+			maxConcurrentStreams:    1,
+			maxRapidResetsPerSecond: 100,
+			writeByteTimeout:        20 * time.Millisecond,
+		},
+		ctx:      ctx,
+		commands: make(chan serverCommand, 1),
+		framer:   xhttp2.NewFramer(&wire, nil),
+		streams:  make(map[uint32]*serverStream),
+	}
+	stream := newServerStream(conn, 1)
+	stream.handlerStarted = true
+	stream.pendingData = []byte("blocked")
+	conn.streams[stream.id] = stream
+	conn.armResponseWriteTimeout(stream)
+	select {
+	case command := <-conn.commands:
+		if err := conn.processCommand(&command); err != nil {
+			t.Fatalf("processing response stall timeout: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("response flow stall wasn't timed out")
+	}
+	if !stream.isReset || len(stream.pendingData) != 0 {
+		t.Fatalf("stalled stream = {reset:%v pending:%d}, want reset and released", stream.isReset, len(stream.pendingData))
 	}
 }
 
@@ -1325,6 +1624,75 @@ func TestResetExtendedConnectFreesStreamSlot(t *testing.T) {
 	}
 }
 
+func TestExtendedConnectWriteDeadlineDoesNotDeliverFailedWrite(t *testing.T) {
+	type writeResult struct {
+		n   int
+		err error
+	}
+	result := make(chan writeResult, 1)
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			if err := ctx.AcceptStream(func(stream fasthttp.StreamConn) {
+				_ = stream.SetWriteDeadline(time.Now().Add(50 * time.Millisecond))
+				n, err := stream.Write([]byte("must-not-arrive"))
+				result <- writeResult{n: n, err: err}
+			}); err != nil {
+				t.Errorf("AcceptStream() error: %v", err)
+			}
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{EnableExtendedConnect: true})
+	peer := dialRawPeer(t, testServer.listener.Addr().String())
+	if err := peer.framer.WriteSettings(xhttp2.Setting{ID: xhttp2.SettingInitialWindowSize, Val: 0}); err != nil {
+		t.Fatalf("WriteSettings() error: %v", err)
+	}
+	peer.writeHeaders(1, false,
+		[2]string{":method", fasthttp.MethodConnect},
+		[2]string{":protocol", "websocket"},
+		[2]string{":scheme", "http"},
+		[2]string{":authority", "example.com"},
+		[2]string{":path", "/ws"},
+	)
+	peer.waitForAny(2*time.Second, "headers")
+	select {
+	case got := <-result:
+		if got.n != 0 || !isTimeout(got.err) {
+			t.Fatalf("Write() = %d, %v; want 0, timeout", got.n, got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream write didn't honor its deadline")
+	}
+	if err := peer.framer.WriteWindowUpdate(1, 1<<20); err != nil {
+		t.Fatalf("stream window update: %v", err)
+	}
+	if err := peer.framer.WriteWindowUpdate(0, 1<<20); err != nil {
+		t.Fatalf("connection window update: %v", err)
+	}
+	deadline := time.Now().Add(300 * time.Millisecond)
+	sawReset := false
+	for {
+		_ = peer.conn.SetReadDeadline(deadline)
+		frame, err := peer.framer.ReadFrame()
+		if err != nil {
+			if isTimeout(err) {
+				break
+			}
+			break
+		}
+		switch frame := frame.(type) {
+		case *xhttp2.DataFrame:
+			if len(frame.Data()) != 0 {
+				t.Fatalf("peer received %q after Write reported failure", frame.Data())
+			}
+		case *xhttp2.RSTStreamFrame:
+			sawReset = true
+		}
+	}
+	if !sawReset {
+		t.Fatal("timed-out stream write did not cancel its stream")
+	}
+}
+
 // A tunnel never sends END_STREAM, so the request read timeout must not apply.
 func TestRequestReadTimeoutSkipsExtendedConnect(t *testing.T) {
 	server := &fasthttp.Server{
@@ -1367,9 +1735,9 @@ func TestRequestReadTimeoutSkipsExtendedConnect(t *testing.T) {
 	}
 }
 
-// stopRequestReadTimeout must clear the deadline too, otherwise every context
-// derived from the RequestCtx is born already cancelled.
-func TestRequestDeadlineClearedAfterRequestBody(t *testing.T) {
+// A transport read timeout is mutable request-body state, whereas
+// context.Context requires successive Deadline calls to be stable.
+func TestRequestDeadlineDoesNotExposeTransportTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(context.Canceled)
 	conn := &serverConn{
@@ -1379,12 +1747,12 @@ func TestRequestDeadlineClearedAfterRequestBody(t *testing.T) {
 	}
 	stream := &serverStream{id: 1}
 	conn.armRequestReadTimeout(stream)
-	if _, ok := stream.Deadline(); !ok {
-		t.Fatal("deadline wasn't armed")
+	if deadline, ok := stream.Deadline(); ok {
+		t.Fatalf("Deadline() = %v, true; want no application deadline", deadline)
 	}
 	conn.stopRequestReadTimeout(stream)
 	if deadline, ok := stream.Deadline(); ok {
-		t.Fatalf("deadline still reported after the body completed: %v", deadline)
+		t.Fatalf("Deadline() changed after body completion: %v", deadline)
 	}
 }
 
@@ -1621,6 +1989,32 @@ func TestSettingsDecreaseDrivesSendWindowNegative(t *testing.T) {
 				}
 				streamEnded = data.StreamEnded()
 			}
+		}
+	}
+}
+
+func TestRepeatedInitialWindowSettingsApplyOneFinalDelta(t *testing.T) {
+	var headerBlock bytes.Buffer
+	conn := &serverConn{
+		config:                  serverConfig{maxEncoderTableSize: defaultHeaderTableSize},
+		streams:                 make(map[uint32]*serverStream),
+		peerInitialStreamWindow: 65535,
+		encoder:                 hpack.NewEncoder(&headerBlock),
+	}
+	for id := uint32(1); id <= 499; id += 2 {
+		conn.streams[id] = &serverStream{id: id, sendWindow: 65535}
+	}
+	settings := make([]xhttp2.Setting, 2730)
+	for i := range settings {
+		settings[i] = xhttp2.Setting{ID: xhttp2.SettingInitialWindowSize, Val: 65535}
+	}
+	settings[len(settings)-1].Val = 32768
+	if err := conn.applySettings(settings); err != nil {
+		t.Fatalf("applySettings() error: %v", err)
+	}
+	for id, stream := range conn.streams {
+		if stream.sendWindow != 32768 {
+			t.Fatalf("stream %d send window = %d, want 32768", id, stream.sendWindow)
 		}
 	}
 }
