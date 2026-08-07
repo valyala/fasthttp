@@ -250,7 +250,7 @@ type Server struct {
 	MaxProtocolRequestCtxCacheBytes int
 
 	nextProtos map[string]ServeHandler
-	protocol   *registeredProtocol
+	protocols  []*registeredProtocol
 
 	concurrencyCh     chan struct{}
 	concurrencyChOnce sync.Once
@@ -2447,7 +2447,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		return handler(c)
 	}
-	if s.protocol != nil && proto == "" {
+	if len(s.protocols) != 0 && proto == "" {
 		protocol, prefix, deadline, detectErr := s.detectCleartextProtocol(c)
 		if detectErr != nil {
 			return detectErr
@@ -2745,7 +2745,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
-			if s.protocol != nil {
+			if len(s.protocols) != 0 {
 				if protocol := s.matchProtocolUpgrade(ctx, br, bw); protocol != nil {
 					// The protocol sets its own deadlines; the HTTP/1 request
 					// deadline would kill an otherwise active connection.

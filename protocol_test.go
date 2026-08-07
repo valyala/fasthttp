@@ -20,6 +20,12 @@ func (f protocolHandlerFunc) ServeConn(ctx *ProtocolServerContext, c net.Conn) e
 	return f(ctx, c)
 }
 
+type upgraderHandlerFunc struct{ protocolHandlerFunc }
+
+func (upgraderHandlerFunc) UpgradeConn(*ProtocolServerContext, net.Conn, *Request) (bool, error) {
+	return false, nil
+}
+
 type deadlineRecordingConn struct {
 	net.Conn
 
@@ -135,10 +141,33 @@ func TestServerRegisterProtocol(t *testing.T) {
 			wantError: true,
 		},
 		{
-			name: "second registration",
+			name: "two protocols",
 			registrations: []ProtocolRegistration{
 				{ALPN: []string{"example"}, Handler: validHandler},
 				{ALPN: []string{"other"}, Handler: validHandler},
+			},
+		},
+		{
+			name: "duplicate registered alpn",
+			registrations: []ProtocolRegistration{
+				{ALPN: []string{"example"}, Handler: validHandler},
+				{ALPN: []string{"example"}, Handler: validHandler},
+			},
+			wantError: true,
+		},
+		{
+			name: "conflicting prefaces",
+			registrations: []ProtocolRegistration{
+				{CleartextPreface: []byte("PROTO"), Handler: validHandler},
+				{CleartextPreface: []byte("PROTOCOL"), Handler: validHandler},
+			},
+			wantError: true,
+		},
+		{
+			name: "duplicate upgrade token",
+			registrations: []ProtocolRegistration{
+				{ALPN: []string{"a"}, CleartextUpgradeToken: "example", Handler: upgraderHandlerFunc{validHandler}},
+				{ALPN: []string{"b"}, CleartextUpgradeToken: "example", Handler: upgraderHandlerFunc{validHandler}},
 			},
 			wantError: true,
 		},
@@ -196,10 +225,10 @@ func TestServerRegisterProtocolCopiesSelectors(t *testing.T) {
 
 	alpn[0] = "changed"
 	preface[0] = 'X'
-	if got := s.protocol.alpn[0]; got != "example" {
+	if got := s.protocols[0].alpn[0]; got != "example" {
 		t.Fatalf("registered ALPN = %q, want %q", got, "example")
 	}
-	if got := string(s.protocol.cleartextPreface); got != "PROTOCOL" {
+	if got := string(s.protocols[0].cleartextPreface); got != "PROTOCOL" {
 		t.Fatalf("registered preface = %q, want %q", got, "PROTOCOL")
 	}
 }
@@ -245,7 +274,7 @@ func TestServerRegisterProtocolTLSFailureDoesNotMutateServer(t *testing.T) {
 	if server.TLSConfig != original {
 		t.Fatal("RegisterProtocol() replaced TLSConfig after a failed registration")
 	}
-	if server.protocol != nil {
+	if len(server.protocols) != 0 {
 		t.Fatal("a failed registration left a protocol registered")
 	}
 	if original.MinVersion != tls.VersionTLS10 || !slices.Equal(original.NextProtos, []string{"custom"}) {
@@ -343,9 +372,9 @@ func TestDetectCleartextProtocolReadsAvailablePrefixInOneCall(t *testing.T) {
 	defer serverConn.Close()
 	defer clientConn.Close()
 	counted := &readCountingConn{Conn: serverConn}
-	server := &Server{protocol: &registeredProtocol{
+	server := &Server{protocols: []*registeredProtocol{{
 		cleartextPreface: []byte("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"),
-	}}
+	}}}
 	writeDone := make(chan error, 1)
 	go func() {
 		_, err := io.WriteString(clientConn, "PRI * HTTP/2.0\r\n\r\nSX\r\n\r\n")

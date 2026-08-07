@@ -366,24 +366,43 @@ func (w *asyncFrameWriter) writePending(pending []*frameWriteBuffer) error {
 // write re-arms before touching the connection, and an armed deadline on an
 // idle connection does nothing.
 func (w *asyncFrameWriter) writeAll(data []byte) error {
-	for len(data) != 0 {
-		if w.noProgressTimeout > 0 {
-			if err := w.conn.SetWriteDeadline(time.Now().Add(w.noProgressTimeout)); err != nil {
-				return err
+	_, err := writeAllDeadline(w.conn, data, w.noProgressTimeout)
+	return err
+}
+
+// writeAllDeadline writes data fully, re-arming the per-attempt no-progress
+// deadline before each write.
+func writeAllDeadline(conn net.Conn, data []byte, noProgressTimeout time.Duration) (int, error) {
+	written := 0
+	for written < len(data) {
+		if noProgressTimeout > 0 {
+			if err := conn.SetWriteDeadline(time.Now().Add(noProgressTimeout)); err != nil {
+				return written, err
 			}
 		}
-		n, err := w.conn.Write(data)
-		if n > 0 {
-			data = data[n:]
-		}
+		n, err := conn.Write(data[written:])
+		written += n
 		if err != nil {
-			return err
+			return written, err
 		}
 		if n == 0 {
-			return io.ErrNoProgress
+			return written, io.ErrNoProgress
 		}
 	}
-	return nil
+	return written, nil
+}
+
+// directFrameWriter is the synchronous writer for the h2c upgrade response.
+// It exists so a connection carries no async writer, queues, or goroutine
+// until the preface proves the peer actually speaks HTTP/2; half-open
+// upgrades are cheap for a client to create.
+type directFrameWriter struct {
+	conn    net.Conn
+	timeout time.Duration
+}
+
+func (w directFrameWriter) Write(data []byte) (int, error) {
+	return writeAllDeadline(w.conn, data, w.timeout)
 }
 
 func (w *asyncFrameWriter) discardQueued() {
