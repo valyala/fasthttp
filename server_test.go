@@ -3650,6 +3650,32 @@ func TestServerConnStateSeesIdleMarkers(t *testing.T) {
 	}
 }
 
+func TestRequestCtxIDKeepsRequestNumberInItsField(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		connID, requestNum uint64
+		otherConnID        uint64
+	}{
+		{"one past the field", 0, 1 << 32, 1},
+		{"twice past the field", 5, 2 << 32, 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var overflowed, other RequestCtx
+			overflowed.connID = tc.connID
+			overflowed.connRequestNum = tc.requestNum
+			other.connID = tc.otherConnID
+
+			if overflowed.ID() == other.ID() {
+				t.Fatalf("connection %d request %d has the same ID as connection %d request 0: %#016x",
+					tc.connID, tc.requestNum, tc.otherConnID, other.ID())
+			}
+			if got := overflowed.ID() >> 32; got != tc.connID {
+				t.Fatalf("connection field = %d, want %d", got, tc.connID)
+			}
+		})
+	}
+}
+
 func TestServerGetOnly(t *testing.T) {
 	t.Parallel()
 
