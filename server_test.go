@@ -5554,3 +5554,34 @@ func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// IsTLS unwraps perIPConn; TLSConnectionState must agree with it.
+func TestTLSConnectionStateThroughPerIPConn(t *testing.T) {
+	certData, keyData, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverSide, clientSide := net.Pipe()
+	defer clientSide.Close()
+	tlsServer := tls.Server(serverSide, &tls.Config{Certificates: []tls.Certificate{cert}})
+	go func() {
+		c := tls.Client(clientSide, &tls.Config{InsecureSkipVerify: true})
+		_ = c.Handshake()
+	}()
+	if err := tlsServer.Handshake(); err != nil {
+		t.Fatal(err)
+	}
+
+	var ctx RequestCtx
+	ctx.c = &perIPConn{Conn: tlsServer}
+	if !ctx.IsTLS() {
+		t.Fatal("IsTLS() = false through perIPConn")
+	}
+	if ctx.TLSConnectionState() == nil {
+		t.Fatal("IsTLS() reports TLS but TLSConnectionState() is nil")
+	}
+}
