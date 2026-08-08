@@ -11,7 +11,10 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-const defaultWriteQueueBatches = 16
+const (
+	defaultWriteQueueBatches = 16
+	initialBatchCapacity     = 4 << 10
+)
 
 // flushWriter is the narrow output contract used by x/net/http2's Framer.
 // Production connections use asyncFrameWriter; focused protocol tests may use
@@ -108,7 +111,7 @@ func (w *asyncFrameWriter) Write(p []byte) (int, error) {
 		if w.active == nil {
 			w.active = w.acquireBuffer()
 		}
-		available := cap(w.active.data) - len(w.active.data)
+		available := w.batchSize - len(w.active.data)
 		if available == 0 {
 			if err := w.enqueueActive(); err != nil {
 				return written, err
@@ -116,10 +119,17 @@ func (w *asyncFrameWriter) Write(p []byte) (int, error) {
 			continue
 		}
 		amount := min(len(p), available)
+		if cap(w.active.data)-len(w.active.data) < amount {
+			// One jump to the batch limit: letting append double would copy
+			// the batch again at every step up to batchSize.
+			grown := make([]byte, len(w.active.data), w.batchSize)
+			copy(grown, w.active.data)
+			w.active.data = grown
+		}
 		w.active.data = append(w.active.data, p[:amount]...)
 		p = p[amount:]
 		written += amount
-		if len(w.active.data) == cap(w.active.data) {
+		if len(w.active.data) == w.batchSize {
 			if err := w.enqueueActive(); err != nil {
 				return written, err
 			}
@@ -401,15 +411,17 @@ func (w *asyncFrameWriter) err() error {
 func (w *asyncFrameWriter) acquireBuffer() *frameWriteBuffer {
 	select {
 	case buffer := <-w.available:
-		buffer.data = buffer.data[:0:w.batchSize]
+		buffer.data = buffer.data[:0]
 		return buffer
 	default:
-		return &frameWriteBuffer{data: make([]byte, 0, w.batchSize)}
+		// Batches hold one burst of frames, which is far below batchSize on a
+		// typical connection. Recycled buffers keep whatever they grew to.
+		return &frameWriteBuffer{data: make([]byte, 0, min(w.batchSize, initialBatchCapacity))}
 	}
 }
 
 func (w *asyncFrameWriter) releaseBuffer(buffer *frameWriteBuffer) {
-	buffer.data = buffer.data[:0:w.batchSize]
+	buffer.data = buffer.data[:0]
 	select {
 	case w.available <- buffer:
 	default:
