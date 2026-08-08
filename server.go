@@ -852,26 +852,30 @@ type tlsConn interface {
 	ConnectionState() tls.ConnectionState
 }
 
+// tlsConnection unwraps ctx.c to its TLS connection, if it is one.
+// The cast is to (tlsConn) instead of (*tls.Conn), since it catches
+// cases with overridden tls.Conn such as:
+//
+//	type customConn struct {
+//	    *tls.Conn
+//
+//	    // other custom fields here
+//	}
+func (ctx *RequestCtx) tlsConnection() (tlsConn, bool) {
+	conn := ctx.c
+	// perIPConn wraps the net.Conn in the Conn field.
+	if pic, ok := conn.(*perIPConn); ok {
+		conn = pic.Conn
+	}
+	tc, ok := conn.(tlsConn)
+	return tc, ok
+}
+
 // IsTLS returns true if the underlying connection is tls.Conn.
 //
 // tls.Conn is an encrypted connection (aka SSL, HTTPS).
 func (ctx *RequestCtx) IsTLS() bool {
-	// cast to (tlsConn) instead of (*tls.Conn), since it catches
-	// cases with overridden tls.Conn such as:
-	//
-	// type customConn struct {
-	//     *tls.Conn
-	//
-	//     // other custom fields here
-	// }
-
-	// perIPConn wraps the net.Conn in the Conn field
-	if pic, ok := ctx.c.(*perIPConn); ok {
-		_, ok := pic.Conn.(tlsConn)
-		return ok
-	}
-
-	_, ok := ctx.c.(tlsConn)
+	_, ok := ctx.tlsConnection()
 	return ok
 }
 
@@ -882,7 +886,7 @@ func (ctx *RequestCtx) IsTLS() bool {
 // The returned state may be used for verifying TLS version, client certificates,
 // etc.
 func (ctx *RequestCtx) TLSConnectionState() *tls.ConnectionState {
-	tc, ok := ctx.c.(tlsConn)
+	tc, ok := ctx.tlsConnection()
 	if !ok {
 		return nil
 	}
