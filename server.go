@@ -2420,28 +2420,35 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			}
 		}
 
+		var firstByte bool
 		if !s.ReduceMemoryUsage || br != nil {
 			if br == nil {
 				br = acquireReader(ctx)
 			}
 
-			// If this is a keep-alive connection we want to try and read the first bytes
-			// within the idle time.
-			if connRequestNum > 1 {
-				var b []byte
-				b, err = br.Peek(1)
-				if len(b) == 0 {
-					// If reading from a keep-alive connection returns nothing it means
-					// the connection was closed (either timeout or from the other side).
-					if err != io.EOF {
-						err = ErrNothingRead{error: err}
-					}
+			// Wait for the first byte under the deadline set above: ReadTimeout on
+			// a new connection, the idle time on a keep-alive one.
+			var b []byte
+			b, err = br.Peek(1)
+			if len(b) == 0 {
+				// Nothing arrived, so the connection was closed (either timeout or
+				// from the other side).
+				if err != io.EOF {
+					err = ErrNothingRead{error: err}
 				}
 			}
+			firstByte = len(b) != 0
 		} else {
 			// On keep-alive connections acquireByteReader will read the first byte
 			// while the idle timeout is active.
 			br, err = acquireByteReader(&ctx)
+			firstByte = err == nil
+		}
+		if firstByte {
+			// Active from the first byte, so Shutdown never reclaims a request
+			// in flight; a peer that sends nothing stays idle.
+			idleConnTime.Store(0)
+			s.setState(c, StateActive)
 		}
 
 		ctx.Request.isTLS = isTLS
@@ -2455,10 +2462,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
 		if err == nil {
-			idleConnTime.Store(0)
-			s.setState(c, StateActive)
-
-			if s.ReadTimeout > 0 {
+			// ReadTimeout restarts at the first byte after an idle wait or a
+			// byte-reader read; a new connection's peek keeps the deadline
+			// armed when it opened.
+			if s.ReadTimeout > 0 && (connRequestNum > 1 || s.ReduceMemoryUsage) {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					break
 				}
@@ -2556,6 +2563,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				} else {
 					err = nr.error
 				}
+			}
+			// A connection the server closed itself, as Shutdown does with an
+			// idle one, gets no error response.
+			if err != nil && errors.Is(err, net.ErrClosed) {
+				err = nil
 			}
 
 			if err != nil {

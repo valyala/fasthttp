@@ -3676,6 +3676,205 @@ func TestRequestCtxIDKeepsRequestNumberInItsField(t *testing.T) {
 	}
 }
 
+func TestServerShutdownClosesConnectionThatSentNothing(t *testing.T) {
+	t.Parallel()
+
+	// The per-IP wrapper goes back to its pool when Shutdown closes the
+	// connection, so the serving goroutine must not answer the failed read.
+	for _, tc := range []struct {
+		name  string
+		perIP int
+	}{{"plain", 0}, {"perIP", 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := &Server{Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") }, MaxConnsPerIP: tc.perIP}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("listening: %v", err)
+			}
+			served := make(chan error, 1)
+			go func() { served <- server.Serve(listener) }()
+
+			conn, err := net.Dial("tcp", listener.Addr().String())
+			if err != nil {
+				t.Fatalf("dialing: %v", err)
+			}
+			defer conn.Close()
+			// The peer connects and then says nothing at all. Serve counts it as
+			// closeable once the accept-time grace has passed, so Shutdown must not
+			// wait on it forever.
+			time.Sleep(testTimeout(100 * time.Millisecond))
+
+			stopped := make(chan error, 1)
+			go func() { stopped <- server.Shutdown() }()
+			select {
+			case err := <-stopped:
+				if err != nil {
+					t.Fatalf("Shutdown() error: %v", err)
+				}
+			case <-time.After(testTimeout(30 * time.Second)):
+				t.Fatal("Shutdown() did not return for a connection that sent nothing")
+			}
+			if err := <-served; err != nil {
+				t.Fatalf("Serve() error: %v", err)
+			}
+		})
+	}
+}
+
+// A peer that sends garbage gets its 400 on a connection that went active.
+func TestServerConnStateActiveOnMalformedRequest(t *testing.T) {
+	var mu sync.Mutex
+	var states []string
+	s := &Server{
+		Handler:   func(*RequestCtx) {},
+		ConnState: func(_ net.Conn, st ConnState) { mu.Lock(); states = append(states, st.String()); mu.Unlock() },
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	serveDone := make(chan struct{})
+	go func() { defer close(serveDone); _ = s.Serve(ln) }()
+	defer func() { _ = ln.Close(); <-serveDone }()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Write([]byte("GARBAGE NOSPACE\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := io.ReadAll(c); !bytes.Contains(b, []byte("400")) {
+		t.Fatalf("response %q, want a 400", b)
+	}
+	_ = c.Close()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		mu.Lock()
+		got := strings.Join(states, ",")
+		mu.Unlock()
+		if got == "new,active,closed" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("states = %q, want new,active,closed", got)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Shutdown must not reclaim a keep-alive connection whose next request has
+// started arriving: the connection is active from its first byte.
+func TestServerShutdownWaitsForPartialKeepAliveRequest(t *testing.T) {
+	active := make(chan struct{}, 4)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+		ConnState: func(_ net.Conn, st ConnState) {
+			if st == StateActive {
+				active <- struct{}{}
+			}
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(ln) }()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	br := bufio.NewReader(c)
+	if _, err := c.Write([]byte("GET /1 HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	<-active
+	var first Response
+	if err := first.Read(br); err != nil {
+		t.Fatalf("first response: %v", err)
+	}
+
+	// Start the second request but hold back its final CRLF.
+	if _, err := c.Write([]byte("GET /2 HTTP/1.1\r\nHost: a\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-active:
+	case <-time.After(time.Second):
+		t.Fatal("connection did not go active on the first byte of a partial request")
+	}
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.Shutdown() }()
+	// Give Shutdown a sweep over the idle connections before completing the request.
+	time.Sleep(testTimeout(50 * time.Millisecond))
+	if _, err := c.Write([]byte("\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	var second Response
+	if err := second.Read(br); err != nil {
+		t.Fatalf("second response after Shutdown began: %v", err)
+	}
+	if second.StatusCode() != StatusOK {
+		t.Fatalf("second response status = %d, want 200", second.StatusCode())
+	}
+	if err := <-stopped; err != nil {
+		t.Fatalf("Shutdown() error: %v", err)
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+}
+
+// The wait for a first request that never arrives ends in a 408 once
+// ReadTimeout expires; a request sent after that is not served.
+func TestServerFirstRequestAfterReadTimeout(t *testing.T) {
+	t.Parallel()
+
+	readTimeout := testTimeout(100 * time.Millisecond)
+	accepted := make(chan struct{})
+	s := &Server{
+		Handler:     func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+		ReadTimeout: readTimeout,
+		ConnState: func(_ net.Conn, st ConnState) {
+			if st == StateNew {
+				close(accepted)
+			}
+		},
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveDone := make(chan struct{})
+	go func() { defer close(serveDone); _ = s.Serve(ln) }()
+	defer func() { _ = ln.Close(); <-serveDone }()
+
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	// The server arms ReadTimeout once it has accepted the connection.
+	<-accepted
+	if err := c.SetReadDeadline(time.Now().Add(readTimeout + readTimeout/2)); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(c)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		// Nothing answered the timeout, so the request arrives after it.
+		_ = c.SetReadDeadline(time.Time{})
+		_, _ = c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n"))
+		if err := resp.Read(br); err != nil {
+			t.Fatalf("no response on the timed-out connection: %v", err)
+		}
+	}
+	if resp.StatusCode() != StatusRequestTimeout {
+		t.Fatalf("status = %d, want %d", resp.StatusCode(), StatusRequestTimeout)
+	}
+}
+
 func TestServerGetOnly(t *testing.T) {
 	t.Parallel()
 
