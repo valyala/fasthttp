@@ -110,6 +110,11 @@ type Response struct {
 
 	bodyRaw []byte
 
+	// vec backs the header and body pair handed to writev, inline so that
+	// forming it costs no allocation; bufs is the slice WriteTo consumes.
+	vec  [2][]byte
+	bufs net.Buffers
+
 	// Response header.
 	//
 	// Copying Header by value is forbidden. Use pointer to Header instead.
@@ -2322,6 +2327,12 @@ func (w *flushWriter) WriteString(s string) (int, error) {
 //
 // See also WriteTo.
 func (resp *Response) Write(w *bufio.Writer) error {
+	return resp.write(nil, w)
+}
+
+// write serializes the response into w. conn must be the connection w buffers
+// for, or nil.
+func (resp *Response) write(conn net.Conn, w *bufio.Writer) error {
 	sendBody := !resp.mustSkipBody()
 
 	if resp.bodyStream != nil {
@@ -2343,13 +2354,56 @@ func (resp *Response) Write(w *bufio.Writer) error {
 		}
 		return resp.Header.writeTrailer(w)
 	}
-	if err := resp.Header.Write(w); err != nil {
+	header := resp.Header.serialize(w)
+	// A response the buffer cannot hold at all costs a partial copy and a
+	// second write; writev sends both pieces from where they already are.
+	if sendBody && bodyLen > 0 && len(header)+bodyLen > w.Size() {
+		if vw := vectorWriter(conn); vw != nil {
+			return resp.writeVectored(vw, w, header, body)
+		}
+	}
+	if _, err := w.Write(header); err != nil {
 		return err
 	}
 	if sendBody {
 		if _, err := w.Write(body); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// writeVectored sends the header and body to vw as one writev. w buffers for
+// vw, so what it still holds has to go out first to keep the order; a header
+// built in w's free space stays intact through that flush.
+func (resp *Response) writeVectored(vw io.Writer, w *bufio.Writer, header, body []byte) error {
+	if w.Buffered() > 0 {
+		if err := w.Flush(); err != nil {
+			return err
+		}
+	}
+	resp.vec[0], resp.vec[1] = header, body
+	resp.bufs = resp.vec[:]
+	_, err := resp.bufs.WriteTo(vw)
+	// WriteTo consumes the slice, but the array still refers to the body; a
+	// pooled response must not hold it.
+	resp.bufs = nil
+	resp.vec[0], resp.vec[1] = nil, nil
+	return err
+}
+
+// vectorWriter returns c when net.Buffers writes to it with a single writev,
+// and nil otherwise. On anything else, a TLS connection above all, net.Buffers
+// falls back to writing the pieces one at a time.
+func vectorWriter(c net.Conn) io.Writer {
+	switch c := c.(type) {
+	case *net.TCPConn:
+		return c
+	case *net.UnixConn:
+		return c
+	case *perIPConn:
+		// It only overrides Close.
+		return vectorWriter(c.Conn)
 	}
 	return nil
 }
