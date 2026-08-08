@@ -3676,6 +3676,42 @@ func TestRequestCtxIDKeepsRequestNumberInItsField(t *testing.T) {
 	}
 }
 
+func TestServerShutdownClosesConnectionThatSentNothing(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") }}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- server.Serve(listener) }()
+
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer conn.Close()
+	// The peer connects and then says nothing at all. Serve counts it as
+	// closeable once the accept-time grace has passed, so Shutdown must not
+	// wait on it forever.
+	time.Sleep(testTimeout(100 * time.Millisecond))
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- server.Shutdown() }()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("Shutdown() error: %v", err)
+		}
+	case <-time.After(testTimeout(30 * time.Second)):
+		t.Fatal("Shutdown() did not return for a connection that sent nothing")
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+}
+
 func TestServerGetOnly(t *testing.T) {
 	t.Parallel()
 

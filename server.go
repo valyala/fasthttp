@@ -2449,9 +2449,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
 		if err == nil {
-			idleConnTime.Store(0)
-			s.setState(c, StateActive)
-
 			if s.ReadTimeout > 0 {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					break
@@ -2489,6 +2486,14 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			}
 
 			if err == nil {
+				// The connection counts as active once a request has actually
+				// arrived, which is also what StateActive means. Marking it any
+				// earlier cleared the grace stamp taken when the connection was
+				// accepted, putting a peer that connects and then says nothing
+				// beyond the reach of Shutdown.
+				idleConnTime.Store(0)
+				s.setState(c, StateActive)
+
 				if onHdrRecv := s.HeaderReceived; onHdrRecv != nil {
 					reqConf := onHdrRecv(&ctx.Request.Header)
 					if reqConf.ReadTimeout > 0 {
