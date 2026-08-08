@@ -2907,7 +2907,7 @@ func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 	if ctx.timeoutResponse != nil {
 		return errors.New("cannot write timed out response")
 	}
-	err := ctx.Response.Write(w)
+	err := ctx.Response.write(ctx.c, w)
 
 	return err
 }

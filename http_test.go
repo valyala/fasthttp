@@ -4679,3 +4679,30 @@ func TestWriteBodyChunkedConcreteTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestResponseWriteAlternatingHeaderSizesAllocations(t *testing.T) {
+	// A header larger than the writer's buffer moves serialization to the
+	// retained buffer for good; alternating with small headers must not keep
+	// allocating.
+	var resp Response
+	resp.SetBodyString("x")
+	w := bufio.NewWriterSize(io.Discard, 1024)
+	small, large := "v", string(bytes.Repeat([]byte("v"), 1500))
+	pair := func() {
+		for _, v := range []string{small, large} {
+			resp.Header.Set("X-Pad", v)
+			if err := resp.Write(w); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Flush(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for range 10 {
+		pair()
+	}
+	if n := testing.AllocsPerRun(100, pair); n > 0 {
+		t.Errorf("%v allocs per alternating pair, expecting 0", n)
+	}
+}

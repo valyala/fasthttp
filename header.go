@@ -2479,16 +2479,22 @@ func coarseSecond() int64 {
 
 // Write writes response header to w.
 func (h *ResponseHeader) Write(w *bufio.Writer) error {
+	_, err := w.Write(h.serialize(w))
+	return err
+}
+
+// serialize returns the header bytes: built in the writer's buffer when it
+// has room for the largest header so far, in bufV otherwise. A build that
+// outgrows the writer's buffer becomes bufV, so the next one is built there.
+func (h *ResponseHeader) serialize(w *bufio.Writer) []byte {
 	if w.Available() < cap(h.bufV) {
-		_, err := w.Write(h.Header())
-		return err
+		return h.Header()
 	}
 	buf := h.AppendBytes(w.AvailableBuffer())
 	if cap(buf) != w.Available() {
 		h.bufV = buf
 	}
-	_, err := w.Write(buf)
-	return err
+	return buf
 }
 
 // WriteTo writes response header to w.
