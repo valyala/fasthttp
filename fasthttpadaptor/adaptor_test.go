@@ -3,6 +3,7 @@ package fasthttpadaptor
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +11,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -455,6 +459,11 @@ func TestHijackFlush(t *testing.T) {
 			if c, rw, err := f.Hijack(); err != nil {
 				t.Error(err)
 			} else {
+				// Flushing the ResponseWriter after Hijack must not block.
+				if fl, ok := w.(http.Flusher); ok {
+					fl.Flush()
+				}
+
 				if _, err := rw.WriteString("bar"); err != nil {
 					t.Error(err)
 				}
@@ -717,6 +726,8 @@ func TestWriterWriteRechecksStreamingReadyAfterLock(t *testing.T) {
 	}()
 
 	time.Sleep(10 * time.Millisecond)
+	// Flush builds the pipe before it makes streaming ready; do the same here.
+	w.pr, w.pw = io.Pipe()
 	close(w.streamReady)
 
 	readCh := make(chan []byte, 1)
@@ -799,5 +810,325 @@ func TestNewFastHTTPHandlerPresetStatusCodeOverriddenByHandler(t *testing.T) {
 	if ctx.Response.StatusCode() != fasthttp.StatusNotFound {
 		t.Fatalf("unexpected status code: %d. Expecting %d (handler's WriteHeader should win)",
 			ctx.Response.StatusCode(), fasthttp.StatusNotFound)
+	}
+}
+
+// A client vanishing mid-stream must not race the request's teardown.
+func TestHandlerStreamClientDisconnect(t *testing.T) {
+	t.Parallel()
+
+	s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("chunk"))
+		w.(http.Flusher).Flush() //nolint:forcetypeassert
+		for range 50 {
+			if _, err := w.Write([]byte("more")); err != nil {
+				return
+			}
+		}
+	})}
+	ln := fasthttputil.NewInmemoryListener()
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+
+	for range 50 {
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		buf := make([]byte, 64)
+		_, _ = c.Read(buf)
+		_ = c.Close()
+	}
+}
+
+// A HEAD response discards the stream while CompressHandler's goroutine may
+// still be reading it; the pre-flush buffer must not be recycled under it.
+func TestHandlerFlushedHeadWithCompression(t *testing.T) {
+	t.Parallel()
+
+	s := &fasthttp.Server{Handler: fasthttp.CompressHandler(NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("a"), 32*1024))
+		w.(http.Flusher).Flush() //nolint:forcetypeassert
+	}))}
+	ln := fasthttputil.NewInmemoryListener()
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			c, err := ln.Dial()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer c.Close()
+			br := bufio.NewReader(c)
+			for range 100 {
+				if _, err := c.Write([]byte("HEAD / HTTP/1.1\r\nHost: a\r\nAccept-Encoding: gzip\r\n\r\n")); err != nil {
+					t.Error(err)
+					return
+				}
+				var resp fasthttp.Response
+				resp.SkipBody = true
+				if err := resp.Read(br); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		})
+	}
+	wg.Wait()
+}
+
+// panic(http.ErrAbortHandler) gives up on the response without crashing.
+func TestHandlerAbortIsQuiet(t *testing.T) {
+	t.Parallel()
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodGet)
+	ctx.Request.SetRequestURI("/")
+	ctx.Request.Header.SetHost("example.com")
+
+	NewFastHTTPHandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	})(ctx)
+}
+
+// An abort before the first write sends nothing, and the server tears the
+// connection down exactly once — through the per-IP wrapper too.
+func TestHandlerAbortWithPerIPLimit(t *testing.T) {
+	t.Parallel()
+
+	for _, keep := range []bool{false, true} {
+		s := &fasthttp.Server{
+			Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/abort" {
+					panic(http.ErrAbortHandler)
+				}
+				_, _ = w.Write([]byte("ok"))
+			}),
+			MaxConnsPerIP:     1,
+			KeepHijackedConns: keep,
+		}
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		go s.Serve(ln) //nolint:errcheck
+
+		c, err := net.Dial("tcp", ln.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("GET /abort HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if b, err := io.ReadAll(c); err != nil || len(b) != 0 {
+			t.Fatalf("keep=%v: aborted response carried %q (err=%v), want nothing", keep, b, err)
+		}
+		_ = c.Close()
+
+		// The per-IP slot must free up and the server must still be serving.
+		var follow string
+		for range 50 {
+			c2, err := net.Dial("tcp", ln.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = c2.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n"))
+			_ = c2.SetReadDeadline(time.Now().Add(2 * time.Second))
+			b, _ := io.ReadAll(c2)
+			_ = c2.Close()
+			follow = string(b)
+			if strings.Contains(follow, " 200 ") && strings.HasSuffix(follow, "ok") {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !strings.Contains(follow, " 200 ") || !strings.HasSuffix(follow, "ok") {
+			t.Fatalf("keep=%v: follow-up response %q, want a 200 with body ok", keep, follow)
+		}
+		_ = ln.Close()
+	}
+}
+
+type logRecorder struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (l *logRecorder) Printf(format string, args ...any) {
+	l.mu.Lock()
+	l.lines = append(l.lines, fmt.Sprintf(format, args...))
+	l.mu.Unlock()
+}
+
+func (l *logRecorder) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return strings.Join(l.lines, "\n")
+}
+
+// A panic after a Flush must neither hang the client on a body that never
+// completes nor let the connection serve a pipelined request, as in net/http;
+// an abort stays quiet, any other panic is logged once. Under CompressHandler
+// the response completes, but the log and the close remain.
+func TestHandlerPanicAfterFlush(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		prefix     string
+		panic      any
+		compressed bool
+		wantLog    string
+	}{
+		{"abort", "partial", http.ErrAbortHandler, false, ""},
+		{"abort-headers-only", "", http.ErrAbortHandler, false, ""},
+		{"panic", "partial", "boom", false, "panic in net/http handler: boom"},
+		{"panic-eof", "partial", io.ErrUnexpectedEOF, false, "panic in net/http handler: unexpected EOF"},
+		{"abort-compressed", "partial", http.ErrAbortHandler, true, ""},
+		{"panic-compressed", "partial", "boom", true, "panic in net/http handler: boom"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var secondServed atomic.Bool
+			logs := &logRecorder{}
+			closed := make(chan struct{}, 1)
+			h := NewFastHTTPHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/" {
+					secondServed.Store(true)
+					return
+				}
+				_, _ = w.Write([]byte(tc.prefix))
+				w.(http.Flusher).Flush() //nolint:forcetypeassert
+				panic(tc.panic)
+			})
+			if tc.compressed {
+				h = fasthttp.CompressHandler(h)
+			}
+			s := &fasthttp.Server{
+				Handler: h,
+				Logger:  logs,
+				ConnState: func(_ net.Conn, st fasthttp.ConnState) {
+					if st == fasthttp.StateClosed {
+						select {
+						case closed <- struct{}{}:
+						default:
+						}
+					}
+				},
+			}
+			ln := fasthttputil.NewInmemoryListener()
+			go s.Serve(ln) //nolint:errcheck
+			defer ln.Close()
+
+			c, err := ln.Dial()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+			if _, err := c.Write([]byte(
+				"GET / HTTP/1.1\r\nHost: a\r\nAccept-Encoding: gzip\r\n\r\nGET /second HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+				t.Fatal(err)
+			}
+
+			done := make(chan error, 1)
+			go func() {
+				br := bufio.NewReader(c)
+				resp, err := http.ReadResponse(br, nil)
+				if err != nil {
+					done <- fmt.Errorf("reading the flushed headers: %w", err)
+					return
+				}
+				defer resp.Body.Close()
+				first := make([]byte, len(tc.prefix))
+				if _, err := io.ReadFull(resp.Body, first); err != nil {
+					done <- err
+					return
+				}
+				if _, err := io.ReadAll(resp.Body); err == nil && !tc.compressed {
+					done <- errors.New("the aborted body ended in a clean EOF")
+					return
+				}
+				if resp2, err := http.ReadResponse(br, nil); err == nil {
+					_ = resp2.Body.Close()
+					done <- errors.New("the connection served a second response after the abort")
+					return
+				}
+				done <- nil
+			}()
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the body of an aborted flushed response never ended")
+			}
+			if secondServed.Load() {
+				t.Fatal("the handler ran for a pipelined request after the abort")
+			}
+			// The server logs, if at all, before it reports the connection closed.
+			<-closed
+			if got := logs.String(); !strings.Contains(got, tc.wantLog) || (tc.wantLog == "" && got != "") {
+				t.Fatalf("server log = %q, want %q", got, tc.wantLog)
+			}
+		})
+	}
+}
+
+// Flush() without a body puts the headers on the wire, as in net/http.
+func TestHandlerFlushSendsHeaders(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Early", "1")
+		w.(http.Flusher).Flush() //nolint:forcetypeassert
+		<-release
+	})}
+	ln := fasthttputil.NewInmemoryListener()
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+	defer close(release)
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	headers := make(chan error, 1)
+	go func() {
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		if err != nil {
+			headers <- err
+			return
+		}
+		defer resp.Body.Close()
+		if resp.Header.Get("X-Early") != "1" {
+			headers <- fmt.Errorf("X-Early = %q, want 1", resp.Header.Get("X-Early"))
+			return
+		}
+		headers <- nil
+		// Let the handler finish so Close can drain the body.
+		<-release
+	}()
+	select {
+	case err := <-headers:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the flushed headers did not arrive while the handler was still running")
 	}
 }

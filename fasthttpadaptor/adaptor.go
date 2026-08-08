@@ -64,10 +64,23 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		go func() {
 			defer func() {
 				if rec := recover(); rec != nil {
-					ctx.Logger().Printf("panic in net/http handler: %v", rec)
+					// ErrAbortHandler is net/http's quiet give-up.
+					mode := modePanicked
+					if rec == http.ErrAbortHandler {
+						mode = modeAborted
+					}
+					if w.pw != nil {
+						// The stream is the server's now: the exit is recorded
+						// while the request is still ours, then the pipe error
+						// cuts the connection.
+						w.stream.fail(ctx, rec)
+						_ = w.pw.CloseWithError(io.ErrUnexpectedEOF)
+					} else if mode == modePanicked {
+						ctx.Logger().Printf("panic in net/http handler: %v", rec)
+					}
 
 					select {
-					case w.modeCh <- modePanicked:
+					case w.modeCh <- mode:
 					default:
 					}
 				} else {
@@ -115,8 +128,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			releaseWriter(w)
 
 		case modeFlushed:
-			// Streaming: send headers and start SetBodyStreamWriter.
+			// Streaming: send the headers now and hand the body to SetBodyStream.
 			ctx.SetStatusCode(w.status())
+			ctx.Response.ImmediateHeaderFlush = true
 
 			haveContentType := false
 			for k, vv := range w.Header() {
@@ -140,35 +154,11 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				w.mu.Unlock()
 			}
 
-			ctx.SetBodyStreamWriter(func(bw *bufio.Writer) {
-				// Ensure cleanup only after the stream completes.
-				defer releaseWriter(w)
-
-				// Send pre-flush bytes.
-				if b := w.consumePreflush(); len(b) > 0 {
-					_, _ = bw.Write(b)
-					_ = bw.Flush()
-				}
-
-				// Stream subsequent writes from the pipe until EOF.
-				buf := bufferPool.Get().(*[]byte) //nolint:forcetypeassert
-				defer bufferPool.Put(buf)
-
-				for {
-					n, err := w.pr.Read(*buf)
-					if n > 0 {
-						if _, e := bw.Write((*buf)[:n]); e != nil {
-							return
-						}
-						if e := bw.Flush(); e != nil {
-							return
-						}
-					}
-					if err != nil {
-						return
-					}
-				}
-			})
+			// The pipe feeds fasthttp's chunked writer directly, so the
+			// server truncates the response and drops the connection when a
+			// handler exit closes the pipe with an error.
+			w.stream = &streamBody{pre: w.consumePreflush(), w: w}
+			ctx.Response.SetBodyStream(w.stream, -1)
 
 			// Signal the writer that streaming is ready so Flush() can return.
 			close(w.streamReady)
@@ -177,10 +167,79 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			releaseWriter(w)
 			return
 
+		case modeAborted:
+			releaseWriter(w)
+			// Hijacking skips the response write and leaves teardown to the
+			// server, so a pooled per-IP wrapper is closed exactly once; the
+			// handler's Close only acts when KeepHijackedConns is set.
+			ctx.HijackSetNoResponse(true)
+			ctx.Hijack(func(c net.Conn) { _ = c.Close() })
+
 		case modePanicked:
 			panic("net/http handler panicked")
 		}
 	}
+}
+
+// streamBody feeds a flushed response through fasthttp's chunked writer and
+// recycles the writer once the server is done with it.
+type streamBody struct {
+	mu     sync.Mutex
+	pre    []byte // pooled pre-flush bytes, recycled by Close
+	w      *writer
+	err    error
+	closed bool
+}
+
+func (b *streamBody) Read(p []byte) (int, error) {
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return 0, io.ErrClosedPipe
+	}
+	if len(b.pre) > 0 {
+		n := copy(p, b.pre)
+		b.pre = b.pre[n:]
+		b.mu.Unlock()
+		return n, nil
+	}
+	b.mu.Unlock()
+	// The pipe is read without the lock, so Close and fail never wait on it.
+	return b.w.pr.Read(p)
+}
+
+// fail records a handler exit while the server still owns the request; a
+// closed stream may belong to a request already released or reused.
+func (b *streamBody) fail(ctx *fasthttp.RequestCtx, rec any) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return
+	}
+	b.err = io.ErrUnexpectedEOF
+	if rec != http.ErrAbortHandler {
+		ctx.Logger().Printf("panic in net/http handler: %v", rec)
+	}
+}
+
+// Close fails further reads before the pre-flush buffer is recycled, since a
+// discarded body may still be read by a compression goroutine, and reports
+// a handler exit the server has not read.
+func (b *streamBody) Close() error {
+	_ = b.w.pr.Close()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.closed {
+		b.closed = true
+		releaseWriter(b.w)
+	}
+	return b.err
+}
+
+// CloseWithError reports the handler's exit when CompressHandler's goroutine,
+// not the server, closes the stream.
+func (b *streamBody) CloseWithError(error) error {
+	return b.Close()
 }
 
 var bufferPool = sync.Pool{
@@ -195,6 +254,7 @@ const (
 	modeFlushed
 	modeHijacked
 	modePanicked
+	modeAborted
 )
 
 // Writer implements http.ResponseWriter + http.Flusher + http.Hijacker for the adaptor.
@@ -207,8 +267,9 @@ type writer struct {
 	responseBody []byte
 	bufPool      *[]byte
 
-	pr *io.PipeReader
-	pw *io.PipeWriter
+	pr     *io.PipeReader
+	stream *streamBody
+	pw     *io.PipeWriter
 
 	hijacked atomic.Bool
 
@@ -221,15 +282,11 @@ type writer struct {
 }
 
 func acquireWriter(ctx *fasthttp.RequestCtx) *writer {
-	pr, pw := io.Pipe()
 	return &writer{
-		ctx:          ctx,
-		h:            make(http.Header),
-		responseBody: nil,
-		pr:           pr,
-		pw:           pw,
-		modeCh:       make(chan int, 1),
-		streamReady:  make(chan struct{}),
+		ctx:         ctx,
+		h:           make(http.Header),
+		modeCh:      make(chan int, 1),
+		streamReady: make(chan struct{}),
 	}
 }
 
@@ -278,7 +335,11 @@ func (w *writer) Write(p []byte) (int, error) {
 }
 
 func (w *writer) Flush() {
+	if w.hijacked.Load() {
+		return
+	}
 	w.flushOnce.Do(func() {
+		w.pr, w.pw = io.Pipe()
 		select {
 		case w.modeCh <- modeFlushed:
 		default:
@@ -337,8 +398,9 @@ func (w *writer) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 func (w *writer) Close() error {
 	w.closeOnce.Do(func() {
-		_ = w.pw.Close()
-		_ = w.pr.Close()
+		if w.pw != nil {
+			_ = w.pw.Close()
+		}
 	})
 	return nil
 }
