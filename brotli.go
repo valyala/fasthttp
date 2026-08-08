@@ -102,6 +102,21 @@ func AppendBrotliBytesLevel(dst, src []byte, level int) []byte {
 	return w.b
 }
 
+// AppendBrotliBytesLevelStackfull appends brotlied src to dst using the given
+// compression level and returns the resulting dst.
+//
+// Supported compression levels are:
+//
+//   - CompressBrotliNoCompression
+//   - CompressBrotliBestSpeed
+//   - CompressBrotliBestCompression
+//   - CompressBrotliDefaultCompression
+func AppendBrotliBytesLevelStackfull(dst, src []byte, level int) []byte {
+	w := &byteSliceWriter{b: dst}
+	WriteBrotliLevelStackfull(w, src, level) //nolint:errcheck
+	return w.b
+}
+
 // WriteBrotliLevel writes brotlied p to w using the given compression level
 // and returns the number of compressed bytes written to w.
 //
@@ -132,6 +147,22 @@ func WriteBrotliLevel(w io.Writer, p []byte, level int) (int, error) {
 	}
 }
 
+// WriteBrotliLevelStackfull writes brotlied p to w using the given compression level
+// and returns the number of compressed bytes written to w.
+//
+// Supported compression levels are:
+//
+//   - CompressBrotliNoCompression
+//   - CompressBrotliBestSpeed
+//   - CompressBrotliBestCompression
+//   - CompressBrotliDefaultCompression
+func WriteBrotliLevelStackfull(w io.Writer, p []byte, level int) (int, error) {
+	zw := acquireRealBrotliWriter(w, level)
+	n, err := zw.Write(p)
+	releaseRealBrotliWriter(zw, level)
+	return n, err
+}
+
 var (
 	stacklessWriteBrotliOnce sync.Once
 	stacklessWriteBrotliFunc func(ctx any) bool
@@ -159,9 +190,20 @@ func WriteBrotli(w io.Writer, p []byte) (int, error) {
 	return WriteBrotliLevel(w, p, CompressBrotliDefaultCompression)
 }
 
+// WriteBrotliStackfull writes brotlied p to w and returns the number of compressed
+// bytes written to w.
+func WriteBrotliStackfull(w io.Writer, p []byte) (int, error) {
+	return WriteBrotliLevelStackfull(w, p, CompressBrotliDefaultCompression)
+}
+
 // AppendBrotliBytes appends brotlied src to dst and returns the resulting dst.
 func AppendBrotliBytes(dst, src []byte) []byte {
 	return AppendBrotliBytesLevel(dst, src, CompressBrotliDefaultCompression)
+}
+
+// AppendBrotliBytesStackfull appends brotlied src to dst and returns the resulting dst.
+func AppendBrotliBytesStackfull(dst, src []byte) []byte {
+	return AppendBrotliBytesLevelStackfull(dst, src, CompressBrotliDefaultCompression)
 }
 
 // WriteUnbrotli writes unbrotlied p to w and returns the number of uncompressed
