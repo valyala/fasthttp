@@ -1829,8 +1829,37 @@ var ErrTimeout = &timeoutError{}
 // SetMaxConns sets up the maximum number of connections which may be established to all hosts listed in Addr.
 func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
 	c.MaxConns = newMaxConns
-	c.connsLock.Unlock()
+	// Grown capacity must reach requests already parked in the wait queue.
+	for c.connsCount < c.maxConnsLocked() && c.serveWaiterLocked() {
+		c.connsCount++
+	}
+}
+
+// maxConnsLocked is MaxConns with its default applied. connsLock must be held.
+func (c *HostClient) maxConnsLocked() int {
+	if c.MaxConns <= 0 {
+		return DefaultMaxConnsPerHost
+	}
+	return c.MaxConns
+}
+
+// serveWaiterLocked hands a connection slot to the next parked waiter and
+// reports whether one took it. connsLock must be held.
+func (c *HostClient) serveWaiterLocked() bool {
+	for q := c.connsWait; q != nil && q.len() > 0; {
+		if w := q.popFront(); w.waiting() {
+			// The connection dialed for the waiter is pooled on release.
+			if !c.connsCleanerRun {
+				c.connsCleanerRun = true
+				go c.connsCleaner()
+			}
+			go c.dialConnFor(w)
+			return true
+		}
+	}
+	return false
 }
 
 func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
@@ -1841,11 +1870,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 	c.connsLock.Lock()
 	n = len(c.conns)
 	if n == 0 {
-		maxConns := c.MaxConns
-		if maxConns <= 0 {
-			maxConns = DefaultMaxConnsPerHost
-		}
-		if c.connsCount < maxConns {
+		if c.connsCount < c.maxConnsLocked() {
 			c.connsCount++
 			createConn = true
 			if !c.connsCleanerRun && !connectionClose {
@@ -2049,18 +2074,13 @@ func (c *HostClient) decConnsCount() {
 
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
-	dialed := false
-	if q := c.connsWait; q != nil {
-		for q.len() > 0 {
-			w := q.popFront()
-			if w.waiting() {
-				go c.dialConnFor(w)
-				dialed = true
-				break
-			}
-		}
+	if c.connsCount > c.maxConnsLocked() {
+		// The limit shrank while this slot was held; retire it so the count
+		// converges on the new cap instead of handing it to a waiter.
+		c.connsCount--
+		return
 	}
-	if !dialed {
+	if !c.serveWaiterLocked() {
 		c.connsCount--
 	}
 }
