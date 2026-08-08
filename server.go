@@ -252,8 +252,7 @@ type Server struct {
 	nextProtos map[string]ServeHandler
 	protocols  []*registeredProtocol
 
-	concurrencyCh     chan struct{}
-	concurrencyChOnce sync.Once
+	concurrencyCh chan struct{}
 
 	idleConns     map[net.Conn]*atomic.Int64
 	protocolConns map[net.Conn]struct{}
@@ -516,7 +515,7 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 	}
 
 	return func(ctx *RequestCtx) {
-		concurrencyCh := ctx.s.getConcurrencyCh()
+		concurrencyCh := ctx.s.concurrencyCh
 		select {
 		case concurrencyCh <- struct{}{}:
 		default:
@@ -923,19 +922,14 @@ func (ctx *RequestCtx) RemoveUserValueBytes(key []byte) {
 	ctx.Request.RemoveUserValueBytes(key)
 }
 
+type tlsConn interface {
+	Handshake() error
+	ConnectionState() tls.ConnectionState
+}
+
 // IsTLS returns true if the underlying connection is tls.Conn.
 //
 // tls.Conn is an encrypted connection (aka SSL, HTTPS).
-// tlsConnection unwraps ctx.c to its TLS connection, if it is one.
-func (ctx *RequestCtx) tlsConnection() (tlsConn, bool) {
-	conn := ctx.c
-	if pic, ok := conn.(*perIPConn); ok {
-		conn = pic.Conn
-	}
-	tc, ok := conn.(tlsConn)
-	return tc, ok
-}
-
 func (ctx *RequestCtx) IsTLS() bool {
 	// cast to (tlsConn) instead of (*tls.Conn), since it catches
 	// cases with overridden tls.Conn such as:
@@ -947,7 +941,12 @@ func (ctx *RequestCtx) IsTLS() bool {
 	// }
 
 	// perIPConn wraps the net.Conn in the Conn field
-	_, ok := ctx.tlsConnection()
+	if pic, ok := ctx.c.(*perIPConn); ok {
+		_, ok := pic.Conn.(tlsConn)
+		return ok
+	}
+
+	_, ok := ctx.c.(tlsConn)
 	return ok
 }
 
@@ -958,7 +957,7 @@ func (ctx *RequestCtx) IsTLS() bool {
 // The returned state may be used for verifying TLS version, client certificates,
 // etc.
 func (ctx *RequestCtx) TLSConnectionState() *tls.ConnectionState {
-	tc, ok := ctx.tlsConnection()
+	tc, ok := ctx.c.(tlsConn)
 	if !ok {
 		return nil
 	}
@@ -1067,11 +1066,8 @@ func (ctx *RequestCtx) String() string {
 }
 
 // ID returns unique ID of the request.
-//
-// ConnID occupies the high 32 bits and ConnRequestNum the low 32, so the ID
-// repeats once either passes 2^32. Use those accessors to avoid the wrap.
 func (ctx *RequestCtx) ID() uint64 {
-	return (ctx.connID << 32) | (ctx.connRequestNum & 0xffffffff)
+	return (ctx.connID << 32) | ctx.connRequestNum
 }
 
 // ConnID returns unique connection ID.
@@ -2070,11 +2066,9 @@ func (s *Server) Serve(ln net.Listener) error {
 	if s.done == nil {
 		s.done = make(chan struct{})
 	}
-	s.concurrencyChOnce.Do(func() {
-		if s.concurrencyCh == nil {
-			s.concurrencyCh = make(chan struct{}, maxWorkersCount)
-		}
-	})
+	if s.concurrencyCh == nil {
+		s.concurrencyCh = make(chan struct{}, maxWorkersCount)
+	}
 	s.mu.Unlock()
 
 	wp := &workerPool{
@@ -2383,17 +2377,6 @@ func (s *Server) getConcurrency() int {
 	return n
 }
 
-// getConcurrencyCh returns the gate TimeoutHandler admits requests through.
-// Serve allocates it up front; ServeConn and ServeConnTLS never call Serve.
-func (s *Server) getConcurrencyCh() chan struct{} {
-	s.concurrencyChOnce.Do(func() {
-		if s.concurrencyCh == nil {
-			s.concurrencyCh = make(chan struct{}, s.getConcurrency())
-		}
-	})
-	return s.concurrencyCh
-}
-
 var globalConnID uint64
 
 func nextConnID() uint64 {
@@ -2554,6 +2537,9 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
 		if err == nil {
+			idleConnTime.Store(0)
+			s.setState(c, StateActive)
+
 			if s.ReadTimeout > 0 && (connRequestNum != 1 || cleartextReadDeadline.IsZero()) {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					break
@@ -2591,14 +2577,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			}
 
 			if err == nil {
-				// The connection counts as active once a request has actually
-				// arrived, which is also what StateActive means. Marking it any
-				// earlier cleared the grace stamp taken when the connection was
-				// accepted, putting a peer that connects and then says nothing
-				// beyond the reach of Shutdown.
-				idleConnTime.Store(0)
-				s.setState(c, StateActive)
-
 				if onHdrRecv := s.HeaderReceived; onHdrRecv != nil {
 					reqConf := onHdrRecv(&ctx.Request.Header)
 					if reqConf.ReadTimeout > 0 {

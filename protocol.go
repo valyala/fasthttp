@@ -66,11 +66,6 @@ type ProtocolUpgrader interface {
 	UpgradeConn(ctx *ProtocolServerContext, c net.Conn, upgraded *Request) (bool, error)
 }
 
-type tlsConn interface {
-	Handshake() error
-	ConnectionState() tls.ConnectionState
-}
-
 type registeredProtocol struct {
 	alpn             []string
 	cleartextPreface []byte

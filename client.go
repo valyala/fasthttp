@@ -1773,18 +1773,17 @@ func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
 	c.MaxConns = newMaxConns
-	// Grown capacity must reach requests already parked in the wait queue.
-	for c.connsCount < c.maxConnsLocked() {
-		w := c.nextWaiterLocked()
-		if w == nil {
+	// Grown capacity reaches parked protocol slot waiters, which nothing but
+	// this notification would ever wake. HTTP/1 waiters keep the pre-existing
+	// contract: they wait for a connection to be released or time out. Only
+	// leading slot waiters are served, preserving the queue's FIFO order.
+	for c.connsWait != nil && c.connsCount < c.maxConnsLocked() {
+		w := c.connsWait.peekFront()
+		if w == nil || (w.waiting() && !w.slotOnly) {
 			return
 		}
-		if !w.slotOnly {
-			c.connsCount++
-			go c.dialConnFor(w)
-			continue
-		}
-		if w.tryDeliverSlot() {
+		c.connsWait.popFront()
+		if w.waiting() && w.tryDeliverSlot() {
 			c.connsCount++
 		}
 	}
@@ -2009,12 +2008,6 @@ func (c *HostClient) decConnsCount() {
 
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
-	if c.connsCount > c.maxConnsLocked() {
-		// The limit shrank while this slot was held; retire it instead of
-		// reusing it.
-		c.connsCount--
-		return
-	}
 	for w := c.nextWaiterLocked(); w != nil; w = c.nextWaiterLocked() {
 		if !w.slotOnly {
 			go c.dialConnFor(w)
