@@ -1596,6 +1596,320 @@ Connection: close
 	}
 }
 
+// oneByteReadWriter hands out a single byte per Read, so the multipart reader
+// cannot buffer past the closing boundary.
+type oneByteReadWriter struct{ readWriter }
+
+func (rw *oneByteReadWriter) Read(p []byte) (int, error) {
+	if len(p) > 1 {
+		p = p[:1]
+	}
+	return rw.readWriter.Read(p)
+}
+
+func TestServerDoesNotParseStreamedMultipartEpilogueAsRequest(t *testing.T) {
+	t.Parallel()
+
+	form := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := form + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				if _, err := ctx.MultipartForm(); err != nil {
+					t.Error(err)
+				}
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
+func TestServerRejectsTruncatedMultipartBody(t *testing.T) {
+	t.Parallel()
+
+	body := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+
+	rw := &readWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST / HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body)+1, body,
+	)
+
+	called := false
+	s := Server{
+		Handler: func(*RequestCtx) {
+			called = true
+		},
+	}
+
+	err := s.ServeConn(rw)
+
+	if called {
+		t.Error("handler was called for a truncated request body")
+	}
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("ServeConn error = %v; want unexpected EOF", err)
+	}
+}
+
+func TestServerDoesNotParseMalformedStreamedMultipartAsRequest(t *testing.T) {
+	t.Parallel()
+
+	// ReadForm gives up on the malformed part header, well before the end of
+	// the declared body.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := "--x\r\nMalformed-Header\r\n" + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				if _, err := ctx.MultipartForm(); err == nil {
+					t.Error("expecting error for a malformed multipart body")
+				}
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
+func TestServerRejectsTruncatedStreamedMultipartBody(t *testing.T) {
+	t.Parallel()
+
+	body := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST / HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body)+1, body,
+	)
+
+	var err error
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			_, err = ctx.MultipartForm()
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("MultipartForm error = %v; want unexpected EOF", err)
+	}
+}
+
+func TestServerStreamedMultipartEpilogueCountsTowardsLimit(t *testing.T) {
+	t.Parallel()
+
+	// The epilogue is request body too, so it has to be charged to maxBodySize
+	// the same way the buffered path charges it, and it still has to leave the
+	// connection framed once the limit is hit.
+	form := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := form + strings.Repeat("z", 1024) + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var (
+		err   error
+		paths []string
+	)
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				_, err = ctx.Request.MultipartFormWithLimit(len(form) + 1)
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Errorf("MultipartFormWithLimit error = %v; want %v", err, ErrBodyTooLarge)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
+func TestServerDoesNotParseStreamedMultipartMissingBoundaryAsRequest(t *testing.T) {
+	t.Parallel()
+
+	// multipart/form-data with no boundary returns ErrNoMultipartForm before a
+	// single body byte is read, so the whole declared body is the smuggled
+	// request.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				if _, err := ctx.MultipartForm(); err == nil {
+					t.Error("expecting error for a multipart body without a boundary")
+				}
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
+func TestServerDoesNotParseStreamedMultipartBadContentEncodingAsRequest(t *testing.T) {
+	t.Parallel()
+
+	// An unsupported Content-Encoding returns before any body byte is read.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Encoding: br\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				if _, err := ctx.MultipartForm(); err == nil {
+					t.Error("expecting error for an unsupported content-encoding")
+				}
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
+func TestServerDoesNotParseStreamedMultipartBadGzipAsRequest(t *testing.T) {
+	t.Parallel()
+
+	// gzip.NewReader reads the 10-byte header before it rejects the bad magic,
+	// so the smuggled request starts right after those 10 bytes.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := "0123456789" + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Encoding: gzip\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				if _, err := ctx.MultipartForm(); err == nil {
+					t.Error("expecting error for a malformed gzip body")
+				}
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
 func TestServerGetWithContent(t *testing.T) {
 	t.Parallel()
 
