@@ -1773,6 +1773,125 @@ func TestServerStreamedMultipartEpilogueCountsTowardsLimit(t *testing.T) {
 	}
 }
 
+func TestServerDoesNotParseStreamedMultipartMissingBoundaryAsRequest(t *testing.T) {
+	t.Parallel()
+
+	// multipart/form-data with no boundary returns ErrNoMultipartForm before a
+	// single body byte is read, so the whole declared body is the smuggled
+	// request.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				if _, err := ctx.MultipartForm(); err == nil {
+					t.Error("expecting error for a multipart body without a boundary")
+				}
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
+func TestServerDoesNotParseStreamedMultipartBadContentEncodingAsRequest(t *testing.T) {
+	t.Parallel()
+
+	// An unsupported Content-Encoding returns before any body byte is read.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Encoding: br\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				if _, err := ctx.MultipartForm(); err == nil {
+					t.Error("expecting error for an unsupported content-encoding")
+				}
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
+func TestServerDoesNotParseStreamedMultipartBadGzipAsRequest(t *testing.T) {
+	t.Parallel()
+
+	// gzip.NewReader reads the 10-byte header before it rejects the bad magic,
+	// so the smuggled request starts right after those 10 bytes.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := "0123456789" + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Encoding: gzip\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				if _, err := ctx.MultipartForm(); err == nil {
+					t.Error("expecting error for a malformed gzip body")
+				}
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
 func TestServerGetWithContent(t *testing.T) {
 	t.Parallel()
 

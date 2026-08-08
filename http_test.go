@@ -1735,6 +1735,46 @@ func TestRequestMultipartFormEpilogue(t *testing.T) {
 	}
 }
 
+// uncomparableReader is passed by value and holds a slice, so its dynamic type
+// is not comparable and `reader == reader` panics at runtime.
+type uncomparableReader struct {
+	data []byte
+	off  *int
+}
+
+func (r uncomparableReader) Read(p []byte) (int, error) {
+	if *r.off >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[*r.off:])
+	*r.off += n
+	return n, nil
+}
+
+func TestRequestMultipartFormUncomparableBodyStream(t *testing.T) {
+	t.Parallel()
+
+	// SetBodyStream accepts any io.Reader, so the drain must not compare the
+	// stream against another reader value: an uncomparable dynamic type would
+	// panic with "comparing uncomparable type".
+	body := "--foobar\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--foobar--\r\n"
+
+	var req Request
+	req.Header.SetContentType("multipart/form-data; boundary=foobar")
+	req.Header.SetContentLength(len(body))
+	req.SetBodyStream(uncomparableReader{data: []byte(body), off: new(int)}, len(body))
+
+	form, err := req.MultipartForm()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer req.RemoveMultipartFormFiles()
+
+	if v := form.Value["key"]; len(v) != 1 || v[0] != "value" {
+		t.Fatalf("unexpected form value %q; expecting %q", form.Value["key"], []string{"value"})
+	}
+}
+
 func testRequestMultipartForm(t *testing.T, boundary string, formData []byte, partsCount int) []byte {
 	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=%s\r\nContent-Length: %d\r\n\r\n%s",
 		boundary, len(formData), formData)

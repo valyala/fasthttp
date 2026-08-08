@@ -1116,6 +1116,20 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 		return req.multipartForm, nil
 	}
 
+	// Every declared body byte has to come off req.bodyStream before we
+	// return, on the error paths as much as the success one. ReadForm stops at
+	// the closing boundary and the early errors (missing boundary, unsupported
+	// content-encoding, bad gzip header) stop even sooner, so without this the
+	// leftover bytes are read back as the start of the next request on a
+	// keep-alive connection. Draining req.bodyStream directly also avoids
+	// comparing reader interface values, which panics for an uncomparable
+	// dynamic type set through SetBodyStream.
+	if req.bodyStream != nil {
+		defer func() {
+			_, _ = copyZeroAlloc(io.Discard, req.bodyStream)
+		}()
+	}
+
 	req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
 	if req.multipartFormBoundary == "" {
 		return nil, ErrNoMultipartForm
@@ -1145,19 +1159,11 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 		mr := multipart.NewReader(bodyStream, req.multipartFormBoundary)
 		req.multipartForm, err = mr.ReadForm(8 * 1024)
 
-		// ReadForm stops at the closing boundary, and on a parse error it stops
-		// wherever it gave up, so either way the rest of the declared body is
-		// still pending. Discard it through bodyStream so the leftover keeps
-		// counting towards maxBodySize, then off the raw stream so none of the
-		// declared body is left behind to be read back as the beginning of the
-		// next request on a keep-alive connection.
-		_, drainErr := copyZeroAlloc(io.Discard, bodyStream)
-		if bodyStream != req.bodyStream {
-			if _, rawErr := copyZeroAlloc(io.Discard, req.bodyStream); drainErr == nil {
-				drainErr = rawErr
-			}
-		}
-		if err == nil {
+		// Drain the rest of the declared body through bodyStream so the
+		// leftover keeps counting towards maxBodySize; the deferred drain then
+		// clears whatever remains on the raw stream so the connection stays
+		// framed.
+		if _, drainErr := copyZeroAlloc(io.Discard, bodyStream); err == nil {
 			err = drainErr
 		}
 		if lr != nil && lr.N <= 0 {
