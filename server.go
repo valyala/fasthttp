@@ -988,8 +988,11 @@ func (ctx *RequestCtx) String() string {
 }
 
 // ID returns unique ID of the request.
+//
+// ConnID occupies the high 32 bits and ConnRequestNum the low 32, so the ID
+// repeats once either passes 2^32. Use those accessors to avoid the wrap.
 func (ctx *RequestCtx) ID() uint64 {
-	return (ctx.connID << 32) | ctx.connRequestNum
+	return (ctx.connID << 32) | (ctx.connRequestNum & 0xffffffff)
 }
 
 // ConnID returns unique connection ID.
