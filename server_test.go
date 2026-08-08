@@ -5300,3 +5300,24 @@ func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TimeoutHandler must admit requests on a server driven by ServeConn, which
+// never allocates the concurrency gate that Serve does.
+func TestTimeoutHandlerViaServeConn(t *testing.T) {
+	s := &Server{Handler: TimeoutHandler(func(ctx *RequestCtx) {
+		ctx.SetBodyString("ok")
+	}, time.Second, "timeout")}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: a.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("ServeConn() error: %v", err)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("status = %d, want 200 (no requests were in flight)", resp.StatusCode())
+	}
+}
