@@ -9,10 +9,10 @@ func initTimer(t *time.Timer, timeout time.Duration) *time.Timer {
 	if t == nil {
 		return time.NewTimer(timeout)
 	}
-	if t.Reset(timeout) {
-		// developer sanity-check
-		panic("BUG: active timer trapped into initTimer()")
-	}
+	// Reset may report the timer active: an expiry can race the owner's select
+	// choosing another case, and then ReleaseTimer's drain runs before the
+	// in-flight delivery. Since Go 1.23 Reset discards that delivery.
+	t.Reset(timeout)
 	return t
 }
 
