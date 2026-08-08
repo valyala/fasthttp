@@ -111,8 +111,8 @@ connection with `ENHANCE_YOUR_CALM`.
 
 Two independent upload defaults are intentional:
 
-**Connection receive flow-control window: 4 MiB** (1 MiB per stream), same as
-the measured HTTP/2 connection-level window used by this implementation.
+**Connection receive flow-control window: 4 MiB** (1 MiB per stream), against
+1 MiB for both in `golang.org/x/net/http2`.
 `MaxUploadBufferPerConnection` controls this wire-level window only. It limits
 unconsumed DATA in flight and is replenished as the server copies or consumes
 request bytes; it is not a cap on the total size of ordinary buffered bodies.
