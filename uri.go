@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -1024,10 +1025,23 @@ func (u *URI) parseQueryArgs() {
 }
 
 // stringContainsCTLByte reports whether s contains any ASCII control character.
+// Eight bytes at a time: a lane below 0x20 or equal to 0x7f sets a high bit in
+// the mask.
 func stringContainsCTLByte(s []byte) bool {
-	for i := range s {
-		b := s[i]
-		if b < ' ' || b == 0x7f {
+	const ones = 0x0101010101010101
+	const highs = 0x8080808080808080
+	i := 0
+	for ; i+8 <= len(s); i += 8 {
+		x := binary.LittleEndian.Uint64(s[i:])
+		bad := (x - ones*0x20) & ^x & highs
+		y := x ^ (ones * 0x7f)
+		bad |= (y - ones) & ^y & highs
+		if bad != 0 {
+			return true
+		}
+	}
+	for ; i < len(s); i++ {
+		if b := s[i]; b < ' ' || b == 0x7f {
 			return true
 		}
 	}
