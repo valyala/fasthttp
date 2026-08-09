@@ -3808,7 +3808,7 @@ func (b *chunkedOptInBody) WriteTo(w io.Writer) (int64, error) {
 	return b.r.WriteTo(w)
 }
 
-func (b *chunkedOptInBody) SupportsChunkedBodyWriteTo() bool { return true }
+func (b *chunkedOptInBody) SupportsBodyWriteTo() bool { return true }
 
 func TestWriteBodyChunkedWriterToOptIn(t *testing.T) {
 	t.Parallel()
@@ -3878,12 +3878,12 @@ func TestWriteBodyChunkedPromotedWriterToNotOptIn(t *testing.T) {
 	stream := &promotedWriterToBody{embeddedWriterTo: inner}
 
 	// The promoted WriteTo makes stream satisfy io.WriterTo, but not
-	// ChunkedBodyWriterTo.
+	// BodyWriterTo.
 	if _, ok := any(stream).(io.WriterTo); !ok {
 		t.Fatal("test setup: stream must satisfy io.WriterTo via promotion")
 	}
-	if _, ok := any(stream).(ChunkedBodyWriterTo); ok {
-		t.Fatal("test setup: stream must NOT satisfy ChunkedBodyWriterTo")
+	if _, ok := any(stream).(BodyWriterTo); ok {
+		t.Fatal("test setup: stream must NOT satisfy BodyWriterTo")
 	}
 
 	var resp Response
@@ -3915,20 +3915,24 @@ func TestWriteBodyChunkedPromotedWriterToNotOptIn(t *testing.T) {
 }
 
 // optInInner supports zero-copy framing; optOutBody embeds it but overrides
-// SupportsChunkedBodyWriteTo to return false, opting back out.
+// SupportsBodyWriteTo to return false, opting back out.
 type optInInner struct {
 	r        *bytes.Reader
+	readCnt  int
 	writeCnt int
 }
 
-func (e *optInInner) Read(p []byte) (int, error) { return e.r.Read(p) }
+func (e *optInInner) Read(p []byte) (int, error) {
+	e.readCnt++
+	return e.r.Read(p)
+}
 
 func (e *optInInner) WriteTo(w io.Writer) (int64, error) {
 	e.writeCnt++
 	return e.r.WriteTo(w)
 }
 
-func (e *optInInner) SupportsChunkedBodyWriteTo() bool { return true }
+func (e *optInInner) SupportsBodyWriteTo() bool { return true }
 
 type optOutBody struct {
 	*optInInner
@@ -3941,7 +3945,181 @@ func (b *optOutBody) Read(p []byte) (int, error) {
 	return b.optInInner.Read(p)
 }
 
-func (b *optOutBody) SupportsChunkedBodyWriteTo() bool { return false }
+func (b *optOutBody) SupportsBodyWriteTo() bool { return false }
+
+func TestBodyStreamOperationsPreserveLegacyWriterToUnlessOverridden(t *testing.T) {
+	t.Parallel()
+
+	body := createFixedBody(10001)
+	operations := []struct {
+		name string
+		run  func(io.Reader) ([]byte, error)
+	}{
+		{
+			name: "response Body",
+			run: func(stream io.Reader) ([]byte, error) {
+				var resp Response
+				resp.SetBodyStream(stream, -1)
+				return resp.Body(), nil
+			},
+		},
+		{
+			name: "request Body",
+			run: func(stream io.Reader) ([]byte, error) {
+				var req Request
+				req.SetBodyStream(stream, -1)
+				return req.Body(), nil
+			},
+		},
+		{
+			name: "response BodyWriteTo",
+			run: func(stream io.Reader) ([]byte, error) {
+				var resp Response
+				resp.SetBodyStream(stream, -1)
+
+				var dst bytes.Buffer
+				if err := resp.BodyWriteTo(&dst); err != nil {
+					return nil, err
+				}
+				return dst.Bytes(), nil
+			},
+		},
+		{
+			name: "request BodyWriteTo",
+			run: func(stream io.Reader) ([]byte, error) {
+				var req Request
+				req.SetBodyStream(stream, -1)
+
+				var dst bytes.Buffer
+				if err := req.BodyWriteTo(&dst); err != nil {
+					return nil, err
+				}
+				return dst.Bytes(), nil
+			},
+		},
+		{
+			name: "response SwapBody",
+			run: func(stream io.Reader) ([]byte, error) {
+				var resp Response
+				resp.SetBodyStream(stream, -1)
+				return resp.SwapBody(nil), nil
+			},
+		},
+		{
+			name: "request SwapBody",
+			run: func(stream io.Reader) ([]byte, error) {
+				var req Request
+				req.SetBodyStream(stream, -1)
+				return req.SwapBody(nil), nil
+			},
+		},
+		{
+			name: "fixed-size response write",
+			run: func(stream io.Reader) ([]byte, error) {
+				var resp Response
+				resp.SetBodyStream(stream, len(body))
+
+				var dst bytes.Buffer
+				bw := bufio.NewWriter(&dst)
+				if err := resp.Write(bw); err != nil {
+					return nil, err
+				}
+				if err := bw.Flush(); err != nil {
+					return nil, err
+				}
+
+				var decoded Response
+				if err := decoded.Read(bufio.NewReader(&dst)); err != nil {
+					return nil, err
+				}
+				return decoded.Body(), nil
+			},
+		},
+		{
+			name: "gzip response write",
+			run: func(stream io.Reader) ([]byte, error) {
+				var resp Response
+				resp.Header.SetContentType("text/plain")
+				resp.SetBodyStream(stream, -1)
+
+				var dst bytes.Buffer
+				bw := bufio.NewWriter(&dst)
+				if err := resp.WriteGzip(bw); err != nil {
+					return nil, err
+				}
+				if err := bw.Flush(); err != nil {
+					return nil, err
+				}
+
+				var decoded Response
+				if err := decoded.Read(bufio.NewReader(&dst)); err != nil {
+					return nil, err
+				}
+				return decoded.BodyGunzip()
+			},
+		},
+	}
+
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			t.Run("unmarked WriterTo keeps legacy behavior", func(t *testing.T) {
+				inner := &embeddedWriterTo{r: bytes.NewReader(body)}
+				stream := &promotedWriterToBody{embeddedWriterTo: inner}
+
+				got, err := operation.run(stream)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !bytes.Equal(got, body) {
+					t.Fatalf("unexpected body of len %d. Expecting len %d", len(got), len(body))
+				}
+				if inner.writeCnt != 1 {
+					t.Fatalf("WriteTo must be called once, got %d", inner.writeCnt)
+				}
+				if stream.readCnt != 0 {
+					t.Fatalf("Read must not be called for an unmarked legacy WriterTo, got %d", stream.readCnt)
+				}
+			})
+
+			t.Run("explicit opt-in uses WriterTo", func(t *testing.T) {
+				stream := &optInInner{r: bytes.NewReader(body)}
+
+				got, err := operation.run(stream)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !bytes.Equal(got, body) {
+					t.Fatalf("unexpected body of len %d. Expecting len %d", len(got), len(body))
+				}
+				if stream.writeCnt != 1 {
+					t.Fatalf("WriteTo must be called once, got %d", stream.writeCnt)
+				}
+				if stream.readCnt != 0 {
+					t.Fatalf("Read must not be called for an opted-in BodyWriterTo, got %d", stream.readCnt)
+				}
+			})
+
+			t.Run("explicit opt-out uses Read", func(t *testing.T) {
+				inner := &optInInner{r: bytes.NewReader(body)}
+				stream := &optOutBody{optInInner: inner}
+
+				got, err := operation.run(stream)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !bytes.Equal(got, body) {
+					t.Fatalf("unexpected body of len %d. Expecting len %d", len(got), len(body))
+				}
+				if inner.writeCnt != 0 {
+					t.Fatalf("WriteTo must not be called after opting out, got %d", inner.writeCnt)
+				}
+				if stream.readCnt == 0 {
+					t.Fatal("Read must be called after opting out")
+				}
+			})
+		})
+	}
+}
 
 func TestWriteBodyChunkedOptOutOverride(t *testing.T) {
 	t.Parallel()
@@ -3950,10 +4128,10 @@ func TestWriteBodyChunkedOptOutOverride(t *testing.T) {
 	inner := &optInInner{r: bytes.NewReader([]byte(body))}
 	stream := &optOutBody{optInInner: inner}
 
-	// stream implements ChunkedBodyWriterTo (the method is promoted/overridden),
-	// but its SupportsChunkedBodyWriteTo returns false, so it must use Read.
-	if _, ok := any(stream).(ChunkedBodyWriterTo); !ok {
-		t.Fatal("test setup: stream must implement ChunkedBodyWriterTo")
+	// stream implements BodyWriterTo (the method is promoted/overridden), but
+	// its SupportsBodyWriteTo returns false, so it must use Read.
+	if _, ok := any(stream).(BodyWriterTo); !ok {
+		t.Fatal("test setup: stream must implement BodyWriterTo")
 	}
 
 	var resp Response
@@ -3985,7 +4163,7 @@ func TestWriteBodyChunkedOptOutOverride(t *testing.T) {
 }
 
 // Standard bytes types take the zero-copy path without implementing
-// ChunkedBodyWriterTo; the output must still be correct.
+// BodyWriterTo; the output must still be correct.
 func TestWriteBodyChunkedConcreteTypes(t *testing.T) {
 	t.Parallel()
 

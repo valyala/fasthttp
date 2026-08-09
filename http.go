@@ -242,7 +242,10 @@ func (resp *Response) SendFile(path string) error {
 //
 // When bodySize < 0 (chunked transfer encoding), fasthttp may frame the body
 // using WriteTo instead of Read for *bytes.Reader, *bytes.Buffer, and streams
-// implementing ChunkedBodyWriterTo.
+// implementing BodyWriterTo that return true from SupportsBodyWriteTo.
+//
+// See BodyWriterTo for controlling whether fasthttp may use WriteTo instead of
+// Read when consuming bodyStream.
 //
 // bodyStream.Close() is called after finishing reading all body data
 // if it implements io.Closer.
@@ -265,7 +268,10 @@ func (req *Request) SetBodyStream(bodyStream io.Reader, bodySize int) {
 //
 // When bodySize < 0 (chunked transfer encoding), fasthttp may frame the body
 // using WriteTo instead of Read for *bytes.Reader, *bytes.Buffer, and streams
-// implementing ChunkedBodyWriterTo.
+// implementing BodyWriterTo that return true from SupportsBodyWriteTo.
+//
+// See BodyWriterTo for controlling whether fasthttp may use WriteTo instead of
+// Read when consuming bodyStream.
 //
 // bodyStream.Close() is called after finishing reading all body data
 // if it implements io.Closer.
@@ -439,7 +445,7 @@ func (resp *Response) Body() []byte {
 	if resp.bodyStream != nil {
 		bodyBuf := resp.bodyBuffer()
 		bodyBuf.Reset()
-		_, err := copyZeroAlloc(bodyBuf, resp.bodyStream)
+		_, err := copyBodyStream(bodyBuf, resp.bodyStream)
 		resp.closeBodyStream(err) //nolint:errcheck
 		if err != nil {
 			bodyBuf.SetString(err.Error())
@@ -465,7 +471,7 @@ func (req *Request) bodyBytes() []byte {
 	if req.bodyStream != nil {
 		bodyBuf := req.bodyBuffer()
 		bodyBuf.Reset()
-		_, err := copyZeroAlloc(bodyBuf, req.bodyStream)
+		_, err := copyBodyStream(bodyBuf, req.bodyStream)
 		req.closeBodyStream() //nolint:errcheck
 		if err != nil {
 			bodyBuf.SetString(err.Error())
@@ -731,7 +737,7 @@ func (resp *Response) BodyUncompressedWithLimit(maxBodySize int) ([]byte, error)
 // BodyWriteTo writes request body to w.
 func (req *Request) BodyWriteTo(w io.Writer) error {
 	if req.bodyStream != nil {
-		_, err := copyZeroAlloc(w, req.bodyStream)
+		_, err := copyBodyStream(w, req.bodyStream)
 		req.closeBodyStream() //nolint:errcheck
 		return err
 	}
@@ -745,7 +751,7 @@ func (req *Request) BodyWriteTo(w io.Writer) error {
 // BodyWriteTo writes response body to w.
 func (resp *Response) BodyWriteTo(w io.Writer) error {
 	if resp.bodyStream != nil {
-		_, err := copyZeroAlloc(w, resp.bodyStream)
+		_, err := copyBodyStream(w, resp.bodyStream)
 		resp.closeBodyStream(err) //nolint:errcheck
 		return err
 	}
@@ -861,7 +867,7 @@ func (resp *Response) SwapBody(body []byte) []byte {
 
 	if resp.bodyStream != nil {
 		bb.Reset()
-		_, err := copyZeroAlloc(bb, resp.bodyStream)
+		_, err := copyBodyStream(bb, resp.bodyStream)
 		resp.closeBodyStream(err) //nolint:errcheck
 		if err != nil {
 			bb.Reset()
@@ -886,7 +892,7 @@ func (req *Request) SwapBody(body []byte) []byte {
 
 	if req.bodyStream != nil {
 		bb.Reset()
-		_, err := copyZeroAlloc(bb, req.bodyStream)
+		_, err := copyBodyStream(bb, req.bodyStream)
 		req.closeBodyStream() //nolint:errcheck
 		if err != nil {
 			bb.Reset()
@@ -2166,7 +2172,7 @@ func compressBrotliBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int)
 		wf: zw,
 		bw: sw,
 	}
-	_, wErr := copyZeroAlloc(fw, bodyStream)
+	_, wErr := copyBodyStream(fw, bodyStream)
 	releaseStacklessBrotliWriter(zw, level)
 	return wErr
 }
@@ -2177,7 +2183,7 @@ func compressGzipBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) e
 		wf: zw,
 		bw: sw,
 	}
-	_, wErr := copyZeroAlloc(fw, bodyStream)
+	_, wErr := copyBodyStream(fw, bodyStream)
 	releaseStacklessGzipWriter(zw, level)
 	return wErr
 }
@@ -2188,7 +2194,7 @@ func compressDeflateBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int
 		wf: zw,
 		bw: sw,
 	}
-	_, wErr := copyZeroAlloc(fw, bodyStream)
+	_, wErr := copyBodyStream(fw, bodyStream)
 	releaseStacklessDeflateWriter(zw, level)
 	return wErr
 }
@@ -2199,7 +2205,7 @@ func compressZstdBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) e
 		wf: zw,
 		bw: sw,
 	}
-	_, wErr := copyZeroAlloc(fw, bodyStream)
+	_, wErr := copyBodyStream(fw, bodyStream)
 	releaseStacklessZstdWriter(zw, level)
 	return wErr
 }
@@ -2512,19 +2518,24 @@ type httpWriter interface {
 	Write(w *bufio.Writer) error
 }
 
-// ChunkedBodyWriterTo lets a body opt into zero-copy chunked framing via
-// WriteTo. It is consulted only for unknown-size bodies (bodySize < 0) written
-// with chunked transfer encoding.
+// BodyWriterTo lets a body stream control whether fasthttp may use WriteTo
+// instead of Read when consuming the stream.
 //
-// SupportsChunkedBodyWriteTo must return true only when WriteTo can safely
-// replace Read, including any pacing, accounting, transformations, or other
-// observable side effects Read performs — emitting the same eventual bytes is
-// not enough. A bare io.WriterTo check is avoided because a WriteTo promoted
-// from an embedded reader would opt in by accident and bypass an overridden
-// Read; the bool also lets an embedding type opt back out.
-type ChunkedBodyWriterTo interface {
+// Returning false from SupportsBodyWriteTo forces fasthttp to use Read.
+// Returning true permits fasthttp to use WriteTo. Existing body-copy paths
+// retain their historical io.WriterTo behavior for streams that do not
+// implement BodyWriterTo, while direct unknown-size chunked framing uses Read
+// for unmarked streams.
+//
+// SupportsBodyWriteTo must return true only when WriteTo can safely replace
+// Read, including any pacing, accounting, transformations, or other observable
+// side effects Read performs — emitting the same eventual bytes is not enough.
+// A bare io.WriterTo check is avoided for direct chunked framing because a
+// WriteTo promoted from an embedded reader would opt in by accident and bypass
+// an overridden Read; the bool also lets an embedding type opt back out.
+type BodyWriterTo interface {
 	io.WriterTo
-	SupportsChunkedBodyWriteTo() bool
+	SupportsBodyWriteTo() bool
 }
 
 type chunkedBodyWriter struct {
@@ -2553,8 +2564,8 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	case *bytes.Buffer:
 		wt = v
 	default:
-		if cw, ok := r.(ChunkedBodyWriterTo); ok && cw.SupportsChunkedBodyWriteTo() {
-			wt = cw
+		if bwt, ok := r.(BodyWriterTo); ok && bwt.SupportsBodyWriteTo() {
+			wt = bwt
 		}
 	}
 	if wt != nil {
@@ -2622,12 +2633,28 @@ func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
 		}
 	}
 
-	n, err := copyZeroAlloc(w, r)
+	n, err := copyBodyStream(w, r)
 
 	if n != size && err == nil {
 		err = fmt.Errorf("copied %d bytes from body stream instead of %d bytes", n, size)
 	}
 	return err
+}
+
+func copyBodyStream(w io.Writer, r io.Reader) (int64, error) {
+	if bwt, ok := r.(BodyWriterTo); ok {
+		if bwt.SupportsBodyWriteTo() {
+			return bwt.WriteTo(w)
+		}
+
+		vbuf := copyBufPool.Get()
+		buf := vbuf.([]byte) //nolint:forcetypeassert
+		n, err := copyBuffer(w, r, buf)
+		copyBufPool.Put(vbuf)
+		return n, err
+	}
+
+	return copyZeroAlloc(w, r)
 }
 
 // copyZeroAlloc optimizes io.Copy by calling ReadFrom or WriteTo only when

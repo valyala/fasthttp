@@ -1625,7 +1625,8 @@ func (ctx *RequestCtx) PostBody() []byte {
 //
 // If bodySize < 0, then bodyStream is read until io.EOF.
 //
-// See ChunkedBodyWriterTo for custom streams writing unknown-size chunked bodies.
+// See BodyWriterTo for controlling whether fasthttp may use WriteTo instead of
+// Read when consuming bodyStream.
 //
 // See also SetBodyStreamWriter.
 func (ctx *RequestCtx) SetBodyStream(bodyStream io.Reader, bodySize int) {
