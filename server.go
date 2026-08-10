@@ -2380,6 +2380,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 	ctx := s.acquireCtx(c)
 	ctx.connTime = connTime
+	ctx.Request.logger = s.logger()
 	isTLS := ctx.IsTLS()
 	var (
 		br *bufio.Reader
@@ -2963,6 +2964,7 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.c = conn
 	ctx.remoteAddr = nil
 	ctx.logger.logger = logger
+	ctx.Request.logger = logger
 	ctx.connID = nextConnID()
 	ctx.s = fakeServer
 	ctx.connRequestNum = 0
@@ -2991,6 +2993,7 @@ func (ctx *RequestCtx) Init(req *Request, remoteAddr net.Addr, logger Logger) {
 	}
 	ctx.Init2(c, logger, true)
 	req.CopyTo(&ctx.Request)
+	ctx.Request.logger = logger
 }
 
 // Deadline returns the time when work done on behalf of this context

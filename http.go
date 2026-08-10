@@ -51,6 +51,8 @@ type Request struct {
 
 	bodyRaw []byte
 
+	logger Logger
+
 	uri URI
 
 	// Request header.
@@ -916,6 +918,9 @@ func (req *Request) SwapBody(body []byte) []byte {
 // If the body is backed by a stream, Body reads the entire stream into memory.
 // Use BodyStream to read it incrementally.
 func (req *Request) Body() []byte {
+	if req.bodyStream != nil && req.logger != nil {
+		req.logger.Printf("WARNING: Request.Body() reads the entire stream into memory. Use Request.BodyStream() or Request.WriteBodyTo() instead to avoid out-of-memory errors.")
+	}
 	if req.bodyRaw != nil {
 		return req.bodyRaw
 	} else if req.onlyMultipartForm() {
@@ -1004,6 +1009,7 @@ func (req *Request) copyToSkipBody(dst *Request) {
 	dst.isTLS = req.isTLS
 
 	dst.UseHostHeader = req.UseHostHeader
+	dst.logger = req.logger
 
 	// do not copy multipartForm - it will be automatically
 	// re-created on the first call to MultipartForm.
@@ -1281,6 +1287,7 @@ func (req *Request) Reset() {
 	req.Header.Reset()
 	req.resetSkipHeader()
 	req.timeout = 0
+	req.logger = nil
 	req.UseHostHeader = false
 	req.DisableRedirectPathNormalizing = false
 }
