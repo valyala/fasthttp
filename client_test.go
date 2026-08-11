@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"regexp"
@@ -118,6 +119,253 @@ func TestClientConnectionCounts(t *testing.T) {
 	if n := c.IdleConnsCount(); n != 0 {
 		t.Errorf("unexpected idle connection count %d. Expecting %d", n, 0)
 	}
+}
+
+func TestClientStreamCloseWaitsForRead(t *testing.T) {
+	t.Parallel()
+
+	clientConn, serverConn := net.Pipe()
+	delayedConn := &delayedReadReturnConn{
+		Conn:               clientConn,
+		readStarted:        make(chan struct{}),
+		underlyingReturned: make(chan struct{}),
+		allowReadReturn:    make(chan struct{}),
+	}
+	serverDone := make(chan struct{})
+	go func() {
+		defer serverConn.Close()
+		reader := bufio.NewReader(serverConn)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if line == "\r\n" {
+				break
+			}
+		}
+		if _, err := io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1\r\na\r\n"); err != nil {
+			return
+		}
+		<-serverDone
+	}()
+
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			close(delayedConn.allowReadReturn)
+			close(serverDone)
+			clientConn.Close()
+		})
+	}
+	t.Cleanup(cleanup)
+
+	client := HostClient{
+		Addr:               "example.com:80",
+		Dial:               func(string) (net.Conn, error) { return delayedConn, nil },
+		StreamResponseBody: true,
+	}
+	var req Request
+	req.SetRequestURI("http://example.com/")
+	resp := AcquireResponse()
+	defer ReleaseResponse(resp)
+	if err := client.Do(&req, resp); err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+
+	stream, ok := resp.BodyStream().(ReadCloserWithError)
+	if !ok {
+		t.Fatalf("unexpected body stream type %T", resp.BodyStream())
+	}
+	buf := make([]byte, 1)
+	if n, err := stream.Read(buf); n != 1 || err != nil || buf[0] != 'a' {
+		t.Fatalf("unexpected first stream read: n=%d err=%v body=%q", n, err, buf[:n])
+	}
+
+	delayedConn.delayRead.Store(true)
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := stream.Read(buf)
+		readDone <- err
+	}()
+	select {
+	case <-delayedConn.readStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for stream read to block")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- stream.CloseWithError(errors.New("cancel stream"))
+	}()
+	select {
+	case <-delayedConn.underlyingReturned:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for connection close to unblock the stream read")
+	}
+
+	if got := client.ConnsCount(); got != 1 {
+		t.Errorf("connection was released while the in-flight read was still running: got %d active connections", got)
+	}
+
+	cleanup()
+	select {
+	case <-readDone:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for stream read to finish")
+	}
+	var closeErr error
+	select {
+	case closeErr = <-closeDone:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for stream close to finish")
+	}
+	if closeErr != nil {
+		t.Fatalf("unexpected stream close error: %v", closeErr)
+	}
+	if got := client.ConnsCount(); got != 0 {
+		t.Fatalf("connection was not released after the stream read finished: got %d active connections", got)
+	}
+}
+
+func TestClientStreamCloseReusesBufferedResponseConnection(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "hello world")
+	}))
+	t.Cleanup(server.Close)
+
+	var dialCount atomic.Int32
+	client := HostClient{
+		Addr: strings.TrimPrefix(server.URL, "http://"),
+		Dial: func(addr string) (net.Conn, error) {
+			dialCount.Add(1)
+			return net.Dial("tcp", addr)
+		},
+		StreamResponseBody: true,
+	}
+	t.Cleanup(client.CloseIdleConnections)
+
+	for range 2 {
+		var req Request
+		req.SetRequestURI(server.URL)
+		resp := AcquireResponse()
+		if err := client.Do(&req, resp); err != nil {
+			ReleaseResponse(resp)
+			t.Fatalf("unexpected request error: %v", err)
+		}
+		if err := resp.CloseBodyStream(); err != nil {
+			ReleaseResponse(resp)
+			t.Fatalf("unexpected stream close error: %v", err)
+		}
+		ReleaseResponse(resp)
+	}
+
+	if got := dialCount.Load(); got != 1 {
+		t.Fatalf("buffered response connection was not reused: got %d dials", got)
+	}
+}
+
+func TestClientStreamCloseInterruptsActiveReadAfterEOF(t *testing.T) {
+	t.Parallel()
+
+	reader := &blockingStreamReader{
+		started: make(chan struct{}),
+		unblock: make(chan struct{}),
+	}
+	var unblockOnce sync.Once
+	unblock := func() {
+		unblockOnce.Do(func() {
+			close(reader.unblock)
+		})
+	}
+	t.Cleanup(unblock)
+
+	released := make(chan bool, 1)
+	stream := &clientStreamBody{
+		reader:    reader,
+		closeDone: make(chan struct{}),
+		interrupt: unblock,
+		release: func(closeConnection bool) {
+			released <- closeConnection
+		},
+	}
+	stream.fullyRead.Store(true)
+
+	readDone := make(chan error, 1)
+	go func() {
+		_, err := stream.Read(make([]byte, 1))
+		readDone <- err
+	}()
+	select {
+	case <-reader.started:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for stream read to block")
+	}
+
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- stream.CloseWithError(nil)
+	}()
+	select {
+	case closeConnection := <-released:
+		if !closeConnection {
+			t.Fatal("active stream read did not force the connection closed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stream close did not interrupt the active read")
+	}
+	select {
+	case <-readDone:
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for stream read to finish")
+	}
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("unexpected stream close error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout waiting for stream close to finish")
+	}
+}
+
+type blockingStreamReader struct {
+	started chan struct{}
+	unblock chan struct{}
+}
+
+func (r *blockingStreamReader) Read([]byte) (int, error) {
+	close(r.started)
+	<-r.unblock
+	return 0, io.EOF
+}
+
+type delayedReadReturnConn struct {
+	net.Conn
+
+	delayRead          atomic.Bool
+	readStarted        chan struct{}
+	underlyingReturned chan struct{}
+	allowReadReturn    chan struct{}
+	readStartOnce      sync.Once
+	readReturnOnce     sync.Once
+}
+
+func (c *delayedReadReturnConn) Read(p []byte) (int, error) {
+	if !c.delayRead.Load() {
+		return c.Conn.Read(p)
+	}
+	c.readStartOnce.Do(func() {
+		close(c.readStarted)
+	})
+	n, err := c.Conn.Read(p)
+	c.readReturnOnce.Do(func() {
+		close(c.underlyingReturned)
+	})
+	<-c.allowReadReturn
+	return n, err
 }
 
 func TestPipelineClientSetUserAgent(t *testing.T) {
