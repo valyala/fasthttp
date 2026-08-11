@@ -3844,6 +3844,22 @@ func TestRequestHeaderPeekAll(t *testing.T) {
 	expectRequestHeaderAll(t, h, "aaa", [][]byte{})
 }
 
+func TestRequestHeaderPeekCanonical(t *testing.T) {
+	t.Parallel()
+
+	key := []byte("ETag")
+	value := []byte("13-1831710635")
+	var h RequestHeader
+	h.SetCanonical(key, value)
+
+	if got := h.PeekCanonical(key); !bytes.Equal(got, value) {
+		t.Fatalf("unexpected value for key %q: %q; want %q", key, got, value)
+	}
+	if string(key) != "ETag" {
+		t.Fatalf("PeekCanonical modified key: %q", key)
+	}
+}
+
 func expectRequestHeaderAll(t *testing.T, h *RequestHeader, key string, expectedValue [][]byte) {
 	if len(h.PeekAll(key)) != len(expectedValue) {
 		t.Fatalf("Unexpected size for key %q: %d. Expected %d", key, len(h.PeekAll(key)), len(expectedValue))
@@ -3878,6 +3894,22 @@ func TestResponseHeaderPeekAll(t *testing.T) {
 	h.Del(HeaderContentEncoding)
 	expectResponseHeaderAll(t, h, HeaderContentType, [][]byte{defaultContentType})
 	expectResponseHeaderAll(t, h, HeaderContentEncoding, [][]byte{})
+}
+
+func TestResponseHeaderPeekCanonical(t *testing.T) {
+	t.Parallel()
+
+	key := []byte("ETag")
+	value := []byte("13-1831710635")
+	var h ResponseHeader
+	h.SetCanonical(key, value)
+
+	if got := h.PeekCanonical(key); !bytes.Equal(got, value) {
+		t.Fatalf("unexpected value for key %q: %q; want %q", key, got, value)
+	}
+	if string(key) != "ETag" {
+		t.Fatalf("PeekCanonical modified key: %q", key)
+	}
 }
 
 func expectResponseHeaderAll(t *testing.T, h *ResponseHeader, key string, expectedValue [][]byte) {
