@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -32,11 +33,32 @@ type header struct {
 
 	contentLength int
 
+	// terminatorSearched is how much of the buffered block a retry has
+	// already searched for the terminator without finding it.
+	terminatorSearched int
+
 	disableNormalizing    bool
 	secureErrorLogMessage bool
 	noHTTP11              bool
 	connectionClose       bool
 	noDefaultContentType  bool
+}
+
+// emptyHeaderBlock reports whether the block after the start line is the
+// CRLF that ends an empty one.
+func emptyHeaderBlock(b []byte) bool {
+	return len(b) >= 2 && b[0] == '\r' && b[1] == '\n'
+}
+
+// blockTerminated reports whether b holds the CRLFCRLF ending the header
+// block, searching only what earlier retries have not seen.
+func (h *header) blockTerminated(b []byte) bool {
+	start := max(h.terminatorSearched-len(strCRLFCRLF)+1, 0)
+	if bytes.Contains(b[start:], strCRLFCRLF) {
+		return true
+	}
+	h.terminatorSearched = len(b)
+	return false
 }
 
 // ResponseHeader represents HTTP response header.
@@ -549,6 +571,34 @@ func validHeaderFieldByte(c byte) bool {
 // as defined by RFC 7230.
 func validHeaderValueByte(c byte) bool {
 	return validHeaderValueByteTable[c] == 1
+}
+
+// validHeaderValueBytes reports whether every byte of v is a valid header
+// value byte. Eight bytes at a time: a lane below 0x20 or equal to 0x7f
+// falls back to the table, which accepts \t.
+func validHeaderValueBytes(v []byte) bool {
+	const ones = 0x0101010101010101
+	const highs = 0x8080808080808080
+	i := 0
+	for ; i+8 <= len(v); i += 8 {
+		x := binary.LittleEndian.Uint64(v[i:])
+		bad := (x - ones*0x20) & ^x & highs
+		y := x ^ (ones * 0x7f)
+		bad |= (y - ones) & ^y & highs
+		if bad != 0 {
+			for _, c := range v[i : i+8] {
+				if validHeaderValueByteTable[c] == 0 {
+					return false
+				}
+			}
+		}
+	}
+	for _, c := range v[i:] {
+		if validHeaderValueByteTable[c] == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // isValidHeaderKey returns whether a is a valid header key, and whether a
@@ -1322,7 +1372,6 @@ func (h *RequestHeader) AllInOrder() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		var s headerScanner
 		s.b = h.rawHeaders
-		s.blockEnd = len(h.rawHeaders)
 		for s.next() {
 			s.key = trimTrailingSpace(s.key)
 			normalizeHeaderKey(s.key, h.disableNormalizing)
@@ -2191,6 +2240,7 @@ func (h *ResponseHeader) Cookie(cookie *Cookie) bool {
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *ResponseHeader) Read(r *bufio.Reader) error {
 	n := 1
+	h.terminatorSearched = 0
 	for {
 		err := h.tryRead(r, n)
 		if err == nil {
@@ -2232,6 +2282,18 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 		return fmt.Errorf("error when reading response headers: %w", err)
 	}
 	b = mustPeekBuffered(r)
+	if n > 1 && !h.blockTerminated(b) {
+		// A retry reparses the whole block, so it waits for the terminator;
+		// the status line is still checked as soon as it is complete, and an
+		// empty block is complete at its CRLF.
+		m, errParse := h.parseFirstLine(b)
+		if errParse != nil {
+			return headerError("response", err, errParse, b, h.secureErrorLogMessage)
+		}
+		if !emptyHeaderBlock(b[m:]) {
+			return headerError("response", err, ErrNeedMore, b, h.secureErrorLogMessage)
+		}
+	}
 	headersLen, errParse := h.parse(b)
 	if errParse != nil {
 		return headerError("response", err, errParse, b, h.secureErrorLogMessage)
@@ -2284,14 +2346,18 @@ func (h *header) tryReadTrailer(r *bufio.Reader, n int) error {
 		return fmt.Errorf("error when reading response trailer: %w", err)
 	}
 	b = mustPeekBuffered(r)
+	// The scanner finalizes fields as it goes, so a retry must not keep the
+	// ones an incomplete parse already appended: it reparses from the start.
+	committed := len(h.h)
 	hh, headersLen, errParse := parseTrailer(b, h.h, h.disableNormalizing)
-	h.h = hh
 	if errParse != nil {
+		h.h = hh[:committed]
 		if err == io.EOF {
 			return err
 		}
 		return headerError("response", err, errParse, b, h.secureErrorLogMessage)
 	}
+	h.h = hh
 	mustDiscard(r, headersLen)
 	return nil
 }
@@ -2337,6 +2403,7 @@ func (h *RequestHeader) Read(r *bufio.Reader) error {
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) readLoop(r *bufio.Reader, waitForMore bool) error {
 	n := 1
+	h.terminatorSearched = 0
 	for {
 		err := h.tryRead(r, n)
 		if err == nil {
@@ -2389,6 +2456,18 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		return fmt.Errorf("error when reading request headers: %w", err)
 	}
 	b = mustPeekBuffered(r)
+	if n > 1 && !h.blockTerminated(b) {
+		// A retry reparses the whole block, so it waits for the terminator;
+		// the request line is still checked as soon as it is complete, and an
+		// empty block is complete at its CRLF.
+		m, errParse := h.parseFirstLine(b)
+		if errParse != nil {
+			return headerError("request", err, errParse, b, h.secureErrorLogMessage)
+		}
+		if !emptyHeaderBlock(b[m:]) {
+			return headerError("request", err, ErrNeedMore, b, h.secureErrorLogMessage)
+		}
+	}
 	headersLen, errParse := h.parse(b)
 	if errParse != nil {
 		return headerError("request", err, errParse, b, h.secureErrorLogMessage)
@@ -2779,14 +2858,18 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 		return 0, err
 	}
 
-	var rawEnd int
-	h.rawHeaders, rawEnd, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
+	b := buf[m:]
+	h.rawHeaders = h.rawHeaders[:0]
+	n, saved, err := h.parseHeaders(b)
 	if err != nil {
 		return 0, err
 	}
-	n, err := h.parseHeaders(buf[m:], rawEnd)
-	if err != nil {
-		return 0, err
+	if n > 2 {
+		// Everything the fold path secured plus the untouched tail is the
+		// exact wire block.
+		h.rawHeaders = append(h.rawHeaders, b[saved:n]...)
+	} else {
+		h.rawHeaders = h.rawHeaders[:0]
 	}
 	return m + n, nil
 }
@@ -2809,13 +2892,10 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 		if isBadTrailer(s.key) {
 			return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
 		}
-		for _, ch := range s.value {
-			if !validHeaderValueByte(ch) {
-				return dest, 0, fmt.Errorf("invalid trailer value %q", s.value)
-			}
+		if !s.valueValid {
+			return dest, 0, fmt.Errorf("invalid trailer value %q", s.value)
 		}
-		normalizeHeaderKeyValidated(s.key, disable)
-		dest = appendArgBytes(dest, s.key, s.value, argsHasValue)
+		dest = appendArgNormalized(dest, s.key, s.value, disable)
 	}
 	if s.err != nil {
 		return dest, 0, s.err
@@ -3052,34 +3132,6 @@ func validateRequestURI(method, requestURI []byte) error {
 	return ErrorInvalidURI
 }
 
-func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
-	n := bytes.IndexByte(buf, nChar)
-	if n < 0 {
-		return dst[:0], 0, ErrNeedMore
-	}
-	if (n == 1 && buf[0] == rChar) || n == 0 {
-		// empty headers
-		return dst, n + 1, nil
-	}
-
-	n++
-	b := buf
-	m := n
-	for {
-		b = b[m:]
-		m = bytes.IndexByte(b, nChar)
-		if m < 0 {
-			return dst, 0, ErrNeedMore
-		}
-		m++
-		n += m
-		if (m == 2 && b[0] == rChar) || m == 1 {
-			dst = append(dst, buf[:n]...)
-			return dst, n, nil
-		}
-	}
-}
-
 func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	// 'identity' content-length by default
 	h.contentLength = -2
@@ -3108,13 +3160,10 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			h.connectionClose = true
 			disableNormalizing = true
 		}
-		normalizeHeaderKeyValidated(s.key, disableNormalizing)
 
-		for _, ch := range s.value {
-			if !validHeaderValueByte(ch) {
-				h.connectionClose = true
-				return 0, fmt.Errorf("invalid header value %q", s.value)
-			}
+		if !s.valueValid {
+			h.connectionClose = true
+			return 0, fmt.Errorf("invalid header value %q", s.value)
 		}
 
 		switch s.key[0] | 0x20 {
@@ -3151,7 +3200,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					h.connectionClose = true
 				} else {
 					h.connectionClose = false
-					h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+					h.h = appendArgNormalized(h.h, s.key, s.value, disableNormalizing)
 				}
 				continue
 			}
@@ -3199,7 +3248,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 		}
-		h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+		h.h = appendArgNormalized(h.h, s.key, s.value, disableNormalizing)
 	}
 
 	if s.err != nil {
@@ -3227,7 +3276,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	return s.r, nil
 }
 
-func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
+func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err error) {
 	h.contentLength = -2
 
 	contentLengthSeen := false
@@ -3236,31 +3285,27 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 
 	var s headerScanner
 	s.b = buf
-	s.blockEnd = blockEnd
+	s.raw = &h.rawHeaders
 
 	for s.next() {
 		key := s.key
 		s.key = trimTrailingSpace(s.key)
 		if len(s.key) != len(key) {
 			h.connectionClose = true
-			return 0, fmt.Errorf("invalid header key %q", key)
+			return 0, 0, fmt.Errorf("invalid header key %q", key)
 		}
 
 		if len(s.key) == 0 {
 			h.connectionClose = true
-			return 0, fmt.Errorf("invalid header key %q", s.key)
+			return 0, 0, fmt.Errorf("invalid header key %q", s.key)
 		}
 
-		// Key bytes were already validated by the scanner.
-		normalizeHeaderKeyValidated(s.key, h.disableNormalizing || s.keyHasSpace)
-
-		for _, ch := range s.value {
-			if !validHeaderValueByte(ch) {
-				h.connectionClose = true
-				return 0, fmt.Errorf("invalid header value %q", s.value)
-			}
+		if !s.valueValid {
+			h.connectionClose = true
+			return 0, 0, fmt.Errorf("invalid header value %q", s.value)
 		}
 
+		disableNormalizing := h.disableNormalizing || s.keyHasSpace
 		isContentLength := false
 		isTransferEncoding := false
 		contentLength := 0
@@ -3270,7 +3315,7 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 				isContentLength = true
 				if contentLengthSeen {
 					h.connectionClose = true
-					return 0, ErrDuplicateContentLength
+					return 0, 0, ErrDuplicateContentLength
 				}
 				contentLengthSeen = true
 				var err error
@@ -3278,7 +3323,7 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 				if err != nil {
 					h.contentLength = -2
 					h.connectionClose = true
-					return 0, err
+					return 0, 0, err
 				}
 			}
 		case 't':
@@ -3290,21 +3335,21 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 				// closed afterwards.
 				if h.noHTTP11 {
 					h.connectionClose = true
-					return 0, ErrUnsupportedTransferEncoding
+					return 0, 0, ErrUnsupportedTransferEncoding
 				}
 				if transferEncodingSeen {
 					h.connectionClose = true
 					if h.secureErrorLogMessage {
-						return 0, ErrUnsupportedTransferEncoding
+						return 0, 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, errors.New("too many transfer-encoding headers")
+					return 0, 0, errors.New("too many transfer-encoding headers")
 				}
 				transferEncodingSeen = true
 			}
 		}
 
 		if h.disableSpecialHeader {
-			h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+			h.h = appendArgNormalized(h.h, s.key, s.value, disableNormalizing)
 			continue
 		}
 
@@ -3313,7 +3358,7 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 			if caseInsensitiveCompare(s.key, strHost) {
 				if hostSeen {
 					h.connectionClose = true
-					return 0, errors.New("too many host headers")
+					return 0, 0, errors.New("too many host headers")
 				}
 				hostSeen = true
 				h.host = append(h.host[:0], s.value...)
@@ -3341,7 +3386,7 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 					h.connectionClose = true
 				} else {
 					h.connectionClose = false
-					h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+					h.h = appendArgNormalized(h.h, s.key, s.value, disableNormalizing)
 				}
 				continue
 			}
@@ -3353,9 +3398,9 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 				if !isIdentity && !isChunked {
 					h.connectionClose = true
 					if h.secureErrorLogMessage {
-						return 0, ErrUnsupportedTransferEncoding
+						return 0, 0, ErrUnsupportedTransferEncoding
 					}
-					return 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
+					return 0, 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
 				}
 
 				if isChunked {
@@ -3368,17 +3413,17 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 				err := h.SetTrailerBytes(s.value)
 				if err != nil {
 					h.connectionClose = true
-					return 0, err
+					return 0, 0, err
 				}
 				continue
 			}
 		}
-		h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+		h.h = appendArgNormalized(h.h, s.key, s.value, disableNormalizing)
 	}
 
 	if s.err != nil {
 		h.connectionClose = true
-		return 0, s.err
+		return 0, 0, s.err
 	}
 
 	if h.contentLength < 0 {
@@ -3389,7 +3434,7 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 		v := peekArgBytes(h.h, strConnection)
 		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
 	}
-	return s.r, nil
+	return s.r, s.rawSaved, nil
 }
 
 func (h *RequestHeader) collectCookies() {

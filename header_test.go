@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResponseHeaderAddContentType(t *testing.T) {
@@ -4258,4 +4259,301 @@ func TestURIHostMemoIsBounded(t *testing.T) {
 	if string(u.Host()) != "example.com:8080" {
 		t.Fatalf("memoized host %q", u.Host())
 	}
+}
+
+// dripTestReader returns one byte per Read, forcing incremental parsing.
+type dripTestReader struct {
+	data []byte
+	pos  int
+}
+
+func (r *dripTestReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	p[0] = r.data[r.pos]
+	r.pos++
+	return 1, nil
+}
+
+func TestResponseHeaderReadTrailerIncremental(t *testing.T) {
+	t.Parallel()
+
+	br := bufio.NewReaderSize(&dripTestReader{data: []byte("X-Meta: one\r\nY-Second: two\r\n\r\n")}, 4096)
+	var h ResponseHeader
+	if err := h.ReadTrailer(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(h.h) != 2 {
+		t.Fatalf("stored %d trailer fields, expecting 2", len(h.h))
+	}
+
+	// A field completed by one retry must not be appended again by the next.
+	wire := make([]byte, 0, 50*len("X-Pad: v\r\n")+2)
+	for range 50 {
+		wire = append(wire, "X-Pad: v\r\n"...)
+	}
+	wire = append(wire, "\r\n"...)
+	var h2 ResponseHeader
+	if err := h2.ReadTrailer(bufio.NewReaderSize(&dripTestReader{data: wire}, 4096)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(h2.h) != 50 {
+		t.Fatalf("stored %d trailer fields, expecting 50", len(h2.h))
+	}
+}
+
+func TestRequestHeaderFoldedRawHeadersAllocations(t *testing.T) {
+	wire := make([]byte, 0, 1024)
+	wire = append(wire, "GET / HTTP/1.1\r\nHost: x\r\n"...)
+	for i := range 40 {
+		wire = append(wire, "X-Fold-"...)
+		wire = append(wire, byte('a'+i%26))
+		wire = append(wire, ": v1\r\n \tv2\r\n"...)
+	}
+	wire = append(wire, "\r\n"...)
+
+	var h RequestHeader
+	br := bufio.NewReaderSize(bytes.NewReader(wire), 8192)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	n := testing.AllocsPerRun(50, func() {
+		br := bufio.NewReaderSize(bytes.NewReader(wire), 8192)
+		if err := h.Read(br); err != nil {
+			t.Fatal(err)
+		}
+	})
+	// bufio.NewReaderSize allocates the reader and its buffer each run.
+	if n > 2 {
+		t.Errorf("%v allocs/op parsing folded headers, expecting the reader's own", n)
+	}
+}
+
+func TestScanValueLineMatchesValidation(t *testing.T) {
+	t.Parallel()
+
+	// Every byte value, at every offset within and across the scanned words.
+	for c := range 256 {
+		for pad := range 20 {
+			line := append(bytes.Repeat([]byte("a"), pad), byte(c))
+			line = append(line, "bb\r\n"...)
+			lf, valid := scanValueLine(line)
+			wantLF := bytes.IndexByte(line, '\n')
+			if lf != wantLF {
+				t.Fatalf("byte %#x at offset %d: line end %d, expecting %d", c, pad, lf, wantLF)
+			}
+			body := line[:wantLF]
+			if len(body) > 0 && body[len(body)-1] == '\r' {
+				body = body[:len(body)-1]
+			}
+			if want := validHeaderValueBytes(body); valid != want {
+				t.Fatalf("byte %#x at offset %d: valid=%v, expecting %v", c, pad, valid, want)
+			}
+		}
+	}
+
+	if lf, _ := scanValueLine([]byte("no terminator here")); lf != -1 {
+		t.Fatalf("line end %d, expecting -1", lf)
+	}
+}
+
+func TestRequestHeaderBlockNeedsCRLFCRLF(t *testing.T) {
+	t.Parallel()
+
+	// A block whose last header line ends in a bare LF is not terminated by
+	// CRLFCRLF, so it must not be accepted: a peer that frames on CRLFCRLF
+	// would read the stream differently.
+	for _, wire := range []string{
+		"GET / HTTP/1.1\r\nHost: a\r\nConnection: keep-alive\n\r\nsmuggled",
+		"POST / HTTP/1.1\r\nHost: a\nContent-Length: 3\n\r\nabc",
+	} {
+		var req Request
+		br := bufio.NewReader(bytes.NewBufferString(wire))
+		if err := req.Read(br); err == nil {
+			t.Errorf("accepted a block terminated by \"\\n\\r\\n\": %q", wire)
+		}
+	}
+
+	// The same block does terminate once a CRLFCRLF is present.
+	for _, wire := range []string{
+		"GET / HTTP/1.1\r\nHost: a\nConnection: keep-alive\r\n\r\n",
+		"GET / HTTP/1.1\r\nHost: a\nX: y\n\r\n\r\n",
+	} {
+		var req Request
+		br := bufio.NewReader(bytes.NewBufferString(wire))
+		if err := req.Read(br); err != nil {
+			t.Errorf("rejected %q: %v", wire, err)
+		}
+	}
+}
+
+func TestRequestHeaderFoldedParseStaysLinear(t *testing.T) {
+	// Joining continuation lines must not rescan for the block terminator
+	// per fold: that turns an ordinary accepted request into a CPU
+	// amplifier. Compare the cost of two sizes rather than absolute time.
+	wire := func(target int) []byte {
+		w := make([]byte, 0, target+64)
+		w = append(w, "GET / HTTP/1.1\r\nHost: x\r\n"...)
+		for len(w) < target {
+			w = append(w, "A:\r\n \r\n"...)
+		}
+		return append(w, "\r\n"...)
+	}
+	parse := func(b []byte) time.Duration {
+		var h RequestHeader
+		start := time.Now()
+		for range 50 {
+			br := bufio.NewReaderSize(bytes.NewReader(b), 32768)
+			if err := h.Read(br); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		}
+		return time.Since(start)
+	}
+	small, large := wire(2048), wire(16384)
+	parse(small)
+	ratio := float64(parse(large)) / float64(parse(small))
+	// Linear would be 8x for 8x the input; quadratic would be around 64x.
+	if ratio > 24 {
+		t.Errorf("8x the folded input cost %.1fx the time, expecting roughly linear", ratio)
+	}
+}
+
+func TestRequestHeaderFoldedRawCapacityIsBounded(t *testing.T) {
+	// The fold path secures the raw block into rawHeaders; the reservation
+	// must follow the block, not everything the reader happens to hold.
+	wire := make([]byte, 0, 32768)
+	wire = append(wire, "GET / HTTP/1.1\r\nHost: x\r\nX-Fold: a\r\n b\r\n\r\n"...)
+	for len(wire) < 24000 {
+		wire = append(wire, "GET /next HTTP/1.1\r\nHost: x\r\n\r\n"...)
+	}
+	var h RequestHeader
+	br := bufio.NewReaderSize(bytes.NewReader(wire), 32768)
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := string(h.RawHeaders()); got != "Host: x\r\nX-Fold: a\r\n b\r\n\r\n" {
+		t.Fatalf("raw headers %q", got)
+	}
+	if c := cap(h.rawHeaders); c > 512 {
+		t.Errorf("rawHeaders capacity %d for a %d byte block, expecting it to follow the block",
+			c, len(h.RawHeaders()))
+	}
+}
+
+func TestRequestHeaderAllInOrderBareLFTerminator(t *testing.T) {
+	t.Parallel()
+
+	// A block ended by a bare LF is accepted when a CRLFCRLF follows in the
+	// buffer; AllInOrder iterates its fields like any other block's.
+	var req Request
+	br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: a\r\nX: y\n\nGET /x HTTP/1.1\r\nHost: b\r\n\r\n"))
+	if err := req.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var got []string
+	for k, v := range req.Header.AllInOrder() {
+		got = append(got, string(k)+"="+string(v))
+	}
+	if s := strings.Join(got, ","); s != "Host=a,X=y" {
+		t.Fatalf("AllInOrder yielded %q, expecting Host=a,X=y", s)
+	}
+}
+
+func TestRequestHeaderTrickledParseStaysLinear(t *testing.T) {
+	// A peer delivering the block a byte at a time must not make every
+	// retry rescan the whole block for the terminator. Compare the cost of
+	// two sizes rather than absolute time.
+	wire := func(target int) []byte {
+		w := make([]byte, 0, target+64)
+		w = append(w, "GET / HTTP/1.1\r\nHost: x\r\n"...)
+		for len(w) < target {
+			w = append(w, "X-Header-Name: some ordinary header value here\r\n"...)
+		}
+		return append(w, "\r\n"...)
+	}
+	parse := func(b []byte, iterations int) time.Duration {
+		var h RequestHeader
+		dr := &dripTestReader{data: b}
+		br := bufio.NewReaderSize(dr, 65536)
+		start := time.Now()
+		for range iterations {
+			dr.pos = 0
+			br.Reset(dr)
+			if err := h.Read(br); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		}
+		return time.Since(start)
+	}
+	small, large := wire(2048), wire(16384)
+	// Enough iterations for the small case to register on a coarse clock.
+	iterations := 1
+	elapsedSmall := parse(small, iterations)
+	for elapsedSmall < 10*time.Millisecond {
+		iterations *= 2
+		elapsedSmall = parse(small, iterations)
+	}
+	ratio := float64(parse(large, iterations)) / float64(elapsedSmall)
+	// Linear would be 8x for 8x the input; quadratic would be around 64x.
+	if ratio > 24 {
+		t.Errorf("8x the trickled input cost %.1fx the time, expecting roughly linear", ratio)
+	}
+}
+
+func TestHeaderEmptyBlockAfterBareLFInFragments(t *testing.T) {
+	t.Parallel()
+
+	// A start line ending in a bare LF followed by an empty CRLF block is
+	// accepted, and how the bytes arrive must not change that; the bare-LF
+	// empty block stays rejected.
+	for _, size := range []int{1, 2, 3, 64} {
+		for _, tc := range []struct {
+			wire string
+			ok   bool
+		}{
+			{"GET / HTTP/1.0\n\r\n", true},
+			{"GET / HTTP/1.0\r\n\r\n", true},
+			{"GET / HTTP/1.0\n\n", false},
+		} {
+			br := bufio.NewReader(&fragmentReader{data: []byte(tc.wire), size: size})
+			var req Request
+			err := req.Read(br)
+			if (err == nil) != tc.ok {
+				t.Errorf("request %q in %d-byte reads: err=%v, expecting ok=%v", tc.wire, size, err, tc.ok)
+			}
+		}
+		for _, tc := range []struct {
+			wire string
+			ok   bool
+		}{
+			{"HTTP/1.1 204 No Content\n\r\n", true},
+			{"HTTP/1.1 204 No Content\r\n\r\n", true},
+			{"HTTP/1.1 204 No Content\n\n", false},
+		} {
+			br := bufio.NewReader(&fragmentReader{data: []byte(tc.wire), size: size})
+			var resp Response
+			err := resp.Read(br)
+			if (err == nil) != tc.ok {
+				t.Errorf("response %q in %d-byte reads: err=%v, expecting ok=%v", tc.wire, size, err, tc.ok)
+			}
+		}
+	}
+}
+
+// fragmentReader hands out at most size bytes per Read.
+type fragmentReader struct {
+	data []byte
+	pos  int
+	size int
+}
+
+func (r *fragmentReader) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p[:min(len(p), r.size)], r.data[r.pos:])
+	r.pos += n
+	return n, nil
 }
