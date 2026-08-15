@@ -1622,7 +1622,7 @@ func (c *HostClient) PendingRequests() int {
 }
 
 func isIdempotent(req *Request) bool {
-	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut()
+	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut() || req.Header.IsQuery()
 }
 
 func (c *HostClient) do(req *Request, resp *Response) (bool, error) {

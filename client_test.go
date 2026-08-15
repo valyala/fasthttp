@@ -2164,6 +2164,13 @@ func TestClientRedirectMethodSwitch(t *testing.T) {
 		{MethodPost, "/redirect-302", "GET|hello"},
 		// 307 must preserve both the method and the body.
 		{MethodPost, "/redirect-307", "POST|hello"},
+		// RFC 10008 section 2.5: the POST exception for 301/302 does not
+		// apply to QUERY, so the method and body survive all three.
+		{MethodQuery, "/redirect-301", "QUERY|hello"},
+		{MethodQuery, "/redirect-302", "QUERY|hello"},
+		{MethodQuery, "/redirect-307", "QUERY|hello"},
+		// 303 switches QUERY to a body-less GET like any other method.
+		{MethodQuery, "/redirect-303", "GET|"},
 	}
 
 	for _, tc := range tests {
@@ -2661,6 +2668,27 @@ func TestClientIdempotentRequest(t *testing.T) {
 	if string(body) != "0123456" {
 		t.Fatalf("unexpected body: %q. Expecting %q", body, "0123456")
 	}
+
+	// QUERY is registered as idempotent by RFC 10008, so it must be retried
+	// like GET even though it carries a body.
+	dialsCount = 0
+	req := AcquireRequest()
+	resp := AcquireResponse()
+	req.SetRequestURI("http://foobar/a/b")
+	req.Header.SetMethod(MethodQuery)
+	req.Header.SetContentType("application/x-www-form-urlencoded")
+	req.SetBodyString("q=foobar")
+	if err = c.Do(req, resp); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := resp.StatusCode(); got != 345 {
+		t.Fatalf("unexpected status code: %d. Expecting 345", got)
+	}
+	if got := string(resp.Body()); got != "0123456" {
+		t.Fatalf("unexpected body: %q. Expecting %q", got, "0123456")
+	}
+	ReleaseRequest(req)
+	ReleaseResponse(resp)
 
 	var args Args
 

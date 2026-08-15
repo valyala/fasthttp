@@ -3938,6 +3938,34 @@ func TestServerEmptyResponse(t *testing.T) {
 	verifyResponse(t, br, 200, string(defaultContentType), "")
 }
 
+func TestServerQueryMethod(t *testing.T) {
+	t.Parallel()
+
+	// RFC 10008 QUERY carries the query in the request content, so the body
+	// must reach the handler the same way it does for POST.
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if !ctx.IsQuery() {
+				t.Errorf("IsQuery() must be true for method %q", ctx.Method())
+			}
+			ctx.SetBodyString(string(ctx.Method()) + "|" +
+				string(ctx.PostBody()) + "|" + string(ctx.PostArgs().Peek("q")))
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("QUERY /contacts HTTP/1.1\r\nHost: example.org\r\n" +
+		"Content-Type: application/x-www-form-urlencoded\r\n" +
+		"Content-Length: 14\r\n\r\nq=foo&limit=10")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, 200, string(defaultContentType), "QUERY|q=foo&limit=10|foo")
+}
+
 func TestServerLogger(t *testing.T) {
 	// This test can't run parallel as it modifies globalConnID.
 
