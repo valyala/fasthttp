@@ -1907,6 +1907,16 @@ func (h *ResponseHeader) PeekBytes(key []byte) []byte {
 	return h.peek(h.bufK)
 }
 
+// PeekCanonical returns header value for the given key without normalizing it.
+// The key must match the canonical form used with SetCanonical.
+//
+// The returned value is valid until the response is released,
+// either though ReleaseResponse or your request handler returning.
+// Do not store references to the returned value. Make copies instead.
+func (h *ResponseHeader) PeekCanonical(key []byte) []byte {
+	return h.peek(key)
+}
+
 // Peek returns header value for the given key.
 //
 // The returned value is valid until the request is released,
@@ -1926,6 +1936,16 @@ func (h *RequestHeader) PeekBytes(key []byte) []byte {
 	h.bufK = append(h.bufK[:0], key...)
 	normalizeHeaderKey(h.bufK, h.disableNormalizing)
 	return h.peek(h.bufK)
+}
+
+// PeekCanonical returns header value for the given key without normalizing it.
+// The key must match the canonical form used with SetCanonical.
+//
+// The returned value is valid until the request is released,
+// either though ReleaseRequest or your request handler returning.
+// Do not store references to the returned value. Make copies instead.
+func (h *RequestHeader) PeekCanonical(key []byte) []byte {
+	return h.peek(key)
 }
 
 func (h *ResponseHeader) peek(key []byte) []byte {
