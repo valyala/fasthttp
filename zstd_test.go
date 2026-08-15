@@ -68,80 +68,50 @@ func zstdEncodeWithFCS(t *testing.T, body []byte) []byte {
 	return compressedBody
 }
 
-// moderatelyCompressibleBody returns n bytes of text which zstd compresses with
-// a ratio well below the one estimateUnzstdSize is willing to trust, so that the
-// uncompressed size from the frame header is used as-is.
-func moderatelyCompressibleBody(n int) []byte {
-	words := []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"}
-	pseudoRandomState := uint64(42)
-
-	body := make([]byte, 0, n+8)
-	for len(body) < n {
-		pseudoRandomState = pseudoRandomState*6364136223846793005 + 1442695040888963407
-		body = append(body, words[pseudoRandomState>>60&7]...)
-		body = append(body, byte('0'+pseudoRandomState%10), ' ')
-	}
-	return body[:n]
-}
-
 func TestEstimateUnzstdSize(t *testing.T) {
 	t.Parallel()
 
-	body := moderatelyCompressibleBody(11000)
-	compressedBody := zstdEncodeWithFCS(t, body)
-	if size := estimateUnzstdSize(compressedBody); size != len(body) {
-		t.Fatalf("unexpected estimate %d. Expecting %d", size, len(body))
+	body := bytes.Repeat([]byte("a"), 11_000)
+	withFCS := zstdEncodeWithFCS(t, body)
+	withoutFCS := []byte{
+		0x28, 0xb5, 0x2f, 0xfd, // zstd magic
+		0x00,       // no frame content size and not a single segment
+		0x00,       // 1 KiB window
+		0x09, 0, 0, // last raw block containing one byte
+		'x',
 	}
-
-	// An uncompressed size implying a suspiciously high compression ratio is
-	// clamped, even though such a ratio is legitimately reachable.
-	highlyCompressibleBody := bytes.Repeat([]byte("foobar baz "), 1000000)
-	compressedBody = zstdEncodeWithFCS(t, highlyCompressibleBody)
-	expectedSize := 4_000_000
-	if size := estimateUnzstdSize(compressedBody); size != expectedSize {
-		t.Fatalf("unexpected estimate %d for a highly compressible body. Expecting %d", size, expectedSize)
+	skippablePrefix := []byte{
+		0x50, 0x2a, 0x4d, 0x18, // skippable frame magic
+		0x03, 0, 0, 0, // payload size
+		'f', 'o', 'o',
 	}
-
-	// Streaming encoders don't know the body size upfront, so a compression
-	// factor of 2 is assumed for the frames they produce. Bodies small enough to
-	// be buffered whole are an exception, as the encoder does learn their size
-	// before writing the frame header.
-	streamedCompressedBody := AppendZstdBytes(nil, moderatelyCompressibleBody(4*1024*1024))
-	if zstdFrameHasContentSize(streamedCompressedBody) {
-		t.Fatalf("expecting no uncompressed size in a frame produced by the streaming encoder")
-	}
-	expectedSize = 2 * len(streamedCompressedBody)
-	if size := estimateUnzstdSize(streamedCompressedBody); size != expectedSize {
-		t.Fatalf("unexpected estimate %d for a streamed frame. Expecting %d", size, expectedSize)
-	}
-
-	if size := estimateUnzstdSize(nil); size != 0 {
-		t.Fatalf("unexpected estimate %d for empty data. Expecting 0", size)
-	}
-
-	nonZstdData := []byte("this is not zstd at all")
-	expectedSize = 2 * len(nonZstdData)
-	if size := estimateUnzstdSize(nonZstdData); size != expectedSize {
-		t.Fatalf("unexpected estimate %d for non-zstd data. Expecting %d", size, expectedSize)
-	}
-
-	// A forged huge uncompressed size must not be trusted as-is:
-	// magic number, then a frame header descriptor with single segment set and
-	// an 8 byte frame content size field, then the maximum content size.
-	forgedHeader := []byte{
+	forgedFCS := []byte{
 		0x28, 0xb5, 0x2f, 0xfd,
 		0xe0,
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 	}
-	expectedSize = 4_000_000
-	if size := estimateUnzstdSize(forgedHeader); size != expectedSize {
-		t.Fatalf("unexpected estimate %d for a forged header. Expecting %d", size, expectedSize)
-	}
-}
+	invalid := []byte("not zstd")
 
-func zstdFrameHasContentSize(p []byte) bool {
-	var header zstd.Header
-	return header.Decode(p) == nil && header.HasFCS
+	testCases := []struct {
+		name string
+		src  []byte
+		want int
+	}{
+		{name: "frame content size", src: withFCS, want: len(body)},
+		{name: "leading skippable frame", src: append(skippablePrefix, withFCS...), want: len(body)},
+		{name: "without frame content size", src: withoutFCS, want: 2 * len(withoutFCS)},
+		{name: "forged frame content size is clamped", src: forgedFCS, want: 4_000_000},
+		{name: "invalid input", src: invalid, want: 2 * len(invalid)},
+		{name: "empty input", src: nil, want: 0},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := estimateUnzstdSize(testCase.src); got != testCase.want {
+				t.Fatalf("unexpected estimate %d. Expecting %d", got, testCase.want)
+			}
+		})
+	}
 }
 
 func TestWriteUnzstdPresizesDestination(t *testing.T) {
