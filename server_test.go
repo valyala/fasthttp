@@ -3413,19 +3413,19 @@ func TestRequestCtxNoHijackNoResponse(t *testing.T) {
 }
 
 func TestRequestCtxInit(t *testing.T) {
-	// This test can't run parallel as it modifies globalConnID.
-
 	var ctx RequestCtx
 	var logger testLogger
-	globalConnID = 0x123456
 	ctx.Init(&ctx.Request, zeroTCPAddr, &logger)
 	ip := ctx.RemoteIP()
 	if !ip.IsUnspecified() {
 		t.Fatalf("unexpected ip for bare RequestCtx: %q. Expected 0.0.0.0", ip)
 	}
+	if requestNum := ctx.ID() & 0xffffffff; requestNum != 0 {
+		t.Fatalf("unexpected request number in ID: %d. Expected 0", requestNum)
+	}
 	ctx.Logger().Printf("foo bar %d", 10)
 
-	expectedLog := "#0012345700000000 - 0.0.0.0:0<->0.0.0.0:0 - GET http:/// - foo bar 10\n"
+	expectedLog := fmt.Sprintf("#%016X - 0.0.0.0:0<->0.0.0.0:0 - GET http:/// - foo bar 10\n", ctx.ID())
 	if logger.out != expectedLog {
 		t.Fatalf("Unexpected log output: %q. Expected %q", logger.out, expectedLog)
 	}
@@ -3939,11 +3939,11 @@ func TestServerEmptyResponse(t *testing.T) {
 }
 
 func TestServerLogger(t *testing.T) {
-	// This test can't run parallel as it modifies globalConnID.
-
 	cl := &testLogger{}
+	var connID uint64
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			connID = ctx.ConnID()
 			logger := ctx.Logger()
 			h := &ctx.Request.Header
 			logger.Printf("begin")
@@ -3966,8 +3966,6 @@ func TestServerLogger(t *testing.T) {
 		},
 	}
 
-	globalConnID = 0
-
 	if err := s.ServeConn(rwx); err != nil {
 		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
@@ -3976,11 +3974,11 @@ func TestServerLogger(t *testing.T) {
 	verifyResponse(t, br, 200, "text/html", "requestURI=/foo1, body=\"\", remoteAddr=1.2.3.4:8765")
 	verifyResponse(t, br, 200, "text/html", "requestURI=/foo2, body=\"abcde\", remoteAddr=1.2.3.4:8765")
 
-	expectedLogOut := `#0000000100000001 - 1.2.3.4:8765<->1.2.3.4:8765 - GET http://google.com/foo1 - begin
-#0000000100000001 - 1.2.3.4:8765<->1.2.3.4:8765 - GET http://google.com/foo1 - end
-#0000000100000002 - 1.2.3.4:8765<->1.2.3.4:8765 - POST http://aaa.com/foo2 - begin
-#0000000100000002 - 1.2.3.4:8765<->1.2.3.4:8765 - POST http://aaa.com/foo2 - end
-`
+	expectedLogOut := fmt.Sprintf(`#%016X - 1.2.3.4:8765<->1.2.3.4:8765 - GET http://google.com/foo1 - begin
+#%016X - 1.2.3.4:8765<->1.2.3.4:8765 - GET http://google.com/foo1 - end
+#%016X - 1.2.3.4:8765<->1.2.3.4:8765 - POST http://aaa.com/foo2 - begin
+#%016X - 1.2.3.4:8765<->1.2.3.4:8765 - POST http://aaa.com/foo2 - end
+`, connID<<32|1, connID<<32|1, connID<<32|2, connID<<32|2)
 	if cl.out != expectedLogOut {
 		t.Fatalf("Unexpected logger output: %q. Expected %q", cl.out, expectedLogOut)
 	}
