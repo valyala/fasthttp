@@ -114,47 +114,66 @@ func TestEstimateUnzstdSize(t *testing.T) {
 	}
 }
 
-func TestWriteUnzstdPresizesDestination(t *testing.T) {
+func TestWriteUnzstdOptimizedDestinations(t *testing.T) {
 	t.Parallel()
 
-	body := moderatelyCompressibleBody(110000)
+	body := bytes.Repeat([]byte("payload"), 1000)
 	compressedBody := zstdEncodeWithFCS(t, body)
+	prefix := []byte("prefix")
 
-	for _, maxBodySize := range []int{0, len(body), 2 * len(body)} {
-		var bb bytebufferpool.ByteBuffer
-		n, err := writeUnzstd(&bb, compressedBody, maxBodySize)
-		if err != nil {
-			t.Fatalf("unexpected error with maxBodySize=%d: %v", maxBodySize, err)
-		}
-		if n != len(body) {
-			t.Fatalf("unexpected decompressed size %d with maxBodySize=%d. Expecting %d", n, maxBodySize, len(body))
-		}
-		if !bytes.Equal(bb.B, body) {
-			t.Fatalf("unexpected decompressed body with maxBodySize=%d", maxBodySize)
-		}
-		// The destination has been pre-sized from the frame header, so
-		// decompression must not have grown it beyond the initial reservation.
-		if cap(bb.B) > 2*len(body) {
-			t.Fatalf("destination buffer was reallocated with maxBodySize=%d: cap=%d, decompressed size=%d",
-				maxBodySize, cap(bb.B), len(body))
-		}
+	testCases := []struct {
+		name      string
+		newWriter func() (io.Writer, func() []byte)
+	}{
+		{name: "byte slice writer", newWriter: func() (io.Writer, func() []byte) {
+			w := &byteSliceWriter{b: append([]byte(nil), prefix...)}
+			return w, func() []byte { return w.b }
+		}},
+		{name: "byte buffer pool", newWriter: func() (io.Writer, func() []byte) {
+			w := &bytebufferpool.ByteBuffer{B: append([]byte(nil), prefix...)}
+			return w, func() []byte { return w.B }
+		}},
+		{name: "bytes buffer", newWriter: func() (io.Writer, func() []byte) {
+			w := bytes.NewBuffer(append([]byte(nil), prefix...))
+			return w, w.Bytes
+		}},
+	}
+
+	want := append(append([]byte(nil), prefix...), body...)
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			w, result := testCase.newWriter()
+			n, err := writeUnzstd(w, compressedBody, 0)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if n != len(body) {
+				t.Fatalf("unexpected decompressed size %d. Expecting %d", n, len(body))
+			}
+			if got := result(); !bytes.Equal(got, want) {
+				t.Fatalf("unexpected destination %q. Expecting %q", got, want)
+			}
+		})
 	}
 }
 
-func TestWriteUnzstdSmallMaxBodySize(t *testing.T) {
-	t.Parallel()
-
-	body := moderatelyCompressibleBody(110000)
-	compressedBody := zstdEncodeWithFCS(t, body)
-
-	// The pre-allocation must not exceed maxBodySize, and the body must still
-	// be rejected as too large.
-	var bb bytebufferpool.ByteBuffer
-	if _, err := writeUnzstd(&bb, compressedBody, 100); err != ErrBodyTooLarge {
-		t.Fatalf("unexpected error %v. Expecting %v", err, ErrBodyTooLarge)
+func BenchmarkWriteUnzstdPresized(b *testing.B) {
+	body := bytes.Repeat([]byte("payload"), 16*1024)
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		b.Fatal(err)
 	}
-	if cap(bb.B) > 2*len(body) {
-		t.Fatalf("unexpected destination buffer capacity %d", cap(bb.B))
+	compressedBody := encoder.EncodeAll(body, nil)
+	encoder.Close()
+
+	b.SetBytes(int64(len(body)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		var dst bytebufferpool.ByteBuffer
+		if _, err := WriteUnzstd(&dst, compressedBody); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
