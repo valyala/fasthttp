@@ -286,11 +286,11 @@ func TestClientStreamCloseInterruptsActiveReadAfterEOF(t *testing.T) {
 	stream := &clientStreamBody{
 		reader:    reader,
 		interrupt: unblock,
-		release: func(closeConnection bool) {
-			released <- closeConnection
+		release: func(discard bool) {
+			released <- discard
 		},
 	}
-	stream.fullyRead.Store(true)
+	stream.fullyRead = true
 
 	readDone := make(chan error, 1)
 	go func() {
@@ -308,8 +308,8 @@ func TestClientStreamCloseInterruptsActiveReadAfterEOF(t *testing.T) {
 		closeDone <- stream.CloseWithError(nil)
 	}()
 	select {
-	case closeConnection := <-released:
-		if !closeConnection {
+	case discard := <-released:
+		if !discard {
 			t.Fatal("active stream read did not force the connection closed")
 		}
 	case <-time.After(time.Second):

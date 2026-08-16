@@ -3233,18 +3233,18 @@ var DefaultTransport RoundTripper = &transport{}
 
 type transport struct{}
 
-// clientStreamBody keeps pooled response resources alive until every in-flight
-// Read has returned. interrupt must unblock network reads without releasing the
-// connection wrapper or reader pools; release performs that cleanup afterward.
+// clientStreamBody serializes reads and keeps pooled response resources alive
+// until an in-flight Read has returned. interrupt must unblock network reads
+// without releasing the connection wrapper or reader pools; release performs
+// that cleanup afterward.
 type clientStreamBody struct {
-	reader      io.Reader
-	interrupt   func()
-	release     func(bool)
-	forceClose  bool
-	closed      atomic.Bool
-	fullyRead   atomic.Bool
-	readersLock sync.RWMutex
-	closeOnce   sync.Once
+	reader    io.Reader
+	interrupt func()
+	release   func(bool)
+	closed    atomic.Bool
+	fullyRead bool
+	readLock  sync.Mutex
+	closeOnce sync.Once
 }
 
 func (s *clientStreamBody) Read(p []byte) (int, error) {
@@ -3252,15 +3252,15 @@ func (s *clientStreamBody) Read(p []byte) (int, error) {
 		return 0, io.ErrClosedPipe
 	}
 
-	s.readersLock.RLock()
-	defer s.readersLock.RUnlock()
+	s.readLock.Lock()
+	defer s.readLock.Unlock()
 	if s.closed.Load() {
 		return 0, io.ErrClosedPipe
 	}
 
 	n, err := s.reader.Read(p)
 	if errors.Is(err, io.EOF) {
-		s.fullyRead.Store(true)
+		s.fullyRead = true
 	}
 	return n, err
 }
@@ -3268,20 +3268,18 @@ func (s *clientStreamBody) Read(p []byte) (int, error) {
 func (s *clientStreamBody) CloseWithError(err error) error {
 	s.closeOnce.Do(func() {
 		s.closed.Store(true)
-		closeConnection := s.forceClose || err != nil || !s.fullyRead.Load()
-		locked := s.readersLock.TryLock()
-		if !locked {
-			closeConnection = true
-		}
-		if closeConnection {
+		locked := s.readLock.TryLock()
+		discard := err != nil || !locked
+		if discard || !s.fullyRead {
+			discard = true
 			s.interrupt()
 		}
 		if !locked {
-			// The interrupt lets a blocked network Read release readersLock.
-			s.readersLock.Lock()
+			// The interrupt lets a blocked network Read release readLock.
+			s.readLock.Lock()
 		}
-		defer s.readersLock.Unlock()
-		s.release(closeConnection)
+		defer s.readLock.Unlock()
+		s.release(discard)
 	})
 	return nil
 }
@@ -3375,33 +3373,25 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 
 	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
-	if customStreamBody && resp.bodyStream != nil {
-		rbs := resp.bodyStream
-		bodyStream := &clientStreamBody{
-			reader:     rbs,
-			forceClose: closeConn,
-			interrupt: func() {
-				_ = conn.Close()
-			},
-			release: func(closeConnection bool) {
-				hc.ReleaseReader(br)
-				if r, ok := rbs.(*requestStream); ok {
-					releaseRequestStream(r)
-				}
-				if closeConnection {
-					hc.CloseConn(cc)
-				} else {
-					hc.ReleaseConn(cc)
-				}
-			},
+	if customStreamBody {
+		if rbs, ok := resp.bodyStream.(*requestStream); ok {
+			resp.bodyStream = &clientStreamBody{
+				reader: rbs,
+				interrupt: func() {
+					_ = conn.Close()
+				},
+				release: func(discard bool) {
+					hc.ReleaseReader(br)
+					releaseRequestStream(rbs)
+					if closeConn || discard {
+						hc.CloseConn(cc)
+					} else {
+						hc.ReleaseConn(cc)
+					}
+				},
+			}
+			return false, nil
 		}
-		if _, ok := rbs.(*requestStream); !ok {
-			// The network body is already buffered, so closing this in-memory stream
-			// does not prevent the connection from being reused.
-			bodyStream.fullyRead.Store(true)
-		}
-		resp.bodyStream = bodyStream
-		return false, nil
 	}
 	hc.ReleaseReader(br)
 
