@@ -3243,9 +3243,8 @@ type clientStreamBody struct {
 	forceClose  bool
 	closed      atomic.Bool
 	fullyRead   atomic.Bool
-	activeReads atomic.Int32
 	readersLock sync.RWMutex
-	closeDone   chan struct{}
+	closeOnce   sync.Once
 }
 
 func (s *clientStreamBody) Read(p []byte) (int, error) {
@@ -3254,11 +3253,7 @@ func (s *clientStreamBody) Read(p []byte) (int, error) {
 	}
 
 	s.readersLock.RLock()
-	s.activeReads.Add(1)
-	defer func() {
-		s.activeReads.Add(-1)
-		s.readersLock.RUnlock()
-	}()
+	defer s.readersLock.RUnlock()
 	if s.closed.Load() {
 		return 0, io.ErrClosedPipe
 	}
@@ -3271,21 +3266,23 @@ func (s *clientStreamBody) Read(p []byte) (int, error) {
 }
 
 func (s *clientStreamBody) CloseWithError(err error) error {
-	if !s.closed.CompareAndSwap(false, true) {
-		<-s.closeDone
-		return nil
-	}
-	defer close(s.closeDone)
-
-	closeConnection := s.forceClose || err != nil || !s.fullyRead.Load() || s.activeReads.Load() > 0
-	if closeConnection {
-		// Interrupt before waiting on readersLock so a blocked network Read can exit.
-		s.interrupt()
-	}
-
-	s.readersLock.Lock()
-	defer s.readersLock.Unlock()
-	s.release(closeConnection)
+	s.closeOnce.Do(func() {
+		s.closed.Store(true)
+		closeConnection := s.forceClose || err != nil || !s.fullyRead.Load()
+		locked := s.readersLock.TryLock()
+		if !locked {
+			closeConnection = true
+		}
+		if closeConnection {
+			s.interrupt()
+		}
+		if !locked {
+			// The interrupt lets a blocked network Read release readersLock.
+			s.readersLock.Lock()
+		}
+		defer s.readersLock.Unlock()
+		s.release(closeConnection)
+	})
 	return nil
 }
 
@@ -3383,7 +3380,6 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		bodyStream := &clientStreamBody{
 			reader:     rbs,
 			forceClose: closeConn,
-			closeDone:  make(chan struct{}),
 			interrupt: func() {
 				_ = conn.Close()
 			},

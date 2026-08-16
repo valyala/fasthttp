@@ -285,7 +285,6 @@ func TestClientStreamCloseInterruptsActiveReadAfterEOF(t *testing.T) {
 	released := make(chan bool, 1)
 	stream := &clientStreamBody{
 		reader:    reader,
-		closeDone: make(chan struct{}),
 		interrupt: unblock,
 		release: func(closeConnection bool) {
 			released <- closeConnection
