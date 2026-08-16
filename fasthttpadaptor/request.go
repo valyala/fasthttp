@@ -6,6 +6,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 
@@ -71,25 +72,66 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	return nil
 }
 
-// ConvertNetHTTPRequestToFastHTTPRequest converts an http.Request to a fasthttp.RequestCtx.
+// ConvertNetHTTPRequestToFastHTTPRequest converts an http.Request to a
+// fasthttp.RequestCtx.
 //
-// The caller is responsible for the lifecycle of the fasthttp.RequestCtx and the
-// underlying fasthttp.Request. The ctx (and its Request) must only be used for
-// the duration that fasthttp considers it valid (typically within a handler),
-// and must not be accessed after the handler has returned.
+// ctx.Request is not reset before the conversion: if it may contain data from
+// a previous use, call ctx.Request.Reset() first. A zero fasthttp.RequestCtx
+// is not fully initialized either: if the converted ctx is used as a
+// context.Context or passed to code using its connection-level methods,
+// initialize it via ctx.Init before converting.
 //
-// The request body is not copied. If r.Body is non-nil, it is passed directly to
-// ctx.Request via SetBodyStream. This means:
+// The request body is not copied. If r.Body is non-nil and not http.NoBody,
+// it is attached to ctx.Request via SetBodyStream. This means:
 //   - r.Body must remain readable for as long as ctx may need to read it.
-//   - r.Body should not be read from, written to, or closed by the caller until
-//     fasthttp is done with ctx.
-//   - The same r.Body must not be reused concurrently in other goroutines while
-//     it is attached to ctx.Request.
+//   - r.Body should not be read from, written to, or closed by the caller
+//     until ctx is done with it.
+//   - The same r.Body must not be used concurrently from other goroutines
+//     while it is attached to ctx.Request.
 //
-// After calling this function, you should treat r.Body as effectively owned by
-// ctx.Request for the lifetime of that context.
+// The body size is taken from r.ContentLength: zero and negative values mean
+// the size is unknown, and the body is then streamed with chunked transfer
+// encoding until EOF, mirroring net/http.
+//
+// Derived state such as r.Form is not converted, and a body that was already
+// consumed (e.g. by r.ParseForm) is attached as the drained stream it is.
+//
+// The host is taken from r.Host, or r.URL.Host if r.Host is empty. A Host
+// entry in r.Header is ignored, mirroring net/http.
+//
+// r.RemoteAddr is parsed without any DNS resolution, so the conversion cannot
+// block. It is expected to be an "IP:port" pair as set by net/http, or a bare
+// IP. Other values are ignored and leave the remote address of ctx unchanged.
+//
+// r.TLS cannot be attached to ctx, since ctx derives its TLS state from the
+// underlying connection. It is only used to derive the URI scheme, which is
+// set from r.URL.Scheme if present, or to "https" if r.TLS is non-nil.
+//
+// Trailer names that are forbidden in trailers (see fasthttp.ErrBadTrailer)
+// are skipped. Trailer values present in r.Trailer are copied, but note that
+// for server requests net/http populates them only after the body has been
+// read to EOF.
+//
+// HTTP/2 and newer protocols are normalized to HTTP/1.1, since fasthttp only
+// models HTTP/1.x messages and the HTTP version is a hop-by-hop property.
 func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, ctx *fasthttp.RequestCtx) {
 	ctx.Request.Header.SetMethod(r.Method)
+
+	if r.Proto != "" {
+		proto := r.Proto
+		if r.ProtoAtLeast(2, 0) {
+			proto = "HTTP/1.1"
+		}
+		ctx.Request.Header.SetProtocol(proto)
+	}
+
+	host := r.Host
+	if host == "" && r.URL != nil {
+		host = r.URL.Host
+	}
+	if host != "" {
+		ctx.Request.Header.SetHost(host)
+	}
 
 	if r.RequestURI != "" {
 		ctx.Request.SetRequestURI(r.RequestURI)
@@ -97,45 +139,73 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, ctx *fasthttp.Reque
 		ctx.Request.SetRequestURI(r.URL.RequestURI())
 	}
 
-	ctx.Request.Header.SetProtocol(r.Proto)
-	ctx.Request.SetHost(r.Host)
-
 	for k, values := range r.Header {
-		for i, v := range values {
-			if i == 0 {
-				ctx.Request.Header.Set(k, v)
-			} else {
-				ctx.Request.Header.Add(k, v)
-			}
+		if strings.EqualFold(k, fasthttp.HeaderHost) {
+			continue
+		}
+		for _, v := range values {
+			ctx.Request.Header.Add(k, v)
 		}
 	}
 
-	if r.Body != nil {
+	for k, values := range r.Trailer {
+		if ctx.Request.Header.AddTrailer(k) != nil {
+			continue
+		}
+		if len(values) > 0 {
+			ctx.Request.Header.Set(k, strings.Join(values, ", "))
+		}
+	}
+
+	if r.Close {
+		ctx.Request.Header.Del(fasthttp.HeaderConnection)
+		ctx.Request.SetConnectionClose()
+	}
+
+	if r.Body != nil && r.Body != http.NoBody {
 		contentLength := int(r.ContentLength)
-		if r.ContentLength >= int64(math.MaxInt) {
+		if r.ContentLength <= 0 || r.ContentLength >= int64(math.MaxInt) {
 			contentLength = -1
 		}
-
 		ctx.Request.SetBodyStream(r.Body, contentLength)
 	}
 
 	if r.RemoteAddr != "" {
-		addr := parseRemoteAddr(r.RemoteAddr)
-		ctx.SetRemoteAddr(addr)
-	}
-}
-
-func parseRemoteAddr(addr string) net.Addr {
-	if tcpAddr, err := net.ResolveTCPAddr("tcp", addr); err == nil {
-		return tcpAddr
-	}
-
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		if tcpAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(addr, "0")); err == nil {
-			return tcpAddr
+		if remoteAddr := parseRemoteAddr(r.RemoteAddr); remoteAddr != nil {
+			ctx.SetRemoteAddr(remoteAddr)
 		}
 	}
 
-	host := strings.Trim(addr, "[]")
-	return &net.TCPAddr{IP: net.ParseIP(host)}
+	scheme := ""
+	if r.URL != nil {
+		scheme = r.URL.Scheme
+	}
+	if scheme == "" && r.TLS != nil {
+		scheme = "https"
+	}
+	if scheme != "" && scheme != "http" {
+		ctx.Request.URI().SetScheme(scheme)
+	}
+
+	if r.URL != nil && r.URL.User != nil {
+		uri := ctx.Request.URI()
+		uri.SetUsername(r.URL.User.Username())
+		if password, hasPassword := r.URL.User.Password(); hasPassword {
+			uri.SetPassword(password)
+		}
+	}
+}
+
+// parseRemoteAddr parses an http.Request.RemoteAddr into a net.Addr. It only
+// parses the string and never resolves host names, so it cannot block.
+// net/http sets RemoteAddr to an "IP:port" pair, but a bare IP without a port
+// is accepted too. It returns nil for any other value.
+func parseRemoteAddr(addr string) net.Addr {
+	if addrPort, err := netip.ParseAddrPort(addr); err == nil {
+		return net.TCPAddrFromAddrPort(addrPort)
+	}
+	if ip, err := netip.ParseAddr(addr); err == nil {
+		return net.TCPAddrFromAddrPort(netip.AddrPortFrom(ip, 0))
+	}
+	return nil
 }
