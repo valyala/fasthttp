@@ -3233,6 +3233,57 @@ var DefaultTransport RoundTripper = &transport{}
 
 type transport struct{}
 
+// clientStreamBody serializes reads and keeps pooled response resources alive
+// until an in-flight Read has returned. interrupt must unblock network reads
+// without releasing the connection wrapper or reader pools; release performs
+// that cleanup afterward.
+type clientStreamBody struct {
+	reader    io.Reader
+	interrupt func()
+	release   func(bool)
+	closed    atomic.Bool
+	fullyRead bool
+	readLock  sync.Mutex
+	closeOnce sync.Once
+}
+
+func (s *clientStreamBody) Read(p []byte) (int, error) {
+	if s.closed.Load() {
+		return 0, io.ErrClosedPipe
+	}
+
+	s.readLock.Lock()
+	defer s.readLock.Unlock()
+	if s.closed.Load() {
+		return 0, io.ErrClosedPipe
+	}
+
+	n, err := s.reader.Read(p)
+	if errors.Is(err, io.EOF) {
+		s.fullyRead = true
+	}
+	return n, err
+}
+
+func (s *clientStreamBody) CloseWithError(err error) error {
+	s.closeOnce.Do(func() {
+		s.closed.Store(true)
+		locked := s.readLock.TryLock()
+		discard := err != nil || !locked
+		if discard || !s.fullyRead {
+			discard = true
+			s.interrupt()
+		}
+		if !locked {
+			// The interrupt lets a blocked network Read release readLock.
+			s.readLock.Lock()
+		}
+		defer s.readLock.Unlock()
+		s.release(discard)
+	})
+	return nil
+}
+
 func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
 	customSkipBody := resp.SkipBody
 	customStreamBody := resp.StreamBody
@@ -3322,25 +3373,25 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 
 	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
-	if customStreamBody && resp.bodyStream != nil {
-		rbs := resp.bodyStream
-		var closed atomic.Bool
-		resp.bodyStream = newCloseReaderWithError(rbs, func(wErr error) error {
-			if !closed.CompareAndSwap(false, true) {
-				return nil
+	if customStreamBody {
+		if rbs, ok := resp.bodyStream.(*requestStream); ok {
+			resp.bodyStream = &clientStreamBody{
+				reader: rbs,
+				interrupt: func() {
+					_ = conn.Close()
+				},
+				release: func(discard bool) {
+					hc.ReleaseReader(br)
+					releaseRequestStream(rbs)
+					if closeConn || discard {
+						hc.CloseConn(cc)
+					} else {
+						hc.ReleaseConn(cc)
+					}
+				},
 			}
-			hc.ReleaseReader(br)
-			if r, ok := rbs.(*requestStream); ok {
-				releaseRequestStream(r)
-			}
-			if closeConn || resp.ConnectionClose() || wErr != nil {
-				hc.CloseConn(cc)
-			} else {
-				hc.ReleaseConn(cc)
-			}
-			return nil
-		})
-		return false, nil
+			return false, nil
+		}
 	}
 	hc.ReleaseReader(br)
 
