@@ -467,6 +467,16 @@ before returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fas
   disables the response body limit and buffered responses may consume unbounded
   memory. PipelineClient does not provide a response body size limit.
 
+### Writing zero-allocation request handlers
+
+- Avoid `fmt.Fprintf`/`fmt.Sprintf` in handlers - `fmt` boxes every argument into
+  `any`, which allocates. Use `Response.AppendBody`/`AppendBodyString` together with
+  the `Append*` helpers (`AppendUint`, `AppendIPv4`, `AppendHTTPDate`, ...) instead.
+- Use `Acquire*`/`Release*` (e.g. `AcquireCookie`) rather than declaring a
+  zero-value struct, which allocates its own buffers.
+- See the [zero-allocation server example](examples/zeroallocserver) for a full
+  handler rewritten this way, with a test asserting 0 allocs/op.
+
 ## Unsafe Zero-Allocation Conversions
 
 In performance-critical code, converting between `[]byte` and `string` using standard Go allocations can be inefficient. To address this, `fasthttp` uses **unsafe**, zero-allocation helpers:
