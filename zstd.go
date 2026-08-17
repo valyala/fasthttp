@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -143,6 +144,20 @@ func WriteUnzstd(w io.Writer, p []byte) (int, error) {
 }
 
 func writeUnzstd(w io.Writer, p []byte, maxBodySize int) (int, error) {
+	estimatedDecompressedSize := estimateUnzstdSize(p)
+	if maxBodySize > 0 {
+		estimatedDecompressedSize = min(estimatedDecompressedSize, maxBodySize)
+	}
+
+	switch dst := w.(type) {
+	case *byteSliceWriter:
+		dst.b = slices.Grow(dst.b, estimatedDecompressedSize)
+	case *bytebufferpool.ByteBuffer:
+		dst.B = slices.Grow(dst.B, estimatedDecompressedSize)
+	case *bytes.Buffer:
+		dst.Grow(estimatedDecompressedSize)
+	}
+
 	r := &byteSliceReader{b: p}
 	zr, err := acquireZstdReader(r)
 	if err != nil {
@@ -155,6 +170,37 @@ func writeUnzstd(w io.Writer, p []byte, maxBodySize int) (int, error) {
 		return 0, fmt.Errorf("too much data unzstd: %d", n)
 	}
 	return nn, err
+}
+
+func estimateUnzstdSize(p []byte) int {
+	// Somewhat reasonable and conservative expectation of compression factor of 2
+	sizeHint := 2 * len(p)
+
+	// We look for the first non-skippable header
+	var header zstd.Header
+	for {
+		if err := header.Decode(p); err != nil {
+			break
+		}
+		if !header.Skippable {
+			break
+		}
+		skippedBytes := header.HeaderSize + int(header.SkippableSize)
+		if skippedBytes <= 0 || skippedBytes > len(p) {
+			break
+		}
+		p = p[skippedBytes:]
+	}
+
+	if header.HasFCS {
+		// Let's have some limit just in case the input is malicious
+		// and wants us to allocate bazillion bytes.
+		// In a non-malicious case it's still better to start growing from 4 MB than from 0.
+
+		// Static analysis complains about integer overflow but the uint64 argument to int() is not larger than 4_000_000, so we silence it.
+		sizeHint = int(min(header.FrameContentSize, 4_000_000)) // #nosec G115
+	}
+	return sizeHint
 }
 
 // AppendUnzstdBytes appends unzstd src to dst and returns the resulting dst.
