@@ -196,7 +196,9 @@ func estimateUnzstdSize(p []byte) int {
 		// Let's have some limit just in case the input is malicious
 		// and wants us to allocate bazillion bytes.
 		// In a non-malicious case it's still better to start growing from 4 MB than from 0.
-		sizeHint = int(min(header.FrameContentSize, 4_000_000))
+
+		// Static analysis complains about integer overflow but the uint64 argument to int() is not larger than 4_000_000, so we silence it.
+		sizeHint = int(min(header.FrameContentSize, 4_000_000)) // #nosec G115
 	}
 	return sizeHint
 }
