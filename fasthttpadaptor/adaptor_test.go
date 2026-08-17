@@ -455,6 +455,11 @@ func TestHijackFlush(t *testing.T) {
 			if c, rw, err := f.Hijack(); err != nil {
 				t.Error(err)
 			} else {
+				// Flushing the ResponseWriter after Hijack must not block.
+				if fl, ok := w.(http.Flusher); ok {
+					fl.Flush()
+				}
+
 				if _, err := rw.WriteString("bar"); err != nil {
 					t.Error(err)
 				}
@@ -717,6 +722,8 @@ func TestWriterWriteRechecksStreamingReadyAfterLock(t *testing.T) {
 	}()
 
 	time.Sleep(10 * time.Millisecond)
+	// Flush builds the pipe before it makes streaming ready; do the same here.
+	w.ensurePipe()
 	close(w.streamReady)
 
 	readCh := make(chan []byte, 1)
@@ -799,5 +806,86 @@ func TestNewFastHTTPHandlerPresetStatusCodeOverriddenByHandler(t *testing.T) {
 	if ctx.Response.StatusCode() != fasthttp.StatusNotFound {
 		t.Fatalf("unexpected status code: %d. Expecting %d (handler's WriteHeader should win)",
 			ctx.Response.StatusCode(), fasthttp.StatusNotFound)
+	}
+}
+
+// A handler announces a trailer up front or sends one via http.TrailerPrefix.
+func TestHandlerWritesTrailers(t *testing.T) {
+	t.Parallel()
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodGet)
+	ctx.Request.SetRequestURI("/")
+	ctx.Request.Header.SetHost("example.com")
+
+	NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(fasthttp.HeaderTrailer, "X-Result")
+		_, _ = w.Write([]byte("body"))
+		w.Header().Set("X-Result", "done")
+		w.Header().Set(http.TrailerPrefix+"X-Late", "late")
+	})(ctx)
+
+	if got := string(ctx.Response.Header.Peek("X-Result")); got != "done" {
+		t.Errorf("trailer X-Result = %q, want done", got)
+	}
+	if got := string(ctx.Response.Header.Peek("X-Late")); got != "late" {
+		t.Errorf("trailer X-Late = %q, want late", got)
+	}
+	if got := string(ctx.Response.Body()); got != "body" {
+		t.Errorf("body = %q, want body", got)
+	}
+}
+
+// panic(http.ErrAbortHandler) gives up on the response without crashing.
+func TestHandlerAbortIsQuiet(t *testing.T) {
+	t.Parallel()
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodGet)
+	ctx.Request.SetRequestURI("/")
+	ctx.Request.Header.SetHost("example.com")
+
+	NewFastHTTPHandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic(http.ErrAbortHandler)
+	})(ctx)
+}
+
+// Aborting after a Flush must end the response stream instead of hanging the
+// client on a body that never completes.
+func TestHandlerAbortAfterFlush(t *testing.T) {
+	t.Parallel()
+
+	s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("partial"))
+		w.(http.Flusher).Flush() //nolint:forcetypeassert
+		panic(http.ErrAbortHandler)
+	})}
+	ln := fasthttputil.NewInmemoryListener()
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		if err != nil {
+			return
+		}
+		defer resp.Body.Close()
+		_, _ = io.ReadAll(resp.Body)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the body of an aborted flushed response never ended")
 	}
 }

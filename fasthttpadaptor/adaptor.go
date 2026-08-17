@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -64,10 +65,16 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		go func() {
 			defer func() {
 				if rec := recover(); rec != nil {
-					ctx.Logger().Printf("panic in net/http handler: %v", rec)
+					// ErrAbortHandler is net/http's quiet give-up.
+					mode := modePanicked
+					if rec == http.ErrAbortHandler {
+						mode = modeAborted
+					} else {
+						ctx.Logger().Printf("panic in net/http handler: %v", rec)
+					}
 
 					select {
-					case w.modeCh <- modePanicked:
+					case w.modeCh <- mode:
 					default:
 					}
 				} else {
@@ -90,15 +97,20 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// Buffered, no Flush() nor Hijack().
 			ctx.SetStatusCode(w.status())
 			haveContentType := false
+			announced := announcedTrailers(w.Header())
 			for k, vv := range w.Header() {
 				if k == fasthttp.HeaderContentType {
 					haveContentType = true
+				}
+				if isTrailerField(k, announced) {
+					continue
 				}
 
 				for _, v := range vv {
 					ctx.Response.Header.Add(k, v)
 				}
 			}
+			writeTrailers(ctx, w.Header(), announced)
 
 			if !haveContentType {
 				// From net/http.ResponseWriter.Write:
@@ -119,6 +131,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			ctx.SetStatusCode(w.status())
 
 			haveContentType := false
+			announced := announcedTrailers(w.Header())
 			for k, vv := range w.Header() {
 				// No Content-Length when streaming.
 				if k == fasthttp.HeaderContentLength {
@@ -126,6 +139,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				}
 				if k == fasthttp.HeaderContentType {
 					haveContentType = true
+				}
+				if isTrailerField(k, announced) {
+					continue
 				}
 				for _, v := range vv {
 					ctx.Response.Header.Add(k, v)
@@ -143,6 +159,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			ctx.SetBodyStreamWriter(func(bw *bufio.Writer) {
 				// Ensure cleanup only after the stream completes.
 				defer releaseWriter(w)
+				defer func() { writeTrailers(ctx, w.Header(), announcedTrailers(w.Header())) }()
 
 				// Send pre-flush bytes.
 				if b := w.consumePreflush(); len(b) > 0 {
@@ -177,6 +194,13 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			releaseWriter(w)
 			return
 
+		case modeAborted:
+			releaseWriter(w)
+			// Hijacking drops the response; the connection has to go with it,
+			// which fasthttp leaves to us when KeepHijackedConns is set.
+			ctx.HijackSetNoResponse(true)
+			ctx.Hijack(func(c net.Conn) { _ = c.Close() })
+
 		case modePanicked:
 			panic("net/http handler panicked")
 		}
@@ -195,6 +219,7 @@ const (
 	modeFlushed
 	modeHijacked
 	modePanicked
+	modeAborted
 )
 
 // Writer implements http.ResponseWriter + http.Flusher + http.Hijacker for the adaptor.
@@ -216,20 +241,17 @@ type writer struct {
 
 	streamReady chan struct{}
 
+	pipeOnce  sync.Once
 	flushOnce sync.Once
 	closeOnce sync.Once
 }
 
 func acquireWriter(ctx *fasthttp.RequestCtx) *writer {
-	pr, pw := io.Pipe()
 	return &writer{
-		ctx:          ctx,
-		h:            make(http.Header),
-		responseBody: nil,
-		pr:           pr,
-		pw:           pw,
-		modeCh:       make(chan int, 1),
-		streamReady:  make(chan struct{}),
+		ctx:         ctx,
+		h:           make(http.Header),
+		modeCh:      make(chan int, 1),
+		streamReady: make(chan struct{}),
 	}
 }
 
@@ -256,6 +278,7 @@ func (w *writer) WriteHeader(code int) {
 func (w *writer) Write(p []byte) (int, error) {
 	select {
 	case <-w.streamReady:
+		w.ensurePipe()
 		return w.pw.Write(p)
 	default:
 	}
@@ -264,6 +287,7 @@ func (w *writer) Write(p []byte) (int, error) {
 	select {
 	case <-w.streamReady:
 		w.mu.Unlock()
+		w.ensurePipe()
 		return w.pw.Write(p)
 	default:
 	}
@@ -277,8 +301,16 @@ func (w *writer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+func (w *writer) ensurePipe() {
+	w.pipeOnce.Do(func() { w.pr, w.pw = io.Pipe() })
+}
+
 func (w *writer) Flush() {
+	if w.hijacked.Load() {
+		return
+	}
 	w.flushOnce.Do(func() {
+		w.ensurePipe()
 		select {
 		case w.modeCh <- modeFlushed:
 		default:
@@ -337,8 +369,10 @@ func (w *writer) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 
 func (w *writer) Close() error {
 	w.closeOnce.Do(func() {
-		_ = w.pw.Close()
-		_ = w.pr.Close()
+		if w.pw != nil {
+			_ = w.pw.Close()
+			_ = w.pr.Close()
+		}
 	})
 	return nil
 }
@@ -367,4 +401,53 @@ func (w *writer) consumePreflush() []byte {
 	out := w.responseBody
 	w.responseBody = nil
 	return out
+}
+
+func announcedTrailers(h http.Header) map[string]bool {
+	var names map[string]bool
+	for _, list := range h[fasthttp.HeaderTrailer] {
+		for name := range strings.SplitSeq(list, ",") {
+			name = http.CanonicalHeaderKey(strings.TrimSpace(name))
+			if name == "" {
+				continue
+			}
+			if names == nil {
+				names = make(map[string]bool)
+			}
+			names[name] = true
+		}
+	}
+	return names
+}
+
+func isTrailerField(key string, announced map[string]bool) bool {
+	if strings.HasPrefix(key, http.TrailerPrefix) {
+		return true
+	}
+	// Trailer is the announcement, not one of the announced.
+	if key == fasthttp.HeaderTrailer {
+		return false
+	}
+	return announced[key]
+}
+
+func writeTrailers(ctx *fasthttp.RequestCtx, h http.Header, announced map[string]bool) {
+	for key, values := range h {
+		name := key
+		if after, ok := strings.CutPrefix(key, http.TrailerPrefix); ok {
+			name = http.CanonicalHeaderKey(after)
+		} else if !announced[key] || key == fasthttp.HeaderTrailer {
+			continue
+		}
+		if err := ctx.Response.Header.AddTrailer(name); err != nil {
+			continue
+		}
+		for i, v := range values {
+			if i == 0 {
+				ctx.Response.Header.Set(name, v)
+				continue
+			}
+			ctx.Response.Header.Add(name, v)
+		}
+	}
 }

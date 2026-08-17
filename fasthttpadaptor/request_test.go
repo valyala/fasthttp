@@ -55,3 +55,53 @@ func BenchmarkConvertRequest(b *testing.B) {
 		_ = ConvertRequest(ctx, &httpReq, true)
 	}
 }
+
+func TestConvertRequestProtocolVersion(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		protocol, wantProto  string
+		wantMajor, wantMinor int
+	}{
+		{"HTTP/2", "HTTP/2.0", 2, 0},
+		{"HTTP/1.0", "HTTP/1.0", 1, 0},
+		{"HTTP/1.1", "HTTP/1.1", 1, 1},
+	} {
+		ctx := &fasthttp.RequestCtx{}
+		ctx.Request.Header.SetMethod(fasthttp.MethodGet)
+		ctx.Request.SetRequestURI("/")
+		ctx.Request.Header.SetHost("example.com")
+		ctx.Request.Header.SetProtocol(tc.protocol)
+
+		var r http.Request
+		if err := ConvertRequest(ctx, &r, true); err != nil {
+			t.Fatalf("ConvertRequest(%s) error: %v", tc.protocol, err)
+		}
+		if r.Proto != tc.wantProto || r.ProtoMajor != tc.wantMajor || r.ProtoMinor != tc.wantMinor {
+			t.Errorf("%s -> %q %d.%d, want %q %d.%d",
+				tc.protocol, r.Proto, r.ProtoMajor, r.ProtoMinor, tc.wantProto, tc.wantMajor, tc.wantMinor)
+		}
+	}
+}
+
+func TestConvertRequestCarriesTrailers(t *testing.T) {
+	t.Parallel()
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodPost)
+	ctx.Request.SetRequestURI("/")
+	ctx.Request.Header.SetHost("example.com")
+	ctx.Request.SetBodyString("body")
+	if err := ctx.Request.Header.SetTrailer("Foo"); err != nil {
+		t.Fatalf("SetTrailer() error: %v", err)
+	}
+	ctx.Request.Header.Set("Foo", "foov")
+
+	var r http.Request
+	if err := ConvertRequest(ctx, &r, true); err != nil {
+		t.Fatalf("ConvertRequest() error: %v", err)
+	}
+	if got := r.Trailer.Get("Foo"); got != "foov" {
+		t.Errorf("Trailer[Foo] = %q, want foov", got)
+	}
+}

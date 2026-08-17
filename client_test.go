@@ -4412,3 +4412,76 @@ func TestClientRetryIfErrUpstream(t *testing.T) {
 		}
 	})
 }
+
+func TestSetMaxConnsWakesQueuedWaiters(t *testing.T) {
+	t.Parallel()
+
+	dialed := make(chan net.Conn, 4)
+	hc := &HostClient{
+		Addr:               "example.com:80",
+		MaxConns:           1,
+		MaxConnWaitTimeout: 5 * time.Second,
+		Dial: func(string) (net.Conn, error) {
+			left, right := net.Pipe()
+			dialed <- right
+			return left, nil
+		},
+	}
+	hc.connsLock.Lock()
+	hc.connsCount = 1
+	hc.connsLock.Unlock()
+
+	acquired := make(chan error, 1)
+	go func() {
+		_, err := hc.AcquireConn(0, false)
+		acquired <- err
+	}()
+	for i := 0; ; i++ {
+		hc.connsLock.Lock()
+		queued := hc.connsWait != nil && hc.connsWait.len() > 0
+		hc.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if i > 1000 {
+			t.Fatal("waiter never queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	hc.SetMaxConns(2)
+	select {
+	case err := <-acquired:
+		if err != nil {
+			t.Fatalf("queued acquire error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SetMaxConns() didn't wake the queued waiter")
+	}
+	if got := hc.ConnsCount(); got != 2 {
+		t.Fatalf("ConnsCount() = %d, want 2", got)
+	}
+}
+
+func TestReleasedConnsConvergeAfterMaxConnsShrink(t *testing.T) {
+	t.Parallel()
+
+	hc := &HostClient{
+		Addr:               "example.com:80",
+		MaxConns:           2,
+		MaxConnWaitTimeout: 5 * time.Second,
+	}
+	hc.connsLock.Lock()
+	hc.connsCount = 2
+	hc.connsLock.Unlock()
+
+	hc.SetMaxConns(1)
+	hc.decConnsCount()
+	if got := hc.ConnsCount(); got != 1 {
+		t.Fatalf("ConnsCount() after shrink = %d, want the retired slot gone", got)
+	}
+	hc.decConnsCount()
+	if got := hc.ConnsCount(); got != 0 {
+		t.Fatalf("ConnsCount() = %d, want 0", got)
+	}
+}

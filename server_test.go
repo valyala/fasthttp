@@ -3650,6 +3650,68 @@ func TestServerConnStateSeesIdleMarkers(t *testing.T) {
 	}
 }
 
+func TestRequestCtxIDKeepsRequestNumberInItsField(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		connID, requestNum uint64
+		otherConnID        uint64
+	}{
+		{"one past the field", 0, 1 << 32, 1},
+		{"twice past the field", 5, 2 << 32, 7},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var overflowed, other RequestCtx
+			overflowed.connID = tc.connID
+			overflowed.connRequestNum = tc.requestNum
+			other.connID = tc.otherConnID
+
+			if overflowed.ID() == other.ID() {
+				t.Fatalf("connection %d request %d has the same ID as connection %d request 0: %#016x",
+					tc.connID, tc.requestNum, tc.otherConnID, other.ID())
+			}
+			if got := overflowed.ID() >> 32; got != tc.connID {
+				t.Fatalf("connection field = %d, want %d", got, tc.connID)
+			}
+		})
+	}
+}
+
+func TestServerShutdownClosesConnectionThatSentNothing(t *testing.T) {
+	t.Parallel()
+
+	server := &Server{Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") }}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- server.Serve(listener) }()
+
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer conn.Close()
+	// The peer connects and then says nothing at all. Serve counts it as
+	// closeable once the accept-time grace has passed, so Shutdown must not
+	// wait on it forever.
+	time.Sleep(testTimeout(100 * time.Millisecond))
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- server.Shutdown() }()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("Shutdown() error: %v", err)
+		}
+	case <-time.After(testTimeout(30 * time.Second)):
+		t.Fatal("Shutdown() did not return for a connection that sent nothing")
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+}
+
 func TestServerGetOnly(t *testing.T) {
 	t.Parallel()
 
@@ -5236,5 +5298,57 @@ func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
 	err := requestCtx.Err()
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TimeoutHandler must admit requests on a server driven by ServeConn, which
+// never allocates the concurrency gate that Serve does.
+func TestTimeoutHandlerViaServeConn(t *testing.T) {
+	s := &Server{Handler: TimeoutHandler(func(ctx *RequestCtx) {
+		ctx.SetBodyString("ok")
+	}, time.Second, "timeout")}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: a.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("ServeConn() error: %v", err)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("status = %d, want 200 (no requests were in flight)", resp.StatusCode())
+	}
+}
+
+// IsTLS unwraps perIPConn; TLSConnectionState must agree with it.
+func TestTLSConnectionStateThroughPerIPConn(t *testing.T) {
+	certData, keyData, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverSide, clientSide := net.Pipe()
+	defer clientSide.Close()
+	tlsServer := tls.Server(serverSide, &tls.Config{Certificates: []tls.Certificate{cert}})
+	go func() {
+		c := tls.Client(clientSide, &tls.Config{InsecureSkipVerify: true}) //nolint:gosec
+		_ = c.Handshake()
+	}()
+	if err := tlsServer.Handshake(); err != nil {
+		t.Fatal(err)
+	}
+
+	var ctx RequestCtx
+	ctx.c = &perIPConn{Conn: tlsServer}
+	if !ctx.IsTLS() {
+		t.Fatal("IsTLS() = false through perIPConn")
+	}
+	if ctx.TLSConnectionState() == nil {
+		t.Fatal("IsTLS() reports TLS but TLSConnectionState() is nil")
 	}
 }
