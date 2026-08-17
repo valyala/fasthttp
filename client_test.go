@@ -2131,6 +2131,8 @@ func TestClientRedirectMethodSwitch(t *testing.T) {
 				ctx.Redirect("/landing", StatusSeeOther)
 			case "/redirect-307":
 				ctx.Redirect("/landing", StatusTemporaryRedirect)
+			case "/redirect-308":
+				ctx.Redirect("/landing", StatusPermanentRedirect)
 			case "/landing":
 				ctx.SetBodyString(string(ctx.Method()) + "|" + string(ctx.PostBody()))
 			default:
@@ -2162,8 +2164,17 @@ func TestClientRedirectMethodSwitch(t *testing.T) {
 		// 301/302 historically switch POST to GET (without forcing a body drop).
 		{MethodPost, "/redirect-301", "GET|hello"},
 		{MethodPost, "/redirect-302", "GET|hello"},
-		// 307 must preserve both the method and the body.
+		// 307 and 308 must preserve both the method and the body.
 		{MethodPost, "/redirect-307", "POST|hello"},
+		{MethodPost, "/redirect-308", "POST|hello"},
+		// RFC 10008 section 2.5: the POST exception for 301/302 does not
+		// apply to QUERY, so the method and body survive all four.
+		{MethodQuery, "/redirect-301", "QUERY|hello"},
+		{MethodQuery, "/redirect-302", "QUERY|hello"},
+		{MethodQuery, "/redirect-307", "QUERY|hello"},
+		{MethodQuery, "/redirect-308", "QUERY|hello"},
+		// 303 switches QUERY to a body-less GET like any other method.
+		{MethodQuery, "/redirect-303", "GET|"},
 	}
 
 	for _, tc := range tests {
@@ -2182,6 +2193,91 @@ func TestClientRedirectMethodSwitch(t *testing.T) {
 			}
 			if got := resp.StatusCode(); got != StatusOK {
 				t.Fatalf("unexpected status code: %d", got)
+			}
+			if got := string(resp.Body()); got != tc.expectedBody {
+				t.Fatalf("unexpected landing echo %q. Expecting %q", got, tc.expectedBody)
+			}
+		})
+	}
+}
+
+func TestClientRedirectBodyStream(t *testing.T) {
+	t.Parallel()
+
+	// The hop that receives the redirect has already consumed the body stream,
+	// so a redirect that keeps the body cannot be replayed: 307 and 308 used to
+	// arrive with an empty body, and the POST switch to GET on 301/302 hung
+	// waiting for a body that never came.
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/redirect-301":
+				ctx.Redirect("/landing", StatusMovedPermanently)
+			case "/redirect-302":
+				ctx.Redirect("/landing", StatusFound)
+			case "/redirect-303":
+				ctx.Redirect("/landing", StatusSeeOther)
+			case "/redirect-307":
+				ctx.Redirect("/landing", StatusTemporaryRedirect)
+			case "/redirect-308":
+				ctx.Redirect("/landing", StatusPermanentRedirect)
+			case "/landing":
+				ctx.SetBodyString(string(ctx.Method()) + "|" + string(ctx.PostBody()))
+			default:
+				ctx.Error("not found", StatusNotFound)
+			}
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	c := &HostClient{
+		Addr: "xxx",
+		Dial: func(addr string) (net.Conn, error) { return ln.Dial() },
+	}
+
+	tests := []struct {
+		expectedErr  error
+		method       string
+		path         string
+		expectedBody string
+	}{
+		// All four body-preserving statuses must report the unusable stream.
+		{ErrRedirectBodyStream, MethodPost, "/redirect-301", ""},
+		{ErrRedirectBodyStream, MethodPost, "/redirect-302", ""},
+		{ErrRedirectBodyStream, MethodPost, "/redirect-307", ""},
+		{ErrRedirectBodyStream, MethodPost, "/redirect-308", ""},
+		{ErrRedirectBodyStream, MethodQuery, "/redirect-301", ""},
+		{ErrRedirectBodyStream, MethodQuery, "/redirect-302", ""},
+		{ErrRedirectBodyStream, MethodQuery, "/redirect-307", ""},
+		{ErrRedirectBodyStream, MethodQuery, "/redirect-308", ""},
+		// 303 drops the body, so a consumed stream is not in the way.
+		{nil, MethodPost, "/redirect-303", "GET|"},
+		{nil, MethodQuery, "/redirect-303", "GET|"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := AcquireRequest()
+			resp := AcquireResponse()
+			defer ReleaseRequest(req)
+			defer ReleaseResponse(resp)
+
+			req.Header.SetMethod(tc.method)
+			req.SetRequestURI("http://xxx" + tc.path)
+			body := bytes.NewBufferString("hello")
+			req.SetBodyStream(body, body.Len())
+
+			err := c.DoRedirects(req, resp, 16)
+			if !errors.Is(err, tc.expectedErr) {
+				t.Fatalf("unexpected error %v. Expecting %v", err, tc.expectedErr)
+			}
+			if tc.expectedErr != nil {
+				return
 			}
 			if got := string(resp.Body()); got != tc.expectedBody {
 				t.Fatalf("unexpected landing echo %q. Expecting %q", got, tc.expectedBody)
@@ -2661,6 +2757,27 @@ func TestClientIdempotentRequest(t *testing.T) {
 	if string(body) != "0123456" {
 		t.Fatalf("unexpected body: %q. Expecting %q", body, "0123456")
 	}
+
+	// QUERY is registered as idempotent by RFC 10008, so it must be retried
+	// like GET even though it carries a body.
+	dialsCount = 0
+	req := AcquireRequest()
+	resp := AcquireResponse()
+	req.SetRequestURI("http://foobar/a/b")
+	req.Header.SetMethod(MethodQuery)
+	req.Header.SetContentType("application/x-www-form-urlencoded")
+	req.SetBodyString("q=foobar")
+	if err = c.Do(req, resp); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := resp.StatusCode(); got != 345 {
+		t.Fatalf("unexpected status code: %d. Expecting 345", got)
+	}
+	if got := string(resp.Body()); got != "0123456" {
+		t.Fatalf("unexpected body: %q. Expecting %q", got, "0123456")
+	}
+	ReleaseRequest(req)
+	ReleaseResponse(resp)
 
 	var args Args
 
