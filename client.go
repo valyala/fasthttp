@@ -527,29 +527,7 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
-	uri := req.URI()
-	if uri == nil {
-		return ErrorInvalidURI
-	}
-
-	host := uri.Host()
-
-	if bytes.ContainsRune(host, ',') {
-		return fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
-	}
-
-	isTLS := false
-	if uri.isHTTPS() {
-		isTLS = true
-	} else if !uri.isHTTP() {
-		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
-	}
-
-	c.mOnce.Do(func() {
-		c.m = make(map[string]*HostClient)
-		c.ms = make(map[string]*HostClient)
-	})
-	hc, err := c.hostClient(host, isTLS)
+	hc, err := c.hostClientForRequest(req)
 	if err != nil {
 		return err
 	}
@@ -557,6 +535,30 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	atomic.AddInt32(&hc.pendingClientRequests, 1)
 	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
 	return hc.Do(req, resp)
+}
+
+func (c *Client) hostClientForRequest(req *Request) (*HostClient, error) {
+	uri := req.URI()
+	if uri == nil {
+		return nil, ErrorInvalidURI
+	}
+
+	host := uri.Host()
+
+	if bytes.ContainsRune(host, ',') {
+		return nil, fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
+	}
+
+	isTLS := uri.isHTTPS()
+	if !isTLS && !uri.isHTTP() {
+		return nil, fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
+	}
+
+	c.mOnce.Do(func() {
+		c.m = make(map[string]*HostClient)
+		c.ms = make(map[string]*HostClient)
+	})
+	return c.hostClient(host, isTLS)
 }
 
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
@@ -930,7 +932,8 @@ type HostClient struct {
 
 	connsCount int
 
-	connsLock sync.Mutex
+	connsLock         sync.Mutex
+	protocolTransport ProtocolRoundTripper
 
 	addrsLock        sync.Mutex
 	tlsConfigMapLock sync.Mutex
@@ -1635,6 +1638,20 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 }
 
 func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error) {
+	if err := c.prepareRequestResponse(req, resp); err != nil {
+		return false, err
+	}
+
+	if c.protocolTransport != nil {
+		ctx := c.acquireProtocolClientContext(req)
+		retry, err := c.protocolTransport.RoundTripWithContext(ctx, c, req, resp)
+		releaseProtocolClientContext(ctx)
+		return retry, err
+	}
+	return c.transport().RoundTrip(c, req, resp)
+}
+
+func (c *HostClient) prepareRequestResponse(req *Request, resp *Response) error {
 	if req == nil {
 		// for debugging purposes
 		panic("BUG: req cannot be nil")
@@ -1651,7 +1668,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
 	if c.IsTLS != req.URI().isHTTPS() {
-		return false, ErrHostClientRedirectToDifferentScheme
+		return ErrHostClientRedirectToDifferentScheme
 	}
 
 	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix)) // #nosec G115
@@ -1679,7 +1696,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		}
 	}
 
-	return c.transport().RoundTrip(c, req, resp)
+	return nil
 }
 
 func (c *HostClient) transport() RoundTripper {
@@ -1687,6 +1704,28 @@ func (c *HostClient) transport() RoundTripper {
 		return DefaultTransport
 	}
 	return c.Transport
+}
+
+// maxConnsLocked is MaxConns with its default applied. connsLock must be held.
+func (c *HostClient) maxConnsLocked() int {
+	if c.MaxConns <= 0 {
+		return DefaultMaxConnsPerHost
+	}
+	return c.MaxConns
+}
+
+// nextWaiterLocked pops the next waiter still waiting, discarding abandoned
+// ones. connsLock must be held.
+func (c *HostClient) nextWaiterLocked() *wantConn {
+	if c.connsWait == nil {
+		return nil
+	}
+	for c.connsWait.len() > 0 {
+		if w := c.connsWait.popFront(); w.waiting() {
+			return w
+		}
+	}
+	return nil
 }
 
 var (
@@ -1732,8 +1771,22 @@ var ErrTimeout = &timeoutError{}
 // SetMaxConns sets up the maximum number of connections which may be established to all hosts listed in Addr.
 func (c *HostClient) SetMaxConns(newMaxConns int) {
 	c.connsLock.Lock()
+	defer c.connsLock.Unlock()
 	c.MaxConns = newMaxConns
-	c.connsLock.Unlock()
+	// Grown capacity reaches parked protocol slot waiters, which nothing but
+	// this notification would ever wake. HTTP/1 waiters keep the pre-existing
+	// contract: they wait for a connection to be released or time out. Only
+	// leading slot waiters are served, preserving the queue's FIFO order.
+	for c.connsWait != nil && c.connsCount < c.maxConnsLocked() {
+		w := c.connsWait.peekFront()
+		if w == nil || (w.waiting() && !w.slotOnly) {
+			return
+		}
+		c.connsWait.popFront()
+		if w.waiting() && w.tryDeliverSlot() {
+			c.connsCount++
+		}
+	}
 }
 
 func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
@@ -1878,6 +1931,9 @@ func (c *HostClient) CloseIdleConnections() {
 	for _, cc := range scratch {
 		c.CloseConn(cc)
 	}
+	if closer, ok := c.protocolTransport.(ProtocolTransportCloser); ok {
+		closer.CloseIdleConnections(c)
+	}
 }
 
 func (c *HostClient) connsCleaner() {
@@ -1952,20 +2008,16 @@ func (c *HostClient) decConnsCount() {
 
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
-	dialed := false
-	if q := c.connsWait; q != nil {
-		for q.len() > 0 {
-			w := q.popFront()
-			if w.waiting() {
-				go c.dialConnFor(w)
-				dialed = true
-				break
-			}
+	for w := c.nextWaiterLocked(); w != nil; w = c.nextWaiterLocked() {
+		if !w.slotOnly {
+			go c.dialConnFor(w)
+			return
+		}
+		if w.tryDeliverSlot() {
+			return
 		}
 	}
-	if !dialed {
-		c.connsCount--
-	}
+	c.connsCount--
 }
 
 // ConnsCount returns connection count of HostClient.
@@ -2014,29 +2066,38 @@ func (c *HostClient) ReleaseConn(cc *clientConn) {
 
 	// try to deliver an idle connection to a *wantConn
 	c.connsLock.Lock()
-	defer c.connsLock.Unlock()
 	delivered := false
-	if q := c.connsWait; q != nil {
-		for q.len() > 0 {
-			w := q.popFront()
-			if w.waiting() {
-				delivered = w.tryDeliver(cc, nil)
-				// This is the last resort to hand over conCount sema.
-				// We must ensure that there are no valid waiters in connsWait
-				// when we exit this loop.
-				//
-				// We did not apply the same looping pattern in the decConnsCount
-				// method because it needs to create a new time-spent connection,
-				// and the decConnsCount call chain will inevitably reach this point.
-				// When MaxConnWaitTimeout>0.
-				if delivered {
-					break
-				}
+	retire := false
+	for w := c.nextWaiterLocked(); w != nil; w = c.nextWaiterLocked() {
+		if w.slotOnly {
+			// The waiter inherits cc's slot and dials its own connection;
+			// the idle HTTP/1 connection retires.
+			if w.tryDeliverSlot() {
+				delivered = true
+				retire = true
+				break
 			}
+			continue
+		}
+		// This is the last resort to hand over conCount sema.
+		// We must ensure that there are no valid waiters in connsWait
+		// when we exit this loop.
+		//
+		// We did not apply the same looping pattern in the decConnsCount
+		// method because it needs to create a new time-spent connection,
+		// and the decConnsCount call chain will inevitably reach this point.
+		// When MaxConnWaitTimeout>0.
+		if delivered = w.tryDeliver(cc, nil); delivered {
+			break
 		}
 	}
 	if !delivered {
 		c.conns = append(c.conns, cc)
+	}
+	c.connsLock.Unlock()
+	if retire {
+		cc.c.Close()
+		releaseClientConn(cc)
 	}
 }
 
@@ -2319,7 +2380,11 @@ type wantConn struct {
 	err   error
 	ready chan struct{}
 	conn  *clientConn
-	mu    sync.Mutex // protects conn, err, close(ready)
+	// slotOnly marks a waiter that wants a connection slot without a dialed
+	// connection: protocol transports dial with their own TLS setup.
+	slotOnly      bool
+	slotDelivered bool
+	mu            sync.Mutex // protects conn, err, slotDelivered, close(ready)
 }
 
 // waiting reports whether w is still waiting for an answer (connection or error).
@@ -2349,21 +2414,40 @@ func (w *wantConn) tryDeliver(conn *clientConn, err error) bool {
 	return true
 }
 
+// tryDeliverSlot transfers ownership of one connection slot to a slotOnly
+// waiter and reports whether it succeeded.
+func (w *wantConn) tryDeliverSlot() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.conn != nil || w.err != nil || w.slotDelivered {
+		return false
+	}
+	w.slotDelivered = true
+	close(w.ready)
+	return true
+}
+
 // cancel marks w as no longer wanting a result (for example, due to cancellation).
-// If a connection has been delivered already, cancel returns it with c.releaseConn.
+// A connection or slot that was delivered already is returned to c.
 func (w *wantConn) cancel(c *HostClient, err error) {
 	w.mu.Lock()
-	if w.conn == nil && w.err == nil {
+	if w.conn == nil && w.err == nil && !w.slotDelivered {
 		close(w.ready) // catch misbehavior in future delivery
 	}
 
 	conn := w.conn
+	slot := w.slotDelivered
 	w.conn = nil
+	w.slotDelivered = false
 	w.err = err
 	w.mu.Unlock()
 
 	if conn != nil {
 		c.ReleaseConn(conn)
+	}
+	if slot {
+		c.decConnsCount()
 	}
 }
 
@@ -3229,23 +3313,35 @@ func (c *pipelineConnClient) PendingRequests() int {
 
 var errPipelineConnStopped = errors.New("pipeline connection has been stopped")
 
-var DefaultTransport RoundTripper = &transport{}
+var defaultTransport = &transport{}
+
+// DefaultTransport is the transport used by HostClient when Transport is nil.
+var DefaultTransport RoundTripper = defaultTransport
 
 type transport struct{}
 
 func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
-	customSkipBody := resp.SkipBody
-	customStreamBody := resp.StreamBody
-
 	var deadline time.Time
 	if req.timeout > 0 {
 		deadline = time.Now().Add(req.timeout)
 	}
-
 	cc, err := hc.AcquireConn(req.timeout, req.ConnectionClose())
 	if err != nil {
 		return false, err
 	}
+	return t.roundTripConn(hc, cc, req, resp, deadline)
+}
+
+func (t *transport) roundTripConn(
+	hc *HostClient,
+	cc *clientConn,
+	req *Request,
+	resp *Response,
+	deadline time.Time,
+) (retry bool, err error) {
+	customSkipBody := resp.SkipBody
+	customStreamBody := resp.StreamBody
+
 	conn := cc.c
 
 	resp.ParseNetConn(conn)

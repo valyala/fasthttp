@@ -1,0 +1,340 @@
+package fasthttp
+
+import (
+	"bufio"
+	"crypto/tls"
+	"io"
+	"net"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+type testProtocolTransport struct {
+	roundTripCalled         atomic.Bool
+	protocolRoundTripCalled atomic.Bool
+	closeIdleCalled         atomic.Bool
+}
+
+func (t *testProtocolTransport) RoundTrip(
+	_ *HostClient,
+	_ *Request,
+	_ *Response,
+) (bool, error) {
+	t.roundTripCalled.Store(true)
+	return false, nil
+}
+
+func (t *testProtocolTransport) RoundTripWithContext(
+	_ *ProtocolClientContext,
+	_ *HostClient,
+	_ *Request,
+	_ *Response,
+) (bool, error) {
+	t.protocolRoundTripCalled.Store(true)
+	return false, nil
+}
+
+func (t *testProtocolTransport) CloseIdleConnections(_ *HostClient) {
+	t.closeIdleCalled.Store(true)
+}
+
+func TestHostClientProtocolRoundTripper(t *testing.T) {
+	transport := &testProtocolTransport{}
+	hc := &HostClient{
+		Addr: "example.com:80",
+	}
+	if err := hc.RegisterProtocolTransport(transport); err != nil {
+		t.Fatalf("RegisterProtocolTransport() error: %v", err)
+	}
+	req := AcquireRequest()
+	defer ReleaseRequest(req)
+	resp := AcquireResponse()
+	defer ReleaseResponse(resp)
+	req.SetRequestURI("http://example.com/")
+
+	if err := hc.Do(req, resp); err != nil {
+		t.Fatalf("Do() error: %v", err)
+	}
+	if !transport.protocolRoundTripCalled.Load() {
+		t.Fatal("Do() didn't call ProtocolRoundTripper")
+	}
+	if transport.roundTripCalled.Load() {
+		t.Fatal("Do() called the legacy RoundTripper path")
+	}
+
+	hc.CloseIdleConnections()
+	if !transport.closeIdleCalled.Load() {
+		t.Fatal("CloseIdleConnections() didn't notify the protocol transport")
+	}
+}
+
+func TestSetMaxConnsWakesQueuedSlotWaiters(t *testing.T) {
+	hc := &HostClient{
+		Addr:               "example.com:80",
+		MaxConns:           1,
+		MaxConnWaitTimeout: 5 * time.Second,
+	}
+	if err := hc.reserveProtocolConn(0); err != nil {
+		t.Fatalf("reserving the only slot: %v", err)
+	}
+
+	result := make(chan error, 1)
+	go func() { result <- hc.reserveProtocolConn(0) }()
+	for i := 0; ; i++ {
+		hc.connsLock.Lock()
+		queued := hc.connsWait != nil && hc.connsWait.len() > 0
+		hc.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if i > 1000 {
+			t.Fatal("slot waiter never queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	hc.SetMaxConns(2)
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("queued reservation error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SetMaxConns() didn't wake the queued slot waiter")
+	}
+	if got := hc.ConnsCount(); got != 2 {
+		t.Fatalf("ConnsCount() = %d, want 2", got)
+	}
+	hc.releaseProtocolConnSlot()
+	hc.releaseProtocolConnSlot()
+}
+
+type timeoutRecordingTransport struct {
+	seen time.Duration
+}
+
+func (t *timeoutRecordingTransport) RoundTrip(_ *HostClient, req *Request, _ *Response) (bool, error) {
+	t.seen = req.timeout
+	return false, nil
+}
+
+func TestHostClientProtocolTransportKeepsCustomHTTP1Fallback(t *testing.T) {
+	roundTripper := &timeoutRecordingTransport{}
+	hc := &HostClient{
+		Addr:      "example.com:80",
+		Transport: roundTripper,
+	}
+	if err := hc.RegisterProtocolTransport(&testProtocolTransport{}); err != nil {
+		t.Fatalf("RegisterProtocolTransport() error: %v", err)
+	}
+
+	var req Request
+	var resp Response
+	req.timeout = 5 * time.Second
+	ctx := &ProtocolClientContext{hostClient: hc, deadline: time.Now().Add(time.Second)}
+	if _, err := ctx.RoundTripHTTP1(&req, &resp); err != nil {
+		t.Fatalf("RoundTripHTTP1() error: %v", err)
+	}
+	if roundTripper.seen <= 0 || roundTripper.seen > time.Second {
+		t.Fatalf("fallback timeout = %v, want the remaining ~1s budget", roundTripper.seen)
+	}
+	if req.timeout != 5*time.Second {
+		t.Fatalf("request timeout = %v after fallback, want restored 5s", req.timeout)
+	}
+}
+
+func TestProtocolClientContextAcquireConnALPN(t *testing.T) {
+	certData, keyData, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatalf("generating certificate: %v", err)
+	}
+	certificate, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatalf("parsing certificate: %v", err)
+	}
+
+	serverConn, clientConn := net.Pipe()
+	serverError := make(chan error, 1)
+	go func() {
+		serverTLS := tls.Server(serverConn, &tls.Config{
+			Certificates: []tls.Certificate{certificate},
+			NextProtos:   []string{"h2", "http/1.1"},
+		})
+		if err := serverTLS.Handshake(); err != nil {
+			serverError <- err
+			return
+		}
+		var one [1]byte
+		_, err := serverTLS.Read(one[:])
+		if err != nil && err != io.EOF {
+			serverError <- err
+			return
+		}
+		serverError <- nil
+		_ = serverTLS.Close()
+	}()
+
+	hc := &HostClient{
+		Addr:  "localhost:443",
+		IsTLS: true,
+		TLSConfig: &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // Test-only self-signed certificate.
+		},
+		DialTimeout: func(string, time.Duration) (net.Conn, error) {
+			return clientConn, nil
+		},
+	}
+	ctx := ProtocolClientContext{
+		hostClient: hc,
+		deadline:   time.Now().Add(time.Second),
+	}
+	conn, err := ctx.AcquireConn([]string{"h2", "http/1.1"})
+	if err != nil {
+		t.Fatalf("AcquireConn() error: %v", err)
+	}
+	if got := conn.NegotiatedProtocol(); got != "h2" {
+		t.Fatalf("NegotiatedProtocol() = %q, want %q", got, "h2")
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+	if err := <-serverError; err != nil {
+		t.Fatalf("server handshake error: %v", err)
+	}
+	if got := hc.ConnsCount(); got != 0 {
+		t.Fatalf("ConnsCount() = %d, want 0", got)
+	}
+}
+
+func TestProtocolClientConnRoundTripHTTP1(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	serverError := make(chan error, 1)
+	go func() {
+		defer serverConn.Close()
+		reader := bufio.NewReader(serverConn)
+		var req Request
+		if err := req.Read(reader); err != nil {
+			serverError <- err
+			return
+		}
+		_, err := io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+		serverError <- err
+	}()
+
+	hc := &HostClient{
+		Addr: "example.com:80",
+		DialTimeout: func(string, time.Duration) (net.Conn, error) {
+			return clientConn, nil
+		},
+	}
+	ctx := ProtocolClientContext{hostClient: hc}
+	conn, err := ctx.AcquireConn(nil)
+	if err != nil {
+		t.Fatalf("AcquireConn() error: %v", err)
+	}
+
+	var req Request
+	req.SetRequestURI("http://example.com/")
+	var resp Response
+	retry, err := conn.RoundTripHTTP1(&req, &resp)
+	if err != nil {
+		t.Fatalf("RoundTripHTTP1() error: %v (retry=%v)", err, retry)
+	}
+	if got := string(resp.Body()); got != "ok" {
+		t.Fatalf("response body = %q, want %q", got, "ok")
+	}
+	if err := <-serverError; err != nil {
+		t.Fatalf("server error: %v", err)
+	}
+
+	hc.CloseIdleConnections()
+	if got := hc.ConnsCount(); got != 0 {
+		t.Fatalf("ConnsCount() after CloseIdleConnections = %d, want 0", got)
+	}
+}
+
+func TestHostClientOpenStreamUnsupported(t *testing.T) {
+	hc := &HostClient{Addr: "example.com:80"}
+	var req Request
+	req.SetRequestURI("http://example.com/")
+	var resp Response
+
+	stream, err := hc.OpenStream(&req, &resp)
+	if stream != nil {
+		t.Fatal("OpenStream() returned a stream for the default transport")
+	}
+	if err != ErrProtocolNotSupported {
+		t.Fatalf("OpenStream() error = %v, want ErrProtocolNotSupported", err)
+	}
+}
+
+func TestReleaseProtocolConnSlotServesHTTP1Waiters(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	server := &Server{Handler: func(*RequestCtx) {}}
+	serveDone := make(chan struct{})
+	go func() {
+		defer close(serveDone)
+		_ = server.Serve(ln)
+	}()
+	t.Cleanup(func() {
+		_ = server.Shutdown()
+		<-serveDone
+		_ = ln.Close()
+	})
+
+	hc := &HostClient{
+		Addr:               ln.Addr().String(),
+		MaxConns:           1,
+		MaxConnWaitTimeout: 2 * time.Second,
+	}
+	// Take the only slot the way a protocol connection would.
+	if err := hc.reserveProtocolConn(0); err != nil {
+		t.Fatalf("reserveProtocolConn() error: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		req := AcquireRequest()
+		resp := AcquireResponse()
+		defer ReleaseRequest(req)
+		defer ReleaseResponse(resp)
+		req.SetRequestURI("http://" + ln.Addr().String() + "/")
+		done <- hc.Do(req, resp)
+	}()
+
+	// Wait until the HTTP/1 request is queued as a connection waiter.
+	deadline := time.Now().Add(time.Second)
+	for {
+		hc.connsLock.Lock()
+		queued := hc.connsWait != nil && hc.connsWait.len() > 0
+		hc.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("HTTP/1 request never queued as a connection waiter")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Freeing the protocol slot must serve the queued HTTP/1 waiter promptly;
+	// both connection kinds share connsCount.
+	released := time.Now()
+	hc.releaseProtocolConnSlot()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("queued request error: %v", err)
+		}
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("queued HTTP/1 request wasn't served after the protocol slot was freed")
+	}
+	if elapsed := time.Since(released); elapsed > 500*time.Millisecond {
+		t.Fatalf("queued request served after %v; want promptly after slot release", elapsed)
+	}
+	hc.CloseIdleConnections()
+}

@@ -7,10 +7,8 @@ import (
 )
 
 type perIPConnCounter struct {
-	perIPConnPool    sync.Pool
-	perIPTLSConnPool sync.Pool
-	m                map[uint32]int
-	lock             sync.Mutex
+	m    map[uint32]int
+	lock sync.Mutex
 }
 
 func (cc *perIPConnCounter) Register(ip uint32) int {
@@ -59,32 +57,17 @@ type perIPTLSConn struct {
 
 func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) net.Conn {
 	if tlsConn, ok := conn.(*tls.Conn); ok {
-		v := counter.perIPTLSConnPool.Get()
-		if v == nil {
-			return &perIPTLSConn{
-				perIPConnCounter: counter,
-				Conn:             tlsConn,
-				ip:               ip,
-			}
-		}
-		c := v.(*perIPTLSConn) //nolint:forcetypeassert
-		c.Conn = tlsConn
-		c.ip = ip
-		return c
-	}
-
-	v := counter.perIPConnPool.Get()
-	if v == nil {
-		return &perIPConn{
+		return &perIPTLSConn{
 			perIPConnCounter: counter,
-			Conn:             conn,
+			Conn:             tlsConn,
 			ip:               ip,
 		}
 	}
-	c := v.(*perIPConn) //nolint:forcetypeassert
-	c.Conn = conn
-	c.ip = ip
-	return c
+	return &perIPConn{
+		perIPConnCounter: counter,
+		Conn:             conn,
+		ip:               ip,
+	}
 }
 
 func (c *perIPConn) Close() error {
@@ -99,7 +82,6 @@ func (c *perIPConn) Close() error {
 
 	err := cc.Close()
 	c.perIPConnCounter.Unregister(c.ip)
-	c.perIPConnCounter.perIPConnPool.Put(c)
 	return err
 }
 
@@ -115,7 +97,6 @@ func (c *perIPTLSConn) Close() error {
 
 	err := cc.Close()
 	c.perIPConnCounter.Unregister(c.ip)
-	c.perIPConnCounter.perIPTLSConnPool.Put(c)
 	return err
 }
 

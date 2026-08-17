@@ -72,10 +72,11 @@ type RequestHeader struct {
 
 	noCopy noCopy
 
-	method     []byte
-	requestURI []byte
-	host       []byte
-	userAgent  []byte
+	method          []byte
+	requestURI      []byte
+	host            []byte
+	userAgent       []byte
+	connectProtocol []byte
 
 	// stores an immutable copy of headers as they were received from the
 	// wire.
@@ -781,6 +782,17 @@ func (h *RequestHeader) SetProtocolBytes(protocol []byte) {
 	h.noHTTP11 = !bytes.Equal(h.protocol, strHTTP11)
 }
 
+// ConnectProtocol returns the extended CONNECT protocol. It is empty for a
+// regular request.
+func (h *RequestHeader) ConnectProtocol() []byte {
+	return h.connectProtocol
+}
+
+// SetConnectProtocol sets the extended CONNECT protocol.
+func (h *RequestHeader) SetConnectProtocol(protocol string) {
+	h.connectProtocol = initHeaderValueString(h.connectProtocol, protocol)
+}
+
 // RequestURI returns RequestURI from the first HTTP request line.
 func (h *RequestHeader) RequestURI() []byte {
 	requestURI := h.requestURI
@@ -1014,6 +1026,7 @@ func (h *RequestHeader) resetSkipNormalize() {
 	h.host = h.host[:0]
 	h.contentType = h.contentType[:0]
 	h.userAgent = h.userAgent[:0]
+	h.connectProtocol = h.connectProtocol[:0]
 	h.trailer = h.trailer[:0]
 	h.mulHeader = h.mulHeader[:0]
 
@@ -1062,6 +1075,7 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.requestURI = append(dst.requestURI, h.requestURI...)
 	dst.host = append(dst.host, h.host...)
 	dst.userAgent = append(dst.userAgent, h.userAgent...)
+	dst.connectProtocol = append(dst.connectProtocol, h.connectProtocol...)
 	dst.cookiesCollected = h.cookiesCollected
 	dst.rawHeaders = append(dst.rawHeaders, h.rawHeaders...)
 }
