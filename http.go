@@ -919,7 +919,8 @@ func (req *Request) SwapBody(body []byte) []byte {
 // Use BodyStream to read it incrementally.
 func (req *Request) Body() []byte {
 	if req.bodyStream != nil && req.logger != nil {
-		req.logger.Printf("WARNING: Request.Body() reads the entire stream into memory. Use Request.BodyStream() or Request.WriteBodyTo() instead to avoid out-of-memory errors.")
+		req.logger.Printf("WARNING: Request.Body() reads the entire stream into memory. " +
+			"Use Request.BodyStream() or Request.WriteBodyTo() instead to avoid out-of-memory errors.")
 	}
 	if req.bodyRaw != nil {
 		return req.bodyRaw
