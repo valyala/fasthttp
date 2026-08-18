@@ -71,6 +71,13 @@ type Request struct {
 
 	keepBodyBuffer bool
 
+	// Set when a streamed request body could not be fully drained, e.g. a
+	// malformed chunk was hit while discarding the multipart epilogue. The
+	// connection is then left mid-body, so the server must close it rather
+	// than reuse it, otherwise the leftover bytes are read back as the start
+	// of the next request.
+	bodyStreamDrainErr bool
+
 	// Used by Server to indicate the request was received on a HTTPS endpoint.
 	// Client/HostClient shouldn't use this field but should depend on the uri.scheme instead.
 	isTLS bool
@@ -1126,7 +1133,13 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	// dynamic type set through SetBodyStream.
 	if req.bodyStream != nil {
 		defer func() {
-			_, _ = copyZeroAlloc(io.Discard, req.bodyStream)
+			if _, drainErr := copyZeroAlloc(io.Discard, req.bodyStream); drainErr != nil {
+				// The declared body could not be fully consumed, so the
+				// connection is left mid-body. Mark it so the server closes the
+				// connection instead of parsing the leftover as the next
+				// request.
+				req.bodyStreamDrainErr = true
+			}
 		}()
 	}
 
@@ -1304,6 +1317,7 @@ func (req *Request) resetSkipHeader() {
 	req.postArgs.Reset()
 	req.parsedPostArgs = false
 	req.isTLS = false
+	req.bodyStreamDrainErr = false
 }
 
 // RemoveMultipartFormFiles removes multipart/form-data temporary files

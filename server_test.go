@@ -1892,6 +1892,47 @@ func TestServerDoesNotParseStreamedMultipartBadGzipAsRequest(t *testing.T) {
 	}
 }
 
+func TestServerDoesNotParseStreamedMultipartMalformedChunkAsRequest(t *testing.T) {
+	t.Parallel()
+
+	// The epilogue drain gives up on a malformed chunk size partway through the
+	// declared body, leaving the connection mid-body. The leftover bytes must
+	// not be read back as the next request, so the connection has to close.
+	form := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	// One valid chunk carrying the whole form, then a chunk whose size line is
+	// invalid, followed by the smuggled request.
+	body := fmt.Sprintf("%x\r\n%s\r\n", len(form), form) + "\x00" + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Transfer-Encoding: chunked\r\n\r\n%s",
+		body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				_ = ctx.FormValue("x")
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
 func TestServerGetWithContent(t *testing.T) {
 	t.Parallel()
 

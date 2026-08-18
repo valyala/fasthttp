@@ -2653,6 +2653,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		connectionClose = connectionClose ||
 			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
 			ctx.Response.Header.ConnectionClose() ||
+			ctx.Request.bodyStreamDrainErr ||
 			(s.CloseOnShutdown && s.stop.Load() == 1)
 		if connectionClose {
 			ctx.Response.Header.SetConnectionClose()
