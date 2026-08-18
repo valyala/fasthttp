@@ -2713,7 +2713,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		if hijackHandler != nil {
 			var hjr io.Reader = c
 			if br != nil {
-				hjr = br
+				if br.Buffered() == 0 {
+					releaseReader(s, br)
+				} else {
+					hjr = br
+				}
 				br = nil
 			}
 			if bw != nil {
