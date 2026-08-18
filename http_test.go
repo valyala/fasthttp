@@ -4194,3 +4194,37 @@ func TestWriteBodyChunkedConcreteTypes(t *testing.T) {
 		}
 	}
 }
+
+type mockLogger struct {
+	mu   sync.Mutex
+	msgs []string
+}
+
+func (l *mockLogger) Printf(format string, args ...any) {
+	l.mu.Lock()
+	l.msgs = append(l.msgs, fmt.Sprintf(format, args...))
+	l.mu.Unlock()
+}
+
+func TestRequestBodyStreamWarning(t *testing.T) {
+	var r Request
+	ml := &mockLogger{}
+	r.logger = ml
+
+	s := "test stream content"
+	r.SetBodyStream(bytes.NewBufferString(s), len(s))
+
+	body := r.Body()
+	if string(body) != s {
+		t.Fatalf("unexpected body %q", body)
+	}
+
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
+	if len(ml.msgs) != 1 {
+		t.Fatalf("expected 1 log message, got %d", len(ml.msgs))
+	}
+	if !strings.Contains(ml.msgs[0], "WARNING: Request.Body() reads the entire stream into memory.") {
+		t.Fatalf("unexpected log message: %q", ml.msgs[0])
+	}
+}
