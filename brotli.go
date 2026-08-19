@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/andybalholm/brotli"
+	brotli "github.com/molecule-man/go-brrr"
 	"github.com/valyala/bytebufferpool"
 	"github.com/valyala/fasthttp/stackless"
 )
@@ -23,16 +23,14 @@ const (
 	CompressBrotliDefaultCompression = 4
 )
 
-func acquireBrotliReader(r io.Reader) (*brotli.Reader, error) {
+func acquireBrotliReader(r io.Reader) *brotli.Reader {
 	v := brotliReaderPool.Get()
 	if v == nil {
-		return brotli.NewReader(r), nil
+		return brotli.NewReader(r)
 	}
 	zr := v.(*brotli.Reader) //nolint:forcetypeassert
-	if err := zr.Reset(r); err != nil {
-		return nil, err
-	}
-	return zr, nil
+	zr.Reset(r)
+	return zr
 }
 
 func releaseBrotliReader(zr *brotli.Reader) {
@@ -67,7 +65,9 @@ func acquireRealBrotliWriter(w io.Writer, level int) *brotli.Writer {
 	p := realBrotliWriterPoolMap[nLevel]
 	v := p.Get()
 	if v == nil {
-		zw := brotli.NewWriterLevel(w, level)
+		// nLevel is always in the [0..11] range accepted by brotli.NewWriter,
+		// so the error can never be non-nil here.
+		zw, _ := brotli.NewWriter(w, nLevel)
 		return zw
 	}
 	zw := v.(*brotli.Writer) //nolint:forcetypeassert
@@ -172,10 +172,7 @@ func WriteUnbrotli(w io.Writer, p []byte) (int, error) {
 
 func writeUnbrotli(w io.Writer, p []byte, maxBodySize int) (int, error) {
 	r := &byteSliceReader{b: p}
-	zr, err := acquireBrotliReader(r)
-	if err != nil {
-		return 0, err
-	}
+	zr := acquireBrotliReader(r)
 	n, err := copyZeroAllocWithLimit(w, zr, maxBodySize)
 	releaseBrotliReader(zr)
 	nn := int(n)
