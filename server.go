@@ -2306,6 +2306,12 @@ func nextConnID() uint64 {
 // See Server.MaxRequestBodySize for details.
 const DefaultMaxRequestBodySize = 4 * 1024 * 1024
 
+// maxUnreadStreamBodySize is how much of a streamed request body the server
+// discards after the handler returns without reading it, in order to keep the
+// connection alive. When more is left the connection is closed instead, as
+// net/http does once a handler returns.
+const maxUnreadStreamBodySize = 256 * 1024
+
 func (s *Server) idleTimeout() time.Duration {
 	if s.IdleTimeout != 0 {
 		return s.IdleTimeout
@@ -2638,6 +2644,12 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		timeoutResponse = ctx.timeoutResponse
 		if timeoutResponse != nil {
+			// The timed out handler may still be reading the streamed body,
+			// so the rest of it cannot be discarded here: close the connection
+			// instead of parsing the unread body as the next request.
+			if ctx.Request.bodyStream != nil {
+				connectionClose = true
+			}
 			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
 			ctx = s.acquireCtx(c)
 			timeoutResponse.CopyTo(&ctx.Response)
@@ -2651,6 +2663,16 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.hijackHandler = nil
 		hijackNoResponse = ctx.hijackNoResponse && hijackHandler != nil
 		ctx.hijackNoResponse = false
+
+		// The handler may have returned without reading the whole streamed
+		// body. What is left of it would be parsed as the next request on
+		// this connection, so discard it, or close the connection when there
+		// is too much left to read.
+		if !connectionClose && hijackHandler == nil {
+			if rs, ok := ctx.Request.bodyStream.(*requestStream); ok && !rs.discard(maxUnreadStreamBodySize) {
+				connectionClose = true
+			}
+		}
 
 		if writeTimeout > 0 {
 			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {

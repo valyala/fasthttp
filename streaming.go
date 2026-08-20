@@ -20,6 +20,10 @@ type requestStream struct {
 	reader          *bufio.Reader
 	totalBytesRead  int
 	chunkLeft       int
+	// chunkedEOF is set once the last chunk and the trailer of a chunked
+	// body have been read, so that further reads don't consume the next
+	// request from the reader.
+	chunkedEOF bool
 }
 
 func (rs *requestStream) Read(p []byte) (int, error) {
@@ -28,6 +32,9 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		err error
 	)
 	if rs.header.ContentLength() == -1 {
+		if rs.chunkedEOF {
+			return 0, io.EOF
+		}
 		if rs.chunkLeft == 0 {
 			chunkSize, err := parseChunkSize(rs.reader)
 			if err != nil {
@@ -38,6 +45,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 				if err != nil && err != io.EOF {
 					return 0, err
 				}
+				rs.chunkedEOF = true
 				return 0, io.EOF
 			}
 			rs.chunkLeft = chunkSize
@@ -86,6 +94,17 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// discard reads and drops what is left of the body, so that the reader ends
+// where the next request starts. It gives up after limit bytes and reports
+// whether the end of the body was reached.
+func (rs *requestStream) discard(limit int) bool {
+	if cl := rs.header.ContentLength(); cl >= 0 && cl-rs.totalBytesRead > limit {
+		return false
+	}
+	_, err := io.CopyN(io.Discard, rs, int64(limit)+1)
+	return err == io.EOF
+}
+
 func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
 	rs := requestStreamPool.Get().(*requestStream) //nolint:forcetypeassert
 	rs.prefetchedBytes = bytes.NewReader(b.B)
@@ -98,6 +117,7 @@ func releaseRequestStream(rs *requestStream) {
 	rs.prefetchedBytes = nil
 	rs.totalBytesRead = 0
 	rs.chunkLeft = 0
+	rs.chunkedEOF = false
 	rs.reader = nil
 	rs.header = nil
 	requestStreamPool.Put(rs)
