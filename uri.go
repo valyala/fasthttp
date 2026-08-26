@@ -754,7 +754,11 @@ func (u *URI) RequestURI() []byte {
 	var dst []byte
 	if u.DisablePathNormalizing {
 		dst = u.requestURI[:0]
-		dst = append(dst, u.PathOriginal()...)
+		path := u.PathOriginal()
+		if len(path) == 0 {
+			path = strSlash
+		}
+		dst = append(dst, path...)
 	} else {
 		dst = appendQuotedPath(u.requestURI[:0], u.Path())
 	}

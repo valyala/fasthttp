@@ -620,3 +620,21 @@ func TestFragmentInHost(t *testing.T) {
 		t.Fatalf("Unexpected host %q. Expected %q", got, "google.com")
 	}
 }
+
+func TestURIRequestURIEmptyPathWithQuery(t *testing.T) {
+	t.Parallel()
+
+	var u URI
+	if err := u.Parse(nil, []byte("http://example.com?foo=bar")); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := string(u.RequestURI()); got != "/?foo=bar" {
+		t.Fatalf("unexpected RequestURI %q. Expecting %q", got, "/?foo=bar")
+	}
+
+	u.DisablePathNormalizing = true
+	if got := string(u.RequestURI()); got != "/?foo=bar" {
+		t.Fatalf("unexpected RequestURI with DisablePathNormalizing %q. Expecting %q", got, "/?foo=bar")
+	}
+}
