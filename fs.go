@@ -21,8 +21,9 @@ import (
 
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
-	brotli "github.com/molecule-man/go-brrr"
 	"github.com/valyala/bytebufferpool"
+
+	brotli "github.com/molecule-man/go-brrr"
 )
 
 // ServeFileBytesUncompressed returns HTTP response containing file contents

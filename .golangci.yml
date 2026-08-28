@@ -94,6 +94,12 @@ formatters:
     - gofmt
     - gofumpt
     - goimports
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/molecule-man/go-brrr)
   exclusions:
     generated: lax
     paths:

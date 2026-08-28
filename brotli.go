@@ -7,9 +7,10 @@ import (
 	"io"
 	"sync"
 
-	brotli "github.com/molecule-man/go-brrr"
 	"github.com/valyala/bytebufferpool"
 	"github.com/valyala/fasthttp/stackless"
+
+	brotli "github.com/molecule-man/go-brrr"
 )
 
 // Supported compression levels.
@@ -205,31 +206,26 @@ var errBrotliExcessiveInput = errors.New("brotli: excessive input")
 // a decoder that succeeds without asking for the held back byte ended before
 // the end of b: the leftover is excessive input.
 type brotliSliceReader struct {
-	b        []byte
-	tail     byte
-	tailRead bool
+	b []byte
 }
 
 func newBrotliSliceReader(b []byte) *brotliSliceReader {
-	if len(b) == 0 {
-		// Nothing to hold back; the decoder rejects an empty slice as truncated.
-		return &brotliSliceReader{tailRead: true}
-	}
-	return &brotliSliceReader{b: b[:len(b)-1], tail: b[len(b)-1]}
+	return &brotliSliceReader{b: b}
 }
 
 func (r *brotliSliceReader) Read(p []byte) (int, error) {
-	if len(r.b) > 0 {
-		n := copy(p, r.b)
+	if len(r.b) > 1 {
+		// Always withhold the final byte.
+		n := copy(p, r.b[:len(r.b)-1])
 		r.b = r.b[n:]
 		return n, nil
 	}
-	if !r.tailRead {
+	if len(r.b) == 1 {
 		if len(p) == 0 {
 			return 0, nil
 		}
-		r.tailRead = true
-		p[0] = r.tail
+		p[0] = r.b[0]
+		r.b = r.b[1:]
 		return 1, nil
 	}
 	return 0, io.EOF
@@ -238,7 +234,7 @@ func (r *brotliSliceReader) Read(p []byte) (int, error) {
 // excessiveInput is only meaningful once the decoder has reported success:
 // a decoder that stopped early hasn't asked for the held back byte either.
 func (r *brotliSliceReader) excessiveInput() bool {
-	return !r.tailRead
+	return len(r.b) > 0
 }
 
 // normalizes compression level into [0..11], so it could be used as an index
