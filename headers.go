@@ -9,6 +9,7 @@ const (
 	HeaderAcceptLanguage                  = "Accept-Language"
 	HeaderAcceptPatch                     = "Accept-Patch"
 	HeaderAcceptPushPolicy                = "Accept-Push-Policy"
+	HeaderAcceptQuery                     = "Accept-Query"
 	HeaderAcceptRanges                    = "Accept-Ranges"
 	HeaderAcceptSignature                 = "Accept-Signature"
 	HeaderAccessControlAllowCredentials   = "Access-Control-Allow-Credentials"

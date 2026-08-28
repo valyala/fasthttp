@@ -855,6 +855,11 @@ func (h *RequestHeader) IsPatch() bool {
 	return string(h.Method()) == MethodPatch
 }
 
+// IsQuery returns true if request method is QUERY.
+func (h *RequestHeader) IsQuery() bool {
+	return string(h.Method()) == MethodQuery
+}
+
 // IsHTTP11 returns true if the header is HTTP/1.1.
 func (h *header) IsHTTP11() bool {
 	return !h.noHTTP11

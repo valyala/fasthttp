@@ -1200,6 +1200,10 @@ var (
 	// ErrTooManyRedirects is returned by clients when the number of redirects followed
 	// exceed the max count.
 	ErrTooManyRedirects = errors.New("fasthttp: too many redirects detected when doing the request")
+	// ErrRedirectBodyStream is returned by clients when a redirect that keeps the request
+	// body is received for a request whose body is a stream. The hop that produced the
+	// redirect consumed the stream, so the body cannot be sent again.
+	ErrRedirectBodyStream = errors.New("fasthttp: cannot follow a body-preserving redirect for a request with a body stream")
 
 	// ErrHostClientRedirectToDifferentScheme is returned when a HostClient follows a redirect to a different protocol.
 	ErrHostClientRedirectToDifferentScheme = errors.New("fasthttp: hostclient can't follow redirects to a different protocol," +
@@ -1230,6 +1234,9 @@ func doRequestFollowRedirects(
 ) (statusCode int, body []byte, err error) {
 	redirectsCount := 0
 	initialHost := hostnameFromURLString(url)
+	// Writing the request consumes a body stream, so remember it here: by the
+	// time a redirect arrives req.IsBodyStream() is already false.
+	hasBodyStream := req.IsBodyStream()
 
 	for {
 		req.SetRequestURI(url)
@@ -1260,6 +1267,14 @@ func doRequestFollowRedirects(
 		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
 		ReleaseURI(redirectURI)
 
+		// Every redirect but 303 keeps the body, and a consumed stream cannot
+		// produce it again. Fail instead of following with an empty body, the
+		// same reason the retry path refuses to retry such a request.
+		if hasBodyStream && statusCode != StatusSeeOther {
+			err = ErrRedirectBodyStream
+			break
+		}
+
 		switch {
 		case statusCode == StatusSeeOther:
 			// RFC 9110 section 15.4.4: a 303 (See Other) response redirects
@@ -1279,6 +1294,9 @@ func doRequestFollowRedirects(
 			req.ResetBody()
 			req.postArgs.Reset()
 			req.parsedPostArgs = false
+			// The body is gone for the rest of the chain, so later
+			// body-preserving redirects have nothing left to replay.
+			hasBodyStream = false
 		case req.Header.IsPost() && (statusCode == StatusMovedPermanently || statusCode == StatusFound):
 			// RFC 9110 sections 15.4.2/15.4.3 Note: for historical reasons a
 			// user agent MAY change the request method from POST to GET for a
@@ -1622,7 +1640,7 @@ func (c *HostClient) PendingRequests() int {
 }
 
 func isIdempotent(req *Request) bool {
-	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut()
+	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut() || req.Header.IsQuery()
 }
 
 func (c *HostClient) do(req *Request, resp *Response) (bool, error) {

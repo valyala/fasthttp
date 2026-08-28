@@ -1336,6 +1336,11 @@ func (ctx *RequestCtx) IsPatch() bool {
 	return ctx.Request.Header.IsPatch()
 }
 
+// IsQuery returns true if request method is QUERY.
+func (ctx *RequestCtx) IsQuery() bool {
+	return ctx.Request.Header.IsQuery()
+}
+
 // Method return request method.
 //
 // Returned value is valid until your request handler returns.
