@@ -1961,6 +1961,43 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	}
 }
 
+func TestRequestWriteEmptyPathWithQuery(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.SetRequestURI("http://example.com?foo=bar")
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	if err := req.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	firstLine := strings.Split(w.String(), "\r\n")[0]
+	if firstLine != "GET /?foo=bar HTTP/1.1" {
+		t.Fatalf("unexpected request line %q. Expecting %q", firstLine, "GET /?foo=bar HTTP/1.1")
+	}
+
+	req.Reset()
+	req.SetRequestURI("http://example.com?foo=bar")
+	req.URI().DisablePathNormalizing = true
+	w.Reset()
+	bw.Reset(&w)
+	if err := req.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	firstLine = strings.Split(w.String(), "\r\n")[0]
+	if firstLine != "GET /?foo=bar HTTP/1.1" {
+		t.Fatalf("unexpected request line with DisablePathNormalizing %q. Expecting %q", firstLine, "GET /?foo=bar HTTP/1.1")
+	}
+}
+
 func TestSetRequestBodyStreamFixedSize(t *testing.T) {
 	t.Parallel()
 
@@ -3461,7 +3498,7 @@ func TestResponseBodyStream(t *testing.T) {
 			client := Client{StreamResponseBody: true, DisablePathNormalizing: true}
 			resp := AcquireResponse()
 			request := AcquireRequest()
-			request.SetRequestURI(server.URL + "?400BadRequest")
+			request.SetRequestURI(server.URL + "?foo=bar")
 			if err := client.Do(request, resp); err != nil {
 				t.Fatal(err)
 			}
@@ -3475,8 +3512,8 @@ func TestResponseBodyStream(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(content) != "400 Bad Request" {
-				t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "400 Bad Request")
+			if string(content) != "hello world" {
+				t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "hello world")
 			}
 		})
 	})

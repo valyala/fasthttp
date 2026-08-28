@@ -786,6 +786,12 @@ func (h *RequestHeader) RequestURI() []byte {
 	requestURI := h.requestURI
 	if len(requestURI) == 0 {
 		requestURI = strSlash
+	} else if requestURI[0] == '?' {
+		// Origin-form requires a path. An empty path is "/".
+		h.requestURI = append(h.requestURI, 0)
+		copy(h.requestURI[1:], h.requestURI[:len(h.requestURI)-1])
+		h.requestURI[0] = '/'
+		requestURI = h.requestURI
 	}
 	return requestURI
 }
