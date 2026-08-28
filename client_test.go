@@ -2221,6 +2221,8 @@ func TestClientRedirectBodyStream(t *testing.T) {
 				ctx.Redirect("/landing", StatusTemporaryRedirect)
 			case "/redirect-308":
 				ctx.Redirect("/landing", StatusPermanentRedirect)
+			case "/redirect-303-then-307":
+				ctx.Redirect("/redirect-307", StatusSeeOther)
 			case "/landing":
 				ctx.SetBodyString(string(ctx.Method()) + "|" + string(ctx.PostBody()))
 			default:
@@ -2258,6 +2260,10 @@ func TestClientRedirectBodyStream(t *testing.T) {
 		// 303 drops the body, so a consumed stream is not in the way.
 		{nil, MethodPost, "/redirect-303", "GET|"},
 		{nil, MethodQuery, "/redirect-303", "GET|"},
+		// Once 303 has dropped the body there is nothing left to replay, so a
+		// body-preserving status later in the chain must still be followed.
+		{nil, MethodPost, "/redirect-303-then-307", "GET|"},
+		{nil, MethodQuery, "/redirect-303-then-307", "GET|"},
 	}
 
 	for _, tc := range tests {

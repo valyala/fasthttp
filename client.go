@@ -1294,6 +1294,9 @@ func doRequestFollowRedirects(
 			req.ResetBody()
 			req.postArgs.Reset()
 			req.parsedPostArgs = false
+			// The body is gone for the rest of the chain, so later
+			// body-preserving redirects have nothing left to replay.
+			hasBodyStream = false
 		case req.Header.IsPost() && (statusCode == StatusMovedPermanently || statusCode == StatusFound):
 			// RFC 9110 sections 15.4.2/15.4.3 Note: for historical reasons a
 			// user agent MAY change the request method from POST to GET for a
