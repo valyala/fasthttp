@@ -2,11 +2,10 @@ package fasthttpadaptor
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"math"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"strings"
 
@@ -73,25 +72,29 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 }
 
 // ConvertNetHTTPRequestToFastHTTPRequest converts an http.Request to a
-// fasthttp.RequestCtx.
+// fasthttp.Request.
 //
-// ctx.Request is not reset before the conversion: if it may contain data from
-// a previous use, call ctx.Request.Reset() first. A zero fasthttp.RequestCtx
-// is not fully initialized either: if the converted ctx is used as a
-// context.Context or passed to code using its connection-level methods,
-// initialize it via ctx.Init before converting.
+// req is not reset before the conversion: if it may contain data from a
+// previous use, call req.Reset() first.
 //
 // The request body is not copied. If r.Body is non-nil and not http.NoBody,
-// it is attached to ctx.Request via SetBodyStream. This means:
-//   - r.Body must remain readable for as long as ctx may need to read it.
+// it is attached to req via SetBodyStream. This means:
+//   - r.Body must remain readable for as long as req may need to read it.
 //   - r.Body should not be read from, written to, or closed by the caller
-//     until ctx is done with it.
+//     until req is done with it.
 //   - The same r.Body must not be used concurrently from other goroutines
-//     while it is attached to ctx.Request.
+//     while it is attached to req.
 //
-// The body size is taken from r.ContentLength: zero and negative values mean
-// the size is unknown, and the body is then streamed with chunked transfer
-// encoding until EOF, mirroring net/http.
+// The body framing is derived only from the dedicated fields, mirroring
+// net/http.Request.Write: Content-Length, Transfer-Encoding and Trailer
+// entries in r.Header are ignored. The body size is taken from
+// r.ContentLength, where zero and negative values mean the size is unknown,
+// and a chunked r.TransferEncoding or a non-empty r.Trailer forces the
+// unknown size too; a body of unknown size is streamed with chunked transfer
+// encoding until EOF. Trailers force the chunked framing, unlike net/http
+// which drops them on requests with a known size, because HTTP/2 requests
+// carry a known length and trailers at the same time, and HTTP/1.x can
+// transport trailers only after a chunked body.
 //
 // Derived state such as r.Form is not converted, and a body that was already
 // consumed (e.g. by r.ParseForm) is attached as the drained stream it is.
@@ -99,30 +102,36 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // The host is taken from r.Host, or r.URL.Host if r.Host is empty. A Host
 // entry in r.Header is ignored, mirroring net/http.
 //
-// r.RemoteAddr is parsed without any DNS resolution, so the conversion cannot
-// block. It is expected to be an "IP:port" pair as set by net/http, or a bare
-// IP. Other values are ignored and leave the remote address of ctx unchanged.
-//
-// r.TLS cannot be attached to ctx, since ctx derives its TLS state from the
-// underlying connection. It is only used to derive the URI scheme, which is
-// set from r.URL.Scheme if present, or to "https" if r.TLS is non-nil.
+// Connection-level state is not converted, since a fasthttp.Request models
+// only the wire message: r.RemoteAddr is ignored, and r.TLS is used only to
+// derive the URI scheme, which is set from r.URL.Scheme if present, or to
+// "https" if r.TLS is non-nil.
 //
 // Trailer names that are forbidden in trailers (see fasthttp.ErrBadTrailer)
-// are skipped. Trailer values present in r.Trailer are copied, but note that
-// for server requests net/http populates them only after the body has been
-// read to EOF.
+// are skipped, and without a body all trailers are dropped, since trailers
+// can only travel after a chunked body. Trailer values present in r.Trailer
+// are copied at conversion time and synchronized again when the attached
+// body reaches EOF, since for server requests net/http populates r.Trailer
+// only while the body is being read. fasthttp writes trailers after draining
+// the body stream, so the synchronized values are the ones written to the
+// wire.
+//
+// URL credentials in r.URL.User are copied to the URI only when r.Header
+// carries no Authorization entry, since fasthttp writes URI userinfo as a
+// Basic Authorization header and an explicit header takes precedence over
+// URL credentials, mirroring net/http.Client.
 //
 // HTTP/2 and newer protocols are normalized to HTTP/1.1, since fasthttp only
 // models HTTP/1.x messages and the HTTP version is a hop-by-hop property.
-func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, ctx *fasthttp.RequestCtx) {
-	ctx.Request.Header.SetMethod(r.Method)
+func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Request) {
+	req.Header.SetMethod(r.Method)
 
 	if r.Proto != "" {
 		proto := r.Proto
 		if r.ProtoAtLeast(2, 0) {
 			proto = "HTTP/1.1"
 		}
-		ctx.Request.Header.SetProtocol(proto)
+		req.Header.SetProtocol(proto)
 	}
 
 	host := r.Host
@@ -130,50 +139,64 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, ctx *fasthttp.Reque
 		host = r.URL.Host
 	}
 	if host != "" {
-		ctx.Request.Header.SetHost(host)
+		req.Header.SetHost(host)
 	}
 
 	if r.RequestURI != "" {
-		ctx.Request.SetRequestURI(r.RequestURI)
+		req.SetRequestURI(r.RequestURI)
 	} else if r.URL != nil {
-		ctx.Request.SetRequestURI(r.URL.RequestURI())
+		req.SetRequestURI(r.URL.RequestURI())
 	}
 
 	for k, values := range r.Header {
-		if strings.EqualFold(k, fasthttp.HeaderHost) {
+		if strings.EqualFold(k, fasthttp.HeaderHost) ||
+			strings.EqualFold(k, fasthttp.HeaderContentLength) ||
+			strings.EqualFold(k, fasthttp.HeaderTransferEncoding) ||
+			strings.EqualFold(k, fasthttp.HeaderTrailer) {
 			continue
 		}
 		for _, v := range values {
-			ctx.Request.Header.Add(k, v)
+			req.Header.Add(k, v)
 		}
 	}
 
-	for k, values := range r.Trailer {
-		if ctx.Request.Header.AddTrailer(k) != nil {
-			continue
-		}
-		if len(values) > 0 {
-			ctx.Request.Header.Set(k, strings.Join(values, ", "))
+	hasBody := r.Body != nil && r.Body != http.NoBody
+
+	var trailerKeys []string
+	if hasBody {
+		for k, values := range r.Trailer {
+			if req.Header.AddTrailer(k) != nil {
+				continue
+			}
+			trailerKeys = append(trailerKeys, k)
+			if len(values) > 0 {
+				req.Header.Set(k, strings.Join(values, ", "))
+			}
 		}
 	}
 
 	if r.Close {
-		ctx.Request.Header.Del(fasthttp.HeaderConnection)
-		ctx.Request.SetConnectionClose()
+		req.Header.Del(fasthttp.HeaderConnection)
+		req.SetConnectionClose()
 	}
 
-	if r.Body != nil && r.Body != http.NoBody {
+	if hasBody {
+		var body io.Reader = r.Body
+		if len(trailerKeys) > 0 {
+			body = &trailerSyncReader{
+				body:    r.Body,
+				trailer: r.Trailer,
+				keys:    trailerKeys,
+				header:  &req.Header,
+			}
+		}
 		contentLength := int(r.ContentLength)
-		if r.ContentLength <= 0 || r.ContentLength >= int64(math.MaxInt) {
+		if r.ContentLength <= 0 || r.ContentLength >= int64(math.MaxInt) ||
+			len(trailerKeys) > 0 ||
+			(len(r.TransferEncoding) > 0 && r.TransferEncoding[0] == "chunked") {
 			contentLength = -1
 		}
-		ctx.Request.SetBodyStream(r.Body, contentLength)
-	}
-
-	if r.RemoteAddr != "" {
-		if remoteAddr := parseRemoteAddr(r.RemoteAddr); remoteAddr != nil {
-			ctx.SetRemoteAddr(remoteAddr)
-		}
+		req.SetBodyStream(body, contentLength)
 	}
 
 	scheme := ""
@@ -184,11 +207,11 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, ctx *fasthttp.Reque
 		scheme = "https"
 	}
 	if scheme != "" && scheme != "http" {
-		ctx.Request.URI().SetScheme(scheme)
+		req.URI().SetScheme(scheme)
 	}
 
-	if r.URL != nil && r.URL.User != nil {
-		uri := ctx.Request.URI()
+	if r.URL != nil && r.URL.User != nil && r.Header.Get(fasthttp.HeaderAuthorization) == "" {
+		uri := req.URI()
 		uri.SetUsername(r.URL.User.Username())
 		if password, hasPassword := r.URL.User.Password(); hasPassword {
 			uri.SetPassword(password)
@@ -196,16 +219,44 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, ctx *fasthttp.Reque
 	}
 }
 
-// parseRemoteAddr parses an http.Request.RemoteAddr into a net.Addr. It only
-// parses the string and never resolves host names, so it cannot block.
-// net/http sets RemoteAddr to an "IP:port" pair, but a bare IP without a port
-// is accepted too. It returns nil for any other value.
-func parseRemoteAddr(addr string) net.Addr {
-	if addrPort, err := netip.ParseAddrPort(addr); err == nil {
-		return net.TCPAddrFromAddrPort(addrPort)
+// trailerSyncReader passes reads through to the attached request body and,
+// once the body reaches EOF, copies the trailer values from the net/http
+// trailer map into the fasthttp request header. net/http completes the map
+// right before a body read returns io.EOF, and fasthttp writes trailers only
+// after the body stream is drained, so the copied values are the ones
+// written to the wire. Only keys accepted by AddTrailer are synchronized: a
+// forbidden name must not reach Set, where it would be treated as a special
+// header carrying real state.
+type trailerSyncReader struct {
+	body    io.ReadCloser
+	trailer http.Header
+	header  *fasthttp.RequestHeader
+	keys    []string
+	synced  bool
+}
+
+func (t *trailerSyncReader) Read(p []byte) (int, error) {
+	n, err := t.body.Read(p)
+	if err != nil && errors.Is(err, io.EOF) {
+		t.sync()
 	}
-	if ip, err := netip.ParseAddr(addr); err == nil {
-		return net.TCPAddrFromAddrPort(netip.AddrPortFrom(ip, 0))
+	return n, err
+}
+
+// Close closes the attached body, preserving the closing behavior the body
+// would have when attached to the request unwrapped.
+func (t *trailerSyncReader) Close() error {
+	return t.body.Close()
+}
+
+func (t *trailerSyncReader) sync() {
+	if t.synced {
+		return
 	}
-	return nil
+	t.synced = true
+	for _, k := range t.keys {
+		if values := t.trailer[k]; len(values) > 0 {
+			t.header.Set(k, strings.Join(values, ", "))
+		}
+	}
 }
