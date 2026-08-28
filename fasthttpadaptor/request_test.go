@@ -48,14 +48,25 @@ func BenchmarkConvertNetHTTPRequestToFastHTTPRequest(b *testing.B) {
 		},
 	}
 
-	ctx := &fasthttp.RequestCtx{}
+	var req fasthttp.Request
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ctx.Request.Reset()
-		ConvertNetHTTPRequestToFastHTTPRequest(&httpReq, ctx)
+		req.Reset()
+		ConvertNetHTTPRequestToFastHTTPRequest(&httpReq, &req)
 	}
+}
+
+type closeTrackingReader struct {
+	io.Reader
+
+	closed *bool
+}
+
+func (r *closeTrackingReader) Close() error {
+	*r.closed = true
+	return nil
 }
 
 func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
@@ -71,20 +82,20 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Header:     http.Header{},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if string(ctx.Method()) != "POST" {
-			t.Errorf("expected method POST, got %s", ctx.Method())
+		if string(req.Header.Method()) != "POST" {
+			t.Errorf("expected method POST, got %s", req.Header.Method())
 		}
-		if string(ctx.RequestURI()) != "/test/path?query=1" {
-			t.Errorf("expected URI /test/path?query=1, got %s", ctx.RequestURI())
+		if string(req.Header.RequestURI()) != "/test/path?query=1" {
+			t.Errorf("expected URI /test/path?query=1, got %s", req.Header.RequestURI())
 		}
-		if string(ctx.Request.Header.Protocol()) != "HTTP/1.1" {
-			t.Errorf("expected protocol HTTP/1.1, got %s", ctx.Request.Header.Protocol())
+		if string(req.Header.Protocol()) != "HTTP/1.1" {
+			t.Errorf("expected protocol HTTP/1.1, got %s", req.Header.Protocol())
 		}
-		if string(ctx.Host()) != "example.com" {
-			t.Errorf("expected host example.com, got %s", ctx.Host())
+		if string(req.Host()) != "example.com" {
+			t.Errorf("expected host example.com, got %s", req.Host())
 		}
 	})
 
@@ -102,11 +113,11 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Header: http.Header{},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if string(ctx.RequestURI()) != "/fallback/path?foo=bar" {
-			t.Errorf("expected URI /fallback/path?foo=bar, got %s", ctx.RequestURI())
+		if string(req.Header.RequestURI()) != "/fallback/path?foo=bar" {
+			t.Errorf("expected URI /fallback/path?foo=bar, got %s", req.Header.RequestURI())
 		}
 	})
 
@@ -123,11 +134,11 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Header: http.Header{},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if string(ctx.Host()) != "url-host.com" {
-			t.Errorf("expected host url-host.com, got %s", ctx.Host())
+		if string(req.Host()) != "url-host.com" {
+			t.Errorf("expected host url-host.com, got %s", req.Host())
 		}
 	})
 
@@ -143,11 +154,11 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if string(ctx.Host()) != "canonical.example" {
-			t.Errorf("expected host canonical.example, got %s", ctx.Host())
+		if string(req.Host()) != "canonical.example" {
+			t.Errorf("expected host canonical.example, got %s", req.Host())
 		}
 	})
 
@@ -164,14 +175,14 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Header: http.Header{},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if string(ctx.Request.URI().Scheme()) != "https" {
-			t.Errorf("expected scheme https, got %s", ctx.Request.URI().Scheme())
+		if string(req.URI().Scheme()) != "https" {
+			t.Errorf("expected scheme https, got %s", req.URI().Scheme())
 		}
-		if string(ctx.Host()) != "example.com" {
-			t.Errorf("expected host example.com, got %s", ctx.Host())
+		if string(req.Host()) != "example.com" {
+			t.Errorf("expected host example.com, got %s", req.Host())
 		}
 	})
 
@@ -186,11 +197,11 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			TLS:        &tls.ConnectionState{},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if string(ctx.Request.URI().Scheme()) != "https" {
-			t.Errorf("expected scheme https, got %s", ctx.Request.URI().Scheme())
+		if string(req.URI().Scheme()) != "https" {
+			t.Errorf("expected scheme https, got %s", req.URI().Scheme())
 		}
 	})
 
@@ -205,13 +216,13 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Header:     http.Header{},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if string(ctx.Request.Header.Protocol()) != "HTTP/1.1" {
-			t.Errorf("expected protocol HTTP/1.1, got %s", ctx.Request.Header.Protocol())
+		if string(req.Header.Protocol()) != "HTTP/1.1" {
+			t.Errorf("expected protocol HTTP/1.1, got %s", req.Header.Protocol())
 		}
-		if !ctx.Request.Header.IsHTTP11() {
+		if !req.Header.IsHTTP11() {
 			t.Error("expected IsHTTP11 to be true")
 		}
 	})
@@ -228,11 +239,11 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Header:     http.Header{},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if string(ctx.Request.Header.Protocol()) != "HTTP/1.1" {
-			t.Errorf("expected protocol HTTP/1.1, got %s", ctx.Request.Header.Protocol())
+		if string(req.Header.Protocol()) != "HTTP/1.1" {
+			t.Errorf("expected protocol HTTP/1.1, got %s", req.Header.Protocol())
 		}
 	})
 
@@ -247,11 +258,11 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Header:     http.Header{},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if string(ctx.Request.Header.Protocol()) != "HTTP/1.0" {
-			t.Errorf("expected protocol HTTP/1.0, got %s", ctx.Request.Header.Protocol())
+		if string(req.Header.Protocol()) != "HTTP/1.0" {
+			t.Errorf("expected protocol HTTP/1.0, got %s", req.Header.Protocol())
 		}
 	})
 
@@ -267,11 +278,11 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if string(ctx.Request.Header.Peek("X-Custom-Header")) != "custom-value" {
-			t.Errorf("expected header value custom-value, got %s", ctx.Request.Header.Peek("X-Custom-Header"))
+		if string(req.Header.Peek("X-Custom-Header")) != "custom-value" {
+			t.Errorf("expected header value custom-value, got %s", req.Header.Peek("X-Custom-Header"))
 		}
 	})
 
@@ -287,10 +298,10 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		values := ctx.Request.Header.PeekAll("Accept")
+		values := req.Header.PeekAll("Accept")
 		if len(values) != 3 {
 			t.Errorf("expected 3 Accept header values, got %d", len(values))
 		}
@@ -309,15 +320,15 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Close: true,
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if !ctx.Request.Header.ConnectionClose() {
+		if !req.Header.ConnectionClose() {
 			t.Error("expected connection close to be set")
 		}
 
 		var connValues []string
-		for k, v := range ctx.Request.Header.All() {
+		for k, v := range req.Header.All() {
 			if strings.EqualFold(string(k), fasthttp.HeaderConnection) {
 				connValues = append(connValues, string(v))
 			}
@@ -340,14 +351,14 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			ContentLength: int64(len(bodyContent)),
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if ctx.Request.Header.ContentLength() != len(bodyContent) {
-			t.Errorf("expected content length %d, got %d", len(bodyContent), ctx.Request.Header.ContentLength())
+		if req.Header.ContentLength() != len(bodyContent) {
+			t.Errorf("expected content length %d, got %d", len(bodyContent), req.Header.ContentLength())
 		}
-		if !bytes.Equal(ctx.Request.Body(), bodyContent) {
-			t.Errorf("expected body %q, got %q", bodyContent, ctx.Request.Body())
+		if !bytes.Equal(req.Body(), bodyContent) {
+			t.Errorf("expected body %q, got %q", bodyContent, req.Body())
 		}
 	})
 
@@ -362,11 +373,11 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Body:       nil,
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if len(ctx.Request.Body()) != 0 {
-			t.Errorf("expected empty body, got %q", ctx.Request.Body())
+		if len(req.Body()) != 0 {
+			t.Errorf("expected empty body, got %q", req.Body())
 		}
 	})
 
@@ -382,14 +393,14 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			ContentLength: 0,
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if ctx.Request.Header.ContentLength() != 0 {
-			t.Errorf("expected content length 0, got %d", ctx.Request.Header.ContentLength())
+		if req.Header.ContentLength() != 0 {
+			t.Errorf("expected content length 0, got %d", req.Header.ContentLength())
 		}
-		if len(ctx.Request.Body()) != 0 {
-			t.Errorf("expected empty body, got %q", ctx.Request.Body())
+		if len(req.Body()) != 0 {
+			t.Errorf("expected empty body, got %q", req.Body())
 		}
 	})
 
@@ -405,14 +416,14 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			ContentLength: 0,
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if ctx.Request.Header.ContentLength() != -1 {
-			t.Errorf("expected content length -1, got %d", ctx.Request.Header.ContentLength())
+		if req.Header.ContentLength() != -1 {
+			t.Errorf("expected content length -1, got %d", req.Header.ContentLength())
 		}
-		if string(ctx.Request.Body()) != "data" {
-			t.Errorf("expected body data, got %q", ctx.Request.Body())
+		if string(req.Body()) != "data" {
+			t.Errorf("expected body data, got %q", req.Body())
 		}
 	})
 
@@ -428,14 +439,14 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			ContentLength: -1,
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if ctx.Request.Header.ContentLength() != -1 {
-			t.Errorf("expected content length -1, got %d", ctx.Request.Header.ContentLength())
+		if req.Header.ContentLength() != -1 {
+			t.Errorf("expected content length -1, got %d", req.Header.ContentLength())
 		}
-		if string(ctx.Request.Header.Peek(fasthttp.HeaderTransferEncoding)) != "chunked" {
-			t.Errorf("expected chunked transfer encoding, got %q", ctx.Request.Header.Peek(fasthttp.HeaderTransferEncoding))
+		if string(req.Header.Peek(fasthttp.HeaderTransferEncoding)) != "chunked" {
+			t.Errorf("expected chunked transfer encoding, got %q", req.Header.Peek(fasthttp.HeaderTransferEncoding))
 		}
 	})
 
@@ -451,11 +462,208 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			ContentLength: math.MaxInt64,
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if ctx.Request.Header.ContentLength() != -1 {
-			t.Errorf("expected content length -1, got %d", ctx.Request.Header.ContentLength())
+		if req.Header.ContentLength() != -1 {
+			t.Errorf("expected content length -1, got %d", req.Header.ContentLength())
+		}
+	})
+
+	t.Run("Content-Length header entry is ignored", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header: http.Header{
+				"Content-Length": []string{"42"},
+			},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != 0 {
+			t.Errorf("expected content length 0, got %d", req.Header.ContentLength())
+		}
+		if len(req.Header.Peek(fasthttp.HeaderContentLength)) != 0 {
+			t.Errorf("expected no Content-Length header, got %q", req.Header.Peek(fasthttp.HeaderContentLength))
+		}
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+		if strings.Contains(buf.String(), "Content-Length") {
+			t.Errorf("expected no Content-Length on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("chunked TransferEncoding overrides ContentLength", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:           "POST",
+			RequestURI:       "/",
+			Proto:            "HTTP/1.1",
+			Host:             "example.com",
+			Header:           http.Header{},
+			Body:             io.NopCloser(strings.NewReader("data")),
+			ContentLength:    4,
+			TransferEncoding: []string{"chunked"},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != -1 {
+			t.Errorf("expected content length -1, got %d", req.Header.ContentLength())
+		}
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+		if !strings.Contains(buf.String(), "Transfer-Encoding: chunked") {
+			t.Errorf("expected chunked framing on the wire, got:\n%s", buf.String())
+		}
+		if strings.Contains(buf.String(), "Content-Length") {
+			t.Errorf("expected no Content-Length on the wire, got:\n%s", buf.String())
+		}
+
+		var parsed fasthttp.Request
+		if err := parsed.Read(bufio.NewReader(bytes.NewReader(buf.Bytes()))); err != nil {
+			t.Fatalf("unexpected error reading request back: %v", err)
+		}
+		if string(parsed.Body()) != "data" {
+			t.Errorf("expected body data, got %q", parsed.Body())
+		}
+	})
+
+	t.Run("Transfer-Encoding header entry is ignored", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header: http.Header{
+				"Transfer-Encoding": []string{"chunked"},
+			},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != 4 {
+			t.Errorf("expected content length 4, got %d", req.Header.ContentLength())
+		}
+		if len(req.Header.Peek(fasthttp.HeaderTransferEncoding)) != 0 {
+			t.Errorf("expected no transfer encoding, got %q", req.Header.Peek(fasthttp.HeaderTransferEncoding))
+		}
+	})
+
+	t.Run("Trailer header entry is ignored", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header: http.Header{
+				"Trailer": []string{"X-Foo"},
+			},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if len(req.Header.Peek(fasthttp.HeaderTrailer)) != 0 {
+			t.Errorf("expected no trailer announcement, got %q", req.Header.Peek(fasthttp.HeaderTrailer))
+		}
+		if req.Header.ContentLength() != 4 {
+			t.Errorf("expected content length 4, got %d", req.Header.ContentLength())
+		}
+	})
+
+	t.Run("trailers with known content length force chunked", func(t *testing.T) {
+		t.Parallel()
+		// HTTP/2 requests can carry both a known content length and
+		// trailers; HTTP/1.x can only transport the trailers after a
+		// chunked body.
+		bodyContent := "data"
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Trailer: http.Header{
+				"X-Checksum": []string{"abc123"},
+			},
+			Body:          io.NopCloser(strings.NewReader(bodyContent)),
+			ContentLength: int64(len(bodyContent)),
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != -1 {
+			t.Errorf("expected content length -1, got %d", req.Header.ContentLength())
+		}
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		var parsed fasthttp.Request
+		if err := parsed.Read(bufio.NewReader(bytes.NewReader(buf.Bytes()))); err != nil {
+			t.Fatalf("unexpected error reading request back: %v", err)
+		}
+		if string(parsed.Body()) != bodyContent {
+			t.Errorf("expected body %q, got %q", bodyContent, parsed.Body())
+		}
+		if string(parsed.Header.Peek("X-Checksum")) != "abc123" {
+			t.Errorf("expected trailer value abc123, got %q", parsed.Header.Peek("X-Checksum"))
+		}
+	})
+
+	t.Run("trailers without body are dropped", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Trailer: http.Header{
+				"X-Checksum": []string{"abc123"},
+			},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if len(req.Header.Peek(fasthttp.HeaderTrailer)) != 0 {
+			t.Errorf("expected no trailer announcement, got %q", req.Header.Peek(fasthttp.HeaderTrailer))
 		}
 	})
 
@@ -470,10 +678,10 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Close:      true,
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		if !ctx.Request.Header.ConnectionClose() {
+		if !req.Header.ConnectionClose() {
 			t.Error("expected connection close to be set")
 		}
 	})
@@ -494,10 +702,10 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			ContentLength: -1,
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		trailer := string(ctx.Request.Header.TrailerHeader())
+		trailer := string(req.Header.TrailerHeader())
 		if !strings.Contains(trailer, "X-Checksum: abc123") {
 			t.Errorf("expected trailer X-Checksum: abc123, got %q", trailer)
 		}
@@ -521,10 +729,10 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			ContentLength: -1,
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		trailer := string(ctx.Request.Header.TrailerHeader())
+		trailer := string(req.Header.TrailerHeader())
 		if !strings.Contains(trailer, "X-Tag: a, b") {
 			t.Errorf("expected trailer X-Tag: a, b, got %q", trailer)
 		}
@@ -546,12 +754,12 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			Body:          io.NopCloser(strings.NewReader(bodyContent)),
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
 		var buf bytes.Buffer
 		bw := bufio.NewWriter(&buf)
-		if err := ctx.Request.Write(bw); err != nil {
+		if err := req.Write(bw); err != nil {
 			t.Fatalf("unexpected error writing request: %v", err)
 		}
 		if err := bw.Flush(); err != nil {
@@ -571,43 +779,168 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 		}
 	})
 
-	t.Run("remote address with port", func(t *testing.T) {
+	t.Run("trailer values from http.ReadRequest are synced at EOF", func(t *testing.T) {
 		t.Parallel()
-		httpReq := &http.Request{
-			Method:     "GET",
-			RequestURI: "/",
-			Proto:      "HTTP/1.1",
-			Host:       "example.com",
-			Header:     http.Header{},
-			RemoteAddr: "192.168.1.100:8080",
+		raw := "POST /upload HTTP/1.1\r\n" +
+			"Host: example.com\r\n" +
+			"Transfer-Encoding: chunked\r\n" +
+			"Trailer: X-Final\r\n" +
+			"\r\n" +
+			"4\r\ndata\r\n0\r\nX-Final: done\r\n\r\n"
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+		if err != nil {
+			t.Fatalf("unexpected error reading raw request: %v", err)
+		}
+		if got := httpReq.Trailer.Get("X-Final"); got != "" {
+			t.Fatalf("expected empty trailer value before the body is read, got %q", got)
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		remoteAddr := ctx.RemoteAddr().String()
-		if remoteAddr != "192.168.1.100:8080" {
-			t.Errorf("expected remote addr 192.168.1.100:8080, got %s", remoteAddr)
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		var parsed fasthttp.Request
+		if err := parsed.Read(bufio.NewReader(bytes.NewReader(buf.Bytes()))); err != nil {
+			t.Fatalf("unexpected error reading request back: %v", err)
+		}
+		if string(parsed.Body()) != "data" {
+			t.Errorf("expected body data, got %q", parsed.Body())
+		}
+		if string(parsed.Header.Peek("X-Final")) != "done" {
+			t.Errorf("expected trailer value done, got %q", parsed.Header.Peek("X-Final"))
 		}
 	})
 
-	t.Run("invalid remote address is ignored", func(t *testing.T) {
+	t.Run("trailer values are synced when the body is drained", func(t *testing.T) {
+		t.Parallel()
+		raw := "POST /upload HTTP/1.1\r\n" +
+			"Host: example.com\r\n" +
+			"Transfer-Encoding: chunked\r\n" +
+			"Trailer: X-Final\r\n" +
+			"\r\n" +
+			"4\r\ndata\r\n0\r\nX-Final: done\r\n\r\n"
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+		if err != nil {
+			t.Fatalf("unexpected error reading raw request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.Body()) != "data" {
+			t.Errorf("expected body data, got %q", req.Body())
+		}
+		if string(req.Header.Peek("X-Final")) != "done" {
+			t.Errorf("expected trailer value done, got %q", req.Header.Peek("X-Final"))
+		}
+	})
+
+	t.Run("attached body with trailers is closed after write", func(t *testing.T) {
+		t.Parallel()
+		closed := false
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Trailer: http.Header{
+				"X-Checksum": []string{"abc123"},
+			},
+			Body:          &closeTrackingReader{Reader: strings.NewReader("data"), closed: &closed},
+			ContentLength: -1,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if !closed {
+			t.Error("expected the attached body to be closed after write")
+		}
+	})
+
+	t.Run("explicit Authorization header wins over URL credentials", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{
 			Method:     "GET",
 			RequestURI: "/",
 			Proto:      "HTTP/1.1",
 			Host:       "example.com",
-			Header:     http.Header{},
-			RemoteAddr: "not-an-address",
+			URL: &url.URL{
+				Path: "/",
+				User: url.UserPassword("user", "pass"),
+			},
+			Header: http.Header{
+				"Authorization": []string{"Bearer explicit-token"},
+			},
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		remoteAddr := ctx.RemoteAddr().String()
-		if remoteAddr != "0.0.0.0:0" {
-			t.Errorf("expected default remote addr 0.0.0.0:0, got %s", remoteAddr)
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if !strings.Contains(buf.String(), "Authorization: Bearer explicit-token\r\n") {
+			t.Errorf("expected the explicit Authorization header on the wire, got:\n%s", buf.String())
+		}
+		if strings.Contains(buf.String(), "Basic") {
+			t.Errorf("expected no Basic credentials on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("URL credentials become Basic authorization", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			URL: &url.URL{
+				Path: "/",
+				User: url.UserPassword("user", "pass"),
+			},
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// base64("user:pass"), the same credentials net/http.Client would send.
+		if !strings.Contains(buf.String(), "Authorization: Basic dXNlcjpwYXNz\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", buf.String())
 		}
 	})
 
@@ -623,51 +956,12 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			ContentLength: 10,
 		}
 
-		ctx := &fasthttp.RequestCtx{}
-		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, ctx)
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
 
-		_, err := io.ReadAll(ctx.RequestBodyStream())
+		_, err := io.ReadAll(req.BodyStream())
 		if err == nil {
 			t.Fatal("expected error when reading body stream, got nil")
 		}
 	})
-}
-
-func TestParseRemoteAddr(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		addr     string
-		expected string
-	}{
-		{"192.168.1.100:8080", "192.168.1.100:8080"},
-		{"192.168.1.100", "192.168.1.100:0"},
-		{"[2001:db8::1]:8080", "[2001:db8::1]:8080"},
-		{"2001:db8::1", "[2001:db8::1]:0"},
-		{"[fe80::1%eth0]:9090", "[fe80::1%eth0]:9090"},
-		{"fe80::1%eth0", "[fe80::1%eth0]:0"},
-		{"[::1]:3000", "[::1]:3000"},
-		{"not-an-address", ""},
-		{"example.com:8080", ""},
-		{"", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.addr, func(t *testing.T) {
-			t.Parallel()
-			addr := parseRemoteAddr(tt.addr)
-			if tt.expected == "" {
-				if addr != nil {
-					t.Errorf("expected nil for %q, got %s", tt.addr, addr)
-				}
-				return
-			}
-			if addr == nil {
-				t.Fatalf("expected %s for %q, got nil", tt.expected, tt.addr)
-			}
-			if addr.String() != tt.expected {
-				t.Errorf("expected %s for %q, got %s", tt.expected, tt.addr, addr)
-			}
-		})
-	}
 }
