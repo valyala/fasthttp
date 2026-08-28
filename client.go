@@ -3373,25 +3373,47 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 
 	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
-	if customStreamBody {
-		if rbs, ok := resp.bodyStream.(*requestStream); ok {
+	if customStreamBody && resp.bodyStream != nil {
+		// releaseConn runs when the caller closes the body stream, so it has to
+		// re-check resp.ConnectionClose(): a caller may only decide that the
+		// connection is unusable while consuming the streamed body.
+		releaseConn := func(discard bool) {
+			if closeConn || discard || resp.ConnectionClose() {
+				hc.CloseConn(cc)
+			} else {
+				hc.ReleaseConn(cc)
+			}
+		}
+		if rs, ok := resp.bodyStream.(*requestStream); ok {
+			// Network backed: a Read may still be in flight when the caller
+			// closes, so interrupt it and wait before pooling anything.
 			resp.bodyStream = &clientStreamBody{
-				reader: rbs,
+				reader: rs,
 				interrupt: func() {
 					_ = conn.Close()
 				},
 				release: func(discard bool) {
 					hc.ReleaseReader(br)
-					releaseRequestStream(rbs)
-					if closeConn || discard {
-						hc.CloseConn(cc)
-					} else {
-						hc.ReleaseConn(cc)
-					}
+					releaseRequestStream(rs)
+					releaseConn(discard)
 				},
 			}
-			return false, nil
+		} else {
+			// Fully buffered: the body already lives in resp.body and nothing
+			// reads the connection any more, so br can be released right away.
+			// The connection still waits for the caller to close the stream.
+			hc.ReleaseReader(br)
+			rbs := resp.bodyStream
+			var closed atomic.Bool
+			resp.bodyStream = newCloseReaderWithError(rbs, func(wErr error) error {
+				if !closed.CompareAndSwap(false, true) {
+					return nil
+				}
+				releaseConn(wErr != nil)
+				return nil
+			})
 		}
+		return false, nil
 	}
 	hc.ReleaseReader(br)
 

@@ -267,6 +267,70 @@ func TestClientStreamCloseReusesBufferedResponseConnection(t *testing.T) {
 	}
 }
 
+func TestClientStreamCloseHonorsLateSetConnectionClose(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		// A body larger than maxResponseBodySize is served through a
+		// *requestStream; leaving it at zero buffers the body instead.
+		maxResponseBodySize int
+	}{
+		{name: "requestStream", maxResponseBodySize: 1},
+		{name: "buffered", maxResponseBodySize: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set(HeaderContentLength, "11")
+				_, _ = io.WriteString(w, "hello world")
+			}))
+			t.Cleanup(server.Close)
+
+			var dialCount atomic.Int32
+			client := HostClient{
+				Addr: strings.TrimPrefix(server.URL, "http://"),
+				Dial: func(addr string) (net.Conn, error) {
+					dialCount.Add(1)
+					return net.Dial("tcp", addr)
+				},
+				MaxResponseBodySize: tc.maxResponseBodySize,
+				StreamResponseBody:  true,
+			}
+			t.Cleanup(client.CloseIdleConnections)
+
+			for i := range 2 {
+				var req Request
+				req.SetRequestURI(server.URL)
+				resp := AcquireResponse()
+				if err := client.Do(&req, resp); err != nil {
+					ReleaseResponse(resp)
+					t.Fatalf("unexpected request error: %v", err)
+				}
+				if _, err := io.ReadAll(resp.BodyStream()); err != nil {
+					ReleaseResponse(resp)
+					t.Fatalf("unexpected stream read error: %v", err)
+				}
+				// The caller only decides the connection is unusable after it
+				// consumed the streamed body.
+				if i == 0 {
+					resp.SetConnectionClose()
+				}
+				if err := resp.CloseBodyStream(); err != nil {
+					ReleaseResponse(resp)
+					t.Fatalf("unexpected stream close error: %v", err)
+				}
+				ReleaseResponse(resp)
+			}
+
+			if got := dialCount.Load(); got != 2 {
+				t.Fatalf("connection was reused after a late SetConnectionClose: got %d dials", got)
+			}
+		})
+	}
+}
+
 func TestClientStreamCloseInterruptsActiveReadAfterEOF(t *testing.T) {
 	t.Parallel()
 
