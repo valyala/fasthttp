@@ -60,6 +60,11 @@ func ExampleResponse_BodyStream() {
 
 	readBodyPrefix := func(resp *fasthttp.Response, limit int) ([]byte, error) {
 		stream := resp.BodyStream()
+		// BodyStream is nil for responses without a body, such as HEAD, 204,
+		// and 304 responses.
+		if stream == nil {
+			return nil, nil
+		}
 		closer, ok := stream.(fasthttp.ReadCloserWithError)
 		if !ok {
 			_ = resp.CloseBodyStream()
