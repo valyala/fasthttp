@@ -944,6 +944,264 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 		}
 	})
 
+	for _, scheme := range []string{"https", "http"} {
+		t.Run("explicit Authorization header wins over absolute-form "+scheme+" target credentials", func(t *testing.T) {
+			t.Parallel()
+			httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+				"GET " + scheme + "://url-user:url-pass@example.com/ HTTP/1.1\r\n" +
+					"Authorization: Bearer explicit-token\r\n\r\n")))
+			if err != nil {
+				t.Fatalf("unexpected error reading request: %v", err)
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error writing request: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error flushing request: %v", err)
+			}
+
+			wire := buf.String()
+			if !strings.HasPrefix(wire, "GET / HTTP/1.1\r\n") {
+				t.Errorf("expected an origin-form request line, got:\n%s", wire)
+			}
+			if !strings.Contains(wire, "Authorization: Bearer explicit-token\r\n") {
+				t.Errorf("expected the explicit Authorization header on the wire, got:\n%s", wire)
+			}
+			if strings.Contains(wire, "url-user") || strings.Contains(wire, "url-pass") || strings.Contains(wire, "Basic") {
+				t.Errorf("expected no URL credentials on the wire, got:\n%s", wire)
+			}
+		})
+	}
+
+	t.Run("absolute-form target credentials become Basic authorization", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"GET http://url-user:url-pass@example.com/ HTTP/1.1\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "GET / HTTP/1.1\r\n") {
+			t.Errorf("expected an origin-form request line, got:\n%s", wire)
+		}
+		// base64("url-user:url-pass"), the same credentials net/http.Client would send.
+		if !strings.Contains(wire, "Authorization: Basic dXJsLXVzZXI6dXJsLXBhc3M=\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", wire)
+		}
+		if strings.Contains(wire, "url-user:url-pass@") {
+			t.Errorf("expected no userinfo in the request target, got:\n%s", wire)
+		}
+	})
+
+	t.Run("no Content-Type is added for a body without one", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			URL:           &url.URL{Path: "/"},
+			Header:        http.Header{},
+			ContentLength: 4,
+			Body:          io.NopCloser(strings.NewReader("data")),
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if strings.Contains(buf.String(), "Content-Type:") {
+			t.Errorf("expected no Content-Type header on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("no Content-Type is added for a bodiless request", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			URL:        &url.URL{Path: "/"},
+			Header:     http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if strings.Contains(buf.String(), "Content-Type:") {
+			t.Errorf("expected no Content-Type header on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("explicit Content-Type is preserved", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			URL:        &url.URL{Path: "/"},
+			Header: http.Header{
+				"Content-Type": []string{"text/plain"},
+			},
+			ContentLength: 4,
+			Body:          io.NopCloser(strings.NewReader("data")),
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if !strings.Contains(buf.String(), "Content-Type: text/plain\r\n") {
+			t.Errorf("expected the explicit Content-Type header on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("body longer than content length is not written past the boundary", func(t *testing.T) {
+		t.Parallel()
+		closed := false
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/upload",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Body: &closeTrackingReader{
+				Reader: strings.NewReader("dataGET /smuggled HTTP/1.1\r\nHost: example.com\r\n\r\n"),
+				closed: &closed,
+			},
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		err := req.Write(bw)
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if !errors.Is(err, errBodyTooLong) {
+			t.Errorf("expected the write to report a too long body, got: %v", err)
+		}
+
+		wire := buf.String()
+		if strings.Contains(wire, "smuggled") {
+			t.Errorf("expected no data past the declared body boundary, got:\n%s", wire)
+		}
+		if !strings.HasSuffix(wire, "\r\n\r\ndata") {
+			t.Errorf("expected the body to be truncated to the declared length, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Content-Length: 4\r\n") {
+			t.Errorf("expected the declared content length on the wire, got:\n%s", wire)
+		}
+		if !closed {
+			t.Error("expected the attached body to be closed after write")
+		}
+	})
+
+	t.Run("body matching content length is written in full", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/upload",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasSuffix(wire, "\r\n\r\ndata") {
+			t.Errorf("expected the whole body on the wire, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Content-Length: 4\r\n") {
+			t.Errorf("expected the declared content length on the wire, got:\n%s", wire)
+		}
+	})
+
+	t.Run("body shorter than content length fails", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/upload",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("da")),
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err == nil {
+			t.Error("expected an error when the body is shorter than the content length")
+		}
+	})
+
 	t.Run("body read error", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{
