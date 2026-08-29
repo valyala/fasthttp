@@ -19,10 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 	"github.com/valyala/bytebufferpool"
+
+	brotli "github.com/molecule-man/go-brrr"
 )
 
 // ServeFileBytesUncompressed returns HTTP response containing file contents
@@ -1974,9 +1975,7 @@ func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, 
 		var err error
 		switch fileEncoding {
 		case "br":
-			if br, err = acquireBrotliReader(f); err != nil {
-				return nil, err
-			}
+			br = acquireBrotliReader(f)
 			r = br
 		case "gzip":
 			if zr, err = acquireGzipReader(f); err != nil {
