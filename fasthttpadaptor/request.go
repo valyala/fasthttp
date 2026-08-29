@@ -96,11 +96,25 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // carry a known length and trailers at the same time, and HTTP/1.x can
 // transport trailers only after a chunked body.
 //
+// A body of known size is truncated to that size when it is written, like
+// net/http does, so that a body longer than r.ContentLength cannot put bytes
+// past the declared boundary, where a peer would parse them as the next
+// request. Writing such a request body fails once the declared size has been
+// written.
+//
 // Derived state such as r.Form is not converted, and a body that was already
 // consumed (e.g. by r.ParseForm) is attached as the drained stream it is.
 //
 // The host is taken from r.Host, or r.URL.Host if r.Host is empty. A Host
 // entry in r.Header is ignored, mirroring net/http.
+//
+// When r.Header carries no Content-Type entry, the default Content-Type
+// fasthttp writes for requests (application/octet-stream) is disabled on req
+// via SetNoDefaultContentType, so the conversion does not add a header the
+// source request did not carry; net/http never generates a Content-Type.
+// Recipients of a message without a Content-Type may assume
+// application/octet-stream themselves (RFC 9110, Section 8.3). Note that
+// req.Reset() restores the fasthttp default.
 //
 // Connection-level state is not converted, since a fasthttp.Request models
 // only the wire message: r.RemoteAddr is ignored, and r.TLS is used only to
@@ -116,10 +130,14 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // the body stream, so the synchronized values are the ones written to the
 // wire.
 //
-// URL credentials in r.URL.User are copied to the URI only when r.Header
-// carries no Authorization entry, since fasthttp writes URI userinfo as a
-// Basic Authorization header and an explicit header takes precedence over
-// URL credentials, mirroring net/http.Client.
+// Credentials follow the precedence of net/http.Client: an Authorization
+// entry in r.Header takes precedence over URL credentials. Without such an
+// entry, credentials in r.URL.User are copied to the URI and are written as
+// a Basic Authorization header. With such an entry, userinfo embedded in an
+// absolute-form r.RequestURI is dropped so it cannot displace the header.
+// Either way a request carrying credentials is written with an origin-form
+// request line, since a request target must not contain userinfo (RFC 9112,
+// Section 3.2.4), just like net/http.Request.Write.
 //
 // HTTP/2 and newer protocols are normalized to HTTP/1.1, since fasthttp only
 // models HTTP/1.x messages and the HTTP version is a hop-by-hop property.
@@ -146,6 +164,10 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 		req.SetRequestURI(r.RequestURI)
 	} else if r.URL != nil {
 		req.SetRequestURI(r.URL.RequestURI())
+	}
+
+	if r.Header.Get(fasthttp.HeaderContentType) == "" {
+		req.Header.SetNoDefaultContentType(true)
 	}
 
 	for k, values := range r.Header {
@@ -181,20 +203,26 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 	}
 
 	if hasBody {
-		var body io.Reader = r.Body
-		if len(trailerKeys) > 0 {
+		contentLength := int(r.ContentLength)
+		if r.ContentLength <= 0 || r.ContentLength >= int64(math.MaxInt) ||
+			len(trailerKeys) > 0 ||
+			(len(r.TransferEncoding) > 0 && r.TransferEncoding[0] == "chunked") {
+			contentLength = -1
+		}
+
+		var body io.Reader
+		switch {
+		case len(trailerKeys) > 0:
 			body = &trailerSyncReader{
 				body:    r.Body,
 				trailer: r.Trailer,
 				keys:    trailerKeys,
 				header:  &req.Header,
 			}
-		}
-		contentLength := int(r.ContentLength)
-		if r.ContentLength <= 0 || r.ContentLength >= int64(math.MaxInt) ||
-			len(trailerKeys) > 0 ||
-			(len(r.TransferEncoding) > 0 && r.TransferEncoding[0] == "chunked") {
-			contentLength = -1
+		case contentLength >= 0:
+			body = &limitedBodyReader{body: r.Body, remaining: int64(contentLength)}
+		default:
+			body = r.Body
 		}
 		req.SetBodyStream(body, contentLength)
 	}
@@ -210,13 +238,66 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 		req.URI().SetScheme(scheme)
 	}
 
-	if r.URL != nil && r.URL.User != nil && r.Header.Get(fasthttp.HeaderAuthorization) == "" {
+	if r.Header.Get(fasthttp.HeaderAuthorization) != "" {
+		if strings.Contains(r.RequestURI, "://") {
+			uri := req.URI()
+			uri.SetUsername("")
+			uri.SetPassword("")
+		}
+	} else if r.URL != nil && r.URL.User != nil {
 		uri := req.URI()
 		uri.SetUsername(r.URL.User.Username())
-		if password, hasPassword := r.URL.User.Password(); hasPassword {
-			uri.SetPassword(password)
+		password, _ := r.URL.User.Password()
+		uri.SetPassword(password)
+	}
+}
+
+// errBodyTooLong is returned from a body read once the attached body turns
+// out to hold more data than the declared content length.
+var errBodyTooLong = errors.New("body is longer than the declared content length")
+
+// limitedBodyReader caps the data read from the attached body at the declared
+// content length. fasthttp copies the whole body stream to the wire before
+// comparing the copied size with the content length, so without the cap the
+// excess of a too long body is written past the framing boundary, where a
+// peer parses it as the start of the next request. net/http instead writes
+// the body through an io.LimitReader and reports the mismatch afterwards, so
+// the cap keeps the written body within its declared boundary and turns the
+// excess into an error.
+type limitedBodyReader struct {
+	body      io.ReadCloser
+	remaining int64
+}
+
+func (l *limitedBodyReader) Read(p []byte) (int, error) {
+	if l.remaining <= 0 {
+		// The declared body was read in full, so this read may only
+		// confirm the end of the body. Data beyond it must not be written,
+		// since it would land past the framing boundary.
+		var b [1]byte
+		n, err := l.body.Read(b[:])
+		switch {
+		case n > 0:
+			return 0, errBodyTooLong
+		case err != nil:
+			return 0, err
+		default:
+			return 0, nil
 		}
 	}
+
+	if int64(len(p)) > l.remaining {
+		p = p[:l.remaining]
+	}
+	n, err := l.body.Read(p)
+	l.remaining -= int64(n)
+	return n, err
+}
+
+// Close closes the attached body, preserving the closing behavior the body
+// would have when attached to the request unwrapped.
+func (l *limitedBodyReader) Close() error {
+	return l.body.Close()
 }
 
 // trailerSyncReader passes reads through to the attached request body and,
