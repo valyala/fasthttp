@@ -370,9 +370,13 @@ type Client struct {
 
 	// StreamResponseBody enables response body streaming for Do methods.
 	// Response bodies aren't fully buffered before Do returns. The caller must
-	// read and close Response.BodyStream. Body read errors occur after Do returns
-	// and aren't handled by retry callbacks. ReadTimeout and request deadlines
-	// remain active while reading the stream.
+	// read [Response.BodyStream] and close it with [Response.CloseBodyStream] or
+	// [ReadCloserWithError.CloseWithError]. Body read errors occur after Do
+	// returns and aren't handled by retry callbacks. ReadTimeout and request
+	// deadlines remain active while reading the stream.
+	//
+	// See the [Response.BodyStream] example for retaining only a bounded prefix
+	// of a response body.
 	//
 	// Get and Post methods still read the full response body before returning.
 	// If Do is called with a nil Response, the client drains only small,
@@ -1014,9 +1018,13 @@ type HostClient struct {
 
 	// StreamResponseBody enables response body streaming for Do methods.
 	// Response bodies aren't fully buffered before Do returns. The caller must
-	// read and close Response.BodyStream. Body read errors occur after Do returns
-	// and aren't handled by retry callbacks. ReadTimeout and request deadlines
-	// remain active while reading the stream.
+	// read [Response.BodyStream] and close it with [Response.CloseBodyStream] or
+	// [ReadCloserWithError.CloseWithError]. Body read errors occur after Do
+	// returns and aren't handled by retry callbacks. ReadTimeout and request
+	// deadlines remain active while reading the stream.
+	//
+	// See the [Response.BodyStream] example for retaining only a bounded prefix
+	// of a response body.
 	//
 	// Get and Post methods still read the full response body before returning.
 	// If Do is called with a nil Response, the client drains only small,
