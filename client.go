@@ -3209,11 +3209,8 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	resp.ParseNetConn(conn)
 
 	writeDeadline := deadline
-	if hc.WriteTimeout > 0 {
-		tmpWriteDeadline := time.Now().Add(hc.WriteTimeout)
-		if writeDeadline.IsZero() || tmpWriteDeadline.Before(writeDeadline) {
-			writeDeadline = tmpWriteDeadline
-		}
+	if writeDeadline.IsZero() && hc.WriteTimeout > 0 {
+		writeDeadline = time.Now().Add(hc.WriteTimeout)
 	}
 
 	if err = conn.SetWriteDeadline(writeDeadline); err != nil {
@@ -3250,11 +3247,8 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 
 	readDeadline := deadline
-	if hc.ReadTimeout > 0 {
-		tmpReadDeadline := time.Now().Add(hc.ReadTimeout)
-		if readDeadline.IsZero() || tmpReadDeadline.Before(readDeadline) {
-			readDeadline = tmpReadDeadline
-		}
+	if readDeadline.IsZero() && hc.ReadTimeout > 0 {
+		readDeadline = time.Now().Add(hc.ReadTimeout)
 	}
 
 	if err = conn.SetReadDeadline(readDeadline); err != nil {

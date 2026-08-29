@@ -1064,6 +1064,83 @@ func TestClientReadTimeout(t *testing.T) {
 	}
 }
 
+func TestHostClientRequestTimeoutOverridesClientTimeout(t *testing.T) {
+	t.Parallel()
+
+	conn := &deadlineRecordingConn{
+		response: []byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"),
+	}
+	clientTimeout := 50 * time.Millisecond
+	requestTimeout := 500 * time.Millisecond
+	c := &HostClient{
+		Addr:                      "example.com:80",
+		ReadTimeout:               clientTimeout,
+		WriteTimeout:              clientTimeout,
+		MaxIdemponentCallAttempts: 1,
+		Dial: func(string) (net.Conn, error) {
+			return conn, nil
+		},
+	}
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://example.com/")
+	if err := c.DoTimeout(&req, &resp, requestTimeout); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	minDeadline := time.Now().Add(requestTimeout / 2)
+	if conn.writeDeadline.Before(minDeadline) {
+		t.Fatalf("write deadline %s is capped by client timeout", conn.writeDeadline)
+	}
+	if conn.readDeadline.Before(minDeadline) {
+		t.Fatalf("read deadline %s is capped by client timeout", conn.readDeadline)
+	}
+}
+
+type deadlineRecordingConn struct {
+	net.Conn
+
+	response      []byte
+	readDeadline  time.Time
+	writeDeadline time.Time
+}
+
+func (c *deadlineRecordingConn) Read(p []byte) (int, error) {
+	if len(c.response) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, c.response)
+	c.response = c.response[n:]
+	return n, nil
+}
+
+func (c *deadlineRecordingConn) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (c *deadlineRecordingConn) Close() error {
+	return nil
+}
+
+func (c *deadlineRecordingConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (c *deadlineRecordingConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (c *deadlineRecordingConn) SetReadDeadline(deadline time.Time) error {
+	c.readDeadline = deadline
+	return nil
+}
+
+func (c *deadlineRecordingConn) SetWriteDeadline(deadline time.Time) error {
+	c.writeDeadline = deadline
+	return nil
+}
+
 func TestClientDefaultUserAgent(t *testing.T) {
 	t.Parallel()
 
