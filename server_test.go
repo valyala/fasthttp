@@ -5326,6 +5326,110 @@ func TestServerClosesConnOnLargeUnreadStreamedBody(t *testing.T) {
 	}
 }
 
+func TestServerDiscardsStreamedBodyClosedByHandler(t *testing.T) {
+	t.Parallel()
+
+	// A handler that abandons the stream with CloseBodyStream instead of
+	// reading it must not leave the unread body on the connection either.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := strings.Repeat("a", 8*1024) + smuggled
+
+	rw := &readWriter{}
+	fmt.Fprintf(&rw.r, "POST /first HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+	rw.r.WriteString("GET /next HTTP/1.1\r\nHost: x\r\n\r\n")
+
+	var paths []string
+	s := Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			ctx.Request.CloseBodyStream() //nolint:errcheck
+		},
+	}
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(paths) != 2 || paths[0] != "/first" || paths[1] != "/next" {
+		t.Fatalf("handler paths = %q; want [/first /next]", paths)
+	}
+}
+
+func TestServerSkipsDiscardOnHandlerConnectionClose(t *testing.T) {
+	t.Parallel()
+
+	// A handler that closes the connection must respond right away instead of
+	// blocking on the rest of an unfinished chunked upload that never arrives.
+	ln := fasthttputil.NewInmemoryListener()
+
+	var mu sync.Mutex
+	var paths []string
+	s := &Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *RequestCtx) {
+			mu.Lock()
+			paths = append(paths, string(ctx.Path()))
+			mu.Unlock()
+			ctx.Response.Header.SetConnectionClose()
+		},
+	}
+	serverCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverCh)
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Only the chunked header is sent, the body chunks never follow.
+	if _, err = conn.Write([]byte("POST /first HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	respCh := make(chan error, 1)
+	go func() {
+		var resp Response
+		if rerr := resp.Read(bufio.NewReader(conn)); rerr != nil {
+			respCh <- rerr
+			return
+		}
+		if !resp.ConnectionClose() {
+			respCh <- errors.New("expecting 'Connection: close' response header")
+			return
+		}
+		respCh <- nil
+	}()
+
+	select {
+	case err = <-respCh:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("no response: the server blocked on the unfinished body")
+	}
+
+	mu.Lock()
+	if len(paths) != 1 || paths[0] != "/first" {
+		mu.Unlock()
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+	mu.Unlock()
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case <-serverCh:
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("timeout")
+	}
+}
+
 func TestServerClosesConnOnTimedOutStreamedBody(t *testing.T) {
 	t.Parallel()
 

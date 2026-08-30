@@ -2387,9 +2387,11 @@ func (req *Request) closeBodyStream() error {
 	if bsc, ok := req.bodyStream.(io.Closer); ok {
 		err = bsc.Close()
 	}
-	if rs, ok := req.bodyStream.(*requestStream); ok {
-		releaseRequestStream(rs)
-	}
+	// A *requestStream reads directly from the connection, so the server loop
+	// owns it: it drains any unread body and returns the stream to the pool
+	// once the connection can be reused, or drops it when closing. Releasing it
+	// here would let a handler abandon an unread body and desync the next
+	// request, so leave that to the server.
 	req.bodyStream = nil
 	return err
 }
