@@ -2311,6 +2311,12 @@ func nextConnID() uint64 {
 // See Server.MaxRequestBodySize for details.
 const DefaultMaxRequestBodySize = 4 * 1024 * 1024
 
+// maxUnreadStreamBodySize is how much of a streamed request body the server
+// discards after the handler returns without reading it, in order to keep the
+// connection alive. When more is left the connection is closed instead, as
+// net/http does once a handler returns.
+const maxUnreadStreamBodySize = 256 * 1024
+
 func (s *Server) idleTimeout() time.Duration {
 	if s.IdleTimeout != 0 {
 		return s.IdleTimeout
@@ -2636,6 +2642,12 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.connRequestNum = connRequestNum
 		ctx.time = time.Now()
 
+		// Capture the streamed request body reader, if any, before running the
+		// handler. The handler may return without reading all of it, or abandon
+		// it via CloseBodyStream; either way it is the server, not the handler,
+		// that owns draining it and returning it to the pool afterwards.
+		reqStream, _ := ctx.Request.bodyStream.(*requestStream)
+
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
 			s.Handler(ctx)
@@ -2643,7 +2655,16 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		timeoutResponse = ctx.timeoutResponse
 		if timeoutResponse != nil {
-			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
+			// The timed out handler runs in its own goroutine and may still be
+			// reading the streamed body from br, so it cannot be drained here.
+			// Close the connection, and keep br out of the reader pool while
+			// that goroutine still owns it by dropping our reference to it.
+			if reqStream != nil {
+				connectionClose = true
+				br = nil
+			}
+			reqStream = nil
+			// Acquire a new ctx because the old one will still be in use by the timed out handler.
 			ctx = s.acquireCtx(c)
 			timeoutResponse.CopyTo(&ctx.Response)
 		}
@@ -2656,6 +2677,25 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.hijackHandler = nil
 		hijackNoResponse = ctx.hijackNoResponse && hijackHandler != nil
 		ctx.hijackNoResponse = false
+
+		// Decide whether the connection is closing before touching the body
+		// stream, so a handler that asked to close it (or a per-connection
+		// limit) skips the drain below instead of blocking on unread bytes.
+		connectionClose = connectionClose ||
+			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
+			ctx.Response.Header.ConnectionClose() ||
+			(s.CloseOnShutdown && s.stop.Load() == 1)
+
+		// The handler may have returned without reading the whole streamed
+		// body. What is left of it would be parsed as the next request on
+		// this connection, so discard it, or close the connection when there
+		// is too much left to read. Skip this when the connection is closing
+		// anyway or was hijacked.
+		if reqStream != nil && !connectionClose && hijackHandler == nil {
+			if !reqStream.discard(maxUnreadStreamBodySize) {
+				connectionClose = true
+			}
+		}
 
 		if writeTimeout > 0 {
 			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
@@ -2670,10 +2710,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			previousWriteTimeout = 0
 		}
 
-		connectionClose = connectionClose ||
-			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
-			ctx.Response.Header.ConnectionClose() ||
-			(s.CloseOnShutdown && s.stop.Load() == 1)
 		if connectionClose {
 			ctx.Response.Header.SetConnectionClose()
 		} else if !ctx.Request.Header.IsHTTP11() {
@@ -2738,12 +2774,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			break
 		}
 
-		if ctx.Request.bodyStream != nil {
-			if rs, ok := ctx.Request.bodyStream.(*requestStream); ok {
-				releaseRequestStream(rs)
-			}
-			ctx.Request.bodyStream = nil
+		if reqStream != nil {
+			releaseRequestStream(reqStream)
 		}
+		ctx.Request.bodyStream = nil
 
 		idleConnTime.Store(ctx.time.Unix())
 		s.setState(c, StateIdle)
