@@ -320,7 +320,7 @@ func TestClientByteReturningHelpersWithStreamingEnabled(t *testing.T) {
 		if r.Method == http.MethodPost {
 			body, _ = io.ReadAll(r.Body)
 		}
-		w.Header().Set(HeaderContentLength, fmt.Sprintf("%d", len(body)))
+		w.Header().Set(HeaderContentLength, strconv.Itoa(len(body)))
 		_, _ = w.Write(body)
 	}))
 	t.Cleanup(server.Close)
@@ -1222,7 +1222,6 @@ func TestPipelineClientBuffersStreamBody(t *testing.T) {
 	if err := client.Do(&req1, &resp1); err != nil {
 		t.Fatalf("first request failed: %v", err)
 	}
-	defer resp1.CloseBodyStream()
 	if got := string(resp1.bodyBytes()); got != "FIRST" {
 		t.Fatalf("first response was not buffered: got %q", got)
 	}
@@ -1243,6 +1242,9 @@ func TestPipelineClientBuffersStreamBody(t *testing.T) {
 	}
 	if got := string(firstBody); got != "FIRST" {
 		t.Fatalf("unexpected first response body %q", got)
+	}
+	if err := resp1.CloseBodyStream(); err != nil {
+		t.Fatalf("close first buffered body stream: %v", err)
 	}
 	if err := <-serverDone; err != nil {
 		t.Fatalf("server failed: %v", err)
