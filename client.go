@@ -288,6 +288,8 @@ type Client struct {
 	WriteBufferSize int
 
 	// Maximum duration for full response reading (including body).
+	// When response streaming is enabled, the deadline remains active while
+	// the caller reads Response.BodyStream.
 	//
 	// By default response read timeout is unlimited.
 	ReadTimeout time.Duration
@@ -309,8 +311,10 @@ type Client struct {
 	// sends a very large Content-Length or chunk size. Set a positive limit
 	// when requesting untrusted servers.
 	//
-	// If StreamResponseBody is true, MaxResponseBodySize is ignored. The caller
-	// must limit reads from BodyStream itself.
+	// If response streaming is enabled for Do methods through StreamResponseBody
+	// or Response.StreamBody, MaxResponseBodySize is ignored and the response
+	// body isn't fully buffered before Do returns. The caller must limit reads
+	// from BodyStream itself. Get and Post methods always enforce this limit.
 	MaxResponseBodySize int
 
 	// Maximum duration for waiting for a free connection.
@@ -364,7 +368,15 @@ type Client struct {
 	// extra slashes are removed, special characters are encoded.
 	DisablePathNormalizing bool
 
-	// StreamResponseBody enables response body streaming.
+	// StreamResponseBody enables response body streaming for Do methods.
+	// Response bodies aren't fully buffered before Do returns. The caller must
+	// read and close Response.BodyStream. Body read errors occur after Do returns
+	// and aren't handled by retry callbacks. ReadTimeout and request deadlines
+	// remain active while reading the stream.
+	//
+	// Get and Post methods still read the full response body before returning.
+	// If Do is called with a nil Response, the client drains only small,
+	// known-length bodies for connection reuse and closes other body streams.
 	StreamResponseBody bool
 }
 
@@ -895,6 +907,8 @@ type HostClient struct {
 	WriteBufferSize int
 
 	// Maximum duration for full response reading (including body).
+	// When response streaming is enabled, the deadline remains active while
+	// the caller reads Response.BodyStream.
 	//
 	// By default response read timeout is unlimited.
 	ReadTimeout time.Duration
@@ -916,8 +930,10 @@ type HostClient struct {
 	// sends a very large Content-Length or chunk size. Set a positive limit
 	// when requesting untrusted servers.
 	//
-	// If StreamResponseBody is true, MaxResponseBodySize is ignored. The caller
-	// must limit reads from BodyStream itself.
+	// If response streaming is enabled for Do methods through StreamResponseBody
+	// or Response.StreamBody, MaxResponseBodySize is ignored and the response
+	// body isn't fully buffered before Do returns. The caller must limit reads
+	// from BodyStream itself. Get and Post methods always enforce this limit.
 	MaxResponseBodySize int
 
 	// Maximum duration for waiting for a free connection.
@@ -996,7 +1012,15 @@ type HostClient struct {
 	// Client logs full errors by default.
 	SecureErrorLogMessage bool
 
-	// StreamResponseBody enables response body streaming.
+	// StreamResponseBody enables response body streaming for Do methods.
+	// Response bodies aren't fully buffered before Do returns. The caller must
+	// read and close Response.BodyStream. Body read errors occur after Do returns
+	// and aren't handled by retry callbacks. ReadTimeout and request deadlines
+	// remain active while reading the stream.
+	//
+	// Get and Post methods still read the full response body before returning.
+	// If Do is called with a nil Response, the client drains only small,
+	// known-length bodies for connection reuse and closes other body streams.
 	StreamResponseBody bool
 
 	connsCleanerRun bool
@@ -1212,17 +1236,46 @@ var (
 
 const defaultMaxRedirectsCount = 16
 
+// Only drain response streams that are known to be small. Reading an unknown
+// length stream can block forever (for example, on an event stream), while
+// closing a large stream avoids transferring a body the caller discarded.
+const maxResponseBodyDrainSize = 8 * 1024
+
+func closeOrDrainResponseBody(resp *Response, maxDrainSize int) error {
+	if !resp.IsBodyStream() {
+		return nil
+	}
+
+	contentLength := resp.Header.ContentLength()
+	if contentLength < 0 || contentLength > maxDrainSize {
+		return resp.CloseBodyStream()
+	}
+	return resp.BodyWriteTo(io.Discard)
+}
+
+func responseBodyDrainSize(maxBodySize int) int {
+	if maxBodySize > 0 && maxBodySize < maxResponseBodyDrainSize {
+		return maxBodySize
+	}
+	return maxResponseBodyDrainSize
+}
+
 func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
 	resp := AcquireResponse()
 	bodyBuf := resp.bodyBuffer()
 	resp.keepBodyBuffer = true
+	resp.preserveBodyBuffer = true
 	oldBody := bodyBuf.B
 	bodyBuf.B = dst
+	forceResponseBodyBuffering := req.forceResponseBodyBuffering
+	req.forceResponseBodyBuffering = true
 
 	statusCode, _, err = doRequestFollowRedirects(req, resp, url, defaultMaxRedirectsCount, c)
+	req.forceResponseBodyBuffering = forceResponseBodyBuffering
 
 	body = bodyBuf.B
 	bodyBuf.B = oldBody
+	resp.preserveBodyBuffer = false
 	resp.keepBodyBuffer = false
 	ReleaseResponse(resp)
 
@@ -1232,6 +1285,11 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 func doRequestFollowRedirects(
 	req *Request, resp *Response, url string, maxRedirectsCount int, c clientDoer,
 ) (statusCode int, body []byte, err error) {
+	if resp == nil {
+		resp = AcquireResponse()
+		defer ReleaseResponse(resp)
+	}
+
 	redirectsCount := 0
 	initialHost := hostnameFromURLString(url)
 	// Writing the request consumes a body stream, so remember it here: by the
@@ -1302,6 +1360,10 @@ func doRequestFollowRedirects(
 			// user agent MAY change the request method from POST to GET for a
 			// 301 (Moved Permanently) or 302 (Found) response.
 			req.Header.SetMethod(MethodGet)
+		}
+
+		if err = closeOrDrainResponseBody(resp, maxResponseBodyDrainSize); err != nil {
+			break
 		}
 	}
 
@@ -1603,7 +1665,7 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		switch {
 		case c.RetryIfErrUpstream != nil:
 			upstream := ""
-			if resp.RemoteAddr() != nil {
+			if resp != nil && resp.RemoteAddr() != nil {
 				upstream = resp.RemoteAddr().String()
 			}
 			resetTimeout, retry = c.RetryIfErrUpstream(req, attempts, err, upstream)
@@ -1647,6 +1709,15 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 	if resp == nil {
 		resp = AcquireResponse()
 		defer ReleaseResponse(resp)
+
+		retry, err := c.doNonNilReqResp(req, resp)
+		if err != nil {
+			return retry, err
+		}
+		if err = closeOrDrainResponseBody(resp, responseBodyDrainSize(c.MaxResponseBodySize)); err != nil {
+			return true, err
+		}
+		return retry, nil
 	}
 
 	return c.doNonNilReqResp(req, resp)
@@ -1679,7 +1750,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 
 	// backing up SkipBody in case it was set explicitly
 	customSkipBody := resp.SkipBody
-	customStreamBody := resp.StreamBody || c.StreamResponseBody
+	customStreamBody := !req.forceResponseBodyBuffering && (resp.StreamBody || c.StreamResponseBody)
 	resp.Reset()
 	resp.SkipBody = customSkipBody
 	resp.StreamBody = customStreamBody
@@ -2467,9 +2538,10 @@ func (q *wantConnQueue) clearFront() (cleaned bool) {
 // It is safe calling PipelineClient methods from concurrently running
 // goroutines.
 //
-// PipelineClient buffers complete response bodies without a size limit. Use
-// Client or HostClient with a positive MaxResponseBodySize when requesting
-// untrusted servers.
+// PipelineClient buffers complete response bodies without a size limit. If
+// Response.StreamBody is set, BodyStream reads from that buffered body; it
+// doesn't stream from the network. Use Client or HostClient with a positive
+// MaxResponseBodySize when requesting untrusted servers.
 type PipelineClient struct {
 	noCopy noCopy
 
@@ -2702,6 +2774,8 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 
 	w := c.acquirePipelineWork(timeout)
 	w.respCopy.Header.disableNormalizing = c.DisableHeaderNamesNormalizing
+	streamBody := resp != nil && resp.StreamBody
+	w.respCopy.StreamBody = streamBody
 	w.req = &w.reqCopy
 	w.resp = &w.respCopy
 
@@ -2730,6 +2804,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		if resp != nil {
 			w.respCopy.copyToSkipBody(resp)
 			swapResponseBody(resp, &w.respCopy)
+			resp.StreamBody = streamBody
 		}
 		err = w.err
 		c.releasePipelineWork(w)
@@ -3199,10 +3274,20 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 				return err
 			}
 		}
-		if err = w.resp.Read(br); err != nil {
+		// PipelineClient must consume each response body before reading the
+		// next response from the shared connection. Preserve StreamBody's
+		// reader API with a buffered stream instead of leaving bytes in br.
+		streamBody := w.resp.StreamBody
+		w.resp.StreamBody = false
+		err = w.resp.Read(br)
+		w.resp.StreamBody = streamBody
+		if err != nil {
 			w.err = err
 			w.done <- struct{}{}
 			return err
+		}
+		if streamBody && !w.resp.mustSkipBody() {
+			w.resp.bodyStream = bytes.NewReader(w.resp.bodyBytes())
 		}
 
 		w.done <- struct{}{}
@@ -3402,34 +3487,21 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 				hc.ReleaseConn(cc)
 			}
 		}
-		if rs, ok := resp.bodyStream.(*requestStream); ok {
-			// Network backed: a Read may still be in flight when the caller
-			// closes, so interrupt it and wait before pooling anything.
-			resp.bodyStream = &clientStreamBody{
-				reader: rs,
-				interrupt: func() {
-					_ = conn.Close()
-				},
-				release: func(discard bool) {
-					hc.ReleaseReader(br)
-					releaseRequestStream(rs)
-					releaseConn(discard)
-				},
-			}
-		} else {
-			// Fully buffered: the body already lives in resp.body and nothing
-			// reads the connection any more, so br can be released right away.
-			// The connection still waits for the caller to close the stream.
-			hc.ReleaseReader(br)
-			rbs := resp.bodyStream
-			var closed atomic.Bool
-			resp.bodyStream = newCloseReaderWithError(rbs, func(wErr error) error {
-				if !closed.CompareAndSwap(false, true) {
-					return nil
-				}
-				releaseConn(wErr != nil)
-				return nil
-			})
+		// ReadLimitBody always creates a network-backed requestStream when
+		// StreamBody is enabled. A Read may still be in flight when the caller
+		// closes, so interrupt it and wait before pooling anything.
+		rs := resp.bodyStream.(*requestStream) //nolint:forcetypeassert
+		resp.bodyStream = &clientStreamBody{
+			reader:    rs,
+			fullyRead: rs.contentLength == 0,
+			interrupt: func() {
+				_ = conn.Close()
+			},
+			release: func(discard bool) {
+				hc.ReleaseReader(br)
+				releaseRequestStream(rs)
+				releaseConn(discard)
+			},
 		}
 		return false, nil
 	}

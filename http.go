@@ -71,6 +71,11 @@ type Request struct {
 
 	keepBodyBuffer bool
 
+	// Used by byte-returning client helpers so body limits and retries remain
+	// inside the normal buffered request path. This is deliberately not copied
+	// by Request.CopyTo; it is scoped to the helper's synchronous Do call.
+	forceResponseBodyBuffering bool
+
 	// Used by Server to indicate the request was received on a HTTPS endpoint.
 	// Client/HostClient shouldn't use this field but should depend on the uri.scheme instead.
 	isTLS bool
@@ -114,8 +119,11 @@ type Response struct {
 	// Relevant for bodyStream only.
 	ImmediateHeaderFlush bool
 
-	// StreamBody enables response body streaming.
-	// Use SetBodyStream to set the body stream.
+	// StreamBody enables response body streaming while reading a response.
+	// Body read errors are returned by BodyStream reads or BodyWriteTo after
+	// Read or a client Do method has returned. Errors that occur after a client
+	// Do method returns aren't handled by that client's retry callbacks.
+	// Use SetBodyStream to set the body stream when writing a response.
 	StreamBody bool
 
 	// Response.Read() skips reading body if set to true.
@@ -126,6 +134,7 @@ type Response struct {
 	SkipBody bool
 
 	keepBodyBuffer        bool
+	preserveBodyBuffer    bool
 	secureErrorLogMessage bool
 }
 
@@ -441,6 +450,8 @@ func (resp *Response) LocalAddr() net.Addr {
 //
 // If the body is backed by a stream, Body reads the entire stream into memory.
 // Use BodyStream to read it incrementally.
+// If reading the stream fails, Body returns the error message as the body.
+// Use BodyStream or BodyWriteTo when the read error must be handled separately.
 func (resp *Response) Body() []byte {
 	if resp.bodyStream != nil {
 		bodyBuf := resp.bodyBuffer()
@@ -1010,6 +1021,7 @@ func (req *Request) copyToSkipBody(dst *Request) {
 }
 
 // CopyTo copies resp contents to dst except of body stream.
+// If the body is streamed, call Body before CopyTo to read and copy it.
 func (resp *Response) CopyTo(dst *Response) {
 	resp.copyToSkipBody(dst)
 	switch {
@@ -1281,6 +1293,7 @@ func (req *Request) Reset() {
 	req.Header.Reset()
 	req.resetSkipHeader()
 	req.timeout = 0
+	req.forceResponseBodyBuffering = false
 	req.UseHostHeader = false
 	req.DisableRedirectPathNormalizing = false
 }
@@ -1309,8 +1322,10 @@ func (req *Request) RemoveMultipartFormFiles() {
 
 // Reset clears response contents.
 func (resp *Response) Reset() {
-	if bodyPoolSizeLimit := int(atomic.LoadInt64(&responseBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && resp.body != nil {
-		resp.ReleaseBody(bodyPoolSizeLimit)
+	if !resp.preserveBodyBuffer {
+		if bodyPoolSizeLimit := int(atomic.LoadInt64(&responseBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && resp.body != nil {
+			resp.ReleaseBody(bodyPoolSizeLimit)
+		}
 	}
 	resp.resetSkipHeader()
 	resp.Header.Reset()
@@ -1586,6 +1601,8 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 //
 // Read does not limit the response body size. Use ReadLimitBody with a positive
 // maxBodySize when reading responses from untrusted sources.
+// If StreamBody is true, the caller must not read from or reuse r until
+// BodyStream is fully read or CloseBodyStream is called.
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (resp *Response) Read(r *bufio.Reader) error {
@@ -1610,6 +1627,10 @@ var errTooManyInterimResponses = errors.New("fasthttp: too many 1xx informationa
 // then ErrBodyTooLarge is returned.
 // If maxBodySize <= 0, no limit is applied and the response may consume
 // unbounded memory.
+// If StreamBody is true, maxBodySize is ignored and the response body is
+// exposed through BodyStream without being fully buffered.
+// The caller must not read from or reuse r until BodyStream is fully read or
+// CloseBodyStream is called.
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
@@ -1657,34 +1678,29 @@ func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 //
 // If maxBodySize > 0 and the body size exceeds maxBodySize,
 // then ErrBodyTooLarge is returned.
+//
+// If StreamBody is true, maxBodySize is ignored and the response body is
+// exposed through BodyStream without being fully buffered.
+// The caller must not read from or reuse r until BodyStream is fully read or
+// CloseBodyStream is called.
 func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
 	bodyBuf := resp.bodyBuffer()
 	bodyBuf.Reset()
 
 	contentLength := resp.Header.ContentLength()
+	if resp.StreamBody {
+		resp.bodyStream = acquireResponseStream(bodyBuf, r, &resp.Header)
+		return nil
+	}
+
 	switch {
 	case contentLength >= 0:
 		bodyBuf.B, err = readBody(r, contentLength, maxBodySize, bodyBuf.B)
-		if err == ErrBodyTooLarge && resp.StreamBody {
-			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
-			err = nil
-		}
 	case contentLength == -1:
-		if resp.StreamBody {
-			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
-		} else {
-			bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
-		}
+		bodyBuf.B, err = readBodyChunked(r, maxBodySize, bodyBuf.B)
 	default:
-		if resp.StreamBody {
-			resp.bodyStream = acquireRequestStream(bodyBuf, r, &resp.Header)
-		} else {
-			bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
-			resp.Header.SetContentLength(len(bodyBuf.B))
-		}
-	}
-	if err == nil && resp.StreamBody && resp.bodyStream == nil {
-		resp.bodyStream = bytes.NewReader(bodyBuf.B)
+		bodyBuf.B, err = readBodyIdentity(r, maxBodySize, bodyBuf.B)
+		resp.Header.SetContentLength(len(bodyBuf.B))
 	}
 	return err
 }

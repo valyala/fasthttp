@@ -16,18 +16,25 @@ type bodyStreamHeader interface {
 
 type requestStream struct {
 	header          bodyStreamHeader
-	prefetchedBytes *bytes.Reader
+	prefetchedBytes bytes.Reader
 	reader          *bufio.Reader
+	contentLength   int
 	totalBytesRead  int
 	chunkLeft       int
+	strictEOF       bool
 }
 
 func (rs *requestStream) Read(p []byte) (int, error) {
+	if rs.reader == nil {
+		panic("BUG: reading released body stream")
+	}
+
 	var (
 		n   int
 		err error
 	)
-	if rs.header.ContentLength() == -1 {
+	contentLength := rs.contentLength
+	if contentLength == -1 {
 		if rs.chunkLeft == 0 {
 			chunkSize, err := parseChunkSize(rs.reader)
 			if err != nil {
@@ -54,7 +61,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		}
 		return n, err
 	}
-	if rs.totalBytesRead == rs.header.ContentLength() {
+	if rs.totalBytesRead == contentLength {
 		return 0, io.EOF
 	}
 	prefetchedSize := int(rs.prefetchedBytes.Size())
@@ -65,22 +72,25 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		}
 		n, err := rs.prefetchedBytes.Read(p)
 		rs.totalBytesRead += n
-		if n == rs.header.ContentLength() {
+		if rs.totalBytesRead == contentLength {
 			return n, io.EOF
 		}
 		return n, err
 	}
-	left := rs.header.ContentLength() - rs.totalBytesRead
+	left := contentLength - rs.totalBytesRead
 	if left > 0 && len(p) > left {
 		p = p[:left]
 	}
 	n, err = rs.reader.Read(p)
 	rs.totalBytesRead += n
+	if err == io.EOF && rs.strictEOF && contentLength >= 0 && rs.totalBytesRead < contentLength {
+		err = io.ErrUnexpectedEOF
+	}
 	if err != nil {
 		return n, err
 	}
 
-	if rs.totalBytesRead == rs.header.ContentLength() {
+	if rs.totalBytesRead == contentLength {
 		err = io.EOF
 	}
 	return n, err
@@ -88,18 +98,27 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 
 func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
 	rs := requestStreamPool.Get().(*requestStream) //nolint:forcetypeassert
-	rs.prefetchedBytes = bytes.NewReader(b.B)
+	rs.prefetchedBytes.Reset(b.B)
 	rs.reader = r
 	rs.header = h
+	rs.contentLength = h.ContentLength()
+	return rs
+}
+
+func acquireResponseStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
+	rs := acquireRequestStream(b, r, h)
+	rs.strictEOF = true
 	return rs
 }
 
 func releaseRequestStream(rs *requestStream) {
-	rs.prefetchedBytes = nil
+	rs.prefetchedBytes.Reset(nil)
 	rs.totalBytesRead = 0
 	rs.chunkLeft = 0
 	rs.reader = nil
 	rs.header = nil
+	rs.contentLength = 0
+	rs.strictEOF = false
 	requestStreamPool.Put(rs)
 }
 
