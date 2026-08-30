@@ -3323,25 +3323,81 @@ func TestResponseBodyStream(t *testing.T) {
 			t.Fatalf("unexpected body content, got: %#v, want: %#v", string(body), "1234561234567")
 		}
 	})
-	t.Run("read simple response", func(t *testing.T) {
+	t.Run("read fixed-length response", func(t *testing.T) {
+		for _, maxBodySize := range []int{0, 8, 20} {
+			t.Run(fmt.Sprintf("maxBodySize=%d", maxBodySize), func(t *testing.T) {
+				resp := AcquireResponse()
+				defer ReleaseResponse(resp)
+				resp.StreamBody = true
+				if err := resp.ReadLimitBody(bufio.NewReader(bytes.NewBufferString(simpleResp)), maxBodySize); err != nil {
+					t.Fatalf("read limit body err: %v", err)
+				}
+				if _, ok := resp.BodyStream().(*requestStream); !ok {
+					t.Fatalf("unexpected body stream type %T", resp.BodyStream())
+				}
+				if body := resp.bodyBytes(); len(body) != 0 {
+					t.Fatalf("response body was buffered: %q", body)
+				}
+				content, err := io.ReadAll(resp.BodyStream())
+				if err != nil {
+					t.Fatalf("read body stream err: %v", err)
+				}
+				if string(content) != "123456789" {
+					t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "123456789")
+				}
+				if err := resp.CloseBodyStream(); err != nil {
+					t.Fatalf("close body stream err: %v", err)
+				}
+			})
+		}
+	})
+	t.Run("truncated fixed-length response", func(t *testing.T) {
 		resp := AcquireResponse()
+		defer ReleaseResponse(resp)
 		resp.StreamBody = true
-		err := resp.ReadLimitBody(bufio.NewReader(bytes.NewBufferString(simpleResp)), 8)
-		if err != nil {
-			t.Fatalf("read limit body err: %v", err)
+		response := "HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\n1234"
+		if err := resp.Read(bufio.NewReader(bytes.NewBufferString(response))); err != nil {
+			t.Fatalf("read response headers err: %v", err)
 		}
-		body := resp.BodyStream()
-		defer func() {
-			if err := resp.CloseBodyStream(); err != nil {
-				t.Fatalf("close body stream err: %v", err)
-			}
-		}()
-		content, err := io.ReadAll(body)
-		if err != nil {
-			t.Fatalf("read limit body err: %v", err)
+		if _, err := io.ReadAll(resp.BodyStream()); err != io.ErrUnexpectedEOF {
+			t.Fatalf("unexpected body stream error: %v; want %v", err, io.ErrUnexpectedEOF)
 		}
-		if string(content) != "123456789" {
-			t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "123456789")
+	})
+	t.Run("fixed-length stream keeps original framing", func(t *testing.T) {
+		resp := AcquireResponse()
+		defer ReleaseResponse(resp)
+		resp.StreamBody = true
+		if err := resp.Read(bufio.NewReader(bytes.NewBufferString(simpleResp))); err != nil {
+			t.Fatalf("read response headers err: %v", err)
+		}
+		resp.Header.SetContentLength(1)
+		body, err := io.ReadAll(resp.BodyStream())
+		if err != nil {
+			t.Fatalf("read body stream err: %v", err)
+		}
+		if string(body) != "123456789" {
+			t.Fatalf("unexpected body content, got: %#v, want: %#v", string(body), "123456789")
+		}
+	})
+	t.Run("copy streamed response after reading body", func(t *testing.T) {
+		var resp Response
+		resp.StreamBody = true
+		if err := resp.Read(bufio.NewReader(bytes.NewBufferString(simpleResp))); err != nil {
+			t.Fatalf("read response headers err: %v", err)
+		}
+
+		var dst Response
+		resp.CopyTo(&dst)
+		if body := dst.Body(); len(body) != 0 {
+			t.Fatalf("CopyTo copied an unread body stream: %q", body)
+		}
+
+		if body := resp.Body(); string(body) != "123456789" {
+			t.Fatalf("unexpected drained body %q", body)
+		}
+		resp.CopyTo(&dst)
+		if body := string(dst.Body()); body != "123456789" {
+			t.Fatalf("CopyTo did not copy the buffered body: %q", body)
 		}
 	})
 	t.Run("http client", func(t *testing.T) {
@@ -3601,8 +3657,10 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 	if err := resp.CloseBodyStream(); err != nil {
 		t.Fatalf("unexpected close error: %v", err)
 	}
-	if rs.reader == nil {
-		t.Fatalf("request stream was released while compression was still reading it")
+	select {
+	case <-compressedStream.done:
+		t.Fatal("compression finished before its body read was unblocked")
+	default:
 	}
 
 	close(reader.unblock)
@@ -3610,9 +3668,6 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 	case <-compressedStream.done:
 	case <-time.After(time.Second):
 		t.Fatalf("timeout waiting for compressed stream cleanup")
-	}
-	if rs.reader != nil {
-		t.Fatalf("request stream was not released after compression finished")
 	}
 }
 
@@ -3658,6 +3713,52 @@ func (h fixedRequestStreamHeader) ContentLength() int {
 
 func (fixedRequestStreamHeader) ReadTrailer(r *bufio.Reader) error {
 	return nil
+}
+
+func TestRequestBodyTruncatedStreamKeepsPartialBody(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.Header.SetContentLength(9)
+	req.bodyStream = acquireRequestStream(
+		req.bodyBuffer(),
+		bufio.NewReader(strings.NewReader("1234")),
+		&req.Header,
+	)
+
+	if body := string(req.Body()); body != "1234" {
+		t.Fatalf("unexpected request body %q; want partial body %q", body, "1234")
+	}
+}
+
+func TestAcquireRequestStreamAllocations(t *testing.T) {
+	var bodyBuf bytebufferpool.ByteBuffer
+	reader := bufio.NewReader(bytes.NewReader(nil))
+	header := fixedRequestStreamHeader{contentLength: 0}
+	allocs := testing.AllocsPerRun(1000, func() {
+		rs := acquireRequestStream(&bodyBuf, reader, header)
+		releaseRequestStream(rs)
+	})
+	if allocs != 0 {
+		t.Fatalf("unexpected allocations per request stream acquire: %v", allocs)
+	}
+}
+
+func TestReleasedRequestStreamReadPanics(t *testing.T) {
+	var bodyBuf bytebufferpool.ByteBuffer
+	rs := acquireRequestStream(
+		&bodyBuf,
+		bufio.NewReader(bytes.NewReader(nil)),
+		fixedRequestStreamHeader{contentLength: 0},
+	)
+	releaseRequestStream(rs)
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("reading a released request stream did not panic")
+		}
+	}()
+	_, _ = rs.Read(make([]byte, 1))
 }
 
 type blockingOnceReader struct {

@@ -15,6 +15,7 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -228,11 +229,55 @@ func TestClientStreamCloseWaitsForRead(t *testing.T) {
 	}
 }
 
-func TestClientStreamCloseReusesBufferedResponseConnection(t *testing.T) {
+func TestClientStreamCloseReusesFullyReadResponseConnection(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "hello world")
+	}))
+	t.Cleanup(server.Close)
+
+	var dialCount atomic.Int32
+	client := HostClient{
+		Addr: strings.TrimPrefix(server.URL, "http://"),
+		Dial: func(addr string) (net.Conn, error) {
+			dialCount.Add(1)
+			return net.Dial("tcp", addr)
+		},
+		StreamResponseBody: true,
+	}
+	t.Cleanup(client.CloseIdleConnections)
+
+	for range 2 {
+		var req Request
+		req.SetRequestURI(server.URL)
+		resp := AcquireResponse()
+		if err := client.Do(&req, resp); err != nil {
+			ReleaseResponse(resp)
+			t.Fatalf("unexpected request error: %v", err)
+		}
+		if _, err := io.Copy(io.Discard, resp.BodyStream()); err != nil {
+			ReleaseResponse(resp)
+			t.Fatalf("unexpected stream read error: %v", err)
+		}
+		if err := resp.CloseBodyStream(); err != nil {
+			ReleaseResponse(resp)
+			t.Fatalf("unexpected stream close error: %v", err)
+		}
+		ReleaseResponse(resp)
+	}
+
+	if got := dialCount.Load(); got != 1 {
+		t.Fatalf("fully read response connection was not reused: got %d dials", got)
+	}
+}
+
+func TestClientStreamCloseReusesZeroLengthResponseConnection(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(HeaderContentLength, "0")
+		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(server.Close)
 
@@ -263,7 +308,331 @@ func TestClientStreamCloseReusesBufferedResponseConnection(t *testing.T) {
 	}
 
 	if got := dialCount.Load(); got != 1 {
-		t.Fatalf("buffered response connection was not reused: got %d dials", got)
+		t.Fatalf("zero-length response connection was not reused: got %d dials", got)
+	}
+}
+
+func TestClientByteReturningHelpersWithStreamingEnabled(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := []byte("get response")
+		if r.Method == http.MethodPost {
+			body, _ = io.ReadAll(r.Body)
+		}
+		w.Header().Set(HeaderContentLength, strconv.Itoa(len(body)))
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(server.Close)
+
+	client := &Client{StreamResponseBody: true}
+	hostClient := &HostClient{
+		Addr:               strings.TrimPrefix(server.URL, "http://"),
+		StreamResponseBody: true,
+	}
+	t.Cleanup(client.CloseIdleConnections)
+	t.Cleanup(hostClient.CloseIdleConnections)
+
+	clients := []struct {
+		name   string
+		client interface {
+			Get([]byte, string) (int, []byte, error)
+			Post([]byte, string, *Args) (int, []byte, error)
+		}
+	}{
+		{name: "Client", client: client},
+		{name: "HostClient", client: hostClient},
+	}
+
+	for _, tc := range clients {
+		t.Run(tc.name, func(t *testing.T) {
+			statusCode, body, err := tc.client.Get(nil, server.URL)
+			if err != nil {
+				t.Fatalf("unexpected GET error: %v", err)
+			}
+			if statusCode != StatusOK {
+				t.Fatalf("unexpected GET status code %d", statusCode)
+			}
+			if string(body) != "get response" {
+				t.Fatalf("unexpected GET body %q", body)
+			}
+
+			var args Args
+			args.Set("foo", "bar")
+			statusCode, body, err = tc.client.Post(body[:0], server.URL, &args)
+			if err != nil {
+				t.Fatalf("unexpected POST error: %v", err)
+			}
+			if statusCode != StatusOK {
+				t.Fatalf("unexpected POST status code %d", statusCode)
+			}
+			if string(body) != args.String() {
+				t.Fatalf("unexpected POST body %q", body)
+			}
+		})
+	}
+}
+
+func TestClientByteReturningHelpersHonorMaxResponseBodySizeWithStreamingEnabled(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "response exceeds limit")
+	}))
+	t.Cleanup(server.Close)
+
+	client := &Client{
+		StreamResponseBody:  true,
+		MaxResponseBodySize: 8,
+	}
+	hostClient := &HostClient{
+		Addr:                strings.TrimPrefix(server.URL, "http://"),
+		StreamResponseBody:  true,
+		MaxResponseBodySize: 8,
+	}
+	t.Cleanup(client.CloseIdleConnections)
+	t.Cleanup(hostClient.CloseIdleConnections)
+
+	clients := []struct {
+		name   string
+		client interface {
+			Get([]byte, string) (int, []byte, error)
+			Post([]byte, string, *Args) (int, []byte, error)
+		}
+	}{
+		{name: "Client", client: client},
+		{name: "HostClient", client: hostClient},
+	}
+
+	for _, tc := range clients {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := tc.client.Get(nil, server.URL); !errors.Is(err, ErrBodyTooLarge) {
+				t.Fatalf("unexpected GET error %v; want %v", err, ErrBodyTooLarge)
+			}
+			if _, _, err := tc.client.Post(nil, server.URL, nil); !errors.Is(err, ErrBodyTooLarge) {
+				t.Fatalf("unexpected POST error %v; want %v", err, ErrBodyTooLarge)
+			}
+		})
+	}
+}
+
+func TestClientByteReturningHelperPreservesBodyWithPoolLimit(t *testing.T) {
+	oldRequestLimit := atomic.LoadInt64(&requestBodyPoolSizeLimit)
+	oldResponseLimit := atomic.LoadInt64(&responseBodyPoolSizeLimit)
+	SetBodySizePoolLimit(int(oldRequestLimit), 1)
+	t.Cleanup(func() {
+		SetBodySizePoolLimit(int(oldRequestLimit), int(oldResponseLimit))
+	})
+
+	client := Client{
+		Transport: &TransportMock{wrapperFunc: func(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+			resp.Header.SetStatusCode(StatusOK)
+			resp.SetBodyString("fresh response")
+			return false, nil
+		}},
+	}
+	tests := []struct {
+		name string
+		do   func([]byte) (int, []byte, error)
+	}{
+		{name: "GET", do: func(dst []byte) (int, []byte, error) {
+			return client.Get(dst, "http://example.com/")
+		}},
+		{name: "POST", do: func(dst []byte) (int, []byte, error) {
+			return client.Post(dst, "http://example.com/", nil)
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dst := make([]byte, len("stale response"), 64)
+			copy(dst, "stale response")
+
+			statusCode, body, err := tc.do(dst)
+			if err != nil {
+				t.Fatalf("unexpected request error: %v", err)
+			}
+			if statusCode != StatusOK {
+				t.Fatalf("unexpected status code %d", statusCode)
+			}
+			if string(body) != "fresh response" {
+				t.Fatalf("unexpected response body %q", body)
+			}
+		})
+	}
+}
+
+func TestClientByteReturningHelperRetriesBodyReadError(t *testing.T) {
+	t.Parallel()
+
+	var dialCount atomic.Int32
+	serverDone := make(chan error, 2)
+	client := HostClient{
+		Addr:                      "example.com:80",
+		StreamResponseBody:        true,
+		MaxIdemponentCallAttempts: 2,
+		RetryIfErr: func(_ *Request, attempts int, err error) (bool, bool) {
+			if attempts != 1 {
+				t.Errorf("unexpected retry attempt %d", attempts)
+			}
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("unexpected retry error %v; want %v", err, io.ErrUnexpectedEOF)
+			}
+			return false, true
+		},
+		Dial: func(string) (net.Conn, error) {
+			attempt := dialCount.Add(1)
+			if attempt > 2 {
+				return nil, fmt.Errorf("unexpected dial attempt %d", attempt)
+			}
+			clientConn, serverConn := net.Pipe()
+			go func() {
+				defer serverConn.Close()
+				reader := bufio.NewReader(serverConn)
+				for {
+					line, err := reader.ReadString('\n')
+					if err != nil {
+						serverDone <- err
+						return
+					}
+					if line == "\r\n" {
+						break
+					}
+				}
+				body := "short"
+				if attempt == 2 {
+					body = "hello world"
+				}
+				_, err := io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n"+body)
+				serverDone <- err
+			}()
+			return clientConn, nil
+		},
+	}
+	t.Cleanup(client.CloseIdleConnections)
+
+	statusCode, body, err := client.Get(nil, "http://example.com/")
+	if err != nil {
+		t.Fatalf("unexpected GET error: %v", err)
+	}
+	if statusCode != StatusOK {
+		t.Fatalf("unexpected GET status code %d", statusCode)
+	}
+	if string(body) != "hello world" {
+		t.Fatalf("unexpected GET body %q", body)
+	}
+	if got := dialCount.Load(); got != 2 {
+		t.Fatalf("unexpected dial count %d; want 2", got)
+	}
+	for range 2 {
+		if err := <-serverDone; err != nil {
+			t.Fatalf("unexpected server error: %v", err)
+		}
+	}
+}
+
+func TestClientStreamingDoesNotPreReadFixedLengthBody(t *testing.T) {
+	tests := []struct {
+		name               string
+		streamResponseBody bool
+	}{
+		{name: "client option", streamResponseBody: true},
+		{name: "response option"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clientConn, serverConn := net.Pipe()
+			allowBody := make(chan struct{})
+			var allowBodyOnce sync.Once
+			releaseBody := func() {
+				allowBodyOnce.Do(func() {
+					close(allowBody)
+				})
+			}
+			serverDone := make(chan error, 1)
+			go func() {
+				defer serverConn.Close()
+				reader := bufio.NewReader(serverConn)
+				for {
+					line, err := reader.ReadString('\n')
+					if err != nil {
+						serverDone <- err
+						return
+					}
+					if line == "\r\n" {
+						break
+					}
+				}
+				if _, err := io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\n"); err != nil {
+					serverDone <- err
+					return
+				}
+				<-allowBody
+				_, err := io.WriteString(serverConn, "hello world")
+				serverDone <- err
+			}()
+			t.Cleanup(func() {
+				releaseBody()
+				_ = clientConn.Close()
+				_ = serverConn.Close()
+			})
+
+			client := HostClient{
+				Addr:               "example.com:80",
+				Dial:               func(string) (net.Conn, error) { return clientConn, nil },
+				StreamResponseBody: tc.streamResponseBody,
+			}
+			t.Cleanup(client.CloseIdleConnections)
+
+			var req Request
+			req.SetRequestURI("http://example.com/")
+			var resp Response
+			resp.StreamBody = !tc.streamResponseBody
+
+			doDone := make(chan error, 1)
+			go func() {
+				doDone <- client.Do(&req, &resp)
+			}()
+
+			select {
+			case err := <-doDone:
+				if err != nil {
+					t.Fatalf("unexpected request error: %v", err)
+				}
+			case <-time.After(time.Second):
+				releaseBody()
+				select {
+				case <-doDone:
+				case <-time.After(time.Second):
+					_ = clientConn.Close()
+					select {
+					case <-doDone:
+					case <-time.After(time.Second):
+						t.Fatal("client did not stop after its connection was closed")
+					}
+				}
+				_ = resp.CloseBodyStream()
+				t.Fatal("client waited for the fixed-length response body")
+			}
+
+			if _, ok := resp.BodyStream().(*clientStreamBody); !ok {
+				t.Fatalf("unexpected body stream type %T", resp.BodyStream())
+			}
+			releaseBody()
+			body, err := io.ReadAll(resp.BodyStream())
+			if err != nil {
+				t.Fatalf("unexpected body stream error: %v", err)
+			}
+			if string(body) != "hello world" {
+				t.Fatalf("unexpected body %q", body)
+			}
+			if err := resp.CloseBodyStream(); err != nil {
+				t.Fatalf("unexpected close error: %v", err)
+			}
+			if err := <-serverDone; err != nil {
+				t.Fatalf("unexpected server error: %v", err)
+			}
+		})
 	}
 }
 
@@ -271,13 +640,11 @@ func TestClientStreamCloseHonorsLateSetConnectionClose(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		name string
-		// A body larger than maxResponseBodySize is served through a
-		// *requestStream; leaving it at zero buffers the body instead.
+		name                string
 		maxResponseBodySize int
 	}{
-		{name: "requestStream", maxResponseBodySize: 1},
-		{name: "buffered", maxResponseBodySize: 0},
+		{name: "zero limit", maxResponseBodySize: 0},
+		{name: "positive limit", maxResponseBodySize: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -307,6 +674,10 @@ func TestClientStreamCloseHonorsLateSetConnectionClose(t *testing.T) {
 				if err := client.Do(&req, resp); err != nil {
 					ReleaseResponse(resp)
 					t.Fatalf("unexpected request error: %v", err)
+				}
+				if _, ok := resp.BodyStream().(*clientStreamBody); !ok {
+					ReleaseResponse(resp)
+					t.Fatalf("unexpected body stream type %T", resp.BodyStream())
 				}
 				if _, err := io.ReadAll(resp.BodyStream()); err != nil {
 					ReleaseResponse(resp)
@@ -805,6 +1176,156 @@ func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 	}
 }
 
+func TestPipelineClientBuffersStreamBody(t *testing.T) {
+	t.Parallel()
+
+	clientConn, serverConn := net.Pipe()
+	t.Cleanup(func() {
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+	})
+
+	serverDone := make(chan error, 1)
+	go func() {
+		defer serverConn.Close()
+		br := bufio.NewReader(serverConn)
+		for _, body := range []string{"FIRST", "SECOND"} {
+			var req Request
+			if err := req.Read(br); err != nil {
+				serverDone <- err
+				return
+			}
+			if _, err := fmt.Fprintf(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+				serverDone <- err
+				return
+			}
+		}
+		serverDone <- nil
+	}()
+
+	var dialed atomic.Bool
+	client := PipelineClient{
+		Dial: func(string) (net.Conn, error) {
+			if !dialed.CompareAndSwap(false, true) {
+				return nil, errors.New("unexpected second dial")
+			}
+			return clientConn, nil
+		},
+		MaxIdleConnDuration: time.Second,
+		Logger:              &testLogger{},
+	}
+
+	var req1 Request
+	req1.SetRequestURI("http://example.test/first")
+	var resp1 Response
+	resp1.StreamBody = true
+	if err := client.Do(&req1, &resp1); err != nil {
+		t.Fatalf("first request failed: %v", err)
+	}
+	if got := string(resp1.bodyBytes()); got != "FIRST" {
+		t.Fatalf("first response was not buffered: got %q", got)
+	}
+
+	var req2 Request
+	req2.SetRequestURI("http://example.test/second")
+	var resp2 Response
+	if err := client.Do(&req2, &resp2); err != nil {
+		t.Fatalf("second request failed: %v", err)
+	}
+	if got := string(resp2.Body()); got != "SECOND" {
+		t.Fatalf("unexpected second response body %q", got)
+	}
+
+	firstBody, err := io.ReadAll(resp1.BodyStream())
+	if err != nil {
+		t.Fatalf("read first buffered body stream: %v", err)
+	}
+	if got := string(firstBody); got != "FIRST" {
+		t.Fatalf("unexpected first response body %q", got)
+	}
+	if err := resp1.CloseBodyStream(); err != nil {
+		t.Fatalf("close first buffered body stream: %v", err)
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatalf("server failed: %v", err)
+	}
+}
+
+func TestPipelineClientDeadlineMethodsPreserveStreamBody(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		do   func(*PipelineClient, *Request, *Response) error
+	}{
+		{
+			name: "DoTimeout",
+			do: func(c *PipelineClient, req *Request, resp *Response) error {
+				return c.DoTimeout(req, resp, time.Second)
+			},
+		},
+		{
+			name: "DoDeadline",
+			do: func(c *PipelineClient, req *Request, resp *Response) error {
+				return c.DoDeadline(req, resp, time.Now().Add(time.Second))
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clientConn, serverConn := net.Pipe()
+			t.Cleanup(func() {
+				_ = clientConn.Close()
+				_ = serverConn.Close()
+			})
+
+			serverDone := make(chan error, 1)
+			go func() {
+				defer serverConn.Close()
+				var req Request
+				if err := req.Read(bufio.NewReader(serverConn)); err != nil {
+					serverDone <- err
+					return
+				}
+				_, err := io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nBODY")
+				serverDone <- err
+			}()
+
+			client := PipelineClient{
+				Addr:                "example.com:80",
+				Dial:                func(string) (net.Conn, error) { return clientConn, nil },
+				MaxIdleConnDuration: time.Second,
+				Logger:              &testLogger{},
+			}
+			var req Request
+			req.SetRequestURI("http://example.com/")
+			var resp Response
+			resp.StreamBody = true
+
+			if err := tc.do(&client, &req, &resp); err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			if !resp.StreamBody || !resp.IsBodyStream() {
+				t.Fatalf("stream body setting was lost: enabled=%v, stream=%T", resp.StreamBody, resp.BodyStream())
+			}
+			body, err := io.ReadAll(resp.BodyStream())
+			if err != nil {
+				t.Fatalf("read buffered body stream: %v", err)
+			}
+			if string(body) != "BODY" {
+				t.Fatalf("unexpected response body %q", body)
+			}
+			if err := resp.CloseBodyStream(); err != nil {
+				t.Fatalf("close body stream: %v", err)
+			}
+			if err := <-serverDone; err != nil {
+				t.Fatalf("server failed: %v", err)
+			}
+		})
+	}
+}
+
 func TestPipelineClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
 	t.Parallel()
 
@@ -1044,6 +1565,118 @@ func TestClientNilResp(t *testing.T) {
 		t.Fatal(err)
 	}
 	ln.Close()
+}
+
+func TestClientNilRespWithStreamingEnabledReusesConnection(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "hello world")
+	}))
+	t.Cleanup(server.Close)
+
+	var dialCount atomic.Int32
+	client := HostClient{
+		Addr: strings.TrimPrefix(server.URL, "http://"),
+		Dial: func(addr string) (net.Conn, error) {
+			dialCount.Add(1)
+			return net.Dial("tcp", addr)
+		},
+		StreamResponseBody: true,
+	}
+	t.Cleanup(client.CloseIdleConnections)
+
+	for range 2 {
+		var req Request
+		req.SetRequestURI(server.URL)
+		if err := client.Do(&req, nil); err != nil {
+			t.Fatalf("unexpected request error: %v", err)
+		}
+	}
+
+	if got := dialCount.Load(); got != 1 {
+		t.Fatalf("ignored response body prevented connection reuse: got %d dials", got)
+	}
+}
+
+func TestClientNilRespWithStreamingEnabledDoesNotDrainDiscardedBody(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name                string
+		responseHeader      string
+		maxResponseBodySize int
+	}{
+		{
+			name:           "unknown length",
+			responseHeader: "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n",
+		},
+		{
+			name:                "over configured limit",
+			responseHeader:      "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n",
+			maxResponseBodySize: 1,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clientConn, serverConn := net.Pipe()
+			t.Cleanup(func() {
+				_ = clientConn.Close()
+				_ = serverConn.Close()
+			})
+
+			serverDone := make(chan error, 1)
+			go func() {
+				defer serverConn.Close()
+				var req Request
+				if err := req.Read(bufio.NewReader(serverConn)); err != nil {
+					serverDone <- err
+					return
+				}
+				if _, err := io.WriteString(serverConn, tc.responseHeader); err != nil {
+					serverDone <- err
+					return
+				}
+
+				var b [1]byte
+				if _, err := serverConn.Read(b[:]); err == nil {
+					serverDone <- errors.New("client kept the discarded response stream open")
+					return
+				}
+				serverDone <- nil
+			}()
+
+			client := HostClient{
+				Addr:                "example.com:80",
+				Dial:                func(string) (net.Conn, error) { return clientConn, nil },
+				StreamResponseBody:  true,
+				MaxResponseBodySize: tc.maxResponseBodySize,
+			}
+			t.Cleanup(client.CloseIdleConnections)
+
+			var req Request
+			req.SetRequestURI("http://example.com/")
+			doDone := make(chan error, 1)
+			go func() {
+				doDone <- client.Do(&req, nil)
+			}()
+
+			select {
+			case err := <-doDone:
+				if err != nil {
+					t.Fatalf("unexpected request error: %v", err)
+				}
+			case <-time.After(time.Second):
+				_ = clientConn.Close()
+				t.Fatal("client tried to drain a discarded response")
+			}
+
+			if err := <-serverDone; err != nil {
+				t.Fatalf("server failed: %v", err)
+			}
+		})
+	}
 }
 
 func TestClientNegativeTimeout(t *testing.T) {
@@ -2423,6 +3056,94 @@ func TestClientFollowRedirects(t *testing.T) {
 
 	ReleaseRequest(req)
 	ReleaseResponse(resp)
+}
+
+func TestClientStreamingRedirectsReuseConnection(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body string
+		switch r.URL.Path {
+		case "/first":
+			body = "first redirect"
+			w.Header().Set(HeaderLocation, "/second")
+			w.Header().Set(HeaderContentLength, strconv.Itoa(len(body)))
+			w.WriteHeader(StatusFound)
+		case "/second":
+			body = "second redirect"
+			w.Header().Set(HeaderLocation, "/final")
+			w.Header().Set(HeaderContentLength, strconv.Itoa(len(body)))
+			w.WriteHeader(StatusFound)
+		case "/final":
+			body = "final response"
+			w.Header().Set(HeaderContentLength, strconv.Itoa(len(body)))
+		default:
+			t.Errorf("unexpected request path %q", r.URL.Path)
+			w.WriteHeader(StatusNotFound)
+			return
+		}
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(server.Close)
+
+	var dialCount atomic.Int32
+	client := HostClient{
+		Addr: strings.TrimPrefix(server.URL, "http://"),
+		Dial: func(addr string) (net.Conn, error) {
+			dialCount.Add(1)
+			return net.Dial("tcp", addr)
+		},
+		StreamResponseBody: true,
+	}
+	t.Cleanup(client.CloseIdleConnections)
+
+	var req Request
+	req.SetRequestURI(server.URL + "/first")
+	var resp Response
+	if err := client.DoRedirects(&req, &resp, 2); err != nil {
+		t.Fatalf("follow redirects: %v", err)
+	}
+	body, err := io.ReadAll(resp.BodyStream())
+	if err != nil {
+		t.Fatalf("read final response: %v", err)
+	}
+	if string(body) != "final response" {
+		t.Fatalf("unexpected final response %q", body)
+	}
+	if err := resp.CloseBodyStream(); err != nil {
+		t.Fatalf("close final response: %v", err)
+	}
+	if got := dialCount.Load(); got != 1 {
+		t.Fatalf("redirect responses prevented connection reuse: got %d dials", got)
+	}
+}
+
+func TestClientDoRedirectsAllowsNilResponse(t *testing.T) {
+	t.Parallel()
+
+	requests := 0
+	client := HostClient{
+		Addr: "example.com:80",
+		Transport: &TransportMock{wrapperFunc: func(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+			requests++
+			if requests == 1 {
+				resp.Header.SetStatusCode(StatusFound)
+				resp.Header.Set(HeaderLocation, "/final")
+			} else {
+				resp.Header.SetStatusCode(StatusOK)
+			}
+			return false, nil
+		}},
+	}
+
+	var req Request
+	req.SetRequestURI("http://example.com/start")
+	if err := client.DoRedirects(&req, nil, 1); err != nil {
+		t.Fatalf("follow redirects with nil response: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("unexpected request count %d; want 2", requests)
+	}
 }
 
 func TestClientRedirectMethodSwitch(t *testing.T) {
@@ -4840,6 +5561,33 @@ func TestClientRetryIfErrUpstream(t *testing.T) {
 		err := c.Do(req, res)
 		if !errors.Is(err, upstreamErr) {
 			t.Fatal(err)
+		}
+		if !retryIfErrCalled {
+			t.Fatal("RetryIfErrUpstream should be called")
+		}
+	})
+
+	t.Run("nil response", func(t *testing.T) {
+		retryIfErrCalled := false
+		c := &Client{
+			Transport: &TransportMock{
+				wrapperFunc: func(_ *HostClient, _ *Request, _ *Response) (bool, error) {
+					return true, upstreamErr
+				},
+			},
+			RetryIfErrUpstream: func(_ *Request, _ int, _ error, upstream string) (bool, bool) {
+				retryIfErrCalled = true
+				if upstream != "" {
+					t.Errorf("expected upstream to be empty, got %s", upstream)
+				}
+				return false, false
+			},
+		}
+		var req Request
+		req.SetRequestURI("http://example.com")
+
+		if err := c.Do(&req, nil); !errors.Is(err, upstreamErr) {
+			t.Fatalf("unexpected error: %v", err)
 		}
 		if !retryIfErrCalled {
 			t.Fatal("RetryIfErrUpstream should be called")
