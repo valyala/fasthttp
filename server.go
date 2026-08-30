@@ -2641,6 +2641,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			s.Handler(ctx)
 		}
 
+		// A failed multipart drain leaves the connection mid-body. Capture it
+		// now, before timeoutResponse swaps out ctx below and before ctx.Request
+		// can be reset, so the close decision still sees it.
+		bodyStreamDrainErr := ctx.Request.bodyStreamDrainErr
+
 		timeoutResponse = ctx.timeoutResponse
 		if timeoutResponse != nil {
 			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
@@ -2673,6 +2678,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		connectionClose = connectionClose ||
 			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
 			ctx.Response.Header.ConnectionClose() ||
+			bodyStreamDrainErr ||
 			(s.CloseOnShutdown && s.stop.Load() == 1)
 		if connectionClose {
 			ctx.Response.Header.SetConnectionClose()

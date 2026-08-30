@@ -71,6 +71,13 @@ type Request struct {
 
 	keepBodyBuffer bool
 
+	// Set when a streamed request body could not be fully drained, e.g. a
+	// malformed chunk was hit while discarding the multipart epilogue. The
+	// connection is then left mid-body, so the server must close it rather
+	// than reuse it, otherwise the leftover bytes are read back as the start
+	// of the next request.
+	bodyStreamDrainErr bool
+
 	// Used by Server to indicate the request was received on a HTTPS endpoint.
 	// Client/HostClient shouldn't use this field but should depend on the uri.scheme instead.
 	isTLS bool
@@ -1136,6 +1143,26 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 		return req.multipartForm, nil
 	}
 
+	// Every declared body byte has to come off req.bodyStream before we
+	// return, on the error paths as much as the success one. ReadForm stops at
+	// the closing boundary and the early errors (missing boundary, unsupported
+	// content-encoding, bad gzip header) stop even sooner, so without this the
+	// leftover bytes are read back as the start of the next request on a
+	// keep-alive connection. Draining req.bodyStream directly also avoids
+	// comparing reader interface values, which panics for an uncomparable
+	// dynamic type set through SetBodyStream.
+	if req.bodyStream != nil {
+		defer func() {
+			if _, drainErr := copyZeroAlloc(io.Discard, req.bodyStream); drainErr != nil {
+				// The declared body could not be fully consumed, so the
+				// connection is left mid-body. Mark it so the server closes the
+				// connection instead of parsing the leftover as the next
+				// request.
+				req.bodyStreamDrainErr = true
+			}
+		}()
+	}
+
 	req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
 	if req.multipartFormBoundary == "" {
 		return nil, ErrNoMultipartForm
@@ -1164,15 +1191,29 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 
 		mr := multipart.NewReader(bodyStream, req.multipartFormBoundary)
 		req.multipartForm, err = mr.ReadForm(8 * 1024)
-		if err != nil {
-			if lr != nil && lr.N <= 0 {
-				return nil, fmt.Errorf("cannot read multipart/form-data body: %w", ErrBodyTooLarge)
+
+		// Drain the rest of the declared body through bodyStream so the
+		// leftover keeps counting towards maxBodySize; the deferred drain then
+		// clears whatever remains on the raw stream so the connection stays
+		// framed.
+		if _, drainErr := copyZeroAlloc(io.Discard, bodyStream); drainErr != nil {
+			// The stream stopped short of the end of the declared body, so the
+			// connection is mid-body. Mark it sticky here rather than leaving it
+			// to the deferred drain: that retry can resume past the bad byte at
+			// a valid terminating chunk and return nil, which would otherwise
+			// leave the connection reusable and the leftover parsed as the next
+			// request.
+			req.bodyStreamDrainErr = true
+			if err == nil {
+				err = drainErr
 			}
-			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 		}
 		if lr != nil && lr.N <= 0 {
+			err = ErrBodyTooLarge
+		}
+		if err != nil {
 			req.RemoveMultipartFormFiles()
-			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", ErrBodyTooLarge)
+			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 		}
 	} else {
 		body := req.bodyBytes()
@@ -1263,10 +1304,22 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 	if size <= 0 {
 		return nil, fmt.Errorf("form size must be greater than 0: given %d", size)
 	}
-	lr := io.LimitReader(r, int64(size))
+	lr := &io.LimitedReader{R: r, N: int64(size)}
 	mr := multipart.NewReader(lr, boundary)
 	f, err := mr.ReadForm(int64(maxInMemoryFileSize))
 	if err != nil {
+		return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
+	}
+	// ReadForm stops at the closing boundary, so anything the sender placed
+	// between it and Content-Length is still unread on r. Discard it, since
+	// on a keep-alive connection those bytes are otherwise read back as the
+	// beginning of the next request.
+	if _, err = copyZeroAlloc(io.Discard, lr); err == nil && lr.N > 0 {
+		// r ended before the declared body size was reached.
+		err = io.ErrUnexpectedEOF
+	}
+	if err != nil {
+		f.RemoveAll() //nolint:errcheck
 		return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 	}
 	return f, nil
@@ -1293,6 +1346,7 @@ func (req *Request) resetSkipHeader() {
 	req.postArgs.Reset()
 	req.parsedPostArgs = false
 	req.isTLS = false
+	req.bodyStreamDrainErr = false
 }
 
 // RemoveMultipartFormFiles removes multipart/form-data temporary files

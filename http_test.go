@@ -1705,6 +1705,76 @@ func TestRequestMultipartForm(t *testing.T) {
 	testRequestMultipartForm(t, "foobar", req.Body(), 3)
 }
 
+func TestRequestMultipartFormEpilogue(t *testing.T) {
+	t.Parallel()
+
+	// Bytes the sender put between the closing boundary and Content-Length.
+	// They belong to this request's body, so they must not show up as the
+	// next request on the connection.
+	body := "--foobar\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--foobar--\r\n" +
+		strings.Repeat("z", 8*1024)
+	next := "GET /next HTTP/1.1\r\nHost: aaa\r\n\r\n"
+
+	s := fmt.Sprintf("POST /first HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=foobar\r\nContent-Length: %d\r\n\r\n%s%s",
+		len(body), body, next)
+
+	br := bufio.NewReader(bytes.NewBufferString(s))
+
+	var req Request
+	if err := req.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	req.RemoveMultipartFormFiles()
+
+	var req2 Request
+	if err := req2.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(req2.URI().Path()) != "/next" {
+		t.Fatalf("unexpected path %q; expecting %q", req2.URI().Path(), "/next")
+	}
+}
+
+// uncomparableReader is passed by value and holds a slice, so its dynamic type
+// is not comparable and `reader == reader` panics at runtime.
+type uncomparableReader struct {
+	data []byte
+	off  *int
+}
+
+func (r uncomparableReader) Read(p []byte) (int, error) {
+	if *r.off >= len(r.data) {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data[*r.off:])
+	*r.off += n
+	return n, nil
+}
+
+func TestRequestMultipartFormUncomparableBodyStream(t *testing.T) {
+	t.Parallel()
+
+	// SetBodyStream accepts any io.Reader, so the drain must not compare the
+	// stream against another reader value: an uncomparable dynamic type would
+	// panic with "comparing uncomparable type".
+	body := "--foobar\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--foobar--\r\n"
+
+	var req Request
+	req.Header.SetContentType("multipart/form-data; boundary=foobar")
+	req.Header.SetContentLength(len(body))
+	req.SetBodyStream(uncomparableReader{data: []byte(body), off: new(int)}, len(body))
+
+	form, err := req.MultipartForm()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer req.RemoveMultipartFormFiles()
+
+	if v := form.Value["key"]; len(v) != 1 || v[0] != "value" {
+		t.Fatalf("unexpected form value %q; expecting %q", form.Value["key"], []string{"value"})
+	}
+}
+
 func testRequestMultipartForm(t *testing.T, boundary string, formData []byte, partsCount int) []byte {
 	s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: multipart/form-data; boundary=%s\r\nContent-Length: %d\r\n\r\n%s",
 		boundary, len(formData), formData)
