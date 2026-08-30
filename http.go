@@ -1176,8 +1176,17 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 		// leftover keeps counting towards maxBodySize; the deferred drain then
 		// clears whatever remains on the raw stream so the connection stays
 		// framed.
-		if _, drainErr := copyZeroAlloc(io.Discard, bodyStream); err == nil {
-			err = drainErr
+		if _, drainErr := copyZeroAlloc(io.Discard, bodyStream); drainErr != nil {
+			// The stream stopped short of the end of the declared body, so the
+			// connection is mid-body. Mark it sticky here rather than leaving it
+			// to the deferred drain: that retry can resume past the bad byte at
+			// a valid terminating chunk and return nil, which would otherwise
+			// leave the connection reusable and the leftover parsed as the next
+			// request.
+			req.bodyStreamDrainErr = true
+			if err == nil {
+				err = drainErr
+			}
 		}
 		if lr != nil && lr.N <= 0 {
 			err = ErrBodyTooLarge

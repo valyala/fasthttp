@@ -1933,6 +1933,84 @@ func TestServerDoesNotParseStreamedMultipartMalformedChunkAsRequest(t *testing.T
 	}
 }
 
+func TestServerClosesAfterAnyStreamedMultipartDrainError(t *testing.T) {
+	t.Parallel()
+
+	// The inline drain fails on the invalid chunk-size byte, but the terminating
+	// chunk right after it lets the deferred drain resume and return cleanly.
+	// The first framing failure has to stay sticky, otherwise the connection is
+	// reused and the bytes after the terminator run as the next request.
+	form := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := fmt.Sprintf("%x\r\n%s\r\n", len(form), form) +
+		"\x00" + "0\r\n\r\n" + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\nHost: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Transfer-Encoding: chunked\r\n\r\n%s",
+		body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1,
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) == "/first" {
+				_ = ctx.FormValue("x")
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
+func TestServerPreservesMultipartDrainErrorAcrossTimeoutResponse(t *testing.T) {
+	t.Parallel()
+
+	// TimeoutErrorWithCode swaps out ctx after the handler, so the drain error
+	// has to be read off the original request before the swap; otherwise the
+	// close decision sees a fresh context and reuses the connection.
+	form := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := fmt.Sprintf("%x\r\n%s\r\n", len(form), form) + "\x00" + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\nHost: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Transfer-Encoding: chunked\r\n\r\n%s",
+		body,
+	)
+
+	var paths []string
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1,
+		Handler: func(ctx *RequestCtx) {
+			path := string(ctx.Path())
+			paths = append(paths, path)
+			if path == "/first" {
+				_ = ctx.FormValue("x")
+				ctx.TimeoutErrorWithCode("timeout", StatusRequestTimeout)
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
 func TestServerGetWithContent(t *testing.T) {
 	t.Parallel()
 
