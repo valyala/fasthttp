@@ -265,10 +265,14 @@ type Client struct {
 
 	// Maximum duration for full response reading (including body).
 	//
+	// If a request timeout is set, the shorter timeout applies.
+	//
 	// By default response read timeout is unlimited.
 	ReadTimeout time.Duration
 
 	// Maximum duration for full request writing (including body).
+	//
+	// If a request timeout is set, the shorter timeout applies.
 	//
 	// By default request write timeout is unlimited.
 	WriteTimeout time.Duration
@@ -866,10 +870,14 @@ type HostClient struct {
 
 	// Maximum duration for full response reading (including body).
 	//
+	// If a request timeout is set, the shorter timeout applies.
+	//
 	// By default response read timeout is unlimited.
 	ReadTimeout time.Duration
 
 	// Maximum duration for full request writing (including body).
+	//
+	// If a request timeout is set, the shorter timeout applies.
 	//
 	// By default request write timeout is unlimited.
 	WriteTimeout time.Duration
@@ -3209,8 +3217,11 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	resp.ParseNetConn(conn)
 
 	writeDeadline := deadline
-	if writeDeadline.IsZero() && hc.WriteTimeout > 0 {
-		writeDeadline = time.Now().Add(hc.WriteTimeout)
+	if hc.WriteTimeout > 0 {
+		tmpWriteDeadline := time.Now().Add(hc.WriteTimeout)
+		if writeDeadline.IsZero() || tmpWriteDeadline.Before(writeDeadline) {
+			writeDeadline = tmpWriteDeadline
+		}
 	}
 
 	if err = conn.SetWriteDeadline(writeDeadline); err != nil {
@@ -3247,8 +3258,11 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 
 	readDeadline := deadline
-	if readDeadline.IsZero() && hc.ReadTimeout > 0 {
-		readDeadline = time.Now().Add(hc.ReadTimeout)
+	if hc.ReadTimeout > 0 {
+		tmpReadDeadline := time.Now().Add(hc.ReadTimeout)
+		if readDeadline.IsZero() || tmpReadDeadline.Before(readDeadline) {
+			readDeadline = tmpReadDeadline
+		}
 	}
 
 	if err = conn.SetReadDeadline(readDeadline); err != nil {

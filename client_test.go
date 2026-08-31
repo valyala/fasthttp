@@ -1064,37 +1064,65 @@ func TestClientReadTimeout(t *testing.T) {
 	}
 }
 
-func TestHostClientRequestTimeoutOverridesClientTimeout(t *testing.T) {
+func TestHostClientRequestAndClientTimeoutPrecedence(t *testing.T) {
 	t.Parallel()
 
-	conn := &deadlineRecordingConn{
-		response: []byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"),
-	}
-	clientTimeout := 50 * time.Millisecond
-	requestTimeout := 500 * time.Millisecond
-	c := &HostClient{
-		Addr:                      "example.com:80",
-		ReadTimeout:               clientTimeout,
-		WriteTimeout:              clientTimeout,
-		MaxIdemponentCallAttempts: 1,
-		Dial: func(string) (net.Conn, error) {
-			return conn, nil
+	tests := []struct {
+		name            string
+		clientTimeout   time.Duration
+		requestTimeout  time.Duration
+		expectedTimeout time.Duration
+	}{
+		{
+			name:            "client timeout is shorter",
+			clientTimeout:   time.Second,
+			requestTimeout:  4 * time.Second,
+			expectedTimeout: time.Second,
+		},
+		{
+			name:            "request timeout is shorter",
+			clientTimeout:   4 * time.Second,
+			requestTimeout:  time.Second,
+			expectedTimeout: time.Second,
 		},
 	}
 
-	var req Request
-	var resp Response
-	req.SetRequestURI("http://example.com/")
-	if err := c.DoTimeout(&req, &resp, requestTimeout); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := &deadlineRecordingConn{
+				response: []byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"),
+			}
+			c := &HostClient{
+				Addr:                      "example.com:80",
+				ReadTimeout:               tt.clientTimeout,
+				WriteTimeout:              tt.clientTimeout,
+				MaxIdemponentCallAttempts: 1,
+				Dial: func(string) (net.Conn, error) {
+					return conn, nil
+				},
+			}
 
-	minDeadline := time.Now().Add(requestTimeout / 2)
-	if conn.writeDeadline.Before(minDeadline) {
-		t.Fatalf("write deadline %s is capped by client timeout", conn.writeDeadline)
+			var req Request
+			var resp Response
+			req.SetRequestURI("http://example.com/")
+			if err := c.DoTimeout(&req, &resp, tt.requestTimeout); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			assertDeadlineWithin(t, "write", conn.writeDeadline, tt.expectedTimeout)
+			assertDeadlineWithin(t, "read", conn.readDeadline, tt.expectedTimeout)
+		})
 	}
-	if conn.readDeadline.Before(minDeadline) {
-		t.Fatalf("read deadline %s is capped by client timeout", conn.readDeadline)
+}
+
+func assertDeadlineWithin(t *testing.T, name string, deadline time.Time, timeout time.Duration) {
+	t.Helper()
+
+	margin := timeout / 4
+	minDeadline := time.Now().Add(timeout - margin)
+	maxDeadline := time.Now().Add(timeout + margin)
+	if deadline.Before(minDeadline) || deadline.After(maxDeadline) {
+		t.Fatalf("%s deadline %s; want it within %s of now", name, deadline, timeout)
 	}
 }
 

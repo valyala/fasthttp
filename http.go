@@ -2902,6 +2902,8 @@ func readCrLf(r *bufio.Reader) error {
 
 // SetTimeout sets timeout for the request.
 //
+// If the client has ReadTimeout or WriteTimeout set, the shorter timeout applies.
+//
 // The following code:
 //
 //	req.SetTimeout(t)
