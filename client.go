@@ -1912,14 +1912,27 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 		}
 	}
 
-	if startCleaner {
-		go c.connsCleaner()
-	}
-
 	conn, err := c.dialHostHard(reqTimeout)
 	if err != nil {
 		c.decConnsCount()
+		if startCleaner {
+			c.connsLock.Lock()
+			if c.connsCount == 0 {
+				c.connsCleanerRun = false
+				startCleaner = false
+			}
+			c.connsLock.Unlock()
+		}
+		if !startCleaner {
+			return nil, err
+		}
+		// Other in-use connections still need the cleaner.
+		go c.connsCleaner()
 		return nil, err
+	}
+
+	if startCleaner {
+		go c.connsCleaner()
 	}
 	cc = acquireClientConn(conn)
 
