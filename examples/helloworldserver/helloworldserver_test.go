@@ -11,7 +11,8 @@ import (
 	"github.com/valyala/fasthttp"
 )
 
-// TestZeroAllocation mirrors TestAllocationServeConn in allocation_test.go.
+// TestZeroAllocation asserts the 0 allocs/op claim in README.md. It mirrors
+// TestAllocationServeConn in allocation_test.go.
 func TestZeroAllocation(t *testing.T) {
 	s := &fasthttp.Server{
 		Handler: requestHandler,

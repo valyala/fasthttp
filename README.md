@@ -474,8 +474,8 @@ before returning from [RequestHandler](https://pkg.go.dev/github.com/valyala/fas
   the `Append*` helpers (`AppendUint`, `AppendIPv4`, `AppendHTTPDate`, ...) instead.
 - Use `Acquire*`/`Release*` (e.g. `AcquireCookie`) rather than declaring a
   zero-value struct, which allocates its own buffers.
-- See the [zero-allocation server example](examples/zeroallocserver) for a full
-  handler rewritten this way, with a test asserting 0 allocs/op.
+- See the [helloworld server example](examples/helloworldserver) for a full
+  handler written this way, with a test asserting 0 allocs/op.
 
 ## Unsafe Zero-Allocation Conversions
 
