@@ -1800,6 +1800,10 @@ func (req *Request) onlyMultipartForm() bool {
 //
 // See also WriteTo.
 func (req *Request) Write(w *bufio.Writer) error {
+	return req.write(w, nil)
+}
+
+func (req *Request) write(w *bufio.Writer, closeBodyStream func() error) error {
 	if len(req.Header.Host()) == 0 || req.parsedURI {
 		uri := req.URI()
 		host := uri.Host()
@@ -1834,7 +1838,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	}
 
 	if req.bodyStream != nil {
-		return req.writeBodyStream(w)
+		return req.writeBodyStream(w, closeBodyStream)
 	}
 
 	body := req.bodyBytes()
@@ -2301,7 +2305,7 @@ func (resp *Response) Write(w *bufio.Writer) error {
 	return nil
 }
 
-func (req *Request) writeBodyStream(w *bufio.Writer) error {
+func (req *Request) writeBodyStream(w *bufio.Writer, closeBodyStream func() error) error {
 	var err error
 
 	contentLength := req.Header.ContentLength()
@@ -2331,7 +2335,12 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 			err = req.Header.writeTrailer(w)
 		}
 	}
-	errc := req.closeBodyStream()
+	var errc error
+	if closeBodyStream == nil {
+		errc = req.closeBodyStream()
+	} else {
+		errc = closeBodyStream()
+	}
 	if err == nil {
 		err = errc
 	}
