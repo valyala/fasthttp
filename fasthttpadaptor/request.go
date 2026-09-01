@@ -2,6 +2,7 @@ package fasthttpadaptor
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"io"
 	"math"
@@ -96,6 +97,12 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // carry a known length and trailers at the same time, and HTTP/1.x can
 // transport trailers only after a chunked body.
 //
+// The conversion never reads the body: nil and http.NoBody are the explicit
+// representations of an empty body, and any other body of unknown size is
+// streamed, even if it turns out to be empty. net/http.Client instead probes
+// such a body for some request methods to tell an empty body from an unknown
+// one; callers that need the bodiless form should pass nil or http.NoBody.
+//
 // A body of known size is truncated to that size when it is written, like
 // net/http does, so that a body longer than r.ContentLength cannot put bytes
 // past the declared boundary, where a peer would parse them as the next
@@ -132,15 +139,22 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 //
 // Credentials follow the precedence of net/http.Client: an Authorization
 // entry in r.Header takes precedence over URL credentials. Without such an
-// entry, credentials in r.URL.User are copied to the URI and are written as
-// a Basic Authorization header. With such an entry, userinfo embedded in an
+// entry, credentials in r.URL.User are written as a Basic Authorization
+// header, including credentials with an empty username, just like
+// net/http.Client sends them. With such an entry, userinfo embedded in an
 // absolute-form r.RequestURI is dropped so it cannot displace the header.
 // Either way a request carrying credentials is written with an origin-form
 // request line, since a request target must not contain userinfo (RFC 9112,
 // Section 3.2.4), just like net/http.Request.Write.
 //
 // HTTP/2 and newer protocols are normalized to HTTP/1.1, since fasthttp only
-// models HTTP/1.x messages and the HTTP version is a hop-by-hop property.
+// models HTTP/1.x messages and the HTTP version is a hop-by-hop property. An
+// older protocol is also normalized to HTTP/1.1 when the conversion requires
+// chunked framing, since chunked transfer encoding does not exist in
+// HTTP/1.0; net/http always writes request lines as HTTP/1.1. The implied
+// close semantics of an HTTP/1.0 request survive the normalization when
+// r.Close is set, which net/http derives from the version and the Connection
+// header when it parses a request.
 func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Request) {
 	req.Header.SetMethod(r.Method)
 
@@ -210,6 +224,10 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 			contentLength = -1
 		}
 
+		if contentLength == -1 && string(req.Header.Protocol()) != "HTTP/1.1" {
+			req.Header.SetProtocol("HTTP/1.1")
+		}
+
 		var body io.Reader
 		switch {
 		case len(trailerKeys) > 0:
@@ -245,10 +263,13 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 			uri.SetPassword("")
 		}
 	} else if r.URL != nil && r.URL.User != nil {
-		uri := req.URI()
-		uri.SetUsername(r.URL.User.Username())
 		password, _ := r.URL.User.Password()
-		uri.SetPassword(password)
+		req.Header.Set(fasthttp.HeaderAuthorization,
+			"Basic "+base64.StdEncoding.EncodeToString(
+				[]byte(r.URL.User.Username()+":"+password)))
+		uri := req.URI()
+		uri.SetUsername("")
+		uri.SetPassword("")
 	}
 }
 

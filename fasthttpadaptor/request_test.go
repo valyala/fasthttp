@@ -266,6 +266,123 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 		}
 	})
 
+	t.Run("HTTP/1.0 request with unknown-length body is normalized to HTTP/1.1", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.0",
+			ProtoMajor:    1,
+			ProtoMinor:    0,
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 0,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "POST / HTTP/1.1\r\n") {
+			t.Errorf("expected an HTTP/1.1 request line, since chunked framing does not exist in HTTP/1.0, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+			t.Errorf("expected a chunked body, got:\n%s", wire)
+		}
+		if !strings.HasSuffix(wire, "\r\n\r\n4\r\ndata\r\n0\r\n\r\n") {
+			t.Errorf("expected a chunked body encoding, got:\n%s", wire)
+		}
+	})
+
+	t.Run("HTTP/1.0 request with trailers is normalized to HTTP/1.1", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.0",
+			ProtoMajor:    1,
+			ProtoMinor:    0,
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 4,
+			Trailer: http.Header{
+				"X-Final": []string{"done"},
+			},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "POST / HTTP/1.1\r\n") {
+			t.Errorf("expected an HTTP/1.1 request line, since trailers need chunked framing, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+			t.Errorf("expected a chunked body, got:\n%s", wire)
+		}
+		if !strings.HasSuffix(wire, "\r\n\r\n4\r\ndata\r\n0\r\nX-Final: done\r\n\r\n") {
+			t.Errorf("expected trailers after the chunked body, got:\n%s", wire)
+		}
+	})
+
+	t.Run("HTTP/1.0 request with known-length body keeps its protocol", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.0",
+			ProtoMajor:    1,
+			ProtoMinor:    0,
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "POST / HTTP/1.0\r\n") {
+			t.Errorf("expected the HTTP/1.0 request line to be kept, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Content-Length: 4\r\n") {
+			t.Errorf("expected a Content-Length header, got:\n%s", wire)
+		}
+		if strings.Contains(wire, "Transfer-Encoding") {
+			t.Errorf("expected no Transfer-Encoding header, got:\n%s", wire)
+		}
+	})
+
 	t.Run("single header", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{
@@ -1008,6 +1125,71 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			t.Errorf("expected Basic credentials on the wire, got:\n%s", wire)
 		}
 		if strings.Contains(wire, "url-user:url-pass@") {
+			t.Errorf("expected no userinfo in the request target, got:\n%s", wire)
+		}
+	})
+
+	t.Run("URL credentials with an empty username become Basic authorization", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			URL: &url.URL{
+				Path: "/",
+				User: url.UserPassword("", "secret"),
+			},
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// base64(":secret"), the same credentials net/http.Client would send.
+		if !strings.Contains(buf.String(), "Authorization: Basic OnNlY3JldA==\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("absolute-form target credentials with an empty username become Basic authorization", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"GET http://:secret@example.com/ HTTP/1.1\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "GET / HTTP/1.1\r\n") {
+			t.Errorf("expected an origin-form request line, got:\n%s", wire)
+		}
+		// base64(":secret"), the same credentials net/http.Client would send.
+		if !strings.Contains(wire, "Authorization: Basic OnNlY3JldA==\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", wire)
+		}
+		if strings.Contains(wire, ":secret@") {
 			t.Errorf("expected no userinfo in the request target, got:\n%s", wire)
 		}
 	})
