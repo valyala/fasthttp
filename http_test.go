@@ -298,6 +298,131 @@ func testResponseBodyStreamWithTrailer(t *testing.T, body []byte, disableNormali
 	}
 }
 
+func TestRequestBufferedBodyWithTrailer(t *testing.T) {
+	t.Parallel()
+
+	for _, body := range []string{"", "data"} {
+		var req1 Request
+		req1.Header.SetMethod(MethodPost)
+		req1.SetRequestURI("http://example.com/upload")
+		req1.SetBodyString(body)
+		if err := req1.Header.AddTrailer("Foo"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		req1.Header.Set("Foo", "testfoo")
+
+		w := &bytes.Buffer{}
+		bw := bufio.NewWriter(w)
+		if err := req1.Write(bw); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		wire := w.String()
+		if !strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+			t.Fatalf("expected chunked transfer encoding, got:\n%q", wire)
+		}
+		if strings.Contains(wire, "Content-Length:") {
+			t.Fatalf("expected no content length, got:\n%q", wire)
+		}
+		if !strings.Contains(wire, "Trailer: Foo\r\n") {
+			t.Fatalf("expected the Trailer header, got:\n%q", wire)
+		}
+		if !strings.HasSuffix(wire, "0\r\nFoo: testfoo\r\n\r\n") {
+			t.Fatalf("expected the trailer after the last chunk, got:\n%q", wire)
+		}
+
+		var req2 Request
+		if err := req2.Read(bufio.NewReader(w)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(req2.Body()) != body {
+			t.Fatalf("unexpected body: %q. Expecting %q", req2.Body(), body)
+		}
+		if got := string(req2.Header.Peek("Foo")); got != "testfoo" {
+			t.Fatalf("unexpected trailer header %q. Expecting %q", got, "testfoo")
+		}
+	}
+}
+
+func TestResponseBufferedBodyWithTrailer(t *testing.T) {
+	t.Parallel()
+
+	for _, body := range []string{"", "data"} {
+		var resp1 Response
+		resp1.SetBodyString(body)
+		if err := resp1.Header.AddTrailer("Foo"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		resp1.Header.Set("Foo", "testfoo")
+
+		w := &bytes.Buffer{}
+		bw := bufio.NewWriter(w)
+		if err := resp1.Write(bw); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		wire := w.String()
+		if !strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+			t.Fatalf("expected chunked transfer encoding, got:\n%q", wire)
+		}
+		if strings.Contains(wire, "Content-Length:") {
+			t.Fatalf("expected no content length, got:\n%q", wire)
+		}
+		if !strings.Contains(wire, "Trailer: Foo\r\n") {
+			t.Fatalf("expected the Trailer header, got:\n%q", wire)
+		}
+		if !strings.HasSuffix(wire, "0\r\nFoo: testfoo\r\n\r\n") {
+			t.Fatalf("expected the trailer after the last chunk, got:\n%q", wire)
+		}
+
+		var resp2 Response
+		if err := resp2.Read(bufio.NewReader(w)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(resp2.Body()) != body {
+			t.Fatalf("unexpected body: %q. Expecting %q", resp2.Body(), body)
+		}
+		if got := string(resp2.Header.Peek("Foo")); got != "testfoo" {
+			t.Fatalf("unexpected trailer header %q. Expecting %q", got, "testfoo")
+		}
+	}
+}
+
+func TestResponseBufferedBodyWithTrailerSkipBody(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	resp.SkipBody = true
+	resp.SetBodyString("data")
+	if err := resp.Header.AddTrailer("Foo"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	resp.Header.Set("Foo", "testfoo")
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := resp.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wire := w.String()
+	if strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+		t.Fatalf("expected no chunked transfer encoding without a sent body, got:\n%q", wire)
+	}
+	if !strings.HasSuffix(wire, "\r\n\r\n") || strings.HasSuffix(wire, "Foo: testfoo\r\n\r\n") {
+		t.Fatalf("expected no body and no trailer values on the wire, got:\n%q", wire)
+	}
+}
+
 func TestResponseBodyStreamDeflate(t *testing.T) {
 	t.Parallel()
 

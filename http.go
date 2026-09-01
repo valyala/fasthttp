@@ -1855,6 +1855,16 @@ func (req *Request) Write(w *bufio.Writer) error {
 		hasBody = true
 		req.Header.SetContentLength(len(body))
 	}
+	if hasBody && len(req.Header.trailer) > 0 {
+		req.Header.SetContentLength(-1)
+		if err = req.Header.Write(w); err != nil {
+			return err
+		}
+		if err = writeBodyChunked(w, bytes.NewReader(body)); err != nil {
+			return err
+		}
+		return req.Header.writeTrailer(w)
+	}
 	if err = req.Header.Write(w); err != nil {
 		return err
 	}
@@ -2289,6 +2299,16 @@ func (resp *Response) Write(w *bufio.Writer) error {
 	bodyLen := len(body)
 	if sendBody || bodyLen > 0 {
 		resp.Header.SetContentLength(bodyLen)
+	}
+	if sendBody && len(resp.Header.trailer) > 0 {
+		resp.Header.SetContentLength(-1)
+		if err := resp.Header.Write(w); err != nil {
+			return err
+		}
+		if err := writeBodyChunked(w, bytes.NewReader(body)); err != nil {
+			return err
+		}
+		return resp.Header.writeTrailer(w)
 	}
 	if err := resp.Header.Write(w); err != nil {
 		return err
