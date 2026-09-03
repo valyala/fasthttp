@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/valyala/bytebufferpool"
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
@@ -263,4 +265,59 @@ func BenchmarkRequestStreamE2E(b *testing.B) {
 	}
 
 	wg.Wait()
+}
+
+// TestRequestStreamStaysAtEOF verifies that a chunked requestStream keeps
+// returning io.EOF once the terminating chunk has been consumed.
+//
+// Without a terminal state, a second Read re-enters parseChunkSize and waits for
+// another chunk header that is never coming. On a keep-alive connection, which
+// stays open after the response body ends, that read blocks for as long as the
+// peer holds the socket open. Any caller that reads a streamed body to EOF and
+// then reads again - draining before release is the common case - parks a
+// goroutine and never releases the connection.
+func TestRequestStreamStaysAtEOF(t *testing.T) {
+	t.Parallel()
+
+	body := createFixedBody(10)
+	chunked := createChunkedBody(body, nil, true)
+
+	// A pipe that is never closed models a keep-alive connection: the body ends,
+	// but the peer keeps the socket open and sends nothing more.
+	pr, pw := io.Pipe()
+	go func() {
+		_, _ = pw.Write(chunked)
+	}()
+	t.Cleanup(func() { _ = pr.Close() })
+
+	var h ResponseHeader
+	h.SetContentLength(-1)
+
+	bb := bytebufferpool.Get()
+	defer bytebufferpool.Put(bb)
+	rs := acquireRequestStream(bb, bufio.NewReader(pr), &h)
+	defer releaseRequestStream(rs)
+
+	got, err := io.ReadAll(rs)
+	if err != nil {
+		t.Fatalf("unexpected error reading body: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("unexpected body %q. Expecting %q", got, body)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, readErr := rs.Read(make([]byte, 1))
+		done <- readErr
+	}()
+
+	select {
+	case readErr := <-done:
+		if !errors.Is(readErr, io.EOF) {
+			t.Fatalf("unexpected error on read after EOF: %v. Expecting io.EOF", readErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Read after EOF blocked waiting for another chunk header")
+	}
 }
