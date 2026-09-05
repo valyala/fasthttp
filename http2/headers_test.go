@@ -198,3 +198,42 @@ func TestOutboundResponseTrailersRespectHeaderListLimit(t *testing.T) {
 		t.Fatalf("encodeTrailerHeaders() error = %v, want header list limit error", err)
 	}
 }
+
+func TestPopulateRequestRoutesSpecialHeaders(t *testing.T) {
+	fields := []hpack.HeaderField{
+		{Name: ":method", Value: "POST"},
+		{Name: ":scheme", Value: "https"},
+		{Name: ":authority", Value: "example.com"},
+		{Name: ":path", Value: "/upload"},
+		{Name: "user-agent", Value: "probe/1.0"},
+		{Name: "content-type", Value: "text/plain"},
+		{Name: "content-length", Value: "4"},
+		{Name: "priority", Value: "u=1, i"},
+		{Name: "priority", Value: "u=7"},
+		{Name: "x-custom", Value: "kept"},
+	}
+	ctx := &fasthttp.RequestCtx{}
+	contentLength, priority, err := populateRequest(ctx, fields, false)
+	if err != nil {
+		t.Fatalf("populateRequest() error: %v", err)
+	}
+	if contentLength != 4 || priority != "u=1, i" {
+		t.Fatalf("populateRequest() = (%d, %q), want (4, %q)", contentLength, priority, "u=1, i")
+	}
+	header := &ctx.Request.Header
+	if got := string(header.UserAgent()); got != "probe/1.0" {
+		t.Errorf("UserAgent() = %q", got)
+	}
+	if got := string(header.ContentType()); got != "text/plain" {
+		t.Errorf("ContentType() = %q", got)
+	}
+	if got := header.ContentLength(); got != 4 {
+		t.Errorf("ContentLength() = %d", got)
+	}
+	if got := header.PeekAll("Priority"); len(got) != 2 || string(got[0]) != "u=1, i" || string(got[1]) != "u=7" {
+		t.Errorf("PeekAll(Priority) = %q, want both values kept", got)
+	}
+	if got := string(header.Peek("X-Custom")); got != "kept" {
+		t.Errorf("Peek(X-Custom) = %q", got)
+	}
+}

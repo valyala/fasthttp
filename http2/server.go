@@ -1014,7 +1014,7 @@ func (c *serverConn) processHeaders(event *incomingFrame) error {
 	stream.priority = priority{urgency: 3}
 	requestCtx := c.protocolContext.AcquireRequestCtx(c.conn, stream)
 	stream.request = requestCtx
-	expectedBody, err := populateRequest(requestCtx, event.fields, c.config.enableExtendedConnect)
+	expectedBody, priorityValue, err := populateRequest(requestCtx, event.fields, c.config.enableExtendedConnect)
 	if err != nil {
 		c.protocolContext.ReleaseRequestCtx(requestCtx)
 		stream.request = nil
@@ -1044,9 +1044,8 @@ func (c *serverConn) processHeaders(event *incomingFrame) error {
 	if isExtended {
 		stream.maxBody = 0
 	}
-	if value := requestCtx.Request.Header.Peek("Priority"); len(value) != 0 {
-		parsed, parseErr := parsePriority(string(value))
-		if parseErr == nil {
+	if priorityValue != "" {
+		if parsed, parseErr := parsePriority(priorityValue); parseErr == nil {
 			stream.priority = parsed
 		}
 	}
