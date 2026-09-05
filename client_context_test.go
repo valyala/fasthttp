@@ -6,11 +6,57 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestDoTimeoutClosableBodyAllocations(t *testing.T) {
+	client := &HostClient{
+		Addr: "example.com:80",
+		Dial: func(string) (net.Conn, error) {
+			return &fakeClientConn{
+				ch: make(chan struct{}, 1),
+				s:  []byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"),
+			}, nil
+		},
+	}
+	defer client.CloseIdleConnections()
+
+	var req Request
+	var resp Response
+	defer req.Reset()
+	defer resp.Reset()
+	req.SetRequestURI("http://example.com/")
+	req.Header.SetMethod(MethodPost)
+
+	reader := strings.NewReader("body")
+	body := io.NopCloser(reader)
+	allocs := func(timeout time.Duration) float64 {
+		return testing.AllocsPerRun(100, func() {
+			reader.Reset("body")
+			req.SetBodyStream(body, 4)
+			var err error
+			if timeout == 0 {
+				err = client.Do(&req, &resp)
+			} else {
+				err = client.DoTimeout(&req, &resp, timeout)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+
+	withoutTimeout := allocs(0)
+	withTimeout := allocs(time.Second)
+	if withTimeout > withoutTimeout {
+		t.Fatalf("timeout adds %.0f allocations per request (without: %.0f, with: %.0f)",
+			withTimeout-withoutTimeout, withoutTimeout, withTimeout)
+	}
+}
 
 type contextRoundTripperFunc func(context.Context, *HostClient, *Request, *Response) (bool, error)
 

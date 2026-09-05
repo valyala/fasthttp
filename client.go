@@ -3802,11 +3802,17 @@ func (s *clientStreamBody) CloseWithError(err error) error {
 }
 
 func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
-	return t.RoundTripContext(context.Background(), hc, req, resp)
+	return t.roundTrip(context.Background(), hc, req, resp, false)
 }
 
 func (t *transport) RoundTripContext(
 	ctx context.Context, hc *HostClient, req *Request, resp *Response,
+) (retry bool, err error) {
+	return t.roundTrip(ctx, hc, req, resp, true)
+}
+
+func (t *transport) roundTrip(
+	ctx context.Context, hc *HostClient, req *Request, resp *Response, contextAware bool,
 ) (retry bool, err error) {
 	customSkipBody := resp.SkipBody
 	customStreamBody := resp.StreamBody
@@ -3821,22 +3827,25 @@ func (t *transport) RoundTripContext(
 		return false, err
 	}
 	conn := cc.c
-	watchContext := ctx
-	var watchCancel context.CancelFunc
-	requestTimeoutWatch := false
-	if _, bodyCanBeInterrupted := req.bodyStream.(io.Closer); !deadline.IsZero() && bodyCanBeInterrupted {
-		if contextDeadline, ok := ctx.Deadline(); !ok || deadline.Before(contextDeadline) {
-			watchContext, watchCancel = context.WithDeadline(ctx, deadline)
-			requestTimeoutWatch = true
-		}
-	}
 	var requestBodyCloser *contextRequestBodyCloser
-	if watchContext.Done() != nil {
-		requestBodyCloser = newContextRequestBodyCloser(req)
+	var contextWatcher *contextConnWatcher
+	if contextAware {
+		watchContext := ctx
+		var watchCancel context.CancelFunc
+		requestTimeoutWatch := false
+		if _, bodyCanBeInterrupted := req.bodyStream.(io.Closer); !deadline.IsZero() && bodyCanBeInterrupted {
+			if contextDeadline, ok := ctx.Deadline(); !ok || deadline.Before(contextDeadline) {
+				watchContext, watchCancel = context.WithDeadline(ctx, deadline)
+				requestTimeoutWatch = true
+			}
+		}
+		if watchContext.Done() != nil {
+			requestBodyCloser = newContextRequestBodyCloser(req)
+		}
+		contextWatcher = watchConnContext(
+			watchContext, ctx, conn, requestBodyCloser, requestTimeoutWatch, watchCancel,
+		)
 	}
-	contextWatcher := watchConnContext(
-		watchContext, ctx, conn, requestBodyCloser, requestTimeoutWatch, watchCancel,
-	)
 	defer func() {
 		if contextWatcher != nil {
 			if contextErr := contextWatcher.stop(); contextErr != nil {
