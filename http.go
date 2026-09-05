@@ -168,6 +168,11 @@ func (req *Request) SetRequestURIBytes(requestURI []byte) {
 }
 
 // RequestURI returns request's URI.
+//
+// If the request URI is absolute and contains a host, calling RequestURI after
+// Host or URI may reset the parsed URI state and make a subsequent Host call
+// return an empty value. Use req.URI().RequestURI() when the parsed URI and its
+// host must remain available.
 func (req *Request) RequestURI() []byte {
 	if req.parsedURI {
 		requestURI := req.uri.RequestURI()
