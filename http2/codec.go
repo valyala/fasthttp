@@ -151,7 +151,7 @@ func (c *headerCodec) decode(
 }
 
 func (c *headerCodec) emit(field hpack.HeaderField) {
-	if !httpguts.ValidHeaderFieldValue(field.Value) {
+	if !httpguts.ValidHeaderFieldValue(field.Value) || hasEdgeWhitespace(field.Value) {
 		c.invalid = fmt.Errorf("http2: invalid value for header %q", field.Name)
 		c.decoder.SetEmitEnabled(false)
 		return
@@ -185,6 +185,16 @@ func (c *headerCodec) emit(field hpack.HeaderField) {
 func (c *headerCodec) resetBlock() {
 	c.fields = nil
 	c.invalid = nil
+}
+
+// hasEdgeWhitespace reports the leading or trailing SP/HTAB that RFC 9113
+// §8.2.1 forbids and httpguts.ValidHeaderFieldValue allows.
+func hasEdgeWhitespace(value string) bool {
+	if value == "" {
+		return false
+	}
+	first, last := value[0], value[len(value)-1]
+	return first == ' ' || first == '\t' || last == ' ' || last == '\t'
 }
 
 func validWireHeaderName(name string) bool {

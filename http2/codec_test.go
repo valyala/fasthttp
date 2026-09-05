@@ -100,3 +100,28 @@ func TestHeaderCodecLimitsZeroLengthContinuations(t *testing.T) {
 		t.Fatalf("decode() error = %v, want ENHANCE_YOUR_CALM connection error", err)
 	}
 }
+
+func TestHeaderCodecRejectsEdgeWhitespaceValues(t *testing.T) {
+	encodeField := func(value string) []byte {
+		var encoded bytes.Buffer
+		if err := hpack.NewEncoder(&encoded).WriteField(hpack.HeaderField{Name: "x-test", Value: value}); err != nil {
+			t.Fatal(err)
+		}
+		return bytes.Clone(encoded.Bytes())
+	}
+	for _, value := range []string{" x", "x ", "\tx", "x\t", " "} {
+		codec := newHeaderCodec(defaultHeaderTableSize, 64<<10)
+		_, _, invalid, err := codec.decodeComplete(encodeField(value), nil)
+		if err != nil {
+			t.Fatalf("value %q: connection error %v", value, err)
+		}
+		if invalid == nil {
+			t.Errorf("value %q with edge whitespace was accepted", value)
+		}
+	}
+	codec := newHeaderCodec(defaultHeaderTableSize, 64<<10)
+	fields, truncated, invalid, err := codec.decodeComplete(encodeField("a b\tc"), nil)
+	if err != nil || truncated || invalid != nil || len(fields) != 1 {
+		t.Fatalf("interior whitespace: fields=%v truncated=%v invalid=%v err=%v", fields, truncated, invalid, err)
+	}
+}

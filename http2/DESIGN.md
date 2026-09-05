@@ -78,8 +78,9 @@ DATA frames.
 ## Request/response semantics
 
 Pseudo-headers map to fasthttp header fields. Rejected: connection-specific
-headers, `TE` other than `trailers`, malformed content lengths, invalid
-trailers, malformed CONNECT, bodies that don't match their content length.
+headers, `TE` other than `trailers`, field values with leading or trailing
+whitespace, malformed content lengths, invalid trailers, malformed CONNECT,
+bodies that don't match their content length.
 Header names go on the wire lowercase. Sensitive fields are never-indexed.
 Fields declared as trailers are excluded from the initial header block.
 
