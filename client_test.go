@@ -2098,6 +2098,111 @@ func TestClientReadTimeout(t *testing.T) {
 	}
 }
 
+func TestHostClientRequestAndClientTimeoutPrecedence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name            string
+		clientTimeout   time.Duration
+		requestTimeout  time.Duration
+		expectedTimeout time.Duration
+	}{
+		{
+			name:            "client timeout is shorter",
+			clientTimeout:   time.Second,
+			requestTimeout:  4 * time.Second,
+			expectedTimeout: time.Second,
+		},
+		{
+			name:            "request timeout is shorter",
+			clientTimeout:   4 * time.Second,
+			requestTimeout:  time.Second,
+			expectedTimeout: time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := &deadlineRecordingConn{
+				response: []byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"),
+			}
+			c := &HostClient{
+				Addr:                      "example.com:80",
+				ReadTimeout:               tt.clientTimeout,
+				WriteTimeout:              tt.clientTimeout,
+				MaxIdemponentCallAttempts: 1,
+				Dial: func(string) (net.Conn, error) {
+					return conn, nil
+				},
+			}
+
+			var req Request
+			var resp Response
+			req.SetRequestURI("http://example.com/")
+			if err := c.DoTimeout(&req, &resp, tt.requestTimeout); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			assertDeadlineWithin(t, "write", conn.writeDeadline, tt.expectedTimeout)
+			assertDeadlineWithin(t, "read", conn.readDeadline, tt.expectedTimeout)
+		})
+	}
+}
+
+func assertDeadlineWithin(t *testing.T, name string, deadline time.Time, timeout time.Duration) {
+	t.Helper()
+
+	margin := timeout / 4
+	minDeadline := time.Now().Add(timeout - margin)
+	maxDeadline := time.Now().Add(timeout + margin)
+	if deadline.Before(minDeadline) || deadline.After(maxDeadline) {
+		t.Fatalf("%s deadline %s; want it within %s of now", name, deadline, timeout)
+	}
+}
+
+type deadlineRecordingConn struct {
+	net.Conn
+
+	response      []byte
+	readDeadline  time.Time
+	writeDeadline time.Time
+}
+
+func (c *deadlineRecordingConn) Read(p []byte) (int, error) {
+	if len(c.response) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, c.response)
+	c.response = c.response[n:]
+	return n, nil
+}
+
+func (c *deadlineRecordingConn) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (c *deadlineRecordingConn) Close() error {
+	return nil
+}
+
+func (c *deadlineRecordingConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (c *deadlineRecordingConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (c *deadlineRecordingConn) SetReadDeadline(deadline time.Time) error {
+	c.readDeadline = deadline
+	return nil
+}
+
+func (c *deadlineRecordingConn) SetWriteDeadline(deadline time.Time) error {
+	c.writeDeadline = deadline
+	return nil
+}
+
 func TestClientDefaultUserAgent(t *testing.T) {
 	t.Parallel()
 

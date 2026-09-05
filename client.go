@@ -291,10 +291,14 @@ type Client struct {
 	// When response streaming is enabled, the deadline remains active while
 	// the caller reads Response.BodyStream.
 	//
+	// If a request timeout is set, the shorter timeout applies.
+	//
 	// By default response read timeout is unlimited.
 	ReadTimeout time.Duration
 
 	// Maximum duration for full request writing (including body).
+	//
+	// If a request timeout is set, the shorter timeout applies.
 	//
 	// By default request write timeout is unlimited.
 	WriteTimeout time.Duration
@@ -910,10 +914,14 @@ type HostClient struct {
 	// When response streaming is enabled, the deadline remains active while
 	// the caller reads Response.BodyStream.
 	//
+	// If a request timeout is set, the shorter timeout applies.
+	//
 	// By default response read timeout is unlimited.
 	ReadTimeout time.Duration
 
 	// Maximum duration for full request writing (including body).
+	//
+	// If a request timeout is set, the shorter timeout applies.
 	//
 	// By default request write timeout is unlimited.
 	WriteTimeout time.Duration
