@@ -50,6 +50,8 @@ type headerEncoder struct {
 	buffer  bytes.Buffer
 	strings headerStringCache
 	fields  []hpack.HeaderField
+	// date interns the Date value, which changes once a second.
+	date string
 }
 
 func (h *headerEncoder) initHeaderEncoder(maxTableSize uint32) {
@@ -254,10 +256,10 @@ func (h *headerEncoder) encodeStatusHeaders(
 		return nil, err
 	}
 	if len(serverDate) != 0 {
-		if err := encoder.WriteField(hpack.HeaderField{
-			Name:  "date",
-			Value: stringsCache.value(serverDate, false),
-		}); err != nil {
+		if h.date != string(serverDate) {
+			h.date = string(serverDate)
+		}
+		if err := encoder.WriteField(hpack.HeaderField{Name: "date", Value: h.date}); err != nil {
 			return nil, err
 		}
 	}
@@ -381,17 +383,20 @@ func applyRequestTrailers(header *fasthttp.RequestHeader, fields []hpack.HeaderF
 	return nil
 }
 
+// populateRequest fills ctx.Request from a decoded header block. It returns
+// the declared content length, or -1, and the first Priority header value.
 func populateRequest(
 	ctx *fasthttp.RequestCtx,
 	fields []hpack.HeaderField,
 	enableExtendedConnect bool,
-) (int64, error) {
+) (int64, string, error) {
 	var method string
 	var scheme string
 	var authority string
 	var path string
 	var connectProtocol string
 	var host string
+	var priority string
 	var contentLength int64 = -1
 	var seenPseudo pseudoField
 	cookies := make([]string, 0, 1)
@@ -410,10 +415,10 @@ func populateRequest(
 			case ":protocol":
 				bit, connectProtocol = pseudoProtocol, field.Value
 			default:
-				return -1, fmt.Errorf("%w: unknown pseudo-header %q", errInvalidRequestHeaders, field.Name)
+				return -1, "", fmt.Errorf("%w: unknown pseudo-header %q", errInvalidRequestHeaders, field.Name)
 			}
 			if seenPseudo&bit != 0 {
-				return -1, fmt.Errorf("%w: duplicate pseudo-header %q", errInvalidRequestHeaders, field.Name)
+				return -1, "", fmt.Errorf("%w: duplicate pseudo-header %q", errInvalidRequestHeaders, field.Name)
 			}
 			seenPseudo |= bit
 			continue
@@ -422,75 +427,87 @@ func populateRequest(
 		name := field.Name
 		value := field.Value
 		if isConnectionSpecificHeader(name) {
-			return -1, fmt.Errorf("%w: connection-specific header %q", errInvalidRequestHeaders, name)
+			return -1, "", fmt.Errorf("%w: connection-specific header %q", errInvalidRequestHeaders, name)
 		}
-		if name == "te" && !strings.EqualFold(strings.TrimSpace(value), "trailers") {
-			return -1, fmt.Errorf("%w: invalid te header", errInvalidRequestHeaders)
-		}
-		if name == "content-length" {
+		switch name {
+		case "te":
+			if !strings.EqualFold(strings.TrimSpace(value), "trailers") {
+				return -1, "", fmt.Errorf("%w: invalid te header", errInvalidRequestHeaders)
+			}
+		case "content-length":
 			parsed, err := parseHTTP2ContentLength(value)
 			if err != nil {
-				return -1, err
+				return -1, "", err
 			}
 			if contentLength >= 0 && contentLength != parsed {
-				return -1, fmt.Errorf("%w: conflicting content-length", errInvalidRequestHeaders)
+				return -1, "", fmt.Errorf("%w: conflicting content-length", errInvalidRequestHeaders)
 			}
 			contentLength = parsed
-		}
-		if name == "host" {
+		case "host":
 			host = value
 			continue
-		}
-		if name == "cookie" {
+		case "cookie":
 			cookies = append(cookies, value)
 			continue
+		// Add would route these to the same setters after normalizing and
+		// copying the field twice.
+		case "user-agent":
+			ctx.Request.Header.SetUserAgent(value)
+			continue
+		case "content-type":
+			ctx.Request.Header.SetContentType(value)
+			continue
+		case "priority":
+			if priority == "" {
+				priority = value
+			}
 		}
 		ctx.Request.Header.Add(name, value)
 	}
 
 	if method == "" {
-		return -1, fmt.Errorf("%w: missing :method", errInvalidRequestHeaders)
+		return -1, "", fmt.Errorf("%w: missing :method", errInvalidRequestHeaders)
 	}
 	isConnect := method == fasthttp.MethodConnect
 	switch {
 	case connectProtocol != "":
 		if !enableExtendedConnect {
-			return -1, fmt.Errorf("%w: extended connect is disabled", errInvalidRequestHeaders)
+			return -1, "", fmt.Errorf("%w: extended connect is disabled", errInvalidRequestHeaders)
 		}
 		if !isConnect || scheme == "" || authority == "" || path == "" {
-			return -1, fmt.Errorf("%w: malformed extended connect", errInvalidRequestHeaders)
+			return -1, "", fmt.Errorf("%w: malformed extended connect", errInvalidRequestHeaders)
 		}
 	case isConnect:
 		if authority == "" || scheme != "" || path != "" {
-			return -1, fmt.Errorf("%w: malformed connect", errInvalidRequestHeaders)
+			return -1, "", fmt.Errorf("%w: malformed connect", errInvalidRequestHeaders)
 		}
 	default:
 		if scheme == "" || path == "" {
-			return -1, fmt.Errorf("%w: missing request pseudo-header", errInvalidRequestHeaders)
+			return -1, "", fmt.Errorf("%w: missing request pseudo-header", errInvalidRequestHeaders)
 		}
 	}
 	if authority == "" {
 		authority = host
 	}
 	if authority == "" {
-		return -1, fmt.Errorf("%w: missing authority", errInvalidRequestHeaders)
+		return -1, "", fmt.Errorf("%w: missing authority", errInvalidRequestHeaders)
 	}
 	if !httpguts.ValidHostHeader(authority) {
-		return -1, fmt.Errorf("%w: invalid authority", errInvalidRequestHeaders)
+		return -1, "", fmt.Errorf("%w: invalid authority", errInvalidRequestHeaders)
 	}
 	if host != "" && host != authority {
 		if !strings.EqualFold(host, authority) {
-			return -1, fmt.Errorf("%w: host and authority differ", errInvalidRequestHeaders)
+			return -1, "", fmt.Errorf("%w: host and authority differ", errInvalidRequestHeaders)
 		}
 	}
 	if path != "" && path != "*" && path[0] != '/' {
-		return -1, fmt.Errorf("%w: invalid :path", errInvalidRequestHeaders)
+		return -1, "", fmt.Errorf("%w: invalid :path", errInvalidRequestHeaders)
 	}
 	if path == "*" && method != fasthttp.MethodOptions {
-		return -1, fmt.Errorf("%w: asterisk :path requires OPTIONS", errInvalidRequestHeaders)
+		return -1, "", fmt.Errorf("%w: asterisk :path requires OPTIONS", errInvalidRequestHeaders)
 	}
 	if scheme != "" && !validScheme(scheme) {
-		return -1, fmt.Errorf("%w: invalid :scheme", errInvalidRequestHeaders)
+		return -1, "", fmt.Errorf("%w: invalid :scheme", errInvalidRequestHeaders)
 	}
 
 	ctx.Request.Header.SetMethod(method)
@@ -505,7 +522,7 @@ func populateRequest(
 	if len(cookies) != 0 {
 		ctx.Request.Header.Set(fasthttp.HeaderCookie, strings.Join(cookies, "; "))
 	}
-	return contentLength, nil
+	return contentLength, priority, nil
 }
 
 func validScheme(scheme string) bool {
