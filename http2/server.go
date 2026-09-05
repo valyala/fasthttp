@@ -1786,10 +1786,12 @@ func (c *serverConn) startResponsePump(stream *serverStream) {
 		reader := stream.request.Response.BodyStream()
 		buffer := acquireResponsePumpBuffer()
 		defer releaseResponsePumpBuffer(buffer)
+		// One acknowledgement is outstanding at a time, so one channel serves
+		// every chunk and the EOF.
+		result := make(chan error, 1)
 		for {
 			n, readErr := reader.Read(buffer.data)
 			if n > 0 {
-				result := make(chan error, 1)
 				command := serverCommand{
 					kind:     serverCommandResponseData,
 					streamID: stream.id,
@@ -1815,7 +1817,6 @@ func (c *serverConn) startResponsePump(stream *serverStream) {
 			}
 			if readErr != nil {
 				_ = stream.request.Response.CloseBodyStream()
-				result := make(chan error, 1)
 				select {
 				case c.commands <- serverCommand{
 					kind:     serverCommandResponseEOF,
