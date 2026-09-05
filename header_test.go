@@ -5115,3 +5115,46 @@ func (r *fragmentReader) Read(p []byte) (int, error) {
 	r.pos += n
 	return n, nil
 }
+
+func TestAddTrailerExtendsAnnouncedSet(t *testing.T) {
+	t.Parallel()
+
+	for _, header := range []interface {
+		Add(key, value string)
+		PeekTrailerKeys() [][]byte
+	}{&RequestHeader{}, &ResponseHeader{}} {
+		header.Add(HeaderTrailer, "Foo")
+		header.Add(HeaderTrailer, "Bar")
+		header.Add(HeaderTrailer, "Foo")
+		keys := header.PeekTrailerKeys()
+		if len(keys) != 2 {
+			t.Fatalf("%T trailer keys after Foo, Bar, Foo = %q, want a two-name set", header, keys)
+		}
+	}
+}
+
+func TestAddTrailerKeepsRawHeaderMode(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.DisableSpecialHeader()
+	h.DisableNormalizing()
+	h.Add("trailer", "Foo")
+	if got := string(h.Peek("trailer")); got != "Foo" {
+		t.Fatalf("Peek(trailer) = %q, want it kept as a raw header", got)
+	}
+}
+
+func TestParsedTrailerFieldsAccumulate(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	err := req.Read(bufio.NewReader(strings.NewReader(
+		"POST / HTTP/1.1\r\nHost: a\r\nTrailer: X-A\r\nTrailer: X-B\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.PeekTrailerKeys(); len(got) != 2 || string(got[0]) != "X-A" || string(got[1]) != "X-B" {
+		t.Fatalf("trailer keys = %q, want [X-A X-B]", got)
+	}
+}

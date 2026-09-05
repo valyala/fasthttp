@@ -573,17 +573,27 @@ func (h *header) AddTrailerBytes(trailer []byte) (err error) {
 		}
 		h.bufK = append(h.bufK[:0], key...)
 		normalizeHeaderKeyValidated(h.bufK, h.disableNormalizing)
-		if cap(h.trailer) > len(h.trailer) {
-			h.trailer = h.trailer[:len(h.trailer)+1]
-			h.trailer[len(h.trailer)-1] = append(h.trailer[len(h.trailer)-1][:0], h.bufK...)
-		} else {
-			key = make([]byte, len(h.bufK))
-			copy(key, h.bufK)
-			h.trailer = append(h.trailer, key)
-		}
+		h.addTrailerKey(h.bufK)
 	}
 
 	return err
+}
+
+// addTrailerKey records a validated, normalized key in the trailer set and
+// reports whether it was new; the set is a set.
+func (h *header) addTrailerKey(key []byte) bool {
+	for _, t := range h.trailer {
+		if bytes.Equal(t, key) {
+			return false
+		}
+	}
+	if cap(h.trailer) > len(h.trailer) {
+		h.trailer = h.trailer[:len(h.trailer)+1]
+		h.trailer[len(h.trailer)-1] = append(h.trailer[len(h.trailer)-1][:0], key...)
+	} else {
+		h.trailer = append(h.trailer, append([]byte(nil), key...))
+	}
+	return true
 }
 
 func isValidTrailerKey(key []byte) bool {
@@ -1468,7 +1478,9 @@ func (h *RequestHeader) del(key []byte) {
 }
 
 // setSpecialHeader handles special headers and return true when a header is processed.
-func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
+// setSpecialHeader handles special headers and returns true when the header
+// is processed. add selects extend-vs-replace for set-typed headers (Trailer).
+func (h *ResponseHeader) setSpecialHeader(key, value []byte, add bool) bool {
 	if len(key) == 0 {
 		return false
 	}
@@ -1518,7 +1530,12 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 			// Transfer-Encoding is managed automatically.
 			return true
 		} else if caseInsensitiveCompare(strTrailer, key) {
-			_ = h.SetTrailerBytes(value)
+			// Adding to Trailer extends the announced set; Set replaces it.
+			if add {
+				_ = h.AddTrailerBytes(value)
+			} else {
+				_ = h.SetTrailerBytes(value)
+			}
 			return true
 		}
 	case 'd':
@@ -1536,8 +1553,9 @@ func (h *header) setNonSpecial(key, value []byte) {
 	h.h = setArgBytes(h.h, key, value, argsHasValue)
 }
 
-// setSpecialHeader handles special headers and return true when a header is processed.
-func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
+// setSpecialHeader handles special headers and returns true when the header
+// is processed. add selects extend-vs-replace for set-typed headers (Trailer).
+func (h *RequestHeader) setSpecialHeader(key, value []byte, add bool) bool {
 	if len(key) == 0 || h.disableSpecialHeader {
 		return false
 	}
@@ -1577,7 +1595,12 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 			// Transfer-Encoding is managed automatically.
 			return true
 		} else if caseInsensitiveCompare(strTrailer, key) {
-			_ = h.SetTrailerBytes(value)
+			// Adding to Trailer extends the announced set; Set replaces it.
+			if add {
+				_ = h.AddTrailerBytes(value)
+			} else {
+				_ = h.SetTrailerBytes(value)
+			}
 			return true
 		}
 	case 'h':
@@ -1653,7 +1676,7 @@ func (h *ResponseHeader) AddBytesV(key string, value []byte) {
 // it will be sent after the chunked response body.
 func (h *ResponseHeader) AddBytesKV(key, value []byte) {
 	h.bufK, h.bufV = initHeaderKV(h.bufK, h.bufV, b2s(key), b2s(value), h.disableNormalizing)
-	if h.setSpecialHeader(h.bufK, h.bufV) {
+	if h.setSpecialHeader(h.bufK, h.bufV, true) {
 		return
 	}
 
@@ -1727,7 +1750,7 @@ func (h *ResponseHeader) SetBytesKV(key, value []byte) {
 // it will be sent after the chunked response body.
 func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	h.bufV = initHeaderValueBytes(h.bufV, value)
-	if h.setSpecialHeader(key, h.bufV) {
+	if h.setSpecialHeader(key, h.bufV, false) {
 		return
 	}
 	h.setNonSpecial(key, h.bufV)
@@ -1885,7 +1908,7 @@ func (h *RequestHeader) AddBytesV(key string, value []byte) {
 // it will be sent after the chunked request body.
 func (h *RequestHeader) AddBytesKV(key, value []byte) {
 	h.bufK, h.bufV = initHeaderKV(h.bufK, h.bufV, b2s(key), b2s(value), h.disableNormalizing)
-	if h.setSpecialHeader(h.bufK, h.bufV) {
+	if h.setSpecialHeader(h.bufK, h.bufV, true) {
 		return
 	}
 
@@ -1959,7 +1982,7 @@ func (h *RequestHeader) SetBytesKV(key, value []byte) {
 // it will be sent after the chunked request body.
 func (h *RequestHeader) SetCanonical(key, value []byte) {
 	h.bufV = initHeaderValueBytes(h.bufV, value)
-	if h.setSpecialHeader(key, h.bufV) {
+	if h.setSpecialHeader(key, h.bufV, false) {
 		return
 	}
 	h.setNonSpecial(key, h.bufV)
@@ -3270,7 +3293,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strTrailer) {
-				err := h.SetTrailerBytes(s.value)
+				err := h.AddTrailerBytes(s.value)
 				if err != nil {
 					h.connectionClose = true
 					return 0, err
@@ -3442,7 +3465,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strTrailer) {
-				err := h.SetTrailerBytes(s.value)
+				err := h.AddTrailerBytes(s.value)
 				if err != nil {
 					h.connectionClose = true
 					return 0, 0, err
