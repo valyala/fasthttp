@@ -2230,3 +2230,79 @@ func TestResponseWriteTimeoutIgnoresStaleCommand(t *testing.T) {
 		t.Fatal("current stall timeout didn't reset the stream")
 	}
 }
+
+func TestAcceptedStreamWriteFailsWhenOwnerStops(t *testing.T) {
+	conn := &serverConn{
+		commands:  make(chan serverCommand, 4),
+		ownerDone: make(chan struct{}),
+		streams:   make(map[uint32]*serverStream),
+	}
+	stream := &serverStream{id: 1, conn: conn}
+	conn.streams[stream.id] = stream
+	streamConn := &streamConn{stream: stream}
+	result := make(chan error, 1)
+	go func() {
+		_, err := streamConn.Write([]byte("payload"))
+		result <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for len(conn.commands) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(conn.commands) == 0 {
+		t.Fatal("write command wasn't queued")
+	}
+	conn.failPendingStreams(io.ErrUnexpectedEOF)
+	select {
+	case err := <-result:
+		if !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatalf("Write() error = %v, want %v", err, io.ErrUnexpectedEOF)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("accepted write outlived the connection owner")
+	}
+}
+
+func TestAcceptedStreamWriteReportsFramedBytesWhenOwnerStops(t *testing.T) {
+	conn := &serverConn{
+		config: serverConfig{
+			maxConcurrentStreams:    1,
+			maxRapidResetsPerSecond: 100,
+		},
+		commands:      make(chan serverCommand, 4),
+		ownerDone:     make(chan struct{}),
+		framer:        xhttp2.NewFramer(io.Discard, nil),
+		streams:       make(map[uint32]*serverStream),
+		connFlowState: connFlowState{send: sendWindow{window: 2}, peerMaxFrameSize: defaultMaxFrameSize},
+	}
+	stream := newServerStream(conn, 1)
+	stream.handlerStarted = true
+	stream.send.window = 2
+	conn.streams[stream.id] = stream
+	streamConn := &streamConn{stream: stream}
+	type writeResult struct {
+		n   int
+		err error
+	}
+	result := make(chan writeResult, 1)
+	go func() {
+		n, err := streamConn.Write([]byte("four"))
+		result <- writeResult{n, err}
+	}()
+	command := <-conn.commands
+	if err := conn.processCommand(&command); err != nil {
+		t.Fatalf("queueing stream write: %v", err)
+	}
+	if progressed, err := conn.flushStream(stream, false); err != nil || !progressed {
+		t.Fatalf("partial flush = %v, %v; want progress", progressed, err)
+	}
+	conn.failPendingStreams(io.ErrUnexpectedEOF)
+	select {
+	case got := <-result:
+		if got.n != 2 || !errors.Is(got.err, io.ErrUnexpectedEOF) {
+			t.Fatalf("Write() = %d, %v; want 2, %v", got.n, got.err, io.ErrUnexpectedEOF)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("accepted write outlived the connection owner")
+	}
+}
