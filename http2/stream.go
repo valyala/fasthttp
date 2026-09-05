@@ -667,6 +667,8 @@ func (c *streamConn) Write(p []byte) (int, error) {
 	select {
 	case result := <-write.result:
 		return result.n, result.err
+	case <-c.stream.conn.ownerDone:
+		return c.abandonedWriteResult(write)
 	case <-expired:
 		// An accepted write cannot be abandoned: its bytes may still reach the
 		// peer, so only the owner can report the authoritative byte count.
@@ -679,8 +681,23 @@ func (c *streamConn) Write(p []byte) (int, error) {
 		}:
 		case <-c.stream.conn.ctx.Done():
 		}
-		result := <-write.result
+		select {
+		case result := <-write.result:
+			return result.n, result.err
+		case <-c.stream.conn.ownerDone:
+			return c.abandonedWriteResult(write)
+		}
+	}
+}
+
+// abandonedWriteResult reports a write whose owner stopped. A result the owner
+// posted before stopping is authoritative; otherwise no byte was framed.
+func (c *streamConn) abandonedWriteResult(write *streamWrite) (int, error) {
+	select {
+	case result := <-write.result:
 		return result.n, result.err
+	default:
+		return 0, c.stream.cause()
 	}
 }
 
