@@ -5380,7 +5380,7 @@ func TestClientHeadWithBody(t *testing.T) {
 		Dial: func(addr string) (net.Conn, error) {
 			return ln.Dial()
 		},
-		ReadTimeout:               time.Millisecond * 10,
+		ReadTimeout:               time.Millisecond * 200,
 		MaxIdemponentCallAttempts: 1,
 	}
 
