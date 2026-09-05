@@ -2137,3 +2137,96 @@ func TestServerHonorsNoDefaultContentType(t *testing.T) {
 		t.Fatalf("Content-Type = %q, want none", values)
 	}
 }
+
+// stalledResponseConn returns a connection whose only stream owes data it
+// cannot send: both send windows are zero.
+func stalledResponseConn(t *testing.T, writeByteTimeout time.Duration) (*serverConn, *serverStream) {
+	t.Helper()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(context.Canceled) })
+	conn := &serverConn{
+		config: serverConfig{
+			maxConcurrentStreams:    1,
+			maxRapidResetsPerSecond: 100,
+			writeByteTimeout:        writeByteTimeout,
+		},
+		ctx:           ctx,
+		commands:      make(chan serverCommand, 1),
+		framer:        xhttp2.NewFramer(io.Discard, nil),
+		streams:       make(map[uint32]*serverStream),
+		connFlowState: connFlowState{peerMaxFrameSize: defaultMaxFrameSize},
+	}
+	stream := newServerStream(conn, 1)
+	stream.handlerStarted = true
+	stream.pendingData = []byte("blocked")
+	conn.streams[stream.id] = stream
+	conn.queueFlush(stream)
+	return conn, stream
+}
+
+func TestResponseFlowStallTimeoutSurvivesRepeatedFlushes(t *testing.T) {
+	conn, stream := stalledResponseConn(t, 20*time.Millisecond)
+	deadline := time.Now().Add(300 * time.Millisecond)
+	for len(conn.commands) == 0 && time.Now().Before(deadline) {
+		if err := conn.flushResponses(); err != nil {
+			t.Fatalf("flushResponses() error: %v", err)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	select {
+	case command := <-conn.commands:
+		if err := conn.processCommand(&command); err != nil {
+			t.Fatalf("processing response stall timeout: %v", err)
+		}
+	default:
+		t.Fatal("repeated flushes postponed the response stall timeout")
+	}
+	if !stream.isReset {
+		t.Fatal("stalled stream wasn't reset")
+	}
+}
+
+func TestResponseWriteTimeoutIgnoresStaleCommand(t *testing.T) {
+	conn, stream := stalledResponseConn(t, time.Hour)
+	if err := conn.flushResponses(); err != nil {
+		t.Fatalf("flushResponses() error: %v", err)
+	}
+	if stream.writeTimer == nil {
+		t.Fatal("stall didn't arm the write timeout")
+	}
+	conn.send.window = 1 << 20
+	stream.send.window = 1 << 20
+	if err := conn.flushResponses(); err != nil {
+		t.Fatalf("flushResponses() error: %v", err)
+	}
+	if len(stream.pendingData) != 0 || stream.writeTimer != nil {
+		t.Fatalf("after progress: pending=%d timer=%v, want drained and disarmed", len(stream.pendingData), stream.writeTimer != nil)
+	}
+	stale := serverCommand{kind: serverCommandResponseWriteTimeout, streamID: 1, generation: 1, err: errStreamTimeout}
+	if err := conn.processCommand(&stale); err != nil {
+		t.Fatalf("processing stale timeout: %v", err)
+	}
+	if stream.isReset {
+		t.Fatal("stale stall timeout reset a stream that made progress")
+	}
+
+	stream.pendingData = []byte("blocked again")
+	conn.send.window = 0
+	conn.queueFlush(stream)
+	if err := conn.flushResponses(); err != nil {
+		t.Fatalf("flushResponses() error: %v", err)
+	}
+	if err := conn.processCommand(&stale); err != nil {
+		t.Fatalf("processing stale timeout: %v", err)
+	}
+	if stream.isReset {
+		t.Fatal("stale stall timeout reset a re-stalled stream")
+	}
+	current := serverCommand{kind: serverCommandResponseWriteTimeout, streamID: 1, generation: 2, err: errStreamTimeout}
+	if err := conn.processCommand(&current); err != nil {
+		t.Fatalf("processing current timeout: %v", err)
+	}
+	if !stream.isReset {
+		t.Fatal("current stall timeout didn't reset the stream")
+	}
+}

@@ -132,7 +132,7 @@ func (w *streamWrite) complete(err error) {
 type serverCommand struct {
 	kind       serverCommandKind
 	streamID   uint32
-	handlerGen uint32
+	generation uint32
 	requestCtx *fasthttp.RequestCtx
 	statusCode int
 	header     *fasthttp.ResponseHeader
@@ -1254,32 +1254,26 @@ func (c *serverConn) stopRequestReadTimeout(stream *serverStream) {
 	}
 }
 
+// armResponseWriteTimeout starts the stall clock once: later zero-credit
+// passes must not push the deadline out. Each arming has its own generation
+// so a timeout that fires while progress resumes cannot reset the stream.
 func (c *serverConn) armResponseWriteTimeout(stream *serverStream) {
-	if c.config.writeByteTimeout <= 0 || len(stream.pendingData) == 0 {
+	if c.config.writeByteTimeout <= 0 || len(stream.pendingData) == 0 || stream.writeTimer != nil {
 		return
 	}
-	streamID := stream.id
-	if stream.writeTimer == nil {
-		stream.writeTimer = time.AfterFunc(c.config.writeByteTimeout, func() {
-			select {
-			case c.commands <- serverCommand{
-				kind:     serverCommandResponseWriteTimeout,
-				streamID: streamID,
-				err:      errStreamTimeout,
-			}:
-			case <-c.ctx.Done():
-			}
-		})
-		return
-	}
-	stream.writeTimer.Reset(c.config.writeByteTimeout)
-}
-
-// pauseResponseWriteTimeout stops the timer but keeps it for the next stall.
-func (c *serverConn) pauseResponseWriteTimeout(stream *serverStream) {
-	if stream.writeTimer != nil {
-		stream.writeTimer.Stop()
-	}
+	stream.writeTimeoutGen++
+	streamID, generation := stream.id, stream.writeTimeoutGen
+	stream.writeTimer = time.AfterFunc(c.config.writeByteTimeout, func() {
+		select {
+		case c.commands <- serverCommand{
+			kind:       serverCommandResponseWriteTimeout,
+			streamID:   streamID,
+			generation: generation,
+			err:        errStreamTimeout,
+		}:
+		case <-c.ctx.Done():
+		}
+	})
 }
 
 func (c *serverConn) stopResponseWriteTimeout(stream *serverStream) {
@@ -1468,7 +1462,7 @@ func (c *serverConn) prunePriorityUpdates() {
 
 func (c *serverConn) processCommand(command *serverCommand) error {
 	if command.kind == serverCommandHandlerDone &&
-		command.handlerGen == c.handlerGen && c.pendingHandlers > 0 {
+		command.generation == c.handlerGen && c.pendingHandlers > 0 {
 		c.pendingHandlers--
 	}
 	stream := c.streams[command.streamID]
@@ -1599,7 +1593,7 @@ func (c *serverConn) processCommand(command *serverCommand) error {
 		}
 		return c.resetStream(stream.id, xhttp2.ErrCodeCancel, command.err)
 	case serverCommandResponseWriteTimeout:
-		if len(stream.pendingData) == 0 {
+		if command.generation != stream.writeTimeoutGen || stream.writeTimer == nil {
 			return nil
 		}
 		return c.resetStream(stream.id, xhttp2.ErrCodeCancel, command.err)
@@ -1614,7 +1608,7 @@ func (c *serverConn) runHandler(stream *serverStream) {
 	case c.commands <- serverCommand{
 		kind:       serverCommandHandlerDone,
 		streamID:   stream.id,
-		handlerGen: stream.handlerGen,
+		generation: stream.handlerGen,
 		requestCtx: stream.request,
 	}:
 	case <-c.ctx.Done():
@@ -1947,9 +1941,9 @@ func (c *serverConn) flushStream(stream *serverStream, drain bool) (bool, error)
 		if stream.pendingWrite != nil {
 			stream.pendingWrite.written += amount
 		}
-		if len(stream.pendingData) != 0 {
-			c.armResponseWriteTimeout(stream)
-		} else {
+		// Progress restarts the stall clock; the next zero-credit pass re-arms it.
+		c.stopResponseWriteTimeout(stream)
+		if len(stream.pendingData) == 0 {
 			stream.pendingData = nil
 			if stream.pendingAck != nil {
 				stream.pendingAck <- nil
@@ -1959,7 +1953,6 @@ func (c *serverConn) flushStream(stream *serverStream, drain bool) (bool, error)
 				stream.pendingWrite.complete(nil)
 				stream.pendingWrite = nil
 			}
-			c.pauseResponseWriteTimeout(stream)
 		}
 		if isLast {
 			stream.localClosed = true
