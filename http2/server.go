@@ -869,7 +869,7 @@ func (c *serverConn) processHeaderStreamError(event *incomingFrame) error {
 	}
 	c.lastClientStreamID = event.streamID
 	delete(c.priorityUpdates, event.streamID)
-	c.rememberClosedClientStream(event.streamID)
+	c.trackClosedClientStream(event.streamID)
 	if err := c.recordRapidReset(); err != nil {
 		return err
 	}
@@ -1096,7 +1096,7 @@ func (c *serverConn) processHeaders(event *incomingFrame) error {
 
 func (c *serverConn) rejectNewStream(streamID uint32, code xhttp2.ErrCode) error {
 	delete(c.priorityUpdates, streamID)
-	c.rememberClosedClientStream(streamID)
+	c.trackClosedClientStream(streamID)
 	if err := c.recordRapidReset(); err != nil {
 		return err
 	}
@@ -1896,7 +1896,7 @@ func (c *serverConn) flushResponses() error {
 	}
 	defer c.compactFlushQueue()
 	for {
-		madeProgress := false
+		another := false
 		for urgency := range c.flushBuckets {
 			c.flushBuckets[urgency] = c.flushBuckets[urgency][:0]
 		}
@@ -1916,25 +1916,25 @@ func (c *serverConn) flushResponses() error {
 				if stream == nil || min(stream.priority.urgency, uint8(7)) != urgency {
 					continue
 				}
-				progressed, err := c.flushStream(stream, !stream.priority.incremental)
+				more, err := c.flushStream(stream, !stream.priority.incremental)
 				if err != nil {
 					return err
 				}
-				if progressed {
-					madeProgress = true
+				if more {
+					another = true
 				}
 			}
 		}
-		if !madeProgress {
+		if !another {
 			return nil
 		}
 	}
 }
 
 // flushStream writes what the stream may send now; drain keeps going until the
-// stream or a window empties.
+// stream or a window empties. It reports whether the stream yielded with data
+// it could still send, which only an incremental stream does.
 func (c *serverConn) flushStream(stream *serverStream, drain bool) (bool, error) {
-	progressed := false
 	for {
 		canSendData := len(stream.pendingData) != 0 && !stream.isReset && !stream.localClosed
 		if !canSendData {
@@ -1945,13 +1945,12 @@ func (c *serverConn) flushStream(stream *serverStream, drain bool) (bool, error)
 			// Only a flow-control stall waits on the peer, so only it gets
 			// the timeout.
 			c.armResponseWriteTimeout(stream)
-			return progressed, nil
+			return false, nil
 		}
 		isLast := amount == len(stream.pendingData) && stream.responseEOF && !stream.responseHasTrailers
 		if err := c.framer.WriteData(stream.id, isLast, stream.pendingData[:amount]); err != nil {
-			return progressed, err
+			return false, err
 		}
-		progressed = true
 		stream.pendingData = stream.pendingData[amount:]
 		if stream.pendingWrite != nil {
 			stream.pendingWrite.written += amount
@@ -1971,7 +1970,7 @@ func (c *serverConn) flushStream(stream *serverStream, drain bool) (bool, error)
 		}
 		if isLast {
 			stream.localClosed = true
-			return true, c.finishResponse(stream)
+			return false, c.finishResponse(stream)
 		}
 		if !drain {
 			return true, nil
@@ -1980,28 +1979,25 @@ func (c *serverConn) flushStream(stream *serverStream, drain bool) (bool, error)
 
 	responseComplete := len(stream.pendingData) == 0 && stream.responseEOF && !stream.localClosed
 	if !responseComplete {
-		return progressed, nil
+		return false, nil
 	}
 	if !stream.responseHasTrailers {
 		if err := c.framer.WriteData(stream.id, true, nil); err != nil {
-			return true, err
+			return false, err
 		}
 		stream.localClosed = true
-		return true, c.finishResponse(stream)
+		return false, c.finishResponse(stream)
 	}
 	encoded, err := c.encodeResponseTrailers(stream)
 	if err != nil {
 		// Nothing reached the HPACK encoder, so this is the stream's problem.
-		if resetErr := c.resetStream(stream.id, xhttp2.ErrCodeInternal, err); resetErr != nil {
-			return true, resetErr
-		}
-		return true, nil
+		return false, c.resetStream(stream.id, xhttp2.ErrCodeInternal, err)
 	}
 	if err := c.writeHeaderBlock(stream.id, true, encoded); err != nil {
-		return true, err
+		return false, err
 	}
 	stream.localClosed = true
-	return true, c.finishResponse(stream)
+	return false, c.finishResponse(stream)
 }
 
 func (c *serverConn) compactFlushQueue() {
@@ -2119,7 +2115,7 @@ func (c *serverConn) maybeFinalizeStream(stream *serverStream) {
 	}
 	delete(c.streams, stream.id)
 	if stream.id&1 == 1 {
-		c.rememberClosedClientStream(stream.id)
+		c.trackClosedClientStream(stream.id)
 	}
 	if stream.isPush {
 		c.activePushes--
@@ -2150,13 +2146,8 @@ func (c *serverConn) markClosedStreamReset(streamID uint32) bool {
 	return true
 }
 
-func (c *serverConn) rememberClosedClientStream(streamID uint32) {
-	if _, exists := c.closedClientStreams[streamID]; exists {
-		return
-	}
-	c.trackClosedClientStream(streamID)
-}
-
+// trackClosedClientStream records a closed client stream. Stream IDs are never
+// reused, so an ID is tracked at most once.
 func (c *serverConn) trackClosedClientStream(streamID uint32) {
 	c.closedClientStreams[streamID] = false
 	limit := int(c.config.maxConcurrentStreams) * 4
