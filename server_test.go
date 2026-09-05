@@ -2790,6 +2790,59 @@ func TestRequestCtxWriteString(t *testing.T) {
 	}
 }
 
+func TestServeConnBufferedBodyWithTrailer(t *testing.T) {
+	t.Parallel()
+
+	handler := func(ctx *RequestCtx) {
+		if err := ctx.Response.Header.AddTrailer("Foo"); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		ctx.Response.Header.Set("Foo", "testfoo")
+		ctx.SetBodyString("data")
+	}
+
+	for _, tc := range []struct {
+		proto   string
+		chunked bool
+	}{
+		// HTTP/1.0 clients can't read chunked encoding, so the
+		// buffered body keeps Content-Length framing.
+		{proto: "HTTP/1.0", chunked: false},
+		{proto: "HTTP/1.1", chunked: true},
+	} {
+		rw := &readWriter{}
+		rw.r.WriteString("GET / " + tc.proto + "\r\nHost: example.com\r\n\r\n")
+
+		ch := make(chan struct{})
+		go func() {
+			if err := ServeConn(rw, handler); err != nil {
+				t.Errorf("unexpected error in ServeConn: %v", err)
+			}
+			close(ch)
+		}()
+
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatal("timeout")
+		}
+
+		wire := rw.w.String()
+		if chunked := strings.Contains(wire, "Transfer-Encoding: chunked\r\n"); chunked != tc.chunked {
+			t.Fatalf("%s: chunked=%v, expecting %v, got:\n%q", tc.proto, chunked, tc.chunked, wire)
+		}
+		if tc.chunked {
+			if !strings.HasSuffix(wire, "0\r\nFoo: testfoo\r\n\r\n") {
+				t.Fatalf("%s: expected the trailer after the last chunk, got:\n%q", tc.proto, wire)
+			}
+			continue
+		}
+		if !strings.Contains(wire, "Content-Length: 4\r\n") || !strings.HasSuffix(wire, "\r\n\r\ndata") {
+			t.Fatalf("%s: expected a Content-Length framed body, got:\n%q", tc.proto, wire)
+		}
+	}
+}
+
 func TestServeConnKeepRequestAndResponseUntilResetUserValues(t *testing.T) {
 	t.Parallel()
 

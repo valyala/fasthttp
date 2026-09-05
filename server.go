@@ -2682,6 +2682,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			// connections are keep-alive by default.
 			ctx.Response.Header.setNonSpecial(strConnection, strKeepAlive)
 		}
+		if !ctx.Request.Header.IsHTTP11() {
+			// HTTP/1.0 clients can't read chunked encoding, so let
+			// Response.Write keep Content-Length framing for them.
+			ctx.Response.Header.noHTTP11 = true
+		}
 
 		if serverName != "" && len(ctx.Response.Header.Server()) == 0 {
 			ctx.Response.Header.SetServer(serverName)
