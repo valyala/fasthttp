@@ -1658,9 +1658,9 @@ func (c *serverConn) handleHandlerDone(
 	if statusCode >= 100 && statusCode < 200 {
 		return c.resetStream(stream.id, xhttp2.ErrCodeInternal, errors.New("http2: final response cannot be informational"))
 	}
+	hasContentLength := len(requestCtx.Response.Header.Peek(fasthttp.HeaderContentLength)) != 0
 	if statusCode == fasthttp.StatusNoContent &&
-		(requestCtx.Response.IsBodyStream() || len(requestCtx.Response.Body()) != 0 ||
-			len(requestCtx.Response.Header.Peek(fasthttp.HeaderContentLength)) != 0) {
+		(requestCtx.Response.IsBodyStream() || len(requestCtx.Response.Body()) != 0 || hasContentLength) {
 		return c.resetStream(
 			stream.id,
 			xhttp2.ErrCodeInternal,
@@ -1669,7 +1669,7 @@ func (c *serverConn) handleHandlerDone(
 	}
 	// DATA on an established tunnel is tunnel bytes, not a body to measure.
 	establishesTunnel := requestCtx.Request.Header.IsConnect() && statusCode >= 200 && statusCode < 300
-	if establishesTunnel && len(requestCtx.Response.Header.Peek(fasthttp.HeaderContentLength)) != 0 {
+	if establishesTunnel && hasContentLength {
 		return c.resetStream(
 			stream.id,
 			xhttp2.ErrCodeInternal,
@@ -1677,17 +1677,19 @@ func (c *serverConn) handleHandlerDone(
 		)
 	}
 
-	stream.acceptMu.Lock()
-	streamHandler := stream.streamHandler
-	if streamHandler != nil && (statusCode < 200 || statusCode >= 300) {
-		stream.streamHandler = nil
-		streamHandler = nil
+	var streamHandler fasthttp.StreamHandler
+	if c.config.enableExtendedConnect {
+		stream.acceptMu.Lock()
+		streamHandler = stream.streamHandler
+		if streamHandler != nil && (statusCode < 200 || statusCode >= 300) {
+			stream.streamHandler = nil
+			streamHandler = nil
+		}
+		stream.acceptMu.Unlock()
 	}
-	stream.acceptMu.Unlock()
 	if streamHandler != nil {
 		if requestCtx.Response.IsBodyStream() || len(requestCtx.Response.Body()) != 0 ||
-			len(requestCtx.Response.Header.PeekTrailerKeys()) != 0 ||
-			len(requestCtx.Response.Header.Peek(fasthttp.HeaderContentLength)) != 0 {
+			len(requestCtx.Response.Header.PeekTrailerKeys()) != 0 || hasContentLength {
 			return c.resetStream(stream.id, xhttp2.ErrCodeInternal, errors.New("http2: accepted stream response cannot have an HTTP body"))
 		}
 		block, err := c.encodeResponseHeaders(
@@ -1707,14 +1709,18 @@ func (c *serverConn) handleHandlerDone(
 		return nil
 	}
 
+	mustNotHaveBody := responseMustNotHaveBody(requestCtx)
 	var bufferedBody []byte
 	if !requestCtx.Response.IsBodyStream() {
 		bufferedBody = requestCtx.Response.Body()
-		if !establishesTunnel &&
-			len(requestCtx.Response.Header.Peek(fasthttp.HeaderContentLength)) == 0 &&
-			(!responseMustNotHaveBody(requestCtx) || len(bufferedBody) != 0) {
+		if !establishesTunnel && !hasContentLength && (!mustNotHaveBody || len(bufferedBody) != 0) {
 			requestCtx.Response.Header.SetContentLength(len(bufferedBody))
+			hasContentLength = true
 		}
+	}
+	expectedResponse := int64(-1)
+	if hasContentLength {
+		expectedResponse = int64(requestCtx.Response.Header.ContentLength())
 	}
 	block, err := c.encodeResponseHeaders(
 		c.server,
@@ -1726,7 +1732,7 @@ func (c *serverConn) handleHandlerDone(
 		return c.resetStream(stream.id, xhttp2.ErrCodeInternal, err)
 	}
 	stream.responseHasTrailers = len(requestCtx.Response.Header.PeekTrailerKeys()) != 0
-	if responseMustNotHaveBody(requestCtx) {
+	if mustNotHaveBody {
 		if err := c.writeHeaderBlock(stream.id, true, block); err != nil {
 			return err
 		}
@@ -1735,7 +1741,7 @@ func (c *serverConn) handleHandlerDone(
 		return c.finishResponse(stream)
 	}
 	if requestCtx.Response.IsBodyStream() {
-		stream.expectedResponse = responseContentLength(&requestCtx.Response.Header)
+		stream.expectedResponse = expectedResponse
 		if err := c.writeHeaderBlock(stream.id, false, block); err != nil {
 			return err
 		}
@@ -1745,7 +1751,7 @@ func (c *serverConn) handleHandlerDone(
 	}
 
 	body := bufferedBody
-	stream.expectedResponse = responseContentLength(&requestCtx.Response.Header)
+	stream.expectedResponse = expectedResponse
 	if stream.expectedResponse >= 0 && stream.expectedResponse != int64(len(body)) {
 		return c.resetStream(stream.id, xhttp2.ErrCodeInternal, errors.New("http2: response body length doesn't match content-length"))
 	}
@@ -2340,13 +2346,6 @@ func responseMustNotHaveBody(ctx *fasthttp.RequestCtx) bool {
 	}
 	statusCode := ctx.Response.StatusCode()
 	return statusCode >= 100 && statusCode < 200 || statusCode == 204 || statusCode == 304
-}
-
-func responseContentLength(header *fasthttp.ResponseHeader) int64 {
-	if len(header.Peek(fasthttp.HeaderContentLength)) == 0 {
-		return -1
-	}
-	return int64(header.ContentLength())
 }
 
 type priority struct {
