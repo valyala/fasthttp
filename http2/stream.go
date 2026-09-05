@@ -358,6 +358,7 @@ type serverStream struct {
 	hijackRejected     bool
 	flushQueued        bool
 	handlerGen         uint32
+	writeTimeoutGen    uint32
 	worker             *streamWorker
 	handlerDone        bool
 	isPush             bool
