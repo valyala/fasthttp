@@ -68,11 +68,34 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 		switch sk {
 		case "Transfer-Encoding":
 			r.TransferEncoding = append(r.TransferEncoding, sv)
+		case fasthttp.HeaderTrailer:
+			// The announcement lives in r.Trailer, not in the header map.
 		default:
 			if sk == fasthttp.HeaderCookie {
 				sv = strings.Clone(sv)
 			}
 			r.Header.Add(sk, sv)
+		}
+	}
+
+	// net/http keeps trailers in Request.Trailer, out of the header map. All()
+	// above is the header section; the trailer section comes from
+	// TrailerHeader(), and a reused request must not keep old trailers.
+	r.Trailer = nil
+	if keys := ctx.Request.Header.PeekTrailerKeys(); len(keys) > 0 {
+		r.Trailer = make(http.Header, len(keys))
+		for _, k := range keys {
+			r.Trailer[http.CanonicalHeaderKey(string(k))] = nil
+		}
+		// TrailerHeader is "Key: Value\r\n" per value, then an empty line.
+		section := ctx.Request.Header.TrailerHeader()
+		for len(section) > len("\r\n") {
+			var line []byte
+			line, section, _ = bytes.Cut(section, strCRLF)
+			if k, v, ok := bytes.Cut(line, strColonSpace); ok {
+				name := http.CanonicalHeaderKey(string(k))
+				r.Trailer[name] = append(r.Trailer[name], string(v))
+			}
 		}
 	}
 
@@ -458,3 +481,8 @@ func (t *trailerSyncReader) sync() {
 		}
 	}
 }
+
+var (
+	strCRLF       = []byte("\r\n")
+	strColonSpace = []byte(": ")
+)

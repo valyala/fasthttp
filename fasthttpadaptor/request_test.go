@@ -2184,3 +2184,151 @@ func TestConvertRequestProtocolVersion(t *testing.T) {
 		}
 	}
 }
+
+// A User-Agent received only as a trailer reaches Request.Trailer, not
+// Request.Header.
+func TestConvertRequestSpecialTrailerStaysOutOfHeader(t *testing.T) {
+	t.Parallel()
+
+	ctx := &fasthttp.RequestCtx{}
+	err := ctx.Request.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: a\r\nTrailer: User-Agent\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nUser-Agent: late\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r http.Request
+	if err := ConvertRequest(ctx, &r, true); err != nil {
+		t.Fatalf("ConvertRequest() error: %v", err)
+	}
+	if v := r.Header.Values("User-Agent"); v != nil {
+		t.Errorf("Header[User-Agent] = %q, want it out of the header map", v)
+	}
+	if got := r.Trailer.Values("User-Agent"); len(got) != 1 || got[0] != "late" {
+		t.Errorf("Trailer[User-Agent] = %q, want [late]", got)
+	}
+}
+
+func TestConvertRequestCarriesTrailers(t *testing.T) {
+	t.Parallel()
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodPost)
+	ctx.Request.SetRequestURI("/")
+	ctx.Request.Header.SetHost("example.com")
+	ctx.Request.SetBodyString("body")
+	if err := ctx.Request.Header.SetTrailer("Foo"); err != nil {
+		t.Fatalf("SetTrailer() error: %v", err)
+	}
+	ctx.Request.Header.Add("Foo", "one")
+	ctx.Request.Header.Add("Foo", "two")
+
+	var r http.Request
+	if err := ConvertRequest(ctx, &r, true); err != nil {
+		t.Fatalf("ConvertRequest() error: %v", err)
+	}
+	got := r.Trailer.Values("Foo")
+	if len(got) != 2 || got[0] != "one" || got[1] != "two" {
+		t.Errorf("Trailer[Foo] = %q, want [one two]", got)
+	}
+	if v := r.Header.Values("Trailer"); v != nil {
+		t.Errorf("Header[Trailer] = %q, want the announcement out of the header map", v)
+	}
+	if v := r.Header.Values("Foo"); v != nil {
+		t.Errorf("Header[Foo] = %q, want announced trailers out of the header map", v)
+	}
+}
+
+// A reused destination request must not inherit its predecessor's trailers.
+func TestConvertRequestResetsTrailerOnReuse(t *testing.T) {
+	t.Parallel()
+
+	ctx := &fasthttp.RequestCtx{}
+	ctx.Request.Header.SetMethod(fasthttp.MethodPost)
+	ctx.Request.SetRequestURI("/")
+	ctx.Request.Header.SetHost("example.com")
+	if err := ctx.Request.Header.SetTrailer("X-T"); err != nil {
+		t.Fatal(err)
+	}
+	ctx.Request.Header.Set("X-T", "first")
+
+	var r http.Request
+	if err := ConvertRequest(ctx, &r, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Trailer.Get("X-T"); got != "first" {
+		t.Fatalf("Trailer[X-T] = %q, want first", got)
+	}
+
+	plain := &fasthttp.RequestCtx{}
+	plain.Request.Header.SetMethod(fasthttp.MethodGet)
+	plain.Request.SetRequestURI("/")
+	plain.Request.Header.SetHost("example.com")
+	if err := ConvertRequest(plain, &r, true); err != nil {
+		t.Fatal(err)
+	}
+	if r.Trailer != nil {
+		t.Fatalf("Trailer = %v after a trailer-free request, want nil", r.Trailer)
+	}
+}
+
+// An unannounced field from the trailer section still lands in Request.Trailer.
+func TestConvertRequestCarriesUnannouncedTrailer(t *testing.T) {
+	t.Parallel()
+
+	raw := "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n" +
+		"4\r\nbody\r\n0\r\nX-Late: v\r\n\r\n"
+	ctx := &fasthttp.RequestCtx{}
+	if err := ctx.Request.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+
+	var r http.Request
+	if err := ConvertRequest(ctx, &r, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Trailer.Get("X-Late"); got != "v" {
+		t.Fatalf("Trailer[X-Late] = %q, want v", got)
+	}
+	if v := r.Header.Values("X-Late"); v != nil {
+		t.Fatalf("Header[X-Late] = %q, want the trailer out of the header map", v)
+	}
+}
+
+// An upfront field and an unannounced trailer of the same name land in their
+// own maps, as they do in net/http.
+func TestConvertRequestKeepsSectionsApart(t *testing.T) {
+	t.Parallel()
+
+	raw := "POST / HTTP/1.1\r\nHost: a\r\nX-Mixed: upfront\r\nTransfer-Encoding: chunked\r\n\r\n" +
+		"4\r\nbody\r\n0\r\nX-Mixed: late\r\nX-Mixed: later\r\n\r\n"
+	ctx := &fasthttp.RequestCtx{}
+	if err := ctx.Request.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+
+	var r http.Request
+	if err := ConvertRequest(ctx, &r, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.Header.Values("X-Mixed"); len(got) != 1 || got[0] != "upfront" {
+		t.Fatalf("Header[X-Mixed] = %q, want [upfront]", got)
+	}
+	if got := r.Trailer.Values("X-Mixed"); len(got) != 2 || got[0] != "late" || got[1] != "later" {
+		t.Fatalf("Trailer[X-Mixed] = %q, want [late later]", got)
+	}
+}
+
+func BenchmarkConvertRequestTrailers(b *testing.B) {
+	raw := "POST /test HTTP/1.1\r\nHost: test\r\nTransfer-Encoding: chunked\r\n\r\n" +
+		"4\r\nbody\r\n0\r\nX-A: one\r\nX-B: two\r\n\r\n"
+	ctx := &fasthttp.RequestCtx{}
+	if err := ctx.Request.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		b.Fatal(err)
+	}
+	var httpReq http.Request
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		_ = ConvertRequest(ctx, &httpReq, true)
+	}
+}

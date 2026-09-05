@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -103,9 +104,13 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// Buffered, no Flush() nor Hijack().
 			ctx.SetStatusCode(w.status())
 			haveContentType := false
+			announced := announcedTrailers(w.Header())
 			for k, vv := range w.Header() {
 				if k == fasthttp.HeaderContentType {
 					haveContentType = true
+				}
+				if isTrailerField(k, announced) {
+					continue
 				}
 
 				for _, v := range vv {
@@ -122,6 +127,16 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 					ctx.Response.Header.Set(fasthttp.HeaderContentType, http.DetectContentType(w.responseBody[:l]))
 				}
 			}
+			if announced != nil && string(ctx.Request.Header.Protocol()) != "HTTP/1.0" {
+				// The announcement makes the body chunked to carry the
+				// trailers, which HTTP/1.0 cannot; a TrailerPrefix field alone
+				// is dropped, as in net/http. The trailers register once the
+				// header block is written, as for a flushed response, so an
+				// upfront value keeps its section.
+				w.stream = &streamBody{pre: w.consumePreflush(), w: w, announced: announced}
+				ctx.Response.SetBodyStream(w.stream, -1)
+				return
+			}
 			if len(w.responseBody) > 0 {
 				ctx.Response.SetBody(w.responseBody)
 			}
@@ -132,6 +147,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			ctx.SetStatusCode(w.status())
 
 			haveContentType := false
+			announced := announcedTrailers(w.Header())
 			for k, vv := range w.Header() {
 				// No Content-Length when streaming.
 				if k == fasthttp.HeaderContentLength {
@@ -139,6 +155,9 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				}
 				if k == fasthttp.HeaderContentType {
 					haveContentType = true
+				}
+				if isTrailerField(k, announced) {
+					continue
 				}
 				for _, v := range vv {
 					ctx.Response.Header.Add(k, v)
@@ -156,7 +175,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			// The pipe feeds fasthttp's chunked writer directly, so the
 			// server truncates the response and drops the connection when a
 			// handler exit closes the pipe with an error.
-			w.stream = &streamBody{pre: w.consumePreflush(), w: w}
+			w.stream = &streamBody{pre: w.consumePreflush(), w: w, announced: announced}
 			ctx.Response.SetBodyStream(w.stream, -1)
 			// Pre-flush bytes carry the headers out. Without any, or with a
 			// body the server skips, flush them alone.
@@ -185,14 +204,18 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 	}
 }
 
-// streamBody feeds a flushed response through fasthttp's chunked writer and
-// recycles the writer once the server is done with it.
+// streamBody feeds a flushed response, or a buffered one that carries
+// trailers, through fasthttp's chunked writer. It registers the handler's
+// trailers when the stream ends cleanly and recycles the writer once the
+// server is done with it.
 type streamBody struct {
-	mu     sync.Mutex
-	pre    []byte // pooled pre-flush bytes, recycled by Close
-	w      *writer
-	err    error
-	closed bool
+	mu        sync.Mutex
+	pre       []byte // pooled pre-flush bytes, recycled by Close
+	w         *writer
+	announced map[string]bool
+	err       error
+	trailered bool
+	closed    bool
 }
 
 func (b *streamBody) Read(p []byte) (int, error) {
@@ -209,7 +232,22 @@ func (b *streamBody) Read(p []byte) (int, error) {
 	}
 	b.mu.Unlock()
 	// The pipe is read without the lock, so Close and fail never wait on it.
-	return b.w.pr.Read(p)
+	// A buffered body has no pipe: nothing follows the pre-flush bytes.
+	n, err := 0, io.EOF
+	if b.w.pr != nil {
+		n, err = b.w.pr.Read(p)
+	}
+	if err == io.EOF {
+		// The handler has returned, so its trailer values are final; a stream
+		// the server closed may belong to a response already reset.
+		b.mu.Lock()
+		if !b.closed && !b.trailered {
+			b.trailered = true
+			writeTrailers(b.w.ctx, b.w.Header(), b.announced)
+		}
+		b.mu.Unlock()
+	}
+	return n, err
 }
 
 // fail records a handler exit while the server still owns the request; a
@@ -230,7 +268,9 @@ func (b *streamBody) fail(ctx *fasthttp.RequestCtx, rec any) {
 // discarded body may still be read by a compression goroutine, and reports
 // a handler exit the server has not read.
 func (b *streamBody) Close() error {
-	_ = b.w.pr.Close()
+	if b.w.pr != nil {
+		_ = b.w.pr.Close()
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if !b.closed {
@@ -433,4 +473,66 @@ func (w *writer) consumePreflush() []byte {
 	out := w.responseBody
 	w.responseBody = nil
 	return out
+}
+
+func announcedTrailers(h http.Header) map[string]bool {
+	var names map[string]bool
+	for _, list := range h[fasthttp.HeaderTrailer] {
+		for name := range strings.SplitSeq(list, ",") {
+			name = http.CanonicalHeaderKey(strings.TrimSpace(name))
+			if name == "" {
+				continue
+			}
+			if names == nil {
+				names = make(map[string]bool)
+			}
+			names[name] = true
+		}
+	}
+	return names
+}
+
+func isTrailerField(key string, announced map[string]bool) bool {
+	if strings.HasPrefix(key, http.TrailerPrefix) {
+		return true
+	}
+	// Trailer is the announcement, not one of the announced.
+	if key == fasthttp.HeaderTrailer {
+		return false
+	}
+	return announced[key]
+}
+
+// trailerName returns the trailer a header map entry stands for, if any.
+func trailerName(key string, announced map[string]bool) (string, bool) {
+	if after, ok := strings.CutPrefix(key, http.TrailerPrefix); ok {
+		return http.CanonicalHeaderKey(after), true
+	}
+	if key == fasthttp.HeaderTrailer {
+		return "", false
+	}
+	return key, announced[key]
+}
+
+// writeTrailers registers the handler's trailers on the response once its
+// header block is written: a name's stale header value must not migrate into
+// the trailer section along with the announcement.
+func writeTrailers(ctx *fasthttp.RequestCtx, h http.Header, announced map[string]bool) {
+	for key := range h {
+		if name, ok := trailerName(key, announced); ok {
+			ctx.Response.Header.Del(name)
+		}
+	}
+	for key, values := range h {
+		name, ok := trailerName(key, announced)
+		if !ok {
+			continue
+		}
+		if err := ctx.Response.Header.AddTrailer(name); err != nil {
+			continue
+		}
+		for _, v := range values {
+			ctx.Response.Header.Add(name, v)
+		}
+	}
 }
