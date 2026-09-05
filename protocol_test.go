@@ -753,3 +753,56 @@ func TestMaxProtocolRequestCtxCacheBytes(t *testing.T) {
 		})
 	}
 }
+
+func TestProtocolAcquireRequestCtxAppliesServerDefaults(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	server := &Server{
+		NoDefaultContentType:          true,
+		NoDefaultDate:                 true,
+		SecureErrorLogMessage:         true,
+		DisableHeaderNamesNormalizing: true,
+	}
+	protocolContext := &ProtocolServerContext{
+		server:       server,
+		conn:         serverConn,
+		idleConnTime: new(atomic.Int64),
+		isTLS:        true,
+	}
+	stream := &testProtocolStream{Context: context.Background()}
+	requestCtx := protocolContext.AcquireRequestCtx(serverConn, stream)
+	defer protocolContext.ReleaseRequestCtx(requestCtx)
+
+	if !requestCtx.Request.isTLS {
+		t.Error("Request.isTLS = false, want true")
+	}
+	if !requestCtx.Response.Header.noDefaultContentType || !requestCtx.Response.Header.noDefaultDate {
+		t.Error("response header defaults weren't disabled")
+	}
+	if !requestCtx.Request.Header.secureErrorLogMessage || !requestCtx.Response.Header.secureErrorLogMessage ||
+		!requestCtx.Request.secureErrorLogMessage || !requestCtx.Response.secureErrorLogMessage {
+		t.Error("SecureErrorLogMessage wasn't applied")
+	}
+	if !requestCtx.Request.Header.disableNormalizing || !requestCtx.Response.Header.disableNormalizing {
+		t.Error("DisableHeaderNamesNormalizing wasn't applied")
+	}
+}
+
+func TestIsTLSConnUnwrapsPerIPConn(t *testing.T) {
+	serverConn, clientConn := net.Pipe()
+	defer serverConn.Close()
+	defer clientConn.Close()
+
+	if isTLSConn(serverConn) {
+		t.Error("plain connection reported as TLS")
+	}
+	tlsConn := tls.Server(serverConn, &tls.Config{}) //nolint:gosec // Never handshakes.
+	if !isTLSConn(tlsConn) {
+		t.Error("TLS connection not reported as TLS")
+	}
+	if !isTLSConn(&perIPConn{Conn: tlsConn}) {
+		t.Error("per-IP wrapped TLS connection not reported as TLS")
+	}
+}

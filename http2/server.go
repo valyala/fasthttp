@@ -1004,7 +1004,7 @@ func (c *serverConn) processHeaders(event *incomingFrame) error {
 	stream.priority = priority{urgency: 3}
 	requestCtx := c.protocolContext.AcquireRequestCtx(c.conn, stream)
 	stream.request = requestCtx
-	expectedBody, err := populateRequest(requestCtx, c.server, event.fields, c.config.enableExtendedConnect)
+	expectedBody, err := populateRequest(requestCtx, event.fields, c.config.enableExtendedConnect)
 	if err != nil {
 		c.protocolContext.ReleaseRequestCtx(requestCtx)
 		stream.request = nil
