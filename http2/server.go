@@ -678,8 +678,7 @@ func (c *serverConn) decodeIncomingHeaders(frame *headersFrame) incomingFrame {
 }
 
 // incomingFrameFromWire copies reused x/net frame slices into pooled event
-// storage. HPACK field strings are immutable values owned by the decoder; only
-// the Framer-owned field slice must be copied before the next ReadFrame call.
+// storage. HEADERS never arrive here: frameReader decodes them itself.
 func incomingFrameFromWire(frame xhttp2.Frame) incomingFrame {
 	header := frame.Header()
 	event := incomingFrame{streamID: header.StreamID}
@@ -694,16 +693,6 @@ func incomingFrameFromWire(frame xhttp2.Frame) incomingFrame {
 				event.settings[i] = frame.Setting(i)
 			}
 		}
-	case *xhttp2.MetaHeadersFrame:
-		event.kind = incomingFrameHeaders
-		event.endStream = frame.StreamEnded()
-		event.truncated = frame.Truncated
-		event.hasPriority = frame.HasPriority()
-		if event.hasPriority {
-			event.dependency = frame.Priority.StreamDep
-		}
-		event.fieldStorage = copyIncomingHeaderFields(frame.Fields)
-		event.fields = event.fieldStorage.fields
 	case *xhttp2.DataFrame:
 		event.kind = incomingFrameData
 		event.endStream = frame.StreamEnded()
@@ -739,12 +728,6 @@ func incomingFrameFromWire(frame xhttp2.Frame) incomingFrame {
 		event.kind = incomingFrameUnknown
 	}
 	return event
-}
-
-func copyIncomingHeaderFields(source []hpack.HeaderField) *incomingHeaderFieldStorage {
-	storage := acquireIncomingHeaderFields(len(source))
-	storage.fields = append(storage.fields, source...)
-	return storage
 }
 
 func acquireIncomingHeaderFields(length int) *incomingHeaderFieldStorage {
