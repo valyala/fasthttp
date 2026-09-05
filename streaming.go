@@ -22,11 +22,22 @@ type requestStream struct {
 	totalBytesRead  int
 	chunkLeft       int
 	strictEOF       bool
+	eof             bool
 }
 
 func (rs *requestStream) Read(p []byte) (int, error) {
 	if rs.reader == nil {
 		panic("BUG: reading released body stream")
+	}
+
+	// The stream is terminal once the body has ended. Without this, a chunked
+	// stream re-enters parseChunkSize on the next Read and blocks waiting for a
+	// chunk header that is never coming: a keep-alive connection stays open
+	// after the body ends, so nothing wakes the read. Any caller that reads a
+	// streamed body to EOF and then reads again - draining before release is the
+	// common case - would park a goroutine and never release the connection.
+	if rs.eof {
+		return 0, io.EOF
 	}
 
 	var (
@@ -45,6 +56,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 				if err != nil && err != io.EOF {
 					return 0, err
 				}
+				rs.eof = true
 				return 0, io.EOF
 			}
 			rs.chunkLeft = chunkSize
@@ -62,6 +74,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		return n, err
 	}
 	if rs.totalBytesRead == contentLength {
+		rs.eof = true
 		return 0, io.EOF
 	}
 	prefetchedSize := int(rs.prefetchedBytes.Size())
@@ -73,6 +86,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		n, err := rs.prefetchedBytes.Read(p)
 		rs.totalBytesRead += n
 		if rs.totalBytesRead == contentLength {
+			rs.eof = true
 			return n, io.EOF
 		}
 		return n, err
@@ -87,10 +101,14 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		err = io.ErrUnexpectedEOF
 	}
 	if err != nil {
+		if err == io.EOF {
+			rs.eof = true
+		}
 		return n, err
 	}
 
 	if rs.totalBytesRead == contentLength {
+		rs.eof = true
 		err = io.EOF
 	}
 	return n, err
@@ -118,6 +136,7 @@ func releaseRequestStream(rs *requestStream) {
 	rs.reader = nil
 	rs.header = nil
 	rs.contentLength = 0
+	rs.eof = false
 	rs.strictEOF = false
 	requestStreamPool.Put(rs)
 }
