@@ -370,8 +370,8 @@ func (resp *Response) CloseBodyStream() error {
 }
 
 // ReadCloserWithError is a body stream that can be closed with the error that
-// caused the caller to stop reading. Streamed client response bodies implement
-// this interface.
+// caused the caller to stop reading. Streamed response bodies returned by
+// [Client.Do] and [HostClient.Do] implement this interface.
 type ReadCloserWithError interface {
 	io.Reader
 	CloseWithError(err error) error
