@@ -136,6 +136,7 @@ type ProtocolServerContext struct {
 	connID       uint64
 	requestCount atomic.Uint64
 	active       atomic.Int32
+	isTLS        bool
 	prefaceRead  bool
 	requestMu    sync.Mutex
 	requestCache []cachedRequestCtx
@@ -221,6 +222,7 @@ func (ctx *ProtocolServerContext) CleartextPrefaceConsumed() bool {
 // ReleaseRequestCtx after all response and stream work is complete.
 func (ctx *ProtocolServerContext) AcquireRequestCtx(c net.Conn, stream ProtocolStream) *RequestCtx {
 	requestCtx := ctx.acquireRequestCtx(c)
+	ctx.applyRequestDefaults(requestCtx)
 	requestCtx.connTime = ctx.connTime
 	requestCtx.time = time.Now()
 	requestCtx.connID = ctx.connID
@@ -269,6 +271,22 @@ func (ctx *ProtocolServerContext) ReleaseRequestCtx(requestCtx *RequestCtx) {
 	if active == 0 {
 		ctx.idleConnTime.Store(time.Now().Unix())
 		ctx.server.setState(ctx.conn, StateIdle)
+	}
+}
+
+// applyRequestDefaults mirrors the per-request setup of the HTTP/1 serve loop.
+func (ctx *ProtocolServerContext) applyRequestDefaults(requestCtx *RequestCtx) {
+	server := ctx.server
+	requestCtx.Request.isTLS = ctx.isTLS
+	requestCtx.Response.Header.noDefaultContentType = server.NoDefaultContentType
+	requestCtx.Response.Header.noDefaultDate = server.NoDefaultDate
+	requestCtx.Request.Header.secureErrorLogMessage = server.SecureErrorLogMessage
+	requestCtx.Response.Header.secureErrorLogMessage = server.SecureErrorLogMessage
+	requestCtx.Request.secureErrorLogMessage = server.SecureErrorLogMessage
+	requestCtx.Response.secureErrorLogMessage = server.SecureErrorLogMessage
+	if server.DisableHeaderNamesNormalizing {
+		requestCtx.Request.Header.DisableNormalizing()
+		requestCtx.Response.Header.DisableNormalizing()
 	}
 }
 
@@ -576,6 +594,7 @@ func (s *Server) serveProtocolConn(c net.Conn, protocol *registeredProtocol, pre
 		idleConnTime: idleConnTime,
 		connTime:     connTime,
 		connID:       nextConnID(),
+		isTLS:        isTLSConn(c),
 		prefaceRead:  prefaceRead,
 	}
 	defer ctx.releaseCachedRequestCtxs()
@@ -609,6 +628,7 @@ func (s *Server) serveUpgradedProtocolConn(
 		idleConnTime: idleConnTime,
 		connTime:     requestCtx.connTime,
 		connID:       requestCtx.connID,
+		isTLS:        isTLSConn(c),
 	}
 	defer ctx.releaseCachedRequestCtxs()
 	upgrader := protocol.handler.(ProtocolUpgrader) //nolint:forcetypeassert // enforced by RegisterProtocol
@@ -658,6 +678,15 @@ func (s *Server) unregisterIdleConn(c net.Conn, idleConnTime *atomic.Int64) {
 	idleConnTimePool.Put(idleConnTime)
 }
 
+// isTLSConn answers RequestCtx.IsTLS for a connection without a RequestCtx.
+func isTLSConn(c net.Conn) bool {
+	if pic, ok := c.(*perIPConn); ok {
+		c = pic.Conn
+	}
+	_, ok := c.(tlsConn)
+	return ok
+}
+
 type protocolPrefaceReader struct {
 	conn   net.Conn
 	prefix []byte
@@ -673,7 +702,7 @@ func (r *protocolPrefaceReader) Read(p []byte) (int, error) {
 }
 
 func (s *Server) detectCleartextProtocol(c net.Conn) (*registeredProtocol, []byte, time.Time, error) {
-	if _, isTLS := c.(tlsConn); isTLS {
+	if isTLSConn(c) {
 		return nil, nil, time.Time{}, nil
 	}
 

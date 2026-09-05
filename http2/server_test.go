@@ -2066,3 +2066,74 @@ func TestStreamWorkersDoNotLeak(t *testing.T) {
 	}
 	t.Fatalf("goroutines %d -> %d: stream workers leaked", before, after)
 }
+
+func TestServerTLSRequestReportsHTTPSScheme(t *testing.T) {
+	certData, keyData, err := fasthttp.GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatalf("GenerateTestCertificate() error: %v", err)
+	}
+	certificate, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatalf("X509KeyPair() error: %v", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error: %v", err)
+	}
+	server := &fasthttp.Server{
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}},
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			fmt.Fprintf(ctx, "%s %v", ctx.URI().Scheme(), ctx.IsTLS())
+		},
+	}
+	if err := ConfigureServer(server, ServerConfig{}); err != nil {
+		t.Fatalf("ConfigureServer() error: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- server.Serve(tls.NewListener(listener, server.TLSConfig.Clone()))
+	}()
+	transport := &xhttp2.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // Test-only certificate.
+		},
+	}
+	t.Cleanup(func() {
+		transport.CloseIdleConnections()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.ShutdownWithContext(ctx)
+		<-done
+	})
+	client := &stdhttp.Client{Transport: transport}
+	resp, err := client.Get("https://" + listener.Addr().String() + "/")
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	if got := string(body); got != "https true" {
+		t.Fatalf("scheme and IsTLS = %q, want %q", got, "https true")
+	}
+}
+
+func TestServerHonorsNoDefaultContentType(t *testing.T) {
+	server := &fasthttp.Server{
+		NoDefaultContentType: true,
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			ctx.SetBodyString("ok")
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	resp, err := testServer.client.Get(testServer.URL("/"))
+	if err != nil {
+		t.Fatalf("Get() error: %v", err)
+	}
+	_ = resp.Body.Close()
+	if values := resp.Header.Values("Content-Type"); len(values) != 0 {
+		t.Fatalf("Content-Type = %q, want none", values)
+	}
+}
