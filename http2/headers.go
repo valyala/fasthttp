@@ -383,14 +383,9 @@ func applyRequestTrailers(header *fasthttp.RequestHeader, fields []hpack.HeaderF
 
 func populateRequest(
 	ctx *fasthttp.RequestCtx,
-	server *fasthttp.Server,
 	fields []hpack.HeaderField,
 	enableExtendedConnect bool,
 ) (int64, error) {
-	if server.DisableHeaderNamesNormalizing {
-		ctx.Request.Header.DisableNormalizing()
-	}
-
 	var method string
 	var scheme string
 	var authority string
