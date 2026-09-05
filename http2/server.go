@@ -185,9 +185,10 @@ type serverConn struct {
 	headerDecoder   *headerCodec
 	writer          *asyncFrameWriter
 
-	events   chan incomingFrame
-	commands chan serverCommand
-	workers  sync.WaitGroup
+	events    chan incomingFrame
+	commands  chan serverCommand
+	ownerDone chan struct{}
+	workers   sync.WaitGroup
 
 	streams            map[uint32]*serverStream
 	flushQueue         []uint32
@@ -236,6 +237,7 @@ func newServerConn(
 		conn:                c,
 		ctx:                 ctx,
 		cancel:              cancel,
+		ownerDone:           make(chan struct{}),
 		streams:             make(map[uint32]*serverStream),
 		connFlowState:       newConnFlowState(int64(config.connectionWindowSize)),
 		peerAllowsPush:      true,
@@ -259,20 +261,7 @@ func (c *serverConn) initQueues() {
 func (c *serverConn) serve(upgrade *serverUpgrade) (retErr error) {
 	defer func() {
 		c.cancel(retErr)
-		for _, stream := range c.streams {
-			stream.cancel(retErr)
-			if stream.body != nil {
-				stream.body.closeWithError(retErr)
-			}
-			if stream.pendingAck != nil {
-				stream.pendingAck <- retErr
-				stream.pendingAck = nil
-			}
-			if stream.pendingWrite != nil {
-				stream.pendingWrite.complete(retErr)
-				stream.pendingWrite = nil
-			}
-		}
+		c.failPendingStreams(retErr)
 		c.stopStreamWorkers()
 		c.workers.Wait()
 		c.releaseAllStreams()
@@ -296,6 +285,27 @@ func (c *serverConn) serve(upgrade *serverUpgrade) (retErr error) {
 
 	go c.readLoop()
 	return c.eventLoop()
+}
+
+// failPendingStreams unblocks every goroutine waiting on a stream once the
+// event loop has stopped. Closing ownerDone afterwards tells StreamConn writers
+// that a command still queued will never run.
+func (c *serverConn) failPendingStreams(cause error) {
+	for _, stream := range c.streams {
+		stream.cancel(cause)
+		if stream.body != nil {
+			stream.body.closeWithError(cause)
+		}
+		if stream.pendingAck != nil {
+			stream.pendingAck <- cause
+			stream.pendingAck = nil
+		}
+		if stream.pendingWrite != nil {
+			stream.pendingWrite.complete(cause)
+			stream.pendingWrite = nil
+		}
+	}
+	close(c.ownerDone)
 }
 
 // startDirect prepares a connection that speaks HTTP/2 from its first byte.
