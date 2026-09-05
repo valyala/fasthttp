@@ -115,7 +115,7 @@ func FuzzHPACKRequestHeaders(f *testing.F) {
 			return
 		}
 		ctx := &fasthttp.RequestCtx{}
-		_, _ = populateRequest(ctx, fields, true)
+		_, _, _ = populateRequest(ctx, fields, true)
 	})
 }
 
