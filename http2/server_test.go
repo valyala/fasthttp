@@ -1264,8 +1264,8 @@ func TestCancelAcceptedStreamWriteReportsPartialAndDropsRemainder(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("queueing stream write: %v", err)
 	}
-	if progressed, err := conn.flushStream(stream, false); err != nil || !progressed {
-		t.Fatalf("partial flush = %v, %v; want progress", progressed, err)
+	if more, err := conn.flushStream(stream, false); err != nil || !more {
+		t.Fatalf("partial flush = %v, %v; want more to send", more, err)
 	}
 	deadlineErr := errStreamTimeout
 	if err := conn.processCommand(&serverCommand{
@@ -2293,8 +2293,8 @@ func TestAcceptedStreamWriteReportsFramedBytesWhenOwnerStops(t *testing.T) {
 	if err := conn.processCommand(&command); err != nil {
 		t.Fatalf("queueing stream write: %v", err)
 	}
-	if progressed, err := conn.flushStream(stream, false); err != nil || !progressed {
-		t.Fatalf("partial flush = %v, %v; want progress", progressed, err)
+	if more, err := conn.flushStream(stream, false); err != nil || !more {
+		t.Fatalf("partial flush = %v, %v; want more to send", more, err)
 	}
 	conn.failPendingStreams(io.ErrUnexpectedEOF)
 	select {
