@@ -394,6 +394,69 @@ func TestResponseBufferedBodyWithTrailer(t *testing.T) {
 	}
 }
 
+func TestRequestBufferedBodyWithTrailerContentType(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name        string
+		body        string
+		contentType string
+		noDefault   bool
+		expected    string
+	}{
+		// Switching to chunked encoding must keep the default
+		// Content-Type that a Content-Length framed body gets.
+		{name: "default", body: "data", expected: "application/octet-stream"},
+		{name: "explicit", body: "data", contentType: "text/plain", expected: "text/plain"},
+		{name: "no default", body: "data", noDefault: true, expected: ""},
+		{name: "empty body", body: "", expected: ""},
+	} {
+		var req1 Request
+		req1.Header.SetMethod(MethodPost)
+		req1.SetRequestURI("http://example.com/upload")
+		req1.SetBodyString(tc.body)
+		if tc.contentType != "" {
+			req1.Header.SetContentType(tc.contentType)
+		}
+		req1.Header.SetNoDefaultContentType(tc.noDefault)
+		if err := req1.Header.AddTrailer("Foo"); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		req1.Header.Set("Foo", "testfoo")
+
+		w := &bytes.Buffer{}
+		bw := bufio.NewWriter(w)
+		if err := req1.Write(bw); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+
+		wire := w.String()
+		if !strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+			t.Fatalf("%s: expected chunked transfer encoding, got:\n%q", tc.name, wire)
+		}
+		if tc.expected == "" {
+			if strings.Contains(wire, "Content-Type:") {
+				t.Fatalf("%s: expected no content type, got:\n%q", tc.name, wire)
+			}
+			continue
+		}
+		if !strings.Contains(wire, "Content-Type: "+tc.expected+"\r\n") {
+			t.Fatalf("%s: expected content type %q, got:\n%q", tc.name, tc.expected, wire)
+		}
+
+		var req2 Request
+		if err := req2.Read(bufio.NewReader(w)); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if got := string(req2.Header.ContentType()); got != tc.expected {
+			t.Fatalf("%s: unexpected content type %q. Expecting %q", tc.name, got, tc.expected)
+		}
+	}
+}
+
 func TestResponseBufferedBodyWithTrailerSkipBody(t *testing.T) {
 	t.Parallel()
 

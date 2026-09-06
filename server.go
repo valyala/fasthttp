@@ -2395,6 +2395,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		hijackNoResponse bool
 
 		connectionClose bool
+		isHTTP11        bool
 
 		continueReadingRequest = true
 	)
@@ -2641,6 +2642,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			s.Handler(ctx)
 		}
 
+		// Remember the request version before ctx may be replaced with a
+		// fresh one below, whose request defaults to HTTP/1.1.
+		isHTTP11 = ctx.Request.Header.IsHTTP11()
+
 		timeoutResponse = ctx.timeoutResponse
 		if timeoutResponse != nil {
 			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
@@ -2676,13 +2681,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			(s.CloseOnShutdown && s.stop.Load() == 1)
 		if connectionClose {
 			ctx.Response.Header.SetConnectionClose()
-		} else if !ctx.Request.Header.IsHTTP11() {
+		} else if !isHTTP11 {
 			// Set 'Connection: keep-alive' response header for HTTP/1.0 request.
 			// There is no need in setting this header for http/1.1, since in http/1.1
 			// connections are keep-alive by default.
 			ctx.Response.Header.setNonSpecial(strConnection, strKeepAlive)
 		}
-		if !ctx.Request.Header.IsHTTP11() {
+		if !isHTTP11 {
 			// HTTP/1.0 clients can't read chunked encoding, so let
 			// Response.Write keep Content-Length framing for them.
 			ctx.Response.Header.noHTTP11 = true

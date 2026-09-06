@@ -1856,6 +1856,9 @@ func (req *Request) Write(w *bufio.Writer) error {
 		req.Header.SetContentLength(len(body))
 	}
 	if hasBody && len(req.Header.trailer) > 0 && req.Header.IsHTTP11() {
+		if len(body) > 0 && !req.Header.noDefaultContentType && len(req.Header.ContentType()) == 0 {
+			req.Header.SetContentTypeBytes(strDefaultContentType)
+		}
 		req.Header.SetContentLength(-1)
 		if err = req.Header.Write(w); err != nil {
 			return err

@@ -2843,6 +2843,66 @@ func TestServeConnBufferedBodyWithTrailer(t *testing.T) {
 	}
 }
 
+func TestServeConnTimeoutErrorWithResponseBufferedBodyWithTrailer(t *testing.T) {
+	t.Parallel()
+
+	handler := func(ctx *RequestCtx) {
+		var resp Response
+		if err := resp.Header.AddTrailer("Foo"); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		resp.Header.Set("Foo", "testfoo")
+		resp.SetBodyString("data")
+		ctx.TimeoutErrorWithResponse(&resp)
+	}
+
+	for _, tc := range []struct {
+		proto   string
+		chunked bool
+	}{
+		// The timeout response is written from a fresh ctx, so the framing
+		// and the Connection header must still follow the original request.
+		{proto: "HTTP/1.0", chunked: false},
+		{proto: "HTTP/1.1", chunked: true},
+	} {
+		rw := &readWriter{}
+		rw.r.WriteString("GET / ")
+		rw.r.WriteString(tc.proto)
+		rw.r.WriteString("\r\nHost: example.com\r\nConnection: keep-alive\r\n\r\n")
+
+		ch := make(chan struct{})
+		go func() {
+			if err := ServeConn(rw, handler); err != nil {
+				t.Errorf("unexpected error in ServeConn: %v", err)
+			}
+			close(ch)
+		}()
+
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatal("timeout")
+		}
+
+		wire := rw.w.String()
+		if chunked := strings.Contains(wire, "Transfer-Encoding: chunked\r\n"); chunked != tc.chunked {
+			t.Fatalf("%s: chunked=%v, expecting %v, got:\n%q", tc.proto, chunked, tc.chunked, wire)
+		}
+		if tc.chunked {
+			if !strings.HasSuffix(wire, "0\r\nFoo: testfoo\r\n\r\n") {
+				t.Fatalf("%s: expected the trailer after the last chunk, got:\n%q", tc.proto, wire)
+			}
+			continue
+		}
+		if !strings.Contains(wire, "Content-Length: 4\r\n") || !strings.HasSuffix(wire, "\r\n\r\ndata") {
+			t.Fatalf("%s: expected a Content-Length framed body, got:\n%q", tc.proto, wire)
+		}
+		if !strings.Contains(wire, "Connection: keep-alive\r\n") {
+			t.Fatalf("%s: expected a keep-alive header for an HTTP/1.0 request, got:\n%q", tc.proto, wire)
+		}
+	}
+}
+
 func TestServeConnKeepRequestAndResponseUntilResetUserValues(t *testing.T) {
 	t.Parallel()
 
