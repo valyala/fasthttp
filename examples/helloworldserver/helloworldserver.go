@@ -55,7 +55,8 @@ func requestHandler(ctx *fasthttp.RequestCtx) {
 	resp.AppendBodyString("\"\nHost is \"")
 	resp.AppendBody(ctx.Host())
 	resp.AppendBodyString("\"\nQuery string is \"")
-	resp.AppendBody(ctx.QueryArgs().AppendBytes((*buf)[:0]))
+	*buf = ctx.QueryArgs().AppendBytes((*buf)[:0])
+	resp.AppendBody(*buf)
 	resp.AppendBodyString("\"\nUser-Agent is \"")
 	resp.AppendBody(ctx.UserAgent())
 

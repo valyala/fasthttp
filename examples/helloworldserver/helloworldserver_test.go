@@ -5,11 +5,17 @@ package main
 import (
 	"bytes"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/valyala/fasthttp"
 )
+
+// request has a query string longer than the scratch buffer's initial capacity,
+// so the handler has to grow it and put the grown buffer back in the pool.
+var request = "GET /foo?bar=baz&" + strings.Repeat("k", 64) + "=" + strings.Repeat("v", 64) +
+	" HTTP/1.1\r\nHost: google.com\r\nCookie: foo=bar\r\n\r\n"
 
 // TestZeroAllocation asserts the 0 allocs/op claim in README.md. It mirrors
 // TestAllocationServeConn in allocation_test.go.
@@ -23,7 +29,7 @@ func TestZeroAllocation(t *testing.T) {
 	rw.w.Grow(1024)
 
 	n := testing.AllocsPerRun(100, func() {
-		rw.r.WriteString("GET /foo?bar=baz HTTP/1.1\r\nHost: google.com\r\nCookie: foo=bar\r\n\r\n")
+		rw.r.WriteString(request)
 		if err := s.ServeConn(rw); err != nil {
 			t.Fatal(err)
 		}
