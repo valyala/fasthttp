@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -38,6 +39,15 @@ import (
 // positive MaxResponseBodySize when requesting untrusted servers.
 func Do(req *Request, resp *Response) error {
 	return defaultClient.Do(req, resp)
+}
+
+// DoContext performs the given request and fills the given response, honoring
+// cancellation and deadlines from ctx.
+//
+// The request's existing timeout is also honored. If both it and ctx have a
+// deadline, the earlier deadline is used.
+func DoContext(ctx context.Context, req *Request, resp *Response) error {
+	return defaultClient.DoContext(ctx, req, resp)
 }
 
 // DoTimeout performs the given request and waits for response during
@@ -207,6 +217,10 @@ type Client struct {
 
 	// Transport defines a transport-like mechanism that wraps every request/response.
 	Transport RoundTripper
+
+	// Callback for establishing new connections to hosts while honoring a
+	// request context. DialContext takes precedence over DialTimeout and Dial.
+	DialContext DialFuncWithContext
 
 	// Callback for establishing new connections to hosts.
 	//
@@ -496,6 +510,22 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 	return c.Do(req, resp)
 }
 
+// DoContext performs the given request and fills the given response, honoring
+// cancellation and deadlines from ctx.
+//
+// The request's existing timeout is also honored. If both it and ctx have a
+// deadline, the earlier deadline is used. A nil context causes a panic.
+// If the request body stream implements io.Closer, cancellation calls Close;
+// the stream should use it to unblock an in-progress Read. A body reader that
+// cannot be interrupted must return on its own before cancellation can complete.
+// Custom dialers and transports must use DialContext and
+// RoundTripperWithContext respectively to be interrupted by cancellation.
+func (c *Client) DoContext(ctx context.Context, req *Request, resp *Response) error {
+	return doRequestContext(ctx, req, resp, func() error {
+		return c.do(ctx, req, resp, true)
+	})
+}
+
 // DoRedirects performs the given http request and fills the given http response,
 // following up to maxRedirectsCount redirects. When the redirect count exceeds
 // maxRedirectsCount, ErrTooManyRedirects is returned.
@@ -543,6 +573,10 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
+	return c.do(context.Background(), req, resp, false)
+}
+
+func (c *Client) do(ctx context.Context, req *Request, resp *Response, contextAware bool) error {
 	uri := req.URI()
 	if uri == nil {
 		return ErrorInvalidURI
@@ -572,7 +606,7 @@ func (c *Client) Do(req *Request, resp *Response) error {
 
 	atomic.AddInt32(&hc.pendingClientRequests, 1)
 	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
-	return hc.Do(req, resp)
+	return hc.doContext(ctx, req, resp, contextAware)
 }
 
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
@@ -598,6 +632,7 @@ func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
 		Transport:                     c.Transport,
 		Name:                          c.Name,
 		NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
+		DialContext:                   c.DialContext,
 		Dial:                          c.Dial,
 		DialTimeout:                   c.DialTimeout,
 		DialDualStack:                 c.DialDualStack,
@@ -754,6 +789,17 @@ type DialFunc func(addr string) (net.Conn, error)
 //   - foobar.com:8080
 type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, error)
 
+// DialFuncWithContext must establish a connection to addr while honoring ctx.
+// The context deadline is the earlier of the request timeout and the context
+// passed to DoContext when either is set.
+//
+// There is no need in establishing TLS (SSL) connection for https.
+// The client automatically converts connection to TLS if HostClient.IsTLS is
+// set.
+//
+// TCP address passed to DialFuncWithContext always contains host and port.
+type DialFuncWithContext func(ctx context.Context, addr string) (net.Conn, error)
+
 // RetryIfFunc defines the signature of the retry if function.
 // Request argument passed to RetryIfFunc, if there are any request errors.
 type RetryIfFunc func(request *Request) bool
@@ -787,6 +833,16 @@ type RoundTripper interface {
 	RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error)
 }
 
+// RoundTripperWithContext is implemented by transports that can propagate
+// request cancellation, deadlines, and values. Client.DoContext and
+// HostClient.DoContext use this interface when available and fall back to
+// RoundTripper otherwise. Ordinary Do calls continue to use RoundTripper.
+type RoundTripperWithContext interface {
+	RoundTripContext(
+		ctx context.Context, hc *HostClient, req *Request, resp *Response,
+	) (retry bool, err error)
+}
+
 // ConnPoolStrategyType define strategy of connection pool enqueue/dequeue.
 type ConnPoolStrategyType int
 
@@ -813,6 +869,10 @@ type HostClient struct {
 
 	// Transport defines a transport-like mechanism that wraps every request/response.
 	Transport RoundTripper
+
+	// Callback for establishing new connections to hosts while honoring a
+	// request context. DialContext takes precedence over DialTimeout and Dial.
+	DialContext DialFuncWithContext
 
 	// Callback for establishing new connections to hosts.
 	//
@@ -1114,6 +1174,42 @@ func (c *HostClient) Post(dst []byte, url string, postArgs *Args) (statusCode in
 
 type clientDoer interface {
 	Do(req *Request, resp *Response) error
+}
+
+func doRequestContext(ctx context.Context, req *Request, resp *Response, do func() error) error {
+	if ctx == nil {
+		panic("fasthttp: nil Context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	previousTimeout := req.timeout
+	defer func() {
+		req.timeout = previousTimeout
+	}()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout := time.Until(deadline)
+		if timeout <= 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return context.DeadlineExceeded
+		}
+		if req.timeout <= 0 || timeout < req.timeout {
+			req.timeout = timeout
+		}
+	}
+
+	err := do()
+	if contextErr := ctx.Err(); contextErr != nil {
+		if err == nil && resp != nil {
+			_ = resp.closeBodyStream(contextErr)
+		}
+		return contextErr
+	}
+	return err
 }
 
 func clientGetURL(dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
@@ -1577,6 +1673,22 @@ func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time
 	return c.Do(req, resp)
 }
 
+// DoContext performs the given request and fills the given response, honoring
+// cancellation and deadlines from ctx.
+//
+// The request's existing timeout is also honored. If both it and ctx have a
+// deadline, the earlier deadline is used. A nil context causes a panic.
+// If the request body stream implements io.Closer, cancellation calls Close;
+// the stream should use it to unblock an in-progress Read. A body reader that
+// cannot be interrupted must return on its own before cancellation can complete.
+// Custom dialers and transports must use DialContext and
+// RoundTripperWithContext respectively to be interrupted by cancellation.
+func (c *HostClient) DoContext(ctx context.Context, req *Request, resp *Response) error {
+	return doRequestContext(ctx, req, resp, func() error {
+		return c.doContext(ctx, req, resp, true)
+	})
+}
+
 // DoRedirects performs the given http request and fills the given http response,
 // following up to maxRedirectsCount redirects. When the redirect count exceeds
 // maxRedirectsCount, ErrTooManyRedirects is returned.
@@ -1619,6 +1731,12 @@ func (c *HostClient) DoRedirects(req *Request, resp *Response, maxRedirectsCount
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) Do(req *Request, resp *Response) error {
+	return c.doContext(context.Background(), req, resp, false)
+}
+
+func (c *HostClient) doContext(
+	ctx context.Context, req *Request, resp *Response, contextAware bool,
+) error {
 	var (
 		err          error
 		retry        bool
@@ -1646,6 +1764,10 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 
 	atomic.AddInt32(&c.pendingRequests, 1)
 	for {
+		if err = ctx.Err(); err != nil {
+			break
+		}
+
 		// If the original timeout was set, we need to update
 		// the one set on the request to reflect the remaining time.
 		if timeout > 0 {
@@ -1656,7 +1778,14 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 			}
 		}
 
-		retry, err = c.do(req, resp)
+		retry, err = c.do(ctx, req, resp, contextAware)
+		if contextErr := ctx.Err(); contextErr != nil {
+			if err == nil && resp != nil {
+				_ = resp.closeBodyStream(contextErr)
+			}
+			err = contextErr
+			break
+		}
 		if err == nil || !retry {
 			break
 		}
@@ -1713,12 +1842,14 @@ func isIdempotent(req *Request) bool {
 	return req.Header.IsGet() || req.Header.IsHead() || req.Header.IsPut() || req.Header.IsQuery()
 }
 
-func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
+func (c *HostClient) do(
+	ctx context.Context, req *Request, resp *Response, contextAware bool,
+) (bool, error) {
 	if resp == nil {
 		resp = AcquireResponse()
 		defer ReleaseResponse(resp)
 
-		retry, err := c.doNonNilReqResp(req, resp)
+		retry, err := c.doNonNilReqRespContext(ctx, req, resp, contextAware)
 		if err != nil {
 			return retry, err
 		}
@@ -1728,10 +1859,16 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 		return retry, nil
 	}
 
-	return c.doNonNilReqResp(req, resp)
+	return c.doNonNilReqRespContext(ctx, req, resp, contextAware)
 }
 
 func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error) {
+	return c.doNonNilReqRespContext(context.Background(), req, resp, false)
+}
+
+func (c *HostClient) doNonNilReqRespContext(
+	ctx context.Context, req *Request, resp *Response, contextAware bool,
+) (bool, error) {
 	if req == nil {
 		// for debugging purposes
 		panic("BUG: req cannot be nil")
@@ -1776,7 +1913,13 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		}
 	}
 
-	return c.transport().RoundTrip(c, req, resp)
+	transport := c.transport()
+	if contextAware {
+		if contextTransport, ok := transport.(RoundTripperWithContext); ok {
+			return contextTransport.RoundTripContext(ctx, c, req, resp)
+		}
+	}
+	return transport.RoundTrip(c, req, resp)
 }
 
 func (c *HostClient) transport() RoundTripper {
@@ -1834,6 +1977,21 @@ func (c *HostClient) SetMaxConns(newMaxConns int) {
 }
 
 func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
+	return c.acquireConn(context.Background(), reqTimeout, connectionClose)
+}
+
+func (c *HostClient) acquireConn(
+	ctx context.Context, reqTimeout time.Duration, connectionClose bool,
+) (cc *clientConn, err error) {
+	if err = ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	requestDeadline := time.Time{}
+	if reqTimeout > 0 {
+		requestDeadline = time.Now().Add(reqTimeout)
+	}
+
 	createConn := false
 	startCleaner := false
 
@@ -1873,6 +2031,10 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 	c.connsLock.Unlock()
 
 	if cc != nil {
+		if err = ctx.Err(); err != nil {
+			c.ReleaseConn(cc)
+			return nil, err
+		}
 		return cc, nil
 	}
 	if !createConn {
@@ -1899,7 +2061,9 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 		defer ReleaseTimer(tc)
 
 		w := &wantConn{
-			ready: make(chan struct{}, 1),
+			ready:           make(chan struct{}, 1),
+			ctx:             ctx,
+			requestDeadline: requestDeadline,
 		}
 		defer func() {
 			if err != nil {
@@ -1911,7 +2075,12 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 
 		select {
 		case <-w.ready:
+			if err = ctx.Err(); err != nil {
+				return nil, err
+			}
 			return w.conn, w.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case <-tc.C:
 			if timeoutOverridden {
 				return nil, ErrTimeout
@@ -1924,7 +2093,15 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 		go c.connsCleaner()
 	}
 
-	conn, err := c.dialHostHard(reqTimeout)
+	dialTimeout := reqTimeout
+	if !requestDeadline.IsZero() {
+		dialTimeout = time.Until(requestDeadline)
+		if dialTimeout <= 0 {
+			c.decConnsCount()
+			return nil, ErrTimeout
+		}
+	}
+	conn, err := c.dialHostHardContext(ctx, dialTimeout)
 	if err != nil {
 		c.decConnsCount()
 		return nil, err
@@ -1944,8 +2121,18 @@ func (c *HostClient) queueForIdle(w *wantConn) {
 	c.connsWait.pushBack(w)
 }
 
-func (c *HostClient) dialConnFor(w *wantConn) {
-	conn, err := c.dialHostHard(0)
+func (c *HostClient) dialConnFor(w *wantConn, state wantConnDialState) {
+	dialTimeout := time.Duration(0)
+	if !state.requestDeadline.IsZero() {
+		dialTimeout = time.Until(state.requestDeadline)
+		if dialTimeout <= 0 {
+			w.tryDeliver(nil, ErrTimeout)
+			c.decConnsCount()
+			return
+		}
+	}
+
+	conn, err := c.dialHostHardContext(state.ctx, dialTimeout)
 	if err != nil {
 		w.tryDeliver(nil, err)
 		c.decConnsCount()
@@ -1954,7 +2141,8 @@ func (c *HostClient) dialConnFor(w *wantConn) {
 
 	cc := acquireClientConn(conn)
 	if !w.tryDeliver(cc, nil) {
-		// not delivered, return idle connection
+		// The waiter no longer needs the result. Keep the valid connection idle
+		// so another request can reuse the reserved pool slot.
 		c.ReleaseConn(cc)
 	}
 }
@@ -2053,8 +2241,9 @@ func (c *HostClient) decConnsCount() {
 	if q := c.connsWait; q != nil {
 		for q.len() > 0 {
 			w := q.popFront()
-			if w.waiting() {
-				go c.dialConnFor(w)
+			state, ok := w.claimDial()
+			if ok {
+				go c.dialConnFor(w, state)
 				dialed = true
 				break
 			}
@@ -2239,6 +2428,12 @@ func (c *HostClient) nextAddr() string {
 }
 
 func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err error) {
+	return c.dialHostHardContext(context.Background(), dialTimeout)
+}
+
+func (c *HostClient) dialHostHardContext(
+	ctx context.Context, dialTimeout time.Duration,
+) (conn net.Conn, err error) {
 	// use dialTimeout to control the timeout of each dial. It does not work if dialTimeout is 0 or if
 	// c.DialTimeout has not been set and c.Dial has been set.
 	// attempt to dial all the available hosts before giving up.
@@ -2257,7 +2452,14 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 		timeout = DefaultDialTimeout
 	}
 	deadline := time.Now().Add(timeout)
+	requestDeadline := time.Time{}
+	if dialTimeout > 0 {
+		requestDeadline = time.Now().Add(dialTimeout)
+	}
 	for n > 0 {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
 		addr := c.nextAddr()
 		var tlsConfig *tls.Config
 		if c.IsTLS {
@@ -2267,9 +2469,22 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 				continue
 			}
 		}
-		conn, err = dialAddr(addr, c.Dial, c.DialTimeout, c.DialDualStack, c.IsTLS, tlsConfig, dialTimeout, c.WriteTimeout)
+		attemptTimeout := dialTimeout
+		if !requestDeadline.IsZero() {
+			attemptTimeout = time.Until(requestDeadline)
+			if attemptTimeout <= 0 {
+				return nil, ErrTimeout
+			}
+		}
+		conn, err = dialAddrContext(
+			ctx, addr, c.DialContext, c.Dial, c.DialTimeout, c.DialDualStack,
+			c.IsTLS, tlsConfig, attemptTimeout, c.WriteTimeout,
+		)
 		if err == nil {
 			return conn, nil
+		}
+		if !requestDeadline.IsZero() && time.Until(requestDeadline) <= 0 {
+			return nil, ErrTimeout
 		}
 		if time.Since(deadline) >= 0 {
 			break
@@ -2302,7 +2517,9 @@ func (c *HostClient) cachedTLSConfig(addr string) (*tls.Config, error) {
 // ErrTLSHandshakeTimeout indicates there is a timeout from tls handshake.
 var ErrTLSHandshakeTimeout = errors.New("fasthttp: tls handshake timed out")
 
-func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time) (_ net.Conn, retErr error) {
+func tlsClientHandshakeContext(
+	ctx context.Context, rawConn net.Conn, tlsConfig *tls.Config, deadline time.Time,
+) (_ net.Conn, retErr error) {
 	defer func() {
 		if retErr != nil {
 			rawConn.Close()
@@ -2313,7 +2530,10 @@ func tlsClientHandshake(rawConn net.Conn, tlsConfig *tls.Config, deadline time.T
 	if err != nil {
 		return nil, err
 	}
-	err = conn.Handshake()
+	err = conn.HandshakeContext(ctx)
+	if contextErr := ctx.Err(); contextErr != nil {
+		return nil, contextErr
+	}
 	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 		return nil, ErrTLSHandshakeTimeout
 	}
@@ -2331,9 +2551,45 @@ func dialAddr(
 	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool,
 	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
 ) (net.Conn, error) {
-	deadline := time.Now().Add(writeTimeout)
-	conn, err := callDialFunc(addr, dial, dialWithTimeout, dialDualStack, isTLS, dialTimeout)
+	return dialAddrContext(
+		context.Background(), addr, nil, dial, dialWithTimeout, dialDualStack,
+		isTLS, tlsConfig, dialTimeout, writeTimeout,
+	)
+}
+
+func dialAddrContext(
+	ctx context.Context, addr string, dialContext DialFuncWithContext, dial DialFunc,
+	dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool,
+	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
+) (net.Conn, error) {
+	now := time.Now()
+	deadline := now.Add(writeTimeout)
+	if dialTimeout > 0 {
+		requestDeadline := now.Add(dialTimeout)
+		if writeTimeout > 0 && requestDeadline.Before(deadline) {
+			deadline = requestDeadline
+		}
+	}
+
+	dialCtx := ctx
+	cancel := func() {}
+	requestContextDerived := false
+	if dialTimeout > 0 && (dialContext != nil || isTLS) {
+		requestDeadline := now.Add(dialTimeout)
+		if contextDeadline, ok := ctx.Deadline(); !ok || requestDeadline.Before(contextDeadline) {
+			dialCtx, cancel = context.WithDeadline(ctx, requestDeadline)
+			requestContextDerived = true
+		}
+	}
+	defer cancel()
+
+	conn, err := callDialFuncContext(
+		dialCtx, addr, dialContext, dial, dialWithTimeout, dialDualStack, isTLS, dialTimeout,
+	)
 	if err != nil {
+		if requestContextDerived && ctx.Err() == nil && errors.Is(dialCtx.Err(), context.DeadlineExceeded) {
+			return nil, ErrTimeout
+		}
 		return nil, err
 	}
 	if conn == nil {
@@ -2348,31 +2604,44 @@ func dialAddr(
 		if writeTimeout == 0 {
 			return tls.Client(conn, tlsConfig), nil
 		}
-		return tlsClientHandshake(conn, tlsConfig, deadline)
+		tlsConn, tlsErr := tlsClientHandshakeContext(dialCtx, conn, tlsConfig, deadline)
+		if tlsErr != nil && requestContextDerived && ctx.Err() == nil && errors.Is(dialCtx.Err(), context.DeadlineExceeded) {
+			return nil, ErrTimeout
+		}
+		return tlsConn, tlsErr
 	}
 	return conn, nil
 }
 
-func callDialFunc(
-	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool, timeout time.Duration,
+func callDialFuncContext(
+	ctx context.Context, addr string, dialContext DialFuncWithContext, dial DialFunc,
+	dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool, timeout time.Duration,
 ) (net.Conn, error) {
-	if dialWithTimeout != nil {
-		return dialWithTimeout(addr, timeout)
-	}
-	if dial != nil {
-		return dial(addr)
-	}
-	addr = AddMissingPort(addr, isTLS)
-	if timeout > 0 {
-		if dialDualStack {
-			return DialDualStackTimeout(addr, timeout)
+	var (
+		conn net.Conn
+		err  error
+	)
+	switch {
+	case dialContext != nil:
+		conn, err = dialContext(ctx, addr)
+	case dialWithTimeout != nil:
+		conn, err = dialWithTimeout(addr, timeout)
+	case dial != nil:
+		conn, err = dial(addr)
+	default:
+		addr = AddMissingPort(addr, isTLS)
+		if timeout <= 0 {
+			timeout = DefaultDialTimeout
 		}
-		return DialTimeout(addr, timeout)
+		conn, err = defaultDialer.dialContext(ctx, addr, dialDualStack, timeout)
 	}
-	if dialDualStack {
-		return DialDualStack(addr)
+	if contextErr := ctx.Err(); contextErr != nil {
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return nil, contextErr
 	}
-	return Dial(addr)
+	return conn, err
 }
 
 // AddMissingPort adds a port to a host if it is missing.
@@ -2413,10 +2682,18 @@ func AddMissingPort(addr string, isTLS bool) string {
 //
 // Inspired by net/http/transport.go.
 type wantConn struct {
-	err   error
-	ready chan struct{}
-	conn  *clientConn
-	mu    sync.Mutex // protects conn, err, close(ready)
+	err             error
+	ready           chan struct{}
+	conn            *clientConn
+	ctx             context.Context //nolint:containedctx // bound to this request-scoped waiter
+	requestDeadline time.Time
+	dialing         bool
+	mu              sync.Mutex // protects conn, err, close(ready)
+}
+
+type wantConnDialState struct {
+	ctx             context.Context //nolint:containedctx // transient state owned by one dial operation
+	requestDeadline time.Time
 }
 
 // waiting reports whether w is still waiting for an answer (connection or error).
@@ -2429,6 +2706,26 @@ func (w *wantConn) waiting() bool {
 	}
 }
 
+// claimDial atomically transfers the request state to a dial operation.
+// Clearing the stored context here prevents completed queue entries from
+// retaining request values while the dial is in progress.
+func (w *wantConn) claimDial() (wantConnDialState, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.conn != nil || w.err != nil || w.dialing {
+		return wantConnDialState{}, false
+	}
+	w.dialing = true
+	state := wantConnDialState{
+		ctx:             w.ctx,
+		requestDeadline: w.requestDeadline,
+	}
+	w.ctx = nil
+	w.requestDeadline = time.Time{}
+	return state, true
+}
+
 // tryDeliver attempts to deliver conn, err to w and reports whether it succeeded.
 func (w *wantConn) tryDeliver(conn *clientConn, err error) bool {
 	w.mu.Lock()
@@ -2439,6 +2736,8 @@ func (w *wantConn) tryDeliver(conn *clientConn, err error) bool {
 	}
 	w.conn = conn
 	w.err = err
+	w.ctx = nil
+	w.requestDeadline = time.Time{}
 	if w.conn == nil && w.err == nil {
 		panic("fasthttp: internal error: misuse of tryDeliver")
 	}
@@ -2457,6 +2756,8 @@ func (w *wantConn) cancel(c *HostClient, err error) {
 	conn := w.conn
 	w.conn = nil
 	w.err = err
+	w.ctx = nil
+	w.requestDeadline = time.Time{}
 	w.mu.Unlock()
 
 	if conn != nil {
@@ -3344,18 +3645,126 @@ var DefaultTransport RoundTripper = &transport{}
 
 type transport struct{}
 
+type contextConnWatcher struct {
+	cancelErr atomic.Pointer[contextConnError]
+	cancel    context.CancelFunc
+	stopCh    chan struct{}
+	doneCh    chan struct{}
+}
+
+type contextRequestBodyCloser struct {
+	req        *Request
+	body       io.Reader
+	err        error
+	once       sync.Once
+	finishOnce sync.Once
+}
+
+type contextConnError struct {
+	err error
+}
+
+func newContextRequestBodyCloser(req *Request) *contextRequestBodyCloser {
+	if _, ok := req.bodyStream.(io.Closer); !ok {
+		return nil
+	}
+	return &contextRequestBodyCloser{
+		req:  req,
+		body: req.bodyStream,
+	}
+}
+
+func (c *contextRequestBodyCloser) close() error {
+	c.once.Do(func() {
+		c.err = c.body.(io.Closer).Close() //nolint:forcetypeassert // checked by constructor
+	})
+	return c.err
+}
+
+func (c *contextRequestBodyCloser) interrupt() {
+	_ = c.close()
+}
+
+func (c *contextRequestBodyCloser) finish() error {
+	err := c.close()
+	c.finishOnce.Do(func() {
+		c.req.bodyStream = nil
+		c.req = nil
+		c.body = nil
+	})
+	return err
+}
+
+func watchConnContext(
+	ctx context.Context,
+	parentCtx context.Context,
+	conn net.Conn,
+	requestBodyCloser *contextRequestBodyCloser,
+	requestTimeout bool,
+	cancel context.CancelFunc,
+) *contextConnWatcher {
+	if ctx.Done() == nil {
+		return nil
+	}
+	w := &contextConnWatcher{
+		cancel: cancel,
+		stopCh: make(chan struct{}),
+		doneCh: make(chan struct{}),
+	}
+	go func() {
+		defer close(w.doneCh)
+		select {
+		case <-ctx.Done():
+			cancelErr := ctx.Err()
+			if requestTimeout && errors.Is(cancelErr, context.DeadlineExceeded) && parentCtx.Err() == nil {
+				cancelErr = ErrTimeout
+			}
+			w.cancelErr.Store(&contextConnError{err: cancelErr})
+			_ = conn.Close()
+			if requestBodyCloser != nil {
+				requestBodyCloser.interrupt()
+			}
+		case <-w.stopCh:
+		}
+	}()
+	return w
+}
+
+func (w *contextConnWatcher) err() error {
+	if w == nil {
+		return nil
+	}
+	if contextErr := w.cancelErr.Load(); contextErr != nil {
+		return contextErr.err
+	}
+	return nil
+}
+
+func (w *contextConnWatcher) stop() error {
+	if w == nil {
+		return nil
+	}
+	close(w.stopCh)
+	<-w.doneCh
+	if w.cancel != nil {
+		w.cancel()
+	}
+	return w.err()
+}
+
 // clientStreamBody serializes reads and keeps pooled response resources alive
 // until an in-flight Read has returned. interrupt must unblock network reads
 // without releasing the connection wrapper or reader pools; release performs
 // that cleanup afterward.
 type clientStreamBody struct {
-	reader    io.Reader
-	interrupt func()
-	release   func(bool)
-	closed    atomic.Bool
-	fullyRead bool
-	readLock  sync.Mutex
-	closeOnce sync.Once
+	reader         io.Reader
+	contextWatcher *contextConnWatcher
+	interrupt      func()
+	release        func(bool)
+	closed         atomic.Bool
+	fullyRead      bool
+	readLock       sync.Mutex
+	closeOnce      sync.Once
 }
 
 func (s *clientStreamBody) Read(p []byte) (int, error) {
@@ -3370,6 +3779,11 @@ func (s *clientStreamBody) Read(p []byte) (int, error) {
 	}
 
 	n, err := s.reader.Read(p)
+	if err != nil && s.contextWatcher != nil {
+		if contextErr := s.contextWatcher.err(); contextErr != nil {
+			err = contextErr
+		}
+	}
 	if errors.Is(err, io.EOF) {
 		s.fullyRead = true
 	}
@@ -3396,6 +3810,18 @@ func (s *clientStreamBody) CloseWithError(err error) error {
 }
 
 func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
+	return t.roundTrip(context.Background(), hc, req, resp, false)
+}
+
+func (t *transport) RoundTripContext(
+	ctx context.Context, hc *HostClient, req *Request, resp *Response,
+) (retry bool, err error) {
+	return t.roundTrip(ctx, hc, req, resp, true)
+}
+
+func (t *transport) roundTrip(
+	ctx context.Context, hc *HostClient, req *Request, resp *Response, contextAware bool,
+) (retry bool, err error) {
 	customSkipBody := resp.SkipBody
 	customStreamBody := resp.StreamBody
 
@@ -3404,11 +3830,40 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		deadline = time.Now().Add(req.timeout)
 	}
 
-	cc, err := hc.AcquireConn(req.timeout, req.ConnectionClose())
+	cc, err := hc.acquireConn(ctx, req.timeout, req.ConnectionClose())
 	if err != nil {
 		return false, err
 	}
 	conn := cc.c
+	var requestBodyCloser *contextRequestBodyCloser
+	var contextWatcher *contextConnWatcher
+	if contextAware {
+		watchContext := ctx
+		var watchCancel context.CancelFunc
+		requestTimeoutWatch := false
+		if _, bodyCanBeInterrupted := req.bodyStream.(io.Closer); !deadline.IsZero() && bodyCanBeInterrupted {
+			if contextDeadline, ok := ctx.Deadline(); !ok || deadline.Before(contextDeadline) {
+				watchContext, watchCancel = context.WithDeadline(ctx, deadline)
+				requestTimeoutWatch = true
+			}
+		}
+		if watchContext.Done() != nil {
+			requestBodyCloser = newContextRequestBodyCloser(req)
+		}
+		contextWatcher = watchConnContext(
+			watchContext, ctx, conn, requestBodyCloser, requestTimeoutWatch, watchCancel,
+		)
+	}
+	defer func() {
+		if contextWatcher != nil {
+			if contextErr := contextWatcher.stop(); contextErr != nil {
+				if requestBodyCloser != nil {
+					_ = requestBodyCloser.finish()
+				}
+				err = contextErr
+			}
+		}
+	}()
 
 	resp.ParseNetConn(conn)
 
@@ -3432,7 +3887,11 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 
 	bw := hc.AcquireWriter(conn)
-	err = req.Write(bw)
+	if requestBodyCloser == nil {
+		err = req.Write(bw)
+	} else {
+		err = req.write(bw, requestBodyCloser.finish)
+	}
 
 	if resetConnection {
 		req.Header.ResetConnectionClose()
@@ -3482,9 +3941,19 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		needRetry := err != ErrBodyTooLarge
 		return needRetry, err
 	}
+	if contextErr := ctx.Err(); contextErr != nil {
+		if customStreamBody && resp.bodyStream != nil {
+			_ = resp.closeBodyStream(contextErr)
+		}
+		hc.ReleaseReader(br)
+		hc.CloseConn(cc)
+		return false, contextErr
+	}
 
 	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
 	if customStreamBody && resp.bodyStream != nil {
+		streamContextWatcher := contextWatcher
+		contextWatcher = nil
 		// releaseConn runs when the caller closes the body stream, so it has to
 		// re-check resp.ConnectionClose(): a caller may only decide that the
 		// connection is unusable while consuming the streamed body.
@@ -3500,12 +3969,18 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		// closes, so interrupt it and wait before pooling anything.
 		rs := resp.bodyStream.(*requestStream) //nolint:forcetypeassert
 		resp.bodyStream = &clientStreamBody{
-			reader:    rs,
-			fullyRead: rs.contentLength == 0,
+			reader:         rs,
+			contextWatcher: streamContextWatcher,
+			fullyRead:      rs.contentLength == 0,
 			interrupt: func() {
 				_ = conn.Close()
 			},
 			release: func(discard bool) {
+				if streamContextWatcher != nil {
+					if contextErr := streamContextWatcher.stop(); contextErr != nil {
+						discard = true
+					}
+				}
 				hc.ReleaseReader(br)
 				releaseRequestStream(rs)
 				releaseConn(discard)
@@ -3514,6 +3989,14 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		return false, nil
 	}
 	hc.ReleaseReader(br)
+	if contextWatcher != nil {
+		contextErr := contextWatcher.stop()
+		contextWatcher = nil
+		if contextErr != nil {
+			hc.CloseConn(cc)
+			return false, contextErr
+		}
+	}
 
 	if closeConn {
 		hc.CloseConn(cc)
