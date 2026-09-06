@@ -2184,7 +2184,7 @@ func wrapPerIPConn(s *Server, c net.Conn) net.Conn {
 		c.Close()
 		return nil
 	}
-	return acquirePerIPConn(c, ip, &s.perIPConnCounter)
+	return newPerIPConn(c, ip, &s.perIPConnCounter)
 }
 
 var defaultLogger = Logger(log.New(os.Stderr, "", log.LstdFlags))
