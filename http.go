@@ -355,9 +355,12 @@ func (req *Request) CloseBodyStream() error {
 	return req.closeBodyStream()
 }
 
-// BodyStream returns io.Reader.
+// BodyStream returns the response body stream.
 //
-// You must CloseBodyStream or ReleaseResponse after you use it.
+// When response streaming is enabled, the caller must close the stream with
+// [Response.CloseBodyStream] after reading it. To report why a read stopped
+// before EOF, assert the returned reader to [ReadCloserWithError] and call
+// CloseWithError. See the example for retaining only a bounded body prefix.
 func (resp *Response) BodyStream() io.Reader {
 	return resp.bodyStream
 }
@@ -366,6 +369,9 @@ func (resp *Response) CloseBodyStream() error {
 	return resp.closeBodyStream(nil)
 }
 
+// ReadCloserWithError is a body stream that can be closed with the error that
+// caused the caller to stop reading. Streamed response bodies returned by
+// [Client.Do] and [HostClient.Do] implement this interface.
 type ReadCloserWithError interface {
 	io.Reader
 	CloseWithError(err error) error
