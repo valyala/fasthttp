@@ -335,7 +335,7 @@ func TestResponseVectoredWriteThroughPerIPConn(t *testing.T) {
 	}
 	counter := &perIPConnCounter{}
 	counter.Register(1)
-	wrapped := acquirePerIPConn(c, 1, counter)
+	wrapped := newPerIPConn(c, 1, counter)
 	defer wrapped.Close()
 	if vectorWriter(wrapped) != c {
 		t.Fatalf("vectorWriter(%T) = %v, expecting the TCP connection", wrapped, vectorWriter(wrapped))
