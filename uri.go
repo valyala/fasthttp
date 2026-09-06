@@ -762,9 +762,11 @@ func (u *URI) RequestURI() []byte {
 	} else {
 		dst = appendQuotedPath(u.requestURI[:0], u.Path())
 	}
-	if u.parsedQueryArgs && u.queryArgs.Len() > 0 {
-		dst = append(dst, '?')
-		dst = u.queryArgs.AppendBytes(dst)
+	if u.parsedQueryArgs {
+		if u.queryArgs.Len() > 0 {
+			dst = append(dst, '?')
+			dst = u.queryArgs.AppendBytes(dst)
+		}
 	} else if len(u.queryString) > 0 {
 		dst = append(dst, '?')
 		dst = append(dst, u.queryString...)

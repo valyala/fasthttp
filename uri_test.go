@@ -638,3 +638,33 @@ func TestURIRequestURIEmptyPathWithQuery(t *testing.T) {
 		t.Fatalf("unexpected RequestURI with DisablePathNormalizing %q. Expecting %q", got, "/?foo=bar")
 	}
 }
+
+func TestURIRequestURIAfterDeletingAllQueryArgs(t *testing.T) {
+	t.Parallel()
+
+	var u URI
+	if err := u.Parse(nil, []byte("http://example.com/path?a=1")); err != nil {
+		t.Fatal(err)
+	}
+
+	u.QueryArgs().Del("a")
+
+	if got := string(u.RequestURI()); got != "/path" {
+		t.Fatalf("unexpected RequestURI %q; want %q", got, "/path")
+	}
+}
+
+func TestURIRequestURIAfterResettingQueryArgs(t *testing.T) {
+	t.Parallel()
+
+	var u URI
+	if err := u.Parse(nil, []byte("http://example.com/path?a=1&b=2")); err != nil {
+		t.Fatal(err)
+	}
+
+	u.QueryArgs().Reset()
+
+	if got := string(u.RequestURI()); got != "/path" {
+		t.Fatalf("unexpected RequestURI %q; want %q", got, "/path")
+	}
+}
