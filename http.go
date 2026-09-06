@@ -1855,6 +1855,19 @@ func (req *Request) Write(w *bufio.Writer) error {
 		hasBody = true
 		req.Header.SetContentLength(len(body))
 	}
+	if hasBody && len(req.Header.trailer) > 0 && req.Header.IsHTTP11() {
+		if len(body) > 0 && !req.Header.noDefaultContentType && len(req.Header.ContentType()) == 0 {
+			req.Header.SetContentTypeBytes(strDefaultContentType)
+		}
+		req.Header.SetContentLength(-1)
+		if err = req.Header.Write(w); err != nil {
+			return err
+		}
+		if err = writeBufferedBodyChunked(w, body); err != nil {
+			return err
+		}
+		return req.Header.writeTrailer(w)
+	}
 	if err = req.Header.Write(w); err != nil {
 		return err
 	}
@@ -2289,6 +2302,16 @@ func (resp *Response) Write(w *bufio.Writer) error {
 	bodyLen := len(body)
 	if sendBody || bodyLen > 0 {
 		resp.Header.SetContentLength(bodyLen)
+	}
+	if sendBody && len(resp.Header.trailer) > 0 && resp.Header.IsHTTP11() {
+		resp.Header.SetContentLength(-1)
+		if err := resp.Header.Write(w); err != nil {
+			return err
+		}
+		if err := writeBufferedBodyChunked(w, body); err != nil {
+			return err
+		}
+		return resp.Header.writeTrailer(w)
 	}
 	if err := resp.Header.Write(w); err != nil {
 		return err
@@ -2783,6 +2806,13 @@ var copyBufPool = sync.Pool{
 }
 
 func writeChunk(w *bufio.Writer, b []byte) error {
+	if err := writeChunkNoFlush(w, b); err != nil {
+		return err
+	}
+	return w.Flush()
+}
+
+func writeChunkNoFlush(w *bufio.Writer, b []byte) error {
 	n := len(b)
 	if err := writeHexInt(w, n); err != nil {
 		return err
@@ -2799,7 +2829,16 @@ func writeChunk(w *bufio.Writer, b []byte) error {
 			return err
 		}
 	}
-	return w.Flush()
+	return nil
+}
+
+func writeBufferedBodyChunked(w *bufio.Writer, body []byte) error {
+	if len(body) > 0 {
+		if err := writeChunkNoFlush(w, body); err != nil {
+			return err
+		}
+	}
+	return writeChunkNoFlush(w, nil)
 }
 
 // ErrBodyTooLarge is returned if either request or response body exceeds
