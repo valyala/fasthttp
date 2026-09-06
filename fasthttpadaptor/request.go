@@ -25,13 +25,20 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	}
 
 	r.Method = b2s(ctx.Method())
-	r.Proto = b2s(ctx.Request.Header.Protocol())
-	if r.Proto == "HTTP/2" {
-		r.ProtoMajor = 2
-	} else {
-		r.ProtoMajor = 1
+	// net/http spells the HTTP/2 version "HTTP/2.0", and its minor version is 0.
+	switch r.Proto = b2s(ctx.Request.Header.Protocol()); r.Proto {
+	case "HTTP/1.1":
+		r.ProtoMajor, r.ProtoMinor = 1, 1
+	case "HTTP/1.0":
+		r.ProtoMajor, r.ProtoMinor = 1, 0
+	case "HTTP/2", "HTTP/2.0":
+		r.Proto, r.ProtoMajor, r.ProtoMinor = "HTTP/2.0", 2, 0
+	default:
+		var ok bool
+		if r.ProtoMajor, r.ProtoMinor, ok = http.ParseHTTPVersion(r.Proto); !ok {
+			r.ProtoMajor, r.ProtoMinor = 1, 1
+		}
 	}
-	r.ProtoMinor = 1
 	r.ContentLength = int64(len(body))
 	r.RemoteAddr = ctx.RemoteAddr().String()
 	r.Host = b2s(ctx.Host())
