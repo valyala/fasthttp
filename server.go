@@ -345,6 +345,8 @@ type Server struct {
 
 	idleConnsMu sync.Mutex
 
+	serverName atomic.Pointer[serverName]
+
 	mu sync.Mutex
 
 	concurrency atomic.Uint32
@@ -2373,7 +2375,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	idleConnTime.Store(connTime.Add(time.Second * 5).Unix())
 	s.idleConnsMu.Unlock()
 
-	serverName := s.getServerName()
+	serverName := s.serverNameBytes()
 	connRequestNum := uint64(0)
 	connID := nextConnID()
 	maxRequestBodySize := s.MaxRequestBodySize
@@ -2398,9 +2400,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		isHTTP11        bool
 
 		continueReadingRequest = true
+		mayContinue            bool
 	)
 	for {
 		connRequestNum++
+		mayContinue = false
 
 		if connRequestNum == 1 {
 			// Apply ReadTimeout to the first request byte.
@@ -2526,9 +2530,9 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				if err == nil {
 					// read body
 					if s.StreamRequestBody {
-						err = ctx.Request.readBodyStream(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
+						mayContinue, err = ctx.Request.readBodyStream(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
 					} else {
-						err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
+						mayContinue, err = ctx.Request.readLimitBody(br, maxRequestBodySize, s.GetOnly, !s.DisablePreParseMultipartForm)
 					}
 				}
 			}
@@ -2564,7 +2568,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// 'Expect: 100-continue' request handling.
 		// See https://www.rfc-editor.org/rfc/rfc9110.html#field.expect for details.
-		if ctx.Request.MayContinue() {
+		if mayContinue {
 			// Allow the ability to deny reading the incoming request body.
 			if s.ExpectHandler != nil {
 				if expectStatus := s.ExpectHandler(ctx); expectStatus != StatusContinue {
@@ -2634,8 +2638,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		// fresh one below, whose request defaults to HTTP/1.1.
 		isHTTP11 = ctx.Request.Header.IsHTTP11()
 
-		if serverName != "" {
-			ctx.Response.Header.SetServer(serverName)
+		if len(serverName) > 0 {
+			ctx.Response.Header.setServerSanitized(serverName)
 		}
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
@@ -2693,8 +2697,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.Response.Header.noHTTP11 = true
 		}
 
-		if serverName != "" && len(ctx.Response.Header.Server()) == 0 {
-			ctx.Response.Header.SetServer(serverName)
+		if len(serverName) > 0 && len(ctx.Response.Header.Server()) == 0 {
+			ctx.Response.Header.setServerSanitized(serverName)
 		}
 
 		if !hijackNoResponse {
@@ -3112,6 +3116,23 @@ func (s *Server) getServerName() string {
 	return serverName
 }
 
+type serverName struct {
+	name  string
+	bytes []byte
+}
+
+// serverNameBytes returns the Server header value with CR and LF removed,
+// cached so it is sanitized once rather than on every response.
+func (s *Server) serverNameBytes() []byte {
+	name := s.getServerName()
+	if p := s.serverName.Load(); p != nil && p.name == name {
+		return p.bytes
+	}
+	p := &serverName{name: name, bytes: initHeaderValueBytes(nil, s2b(name))}
+	s.serverName.Store(p)
+	return p.bytes
+}
+
 func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 	w.Write(formatStatusLine(nil, strHTTP11, statusCode, s2b(StatusMessage(statusCode)))) //nolint:errcheck
 
@@ -3145,7 +3166,7 @@ func defaultErrorHandler(ctx *RequestCtx, err error) {
 	}
 }
 
-func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverName string, err error) *bufio.Writer {
+func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverName []byte, err error) *bufio.Writer {
 	errorHandler := defaultErrorHandler
 	if s.ErrorHandler != nil {
 		errorHandler = s.ErrorHandler
@@ -3153,8 +3174,8 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 
 	errorHandler(ctx, err)
 
-	if serverName != "" {
-		ctx.Response.Header.SetServer(serverName)
+	if len(serverName) > 0 {
+		ctx.Response.Header.setServerSanitized(serverName)
 	}
 	ctx.SetConnectionClose()
 	if bw == nil {
