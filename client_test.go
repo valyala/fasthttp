@@ -5699,3 +5699,55 @@ func TestClientRetryIfErrUpstream(t *testing.T) {
 		}
 	})
 }
+
+func TestHostClientReleaseConnClearsDeadlines(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("cannot listen: %v", err)
+	}
+	defer ln.Close()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("ok") //nolint:errcheck
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+
+	c := &HostClient{
+		Addr: ln.Addr().String(),
+		// A retry would hide the failure by dialing a new connection.
+		MaxIdemponentCallAttempts: 1,
+	}
+
+	req := AcquireRequest()
+	resp := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(resp)
+	req.SetRequestURI("http://" + ln.Addr().String() + "/")
+
+	// Leave an idle connection behind that has no deadlines set.
+	if err := c.Do(req, resp); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Set an already expired deadline on it through the public API.
+	cc, err := c.AcquireConn(0, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := cc.Conn().SetDeadline(time.Now().Add(-time.Second)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	c.ReleaseConn(cc)
+
+	// The next request must clear that deadline before using the connection.
+	if err := c.Do(req, resp); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if body := resp.Body(); string(body) != "ok" {
+		t.Fatalf("unexpected body %q. Expecting %q", body, "ok")
+	}
+}
