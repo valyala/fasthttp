@@ -558,3 +558,62 @@ func testAppendUnquotedArg(t *testing.T, s, expectedS string) {
 		t.Fatalf("Unexpected AppendUnquotedArg(AppendQuotedArg(%q))=%q, want %q", s, unquotedS, s)
 	}
 }
+
+func TestLowercaseBytesMatchesTable(t *testing.T) {
+	t.Parallel()
+
+	for n := 0; n <= 24; n++ {
+		for c := range 256 {
+			for pos := 0; pos < n; pos++ {
+				b := make([]byte, n)
+				for i := range b {
+					b[i] = 'A' + byte(i%26)
+				}
+				b[pos] = byte(c)
+				exp := make([]byte, n)
+				for i := range b {
+					exp[i] = toLowerTable[b[i]]
+				}
+				lowercaseBytes(b)
+				if !bytes.Equal(b, exp) {
+					t.Fatalf("unexpected result for byte %#x at %d of %d: %q. Expecting %q", c, pos, n, b, exp)
+				}
+			}
+		}
+	}
+}
+
+func TestAppendQuotedArgAndPathPrefix(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range []string{"", "abc", "a b", " ", "foo/bar?baz", "a%20b", "\xff\x00", "abcdefgh-ijk~lmn"} {
+		var exp []byte
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			switch {
+			case c == ' ':
+				exp = append(exp, '+')
+			case quotedArgShouldEscapeTable[c] != 0:
+				exp = append(exp, '%', upperhex[c>>4], upperhex[c&0xf])
+			default:
+				exp = append(exp, c)
+			}
+		}
+		if got := AppendQuotedArg(nil, []byte(s)); !bytes.Equal(got, exp) {
+			t.Fatalf("unexpected AppendQuotedArg(%q): %q. Expecting %q", s, got, exp)
+		}
+
+		exp = exp[:0]
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			if quotedPathShouldEscapeTable[c] != 0 {
+				exp = append(exp, '%', upperhex[c>>4], upperhex[c&0xf])
+			} else {
+				exp = append(exp, c)
+			}
+		}
+		if got := appendQuotedPath(nil, []byte(s)); !bytes.Equal(got, exp) {
+			t.Fatalf("unexpected appendQuotedPath(%q): %q. Expecting %q", s, got, exp)
+		}
+	}
+}
