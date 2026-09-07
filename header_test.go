@@ -4162,30 +4162,32 @@ func TestValidHeaderValueMatchesByteTable(t *testing.T) {
 	}
 }
 
-func TestIsValidHeaderKeySpaces(t *testing.T) {
+func TestScanHeaderKey(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
-		key        string
-		valid      bool
+		line       string
+		colon      int
 		innerSpace bool
+		valid      bool
 	}{
-		{"Content-Type", true, false},
-		{"Content-Type ", true, false},
-		{"Content-Type  ", true, false},
-		{"Content Type", true, true},
-		{"Content Type ", true, true},
-		{" Content-Type", true, true},
-		{"Content\tType", false, false},
-		{"", false, false},
-		{" ", true, false},
-		{"Content:Type", false, false},
-		{"\xffoo", false, false},
+		{"Content-Type: text/html", 12, false, true},
+		{"Content-Type : text/html", 13, false, true},
+		{"Content-Type  :", 14, false, true},
+		{"Content Type: a", 12, true, true},
+		{"Content Type : a", 13, true, true},
+		{"Content-Type", -1, false, false},
+		{"", -1, false, false},
+		{": a", 0, false, false},
+		{"Content\tType: a", 12, false, false},
+		{"Content\tType", -1, false, false},
+		{"\xffoo: bar", 3, false, false},
+		{"a:b:c", 1, false, true},
 	} {
-		valid, innerSpace := isValidHeaderKey([]byte(tc.key))
-		if valid != tc.valid || innerSpace != tc.innerSpace {
-			t.Fatalf("unexpected result for %q: valid=%v innerSpace=%v. Expecting valid=%v innerSpace=%v",
-				tc.key, valid, innerSpace, tc.valid, tc.innerSpace)
+		colon, innerSpace, valid := scanHeaderKey([]byte(tc.line))
+		if colon != tc.colon || innerSpace != tc.innerSpace || valid != tc.valid {
+			t.Fatalf("unexpected result for %q: colon=%d innerSpace=%v valid=%v. Expecting colon=%d innerSpace=%v valid=%v",
+				tc.line, colon, innerSpace, valid, tc.colon, tc.innerSpace, tc.valid)
 		}
 	}
 }

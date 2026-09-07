@@ -584,30 +584,6 @@ func hasCTLByteWord(v uint64) bool {
 	return ((v-0x20*ones)&^v|(x-ones)&^x)&highs != 0
 }
 
-// isValidHeaderKey returns whether a is a valid header key, and whether a
-// contains a space before its last non-space byte. Such a space survives
-// trailing-whitespace trimming, and a key carrying it is accepted but must
-// not be canonicalized. See https://go.dev/issue/34540 and
-// https://github.com/valyala/fasthttp/issues/1917.
-func isValidHeaderKey(a []byte) (valid, innerSpace bool) {
-	if len(a) == 0 {
-		return false, false
-	}
-	seenSpace := false
-	for _, c := range a {
-		if !validHeaderFieldByte(c) {
-			if c != ' ' {
-				return false, false
-			}
-			seenSpace = true
-		}
-	}
-	if seenSpace {
-		innerSpace = bytes.IndexByte(a, ' ') < len(trimTrailingSpace(a))
-	}
-	return true, innerSpace
-}
-
 // VisitHeaderParams calls f for each parameter in the given header bytes.
 // It stops processing when f returns false or an invalid parameter is found.
 // Parameter values may be quoted, in which case \ is treated as an escape
