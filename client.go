@@ -2117,6 +2117,13 @@ func releaseClientConn(cc *clientConn) {
 var clientConnPool sync.Pool
 
 func (c *HostClient) ReleaseConn(cc *clientConn) {
+	// The caller may have changed the deadlines through cc.Conn().
+	cc.readDeadlineSet = true
+	cc.writeDeadlineSet = true
+	c.releaseConn(cc)
+}
+
+func (c *HostClient) releaseConn(cc *clientConn) {
 	cc.lastUseTime = time.Now()
 	if c.MaxConnWaitTimeout <= 0 {
 		c.connsLock.Lock()
@@ -3514,7 +3521,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 			if closeConn || discard || resp.ConnectionClose() {
 				hc.CloseConn(cc)
 			} else {
-				hc.ReleaseConn(cc)
+				hc.releaseConn(cc)
 			}
 		}
 		// ReadLimitBody always creates a network-backed requestStream when
@@ -3540,7 +3547,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	if closeConn {
 		hc.CloseConn(cc)
 	} else {
-		hc.ReleaseConn(cc)
+		hc.releaseConn(cc)
 	}
 	return false, nil
 }

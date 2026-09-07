@@ -4296,3 +4296,24 @@ func TestRequestHeaderReadMoreLinesThanRecorded(t *testing.T) {
 		t.Fatalf("unexpected buffered bytes: %d", br.Buffered())
 	}
 }
+
+func TestRequestHeaderMethodDefaultIsRequestLocal(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	m := h.Method()
+	if string(m) != MethodGet {
+		t.Fatalf("unexpected default method %q. Expecting %q", m, MethodGet)
+	}
+	m[0] = 'X'
+
+	var h2 RequestHeader
+	if m2 := h2.Method(); string(m2) != MethodGet {
+		t.Fatalf("default method of another header changed to %q", m2)
+	}
+
+	h.Reset()
+	if m := h.Method(); string(m) != MethodGet {
+		t.Fatalf("unexpected default method after reset %q. Expecting %q", m, MethodGet)
+	}
+}
