@@ -1039,6 +1039,12 @@ type clientConn struct {
 
 	createdTime time.Time
 	lastUseTime time.Time
+
+	// readDeadlineSet and writeDeadlineSet record whether c currently has a
+	// deadline, so a request without timeouts can skip clearing one that was
+	// never set.
+	readDeadlineSet  bool
+	writeDeadlineSet bool
 }
 
 // Conn returns the underlying net.Conn associated with the client connection.
@@ -2089,6 +2095,8 @@ func acquireClientConn(conn net.Conn) *clientConn {
 	cc := v.(*clientConn) //nolint:forcetypeassert
 	cc.c = conn
 	cc.createdTime = time.Now()
+	cc.readDeadlineSet = true
+	cc.writeDeadlineSet = true
 	return cc
 }
 
@@ -3420,9 +3428,12 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 	}
 
-	if err = conn.SetWriteDeadline(writeDeadline); err != nil {
-		hc.CloseConn(cc)
-		return true, err
+	if !writeDeadline.IsZero() || cc.writeDeadlineSet {
+		if err = conn.SetWriteDeadline(writeDeadline); err != nil {
+			hc.CloseConn(cc)
+			return true, err
+		}
+		cc.writeDeadlineSet = !writeDeadline.IsZero()
 	}
 
 	resetConnection := false
@@ -3461,9 +3472,12 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 	}
 
-	if err = conn.SetReadDeadline(readDeadline); err != nil {
-		hc.CloseConn(cc)
-		return true, err
+	if !readDeadline.IsZero() || cc.readDeadlineSet {
+		if err = conn.SetReadDeadline(readDeadline); err != nil {
+			hc.CloseConn(cc)
+			return true, err
+		}
+		cc.readDeadlineSet = !readDeadline.IsZero()
 	}
 
 	if customSkipBody || req.Header.IsHead() {
