@@ -17,6 +17,11 @@ type headerScanner struct {
 	// it if the block really ends in CRLFCRLF there.
 	blockEnd int
 
+	// lineEnds holds the offsets in b of the '\n' ending each line of the
+	// block, in order, when the caller has already found them (see
+	// readRawHeaders). readLine searches b itself once they run out.
+	lineEnds []int
+
 	key   []byte
 	value []byte
 
@@ -92,9 +97,15 @@ func (s *headerScanner) next() bool {
 // trailing \n and a possible preceding \r dropped. b is truncated at the
 // header block terminator, so every line ends in \n.
 func (s *headerScanner) readLine() []byte {
-	i := bytes.IndexByte(s.b[s.r:], '\n')
-	if i < 0 {
-		return nil
+	var i int
+	if len(s.lineEnds) > 0 && s.lineEnds[0] >= s.r && s.lineEnds[0] < len(s.b) {
+		i = s.lineEnds[0] - s.r
+		s.lineEnds = s.lineEnds[1:]
+	} else {
+		i = bytes.IndexByte(s.b[s.r:], '\n')
+		if i < 0 {
+			return nil
+		}
 	}
 	line := s.b[s.r : s.r+i]
 	s.r += i + 1
