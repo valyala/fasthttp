@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"slices"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -98,7 +99,7 @@ func TestEstimateUnzstdSize(t *testing.T) {
 		want int
 	}{
 		{name: "frame content size", src: withFCS, want: len(body)},
-		{name: "leading skippable frame", src: append(skippablePrefix, withFCS...), want: len(body)},
+		{name: "leading skippable frame", src: slices.Concat(skippablePrefix, withFCS), want: len(body)},
 		{name: "without frame content size", src: withoutFCS, want: 2 * len(withoutFCS)},
 		{name: "forged frame content size is clamped", src: forgedFCS, want: 4_000_000},
 		{name: "invalid input", src: invalid, want: 2 * len(invalid)},

@@ -4130,7 +4130,7 @@ func TestRequestHeaderEmptyPathWithQuery(t *testing.T) {
 		t.Fatalf("unexpected RequestURI %q. Expecting %q", got, "/?foo=bar")
 	}
 
-	firstLine := strings.Split(string(h.Header()), "\r\n")[0]
+	firstLine, _, _ := strings.Cut(string(h.Header()), "\r\n")
 	if firstLine != "GET /?foo=bar HTTP/1.1" {
 		t.Fatalf("unexpected request line %q. Expecting %q", firstLine, "GET /?foo=bar HTTP/1.1")
 	}

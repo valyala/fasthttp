@@ -1975,7 +1975,7 @@ func TestRequestWriteEmptyPathWithQuery(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	firstLine := strings.Split(w.String(), "\r\n")[0]
+	firstLine, _, _ := strings.Cut(w.String(), "\r\n")
 	if firstLine != "GET /?foo=bar HTTP/1.1" {
 		t.Fatalf("unexpected request line %q. Expecting %q", firstLine, "GET /?foo=bar HTTP/1.1")
 	}
@@ -1992,7 +1992,7 @@ func TestRequestWriteEmptyPathWithQuery(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	firstLine = strings.Split(w.String(), "\r\n")[0]
+	firstLine, _, _ = strings.Cut(w.String(), "\r\n")
 	if firstLine != "GET /?foo=bar HTTP/1.1" {
 		t.Fatalf("unexpected request line with DisablePathNormalizing %q. Expecting %q", firstLine, "GET /?foo=bar HTTP/1.1")
 	}

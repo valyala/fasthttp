@@ -11,6 +11,7 @@ linters:
     - errorlint
     - exhaustive
     - exhaustruct
+    - exhaustruct_v5
     - forbidigo
     - funcorder
     - funlen
@@ -19,7 +20,7 @@ linters:
     - goconst
     - gocyclo
     - godox
-    - gosec
+    - gomodguard
     - gosmopolitan
     - inamedparam
     - intrange
@@ -56,6 +57,13 @@ linters:
         - opinionated
         - performance
         - style
+    gosec:
+      # Preserve the exclusions from the former standalone security workflow.
+      excludes:
+        - G103
+        - G104
+        - G304
+        - G402
     govet:
       disable:
         - fieldalignment
@@ -74,10 +82,19 @@ linters:
   exclusions:
     generated: lax
     presets:
-      - common-false-positives
-      - legacy
       - std-error-handling
     rules:
+      # Preserve the non-security legacy exclusions without hiding gosec findings.
+      - linters:
+          - govet
+        text: '(possible misuse of unsafe.Pointer|should have signature)'
+      - linters:
+          - staticcheck
+        text: 'SA4011'
+      # The standalone gosec scan did not include test files.
+      - linters:
+          - gosec
+        path: _test\.go
       - linters:
           - lll
         path: _test\.go

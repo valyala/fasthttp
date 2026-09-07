@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -352,7 +353,7 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
+			DialContext:         func(_ context.Context, _, _ string) (net.Conn, error) { return ln.Dial() },
 			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
 		},
 	}
@@ -474,7 +475,7 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
+			DialContext:         func(_ context.Context, _, _ string) (net.Conn, error) { return ln.Dial() },
 			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
 		},
 		Timeout: 5 * time.Second,
