@@ -23,7 +23,6 @@ var (
 	strHTTP11                   = []byte("HTTP/1.1")
 	strColon                    = []byte(":")
 	strColonSlashSlash          = []byte("://")
-	strColonSpace               = []byte(": ")
 	strCommaSpace               = []byte(", ")
 	strGMT                      = []byte("GMT")
 	strSpace                    = []byte(" ")
@@ -90,7 +89,8 @@ var (
 	strBytes               = []byte("bytes")
 	strBasicSpace          = []byte("Basic ")
 	strLink                = []byte("Link")
-	strConnect             = []byte("CONNECT")
+	strGet                 = []byte(MethodGet)
+	strConnect             = []byte(MethodConnect)
 
 	strApplicationSlash = []byte("application/")
 	strImageSVG         = []byte("image/svg")

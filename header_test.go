@@ -4135,3 +4135,57 @@ func TestRequestHeaderEmptyPathWithQuery(t *testing.T) {
 		t.Fatalf("unexpected request line %q. Expecting %q", firstLine, "GET /?foo=bar HTTP/1.1")
 	}
 }
+
+func TestValidHeaderValueMatchesByteTable(t *testing.T) {
+	t.Parallel()
+
+	for n := 0; n <= 20; n++ {
+		for c := range 256 {
+			for pos := 0; pos < n; pos++ {
+				b := bytes.Repeat([]byte{'a'}, n)
+				b[pos] = byte(c)
+				exp := true
+				for _, ch := range b {
+					if !validHeaderValueByte(ch) {
+						exp = false
+						break
+					}
+				}
+				if got := validHeaderValue(b); got != exp {
+					t.Fatalf("unexpected result for byte %#x at %d of %d: %v. Expecting %v", c, pos, n, got, exp)
+				}
+			}
+		}
+	}
+	if !validHeaderValue(nil) {
+		t.Fatal("expecting empty value to be valid")
+	}
+}
+
+func TestIsValidHeaderKeySpaces(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		key        string
+		valid      bool
+		innerSpace bool
+	}{
+		{"Content-Type", true, false},
+		{"Content-Type ", true, false},
+		{"Content-Type  ", true, false},
+		{"Content Type", true, true},
+		{"Content Type ", true, true},
+		{" Content-Type", true, true},
+		{"Content\tType", false, false},
+		{"", false, false},
+		{" ", true, false},
+		{"Content:Type", false, false},
+		{"\xffoo", false, false},
+	} {
+		valid, innerSpace := isValidHeaderKey([]byte(tc.key))
+		if valid != tc.valid || innerSpace != tc.innerSpace {
+			t.Fatalf("unexpected result for %q: valid=%v innerSpace=%v. Expecting valid=%v innerSpace=%v",
+				tc.key, valid, innerSpace, tc.valid, tc.innerSpace)
+		}
+	}
+}
