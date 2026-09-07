@@ -668,3 +668,31 @@ func TestURIRequestURIAfterResettingQueryArgs(t *testing.T) {
 		t.Fatalf("unexpected RequestURI %q; want %q", got, "/path")
 	}
 }
+
+func TestStringContainsCTLByteMatchesByteLoop(t *testing.T) {
+	t.Parallel()
+
+	for n := 0; n <= 20; n++ {
+		for c := range 256 {
+			for pos := 0; pos < n; pos++ {
+				b := bytes.Repeat([]byte{'a'}, n)
+				b[pos] = byte(c)
+				exp := byte(c) < ' ' || byte(c) == 0x7f
+				if got := stringContainsCTLByte(b); got != exp {
+					t.Fatalf("unexpected result for byte %#x at %d of %d: %v. Expecting %v", c, pos, n, got, exp)
+				}
+			}
+		}
+	}
+}
+
+func TestHostShouldEscapeTable(t *testing.T) {
+	t.Parallel()
+
+	for c := range 256 {
+		exp := c < 0x80 && shouldEscape(byte(c), encodeHost)
+		if got := hostShouldEscapeTable[c] != 0; got != exp {
+			t.Fatalf("unexpected table entry for %#x: %v. Expecting %v", c, got, exp)
+		}
+	}
+}

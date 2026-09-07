@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -301,7 +302,8 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		u.SetSchemeBytes(strHTTPS)
 	}
 
-	if n := bytes.LastIndexByte(host, '@'); n >= 0 {
+	if bytes.IndexByte(host, '@') >= 0 {
+		n := bytes.LastIndexByte(host, '@')
 		auth := host[:n]
 		if !validUserinfo(auth) {
 			return ErrorInvalidURI
@@ -468,8 +470,8 @@ func parseHost(host []byte) ([]byte, error) {
 			return nil, fmt.Errorf("invalid host %q", host)
 		}
 
-		if i := bytes.LastIndexByte(host, ':'); i != -1 {
-			if bytes.IndexByte(host[:i], ':') != -1 {
+		if i := bytes.IndexByte(host, ':'); i != -1 {
+			if bytes.IndexByte(host[i+1:], ':') != -1 {
 				return nil, fmt.Errorf("invalid host %q with multiple port delimiters", host)
 			}
 
@@ -518,6 +520,7 @@ func (e InvalidHostError) Error() string {
 func unescape(s []byte, mode encoding) ([]byte, error) {
 	// Count %, check that they're well-formed.
 	n := 0
+	checkHost := mode == encodeHost || mode == encodeZone
 	for i := 0; i < len(s); {
 		switch s[i] {
 		case '%':
@@ -553,7 +556,7 @@ func unescape(s []byte, mode encoding) ([]byte, error) {
 			}
 			i += 3
 		default:
-			if (mode == encodeHost || mode == encodeZone) && s[i] < 0x80 && shouldEscape(s[i], mode) {
+			if checkHost && hostShouldEscapeTable[s[i]] != 0 {
 				return nil, InvalidHostError(s[i : i+1])
 			}
 			i++
@@ -971,8 +974,13 @@ func (u *URI) parseQueryArgs() {
 
 // stringContainsCTLByte reports whether s contains any ASCII control character.
 func stringContainsCTLByte(s []byte) bool {
-	for i := range s {
-		b := s[i]
+	for len(s) >= 8 {
+		if hasCTLByteWord(binary.LittleEndian.Uint64(s)) {
+			return true
+		}
+		s = s[8:]
+	}
+	for _, b := range s {
 		if b < ' ' || b == 0x7f {
 			return true
 		}
