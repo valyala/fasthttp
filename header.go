@@ -352,6 +352,12 @@ func (h *ResponseHeader) SetServerBytes(server []byte) {
 	h.server = initHeaderValueBytes(h.server, server)
 }
 
+// setServerSanitized sets Server header value from bytes that are known to
+// contain no CR or LF.
+func (h *ResponseHeader) setServerSanitized(server []byte) {
+	h.server = append(h.server[:0], server...)
+}
+
 // ContentType returns Content-Type header value.
 func (h *RequestHeader) ContentType() []byte {
 	if h.disableSpecialHeader {
@@ -3006,9 +3012,13 @@ func validateRequestURI(method, requestURI []byte) error {
 	return ErrorInvalidURI
 }
 
+// maxLineEnds bounds the line terminator offsets readRawHeaders records, and
+// with that the memory a pooled RequestHeader keeps for them.
+const maxLineEnds = 512
+
 // readRawHeaders copies the header block at the start of buf into dst and
-// returns it together with the offsets of the block's line terminators and
-// the block length.
+// returns it together with the offsets of the block's first line terminators
+// and the block length.
 func readRawHeaders(dst []byte, lineEnds []int, buf []byte) ([]byte, []int, int, error) {
 	n := bytes.IndexByte(buf, nChar)
 	if n < 0 {
@@ -3031,7 +3041,9 @@ func readRawHeaders(dst []byte, lineEnds []int, buf []byte) ([]byte, []int, int,
 		}
 		m++
 		n += m
-		lineEnds = append(lineEnds, n-1)
+		if len(lineEnds) < maxLineEnds {
+			lineEnds = append(lineEnds, n-1)
+		}
 		if (m == 2 && b[0] == rChar) || m == 1 {
 			dst = append(dst, buf[:n]...)
 			return dst, lineEnds, n, nil

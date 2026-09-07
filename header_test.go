@@ -4191,3 +4191,37 @@ func TestScanHeaderKey(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestHeaderReadMoreLinesThanRecorded(t *testing.T) {
+	t.Parallel()
+
+	n := maxLineEnds + 50
+	var sb strings.Builder
+	sb.WriteString("GET / HTTP/1.1\r\nHost: foobar.com\r\n")
+	for i := range n {
+		fmt.Fprintf(&sb, "X-Header-%d: value-%d\r\n", i, i)
+	}
+	sb.WriteString("\r\n")
+	s := sb.String()
+
+	var h RequestHeader
+	br := bufio.NewReaderSize(bytes.NewBufferString(s), len(s))
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(h.Host()) != "foobar.com" {
+		t.Fatalf("unexpected host: %q", h.Host())
+	}
+	for i := range n {
+		key := fmt.Sprintf("X-Header-%d", i)
+		if v := h.Peek(key); string(v) != fmt.Sprintf("value-%d", i) {
+			t.Fatalf("unexpected value for %q: %q", key, v)
+		}
+	}
+	if raw := h.RawHeaders(); string(raw) != s[len("GET / HTTP/1.1\r\n"):] {
+		t.Fatalf("unexpected raw headers length %d, expecting %d", len(raw), len(s)-len("GET / HTTP/1.1\r\n"))
+	}
+	if br.Buffered() != 0 {
+		t.Fatalf("unexpected buffered bytes: %d", br.Buffered())
+	}
+}

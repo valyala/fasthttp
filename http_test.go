@@ -1455,7 +1455,7 @@ func TestRequestContinueReadBodyDisablePrereadMultipartForm(t *testing.T) {
 		t.Fatalf("unexpected error reading headers: %v", err)
 	}
 
-	if err := r.readLimitBody(br, 10000, false, false); err != nil {
+	if _, err := r.readLimitBody(br, 10000, false, false); err != nil {
 		t.Fatalf("unexpected error reading body: %v", err)
 	}
 
