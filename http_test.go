@@ -144,6 +144,7 @@ func TestRequestCopyTo(t *testing.T) {
 	if err := req.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	req.DisableRedirectPathNormalizing = true
 	testRequestCopyTo(t, &req)
 }
 
@@ -168,7 +169,9 @@ func testRequestCopyTo(t *testing.T, src *Request) {
 	src.CopyTo(&dst)
 
 	// Compare serialized representations.
-	if src.String() != dst.String() || !bytes.Equal(src.Body(), dst.Body()) {
+	if src.String() != dst.String() ||
+		!bytes.Equal(src.Body(), dst.Body()) ||
+		src.DisableRedirectPathNormalizing != dst.DisableRedirectPathNormalizing {
 		t.Fatalf("RequestCopyTo fail, src: \n%+v\ndst: \n%+v\n", src, &dst)
 	}
 }
