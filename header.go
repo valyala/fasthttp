@@ -594,8 +594,12 @@ func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
 			return
 		}
 		b = b[idxSemi+1:]
-		for len(b) > 0 && b[0] == ' ' {
+		for len(b) > 0 && (b[0] == ' ' || b[0] == '\t') {
 			b = b[1:]
+		}
+		if len(b) > 0 && b[0] == ';' {
+			// Empty parameters are allowed by RFC 9110.
+			continue
 		}
 
 		n := 0
