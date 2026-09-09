@@ -2,7 +2,6 @@ package fasthttp
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -975,7 +974,7 @@ func (u *URI) parseQueryArgs() {
 // stringContainsCTLByte reports whether s contains any ASCII control character.
 func stringContainsCTLByte(s []byte) bool {
 	for len(s) >= 8 {
-		if hasCTLByteWord(binary.LittleEndian.Uint64(s)) {
+		if anyByteIsCTL(loadWord(s)) {
 			return true
 		}
 		s = s[8:]

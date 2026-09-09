@@ -5,7 +5,6 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -463,18 +462,8 @@ const (
 )
 
 func lowercaseBytes(b []byte) {
-	const (
-		ones  = 0x0101010101010101
-		highs = 0x8080808080808080
-	)
-	// Eight bytes at a time: a byte is in 'A'..'Z' when adding 0x3f sets its
-	// high bit while adding 0x25 does not. Non-ASCII bytes are masked out so
-	// they neither carry nor change.
 	for len(b) >= 8 {
-		v := binary.LittleEndian.Uint64(b)
-		w := v &^ highs
-		m := (w + 0x3f*ones) &^ (w + 0x25*ones) &^ v & highs
-		binary.LittleEndian.PutUint64(b, v|m>>2)
+		storeWord(b, lowercaseWord(loadWord(b)))
 		b = b[8:]
 	}
 	for i := range b {
