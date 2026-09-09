@@ -3,7 +3,6 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -565,10 +564,10 @@ func validHeaderValueByte(c byte) bool {
 // validHeaderValue returns true if every byte of b is a valid header value
 // byte as defined by RFC 7230.
 func validHeaderValue(b []byte) bool {
-	// Eight bytes at a time: a word is clean when no byte is below 0x20 or
-	// equal to 0x7f. Tabs are valid but fail that test, so such words fall
-	// through to the byte loop.
-	for len(b) >= 8 && !hasCTLByteWord(binary.LittleEndian.Uint64(b)) {
+	// Words without control bytes are skipped eight at a time. A tab is a
+	// valid value byte but also a control byte, so a word holding one is
+	// checked byte by byte.
+	for len(b) >= 8 && !anyByteIsCTL(loadWord(b)) {
 		b = b[8:]
 	}
 	for _, c := range b {
@@ -577,17 +576,6 @@ func validHeaderValue(b []byte) bool {
 		}
 	}
 	return true
-}
-
-// hasCTLByteWord returns true if any byte of v is an ASCII control
-// character, i.e. below 0x20 or equal to 0x7f.
-func hasCTLByteWord(v uint64) bool {
-	const (
-		ones  = 0x0101010101010101
-		highs = 0x8080808080808080
-	)
-	x := v ^ (0x7f * ones)
-	return ((v-0x20*ones)&^v|(x-ones)&^x)&highs != 0
 }
 
 // VisitHeaderParams calls f for each parameter in the given header bytes.
