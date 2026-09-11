@@ -5699,3 +5699,26 @@ func TestClientRetryIfErrUpstream(t *testing.T) {
 		}
 	})
 }
+
+func TestHostClientQueueForIdleRechecksIdle(t *testing.T) {
+	c := &HostClient{
+		ConnPoolStrategy:   LIFO,
+		MaxConns:           1,
+		MaxConnWaitTimeout: time.Second,
+		connsCount:         1,
+	}
+	cc := &clientConn{}
+	c.ReleaseConn(cc)
+
+	w := &wantConn{ready: make(chan struct{}, 1)}
+	c.queueForIdle(w)
+
+	select {
+	case <-w.ready:
+		if w.conn != cc || w.err != nil {
+			t.Fatalf("unexpected waiter result: conn=%p err=%v", w.conn, w.err)
+		}
+	default:
+		t.Fatal("waiter was not given an idle connection")
+	}
+}

@@ -1937,6 +1937,26 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 func (c *HostClient) queueForIdle(w *wantConn) {
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
+	if n := len(c.conns); n > 0 {
+		var cc *clientConn
+		switch c.ConnPoolStrategy {
+		case LIFO:
+			n--
+			cc = c.conns[n]
+			c.conns[n] = nil
+			c.conns = c.conns[:n]
+		case FIFO:
+			cc = c.conns[0]
+			copy(c.conns, c.conns[1:])
+			c.conns[n-1] = nil
+			c.conns = c.conns[:n-1]
+		default:
+			w.tryDeliver(nil, ErrConnPoolStrategyNotImpl)
+			return
+		}
+		w.tryDeliver(cc, nil)
+		return
+	}
 	if c.connsWait == nil {
 		c.connsWait = &wantConnQueue{}
 	}
