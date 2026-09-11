@@ -2699,6 +2699,46 @@ func TestRequestHeaderSetCookieSanitizesNewLines(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderSetCookieSanitizesSemicolons(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.SetRequestURI("/")
+	h.SetHost("example.com")
+	h.SetCookie("sid", "abc; admin=1")
+
+	header := string(h.Header())
+	if n := strings.Count(header, ";"); n != 0 {
+		t.Fatalf("unexpected %d cookie separators in %q", n, header)
+	}
+
+	var h1 RequestHeader
+	if err := h1.Read(bufio.NewReader(strings.NewReader(header))); err != nil {
+		t.Fatal(err)
+	}
+	if v := string(h1.Cookie("admin")); v != "" {
+		t.Fatalf("unexpected injected cookie admin=%q in %q", v, header)
+	}
+
+	var h2 RequestHeader
+	h2.SetRequestURI("/")
+	h2.SetHost("example.com")
+	h2.SetCookie("sid; admin=1", "abc")
+
+	header2 := string(h2.Header())
+	if n := strings.Count(header2, ";"); n != 0 {
+		t.Fatalf("unexpected %d cookie separators in %q", n, header2)
+	}
+
+	var h3 RequestHeader
+	if err := h3.Read(bufio.NewReader(strings.NewReader(header2))); err != nil {
+		t.Fatal(err)
+	}
+	if v := string(h3.Cookie("admin")); v != "" {
+		t.Fatalf("unexpected injected cookie admin=%q in %q", v, header2)
+	}
+}
+
 func TestResponseHeaderSetCookieSanitizesNewLines(t *testing.T) {
 	t.Parallel()
 
