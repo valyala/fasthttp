@@ -5722,3 +5722,39 @@ func TestHostClientQueueForIdleRechecksIdle(t *testing.T) {
 		t.Fatal("waiter was not given an idle connection")
 	}
 }
+
+func TestHostClientQueueForIdleRechecksCapacity(t *testing.T) {
+	c := &HostClient{
+		Addr: "example.com:80",
+		Dial: func(string) (net.Conn, error) {
+			conn, peer := net.Pipe()
+			peer.Close()
+			return conn, nil
+		},
+		ConnPoolStrategy:   LIFO,
+		MaxConns:           1,
+		MaxConnWaitTimeout: time.Second,
+		connsCount:         1,
+	}
+
+	// The last connection is closed after AcquireConn checked the pool and the
+	// connection count, but before the waiter is registered: its slot is freed
+	// without returning an idle connection to the pool.
+	c.decConnsCount()
+
+	w := &wantConn{ready: make(chan struct{}, 1)}
+	c.queueForIdle(w)
+
+	select {
+	case <-w.ready:
+		if w.err != nil {
+			t.Fatalf("unexpected waiter error: %v", w.err)
+		}
+		if w.conn == nil {
+			t.Fatal("waiter was not given a replacement connection")
+		}
+		c.CloseConn(w.conn)
+	case <-time.After(time.Second):
+		t.Fatalf("waiter timed out with connsCount=%d: released capacity was not rechecked", c.ConnsCount())
+	}
+}
