@@ -2790,6 +2790,119 @@ func TestRequestCtxWriteString(t *testing.T) {
 	}
 }
 
+func TestServeConnBufferedBodyWithTrailer(t *testing.T) {
+	t.Parallel()
+
+	handler := func(ctx *RequestCtx) {
+		if err := ctx.Response.Header.AddTrailer("Foo"); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		ctx.Response.Header.Set("Foo", "testfoo")
+		ctx.SetBodyString("data")
+	}
+
+	for _, tc := range []struct {
+		proto   string
+		chunked bool
+	}{
+		// HTTP/1.0 clients can't read chunked encoding, so the
+		// buffered body keeps Content-Length framing.
+		{proto: "HTTP/1.0", chunked: false},
+		{proto: "HTTP/1.1", chunked: true},
+	} {
+		rw := &readWriter{}
+		rw.r.WriteString("GET / " + tc.proto + "\r\nHost: example.com\r\n\r\n")
+
+		ch := make(chan struct{})
+		go func() {
+			if err := ServeConn(rw, handler); err != nil {
+				t.Errorf("unexpected error in ServeConn: %v", err)
+			}
+			close(ch)
+		}()
+
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatal("timeout")
+		}
+
+		wire := rw.w.String()
+		if chunked := strings.Contains(wire, "Transfer-Encoding: chunked\r\n"); chunked != tc.chunked {
+			t.Fatalf("%s: chunked=%v, expecting %v, got:\n%q", tc.proto, chunked, tc.chunked, wire)
+		}
+		if tc.chunked {
+			if !strings.HasSuffix(wire, "0\r\nFoo: testfoo\r\n\r\n") {
+				t.Fatalf("%s: expected the trailer after the last chunk, got:\n%q", tc.proto, wire)
+			}
+			continue
+		}
+		if !strings.Contains(wire, "Content-Length: 4\r\n") || !strings.HasSuffix(wire, "\r\n\r\ndata") {
+			t.Fatalf("%s: expected a Content-Length framed body, got:\n%q", tc.proto, wire)
+		}
+	}
+}
+
+func TestServeConnTimeoutErrorWithResponseBufferedBodyWithTrailer(t *testing.T) {
+	t.Parallel()
+
+	handler := func(ctx *RequestCtx) {
+		var resp Response
+		if err := resp.Header.AddTrailer("Foo"); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		resp.Header.Set("Foo", "testfoo")
+		resp.SetBodyString("data")
+		ctx.TimeoutErrorWithResponse(&resp)
+	}
+
+	for _, tc := range []struct {
+		proto   string
+		chunked bool
+	}{
+		// The timeout response is written from a fresh ctx, so the framing
+		// and the Connection header must still follow the original request.
+		{proto: "HTTP/1.0", chunked: false},
+		{proto: "HTTP/1.1", chunked: true},
+	} {
+		rw := &readWriter{}
+		rw.r.WriteString("GET / ")
+		rw.r.WriteString(tc.proto)
+		rw.r.WriteString("\r\nHost: example.com\r\nConnection: keep-alive\r\n\r\n")
+
+		ch := make(chan struct{})
+		go func() {
+			if err := ServeConn(rw, handler); err != nil {
+				t.Errorf("unexpected error in ServeConn: %v", err)
+			}
+			close(ch)
+		}()
+
+		select {
+		case <-ch:
+		case <-time.After(time.Second):
+			t.Fatal("timeout")
+		}
+
+		wire := rw.w.String()
+		if chunked := strings.Contains(wire, "Transfer-Encoding: chunked\r\n"); chunked != tc.chunked {
+			t.Fatalf("%s: chunked=%v, expecting %v, got:\n%q", tc.proto, chunked, tc.chunked, wire)
+		}
+		if tc.chunked {
+			if !strings.HasSuffix(wire, "0\r\nFoo: testfoo\r\n\r\n") {
+				t.Fatalf("%s: expected the trailer after the last chunk, got:\n%q", tc.proto, wire)
+			}
+			continue
+		}
+		if !strings.Contains(wire, "Content-Length: 4\r\n") || !strings.HasSuffix(wire, "\r\n\r\ndata") {
+			t.Fatalf("%s: expected a Content-Length framed body, got:\n%q", tc.proto, wire)
+		}
+		if !strings.Contains(wire, "Connection: keep-alive\r\n") {
+			t.Fatalf("%s: expected a keep-alive header for an HTTP/1.0 request, got:\n%q", tc.proto, wire)
+		}
+	}
+}
+
 func TestServeConnKeepRequestAndResponseUntilResetUserValues(t *testing.T) {
 	t.Parallel()
 
@@ -3555,6 +3668,75 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	case <-serverCh:
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
+	}
+}
+
+func TestTimeoutHandlerSetProtocolRace(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		proto        string
+		handlerProto string
+		keepAlive    bool
+	}{
+		// TimeoutHandler returns while h keeps running on its own goroutine,
+		// so the request version used for the timeout response must be read
+		// before the handler is called instead of after it returns.
+		{proto: "HTTP/1.0", handlerProto: "HTTP/1.1", keepAlive: true},
+		{proto: "HTTP/1.1", handlerProto: "HTTP/1.0", keepAlive: false},
+	} {
+		release := make(chan struct{})
+		done := make(chan struct{})
+		h := func(ctx *RequestCtx) {
+			ctx.Request.Header.SetProtocol(tc.handlerProto)
+			<-release
+			close(done)
+		}
+
+		ln := fasthttputil.NewInmemoryListener()
+		s := &Server{
+			Handler: TimeoutHandler(h, 20*time.Millisecond, "timeout"),
+		}
+		serverCh := make(chan struct{})
+		go func() {
+			if err := s.Serve(ln); err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			close(serverCh)
+		}()
+
+		conn, err := ln.Dial()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, err = conn.Write([]byte("GET / " + tc.proto + "\r\nHost: example.com\r\nConnection: keep-alive\r\n\r\n")); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		br := bufio.NewReader(conn)
+		resp := verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "timeout")
+		if keepAlive := bytes.Equal(resp.Header.Peek(HeaderConnection), strKeepAlive); keepAlive != tc.keepAlive {
+			t.Fatalf("%s: keep-alive header=%v, expecting %v, got:\n%s", tc.proto, keepAlive, tc.keepAlive, resp.Header.String())
+		}
+		if err = conn.Close(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Let the handler goroutine finish only after the response was read.
+		close(release)
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatal("timeout")
+		}
+
+		if err = ln.Close(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		select {
+		case <-serverCh:
+		case <-time.After(time.Second):
+			t.Fatal("timeout")
+		}
 	}
 }
 
