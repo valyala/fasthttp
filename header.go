@@ -578,6 +578,11 @@ func isValidHeaderKey(a []byte) (valid, innerSpace bool) {
 
 // VisitHeaderParams calls f for each parameter in the given header bytes.
 // It stops processing when f returns false or an invalid parameter is found.
+// Invalid parameters, such as "foo" or "foo=", stop processing without reporting
+// an error, and any subsequent parameters are not visited. The caller may receive
+// only a prefix of the parameters and cannot distinguish this from reaching the
+// end of the header. Parameters already passed to f are not affected.
+//
 // Parameter values may be quoted, in which case \ is treated as an escape
 // character, and the value is unquoted before being passed to value.
 // See: https://www.rfc-editor.org/rfc/rfc9110#section-5.6.6
