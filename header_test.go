@@ -1399,10 +1399,10 @@ func TestVisitHeaderParams(t *testing.T) {
 	testVisitHeaderParams(t, "text/plain; =bar", [][2]string{})
 	testVisitHeaderParams(t, "text/plain; foo = bar", [][2]string{})
 	testVisitHeaderParams(t, `text/plain; foo="bar`, [][2]string{})
-	testVisitHeaderParams(t, "text/plain;;foo=bar", [][2]string{})
+	testVisitHeaderParams(t, "text/plain;;foo=bar", [][2]string{{"foo", "bar"}})
 
 	parsed := make([][2]string, 0)
-	VisitHeaderParams([]byte(`text/plain; foo=bar; charset=utf-8`), func(key, value []byte) bool {
+	VisitHeaderParams([]byte(`text/plain; ; foo=bar; ; charset=utf-8`), func(key, value []byte) bool {
 		parsed = append(parsed, [2]string{string(key), string(value)})
 		return !bytes.Equal(key, []byte("foo"))
 	})
@@ -1413,6 +1413,37 @@ func TestVisitHeaderParams(t *testing.T) {
 
 	if parsed[0] != [2]string{"foo", "bar"} {
 		t.Fatalf("unexpected parameter %v=%v. Expecting foo=bar", parsed[0][0], parsed[0][1])
+	}
+}
+
+func TestVisitHeaderParamsEmptyParameters(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		header string
+		params [][2]string
+	}{
+		{"leading", "text/plain;;;charset=utf-8", [][2]string{{"charset", "utf-8"}}},
+		{"middle", "text/plain;charset=utf-8;;q=0.39", [][2]string{{"charset", "utf-8"}, {"q", "0.39"}}},
+		{"trailing", "text/plain;charset=utf-8;;;", [][2]string{{"charset", "utf-8"}}},
+		{"spaces", "multipart/form-data; ; boundary=x", [][2]string{{"boundary", "x"}}},
+		{"tabs", "text/plain;\t; \t;\tcharset=utf-8", [][2]string{{"charset", "utf-8"}}},
+		{"only empty", "text/plain; \t;\t;; ", nil},
+		{"quoted semicolon", `text/plain;;foo="a;b";;charset=utf-8`, [][2]string{{"foo", "a;b"}, {"charset", "utf-8"}}},
+		{"quoted escape", `text/plain;;foo="a\";b";;charset=utf-8`, [][2]string{{"foo", `a\";b`}, {"charset", "utf-8"}}},
+		{"quoted empty", `text/plain;;foo="";;charset=utf-8`, [][2]string{{"foo", ""}, {"charset", "utf-8"}}},
+		{"missing equals", "text/plain;;foo; charset=utf-8", nil},
+		{"missing value", "text/plain;;foo=; charset=utf-8", nil},
+		{"invalid name", "text/plain;;=bar; charset=utf-8", nil},
+		{"invalid whitespace", "text/plain;;foo = bar; charset=utf-8", nil},
+		{"unclosed quote", `text/plain;;foo="bar; charset=utf-8`, nil},
+		{"invalid after valid", "text/plain;;q=0.39;;foo; charset=utf-8", [][2]string{{"q", "0.39"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testVisitHeaderParams(t, tt.header, tt.params)
+		})
 	}
 }
 
