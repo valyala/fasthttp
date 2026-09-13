@@ -5558,8 +5558,7 @@ func dialForDNSCache(t *testing.T, dialer *TCPDialer) {
 		return
 	}
 
-	var dialErr *ErrDialWithUpstream
-	if !errors.As(err, &dialErr) {
+	if _, ok := errors.AsType[*ErrDialWithUpstream](err); !ok {
 		t.Fatalf("unexpected dial error: %v", err)
 	}
 }
