@@ -700,9 +700,8 @@ func normalizePath(dst, src []byte) []byte {
 
 	// remove trailing /. , which denotes the current directory and so leaves
 	// the trailing slash behind. See RFC 3986 section 5.2.4 step 2B.
-	n = bytes.LastIndex(b, strSlashDot)
-	if n >= 0 && n+len(strSlashDot) == len(b) {
-		b = b[:n+1]
+	if bytes.HasSuffix(b, strSlashDot) {
+		b = b[:len(b)-1]
 	}
 
 	if filepath.Separator == '\\' {
