@@ -964,7 +964,7 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 		}
 	})
 
-	t.Run("trailer values are synced when the body is drained", func(t *testing.T) {
+	t.Run("materialized body writes synced trailer values", func(t *testing.T) {
 		t.Parallel()
 		raw := "POST /upload HTTP/1.1\r\n" +
 			"Host: example.com\r\n" +
@@ -985,6 +985,26 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 		}
 		if string(req.Header.Peek("X-Final")) != "done" {
 			t.Errorf("expected trailer value done, got %q", req.Header.Peek("X-Final"))
+		}
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		var parsed fasthttp.Request
+		if err := parsed.Read(bufio.NewReader(bytes.NewReader(buf.Bytes()))); err != nil {
+			t.Fatalf("unexpected error reading request back: %v", err)
+		}
+		if string(parsed.Body()) != "data" {
+			t.Errorf("expected body data, got %q", parsed.Body())
+		}
+		if string(parsed.Header.Peek("X-Final")) != "done" {
+			t.Errorf("expected trailer value done, got %q", parsed.Header.Peek("X-Final"))
 		}
 	})
 
