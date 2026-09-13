@@ -1682,8 +1682,9 @@ func (h *ResponseHeader) SetCookie(cookie *Cookie) {
 // SetCookie sets 'key: value' cookies.
 func (h *RequestHeader) SetCookie(key, value string) {
 	h.collectCookies()
-	h.bufK = initHeaderValueString(h.bufK, key)
-	h.bufV = initHeaderValueString(h.bufV, value)
+	// ';' separates cookies in a Cookie header, so strip it like Cookie does.
+	h.bufK = removeSemicolons(initHeaderValueString(h.bufK, key))
+	h.bufV = removeSemicolons(initHeaderValueString(h.bufV, value))
 	h.cookies = setArgBytes(h.cookies, h.bufK, h.bufV, argsHasValue)
 }
 
