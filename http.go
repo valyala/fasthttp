@@ -1403,43 +1403,50 @@ func (req *Request) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
 		return err
 	}
 
-	return req.readLimitBody(r, maxBodySize, false, true)
+	_, err := req.readLimitBody(r, maxBodySize, false, true)
+	return err
 }
 
-func (req *Request) readLimitBody(r *bufio.Reader, maxBodySize int, getOnly, preParseMultipartForm bool) error {
+// readLimitBody reads the request body unless the request carries
+// 'Expect: 100-continue', which it reports as mayContinue instead.
+func (req *Request) readLimitBody(
+	r *bufio.Reader, maxBodySize int, getOnly, preParseMultipartForm bool,
+) (mayContinue bool, err error) {
 	// Do not reset the request here - the caller must reset it before
 	// calling this method.
 
 	if getOnly && !req.Header.IsGet() && !req.Header.IsHead() {
-		return ErrGetOnly
+		return false, ErrGetOnly
 	}
 
 	if req.MayContinue() {
 		// 'Expect: 100-continue' header found. Let the caller deciding
 		// whether to read request body or
 		// to return StatusExpectationFailed.
-		return nil
+		return true, nil
 	}
 
-	return req.ContinueReadBody(r, maxBodySize, preParseMultipartForm)
+	return false, req.ContinueReadBody(r, maxBodySize, preParseMultipartForm)
 }
 
-func (req *Request) readBodyStream(r *bufio.Reader, maxBodySize int, getOnly, preParseMultipartForm bool) error {
+func (req *Request) readBodyStream(
+	r *bufio.Reader, maxBodySize int, getOnly, preParseMultipartForm bool,
+) (mayContinue bool, err error) {
 	// Do not reset the request here - the caller must reset it before
 	// calling this method.
 
 	if getOnly && !req.Header.IsGet() && !req.Header.IsHead() {
-		return ErrGetOnly
+		return false, ErrGetOnly
 	}
 
 	if req.MayContinue() {
 		// 'Expect: 100-continue' header found. Let the caller deciding
 		// whether to read request body or
 		// to return StatusExpectationFailed.
-		return nil
+		return true, nil
 	}
 
-	return req.ContinueReadBodyStream(r, maxBodySize, preParseMultipartForm)
+	return false, req.ContinueReadBodyStream(r, maxBodySize, preParseMultipartForm)
 }
 
 // MayContinue returns true if the request contains

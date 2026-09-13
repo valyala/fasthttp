@@ -558,3 +558,97 @@ func testAppendUnquotedArg(t *testing.T, s, expectedS string) {
 		t.Fatalf("Unexpected AppendUnquotedArg(AppendQuotedArg(%q))=%q, want %q", s, unquotedS, s)
 	}
 }
+
+func TestLowercaseBytesMatchesTable(t *testing.T) {
+	t.Parallel()
+
+	for n := 0; n <= 24; n++ {
+		for c := range 256 {
+			for pos := 0; pos < n; pos++ {
+				b := make([]byte, n)
+				for i := range b {
+					b[i] = 'A' + byte(i%26)
+				}
+				b[pos] = byte(c)
+				exp := make([]byte, n)
+				for i := range b {
+					exp[i] = toLowerTable[b[i]]
+				}
+				lowercaseBytes(b)
+				if !bytes.Equal(b, exp) {
+					t.Fatalf("unexpected result for byte %#x at %d of %d: %q. Expecting %q", c, pos, n, b, exp)
+				}
+			}
+		}
+	}
+}
+
+func TestAppendQuotedArgAndPathPrefix(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range []string{"", "abc", "a b", " ", "foo/bar?baz", "a%20b", "\xff\x00", "abcdefgh-ijk~lmn"} {
+		var exp []byte
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			switch {
+			case c == ' ':
+				exp = append(exp, '+')
+			case quotedArgShouldEscapeTable[c] != 0:
+				exp = append(exp, '%', upperhex[c>>4], upperhex[c&0xf])
+			default:
+				exp = append(exp, c)
+			}
+		}
+		if got := AppendQuotedArg(nil, []byte(s)); !bytes.Equal(got, exp) {
+			t.Fatalf("unexpected AppendQuotedArg(%q): %q. Expecting %q", s, got, exp)
+		}
+
+		exp = exp[:0]
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			if quotedPathShouldEscapeTable[c] != 0 {
+				exp = append(exp, '%', upperhex[c>>4], upperhex[c&0xf])
+			} else {
+				exp = append(exp, c)
+			}
+		}
+		if got := appendQuotedPath(nil, []byte(s)); !bytes.Equal(got, exp) {
+			t.Fatalf("unexpected appendQuotedPath(%q): %q. Expecting %q", s, got, exp)
+		}
+	}
+}
+
+func TestAppendHTTPDateMatchesTimeFormat(t *testing.T) {
+	t.Parallel()
+
+	expected := func(d time.Time) string {
+		b := d.In(time.UTC).AppendFormat(nil, time.RFC1123)
+		copy(b[len(b)-3:], "GMT")
+		return string(b)
+	}
+	check := func(d time.Time) {
+		if got, exp := string(AppendHTTPDate(nil, d)), expected(d); got != exp {
+			t.Fatalf("unexpected result for %v: %q. Expecting %q", d, got, exp)
+		}
+	}
+	for _, d := range []time.Time{
+		time.Date(0, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(99, time.December, 31, 23, 59, 59, 0, time.UTC),
+		time.Date(999, time.February, 28, 12, 0, 0, 0, time.UTC),
+		time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC),
+		time.Date(2024, time.February, 29, 1, 2, 3, 999999999, time.FixedZone("X", 5*3600)),
+		time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC),
+		time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(-1, time.June, 15, 6, 7, 8, 0, time.UTC),
+		{},
+	} {
+		check(d)
+	}
+	d := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	for range 5000 {
+		check(d)
+		d = d.Add(37*time.Hour + 41*time.Minute + 53*time.Second)
+	}
+}

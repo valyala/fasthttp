@@ -81,6 +81,10 @@ type RequestHeader struct {
 	// wire.
 	rawHeaders []byte
 
+	// lineEnds holds the offsets of the line terminators found by
+	// readRawHeaders, so parseHeaders does not scan for them again.
+	lineEnds []int
+
 	disableSpecialHeader bool
 	cookiesCollected     bool
 }
@@ -347,6 +351,12 @@ func (h *ResponseHeader) SetServerBytes(server []byte) {
 	h.server = initHeaderValueBytes(h.server, server)
 }
 
+// setServerSanitized sets Server header value from bytes that are known to
+// contain no CR or LF.
+func (h *ResponseHeader) setServerSanitized(server []byte) {
+	h.server = append(h.server[:0], server...)
+}
+
 // ContentType returns Content-Type header value.
 func (h *RequestHeader) ContentType() []byte {
 	if h.disableSpecialHeader {
@@ -542,7 +552,7 @@ func isValidTrailerKey(key []byte) bool {
 // validHeaderFieldByte returns true if c valid header field byte
 // as defined by RFC 7230.
 func validHeaderFieldByte(c byte) bool {
-	return c < 128 && validHeaderFieldByteTable[c] == 1
+	return validHeaderFieldByteTable[c] == 1
 }
 
 // validHeaderValueByte returns true if c valid header value byte
@@ -551,29 +561,21 @@ func validHeaderValueByte(c byte) bool {
 	return validHeaderValueByteTable[c] == 1
 }
 
-// isValidHeaderKey returns whether a is a valid header key, and whether a
-// contains a space before its last non-space byte. Such a space survives
-// trailing-whitespace trimming, and a key carrying it is accepted but must
-// not be canonicalized. See https://go.dev/issue/34540 and
-// https://github.com/valyala/fasthttp/issues/1917.
-func isValidHeaderKey(a []byte) (valid, innerSpace bool) {
-	if len(a) == 0 {
-		return false, false
+// validHeaderValue returns true if every byte of b is a valid header value
+// byte as defined by RFC 7230.
+func validHeaderValue(b []byte) bool {
+	// Words without control bytes are skipped eight at a time. A tab is a
+	// valid value byte but also a control byte, so a word holding one is
+	// checked byte by byte.
+	for len(b) >= 8 && !anyByteIsCTL(loadWord(b)) {
+		b = b[8:]
 	}
-	seenSpace := false
-	for _, c := range a {
-		if c == ' ' {
-			seenSpace = true
-			continue
-		}
-		if !validHeaderFieldByte(c) {
-			return false, false
-		}
-		if seenSpace {
-			innerSpace = true
+	for _, c := range b {
+		if !validHeaderValueByte(c) {
+			return false
 		}
 	}
-	return true, innerSpace
+	return true
 }
 
 // VisitHeaderParams calls f for each parameter in the given header bytes.
@@ -746,7 +748,7 @@ func (h *RequestHeader) SetRefererBytes(referer []byte) {
 // Method returns HTTP request method.
 func (h *RequestHeader) Method() []byte {
 	if len(h.method) == 0 {
-		return []byte(MethodGet)
+		h.method = append(h.method[:0], MethodGet...)
 	}
 	return h.method
 }
@@ -2422,7 +2424,15 @@ func refreshServerDate() {
 
 // Write writes response header to w.
 func (h *ResponseHeader) Write(w *bufio.Writer) error {
-	_, err := w.Write(h.Header())
+	if w.Available() < cap(h.bufV) {
+		_, err := w.Write(h.Header())
+		return err
+	}
+	buf := h.AppendBytes(w.AvailableBuffer())
+	if cap(buf) != w.Available() {
+		h.bufV = buf
+	}
+	_, err := w.Write(buf)
 	return err
 }
 
@@ -2465,7 +2475,7 @@ func (h *ResponseHeader) TrailerHeader() []byte {
 		value := h.peek(t)
 		h.bufV = appendHeaderLine(h.bufV, t, value)
 	}
-	h.bufV = append(h.bufV, strCRLF...)
+	h.bufV = append(h.bufV, '\r', '\n')
 	return h.bufV
 }
 
@@ -2480,6 +2490,11 @@ func (h *ResponseHeader) appendStatusLine(dst []byte) []byte {
 	statusCode := h.StatusCode()
 	if statusCode < 0 {
 		statusCode = StatusOK
+	}
+	if len(h.protocol) == 0 && len(h.statusMessage) == 0 && statusCode < len(statusLines) {
+		if line := statusLines[statusCode]; line != "" {
+			return append(dst, line...)
+		}
 	}
 	return formatStatusLine(dst, h.Protocol(), statusCode, h.StatusMessage())
 }
@@ -2549,12 +2564,20 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
-	return append(dst, strCRLF...)
+	return append(dst, '\r', '\n')
 }
 
 // Write writes request header to w.
 func (h *RequestHeader) Write(w *bufio.Writer) error {
-	_, err := w.Write(h.Header())
+	if w.Available() < cap(h.bufV) {
+		_, err := w.Write(h.Header())
+		return err
+	}
+	buf := h.AppendBytes(w.AvailableBuffer())
+	if cap(buf) != w.Available() {
+		h.bufV = buf
+	}
+	_, err := w.Write(buf)
 	return err
 }
 
@@ -2597,7 +2620,7 @@ func (h *RequestHeader) TrailerHeader() []byte {
 		value := h.peek(t)
 		h.bufV = appendHeaderLine(h.bufV, t, value)
 	}
-	h.bufV = append(h.bufV, strCRLF...)
+	h.bufV = append(h.bufV, '\r', '\n')
 	return h.bufV
 }
 
@@ -2628,7 +2651,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	dst = append(dst, h.RequestURI()...)
 	dst = append(dst, ' ')
 	dst = append(dst, h.Protocol()...)
-	dst = append(dst, strCRLF...)
+	dst = append(dst, '\r', '\n')
 
 	userAgent := h.UserAgent()
 	if len(userAgent) > 0 && !h.disableSpecialHeader {
@@ -2675,23 +2698,23 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	n := len(h.cookies)
 	if n > 0 && !h.disableSpecialHeader {
 		dst = append(dst, strCookie...)
-		dst = append(dst, strColonSpace...)
+		dst = append(dst, ':', ' ')
 		dst = appendRequestCookieBytes(dst, h.cookies)
-		dst = append(dst, strCRLF...)
+		dst = append(dst, '\r', '\n')
 	}
 
 	if h.ConnectionClose() && !h.disableSpecialHeader {
 		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
-	return append(dst, strCRLF...)
+	return append(dst, '\r', '\n')
 }
 
 func appendHeaderLine(dst, key, value []byte) []byte {
 	dst = append(dst, key...)
-	dst = append(dst, strColonSpace...)
+	dst = append(dst, ':', ' ')
 	dst = append(dst, value...)
-	return append(dst, strCRLF...)
+	return append(dst, '\r', '\n')
 }
 
 func (h *ResponseHeader) parse(buf []byte) (int, error) {
@@ -2717,7 +2740,7 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 	}
 
 	var rawEnd int
-	h.rawHeaders, rawEnd, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
+	h.rawHeaders, h.lineEnds, rawEnd, err = readRawHeaders(h.rawHeaders[:0], h.lineEnds[:0], buf[m:])
 	if err != nil {
 		return 0, err
 	}
@@ -2746,10 +2769,8 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 		if isBadTrailer(s.key) {
 			return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
 		}
-		for _, ch := range s.value {
-			if !validHeaderValueByte(ch) {
-				return dest, 0, fmt.Errorf("invalid trailer value %q", s.value)
-			}
+		if !validHeaderValue(s.value) {
+			return dest, 0, fmt.Errorf("invalid trailer value %q", s.value)
 		}
 		normalizeHeaderKeyValidated(s.key, disable)
 		dest = appendArgBytes(dest, s.key, s.value, argsHasValue)
@@ -2979,14 +3000,22 @@ func validateRequestURI(method, requestURI []byte) error {
 	return ErrorInvalidURI
 }
 
-func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
+// maxLineEnds bounds the line terminator offsets readRawHeaders records, and
+// with that the memory a pooled RequestHeader keeps for them.
+const maxLineEnds = 512
+
+// readRawHeaders copies the header block at the start of buf into dst and
+// returns it together with the offsets of the block's first line terminators
+// and the block length.
+func readRawHeaders(dst []byte, lineEnds []int, buf []byte) ([]byte, []int, int, error) {
 	n := bytes.IndexByte(buf, nChar)
 	if n < 0 {
-		return dst[:0], 0, ErrNeedMore
+		return dst[:0], lineEnds, 0, ErrNeedMore
 	}
+	lineEnds = append(lineEnds, n)
 	if (n == 1 && buf[0] == rChar) || n == 0 {
 		// empty headers
-		return dst, n + 1, nil
+		return dst, lineEnds, n + 1, nil
 	}
 
 	n++
@@ -2996,13 +3025,16 @@ func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
 		b = b[m:]
 		m = bytes.IndexByte(b, nChar)
 		if m < 0 {
-			return dst, 0, ErrNeedMore
+			return dst, lineEnds, 0, ErrNeedMore
 		}
 		m++
 		n += m
+		if len(lineEnds) < maxLineEnds {
+			lineEnds = append(lineEnds, n-1)
+		}
 		if (m == 2 && b[0] == rChar) || m == 1 {
 			dst = append(dst, buf[:n]...)
-			return dst, n, nil
+			return dst, lineEnds, n, nil
 		}
 	}
 }
@@ -3037,11 +3069,9 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 		}
 		normalizeHeaderKeyValidated(s.key, disableNormalizing)
 
-		for _, ch := range s.value {
-			if !validHeaderValueByte(ch) {
-				h.connectionClose = true
-				return 0, fmt.Errorf("invalid header value %q", s.value)
-			}
+		if !validHeaderValue(s.value) {
+			h.connectionClose = true
+			return 0, fmt.Errorf("invalid header value %q", s.value)
 		}
 
 		switch s.key[0] | 0x20 {
@@ -3164,6 +3194,7 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 	var s headerScanner
 	s.b = buf
 	s.blockEnd = blockEnd
+	s.lineEnds = h.lineEnds
 
 	for s.next() {
 		key := s.key
@@ -3181,11 +3212,9 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 		// Key bytes were already validated by the scanner.
 		normalizeHeaderKeyValidated(s.key, h.disableNormalizing || s.keyHasSpace)
 
-		for _, ch := range s.value {
-			if !validHeaderValueByte(ch) {
-				h.connectionClose = true
-				return 0, fmt.Errorf("invalid header value %q", s.value)
-			}
+		if !validHeaderValue(s.value) {
+			h.connectionClose = true
+			return 0, fmt.Errorf("invalid header value %q", s.value)
 		}
 
 		isContentLength := false
