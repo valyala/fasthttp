@@ -191,6 +191,7 @@ func FuzzHeaderScanner(f *testing.F) {
 			for _, c := range s.value {
 				if !validHeaderValueByte(c) {
 					s.err = fmt.Errorf("malformed MIME header: invalid byte %q in value %q for key %q", c, s.value, s.key)
+					break
 				}
 			}
 			if s.err != nil {
