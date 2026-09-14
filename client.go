@@ -1944,12 +1944,47 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 
 func (c *HostClient) queueForIdle(w *wantConn) {
 	c.connsLock.Lock()
-	defer c.connsLock.Unlock()
+	if n := len(c.conns); n > 0 {
+		var cc *clientConn
+		switch c.ConnPoolStrategy {
+		case LIFO:
+			n--
+			cc = c.conns[n]
+			c.conns[n] = nil
+			c.conns = c.conns[:n]
+		case FIFO:
+			cc = c.conns[0]
+			copy(c.conns, c.conns[1:])
+			c.conns[n-1] = nil
+			c.conns = c.conns[:n-1]
+		default:
+			c.connsLock.Unlock()
+			w.tryDeliver(nil, ErrConnPoolStrategyNotImpl)
+			return
+		}
+		c.connsLock.Unlock()
+		w.tryDeliver(cc, nil)
+		return
+	}
+	// A connection may have been closed since AcquireConn checked the pool and
+	// the connection count, freeing capacity without adding an idle connection.
+	// Reserve the freed slot and dial a replacement connection for w.
+	maxConns := c.MaxConns
+	if maxConns <= 0 {
+		maxConns = DefaultMaxConnsPerHost
+	}
+	if c.connsCount < maxConns {
+		c.connsCount++
+		c.connsLock.Unlock()
+		go c.dialConnFor(w)
+		return
+	}
 	if c.connsWait == nil {
 		c.connsWait = &wantConnQueue{}
 	}
 	c.connsWait.clearFront()
 	c.connsWait.pushBack(w)
+	c.connsLock.Unlock()
 }
 
 func (c *HostClient) dialConnFor(w *wantConn) {
