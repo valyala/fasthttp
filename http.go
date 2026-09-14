@@ -2752,7 +2752,6 @@ func copyZeroAlloc(w io.Writer, r io.Reader) (int64, error) {
 		}
 	case *net.TCPConn:
 		if readerIsFile {
-			// net.WriteTo requires go1.22 or later
 			// Benchmark tests show that on Windows, WriteTo performs
 			// significantly better than ReadFrom. On Linux, however,
 			// ReadFrom slightly outperforms WriteTo. When possible,
