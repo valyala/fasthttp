@@ -147,6 +147,18 @@ func TestRequestCopyTo(t *testing.T) {
 	testRequestCopyTo(t, &req)
 }
 
+func TestRequestCopyToDisableRedirectPathNormalizing(t *testing.T) {
+	t.Parallel()
+
+	var src, dst Request
+	src.DisableRedirectPathNormalizing = true
+	src.CopyTo(&dst)
+
+	if !dst.DisableRedirectPathNormalizing {
+		t.Fatal("DisableRedirectPathNormalizing wasn't copied")
+	}
+}
+
 func TestResponseCopyTo(t *testing.T) {
 	t.Parallel()
 
