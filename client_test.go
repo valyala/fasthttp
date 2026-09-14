@@ -5699,3 +5699,132 @@ func TestClientRetryIfErrUpstream(t *testing.T) {
 		}
 	})
 }
+
+func TestSetMaxConnsWakesQueuedWaiters(t *testing.T) {
+	t.Parallel()
+
+	dialed := make(chan net.Conn, 4)
+	hc := &HostClient{
+		Addr:               "example.com:80",
+		MaxConns:           1,
+		MaxConnWaitTimeout: 5 * time.Second,
+		Dial: func(string) (net.Conn, error) {
+			left, right := net.Pipe()
+			dialed <- right
+			return left, nil
+		},
+	}
+	hc.connsLock.Lock()
+	hc.connsCount = 1
+	hc.connsLock.Unlock()
+
+	acquired := make(chan error, 1)
+	go func() {
+		_, err := hc.AcquireConn(0, false)
+		acquired <- err
+	}()
+	for i := 0; ; i++ {
+		hc.connsLock.Lock()
+		queued := hc.connsWait != nil && hc.connsWait.len() > 0
+		hc.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if i > 1000 {
+			t.Fatal("waiter never queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	hc.SetMaxConns(2)
+	select {
+	case err := <-acquired:
+		if err != nil {
+			t.Fatalf("queued acquire error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SetMaxConns() didn't wake the queued waiter")
+	}
+	if got := hc.ConnsCount(); got != 2 {
+		t.Fatalf("ConnsCount() = %d, want 2", got)
+	}
+}
+
+// A connection dialed for a queued waiter is pooled on release, so the idle
+// cleaner must run for it even when no earlier connection started one.
+func TestSetMaxConnsStartsIdleCleanerForWaiter(t *testing.T) {
+	t.Parallel()
+
+	hc := &HostClient{
+		Addr:                "example.com:80",
+		MaxConns:            1,
+		MaxConnWaitTimeout:  5 * time.Second,
+		MaxIdleConnDuration: 10 * time.Millisecond,
+		Dial: func(string) (net.Conn, error) {
+			left, _ := net.Pipe()
+			return left, nil
+		},
+	}
+	// A Connection: close request does not start the cleaner.
+	first, err := hc.AcquireConn(0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	acquired := make(chan error, 1)
+	go func() {
+		cc, err := hc.AcquireConn(0, false)
+		if err == nil {
+			hc.ReleaseConn(cc)
+		}
+		acquired <- err
+	}()
+	for i := 0; ; i++ {
+		hc.connsLock.Lock()
+		queued := hc.connsWait != nil && hc.connsWait.len() > 0
+		hc.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if i > 1000 {
+			t.Fatal("waiter never queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	hc.SetMaxConns(2)
+	if err := <-acquired; err != nil {
+		t.Fatalf("queued acquire error: %v", err)
+	}
+	hc.CloseConn(first)
+	deadline := time.Now().Add(testTimeout(2 * time.Second))
+	for hc.IdleConnsCount() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("IdleConnsCount() = %d, want the waiter's connection expired", hc.IdleConnsCount())
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestReleasedConnsConvergeAfterMaxConnsShrink(t *testing.T) {
+	t.Parallel()
+
+	hc := &HostClient{
+		Addr:               "example.com:80",
+		MaxConns:           2,
+		MaxConnWaitTimeout: 5 * time.Second,
+	}
+	hc.connsLock.Lock()
+	hc.connsCount = 2
+	hc.connsLock.Unlock()
+
+	hc.SetMaxConns(1)
+	hc.decConnsCount()
+	if got := hc.ConnsCount(); got != 1 {
+		t.Fatalf("ConnsCount() after shrink = %d, want the retired slot gone", got)
+	}
+	hc.decConnsCount()
+	if got := hc.ConnsCount(); got != 0 {
+		t.Fatalf("ConnsCount() = %d, want 0", got)
+	}
+}
