@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -445,6 +446,16 @@ type FS struct {
 	// Byte range requests are disabled by default.
 	AcceptByteRange bool
 
+	// Sends a weak ETag header derived from the modification time and size
+	// of the served file if set to true. Requests with a matching
+	// If-None-Match header get '304 Not Modified' responses.
+	//
+	// Files with an unknown modification time, such as files from embed.FS,
+	// get no ETag, since a size-only tag cannot reliably detect changes.
+	//
+	// ETag generation is disabled by default.
+	GenerateETag bool
+
 	// SkipCache if true, will cache no file handler.
 	//
 	// By default is false.
@@ -600,6 +611,7 @@ func (fs *FS) initRequestHandler() {
 		compressRoot:           compressRoot,
 		pathNotFound:           fs.PathNotFound,
 		acceptByteRange:        fs.AcceptByteRange,
+		generateETag:           fs.GenerateETag,
 		compressedFileSuffixes: compressedFileSuffixes,
 	}
 
@@ -645,6 +657,7 @@ type fsHandler struct {
 	compressBrotli     bool
 	compressZstd       bool
 	acceptByteRange    bool
+	generateETag       bool
 }
 
 type fsFile struct {
@@ -657,6 +670,7 @@ type fsFile struct {
 	contentType     string
 	dirIndex        []byte
 	lastModifiedStr []byte
+	etag            []byte
 
 	bigFiles      []*bigFileReader
 	contentLength int
@@ -1391,12 +1405,27 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			return
 		}
 
+		if h.generateETag {
+			ff.etag = appendFSETag(nil, ff.lastModified, ff.contentLength)
+		}
+
 		ff = h.cacheManager.SetFileToCache(fileCacheKind, path, ff)
 	}
 
-	if !ctx.IfModifiedSince(ff.lastModified) {
-		ff.decReadersCount()
+	var notModified bool
+	if ifNoneMatch := ctx.Request.Header.peek(strIfNoneMatch); h.generateETag && len(ifNoneMatch) > 0 {
+		// If-Modified-Since is ignored when If-None-Match is present.
+		// See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3
+		notModified = fsETagMatch(ifNoneMatch, ff.etag)
+	} else {
+		notModified = !ctx.IfModifiedSince(ff.lastModified)
+	}
+	if notModified {
 		ctx.NotModified()
+		if len(ff.etag) > 0 {
+			ctx.Response.Header.SetBytesV(HeaderETag, ff.etag)
+		}
+		ff.decReadersCount()
 		return
 	}
 
@@ -1450,6 +1479,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	}
 
 	hdr.setNonSpecial(strLastModified, ff.lastModifiedStr)
+	if len(ff.etag) > 0 {
+		hdr.SetBytesV(HeaderETag, ff.etag)
+	}
 	if !ctx.IsHead() {
 		ctx.SetBodyStream(r, contentLength)
 	} else {
@@ -1469,6 +1501,62 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.SetContentType(ff.contentType)
 	}
 	ctx.SetStatusCode(statusCode)
+}
+
+// appendFSETag appends a weak entity tag built from the hex-encoded
+// modification time and size of the served file to dst.
+//
+// The tag is weak, since the modification time has one second resolution
+// and compressed variants of the same file may have equal sizes, so it cannot
+// guarantee byte-for-byte equality. It is not appended if the modification
+// time is unknown.
+func appendFSETag(dst []byte, lastModified time.Time, size int) []byte {
+	mtime := lastModified.Unix()
+	if mtime <= 0 {
+		return dst
+	}
+	dst = append(dst, `W/"`...)
+	dst = strconv.AppendInt(dst, mtime, 16)
+	dst = append(dst, '-')
+	dst = strconv.AppendInt(dst, int64(size), 16)
+	return append(dst, '"')
+}
+
+// fsETagMatch reports whether the given If-None-Match header value matches
+// etag using the weak comparison.
+//
+// See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2
+func fsETagMatch(ifNoneMatch, etag []byte) bool {
+	etag = trimWeakETagPrefix(etag)
+	b := ifNoneMatch
+	for {
+		b = bytes.TrimLeft(b, " \t,")
+		if len(b) == 0 {
+			return false
+		}
+		if b[0] == '*' {
+			return true
+		}
+		b = trimWeakETagPrefix(b)
+		if len(b) < 2 || b[0] != '"' {
+			return false
+		}
+		n := bytes.IndexByte(b[1:], '"')
+		if n < 0 {
+			return false
+		}
+		if len(etag) > 0 && bytes.Equal(b[:n+2], etag) {
+			return true
+		}
+		b = b[n+2:]
+	}
+}
+
+func trimWeakETagPrefix(etag []byte) []byte {
+	if len(etag) >= 2 && etag[0] == 'W' && etag[1] == '/' {
+		return etag[2:]
+	}
+	return etag
 }
 
 type byteRangeUpdater interface {

@@ -1318,3 +1318,35 @@ func TestFSServeRejectsBackslashDotDotSegments(t *testing.T) {
 		})
 	}
 }
+
+func TestFSGenerateETagFS(t *testing.T) {
+	t.Parallel()
+
+	mtime := time.Unix(1700000000, 0)
+	testFS := fstest.MapFS{
+		"file.txt":     {Data: []byte("body"), ModTime: mtime},
+		"no-mtime.txt": {Data: []byte("body")},
+	}
+	h := (&FS{FS: testFS, AllowEmptyRoot: true, GenerateETag: true, SkipCache: true}).NewRequestHandler()
+
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, TestLogger{t})
+	ctx.Request.SetRequestURI("/file.txt")
+	h(&ctx)
+	expectedETag := `W/"6553f100-4"`
+	if etag := string(ctx.Response.Header.Peek(HeaderETag)); etag != expectedETag {
+		t.Fatalf("unexpected ETag: %q. Expecting %q", etag, expectedETag)
+	}
+
+	// A size-only tag can't detect changes, so no ETag is sent without a modification time.
+	ctx.Request.Reset()
+	ctx.Response.Reset()
+	ctx.Request.SetRequestURI("/no-mtime.txt")
+	h(&ctx)
+	if ctx.Response.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", ctx.Response.StatusCode(), StatusOK)
+	}
+	if etag := ctx.Response.Header.Peek(HeaderETag); len(etag) > 0 {
+		t.Fatalf("unexpected ETag: %q", etag)
+	}
+}
