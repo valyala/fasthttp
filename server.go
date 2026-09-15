@@ -245,7 +245,10 @@ type Server struct {
 	concurrencyCh chan struct{}
 
 	idleConns map[net.Conn]*atomic.Int64
-	done      chan struct{}
+
+	// done is written under mu, but RequestCtx.Done() reads it without mu,
+	// possibly after the handler has returned, so it must be atomic.
+	done atomic.Pointer[chan struct{}]
 
 	// Whether done was already closed. A ShutdownWithContext that gives up on
 	// its context leaves it closed but in place, and it must not be closed twice.
@@ -1986,8 +1989,9 @@ func (s *Server) Serve(ln net.Listener) error {
 
 	s.mu.Lock()
 	s.ln = append(s.ln, ln)
-	if s.done == nil {
-		s.done = make(chan struct{})
+	if s.done.Load() == nil {
+		done := make(chan struct{})
+		s.done.Store(&done)
 	}
 	if s.concurrencyCh == nil {
 		s.concurrencyCh = make(chan struct{}, maxWorkersCount)
@@ -2086,8 +2090,8 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 
 	lnerr := s.closeListenersLocked()
 
-	if s.done != nil && !s.doneClosed {
-		close(s.done)
+	if done := s.done.Load(); done != nil && !s.doneClosed {
+		close(*done)
 		s.doneClosed = true
 	}
 
@@ -2102,7 +2106,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 
 		if open := s.open.Load(); open == 0 {
 			// There may be a pending request to call ctx.Done(). Therefore, we only set it to nil when open == 0.
-			s.done = nil
+			s.done.Store(nil)
 			s.doneClosed = false
 			return lnerr
 		}
@@ -3025,7 +3029,10 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // Note: Because creating a new channel for every request is just too expensive, so
 // RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Done() <-chan struct{} {
-	return ctx.s.done
+	if done := ctx.s.done.Load(); done != nil {
+		return *done
+	}
+	return nil
 }
 
 // Err returns a non-nil error value after Done is closed,
@@ -3056,11 +3063,15 @@ func (ctx *RequestCtx) Value(key any) any {
 	return ctx.UserValue(key)
 }
 
-var fakeServer = &Server{
-	done: make(chan struct{}),
-	// Initialize concurrencyCh for TimeoutHandler
-	concurrencyCh: make(chan struct{}, DefaultConcurrency),
-}
+var fakeServer = func() *Server {
+	s := &Server{
+		// Initialize concurrencyCh for TimeoutHandler
+		concurrencyCh: make(chan struct{}, DefaultConcurrency),
+	}
+	done := make(chan struct{})
+	s.done.Store(&done)
+	return s
+}()
 
 type fakeAddrer struct {
 	net.Conn
