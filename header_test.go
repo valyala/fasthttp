@@ -3913,6 +3913,18 @@ func TestRequestHeaderPeekAll(t *testing.T) {
 	expectRequestHeaderAll(t, h, "Content-Type", [][]byte{})
 	expectRequestHeaderAll(t, h, HeaderHost, [][]byte{})
 	expectRequestHeaderAll(t, h, "aaa", [][]byte{})
+	h.Del("Content-Length")
+	h.Del("Cookie")
+	h.Del(HeaderTrailer)
+	expectRequestHeaderAll(t, h, "Content-Length", [][]byte{})
+	expectRequestHeaderAll(t, h, "Cookie", [][]byte{})
+	expectRequestHeaderAll(t, h, HeaderTrailer, [][]byte{})
+
+	// Single-element values must still come back.
+	h.Add("Content-Length", "0")
+	h.Add(HeaderTrailer, "foo")
+	expectRequestHeaderAll(t, h, "Content-Length", [][]byte{s2b("0")})
+	expectRequestHeaderAll(t, h, HeaderTrailer, [][]byte{s2b("Foo")})
 }
 
 func TestRequestHeaderPeekCanonical(t *testing.T) {
@@ -3950,6 +3962,7 @@ func TestResponseHeaderPeekAll(t *testing.T) {
 	h.Add(HeaderContentLength, "1234")
 	h.Add(HeaderServer, "aaaa")
 	h.Add(HeaderSetCookie, "cccc")
+	h.Add(HeaderTrailer, "foo, bar")
 	h.Add("aaa", "aaa")
 	h.Add("aaa", "bbb")
 
@@ -3959,12 +3972,25 @@ func TestResponseHeaderPeekAll(t *testing.T) {
 	expectResponseHeaderAll(t, h, HeaderContentLength, [][]byte{s2b("1234")})
 	expectResponseHeaderAll(t, h, HeaderServer, [][]byte{s2b("aaaa")})
 	expectResponseHeaderAll(t, h, HeaderSetCookie, [][]byte{s2b("cccc")})
+	expectResponseHeaderAll(t, h, HeaderTrailer, [][]byte{s2b("Foo, Bar")})
 	expectResponseHeaderAll(t, h, "aaa", [][]byte{s2b("aaa"), s2b("bbb")})
 
 	h.Del(HeaderContentType)
 	h.Del(HeaderContentEncoding)
 	expectResponseHeaderAll(t, h, HeaderContentType, [][]byte{defaultContentType})
 	expectResponseHeaderAll(t, h, HeaderContentEncoding, [][]byte{})
+	h.Del(HeaderContentLength)
+	h.Del(HeaderSetCookie)
+	expectResponseHeaderAll(t, h, HeaderContentLength, [][]byte{})
+	expectResponseHeaderAll(t, h, HeaderSetCookie, [][]byte{})
+	h.Del(HeaderTrailer)
+	expectResponseHeaderAll(t, h, HeaderTrailer, [][]byte{})
+
+	// Single-element values must still come back.
+	h.Add(HeaderContentLength, "0")
+	h.Add(HeaderTrailer, "foo")
+	expectResponseHeaderAll(t, h, HeaderContentLength, [][]byte{s2b("0")})
+	expectResponseHeaderAll(t, h, HeaderTrailer, [][]byte{s2b("Foo")})
 }
 
 func TestResponseHeaderPeekCanonical(t *testing.T) {
