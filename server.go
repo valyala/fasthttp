@@ -378,6 +378,17 @@ type Server struct {
 	// Aggressive memory usage reduction is disabled by default.
 	ReduceMemoryUsage bool
 
+	// Reads the wall clock only when a handler asks for the request time
+	// instead of once per request, if set to true.
+	//
+	// RequestCtx.Time() then reports the moment of its first call rather
+	// than the moment the server started reading the request, and it must
+	// not be called from several goroutines at once. The server itself
+	// keeps its idle bookkeeping on a clock refreshed once per second.
+	//
+	// Reading the clock per request is the default.
+	LazyRequestTime bool
+
 	// Rejects all non-GET requests if set to true.
 	//
 	// This option is useful as anti-DoS protection for servers
@@ -1001,7 +1012,12 @@ func (ctx *RequestCtx) ConnID() uint64 {
 }
 
 // Time returns RequestHandler call time.
+//
+// With Server.LazyRequestTime the clock is read here on the first call.
 func (ctx *RequestCtx) Time() time.Time {
+	if ctx.time.IsZero() && ctx.s != nil && ctx.s.LazyRequestTime {
+		ctx.time = time.Now()
+	}
 	return ctx.time
 }
 
@@ -2352,6 +2368,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	}
 
 	connTime := time.Now()
+	if s.LazyRequestTime {
+		// The refresher keeps the coarse second the idle bookkeeping runs on.
+		serverDateOnce.Do(updateServerDate)
+	}
 
 	s.idleConnsMu.Lock()
 	if s.idleConns == nil {
@@ -2639,7 +2659,16 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		}
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
-		reqTime := time.Now()
+		var (
+			reqTime   time.Time
+			reqSecond int64
+		)
+		if s.LazyRequestTime {
+			reqSecond = coarseSecond()
+		} else {
+			reqTime = time.Now()
+			reqSecond = reqTime.Unix()
+		}
 		ctx.time = reqTime
 
 		// If a client denies a request the handler should not be called
@@ -2758,7 +2787,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.Request.bodyStream = nil
 		}
 
-		idleConnTime.Store(reqTime.Unix())
+		idleConnTime.Store(reqSecond)
 		s.setState(c, StateIdle)
 		ctx.Request.Reset()
 		ctx.Response.Reset()

@@ -3842,6 +3842,51 @@ func TestTimeoutHandlerKeepsRequestTime(t *testing.T) {
 	}
 }
 
+func TestServerLazyRequestTime(t *testing.T) {
+	t.Parallel()
+
+	var first, second time.Time
+	idleCh := make(chan int64, 1)
+	var s *Server
+	s = &Server{
+		LazyRequestTime: true,
+		Handler: func(ctx *RequestCtx) {
+			first = ctx.Time()
+			second = ctx.Time()
+			ctx.SetBodyString("ok")
+		},
+		ConnState: func(c net.Conn, state ConnState) {
+			if state != StateIdle {
+				return
+			}
+			s.idleConnsMu.Lock()
+			idleCh <- s.idleConns[c].Load()
+			s.idleConnsMu.Unlock()
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if d := time.Since(first); d < 0 || d > time.Minute {
+		t.Fatalf("unexpected request time: %v", first)
+	}
+	if !second.Equal(first) {
+		t.Fatalf("request time changed between calls: %v and %v", first, second)
+	}
+	if idle := <-idleCh; time.Since(time.Unix(idle, 0)) > time.Minute {
+		t.Fatalf("unexpected idle timestamp: %v", time.Unix(idle, 0))
+	}
+
+	var bare RequestCtx
+	if !bare.Time().IsZero() {
+		t.Fatalf("a ctx without a server read the clock: %v", bare.Time())
+	}
+}
+
 func TestServerConnStateSeesIdleMarkers(t *testing.T) {
 	t.Parallel()
 
