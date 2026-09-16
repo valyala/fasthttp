@@ -3536,6 +3536,9 @@ func TestRequestCtxInit(t *testing.T) {
 	if requestNum := ctx.ID() & 0xffffffff; requestNum != 0 {
 		t.Fatalf("unexpected request number in ID: %d. Expected 0", requestNum)
 	}
+	if d := time.Since(ctx.Time()); d < 0 || d > time.Minute {
+		t.Fatalf("unexpected request time for bare RequestCtx: %v", ctx.Time())
+	}
 	ctx.Logger().Printf("foo bar %d", 10)
 
 	expectedLog := fmt.Sprintf("#%016X - 0.0.0.0:0<->0.0.0.0:0 - GET http:/// - foo bar 10\n", ctx.ID())
@@ -3773,6 +3776,66 @@ func TestTimeoutHandlerTimeoutReuse(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	verifyResponse(t, br, StatusOK, string(defaultContentType), "ok")
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestTimeoutHandlerKeepsRequestTime(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	idleCh := make(chan int64, 4)
+	connTimeCh := make(chan time.Time, 4)
+	h := func(ctx *RequestCtx) {
+		if string(ctx.Path()) == "/timeout" {
+			time.Sleep(time.Second)
+		} else {
+			connTimeCh <- ctx.ConnTime()
+		}
+		ctx.SetBodyString("ok")
+	}
+	var s *Server
+	s = &Server{
+		Handler: TimeoutHandler(h, 50*time.Millisecond, "timeout!!!"),
+		ConnState: func(c net.Conn, state ConnState) {
+			if state != StateIdle {
+				return
+			}
+			s.idleConnsMu.Lock()
+			idleCh <- s.idleConns[c].Load()
+			s.idleConnsMu.Unlock()
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	br := bufio.NewReader(conn)
+	if _, err = conn.Write([]byte("GET /timeout HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	verifyResponse(t, br, StatusRequestTimeout, string(defaultContentType), "timeout!!!")
+
+	if idle := <-idleCh; time.Since(time.Unix(idle, 0)) > time.Minute {
+		t.Fatalf("unexpected idle timestamp after a timeout: %v", time.Unix(idle, 0))
+	}
+
+	if _, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	verifyResponse(t, br, StatusOK, string(defaultContentType), "ok")
+
+	if connTime := <-connTimeCh; time.Since(connTime) > time.Minute {
+		t.Fatalf("unexpected connection time after a timeout: %v", connTime)
+	}
 
 	if err := ln.Close(); err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -2639,7 +2639,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		}
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
-		ctx.time = time.Now()
+		reqTime := time.Now()
+		ctx.time = reqTime
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
@@ -2650,6 +2651,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		if timeoutResponse != nil {
 			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
 			ctx = s.acquireCtx(c)
+			ctx.connTime = connTime
+			ctx.time = reqTime
 			timeoutResponse.CopyTo(&ctx.Response)
 		}
 
@@ -2755,7 +2758,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.Request.bodyStream = nil
 		}
 
-		idleConnTime.Store(ctx.time.Unix())
+		idleConnTime.Store(reqTime.Unix())
 		s.setState(c, StateIdle)
 		ctx.Request.Reset()
 		ctx.Response.Reset()
@@ -2982,6 +2985,7 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.s = fakeServer
 	ctx.connRequestNum = 0
 	ctx.connTime = time.Now()
+	ctx.time = ctx.connTime
 
 	keepBodyBuffer := !reduceMemoryUsage
 	ctx.Request.keepBodyBuffer = keepBodyBuffer
