@@ -1945,6 +1945,40 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 func (c *HostClient) queueForIdle(w *wantConn) {
 	c.connsLock.Lock()
 	defer c.connsLock.Unlock()
+
+	// Recheck under the lock. AcquireConn drops connsLock after seeing an
+	// empty/full pool; ReleaseConn or decConnsCount can run in that gap
+	// and leave an idle conn (or free capacity) that a waiter would
+	// otherwise miss until timeout.
+	if n := len(c.conns); n > 0 {
+		var cc *clientConn
+		switch c.ConnPoolStrategy {
+		case LIFO:
+			n--
+			cc = c.conns[n]
+			c.conns[n] = nil
+			c.conns = c.conns[:n]
+		case FIFO:
+			cc = c.conns[0]
+			copy(c.conns, c.conns[1:])
+			c.conns[n-1] = nil
+			c.conns = c.conns[:n-1]
+		}
+		if cc != nil {
+			w.tryDeliver(cc, nil)
+			return
+		}
+	}
+	maxConns := c.MaxConns
+	if maxConns <= 0 {
+		maxConns = DefaultMaxConnsPerHost
+	}
+	if c.connsCount < maxConns {
+		c.connsCount++
+		go c.dialConnFor(w)
+		return
+	}
+
 	if c.connsWait == nil {
 		c.connsWait = &wantConnQueue{}
 	}

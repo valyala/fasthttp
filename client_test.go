@@ -5071,6 +5071,60 @@ func TestHostClientErrConnPoolStrategyNotImpl(t *testing.T) {
 	}
 }
 
+func TestWaiterRegistrationRechecksIdle(t *testing.T) {
+	t.Parallel()
+
+	for _, strategy := range []ConnPoolStrategyType{FIFO, LIFO} {
+		t.Run(fmt.Sprintf("strategy=%d", strategy), func(t *testing.T) {
+			c := &HostClient{
+				MaxConns:           1,
+				MaxConnWaitTimeout: time.Second,
+				ConnPoolStrategy:   strategy,
+				connsCount:         1,
+			}
+			// AcquireConn has observed no idle connections and a full pool,
+			// then unlocked connsLock, but has not called queueForIdle yet.
+			cc := &clientConn{}
+			c.ReleaseConn(cc)
+
+			w := &wantConn{ready: make(chan struct{}, 1)}
+			c.queueForIdle(w)
+			select {
+			case <-w.ready:
+				if w.conn != cc || w.err != nil {
+					t.Fatalf("unexpected delivery: conn=%p err=%v", w.conn, w.err)
+				}
+			default:
+				t.Fatalf("waiter remains blocked despite %d idle connection(s)", c.IdleConnsCount())
+			}
+		})
+	}
+}
+
+func TestWaiterRegistrationDialsWhenCapacityFreed(t *testing.T) {
+	t.Parallel()
+
+	c := &HostClient{
+		MaxConns:           1,
+		MaxConnWaitTimeout: time.Second,
+		connsCount:         0,
+	}
+	w := &wantConn{ready: make(chan struct{}, 1)}
+	c.queueForIdle(w)
+	if got := c.ConnsCount(); got != 1 {
+		t.Fatalf("expected connsCount reserved for dial, got %d", got)
+	}
+	c.connsLock.Lock()
+	qlen := 0
+	if c.connsWait != nil {
+		qlen = c.connsWait.len()
+	}
+	c.connsLock.Unlock()
+	if qlen != 0 {
+		t.Fatalf("waiter queued despite free capacity, qlen=%d", qlen)
+	}
+}
+
 func TestAddMissingPort(t *testing.T) {
 	t.Parallel()
 
