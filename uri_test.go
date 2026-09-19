@@ -325,6 +325,19 @@ func TestURIPathNormalize(t *testing.T) {
 	testURIPathNormalize(t, &u, "./foo/", "/foo/")
 	testURIPathNormalize(t, &u, "./../.././../../aaa/bbb/../../../././../", "/")
 	testURIPathNormalize(t, &u, "./a/./.././../b/./foo.html", "/b/foo.html")
+
+	// trailing single dot, see RFC 3986 section 5.2.4 step 2B
+	testURIPathNormalize(t, &u, "/.", "/")
+	testURIPathNormalize(t, &u, "/aaa/.", "/aaa/")
+	testURIPathNormalize(t, &u, "/aaa/bbb/.", "/aaa/bbb/")
+	testURIPathNormalize(t, &u, "/aaa/./.", "/aaa/")
+	testURIPathNormalize(t, &u, "/aaa/../.", "/")
+	testURIPathNormalize(t, &u, "/a.b/.", "/a.b/")
+	testURIPathNormalize(t, &u, "/aaa%2F.", "/aaa/")
+
+	// a segment of more than one dot is an ordinary segment
+	testURIPathNormalize(t, &u, "/aaa/...", "/aaa/...")
+	testURIPathNormalize(t, &u, "/aaa/.b", "/aaa/.b")
 }
 
 func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string) {

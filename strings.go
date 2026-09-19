@@ -9,6 +9,7 @@ var (
 var (
 	strSlash                    = []byte("/")
 	strSlashSlash               = []byte("//")
+	strSlashDot                 = []byte("/.")
 	strSlashDotDot              = []byte("/..")
 	strSlashDotSlash            = []byte("/./")
 	strSlashDotDotSlash         = []byte("/../")
