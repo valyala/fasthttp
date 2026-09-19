@@ -1963,6 +1963,11 @@ func (c *HostClient) queueForIdle(w *wantConn) {
 			copy(c.conns, c.conns[1:])
 			c.conns[n-1] = nil
 			c.conns = c.conns[:n-1]
+		default:
+			// Same as AcquireConn: an unsupported strategy must not fall
+			// through to wait/timeout when an idle conn appeared in the gap.
+			w.tryDeliver(nil, ErrConnPoolStrategyNotImpl)
+			return
 		}
 		if cc != nil {
 			w.tryDeliver(cc, nil)

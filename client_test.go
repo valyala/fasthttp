@@ -5101,6 +5101,39 @@ func TestWaiterRegistrationRechecksIdle(t *testing.T) {
 	}
 }
 
+func TestWaiterRegistrationInvalidStrategy(t *testing.T) {
+	t.Parallel()
+
+	c := &HostClient{
+		MaxConns:           1,
+		MaxConnWaitTimeout: time.Second,
+		ConnPoolStrategy:   ConnPoolStrategyType(100),
+		connsCount:         1,
+	}
+	// AcquireConn saw a full pool with no idle conns, then an idle conn
+	// appeared in the registration gap. queueForIdle must surface the
+	// existing invalid-strategy error instead of queueing a timeout.
+	cc := &clientConn{}
+	c.ReleaseConn(cc)
+
+	w := &wantConn{ready: make(chan struct{}, 1)}
+	c.queueForIdle(w)
+	select {
+	case <-w.ready:
+		if w.err != ErrConnPoolStrategyNotImpl {
+			t.Fatalf("expected ErrConnPoolStrategyNotImpl, got %v", w.err)
+		}
+		if w.conn != nil {
+			t.Fatal("did not expect a connection for an unsupported strategy")
+		}
+	default:
+		t.Fatal("waiter queued instead of receiving ErrConnPoolStrategyNotImpl")
+	}
+	if got := c.IdleConnsCount(); got != 1 {
+		t.Fatalf("idle conn should remain in the pool, got %d", got)
+	}
+}
+
 func TestWaiterRegistrationDialsWhenCapacityFreed(t *testing.T) {
 	t.Parallel()
 
