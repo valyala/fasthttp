@@ -115,6 +115,12 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // The host is taken from r.Host, or r.URL.Host if r.Host is empty. A Host
 // entry in r.Header is ignored, mirroring net/http.
 //
+// The request target is taken from r.RequestURI, or derived from r.URL when
+// r.RequestURI is empty. A CONNECT request targets an authority rather than
+// a resource (RFC 9112, Section 3.2.3), so when its URL carries no path the
+// host becomes the target, like net/http does, instead of the origin-form
+// "/" that would name no authority to tunnel to.
+//
 // When r.Header carries no Content-Type entry, the default Content-Type
 // fasthttp writes for requests (application/octet-stream) is disabled on req
 // via SetNoDefaultContentType, so the conversion does not add a header the
@@ -143,9 +149,9 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // header, including credentials with an empty username, just like
 // net/http.Client sends them. With such an entry, userinfo embedded in an
 // absolute-form r.RequestURI is dropped so it cannot displace the header.
-// Either way a request carrying credentials is written with an origin-form
-// request line, since a request target must not contain userinfo (RFC 9112,
-// Section 3.2.4), just like net/http.Request.Write.
+// Either way an absolute-form target carrying credentials is written with an
+// origin-form request line, since a request target must not contain userinfo
+// (RFC 9112, Section 3.2.4), just like net/http.Request.Write.
 //
 // HTTP/2 and newer protocols are normalized to HTTP/1.1, since fasthttp only
 // models HTTP/1.x messages and the HTTP version is a hop-by-hop property. An
@@ -174,10 +180,17 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 		req.Header.SetHost(host)
 	}
 
+	target := ""
 	if r.RequestURI != "" {
-		req.SetRequestURI(r.RequestURI)
+		target = r.RequestURI
 	} else if r.URL != nil {
-		req.SetRequestURI(r.URL.RequestURI())
+		target = r.URL.RequestURI()
+		if host != "" && r.Method == http.MethodConnect && r.URL.Path == "" && r.URL.Opaque == "" {
+			target = host
+		}
+	}
+	if target != "" {
+		req.SetRequestURI(target)
 	}
 
 	if r.Header.Get(fasthttp.HeaderContentType) == "" {
@@ -270,6 +283,10 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 		uri := req.URI()
 		uri.SetUsername("")
 		uri.SetPassword("")
+	}
+
+	if r.Method == http.MethodConnect && target != "" && target[0] != '/' {
+		req.SetRequestURI(target)
 	}
 }
 

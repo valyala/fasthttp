@@ -149,6 +149,117 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 		}
 	})
 
+	t.Run("CONNECT request keeps its authority-form target", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.NewRequest("CONNECT", "http://example.com:443", nil)
+		if err != nil {
+			t.Fatalf("unexpected error building request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		// The request line net/http writes for the same request. The
+		// origin-form "/" that r.URL.RequestURI returns for the empty path
+		// such a URL carries would name no authority to tunnel to.
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected an authority-form request line, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Host: example.com:443\r\n") {
+			t.Errorf("expected the authority as the host, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT request with a scheme keeps its authority-form target", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.NewRequest("CONNECT", "https://example.com:443", nil)
+		if err != nil {
+			t.Fatalf("unexpected error building request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// The scheme makes the conversion parse the URI, which must not turn
+		// the authority into a path.
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected an authority-form request line, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT request read from the wire keeps its authority-form target", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+		httpReq.TLS = &tls.ConnectionState{}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected an authority-form request line, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT request with a path keeps its origin-form target", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.NewRequest("CONNECT", "http://example.com:443/tunnel", nil)
+		if err != nil {
+			t.Fatalf("unexpected error building request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// Only a target without a path is authority-form, like in net/http.
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT /tunnel HTTP/1.1\r\n") {
+			t.Errorf("expected an origin-form request line, got:\n%s", wire)
+		}
+	})
+
 	t.Run("URL host fallback when Host is empty", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{
