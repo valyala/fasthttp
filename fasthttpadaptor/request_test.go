@@ -151,7 +151,7 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 
 	t.Run("CONNECT request keeps its authority-form target", func(t *testing.T) {
 		t.Parallel()
-		httpReq, err := http.NewRequest("CONNECT", "http://example.com:443", nil)
+		httpReq, err := http.NewRequest("CONNECT", "http://example.com:443", http.NoBody)
 		if err != nil {
 			t.Fatalf("unexpected error building request: %v", err)
 		}
@@ -182,7 +182,7 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 
 	t.Run("CONNECT request with a scheme keeps its authority-form target", func(t *testing.T) {
 		t.Parallel()
-		httpReq, err := http.NewRequest("CONNECT", "https://example.com:443", nil)
+		httpReq, err := http.NewRequest("CONNECT", "https://example.com:443", http.NoBody)
 		if err != nil {
 			t.Fatalf("unexpected error building request: %v", err)
 		}
@@ -236,7 +236,7 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 
 	t.Run("CONNECT request with a path keeps its origin-form target", func(t *testing.T) {
 		t.Parallel()
-		httpReq, err := http.NewRequest("CONNECT", "http://example.com:443/tunnel", nil)
+		httpReq, err := http.NewRequest("CONNECT", "http://example.com:443/tunnel", http.NoBody)
 		if err != nil {
 			t.Fatalf("unexpected error building request: %v", err)
 		}
