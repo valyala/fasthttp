@@ -1907,7 +1907,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 			}
 		}()
 
-		c.queueForIdle(w)
+		c.queueForIdle(w, connectionClose)
 
 		select {
 		case <-w.ready:
@@ -1934,7 +1934,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 	return cc, nil
 }
 
-func (c *HostClient) queueForIdle(w *wantConn) {
+func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
 	c.connsLock.Lock()
 	if n := len(c.conns); n > 0 {
 		var cc *clientConn
@@ -1960,14 +1960,24 @@ func (c *HostClient) queueForIdle(w *wantConn) {
 	}
 	// A connection may have been closed since AcquireConn checked the pool and
 	// the connection count, freeing capacity without adding an idle connection.
-	// Reserve the freed slot and dial a replacement connection for w.
+	// Reserve the freed slot and dial a replacement connection for w. The conns
+	// cleaner may have exited after observing connsCount == 0 before the slot
+	// was reserved, so restart it as well.
 	maxConns := c.MaxConns
 	if maxConns <= 0 {
 		maxConns = DefaultMaxConnsPerHost
 	}
 	if c.connsCount < maxConns {
 		c.connsCount++
+		startCleaner := false
+		if !c.connsCleanerRun && !connectionClose {
+			c.connsCleanerRun = true
+			startCleaner = true
+		}
 		c.connsLock.Unlock()
+		if startCleaner {
+			go c.connsCleaner()
+		}
 		go c.dialConnFor(w)
 		return
 	}

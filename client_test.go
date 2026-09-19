@@ -5711,7 +5711,7 @@ func TestHostClientQueueForIdleRechecksIdle(t *testing.T) {
 	c.ReleaseConn(cc)
 
 	w := &wantConn{ready: make(chan struct{}, 1)}
-	c.queueForIdle(w)
+	c.queueForIdle(w, false)
 
 	select {
 	case <-w.ready:
@@ -5743,7 +5743,7 @@ func TestHostClientQueueForIdleRechecksCapacity(t *testing.T) {
 	c.decConnsCount()
 
 	w := &wantConn{ready: make(chan struct{}, 1)}
-	c.queueForIdle(w)
+	c.queueForIdle(w, false)
 
 	select {
 	case <-w.ready:
@@ -5756,5 +5756,58 @@ func TestHostClientQueueForIdleRechecksCapacity(t *testing.T) {
 		c.CloseConn(w.conn)
 	case <-time.After(time.Second):
 		t.Fatalf("waiter timed out with connsCount=%d: released capacity was not rechecked", c.ConnsCount())
+	}
+}
+
+func TestHostClientQueueForIdleRestartsCleaner(t *testing.T) {
+	c := &HostClient{
+		Addr: "example.com:80",
+		Dial: func(string) (net.Conn, error) {
+			conn, peer := net.Pipe()
+			peer.Close()
+			return conn, nil
+		},
+		ConnPoolStrategy:    LIFO,
+		MaxConns:            1,
+		MaxConnWaitTimeout:  time.Second,
+		MaxIdleConnDuration: 50 * time.Millisecond,
+		connsCount:          1,
+	}
+
+	// The last connection closes after AcquireConn checked the pool and the
+	// connection count. The conns cleaner has already observed connsCount == 0
+	// and exited, so reserving the freed slot must also restart the cleaner.
+	c.decConnsCount()
+
+	w := &wantConn{ready: make(chan struct{}, 1)}
+	c.queueForIdle(w, false)
+
+	select {
+	case <-w.ready:
+	case <-time.After(time.Second):
+		t.Fatal("waiter was not given a replacement connection")
+	}
+	if w.err != nil {
+		t.Fatalf("unexpected waiter error: %v", w.err)
+	}
+
+	// Once the replacement connection is returned to the pool, the restarted
+	// cleaner must close it after MaxIdleConnDuration and then exit.
+	c.ReleaseConn(w.conn)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		c.connsLock.Lock()
+		idle := len(c.conns)
+		count := c.connsCount
+		cleanerRun := c.connsCleanerRun
+		c.connsLock.Unlock()
+		if idle == 0 && count == 0 && !cleanerRun {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("idle=%d count=%d cleanerRun=%t: the idle connection was never closed by the conns cleaner", idle, count, cleanerRun)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
