@@ -414,6 +414,9 @@ func (c *Cookie) ParseBytes(src []byte) error {
 					if err != nil {
 						return err
 					}
+					if maxAge == 0 {
+						maxAge = -1
+					}
 					c.maxAge = maxAge
 				}
 
