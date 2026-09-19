@@ -2053,15 +2053,21 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 		}
 	case HeaderContentLength:
-		h.mulHeader = append(h.mulHeader, h.contentLengthBytes)
+		if len(h.contentLengthBytes) > 0 {
+			h.mulHeader = append(h.mulHeader, h.contentLengthBytes)
+		}
 	case HeaderCookie:
 		if h.cookiesCollected {
-			h.mulHeader = append(h.mulHeader, appendRequestCookieBytes(nil, h.cookies))
+			if len(h.cookies) > 0 {
+				h.mulHeader = append(h.mulHeader, appendRequestCookieBytes(nil, h.cookies))
+			}
 		} else {
 			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 		}
 	case HeaderTrailer:
-		h.mulHeader = append(h.mulHeader, appendTrailerBytes(nil, h.trailer, strCommaSpace))
+		if len(h.trailer) > 0 {
+			h.mulHeader = append(h.mulHeader, appendTrailerBytes(nil, h.trailer, strCommaSpace))
+		}
 	default:
 		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 	}
@@ -2101,11 +2107,17 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 		}
 	case HeaderContentLength:
-		h.mulHeader = append(h.mulHeader, h.contentLengthBytes)
+		if len(h.contentLengthBytes) > 0 {
+			h.mulHeader = append(h.mulHeader, h.contentLengthBytes)
+		}
 	case HeaderSetCookie:
-		h.mulHeader = append(h.mulHeader, appendResponseCookieBytes(nil, h.cookies))
+		if len(h.cookies) > 0 {
+			h.mulHeader = append(h.mulHeader, appendResponseCookieBytes(nil, h.cookies))
+		}
 	case HeaderTrailer:
-		h.mulHeader = append(h.mulHeader, appendTrailerBytes(nil, h.trailer, strCommaSpace))
+		if len(h.trailer) > 0 {
+			h.mulHeader = append(h.mulHeader, appendTrailerBytes(nil, h.trailer, strCommaSpace))
+		}
 	default:
 		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 	}
