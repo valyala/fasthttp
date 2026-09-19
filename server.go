@@ -378,15 +378,15 @@ type Server struct {
 	// Aggressive memory usage reduction is disabled by default.
 	ReduceMemoryUsage bool
 
-	// Reads the wall clock only when a handler asks for the request time
-	// instead of once per request, if set to true.
+	// Defers recording the request time until the first call to
+	// RequestCtx.Time() if set to true.
 	//
-	// RequestCtx.Time() then reports the moment of its first call rather
-	// than the moment the server started reading the request, and it must
-	// not be called from several goroutines at once. The server itself
-	// keeps its idle bookkeeping on a clock refreshed once per second.
+	// RequestCtx.Time() returns the time of that first call and returns
+	// the same value on subsequent calls during the request.
+	// Idle connection tracking uses a clock refreshed once per second.
 	//
-	// Reading the clock per request is the default.
+	// By default the request time is recorded immediately before
+	// calling the request handler.
 	LazyRequestTime bool
 
 	// Rejects all non-GET requests if set to true.
