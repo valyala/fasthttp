@@ -447,8 +447,9 @@ type FS struct {
 	AcceptByteRange bool
 
 	// Sends a weak ETag header derived from the modification time and size
-	// of the served file if set to true. Requests with a matching
-	// If-None-Match header get '304 Not Modified' responses.
+	// of the served file if set to true. GET and HEAD requests with a matching
+	// If-None-Match header get '304 Not Modified' responses, other methods
+	// get '412 Precondition Failed'.
 	//
 	// Files with an unknown modification time, such as files from embed.FS,
 	// get no ETag, since a size-only tag cannot reliably detect changes.
@@ -1413,10 +1414,20 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	}
 
 	var notModified bool
-	if ifNoneMatch := ctx.Request.Header.peek(strIfNoneMatch); h.generateETag && len(ifNoneMatch) > 0 {
+	if ifNoneMatch := ctx.Request.Header.peekAll(strIfNoneMatch); h.generateETag && len(ifNoneMatch) > 0 {
 		// If-Modified-Since is ignored when If-None-Match is present.
 		// See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3
-		notModified = fsETagMatch(ifNoneMatch, ff.etag)
+		if fsETagMatch(ifNoneMatch, ff.etag) {
+			// Only GET and HEAD get 304, other methods get 412.
+			// See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2
+			if !ctx.IsGet() && !ctx.IsHead() {
+				ff.decReadersCount()
+				ctx.Response.Reset()
+				ctx.SetStatusCode(StatusPreconditionFailed)
+				return
+			}
+			notModified = true
+		}
 	} else {
 		notModified = !ctx.IfModifiedSince(ff.lastModified)
 	}
@@ -1522,13 +1533,24 @@ func appendFSETag(dst []byte, lastModified time.Time, size int) []byte {
 	return append(dst, '"')
 }
 
-// fsETagMatch reports whether the given If-None-Match header value matches
-// etag using the weak comparison.
+// fsETagMatch reports whether any of the given If-None-Match header values
+// matches etag using the weak comparison. Multiple header lines are treated
+// the same as a single comma-separated list.
 //
 // See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2
-func fsETagMatch(ifNoneMatch, etag []byte) bool {
+func fsETagMatch(ifNoneMatch [][]byte, etag []byte) bool {
 	etag = trimWeakETagPrefix(etag)
-	b := ifNoneMatch
+	for _, v := range ifNoneMatch {
+		if fsETagListMatch(v, etag) {
+			return true
+		}
+	}
+	return false
+}
+
+// fsETagListMatch reports whether the comma-separated entity tag list b
+// matches etag, which must not have the weak prefix.
+func fsETagListMatch(b, etag []byte) bool {
 	for {
 		b = bytes.TrimLeft(b, " \t,")
 		if len(b) == 0 {

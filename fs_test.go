@@ -1516,6 +1516,48 @@ func TestFSGenerateETag(t *testing.T) {
 	if resp.StatusCode() != StatusNotModified {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotModified)
 	}
+
+	// Only GET and HEAD get 304 for a matching If-None-Match, other methods get 412.
+	for _, tc := range []struct {
+		method         string
+		ifNoneMatch    string
+		expectedStatus int
+	}{
+		{MethodGet, expectedETag, StatusNotModified},
+		{MethodHead, expectedETag, StatusNotModified},
+		{MethodGet, "*", StatusNotModified},
+		{MethodHead, "*", StatusNotModified},
+		{MethodPost, expectedETag, StatusPreconditionFailed},
+		{MethodPut, "*", StatusPreconditionFailed},
+		{MethodPost, `"foo"`, StatusOK},
+	} {
+		resp := testFSETagRequest(t, h, func(req *Request) {
+			req.Header.SetMethod(tc.method)
+			req.Header.Set(HeaderIfNoneMatch, tc.ifNoneMatch)
+		})
+		if resp.StatusCode() != tc.expectedStatus {
+			t.Fatalf("%s %s: unexpected status code: %d. Expecting %d", tc.method, tc.ifNoneMatch, resp.StatusCode(), tc.expectedStatus)
+		}
+		if tc.expectedStatus != StatusOK && len(resp.Body()) > 0 {
+			t.Fatalf("%s %s: unexpected body: %q", tc.method, tc.ifNoneMatch, resp.Body())
+		}
+	}
+
+	// Multiple If-None-Match headers are combined like a single comma-separated one.
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		req.Header.Add(HeaderIfNoneMatch, `"other"`)
+		req.Header.Add(HeaderIfNoneMatch, expectedETag)
+	})
+	if resp.StatusCode() != StatusNotModified {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotModified)
+	}
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		req.Header.Add(HeaderIfNoneMatch, `"other"`)
+		req.Header.Add(HeaderIfNoneMatch, `"another"`)
+	})
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
 }
 
 func TestFSGenerateETagDisabled(t *testing.T) {
