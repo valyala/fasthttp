@@ -24,7 +24,6 @@ var (
 	strHTTP11                   = []byte("HTTP/1.1")
 	strColon                    = []byte(":")
 	strColonSlashSlash          = []byte("://")
-	strColonSpace               = []byte(": ")
 	strCommaSpace               = []byte(", ")
 	strGMT                      = []byte("GMT")
 	strSpace                    = []byte(" ")
