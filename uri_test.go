@@ -225,6 +225,17 @@ func TestURIRejectsMixedBracketHost(t *testing.T) {
 	}
 }
 
+func TestHostShouldEscapeTable(t *testing.T) {
+	t.Parallel()
+
+	for c := range 256 {
+		exp := c < 0x80 && shouldEscape(byte(c), encodeHost)
+		if got := hostShouldEscapeTable[c] != 0; got != exp {
+			t.Fatalf("unexpected table entry for %#x: %v. Expecting %v", c, got, exp)
+		}
+	}
+}
+
 func testURIUpdate(t *testing.T, base, update, result string) {
 	var u URI
 	u.Parse(nil, []byte(base)) //nolint:errcheck

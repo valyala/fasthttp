@@ -30,6 +30,41 @@ func TestAppendQuotedArg(t *testing.T) {
 	}
 }
 
+func TestAppendQuotedArgAndPathPrefix(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range []string{"", "abc", "a b", " ", "foo/bar?baz", "a%20b", "\xff\x00", "abcdefgh-ijk~lmn"} {
+		var exp []byte
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			switch {
+			case c == ' ':
+				exp = append(exp, '+')
+			case quotedArgShouldEscapeTable[c] != 0:
+				exp = append(exp, '%', upperhex[c>>4], upperhex[c&0xf])
+			default:
+				exp = append(exp, c)
+			}
+		}
+		if got := AppendQuotedArg(nil, []byte(s)); !bytes.Equal(got, exp) {
+			t.Fatalf("unexpected AppendQuotedArg(%q): %q. Expecting %q", s, got, exp)
+		}
+
+		exp = exp[:0]
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			if quotedPathShouldEscapeTable[c] != 0 {
+				exp = append(exp, '%', upperhex[c>>4], upperhex[c&0xf])
+			} else {
+				exp = append(exp, c)
+			}
+		}
+		if got := appendQuotedPath(nil, []byte(s)); !bytes.Equal(got, exp) {
+			t.Fatalf("unexpected appendQuotedPath(%q): %q. Expecting %q", s, got, exp)
+		}
+	}
+}
+
 func TestAppendHTMLEscape(t *testing.T) {
 	t.Parallel()
 

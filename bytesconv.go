@@ -445,7 +445,12 @@ func AppendUnquotedArg(dst, src []byte) []byte {
 
 // AppendQuotedArg appends url-encoded src to dst and returns appended dst.
 func AppendQuotedArg(dst, src []byte) []byte {
-	for _, c := range src {
+	i := 0
+	for i < len(src) && quotedArgShouldEscapeTable[src[i]] == 0 {
+		i++
+	}
+	dst = append(dst, src[:i]...)
+	for _, c := range src[i:] {
 		switch {
 		case c == ' ':
 			dst = append(dst, '+')
@@ -464,8 +469,13 @@ func appendQuotedPath(dst, src []byte) []byte {
 		return append(dst, '*')
 	}
 
-	for _, c := range src {
-		if quotedPathShouldEscapeTable[int(c)] != 0 {
+	i := 0
+	for i < len(src) && quotedPathShouldEscapeTable[src[i]] == 0 {
+		i++
+	}
+	dst = append(dst, src[:i]...)
+	for _, c := range src[i:] {
+		if quotedPathShouldEscapeTable[c] != 0 {
 			dst = append(dst, '%', upperhex[c>>4], upperhex[c&0xf])
 		} else {
 			dst = append(dst, c)
