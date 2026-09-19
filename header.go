@@ -539,6 +539,23 @@ func isValidTrailerKey(key []byte) bool {
 	return true
 }
 
+// validHeaderValue returns true if every byte of b is a valid header value
+// byte as defined by RFC 7230.
+func validHeaderValue(b []byte) bool {
+	// Words without control bytes are skipped eight at a time. A tab is a
+	// valid value byte but also a control byte, so a word holding one is
+	// checked byte by byte.
+	for len(b) >= 8 && !anyByteIsCTL(loadWord(b)) {
+		b = b[8:]
+	}
+	for _, c := range b {
+		if !validHeaderValueByte(c) {
+			return false
+		}
+	}
+	return true
+}
+
 // validHeaderFieldByte returns true if c valid header field byte
 // as defined by RFC 7230.
 func validHeaderFieldByte(c byte) bool {
@@ -2798,10 +2815,8 @@ func parseTrailer(src []byte, dest []argsKV, disableNormalizing bool) ([]argsKV,
 		if isBadTrailer(s.key) {
 			return dest, 0, fmt.Errorf("forbidden trailer key %q", s.key)
 		}
-		for _, ch := range s.value {
-			if !validHeaderValueByte(ch) {
-				return dest, 0, fmt.Errorf("invalid trailer value %q", s.value)
-			}
+		if !validHeaderValue(s.value) {
+			return dest, 0, fmt.Errorf("invalid trailer value %q", s.value)
 		}
 		normalizeHeaderKeyValidated(s.key, disable)
 		dest = appendArgBytes(dest, s.key, s.value, argsHasValue)
@@ -3099,11 +3114,9 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 		}
 		normalizeHeaderKeyValidated(s.key, disableNormalizing)
 
-		for _, ch := range s.value {
-			if !validHeaderValueByte(ch) {
-				h.connectionClose = true
-				return 0, fmt.Errorf("invalid header value %q", s.value)
-			}
+		if !validHeaderValue(s.value) {
+			h.connectionClose = true
+			return 0, fmt.Errorf("invalid header value %q", s.value)
 		}
 
 		switch s.key[0] | 0x20 {
@@ -3243,11 +3256,9 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 		// Key bytes were already validated by the scanner.
 		normalizeHeaderKeyValidated(s.key, h.disableNormalizing || s.keyHasSpace)
 
-		for _, ch := range s.value {
-			if !validHeaderValueByte(ch) {
-				h.connectionClose = true
-				return 0, fmt.Errorf("invalid header value %q", s.value)
-			}
+		if !validHeaderValue(s.value) {
+			h.connectionClose = true
+			return 0, fmt.Errorf("invalid header value %q", s.value)
 		}
 
 		isContentLength := false

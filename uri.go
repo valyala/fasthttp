@@ -1025,8 +1025,13 @@ func (u *URI) parseQueryArgs() {
 
 // stringContainsCTLByte reports whether s contains any ASCII control character.
 func stringContainsCTLByte(s []byte) bool {
-	for i := range s {
-		b := s[i]
+	for len(s) >= 8 {
+		if anyByteIsCTL(loadWord(s)) {
+			return true
+		}
+		s = s[8:]
+	}
+	for _, b := range s {
 		if b < ' ' || b == 0x7f {
 			return true
 		}
