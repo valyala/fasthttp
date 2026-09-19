@@ -462,6 +462,10 @@ const (
 )
 
 func lowercaseBytes(b []byte) {
+	for len(b) >= 8 {
+		storeWord(b, lowercaseWord(loadWord(b)))
+		b = b[8:]
+	}
 	for i := range b {
 		p := &b[i]
 		*p = toLowerTable[*p]
