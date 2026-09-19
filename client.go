@@ -1975,7 +1975,18 @@ func (c *HostClient) queueForIdle(w *wantConn) {
 	}
 	if c.connsCount < maxConns {
 		c.connsCount++
+		// AcquireConn can drop the lock after the last connection closes and
+		// the cleaner exits (connsCount == 0). This replacement dial must
+		// restart the cleaner so a later idle conn is still collected.
+		startCleaner := false
+		if !c.connsCleanerRun {
+			startCleaner = true
+			c.connsCleanerRun = true
+		}
 		go c.dialConnFor(w)
+		if startCleaner {
+			go c.connsCleaner()
+		}
 		return
 	}
 

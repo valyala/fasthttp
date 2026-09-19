@@ -5119,10 +5119,62 @@ func TestWaiterRegistrationDialsWhenCapacityFreed(t *testing.T) {
 	if c.connsWait != nil {
 		qlen = c.connsWait.len()
 	}
+	cleaner := c.connsCleanerRun
 	c.connsLock.Unlock()
 	if qlen != 0 {
 		t.Fatalf("waiter queued despite free capacity, qlen=%d", qlen)
 	}
+	if !cleaner {
+		t.Fatal("queueForIdle dial path did not restart connsCleaner")
+	}
+}
+
+func TestWaiterRegistrationRestartsCleanerAfterLastConn(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {},
+	}
+	go s.Serve(ln) //nolint:errcheck
+
+	c := &HostClient{
+		Addr: "example.com",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		MaxConns:            1,
+		MaxConnWaitTimeout:  time.Second,
+		MaxIdleConnDuration: 20 * time.Millisecond,
+		connsCount:          0,
+		connsCleanerRun:     false,
+	}
+	w := &wantConn{ready: make(chan struct{}, 1)}
+	c.queueForIdle(w)
+	select {
+	case <-w.ready:
+		if w.err != nil {
+			t.Fatalf("dial failed: %v", w.err)
+		}
+		if w.conn == nil {
+			t.Fatal("expected replacement connection")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for replacement dial")
+	}
+	if !c.connsCleanerRun {
+		t.Fatal("cleaner not running after queueForIdle replacement dial")
+	}
+	c.ReleaseConn(w.conn)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if c.IdleConnsCount() == 0 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("replacement idle conn not collected after MaxIdleConnDuration, idle=%d", c.IdleConnsCount())
 }
 
 func TestAddMissingPort(t *testing.T) {
