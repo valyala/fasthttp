@@ -5711,7 +5711,7 @@ func TestHostClientQueueForIdleRechecksIdle(t *testing.T) {
 	c.ReleaseConn(cc)
 
 	w := &wantConn{ready: make(chan struct{}, 1)}
-	c.queueForIdle(w)
+	c.queueForIdle(w, false)
 
 	select {
 	case <-w.ready:
@@ -5743,7 +5743,7 @@ func TestHostClientQueueForIdleRechecksCapacity(t *testing.T) {
 	c.decConnsCount()
 
 	w := &wantConn{ready: make(chan struct{}, 1)}
-	c.queueForIdle(w)
+	c.queueForIdle(w, false)
 
 	select {
 	case <-w.ready:
@@ -5786,7 +5786,7 @@ func TestHostClientQueueForIdleCanceledConnectionClose(t *testing.T) {
 			}
 			t.Cleanup(c.CloseIdleConnections)
 			w := &wantConn{ready: make(chan struct{}, 1)}
-			c.queueForIdle(w)
+			c.queueForIdle(w, false)
 			select {
 			case <-dialStarted:
 			case <-time.After(3 * time.Second):
@@ -5852,7 +5852,7 @@ func TestHostClientQueueForIdleRestartsCleaner(t *testing.T) {
 	c.decConnsCount()
 
 	w := &wantConn{ready: make(chan struct{}, 1)}
-	c.queueForIdle(w)
+	c.queueForIdle(w, false)
 
 	select {
 	case <-w.ready:
@@ -5881,5 +5881,95 @@ func TestHostClientQueueForIdleRestartsCleaner(t *testing.T) {
 			t.Fatalf("idle=%d count=%d cleanerRun=%t: the idle connection was never closed by the conns cleaner", idle, count, cleanerRun)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestHostClientTransferDialRestartsCleaner(t *testing.T) {
+	var dials atomic.Int32
+	dialStarted := make(chan struct{})
+	allowDial := make(chan struct{})
+	releaseDial := sync.OnceFunc(func() { close(allowDial) })
+	t.Cleanup(releaseDial)
+	c := &HostClient{
+		Addr: "example.com:80",
+		Dial: func(string) (net.Conn, error) {
+			conn, peer := net.Pipe()
+			peer.Close()
+			if dials.Add(1) == 2 {
+				close(dialStarted)
+				<-allowDial
+			}
+			return conn, nil
+		},
+		ConnPoolStrategy:    LIFO,
+		MaxConns:            1,
+		MaxConnWaitTimeout:  250 * time.Millisecond,
+		MaxIdleConnDuration: 50 * time.Millisecond,
+	}
+
+	// A Connection: close request takes the only slot. As in AcquireConn, no
+	// conns cleaner is started for it.
+	cc1, err := c.AcquireConn(0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	acquireDone := make(chan error, 1)
+	go func() {
+		_, err := c.AcquireConn(0, false)
+		acquireDone <- err
+	}()
+
+	// Wait until the second request is queued as a waiter.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		c.connsLock.Lock()
+		queued := c.connsWait != nil && c.connsWait.len() > 0
+		c.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("waiter was not queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// The first connection closes; decConnsCount transfers its slot to the
+	// waiter with a replacement dial.
+	c.CloseConn(cc1)
+
+	select {
+	case <-dialStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("replacement dial did not start")
+	}
+
+	// The waiter times out and cancels while the replacement dial is pending.
+	select {
+	case err := <-acquireDone:
+		if err == nil {
+			t.Fatal("expected the waiter to time out")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("waiter did not time out")
+	}
+
+	// The replacement dial completes; delivery fails and the connection is
+	// returned to the pool. The cleaner must close it once idle.
+	releaseDial()
+
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		c.connsLock.Lock()
+		idle, count, cleanerRun := len(c.conns), c.connsCount, c.connsCleanerRun
+		c.connsLock.Unlock()
+		if idle == 0 && count == 0 && !cleanerRun {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("idle=%d count=%d cleanerRun=%t: pooled connection was never closed", idle, count, cleanerRun)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

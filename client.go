@@ -1907,7 +1907,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 			}
 		}()
 
-		c.queueForIdle(w)
+		c.queueForIdle(w, connectionClose)
 
 		select {
 		case <-w.ready:
@@ -1934,7 +1934,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 	return cc, nil
 }
 
-func (c *HostClient) queueForIdle(w *wantConn) {
+func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
 	c.connsLock.Lock()
 	if n := len(c.conns); n > 0 {
 		var cc *clientConn
@@ -1970,8 +1970,7 @@ func (c *HostClient) queueForIdle(w *wantConn) {
 	if c.connsCount < maxConns {
 		c.connsCount++
 		startCleaner := false
-		// 异步拨号的等待者取消后，连接仍可能回池，因此始终确保清理器运行。
-		if !c.connsCleanerRun {
+		if !c.connsCleanerRun && !connectionClose {
 			c.connsCleanerRun = true
 			startCleaner = true
 		}
@@ -2148,38 +2147,46 @@ var clientConnPool sync.Pool
 
 func (c *HostClient) ReleaseConn(cc *clientConn) {
 	cc.lastUseTime = time.Now()
-	if c.MaxConnWaitTimeout <= 0 {
-		c.connsLock.Lock()
-		c.conns = append(c.conns, cc)
-		c.connsLock.Unlock()
-		return
-	}
-
-	// try to deliver an idle connection to a *wantConn
+	startCleaner := false
 	c.connsLock.Lock()
-	defer c.connsLock.Unlock()
-	delivered := false
-	if q := c.connsWait; q != nil {
-		for q.len() > 0 {
-			w := q.popFront()
-			if w.waiting() {
-				delivered = w.tryDeliver(cc, nil)
-				// This is the last resort to hand over conCount sema.
-				// We must ensure that there are no valid waiters in connsWait
-				// when we exit this loop.
-				//
-				// We did not apply the same looping pattern in the decConnsCount
-				// method because it needs to create a new time-spent connection,
-				// and the decConnsCount call chain will inevitably reach this point.
-				// When MaxConnWaitTimeout>0.
-				if delivered {
-					break
+	if c.MaxConnWaitTimeout <= 0 {
+		c.conns = append(c.conns, cc)
+	} else {
+		// try to deliver an idle connection to a *wantConn
+		delivered := false
+		if q := c.connsWait; q != nil {
+			for q.len() > 0 {
+				w := q.popFront()
+				if w.waiting() {
+					delivered = w.tryDeliver(cc, nil)
+					// This is the last resort to hand over conCount sema.
+					// We must ensure that there are no valid waiters in connsWait
+					// when we exit this loop.
+					//
+					// We did not apply the same looping pattern in the decConnsCount
+					// method because it needs to create a new time-spent connection,
+					// and the decConnsCount call chain will inevitably reach this point.
+					// When MaxConnWaitTimeout>0.
+					if delivered {
+						break
+					}
 				}
 			}
 		}
+		if !delivered {
+			c.conns = append(c.conns, cc)
+		}
 	}
-	if !delivered {
-		c.conns = append(c.conns, cc)
+	// A connection may be pooled while the conns cleaner is not running, for
+	// example a replacement dialed for a waiter that timed out and cancelled.
+	// Keep the cleaner running so pooled connections are closed once idle.
+	if len(c.conns) > 0 && !c.connsCleanerRun {
+		c.connsCleanerRun = true
+		startCleaner = true
+	}
+	c.connsLock.Unlock()
+	if startCleaner {
+		go c.connsCleaner()
 	}
 }
 
