@@ -324,11 +324,10 @@ func targetIsAbsoluteForm(target string) bool {
 // net/http.Request.Write does. The authority ends at the first "/", "?" or
 // "#", and the userinfo within it ends at the last "@", like in net/url.
 func targetHasUserinfo(target string) bool {
-	i := strings.Index(target, "://")
-	if i < 0 {
+	_, authority, ok := strings.Cut(target, "://")
+	if !ok {
 		return false
 	}
-	authority := target[i+len("://"):]
 	if j := strings.IndexAny(authority, "/?#"); j >= 0 {
 		authority = authority[:j]
 	}
