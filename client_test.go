@@ -5711,7 +5711,7 @@ func TestHostClientQueueForIdleRechecksIdle(t *testing.T) {
 	c.ReleaseConn(cc)
 
 	w := &wantConn{ready: make(chan struct{}, 1)}
-	c.queueForIdle(w, false)
+	c.queueForIdle(w)
 
 	select {
 	case <-w.ready:
@@ -5743,7 +5743,7 @@ func TestHostClientQueueForIdleRechecksCapacity(t *testing.T) {
 	c.decConnsCount()
 
 	w := &wantConn{ready: make(chan struct{}, 1)}
-	c.queueForIdle(w, false)
+	c.queueForIdle(w)
 
 	select {
 	case <-w.ready:
@@ -5756,6 +5756,78 @@ func TestHostClientQueueForIdleRechecksCapacity(t *testing.T) {
 		c.CloseConn(w.conn)
 	case <-time.After(time.Second):
 		t.Fatalf("waiter timed out with connsCount=%d: released capacity was not rechecked", c.ConnsCount())
+	}
+}
+
+func TestHostClientQueueForIdleCanceledConnectionClose(t *testing.T) {
+	for _, cancelBeforeDial := range []bool{true, false} {
+		name := "after_delivery"
+		if cancelBeforeDial {
+			name = "before_dial_completes"
+		}
+		t.Run(name, func(t *testing.T) {
+			conn, peer := net.Pipe()
+			t.Cleanup(func() { conn.Close() })
+			t.Cleanup(func() { peer.Close() })
+			dialStarted := make(chan struct{})
+			allowDial := make(chan struct{})
+			unblockDial := sync.OnceFunc(func() { close(allowDial) })
+			t.Cleanup(unblockDial)
+			c := &HostClient{
+				Addr: "example.com:80",
+				Dial: func(string) (net.Conn, error) {
+					close(dialStarted)
+					<-allowDial
+					return conn, nil
+				},
+				MaxConns:            1,
+				MaxConnWaitTimeout:  time.Second,
+				MaxIdleConnDuration: 10 * time.Millisecond,
+			}
+			t.Cleanup(c.CloseIdleConnections)
+			w := &wantConn{ready: make(chan struct{}, 1)}
+			c.queueForIdle(w)
+			select {
+			case <-dialStarted:
+			case <-time.After(3 * time.Second):
+				t.Fatal("replacement dial did not start")
+			}
+			if cancelBeforeDial {
+				w.cancel(c, ErrTimeout)
+				unblockDial()
+			} else {
+				unblockDial()
+				select {
+				case <-w.ready:
+				case <-time.After(3 * time.Second):
+					t.Fatal("replacement connection was not delivered")
+				}
+				if w.conn == nil || w.err != nil {
+					t.Fatalf("unexpected waiter result: conn=%p err=%v", w.conn, w.err)
+				}
+				w.cancel(c, ErrTimeout)
+			}
+			if err := peer.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			var b [1]byte
+			if _, err := peer.Read(b[:]); err != io.EOF {
+				t.Fatalf("idle connection was not closed: %v", err)
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				c.connsLock.Lock()
+				idle, count, cleanerRun := len(c.conns), c.connsCount, c.connsCleanerRun
+				c.connsLock.Unlock()
+				if idle == 0 && count == 0 && !cleanerRun {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("idle=%d count=%d cleanerRun=%t: cleaner did not exit", idle, count, cleanerRun)
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
 	}
 }
 
@@ -5780,7 +5852,7 @@ func TestHostClientQueueForIdleRestartsCleaner(t *testing.T) {
 	c.decConnsCount()
 
 	w := &wantConn{ready: make(chan struct{}, 1)}
-	c.queueForIdle(w, false)
+	c.queueForIdle(w)
 
 	select {
 	case <-w.ready:

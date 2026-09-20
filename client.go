@@ -1907,7 +1907,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 			}
 		}()
 
-		c.queueForIdle(w, connectionClose)
+		c.queueForIdle(w)
 
 		select {
 		case <-w.ready:
@@ -1934,7 +1934,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 	return cc, nil
 }
 
-func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
+func (c *HostClient) queueForIdle(w *wantConn) {
 	c.connsLock.Lock()
 	if n := len(c.conns); n > 0 {
 		var cc *clientConn
@@ -1970,7 +1970,8 @@ func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
 	if c.connsCount < maxConns {
 		c.connsCount++
 		startCleaner := false
-		if !c.connsCleanerRun && !connectionClose {
+		// 异步拨号的等待者取消后，连接仍可能回池，因此始终确保清理器运行。
+		if !c.connsCleanerRun {
 			c.connsCleanerRun = true
 			startCleaner = true
 		}
