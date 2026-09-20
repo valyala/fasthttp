@@ -1535,43 +1535,62 @@ func appendFSETag(dst []byte, lastModified time.Time, size int) []byte {
 
 // fsETagMatch reports whether any of the given If-None-Match header values
 // matches etag using the weak comparison. Multiple header lines are treated
-// the same as a single comma-separated list.
+// the same as a single comma-separated list. A malformed entity tag stops the
+// scan of the whole combined field value and counts as no match.
 //
 // See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2
 func fsETagMatch(ifNoneMatch [][]byte, etag []byte) bool {
 	etag = trimWeakETagPrefix(etag)
+	matched := false
 	for _, v := range ifNoneMatch {
-		if fsETagListMatch(v, etag) {
-			return true
+		m, ok := fsETagListMatch(v, etag)
+		if !ok {
+			return false
 		}
+		matched = matched || m
 	}
-	return false
+	return matched
 }
 
 // fsETagListMatch reports whether the comma-separated entity tag list b
-// matches etag, which must not have the weak prefix.
-func fsETagListMatch(b, etag []byte) bool {
+// matches etag, which must not have the weak prefix. ok is false if b holds
+// a malformed entity tag.
+func fsETagListMatch(b, etag []byte) (matched, ok bool) {
 	for {
 		b = bytes.TrimLeft(b, " \t,")
 		if len(b) == 0 {
-			return false
+			return matched, true
 		}
 		if b[0] == '*' {
-			return true
+			return true, true
 		}
 		b = trimWeakETagPrefix(b)
 		if len(b) < 2 || b[0] != '"' {
-			return false
+			return false, false
 		}
 		n := bytes.IndexByte(b[1:], '"')
-		if n < 0 {
-			return false
+		if n < 0 || !validETagChars(b[1:n+1]) {
+			return false, false
 		}
 		if len(etag) > 0 && bytes.Equal(b[:n+2], etag) {
-			return true
+			matched = true
 		}
 		b = b[n+2:]
 	}
+}
+
+// validETagChars reports whether b holds only characters allowed inside
+// the quotes of an entity tag.
+//
+// See https://www.rfc-editor.org/rfc/rfc9110#section-8.8.3
+func validETagChars(b []byte) bool {
+	for _, c := range b {
+		// etagc = "!" / %x23-7E / obs-text
+		if c != '!' && (c < 0x23 || c > 0x7e) && c < 0x80 {
+			return false
+		}
+	}
+	return true
 }
 
 func trimWeakETagPrefix(etag []byte) []byte {

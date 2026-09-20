@@ -1475,8 +1475,16 @@ func TestFSGenerateETag(t *testing.T) {
 		{"any", "*", "", StatusNotModified},
 		{"mismatch", `W/"0-0"`, "", StatusOK},
 		{"prefix mismatch", strings.TrimSuffix(expectedETag, `"`) + `0"`, "", StatusOK},
+		{"list with special characters", `"a!#$%~", ` + expectedETag, "", StatusNotModified},
 		{"malformed", "foo", "", StatusOK},
 		{"unterminated", `"foo`, "", StatusOK},
+		// A malformed entity tag stops the scan of the whole field value.
+		{"space in tag", `"bad tag", ` + expectedETag, "", StatusOK},
+		{"space in tag after match", expectedETag + `, "bad tag"`, "", StatusOK},
+		{"control character in tag", "\"bad\x01tag\", " + expectedETag, "", StatusOK},
+		{"del character in tag", "\"bad\x7ftag\", " + expectedETag, "", StatusOK},
+		{"missing quotes in list", `foo, ` + expectedETag, "", StatusOK},
+		{"unterminated in list", `"foo, ` + expectedETag, "", StatusOK},
 		{"precedence over not modified since", `"foo"`, string(AppendHTTPDate(nil, mtime.Add(time.Hour))), StatusOK},
 		{"precedence over modified since", expectedETag, string(AppendHTTPDate(nil, mtime.Add(-time.Hour))), StatusNotModified},
 	} {
@@ -1530,6 +1538,8 @@ func TestFSGenerateETag(t *testing.T) {
 		{MethodPost, expectedETag, StatusPreconditionFailed},
 		{MethodPut, "*", StatusPreconditionFailed},
 		{MethodPost, `"foo"`, StatusOK},
+		{MethodPost, `"bad tag", ` + expectedETag, StatusOK},
+		{MethodPut, `"bad tag", *`, StatusOK},
 	} {
 		resp := testFSETagRequest(t, h, func(req *Request) {
 			req.Header.SetMethod(tc.method)
@@ -1557,6 +1567,22 @@ func TestFSGenerateETag(t *testing.T) {
 	})
 	if resp.StatusCode() != StatusOK {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+
+	// A malformed entity tag stops the scan of all the header lines.
+	for _, tc := range [][2]string{
+		{`"bad tag"`, expectedETag},
+		{expectedETag, `"bad tag"`},
+		{`"other"`, `"bad tag", ` + expectedETag},
+		{`"bad tag"`, "*"},
+	} {
+		resp := testFSETagRequest(t, h, func(req *Request) {
+			req.Header.Add(HeaderIfNoneMatch, tc[0])
+			req.Header.Add(HeaderIfNoneMatch, tc[1])
+		})
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("%q, %q: unexpected status code: %d. Expecting %d", tc[0], tc[1], resp.StatusCode(), StatusOK)
+		}
 	}
 }
 
