@@ -118,8 +118,12 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // The request target is taken from r.RequestURI, or derived from r.URL when
 // r.RequestURI is empty. A CONNECT request targets an authority rather than
 // a resource (RFC 9112, Section 3.2.3), so when its URL carries no path the
-// host becomes the target, like net/http does, instead of the origin-form
-// "/" that would name no authority to tunnel to.
+// target becomes r.URL.Opaque, or the host when there is no opaque value,
+// like net/http does, instead of the origin-form "/" that would name no
+// authority to tunnel to. Such an opaque target is written as it is, so it
+// carries neither the scheme nor the query that r.URL.RequestURI would add.
+// An absolute-form target is written as it is too, whatever its scheme, so a
+// request addressed to a proxy keeps naming the authority it addresses.
 //
 // When r.Header carries no Content-Type entry, the default Content-Type
 // fasthttp writes for requests (application/octet-stream) is disabled on req
@@ -151,7 +155,9 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // absolute-form r.RequestURI is dropped so it cannot displace the header.
 // Either way an absolute-form target carrying credentials is written with an
 // origin-form request line, since a request target must not contain userinfo
-// (RFC 9112, Section 3.2.4), just like net/http.Request.Write.
+// (RFC 9112, Section 3.2.4), just like net/http.Request.Write. An
+// authority-form CONNECT target names the authority to tunnel to and has no
+// origin form, so its credentials are stripped from the target instead.
 //
 // HTTP/2 and newer protocols are normalized to HTTP/1.1, since fasthttp only
 // models HTTP/1.x messages and the HTTP version is a hop-by-hop property. An
@@ -181,13 +187,29 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 	}
 
 	target := ""
+	restoreTarget := false
 	if r.RequestURI != "" {
 		target = r.RequestURI
+		if r.Method == http.MethodConnect && target[0] != '/' && !targetIsAbsoluteForm(target) {
+			if at := strings.LastIndexByte(target, '@'); at >= 0 {
+				target = target[at+1:]
+			}
+			restoreTarget = true
+		}
 	} else if r.URL != nil {
 		target = r.URL.RequestURI()
-		if host != "" && r.Method == http.MethodConnect && r.URL.Path == "" && r.URL.Opaque == "" {
-			target = host
+		if r.Method == http.MethodConnect && r.URL.Path == "" {
+			if r.URL.Opaque != "" {
+				target = r.URL.Opaque
+				restoreTarget = true
+			} else if host != "" {
+				target = host
+				restoreTarget = true
+			}
 		}
+	}
+	if !restoreTarget && targetIsAbsoluteForm(target) && !targetHasUserinfo(target) {
+		restoreTarget = true
 	}
 	if target != "" {
 		req.SetRequestURI(target)
@@ -285,9 +307,32 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 		uri.SetPassword("")
 	}
 
-	if r.Method == http.MethodConnect && target != "" && target[0] != '/' {
+	if restoreTarget {
 		req.SetRequestURI(target)
 	}
+}
+
+// targetIsAbsoluteForm reports whether a request target is absolute-form,
+// that is whether it names a scheme and an authority rather than only a path.
+func targetIsAbsoluteForm(target string) bool {
+	return strings.Contains(target, "://")
+}
+
+// targetHasUserinfo reports whether an absolute-form request target carries
+// userinfo. A request target must not contain any (RFC 9112, Section 3.2.4),
+// so such a target is written in origin-form instead, like
+// net/http.Request.Write does. The authority ends at the first "/", "?" or
+// "#", and the userinfo within it ends at the last "@", like in net/url.
+func targetHasUserinfo(target string) bool {
+	i := strings.Index(target, "://")
+	if i < 0 {
+		return false
+	}
+	authority := target[i+len("://"):]
+	if j := strings.IndexAny(authority, "/?#"); j >= 0 {
+		authority = authority[:j]
+	}
+	return strings.IndexByte(authority, '@') >= 0
 }
 
 // errBodyTooLong is returned from a body read once the attached body turns

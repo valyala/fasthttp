@@ -260,6 +260,233 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 		}
 	})
 
+	t.Run("CONNECT authority-form target credentials become Basic authorization", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"CONNECT url-user:url-pass@example.com:443 HTTP/1.1\r\n" +
+				"Host: example.com:443\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// The authority to tunnel to survives, without the credentials a
+		// request target must not carry.
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected a sanitized authority-form request line, got:\n%s", wire)
+		}
+		// base64("url-user:url-pass"), the same credentials net/http.Client would send.
+		if !strings.Contains(wire, "Authorization: Basic dXJsLXVzZXI6dXJsLXBhc3M=\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", wire)
+		}
+		if strings.Contains(wire, "url-user:url-pass@") {
+			t.Errorf("expected no userinfo in the request target, got:\n%s", wire)
+		}
+	})
+
+	t.Run("explicit Authorization header wins over CONNECT authority-form target credentials", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"CONNECT url-user:url-pass@example.com:443 HTTP/1.1\r\n" +
+				"Host: example.com:443\r\n" +
+				"Authorization: Bearer explicit-token\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected a sanitized authority-form request line, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Authorization: Bearer explicit-token\r\n") {
+			t.Errorf("expected the explicit Authorization header on the wire, got:\n%s", wire)
+		}
+		if strings.Contains(wire, "url-user") || strings.Contains(wire, "url-pass") || strings.Contains(wire, "Basic") {
+			t.Errorf("expected no URL credentials on the wire, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT absolute-form target credentials keep the origin-form request line", func(t *testing.T) {
+		t.Parallel()
+		// net/http parses every non-origin-form CONNECT target as an
+		// authority, so an absolute-form one only reaches the conversion
+		// from a hand-built request.
+		httpReq := &http.Request{
+			Method:     http.MethodConnect,
+			RequestURI: "http://url-user:url-pass@example.com:443/tunnel",
+			URL: &url.URL{
+				Scheme: "http",
+				User:   url.UserPassword("url-user", "url-pass"),
+				Host:   "example.com:443",
+				Path:   "/tunnel",
+			},
+			Host:   "example.com:443",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// An absolute-form target has an origin form to fall back to, so the
+		// authority-form restoration must not claim it.
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT /tunnel HTTP/1.1\r\n") {
+			t.Errorf("expected an origin-form request line, got:\n%s", wire)
+		}
+		// base64("url-user:url-pass"), the same credentials net/http.Client would send.
+		if !strings.Contains(wire, "Authorization: Basic dXJsLXVzZXI6dXJsLXBhc3M=\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", wire)
+		}
+		if strings.Contains(wire, "url-user:url-pass@") {
+			t.Errorf("expected no userinfo in the request target, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT authority-form target without credentials keeps its userinfo-free target", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"CONNECT [::1]:443 HTTP/1.1\r\nHost: [::1]:443\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT [::1]:443 HTTP/1.1\r\n") {
+			t.Errorf("expected an authority-form request line, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT opaque target is used as it is", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method: http.MethodConnect,
+			URL:    &url.URL{Scheme: "https", Opaque: "//example.com:443"},
+			Host:   "example.com:443",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// net/http writes an opaque CONNECT target verbatim, where
+		// r.URL.RequestURI would turn it into the scheme-prefixed
+		// "https://example.com:443".
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT //example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected the opaque request target, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT opaque target drops the query", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method: http.MethodConnect,
+			URL:    &url.URL{Scheme: "https", Opaque: "//example.com:443", RawQuery: "a=b"},
+			Host:   "example.com:443",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// An authority to tunnel to carries no query, and net/http appends
+		// none to an opaque target either.
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT //example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected the opaque request target without a query, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT opaque authority target is used as it is", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method: http.MethodConnect,
+			URL:    &url.URL{Scheme: "https", Opaque: "example.com:443"},
+			Host:   "example.com:443",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected the opaque request target, got:\n%s", wire)
+		}
+	})
+
 	t.Run("URL host fallback when Host is empty", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{
@@ -1219,6 +1446,67 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			t.Errorf("expected Basic credentials on the wire, got:\n%s", buf.String())
 		}
 	})
+
+	for _, scheme := range []string{"https", "http"} {
+		t.Run("absolute-form "+scheme+" target keeps its absolute-form request line", func(t *testing.T) {
+			t.Parallel()
+			httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+				"GET " + scheme + "://example.com/path?a=b HTTP/1.1\r\n\r\n")))
+			if err != nil {
+				t.Fatalf("unexpected error reading request: %v", err)
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error writing request: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error flushing request: %v", err)
+			}
+
+			// The target a request addressed to a proxy carries survives
+			// whatever its scheme: only a non-http scheme is set on the URI,
+			// and a parsed URI would rewrite the request line in origin-form.
+			wire := buf.String()
+			want := "GET " + scheme + "://example.com/path?a=b HTTP/1.1\r\n"
+			if !strings.HasPrefix(wire, want) {
+				t.Errorf("expected an absolute-form request line, got:\n%s", wire)
+			}
+		})
+
+		t.Run("opaque "+scheme+" target is used as it is", func(t *testing.T) {
+			t.Parallel()
+			httpReq := &http.Request{
+				Method: http.MethodGet,
+				URL:    &url.URL{Scheme: scheme, Opaque: "//example.com/path", RawQuery: "a=b"},
+				Host:   "example.com",
+				Header: http.Header{},
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error writing request: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error flushing request: %v", err)
+			}
+
+			// The request line net/http writes for the same request.
+			wire := buf.String()
+			want := "GET " + scheme + "://example.com/path?a=b HTTP/1.1\r\n"
+			if !strings.HasPrefix(wire, want) {
+				t.Errorf("expected the opaque request target, got:\n%s", wire)
+			}
+		})
+	}
 
 	for _, scheme := range []string{"https", "http"} {
 		t.Run("explicit Authorization header wins over absolute-form "+scheme+" target credentials", func(t *testing.T) {
