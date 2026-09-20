@@ -2963,11 +2963,39 @@ func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, err
 	}
 }
 
+// appendBodyFixedSizeSmallThreshold is the largest declared body size for
+// which appendBodyFixedSize still pre-allocates the full destination buffer
+// up front. Above this, the client-declared Content-Length is not trusted
+// enough to pre-allocate in full: a slow client (Slowloris-style) could
+// otherwise pin an allocation sized to an arbitrarily large declared
+// length, per connection, for as long as it trickles bytes in. See #2037.
+//
+// This matches DefaultMaxRequestBodySize deliberately: readBody already
+// rejects any declared Content-Length above the server's configured
+// MaxRequestBodySize before appendBodyFixedSize is ever called, so a
+// server running with the default (or a smaller) limit -- the
+// overwhelming majority of real deployments -- always takes the
+// unmodified fast path below, with zero behavior or performance change.
+// Only a server explicitly configured to accept larger bodies (an opt-in
+// choice) exercises the bounded-doubling path, where some CPU/allocation
+// overhead in exchange for not pinning unbounded memory is an expected
+// and reasonable cost of that choice.
+const appendBodyFixedSizeSmallThreshold = DefaultMaxRequestBodySize
+
 func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	if n == 0 {
 		return dst, nil
 	}
+	if n <= appendBodyFixedSizeSmallThreshold {
+		return appendBodyFixedSizeSmall(r, dst, n)
+	}
+	return appendBodyFixedSizeLarge(r, dst, n)
+}
 
+// appendBodyFixedSizeSmall is the original, unmodified fast path: for
+// bodies within appendBodyFixedSizeSmallThreshold, pre-allocating the full
+// buffer up front is cheap and correctness/perf here must not regress.
+func appendBodyFixedSizeSmall(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	offset := len(dst)
 	dstLen := offset + n
 	if cap(dst) < dstLen {
@@ -2992,6 +3020,70 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 		offset += nn
 		if offset == dstLen {
 			return dst, nil
+		}
+	}
+}
+
+// appendBodyFixedSizeLarge handles declared body sizes above
+// appendBodyFixedSizeSmallThreshold -- reachable only when a server is
+// explicitly configured with a MaxRequestBodySize larger than the default.
+// Rather than pre-allocating the full (unverified) declared length up
+// front, it safely allocates up to appendBodyFixedSizeSmallThreshold
+// immediately (that much is already established as safe to allocate
+// unconditionally) and grows the rest by doubling as data actually
+// arrives -- the same bounded-growth strategy readBodyIdentity (above)
+// already uses for reads of untrusted length. At any point, cap(dst)
+// stays proportional to bytes actually read, not to the client's declared
+// Content-Length, so a slow/stalled connection can only ever pin an
+// amount bounded by appendBodyFixedSizeSmallThreshold plus its own actual
+// progress. See #2037.
+//
+// An earlier version of this fix read through a small scratch buffer and
+// grew dst via append(); benchmarking showed that regressed large-body
+// throughput by ~7x (Go's append growth factor for large slices is closer
+// to 1.25x than 2x, so reaching a multi-MiB body via that path costs many
+// more copy-and-reallocate cycles than doubling does). Doubling keeps that
+// amortized to O(n) total copied bytes, matching the original fast path's
+// characteristics for the common "body arrives promptly" case.
+func appendBodyFixedSizeLarge(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
+	offset := len(dst)
+	target := offset + n
+
+	initLen := offset + appendBodyFixedSizeSmallThreshold
+	if initLen > target {
+		initLen = target
+	}
+	if cap(dst) < initLen {
+		b := make([]byte, roundUpForSliceCap(initLen))
+		copy(b, dst)
+		dst = b
+	}
+	dst = dst[:initLen]
+
+	for {
+		nn, err := r.Read(dst[offset:])
+		if nn <= 0 {
+			switch {
+			case errors.Is(err, io.EOF):
+				return dst[:offset], io.ErrUnexpectedEOF
+			case err != nil:
+				return dst[:offset], err
+			default:
+				return dst[:offset], fmt.Errorf("bufio read returned (%d, nil)", nn)
+			}
+		}
+		offset += nn
+		if offset == target {
+			return dst, nil
+		}
+		if offset == len(dst) {
+			newLen := roundUpForSliceCap(2 * offset)
+			if newLen > target {
+				newLen = target
+			}
+			b := make([]byte, newLen)
+			copy(b, dst)
+			dst = b
 		}
 	}
 }

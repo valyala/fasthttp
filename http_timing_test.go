@@ -1,6 +1,7 @@
 package fasthttp
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"net"
@@ -280,4 +281,44 @@ func BenchmarkCopyZeroAllocNetConnToOSFile(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+// benchAppendBodyFixedSize benchmarks reading a body of the given size where
+// all bytes are already available (the common/legitimate case), to catch
+// any regression introduced by the #2037 memory-pinning fix on the
+// fast path.
+func benchAppendBodyFixedSize(b *testing.B, size int) {
+	body := make([]byte, size)
+	for i := range body {
+		body[i] = byte(i%10) + '0'
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		br := bufio.NewReader(bytes.NewReader(body))
+		if _, err := appendBodyFixedSize(br, nil, size); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkAppendBodyFixedSizeSmall(b *testing.B) {
+	benchAppendBodyFixedSize(b, 1024) // typical small JSON/form body, well within the fast path
+}
+
+func BenchmarkAppendBodyFixedSizeAtFastPathBoundary(b *testing.B) {
+	// DefaultMaxRequestBodySize -- the fast/slow path boundary, and the
+	// largest body a server running with the default (or a smaller)
+	// configured MaxRequestBodySize can ever present here, since readBody
+	// already rejects anything larger before this is called. Must show no
+	// regression vs. the original single-allocation implementation.
+	benchAppendBodyFixedSize(b, DefaultMaxRequestBodySize)
+}
+
+func BenchmarkAppendBodyFixedSizeBeyondDefaultLimit(b *testing.B) {
+	// Only reachable by a server explicitly configured to accept bodies
+	// larger than the default -- exercises the bounded-doubling growth
+	// path.
+	benchAppendBodyFixedSize(b, 16<<20)
 }

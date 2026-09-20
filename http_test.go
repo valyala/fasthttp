@@ -3070,6 +3070,65 @@ func TestReadBodyFixedSize(t *testing.T) {
 	testReadBodyFixedSize(t, 34345)
 }
 
+// slowTrickleReader hands back bytes one at a time (regardless of the
+// requested slice length) to simulate a Slowloris-style client that
+// declares a huge Content-Length but sends it byte by byte, then returns
+// errAfter once it has provided the given number of bytes -- standing in
+// for the connection stalling or being reset mid-body.
+type slowTrickleReader struct {
+	remaining int
+	errAfter  error
+}
+
+func (r *slowTrickleReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, r.errAfter
+	}
+	p[0] = 'a'
+	r.remaining--
+	return 1, nil
+}
+
+// TestAppendBodyFixedSizeDoesNotPinMemoryToDeclaredLength verifies #2037: a
+// client that declares a body far larger than appendBodyFixedSizeSmallThreshold
+// (only reachable at all when a server is explicitly configured with a
+// MaxRequestBodySize above the default -- readBody rejects anything larger
+// than the configured limit before this is ever called) but only ever sends
+// a handful of bytes must not cause a buffer sized to the full declared
+// length to be allocated and retained -- only up to the fixed, bounded
+// appendBodyFixedSizeSmallThreshold safety cap, regardless of how large the
+// declared length claims to be. Before the fix, appendBodyFixedSize
+// allocates roundUpForSliceCap(n) up front, before a single byte has
+// arrived, so the returned (partial, error) slice's backing array is
+// already that large regardless of how little was actually read.
+func TestAppendBodyFixedSizeDoesNotPinMemoryToDeclaredLength(t *testing.T) {
+	t.Parallel()
+
+	const declaredContentLength = 8 * appendBodyFixedSizeSmallThreshold // far larger than the safety cap
+	const actuallySent = 100                                            // but the connection only ever delivers this many bytes
+
+	src := &slowTrickleReader{remaining: actuallySent, errAfter: io.ErrClosedPipe}
+	br := bufio.NewReader(src)
+
+	dst, err := appendBodyFixedSize(br, nil, declaredContentLength)
+	if err == nil {
+		t.Fatal("expected an error, since fewer bytes were provided than the declared Content-Length")
+	}
+	if len(dst) != actuallySent {
+		t.Fatalf("expected %d bytes read before the error, got %d", actuallySent, len(dst))
+	}
+	// Must stay at or near the fixed safety cap (rounded up by
+	// roundUpForSliceCap), nowhere near the much larger declared length a
+	// pre-allocating implementation would pin.
+	const maxAcceptableCap = 2 * appendBodyFixedSizeSmallThreshold
+	if cap(dst) > maxAcceptableCap {
+		t.Fatalf("appendBodyFixedSize retained a %d-byte buffer for only %d bytes actually read out of a "+
+			"%d-byte declared length -- it pre-allocated close to the full declared length instead of "+
+			"tracking actual bytes read (Slowloris-class memory pinning, see #2037)",
+			cap(dst), actuallySent, declaredContentLength)
+	}
+}
+
 func TestReadBodyChunked(t *testing.T) {
 	t.Parallel()
 
