@@ -381,6 +381,17 @@ type Server struct {
 	// Aggressive memory usage reduction is disabled by default.
 	ReduceMemoryUsage bool
 
+	// Defers recording the request time until the first call to
+	// RequestCtx.Time() if set to true.
+	//
+	// RequestCtx.Time() returns the time of that first call and returns
+	// the same value on subsequent calls during the request.
+	// Idle connection tracking uses a clock refreshed once per second.
+	//
+	// By default the request time is recorded immediately before
+	// calling the request handler.
+	LazyRequestTime bool
+
 	// Rejects all non-GET requests if set to true.
 	//
 	// This option is useful as anti-DoS protection for servers
@@ -1004,7 +1015,12 @@ func (ctx *RequestCtx) ConnID() uint64 {
 }
 
 // Time returns RequestHandler call time.
+//
+// With Server.LazyRequestTime the clock is read here on the first call.
 func (ctx *RequestCtx) Time() time.Time {
+	if ctx.time.IsZero() && ctx.s != nil && ctx.s.LazyRequestTime {
+		ctx.time = time.Now()
+	}
 	return ctx.time
 }
 
@@ -2356,6 +2372,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	}
 
 	connTime := time.Now()
+	if s.LazyRequestTime {
+		// The refresher keeps the coarse second the idle bookkeeping runs on.
+		serverDateOnce.Do(updateServerDate)
+	}
 
 	s.idleConnsMu.Lock()
 	if s.idleConns == nil {
@@ -2643,7 +2663,17 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		}
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
-		ctx.time = time.Now()
+		var (
+			reqTime   time.Time
+			reqSecond int64
+		)
+		if s.LazyRequestTime {
+			reqSecond = coarseSecond()
+		} else {
+			reqTime = time.Now()
+			reqSecond = reqTime.Unix()
+		}
+		ctx.time = reqTime
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
@@ -2654,6 +2684,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		if timeoutResponse != nil {
 			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
 			ctx = s.acquireCtx(c)
+			ctx.connTime = connTime
+			ctx.time = reqTime
 			timeoutResponse.CopyTo(&ctx.Response)
 		}
 
@@ -2759,7 +2791,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.Request.bodyStream = nil
 		}
 
-		idleConnTime.Store(ctx.time.Unix())
+		idleConnTime.Store(reqSecond)
 		s.setState(c, StateIdle)
 		ctx.Request.Reset()
 		ctx.Response.Reset()
@@ -2986,6 +3018,7 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.s = fakeServer
 	ctx.connRequestNum = 0
 	ctx.connTime = time.Now()
+	ctx.time = ctx.connTime
 
 	keepBodyBuffer := !reduceMemoryUsage
 	ctx.Request.keepBodyBuffer = keepBodyBuffer

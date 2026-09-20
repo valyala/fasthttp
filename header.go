@@ -2434,12 +2434,21 @@ func updateServerDate() {
 
 var (
 	serverDate     atomic.Pointer[[]byte]
+	serverSecond   atomic.Int64
 	serverDateOnce sync.Once // serverDateOnce.Do(updateServerDate)
 )
 
 func refreshServerDate() {
-	b := AppendHTTPDate(nil, time.Now())
+	now := time.Now()
+	b := AppendHTTPDate(nil, now)
 	serverDate.Store(&b)
+	serverSecond.Store(now.Unix())
+}
+
+// coarseSecond returns the second refreshServerDate last saw, zero until the
+// refresher has run once.
+func coarseSecond() int64 {
+	return serverSecond.Load()
 }
 
 // Write writes response header to w.
