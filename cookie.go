@@ -410,11 +410,17 @@ func (c *Cookie) ParseBytes(src []byte) error {
 			switch k[0] | 0x20 {
 			case 'm':
 				if caseInsensitiveCompare(strCookieMaxAge, k) {
+					// RFC 6265, section 5.2.2: a Max-Age of zero or less
+					// expires the cookie immediately.
+					negative := len(v) > 0 && v[0] == '-'
+					if negative {
+						v = v[1:]
+					}
 					maxAge, err := ParseUint(v)
 					if err != nil {
 						return err
 					}
-					if maxAge == 0 {
+					if maxAge == 0 || negative {
 						maxAge = -1
 					}
 					c.maxAge = maxAge
