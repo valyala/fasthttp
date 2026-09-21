@@ -5554,3 +5554,64 @@ func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestServerRequestBodyStreamWarningPipelined(t *testing.T) {
+	for _, reduceMemoryUsage := range []bool{false, true} {
+		reduceMemoryUsage := reduceMemoryUsage
+		t.Run(fmt.Sprintf("ReduceMemoryUsage_%v", reduceMemoryUsage), func(t *testing.T) {
+			tl := &testLogger{}
+			s := &Server{
+				StreamRequestBody: true,
+				ReduceMemoryUsage: reduceMemoryUsage,
+				Logger:            tl,
+				Handler: func(ctx *RequestCtx) {
+					_ = ctx.Request.Body()
+					ctx.SetStatusCode(StatusOK)
+				},
+			}
+
+			ln := fasthttputil.NewInmemoryListener()
+			defer ln.Close()
+
+			go func() {
+				_ = s.Serve(ln)
+			}()
+
+			c, err := ln.Dial()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			defer c.Close()
+
+			req := "POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\n\r\nhello" +
+				"POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\nConnection: close\r\n\r\nworld"
+			if _, err = c.Write([]byte(req)); err != nil {
+				t.Fatal(err)
+			}
+
+			br := bufio.NewReader(c)
+			for i := 0; i < 2; i++ {
+				var resp Response
+				if err := resp.Read(br); err != nil {
+					t.Fatalf("request %d: unexpected error: %v", i+1, err)
+				}
+				if resp.StatusCode() != StatusOK {
+					t.Fatalf("request %d: unexpected status code: %d", i+1, resp.StatusCode())
+				}
+			}
+
+			tl.lock.Lock()
+			out := tl.out
+			tl.lock.Unlock()
+
+			expectedWarning := "Request.Body() reads the entire stream into memory. " +
+				"Use Request.BodyStream() or Request.BodyWriteTo() instead to avoid out-of-memory errors.\n"
+			expectedOut := expectedWarning + expectedWarning
+
+			if out != expectedOut {
+				t.Fatalf("unexpected warnings: got %q, want %q (ReduceMemoryUsage=%v)", out, expectedOut, reduceMemoryUsage)
+			}
+		})
+	}
+}
+
