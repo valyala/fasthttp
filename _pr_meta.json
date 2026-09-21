@@ -1,0 +1,8 @@
+{
+  "repo": "valyala/fasthttp",
+  "number": 2350,
+  "base": "master",
+  "head": "fix-stream-body-warning",
+  "fork": "VedantMadane/fasthttp",
+  "title": "fix(request): warn when Request.Body() is called on streamed requests"
+}
