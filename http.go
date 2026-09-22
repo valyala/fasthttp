@@ -2151,7 +2151,7 @@ func (resp *Response) zstdBody(level int) {
 }
 
 type compressedBodyStream struct {
-	io.ReadCloser
+	r io.ReadCloser // compressed output, started by the first Read
 
 	bodyStream io.Reader
 	level      int
@@ -2159,6 +2159,7 @@ type compressedBodyStream struct {
 
 	done chan struct{}
 
+	startOnce     sync.Once
 	closeReadOnce sync.Once
 	closeReadErr  error
 
@@ -2167,9 +2168,27 @@ type compressedBodyStream struct {
 	closeErr       error
 }
 
+// Read starts compressing on the first call, so the body stream is read only
+// once the server writes the body, after the headers.
+func (s *compressedBodyStream) Read(p []byte) (int, error) {
+	s.startOnce.Do(func() { s.r = NewStreamReader(s.write) })
+	if s.r == nil {
+		return 0, io.ErrClosedPipe
+	}
+	return s.r.Read(p)
+}
+
 func (s *compressedBodyStream) Close() error {
 	s.closeReadOnce.Do(func() {
-		s.closeReadErr = s.ReadCloser.Close()
+		started := true
+		s.startOnce.Do(func() { started = false })
+		if !started {
+			// A body discarded unread, as for HEAD, is closed like an
+			// uncompressed one.
+			s.closeReadErr = s.closeOriginal(nil)
+			return
+		}
+		s.closeReadErr = s.r.Close()
 		if err := s.closeOriginalForDiscard(); s.closeReadErr == nil {
 			s.closeReadErr = err
 		}
@@ -2230,14 +2249,12 @@ func (s *compressedBodyStream) closeOriginalForDiscard() error {
 type compressBodyStream func(sw *bufio.Writer, bodyStream io.Reader, level int) error
 
 func newCompressedBodyStream(bodyStream io.Reader, level int, compress compressBodyStream) io.ReadCloser {
-	s := &compressedBodyStream{
+	return &compressedBodyStream{
 		bodyStream: bodyStream,
 		level:      level,
 		compress:   compress,
 		done:       make(chan struct{}),
 	}
-	s.ReadCloser = NewStreamReader(s.write)
-	return s
 }
 
 func compressBrotliBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) error {
