@@ -2687,6 +2687,8 @@ func (cw *chunkedBodyWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// writeBodyChunked flushes each chunk; the last one stays buffered for the
+// trailer section that completes the body.
 func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	// Frame WriteTo output directly, skipping copyBufPool, for bodies whose
 	// WriteTo is known to match reading.
@@ -2709,7 +2711,7 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 		if cw.err != nil {
 			return cw.err
 		}
-		return writeChunk(w, nil)
+		return writeChunkNoFlush(w, nil)
 	}
 
 	vbuf := copyBufPool.Get()
@@ -2724,7 +2726,7 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 				continue
 			}
 			if err == io.EOF {
-				if err = writeChunk(w, buf[:0]); err != nil {
+				if err = writeChunkNoFlush(w, nil); err != nil {
 					break
 				}
 				err = nil
