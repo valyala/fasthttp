@@ -4171,6 +4171,42 @@ func TestServerConnectionClose(t *testing.T) {
 	}
 }
 
+func TestServerConnectionCloseToken(t *testing.T) {
+	t.Parallel()
+
+	for _, v := range []string{"Close", "TE, close"} {
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {},
+		}
+
+		rw := &readWriter{}
+		rw.r.WriteString("GET /foo1 HTTP/1.1\r\nHost: google.com\r\nConnection: " + v + "\r\n\r\n")
+		rw.r.WriteString("GET /must/be/ignored HTTP/1.1\r\nHost: aaa.com\r\n\r\n")
+
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatalf("Unexpected error from serveConn: %v", err)
+		}
+
+		br := bufio.NewReader(&rw.w)
+		var resp Response
+
+		if err := resp.Read(br); err != nil {
+			t.Fatalf("Unexpected error when parsing response: %v", err)
+		}
+		if !resp.ConnectionClose() {
+			t.Fatalf("Connection: %q: expecting Connection: close header", v)
+		}
+
+		data, err := io.ReadAll(br)
+		if err != nil {
+			t.Fatalf("Unexpected error when reading remaining data: %v", err)
+		}
+		if len(data) != 0 {
+			t.Fatalf("Connection: %q: unexpected data read after the first response %q. Expecting %q", v, data, "")
+		}
+	}
+}
+
 func TestServerRequestNumAndTime(t *testing.T) {
 	t.Parallel()
 

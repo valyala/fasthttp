@@ -1441,8 +1441,12 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 			h.SetContentEncodingBytes(value)
 			return true
 		case caseInsensitiveCompare(strConnection, key):
-			if bytes.Equal(strClose, value) {
+			if hasHeaderValue(value, strClose) {
 				h.SetConnectionClose()
+				// value may be h.bufV, so the other options need their own buffer.
+				if v := appendHeaderValuesExcept(nil, value, strClose); len(v) > 0 {
+					h.setNonSpecial(key, v)
+				}
 			} else {
 				h.ResetConnectionClose()
 				h.setNonSpecial(key, value)
@@ -1502,8 +1506,12 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 			}
 			return true
 		case caseInsensitiveCompare(strConnection, key):
-			if bytes.Equal(strClose, value) {
+			if hasHeaderValue(value, strClose) {
 				h.SetConnectionClose()
+				// value may be h.bufV, so the other options need their own buffer.
+				if v := appendHeaderValuesExcept(nil, value, strClose); len(v) > 0 {
+					h.setNonSpecial(key, v)
+				}
 			} else {
 				h.ResetConnectionClose()
 				h.setNonSpecial(key, value)
@@ -3105,8 +3113,12 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strConnection) {
-				if bytes.Equal(s.value, strClose) {
+				if hasHeaderValue(s.value, strClose) {
 					h.connectionClose = true
+					h.bufV = appendHeaderValuesExcept(h.bufV[:0], s.value, strClose)
+					if len(h.bufV) > 0 {
+						h.h = appendArgBytes(h.h, s.key, h.bufV, argsHasValue)
+					}
 				} else {
 					h.connectionClose = false
 					h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
@@ -3295,8 +3307,12 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strConnection) {
-				if bytes.Equal(s.value, strClose) {
+				if hasHeaderValue(s.value, strClose) {
 					h.connectionClose = true
+					h.bufV = appendHeaderValuesExcept(h.bufV[:0], s.value, strClose)
+					if len(h.bufV) > 0 {
+						h.h = appendArgBytes(h.h, s.key, h.bufV, argsHasValue)
+					}
 				} else {
 					h.connectionClose = false
 					h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
@@ -3421,6 +3437,24 @@ func hasHeaderValue(s, value []byte) bool {
 		}
 	}
 	return false
+}
+
+// appendHeaderValuesExcept appends to dst the values in the comma-separated
+// list s other than value, joined by ", ".
+func appendHeaderValuesExcept(dst, s, value []byte) []byte {
+	n := len(dst)
+	var vs headerValueScanner
+	vs.b = s
+	for vs.next() {
+		if len(vs.value) == 0 || caseInsensitiveCompare(vs.value, value) {
+			continue
+		}
+		if len(dst) > n {
+			dst = append(dst, strCommaSpace...)
+		}
+		dst = append(dst, vs.value...)
+	}
+	return dst
 }
 
 func nextLine(b []byte) ([]byte, []byte, error) {
