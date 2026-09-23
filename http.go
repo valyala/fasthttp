@@ -1030,6 +1030,7 @@ func (req *Request) copyToSkipBody(dst *Request) {
 	dst.isTLS = req.isTLS
 
 	dst.UseHostHeader = req.UseHostHeader
+	dst.DisableRedirectPathNormalizing = req.DisableRedirectPathNormalizing
 	dst.logger = req.logger
 
 	// do not copy multipartForm - it will be automatically
