@@ -1441,7 +1441,7 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 			h.SetContentEncodingBytes(value)
 			return true
 		case caseInsensitiveCompare(strConnection, key):
-			if bytes.Equal(strClose, value) {
+			if hasHeaderValue(value, strClose) {
 				h.SetConnectionClose()
 			} else {
 				h.ResetConnectionClose()
@@ -1502,7 +1502,7 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 			}
 			return true
 		case caseInsensitiveCompare(strConnection, key):
-			if bytes.Equal(strClose, value) {
+			if hasHeaderValue(value, strClose) {
 				h.SetConnectionClose()
 			} else {
 				h.ResetConnectionClose()
@@ -3105,7 +3105,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strConnection) {
-				if bytes.Equal(s.value, strClose) {
+				if hasHeaderValue(s.value, strClose) {
 					h.connectionClose = true
 				} else {
 					h.connectionClose = false
@@ -3295,7 +3295,7 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strConnection) {
-				if bytes.Equal(s.value, strClose) {
+				if hasHeaderValue(s.value, strClose) {
 					h.connectionClose = true
 				} else {
 					h.connectionClose = false

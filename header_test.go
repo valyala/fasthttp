@@ -3224,6 +3224,63 @@ func testResponseHeaderConnectionClose(t *testing.T, connectionClose bool) {
 	}
 }
 
+func TestHeaderConnectionCloseVariants(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		header string
+		want   bool
+	}{
+		{"close", true},
+		{"Close", true},
+		{"CLOSE", true},
+		{"TE, close", true},
+		{"close, TE", true},
+		{"keep-alive", false},
+		{"keep-alive, TE", false},
+	}
+
+	for _, tc := range cases {
+		t.Run("reqRead/"+tc.header, func(t *testing.T) {
+			raw := "GET / HTTP/1.1\r\nHost: h\r\nConnection: " + tc.header + "\r\n\r\n"
+			var req Request
+			if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := req.ConnectionClose(); got != tc.want {
+				t.Errorf("req.ConnectionClose() for %q = %v, want %v", tc.header, got, tc.want)
+			}
+		})
+
+		t.Run("respRead/"+tc.header, func(t *testing.T) {
+			respRaw := "HTTP/1.1 200 OK\r\nConnection: " + tc.header + "\r\nContent-Length: 0\r\n\r\n"
+			var resp Response
+			if err := resp.Read(bufio.NewReader(strings.NewReader(respRaw))); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := resp.ConnectionClose(); got != tc.want {
+				t.Errorf("resp.ConnectionClose() for %q = %v, want %v", tc.header, got, tc.want)
+			}
+		})
+
+		t.Run("reqSet/"+tc.header, func(t *testing.T) {
+			var req Request
+			req.Header.Set("Connection", tc.header)
+			if got := req.ConnectionClose(); got != tc.want {
+				t.Errorf("req.Header.Set ConnectionClose() for %q = %v, want %v", tc.header, got, tc.want)
+			}
+		})
+
+		t.Run("respSet/"+tc.header, func(t *testing.T) {
+			var resp Response
+			resp.Header.Set("Connection", tc.header)
+			if got := resp.ConnectionClose(); got != tc.want {
+				t.Errorf("resp.Header.Set ConnectionClose() for %q = %v, want %v", tc.header, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRequestHeaderTooBig(t *testing.T) {
 	t.Parallel()
 
