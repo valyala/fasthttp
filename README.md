@@ -679,11 +679,10 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
   `string()` if you prefer working with strings instead of byte slices.
   But be aware that this has non-zero overhead.
 
-- _Which GO versions are supported by fasthttp?_
+- _Which Go versions are supported by fasthttp?_
 
   We support the same versions the Go team supports.
-  Currently that is Go 1.25.x and newer.
-  Older versions might work, but won't officially be supported.
+  Go 1.26.0 or newer is required. CI tests Go 1.26.x and Go 1.27.x.
 
 - _Please provide real benchmark data and server information_
 

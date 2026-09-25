@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -391,10 +390,6 @@ func TestFSFSByteRangeSingleThread(t *testing.T) {
 
 func TestFSFSCompressConcurrent(t *testing.T) {
 	t.Parallel()
-	// go 1.16 timeout may occur
-	if strings.HasPrefix(runtime.Version(), "go1.16") {
-		t.SkipNow()
-	}
 
 	stop := make(chan struct{})
 	defer close(stop)
@@ -993,7 +988,7 @@ func TestFSFSGenerateIndexOsDirFS(t *testing.T) {
 			h(&ctx)
 
 			if ctx.Response.StatusCode() != StatusOK {
-				t.Fatalf("unexpected status code %d for path %q. Expecting %d", ctx.Response.StatusCode(), ctx.Response.StatusCode(), StatusOK)
+				t.Fatalf("unexpected status code %d for path %q. Expecting %d", ctx.Response.StatusCode(), c, StatusOK)
 			}
 
 			if !bytes.Contains(ctx.Response.Body(), []byte("fasthttputil")) {
@@ -1032,7 +1027,7 @@ func TestFSFSGenerateIndexOsDirFS(t *testing.T) {
 			h(&ctx)
 
 			if ctx.Response.StatusCode() != StatusOK {
-				t.Fatalf("unexpected status code %d for path %q. Expecting %d", ctx.Response.StatusCode(), ctx.Response.StatusCode(), StatusOK)
+				t.Fatalf("unexpected status code %d for path %q. Expecting %d", ctx.Response.StatusCode(), c, StatusOK)
 			}
 
 			if !bytes.Contains(ctx.Response.Body(), []byte("fasthttputil")) {
