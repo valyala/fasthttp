@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -20,11 +21,22 @@ const (
 	CompressZstdBestCompression
 )
 
+const (
+	limitedZstdDecoderMemoryHeadroom uint64 = 8 * 1024 * 1024
+	maxZstdDecoderMemory             uint64 = 1 << 63
+)
+
 var (
 	zstdDecoderPool            sync.Pool
+	zstdLimitedDecoderPool     sync.Pool
 	realZstdWriterPoolMap      = newCompressWriterPoolMap()
 	stacklessZstdWriterPoolMap = newCompressWriterPoolMap()
 )
+
+type limitedZstdReader struct {
+	zr        *zstd.Decoder
+	maxMemory uint64
+}
 
 func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 	v := zstdDecoderPool.Get()
@@ -40,6 +52,49 @@ func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 
 func releaseZstdReader(zr *zstd.Decoder) {
 	zstdDecoderPool.Put(zr)
+}
+
+func acquireLimitedZstdReader(r io.Reader, maxBodySize int) (*limitedZstdReader, error) {
+	requiredMemory := uint64(max(maxBodySize, zstd.MinWindowSize))
+	if v := zstdLimitedDecoderPool.Get(); v != nil {
+		limited := v.(*limitedZstdReader) //nolint:forcetypeassert
+		// Decoder caps are rounded up to 8 MiB buckets below. These bounds
+		// accept exactly the bucket a fresh decoder would use for this limit.
+		if limited.maxMemory >= requiredMemory &&
+			limited.maxMemory-requiredMemory < limitedZstdDecoderMemoryHeadroom {
+			if err := limited.zr.Reset(r); err != nil {
+				limited.zr.Close()
+				return nil, err
+			}
+			return limited, nil
+		}
+		limited.zr.Close()
+	}
+
+	maxMemory := requiredMemory
+	if remainder := requiredMemory % limitedZstdDecoderMemoryHeadroom; remainder != 0 {
+		maxMemory = min(
+			requiredMemory+limitedZstdDecoderMemoryHeadroom-remainder,
+			maxZstdDecoderMemory,
+		)
+	}
+	zr, err := zstd.NewReader(
+		r,
+		zstd.WithDecoderMaxMemory(maxMemory),
+		zstd.WithDecoderConcurrency(1),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &limitedZstdReader{zr: zr, maxMemory: maxMemory}, nil
+}
+
+func releaseLimitedZstdReader(limited *limitedZstdReader) {
+	if err := limited.zr.Reset(nil); err != nil {
+		limited.zr.Close()
+		return
+	}
+	zstdLimitedDecoderPool.Put(limited)
 }
 
 func acquireStacklessZstdWriter(w io.Writer, compressLevel int) stackless.Writer {
@@ -159,12 +214,29 @@ func writeUnzstd(w io.Writer, p []byte, maxBodySize int) (int, error) {
 	}
 
 	r := &byteSliceReader{b: p}
-	zr, err := acquireZstdReader(r)
+	var zr *zstd.Decoder
+	var limited *limitedZstdReader
+	var err error
+	if maxBodySize > 0 {
+		limited, err = acquireLimitedZstdReader(r, maxBodySize)
+		if limited != nil {
+			zr = limited.zr
+		}
+	} else {
+		zr, err = acquireZstdReader(r)
+	}
 	if err != nil {
 		return 0, err
 	}
 	n, err := copyZeroAllocWithLimit(w, zr, maxBodySize)
-	releaseZstdReader(zr)
+	if maxBodySize > 0 {
+		releaseLimitedZstdReader(limited)
+		if errors.Is(err, zstd.ErrWindowSizeExceeded) || errors.Is(err, zstd.ErrDecoderSizeExceeded) {
+			err = ErrBodyTooLarge
+		}
+	} else {
+		releaseZstdReader(zr)
+	}
 	nn := int(n)
 	if int64(nn) != n {
 		return 0, fmt.Errorf("too much data unzstd: %d", n)
