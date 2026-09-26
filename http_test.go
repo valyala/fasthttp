@@ -4703,4 +4703,3 @@ func TestRequestBodyStreamWarning(t *testing.T) {
 		t.Fatalf("unexpected log message: got %q, want %q", out, expectedWarning)
 	}
 }
-

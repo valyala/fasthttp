@@ -5557,7 +5557,6 @@ func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
 
 func TestServerRequestBodyStreamWarningPipelined(t *testing.T) {
 	for _, reduceMemoryUsage := range []bool{false, true} {
-		reduceMemoryUsage := reduceMemoryUsage
 		t.Run(fmt.Sprintf("ReduceMemoryUsage_%v", reduceMemoryUsage), func(t *testing.T) {
 			tl := &testLogger{}
 			s := &Server{
@@ -5590,7 +5589,7 @@ func TestServerRequestBodyStreamWarningPipelined(t *testing.T) {
 			}
 
 			br := bufio.NewReader(c)
-			for i := 0; i < 2; i++ {
+			for i := range 2 {
 				var resp Response
 				if err := resp.Read(br); err != nil {
 					t.Fatalf("request %d: unexpected error: %v", i+1, err)
@@ -5614,4 +5613,3 @@ func TestServerRequestBodyStreamWarningPipelined(t *testing.T) {
 		})
 	}
 }
-
