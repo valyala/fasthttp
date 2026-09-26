@@ -751,8 +751,15 @@ func normalizePath(dst, src []byte) []byte {
 
 // RequestURI returns RequestURI - i.e. URI without Scheme and Host.
 func (u *URI) RequestURI() []byte {
+	return u.requestURIBytes(u.DisablePathNormalizing)
+}
+
+// requestURIBytes is like RequestURI, with path normalization disabled
+// whenever disablePathNormalizing is set, whatever u.DisablePathNormalizing
+// holds.
+func (u *URI) requestURIBytes(disablePathNormalizing bool) []byte {
 	var dst []byte
-	if u.DisablePathNormalizing {
+	if disablePathNormalizing {
 		dst = u.requestURI[:0]
 		path := u.PathOriginal()
 		if len(path) == 0 {

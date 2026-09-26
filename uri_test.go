@@ -639,6 +639,55 @@ func TestURIRequestURIEmptyPathWithQuery(t *testing.T) {
 	}
 }
 
+func TestURIRequestURIBytes(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		uri        string
+		normalized string
+		original   string
+	}{
+		// An authority-form CONNECT target is parsed as a path without a
+		// leading slash.
+		{uri: "example.com:443", normalized: "/example.com:443", original: "example.com:443"},
+		{uri: "[::1]:443", normalized: "%5B::1%5D:443", original: "[::1]:443"},
+		{uri: "//example.com:443", normalized: "/example.com:443", original: "//example.com:443"},
+		{uri: "/a//b/../c?x=y", normalized: "/a/c?x=y", original: "/a//b/../c?x=y"},
+		{uri: "", normalized: "/", original: "/"},
+	} {
+		t.Run(tc.uri, func(t *testing.T) {
+			t.Parallel()
+
+			var u URI
+			if err := u.Parse([]byte("example.com:443"), []byte(tc.uri)); err != nil {
+				t.Fatal(err)
+			}
+
+			// The argument decides the normalization, whatever
+			// DisablePathNormalizing holds.
+			for _, disable := range []bool{false, true} {
+				u.DisablePathNormalizing = disable
+				if got := string(u.requestURIBytes(false)); got != tc.normalized {
+					t.Fatalf("unexpected normalized request uri with DisablePathNormalizing=%v %q. Expecting %q", disable, got, tc.normalized)
+				}
+				if got := string(u.requestURIBytes(true)); got != tc.original {
+					t.Fatalf("unexpected original request uri with DisablePathNormalizing=%v %q. Expecting %q", disable, got, tc.original)
+				}
+			}
+
+			// RequestURI keeps following DisablePathNormalizing.
+			u.DisablePathNormalizing = false
+			if got := string(u.RequestURI()); got != tc.normalized {
+				t.Fatalf("unexpected RequestURI %q. Expecting %q", got, tc.normalized)
+			}
+			u.DisablePathNormalizing = true
+			if got := string(u.RequestURI()); got != tc.original {
+				t.Fatalf("unexpected RequestURI with DisablePathNormalizing %q. Expecting %q", got, tc.original)
+			}
+		})
+	}
+}
+
 func TestURIRequestURIAfterDeletingAllQueryArgs(t *testing.T) {
 	t.Parallel()
 

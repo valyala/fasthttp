@@ -170,10 +170,20 @@ func (req *Request) SetRequestURIBytes(requestURI []byte) {
 // RequestURI returns request's URI.
 func (req *Request) RequestURI() []byte {
 	if req.parsedURI {
-		requestURI := req.uri.RequestURI()
+		requestURI := req.requestURIFromURI()
 		req.SetRequestURIBytes(requestURI)
 	}
 	return req.Header.RequestURI()
+}
+
+// requestURIFromURI returns the request target rebuilt from the parsed URI.
+//
+// The target of a CONNECT request names the authority to tunnel to rather
+// than a path (RFC 9112, Section 3.2.3), so it is rebuilt without path
+// normalization, which would turn the authority-form "example.com:443" into
+// the origin-form "/example.com:443".
+func (req *Request) requestURIFromURI() []byte {
+	return req.uri.requestURIBytes(req.uri.DisablePathNormalizing || req.Header.IsConnect())
 }
 
 // StatusCode returns response status code.
@@ -1820,7 +1830,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 		} else if !req.UseHostHeader {
 			req.Header.SetHostBytes(host)
 		}
-		req.Header.SetRequestURIBytes(uri.RequestURI())
+		req.Header.SetRequestURIBytes(req.requestURIFromURI())
 
 		if len(uri.username) > 0 {
 			// RequestHeader.SetBytesKV only uses RequestHeader.bufKV.key
