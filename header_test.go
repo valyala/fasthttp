@@ -1965,6 +1965,69 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 	}
 }
 
+func TestHeaderConnectionCloseToken(t *testing.T) {
+	t.Parallel()
+
+	// RFC 9110 section 7.6.1: Connection is a comma-separated list of
+	// case-insensitive options, and close anywhere in it closes the connection.
+	// The other options are kept.
+	for _, tc := range []struct {
+		value string
+		kept  string
+		close bool
+	}{
+		{value: "close", kept: "", close: true},
+		{value: "Close", kept: "", close: true},
+		{value: "CLOSE", kept: "", close: true},
+		{value: "TE, close", kept: "TE", close: true},
+		{value: "close, TE", kept: "TE", close: true},
+		{value: "keep-alive,close", kept: "keep-alive", close: true},
+		{value: "a, Close, b", kept: "a, b", close: true},
+		{value: "keep-alive", kept: "keep-alive", close: false},
+		{value: "closed", kept: "closed", close: false},
+		{value: "TE, xclose", kept: "TE, xclose", close: false},
+		{value: "Upgrade", kept: "Upgrade", close: false},
+	} {
+		check := func(what string, connectionClose bool, header []byte) {
+			t.Helper()
+			if connectionClose != tc.close {
+				t.Errorf("%s(Connection: %q): ConnectionClose()=%v, want %v", what, tc.value, connectionClose, tc.close)
+			}
+			var kept []string
+			for line := range strings.SplitSeq(string(header), "\r\n") {
+				if v, ok := strings.CutPrefix(line, "Connection: "); ok && v != "close" {
+					kept = append(kept, v)
+				}
+			}
+			if got := strings.Join(kept, "; "); got != tc.kept {
+				t.Errorf("%s(Connection: %q): other Connection options %q, want %q", what, tc.value, got, tc.kept)
+			}
+		}
+
+		var req RequestHeader
+		s := "GET / HTTP/1.1\r\nHost: a\r\nConnection: " + tc.value + "\r\n\r\n"
+		if err := req.Read(bufio.NewReader(strings.NewReader(s))); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		check("request Read", req.ConnectionClose(), req.Header())
+
+		var resp ResponseHeader
+		s = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: " + tc.value + "\r\n\r\n"
+		if err := resp.Read(bufio.NewReader(strings.NewReader(s))); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		check("response Read", resp.ConnectionClose(), resp.Header())
+
+		req.Reset()
+		req.Set(HeaderConnection, tc.value)
+		check("request Set", req.ConnectionClose(), req.Header())
+
+		resp.Reset()
+		resp.Set(HeaderConnection, tc.value)
+		check("response Set", resp.ConnectionClose(), resp.Header())
+	}
+}
+
 func TestRequestHeaderSetCookie(t *testing.T) {
 	t.Parallel()
 
