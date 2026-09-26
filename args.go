@@ -463,6 +463,32 @@ func appendArgBytes(h []argsKV, key, value []byte, noValue bool) []argsKV {
 	return appendArg(h, b2s(key), b2s(value), noValue)
 }
 
+// appendArgNormalized stores a parsed header field, canonicalizing the key
+// while it is copied so the source bytes stay untouched.
+func appendArgNormalized(args []argsKV, key, value []byte, disableNormalizing bool) []argsKV {
+	var kv *argsKV
+	args, kv = allocArg(args)
+	if disableNormalizing {
+		kv.key = append(kv.key[:0], key...)
+	} else {
+		dst := kv.key[:0]
+		upper := true
+		for _, c := range key {
+			if upper {
+				c = toUpperTable[c]
+			} else {
+				c = toLowerTable[c]
+			}
+			upper = c == '-'
+			dst = append(dst, c)
+		}
+		kv.key = dst
+	}
+	kv.value = append(kv.value[:0], value...)
+	kv.noValue = argsHasValue
+	return args
+}
+
 func appendArg(args []argsKV, key, value string, noValue bool) []argsKV {
 	var kv *argsKV
 	args, kv = allocArg(args)

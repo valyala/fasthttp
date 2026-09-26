@@ -5554,3 +5554,60 @@ func TestRequestCtxInitShouldNotBeCanceledIssue1879(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestServerKeepAliveRequestStateIsolation(t *testing.T) {
+	t.Parallel()
+
+	var requestNum int
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			requestNum++
+			switch requestNum {
+			case 1:
+				// Contaminate every piece of per-request state a handler can reach.
+				ctx.SetUserValue("k", "v")
+				ctx.Request.Header.DisableNormalizing()
+				ctx.Request.Header.DisableSpecialHeader()
+				ctx.Request.Header.SetNoDefaultContentType(true)
+				ctx.URI().SetPath("/mutated")
+				ctx.URI().QueryArgs().Add("injected", "1")
+				ctx.PostArgs().Add("injected", "1")
+				ctx.Request.SetBodyString("contaminated")
+				ctx.Request.UseHostHeader = true
+			case 2:
+				if v := ctx.UserValue("k"); v != nil {
+					t.Errorf("user value leaked: %v", v)
+				}
+				if string(ctx.Path()) != "/second" {
+					t.Errorf("unexpected path %q", ctx.Path())
+				}
+				if ctx.URI().QueryArgs().Has("injected") {
+					t.Error("query args leaked")
+				}
+				if ctx.PostArgs().Has("injected") {
+					t.Error("post args leaked")
+				}
+				if len(ctx.Request.Body()) != 0 {
+					t.Errorf("body leaked: %q", ctx.Request.Body())
+				}
+				if ctx.Request.UseHostHeader {
+					t.Error("UseHostHeader leaked")
+				}
+				if name := ctx.Request.Header.Peek("x-lower-case"); string(name) != "yes" {
+					t.Errorf("normalization not restored: %q", name)
+				}
+			}
+			ctx.SetBodyString("ok")
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /first HTTP/1.1\r\nHost: a\r\n\r\n")
+	rw.r.WriteString("GET /second HTTP/1.1\r\nHost: a\r\nX-Lower-Case: yes\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if requestNum != 2 {
+		t.Fatalf("served %d requests, expecting 2", requestNum)
+	}
+}
