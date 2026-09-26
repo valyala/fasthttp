@@ -48,11 +48,39 @@ func (c *clientConn) writeRequest(stream *clientStream, keepOpen bool, deadline 
 	if keepOpen || !hasBody {
 		return nil
 	}
+	var err error
 	if reader == nil {
-		return c.sendData(stream, body, true, deadline)
+		err = c.sendData(stream, body, true, deadline)
+	} else {
+		defer req.CloseBodyStream() //nolint:errcheck
+		err = c.sendRequestStream(stream, reader, requestContentLength(&req.Header), deadline)
 	}
-	defer req.CloseBodyStream() //nolint:errcheck
-	return c.sendRequestStream(stream, reader, requestContentLength(&req.Header), deadline)
+	if errors.Is(err, errResponseComplete) {
+		return c.abandonRequestBody(stream)
+	}
+	return err
+}
+
+// abandonRequestBody stops a request body once its response is complete. A
+// reset, unlike an early END_STREAM, cannot pass for a shorter body.
+func (c *clientConn) abandonRequestBody(stream *clientStream) error {
+	c.mu.Lock()
+	if stream.localClosed {
+		c.mu.Unlock()
+		return nil
+	}
+	stream.localClosed = true
+	streamID := stream.id
+	c.mu.Unlock()
+	// Written before the stream is finalized: an idle drain must not close
+	// the connection under the reset.
+	err := c.writeControl(func() error {
+		return c.framer.WriteRSTStream(streamID, xhttp2.ErrCodeCancel)
+	})
+	c.mu.Lock()
+	c.maybeFinalizeStreamLocked(stream)
+	c.mu.Unlock()
+	return err
 }
 
 func (c *clientConn) writeRequestHeaders(
@@ -183,10 +211,13 @@ func (c *clientConn) sendRequestStream(
 	var sent int64
 	for {
 		c.mu.Lock()
-		responseStarted := stream.responseHeader || stream.remoteClosed
+		streamErr, responseComplete := stream.err, stream.remoteClosed
 		c.mu.Unlock()
-		if responseStarted {
-			return c.sendData(stream, nil, true, deadline)
+		if streamErr != nil {
+			return streamErr
+		}
+		if responseComplete {
+			return errResponseComplete
 		}
 		n, readErr := reader.Read(buffer)
 		if n > 0 {
@@ -297,6 +328,10 @@ func (c *clientConn) waitForSendWindow(stream *clientStream, data []byte, deadli
 		if stream.localClosed {
 			c.mu.Unlock()
 			return errClientStreamClosed
+		}
+		if stream.remoteClosed && !stream.isOpenStream {
+			c.mu.Unlock()
+			return errResponseComplete
 		}
 		if len(data) == 0 || c.send.window > 0 && stream.send.window > 0 {
 			c.mu.Unlock()

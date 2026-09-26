@@ -21,6 +21,7 @@ var (
 	errClientConnClosed   = errors.New("http2: client connection closed")
 	errClientPoolClosed   = errors.New("http2: client connection pool closed")
 	errClientStreamClosed = errors.New("http2: client stream closed")
+	errResponseComplete   = errors.New("http2: response completed before the request body")
 	// ErrRefusedStream matches a StreamError carrying REFUSED_STREAM.
 	ErrRefusedStream = errors.New("http2: stream refused")
 	// ErrConnectionDraining matches streams rejected by a received GOAWAY.

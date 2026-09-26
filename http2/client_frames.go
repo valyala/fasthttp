@@ -517,6 +517,8 @@ func (c *clientConn) endResponseLocked(stream *clientStream, responseErr error) 
 		responseErr = errors.New("http2: response body length doesn't match content-length")
 	}
 	stream.remoteClosed = true
+	// A request body still waiting for flow control stops here.
+	c.signalLocked()
 	if stream.responseBody != nil {
 		stream.responseBody.closeWithError(responseErr)
 	}

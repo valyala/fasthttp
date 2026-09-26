@@ -11,6 +11,7 @@ import (
 	"math"
 	"net"
 	stdhttp "net/http"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1829,5 +1830,69 @@ func TestIdleConnectionClosesAfterMaxIdleConnDuration(t *testing.T) {
 			t.Fatal("idle connection outlived MaxIdleConnDuration")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+type pacedReader struct {
+	r io.Reader
+}
+
+func (p *pacedReader) Read(b []byte) (int, error) {
+	time.Sleep(time.Millisecond)
+	return p.r.Read(b[:min(len(b), 16<<10)])
+}
+
+// A response that starts before the request body is sent must not cut the
+// upload short, with or without a declared length.
+func TestClientStreamedBodyOutlivesResponseHeaders(t *testing.T) {
+	const size = 1 << 20
+	for _, length := range []int{size, -1} {
+		server := &fasthttp.Server{
+			StreamRequestBody: true,
+			Handler: func(ctx *fasthttp.RequestCtx) {
+				body := ctx.RequestBodyStream()
+				ctx.SetBodyStreamWriter(func(w *bufio.Writer) {
+					n, _ := io.Copy(io.Discard, body)
+					_, _ = w.WriteString(strconv.FormatInt(n, 10))
+				})
+			},
+		}
+		testServer := newTestServer(t, server, ServerConfig{})
+		hc := newPriorKnowledgeHostClient(t, testServer.listener.Addr().String())
+		var req fasthttp.Request
+		var resp fasthttp.Response
+		req.SetRequestURI(testServer.URL("/upload"))
+		req.Header.SetMethod(fasthttp.MethodPost)
+		req.SetBodyStream(&pacedReader{r: bytes.NewReader(make([]byte, size))}, length)
+		if err := hc.DoTimeout(&req, &resp, 10*time.Second); err != nil {
+			t.Fatalf("length %d: DoTimeout() error: %v", length, err)
+		}
+		if got := string(resp.Body()); got != strconv.Itoa(size) {
+			t.Fatalf("length %d: server read %s bytes, want %d", length, got, size)
+		}
+	}
+}
+
+// A server may answer without reading the body; the client then returns the
+// response instead of waiting for flow control that never comes.
+func TestClientReturnsResponseToUnreadBody(t *testing.T) {
+	server := &fasthttp.Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			ctx.SetStatusCode(fasthttp.StatusRequestEntityTooLarge)
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	hc := newPriorKnowledgeHostClient(t, testServer.listener.Addr().String())
+	var req fasthttp.Request
+	var resp fasthttp.Response
+	req.SetRequestURI(testServer.URL("/upload"))
+	req.Header.SetMethod(fasthttp.MethodPost)
+	req.SetBody(make([]byte, 8<<20))
+	if err := hc.DoTimeout(&req, &resp, 5*time.Second); err != nil {
+		t.Fatalf("DoTimeout() error: %v", err)
+	}
+	if resp.StatusCode() != fasthttp.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode())
 	}
 }
