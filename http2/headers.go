@@ -209,6 +209,9 @@ func (h *headerEncoder) encodeStatusHeaders(
 	if len(serverDate) != 0 {
 		headerSize += uint64(len(fasthttp.HeaderDate) + len(serverDate) + 32)
 	}
+	if maxHeaderListSize != 0 && headerSize > maxHeaderListSize {
+		return nil, errResponseHeaderTooLarge
+	}
 	fields := (*scratch)[:0]
 	var validateErr error
 	header.All()(func(key, value []byte) bool {

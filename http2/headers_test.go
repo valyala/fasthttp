@@ -237,3 +237,18 @@ func TestPopulateRequestRoutesSpecialHeaders(t *testing.T) {
 		t.Errorf("Peek(X-Custom) = %q", got)
 	}
 }
+
+// The :status and date fields alone count against the peer's limit.
+func TestOutboundStatusHeadersCountMandatoryFields(t *testing.T) {
+	var enc headerEncoder
+	enc.initHeaderEncoder(defaultHeaderTableSize)
+	var header fasthttp.ResponseHeader
+	header.SetNoDefaultContentType(true)
+	if _, err := enc.encodeStatusHeaders("200", &header, statusHeaderOptions{
+		serverDate:        []byte("Sun, 27 Sep 2026 00:00:00 GMT"),
+		skipContentLength: true,
+		maxHeaderListSize: 64,
+	}); !errors.Is(err, errResponseHeaderTooLarge) {
+		t.Fatalf("encodeStatusHeaders() error = %v, want header list limit error", err)
+	}
+}
