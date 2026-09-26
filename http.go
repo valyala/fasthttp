@@ -2970,17 +2970,18 @@ func readBodyIdentity(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, err
 // otherwise pin an allocation sized to an arbitrarily large declared
 // length, per connection, for as long as it trickles bytes in. See #2037.
 //
-// This matches DefaultMaxRequestBodySize deliberately: readBody already
-// rejects any declared Content-Length above the server's configured
-// MaxRequestBodySize before appendBodyFixedSize is ever called, so a
-// server running with the default (or a smaller) limit -- the
-// overwhelming majority of real deployments -- always takes the
-// unmodified fast path below, with zero behavior or performance change.
-// Only a server explicitly configured to accept larger bodies (an opt-in
-// choice) exercises the bounded-doubling path, where some CPU/allocation
-// overhead in exchange for not pinning unbounded memory is an expected
-// and reasonable cost of that choice.
-const appendBodyFixedSizeSmallThreshold = DefaultMaxRequestBodySize
+// Deliberately NOT tied to DefaultMaxRequestBodySize (4 MiB): the #2037
+// repro itself runs a default-configured server (no MaxRequestBodySize
+// override at all), so every request a default server ever accepts -- up
+// to 4 MiB -- would still take the unbounded fast path if the threshold
+// were that large, leaving the reported attack completely unmitigated for
+// the overwhelming majority of real deployments. 64 KiB matches the value
+// the community converged on across several rounds of benchmarking in the
+// issue thread: comfortably larger than a typical small JSON/form body (so
+// the common case still gets the single-allocation fast path), while
+// bounding a slow/stalled connection's pinned memory to a small, fixed
+// amount regardless of what limit the server is configured with.
+const appendBodyFixedSizeSmallThreshold = 64 * 1024
 
 func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	if n == 0 {
@@ -3025,17 +3026,23 @@ func appendBodyFixedSizeSmall(r *bufio.Reader, dst []byte, n int) ([]byte, error
 }
 
 // appendBodyFixedSizeLarge handles declared body sizes above
-// appendBodyFixedSizeSmallThreshold -- reachable only when a server is
-// explicitly configured with a MaxRequestBodySize larger than the default.
+// appendBodyFixedSizeSmallThreshold. With the 64 KiB threshold this is the
+// routine path for any body between that and DefaultMaxRequestBodySize (4
+// MiB) on an otherwise default-configured server -- not, as an earlier
+// version of this comment claimed, something reachable only when
+// MaxRequestBodySize is explicitly raised above the default.
+//
 // Rather than pre-allocating the full (unverified) declared length up
 // front, it safely allocates up to appendBodyFixedSizeSmallThreshold
 // immediately (that much is already established as safe to allocate
 // unconditionally) and grows the rest by doubling as data actually
 // arrives -- the same bounded-growth strategy readBodyIdentity (above)
-// already uses for reads of untrusted length. At any point, cap(dst)
-// stays proportional to bytes actually read, not to the client's declared
-// Content-Length, so a slow/stalled connection can only ever pin an
-// amount bounded by appendBodyFixedSizeSmallThreshold plus its own actual
+// already uses for reads of untrusted length. For a fresh dst (the case
+// #2037 is actually about: a new connection/buffer with no prior
+// capacity), any *new* memory this function allocates stays proportional
+// to bytes actually read, not to the client's declared Content-Length, so
+// a slow/stalled connection can only ever cause a *fresh allocation*
+// bounded by appendBodyFixedSizeSmallThreshold plus its own actual
 // progress. See #2037.
 //
 // An earlier version of this fix read through a small scratch buffer and
@@ -3045,6 +3052,26 @@ func appendBodyFixedSizeSmall(r *bufio.Reader, dst []byte, n int) ([]byte, error
 // more copy-and-reallocate cycles than doubling does). Doubling keeps that
 // amortized to O(n) total copied bytes, matching the original fast path's
 // characteristics for the common "body arrives promptly" case.
+//
+// dst is frequently a buffer pooled across requests/connections (see
+// Request.bodyBuffer, backed by bytebufferpool -- fasthttp deliberately
+// keeps a connection's buffers around at their peak size across requests
+// rather than shrinking them back down; see the maintainer's own comment
+// on #2037 explaining this is intended, not itself the bug), so a
+// caller-provided dst may already carry more capacity than our small
+// initial allocation -- e.g. a prior large request on the same pooled
+// connection. The growth loop below reuses that capacity via a plain
+// reslice, at each doubling step, instead of discarding it for a smaller
+// fresh allocation, whenever it's already sufficient -- this is enough on
+// its own to reach the "no wasted reallocation" behavior a pooled buffer
+// needs: capacity already covering an early doubling step lets every
+// later step in the same call reuse it too. The initial allocation itself
+// deliberately stays bounded to appendBodyFixedSizeSmallThreshold
+// regardless of how much more capacity dst might already have, keeping
+// this function's own reasoning simple (every request starts the same
+// bounded way; only actual, verified progress ever grows past it) rather
+// than adding a separate "jump straight to existing capacity" special
+// case up front.
 func appendBodyFixedSizeLarge(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	offset := len(dst)
 	target := offset + n
@@ -3081,9 +3108,16 @@ func appendBodyFixedSizeLarge(r *bufio.Reader, dst []byte, n int) ([]byte, error
 			if newLen > target {
 				newLen = target
 			}
-			b := make([]byte, newLen)
-			copy(b, dst)
-			dst = b
+			if cap(dst) >= newLen {
+				// Already-available capacity (e.g. from a pooled buffer
+				// larger than our doubling has reached yet) -- reslice
+				// instead of allocating and copying into a new one.
+				dst = dst[:newLen]
+			} else {
+				b := make([]byte, newLen)
+				copy(b, dst)
+				dst = b
+			}
 		}
 	}
 }
