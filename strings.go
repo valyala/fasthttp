@@ -39,6 +39,7 @@ var (
 	strHost               = []byte(HeaderHost)
 	strReferer            = []byte(HeaderReferer)
 	strServer             = []byte(HeaderServer)
+	strServerPrefix       = []byte("Server: ")
 	strTransferEncoding   = []byte(HeaderTransferEncoding)
 	strContentEncoding    = []byte(HeaderContentEncoding)
 	strAcceptEncoding     = []byte(HeaderAcceptEncoding)

@@ -4259,3 +4259,29 @@ func TestURIHostMemoIsBounded(t *testing.T) {
 		t.Fatalf("memoized host %q", u.Host())
 	}
 }
+
+func TestResponseHeaderSetServerOverridesDefault(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	line := []byte("Server: edge\r\n")
+	h.serverDefaultLine = line
+	if string(h.Server()) != "edge" {
+		t.Fatalf("Server()=%q", h.Server())
+	}
+	// The line is shared by every connection; a handler writing into what
+	// Server() returned must not reach it.
+	h.Server()[0] = 'X'
+	if string(line) != "Server: edge\r\n" {
+		t.Fatalf("shared line changed to %q", line)
+	}
+	if !bytes.Contains(h.Header(), []byte("Server: Xdge\r\n")) {
+		t.Fatalf("header %q lost the handler's edit", h.Header())
+	}
+	// An explicit setter wins, including the empty value, as it did when the
+	// default was a plain Set.
+	h.SetServer("")
+	if len(h.Server()) != 0 {
+		t.Errorf("Server()=%q after SetServer(\"\"), expecting empty", h.Server())
+	}
+}

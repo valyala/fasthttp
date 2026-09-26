@@ -55,6 +55,10 @@ type ResponseHeader struct {
 	contentEncoding []byte
 	server          []byte
 
+	// serverDefaultLine is the preformed "Server: name\r\n" emitted when
+	// server is empty. The serve loop points it at the Server's cached line.
+	serverDefaultLine []byte
+
 	statusCode int
 
 	noDefaultDate bool
@@ -334,16 +338,35 @@ func (h *ResponseHeader) addVaryBytes(value []byte) {
 
 // Server returns Server header value.
 func (h *ResponseHeader) Server() []byte {
+	if len(h.server) == 0 && len(h.serverDefaultLine) != 0 {
+		// The default line is shared by every connection; hand out a copy.
+		line := h.serverDefaultLine
+		h.server = append(h.server[:0], line[len(strServerPrefix):len(line)-len(strCRLF)]...)
+	}
 	return h.server
+}
+
+// hasServer reports whether a Server header will be written.
+func (h *ResponseHeader) hasServer() bool {
+	return len(h.server) != 0 || len(h.serverDefaultLine) != 0
+}
+
+// setServerDefault installs the cached default line, replacing an explicit
+// value the way SetServer did.
+func (h *ResponseHeader) setServerDefault(line []byte) {
+	h.server = h.server[:0]
+	h.serverDefaultLine = line
 }
 
 // SetServer sets Server header value.
 func (h *ResponseHeader) SetServer(server string) {
+	h.serverDefaultLine = nil
 	h.server = initHeaderValueString(h.server, server)
 }
 
 // SetServerBytes sets Server header value.
 func (h *ResponseHeader) SetServerBytes(server []byte) {
+	h.serverDefaultLine = nil
 	h.server = initHeaderValueBytes(h.server, server)
 }
 
@@ -1006,6 +1029,7 @@ func (h *ResponseHeader) resetSkipNormalize() {
 	h.contentType = h.contentType[:0]
 	h.contentEncoding = h.contentEncoding[:0]
 	h.server = h.server[:0]
+	h.serverDefaultLine = nil
 
 	h.h = h.h[:0]
 	h.cookies = h.cookies[:0]
@@ -1070,6 +1094,7 @@ func (h *ResponseHeader) CopyTo(dst *ResponseHeader) {
 	dst.statusMessage = append(dst.statusMessage, h.statusMessage...)
 	dst.contentEncoding = append(dst.contentEncoding, h.contentEncoding...)
 	dst.server = append(dst.server, h.server...)
+	dst.serverDefaultLine = h.serverDefaultLine
 }
 
 // CopyTo copies all the headers to dst.
@@ -1372,6 +1397,7 @@ func (h *ResponseHeader) del(key []byte) {
 		h.contentEncoding = h.contentEncoding[:0]
 	case HeaderServer:
 		h.server = h.server[:0]
+		h.serverDefaultLine = nil
 	case HeaderSetCookie:
 		h.cookies = h.cookies[:0]
 	case HeaderContentLength:
@@ -2453,16 +2479,22 @@ func coarseSecond() int64 {
 
 // Write writes response header to w.
 func (h *ResponseHeader) Write(w *bufio.Writer) error {
+	_, err := w.Write(h.serialize(w))
+	return err
+}
+
+// serialize returns the header bytes: built in the writer's buffer when it
+// has room for the largest header so far, in bufV otherwise. A build that
+// outgrows the writer's buffer becomes bufV, so the next one is built there.
+func (h *ResponseHeader) serialize(w *bufio.Writer) []byte {
 	if w.Available() < cap(h.bufV) {
-		_, err := w.Write(h.Header())
-		return err
+		return h.Header()
 	}
 	buf := h.AppendBytes(w.AvailableBuffer())
 	if cap(buf) != w.Available() {
 		h.bufV = buf
 	}
-	_, err := w.Write(buf)
-	return err
+	return buf
 }
 
 // WriteTo writes response header to w.
@@ -2533,9 +2565,10 @@ func (h *ResponseHeader) appendStatusLine(dst []byte) []byte {
 func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	dst = h.appendStatusLine(dst[:0])
 
-	server := h.Server()
-	if len(server) != 0 {
-		dst = appendHeaderLine(dst, strServer, server)
+	if len(h.server) != 0 {
+		dst = appendHeaderLine(dst, strServer, h.server)
+	} else if len(h.serverDefaultLine) != 0 {
+		dst = append(dst, h.serverDefaultLine...)
 	}
 
 	if !h.noDefaultDate {
