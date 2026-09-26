@@ -1021,6 +1021,7 @@ func (h *RequestHeader) resetSkipNormalize() {
 	h.cookiesCollected = false
 
 	h.rawHeaders = h.rawHeaders[:0]
+	h.lineEnds = h.lineEnds[:0]
 }
 
 func (h *header) copyTo(dst *header) {

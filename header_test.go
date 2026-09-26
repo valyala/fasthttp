@@ -4324,6 +4324,30 @@ func TestRequestHeaderReadMoreLinesThanRecorded(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderResetClearsLineEnds(t *testing.T) {
+	t.Parallel()
+
+	s := "GET / HTTP/1.1\r\nHost: foobar.com\r\nX-Foo: bar\r\n\r\n"
+	var h RequestHeader
+	if err := h.Read(bufio.NewReader(bytes.NewBufferString(s))); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(h.lineEnds) == 0 {
+		t.Fatal("expecting line ends to be recorded after Read")
+	}
+
+	var dst RequestHeader
+	h.CopyTo(&dst)
+	if len(dst.lineEnds) != 0 {
+		t.Fatalf("unexpected line ends after CopyTo: %v", dst.lineEnds)
+	}
+
+	h.Reset()
+	if len(h.lineEnds) != 0 {
+		t.Fatalf("unexpected line ends after Reset: %v", h.lineEnds)
+	}
+}
+
 func TestRequestHeaderMethodDefaultIsRequestLocal(t *testing.T) {
 	t.Parallel()
 
