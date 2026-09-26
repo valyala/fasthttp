@@ -1485,6 +1485,19 @@ func TestFSGenerateETag(t *testing.T) {
 		{"del character in tag", "\"bad\x7ftag\", " + expectedETag, "", StatusOK},
 		{"missing quotes in list", `foo, ` + expectedETag, "", StatusOK},
 		{"unterminated in list", `"foo, ` + expectedETag, "", StatusOK},
+		// Entity tags must be separated by commas.
+		{"missing comma", `"other"` + expectedETag, "", StatusOK},
+		{"missing comma with space", `"other" ` + expectedETag, "", StatusOK},
+		{"missing comma after match", expectedETag + ` "other"`, "", StatusOK},
+		{"trailing garbage after match", expectedETag + `x`, "", StatusOK},
+		{"empty list elements", ` , ` + expectedETag + ` ,, "other" , `, "", StatusNotModified},
+		// "*" is only valid as the whole field value.
+		{"any with whitespace", " * ", "", StatusNotModified},
+		{"any with empty list elements", ", *,", "", StatusNotModified},
+		{"any with garbage", "*garbage", "", StatusOK},
+		{"any with malformed tag", `*, "bad tag"`, "", StatusOK},
+		{"any with tag", `*, ` + expectedETag, "", StatusOK},
+		{"tag with any", expectedETag + `, *`, "", StatusOK},
 		{"precedence over not modified since", `"foo"`, string(AppendHTTPDate(nil, mtime.Add(time.Hour))), StatusOK},
 		{"precedence over modified since", expectedETag, string(AppendHTTPDate(nil, mtime.Add(-time.Hour))), StatusNotModified},
 	} {
@@ -1569,12 +1582,16 @@ func TestFSGenerateETag(t *testing.T) {
 		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
 	}
 
-	// A malformed entity tag stops the scan of all the header lines.
+	// A malformed value in any of the header lines counts as no match.
 	for _, tc := range [][2]string{
 		{`"bad tag"`, expectedETag},
 		{expectedETag, `"bad tag"`},
 		{`"other"`, `"bad tag", ` + expectedETag},
 		{`"bad tag"`, "*"},
+		{`"other"`, "*"},
+		{"*", expectedETag},
+		{"*", "*"},
+		{`"other"`, expectedETag + ` "another"`},
 	} {
 		resp := testFSETagRequest(t, h, func(req *Request) {
 			req.Header.Add(HeaderIfNoneMatch, tc[0])
@@ -1678,6 +1695,20 @@ func TestFSGenerateETagCompress(t *testing.T) {
 	}
 	if etag := string(resp.Header.Peek(HeaderETag)); etag != gzipETag {
 		t.Fatalf("unexpected ETag: %q. Expecting %q", etag, gzipETag)
+	}
+	// A 304 must include the Vary header the 200 response would include.
+	if vary := string(resp.Header.Peek(HeaderVary)); vary != HeaderAcceptEncoding {
+		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, HeaderAcceptEncoding)
+	}
+
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		req.Header.Set(HeaderIfNoneMatch, plainETag)
+	})
+	if resp.StatusCode() != StatusNotModified {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotModified)
+	}
+	if vary := resp.Header.Peek(HeaderVary); len(vary) > 0 {
+		t.Fatalf("unexpected Vary for uncompressed 304 response: %q", vary)
 	}
 }
 

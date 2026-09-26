@@ -1433,6 +1433,12 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	}
 	if notModified {
 		ctx.NotModified()
+		// NotModified resets the response, so add back the Vary header
+		// the 200 response would include.
+		// See https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5
+		if ff.compressed {
+			ctx.Response.Header.addVaryBytes(strAcceptEncoding)
+		}
 		if len(ff.etag) > 0 {
 			ctx.Response.Header.SetBytesV(HeaderETag, ff.etag)
 		}
@@ -1533,50 +1539,66 @@ func appendFSETag(dst []byte, lastModified time.Time, size int) []byte {
 	return append(dst, '"')
 }
 
-// fsETagMatch reports whether any of the given If-None-Match header values
-// matches etag using the weak comparison. Multiple header lines are treated
-// the same as a single comma-separated list. A malformed entity tag stops the
-// scan of the whole combined field value and counts as no match.
+// fsETagMatch reports whether the given If-None-Match header values match
+// etag using the weak comparison. Multiple header lines are treated the same
+// as a single comma-separated list. The combined field value must be either
+// a lone "*" or a comma-separated list of entity tags. Any malformed value
+// counts as no match.
 //
 // See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2
 func fsETagMatch(ifNoneMatch [][]byte, etag []byte) bool {
 	etag = trimWeakETagPrefix(etag)
-	matched := false
+	matched, star := false, false
+	elements := 0
 	for _, v := range ifNoneMatch {
-		m, ok := fsETagListMatch(v, etag)
-		if !ok {
-			return false
+		for {
+			// Empty list elements are allowed.
+			// See https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2
+			v = bytes.TrimLeft(v, " \t,")
+			if len(v) == 0 {
+				break
+			}
+			elements++
+			if v[0] == '*' {
+				star = true
+				v = v[1:]
+			} else {
+				tag, rest, ok := nextETag(v)
+				if !ok {
+					return false
+				}
+				if len(etag) > 0 && bytes.Equal(tag, etag) {
+					matched = true
+				}
+				v = rest
+			}
+			// Elements must be separated by a comma.
+			v = bytes.TrimLeft(v, " \t")
+			if len(v) > 0 && v[0] != ',' {
+				return false
+			}
 		}
-		matched = matched || m
+	}
+	if star {
+		// "*" is only valid as the whole field value.
+		return elements == 1
 	}
 	return matched
 }
 
-// fsETagListMatch reports whether the comma-separated entity tag list b
-// matches etag, which must not have the weak prefix. ok is false if b holds
-// a malformed entity tag.
-func fsETagListMatch(b, etag []byte) (matched, ok bool) {
-	for {
-		b = bytes.TrimLeft(b, " \t,")
-		if len(b) == 0 {
-			return matched, true
-		}
-		if b[0] == '*' {
-			return true, true
-		}
-		b = trimWeakETagPrefix(b)
-		if len(b) < 2 || b[0] != '"' {
-			return false, false
-		}
-		n := bytes.IndexByte(b[1:], '"')
-		if n < 0 || !validETagChars(b[1:n+1]) {
-			return false, false
-		}
-		if len(etag) > 0 && bytes.Equal(b[:n+2], etag) {
-			matched = true
-		}
-		b = b[n+2:]
+// nextETag parses the entity tag at the start of b. It returns the tag
+// without the weak prefix and the rest of b. ok is false if b does not start
+// with a valid entity tag.
+func nextETag(b []byte) (tag, rest []byte, ok bool) {
+	b = trimWeakETagPrefix(b)
+	if len(b) < 2 || b[0] != '"' {
+		return nil, nil, false
 	}
+	n := bytes.IndexByte(b[1:], '"')
+	if n < 0 || !validETagChars(b[1:n+1]) {
+		return nil, nil, false
+	}
+	return b[:n+2], b[n+2:], true
 }
 
 // validETagChars reports whether b holds only characters allowed inside
