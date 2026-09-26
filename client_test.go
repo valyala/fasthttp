@@ -1225,7 +1225,11 @@ func TestPipelineClientMaxResponseBodySize(t *testing.T) {
 					req.SetRequestURI("http://example.test/")
 					var resp Response
 					resp.StreamBody = stream
-					defer resp.CloseBodyStream()
+					defer func() {
+						if err := resp.CloseBodyStream(); err != nil {
+							t.Errorf("close response body stream: %v", err)
+						}
+					}()
 					var err error
 					switch method {
 					case "Do":
