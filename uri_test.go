@@ -692,3 +692,51 @@ func TestURIRequestURIAfterResettingQueryArgs(t *testing.T) {
 		t.Fatalf("unexpected RequestURI %q; want %q", got, "/path")
 	}
 }
+
+func TestURIParseSchemeInQueryKeepsOriginForm(t *testing.T) {
+	t.Parallel()
+
+	// "://" in the query of an origin-form target must not turn it into an
+	// absolute URI; a target with two leading slashes still carries one.
+	var u URI
+	if err := u.Parse([]byte("a"), []byte("/x?u=a://b")); err != nil {
+		t.Fatal(err)
+	}
+	if string(u.Host()) != "a" || string(u.Path()) != "/x" || string(u.QueryString()) != "u=a://b" {
+		t.Fatalf("got host %q path %q query %q", u.Host(), u.Path(), u.QueryString())
+	}
+	if err := u.Parse([]byte("a"), []byte("//host/p?u=a://b")); err != nil {
+		t.Fatal(err)
+	}
+	if string(u.Host()) != "host" || string(u.Path()) != "/p" || string(u.QueryString()) != "u=a://b" {
+		t.Fatalf("got host %q path %q query %q", u.Host(), u.Path(), u.QueryString())
+	}
+}
+
+func TestURIParseHostMemoAliasedArgument(t *testing.T) {
+	t.Parallel()
+
+	// Parse may be handed the URI's own host; the memo must key on the bytes
+	// as passed, not on what parseHost made of them in place.
+	var u URI
+	u.SetHost("%c3%b6.example")
+	if err := u.Parse(u.Host(), []byte("/")); err != nil {
+		t.Fatal(err)
+	}
+	if string(u.Host()) != "\xc3\xb6.example" {
+		t.Fatalf("host %q", u.Host())
+	}
+	if err := u.Parse([]byte("\xc3\xb6.examplemple"), []byte("/")); err != nil {
+		t.Fatal(err)
+	}
+	if string(u.Host()) != "\xc3\xb6.examplemple" {
+		t.Fatalf("host %q: the memo key was taken after the in-place rewrite", u.Host())
+	}
+	// A failed parse leaves no key behind.
+	if err := u.Parse([]byte("a b"), []byte("/")); err == nil {
+		t.Fatal("expected an error for an authority with a space")
+	}
+	if len(u.hostRaw) != 0 {
+		t.Fatalf("memo key %q retained after a failed parse", u.hostRaw)
+	}
+}

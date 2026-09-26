@@ -58,6 +58,12 @@ type URI struct {
 	password        []byte
 	parsedQueryArgs bool
 
+	// parseHost memo: identical authority bytes parse to identical output.
+	// Survives Reset so keep-alive requests skip the host validation. Only
+	// authorities that could be real are kept, so a huge Host is not retained.
+	hostRaw    []byte
+	hostParsed []byte
+
 	// Path values are sent as-is without normalization.
 	//
 	// Disabled path normalization may be useful for proxying incoming requests
@@ -79,6 +85,8 @@ func (u *URI) CopyTo(dst *URI) {
 	dst.host = append(dst.host, u.host...)
 	dst.username = append(dst.username, u.username...)
 	dst.password = append(dst.password, u.password...)
+	dst.hostRaw = append(dst.hostRaw[:0], u.hostRaw...)
+	dst.hostParsed = append(dst.hostParsed[:0], u.hostParsed...)
 
 	u.queryArgs.CopyTo(&dst.queryArgs)
 	dst.parsedQueryArgs = u.parsedQueryArgs
@@ -268,6 +276,10 @@ func (u *URI) SetHostBytes(host []byte) {
 	lowercaseBytes(u.host)
 }
 
+// maxMemoizedHostLen bounds the authority memo; a real authority is far
+// shorter, and a longer one is not worth retaining twice.
+const maxMemoizedHostLen = 256
+
 var ErrorInvalidURI = errors.New("fasthttp: invalid uri")
 
 // Parse initializes URI from the given host and uri.
@@ -283,11 +295,26 @@ func (u *URI) Parse(host, uri []byte) error {
 func (u *URI) parse(host, uri []byte, isTLS bool) error {
 	u.Reset()
 
+	// Origin-form root with a repeated Host is the steady state of
+	// keep-alive traffic; everything is memoized.
+	if len(host) != 0 && len(uri) == 1 && uri[0] == '/' && bytes.Equal(host, u.hostRaw) {
+		u.host = append(u.host[:0], u.hostParsed...)
+		u.pathOriginal = append(u.pathOriginal[:0], '/')
+		u.path = append(u.path[:0], '/')
+		if isTLS {
+			u.SetSchemeBytes(strHTTPS)
+		}
+		return nil
+	}
+
 	if stringContainsCTLByte(uri) {
 		return ErrorInvalidURI
 	}
 
-	if len(host) == 0 || bytes.Contains(uri, strColonSlashSlash) {
+	// A target with a single leading slash is origin-form whatever it
+	// contains; splitHostURI would hand it back unchanged.
+	originForm := len(uri) > 1 && uri[0] == '/' && uri[1] != '/'
+	if len(host) == 0 || (!originForm && bytes.Contains(uri, strColonSlashSlash)) {
 		scheme, newHost, newURI := splitHostURI(host, uri)
 		if len(scheme) > 0 && !isValidScheme(scheme) {
 			return fmt.Errorf("invalid scheme %q", scheme)
@@ -318,13 +345,29 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		}
 	}
 
-	u.host = append(u.host, host...)
-	parsedHost, err := parseHost(u.host)
-	if err != nil {
-		return err
+	if len(host) != 0 && bytes.Equal(host, u.hostRaw) {
+		u.host = append(u.host[:0], u.hostParsed...)
+	} else {
+		// The key is taken before parseHost rewrites u.host in place, which
+		// host may alias, and dropped again unless the parse succeeds.
+		memo := len(host) <= maxMemoizedHostLen
+		u.hostRaw = u.hostRaw[:0]
+		if memo {
+			u.hostRaw = append(u.hostRaw, host...)
+		}
+		u.host = append(u.host, host...)
+		parsedHost, err := parseHost(u.host)
+		if err != nil {
+			u.hostRaw = u.hostRaw[:0]
+			return err
+		}
+		u.host = parsedHost
+		lowercaseBytes(u.host)
+		u.hostParsed = u.hostParsed[:0]
+		if memo {
+			u.hostParsed = append(u.hostParsed, u.host...)
+		}
 	}
-	u.host = parsedHost
-	lowercaseBytes(u.host)
 
 	b := uri
 	queryIndex := bytes.IndexByte(b, '?')
@@ -642,6 +685,9 @@ func validOptionalPort(port []byte) bool {
 }
 
 func normalizePath(dst, src []byte) []byte {
+	if len(src) == 1 && src[0] == '/' {
+		return append(dst[:0], '/')
+	}
 	dst = dst[:0]
 	dst = addLeadingSlash(dst, src)
 	dst = decodeArgAppendNoPlus(dst, src)
