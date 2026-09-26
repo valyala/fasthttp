@@ -583,7 +583,16 @@ func TestServerShutdownDeadlineClosesProtocolConnections(t *testing.T) {
 	}
 	handlerStarted := make(chan struct{})
 	handlerDone := make(chan struct{})
-	server := &Server{}
+	connClosed := make(chan struct{})
+	server := &Server{
+		// The closed connection's read error is expected; keep it out of the log.
+		Logger: &testLogger{},
+		ConnState: func(_ net.Conn, state ConnState) {
+			if state == StateClosed {
+				close(connClosed)
+			}
+		},
+	}
 	if err := server.RegisterProtocol(ProtocolRegistration{
 		CleartextPreface: []byte(preface),
 		Handler: protocolHandlerFunc(func(ctx *ProtocolServerContext, conn net.Conn) error {
@@ -633,6 +642,12 @@ func TestServerShutdownDeadlineClosesProtocolConnections(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Serve() didn't return")
+	}
+	// Serve returns with the listener; the worker finishes the connection after.
+	select {
+	case <-connClosed:
+	case <-time.After(time.Second):
+		t.Fatal("the protocol connection's worker didn't finish")
 	}
 }
 

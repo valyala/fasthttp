@@ -80,10 +80,22 @@ func TestHostClientDoTimeoutIncludesDial(t *testing.T) {
 	listener := fasthttputil.NewInmemoryListener()
 	releaseHandler := make(chan struct{})
 	serveDone := make(chan error, 1)
-	server := &Server{Handler: func(*RequestCtx) { <-releaseHandler }}
+	connClosed := make(chan struct{})
+	server := &Server{
+		Handler: func(*RequestCtx) { <-releaseHandler },
+		// The timed-out request's connection fails once released; that's expected.
+		Logger: &testLogger{},
+		ConnState: func(_ net.Conn, state ConnState) {
+			if state == StateClosed {
+				close(connClosed)
+			}
+		},
+	}
 	go func() { serveDone <- server.Serve(listener) }()
 	t.Cleanup(func() {
+		// Let the abandoned request finish here rather than in a later test.
 		close(releaseHandler)
+		<-connClosed
 		_ = listener.Close()
 		<-serveDone
 	})
