@@ -247,11 +247,23 @@ func (p *clientPool) acquireStream(
 			return nil, nil, nil
 		}
 		now := time.Now()
+		var expired []*clientConn
 		for _, conn := range p.conns {
 			if stream := conn.reserveStream(req, resp, openStream, deadline, now); stream != nil {
 				p.mu.Unlock()
 				return stream, nil, nil
 			}
+			if conn.expiredIdle() {
+				expired = append(expired, conn)
+			}
+		}
+		if len(expired) != 0 {
+			// Their slots count against MaxConns until they close.
+			p.mu.Unlock()
+			for _, conn := range expired {
+				conn.closeIfIdle()
+			}
+			continue
 		}
 		if p.dialing {
 			notify := p.notify

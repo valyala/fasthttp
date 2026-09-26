@@ -180,6 +180,7 @@ type clientConn struct {
 	peerExtendedConnect  bool
 	goAway               bool
 	goAwayLastStreamID   uint32
+	expired              bool // past MaxConnDuration; closes once idle
 	closed               bool
 	err                  error
 	notify               chan struct{}
@@ -287,7 +288,8 @@ func (c *clientConn) reserveStream(
 		c.activeStreams-c.activePushStreams >= streamLimit {
 		return nil
 	}
-	if c.hc.MaxConnDuration > 0 && now.Sub(c.created) >= c.hc.MaxConnDuration {
+	if c.expired || c.hc.MaxConnDuration > 0 && now.Sub(c.created) >= c.hc.MaxConnDuration {
+		c.expired = true
 		return nil
 	}
 	if c.idleTimer != nil {
@@ -534,7 +536,7 @@ func (c *clientConn) maybeFinalizeStreamLocked(stream *clientStream) {
 	}
 	c.signalLocked()
 	if c.activeStreams == 0 {
-		if c.goAway {
+		if c.goAway || c.expired {
 			go c.closeIfIdle()
 			return
 		}
@@ -588,6 +590,13 @@ func (c *clientConn) fail(cause error) {
 	c.shutdownWriter(cause, false)
 	_ = c.lease.Close()
 	c.pool.remove(c)
+}
+
+// expiredIdle reports whether c is past MaxConnDuration with no stream left.
+func (c *clientConn) expiredIdle() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.expired && c.activeStreams == 0 && !c.closed
 }
 
 func (c *clientConn) closeIfIdle() {

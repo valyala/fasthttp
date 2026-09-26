@@ -1954,3 +1954,36 @@ func TestOpenStreamDeadlineSetWhileBlocked(t *testing.T) {
 		}
 	}
 }
+
+// A connection past MaxConnDuration gives up its slot, so the next request
+// dials a replacement instead of failing with ErrNoFreeConns.
+func TestClientReplacesExpiredConnection(t *testing.T) {
+	server := &fasthttp.Server{Handler: func(ctx *fasthttp.RequestCtx) { ctx.SetBodyString("ok") }}
+	testServer := newTestServer(t, server, ServerConfig{})
+	var dials atomic.Int64
+	hc := &fasthttp.HostClient{
+		Addr:            testServer.listener.Addr().String(),
+		MaxConns:        1,
+		MaxConnDuration: 50 * time.Millisecond,
+		Dial: func(addr string) (net.Conn, error) {
+			dials.Add(1)
+			return net.Dial("tcp", addr)
+		},
+	}
+	if err := ConfigureHostClient(hc, ClientConfig{Mode: PriorKnowledge}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+	for i := range 2 {
+		var req fasthttp.Request
+		var resp fasthttp.Response
+		req.SetRequestURI(testServer.URL("/"))
+		if err := hc.DoTimeout(&req, &resp, 2*time.Second); err != nil {
+			t.Fatalf("request %d error: %v", i, err)
+		}
+		time.Sleep(80 * time.Millisecond)
+	}
+	if got := dials.Load(); got != 2 {
+		t.Fatalf("dials = %d, want a replacement for the expired connection", got)
+	}
+}
