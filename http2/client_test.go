@@ -1987,3 +1987,84 @@ func TestClientReplacesExpiredConnection(t *testing.T) {
 		t.Fatalf("dials = %d, want a replacement for the expired connection", got)
 	}
 }
+
+// runPushPromise feeds one PUSH_PROMISE for authority on parentID and returns
+// the result, how often the handler was asked, and the frames written back.
+func runPushPromise(t *testing.T, parentID uint32, parentURI, authority string) (int64, []xhttp2.Frame, error) {
+	t.Helper()
+	var block bytes.Buffer
+	encoder := hpack.NewEncoder(&block)
+	for _, field := range [][2]string{{":method", "GET"}, {":scheme", "http"}, {":authority", authority}, {":path", "/pushed"}} {
+		if err := encoder.WriteField(hpack.HeaderField{Name: field[0], Value: field[1]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var wire, out bytes.Buffer
+	if err := xhttp2.NewFramer(&wire, nil).WritePushPromise(xhttp2.PushPromiseParam{
+		StreamID:      parentID,
+		PromiseID:     4,
+		BlockFragment: block.Bytes(),
+		EndHeaders:    true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	parent := fasthttp.AcquireRequest()
+	t.Cleanup(func() { fasthttp.ReleaseRequest(parent) })
+	parent.SetRequestURI(parentURI)
+	pushes := &rejectingPushHandler{}
+	writer := bufio.NewWriter(&out)
+	conn := &clientConn{
+		writeSem:       make(chan struct{}, 1),
+		config:         clientConfig{maxHeaderListSize: 64 << 10, maxConcurrentStreams: 8, pushHandler: pushes},
+		framer:         xhttp2.NewFramer(writer, &wire),
+		bufferedWriter: writer,
+		headerDecoder:  newHeaderCodec(defaultHeaderTableSize, 64<<10),
+		streams:        map[uint32]*clientStream{parentID: {id: parentID, parentRequest: parent, isPush: parentID&1 == 0}},
+	}
+	installTestWriter(t, conn)
+	frame, err := conn.framer.ReadFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = conn.processPushPromise(frame.(*xhttp2.PushPromiseFrame)) //nolint:forcetypeassert
+	var written []xhttp2.Frame
+	reader := xhttp2.NewFramer(nil, &out)
+	for {
+		frame, readErr := reader.ReadFrame()
+		if readErr != nil {
+			break
+		}
+		written = append(written, frame)
+	}
+	return pushes.declined.Load(), written, err
+}
+
+func TestPushPromiseForAnotherOriginIsRefused(t *testing.T) {
+	asked, written, err := runPushPromise(t, 1, "http://example.com/", "victim.example")
+	if err != nil {
+		t.Fatalf("processPushPromise() error: %v", err)
+	}
+	if asked != 0 {
+		t.Fatal("a cross-origin push reached the push handler")
+	}
+	if len(written) != 1 {
+		t.Fatalf("wrote %d frames, want one RST_STREAM", len(written))
+	}
+	if reset, ok := written[0].(*xhttp2.RSTStreamFrame); !ok || reset.StreamID != 4 || reset.ErrCode != xhttp2.ErrCodeProtocol {
+		t.Fatalf("wrote %v, want RST_STREAM(4, PROTOCOL_ERROR)", written[0])
+	}
+
+	if asked, _, _ := runPushPromise(t, 1, "http://example.com/", "Example.com"); asked != 1 {
+		t.Fatal("a same-origin push didn't reach the push handler")
+	}
+}
+
+func TestPushPromiseOnPushedStreamFailsConnection(t *testing.T) {
+	asked, _, err := runPushPromise(t, 2, "http://example.com/", "example.com")
+	if connErr, ok := errors.AsType[xhttp2.ConnectionError](err); !ok || xhttp2.ErrCode(connErr) != xhttp2.ErrCodeProtocol {
+		t.Fatalf("processPushPromise() error = %v, want PROTOCOL_ERROR connection error", err)
+	}
+	if asked != 0 {
+		t.Fatal("a promise on a pushed stream reached the push handler")
+	}
+}

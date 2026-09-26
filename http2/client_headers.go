@@ -1,6 +1,7 @@
 package http2
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -115,6 +116,17 @@ func validateResponseTrailerFields(fields []hpack.HeaderField) error {
 		}
 	}
 	return nil
+}
+
+// sameOrigin reports whether promised has the scheme and authority parent was
+// sent with.
+func sameOrigin(parent, promised *fasthttp.Request) bool {
+	authority := parent.Header.Host()
+	if len(authority) == 0 {
+		authority = parent.URI().Host()
+	}
+	return bytes.EqualFold(parent.URI().Scheme(), promised.URI().Scheme()) &&
+		bytes.EqualFold(authority, promised.Header.Host())
 }
 
 func populatePromisedRequest(req *fasthttp.Request, fields []hpack.HeaderField) error {

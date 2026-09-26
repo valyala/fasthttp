@@ -669,6 +669,11 @@ func (c *clientConn) processPushPromise(frame *xhttp2.PushPromiseFrame) error {
 		return err
 	}
 
+	if frame.StreamID&1 == 0 {
+		// RFC 9113 §6.6: a promise rides a client-initiated stream, so a
+		// pushed stream cannot promise another.
+		return xhttp2.ConnectionError(xhttp2.ErrCodeProtocol)
+	}
 	c.mu.Lock()
 	parent := c.streams[frame.StreamID]
 	validID := frame.PromiseID != 0 && frame.PromiseID&1 == 0 && frame.PromiseID > c.lastPromisedStreamID
@@ -725,10 +730,17 @@ func (c *clientConn) finishPushPromise(
 			return c.framer.WriteRSTStream(promisedID, xhttp2.ErrCodeCancel)
 		})
 	}
-	parentCopy := fasthttp.AcquireRequest()
-	if parent.parentRequest != nil {
-		parent.parentRequest.CopyTo(parentCopy)
+	if parent.parentRequest == nil || !sameOrigin(parent.parentRequest, promised) {
+		// RFC 9113 §8.4: the server is only known to be authoritative for the
+		// origin the request went to.
+		c.mu.Unlock()
+		fasthttp.ReleaseRequest(promised)
+		return c.writeControl(func() error {
+			return c.framer.WriteRSTStream(promisedID, xhttp2.ErrCodeProtocol)
+		})
 	}
+	parentCopy := fasthttp.AcquireRequest()
+	parent.parentRequest.CopyTo(parentCopy)
 	c.mu.Unlock()
 	accepted := c.config.pushHandler.Accept(parentCopy, promised)
 	fasthttp.ReleaseRequest(parentCopy)

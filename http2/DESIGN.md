@@ -85,8 +85,9 @@ Header names go on the wire lowercase. Sensitive fields are never-indexed.
 Fields declared as trailers are excluded from the initial header block.
 
 Push and extended CONNECT exist but are off by default. Push is same-origin
-GET/HEAD, limited by depth and promise count. Extended CONNECT requires the
-peer's `SETTINGS_ENABLE_CONNECT_PROTOCOL=1`. `RequestCtx.AcceptStream` and
+GET/HEAD, promised only on client-initiated streams and limited by the
+concurrent stream count. Extended CONNECT requires the peer's
+`SETTINGS_ENABLE_CONNECT_PROTOCOL=1`. `RequestCtx.AcceptStream` and
 `HostClient.OpenStream` expose the stream as a `fasthttp.StreamConn`.
 
 gRPC works without dedicated API:
