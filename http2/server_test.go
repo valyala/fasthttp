@@ -138,6 +138,9 @@ func TestConcurrentBufferedUploadsShareConnection(t *testing.T) {
 			release := make(chan struct{})
 			server := &fasthttp.Server{
 				Handler: func(ctx *fasthttp.RequestCtx) {
+					if string(ctx.Path()) == "/warmup" {
+						return
+					}
 					started <- struct{}{}
 					<-release
 					ctx.SetBodyString("ok")
@@ -145,6 +148,13 @@ func TestConcurrentBufferedUploadsShareConnection(t *testing.T) {
 			}
 			testServer := newTestServer(t, server, ServerConfig{})
 			testServer.transport.StrictMaxConcurrentStreams = true
+			// Establish the connection first: from Go 1.27 the x/net Transport
+			// defers to net/http, which dials per request until one exists.
+			resp, err := testServer.client.Get(testServer.URL("/warmup"))
+			if err != nil {
+				t.Fatalf("warm-up request: %v", err)
+			}
+			_ = resp.Body.Close()
 
 			var wg sync.WaitGroup
 			errs := make(chan error, testCase.uploads)
