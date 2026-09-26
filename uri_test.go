@@ -650,7 +650,7 @@ func TestURIRequestURIBytes(t *testing.T) {
 		// An authority-form CONNECT target is parsed as a path without a
 		// leading slash.
 		{uri: "example.com:443", normalized: "/example.com:443", original: "example.com:443"},
-		{uri: "[::1]:443", normalized: "%5B::1%5D:443", original: "[::1]:443"},
+		{uri: "[2001:db8::1]:443", normalized: "/%5B2001:db8::1%5D:443", original: "[2001:db8::1]:443"},
 		{uri: "//example.com:443", normalized: "/example.com:443", original: "//example.com:443"},
 		{uri: "/a//b/../c?x=y", normalized: "/a/c?x=y", original: "/a//b/../c?x=y"},
 		{uri: "", normalized: "/", original: "/"},
