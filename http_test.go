@@ -3070,6 +3070,219 @@ func TestReadBodyFixedSize(t *testing.T) {
 	testReadBodyFixedSize(t, 34345)
 }
 
+// slowTrickleReader hands back bytes one at a time (regardless of the
+// requested slice length) to simulate a Slowloris-style client that
+// declares a huge Content-Length but sends it byte by byte, then returns
+// errAfter once it has provided the given number of bytes -- standing in
+// for the connection stalling or being reset mid-body.
+type slowTrickleReader struct {
+	remaining int
+	errAfter  error
+}
+
+func (r *slowTrickleReader) Read(p []byte) (int, error) {
+	if r.remaining <= 0 {
+		return 0, r.errAfter
+	}
+	p[0] = 'a'
+	r.remaining--
+	return 1, nil
+}
+
+// TestAppendBodyFixedSizeDoesNotPinMemoryToDeclaredLength verifies #2037: a
+// client that declares a body far larger than appendBodyFixedSizeSmallThreshold
+// but only ever sends a handful of bytes must not cause a buffer sized to
+// the full declared length to be allocated and retained -- only up to the
+// fixed, bounded appendBodyFixedSizeSmallThreshold safety cap, regardless of
+// how large the declared length claims to be. Before the fix,
+// appendBodyFixedSize allocates roundUpForSliceCap(n) up front, before a
+// single byte has arrived, so the returned (partial, error) slice's
+// backing array is already that large regardless of how little was
+// actually read.
+func TestAppendBodyFixedSizeDoesNotPinMemoryToDeclaredLength(t *testing.T) {
+	t.Parallel()
+
+	const declaredContentLength = 8 * appendBodyFixedSizeSmallThreshold // far larger than the safety cap
+	const actuallySent = 100                                            // but the connection only ever delivers this many bytes
+
+	src := &slowTrickleReader{remaining: actuallySent, errAfter: io.ErrClosedPipe}
+	br := bufio.NewReader(src)
+
+	dst, err := appendBodyFixedSize(br, nil, declaredContentLength)
+	if err == nil {
+		t.Fatal("expected an error, since fewer bytes were provided than the declared Content-Length")
+	}
+	if len(dst) != actuallySent {
+		t.Fatalf("expected %d bytes read before the error, got %d", actuallySent, len(dst))
+	}
+	// Must stay at or near the fixed safety cap (rounded up by
+	// roundUpForSliceCap), nowhere near the much larger declared length a
+	// pre-allocating implementation would pin.
+	const maxAcceptableCap = 2 * appendBodyFixedSizeSmallThreshold
+	if cap(dst) > maxAcceptableCap {
+		t.Fatalf("appendBodyFixedSize retained a %d-byte buffer for only %d bytes actually read out of a "+
+			"%d-byte declared length -- it pre-allocated close to the full declared length instead of "+
+			"tracking actual bytes read (Slowloris-class memory pinning, see #2037)",
+			cap(dst), actuallySent, declaredContentLength)
+	}
+}
+
+// TestAppendBodyFixedSizeDoesNotPinMemoryForDefaultServerBodySize verifies
+// #2037 for the case that actually matters most: a server running with no
+// MaxRequestBodySize override at all (DefaultMaxRequestBodySize, 4 MiB --
+// the exact configuration the original bug report used). A declared
+// Content-Length well within that default limit, but far above the small
+// safety threshold, must still be bounded: it must not be possible to tie
+// the threshold's value to MaxRequestBodySize (or anything of comparable
+// size) without leaving every default-configured server's entire accepted
+// body-size range unmitigated.
+func TestAppendBodyFixedSizeDoesNotPinMemoryForDefaultServerBodySize(t *testing.T) {
+	t.Parallel()
+
+	const declaredContentLength = 2 * 1024 * 1024 // 2 MiB: well within DefaultMaxRequestBodySize (4 MiB)
+	const actuallySent = 100                      // but the connection only ever delivers this many bytes
+
+	if declaredContentLength > DefaultMaxRequestBodySize {
+		t.Fatalf("test setup error: declaredContentLength (%d) must stay within DefaultMaxRequestBodySize (%d) "+
+			"to actually exercise the default-server case", declaredContentLength, DefaultMaxRequestBodySize)
+	}
+
+	src := &slowTrickleReader{remaining: actuallySent, errAfter: io.ErrClosedPipe}
+	br := bufio.NewReader(src)
+
+	dst, err := appendBodyFixedSize(br, nil, declaredContentLength)
+	if err == nil {
+		t.Fatal("expected an error, since fewer bytes were provided than the declared Content-Length")
+	}
+	if len(dst) != actuallySent {
+		t.Fatalf("expected %d bytes read before the error, got %d", actuallySent, len(dst))
+	}
+	// A fixed, hardcoded bound -- deliberately NOT derived from
+	// appendBodyFixedSizeSmallThreshold itself, so this test actually
+	// pins a real-world-meaningful cap instead of trivially passing
+	// whatever that constant happens to be set to (which is exactly the
+	// bug this test exists to catch).
+	const maxAcceptableCap = 512 * 1024
+	if cap(dst) > maxAcceptableCap {
+		t.Fatalf("appendBodyFixedSize retained a %d-byte buffer for a %d-byte body declared by a "+
+			"default-configured server (DefaultMaxRequestBodySize=%d), for only %d bytes actually read -- "+
+			"the fast-path threshold is too large and leaves the exact #2037 scenario unmitigated",
+			cap(dst), declaredContentLength, DefaultMaxRequestBodySize, actuallySent)
+	}
+}
+
+// TestAppendBodyFixedSizeLargeReusesExistingCapacity verifies that when the
+// caller-provided dst already has enough spare capacity to hold the full
+// declared body (as happens routinely in practice: Request/Response bodies
+// are backed by a bytebufferpool buffer reused across requests, so a
+// connection that previously handled a large request already carries that
+// capacity into the next one), appendBodyFixedSize's growth loop reuses it
+// instead of discarding it for a smaller fresh allocation as bytes actually
+// arrive. Before this fix, appendBodyFixedSizeLarge's growth loop only ever
+// allocated a fresh buffer on every doubling step, so a 16 MiB pre-existing
+// buffer was thrown away and grown by repeated reallocate-and-copy doubling
+// right back up -- discarding real, already-paid-for capacity on every
+// single large request.
+//
+// The check is the backing array's identity before and after (not a
+// per-Read-call address comparison): dst[offset:]'s address legitimately
+// differs from call to call purely because offset advances, whether or not
+// the backing array changed, so only comparing the array's identity across
+// the whole operation is a real invariant.
+func TestAppendBodyFixedSizeLargeReusesExistingCapacity(t *testing.T) {
+	t.Parallel()
+
+	// Deliberately larger than any plausible appendBodyFixedSizeSmallThreshold
+	// value (including the too-large DefaultMaxRequestBodySize this fix
+	// replaces), so this test exercises appendBodyFixedSizeLarge's
+	// buffer-reuse behavior regardless of the separate threshold-value bug,
+	// and large enough that the doubling loop takes several growth steps
+	// (not just one), genuinely exercising the loop's reuse-check repeatedly.
+	const bodySize = 8 * 1024 * 1024
+	const preexistingCap = 4 * bodySize
+
+	body := make([]byte, bodySize)
+	for i := range body {
+		body[i] = byte(i%10) + '0'
+	}
+
+	// Simulate a pooled buffer that already grew large from a prior request.
+	dst := make([]byte, 0, preexistingCap)
+	origAddr := &dst[:1][0]
+
+	br := bufio.NewReader(bytes.NewReader(body))
+
+	dst, err := appendBodyFixedSize(br, dst, bodySize)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(dst) != bodySize {
+		t.Fatalf("expected %d bytes read, got %d", bodySize, len(dst))
+	}
+	newAddr := &dst[:1][0]
+	if newAddr != origAddr {
+		t.Fatalf("expected the returned slice to share the original backing array (addr %p), got a "+
+			"different one (addr %p) -- the pre-existing buffer capacity was discarded", origAddr, newAddr)
+	}
+}
+
+// TestAppendBodyFixedSizeLargeReusingCapacityAllocatesNothingNew verifies
+// the actual invariant #2037 requires when dst already carries spare
+// capacity from an earlier request on the same pooled connection (see
+// TestAppendBodyFixedSizeLargeReusesExistingCapacity's comment on why this
+// is the routine case in practice, and the erikdubbelboer comment on #2037
+// explaining that retaining a connection's peak buffer capacity across
+// requests is intended fasthttp behavior, not itself the bug): as the
+// growth loop's doubling steps reach sizes already covered by dst's
+// existing capacity, none of them should perform a *new* heap allocation.
+//
+// This is deliberately NOT a test that cap(dst) stays small after the
+// call: cap() reports the full backing array's capacity from a slice's
+// start regardless of how little of it this particular call chose to
+// use, and reslicing into an already-allocated array (never past its
+// existing cap) commits no new memory no matter how large a len is
+// requested -- so asserting an upper bound on cap(dst) here would either
+// be trivially satisfied or trivially violated depending only on how the
+// pool happened to grow, never on anything this function does. The
+// allocation count is the metric that actually distinguishes "reused
+// existing memory" from "pinned new memory," which is what #2037 is
+// actually about.
+func TestAppendBodyFixedSizeLargeReusingCapacityAllocatesNothingNew(t *testing.T) {
+	// Deliberately not t.Parallel(): testing.AllocsPerRun panics if run
+	// concurrently with other tests (it needs exclusive GC/allocation
+	// accounting).
+
+	const bodySize = 4 * 1024 * 1024
+	body := make([]byte, bodySize)
+	for i := range body {
+		body[i] = byte(i%10) + '0'
+	}
+
+	allocs := testing.AllocsPerRun(20, func() {
+		// Simulate a pooled buffer already grown large by an earlier,
+		// legitimate request on the same connection.
+		dst := make([]byte, 0, 2*bodySize)
+		br := bufio.NewReader(bytes.NewReader(body))
+		result, err := appendBodyFixedSize(br, dst, bodySize)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(result) != bodySize {
+			t.Fatalf("expected %d bytes read, got %d", bodySize, len(result))
+		}
+	})
+	// A small, constant number of allocations is expected for the bufio
+	// reader / closures themselves -- what must NOT happen is an
+	// allocation scaling with bodySize (which is what "discarding the
+	// pre-existing capacity for a fresh, smaller allocation" would cause).
+	const maxExpectedAllocs = 5
+	if allocs > maxExpectedAllocs {
+		t.Fatalf("expected at most %v allocations per run when dst already has ample spare capacity, got %v -- "+
+			"this suggests appendBodyFixedSize is discarding the caller-provided buffer's existing capacity "+
+			"for a fresh allocation instead of reusing it", maxExpectedAllocs, allocs)
+	}
+}
+
 func TestReadBodyChunked(t *testing.T) {
 	t.Parallel()
 

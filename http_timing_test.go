@@ -1,6 +1,7 @@
 package fasthttp
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"net"
@@ -277,6 +278,82 @@ func BenchmarkCopyZeroAllocNetConnToOSFile(b *testing.B) {
 		b.StopTimer()
 		conn, err = net.Dial("tcp", addr)
 		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// benchAppendBodyFixedSize benchmarks reading a body of the given size where
+// all bytes are already available (the common/legitimate case), to catch
+// any regression introduced by the #2037 memory-pinning fix on the
+// fast path.
+func benchAppendBodyFixedSize(b *testing.B, size int) {
+	body := make([]byte, size)
+	for i := range body {
+		body[i] = byte(i%10) + '0'
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		br := bufio.NewReader(bytes.NewReader(body))
+		if _, err := appendBodyFixedSize(br, nil, size); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkAppendBodyFixedSizeSmall(b *testing.B) {
+	benchAppendBodyFixedSize(b, 1024) // typical small JSON/form body, well within the fast path
+}
+
+func BenchmarkAppendBodyFixedSizeAtFastPathBoundary(b *testing.B) {
+	// appendBodyFixedSizeSmallThreshold itself -- the fast/slow path
+	// boundary. Must show no regression vs. the original single-allocation
+	// implementation.
+	benchAppendBodyFixedSize(b, appendBodyFixedSizeSmallThreshold)
+}
+
+func BenchmarkAppendBodyFixedSizeAtDefaultServerLimit(b *testing.B) {
+	// DefaultMaxRequestBodySize -- the largest body a server running with
+	// no MaxRequestBodySize override can ever present here. Unlike the
+	// fast-path boundary above, this now goes through the bounded-doubling
+	// path (see #2037: the whole point of this fix is that a
+	// default-configured server's accepted range must not take the
+	// unbounded fast path), so this benchmark characterizes the real cost
+	// of that for the single most common real-world case, rather than
+	// (incorrectly) claiming it as unaffected.
+	benchAppendBodyFixedSize(b, DefaultMaxRequestBodySize)
+}
+
+func BenchmarkAppendBodyFixedSizeBeyondDefaultLimit(b *testing.B) {
+	// Only reachable by a server explicitly configured to accept bodies
+	// larger than the default -- exercises the bounded-doubling growth
+	// path.
+	benchAppendBodyFixedSize(b, 16<<20)
+}
+
+// BenchmarkAppendBodyFixedSizeLargeWithPooledCapacity benchmarks the same
+// DefaultMaxRequestBodySize-sized read as above, but into a dst that
+// already has ample spare capacity -- simulating the realistic case of a
+// Request's bytebufferpool-backed body buffer that grew large on a prior
+// request over the same pooled connection. Demonstrates the buffer-reuse
+// fix: allocation count here should be close to the fast-path benchmarks
+// above, not scaled up by the number of doubling steps a fresh, small
+// initial allocation would need.
+func BenchmarkAppendBodyFixedSizeLargeWithPooledCapacity(b *testing.B) {
+	const size = DefaultMaxRequestBodySize
+	body := make([]byte, size)
+	for i := range body {
+		body[i] = byte(i%10) + '0'
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		dst := make([]byte, 0, size) // pre-sized, as if reused from a pool
+		br := bufio.NewReader(bytes.NewReader(body))
+		if _, err := appendBodyFixedSize(br, dst, size); err != nil {
 			b.Fatal(err)
 		}
 	}
