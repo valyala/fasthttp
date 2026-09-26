@@ -26,6 +26,37 @@ import (
 	"github.com/valyala/fasthttp/fasthttputil"
 )
 
+func TestHostClientDialErrorDoesNotStartCleaner(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	c := &HostClient{
+		Addr:                addr,
+		MaxIdleConnDuration: time.Hour,
+	}
+	_, err = c.AcquireConn(time.Second, false)
+	if err == nil {
+		t.Fatal("expected dial error")
+	}
+
+	c.connsLock.Lock()
+	run := c.connsCleanerRun
+	count := c.connsCount
+	c.connsLock.Unlock()
+	if run {
+		t.Fatal("connsCleaner should not run after a failed dial with no connections")
+	}
+	if count != 0 {
+		t.Fatalf("connsCount = %d, want 0", count)
+	}
+}
+
 func TestCloseIdleConnections(t *testing.T) {
 	t.Parallel()
 
