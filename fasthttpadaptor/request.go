@@ -122,8 +122,24 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // like net/http does, instead of the origin-form "/" that would name no
 // authority to tunnel to. Such an opaque target is written as it is, so it
 // carries neither the scheme nor the query that r.URL.RequestURI would add.
-// An absolute-form target is written as it is too, whatever its scheme, so a
-// request addressed to a proxy keeps naming the authority it addresses.
+// A CONNECT target keeps its form when req.URI() is accessed later, as
+// fasthttp.Client does, since fasthttp rebuilds the target of a CONNECT
+// request without path normalization.
+//
+// An absolute-form target is kept as it is too, whatever its scheme, so a
+// request written with req.Write to a proxy keeps naming the authority it
+// addresses. This holds only until req.URI() is accessed: fasthttp then
+// rebuilds the target in origin-form from the parsed URI. That is the form
+// fasthttp.Client and fasthttp.HostClient send, since they send the request
+// to the host of the URI itself, through a CONNECT tunnel when a proxy
+// dialer is used.
+//
+// Once the URI is parsed, fasthttp also normalizes the path of the target it
+// rebuilds unless req.URI().DisablePathNormalizing is set, e.g. "//" in the
+// path is collapsed into "/". The conversion parses the URI itself when it
+// sets a scheme other than http or clears URL credentials, so req.Write may
+// then write a normalized target, like fasthttp.Client always does unless
+// its DisablePathNormalizing option is set.
 //
 // When r.Header carries no Content-Type entry, the default Content-Type
 // fasthttp writes for requests (application/octet-stream) is disabled on req
@@ -145,7 +161,9 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // body reaches EOF, since for server requests net/http populates r.Trailer
 // only while the body is being read. fasthttp writes trailers after draining
 // the body stream, so the synchronized values are the ones written to the
-// wire.
+// wire. Materializing the body of a converted request before writing it
+// (e.g. via req.Body()) keeps the trailers, since fasthttp writes a buffered
+// body with registered trailers chunked.
 //
 // Credentials follow the precedence of net/http.Client: an Authorization
 // entry in r.Header takes precedence over URL credentials. Without such an
@@ -187,30 +205,24 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 	}
 
 	target := ""
-	restoreTarget := false
 	if r.RequestURI != "" {
 		target = r.RequestURI
 		if r.Method == http.MethodConnect && target[0] != '/' && !targetIsAbsoluteForm(target) {
 			if at := strings.LastIndexByte(target, '@'); at >= 0 {
 				target = target[at+1:]
 			}
-			restoreTarget = true
 		}
 	} else if r.URL != nil {
 		target = r.URL.RequestURI()
 		if r.Method == http.MethodConnect && r.URL.Path == "" {
 			if r.URL.Opaque != "" {
 				target = r.URL.Opaque
-				restoreTarget = true
 			} else if host != "" {
 				target = host
-				restoreTarget = true
 			}
 		}
 	}
-	if !restoreTarget && targetIsAbsoluteForm(target) && !targetHasUserinfo(target) {
-		restoreTarget = true
-	}
+	restoreTarget := targetIsAbsoluteForm(target) && !targetHasUserinfo(target)
 	if target != "" {
 		req.SetRequestURI(target)
 	}
@@ -292,7 +304,7 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 	}
 
 	if r.Header.Get(fasthttp.HeaderAuthorization) != "" {
-		if strings.Contains(r.RequestURI, "://") {
+		if targetIsAbsoluteForm(r.RequestURI) {
 			uri := req.URI()
 			uri.SetUsername("")
 			uri.SetPassword("")
@@ -313,9 +325,25 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 }
 
 // targetIsAbsoluteForm reports whether a request target is absolute-form,
-// that is whether it names a scheme and an authority rather than only a path.
+// that is whether it starts with a scheme followed by an authority rather
+// than with a path. A "://" further on belongs to the path or the query, as
+// in "/?next=http://other.example/". The scheme is checked like in net/url:
+// a letter followed by letters, digits, "+", "-" or ".".
 func targetIsAbsoluteForm(target string) bool {
-	return strings.Contains(target, "://")
+	i := strings.Index(target, "://")
+	if i <= 0 {
+		return false
+	}
+	for j := range i {
+		c := target[j]
+		switch {
+		case 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z':
+		case j > 0 && ('0' <= c && c <= '9' || c == '+' || c == '-' || c == '.'):
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // targetHasUserinfo reports whether an absolute-form request target carries

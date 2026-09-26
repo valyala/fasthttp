@@ -7,13 +7,16 @@ import (
 	"errors"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 	"testing/iotest"
+	"time"
 
 	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 func TestConvertRequestPreservesDuplicateHeaders(t *testing.T) {
@@ -486,6 +489,252 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			t.Errorf("expected the opaque request target, got:\n%s", wire)
 		}
 	})
+
+	connectTargetCases := []struct {
+		name    string
+		request func() (*http.Request, error)
+		target  string
+	}{
+		{
+			name: "authority-form target read from the wire",
+			request: func() (*http.Request, error) {
+				return http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")))
+			},
+			target: "example.com:443",
+		},
+		{
+			name: "authority-form target read over TLS",
+			request: func() (*http.Request, error) {
+				r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")))
+				if r != nil {
+					r.TLS = &tls.ConnectionState{}
+				}
+				return r, err
+			},
+			target: "example.com:443",
+		},
+		{
+			name: "authority-form target with credentials",
+			request: func() (*http.Request, error) {
+				return http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"CONNECT url-user:url-pass@example.com:443 HTTP/1.1\r\n" +
+						"Host: example.com:443\r\n\r\n")))
+			},
+			target: "example.com:443",
+		},
+		{
+			name: "URL without a path",
+			request: func() (*http.Request, error) {
+				return http.NewRequest(http.MethodConnect, "http://example.com:443", http.NoBody)
+			},
+			target: "example.com:443",
+		},
+		{
+			name: "URL with a scheme and without a path",
+			request: func() (*http.Request, error) {
+				return http.NewRequest(http.MethodConnect, "https://example.com:443", http.NoBody)
+			},
+			target: "example.com:443",
+		},
+		{
+			name: "opaque target",
+			request: func() (*http.Request, error) {
+				return &http.Request{
+					Method: http.MethodConnect,
+					URL:    &url.URL{Scheme: "https", Opaque: "//example.com:443"},
+					Host:   "example.com:443",
+					Header: http.Header{},
+				}, nil
+			},
+			target: "//example.com:443",
+		},
+		{
+			name: "opaque authority target",
+			request: func() (*http.Request, error) {
+				return &http.Request{
+					Method: http.MethodConnect,
+					URL:    &url.URL{Scheme: "https", Opaque: "example.com:443"},
+					Host:   "example.com:443",
+					Header: http.Header{},
+				}, nil
+			},
+			target: "example.com:443",
+		},
+	}
+	for _, tc := range connectTargetCases {
+		t.Run("CONNECT "+tc.name+" survives URI access", func(t *testing.T) {
+			t.Parallel()
+			httpReq, err := tc.request()
+			if err != nil {
+				t.Fatalf("unexpected error building request: %v", err)
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			// fasthttp.Client.Do and HostClient.Do access the URI before
+			// writing, which makes Write rebuild the target from the parsed
+			// URI.
+			req.URI()
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error writing request: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error flushing request: %v", err)
+			}
+
+			wire := buf.String()
+			if want := "CONNECT " + tc.target + " HTTP/1.1\r\n"; !strings.HasPrefix(wire, want) {
+				t.Errorf("expected request line %q, got:\n%s", want, wire)
+			}
+		})
+	}
+
+	schemeSeparatorCases := []struct {
+		name    string
+		request func() (*http.Request, error)
+		target  string
+	}{
+		{
+			name: "query of a URL",
+			request: func() (*http.Request, error) {
+				return http.NewRequest(http.MethodGet, "https://example.com/?next=http://other.example/", http.NoBody)
+			},
+			target: "/?next=http://other.example/",
+		},
+		{
+			name: "path of a URL",
+			request: func() (*http.Request, error) {
+				return http.NewRequest(http.MethodGet, "https://example.com/redirect/http://other.example/", http.NoBody)
+			},
+			target: "/redirect/http://other.example/",
+		},
+		{
+			name: "query of a target read over TLS",
+			request: func() (*http.Request, error) {
+				r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"GET /?next=http://other.example/ HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+				if r != nil {
+					r.TLS = &tls.ConnectionState{}
+				}
+				return r, err
+			},
+			target: "/?next=http://other.example/",
+		},
+		{
+			name: "path of a target read over TLS",
+			request: func() (*http.Request, error) {
+				r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"GET /redirect/http://other.example/ HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+				if r != nil {
+					r.TLS = &tls.ConnectionState{}
+				}
+				return r, err
+			},
+			target: "/redirect/http://other.example/",
+		},
+	}
+	for _, tc := range schemeSeparatorCases {
+		t.Run("origin-form target with a scheme separator in the "+tc.name+" keeps the https scheme", func(t *testing.T) {
+			t.Parallel()
+			httpReq, err := tc.request()
+			if err != nil {
+				t.Fatalf("unexpected error building request: %v", err)
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			// Only a scheme at the start makes a target absolute-form, so
+			// the origin-form target is not restored after the scheme is
+			// set, which would reparse the URI and drop the https scheme
+			// fasthttp.Client.Do selects the transport with.
+			if got := string(req.Header.RequestURI()); got != tc.target {
+				t.Errorf("expected request target %q, got %q", tc.target, got)
+			}
+			if got := string(req.URI().Scheme()); got != "https" {
+				t.Errorf("expected scheme https, got %q", got)
+			}
+			if got := string(req.URI().Host()); got != "example.com" {
+				t.Errorf("expected host example.com, got %q", got)
+			}
+		})
+	}
+
+	t.Run("absolute-form target is rebuilt in origin-form after URI access", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"GET http://example.com/path?a=b HTTP/1.1\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		// fasthttp.Client and HostClient send the request to the host of
+		// the URI itself, where the origin-form is the one to use.
+		req.URI()
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "GET /path?a=b HTTP/1.1\r\n") {
+			t.Errorf("expected an origin-form request line, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Host: example.com\r\n") {
+			t.Errorf("expected the authority as the host, got:\n%s", wire)
+		}
+	})
+
+	for _, tc := range []struct {
+		name                   string
+		disablePathNormalizing bool
+		want                   string
+	}{
+		{name: "normalizes the path", want: "GET /a/b HTTP/1.1\r\n"},
+		{name: "keeps the path with path normalization disabled", disablePathNormalizing: true, want: "GET /a//b HTTP/1.1\r\n"},
+	} {
+		t.Run("URI parsed by the conversion "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			httpReq, err := http.NewRequest(http.MethodGet, "https://example.com/a//b", http.NoBody)
+			if err != nil {
+				t.Fatalf("unexpected error building request: %v", err)
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			// Setting the https scheme parses the URI, so Write rebuilds
+			// the target from it.
+			req.URI().DisablePathNormalizing = tc.disablePathNormalizing
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error writing request: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error flushing request: %v", err)
+			}
+
+			if wire := buf.String(); !strings.HasPrefix(wire, tc.want) {
+				t.Errorf("expected request line %q, got:\n%s", tc.want, wire)
+			}
+		})
+	}
 
 	t.Run("URL host fallback when Host is empty", func(t *testing.T) {
 		t.Parallel()
@@ -1851,4 +2100,59 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			t.Fatal("expected error when reading body stream, got nil")
 		}
 	})
+}
+
+func TestConvertNetHTTPRequestToFastHTTPRequestConnectThroughHostClient(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+
+	targetCh := make(chan string, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			t.Errorf("unexpected error accepting connection: %v", err)
+			return
+		}
+		defer c.Close()
+		r, err := http.ReadRequest(bufio.NewReader(c))
+		if err != nil {
+			t.Errorf("unexpected error reading request: %v", err)
+			return
+		}
+		targetCh <- r.RequestURI
+		if _, err := c.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error writing response: %v", err)
+		}
+	}()
+
+	httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+		"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")))
+	if err != nil {
+		t.Fatalf("unexpected error reading request: %v", err)
+	}
+
+	var req fasthttp.Request
+	ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+	// HostClient.Do accesses the URI and resets its path normalization
+	// before writing the request.
+	c := &fasthttp.HostClient{
+		Addr: "example.com:443",
+		Dial: func(string) (net.Conn, error) { return ln.Dial() },
+	}
+	var resp fasthttp.Response
+	if err := c.DoTimeout(&req, &resp, 5*time.Second); err != nil {
+		t.Fatalf("unexpected error doing request: %v", err)
+	}
+
+	select {
+	case target := <-targetCh:
+		if target != "example.com:443" {
+			t.Errorf("expected the authority-form target example.com:443, got %q", target)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
+	}
 }
