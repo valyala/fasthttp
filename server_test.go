@@ -299,7 +299,7 @@ func TestServerConnState(t *testing.T) {
 
 	select {
 	case <-clientCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -309,7 +309,7 @@ func TestServerConnState(t *testing.T) {
 
 	select {
 	case <-serverCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -671,7 +671,7 @@ func TestServerResponseServerHeader(t *testing.T) {
 
 	select {
 	case <-clientCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -681,7 +681,7 @@ func TestServerResponseServerHeader(t *testing.T) {
 
 	select {
 	case <-serverCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 }
@@ -764,7 +764,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 
 	select {
 	case <-clientCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -774,7 +774,7 @@ func TestServerResponseBodyStream(t *testing.T) {
 
 	select {
 	case <-serverCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 }
@@ -839,7 +839,7 @@ func TestServerDisableKeepalive(t *testing.T) {
 
 	select {
 	case <-clientCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -849,7 +849,7 @@ func TestServerDisableKeepalive(t *testing.T) {
 
 	select {
 	case <-serverCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 }
@@ -921,7 +921,7 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 
 	select {
 	case <-clientCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -931,7 +931,7 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 
 	select {
 	case <-serverCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 }
@@ -1026,7 +1026,7 @@ func TestServerConcurrencyLimit(t *testing.T) {
 
 	select {
 	case <-clientCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -1036,7 +1036,7 @@ func TestServerConcurrencyLimit(t *testing.T) {
 
 	select {
 	case <-serverCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 }
@@ -1089,7 +1089,7 @@ func TestRejectedRequestsCount(t *testing.T) {
 
 	select {
 	case <-clientCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -1099,7 +1099,7 @@ func TestRejectedRequestsCount(t *testing.T) {
 
 	select {
 	case <-serverCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 }
@@ -1264,7 +1264,7 @@ func TestServerTLSReadTimeout(t *testing.T) {
 
 	select {
 	case err = <-r:
-	case <-time.After(time.Second * 2):
+	case <-time.After(testTimeout(time.Second * 2)):
 	}
 
 	if err == nil {
@@ -1305,7 +1305,7 @@ func TestServerReduceMemoryUsageReadTimeoutOnFirstByte(t *testing.T) {
 		if err == nil {
 			t.Fatal("server didn't close connection after first-byte timeout")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("server didn't close connection after first-byte timeout")
 	}
 
@@ -1314,7 +1314,7 @@ func TestServerReduceMemoryUsageReadTimeoutOnFirstByte(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error from ServeConn: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout waiting for ServeConn")
 	}
 }
@@ -1379,7 +1379,7 @@ func TestServerServeTLSEmbed(t *testing.T) {
 	}()
 	select {
 	case <-respCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -1389,7 +1389,7 @@ func TestServerServeTLSEmbed(t *testing.T) {
 	}
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 }
@@ -1580,7 +1580,7 @@ Connection: close
 
 		select {
 		case <-respCh:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatal("timeout")
 		}
 
@@ -1590,7 +1590,7 @@ Connection: close
 
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatal("timeout when waiting for the server to stop")
 		}
 	}
@@ -1692,7 +1692,7 @@ func TestServerReduceMemoryUsageSerial(t *testing.T) {
 
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout when waiting for the server to stop")
 	}
 }
@@ -1725,7 +1725,7 @@ func TestServerReduceMemoryUsageConcurrent(t *testing.T) {
 	for i := range 10 {
 		select {
 		case <-gCh:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout on goroutine %d", i)
 		}
 	}
@@ -1736,7 +1736,7 @@ func TestServerReduceMemoryUsageConcurrent(t *testing.T) {
 
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout when waiting for the server to stop")
 	}
 }
@@ -1763,7 +1763,7 @@ func testServerRequests(t *testing.T, ln *fasthttputil.InmemoryListener) {
 		}()
 		select {
 		case <-respCh:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout on iteration %d", i)
 		}
 	}
@@ -1833,7 +1833,7 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 
 	select {
 	case <-tailCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout when reading tail")
 	}
 
@@ -1847,7 +1847,7 @@ func TestServerHTTP10ConnectionKeepAlive(t *testing.T) {
 
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout when waiting for the server to stop")
 	}
 }
@@ -1908,7 +1908,7 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 
 	select {
 	case <-tailCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout when reading tail")
 	}
 
@@ -1922,7 +1922,7 @@ func TestServerHTTP10ConnectionClose(t *testing.T) {
 
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout when waiting for the server to stop")
 	}
 }
@@ -2937,7 +2937,7 @@ func TestServeConnKeepRequestAndResponseUntilResetUserValues(t *testing.T) {
 
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -2993,7 +2993,7 @@ func TestServerErrorHandler(t *testing.T) {
 
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatal("timeout")
 		}
 
@@ -3034,7 +3034,7 @@ func TestServeConnHijackResetUserValues(t *testing.T) {
 
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Errorf("Timeout: UserValues should be reset")
 	}
 }
@@ -3063,7 +3063,7 @@ func TestServeConnNonHTTP11KeepAlive(t *testing.T) {
 
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 
@@ -3589,7 +3589,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 	for range concurrency {
 		select {
 		case <-clientCh:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatal("timeout")
 		}
 	}
@@ -3600,7 +3600,7 @@ func TestTimeoutHandlerSuccess(t *testing.T) {
 
 	select {
 	case <-serverCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 }
@@ -3649,7 +3649,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	for range concurrency {
 		select {
 		case <-clientCh:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatal("timeout")
 		}
 	}
@@ -3658,7 +3658,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 	for range concurrency {
 		select {
 		case <-doneCh:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatal("timeout")
 		}
 	}
@@ -3669,7 +3669,7 @@ func TestTimeoutHandlerTimeout(t *testing.T) {
 
 	select {
 	case <-serverCh:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("timeout")
 	}
 }
@@ -3926,7 +3926,7 @@ func TestServerConnStateSeesIdleMarkers(t *testing.T) {
 		if active != 0 {
 			t.Fatalf("unexpected active marker: %d. Expecting 0", active)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for active state")
 	}
 
@@ -3935,7 +3935,7 @@ func TestServerConnStateSeesIdleMarkers(t *testing.T) {
 		if idle == 0 {
 			t.Fatalf("unexpected idle marker: %d. Expecting non-zero", idle)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for idle state")
 	}
 }
@@ -4575,7 +4575,7 @@ func TestShutdown(t *testing.T) {
 	done := 0
 	for {
 		select {
-		case <-time.After(time.Second * 2):
+		case <-time.After(testTimeout(time.Second * 2)):
 			t.Fatal("shutdown took too long")
 		case <-serveCh:
 			done++
@@ -5222,7 +5222,7 @@ func TestStreamBodyRequestContentLength(t *testing.T) {
 		if err == nil || err.Error() != fasthttputil.ErrConnectionClosed.Error() {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("test timeout")
 	}
 }
@@ -5282,7 +5282,7 @@ func TestMaxReadTimeoutPerRequest(t *testing.T) {
 		if err == nil || !strings.EqualFold(err.Error(), fasthttputil.ErrTimeout.Error()) {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("test timeout")
 	}
 }
@@ -5348,7 +5348,7 @@ func TestMaxWriteTimeoutPerRequest(t *testing.T) {
 		if err == nil || !strings.EqualFold(err.Error(), fasthttputil.ErrTimeout.Error()) {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatal("test timeout")
 	}
 }

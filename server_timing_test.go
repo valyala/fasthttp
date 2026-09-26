@@ -452,7 +452,7 @@ func benchmarkServer(b *testing.B, s realServer, clientsCount, requestsPerConn i
 
 	select {
 	case <-ch:
-	case <-time.After(10 * time.Second):
+	case <-time.After(testTimeout(10 * time.Second)):
 		b.Fatalf("Server.Serve() didn't stop")
 	}
 }
