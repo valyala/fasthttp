@@ -2955,22 +2955,31 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		}
 	}
 
-	// parse method
-	n := bytes.IndexByte(b, ' ')
-	if n <= 0 {
-		if h.secureErrorLogMessage {
-			return 0, ErrMissingRequestMethod
+	// parse method; common methods skip the byte-wise validation
+	var n int
+	switch {
+	case len(b) > 4 && string(b[:4]) == "GET ":
+		n = 3
+	case len(b) > 5 && string(b[:5]) == "POST ":
+		n = 4
+	case len(b) > 5 && string(b[:5]) == "HEAD ":
+		n = 4
+	default:
+		n = bytes.IndexByte(b, ' ')
+		if n <= 0 {
+			if h.secureErrorLogMessage {
+				return 0, ErrMissingRequestMethod
+			}
+			return 0, fmt.Errorf("cannot find http request method in %q", buf)
 		}
-		return 0, fmt.Errorf("cannot find http request method in %q", buf)
+		if !isValidMethod(b[:n]) {
+			if h.secureErrorLogMessage {
+				return 0, ErrUnsupportedRequestMethod
+			}
+			return 0, fmt.Errorf("unsupported http request method %q in %q", b[:n], buf)
+		}
 	}
 	h.method = append(h.method[:0], b[:n]...)
-
-	if !isValidMethod(h.method) {
-		if h.secureErrorLogMessage {
-			return 0, ErrUnsupportedRequestMethod
-		}
-		return 0, fmt.Errorf("unsupported http request method %q in %q", h.method, buf)
-	}
 
 	b = b[n+1:]
 	n = bytes.IndexByte(b, ' ')
@@ -2979,8 +2988,9 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 	}
 
 	protoStr := b[n+1:]
+	http11 := bytes.Equal(protoStr, strHTTP11)
 
-	if !isHTTPVersion(protoStr) {
+	if !http11 && !isHTTPVersion(protoStr) {
 		if h.secureErrorLogMessage {
 			return 0, fmt.Errorf("unsupported http version %q", protoStr)
 		}
@@ -3001,7 +3011,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 		return 0, fmt.Errorf("invalid request uri %q in %q: %w", b[:n], buf, err)
 	}
 
-	h.noHTTP11 = !bytes.Equal(protoStr, strHTTP11)
+	h.noHTTP11 = !http11
 	h.protocol = append(h.protocol[:0], protoStr...)
 	h.requestURI = append(h.requestURI[:0], b[:n]...)
 
