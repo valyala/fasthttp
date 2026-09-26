@@ -893,19 +893,19 @@ func (c *clientStreamConn) Write(p []byte) (int, error) {
 	}
 	deadline := c.writeDeadline.at
 	c.mu.Unlock()
-	err := c.stream.conn.sendData(c.stream, p, false, deadline)
+	n, err := c.stream.conn.sendData(c.stream, p, false, deadline)
 	c.mu.Lock()
 	expired := c.endLocked(&c.writeDeadline)
 	c.mu.Unlock()
 	if expired {
-		return 0, errStreamTimeout
+		return n, errStreamTimeout
 	}
 	if err != nil {
 		if errors.Is(err, fasthttp.ErrTimeout) {
 			c.cancelOnDeadline()
-			return 0, errStreamTimeout
+			return n, errStreamTimeout
 		}
-		return 0, err
+		return n, err
 	}
 	return len(p), nil
 }
@@ -928,7 +928,7 @@ func (c *clientStreamConn) Close() error {
 	}
 	if !writeClosed {
 		c.writeMu.Lock()
-		err := c.stream.conn.sendData(c.stream, nil, true, deadline)
+		_, err := c.stream.conn.sendData(c.stream, nil, true, deadline)
 		c.writeMu.Unlock()
 		return err
 	}
@@ -957,7 +957,8 @@ func (c *clientStreamConn) CloseWrite() error {
 	c.writeClosed = true
 	deadline := c.writeDeadline.at
 	c.mu.Unlock()
-	return c.stream.conn.sendData(c.stream, nil, true, deadline)
+	_, err := c.stream.conn.sendData(c.stream, nil, true, deadline)
+	return err
 }
 
 var (

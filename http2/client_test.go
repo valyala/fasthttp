@@ -2111,3 +2111,39 @@ func TestClientRejectsOtherNegotiatedProtocol(t *testing.T) {
 		t.Fatalf("Do() error = %v, want %v", err, errUnsupportedProtocol)
 	}
 }
+
+// A write cut short by its deadline reports the bytes that did go out.
+func TestOpenStreamWriteReportsPartialProgress(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			_ = ctx.AcceptStream(func(fasthttp.StreamConn) { <-release })
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{EnableExtendedConnect: true})
+	hc := &fasthttp.HostClient{Addr: testServer.listener.Addr().String()}
+	if err := ConfigureHostClient(hc, ClientConfig{Mode: PriorKnowledge, EnableExtendedConnect: true}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+	var req fasthttp.Request
+	var resp fasthttp.Response
+	req.Header.SetMethod(fasthttp.MethodConnect)
+	req.Header.SetConnectProtocol("websocket")
+	req.SetRequestURI(testServer.URL("/ws"))
+	conn, err := hc.OpenStream(&req, &resp)
+	if err != nil {
+		t.Fatalf("OpenStream() error: %v", err)
+	}
+	defer conn.Close()
+	payload := make([]byte, 8<<20)
+	_ = conn.SetWriteDeadline(time.Now().Add(200 * time.Millisecond))
+	n, err := conn.Write(payload)
+	if !isTimeout(err) {
+		t.Fatalf("Write() error = %v, want timeout", err)
+	}
+	if n <= 0 || n >= len(payload) {
+		t.Fatalf("Write() = %d, want the bytes the flow-control window let through", n)
+	}
+}

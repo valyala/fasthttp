@@ -50,7 +50,7 @@ func (c *clientConn) writeRequest(stream *clientStream, keepOpen bool, deadline 
 	}
 	var err error
 	if reader == nil {
-		err = c.sendData(stream, body, true, deadline)
+		_, err = c.sendData(stream, body, true, deadline)
 	} else {
 		defer req.CloseBodyStream() //nolint:errcheck
 		err = c.sendRequestStream(stream, reader, requestContentLength(&req.Header), deadline)
@@ -229,7 +229,7 @@ func (c *clientConn) sendRequestStream(
 			if end && expected >= 0 && sent != expected {
 				return errors.New("http2: request body length doesn't match content-length")
 			}
-			if err := c.sendData(stream, buffer[:n], end, deadline); err != nil {
+			if _, err := c.sendData(stream, buffer[:n], end, deadline); err != nil {
 				return err
 			}
 			if end {
@@ -243,21 +243,26 @@ func (c *clientConn) sendRequestStream(
 			if expected >= 0 && sent != expected {
 				return errors.New("http2: request body length doesn't match content-length")
 			}
-			return c.sendData(stream, nil, true, deadline)
+			_, err := c.sendData(stream, nil, true, deadline)
+			return err
 		}
 	}
 }
 
-func (c *clientConn) sendData(stream *clientStream, data []byte, endStream bool, deadline time.Time) error {
+// sendData reports the bytes whose frames reached the connection, so a
+// failed write can say how much of data went out.
+func (c *clientConn) sendData(stream *clientStream, data []byte, endStream bool, deadline time.Time) (int, error) {
+	sent := 0
 	for len(data) != 0 || endStream {
 		if err := c.waitForSendWindow(stream, data, deadline); err != nil {
-			return err
+			return sent, err
 		}
 
 		if err := c.lockWrite(deadline); err != nil {
-			return err
+			return sent, err
 		}
 		framesWritten := 0
+		batched := 0
 		finished := false
 		var streamErr error
 		var writeErr error
@@ -289,6 +294,7 @@ func (c *clientConn) sendData(stream *clientStream, data []byte, endStream bool,
 				break
 			}
 			data = data[amount:]
+			batched += amount
 			framesWritten++
 			if last {
 				finished = true
@@ -302,19 +308,20 @@ func (c *clientConn) sendData(stream *clientStream, data []byte, endStream bool,
 
 		if writeErr != nil {
 			c.fail(writeErr)
-			return writeErr
+			return sent, writeErr
 		}
+		sent += batched
 		if streamErr != nil {
-			return streamErr
+			return sent, streamErr
 		}
 		if finished {
 			c.mu.Lock()
 			c.maybeFinalizeStreamLocked(stream)
 			c.mu.Unlock()
-			return nil
+			return sent, nil
 		}
 	}
-	return nil
+	return sent, nil
 }
 
 func (c *clientConn) waitForSendWindow(stream *clientStream, data []byte, deadline time.Time) error {
