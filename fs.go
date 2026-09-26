@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -445,6 +446,17 @@ type FS struct {
 	// Byte range requests are disabled by default.
 	AcceptByteRange bool
 
+	// Sends a weak ETag header derived from the modification time and size
+	// of the served file if set to true. GET and HEAD requests with a matching
+	// If-None-Match header get '304 Not Modified' responses, other methods
+	// get '412 Precondition Failed'.
+	//
+	// Files with an unknown modification time, such as files from embed.FS,
+	// get no ETag, since a size-only tag cannot reliably detect changes.
+	//
+	// ETag generation is disabled by default.
+	GenerateETag bool
+
 	// SkipCache if true, will cache no file handler.
 	//
 	// By default is false.
@@ -600,6 +612,7 @@ func (fs *FS) initRequestHandler() {
 		compressRoot:           compressRoot,
 		pathNotFound:           fs.PathNotFound,
 		acceptByteRange:        fs.AcceptByteRange,
+		generateETag:           fs.GenerateETag,
 		compressedFileSuffixes: compressedFileSuffixes,
 	}
 
@@ -645,6 +658,7 @@ type fsHandler struct {
 	compressBrotli     bool
 	compressZstd       bool
 	acceptByteRange    bool
+	generateETag       bool
 }
 
 type fsFile struct {
@@ -657,6 +671,7 @@ type fsFile struct {
 	contentType     string
 	dirIndex        []byte
 	lastModifiedStr []byte
+	etag            []byte
 
 	bigFiles      []*bigFileReader
 	contentLength int
@@ -1391,12 +1406,43 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			return
 		}
 
+		if h.generateETag {
+			ff.etag = appendFSETag(nil, ff.lastModified, ff.contentLength)
+		}
+
 		ff = h.cacheManager.SetFileToCache(fileCacheKind, path, ff)
 	}
 
-	if !ctx.IfModifiedSince(ff.lastModified) {
-		ff.decReadersCount()
+	var notModified bool
+	if ifNoneMatch := ctx.Request.Header.peekAll(strIfNoneMatch); h.generateETag && len(ifNoneMatch) > 0 {
+		// If-Modified-Since is ignored when If-None-Match is present.
+		// See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3
+		if fsETagMatch(ifNoneMatch, ff.etag) {
+			// Only GET and HEAD get 304, other methods get 412.
+			// See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2
+			if !ctx.IsGet() && !ctx.IsHead() {
+				ff.decReadersCount()
+				ctx.Response.Reset()
+				ctx.SetStatusCode(StatusPreconditionFailed)
+				return
+			}
+			notModified = true
+		}
+	} else {
+		notModified = !ctx.IfModifiedSince(ff.lastModified)
+	}
+	if notModified {
 		ctx.NotModified()
+		// NotModified resets the response, so add back the Vary header
+		// the 200 response would include.
+		// See https://www.rfc-editor.org/rfc/rfc9110#section-15.4.5
+		if ff.compressed {
+			ctx.Response.Header.addVaryBytes(strAcceptEncoding)
+		}
+		if len(ff.etag) > 0 {
+			ctx.Response.Header.SetBytesV(HeaderETag, ff.etag)
+		}
+		ff.decReadersCount()
 		return
 	}
 
@@ -1450,6 +1496,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	}
 
 	hdr.setNonSpecial(strLastModified, ff.lastModifiedStr)
+	if len(ff.etag) > 0 {
+		hdr.SetBytesV(HeaderETag, ff.etag)
+	}
 	if !ctx.IsHead() {
 		ctx.SetBodyStream(r, contentLength)
 	} else {
@@ -1469,6 +1518,108 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.SetContentType(ff.contentType)
 	}
 	ctx.SetStatusCode(statusCode)
+}
+
+// appendFSETag appends a weak entity tag built from the hex-encoded
+// modification time and size of the served file to dst.
+//
+// The tag is weak, since the modification time has one second resolution
+// and compressed variants of the same file may have equal sizes, so it cannot
+// guarantee byte-for-byte equality. It is not appended if the modification
+// time is unknown.
+func appendFSETag(dst []byte, lastModified time.Time, size int) []byte {
+	mtime := lastModified.Unix()
+	if mtime <= 0 {
+		return dst
+	}
+	dst = append(dst, `W/"`...)
+	dst = strconv.AppendInt(dst, mtime, 16)
+	dst = append(dst, '-')
+	dst = strconv.AppendInt(dst, int64(size), 16)
+	return append(dst, '"')
+}
+
+// fsETagMatch reports whether the given If-None-Match header values match
+// etag using the weak comparison. Multiple header lines are treated the same
+// as a single comma-separated list. The combined field value must be either
+// a lone "*" or a comma-separated list of entity tags. Any malformed value
+// counts as no match.
+//
+// See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2
+func fsETagMatch(ifNoneMatch [][]byte, etag []byte) bool {
+	etag = trimWeakETagPrefix(etag)
+	matched, star := false, false
+	elements := 0
+	for _, v := range ifNoneMatch {
+		for {
+			// Empty list elements are allowed.
+			// See https://www.rfc-editor.org/rfc/rfc9110#section-5.6.1.2
+			v = bytes.TrimLeft(v, " \t,")
+			if len(v) == 0 {
+				break
+			}
+			elements++
+			if v[0] == '*' {
+				star = true
+				v = v[1:]
+			} else {
+				tag, rest, ok := nextETag(v)
+				if !ok {
+					return false
+				}
+				if len(etag) > 0 && bytes.Equal(tag, etag) {
+					matched = true
+				}
+				v = rest
+			}
+			// Elements must be separated by a comma.
+			v = bytes.TrimLeft(v, " \t")
+			if len(v) > 0 && v[0] != ',' {
+				return false
+			}
+		}
+	}
+	if star {
+		// "*" is only valid as the whole field value.
+		return elements == 1
+	}
+	return matched
+}
+
+// nextETag parses the entity tag at the start of b. It returns the tag
+// without the weak prefix and the rest of b. ok is false if b does not start
+// with a valid entity tag.
+func nextETag(b []byte) (tag, rest []byte, ok bool) {
+	b = trimWeakETagPrefix(b)
+	if len(b) < 2 || b[0] != '"' {
+		return nil, nil, false
+	}
+	n := bytes.IndexByte(b[1:], '"')
+	if n < 0 || !validETagChars(b[1:n+1]) {
+		return nil, nil, false
+	}
+	return b[:n+2], b[n+2:], true
+}
+
+// validETagChars reports whether b holds only characters allowed inside
+// the quotes of an entity tag.
+//
+// See https://www.rfc-editor.org/rfc/rfc9110#section-8.8.3
+func validETagChars(b []byte) bool {
+	for _, c := range b {
+		// etagc = "!" / %x23-7E / obs-text
+		if c != '!' && (c < 0x23 || c > 0x7e) && c < 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+func trimWeakETagPrefix(etag []byte) []byte {
+	if len(etag) >= 2 && etag[0] == 'W' && etag[1] == '/' {
+		return etag[2:]
+	}
+	return etag
 }
 
 type byteRangeUpdater interface {

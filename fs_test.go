@@ -1425,3 +1425,302 @@ func TestFileCacheForZstd(t *testing.T) {
 		t.Fatalf("Unexpected response body %q. Expecting %q", ctx.Response.Body(), data)
 	}
 }
+
+func TestFSGenerateETag(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "file.txt")
+	body := strings.Repeat("fasthttp etag test body\n", 100)
+	if err := os.WriteFile(filePath, []byte(body), 0o600); err != nil {
+		t.Fatalf("cannot create test file: %v", err)
+	}
+	mtime := time.Unix(1700000000, 0)
+	if err := os.Chtimes(filePath, mtime, mtime); err != nil {
+		t.Fatalf("cannot set modification time: %v", err)
+	}
+	expectedETag := fmt.Sprintf(`W/"%x-%x"`, mtime.Unix(), len(body))
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	h := (&FS{
+		Root:            dir,
+		AcceptByteRange: true,
+		GenerateETag:    true,
+		CleanStop:       stop,
+	}).NewRequestHandler()
+
+	resp := testFSETagRequest(t, h, nil)
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+	if etag := string(resp.Header.Peek(HeaderETag)); etag != expectedETag {
+		t.Fatalf("unexpected ETag: %q. Expecting %q", etag, expectedETag)
+	}
+	if string(resp.Body()) != body {
+		t.Fatalf("unexpected body: %q. Expecting %q", resp.Body(), body)
+	}
+
+	for _, tc := range []struct {
+		name            string
+		ifNoneMatch     string
+		ifModifiedSince string
+		expectedStatus  int
+	}{
+		{"exact", expectedETag, "", StatusNotModified},
+		{"strong form", strings.TrimPrefix(expectedETag, "W/"), "", StatusNotModified},
+		{"list", `"foo", W/"bar",` + expectedETag, "", StatusNotModified},
+		{"list without spaces", `"foo",` + expectedETag + `,"bar"`, "", StatusNotModified},
+		{"any", "*", "", StatusNotModified},
+		{"mismatch", `W/"0-0"`, "", StatusOK},
+		{"prefix mismatch", strings.TrimSuffix(expectedETag, `"`) + `0"`, "", StatusOK},
+		{"list with special characters", `"a!#$%~", ` + expectedETag, "", StatusNotModified},
+		{"malformed", "foo", "", StatusOK},
+		{"unterminated", `"foo`, "", StatusOK},
+		// A malformed entity tag stops the scan of the whole field value.
+		{"space in tag", `"bad tag", ` + expectedETag, "", StatusOK},
+		{"space in tag after match", expectedETag + `, "bad tag"`, "", StatusOK},
+		{"control character in tag", "\"bad\x01tag\", " + expectedETag, "", StatusOK},
+		{"del character in tag", "\"bad\x7ftag\", " + expectedETag, "", StatusOK},
+		{"missing quotes in list", `foo, ` + expectedETag, "", StatusOK},
+		{"unterminated in list", `"foo, ` + expectedETag, "", StatusOK},
+		// Entity tags must be separated by commas.
+		{"missing comma", `"other"` + expectedETag, "", StatusOK},
+		{"missing comma with space", `"other" ` + expectedETag, "", StatusOK},
+		{"missing comma after match", expectedETag + ` "other"`, "", StatusOK},
+		{"trailing garbage after match", expectedETag + `x`, "", StatusOK},
+		{"empty list elements", ` , ` + expectedETag + ` ,, "other" , `, "", StatusNotModified},
+		// "*" is only valid as the whole field value.
+		{"any with whitespace", " * ", "", StatusNotModified},
+		{"any with empty list elements", ", *,", "", StatusNotModified},
+		{"any with garbage", "*garbage", "", StatusOK},
+		{"any with malformed tag", `*, "bad tag"`, "", StatusOK},
+		{"any with tag", `*, ` + expectedETag, "", StatusOK},
+		{"tag with any", expectedETag + `, *`, "", StatusOK},
+		{"precedence over not modified since", `"foo"`, string(AppendHTTPDate(nil, mtime.Add(time.Hour))), StatusOK},
+		{"precedence over modified since", expectedETag, string(AppendHTTPDate(nil, mtime.Add(-time.Hour))), StatusNotModified},
+	} {
+		resp := testFSETagRequest(t, h, func(req *Request) {
+			if tc.ifNoneMatch != "" {
+				req.Header.Set(HeaderIfNoneMatch, tc.ifNoneMatch)
+			}
+			if tc.ifModifiedSince != "" {
+				req.Header.Set(HeaderIfModifiedSince, tc.ifModifiedSince)
+			}
+		})
+		if resp.StatusCode() != tc.expectedStatus {
+			t.Fatalf("%s: unexpected status code: %d. Expecting %d", tc.name, resp.StatusCode(), tc.expectedStatus)
+		}
+		if etag := string(resp.Header.Peek(HeaderETag)); etag != expectedETag {
+			t.Fatalf("%s: unexpected ETag: %q. Expecting %q", tc.name, etag, expectedETag)
+		}
+		if tc.expectedStatus == StatusNotModified && len(resp.Body()) > 0 {
+			t.Fatalf("%s: unexpected body for 304 response: %q", tc.name, resp.Body())
+		}
+	}
+
+	// Byte range responses carry the ETag of the whole file.
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		req.Header.SetByteRange(0, 9)
+	})
+	if resp.StatusCode() != StatusPartialContent {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusPartialContent)
+	}
+	if etag := string(resp.Header.Peek(HeaderETag)); etag != expectedETag {
+		t.Fatalf("unexpected ETag: %q. Expecting %q", etag, expectedETag)
+	}
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		req.Header.SetByteRange(0, 9)
+		req.Header.Set(HeaderIfNoneMatch, expectedETag)
+	})
+	if resp.StatusCode() != StatusNotModified {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotModified)
+	}
+
+	// Only GET and HEAD get 304 for a matching If-None-Match, other methods get 412.
+	for _, tc := range []struct {
+		method         string
+		ifNoneMatch    string
+		expectedStatus int
+	}{
+		{MethodGet, expectedETag, StatusNotModified},
+		{MethodHead, expectedETag, StatusNotModified},
+		{MethodGet, "*", StatusNotModified},
+		{MethodHead, "*", StatusNotModified},
+		{MethodPost, expectedETag, StatusPreconditionFailed},
+		{MethodPut, "*", StatusPreconditionFailed},
+		{MethodPost, `"foo"`, StatusOK},
+		{MethodPost, `"bad tag", ` + expectedETag, StatusOK},
+		{MethodPut, `"bad tag", *`, StatusOK},
+	} {
+		resp := testFSETagRequest(t, h, func(req *Request) {
+			req.Header.SetMethod(tc.method)
+			req.Header.Set(HeaderIfNoneMatch, tc.ifNoneMatch)
+		})
+		if resp.StatusCode() != tc.expectedStatus {
+			t.Fatalf("%s %s: unexpected status code: %d. Expecting %d", tc.method, tc.ifNoneMatch, resp.StatusCode(), tc.expectedStatus)
+		}
+		if tc.expectedStatus != StatusOK && len(resp.Body()) > 0 {
+			t.Fatalf("%s %s: unexpected body: %q", tc.method, tc.ifNoneMatch, resp.Body())
+		}
+	}
+
+	// Multiple If-None-Match headers are combined like a single comma-separated one.
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		req.Header.Add(HeaderIfNoneMatch, `"other"`)
+		req.Header.Add(HeaderIfNoneMatch, expectedETag)
+	})
+	if resp.StatusCode() != StatusNotModified {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotModified)
+	}
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		req.Header.Add(HeaderIfNoneMatch, `"other"`)
+		req.Header.Add(HeaderIfNoneMatch, `"another"`)
+	})
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+
+	// A malformed value in any of the header lines counts as no match.
+	for _, tc := range [][2]string{
+		{`"bad tag"`, expectedETag},
+		{expectedETag, `"bad tag"`},
+		{`"other"`, `"bad tag", ` + expectedETag},
+		{`"bad tag"`, "*"},
+		{`"other"`, "*"},
+		{"*", expectedETag},
+		{"*", "*"},
+		{`"other"`, expectedETag + ` "another"`},
+	} {
+		resp := testFSETagRequest(t, h, func(req *Request) {
+			req.Header.Add(HeaderIfNoneMatch, tc[0])
+			req.Header.Add(HeaderIfNoneMatch, tc[1])
+		})
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("%q, %q: unexpected status code: %d. Expecting %d", tc[0], tc[1], resp.StatusCode(), StatusOK)
+		}
+	}
+}
+
+func TestFSGenerateETagDisabled(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), []byte("body"), 0o600); err != nil {
+		t.Fatalf("cannot create test file: %v", err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	h := (&FS{
+		Root:      dir,
+		CleanStop: stop,
+	}).NewRequestHandler()
+
+	resp := testFSETagRequest(t, h, nil)
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+	if etag := resp.Header.Peek(HeaderETag); len(etag) > 0 {
+		t.Fatalf("unexpected ETag: %q", etag)
+	}
+
+	// If-None-Match must not affect responses and must not override If-Modified-Since.
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		req.Header.Set(HeaderIfNoneMatch, "*")
+	})
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		req.Header.Set(HeaderIfNoneMatch, `"foo"`)
+		req.Header.Set(HeaderIfModifiedSince, string(AppendHTTPDate(nil, time.Now().Add(time.Hour))))
+	})
+	if resp.StatusCode() != StatusNotModified {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotModified)
+	}
+}
+
+func TestFSGenerateETagCompress(t *testing.T) {
+	t.Parallel()
+
+	// File locking is flaky on Windows.
+	if runtime.GOOS == "windows" {
+		t.SkipNow()
+	}
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "file.txt")
+	body := strings.Repeat("fasthttp etag compress test body\n", 1000)
+	if err := os.WriteFile(filePath, []byte(body), 0o600); err != nil {
+		t.Fatalf("cannot create test file: %v", err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	h := (&FS{
+		Root:         dir,
+		Compress:     true,
+		GenerateETag: true,
+		CleanStop:    stop,
+	}).NewRequestHandler()
+
+	resp := testFSETagRequest(t, h, nil)
+	plainETag := string(resp.Header.Peek(HeaderETag))
+	if plainETag == "" {
+		t.Fatal("missing ETag for uncompressed response")
+	}
+
+	acceptGzip := func(req *Request) {
+		req.Header.Set(HeaderAcceptEncoding, "gzip")
+	}
+	resp = testFSETagRequest(t, h, acceptGzip)
+	if string(resp.Header.ContentEncoding()) != "gzip" {
+		t.Fatalf("unexpected Content-Encoding: %q. Expecting %q", resp.Header.ContentEncoding(), "gzip")
+	}
+	gzipETag := string(resp.Header.Peek(HeaderETag))
+	if gzipETag == "" || gzipETag == plainETag {
+		t.Fatalf("unexpected ETag for gzip response: %q. Expecting a non-empty tag different from %q", gzipETag, plainETag)
+	}
+
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		acceptGzip(req)
+		req.Header.Set(HeaderIfNoneMatch, gzipETag)
+	})
+	if resp.StatusCode() != StatusNotModified {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotModified)
+	}
+	if etag := string(resp.Header.Peek(HeaderETag)); etag != gzipETag {
+		t.Fatalf("unexpected ETag: %q. Expecting %q", etag, gzipETag)
+	}
+	// A 304 must include the Vary header the 200 response would include.
+	if vary := string(resp.Header.Peek(HeaderVary)); vary != HeaderAcceptEncoding {
+		t.Fatalf("unexpected Vary: %q. Expecting %q", vary, HeaderAcceptEncoding)
+	}
+
+	resp = testFSETagRequest(t, h, func(req *Request) {
+		req.Header.Set(HeaderIfNoneMatch, plainETag)
+	})
+	if resp.StatusCode() != StatusNotModified {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusNotModified)
+	}
+	if vary := resp.Header.Peek(HeaderVary); len(vary) > 0 {
+		t.Fatalf("unexpected Vary for uncompressed 304 response: %q", vary)
+	}
+}
+
+func testFSETagRequest(t *testing.T, h RequestHandler, prepare func(req *Request)) *Response {
+	t.Helper()
+
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, nil)
+	ctx.Request.SetRequestURI("/file.txt")
+	if prepare != nil {
+		prepare(&ctx.Request)
+	}
+	h(&ctx)
+	return readResponseFromCtx(t, &ctx, false)
+}
