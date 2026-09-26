@@ -1176,6 +1176,84 @@ func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 	}
 }
 
+func TestPipelineClientMaxResponseBodySize(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		limit    int
+		response string
+		tooLarge bool
+	}{
+		{"fixed-over-limit", 4, "Content-Length: 5\r\n\r\nHELLO", true},
+		{"chunked-over-limit", 4, "Transfer-Encoding: chunked\r\n\r\n3\r\nHEL\r\n2\r\nLO\r\n0\r\n\r\n", true},
+		{"identity-over-limit", 4, "Connection: close\r\n\r\nHELLO", true},
+		{"at-limit", 5, "Content-Length: 5\r\n\r\nHELLO", false},
+		{"unlimited", 0, "Content-Length: 5\r\n\r\nHELLO", false},
+		{"negative-unlimited", -1, "Content-Length: 5\r\n\r\nHELLO", false},
+	} {
+		for _, stream := range []bool{false, true} {
+			for _, method := range []string{"Do", "DoTimeout", "DoDeadline"} {
+				t.Run(fmt.Sprintf("%s/stream=%t/%s", tc.name, stream, method), func(t *testing.T) {
+					t.Parallel()
+					clientConn, serverConn := net.Pipe()
+					t.Cleanup(func() {
+						_ = clientConn.Close()
+						_ = serverConn.Close()
+					})
+					go func() {
+						defer serverConn.Close()
+						var req Request
+						if req.Read(bufio.NewReader(serverConn)) == nil {
+							_, _ = io.WriteString(serverConn, "HTTP/1.1 200 OK\r\n"+tc.response)
+						}
+					}()
+					var dialed atomic.Bool
+					client := PipelineClient{
+						MaxResponseBodySize: tc.limit,
+						ReadTimeout:         testTimeout(time.Second),
+						WriteTimeout:        testTimeout(time.Second),
+						Logger:              &testLogger{},
+						Dial: func(string) (net.Conn, error) {
+							if !dialed.CompareAndSwap(false, true) {
+								return nil, errors.New("unexpected second dial")
+							}
+							return clientConn, nil
+						},
+					}
+					var req Request
+					req.SetRequestURI("http://example.test/")
+					var resp Response
+					resp.StreamBody = stream
+					defer func() {
+						if err := resp.CloseBodyStream(); err != nil {
+							t.Errorf("close response body stream: %v", err)
+						}
+					}()
+					var err error
+					switch method {
+					case "Do":
+						err = client.Do(&req, &resp)
+					case "DoTimeout":
+						err = client.DoTimeout(&req, &resp, testTimeout(5*time.Second))
+					case "DoDeadline":
+						err = client.DoDeadline(&req, &resp, time.Now().Add(testTimeout(5*time.Second)))
+					}
+					if tc.tooLarge {
+						if !errors.Is(err, ErrBodyTooLarge) {
+							t.Fatalf("got %v, want ErrBodyTooLarge", err)
+						}
+					} else if err != nil {
+						t.Fatalf("request failed: %v", err)
+					} else if got := string(resp.Body()); got != "HELLO" {
+						t.Fatalf("body = %q, want HELLO", got)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestPipelineClientBuffersStreamBody(t *testing.T) {
 	t.Parallel()
 
