@@ -263,7 +263,7 @@ func newTLSBenchmarkServer(b *testing.B) *testServer {
 	dials := new(atomic.Int64)
 	transport := &xhttp2.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec // Benchmark-only certificate.
+			InsecureSkipVerify: true,
 		},
 		DialTLSContext: func(ctx context.Context, network, addr string, config *tls.Config) (net.Conn, error) {
 			dials.Add(1)
@@ -312,7 +312,7 @@ func newTLSBenchmarkHostClient(b *testing.B, addr string) *fasthttp.HostClient {
 		MaxConns:           1,
 		MaxConnWaitTimeout: time.Minute,
 		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec // Benchmark-only certificate.
+			InsecureSkipVerify: true,
 		},
 	}
 	if err := ConfigureHostClient(client, ClientConfig{MaxConcurrentStreams: 1000}); err != nil {

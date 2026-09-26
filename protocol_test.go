@@ -234,7 +234,7 @@ func TestServerRegisterProtocolCopiesSelectors(t *testing.T) {
 }
 
 func TestServerRegisterProtocolPreservesAndOrdersTLSConfig(t *testing.T) {
-	original := &tls.Config{NextProtos: []string{"custom", "http/1.1"}} //nolint:gosec
+	original := &tls.Config{NextProtos: []string{"custom", "http/1.1"}}
 	server := &Server{TLSConfig: original}
 	err := server.RegisterProtocol(ProtocolRegistration{
 		ALPN:         []string{"h2"},
@@ -256,7 +256,7 @@ func TestServerRegisterProtocolPreservesAndOrdersTLSConfig(t *testing.T) {
 }
 
 func TestServerRegisterProtocolTLSFailureDoesNotMutateServer(t *testing.T) {
-	original := &tls.Config{ //nolint:gosec
+	original := &tls.Config{
 		MinVersion: tls.VersionTLS10,
 		MaxVersion: tls.VersionTLS11,
 		NextProtos: []string{"custom"},
@@ -798,7 +798,7 @@ func TestIsTLSConnUnwrapsPerIPConn(t *testing.T) {
 	if isTLSConn(serverConn) {
 		t.Error("plain connection reported as TLS")
 	}
-	tlsConn := tls.Server(serverConn, &tls.Config{}) //nolint:gosec // Never handshakes.
+	tlsConn := tls.Server(serverConn, &tls.Config{})
 	if !isTLSConn(tlsConn) {
 		t.Error("TLS connection not reported as TLS")
 	}

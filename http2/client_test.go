@@ -986,7 +986,7 @@ func TestClientTLSALPN(t *testing.T) {
 		Addr:  listener.Addr().String(),
 		IsTLS: true,
 		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec // Test-only certificate.
+			InsecureSkipVerify: true,
 		},
 	}
 	if err := ConfigureHostClient(hc, ClientConfig{}); err != nil {
@@ -1044,7 +1044,7 @@ func TestClientTLSHTTP1FallbackReusesNegotiatedConnection(t *testing.T) {
 		Addr:  listener.Addr().String(),
 		IsTLS: true,
 		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec // Test-only certificate.
+			InsecureSkipVerify: true,
 		},
 		DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
 			dials.Add(1)
@@ -1101,7 +1101,7 @@ func TestClientRequireHTTP2RejectsHTTP1ALPN(t *testing.T) {
 		Addr:  "localhost:443",
 		IsTLS: true,
 		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec // Test-only certificate.
+			InsecureSkipVerify: true,
 		},
 		DialTimeout: func(string, time.Duration) (net.Conn, error) {
 			return clientConn, nil

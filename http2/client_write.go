@@ -34,8 +34,7 @@ func (c *clientConn) writeRequest(stream *clientStream, keepOpen bool, deadline 
 		return errors.New("http2: request body length doesn't match content-length")
 	}
 	if err := c.writeRequestHeaders(stream, !keepOpen && !hasBody, req, deadline); err != nil {
-		var connectionError *clientConnectionWriteError
-		if errors.As(err, &connectionError) {
+		if connectionError, ok := errors.AsType[*clientConnectionWriteError](err); ok {
 			c.fail(connectionError.err)
 		}
 		return err
