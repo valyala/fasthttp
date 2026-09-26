@@ -628,3 +628,27 @@ func testAppendUnquotedArg(t *testing.T, s, expectedS string) {
 		t.Fatalf("Unexpected AppendUnquotedArg(AppendQuotedArg(%q))=%q, want %q", s, unquotedS, s)
 	}
 }
+
+func TestLowercaseBytesMatchesTable(t *testing.T) {
+	t.Parallel()
+
+	for n := 0; n <= 24; n++ {
+		for c := range 256 {
+			for pos := 0; pos < n; pos++ {
+				b := make([]byte, n)
+				for i := range b {
+					b[i] = 'A' + byte(i%26)
+				}
+				b[pos] = byte(c)
+				exp := make([]byte, n)
+				for i := range b {
+					exp[i] = toLowerTable[b[i]]
+				}
+				lowercaseBytes(b)
+				if !bytes.Equal(b, exp) {
+					t.Fatalf("unexpected result for byte %#x at %d of %d: %q. Expecting %q", c, pos, n, b, exp)
+				}
+			}
+		}
+	}
+}

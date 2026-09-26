@@ -2526,6 +2526,32 @@ func TestTrailerValueControlBytesRejected(t *testing.T) {
 	}
 }
 
+func TestValidHeaderValueMatchesByteTable(t *testing.T) {
+	t.Parallel()
+
+	for n := 0; n <= 20; n++ {
+		for c := range 256 {
+			for pos := 0; pos < n; pos++ {
+				b := bytes.Repeat([]byte{'a'}, n)
+				b[pos] = byte(c)
+				exp := true
+				for _, ch := range b {
+					if !validHeaderValueByte(ch) {
+						exp = false
+						break
+					}
+				}
+				if got := validHeaderValue(b); got != exp {
+					t.Fatalf("unexpected result for byte %#x at %d of %d: %v. Expecting %v", c, pos, n, got, exp)
+				}
+			}
+		}
+	}
+	if !validHeaderValue(nil) {
+		t.Fatal("expecting empty value to be valid")
+	}
+}
+
 func TestResponseHeaderCookie(t *testing.T) {
 	t.Parallel()
 
