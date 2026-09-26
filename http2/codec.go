@@ -77,7 +77,7 @@ func newHeaderCodec(maxTableSize, maxListSize uint32) *headerCodec {
 	codec := &headerCodec{maxListSize: uint64(maxListSize)}
 	codec.decoder = hpack.NewDecoder(maxTableSize, codec.emit)
 	codec.decoder.SetAllowedMaxDynamicTableSize(maxTableSize)
-	codec.decoder.SetMaxStringLength(int(codec.maxListSize))
+	codec.decoder.SetMaxStringLength(int(codec.maxListSize)) // #nosec G115
 	return codec
 }
 

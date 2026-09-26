@@ -179,7 +179,8 @@ func normalizeClientConfig(hc *fasthttp.HostClient, cfg *ClientConfig) (clientCo
 	if result.maxHeaderListSize == 0 {
 		result.maxHeaderListSize = defaultMaxHeaderListSize
 		if hc != nil && hc.ReadBufferSize > int(result.maxHeaderListSize) {
-			result.maxHeaderListSize = uint32(hc.ReadBufferSize)
+			// Clamped before the conversion, so an oversized buffer still fails the limit check.
+			result.maxHeaderListSize = uint32(min(hc.ReadBufferSize, maxConfiguredHeaderListSize+1)) // #nosec G115
 		}
 	}
 	if result.maxDecoderTableSize == 0 {
@@ -357,7 +358,8 @@ func normalizeServerConfig(s *fasthttp.Server, cfg *ServerConfig) (serverConfig,
 	if result.maxHeaderListSize == 0 {
 		result.maxHeaderListSize = defaultMaxHeaderListSize
 		if s.ReadBufferSize > int(result.maxHeaderListSize) {
-			result.maxHeaderListSize = uint32(s.ReadBufferSize)
+			// Clamped before the conversion, so an oversized buffer still fails the limit check.
+			result.maxHeaderListSize = uint32(min(s.ReadBufferSize, maxConfiguredHeaderListSize+1)) // #nosec G115
 		}
 	}
 	if result.maxDecoderTableSize == 0 {

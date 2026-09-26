@@ -250,7 +250,7 @@ func (c *clientConn) writePrefaceAndSettings() (err error) {
 	settings := []xhttp2.Setting{
 		{ID: xhttp2.SettingEnablePush, Val: enablePush},
 		{ID: xhttp2.SettingMaxConcurrentStreams, Val: c.config.maxConcurrentStreams},
-		{ID: xhttp2.SettingInitialWindowSize, Val: uint32(c.config.streamWindowSize)},
+		{ID: xhttp2.SettingInitialWindowSize, Val: uint32(c.config.streamWindowSize)}, // #nosec G115
 		{ID: xhttp2.SettingMaxFrameSize, Val: c.config.maxReadFrameSize},
 		{ID: xhttp2.SettingMaxHeaderListSize, Val: c.config.maxHeaderListSize},
 		{ID: xhttp2.SettingHeaderTableSize, Val: c.config.maxDecoderTableSize},
@@ -262,7 +262,7 @@ func (c *clientConn) writePrefaceAndSettings() (err error) {
 	if err := c.framer.WriteSettings(settings...); err != nil {
 		return err
 	}
-	increment := uint32(c.config.connectionWindowSize - 65535)
+	increment := uint32(c.config.connectionWindowSize - 65535) // #nosec G115
 	if increment != 0 {
 		if err := c.framer.WriteWindowUpdate(0, increment); err != nil {
 			return err

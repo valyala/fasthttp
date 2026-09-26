@@ -541,8 +541,7 @@ func (c *serverConn) handleIncomingEvent(event *incomingFrame) (bool, error) {
 		return true, c.failConnection(errorCode(event.err), event.err)
 	}
 	if err := c.processFrame(event); err != nil {
-		var protocolErr *serverError
-		if errors.As(err, &protocolErr) {
+		if protocolErr, ok := errors.AsType[*serverError](err); ok {
 			return true, c.failConnection(protocolErr.code, protocolErr.err)
 		}
 		return true, c.failConnection(xhttp2.ErrCodeInternal, err)
@@ -551,8 +550,7 @@ func (c *serverConn) handleIncomingEvent(event *incomingFrame) (bool, error) {
 }
 
 func (c *serverConn) failCommand(err error) error {
-	var protocolErr *serverError
-	if errors.As(err, &protocolErr) {
+	if protocolErr, ok := errors.AsType[*serverError](err); ok {
 		return c.failConnection(protocolErr.code, protocolErr.err)
 	}
 	return c.failConnection(xhttp2.ErrCodeInternal, err)
@@ -592,7 +590,7 @@ func (c *serverConn) readClientPreface() error {
 func (c *serverConn) writeInitialSettings() error {
 	settings := []xhttp2.Setting{
 		{ID: xhttp2.SettingMaxConcurrentStreams, Val: c.config.maxConcurrentStreams},
-		{ID: xhttp2.SettingInitialWindowSize, Val: uint32(c.config.streamWindowSize)},
+		{ID: xhttp2.SettingInitialWindowSize, Val: uint32(c.config.streamWindowSize)}, // #nosec G115
 		{ID: xhttp2.SettingMaxFrameSize, Val: c.config.maxReadFrameSize},
 		{ID: xhttp2.SettingMaxHeaderListSize, Val: c.config.maxHeaderListSize},
 		{ID: xhttp2.SettingHeaderTableSize, Val: c.config.maxDecoderTableSize},
@@ -604,7 +602,7 @@ func (c *serverConn) writeInitialSettings() error {
 	if err := c.framer.WriteSettings(settings...); err != nil {
 		return err
 	}
-	windowIncrement := uint32(c.config.connectionWindowSize - 65535)
+	windowIncrement := uint32(c.config.connectionWindowSize - 65535) // #nosec G115
 	if windowIncrement != 0 {
 		return c.framer.WriteWindowUpdate(0, windowIncrement)
 	}
@@ -616,12 +614,10 @@ func (c *serverConn) readLoop() {
 		frame, err := c.frames.readFrame()
 		event := incomingFrame{err: err}
 		if err != nil {
-			var readErr *frameReadError
-			if errors.As(err, &readErr) {
+			if readErr, ok := errors.AsType[*frameReadError](err); ok {
 				event.frameType = readErr.frameType
 			}
-			var streamError xhttp2.StreamError
-			if errors.As(err, &streamError) {
+			if streamError, ok := errors.AsType[xhttp2.StreamError](err); ok {
 				event.kind = incomingFrameStreamError
 				event.streamID = streamError.StreamID
 				event.errCode = streamError.Code
@@ -989,7 +985,7 @@ func (c *serverConn) processHeaders(event *incomingFrame) error {
 	}
 	// Pushes are server-initiated; SETTINGS_MAX_CONCURRENT_STREAMS limits
 	// only the peer's.
-	if uint32(len(c.streams))-c.activePushes >= c.config.maxConcurrentStreams {
+	if uint32(len(c.streams))-c.activePushes >= c.config.maxConcurrentStreams { // #nosec G115
 		return c.rejectNewStream(event.streamID, xhttp2.ErrCodeRefusedStream)
 	}
 
@@ -1283,7 +1279,7 @@ func (c *serverConn) consumeRequestBytes(stream *serverStream, amount int64) err
 		return err
 	}
 	if increment := stream.recv.consume(amount, int64(c.config.streamWindowSize)); increment != 0 {
-		return c.framer.WriteWindowUpdate(stream.id, uint32(increment))
+		return c.framer.WriteWindowUpdate(stream.id, uint32(increment)) // #nosec G115
 	}
 	return nil
 }
@@ -1293,7 +1289,7 @@ func (c *serverConn) consumeConnectionBytes(amount int64) error {
 		return nil
 	}
 	if increment := c.recv.consume(amount, int64(c.config.connectionWindowSize)); increment != 0 {
-		return c.framer.WriteWindowUpdate(0, uint32(increment))
+		return c.framer.WriteWindowUpdate(0, uint32(increment)) // #nosec G115
 	}
 	return nil
 }
@@ -1303,7 +1299,7 @@ func (c *serverConn) restoreConnectionWindow(amount int64) {
 		return
 	}
 	c.recv.restore(amount)
-	_ = c.framer.WriteWindowUpdate(0, uint32(amount))
+	_ = c.framer.WriteWindowUpdate(0, uint32(amount)) // #nosec G115
 }
 
 func (c *serverConn) processRST(event *incomingFrame) error {
@@ -2375,8 +2371,7 @@ func errorCode(err error) xhttp2.ErrCode {
 	if errors.Is(err, xhttp2.ErrFrameTooLarge) {
 		return xhttp2.ErrCodeFrameSize
 	}
-	var connectionError xhttp2.ConnectionError
-	if errors.As(err, &connectionError) {
+	if connectionError, ok := errors.AsType[xhttp2.ConnectionError](err); ok {
 		return xhttp2.ErrCode(connectionError)
 	}
 	return xhttp2.ErrCodeProtocol

@@ -2095,7 +2095,7 @@ func TestServerTLSRequestReportsHTTPSScheme(t *testing.T) {
 	}()
 	transport := &xhttp2.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec // Test-only certificate.
+			InsecureSkipVerify: true,
 		},
 	}
 	t.Cleanup(func() {

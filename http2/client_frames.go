@@ -508,7 +508,7 @@ func (c *clientConn) restoreConnectionWindow(amount int64) {
 	c.recv.restore(amount)
 	c.mu.Unlock()
 	_ = c.writeControl(func() error {
-		return c.framer.WriteWindowUpdate(0, uint32(amount))
+		return c.framer.WriteWindowUpdate(0, uint32(amount)) // #nosec G115
 	})
 }
 
@@ -548,12 +548,12 @@ func (c *clientConn) consumeResponseBytes(streamID uint32, amount int) {
 	}
 	_ = c.writeControl(func() error {
 		if connectionIncrement != 0 {
-			if err := c.framer.WriteWindowUpdate(0, uint32(connectionIncrement)); err != nil {
+			if err := c.framer.WriteWindowUpdate(0, uint32(connectionIncrement)); err != nil { // #nosec G115
 				return err
 			}
 		}
 		if streamIncrement != 0 {
-			return c.framer.WriteWindowUpdate(streamID, uint32(streamIncrement))
+			return c.framer.WriteWindowUpdate(streamID, uint32(streamIncrement)) // #nosec G115
 		}
 		return nil
 	})

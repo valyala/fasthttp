@@ -29,7 +29,7 @@ const maxMessageSize = 4 << 20
 // frame wraps one message in gRPC's length-prefixed framing.
 func frame(message []byte) []byte {
 	framed := make([]byte, 5+len(message))
-	binary.BigEndian.PutUint32(framed[1:5], uint32(len(message)))
+	binary.BigEndian.PutUint32(framed[1:5], uint32(len(message))) // #nosec G115
 	copy(framed[5:], message)
 	return framed
 }

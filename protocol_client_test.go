@@ -179,7 +179,7 @@ func TestProtocolClientContextAcquireConnALPN(t *testing.T) {
 		Addr:  "localhost:443",
 		IsTLS: true,
 		TLSConfig: &tls.Config{
-			InsecureSkipVerify: true, //nolint:gosec // Test-only self-signed certificate.
+			InsecureSkipVerify: true,
 		},
 		DialTimeout: func(string, time.Duration) (net.Conn, error) {
 			return clientConn, nil

@@ -98,6 +98,11 @@ linters:
       - linters:
           - lll
         path: _test\.go
+      # The HTTP/2 tests use golang.org/x/net/http2 as the reference peer.
+      - linters:
+          - staticcheck
+        path: http2/.*_test\.go
+        text: 'SA1019: \(?\*?golang\.org/x/net/http2\.'
     paths:
       - third_party$
       - builtin$

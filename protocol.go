@@ -517,7 +517,8 @@ func prepareProtocolTLSConfig(
 	fallback []string,
 	minVersion uint16,
 ) (*tls.Config, error) {
-	config := &tls.Config{} //nolint:gosec // MinVersion is enforced below from the registrations.
+	// MinVersion is enforced below from the registrations.
+	config := &tls.Config{}
 	if current != nil {
 		config = current.Clone()
 	}

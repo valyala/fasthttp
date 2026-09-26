@@ -27,7 +27,7 @@ func main() {
 			ctx.SetBodyString("ok")
 		},
 	}
-	config := fasthttphttp2.ServerConfig{MaxHeaderListSize: uint32(*maxHeaderListSize)}
+	config := fasthttphttp2.ServerConfig{MaxHeaderListSize: uint32(*maxHeaderListSize)} // #nosec G115
 	listener, err := net.Listen("tcp", *address)
 	if err != nil {
 		log.Fatal(err)

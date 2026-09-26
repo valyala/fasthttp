@@ -22,7 +22,8 @@ type headersFrame struct {
 
 func (f *headersFrame) HeaderBlockFragment() []byte { return f.fragment }
 func (f *headersFrame) HeadersEnded() bool          { return f.flags.Has(xhttp2.FlagHeadersEndHeaders) }
-func (f *headersFrame) StreamEnded() bool           { return f.flags.Has(xhttp2.FlagHeadersEndStream) }
+
+func (f *headersFrame) StreamEnded() bool { return f.flags.Has(xhttp2.FlagHeadersEndStream) }
 
 // frameReader takes HEADERS payloads itself and leaves every other type to
 // x/net. conn must be the reader the Framer was built with, so that a payload

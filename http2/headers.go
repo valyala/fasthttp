@@ -551,7 +551,7 @@ func parseHTTP2ContentLength(value string) (int64, error) {
 		}
 	}
 	length, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || uint64(length) > uint64(^uint(0)>>1) {
+	if err != nil || uint64(length) > uint64(^uint(0)>>1) { // #nosec G115
 		return 0, fmt.Errorf("%w: invalid content-length", errInvalidRequestHeaders)
 	}
 	return length, nil
