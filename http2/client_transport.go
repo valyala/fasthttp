@@ -327,12 +327,20 @@ func (p *clientPool) dial(ctx *fasthttp.ProtocolClientContext) (*clientConn, *fa
 	if err != nil {
 		return nil, nil, err
 	}
-	if p.hc.IsTLS && lease.NegotiatedProtocol() != "h2" {
-		if p.config.mode == RequireHTTP2 {
+	if p.hc.IsTLS {
+		switch lease.NegotiatedProtocol() {
+		case "h2":
+		case "", "http/1.1":
+			if p.config.mode == RequireHTTP2 {
+				_ = lease.Close()
+				return nil, nil, ErrHTTP2Required
+			}
+			return nil, lease, nil
+		default:
+			// Any other protocol came from the caller's NextProtos, and we don't speak it.
 			_ = lease.Close()
-			return nil, nil, ErrHTTP2Required
+			return nil, nil, errUnsupportedProtocol
 		}
-		return nil, lease, nil
 	}
 	conn, err := newClientConn(p, lease)
 	if err != nil {

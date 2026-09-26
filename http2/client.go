@@ -17,11 +17,12 @@ import (
 var (
 	// ErrHTTP2Required is returned when RequireHTTP2 is configured and TLS
 	// negotiation doesn't select h2.
-	ErrHTTP2Required      = errors.New("http2: server didn't negotiate h2")
-	errClientConnClosed   = errors.New("http2: client connection closed")
-	errClientPoolClosed   = errors.New("http2: client connection pool closed")
-	errClientStreamClosed = errors.New("http2: client stream closed")
-	errResponseComplete   = errors.New("http2: response completed before the request body")
+	ErrHTTP2Required       = errors.New("http2: server didn't negotiate h2")
+	errClientConnClosed    = errors.New("http2: client connection closed")
+	errClientPoolClosed    = errors.New("http2: client connection pool closed")
+	errClientStreamClosed  = errors.New("http2: client stream closed")
+	errResponseComplete    = errors.New("http2: response completed before the request body")
+	errUnsupportedProtocol = errors.New("http2: server negotiated a protocol other than h2 or http/1.1")
 	// ErrRefusedStream matches a StreamError carrying REFUSED_STREAM.
 	ErrRefusedStream = errors.New("http2: stream refused")
 	// ErrConnectionDraining matches streams rejected by a received GOAWAY.

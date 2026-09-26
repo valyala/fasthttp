@@ -2068,3 +2068,46 @@ func TestPushPromiseOnPushedStreamFailsConnection(t *testing.T) {
 		t.Fatal("a promise on a pushed stream reached the push handler")
 	}
 }
+
+// A connection that negotiated neither h2 nor HTTP/1.1 is not spoken to.
+func TestClientRejectsOtherNegotiatedProtocol(t *testing.T) {
+	certData, keyData, err := fasthttp.GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatalf("GenerateTestCertificate() error: %v", err)
+	}
+	certificate, err := tls.X509KeyPair(certData, keyData)
+	if err != nil {
+		t.Fatalf("X509KeyPair() error: %v", err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen() error: %v", err)
+	}
+	server := &fasthttp.Server{Handler: func(ctx *fasthttp.RequestCtx) { ctx.SetBodyString("ok") }}
+	done := make(chan error, 1)
+	go func() {
+		done <- server.Serve(tls.NewListener(listener, &tls.Config{
+			Certificates: []tls.Certificate{certificate},
+			NextProtos:   []string{"custom"},
+		}))
+	}()
+	t.Cleanup(func() {
+		_ = server.Shutdown()
+		<-done
+	})
+	hc := &fasthttp.HostClient{
+		Addr:      listener.Addr().String(),
+		IsTLS:     true,
+		TLSConfig: &tls.Config{InsecureSkipVerify: true, NextProtos: []string{"custom"}},
+	}
+	if err := ConfigureHostClient(hc, ClientConfig{}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+	var req fasthttp.Request
+	var resp fasthttp.Response
+	req.SetRequestURI("https://" + listener.Addr().String() + "/")
+	if err := hc.DoTimeout(&req, &resp, 2*time.Second); !errors.Is(err, errUnsupportedProtocol) {
+		t.Fatalf("Do() error = %v, want %v", err, errUnsupportedProtocol)
+	}
+}
