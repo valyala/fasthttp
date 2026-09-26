@@ -1915,7 +1915,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 			}
 		}()
 
-		c.queueForIdle(w)
+		c.queueForIdle(w, connectionClose)
 
 		select {
 		case <-w.ready:
@@ -1942,14 +1942,59 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 	return cc, nil
 }
 
-func (c *HostClient) queueForIdle(w *wantConn) {
+func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
 	c.connsLock.Lock()
-	defer c.connsLock.Unlock()
+	if n := len(c.conns); n > 0 {
+		var cc *clientConn
+		switch c.ConnPoolStrategy {
+		case LIFO:
+			n--
+			cc = c.conns[n]
+			c.conns[n] = nil
+			c.conns = c.conns[:n]
+		case FIFO:
+			cc = c.conns[0]
+			copy(c.conns, c.conns[1:])
+			c.conns[n-1] = nil
+			c.conns = c.conns[:n-1]
+		default:
+			c.connsLock.Unlock()
+			w.tryDeliver(nil, ErrConnPoolStrategyNotImpl)
+			return
+		}
+		c.connsLock.Unlock()
+		w.tryDeliver(cc, nil)
+		return
+	}
+	// A connection may have been closed since AcquireConn checked the pool and
+	// the connection count, freeing capacity without adding an idle connection.
+	// Reserve the freed slot and dial a replacement connection for w. The conns
+	// cleaner may have exited after observing connsCount == 0 before the slot
+	// was reserved, so restart it as well.
+	maxConns := c.MaxConns
+	if maxConns <= 0 {
+		maxConns = DefaultMaxConnsPerHost
+	}
+	if c.connsCount < maxConns {
+		c.connsCount++
+		startCleaner := false
+		if !c.connsCleanerRun && !connectionClose {
+			c.connsCleanerRun = true
+			startCleaner = true
+		}
+		c.connsLock.Unlock()
+		if startCleaner {
+			go c.connsCleaner()
+		}
+		go c.dialConnFor(w)
+		return
+	}
 	if c.connsWait == nil {
 		c.connsWait = &wantConnQueue{}
 	}
 	c.connsWait.clearFront()
 	c.connsWait.pushBack(w)
+	c.connsLock.Unlock()
 }
 
 func (c *HostClient) dialConnFor(w *wantConn) {
@@ -2110,38 +2155,46 @@ var clientConnPool sync.Pool
 
 func (c *HostClient) ReleaseConn(cc *clientConn) {
 	cc.lastUseTime = time.Now()
-	if c.MaxConnWaitTimeout <= 0 {
-		c.connsLock.Lock()
-		c.conns = append(c.conns, cc)
-		c.connsLock.Unlock()
-		return
-	}
-
-	// try to deliver an idle connection to a *wantConn
+	startCleaner := false
 	c.connsLock.Lock()
-	defer c.connsLock.Unlock()
-	delivered := false
-	if q := c.connsWait; q != nil {
-		for q.len() > 0 {
-			w := q.popFront()
-			if w.waiting() {
-				delivered = w.tryDeliver(cc, nil)
-				// This is the last resort to hand over conCount sema.
-				// We must ensure that there are no valid waiters in connsWait
-				// when we exit this loop.
-				//
-				// We did not apply the same looping pattern in the decConnsCount
-				// method because it needs to create a new time-spent connection,
-				// and the decConnsCount call chain will inevitably reach this point.
-				// When MaxConnWaitTimeout>0.
-				if delivered {
-					break
+	if c.MaxConnWaitTimeout <= 0 {
+		c.conns = append(c.conns, cc)
+	} else {
+		// try to deliver an idle connection to a *wantConn
+		delivered := false
+		if q := c.connsWait; q != nil {
+			for q.len() > 0 {
+				w := q.popFront()
+				if w.waiting() {
+					delivered = w.tryDeliver(cc, nil)
+					// This is the last resort to hand over conCount sema.
+					// We must ensure that there are no valid waiters in connsWait
+					// when we exit this loop.
+					//
+					// We did not apply the same looping pattern in the decConnsCount
+					// method because it needs to create a new time-spent connection,
+					// and the decConnsCount call chain will inevitably reach this point.
+					// When MaxConnWaitTimeout>0.
+					if delivered {
+						break
+					}
 				}
 			}
 		}
+		if !delivered {
+			c.conns = append(c.conns, cc)
+		}
 	}
-	if !delivered {
-		c.conns = append(c.conns, cc)
+	// A connection may be pooled while the conns cleaner is not running, for
+	// example a replacement dialed for a waiter that timed out and cancelled.
+	// Keep the cleaner running so pooled connections are closed once idle.
+	if len(c.conns) > 0 && !c.connsCleanerRun {
+		c.connsCleanerRun = true
+		startCleaner = true
+	}
+	c.connsLock.Unlock()
+	if startCleaner {
+		go c.connsCleaner()
 	}
 }
 
