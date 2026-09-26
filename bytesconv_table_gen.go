@@ -146,6 +146,28 @@ func main() {
 		return table
 	}()
 
+	hostShouldEscapeTable := func() [256]byte {
+		// Matches shouldEscape(c, encodeHost) for ASCII bytes. Non-ASCII
+		// bytes are never escaped in a host, see unescape.
+		var a [256]byte
+		for c := 0; c < 0x80; c++ {
+			a[c] = 1
+		}
+		for i := int('a'); i <= int('z'); i++ {
+			a[i] = 0
+		}
+		for i := int('A'); i <= int('Z'); i++ {
+			a[i] = 0
+		}
+		for i := int('0'); i <= int('9'); i++ {
+			a[i] = 0
+		}
+		for _, v := range `!$&'()*+,;=:[]<>"-_.~` {
+			a[v] = 0
+		}
+		return a
+	}()
+
 	validMethodValueByteTable := [256]byte{
 		/*
 				Same as net/http
@@ -250,6 +272,7 @@ func main() {
 	fmt.Fprintf(w, "const validHeaderFieldByteTable = %q\n", validHeaderFieldByteTable)
 	fmt.Fprintf(w, "const validHeaderValueByteTable = %q\n", validHeaderValueByteTable)
 	fmt.Fprintf(w, "const validMethodValueByteTable = %q\n", validMethodValueByteTable)
+	fmt.Fprintf(w, "const hostShouldEscapeTable = %q\n", hostShouldEscapeTable)
 
 	if err := os.WriteFile("bytesconv_table.go", w.Bytes(), 0o660); err != nil {
 		log.Fatal(err)
