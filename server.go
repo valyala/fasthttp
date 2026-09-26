@@ -865,26 +865,30 @@ type tlsConn interface {
 	ConnectionState() tls.ConnectionState
 }
 
+// tlsConnection unwraps ctx.c to its TLS connection, if it is one.
+// The cast is to (tlsConn) instead of (*tls.Conn), since it catches
+// cases with overridden tls.Conn such as:
+//
+//	type customConn struct {
+//	    *tls.Conn
+//
+//	    // other custom fields here
+//	}
+func (ctx *RequestCtx) tlsConnection() (tlsConn, bool) {
+	conn := ctx.c
+	// perIPConn wraps the net.Conn in the Conn field.
+	if pic, ok := conn.(*perIPConn); ok {
+		conn = pic.Conn
+	}
+	tc, ok := conn.(tlsConn)
+	return tc, ok
+}
+
 // IsTLS returns true if the underlying connection is tls.Conn.
 //
 // tls.Conn is an encrypted connection (aka SSL, HTTPS).
 func (ctx *RequestCtx) IsTLS() bool {
-	// cast to (tlsConn) instead of (*tls.Conn), since it catches
-	// cases with overridden tls.Conn such as:
-	//
-	// type customConn struct {
-	//     *tls.Conn
-	//
-	//     // other custom fields here
-	// }
-
-	// perIPConn wraps the net.Conn in the Conn field
-	if pic, ok := ctx.c.(*perIPConn); ok {
-		_, ok := pic.Conn.(tlsConn)
-		return ok
-	}
-
-	_, ok := ctx.c.(tlsConn)
+	_, ok := ctx.tlsConnection()
 	return ok
 }
 
@@ -895,7 +899,7 @@ func (ctx *RequestCtx) IsTLS() bool {
 // The returned state may be used for verifying TLS version, client certificates,
 // etc.
 func (ctx *RequestCtx) TLSConnectionState() *tls.ConnectionState {
-	tc, ok := ctx.c.(tlsConn)
+	tc, ok := ctx.tlsConnection()
 	if !ok {
 		return nil
 	}
@@ -2201,7 +2205,7 @@ func wrapPerIPConn(s *Server, c net.Conn) net.Conn {
 		c.Close()
 		return nil
 	}
-	return acquirePerIPConn(c, ip, &s.perIPConnCounter)
+	return newPerIPConn(c, ip, &s.perIPConnCounter)
 }
 
 var defaultLogger = Logger(log.New(os.Stderr, "", log.LstdFlags))
@@ -2447,17 +2451,16 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				br = acquireReader(ctx)
 			}
 
-			// If this is a keep-alive connection we want to try and read the first bytes
-			// within the idle time.
-			if connRequestNum > 1 {
-				var b []byte
-				b, err = br.Peek(1)
-				if len(b) == 0 {
-					// If reading from a keep-alive connection returns nothing it means
-					// the connection was closed (either timeout or from the other side).
-					if err != io.EOF {
-						err = ErrNothingRead{error: err}
-					}
+			// Wait for the first byte under the deadline set above: ReadTimeout on
+			// a new connection, the idle time on a keep-alive one. The connection
+			// goes active only once it arrives.
+			var b []byte
+			b, err = br.Peek(1)
+			if len(b) == 0 {
+				// Nothing arrived, so the connection was closed (either timeout or
+				// from the other side).
+				if err != io.EOF {
+					err = ErrNothingRead{error: err}
 				}
 			}
 		} else {
@@ -2480,7 +2483,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			idleConnTime.Store(0)
 			s.setState(c, StateActive)
 
-			if s.ReadTimeout > 0 {
+			// ReadTimeout restarts at the first byte after an idle wait or a
+			// byte-reader read; a new connection's peek keeps the deadline
+			// armed when it opened.
+			if s.ReadTimeout > 0 && (connRequestNum > 1 || s.ReduceMemoryUsage) {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					break
 				}
@@ -2578,6 +2584,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				} else {
 					err = nr.error
 				}
+			}
+			// A connection the server closed itself, as Shutdown does with an
+			// idle one, gets no error response.
+			if errors.Is(err, net.ErrClosed) {
+				err = nil
 			}
 
 			if err != nil {
