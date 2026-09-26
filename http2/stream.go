@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -559,14 +558,25 @@ func (s *serverStream) AcceptStream(handler fasthttp.StreamHandler) error {
 // and client StreamConn implementations.
 type streamConnState struct {
 	netConn net.Conn
+	cancel  func() // ends the stream once a deadline passes
 
 	writeMu       sync.Mutex
 	mu            sync.Mutex
-	readDeadline  time.Time
-	writeDeadline time.Time
+	readDeadline  streamDeadline
+	writeDeadline streamDeadline
 	isClosed      bool
 	readClosed    bool
 	writeClosed   bool
+}
+
+// streamDeadline is one direction's deadline. Its timer runs only while an
+// operation in that direction is in flight and cancels the stream when the
+// deadline passes, so moving the deadline also reaches a blocked call.
+type streamDeadline struct {
+	at      time.Time
+	timer   *time.Timer
+	pending int
+	expired bool
 }
 
 func (c *streamConnState) LocalAddr() net.Addr {
@@ -579,24 +589,102 @@ func (c *streamConnState) RemoteAddr() net.Addr {
 
 func (c *streamConnState) SetDeadline(deadline time.Time) error {
 	c.mu.Lock()
-	c.readDeadline = deadline
-	c.writeDeadline = deadline
+	c.setDeadlineLocked(&c.readDeadline, deadline)
+	c.setDeadlineLocked(&c.writeDeadline, deadline)
 	c.mu.Unlock()
 	return nil
 }
 
 func (c *streamConnState) SetReadDeadline(deadline time.Time) error {
 	c.mu.Lock()
-	c.readDeadline = deadline
+	c.setDeadlineLocked(&c.readDeadline, deadline)
 	c.mu.Unlock()
 	return nil
 }
 
 func (c *streamConnState) SetWriteDeadline(deadline time.Time) error {
 	c.mu.Lock()
-	c.writeDeadline = deadline
+	c.setDeadlineLocked(&c.writeDeadline, deadline)
 	c.mu.Unlock()
 	return nil
+}
+
+func (c *streamConnState) setDeadlineLocked(d *streamDeadline, at time.Time) {
+	d.at = at
+	if d.pending != 0 {
+		c.armLocked(d)
+	}
+}
+
+// armLocked schedules the timer for d.at, or parks it for a zero deadline.
+// The timer is kept across operations; expire tolerates a stale run.
+func (c *streamConnState) armLocked(d *streamDeadline) {
+	switch {
+	case d.at.IsZero():
+		if d.timer != nil {
+			d.timer.Stop()
+		}
+	case d.timer == nil:
+		d.timer = time.AfterFunc(time.Until(d.at), func() { c.expire(d) })
+	default:
+		d.timer.Reset(time.Until(d.at))
+	}
+}
+
+// readUnderDeadline reads once. If the read deadline passes while the read
+// waits, including a deadline set after it began, the stream is cancelled.
+func (c *streamConnState) readUnderDeadline(read io.Reader, p []byte) (int, error) {
+	c.mu.Lock()
+	if c.isClosed || c.readClosed {
+		c.mu.Unlock()
+		return 0, net.ErrClosed
+	}
+	if err := c.beginLocked(&c.readDeadline); err != nil {
+		c.mu.Unlock()
+		return 0, err
+	}
+	c.mu.Unlock()
+	n, err := read.Read(p)
+	c.mu.Lock()
+	expired := c.endLocked(&c.readDeadline)
+	c.mu.Unlock()
+	if expired {
+		return n, errStreamTimeout
+	}
+	return n, err
+}
+
+// beginLocked registers an operation, failing it at once past the deadline.
+func (c *streamConnState) beginLocked(d *streamDeadline) error {
+	if !d.at.IsZero() && !time.Now().Before(d.at) {
+		return errStreamTimeout
+	}
+	d.pending++
+	if d.pending == 1 {
+		c.armLocked(d)
+	}
+	return nil
+}
+
+// endLocked unregisters an operation and reports whether the deadline
+// cancelled the stream under it.
+func (c *streamConnState) endLocked(d *streamDeadline) bool {
+	d.pending--
+	if d.pending == 0 && d.timer != nil {
+		d.timer.Stop()
+	}
+	return d.expired
+}
+
+func (c *streamConnState) expire(d *streamDeadline) {
+	c.mu.Lock()
+	if d.pending == 0 || d.at.IsZero() || time.Now().Before(d.at) {
+		c.mu.Unlock()
+		return
+	}
+	d.expired = true
+	c.mu.Unlock()
+	c.cancel()
 }
 
 type streamConn struct {
@@ -607,21 +695,11 @@ type streamConn struct {
 }
 
 func (c *streamConn) Read(p []byte) (int, error) {
-	c.mu.Lock()
-	if c.isClosed || c.readClosed {
-		c.mu.Unlock()
-		return 0, net.ErrClosed
-	}
-	deadline := c.readDeadline
-	c.mu.Unlock()
-	if deadline.IsZero() {
-		return c.read.Read(p)
-	}
-	conn := c.stream.conn
-	streamID := c.stream.id
-	return readWithStreamDeadline(c.read, p, deadline, func() {
-		conn.cancelStream(streamID, errStreamTimeout)
-	})
+	return c.readUnderDeadline(c.read, p)
+}
+
+func (c *streamConn) cancelOnDeadline() {
+	c.stream.conn.cancelStream(c.stream.id, errStreamTimeout)
 }
 
 func (c *streamConn) Write(p []byte) (int, error) {
@@ -631,17 +709,27 @@ func (c *streamConn) Write(p []byte) (int, error) {
 		return 0, nil
 	}
 	c.mu.Lock()
-	isClosed := c.isClosed
-	writeClosed := c.writeClosed
-	deadline := c.writeDeadline
-	c.mu.Unlock()
-	if isClosed || writeClosed {
+	if c.isClosed || c.writeClosed {
+		c.mu.Unlock()
 		return 0, net.ErrClosed
 	}
-	if !deadline.IsZero() && time.Until(deadline) <= 0 {
-		return 0, errStreamTimeout
+	if err := c.beginLocked(&c.writeDeadline); err != nil {
+		c.mu.Unlock()
+		return 0, err
 	}
+	deadline := c.writeDeadline.at
+	c.mu.Unlock()
+	n, err := c.write(p, deadline)
+	c.mu.Lock()
+	expired := c.endLocked(&c.writeDeadline)
+	c.mu.Unlock()
+	if expired && err == nil {
+		err = errStreamTimeout
+	}
+	return n, err
+}
 
+func (c *streamConn) write(p []byte, deadline time.Time) (int, error) {
 	write := &streamWrite{result: make(chan streamWriteResult, 1)}
 	// p is shared, not cloned: the owner completes a write only after its
 	// bytes are copied out or dropped, and Write blocks on that completion.
@@ -776,27 +864,6 @@ func (c *streamConn) CloseWrite() error {
 	}
 }
 
-// readWithStreamDeadline blocks in one read, cancelling the stream at deadline
-// to unblock it. Read and deadline race to claim the outcome, so a read that
-// already holds data reports the timeout rather than success on a dead stream.
-func readWithStreamDeadline(read io.Reader, p []byte, deadline time.Time, cancel func()) (int, error) {
-	if time.Until(deadline) <= 0 {
-		return 0, errStreamTimeout
-	}
-	var claimed atomic.Bool
-	timer := time.AfterFunc(time.Until(deadline), func() {
-		if claimed.CompareAndSwap(false, true) {
-			cancel()
-		}
-	})
-	n, err := read.Read(p)
-	timer.Stop()
-	if !claimed.CompareAndSwap(false, true) {
-		return n, errStreamTimeout
-	}
-	return n, err
-}
-
 type clientStreamConn struct {
 	streamConnState
 
@@ -805,21 +872,11 @@ type clientStreamConn struct {
 }
 
 func (c *clientStreamConn) Read(p []byte) (int, error) {
-	c.mu.Lock()
-	if c.readClosed || c.isClosed {
-		c.mu.Unlock()
-		return 0, net.ErrClosed
-	}
-	deadline := c.readDeadline
-	c.mu.Unlock()
-	if deadline.IsZero() {
-		return c.read.Read(p)
-	}
-	conn := c.stream.conn
-	streamID := c.stream.id
-	return readWithStreamDeadline(c.read, p, deadline, func() {
-		conn.resetStream(streamID, xhttp2.ErrCodeCancel, errStreamTimeout, false)
-	})
+	return c.readUnderDeadline(c.read, p)
+}
+
+func (c *clientStreamConn) cancelOnDeadline() {
+	c.stream.conn.resetStream(c.stream.id, xhttp2.ErrCodeCancel, errStreamTimeout, false)
 }
 
 func (c *clientStreamConn) Write(p []byte) (int, error) {
@@ -830,11 +887,22 @@ func (c *clientStreamConn) Write(p []byte) (int, error) {
 		c.mu.Unlock()
 		return 0, net.ErrClosed
 	}
-	deadline := c.writeDeadline
+	if err := c.beginLocked(&c.writeDeadline); err != nil {
+		c.mu.Unlock()
+		return 0, err
+	}
+	deadline := c.writeDeadline.at
 	c.mu.Unlock()
-	if err := c.stream.conn.sendData(c.stream, p, false, deadline); err != nil {
+	err := c.stream.conn.sendData(c.stream, p, false, deadline)
+	c.mu.Lock()
+	expired := c.endLocked(&c.writeDeadline)
+	c.mu.Unlock()
+	if expired {
+		return 0, errStreamTimeout
+	}
+	if err != nil {
 		if errors.Is(err, fasthttp.ErrTimeout) {
-			c.stream.conn.resetStream(c.stream.id, xhttp2.ErrCodeCancel, errStreamTimeout, false)
+			c.cancelOnDeadline()
 			return 0, errStreamTimeout
 		}
 		return 0, err
@@ -853,7 +921,7 @@ func (c *clientStreamConn) Close() error {
 	writeClosed := c.writeClosed
 	c.readClosed = true
 	c.writeClosed = true
-	deadline := c.writeDeadline
+	deadline := c.writeDeadline.at
 	c.mu.Unlock()
 	if !readClosed {
 		_ = c.read.Close()
@@ -887,7 +955,7 @@ func (c *clientStreamConn) CloseWrite() error {
 		return nil
 	}
 	c.writeClosed = true
-	deadline := c.writeDeadline
+	deadline := c.writeDeadline.at
 	c.mu.Unlock()
 	return c.stream.conn.sendData(c.stream, nil, true, deadline)
 }

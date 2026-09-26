@@ -2316,3 +2316,44 @@ func TestAcceptedStreamWriteReportsFramedBytesWhenOwnerStops(t *testing.T) {
 		t.Fatal("accepted write outlived the connection owner")
 	}
 }
+
+// A write deadline set after a stream write blocked on flow control must
+// still end the write.
+func TestExtendedConnectWriteDeadlineSetWhileBlocked(t *testing.T) {
+	result := make(chan error, 1)
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			if err := ctx.AcceptStream(func(stream fasthttp.StreamConn) {
+				go func() {
+					time.Sleep(50 * time.Millisecond)
+					_ = stream.SetWriteDeadline(time.Now())
+				}()
+				_, err := stream.Write([]byte("blocked"))
+				result <- err
+			}); err != nil {
+				t.Errorf("AcceptStream() error: %v", err)
+			}
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{EnableExtendedConnect: true})
+	peer := dialRawPeer(t, testServer.listener.Addr().String())
+	if err := peer.framer.WriteSettings(xhttp2.Setting{ID: xhttp2.SettingInitialWindowSize, Val: 0}); err != nil {
+		t.Fatalf("WriteSettings() error: %v", err)
+	}
+	peer.writeHeaders(1, false,
+		[2]string{":method", fasthttp.MethodConnect},
+		[2]string{":protocol", "websocket"},
+		[2]string{":scheme", "http"},
+		[2]string{":authority", "example.com"},
+		[2]string{":path", "/ws"},
+	)
+	peer.waitForAny(2*time.Second, "headers")
+	select {
+	case err := <-result:
+		if !isTimeout(err) {
+			t.Fatalf("Write() error = %v, want timeout", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("a blocked stream write ignored a deadline set after it began")
+	}
+}

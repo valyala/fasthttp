@@ -42,35 +42,65 @@ type readerFunc func(p []byte) (int, error)
 
 func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
 
-func TestReadWithStreamDeadlineExpired(t *testing.T) {
+func TestReadUnderDeadlineExpired(t *testing.T) {
 	var canceled atomic.Bool
 	blocked := make(chan struct{})
 	reader := readerFunc(func([]byte) (int, error) {
 		<-blocked
 		return 0, errors.New("stream canceled")
 	})
-	n, err := readWithStreamDeadline(reader, make([]byte, 1), time.Now().Add(10*time.Millisecond), func() {
+	state := streamConnState{cancel: func() {
 		canceled.Store(true)
 		close(blocked)
-	})
+	}}
+	_ = state.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+	n, err := state.readUnderDeadline(reader, make([]byte, 1))
 	if n != 0 || !isTimeout(err) {
-		t.Fatalf("readWithStreamDeadline() = %d, %v; want 0, timeout", n, err)
+		t.Fatalf("readUnderDeadline() = %d, %v; want 0, timeout", n, err)
 	}
 	if !canceled.Load() {
 		t.Fatal("expired deadline didn't cancel the stream")
 	}
 }
 
-func TestReadWithStreamDeadlinePassedDeadline(t *testing.T) {
+// A deadline set while a read is already blocked must still end it.
+func TestReadUnderDeadlineSetWhileBlocked(t *testing.T) {
+	blocked := make(chan struct{})
+	reader := readerFunc(func([]byte) (int, error) {
+		<-blocked
+		return 0, errors.New("stream canceled")
+	})
+	state := streamConnState{cancel: func() { close(blocked) }}
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		_ = state.SetReadDeadline(time.Now())
+	}()
+	done := make(chan error, 1)
+	go func() {
+		_, err := state.readUnderDeadline(reader, make([]byte, 1))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !isTimeout(err) {
+			t.Fatalf("readUnderDeadline() error = %v, want timeout", err)
+		}
+	case <-time.After(2 * time.Second):
+		close(blocked)
+		t.Fatal("a deadline set during the read didn't end it")
+	}
+}
+
+func TestReadUnderDeadlinePassedDeadline(t *testing.T) {
 	var canceled, attempted atomic.Bool
 	reader := readerFunc(func([]byte) (int, error) {
 		attempted.Store(true)
 		return 0, io.EOF
 	})
-	if _, err := readWithStreamDeadline(reader, make([]byte, 1), time.Now().Add(-time.Second), func() {
-		canceled.Store(true)
-	}); !isTimeout(err) {
-		t.Fatalf("readWithStreamDeadline() error = %v, want timeout", err)
+	state := streamConnState{cancel: func() { canceled.Store(true) }}
+	_ = state.SetReadDeadline(time.Now().Add(-time.Second))
+	if _, err := state.readUnderDeadline(reader, make([]byte, 1)); !isTimeout(err) {
+		t.Fatalf("readUnderDeadline() error = %v, want timeout", err)
 	}
 	if attempted.Load() {
 		t.Fatal("read ran after the deadline had passed")
@@ -82,7 +112,7 @@ func TestReadWithStreamDeadlinePassedDeadline(t *testing.T) {
 
 // A read that completes as its deadline fires must not report success on a
 // stream the deadline callback then cancels.
-func TestReadWithStreamDeadlineRace(t *testing.T) {
+func TestReadUnderDeadlineRace(t *testing.T) {
 	for range 500 {
 		var canceled atomic.Bool
 		deadline := time.Now().Add(200 * time.Microsecond)
@@ -91,17 +121,17 @@ func TestReadWithStreamDeadlineRace(t *testing.T) {
 			p[0] = 'x'
 			return 1, nil
 		})
-		n, err := readWithStreamDeadline(reader, make([]byte, 1), deadline, func() {
-			canceled.Store(true)
-		})
+		state := streamConnState{cancel: func() { canceled.Store(true) }}
+		_ = state.SetReadDeadline(deadline)
+		n, err := state.readUnderDeadline(reader, make([]byte, 1))
 		if err != nil {
 			if !isTimeout(err) {
-				t.Fatalf("readWithStreamDeadline() error = %v, want timeout", err)
+				t.Fatalf("readUnderDeadline() error = %v, want timeout", err)
 			}
 			continue
 		}
 		if n != 1 {
-			t.Fatalf("readWithStreamDeadline() = %d, want 1", n)
+			t.Fatalf("readUnderDeadline() = %d, want 1", n)
 		}
 		time.Sleep(200 * time.Microsecond)
 		if canceled.Load() {

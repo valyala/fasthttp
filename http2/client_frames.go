@@ -367,6 +367,7 @@ func (c *clientConn) processResponseHeaders(frame *decodedClientHeaders) error {
 				stream:          stream,
 				read:            stream.responseBody,
 			}
+			streamConn.cancel = streamConn.cancelOnDeadline
 			c.sendResultLocked(stream, clientResult{streamConn: streamConn})
 		}
 	} else if stream.isStreaming {

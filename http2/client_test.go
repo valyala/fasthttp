@@ -1896,3 +1896,61 @@ func TestClientReturnsResponseToUnreadBody(t *testing.T) {
 		t.Fatalf("status = %d, want 413", resp.StatusCode())
 	}
 }
+
+// Deadlines set while an OpenStream read or write is blocked must end it.
+func TestOpenStreamDeadlineSetWhileBlocked(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			_ = ctx.AcceptStream(func(fasthttp.StreamConn) { <-release })
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{EnableExtendedConnect: true})
+	hc := &fasthttp.HostClient{Addr: testServer.listener.Addr().String()}
+	if err := ConfigureHostClient(hc, ClientConfig{Mode: PriorKnowledge, EnableExtendedConnect: true}); err != nil {
+		t.Fatalf("ConfigureHostClient() error: %v", err)
+	}
+	t.Cleanup(hc.CloseIdleConnections)
+	open := func() fasthttp.StreamConn {
+		var req fasthttp.Request
+		var resp fasthttp.Response
+		req.Header.SetMethod(fasthttp.MethodConnect)
+		req.Header.SetConnectProtocol("websocket")
+		req.SetRequestURI(testServer.URL("/ws"))
+		conn, err := hc.OpenStream(&req, &resp)
+		if err != nil {
+			t.Fatalf("OpenStream() error: %v", err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		return conn
+	}
+	for _, tc := range []struct {
+		name string
+		op   func(fasthttp.StreamConn) error
+		set  func(fasthttp.StreamConn) error
+	}{
+		{"read", func(c fasthttp.StreamConn) error {
+			_, err := c.Read(make([]byte, 1))
+			return err
+		}, func(c fasthttp.StreamConn) error { return c.SetReadDeadline(time.Now()) }},
+		{"write", func(c fasthttp.StreamConn) error {
+			_, err := c.Write(make([]byte, 8<<20))
+			return err
+		}, func(c fasthttp.StreamConn) error { return c.SetWriteDeadline(time.Now()) }},
+	} {
+		conn := open()
+		done := make(chan error, 1)
+		go func() { done <- tc.op(conn) }()
+		time.Sleep(50 * time.Millisecond)
+		_ = tc.set(conn)
+		select {
+		case err := <-done:
+			if !isTimeout(err) {
+				t.Fatalf("%s error = %v, want timeout", tc.name, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("a blocked %s ignored a deadline set after it began", tc.name)
+		}
+	}
+}

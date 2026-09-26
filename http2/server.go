@@ -1843,6 +1843,7 @@ func (c *serverConn) startStreamHandler(
 			reader = stream.body
 		}
 		streamConn := &streamConn{streamConnState: streamConnState{netConn: c.conn}, stream: stream, read: reader}
+		streamConn.cancel = streamConn.cancelOnDeadline
 		handler(streamConn)
 		_ = streamConn.Close()
 		select {
