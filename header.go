@@ -2453,7 +2453,15 @@ func coarseSecond() int64 {
 
 // Write writes response header to w.
 func (h *ResponseHeader) Write(w *bufio.Writer) error {
-	_, err := w.Write(h.Header())
+	if w.Available() < cap(h.bufV) {
+		_, err := w.Write(h.Header())
+		return err
+	}
+	buf := h.AppendBytes(w.AvailableBuffer())
+	if cap(buf) != w.Available() {
+		h.bufV = buf
+	}
+	_, err := w.Write(buf)
 	return err
 }
 
@@ -2496,7 +2504,7 @@ func (h *ResponseHeader) TrailerHeader() []byte {
 		value := h.peek(t)
 		h.bufV = appendHeaderLine(h.bufV, t, value)
 	}
-	h.bufV = append(h.bufV, strCRLF...)
+	h.bufV = append(h.bufV, '\r', '\n')
 	return h.bufV
 }
 
@@ -2511,6 +2519,11 @@ func (h *ResponseHeader) appendStatusLine(dst []byte) []byte {
 	statusCode := h.StatusCode()
 	if statusCode < 0 {
 		statusCode = StatusOK
+	}
+	if len(h.protocol) == 0 && len(h.statusMessage) == 0 && statusCode < len(statusLines) {
+		if line := statusLines[statusCode]; line != "" {
+			return append(dst, line...)
+		}
 	}
 	return formatStatusLine(dst, h.Protocol(), statusCode, h.StatusMessage())
 }
@@ -2580,12 +2593,20 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
-	return append(dst, strCRLF...)
+	return append(dst, '\r', '\n')
 }
 
 // Write writes request header to w.
 func (h *RequestHeader) Write(w *bufio.Writer) error {
-	_, err := w.Write(h.Header())
+	if w.Available() < cap(h.bufV) {
+		_, err := w.Write(h.Header())
+		return err
+	}
+	buf := h.AppendBytes(w.AvailableBuffer())
+	if cap(buf) != w.Available() {
+		h.bufV = buf
+	}
+	_, err := w.Write(buf)
 	return err
 }
 
@@ -2628,7 +2649,7 @@ func (h *RequestHeader) TrailerHeader() []byte {
 		value := h.peek(t)
 		h.bufV = appendHeaderLine(h.bufV, t, value)
 	}
-	h.bufV = append(h.bufV, strCRLF...)
+	h.bufV = append(h.bufV, '\r', '\n')
 	return h.bufV
 }
 
@@ -2659,7 +2680,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	dst = append(dst, h.RequestURI()...)
 	dst = append(dst, ' ')
 	dst = append(dst, h.Protocol()...)
-	dst = append(dst, strCRLF...)
+	dst = append(dst, '\r', '\n')
 
 	userAgent := h.UserAgent()
 	if len(userAgent) > 0 && !h.disableSpecialHeader {
@@ -2706,23 +2727,23 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	n := len(h.cookies)
 	if n > 0 && !h.disableSpecialHeader {
 		dst = append(dst, strCookie...)
-		dst = append(dst, strColonSpace...)
+		dst = append(dst, ':', ' ')
 		dst = appendRequestCookieBytes(dst, h.cookies)
-		dst = append(dst, strCRLF...)
+		dst = append(dst, '\r', '\n')
 	}
 
 	if h.ConnectionClose() && !h.disableSpecialHeader {
 		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
-	return append(dst, strCRLF...)
+	return append(dst, '\r', '\n')
 }
 
 func appendHeaderLine(dst, key, value []byte) []byte {
 	dst = append(dst, key...)
-	dst = append(dst, strColonSpace...)
+	dst = append(dst, ':', ' ')
 	dst = append(dst, value...)
-	return append(dst, strCRLF...)
+	return append(dst, '\r', '\n')
 }
 
 func (h *ResponseHeader) parse(buf []byte) (int, error) {
