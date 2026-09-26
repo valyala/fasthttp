@@ -114,9 +114,41 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 // AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
 // to dst and returns the extended dst.
 func AppendHTTPDate(dst []byte, date time.Time) []byte {
-	dst = date.In(time.UTC).AppendFormat(dst, time.RFC1123)
-	copy(dst[len(dst)-3:], strGMT)
-	return dst
+	date = date.UTC()
+	year, month, day := date.Date()
+	if year < 0 || year > 9999 {
+		dst = date.AppendFormat(dst, time.RFC1123)
+		copy(dst[len(dst)-3:], strGMT)
+		return dst
+	}
+	hour, minute, sec := date.Clock()
+
+	const (
+		weekdays = "SunMonTueWedThuFriSat"
+		months   = "JanFebMarAprMayJunJulAugSepOctNovDec"
+	)
+	w := 3 * int(date.Weekday())
+	m := 3 * (int(month) - 1)
+	dst = append(dst, weekdays[w:w+3]...)
+	dst = append(dst, ',', ' ')
+	dst = append2Digits(dst, day)
+	dst = append(dst, ' ')
+	dst = append(dst, months[m:m+3]...)
+	dst = append(dst, ' ')
+	dst = append2Digits(dst, year/100)
+	dst = append2Digits(dst, year%100)
+	dst = append(dst, ' ')
+	dst = append2Digits(dst, hour)
+	dst = append(dst, ':')
+	dst = append2Digits(dst, minute)
+	dst = append(dst, ':')
+	dst = append2Digits(dst, sec)
+	return append(dst, ' ', 'G', 'M', 'T')
+}
+
+func append2Digits(dst []byte, v int) []byte {
+	const digits = "0123456789"
+	return append(dst, digits[v/10], digits[v%10])
 }
 
 // ParseHTTPDate parses HTTP-compliant (RFC1123) date.
