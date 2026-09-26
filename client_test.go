@@ -76,6 +76,52 @@ func TestCloseIdleConnections(t *testing.T) {
 	}
 }
 
+func TestHostClientDoTimeoutIncludesDial(t *testing.T) {
+	listener := fasthttputil.NewInmemoryListener()
+	releaseHandler := make(chan struct{})
+	serveDone := make(chan error, 1)
+	connClosed := make(chan struct{})
+	server := &Server{
+		Handler: func(*RequestCtx) { <-releaseHandler },
+		// The timed-out request's connection fails once released; that's expected.
+		Logger: &testLogger{},
+		ConnState: func(_ net.Conn, state ConnState) {
+			if state == StateClosed {
+				close(connClosed)
+			}
+		},
+	}
+	go func() { serveDone <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		// Let the abandoned request finish here rather than in a later test.
+		close(releaseHandler)
+		<-connClosed
+		_ = listener.Close()
+		<-serveDone
+	})
+
+	const timeout = 600 * time.Millisecond
+	client := &HostClient{
+		Addr: "example.com",
+		Dial: func(string) (net.Conn, error) {
+			time.Sleep(timeout / 2)
+			return listener.Dial()
+		},
+	}
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://example.com/")
+	started := time.Now()
+	err := client.DoTimeout(&req, &resp, timeout)
+	elapsed := time.Since(started)
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("DoTimeout() error = %v, want %v", err, ErrTimeout)
+	}
+	if elapsed > timeout+timeout/3 {
+		t.Fatalf("DoTimeout() elapsed = %v, want at most %v", elapsed, timeout+timeout/3)
+	}
+}
+
 func TestClientConnectionCounts(t *testing.T) {
 	t.Parallel()
 
