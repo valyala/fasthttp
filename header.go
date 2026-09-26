@@ -177,12 +177,12 @@ func (h *header) ResetConnectionClose() {
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *ResponseHeader) ConnectionUpgrade() bool {
-	return hasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
+	return !h.ConnectionClose() && hasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
 }
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
 func (h *RequestHeader) ConnectionUpgrade() bool {
-	return hasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
+	return !h.ConnectionClose() && hasHeaderValue(h.Peek(HeaderConnection), strUpgrade)
 }
 
 // PeekCookie is able to returns cookie by a given key from response.
@@ -1127,7 +1127,7 @@ func (h *ResponseHeader) All() iter.Seq2[[]byte, []byte] {
 			}
 		}
 
-		if h.ConnectionClose() && !yield(strConnection, strClose) {
+		if h.ConnectionClose() && !hasConnectionCloseValue(h.h) && !yield(strConnection, strClose) {
 			return
 		}
 	}
@@ -1285,7 +1285,7 @@ func (h *RequestHeader) All() iter.Seq2[[]byte, []byte] {
 				return
 			}
 		}
-		if h.ConnectionClose() && !yield(strConnection, strClose) {
+		if h.ConnectionClose() && !hasConnectionCloseValue(h.h) && !yield(strConnection, strClose) {
 			return
 		}
 	}
@@ -1442,7 +1442,12 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte) bool {
 			return true
 		case caseInsensitiveCompare(strConnection, key):
 			if hasHeaderValue(value, strClose) {
-				h.SetConnectionClose()
+				h.connectionClose = true
+				if hasOtherHeaderValue(value, strClose) {
+					h.setNonSpecial(key, value)
+				} else {
+					h.h = delAllArgs(h.h, HeaderConnection)
+				}
 			} else {
 				h.ResetConnectionClose()
 				h.setNonSpecial(key, value)
@@ -1503,7 +1508,12 @@ func (h *RequestHeader) setSpecialHeader(key, value []byte) bool {
 			return true
 		case caseInsensitiveCompare(strConnection, key):
 			if hasHeaderValue(value, strClose) {
-				h.SetConnectionClose()
+				h.connectionClose = true
+				if hasOtherHeaderValue(value, strClose) {
+					h.setNonSpecial(key, value)
+				} else {
+					h.h = delAllArgs(h.h, HeaderConnection)
+				}
 			} else {
 				h.ResetConnectionClose()
 				h.setNonSpecial(key, value)
@@ -1978,10 +1988,13 @@ func (h *ResponseHeader) peek(key []byte) []byte {
 	case HeaderServer:
 		return h.Server()
 	case HeaderConnection:
+		if v := peekArgBytes(h.h, key); len(v) > 0 {
+			return v
+		}
 		if h.ConnectionClose() {
 			return strClose
 		}
-		return peekArgBytes(h.h, key)
+		return nil
 	case HeaderContentLength:
 		return h.contentLengthBytes
 	case HeaderSetCookie:
@@ -2002,10 +2015,13 @@ func (h *RequestHeader) peek(key []byte) []byte {
 	case HeaderUserAgent:
 		return h.UserAgent()
 	case HeaderConnection:
+		if v := peekArgBytes(h.h, key); len(v) > 0 {
+			return v
+		}
 		if h.ConnectionClose() {
 			return strClose
 		}
-		return peekArgBytes(h.h, key)
+		return nil
 	case HeaderContentLength:
 		return h.contentLengthBytes
 	case HeaderCookie:
@@ -2047,10 +2063,10 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = append(h.mulHeader, ua)
 		}
 	case HeaderConnection:
-		if h.ConnectionClose() {
+		origLen := len(h.mulHeader)
+		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+		if h.ConnectionClose() && (len(h.mulHeader) == origLen || !hasConnectionCloseValue(h.h)) {
 			h.mulHeader = append(h.mulHeader, strClose)
-		} else {
-			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 		}
 	case HeaderContentLength:
 		if len(h.contentLengthBytes) > 0 {
@@ -2101,10 +2117,10 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = append(h.mulHeader, server)
 		}
 	case HeaderConnection:
-		if h.ConnectionClose() {
+		origLen := len(h.mulHeader)
+		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+		if h.ConnectionClose() && (len(h.mulHeader) == origLen || !hasConnectionCloseValue(h.h)) {
 			h.mulHeader = append(h.mulHeader, strClose)
-		} else {
-			h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
 		}
 	case HeaderContentLength:
 		if len(h.contentLengthBytes) > 0 {
@@ -2576,7 +2592,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		}
 	}
 
-	if h.ConnectionClose() {
+	if h.ConnectionClose() && !hasConnectionCloseValue(h.h) {
 		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
@@ -2711,7 +2727,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 		dst = append(dst, strCRLF...)
 	}
 
-	if h.ConnectionClose() && !h.disableSpecialHeader {
+	if h.ConnectionClose() && !h.disableSpecialHeader && !hasConnectionCloseValue(h.h) {
 		dst = appendHeaderLine(dst, strConnection, strClose)
 	}
 
@@ -3107,8 +3123,10 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 			if caseInsensitiveCompare(s.key, strConnection) {
 				if hasHeaderValue(s.value, strClose) {
 					h.connectionClose = true
+					if hasOtherHeaderValue(s.value, strClose) {
+						h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+					}
 				} else {
-					h.connectionClose = false
 					h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
 				}
 				continue
@@ -3297,8 +3315,10 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 			if caseInsensitiveCompare(s.key, strConnection) {
 				if hasHeaderValue(s.value, strClose) {
 					h.connectionClose = true
+					if hasOtherHeaderValue(s.value, strClose) {
+						h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
+					}
 				} else {
-					h.connectionClose = false
 					h.h = appendArgBytes(h.h, s.key, s.value, argsHasValue)
 				}
 				continue
@@ -3403,10 +3423,10 @@ func (s *headerValueScanner) next() bool {
 }
 
 func stripSpace(b []byte) []byte {
-	for len(b) > 0 && b[0] == ' ' {
+	for len(b) > 0 && (b[0] == ' ' || b[0] == '\t') {
 		b = b[1:]
 	}
-	for len(b) > 0 && b[len(b)-1] == ' ' {
+	for len(b) > 0 && (b[len(b)-1] == ' ' || b[len(b)-1] == '\t') {
 		b = b[:len(b)-1]
 	}
 	return b
@@ -3418,6 +3438,28 @@ func hasHeaderValue(s, value []byte) bool {
 	for vs.next() {
 		if caseInsensitiveCompare(vs.value, value) {
 			return true
+		}
+	}
+	return false
+}
+
+func hasOtherHeaderValue(s, value []byte) bool {
+	var vs headerValueScanner
+	vs.b = s
+	for vs.next() {
+		if len(vs.value) > 0 && !caseInsensitiveCompare(vs.value, value) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasConnectionCloseValue(h []argsKV) bool {
+	for i := range h {
+		if caseInsensitiveCompare(h[i].key, strConnection) {
+			if hasHeaderValue(h[i].value, strClose) {
+				return true
+			}
 		}
 	}
 	return false
