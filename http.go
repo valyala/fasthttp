@@ -1019,11 +1019,19 @@ func (req *Request) SetBodyString(body string) {
 func (req *Request) ResetBody() {
 	req.bodyRaw = nil
 	req.RemoveMultipartFormFiles()
+	rs, _ := req.bodyStream.(*requestStream)
 	req.closeBodyStream() //nolint:errcheck
 	if req.body != nil {
-		if req.keepBodyBuffer {
+		switch {
+		case req.keepBodyBuffer:
 			req.body.Reset()
-		} else {
+		case rs != nil:
+			// The server still drains rs after the handler returns, and it
+			// reads its prefetched bytes from this buffer, so leave the buffer
+			// to be pooled when the stream is released rather than now.
+			rs.body = req.body
+			req.body = nil
+		default:
 			requestBodyPool.Put(req.body)
 			req.body = nil
 		}
@@ -2225,7 +2233,7 @@ func (s *compressedBodyStream) closeOriginal(wErr error) error {
 			err = errc
 		}
 	}
-	if bsr, ok := s.bodyStream.(*requestStream); ok {
+	if bsr, ok := s.bodyStream.(*requestStream); ok && bsr.releaseOnClose {
 		releaseRequestStream(bsr)
 	}
 	return err
@@ -2311,7 +2319,7 @@ func closeBodyStreamReader(bodyStream io.Reader, wErr error) error {
 			err = errc
 		}
 	}
-	if bsr, ok := bodyStream.(*requestStream); ok {
+	if bsr, ok := bodyStream.(*requestStream); ok && bsr.releaseOnClose {
 		releaseRequestStream(bsr)
 	}
 	return err
@@ -2537,9 +2545,11 @@ func (req *Request) closeBodyStream() error {
 	if bsc, ok := req.bodyStream.(io.Closer); ok {
 		err = bsc.Close()
 	}
-	if rs, ok := req.bodyStream.(*requestStream); ok {
-		releaseRequestStream(rs)
-	}
+	// A *requestStream reads directly from the connection, so the server loop
+	// owns it: it drains any unread body and returns the stream to the pool
+	// once the connection can be reused, or drops it when closing. Releasing it
+	// here would let a handler abandon an unread body and desync the next
+	// request, so leave that to the server.
 	req.bodyStream = nil
 	return err
 }

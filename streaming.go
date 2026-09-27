@@ -17,12 +17,21 @@ type bodyStreamHeader interface {
 type requestStream struct {
 	header          bodyStreamHeader
 	prefetchedBytes bytes.Reader
-	reader          *bufio.Reader
-	contentLength   int
-	totalBytesRead  int
-	chunkLeft       int
-	strictEOF       bool
-	eof             bool
+	// body is the request body buffer holding prefetchedBytes, once the
+	// request has let go of it while the server still has to drain the
+	// stream. It goes back to the pool when the stream is released.
+	body           *bytebufferpool.ByteBuffer
+	reader         *bufio.Reader
+	contentLength  int
+	totalBytesRead int
+	chunkLeft      int
+	strictEOF      bool
+	eof            bool
+	// releaseOnClose is set on a response stream, which is released when the
+	// response body is closed. A request stream is instead released by the
+	// server loop once it has drained what the handler left unread, so a
+	// response body streaming from it must not release it.
+	releaseOnClose bool
 }
 
 func (rs *requestStream) Read(p []byte) (int, error) {
@@ -114,6 +123,23 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// bodyOverflows reports whether more than limit bytes of a known-length body
+// are still unread. A chunked body has no declared length, so it always
+// returns false and is drained best-effort by discard instead. The framing
+// comes from contentLength captured when the stream was created, so a handler
+// mutating the request header cannot change the answer.
+func (rs *requestStream) bodyOverflows(limit int) bool {
+	return rs.contentLength >= 0 && rs.contentLength-rs.totalBytesRead > limit
+}
+
+// discard reads and drops what is left of the body, so that the reader ends
+// where the next request starts. It gives up after limit bytes and reports
+// whether the end of the body was reached.
+func (rs *requestStream) discard(limit int) bool {
+	_, err := io.CopyN(io.Discard, rs, int64(limit)+1)
+	return err == io.EOF
+}
+
 func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
 	rs := requestStreamPool.Get().(*requestStream) //nolint:forcetypeassert
 	rs.prefetchedBytes.Reset(b.B)
@@ -126,11 +152,16 @@ func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyS
 func acquireResponseStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
 	rs := acquireRequestStream(b, r, h)
 	rs.strictEOF = true
+	rs.releaseOnClose = true
 	return rs
 }
 
 func releaseRequestStream(rs *requestStream) {
 	rs.prefetchedBytes.Reset(nil)
+	if rs.body != nil {
+		requestBodyPool.Put(rs.body)
+		rs.body = nil
+	}
 	rs.totalBytesRead = 0
 	rs.chunkLeft = 0
 	rs.reader = nil
@@ -138,6 +169,7 @@ func releaseRequestStream(rs *requestStream) {
 	rs.contentLength = 0
 	rs.eof = false
 	rs.strictEOF = false
+	rs.releaseOnClose = false
 	requestStreamPool.Put(rs)
 }
 
