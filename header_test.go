@@ -4259,3 +4259,112 @@ func TestURIHostMemoIsBounded(t *testing.T) {
 		t.Fatalf("memoized host %q", u.Host())
 	}
 }
+
+func TestScanHeaderKey(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		line       string
+		colon      int
+		innerSpace bool
+		valid      bool
+	}{
+		{"Content-Type: text/html", 12, false, true},
+		{"Content-Type : text/html", 13, false, true},
+		{"Content-Type  :", 14, false, true},
+		{"Content Type: a", 12, true, true},
+		{"Content Type : a", 13, true, true},
+		{"Content-Type", -1, false, false},
+		{"", -1, false, false},
+		{": a", 0, false, false},
+		{"Content\tType: a", 12, false, false},
+		{"Content\tType", -1, false, false},
+		{"\xffoo: bar", 3, false, false},
+		{"a:b:c", 1, false, true},
+	} {
+		colon, innerSpace, valid := scanHeaderKey([]byte(tc.line))
+		if colon != tc.colon || innerSpace != tc.innerSpace || valid != tc.valid {
+			t.Fatalf("unexpected result for %q: colon=%d innerSpace=%v valid=%v. Expecting colon=%d innerSpace=%v valid=%v",
+				tc.line, colon, innerSpace, valid, tc.colon, tc.innerSpace, tc.valid)
+		}
+	}
+}
+
+func TestRequestHeaderReadMoreLinesThanRecorded(t *testing.T) {
+	t.Parallel()
+
+	n := maxLineEnds + 50
+	var sb strings.Builder
+	sb.WriteString("GET / HTTP/1.1\r\nHost: foobar.com\r\n")
+	for i := range n {
+		fmt.Fprintf(&sb, "X-Header-%d: value-%d\r\n", i, i)
+	}
+	sb.WriteString("\r\n")
+	s := sb.String()
+
+	var h RequestHeader
+	br := bufio.NewReaderSize(bytes.NewBufferString(s), len(s))
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(h.Host()) != "foobar.com" {
+		t.Fatalf("unexpected host: %q", h.Host())
+	}
+	for i := range n {
+		key := fmt.Sprintf("X-Header-%d", i)
+		if v := h.Peek(key); string(v) != fmt.Sprintf("value-%d", i) {
+			t.Fatalf("unexpected value for %q: %q", key, v)
+		}
+	}
+	if raw := h.RawHeaders(); string(raw) != s[len("GET / HTTP/1.1\r\n"):] {
+		t.Fatalf("unexpected raw headers length %d, expecting %d", len(raw), len(s)-len("GET / HTTP/1.1\r\n"))
+	}
+	if br.Buffered() != 0 {
+		t.Fatalf("unexpected buffered bytes: %d", br.Buffered())
+	}
+}
+
+func TestRequestHeaderResetClearsLineEnds(t *testing.T) {
+	t.Parallel()
+
+	s := "GET / HTTP/1.1\r\nHost: foobar.com\r\nX-Foo: bar\r\n\r\n"
+	var h RequestHeader
+	if err := h.Read(bufio.NewReader(bytes.NewBufferString(s))); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(h.lineEnds) == 0 {
+		t.Fatal("expecting line ends to be recorded after Read")
+	}
+
+	var dst RequestHeader
+	h.CopyTo(&dst)
+	if len(dst.lineEnds) != 0 {
+		t.Fatalf("unexpected line ends after CopyTo: %v", dst.lineEnds)
+	}
+
+	h.Reset()
+	if len(h.lineEnds) != 0 {
+		t.Fatalf("unexpected line ends after Reset: %v", h.lineEnds)
+	}
+}
+
+func TestRequestHeaderMethodDefaultIsRequestLocal(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	m := h.Method()
+	if string(m) != MethodGet {
+		t.Fatalf("unexpected default method %q. Expecting %q", m, MethodGet)
+	}
+	m[0] = 'X'
+
+	var h2 RequestHeader
+	if m2 := h2.Method(); string(m2) != MethodGet {
+		t.Fatalf("default method of another header changed to %q", m2)
+	}
+
+	h.Reset()
+	if m := h.Method(); string(m) != MethodGet {
+		t.Fatalf("unexpected default method after reset %q. Expecting %q", m, MethodGet)
+	}
+}

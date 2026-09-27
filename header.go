@@ -81,6 +81,10 @@ type RequestHeader struct {
 	// wire.
 	rawHeaders []byte
 
+	// lineEnds holds the offsets of the line terminators found by
+	// readRawHeaders, so parseHeaders does not scan for them again.
+	lineEnds []int
+
 	disableSpecialHeader bool
 	cookiesCollected     bool
 }
@@ -542,38 +546,13 @@ func isValidTrailerKey(key []byte) bool {
 // validHeaderFieldByte returns true if c valid header field byte
 // as defined by RFC 7230.
 func validHeaderFieldByte(c byte) bool {
-	return c < 128 && validHeaderFieldByteTable[c] == 1
+	return validHeaderFieldByteTable[c] == 1
 }
 
 // validHeaderValueByte returns true if c valid header value byte
 // as defined by RFC 7230.
 func validHeaderValueByte(c byte) bool {
 	return validHeaderValueByteTable[c] == 1
-}
-
-// isValidHeaderKey returns whether a is a valid header key, and whether a
-// contains a space before its last non-space byte. Such a space survives
-// trailing-whitespace trimming, and a key carrying it is accepted but must
-// not be canonicalized. See https://go.dev/issue/34540 and
-// https://github.com/valyala/fasthttp/issues/1917.
-func isValidHeaderKey(a []byte) (valid, innerSpace bool) {
-	if len(a) == 0 {
-		return false, false
-	}
-	seenSpace := false
-	for _, c := range a {
-		if c == ' ' {
-			seenSpace = true
-			continue
-		}
-		if !validHeaderFieldByte(c) {
-			return false, false
-		}
-		if seenSpace {
-			innerSpace = true
-		}
-	}
-	return true, innerSpace
 }
 
 // VisitHeaderParams calls f for each parameter in the given header bytes.
@@ -755,7 +734,7 @@ func (h *RequestHeader) SetRefererBytes(referer []byte) {
 // Method returns HTTP request method.
 func (h *RequestHeader) Method() []byte {
 	if len(h.method) == 0 {
-		return []byte(MethodGet)
+		h.method = append(h.method[:0], MethodGet...)
 	}
 	return h.method
 }
@@ -1042,6 +1021,7 @@ func (h *RequestHeader) resetSkipNormalize() {
 	h.cookiesCollected = false
 
 	h.rawHeaders = h.rawHeaders[:0]
+	h.lineEnds = h.lineEnds[:0]
 }
 
 func (h *header) copyTo(dst *header) {
@@ -2769,7 +2749,7 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 	}
 
 	var rawEnd int
-	h.rawHeaders, rawEnd, err = readRawHeaders(h.rawHeaders[:0], buf[m:])
+	h.rawHeaders, h.lineEnds, rawEnd, err = readRawHeaders(h.rawHeaders[:0], h.lineEnds[:0], buf[m:])
 	if err != nil {
 		return 0, err
 	}
@@ -3041,14 +3021,22 @@ func validateRequestURI(method, requestURI []byte) error {
 	return ErrorInvalidURI
 }
 
-func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
+// maxLineEnds bounds the line terminator offsets readRawHeaders records, and
+// with that the memory a pooled RequestHeader keeps for them.
+const maxLineEnds = 512
+
+// readRawHeaders copies the header block at the start of buf into dst and
+// returns it together with the offsets of the block's first line terminators
+// and the block length.
+func readRawHeaders(dst []byte, lineEnds []int, buf []byte) ([]byte, []int, int, error) {
 	n := bytes.IndexByte(buf, nChar)
 	if n < 0 {
-		return dst[:0], 0, ErrNeedMore
+		return dst[:0], lineEnds, 0, ErrNeedMore
 	}
+	lineEnds = append(lineEnds, n)
 	if (n == 1 && buf[0] == rChar) || n == 0 {
 		// empty headers
-		return dst, n + 1, nil
+		return dst, lineEnds, n + 1, nil
 	}
 
 	n++
@@ -3058,13 +3046,16 @@ func readRawHeaders(dst, buf []byte) ([]byte, int, error) {
 		b = b[m:]
 		m = bytes.IndexByte(b, nChar)
 		if m < 0 {
-			return dst, 0, ErrNeedMore
+			return dst, lineEnds, 0, ErrNeedMore
 		}
 		m++
 		n += m
+		if len(lineEnds) < maxLineEnds {
+			lineEnds = append(lineEnds, n-1)
+		}
 		if (m == 2 && b[0] == rChar) || m == 1 {
 			dst = append(dst, buf[:n]...)
-			return dst, n, nil
+			return dst, lineEnds, n, nil
 		}
 	}
 }
@@ -3226,6 +3217,7 @@ func (h *RequestHeader) parseHeaders(buf []byte, blockEnd int) (int, error) {
 	var s headerScanner
 	s.b = buf
 	s.blockEnd = blockEnd
+	s.lineEnds = h.lineEnds
 
 	for s.next() {
 		key := s.key

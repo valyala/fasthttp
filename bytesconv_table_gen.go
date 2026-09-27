@@ -98,7 +98,7 @@ func main() {
 		return a
 	}()
 
-	validHeaderFieldByteTable := func() [128]byte {
+	validHeaderFieldByteTable := func() [256]byte {
 		// Should match net/textproto's validHeaderFieldByte(c byte) bool
 		// Defined by RFC 7230 and 9110:
 		//
@@ -107,7 +107,7 @@ func main() {
 		//	tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
 		//	        "^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
 		//	token = 1*tchar
-		var table [128]byte
+		var table [256]byte
 		for c := 0; c < 128; c++ {
 			if (c >= '0' && c <= '9') ||
 				(c >= 'a' && c <= 'z') ||

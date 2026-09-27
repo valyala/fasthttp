@@ -17,6 +17,11 @@ type headerScanner struct {
 	// it if the block really ends in CRLFCRLF there.
 	blockEnd int
 
+	// lineEnds holds the offsets in b of the '\n' ending each line of the
+	// block, in order, when the caller has already found them (see
+	// readRawHeaders). readLine searches b itself once they run out.
+	lineEnds []int
+
 	key   []byte
 	value []byte
 
@@ -62,14 +67,9 @@ func (s *headerScanner) next() bool {
 		return false
 	}
 
-	// Key ends at the first colon, already found by readContinuedLineSlice.
+	// Key ends at the first colon, already found and validated by
+	// readContinuedLineSlice.
 	k, v := kv[:colon], kv[colon+1:]
-	valid, innerSpace := isValidHeaderKey(k)
-	if !valid {
-		s.err = fmt.Errorf("malformed mime header line: %q", kv)
-		return false
-	}
-	s.keyHasSpace = innerSpace
 
 	// Skip initial spaces in value, without bytes.TrimLeft: it would
 	// rebuild its ASCII set on every call.
@@ -92,9 +92,15 @@ func (s *headerScanner) next() bool {
 // trailing \n and a possible preceding \r dropped. b is truncated at the
 // header block terminator, so every line ends in \n.
 func (s *headerScanner) readLine() []byte {
-	i := bytes.IndexByte(s.b[s.r:], '\n')
-	if i < 0 {
-		return nil
+	var i int
+	if len(s.lineEnds) > 0 && s.lineEnds[0] >= s.r && s.lineEnds[0] < len(s.b) {
+		i = s.lineEnds[0] - s.r
+		s.lineEnds = s.lineEnds[1:]
+	} else {
+		i = bytes.IndexByte(s.b[s.r:], '\n')
+		if i < 0 {
+			return nil
+		}
 	}
 	line := s.b[s.r : s.r+i]
 	s.r += i + 1
@@ -116,10 +122,14 @@ func (s *headerScanner) readContinuedLineSlice() ([]byte, int, error) {
 		return line, -1, nil
 	}
 
-	colon := bytes.IndexByte(line, ':')
-	if colon < 0 {
-		return nil, -1, fmt.Errorf("malformed mime header: missing colon: %q", line)
+	colon, innerSpace, valid := scanHeaderKey(line)
+	if !valid {
+		if colon < 0 {
+			return nil, -1, fmt.Errorf("malformed mime header: missing colon: %q", line)
+		}
+		return nil, -1, fmt.Errorf("malformed mime header line: %q", trim(line))
 	}
+	s.keyHasSpace = innerSpace
 
 	// If the next line doesn't start with a space or tab, we are done.
 	if len(s.b)-s.r > 1 {
@@ -153,6 +163,37 @@ func (s *headerScanner) skipSpace() bool {
 		skipped = true
 	}
 	return skipped
+}
+
+// scanHeaderKey returns the position of the colon ending the header key in
+// line and whether the key is valid. A key may contain spaces (see
+// https://github.com/valyala/fasthttp/issues/1917); innerSpace reports a
+// space that survives trailing-whitespace trimming, such a key is accepted
+// but must not be canonicalized. When the key is invalid, colon is -1 if
+// line has no colon at all.
+func scanHeaderKey(line []byte) (colon int, innerSpace, valid bool) {
+	seenSpace := false
+	for i, c := range line {
+		if validHeaderFieldByte(c) {
+			continue
+		}
+		switch c {
+		case ':':
+			if i == 0 {
+				return 0, false, false
+			}
+			if seenSpace {
+				key := line[:i]
+				innerSpace = bytes.IndexByte(key, ' ') < len(trimTrailingSpace(key))
+			}
+			return i, innerSpace, true
+		case ' ':
+			seenSpace = true
+		default:
+			return bytes.IndexByte(line, ':'), false, false
+		}
+	}
+	return -1, false, false
 }
 
 func isASCIILetter(b byte) bool {
