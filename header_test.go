@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResponseHeaderAddContentType(t *testing.T) {
@@ -4392,5 +4393,22 @@ func TestResponseHeaderSetServerOverridesDefault(t *testing.T) {
 	h.SetServer("")
 	if len(h.Server()) != 0 {
 		t.Errorf("Server()=%q after SetServer(\"\"), expecting empty", h.Server())
+	}
+}
+
+func TestServerDateLine(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.September, 27, 8, 0, 0, 0, time.UTC)
+	if got, want := string(serverDateLineFor(now)), "Date: Sun, 27 Sep 2026 08:00:00 GMT\r\n"; got != want {
+		t.Fatalf("date line %q, expecting %q", got, want)
+	}
+
+	var h, parsed ResponseHeader
+	if err := parsed.Read(bufio.NewReader(bytes.NewReader(h.Header()))); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := ParseHTTPDate(parsed.Peek(HeaderDate)); err != nil {
+		t.Fatalf("Date %q: %v", parsed.Peek(HeaderDate), err)
 	}
 }

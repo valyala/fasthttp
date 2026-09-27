@@ -3202,7 +3202,7 @@ func (s *Server) writeFastError(w io.Writer, statusCode int, msg string) {
 	date := ""
 	if !s.NoDefaultDate {
 		serverDateOnce.Do(updateServerDate)
-		date = fmt.Sprintf("Date: %s\r\n", *serverDate.Load())
+		date = string(*serverDateLine.Load())
 	}
 
 	fmt.Fprintf(w, "Connection: close\r\n"+
