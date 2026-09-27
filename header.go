@@ -2439,16 +2439,22 @@ func updateServerDate() {
 }
 
 var (
-	serverDate     atomic.Pointer[[]byte]
+	serverDateLine atomic.Pointer[[]byte]
 	serverSecond   atomic.Int64
 	serverDateOnce sync.Once // serverDateOnce.Do(updateServerDate)
 )
 
 func refreshServerDate() {
 	now := time.Now()
-	b := AppendHTTPDate(nil, now)
-	serverDate.Store(&b)
+	line := serverDateLineFor(now)
+	serverDateLine.Store(&line)
 	serverSecond.Store(now.Unix())
+}
+
+// serverDateLineFor renders the Date header line for now.
+func serverDateLineFor(now time.Time) []byte {
+	b := AppendHTTPDate(nil, now)
+	return appendHeaderLine(make([]byte, 0, len(strDate)+len(b)+4), strDate, b)
 }
 
 // coarseSecond returns the second refreshServerDate last saw, zero until the
@@ -2553,7 +2559,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 
 	if !h.noDefaultDate {
 		serverDateOnce.Do(updateServerDate)
-		dst = appendHeaderLine(dst, strDate, *serverDate.Load())
+		dst = append(dst, *serverDateLine.Load()...)
 	}
 
 	// Append Content-Type only for non-zero responses
