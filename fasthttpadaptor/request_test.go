@@ -1,10 +1,22 @@
 package fasthttpadaptor
 
 import (
+	"bufio"
+	"bytes"
+	"crypto/tls"
+	"errors"
+	"io"
+	"math"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
+	"testing/iotest"
+	"time"
 
 	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 func TestConvertRequestPreservesDuplicateHeaders(t *testing.T) {
@@ -53,5 +65,2094 @@ func BenchmarkConvertRequest(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		_ = ConvertRequest(ctx, &httpReq, true)
+	}
+}
+
+func BenchmarkConvertNetHTTPRequestToFastHTTPRequest(b *testing.B) {
+	httpReq := http.Request{
+		Method:     "GET",
+		RequestURI: "/test",
+		Host:       "test",
+		Header: http.Header{
+			"X": []string{"test"},
+			"Y": []string{"test"},
+		},
+	}
+
+	var req fasthttp.Request
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		req.Reset()
+		ConvertNetHTTPRequestToFastHTTPRequest(&httpReq, &req)
+	}
+}
+
+type closeTrackingReader struct {
+	io.Reader
+
+	closed *bool
+}
+
+func (r *closeTrackingReader) Close() error {
+	*r.closed = true
+	return nil
+}
+
+func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("basic conversion", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/test/path?query=1",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.Header.Method()) != "POST" {
+			t.Errorf("expected method POST, got %s", req.Header.Method())
+		}
+		if string(req.Header.RequestURI()) != "/test/path?query=1" {
+			t.Errorf("expected URI /test/path?query=1, got %s", req.Header.RequestURI())
+		}
+		if string(req.Header.Protocol()) != "HTTP/1.1" {
+			t.Errorf("expected protocol HTTP/1.1, got %s", req.Header.Protocol())
+		}
+		if string(req.Host()) != "example.com" {
+			t.Errorf("expected host example.com, got %s", req.Host())
+		}
+	})
+
+	t.Run("URL fallback when RequestURI is empty", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "",
+			URL: &url.URL{
+				Path:     "/fallback/path",
+				RawQuery: "foo=bar",
+			},
+			Proto:  "HTTP/1.1",
+			Host:   "fallback.com",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.Header.RequestURI()) != "/fallback/path?foo=bar" {
+			t.Errorf("expected URI /fallback/path?foo=bar, got %s", req.Header.RequestURI())
+		}
+	})
+
+	t.Run("CONNECT request keeps its authority-form target", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.NewRequest("CONNECT", "http://example.com:443", http.NoBody)
+		if err != nil {
+			t.Fatalf("unexpected error building request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		// The request line net/http writes for the same request. The
+		// origin-form "/" that r.URL.RequestURI returns for the empty path
+		// such a URL carries would name no authority to tunnel to.
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected an authority-form request line, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Host: example.com:443\r\n") {
+			t.Errorf("expected the authority as the host, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT request with a scheme keeps its authority-form target", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.NewRequest("CONNECT", "https://example.com:443", http.NoBody)
+		if err != nil {
+			t.Fatalf("unexpected error building request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// The scheme makes the conversion parse the URI, which must not turn
+		// the authority into a path.
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected an authority-form request line, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT request read from the wire keeps its authority-form target", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+		httpReq.TLS = &tls.ConnectionState{}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected an authority-form request line, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT request with a path keeps its origin-form target", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.NewRequest("CONNECT", "http://example.com:443/tunnel", http.NoBody)
+		if err != nil {
+			t.Fatalf("unexpected error building request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// Only a target without a path is authority-form, like in net/http.
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT /tunnel HTTP/1.1\r\n") {
+			t.Errorf("expected an origin-form request line, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT authority-form target credentials become Basic authorization", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"CONNECT url-user:url-pass@example.com:443 HTTP/1.1\r\n" +
+				"Host: example.com:443\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// The authority to tunnel to survives, without the credentials a
+		// request target must not carry.
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected a sanitized authority-form request line, got:\n%s", wire)
+		}
+		// base64("url-user:url-pass"), the same credentials net/http.Client would send.
+		if !strings.Contains(wire, "Authorization: Basic dXJsLXVzZXI6dXJsLXBhc3M=\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", wire)
+		}
+		if strings.Contains(wire, "url-user:url-pass@") {
+			t.Errorf("expected no userinfo in the request target, got:\n%s", wire)
+		}
+	})
+
+	t.Run("explicit Authorization header wins over CONNECT authority-form target credentials", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"CONNECT url-user:url-pass@example.com:443 HTTP/1.1\r\n" +
+				"Host: example.com:443\r\n" +
+				"Authorization: Bearer explicit-token\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected a sanitized authority-form request line, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Authorization: Bearer explicit-token\r\n") {
+			t.Errorf("expected the explicit Authorization header on the wire, got:\n%s", wire)
+		}
+		if strings.Contains(wire, "url-user") || strings.Contains(wire, "url-pass") || strings.Contains(wire, "Basic") {
+			t.Errorf("expected no URL credentials on the wire, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT absolute-form target credentials keep the origin-form request line", func(t *testing.T) {
+		t.Parallel()
+		// net/http parses every non-origin-form CONNECT target as an
+		// authority, so an absolute-form one only reaches the conversion
+		// from a hand-built request.
+		httpReq := &http.Request{
+			Method:     http.MethodConnect,
+			RequestURI: "http://url-user:url-pass@example.com:443/tunnel",
+			URL: &url.URL{
+				Scheme: "http",
+				User:   url.UserPassword("url-user", "url-pass"),
+				Host:   "example.com:443",
+				Path:   "/tunnel",
+			},
+			Host:   "example.com:443",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// An absolute-form target has an origin form to fall back to, so the
+		// authority-form restoration must not claim it.
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT /tunnel HTTP/1.1\r\n") {
+			t.Errorf("expected an origin-form request line, got:\n%s", wire)
+		}
+		// base64("url-user:url-pass"), the same credentials net/http.Client would send.
+		if !strings.Contains(wire, "Authorization: Basic dXJsLXVzZXI6dXJsLXBhc3M=\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", wire)
+		}
+		if strings.Contains(wire, "url-user:url-pass@") {
+			t.Errorf("expected no userinfo in the request target, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT authority-form target without credentials keeps its userinfo-free target", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"CONNECT [::1]:443 HTTP/1.1\r\nHost: [::1]:443\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT [::1]:443 HTTP/1.1\r\n") {
+			t.Errorf("expected an authority-form request line, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT opaque target is used as it is", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method: http.MethodConnect,
+			URL:    &url.URL{Scheme: "https", Opaque: "//example.com:443"},
+			Host:   "example.com:443",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// net/http writes an opaque CONNECT target verbatim, where
+		// r.URL.RequestURI would turn it into the scheme-prefixed
+		// "https://example.com:443".
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT //example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected the opaque request target, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT opaque target drops the query", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method: http.MethodConnect,
+			URL:    &url.URL{Scheme: "https", Opaque: "//example.com:443", RawQuery: "a=b"},
+			Host:   "example.com:443",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// An authority to tunnel to carries no query, and net/http appends
+		// none to an opaque target either.
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT //example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected the opaque request target without a query, got:\n%s", wire)
+		}
+	})
+
+	t.Run("CONNECT opaque authority target is used as it is", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method: http.MethodConnect,
+			URL:    &url.URL{Scheme: "https", Opaque: "example.com:443"},
+			Host:   "example.com:443",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "CONNECT example.com:443 HTTP/1.1\r\n") {
+			t.Errorf("expected the opaque request target, got:\n%s", wire)
+		}
+	})
+
+	connectTargetCases := []struct {
+		name    string
+		request func() (*http.Request, error)
+		target  string
+	}{
+		{
+			name: "authority-form target read from the wire",
+			request: func() (*http.Request, error) {
+				return http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")))
+			},
+			target: "example.com:443",
+		},
+		{
+			name: "authority-form target read over TLS",
+			request: func() (*http.Request, error) {
+				r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")))
+				if r != nil {
+					r.TLS = &tls.ConnectionState{}
+				}
+				return r, err
+			},
+			target: "example.com:443",
+		},
+		{
+			name: "authority-form target with credentials",
+			request: func() (*http.Request, error) {
+				return http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"CONNECT url-user:url-pass@example.com:443 HTTP/1.1\r\n" +
+						"Host: example.com:443\r\n\r\n")))
+			},
+			target: "example.com:443",
+		},
+		{
+			name: "URL without a path",
+			request: func() (*http.Request, error) {
+				return http.NewRequest(http.MethodConnect, "http://example.com:443", http.NoBody)
+			},
+			target: "example.com:443",
+		},
+		{
+			name: "URL with a scheme and without a path",
+			request: func() (*http.Request, error) {
+				return http.NewRequest(http.MethodConnect, "https://example.com:443", http.NoBody)
+			},
+			target: "example.com:443",
+		},
+		{
+			name: "opaque target",
+			request: func() (*http.Request, error) {
+				return &http.Request{
+					Method: http.MethodConnect,
+					URL:    &url.URL{Scheme: "https", Opaque: "//example.com:443"},
+					Host:   "example.com:443",
+					Header: http.Header{},
+				}, nil
+			},
+			target: "//example.com:443",
+		},
+		{
+			name: "opaque authority target",
+			request: func() (*http.Request, error) {
+				return &http.Request{
+					Method: http.MethodConnect,
+					URL:    &url.URL{Scheme: "https", Opaque: "example.com:443"},
+					Host:   "example.com:443",
+					Header: http.Header{},
+				}, nil
+			},
+			target: "example.com:443",
+		},
+	}
+	for _, tc := range connectTargetCases {
+		t.Run("CONNECT "+tc.name+" survives URI access", func(t *testing.T) {
+			t.Parallel()
+			httpReq, err := tc.request()
+			if err != nil {
+				t.Fatalf("unexpected error building request: %v", err)
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			// fasthttp.Client.Do and HostClient.Do access the URI before
+			// writing, which makes Write rebuild the target from the parsed
+			// URI.
+			req.URI()
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error writing request: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error flushing request: %v", err)
+			}
+
+			wire := buf.String()
+			if want := "CONNECT " + tc.target + " HTTP/1.1\r\n"; !strings.HasPrefix(wire, want) {
+				t.Errorf("expected request line %q, got:\n%s", want, wire)
+			}
+		})
+	}
+
+	schemeSeparatorCases := []struct {
+		name    string
+		request func() (*http.Request, error)
+		target  string
+	}{
+		{
+			name: "query of a URL",
+			request: func() (*http.Request, error) {
+				return http.NewRequest(http.MethodGet, "https://example.com/?next=http://other.example/", http.NoBody)
+			},
+			target: "/?next=http://other.example/",
+		},
+		{
+			name: "path of a URL",
+			request: func() (*http.Request, error) {
+				return http.NewRequest(http.MethodGet, "https://example.com/redirect/http://other.example/", http.NoBody)
+			},
+			target: "/redirect/http://other.example/",
+		},
+		{
+			name: "query of a target read over TLS",
+			request: func() (*http.Request, error) {
+				r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"GET /?next=http://other.example/ HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+				if r != nil {
+					r.TLS = &tls.ConnectionState{}
+				}
+				return r, err
+			},
+			target: "/?next=http://other.example/",
+		},
+		{
+			name: "path of a target read over TLS",
+			request: func() (*http.Request, error) {
+				r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"GET /redirect/http://other.example/ HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+				if r != nil {
+					r.TLS = &tls.ConnectionState{}
+				}
+				return r, err
+			},
+			target: "/redirect/http://other.example/",
+		},
+	}
+	for _, tc := range schemeSeparatorCases {
+		t.Run("origin-form target with a scheme separator in the "+tc.name+" keeps the https scheme", func(t *testing.T) {
+			t.Parallel()
+			httpReq, err := tc.request()
+			if err != nil {
+				t.Fatalf("unexpected error building request: %v", err)
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			// Only a scheme at the start makes a target absolute-form, so
+			// the origin-form target is not restored after the scheme is
+			// set, which would reparse the URI and drop the https scheme
+			// fasthttp.Client.Do selects the transport with.
+			if got := string(req.Header.RequestURI()); got != tc.target {
+				t.Errorf("expected request target %q, got %q", tc.target, got)
+			}
+			if got := string(req.URI().Scheme()); got != "https" {
+				t.Errorf("expected scheme https, got %q", got)
+			}
+			if got := string(req.URI().Host()); got != "example.com" {
+				t.Errorf("expected host example.com, got %q", got)
+			}
+		})
+	}
+
+	t.Run("absolute-form target is rebuilt in origin-form after URI access", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"GET http://example.com/path?a=b HTTP/1.1\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		// fasthttp.Client and HostClient send the request to the host of
+		// the URI itself, where the origin-form is the one to use.
+		req.URI()
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "GET /path?a=b HTTP/1.1\r\n") {
+			t.Errorf("expected an origin-form request line, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Host: example.com\r\n") {
+			t.Errorf("expected the authority as the host, got:\n%s", wire)
+		}
+	})
+
+	for _, tc := range []struct {
+		name                   string
+		disablePathNormalizing bool
+		want                   string
+	}{
+		{name: "normalizes the path", want: "GET /a/b HTTP/1.1\r\n"},
+		{name: "keeps the path with path normalization disabled", disablePathNormalizing: true, want: "GET /a//b HTTP/1.1\r\n"},
+	} {
+		t.Run("URI parsed by the conversion "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			httpReq, err := http.NewRequest(http.MethodGet, "https://example.com/a//b", http.NoBody)
+			if err != nil {
+				t.Fatalf("unexpected error building request: %v", err)
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			// Setting the https scheme parses the URI, so Write rebuilds
+			// the target from it.
+			req.URI().DisablePathNormalizing = tc.disablePathNormalizing
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error writing request: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error flushing request: %v", err)
+			}
+
+			if wire := buf.String(); !strings.HasPrefix(wire, tc.want) {
+				t.Errorf("expected request line %q, got:\n%s", tc.want, wire)
+			}
+		})
+	}
+
+	t.Run("URL host fallback when Host is empty", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			URL: &url.URL{
+				Host: "url-host.com",
+				Path: "/",
+			},
+			Proto:  "HTTP/1.1",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.Host()) != "url-host.com" {
+			t.Errorf("expected host url-host.com, got %s", req.Host())
+		}
+	})
+
+	t.Run("Host field wins over Host header", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "canonical.example",
+			Header: http.Header{
+				"Host": []string{"other.example"},
+			},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.Host()) != "canonical.example" {
+			t.Errorf("expected host canonical.example, got %s", req.Host())
+		}
+	})
+
+	t.Run("scheme from URL", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method: "GET",
+			URL: &url.URL{
+				Scheme: "https",
+				Host:   "example.com",
+				Path:   "/secure",
+			},
+			Proto:  "HTTP/1.1",
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.URI().Scheme()) != "https" {
+			t.Errorf("expected scheme https, got %s", req.URI().Scheme())
+		}
+		if string(req.Host()) != "example.com" {
+			t.Errorf("expected host example.com, got %s", req.Host())
+		}
+	})
+
+	t.Run("scheme from TLS connection state", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			TLS:        &tls.ConnectionState{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.URI().Scheme()) != "https" {
+			t.Errorf("expected scheme https, got %s", req.URI().Scheme())
+		}
+	})
+
+	t.Run("HTTP/2 protocol is normalized to HTTP/1.1", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/2.0",
+			ProtoMajor: 2,
+			Host:       "example.com",
+			Header:     http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.Header.Protocol()) != "HTTP/1.1" {
+			t.Errorf("expected protocol HTTP/1.1, got %s", req.Header.Protocol())
+		}
+		if !req.Header.IsHTTP11() {
+			t.Error("expected IsHTTP11 to be true")
+		}
+	})
+
+	t.Run("HTTP/2 protocol without minor version is normalized", func(t *testing.T) {
+		t.Parallel()
+		// ConvertRequest produces exactly this protocol and major version.
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/2",
+			ProtoMajor: 2,
+			Host:       "example.com",
+			Header:     http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.Header.Protocol()) != "HTTP/1.1" {
+			t.Errorf("expected protocol HTTP/1.1, got %s", req.Header.Protocol())
+		}
+	})
+
+	t.Run("HTTP/1.0 protocol is kept", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.0",
+			ProtoMajor: 1,
+			Host:       "example.com",
+			Header:     http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.Header.Protocol()) != "HTTP/1.0" {
+			t.Errorf("expected protocol HTTP/1.0, got %s", req.Header.Protocol())
+		}
+	})
+
+	t.Run("HTTP/1.0 request with unknown-length body is normalized to HTTP/1.1", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.0",
+			ProtoMajor:    1,
+			ProtoMinor:    0,
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 0,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "POST / HTTP/1.1\r\n") {
+			t.Errorf("expected an HTTP/1.1 request line, since chunked framing does not exist in HTTP/1.0, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+			t.Errorf("expected a chunked body, got:\n%s", wire)
+		}
+		if !strings.HasSuffix(wire, "\r\n\r\n4\r\ndata\r\n0\r\n\r\n") {
+			t.Errorf("expected a chunked body encoding, got:\n%s", wire)
+		}
+	})
+
+	t.Run("HTTP/1.0 request with trailers is normalized to HTTP/1.1", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.0",
+			ProtoMajor:    1,
+			ProtoMinor:    0,
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 4,
+			Trailer: http.Header{
+				"X-Final": []string{"done"},
+			},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "POST / HTTP/1.1\r\n") {
+			t.Errorf("expected an HTTP/1.1 request line, since trailers need chunked framing, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+			t.Errorf("expected a chunked body, got:\n%s", wire)
+		}
+		if !strings.HasSuffix(wire, "\r\n\r\n4\r\ndata\r\n0\r\nX-Final: done\r\n\r\n") {
+			t.Errorf("expected trailers after the chunked body, got:\n%s", wire)
+		}
+	})
+
+	t.Run("HTTP/1.0 request with known-length body keeps its protocol", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.0",
+			ProtoMajor:    1,
+			ProtoMinor:    0,
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "POST / HTTP/1.0\r\n") {
+			t.Errorf("expected the HTTP/1.0 request line to be kept, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Content-Length: 4\r\n") {
+			t.Errorf("expected a Content-Length header, got:\n%s", wire)
+		}
+		if strings.Contains(wire, "Transfer-Encoding") {
+			t.Errorf("expected no Transfer-Encoding header, got:\n%s", wire)
+		}
+	})
+
+	t.Run("single header", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header: http.Header{
+				"X-Custom-Header": []string{"custom-value"},
+			},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.Header.Peek("X-Custom-Header")) != "custom-value" {
+			t.Errorf("expected header value custom-value, got %s", req.Header.Peek("X-Custom-Header"))
+		}
+	})
+
+	t.Run("multiple header values", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header: http.Header{
+				"Accept": []string{"text/html", "application/json", "text/plain"},
+			},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		values := req.Header.PeekAll("Accept")
+		if len(values) != 3 {
+			t.Errorf("expected 3 Accept header values, got %d", len(values))
+		}
+	})
+
+	t.Run("close overrides copied connection header", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header: http.Header{
+				"Connection": []string{"keep-alive"},
+			},
+			Close: true,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if !req.Header.ConnectionClose() {
+			t.Error("expected connection close to be set")
+		}
+
+		var connValues []string
+		for k, v := range req.Header.All() {
+			if strings.EqualFold(string(k), fasthttp.HeaderConnection) {
+				connValues = append(connValues, string(v))
+			}
+		}
+		if len(connValues) != 1 || connValues[0] != "close" {
+			t.Errorf("expected a single Connection: close header, got %v", connValues)
+		}
+	})
+
+	t.Run("request body", func(t *testing.T) {
+		t.Parallel()
+		bodyContent := []byte("test body content")
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(bytes.NewReader(bodyContent)),
+			ContentLength: int64(len(bodyContent)),
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != len(bodyContent) {
+			t.Errorf("expected content length %d, got %d", len(bodyContent), req.Header.ContentLength())
+		}
+		if !bytes.Equal(req.Body(), bodyContent) {
+			t.Errorf("expected body %q, got %q", bodyContent, req.Body())
+		}
+	})
+
+	t.Run("nil body", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Body:       nil,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if len(req.Body()) != 0 {
+			t.Errorf("expected empty body, got %q", req.Body())
+		}
+	})
+
+	t.Run("NoBody keeps zero content length", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "GET",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          http.NoBody,
+			ContentLength: 0,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != 0 {
+			t.Errorf("expected content length 0, got %d", req.Header.ContentLength())
+		}
+		if len(req.Body()) != 0 {
+			t.Errorf("expected empty body, got %q", req.Body())
+		}
+	})
+
+	t.Run("zero content length with body means unknown", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 0,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != -1 {
+			t.Errorf("expected content length -1, got %d", req.Header.ContentLength())
+		}
+		if string(req.Body()) != "data" {
+			t.Errorf("expected body data, got %q", req.Body())
+		}
+	})
+
+	t.Run("negative content length means unknown", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("streamed")),
+			ContentLength: -1,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != -1 {
+			t.Errorf("expected content length -1, got %d", req.Header.ContentLength())
+		}
+		if string(req.Header.Peek(fasthttp.HeaderTransferEncoding)) != "chunked" {
+			t.Errorf("expected chunked transfer encoding, got %q", req.Header.Peek(fasthttp.HeaderTransferEncoding))
+		}
+	})
+
+	t.Run("content length larger than max int means unknown", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("big")),
+			ContentLength: math.MaxInt64,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != -1 {
+			t.Errorf("expected content length -1, got %d", req.Header.ContentLength())
+		}
+	})
+
+	t.Run("Content-Length header entry is ignored", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header: http.Header{
+				"Content-Length": []string{"42"},
+			},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != 0 {
+			t.Errorf("expected content length 0, got %d", req.Header.ContentLength())
+		}
+		if len(req.Header.Peek(fasthttp.HeaderContentLength)) != 0 {
+			t.Errorf("expected no Content-Length header, got %q", req.Header.Peek(fasthttp.HeaderContentLength))
+		}
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+		if strings.Contains(buf.String(), "Content-Length") {
+			t.Errorf("expected no Content-Length on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("chunked TransferEncoding overrides ContentLength", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:           "POST",
+			RequestURI:       "/",
+			Proto:            "HTTP/1.1",
+			Host:             "example.com",
+			Header:           http.Header{},
+			Body:             io.NopCloser(strings.NewReader("data")),
+			ContentLength:    4,
+			TransferEncoding: []string{"chunked"},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != -1 {
+			t.Errorf("expected content length -1, got %d", req.Header.ContentLength())
+		}
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+		if !strings.Contains(buf.String(), "Transfer-Encoding: chunked") {
+			t.Errorf("expected chunked framing on the wire, got:\n%s", buf.String())
+		}
+		if strings.Contains(buf.String(), "Content-Length") {
+			t.Errorf("expected no Content-Length on the wire, got:\n%s", buf.String())
+		}
+
+		var parsed fasthttp.Request
+		if err := parsed.Read(bufio.NewReader(bytes.NewReader(buf.Bytes()))); err != nil {
+			t.Fatalf("unexpected error reading request back: %v", err)
+		}
+		if string(parsed.Body()) != "data" {
+			t.Errorf("expected body data, got %q", parsed.Body())
+		}
+	})
+
+	t.Run("Transfer-Encoding header entry is ignored", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header: http.Header{
+				"Transfer-Encoding": []string{"chunked"},
+			},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != 4 {
+			t.Errorf("expected content length 4, got %d", req.Header.ContentLength())
+		}
+		if len(req.Header.Peek(fasthttp.HeaderTransferEncoding)) != 0 {
+			t.Errorf("expected no transfer encoding, got %q", req.Header.Peek(fasthttp.HeaderTransferEncoding))
+		}
+	})
+
+	t.Run("Trailer header entry is ignored", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header: http.Header{
+				"Trailer": []string{"X-Foo"},
+			},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if len(req.Header.Peek(fasthttp.HeaderTrailer)) != 0 {
+			t.Errorf("expected no trailer announcement, got %q", req.Header.Peek(fasthttp.HeaderTrailer))
+		}
+		if req.Header.ContentLength() != 4 {
+			t.Errorf("expected content length 4, got %d", req.Header.ContentLength())
+		}
+	})
+
+	t.Run("trailers with known content length force chunked", func(t *testing.T) {
+		t.Parallel()
+		// HTTP/2 requests can carry both a known content length and
+		// trailers; HTTP/1.x can only transport the trailers after a
+		// chunked body.
+		bodyContent := "data"
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Trailer: http.Header{
+				"X-Checksum": []string{"abc123"},
+			},
+			Body:          io.NopCloser(strings.NewReader(bodyContent)),
+			ContentLength: int64(len(bodyContent)),
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if req.Header.ContentLength() != -1 {
+			t.Errorf("expected content length -1, got %d", req.Header.ContentLength())
+		}
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		var parsed fasthttp.Request
+		if err := parsed.Read(bufio.NewReader(bytes.NewReader(buf.Bytes()))); err != nil {
+			t.Fatalf("unexpected error reading request back: %v", err)
+		}
+		if string(parsed.Body()) != bodyContent {
+			t.Errorf("expected body %q, got %q", bodyContent, parsed.Body())
+		}
+		if string(parsed.Header.Peek("X-Checksum")) != "abc123" {
+			t.Errorf("expected trailer value abc123, got %q", parsed.Header.Peek("X-Checksum"))
+		}
+	})
+
+	t.Run("trailers without body are dropped", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Trailer: http.Header{
+				"X-Checksum": []string{"abc123"},
+			},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if len(req.Header.Peek(fasthttp.HeaderTrailer)) != 0 {
+			t.Errorf("expected no trailer announcement, got %q", req.Header.Peek(fasthttp.HeaderTrailer))
+		}
+	})
+
+	t.Run("connection close", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Close:      true,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if !req.Header.ConnectionClose() {
+			t.Error("expected connection close to be set")
+		}
+	})
+
+	t.Run("trailers", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Trailer: http.Header{
+				"X-Checksum":     []string{"abc123"},
+				"Content-Length": []string{"42"}, // forbidden trailer, must be skipped
+			},
+			Body:          io.NopCloser(strings.NewReader("body")),
+			ContentLength: -1,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		trailer := string(req.Header.TrailerHeader())
+		if !strings.Contains(trailer, "X-Checksum: abc123") {
+			t.Errorf("expected trailer X-Checksum: abc123, got %q", trailer)
+		}
+		if strings.Contains(trailer, "Content-Length") {
+			t.Errorf("expected forbidden trailer Content-Length to be skipped, got %q", trailer)
+		}
+	})
+
+	t.Run("multiple trailer values are joined", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Trailer: http.Header{
+				"X-Tag": []string{"a", "b"},
+			},
+			Body:          io.NopCloser(strings.NewReader("body")),
+			ContentLength: -1,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		trailer := string(req.Header.TrailerHeader())
+		if !strings.Contains(trailer, "X-Tag: a, b") {
+			t.Errorf("expected trailer X-Tag: a, b, got %q", trailer)
+		}
+	})
+
+	t.Run("write round trip with chunked body and trailer", func(t *testing.T) {
+		t.Parallel()
+		bodyContent := "chunked body content"
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/upload",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Trailer: http.Header{
+				"X-Checksum": []string{"abc123"},
+			},
+			ContentLength: -1,
+			Body:          io.NopCloser(strings.NewReader(bodyContent)),
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		var parsed fasthttp.Request
+		if err := parsed.Read(bufio.NewReader(bytes.NewReader(buf.Bytes()))); err != nil {
+			t.Fatalf("unexpected error reading request back: %v", err)
+		}
+
+		if string(parsed.Body()) != bodyContent {
+			t.Errorf("expected body %q, got %q", bodyContent, parsed.Body())
+		}
+		if string(parsed.Header.Peek("X-Checksum")) != "abc123" {
+			t.Errorf("expected trailer value abc123, got %q", parsed.Header.Peek("X-Checksum"))
+		}
+	})
+
+	t.Run("trailer values from http.ReadRequest are synced at EOF", func(t *testing.T) {
+		t.Parallel()
+		raw := "POST /upload HTTP/1.1\r\n" +
+			"Host: example.com\r\n" +
+			"Transfer-Encoding: chunked\r\n" +
+			"Trailer: X-Final\r\n" +
+			"\r\n" +
+			"4\r\ndata\r\n0\r\nX-Final: done\r\n\r\n"
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+		if err != nil {
+			t.Fatalf("unexpected error reading raw request: %v", err)
+		}
+		if got := httpReq.Trailer.Get("X-Final"); got != "" {
+			t.Fatalf("expected empty trailer value before the body is read, got %q", got)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		var parsed fasthttp.Request
+		if err := parsed.Read(bufio.NewReader(bytes.NewReader(buf.Bytes()))); err != nil {
+			t.Fatalf("unexpected error reading request back: %v", err)
+		}
+		if string(parsed.Body()) != "data" {
+			t.Errorf("expected body data, got %q", parsed.Body())
+		}
+		if string(parsed.Header.Peek("X-Final")) != "done" {
+			t.Errorf("expected trailer value done, got %q", parsed.Header.Peek("X-Final"))
+		}
+	})
+
+	t.Run("materialized body writes synced trailer values", func(t *testing.T) {
+		t.Parallel()
+		raw := "POST /upload HTTP/1.1\r\n" +
+			"Host: example.com\r\n" +
+			"Transfer-Encoding: chunked\r\n" +
+			"Trailer: X-Final\r\n" +
+			"\r\n" +
+			"4\r\ndata\r\n0\r\nX-Final: done\r\n\r\n"
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(raw)))
+		if err != nil {
+			t.Fatalf("unexpected error reading raw request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		if string(req.Body()) != "data" {
+			t.Errorf("expected body data, got %q", req.Body())
+		}
+		if string(req.Header.Peek("X-Final")) != "done" {
+			t.Errorf("expected trailer value done, got %q", req.Header.Peek("X-Final"))
+		}
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		var parsed fasthttp.Request
+		if err := parsed.Read(bufio.NewReader(bytes.NewReader(buf.Bytes()))); err != nil {
+			t.Fatalf("unexpected error reading request back: %v", err)
+		}
+		if string(parsed.Body()) != "data" {
+			t.Errorf("expected body data, got %q", parsed.Body())
+		}
+		if string(parsed.Header.Peek("X-Final")) != "done" {
+			t.Errorf("expected trailer value done, got %q", parsed.Header.Peek("X-Final"))
+		}
+	})
+
+	t.Run("attached body with trailers is closed after write", func(t *testing.T) {
+		t.Parallel()
+		closed := false
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Trailer: http.Header{
+				"X-Checksum": []string{"abc123"},
+			},
+			Body:          &closeTrackingReader{Reader: strings.NewReader("data"), closed: &closed},
+			ContentLength: -1,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if !closed {
+			t.Error("expected the attached body to be closed after write")
+		}
+	})
+
+	t.Run("explicit Authorization header wins over URL credentials", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			URL: &url.URL{
+				Path: "/",
+				User: url.UserPassword("user", "pass"),
+			},
+			Header: http.Header{
+				"Authorization": []string{"Bearer explicit-token"},
+			},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if !strings.Contains(buf.String(), "Authorization: Bearer explicit-token\r\n") {
+			t.Errorf("expected the explicit Authorization header on the wire, got:\n%s", buf.String())
+		}
+		if strings.Contains(buf.String(), "Basic") {
+			t.Errorf("expected no Basic credentials on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("URL credentials become Basic authorization", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			URL: &url.URL{
+				Path: "/",
+				User: url.UserPassword("user", "pass"),
+			},
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// base64("user:pass"), the same credentials net/http.Client would send.
+		if !strings.Contains(buf.String(), "Authorization: Basic dXNlcjpwYXNz\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	for _, scheme := range []string{"https", "http"} {
+		t.Run("absolute-form "+scheme+" target keeps its absolute-form request line", func(t *testing.T) {
+			t.Parallel()
+			httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+				"GET " + scheme + "://example.com/path?a=b HTTP/1.1\r\n\r\n")))
+			if err != nil {
+				t.Fatalf("unexpected error reading request: %v", err)
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error writing request: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error flushing request: %v", err)
+			}
+
+			// The target a request addressed to a proxy carries survives
+			// whatever its scheme: only a non-http scheme is set on the URI,
+			// and a parsed URI would rewrite the request line in origin-form.
+			wire := buf.String()
+			want := "GET " + scheme + "://example.com/path?a=b HTTP/1.1\r\n"
+			if !strings.HasPrefix(wire, want) {
+				t.Errorf("expected an absolute-form request line, got:\n%s", wire)
+			}
+		})
+
+		t.Run("opaque "+scheme+" target is used as it is", func(t *testing.T) {
+			t.Parallel()
+			httpReq := &http.Request{
+				Method: http.MethodGet,
+				URL:    &url.URL{Scheme: scheme, Opaque: "//example.com/path", RawQuery: "a=b"},
+				Host:   "example.com",
+				Header: http.Header{},
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error writing request: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error flushing request: %v", err)
+			}
+
+			// The request line net/http writes for the same request.
+			wire := buf.String()
+			want := "GET " + scheme + "://example.com/path?a=b HTTP/1.1\r\n"
+			if !strings.HasPrefix(wire, want) {
+				t.Errorf("expected the opaque request target, got:\n%s", wire)
+			}
+		})
+	}
+
+	for _, scheme := range []string{"https", "http"} {
+		t.Run("explicit Authorization header wins over absolute-form "+scheme+" target credentials", func(t *testing.T) {
+			t.Parallel()
+			httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+				"GET " + scheme + "://url-user:url-pass@example.com/ HTTP/1.1\r\n" +
+					"Authorization: Bearer explicit-token\r\n\r\n")))
+			if err != nil {
+				t.Fatalf("unexpected error reading request: %v", err)
+			}
+
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error writing request: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error flushing request: %v", err)
+			}
+
+			wire := buf.String()
+			if !strings.HasPrefix(wire, "GET / HTTP/1.1\r\n") {
+				t.Errorf("expected an origin-form request line, got:\n%s", wire)
+			}
+			if !strings.Contains(wire, "Authorization: Bearer explicit-token\r\n") {
+				t.Errorf("expected the explicit Authorization header on the wire, got:\n%s", wire)
+			}
+			if strings.Contains(wire, "url-user") || strings.Contains(wire, "url-pass") || strings.Contains(wire, "Basic") {
+				t.Errorf("expected no URL credentials on the wire, got:\n%s", wire)
+			}
+		})
+	}
+
+	t.Run("absolute-form target credentials become Basic authorization", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"GET http://url-user:url-pass@example.com/ HTTP/1.1\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "GET / HTTP/1.1\r\n") {
+			t.Errorf("expected an origin-form request line, got:\n%s", wire)
+		}
+		// base64("url-user:url-pass"), the same credentials net/http.Client would send.
+		if !strings.Contains(wire, "Authorization: Basic dXJsLXVzZXI6dXJsLXBhc3M=\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", wire)
+		}
+		if strings.Contains(wire, "url-user:url-pass@") {
+			t.Errorf("expected no userinfo in the request target, got:\n%s", wire)
+		}
+	})
+
+	t.Run("URL credentials with an empty username become Basic authorization", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "GET",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			URL: &url.URL{
+				Path: "/",
+				User: url.UserPassword("", "secret"),
+			},
+			Header: http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		// base64(":secret"), the same credentials net/http.Client would send.
+		if !strings.Contains(buf.String(), "Authorization: Basic OnNlY3JldA==\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("absolute-form target credentials with an empty username become Basic authorization", func(t *testing.T) {
+		t.Parallel()
+		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"GET http://:secret@example.com/ HTTP/1.1\r\n\r\n")))
+		if err != nil {
+			t.Fatalf("unexpected error reading request: %v", err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasPrefix(wire, "GET / HTTP/1.1\r\n") {
+			t.Errorf("expected an origin-form request line, got:\n%s", wire)
+		}
+		// base64(":secret"), the same credentials net/http.Client would send.
+		if !strings.Contains(wire, "Authorization: Basic OnNlY3JldA==\r\n") {
+			t.Errorf("expected Basic credentials on the wire, got:\n%s", wire)
+		}
+		if strings.Contains(wire, ":secret@") {
+			t.Errorf("expected no userinfo in the request target, got:\n%s", wire)
+		}
+	})
+
+	t.Run("no Content-Type is added for a body without one", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			URL:           &url.URL{Path: "/"},
+			Header:        http.Header{},
+			ContentLength: 4,
+			Body:          io.NopCloser(strings.NewReader("data")),
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if strings.Contains(buf.String(), "Content-Type:") {
+			t.Errorf("expected no Content-Type header on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("no Content-Type is added for a bodiless request", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			URL:        &url.URL{Path: "/"},
+			Header:     http.Header{},
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if strings.Contains(buf.String(), "Content-Type:") {
+			t.Errorf("expected no Content-Type header on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("explicit Content-Type is preserved", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			URL:        &url.URL{Path: "/"},
+			Header: http.Header{
+				"Content-Type": []string{"text/plain"},
+			},
+			ContentLength: 4,
+			Body:          io.NopCloser(strings.NewReader("data")),
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if !strings.Contains(buf.String(), "Content-Type: text/plain\r\n") {
+			t.Errorf("expected the explicit Content-Type header on the wire, got:\n%s", buf.String())
+		}
+	})
+
+	t.Run("body longer than content length is not written past the boundary", func(t *testing.T) {
+		t.Parallel()
+		closed := false
+		httpReq := &http.Request{
+			Method:     "POST",
+			RequestURI: "/upload",
+			Proto:      "HTTP/1.1",
+			Host:       "example.com",
+			Header:     http.Header{},
+			Body: &closeTrackingReader{
+				Reader: strings.NewReader("dataGET /smuggled HTTP/1.1\r\nHost: example.com\r\n\r\n"),
+				closed: &closed,
+			},
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		err := req.Write(bw)
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		if !errors.Is(err, errBodyTooLong) {
+			t.Errorf("expected the write to report a too long body, got: %v", err)
+		}
+
+		wire := buf.String()
+		if strings.Contains(wire, "smuggled") {
+			t.Errorf("expected no data past the declared body boundary, got:\n%s", wire)
+		}
+		if !strings.HasSuffix(wire, "\r\n\r\ndata") {
+			t.Errorf("expected the body to be truncated to the declared length, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Content-Length: 4\r\n") {
+			t.Errorf("expected the declared content length on the wire, got:\n%s", wire)
+		}
+		if !closed {
+			t.Error("expected the attached body to be closed after write")
+		}
+	})
+
+	t.Run("body matching content length is written in full", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/upload",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("data")),
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("unexpected error writing request: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error flushing request: %v", err)
+		}
+
+		wire := buf.String()
+		if !strings.HasSuffix(wire, "\r\n\r\ndata") {
+			t.Errorf("expected the whole body on the wire, got:\n%s", wire)
+		}
+		if !strings.Contains(wire, "Content-Length: 4\r\n") {
+			t.Errorf("expected the declared content length on the wire, got:\n%s", wire)
+		}
+	})
+
+	t.Run("body shorter than content length fails", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/upload",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(strings.NewReader("da")),
+			ContentLength: 4,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err == nil {
+			t.Error("expected an error when the body is shorter than the content length")
+		}
+	})
+
+	t.Run("body read error", func(t *testing.T) {
+		t.Parallel()
+		httpReq := &http.Request{
+			Method:        "POST",
+			RequestURI:    "/",
+			Proto:         "HTTP/1.1",
+			Host:          "example.com",
+			Header:        http.Header{},
+			Body:          io.NopCloser(iotest.ErrReader(errors.New("read error"))),
+			ContentLength: 10,
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+		_, err := io.ReadAll(req.BodyStream())
+		if err == nil {
+			t.Fatal("expected error when reading body stream, got nil")
+		}
+	})
+}
+
+func TestConvertNetHTTPRequestToFastHTTPRequestConnectThroughHostClient(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+
+	targetCh := make(chan string, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			t.Errorf("unexpected error accepting connection: %v", err)
+			return
+		}
+		defer c.Close()
+		r, err := http.ReadRequest(bufio.NewReader(c))
+		if err != nil {
+			t.Errorf("unexpected error reading request: %v", err)
+			return
+		}
+		targetCh <- r.RequestURI
+		if _, err := c.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")); err != nil {
+			t.Errorf("unexpected error writing response: %v", err)
+		}
+	}()
+
+	httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+		"CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")))
+	if err != nil {
+		t.Fatalf("unexpected error reading request: %v", err)
+	}
+
+	var req fasthttp.Request
+	ConvertNetHTTPRequestToFastHTTPRequest(httpReq, &req)
+
+	// HostClient.Do accesses the URI and resets its path normalization
+	// before writing the request.
+	c := &fasthttp.HostClient{
+		Addr: "example.com:443",
+		Dial: func(string) (net.Conn, error) { return ln.Dial() },
+	}
+	var resp fasthttp.Response
+	if err := c.DoTimeout(&req, &resp, 5*time.Second); err != nil {
+		t.Fatalf("unexpected error doing request: %v", err)
+	}
+
+	select {
+	case target := <-targetCh:
+		if target != "example.com:443" {
+			t.Errorf("expected the authority-form target example.com:443, got %q", target)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout")
 	}
 }
