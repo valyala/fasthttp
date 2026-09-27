@@ -645,6 +645,29 @@ func TestResponseBufferedBodyWithTrailerNoFlush(t *testing.T) {
 	}
 }
 
+// The last chunk stays buffered with the trailer section that follows it,
+// through both the Read and the WriteTo framing paths.
+func TestResponseBodyStreamLastChunkNoFlush(t *testing.T) {
+	t.Parallel()
+
+	for _, body := range []io.Reader{strings.NewReader("data"), bytes.NewReader([]byte("data"))} {
+		var resp Response
+		resp.SetBodyStream(body, -1)
+
+		var wc writeCounter
+		bw := bufio.NewWriter(&wc)
+		if err := resp.Write(bw); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wc.n != 1 {
+			t.Fatalf("%T: Write flushed %d times, expecting only the data chunk", body, wc.n)
+		}
+		if got := bw.Buffered(); got != len("0\r\n\r\n") {
+			t.Fatalf("%T: %d bytes left buffered, expecting the last chunk and the trailer section", body, got)
+		}
+	}
+}
+
 func TestResponseBodyStreamDeflate(t *testing.T) {
 	t.Parallel()
 
