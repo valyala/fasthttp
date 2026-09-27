@@ -47,3 +47,12 @@ func benchmarkURIParse(b *testing.B, host, uri string) {
 		}
 	})
 }
+
+func BenchmarkStringContainsCTLByte(b *testing.B) {
+	uri := []byte("/api/v1/items?page=2&limit=50&sort=name")
+	for range b.N {
+		if stringContainsCTLByte(uri) {
+			b.Fatal("clean uri flagged")
+		}
+	}
+}

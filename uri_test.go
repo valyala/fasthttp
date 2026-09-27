@@ -740,3 +740,26 @@ func TestURIParseHostMemoAliasedArgument(t *testing.T) {
 		t.Fatalf("memo key %q retained after a failed parse", u.hostRaw)
 	}
 }
+
+func TestStringContainsCTLByteEveryPosition(t *testing.T) {
+	t.Parallel()
+
+	// Word-at-a-time scanning has to agree with the byte definition for every
+	// byte at every alignment: two full words plus a tail.
+	for c := range 256 {
+		want := c < 0x20 || c == 0x7f
+		for pos := range 21 {
+			s := bytes.Repeat([]byte{'a'}, 21)
+			s[pos] = byte(c)
+			if got := stringContainsCTLByte(s); got != want {
+				t.Fatalf("byte %#x at %d: got %v, want %v", c, pos, got, want)
+			}
+			if got := stringContainsCTLByte(s[:pos+1]); got != want {
+				t.Fatalf("byte %#x ending at %d: got %v, want %v", c, pos, got, want)
+			}
+		}
+	}
+	if stringContainsCTLByte(nil) {
+		t.Fatal("nil must not contain a CTL byte")
+	}
+}
