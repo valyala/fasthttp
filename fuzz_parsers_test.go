@@ -63,6 +63,12 @@ func FuzzURIResolveReference(f *testing.F) {
 	for _, ref := range []string{"../Next?Key=Value", "./", "/Other", "?Key=Value", "#Fragment", "//other.example/A", "https://other.example/B"} {
 		f.Add("/Base/Dir/index?old=value", ref)
 	}
+	// net/url.String loses the empty authority in "//?" and the empty
+	// fragment in "#". Keep these and adjacent update forms as regression
+	// seeds so the target does not change the input before exercising it.
+	for _, ref := range []string{"//?", "?", "#", "# ", "/?", "//other.example?"} {
+		f.Add("#0", ref)
+	}
 	f.Fuzz(func(t *testing.T, basePath, ref string) {
 		if len(basePath)+len(ref) > defaultReadBufferSize {
 			return
@@ -76,11 +82,17 @@ func FuzzURIResolveReference(f *testing.F) {
 			return
 		}
 		// net/url preserves escaped separators and duplicate slashes, while
-		// fasthttp normalizes them. Query-only updates containing '#' also
-		// follow a different API contract. Keep the differential subset explicit.
+		// fasthttp normalizes them. It also loses an empty authority when
+		// parsing: "//?" becomes indistinguishable from the query-only "?".
+		// fasthttp treats the former as a host replacement, so exclude that
+		// incompatible case. Query-only updates containing '#' have a
+		// different API contract too. net/url permits raw control bytes in
+		// fragments, which URI.Parse rejects. Keep the subset explicit.
 		if ref == "" || strings.ContainsAny(basePath+ref, "%\\") || strings.Contains(base.Path, "//") ||
 			strings.Contains(reference.Path, "//") || base.Opaque != "" || reference.Opaque != "" ||
 			base.User != nil || reference.User != nil ||
+			strings.IndexFunc(ref, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 ||
+			(strings.HasPrefix(ref, "//") && reference.Host == "") ||
 			(strings.HasPrefix(ref, "?") && strings.Contains(ref, "#")) ||
 			(reference.Scheme != "" && (reference.Host == "" || !strings.Contains(ref, "://"))) ||
 			(reference.Scheme != "" && reference.Scheme != "http" && reference.Scheme != "https") {
@@ -97,19 +109,29 @@ func FuzzURIResolveReference(f *testing.F) {
 			return
 		}
 		want := base.ResolveReference(reference)
-		if strings.HasPrefix(ref, "?") {
+		switch ref[0] {
+		case '?':
 			// UpdateBytes documents query-only updates as replacing just the
 			// query string; unlike ResolveReference, they retain the old hash.
 			want.Fragment, want.RawFragment = base.Fragment, base.RawFragment
+		case '#':
+			// An explicit fragment-only update replaces the old hash even
+			// when empty. net/url cannot distinguish "#" from an empty ref.
+			want.Fragment, want.RawFragment = reference.Fragment, reference.RawFragment
 		}
 		var normalized URI
 		if normalized.Parse(nil, []byte(want.String())) != nil {
 			return
 		}
-		// net/url escapes spaces and non-ASCII bytes in fragments when
-		// serializing; fasthttp stores the fragment's wire representation.
-		u.UpdateBytes([]byte(reference.String()))
-		if !bytes.Equal(u.FullURI(), normalized.FullURI()) {
+		// Exercise the original bytes. Serializing reference first can erase
+		// syntax that selects a different UpdateBytes branch. Compare decoded
+		// fragments because net/url escapes them when serializing, whereas
+		// fasthttp retains their wire representation.
+		u.UpdateBytes([]byte(ref))
+		fragment, fragmentErr := url.PathUnescape(string(u.Hash()))
+		if !bytes.Equal(u.Scheme(), normalized.Scheme()) || !bytes.Equal(u.Host(), normalized.Host()) ||
+			!bytes.Equal(u.Path(), normalized.Path()) || !bytes.Equal(u.QueryString(), normalized.QueryString()) ||
+			fragmentErr != nil || fragment != want.Fragment {
 			t.Fatalf("resolve %q against %q: got %q want %q", ref, base, u.FullURI(), normalized.FullURI())
 		}
 	})
