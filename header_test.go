@@ -1965,6 +1965,32 @@ func TestRequestHeaderConnectionClose(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderConnectionCloseCaseAndTokens(t *testing.T) {
+	t.Parallel()
+
+	for _, v := range []string{"close", "Close", "CLOSE", "TE, close", "close, TE", "Keep-Alive, Close"} {
+		raw := "GET / HTTP/1.1\r\nHost: h\r\nConnection: " + v + "\r\n\r\n"
+		var h RequestHeader
+		if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+			t.Fatalf("Connection: %q: read error: %v", v, err)
+		}
+		if !h.ConnectionClose() {
+			t.Fatalf("Connection: %q: ConnectionClose()=false, want true", v)
+		}
+	}
+
+	var h RequestHeader
+	h.Set(HeaderConnection, "Close")
+	if !h.ConnectionClose() {
+		t.Fatalf("Set(Connection, Close): ConnectionClose()=false")
+	}
+	h.ResetConnectionClose()
+	h.Set(HeaderConnection, "TE, close")
+	if !h.ConnectionClose() {
+		t.Fatalf("Set(Connection, TE, close): ConnectionClose()=false")
+	}
+}
+
 func TestRequestHeaderSetCookie(t *testing.T) {
 	t.Parallel()
 
