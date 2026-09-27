@@ -1357,16 +1357,20 @@ func TestFSFSSmallFileServedFromMemory(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		fsys     fs.FS
-		inMemory bool
+		name          string
+		fsys          fs.FS
+		inMemory      bool
+		contentLength int
 	}{
-		{name: "read at", fsys: testFS, inMemory: true},
+		{name: "read at", fsys: testFS, inMemory: true, contentLength: len(body)},
 		// Stat reports more bytes than the file holds, as it does for a file
 		// that shrank since.
-		{name: "shrunk", fsys: fileWrapFS{FS: testFS, extraSize: 1}, inMemory: true},
+		{name: "shrunk", fsys: fileWrapFS{FS: testFS, extraSize: 1}, inMemory: true, contentLength: len(body)},
 		// Without ReadAt the file keeps being read on every request.
-		{name: "no read at", fsys: fileWrapFS{FS: testFS}, inMemory: false},
+		{name: "no read at", fsys: fileWrapFS{FS: testFS}, inMemory: false, contentLength: len(body)},
+		// Size is only a byte count for regular files, other files may
+		// report a negative one. Those keep being streamed, chunked.
+		{name: "negative size", fsys: fileWrapFS{FS: testFS, extraSize: -int64(len(body)) - 1}, inMemory: false, contentLength: -1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1387,9 +1391,9 @@ func TestFSFSSmallFileServedFromMemory(t *testing.T) {
 				if resp.StatusCode() != StatusOK {
 					t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
 				}
-				if resp.Header.ContentLength() != len(body) || !bytes.Equal(resp.Body(), body) {
-					t.Fatalf("unexpected response with Content-Length %d and body %q. Expecting %q",
-						resp.Header.ContentLength(), resp.Body(), body)
+				if resp.Header.ContentLength() != tt.contentLength || !bytes.Equal(resp.Body(), body) {
+					t.Fatalf("unexpected response with Content-Length %d and body %q. Expecting %d and %q",
+						resp.Header.ContentLength(), resp.Body(), tt.contentLength, body)
 				}
 			}
 		})
@@ -1397,7 +1401,7 @@ func TestFSFSSmallFileServedFromMemory(t *testing.T) {
 }
 
 // fileWrapFS hands out files without a ReadAt method, or, if extraSize is
-// set, files whose Stat reports extraSize more bytes than they hold.
+// set, files whose Stat reports a size extraSize off from what they hold.
 type fileWrapFS struct {
 	fs.FS
 
@@ -1409,8 +1413,8 @@ func (fsys fileWrapFS) Open(name string) (fs.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if fsys.extraSize > 0 {
-		return grownFile{seekFile: seekFile{f}, extraSize: fsys.extraSize}, nil
+	if fsys.extraSize != 0 {
+		return resizedFile{seekFile: seekFile{f}, extraSize: fsys.extraSize}, nil
 	}
 	return seekFile{f}, nil
 }
@@ -1424,31 +1428,31 @@ func (f seekFile) Seek(offset int64, whence int) (int64, error) {
 	return f.File.(io.Seeker).Seek(offset, whence) //nolint:forcetypeassert
 }
 
-type grownFile struct {
+type resizedFile struct {
 	seekFile
 
 	extraSize int64
 }
 
-func (f grownFile) ReadAt(p []byte, off int64) (int, error) {
+func (f resizedFile) ReadAt(p []byte, off int64) (int, error) {
 	return f.File.(io.ReaderAt).ReadAt(p, off) //nolint:forcetypeassert
 }
 
-func (f grownFile) Stat() (fs.FileInfo, error) {
+func (f resizedFile) Stat() (fs.FileInfo, error) {
 	fi, err := f.File.Stat()
 	if err != nil {
 		return nil, err
 	}
-	return grownFileInfo{FileInfo: fi, extraSize: f.extraSize}, nil
+	return resizedFileInfo{FileInfo: fi, extraSize: f.extraSize}, nil
 }
 
-type grownFileInfo struct {
+type resizedFileInfo struct {
 	fs.FileInfo
 
 	extraSize int64
 }
 
-func (fi grownFileInfo) Size() int64 {
+func (fi resizedFileInfo) Size() int64 {
 	return fi.FileInfo.Size() + fi.extraSize
 }
 

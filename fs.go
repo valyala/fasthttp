@@ -2142,8 +2142,10 @@ func (h *fsHandler) newFSFile(f fs.File, fileInfo fs.FileInfo, compressed bool, 
 	// A small file going into the cache is read into memory once, so the
 	// requests it serves don't read the file again and its descriptor isn't
 	// held open while cached. ReadAt doesn't depend on the file offset, which
-	// content type and compressibility checks may have moved.
-	if ra, ok := f.(io.ReaderAt); ok && !h.skipCache && contentLength <= maxSmallFileSize && h.reserveSmallFileInMemory() {
+	// content type and compressibility checks may have moved. A negative size,
+	// which a non-regular file may report, keeps the file streamed.
+	if ra, ok := f.(io.ReaderAt); ok && !h.skipCache &&
+		contentLength >= 0 && contentLength <= maxSmallFileSize && h.reserveSmallFileInMemory() {
 		data := make([]byte, contentLength)
 		n, err := ra.ReadAt(data, 0)
 		_ = f.Close()
