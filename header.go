@@ -171,7 +171,17 @@ func (h *header) SetConnectionClose() {
 func (h *header) ResetConnectionClose() {
 	if h.connectionClose {
 		h.connectionClose = false
-		h.h = delAllArgs(h.h, HeaderConnection)
+		for i := 0; i < len(h.h); i++ {
+			if caseInsensitiveCompare(h.h[i].key, strConnection) {
+				h.bufV = removeHeaderValue(h.bufV[:0], h.h[i].value, strClose)
+				if len(h.bufV) == 0 {
+					h.h = append(h.h[:i], h.h[i+1:]...)
+					i--
+				} else {
+					h.h[i].value = append(h.h[i].value[:0], h.bufV...)
+				}
+			}
+		}
 	}
 }
 
@@ -3463,6 +3473,23 @@ func hasConnectionCloseValue(h []argsKV) bool {
 		}
 	}
 	return false
+}
+
+func removeHeaderValue(dst, b, value []byte) []byte {
+	var vs headerValueScanner
+	vs.b = b
+	first := true
+	for vs.next() {
+		if len(vs.value) == 0 || caseInsensitiveCompare(vs.value, value) {
+			continue
+		}
+		if !first {
+			dst = append(dst, ',', ' ')
+		}
+		dst = append(dst, vs.value...)
+		first = false
+	}
+	return dst
 }
 
 func nextLine(b []byte) ([]byte, []byte, error) {
