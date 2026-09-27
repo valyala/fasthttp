@@ -22,7 +22,9 @@ import (
 func TestInvalidTrailers(t *testing.T) {
 	t.Parallel()
 
-	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200\r\nTransfer-Encoding:\xff\n\n0\r\n0"))); !errors.Is(err, io.EOF) {
+	// The scanner rejects the unknown transfer-encoding as soon as its line
+	// is complete instead of waiting for the header block terminator.
+	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200\r\nTransfer-Encoding:\xff\n\n0\r\n0"))); err == nil || !strings.Contains(err.Error(), "unsupported transfer-encoding") {
 		t.Errorf("%#v", err)
 	}
 	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\nTRaILeR:,\r\n\r\n"))); !errors.Is(err, ErrBadTrailer) {
