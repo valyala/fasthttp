@@ -49,11 +49,17 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		if rs.chunkLeft == 0 {
 			chunkSize, err := parseChunkSize(rs.reader)
 			if err != nil {
+				if err == io.EOF {
+					return 0, ErrBrokenChunk{error: io.ErrUnexpectedEOF}
+				}
 				return 0, err
 			}
 			if chunkSize == 0 {
 				err = rs.header.ReadTrailer(rs.reader)
-				if err != nil && err != io.EOF {
+				if err != nil {
+					if err == io.EOF {
+						return 0, ErrBrokenChunk{error: io.ErrUnexpectedEOF}
+					}
 					return 0, err
 				}
 				rs.eof = true

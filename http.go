@@ -1327,10 +1327,22 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 	if size <= 0 {
 		return nil, fmt.Errorf("form size must be greater than 0: given %d", size)
 	}
-	lr := io.LimitReader(r, int64(size))
+	lr := &io.LimitedReader{R: r, N: int64(size)}
 	mr := multipart.NewReader(lr, boundary)
 	f, err := mr.ReadForm(int64(maxInMemoryFileSize))
 	if err != nil {
+		return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
+	}
+	// The MIME closing boundary can precede an epilogue. Consume the entire
+	// HTTP body before the next request is read, and reject a short body even
+	// when the multipart form itself was complete.
+	if lr.N > 0 {
+		if _, err = io.Copy(io.Discard, lr); err == nil && lr.N != 0 {
+			err = io.ErrUnexpectedEOF
+		}
+	}
+	if err != nil {
+		_ = f.RemoveAll()
 		return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 	}
 	return f, nil
