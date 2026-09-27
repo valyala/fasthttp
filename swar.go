@@ -42,9 +42,12 @@ func anyByteEqual(w uint64, c byte) bool {
 }
 
 // anyByteIsCTL reports whether any lane of w is an ASCII control character:
-// below 0x20, or 0x7f (DEL).
+// below 0x20, or 0x7f (DEL). Both lane tests are written out in one
+// expression rather than composed from anyByteBelow and anyByteEqual, which
+// costs enough in the inliner's model to push callers over its budget.
 func anyByteIsCTL(w uint64) bool {
-	return anyByteBelow(w, 0x20) || anyByteEqual(w, 0x7f)
+	x := w ^ repeatByte(0x7f)
+	return ((w-repeatByte(0x20))&^w|(x-lowBits)&^x)&highBits != 0
 }
 
 // lowercaseWord returns w with every ASCII uppercase lane lowercased.

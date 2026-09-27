@@ -467,8 +467,7 @@ func lowercaseBytes(b []byte) {
 		b = b[8:]
 	}
 	for i := range b {
-		p := &b[i]
-		*p = toLowerTable[*p]
+		b[i] = toLowerTable[b[i]]
 	}
 }
 
