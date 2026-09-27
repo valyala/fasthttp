@@ -2434,6 +2434,7 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 			}
 		}
 	}
+	req.Header.written = true
 	if contentLength >= 0 {
 		if err = req.Header.Write(w); err == nil {
 			err = writeBodyFixedSize(w, req.bodyStream, int64(contentLength))
@@ -2448,6 +2449,7 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 			err = req.Header.writeTrailer(w)
 		}
 	}
+	req.Header.written = false
 	errc := req.closeBodyStream()
 	if err == nil {
 		err = errc
@@ -2461,7 +2463,9 @@ type ErrBodyStreamWritePanic struct {
 }
 
 func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (err error) {
+	resp.Header.written = true
 	defer func() {
+		resp.Header.written = false
 		if r := recover(); r != nil {
 			err = &ErrBodyStreamWritePanic{
 				error: fmt.Errorf("panic while writing body stream: %+v", r),

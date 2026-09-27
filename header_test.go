@@ -4317,23 +4317,6 @@ func TestScanHeaderKey(t *testing.T) {
 	}
 }
 
-func TestAddTrailerExtendsAnnouncedSet(t *testing.T) {
-	t.Parallel()
-
-	for _, header := range []interface {
-		Add(key, value string)
-		PeekTrailerKeys() [][]byte
-	}{&RequestHeader{}, &ResponseHeader{}} {
-		header.Add(HeaderTrailer, "Foo")
-		header.Add(HeaderTrailer, "Bar")
-		header.Add(HeaderTrailer, "Foo")
-		keys := header.PeekTrailerKeys()
-		if len(keys) != 2 {
-			t.Fatalf("%T trailer keys after Foo, Bar, Foo = %q, want a two-name set", header, keys)
-		}
-	}
-}
-
 func TestRequestHeaderReadMoreLinesThanRecorded(t *testing.T) {
 	t.Parallel()
 
@@ -4468,6 +4451,241 @@ func TestAddTrailerKeepsRawHeaderMode(t *testing.T) {
 	}
 }
 
+func TestReadTrailerRecordsUnannouncedKeys(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	r := bufio.NewReader(strings.NewReader("X-Late: v\r\n\r\n"))
+	if err := h.ReadTrailer(r); err != nil {
+		t.Fatalf("ReadTrailer() error: %v", err)
+	}
+	keys := h.PeekTrailerKeys()
+	if len(keys) != 1 || string(keys[0]) != "X-Late" {
+		t.Fatalf("trailer keys = %q, want [X-Late]", keys)
+	}
+	if got := string(h.Peek("X-Late")); got != "v" {
+		t.Fatalf("Peek(X-Late) = %q, want v", got)
+	}
+}
+
+func TestTrailerHeaderKeepsEveryValue(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	if err := h.SetTrailer("X-T"); err != nil {
+		t.Fatal(err)
+	}
+	h.Add("X-T", "one")
+	h.Add("X-T", "two")
+	if got := string(h.TrailerHeader()); got != "X-T: one\r\nX-T: two\r\n\r\n" {
+		t.Fatalf("TrailerHeader() = %q, want both values", got)
+	}
+}
+
+// Values keep the section they arrived in: an upfront field that shares its
+// name with a trailer stays a header, the trailer stays a trailer.
+func TestTrailerSectionProvenance(t *testing.T) {
+	t.Parallel()
+
+	raw := "POST / HTTP/1.1\r\nHost: a\r\nX-Mixed: upfront\r\nTransfer-Encoding: chunked\r\n\r\n" +
+		"4\r\nbody\r\n0\r\nX-Mixed: late\r\nX-Late: v\r\n\r\n"
+	var req Request
+	if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+	h := &req.Header
+
+	if got := string(h.Peek("X-Mixed")); got != "upfront" {
+		t.Fatalf("Peek(X-Mixed) = %q, want the upfront value", got)
+	}
+	if got := h.PeekAll("X-Mixed"); len(got) != 2 || string(got[0]) != "upfront" || string(got[1]) != "late" {
+		t.Fatalf("PeekAll(X-Mixed) = %q, want [upfront late]", got)
+	}
+	if got := string(h.Peek("X-Late")); got != "v" {
+		t.Fatalf("Peek(X-Late) = %q, want v", got)
+	}
+	var section []string
+	for k, v := range h.All() {
+		if string(k) == "X-Mixed" || string(k) == "X-Late" {
+			section = append(section, string(k)+"="+string(v))
+		}
+	}
+	if len(section) != 1 || section[0] != "X-Mixed=upfront" {
+		t.Fatalf("All() carried %v, want only the upfront X-Mixed", section)
+	}
+	if got := string(h.TrailerHeader()); got != "X-Mixed: late\r\nX-Late: v\r\n\r\n" {
+		t.Fatalf("TrailerHeader() = %q", got)
+	}
+	head := string(h.Header())
+	if !strings.Contains(head, "X-Mixed: upfront\r\n") || strings.Contains(head, "late") {
+		t.Fatalf("Header() = %q, want the upfront value and no trailer", head)
+	}
+	if keys := h.PeekTrailerKeys(); len(keys) != 2 {
+		t.Fatalf("PeekTrailerKeys() = %q, want the two received names", keys)
+	}
+
+	h.Del("X-Mixed")
+	if h.Peek("X-Mixed") != nil || string(h.TrailerHeader()) != "X-Late: v\r\n\r\n" {
+		t.Fatalf("Del left X-Mixed in a section: %q / %q", h.Peek("X-Mixed"), h.TrailerHeader())
+	}
+}
+
+// Announcing a name after setting it moves the value to the trailer section;
+// the trailer section and the announcement survive CopyTo and go with Reset.
+func TestTrailerSectionCopyReset(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	h.noDefaultDate = true
+	h.Set("X-T", "one")
+	h.Add("X-T", "two")
+	if err := h.AddTrailer("X-T"); err != nil {
+		t.Fatal(err)
+	}
+	if head := string(h.Header()); strings.Contains(head, "X-T: ") {
+		t.Fatalf("Header() still carries the announced value: %q", head)
+	}
+	var dst ResponseHeader
+	h.CopyTo(&dst)
+	if got := string(dst.TrailerHeader()); got != "X-T: one\r\nX-T: two\r\n\r\n" {
+		t.Fatalf("copied TrailerHeader() = %q", got)
+	}
+	if got := dst.PeekAll("X-T"); len(got) != 2 {
+		t.Fatalf("copied PeekAll(X-T) = %q, want both values", got)
+	}
+	dst.Reset()
+	if dst.Peek("X-T") != nil || string(dst.TrailerHeader()) != "\r\n" || len(dst.PeekTrailerKeys()) != 0 {
+		t.Fatal("Reset left trailer state behind")
+	}
+}
+
+// A response read with trailers writes back with the same sections.
+func TestResponseTrailerRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	raw := "HTTP/1.1 200 OK\r\nX-Mixed: upfront\r\nTrailer: X-Mixed\r\nTransfer-Encoding: chunked\r\n\r\n" +
+		"4\r\nbody\r\n0\r\nX-Mixed: late\r\n\r\n"
+	var resp Response
+	if err := resp.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatalf("Read() error: %v", err)
+	}
+	resp.Header.noDefaultDate = true
+	// Trailers ride only on a chunked body, which is how a proxy forwards one.
+	payload := append([]byte(nil), resp.Body()...)
+	resp.SetBodyStream(bytes.NewReader(payload), -1)
+	var out bytes.Buffer
+	bw := bufio.NewWriter(&out)
+	if err := resp.Write(bw); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+	_ = bw.Flush()
+	head, body, ok := strings.Cut(out.String(), "\r\n\r\n")
+	if !ok {
+		t.Fatalf("no header terminator in %q", out.String())
+	}
+	if !strings.Contains(head, "X-Mixed: upfront\r\n") || !strings.Contains(head, "Trailer: X-Mixed") || strings.Contains(head, "late") {
+		t.Fatalf("header block = %q", head)
+	}
+	if !strings.HasSuffix(body, "0\r\nX-Mixed: late\r\n\r\n") {
+		t.Fatalf("body = %q, want it to end with the single trailer value", body)
+	}
+}
+
+// A request built by hand sends its announced values in the trailer section.
+func TestRequestWriteProgrammaticTrailers(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.SetRequestURI("http://a/")
+	req.Header.SetMethod(MethodPost)
+	if err := req.Header.SetTrailer("X-T"); err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Add("X-T", "one")
+	req.Header.Add("X-T", "two")
+	req.SetBodyStream(strings.NewReader("body"), -1)
+	var out bytes.Buffer
+	bw := bufio.NewWriter(&out)
+	if err := req.Write(bw); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+	_ = bw.Flush()
+	head, body, _ := strings.Cut(out.String(), "\r\n\r\n")
+	if !strings.Contains(head, "Trailer: X-T") || strings.Contains(head, "X-T: ") {
+		t.Fatalf("header block = %q", head)
+	}
+	if !strings.HasSuffix(body, "0\r\nX-T: one\r\nX-T: two\r\n\r\n") {
+		t.Fatalf("body = %q, want both trailer values after the last chunk", body)
+	}
+}
+
+func BenchmarkRequestReadChunked(b *testing.B) {
+	benchmarkRequestReadChunked(b, "4\r\nbody\r\n0\r\n\r\n")
+}
+
+func BenchmarkRequestReadChunkedTrailers(b *testing.B) {
+	benchmarkRequestReadChunked(b, "4\r\nbody\r\n0\r\nX-A: one\r\nX-B: two\r\n\r\n")
+}
+
+func benchmarkRequestReadChunked(b *testing.B, body string) {
+	raw := []byte("POST / HTTP/1.1\r\nHost: a\r\nX-Up: front\r\nTrailer: X-A\r\nTransfer-Encoding: chunked\r\n\r\n" + body)
+	var req Request
+	r := bytes.NewReader(raw)
+	br := bufio.NewReader(r)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		r.Reset(raw)
+		br.Reset(r)
+		if err := req.Read(br); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestAddTrailerExtendsAnnouncedSet(t *testing.T) {
+	t.Parallel()
+
+	for _, header := range []interface {
+		Add(key, value string)
+		PeekTrailerKeys() [][]byte
+	}{&RequestHeader{}, &ResponseHeader{}} {
+		header.Add(HeaderTrailer, "Foo")
+		header.Add(HeaderTrailer, "Bar")
+		header.Add(HeaderTrailer, "Foo")
+		keys := header.PeekTrailerKeys()
+		if len(keys) != 2 {
+			t.Fatalf("%T trailer keys after Foo, Bar, Foo = %q, want a two-name set", header, keys)
+		}
+	}
+}
+
+// Dropping a name from the announced set returns its values to the header
+// section instead of leaving them in a section that is never written.
+func TestTrailerUnannounceRestoresValues(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	if err := h.SetTrailer("X-A,X-B"); err != nil {
+		t.Fatal(err)
+	}
+	h.Set("X-A", "a")
+	h.Set("X-B", "b")
+	if err := h.SetTrailer("X-B"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.Header()); !strings.Contains(got, "X-A: a\r\n") || strings.Contains(got, "X-B: b") {
+		t.Fatalf("header section after announcing X-B only = %q", got)
+	}
+	if got := string(h.TrailerHeader()); got != "X-B: b\r\n\r\n" {
+		t.Fatalf("trailer section = %q, want only X-B", got)
+	}
+	h.Del(HeaderTrailer)
+	if got := string(h.Header()); !strings.Contains(got, "X-B: b\r\n") || len(h.TrailerHeader()) != 2 {
+		t.Fatalf("after Del(Trailer): header %q, trailer %q", got, h.TrailerHeader())
+	}
+}
+
 // Repeated Trailer fields in a parsed message announce all their names.
 func TestParsedTrailerFieldsAccumulate(t *testing.T) {
 	t.Parallel()
@@ -4480,5 +4698,175 @@ func TestParsedTrailerFieldsAccumulate(t *testing.T) {
 	}
 	if got := req.Header.PeekTrailerKeys(); len(got) != 2 || string(got[0]) != "X-A" || string(got[1]) != "X-B" {
 		t.Fatalf("trailer keys = %q, want [X-A X-B]", got)
+	}
+}
+
+// Replacing the announcement through the generic setters, whose value shares
+// the header's scratch buffer, must see the new list.
+func TestSetTrailerThroughGenericSetters(t *testing.T) {
+	t.Parallel()
+
+	for name, h := range map[string]interface {
+		Set(key, value string)
+		SetBytesKV(key, value []byte)
+		Peek(key string) []byte
+		TrailerHeader() []byte
+		Header() []byte
+	}{"request": &RequestHeader{}, "response": &ResponseHeader{}} {
+		h.Set("X-Old", "old")
+		h.Set("X-New", "new")
+		h.Set(HeaderTrailer, "X-Old")
+		h.SetBytesKV([]byte(HeaderTrailer), []byte("X-New"))
+		if got := string(h.Peek(HeaderTrailer)); got != "X-New" {
+			t.Fatalf("%s: Peek(Trailer) = %q, want X-New", name, got)
+		}
+		if got := string(h.TrailerHeader()); got != "X-New: new\r\n\r\n" {
+			t.Fatalf("%s: trailer section = %q", name, got)
+		}
+		if hdr := string(h.Header()); !strings.Contains(hdr, "X-Old: old\r\n") || strings.Contains(hdr, "X-New: new") {
+			t.Fatalf("%s: header section = %q", name, hdr)
+		}
+	}
+}
+
+// Replacing the announced set only moves what changes: kept names stay in
+// place, dropped names return to the header section, added names take their
+// values along.
+func TestSetTrailerMovesOnlyTheDifference(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	err := resp.Read(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nX-A: upfront\r\nX-M: upfront\r\nX-N: n\r\nTrailer: X-A, X-M\r\n" +
+			"Transfer-Encoding: chunked\r\n\r\n0\r\nX-A: late\r\nX-M: late\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &resp.Header
+	if err := h.SetTrailer("X-A, X-M"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.TrailerHeader()); got != "X-A: late\r\nX-M: late\r\n\r\n" {
+		t.Fatalf("same set: trailer section = %q", got)
+	}
+	if hdr := string(h.Header()); !strings.Contains(hdr, "X-A: upfront\r\n") || !strings.Contains(hdr, "X-M: upfront\r\n") {
+		t.Fatalf("same set: header section = %q", hdr)
+	}
+	if err := h.SetTrailer("X-M, X-N"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.TrailerHeader()); got != "X-M: late\r\nX-N: n\r\n\r\n" {
+		t.Fatalf("X-A dropped, X-N added: trailer section = %q", got)
+	}
+	hdr := string(h.Header())
+	for _, want := range []string{"X-A: upfront\r\n", "X-A: late\r\n", "X-M: upfront\r\n"} {
+		if !strings.Contains(hdr, want) {
+			t.Fatalf("X-A dropped, X-N added: header section %q lacks %q", hdr, want)
+		}
+	}
+	if strings.Contains(hdr, "X-N: n") {
+		t.Fatalf("X-A dropped, X-N added: header section still carries X-N: %q", hdr)
+	}
+	if got := h.PeekAll("X-M"); len(got) != 2 || string(got[0]) != "upfront" || string(got[1]) != "late" {
+		t.Fatalf("PeekAll(X-M) = %q, want both sections, upfront first", got)
+	}
+}
+
+// Peek prefers an upfront value even when it is empty.
+func TestTrailerPeekPrefersEmptyUpfrontValue(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	err := req.Read(bufio.NewReader(strings.NewReader(
+		"POST / HTTP/1.1\r\nHost: a\r\nX-E:\r\nTrailer: X-E\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nX-E: late\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.Peek("X-E"); len(got) != 0 {
+		t.Fatalf("Peek(X-E) = %q, want the empty upfront value", got)
+	}
+	if got := req.Header.PeekAll("X-E"); len(got) != 2 || string(got[1]) != "late" {
+		t.Fatalf("PeekAll(X-E) = %q, want both sections", got)
+	}
+}
+
+// A getter that reads the header section directly still sees an announced
+// value.
+func TestTrailerAnnouncedGettersFallBack(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	if err := h.SetTrailer(HeaderReferer); err != nil {
+		t.Fatal(err)
+	}
+	h.SetReferer("https://a/")
+	if string(h.Referer()) != "https://a/" || string(h.TrailerHeader()) != "Referer: https://a/\r\n\r\n" {
+		t.Fatalf("Referer() = %q, trailer section %q", h.Referer(), h.TrailerHeader())
+	}
+}
+
+// Announcing a name after the header block has been written leaves its
+// values where they are: they were sent as headers, so only values set from
+// then on become trailers.
+// announcingReader announces a trailer as its body ends, the way a stream
+// that learns its trailers late does.
+type announcingReader struct {
+	h    *ResponseHeader
+	done bool
+}
+
+func (r *announcingReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, io.EOF
+	}
+	r.done = true
+	if err := r.h.AddTrailer("X-Sum"); err != nil {
+		return 0, err
+	}
+	r.h.Set("X-Sum", "2")
+	return copy(p, "body"), nil
+}
+
+func TestAnnounceWhileStreamingKeepsSentValues(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	resp.Header.Set("X-Sum", "1")
+	resp.SetBodyStream(&announcingReader{h: &resp.Header}, -1)
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := resp.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	head, tail, _ := strings.Cut(buf.String(), "\r\n\r\n")
+	if !strings.Contains(head, "\r\nX-Sum: 1\r\n") || strings.Contains(head, "X-Sum: 2") {
+		t.Fatalf("header block = %q, want the value sent before the announcement", head)
+	}
+	if !strings.HasSuffix(tail, "0\r\nX-Sum: 2\r\n\r\n") {
+		t.Fatalf("body and trailer = %q, want only the later value as a trailer", tail)
+	}
+	// The write is over; a new announcement moves values again.
+	if err := resp.Header.AddTrailer("X-Sum2"); err != nil {
+		t.Fatal(err)
+	}
+	resp.Header.Set("X-Sum", "3")
+	if got := string(resp.Header.TrailerHeader()); got != "X-Sum: 3\r\n\r\n" {
+		t.Fatalf("trailer section after the write = %q", got)
+	}
+
+	// Serializing for a look, as String does, sends nothing.
+	var req Request
+	req.SetRequestURI("http://a/")
+	req.Header.SetMethod(MethodPost)
+	req.Header.Set("X-Sum", "1")
+	_ = req.String()
+	if err := req.Header.SetTrailer("X-Sum"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(req.Header.TrailerHeader()); got != "X-Sum: 1\r\n\r\n" || bytes.Contains(req.Header.Header(), []byte("X-Sum: 1")) {
+		t.Fatalf("after String(): trailer section = %q, header %q", got, req.Header.Header())
 	}
 }
