@@ -201,7 +201,13 @@ func (s *headerScanner) nextFolded() bool {
 
 	s.key = k
 	s.value = v
-	s.valueValid = validHeaderValue(v)
+	s.valueValid = true
+	for _, c := range skipCleanWords(v) {
+		if !validHeaderValueByte(c) {
+			s.valueValid = false
+			break
+		}
+	}
 
 	return true
 }

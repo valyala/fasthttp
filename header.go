@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -597,21 +598,16 @@ func isValidTrailerKey(key []byte) bool {
 	return true
 }
 
-// validHeaderValue returns true if every byte of b is a valid header value
-// byte as defined by RFC 7230.
-func validHeaderValue(b []byte) bool {
-	// Words without control bytes are skipped eight at a time. A tab is a
-	// valid value byte but also a control byte, so a word holding one is
-	// checked byte by byte.
-	for len(b) >= 8 && !anyByteIsCTL(loadWord(b)) {
+// skipCleanWords returns b without its leading whole words that hold no
+// control byte, so a caller validating b byte by byte only visits the rest.
+// A tab is a valid value byte but also a control byte, so a word holding one
+// is left to the caller. The word is loaded here rather than through
+// loadWord to keep the function within the inlining budget.
+func skipCleanWords(b []byte) []byte {
+	for len(b) >= 8 && !anyByteIsCTL(binary.LittleEndian.Uint64(b)) {
 		b = b[8:]
 	}
-	for _, c := range b {
-		if !validHeaderValueByte(c) {
-			return false
-		}
-	}
-	return true
+	return b
 }
 
 // validHeaderFieldByte returns true if c valid header field byte

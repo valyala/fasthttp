@@ -2527,29 +2527,41 @@ func TestTrailerValueControlBytesRejected(t *testing.T) {
 	}
 }
 
-func TestValidHeaderValueMatchesByteTable(t *testing.T) {
+func TestSkipCleanWords(t *testing.T) {
 	t.Parallel()
 
-	for n := 0; n <= 20; n++ {
+	isCTL := func(c byte) bool { return c < 0x20 || c == 0x7f }
+	for n := 0; n <= 24; n++ {
 		for c := range 256 {
 			for pos := 0; pos < n; pos++ {
 				b := bytes.Repeat([]byte{'a'}, n)
 				b[pos] = byte(c)
-				exp := true
-				for _, ch := range b {
-					if !validHeaderValueByte(ch) {
-						exp = false
-						break
+				rest := skipCleanWords(b)
+				skipped := len(b) - len(rest)
+				if skipped%8 != 0 || !bytes.Equal(rest, b[skipped:]) {
+					t.Fatalf("byte %#x at %d of %d: skipped %d bytes, rest %q", c, pos, n, skipped, rest)
+				}
+				for _, ch := range b[:skipped] {
+					if isCTL(ch) {
+						t.Fatalf("byte %#x at %d of %d: skipped a control byte", c, pos, n)
 					}
 				}
-				if got := validHeaderValue(b); got != exp {
-					t.Fatalf("unexpected result for byte %#x at %d of %d: %v. Expecting %v", c, pos, n, got, exp)
+				if len(rest) >= 8 {
+					clean := true
+					for _, ch := range rest[:8] {
+						if isCTL(ch) {
+							clean = false
+						}
+					}
+					if clean {
+						t.Fatalf("byte %#x at %d of %d: stopped at a clean word", c, pos, n)
+					}
 				}
 			}
 		}
 	}
-	if !validHeaderValue(nil) {
-		t.Fatal("expecting empty value to be valid")
+	if rest := skipCleanWords(nil); len(rest) != 0 {
+		t.Fatalf("unexpected rest for nil: %q", rest)
 	}
 }
 
@@ -4878,7 +4890,14 @@ func TestScanValueLineMatchesValidation(t *testing.T) {
 			if len(body) > 0 && body[len(body)-1] == '\r' {
 				body = body[:len(body)-1]
 			}
-			if want := validHeaderValue(body); valid != want {
+			want := true
+			for _, c := range body {
+				if !validHeaderValueByte(c) {
+					want = false
+					break
+				}
+			}
+			if valid != want {
 				t.Fatalf("byte %#x at offset %d: valid=%v, expecting %v", c, pad, valid, want)
 			}
 		}
