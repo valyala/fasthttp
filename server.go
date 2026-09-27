@@ -2351,6 +2351,12 @@ func nextConnID() uint64 {
 // See Server.MaxRequestBodySize for details.
 const DefaultMaxRequestBodySize = 4 * 1024 * 1024
 
+// maxUnreadStreamBodySize is how much of a streamed request body the server
+// discards after the handler returns without reading it, in order to keep the
+// connection alive. When more is left the connection is closed instead, as
+// net/http does once a handler returns.
+const maxUnreadStreamBodySize = 256 * 1024
+
 func (s *Server) idleTimeout() time.Duration {
 	if s.IdleTimeout != 0 {
 		return s.IdleTimeout
@@ -2441,6 +2447,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		connectionClose bool
 		isHTTP11        bool
+
+		// The streamed body of the request being served. The loop, not the
+		// handler, owns draining and releasing it.
+		reqStream *requestStream
 
 		continueReadingRequest = true
 	)
@@ -2706,6 +2716,16 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		}
 		ctx.time = reqTime
 
+		// Capture the streamed request body reader, if any, before running the
+		// handler. The handler may return without reading all of it, or abandon
+		// it via CloseBodyStream; either way it is the server, not the handler,
+		// that owns draining it and returning it to the pool afterwards.
+		reqStream, _ = ctx.Request.bodyStream.(*requestStream)
+		// Tell the request as well, so it keeps the body buffer the stream's
+		// prefetched bytes live in out of the pool even after the handler
+		// has closed the stream.
+		ctx.Request.serverStream = reqStream
+
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
 			s.Handler(ctx)
@@ -2713,6 +2733,15 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		timeoutResponse = ctx.timeoutResponse
 		if timeoutResponse != nil {
+			// The timed out handler runs in its own goroutine and may still be
+			// reading the streamed body from br, so it cannot be drained here.
+			// Close the connection, and keep br out of the reader pool while
+			// that goroutine still owns it by dropping our reference to it.
+			if reqStream != nil {
+				connectionClose = true
+				br = nil
+			}
+			reqStream = nil
 			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
 			ctx = s.acquireCtx(c)
 			ctx.connTime = connTime
@@ -2746,6 +2775,19 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
 			ctx.Response.Header.ConnectionClose() ||
 			(s.CloseOnShutdown && s.stop.Load() == 1)
+
+		// If the handler left too much of a known-length streamed body unread,
+		// draining it after the response would read far past what belongs to
+		// this request, so close the connection instead. This has to be decided
+		// before the response headers are written. The rest of the body is
+		// drained after the response below, once it has had its chance to
+		// consume the stream. Skip this when the connection is closing anyway or
+		// was hijacked.
+		if reqStream != nil && !connectionClose && hijackHandler == nil &&
+			reqStream.bodyOverflows(maxUnreadStreamBodySize) {
+			connectionClose = true
+		}
+
 		if connectionClose {
 			ctx.Response.Header.SetConnectionClose()
 		} else if !isHTTP11 {
@@ -2770,6 +2812,15 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			}
 			if err = writeResponse(ctx, bw); err != nil {
 				break
+			}
+
+			// The response has now had its chance to consume the request stream
+			// (for example a body that streams straight from it). Discard what
+			// the handler left behind so it isn't parsed as the next request; if
+			// there is still too much on the wire, close the connection instead.
+			if reqStream != nil && !connectionClose && hijackHandler == nil &&
+				!reqStream.discard(maxUnreadStreamBodySize) {
+				connectionClose = true
 			}
 
 			// Only flush the writer if we don't have another request in the pipeline.
@@ -2798,6 +2849,9 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				hjr = br
 				br = nil
 			}
+			// The hijack handler may still read the request stream, so leave
+			// it to the GC instead of releasing it.
+			reqStream = nil
 			if bw != nil {
 				err = bw.Flush()
 				if err != nil {
@@ -2815,12 +2869,14 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			break
 		}
 
-		if ctx.Request.bodyStream != nil {
-			if rs, ok := ctx.Request.bodyStream.(*requestStream); ok {
-				releaseRequestStream(rs)
-			}
-			ctx.Request.bodyStream = nil
+		// closeBodyStream no longer releases a *requestStream, so release the one
+		// we captured before the handler ran (even if it cleared bodyStream).
+		if reqStream != nil {
+			releaseRequestStream(reqStream)
+			reqStream = nil
 		}
+		ctx.Request.bodyStream = nil
+		ctx.Request.serverStream = nil
 
 		idleConnTime.Store(reqSecond)
 		s.setState(c, StateIdle)
@@ -2841,6 +2897,12 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	}
 	if hijackHandler == nil {
 		s.releaseCtx(ctx)
+	}
+	// Release the stream of the last request if the loop ended before doing
+	// so. This goes after the ctx reset above, which hands the body buffer
+	// the stream still reads from over to it.
+	if reqStream != nil {
+		releaseRequestStream(reqStream)
 	}
 
 	s.idleConnsMu.Lock()
