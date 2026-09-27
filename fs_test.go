@@ -311,7 +311,13 @@ func TestFSSmallFileServedFromMemory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "big.txt"), big, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	h := (&FS{Root: dir, AcceptByteRange: true}).NewRequestHandler()
+
+	// Closing stop releases the cached big file, whose open handles would
+	// otherwise keep t.TempDir cleanup from removing it on Windows.
+	stop := make(chan struct{})
+	defer close(stop)
+
+	h := (&FS{Root: dir, AcceptByteRange: true, CleanStop: stop}).NewRequestHandler()
 
 	serve := func(path, byteRange string) (*fsFile, *Response) {
 		t.Helper()
