@@ -3522,6 +3522,83 @@ func TestHeaderConnectionPreserveOptions(t *testing.T) {
 			t.Fatalf("expected Connection header to be deleted when only close was present, got %q", req.Header.Peek("Connection"))
 		}
 	})
+
+	t.Run("setConnectionOverwritesPreservingValue", func(t *testing.T) {
+		var req Request
+		req.Header.Set("Connection", "X-Hop, close")
+		req.Header.Set("Connection", "keep-alive")
+		if got := string(req.Header.Peek("Connection")); got != "keep-alive" {
+			t.Fatalf("expected request Connection: keep-alive, got %q", got)
+		}
+		if req.ConnectionClose() {
+			t.Fatalf("expected request ConnectionClose() to be false")
+		}
+
+		var resp Response
+		resp.Header.Set("Connection", "X-Hop, close")
+		resp.Header.Set("Connection", "keep-alive")
+		if got := string(resp.Header.Peek("Connection")); got != "keep-alive" {
+			t.Fatalf("expected response Connection: keep-alive, got %q", got)
+		}
+		if resp.ConnectionClose() {
+			t.Fatalf("expected response ConnectionClose() to be false")
+		}
+	})
+
+	t.Run("addHeaderAfterResetPreservesDistinctBuffers", func(t *testing.T) {
+		// Request
+		var req Request
+		req.Header.Set("Connection", "")
+		req.Header.Set("X-Test", "original")
+		req.Header.SetConnectionClose()
+		req.Header.ResetConnectionClose()
+		req.Header.Set("X-New", "changed")
+		if got := string(req.Header.Peek("X-Test")); got != "original" {
+			t.Fatalf("expected request X-Test: original, got %q", got)
+		}
+		if got := string(req.Header.Peek("X-New")); got != "changed" {
+			t.Fatalf("expected request X-New: changed, got %q", got)
+		}
+
+		// Response
+		var resp Response
+		resp.Header.Set("Connection", "")
+		resp.Header.Set("X-Test", "original")
+		resp.Header.SetConnectionClose()
+		resp.Header.ResetConnectionClose()
+		resp.Header.Set("X-New", "changed")
+		if got := string(resp.Header.Peek("X-Test")); got != "original" {
+			t.Fatalf("expected response X-Test: original, got %q", got)
+		}
+		if got := string(resp.Header.Peek("X-New")); got != "changed" {
+			t.Fatalf("expected response X-New: changed, got %q", got)
+		}
+
+		// When Connection header had "close"
+		var req2 Request
+		req2.Header.Set("Connection", "close")
+		req2.Header.Set("X-Test", "original")
+		req2.Header.ResetConnectionClose()
+		req2.Header.Set("X-New", "changed")
+		if got := string(req2.Header.Peek("X-Test")); got != "original" {
+			t.Fatalf("expected request X-Test: original, got %q", got)
+		}
+		if got := string(req2.Header.Peek("X-New")); got != "changed" {
+			t.Fatalf("expected request X-New: changed, got %q", got)
+		}
+
+		var resp2 Response
+		resp2.Header.Set("Connection", "close")
+		resp2.Header.Set("X-Test", "original")
+		resp2.Header.ResetConnectionClose()
+		resp2.Header.Set("X-New", "changed")
+		if got := string(resp2.Header.Peek("X-Test")); got != "original" {
+			t.Fatalf("expected response X-Test: original, got %q", got)
+		}
+		if got := string(resp2.Header.Peek("X-New")); got != "changed" {
+			t.Fatalf("expected response X-New: changed, got %q", got)
+		}
+	})
 }
 
 func TestRequestHeaderTooBig(t *testing.T) {

@@ -173,12 +173,16 @@ func (h *header) ResetConnectionClose() {
 		h.connectionClose = false
 		for i := 0; i < len(h.h); i++ {
 			if caseInsensitiveCompare(h.h[i].key, strConnection) {
-				h.bufV = removeHeaderValue(h.bufV[:0], h.h[i].value, strClose)
-				if len(h.bufV) == 0 {
-					h.h = append(h.h[:i], h.h[i+1:]...)
+				val := removeHeaderValue(nil, h.h[i].value, strClose)
+				if len(val) == 0 {
+					tmp := h.h[i]
+					copy(h.h[i:], h.h[i+1:])
+					n := len(h.h) - 1
+					h.h[n] = tmp
+					h.h = h.h[:n]
 					i--
 				} else {
-					h.h[i].value = append(h.h[i].value[:0], h.bufV...)
+					h.h[i].value = append(h.h[i].value[:0], val...)
 				}
 			}
 		}
