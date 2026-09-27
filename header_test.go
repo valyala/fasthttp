@@ -3251,6 +3251,383 @@ func testResponseHeaderConnectionClose(t *testing.T, connectionClose bool) {
 	}
 }
 
+func TestHeaderConnectionCloseVariants(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		header string
+		want   bool
+	}{
+		{"close", true},
+		{"Close", true},
+		{"CLOSE", true},
+		{"\tclose\t", true},
+		{" \tClose\t ", true},
+		{"TE, close", true},
+		{"close, TE", true},
+		{"TE,\tclose", true},
+		{"close\t, TE", true},
+		{"\tTE\t,\tclose\t", true},
+		{"X-Hop, close", true},
+		{"close, X-Hop", true},
+		{"keep-alive", false},
+		{"keep-alive, TE", false},
+		{"keep-alive,\tTE", false},
+	}
+
+	for _, tc := range cases {
+		t.Run("reqRead/"+tc.header, func(t *testing.T) {
+			raw := "GET / HTTP/1.1\r\nHost: h\r\nConnection: " + tc.header + "\r\n\r\n"
+			var req Request
+			if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := req.ConnectionClose(); got != tc.want {
+				t.Errorf("req.ConnectionClose() for %q = %v, want %v", tc.header, got, tc.want)
+			}
+		})
+
+		t.Run("respRead/"+tc.header, func(t *testing.T) {
+			respRaw := "HTTP/1.1 200 OK\r\nConnection: " + tc.header + "\r\nContent-Length: 0\r\n\r\n"
+			var resp Response
+			if err := resp.Read(bufio.NewReader(strings.NewReader(respRaw))); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := resp.ConnectionClose(); got != tc.want {
+				t.Errorf("resp.ConnectionClose() for %q = %v, want %v", tc.header, got, tc.want)
+			}
+		})
+
+		t.Run("reqSet/"+tc.header, func(t *testing.T) {
+			var req Request
+			req.Header.Set("Connection", tc.header)
+			if got := req.ConnectionClose(); got != tc.want {
+				t.Errorf("req.Header.Set ConnectionClose() for %q = %v, want %v", tc.header, got, tc.want)
+			}
+		})
+
+		t.Run("respSet/"+tc.header, func(t *testing.T) {
+			var resp Response
+			resp.Header.Set("Connection", tc.header)
+			if got := resp.ConnectionClose(); got != tc.want {
+				t.Errorf("resp.Header.Set ConnectionClose() for %q = %v, want %v", tc.header, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHeaderConnectionPreserveOptions(t *testing.T) {
+	t.Parallel()
+
+	testOptionPreserved := func(t *testing.T, target string, getConn func() []byte, getHeader func() string, visit func(f func(k, v []byte))) {
+		conn := getConn()
+		if !hasHeaderValue(conn, []byte("X-Hop")) {
+			t.Fatalf("%s: expected Connection header to contain X-Hop, got %q", target, conn)
+		}
+		if !hasHeaderValue(conn, strClose) {
+			t.Fatalf("%s: expected Connection header to contain close, got %q", target, conn)
+		}
+
+		rawHeader := getHeader()
+		if !strings.Contains(rawHeader, "X-Hop") {
+			t.Fatalf("%s: serialized header missing X-Hop: %q", target, rawHeader)
+		}
+		if strings.Count(rawHeader, "Connection:") != 1 {
+			t.Fatalf("%s: expected exactly 1 Connection header in serialized output, got: %q", target, rawHeader)
+		}
+
+		connVisitCount := 0
+		visit(func(k, v []byte) {
+			if caseInsensitiveCompare(k, strConnection) {
+				connVisitCount++
+				if !hasHeaderValue(v, []byte("X-Hop")) {
+					t.Errorf("%s: visited Connection header missing X-Hop: %q", target, v)
+				}
+			}
+		})
+		if connVisitCount != 1 {
+			t.Fatalf("%s: expected exactly 1 Connection header visited, got %d", target, connVisitCount)
+		}
+	}
+
+	t.Run("reqRead", func(t *testing.T) {
+		raw := "GET / HTTP/1.1\r\nHost: h\r\nConnection: X-Hop, close\r\nX-Hop: secret\r\n\r\n"
+		var req Request
+		if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !req.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be true")
+		}
+		if string(req.Header.Peek("X-Hop")) != "secret" {
+			t.Fatalf("expected X-Hop header to be preserved, got %q", req.Header.Peek("X-Hop"))
+		}
+		testOptionPreserved(t, "reqRead",
+			func() []byte { return req.Header.Peek("Connection") },
+			func() string { return string(req.Header.Header()) },
+			req.Header.VisitAll,
+		)
+	})
+
+	t.Run("respRead", func(t *testing.T) {
+		raw := "HTTP/1.1 200 OK\r\nConnection: X-Hop, close\r\nContent-Length: 0\r\n\r\n"
+		var resp Response
+		if err := resp.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !resp.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be true")
+		}
+		testOptionPreserved(t, "respRead",
+			func() []byte { return resp.Header.Peek("Connection") },
+			func() string { return string(resp.Header.Header()) },
+			resp.Header.VisitAll,
+		)
+	})
+
+	t.Run("reqSet", func(t *testing.T) {
+		var req Request
+		req.Header.Set("Connection", "X-Hop, close")
+		if !req.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be true")
+		}
+		testOptionPreserved(t, "reqSet",
+			func() []byte { return req.Header.Peek("Connection") },
+			func() string { return string(req.Header.Header()) },
+			req.Header.VisitAll,
+		)
+	})
+
+	t.Run("respSet", func(t *testing.T) {
+		var resp Response
+		resp.Header.Set("Connection", "X-Hop, close")
+		if !resp.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be true")
+		}
+		testOptionPreserved(t, "respSet",
+			func() []byte { return resp.Header.Peek("Connection") },
+			func() string { return string(resp.Header.Header()) },
+			resp.Header.VisitAll,
+		)
+	})
+
+	t.Run("tabsParsingAndSet", func(t *testing.T) {
+		tabInputs := []string{"TE,\tclose", "close\t, TE", "foo,\tClose\t, bar"}
+		for _, in := range tabInputs {
+			var req Request
+			raw := "GET / HTTP/1.1\r\nHost: h\r\nConnection: " + in + "\r\n\r\n"
+			if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !req.ConnectionClose() {
+				t.Errorf("reqRead: expected ConnectionClose() for %q to be true", in)
+			}
+			if !hasHeaderValue(req.Header.Peek("Connection"), strClose) {
+				t.Errorf("reqRead: expected Peek(Connection) to have close for %q", in)
+			}
+
+			var resp Response
+			resp.Header.Set("Connection", in)
+			if !resp.ConnectionClose() {
+				t.Errorf("respSet: expected ConnectionClose() for %q to be true", in)
+			}
+			if !hasHeaderValue(resp.Header.Peek("Connection"), strClose) {
+				t.Errorf("respSet: expected Peek(Connection) to have close for %q", in)
+			}
+		}
+	})
+
+	t.Run("reqResetPreservesOtherOptions", func(t *testing.T) {
+		// After read/parsing
+		raw := "GET / HTTP/1.1\r\nHost: h\r\nConnection: X-Hop, close\r\nX-Hop: secret\r\n\r\n"
+		var req Request
+		if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !req.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be true before reset")
+		}
+		req.Header.ResetConnectionClose()
+		if req.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be false after reset")
+		}
+		conn := req.Header.Peek("Connection")
+		if !hasHeaderValue(conn, []byte("X-Hop")) {
+			t.Fatalf("expected Connection header to keep X-Hop after reset, got %q", conn)
+		}
+		if hasHeaderValue(conn, strClose) {
+			t.Fatalf("expected close option to be removed from Connection header, got %q", conn)
+		}
+		if string(req.Header.Peek("X-Hop")) != "secret" {
+			t.Fatalf("expected X-Hop header to be preserved, got %q", req.Header.Peek("X-Hop"))
+		}
+		hdr := string(req.Header.Header())
+		if !strings.Contains(hdr, "Connection: X-Hop") {
+			t.Fatalf("expected serialized header to have 'Connection: X-Hop', got %q", hdr)
+		}
+		if strings.Contains(hdr, "close") {
+			t.Fatalf("expected serialized header to not contain 'close', got %q", hdr)
+		}
+
+		// After Set
+		var req2 Request
+		req2.Header.Set("Connection", "close, X-Hop")
+		req2.Header.Set("X-Hop", "secret")
+		if !req2.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be true before reset")
+		}
+		req2.Header.ResetConnectionClose()
+		if req2.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be false after reset")
+		}
+		conn2 := req2.Header.Peek("Connection")
+		if !hasHeaderValue(conn2, []byte("X-Hop")) {
+			t.Fatalf("expected Connection header to keep X-Hop after reset, got %q", conn2)
+		}
+		if hasHeaderValue(conn2, strClose) {
+			t.Fatalf("expected close option to be removed from Connection header, got %q", conn2)
+		}
+		hdr2 := string(req2.Header.Header())
+		if !strings.Contains(hdr2, "Connection: X-Hop") {
+			t.Fatalf("expected serialized header to have 'Connection: X-Hop', got %q", hdr2)
+		}
+	})
+
+	t.Run("respResetPreservesOtherOptions", func(t *testing.T) {
+		// After read/parsing
+		raw := "HTTP/1.1 200 OK\r\nConnection: foo, close, bar\r\nContent-Length: 0\r\n\r\n"
+		var resp Response
+		if err := resp.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !resp.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be true before reset")
+		}
+		resp.Header.ResetConnectionClose()
+		if resp.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be false after reset")
+		}
+		conn := resp.Header.Peek("Connection")
+		if !hasHeaderValue(conn, []byte("foo")) || !hasHeaderValue(conn, []byte("bar")) {
+			t.Fatalf("expected Connection header to keep foo and bar after reset, got %q", conn)
+		}
+		if hasHeaderValue(conn, strClose) {
+			t.Fatalf("expected close option to be removed from Connection header, got %q", conn)
+		}
+		hdr := string(resp.Header.Header())
+		if !strings.Contains(hdr, "Connection: foo, bar") {
+			t.Fatalf("expected serialized header to have 'Connection: foo, bar', got %q", hdr)
+		}
+
+		// After Set
+		var resp2 Response
+		resp2.Header.Set("Connection", "X-Hop, close")
+		if !resp2.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be true before reset")
+		}
+		resp2.Header.ResetConnectionClose()
+		if resp2.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be false after reset")
+		}
+		conn2 := resp2.Header.Peek("Connection")
+		if !hasHeaderValue(conn2, []byte("X-Hop")) {
+			t.Fatalf("expected Connection header to keep X-Hop after reset, got %q", conn2)
+		}
+		if hasHeaderValue(conn2, strClose) {
+			t.Fatalf("expected close option to be removed from Connection header, got %q", conn2)
+		}
+	})
+
+	t.Run("resetOnlyCloseDeletesHeader", func(t *testing.T) {
+		var req Request
+		req.Header.Set("Connection", "close")
+		req.Header.ResetConnectionClose()
+		if req.ConnectionClose() {
+			t.Fatalf("expected ConnectionClose() to be false")
+		}
+		if len(req.Header.Peek("Connection")) > 0 {
+			t.Fatalf("expected Connection header to be deleted when only close was present, got %q", req.Header.Peek("Connection"))
+		}
+	})
+
+	t.Run("setConnectionOverwritesPreservingValue", func(t *testing.T) {
+		var req Request
+		req.Header.Set("Connection", "X-Hop, close")
+		req.Header.Set("Connection", "keep-alive")
+		if got := string(req.Header.Peek("Connection")); got != "keep-alive" {
+			t.Fatalf("expected request Connection: keep-alive, got %q", got)
+		}
+		if req.ConnectionClose() {
+			t.Fatalf("expected request ConnectionClose() to be false")
+		}
+
+		var resp Response
+		resp.Header.Set("Connection", "X-Hop, close")
+		resp.Header.Set("Connection", "keep-alive")
+		if got := string(resp.Header.Peek("Connection")); got != "keep-alive" {
+			t.Fatalf("expected response Connection: keep-alive, got %q", got)
+		}
+		if resp.ConnectionClose() {
+			t.Fatalf("expected response ConnectionClose() to be false")
+		}
+	})
+
+	t.Run("addHeaderAfterResetPreservesDistinctBuffers", func(t *testing.T) {
+		// Request
+		var req Request
+		req.Header.Set("Connection", "")
+		req.Header.Set("X-Test", "original")
+		req.Header.SetConnectionClose()
+		req.Header.ResetConnectionClose()
+		req.Header.Set("X-New", "changed")
+		if got := string(req.Header.Peek("X-Test")); got != "original" {
+			t.Fatalf("expected request X-Test: original, got %q", got)
+		}
+		if got := string(req.Header.Peek("X-New")); got != "changed" {
+			t.Fatalf("expected request X-New: changed, got %q", got)
+		}
+
+		// Response
+		var resp Response
+		resp.Header.Set("Connection", "")
+		resp.Header.Set("X-Test", "original")
+		resp.Header.SetConnectionClose()
+		resp.Header.ResetConnectionClose()
+		resp.Header.Set("X-New", "changed")
+		if got := string(resp.Header.Peek("X-Test")); got != "original" {
+			t.Fatalf("expected response X-Test: original, got %q", got)
+		}
+		if got := string(resp.Header.Peek("X-New")); got != "changed" {
+			t.Fatalf("expected response X-New: changed, got %q", got)
+		}
+
+		// When Connection header had "close"
+		var req2 Request
+		req2.Header.Set("Connection", "close")
+		req2.Header.Set("X-Test", "original")
+		req2.Header.ResetConnectionClose()
+		req2.Header.Set("X-New", "changed")
+		if got := string(req2.Header.Peek("X-Test")); got != "original" {
+			t.Fatalf("expected request X-Test: original, got %q", got)
+		}
+		if got := string(req2.Header.Peek("X-New")); got != "changed" {
+			t.Fatalf("expected request X-New: changed, got %q", got)
+		}
+
+		var resp2 Response
+		resp2.Header.Set("Connection", "close")
+		resp2.Header.Set("X-Test", "original")
+		resp2.Header.ResetConnectionClose()
+		resp2.Header.Set("X-New", "changed")
+		if got := string(resp2.Header.Peek("X-Test")); got != "original" {
+			t.Fatalf("expected response X-Test: original, got %q", got)
+		}
+		if got := string(resp2.Header.Peek("X-New")); got != "changed" {
+			t.Fatalf("expected response X-New: changed, got %q", got)
+		}
+	})
+}
+
 func TestRequestHeaderTooBig(t *testing.T) {
 	t.Parallel()
 
