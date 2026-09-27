@@ -2679,6 +2679,16 @@ type PipelineClient struct {
 	// By default request write timeout is unlimited.
 	WriteTimeout time.Duration
 
+	// Maximum response body size. The client returns ErrBodyTooLarge if
+	// this limit is greater than 0 and the response body exceeds it.
+	//
+	// A value less than or equal to zero disables the limit (the default).
+	// Set a positive limit when requesting untrusted servers.
+	//
+	// This limit also applies when Response.StreamBody is enabled, because
+	// PipelineClient buffers each body before reading the next response.
+	MaxResponseBodySize int
+
 	connClientsLock sync.Mutex
 
 	// NoDefaultUserAgentHeader when set to true, causes the default
@@ -2748,6 +2758,7 @@ type pipelineConnClient struct {
 	WriteBufferSize     int
 	ReadTimeout         time.Duration
 	WriteTimeout        time.Duration
+	MaxResponseBodySize int
 
 	chLock sync.Mutex
 
@@ -3051,6 +3062,7 @@ func (c *PipelineClient) newConnClient() *pipelineConnClient {
 		WriteBufferSize:               c.WriteBufferSize,
 		ReadTimeout:                   c.ReadTimeout,
 		WriteTimeout:                  c.WriteTimeout,
+		MaxResponseBodySize:           c.MaxResponseBodySize,
 		Logger:                        c.Logger,
 	}
 	c.connClients = append(c.connClients, cc)
@@ -3348,7 +3360,7 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 		// reader API with a buffered stream instead of leaving bytes in br.
 		streamBody := w.resp.StreamBody
 		w.resp.StreamBody = false
-		err = w.resp.Read(br)
+		err = w.resp.ReadLimitBody(br, c.MaxResponseBodySize)
 		w.resp.StreamBody = streamBody
 		if err != nil {
 			w.err = err
