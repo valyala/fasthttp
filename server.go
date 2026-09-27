@@ -349,6 +349,8 @@ type Server struct {
 
 	idleConnsMu sync.Mutex
 
+	serverNameLine atomic.Pointer[serverLine]
+
 	mu sync.Mutex
 
 	concurrency atomic.Uint32
@@ -2409,6 +2411,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	s.idleConnsMu.Unlock()
 
 	serverName := s.getServerName()
+	serverNameLine := s.getServerNameLine(serverName)
 	connRequestNum := uint64(0)
 	connID := nextConnID()
 	maxRequestBodySize := s.MaxRequestBodySize
@@ -2669,8 +2672,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		// fresh one below, whose request defaults to HTTP/1.1.
 		isHTTP11 = ctx.Request.Header.IsHTTP11()
 
-		if serverName != "" {
-			ctx.Response.Header.SetServer(serverName)
+		if serverNameLine != nil {
+			ctx.Response.Header.setServerDefault(serverNameLine)
 		}
 		ctx.connID = connID
 		ctx.connRequestNum = connRequestNum
@@ -2740,8 +2743,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.Response.Header.noHTTP11 = true
 		}
 
-		if serverName != "" && len(ctx.Response.Header.Server()) == 0 {
-			ctx.Response.Header.SetServer(serverName)
+		if serverNameLine != nil && !ctx.Response.Header.hasServer() {
+			ctx.Response.Header.serverDefaultLine = serverNameLine
 		}
 
 		if !hijackNoResponse {
@@ -2915,7 +2918,7 @@ func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
 	if ctx.timeoutResponse != nil {
 		return errors.New("cannot write timed out response")
 	}
-	err := ctx.Response.Write(w)
+	err := ctx.Response.write(ctx.c, w)
 
 	return err
 }
@@ -3152,6 +3155,31 @@ func (s *Server) releaseCtx(ctx *RequestCtx) {
 
 	ctx.reset()
 	s.ctxPool.Put(ctx)
+}
+
+// serverLine is the "Server: name\r\n" bytes cached for a server name.
+type serverLine struct {
+	name string
+	line []byte
+}
+
+// getServerNameLine returns the cached "Server: name\r\n" bytes.
+func (s *Server) getServerNameLine(serverName string) []byte {
+	if serverName == "" {
+		return nil
+	}
+	if p := s.serverNameLine.Load(); p != nil && p.name == serverName {
+		return p.line
+	}
+	// The name goes through the same newline stripping SetServer applies, or
+	// a configured name could split the response header.
+	name := removeNewLines([]byte(serverName))
+	line := make([]byte, 0, len(strServerPrefix)+len(name)+len(strCRLF))
+	line = append(line, strServerPrefix...)
+	line = append(line, name...)
+	line = append(line, strCRLF...)
+	s.serverNameLine.Store(&serverLine{name: serverName, line: line})
+	return line
 }
 
 func (s *Server) getServerName() string {
