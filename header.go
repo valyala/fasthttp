@@ -347,6 +347,16 @@ func (h *ResponseHeader) addVaryBytes(value []byte) {
 
 // Server returns Server header value.
 func (h *ResponseHeader) Server() []byte {
+	if len(h.server) == 0 && len(h.serverDefaultLine) == 0 {
+		if v := h.trailerValue(strServer); v != nil {
+			return v
+		}
+	}
+	return h.upfrontServer()
+}
+
+// upfrontServer is the header-section Server value, the default one included.
+func (h *ResponseHeader) upfrontServer() []byte {
 	if len(h.server) == 0 && len(h.serverDefaultLine) != 0 {
 		// The default line is shared by every connection; hand out a copy.
 		line := h.serverDefaultLine
@@ -357,7 +367,7 @@ func (h *ResponseHeader) Server() []byte {
 
 // hasServer reports whether a Server header will be written.
 func (h *ResponseHeader) hasServer() bool {
-	return len(h.server) != 0 || len(h.serverDefaultLine) != 0
+	return len(h.server) != 0 || len(h.serverDefaultLine) != 0 || h.trailerValue(strServer) != nil
 }
 
 // setServerDefault installs the cached default line, replacing an explicit
@@ -369,12 +379,15 @@ func (h *ResponseHeader) setServerDefault(line []byte) {
 
 // SetServer sets Server header value.
 func (h *ResponseHeader) SetServer(server string) {
-	h.serverDefaultLine = nil
-	h.server = initHeaderValueString(h.server, server)
+	h.SetServerBytes(s2b(server))
 }
 
 // SetServerBytes sets Server header value.
 func (h *ResponseHeader) SetServerBytes(server []byte) {
+	if h.isTrailerKey(strServer) {
+		h.trailerH = setArgBytes(h.trailerH, strServer, initHeaderValueBytes(h.bufV[:0], server), argsHasValue)
+		return
+	}
 	h.serverDefaultLine = nil
 	h.server = initHeaderValueBytes(h.server, server)
 }
@@ -450,7 +463,13 @@ func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
 // Return ErrBadTrailer if contain any forbidden trailers.
-func (h *header) SetTrailer(trailer string) error {
+func (h *ResponseHeader) SetTrailer(trailer string) error {
+	return h.SetTrailerBytes(s2b(trailer))
+}
+
+// SetTrailer sets the Trailer header value for a chunked request; see
+// ResponseHeader.SetTrailer for the forbidden names.
+func (h *RequestHeader) SetTrailer(trailer string) error {
 	return h.SetTrailerBytes(s2b(trailer))
 }
 
@@ -471,13 +490,46 @@ func (h *header) SetTrailer(trailer string) error {
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
 // Return ErrBadTrailer if contain any forbidden trailers.
-func (h *header) SetTrailerBytes(trailer []byte) error {
-	if len(h.trailer) == 0 {
-		return h.AddTrailerBytes(trailer)
+func (h *ResponseHeader) SetTrailerBytes(trailer []byte) error {
+	// The default line is an upfront value too.
+	h.upfrontServer()
+	err := h.setTrailerBytes(trailer, strServer, &h.server)
+	h.dropServerDefault()
+	return err
+}
+
+// dropServerDefault forgets the default Server line once Server has a
+// trailer value: the header section no longer carries the name, and the
+// default must not recreate it there.
+func (h *ResponseHeader) dropServerDefault() {
+	if h.serverDefaultLine != nil && h.trailerValue(strServer) != nil {
+		h.serverDefaultLine = nil
 	}
-	// Names the new set drops return to the header section, names it keeps
-	// stay put, names it adds take their values along. trailer may alias
-	// bufV, so only bufK serves as scratch here.
+}
+
+// SetTrailerBytes is SetTrailer for a byte slice.
+func (h *RequestHeader) SetTrailerBytes(trailer []byte) error {
+	key, field := h.specialTrailer()
+	return h.setTrailerBytes(trailer, key, field)
+}
+
+// specialTrailer is the header with storage of its own that trailers may
+// carry. Raw-header mode keeps it in the header store like any other name.
+func (h *RequestHeader) specialTrailer() ([]byte, *[]byte) {
+	if h.disableSpecialHeader {
+		return nil, nil
+	}
+	return strUserAgent, &h.userAgent
+}
+
+// setTrailerBytes replaces the announced set. Names it drops return to the
+// header section, names it keeps stay put, names it adds take their values
+// along. special is the header with dedicated storage that may be announced.
+// trailer may alias bufV, so only bufK serves as scratch here.
+func (h *header) setTrailerBytes(trailer, specialKey []byte, special *[]byte) error {
+	if len(h.trailer) == 0 {
+		return h.addTrailerBytes(trailer, specialKey, special)
+	}
 	// Kept names move to the front of the set; the rest is dropped.
 	kept := 0
 	for list, i := trailer, -1; i+1 < len(list); {
@@ -501,10 +553,13 @@ func (h *header) SetTrailerBytes(trailer []byte) error {
 		}
 	}
 	for _, name := range h.trailer[kept:] {
+		if special != nil && bytes.Equal(name, specialKey) {
+			h.restoreTrailer(specialKey, special)
+		}
 		h.trailerH, h.h = moveArgs(h.trailerH, h.h, name)
 	}
 	h.trailer = h.trailer[:kept]
-	return h.addTrailers(trailer, true)
+	return h.addTrailers(trailer, true, specialKey, special)
 }
 
 // unannounceTrailers forgets the announced set. Values already in the trailer
@@ -515,6 +570,45 @@ func (h *header) unannounceTrailers() {
 	}
 	h.trailerH = h.trailerH[:0]
 	h.trailer = h.trailer[:0]
+}
+
+// migrateTrailer moves a special header's value into the trailer section as
+// its name is announced.
+func (h *header) migrateTrailer(key []byte, special *[]byte) {
+	if len(*special) == 0 {
+		return
+	}
+	h.trailerH = appendArgBytes(h.trailerH, key, *special, argsHasValue)
+	*special = (*special)[:0]
+}
+
+// restoreTrailer returns a special header's first trailer-section value to
+// its own storage, if that is free, before the announcement that put it there
+// is dropped. Any other value, and all of them behind an upfront one, join
+// the header section like any other trailer.
+func (h *header) restoreTrailer(key []byte, special *[]byte) {
+	if len(*special) != 0 {
+		return
+	}
+	for i := range h.trailerH {
+		if bytes.Equal(h.trailerH[i].key, key) {
+			// Dedicated storage reads an empty value as absent; such a value
+			// stays an ordinary header, and so do those behind it.
+			if len(h.trailerH[i].value) != 0 {
+				*special = append((*special)[:0], h.trailerH[i].value...)
+				h.trailerH = delArgAt(h.trailerH, i)
+			}
+			return
+		}
+	}
+}
+
+// trailerValue returns key's trailer-section value if key is announced.
+func (h *header) trailerValue(key []byte) []byte {
+	if !h.isTrailerKey(key) {
+		return nil
+	}
+	return peekArgBytes(h.trailerH, key)
 }
 
 // peekSections returns key's first value, from the header section before the
@@ -532,7 +626,7 @@ func (h *header) peekSections(key []byte) []byte {
 // fields accumulate. Values already read stay in their section: an upfront
 // field that shares a name with a trailer is still a header.
 func (h *header) addParsedTrailers(trailer []byte) error {
-	return h.addTrailers(trailer, false)
+	return h.addTrailers(trailer, false, nil, nil)
 }
 
 // AddTrailer add Trailer header value for chunked response
@@ -552,7 +646,13 @@ func (h *header) addParsedTrailers(trailer []byte) error {
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
 // Return ErrBadTrailer if contain any forbidden trailers.
-func (h *header) AddTrailer(trailer string) error {
+func (h *ResponseHeader) AddTrailer(trailer string) error {
+	return h.AddTrailerBytes(s2b(trailer))
+}
+
+// AddTrailer adds names to the Trailer header of a chunked request; see
+// ResponseHeader.AddTrailer for the forbidden names.
+func (h *RequestHeader) AddTrailer(trailer string) error {
 	return h.AddTrailerBytes(s2b(trailer))
 }
 
@@ -590,15 +690,29 @@ var (
 // 6. determining how to process the payload (e.g., Content-Encoding, Content-Type, Content-Range, and Trailer)
 //
 // Return ErrBadTrailer if contain any forbidden trailers.
-func (h *header) AddTrailerBytes(trailer []byte) error {
-	return h.addTrailers(trailer, true)
+func (h *ResponseHeader) AddTrailerBytes(trailer []byte) error {
+	h.upfrontServer()
+	err := h.addTrailerBytes(trailer, strServer, &h.server)
+	h.dropServerDefault()
+	return err
+}
+
+// AddTrailerBytes is AddTrailer for a byte slice.
+func (h *RequestHeader) AddTrailerBytes(trailer []byte) error {
+	key, field := h.specialTrailer()
+	return h.addTrailerBytes(trailer, key, field)
+}
+
+func (h *header) addTrailerBytes(trailer, specialKey []byte, special *[]byte) error {
+	return h.addTrailers(trailer, true, specialKey, special)
 }
 
 // addTrailers records the comma-separated names in trailer. With migrate,
 // values already set under a newly announced name move to the trailer
 // section, so announcing after setting still sends them as trailers, unless
-// the header block has been written already.
-func (h *header) addTrailers(trailer []byte, migrate bool) (err error) {
+// the header block has been written already; special is the header with
+// dedicated storage that may be announced.
+func (h *header) addTrailers(trailer []byte, migrate bool, specialKey []byte, special *[]byte) (err error) {
 	for i := -1; i+1 < len(trailer); {
 		trailer = trailer[i+1:]
 		i = bytes.IndexByte(trailer, ',')
@@ -614,6 +728,10 @@ func (h *header) addTrailers(trailer []byte, migrate bool) (err error) {
 		h.bufK = append(h.bufK[:0], key...)
 		normalizeHeaderKeyValidated(h.bufK, h.disableNormalizing)
 		if h.addTrailerKey(h.bufK) && migrate && !h.written {
+			// The dedicated value is written before the header store's.
+			if special != nil && bytes.Equal(h.bufK, specialKey) {
+				h.migrateTrailer(specialKey, special)
+			}
 			h.h, h.trailerH = moveArgs(h.h, h.trailerH, h.bufK)
 		}
 	}
@@ -634,6 +752,16 @@ func (h *header) addTrailerKey(key []byte) bool {
 		h.trailer = append(h.trailer, append([]byte(nil), key...))
 	}
 	return true
+}
+
+// delArgAt removes args[i], keeping the order of the rest and the entry's
+// buffers for reuse.
+func delArgAt(args []argsKV, i int) []argsKV {
+	tmp := args[i]
+	n := len(args) - 1
+	copy(args[i:], args[i+1:])
+	args[n] = tmp
+	return args[:n]
 }
 
 // moveArgs moves every value stored under key from src to dst, keeping order.
@@ -834,16 +962,25 @@ func (h *RequestHeader) UserAgent() []byte {
 	if h.disableSpecialHeader {
 		return h.peekSections(strUserAgent)
 	}
+	if len(h.userAgent) == 0 {
+		if v := h.trailerValue(strUserAgent); v != nil {
+			return v
+		}
+	}
 	return h.userAgent
 }
 
 // SetUserAgent sets User-Agent header value.
 func (h *RequestHeader) SetUserAgent(userAgent string) {
-	h.userAgent = initHeaderValueString(h.userAgent, userAgent)
+	h.SetUserAgentBytes(s2b(userAgent))
 }
 
 // SetUserAgentBytes sets User-Agent header value.
 func (h *RequestHeader) SetUserAgentBytes(userAgent []byte) {
+	if !h.disableSpecialHeader && h.isTrailerKey(strUserAgent) {
+		h.trailerH = setArgBytes(h.trailerH, strUserAgent, initHeaderValueBytes(h.bufV[:0], userAgent), argsHasValue)
+		return
+	}
 	h.userAgent = initHeaderValueBytes(h.userAgent, userAgent)
 }
 
@@ -1226,7 +1363,7 @@ func (h *ResponseHeader) All() iter.Seq2[[]byte, []byte] {
 			return
 		}
 
-		if server := h.Server(); len(server) > 0 && !yield(strServer, server) {
+		if server := h.upfrontServer(); len(server) > 0 && !yield(strServer, server) {
 			return
 		}
 
@@ -1382,7 +1519,7 @@ func (h *RequestHeader) All() iter.Seq2[[]byte, []byte] {
 			return
 		}
 
-		if userAgent := h.UserAgent(); len(userAgent) > 0 && !yield(strUserAgent, userAgent) {
+		if !h.disableSpecialHeader && len(h.userAgent) > 0 && !yield(strUserAgent, h.userAgent) {
 			return
 		}
 
@@ -1500,6 +1637,8 @@ func (h *ResponseHeader) del(key []byte) {
 	case HeaderConnection:
 		h.connectionClose = false
 	case HeaderTrailer:
+		h.upfrontServer()
+		h.restoreTrailer(strServer, &h.server)
 		h.unannounceTrailers()
 	}
 	h.h = delAllArgs(h.h, b2s(key))
@@ -1535,6 +1674,9 @@ func (h *RequestHeader) del(key []byte) {
 	case HeaderConnection:
 		h.connectionClose = false
 	case HeaderTrailer:
+		if !h.disableSpecialHeader {
+			h.restoreTrailer(strUserAgent, &h.userAgent)
+		}
 		h.unannounceTrailers()
 	}
 	h.h = delAllArgs(h.h, b2s(key))
@@ -2201,9 +2343,11 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = append(h.mulHeader, contentType)
 		}
 	case HeaderUserAgent:
-		if ua := h.UserAgent(); len(ua) > 0 {
-			h.mulHeader = append(h.mulHeader, ua)
+		if !h.disableSpecialHeader && len(h.userAgent) > 0 {
+			h.mulHeader = append(h.mulHeader, h.userAgent)
 		}
+		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.trailerH, key)
 	case HeaderConnection:
 		if h.ConnectionClose() {
 			h.mulHeader = append(h.mulHeader, strClose)
@@ -2256,9 +2400,11 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = append(h.mulHeader, contentEncoding)
 		}
 	case HeaderServer:
-		if server := h.Server(); len(server) > 0 {
+		if server := h.upfrontServer(); len(server) > 0 {
 			h.mulHeader = append(h.mulHeader, server)
 		}
+		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
+		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.trailerH, key)
 	case HeaderConnection:
 		if h.ConnectionClose() {
 			h.mulHeader = append(h.mulHeader, strClose)
@@ -2828,9 +2974,8 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	dst = append(dst, h.Protocol()...)
 	dst = append(dst, '\r', '\n')
 
-	userAgent := h.UserAgent()
-	if len(userAgent) > 0 && !h.disableSpecialHeader {
-		dst = appendHeaderLine(dst, strUserAgent, userAgent)
+	if len(h.userAgent) > 0 && !h.disableSpecialHeader {
+		dst = appendHeaderLine(dst, strUserAgent, h.userAgent)
 	}
 
 	host := h.Host()

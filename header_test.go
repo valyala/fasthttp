@@ -4870,3 +4870,300 @@ func TestAnnounceWhileStreamingKeepsSentValues(t *testing.T) {
 		t.Fatalf("after String(): trailer section = %q, header %q", got, req.Header.Header())
 	}
 }
+
+// A special header announced as a trailer lives in the trailer section
+// whichever setter wrote it, reads back through its accessors, and returns
+// to its own storage once the announcement is dropped.
+func TestTrailerSpecialHeader(t *testing.T) {
+	t.Parallel()
+
+	for name, set := range map[string]func(h *ResponseHeader){
+		"SetServer after":  func(h *ResponseHeader) { _ = h.SetTrailer(HeaderServer); h.SetServer("edge") },
+		"SetServer before": func(h *ResponseHeader) { h.SetServer("edge"); _ = h.SetTrailer(HeaderServer) },
+		"Set after":        func(h *ResponseHeader) { _ = h.SetTrailer(HeaderServer); h.Set(HeaderServer, "edge") },
+	} {
+		var h ResponseHeader
+		set(&h)
+		if got := string(h.TrailerHeader()); got != "Server: edge\r\n\r\n" {
+			t.Fatalf("%s: trailer section = %q", name, got)
+		}
+		if string(h.Server()) != "edge" || string(h.Peek(HeaderServer)) != "edge" || len(h.PeekAll(HeaderServer)) != 1 {
+			t.Fatalf("%s: Server() = %q, Peek = %q, PeekAll = %q", name, h.Server(), h.Peek(HeaderServer), h.PeekAll(HeaderServer))
+		}
+		if bytes.Contains(h.Header(), []byte("Server:")) {
+			t.Fatalf("%s: header section still carries Server: %q", name, h.Header())
+		}
+		h.Del(HeaderTrailer)
+		if string(h.Server()) != "edge" || !bytes.Contains(h.Header(), []byte("Server: edge\r\n")) {
+			t.Fatalf("%s: un-announcing did not restore Server to the header section: %q", name, h.Header())
+		}
+	}
+
+	var rh RequestHeader
+	rh.SetUserAgent("ua")
+	if err := rh.SetTrailer(HeaderUserAgent); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(rh.TrailerHeader()); got != "User-Agent: ua\r\n\r\n" || string(rh.UserAgent()) != "ua" {
+		t.Fatalf("request: trailer section %q, UserAgent() %q", got, rh.UserAgent())
+	}
+}
+
+// A special header received only in the trailer section stays there: the
+// accessor falls back to it, but the header block and All do not.
+func TestTrailerSpecialHeaderReceivedOnlyAsTrailer(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	err := req.Read(bufio.NewReader(strings.NewReader(
+		"GET / HTTP/1.1\r\nHost: a\r\nTrailer: User-Agent\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nUser-Agent: late\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &req.Header
+	if string(h.UserAgent()) != "late" || string(h.Peek(HeaderUserAgent)) != "late" {
+		t.Fatalf("UserAgent() = %q, Peek = %q, want the trailer value", h.UserAgent(), h.Peek(HeaderUserAgent))
+	}
+	if bytes.Contains(h.Header(), []byte("User-Agent:")) {
+		t.Fatalf("header block carries the trailer value: %q", h.Header())
+	}
+	for k := range h.All() {
+		if string(k) == HeaderUserAgent {
+			t.Fatal("All() yielded the trailer-section User-Agent")
+		}
+	}
+	if got := string(h.TrailerHeader()); got != "User-Agent: late\r\n\r\n" {
+		t.Fatalf("trailer section = %q", got)
+	}
+}
+
+// Announcing an unrelated name must not move a special header that is already
+// announced and present in both sections of a parsed message.
+func TestAddTrailerKeepsParsedSpecialSections(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	err := resp.Read(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nServer: upfront\r\nTrailer: Server\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nServer: late\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resp.Header.AddTrailer("X-New"); err != nil {
+		t.Fatal(err)
+	}
+	if string(resp.Header.Server()) != "upfront" || !bytes.Contains(resp.Header.Header(), []byte("Server: upfront\r\n")) {
+		t.Fatalf("response: Server() = %q, header %q", resp.Header.Server(), resp.Header.Header())
+	}
+	if got := string(resp.Header.TrailerHeader()); got != "Server: late\r\n\r\n" {
+		t.Fatalf("response trailer section = %q", got)
+	}
+
+	var req Request
+	err = req.Read(bufio.NewReader(strings.NewReader(
+		"POST / HTTP/1.1\r\nHost: a\r\nUser-Agent: upfront\r\nTrailer: User-Agent\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nUser-Agent: late\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := req.Header.AddTrailer("X-New"); err != nil {
+		t.Fatal(err)
+	}
+	if string(req.Header.UserAgent()) != "upfront" || !bytes.Contains(req.Header.Header(), []byte("User-Agent: upfront\r\n")) {
+		t.Fatalf("request: UserAgent() = %q, header %q", req.Header.UserAgent(), req.Header.Header())
+	}
+	if got := string(req.Header.TrailerHeader()); got != "User-Agent: late\r\n\r\n" {
+		t.Fatalf("request trailer section = %q", got)
+	}
+}
+
+// Dropping the announcement of a special header received several times in
+// the trailer section keeps every value: the first returns to its storage,
+// the rest become ordinary headers.
+func TestUnannounceKeepsRepeatedSpecialTrailers(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	err := resp.Read(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nTrailer: Server\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nServer: late1\r\nServer: late2\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Header.Del(HeaderTrailer)
+	hdr := string(resp.Header.Header())
+	if string(resp.Header.Server()) != "late1" || !strings.Contains(hdr, "Server: late1\r\n") || !strings.Contains(hdr, "Server: late2\r\n") {
+		t.Fatalf("response: Server() = %q, header %q", resp.Header.Server(), hdr)
+	}
+	if got := resp.Header.PeekAll(HeaderServer); len(got) != 2 || string(got[0]) != "late1" || string(got[1]) != "late2" {
+		t.Fatalf("response: PeekAll(Server) = %q, want both", got)
+	}
+	if got := resp.Header.TrailerHeader(); len(got) != 2 {
+		t.Fatalf("response trailer section = %q, want empty", got)
+	}
+	// Announcing again moves both back, in their original order.
+	if err := resp.Header.AddTrailer(HeaderServer); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(resp.Header.TrailerHeader()); got != "Server: late1\r\nServer: late2\r\n\r\n" || string(resp.Header.Server()) != "late1" {
+		t.Fatalf("re-announced: trailer section = %q, Server() = %q", got, resp.Header.Server())
+	}
+
+	var req Request
+	err = req.Read(bufio.NewReader(strings.NewReader(
+		"POST / HTTP/1.1\r\nHost: a\r\nTrailer: User-Agent\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nUser-Agent: ua1\r\nUser-Agent: ua2\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := req.Header.SetTrailer("X-Other"); err != nil {
+		t.Fatal(err)
+	}
+	hdr = string(req.Header.Header())
+	if string(req.Header.UserAgent()) != "ua1" || !strings.Contains(hdr, "User-Agent: ua1\r\n") || !strings.Contains(hdr, "User-Agent: ua2\r\n") {
+		t.Fatalf("request: UserAgent() = %q, header %q", req.Header.UserAgent(), hdr)
+	}
+	if got := req.Header.PeekAll(HeaderUserAgent); len(got) != 2 || string(got[0]) != "ua1" || string(got[1]) != "ua2" {
+		t.Fatalf("request: PeekAll(User-Agent) = %q, want both", got)
+	}
+}
+
+// Replacing the announced set treats a header with its own storage like any
+// other name: kept in place, or moved back when dropped.
+func TestSetTrailerMovesOnlyTheDifferenceForSpecialHeaders(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	err := resp.Read(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nServer: upfront\r\nX-M: upfront\r\nTrailer: Server, X-M\r\n" +
+			"Transfer-Encoding: chunked\r\n\r\n0\r\nServer: late\r\nX-M: late\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &resp.Header
+	if err := h.SetTrailer("Server, X-M"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.TrailerHeader()); got != "Server: late\r\nX-M: late\r\n\r\n" || string(h.Server()) != "upfront" {
+		t.Fatalf("same set: trailer section = %q, Server() = %q", got, h.Server())
+	}
+	if err := h.SetTrailer("X-M"); err != nil {
+		t.Fatal(err)
+	}
+	hdr := string(h.Header())
+	if string(h.Server()) != "upfront" || !strings.Contains(hdr, "Server: upfront\r\n") || !strings.Contains(hdr, "Server: late\r\n") {
+		t.Fatalf("Server dropped: Server() = %q, header section %q", h.Server(), hdr)
+	}
+	if got := string(h.TrailerHeader()); got != "X-M: late\r\n\r\n" {
+		t.Fatalf("Server dropped: trailer section = %q", got)
+	}
+}
+
+// PeekAll of a header with its own storage sees both sections too.
+func TestTrailerSpecialHeaderPeekAllBothSections(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	err := req.Read(bufio.NewReader(strings.NewReader(
+		"POST / HTTP/1.1\r\nHost: a\r\nUser-Agent: upfront\r\nTrailer: User-Agent\r\n" +
+			"Transfer-Encoding: chunked\r\n\r\n0\r\nUser-Agent: late\r\n\r\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := req.Header.PeekAll(HeaderUserAgent); len(got) != 2 || string(got[0]) != "upfront" || string(got[1]) != "late" {
+		t.Fatalf("PeekAll(User-Agent) = %q, want [upfront late]", got)
+	}
+	if string(req.Header.UserAgent()) != "upfront" {
+		t.Fatalf("UserAgent() = %q, want the upfront value", req.Header.UserAgent())
+	}
+}
+
+// In raw-header mode an announced User-Agent is still found by every getter.
+func TestTrailerSpecialHeaderRawModeGetters(t *testing.T) {
+	t.Parallel()
+
+	var raw RequestHeader
+	raw.DisableSpecialHeader()
+	if err := raw.SetTrailer(HeaderUserAgent); err != nil {
+		t.Fatal(err)
+	}
+	raw.Set(HeaderUserAgent, "ua")
+	if string(raw.UserAgent()) != "ua" || string(raw.Peek(HeaderUserAgent)) != "ua" || len(raw.PeekAll(HeaderUserAgent)) != 1 {
+		t.Fatalf("UserAgent() = %q, Peek = %q, PeekAll = %q", raw.UserAgent(), raw.Peek(HeaderUserAgent), raw.PeekAll(HeaderUserAgent))
+	}
+	// The dedicated setter stays off the wire in this mode, as before.
+	raw.SetUserAgent("hidden")
+	if got := string(raw.TrailerHeader()); got != "User-Agent: ua\r\n\r\n" {
+		t.Fatalf("trailer section = %q", got)
+	}
+	// Dropping the announcement keeps the value in the header store, which
+	// is where raw-header mode reads and writes User-Agent.
+	raw.Del(HeaderTrailer)
+	if string(raw.UserAgent()) != "ua" || !bytes.Contains(raw.Header(), []byte("User-Agent: ua\r\n")) {
+		t.Fatalf("after Del(Trailer): UserAgent() = %q, header %q", raw.UserAgent(), raw.Header())
+	}
+}
+
+// Announcing Server after the default line was handed out moves that value
+// to the trailer section for good: the default must not resurface upfront.
+func TestTrailerServerDefaultFollowsAnnouncement(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	h.setServerDefault([]byte("Server: fasthttp\r\n"))
+	if err := h.SetTrailer(HeaderServer); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(h.TrailerHeader()); got != "Server: fasthttp\r\n\r\n" || string(h.Server()) != "fasthttp" {
+		t.Fatalf("trailer section = %q, Server() = %q", got, h.Server())
+	}
+	if got := h.PeekAll(HeaderServer); len(got) != 1 || string(got[0]) != "fasthttp" {
+		t.Fatalf("PeekAll(Server) = %q, want the trailer value once", got)
+	}
+	if bytes.Contains(h.Header(), []byte("Server:")) {
+		t.Fatalf("header section still carries Server: %q", h.Header())
+	}
+
+	// A trailer received under the default line ranks after it, as after any
+	// upfront value, and dropping the announcement keeps both.
+	var recv ResponseHeader
+	recv.setServerDefault([]byte("Server: fasthttp\r\n"))
+	if err := recv.ReadTrailer(bufio.NewReader(strings.NewReader("Server: late\r\n\r\n"))); err != nil {
+		t.Fatal(err)
+	}
+	if got := recv.PeekAll(HeaderServer); string(recv.Server()) != "fasthttp" || len(got) != 2 || string(got[1]) != "late" {
+		t.Fatalf("Server() = %q, PeekAll = %q", recv.Server(), got)
+	}
+	recv.Del(HeaderTrailer)
+	if hdr := string(recv.Header()); !strings.Contains(hdr, "Server: fasthttp\r\n") || !strings.Contains(hdr, "Server: late\r\n") {
+		t.Fatalf("header section = %q, want the default and the former trailer", hdr)
+	}
+}
+
+// All() respects raw-header mode for User-Agent as the getters do.
+func TestRequestHeaderAllSkipsUserAgentInRawMode(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.SetUserAgent("hidden")
+	h.DisableSpecialHeader()
+	for k := range h.All() {
+		if string(k) == HeaderUserAgent {
+			t.Fatal("All() yielded the User-Agent field that raw-header mode hides")
+		}
+	}
+}
+
+// An empty special-header trailer value survives un-announcing as an ordinary
+// header line, since the dedicated storage reads an empty value as absent.
+func TestUnannounceKeepsEmptySpecialTrailer(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	err := resp.Read(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 200 OK\r\nTrailer: Server\r\nTransfer-Encoding: chunked\r\n\r\n0\r\nServer: \r\nServer: second\r\n\r\n"))) //nolint:dupword // two Server trailer lines on purpose
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Header.Del(HeaderTrailer)
+	hdr := string(resp.Header.Header())
+	if !strings.Contains(hdr, "Server: \r\n") || !strings.Contains(hdr, "Server: second\r\n") {
+		t.Fatalf("header section = %q, want both Server lines", hdr)
+	}
+}
