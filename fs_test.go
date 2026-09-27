@@ -298,6 +298,116 @@ func (pw pureWriter) Write(p []byte) (nn int, err error) {
 	return pw.w.Write(p)
 }
 
+func TestFSSmallFileServedFromMemory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	small := []byte("small file body")
+	smallPath := filepath.Join(dir, "small.txt")
+	if err := os.WriteFile(smallPath, small, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	big := bytes.Repeat([]byte("b"), maxSmallFileSize+1)
+	if err := os.WriteFile(filepath.Join(dir, "big.txt"), big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := (&FS{Root: dir, AcceptByteRange: true}).NewRequestHandler()
+
+	serve := func(path, byteRange string) (*fsFile, *Response) {
+		t.Helper()
+		var ctx RequestCtx
+		ctx.Init(&Request{}, nil, TestLogger{t})
+		ctx.Request.SetRequestURI(path)
+		if byteRange != "" {
+			ctx.Request.Header.Set(HeaderRange, byteRange)
+		}
+		h(&ctx)
+		var ff *fsFile
+		switch r := ctx.Response.bodyStream.(type) {
+		case *fsSmallFileReader:
+			ff = r.ff
+		case *bigFileReader:
+			ff = r.ff
+		default:
+			t.Fatalf("unexpected body stream %T for %q", r, path)
+		}
+		return ff, readResponseFromCtx(t, &ctx, false)
+	}
+
+	// The first request caches the file, the second one is served from the cache.
+	for range 2 {
+		ff, resp := serve("/small.txt", "")
+		if ff.f != nil {
+			t.Fatal("cached small file must not keep its descriptor open")
+		}
+		if !bytes.Equal(resp.Body(), small) {
+			t.Fatalf("unexpected body %q. Expecting %q", resp.Body(), small)
+		}
+	}
+
+	_, resp := serve("/small.txt", "bytes=6-9")
+	if resp.StatusCode() != StatusPartialContent {
+		t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusPartialContent)
+	}
+	if string(resp.Body()) != "file" {
+		t.Fatalf("unexpected body %q. Expecting %q", resp.Body(), "file")
+	}
+
+	// The cached copy keeps the response consistent with the cached
+	// Content-Length while the file shrinks on disk.
+	if err := os.WriteFile(smallPath, small[:5], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, resp = serve("/small.txt", "")
+	if resp.Header.ContentLength() != len(small) || !bytes.Equal(resp.Body(), small) {
+		t.Fatalf("unexpected response with Content-Length %d and body %q. Expecting the cached %q",
+			resp.Header.ContentLength(), resp.Body(), small)
+	}
+
+	ff, resp := serve("/big.txt", "")
+	if ff.f == nil {
+		t.Fatal("big file must be read from its descriptor")
+	}
+	if !bytes.Equal(resp.Body(), big) {
+		t.Fatalf("unexpected body of %d bytes. Expecting %d bytes", len(resp.Body()), len(big))
+	}
+}
+
+func TestFSSkipCacheSmallFileNoReadFrom(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	expectedStr := "hello, world!"
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte(expectedStr), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := (&FS{Root: dir, SkipCache: true}).NewRequestHandler()
+
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, TestLogger{t})
+	ctx.Request.SetRequestURI("/hello.txt")
+	h(&ctx)
+
+	// Without the cache the file is read on each request, not kept in memory.
+	reader, ok := ctx.Response.bodyStream.(*fsSmallFileReader)
+	if !ok {
+		t.Fatalf("unexpected body stream %T. Expecting *fsSmallFileReader", ctx.Response.bodyStream)
+	}
+	if reader.ff.f == nil {
+		t.Fatal("uncached small file must be read from its descriptor")
+	}
+	defer reader.Close()
+
+	var buf bytes.Buffer
+	n, err := reader.WriteTo(pureWriter{w: &buf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != int64(len(expectedStr)) || buf.String() != expectedStr {
+		t.Fatalf("unexpected body %q (%d bytes). Expecting %q", buf.String(), n, expectedStr)
+	}
+}
+
 func TestServeFileCompressed(t *testing.T) {
 	// This test can't run parallel as files in / might be changed by other tests.
 

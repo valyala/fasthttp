@@ -394,6 +394,10 @@ type FS struct {
 
 	// Expiration duration for inactive file handlers.
 	//
+	// Files of up to 8 KiB are cached in memory rather than as open file
+	// handles, so changes to them are served only after their cache entries
+	// expire.
+	//
 	// FSHandlerCacheDuration is used by default.
 	CacheDuration time.Duration
 
@@ -613,6 +617,7 @@ func (fs *FS) initRequestHandler() {
 		pathNotFound:           fs.PathNotFound,
 		acceptByteRange:        fs.AcceptByteRange,
 		generateETag:           fs.GenerateETag,
+		skipCache:              fs.SkipCache,
 		compressedFileSuffixes: compressedFileSuffixes,
 	}
 
@@ -659,6 +664,7 @@ type fsHandler struct {
 	compressZstd       bool
 	acceptByteRange    bool
 	generateETag       bool
+	skipCache          bool
 }
 
 type fsFile struct {
@@ -669,7 +675,7 @@ type fsFile struct {
 	h               *fsHandler
 	filename        string // fs.FileInfo.Name() return filename, isn't filepath.
 	contentType     string
-	dirIndex        []byte
+	dirIndex        []byte // contents of a file served from memory, f is nil then
 	lastModifiedStr []byte
 	etag            []byte
 
@@ -2111,6 +2117,23 @@ func (h *fsHandler) newFSFile(f fs.File, fileInfo fs.FileInfo, compressed bool, 
 		lastModifiedStr: AppendHTTPDate(nil, lastModified),
 
 		t: time.Now(),
+	}
+
+	// A small file going into the cache is read into memory once, so the
+	// requests it serves don't read the file again and its descriptor isn't
+	// held open while cached. ReadAt doesn't depend on the file offset, which
+	// content type and compressibility checks may have moved.
+	if ra, ok := f.(io.ReaderAt); ok && !h.skipCache && contentLength <= maxSmallFileSize {
+		data := make([]byte, contentLength)
+		n, err := ra.ReadAt(data, 0)
+		_ = f.Close()
+		if err != nil && err != io.EOF {
+			return nil, fmt.Errorf("cannot read file %q: %w", filePath, err)
+		}
+		// A file that shrank since Stat is served as read.
+		ff.f = nil
+		ff.dirIndex = data[:n]
+		ff.contentLength = n
 	}
 	return ff, nil
 }

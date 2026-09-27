@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"embed"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -1344,4 +1345,108 @@ func TestFSGenerateETagFS(t *testing.T) {
 	if etag := ctx.Response.Header.Peek(HeaderETag); len(etag) > 0 {
 		t.Fatalf("unexpected ETag: %q", etag)
 	}
+}
+
+func TestFSFSSmallFileServedFromMemory(t *testing.T) {
+	t.Parallel()
+
+	body := []byte("small file body")
+	testFS := fstest.MapFS{
+		"file.txt": {Data: body},
+	}
+
+	tests := []struct {
+		name     string
+		fsys     fs.FS
+		inMemory bool
+	}{
+		{name: "read at", fsys: testFS, inMemory: true},
+		// Stat reports more bytes than the file holds, as it does for a file
+		// that shrank since.
+		{name: "shrunk", fsys: fileWrapFS{FS: testFS, extraSize: 1}, inMemory: true},
+		// Without ReadAt the file keeps being read on every request.
+		{name: "no read at", fsys: fileWrapFS{FS: testFS}, inMemory: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := (&FS{FS: tt.fsys, AllowEmptyRoot: true}).NewRequestHandler()
+			for range 2 {
+				var ctx RequestCtx
+				ctx.Init(&Request{}, nil, TestLogger{t})
+				ctx.Request.SetRequestURI("/file.txt")
+				h(&ctx)
+
+				_, inMemory := ctx.Response.bodyStream.(*fsSmallFileReader)
+				if inMemory != tt.inMemory {
+					t.Fatalf("unexpected body stream %T", ctx.Response.bodyStream)
+				}
+				resp := readResponseFromCtx(t, &ctx, false)
+				if resp.StatusCode() != StatusOK {
+					t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
+				}
+				if resp.Header.ContentLength() != len(body) || !bytes.Equal(resp.Body(), body) {
+					t.Fatalf("unexpected response with Content-Length %d and body %q. Expecting %q",
+						resp.Header.ContentLength(), resp.Body(), body)
+				}
+			}
+		})
+	}
+}
+
+// fileWrapFS hands out files without a ReadAt method, or, if extraSize is
+// set, files whose Stat reports extraSize more bytes than they hold.
+type fileWrapFS struct {
+	fs.FS
+
+	extraSize int64
+}
+
+func (fsys fileWrapFS) Open(name string) (fs.File, error) {
+	f, err := fsys.FS.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if fsys.extraSize > 0 {
+		return grownFile{seekFile: seekFile{f}, extraSize: fsys.extraSize}, nil
+	}
+	return seekFile{f}, nil
+}
+
+// seekFile keeps the Seek method the file readers need and hides ReadAt.
+type seekFile struct {
+	fs.File
+}
+
+func (f seekFile) Seek(offset int64, whence int) (int64, error) {
+	return f.File.(io.Seeker).Seek(offset, whence) //nolint:forcetypeassert
+}
+
+type grownFile struct {
+	seekFile
+
+	extraSize int64
+}
+
+func (f grownFile) ReadAt(p []byte, off int64) (int, error) {
+	return f.File.(io.ReaderAt).ReadAt(p, off) //nolint:forcetypeassert
+}
+
+func (f grownFile) Stat() (fs.FileInfo, error) {
+	fi, err := f.File.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return grownFileInfo{FileInfo: fi, extraSize: f.extraSize}, nil
+}
+
+type grownFileInfo struct {
+	fs.FileInfo
+
+	extraSize int64
+}
+
+func (fi grownFileInfo) Size() int64 {
+	return fi.FileInfo.Size() + fi.extraSize
 }
