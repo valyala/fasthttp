@@ -48,6 +48,7 @@ var (
 	strLocation           = []byte(HeaderLocation)
 	strIfModifiedSince    = []byte(HeaderIfModifiedSince)
 	strLastModified       = []byte(HeaderLastModified)
+	strIfNoneMatch        = []byte(HeaderIfNoneMatch)
 	strAcceptRanges       = []byte(HeaderAcceptRanges)
 	strRange              = []byte(HeaderRange)
 	strContentRange       = []byte(HeaderContentRange)
