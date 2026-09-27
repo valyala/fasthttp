@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/klauspost/compress/gzip"
@@ -394,9 +395,9 @@ type FS struct {
 
 	// Expiration duration for inactive file handlers.
 	//
-	// Files of up to 8 KiB are cached in memory rather than as open file
-	// handles, so changes to them are served only after their cache entries
-	// expire.
+	// Up to 4096 files of up to 8 KiB each are cached in memory rather than
+	// as open file handles, so changes to them are served only after their
+	// cache entries expire.
 	//
 	// FSHandlerCacheDuration is used by default.
 	CacheDuration time.Duration
@@ -651,6 +652,10 @@ type fsHandler struct {
 
 	cacheManager cacheManager
 
+	// smallFilesInMemory counts the cached files held in memory, which
+	// maxSmallFilesInMemory bounds.
+	smallFilesInMemory atomic.Int64
+
 	pathRewrite            PathRewriteFunc
 	pathNotFound           RequestHandler
 	compressedFileSuffixes map[string]string
@@ -685,6 +690,10 @@ type fsFile struct {
 
 	bigFilesLock sync.Mutex
 	compressed   bool
+
+	// countedInMemory is set while the file counts toward its handler's
+	// smallFilesInMemory.
+	countedInMemory bool
 }
 
 func (ff *fsFile) NewReader() (io.Reader, error) {
@@ -710,6 +719,13 @@ func (ff *fsFile) smallFileReader() io.Reader {
 
 // Files bigger than this size are sent with sendfile.
 const maxSmallFileSize = 2 * 4096
+
+// maxSmallFilesInMemory bounds how many small files one FS keeps in memory,
+// and with that the file contents it holds to 32 MiB. Past it, small files
+// are cached as open files and read on every request, so paths an attacker
+// can vary, such as letter case on a case-insensitive filesystem, can't make
+// it hold file contents without limit.
+const maxSmallFilesInMemory = 4096
 
 func (ff *fsFile) isBig() bool {
 	if _, ok := ff.h.filesystem.(*osFS); !ok { // fs.FS only uses bigFileReader, memory cache uses fsSmallFileReader
@@ -749,6 +765,10 @@ func (ff *fsFile) bigFileReader() (io.Reader, error) {
 }
 
 func (ff *fsFile) Release() {
+	if ff.countedInMemory {
+		ff.countedInMemory = false
+		ff.h.smallFilesInMemory.Add(-1)
+	}
 	if ff.f != nil {
 		_ = ff.f.Close()
 
@@ -2123,19 +2143,35 @@ func (h *fsHandler) newFSFile(f fs.File, fileInfo fs.FileInfo, compressed bool, 
 	// requests it serves don't read the file again and its descriptor isn't
 	// held open while cached. ReadAt doesn't depend on the file offset, which
 	// content type and compressibility checks may have moved.
-	if ra, ok := f.(io.ReaderAt); ok && !h.skipCache && contentLength <= maxSmallFileSize {
+	if ra, ok := f.(io.ReaderAt); ok && !h.skipCache && contentLength <= maxSmallFileSize && h.reserveSmallFileInMemory() {
 		data := make([]byte, contentLength)
 		n, err := ra.ReadAt(data, 0)
 		_ = f.Close()
 		if err != nil && err != io.EOF {
+			h.smallFilesInMemory.Add(-1)
 			return nil, fmt.Errorf("cannot read file %q: %w", filePath, err)
 		}
 		// A file that shrank since Stat is served as read.
 		ff.f = nil
 		ff.dirIndex = data[:n]
 		ff.contentLength = n
+		ff.countedInMemory = true
 	}
 	return ff, nil
+}
+
+// reserveSmallFileInMemory counts one more small file held in memory and
+// reports whether it stays within maxSmallFilesInMemory.
+func (h *fsHandler) reserveSmallFileInMemory() bool {
+	for {
+		n := h.smallFilesInMemory.Load()
+		if n >= maxSmallFilesInMemory {
+			return false
+		}
+		if h.smallFilesInMemory.CompareAndSwap(n, n+1) {
+			return true
+		}
+	}
 }
 
 func readFileHeader(f io.Reader, compressed bool, fileEncoding string) ([]byte, error) {

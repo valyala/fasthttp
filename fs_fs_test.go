@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -1449,4 +1450,94 @@ type grownFileInfo struct {
 
 func (fi grownFileInfo) Size() int64 {
 	return fi.FileInfo.Size() + fi.extraSize
+}
+
+func TestFSSmallFilesInMemoryLimit(t *testing.T) {
+	t.Parallel()
+
+	// On a case-insensitive filesystem one file answers to as many cached
+	// paths as its name has letter case variants.
+	const name = "abcdefghijklm.txt"
+	body := []byte("body")
+	fsys := caseInsensitiveFS{fsys: fstest.MapFS{name: {Data: body}}}
+	stop := make(chan struct{})
+	defer close(stop)
+	h := (&FS{FS: fsys, AllowEmptyRoot: true, CleanStop: stop}).NewRequestHandler()
+
+	inMemory := 0
+	for i := range maxSmallFilesInMemory + 100 {
+		path := []byte("/" + name)
+		for j := range 13 {
+			if i&(1<<j) != 0 {
+				path[1+j] -= 'a' - 'A'
+			}
+		}
+		var ctx RequestCtx
+		ctx.Init(&Request{}, nil, TestLogger{t})
+		ctx.Request.SetRequestURIBytes(path)
+		h(&ctx)
+		if _, ok := ctx.Response.bodyStream.(*fsSmallFileReader); ok {
+			inMemory++
+		}
+		if ctx.Response.StatusCode() != StatusOK || !bytes.Equal(ctx.Response.Body(), body) {
+			t.Fatalf("unexpected response for %q: status %d, body %q", path, ctx.Response.StatusCode(), ctx.Response.Body())
+		}
+	}
+	if inMemory != maxSmallFilesInMemory {
+		t.Fatalf("%d files kept in memory. Expecting %d", inMemory, maxSmallFilesInMemory)
+	}
+}
+
+func TestFSSmallFilesInMemoryReleased(t *testing.T) {
+	t.Parallel()
+
+	testFS := fstest.MapFS{"file.txt": {Data: []byte("body")}}
+	h := &fsHandler{filesystem: testFS}
+	open := func() *fsFile {
+		t.Helper()
+		f, err := testFS.Open("file.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fi, err := f.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ff, err := h.newFSFile(f, fi, false, "file.txt", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ff
+	}
+
+	ff := open()
+	if ff.f != nil || h.smallFilesInMemory.Load() != 1 {
+		t.Fatalf("small file not counted in memory: descriptor open %t, count %d", ff.f != nil, h.smallFilesInMemory.Load())
+	}
+	ff.Release()
+	if n := h.smallFilesInMemory.Load(); n != 0 {
+		t.Fatalf("unexpected count %d after release. Expecting 0", n)
+	}
+
+	// Past the limit a small file stays open, and releasing it leaves the
+	// count alone.
+	h.smallFilesInMemory.Store(maxSmallFilesInMemory)
+	ff = open()
+	if ff.f == nil {
+		t.Fatal("small file kept in memory past the limit")
+	}
+	ff.Release()
+	if n := h.smallFilesInMemory.Load(); n != maxSmallFilesInMemory {
+		t.Fatalf("unexpected count %d after release. Expecting %d", n, maxSmallFilesInMemory)
+	}
+}
+
+// caseInsensitiveFS opens names regardless of their letter case, as the
+// default filesystems on Windows and macOS do.
+type caseInsensitiveFS struct {
+	fsys fs.FS
+}
+
+func (c caseInsensitiveFS) Open(name string) (fs.File, error) {
+	return c.fsys.Open(strings.ToLower(name))
 }
