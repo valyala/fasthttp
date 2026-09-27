@@ -14,6 +14,7 @@ func FuzzMultipartFraming(f *testing.F) {
 		f.Add([]byte("form value"), "fuzz-boundary", []byte("epilogue"), mode, uint8(0))
 	}
 	f.Add(bytes.Repeat([]byte("x"), 9000), "file-boundary", bytes.Repeat([]byte("e"), 5000), uint8(0), uint8(255))
+	f.Add([]byte("--0"), "0", []byte("0"), uint8('Q'), uint8(14))
 	f.Fuzz(func(t *testing.T, value []byte, boundary string, epilogue []byte, mode, fragment uint8) {
 		if len(value) > 16*1024 || len(epilogue) > 8192 || len(boundary) > 70 {
 			return
@@ -36,9 +37,10 @@ func FuzzMultipartFraming(f *testing.F) {
 		if err := mw.Close(); err != nil {
 			t.Fatal(err)
 		}
-		// An arbitrary value can itself contain a delimiter. Those inputs are
-		// useful malformed forms, but only require the framing assertions.
-		checkValues := !bytes.Contains(value, []byte("\r\n--"+boundary))
+		// A delimiter can occur at the start of a part or after CRLF within
+		// its value. Such forms are malformed, so don't assert their fields.
+		checkValues := !bytes.HasPrefix(value, []byte("--"+boundary)) &&
+			!bytes.Contains(value, []byte("\r\n--"+boundary))
 		body := append(bytes.Clone(form.Bytes()), epilogue...)
 		contentType := mw.FormDataContentType()
 		gzip, chunked, truncated := mode&1 != 0, mode&2 != 0, mode&4 != 0

@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"testing"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 const (
@@ -151,6 +153,9 @@ func FuzzRequestFraming(f *testing.F) {
 func FuzzResponseFraming(f *testing.F) {
 	for _, s := range []string{
 		"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nabc",
+		"HTTP/1.0 200 \nContent-Length:0\n\n",
+		"HTTP/1.1 200 OK\r\nContent-Length : 0\r\n\r\n",
+		"HTTP/1.1 200 OK\r\nTransfer-Encoding : chunked\r\n\r\n0\r\n\r\n",
 		"HTTP/1.1 103 Early Hints\r\nLink: </a>\r\n\r\nHTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
 		"HTTP/1.1 204 No Content\r\n\r\n",
 		"HTTP/1.1 304 Not Modified\r\nContent-Length: 42\r\n\r\n",
@@ -159,6 +164,7 @@ func FuzzResponseFraming(f *testing.F) {
 	} {
 		f.Add([]byte(s), uint8(1), false)
 	}
+	f.Add([]byte("HTTP/1.0 200 \nContent-Length :0\n\n"), uint8(0), false)
 	f.Fuzz(func(t *testing.T, data []byte, fragment uint8, head bool) {
 		if len(data) > fuzzBodyLimit {
 			return
@@ -195,6 +201,14 @@ func FuzzResponseFraming(f *testing.F) {
 			nr, err = http.ReadResponse(br, &http.Request{Method: method})
 			if err != nil {
 				return
+			}
+			// Fasthttp trims spaces before colons, while net/http preserves them
+			// in header names. Compare only valid names, including interim responses.
+			for key := range nr.Header {
+				if !httpguts.ValidHeaderFieldName(key) {
+					_ = nr.Body.Close()
+					return
+				}
 			}
 			if nr.StatusCode < 100 || nr.StatusCode >= 200 || nr.StatusCode == StatusSwitchingProtocols {
 				break
