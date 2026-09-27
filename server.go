@@ -242,7 +242,8 @@ type Server struct {
 
 	nextProtos map[string]ServeHandler
 
-	concurrencyCh chan struct{}
+	concurrencyCh     chan struct{}
+	concurrencyChOnce sync.Once
 
 	idleConns map[net.Conn]*atomic.Int64
 
@@ -512,7 +513,7 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 	}
 
 	return func(ctx *RequestCtx) {
-		concurrencyCh := ctx.s.concurrencyCh
+		concurrencyCh := ctx.s.getConcurrencyCh()
 		select {
 		case concurrencyCh <- struct{}{}:
 		default:
@@ -2012,9 +2013,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		done := make(chan struct{})
 		s.done.Store(&done)
 	}
-	if s.concurrencyCh == nil {
-		s.concurrencyCh = make(chan struct{}, maxWorkersCount)
-	}
+	s.getConcurrencyCh()
 	s.mu.Unlock()
 
 	wp := &workerPool{
@@ -2320,6 +2319,15 @@ func (s *Server) getConcurrency() int {
 		n = DefaultConcurrency
 	}
 	return n
+}
+
+// getConcurrencyCh returns the gate TimeoutHandler admits requests through.
+// Serve allocates it up front; ServeConn never calls Serve.
+func (s *Server) getConcurrencyCh() chan struct{} {
+	s.concurrencyChOnce.Do(func() {
+		s.concurrencyCh = make(chan struct{}, s.getConcurrency())
+	})
+	return s.concurrencyCh
 }
 
 var globalConnID uint64
@@ -3100,10 +3108,7 @@ func (ctx *RequestCtx) Value(key any) any {
 }
 
 var fakeServer = func() *Server {
-	s := &Server{
-		// Initialize concurrencyCh for TimeoutHandler
-		concurrencyCh: make(chan struct{}, DefaultConcurrency),
-	}
+	s := &Server{}
 	done := make(chan struct{})
 	s.done.Store(&done)
 	return s
