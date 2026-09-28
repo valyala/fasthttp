@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -3280,6 +3281,50 @@ func TestAppendBodyFixedSizeLargeReusingCapacityAllocatesNothingNew(t *testing.T
 		t.Fatalf("expected at most %v allocations per run when dst already has ample spare capacity, got %v -- "+
 			"this suggests appendBodyFixedSize is discarding the caller-provided buffer's existing capacity "+
 			"for a fresh allocation instead of reusing it", maxExpectedAllocs, allocs)
+	}
+}
+
+// TestNextGrowthLenGuardsAgainstOverflow pins the bug erikdubbelboer found
+// in review on PR #2408: appendBodyFixedSizeLarge's growth loop computed
+// roundUpForSliceCap(2 * offset) unguarded. On a 32-bit platform, where int
+// is 32 bits wide, offset reaching 1 GiB makes 2*offset overflow, wrapping
+// negative; roundUpForSliceCap then returns 0, dst gets resliced to length
+// 0, and the next read into dst[offset:] panics.
+//
+// This test can't literally reproduce a 32-bit int overflow on a 64-bit
+// test runner (int is 64 bits here, so doubling a 1 GiB offset doesn't
+// overflow). Instead it exercises the exact same failure mechanism at
+// whatever this platform's real overflow boundary is, via math.MaxInt --
+// which is int32-sized on a 32-bit GOARCH and int64-sized here -- so the
+// guard is verified against the boundary condition itself, not against a
+// platform-specific magic number that would only be meaningful on 32-bit.
+func TestNextGrowthLenGuardsAgainstOverflow(t *testing.T) {
+	t.Parallel()
+
+	// The smallest offset for which naive doubling (2 * offset) overflows
+	// int on this platform.
+	offset := math.MaxInt/2 + 1
+	target := offset + 4096
+
+	got := nextGrowthLen(offset, target)
+	if got != target {
+		t.Fatalf("nextGrowthLen(%d, %d) = %d, want %d (jump straight to target instead of "+
+			"doubling when doubling would overflow int)", offset, target, got, target)
+	}
+}
+
+// TestNextGrowthLenDoublesWithinBounds confirms nextGrowthLen still doubles
+// normally, capped at target, for the routine (non-overflow) case --
+// nextGrowthLen must not regress appendBodyFixedSizeLarge's existing
+// growth/reuse behavior while fixing the overflow case above.
+func TestNextGrowthLenDoublesWithinBounds(t *testing.T) {
+	t.Parallel()
+
+	if got, want := nextGrowthLen(64*1024, 10*1024*1024), 128*1024; got != want {
+		t.Fatalf("nextGrowthLen(64KiB, 10MiB) = %d, want %d (should double)", got, want)
+	}
+	if got, want := nextGrowthLen(9*1024*1024, 10*1024*1024), 10*1024*1024; got != want {
+		t.Fatalf("nextGrowthLen(9MiB, 10MiB) = %d, want %d (should cap at target, not overshoot)", got, want)
 	}
 }
 

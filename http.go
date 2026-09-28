@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net"
 	"os"
@@ -3104,10 +3105,7 @@ func appendBodyFixedSizeLarge(r *bufio.Reader, dst []byte, n int) ([]byte, error
 			return dst, nil
 		}
 		if offset == len(dst) {
-			newLen := roundUpForSliceCap(2 * offset)
-			if newLen > target {
-				newLen = target
-			}
+			newLen := nextGrowthLen(offset, target)
 			if cap(dst) >= newLen {
 				// Already-available capacity (e.g. from a pooled buffer
 				// larger than our doubling has reached yet) -- reslice
@@ -3120,6 +3118,27 @@ func appendBodyFixedSizeLarge(r *bufio.Reader, dst []byte, n int) ([]byte, error
 			}
 		}
 	}
+}
+
+// nextGrowthLen computes the length appendBodyFixedSizeLarge's read loop
+// should grow dst to next, given the current offset and the final target
+// length. It doubles offset via roundUpForSliceCap when that's safe, but
+// jumps straight to target instead when offset is large enough that
+// doubling it would overflow int -- most reachable on a 32-bit platform,
+// where int is only 32 bits wide, but guarded here in a platform-
+// independent way via math.MaxInt rather than a hard-coded threshold that
+// would only be meaningful on one word size. Without this guard, an
+// overflowed (negative) doubled value makes roundUpForSliceCap return 0,
+// which reslices dst to length 0 and panics on the next read into
+// dst[offset:].
+func nextGrowthLen(offset, target int) int {
+	newLen := target
+	if offset <= math.MaxInt/2 {
+		if doubled := roundUpForSliceCap(2 * offset); doubled < newLen {
+			newLen = doubled
+		}
+	}
+	return newLen
 }
 
 // ErrBrokenChunk is returned when server receives a broken chunked body (Transfer-Encoding: chunked).
