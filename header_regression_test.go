@@ -42,6 +42,73 @@ func TestIssue28ResponseWithoutBodyNoContentType(t *testing.T) {
 	}
 }
 
+// A response whose status forbids a body must not be written back out with a
+// Content-Length.
+//
+// RFC 9110 section 8.6 forbids Content-Length on a response with a 1xx or 204
+// status code, and fasthttp already refuses to set one for those statuses
+// (ResponseHeader.SetContentLength). Parsing keeps whatever the peer sent so
+// the value stays observable, but serializing it re-emits a Content-Length
+// that announces a body the status code does not allow. That is what a proxy
+// forwarding a 204/304 would put on the wire.
+func TestResponseBodylessStatusOmitsContentLength(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		raw    string
+		status string
+	}{
+		{"204", "HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\n", "HTTP/1.1 204 No Content\r\n"},
+		{"304", "HTTP/1.1 304 Not Modified\r\nContent-Length: 5\r\n\r\n", "HTTP/1.1 304 Not Modified\r\n"},
+	} {
+		var resp Response
+		if err := resp.Read(bufio.NewReader(strings.NewReader(tc.raw))); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		// The parsed value stays observable; only the wire form drops it.
+		if cl := resp.Header.ContentLength(); cl != 5 {
+			t.Fatalf("%s: unexpected content-length %d. Expecting 5", tc.name, cl)
+		}
+
+		// Re-serializing (what a proxy does) must not reintroduce it.
+		s := resp.String()
+		if !strings.HasPrefix(s, tc.status) {
+			t.Fatalf("%s: unexpected status line in %q", tc.name, s)
+		}
+		if strings.Contains(s, "Content-Length") {
+			t.Fatalf("%s: unexpected Content-Length in %q", tc.name, s)
+		}
+		if strings.Contains(s, "Content-Type") {
+			t.Fatalf("%s: unexpected Content-Type in %q", tc.name, s)
+		}
+	}
+}
+
+// A 200 response keeps its Content-Length; the rule above must not be
+// over-applied.
+func TestResponseBodyStatusKeepsContentLength(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello"))); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cl := resp.Header.ContentLength(); cl != 5 {
+		t.Fatalf("unexpected content-length %d. Expecting 5", cl)
+	}
+	if body := string(resp.Body()); body != "hello" {
+		t.Fatalf("unexpected body %q. Expecting %q", body, "hello")
+	}
+	s := resp.String()
+	if !strings.Contains(s, "Content-Length: 5\r\n") {
+		t.Fatalf("expecting Content-Length in %q", s)
+	}
+	if !strings.Contains(s, "Content-Type: text/plain; charset=utf-8\r\n") {
+		t.Fatalf("expecting Content-Type in %q", s)
+	}
+}
+
 func TestIssue6RequestHeaderSetContentType(t *testing.T) {
 	t.Parallel()
 

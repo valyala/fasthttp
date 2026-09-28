@@ -2612,7 +2612,11 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	// Append Content-Type only for non-zero responses
 	// or if it is explicitly set.
 	// See https://github.com/valyala/fasthttp/issues/28 .
-	if h.ContentLength() != 0 || len(h.contentType) > 0 {
+	// A status that forbids a body has no content to describe, so it gets no
+	// Content-Type even when one is set. Parsing such a response leaves
+	// contentLength at -2 ("identity"), which the non-zero test below would
+	// otherwise read as "has a body".
+	if !h.mustSkipContentLength() && (h.ContentLength() != 0 || len(h.contentType) > 0) {
 		contentType := h.ContentType()
 		if len(contentType) > 0 {
 			dst = appendHeaderLine(dst, strContentType, contentType)
@@ -2623,7 +2627,13 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		dst = appendHeaderLine(dst, strContentEncoding, contentEncoding)
 	}
 
-	if len(h.contentLengthBytes) > 0 {
+	// RFC 9110 section 8.6 forbids Content-Length on a response that has no
+	// body. Parsing keeps the value a peer sent so a proxy can report it, but
+	// it must not be written back out: re-emitting it announces a body the
+	// status code does not allow, and a peer that trusts it would frame the
+	// following bytes as this response's body. SetContentLength already
+	// refuses these statuses, so serialization agrees.
+	if len(h.contentLengthBytes) > 0 && !h.mustSkipContentLength() {
 		dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
 	}
 
