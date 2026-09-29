@@ -4025,6 +4025,8 @@ func TestResponseCompressedBodyStreamCloseKeepsWriteError(t *testing.T) {
 	resp.Header.SetContentType("text/plain")
 	resp.SetBodyStream(bodyStream, -1)
 	resp.gzipBody(CompressDefaultCompression)
+	// Compression starts with the first read.
+	_, _ = resp.BodyStream().Read(nil)
 
 	if err := resp.CloseBodyStream(); err != nil {
 		t.Fatalf("unexpected close error: %v", err)
@@ -4057,6 +4059,8 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 	resp.SetBodyStream(rs, -1)
 	resp.gzipBody(CompressDefaultCompression)
 	compressedStream := resp.bodyStream.(*compressedBodyStream) //nolint:forcetypeassert
+	// Compression starts with the first read.
+	_, _ = compressedStream.Read(nil)
 
 	select {
 	case <-reader.reading:
@@ -4079,6 +4083,39 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for compressed stream cleanup")
 	}
+}
+
+// A body stream may finish the trailers as it ends: under compression it is
+// still read only while the response is written, after the headers.
+func TestResponseCompressedBodyStreamSetsTrailersAtEOF(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	resp.Header.SetContentType("text/plain")
+	resp.Header.Set(HeaderTrailer, "X-Sum")
+	resp.SetBodyStream(&trailerAtEOF{r: strings.NewReader("body"), h: &resp.Header}, -1)
+	resp.gzipBody(CompressDefaultCompression)
+
+	var got Response
+	if err := got.Read(bufio.NewReader(strings.NewReader(resp.String()))); err != nil {
+		t.Fatal(err)
+	}
+	if v := got.Header.Peek("X-Sum"); string(v) != "1" {
+		t.Fatalf("X-Sum = %q, want 1", v)
+	}
+}
+
+type trailerAtEOF struct {
+	r io.Reader
+	h *ResponseHeader
+}
+
+func (b *trailerAtEOF) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err == io.EOF {
+		b.h.Set("X-Sum", "1")
+	}
+	return n, err
 }
 
 type blockingCloseReader struct {
