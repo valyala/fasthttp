@@ -286,3 +286,23 @@ func BenchmarkRequestHeaderIsGet(b *testing.B) {
 		}
 	})
 }
+
+func BenchmarkRequestHeaderReadDrip(b *testing.B) {
+	// One byte per read: every retry must stay cheap until the block is in.
+	wire := []byte("GET / HTTP/1.1\r\nHost: example.com\r\n")
+	for len(wire) < 4096 {
+		wire = append(wire, "X-Header-Name: some ordinary header value here\r\n"...)
+	}
+	wire = append(wire, "\r\n"...)
+	dr := &dripTestReader{data: wire}
+	br := bufio.NewReaderSize(dr, 16384)
+	var h RequestHeader
+	b.ReportAllocs()
+	for b.Loop() {
+		dr.pos = 0
+		br.Reset(dr)
+		if err := h.Read(br); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

@@ -11,3 +11,8 @@ func hasWindowsReservedPathColon(path []byte, rootIsEmpty bool) bool {
 	}
 	return bytes.IndexByte(rest, ':') >= 0
 }
+
+func isASCIILetter(b byte) bool {
+	b |= 0x20 // Make lower case.
+	return 'a' <= b && b <= 'z'
+}
