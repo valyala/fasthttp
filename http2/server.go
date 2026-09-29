@@ -1615,11 +1615,14 @@ func (c *serverConn) handleHandlerDone(
 		replacement := c.protocolContext.AcquireRequestCtx(c.conn, stream)
 		replacement.Request.Header.SetMethodBytes(requestCtx.Request.Header.Method())
 		timeoutResponse.CopyTo(&replacement.Response)
-		stream.request = replacement
 		// The timed-out handler goroutine still references the original
 		// RequestCtx, so neither it nor this stream may return to a pool
 		// until the connection ends; releaseAllStreams checks this flag.
+		// AcceptStream from that goroutine reads both under acceptMu.
+		stream.acceptMu.Lock()
+		stream.request = replacement
 		stream.hasAbandonedRequest = true
+		stream.acceptMu.Unlock()
 		c.protocolContext.ReleaseRequestCtx(requestCtx)
 		requestCtx = replacement
 	}

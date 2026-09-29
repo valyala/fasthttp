@@ -1659,6 +1659,38 @@ func TestStreamConnCloseOutlivingHandler(t *testing.T) {
 	}()
 }
 
+func TestTimedOutHandlerCannotAcceptStream(t *testing.T) {
+	// TimeoutHandler answers without waiting for the handler, which may still
+	// try to accept the stream after its request was replaced and released.
+	late := make(chan struct{})
+	accepted := make(chan error, 1)
+	handler := func(ctx *fasthttp.RequestCtx) {
+		<-late
+		defer func() {
+			if r := recover(); r != nil {
+				accepted <- fmt.Errorf("panic: %v", r)
+			}
+		}()
+		accepted <- ctx.AcceptStream(func(fasthttp.StreamConn) {})
+	}
+	server := &fasthttp.Server{Handler: fasthttp.TimeoutHandler(handler, 10*time.Millisecond, "timeout")}
+	testServer := newTestServer(t, server, ServerConfig{EnableExtendedConnect: true})
+	peer := dialRawPeer(t, testServer.listener.Addr().String())
+	peer.writeHeaders(1, false,
+		[2]string{":method", fasthttp.MethodConnect},
+		[2]string{":protocol", "websocket"},
+		[2]string{":scheme", "http"},
+		[2]string{":authority", "example.com"},
+		[2]string{":path", "/ws"},
+	)
+	// The timeout response ends the stream, which the server then finalizes.
+	peer.waitForAny(2*time.Second, "rst_NO_ERROR")
+	close(late)
+	if err := <-accepted; !errors.Is(err, errStreamClosed) {
+		t.Fatalf("AcceptStream() from the abandoned handler = %v, want %v", err, errStreamClosed)
+	}
+}
+
 func TestResetExtendedConnectFreesStreamSlot(t *testing.T) {
 	server := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {

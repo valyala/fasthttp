@@ -546,11 +546,16 @@ func (s *serverStream) AcceptStream(handler fasthttp.StreamHandler) error {
 	if !s.conn.config.enableExtendedConnect {
 		return fasthttp.ErrProtocolNotSupported
 	}
+	s.acceptMu.Lock()
+	defer s.acceptMu.Unlock()
+	// A handler TimeoutHandler gave up on may still call this after its
+	// request was replaced and released.
+	if s.hasAbandonedRequest {
+		return errStreamClosed
+	}
 	if len(s.request.Request.Header.ConnectProtocol()) == 0 {
 		return errors.New("http2: request isn't an extended connect")
 	}
-	s.acceptMu.Lock()
-	defer s.acceptMu.Unlock()
 	if s.streamHandler != nil {
 		return errors.New("http2: stream is already accepted")
 	}
