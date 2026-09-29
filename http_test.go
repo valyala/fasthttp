@@ -1614,6 +1614,31 @@ func TestRequestWriteTo(t *testing.T) {
 	}
 }
 
+// A response without a body has no trailer section either.
+func TestResponseWriteSkipBodyOmitsTrailer(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	resp.SkipBody = true
+	if err := resp.Header.AddTrailer("X-Sum"); err != nil {
+		t.Fatal(err)
+	}
+	resp.Header.Set("X-Sum", "1")
+	resp.SetBodyStream(strings.NewReader("abc"), -1)
+
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := resp.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if wire := buf.String(); !strings.HasSuffix(wire, "Trailer: X-Sum\r\n\r\n") || strings.Contains(wire, "X-Sum: 1") {
+		t.Fatalf("wire = %q, want the headers alone", wire)
+	}
+}
+
 func TestResponseSkipBody(t *testing.T) {
 	t.Parallel()
 

@@ -2514,11 +2514,11 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (err error
 			if resp.ImmediateHeaderFlush {
 				err = w.Flush()
 			}
+			// Trailers frame the body, so a response without one has none.
 			if err == nil && sendBody {
-				err = writeBodyChunked(w, resp.bodyStream)
-			}
-			if err == nil {
-				err = resp.Header.writeTrailer(w)
+				if err = writeBodyChunked(w, resp.bodyStream); err == nil {
+					err = resp.Header.writeTrailer(w)
+				}
 			}
 		}
 	}
