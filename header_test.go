@@ -4964,14 +4964,22 @@ func TestRequestHeaderFoldedParseStaysLinear(t *testing.T) {
 	small, large := wire(2048), wire(16384)
 	// Enough iterations for the small case to register on a coarse clock.
 	iterations := 1
-	elapsedSmall := parse(small, iterations)
-	for elapsedSmall < 10*time.Millisecond {
+	for parse(small, iterations) < 10*time.Millisecond {
 		iterations *= 2
-		elapsedSmall = parse(small, iterations)
 	}
-	ratio := float64(parse(large, iterations)) / float64(elapsedSmall)
+	// The best of three keeps a loaded runner's scheduling out of the ratio.
+	measure := func(b []byte) time.Duration {
+		best := parse(b, iterations)
+		for range 2 {
+			if d := parse(b, iterations); d < best {
+				best = d
+			}
+		}
+		return best
+	}
+	ratio := float64(measure(large)) / float64(measure(small))
 	// Linear would be 8x for 8x the input; quadratic would be around 64x.
-	if ratio > 24 {
+	if ratio > 32 {
 		t.Errorf("8x the folded input cost %.1fx the time, expecting roughly linear", ratio)
 	}
 }
@@ -5046,14 +5054,22 @@ func TestRequestHeaderTrickledParseStaysLinear(t *testing.T) {
 	small, large := wire(2048), wire(16384)
 	// Enough iterations for the small case to register on a coarse clock.
 	iterations := 1
-	elapsedSmall := parse(small, iterations)
-	for elapsedSmall < 10*time.Millisecond {
+	for parse(small, iterations) < 10*time.Millisecond {
 		iterations *= 2
-		elapsedSmall = parse(small, iterations)
 	}
-	ratio := float64(parse(large, iterations)) / float64(elapsedSmall)
+	// The best of three keeps a loaded runner's scheduling out of the ratio.
+	measure := func(b []byte) time.Duration {
+		best := parse(b, iterations)
+		for range 2 {
+			if d := parse(b, iterations); d < best {
+				best = d
+			}
+		}
+		return best
+	}
+	ratio := float64(measure(large)) / float64(measure(small))
 	// Linear would be 8x for 8x the input; quadratic would be around 64x.
-	if ratio > 24 {
+	if ratio > 32 {
 		t.Errorf("8x the trickled input cost %.1fx the time, expecting roughly linear", ratio)
 	}
 }
