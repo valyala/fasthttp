@@ -347,7 +347,7 @@ func (c *clientConn) processResponseHeaders(frame *decodedClientHeaders) error {
 			stream.resp.Header.Del(fasthttp.HeaderTransferEncoding)
 		}
 	}
-	rejectOpenStream := false
+	var rejectOpenStream error
 	if stream.isOpenStream {
 		if status < 200 || status >= 300 {
 			err := fmt.Errorf("http2: extended connect failed with status %d", status)
@@ -356,7 +356,9 @@ func (c *clientConn) processResponseHeaders(frame *decodedClientHeaders) error {
 			stream.localClosed = true
 			stream.responseBody.closeWithError(err)
 			c.sendResultLocked(stream, clientResult{err: err})
-			rejectOpenStream = !frame.endStream
+			if !frame.endStream {
+				rejectOpenStream = err
+			}
 		} else {
 			if stream.timer != nil {
 				stream.timer.Stop()
@@ -377,8 +379,8 @@ func (c *clientConn) processResponseHeaders(frame *decodedClientHeaders) error {
 		c.endResponseLocked(stream, nil)
 	}
 	c.mu.Unlock()
-	if rejectOpenStream {
-		c.resetStream(frame.streamID, xhttp2.ErrCodeCancel, stream.err, false)
+	if rejectOpenStream != nil {
+		c.resetStream(frame.streamID, xhttp2.ErrCodeCancel, rejectOpenStream, false)
 	}
 	return nil
 }
