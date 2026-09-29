@@ -3418,11 +3418,12 @@ func (s *headerValueScanner) next() bool {
 	return true
 }
 
+// stripSpace trims optional whitespace (spaces and tabs, RFC 9110 section 5.6.3).
 func stripSpace(b []byte) []byte {
-	for len(b) > 0 && b[0] == ' ' {
+	for len(b) > 0 && (b[0] == ' ' || b[0] == '\t') {
 		b = b[1:]
 	}
-	for len(b) > 0 && b[len(b)-1] == ' ' {
+	for len(b) > 0 && (b[len(b)-1] == ' ' || b[len(b)-1] == '\t') {
 		b = b[:len(b)-1]
 	}
 	return b
