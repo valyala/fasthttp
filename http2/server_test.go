@@ -1625,16 +1625,17 @@ func TestResetExtendedConnectFreesStreamSlot(t *testing.T) {
 
 		// Freeing the slot happens when the tunnel handler goroutine returns
 		// and its completion command is processed -- asynchronous to frame
-		// processing, so the first follow-up may still see REFUSED_STREAM. A
-		// real leak never frees the slot, so every attempt would be refused;
-		// bounded retries distinguish a transient race from a leak without a
-		// fixed sleep.
+		// processing, so follow-ups may still see REFUSED_STREAM for as long
+		// as that goroutine waits to run. A real leak never frees the slot, so
+		// retrying for a bounded time tells the two apart.
 		accepted := false
-		for attempt := 0; attempt < 20 && !accepted; attempt++ {
+		for deadline := time.Now().Add(2 * time.Second); !accepted && time.Now().Before(deadline); {
 			peer.request(streamID, "/plain", true)
 			streamID += 2
 			_, kind := peer.waitForAny(2*time.Second, "headers", "rst_REFUSED_STREAM")
-			accepted = kind == "headers"
+			if accepted = kind == "headers"; !accepted {
+				time.Sleep(time.Millisecond)
+			}
 		}
 		if !accepted {
 			t.Fatalf("round %d: stream slot stayed occupied after the tunnel reset", round)
