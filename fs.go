@@ -902,6 +902,7 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 	var err error
 	if ff.f == nil {
 		n, err = w.Write(ff.dirIndex[r.startPos:r.endPos])
+		r.startPos += n
 		return int64(n), err
 	}
 
@@ -939,7 +940,9 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 	if err == io.EOF {
 		err = nil
 	}
-	return int64(curPos - r.startPos), err
+	written := curPos - r.startPos
+	r.startPos = curPos
+	return int64(written), err
 }
 
 type cacheManager interface {
