@@ -1582,6 +1582,83 @@ func (p *rawPeer) collect(timeout time.Duration) map[string]int {
 // A reset extended CONNECT stream must free its MAX_CONCURRENT_STREAMS slot.
 // The completion command used to race stream.Done, so it was dropped about half
 // the time; repeat enough to make a regression fail reliably.
+func TestStreamConnCloseOutlivingHandler(t *testing.T) {
+	// A Close from another goroutine can get in first, which makes the
+	// handler's own Close return at once; the stream then finalizes while that
+	// goroutine is still closing. Its remaining calls must fail cleanly rather
+	// than reach a recycled stream.
+	conns := make(chan *streamConn, 1)
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			if err := ctx.AcceptStream(func(stream fasthttp.StreamConn) {
+				conn := stream.(*streamConn) //nolint:forcetypeassert
+				// What that Close does first.
+				conn.mu.Lock()
+				conn.isClosed = true
+				conn.mu.Unlock()
+				conns <- conn
+			}); err != nil {
+				t.Errorf("AcceptStream() error: %v", err)
+			}
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{EnableExtendedConnect: true})
+	peer := dialRawPeer(t, testServer.listener.Addr().String())
+	peer.writeHeaders(1, false,
+		[2]string{":method", fasthttp.MethodConnect},
+		[2]string{":protocol", "websocket"},
+		[2]string{":scheme", "http"},
+		[2]string{":authority", "example.com"},
+		[2]string{":path", "/ws"},
+	)
+	conn := <-conns
+	peer.waitForAny(2*time.Second, "rst_NO_ERROR")
+	// The event loop answers a PING only after it finalized the stream.
+	if err := peer.framer.WritePing(false, [8]byte{1}); err != nil {
+		t.Fatalf("WritePing() error: %v", err)
+	}
+	for {
+		_ = peer.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		frame, err := peer.framer.ReadFrame()
+		if err != nil {
+			t.Fatalf("waiting for the PING ack: %v", err)
+		}
+		if ping, ok := frame.(*xhttp2.PingFrame); ok && ping.IsAck() {
+			break
+		}
+	}
+
+	for name, call := range map[string]func() error{"CloseRead": conn.CloseRead, "CloseWrite": conn.CloseWrite} {
+		result := make(chan error, 1)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					result <- fmt.Errorf("panic: %v", r)
+				}
+			}()
+			result <- call()
+		}()
+		select {
+		case err := <-result:
+			if !errors.Is(err, errStreamClosed) {
+				t.Fatalf("%s() on the finalized stream = %v, want %v", name, err, errStreamClosed)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s() on the finalized stream never returned", name)
+		}
+	}
+	// A deadline timer firing this late cancels by stream ID and finds
+	// nothing; it must not reach the stream either.
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("late deadline cancel: panic: %v", r)
+			}
+		}()
+		conn.cancel()
+	}()
+}
+
 func TestResetExtendedConnectFreesStreamSlot(t *testing.T) {
 	server := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {

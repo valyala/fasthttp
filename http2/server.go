@@ -1837,6 +1837,7 @@ func (c *serverConn) startStreamHandler(
 	handler fasthttp.StreamHandler,
 ) {
 	stream.handlerDone = false
+	stream.hasStreamConn = true
 	c.workers.Go(func() {
 		var reader io.Reader = bytes.NewReader(nil)
 		if stream.body != nil {
@@ -2106,7 +2107,7 @@ func (c *serverConn) maybeFinalizeStream(stream *serverStream) {
 		c.protocolContext.ReleaseRequestCtx(stream.request)
 		stream.request = nil
 	}
-	if !stream.hasAbandonedRequest {
+	if !stream.hasAbandonedRequest && !stream.hasStreamConn {
 		releaseServerStream(stream)
 	}
 }

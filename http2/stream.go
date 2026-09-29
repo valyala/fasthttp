@@ -375,6 +375,10 @@ type serverStream struct {
 	responsePumpStarted bool
 	responsePumpDone    bool
 	hasAbandonedRequest bool
+	// hasStreamConn marks a stream handed to a stream handler. Its StreamConn
+	// may be used past the handler from another goroutine, so the stream
+	// must stay intact once finalized rather than return to the pool.
+	hasStreamConn bool
 
 	acceptMu      sync.Mutex
 	streamHandler fasthttp.StreamHandler
