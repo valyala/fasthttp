@@ -50,7 +50,10 @@ func TestIssue28ResponseWithoutBodyNoContentType(t *testing.T) {
 // (ResponseHeader.SetContentLength). Parsing keeps whatever the peer sent so
 // the value stays observable, but serializing it re-emits a Content-Length
 // that announces a body the status code does not allow. That is what a proxy
-// forwarding a 204/304 would put on the wire.
+// forwarding a 204 would put on the wire.
+//
+// Only 204 is covered here: a 1xx response carrying Content-Length is already
+// rejected while parsing, so the serialization guard is unreachable for it.
 func TestResponseBodylessStatusOmitsContentLength(t *testing.T) {
 	t.Parallel()
 
@@ -60,7 +63,6 @@ func TestResponseBodylessStatusOmitsContentLength(t *testing.T) {
 		status string
 	}{
 		{"204", "HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\n", "HTTP/1.1 204 No Content\r\n"},
-		{"304", "HTTP/1.1 304 Not Modified\r\nContent-Length: 5\r\n\r\n", "HTTP/1.1 304 Not Modified\r\n"},
 	} {
 		var resp Response
 		if err := resp.Read(bufio.NewReader(strings.NewReader(tc.raw))); err != nil {
@@ -82,6 +84,47 @@ func TestResponseBodylessStatusOmitsContentLength(t *testing.T) {
 		if strings.Contains(s, "Content-Type") {
 			t.Fatalf("%s: unexpected Content-Type in %q", tc.name, s)
 		}
+	}
+}
+
+// A 304 has no body of its own, but RFC 9110 section 8.6 still allows
+// Content-Length there, where it describes the corresponding 200 response. A
+// proxy forwarding a parsed 304 must keep it, or the client cannot tell how
+// large the cached representation is.
+func TestResponseNotModifiedKeepsContentLength(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 304 Not Modified\r\nContent-Length: 5\r\n\r\n"))); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cl := resp.Header.ContentLength(); cl != 5 {
+		t.Fatalf("unexpected content-length %d. Expecting 5", cl)
+	}
+
+	s := resp.String()
+	if !strings.Contains(s, "Content-Length: 5\r\n") {
+		t.Fatalf("expecting Content-Length to be preserved in %q", s)
+	}
+}
+
+// A 204 must not gain a default Content-Type, but an explicitly set one is
+// still emitted: a response without a body may still carry representation
+// metadata (RFC 9110 section 15.3.5).
+func TestResponseNoContentExplicitContentType(t *testing.T) {
+	t.Parallel()
+
+	var r Response
+	r.Header.SetStatusCode(StatusNoContent)
+	r.Header.SetContentType("application/json")
+
+	s := r.String()
+	if !strings.Contains(s, "Content-Type: application/json\r\n") {
+		t.Fatalf("expecting explicitly set Content-Type in %q", s)
+	}
+	if strings.Contains(s, "Content-Length") {
+		t.Fatalf("unexpected Content-Length in %q", s)
 	}
 }
 
