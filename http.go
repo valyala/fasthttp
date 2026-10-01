@@ -78,7 +78,13 @@ type Request struct {
 	parsedPostArgs bool
 	uriParseErr    error
 
-	keepBodyBuffer bool
+	// KeepBodyBuffer controls whether the request body buffer is kept
+	// across Reset() calls and reuse instead of returning it to requestBodyPool.
+	//
+	// It is false by default. Set it to true if you want to reuse the same
+	// Request instance across multiple requests without reallocating
+	// or returning the body buffer to the pool.
+	KeepBodyBuffer bool
 
 	// Used by byte-returning client helpers so body limits and retries remain
 	// inside the normal buffered request path. This is deliberately not copied
@@ -148,7 +154,14 @@ type Response struct {
 	// Use it for writing HEAD responses.
 	SkipBody bool
 
-	keepBodyBuffer        bool
+	// KeepBodyBuffer controls whether the response body buffer is kept
+	// across Reset() calls and reuse instead of returning it to responseBodyPool.
+	//
+	// It is false by default. Set it to true if you want to reuse the same
+	// Response instance across multiple requests without reallocating
+	// or returning the body buffer to the pool.
+	KeepBodyBuffer bool
+
 	preserveBodyBuffer    bool
 	secureErrorLogMessage bool
 }
@@ -866,7 +879,7 @@ func (resp *Response) ResetBody() {
 	resp.bodyRaw = nil
 	resp.closeBodyStream(nil) //nolint:errcheck
 	if resp.body != nil {
-		if resp.keepBodyBuffer {
+		if resp.KeepBodyBuffer {
 			resp.body.Reset()
 		} else {
 			responseBodyPool.Put(resp.body)
@@ -1045,7 +1058,7 @@ func (req *Request) ResetBody() {
 	req.serverStream = nil
 	if req.body != nil {
 		switch {
-		case req.keepBodyBuffer:
+		case req.KeepBodyBuffer:
 			req.body.Reset()
 		case rs != nil:
 			// The server still drains rs after the handler returns, and it
@@ -1091,6 +1104,7 @@ func (req *Request) copyToSkipBody(dst *Request) {
 	dst.UseHostHeader = req.UseHostHeader
 	dst.DisableRedirectPathNormalizing = req.DisableRedirectPathNormalizing
 	dst.logger = req.logger
+	dst.KeepBodyBuffer = req.KeepBodyBuffer
 
 	// do not copy multipartForm - it will be automatically
 	// re-created on the first call to MultipartForm.
@@ -1117,6 +1131,7 @@ func (resp *Response) copyToSkipBody(dst *Response) {
 	dst.Reset()
 	resp.Header.CopyTo(&dst.Header)
 	dst.SkipBody = resp.SkipBody
+	dst.KeepBodyBuffer = resp.KeepBodyBuffer
 	dst.raddr = resp.raddr
 	dst.laddr = resp.laddr
 }
