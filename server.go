@@ -2632,6 +2632,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 					}
 
 					ctx.SetStatusCode(StatusExpectationFailed)
+					// Close connection since client may have already started sending body data.
+					connectionClose = true
 				}
 			}
 

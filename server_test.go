@@ -2308,6 +2308,57 @@ func TestServerContinueHandler(t *testing.T) {
 	}
 }
 
+func TestServerContinueHandlerConnectionClose(t *testing.T) {
+	t.Parallel()
+
+	var paths []string
+	s := &Server{
+		ContinueHandler: func(headers *RequestHeader) bool {
+			return headers.ContentLength() <= 5
+		},
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			ctx.WriteString("ok") //nolint:errcheck
+		},
+	}
+
+	// A denied request leaves its declared body unread, so the connection must
+	// not be reused: those bytes would be read as the next request.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: gle.com\r\n\r\n"
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-continue\r\n"+
+			"Content-Length: %d\r\nContent-Type: a/b\r\n\r\n%s",
+		len(smuggled), smuggled)
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Unexpected error when reading response: %v", err)
+	}
+	if resp.StatusCode() != StatusExpectationFailed {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusExpectationFailed)
+	}
+	if !resp.Header.ConnectionClose() {
+		t.Fatal("response should have Connection: close header")
+	}
+
+	data, err := io.ReadAll(br)
+	if err != nil {
+		t.Fatalf("Unexpected error when reading remaining data: %v", err)
+	}
+	if len(data) > 0 {
+		t.Fatalf("unexpected remaining data %q. Connection should have been closed", data)
+	}
+	if len(paths) > 0 {
+		t.Fatalf("unexpected handler paths %q. Expecting none", paths)
+	}
+}
+
 func TestServerExpectHandler(t *testing.T) {
 	t.Parallel()
 
@@ -5724,6 +5775,20 @@ func (rw *readWriter) SetReadDeadline(t time.Time) error {
 
 func (rw *readWriter) SetWriteDeadline(t time.Time) error {
 	return nil
+}
+
+// oneByteReadWriter hands out a single byte per Read, so nothing past the
+// header block ends up buffered. That is what a request body arriving after
+// its headers looks like to the server.
+type oneByteReadWriter struct {
+	readWriter
+}
+
+func (rw *oneByteReadWriter) Read(b []byte) (int, error) {
+	if len(b) > 1 {
+		b = b[:1]
+	}
+	return rw.readWriter.Read(b)
 }
 
 type testLogger struct {
