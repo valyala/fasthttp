@@ -3432,6 +3432,120 @@ func TestRequestRawBodyReset(t *testing.T) {
 	testBodyWriteTo(t, &r, "", true)
 }
 
+func TestResponseKeepBodyBuffer(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	if resp.KeepBodyBuffer {
+		t.Fatalf("expected KeepBodyBuffer to be false by default")
+	}
+	resp.SetBodyString("foobar")
+	if resp.body == nil {
+		t.Fatalf("expected non-nil resp.body")
+	}
+	resp.ResetBody()
+	if resp.body != nil {
+		t.Fatalf("expected nil resp.body after ResetBody when KeepBodyBuffer is false")
+	}
+
+	resp.KeepBodyBuffer = true
+	resp.SetBodyString("foobar-large-buffer-content")
+	buf := resp.body
+	if buf == nil {
+		t.Fatalf("expected non-nil resp.body")
+	}
+	initialCap := cap(buf.B)
+
+	resp.ResetBody()
+	if resp.body == nil {
+		t.Fatalf("expected non-nil resp.body after ResetBody with KeepBodyBuffer=true")
+	}
+	if len(resp.Body()) != 0 {
+		t.Fatalf("expected empty body after ResetBody, got %q", resp.Body())
+	}
+	if cap(resp.body.B) != initialCap {
+		t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(resp.body.B))
+	}
+
+	resp.SetBodyString("new-content")
+	resp.Reset()
+	if resp.body == nil {
+		t.Fatalf("expected non-nil resp.body after Reset with KeepBodyBuffer=true")
+	}
+	if len(resp.Body()) != 0 {
+		t.Fatalf("expected empty body after Reset, got %q", resp.Body())
+	}
+	if cap(resp.body.B) != initialCap {
+		t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(resp.body.B))
+	}
+}
+
+func TestRequestKeepBodyBuffer(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	if req.KeepBodyBuffer {
+		t.Fatalf("expected KeepBodyBuffer to be false by default")
+	}
+	req.SetBodyString("foobar")
+	if req.body == nil {
+		t.Fatalf("expected non-nil req.body")
+	}
+	req.ResetBody()
+	if req.body != nil {
+		t.Fatalf("expected nil req.body after ResetBody when KeepBodyBuffer is false")
+	}
+
+	req.KeepBodyBuffer = true
+	req.SetBodyString("foobar-large-buffer-content")
+	buf := req.body
+	if buf == nil {
+		t.Fatalf("expected non-nil req.body")
+	}
+	initialCap := cap(buf.B)
+
+	req.ResetBody()
+	if req.body == nil {
+		t.Fatalf("expected non-nil req.body after ResetBody with KeepBodyBuffer=true")
+	}
+	if len(req.Body()) != 0 {
+		t.Fatalf("expected empty body after ResetBody, got %q", req.Body())
+	}
+	if cap(req.body.B) != initialCap {
+		t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(req.body.B))
+	}
+
+	req.SetBodyString("new-content")
+	req.Reset()
+	if req.body == nil {
+		t.Fatalf("expected non-nil req.body after Reset with KeepBodyBuffer=true")
+	}
+	if len(req.Body()) != 0 {
+		t.Fatalf("expected empty body after Reset, got %q", req.Body())
+	}
+	if cap(req.body.B) != initialCap {
+		t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(req.body.B))
+	}
+}
+
+func TestKeepBodyBufferCopyTo(t *testing.T) {
+	t.Parallel()
+
+	var req1, req2 Request
+	req1.KeepBodyBuffer = true
+	req1.CopyTo(&req2)
+	if !req2.KeepBodyBuffer {
+		t.Fatalf("expected req2.KeepBodyBuffer to be true after CopyTo")
+	}
+
+	var resp1, resp2 Response
+	resp1.KeepBodyBuffer = true
+	resp1.CopyTo(&resp2)
+	if !resp2.KeepBodyBuffer {
+		t.Fatalf("expected resp2.KeepBodyBuffer to be true after CopyTo")
+	}
+}
+
 func TestResponseRawBodyCopyTo(t *testing.T) {
 	t.Parallel()
 
