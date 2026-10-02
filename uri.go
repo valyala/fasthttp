@@ -684,6 +684,59 @@ func validOptionalPort(port []byte) bool {
 	return true
 }
 
+// removeSegments removes every occurrence of p from b, leaving p[0] behind,
+// and returns the result written over b.
+//
+// Removing one occurrence can expose another that ends where it did, so the
+// bytes already written are rechecked after every one. That keeps the whole
+// rewrite to a single pass: removing an occurrence used to move everything
+// behind it, which costs O(len(b)^2) for a path built out of nothing but p.
+func removeSegments(b, p []byte) []byte {
+	n := bytes.Index(b, p)
+	if n < 0 {
+		return b
+	}
+	last := p[len(p)-1]
+	w := n
+	for r := n; r < len(b); r++ {
+		b[w] = b[r]
+		w++
+		for w >= len(p) && b[w-1] == last && bytes.Equal(b[w-len(p):w], p) {
+			w -= len(p) - 1
+		}
+	}
+	return b[:w]
+}
+
+// removeParentSegments removes every occurrence of p from b together with the
+// path segment in front of it, and returns the result written over b. sep is
+// the separator left where that segment started; a zero sep keeps the byte
+// that is already there.
+//
+// Single pass for the same reason as removeSegments. Each parent lookup walks
+// back over a segment that the removal then drops, so the lookups add up to
+// one more pass over b.
+func removeParentSegments(b, p []byte, sep byte) []byte {
+	n := bytes.Index(b, p)
+	if n < 0 {
+		return b
+	}
+	last := p[len(p)-1]
+	w := n
+	for r := n; r < len(b); r++ {
+		b[w] = b[r]
+		w++
+		for w >= len(p) && b[w-1] == last && bytes.Equal(b[w-len(p):w], p) {
+			w = max(bytes.LastIndexByte(b[:w-len(p)], '/'), 0)
+			if sep != 0 {
+				b[w] = sep
+			}
+			w++
+		}
+	}
+	return b[:w]
+}
+
 func normalizePath(dst, src []byte) []byte {
 	if len(src) == 1 && src[0] == '/' {
 		return append(dst[:0], '/')
@@ -693,48 +746,18 @@ func normalizePath(dst, src []byte) []byte {
 	dst = decodeArgAppendNoPlus(dst, src)
 
 	// remove duplicate slashes
-	b := dst
-	bSize := len(b)
-	for {
-		n := bytes.Index(b, strSlashSlash)
-		if n < 0 {
-			break
-		}
-		b = b[n:]
-		copy(b, b[1:])
-		b = b[:len(b)-1]
-		bSize--
-	}
-	dst = dst[:bSize]
+	b := removeSegments(dst, strSlashSlash)
 
 	// No '.' means no "/./", "/../" or "/.." to remove.
-	b = dst
 	if bytes.IndexByte(b, '.') < 0 {
 		return b
 	}
 
 	// remove /./ parts
-	for {
-		n := bytes.Index(b, strSlashDotSlash)
-		if n < 0 {
-			break
-		}
-		nn := n + len(strSlashDotSlash) - 1
-		copy(b[n:], b[nn:])
-		b = b[:len(b)-nn+n]
-	}
+	b = removeSegments(b, strSlashDotSlash)
 
 	// remove /foo/../ parts
-	for {
-		n := bytes.Index(b, strSlashDotDotSlash)
-		if n < 0 {
-			break
-		}
-		nn := max(bytes.LastIndexByte(b[:n], '/'), 0)
-		n += len(strSlashDotDotSlash) - 1
-		copy(b[nn:], b[n:])
-		b = b[:len(b)-n+nn]
-	}
+	b = removeParentSegments(b, strSlashDotDotSlash, '/')
 
 	// remove trailing /foo/..
 	n := bytes.LastIndex(b, strSlashDotDot)
@@ -754,40 +777,13 @@ func normalizePath(dst, src []byte) []byte {
 
 	if filepath.Separator == '\\' {
 		// remove \.\ parts
-		for {
-			n := bytes.Index(b, strBackSlashDotBackSlash)
-			if n < 0 {
-				break
-			}
-			nn := n + len(strSlashDotSlash) - 1
-			copy(b[n:], b[nn:])
-			b = b[:len(b)-nn+n]
-		}
+		b = removeSegments(b, strBackSlashDotBackSlash)
 
 		// remove /foo/..\ parts
-		for {
-			n := bytes.Index(b, strSlashDotDotBackSlash)
-			if n < 0 {
-				break
-			}
-			nn := max(bytes.LastIndexByte(b[:n], '/'), 0)
-			nn++
-			n += len(strSlashDotDotBackSlash)
-			copy(b[nn:], b[n:])
-			b = b[:len(b)-n+nn]
-		}
+		b = removeParentSegments(b, strSlashDotDotBackSlash, 0)
 
 		// remove /foo\..\ parts
-		for {
-			n := bytes.Index(b, strBackSlashDotDotBackSlash)
-			if n < 0 {
-				break
-			}
-			nn := max(bytes.LastIndexByte(b[:n], '/'), 0)
-			n += len(strBackSlashDotDotBackSlash) - 1
-			copy(b[nn:], b[n:])
-			b = b[:len(b)-n+nn]
-		}
+		b = removeParentSegments(b, strBackSlashDotDotBackSlash, '\\')
 
 		// remove trailing \foo\..
 		n := bytes.LastIndex(b, strBackSlashDotDot)

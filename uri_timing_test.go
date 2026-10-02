@@ -1,6 +1,7 @@
 package fasthttp
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -14,6 +15,16 @@ func BenchmarkURIParsePathQueryString(b *testing.B) {
 
 func BenchmarkURIParsePathQueryStringHash(b *testing.B) {
 	benchmarkURIParse(b, "google.com", "/foo/bar?query=string&other=value#hashstring")
+}
+
+// A request URI made of nothing but separators or dot segments normalizes to
+// "/", so these measure the cost of getting there rather than the result.
+func BenchmarkURIParsePathSlashRun(b *testing.B) {
+	benchmarkURIParse(b, "google.com", strings.Repeat("/", 8*1024))
+}
+
+func BenchmarkURIParsePathDotSegments(b *testing.B) {
+	benchmarkURIParse(b, "google.com", strings.Repeat("/a/..", 1638))
 }
 
 func BenchmarkURIParseHostname(b *testing.B) {
