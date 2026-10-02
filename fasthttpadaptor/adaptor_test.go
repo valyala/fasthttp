@@ -1769,3 +1769,96 @@ func TestStreamBodyTrailersAfterClose(t *testing.T) {
 		<-read
 	}
 }
+
+type unwrapResponseWriter struct {
+	http.ResponseWriter
+}
+
+func (u *unwrapResponseWriter) Unwrap() http.ResponseWriter {
+	return u.ResponseWriter
+}
+
+func TestResponseControllerDeadlines(t *testing.T) {
+	t.Parallel()
+
+	// Direct tests on writer with nil ctx
+	w := &writer{}
+	d := time.Now().Add(time.Second)
+	if err := w.SetReadDeadline(d); !errors.Is(err, fasthttp.ErrNilConnection) {
+		t.Fatalf("expected ErrNilConnection, got %v", err)
+	}
+	if err := w.SetWriteDeadline(d); !errors.Is(err, fasthttp.ErrNilConnection) {
+		t.Fatalf("expected ErrNilConnection, got %v", err)
+	}
+	if err := w.SetDeadline(d); !errors.Is(err, fasthttp.ErrNilConnection) {
+		t.Fatalf("expected ErrNilConnection, got %v", err)
+	}
+
+	var (
+		directReadErr, directWriteErr   error
+		wrappedReadErr, wrappedWriteErr error
+		implementsRead, implementsWrite bool
+	)
+
+	s := &fasthttp.Server{
+		Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := w.(interface{ SetReadDeadline(time.Time) error }); ok {
+				implementsRead = true
+			}
+			if _, ok := w.(interface{ SetWriteDeadline(time.Time) error }); ok {
+				implementsWrite = true
+			}
+
+			// Test direct http.ResponseController
+			rc := http.NewResponseController(w)
+			directReadErr = rc.SetReadDeadline(time.Now().Add(5 * time.Second))
+			directWriteErr = rc.SetWriteDeadline(time.Now().Add(5 * time.Second))
+
+			// Test wrapped ResponseController with Unwrap()
+			wrappedRC := http.NewResponseController(&unwrapResponseWriter{ResponseWriter: w})
+			wrappedReadErr = wrappedRC.SetReadDeadline(time.Now().Add(5 * time.Second))
+			wrappedWriteErr = wrappedRC.SetWriteDeadline(time.Now().Add(5 * time.Second))
+
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		}),
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatalf("reading response: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	if !implementsRead {
+		t.Fatal("expected ResponseWriter to implement SetReadDeadline")
+	}
+	if !implementsWrite {
+		t.Fatal("expected ResponseWriter to implement SetWriteDeadline")
+	}
+	if directReadErr != nil {
+		t.Fatalf("unexpected directReadErr: %v", directReadErr)
+	}
+	if directWriteErr != nil {
+		t.Fatalf("unexpected directWriteErr: %v", directWriteErr)
+	}
+	if wrappedReadErr != nil {
+		t.Fatalf("unexpected wrappedReadErr: %v", wrappedReadErr)
+	}
+	if wrappedWriteErr != nil {
+		t.Fatalf("unexpected wrappedWriteErr: %v", wrappedWriteErr)
+	}
+}
+

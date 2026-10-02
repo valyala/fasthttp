@@ -16,6 +16,11 @@ func TestExportedErrorStrings(t *testing.T) {
 			want: "fasthttp: server is already serving connections",
 		},
 		{
+			name: "ErrNilConnection",
+			err:  ErrNilConnection,
+			want: "fasthttp: nil connection",
+		},
+		{
 			name: "ErrMissingFile",
 			err:  ErrMissingFile,
 			want: "fasthttp: there is no uploaded file associated with the given key",
