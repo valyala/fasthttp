@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/valyala/fasthttp"
 )
@@ -316,7 +317,8 @@ const (
 	modeAborted
 )
 
-// Writer implements http.ResponseWriter + http.Flusher + http.Hijacker for the adaptor.
+// Writer implements http.ResponseWriter + http.Flusher + http.Hijacker +
+// SetReadDeadline/SetWriteDeadline (for http.ResponseController) for the adaptor.
 type writer struct {
 	ctx        *fasthttp.RequestCtx
 	h          http.Header
@@ -639,4 +641,30 @@ func addTrailer(ctx *fasthttp.RequestCtx, name string, values []string) {
 	for _, v := range values {
 		ctx.Response.Header.Add(name, v)
 	}
+}
+
+// SetReadDeadline sets the read deadline on the underlying connection.
+// This enables support for http.ResponseController.SetReadDeadline.
+func (w *writer) SetReadDeadline(deadline time.Time) error {
+	if w.ctx == nil {
+		return fasthttp.ErrNilConnection
+	}
+	return w.ctx.SetReadDeadline(deadline)
+}
+
+// SetWriteDeadline sets the write deadline on the underlying connection.
+// This enables support for http.ResponseController.SetWriteDeadline.
+func (w *writer) SetWriteDeadline(deadline time.Time) error {
+	if w.ctx == nil {
+		return fasthttp.ErrNilConnection
+	}
+	return w.ctx.SetWriteDeadline(deadline)
+}
+
+// SetDeadline sets the read and write deadlines on the underlying connection.
+func (w *writer) SetDeadline(deadline time.Time) error {
+	if w.ctx == nil {
+		return fasthttp.ErrNilConnection
+	}
+	return w.ctx.SetDeadline(deadline)
 }

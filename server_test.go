@@ -6125,3 +6125,33 @@ func TestServerKeepAliveRequestStateIsolation(t *testing.T) {
 		t.Fatalf("served %d requests, expecting 2", requestNum)
 	}
 }
+
+func TestRequestCtxDeadlines(t *testing.T) {
+	t.Parallel()
+
+	// When connection is nil
+	var ctx RequestCtx
+	d := time.Now().Add(time.Second)
+	if err := ctx.SetReadDeadline(d); !errors.Is(err, ErrNilConnection) {
+		t.Fatalf("expected ErrNilConnection, got %v", err)
+	}
+	if err := ctx.SetWriteDeadline(d); !errors.Is(err, ErrNilConnection) {
+		t.Fatalf("expected ErrNilConnection, got %v", err)
+	}
+	if err := ctx.SetDeadline(d); !errors.Is(err, ErrNilConnection) {
+		t.Fatalf("expected ErrNilConnection, got %v", err)
+	}
+
+	// When connection is present
+	rw := &readWriter{}
+	ctx.c = rw
+	if err := ctx.SetReadDeadline(d); err != nil {
+		t.Fatalf("unexpected error from SetReadDeadline: %v", err)
+	}
+	if err := ctx.SetWriteDeadline(d); err != nil {
+		t.Fatalf("unexpected error from SetWriteDeadline: %v", err)
+	}
+	if err := ctx.SetDeadline(d); err != nil {
+		t.Fatalf("unexpected error from SetDeadline: %v", err)
+	}
+}

@@ -24,6 +24,9 @@ var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 // Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
 var ErrAlreadyServing = errors.New("fasthttp: server is already serving connections")
 
+// ErrNilConnection is returned when attempting to set deadlines on a nil connection.
+var ErrNilConnection = errors.New("fasthttp: nil connection")
+
 // ServeConn serves HTTP requests from the given connection
 // using the given handler.
 //
@@ -917,6 +920,30 @@ func (ctx *RequestCtx) TLSConnectionState() *tls.ConnectionState {
 // Reading from or writing to the returned connection will end badly!
 func (ctx *RequestCtx) Conn() net.Conn {
 	return ctx.c
+}
+
+// SetReadDeadline sets the read deadline on the underlying connection.
+func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
+	if ctx.c == nil {
+		return ErrNilConnection
+	}
+	return ctx.c.SetReadDeadline(deadline)
+}
+
+// SetWriteDeadline sets the write deadline on the underlying connection.
+func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
+	if ctx.c == nil {
+		return ErrNilConnection
+	}
+	return ctx.c.SetWriteDeadline(deadline)
+}
+
+// SetDeadline sets the read and write deadlines associated with the underlying connection.
+func (ctx *RequestCtx) SetDeadline(deadline time.Time) error {
+	if ctx.c == nil {
+		return ErrNilConnection
+	}
+	return ctx.c.SetDeadline(deadline)
 }
 
 func (ctx *RequestCtx) reset() {
