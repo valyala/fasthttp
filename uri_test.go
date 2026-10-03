@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -336,6 +337,14 @@ func TestURIPathNormalize(t *testing.T) {
 	testURIPathNormalize(t, &u, "./foo/", "/foo/")
 	testURIPathNormalize(t, &u, "./../.././../../aaa/bbb/../../../././../", "/")
 	testURIPathNormalize(t, &u, "./a/./.././../b/./foo.html", "/b/foo.html")
+
+	// long runs of separators and dot segments, removed in one pass
+	testURIPathNormalize(t, &u, "/a"+strings.Repeat("/", 64)+"b", "/a/b")
+	testURIPathNormalize(t, &u, strings.Repeat("/", 64), "/")
+	testURIPathNormalize(t, &u, strings.Repeat("/.", 64)+"/a", "/a")
+	testURIPathNormalize(t, &u, strings.Repeat("/..", 64)+"/a", "/a")
+	testURIPathNormalize(t, &u, "/a"+strings.Repeat("/b/..", 64)+"/c", "/a/c")
+	testURIPathNormalize(t, &u, "/a"+strings.Repeat("/./b/../", 64), "/a/")
 
 	// trailing single dot, see RFC 3986 section 5.2.4 step 2B
 	testURIPathNormalize(t, &u, "/.", "/")
