@@ -1862,3 +1862,123 @@ func TestResponseControllerDeadlines(t *testing.T) {
 	}
 }
 
+func TestResponseControllerStreamingWriteDeadlineOverride(t *testing.T) {
+	t.Parallel()
+
+	s := &fasthttp.Server{
+		WriteTimeout: 40 * time.Millisecond,
+		Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			rc := http.NewResponseController(w)
+			if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+				t.Errorf("unexpected SetWriteDeadline error: %v", err)
+			}
+			w.WriteHeader(http.StatusOK)
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+			time.Sleep(120 * time.Millisecond)
+			_, _ = w.Write([]byte("streaming body content"))
+		}),
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatalf("reading response: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		t.Fatalf("reading body: %v", err)
+	}
+	if string(body) != "streaming body content" {
+		t.Fatalf("unexpected body: %q", string(body))
+	}
+}
+
+func TestResponseControllerKeepAliveDeadlinesCleared(t *testing.T) {
+	t.Parallel()
+
+	for _, deadlineType := range []string{"read", "write"} {
+		t.Run(deadlineType, func(t *testing.T) {
+			var requestCount atomic.Int64
+			s := &fasthttp.Server{
+				ReadTimeout:  0,
+				IdleTimeout:  0,
+				WriteTimeout: 0,
+				Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					reqNum := requestCount.Add(1)
+					rc := http.NewResponseController(w)
+					if reqNum == 1 {
+						deadline := time.Now().Add(100 * time.Millisecond)
+						if deadlineType == "read" {
+							if err := rc.SetReadDeadline(deadline); err != nil {
+								t.Errorf("SetReadDeadline error: %v", err)
+							}
+						} else {
+							if err := rc.SetWriteDeadline(deadline); err != nil {
+								t.Errorf("SetWriteDeadline error: %v", err)
+							}
+						}
+					}
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write([]byte(fmt.Sprintf("resp-%d", reqNum)))
+				}),
+			}
+			ln := fasthttputil.NewInmemoryListener()
+			go s.Serve(ln) //nolint:errcheck
+			defer ln.Close()
+
+			c, err := ln.Dial()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+
+			br := bufio.NewReader(c)
+
+			// First request
+			if _, err := c.Write([]byte("GET /req1 HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+				t.Fatal(err)
+			}
+			resp1, err := http.ReadResponse(br, nil)
+			if err != nil {
+				t.Fatalf("reading response 1: %v", err)
+			}
+			body1, err := io.ReadAll(resp1.Body)
+			_ = resp1.Body.Close()
+			if err != nil || string(body1) != "resp-1" {
+				t.Fatalf("response 1 unexpected: body=%q, err=%v", string(body1), err)
+			}
+
+			// Wait for the 100ms deadline to expire
+			time.Sleep(150 * time.Millisecond)
+
+			// Second request on the same keep-alive connection
+			if _, err := c.Write([]byte("GET /req2 HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+				t.Fatalf("writing request 2: %v", err)
+			}
+			resp2, err := http.ReadResponse(br, nil)
+			if err != nil {
+				t.Fatalf("reading response 2: %v", err)
+			}
+			body2, err := io.ReadAll(resp2.Body)
+			_ = resp2.Body.Close()
+			if err != nil || string(body2) != "resp-2" {
+				t.Fatalf("response 2 unexpected: body=%q, err=%v", string(body2), err)
+			}
+		})
+	}
+}
+
