@@ -358,6 +358,9 @@ func acquireWriter(ctx *fasthttp.RequestCtx) *writer {
 
 func releaseWriter(w *writer) {
 	_ = w.Close()
+	w.mu.Lock()
+	w.ctx = nil
+	w.mu.Unlock()
 	if w.bufPool != nil {
 		bufferPool.Put(w.bufPool)
 		w.bufPool = nil
@@ -646,25 +649,34 @@ func addTrailer(ctx *fasthttp.RequestCtx, name string, values []string) {
 // SetReadDeadline sets the read deadline on the underlying connection.
 // This enables support for http.ResponseController.SetReadDeadline.
 func (w *writer) SetReadDeadline(deadline time.Time) error {
-	if w.ctx == nil {
+	w.mu.Lock()
+	ctx := w.ctx
+	w.mu.Unlock()
+	if ctx == nil {
 		return fasthttp.ErrNilConnection
 	}
-	return w.ctx.SetReadDeadline(deadline)
+	return ctx.SetReadDeadline(deadline)
 }
 
 // SetWriteDeadline sets the write deadline on the underlying connection.
 // This enables support for http.ResponseController.SetWriteDeadline.
 func (w *writer) SetWriteDeadline(deadline time.Time) error {
-	if w.ctx == nil {
+	w.mu.Lock()
+	ctx := w.ctx
+	w.mu.Unlock()
+	if ctx == nil {
 		return fasthttp.ErrNilConnection
 	}
-	return w.ctx.SetWriteDeadline(deadline)
+	return ctx.SetWriteDeadline(deadline)
 }
 
 // SetDeadline sets the read and write deadlines on the underlying connection.
 func (w *writer) SetDeadline(deadline time.Time) error {
-	if w.ctx == nil {
+	w.mu.Lock()
+	ctx := w.ctx
+	w.mu.Unlock()
+	if ctx == nil {
 		return fasthttp.ErrNilConnection
 	}
-	return w.ctx.SetDeadline(deadline)
+	return ctx.SetDeadline(deadline)
 }
