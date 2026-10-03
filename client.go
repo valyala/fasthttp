@@ -1770,12 +1770,14 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	// Free up resources occupied by response before sending the request,
 	// so the GC may reclaim these resources (e.g. response body).
 
-	// backing up SkipBody in case it was set explicitly
+	// Preserve response options that may have been set explicitly.
 	customSkipBody := resp.SkipBody
 	customStreamBody := !req.forceResponseBodyBuffering && (resp.StreamBody || c.StreamResponseBody)
+	customNoDefaultContentType := resp.Header.noDefaultContentType
 	resp.Reset()
 	resp.SkipBody = customSkipBody
 	resp.StreamBody = customStreamBody
+	resp.Header.noDefaultContentType = customNoDefaultContentType
 
 	req.URI().DisablePathNormalizing = c.DisablePathNormalizing
 

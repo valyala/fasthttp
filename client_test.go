@@ -6182,3 +6182,51 @@ func TestHostClientReleaseConnClearsDeadlines(t *testing.T) {
 		t.Fatalf("unexpected body %q. Expecting %q", body, "ok")
 	}
 }
+
+func TestHostClientPreservesNoDefaultContentType(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Suppress net/http's automatic content-type detection.
+		w.Header()[HeaderContentType] = nil
+		if r.URL.Path == "/explicit" {
+			w.Header().Set(HeaderContentType, "application/example")
+		}
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer srv.Close()
+
+	client := &HostClient{Addr: strings.TrimPrefix(srv.URL, "http://")}
+	defer client.CloseIdleConnections()
+
+	for _, noDefault := range []bool{false, true} {
+		for _, explicit := range []bool{false, true} {
+			t.Run(fmt.Sprintf("noDefault=%v/explicit=%v", noDefault, explicit), func(t *testing.T) {
+				var req Request
+				var resp Response
+				req.SetRequestURI(srv.URL)
+				if explicit {
+					req.SetRequestURI(srv.URL + "/explicit")
+				}
+				resp.Header.SetNoDefaultContentType(noDefault)
+				for range 2 {
+					if err := client.Do(&req, &resp); err != nil {
+						t.Fatal(err)
+					}
+					if resp.Header.noDefaultContentType != noDefault {
+						t.Errorf("unexpected noDefaultContentType %v. Expecting %v", resp.Header.noDefaultContentType, noDefault)
+					}
+					var want []byte
+					if explicit {
+						want = []byte("application/example")
+					} else if !noDefault {
+						want = defaultContentType
+					}
+					if got := resp.Header.ContentType(); !bytes.Equal(got, want) {
+						t.Errorf("unexpected Content-Type %q. Expecting %q", got, want)
+					}
+				}
+			})
+		}
+	}
+}
