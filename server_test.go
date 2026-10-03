@@ -6061,7 +6061,6 @@ func TestServerKeepAliveRequestStateIsolation(t *testing.T) {
 	}
 }
 
-
 func TestServerRequestBodyStreamWarningPipelined(t *testing.T) {
 	for _, reduceMemoryUsage := range []bool{false, true} {
 		t.Run(fmt.Sprintf("ReduceMemoryUsage_%v", reduceMemoryUsage), func(t *testing.T) {
