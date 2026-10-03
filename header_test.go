@@ -5863,16 +5863,17 @@ func TestTrailerSpecialHeaderEmptyUpfrontValue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// An empty upfront value comes first; only an absent one falls back.
-		want, all := "late", []string{"late"}
+		// An empty upfront value still counts for the getters, so only an
+		// absent one falls back; PeekAll leaves it out, as without trailers.
+		want := "late"
 		if upfront != "" {
-			want, all = "", []string{"", "late"}
+			want = ""
 		}
 		if got := string(resp.Header.Server()); got != want || string(resp.Header.Peek(HeaderServer)) != want {
 			t.Fatalf("upfront %q: Server() = %q, Peek = %q, want %q", upfront, got, resp.Header.Peek(HeaderServer), want)
 		}
-		if got := resp.Header.PeekAll(HeaderServer); fmt.Sprintf("%q", got) != fmt.Sprintf("%q", all) {
-			t.Fatalf("upfront %q: PeekAll = %q, want %q", upfront, got, all)
+		if got := resp.Header.PeekAll(HeaderServer); len(got) != 1 || string(got[0]) != "late" {
+			t.Fatalf("upfront %q: PeekAll = %q, want [late]", upfront, got)
 		}
 	}
 
@@ -5883,16 +5884,28 @@ func TestTrailerSpecialHeaderEmptyUpfrontValue(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want, all := "late", []string{"late"}
+		want := "late"
 		if upfront != "" {
-			want, all = "", []string{"", "late"}
+			want = ""
 		}
 		if got := string(req.Header.UserAgent()); got != want || string(req.Header.Peek(HeaderUserAgent)) != want {
 			t.Fatalf("upfront %q: UserAgent() = %q, Peek = %q, want %q", upfront, got, req.Header.Peek(HeaderUserAgent), want)
 		}
-		if got := req.Header.PeekAll(HeaderUserAgent); fmt.Sprintf("%q", got) != fmt.Sprintf("%q", all) {
-			t.Fatalf("upfront %q: PeekAll = %q, want %q", upfront, got, all)
+		if got := req.Header.PeekAll(HeaderUserAgent); len(got) != 1 || string(got[0]) != "late" {
+			t.Fatalf("upfront %q: PeekAll = %q, want [late]", upfront, got)
 		}
+	}
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\nServer: \r\nContent-Length: 0\r\n\r\n"))); err != nil {
+		t.Fatal(err)
+	}
+	var req Request
+	if err := req.Read(bufio.NewReader(strings.NewReader("GET / HTTP/1.1\r\nHost: a\r\nUser-Agent: \r\n\r\n"))); err != nil {
+		t.Fatal(err)
+	}
+	if got, got2 := len(resp.Header.PeekAll(HeaderServer)), len(req.Header.PeekAll(HeaderUserAgent)); got != 0 || got2 != 0 {
+		t.Fatalf("without trailers: PeekAll(Server) has %d values, PeekAll(User-Agent) %d, want none", got, got2)
 	}
 }
 

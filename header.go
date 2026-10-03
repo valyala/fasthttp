@@ -2417,7 +2417,7 @@ func (h *RequestHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = append(h.mulHeader, contentType)
 		}
 	case HeaderUserAgent:
-		if !h.disableSpecialHeader && (h.userAgentSet || len(h.userAgent) > 0) {
+		if !h.disableSpecialHeader && len(h.userAgent) > 0 {
 			h.mulHeader = append(h.mulHeader, h.userAgent)
 		}
 		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
@@ -2474,7 +2474,7 @@ func (h *ResponseHeader) peekAll(key []byte) [][]byte {
 			h.mulHeader = append(h.mulHeader, contentEncoding)
 		}
 	case HeaderServer:
-		if server := h.upfrontServer(); h.serverSet || len(server) > 0 {
+		if server := h.upfrontServer(); len(server) > 0 {
 			h.mulHeader = append(h.mulHeader, server)
 		}
 		h.mulHeader = peekAllArgBytesToDst(h.mulHeader, h.h, key)
