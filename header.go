@@ -311,6 +311,23 @@ func (h *ResponseHeader) mustSkipContentLength() bool {
 	return statusCode == StatusNotModified || statusCode == StatusNoContent || statusCode < 200
 }
 
+// mustSkipBody reports whether the status code forbids a message body. Unlike
+// mustSkipContentLength it also covers 304, which has no body of its own.
+func (h *ResponseHeader) mustSkipBody() bool {
+	return h.mustSkipContentLength()
+}
+
+// mustSkipContentLengthOnWire reports whether re-serializing this response must
+// not emit Content-Length.
+//
+// This is narrower than mustSkipContentLength: RFC 9110 section 8.6 forbids it
+// on a 1xx or 204 response, but allows it on a 304, where the value describes
+// the corresponding 200 response rather than a body of its own.
+func (h *ResponseHeader) mustSkipContentLengthOnWire() bool {
+	statusCode := h.StatusCode()
+	return statusCode < 200 || statusCode == StatusNoContent
+}
+
 // SetContentLength sets Content-Length header value.
 //
 // Negative content-length sets 'Transfer-Encoding: chunked' header.
@@ -2962,7 +2979,12 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 	// Append Content-Type only for non-zero responses
 	// or if it is explicitly set.
 	// See https://github.com/valyala/fasthttp/issues/28 .
-	if h.ContentLength() != 0 || len(h.contentType) > 0 {
+	// A status with no body gets no *default* Content-Type. An explicitly set
+	// one is still emitted: a response without a body may still carry
+	// representation metadata (RFC 9110 section 15.3.5). Parsing such a response
+	// leaves contentLength at -2 ("identity"), which the non-zero test would
+	// otherwise read as "has a body".
+	if len(h.contentType) > 0 || (h.ContentLength() != 0 && !h.mustSkipBody()) {
 		contentType := h.ContentType()
 		if len(contentType) > 0 {
 			dst = appendHeaderLine(dst, strContentType, contentType)
@@ -2973,7 +2995,16 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		dst = appendHeaderLine(dst, strContentEncoding, contentEncoding)
 	}
 
-	if len(h.contentLengthBytes) > 0 {
+	// RFC 9110 section 8.6 forbids Content-Length on a 1xx or 204 response.
+	// Parsing keeps whatever the peer sent so the value stays observable, but
+	// serializing it re-emits a Content-Length that announces a body the status
+	// code does not allow. SetContentLength already refuses these statuses, so
+	// serialization agrees.
+	//
+	// This is narrower than mustSkipContentLength, which also covers 304: there
+	// Content-Length is allowed, because it describes the corresponding 200
+	// response rather than a body of its own.
+	if len(h.contentLengthBytes) > 0 && !h.mustSkipContentLengthOnWire() {
 		dst = appendHeaderLine(dst, strContentLength, h.contentLengthBytes)
 	}
 
