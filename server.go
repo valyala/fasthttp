@@ -24,6 +24,9 @@ var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 // Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
 var ErrAlreadyServing = errors.New("fasthttp: server is already serving connections")
 
+// ErrNilConnection is returned when attempting to set deadlines on a nil connection.
+var ErrNilConnection = errors.New("fasthttp: nil connection")
+
 // ServeConn serves HTTP requests from the given connection
 // using the given handler.
 //
@@ -669,9 +672,11 @@ type RequestCtx struct {
 	// Copying Request by value is forbidden. Use pointer to Request instead.
 	Request Request
 
-	connID           uint64
-	connRequestNum   uint64
-	hijackNoResponse bool
+	connID                  uint64
+	connRequestNum          uint64
+	hijackNoResponse        bool
+	handlerReadDeadlineSet  atomic.Bool
+	handlerWriteDeadlineSet atomic.Bool
 }
 
 // EarlyHints allows the server to hint to the browser what resources a page would need
@@ -919,6 +924,43 @@ func (ctx *RequestCtx) Conn() net.Conn {
 	return ctx.c
 }
 
+// SetReadDeadline sets the read deadline on the underlying connection.
+func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
+	if ctx.c == nil {
+		return ErrNilConnection
+	}
+	err := ctx.c.SetReadDeadline(deadline)
+	if err == nil {
+		ctx.handlerReadDeadlineSet.Store(true)
+	}
+	return err
+}
+
+// SetWriteDeadline sets the write deadline on the underlying connection.
+func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
+	if ctx.c == nil {
+		return ErrNilConnection
+	}
+	err := ctx.c.SetWriteDeadline(deadline)
+	if err == nil {
+		ctx.handlerWriteDeadlineSet.Store(true)
+	}
+	return err
+}
+
+// SetDeadline sets the read and write deadlines associated with the underlying connection.
+func (ctx *RequestCtx) SetDeadline(deadline time.Time) error {
+	if ctx.c == nil {
+		return ErrNilConnection
+	}
+	err := ctx.c.SetDeadline(deadline)
+	if err == nil {
+		ctx.handlerReadDeadlineSet.Store(true)
+		ctx.handlerWriteDeadlineSet.Store(true)
+	}
+	return err
+}
+
 func (ctx *RequestCtx) reset() {
 	ctx.Request.Reset()
 	ctx.Response.Reset()
@@ -930,6 +972,8 @@ func (ctx *RequestCtx) reset() {
 	ctx.remoteAddr = nil
 	ctx.time = zeroTime
 	ctx.c = nil
+	ctx.handlerReadDeadlineSet.Store(false)
+	ctx.handlerWriteDeadlineSet.Store(false)
 
 	// Don't reset ctx.s!
 	// We have a pool per server so the next time this ctx is used it
@@ -2728,17 +2772,21 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		hijackNoResponse = ctx.hijackNoResponse && hijackHandler != nil
 		ctx.hijackNoResponse = false
 
-		if writeTimeout > 0 {
-			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-				break
-			}
-			previousWriteTimeout = writeTimeout
-		} else if previousWriteTimeout > 0 {
-			// We don't want a write timeout but we previously set one, remove it.
-			if err = c.SetWriteDeadline(zeroTime); err != nil {
-				break
-			}
+		if ctx.handlerWriteDeadlineSet.Load() {
 			previousWriteTimeout = 0
+		} else {
+			if writeTimeout > 0 {
+				if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+					break
+				}
+				previousWriteTimeout = writeTimeout
+			} else if previousWriteTimeout > 0 {
+				// We don't want a write timeout but we previously set one, remove it.
+				if err = c.SetWriteDeadline(zeroTime); err != nil {
+					break
+				}
+				previousWriteTimeout = 0
+			}
 		}
 
 		connectionClose = connectionClose ||
@@ -2819,6 +2867,20 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				releaseRequestStream(rs)
 			}
 			ctx.Request.bodyStream = nil
+		}
+
+		if ctx.handlerReadDeadlineSet.Load() {
+			if err = c.SetReadDeadline(zeroTime); err != nil {
+				break
+			}
+			ctx.handlerReadDeadlineSet.Store(false)
+		}
+		if ctx.handlerWriteDeadlineSet.Load() {
+			if err = c.SetWriteDeadline(zeroTime); err != nil {
+				break
+			}
+			ctx.handlerWriteDeadlineSet.Store(false)
+			previousWriteTimeout = 0
 		}
 
 		idleConnTime.Store(reqSecond)
