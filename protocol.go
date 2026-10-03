@@ -284,6 +284,9 @@ func (ctx *ProtocolServerContext) applyRequestDefaults(requestCtx *RequestCtx) {
 	requestCtx.Request.isTLS = ctx.isTLS
 	requestCtx.Response.Header.noDefaultContentType = server.NoDefaultContentType
 	requestCtx.Response.Header.noDefaultDate = server.NoDefaultDate
+	if line := server.getServerNameLine(server.getServerName()); line != nil {
+		requestCtx.Response.Header.setServerDefault(line)
+	}
 	requestCtx.Request.Header.secureErrorLogMessage = server.SecureErrorLogMessage
 	requestCtx.Response.Header.secureErrorLogMessage = server.SecureErrorLogMessage
 	requestCtx.Request.secureErrorLogMessage = server.SecureErrorLogMessage

@@ -14,6 +14,7 @@ import (
 	"net/http/httptrace"
 	"net/textproto"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -238,6 +239,53 @@ func TestServerSendsDefaultDate(t *testing.T) {
 				t.Fatalf("parsing Date %q: %v", dates[0], err)
 			}
 		})
+	}
+}
+
+// Each value goes out in the section it is in, as over HTTP/1.
+func TestServerKeepsResponseValuesInTheirSection(t *testing.T) {
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/mixed":
+				err := ctx.Response.Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\nX-Mixed: upfront\r\n" +
+					"Trailer: X-Mixed\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nok\r\n0\r\nX-Mixed: late\r\n\r\n")))
+				if err != nil {
+					t.Error(err)
+				}
+			case "/server":
+				// The default line stays upfront.
+				_ = ctx.Response.Header.AddTrailer(fasthttp.HeaderServer)
+				ctx.Response.Header.Set(fasthttp.HeaderServer, "late")
+			case "/deleted":
+				ctx.Response.Header.Del(fasthttp.HeaderServer)
+				_ = ctx.Response.Header.AddTrailer(fasthttp.HeaderServer)
+			}
+		},
+	}
+	testServer := newTestServer(t, server, ServerConfig{})
+	for _, tc := range []struct {
+		path, header, trailer string
+	}{
+		{"/mixed", `X-Mixed=["upfront"] Server=["fasthttp"]`, `X-Mixed=["late"] Server=[]`},
+		{"/server", `X-Mixed=[] Server=["fasthttp"]`, `X-Mixed=[] Server=["late"]`},
+		{"/deleted", `X-Mixed=[] Server=["fasthttp"]`, `X-Mixed=[] Server=[]`},
+	} {
+		resp, err := testServer.client.Get(testServer.URL(tc.path))
+		if err != nil {
+			t.Fatalf("%s: Get() error: %v", tc.path, err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		sections := func(h stdhttp.Header) string {
+			return fmt.Sprintf("X-Mixed=%q Server=%q", h.Values("X-Mixed"), h.Values("Server"))
+		}
+		if got := sections(resp.Header); got != tc.header {
+			t.Errorf("%s: header block %s, want %s", tc.path, got, tc.header)
+		}
+		if got := sections(resp.Trailer); got != tc.trailer {
+			t.Errorf("%s: trailers %s, want %s", tc.path, got, tc.trailer)
+		}
 	}
 }
 

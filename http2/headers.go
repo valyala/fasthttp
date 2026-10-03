@@ -38,7 +38,7 @@ const trailerIndexThreshold = 16
 // informational one.
 type statusHeaderOptions struct {
 	serverDate        []byte
-	trailerKeys       [][]byte
+	defaultServer     string
 	skipContentLength bool
 	maxHeaderListSize uint64
 }
@@ -167,21 +167,35 @@ func (h *headerEncoder) encodeResponseHeaders(
 	maxHeaderListSize uint64,
 	serverDate []byte,
 ) ([]byte, error) {
-	if len(response.Header.Server()) == 0 && !server.NoDefaultServerHeader {
-		name := server.Name
-		if name == "" {
-			name = "fasthttp"
-		}
-		response.Header.SetServer(name)
+	// A response left with no Server value gets the default upfront, as in
+	// HTTP/1; SetServer would file it as a trailer once Server is announced.
+	var defaultServer string
+	if len(response.Header.Server()) == 0 {
+		defaultServer = defaultServerName(server)
 	}
 	if server.NoDefaultDate {
 		serverDate = nil
 	}
 	return h.encodeStatusHeaders(statusCodeString(response.StatusCode()), &response.Header, statusHeaderOptions{
 		serverDate:        serverDate,
-		trailerKeys:       response.Header.PeekTrailerKeys(),
+		defaultServer:     defaultServer,
 		maxHeaderListSize: maxHeaderListSize,
 	})
+}
+
+// defaultServerName is the Server value HTTP/1 falls back to, newlines
+// replaced as SetServer does.
+func defaultServerName(server *fasthttp.Server) string {
+	name := server.Name
+	if name == "" && !server.NoDefaultServerHeader {
+		name = "fasthttp"
+	}
+	return strings.Map(func(r rune) rune {
+		if r == '\r' || r == '\n' {
+			return ' '
+		}
+		return r
+	}, name)
 }
 
 func (h *headerEncoder) encodeInformationalHeaders(
@@ -203,11 +217,14 @@ func (h *headerEncoder) encodeStatusHeaders(
 	opts statusHeaderOptions,
 ) ([]byte, error) {
 	encoder, buffer, stringsCache, scratch := h.encoder, &h.buffer, &h.strings, &h.fields
-	serverDate, trailerKeys := opts.serverDate, opts.trailerKeys
+	serverDate, defaultServer := opts.serverDate, opts.defaultServer
 	skipContentLength, maxHeaderListSize := opts.skipContentLength, opts.maxHeaderListSize
 	headerSize := uint64(len(":status") + len(status) + 32)
 	if len(serverDate) != 0 {
 		headerSize += uint64(len(fasthttp.HeaderDate) + len(serverDate) + 32)
+	}
+	if defaultServer != "" {
+		headerSize += uint64(len(fasthttp.HeaderServer) + len(defaultServer) + 32)
 	}
 	if maxHeaderListSize != 0 && headerSize > maxHeaderListSize {
 		return nil, errResponseHeaderTooLarge
@@ -224,9 +241,6 @@ func (h *headerEncoder) encodeStatusHeaders(
 			return true
 		}
 		if skipContentLength && name == "content-length" {
-			return true
-		}
-		if len(trailerKeys) != 0 && hasTrailerKey(trailerKeys, name) {
 			return true
 		}
 		if len(serverDate) != 0 && name == "date" {
@@ -266,6 +280,11 @@ func (h *headerEncoder) encodeStatusHeaders(
 			return nil, err
 		}
 	}
+	if defaultServer != "" {
+		if err := encoder.WriteField(hpack.HeaderField{Name: "server", Value: defaultServer}); err != nil {
+			return nil, err
+		}
+	}
 	for _, field := range fields {
 		if err := encoder.WriteField(field); err != nil {
 			return nil, err
@@ -279,35 +298,49 @@ func (h *headerEncoder) encodeTrailerHeaders(
 	maxHeaderListSize uint64,
 ) ([]byte, error) {
 	encoder, buffer, stringsCache := h.encoder, &h.buffer, &h.strings
+	// The trailer section, as HTTP/1 writes it: a header-section value of an
+	// announced name went out in the header block.
+	section := header.TrailerHeader()
 	headerSize := uint64(0)
-	for _, key := range header.PeekTrailerKeys() {
+	for key, value, rest := nextHeaderLine(section); key != nil; key, value, rest = nextHeaderLine(rest) {
 		name := stringsCache.name(key)
 		if name == "te" || isConnectionSpecificHeader(name) {
 			return nil, fmt.Errorf("http2: invalid response trailer %q", name)
 		}
-		for _, value := range header.PeekAll(string(key)) {
-			headerSize += uint64(len(name) + len(value) + 32)
-			if maxHeaderListSize != 0 && headerSize > maxHeaderListSize {
-				return nil, errResponseHeaderTooLarge
-			}
+		headerSize += uint64(len(name) + len(value) + 32)
+		if maxHeaderListSize != 0 && headerSize > maxHeaderListSize {
+			return nil, errResponseHeaderTooLarge
 		}
 	}
 	buffer.Reset()
-	for _, key := range header.PeekTrailerKeys() {
+	for key, value, rest := nextHeaderLine(section); key != nil; key, value, rest = nextHeaderLine(rest) {
 		name := stringsCache.name(key)
-		values := header.PeekAll(string(key))
-		for _, value := range values {
-			sensitive := isSensitiveHeader(name)
-			if err := encoder.WriteField(hpack.HeaderField{
-				Name:      name,
-				Value:     stringsCache.value(value, sensitive),
-				Sensitive: sensitive,
-			}); err != nil {
-				return nil, err
-			}
+		sensitive := isSensitiveHeader(name)
+		if err := encoder.WriteField(hpack.HeaderField{
+			Name:      name,
+			Value:     stringsCache.value(value, sensitive),
+			Sensitive: sensitive,
+		}); err != nil {
+			return nil, err
 		}
 	}
 	return buffer.Bytes(), nil
+}
+
+// nextHeaderLine splits the first "Key: value\r\n" line off a serialized
+// section; key is nil at the closing empty line. Keys are tokens and values
+// hold no line breaks, so the split is exact.
+func nextHeaderLine(b []byte) (key, value, rest []byte) {
+	end := bytes.IndexByte(b, '\r')
+	if end <= 0 {
+		return nil, nil, nil
+	}
+	line := b[:end]
+	colon := bytes.IndexByte(line, ':')
+	if colon <= 0 || colon+len(": ") > len(line) {
+		return nil, nil, nil
+	}
+	return line[:colon], line[colon+len(": "):], b[end+len("\r\n"):]
 }
 
 // writeContinuationFrames emits block -- the part of a field block its opening
