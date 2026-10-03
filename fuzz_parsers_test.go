@@ -16,6 +16,9 @@ func FuzzURIPath(f *testing.F) {
 	for _, target := range []string{"/A/B?Key=Value", "/a/%2e%2e/b", "/a%2fb//c/.", "/%252e%252e/x", "/%zz", `/a\..\b`, "/?x=1#Fragment"} {
 		f.Add("Example.COM", target)
 	}
+	f.Add("%25", "0")
+	f.Add("[fe80::1%25en0]", "/a?b=c")
+	f.Add(" ", "//://")
 	f.Fuzz(func(t *testing.T, host, target string) {
 		if len(host)+len(target) > defaultReadBufferSize {
 			return
@@ -47,9 +50,12 @@ func FuzzURIPath(f *testing.F) {
 					t.Fatalf("path normalization: %q became %q, want %q", u.PathOriginal(), u.Path(), want)
 				}
 			}
+			// Host is decoded, and an absolute target can override the input
+			// host. Use a valid fixed host to test just the request target.
+			requestURI := bytes.Clone(u.RequestURI())
 			var roundTrip URI
-			if err := roundTrip.Parse(bytes.Clone(u.Host()), bytes.Clone(u.RequestURI())); err != nil {
-				t.Fatalf("serialized URI failed to parse: %v", err)
+			if err := roundTrip.Parse([]byte("example.com"), requestURI); err != nil {
+				t.Fatalf("request URI %q failed to parse: %v", requestURI, err)
 			}
 			if !bytes.Equal(roundTrip.Path(), u.Path()) || !bytes.Equal(roundTrip.QueryString(), u.QueryString()) {
 				t.Fatal("URI serialization changed path or query")
