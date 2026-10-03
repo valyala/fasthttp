@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"embed"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -1344,4 +1346,202 @@ func TestFSGenerateETagFS(t *testing.T) {
 	if etag := ctx.Response.Header.Peek(HeaderETag); len(etag) > 0 {
 		t.Fatalf("unexpected ETag: %q", etag)
 	}
+}
+
+func TestFSFSSmallFileServedFromMemory(t *testing.T) {
+	t.Parallel()
+
+	body := []byte("small file body")
+	testFS := fstest.MapFS{
+		"file.txt": {Data: body},
+	}
+
+	tests := []struct {
+		name          string
+		fsys          fs.FS
+		inMemory      bool
+		contentLength int
+	}{
+		{name: "read at", fsys: testFS, inMemory: true, contentLength: len(body)},
+		// Stat reports more bytes than the file holds, as it does for a file
+		// that shrank since.
+		{name: "shrunk", fsys: fileWrapFS{FS: testFS, extraSize: 1}, inMemory: true, contentLength: len(body)},
+		// Without ReadAt the file keeps being read on every request.
+		{name: "no read at", fsys: fileWrapFS{FS: testFS}, inMemory: false, contentLength: len(body)},
+		// Size is only a byte count for regular files, other files may
+		// report a negative one. Those keep being streamed, chunked.
+		{name: "negative size", fsys: fileWrapFS{FS: testFS, extraSize: -int64(len(body)) - 1}, inMemory: false, contentLength: -1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := (&FS{FS: tt.fsys, AllowEmptyRoot: true}).NewRequestHandler()
+			for range 2 {
+				var ctx RequestCtx
+				ctx.Init(&Request{}, nil, TestLogger{t})
+				ctx.Request.SetRequestURI("/file.txt")
+				h(&ctx)
+
+				_, inMemory := ctx.Response.bodyStream.(*fsSmallFileReader)
+				if inMemory != tt.inMemory {
+					t.Fatalf("unexpected body stream %T", ctx.Response.bodyStream)
+				}
+				resp := readResponseFromCtx(t, &ctx, false)
+				if resp.StatusCode() != StatusOK {
+					t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
+				}
+				if resp.Header.ContentLength() != tt.contentLength || !bytes.Equal(resp.Body(), body) {
+					t.Fatalf("unexpected response with Content-Length %d and body %q. Expecting %d and %q",
+						resp.Header.ContentLength(), resp.Body(), tt.contentLength, body)
+				}
+			}
+		})
+	}
+}
+
+// fileWrapFS hands out files without a ReadAt method, or, if extraSize is
+// set, files whose Stat reports a size extraSize off from what they hold.
+type fileWrapFS struct {
+	fs.FS
+
+	extraSize int64
+}
+
+func (fsys fileWrapFS) Open(name string) (fs.File, error) {
+	f, err := fsys.FS.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if fsys.extraSize != 0 {
+		return resizedFile{seekFile: seekFile{f}, extraSize: fsys.extraSize}, nil
+	}
+	return seekFile{f}, nil
+}
+
+// seekFile keeps the Seek method the file readers need and hides ReadAt.
+type seekFile struct {
+	fs.File
+}
+
+func (f seekFile) Seek(offset int64, whence int) (int64, error) {
+	return f.File.(io.Seeker).Seek(offset, whence) //nolint:forcetypeassert
+}
+
+type resizedFile struct {
+	seekFile
+
+	extraSize int64
+}
+
+func (f resizedFile) ReadAt(p []byte, off int64) (int, error) {
+	return f.File.(io.ReaderAt).ReadAt(p, off) //nolint:forcetypeassert
+}
+
+func (f resizedFile) Stat() (fs.FileInfo, error) {
+	fi, err := f.File.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return resizedFileInfo{FileInfo: fi, extraSize: f.extraSize}, nil
+}
+
+type resizedFileInfo struct {
+	fs.FileInfo
+
+	extraSize int64
+}
+
+func (fi resizedFileInfo) Size() int64 {
+	return fi.FileInfo.Size() + fi.extraSize
+}
+
+func TestFSSmallFilesInMemoryLimit(t *testing.T) {
+	t.Parallel()
+
+	// On a case-insensitive filesystem one file answers to as many cached
+	// paths as its name has letter case variants.
+	const name = "abcdefghijklm.txt"
+	body := []byte("body")
+	fsys := caseInsensitiveFS{fsys: fstest.MapFS{name: {Data: body}}}
+	stop := make(chan struct{})
+	defer close(stop)
+	h := (&FS{FS: fsys, AllowEmptyRoot: true, CleanStop: stop}).NewRequestHandler()
+
+	inMemory := 0
+	for i := range maxSmallFilesInMemory + 100 {
+		path := []byte("/" + name)
+		for j := range 13 {
+			if i&(1<<j) != 0 {
+				path[1+j] -= 'a' - 'A'
+			}
+		}
+		var ctx RequestCtx
+		ctx.Init(&Request{}, nil, TestLogger{t})
+		ctx.Request.SetRequestURIBytes(path)
+		h(&ctx)
+		if _, ok := ctx.Response.bodyStream.(*fsSmallFileReader); ok {
+			inMemory++
+		}
+		if ctx.Response.StatusCode() != StatusOK || !bytes.Equal(ctx.Response.Body(), body) {
+			t.Fatalf("unexpected response for %q: status %d, body %q", path, ctx.Response.StatusCode(), ctx.Response.Body())
+		}
+	}
+	if inMemory != maxSmallFilesInMemory {
+		t.Fatalf("%d files kept in memory. Expecting %d", inMemory, maxSmallFilesInMemory)
+	}
+}
+
+func TestFSSmallFilesInMemoryReleased(t *testing.T) {
+	t.Parallel()
+
+	testFS := fstest.MapFS{"file.txt": {Data: []byte("body")}}
+	h := &fsHandler{filesystem: testFS}
+	open := func() *fsFile {
+		t.Helper()
+		f, err := testFS.Open("file.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fi, err := f.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ff, err := h.newFSFile(f, fi, false, "file.txt", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ff
+	}
+
+	ff := open()
+	if ff.f != nil || h.smallFilesInMemory.Load() != 1 {
+		t.Fatalf("small file not counted in memory: descriptor open %t, count %d", ff.f != nil, h.smallFilesInMemory.Load())
+	}
+	ff.Release()
+	if n := h.smallFilesInMemory.Load(); n != 0 {
+		t.Fatalf("unexpected count %d after release. Expecting 0", n)
+	}
+
+	// Past the limit a small file stays open, and releasing it leaves the
+	// count alone.
+	h.smallFilesInMemory.Store(maxSmallFilesInMemory)
+	ff = open()
+	if ff.f == nil {
+		t.Fatal("small file kept in memory past the limit")
+	}
+	ff.Release()
+	if n := h.smallFilesInMemory.Load(); n != maxSmallFilesInMemory {
+		t.Fatalf("unexpected count %d after release. Expecting %d", n, maxSmallFilesInMemory)
+	}
+}
+
+// caseInsensitiveFS opens names regardless of their letter case, as the
+// default filesystems on Windows and macOS do.
+type caseInsensitiveFS struct {
+	fsys fs.FS
+}
+
+func (c caseInsensitiveFS) Open(name string) (fs.File, error) {
+	return c.fsys.Open(strings.ToLower(name))
 }
