@@ -1073,7 +1073,6 @@ func (req *Request) copyToSkipBody(dst *Request) {
 
 	dst.UseHostHeader = req.UseHostHeader
 	dst.DisableRedirectPathNormalizing = req.DisableRedirectPathNormalizing
-	dst.KeepBodyBuffer = req.KeepBodyBuffer
 
 	// do not copy multipartForm - it will be automatically
 	// re-created on the first call to MultipartForm.
@@ -1100,7 +1099,6 @@ func (resp *Response) copyToSkipBody(dst *Response) {
 	dst.Reset()
 	resp.Header.CopyTo(&dst.Header)
 	dst.SkipBody = resp.SkipBody
-	dst.KeepBodyBuffer = resp.KeepBodyBuffer
 	dst.raddr = resp.raddr
 	dst.laddr = resp.laddr
 }
@@ -1347,8 +1345,10 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 // Reset clears request contents.
 func (req *Request) Reset() {
 	req.userValues.Reset() // it should be at the top, since some values might implement io.Closer interface
-	if bodyPoolSizeLimit := int(atomic.LoadInt64(&requestBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && req.body != nil {
-		req.ReleaseBody(bodyPoolSizeLimit)
+	if !req.KeepBodyBuffer {
+		if bodyPoolSizeLimit := int(atomic.LoadInt64(&requestBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && req.body != nil {
+			req.ReleaseBody(bodyPoolSizeLimit)
+		}
 	}
 	req.Header.Reset()
 	req.resetSkipHeader()
@@ -1382,7 +1382,7 @@ func (req *Request) RemoveMultipartFormFiles() {
 
 // Reset clears response contents.
 func (resp *Response) Reset() {
-	if !resp.preserveBodyBuffer {
+	if !resp.preserveBodyBuffer && !resp.KeepBodyBuffer {
 		if bodyPoolSizeLimit := int(atomic.LoadInt64(&responseBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && resp.body != nil {
 			resp.ReleaseBody(bodyPoolSizeLimit)
 		}
