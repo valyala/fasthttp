@@ -2095,12 +2095,15 @@ func (s *Server) Shutdown() error {
 // or context timeout and then shut down.
 //
 // When ShutdownWithContext is called, Serve, ListenAndServe, and ListenAndServeTLS immediately return nil.
-// Make sure the program doesn't exit and waits instead for Shutdown to return.
+// Make sure the program doesn't exit and waits instead for ShutdownWithContext to return.
 //
 // ShutdownWithContext does not close keepalive connections so it's recommended to set ReadTimeout and IdleTimeout
 // to something else than 0.
 //
-// When ShutdownWithContext returns errors, any operation to the Server is unavailable.
+// If ctx expires before all connections have closed, ShutdownWithContext returns ctx.Err().
+// The remaining connections are left running, and the stop flag is reset.
+// The Done channel stays closed so requests that are still running keep observing the same channel.
+// The Server can be reused by calling Serve with a new listener.
 func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
