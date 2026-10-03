@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1188,5 +1189,583 @@ func TestHandlerFlushSendsHeaders(t *testing.T) {
 		close(release)
 		_ = c.Close()
 		_ = ln.Close()
+	}
+}
+
+// A handler announces a trailer up front or sends one via http.TrailerPrefix;
+// both reach the wire exactly once, on a chunked body, flushed or buffered.
+// A header sent before Flush stays a header when a TrailerPrefix trailer of
+// the same name follows: the client sees ["upfront"] and ["late"], as with
+// net/http, not the upfront value repeated in the trailers.
+func TestHandlerTrailerPrefixKeepsUpfrontHeader(t *testing.T) {
+	t.Parallel()
+
+	s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Mixed", "upfront")
+		_, _ = w.Write([]byte("body"))
+		w.(http.Flusher).Flush() //nolint:forcetypeassert
+		w.Header().Set(http.TrailerPrefix+"X-Mixed", "late")
+	})}
+	ln := fasthttputil.NewInmemoryListener()
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if _, err := io.ReadAll(resp.Body); err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.Header["X-Mixed"]; !slices.Equal(got, []string{"upfront"}) {
+		t.Fatalf("header X-Mixed = %q, want [upfront]", got)
+	}
+	if got := resp.Trailer["X-Mixed"]; !slices.Equal(got, []string{"late"}) {
+		t.Fatalf("trailer X-Mixed = %q, want [late]", got)
+	}
+}
+
+// A buffered response that announces trailers keeps an upfront header when a
+// TrailerPrefix trailer of the same name follows, as net/http does.
+func TestHandlerBufferedTrailerPrefixKeepsUpfrontHeader(t *testing.T) {
+	t.Parallel()
+
+	s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(fasthttp.HeaderTrailer, "X-Other")
+		w.Header().Set("X-Mixed", "upfront")
+		_, _ = w.Write([]byte("body"))
+		w.Header().Set(http.TrailerPrefix+"X-Mixed", "late")
+		w.Header().Set("X-Other", "other")
+	})}
+	ln := fasthttputil.NewInmemoryListener()
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || string(body) != "body" {
+		t.Fatalf("body = %q, %v", body, err)
+	}
+	if got := resp.Header["X-Mixed"]; !slices.Equal(got, []string{"upfront"}) {
+		t.Fatalf("header X-Mixed = %q, want [upfront]", got)
+	}
+	if got := resp.Trailer["X-Mixed"]; !slices.Equal(got, []string{"late"}) {
+		t.Fatalf("trailer X-Mixed = %q, want [late]", got)
+	}
+	if got := resp.Trailer["X-Other"]; !slices.Equal(got, []string{"other"}) || resp.Header["X-Other"] != nil {
+		t.Fatalf("X-Other: trailer %q, header %q; want the value as a trailer only", got, resp.Header["X-Other"])
+	}
+}
+
+// A buffered HEAD response that announces trailers has no body to carry
+// them: nothing may follow its header block on the connection.
+func TestHandlerBufferedHeadWithTrailersStaysFramed(t *testing.T) {
+	t.Parallel()
+
+	s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set(fasthttp.HeaderTrailer, "X-Sum")
+		_, _ = w.Write([]byte("body"))
+		w.Header().Set("X-Sum", "1")
+	})}
+	ln := fasthttputil.NewInmemoryListener()
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("HEAD / HTTP/1.1\r\nHost: a\r\n\r\nGET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(c)
+	head, err := http.ReadResponse(br, &http.Request{Method: http.MethodHead})
+	if err != nil {
+		t.Fatalf("HEAD response: %v", err)
+	}
+	_ = head.Body.Close()
+	get, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatalf("GET response after HEAD: %v", err)
+	}
+	defer get.Body.Close()
+	if body, err := io.ReadAll(get.Body); err != nil || string(body) != "body" || get.Trailer.Get("X-Sum") != "1" {
+		t.Fatalf("GET after HEAD: body %q, %v, trailer %q", body, err, get.Trailer)
+	}
+}
+
+// A TrailerPrefix field present at the first Write makes a buffered response
+// chunked with the trailer, as in net/http, whose framing is fixed then; one
+// added afterwards is dropped, as net/http drops it.
+func TestHandlerBufferedTrailerPrefixFollowsFirstWrite(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		header  bool   // WriteHeader before the prefix field commits the header first
+		before  bool   // the prefix field precedes the first Write
+		chunked bool   // an explicit chunked Transfer-Encoding
+		length  string // a Content-Length that is no length, which net/http also chunks around
+		size    int
+	}{
+		{false, true, false, "-", 4},
+		{false, false, false, "-", 4},
+		{false, false, false, "-", 2 * bufferBeforeChunkingSize},
+		{true, true, false, "-", 4},
+		{true, true, false, "-", 2 * bufferBeforeChunkingSize},
+		{false, false, true, "-", 4},
+		{false, false, false, "", 4},
+		{false, false, false, "x", 4},
+	} {
+		before, sent := tc.before, (tc.before && !tc.header) || tc.chunked || tc.length != "-" || tc.size > bufferBeforeChunkingSize
+		s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if tc.chunked {
+				w.Header().Set(fasthttp.HeaderTransferEncoding, "chunked")
+			}
+			if tc.length != "-" {
+				w.Header().Set(fasthttp.HeaderContentLength, tc.length)
+			}
+			if tc.header {
+				w.WriteHeader(http.StatusOK)
+			}
+			if before {
+				w.Header().Set(http.TrailerPrefix+"X-Sum", "1")
+			}
+			_, _ = w.Write(bytes.Repeat([]byte("b"), tc.size))
+			if !before {
+				w.Header().Set(http.TrailerPrefix+"X-Sum", "1")
+			}
+		})}
+		ln := fasthttputil.NewInmemoryListener()
+		go s.Serve(ln) //nolint:errcheck
+
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.ReadAll(resp.Body); err != nil {
+			t.Fatal(err)
+		}
+		if got, chunked := resp.Trailer["X-Sum"], slices.Contains(resp.TransferEncoding, "chunked"); sent && (!chunked || !slices.Equal(got, []string{"1"})) || !sent && (chunked || got != nil) {
+			t.Fatalf("%+v: chunked=%v trailer X-Sum=%q", tc, chunked, got)
+		}
+		_ = resp.Body.Close()
+		_ = c.Close()
+		_ = ln.Close()
+	}
+}
+
+// Middleware that materializes the streamed body before the server writes
+// the response ends the stream early; the trailers still register and no
+// value is lost, the upfront one moving to the trailer section along with
+// the announcement.
+func TestHandlerTrailersSurviveBodyMaterialization(t *testing.T) {
+	t.Parallel()
+
+	h := NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-Mixed", "upfront")
+		_, _ = w.Write([]byte("body"))
+		w.(http.Flusher).Flush() //nolint:forcetypeassert
+		w.Header().Set(http.TrailerPrefix+"X-Mixed", "late")
+	})
+	s := &fasthttp.Server{Handler: func(ctx *fasthttp.RequestCtx) {
+		h(ctx)
+		if string(ctx.Response.Body()) != "body" {
+			t.Errorf("materialized body = %q", ctx.Response.Body())
+		}
+	}}
+	ln := fasthttputil.NewInmemoryListener()
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if body, err := io.ReadAll(resp.Body); err != nil || string(body) != "body" {
+		t.Fatalf("body = %q, %v", body, err)
+	}
+	got := slices.Concat(resp.Header["X-Mixed"], resp.Trailer["X-Mixed"])
+	if !slices.Equal(got, []string{"upfront", "late"}) {
+		t.Fatalf("X-Mixed values = %q (header %q, trailer %q), want both", got, resp.Header["X-Mixed"], resp.Trailer["X-Mixed"])
+	}
+}
+
+func TestHandlerForbiddenTrailerStaysHeader(t *testing.T) {
+	t.Parallel()
+
+	for _, flush := range []bool{false, true} {
+		s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set(fasthttp.HeaderTrailer, "Content-Type, X-Ok")
+			w.Header().Set(fasthttp.HeaderContentType, "application/json")
+			_, _ = w.Write([]byte("{}"))
+			if flush {
+				w.(http.Flusher).Flush() //nolint:forcetypeassert
+			}
+			w.Header().Set("X-Ok", "done")
+		})}
+		ln := fasthttputil.NewInmemoryListener()
+		go s.Serve(ln) //nolint:errcheck
+
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire := string(raw)
+		if strings.Count(wire, "Content-Type") != 1 || !strings.Contains(wire, "Content-Type: application/json\r\n") ||
+			!strings.Contains(wire, "Trailer: X-Ok\r\n") || !strings.Contains(wire, "X-Ok: done") {
+			t.Errorf("flush=%v: want the forbidden name as a header and X-Ok as the trailer in:\n%s", flush, wire)
+		}
+		_ = c.Close()
+		_ = ln.Close()
+	}
+}
+
+func TestHandlerExplicitContentLengthKeepsFraming(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		length, te string
+		announce   bool
+		late       string // set after the first Write, once the framing is fixed: the "length", the "trailer" announcement, a new "value", or the "only" value
+	}{
+		{"4", "", false, ""},
+		{"4", "", true, ""},
+		{"", "", true, ""},
+		{"x", "", true, ""},
+		{"4", "chunked", true, ""},
+		{"", "identity", true, ""},
+		{"4", "", true, "length"},
+		{"", "", true, "trailer"},
+		{"4", "", true, "value"},
+		{"4", "", true, "only"},
+	} {
+		announce := tc.announce
+		fixed := tc.te == "identity" || (tc.te == "" && tc.length == "4" && tc.late != "length") || tc.late == "trailer"
+		s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if tc.late != "length" {
+				w.Header().Set(fasthttp.HeaderContentLength, tc.length)
+			}
+			if tc.te != "" {
+				w.Header().Set(fasthttp.HeaderTransferEncoding, tc.te)
+			}
+			switch {
+			case announce && tc.late != "trailer":
+				w.Header().Set(fasthttp.HeaderTrailer, "X-Sum")
+				if tc.late != "only" {
+					w.Header().Set("X-Sum", "1")
+				}
+			case !announce:
+				w.Header().Set(http.TrailerPrefix+"X-Sum", "1")
+			}
+			_, _ = w.Write([]byte("body"))
+			switch tc.late {
+			case "length":
+				w.Header().Set(fasthttp.HeaderContentLength, tc.length)
+			case "trailer", "only":
+				w.Header().Set(fasthttp.HeaderTrailer, "X-Sum")
+				w.Header().Set("X-Sum", "1")
+			case "value":
+				w.Header().Set("X-Sum", "2")
+			}
+		})}
+		ln := fasthttputil.NewInmemoryListener()
+		go s.Serve(ln) //nolint:errcheck
+
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire := string(raw)
+		if fixed {
+			// The announced value is a header as committed, as net/http writes
+			// its header block, and so is one announced too late; the prefix
+			// value and a value set after the commit are dropped.
+			wantHeader := announce && tc.late != "only"
+			if !strings.Contains(wire, "Content-Length: 4\r\n") || strings.Contains(wire, "chunked") || !strings.HasSuffix(wire, "\r\n\r\nbody") ||
+				strings.Contains(wire, "X-Sum: 1\r\n") != wantHeader || strings.Contains(wire, "X-Sum: 2") {
+				t.Errorf("%+v: want fixed-length framing without trailers in:\n%s", tc, wire)
+			}
+		} else if !strings.Contains(wire, "chunked") || !strings.HasSuffix(wire, "0\r\nX-Sum: 1\r\n\r\n") {
+			// An unusable length, or one beside a chunked encoding, is no explicit length.
+			t.Errorf("%+v: want a chunked response with the trailer in:\n%s", tc, wire)
+		}
+		_ = c.Close()
+		_ = ln.Close()
+	}
+}
+
+func TestHandlerTrailerPrefixValuesComeFirst(t *testing.T) {
+	t.Parallel()
+
+	for range 8 {
+		s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set(fasthttp.HeaderTrailer, "X-T")
+			_, _ = w.Write([]byte("body"))
+			w.Header().Set("X-T", "announced")
+			w.Header().Set(http.TrailerPrefix+"X-T", "prefixed")
+		})}
+		ln := fasthttputil.NewInmemoryListener()
+		go s.Serve(ln) //nolint:errcheck
+
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.ReadAll(resp.Body); err != nil {
+			t.Fatal(err)
+		}
+		if got := resp.Trailer["X-T"]; !slices.Equal(got, []string{"prefixed", "announced"}) {
+			t.Fatalf("trailer X-T = %q, want the prefix value first", got)
+		}
+		_ = resp.Body.Close()
+		_ = c.Close()
+		_ = ln.Close()
+	}
+}
+
+func TestHandlerFlushedFixedFramingDropsTrailers(t *testing.T) {
+	t.Parallel()
+
+	for _, te := range []string{"", "identity"} {
+		s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			if te != "" {
+				w.Header().Set(fasthttp.HeaderTransferEncoding, te)
+			} else {
+				w.Header().Set(fasthttp.HeaderContentLength, "4")
+			}
+			w.Header().Set(fasthttp.HeaderTrailer, "X-Sum")
+			w.Header().Set("X-Sum", "1")
+			_, _ = w.Write([]byte("body"))
+			w.(http.Flusher).Flush() //nolint:forcetypeassert
+			w.Header().Set("X-Sum", "2")
+			w.Header().Set(http.TrailerPrefix+"X-Late", "late")
+		})}
+		ln := fasthttputil.NewInmemoryListener()
+		go s.Serve(ln) //nolint:errcheck
+
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The committed value is a header; nothing set after the flush is sent.
+		if wire := string(raw); !strings.Contains(wire, "X-Sum: 1\r\n") || strings.Contains(wire, "X-Sum: 2") || strings.Contains(wire, "X-Late") || strings.Contains(wire, "Trailer:") {
+			t.Errorf("te=%q: want the committed value as a header and no trailers in:\n%s", te, wire)
+		}
+		_ = c.Close()
+		_ = ln.Close()
+	}
+}
+
+func TestHandlerAnnouncedValueWithoutTrailerSection(t *testing.T) {
+	t.Parallel()
+
+	// HEAD and HTTP/1.0 carry no trailers: the announced name keeps the value
+	// committed with the header as a header, as net/http writes it.
+	for _, request := range []string{"HEAD / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n", "GET / HTTP/1.0\r\nHost: a\r\n\r\n"} {
+		s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set(fasthttp.HeaderTrailer, "X-Sum")
+			w.Header().Set("X-Sum", "1")
+			_, _ = w.Write([]byte("body"))
+			w.Header().Set("X-Sum", "2")
+		})}
+		ln := fasthttputil.NewInmemoryListener()
+		go s.Serve(ln) //nolint:errcheck
+
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte(request)); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if wire := string(raw); !strings.Contains(wire, "X-Sum: 1\r\n") || strings.Contains(wire, "X-Sum: 2") || strings.Contains(wire, "chunked") {
+			t.Errorf("%q: want the committed value as a header and no trailer section in:\n%s", request, wire)
+		}
+		_ = c.Close()
+		_ = ln.Close()
+	}
+}
+
+func TestHandlerTrailersKeepDateAndRepeatedServer(t *testing.T) {
+	t.Parallel()
+
+	const date = "Mon, 28 Sep 2026 00:00:00 GMT"
+	for _, flush := range []bool{false, true} {
+		s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set(fasthttp.HeaderTrailer, "Date, Server")
+			_, _ = w.Write([]byte("body"))
+			if flush {
+				w.(http.Flusher).Flush() //nolint:forcetypeassert
+			}
+			w.Header().Add(fasthttp.HeaderServer, "one")
+			w.Header().Add(fasthttp.HeaderServer, "two")
+			w.Header().Set(fasthttp.HeaderDate, date)
+		})}
+		ln := fasthttputil.NewInmemoryListener()
+		go s.Serve(ln) //nolint:errcheck
+
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.ReadAll(resp.Body); err != nil {
+			t.Fatal(err)
+		}
+		if got := resp.Trailer.Values(fasthttp.HeaderServer); !slices.Equal(got, []string{"one", "two"}) {
+			t.Errorf("flush=%v: trailer Server = %q, want both values", flush, got)
+		}
+		if got := resp.Trailer.Values(fasthttp.HeaderDate); !slices.Equal(got, []string{date}) {
+			t.Errorf("flush=%v: trailer Date = %q, want the handler's", flush, got)
+		}
+		_ = resp.Body.Close()
+		_ = c.Close()
+		_ = ln.Close()
+	}
+}
+
+func TestHandlerWritesTrailers(t *testing.T) {
+	t.Parallel()
+
+	for _, flush := range []bool{false, true} {
+		s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set(fasthttp.HeaderTrailer, "X-Result")
+			_, _ = w.Write([]byte("body"))
+			if flush {
+				w.(http.Flusher).Flush() //nolint:forcetypeassert
+			}
+			w.Header().Add("X-Result", "done")
+			w.Header().Add("X-Result", "twice")
+			w.Header().Set(http.TrailerPrefix+"X-Late", "late")
+		})}
+		ln := fasthttputil.NewInmemoryListener()
+		go s.Serve(ln) //nolint:errcheck
+
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := io.ReadAll(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wire := string(raw)
+		for _, want := range []string{"Transfer-Encoding: chunked", "X-Result: done", "X-Result: twice", "X-Late: late"} {
+			if strings.Count(wire, want) != 1 {
+				t.Errorf("flush=%v: %q not exactly once in:\n%s", flush, want, wire)
+			}
+		}
+		if strings.Count(wire, "X-Result") != 3 { // the announcement plus both trailer lines
+			t.Errorf("flush=%v: wrong X-Result count in:\n%s", flush, wire)
+		}
+		_ = c.Close()
+		_ = ln.Close()
+	}
+}
+
+// A compression goroutine may reach the end of the stream while the server
+// closes it early; the trailers must not land on a response it then resets.
+func TestStreamBodyTrailersAfterClose(t *testing.T) {
+	t.Parallel()
+
+	for range 500 {
+		var ctx fasthttp.RequestCtx
+		w := acquireWriter(&ctx)
+		w.Header().Set(fasthttp.HeaderTrailer, "X-Sum")
+		w.Header().Set("X-Sum", "1")
+		w.pr, w.pw = io.Pipe()
+		b := &streamBody{w: w, announced: announceTrailers(&ctx, w.Header()[fasthttp.HeaderTrailer]), trailers: true}
+
+		reading, read := make(chan struct{}), make(chan struct{})
+		go func() {
+			defer close(read)
+			close(reading)
+			_, _ = b.Read(make([]byte, 1))
+		}()
+		<-reading
+		// The handler returns as the server gives up on the stream.
+		_ = w.pw.Close()
+		_ = b.Close()
+		ctx.Response.Reset()
+		<-read
 	}
 }
