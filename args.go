@@ -139,23 +139,27 @@ func (a *Args) QueryString() []byte {
 
 // Sort sorts Args by key and then value using 'f' as comparison function.
 //
+// f must return a negative value, zero, or a positive value when x is less
+// than, equal to, or greater than y, respectively.
 // For example args.Sort(bytes.Compare).
 func (a *Args) Sort(f func(x, y []byte) int) {
 	sort.SliceStable(a.args, func(i, j int) bool {
 		n := f(a.args[i].key, a.args[j].key)
 		if n == 0 {
-			return f(a.args[i].value, a.args[j].value) == -1
+			return f(a.args[i].value, a.args[j].value) < 0
 		}
-		return n == -1
+		return n < 0
 	})
 }
 
 // SortKeys sorts Args by key only using 'f' as comparison function.
 //
+// f must return a negative value, zero, or a positive value when x is less
+// than, equal to, or greater than y, respectively.
 // For example args.SortKeys(bytes.Compare).
 func (a *Args) SortKeys(f func(x, y []byte) int) {
 	sort.SliceStable(a.args, func(i, j int) bool {
-		return f(a.args[i].key, a.args[j].key) == -1
+		return f(a.args[i].key, a.args[j].key) < 0
 	})
 }
 
