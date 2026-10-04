@@ -675,6 +675,7 @@ type RequestCtx struct {
 	connID                  uint64
 	connRequestNum          uint64
 	hijackNoResponse        bool
+	deadlineMu              sync.Mutex
 	handlerReadDeadlineSet  atomic.Bool
 	handlerWriteDeadlineSet atomic.Bool
 }
@@ -926,6 +927,8 @@ func (ctx *RequestCtx) Conn() net.Conn {
 
 // SetReadDeadline sets the read deadline on the underlying connection.
 func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
+	ctx.deadlineMu.Lock()
+	defer ctx.deadlineMu.Unlock()
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
@@ -938,6 +941,8 @@ func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
 
 // SetWriteDeadline sets the write deadline on the underlying connection.
 func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
+	ctx.deadlineMu.Lock()
+	defer ctx.deadlineMu.Unlock()
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
@@ -950,6 +955,8 @@ func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
 
 // SetDeadline sets the read and write deadlines associated with the underlying connection.
 func (ctx *RequestCtx) SetDeadline(deadline time.Time) error {
+	ctx.deadlineMu.Lock()
+	defer ctx.deadlineMu.Unlock()
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
@@ -971,9 +978,11 @@ func (ctx *RequestCtx) reset() {
 	ctx.connTime = zeroTime
 	ctx.remoteAddr = nil
 	ctx.time = zeroTime
+	ctx.deadlineMu.Lock()
 	ctx.c = nil
 	ctx.handlerReadDeadlineSet.Store(false)
 	ctx.handlerWriteDeadlineSet.Store(false)
+	ctx.deadlineMu.Unlock()
 
 	// Don't reset ctx.s!
 	// We have a pool per server so the next time this ctx is used it
@@ -2786,11 +2795,22 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				br = nil
 			}
 			reqStream = nil
+			oldCtx := ctx
 			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
 			ctx = s.acquireCtx(c)
 			ctx.connTime = connTime
 			ctx.time = reqTime
 			timeoutResponse.CopyTo(&ctx.Response)
+
+			oldCtx.deadlineMu.Lock()
+			oldCtx.c = nil
+			if oldCtx.handlerReadDeadlineSet.Load() {
+				ctx.handlerReadDeadlineSet.Store(true)
+			}
+			if oldCtx.handlerWriteDeadlineSet.Load() {
+				ctx.handlerWriteDeadlineSet.Store(true)
+			}
+			oldCtx.deadlineMu.Unlock()
 		}
 
 		if ctx.IsHead() {
@@ -2802,22 +2822,26 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		hijackNoResponse = ctx.hijackNoResponse && hijackHandler != nil
 		ctx.hijackNoResponse = false
 
+		ctx.deadlineMu.Lock()
 		if ctx.handlerWriteDeadlineSet.Load() {
 			previousWriteTimeout = 0
 		} else {
 			if writeTimeout > 0 {
 				if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+					ctx.deadlineMu.Unlock()
 					break
 				}
 				previousWriteTimeout = writeTimeout
 			} else if previousWriteTimeout > 0 {
 				// We don't want a write timeout but we previously set one, remove it.
 				if err = c.SetWriteDeadline(zeroTime); err != nil {
+					ctx.deadlineMu.Unlock()
 					break
 				}
 				previousWriteTimeout = 0
 			}
 		}
+		ctx.deadlineMu.Unlock()
 
 		connectionClose = connectionClose ||
 			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
@@ -2867,7 +2891,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			// consumed body can still batch pipelined responses in the writer.
 			unreadStreamBody := reqStream != nil && !reqStream.eof &&
 				(reqStream.contentLength == -1 || reqStream.totalBytesRead < reqStream.contentLength)
-			if unreadStreamBody || br == nil || br.Buffered() == 0 || connectionClose || (s.ReduceMemoryUsage && hijackHandler == nil) {
+			// Only flush the writer if we don't have another request in the pipeline.
+			// This is a big of an ugly optimization for https://www.techempower.com/benchmarks/
+			// This benchmark will send 16 pipelined requests. It is faster to pack as many responses
+			// in a TCP packet and send it back at once than waiting for a flush every request.
+			// In real world circumstances this behaviour could be argued as being wrong.
+			if unreadStreamBody || br == nil || br.Buffered() == 0 || connectionClose ||
+				ctx.handlerWriteDeadlineSet.Load() || (s.ReduceMemoryUsage && hijackHandler == nil) {
 				err = bw.Flush()
 				if err != nil {
 					break
@@ -2926,19 +2956,29 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Request.bodyStream = nil
 		ctx.Request.serverStream = nil
 
+		ctx.deadlineMu.Lock()
 		if ctx.handlerReadDeadlineSet.Load() {
 			if err = c.SetReadDeadline(zeroTime); err != nil {
+				ctx.deadlineMu.Unlock()
 				break
 			}
 			ctx.handlerReadDeadlineSet.Store(false)
 		}
 		if ctx.handlerWriteDeadlineSet.Load() {
+			if bw != nil && bw.Buffered() > 0 {
+				if err = bw.Flush(); err != nil {
+					ctx.deadlineMu.Unlock()
+					break
+				}
+			}
 			if err = c.SetWriteDeadline(zeroTime); err != nil {
+				ctx.deadlineMu.Unlock()
 				break
 			}
 			ctx.handlerWriteDeadlineSet.Store(false)
 			previousWriteTimeout = 0
 		}
+		ctx.deadlineMu.Unlock()
 
 		idleConnTime.Store(reqSecond)
 		s.setState(c, StateIdle)
