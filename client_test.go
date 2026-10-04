@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1086,6 +1087,189 @@ func testPipelineClientDoOnce(t *testing.T, c *PipelineClient) {
 	}
 }
 
+func waitPipelineClientStopped(t *testing.T, c *PipelineClient) {
+	t.Helper()
+
+	deadline := time.Now().Add(testTimeout(3 * time.Second))
+	for {
+		stopped := true
+		c.connClientsLock.Lock()
+		for _, cc := range c.connClients {
+			cc.chLock.Lock()
+			stopped = stopped && cc.chs == nil
+			cc.chLock.Unlock()
+		}
+		c.connClientsLock.Unlock()
+		if stopped {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("pipeline worker did not stop")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestPipelineClientRetiresAfterDialFailure(t *testing.T) {
+	t.Parallel()
+
+	for _, method := range []string{"DoTimeout", "DoDeadline"} {
+		t.Run(method, func(t *testing.T) {
+			t.Parallel()
+
+			clientConn, serverConn := net.Pipe()
+			var available atomic.Bool
+			var dials atomic.Int64
+			c := &PipelineClient{
+				MaxIdleConnDuration: 10 * time.Millisecond,
+				Logger:              log.New(io.Discard, "", 0),
+				Dial: func(string) (net.Conn, error) {
+					dials.Add(1)
+					if !available.Load() {
+						return nil, errors.New("connection refused")
+					}
+					return clientConn, nil
+				},
+			}
+			t.Cleanup(func() {
+				_ = clientConn.Close()
+				_ = serverConn.Close()
+				waitPipelineClientStopped(t, c)
+			})
+			var req Request
+			var resp Response
+			req.SetRequestURI("http://example.test/")
+			timeout := testTimeout(50 * time.Millisecond)
+			var err error
+			switch method {
+			case "DoTimeout":
+				err = c.DoTimeout(&req, &resp, timeout)
+			case "DoDeadline":
+				err = c.DoDeadline(&req, &resp, time.Now().Add(timeout))
+			}
+			if !errors.Is(err, ErrTimeout) {
+				t.Fatalf("got %v, want ErrTimeout", err)
+			}
+			waitPipelineClientStopped(t, c)
+			if got := dials.Load(); got == 0 || got > 2 {
+				t.Fatalf("got %d failed dials for one timed-out request", got)
+			}
+
+			// Retirement must allow the same client to serve new requests.
+			available.Store(true)
+			go func() {
+				defer serverConn.Close()
+				var req Request
+				if req.Read(bufio.NewReader(serverConn)) == nil {
+					_, _ = io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+				}
+			}()
+			if err := c.DoTimeout(&req, &resp, testTimeout(time.Second)); err != nil {
+				t.Fatalf("request after retirement failed: %v", err)
+			}
+			if got := string(resp.Body()); got != "OK" {
+				t.Fatalf("body = %q, want OK", got)
+			}
+		})
+	}
+}
+
+func TestPipelineClientClosesAbandonedRequestStream(t *testing.T) {
+	t.Parallel()
+
+	c := &PipelineClient{
+		Logger: log.New(io.Discard, "", 0),
+		Dial: func(string) (net.Conn, error) {
+			return nil, errors.New("connection refused")
+		},
+	}
+	t.Cleanup(func() { waitPipelineClientStopped(t, c) })
+	closed := make(chan struct{})
+	var req Request
+	req.SetRequestURI("http://example.test/")
+	req.SetBodyStream(&testReader{
+		onClose: func() error {
+			// Closing an abandoned stream must not hold the client lock.
+			if n := c.PendingRequests(); n != 0 {
+				t.Errorf("got %d pending requests after timeout", n)
+			}
+			close(closed)
+			return nil
+		},
+	}, 1)
+	if err := c.DoTimeout(&req, nil, testTimeout(50*time.Millisecond)); !errors.Is(err, ErrTimeout) {
+		t.Fatalf("got %v, want ErrTimeout", err)
+	}
+	select {
+	case <-closed:
+	case <-time.After(testTimeout(3 * time.Second)):
+		t.Fatal("abandoned request body stream was not closed")
+	}
+}
+
+func TestPipelineClientThrottlesDialFailures(t *testing.T) {
+	t.Parallel()
+
+	clientConn, serverConn := net.Pipe()
+	firstDial := make(chan struct{})
+	var available atomic.Bool
+	var dials atomic.Int64
+	c := &PipelineClient{
+		MaxIdleConnDuration: 10 * time.Millisecond,
+		Logger:              log.New(io.Discard, "", 0),
+		Dial: func(string) (net.Conn, error) {
+			if dials.Add(1) == 1 {
+				close(firstDial)
+			}
+			if !available.Load() {
+				return nil, errors.New("connection refused")
+			}
+			return clientConn, nil
+		},
+	}
+	t.Cleanup(func() {
+		_ = clientConn.Close()
+		_ = serverConn.Close()
+		waitPipelineClientStopped(t, c)
+	})
+	go func() {
+		defer serverConn.Close()
+		var req Request
+		if req.Read(bufio.NewReader(serverConn)) == nil {
+			_, _ = io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+		}
+	}()
+	done := make(chan error, 1)
+	go func() {
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.test/")
+		err := c.DoTimeout(&req, &resp, testTimeout(5*time.Second))
+		if err == nil && string(resp.Body()) != "OK" {
+			err = fmt.Errorf("body = %q, want OK", resp.Body())
+		}
+		done <- err
+	}()
+	select {
+	case <-firstDial:
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("request did not start dialing")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if got := dials.Load(); got > 2 {
+		t.Errorf("connection failure caused %d dials in 100ms", got)
+	}
+	available.Store(true)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("pending request failed after connection recovered: %v", err)
+		}
+	case <-time.After(testTimeout(6 * time.Second)):
+		t.Fatal("pending request was not retried")
+	}
+}
+
 func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 	t.Parallel()
 
@@ -1197,10 +1381,6 @@ func TestPipelineClientMaxResponseBodySize(t *testing.T) {
 				t.Run(fmt.Sprintf("%s/stream=%t/%s", tc.name, stream, method), func(t *testing.T) {
 					t.Parallel()
 					clientConn, serverConn := net.Pipe()
-					t.Cleanup(func() {
-						_ = clientConn.Close()
-						_ = serverConn.Close()
-					})
 					go func() {
 						defer serverConn.Close()
 						var req Request
@@ -1210,6 +1390,7 @@ func TestPipelineClientMaxResponseBodySize(t *testing.T) {
 					}()
 					var dialed atomic.Bool
 					client := PipelineClient{
+						MaxIdleConnDuration: 10 * time.Millisecond,
 						MaxResponseBodySize: tc.limit,
 						ReadTimeout:         testTimeout(time.Second),
 						WriteTimeout:        testTimeout(time.Second),
@@ -1221,6 +1402,11 @@ func TestPipelineClientMaxResponseBodySize(t *testing.T) {
 							return clientConn, nil
 						},
 					}
+					t.Cleanup(func() {
+						_ = clientConn.Close()
+						_ = serverConn.Close()
+						waitPipelineClientStopped(t, &client)
+					})
 					var req Request
 					req.SetRequestURI("http://example.test/")
 					var resp Response
