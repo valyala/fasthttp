@@ -1285,7 +1285,7 @@ func responseBodyDrainSize(maxBodySize int) int {
 func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
 	resp := AcquireResponse()
 	bodyBuf := resp.bodyBuffer()
-	resp.keepBodyBuffer = true
+	resp.KeepBodyBuffer = true
 	resp.preserveBodyBuffer = true
 	oldBody := bodyBuf.B
 	bodyBuf.B = dst
@@ -1298,7 +1298,7 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	body = bodyBuf.B
 	bodyBuf.B = oldBody
 	resp.preserveBodyBuffer = false
-	resp.keepBodyBuffer = false
+	resp.KeepBodyBuffer = false
 	ReleaseResponse(resp)
 
 	return statusCode, body, err
@@ -1511,6 +1511,7 @@ func AcquireRequest() *Request {
 // It is forbidden accessing req and/or its' members after returning
 // it to request pool.
 func ReleaseRequest(req *Request) {
+	req.KeepBodyBuffer = false
 	req.Reset()
 	requestPool.Put(req)
 }
@@ -1533,6 +1534,7 @@ func AcquireResponse() *Response {
 // It is forbidden accessing resp and/or its' members after returning
 // it to response pool.
 func ReleaseResponse(resp *Response) {
+	resp.KeepBodyBuffer = false
 	resp.Reset()
 	responsePool.Put(resp)
 }

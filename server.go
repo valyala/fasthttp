@@ -924,6 +924,12 @@ func (ctx *RequestCtx) reset() {
 	ctx.Response.Reset()
 	ctx.fbr.reset()
 
+	if ctx.s != nil {
+		keepBodyBuffer := !ctx.s.ReduceMemoryUsage
+		ctx.Request.KeepBodyBuffer = keepBodyBuffer
+		ctx.Response.KeepBodyBuffer = keepBodyBuffer
+	}
+
 	ctx.connID = 0
 	ctx.connRequestNum = 0
 	ctx.connTime = zeroTime
@@ -3021,8 +3027,8 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 		keepBodyBuffer := !s.ReduceMemoryUsage
 
 		ctx = new(RequestCtx)
-		ctx.Request.keepBodyBuffer = keepBodyBuffer
-		ctx.Response.keepBodyBuffer = keepBodyBuffer
+		ctx.Request.KeepBodyBuffer = keepBodyBuffer
+		ctx.Response.KeepBodyBuffer = keepBodyBuffer
 		ctx.s = s
 	} else {
 		ctx = v.(*RequestCtx) //nolint:forcetypeassert
@@ -3053,8 +3059,8 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.time = ctx.connTime
 
 	keepBodyBuffer := !reduceMemoryUsage
-	ctx.Request.keepBodyBuffer = keepBodyBuffer
-	ctx.Response.keepBodyBuffer = keepBodyBuffer
+	ctx.Request.KeepBodyBuffer = keepBodyBuffer
+	ctx.Response.KeepBodyBuffer = keepBodyBuffer
 }
 
 // Init prepares ctx for passing to RequestHandler.

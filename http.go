@@ -71,7 +71,13 @@ type Request struct {
 	parsedPostArgs bool
 	uriParseErr    error
 
-	keepBodyBuffer bool
+	// KeepBodyBuffer controls whether the request body buffer is kept
+	// across Reset() calls and reuse instead of returning it to requestBodyPool.
+	//
+	// It is false by default. Set it to true if you want to reuse the same
+	// Request instance across multiple requests without reallocating
+	// or returning the body buffer to the pool.
+	KeepBodyBuffer bool
 
 	// Used by byte-returning client helpers so body limits and retries remain
 	// inside the normal buffered request path. This is deliberately not copied
@@ -140,7 +146,14 @@ type Response struct {
 	// Use it for writing HEAD responses.
 	SkipBody bool
 
-	keepBodyBuffer        bool
+	// KeepBodyBuffer controls whether the response body buffer is kept
+	// across Reset() calls and reuse instead of returning it to responseBodyPool.
+	//
+	// It is false by default. Set it to true if you want to reuse the same
+	// Response instance across multiple requests without reallocating
+	// or returning the body buffer to the pool.
+	KeepBodyBuffer bool
+
 	preserveBodyBuffer    bool
 	secureErrorLogMessage bool
 }
@@ -853,7 +866,7 @@ func (resp *Response) ResetBody() {
 	resp.bodyRaw = nil
 	resp.closeBodyStream(nil) //nolint:errcheck
 	if resp.body != nil {
-		if resp.keepBodyBuffer {
+		if resp.KeepBodyBuffer {
 			resp.body.Reset()
 		} else {
 			responseBodyPool.Put(resp.body)
@@ -1027,7 +1040,7 @@ func (req *Request) ResetBody() {
 	req.RemoveMultipartFormFiles()
 	req.closeBodyStream() //nolint:errcheck
 	if req.body != nil {
-		if req.keepBodyBuffer {
+		if req.KeepBodyBuffer {
 			req.body.Reset()
 		} else {
 			requestBodyPool.Put(req.body)
@@ -1339,8 +1352,10 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 // Reset clears request contents.
 func (req *Request) Reset() {
 	req.userValues.Reset() // it should be at the top, since some values might implement io.Closer interface
-	if bodyPoolSizeLimit := int(atomic.LoadInt64(&requestBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && req.body != nil {
-		req.ReleaseBody(bodyPoolSizeLimit)
+	if !req.KeepBodyBuffer {
+		if bodyPoolSizeLimit := int(atomic.LoadInt64(&requestBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && req.body != nil {
+			req.ReleaseBody(bodyPoolSizeLimit)
+		}
 	}
 	req.Header.Reset()
 	req.resetSkipHeader()
@@ -1375,7 +1390,7 @@ func (req *Request) RemoveMultipartFormFiles() {
 
 // Reset clears response contents.
 func (resp *Response) Reset() {
-	if !resp.preserveBodyBuffer {
+	if !resp.preserveBodyBuffer && !resp.KeepBodyBuffer {
 		if bodyPoolSizeLimit := int(atomic.LoadInt64(&responseBodyPoolSizeLimit)); bodyPoolSizeLimit >= 0 && resp.body != nil {
 			resp.ReleaseBody(bodyPoolSizeLimit)
 		}
