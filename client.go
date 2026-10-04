@@ -3135,40 +3135,56 @@ func (c *pipelineConnClient) releasePipelineConnChannels(chs *pipelineConnChanne
 func (c *pipelineConnClient) pipelineWorker(chs *pipelineConnChannels) {
 	// Keep restarting the worker if it fails (connection errors for example).
 	for {
-		if err := c.worker(chs); err != nil {
-			c.logger().Printf("error in PipelineClient(%q): %v", c.Addr, err)
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// Throttle client reconnections on timeout errors
-				time.Sleep(time.Second)
-			}
-		} else if c.tryRetirePipelineConnChannels(chs) {
+		if c.tryRetirePipelineConnChannels(chs) {
 			return
+		}
+		connected, err := c.worker(chs)
+		if err != nil {
+			c.logger().Printf("error in PipelineClient(%q): %v", c.Addr, err)
+		}
+		if c.tryRetirePipelineConnChannels(chs) {
+			return
+		}
+		if netErr, ok := err.(net.Error); !connected || (ok && netErr.Timeout()) {
+			// Throttle all connection establishment failures and timeouts.
+			// Reconnect promptly after other errors on an established connection.
+			time.Sleep(time.Second)
 		}
 	}
 }
 
 func (c *pipelineConnClient) tryRetirePipelineConnChannels(chs *pipelineConnChannels) bool {
 	c.chLock.Lock()
-	stop := c.chs == chs && chs.users == 0 && len(chs.chR) == 0 && len(chs.chW) == 0
+	stop := c.chs == chs && chs.users == 0 && len(chs.chR) == 0
 	if stop {
 		c.chs = nil
 	}
 	c.chLock.Unlock()
+	if stop {
+		// The reader and writer have stopped, and no callers are using these
+		// channels. Any remaining outgoing requests were abandoned on timeout.
+		// New callers acquire new channels. Reset work outside chLock, since
+		// closing a request body stream may call back into the client.
+		for len(chs.chW) > 0 {
+			c.releasePipelineWork(<-chs.chW)
+		}
+	}
 	return stop
 }
 
-func (c *pipelineConnClient) worker(chs *pipelineConnChannels) error {
+// worker returns whether a connection was established and the worker's error.
+func (c *pipelineConnClient) worker(chs *pipelineConnChannels) (bool, error) {
 	var tlsConfig *tls.Config
 	if c.IsTLS {
 		var err error
 		tlsConfig, err = c.cachedTLSConfig()
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
 	conn, err := dialAddr(c.Addr, c.Dial, nil, c.DialDualStack, c.IsTLS, tlsConfig, 0, c.WriteTimeout)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Start reader and writer
@@ -3202,7 +3218,7 @@ func (c *pipelineConnClient) worker(chs *pipelineConnChannels) error {
 		w.done <- struct{}{}
 	}
 
-	return err
+	return true, err
 }
 
 func (c *pipelineConnClient) cachedTLSConfig() (*tls.Config, error) {
