@@ -4831,3 +4831,27 @@ func TestResponseWriteAlternatingHeaderSizesAllocations(t *testing.T) {
 		t.Errorf("%v allocs per alternating pair, expecting 0", n)
 	}
 }
+
+func TestRequestBodyStreamWarning(t *testing.T) {
+	var r Request
+	tl := &testLogger{}
+	r.logger = tl
+
+	s := "test stream content"
+	r.SetBodyStream(bytes.NewBufferString(s), len(s))
+
+	body := r.Body()
+	if string(body) != s {
+		t.Fatalf("unexpected body %q", body)
+	}
+
+	tl.lock.Lock()
+	out := tl.out
+	tl.lock.Unlock()
+
+	expectedWarning := "Request.Body() reads the entire stream into memory. " +
+		"Use Request.BodyStream() or Request.BodyWriteTo() instead to avoid out-of-memory errors.\n"
+	if out != expectedWarning {
+		t.Fatalf("unexpected log message: got %q, want %q", out, expectedWarning)
+	}
+}
