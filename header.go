@@ -3010,6 +3010,22 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 
 	for i, n := 0, len(h.h); i < n; i++ {
 		kv := &h.h[i]
+		// RFC 9112 section 6.1 forbids Transfer-Encoding on 1xx and 204:
+		// these statuses cannot carry a body, so they must not announce a
+		// transfer coding such as chunked. A peer can still send the invalid
+		// field, and parsing retains it so callers can inspect what arrived.
+		// Suppress it only here, when producing the outgoing wire header;
+		// deleting it from h.h would also change Peek/VisitAll and parsed state.
+		//
+		// The Content-Length wire guard has exactly the same status boundary,
+		// so reuse it rather than mustSkipBody, which would also exclude 304.
+		// Transfer-Encoding is permitted on a 304 to describe the coding that
+		// would have applied to the corresponding 200 response, even though
+		// the 304 itself has no body. Preserve that metadata (and normal 200s).
+		// Compare case-insensitively for headers read with normalization off.
+		if h.mustSkipContentLengthOnWire() && caseInsensitiveCompare(kv.key, strTransferEncoding) {
+			continue
+		}
 		if h.noDefaultDate || !bytes.Equal(kv.key, strDate) {
 			dst = appendHeaderLine(dst, kv.key, kv.value)
 		}

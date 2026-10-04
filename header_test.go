@@ -5999,3 +5999,38 @@ func TestTrailerSpecialHeaderSetWhileStreaming(t *testing.T) {
 		t.Fatalf("request = %q, want the User-Agent set while streaming as the trailer", buf.String())
 	}
 }
+
+func TestResponseHeaderTransferEncodingOnWire(t *testing.T) {
+	t.Parallel()
+
+	// 100 and 103 exercise informational responses; 101 verifies that the
+	// protocol-switching response is still subject to the 1xx prohibition.
+	// 204 is the reported regression: forwarding a parsed No Content response
+	// must not re-emit the peer's invalid chunked framing header.
+	// 304 is a bodyless control where transfer-coding metadata is allowed,
+	// and 200 ensures ordinary chunked responses keep their framing header.
+	for _, status := range []int{StatusContinue, StatusSwitchingProtocols, StatusEarlyHints, StatusNoContent, StatusNotModified, StatusOK} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			t.Parallel()
+			var h ResponseHeader
+			// Read the header directly: informational responses have no body and
+			// Response.Read would continue looking for the final response.
+			raw := fmt.Sprintf("HTTP/1.1 %d %s\r\nTransfer-Encoding: chunked\r\n\r\n", status, StatusMessage(status))
+			if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+				t.Fatalf("read header: %v", err)
+			}
+			// The fix belongs to serialization, not parsing: callers must still
+			// be able to observe the original header, even for an invalid peer.
+			if got := string(h.Peek(HeaderTransferEncoding)); got != "chunked" {
+				t.Fatalf("parsed Transfer-Encoding = %q, want chunked", got)
+			}
+			wire := string(h.AppendBytes(nil))
+			// Assert both halves of the boundary: omit forbidden framing, but
+			// do not strip valid 304 metadata or change an ordinary 200 response.
+			want := status >= 200 && status != StatusNoContent
+			if got := strings.Contains(wire, "Transfer-Encoding: chunked\r\n"); got != want {
+				t.Fatalf("Transfer-Encoding on wire = %t, want %t:\n%s", got, want, wire)
+			}
+		})
+	}
+}
