@@ -1,0 +1,77 @@
+//go:build !race
+
+package main
+
+import (
+	"bytes"
+	"net"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/valyala/fasthttp"
+)
+
+// request has a query string longer than the scratch buffer's initial capacity,
+// so the handler has to grow it and put the grown buffer back in the pool.
+var request = "GET /foo?bar=baz&" + strings.Repeat("k", 64) + "=" + strings.Repeat("v", 64) +
+	" HTTP/1.1\r\nHost: google.com\r\nCookie: foo=bar\r\n\r\n"
+
+// TestZeroAllocation asserts the 0 allocs/op claim in README.md. It mirrors
+// TestAllocationServeConn in allocation_test.go.
+func TestZeroAllocation(t *testing.T) {
+	s := &fasthttp.Server{
+		Handler: requestHandler,
+	}
+
+	rw := &readWriter{}
+	rw.r.Grow(1024)
+	rw.w.Grow(1024)
+
+	n := testing.AllocsPerRun(100, func() {
+		rw.r.WriteString(request)
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatal(err)
+		}
+		rw.w.Reset()
+	})
+
+	if n != 0 {
+		t.Fatalf("expected 0 allocations, got %f", n)
+	}
+}
+
+type readWriter struct {
+	net.Conn
+
+	r bytes.Buffer
+	w bytes.Buffer
+}
+
+func (rw *readWriter) Close() error {
+	return nil
+}
+
+func (rw *readWriter) Read(b []byte) (int, error) {
+	return rw.r.Read(b)
+}
+
+func (rw *readWriter) Write(b []byte) (int, error) {
+	return rw.w.Write(b)
+}
+
+var zeroTCPAddr = &net.TCPAddr{
+	IP: net.IPv4zero,
+}
+
+func (rw *readWriter) RemoteAddr() net.Addr {
+	return zeroTCPAddr
+}
+
+func (rw *readWriter) LocalAddr() net.Addr {
+	return zeroTCPAddr
+}
+
+func (rw *readWriter) SetDeadline(t time.Time) error      { return nil }
+func (rw *readWriter) SetReadDeadline(t time.Time) error  { return nil }
+func (rw *readWriter) SetWriteDeadline(t time.Time) error { return nil }

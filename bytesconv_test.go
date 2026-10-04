@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,6 +27,41 @@ func TestAppendQuotedArg(t *testing.T) {
 	expect := url.QueryEscape(string(allcases))
 	if res != expect {
 		t.Fatalf("unexpected string %q. Expecting %q.", res, expect)
+	}
+}
+
+func TestAppendQuotedArgAndPathPrefix(t *testing.T) {
+	t.Parallel()
+
+	for _, s := range []string{"", "abc", "a b", " ", "foo/bar?baz", "a%20b", "\xff\x00", "abcdefgh-ijk~lmn"} {
+		var exp []byte
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			switch {
+			case c == ' ':
+				exp = append(exp, '+')
+			case quotedArgShouldEscapeTable[c] != 0:
+				exp = append(exp, '%', upperhex[c>>4], upperhex[c&0xf])
+			default:
+				exp = append(exp, c)
+			}
+		}
+		if got := AppendQuotedArg(nil, []byte(s)); !bytes.Equal(got, exp) {
+			t.Fatalf("unexpected AppendQuotedArg(%q): %q. Expecting %q", s, got, exp)
+		}
+
+		exp = exp[:0]
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			if quotedPathShouldEscapeTable[c] != 0 {
+				exp = append(exp, '%', upperhex[c>>4], upperhex[c&0xf])
+			} else {
+				exp = append(exp, c)
+			}
+		}
+		if got := appendQuotedPath(nil, []byte(s)); !bytes.Equal(got, exp) {
+			t.Fatalf("unexpected appendQuotedPath(%q): %q. Expecting %q", s, got, exp)
+		}
 	}
 }
 
@@ -201,6 +237,41 @@ func TestAppendHTTPDate(t *testing.T) {
 	}
 }
 
+func TestAppendHTTPDateMatchesTimeFormat(t *testing.T) {
+	t.Parallel()
+
+	expected := func(d time.Time) string {
+		b := d.In(time.UTC).AppendFormat(nil, time.RFC1123)
+		copy(b[len(b)-3:], "GMT")
+		return string(b)
+	}
+	check := func(d time.Time) {
+		if got, exp := string(AppendHTTPDate(nil, d)), expected(d); got != exp {
+			t.Fatalf("unexpected result for %v: %q. Expecting %q", d, got, exp)
+		}
+	}
+	for _, d := range []time.Time{
+		time.Date(0, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(99, time.December, 31, 23, 59, 59, 0, time.UTC),
+		time.Date(999, time.February, 28, 12, 0, 0, 0, time.UTC),
+		time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC),
+		time.Date(2024, time.February, 29, 1, 2, 3, 999999999, time.FixedZone("X", 5*3600)),
+		time.Date(9999, time.December, 31, 23, 59, 59, 0, time.UTC),
+		time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(-1, time.June, 15, 6, 7, 8, 0, time.UTC),
+		{},
+	} {
+		check(d)
+	}
+	d := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	for range 5000 {
+		check(d)
+		d = d.Add(37*time.Hour + 41*time.Minute + 53*time.Second)
+	}
+}
+
 func TestParseHTTPDateCompatibility(t *testing.T) {
 	t.Parallel()
 
@@ -332,6 +403,91 @@ func TestParseUintError(t *testing.T) {
 	// too big num
 	testParseUintError(t, "12345678901234567890")
 	testParseUintError(t, "1234567890123456789012")
+}
+
+// The digit gate in parseUintBuf has to be conservative on whatever int size
+// the build targets: a number of exactly maxSafeIntDigits digits must always
+// fit in an int, and one digit more must be able to overflow it.
+func TestMaxSafeIntDigits(t *testing.T) {
+	t.Parallel()
+
+	fits := strings.Repeat("9", maxSafeIntDigits)
+	if _, err := strconv.ParseUint(fits, 10, strconv.IntSize-1); err != nil {
+		t.Fatalf("%d nines must fit in an int on this platform: %v", maxSafeIntDigits, err)
+	}
+	if _, err := strconv.ParseUint(fits+"9", 10, strconv.IntSize-1); err == nil {
+		t.Fatalf("%d nines must not fit in an int on this platform", maxSafeIntDigits+1)
+	}
+}
+
+// ParseUint must agree with the standard library about which unsigned decimal
+// strings fit in an int and about the value when they do. A table of round
+// hostile numbers is not enough: the overflow this pins only shows up in a
+// narrow band of values where 10*v wraps back above v, and that band sits in a
+// different place for each int size, so both are covered below.
+func TestParseUintMatchesStrconv(t *testing.T) {
+	t.Parallel()
+
+	values := []string{
+		"0", "1", "9", "10", "255", "1000", "0123", "00000000000000000001",
+		// Wrap band for a 32-bit int: the pre-fix parser returned 705032704 for
+		// "5000000000" with no error. All of these are in range on a 64-bit
+		// platform, so the oracle decides what correct means for each build.
+		"2147483647", "2147483648", "5000000000", "6000000000", "9999999999",
+		"10000000000", "15000000000", "48000000000",
+		// Wrap band for a 64-bit int.
+		"9223372036854775806", "9223372036854775807", "9223372036854775808",
+		"18446744073709551615", "18446744073709551616",
+		"21000000000000000000", "22000000000000000000", "23000000000000000000",
+		"24000000000000000000", "25000000000000000000", "26000000000000000000",
+		"27000000000000000000", "41000000000000000000",
+		"210000000000000000000", "230000000000000000000", "410000000000000000000",
+		"4100000000000000000000",
+		"99999999999999999999", "100000000000000000000",
+	}
+
+	for _, s := range values {
+		got, gotErr := ParseUint([]byte(s))
+		// A bit size one below the int size accepts exactly the strings that name
+		// a non-negative int. ParseUint is the oracle rather than ParseInt, which
+		// also accepts the leading sign that fasthttp's ParseUint rejects.
+		want, wantErr := strconv.ParseUint(s, 10, strconv.IntSize-1)
+
+		if (gotErr != nil) != (wantErr != nil) {
+			t.Fatalf("ParseUint(%q) = (%d, %v), strconv.ParseUint = (%d, %v): "+
+				"they disagree about whether the value is in range", s, got, gotErr, want, wantErr)
+		}
+		if gotErr == nil && uint64(got) != want {
+			t.Fatalf("ParseUint(%q) = %d. Expecting %d", s, got, want)
+		}
+	}
+}
+
+// The parsed length must not be trusted as an int when it never fit one: a
+// Content-Length that overflows is an error on both the request and the
+// response side, not a wrapped value.
+func TestParseContentLengthRejectsOverflow(t *testing.T) {
+	t.Parallel()
+
+	for _, cl := range []string{"25000000000000000000", "41000000000000000000", "9223372036854775808"} {
+		if n, err := parseContentLength([]byte(cl)); err == nil {
+			t.Fatalf("parseContentLength(%q) = %d with no error. Expecting an error", cl, n)
+		}
+
+		var h RequestHeader
+		raw := "POST / HTTP/1.1\r\nHost: a\r\nContent-Length: " + cl + "\r\n\r\n"
+		if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err == nil {
+			t.Fatalf("RequestHeader.Read accepted Content-Length %q as %d. Expecting an error",
+				cl, h.ContentLength())
+		}
+
+		var rh ResponseHeader
+		rawResp := "HTTP/1.1 200 OK\r\nContent-Length: " + cl + "\r\n\r\n"
+		if err := rh.Read(bufio.NewReader(strings.NewReader(rawResp))); err == nil {
+			t.Fatalf("ResponseHeader.Read accepted Content-Length %q as %d. Expecting an error",
+				cl, rh.ContentLength())
+		}
+	}
 }
 
 func TestParseUfloatSuccess(t *testing.T) {
@@ -470,5 +626,29 @@ func testAppendUnquotedArg(t *testing.T, s, expectedS string) {
 	unquotedS := AppendUnquotedArg(nil, quotedS)
 	if s != string(unquotedS) {
 		t.Fatalf("Unexpected AppendUnquotedArg(AppendQuotedArg(%q))=%q, want %q", s, unquotedS, s)
+	}
+}
+
+func TestLowercaseBytesMatchesTable(t *testing.T) {
+	t.Parallel()
+
+	for n := 0; n <= 24; n++ {
+		for c := range 256 {
+			for pos := 0; pos < n; pos++ {
+				b := make([]byte, n)
+				for i := range b {
+					b[i] = 'A' + byte(i%26)
+				}
+				b[pos] = byte(c)
+				exp := make([]byte, n)
+				for i := range b {
+					exp[i] = toLowerTable[b[i]]
+				}
+				lowercaseBytes(b)
+				if !bytes.Equal(b, exp) {
+					t.Fatalf("unexpected result for byte %#x at %d of %d: %q. Expecting %q", c, pos, n, b, exp)
+				}
+			}
+		}
 	}
 }

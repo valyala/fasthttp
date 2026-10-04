@@ -16,18 +16,36 @@ type bodyStreamHeader interface {
 
 type requestStream struct {
 	header          bodyStreamHeader
-	prefetchedBytes *bytes.Reader
+	prefetchedBytes bytes.Reader
 	reader          *bufio.Reader
+	contentLength   int
 	totalBytesRead  int
 	chunkLeft       int
+	strictEOF       bool
+	eof             bool
 }
 
 func (rs *requestStream) Read(p []byte) (int, error) {
+	if rs.reader == nil {
+		panic("BUG: reading released body stream")
+	}
+
+	// The stream is terminal once the body has ended. Without this, a chunked
+	// stream re-enters parseChunkSize on the next Read and blocks waiting for a
+	// chunk header that is never coming: a keep-alive connection stays open
+	// after the body ends, so nothing wakes the read. Any caller that reads a
+	// streamed body to EOF and then reads again - draining before release is the
+	// common case - would park a goroutine and never release the connection.
+	if rs.eof {
+		return 0, io.EOF
+	}
+
 	var (
 		n   int
 		err error
 	)
-	if rs.header.ContentLength() == -1 {
+	contentLength := rs.contentLength
+	if contentLength == -1 {
 		if rs.chunkLeft == 0 {
 			chunkSize, err := parseChunkSize(rs.reader)
 			if err != nil {
@@ -38,6 +56,7 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 				if err != nil && err != io.EOF {
 					return 0, err
 				}
+				rs.eof = true
 				return 0, io.EOF
 			}
 			rs.chunkLeft = chunkSize
@@ -54,7 +73,8 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		}
 		return n, err
 	}
-	if rs.totalBytesRead == rs.header.ContentLength() {
+	if rs.totalBytesRead == contentLength {
+		rs.eof = true
 		return 0, io.EOF
 	}
 	prefetchedSize := int(rs.prefetchedBytes.Size())
@@ -65,26 +85,30 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 		}
 		n, err := rs.prefetchedBytes.Read(p)
 		rs.totalBytesRead += n
-		if n == rs.header.ContentLength() {
+		if rs.totalBytesRead == contentLength {
+			rs.eof = true
 			return n, io.EOF
 		}
 		return n, err
 	}
-	left := rs.header.ContentLength() - rs.totalBytesRead
+	left := contentLength - rs.totalBytesRead
 	if left > 0 && len(p) > left {
 		p = p[:left]
 	}
 	n, err = rs.reader.Read(p)
 	rs.totalBytesRead += n
+	if err == io.EOF && rs.strictEOF && contentLength >= 0 && rs.totalBytesRead < contentLength {
+		err = io.ErrUnexpectedEOF
+	}
 	if err != nil {
-		if err == io.EOF && rs.totalBytesRead < rs.header.ContentLength() {
-			// The peer stopped sending before Content-Length was reached.
-			err = io.ErrUnexpectedEOF
+		if err == io.EOF {
+			rs.eof = true
 		}
 		return n, err
 	}
 
-	if rs.totalBytesRead == rs.header.ContentLength() {
+	if rs.totalBytesRead == contentLength {
+		rs.eof = true
 		err = io.EOF
 	}
 	return n, err
@@ -92,18 +116,28 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 
 func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
 	rs := requestStreamPool.Get().(*requestStream) //nolint:forcetypeassert
-	rs.prefetchedBytes = bytes.NewReader(b.B)
+	rs.prefetchedBytes.Reset(b.B)
 	rs.reader = r
 	rs.header = h
+	rs.contentLength = h.ContentLength()
+	return rs
+}
+
+func acquireResponseStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
+	rs := acquireRequestStream(b, r, h)
+	rs.strictEOF = true
 	return rs
 }
 
 func releaseRequestStream(rs *requestStream) {
-	rs.prefetchedBytes = nil
+	rs.prefetchedBytes.Reset(nil)
 	rs.totalBytesRead = 0
 	rs.chunkLeft = 0
 	rs.reader = nil
 	rs.header = nil
+	rs.contentLength = 0
+	rs.eof = false
+	rs.strictEOF = false
 	requestStreamPool.Put(rs)
 }
 

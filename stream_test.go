@@ -34,7 +34,7 @@ func TestNewStreamReader(t *testing.T) {
 
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout")
 	}
 }
@@ -82,7 +82,7 @@ func TestStreamReaderClose(t *testing.T) {
 		if err != nil {
 			t.Fatalf("error returned from stream reader: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout when waiting for stream reader")
 	}
 
@@ -100,7 +100,7 @@ func TestStreamReaderClose(t *testing.T) {
 		if err != nil {
 			t.Fatalf("error returned when reading tail data: %v", err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout when reading tail data")
 	}
 }

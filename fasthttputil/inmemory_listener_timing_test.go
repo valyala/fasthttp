@@ -90,8 +90,7 @@ func benchmark(b *testing.B, h fasthttp.RequestHandler, isTLS bool) {
 			b.Fatalf("cannot load TLS certificate: %v", err)
 		}
 		serverTLSConfig = &tls.Config{
-			Certificates:             []tls.Certificate{cert},
-			PreferServerCipherSuites: true,
+			Certificates: []tls.Certificate{cert},
 		}
 		serverTLSConfig.CurvePreferences = []tls.CurveID{}
 		clientTLSConfig = &tls.Config{

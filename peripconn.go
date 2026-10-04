@@ -4,13 +4,12 @@ import (
 	"crypto/tls"
 	"net"
 	"sync"
+	"sync/atomic"
 )
 
 type perIPConnCounter struct {
-	perIPConnPool    sync.Pool
-	perIPTLSConnPool sync.Pool
-	m                map[uint32]int
-	lock             sync.Mutex
+	m    map[uint32]int
+	lock sync.Mutex
 }
 
 func (cc *perIPConnCounter) Register(ip uint32) int {
@@ -31,17 +30,23 @@ func (cc *perIPConnCounter) Unregister(ip uint32) {
 		// developer safeguard
 		panic("BUG: perIPConnCounter.Register() wasn't called")
 	}
-	n := max(cc.m[ip]-1, 0)
-	cc.m[ip] = n
+	// Drop the entry, otherwise the map keeps a key per distinct client IP forever.
+	if n := cc.m[ip] - 1; n > 0 {
+		cc.m[ip] = n
+	} else {
+		delete(cc.m, ip)
+	}
 }
 
+// A per-IP wrapper is not recycled: Shutdown closes the connection from
+// another goroutine while the serving one may still use the wrapper.
 type perIPConn struct {
 	net.Conn
 
 	perIPConnCounter *perIPConnCounter
 
-	ip   uint32
-	lock sync.Mutex
+	ip     uint32
+	closed atomic.Bool
 }
 
 type perIPTLSConn struct {
@@ -49,69 +54,40 @@ type perIPTLSConn struct {
 
 	perIPConnCounter *perIPConnCounter
 
-	ip   uint32
-	lock sync.Mutex
+	ip     uint32
+	closed atomic.Bool
 }
 
-func acquirePerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) net.Conn {
+func newPerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) net.Conn {
 	if tlsConn, ok := conn.(*tls.Conn); ok {
-		v := counter.perIPTLSConnPool.Get()
-		if v == nil {
-			return &perIPTLSConn{
-				perIPConnCounter: counter,
-				Conn:             tlsConn,
-				ip:               ip,
-			}
-		}
-		c := v.(*perIPTLSConn) //nolint:forcetypeassert
-		c.Conn = tlsConn
-		c.ip = ip
-		return c
-	}
-
-	v := counter.perIPConnPool.Get()
-	if v == nil {
-		return &perIPConn{
+		return &perIPTLSConn{
 			perIPConnCounter: counter,
-			Conn:             conn,
+			Conn:             tlsConn,
 			ip:               ip,
 		}
 	}
-	c := v.(*perIPConn) //nolint:forcetypeassert
-	c.Conn = conn
-	c.ip = ip
-	return c
+	return &perIPConn{
+		perIPConnCounter: counter,
+		Conn:             conn,
+		ip:               ip,
+	}
 }
 
 func (c *perIPConn) Close() error {
-	c.lock.Lock()
-	cc := c.Conn
-	c.Conn = nil
-	c.lock.Unlock()
-
-	if cc == nil {
+	if c.closed.Swap(true) {
 		return nil
 	}
-
-	err := cc.Close()
+	err := c.Conn.Close()
 	c.perIPConnCounter.Unregister(c.ip)
-	c.perIPConnCounter.perIPConnPool.Put(c)
 	return err
 }
 
 func (c *perIPTLSConn) Close() error {
-	c.lock.Lock()
-	cc := c.Conn
-	c.Conn = nil
-	c.lock.Unlock()
-
-	if cc == nil {
+	if c.closed.Swap(true) {
 		return nil
 	}
-
-	err := cc.Close()
+	err := c.Conn.Close()
 	c.perIPConnCounter.Unregister(c.ip)
-	c.perIPConnCounter.perIPTLSConnPool.Put(c)
 	return err
 }
 

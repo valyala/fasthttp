@@ -15,7 +15,8 @@ func main() {
 	url.SetPassword("Open Sesame")
 
 	hc := &fasthttp.HostClient{
-		Addr: "localhost:8080", // The host address and port must be set explicitly
+		Addr:                "localhost:8080", // The host address and port must be set explicitly
+		MaxResponseBodySize: 10 * 1024 * 1024, // Reject responses larger than 10 MiB.
 	}
 
 	req := fasthttp.AcquireRequest()

@@ -63,7 +63,7 @@ func benchmarkStreamReader(b *testing.B, size int) {
 			if err != nil {
 				b.Fatalf("unexpected error from stream reader: %v", err)
 			}
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			b.Fatalf("timeout")
 		}
 	})

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -55,7 +56,7 @@ func AppendHTMLEscapeBytes(dst, s []byte) []byte {
 // and returns the extended dst.
 func AppendIPv4(dst []byte, ip net.IP) []byte {
 	ip = ip.To4()
-	if ip == nil {
+	if len(ip) != net.IPv4len {
 		return append(dst, "non-v4 ip passed to AppendIPv4"...)
 	}
 
@@ -85,7 +86,7 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 	b := ipStr
 	for i := range 3 {
 		n := bytes.IndexByte(b, '.')
-		if n < 0 {
+		if uint(n) >= uint(len(b)) {
 			return dst, fmt.Errorf("cannot find dot in ip string %q", ipStr)
 		}
 		octet, parsed, err := parseIPv4Octet(b[:n])
@@ -113,9 +114,41 @@ func ParseIPv4(dst net.IP, ipStr []byte) (net.IP, error) {
 // AppendHTTPDate appends HTTP-compliant (RFC1123) representation of date
 // to dst and returns the extended dst.
 func AppendHTTPDate(dst []byte, date time.Time) []byte {
-	dst = date.In(time.UTC).AppendFormat(dst, time.RFC1123)
-	copy(dst[len(dst)-3:], strGMT)
-	return dst
+	date = date.UTC()
+	year, month, day := date.Date()
+	if year < 0 || year > 9999 {
+		dst = date.AppendFormat(dst, time.RFC1123)
+		copy(dst[len(dst)-3:], strGMT)
+		return dst
+	}
+	hour, minute, sec := date.Clock()
+
+	const (
+		weekdays = "SunMonTueWedThuFriSat"
+		months   = "JanFebMarAprMayJunJulAugSepOctNovDec"
+	)
+	w := 3 * int(date.Weekday())
+	m := 3 * (int(month) - 1)
+	dst = append(dst, weekdays[w:w+3]...)
+	dst = append(dst, ',', ' ')
+	dst = append2Digits(dst, day)
+	dst = append(dst, ' ')
+	dst = append(dst, months[m:m+3]...)
+	dst = append(dst, ' ')
+	dst = append2Digits(dst, year/100)
+	dst = append2Digits(dst, year%100)
+	dst = append(dst, ' ')
+	dst = append2Digits(dst, hour)
+	dst = append(dst, ':')
+	dst = append2Digits(dst, minute)
+	dst = append(dst, ':')
+	dst = append2Digits(dst, sec)
+	return append(dst, ' ', 'G', 'M', 'T')
+}
+
+func append2Digits(dst []byte, v int) []byte {
+	const digits = "0123456789"
+	return append(dst, digits[v/10], digits[v%10])
 }
 
 // ParseHTTPDate parses HTTP-compliant (RFC1123) date.
@@ -258,6 +291,10 @@ func AppendUint(dst []byte, n int) []byte {
 }
 
 // ParseUint parses uint from buf.
+//
+// A value too large for an int is an error rather than a wrapped result, so
+// ParseUint accepts exactly the unsigned decimal strings whose value fits in an
+// int on the current platform.
 func ParseUint(buf []byte) (int, error) {
 	v, n, err := parseUintBuf(buf)
 	if n != len(buf) {
@@ -274,14 +311,25 @@ var (
 	errTooLongInt             = errors.New("too long int")
 )
 
+const (
+	// maxIntDiv10 is the largest accumulator that can still take another digit.
+	// Anything above it overflows an int when multiplied by 10.
+	maxIntDiv10 = math.MaxInt / 10
+
+	// maxSafeIntDigits is how many leading decimal digits can never overflow an
+	// int, whatever the word size: 10**18-1 fits a 64-bit int and 10**9-1 fits a
+	// 32-bit one. Go defines strconv.IntSize as 32 or 64 and nothing else.
+	// TestMaxSafeIntDigits checks both halves of that claim on the build's own
+	// int size.
+	maxSafeIntDigits = 9 * (strconv.IntSize / 32)
+)
+
 func parseUintBuf(b []byte) (int, int, error) {
-	n := len(b)
-	if n == 0 {
+	if len(b) == 0 {
 		return -1, 0, errEmptyInt
 	}
 	v := 0
-	for i := range n {
-		c := b[i]
+	for i, c := range b {
 		k := c - '0'
 		if k > 9 {
 			if i == 0 {
@@ -290,13 +338,20 @@ func parseUintBuf(b []byte) (int, int, error) {
 			return v, i, nil
 		}
 		vNew := 10*v + int(k)
-		// Test for overflow.
-		if vNew < v {
+		// Test for overflow before trusting the result. Comparing the product
+		// against the accumulator afterwards is not enough: 10*v wraps modulo
+		// the int size and can land back above v, in which case the overflow
+		// goes unnoticed and a wrong value is returned instead of an error.
+		// Once v is known to be no larger than maxIntDiv10 the product cannot
+		// exceed math.MaxInt+2, so the sign test settles the only case left.
+		// Below maxSafeIntDigits neither can happen, which keeps the whole test
+		// out of the common path.
+		if i >= maxSafeIntDigits && (v > maxIntDiv10 || vNew < 0) {
 			return -1, i, errTooLongInt
 		}
 		v = vNew
 	}
-	return v, n, nil
+	return v, len(b), nil
 }
 
 func parseIPv4Octet(b []byte) (byte, int, error) {
@@ -407,9 +462,12 @@ const (
 )
 
 func lowercaseBytes(b []byte) {
+	for len(b) >= 8 {
+		storeWord(b, lowercaseWord(loadWord(b)))
+		b = b[8:]
+	}
 	for i := range b {
-		p := &b[i]
-		*p = toLowerTable[*p]
+		b[i] = toLowerTable[b[i]]
 	}
 }
 
@@ -422,7 +480,12 @@ func AppendUnquotedArg(dst, src []byte) []byte {
 
 // AppendQuotedArg appends url-encoded src to dst and returns appended dst.
 func AppendQuotedArg(dst, src []byte) []byte {
-	for _, c := range src {
+	i := 0
+	for i < len(src) && quotedArgShouldEscapeTable[src[i]] == 0 {
+		i++
+	}
+	dst = append(dst, src[:i]...)
+	for _, c := range src[i:] {
 		switch {
 		case c == ' ':
 			dst = append(dst, '+')
@@ -441,8 +504,13 @@ func appendQuotedPath(dst, src []byte) []byte {
 		return append(dst, '*')
 	}
 
-	for _, c := range src {
-		if quotedPathShouldEscapeTable[int(c)] != 0 {
+	i := 0
+	for i < len(src) && quotedPathShouldEscapeTable[src[i]] == 0 {
+		i++
+	}
+	dst = append(dst, src[:i]...)
+	for _, c := range src[i:] {
+		if quotedPathShouldEscapeTable[c] != 0 {
 			dst = append(dst, '%', upperhex[c>>4], upperhex[c&0xf])
 		} else {
 			dst = append(dst, c)

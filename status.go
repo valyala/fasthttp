@@ -151,6 +151,16 @@ var (
 	}
 )
 
+var statusLines = func() []string {
+	lines := make([]string, len(statusMessages))
+	for code, msg := range statusMessages {
+		if msg != "" {
+			lines[code] = "HTTP/1.1 " + strconv.Itoa(code) + " " + msg + "\r\n"
+		}
+	}
+	return lines
+}()
+
 // StatusMessage returns HTTP status message for the given status code.
 func StatusMessage(statusCode int) string {
 	if statusCode < statusMessageMin || statusCode > statusMessageMax {
@@ -179,7 +189,7 @@ func formatStatusLine(dst, protocol []byte, statusCode int, statusText []byte) [
 	dst = appendStatusCode(dst, statusCode)
 	dst = append(dst, ' ')
 	dst = append(dst, statusText...)
-	return append(dst, strCRLF...)
+	return append(dst, '\r', '\n')
 }
 
 func statusCodeLen(statusCode int) int {

@@ -2,8 +2,10 @@ package fasthttp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -19,11 +21,22 @@ const (
 	CompressZstdBestCompression
 )
 
+const (
+	limitedZstdDecoderMemoryHeadroom uint64 = 8 * 1024 * 1024
+	maxZstdDecoderMemory             uint64 = 1 << 63
+)
+
 var (
 	zstdDecoderPool            sync.Pool
+	zstdLimitedDecoderPool     sync.Pool
 	realZstdWriterPoolMap      = newCompressWriterPoolMap()
 	stacklessZstdWriterPoolMap = newCompressWriterPoolMap()
 )
+
+type limitedZstdReader struct {
+	zr        *zstd.Decoder
+	maxMemory uint64
+}
 
 func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 	v := zstdDecoderPool.Get()
@@ -39,6 +52,49 @@ func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 
 func releaseZstdReader(zr *zstd.Decoder) {
 	zstdDecoderPool.Put(zr)
+}
+
+func acquireLimitedZstdReader(r io.Reader, maxBodySize int) (*limitedZstdReader, error) {
+	requiredMemory := uint64(max(maxBodySize, zstd.MinWindowSize))
+	if v := zstdLimitedDecoderPool.Get(); v != nil {
+		limited := v.(*limitedZstdReader) //nolint:forcetypeassert
+		// Decoder caps are rounded up to 8 MiB buckets below. These bounds
+		// accept exactly the bucket a fresh decoder would use for this limit.
+		if limited.maxMemory >= requiredMemory &&
+			limited.maxMemory-requiredMemory < limitedZstdDecoderMemoryHeadroom {
+			if err := limited.zr.Reset(r); err != nil {
+				limited.zr.Close()
+				return nil, err
+			}
+			return limited, nil
+		}
+		limited.zr.Close()
+	}
+
+	maxMemory := requiredMemory
+	if remainder := requiredMemory % limitedZstdDecoderMemoryHeadroom; remainder != 0 {
+		maxMemory = min(
+			requiredMemory+limitedZstdDecoderMemoryHeadroom-remainder,
+			maxZstdDecoderMemory,
+		)
+	}
+	zr, err := zstd.NewReader(
+		r,
+		zstd.WithDecoderMaxMemory(maxMemory),
+		zstd.WithDecoderConcurrency(1),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &limitedZstdReader{zr: zr, maxMemory: maxMemory}, nil
+}
+
+func releaseLimitedZstdReader(limited *limitedZstdReader) {
+	if err := limited.zr.Reset(nil); err != nil {
+		limited.zr.Close()
+		return
+	}
+	zstdLimitedDecoderPool.Put(limited)
 }
 
 func acquireStacklessZstdWriter(w io.Writer, compressLevel int) stackless.Writer {
@@ -143,18 +199,80 @@ func WriteUnzstd(w io.Writer, p []byte) (int, error) {
 }
 
 func writeUnzstd(w io.Writer, p []byte, maxBodySize int) (int, error) {
+	estimatedDecompressedSize := estimateUnzstdSize(p)
+	if maxBodySize > 0 {
+		estimatedDecompressedSize = min(estimatedDecompressedSize, maxBodySize)
+	}
+
+	switch dst := w.(type) {
+	case *byteSliceWriter:
+		dst.b = slices.Grow(dst.b, estimatedDecompressedSize)
+	case *bytebufferpool.ByteBuffer:
+		dst.B = slices.Grow(dst.B, estimatedDecompressedSize)
+	case *bytes.Buffer:
+		dst.Grow(estimatedDecompressedSize)
+	}
+
 	r := &byteSliceReader{b: p}
-	zr, err := acquireZstdReader(r)
+	var zr *zstd.Decoder
+	var limited *limitedZstdReader
+	var err error
+	if maxBodySize > 0 {
+		limited, err = acquireLimitedZstdReader(r, maxBodySize)
+		if limited != nil {
+			zr = limited.zr
+		}
+	} else {
+		zr, err = acquireZstdReader(r)
+	}
 	if err != nil {
 		return 0, err
 	}
 	n, err := copyZeroAllocWithLimit(w, zr, maxBodySize)
-	releaseZstdReader(zr)
+	if maxBodySize > 0 {
+		releaseLimitedZstdReader(limited)
+		if errors.Is(err, zstd.ErrWindowSizeExceeded) || errors.Is(err, zstd.ErrDecoderSizeExceeded) {
+			err = ErrBodyTooLarge
+		}
+	} else {
+		releaseZstdReader(zr)
+	}
 	nn := int(n)
 	if int64(nn) != n {
 		return 0, fmt.Errorf("too much data unzstd: %d", n)
 	}
 	return nn, err
+}
+
+func estimateUnzstdSize(p []byte) int {
+	// Somewhat reasonable and conservative expectation of compression factor of 2
+	sizeHint := 2 * len(p)
+
+	// We look for the first non-skippable header
+	var header zstd.Header
+	for {
+		if err := header.Decode(p); err != nil {
+			break
+		}
+		if !header.Skippable {
+			break
+		}
+		skippedBytes := header.HeaderSize + int(header.SkippableSize)
+		if skippedBytes <= 0 || skippedBytes > len(p) {
+			break
+		}
+		p = p[skippedBytes:]
+	}
+
+	if header.HasFCS {
+		// Let's have some limit just in case the input is malicious
+		// and wants us to allocate bazillion bytes.
+		// In a non-malicious case it's still better to start growing from 4 MB than from 0.
+
+		// gosec complains about integer overflow but the uint64 argument to int() is not larger than 4_000_000, so we silence it.
+		sizeHint = int(min(header.FrameContentSize, 4_000_000)) // #nosec G115
+	}
+	return sizeHint
 }
 
 // AppendUnzstdBytes appends unzstd src to dst and returns the resulting dst.

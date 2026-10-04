@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -187,7 +188,7 @@ func benchmarkClientGetEndToEndTCP(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -253,7 +254,7 @@ func benchmarkNetHTTPClientGetEndToEndTCP(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -317,7 +318,7 @@ func benchmarkClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -352,7 +353,7 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
+			DialContext:         func(_ context.Context, _, _ string) (net.Conn, error) { return ln.Dial() },
 			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
 		},
 	}
@@ -383,7 +384,7 @@ func benchmarkNetHTTPClientGetEndToEndInmemory(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -442,7 +443,7 @@ func benchmarkClientEndToEndBigResponseInmemory(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -474,7 +475,7 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 
 	c := &http.Client{
 		Transport: &http.Transport{
-			Dial:                func(_, _ string) (net.Conn, error) { return ln.Dial() },
+			DialContext:         func(_ context.Context, _, _ string) (net.Conn, error) { return ln.Dial() },
 			MaxIdleConnsPerHost: parallelism * runtime.GOMAXPROCS(-1),
 		},
 		Timeout: 5 * time.Second,
@@ -510,7 +511,7 @@ func benchmarkNetHTTPClientEndToEndBigResponseInmemory(b *testing.B, parallelism
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }
@@ -578,7 +579,7 @@ func benchmarkPipelineClient(b *testing.B, parallelism int) {
 	ln.Close()
 	select {
 	case <-ch:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		b.Fatalf("server wasn't stopped")
 	}
 }

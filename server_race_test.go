@@ -3,6 +3,7 @@
 package fasthttp
 
 import (
+	"bufio"
 	"context"
 	"math"
 	"testing"
@@ -44,4 +45,51 @@ func TestServerDoneRace(t *testing.T) {
 	cancelFunc()
 
 	s.ShutdownWithContext(ctx)
+}
+
+// RequestCtx.Done() and Err() may still be used after the handler returns,
+// for example by database/sql's awaitDone or context.WithCancel's propagation
+// goroutine, which select on ctx.Done() and then call ctx.Err(). Waking up
+// from the closed channel must not race with ShutdownWithContext clearing it.
+func TestServerDoneAfterHandlerReturnsRace(t *testing.T) {
+	t.Parallel()
+
+	errCh := make(chan error, 1)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			done := ctx.Done()
+			go func() {
+				<-done
+				errCh <- ctx.Err()
+			}()
+		},
+	}
+
+	ln := fasthttputil.NewInmemoryListener()
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- s.Serve(ln)
+	}()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err = c.Write([]byte("GET / HTTP/1.1\r\nHost: go.dev\r\nConnection: close\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(c)
+	var resp Response
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	c.Close()
+
+	if err = s.Shutdown(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err = <-serveErr; err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	<-errCh
 }

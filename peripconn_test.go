@@ -22,6 +22,11 @@ func TestPerIPConnCounter(t *testing.T) {
 		t.Fatalf("Unexpected counter value=%d. Expected 1", n)
 	}
 
+	cc.Unregister(123)
+	if n := cc.Register(123); n != 99 {
+		t.Fatalf("Unexpected counter value=%d. Expected 99", n)
+	}
+
 	for i := 1; i < 100; i++ {
 		cc.Unregister(123)
 	}
@@ -32,4 +37,8 @@ func TestPerIPConnCounter(t *testing.T) {
 		t.Fatalf("Unexpected counter value=%d. Expected 1", n)
 	}
 	cc.Unregister(123)
+
+	if len(cc.m) != 0 {
+		t.Fatalf("Unexpected counter map size=%d. Expected 0", len(cc.m))
+	}
 }

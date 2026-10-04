@@ -22,7 +22,9 @@ import (
 func TestInvalidTrailers(t *testing.T) {
 	t.Parallel()
 
-	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200\r\nTransfer-Encoding:\xff\n\n0\r\n0"))); !errors.Is(err, io.EOF) {
+	// The scanner rejects the unknown transfer-encoding as soon as its line
+	// is complete instead of waiting for the header block terminator.
+	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200\r\nTransfer-Encoding:\xff\n\n0\r\n0"))); err == nil || !strings.Contains(err.Error(), "unsupported transfer-encoding") {
 		t.Errorf("%#v", err)
 	}
 	if err := (&Response{}).Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\nTRaILeR:,\r\n\r\n"))); !errors.Is(err, ErrBadTrailer) {
@@ -144,6 +146,7 @@ func TestRequestCopyTo(t *testing.T) {
 	if err := req.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	req.DisableRedirectPathNormalizing = true
 	testRequestCopyTo(t, &req)
 }
 
@@ -168,7 +171,9 @@ func testRequestCopyTo(t *testing.T, src *Request) {
 	src.CopyTo(&dst)
 
 	// Compare serialized representations.
-	if src.String() != dst.String() || !bytes.Equal(src.Body(), dst.Body()) {
+	if src.String() != dst.String() ||
+		!bytes.Equal(src.Body(), dst.Body()) ||
+		src.DisableRedirectPathNormalizing != dst.DisableRedirectPathNormalizing {
 		t.Fatalf("RequestCopyTo fail, src: \n%+v\ndst: \n%+v\n", src, &dst)
 	}
 }
@@ -294,6 +299,373 @@ func testResponseBodyStreamWithTrailer(t *testing.T, body []byte, disableNormali
 		r := resp2.Header.Peek(k)
 		if string(r) != v {
 			t.Fatalf("unexpected trailer header %q: %q. Expecting %q", kBytes, r, v)
+		}
+	}
+}
+
+func TestRequestBufferedBodyWithTrailer(t *testing.T) {
+	t.Parallel()
+
+	for _, body := range []string{"", "data"} {
+		var req1 Request
+		req1.Header.SetMethod(MethodPost)
+		req1.SetRequestURI("http://example.com/upload")
+		req1.SetBodyString(body)
+		if err := req1.Header.AddTrailer("Foo"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		req1.Header.Set("Foo", "testfoo")
+
+		w := &bytes.Buffer{}
+		bw := bufio.NewWriter(w)
+		if err := req1.Write(bw); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		wire := w.String()
+		if !strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+			t.Fatalf("expected chunked transfer encoding, got:\n%q", wire)
+		}
+		if strings.Contains(wire, "Content-Length:") {
+			t.Fatalf("expected no content length, got:\n%q", wire)
+		}
+		if !strings.Contains(wire, "Trailer: Foo\r\n") {
+			t.Fatalf("expected the Trailer header, got:\n%q", wire)
+		}
+		if !strings.HasSuffix(wire, "0\r\nFoo: testfoo\r\n\r\n") {
+			t.Fatalf("expected the trailer after the last chunk, got:\n%q", wire)
+		}
+
+		var req2 Request
+		if err := req2.Read(bufio.NewReader(w)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(req2.Body()) != body {
+			t.Fatalf("unexpected body: %q. Expecting %q", req2.Body(), body)
+		}
+		if got := string(req2.Header.Peek("Foo")); got != "testfoo" {
+			t.Fatalf("unexpected trailer header %q. Expecting %q", got, "testfoo")
+		}
+	}
+}
+
+func TestResponseBufferedBodyWithTrailer(t *testing.T) {
+	t.Parallel()
+
+	for _, body := range []string{"", "data"} {
+		var resp1 Response
+		resp1.SetBodyString(body)
+		if err := resp1.Header.AddTrailer("Foo"); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		resp1.Header.Set("Foo", "testfoo")
+
+		w := &bytes.Buffer{}
+		bw := bufio.NewWriter(w)
+		if err := resp1.Write(bw); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		wire := w.String()
+		if !strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+			t.Fatalf("expected chunked transfer encoding, got:\n%q", wire)
+		}
+		if strings.Contains(wire, "Content-Length:") {
+			t.Fatalf("expected no content length, got:\n%q", wire)
+		}
+		if !strings.Contains(wire, "Trailer: Foo\r\n") {
+			t.Fatalf("expected the Trailer header, got:\n%q", wire)
+		}
+		if !strings.HasSuffix(wire, "0\r\nFoo: testfoo\r\n\r\n") {
+			t.Fatalf("expected the trailer after the last chunk, got:\n%q", wire)
+		}
+
+		var resp2 Response
+		if err := resp2.Read(bufio.NewReader(w)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if string(resp2.Body()) != body {
+			t.Fatalf("unexpected body: %q. Expecting %q", resp2.Body(), body)
+		}
+		if got := string(resp2.Header.Peek("Foo")); got != "testfoo" {
+			t.Fatalf("unexpected trailer header %q. Expecting %q", got, "testfoo")
+		}
+	}
+}
+
+func TestRequestBufferedBodyWithTrailerContentType(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name        string
+		body        string
+		contentType string
+		noDefault   bool
+		expected    string
+	}{
+		// Switching to chunked encoding must keep the default
+		// Content-Type that a Content-Length framed body gets.
+		{name: "default", body: "data", expected: "application/octet-stream"},
+		{name: "explicit", body: "data", contentType: "text/plain", expected: "text/plain"},
+		{name: "no default", body: "data", noDefault: true, expected: ""},
+		{name: "empty body", body: "", expected: ""},
+	} {
+		var req1 Request
+		req1.Header.SetMethod(MethodPost)
+		req1.SetRequestURI("http://example.com/upload")
+		req1.SetBodyString(tc.body)
+		if tc.contentType != "" {
+			req1.Header.SetContentType(tc.contentType)
+		}
+		req1.Header.SetNoDefaultContentType(tc.noDefault)
+		if err := req1.Header.AddTrailer("Foo"); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		req1.Header.Set("Foo", "testfoo")
+
+		w := &bytes.Buffer{}
+		bw := bufio.NewWriter(w)
+		if err := req1.Write(bw); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+
+		wire := w.String()
+		if !strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+			t.Fatalf("%s: expected chunked transfer encoding, got:\n%q", tc.name, wire)
+		}
+		if tc.expected == "" {
+			if strings.Contains(wire, "Content-Type:") {
+				t.Fatalf("%s: expected no content type, got:\n%q", tc.name, wire)
+			}
+			continue
+		}
+		if !strings.Contains(wire, "Content-Type: "+tc.expected+"\r\n") {
+			t.Fatalf("%s: expected content type %q, got:\n%q", tc.name, tc.expected, wire)
+		}
+
+		var req2 Request
+		if err := req2.Read(bufio.NewReader(w)); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.name, err)
+		}
+		if got := string(req2.Header.ContentType()); got != tc.expected {
+			t.Fatalf("%s: unexpected content type %q. Expecting %q", tc.name, got, tc.expected)
+		}
+	}
+}
+
+func TestResponseBufferedBodyWithTrailerSkipBody(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	resp.SkipBody = true
+	resp.SetBodyString("data")
+	if err := resp.Header.AddTrailer("Foo"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	resp.Header.Set("Foo", "testfoo")
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := resp.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wire := w.String()
+	if strings.Contains(wire, "Transfer-Encoding: chunked\r\n") {
+		t.Fatalf("expected no chunked transfer encoding without a sent body, got:\n%q", wire)
+	}
+	if !strings.HasSuffix(wire, "\r\n\r\n") || strings.HasSuffix(wire, "Foo: testfoo\r\n\r\n") {
+		t.Fatalf("expected no body and no trailer values on the wire, got:\n%q", wire)
+	}
+}
+
+func TestRequestBufferedBodyWithTrailerHTTP10(t *testing.T) {
+	t.Parallel()
+
+	var req1 Request
+	req1.Header.SetMethod(MethodPost)
+	req1.Header.SetProtocol("HTTP/1.0")
+	req1.SetRequestURI("http://example.com/upload")
+	req1.SetBodyString("data")
+	if err := req1.Header.AddTrailer("Foo"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	req1.Header.Set("Foo", "testfoo")
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := req1.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// HTTP/1.0 doesn't support chunked encoding, so the body keeps
+	// Content-Length framing.
+	wire := w.String()
+	if !strings.HasPrefix(wire, "POST /upload HTTP/1.0\r\n") {
+		t.Fatalf("unexpected request line, got:\n%q", wire)
+	}
+	if strings.Contains(wire, "Transfer-Encoding:") {
+		t.Fatalf("expected no transfer encoding for HTTP/1.0, got:\n%q", wire)
+	}
+	if !strings.Contains(wire, "Content-Length: 4\r\n") {
+		t.Fatalf("expected content length, got:\n%q", wire)
+	}
+	if !strings.HasSuffix(wire, "\r\n\r\ndata") {
+		t.Fatalf("expected a plain body, got:\n%q", wire)
+	}
+
+	var req2 Request
+	if err := req2.Read(bufio.NewReader(w)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(req2.Body()) != "data" {
+		t.Fatalf("unexpected body: %q. Expecting %q", req2.Body(), "data")
+	}
+}
+
+func TestResponseBufferedBodyWithTrailerHTTP10(t *testing.T) {
+	t.Parallel()
+
+	// Only parsing marks a ResponseHeader as HTTP/1.0, so start from a
+	// parsed HTTP/1.0 response, like a proxy forwarding an upstream response.
+	var resp1 Response
+	br := bufio.NewReader(strings.NewReader("HTTP/1.0 200 OK\r\nContent-Length: 4\r\n\r\ndata"))
+	if err := resp1.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp1.Header.IsHTTP11() {
+		t.Fatal("expected an HTTP/1.0 response header")
+	}
+	if err := resp1.Header.AddTrailer("Foo"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	resp1.Header.Set("Foo", "testfoo")
+
+	w := &bytes.Buffer{}
+	bw := bufio.NewWriter(w)
+	if err := resp1.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wire := w.String()
+	if !strings.HasPrefix(wire, "HTTP/1.0 200 OK\r\n") {
+		t.Fatalf("unexpected status line, got:\n%q", wire)
+	}
+	if strings.Contains(wire, "Transfer-Encoding:") {
+		t.Fatalf("expected no transfer encoding for HTTP/1.0, got:\n%q", wire)
+	}
+	if !strings.Contains(wire, "Content-Length: 4\r\n") {
+		t.Fatalf("expected content length, got:\n%q", wire)
+	}
+	if !strings.HasSuffix(wire, "\r\n\r\ndata") {
+		t.Fatalf("expected a plain body, got:\n%q", wire)
+	}
+
+	var resp2 Response
+	if err := resp2.Read(bufio.NewReader(w)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(resp2.Body()) != "data" {
+		t.Fatalf("unexpected body: %q. Expecting %q", resp2.Body(), "data")
+	}
+}
+
+// writeCounter counts the writes reaching the underlying writer, which is
+// how often a bufio.Writer wrapping it was flushed.
+type writeCounter struct {
+	n int
+}
+
+func (wc *writeCounter) Write(p []byte) (int, error) {
+	wc.n++
+	return len(p), nil
+}
+
+func TestRequestBufferedBodyWithTrailerNoFlush(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.Header.SetMethod(MethodPost)
+	req.SetRequestURI("http://example.com/upload")
+	req.SetBodyString("data")
+	if err := req.Header.AddTrailer("Foo"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	req.Header.Set("Foo", "testfoo")
+
+	var wc writeCounter
+	bw := bufio.NewWriter(&wc)
+	if err := req.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if wc.n != 0 {
+		t.Fatalf("Write flushed %d times, expecting none", wc.n)
+	}
+	if bw.Buffered() == 0 {
+		t.Fatal("expected the request to be buffered")
+	}
+}
+
+func TestResponseBufferedBodyWithTrailerNoFlush(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	resp.SetBodyString("data")
+	if err := resp.Header.AddTrailer("Foo"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	resp.Header.Set("Foo", "testfoo")
+
+	var wc writeCounter
+	bw := bufio.NewWriter(&wc)
+	if err := resp.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if wc.n != 0 {
+		t.Fatalf("Write flushed %d times, expecting none", wc.n)
+	}
+	if bw.Buffered() == 0 {
+		t.Fatal("expected the response to be buffered")
+	}
+}
+
+// The last chunk stays buffered with the trailer section that follows it,
+// through both the Read and the WriteTo framing paths.
+func TestResponseBodyStreamLastChunkNoFlush(t *testing.T) {
+	t.Parallel()
+
+	for _, body := range []io.Reader{strings.NewReader("data"), bytes.NewReader([]byte("data"))} {
+		var resp Response
+		resp.SetBodyStream(body, -1)
+
+		var wc writeCounter
+		bw := bufio.NewWriter(&wc)
+		if err := resp.Write(bw); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if wc.n != 1 {
+			t.Fatalf("%T: Write flushed %d times, expecting only the data chunk", body, wc.n)
+		}
+		if got := bw.Buffered(); got != len("0\r\n\r\n") {
+			t.Fatalf("%T: %d bytes left buffered, expecting the last chunk and the trailer section", body, got)
 		}
 	}
 }
@@ -605,7 +977,7 @@ func TestResponseSwapBodyConcurrent(t *testing.T) {
 	for range 10 {
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout")
 		}
 	}
@@ -659,7 +1031,7 @@ func TestRequestSwapBodyConcurrent(t *testing.T) {
 	for range 10 {
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
+		case <-time.After(testTimeout(time.Second)):
 			t.Fatalf("timeout")
 		}
 	}
@@ -1239,6 +1611,31 @@ func TestRequestWriteTo(t *testing.T) {
 	}
 	if string(buf.B) != s {
 		t.Fatalf("unexpected request %q. Expecting %q", buf.B, s)
+	}
+}
+
+// A response without a body has no trailer section either.
+func TestResponseWriteSkipBodyOmitsTrailer(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	resp.SkipBody = true
+	if err := resp.Header.AddTrailer("X-Sum"); err != nil {
+		t.Fatal(err)
+	}
+	resp.Header.Set("X-Sum", "1")
+	resp.SetBodyStream(strings.NewReader("abc"), -1)
+
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := resp.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if wire := buf.String(); !strings.HasSuffix(wire, "Trailer: X-Sum\r\n\r\n") || strings.Contains(wire, "X-Sum: 1") {
+		t.Fatalf("wire = %q, want the headers alone", wire)
 	}
 }
 
@@ -2031,6 +2428,81 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	}
 }
 
+func TestRequestWriteEmptyPathWithQuery(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.SetRequestURI("http://example.com?foo=bar")
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	if err := req.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	firstLine, _, _ := strings.Cut(w.String(), "\r\n")
+	if firstLine != "GET /?foo=bar HTTP/1.1" {
+		t.Fatalf("unexpected request line %q. Expecting %q", firstLine, "GET /?foo=bar HTTP/1.1")
+	}
+
+	req.Reset()
+	req.SetRequestURI("http://example.com?foo=bar")
+	req.URI().DisablePathNormalizing = true
+	w.Reset()
+	bw.Reset(&w)
+	if err := req.Write(bw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	firstLine, _, _ = strings.Cut(w.String(), "\r\n")
+	if firstLine != "GET /?foo=bar HTTP/1.1" {
+		t.Fatalf("unexpected request line with DisablePathNormalizing %q. Expecting %q", firstLine, "GET /?foo=bar HTTP/1.1")
+	}
+}
+
+func TestRequestWriteConnectTargetAfterURIAccess(t *testing.T) {
+	t.Parallel()
+
+	for _, target := range []string{"example.com:443", "[::1]:443", "//example.com:443", "/tunnel"} {
+		t.Run(target, func(t *testing.T) {
+			t.Parallel()
+
+			var req Request
+			s := "CONNECT " + target + " HTTP/1.1\r\nHost: example.com:443\r\n\r\n"
+			if err := req.Read(bufio.NewReader(strings.NewReader(s))); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			// Accessing the URI makes Write rebuild the target from the
+			// parsed URI, which must keep the CONNECT target as it is, also
+			// when path normalization is enabled, as HostClient leaves it.
+			req.URI().DisablePathNormalizing = false
+			if got := string(req.RequestURI()); got != target {
+				t.Fatalf("unexpected request uri %q. Expecting %q", got, target)
+			}
+
+			var w bytes.Buffer
+			bw := bufio.NewWriter(&w)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			firstLine, _, _ := strings.Cut(w.String(), "\r\n")
+			if want := "CONNECT " + target + " HTTP/1.1"; firstLine != want {
+				t.Fatalf("unexpected request line %q. Expecting %q", firstLine, want)
+			}
+		})
+	}
+}
+
 func TestSetRequestBodyStreamFixedSize(t *testing.T) {
 	t.Parallel()
 
@@ -2356,8 +2828,8 @@ func TestResponseReadWithoutBody(t *testing.T) {
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 204 Foo Bar\r\nContent-Type: aab\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n", false,
 		204, -1, "aab")
 
-	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 123 AAA\r\nContent-Type: xxx\r\nContent-Length: 3434\r\n\r\n", false,
-		123, 3434, "xxx")
+	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 123 AAA\r\nContent-Type: xxx\r\n\r\nHTTP/1.1 250 BBB\r\nContent-Type: yyy\r\nContent-Length: 0\r\n\r\n", false,
+		250, 0, "yyy")
 
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 200 OK\r\nContent-Type: text/xml\r\nContent-Length: 123\r\n\r\nfoobar\r\n", true,
 		200, 123, "text/xml")
@@ -2365,6 +2837,44 @@ func TestResponseReadWithoutBody(t *testing.T) {
 	// '100 Continue' must be skipped.
 	testResponseReadWithoutBody(t, &resp, "HTTP/1.1 100 Continue\r\nFoo-bar: baz\r\n\r\nHTTP/1.1 329 aaa\r\nContent-Type: qwe\r\nContent-Length: 894\r\n\r\n", true,
 		329, 894, "qwe")
+}
+
+func TestResponseReadSwitchingProtocolsIsTerminal(t *testing.T) {
+	t.Parallel()
+
+	r := bufio.NewReader(strings.NewReader(
+		"HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\nUPGRADE-DATA",
+	))
+	var resp Response
+	if err := resp.Read(r); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != StatusSwitchingProtocols {
+		t.Fatalf("unexpected status code %d; want %d", resp.StatusCode(), StatusSwitchingProtocols)
+	}
+	remaining, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read upgrade data: %v", err)
+	}
+	if string(remaining) != "UPGRADE-DATA" {
+		t.Fatalf("unexpected upgrade data %q", remaining)
+	}
+}
+
+func TestResponseReadLimitsInterimResponses(t *testing.T) {
+	t.Parallel()
+
+	var s strings.Builder
+	for range maxInterimResponses + 1 {
+		s.WriteString("HTTP/1.1 103 Early Hints\r\n\r\n")
+	}
+	s.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+
+	var resp Response
+	err := resp.Read(bufio.NewReader(strings.NewReader(s.String())))
+	if !errors.Is(err, errTooManyInterimResponses) {
+		t.Fatalf("unexpected error %v; want %v", err, errTooManyInterimResponses)
+	}
 }
 
 func testResponseReadWithoutBody(t *testing.T, resp *Response, s string, skipBody bool,
@@ -3318,25 +3828,81 @@ func TestResponseBodyStream(t *testing.T) {
 			t.Fatalf("unexpected body content, got: %#v, want: %#v", string(body), "1234561234567")
 		}
 	})
-	t.Run("read simple response", func(t *testing.T) {
+	t.Run("read fixed-length response", func(t *testing.T) {
+		for _, maxBodySize := range []int{0, 8, 20} {
+			t.Run(fmt.Sprintf("maxBodySize=%d", maxBodySize), func(t *testing.T) {
+				resp := AcquireResponse()
+				defer ReleaseResponse(resp)
+				resp.StreamBody = true
+				if err := resp.ReadLimitBody(bufio.NewReader(bytes.NewBufferString(simpleResp)), maxBodySize); err != nil {
+					t.Fatalf("read limit body err: %v", err)
+				}
+				if _, ok := resp.BodyStream().(*requestStream); !ok {
+					t.Fatalf("unexpected body stream type %T", resp.BodyStream())
+				}
+				if body := resp.bodyBytes(); len(body) != 0 {
+					t.Fatalf("response body was buffered: %q", body)
+				}
+				content, err := io.ReadAll(resp.BodyStream())
+				if err != nil {
+					t.Fatalf("read body stream err: %v", err)
+				}
+				if string(content) != "123456789" {
+					t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "123456789")
+				}
+				if err := resp.CloseBodyStream(); err != nil {
+					t.Fatalf("close body stream err: %v", err)
+				}
+			})
+		}
+	})
+	t.Run("truncated fixed-length response", func(t *testing.T) {
 		resp := AcquireResponse()
+		defer ReleaseResponse(resp)
 		resp.StreamBody = true
-		err := resp.ReadLimitBody(bufio.NewReader(bytes.NewBufferString(simpleResp)), 8)
-		if err != nil {
-			t.Fatalf("read limit body err: %v", err)
+		response := "HTTP/1.1 200 OK\r\nContent-Length: 9\r\n\r\n1234"
+		if err := resp.Read(bufio.NewReader(bytes.NewBufferString(response))); err != nil {
+			t.Fatalf("read response headers err: %v", err)
 		}
-		body := resp.BodyStream()
-		defer func() {
-			if err := resp.CloseBodyStream(); err != nil {
-				t.Fatalf("close body stream err: %v", err)
-			}
-		}()
-		content, err := io.ReadAll(body)
-		if err != nil {
-			t.Fatalf("read limit body err: %v", err)
+		if _, err := io.ReadAll(resp.BodyStream()); err != io.ErrUnexpectedEOF {
+			t.Fatalf("unexpected body stream error: %v; want %v", err, io.ErrUnexpectedEOF)
 		}
-		if string(content) != "123456789" {
-			t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "123456789")
+	})
+	t.Run("fixed-length stream keeps original framing", func(t *testing.T) {
+		resp := AcquireResponse()
+		defer ReleaseResponse(resp)
+		resp.StreamBody = true
+		if err := resp.Read(bufio.NewReader(bytes.NewBufferString(simpleResp))); err != nil {
+			t.Fatalf("read response headers err: %v", err)
+		}
+		resp.Header.SetContentLength(1)
+		body, err := io.ReadAll(resp.BodyStream())
+		if err != nil {
+			t.Fatalf("read body stream err: %v", err)
+		}
+		if string(body) != "123456789" {
+			t.Fatalf("unexpected body content, got: %#v, want: %#v", string(body), "123456789")
+		}
+	})
+	t.Run("copy streamed response after reading body", func(t *testing.T) {
+		var resp Response
+		resp.StreamBody = true
+		if err := resp.Read(bufio.NewReader(bytes.NewBufferString(simpleResp))); err != nil {
+			t.Fatalf("read response headers err: %v", err)
+		}
+
+		var dst Response
+		resp.CopyTo(&dst)
+		if body := dst.Body(); len(body) != 0 {
+			t.Fatalf("CopyTo copied an unread body stream: %q", body)
+		}
+
+		if body := resp.Body(); string(body) != "123456789" {
+			t.Fatalf("unexpected drained body %q", body)
+		}
+		resp.CopyTo(&dst)
+		if body := string(dst.Body()); body != "123456789" {
+			t.Fatalf("CopyTo did not copy the buffered body: %q", body)
 		}
 	})
 	t.Run("http client", func(t *testing.T) {
@@ -3493,7 +4059,7 @@ func TestResponseBodyStream(t *testing.T) {
 			client := Client{StreamResponseBody: true, DisablePathNormalizing: true}
 			resp := AcquireResponse()
 			request := AcquireRequest()
-			request.SetRequestURI(server.URL + "?400BadRequest")
+			request.SetRequestURI(server.URL + "?foo=bar")
 			if err := client.Do(request, resp); err != nil {
 				t.Fatal(err)
 			}
@@ -3507,8 +4073,8 @@ func TestResponseBodyStream(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if string(content) != "400 Bad Request" {
-				t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "400 Bad Request")
+			if string(content) != "hello world" {
+				t.Fatalf("unexpected body content, got: %#v, want: %#v", string(content), "hello world")
 			}
 		})
 	})
@@ -3532,7 +4098,7 @@ func TestResponseCompressedBodyStreamCloseClosesOriginal(t *testing.T) {
 
 	select {
 	case <-bodyStream.closed:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for original body stream close")
 	}
 }
@@ -3554,6 +4120,8 @@ func TestResponseCompressedBodyStreamCloseKeepsWriteError(t *testing.T) {
 	resp.Header.SetContentType("text/plain")
 	resp.SetBodyStream(bodyStream, -1)
 	resp.gzipBody(CompressDefaultCompression)
+	// Compression starts with the first read.
+	_, _ = resp.BodyStream().Read(nil)
 
 	if err := resp.CloseBodyStream(); err != nil {
 		t.Fatalf("unexpected close error: %v", err)
@@ -3565,7 +4133,7 @@ func TestResponseCompressedBodyStreamCloseKeepsWriteError(t *testing.T) {
 		if err == nil {
 			t.Fatalf("unexpected nil close error")
 		}
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for original body stream close")
 	}
 }
@@ -3586,29 +4154,63 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 	resp.SetBodyStream(rs, -1)
 	resp.gzipBody(CompressDefaultCompression)
 	compressedStream := resp.bodyStream.(*compressedBodyStream) //nolint:forcetypeassert
+	// Compression starts with the first read.
+	_, _ = compressedStream.Read(nil)
 
 	select {
 	case <-reader.reading:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for request stream read")
 	}
 
 	if err := resp.CloseBodyStream(); err != nil {
 		t.Fatalf("unexpected close error: %v", err)
 	}
-	if rs.reader == nil {
-		t.Fatalf("request stream was released while compression was still reading it")
+	select {
+	case <-compressedStream.done:
+		t.Fatal("compression finished before its body read was unblocked")
+	default:
 	}
 
 	close(reader.unblock)
 	select {
 	case <-compressedStream.done:
-	case <-time.After(time.Second):
+	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for compressed stream cleanup")
 	}
-	if rs.reader != nil {
-		t.Fatalf("request stream was not released after compression finished")
+}
+
+// A body stream may finish the trailers as it ends: under compression it is
+// still read only while the response is written, after the headers.
+func TestResponseCompressedBodyStreamSetsTrailersAtEOF(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	resp.Header.SetContentType("text/plain")
+	resp.Header.Set(HeaderTrailer, "X-Sum")
+	resp.SetBodyStream(&trailerAtEOF{r: strings.NewReader("body"), h: &resp.Header}, -1)
+	resp.gzipBody(CompressDefaultCompression)
+
+	var got Response
+	if err := got.Read(bufio.NewReader(strings.NewReader(resp.String()))); err != nil {
+		t.Fatal(err)
 	}
+	if v := got.Header.Peek("X-Sum"); string(v) != "1" {
+		t.Fatalf("X-Sum = %q, want 1", v)
+	}
+}
+
+type trailerAtEOF struct {
+	r io.Reader
+	h *ResponseHeader
+}
+
+func (b *trailerAtEOF) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if err == io.EOF {
+		b.h.Set("X-Sum", "1")
+	}
+	return n, err
 }
 
 type blockingCloseReader struct {
@@ -3653,6 +4255,52 @@ func (h fixedRequestStreamHeader) ContentLength() int {
 
 func (fixedRequestStreamHeader) ReadTrailer(r *bufio.Reader) error {
 	return nil
+}
+
+func TestRequestBodyTruncatedStreamKeepsPartialBody(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.Header.SetContentLength(9)
+	req.bodyStream = acquireRequestStream(
+		req.bodyBuffer(),
+		bufio.NewReader(strings.NewReader("1234")),
+		&req.Header,
+	)
+
+	if body := string(req.Body()); body != "1234" {
+		t.Fatalf("unexpected request body %q; want partial body %q", body, "1234")
+	}
+}
+
+func TestAcquireRequestStreamAllocations(t *testing.T) {
+	var bodyBuf bytebufferpool.ByteBuffer
+	reader := bufio.NewReader(bytes.NewReader(nil))
+	header := fixedRequestStreamHeader{contentLength: 0}
+	allocs := testing.AllocsPerRun(1000, func() {
+		rs := acquireRequestStream(&bodyBuf, reader, header)
+		releaseRequestStream(rs)
+	})
+	if allocs != 0 {
+		t.Fatalf("unexpected allocations per request stream acquire: %v", allocs)
+	}
+}
+
+func TestReleasedRequestStreamReadPanics(t *testing.T) {
+	var bodyBuf bytebufferpool.ByteBuffer
+	rs := acquireRequestStream(
+		&bodyBuf,
+		bufio.NewReader(bytes.NewReader(nil)),
+		fixedRequestStreamHeader{contentLength: 0},
+	)
+	releaseRequestStream(rs)
+
+	defer func() {
+		if recover() == nil {
+			t.Fatal("reading a released request stream did not panic")
+		}
+	}()
+	_, _ = rs.Read(make([]byte, 1))
 }
 
 type blockingOnceReader struct {
@@ -3820,5 +4468,460 @@ func TestRequestGetTimeOut(t *testing.T) {
 				t.Errorf("GetTimeOut() = %v, want %v", got, test.expected)
 			}
 		})
+	}
+}
+
+// chunkedOptInBody opts in, so writeBodyChunked must use WriteTo, not Read.
+type chunkedOptInBody struct {
+	r        *bytes.Reader
+	readCnt  int
+	writeCnt int
+}
+
+func (b *chunkedOptInBody) Read(p []byte) (int, error) {
+	b.readCnt++
+	return b.r.Read(p)
+}
+
+func (b *chunkedOptInBody) WriteTo(w io.Writer) (int64, error) {
+	b.writeCnt++
+	return b.r.WriteTo(w)
+}
+
+func (b *chunkedOptInBody) SupportsBodyWriteTo() bool { return true }
+
+func TestWriteBodyChunkedWriterToOptIn(t *testing.T) {
+	t.Parallel()
+
+	body := string(createFixedBody(10001))
+	stream := &chunkedOptInBody{r: bytes.NewReader([]byte(body))}
+
+	var resp Response
+	resp.SetBodyStream(stream, -1)
+
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	if err := resp.Write(bw); err != nil {
+		t.Fatalf("unexpected error when writing response: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error when flushing response: %v", err)
+	}
+
+	if stream.writeCnt != 1 {
+		t.Fatalf("WriteTo must be called once, got %d", stream.writeCnt)
+	}
+	if stream.readCnt != 0 {
+		t.Fatalf("Read must not be called on an opted-in body, got %d", stream.readCnt)
+	}
+
+	var resp1 Response
+	if err := resp1.Read(bufio.NewReader(&w)); err != nil {
+		t.Fatalf("unexpected error when reading response: %v", err)
+	}
+	if string(resp1.Body()) != body {
+		t.Fatalf("unexpected body of len %d. Expecting len %d", len(resp1.Body()), len(body))
+	}
+}
+
+// promotedWriterToBody has WriteTo promoted from an embedded reader while Read
+// is overridden — TestRevertPull1233's F pattern. Without the marker it must
+// not opt in, or the overridden Read is bypassed.
+type embeddedWriterTo struct {
+	r        *bytes.Reader
+	writeCnt int
+}
+
+func (e *embeddedWriterTo) Read(p []byte) (int, error) { return e.r.Read(p) }
+
+func (e *embeddedWriterTo) WriteTo(w io.Writer) (int64, error) {
+	e.writeCnt++
+	return e.r.WriteTo(w)
+}
+
+type promotedWriterToBody struct {
+	*embeddedWriterTo // WriteTo is promoted from here
+
+	readCnt int
+}
+
+func (b *promotedWriterToBody) Read(p []byte) (int, error) {
+	b.readCnt++
+	return b.embeddedWriterTo.Read(p)
+}
+
+func TestWriteBodyChunkedPromotedWriterToNotOptIn(t *testing.T) {
+	t.Parallel()
+
+	body := string(createFixedBody(10001))
+	inner := &embeddedWriterTo{r: bytes.NewReader([]byte(body))}
+	stream := &promotedWriterToBody{embeddedWriterTo: inner}
+
+	// The promoted WriteTo makes stream satisfy io.WriterTo, but not
+	// BodyWriterTo.
+	if _, ok := any(stream).(io.WriterTo); !ok {
+		t.Fatal("test setup: stream must satisfy io.WriterTo via promotion")
+	}
+	if _, ok := any(stream).(BodyWriterTo); ok {
+		t.Fatal("test setup: stream must NOT satisfy BodyWriterTo")
+	}
+
+	var resp Response
+	resp.SetBodyStream(stream, -1)
+
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	if err := resp.Write(bw); err != nil {
+		t.Fatalf("unexpected error when writing response: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error when flushing response: %v", err)
+	}
+
+	if stream.readCnt == 0 {
+		t.Fatal("Read must be used when the body did not opt in")
+	}
+	if inner.writeCnt != 0 {
+		t.Fatalf("promoted WriteTo must not be called, got %d", inner.writeCnt)
+	}
+
+	var resp1 Response
+	if err := resp1.Read(bufio.NewReader(&w)); err != nil {
+		t.Fatalf("unexpected error when reading response: %v", err)
+	}
+	if string(resp1.Body()) != body {
+		t.Fatalf("unexpected body of len %d. Expecting len %d", len(resp1.Body()), len(body))
+	}
+}
+
+// optInInner supports zero-copy framing; optOutBody embeds it but overrides
+// SupportsBodyWriteTo to return false, opting back out.
+type optInInner struct {
+	r        *bytes.Reader
+	readCnt  int
+	writeCnt int
+}
+
+func (e *optInInner) Read(p []byte) (int, error) {
+	e.readCnt++
+	return e.r.Read(p)
+}
+
+func (e *optInInner) WriteTo(w io.Writer) (int64, error) {
+	e.writeCnt++
+	return e.r.WriteTo(w)
+}
+
+func (e *optInInner) SupportsBodyWriteTo() bool { return true }
+
+type optOutBody struct {
+	*optInInner
+
+	readCnt int
+}
+
+func (b *optOutBody) Read(p []byte) (int, error) {
+	b.readCnt++
+	return b.optInInner.Read(p)
+}
+
+func (b *optOutBody) SupportsBodyWriteTo() bool { return false }
+
+func TestBodyStreamOperationsPreserveLegacyWriterToUnlessOverridden(t *testing.T) {
+	t.Parallel()
+
+	body := createFixedBody(10001)
+	operations := []struct {
+		name string
+		run  func(io.Reader) ([]byte, error)
+	}{
+		{
+			name: "response Body",
+			run: func(stream io.Reader) ([]byte, error) {
+				var resp Response
+				resp.SetBodyStream(stream, -1)
+				return resp.Body(), nil
+			},
+		},
+		{
+			name: "request Body",
+			run: func(stream io.Reader) ([]byte, error) {
+				var req Request
+				req.SetBodyStream(stream, -1)
+				return req.Body(), nil
+			},
+		},
+		{
+			name: "response BodyWriteTo",
+			run: func(stream io.Reader) ([]byte, error) {
+				var resp Response
+				resp.SetBodyStream(stream, -1)
+
+				var dst bytes.Buffer
+				if err := resp.BodyWriteTo(&dst); err != nil {
+					return nil, err
+				}
+				return dst.Bytes(), nil
+			},
+		},
+		{
+			name: "request BodyWriteTo",
+			run: func(stream io.Reader) ([]byte, error) {
+				var req Request
+				req.SetBodyStream(stream, -1)
+
+				var dst bytes.Buffer
+				if err := req.BodyWriteTo(&dst); err != nil {
+					return nil, err
+				}
+				return dst.Bytes(), nil
+			},
+		},
+		{
+			name: "response SwapBody",
+			run: func(stream io.Reader) ([]byte, error) {
+				var resp Response
+				resp.SetBodyStream(stream, -1)
+				return resp.SwapBody(nil), nil
+			},
+		},
+		{
+			name: "request SwapBody",
+			run: func(stream io.Reader) ([]byte, error) {
+				var req Request
+				req.SetBodyStream(stream, -1)
+				return req.SwapBody(nil), nil
+			},
+		},
+		{
+			name: "fixed-size response write",
+			run: func(stream io.Reader) ([]byte, error) {
+				var resp Response
+				resp.SetBodyStream(stream, len(body))
+
+				var dst bytes.Buffer
+				bw := bufio.NewWriter(&dst)
+				if err := resp.Write(bw); err != nil {
+					return nil, err
+				}
+				if err := bw.Flush(); err != nil {
+					return nil, err
+				}
+
+				var decoded Response
+				if err := decoded.Read(bufio.NewReader(&dst)); err != nil {
+					return nil, err
+				}
+				return decoded.Body(), nil
+			},
+		},
+		{
+			name: "gzip response write",
+			run: func(stream io.Reader) ([]byte, error) {
+				var resp Response
+				resp.Header.SetContentType("text/plain")
+				resp.SetBodyStream(stream, -1)
+
+				var dst bytes.Buffer
+				bw := bufio.NewWriter(&dst)
+				if err := resp.WriteGzip(bw); err != nil {
+					return nil, err
+				}
+				if err := bw.Flush(); err != nil {
+					return nil, err
+				}
+
+				var decoded Response
+				if err := decoded.Read(bufio.NewReader(&dst)); err != nil {
+					return nil, err
+				}
+				return decoded.BodyGunzip()
+			},
+		},
+	}
+
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			t.Run("unmarked WriterTo keeps legacy behavior", func(t *testing.T) {
+				inner := &embeddedWriterTo{r: bytes.NewReader(body)}
+				stream := &promotedWriterToBody{embeddedWriterTo: inner}
+
+				got, err := operation.run(stream)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !bytes.Equal(got, body) {
+					t.Fatalf("unexpected body of len %d. Expecting len %d", len(got), len(body))
+				}
+				if inner.writeCnt != 1 {
+					t.Fatalf("WriteTo must be called once, got %d", inner.writeCnt)
+				}
+				if stream.readCnt != 0 {
+					t.Fatalf("Read must not be called for an unmarked legacy WriterTo, got %d", stream.readCnt)
+				}
+			})
+
+			t.Run("explicit opt-in uses WriterTo", func(t *testing.T) {
+				stream := &optInInner{r: bytes.NewReader(body)}
+
+				got, err := operation.run(stream)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !bytes.Equal(got, body) {
+					t.Fatalf("unexpected body of len %d. Expecting len %d", len(got), len(body))
+				}
+				if stream.writeCnt != 1 {
+					t.Fatalf("WriteTo must be called once, got %d", stream.writeCnt)
+				}
+				if stream.readCnt != 0 {
+					t.Fatalf("Read must not be called for an opted-in BodyWriterTo, got %d", stream.readCnt)
+				}
+			})
+
+			t.Run("explicit opt-out uses Read", func(t *testing.T) {
+				inner := &optInInner{r: bytes.NewReader(body)}
+				stream := &optOutBody{optInInner: inner}
+
+				got, err := operation.run(stream)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if !bytes.Equal(got, body) {
+					t.Fatalf("unexpected body of len %d. Expecting len %d", len(got), len(body))
+				}
+				if inner.writeCnt != 0 {
+					t.Fatalf("WriteTo must not be called after opting out, got %d", inner.writeCnt)
+				}
+				if stream.readCnt == 0 {
+					t.Fatal("Read must be called after opting out")
+				}
+			})
+		})
+	}
+}
+
+func TestWriteBodyChunkedOptOutOverride(t *testing.T) {
+	t.Parallel()
+
+	body := string(createFixedBody(10001))
+	inner := &optInInner{r: bytes.NewReader([]byte(body))}
+	stream := &optOutBody{optInInner: inner}
+
+	// stream implements BodyWriterTo (the method is promoted/overridden), but
+	// its SupportsBodyWriteTo returns false, so it must use Read.
+	if _, ok := any(stream).(BodyWriterTo); !ok {
+		t.Fatal("test setup: stream must implement BodyWriterTo")
+	}
+
+	var resp Response
+	resp.SetBodyStream(stream, -1)
+
+	var w bytes.Buffer
+	bw := bufio.NewWriter(&w)
+	if err := resp.Write(bw); err != nil {
+		t.Fatalf("unexpected error when writing response: %v", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatalf("unexpected error when flushing response: %v", err)
+	}
+
+	if stream.readCnt == 0 {
+		t.Fatal("Read must be used when the body opted back out")
+	}
+	if inner.writeCnt != 0 {
+		t.Fatalf("WriteTo must not be called after opting out, got %d", inner.writeCnt)
+	}
+
+	var resp1 Response
+	if err := resp1.Read(bufio.NewReader(&w)); err != nil {
+		t.Fatalf("unexpected error when reading response: %v", err)
+	}
+	if string(resp1.Body()) != body {
+		t.Fatalf("unexpected body of len %d. Expecting len %d", len(resp1.Body()), len(body))
+	}
+}
+
+// Standard bytes types take the zero-copy path without implementing
+// BodyWriterTo; the output must still be correct.
+func TestWriteBodyChunkedConcreteTypes(t *testing.T) {
+	t.Parallel()
+
+	body := string(createFixedBody(10001))
+	newReaders := []func() io.Reader{
+		func() io.Reader { return bytes.NewReader([]byte(body)) },
+		func() io.Reader { return bytes.NewBufferString(body) },
+	}
+	for _, newReader := range newReaders {
+		var resp Response
+		resp.SetBodyStream(newReader(), -1)
+
+		var w bytes.Buffer
+		bw := bufio.NewWriter(&w)
+		if err := resp.Write(bw); err != nil {
+			t.Fatalf("unexpected error when writing response: %v", err)
+		}
+		if err := bw.Flush(); err != nil {
+			t.Fatalf("unexpected error when flushing response: %v", err)
+		}
+
+		var resp1 Response
+		if err := resp1.Read(bufio.NewReader(&w)); err != nil {
+			t.Fatalf("unexpected error when reading response: %v", err)
+		}
+		if string(resp1.Body()) != body {
+			t.Fatalf("unexpected body of len %d. Expecting len %d", len(resp1.Body()), len(body))
+		}
+	}
+}
+
+func TestResponseWriteAlternatingHeaderSizesAllocations(t *testing.T) {
+	// A header larger than the writer's buffer moves serialization to the
+	// retained buffer for good; alternating with small headers must not keep
+	// allocating.
+	var resp Response
+	resp.SetBodyString("x")
+	w := bufio.NewWriterSize(io.Discard, 1024)
+	small, large := "v", string(bytes.Repeat([]byte("v"), 1500))
+	pair := func() {
+		for _, v := range []string{small, large} {
+			resp.Header.Set("X-Pad", v)
+			if err := resp.Write(w); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Flush(); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for range 10 {
+		pair()
+	}
+	if n := testing.AllocsPerRun(100, pair); n > 0 {
+		t.Errorf("%v allocs per alternating pair, expecting 0", n)
+	}
+}
+
+func TestRequestBodyStreamWarning(t *testing.T) {
+	var r Request
+	tl := &testLogger{}
+	r.logger = tl
+
+	s := "test stream content"
+	r.SetBodyStream(bytes.NewBufferString(s), len(s))
+
+	body := r.Body()
+	if string(body) != s {
+		t.Fatalf("unexpected body %q", body)
+	}
+
+	tl.lock.Lock()
+	out := tl.out
+	tl.lock.Unlock()
+
+	expectedWarning := "Request.Body() reads the entire stream into memory. " +
+		"Use Request.BodyStream() or Request.BodyWriteTo() instead to avoid out-of-memory errors.\n"
+	if out != expectedWarning {
+		t.Fatalf("unexpected log message: got %q, want %q", out, expectedWarning)
 	}
 }

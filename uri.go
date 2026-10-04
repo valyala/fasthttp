@@ -58,6 +58,12 @@ type URI struct {
 	password        []byte
 	parsedQueryArgs bool
 
+	// parseHost memo: identical authority bytes parse to identical output.
+	// Survives Reset so keep-alive requests skip the host validation. Only
+	// authorities that could be real are kept, so a huge Host is not retained.
+	hostRaw    []byte
+	hostParsed []byte
+
 	// Path values are sent as-is without normalization.
 	//
 	// Disabled path normalization may be useful for proxying incoming requests
@@ -79,6 +85,8 @@ func (u *URI) CopyTo(dst *URI) {
 	dst.host = append(dst.host, u.host...)
 	dst.username = append(dst.username, u.username...)
 	dst.password = append(dst.password, u.password...)
+	dst.hostRaw = append(dst.hostRaw[:0], u.hostRaw...)
+	dst.hostParsed = append(dst.hostParsed[:0], u.hostParsed...)
 
 	u.queryArgs.CopyTo(&dst.queryArgs)
 	dst.parsedQueryArgs = u.parsedQueryArgs
@@ -268,6 +276,10 @@ func (u *URI) SetHostBytes(host []byte) {
 	lowercaseBytes(u.host)
 }
 
+// maxMemoizedHostLen bounds the authority memo; a real authority is far
+// shorter, and a longer one is not worth retaining twice.
+const maxMemoizedHostLen = 256
+
 var ErrorInvalidURI = errors.New("fasthttp: invalid uri")
 
 // Parse initializes URI from the given host and uri.
@@ -283,11 +295,26 @@ func (u *URI) Parse(host, uri []byte) error {
 func (u *URI) parse(host, uri []byte, isTLS bool) error {
 	u.Reset()
 
+	// Origin-form root with a repeated Host is the steady state of
+	// keep-alive traffic; everything is memoized.
+	if len(host) != 0 && len(uri) == 1 && uri[0] == '/' && bytes.Equal(host, u.hostRaw) {
+		u.host = append(u.host[:0], u.hostParsed...)
+		u.pathOriginal = append(u.pathOriginal[:0], '/')
+		u.path = append(u.path[:0], '/')
+		if isTLS {
+			u.SetSchemeBytes(strHTTPS)
+		}
+		return nil
+	}
+
 	if stringContainsCTLByte(uri) {
 		return ErrorInvalidURI
 	}
 
-	if len(host) == 0 || bytes.Contains(uri, strColonSlashSlash) {
+	// A target with a single leading slash is origin-form whatever it
+	// contains; splitHostURI would hand it back unchanged.
+	originForm := len(uri) > 1 && uri[0] == '/' && uri[1] != '/'
+	if len(host) == 0 || (!originForm && bytes.Contains(uri, strColonSlashSlash)) {
 		scheme, newHost, newURI := splitHostURI(host, uri)
 		if len(scheme) > 0 && !isValidScheme(scheme) {
 			return fmt.Errorf("invalid scheme %q", scheme)
@@ -301,7 +328,8 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		u.SetSchemeBytes(strHTTPS)
 	}
 
-	if n := bytes.LastIndexByte(host, '@'); n >= 0 {
+	if bytes.IndexByte(host, '@') >= 0 {
+		n := bytes.LastIndexByte(host, '@')
 		auth := host[:n]
 		if !validUserinfo(auth) {
 			return ErrorInvalidURI
@@ -317,13 +345,29 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		}
 	}
 
-	u.host = append(u.host, host...)
-	parsedHost, err := parseHost(u.host)
-	if err != nil {
-		return err
+	if len(host) != 0 && bytes.Equal(host, u.hostRaw) {
+		u.host = append(u.host[:0], u.hostParsed...)
+	} else {
+		// The key is taken before parseHost rewrites u.host in place, which
+		// host may alias, and dropped again unless the parse succeeds.
+		memo := len(host) <= maxMemoizedHostLen
+		u.hostRaw = u.hostRaw[:0]
+		if memo {
+			u.hostRaw = append(u.hostRaw, host...)
+		}
+		u.host = append(u.host, host...)
+		parsedHost, err := parseHost(u.host)
+		if err != nil {
+			u.hostRaw = u.hostRaw[:0]
+			return err
+		}
+		u.host = parsedHost
+		lowercaseBytes(u.host)
+		u.hostParsed = u.hostParsed[:0]
+		if memo {
+			u.hostParsed = append(u.hostParsed, u.host...)
+		}
 	}
-	u.host = parsedHost
-	lowercaseBytes(u.host)
 
 	b := uri
 	queryIndex := bytes.IndexByte(b, '?')
@@ -404,6 +448,24 @@ func isValidScheme(scheme []byte) bool {
 	return true
 }
 
+// isAuthorityDelimiter reports whether the "//" at index n in uri introduces an
+// authority. Per RFC 3986 that is only the case for a network-path reference,
+// which starts with "//", or when the "//" is preceded by a scheme and a colon.
+// Anywhere else the "//" belongs to a path or to a query, so "a//b" is a
+// relative path and not scheme "a" with host "b".
+func isAuthorityDelimiter(uri []byte, n int) bool {
+	if n == 0 {
+		return true
+	}
+	scheme := uri[:n]
+	if scheme[len(scheme)-1] != ':' {
+		return false
+	}
+	// splitHostURI also accepts the empty scheme in "://host".
+	scheme = scheme[:len(scheme)-1]
+	return len(scheme) == 0 || isValidScheme(scheme)
+}
+
 // parseHost parses host as an authority without user
 // information. That is, as host[:port].
 //
@@ -450,8 +512,8 @@ func parseHost(host []byte) ([]byte, error) {
 			return nil, fmt.Errorf("invalid host %q", host)
 		}
 
-		if i := bytes.LastIndexByte(host, ':'); i != -1 {
-			if bytes.IndexByte(host[:i], ':') != -1 {
+		if i := bytes.IndexByte(host, ':'); i != -1 {
+			if bytes.IndexByte(host[i+1:], ':') != -1 {
 				return nil, fmt.Errorf("invalid host %q with multiple port delimiters", host)
 			}
 
@@ -500,6 +562,7 @@ func (e InvalidHostError) Error() string {
 func unescape(s []byte, mode encoding) ([]byte, error) {
 	// Count %, check that they're well-formed.
 	n := 0
+	checkHost := mode == encodeHost || mode == encodeZone
 	for i := 0; i < len(s); {
 		switch s[i] {
 		case '%':
@@ -535,7 +598,7 @@ func unescape(s []byte, mode encoding) ([]byte, error) {
 			}
 			i += 3
 		default:
-			if (mode == encodeHost || mode == encodeZone) && s[i] < 0x80 && shouldEscape(s[i], mode) {
+			if checkHost && hostShouldEscapeTable[s[i]] != 0 {
 				return nil, InvalidHostError(s[i : i+1])
 			}
 			i++
@@ -621,54 +684,80 @@ func validOptionalPort(port []byte) bool {
 	return true
 }
 
+// removeSegments removes every occurrence of p from b, leaving p[0] behind,
+// and returns the result written over b.
+//
+// Removing one occurrence can expose another that ends where it did, so the
+// bytes already written are rechecked after every one. That keeps the whole
+// rewrite to a single pass: removing an occurrence used to move everything
+// behind it, which costs O(len(b)^2) for a path built out of nothing but p.
+func removeSegments(b, p []byte) []byte {
+	n := bytes.Index(b, p)
+	if n < 0 {
+		return b
+	}
+	last := p[len(p)-1]
+	w := n
+	for r := n; r < len(b); r++ {
+		b[w] = b[r]
+		w++
+		for w >= len(p) && b[w-1] == last && bytes.Equal(b[w-len(p):w], p) {
+			w -= len(p) - 1
+		}
+	}
+	return b[:w]
+}
+
+// removeParentSegments removes every occurrence of p from b together with the
+// path segment in front of it, and returns the result written over b. sep is
+// the separator left where that segment started; a zero sep keeps the byte
+// that is already there.
+//
+// Single pass for the same reason as removeSegments. Each parent lookup walks
+// back over a segment that the removal then drops, so the lookups add up to
+// one more pass over b.
+func removeParentSegments(b, p []byte, sep byte) []byte {
+	n := bytes.Index(b, p)
+	if n < 0 {
+		return b
+	}
+	last := p[len(p)-1]
+	w := n
+	for r := n; r < len(b); r++ {
+		b[w] = b[r]
+		w++
+		for w >= len(p) && b[w-1] == last && bytes.Equal(b[w-len(p):w], p) {
+			w = max(bytes.LastIndexByte(b[:w-len(p)], '/'), 0)
+			if sep != 0 {
+				b[w] = sep
+			}
+			w++
+		}
+	}
+	return b[:w]
+}
+
 func normalizePath(dst, src []byte) []byte {
+	if len(src) == 1 && src[0] == '/' {
+		return append(dst[:0], '/')
+	}
 	dst = dst[:0]
 	dst = addLeadingSlash(dst, src)
 	dst = decodeArgAppendNoPlus(dst, src)
 
 	// remove duplicate slashes
-	b := dst
-	bSize := len(b)
-	for {
-		n := bytes.Index(b, strSlashSlash)
-		if n < 0 {
-			break
-		}
-		b = b[n:]
-		copy(b, b[1:])
-		b = b[:len(b)-1]
-		bSize--
-	}
-	dst = dst[:bSize]
+	b := removeSegments(dst, strSlashSlash)
 
 	// No '.' means no "/./", "/../" or "/.." to remove.
-	b = dst
 	if bytes.IndexByte(b, '.') < 0 {
 		return b
 	}
 
 	// remove /./ parts
-	for {
-		n := bytes.Index(b, strSlashDotSlash)
-		if n < 0 {
-			break
-		}
-		nn := n + len(strSlashDotSlash) - 1
-		copy(b[n:], b[nn:])
-		b = b[:len(b)-nn+n]
-	}
+	b = removeSegments(b, strSlashDotSlash)
 
 	// remove /foo/../ parts
-	for {
-		n := bytes.Index(b, strSlashDotDotSlash)
-		if n < 0 {
-			break
-		}
-		nn := max(bytes.LastIndexByte(b[:n], '/'), 0)
-		n += len(strSlashDotDotSlash) - 1
-		copy(b[nn:], b[n:])
-		b = b[:len(b)-n+nn]
-	}
+	b = removeParentSegments(b, strSlashDotDotSlash, '/')
 
 	// remove trailing /foo/..
 	n := bytes.LastIndex(b, strSlashDotDot)
@@ -680,42 +769,21 @@ func normalizePath(dst, src []byte) []byte {
 		b = b[:nn+1]
 	}
 
+	// remove trailing /. , which denotes the current directory and so leaves
+	// the trailing slash behind. See RFC 3986 section 5.2.4 step 2B.
+	if bytes.HasSuffix(b, strSlashDot) {
+		b = b[:len(b)-1]
+	}
+
 	if filepath.Separator == '\\' {
 		// remove \.\ parts
-		for {
-			n := bytes.Index(b, strBackSlashDotBackSlash)
-			if n < 0 {
-				break
-			}
-			nn := n + len(strSlashDotSlash) - 1
-			copy(b[n:], b[nn:])
-			b = b[:len(b)-nn+n]
-		}
+		b = removeSegments(b, strBackSlashDotBackSlash)
 
 		// remove /foo/..\ parts
-		for {
-			n := bytes.Index(b, strSlashDotDotBackSlash)
-			if n < 0 {
-				break
-			}
-			nn := max(bytes.LastIndexByte(b[:n], '/'), 0)
-			nn++
-			n += len(strSlashDotDotBackSlash)
-			copy(b[nn:], b[n:])
-			b = b[:len(b)-n+nn]
-		}
+		b = removeParentSegments(b, strSlashDotDotBackSlash, 0)
 
 		// remove /foo\..\ parts
-		for {
-			n := bytes.Index(b, strBackSlashDotDotBackSlash)
-			if n < 0 {
-				break
-			}
-			nn := max(bytes.LastIndexByte(b[:n], '/'), 0)
-			n += len(strBackSlashDotDotBackSlash) - 1
-			copy(b[nn:], b[n:])
-			b = b[:len(b)-n+nn]
-		}
+		b = removeParentSegments(b, strBackSlashDotDotBackSlash, '\\')
 
 		// remove trailing \foo\..
 		n := bytes.LastIndex(b, strBackSlashDotDot)
@@ -733,16 +801,29 @@ func normalizePath(dst, src []byte) []byte {
 
 // RequestURI returns RequestURI - i.e. URI without Scheme and Host.
 func (u *URI) RequestURI() []byte {
+	return u.requestURIBytes(u.DisablePathNormalizing)
+}
+
+// requestURIBytes is like RequestURI, with path normalization disabled
+// whenever disablePathNormalizing is set, whatever u.DisablePathNormalizing
+// holds.
+func (u *URI) requestURIBytes(disablePathNormalizing bool) []byte {
 	var dst []byte
-	if u.DisablePathNormalizing {
+	if disablePathNormalizing {
 		dst = u.requestURI[:0]
-		dst = append(dst, u.PathOriginal()...)
+		path := u.PathOriginal()
+		if len(path) == 0 {
+			path = strSlash
+		}
+		dst = append(dst, path...)
 	} else {
 		dst = appendQuotedPath(u.requestURI[:0], u.Path())
 	}
-	if u.parsedQueryArgs && u.queryArgs.Len() > 0 {
-		dst = append(dst, '?')
-		dst = u.queryArgs.AppendBytes(dst)
+	if u.parsedQueryArgs {
+		if u.queryArgs.Len() > 0 {
+			dst = append(dst, '?')
+			dst = u.queryArgs.AppendBytes(dst)
+		}
 	} else if len(u.queryString) > 0 {
 		dst = append(dst, '?')
 		dst = append(dst, u.queryString...)
@@ -807,7 +888,7 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 	}
 
 	n := bytes.Index(newURI, strSlashSlash)
-	if n >= 0 {
+	if n >= 0 && isAuthorityDelimiter(newURI, n) {
 		// absolute uri
 		var b [32]byte
 		schemeOriginal := b[:0]
@@ -947,8 +1028,13 @@ func (u *URI) parseQueryArgs() {
 
 // stringContainsCTLByte reports whether s contains any ASCII control character.
 func stringContainsCTLByte(s []byte) bool {
-	for i := range s {
-		b := s[i]
+	for len(s) >= 8 {
+		if anyByteIsCTL(loadWord(s)) {
+			return true
+		}
+		s = s[8:]
+	}
+	for _, b := range s {
 		if b < ' ' || b == 0x7f {
 			return true
 		}

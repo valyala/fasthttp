@@ -226,7 +226,7 @@ func (wp *workerPool) workerFunc(ch *workerChan) {
 			errStr := err.Error()
 			shouldIgnore := strings.Contains(errStr, "broken pipe") ||
 				strings.Contains(errStr, "reset by peer") ||
-				strings.Contains(errStr, "request headers: small read buffer") ||
+				strings.Contains(errStr, "request headers: "+ErrSmallReadBuffer.Error()) ||
 				strings.Contains(errStr, "unexpected EOF") ||
 				strings.Contains(errStr, "i/o timeout") ||
 				errors.Is(err, ErrBadTrailer)

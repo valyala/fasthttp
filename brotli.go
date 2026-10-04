@@ -2,13 +2,15 @@ package fasthttp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 
-	"github.com/andybalholm/brotli"
 	"github.com/valyala/bytebufferpool"
 	"github.com/valyala/fasthttp/stackless"
+
+	brotli "github.com/molecule-man/go-brrr"
 )
 
 // Supported compression levels.
@@ -23,16 +25,14 @@ const (
 	CompressBrotliDefaultCompression = 4
 )
 
-func acquireBrotliReader(r io.Reader) (*brotli.Reader, error) {
+func acquireBrotliReader(r io.Reader) *brotli.Reader {
 	v := brotliReaderPool.Get()
 	if v == nil {
-		return brotli.NewReader(r), nil
+		return brotli.NewReader(r)
 	}
 	zr := v.(*brotli.Reader) //nolint:forcetypeassert
-	if err := zr.Reset(r); err != nil {
-		return nil, err
-	}
-	return zr, nil
+	zr.Reset(r)
+	return zr
 }
 
 func releaseBrotliReader(zr *brotli.Reader) {
@@ -67,7 +67,9 @@ func acquireRealBrotliWriter(w io.Writer, level int) *brotli.Writer {
 	p := realBrotliWriterPoolMap[nLevel]
 	v := p.Get()
 	if v == nil {
-		zw := brotli.NewWriterLevel(w, level)
+		// nLevel is always in the [0..11] range accepted by brotli.NewWriter,
+		// so the error can never be non-nil here.
+		zw, _ := brotli.NewWriter(w, nLevel)
 		return zw
 	}
 	zw := v.(*brotli.Writer) //nolint:forcetypeassert
@@ -171,16 +173,16 @@ func WriteUnbrotli(w io.Writer, p []byte) (int, error) {
 }
 
 func writeUnbrotli(w io.Writer, p []byte, maxBodySize int) (int, error) {
-	r := &byteSliceReader{b: p}
-	zr, err := acquireBrotliReader(r)
-	if err != nil {
-		return 0, err
-	}
+	r := newBrotliSliceReader(p)
+	zr := acquireBrotliReader(r)
 	n, err := copyZeroAllocWithLimit(w, zr, maxBodySize)
 	releaseBrotliReader(zr)
 	nn := int(n)
 	if int64(nn) != n {
 		return 0, fmt.Errorf("too much data unbrotlied: %d", n)
+	}
+	if err == nil && r.excessiveInput() {
+		return nn, errBrotliExcessiveInput
 	}
 	return nn, err
 }
@@ -190,6 +192,49 @@ func AppendUnbrotliBytes(dst, src []byte) ([]byte, error) {
 	w := &byteSliceWriter{b: dst}
 	_, err := WriteUnbrotli(w, src)
 	return w.b, err
+}
+
+// errBrotliExcessiveInput is returned when a complete brotli stream is followed
+// by bytes that aren't part of it. github.com/andybalholm/brotli, the decoder
+// fasthttp used before, reported this with the same message; go-brrr ignores
+// the trailing bytes, so brotliSliceReader detects them instead.
+var errBrotliExcessiveInput = errors.New("brotli: excessive input")
+
+// brotliSliceReader hands the decoder everything but the final byte of b,
+// releasing that byte only once the decoder asks for more input. A brotli
+// stream is self-terminating and its final byte always carries stream bits, so
+// a decoder that succeeds without asking for the held back byte ended before
+// the end of b: the leftover is excessive input.
+type brotliSliceReader struct {
+	b []byte
+}
+
+func newBrotliSliceReader(b []byte) *brotliSliceReader {
+	return &brotliSliceReader{b: b}
+}
+
+func (r *brotliSliceReader) Read(p []byte) (int, error) {
+	if len(r.b) > 1 {
+		// Always withhold the final byte.
+		n := copy(p, r.b[:len(r.b)-1])
+		r.b = r.b[n:]
+		return n, nil
+	}
+	if len(r.b) == 1 {
+		if len(p) == 0 {
+			return 0, nil
+		}
+		p[0] = r.b[0]
+		r.b = r.b[1:]
+		return 1, nil
+	}
+	return 0, io.EOF
+}
+
+// excessiveInput is only meaningful once the decoder has reported success:
+// a decoder that stopped early hasn't asked for the held back byte either.
+func (r *brotliSliceReader) excessiveInput() bool {
+	return len(r.b) > 0
 }
 
 // normalizes compression level into [0..11], so it could be used as an index
