@@ -84,6 +84,7 @@ type Request struct {
 	// Request instance across multiple requests without reallocating
 	// or returning the body buffer to the pool.
 	KeepBodyBuffer bool
+	keepBodyBuffer bool
 
 	// Used by byte-returning client helpers so body limits and retries remain
 	// inside the normal buffered request path. This is deliberately not copied
@@ -159,6 +160,7 @@ type Response struct {
 	// Response instance across multiple requests without reallocating
 	// or returning the body buffer to the pool.
 	KeepBodyBuffer bool
+	keepBodyBuffer bool
 
 	preserveBodyBuffer    bool
 	secureErrorLogMessage bool
@@ -872,7 +874,7 @@ func (resp *Response) ResetBody() {
 	resp.bodyRaw = nil
 	resp.closeBodyStream(nil) //nolint:errcheck
 	if resp.body != nil {
-		if resp.KeepBodyBuffer {
+		if resp.KeepBodyBuffer || resp.keepBodyBuffer {
 			resp.body.Reset()
 		} else {
 			responseBodyPool.Put(resp.body)
@@ -1051,7 +1053,7 @@ func (req *Request) ResetBody() {
 	req.serverStream = nil
 	if req.body != nil {
 		switch {
-		case req.KeepBodyBuffer:
+		case req.KeepBodyBuffer || req.keepBodyBuffer:
 			req.body.Reset()
 		case rs != nil:
 			// The server still drains rs after the handler returns, and it

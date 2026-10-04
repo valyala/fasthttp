@@ -920,15 +920,20 @@ func (ctx *RequestCtx) Conn() net.Conn {
 }
 
 func (ctx *RequestCtx) reset() {
+	if ctx.s != nil {
+		keepBodyBuffer := !ctx.s.ReduceMemoryUsage
+		ctx.Request.keepBodyBuffer = keepBodyBuffer
+		ctx.Response.keepBodyBuffer = keepBodyBuffer
+	} else {
+		ctx.Request.keepBodyBuffer = false
+		ctx.Response.keepBodyBuffer = false
+	}
+	ctx.Request.KeepBodyBuffer = false
+	ctx.Response.KeepBodyBuffer = false
+
 	ctx.Request.Reset()
 	ctx.Response.Reset()
 	ctx.fbr.reset()
-
-	if ctx.s != nil {
-		keepBodyBuffer := !ctx.s.ReduceMemoryUsage
-		ctx.Request.KeepBodyBuffer = keepBodyBuffer
-		ctx.Response.KeepBodyBuffer = keepBodyBuffer
-	}
 
 	ctx.connID = 0
 	ctx.connRequestNum = 0
@@ -2888,6 +2893,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		s.setState(c, StateIdle)
 		ctx.Request.Reset()
 		ctx.Response.Reset()
+		if ctx.s != nil {
+			keepBodyBuffer := !ctx.s.ReduceMemoryUsage
+			ctx.Request.keepBodyBuffer = keepBodyBuffer
+			ctx.Response.keepBodyBuffer = keepBodyBuffer
+		}
+		ctx.Request.KeepBodyBuffer = false
+		ctx.Response.KeepBodyBuffer = false
 
 		if s.stop.Load() == 1 {
 			err = nil
@@ -3086,15 +3098,16 @@ func releaseWriter(s *Server, w *bufio.Writer) {
 func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 	v := s.ctxPool.Get()
 	if v == nil {
-		keepBodyBuffer := !s.ReduceMemoryUsage
-
 		ctx = new(RequestCtx)
-		ctx.Request.KeepBodyBuffer = keepBodyBuffer
-		ctx.Response.KeepBodyBuffer = keepBodyBuffer
 		ctx.s = s
 	} else {
 		ctx = v.(*RequestCtx) //nolint:forcetypeassert
 	}
+	keepBodyBuffer := !s.ReduceMemoryUsage
+	ctx.Request.keepBodyBuffer = keepBodyBuffer
+	ctx.Response.keepBodyBuffer = keepBodyBuffer
+	ctx.Request.KeepBodyBuffer = false
+	ctx.Response.KeepBodyBuffer = false
 	if s.FormValueFunc != nil {
 		ctx.formValueFunc = s.FormValueFunc
 	}
@@ -3121,8 +3134,10 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.time = ctx.connTime
 
 	keepBodyBuffer := !reduceMemoryUsage
-	ctx.Request.KeepBodyBuffer = keepBodyBuffer
-	ctx.Response.KeepBodyBuffer = keepBodyBuffer
+	ctx.Request.keepBodyBuffer = keepBodyBuffer
+	ctx.Response.keepBodyBuffer = keepBodyBuffer
+	ctx.Request.KeepBodyBuffer = false
+	ctx.Response.KeepBodyBuffer = false
 }
 
 // Init prepares ctx for passing to RequestHandler.

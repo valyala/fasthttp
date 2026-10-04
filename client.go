@@ -1512,6 +1512,7 @@ func AcquireRequest() *Request {
 // it to request pool.
 func ReleaseRequest(req *Request) {
 	req.KeepBodyBuffer = false
+	req.keepBodyBuffer = false
 	req.Reset()
 	requestPool.Put(req)
 }
@@ -1535,6 +1536,7 @@ func AcquireResponse() *Response {
 // it to response pool.
 func ReleaseResponse(resp *Response) {
 	resp.KeepBodyBuffer = false
+	resp.keepBodyBuffer = false
 	resp.Reset()
 	responsePool.Put(resp)
 }
