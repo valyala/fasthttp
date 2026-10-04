@@ -1933,7 +1933,7 @@ func TestResponseControllerKeepAliveDeadlinesCleared(t *testing.T) {
 						}
 					}
 					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write([]byte(fmt.Sprintf("resp-%d", reqNum)))
+					fmt.Fprintf(w, "resp-%d", reqNum)
 				}),
 			}
 			ln := fasthttputil.NewInmemoryListener()
@@ -1981,4 +1981,3 @@ func TestResponseControllerKeepAliveDeadlinesCleared(t *testing.T) {
 		})
 	}
 }
-
