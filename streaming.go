@@ -114,6 +114,12 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// truncated reports whether a fixed-length body ended before Content-Length
+// bytes of it were read.
+func (rs *requestStream) truncated() bool {
+	return rs.eof && rs.contentLength >= 0 && rs.totalBytesRead < rs.contentLength
+}
+
 func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
 	rs := requestStreamPool.Get().(*requestStream) //nolint:forcetypeassert
 	rs.prefetchedBytes.Reset(b.B)

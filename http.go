@@ -1272,6 +1272,12 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 				err = drainErr
 			}
 		}
+		if rs, ok := req.bodyStream.(*requestStream); ok && err == nil && rs.truncated() {
+			// The peer stopped sending before Content-Length was reached. A
+			// request stream reports that as a plain io.EOF, which the drain
+			// above takes for the end of the body.
+			err = io.ErrUnexpectedEOF
+		}
 		if lr != nil && lr.N <= 0 {
 			err = ErrBodyTooLarge
 		}
