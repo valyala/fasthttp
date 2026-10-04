@@ -23,9 +23,24 @@ type requestStream struct {
 	chunkLeft       int
 	strictEOF       bool
 	eof             bool
+
+	// failed is where the server is told that a Read returned an error other
+	// than io.EOF. The stream is then at an unknown offset in the body, so the
+	// connection can't be reused, and a later Read that happens to succeed
+	// doesn't change that. It points at state owned by the connection rather
+	// than by the Request, which a handler can reset.
+	failed *bool
 }
 
 func (rs *requestStream) Read(p []byte) (int, error) {
+	n, err := rs.read(p)
+	if err != nil && err != io.EOF && rs.failed != nil {
+		*rs.failed = true
+	}
+	return n, err
+}
+
+func (rs *requestStream) read(p []byte) (int, error) {
 	if rs.reader == nil {
 		panic("BUG: reading released body stream")
 	}
@@ -140,6 +155,7 @@ func releaseRequestStream(rs *requestStream) {
 	rs.totalBytesRead = 0
 	rs.chunkLeft = 0
 	rs.reader = nil
+	rs.failed = nil
 	rs.header = nil
 	rs.contentLength = 0
 	rs.eof = false
