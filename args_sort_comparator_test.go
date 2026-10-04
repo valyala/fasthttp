@@ -1,10 +1,8 @@
-package fasthttp_test
+package fasthttp
 
 import (
 	"bytes"
 	"testing"
-
-	"github.com/valyala/fasthttp"
 )
 
 func TestArgsSortComparatorSign(t *testing.T) {
@@ -21,7 +19,7 @@ func TestArgsSortComparatorSign(t *testing.T) {
 			t.Parallel()
 
 			for _, keysOnly := range []bool{false, true} {
-				var args fasthttp.Args
+				var args Args
 				args.Parse("z=last&a=z&a=a&c=middle&a=z")
 				want := "a=a&a=z&a=z&c=middle&z=last"
 				if keysOnly {
@@ -35,14 +33,14 @@ func TestArgsSortComparatorSign(t *testing.T) {
 				}
 			}
 
-			var values fasthttp.Args
+			var values Args
 			values.Parse("a=z&a=a&a=m")
 			values.Sort(tc.compare)
 			if got := values.String(); got != "a=a&a=m&a=z" {
 				t.Errorf("value-only sort: got %q", got)
 			}
 
-			var descending fasthttp.Args
+			var descending Args
 			descending.Parse("a=a&z=last&a=z&c=middle")
 			descending.Sort(func(a, b []byte) int { return tc.compare(b, a) })
 			if got := descending.String(); got != "z=last&c=middle&a=z&a=a" {
@@ -56,7 +54,7 @@ func TestArgsSortComparatorEqualStability(t *testing.T) {
 	t.Parallel()
 
 	for _, keysOnly := range []bool{false, true} {
-		var args fasthttp.Args
+		var args Args
 		args.Parse("z=last&a=z&a=a&c=middle")
 		compare := func(_, _ []byte) int { return 0 }
 		if keysOnly {
