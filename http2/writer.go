@@ -16,6 +16,14 @@ const (
 	initialBatchCapacity     = 4 << 10
 )
 
+// flushWriter is the narrow output contract used by x/net/http2's Framer.
+// Production connections use asyncFrameWriter; focused protocol tests may use
+// bufio.Writer directly.
+type flushWriter interface {
+	io.Writer
+	Flush() error
+}
+
 type frameWriteFailure struct {
 	err error
 }

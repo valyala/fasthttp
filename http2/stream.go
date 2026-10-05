@@ -1,6 +1,7 @@
 package http2
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -11,9 +12,119 @@ import (
 	"time"
 
 	"github.com/valyala/fasthttp"
+	xhttp2 "golang.org/x/net/http2"
 )
 
 var errStreamClosed = errors.New("http2: stream closed")
+
+type responseBody struct {
+	mu           sync.Mutex
+	ready        *sync.Cond
+	buffer       bytes.Buffer
+	err          error
+	eofCommit    func() error
+	isClosed     bool
+	isDone       bool
+	eofCommitted bool
+	conn         *clientConn
+	streamID     uint32
+}
+
+func newResponseBody(conn *clientConn, streamID uint32) *responseBody {
+	body := &responseBody{conn: conn, streamID: streamID}
+	body.ready = sync.NewCond(&body.mu)
+	return body
+}
+
+func (b *responseBody) Read(p []byte) (int, error) {
+	b.mu.Lock()
+	for b.buffer.Len() == 0 && !b.isClosed {
+		b.ready.Wait()
+	}
+	if b.buffer.Len() == 0 {
+		err := b.err
+		var commit func() error
+		if err == nil && !b.eofCommitted {
+			b.eofCommitted = true
+			commit = b.eofCommit
+		}
+		done := b.markDoneLocked()
+		b.mu.Unlock()
+		if commit != nil {
+			err = commit()
+		}
+		if done {
+			b.conn.responseBodyDone(b.streamID)
+		}
+		if err == nil {
+			err = io.EOF
+		}
+		return 0, err
+	}
+	// Non-empty buffer: Read cannot fail.
+	n, _ := b.buffer.Read(p)
+	b.mu.Unlock()
+	if n > 0 {
+		b.conn.consumeResponseBytes(b.streamID, n)
+	}
+	return n, nil
+}
+
+func (b *responseBody) setEOFCommit(commit func() error) {
+	b.mu.Lock()
+	b.eofCommit = commit
+	b.mu.Unlock()
+}
+
+func (b *responseBody) Close() error {
+	b.mu.Lock()
+	if b.isDone {
+		b.mu.Unlock()
+		return nil
+	}
+	discarded := b.buffer.Len()
+	b.buffer.Reset()
+	b.isClosed = true
+	b.err = net.ErrClosed
+	b.ready.Broadcast()
+	done := b.markDoneLocked()
+	b.mu.Unlock()
+	b.conn.closeResponseBody(b.streamID, discarded)
+	if done {
+		b.conn.responseBodyDone(b.streamID)
+	}
+	return nil
+}
+
+func (b *responseBody) write(p []byte) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.isClosed {
+		return errStreamClosed
+	}
+	// bytes.Buffer.Write never fails.
+	b.buffer.Write(p)
+	b.ready.Broadcast()
+	return nil
+}
+
+func (b *responseBody) closeWithError(err error) {
+	b.mu.Lock()
+	if !b.isClosed {
+		b.isClosed = true
+		b.err = err
+		b.ready.Broadcast()
+	}
+	b.mu.Unlock()
+}
+
+func (b *responseBody) markDoneLocked() bool {
+	if b.isDone {
+		return false
+	}
+	b.isDone = true
+	return true
+}
 
 type requestBody struct {
 	mu           sync.Mutex
@@ -762,6 +873,103 @@ func (c *streamConn) CloseWrite() error {
 	}
 }
 
+type clientStreamConn struct {
+	streamConnState
+
+	stream *clientStream
+	read   *responseBody
+}
+
+func (c *clientStreamConn) Read(p []byte) (int, error) {
+	return c.readUnderDeadline(c.read, p)
+}
+
+func (c *clientStreamConn) cancelOnDeadline() {
+	c.stream.conn.resetStream(c.stream.id, xhttp2.ErrCodeCancel, errStreamTimeout, false)
+}
+
+func (c *clientStreamConn) Write(p []byte) (int, error) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.mu.Lock()
+	if c.writeClosed || c.isClosed {
+		c.mu.Unlock()
+		return 0, net.ErrClosed
+	}
+	if err := c.beginLocked(&c.writeDeadline); err != nil {
+		c.mu.Unlock()
+		return 0, err
+	}
+	deadline := c.writeDeadline.at
+	c.mu.Unlock()
+	n, err := c.stream.conn.sendData(c.stream, p, false, deadline)
+	c.mu.Lock()
+	expired := c.endLocked(&c.writeDeadline)
+	c.mu.Unlock()
+	if expired {
+		return n, errStreamTimeout
+	}
+	if err != nil {
+		if errors.Is(err, fasthttp.ErrTimeout) {
+			c.cancelOnDeadline()
+			return n, errStreamTimeout
+		}
+		return n, err
+	}
+	return len(p), nil
+}
+
+func (c *clientStreamConn) Close() error {
+	c.mu.Lock()
+	if c.isClosed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.isClosed = true
+	readClosed := c.readClosed
+	writeClosed := c.writeClosed
+	c.readClosed = true
+	c.writeClosed = true
+	deadline := c.writeDeadline.at
+	c.mu.Unlock()
+	if !readClosed {
+		_ = c.read.Close()
+	}
+	if !writeClosed {
+		c.writeMu.Lock()
+		_, err := c.stream.conn.sendData(c.stream, nil, true, deadline)
+		c.writeMu.Unlock()
+		return err
+	}
+	return nil
+}
+
+func (c *clientStreamConn) CloseRead() error {
+	c.mu.Lock()
+	if c.readClosed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.readClosed = true
+	c.mu.Unlock()
+	return c.read.Close()
+}
+
+func (c *clientStreamConn) CloseWrite() error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	c.mu.Lock()
+	if c.writeClosed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.writeClosed = true
+	deadline := c.writeDeadline.at
+	c.mu.Unlock()
+	_, err := c.stream.conn.sendData(c.stream, nil, true, deadline)
+	return err
+}
+
 var (
 	_ fasthttp.ProtocolStream              = (*serverStream)(nil)
 	_ fasthttp.InformationalResponseWriter = (*serverStream)(nil)
@@ -769,4 +977,5 @@ var (
 	_ fasthttp.StreamAccepter              = (*serverStream)(nil)
 	_ fasthttp.HijackRejectionNotifier     = (*serverStream)(nil)
 	_ fasthttp.StreamConn                  = (*streamConn)(nil)
+	_ fasthttp.StreamConn                  = (*clientStreamConn)(nil)
 )

@@ -13,6 +13,7 @@ import (
 	stdhttp "net/http"
 	"net/http/httptrace"
 	"net/textproto"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1398,6 +1399,54 @@ func TestStreamHandlerDoneReleasesClosedStream(t *testing.T) {
 	}
 }
 
+func TestServerTimeoutErrorAbandonsOriginalRequestCtx(t *testing.T) {
+	releaseHeldCtx := make(chan struct{})
+	var releaseHeldCtxOnce sync.Once
+	heldPath := make(chan string, 1)
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			if string(ctx.Path()) != "/timeout" {
+				ctx.SetBodyString("ok")
+				return
+			}
+			go func() {
+				<-releaseHeldCtx
+				heldPath <- string(ctx.Path())
+			}()
+			ctx.TimeoutError("timeout")
+		},
+	}
+	t.Cleanup(func() { releaseHeldCtxOnce.Do(func() { close(releaseHeldCtx) }) })
+	testServer := newTestServer(t, server, ServerConfig{})
+	hc := newPriorKnowledgeHostClient(t, testServer.listener.Addr().String())
+
+	for _, test := range []struct {
+		path   string
+		status int
+		body   string
+	}{
+		{path: "/timeout", status: fasthttp.StatusRequestTimeout, body: "timeout"},
+		{path: "/ok", status: fasthttp.StatusOK, body: "ok"},
+	} {
+		req := fasthttp.AcquireRequest()
+		resp := fasthttp.AcquireResponse()
+		req.SetRequestURI(testServer.URL(test.path))
+		err := hc.Do(req, resp)
+		if err != nil {
+			t.Fatalf("Do(%q) error: %v", test.path, err)
+		}
+		if resp.StatusCode() != test.status || string(resp.Body()) != test.body {
+			t.Fatalf("Do(%q) response = (%d, %q), want (%d, %q)", test.path, resp.StatusCode(), resp.Body(), test.status, test.body)
+		}
+		fasthttp.ReleaseRequest(req)
+		fasthttp.ReleaseResponse(resp)
+	}
+	releaseHeldCtxOnce.Do(func() { close(releaseHeldCtx) })
+	if path := <-heldPath; path != "/timeout" {
+		t.Fatalf("abandoned RequestCtx path = %q, want /timeout", path)
+	}
+}
+
 func requireConnectionWindowUpdate(t testing.TB, wire []byte, expected uint32) {
 	t.Helper()
 	framer := xhttp2.NewFramer(nil, bytes.NewReader(wire))
@@ -2143,6 +2192,47 @@ func TestRepeatedInitialWindowSettingsApplyOneFinalDelta(t *testing.T) {
 			t.Fatalf("stream %d send window = %d, want 32768", id, stream.send.window)
 		}
 	}
+}
+
+// A connection must not leave handler workers parked after it closes.
+func TestStreamWorkersDoNotLeak(t *testing.T) {
+	before := runtime.NumGoroutine()
+	// Subtests so each round's cleanup runs before the next one starts.
+	for round := range 5 {
+		t.Run(fmt.Sprintf("round-%d", round), func(t *testing.T) {
+			server := &fasthttp.Server{
+				Handler: func(ctx *fasthttp.RequestCtx) { ctx.SetBodyString("ok") },
+			}
+			testServer := newTestServer(t, server, ServerConfig{MaxConcurrentStreams: 100})
+			hc := newPriorKnowledgeHostClient(t, testServer.listener.Addr().String())
+			var wait sync.WaitGroup
+			for range 50 {
+				wait.Go(func() {
+					req := fasthttp.AcquireRequest()
+					resp := fasthttp.AcquireResponse()
+					defer fasthttp.ReleaseRequest(req)
+					defer fasthttp.ReleaseResponse(resp)
+					req.SetRequestURI(testServer.URL("/"))
+					if err := hc.Do(req, resp); err != nil {
+						t.Errorf("Do() error: %v", err)
+					}
+				})
+			}
+			wait.Wait()
+			hc.CloseIdleConnections()
+		})
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var after int
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		after = runtime.NumGoroutine()
+		if after <= before+10 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("goroutines %d -> %d: stream workers leaked", before, after)
 }
 
 func TestServerTLSRequestReportsHTTPSScheme(t *testing.T) {

@@ -136,6 +136,39 @@ func TestRequestTrailersKeepRepeatedFields(t *testing.T) {
 	}
 }
 
+func TestResponseTrailersKeepRepeatedFields(t *testing.T) {
+	var resp fasthttp.Response
+	fields := []hpack.HeaderField{
+		{Name: "x-checksum", Value: "one"},
+		{Name: "x-checksum", Value: "two"},
+	}
+	if err := populateResponseTrailers(&resp, fields); err != nil {
+		t.Fatalf("populateResponseTrailers() error: %v", err)
+	}
+	values := resp.Header.PeekAll("X-Checksum")
+	if len(values) != 2 || string(values[0]) != "one" || string(values[1]) != "two" {
+		t.Fatalf("trailer values = %q, want [one two]", values)
+	}
+	if keys := resp.Header.PeekTrailerKeys(); len(keys) != 1 {
+		t.Fatalf("trailer keys = %q, want one entry", keys)
+	}
+}
+
+func TestResponseHeadersRejectTE(t *testing.T) {
+	var response fasthttp.Response
+	if _, _, err := populateResponse(&response, []hpack.HeaderField{
+		{Name: ":status", Value: "200"},
+		{Name: "te", Value: "trailers"},
+	}, false); err == nil {
+		t.Fatal("response TE header was accepted")
+	}
+	if err := populateResponseTrailers(&response, []hpack.HeaderField{
+		{Name: "te", Value: "trailers"},
+	}); err == nil {
+		t.Fatal("response trailer TE field was accepted")
+	}
+}
+
 func TestOutboundResponseHeadersRejectTEBeforeHPACK(t *testing.T) {
 	var enc headerEncoder
 	enc.initHeaderEncoder(defaultHeaderTableSize)
