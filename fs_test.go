@@ -887,6 +887,9 @@ func TestParseByteRangeError(t *testing.T) {
 	// suffix byte range for empty content
 	testParseByteRangeError(t, "bytes=-5", 0)
 
+	// zero-length suffix byte range
+	testParseByteRangeError(t, "bytes=-0", 10)
+
 	// startPos exceeding endPos
 	testParseByteRangeError(t, "bytes=123-34", 1234)
 }
