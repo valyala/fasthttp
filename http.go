@@ -2816,6 +2816,12 @@ func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
 		}
 	}
 
+	// A file may have grown since its size was taken. Stop at size, so
+	// nothing follows the body the Content-Length announces.
+	if f, ok := r.(*os.File); ok {
+		r = &io.LimitedReader{R: f, N: size}
+	}
+
 	n, err := copyBodyStream(w, r)
 
 	if n != size && err == nil {

@@ -9,6 +9,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -2447,6 +2449,50 @@ func TestSetResponseBodyStreamFixedSize(t *testing.T) {
 	testSetResponseBodyStream(t, "a")
 	testSetResponseBodyStream(t, string(createFixedBody(4097)))
 	testSetResponseBodyStream(t, string(createFixedBody(100500)))
+}
+
+func TestResponseSendFileGrownFile(t *testing.T) {
+	t.Parallel()
+
+	for _, size := range []int{100, 2 * maxSmallFileSize} {
+		body := createFixedBody(size)
+		filePath := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(filePath, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		var resp Response
+		if err := resp.SendFile(filePath); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// The file grows after SendFile took its size for Content-Length.
+		f, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = f.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"); err != nil {
+			t.Fatal(err)
+		}
+		if err = f.Close(); err != nil {
+			t.Fatal(err)
+		}
+
+		var w bytes.Buffer
+		bw := bufio.NewWriter(&w)
+		if err = resp.Write(bw); err != nil {
+			t.Fatalf("unexpected error when writing response: %v. size=%d", err, size)
+		}
+		if err = bw.Flush(); err != nil {
+			t.Fatalf("unexpected error when flushing response: %v. size=%d", err, size)
+		}
+
+		_, written, _ := bytes.Cut(w.Bytes(), []byte("\r\n\r\n"))
+		if resp.Header.ContentLength() != size || !bytes.Equal(written, body) {
+			t.Fatalf("wrote a body of %d bytes with Content-Length %d. Expecting %d bytes",
+				len(written), resp.Header.ContentLength(), size)
+		}
+	}
 }
 
 func TestSetRequestBodyStreamChunked(t *testing.T) {
