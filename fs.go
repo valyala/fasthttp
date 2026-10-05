@@ -1683,6 +1683,11 @@ func ParseByteRange(byteRange []byte, contentLength int) (startPos, endPos int, 
 		if contentLength <= 0 {
 			return 0, 0, fmt.Errorf("byte range %q is invalid for empty content", byteRange)
 		}
+		if v == 0 {
+			// A suffix range with a zero suffix-length selects no bytes
+			// and is unsatisfiable (RFC 9110, section 14.1.1).
+			return 0, 0, fmt.Errorf("suffix length in byte range %q must be greater than zero", byteRange)
+		}
 		startPos := max(contentLength-v, 0)
 		return startPos, contentLength - 1, nil
 	}

@@ -6688,3 +6688,632 @@ func TestServerRequestBodyStreamWarningPipelined(t *testing.T) {
 		})
 	}
 }
+
+func TestServerDiscardsUnreadStreamedBody(t *testing.T) {
+	t.Parallel()
+
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	next := "GET /next HTTP/1.1\r\nHost: x\r\n\r\n"
+
+	// The first 8KiB of a fixed-length body are prefetched, so the rest of
+	// the body is what the next request would be parsed from.
+	body := strings.Repeat("a", 8*1024) + smuggled
+
+	for _, tc := range []struct {
+		name string
+		req  string
+	}{
+		{
+			name: "content-length",
+			req: fmt.Sprintf("POST /first HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s",
+				len(body), body),
+		},
+		{
+			name: "chunked",
+			req: fmt.Sprintf("POST /first HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n%x\r\n%s\r\n0\r\n\r\n",
+				len(body), body),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rw := &readWriter{}
+			rw.r.WriteString(tc.req)
+			rw.r.WriteString(next)
+
+			var paths []string
+			s := Server{
+				StreamRequestBody: true,
+				Handler: func(ctx *RequestCtx) {
+					paths = append(paths, string(ctx.Path()))
+				},
+			}
+			if err := s.ServeConn(rw); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(paths) != 2 || paths[0] != "/first" || paths[1] != "/next" {
+				t.Fatalf("handler paths = %q; want [/first /next]", paths)
+			}
+
+			br := bufio.NewReader(&rw.w)
+			var resp Response
+			for range 2 {
+				if err := resp.Read(br); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if resp.ConnectionClose() {
+					t.Fatal("unexpected 'Connection: close' response header")
+				}
+			}
+		})
+	}
+}
+
+func TestServerClosesConnOnLargeUnreadStreamedBody(t *testing.T) {
+	t.Parallel()
+
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := strings.Repeat("a", maxUnreadStreamBodySize) + smuggled
+
+	rw := &readWriter{}
+	fmt.Fprintf(&rw.r, "POST /first HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+	rw.r.WriteString("GET /next HTTP/1.1\r\nHost: x\r\n\r\n")
+
+	var paths []string
+	s := Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+		},
+	}
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(paths) != 1 || paths[0] != "/first" {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatal("expecting 'Connection: close' response header")
+	}
+	if br.Buffered() != 0 {
+		t.Fatalf("unexpected data after the first response: %q", rw.w.String())
+	}
+}
+
+func TestServerDiscardsStreamedBodyClosedByHandler(t *testing.T) {
+	t.Parallel()
+
+	// A handler that abandons the stream with CloseBodyStream instead of
+	// reading it must not leave the unread body on the connection either.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := strings.Repeat("a", 8*1024) + smuggled
+
+	rw := &readWriter{}
+	fmt.Fprintf(&rw.r, "POST /first HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+	rw.r.WriteString("GET /next HTTP/1.1\r\nHost: x\r\n\r\n")
+
+	var paths []string
+	s := Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			ctx.Request.CloseBodyStream() //nolint:errcheck
+		},
+	}
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(paths) != 2 || paths[0] != "/first" || paths[1] != "/next" {
+		t.Fatalf("handler paths = %q; want [/first /next]", paths)
+	}
+}
+
+func TestServerSkipsDiscardOnHandlerConnectionClose(t *testing.T) {
+	t.Parallel()
+
+	// A handler that closes the connection must respond right away instead of
+	// blocking on the rest of an unfinished chunked upload that never arrives.
+	ln := fasthttputil.NewInmemoryListener()
+
+	var mu sync.Mutex
+	var paths []string
+	s := &Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *RequestCtx) {
+			mu.Lock()
+			paths = append(paths, string(ctx.Path()))
+			mu.Unlock()
+			ctx.Response.Header.SetConnectionClose()
+		},
+	}
+	serverCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverCh)
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Only the chunked header is sent, the body chunks never follow.
+	if _, err = conn.Write([]byte("POST /first HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	respCh := make(chan error, 1)
+	go func() {
+		var resp Response
+		if rerr := resp.Read(bufio.NewReader(conn)); rerr != nil {
+			respCh <- rerr
+			return
+		}
+		if !resp.ConnectionClose() {
+			respCh <- errors.New("expecting 'Connection: close' response header")
+			return
+		}
+		respCh <- nil
+	}()
+
+	select {
+	case err = <-respCh:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("no response: the server blocked on the unfinished body")
+	}
+
+	mu.Lock()
+	if len(paths) != 1 || paths[0] != "/first" {
+		mu.Unlock()
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+	mu.Unlock()
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case <-serverCh:
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("timeout")
+	}
+}
+
+func TestServerClosesConnOnTimedOutStreamedBody(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+
+	var mu sync.Mutex
+	var paths []string
+	handlerDone := make(chan struct{})
+	h := func(ctx *RequestCtx) {
+		mu.Lock()
+		paths = append(paths, string(ctx.Path()))
+		mu.Unlock()
+		if string(ctx.Path()) == "/first" {
+			<-handlerDone
+		}
+	}
+	s := &Server{
+		StreamRequestBody: true,
+		Handler:           TimeoutHandler(h, testTimeout(20*time.Millisecond), "timeout"),
+	}
+	serverCh := make(chan struct{})
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		close(serverCh)
+	}()
+
+	conn, err := ln.Dial()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := strings.Repeat("a", 8*1024) + smuggled
+	if _, err = fmt.Fprintf(conn, "POST /first HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	br := bufio.NewReader(conn)
+	var resp Response
+	if err = resp.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != StatusRequestTimeout {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusRequestTimeout)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatal("expecting 'Connection: close' response header")
+	}
+	if _, err = br.ReadByte(); err != io.EOF {
+		t.Fatalf("expecting the connection to be closed, got %v", err)
+	}
+	close(handlerDone)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) != 1 || paths[0] != "/first" {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+
+	if err := ln.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	select {
+	case <-serverCh:
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("timeout")
+	}
+}
+
+func TestServerKeepsStreamFramingWhenHandlerMutatesRequest(t *testing.T) {
+	t.Parallel()
+
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	next := "GET /next HTTP/1.1\r\nHost: x\r\n\r\n"
+	// The first 8KiB of a fixed-length body are prefetched, so the rest of the
+	// body is what a desync would parse as the next request.
+	body := strings.Repeat("a", 8*1024) + smuggled
+
+	for _, tc := range []struct {
+		name string
+		read bool
+	}{
+		// Resetting the request without reading the body must not let the unread
+		// bytes through: the drain has to use the framing captured when the
+		// stream was created, not the now-cleared request header.
+		{name: "reset-without-read", read: false},
+		// Reading the whole body first and then resetting the request must not
+		// make the drain read on into the next request.
+		{name: "read-then-reset", read: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rw := &readWriter{}
+			fmt.Fprintf(&rw.r, "POST /first HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+			rw.r.WriteString(next)
+
+			var paths []string
+			s := Server{
+				StreamRequestBody: true,
+				Handler: func(ctx *RequestCtx) {
+					paths = append(paths, string(ctx.Path()))
+					if string(ctx.Path()) != "/first" {
+						return
+					}
+					if tc.read {
+						if _, err := io.Copy(io.Discard, ctx.RequestBodyStream()); err != nil {
+							t.Errorf("unexpected error reading body: %v", err)
+						}
+					}
+					ctx.Request.Reset()
+				},
+			}
+			if err := s.ServeConn(rw); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(paths) != 2 || paths[0] != "/first" || paths[1] != "/next" {
+				t.Fatalf("handler paths = %q; want [/first /next]", paths)
+			}
+		})
+	}
+}
+
+func TestServerLetsResponseConsumeStreamedBody(t *testing.T) {
+	t.Parallel()
+
+	// A handler may stream the response body straight from the request body.
+	// The drain must run after the response has been written, so the response
+	// still gets the bytes instead of finding an already-drained stream, and
+	// closing the response body must not release the request stream before
+	// the drain reads it.
+	payload := "hello streamed body req"
+	next := "GET /next HTTP/1.1\r\nHost: x\r\n\r\n"
+
+	for _, tc := range []struct {
+		name     string
+		body     func(ctx *RequestCtx)
+		compress bool
+	}{
+		{
+			name: "limit-reader",
+			body: func(ctx *RequestCtx) {
+				n := len(payload)
+				ctx.Response.SetBodyStream(io.LimitReader(ctx.RequestBodyStream(), int64(n)), n)
+			},
+		},
+		{
+			// The request stream itself is the response body: writing the
+			// response closes it, which must not return it to the pool.
+			name: "direct",
+			body: func(ctx *RequestCtx) {
+				ctx.Response.SetBodyStream(ctx.RequestBodyStream(), len(payload))
+			},
+		},
+		{
+			// Same, wrapped by the compressed body stream.
+			name:     "compressed",
+			compress: true,
+			body: func(ctx *RequestCtx) {
+				ctx.Response.SetBodyStream(ctx.RequestBodyStream(), len(payload))
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rw := &readWriter{}
+			fmt.Fprintf(&rw.r, "POST /first HTTP/1.1\r\nHost: x\r\nAccept-Encoding: gzip\r\nContent-Length: %d\r\n\r\n%s", len(payload), payload)
+			rw.r.WriteString(next)
+
+			var paths []string
+			h := func(ctx *RequestCtx) {
+				paths = append(paths, string(ctx.Path()))
+				if string(ctx.Path()) == "/first" {
+					tc.body(ctx)
+				}
+			}
+			if tc.compress {
+				h = CompressHandler(h)
+			}
+			s := Server{
+				StreamRequestBody: true,
+				Handler:           h,
+			}
+			if err := s.ServeConn(rw); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(paths) != 2 || paths[0] != "/first" || paths[1] != "/next" {
+				t.Fatalf("handler paths = %q; want [/first /next]", paths)
+			}
+
+			br := bufio.NewReader(&rw.w)
+			var resp Response
+			if err := resp.Read(br); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			body := resp.Body()
+			if tc.compress {
+				var err error
+				if body, err = resp.BodyGunzip(); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+			if string(body) != payload {
+				t.Fatalf("response body = %q; want %q", body, payload)
+			}
+			if resp.ConnectionClose() {
+				t.Fatal("unexpected 'Connection: close' response header")
+			}
+			if err := resp.Read(br); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestServerKeepsConnWhenResponseConsumesLargeStreamedBody(t *testing.T) {
+	t.Parallel()
+
+	payload := strings.Repeat("x", maxUnreadStreamBodySize+1)
+	next := "GET /next HTTP/1.1\r\nHost: x\r\n\r\n"
+
+	for _, tc := range []struct {
+		name     string
+		body     func(*RequestCtx)
+		wantBody string
+	}{
+		{
+			name: "direct",
+			body: func(ctx *RequestCtx) {
+				ctx.Response.SetBodyStream(ctx.RequestBodyStream(), len(payload))
+			},
+			wantBody: payload,
+		},
+		{
+			name: "wrapped",
+			body: func(ctx *RequestCtx) {
+				ctx.Response.SetBodyStream(io.LimitReader(ctx.RequestBodyStream(), int64(len(payload))), len(payload))
+			},
+			wantBody: payload,
+		},
+		{
+			name: "wrapped-leaves-small-tail",
+			body: func(ctx *RequestCtx) {
+				n := len(payload) - 128
+				ctx.Response.SetBodyStream(io.LimitReader(ctx.RequestBodyStream(), int64(n)), n)
+			},
+			wantBody: payload[:len(payload)-128],
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rw := &readWriter{}
+			fmt.Fprintf(&rw.r, "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(payload), payload)
+			rw.r.WriteString(next)
+
+			var paths []string
+			s := Server{
+				StreamRequestBody: true,
+				Handler: func(ctx *RequestCtx) {
+					paths = append(paths, string(ctx.Path()))
+					if string(ctx.Path()) == "/echo" {
+						tc.body(ctx)
+					}
+				},
+			}
+			if err := s.ServeConn(rw); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(paths) != 2 || paths[0] != "/echo" || paths[1] != "/next" {
+				t.Fatalf("handler paths = %q; want [/echo /next]", paths)
+			}
+
+			br := bufio.NewReader(&rw.w)
+			var resp Response
+			if err := resp.Read(br); err != nil {
+				t.Fatalf("unexpected error reading echo response: %v", err)
+			}
+			if string(resp.Body()) != tc.wantBody {
+				t.Fatal("unexpected echo response body")
+			}
+			if resp.ConnectionClose() {
+				t.Fatal("echo response unexpectedly closes the connection")
+			}
+			if err := resp.Read(br); err != nil {
+				t.Fatalf("unexpected error reading next response: %v", err)
+			}
+		})
+	}
+}
+
+func TestServerClosesConnWhenResponseStreamLeavesLargeBodyUnread(t *testing.T) {
+	t.Parallel()
+
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := strings.Repeat("a", maxUnreadStreamBodySize) + smuggled
+	rw := &readWriter{}
+	fmt.Fprintf(&rw.r, "POST /first HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+	rw.r.WriteString("GET /next HTTP/1.1\r\nHost: x\r\n\r\n")
+
+	var paths []string
+	s := Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			ctx.Response.SetBodyStream(strings.NewReader("ok"), 2)
+		},
+	}
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(paths) != 1 || paths[0] != "/first" {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error reading response: %v", err)
+	}
+	if string(resp.Body()) != "ok" {
+		t.Fatalf("response body = %q; want ok", resp.Body())
+	}
+	if _, err := br.ReadByte(); err != io.EOF {
+		t.Fatalf("expected the connection to close after the response, got %v", err)
+	}
+}
+
+func TestServerFlushesResponseBeforeDiscardingStreamedBody(t *testing.T) {
+	t.Parallel()
+
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	s := Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *RequestCtx) {
+			ctx.SetBodyString("rejected")
+		},
+	}
+	go func() {
+		defer close(done)
+		_ = s.ServeConn(server)
+		_ = server.Close()
+	}()
+	defer func() {
+		_ = client.Close()
+		<-done
+	}()
+
+	// The handler can respond from the headers alone. The client has not sent
+	// the chunked body yet, so draining it must not hold the response back.
+	if _, err := client.Write([]byte("POST /first HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected write error: %v", err)
+	}
+	if err := client.SetReadDeadline(time.Now().Add(testTimeout(time.Second))); err != nil {
+		t.Fatalf("unexpected deadline error: %v", err)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(client)); err != nil {
+		t.Fatalf("no prompt response before sending the body: %v", err)
+	}
+	if string(resp.Body()) != "rejected" {
+		t.Fatalf("response body = %q; want rejected", resp.Body())
+	}
+}
+
+func TestServerKeepsPrefetchedBodyWhenHandlerResetsRequest(t *testing.T) {
+	// Not parallel: the check below needs the pool to hand back the buffer
+	// that was just put into it.
+
+	// With ReduceMemoryUsage the request body buffer goes back to the pool on
+	// Reset. The stream's prefetched bytes live in that buffer and the server
+	// still drains them after the handler returns, so the buffer must not be
+	// pooled, and reused by another request, before then.
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := strings.Repeat("a", 8*1024) + smuggled
+
+	for _, tc := range []struct {
+		name        string
+		closeStream bool
+	}{
+		{name: "reset"},
+		// Closing the stream first takes it off the request, but the server
+		// still drains it, so the buffer has to be kept all the same.
+		{name: "close-then-reset", closeStream: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rw := &readWriter{}
+			fmt.Fprintf(&rw.r, "POST /first HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+			rw.r.WriteString("GET /next HTTP/1.1\r\nHost: x\r\n\r\n")
+
+			var paths []string
+			written := make(chan struct{})
+			s := Server{
+				StreamRequestBody: true,
+				ReduceMemoryUsage: true,
+				Handler: func(ctx *RequestCtx) {
+					paths = append(paths, string(ctx.Path()))
+					if string(ctx.Path()) != "/first" {
+						return
+					}
+					prefetched := ctx.Request.body
+					if tc.closeStream {
+						ctx.Request.CloseBodyStream() //nolint:errcheck
+					}
+					ctx.Request.Reset()
+					// Another request would get the pooled buffer now and write to it
+					// while the drain still reads the prefetched bytes from it.
+					bb := requestBodyPool.Get()
+					if bb == prefetched {
+						t.Error("prefetched body buffer was pooled while the stream still reads it")
+					}
+					go func() {
+						bb.SetString("reused by another request")
+						close(written)
+					}()
+				},
+			}
+			if err := s.ServeConn(rw); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			<-written
+
+			if len(paths) != 2 || paths[0] != "/first" || paths[1] != "/next" {
+				t.Fatalf("handler paths = %q; want [/first /next]", paths)
+			}
+		})
+	}
+}
