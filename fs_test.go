@@ -379,6 +379,91 @@ func TestFSSmallFileServedFromMemory(t *testing.T) {
 	}
 }
 
+func TestFSBigFileGrownAfterCached(t *testing.T) {
+	t.Parallel()
+
+	big := bytes.Repeat([]byte("b"), 2*maxSmallFileSize)
+
+	tests := []struct {
+		fs   func(dir string) *FS
+		name string
+	}{
+		{name: "root", fs: func(dir string) *FS { return &FS{Root: dir} }},
+		{name: "dir fs", fs: func(dir string) *FS { return &FS{FS: os.DirFS(dir), AllowEmptyRoot: true} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			bigPath := filepath.Join(dir, "big.txt")
+			if err := os.WriteFile(bigPath, big, 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			// Closing stop releases the cached big file, whose open handles would
+			// otherwise keep t.TempDir cleanup from removing it on Windows.
+			stop := make(chan struct{})
+			defer close(stop)
+
+			fs := tt.fs(dir)
+			fs.CleanStop = stop
+			h := fs.NewRequestHandler()
+
+			serve := func() *RequestCtx {
+				t.Helper()
+				ctx := &RequestCtx{}
+				ctx.Init(&Request{}, nil, TestLogger{t})
+				ctx.Request.SetRequestURI("/big.txt")
+				h(ctx)
+				if _, ok := ctx.Response.bodyStream.(*bigFileReader); !ok {
+					t.Fatalf("unexpected body stream %T. Expecting *bigFileReader", ctx.Response.bodyStream)
+				}
+				return ctx
+			}
+			// writtenBody returns everything the response writes after its header.
+			writtenBody := func(ctx *RequestCtx) []byte {
+				t.Helper()
+				var buf bytes.Buffer
+				bw := bufio.NewWriter(&buf)
+				if err := ctx.Response.Write(bw); err != nil {
+					t.Fatalf("unexpected error when writing response: %v", err)
+				}
+				if err := bw.Flush(); err != nil {
+					t.Fatalf("unexpected error when flushing response: %v", err)
+				}
+				_, body, _ := bytes.Cut(buf.Bytes(), []byte("\r\n\r\n"))
+				return body
+			}
+
+			// The first request caches the file together with its size.
+			if body := writtenBody(serve()); !bytes.Equal(body, big) {
+				t.Fatalf("unexpected body of %d bytes. Expecting %d bytes", len(body), len(big))
+			}
+
+			f, err := os.OpenFile(bigPath, os.O_APPEND|os.O_WRONLY, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = f.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"); err != nil {
+				t.Fatal(err)
+			}
+			if err = f.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			// One request reuses the reader of the first one, the other one has
+			// to open the file again. Neither may write what was appended after
+			// the body the cached Content-Length announces.
+			for _, ctx := range []*RequestCtx{serve(), serve()} {
+				body := writtenBody(ctx)
+				if ctx.Response.Header.ContentLength() != len(big) || !bytes.Equal(body, big) {
+					t.Fatalf("wrote a body of %d bytes with Content-Length %d. Expecting the cached %d bytes",
+						len(body), ctx.Response.Header.ContentLength(), len(big))
+				}
+			}
+		})
+	}
+}
+
 func TestFSSkipCacheSmallFileNoReadFrom(t *testing.T) {
 	t.Parallel()
 

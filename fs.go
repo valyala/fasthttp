@@ -739,7 +739,7 @@ func (ff *fsFile) bigFileReader() (io.Reader, error) {
 		return nil, errors.New("bug: ff.f must be non-nil in big file reader")
 	}
 
-	var r io.Reader
+	var r *bigFileReader
 
 	ff.bigFilesLock.Lock()
 	n := len(ff.bigFiles)
@@ -749,19 +749,27 @@ func (ff *fsFile) bigFileReader() (io.Reader, error) {
 	}
 	ff.bigFilesLock.Unlock()
 
-	if r != nil {
-		return r, nil
+	if r == nil {
+		f, err := ff.h.filesystem.Open(ff.filename)
+		if err != nil {
+			return nil, fmt.Errorf("cannot open already opened file: %w", err)
+		}
+		r = &bigFileReader{
+			f:  f,
+			ff: ff,
+		}
 	}
 
-	f, err := ff.h.filesystem.Open(ff.filename)
-	if err != nil {
-		return nil, fmt.Errorf("cannot open already opened file: %w", err)
+	// The file may have grown since its size was cached. Stop at the cached
+	// size, so nothing follows the body the Content-Length announces. A file
+	// with a negative size is streamed until EOF.
+	r.r = r.f
+	if ff.contentLength >= 0 {
+		r.lr.R = r.f
+		r.lr.N = int64(ff.contentLength)
+		r.r = &r.lr
 	}
-	return &bigFileReader{
-		f:  f,
-		ff: ff,
-		r:  f,
-	}, nil
+	return r, nil
 }
 
 func (ff *fsFile) Release() {
