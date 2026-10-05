@@ -2179,6 +2179,55 @@ func TestServerPreservesMultipartDrainErrorAcrossTimeoutHandler(t *testing.T) {
 	}
 }
 
+func TestServerStreamedMultipartFormLeavesNonMultipartBodyUnread(t *testing.T) {
+	t.Parallel()
+
+	// MultipartForm only drains a multipart/form-data body. A streamed body of
+	// any other type has to stay on the stream after ErrNoMultipartForm, so
+	// the handler can still read it.
+	body := `{"a":1}`
+
+	for name, parse := range map[string]func(ctx *RequestCtx){
+		"MultipartForm": func(ctx *RequestCtx) {
+			if _, err := ctx.MultipartForm(); !errors.Is(err, ErrNoMultipartForm) {
+				t.Errorf("MultipartForm error = %v; want %v", err, ErrNoMultipartForm)
+			}
+		},
+		"FormValue": func(ctx *RequestCtx) {
+			if v := ctx.FormValue("missing"); v != nil {
+				t.Errorf("FormValue = %q; want nil", v)
+			}
+		},
+	} {
+		rw := &oneByteReadWriter{}
+		fmt.Fprintf(&rw.r,
+			"POST / HTTP/1.1\r\n"+
+				"Host: x\r\n"+
+				"Content-Type: application/json\r\n"+
+				"Content-Length: %d\r\n\r\n%s",
+			len(body), body,
+		)
+
+		var postBody string
+		s := Server{
+			StreamRequestBody:  true,
+			MaxRequestBodySize: 1, // Force RequestBodyStream.
+			Logger:             &testLogger{},
+			Handler: func(ctx *RequestCtx) {
+				parse(ctx)
+				postBody = string(ctx.PostBody())
+			},
+		}
+
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatalf("%s: unexpected error: %v", name, err)
+		}
+		if postBody != body {
+			t.Errorf("%s: PostBody() = %q; want %q", name, postBody, body)
+		}
+	}
+}
+
 func TestServerGetWithContent(t *testing.T) {
 	t.Parallel()
 
