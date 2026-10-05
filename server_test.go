@@ -6601,6 +6601,155 @@ func TestServerLetsResponseConsumeStreamedBody(t *testing.T) {
 	}
 }
 
+func TestServerKeepsConnWhenResponseConsumesLargeStreamedBody(t *testing.T) {
+	t.Parallel()
+
+	payload := strings.Repeat("x", maxUnreadStreamBodySize+1)
+	next := "GET /next HTTP/1.1\r\nHost: x\r\n\r\n"
+
+	for _, tc := range []struct {
+		name     string
+		body     func(*RequestCtx)
+		wantBody string
+	}{
+		{
+			name: "direct",
+			body: func(ctx *RequestCtx) {
+				ctx.Response.SetBodyStream(ctx.RequestBodyStream(), len(payload))
+			},
+			wantBody: payload,
+		},
+		{
+			name: "wrapped",
+			body: func(ctx *RequestCtx) {
+				ctx.Response.SetBodyStream(io.LimitReader(ctx.RequestBodyStream(), int64(len(payload))), len(payload))
+			},
+			wantBody: payload,
+		},
+		{
+			name: "wrapped-leaves-small-tail",
+			body: func(ctx *RequestCtx) {
+				n := len(payload) - 128
+				ctx.Response.SetBodyStream(io.LimitReader(ctx.RequestBodyStream(), int64(n)), n)
+			},
+			wantBody: payload[:len(payload)-128],
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rw := &readWriter{}
+			fmt.Fprintf(&rw.r, "POST /echo HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(payload), payload)
+			rw.r.WriteString(next)
+
+			var paths []string
+			s := Server{
+				StreamRequestBody: true,
+				Handler: func(ctx *RequestCtx) {
+					paths = append(paths, string(ctx.Path()))
+					if string(ctx.Path()) == "/echo" {
+						tc.body(ctx)
+					}
+				},
+			}
+			if err := s.ServeConn(rw); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(paths) != 2 || paths[0] != "/echo" || paths[1] != "/next" {
+				t.Fatalf("handler paths = %q; want [/echo /next]", paths)
+			}
+
+			br := bufio.NewReader(&rw.w)
+			var resp Response
+			if err := resp.Read(br); err != nil {
+				t.Fatalf("unexpected error reading echo response: %v", err)
+			}
+			if string(resp.Body()) != tc.wantBody {
+				t.Fatal("unexpected echo response body")
+			}
+			if resp.ConnectionClose() {
+				t.Fatal("echo response unexpectedly closes the connection")
+			}
+			if err := resp.Read(br); err != nil {
+				t.Fatalf("unexpected error reading next response: %v", err)
+			}
+		})
+	}
+}
+
+func TestServerClosesConnWhenResponseStreamLeavesLargeBodyUnread(t *testing.T) {
+	t.Parallel()
+
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := strings.Repeat("a", maxUnreadStreamBodySize) + smuggled
+	rw := &readWriter{}
+	fmt.Fprintf(&rw.r, "POST /first HTTP/1.1\r\nHost: x\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+	rw.r.WriteString("GET /next HTTP/1.1\r\nHost: x\r\n\r\n")
+
+	var paths []string
+	s := Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			ctx.Response.SetBodyStream(strings.NewReader("ok"), 2)
+		},
+	}
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(paths) != 1 || paths[0] != "/first" {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("unexpected error reading response: %v", err)
+	}
+	if string(resp.Body()) != "ok" {
+		t.Fatalf("response body = %q; want ok", resp.Body())
+	}
+	if _, err := br.ReadByte(); err != io.EOF {
+		t.Fatalf("expected the connection to close after the response, got %v", err)
+	}
+}
+
+func TestServerFlushesResponseBeforeDiscardingStreamedBody(t *testing.T) {
+	t.Parallel()
+
+	client, server := net.Pipe()
+	done := make(chan struct{})
+	s := Server{
+		StreamRequestBody: true,
+		Handler: func(ctx *RequestCtx) {
+			ctx.SetBodyString("rejected")
+		},
+	}
+	go func() {
+		defer close(done)
+		_ = s.ServeConn(server)
+		_ = server.Close()
+	}()
+	defer func() {
+		_ = client.Close()
+		<-done
+	}()
+
+	// The handler can respond from the headers alone. The client has not sent
+	// the chunked body yet, so draining it must not hold the response back.
+	if _, err := client.Write([]byte("POST /first HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n")); err != nil {
+		t.Fatalf("unexpected write error: %v", err)
+	}
+	if err := client.SetReadDeadline(time.Now().Add(testTimeout(time.Second))); err != nil {
+		t.Fatalf("unexpected deadline error: %v", err)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(client)); err != nil {
+		t.Fatalf("no prompt response before sending the body: %v", err)
+	}
+	if string(resp.Body()) != "rejected" {
+		t.Fatalf("response body = %q; want rejected", resp.Body())
+	}
+}
+
 func TestServerKeepsPrefetchedBodyWhenHandlerResetsRequest(t *testing.T) {
 	// Not parallel: the check below needs the pool to hand back the buffer
 	// that was just put into it.
