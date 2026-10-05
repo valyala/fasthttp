@@ -2776,14 +2776,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.Response.Header.ConnectionClose() ||
 			(s.CloseOnShutdown && s.stop.Load() == 1)
 
-		// If the handler left too much of a known-length streamed body unread,
-		// draining it after the response would read far past what belongs to
-		// this request, so close the connection instead. This has to be decided
-		// before the response headers are written. The rest of the body is
-		// drained after the response below, once it has had its chance to
-		// consume the stream. Skip this when the connection is closing anyway or
-		// was hijacked.
+		// If no response stream can consume the request body, a known-length
+		// body over the drain limit means the connection must close. Decide
+		// that now so the response includes Connection: close. A response stream
+		// may read the request body while it is written, so check its remaining
+		// length after writeResponse instead.
 		if reqStream != nil && !connectionClose && hijackHandler == nil &&
+			ctx.Response.bodyStream == nil &&
 			reqStream.bodyOverflows(maxUnreadStreamBodySize) {
 			connectionClose = true
 		}
@@ -2814,25 +2813,26 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				break
 			}
 
+			// Draining an unread streamed body may block waiting for the client.
+			// Flush the response first so a handler that answered from the headers
+			// alone does not leave the client waiting for that answer. A fully
+			// consumed body can still batch pipelined responses in the writer.
+			unreadStreamBody := reqStream != nil && !reqStream.eof &&
+				(reqStream.contentLength == -1 || reqStream.totalBytesRead < reqStream.contentLength)
+			if unreadStreamBody || br == nil || br.Buffered() == 0 || connectionClose || (s.ReduceMemoryUsage && hijackHandler == nil) {
+				err = bw.Flush()
+				if err != nil {
+					break
+				}
+			}
+
 			// The response has now had its chance to consume the request stream
 			// (for example a body that streams straight from it). Discard what
 			// the handler left behind so it isn't parsed as the next request; if
 			// there is still too much on the wire, close the connection instead.
 			if reqStream != nil && !connectionClose && hijackHandler == nil &&
-				!reqStream.discard(maxUnreadStreamBodySize) {
+				(reqStream.bodyOverflows(maxUnreadStreamBodySize) || !reqStream.discard(maxUnreadStreamBodySize)) {
 				connectionClose = true
-			}
-
-			// Only flush the writer if we don't have another request in the pipeline.
-			// This is a big of an ugly optimization for https://www.techempower.com/benchmarks/
-			// This benchmark will send 16 pipelined requests. It is faster to pack as many responses
-			// in a TCP packet and send it back at once than waiting for a flush every request.
-			// In real world circumstances this behaviour could be argued as being wrong.
-			if br == nil || br.Buffered() == 0 || connectionClose || (s.ReduceMemoryUsage && hijackHandler == nil) {
-				err = bw.Flush()
-				if err != nil {
-					break
-				}
 			}
 			if connectionClose {
 				break
