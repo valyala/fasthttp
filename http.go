@@ -1227,8 +1227,8 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	// dynamic type set through SetBodyStream.
 	//
 	// The drain error isn't recorded here. A failed read leaves the connection
-	// mid-body, and the server's stream reports that to the connection itself,
-	// see requestStream.failed, where Request.Reset can't clear it.
+	// mid-body, and the server's stream records that itself, see
+	// requestStream.failed, where Request.Reset can't clear it.
 	if req.bodyStream != nil {
 		defer copyBodyStream(io.Discard, req.bodyStream) //nolint:errcheck
 	}

@@ -32,19 +32,18 @@ type requestStream struct {
 	// server loop once it has drained what the handler left unread, so a
 	// response body streaming from it must not release it.
 	releaseOnClose bool
-
-	// failed is where the server is told that a Read returned an error other
-	// than io.EOF. The stream is then at an unknown offset in the body, so the
-	// connection can't be reused, and a later Read that happens to succeed
-	// doesn't change that. It points at state owned by the connection rather
-	// than by the Request, which a handler can reset.
-	failed *bool
+	// failed is set once a Read returns an error other than io.EOF. The
+	// stream is then at an unknown offset in the body, so the connection can't
+	// be reused, and a later Read that happens to succeed doesn't change that.
+	// The server loop owns the stream, so a handler resetting the request
+	// can't clear it.
+	failed bool
 }
 
 func (rs *requestStream) Read(p []byte) (int, error) {
 	n, err := rs.read(p)
-	if err != nil && err != io.EOF && rs.failed != nil {
-		*rs.failed = true
+	if err != nil && err != io.EOF {
+		rs.failed = true
 	}
 	return n, err
 }
@@ -186,7 +185,7 @@ func releaseRequestStream(rs *requestStream) {
 	rs.totalBytesRead = 0
 	rs.chunkLeft = 0
 	rs.reader = nil
-	rs.failed = nil
+	rs.failed = false
 	rs.header = nil
 	rs.contentLength = 0
 	rs.eof = false

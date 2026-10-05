@@ -672,12 +672,6 @@ type RequestCtx struct {
 	connID           uint64
 	connRequestNum   uint64
 	hijackNoResponse bool
-
-	// Set by the request body stream when one of its reads fails, see
-	// requestStream.failed. It lives here rather than on Request so that the
-	// handler can't reset it before the server decides whether to keep the
-	// connection.
-	bodyStreamFailed bool
 }
 
 // EarlyHints allows the server to hint to the browser what resources a page would need
@@ -2722,15 +2716,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		}
 		ctx.time = reqTime
 
-		// A request stream whose read fails, e.g. on a malformed chunk while
-		// the multipart epilogue is drained, leaves the connection mid-body.
-		// Have it report that to ctx: Request.Reset in the handler releases the
-		// stream and clears the request, so neither can hold it.
-		ctx.bodyStreamFailed = false
-		if rs, ok := ctx.Request.bodyStream.(*requestStream); ok {
-			rs.failed = &ctx.bodyStreamFailed
-		}
-
 		// Capture the streamed request body reader, if any, before running the
 		// handler. The handler may return without reading all of it, or abandon
 		// it via CloseBodyStream; either way it is the server, not the handler,
@@ -2745,10 +2730,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		if continueReadingRequest {
 			s.Handler(ctx)
 		}
-
-		// Capture it now, before timeoutResponse swaps out ctx below, so the
-		// close decision still sees it.
-		bodyStreamFailed := ctx.bodyStreamFailed
 
 		timeoutResponse = ctx.timeoutResponse
 		if timeoutResponse != nil {
@@ -2793,7 +2774,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		connectionClose = connectionClose ||
 			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
 			ctx.Response.Header.ConnectionClose() ||
-			bodyStreamFailed ||
+			(reqStream != nil && reqStream.failed) ||
 			(s.CloseOnShutdown && s.stop.Load() == 1)
 
 		// If no response stream can consume the request body, a known-length

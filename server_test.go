@@ -2100,6 +2100,85 @@ func TestServerClosesAfterStreamedMultipartParseReadError(t *testing.T) {
 	}
 }
 
+func TestServerPreservesMultipartDrainErrorAcrossTimeoutHandler(t *testing.T) {
+	t.Parallel()
+
+	// TimeoutHandler returns while h keeps running on its own goroutine, so
+	// h's failed read of the body stream isn't synchronized with the server.
+	// The server must not look at the stream once the request has timed out,
+	// and the connection has to close without it.
+	form := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := fmt.Sprintf("%x\r\n%s\r\n", len(form), form) +
+		"\x00" + "0\r\n\r\n" + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\nHost: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Transfer-Encoding: chunked\r\n\r\n%s",
+		body,
+	)
+
+	var (
+		mu    sync.Mutex
+		paths []string
+	)
+	readDone := make(chan struct{})
+	release := make(chan struct{})
+	handlerDone := make(chan struct{})
+	h := func(ctx *RequestCtx) {
+		path := string(ctx.Path())
+		mu.Lock()
+		paths = append(paths, path)
+		mu.Unlock()
+		if path == "/first" {
+			_, _ = ctx.MultipartForm()
+			close(readDone)
+			// Wait past the timeout.
+			<-release
+			close(handlerDone)
+		}
+	}
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1,
+		Handler:                      TimeoutHandler(h, testTimeout(20*time.Millisecond), "timeout"),
+	}
+
+	_ = s.ServeConn(rw)
+
+	select {
+	case <-readDone:
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("timeout")
+	}
+	close(release)
+	select {
+	case <-handlerDone:
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("timeout")
+	}
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.StatusCode() != StatusRequestTimeout {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusRequestTimeout)
+	}
+	if !resp.ConnectionClose() {
+		t.Fatal("expecting 'Connection: close' response header")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
 func TestServerGetWithContent(t *testing.T) {
 	t.Parallel()
 
