@@ -2895,6 +2895,11 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	req.copyToSkipBody(&w.reqCopy)
 	swapRequestBody(req, &w.reqCopy)
 
+	if resp != nil {
+		w.respCopy.KeepBodyBuffer = resp.KeepBodyBuffer
+		swapResponseBody(resp, &w.respCopy)
+	}
+
 	// Put the request to outgoing queue
 	select {
 	case chs.chW <- w:
@@ -2904,6 +2909,9 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		select {
 		case chs.chW <- w:
 		case <-w.t.C:
+			if resp != nil {
+				swapResponseBody(resp, &w.respCopy)
+			}
 			c.releasePipelineWork(w)
 			return ErrTimeout
 		}
@@ -2936,6 +2944,8 @@ func (c *pipelineConnClient) acquirePipelineWork(timeout time.Duration) (w *pipe
 			done: make(chan struct{}, 1),
 		}
 	}
+	w.reqCopy.KeepBodyBuffer = false
+	w.respCopy.KeepBodyBuffer = false
 	if timeout > 0 {
 		if w.t == nil {
 			w.t = time.NewTimer(timeout)
@@ -2953,6 +2963,8 @@ func (c *pipelineConnClient) releasePipelineWork(w *pipelineWork) {
 	if w.t != nil {
 		w.t.Stop()
 	}
+	w.reqCopy.KeepBodyBuffer = false
+	w.respCopy.KeepBodyBuffer = false
 	w.reqCopy.Reset()
 	w.respCopy.Reset()
 	w.req = nil
