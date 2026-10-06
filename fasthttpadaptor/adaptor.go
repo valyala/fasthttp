@@ -650,33 +650,30 @@ func addTrailer(ctx *fasthttp.RequestCtx, name string, values []string) {
 // This enables support for http.ResponseController.SetReadDeadline.
 func (w *writer) SetReadDeadline(deadline time.Time) error {
 	w.mu.Lock()
-	ctx := w.ctx
-	w.mu.Unlock()
-	if ctx == nil {
+	defer w.mu.Unlock()
+	if w.ctx == nil {
 		return fasthttp.ErrNilConnection
 	}
-	return ctx.SetReadDeadline(deadline)
+	return w.ctx.SetReadDeadline(deadline)
 }
 
 // SetWriteDeadline sets the write deadline on the underlying connection.
 // This enables support for http.ResponseController.SetWriteDeadline.
 func (w *writer) SetWriteDeadline(deadline time.Time) error {
 	w.mu.Lock()
-	ctx := w.ctx
-	w.mu.Unlock()
-	if ctx == nil {
+	defer w.mu.Unlock()
+	if w.ctx == nil {
 		return fasthttp.ErrNilConnection
 	}
-	return ctx.SetWriteDeadline(deadline)
+	return w.ctx.SetWriteDeadline(deadline)
 }
 
 // SetDeadline sets the read and write deadlines on the underlying connection.
 func (w *writer) SetDeadline(deadline time.Time) error {
 	w.mu.Lock()
-	ctx := w.ctx
-	w.mu.Unlock()
-	if ctx == nil {
+	defer w.mu.Unlock()
+	if w.ctx == nil {
 		return fasthttp.ErrNilConnection
 	}
-	return ctx.SetDeadline(deadline)
+	return w.ctx.SetDeadline(deadline)
 }

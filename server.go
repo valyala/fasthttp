@@ -27,6 +27,10 @@ var ErrAlreadyServing = errors.New("fasthttp: server is already serving connecti
 // ErrNilConnection is returned when attempting to set deadlines on a nil connection.
 var ErrNilConnection = errors.New("fasthttp: nil connection")
 
+// ErrDeadlineUpdatesDisabled is returned when attempting to set deadlines on a RequestCtx
+// whose deadline updates have been disabled (such as a timed-out handler's context).
+var ErrDeadlineUpdatesDisabled = errors.New("fasthttp: deadline updates disabled")
+
 // ServeConn serves HTTP requests from the given connection
 // using the given handler.
 //
@@ -676,6 +680,7 @@ type RequestCtx struct {
 	connRequestNum          uint64
 	hijackNoResponse        bool
 	deadlineMu              sync.Mutex
+	deadlineUpdatesDisabled atomic.Bool
 	handlerReadDeadlineSet  atomic.Bool
 	handlerWriteDeadlineSet atomic.Bool
 }
@@ -932,6 +937,9 @@ func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
+	if ctx.deadlineUpdatesDisabled.Load() {
+		return ErrDeadlineUpdatesDisabled
+	}
 	err := ctx.c.SetReadDeadline(deadline)
 	if err == nil {
 		ctx.handlerReadDeadlineSet.Store(true)
@@ -946,6 +954,9 @@ func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
+	if ctx.deadlineUpdatesDisabled.Load() {
+		return ErrDeadlineUpdatesDisabled
+	}
 	err := ctx.c.SetWriteDeadline(deadline)
 	if err == nil {
 		ctx.handlerWriteDeadlineSet.Store(true)
@@ -959,6 +970,9 @@ func (ctx *RequestCtx) SetDeadline(deadline time.Time) error {
 	defer ctx.deadlineMu.Unlock()
 	if ctx.c == nil {
 		return ErrNilConnection
+	}
+	if ctx.deadlineUpdatesDisabled.Load() {
+		return ErrDeadlineUpdatesDisabled
 	}
 	err := ctx.c.SetDeadline(deadline)
 	if err == nil {
@@ -980,6 +994,7 @@ func (ctx *RequestCtx) reset() {
 	ctx.time = zeroTime
 	ctx.deadlineMu.Lock()
 	ctx.c = nil
+	ctx.deadlineUpdatesDisabled.Store(false)
 	ctx.handlerReadDeadlineSet.Store(false)
 	ctx.handlerWriteDeadlineSet.Store(false)
 	ctx.deadlineMu.Unlock()
@@ -1806,6 +1821,7 @@ func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 	respCopy := &Response{}
 	resp.CopyTo(respCopy)
 	ctx.timeoutResponse = respCopy
+	ctx.deadlineUpdatesDisabled.Store(true)
 }
 
 // NextProto adds nph to be processed when key is negotiated when TLS
@@ -2802,8 +2818,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.time = reqTime
 			timeoutResponse.CopyTo(&ctx.Response)
 
+			oldCtx.deadlineUpdatesDisabled.Store(true)
 			oldCtx.deadlineMu.Lock()
-			oldCtx.c = nil
 			if oldCtx.handlerReadDeadlineSet.Load() {
 				ctx.handlerReadDeadlineSet.Store(true)
 			}

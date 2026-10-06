@@ -6969,3 +6969,83 @@ func TestServerPipelinedWriteDeadline(t *testing.T) {
 		t.Fatalf("unexpected response 2 body: %q", string(resp2.Body()))
 	}
 }
+
+func TestServerTimeoutHandlerConcurrentAddressesAndDeadlines(t *testing.T) {
+	t.Parallel()
+
+	timeoutFinished := make(chan struct{})
+	s := &Server{
+		Handler: TimeoutHandler(func(ctx *RequestCtx) {
+			// Sleep until timeout has fired and server processed it
+			time.Sleep(30 * time.Millisecond)
+
+			logger := ctx.Logger()
+			// Concurrently call RemoteAddr, LocalAddr, Logger, and deadlines
+			var wg sync.WaitGroup
+			for range 5 {
+				wg.Go(func() {
+					remote := ctx.RemoteAddr()
+					if remote == nil || remote.String() == "0.0.0.0:0" {
+						t.Errorf("unexpected RemoteAddr: %v", remote)
+					}
+					local := ctx.LocalAddr()
+					if local == nil || local.String() == "0.0.0.0:0" {
+						t.Errorf("unexpected LocalAddr: %v", local)
+					}
+					ip := ctx.RemoteIP()
+					if ip == nil || ip.IsUnspecified() {
+						t.Errorf("unexpected RemoteIP: %v", ip)
+					}
+					logger.Printf("test log after timeout")
+
+					err := ctx.SetReadDeadline(time.Now().Add(time.Second))
+					if !errors.Is(err, ErrDeadlineUpdatesDisabled) {
+						t.Errorf("expected ErrDeadlineUpdatesDisabled, got %v", err)
+					}
+					err = ctx.SetWriteDeadline(time.Now().Add(time.Second))
+					if !errors.Is(err, ErrDeadlineUpdatesDisabled) {
+						t.Errorf("expected ErrDeadlineUpdatesDisabled, got %v", err)
+					}
+					err = ctx.SetDeadline(time.Now().Add(time.Second))
+					if !errors.Is(err, ErrDeadlineUpdatesDisabled) {
+						t.Errorf("expected ErrDeadlineUpdatesDisabled, got %v", err)
+					}
+				})
+			}
+			wg.Wait()
+			close(timeoutFinished)
+		}, 10*time.Millisecond, "timeout"),
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go s.Serve(ln) //nolint:errcheck
+	defer ln.Close()
+
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	br := bufio.NewReader(c)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("reading response: %v", err)
+	}
+	if resp.StatusCode() != StatusRequestTimeout {
+		t.Fatalf("unexpected status code: %d", resp.StatusCode())
+	}
+
+	select {
+	case <-timeoutFinished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed-out handler did not finish in time")
+	}
+}
