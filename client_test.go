@@ -6482,4 +6482,3 @@ func TestClientDoKeepBodyBuffer(t *testing.T) {
 		t.Fatalf("expected resp.body to be reused across requests")
 	}
 }
-

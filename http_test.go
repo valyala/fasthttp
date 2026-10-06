@@ -3709,8 +3709,13 @@ func TestKeepBodyBufferWithPoolSizeLimit(t *testing.T) {
 	})
 
 	t.Run("PipelineClientDoTimeout", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			_, _ = w.Write(payload)
+		smallPayload := []byte("small-16-bytes--")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/small" {
+				_, _ = w.Write(smallPayload)
+			} else {
+				_, _ = w.Write(payload)
+			}
 		}))
 		t.Cleanup(server.Close)
 
@@ -3731,8 +3736,62 @@ func TestKeepBodyBufferWithPoolSizeLimit(t *testing.T) {
 		if !resp.KeepBodyBuffer {
 			t.Fatalf("expected resp.KeepBodyBuffer to remain true after PipelineClient.DoTimeout")
 		}
-		if resp.body == nil || cap(resp.body.B) <= 1024 {
+		buf := resp.body
+		if buf == nil || cap(buf.B) <= 1024 {
 			t.Fatalf("expected resp.body capacity > 1024, got %v", resp.body)
+		}
+		initialCap := cap(buf.B)
+
+		// Call again with a smaller response to ensure the retained buffer is kept and not replaced.
+		req.SetRequestURI(server.URL + "/small")
+		if err := client.DoTimeout(&req, resp, 5*time.Second); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		if !resp.KeepBodyBuffer {
+			t.Fatalf("expected resp.KeepBodyBuffer to remain true")
+		}
+		if resp.body != buf {
+			t.Fatalf("expected resp.body pointer to stay identical across calls, got %p != %p", resp.body, buf)
+		}
+		if cap(resp.body.B) != initialCap {
+			t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(resp.body.B))
+		}
+		if !bytes.Equal(resp.Body(), smallPayload) {
+			t.Fatalf("unexpected response body: %q", resp.Body())
+		}
+
+		// Third call with DoDeadline.
+		req.SetRequestURI(server.URL)
+		if err := client.DoDeadline(&req, resp, time.Now().Add(5*time.Second)); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		if resp.body != buf {
+			t.Fatalf("expected resp.body pointer to stay identical after DoDeadline, got %p != %p", resp.body, buf)
+		}
+		if !bytes.Equal(resp.Body(), payload) {
+			t.Fatalf("unexpected response body: %q", resp.Body())
+		}
+
+		// Pre-retained 64 KB buffer should be preserved across small responses.
+		resp64 := AcquireResponse()
+		defer ReleaseResponse(resp64)
+		resp64.KeepBodyBuffer = true
+		resp64.SetBody(bytes.Repeat([]byte("z"), 65536))
+		buf64 := resp64.body
+		cap64 := cap(buf64.B)
+
+		req.SetRequestURI(server.URL + "/small")
+		if err := client.DoTimeout(&req, resp64, 5*time.Second); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		if resp64.body != buf64 {
+			t.Fatalf("expected resp64.body pointer to be preserved, got %p != %p", resp64.body, buf64)
+		}
+		if cap(resp64.body.B) != cap64 {
+			t.Fatalf("expected capacity %d to be preserved, got %d", cap64, cap(resp64.body.B))
+		}
+		if !bytes.Equal(resp64.Body(), smallPayload) {
+			t.Fatalf("unexpected response body: %q", resp64.Body())
 		}
 	})
 }
