@@ -24,6 +24,13 @@ var errNoCertOrKeyProvided = errors.New("cert or key has not provided")
 // Deprecated: ErrAlreadyServing is never returned from Serve. See issue #633.
 var ErrAlreadyServing = errors.New("fasthttp: server is already serving connections")
 
+// ErrNilConnection is returned when attempting to set deadlines on a nil connection.
+var ErrNilConnection = errors.New("fasthttp: nil connection")
+
+// ErrDeadlineUpdatesDisabled is returned when attempting to set deadlines on a RequestCtx
+// whose deadline updates have been disabled (such as a timed-out handler's context).
+var ErrDeadlineUpdatesDisabled = errors.New("fasthttp: deadline updates disabled")
+
 // ServeConn serves HTTP requests from the given connection
 // using the given handler.
 //
@@ -669,9 +676,13 @@ type RequestCtx struct {
 	// Copying Request by value is forbidden. Use pointer to Request instead.
 	Request Request
 
-	connID           uint64
-	connRequestNum   uint64
-	hijackNoResponse bool
+	connID                  uint64
+	connRequestNum          uint64
+	hijackNoResponse        bool
+	deadlineMu              sync.Mutex
+	deadlineUpdatesDisabled atomic.Bool
+	handlerReadDeadlineSet  atomic.Bool
+	handlerWriteDeadlineSet atomic.Bool
 }
 
 // EarlyHints allows the server to hint to the browser what resources a page would need
@@ -919,6 +930,58 @@ func (ctx *RequestCtx) Conn() net.Conn {
 	return ctx.c
 }
 
+// SetReadDeadline sets the read deadline on the underlying connection.
+func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
+	ctx.deadlineMu.Lock()
+	defer ctx.deadlineMu.Unlock()
+	if ctx.c == nil {
+		return ErrNilConnection
+	}
+	if ctx.deadlineUpdatesDisabled.Load() {
+		return ErrDeadlineUpdatesDisabled
+	}
+	err := ctx.c.SetReadDeadline(deadline)
+	if err == nil {
+		ctx.handlerReadDeadlineSet.Store(true)
+	}
+	return err
+}
+
+// SetWriteDeadline sets the write deadline on the underlying connection.
+func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
+	ctx.deadlineMu.Lock()
+	defer ctx.deadlineMu.Unlock()
+	if ctx.c == nil {
+		return ErrNilConnection
+	}
+	if ctx.deadlineUpdatesDisabled.Load() {
+		return ErrDeadlineUpdatesDisabled
+	}
+	err := ctx.c.SetWriteDeadline(deadline)
+	if err == nil {
+		ctx.handlerWriteDeadlineSet.Store(true)
+	}
+	return err
+}
+
+// SetDeadline sets the read and write deadlines associated with the underlying connection.
+func (ctx *RequestCtx) SetDeadline(deadline time.Time) error {
+	ctx.deadlineMu.Lock()
+	defer ctx.deadlineMu.Unlock()
+	if ctx.c == nil {
+		return ErrNilConnection
+	}
+	if ctx.deadlineUpdatesDisabled.Load() {
+		return ErrDeadlineUpdatesDisabled
+	}
+	err := ctx.c.SetDeadline(deadline)
+	if err == nil {
+		ctx.handlerReadDeadlineSet.Store(true)
+		ctx.handlerWriteDeadlineSet.Store(true)
+	}
+	return err
+}
+
 func (ctx *RequestCtx) reset() {
 	ctx.Request.Reset()
 	ctx.Response.Reset()
@@ -929,7 +992,12 @@ func (ctx *RequestCtx) reset() {
 	ctx.connTime = zeroTime
 	ctx.remoteAddr = nil
 	ctx.time = zeroTime
+	ctx.deadlineMu.Lock()
 	ctx.c = nil
+	ctx.deadlineUpdatesDisabled.Store(false)
+	ctx.handlerReadDeadlineSet.Store(false)
+	ctx.handlerWriteDeadlineSet.Store(false)
+	ctx.deadlineMu.Unlock()
 
 	// Don't reset ctx.s!
 	// We have a pool per server so the next time this ctx is used it
@@ -1753,6 +1821,7 @@ func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 	respCopy := &Response{}
 	resp.CopyTo(respCopy)
 	ctx.timeoutResponse = respCopy
+	ctx.deadlineUpdatesDisabled.Store(true)
 }
 
 // NextProto adds nph to be processed when key is negotiated when TLS
@@ -2742,11 +2811,22 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				br = nil
 			}
 			reqStream = nil
+			oldCtx := ctx
 			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
 			ctx = s.acquireCtx(c)
 			ctx.connTime = connTime
 			ctx.time = reqTime
 			timeoutResponse.CopyTo(&ctx.Response)
+
+			oldCtx.deadlineUpdatesDisabled.Store(true)
+			oldCtx.deadlineMu.Lock()
+			if oldCtx.handlerReadDeadlineSet.Load() {
+				ctx.handlerReadDeadlineSet.Store(true)
+			}
+			if oldCtx.handlerWriteDeadlineSet.Load() {
+				ctx.handlerWriteDeadlineSet.Store(true)
+			}
+			oldCtx.deadlineMu.Unlock()
 		}
 
 		if ctx.IsHead() {
@@ -2758,18 +2838,26 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		hijackNoResponse = ctx.hijackNoResponse && hijackHandler != nil
 		ctx.hijackNoResponse = false
 
-		if writeTimeout > 0 {
-			if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-				break
-			}
-			previousWriteTimeout = writeTimeout
-		} else if previousWriteTimeout > 0 {
-			// We don't want a write timeout but we previously set one, remove it.
-			if err = c.SetWriteDeadline(zeroTime); err != nil {
-				break
-			}
+		ctx.deadlineMu.Lock()
+		if ctx.handlerWriteDeadlineSet.Load() {
 			previousWriteTimeout = 0
+		} else {
+			if writeTimeout > 0 {
+				if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+					ctx.deadlineMu.Unlock()
+					break
+				}
+				previousWriteTimeout = writeTimeout
+			} else if previousWriteTimeout > 0 {
+				// We don't want a write timeout but we previously set one, remove it.
+				if err = c.SetWriteDeadline(zeroTime); err != nil {
+					ctx.deadlineMu.Unlock()
+					break
+				}
+				previousWriteTimeout = 0
+			}
 		}
+		ctx.deadlineMu.Unlock()
 
 		connectionClose = connectionClose ||
 			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
@@ -2819,7 +2907,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			// consumed body can still batch pipelined responses in the writer.
 			unreadStreamBody := reqStream != nil && !reqStream.eof &&
 				(reqStream.contentLength == -1 || reqStream.totalBytesRead < reqStream.contentLength)
-			if unreadStreamBody || br == nil || br.Buffered() == 0 || connectionClose || (s.ReduceMemoryUsage && hijackHandler == nil) {
+			// Only flush the writer if we don't have another request in the pipeline.
+			// This is a big of an ugly optimization for https://www.techempower.com/benchmarks/
+			// This benchmark will send 16 pipelined requests. It is faster to pack as many responses
+			// in a TCP packet and send it back at once than waiting for a flush every request.
+			// In real world circumstances this behaviour could be argued as being wrong.
+			if unreadStreamBody || br == nil || br.Buffered() == 0 || connectionClose ||
+				ctx.handlerWriteDeadlineSet.Load() || (s.ReduceMemoryUsage && hijackHandler == nil) {
 				err = bw.Flush()
 				if err != nil {
 					break
@@ -2877,6 +2971,30 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		}
 		ctx.Request.bodyStream = nil
 		ctx.Request.serverStream = nil
+
+		ctx.deadlineMu.Lock()
+		if ctx.handlerReadDeadlineSet.Load() {
+			if err = c.SetReadDeadline(zeroTime); err != nil {
+				ctx.deadlineMu.Unlock()
+				break
+			}
+			ctx.handlerReadDeadlineSet.Store(false)
+		}
+		if ctx.handlerWriteDeadlineSet.Load() {
+			if bw != nil && bw.Buffered() > 0 {
+				if err = bw.Flush(); err != nil {
+					ctx.deadlineMu.Unlock()
+					break
+				}
+			}
+			if err = c.SetWriteDeadline(zeroTime); err != nil {
+				ctx.deadlineMu.Unlock()
+				break
+			}
+			ctx.handlerWriteDeadlineSet.Store(false)
+			previousWriteTimeout = 0
+		}
+		ctx.deadlineMu.Unlock()
 
 		idleConnTime.Store(reqSecond)
 		s.setState(c, StateIdle)
