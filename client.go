@@ -1285,7 +1285,7 @@ func responseBodyDrainSize(maxBodySize int) int {
 func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
 	resp := AcquireResponse()
 	bodyBuf := resp.bodyBuffer()
-	resp.keepBodyBuffer = true
+	resp.KeepBodyBuffer = true
 	resp.preserveBodyBuffer = true
 	oldBody := bodyBuf.B
 	bodyBuf.B = dst
@@ -1298,7 +1298,7 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	body = bodyBuf.B
 	bodyBuf.B = oldBody
 	resp.preserveBodyBuffer = false
-	resp.keepBodyBuffer = false
+	resp.KeepBodyBuffer = false
 	ReleaseResponse(resp)
 
 	return statusCode, body, err
@@ -1511,6 +1511,8 @@ func AcquireRequest() *Request {
 // It is forbidden accessing req and/or its' members after returning
 // it to request pool.
 func ReleaseRequest(req *Request) {
+	req.KeepBodyBuffer = false
+	req.keepBodyBuffer = false
 	req.Reset()
 	requestPool.Put(req)
 }
@@ -1533,6 +1535,8 @@ func AcquireResponse() *Response {
 // It is forbidden accessing resp and/or its' members after returning
 // it to response pool.
 func ReleaseResponse(resp *Response) {
+	resp.KeepBodyBuffer = false
+	resp.keepBodyBuffer = false
 	resp.Reset()
 	responsePool.Put(resp)
 }
@@ -2891,6 +2895,11 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	req.copyToSkipBody(&w.reqCopy)
 	swapRequestBody(req, &w.reqCopy)
 
+	if resp != nil {
+		w.respCopy.KeepBodyBuffer = resp.KeepBodyBuffer
+		swapResponseBody(resp, &w.respCopy)
+	}
+
 	// Put the request to outgoing queue
 	select {
 	case chs.chW <- w:
@@ -2900,6 +2909,9 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		select {
 		case chs.chW <- w:
 		case <-w.t.C:
+			if resp != nil {
+				swapResponseBody(resp, &w.respCopy)
+			}
 			c.releasePipelineWork(w)
 			return ErrTimeout
 		}
@@ -2932,6 +2944,8 @@ func (c *pipelineConnClient) acquirePipelineWork(timeout time.Duration) (w *pipe
 			done: make(chan struct{}, 1),
 		}
 	}
+	w.reqCopy.KeepBodyBuffer = false
+	w.respCopy.KeepBodyBuffer = false
 	if timeout > 0 {
 		if w.t == nil {
 			w.t = time.NewTimer(timeout)
@@ -2949,6 +2963,8 @@ func (c *pipelineConnClient) releasePipelineWork(w *pipelineWork) {
 	if w.t != nil {
 		w.t.Stop()
 	}
+	w.reqCopy.KeepBodyBuffer = false
+	w.respCopy.KeepBodyBuffer = false
 	w.reqCopy.Reset()
 	w.respCopy.Reset()
 	w.req = nil

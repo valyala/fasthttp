@@ -6416,3 +6416,69 @@ func TestHostClientPreservesNoDefaultContentType(t *testing.T) {
 		}
 	}
 }
+
+func TestReleaseKeepBodyBuffer(t *testing.T) {
+	t.Parallel()
+
+	req := AcquireRequest()
+	req.KeepBodyBuffer = true
+	req.SetBodyString("test request")
+	ReleaseRequest(req)
+
+	req2 := AcquireRequest()
+	defer ReleaseRequest(req2)
+	if req2.KeepBodyBuffer {
+		t.Fatalf("expected AcquireRequest to return request with KeepBodyBuffer=false")
+	}
+
+	resp := AcquireResponse()
+	resp.KeepBodyBuffer = true
+	resp.SetBodyString("test response")
+	ReleaseResponse(resp)
+
+	resp2 := AcquireResponse()
+	defer ReleaseResponse(resp2)
+	if resp2.KeepBodyBuffer {
+		t.Fatalf("expected AcquireResponse to return response with KeepBodyBuffer=false")
+	}
+}
+
+func TestClientDoKeepBodyBuffer(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("response payload from server"))
+	}))
+	t.Cleanup(server.Close)
+
+	var client Client
+	t.Cleanup(client.CloseIdleConnections)
+
+	resp := AcquireResponse()
+	defer ReleaseResponse(resp)
+	resp.KeepBodyBuffer = true
+
+	var req Request
+	req.SetRequestURI(server.URL)
+
+	if err := client.Do(&req, resp); err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if string(resp.Body()) != "response payload from server" {
+		t.Fatalf("unexpected response: %q", resp.Body())
+	}
+	buf := resp.body
+	if buf == nil {
+		t.Fatalf("expected non-nil resp.body")
+	}
+
+	if err := client.Do(&req, resp); err != nil {
+		t.Fatalf("unexpected request error: %v", err)
+	}
+	if string(resp.Body()) != "response payload from server" {
+		t.Fatalf("unexpected response: %q", resp.Body())
+	}
+	if resp.body != buf {
+		t.Fatalf("expected resp.body to be reused across requests")
+	}
+}

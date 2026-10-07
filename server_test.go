@@ -6813,3 +6813,148 @@ func TestServerKeepsPrefetchedBodyWhenHandlerResetsRequest(t *testing.T) {
 		})
 	}
 }
+
+func TestServerKeepBodyBufferWithPoolSizeLimit(t *testing.T) {
+	oldRequestLimit := atomic.LoadInt64(&requestBodyPoolSizeLimit)
+	oldResponseLimit := atomic.LoadInt64(&responseBodyPoolSizeLimit)
+	SetBodySizePoolLimit(1024, 1024)
+	t.Cleanup(func() {
+		SetBodySizePoolLimit(int(oldRequestLimit), int(oldResponseLimit))
+	})
+
+	payload := bytes.Repeat([]byte("x"), 2048)
+
+	s := &Server{
+		ReduceMemoryUsage: false,
+	}
+
+	t.Run("DefaultServerReuseAppliesPoolLimit", func(t *testing.T) {
+		ctx := s.acquireCtx(nil)
+		defer s.releaseCtx(ctx)
+
+		if ctx.Request.KeepBodyBuffer || ctx.Response.KeepBodyBuffer {
+			t.Fatalf("expected KeepBodyBuffer to be false by default on acquired ctx")
+		}
+
+		ctx.Request.SetBody(payload)
+		ctx.Response.SetBody(payload)
+		if ctx.Request.body == nil || cap(ctx.Request.body.B) <= 1024 {
+			t.Fatalf("expected request buffer capacity > 1024")
+		}
+		if ctx.Response.body == nil || cap(ctx.Response.body.B) <= 1024 {
+			t.Fatalf("expected response buffer capacity > 1024")
+		}
+
+		ctx.Request.Reset()
+		ctx.Response.Reset()
+
+		if ctx.Request.body != nil {
+			t.Fatalf("expected ctx.Request.body to be nil after Reset when exceeding pool size limit")
+		}
+		if ctx.Response.body != nil {
+			t.Fatalf("expected ctx.Response.body to be nil after Reset when exceeding pool size limit")
+		}
+
+		smallPayload := bytes.Repeat([]byte("y"), 512)
+		ctx.Request.SetBody(smallPayload)
+		ctx.Response.SetBody(smallPayload)
+		reqBuf := ctx.Request.body
+		respBuf := ctx.Response.body
+
+		ctx.Request.Reset()
+		ctx.Response.Reset()
+
+		if ctx.Request.body == nil || ctx.Request.body != reqBuf {
+			t.Fatalf("expected ctx.Request.body to be preserved across Reset when within pool limit")
+		}
+		if ctx.Response.body == nil || ctx.Response.body != respBuf {
+			t.Fatalf("expected ctx.Response.body to be preserved across Reset when within pool limit")
+		}
+	})
+
+	t.Run("ExplicitHandlerOptInRetainsLargeBuffer", func(t *testing.T) {
+		ctx := s.acquireCtx(nil)
+		defer s.releaseCtx(ctx)
+
+		ctx.Request.KeepBodyBuffer = true
+		ctx.Response.KeepBodyBuffer = true
+
+		ctx.Request.SetBody(payload)
+		ctx.Response.SetBody(payload)
+		reqBuf := ctx.Request.body
+		respBuf := ctx.Response.body
+
+		ctx.Request.Reset()
+		ctx.Response.Reset()
+
+		if ctx.Request.body == nil || ctx.Request.body != reqBuf {
+			t.Fatalf("expected ctx.Request.body to be retained when handler explicitly set KeepBodyBuffer=true")
+		}
+		if ctx.Response.body == nil || ctx.Response.body != respBuf {
+			t.Fatalf("expected ctx.Response.body to be retained when handler explicitly set KeepBodyBuffer=true")
+		}
+	})
+}
+
+func TestServerReduceMemoryUsageKeepBodyBufferCleanup(t *testing.T) {
+	s := &Server{
+		ReduceMemoryUsage: true,
+	}
+
+	ctx := s.acquireCtx(nil)
+	ctx.Request.KeepBodyBuffer = true
+	ctx.Response.KeepBodyBuffer = true
+	ctx.Request.SetBody([]byte("test request body"))
+	ctx.Response.SetBody([]byte("test response body"))
+
+	if ctx.Request.body == nil || ctx.Response.body == nil {
+		t.Fatalf("expected non-nil body buffers before release")
+	}
+
+	s.releaseCtx(ctx)
+
+	ctx2 := s.acquireCtx(nil)
+	defer s.releaseCtx(ctx2)
+
+	if ctx2.Request.body != nil {
+		t.Fatalf("expected ctx2.Request.body to be nil after release with ReduceMemoryUsage=true")
+	}
+	if ctx2.Response.body != nil {
+		t.Fatalf("expected ctx2.Response.body to be nil after release with ReduceMemoryUsage=true")
+	}
+	if ctx2.Request.KeepBodyBuffer {
+		t.Fatalf("expected ctx2.Request.KeepBodyBuffer to be false")
+	}
+	if ctx2.Response.KeepBodyBuffer {
+		t.Fatalf("expected ctx2.Response.KeepBodyBuffer to be false")
+	}
+}
+
+func TestServerReduceMemoryUsageKeepBodyBufferConnectionLifecycle(t *testing.T) {
+	var handledCtx *RequestCtx
+	s := &Server{
+		ReduceMemoryUsage: true,
+		Handler: func(ctx *RequestCtx) {
+			handledCtx = ctx
+			ctx.Request.KeepBodyBuffer = true
+			ctx.Response.KeepBodyBuffer = true
+			ctx.SetBodyString("response content")
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 12\r\n\r\nrequest body")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if handledCtx == nil {
+		t.Fatalf("handler was not invoked")
+	}
+	if handledCtx.Request.body != nil {
+		t.Fatalf("expected handledCtx.Request.body to be nil after connection closed")
+	}
+	if handledCtx.Response.body != nil {
+		t.Fatalf("expected handledCtx.Response.body to be nil after connection closed")
+	}
+}

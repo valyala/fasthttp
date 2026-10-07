@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -3476,6 +3477,323 @@ func TestRequestRawBodyReset(t *testing.T) {
 	r.ResetBody()
 
 	testBodyWriteTo(t, &r, "", true)
+}
+
+func TestResponseKeepBodyBuffer(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	if resp.KeepBodyBuffer {
+		t.Fatalf("expected KeepBodyBuffer to be false by default")
+	}
+	resp.SetBodyString("foobar")
+	if resp.body == nil {
+		t.Fatalf("expected non-nil resp.body")
+	}
+	resp.ResetBody()
+	if resp.body != nil {
+		t.Fatalf("expected nil resp.body after ResetBody when KeepBodyBuffer is false")
+	}
+
+	resp.KeepBodyBuffer = true
+	resp.SetBodyString("foobar-large-buffer-content")
+	buf := resp.body
+	if buf == nil {
+		t.Fatalf("expected non-nil resp.body")
+	}
+	initialCap := cap(buf.B)
+
+	resp.ResetBody()
+	if resp.body == nil {
+		t.Fatalf("expected non-nil resp.body after ResetBody with KeepBodyBuffer=true")
+	}
+	if len(resp.Body()) != 0 {
+		t.Fatalf("expected empty body after ResetBody, got %q", resp.Body())
+	}
+	if cap(resp.body.B) != initialCap {
+		t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(resp.body.B))
+	}
+
+	resp.SetBodyString("new-content")
+	resp.Reset()
+	if resp.body == nil {
+		t.Fatalf("expected non-nil resp.body after Reset with KeepBodyBuffer=true")
+	}
+	if len(resp.Body()) != 0 {
+		t.Fatalf("expected empty body after Reset, got %q", resp.Body())
+	}
+	if cap(resp.body.B) != initialCap {
+		t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(resp.body.B))
+	}
+}
+
+func TestRequestKeepBodyBuffer(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	if req.KeepBodyBuffer {
+		t.Fatalf("expected KeepBodyBuffer to be false by default")
+	}
+	req.SetBodyString("foobar")
+	if req.body == nil {
+		t.Fatalf("expected non-nil req.body")
+	}
+	req.ResetBody()
+	if req.body != nil {
+		t.Fatalf("expected nil req.body after ResetBody when KeepBodyBuffer is false")
+	}
+
+	req.KeepBodyBuffer = true
+	req.SetBodyString("foobar-large-buffer-content")
+	buf := req.body
+	if buf == nil {
+		t.Fatalf("expected non-nil req.body")
+	}
+	initialCap := cap(buf.B)
+
+	req.ResetBody()
+	if req.body == nil {
+		t.Fatalf("expected non-nil req.body after ResetBody with KeepBodyBuffer=true")
+	}
+	if len(req.Body()) != 0 {
+		t.Fatalf("expected empty body after ResetBody, got %q", req.Body())
+	}
+	if cap(req.body.B) != initialCap {
+		t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(req.body.B))
+	}
+
+	req.SetBodyString("new-content")
+	req.Reset()
+	if req.body == nil {
+		t.Fatalf("expected non-nil req.body after Reset with KeepBodyBuffer=true")
+	}
+	if len(req.Body()) != 0 {
+		t.Fatalf("expected empty body after Reset, got %q", req.Body())
+	}
+	if cap(req.body.B) != initialCap {
+		t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(req.body.B))
+	}
+}
+
+func TestKeepBodyBufferCopyTo(t *testing.T) {
+	t.Parallel()
+
+	// Destination KeepBodyBuffer should remain unchanged after CopyTo
+	var req1, req2 Request
+	req1.KeepBodyBuffer = false
+	req2.KeepBodyBuffer = true
+	req1.CopyTo(&req2)
+	if !req2.KeepBodyBuffer {
+		t.Fatalf("expected req2.KeepBodyBuffer to remain true when copying from req with KeepBodyBuffer=false")
+	}
+
+	req1.KeepBodyBuffer = true
+	req2.KeepBodyBuffer = false
+	req1.CopyTo(&req2)
+	if req2.KeepBodyBuffer {
+		t.Fatalf("expected req2.KeepBodyBuffer to remain false when copying from req with KeepBodyBuffer=true")
+	}
+
+	var resp1, resp2 Response
+	resp1.KeepBodyBuffer = false
+	resp2.KeepBodyBuffer = true
+	resp1.CopyTo(&resp2)
+	if !resp2.KeepBodyBuffer {
+		t.Fatalf("expected resp2.KeepBodyBuffer to remain true when copying from resp with KeepBodyBuffer=false")
+	}
+
+	resp1.KeepBodyBuffer = true
+	resp2.KeepBodyBuffer = false
+	resp1.CopyTo(&resp2)
+	if resp2.KeepBodyBuffer {
+		t.Fatalf("expected resp2.KeepBodyBuffer to remain false when copying from resp with KeepBodyBuffer=true")
+	}
+}
+
+func TestKeepBodyBufferWithPoolSizeLimit(t *testing.T) {
+	oldRequestLimit := atomic.LoadInt64(&requestBodyPoolSizeLimit)
+	oldResponseLimit := atomic.LoadInt64(&responseBodyPoolSizeLimit)
+	SetBodySizePoolLimit(1024, 1024)
+	t.Cleanup(func() {
+		SetBodySizePoolLimit(int(oldRequestLimit), int(oldResponseLimit))
+	})
+
+	payload := bytes.Repeat([]byte("x"), 2048)
+
+	t.Run("Response", func(t *testing.T) {
+		var resp Response
+		resp.KeepBodyBuffer = true
+		resp.SetBody(payload)
+		buf := resp.body
+		if buf == nil || cap(buf.B) <= 1024 {
+			t.Fatalf("expected resp.body capacity > 1024, got %v", buf)
+		}
+
+		resp.Reset()
+		if resp.body == nil {
+			t.Fatalf("expected resp.body to be retained after Reset when KeepBodyBuffer=true")
+		}
+		if resp.body != buf {
+			t.Fatalf("expected same resp.body buffer instance after Reset")
+		}
+		if cap(resp.body.B) <= 1024 {
+			t.Fatalf("expected capacity to be preserved, got %d", cap(resp.body.B))
+		}
+
+		var defaultResp Response
+		defaultResp.SetBody(payload)
+		defaultResp.Reset()
+		if defaultResp.body != nil {
+			t.Fatalf("expected defaultResp.body to be nil after Reset when KeepBodyBuffer=false and limit exceeded")
+		}
+	})
+
+	t.Run("Request", func(t *testing.T) {
+		var req Request
+		req.KeepBodyBuffer = true
+		req.SetBody(payload)
+		buf := req.body
+		if buf == nil || cap(buf.B) <= 1024 {
+			t.Fatalf("expected req.body capacity > 1024, got %v", buf)
+		}
+
+		req.Reset()
+		if req.body == nil {
+			t.Fatalf("expected req.body to be retained after Reset when KeepBodyBuffer=true")
+		}
+		if req.body != buf {
+			t.Fatalf("expected same req.body buffer instance after Reset")
+		}
+		if cap(req.body.B) <= 1024 {
+			t.Fatalf("expected capacity to be preserved, got %d", cap(req.body.B))
+		}
+
+		var defaultReq Request
+		defaultReq.SetBody(payload)
+		defaultReq.Reset()
+		if defaultReq.body != nil {
+			t.Fatalf("expected defaultReq.body to be nil after Reset when KeepBodyBuffer=false and limit exceeded")
+		}
+	})
+
+	t.Run("ClientDo", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write(payload)
+		}))
+		t.Cleanup(server.Close)
+
+		var client Client
+		t.Cleanup(client.CloseIdleConnections)
+
+		resp := AcquireResponse()
+		defer ReleaseResponse(resp)
+		resp.KeepBodyBuffer = true
+
+		var req Request
+		req.SetRequestURI(server.URL)
+
+		if err := client.Do(&req, resp); err != nil {
+			t.Fatalf("unexpected request error: %v", err)
+		}
+		buf := resp.body
+		if buf == nil || cap(buf.B) <= 1024 {
+			t.Fatalf("expected resp.body capacity > 1024, got %v", buf)
+		}
+
+		if err := client.Do(&req, resp); err != nil {
+			t.Fatalf("unexpected request error: %v", err)
+		}
+		if resp.body != buf {
+			t.Fatalf("expected resp.body to be reused across requests even with pool limit")
+		}
+	})
+
+	t.Run("PipelineClientDoTimeout", func(t *testing.T) {
+		smallPayload := []byte("small-16-bytes--")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/small" {
+				_, _ = w.Write(smallPayload)
+			} else {
+				_, _ = w.Write(payload)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		client := &PipelineClient{
+			Addr: strings.TrimPrefix(server.URL, "http://"),
+		}
+
+		resp := AcquireResponse()
+		defer ReleaseResponse(resp)
+		resp.KeepBodyBuffer = true
+
+		var req Request
+		req.SetRequestURI(server.URL)
+
+		if err := client.DoTimeout(&req, resp, 5*time.Second); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		if !resp.KeepBodyBuffer {
+			t.Fatalf("expected resp.KeepBodyBuffer to remain true after PipelineClient.DoTimeout")
+		}
+		buf := resp.body
+		if buf == nil || cap(buf.B) <= 1024 {
+			t.Fatalf("expected resp.body capacity > 1024, got %v", resp.body)
+		}
+		initialCap := cap(buf.B)
+
+		// Call again with a smaller response to ensure the retained buffer is kept and not replaced.
+		req.SetRequestURI(server.URL + "/small")
+		if err := client.DoTimeout(&req, resp, 5*time.Second); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		if !resp.KeepBodyBuffer {
+			t.Fatalf("expected resp.KeepBodyBuffer to remain true")
+		}
+		if resp.body != buf {
+			t.Fatalf("expected resp.body pointer to stay identical across calls, got %p != %p", resp.body, buf)
+		}
+		if cap(resp.body.B) != initialCap {
+			t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(resp.body.B))
+		}
+		if !bytes.Equal(resp.Body(), smallPayload) {
+			t.Fatalf("unexpected response body: %q", resp.Body())
+		}
+
+		// Third call with DoDeadline.
+		req.SetRequestURI(server.URL)
+		if err := client.DoDeadline(&req, resp, time.Now().Add(5*time.Second)); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		if resp.body != buf {
+			t.Fatalf("expected resp.body pointer to stay identical after DoDeadline, got %p != %p", resp.body, buf)
+		}
+		if !bytes.Equal(resp.Body(), payload) {
+			t.Fatalf("unexpected response body: %q", resp.Body())
+		}
+
+		// Pre-retained 64 KB buffer should be preserved across small responses.
+		resp64 := AcquireResponse()
+		defer ReleaseResponse(resp64)
+		resp64.KeepBodyBuffer = true
+		resp64.SetBody(bytes.Repeat([]byte("z"), 65536))
+		buf64 := resp64.body
+		cap64 := cap(buf64.B)
+
+		req.SetRequestURI(server.URL + "/small")
+		if err := client.DoTimeout(&req, resp64, 5*time.Second); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		if resp64.body != buf64 {
+			t.Fatalf("expected resp64.body pointer to be preserved, got %p != %p", resp64.body, buf64)
+		}
+		if cap(resp64.body.B) != cap64 {
+			t.Fatalf("expected capacity %d to be preserved, got %d", cap64, cap(resp64.body.B))
+		}
+		if !bytes.Equal(resp64.Body(), smallPayload) {
+			t.Fatalf("unexpected response body: %q", resp64.Body())
+		}
+	})
 }
 
 func TestResponseRawBodyCopyTo(t *testing.T) {
