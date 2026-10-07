@@ -3878,6 +3878,10 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 		t.Fatalf("unexpected connection: close header")
 	}
 
+	// Asterisk-form request-target is allowed for OPTIONS (RFC 9112, section 3.2.4)
+	testRequestHeaderReadSuccess(t, h, "OPTIONS * HTTP/1.1\r\nHost: example.com\r\n\r\n",
+		-2, "*", "example.com", "", "")
+
 	// simple headers with body
 	testRequestHeaderReadSuccess(t, h, "GET /a/bar HTTP/1.1\r\nHost: gole.com\r\nconneCTION: close\r\n\r\nfoobar",
 		-2, "/a/bar", "gole.com", "", "")
@@ -4140,6 +4144,12 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// Missing host header
 	testRequestHeaderReadError(t, h, "GET /foo/bar HTTP/1.1\r\n\r\n")
+
+	// Asterisk-form request-target is forbidden for methods other than OPTIONS (RFC 9112, section 3.2.4)
+	testRequestHeaderReadError(t, h, "GET * HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	testRequestHeaderReadError(t, h, "POST * HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	testRequestHeaderReadError(t, h, "HEAD * HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	testRequestHeaderReadError(t, h, "DELETE * HTTP/1.1\r\nHost: example.com\r\n\r\n")
 }
 
 func TestRequestHeaderReadSecuredError(t *testing.T) {
