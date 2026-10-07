@@ -1780,6 +1780,65 @@ func TestServerStreamedMultipartEpilogueCountsTowardsLimit(t *testing.T) {
 	}
 }
 
+func TestServerStreamedMultipartFormLeavesOversizedBodyUnread(t *testing.T) {
+	t.Parallel()
+
+	// Rejecting a body for exceeding the limit must not read the rest of the
+	// upload first. What is left over is the server's to deal with, and here it
+	// is well past maxUnreadStreamBodySize, so the connection closes rather
+	// than being reused for the pipelined request.
+	const limit = 1024
+	form := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n" +
+		strings.Repeat("z", maxUnreadStreamBodySize+limit) + "\r\n--x--\r\n"
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := form + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var (
+		err      error
+		bodyRead int
+		paths    []string
+	)
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) != "/first" {
+				return
+			}
+			_, err = ctx.Request.MultipartFormWithLimit(limit)
+			if rs, ok := ctx.Request.bodyStream.(*requestStream); ok {
+				bodyRead = rs.totalBytesRead
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Errorf("MultipartFormWithLimit error = %v; want %v", err, ErrBodyTooLarge)
+	}
+	if bodyRead > limit+1 {
+		t.Errorf("read %d body bytes to reject a %d byte limit; want at most %d", bodyRead, limit, limit+1)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+	if resp := rw.w.String(); !strings.Contains(resp, "Connection: close") {
+		t.Errorf("response = %q; want Connection: close", resp)
+	}
+}
+
 func TestServerDoesNotParseStreamedMultipartMissingBoundaryAsRequest(t *testing.T) {
 	t.Parallel()
 

@@ -1230,11 +1230,19 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	// caller only finds that out from ErrNoMultipartForm and may still want to
 	// read it.
 	//
+	// A body rejected for exceeding maxBodySize is left unread too, see below.
+	//
 	// The drain error isn't recorded here. A failed read leaves the connection
 	// mid-body, and the server's stream records that itself, see
 	// requestStream.failed, where Request.Reset can't clear it.
+	var drainBodyStream bool
 	if req.bodyStream != nil && isMultipartFormData(req.Header.ContentType()) {
-		defer copyBodyStream(io.Discard, req.bodyStream) //nolint:errcheck
+		drainBodyStream = true
+		defer func() {
+			if drainBodyStream {
+				copyBodyStream(io.Discard, req.bodyStream) //nolint:errcheck
+			}
+		}()
 	}
 
 	req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
@@ -1281,6 +1289,12 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 		}
 		if lr != nil && lr.N <= 0 {
 			err = ErrBodyTooLarge
+			// The body is already longer than the caller agreed to read, so
+			// don't read the rest of the upload just to reject it. The
+			// server's drain takes it from here, bounded by
+			// maxUnreadStreamBodySize, and closes the connection when more
+			// than that is left.
+			drainBodyStream = false
 		}
 		if err != nil {
 			req.RemoveMultipartFormFiles()
