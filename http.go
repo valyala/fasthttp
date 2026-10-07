@@ -1217,6 +1217,34 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 		return req.multipartForm, nil
 	}
 
+	// Every declared body byte of a multipart request has to come off
+	// req.bodyStream before we return, on the error paths as much as the
+	// success one. ReadForm stops at the closing boundary and the early errors
+	// (missing boundary, unsupported content-encoding, bad gzip header) stop
+	// even sooner, so without this the leftover bytes are read back as the
+	// start of the next request on a keep-alive connection. Draining
+	// req.bodyStream directly also avoids comparing reader interface values,
+	// which panics for an uncomparable dynamic type set through SetBodyStream.
+	//
+	// A body whose media type isn't multipart/form-data is left unread. The
+	// caller only finds that out from ErrNoMultipartForm and may still want to
+	// read it.
+	//
+	// A body rejected for exceeding maxBodySize is left unread too, see below.
+	//
+	// The drain error isn't recorded here. A failed read leaves the connection
+	// mid-body, and the server's stream records that itself, see
+	// requestStream.failed, where Request.Reset can't clear it.
+	var drainBodyStream bool
+	if req.bodyStream != nil && isMultipartFormData(req.Header.ContentType()) {
+		drainBodyStream = true
+		defer func() {
+			if drainBodyStream {
+				copyBodyStream(io.Discard, req.bodyStream) //nolint:errcheck
+			}
+		}()
+	}
+
 	req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
 	if req.multipartFormBoundary == "" {
 		return nil, ErrNoMultipartForm
@@ -1245,15 +1273,32 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 
 		mr := multipart.NewReader(bodyStream, req.multipartFormBoundary)
 		req.multipartForm, err = mr.ReadForm(8 * 1024)
-		if err != nil {
-			if lr != nil && lr.N <= 0 {
-				return nil, fmt.Errorf("cannot read multipart/form-data body: %w", ErrBodyTooLarge)
-			}
-			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
+
+		// Drain the rest of the declared body through bodyStream so the
+		// leftover keeps counting towards maxBodySize; the deferred drain then
+		// clears whatever remains on the raw stream so the connection stays
+		// framed.
+		if _, drainErr := copyBodyStream(io.Discard, bodyStream); drainErr != nil && err == nil {
+			err = drainErr
+		}
+		if rs, ok := req.bodyStream.(*requestStream); ok && err == nil && rs.truncated() {
+			// The peer stopped sending before Content-Length was reached. A
+			// request stream reports that as a plain io.EOF, which the drain
+			// above takes for the end of the body.
+			err = io.ErrUnexpectedEOF
 		}
 		if lr != nil && lr.N <= 0 {
+			err = ErrBodyTooLarge
+			// The body is already longer than the caller agreed to read, so
+			// don't read the rest of the upload just to reject it. The
+			// server's drain takes it from here, bounded by
+			// maxUnreadStreamBodySize, and closes the connection when more
+			// than that is left.
+			drainBodyStream = false
+		}
+		if err != nil {
 			req.RemoveMultipartFormFiles()
-			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", ErrBodyTooLarge)
+			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 		}
 	} else {
 		body := req.bodyBytes()
@@ -1275,6 +1320,18 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	}
 
 	return req.multipartForm, nil
+}
+
+// isMultipartFormData reports whether contentType declares the
+// multipart/form-data media type, with or without parameters. A plain prefix
+// match would also take media types such as multipart/form-data-alt, whose
+// body the multipart parser never reads.
+func isMultipartFormData(contentType []byte) bool {
+	if !bytes.HasPrefix(contentType, strMultipartFormData) {
+		return false
+	}
+	rest := contentType[len(strMultipartFormData):]
+	return len(rest) == 0 || rest[0] == ';'
 }
 
 func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
@@ -1344,10 +1401,22 @@ func readMultipartForm(r io.Reader, boundary string, size, maxInMemoryFileSize i
 	if size <= 0 {
 		return nil, fmt.Errorf("form size must be greater than 0: given %d", size)
 	}
-	lr := io.LimitReader(r, int64(size))
+	lr := &io.LimitedReader{R: r, N: int64(size)}
 	mr := multipart.NewReader(lr, boundary)
 	f, err := mr.ReadForm(int64(maxInMemoryFileSize))
 	if err != nil {
+		return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
+	}
+	// ReadForm stops at the closing boundary, so anything the sender placed
+	// between it and Content-Length is still unread on r. Discard it, since
+	// on a keep-alive connection those bytes are otherwise read back as the
+	// beginning of the next request.
+	if _, err = copyZeroAlloc(io.Discard, lr); err == nil && lr.N > 0 {
+		// r ended before the declared body size was reached.
+		err = io.ErrUnexpectedEOF
+	}
+	if err != nil {
+		f.RemoveAll() //nolint:errcheck
 		return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 	}
 	return f, nil
