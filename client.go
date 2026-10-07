@@ -547,29 +547,7 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
-	uri := req.URI()
-	if uri == nil {
-		return ErrorInvalidURI
-	}
-
-	host := uri.Host()
-
-	if bytes.ContainsRune(host, ',') {
-		return fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
-	}
-
-	isTLS := false
-	if uri.isHTTPS() {
-		isTLS = true
-	} else if !uri.isHTTP() {
-		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
-	}
-
-	c.mOnce.Do(func() {
-		c.m = make(map[string]*HostClient)
-		c.ms = make(map[string]*HostClient)
-	})
-	hc, err := c.hostClient(host, isTLS)
+	hc, err := c.hostClientForRequest(req)
 	if err != nil {
 		return err
 	}
@@ -577,6 +555,30 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	atomic.AddInt32(&hc.pendingClientRequests, 1)
 	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
 	return hc.Do(req, resp)
+}
+
+func (c *Client) hostClientForRequest(req *Request) (*HostClient, error) {
+	uri := req.URI()
+	if uri == nil {
+		return nil, ErrorInvalidURI
+	}
+
+	host := uri.Host()
+
+	if bytes.ContainsRune(host, ',') {
+		return nil, fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
+	}
+
+	isTLS := uri.isHTTPS()
+	if !isTLS && !uri.isHTTP() {
+		return nil, fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
+	}
+
+	c.mOnce.Do(func() {
+		c.m = make(map[string]*HostClient)
+		c.ms = make(map[string]*HostClient)
+	})
+	return c.hostClient(host, isTLS)
 }
 
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
@@ -958,7 +960,8 @@ type HostClient struct {
 
 	connsCount int
 
-	connsLock sync.Mutex
+	connsLock         sync.Mutex
+	protocolTransport ProtocolRoundTripper
 
 	addrsLock        sync.Mutex
 	tlsConfigMapLock sync.Mutex
@@ -1746,6 +1749,20 @@ func (c *HostClient) do(req *Request, resp *Response) (bool, error) {
 }
 
 func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error) {
+	if err := c.prepareRequestResponse(req, resp); err != nil {
+		return false, err
+	}
+
+	if c.protocolTransport != nil {
+		ctx := c.acquireProtocolClientContext(req)
+		retry, err := c.protocolTransport.RoundTripWithContext(ctx, c, req, resp)
+		releaseProtocolClientContext(ctx)
+		return retry, err
+	}
+	return c.transport().RoundTrip(c, req, resp)
+}
+
+func (c *HostClient) prepareRequestResponse(req *Request, resp *Response) error {
 	if req == nil {
 		// for debugging purposes
 		panic("BUG: req cannot be nil")
@@ -1762,7 +1779,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
 	if c.IsTLS != req.URI().isHTTPS() {
-		return false, ErrHostClientRedirectToDifferentScheme
+		return ErrHostClientRedirectToDifferentScheme
 	}
 
 	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix)) // #nosec G115
@@ -1792,7 +1809,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		}
 	}
 
-	return c.transport().RoundTrip(c, req, resp)
+	return nil
 }
 
 func (c *HostClient) transport() RoundTripper {
@@ -1865,8 +1882,16 @@ func (c *HostClient) maxConnsLocked() int {
 // reports whether one took it. connsLock must be held.
 func (c *HostClient) serveWaiterLocked() bool {
 	for q := c.connsWait; q != nil && q.len() > 0; {
-		if w := q.popFront(); w.waiting() {
+		w := q.popFront()
+		if !w.waiting() {
+			continue
+		}
+		if !w.slotOnly {
 			go c.dialConnFor(w)
+			return true
+		}
+		// A slot waiter dials its own connection.
+		if w.tryDeliverSlot() {
 			return true
 		}
 	}
@@ -1991,6 +2016,13 @@ func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
 			return
 		}
 		c.connsLock.Unlock()
+		if w.slotOnly {
+			// The waiter inherits cc's slot; the idle HTTP/1 connection retires.
+			w.tryDeliverSlot()
+			cc.c.Close()
+			releaseClientConn(cc)
+			return
+		}
 		w.tryDeliver(cc, nil)
 		return
 	}
@@ -2001,6 +2033,12 @@ func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
 	// was reserved, so restart it as well.
 	if c.connsCount < c.maxConnsLocked() {
 		c.connsCount++
+		if w.slotOnly {
+			// A slot waiter dials its own connection.
+			c.connsLock.Unlock()
+			w.tryDeliverSlot()
+			return
+		}
 		startCleaner := false
 		if !c.connsCleanerRun && !connectionClose {
 			c.connsCleanerRun = true
@@ -2051,6 +2089,9 @@ func (c *HostClient) CloseIdleConnections() {
 
 	for _, cc := range scratch {
 		c.CloseConn(cc)
+	}
+	if closer, ok := c.protocolTransport.(ProtocolTransportCloser); ok {
+		closer.CloseIdleConnections(c)
 	}
 }
 
@@ -2184,6 +2225,7 @@ func (c *HostClient) ReleaseConn(cc *clientConn) {
 func (c *HostClient) releaseConn(cc *clientConn) {
 	cc.lastUseTime = time.Now()
 	startCleaner := false
+	retire := false
 	c.connsLock.Lock()
 	if c.MaxConnWaitTimeout <= 0 {
 		c.conns = append(c.conns, cc)
@@ -2194,6 +2236,16 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 			for q.len() > 0 {
 				w := q.popFront()
 				if w.waiting() {
+					if w.slotOnly {
+						// The waiter inherits cc's slot and dials its own
+						// connection; the idle HTTP/1 connection retires.
+						if w.tryDeliverSlot() {
+							delivered = true
+							retire = true
+							break
+						}
+						continue
+					}
 					delivered = w.tryDeliver(cc, nil)
 					// This is the last resort to hand over conCount sema.
 					// We must ensure that there are no valid waiters in connsWait
@@ -2223,6 +2275,10 @@ func (c *HostClient) releaseConn(cc *clientConn) {
 	c.connsLock.Unlock()
 	if startCleaner {
 		go c.connsCleaner()
+	}
+	if retire {
+		cc.c.Close()
+		releaseClientConn(cc)
 	}
 }
 
@@ -2505,7 +2561,11 @@ type wantConn struct {
 	err   error
 	ready chan struct{}
 	conn  *clientConn
-	mu    sync.Mutex // protects conn, err, close(ready)
+	// slotOnly marks a waiter that wants a connection slot without a dialed
+	// connection: protocol transports dial with their own TLS setup.
+	slotOnly      bool
+	slotDelivered bool
+	mu            sync.Mutex // protects conn, err, slotDelivered, close(ready)
 }
 
 // waiting reports whether w is still waiting for an answer (connection or error).
@@ -2535,21 +2595,40 @@ func (w *wantConn) tryDeliver(conn *clientConn, err error) bool {
 	return true
 }
 
+// tryDeliverSlot transfers ownership of one connection slot to a slotOnly
+// waiter and reports whether it succeeded.
+func (w *wantConn) tryDeliverSlot() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	if w.conn != nil || w.err != nil || w.slotDelivered {
+		return false
+	}
+	w.slotDelivered = true
+	close(w.ready)
+	return true
+}
+
 // cancel marks w as no longer wanting a result (for example, due to cancellation).
-// If a connection has been delivered already, cancel returns it with c.releaseConn.
+// A connection or slot that was delivered already is returned to c.
 func (w *wantConn) cancel(c *HostClient, err error) {
 	w.mu.Lock()
-	if w.conn == nil && w.err == nil {
+	if w.conn == nil && w.err == nil && !w.slotDelivered {
 		close(w.ready) // catch misbehavior in future delivery
 	}
 
 	conn := w.conn
+	slot := w.slotDelivered
 	w.conn = nil
+	w.slotDelivered = false
 	w.err = err
 	w.mu.Unlock()
 
 	if conn != nil {
 		c.ReleaseConn(conn)
+	}
+	if slot {
+		c.decConnsCount()
 	}
 }
 
@@ -3457,7 +3536,10 @@ func (c *pipelineConnClient) PendingRequests() int {
 
 var errPipelineConnStopped = errors.New("pipeline connection has been stopped")
 
-var DefaultTransport RoundTripper = &transport{}
+var defaultTransport = &transport{}
+
+// DefaultTransport is the transport used by HostClient when Transport is nil.
+var DefaultTransport RoundTripper = defaultTransport
 
 type transport struct{}
 
@@ -3513,18 +3595,27 @@ func (s *clientStreamBody) CloseWithError(err error) error {
 }
 
 func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
-	customSkipBody := resp.SkipBody
-	customStreamBody := resp.StreamBody
-
 	var deadline time.Time
 	if req.timeout > 0 {
 		deadline = time.Now().Add(req.timeout)
 	}
-
 	cc, err := hc.AcquireConn(req.timeout, req.ConnectionClose())
 	if err != nil {
 		return false, err
 	}
+	return t.roundTripConn(hc, cc, req, resp, deadline)
+}
+
+func (t *transport) roundTripConn(
+	hc *HostClient,
+	cc *clientConn,
+	req *Request,
+	resp *Response,
+	deadline time.Time,
+) (retry bool, err error) {
+	customSkipBody := resp.SkipBody
+	customStreamBody := resp.StreamBody
+
 	conn := cc.c
 
 	resp.ParseNetConn(conn)
