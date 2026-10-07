@@ -2228,6 +2228,46 @@ func TestServerStreamedMultipartFormLeavesNonMultipartBodyUnread(t *testing.T) {
 	}
 }
 
+func TestServerStreamedMultipartFormLeavesSimilarMediaTypeBodyUnread(t *testing.T) {
+	t.Parallel()
+
+	// multipart/form-data-alt is a media type of its own, not
+	// multipart/form-data with a parameter, so its body stays on the stream the
+	// same way a JSON one does.
+	body := "--x\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--x--\r\n"
+
+	for _, contentType := range []string{"multipart/form-data-alt", "multipart/form-data-alt; boundary=x"} {
+		rw := &oneByteReadWriter{}
+		fmt.Fprintf(&rw.r,
+			"POST / HTTP/1.1\r\n"+
+				"Host: x\r\n"+
+				"Content-Type: %s\r\n"+
+				"Content-Length: %d\r\n\r\n%s",
+			contentType, len(body), body,
+		)
+
+		var postBody string
+		s := Server{
+			StreamRequestBody:  true,
+			MaxRequestBodySize: 1, // Force RequestBodyStream.
+			Logger:             &testLogger{},
+			Handler: func(ctx *RequestCtx) {
+				if _, err := ctx.MultipartForm(); !errors.Is(err, ErrNoMultipartForm) {
+					t.Errorf("%s: MultipartForm error = %v; want %v", contentType, err, ErrNoMultipartForm)
+				}
+				postBody = string(ctx.PostBody())
+			},
+		}
+
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatalf("%s: unexpected error: %v", contentType, err)
+		}
+		if postBody != body {
+			t.Errorf("%s: PostBody() = %q; want %q", contentType, postBody, body)
+		}
+	}
+}
+
 func TestServerGetWithContent(t *testing.T) {
 	t.Parallel()
 

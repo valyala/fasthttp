@@ -1226,13 +1226,14 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	// req.bodyStream directly also avoids comparing reader interface values,
 	// which panics for an uncomparable dynamic type set through SetBodyStream.
 	//
-	// A body that isn't multipart/form-data is left unread. The caller only
-	// finds that out from ErrNoMultipartForm and may still want to read it.
+	// A body whose media type isn't multipart/form-data is left unread. The
+	// caller only finds that out from ErrNoMultipartForm and may still want to
+	// read it.
 	//
 	// The drain error isn't recorded here. A failed read leaves the connection
 	// mid-body, and the server's stream records that itself, see
 	// requestStream.failed, where Request.Reset can't clear it.
-	if req.bodyStream != nil && bytes.HasPrefix(req.Header.ContentType(), strMultipartFormData) {
+	if req.bodyStream != nil && isMultipartFormData(req.Header.ContentType()) {
 		defer copyBodyStream(io.Discard, req.bodyStream) //nolint:errcheck
 	}
 
@@ -1305,6 +1306,18 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	}
 
 	return req.multipartForm, nil
+}
+
+// isMultipartFormData reports whether contentType declares the
+// multipart/form-data media type, with or without parameters. A plain prefix
+// match would also take media types such as multipart/form-data-alt, whose
+// body the multipart parser never reads.
+func isMultipartFormData(contentType []byte) bool {
+	if !bytes.HasPrefix(contentType, strMultipartFormData) {
+		return false
+	}
+	rest := contentType[len(strMultipartFormData):]
+	return len(rest) == 0 || rest[0] == ';'
 }
 
 func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
