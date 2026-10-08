@@ -814,6 +814,51 @@ func runFSByteRangeSingleThread(t *testing.T, fs *FS) {
 	testFSByteRange(t, h, "/README.md")
 }
 
+func TestFSByteRangeIgnoreUnsupported(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	body := []byte("0123456789")
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	fs := &FS{
+		Root:            dir,
+		AcceptByteRange: true,
+		CleanStop:       stop,
+	}
+	h := fs.NewRequestHandler()
+
+	// Neither an unknown range unit nor multiple ranges can be served, so
+	// the Range header must be ignored rather than answered with a 416.
+	for _, byteRange := range []string{
+		"items=0-4",
+		"bytes=0-1,4-5",
+		"bytes=0-1, 4-5",
+	} {
+		var ctx RequestCtx
+		ctx.Init(&Request{}, nil, nil)
+		ctx.Request.SetRequestURI("/file.txt")
+		ctx.Request.Header.Set(HeaderRange, byteRange)
+		h(&ctx)
+
+		resp := readResponseFromCtx(t, &ctx, false)
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code for %q: %d. Expecting %d", byteRange, resp.StatusCode(), StatusOK)
+		}
+		if cr := resp.Header.Peek(HeaderContentRange); len(cr) > 0 {
+			t.Fatalf("unexpected Content-Range for %q: %q", byteRange, cr)
+		}
+		if !bytes.Equal(resp.Body(), body) {
+			t.Fatalf("unexpected body for %q: %q. Expecting %q", byteRange, resp.Body(), body)
+		}
+	}
+}
+
 func TestFSByteRangeZeroLengthSuffixRange(t *testing.T) {
 	t.Parallel()
 
