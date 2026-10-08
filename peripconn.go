@@ -7,15 +7,20 @@ import (
 	"sync/atomic"
 )
 
+// perIPKey identifies the client a connection comes from. Every address is
+// held in its 16-byte form, so an IPv4 peer and the IPv4-mapped form of the
+// same address are one client.
+type perIPKey [16]byte
+
 type perIPConnCounter struct {
-	m    map[uint32]int
+	m    map[perIPKey]int
 	lock sync.Mutex
 }
 
-func (cc *perIPConnCounter) Register(ip uint32) int {
+func (cc *perIPConnCounter) Register(ip perIPKey) int {
 	cc.lock.Lock()
 	if cc.m == nil {
-		cc.m = make(map[uint32]int)
+		cc.m = make(map[perIPKey]int)
 	}
 	n := cc.m[ip] + 1
 	cc.m[ip] = n
@@ -23,7 +28,7 @@ func (cc *perIPConnCounter) Register(ip uint32) int {
 	return n
 }
 
-func (cc *perIPConnCounter) Unregister(ip uint32) {
+func (cc *perIPConnCounter) Unregister(ip perIPKey) {
 	cc.lock.Lock()
 	defer cc.lock.Unlock()
 	if cc.m == nil {
@@ -45,7 +50,7 @@ type perIPConn struct {
 
 	perIPConnCounter *perIPConnCounter
 
-	ip     uint32
+	ip     perIPKey
 	closed atomic.Bool
 }
 
@@ -54,11 +59,11 @@ type perIPTLSConn struct {
 
 	perIPConnCounter *perIPConnCounter
 
-	ip     uint32
+	ip     perIPKey
 	closed atomic.Bool
 }
 
-func newPerIPConn(conn net.Conn, ip uint32, counter *perIPConnCounter) net.Conn {
+func newPerIPConn(conn net.Conn, ip perIPKey, counter *perIPConnCounter) net.Conn {
 	if tlsConn, ok := conn.(*tls.Conn); ok {
 		return &perIPTLSConn{
 			perIPConnCounter: counter,
@@ -91,20 +96,24 @@ func (c *perIPTLSConn) Close() error {
 	return err
 }
 
-func getUint32IP(c net.Conn) uint32 {
-	ip := getConnIP4(c)
-
-	if len(ip) != 4 {
-		return 0
+// getPerIPKey returns the counter key for the client c comes from. ok is
+// false when the peer has no IP address to key on, which leaves the
+// connection uncounted.
+func getPerIPKey(c net.Conn) (key perIPKey, ok bool) {
+	ip := getConnIP(c).To16()
+	if ip == nil {
+		return key, false
 	}
-	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
+	copy(key[:], ip)
+	return key, true
 }
 
-func getConnIP4(c net.Conn) net.IP {
-	addr := c.RemoteAddr()
-	ipAddr, ok := addr.(*net.TCPAddr)
+// getConnIP returns the IP the connection comes from, or nil when its peer
+// has no IP address.
+func getConnIP(c net.Conn) net.IP {
+	ipAddr, ok := c.RemoteAddr().(*net.TCPAddr)
 	if !ok {
-		return net.IPv4zero
+		return nil
 	}
-	return ipAddr.IP.To4()
+	return ipAddr.IP
 }

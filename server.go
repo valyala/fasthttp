@@ -2189,7 +2189,7 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 			if pic == nil {
 				if time.Since(*lastPerIPErrorTime) > time.Minute {
 					s.logger().Printf("The number of connections from %s exceeds MaxConnsPerIP=%d",
-						getConnIP4(c), s.MaxConnsPerIP)
+						getConnIP(c), s.MaxConnsPerIP)
 					*lastPerIPErrorTime = time.Now()
 				}
 				continue
@@ -2201,8 +2201,8 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 }
 
 func wrapPerIPConn(s *Server, c net.Conn) net.Conn {
-	ip := getUint32IP(c)
-	if ip == 0 {
+	ip, ok := getPerIPKey(c)
+	if !ok {
 		return c
 	}
 	n := s.perIPConnCounter.Register(ip)
