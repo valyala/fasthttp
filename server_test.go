@@ -3221,6 +3221,14 @@ func TestRequestCtxIfModifiedSince(t *testing.T) {
 	if !ctx.IfModifiedSince(future) {
 		t.Fatal("If-Modified-Since future time must return true")
 	}
+
+	// RFC 9110, section 5.6.7: recipients must accept the obsolete formats too.
+	for _, layout := range []string{"Monday, 02-Jan-06 15:04:05 GMT", time.ANSIC} {
+		ctx.Request.Header.Set("If-Modified-Since", lastModified.UTC().Format(layout))
+		if ctx.IfModifiedSince(lastModified) {
+			t.Fatalf("If-Modified-Since %q must return false", ctx.Request.Header.Peek("If-Modified-Since"))
+		}
+	}
 }
 
 func TestRequestCtxSendFileNotModified(t *testing.T) {

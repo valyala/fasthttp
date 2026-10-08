@@ -325,6 +325,26 @@ func TestParseHTTPDateCompatibility(t *testing.T) {
 	}
 }
 
+func TestParseHTTPDateObsoleteFormats(t *testing.T) {
+	t.Parallel()
+
+	// The examples from RFC 9110, section 5.6.7 all denote the same instant.
+	want := time.Date(1994, time.November, 6, 8, 49, 37, 0, time.UTC)
+	for _, s := range []string{
+		"Sun, 06 Nov 1994 08:49:37 GMT",
+		"Sunday, 06-Nov-94 08:49:37 GMT",
+		"Sun Nov  6 08:49:37 1994",
+	} {
+		got, err := ParseHTTPDate([]byte(s))
+		if err != nil {
+			t.Fatalf("unexpected error for %q: %v", s, err)
+		}
+		if !got.Equal(want) {
+			t.Fatalf("unexpected time for %q: %v. Expecting %v", s, got, want)
+		}
+	}
+}
+
 func BenchmarkParseHTTPDate(b *testing.B) {
 	date := []byte("Tue, 10 Nov 2009 23:00:00 GMT")
 
@@ -352,6 +372,8 @@ func FuzzParseHTTPDate(f *testing.F) {
 		"Fri, 31 Dec 1999 23:59:59 GMT",
 		"Mon, 29 Feb 2016 12:34:56 GMT",
 		"Sun, 06 Nov 1994 08:49:37 GMT",
+		"Sunday, 06-Nov-94 08:49:37 GMT",
+		"Sun Nov  6 08:49:37 1994",
 		// Invalid inputs to exercise rejection paths.
 		"Tue, 10 Nov 2009 23:00:00 UTC",
 		"Tue, 31 Feb 2009 23:00:00 GMT",
@@ -368,10 +390,10 @@ func FuzzParseHTTPDate(f *testing.F) {
 	f.Fuzz(func(t *testing.T, s string) {
 		b := []byte(s)
 
-		// Reference: time.Parse with http.TimeFormat is what ParseHTTPDate falls back to.
-		stdTime, stdErr := time.Parse(http.TimeFormat, s)
+		// Reference: http.ParseTime is what ParseHTTPDate falls back to.
+		stdTime, stdErr := http.ParseTime(s)
 
-		// The public API must always agree with time.Parse.
+		// The public API must always agree with http.ParseTime.
 		got, gotErr := ParseHTTPDate(b)
 		if (gotErr != nil) != (stdErr != nil) {
 			t.Fatalf("ParseHTTPDate error mismatch for %q: got err=%v, std err=%v", s, gotErr, stdErr)
