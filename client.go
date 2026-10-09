@@ -3399,6 +3399,13 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 				return err
 			}
 		}
+		// A response to HEAD carries no body no matter what Content-Length
+		// or Transfer-Encoding announce (RFC 9112 section 6.3). Reading one
+		// here would consume the following pipelined responses as the body,
+		// the same reason transport.RoundTrip skips it.
+		if w.req.Header.IsHead() {
+			w.resp.SkipBody = true
+		}
 		// PipelineClient must consume each response body before reading the
 		// next response from the shared connection. Preserve StreamBody's
 		// reader API with a buffered stream instead of leaving bytes in br.
