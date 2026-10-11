@@ -39,9 +39,10 @@ func SetBodySizePoolLimit(reqBodyLimit, respBodyLimit int) {
 type Request struct {
 	noCopy noCopy
 
-	bodyStream io.Reader
-	w          requestBodyWriter
-	body       *bytebufferpool.ByteBuffer
+	bodyStream       io.Reader
+	bodyStreamWriter *fixedSizeBodyWriter
+	w                requestBodyWriter
+	body             *bytebufferpool.ByteBuffer
 
 	// serverStream is the request stream the server drains and releases
 	// after the handler returns. Its prefetched bytes live in body, so body
@@ -107,7 +108,8 @@ type Request struct {
 type Response struct {
 	noCopy noCopy
 
-	bodyStream io.Reader
+	bodyStream       io.Reader
+	bodyStreamWriter *fixedSizeBodyWriter
 
 	// Remote TCPAddr from concurrently net.Conn.
 	raddr net.Addr
@@ -1917,19 +1919,26 @@ func (req *Request) Write(w *bufio.Writer) error {
 		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
 	}
 
-	hasBody := false
 	if len(body) == 0 {
 		body = req.postArgs.QueryString()
 	}
-	if len(body) != 0 || !req.Header.ignoreBody() {
-		hasBody = true
-		req.Header.SetContentLength(len(body))
+	hasBody := len(body) != 0 || !req.Header.ignoreBody()
+	chunked := hasBody && len(req.Header.trailer) > 0 && req.Header.IsHTTP11()
+	contentLength := len(body)
+	if chunked {
+		contentLength = -1
 	}
-	if hasBody && len(req.Header.trailer) > 0 && req.Header.IsHTTP11() {
+	if req.Header.disableSpecialHeader {
+		if err = req.Header.setRawBodyFraming(contentLength, hasBody); err != nil {
+			return err
+		}
+	} else if hasBody {
+		req.Header.SetContentLength(contentLength)
+	}
+	if chunked {
 		if len(body) > 0 && !req.Header.noDefaultContentType && len(req.Header.ContentType()) == 0 {
 			req.Header.SetContentTypeBytes(strDefaultContentType)
 		}
-		req.Header.SetContentLength(-1)
 		if err = req.Header.Write(w); err != nil {
 			return err
 		}
@@ -2464,7 +2473,13 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 	var err error
 
 	contentLength := req.Header.ContentLength()
-	if contentLength < 0 {
+	if req.Header.disableSpecialHeader && req.Header.contentLength != -2 {
+		// SetBodyStream's size is authoritative for outgoing raw headers.
+		// A parsed raw request has no dedicated size, so use its validated
+		// framing field when forwarding its body stream.
+		contentLength = req.Header.contentLength
+	}
+	if contentLength < 0 && !req.Header.disableSpecialHeader {
 		lrSize := limitedReaderSize(req.bodyStream)
 		if lrSize >= 0 {
 			contentLength = int(lrSize)
@@ -2476,18 +2491,19 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 			}
 		}
 	}
-	req.Header.written = true
-	if contentLength >= 0 {
-		if err = req.Header.Write(w); err == nil {
-			err = writeBodyFixedSize(w, req.bodyStream, int64(contentLength))
+	if req.Header.disableSpecialHeader {
+		if err = req.Header.setRawBodyFraming(contentLength, true); err != nil {
+			_ = req.closeBodyStream()
+			return err
 		}
-	} else {
+	} else if contentLength < 0 {
 		req.Header.SetContentLength(-1)
-		err = req.Header.Write(w)
-		if err == nil {
-			err = writeBodyChunked(w, req.bodyStream)
-		}
-		if err == nil {
+	}
+	req.Header.written = true
+	if err = req.Header.Write(w); err == nil {
+		if contentLength >= 0 {
+			err = writeBodyFixedSize(w, req.bodyStream, int64(contentLength), &req.bodyStreamWriter)
+		} else if err = writeBodyChunked(w, req.bodyStream); err == nil {
 			err = req.Header.writeTrailer(w)
 		}
 	}
@@ -2534,7 +2550,7 @@ func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (err error
 				err = w.Flush()
 			}
 			if err == nil && sendBody {
-				err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength))
+				err = writeBodyFixedSize(w, resp.bodyStream, int64(contentLength), &resp.bodyStreamWriter)
 			}
 		}
 	} else {
@@ -2798,36 +2814,112 @@ func limitedReaderSize(r io.Reader) int64 {
 	return lr.N
 }
 
-func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64) error {
-	if size > maxSmallFileSize {
-		earlyFlush := false
-		switch r := r.(type) {
-		case *os.File:
-			earlyFlush = true
-		case *io.LimitedReader:
-			_, earlyFlush = r.R.(*os.File)
-		}
-		if earlyFlush {
-			// w buffer must be empty for triggering
-			// sendfile path in bufio.Writer.ReadFrom.
-			if err := w.Flush(); err != nil {
-				return err
-			}
-		}
+func writeBodyFixedSize(w *bufio.Writer, r io.Reader, size int64, bodyWriter **fixedSizeBodyWriter) error {
+	// Keep using a stream's WriterTo when available, but never let it write
+	// past the advertised size onto a persistent connection.
+	// Reuse the request or response's state to avoid allocating a writer.
+	if *bodyWriter == nil {
+		*bodyWriter = &fixedSizeBodyWriter{}
 	}
-
-	// A file may have grown since its size was taken. Stop at size, so
-	// nothing follows the body the Content-Length announces.
-	if f, ok := r.(*os.File); ok {
-		r = &io.LimitedReader{R: f, N: size}
+	bw := *bodyWriter
+	*bw = fixedSizeBodyWriter{w: w, remaining: size}
+	defer func() {
+		*bw = fixedSizeBodyWriter{}
+	}()
+	n, err := copyBodyStream(bw, r)
+	if bw.overrun && err == nil {
+		err = errBodyStreamTooLong
 	}
-
-	n, err := copyBodyStream(w, r)
 
 	if n != size && err == nil {
 		err = fmt.Errorf("copied %d bytes from body stream instead of %d bytes", n, size)
 	}
 	return err
+}
+
+var errBodyStreamTooLong = errors.New("fasthttp: body stream exceeds content-length")
+
+type fixedSizeBodyWriter struct {
+	w             *bufio.Writer
+	limitedReader io.LimitedReader
+	remaining     int64
+	overrunBuf    [1]byte
+	overrun       bool
+}
+
+func (w *fixedSizeBodyWriter) ReadFrom(r io.Reader) (int64, error) {
+	stream := r
+	var limited *io.LimitedReader
+	if lr, ok := r.(*io.LimitedReader); ok {
+		limited = lr
+		stream = lr.R
+	}
+	if _, ok := stream.(*os.File); ok && w.remaining > maxSmallFileSize {
+		// An empty output buffer allows ReadFrom to use sendfile for large files.
+		if err := w.w.Flush(); err != nil {
+			return 0, err
+		}
+	}
+	// Keep a file or socket directly inside one LimitedReader so ReadFrom can
+	// use sendfile or splice while bounding the bytes sent to the connection.
+	w.limitedReader = io.LimitedReader{R: stream, N: w.remaining}
+	if limited != nil {
+		w.limitedReader.N = min(w.limitedReader.N, limited.N)
+	}
+	n, err := w.w.ReadFrom(&w.limitedReader)
+	w.remaining -= n
+	if limited != nil {
+		limited.N -= n
+	}
+	if err != nil || w.remaining > 0 {
+		return n, err
+	}
+	// A file may have grown since its size was measured. Match SendFile by
+	// stopping successfully at the advertised size.
+	if _, ok := r.(*os.File); ok {
+		return n, nil
+	}
+	// The bounded copy stops at the body size. Check the original stream for
+	// EOF without allowing an extra byte into the output buffer.
+	for range 100 {
+		nr, readErr := r.Read(w.overrunBuf[:])
+		if nr > 0 {
+			w.overrun = true
+			return n, errBodyStreamTooLong
+		}
+		if readErr == io.EOF {
+			return n, nil
+		}
+		if readErr != nil {
+			return n, readErr
+		}
+	}
+	return n, io.ErrNoProgress
+}
+
+func (w *fixedSizeBodyWriter) Write(p []byte) (int, error) {
+	if int64(len(p)) > w.remaining {
+		w.overrun = true
+		p = p[:int(w.remaining)]
+	}
+	n, err := w.w.Write(p)
+	w.remaining -= int64(n)
+	if err == nil && n != len(p) {
+		err = io.ErrShortWrite
+	}
+	// Flush a full buffer before the copy loop reads more of the body,
+	// matching bufio.Writer.ReadFrom's streaming behavior.
+	if err == nil && w.w.Available() == 0 {
+		err = w.w.Flush()
+	}
+	if w.overrun && err == nil {
+		err = errBodyStreamTooLong
+	}
+	return n, err
+}
+
+func (w *fixedSizeBodyWriter) WriteString(s string) (int, error) {
+	return w.Write(s2b(s))
 }
 
 func copyBodyStream(w io.Writer, r io.Reader) (int64, error) {

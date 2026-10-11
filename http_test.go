@@ -184,7 +184,11 @@ func testResponseCopyTo(t *testing.T, src *Response) {
 	var dst Response
 	src.CopyTo(&dst)
 
-	if !reflect.DeepEqual(src, &dst) {
+	if !reflect.DeepEqual(&src.Header, &dst.Header) ||
+		!bytes.Equal(src.Body(), dst.Body()) ||
+		src.SkipBody != dst.SkipBody ||
+		!reflect.DeepEqual(src.raddr, dst.raddr) ||
+		!reflect.DeepEqual(src.laddr, dst.laddr) {
 		t.Fatalf("ResponseCopyTo fail, src: \n%+v\ndst: \n%+v\n", src, &dst)
 	}
 }
@@ -3561,6 +3565,64 @@ func TestResponseImmediateHeaderFlushRegressionChunked(t *testing.T) {
 	testBodyWriteTo(t, &r, expectedS, false)
 }
 
+type bodyReadFunc func([]byte) (int, error)
+
+func (f bodyReadFunc) Read(p []byte) (int, error) {
+	return f(p)
+}
+
+func TestFixedSizeBodyStreamLength(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		body   string
+		size   int
+		stream string
+	}{
+		{name: "empty"},
+		{name: "short", body: "ab", size: 3},
+		{name: "exact", body: "abc", size: 3},
+		{name: "long-reader", body: "abcdef", size: 3},
+		{name: "long-WriterTo", body: "abcdef", size: 3, stream: "bytes"},
+		{name: "long-StringWriter", body: "abcdef", size: 3, stream: "strings"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var stream io.Reader
+			switch tc.stream {
+			case "bytes":
+				stream = bytes.NewReader([]byte(tc.body))
+			case "strings":
+				stream = strings.NewReader(tc.body)
+			default:
+				stream = bodyReadFunc(strings.NewReader(tc.body).Read)
+			}
+			var wire bytes.Buffer
+			w := bufio.NewWriter(struct{ io.Writer }{&wire})
+			var bw *fixedSizeBodyWriter
+			err := writeBodyFixedSize(w, stream, int64(tc.size), &bw)
+			switch {
+			case len(tc.body) < tc.size:
+				if err == nil {
+					t.Fatal("expected an error for a short body stream")
+				}
+			case len(tc.body) > tc.size:
+				if !errors.Is(err, errBodyStreamTooLong) {
+					t.Fatalf("write error = %v, want oversized stream error", err)
+				}
+			case err != nil:
+				t.Fatal(err)
+			}
+			if err := w.Flush(); err != nil {
+				t.Fatal(err)
+			}
+			if want := tc.body[:min(len(tc.body), tc.size)]; wire.String() != want {
+				t.Fatalf("written body = %q, want %q", wire.String(), want)
+			}
+		})
+	}
+}
+
 func TestResponseImmediateHeaderFlushFixedLength(t *testing.T) {
 	t.Parallel()
 
@@ -4875,6 +4937,56 @@ func TestResponseWriteAlternatingHeaderSizesAllocations(t *testing.T) {
 	}
 	if n := testing.AllocsPerRun(100, pair); n > 0 {
 		t.Errorf("%v allocs per alternating pair, expecting 0", n)
+	}
+}
+
+func TestFixedSizeBodyStreamWriteAllocations(t *testing.T) {
+	body := bytes.Repeat([]byte("x"), 16*1024)
+	stringBody := string(body)
+	var reader bytes.Reader
+	var stringReader strings.Reader
+	for _, tc := range []struct {
+		name   string
+		stream io.Reader
+	}{
+		{"bytes", &reader},
+		{"strings", &stringReader},
+		{"read-only", struct{ io.Reader }{&reader}},
+	} {
+		for _, request := range []bool{true, false} {
+			name := "response/" + tc.name
+			if request {
+				name = "request/" + tc.name
+			}
+			t.Run(name, func(t *testing.T) {
+				var req Request
+				req.Header.SetHost("example.com")
+				req.Header.SetMethod(MethodPost)
+				var resp Response
+				w := bufio.NewWriter(io.Discard)
+				write := func() {
+					reader.Reset(body)
+					stringReader.Reset(stringBody)
+					var err error
+					if request {
+						req.SetBodyStream(tc.stream, len(body))
+						err = req.Write(w)
+					} else {
+						resp.SetBodyStream(tc.stream, len(body))
+						err = resp.Write(w)
+					}
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err := w.Flush(); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if n := testing.AllocsPerRun(100, write); n > 0 {
+					t.Errorf("%v allocs per fixed-size stream write, expecting 0", n)
+				}
+			})
+		}
 	}
 }
 
