@@ -936,6 +936,54 @@ func TestServerMaxConnsPerIPLimit(t *testing.T) {
 	}
 }
 
+func TestServerMaxConnsPerIPLimitIPv6(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		Handler:       func(ctx *RequestCtx) { ctx.WriteString("OK") }, //nolint:errcheck
+		MaxConnsPerIP: 1,
+		Logger:        &testLogger{},
+	}
+
+	ln, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		t.Skipf("no IPv6 loopback available: %v", err)
+	}
+	serverCh := make(chan error, 1)
+	go func() { serverCh <- s.Serve(ln) }()
+
+	first, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer first.Close()
+	second, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer second.Close()
+
+	if err := second.SetReadDeadline(time.Now().Add(testTimeout(time.Second))); err != nil {
+		t.Fatalf("setting deadline: %v", err)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(second)); err != nil {
+		t.Fatalf("reading the refusal: %v", err)
+	}
+	if resp.StatusCode() != StatusTooManyRequests {
+		t.Fatalf("second connection status code = %d, want %d", resp.StatusCode(), StatusTooManyRequests)
+	}
+
+	first.Close()
+	second.Close()
+	if err := s.Shutdown(); err != nil {
+		t.Fatalf("Shutdown() error: %v", err)
+	}
+	if err := <-serverCh; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+}
+
 type fakeIPListener struct {
 	net.Listener
 }
