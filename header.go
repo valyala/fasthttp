@@ -3452,8 +3452,12 @@ func validateRequestURI(method, requestURI []byte) error {
 	if stringContainsCTLByte(requestURI) {
 		return ErrorInvalidURI
 	}
+	// Asterisk-form request-target is only valid for server-wide OPTIONS requests (RFC 9112, section 3.2.4).
 	if len(requestURI) == 1 && requestURI[0] == '*' {
-		return nil
+		if bytes.Equal(method, strOptions) {
+			return nil
+		}
+		return ErrorInvalidURI
 	}
 	if len(requestURI) > 0 && requestURI[0] == '/' {
 		return nil
