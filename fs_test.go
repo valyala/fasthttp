@@ -1964,6 +1964,48 @@ func TestFSGenerateETagDisabled(t *testing.T) {
 	}
 }
 
+func TestFSIfModifiedSinceMethods(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	body := []byte("body")
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), body, 0o600); err != nil {
+		t.Fatalf("cannot create test file: %v", err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	h := (&FS{
+		Root:      dir,
+		CleanStop: stop,
+	}).NewRequestHandler()
+
+	// If-Modified-Since is ignored for methods other than GET and HEAD.
+	ifModifiedSince := string(AppendHTTPDate(nil, time.Now().Add(time.Hour)))
+	for _, tc := range []struct {
+		method         string
+		expectedStatus int
+	}{
+		{MethodGet, StatusNotModified},
+		{MethodHead, StatusNotModified},
+		{MethodPost, StatusOK},
+		{MethodPut, StatusOK},
+		{MethodDelete, StatusOK},
+	} {
+		resp := testFSETagRequest(t, h, func(req *Request) {
+			req.Header.SetMethod(tc.method)
+			req.Header.Set(HeaderIfModifiedSince, ifModifiedSince)
+		})
+		if resp.StatusCode() != tc.expectedStatus {
+			t.Fatalf("%s: unexpected status code: %d. Expecting %d", tc.method, resp.StatusCode(), tc.expectedStatus)
+		}
+		if tc.expectedStatus == StatusOK && !bytes.Equal(resp.Body(), body) {
+			t.Fatalf("%s: unexpected body: %q. Expecting %q", tc.method, resp.Body(), body)
+		}
+	}
+}
+
 func TestFSGenerateETagCompress(t *testing.T) {
 	t.Parallel()
 
