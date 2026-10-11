@@ -1510,7 +1510,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	contentLength := ff.contentLength
 	if h.acceptByteRange {
 		hdr.setNonSpecial(strAcceptRanges, strBytes)
-		if len(byteRange) > 0 {
+		if isSingleByteRange(byteRange) {
 			startPos, endPos, err := ParseByteRange(byteRange, contentLength)
 			if err != nil {
 				_ = r.(io.Closer).Close() //nolint:forcetypeassert
@@ -1661,6 +1661,15 @@ func trimWeakETagPrefix(etag []byte) []byte {
 
 type byteRangeUpdater interface {
 	UpdateByteRange(startPos, endPos int) error
+}
+
+// isSingleByteRange reports whether byteRange asks for a single range in
+// bytes, the only kind of Range the FS handler serves. Any other Range is
+// ignored and the whole file is sent: RFC 9110, section 14.2 allows a server
+// to ignore Range and requires it for a range unit it does not understand.
+func isSingleByteRange(byteRange []byte) bool {
+	return len(byteRange) > len(strBytes) && byteRange[len(strBytes)] == '=' &&
+		bytes.HasPrefix(byteRange, strBytes) && bytes.IndexByte(byteRange, ',') < 0
 }
 
 // ParseByteRange parses 'Range: bytes=...' header value.
