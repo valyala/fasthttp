@@ -152,11 +152,14 @@ func append2Digits(dst []byte, v int) []byte {
 }
 
 // ParseHTTPDate parses HTTP-compliant (RFC1123) date.
+//
+// The obsolete RFC 850 and ANSI C asctime() formats are accepted too,
+// as RFC 9110, section 5.6.7 requires.
 func ParseHTTPDate(date []byte) (time.Time, error) {
 	if t, ok := parseRFC1123DateGMT(date); ok {
 		return t, nil
 	}
-	return time.Parse(http.TimeFormat, b2s(date))
+	return http.ParseTime(b2s(date))
 }
 
 func parseRFC1123DateGMT(b []byte) (time.Time, bool) {
