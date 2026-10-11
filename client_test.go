@@ -1360,6 +1360,115 @@ func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 	}
 }
 
+func TestPipelineClientHeadResponseWithContentLength(t *testing.T) {
+	t.Parallel()
+
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+
+	firstRequestRead := make(chan struct{})
+	serverDone := make(chan error, 1)
+	go func() {
+		defer serverConn.Close()
+
+		br := bufio.NewReader(serverConn)
+		for i := range 2 {
+			var req Request
+			if err := req.Read(br); err != nil {
+				serverDone <- fmt.Errorf("read request %d: %w", i, err)
+				return
+			}
+			if i == 0 {
+				if !req.Header.IsHead() {
+					serverDone <- fmt.Errorf("request 0 method is %q; want HEAD", req.Header.Method())
+					return
+				}
+				close(firstRequestRead)
+			}
+		}
+
+		// The HEAD response declares the length of the body a GET would
+		// return, but carries none (RFC 9112 section 6.3).
+		_, err := io.WriteString(serverConn,
+			"HTTP/1.1 200 OK\r\nContent-Length: 12\r\n\r\n"+
+				"HTTP/1.1 200 OK\r\nContent-Length: 6\r\n\r\nSECOND")
+		serverDone <- err
+	}()
+
+	var dialMu sync.Mutex
+	dialed := false
+	c := &PipelineClient{
+		Dial: func(string) (net.Conn, error) {
+			dialMu.Lock()
+			defer dialMu.Unlock()
+			if dialed {
+				return nil, errors.New("unexpected second dial")
+			}
+			dialed = true
+			return clientConn, nil
+		},
+		MaxPendingRequests:  2,
+		MaxIdleConnDuration: time.Second,
+		Logger:              &testLogger{},
+	}
+
+	type result struct {
+		err           error
+		body          string
+		index         int
+		status        int
+		contentLength int
+	}
+	results := make(chan result, 2)
+	do := func(index int, method, uri string) {
+		go func() {
+			var req Request
+			var resp Response
+			req.SetRequestURI(uri)
+			req.Header.SetMethod(method)
+			err := c.DoTimeout(&req, &resp, testTimeout(time.Second))
+			results <- result{
+				index:         index,
+				status:        resp.StatusCode(),
+				body:          string(resp.Body()),
+				contentLength: resp.Header.ContentLength(),
+				err:           err,
+			}
+		}()
+	}
+
+	do(0, MethodHead, "http://example.test/first")
+	select {
+	case <-firstRequestRead:
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("server did not receive the HEAD request")
+	}
+	do(1, MethodGet, "http://example.test/second")
+
+	got := make([]result, 2)
+	for range 2 {
+		r := <-results
+		got[r.index] = r
+	}
+	for i := range got {
+		if got[i].err != nil {
+			t.Fatalf("request %d failed: %v", i, got[i].err)
+		}
+		if got[i].status != StatusOK {
+			t.Fatalf("request %d received status %d; want 200", i, got[i].status)
+		}
+	}
+	if got[0].body != "" || got[0].contentLength != 12 {
+		t.Fatalf("HEAD received body %q and Content-Length %d; want no body and 12", got[0].body, got[0].contentLength)
+	}
+	if got[1].body != "SECOND" {
+		t.Fatalf("request 1 received body %q; want %q", got[1].body, "SECOND")
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatalf("server failed: %v", err)
+	}
+}
+
 func TestPipelineClientMaxResponseBodySize(t *testing.T) {
 	t.Parallel()
 
