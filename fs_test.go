@@ -895,6 +895,75 @@ func TestFSByteRangeZeroLengthSuffixRange(t *testing.T) {
 	}
 }
 
+func TestFSByteRangeIfRange(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	filePath := filepath.Join(dir, "file.txt")
+	body := []byte("0123456789")
+	if err := os.WriteFile(filePath, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mtime := time.Unix(1700000000, 0)
+	if err := os.Chtimes(filePath, mtime, mtime); err != nil {
+		t.Fatalf("cannot set modification time: %v", err)
+	}
+	etag := fmt.Sprintf(`W/"%x-%x"`, mtime.Unix(), len(body))
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	fs := &FS{
+		Root:            dir,
+		AcceptByteRange: true,
+		GenerateETag:    true,
+		CleanStop:       stop,
+	}
+	h := fs.NewRequestHandler()
+
+	// The Range header is only served when the If-Range validator matches,
+	// otherwise the whole file is sent.
+	for _, tc := range []struct {
+		name           string
+		byteRange      string
+		ifRange        string
+		expectedStatus int
+	}{
+		{"no If-Range", "bytes=2-4", "", StatusPartialContent},
+		{"Last-Modified", "bytes=2-4", string(AppendHTTPDate(nil, mtime)), StatusPartialContent},
+		{"Last-Modified in RFC 850 format", "bytes=2-4", mtime.UTC().Format("Monday, 02-Jan-06 15:04:05 GMT"), StatusPartialContent},
+		{"older date", "bytes=2-4", string(AppendHTTPDate(nil, mtime.Add(-time.Hour))), StatusOK},
+		{"newer date", "bytes=2-4", string(AppendHTTPDate(nil, mtime.Add(time.Hour))), StatusOK},
+		{"weak ETag", "bytes=2-4", etag, StatusOK},
+		{"strong form of the ETag", "bytes=2-4", strings.TrimPrefix(etag, "W/"), StatusOK},
+		{"malformed", "bytes=2-4", "foo", StatusOK},
+		{"unsatisfiable range with stale date", "bytes=20-30", string(AppendHTTPDate(nil, mtime.Add(-time.Hour))), StatusOK},
+	} {
+		var ctx RequestCtx
+		ctx.Init(&Request{}, nil, nil)
+		ctx.Request.SetRequestURI("/file.txt")
+		ctx.Request.Header.Set(HeaderRange, tc.byteRange)
+		if tc.ifRange != "" {
+			ctx.Request.Header.Set(HeaderIfRange, tc.ifRange)
+		}
+		h(&ctx)
+
+		resp := readResponseFromCtx(t, &ctx, false)
+		if resp.StatusCode() != tc.expectedStatus {
+			t.Fatalf("%s: unexpected status code: %d. Expecting %d", tc.name, resp.StatusCode(), tc.expectedStatus)
+		}
+		expectedBody := body
+		if tc.expectedStatus == StatusPartialContent {
+			expectedBody = body[2:5]
+		} else if cr := resp.Header.Peek(HeaderContentRange); len(cr) > 0 {
+			t.Fatalf("%s: unexpected Content-Range: %q", tc.name, cr)
+		}
+		if !bytes.Equal(resp.Body(), expectedBody) {
+			t.Fatalf("%s: unexpected body: %q. Expecting %q", tc.name, resp.Body(), expectedBody)
+		}
+	}
+}
+
 func testFSByteRange(t *testing.T, h RequestHandler, filePath string) {
 	t.Helper()
 
