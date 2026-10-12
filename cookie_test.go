@@ -695,6 +695,35 @@ func testAppendRequestCookieBytes(t *testing.T, s, expectedS string) {
 	}
 }
 
+func TestCookieParseInvalidExpires(t *testing.T) {
+	t.Parallel()
+
+	var c Cookie
+	for _, tc := range []struct {
+		name   string
+		input  string
+		expire time.Time
+		output string
+	}{
+		{"later attributes", "foo=bar; expires=never; path=/; Secure; HttpOnly", CookieExpireUnlimited, "foo=bar; path=/; HttpOnly; secure"},
+		{"garbage", "foo=bar; expires=0; samesite=strict", CookieExpireUnlimited, "foo=bar; SameSite=Strict"},
+		{"empty", "foo=bar; expires=; domain=example.com", CookieExpireUnlimited, "foo=bar; domain=example.com"},
+		{"valid kept", "foo=bar; expires=Tue, 10 Nov 2009 23:00:00 GMT; expires=bogus", time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC), "foo=bar; expires=Tue, 10 Nov 2009 23:00:00 GMT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := c.Parse(tc.input); err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if got := c.Expire(); !got.Equal(tc.expire) {
+				t.Errorf("unexpected expire: got %v, want %v", got, tc.expire)
+			}
+			if got := c.String(); got != tc.output {
+				t.Errorf("unexpected cookie: got %q, want %q", got, tc.output)
+			}
+		})
+	}
+}
+
 func TestCookieParseZeroMaxAge(t *testing.T) {
 	t.Parallel()
 
