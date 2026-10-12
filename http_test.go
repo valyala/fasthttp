@@ -2209,6 +2209,9 @@ func TestRequestReadLimitBodyContentLengthAndTransferEncoding(t *testing.T) {
 		if body := string(req.Body()); body != "test" {
 			t.Fatalf("unexpected body %q. Expecting %q. s=%q", body, "test", s)
 		}
+		if !req.Header.ConnectionClose() {
+			t.Fatalf("expecting connection close. s=%q", s)
+		}
 		b, err := br.Peek(4)
 		if err != nil {
 			t.Fatalf("unexpected error reading remaining bytes: %v. s=%q", err, s)
