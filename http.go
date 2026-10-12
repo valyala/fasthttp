@@ -1219,25 +1219,28 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 
 	// Every declared body byte of a multipart request has to come off
 	// req.bodyStream before we return, on the error paths as much as the
-	// success one. ReadForm stops at the closing boundary and the early errors
-	// (missing boundary, unsupported content-encoding, bad gzip header) stop
-	// even sooner, so without this the leftover bytes are read back as the
-	// start of the next request on a keep-alive connection. Draining
-	// req.bodyStream directly also avoids comparing reader interface values,
-	// which panics for an uncomparable dynamic type set through SetBodyStream.
+	// success one: ReadForm stops at the closing boundary, so without the
+	// drain the leftover bytes are read back as the start of the next request
+	// on a keep-alive connection. Draining req.bodyStream directly also avoids
+	// comparing reader interface values, which panics for an uncomparable
+	// dynamic type set through SetBodyStream.
 	//
-	// A body whose media type isn't multipart/form-data is left unread. The
-	// caller only finds that out from ErrNoMultipartForm and may still want to
-	// read it.
-	//
-	// A body rejected for exceeding maxBodySize is left unread too, see below.
+	// The drain only arms once the headers check out and the size limiter is
+	// installed. The early validation errors (missing boundary, unsupported
+	// content-encoding, bad gzip header) return before a limiter exists, so
+	// draining there could read an entire unbounded upload just to reject it.
+	// Those bodies are left to the server's drain, bounded by
+	// maxUnreadStreamBodySize, which closes the connection when more than that
+	// is left. A body rejected for exceeding maxBodySize is left unread the
+	// same way, see below, and a body whose media type isn't
+	// multipart/form-data at all is left unread too: the caller only finds
+	// that out from ErrNoMultipartForm and may still want to read it.
 	//
 	// The drain error isn't recorded here. A failed read leaves the connection
 	// mid-body, and the server's stream records that itself, see
 	// requestStream.failed, where Request.Reset can't clear it.
 	var drainBodyStream bool
 	if req.bodyStream != nil && isMultipartFormData(req.Header.ContentType()) {
-		drainBodyStream = true
 		defer func() {
 			if drainBodyStream {
 				copyBodyStream(io.Discard, req.bodyStream) //nolint:errcheck
@@ -1270,6 +1273,7 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 			}
 			bodyStream = lr
 		}
+		drainBodyStream = true
 
 		mr := multipart.NewReader(bodyStream, req.multipartFormBoundary)
 		req.multipartForm, err = mr.ReadForm(8 * 1024)

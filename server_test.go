@@ -1839,6 +1839,87 @@ func TestServerStreamedMultipartFormLeavesOversizedBodyUnread(t *testing.T) {
 	}
 }
 
+func TestServerStreamedMultipartFormLeavesBodyUnreadOnEarlyError(t *testing.T) {
+	t.Parallel()
+
+	// The early validation errors return before the size limiter is installed,
+	// so draining there could read an entire unbounded upload just to reject
+	// it. The body stays unread, and with more than maxUnreadStreamBodySize
+	// left the server closes the connection instead of reusing it.
+	cases := []struct {
+		name            string
+		contentType     string
+		contentEncoding string
+		// How many body bytes the rejection itself may consume: none, except
+		// for the gzip header read.
+		maxRead int
+	}{
+		{name: "MissingBoundary", contentType: "multipart/form-data"},
+		{name: "BadContentEncoding", contentType: "multipart/form-data; boundary=x", contentEncoding: "br"},
+		{name: "BadGzip", contentType: "multipart/form-data; boundary=x", contentEncoding: "gzip", maxRead: 10},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			const limit = 1024
+			smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+			body := strings.Repeat("z", maxUnreadStreamBodySize+limit) + smuggled
+
+			ce := ""
+			if tc.contentEncoding != "" {
+				ce = "Content-Encoding: " + tc.contentEncoding + "\r\n"
+			}
+			rw := &oneByteReadWriter{}
+			fmt.Fprintf(&rw.r,
+				"POST /first HTTP/1.1\r\n"+
+					"Host: x\r\n"+
+					"Content-Type: %s\r\n"+
+					"%s"+
+					"Content-Length: %d\r\n\r\n%s",
+				tc.contentType, ce, len(body), body,
+			)
+
+			var (
+				err      error
+				bodyRead int
+				paths    []string
+			)
+			s := Server{
+				StreamRequestBody:            true,
+				DisablePreParseMultipartForm: true,
+				MaxRequestBodySize:           1, // Force RequestBodyStream.
+				Handler: func(ctx *RequestCtx) {
+					paths = append(paths, string(ctx.Path()))
+					if string(ctx.Path()) != "/first" {
+						return
+					}
+					_, err = ctx.Request.MultipartFormWithLimit(limit)
+					if rs, ok := ctx.Request.bodyStream.(*requestStream); ok {
+						bodyRead = rs.totalBytesRead
+					}
+				},
+			}
+
+			_ = s.ServeConn(rw)
+
+			if err == nil {
+				t.Error("expecting an error from MultipartFormWithLimit")
+			}
+			if bodyRead > tc.maxRead {
+				t.Errorf("read %d body bytes to reject the request; want at most %d", bodyRead, tc.maxRead)
+			}
+			if len(paths) != 1 {
+				t.Fatalf("handler paths = %q; want only [/first]", paths)
+			}
+			if resp := rw.w.String(); !strings.Contains(resp, "Connection: close") {
+				t.Errorf("response = %q; want Connection: close", resp)
+			}
+		})
+	}
+}
+
 func TestServerDoesNotParseStreamedMultipartMissingBoundaryAsRequest(t *testing.T) {
 	t.Parallel()
 
