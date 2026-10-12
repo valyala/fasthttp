@@ -964,6 +964,64 @@ func TestFSByteRangeIfRange(t *testing.T) {
 	}
 }
 
+func TestFSByteRangeMethods(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	body := []byte("0123456789")
+	if err := os.WriteFile(filepath.Join(dir, "file.txt"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	fs := &FS{
+		Root:            dir,
+		AcceptByteRange: true,
+		CleanStop:       stop,
+	}
+	h := fs.NewRequestHandler()
+
+	// Range is ignored for methods other than GET and HEAD.
+	for _, tc := range []struct {
+		method         string
+		expectedStatus int
+	}{
+		{MethodGet, StatusPartialContent},
+		{MethodHead, StatusPartialContent},
+		{MethodPost, StatusOK},
+		{MethodPut, StatusOK},
+		{MethodDelete, StatusOK},
+	} {
+		var ctx RequestCtx
+		ctx.Init(&Request{}, nil, nil)
+		ctx.Request.Header.SetMethod(tc.method)
+		ctx.Request.SetRequestURI("/file.txt")
+		ctx.Request.Header.Set(HeaderRange, "bytes=2-4")
+		h(&ctx)
+
+		isHead := tc.method == MethodHead
+		resp := readResponseFromCtx(t, &ctx, isHead)
+		if resp.StatusCode() != tc.expectedStatus {
+			t.Fatalf("%s: unexpected status code: %d. Expecting %d", tc.method, resp.StatusCode(), tc.expectedStatus)
+		}
+		expectedBody := body
+		if tc.expectedStatus == StatusPartialContent {
+			expectedBody = body[2:5]
+		} else if cr := resp.Header.Peek(HeaderContentRange); len(cr) > 0 {
+			t.Fatalf("%s: unexpected Content-Range: %q", tc.method, cr)
+		}
+		if isHead {
+			if resp.Header.ContentLength() != len(expectedBody) {
+				t.Fatalf("%s: unexpected Content-Length: %d. Expecting %d", tc.method, resp.Header.ContentLength(), len(expectedBody))
+			}
+		} else if !bytes.Equal(resp.Body(), expectedBody) {
+			t.Fatalf("%s: unexpected body: %q. Expecting %q", tc.method, resp.Body(), expectedBody)
+		}
+	}
+}
+
 func testFSByteRange(t *testing.T, h RequestHandler, filePath string) {
 	t.Helper()
 

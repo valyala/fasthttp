@@ -1390,7 +1390,12 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	mustCompress := false
 	fileCacheKind := defaultCacheKind
 	fileEncoding := ""
-	byteRange := ctx.Request.Header.peek(strRange)
+	var byteRange []byte
+	if ctx.IsGet() || ctx.IsHead() {
+		// Range handling is only defined for GET, and HEAD gets the same
+		// headers as GET. See https://www.rfc-editor.org/rfc/rfc9110#section-14.2
+		byteRange = ctx.Request.Header.peek(strRange)
+	}
 	if len(byteRange) == 0 && h.compress {
 		switch {
 		case h.compressBrotli && ctx.Request.Header.HasAcceptEncodingBytes(strBr):
