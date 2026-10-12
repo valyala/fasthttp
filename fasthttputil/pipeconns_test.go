@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -465,4 +466,33 @@ func TestPipeConnsAddrCustom(t *testing.T) {
 	if c2.RemoteAddr() != addr2 {
 		t.Fatalf("unexpected remote address: %v", c2.RemoteAddr())
 	}
+}
+
+func TestPipeConnsCollectedWithPendingDeadline(t *testing.T) {
+	t.Parallel()
+
+	collected := make(chan struct{})
+	func() {
+		pc := NewPipeConns()
+		runtime.AddCleanup(pc, func(ch chan struct{}) { close(ch) }, collected)
+		c := pc.Conn1()
+		if err := c.SetDeadline(time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+		if err := pc.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	for range 100 {
+		runtime.GC()
+		select {
+		case <-collected:
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	t.Fatal("a closed pipe with a pending deadline was not collected")
 }

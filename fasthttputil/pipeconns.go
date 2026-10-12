@@ -304,7 +304,10 @@ func (d *pipeDeadline) set(t time.Time) {
 		if closed {
 			d.cancel = make(chan struct{})
 		}
-		d.timer = time.AfterFunc(dur, func() { close(d.cancel) })
+		// The timer holds only the channel, so a closed pipe is not kept
+		// alive until the deadline.
+		cancel := d.cancel
+		d.timer = time.AfterFunc(dur, func() { close(cancel) })
 		return
 	}
 	if !closed {
