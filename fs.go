@@ -1465,7 +1465,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			}
 			notModified = true
 		}
-	} else {
+	} else if ctx.IsGet() || ctx.IsHead() {
+		// If-Modified-Since only applies to GET and HEAD.
+		// See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3
 		notModified = !ctx.IfModifiedSince(ff.lastModified)
 	}
 	if notModified {
