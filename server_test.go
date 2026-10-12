@@ -2277,6 +2277,54 @@ func TestServerRejectsInvalidContentLengthWithTransferEncoding(t *testing.T) {
 	}
 }
 
+func TestServerClosesConnOnContentLengthWithTransferEncoding(t *testing.T) {
+	t.Parallel()
+
+	for _, req := range []string{
+		"POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 1\r\nTransfer-Encoding: chunked\r\n\r\n4\r\ntest\r\n0\r\n\r\n",
+		"POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nContent-Length: 1\r\n\r\n4\r\ntest\r\n0\r\n\r\n",
+	} {
+		var requests atomic.Int32
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				requests.Add(1)
+				ctx.Success("text/plain", ctx.PostBody())
+			},
+		}
+
+		rw := &readWriter{}
+		rw.r.WriteString(req)
+		rw.r.WriteString("GET /must/be/ignored HTTP/1.1\r\nHost: a\r\n\r\n")
+
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatalf("unexpected error from ServeConn: %v", err)
+		}
+
+		br := bufio.NewReader(&rw.w)
+		var resp Response
+		if err := resp.Read(br); err != nil {
+			t.Fatalf("unexpected error when parsing response: %v", err)
+		}
+		if string(resp.Body()) != "test" {
+			t.Fatalf("unexpected body %q. Expecting %q", resp.Body(), "test")
+		}
+		if !resp.ConnectionClose() {
+			t.Fatalf("expecting Connection: close header for %q", req)
+		}
+
+		data, err := io.ReadAll(br)
+		if err != nil {
+			t.Fatalf("unexpected error when reading remaining data: %v", err)
+		}
+		if len(data) > 0 {
+			t.Fatalf("unexpected data after the first response %q", data)
+		}
+		if n := requests.Load(); n != 1 {
+			t.Fatalf("unexpected number of handled requests: %d. Expecting 1", n)
+		}
+	}
+}
+
 func TestServerContinueHandler(t *testing.T) {
 	t.Parallel()
 

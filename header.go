@@ -3828,6 +3828,13 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	if h.contentLength < 0 {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 	}
+	if contentLengthSeen && transferEncodingSeen {
+		// A request with both Content-Length and Transfer-Encoding might be
+		// an attempt at request smuggling, so the connection must be closed
+		// after responding to it.
+		// See https://www.rfc-editor.org/rfc/rfc9112#section-6.3
+		h.connectionClose = true
+	}
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
 		v := peekArgBytes(h.h, strConnection)
