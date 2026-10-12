@@ -1512,7 +1512,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	contentLength := ff.contentLength
 	if h.acceptByteRange {
 		hdr.setNonSpecial(strAcceptRanges, strBytes)
-		if isSingleByteRange(byteRange) {
+		if isSingleByteRange(byteRange) && fsIfRangeMatch(ctx.Request.Header.peek(strIfRange), ff.lastModified) {
 			startPos, endPos, err := ParseByteRange(byteRange, contentLength)
 			if err != nil {
 				_ = r.(io.Closer).Close() //nolint:forcetypeassert
@@ -1557,6 +1557,18 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.SetContentType(ff.contentType)
 	}
 	ctx.SetStatusCode(statusCode)
+}
+
+// fsIfRangeMatch reports whether the Range header may be served given
+// the If-Range header value. If-Range uses the strong comparison and FS
+// only generates weak entity tags, so only a date equal to Last-Modified
+// matches. See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.5
+func fsIfRangeMatch(ifRange []byte, lastModified time.Time) bool {
+	if len(ifRange) == 0 {
+		return true
+	}
+	t, err := ParseHTTPDate(ifRange)
+	return err == nil && t.Equal(lastModified.Truncate(time.Second))
 }
 
 // appendFSETag appends a weak entity tag built from the hex-encoded
