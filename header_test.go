@@ -5155,6 +5155,117 @@ func TestAddTrailerKeepsRawHeaderMode(t *testing.T) {
 	}
 }
 
+func TestTrailerAnnouncementDedupesBeyondIndexThreshold(t *testing.T) {
+	t.Parallel()
+
+	// More names than trailerSetMin, so the parse loop indexes the set, with
+	// duplicates inside one field and across both of them.
+	names := make([]string, 2*trailerSetMin+8)
+	for i := range names {
+		names[i] = fmt.Sprintf("X-T%d", i)
+	}
+	half := len(names) / 2
+	first := make([]string, 0, 2*half)
+	second := make([]string, 0, 2*(len(names)-half))
+	for _, name := range names[:half] {
+		first = append(first, name, name)
+	}
+	for _, name := range names[half:] {
+		second = append(second, name, names[0])
+	}
+
+	var req Request
+	err := req.Read(bufio.NewReaderSize(strings.NewReader(
+		"POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n"+
+			"Trailer: "+strings.Join(first, ",")+"\r\n"+
+			"Trailer: "+strings.Join(second, ",")+"\r\n\r\n0\r\n\r\n"), 1<<16))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keys := req.Header.PeekTrailerKeys()
+	if len(keys) != len(names) {
+		t.Fatalf("trailer keys = %d names, want %d", len(keys), len(names))
+	}
+	for i, key := range keys {
+		if string(key) != names[i] {
+			t.Fatalf("trailer key %d = %q, want %q", i, key, names[i])
+		}
+	}
+}
+
+func TestTrailerAnnouncementSharesIndexAcrossFields(t *testing.T) {
+	t.Parallel()
+
+	// One Trailer field per name, past trailerSetMin in total, so the index
+	// has to carry across fields: a per-field index would rebuild from
+	// h.trailer every time, and the names of the field before it would have
+	// to be found by the scan it replaces.
+	names := make([]string, 4*trailerSetMin+8)
+	fields := make([]string, 0, len(names)+2)
+	for i := range names {
+		names[i] = fmt.Sprintf("X-T%d", i)
+		fields = append(fields, "Trailer: "+names[i]+"\r\n")
+	}
+	// A name repeated in a later field of its own, and one repeated in a
+	// field that also carries a new name, add no second key.
+	fields = append(fields,
+		"Trailer: "+names[0]+"\r\n",
+		"Trailer: "+names[len(names)-1]+","+names[len(names)/2]+"\r\n")
+
+	var req Request
+	err := req.Read(bufio.NewReaderSize(strings.NewReader(
+		"POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n"+
+			strings.Join(fields, "")+"\r\n0\r\n\r\n"), 1<<16))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keys := req.Header.PeekTrailerKeys()
+	if len(keys) != len(names) {
+		t.Fatalf("trailer keys = %d names, want %d", len(keys), len(names))
+	}
+	for i, key := range keys {
+		if string(key) != names[i] {
+			t.Fatalf("trailer key %d = %q, want %q", i, key, names[i])
+		}
+	}
+}
+
+func TestTrailerSectionDedupesBeyondIndexThreshold(t *testing.T) {
+	t.Parallel()
+
+	names := make([]string, 2*trailerSetMin+8)
+	section := make([]string, 0, len(names)+1)
+	for i := range names {
+		names[i] = fmt.Sprintf("X-T%d", i)
+		section = append(section, names[i]+": v")
+	}
+	// A repeat in the section keeps its value but adds no second key.
+	section = append(section, names[0]+": again")
+
+	var req Request
+	err := req.Read(bufio.NewReaderSize(strings.NewReader(
+		"POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n"+
+			strings.Join(section, "\r\n")+"\r\n\r\n"), 1<<16))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keys := req.Header.PeekTrailerKeys()
+	if len(keys) != len(names) {
+		t.Fatalf("trailer keys = %d names, want %d", len(keys), len(names))
+	}
+	for i, key := range keys {
+		if string(key) != names[i] {
+			t.Fatalf("trailer key %d = %q, want %q", i, key, names[i])
+		}
+	}
+	if got := string(req.Header.Peek(names[0])); got != "v" {
+		t.Fatalf("Peek(%s) = %q, want v", names[0], got)
+	}
+}
+
 func TestParsedTrailerFieldsAccumulate(t *testing.T) {
 	t.Parallel()
 

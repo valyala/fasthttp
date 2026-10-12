@@ -732,10 +732,11 @@ func (h *header) peekSections(key []byte) []byte {
 }
 
 // addParsedTrailers records the names of a parsed Trailer field; repeated
-// fields accumulate. Values already read stay in their section: an upfront
-// field that shares a name with a trailer is still a header.
-func (h *header) addParsedTrailers(trailer []byte) error {
-	return h.addTrailers(trailer, false, dedicated{})
+// fields accumulate, sharing the set's index through set. Values already read
+// stay in their section: an upfront field that shares a name with a trailer
+// is still a header.
+func (h *header) addParsedTrailers(trailer []byte, set *trailerSet) error {
+	return h.addTrailersIndexed(trailer, false, dedicated{}, set)
 }
 
 // AddTrailer add Trailer header value for chunked response
@@ -813,7 +814,15 @@ func (h *RequestHeader) AddTrailerBytes(trailer []byte) error {
 // section, so announcing after setting still sends them as trailers, unless
 // the header block has been written already; d is the header with dedicated
 // storage that may be announced.
-func (h *header) addTrailers(trailer []byte, migrate bool, d dedicated) (err error) {
+func (h *header) addTrailers(trailer []byte, migrate bool, d dedicated) error {
+	var set trailerSet
+	return h.addTrailersIndexed(trailer, migrate, d, &set)
+}
+
+// addTrailersIndexed is addTrailers over an index the caller owns, so that a
+// header parse can share one across every Trailer field of a message instead
+// of building one per field.
+func (h *header) addTrailersIndexed(trailer []byte, migrate bool, d dedicated, set *trailerSet) (err error) {
 	for i := -1; i+1 < len(trailer); {
 		trailer = trailer[i+1:]
 		i = bytes.IndexByte(trailer, ',')
@@ -828,7 +837,7 @@ func (h *header) addTrailers(trailer []byte, migrate bool, d dedicated) (err err
 		}
 		h.bufK = append(h.bufK[:0], key...)
 		normalizeHeaderKeyValidated(h.bufK, h.disableNormalizing)
-		if h.addTrailerKey(h.bufK) && migrate && !h.written {
+		if set.add(h, h.bufK) && migrate && !h.written {
 			// The dedicated value is written before the header store's.
 			if d.value != nil && bytes.Equal(h.bufK, d.key) {
 				h.migrateTrailer(d)
@@ -840,19 +849,68 @@ func (h *header) addTrailers(trailer []byte, migrate bool, d dedicated) (err err
 	return err
 }
 
+// trailerSetMin is the number of names the trailer set must already hold
+// before a parse loop indexes it. A message announces a handful of names, and
+// checking that many with isTrailerKey costs less than building a map, so
+// everything realistic keeps the scan; the index is only there to keep a loop
+// fed with attacker-sized input off the quadratic path.
+const trailerSetMin = 64
+
+// trailerSet indexes the trailer set by name for a parse that adds many names
+// in a row, where isTrailerKey's scan of every name already recorded makes
+// the parse quadratic in its input. One set covers a whole header parse, so a
+// Trailer field repeated per name neither rebuilds the index nor recopies the
+// names already in it. The index is built from h.trailer once the set reaches
+// trailerSetMin and is the only thing that appends to it from then on, which
+// is what keeps it in step with the set for as long as it lives: a parse that
+// also announced trailers another way would have to index them here too.
+type trailerSet struct {
+	names map[string]struct{}
+}
+
+// add records a validated, normalized key and reports whether it was new,
+// exactly as addTrailerKey does.
+func (s *trailerSet) add(h *header, key []byte) bool {
+	if s.names == nil {
+		// A set this small is cheaper to scan than to index.
+		if len(h.trailer) < trailerSetMin {
+			return h.addTrailerKey(key)
+		}
+		s.names = make(map[string]struct{}, len(h.trailer)+1)
+		for _, name := range h.trailer {
+			s.names[b2s(name)] = struct{}{}
+		}
+	}
+	if _, ok := s.names[string(key)]; ok {
+		return false
+	}
+	h.appendTrailerKey(key)
+	// The trailer set's own copy backs the index, so indexing a name costs
+	// nothing: the copy outlives the parse, and the parse writes only behind
+	// the names it has indexed already, never over one of them.
+	s.names[b2s(h.trailer[len(h.trailer)-1])] = struct{}{}
+	return true
+}
+
 // addTrailerKey records a validated, normalized key in the trailer set and
 // reports whether it was new; the set is a set.
 func (h *header) addTrailerKey(key []byte) bool {
 	if h.isTrailerKey(key) {
 		return false
 	}
+	h.appendTrailerKey(key)
+	return true
+}
+
+// appendTrailerKey stores a key the caller has established is not in the
+// trailer set yet, reusing the buffer a reset parked behind the length.
+func (h *header) appendTrailerKey(key []byte) {
 	if cap(h.trailer) > len(h.trailer) {
 		h.trailer = h.trailer[:len(h.trailer)+1]
 		h.trailer[len(h.trailer)-1] = append(h.trailer[len(h.trailer)-1][:0], key...)
 	} else {
 		h.trailer = append(h.trailer, append([]byte(nil), key...))
 	}
-	return true
 }
 
 // delArgAt removes args[i], keeping the order of the rest and the entry's
@@ -3263,6 +3321,7 @@ func (h *RequestHeader) parse(buf []byte) (int, error) {
 func (h *header) parseTrailer(src []byte) (int, error) {
 	var s headerScanner
 	s.b = src
+	var set trailerSet
 
 	for s.next() {
 		// Trim trailing whitespace before the colon to normalize headers
@@ -3284,7 +3343,7 @@ func (h *header) parseTrailer(src []byte) (int, error) {
 		h.trailerH = appendArgNormalized(h.trailerH, s.key, s.value, disable)
 		// An unannounced field still arrived in the trailer section; the key
 		// set reflects what was received.
-		h.addTrailerKey(h.trailerH[len(h.trailerH)-1].key)
+		set.add(h, h.trailerH[len(h.trailerH)-1].key)
 	}
 	if s.err != nil {
 		return 0, s.err
@@ -3532,6 +3591,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	var s headerScanner
 	s.b = buf
 	var kv *argsKV
+	var trailers trailerSet
 	transferEncodingSeen := false
 	contentLengthSeen := false
 
@@ -3636,7 +3696,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strTrailer) {
-				err := h.addParsedTrailers(s.value)
+				err := h.addParsedTrailers(s.value, &trailers)
 				if err != nil {
 					h.connectionClose = true
 					return 0, err
@@ -3682,6 +3742,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	var s headerScanner
 	s.b = buf
 	s.raw = &h.rawHeaders
+	var trailers trailerSet
 
 	for s.next() {
 		key := s.key
@@ -3809,7 +3870,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strTrailer) {
-				err := h.addParsedTrailers(s.value)
+				err := h.addParsedTrailers(s.value, &trailers)
 				if err != nil {
 					h.connectionClose = true
 					return 0, 0, err
