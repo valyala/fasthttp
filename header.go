@@ -258,15 +258,20 @@ func (h *RequestHeader) ContentLength() int {
 		// Parse framing headers from raw headers when special headers are disabled.
 		// Transfer-Encoding takes precedence over Content-Length, matching
 		// the normal parser path.
-		te := peekArgBytes(h.h, strTransferEncoding)
-		if caseInsensitiveCompare(te, strChunked) {
-			return -1 // chunked
+		var contentLength []byte
+		for i := range h.h {
+			kv := &h.h[i]
+			if caseInsensitiveCompare(kv.key, strTransferEncoding) && caseInsensitiveCompare(kv.value, strChunked) {
+				return -1 // chunked
+			}
+			if caseInsensitiveCompare(kv.key, strContentLength) && contentLength == nil {
+				contentLength = kv.value
+			}
 		}
-		v := peekArgBytes(h.h, strContentLength)
-		if len(v) == 0 {
+		if len(contentLength) == 0 {
 			return -2 // identity
 		}
-		n, err := parseContentLength(v)
+		n, err := parseContentLength(contentLength)
 		if err != nil {
 			return -2 // identity on parse error
 		}
@@ -340,6 +345,51 @@ func (h *RequestHeader) SetContentLength(contentLength int) {
 		h.contentLengthBytes = h.contentLengthBytes[:0]
 		h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 	}
+}
+
+var errConflictingRequestFraming = errors.New("fasthttp: request content-length and transfer-encoding conflict")
+
+// setRawBodyFraming makes the framing of a written request agree with its body.
+// Keep the caller's field casing and position when a single raw field exists.
+func (h *RequestHeader) setRawBodyFraming(contentLength int, hasBody bool) error {
+	var lengthField, encodingField *argsKV
+	for i := range h.h {
+		kv := &h.h[i]
+		switch {
+		case caseInsensitiveCompare(kv.key, strContentLength):
+			if lengthField != nil {
+				return ErrDuplicateContentLength
+			}
+			lengthField = kv
+		case caseInsensitiveCompare(kv.key, strTransferEncoding):
+			if encodingField != nil {
+				return ErrUnsupportedTransferEncoding
+			}
+			encodingField = kv
+		}
+	}
+	if lengthField != nil && (encodingField != nil || contentLength < 0) {
+		return errConflictingRequestFraming
+	}
+	if encodingField != nil && (contentLength >= 0 || !caseInsensitiveCompare(encodingField.value, strChunked)) {
+		return ErrUnsupportedTransferEncoding
+	}
+	if contentLength >= 0 {
+		h.contentLength = contentLength
+		h.contentLengthBytes = AppendUint(h.contentLengthBytes[:0], contentLength)
+		if lengthField != nil {
+			lengthField.value = append(lengthField.value[:0], h.contentLengthBytes...)
+		} else if hasBody {
+			h.h = appendArgBytes(h.h, strContentLength, h.contentLengthBytes, argsHasValue)
+		}
+		return nil
+	}
+	h.contentLength = -1
+	h.contentLengthBytes = h.contentLengthBytes[:0]
+	if encodingField == nil {
+		h.h = appendArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
+	}
+	return nil
 }
 
 func (h *ResponseHeader) isCompressibleContentType() bool {
