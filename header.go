@@ -1287,19 +1287,7 @@ func (h *RequestHeader) HasAcceptEncoding(acceptEncoding string) bool {
 // HasAcceptEncodingBytes returns true if the header contains
 // the given Accept-Encoding value.
 func (h *RequestHeader) HasAcceptEncodingBytes(acceptEncoding []byte) bool {
-	ae := h.peek(strAcceptEncoding)
-	n := bytes.Index(ae, acceptEncoding)
-	if n < 0 {
-		return false
-	}
-	b := ae[n+len(acceptEncoding):]
-	if len(b) > 0 && b[0] != ',' {
-		return false
-	}
-	if n == 0 {
-		return true
-	}
-	return ae[n-1] == ' '
+	return hasHeaderValue(h.peek(strAcceptEncoding), acceptEncoding)
 }
 
 // Len returns the number of headers set,
