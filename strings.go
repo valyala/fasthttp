@@ -84,7 +84,6 @@ var (
 	strKeepAlive           = []byte("keep-alive")
 	strUpgrade             = []byte("Upgrade")
 	strChunked             = []byte("chunked")
-	strIdentity            = []byte("identity")
 	str100Continue         = []byte("100-continue")
 	strPostArgsContentType = []byte("application/x-www-form-urlencoded")
 	strDefaultContentType  = []byte("application/octet-stream")

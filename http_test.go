@@ -3138,6 +3138,49 @@ func TestResponseReadUnsupportedTransferEncoding(t *testing.T) {
 	}
 }
 
+func TestRequestReadUnsupportedTransferEncoding(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		request string
+	}{
+		{
+			name:    "identity",
+			request: "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: identity\r\n\r\nGET /next HTTP/1.1\r\nHost: a\r\n\r\n",
+		},
+		{
+			name:    "identity with content-length",
+			request: "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: identity\r\nContent-Length: 5\r\n\r\nABCDE",
+		},
+		{
+			name:    "deflate",
+			request: "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: deflate\r\nContent-Length: 5\r\n\r\nABCDE",
+		},
+		{
+			name:    "compound",
+			request: "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked, gzip\r\n\r\n0\r\n\r\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, disableSpecialHeader := range []bool{false, true} {
+				var req Request
+				if disableSpecialHeader {
+					req.Header.DisableSpecialHeader()
+				}
+				if err := req.Read(bufio.NewReader(strings.NewReader(tt.request))); err == nil {
+					t.Fatalf("expected an error (DisableSpecialHeader=%v)", disableSpecialHeader)
+				}
+			}
+			if _, err := http.ReadRequest(bufio.NewReader(strings.NewReader(tt.request))); err == nil {
+				t.Fatal("net/http accepted request")
+			}
+		})
+	}
+}
+
 func TestResponseReadError(t *testing.T) {
 	t.Parallel()
 
