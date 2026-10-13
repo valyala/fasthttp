@@ -1920,6 +1920,72 @@ func TestServerStreamedMultipartFormLeavesBodyUnreadOnEarlyError(t *testing.T) {
 	}
 }
 
+func TestServerStreamedMultipartFormLeavesBodyUnreadOnCorruptGzip(t *testing.T) {
+	t.Parallel()
+
+	// A valid gzip header gets ReadForm past the setup checks and arms the
+	// drain, but a corrupt DEFLATE block then aborts ReadForm and the limited
+	// drain with the raw body still on the wire and the limiter nowhere near
+	// zero. The remainder must be left to the server's drain rather than read in
+	// full just to reject it; it is well past maxUnreadStreamBodySize, so the
+	// connection closes instead of serving the pipelined request.
+	const limit = 1024
+	// 10-byte gzip header (magic, DEFLATE method, no flags) followed by a
+	// reserved DEFLATE block type that flate rejects on the first read.
+	gzipPrefix := "\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\x00\x07"
+	compressed := gzipPrefix + strings.Repeat("z", maxUnreadStreamBodySize+limit)
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := compressed + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Encoding: gzip\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var (
+		err      error
+		bodyRead int
+		paths    []string
+	)
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) != "/first" {
+				return
+			}
+			_, err = ctx.Request.MultipartFormWithLimit(limit)
+			if rs, ok := ctx.Request.bodyStream.(*requestStream); ok {
+				bodyRead = rs.totalBytesRead
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if err == nil {
+		t.Error("expecting an error from MultipartFormWithLimit")
+	}
+	// Decoding reads the gzip header and whatever the flate reader buffers
+	// before it trips, but nowhere near the whole upload.
+	if bodyRead >= maxUnreadStreamBodySize {
+		t.Errorf("read %d body bytes to reject the request; want well under %d", bodyRead, maxUnreadStreamBodySize)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+	if resp := rw.w.String(); !strings.Contains(resp, "Connection: close") {
+		t.Errorf("response = %q; want Connection: close", resp)
+	}
+}
+
 func TestServerDoesNotParseStreamedMultipartMissingBoundaryAsRequest(t *testing.T) {
 	t.Parallel()
 

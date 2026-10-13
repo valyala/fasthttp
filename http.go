@@ -1231,10 +1231,13 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	// draining there could read an entire unbounded upload just to reject it.
 	// Those bodies are left to the server's drain, bounded by
 	// maxUnreadStreamBodySize, which closes the connection when more than that
-	// is left. A body rejected for exceeding maxBodySize is left unread the
-	// same way, see below, and a body whose media type isn't
-	// multipart/form-data at all is left unread too: the caller only finds
-	// that out from ErrNoMultipartForm and may still want to read it.
+	// is left. A body rejected on any later error path is left unread the same
+	// way, see below: ReadForm or the limited drain can give up with most of the
+	// declared body unread (a corrupt compressed block aborts them before the
+	// limiter reaches zero), and reading the rest just to fail it is the thing
+	// we are avoiding. A body whose media type isn't multipart/form-data at all
+	// is left unread too: the caller only finds that out from ErrNoMultipartForm
+	// and may still want to read it.
 	//
 	// The drain error isn't recorded here. A failed read leaves the connection
 	// mid-body, and the server's stream records that itself, see
@@ -1293,14 +1296,16 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 		}
 		if lr != nil && lr.N <= 0 {
 			err = ErrBodyTooLarge
-			// The body is already longer than the caller agreed to read, so
-			// don't read the rest of the upload just to reject it. The
-			// server's drain takes it from here, bounded by
-			// maxUnreadStreamBodySize, and closes the connection when more
-			// than that is left.
-			drainBodyStream = false
 		}
 		if err != nil {
+			// Something went wrong while reading the body: ReadForm or the
+			// limited drain failed, the body was truncated, or it exceeded
+			// maxBodySize. Don't read the rest of the upload just to reject it,
+			// which a corrupt compressed block would otherwise force, since it
+			// aborts the drain with the raw body still on the wire. The server's
+			// drain takes it from here, bounded by maxUnreadStreamBodySize, and
+			// closes the connection when more than that is left.
+			drainBodyStream = false
 			req.RemoveMultipartFormFiles()
 			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", err)
 		}
