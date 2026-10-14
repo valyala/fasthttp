@@ -2404,6 +2404,35 @@ func TestServerContinueHandler(t *testing.T) {
 	}
 }
 
+func TestServerContinueHandlerExpectCaseInsensitive(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		ContinueHandler: func(*RequestHeader) bool {
+			return false
+		},
+		Handler: func(*RequestCtx) {
+			t.Error("the handler must not be called for a denied request")
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: gle.com\r\nExpect: 100-Continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+
+	br := bufio.NewReader(&rw.w)
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("Unexpected error when reading response: %v", err)
+	}
+	if resp.StatusCode() != StatusExpectationFailed {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusExpectationFailed)
+	}
+}
+
 func TestServerContinueHandlerConnectionClose(t *testing.T) {
 	t.Parallel()
 

@@ -1888,6 +1888,12 @@ func TestRequestMayContinue(t *testing.T) {
 	if !r.MayContinue() {
 		t.Fatalf("MayContinue on 'Expect: 100-continue' header must return true")
 	}
+
+	// The Expect field value is case-insensitive (RFC 9110, section 10.1.1).
+	r.Header.Set("Expect", "100-Continue")
+	if !r.MayContinue() {
+		t.Fatalf("MayContinue on 'Expect: 100-Continue' header must return true")
+	}
 }
 
 func TestResponseGzipStream(t *testing.T) {
