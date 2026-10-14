@@ -1284,9 +1284,13 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 		// Drain the rest of the declared body through bodyStream so the
 		// leftover keeps counting towards maxBodySize; the deferred drain then
 		// clears whatever remains on the raw stream so the connection stays
-		// framed.
-		if _, drainErr := copyBodyStream(io.Discard, bodyStream); drainErr != nil && err == nil {
-			err = drainErr
+		// framed. Once ReadForm has failed, the form is rejected no matter
+		// what follows, so the remainder is left to the server's bounded
+		// drain rather than read just to reject it.
+		if err == nil {
+			if _, drainErr := copyBodyStream(io.Discard, bodyStream); drainErr != nil {
+				err = drainErr
+			}
 		}
 		if rs, ok := req.bodyStream.(*requestStream); ok && err == nil && rs.truncated() {
 			// The peer stopped sending before Content-Length was reached. A

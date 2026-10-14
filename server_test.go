@@ -1986,6 +1986,66 @@ func TestServerStreamedMultipartFormLeavesBodyUnreadOnCorruptGzip(t *testing.T) 
 	}
 }
 
+func TestServerStreamedMultipartFormLeavesBodyUnreadOnMalformedHeader(t *testing.T) {
+	t.Parallel()
+
+	// A malformed part header aborts ReadForm a few bytes in, with the rest of
+	// the declared body still on the wire. The remainder must be left to the
+	// server's drain rather than read in full just to reject it; it is well
+	// past maxUnreadStreamBodySize, so the connection closes instead of
+	// serving the pipelined request.
+	malformed := "--x\r\nMalformed-Header\r\n"
+	smuggled := "GET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n"
+	body := malformed + strings.Repeat("z", maxUnreadStreamBodySize+1024) + smuggled
+
+	rw := &oneByteReadWriter{}
+	fmt.Fprintf(&rw.r,
+		"POST /first HTTP/1.1\r\n"+
+			"Host: x\r\n"+
+			"Content-Type: multipart/form-data; boundary=x\r\n"+
+			"Content-Length: %d\r\n\r\n%s",
+		len(body), body,
+	)
+
+	var (
+		err      error
+		bodyRead int
+		paths    []string
+	)
+	s := Server{
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		Handler: func(ctx *RequestCtx) {
+			paths = append(paths, string(ctx.Path()))
+			if string(ctx.Path()) != "/first" {
+				return
+			}
+			_, err = ctx.MultipartForm()
+			if rs, ok := ctx.Request.bodyStream.(*requestStream); ok {
+				bodyRead = rs.totalBytesRead
+			}
+		},
+	}
+
+	_ = s.ServeConn(rw)
+
+	if err == nil {
+		t.Error("expecting an error from MultipartForm")
+	}
+	// ReadForm buffers whatever its reader has fetched when the bad header
+	// trips it, but nowhere near the whole upload.
+	if bodyRead >= maxUnreadStreamBodySize {
+		t.Errorf("read %d body bytes to reject the request; want well under %d", bodyRead, maxUnreadStreamBodySize)
+	}
+	if len(paths) != 1 {
+		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+	if resp := rw.w.String(); !strings.Contains(resp, "Connection: close") {
+		t.Errorf("response = %q; want Connection: close", resp)
+	}
+}
+
 func TestServerDoesNotParseStreamedMultipartMissingBoundaryAsRequest(t *testing.T) {
 	t.Parallel()
 
