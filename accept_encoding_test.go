@@ -19,6 +19,10 @@ func TestRequestHeaderHasAcceptEncodingTokens(t *testing.T) {
 		{"ows", "br,\t gzip \t,deflate", "gzip", true},
 		{"mixed_case", "br,GZip", "gzip", true},
 		{"mixed_case_query", "gzip,br", "GZIP", true},
+		{"caret_token", "x^codec", "X^CODEC", true},
+		{"tilde_token", "x~codec", "X~CODEC", true},
+		{"caret_is_not_tilde", "x^codec", "x~codec", false},
+		{"tilde_is_not_caret", "x~codec", "x^codec", false},
 		{"later_token", "xgzip, gzip", "gzip", true},
 		{"later_token_after_prefix", "gzip-extra, gzip", "gzip", true},
 		{"suffix_only", "xgzip,br", "gzip", false},
@@ -35,10 +39,10 @@ func TestRequestHeaderHasAcceptEncodingTokens(t *testing.T) {
 			var h RequestHeader
 			h.Set(HeaderAcceptEncoding, tc.header)
 			if got := h.HasAcceptEncoding(tc.encoding); got != tc.want {
-				t.Fatalf("HasAcceptEncoding(%q, %q) = %v, want %v", tc.header, tc.encoding, got, tc.want)
+				t.Errorf("HasAcceptEncoding(%q, %q) = %v, want %v", tc.header, tc.encoding, got, tc.want)
 			}
 			if got := h.HasAcceptEncodingBytes([]byte(tc.encoding)); got != tc.want {
-				t.Fatalf("HasAcceptEncodingBytes(%q, %q) = %v, want %v", tc.header, tc.encoding, got, tc.want)
+				t.Errorf("HasAcceptEncodingBytes(%q, %q) = %v, want %v", tc.header, tc.encoding, got, tc.want)
 			}
 		})
 	}

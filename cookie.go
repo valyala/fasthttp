@@ -736,7 +736,7 @@ func caseInsensitiveCompare(a, b []byte) bool {
 		return false
 	}
 	for i := range a {
-		if a[i]|0x20 != b[i]|0x20 {
+		if toLowerTable[a[i]] != toLowerTable[b[i]] {
 			return false
 		}
 	}
