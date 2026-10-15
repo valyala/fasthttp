@@ -5,8 +5,8 @@ import "testing"
 func TestCaseInsensitiveCompareASCII(t *testing.T) {
 	t.Parallel()
 
-	for a := 0; a < 256; a++ {
-		for b := 0; b < 256; b++ {
+	for a := range 256 {
+		for b := range 256 {
 			want := a == b ||
 				(a >= 'A' && a <= 'Z' && a+'a'-'A' == b) ||
 				(b >= 'A' && b <= 'Z' && b+'a'-'A' == a)
