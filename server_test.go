@@ -5617,10 +5617,10 @@ func TestStreamBodyRequestContentLength(t *testing.T) {
 		Handler: func(ctx *RequestCtx) {
 			realContentLength := ctx.Request.Header.ContentLength()
 			if realContentLength != contentLength {
-				t.Fatal("incorrect content length")
+				t.Error("incorrect content length")
 			}
 			if _, err := io.Copy(io.Discard, ctx.RequestBodyStream()); err != nil {
-				t.Fatalf("unexpected error when reading request body: %v", err)
+				t.Errorf("unexpected error when reading request body: %v", err)
 			}
 		},
 		MaxRequestBodySize: 1 * 1024 * 1024, // 1M
@@ -5629,22 +5629,31 @@ func TestStreamBodyRequestContentLength(t *testing.T) {
 
 	pipe := fasthttputil.NewPipeConns()
 	cc, sc := pipe.Conn1(), pipe.Conn2()
+	defer cc.Close()
 	if _, err := fmt.Fprintf(cc, "POST /foo2 HTTP/1.1\r\nHost: aaa.com\r\nContent-Length: %d\r\nContent-Type: aa\r\n\r\n%s", contentLength, content); err != nil {
 		t.Fatal(err)
 	}
 
-	ch := make(chan error)
+	ch := make(chan error, 1)
 	go func() {
 		ch <- s.ServeConn(sc)
 	}()
 
-	if err := sc.Close(); err != nil {
+	// Wait for the response before closing, so shutdown cannot race its write.
+	if err := cc.SetReadDeadline(time.Now().Add(testTimeout(time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(cc)); err != nil {
+		t.Fatalf("unexpected error reading response: %v", err)
+	}
+	if err := cc.Close(); err != nil {
 		t.Fatal(err)
 	}
 
 	select {
 	case err := <-ch:
-		if err == nil || err.Error() != fasthttputil.ErrConnectionClosed.Error() {
+		if err != nil {
 			t.Fatalf("Unexpected error from serveConn: %v", err)
 		}
 	case <-time.After(testTimeout(time.Second)):
