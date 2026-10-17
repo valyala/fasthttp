@@ -67,17 +67,90 @@ func TestNewVHostPathRewriter(t *testing.T) {
 func TestNewVHostPathRewriterMaliciousHost(t *testing.T) {
 	t.Parallel()
 
-	var ctx RequestCtx
-	var req Request
-	req.Header.SetHost("/../../../etc/passwd")
-	req.SetRequestURI("/foo/bar/baz")
-	ctx.Init(&req, nil, nil)
+	for _, host := range []string{"/../../../etc/passwd", `..\..\etc\passwd`} {
+		var ctx RequestCtx
+		var req Request
+		req.Header.SetHost(host)
+		req.SetRequestURI("/foo/bar/baz")
+		ctx.Init(&req, nil, nil)
 
-	f := NewVHostPathRewriter(0)
-	path := f(&ctx)
-	expectedPath := "/invalid-host/"
-	if string(path) != expectedPath {
-		t.Fatalf("unexpected path %q. Expecting %q", path, expectedPath)
+		f := NewVHostPathRewriter(0)
+		path := f(&ctx)
+		expectedPath := "/invalid-host/"
+		if string(path) != expectedPath {
+			t.Fatalf("unexpected path %q for host %q. Expecting %q", path, host, expectedPath)
+		}
+	}
+}
+
+func TestNewVHostPathRewriterEndToEnd(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	vhostRoot := filepath.Join(root, "example.com")
+	if err := os.MkdirAll(filepath.Join(vhostRoot, "%2e%2e"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"root-private.txt":                    "ROOT-PRIVATE-MARKER",
+		"example.com/public.txt":              "PUBLIC-MARKER",
+		"example.com/%2e%2e/literal-name.txt": "LITERAL-NAME-MARKER",
+	} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+	fs := &FS{
+		Root:        root,
+		PathRewrite: NewVHostPathRewriter(0),
+		CleanStop:   stop,
+	}
+	server := &Server{Handler: fs.NewRequestHandler(), Logger: TestLogger{t}}
+
+	// Windows normalization leaves `/../root-private.txt`, which FS must reject.
+	backslashStatus, backslashBody := StatusNotFound, "Cannot open requested path"
+	if runtime.GOOS == "windows" {
+		backslashStatus, backslashBody = StatusInternalServerError, "Internal Server Error"
+	}
+
+	for _, tc := range []struct {
+		name       string
+		host       string
+		path       string
+		wantStatus int
+		wantBody   string
+	}{
+		{"normal vhost file", "example.com", "/public.txt", StatusOK, "PUBLIC-MARKER"},
+		{"root file is isolated", "example.com", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
+		{"dot host", ".", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
+		{"dot dot host", "..", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
+		{"encoded dot host", "%252e", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
+		{"encoded parent path", "example.com", "/%252e%252e/root-private.txt", StatusNotFound, "Cannot open requested path"},
+		{"nested encoded parent path", "example.com", "/safe/%252e%252e/%252e%252e/root-private.txt", StatusNotFound, "Cannot open requested path"},
+		{"backslash parent path", "example.com", "/a/..%5c../root-private.txt", backslashStatus, backslashBody},
+		{"literal encoded name", "example.com", "/%252e%252e/literal-name.txt", StatusOK, "LITERAL-NAME-MARKER"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rw := &readWriter{}
+			fmt.Fprintf(&rw.r, "GET %s HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", tc.path, tc.host)
+			if err := server.ServeConn(rw); err != nil {
+				t.Fatalf("ServeConn() error: %v", err)
+			}
+
+			var response Response
+			if err := response.Read(bufio.NewReader(&rw.w)); err != nil {
+				t.Fatalf("Response.Read() error: %v", err)
+			}
+			if got := response.StatusCode(); got != tc.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %q", got, tc.wantStatus, response.Body())
+			}
+			if got := string(response.Body()); got != tc.wantBody {
+				t.Fatalf("body = %q, want %q", got, tc.wantBody)
+			}
+		})
 	}
 }
 
