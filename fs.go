@@ -275,17 +275,23 @@ type PathRewriteFunc func(ctx *RequestCtx) []byte
 func NewVHostPathRewriter(slashesCount int) PathRewriteFunc {
 	return func(ctx *RequestCtx) []byte {
 		path := stripLeadingSlashes(ctx.Path(), slashesCount)
+		// On Windows ctx.Path() may keep a '..' segment, e.g. from `/a/..\../`.
+		// Return it unchanged so FS rejects it instead of letting the second
+		// normalization below remove the host segment.
+		if hasDotDotPathSegment(path) {
+			return path
+		}
 		host := ctx.Host()
-		if n := bytes.IndexByte(host, '/'); n >= 0 {
+		if n := bytes.IndexAny(host, `/\`); n >= 0 {
 			host = nil
 		}
-		if len(host) == 0 {
+		if len(host) == 0 || len(bytes.Trim(host, ".")) == 0 {
 			host = strInvalidHost
 		}
 		b := bytebufferpool.Get()
 		b.B = append(b.B, '/')
-		b.B = append(b.B, host...)
-		b.B = append(b.B, path...)
+		b.B = appendQuotedPath(b.B, host)
+		b.B = appendQuotedPath(b.B, path)
 		ctx.URI().SetPathBytes(b.B)
 		bytebufferpool.Put(b)
 
