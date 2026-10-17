@@ -2053,9 +2053,8 @@ func (s *Server) Serve(ln net.Listener) error {
 		if !wp.Serve(c) {
 			s.open.Add(-1)
 			s.rejectedRequestsCount.Add(1)
-			s.writeFastError(c, StatusServiceUnavailable,
+			s.rejectConn(c, StatusServiceUnavailable,
 				"The connection cannot be served because Server.Concurrency limit exceeded")
-			c.Close()
 			s.setState(c, StateClosed)
 			if time.Since(lastOverflowErrorTime) > time.Minute {
 				s.logger().Printf("The incoming connection cannot be served, because %d concurrent connections are served. "+
@@ -2208,11 +2207,24 @@ func wrapPerIPConn(s *Server, c net.Conn) net.Conn {
 	n := s.perIPConnCounter.Register(ip)
 	if n > s.MaxConnsPerIP {
 		s.perIPConnCounter.Unregister(ip)
-		s.writeFastError(c, StatusTooManyRequests, "The number of connections from your ip exceeds MaxConnsPerIP")
-		c.Close()
+		s.rejectConn(c, StatusTooManyRequests, "The number of connections from your ip exceeds MaxConnsPerIP")
 		return nil
 	}
 	return newPerIPConn(c, ip, &s.perIPConnCounter)
+}
+
+func (s *Server) rejectConn(c net.Conn, statusCode int, msg string) {
+	conn := c
+	if pic, ok := conn.(*perIPConn); ok {
+		conn = pic.Conn
+	}
+	// A rejected TLS connection may not have completed its handshake. Writing
+	// an HTTP response would wait for the client's ClientHello, potentially
+	// blocking the accept loop or the ServeConn caller indefinitely.
+	if _, isTLS := conn.(tlsConn); !isTLS {
+		s.writeFastError(c, statusCode, msg)
+	}
+	c.Close()
 }
 
 var defaultLogger = Logger(log.New(os.Stderr, "", log.LstdFlags))
@@ -2254,8 +2266,7 @@ func (s *Server) ServeConn(c net.Conn) error {
 	}
 
 	if !s.tryAcquireConcurrency() {
-		s.writeFastError(c, StatusServiceUnavailable, "The connection cannot be served because Server.Concurrency limit exceeded")
-		c.Close()
+		s.rejectConn(c, StatusServiceUnavailable, "The connection cannot be served because Server.Concurrency limit exceeded")
 		return ErrConcurrencyLimit
 	}
 	defer s.releaseConcurrency()
