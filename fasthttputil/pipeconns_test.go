@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -64,6 +65,67 @@ func TestPipeConnsWriteTimeout(t *testing.T) {
 		if err != ErrTimeout {
 			t.Fatalf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 		}
+	}
+}
+
+func TestPipeConnsSetDeadlineConcurrent(t *testing.T) {
+	t.Parallel()
+
+	pc := NewPipeConns()
+	c1 := pc.Conn1()
+
+	readErr := make(chan error, 1)
+	go func() {
+		_, err := c1.Read(make([]byte, 1))
+		readErr <- err
+	}()
+	writeErr := make(chan error, 1)
+	go func() {
+		for {
+			if _, err := c1.Write([]byte("foobar")); err != nil {
+				writeErr <- err
+				return
+			}
+		}
+	}()
+
+	// Move the deadlines while the other side neither reads nor writes,
+	// so that Read and Write are blocked.
+	for range 100 {
+		if err := c1.SetDeadline(time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		time.Sleep(100 * time.Microsecond)
+	}
+
+	// A deadline in the past interrupts the pending operations.
+	if err := c1.SetDeadline(time.Now()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, ch := range []chan error{readErr, writeErr} {
+		select {
+		case err := <-ch:
+			if err != ErrTimeout {
+				t.Fatalf("unexpected error: %v. Expecting %v", err, ErrTimeout)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("pending operation not interrupted by the deadline")
+		}
+	}
+
+	// Clearing the deadline makes the connection usable again.
+	if err := c1.SetDeadline(time.Time{}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := pc.Conn2().Write([]byte("x")); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := c1.Read(make([]byte, 1)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if err := pc.Close(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -404,4 +466,33 @@ func TestPipeConnsAddrCustom(t *testing.T) {
 	if c2.RemoteAddr() != addr2 {
 		t.Fatalf("unexpected remote address: %v", c2.RemoteAddr())
 	}
+}
+
+func TestPipeConnsCollectedWithPendingDeadline(t *testing.T) {
+	t.Parallel()
+
+	collected := make(chan struct{})
+	func() {
+		pc := NewPipeConns()
+		runtime.AddCleanup(pc, func(ch chan struct{}) { close(ch) }, collected)
+		c := pc.Conn1()
+		if err := c.SetDeadline(time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("x")); err != nil {
+			t.Fatal(err)
+		}
+		if err := pc.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	for range 100 {
+		runtime.GC()
+		select {
+		case <-collected:
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	t.Fatal("a closed pipe with a pending deadline was not collected")
 }
