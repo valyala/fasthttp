@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -212,6 +213,11 @@ type Client struct {
 	//
 	// Default DialTimeout is used if not set.
 	DialTimeout DialFuncWithTimeout
+
+	// Callback for establishing new connections to hosts with context.
+	//
+	// If not set, DialTimeout or Dial is used.
+	DialContext DialFuncWithContext
 
 	// Callback for establishing new connections to hosts.
 	//
@@ -500,6 +506,70 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 	return c.Do(req, resp)
 }
 
+// DoContext performs the given http request and fills the given http response,
+// respecting context cancellation and deadlines.
+//
+// Request must contain at least non-zero RequestURI with full url (including
+// scheme and host) or non-zero Host header + RequestURI.
+//
+// Client determines the server to be requested in the following order:
+//
+//   - from RequestURI if it contains full url with scheme and host;
+//   - from Host header otherwise.
+//
+// The function doesn't follow redirects. Use Get* for following redirects.
+//
+// Response is ignored if resp is nil.
+//
+// If ctx is already done, ctx.Err() is returned immediately.
+// If ctx is cancelled or expires during dial, reading, or writing, the
+// operation is aborted and ctx.Err() is returned.
+//
+// ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
+// to the requested host are busy.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
+func (c *Client) DoContext(ctx context.Context, req *Request, resp *Response) error {
+	if ctx == nil {
+		return errors.New("fasthttp: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	uri := req.URI()
+	if uri == nil {
+		return ErrorInvalidURI
+	}
+
+	host := uri.Host()
+
+	if bytes.ContainsRune(host, ',') {
+		return fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
+	}
+
+	isTLS := false
+	if uri.isHTTPS() {
+		isTLS = true
+	} else if !uri.isHTTP() {
+		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
+	}
+
+	c.mOnce.Do(func() {
+		c.m = make(map[string]*HostClient)
+		c.ms = make(map[string]*HostClient)
+	})
+	hc, err := c.hostClient(host, isTLS)
+	if err != nil {
+		return err
+	}
+
+	atomic.AddInt32(&hc.pendingClientRequests, 1)
+	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
+	return hc.DoContext(ctx, req, resp)
+}
+
 // DoRedirects performs the given http request and fills the given http response,
 // following up to maxRedirectsCount redirects. When the redirect count exceeds
 // maxRedirectsCount, ErrTooManyRedirects is returned.
@@ -604,6 +674,7 @@ func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
 		NoDefaultUserAgentHeader:      c.NoDefaultUserAgentHeader,
 		Dial:                          c.Dial,
 		DialTimeout:                   c.DialTimeout,
+		DialContext:                   c.DialContext,
 		DialDualStack:                 c.DialDualStack,
 		IsTLS:                         isTLS,
 		TLSConfig:                     c.TLSConfig,
@@ -758,6 +829,20 @@ type DialFunc func(addr string) (net.Conn, error)
 //   - foobar.com:8080
 type DialFuncWithTimeout func(addr string, timeout time.Duration) (net.Conn, error)
 
+// DialFuncWithContext must establish connection to addr using the provided context.
+//
+// There is no need in establishing TLS (SSL) connection for https.
+// The client automatically converts connection to TLS
+// if HostClient.IsTLS is set.
+//
+// TCP address passed to DialFuncWithContext always contains host and port.
+// Example TCP addr values:
+//
+//   - foobar.com:80
+//   - foobar.com:443
+//   - foobar.com:8080
+type DialFuncWithContext func(ctx context.Context, addr string) (net.Conn, error)
+
 // RetryIfFunc defines the signature of the retry if function.
 // Request argument passed to RetryIfFunc, if there are any request errors.
 type RetryIfFunc func(request *Request) bool
@@ -822,6 +907,11 @@ type HostClient struct {
 	//
 	// Default DialTimeout is used if not set.
 	DialTimeout DialFuncWithTimeout
+
+	// Callback for establishing new connections to hosts with context.
+	//
+	// If not set, DialTimeout or Dial is used.
+	DialContext DialFuncWithContext
 
 	// Callback for establishing new connections to hosts.
 	//
@@ -1591,6 +1681,54 @@ func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time
 	return c.Do(req, resp)
 }
 
+// DoContext performs the given http request and sets the corresponding response,
+// respecting context cancellation and deadlines.
+//
+// Request must contain at least non-zero RequestURI with full url (including
+// scheme and host) or non-zero Host header + RequestURI.
+//
+// The function doesn't follow redirects. Use Get* for following redirects.
+//
+// Response is ignored if resp is nil.
+//
+// If ctx is already done, ctx.Err() is returned immediately.
+// If ctx is cancelled or expires during dial, reading, or writing, the
+// operation is aborted and ctx.Err() is returned.
+//
+// ErrNoFreeConns is returned if all HostClient.MaxConns connections
+// to the host are busy.
+//
+// It is recommended obtaining req and resp via AcquireRequest
+// and AcquireResponse in performance-critical code.
+func (c *HostClient) DoContext(ctx context.Context, req *Request, resp *Response) error {
+	if ctx == nil {
+		return errors.New("fasthttp: nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	oldCtx := req.ctx
+	oldTimeout := req.timeout
+	req.ctx = ctx
+	defer func() {
+		req.ctx = oldCtx
+		req.timeout = oldTimeout
+	}()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout := time.Until(deadline)
+		if timeout <= 0 {
+			return ctx.Err()
+		}
+		if req.timeout <= 0 || timeout < req.timeout {
+			req.timeout = timeout
+		}
+	}
+
+	return c.Do(req, resp)
+}
+
 // DoRedirects performs the given http request and fills the given http response,
 // following up to maxRedirectsCount redirects. When the redirect count exceeds
 // maxRedirectsCount, ErrTooManyRedirects is returned.
@@ -1653,6 +1791,17 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 	if timeout > 0 {
 		deadline = time.Now().Add(timeout)
 	}
+	if req.ctx != nil {
+		if ctxDeadline, ok := req.ctx.Deadline(); ok {
+			if deadline.IsZero() || ctxDeadline.Before(deadline) {
+				deadline = ctxDeadline
+				timeout = time.Until(deadline)
+				if timeout <= 0 {
+					return req.ctx.Err()
+				}
+			}
+		}
+	}
 	retryFunc := c.RetryIf
 	if retryFunc == nil {
 		retryFunc = isIdempotent
@@ -1660,17 +1809,31 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 
 	atomic.AddInt32(&c.pendingRequests, 1)
 	for {
+		if req.ctx != nil {
+			if err = req.ctx.Err(); err != nil {
+				break
+			}
+		}
+
 		// If the original timeout was set, we need to update
 		// the one set on the request to reflect the remaining time.
 		if timeout > 0 {
 			req.timeout = time.Until(deadline)
 			if req.timeout <= 0 {
-				err = ErrTimeout
+				if req.ctx != nil && req.ctx.Err() != nil {
+					err = req.ctx.Err()
+				} else {
+					err = ErrTimeout
+				}
 				break
 			}
 		}
 
 		retry, err = c.do(req, resp)
+		if req.ctx != nil && req.ctx.Err() != nil {
+			err = req.ctx.Err()
+			break
+		}
 		if err == nil || !retry {
 			break
 		}
@@ -1874,6 +2037,15 @@ func (c *HostClient) serveWaiterLocked() bool {
 }
 
 func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
+	return c.acquireConn(nil, reqTimeout, connectionClose)
+}
+
+func (c *HostClient) acquireConn(ctx context.Context, reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	createConn := false
 	startCleaner := false
 
@@ -1945,11 +2117,21 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 
 		c.queueForIdle(w, connectionClose)
 
+		var ctxDone <-chan struct{}
+		if ctx != nil {
+			ctxDone = ctx.Done()
+		}
+
 		select {
 		case <-w.ready:
 			return w.conn, w.err
+		case <-ctxDone:
+			return nil, ctx.Err()
 		case <-tc.C:
 			if timeoutOverridden {
+				if ctx != nil && ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
 				return nil, ErrTimeout
 			}
 			return nil, ErrNoFreeConns
@@ -1960,7 +2142,7 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 		go c.connsCleaner()
 	}
 
-	conn, err := c.dialHostHard(reqTimeout)
+	conn, err := c.dialHostHardContext(ctx, reqTimeout)
 	if err != nil {
 		c.decConnsCount()
 		return nil, err
@@ -2328,6 +2510,15 @@ func (c *HostClient) nextAddr() string {
 }
 
 func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err error) {
+	return c.dialHostHardContext(nil, dialTimeout)
+}
+
+func (c *HostClient) dialHostHardContext(ctx context.Context, dialTimeout time.Duration) (conn net.Conn, err error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
 	// use dialTimeout to control the timeout of each dial. It does not work if dialTimeout is 0 or if
 	// c.DialTimeout has not been set and c.Dial has been set.
 	// attempt to dial all the available hosts before giving up.
@@ -2347,6 +2538,11 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 	}
 	deadline := time.Now().Add(timeout)
 	for n > 0 {
+		if ctx != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		}
 		addr := c.nextAddr()
 		var tlsConfig *tls.Config
 		if c.IsTLS {
@@ -2356,9 +2552,16 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 				continue
 			}
 		}
-		conn, err = dialAddr(addr, c.Dial, c.DialTimeout, c.DialDualStack, c.IsTLS, tlsConfig, dialTimeout, c.WriteTimeout)
+		conn, err = dialAddrContext(ctx, addr, c.Dial, c.DialTimeout, c.DialContext, c.DialDualStack, c.IsTLS, tlsConfig, dialTimeout, c.WriteTimeout)
 		if err == nil {
+			if ctx != nil && ctx.Err() != nil {
+				_ = conn.Close()
+				return nil, ctx.Err()
+			}
 			return conn, nil
+		}
+		if ctx != nil && ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 		if time.Since(deadline) >= 0 {
 			break
@@ -2420,13 +2623,27 @@ func dialAddr(
 	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool,
 	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
 ) (net.Conn, error) {
+	return dialAddrContext(nil, addr, dial, dialWithTimeout, nil, dialDualStack, isTLS, tlsConfig, dialTimeout, writeTimeout)
+}
+
+func dialAddrContext(
+	ctx context.Context,
+	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialContext DialFuncWithContext,
+	dialDualStack, isTLS bool,
+	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
+) (net.Conn, error) {
 	deadline := time.Now().Add(writeTimeout)
-	conn, err := callDialFunc(addr, dial, dialWithTimeout, dialDualStack, isTLS, dialTimeout)
+	conn, err := callDialFunc(ctx, addr, dial, dialWithTimeout, dialContext, dialDualStack, isTLS, dialTimeout)
 	if err != nil {
 		return nil, err
 	}
 	if conn == nil {
 		return nil, errors.New("dialling unsuccessful: please report this bug")
+	}
+
+	if ctx != nil && ctx.Err() != nil {
+		_ = conn.Close()
+		return nil, ctx.Err()
 	}
 
 	// We assume that any conn that has the Handshake() method is a TLS conn already.
@@ -2443,8 +2660,13 @@ func dialAddr(
 }
 
 func callDialFunc(
-	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool, timeout time.Duration,
+	ctx context.Context,
+	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialContext DialFuncWithContext,
+	dialDualStack, isTLS bool, timeout time.Duration,
 ) (net.Conn, error) {
+	if dialContext != nil && ctx != nil {
+		return dialContext(ctx, addr)
+	}
 	if dialWithTimeout != nil {
 		return dialWithTimeout(addr, timeout)
 	}
@@ -2452,6 +2674,12 @@ func callDialFunc(
 		return dial(addr)
 	}
 	addr = AddMissingPort(addr, isTLS)
+	if ctx != nil {
+		if dialDualStack {
+			return defaultDialer.DialDualStackContext(ctx, addr)
+		}
+		return defaultDialer.DialContext(ctx, addr)
+	}
 	if timeout > 0 {
 		if dialDualStack {
 			return DialDualStackTimeout(addr, timeout)
@@ -3527,12 +3755,46 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	if req.timeout > 0 {
 		deadline = time.Now().Add(req.timeout)
 	}
+	if req.ctx != nil {
+		if ctxDeadline, ok := req.ctx.Deadline(); ok {
+			if deadline.IsZero() || ctxDeadline.Before(deadline) {
+				deadline = ctxDeadline
+			}
+		}
+	}
 
-	cc, err := hc.AcquireConn(req.timeout, req.ConnectionClose())
+	cc, err := hc.acquireConn(req.ctx, req.timeout, req.ConnectionClose())
 	if err != nil {
+		if req.ctx != nil && req.ctx.Err() != nil {
+			return false, req.ctx.Err()
+		}
 		return false, err
 	}
 	conn := cc.c
+
+	var (
+		cancelWatch chan struct{}
+		watchDone   chan struct{}
+	)
+	if ctx := req.ctx; ctx != nil && ctx.Done() != nil {
+		cancelWatch = make(chan struct{})
+		watchDone = make(chan struct{})
+		go func() {
+			defer close(watchDone)
+			select {
+			case <-ctx.Done():
+				_ = conn.Close()
+			case <-cancelWatch:
+			}
+		}()
+	}
+	stopWatch := func() {
+		if cancelWatch != nil {
+			close(cancelWatch)
+			<-watchDone
+			cancelWatch = nil
+		}
+	}
 
 	resp.ParseNetConn(conn)
 
@@ -3546,7 +3808,11 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 
 	if !writeDeadline.IsZero() || cc.writeDeadlineSet {
 		if err = conn.SetWriteDeadline(writeDeadline); err != nil {
+			stopWatch()
 			hc.CloseConn(cc)
+			if req.ctx != nil && req.ctx.Err() != nil {
+				return false, req.ctx.Err()
+			}
 			return true, err
 		}
 		cc.writeDeadlineSet = !writeDeadline.IsZero()
@@ -3576,7 +3842,11 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 
 	if err != nil {
+		stopWatch()
 		hc.CloseConn(cc)
+		if req.ctx != nil && req.ctx.Err() != nil {
+			return false, req.ctx.Err()
+		}
 		return true, err
 	}
 
@@ -3590,7 +3860,11 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 
 	if !readDeadline.IsZero() || cc.readDeadlineSet {
 		if err = conn.SetReadDeadline(readDeadline); err != nil {
+			stopWatch()
 			hc.CloseConn(cc)
+			if req.ctx != nil && req.ctx.Err() != nil {
+				return false, req.ctx.Err()
+			}
 			return true, err
 		}
 		cc.readDeadlineSet = !readDeadline.IsZero()
@@ -3606,11 +3880,22 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	br := hc.AcquireReader(conn)
 	err = resp.ReadLimitBody(br, hc.MaxResponseBodySize)
 	if err != nil {
+		stopWatch()
 		hc.ReleaseReader(br)
 		hc.CloseConn(cc)
+		if req.ctx != nil && req.ctx.Err() != nil {
+			return false, req.ctx.Err()
+		}
 		// Don't retry in case of ErrBodyTooLarge since we will just get the same again.
 		needRetry := err != ErrBodyTooLarge
 		return needRetry, err
+	}
+
+	if req.ctx != nil && req.ctx.Err() != nil {
+		stopWatch()
+		hc.ReleaseReader(br)
+		hc.CloseConn(cc)
+		return false, req.ctx.Err()
 	}
 
 	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
@@ -3636,6 +3921,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 				_ = conn.Close()
 			},
 			release: func(discard bool) {
+				stopWatch()
 				hc.ReleaseReader(br)
 				releaseRequestStream(rs)
 				releaseConn(discard)
@@ -3643,6 +3929,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 		return false, nil
 	}
+	stopWatch()
 	hc.ReleaseReader(br)
 
 	if closeConn {
