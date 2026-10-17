@@ -2774,6 +2774,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		connectionClose = connectionClose ||
 			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
 			ctx.Response.Header.ConnectionClose() ||
+			(reqStream != nil && reqStream.failed) ||
 			(s.CloseOnShutdown && s.stop.Load() == 1)
 
 		// If no response stream can consume the request body, a known-length

@@ -32,9 +32,23 @@ type requestStream struct {
 	// server loop once it has drained what the handler left unread, so a
 	// response body streaming from it must not release it.
 	releaseOnClose bool
+	// failed is set once a Read returns an error other than io.EOF. The
+	// stream is then at an unknown offset in the body, so the connection can't
+	// be reused, and a later Read that happens to succeed doesn't change that.
+	// The server loop owns the stream, so a handler resetting the request
+	// can't clear it.
+	failed bool
 }
 
 func (rs *requestStream) Read(p []byte) (int, error) {
+	n, err := rs.read(p)
+	if err != nil && err != io.EOF {
+		rs.failed = true
+	}
+	return n, err
+}
+
+func (rs *requestStream) read(p []byte) (int, error) {
 	if rs.reader == nil {
 		panic("BUG: reading released body stream")
 	}
@@ -123,6 +137,12 @@ func (rs *requestStream) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// truncated reports whether a fixed-length body ended before Content-Length
+// bytes of it were read.
+func (rs *requestStream) truncated() bool {
+	return rs.eof && rs.contentLength >= 0 && rs.totalBytesRead < rs.contentLength
+}
+
 // bodyOverflows reports whether more than limit bytes of a known-length body
 // are still unread. A chunked body has no declared length, so it always
 // returns false and is drained best-effort by discard instead. The framing
@@ -165,6 +185,7 @@ func releaseRequestStream(rs *requestStream) {
 	rs.totalBytesRead = 0
 	rs.chunkLeft = 0
 	rs.reader = nil
+	rs.failed = false
 	rs.header = nil
 	rs.contentLength = 0
 	rs.eof = false
