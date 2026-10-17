@@ -30,6 +30,9 @@ import (
 //   - net/http -> fasthttp handler conversion has some overhead,
 //     so the returned handler will be always slower than manually written
 //     fasthttp handler.
+//   - Request bodies are fully buffered via ctx.PostBody() before invoking the
+//     adapted handler, even when StreamRequestBody is enabled. As a result,
+//     http.ResponseController.SetReadDeadline cannot control upload read timeouts.
 //
 // So it is advisable using this function only for quick net/http -> fasthttp
 // switching. Then manually convert net/http handlers to fasthttp handlers
@@ -50,6 +53,9 @@ func NewFastHTTPHandlerFunc(h http.HandlerFunc) fasthttp.RequestHandler {
 //   - net/http -> fasthttp handler conversion has some overhead,
 //     so the returned handler will be always slower than manually written
 //     fasthttp handler.
+//   - Request bodies are fully buffered via ctx.PostBody() before invoking the
+//     adapted handler, even when StreamRequestBody is enabled. As a result,
+//     http.ResponseController.SetReadDeadline cannot control upload read timeouts.
 //
 // So it is advisable using this function only for quick net/http -> fasthttp
 // switching. Then manually convert net/http handlers to fasthttp handlers
@@ -648,6 +654,13 @@ func addTrailer(ctx *fasthttp.RequestCtx, name string, values []string) {
 
 // SetReadDeadline sets the read deadline on the underlying connection.
 // This enables support for http.ResponseController.SetReadDeadline.
+//
+// Note: Because ConvertRequest reads the full request body via ctx.PostBody()
+// before invoking the adapted net/http handler, the body has already been
+// read by the time the handler runs (even if StreamRequestBody is enabled).
+// SetReadDeadline allows handlers to satisfy http.ResponseController calls
+// without returning an unsupported method error, but it cannot be used to
+// control the upload timeout of the incoming request body.
 func (w *writer) SetReadDeadline(deadline time.Time) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -666,14 +679,4 @@ func (w *writer) SetWriteDeadline(deadline time.Time) error {
 		return fasthttp.ErrNilConnection
 	}
 	return w.ctx.SetWriteDeadline(deadline)
-}
-
-// SetDeadline sets the read and write deadlines on the underlying connection.
-func (w *writer) SetDeadline(deadline time.Time) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.ctx == nil {
-		return fasthttp.ErrNilConnection
-	}
-	return w.ctx.SetDeadline(deadline)
 }

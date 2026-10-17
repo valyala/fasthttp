@@ -1790,9 +1790,6 @@ func TestResponseControllerDeadlines(t *testing.T) {
 	if err := w.SetWriteDeadline(d); !errors.Is(err, fasthttp.ErrNilConnection) {
 		t.Fatalf("expected ErrNilConnection, got %v", err)
 	}
-	if err := w.SetDeadline(d); !errors.Is(err, fasthttp.ErrNilConnection) {
-		t.Fatalf("expected ErrNilConnection, got %v", err)
-	}
 
 	var (
 		directReadErr, directWriteErr   error
@@ -2001,9 +1998,6 @@ func TestResponseControllerKeepAliveStreamingHeadNoDeadlineLeak(t *testing.T) {
 					for range 50 {
 						_ = rc.SetWriteDeadline(time.Now().Add(10 * time.Millisecond))
 						_ = rc.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
-						if d, ok := w.(interface{ SetDeadline(time.Time) error }); ok {
-							_ = d.SetDeadline(time.Now().Add(10 * time.Millisecond))
-						}
 					}
 					close(deadlineApplied)
 				}()
@@ -2106,9 +2100,6 @@ func TestResponseControllerDeadlinesAfterReleaseWriter(t *testing.T) {
 		t.Fatalf("expected ErrNilConnection, got %v", err)
 	}
 	if err := releasedWriter.SetWriteDeadline(d); !errors.Is(err, fasthttp.ErrNilConnection) {
-		t.Fatalf("expected ErrNilConnection, got %v", err)
-	}
-	if err := releasedWriter.SetDeadline(d); !errors.Is(err, fasthttp.ErrNilConnection) {
 		t.Fatalf("expected ErrNilConnection, got %v", err)
 	}
 }

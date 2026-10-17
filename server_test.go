@@ -6826,9 +6826,6 @@ func TestRequestCtxDeadlines(t *testing.T) {
 	if err := ctx.SetWriteDeadline(d); !errors.Is(err, ErrNilConnection) {
 		t.Fatalf("expected ErrNilConnection, got %v", err)
 	}
-	if err := ctx.SetDeadline(d); !errors.Is(err, ErrNilConnection) {
-		t.Fatalf("expected ErrNilConnection, got %v", err)
-	}
 
 	// When connection is present
 	rw := &readWriter{}
@@ -6838,9 +6835,6 @@ func TestRequestCtxDeadlines(t *testing.T) {
 	}
 	if err := ctx.SetWriteDeadline(d); err != nil {
 		t.Fatalf("unexpected error from SetWriteDeadline: %v", err)
-	}
-	if err := ctx.SetDeadline(d); err != nil {
-		t.Fatalf("unexpected error from SetDeadline: %v", err)
 	}
 }
 
@@ -7003,10 +6997,6 @@ func TestServerTimeoutHandlerConcurrentAddressesAndDeadlines(t *testing.T) {
 						t.Errorf("expected ErrDeadlineUpdatesDisabled, got %v", err)
 					}
 					err = ctx.SetWriteDeadline(time.Now().Add(time.Second))
-					if !errors.Is(err, ErrDeadlineUpdatesDisabled) {
-						t.Errorf("expected ErrDeadlineUpdatesDisabled, got %v", err)
-					}
-					err = ctx.SetDeadline(time.Now().Add(time.Second))
 					if !errors.Is(err, ErrDeadlineUpdatesDisabled) {
 						t.Errorf("expected ErrDeadlineUpdatesDisabled, got %v", err)
 					}

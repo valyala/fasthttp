@@ -681,7 +681,8 @@ type RequestCtx struct {
 	hijackNoResponse        bool
 	deadlineMu              sync.Mutex
 	deadlineUpdatesDisabled atomic.Bool
-	handlerReadDeadlineSet  atomic.Bool
+	handlerDeadlineSet      atomic.Bool
+	handlerReadDeadlineSet  bool
 	handlerWriteDeadlineSet atomic.Bool
 }
 
@@ -942,7 +943,8 @@ func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
 	}
 	err := ctx.c.SetReadDeadline(deadline)
 	if err == nil {
-		ctx.handlerReadDeadlineSet.Store(true)
+		ctx.handlerReadDeadlineSet = true
+		ctx.handlerDeadlineSet.Store(true)
 	}
 	return err
 }
@@ -960,24 +962,7 @@ func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
 	err := ctx.c.SetWriteDeadline(deadline)
 	if err == nil {
 		ctx.handlerWriteDeadlineSet.Store(true)
-	}
-	return err
-}
-
-// SetDeadline sets the read and write deadlines associated with the underlying connection.
-func (ctx *RequestCtx) SetDeadline(deadline time.Time) error {
-	ctx.deadlineMu.Lock()
-	defer ctx.deadlineMu.Unlock()
-	if ctx.c == nil {
-		return ErrNilConnection
-	}
-	if ctx.deadlineUpdatesDisabled.Load() {
-		return ErrDeadlineUpdatesDisabled
-	}
-	err := ctx.c.SetDeadline(deadline)
-	if err == nil {
-		ctx.handlerReadDeadlineSet.Store(true)
-		ctx.handlerWriteDeadlineSet.Store(true)
+		ctx.handlerDeadlineSet.Store(true)
 	}
 	return err
 }
@@ -995,7 +980,8 @@ func (ctx *RequestCtx) reset() {
 	ctx.deadlineMu.Lock()
 	ctx.c = nil
 	ctx.deadlineUpdatesDisabled.Store(false)
-	ctx.handlerReadDeadlineSet.Store(false)
+	ctx.handlerDeadlineSet.Store(false)
+	ctx.handlerReadDeadlineSet = false
 	ctx.handlerWriteDeadlineSet.Store(false)
 	ctx.deadlineMu.Unlock()
 
@@ -2820,11 +2806,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 			oldCtx.deadlineUpdatesDisabled.Store(true)
 			oldCtx.deadlineMu.Lock()
-			if oldCtx.handlerReadDeadlineSet.Load() {
-				ctx.handlerReadDeadlineSet.Store(true)
+			if oldCtx.handlerReadDeadlineSet {
+				ctx.handlerReadDeadlineSet = true
+				ctx.handlerDeadlineSet.Store(true)
 			}
 			if oldCtx.handlerWriteDeadlineSet.Load() {
 				ctx.handlerWriteDeadlineSet.Store(true)
+				ctx.handlerDeadlineSet.Store(true)
 			}
 			oldCtx.deadlineMu.Unlock()
 		}
@@ -2838,26 +2826,22 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		hijackNoResponse = ctx.hijackNoResponse && hijackHandler != nil
 		ctx.hijackNoResponse = false
 
-		ctx.deadlineMu.Lock()
 		if ctx.handlerWriteDeadlineSet.Load() {
 			previousWriteTimeout = 0
 		} else {
 			if writeTimeout > 0 {
 				if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-					ctx.deadlineMu.Unlock()
 					break
 				}
 				previousWriteTimeout = writeTimeout
 			} else if previousWriteTimeout > 0 {
 				// We don't want a write timeout but we previously set one, remove it.
 				if err = c.SetWriteDeadline(zeroTime); err != nil {
-					ctx.deadlineMu.Unlock()
 					break
 				}
 				previousWriteTimeout = 0
 			}
 		}
-		ctx.deadlineMu.Unlock()
 
 		connectionClose = connectionClose ||
 			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
@@ -2972,29 +2956,32 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Request.bodyStream = nil
 		ctx.Request.serverStream = nil
 
-		ctx.deadlineMu.Lock()
-		if ctx.handlerReadDeadlineSet.Load() {
-			if err = c.SetReadDeadline(zeroTime); err != nil {
-				ctx.deadlineMu.Unlock()
-				break
-			}
-			ctx.handlerReadDeadlineSet.Store(false)
-		}
-		if ctx.handlerWriteDeadlineSet.Load() {
-			if bw != nil && bw.Buffered() > 0 {
-				if err = bw.Flush(); err != nil {
+		if ctx.handlerDeadlineSet.Load() {
+			ctx.deadlineMu.Lock()
+			if ctx.handlerReadDeadlineSet {
+				if err = c.SetReadDeadline(zeroTime); err != nil {
 					ctx.deadlineMu.Unlock()
 					break
 				}
+				ctx.handlerReadDeadlineSet = false
 			}
-			if err = c.SetWriteDeadline(zeroTime); err != nil {
-				ctx.deadlineMu.Unlock()
-				break
+			if ctx.handlerWriteDeadlineSet.Load() {
+				if bw != nil && bw.Buffered() > 0 {
+					if err = bw.Flush(); err != nil {
+						ctx.deadlineMu.Unlock()
+						break
+					}
+				}
+				if err = c.SetWriteDeadline(zeroTime); err != nil {
+					ctx.deadlineMu.Unlock()
+					break
+				}
+				ctx.handlerWriteDeadlineSet.Store(false)
+				previousWriteTimeout = 0
 			}
-			ctx.handlerWriteDeadlineSet.Store(false)
-			previousWriteTimeout = 0
+			ctx.handlerDeadlineSet.Store(false)
+			ctx.deadlineMu.Unlock()
 		}
-		ctx.deadlineMu.Unlock()
 
 		idleConnTime.Store(reqSecond)
 		s.setState(c, StateIdle)
