@@ -5923,6 +5923,57 @@ func TestTCPDialerDNSCleanerStopsAndRestarts(t *testing.T) {
 	waitForTCPDialerCleanerState(t, dialer, false)
 }
 
+func TestTCPDialerKeepAlive(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer ln.Close()
+
+	ch := make(chan struct{})
+	go func() {
+		defer close(ch)
+		conn, err := ln.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	dialer := &TCPDialer{
+		KeepAlive: 5 * time.Second,
+	}
+
+	conn, err := dialer.Dial(ln.Addr().String())
+	if err != nil {
+		t.Fatalf("unexpected error dialing with KeepAlive: %v", err)
+	}
+	defer conn.Close()
+
+	<-ch
+
+	// Test with negative KeepAlive (disabled)
+	ch2 := make(chan struct{})
+	go func() {
+		defer close(ch2)
+		conn, err := ln.Accept()
+		if err == nil {
+			conn.Close()
+		}
+	}()
+
+	dialerDisabled := &TCPDialer{
+		KeepAlive: -1,
+	}
+
+	conn2, err := dialerDisabled.DialTimeout(ln.Addr().String(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error dialing with disabled KeepAlive: %v", err)
+	}
+	defer conn2.Close()
+
+	<-ch2
+}
+
 func dialForDNSCache(t *testing.T, dialer *TCPDialer) {
 	t.Helper()
 

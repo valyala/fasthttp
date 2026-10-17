@@ -160,6 +160,11 @@ type TCPDialer struct {
 	// DNSCacheDuration may be used to override the default DNS cache duration (DefaultDNSCacheDuration)
 	DNSCacheDuration time.Duration
 
+	// KeepAlive specifies the keep-alive period for an active network connection.
+	// If zero, keep-alives are enabled if supported by the protocol and operating system.
+	// If negative, keep-alives are disabled.
+	KeepAlive time.Duration
+
 	once sync.Once
 
 	// DisableDNSResolution may be used to disable DNS resolution
@@ -356,6 +361,9 @@ func (d *TCPDialer) tryDial(
 	dialer := net.Dialer{}
 	if d.LocalAddr != nil {
 		dialer.LocalAddr = d.LocalAddr
+	}
+	if d.KeepAlive != 0 {
+		dialer.KeepAlive = d.KeepAlive
 	}
 
 	ctx, cancelCtx := context.WithDeadline(context.Background(), deadline)
