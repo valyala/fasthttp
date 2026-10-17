@@ -19,6 +19,11 @@ import (
 //
 // The http.Request must not be used after the fasthttp handler has returned!
 // Memory in use by the http.Request will be reused after your handler has returned!
+//
+// Note: ConvertRequest consumes the full request body via ctx.PostBody(),
+// buffering it into r.Body even when StreamRequestBody is enabled. As a result,
+// adapted handlers calling http.ResponseController.SetReadDeadline cannot
+// control the upload timeout for the incoming request body.
 func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) error {
 	body := ctx.PostBody()
 	strRequestURI := b2s(ctx.RequestURI())
