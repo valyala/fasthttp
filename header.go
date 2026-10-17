@@ -3802,6 +3802,15 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 					return 0, 0, errors.New("too many transfer-encoding headers")
 				}
 				transferEncodingSeen = true
+				// RFC 9112, section 6.3: a request body can only be framed
+				// by chunked, so any other transfer coding is rejected.
+				if !caseInsensitiveCompare(s.value, strChunked) {
+					h.connectionClose = true
+					if h.secureErrorLogMessage {
+						return 0, 0, ErrUnsupportedTransferEncoding
+					}
+					return 0, 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
+				}
 			}
 		}
 
@@ -3852,21 +3861,8 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 			}
 		case 't':
 			if isTransferEncoding {
-				isIdentity := caseInsensitiveCompare(s.value, strIdentity)
-				isChunked := caseInsensitiveCompare(s.value, strChunked)
-
-				if !isIdentity && !isChunked {
-					h.connectionClose = true
-					if h.secureErrorLogMessage {
-						return 0, 0, ErrUnsupportedTransferEncoding
-					}
-					return 0, 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
-				}
-
-				if isChunked {
-					h.contentLength = -1
-					h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
-				}
+				h.contentLength = -1
+				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
 				continue
 			}
 			if caseInsensitiveCompare(s.key, strTrailer) {
