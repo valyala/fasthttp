@@ -984,6 +984,270 @@ func TestServerMaxConnsPerIPLimitIPv6(t *testing.T) {
 	}
 }
 
+func TestServerMaxConnsPerIPTLSRejectDoesNotBlockAccept(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	certData, keyData, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK") //nolint:errcheck
+		},
+		ReadTimeout:   testTimeout(2 * time.Second),
+		MaxConnsPerIP: 1,
+		Logger:        &testLogger{},
+	}
+	if err = s.AppendCertEmbed(certData, keyData); err != nil {
+		t.Fatal(err)
+	}
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- s.ServeTLS(ln, "", "")
+	}()
+	defer func() {
+		ln.Close()
+		select {
+		case err := <-serverErr:
+			if err != nil {
+				t.Errorf("ServeTLS: %v", err)
+			}
+		case <-time.After(testTimeout(3 * time.Second)):
+			t.Error("ServeTLS did not stop after closing its listener")
+		}
+	}()
+
+	// The first client occupies the per-IP slot without sending a ClientHello.
+	c1, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c1.Close()
+
+	waitForCount := func(want int) {
+		t.Helper()
+		deadline := time.Now().Add(testTimeout(3 * time.Second))
+		for time.Now().Before(deadline) {
+			s.perIPConnCounter.lock.Lock()
+			count := 0
+			for _, n := range s.perIPConnCounter.m {
+				count += n
+			}
+			s.perIPConnCounter.lock.Unlock()
+			if count == want {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+		t.Fatalf("per-IP connection count did not become %d", want)
+	}
+	waitForCount(1)
+
+	// The second client also sends nothing. Its rejected TLS socket must be
+	// closed without a handshake on the accept loop.
+	c2, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c2.Close()
+	if err = c2.SetReadDeadline(time.Now().Add(testTimeout(500 * time.Millisecond))); err != nil {
+		t.Fatal(err)
+	}
+	var b [1]byte
+	if _, err = c2.Read(b[:]); err != io.EOF {
+		t.Fatalf("rejected TLS connection should close without a handshake; read error: %v", err)
+	}
+	c1.Close()
+	waitForCount(0)
+
+	c3, err := tls.DialWithDialer(&net.Dialer{Timeout: testTimeout(time.Second)},
+		"tcp", ln.Addr().String(), &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatalf("TLS handshake after per-IP slot was released: %v", err)
+	}
+	defer c3.Close()
+	if _, err = c3.Write([]byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	var resp Response
+	if err = resp.Read(bufio.NewReader(c3)); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode() != StatusOK || string(resp.Body()) != "OK" {
+		t.Fatalf("unexpected response: status=%d body=%q", resp.StatusCode(), resp.Body())
+	}
+}
+
+func TestServerConcurrencyTLSRejectDoesNotBlockAccept(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	certData, keyData, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.WriteString("OK") //nolint:errcheck
+		},
+		Concurrency: 1,
+		ReadTimeout: testTimeout(2 * time.Second),
+		Logger:      &testLogger{},
+	}
+	if err = s.AppendCertEmbed(certData, keyData); err != nil {
+		t.Fatal(err)
+	}
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- s.ServeTLS(ln, "", "")
+	}()
+	defer func() {
+		ln.Close()
+		select {
+		case err := <-serverErr:
+			if err != nil {
+				t.Errorf("ServeTLS: %v", err)
+			}
+		case <-time.After(testTimeout(3 * time.Second)):
+			t.Error("ServeTLS did not stop after closing its listener")
+		}
+	}()
+
+	tlsConfig := &tls.Config{InsecureSkipVerify: true}
+	dialTLS := func() (*tls.Conn, error) {
+		return tls.DialWithDialer(&net.Dialer{Timeout: testTimeout(time.Second)},
+			"tcp", ln.Addr().String(), tlsConfig)
+	}
+	// Finish the first handshake so its worker is definitely occupied while
+	// it waits for an HTTP request.
+	c1, err := dialTLS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c1.Close()
+
+	// The over-limit connection never sends a ClientHello. It must be closed
+	// before the server attempts to accept another connection.
+	c2, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c2.Close()
+	if err = c2.SetReadDeadline(time.Now().Add(testTimeout(500 * time.Millisecond))); err != nil {
+		t.Fatal(err)
+	}
+	var b [1]byte
+	if _, err = c2.Read(b[:]); err != io.EOF {
+		t.Fatalf("rejected TLS connection should close without a handshake; read error: %v", err)
+	}
+	c1.Close()
+
+	deadline := time.Now().Add(testTimeout(3 * time.Second))
+	for s.open.Load() != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("first TLS connection did not close")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	var c3 *tls.Conn
+	for time.Now().Before(deadline) {
+		c3, err = dialTLS()
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("TLS handshake after worker was released: %v", err)
+	}
+	defer c3.Close()
+	if _, err = c3.Write([]byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	var resp Response
+	if err = resp.Read(bufio.NewReader(c3)); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode() != StatusOK || string(resp.Body()) != "OK" {
+		t.Fatalf("unexpected response: status=%d body=%q", resp.StatusCode(), resp.Body())
+	}
+}
+
+func TestServeConnTLSConcurrencyRejectDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{Concurrency: 1}
+	if !s.tryAcquireConcurrency() {
+		t.Fatal("could not occupy concurrency slot")
+	}
+	defer s.releaseConcurrency()
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	result := make(chan error, 1)
+	go func() {
+		result <- s.ServeConn(tls.Server(server, &tls.Config{}))
+	}()
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrConcurrencyLimit) {
+			t.Fatalf("ServeConn error = %v; want %v", err, ErrConcurrencyLimit)
+		}
+	case <-time.After(testTimeout(500 * time.Millisecond)):
+		client.Close()
+		t.Fatal("ServeConn blocked waiting for a TLS ClientHello on a rejected connection")
+	}
+}
+
+func TestServeConnWrappedTLSConcurrencyRejectDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{Concurrency: 1, MaxConnsPerIP: 1}
+	if !s.tryAcquireConcurrency() {
+		t.Fatal("could not occupy concurrency slot")
+	}
+	defer s.releaseConcurrency()
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	// Embedding tls.Conn preserves its TLS methods, but causes the per-IP
+	// limiter to use perIPConn rather than perIPTLSConn.
+	c := struct{ *tls.Conn }{tls.Server(&fakeIPConn{Conn: server}, &tls.Config{})}
+	result := make(chan error, 1)
+	go func() {
+		result <- s.ServeConn(c)
+	}()
+	select {
+	case err := <-result:
+		if !errors.Is(err, ErrConcurrencyLimit) {
+			t.Fatalf("ServeConn error = %v; want %v", err, ErrConcurrencyLimit)
+		}
+	case <-time.After(testTimeout(500 * time.Millisecond)):
+		client.Close()
+		<-result
+		t.Fatal("ServeConn blocked waiting for a TLS ClientHello on a wrapped rejected connection")
+	}
+
+	s.perIPConnCounter.lock.Lock()
+	defer s.perIPConnCounter.lock.Unlock()
+	if len(s.perIPConnCounter.m) != 0 {
+		t.Fatal("rejected connection did not release its per-IP slot")
+	}
+}
+
 type fakeIPListener struct {
 	net.Listener
 }
