@@ -2895,11 +2895,6 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	req.copyToSkipBody(&w.reqCopy)
 	swapRequestBody(req, &w.reqCopy)
 
-	if resp != nil {
-		w.respCopy.KeepBodyBuffer = resp.KeepBodyBuffer
-		swapResponseBody(resp, &w.respCopy)
-	}
-
 	// Put the request to outgoing queue
 	select {
 	case chs.chW <- w:
@@ -2909,9 +2904,6 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		select {
 		case chs.chW <- w:
 		case <-w.t.C:
-			if resp != nil {
-				swapResponseBody(resp, &w.respCopy)
-			}
 			c.releasePipelineWork(w)
 			return ErrTimeout
 		}
@@ -2922,8 +2914,16 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	select {
 	case <-w.done:
 		if resp != nil {
-			w.respCopy.copyToSkipBody(resp)
-			swapResponseBody(resp, &w.respCopy)
+			if resp.KeepBodyBuffer && resp.body != nil {
+				w.respCopy.copyToSkipBody(resp)
+				resp.SetBody(w.respCopy.bodyBytes())
+				if streamBody && !resp.mustSkipBody() {
+					resp.bodyStream = bytes.NewReader(resp.bodyBytes())
+				}
+			} else {
+				w.respCopy.copyToSkipBody(resp)
+				swapResponseBody(resp, &w.respCopy)
+			}
 			resp.StreamBody = streamBody
 		}
 		err = w.err

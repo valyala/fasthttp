@@ -3794,6 +3794,197 @@ func TestKeepBodyBufferWithPoolSizeLimit(t *testing.T) {
 			t.Fatalf("unexpected response body: %q", resp64.Body())
 		}
 	})
+
+	t.Run("PipelineClientTimeoutPreservesBuffer", func(t *testing.T) {
+		slowCh := make(chan struct{})
+		t.Cleanup(func() {
+			select {
+			case <-slowCh:
+			default:
+				close(slowCh)
+			}
+		})
+
+		fastPayload := []byte("fast-response-bytes")
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/slow" {
+				select {
+				case <-slowCh:
+				case <-r.Context().Done():
+				}
+				_, _ = w.Write([]byte("slow-response"))
+				return
+			}
+			_, _ = w.Write(fastPayload)
+		}))
+		t.Cleanup(server.Close)
+
+		client := &PipelineClient{
+			Addr: strings.TrimPrefix(server.URL, "http://"),
+		}
+
+		// 1. Verify pre-retained 64 KB buffer is preserved upon ErrTimeout in DoTimeout.
+		resp := AcquireResponse()
+		defer ReleaseResponse(resp)
+		resp.KeepBodyBuffer = true
+		resp.SetBody(bytes.Repeat([]byte("z"), 65536))
+		buf := resp.body
+		initialCap := cap(buf.B)
+
+		var req Request
+		req.SetRequestURI(server.URL + "/slow")
+		err := client.DoTimeout(&req, resp, 25*time.Millisecond)
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("expected ErrTimeout, got %v", err)
+		}
+		if !resp.KeepBodyBuffer {
+			t.Fatalf("expected resp.KeepBodyBuffer to remain true after timeout")
+		}
+		if resp.body == nil {
+			t.Fatalf("expected resp.body to be non-nil after timeout")
+		}
+		if resp.body != buf {
+			t.Fatalf("expected resp.body pointer to be preserved after ErrTimeout, got %p != %p", resp.body, buf)
+		}
+		if cap(resp.body.B) != initialCap {
+			t.Fatalf("expected resp.body capacity %d to be preserved after timeout, got %d", initialCap, cap(resp.body.B))
+		}
+
+		// Unblock the slow handler so the worker finishes reading and the pipeline connection is ready.
+		close(slowCh)
+
+		// Subsequent request reuses the exact same retained buffer without reallocation.
+		req.SetRequestURI(server.URL + "/fast")
+		if err := client.DoTimeout(&req, resp, 5*time.Second); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		if resp.body != buf {
+			t.Fatalf("expected resp.body pointer to stay identical after subsequent request, got %p != %p", resp.body, buf)
+		}
+		if cap(resp.body.B) != initialCap {
+			t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(resp.body.B))
+		}
+		if !bytes.Equal(resp.Body(), fastPayload) {
+			t.Fatalf("unexpected response body: %q", resp.Body())
+		}
+
+		// 2. Verify DoDeadline also preserves caller's retained buffer upon ErrTimeout.
+		slowCh2 := make(chan struct{})
+		t.Cleanup(func() {
+			select {
+			case <-slowCh2:
+			default:
+				close(slowCh2)
+			}
+		})
+		server2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/slow" {
+				select {
+				case <-slowCh2:
+				case <-r.Context().Done():
+				}
+				_, _ = w.Write([]byte("slow-response"))
+				return
+			}
+			_, _ = w.Write(fastPayload)
+		}))
+		t.Cleanup(server2.Close)
+
+		client2 := &PipelineClient{
+			Addr: strings.TrimPrefix(server2.URL, "http://"),
+		}
+
+		req.SetRequestURI(server2.URL + "/slow")
+		err = client2.DoDeadline(&req, resp, time.Now().Add(25*time.Millisecond))
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("expected ErrTimeout from DoDeadline, got %v", err)
+		}
+		if resp.body != buf {
+			t.Fatalf("expected resp.body pointer to be preserved after DoDeadline timeout, got %p != %p", resp.body, buf)
+		}
+		if cap(resp.body.B) != initialCap {
+			t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(resp.body.B))
+		}
+
+		close(slowCh2)
+		req.SetRequestURI(server2.URL + "/fast")
+		if err := client2.DoDeadline(&req, resp, time.Now().Add(5*time.Second)); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		if resp.body != buf {
+			t.Fatalf("expected resp.body pointer to stay identical after subsequent DoDeadline, got %p != %p", resp.body, buf)
+		}
+		if cap(resp.body.B) != initialCap {
+			t.Fatalf("expected capacity %d to be preserved, got %d", initialCap, cap(resp.body.B))
+		}
+		if !bytes.Equal(resp.Body(), fastPayload) {
+			t.Fatalf("unexpected response body: %q", resp.Body())
+		}
+
+		// 3. Dynamically acquired buffer from a successful call remains retained across a timeout.
+		respDyn := AcquireResponse()
+		defer ReleaseResponse(respDyn)
+		respDyn.KeepBodyBuffer = true
+
+		slowCh3 := make(chan struct{})
+		t.Cleanup(func() {
+			select {
+			case <-slowCh3:
+			default:
+				close(slowCh3)
+			}
+		})
+		server3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/slow" {
+				select {
+				case <-slowCh3:
+				case <-r.Context().Done():
+				}
+				_, _ = w.Write([]byte("slow-response"))
+				return
+			}
+			_, _ = w.Write(payload)
+		}))
+		t.Cleanup(server3.Close)
+
+		client3 := &PipelineClient{
+			Addr: strings.TrimPrefix(server3.URL, "http://"),
+		}
+
+		req.SetRequestURI(server3.URL + "/fast")
+		if err := client3.DoTimeout(&req, respDyn, 5*time.Second); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		dynBuf := respDyn.body
+		if dynBuf == nil || cap(dynBuf.B) <= 1024 {
+			t.Fatalf("expected respDyn.body capacity > 1024, got %v", dynBuf)
+		}
+		dynCap := cap(dynBuf.B)
+
+		req.SetRequestURI(server3.URL + "/slow")
+		err = client3.DoTimeout(&req, respDyn, 25*time.Millisecond)
+		if !errors.Is(err, ErrTimeout) {
+			t.Fatalf("expected ErrTimeout, got %v", err)
+		}
+		if respDyn.body != dynBuf {
+			t.Fatalf("expected dynamically acquired respDyn.body to be preserved after ErrTimeout, got %p != %p", respDyn.body, dynBuf)
+		}
+		if cap(respDyn.body.B) != dynCap {
+			t.Fatalf("expected capacity %d to be preserved after timeout, got %d", dynCap, cap(respDyn.body.B))
+		}
+
+		close(slowCh3)
+		req.SetRequestURI(server3.URL + "/fast")
+		if err := client3.DoTimeout(&req, respDyn, 5*time.Second); err != nil {
+			t.Fatalf("unexpected pipeline request error: %v", err)
+		}
+		if respDyn.body != dynBuf {
+			t.Fatalf("expected respDyn.body pointer to stay identical across calls, got %p != %p", respDyn.body, dynBuf)
+		}
+		if cap(respDyn.body.B) != dynCap {
+			t.Fatalf("expected capacity %d to be preserved, got %d", dynCap, cap(respDyn.body.B))
+		}
+	})
 }
 
 func TestResponseRawBodyCopyTo(t *testing.T) {
