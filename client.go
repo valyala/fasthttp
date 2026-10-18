@@ -2893,7 +2893,11 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 
 	// Make a copy of the request in order to avoid data races on timeouts
 	req.copyToSkipBody(&w.reqCopy)
-	swapRequestBody(req, &w.reqCopy)
+	if req.KeepBodyBuffer && req.body != nil && req.bodyStream == nil {
+		w.reqCopy.SetBody(req.bodyBytes())
+	} else {
+		swapRequestBody(req, &w.reqCopy)
+	}
 
 	// Put the request to outgoing queue
 	select {
