@@ -22,6 +22,8 @@ import (
 //
 // Use Response.SetBodyStream(r, -1) to opt in. NewStreamReader and
 // Response.SetBodyStreamWriter retain their existing behavior.
+// The HTTP write path may batch ready data, flushing after writing at least
+// 32 KiB in a batch or before waiting for more input.
 // A successful nonempty Flush means the bridge has accepted the buffered data;
 // it does not guarantee that a reader has consumed it or a remote client has
 // received it. Accepted input may be reused after Write returns. Close leaves
