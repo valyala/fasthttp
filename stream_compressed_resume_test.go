@@ -32,6 +32,15 @@ func TestStreamCompressedReadWriteToResume(t *testing.T) {
 				if _, err := io.ReadFull(reader, prefix); err != nil {
 					t.Fatal(err)
 				}
+				// WriterTo alone cannot prove the compressed output byte bound.
+				// Verify that the lazy output really uses the quota-tested bridge.
+				bounded, ok := reader.(*boundedCompressedBodyStream)
+				if !ok {
+					t.Fatalf("compressed stream type = %T", reader)
+				}
+				if _, ok := bounded.r.(*streamPipe); !ok {
+					t.Fatalf("compressed output is not bounded: %T", bounded.r)
+				}
 				var encoded bytes.Buffer
 				encoded.Write(prefix)
 				if partial {
@@ -66,7 +75,7 @@ func TestStreamCompressedReadWriteToResume(t *testing.T) {
 				if err != nil || !bytes.Equal(got, body) {
 					t.Fatalf("resumed compressed body len=%d,err=%v; expected %d", len(got), err, len(body))
 				}
-				if err := streamCompatAwait(t, done); err != nil {
+				if err := streamAwait(t, done, "done"); err != nil {
 					t.Fatal(err)
 				}
 			})

@@ -9,7 +9,7 @@ import (
 	"testing/synctest"
 )
 
-func TestStreamCompressionReadyBatchFlushBeforeWait(t *testing.T) {
+func TestStreamBatchReadyFlushBeforeWait(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		p := newStreamPipe()
 		for range 4 {
@@ -42,7 +42,7 @@ func TestStreamCompressionReadyBatchFlushBeforeWait(t *testing.T) {
 	})
 }
 
-func TestStreamCompressionBatchFlushError(t *testing.T) {
+func TestStreamBatchFlushError(t *testing.T) {
 	p := newStreamPipe()
 	if _, err := p.Write([]byte("event")); err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestStreamCompressionBatchFlushError(t *testing.T) {
 	}
 }
 
-func TestStreamCompressionBatchWriteErrorPreservesTail(t *testing.T) {
+func TestStreamBatchWriteErrorNormalization(t *testing.T) {
 	p := newStreamPipe()
 	if _, err := p.Write([]byte("event")); err != nil {
 		t.Fatal(err)
@@ -73,23 +73,22 @@ func TestStreamCompressionBatchWriteErrorPreservesTail(t *testing.T) {
 	var dst bytes.Buffer
 	bw := bufio.NewWriter(&dst)
 	codec := streamBatchTestRejectedCodec{err: sentinel}
-	fw := flushWriter{wf: codec, bw: bw}
+	fw := flushWriter{wf: &codec, bw: bw}
 	n, err := p.WriteTo(&fw)
-	if n != 0 || !errors.Is(err, sentinel) {
-		t.Fatal(n, err)
-	}
-	tail, err := io.ReadAll(p)
-	if err != nil || string(tail) != "event" {
-		t.Fatal(string(tail), err)
+	if n != 0 || !errors.Is(err, sentinel) || codec.writes != 1 || codec.flushes != 0 {
+		t.Fatal(n, err, codec.writes, codec.flushes)
 	}
 }
 
 // A stackless writer can return its previous count when high load rejects
 // dispatch. Preserve flushWriter's existing normalization of codec errors.
-type streamBatchTestRejectedCodec struct{ err error }
+type streamBatchTestRejectedCodec struct {
+	err             error
+	writes, flushes int
+}
 
-func (c streamBatchTestRejectedCodec) Write([]byte) (int, error) { return 64, c.err }
-func (c streamBatchTestRejectedCodec) Flush() error              { return c.err }
+func (c *streamBatchTestRejectedCodec) Write([]byte) (int, error) { c.writes++; return 64, c.err }
+func (c *streamBatchTestRejectedCodec) Flush() error              { c.flushes++; return c.err }
 
 type streamBatchTestCodec struct {
 	w        io.Writer

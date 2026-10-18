@@ -16,6 +16,9 @@ import (
 // 160 KiB. This excludes the caller's input, bufio, compression state and idle
 // pooled buffers. HTTP compression of this exact reader uses a second bounded
 // bridge, for at most 320 KiB of active bridge payload.
+// Wrapping the returned reader changes its dynamic type, so HTTP compression
+// uses the legacy stream path and no longer has the combined 320 KiB bound,
+// even if the wrapper forwards BodyWriterTo.
 //
 // Use Response.SetBodyStream(r, -1) to opt in. NewStreamReader and
 // Response.SetBodyStreamWriter retain their existing behavior.
@@ -204,6 +207,9 @@ func (p *streamPipe) Read(b []byte) (int, error) {
 
 // HTTP framing and compression implement this internal batching contract.
 // WriteTo flushes ready data before waiting for more input.
+// Callers must pass only nonempty slices to writeUnflushed: an empty HTTP chunk
+// terminates the body. streamPipe only queues nonempty data, and consumed
+// blocks are released before the next call.
 type streamBatchWriter interface {
 	writeUnflushed([]byte) (int, error)
 	flush() error
@@ -314,6 +320,9 @@ func (cw *chunkedBodyWriter) flush() error {
 func (w *flushWriter) writeUnflushed(p []byte) (int, error) {
 	n, err := w.wf.Write(p)
 	if err != nil {
+		// Match flushWriter.Write's codec-error normalization. A rejected
+		// stackless dispatch can return a stale n. Compression aborts on this
+		// error; the reported count cannot be used to retry the codec input.
 		return 0, err
 	}
 	return n, nil
