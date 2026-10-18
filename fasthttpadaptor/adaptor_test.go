@@ -1904,6 +1904,60 @@ func TestResponseControllerStreamingWriteDeadlineOverride(t *testing.T) {
 	}
 }
 
+func TestResponseControllerStreamingPostFlushWriteDeadlineClear(t *testing.T) {
+	t.Parallel()
+
+	for i := range 5 {
+		t.Run(fmt.Sprintf("iter-%d", i), func(t *testing.T) {
+			t.Parallel()
+
+			s := &fasthttp.Server{
+				WriteTimeout: 40 * time.Millisecond,
+				Handler: NewFastHTTPHandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(http.StatusOK)
+					if flusher, ok := w.(http.Flusher); ok {
+						flusher.Flush()
+					}
+					rc := http.NewResponseController(w)
+					if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+						t.Errorf("unexpected SetWriteDeadline error: %v", err)
+					}
+					time.Sleep(120 * time.Millisecond)
+					_, _ = w.Write([]byte("streaming body content"))
+				}),
+			}
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			go s.Serve(ln) //nolint:errcheck
+			defer ln.Close()
+
+			c, err := net.Dial("tcp", ln.Addr().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer c.Close()
+
+			if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+				t.Fatal(err)
+			}
+			resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+			if err != nil {
+				t.Fatalf("reading response: %v", err)
+			}
+			body, err := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if err != nil {
+				t.Fatalf("reading body: %v", err)
+			}
+			if string(body) != "streaming body content" {
+				t.Fatalf("unexpected body: %q", string(body))
+			}
+		})
+	}
+}
+
 func TestResponseControllerKeepAliveDeadlinesCleared(t *testing.T) {
 	t.Parallel()
 
