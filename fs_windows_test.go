@@ -49,3 +49,24 @@ func TestFSWindowsServeFileAllowsDriveLetter(t *testing.T) {
 		t.Fatalf("unexpected status %d; want %d", ctx.Response.StatusCode(), StatusOK)
 	}
 }
+
+func TestFSWindowsRejectsReservedDeviceNames(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "public.txt"), []byte("public"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := (&FS{Root: root, SkipCache: true}).NewRequestHandler()
+
+	if resp := fsRootTestGet(t, h, "/public.txt", "", ""); resp.status != StatusOK || resp.body != "public" {
+		t.Fatalf("public file: status=%d body=%q", resp.status, resp.body)
+	}
+	// A plain path join turns these into the NUL device rather than a
+	// file in Root.
+	for _, path := range []string{"/NUL", "/nul", "/sub/NUL"} {
+		if resp := fsRootTestGet(t, h, path, "", ""); resp.status != StatusNotFound {
+			t.Fatalf("%s: status=%d body=%q, want %d", path, resp.status, resp.body, StatusNotFound)
+		}
+	}
+}
