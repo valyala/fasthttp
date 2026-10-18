@@ -126,7 +126,7 @@ func TestNewVHostPathRewriterEndToEnd(t *testing.T) {
 		{"normal vhost file", "example.com", "/public.txt", StatusOK, "PUBLIC-MARKER"},
 		{"root file is isolated", "example.com", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"dot host", ".", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
-		{"dot dot host", "..", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
+		{"double dot host", "..", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"encoded dot host", "%252e", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"encoded parent path", "example.com", "/%252e%252e/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"nested encoded parent path", "example.com", "/safe/%252e%252e/%252e%252e/root-private.txt", StatusNotFound, "Cannot open requested path"},
