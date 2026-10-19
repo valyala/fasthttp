@@ -2828,23 +2828,23 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		if writeTimeout > 0 || previousWriteTimeout > 0 {
 			ctx.deadlineMu.Lock()
-			if ctx.handlerWriteDeadlineSet.Load() {
+			switch {
+			case ctx.handlerWriteDeadlineSet.Load():
 				previousWriteTimeout = 0
-			} else if writeTimeout > 0 {
-				if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
-					ctx.deadlineMu.Unlock()
-					break
+			case writeTimeout > 0:
+				if err = c.SetWriteDeadline(time.Now().Add(writeTimeout)); err == nil {
+					previousWriteTimeout = writeTimeout
 				}
-				previousWriteTimeout = writeTimeout
-			} else if previousWriteTimeout > 0 {
+			case previousWriteTimeout > 0:
 				// We don't want a write timeout but we previously set one, remove it.
-				if err = c.SetWriteDeadline(zeroTime); err != nil {
-					ctx.deadlineMu.Unlock()
-					break
+				if err = c.SetWriteDeadline(zeroTime); err == nil {
+					previousWriteTimeout = 0
 				}
-				previousWriteTimeout = 0
 			}
 			ctx.deadlineMu.Unlock()
+			if err != nil {
+				break
+			}
 		}
 
 		connectionClose = connectionClose ||
