@@ -2166,10 +2166,11 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 		if fileInfoOriginal.ModTime().Sub(fileInfo.ModTime()) >= time.Second {
 			// The compressed file became stale. Re-create it.
 			_ = f.Close()
+			// Only remove it from the OS filesystem. A custom FS.FS is
+			// read-only here, and filePath is relative to it rather than
+			// to the working directory.
 			if o, ok := h.filesystem.(*osFS); ok {
 				_ = o.remove(filePath)
-			} else {
-				_ = os.Remove(filePath)
 			}
 			return h.compressAndOpenFSFile(filePathOriginal, fileEncoding)
 		}

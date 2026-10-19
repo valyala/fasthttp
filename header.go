@@ -1286,8 +1286,51 @@ func (h *RequestHeader) HasAcceptEncoding(acceptEncoding string) bool {
 
 // HasAcceptEncodingBytes returns true if the header contains
 // the given Accept-Encoding value.
+//
+// Parameters after the coding, such as a quality value, are ignored,
+// except that a coding with a quality value of 0 is not acceptable.
+// See https://www.rfc-editor.org/rfc/rfc9110.html#section-12.5.3 for details.
 func (h *RequestHeader) HasAcceptEncodingBytes(acceptEncoding []byte) bool {
-	return hasHeaderValue(h.peek(strAcceptEncoding), acceptEncoding)
+	var vs headerValueScanner
+	vs.b = h.peek(strAcceptEncoding)
+	for vs.next() {
+		v := vs.value
+		if len(v) < len(acceptEncoding) || !caseInsensitiveCompare(v[:len(acceptEncoding)], acceptEncoding) {
+			continue
+		}
+		params := stripSpace(v[len(acceptEncoding):])
+		if len(params) == 0 {
+			return true
+		}
+		if params[0] != ';' {
+			continue
+		}
+		return !hasZeroQualityValue(params[1:])
+	}
+	return false
+}
+
+// hasZeroQualityValue reports whether the given Accept-Encoding member
+// parameters contain a q=0 weight, which marks the coding as not acceptable.
+func hasZeroQualityValue(params []byte) bool {
+	for len(params) > 0 {
+		var param []byte
+		param, params, _ = bytes.Cut(params, []byte{';'})
+		param = stripSpace(param)
+		if len(param) < 2 || param[0]|0x20 != 'q' || param[1] != '=' {
+			continue
+		}
+		qvalue := param[2:]
+		if len(qvalue) == 0 || qvalue[0] != '0' {
+			return false
+		}
+		qvalue = qvalue[1:]
+		if len(qvalue) > 0 && qvalue[0] == '.' {
+			qvalue = qvalue[1:]
+		}
+		return len(qvalue) <= 3 && len(bytes.Trim(qvalue, "0")) == 0
+	}
+	return false
 }
 
 // Len returns the number of headers set,

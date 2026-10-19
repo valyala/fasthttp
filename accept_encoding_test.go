@@ -31,6 +31,17 @@ func TestRequestHeaderHasAcceptEncodingTokens(t *testing.T) {
 		{"absent", "br,deflate", "gzip", false},
 		{"empty_header", "", "gzip", false},
 		{"quality_unchanged", "gzip;q=0", "gzip", false},
+		{"quality_accepted", "gzip;q=0.5", "gzip", true},
+		{"quality_one", "br, gzip;q=1.0", "gzip", true},
+		{"quality_smallest", "gzip;q=0.001", "gzip", true},
+		{"quality_ows", "br, gzip \t; q=0.8", "gzip", true},
+		{"quality_upper_case_name", "gzip;Q=0.8", "gzip", true},
+		{"quality_zero_decimals", "gzip;q=0.000", "gzip", false},
+		{"quality_zero_ows", "br, gzip ; q=0", "gzip", false},
+		{"quality_zero_upper_case_name", "gzip;Q=0.0", "gzip", false},
+		{"quality_zero_other_coding", "gzip, br;q=0", "gzip", true},
+		{"quality_zero_this_coding", "gzip;q=0, br", "br", true},
+		{"quality_prefix_only", "gzip-extra;q=1, br", "gzip", false},
 		{"wildcard_unchanged", "*", "gzip", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,7 +66,7 @@ func TestCompressHandlerAcceptEncodingTokens(t *testing.T) {
 	handler := CompressHandler(func(ctx *RequestCtx) {
 		ctx.SetBodyString(body)
 	})
-	for _, acceptEncoding := range []string{"br,gzip", "br,\t GZip \t", "xgzip, gzip"} {
+	for _, acceptEncoding := range []string{"br,gzip", "br,\t GZip \t", "xgzip, gzip", "gzip;q=1.0, identity; q=0.5, *;q=0"} {
 		t.Run(acceptEncoding, func(t *testing.T) {
 			t.Parallel()
 
@@ -92,6 +103,7 @@ func BenchmarkRequestHeaderHasAcceptEncodingTokens(b *testing.B) {
 		{"absent", "gzip, deflate, br", "zstd"},
 		{"no_space", "br,gzip", "gzip"},
 		{"later_token", "xgzip, gzip", "gzip"},
+		{"quality", "br;q=1.0, gzip;q=0.8", "gzip"},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			var h RequestHeader
