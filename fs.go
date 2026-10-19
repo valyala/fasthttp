@@ -383,6 +383,9 @@ type FS struct {
 
 	// Path to the compressed root directory to serve files from. If this value
 	// is empty, Root is used.
+	//
+	// Compressed copies are confined to CompressRoot unless it is a whole
+	// volume or AllowSymlinksOutsideRoot is set.
 	CompressRoot string
 
 	// Suffix to add to the name of cached compressed file.
@@ -421,7 +424,7 @@ type FS struct {
 	AllowEmptyRoot bool
 
 	// AllowSymlinksOutsideRoot makes FS follow symbolic links that lead
-	// outside Root.
+	// outside Root, or outside CompressRoot for the compressed copies.
 	//
 	// By default, when FS serves files from the OS filesystem (FS.FS is nil),
 	// every file FS opens, stats or writes for a request is resolved with
@@ -2587,8 +2590,8 @@ func (o osRoot) mkdirParent(name string, perm os.FileMode) error {
 // The file gets a random name and is opened with O_EXCL and 0600, so a
 // symlink pre-planted at an otherwise predictable temp path can't be
 // followed to truncate an arbitrary file, and the cache file isn't left
-// group/world-readable. Its base name is short and doesn't depend on the
-// one of name, so it doesn't limit how long that may be.
+// group/world-readable. Its base name is short and independent of name's,
+// so it doesn't limit how long the compressed file's name may be.
 func (o osRoot) createTemp(name string) (*os.File, string, error) {
 	// os.Root has no CreateTemp, so do what os.CreateTemp does, with a
 	// random part that can't be guessed. The directory is taken from name
