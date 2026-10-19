@@ -159,78 +159,50 @@ func TestStreamCompatFixedLengthFraming(t *testing.T) {
 	}
 }
 
-func TestStreamCompatFixedLengthHTTPConnection(t *testing.T) {
-	for _, delta := range []int{-1, 0, 1} {
-		t.Run(fmt.Sprintf("declaredDelta=%d", delta), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				body := streamCompatBody(192*1024 + 17)
-				sw, producerDone := streamCompatProducer(body, 64*1024, 0)
-				calls := 0
-				server, client := net.Pipe()
-				defer streamClose(t, client)
-				s := Server{NoDefaultDate: true, Handler: func(ctx *RequestCtx) {
-					calls++
-					if calls == 1 {
-						ctx.SetBodyStream(NewBoundedStreamReader(sw), len(body)+delta)
-					} else {
-						ctx.SetBodyString("next")
-					}
-				}}
-				serverDone := make(chan error, 1)
-				go func() { serverDone <- s.ServeConn(server) }()
-				if _, err := io.WriteString(client, "GET /first HTTP/1.1\r\nHost: localhost\r\n\r\nGET /next HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
-					t.Fatal(err)
-				}
-				br := bufio.NewReader(client)
-				first, err := http.ReadResponse(br, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				got, bodyErr := io.ReadAll(first.Body)
-				if err := first.Body.Close(); err != nil {
-					t.Fatal(err)
-				}
-				if delta != 0 {
-					// A failed response can lose its final buffered bytes when the
-					// server closes the connection. It must never send an overrun
-					// or continue with the next response.
-					if bodyErr != nil && !errors.Is(bodyErr, io.ErrUnexpectedEOF) {
-						t.Fatalf("aborted body read error = %v", bodyErr)
-					}
-				} else if bodyErr != nil || len(got) != len(body) {
-					t.Fatalf("exact body length=%d, err=%v", len(got), bodyErr)
-				}
-				if len(got) > min(len(body), len(body)+delta) || !bytes.Equal(got, body[:len(got)]) {
-					t.Fatal("fixed-length response corrupted")
-				}
-				next, nextErr := http.ReadResponse(br, nil)
-				if delta == 0 {
-					if nextErr != nil {
-						t.Fatal(nextErr)
-					}
-					got, err := io.ReadAll(next.Body)
-					if closeErr := next.Body.Close(); err == nil {
-						err = closeErr
-					}
-					if err != nil || string(got) != "next" {
-						t.Fatal(string(got), err)
-					}
-				} else if nextErr == nil {
-					streamClose(t, next.Body)
-					t.Fatal("server reused connection after body-length error")
-				}
-				serveErr := <-serverDone
-				<-producerDone
-				if delta == 0 {
-					if serveErr != nil || calls != 2 {
-						t.Fatalf("ServeConn=%v, handler calls=%d", serveErr, calls)
-					}
-				} else if serveErr == nil || calls != 1 {
-					t.Fatalf("ServeConn=%v, handler calls=%d after framing error", serveErr, calls)
-				}
-			})
-		})
-	}
+// Detailed exact/short/long framing is covered above. At the connection level,
+// verify that a framing error prevents reuse for a pipelined request.
+func TestStreamCompatFixedLengthErrorClosesConnection(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		body := streamCompatBody(192*1024 + 17)
+		sw, producerDone := streamCompatProducer(body, 64*1024, 0)
+		calls := 0
+		s := Server{NoDefaultDate: true, Handler: func(ctx *RequestCtx) {
+			calls++
+			ctx.SetBodyStream(NewBoundedStreamReader(sw), len(body)-1)
+		}}
+		client, serverDone := streamCompatServeConn(t, &s)
+		if _, err := io.WriteString(client, "GET /first HTTP/1.1\r\nHost: localhost\r\n\r\nGET /next HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
+			t.Fatal(err)
+		}
+		br := bufio.NewReader(client)
+		first, err := http.ReadResponse(br, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := io.ReadAll(first.Body)
+		if closeErr := first.Body.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
+		// The final buffered bytes may be discarded on error; an overrun or a
+		// second response must never be sent.
+		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+			t.Fatal(err)
+		}
+		if len(got) >= len(body) || !bytes.Equal(got, body[:len(got)]) {
+			t.Fatal("fixed-length response corrupted")
+		}
+		if next, err := http.ReadResponse(br, nil); err == nil {
+			if closeErr := next.Body.Close(); closeErr != nil {
+				t.Fatal(closeErr)
+			}
+			t.Fatal("server reused connection after body-length error")
+		}
+		serveErr := <-serverDone
+		<-producerDone
+		if !errors.Is(serveErr, errBodyStreamTooLong) || calls != 1 {
+			t.Fatalf("ServeConn=%v, handler calls=%d after framing error", serveErr, calls)
+		}
+	})
 }
 
 type streamCompatCodec struct {
@@ -253,11 +225,6 @@ func TestStreamCompatHTTPCompressionTrailersAndKeepAlive(t *testing.T) {
 		for _, writeSize := range []int{5, 64 * 1024} {
 			t.Run(fmt.Sprintf("%s/write=%d", codec.name, writeSize), func(t *testing.T) {
 				sw, producerDone := streamCompatProducer(body, writeSize, 7)
-				server, client := net.Pipe()
-				defer streamClose(t, client)
-				if err := client.SetDeadline(time.Now().Add(testTimeout(5 * time.Second))); err != nil {
-					t.Fatal(err)
-				}
 				s := Server{NoDefaultDate: true, Handler: CompressHandlerBrotliLevel(func(ctx *RequestCtx) {
 					if string(ctx.Path()) == "/next" {
 						ctx.SetBodyString("next")
@@ -270,8 +237,7 @@ func TestStreamCompatHTTPCompressionTrailersAndKeepAlive(t *testing.T) {
 					ctx.Response.Header.Set("X-Stream-Complete", "yes")
 					ctx.SetBodyStream(NewBoundedStreamReader(sw), -1)
 				}, CompressBrotliBestSpeed, CompressBestSpeed)}
-				serverDone := make(chan error, 1)
-				go func() { serverDone <- s.ServeConn(server) }()
+				client, serverDone := streamCompatServeConn(t, &s)
 				if _, err := fmt.Fprintf(client, "GET /first HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: %s\r\n\r\n", codec.name); err != nil {
 					t.Fatal(err)
 				}
@@ -306,20 +272,7 @@ func TestStreamCompatHTTPCompressionTrailersAndKeepAlive(t *testing.T) {
 				if err := streamAwait(t, producerDone, "producerDone"); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := io.WriteString(client, "GET /next HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
-					t.Fatal(err)
-				}
-				next, err := http.ReadResponse(br, nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				got, err = io.ReadAll(next.Body)
-				if closeErr := next.Body.Close(); err == nil {
-					err = closeErr
-				}
-				if err != nil || string(got) != "next" {
-					t.Fatal(string(got), err)
-				}
+				streamCompatNextResponse(t, client, br)
 				if err := streamAwait(t, serverDone, "serverDone"); err != nil {
 					t.Fatal(err)
 				}
@@ -359,6 +312,9 @@ func TestStreamCompatCompressionCloseCancelsProducer(t *testing.T) {
 					if n, err := compressed.Read(make([]byte, 1)); n != 1 || err != nil {
 						t.Fatal(n, err)
 					}
+					if _, ok := compressed.r.(*streamPipe); !ok {
+						t.Fatalf("compressed output is not bounded: %T", compressed.r)
+					}
 				}
 				for range 2 {
 					if err := resp.CloseBodyStream(); err != nil {
@@ -375,51 +331,6 @@ func TestStreamCompatCompressionCloseCancelsProducer(t *testing.T) {
 				}
 				// Close remains idempotent after the compression goroutine exits.
 				if err := compressed.Close(); err != nil {
-					t.Fatal(err)
-				}
-			})
-		}
-	}
-}
-
-func TestStreamCompatMaterializingBodyOperations(t *testing.T) {
-	body := streamCompatBody(384*1024 + 23)
-	for _, kind := range []string{"request", "response"} {
-		for _, operation := range []string{"Body", "BodyWriteTo", "SwapBody"} {
-			t.Run(kind+"/"+operation, func(t *testing.T) {
-				var req Request
-				var resp Response
-				var stream interface {
-					SetBodyStream(io.Reader, int)
-					Body() []byte
-					BodyWriteTo(io.Writer) error
-					SwapBody([]byte) []byte
-				} = &req
-				if kind == "response" {
-					stream = &resp
-				}
-				sw, done := streamCompatProducer(body, 64*1024, 0)
-				stream.SetBodyStream(NewBoundedStreamReader(sw), -1)
-				var got []byte
-				switch operation {
-				case "Body":
-					got = stream.Body()
-				case "BodyWriteTo":
-					var dst bytes.Buffer
-					if err := stream.BodyWriteTo(&dst); err != nil {
-						t.Fatal(err)
-					}
-					got = dst.Bytes()
-				case "SwapBody":
-					got = stream.SwapBody([]byte("replacement"))
-					if replacement := stream.Body(); string(replacement) != "replacement" {
-						t.Fatalf("replacement body = %q", replacement)
-					}
-				}
-				if !bytes.Equal(got, body) {
-					t.Fatalf("materialized body len=%d, want %d", len(got), len(body))
-				}
-				if err := streamAwait(t, done, "done"); err != nil {
 					t.Fatal(err)
 				}
 			})
@@ -487,11 +398,6 @@ func TestStreamCompatHEADKeepAliveClosesProducer(t *testing.T) {
 		t.Run(encoding, func(t *testing.T) {
 			original, producerDone := streamCompatInfiniteProducer()
 			defer streamClose(t, original)
-			server, client := net.Pipe()
-			defer streamClose(t, client)
-			if err := client.SetDeadline(time.Now().Add(testTimeout(5 * time.Second))); err != nil {
-				t.Fatal(err)
-			}
 			s := Server{NoDefaultDate: true, Handler: CompressHandlerBrotliLevel(func(ctx *RequestCtx) {
 				if ctx.IsHead() {
 					ctx.SetContentType("text/plain")
@@ -500,8 +406,7 @@ func TestStreamCompatHEADKeepAliveClosesProducer(t *testing.T) {
 					ctx.SetBodyString("next")
 				}
 			}, CompressBrotliBestSpeed, CompressBestSpeed)}
-			serverDone := make(chan error, 1)
-			go func() { serverDone <- s.ServeConn(server) }()
+			client, serverDone := streamCompatServeConn(t, &s)
 			if _, err := fmt.Fprintf(client, "HEAD / HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: %s\r\n\r\n", encoding); err != nil {
 				t.Fatal(err)
 			}
@@ -520,20 +425,7 @@ func TestStreamCompatHEADKeepAliveClosesProducer(t *testing.T) {
 			if err := streamAwait(t, producerDone, "producerDone"); err == nil {
 				t.Fatal("HEAD did not stop producer")
 			}
-			if _, err := io.WriteString(client, "GET /next HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
-				t.Fatal(err)
-			}
-			next, err := http.ReadResponse(br, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, err = io.ReadAll(next.Body)
-			if closeErr := next.Body.Close(); err == nil {
-				err = closeErr
-			}
-			if err != nil || string(got) != "next" {
-				t.Fatal(string(got), err)
-			}
+			streamCompatNextResponse(t, client, br)
 			if err := streamAwait(t, serverDone, "serverDone"); err != nil {
 				t.Fatal(err)
 			}
@@ -579,11 +471,6 @@ func TestStreamCompatCompressedHTTPDisconnectStopsProducer(t *testing.T) {
 		t.Run(codec.name, func(t *testing.T) {
 			original, producerDone := streamCompatInfiniteProducer()
 			defer streamClose(t, original)
-			server, client := net.Pipe()
-			defer streamClose(t, client)
-			if err := client.SetDeadline(time.Now().Add(testTimeout(5 * time.Second))); err != nil {
-				t.Fatal(err)
-			}
 			compressor := make(chan *boundedCompressedBodyStream, 1)
 			s := Server{NoDefaultDate: true, Handler: func(ctx *RequestCtx) {
 				ctx.SetContentType("text/plain")
@@ -596,8 +483,7 @@ func TestStreamCompatCompressedHTTPDisconnectStopsProducer(t *testing.T) {
 				}
 				compressor <- compressed
 			}}
-			serverDone := make(chan error, 1)
-			go func() { serverDone <- s.ServeConn(server) }()
+			client, serverDone := streamCompatServeConn(t, &s)
 			if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"); err != nil {
 				t.Fatal(err)
 			}
@@ -624,5 +510,178 @@ func TestStreamCompatCompressedHTTPDisconnectStopsProducer(t *testing.T) {
 			compressed := streamAwait(t, compressor, "HTTP compressor")
 			streamAwait(t, compressed.done, "compressor completion")
 		})
+	}
+}
+
+func TestStreamCompressedReadWriteToResume(t *testing.T) {
+	body := streamCompatBody(128*1024 + 17)
+	// Resume belongs to the shared bounded wrapper; all codecs have round-trip
+	// and cancellation coverage in the tables above.
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("partial=%t", partial), func(t *testing.T) {
+			sw, done := streamCompatProducer(body, 64*1024, 1)
+			var resp Response
+			resp.Header.SetContentType("text/plain")
+			resp.SetBodyStream(NewBoundedStreamReader(sw), -1)
+			resp.gzipBody(CompressBestSpeed)
+			defer func() {
+				if err := resp.CloseBodyStream(); err != nil {
+					t.Error(err)
+				}
+			}()
+			reader := resp.BodyStream()
+			wt, ok := reader.(BodyWriterTo)
+			if !ok || !wt.SupportsBodyWriteTo() {
+				t.Fatal("compressed bounded stream lost its explicit WriteTo capability")
+			}
+			prefix := make([]byte, 7)
+			if _, err := io.ReadFull(reader, prefix); err != nil {
+				t.Fatal(err)
+			}
+			// WriterTo alone cannot prove the compressed output byte bound.
+			// Verify that the lazy output really uses the quota-tested bridge.
+			bounded, ok := reader.(*boundedCompressedBodyStream)
+			if !ok {
+				t.Fatalf("compressed stream type = %T", reader)
+			}
+			if _, ok := bounded.r.(*streamPipe); !ok {
+				t.Fatalf("compressed output is not bounded: %T", bounded.r)
+			}
+			var encoded bytes.Buffer
+			encoded.Write(prefix)
+			if partial {
+				sentinel := errors.New("compressed destination failed")
+				dst := streamBoundaryWriter{failAt: 1, n: 13, err: sentinel}
+				n, err := wt.WriteTo(&dst)
+				if !errors.Is(err, sentinel) || n != int64(dst.dst.Len()) || n != 13 {
+					t.Fatalf("encoded accepted count=%d,%v, destination bytes=%d", n, err, dst.dst.Len())
+				}
+				encoded.Write(dst.dst.Bytes())
+				// Read must resume the same encoded stream and retained output
+				// prefix, without starting another codec/header after failure.
+				tail, err := io.ReadAll(reader)
+				if err != nil {
+					t.Fatal(err)
+				}
+				encoded.Write(tail)
+			} else {
+				before := encoded.Len()
+				n, err := wt.WriteTo(&encoded)
+				if err != nil || n != int64(encoded.Len()-before) {
+					t.Fatalf("encoded WriteTo count=%d,%v; actual=%d", n, err, encoded.Len()-before)
+				}
+			}
+			var extra bytes.Buffer
+			if n, err := wt.WriteTo(&extra); n != 0 || err != nil || extra.Len() != 0 {
+				t.Fatalf("repeated WriteTo after EOF=%d,%v, bytes=%d", n, err, extra.Len())
+			}
+			var decoded Response
+			decoded.SetBodyRaw(encoded.Bytes())
+			got, err := decoded.BodyGunzip()
+			if err != nil || !bytes.Equal(got, body) {
+				t.Fatalf("resumed compressed body len=%d,err=%v; expected %d", len(got), err, len(body))
+			}
+			if err := streamAwait(t, done, "done"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestStreamCompatReadyHTTPBurstFlushBeforeFutureData(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ready, finish := make(chan error, 1), make(chan struct{})
+		r := streamGatedBurst(ready, finish)
+		defer streamClose(t, r)
+		if err := <-ready; err != nil {
+			t.Fatal(err)
+		}
+		server, client := net.Pipe()
+		defer streamClose(t, client)
+		done := make(chan error, 1)
+		go func() {
+			defer streamClose(t, server)
+			var resp Response
+			resp.Header.noDefaultDate = true
+			resp.SetBodyStream(r, -1)
+			bw := bufio.NewWriterSize(server, 64*1024)
+			err := resp.Write(bw)
+			if err == nil {
+				err = bw.Flush()
+			}
+			done <- err
+		}()
+		response, err := http.ReadResponse(bufio.NewReader(client), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer streamClose(t, response.Body)
+		got := make([]byte, 512)
+		if _, err := io.ReadFull(response.Body, got); err != nil || !bytes.Equal(got, bytes.Repeat([]byte("v"), 512)) {
+			t.Fatalf("ready HTTP data=%d,%v", len(got), err)
+		}
+		close(finish)
+		if tail, err := io.ReadAll(response.Body); err != nil || len(tail) != 0 {
+			t.Fatal(len(tail), err)
+		}
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// Use for waits outside synctest bubbles, notably real TCP and codec workers.
+// Pure bubble-local channel/Cond deadlocks are diagnosed by synctest itself.
+func streamAwait[T any](t testing.TB, done <-chan T, event string) T {
+	t.Helper()
+	select {
+	case value := <-done:
+		return value
+	case <-time.After(testTimeout(15 * time.Second)):
+		t.Fatalf("timeout waiting for %s", event)
+		var zero T
+		return zero
+	}
+}
+
+func streamClose(t testing.TB, c io.Closer) {
+	t.Helper()
+	if err := c.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		t.Error(err)
+	}
+}
+
+// Share connection setup without hiding each test's request/response exchange.
+func streamCompatServeConn(t *testing.T, s *Server) (net.Conn, <-chan error) {
+	t.Helper()
+	server, client := net.Pipe()
+	if err := client.SetDeadline(time.Now().Add(testTimeout(5 * time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	done, returned := make(chan error, 1), make(chan struct{})
+	go func() { done <- s.ServeConn(server); close(returned) }()
+	t.Cleanup(func() {
+		streamClose(t, client)
+		streamClose(t, server)
+		streamAwait(t, returned, "ServeConn cleanup")
+	})
+	return client, done
+}
+
+func streamCompatNextResponse(t *testing.T, client net.Conn, br *bufio.Reader) {
+	t.Helper()
+	if _, err := io.WriteString(client, "GET /next HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	next, err := http.ReadResponse(br, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(next.Body)
+	if closeErr := next.Body.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil || string(got) != "next" {
+		t.Fatal(string(got), err)
 	}
 }

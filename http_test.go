@@ -4747,7 +4747,8 @@ func (b *optOutBody) SupportsBodyWriteTo() bool { return false }
 func TestBodyStreamOperationsPreserveLegacyWriterToUnlessOverridden(t *testing.T) {
 	t.Parallel()
 
-	body := createFixedBody(10001)
+	// Exceed the bounded reader capacity so materialization must drain the producer.
+	body := createFixedBody(384*1024 + 23)
 	operations := []struct {
 		name string
 		run  func(io.Reader) ([]byte, error)
@@ -4799,7 +4800,11 @@ func TestBodyStreamOperationsPreserveLegacyWriterToUnlessOverridden(t *testing.T
 			run: func(stream io.Reader) ([]byte, error) {
 				var resp Response
 				resp.SetBodyStream(stream, -1)
-				return resp.SwapBody(nil), nil
+				body := resp.SwapBody([]byte("replacement"))
+				if got := resp.Body(); string(got) != "replacement" {
+					return nil, fmt.Errorf("replacement body = %q", got)
+				}
+				return body, nil
 			},
 		},
 		{
@@ -4807,7 +4812,11 @@ func TestBodyStreamOperationsPreserveLegacyWriterToUnlessOverridden(t *testing.T
 			run: func(stream io.Reader) ([]byte, error) {
 				var req Request
 				req.SetBodyStream(stream, -1)
-				return req.SwapBody(nil), nil
+				body := req.SwapBody([]byte("replacement"))
+				if got := req.Body(); string(got) != "replacement" {
+					return nil, fmt.Errorf("replacement body = %q", got)
+				}
+				return body, nil
 			},
 		},
 		{
@@ -4859,6 +4868,19 @@ func TestBodyStreamOperationsPreserveLegacyWriterToUnlessOverridden(t *testing.T
 
 	for _, operation := range operations {
 		t.Run(operation.name, func(t *testing.T) {
+			t.Run("bounded stream", func(t *testing.T) {
+				sw, done := streamCompatProducer(body, 64*1024, 0)
+				stream := NewBoundedStreamReader(sw)
+				defer streamClose(t, stream)
+				got, err := operation.run(stream)
+				if err != nil || !bytes.Equal(got, body) {
+					t.Fatalf("body length=%d, error=%v; want %d bytes", len(got), err, len(body))
+				}
+				if err := streamAwait(t, done, "bounded producer"); err != nil {
+					t.Fatal(err)
+				}
+			})
+
 			t.Run("unmarked WriterTo keeps legacy behavior", func(t *testing.T) {
 				inner := &embeddedWriterTo{r: bytes.NewReader(body)}
 				stream := &promotedWriterToBody{embeddedWriterTo: inner}
