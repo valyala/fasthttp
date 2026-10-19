@@ -1545,3 +1545,40 @@ type caseInsensitiveFS struct {
 func (c caseInsensitiveFS) Open(name string) (fs.File, error) {
 	return c.fsys.Open(strings.ToLower(name))
 }
+
+// A stale compressed file in a custom fs.FS is compressed again in memory.
+// Nothing may be removed from the OS filesystem, where the same relative
+// name refers to an unrelated file.
+func TestFSFSStaleCompressedFileNotRemovedFromDisk(t *testing.T) {
+	t.Chdir(t.TempDir())
+	const cachedName = "page.html.fasthttp.gz"
+	if err := os.WriteFile(cachedName, []byte("unrelated"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	content := bytes.Repeat([]byte("compressible-data-"), 1000)
+	testFS := fstest.MapFS{
+		"page.html": {Data: content, ModTime: now},
+		cachedName:  {Data: AppendGzipBytes(nil, []byte("stale")), ModTime: now.Add(-time.Hour)},
+	}
+	h := (&FS{FS: testFS, Compress: true, SkipCache: true}).NewRequestHandler()
+
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, nil)
+	ctx.Request.SetRequestURI("/page.html")
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip")
+	h(&ctx)
+
+	status, encoding := ctx.Response.StatusCode(), string(ctx.Response.Header.ContentEncoding())
+	if status != StatusOK || encoding != "gzip" {
+		t.Fatalf("status=%d encoding=%q, want %d gzip", status, encoding, StatusOK)
+	}
+	body, err := AppendGunzipBytes(nil, ctx.Response.Body())
+	if err != nil || !bytes.Equal(body, content) {
+		t.Fatalf("served %q (%v), want the file compressed again", body, err)
+	}
+	if _, err := os.Stat(cachedName); err != nil {
+		t.Fatalf("file %q in the working directory was removed: %v", cachedName, err)
+	}
+}
