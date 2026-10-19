@@ -2581,33 +2581,38 @@ func (o osRoot) mkdirParent(name string, perm os.FileMode) error {
 	return r.MkdirAll(parent, perm)
 }
 
-// createTemp creates a new file next to name and returns it and its path.
+// createTemp creates a new file in the directory of name, to be renamed to
+// name once it is written, and returns it and its path.
 //
 // The file gets a random name and is opened with O_EXCL and 0600, so a
 // symlink pre-planted at an otherwise predictable temp path can't be
 // followed to truncate an arbitrary file, and the cache file isn't left
-// group/world-readable.
+// group/world-readable. Its base name is short and doesn't depend on the
+// one of name, so it doesn't limit how long that may be.
 func (o osRoot) createTemp(name string) (*os.File, string, error) {
+	// os.Root has no CreateTemp, so do what os.CreateTemp does, with a
+	// random part that can't be guessed. The directory is taken from name
+	// as it is, since filepath.Dir would clean it and a root such as
+	// "/cwd/./cache" would no longer be its prefix.
+	tmpName := strings.TrimSuffix(name, filepath.Base(name)) + ".fasthttp-" + rand.Text() + ".tmp"
+	const flag = os.O_RDWR | os.O_CREATE | os.O_EXCL
 	if o.dir == "" {
-		f, err := os.CreateTemp(filepath.Dir(name), filepath.Base(name)+".tmp-*")
+		f, err := os.OpenFile(tmpName, flag, 0o600)
 		if err != nil {
 			return nil, "", err
 		}
-		tmpName := f.Name()
 		return f, tmpName, nil
 	}
-	r, rel, err := o.openRoot(name)
+	r, rel, err := o.openRoot(tmpName)
 	if err != nil {
 		return nil, "", err
 	}
 	defer r.Close()
-	// os.Root has no CreateTemp, so do what os.CreateTemp does.
-	suffix := ".tmp-" + rand.Text()
-	f, err := r.OpenFile(rel+suffix, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := r.OpenFile(rel, flag, 0o600)
 	if err != nil {
 		return nil, "", err
 	}
-	return f, name + suffix, nil
+	return f, tmpName, nil
 }
 
 func (o osRoot) chtimes(name string, atime, mtime time.Time) error {

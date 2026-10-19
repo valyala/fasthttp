@@ -1499,8 +1499,6 @@ func (f *errReadFile) Close() error                 { return nil }
 func TestFSCompressTmpFileRemovedOnError(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-
 	// Use this test file as the source for a valid fs.FileInfo.
 	fi, err := os.Stat("fs_test.go")
 	if err != nil {
@@ -1508,17 +1506,103 @@ func TestFSCompressTmpFileRemovedOnError(t *testing.T) {
 	}
 
 	h := &fsHandler{}
-	compressedFilePath := filepath.Join(dir, "out.gz")
-	tmpFilePath := compressedFilePath + ".tmp"
+	for _, confined := range []bool{false, true} {
+		dir := t.TempDir()
+		cache := osRoot{}
+		if confined {
+			cache = newOSRoot(dir, false)
+		}
+		compressedFilePath := filepath.Join(dir, "out.gz")
 
-	_, err = h.compressFileNolock(
-		osRoot{}, &errReadFile{fi: fi}, fi, "fs_test.go", compressedFilePath, "gzip")
-	if err == nil {
-		t.Fatalf("expecting error when compression fails")
+		_, err = h.compressFileNolock(
+			cache, &errReadFile{fi: fi}, fi, "fs_test.go", compressedFilePath, "gzip")
+		if err == nil {
+			t.Fatalf("expecting error when compression fails")
+		}
+
+		// The temporary file has a random name, so nothing may be left.
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("confined=%v: temporary file %q must be removed on compression error", confined, entries[0].Name())
+		}
 	}
+}
 
-	if _, err := os.Stat(tmpFilePath); !os.IsNotExist(err) {
-		t.Fatalf("temporary file %q must be removed on compression error, stat err: %v", tmpFilePath, err)
+// TestFSCompressLongFileName checks that the temporary file for a compressed
+// copy doesn't shorten the file names FS can compress: every file whose
+// compressed copy has a valid name gets compressed.
+func TestFSCompressLongFileName(t *testing.T) {
+	t.Parallel()
+
+	compressible := bytes.Repeat([]byte("compressible-data-"), 1000)
+	// A 225-byte name, and the longest name whose compressed copies, with
+	// suffixes of up to 13 bytes, fit in the 255-byte name limit of common
+	// filesystems.
+	names := []string{strings.Repeat("a", 221) + ".txt", strings.Repeat("b", 238) + ".txt"}
+	encodings := []struct{ encoding, suffix string }{
+		{encoding: "gzip", suffix: ".fasthttp.gz"},
+		{encoding: "br", suffix: ".fasthttp.br"},
+		{encoding: "zstd", suffix: ".fasthttp.zst"},
+	}
+	for _, allowSymlinksOutsideRoot := range []bool{false, true} {
+		root := t.TempDir()
+		for _, name := range names {
+			fsRootTestWriteFiles(t, root, map[string][]byte{name: compressible})
+		}
+		h := (&FS{
+			Root:                     root,
+			Compress:                 true,
+			CompressBrotli:           true,
+			CompressZstd:             true,
+			SkipCache:                true,
+			AllowSymlinksOutsideRoot: allowSymlinksOutsideRoot,
+		}).NewRequestHandler()
+
+		for _, name := range names {
+			for _, enc := range encodings {
+				resp := fsRootTestGet(t, h, "/"+name, enc.encoding, "")
+				if resp.status != StatusOK || resp.contentEncoding != enc.encoding {
+					t.Errorf("AllowSymlinksOutsideRoot=%v, %d-byte name, %s: status=%d encoding=%q body=%q",
+						allowSymlinksOutsideRoot, len(name), enc.encoding, resp.status, resp.contentEncoding, resp.body)
+					continue
+				}
+				var body []byte
+				var err error
+				switch enc.encoding {
+				case "gzip":
+					body, err = AppendGunzipBytes(nil, []byte(resp.body))
+				case "br":
+					body, err = AppendUnbrotliBytes(nil, []byte(resp.body))
+				case "zstd":
+					body, err = AppendUnzstdBytes(nil, []byte(resp.body))
+				}
+				if err != nil || !bytes.Equal(body, compressible) {
+					t.Errorf("AllowSymlinksOutsideRoot=%v, %d-byte name, %s: body doesn't decode to the file: %v",
+						allowSymlinksOutsideRoot, len(name), enc.encoding, err)
+				}
+				if _, err := os.Stat(filepath.Join(root, name+enc.suffix)); err != nil {
+					t.Errorf("AllowSymlinksOutsideRoot=%v, %d-byte name, %s: compressed file wasn't written: %v",
+						allowSymlinksOutsideRoot, len(name), enc.encoding, err)
+				}
+			}
+		}
+
+		// Only the files and their compressed copies are left.
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := len(names) * (1 + len(encodings)); len(entries) != want {
+			got := make([]string, 0, len(entries))
+			for _, e := range entries {
+				got = append(got, e.Name())
+			}
+			t.Errorf("AllowSymlinksOutsideRoot=%v: %d files in Root, want %d: %q",
+				allowSymlinksOutsideRoot, len(entries), want, got)
+		}
 	}
 }
 
