@@ -2370,6 +2370,9 @@ func (s *compressedBodyStream) closeOriginalForDiscard() error {
 type compressBodyStream func(sw *bufio.Writer, bodyStream io.Reader, level int) error
 
 func newCompressedBodyStream(bodyStream io.Reader, level int, compress compressBodyStream) io.ReadCloser {
+	if _, ok := bodyStream.(*streamPipe); ok {
+		return newBoundedCompressedBodyStream(bodyStream, level, compress)
+	}
 	return &compressedBodyStream{
 		bodyStream: bodyStream,
 		level:      level,
