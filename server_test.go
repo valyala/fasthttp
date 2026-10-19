@@ -3379,6 +3379,39 @@ func TestServerExpect100Continue(t *testing.T) {
 	}
 }
 
+func TestServerExpect100ContinueHTTP10(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		ContinueHandler: func(*RequestHeader) bool {
+			t.Error("ContinueHandler must not be called for an HTTP/1.0 request")
+			return false
+		},
+		Handler: func(ctx *RequestCtx) {
+			if string(ctx.PostBody()) != "12345" {
+				t.Errorf("unexpected body: %q. Expecting %q", ctx.PostBody(), "12345")
+			}
+			ctx.WriteString("foobar") //nolint:errcheck
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST /foo HTTP/1.0\r\nHost: gle.com\r\nExpect: 100-continue\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+
+	// An HTTP/1.0 client doesn't understand 1xx responses, so the expectation
+	// must be ignored and only the final response sent.
+	if bytes.HasPrefix(rw.w.Bytes(), []byte("HTTP/1.1 100 ")) {
+		t.Fatalf("unexpected 100 Continue response to an HTTP/1.0 request: %q", rw.w.Bytes())
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusOK, string(defaultContentType), "foobar")
+}
+
 func TestServerExpect103EarlyHints(t *testing.T) {
 	t.Parallel()
 
