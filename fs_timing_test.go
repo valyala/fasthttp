@@ -8,25 +8,39 @@ import (
 )
 
 // BenchmarkFSSmallFile serves a cached small file over a pipelined
-// connection, from a directory and from an fs.FS.
+// connection, from a directory and from an fs.FS. The nocache cases open
+// the file for every request.
 func BenchmarkFSSmallFile(b *testing.B) {
 	body := bytes.Repeat([]byte("a"), 1024)
 	dir := b.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "file.txt"), body, 0o600); err != nil {
 		b.Fatal(err)
 	}
+	nested := filepath.Join(dir, "a", "b", "c", "d")
+	if err := os.MkdirAll(nested, 0o750); err != nil {
+		b.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "file.txt"), body, 0o600); err != nil {
+		b.Fatal(err)
+	}
 
 	b.Run("dir", func(b *testing.B) {
-		benchmarkFSSmallFile(b, &FS{Root: dir}, len(body))
+		benchmarkFSSmallFile(b, &FS{Root: dir}, "/file.txt", len(body))
 	})
 	b.Run("fs", func(b *testing.B) {
-		benchmarkFSSmallFile(b, &FS{FS: os.DirFS(dir), AllowEmptyRoot: true}, len(body))
+		benchmarkFSSmallFile(b, &FS{FS: os.DirFS(dir), AllowEmptyRoot: true}, "/file.txt", len(body))
+	})
+	b.Run("dir-nocache", func(b *testing.B) {
+		benchmarkFSSmallFile(b, &FS{Root: dir, SkipCache: true}, "/file.txt", len(body))
+	})
+	b.Run("dir-nocache-nested", func(b *testing.B) {
+		benchmarkFSSmallFile(b, &FS{Root: dir, SkipCache: true}, "/a/b/c/d/file.txt", len(body))
 	})
 }
 
-func benchmarkFSSmallFile(b *testing.B, fs *FS, size int) {
+func benchmarkFSSmallFile(b *testing.B, fs *FS, path string, size int) {
 	const depth = 16
-	const request = "GET /file.txt HTTP/1.1\r\nHost: 127.0.0.1:8081\r\n\r\n"
+	request := "GET " + path + " HTTP/1.1\r\nHost: 127.0.0.1:8081\r\n\r\n"
 	batch := make([]byte, 0, depth*len(request))
 	for range depth {
 		batch = append(batch, request...)

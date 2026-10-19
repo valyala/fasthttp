@@ -1499,8 +1499,6 @@ func (f *errReadFile) Close() error                 { return nil }
 func TestFSCompressTmpFileRemovedOnError(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
-
 	// Use this test file as the source for a valid fs.FileInfo.
 	fi, err := os.Stat("fs_test.go")
 	if err != nil {
@@ -1508,17 +1506,103 @@ func TestFSCompressTmpFileRemovedOnError(t *testing.T) {
 	}
 
 	h := &fsHandler{}
-	compressedFilePath := filepath.Join(dir, "out.gz")
-	tmpFilePath := compressedFilePath + ".tmp"
+	for _, confined := range []bool{false, true} {
+		dir := t.TempDir()
+		cache := osRoot{}
+		if confined {
+			cache = newOSRoot(dir, false)
+		}
+		compressedFilePath := filepath.Join(dir, "out.gz")
 
-	_, err = h.compressFileNolock(
-		&errReadFile{fi: fi}, fi, "fs_test.go", compressedFilePath, "gzip")
-	if err == nil {
-		t.Fatalf("expecting error when compression fails")
+		_, err = h.compressFileNolock(
+			cache, &errReadFile{fi: fi}, fi, "fs_test.go", compressedFilePath, "gzip")
+		if err == nil {
+			t.Fatalf("expecting error when compression fails")
+		}
+
+		// The temporary file has a random name, so nothing may be left.
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("confined=%v: temporary file %q must be removed on compression error", confined, entries[0].Name())
+		}
 	}
+}
 
-	if _, err := os.Stat(tmpFilePath); !os.IsNotExist(err) {
-		t.Fatalf("temporary file %q must be removed on compression error, stat err: %v", tmpFilePath, err)
+// TestFSCompressLongFileName checks that the temporary file for a compressed
+// copy doesn't shorten the file names FS can compress: every file whose
+// compressed copy has a valid name gets compressed.
+func TestFSCompressLongFileName(t *testing.T) {
+	t.Parallel()
+
+	compressible := bytes.Repeat([]byte("compressible-data-"), 1000)
+	// A 225-byte name, and the longest name whose compressed copies, with
+	// suffixes of up to 13 bytes, fit in the 255-byte name limit of common
+	// filesystems.
+	names := []string{strings.Repeat("a", 221) + ".txt", strings.Repeat("b", 238) + ".txt"}
+	encodings := []struct{ encoding, suffix string }{
+		{encoding: "gzip", suffix: ".fasthttp.gz"},
+		{encoding: "br", suffix: ".fasthttp.br"},
+		{encoding: "zstd", suffix: ".fasthttp.zst"},
+	}
+	for _, allowSymlinksOutsideRoot := range []bool{false, true} {
+		root := t.TempDir()
+		for _, name := range names {
+			fsRootTestWriteFiles(t, root, map[string][]byte{name: compressible})
+		}
+		h := (&FS{
+			Root:                     root,
+			Compress:                 true,
+			CompressBrotli:           true,
+			CompressZstd:             true,
+			SkipCache:                true,
+			AllowSymlinksOutsideRoot: allowSymlinksOutsideRoot,
+		}).NewRequestHandler()
+
+		for _, name := range names {
+			for _, enc := range encodings {
+				resp := fsRootTestGet(t, h, "/"+name, enc.encoding, "")
+				if resp.status != StatusOK || resp.contentEncoding != enc.encoding {
+					t.Errorf("AllowSymlinksOutsideRoot=%v, %d-byte name, %s: status=%d encoding=%q body=%q",
+						allowSymlinksOutsideRoot, len(name), enc.encoding, resp.status, resp.contentEncoding, resp.body)
+					continue
+				}
+				var body []byte
+				var err error
+				switch enc.encoding {
+				case "gzip":
+					body, err = AppendGunzipBytes(nil, []byte(resp.body))
+				case "br":
+					body, err = AppendUnbrotliBytes(nil, []byte(resp.body))
+				case "zstd":
+					body, err = AppendUnzstdBytes(nil, []byte(resp.body))
+				}
+				if err != nil || !bytes.Equal(body, compressible) {
+					t.Errorf("AllowSymlinksOutsideRoot=%v, %d-byte name, %s: body doesn't decode to the file: %v",
+						allowSymlinksOutsideRoot, len(name), enc.encoding, err)
+				}
+				if _, err := os.Stat(filepath.Join(root, name+enc.suffix)); err != nil {
+					t.Errorf("AllowSymlinksOutsideRoot=%v, %d-byte name, %s: compressed file wasn't written: %v",
+						allowSymlinksOutsideRoot, len(name), enc.encoding, err)
+				}
+			}
+		}
+
+		// Only the files and their compressed copies are left.
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := len(names) * (1 + len(encodings)); len(entries) != want {
+			got := make([]string, 0, len(entries))
+			for _, e := range entries {
+				got = append(got, e.Name())
+			}
+			t.Errorf("AllowSymlinksOutsideRoot=%v: %d files in Root, want %d: %q",
+				allowSymlinksOutsideRoot, len(entries), want, got)
+		}
 	}
 }
 
@@ -2286,4 +2370,617 @@ func testFSETagRequest(t *testing.T, h RequestHandler, prepare func(req *Request
 	}
 	h(&ctx)
 	return readResponseFromCtx(t, &ctx, false)
+}
+
+// fsRootTestResponse holds the parts of an FS response that must not depend
+// on whether FS confines file access to Root.
+type fsRootTestResponse struct {
+	contentType     string
+	contentEncoding string
+	contentRange    string
+	location        string
+	body            string
+	status          int
+	contentLength   int
+}
+
+func fsRootTestGet(t *testing.T, h RequestHandler, path, acceptEncoding, byteRange string) fsRootTestResponse {
+	t.Helper()
+
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, TestLogger{t: t})
+	ctx.Request.SetRequestURI(path)
+	if acceptEncoding != "" {
+		ctx.Request.Header.Set(HeaderAcceptEncoding, acceptEncoding)
+	}
+	if byteRange != "" {
+		ctx.Request.Header.Set(HeaderRange, byteRange)
+	}
+	h(&ctx)
+
+	hdr := &ctx.Response.Header
+	return fsRootTestResponse{
+		status:          ctx.Response.StatusCode(),
+		contentLength:   hdr.ContentLength(),
+		contentType:     string(hdr.ContentType()),
+		contentEncoding: string(hdr.ContentEncoding()),
+		contentRange:    string(hdr.Peek(HeaderContentRange)),
+		location:        string(hdr.Peek(HeaderLocation)),
+		body:            string(ctx.Response.Body()),
+	}
+}
+
+func fsRootTestWriteFiles(t *testing.T, dir string, files map[string][]byte) {
+	t.Helper()
+
+	for name, data := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestFSRootServesLikeUnconfined checks that opening files through os.Root
+// doesn't change the responses to ordinary requests.
+func TestFSRootServesLikeUnconfined(t *testing.T) {
+	t.Parallel()
+
+	// Random numbers compress to under half their size, so the compressed
+	// copy of big.txt is a big file too, which is opened again to be read.
+	var bigText []byte
+	rnd := rand.New(rand.NewSource(1))
+	for len(bigText) < 16*maxSmallFileSize {
+		bigText = fmt.Appendf(bigText, "%d ", rnd.Intn(100))
+	}
+	files := map[string][]byte{
+		"index.html":         []byte("<p>root index</p>"),
+		"big.bin":            bytes.Repeat([]byte("0123456789"), 2*maxSmallFileSize),
+		"big.txt":            bigText,
+		"app.js":             bytes.Repeat([]byte("compressible-data-"), 1000),
+		"sub/index.html":     []byte("<p>sub index</p>"),
+		"sub/style.css":      []byte("body{}"),
+		"sub/deep/data.json": []byte(`{"a":1}`),
+		"listing/a.txt":      []byte("a"),
+		"listing/b.txt":      []byte("bb"),
+	}
+	requests := []struct {
+		path           string
+		acceptEncoding string
+		byteRange      string
+	}{
+		{path: "/"},
+		{path: "/", acceptEncoding: "gzip"},
+		{path: "/sub/", acceptEncoding: "br"},
+		{path: "/index.html"},
+		{path: "/big.bin"},
+		{path: "/big.bin", byteRange: "bytes=100-299"},
+		{path: "/big.bin", byteRange: "bytes=-50"},
+		{path: "/big.txt", acceptEncoding: "gzip"},
+		{path: "/big.txt", acceptEncoding: "br"},
+		{path: "/app.js", acceptEncoding: "gzip"},
+		{path: "/app.js", acceptEncoding: "br"},
+		{path: "/app.js", acceptEncoding: "zstd"},
+		{path: "/sub"},
+		{path: "/sub/"},
+		{path: "/sub/style.css"},
+		{path: "/sub/style.css", acceptEncoding: "gzip"},
+		{path: "/sub/deep/data.json"},
+		{path: "/listing/"},
+		{path: "/listing/", acceptEncoding: "gzip"},
+		{path: "/missing.txt"},
+		{path: "/sub/missing/"},
+	}
+
+	// The compressed files go to Root itself, to a sibling whose name starts
+	// with the name of Root, or to a directory inside Root.
+	for _, cacheName := range []string{"", "www-cache", filepath.Join("www", "cache")} {
+		base := t.TempDir()
+		root := filepath.Join(base, "www")
+		fsRootTestWriteFiles(t, root, files)
+
+		cacheDir := root
+		compressRoot := ""
+		if cacheName != "" {
+			compressRoot = filepath.Join(base, cacheName)
+			cacheDir = compressRoot
+		}
+
+		newHandler := func(allowSymlinksOutsideRoot bool) RequestHandler {
+			stop := make(chan struct{})
+			t.Cleanup(func() { close(stop) })
+			fs := &FS{
+				Root:                     root,
+				CompressRoot:             compressRoot,
+				IndexNames:               []string{"index.html"},
+				GenerateIndexPages:       true,
+				AcceptByteRange:          true,
+				Compress:                 true,
+				CompressBrotli:           true,
+				CompressZstd:             true,
+				CleanStop:                stop,
+				AllowSymlinksOutsideRoot: allowSymlinksOutsideRoot,
+			}
+			return fs.NewRequestHandler()
+		}
+		// The confined handler runs first, so it is the one that writes
+		// the compressed files.
+		confined := newHandler(false)
+		unconfined := newHandler(true)
+
+		for _, req := range requests {
+			got := fsRootTestGet(t, confined, req.path, req.acceptEncoding, req.byteRange)
+			want := fsRootTestGet(t, unconfined, req.path, req.acceptEncoding, req.byteRange)
+			if got != want {
+				t.Fatalf("CompressRoot=%q, request %+v:\ngot  %+v\nwant %+v", compressRoot, req, got, want)
+			}
+		}
+
+		for _, name := range []string{"app.js.fasthttp.gz", "app.js.fasthttp.br", "app.js.fasthttp.zst", "big.txt.fasthttp.gz"} {
+			if _, err := os.Stat(filepath.Join(cacheDir, name)); err != nil {
+				t.Errorf("compressed file wasn't written to %q: %v", cacheDir, err)
+			}
+		}
+	}
+}
+
+// Relative roots such as "./www" are joined with the working directory
+// without cleaning, so the paths FS builds from them keep the "." or ".."
+// components. Compressed files must still be written under CompressRoot.
+func TestFSRootRelativeRoots(t *testing.T) {
+	base := t.TempDir()
+	work := filepath.Join(base, "work")
+	if err := os.Mkdir(work, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(work)
+
+	compressible := bytes.Repeat([]byte("compressible-data-"), 1000)
+	for _, roots := range []struct{ root, compressRoot string }{
+		{root: "./www", compressRoot: "./cache"},
+		{root: "../www", compressRoot: "../cache"},
+		{root: "www-same", compressRoot: "./www-same"},
+	} {
+		fsRootTestWriteFiles(t, roots.root, map[string][]byte{
+			"app.js":          compressible,
+			"sub/deep/app.js": compressible,
+			"index.html":      compressible,
+		})
+
+		newHandler := func(allowSymlinksOutsideRoot bool) RequestHandler {
+			stop := make(chan struct{})
+			t.Cleanup(func() { close(stop) })
+			fs := &FS{
+				Root:                     roots.root,
+				CompressRoot:             roots.compressRoot,
+				IndexNames:               []string{"index.html"},
+				Compress:                 true,
+				CompressBrotli:           true,
+				CleanStop:                stop,
+				AllowSymlinksOutsideRoot: allowSymlinksOutsideRoot,
+			}
+			return fs.NewRequestHandler()
+		}
+		confined := newHandler(false)
+		unconfined := newHandler(true)
+
+		for _, req := range []struct{ path, acceptEncoding string }{
+			{path: "/app.js", acceptEncoding: "gzip"},
+			{path: "/sub/deep/app.js", acceptEncoding: "br"},
+			{path: "/", acceptEncoding: "gzip"},
+			{path: "/index.html"},
+		} {
+			got := fsRootTestGet(t, confined, req.path, req.acceptEncoding, "")
+			want := fsRootTestGet(t, unconfined, req.path, req.acceptEncoding, "")
+			if got.status != want.status || got.contentEncoding != want.contentEncoding || got.body != want.body {
+				t.Fatalf("Root=%q CompressRoot=%q, request %+v: got status=%d encoding=%q, want status=%d encoding=%q",
+					roots.root, roots.compressRoot, req, got.status, got.contentEncoding, want.status, want.contentEncoding)
+			}
+			if req.acceptEncoding != "" && got.contentEncoding != req.acceptEncoding {
+				t.Fatalf("Root=%q CompressRoot=%q, request %+v: Content-Encoding %q, want %q",
+					roots.root, roots.compressRoot, req, got.contentEncoding, req.acceptEncoding)
+			}
+		}
+		for _, name := range []string{"app.js.fasthttp.gz", filepath.Join("sub", "deep", "app.js.fasthttp.br")} {
+			if _, err := os.Stat(filepath.Join(roots.compressRoot, name)); err != nil {
+				t.Errorf("compressed file wasn't written under CompressRoot %q: %v", roots.compressRoot, err)
+			}
+		}
+	}
+}
+
+func TestFSRootSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks needs extra privileges on Windows")
+	}
+	t.Parallel()
+
+	base := t.TempDir()
+	realRoot := filepath.Join(base, "real-root")
+	outside := filepath.Join(base, "outside")
+	fsRootTestWriteFiles(t, realRoot, map[string][]byte{
+		"public.txt": []byte("public"),
+		"sub/a.txt":  []byte("sub-a"),
+	})
+	fsRootTestWriteFiles(t, outside, map[string][]byte{
+		"secret.txt": []byte("outside-root"),
+	})
+	for _, link := range []struct{ target, name string }{
+		// Symlinks that stay within the root keep working.
+		{"public.txt", "relative-link.txt"},
+		{"sub", "relative-dir"},
+		{"../public.txt", "sub/parent-link.txt"},
+		// Symlinks that leave the root.
+		{filepath.Join(outside, "secret.txt"), "file-link.txt"},
+		{outside, "dir-link"},
+		{"../outside/secret.txt", "relative-escape.txt"},
+	} {
+		if err := os.Symlink(link.target, filepath.Join(realRoot, link.name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Root itself may be a symlink.
+	root := filepath.Join(base, "root-link")
+	if err := os.Symlink(realRoot, root); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, allowSymlinksOutsideRoot := range []bool{false, true} {
+		h := (&FS{
+			Root:                     root,
+			GenerateIndexPages:       true,
+			SkipCache:                true,
+			AllowSymlinksOutsideRoot: allowSymlinksOutsideRoot,
+		}).NewRequestHandler()
+
+		for path, body := range map[string]string{
+			"/public.txt":          "public",
+			"/relative-link.txt":   "public",
+			"/relative-dir/a.txt":  "sub-a",
+			"/sub/parent-link.txt": "public",
+		} {
+			resp := fsRootTestGet(t, h, path, "", "")
+			if resp.status != StatusOK || resp.body != body {
+				t.Fatalf("AllowSymlinksOutsideRoot=%v, %s: status=%d body=%q, want %d %q",
+					allowSymlinksOutsideRoot, path, resp.status, resp.body, StatusOK, body)
+			}
+		}
+
+		for _, path := range []string{"/file-link.txt", "/dir-link/secret.txt", "/relative-escape.txt"} {
+			resp := fsRootTestGet(t, h, path, "", "")
+			if allowSymlinksOutsideRoot {
+				if resp.status != StatusOK || resp.body != "outside-root" {
+					t.Fatalf("AllowSymlinksOutsideRoot=true, %s: status=%d body=%q, want the linked file",
+						path, resp.status, resp.body)
+				}
+				continue
+			}
+			if resp.status != StatusNotFound || strings.Contains(resp.body, "outside-root") {
+				t.Fatalf("%s: status=%d body=%q, want %d without the file outside Root",
+					path, resp.status, resp.body, StatusNotFound)
+			}
+		}
+
+		resp := fsRootTestGet(t, h, "/dir-link/", "", "")
+		if strings.Contains(resp.body, "secret.txt") != allowSymlinksOutsideRoot {
+			t.Fatalf("AllowSymlinksOutsideRoot=%v, index of a linked directory outside Root: status=%d body=%q",
+				allowSymlinksOutsideRoot, resp.status, resp.body)
+		}
+	}
+}
+
+func TestFSRootCompressedFilesStayInRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks needs extra privileges on Windows")
+	}
+	t.Parallel()
+
+	compressible := bytes.Repeat([]byte("compressible-data-"), 1000)
+	for _, allowSymlinksOutsideRoot := range []bool{false, true} {
+		root := t.TempDir()
+		compressRoot := t.TempDir()
+		outside := t.TempDir()
+		fsRootTestWriteFiles(t, root, map[string][]byte{"sub/page.html": compressible})
+		fsRootTestWriteFiles(t, outside, map[string][]byte{
+			"linked/page.html": compressible,
+			"cache/.keep":      nil,
+		})
+		// A directory under Root links to a directory outside it, and so does
+		// the directory under CompressRoot that the compressed copy of
+		// sub/page.html goes to.
+		if err := os.Symlink(filepath.Join(outside, "linked"), filepath.Join(root, "linked")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(outside, "cache"), filepath.Join(compressRoot, "sub")); err != nil {
+			t.Fatal(err)
+		}
+
+		for _, tc := range []struct {
+			compressRoot string
+			path         string
+			written      string
+		}{
+			{path: "/linked/page.html", written: filepath.Join(outside, "linked", "page.html.fasthttp.gz")},
+			{compressRoot: compressRoot, path: "/sub/page.html", written: filepath.Join(outside, "cache", "page.html.fasthttp.gz")},
+		} {
+			h := (&FS{
+				Root:                     root,
+				CompressRoot:             tc.compressRoot,
+				Compress:                 true,
+				SkipCache:                true,
+				AllowSymlinksOutsideRoot: allowSymlinksOutsideRoot,
+			}).NewRequestHandler()
+			resp := fsRootTestGet(t, h, tc.path, "gzip", "")
+
+			_, err := os.Stat(tc.written)
+			if allowSymlinksOutsideRoot {
+				if err != nil || resp.status != StatusOK || resp.contentEncoding != "gzip" {
+					t.Fatalf("AllowSymlinksOutsideRoot=true, %s: status=%d encoding=%q, stat %q: %v",
+						tc.path, resp.status, resp.contentEncoding, tc.written, err)
+				}
+				continue
+			}
+			if !errors.Is(err, iofs.ErrNotExist) {
+				t.Fatalf("%s: compressed file written through a symlink that leaves the root to %q (stat error %v)",
+					tc.path, tc.written, err)
+			}
+			if resp.status == StatusOK && resp.contentEncoding == "gzip" {
+				t.Fatalf("%s: served a compressed file through a symlink that leaves the root", tc.path)
+			}
+		}
+	}
+}
+
+// TestFSRootCompressRootInsideRoot checks that a CompressRoot inside Root
+// only applies to the compressed files FS writes: requested files under it
+// are still resolved in Root.
+func TestFSRootCompressRootInsideRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks needs extra privileges on Windows")
+	}
+	t.Parallel()
+
+	compressible := bytes.Repeat([]byte("compressible-data-"), 1000)
+	for _, allowSymlinksOutsideRoot := range []bool{false, true} {
+		newHandler := func(root string) RequestHandler {
+			return (&FS{
+				Root:                     root,
+				CompressRoot:             filepath.Join(root, "cache"),
+				Compress:                 true,
+				SkipCache:                true,
+				AllowSymlinksOutsideRoot: allowSymlinksOutsideRoot,
+			}).NewRequestHandler()
+		}
+
+		// A symlink in the cache directory to a file elsewhere in Root.
+		root := filepath.Join(t.TempDir(), "www")
+		fsRootTestWriteFiles(t, root, map[string][]byte{"public.txt": []byte("public")})
+		if err := os.Mkdir(filepath.Join(root, "cache"), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join("..", "public.txt"), filepath.Join(root, "cache", "link.txt")); err != nil {
+			t.Fatal(err)
+		}
+		resp := fsRootTestGet(t, newHandler(root), "/cache/link.txt", "", "")
+		if resp.status != StatusOK || resp.body != "public" {
+			t.Errorf("AllowSymlinksOutsideRoot=%v, /cache/link.txt: status=%d body=%q, want %d %q",
+				allowSymlinksOutsideRoot, resp.status, resp.body, StatusOK, "public")
+		}
+
+		// A cache directory that is a symlink to a directory outside Root.
+		base := t.TempDir()
+		root = filepath.Join(base, "www")
+		outside := filepath.Join(base, "outside")
+		fsRootTestWriteFiles(t, root, map[string][]byte{"app.js": compressible})
+		fsRootTestWriteFiles(t, outside, map[string][]byte{"secret.txt": []byte("outside-root")})
+		if err := os.Symlink(filepath.Join("..", "outside"), filepath.Join(root, "cache")); err != nil {
+			t.Fatal(err)
+		}
+		h := newHandler(root)
+		resp = fsRootTestGet(t, h, "/cache/secret.txt", "", "")
+		if allowSymlinksOutsideRoot {
+			if resp.status != StatusOK || resp.body != "outside-root" {
+				t.Errorf("AllowSymlinksOutsideRoot=true, /cache/secret.txt: status=%d body=%q, want the linked file",
+					resp.status, resp.body)
+			}
+		} else if resp.status != StatusNotFound || strings.Contains(resp.body, "outside-root") {
+			t.Errorf("/cache/secret.txt: status=%d body=%q, want %d without the file outside Root",
+				resp.status, resp.body, StatusNotFound)
+		}
+		// CompressRoot itself may be a symlink, like Root, so the compressed
+		// files still go to the directory it links to.
+		resp = fsRootTestGet(t, h, "/app.js", "gzip", "")
+		if resp.status != StatusOK || resp.contentEncoding != "gzip" {
+			t.Errorf("AllowSymlinksOutsideRoot=%v, /app.js: status=%d encoding=%q, want %d gzip",
+				allowSymlinksOutsideRoot, resp.status, resp.contentEncoding, StatusOK)
+		}
+		if _, err := os.Stat(filepath.Join(outside, "app.js.fasthttp.gz")); err != nil {
+			t.Errorf("AllowSymlinksOutsideRoot=%v: compressed file wasn't written to CompressRoot: %v",
+				allowSymlinksOutsideRoot, err)
+		}
+	}
+}
+
+// TestFSRootWholeVolumeCompressRoot checks that a CompressRoot that is a
+// whole volume, which has no directory to confine paths to, doesn't stop
+// FS from confining the paths in Root.
+func TestFSRootWholeVolumeCompressRoot(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks needs extra privileges on Windows")
+	}
+	t.Parallel()
+
+	base := t.TempDir()
+	root := filepath.Join(base, "www")
+	outside := filepath.Join(base, "outside")
+	fsRootTestWriteFiles(t, root, map[string][]byte{"public.txt": []byte("public")})
+	fsRootTestWriteFiles(t, outside, map[string][]byte{"secret.txt": []byte("outside-root")})
+	if err := os.Symlink(filepath.Join("..", "outside", "secret.txt"), filepath.Join(root, "file-link.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("..", "outside"), filepath.Join(root, "dir-link")); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, allowSymlinksOutsideRoot := range []bool{false, true} {
+		h := (&FS{
+			Root:                     root,
+			CompressRoot:             filepath.VolumeName(base) + string(filepath.Separator),
+			SkipCache:                true,
+			AllowSymlinksOutsideRoot: allowSymlinksOutsideRoot,
+		}).NewRequestHandler()
+
+		if resp := fsRootTestGet(t, h, "/public.txt", "", ""); resp.status != StatusOK || resp.body != "public" {
+			t.Errorf("AllowSymlinksOutsideRoot=%v, /public.txt: status=%d body=%q",
+				allowSymlinksOutsideRoot, resp.status, resp.body)
+		}
+		for _, path := range []string{"/file-link.txt", "/dir-link/secret.txt"} {
+			resp := fsRootTestGet(t, h, path, "", "")
+			if allowSymlinksOutsideRoot {
+				if resp.status != StatusOK || resp.body != "outside-root" {
+					t.Errorf("AllowSymlinksOutsideRoot=true, %s: status=%d body=%q, want the linked file",
+						path, resp.status, resp.body)
+				}
+				continue
+			}
+			if resp.status != StatusNotFound || strings.Contains(resp.body, "outside-root") {
+				t.Errorf("%s: status=%d body=%q, want %d without the file outside Root",
+					path, resp.status, resp.body, StatusNotFound)
+			}
+		}
+	}
+}
+
+// TestFSRootStaleCompressedFileInRoot checks that a stale precompressed file
+// next to its original in Root is removed from Root when the compressed
+// copies FS writes go to a separate CompressRoot.
+func TestFSRootStaleCompressedFileInRoot(t *testing.T) {
+	t.Parallel()
+
+	compressible := bytes.Repeat([]byte("compressible-data-"), 1000)
+	for _, allowSymlinksOutsideRoot := range []bool{false, true} {
+		base := t.TempDir()
+		root := filepath.Join(base, "www")
+		compressRoot := filepath.Join(base, "cache")
+		stale := filepath.Join(root, "app.js.fasthttp.gz")
+		fsRootTestWriteFiles(t, root, map[string][]byte{
+			"app.js":             compressible,
+			"app.js.fasthttp.gz": AppendGzipBytes(nil, []byte("stale")),
+		})
+		old := time.Now().Add(-time.Hour)
+		if err := os.Chtimes(stale, old, old); err != nil {
+			t.Fatal(err)
+		}
+
+		h := (&FS{
+			Root:                     root,
+			CompressRoot:             compressRoot,
+			Compress:                 true,
+			SkipCache:                true,
+			AllowSymlinksOutsideRoot: allowSymlinksOutsideRoot,
+		}).NewRequestHandler()
+		resp := fsRootTestGet(t, h, "/app.js", "gzip", "")
+		body, err := AppendGunzipBytes(nil, []byte(resp.body))
+		if resp.status != StatusOK || resp.contentEncoding != "gzip" || err != nil || !bytes.Equal(body, compressible) {
+			t.Errorf("AllowSymlinksOutsideRoot=%v, /app.js: status=%d encoding=%q, gunzip error %v, want the file compressed again",
+				allowSymlinksOutsideRoot, resp.status, resp.contentEncoding, err)
+		}
+		if _, err := os.Stat(stale); !errors.Is(err, iofs.ErrNotExist) {
+			t.Errorf("AllowSymlinksOutsideRoot=%v: stale compressed file in Root wasn't removed (stat error %v)",
+				allowSymlinksOutsideRoot, err)
+		}
+		if _, err := os.Stat(filepath.Join(compressRoot, "app.js.fasthttp.gz")); err != nil {
+			t.Errorf("AllowSymlinksOutsideRoot=%v: compressed file wasn't written to CompressRoot: %v",
+				allowSymlinksOutsideRoot, err)
+		}
+	}
+}
+
+func TestOSFSRoots(t *testing.T) {
+	t.Parallel()
+
+	base := t.TempDir()
+	root := filepath.Join(base, "www")
+	compressRoot := filepath.Join(base, "www-cache")
+	sep := string(filepath.Separator)
+
+	for _, tc := range []struct {
+		name    string
+		wantRel string // empty for a name outside root
+	}{
+		{name: root, wantRel: "."},
+		{name: root + sep + "a.txt", wantRel: "a.txt"},
+		{name: root + sep + sep + "a" + sep + "b.txt", wantRel: "a" + sep + "b.txt"},
+		{name: root + "/index.html", wantRel: "index.html"},
+		// A sibling whose name starts with the name of root.
+		{name: compressRoot + sep + "a.txt"},
+		{name: base + sep + "a.txt"},
+		{name: root + ".fasthttp.gz"},
+	} {
+		rel, err := newOSRoot(root, false).rel(tc.name)
+		if tc.wantRel == "" {
+			if !errors.Is(err, iofs.ErrNotExist) {
+				t.Fatalf("root %q, %q: got %q and %v, want an error for a path outside the root", root, tc.name, rel, err)
+			}
+			continue
+		}
+		if err != nil || rel != tc.wantRel {
+			t.Fatalf("root %q, %q: got %q and %v, want %q", root, tc.name, rel, err, tc.wantRel)
+		}
+	}
+
+	// Root and CompressRoot are confined independently of each other, and a
+	// root that is empty or a whole volume isn't confined.
+	volume := filepath.VolumeName(base)
+	nested := filepath.Join(root, "cache")
+	for _, tc := range []struct {
+		root                     string
+		compressRoot             string
+		wantRoot                 string
+		wantCompressRoot         string
+		allowSymlinksOutsideRoot bool
+	}{
+		{root: root, compressRoot: root, wantRoot: root, wantCompressRoot: root},
+		{root: root, compressRoot: compressRoot, wantRoot: root, wantCompressRoot: compressRoot},
+		{root: root, compressRoot: nested, wantRoot: root, wantCompressRoot: nested},
+		{root: nested, compressRoot: root, wantRoot: nested, wantCompressRoot: root},
+		{root: root, compressRoot: "", wantRoot: root},
+		{root: root, compressRoot: volume, wantRoot: root},
+		{root: "", compressRoot: compressRoot, wantCompressRoot: compressRoot},
+		{root: volume, compressRoot: compressRoot, wantCompressRoot: compressRoot},
+		{root: "", compressRoot: ""},
+		{root: root, compressRoot: compressRoot, allowSymlinksOutsideRoot: true},
+	} {
+		o := newOSFS(tc.root, tc.compressRoot, tc.allowSymlinksOutsideRoot)
+		if o.root.dir != tc.wantRoot || o.compressRoot.dir != tc.wantCompressRoot {
+			t.Fatalf("newOSFS(%q, %q, %v) confines paths to %q and %q, want %q and %q",
+				tc.root, tc.compressRoot, tc.allowSymlinksOutsideRoot,
+				o.root.dir, o.compressRoot.dir, tc.wantRoot, tc.wantCompressRoot)
+		}
+	}
+}
+
+// bigFileReader only gets sendfile when the file it reads is an *os.File.
+func TestOSFSOpenReturnsOSFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	name := filepath.Join(root, "big.bin")
+	if err := os.WriteFile(name, bytes.Repeat([]byte("x"), 2*maxSmallFileSize), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, allowSymlinksOutsideRoot := range []bool{false, true} {
+		f, err := newOSFS(root, root, allowSymlinksOutsideRoot).Open(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, ok := f.(*os.File)
+		_ = f.Close()
+		if !ok {
+			t.Fatalf("AllowSymlinksOutsideRoot=%v: Open returned %T, want *os.File", allowSymlinksOutsideRoot, f)
+		}
+	}
 }

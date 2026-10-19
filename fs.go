@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"html"
@@ -375,10 +376,16 @@ type FS struct {
 	h RequestHandler
 
 	// Path to the root directory to serve files from.
+	//
+	// Symbolic links under Root are only followed while they stay inside
+	// it, see AllowSymlinksOutsideRoot.
 	Root string
 
 	// Path to the compressed root directory to serve files from. If this value
 	// is empty, Root is used.
+	//
+	// Compressed copies are confined to CompressRoot unless it is a whole
+	// volume or AllowSymlinksOutsideRoot is set.
 	CompressRoot string
 
 	// Suffix to add to the name of cached compressed file.
@@ -415,6 +422,28 @@ type FS struct {
 	// on windows that are on different filesystems. On linux setting your Root to "/" already allows you to use
 	// absolute paths on any filesystem.
 	AllowEmptyRoot bool
+
+	// AllowSymlinksOutsideRoot makes FS follow symbolic links that lead
+	// outside Root, or outside CompressRoot for the compressed copies.
+	//
+	// By default, when FS serves files from the OS filesystem (FS.FS is nil),
+	// every file FS opens, stats or writes for a request is resolved with
+	// os.Root, so it stays inside its root directory even if a path component
+	// is a symbolic link. Requested files, index files and directory listings
+	// are resolved in Root, and the compressed copies FS writes are resolved
+	// in CompressRoot. Symbolic links that point outside the root, and
+	// absolute symbolic links, are then not followed: requests for paths
+	// through them are answered as if the path could not be opened (404,
+	// or 403 for an index file). Generated index pages still list such
+	// links. Symbolic links that stay inside the root keep working, and
+	// Root and CompressRoot themselves may be symbolic links. A Root or
+	// CompressRoot that is empty or a whole volume, such as "/", has no
+	// directory to confine paths to, so paths in it are used as they are;
+	// the other one is still confined.
+	//
+	// Set this only if Root deliberately links to files elsewhere. Paths are
+	// then joined with Root and opened as they are.
+	AllowSymlinksOutsideRoot bool
 
 	// Uses brotli encoding and fallbacks to zstd or gzip in responses if set to true, uses zstd or gzip if set to false.
 	//
@@ -631,7 +660,7 @@ func (fs *FS) initRequestHandler() {
 	h.cacheManager = newCacheManager(fs)
 
 	if h.filesystem == nil {
-		h.filesystem = &osFS{} // It provides os.Open and os.Stat
+		h.filesystem = newOSFS(root, compressRoot, fs.AllowSymlinksOutsideRoot)
 	}
 
 	if fs.SkipCache {
@@ -697,6 +726,10 @@ type fsFile struct {
 	bigFilesLock sync.Mutex
 	compressed   bool
 
+	// inCompressRoot is set for a compressed copy FS wrote to CompressRoot,
+	// which bigFileReader opens again in CompressRoot rather than in Root.
+	inCompressRoot bool
+
 	// countedInMemory is set while the file counts toward its handler's
 	// smallFilesInMemory.
 	countedInMemory bool
@@ -756,7 +789,7 @@ func (ff *fsFile) bigFileReader() (io.Reader, error) {
 	ff.bigFilesLock.Unlock()
 
 	if r == nil {
-		f, err := ff.h.filesystem.Open(ff.filename)
+		f, err := ff.reopen()
 		if err != nil {
 			return nil, fmt.Errorf("cannot open already opened file: %w", err)
 		}
@@ -776,6 +809,18 @@ func (ff *fsFile) bigFileReader() (io.Reader, error) {
 		r.r = &r.lr
 	}
 	return r, nil
+}
+
+// reopen opens the file ff serves once more, in the root it was opened in.
+func (ff *fsFile) reopen() (fs.File, error) {
+	if o, ok := ff.h.filesystem.(*osFS); ok && ff.inCompressRoot {
+		f, err := o.compressRoot.open(ff.filename)
+		if err != nil {
+			return nil, err
+		}
+		return f, nil
+	}
+	return ff.h.filesystem.Open(ff.filename)
 }
 
 func (ff *fsFile) Release() {
@@ -1922,12 +1967,14 @@ func (h *fsHandler) compressAndOpenFSFile(filePath, fileEncoding string) (*fsFil
 
 	compressedFilePath := h.filePathToCompressed(filePath)
 
-	if _, ok := h.filesystem.(*osFS); !ok {
+	o, ok := h.filesystem.(*osFS)
+	if !ok {
 		return h.newCompressedFSFileCache(f, fileInfo, compressedFilePath, fileEncoding)
 	}
 
 	if compressedFilePath != filePath {
-		if err := os.MkdirAll(filepath.Dir(compressedFilePath), 0o750); err != nil {
+		if err := o.compressRoot.mkdirParent(compressedFilePath, 0o750); err != nil {
+			_ = f.Close()
 			return nil, err
 		}
 	}
@@ -1945,29 +1992,26 @@ func (h *fsHandler) compressAndOpenFSFile(filePath, fileEncoding string) (*fsFil
 		flock.mu.Unlock()
 		releaseFileLock(absPath, flock)
 	}()
-	return h.compressFileNolock(f, fileInfo, filePath, compressedFilePath, fileEncoding)
+	return h.compressFileNolock(o.compressRoot, f, fileInfo, filePath, compressedFilePath, fileEncoding)
 }
 
+// compressFileNolock writes the compressed copy of f to compressedFilePath
+// in cache, the root of the compressed files, and opens it.
 func (h *fsHandler) compressFileNolock(
-	f fs.File, fileInfo fs.FileInfo, filePath, compressedFilePath, fileEncoding string,
+	cache osRoot, f fs.File, fileInfo fs.FileInfo, filePath, compressedFilePath, fileEncoding string,
 ) (*fsFile, error) {
 	// Attempt to open compressed file created by another concurrent
 	// goroutine.
 	// It is safe opening such a file, since the file creation
 	// is guarded by file mutex - see getFileLock call.
-	if _, err := os.Stat(compressedFilePath); err == nil {
+	if _, err := cache.stat(compressedFilePath); err == nil {
 		_ = f.Close()
-		return h.newCompressedFSFile(compressedFilePath, fileEncoding)
+		return h.newCompressedFSFile(cache, compressedFilePath, fileEncoding)
 	}
 
 	// Create temporary file, so concurrent goroutines don't use
 	// it until it is created.
-	//
-	// os.CreateTemp gives the file a random name and opens it with O_EXCL and
-	// 0600, so a symlink pre-planted at the otherwise predictable temp path
-	// can't be followed to truncate an arbitrary file, and the cache file
-	// isn't left group/world-readable.
-	zf, err := os.CreateTemp(filepath.Dir(compressedFilePath), filepath.Base(compressedFilePath)+".tmp-*")
+	zf, tmpFilePath, err := cache.createTemp(compressedFilePath)
 	if err != nil {
 		_ = f.Close()
 		if !errors.Is(err, fs.ErrPermission) {
@@ -1975,7 +2019,6 @@ func (h *fsHandler) compressFileNolock(
 		}
 		return nil, errNoCreatePermission
 	}
-	tmpFilePath := zf.Name()
 	switch fileEncoding {
 	case "br":
 		zw := acquireStacklessBrotliWriter(zf, CompressDefaultCompression)
@@ -2002,19 +2045,19 @@ func (h *fsHandler) compressFileNolock(
 	_ = zf.Close()
 	_ = f.Close()
 	if err != nil {
-		_ = os.Remove(tmpFilePath)
+		_ = cache.remove(tmpFilePath)
 		return nil, fmt.Errorf("error when compressing file %q to %q: %w", filePath, tmpFilePath, err)
 	}
-	if err = os.Chtimes(tmpFilePath, time.Now(), fileInfo.ModTime()); err != nil {
-		_ = os.Remove(tmpFilePath)
+	if err = cache.chtimes(tmpFilePath, time.Now(), fileInfo.ModTime()); err != nil {
+		_ = cache.remove(tmpFilePath)
 		return nil, fmt.Errorf("cannot change modification time to %v for tmp file %q: %v",
 			fileInfo.ModTime(), tmpFilePath, err)
 	}
-	if err = os.Rename(tmpFilePath, compressedFilePath); err != nil {
-		_ = os.Remove(tmpFilePath)
+	if err = cache.rename(tmpFilePath, compressedFilePath); err != nil {
+		_ = cache.remove(tmpFilePath)
 		return nil, fmt.Errorf("cannot move compressed file from %q to %q: %w", tmpFilePath, compressedFilePath, err)
 	}
-	return h.newCompressedFSFile(compressedFilePath, fileEncoding)
+	return h.newCompressedFSFile(cache, compressedFilePath, fileEncoding)
 }
 
 // newCompressedFSFileCache use memory cache compressed files.
@@ -2088,8 +2131,10 @@ func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, fi
 	return ff, nil
 }
 
-func (h *fsHandler) newCompressedFSFile(filePath, fileEncoding string) (*fsFile, error) {
-	f, err := h.filesystem.Open(filePath)
+// newCompressedFSFile opens the compressed copy filePath that FS wrote to
+// cache, the root of the compressed files.
+func (h *fsHandler) newCompressedFSFile(cache osRoot, filePath, fileEncoding string) (*fsFile, error) {
+	f, err := cache.open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open compressed file %q: %w", filePath, err)
 	}
@@ -2098,7 +2143,12 @@ func (h *fsHandler) newCompressedFSFile(filePath, fileEncoding string) (*fsFile,
 		_ = f.Close()
 		return nil, fmt.Errorf("cannot obtain info for compressed file %q: %w", filePath, err)
 	}
-	return h.newFSFile(f, fileInfo, true, filePath, fileEncoding)
+	ff, err := h.newFSFile(f, fileInfo, true, filePath, fileEncoding)
+	if err != nil {
+		return nil, err
+	}
+	ff.inCompressRoot = true
+	return ff, nil
 }
 
 func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding string) (*fsFile, error) {
@@ -2151,8 +2201,8 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 			// Only remove it from the OS filesystem. A custom FS.FS is
 			// read-only here, and filePath is relative to it rather than
 			// to the working directory.
-			if _, ok := h.filesystem.(*osFS); ok {
-				_ = os.Remove(filePath)
+			if o, ok := h.filesystem.(*osFS); ok {
+				_ = o.root.remove(filePath)
 			}
 			return h.compressAndOpenFSFile(filePathOriginal, fileEncoding)
 		}
@@ -2379,9 +2429,231 @@ func releaseFileLock(absPath string, flock *fileLock) {
 	filesLockMu.Unlock()
 }
 
-var _ fs.FS = (*osFS)(nil)
+var _ fs.StatFS = (*osFS)(nil)
 
-type osFS struct{}
+// errOutsideRoot is reported for a path outside the root directory it is
+// resolved in. Such a path names nothing FS may serve, so it counts as not
+// existing. FS asks for one when a request for Root itself may be
+// compressed: it looks for Root plus the compressed file suffix, which is
+// next to Root, not inside it.
+var errOutsideRoot = fmt.Errorf("path is outside the FS root directory: %w", fs.ErrNotExist)
 
-func (o *osFS) Open(name string) (fs.File, error)     { return os.Open(name) }
-func (o *osFS) Stat(name string) (fs.FileInfo, error) { return os.Stat(name) }
+// osFS is the filesystem FS uses when FS.FS is nil. Its methods take the OS
+// paths fsHandler builds from Root and CompressRoot.
+//
+// The root a path is resolved in depends on what FS does with it, not on
+// the path itself. Open and Stat, which FS uses for the requested files,
+// index files and directory listings, resolve paths in Root, while the
+// compressed copies FS writes are created and opened in CompressRoot. Each
+// root is confined on its own, so a CompressRoot inside Root, or one that
+// is a whole volume, doesn't change how paths in Root are resolved.
+type osFS struct {
+	root         osRoot
+	compressRoot osRoot
+}
+
+// newOSFS returns the osFS for the normalized root and compressRoot.
+func newOSFS(root, compressRoot string, allowSymlinksOutsideRoot bool) *osFS {
+	return &osFS{
+		root:         newOSRoot(root, allowSymlinksOutsideRoot),
+		compressRoot: newOSRoot(compressRoot, allowSymlinksOutsideRoot),
+	}
+}
+
+func (o *osFS) Open(name string) (fs.File, error) {
+	f, err := o.root.open(name)
+	if err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+func (o *osFS) Stat(name string) (fs.FileInfo, error) {
+	return o.root.stat(name)
+}
+
+// osRoot resolves paths inside the directory dir with os.Root, so neither
+// a ".." component nor a symbolic link can lead outside it. The directory
+// is opened for each operation instead of once, so FS keeps following it
+// by name, as it did with plain paths, when the directory is replaced or
+// dir is a symbolic link that gets switched to another directory.
+//
+// If dir is empty, paths are used as they are.
+type osRoot struct {
+	dir string
+}
+
+func newOSRoot(dir string, allowSymlinksOutsideRoot bool) osRoot {
+	// An empty dir, or one that is only a volume name such as "C:", stands
+	// for the whole filesystem (ServeFile serves absolute paths this way),
+	// so there is no directory to confine paths to.
+	if allowSymlinksOutsideRoot || isWholeFilesystemRoot(dir) {
+		return osRoot{}
+	}
+	return osRoot{dir: dir}
+}
+
+func isWholeFilesystemRoot(dir string) bool {
+	return dir == "" || dir == filepath.VolumeName(dir)
+}
+
+// rel returns name relative to o.dir.
+func (o osRoot) rel(name string) (string, error) {
+	rest, ok := strings.CutPrefix(name, o.dir)
+	if !ok || (rest != "" && !os.IsPathSeparator(rest[0])) {
+		return "", &fs.PathError{Op: "open", Path: name, Err: errOutsideRoot}
+	}
+	// os.Root rejects names starting with a separator.
+	for rest != "" && os.IsPathSeparator(rest[0]) {
+		rest = rest[1:]
+	}
+	if rest == "" {
+		rest = "."
+	}
+	return rest, nil
+}
+
+// openRoot opens o.dir, and returns name relative to it.
+func (o osRoot) openRoot(name string) (*os.Root, string, error) {
+	rel, err := o.rel(name)
+	if err != nil {
+		return nil, "", err
+	}
+	r, err := os.OpenRoot(o.dir)
+	if err != nil {
+		return nil, "", err
+	}
+	return r, rel, nil
+}
+
+// open opens the file name. It returns an *os.File, which keeps sendfile
+// and the other fast paths for big files.
+func (o osRoot) open(name string) (*os.File, error) {
+	if o.dir == "" {
+		return os.Open(name)
+	}
+	rel, err := o.rel(name)
+	if err != nil {
+		return nil, err
+	}
+	if rel == "." {
+		// The root directory itself, which may be a symbolic link.
+		return os.Open(name)
+	}
+	return os.OpenInRoot(o.dir, rel)
+}
+
+func (o osRoot) stat(name string) (fs.FileInfo, error) {
+	if o.dir == "" {
+		return os.Stat(name)
+	}
+	r, rel, err := o.openRoot(name)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return r.Stat(rel)
+}
+
+// mkdirParent creates the directory the file name goes into, as
+// os.MkdirAll(filepath.Dir(name), perm) does.
+func (o osRoot) mkdirParent(name string, perm os.FileMode) error {
+	if o.dir == "" {
+		return os.MkdirAll(filepath.Dir(name), perm)
+	}
+	// Take the parent of the name relative to its root: filepath.Dir cleans
+	// the whole path, and a root such as "/cwd/./cache" built from the
+	// relative CompressRoot "./cache" would no longer be its prefix.
+	rel, err := o.rel(name)
+	if err != nil {
+		return err
+	}
+	// The root comes from the FS configuration and is created as before.
+	if err := os.MkdirAll(o.dir, perm); err != nil {
+		return err
+	}
+	parent := filepath.Dir(rel)
+	if parent == "." {
+		return nil
+	}
+	r, err := os.OpenRoot(o.dir)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	return r.MkdirAll(parent, perm)
+}
+
+// createTemp creates a new file in the directory of name, to be renamed to
+// name once it is written, and returns it and its path.
+//
+// The file gets a random name and is opened with O_EXCL and 0600, so a
+// symlink pre-planted at an otherwise predictable temp path can't be
+// followed to truncate an arbitrary file, and the cache file isn't left
+// group/world-readable. Its base name is short and independent of name's,
+// so it doesn't limit how long the compressed file's name may be.
+func (o osRoot) createTemp(name string) (*os.File, string, error) {
+	// os.Root has no CreateTemp, so do what os.CreateTemp does, with a
+	// random part that can't be guessed. The directory is taken from name
+	// as it is, since filepath.Dir would clean it and a root such as
+	// "/cwd/./cache" would no longer be its prefix.
+	tmpName := strings.TrimSuffix(name, filepath.Base(name)) + ".fasthttp-" + rand.Text() + ".tmp"
+	const flag = os.O_RDWR | os.O_CREATE | os.O_EXCL
+	if o.dir == "" {
+		f, err := os.OpenFile(tmpName, flag, 0o600)
+		if err != nil {
+			return nil, "", err
+		}
+		return f, tmpName, nil
+	}
+	r, rel, err := o.openRoot(tmpName)
+	if err != nil {
+		return nil, "", err
+	}
+	defer r.Close()
+	f, err := r.OpenFile(rel, flag, 0o600)
+	if err != nil {
+		return nil, "", err
+	}
+	return f, tmpName, nil
+}
+
+func (o osRoot) chtimes(name string, atime, mtime time.Time) error {
+	if o.dir == "" {
+		return os.Chtimes(name, atime, mtime)
+	}
+	r, rel, err := o.openRoot(name)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	return r.Chtimes(rel, atime, mtime)
+}
+
+func (o osRoot) rename(oldname, newname string) error {
+	if o.dir == "" {
+		return os.Rename(oldname, newname)
+	}
+	newRel, err := o.rel(newname)
+	if err != nil {
+		return err
+	}
+	r, oldRel, err := o.openRoot(oldname)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	return r.Rename(oldRel, newRel)
+}
+
+func (o osRoot) remove(name string) error {
+	if o.dir == "" {
+		return os.Remove(name)
+	}
+	r, rel, err := o.openRoot(name)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+	return r.Remove(rel)
+}
