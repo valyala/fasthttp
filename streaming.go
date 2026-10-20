@@ -160,6 +160,20 @@ func (rs *requestStream) discard(limit int) bool {
 	return err == io.EOF
 }
 
+// clonePrefetchedBytes gives the requestStream its own independent copy of prefetchedBytes
+// so that caller-retained request body buffers are not shared or aliased with the worker.
+func (rs *requestStream) clonePrefetchedBytes() {
+	if size := rs.prefetchedBytes.Size(); size > 0 {
+		prefetched := make([]byte, size)
+		_, _ = rs.prefetchedBytes.ReadAt(prefetched, 0)
+		currOff, _ := rs.prefetchedBytes.Seek(0, io.SeekCurrent)
+		rs.prefetchedBytes.Reset(prefetched)
+		if currOff > 0 {
+			_, _ = rs.prefetchedBytes.Seek(currOff, io.SeekStart)
+		}
+	}
+}
+
 func acquireRequestStream(b *bytebufferpool.ByteBuffer, r *bufio.Reader, h bodyStreamHeader) *requestStream {
 	rs := requestStreamPool.Get().(*requestStream) //nolint:forcetypeassert
 	rs.prefetchedBytes.Reset(b.B)

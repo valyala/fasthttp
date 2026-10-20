@@ -2899,6 +2899,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 			req.bodyStream = nil
 			if rs, ok := w.reqCopy.bodyStream.(*requestStream); ok {
 				rs.header = &w.reqCopy.Header
+				rs.clonePrefetchedBytes()
 			}
 		} else {
 			w.reqCopy.SetBody(req.bodyBytes())

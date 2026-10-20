@@ -8158,7 +8158,6 @@ func TestServerKeepsPrefetchedBodyWhenHandlerResetsRequest(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestRequestCtxDeadlines(t *testing.T) {
 	t.Parallel()
 

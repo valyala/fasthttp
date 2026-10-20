@@ -1699,6 +1699,105 @@ func TestPipelineClientDeadlineMethodsPreserveStreamBody(t *testing.T) {
 	}
 }
 
+func TestPipelineClientContinueReadBodyStreamTimeoutReuse(t *testing.T) {
+	t.Parallel()
+
+	for _, method := range []string{"DoTimeout", "DoDeadline"} {
+		t.Run(method, func(t *testing.T) {
+			origBody := bytes.Repeat([]byte("a"), 8192)
+			newBody := bytes.Repeat([]byte("z"), 1024)
+
+			clientConn, serverConn := net.Pipe()
+			t.Cleanup(func() {
+				_ = clientConn.Close()
+				_ = serverConn.Close()
+			})
+
+			client := &PipelineClient{
+				WriteBufferSize:     64, // blocks in header write before streaming body
+				MaxIdleConnDuration: 10 * time.Millisecond,
+				Dial: func(string) (net.Conn, error) {
+					return clientConn, nil
+				},
+				Logger: &testLogger{},
+			}
+			t.Cleanup(func() {
+				waitPipelineClientStopped(t, client)
+			})
+
+			req := AcquireRequest()
+			defer ReleaseRequest(req)
+			req.Header.SetMethod(MethodPost)
+			req.SetRequestURI("http://example.com/test")
+			req.KeepBodyBuffer = true
+			req.Header.SetContentLength(len(origBody))
+
+			br := bufio.NewReader(bytes.NewReader(origBody))
+			if err := req.ContinueReadBodyStream(br, 1024); err != nil {
+				t.Fatalf("unexpected ContinueReadBodyStream error: %v", err)
+			}
+
+			buf := req.body
+			if buf == nil || len(buf.B) != 1024 {
+				t.Fatalf("expected req.body to contain 1024 prefetched bytes")
+			}
+			initialCap := cap(buf.B)
+
+			resp := AcquireResponse()
+			defer ReleaseResponse(resp)
+
+			// 1. Worker begins writing req, but net.Pipe blocks on small write buffer before prefetched bytes are read.
+			// The deadline arrives and DoTimeout/DoDeadline returns ErrTimeout.
+			var err error
+			if method == "DoTimeout" {
+				err = client.DoTimeout(req, resp, 20*time.Millisecond)
+			} else {
+				err = client.DoDeadline(req, resp, time.Now().Add(20*time.Millisecond))
+			}
+			if !errors.Is(err, ErrTimeout) {
+				t.Fatalf("expected ErrTimeout, got %v", err)
+			}
+
+			// 2. Caller reuses req with req.SetBody after timeout; caller buffer ownership must be preserved.
+			req.SetBody(newBody)
+			if req.body != buf {
+				t.Fatalf("expected req.body to remain identical on caller, got %p != %p", req.body, buf)
+			}
+			if cap(req.body.B) != initialCap {
+				t.Fatalf("expected req.body capacity %d to be preserved, got %d", initialCap, cap(req.body.B))
+			}
+
+			// 3. Server now reads the request written by the worker.
+			serverBodyCh := make(chan []byte, 1)
+			serverErrCh := make(chan error, 1)
+			go func() {
+				var serverReq Request
+				if err := serverReq.Read(bufio.NewReader(serverConn)); err != nil {
+					serverErrCh <- err
+					return
+				}
+				serverBodyCh <- append([]byte(nil), serverReq.Body()...)
+				_, _ = io.WriteString(serverConn, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+			}()
+
+			select {
+			case err := <-serverErrCh:
+				t.Fatalf("server read error: %v", err)
+			case received := <-serverBodyCh:
+				if len(received) != len(origBody) {
+					t.Fatalf("expected server to receive %d bytes, got %d", len(origBody), len(received))
+				}
+				if !bytes.Equal(received, origBody) {
+					t.Fatalf("server received corrupted body: first 1KB was mutated (got %q..., want %q...)",
+						received[:16], origBody[:16])
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("timeout waiting for server to receive request")
+			}
+		})
+	}
+}
+
 func TestPipelineClientTLSMalformedAddrFailsBeforeDial(t *testing.T) {
 	t.Parallel()
 
@@ -5024,6 +5123,9 @@ func startEchoServerExt(t *testing.T, network, addr string, isTLS bool) *testEch
 		ln, err = net.Listen(network, addr)
 	}
 	if err != nil {
+		if network == "unix" && (errors.Is(err, syscall.EOPNOTSUPP) || strings.Contains(err.Error(), "operation not supported")) {
+			t.Skipf("filesystem does not support unix sockets: %v", err)
+		}
 		t.Fatalf("cannot listen %q: %v", addr, err)
 	}
 
