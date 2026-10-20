@@ -24,10 +24,6 @@ func NewPipeConns() *PipeConns {
 	pc.c2.wCh = ch1
 	pc.c1.pc = pc
 	pc.c2.pc = pc
-	for _, c := range []*pipeConn{&pc.c1, &pc.c2} {
-		c.readDeadline.cancel = make(chan struct{})
-		c.writeDeadline.cancel = make(chan struct{})
-	}
 	return pc
 }
 
@@ -278,9 +274,12 @@ func (c *pipeConn) SetWriteDeadline(deadline time.Time) error {
 // pipeDeadline works like the one behind net.Pipe: wait returns a channel
 // that is closed once the deadline has passed, so that pending operations
 // wake up, and a later deadline replaces a closed channel with an open one.
+// The channel is made when an operation first blocks or a deadline is first
+// set, and the timer is kept while its channel is open.
 type pipeDeadline struct {
-	timer  *time.Timer
-	cancel chan struct{}
+	timer  *time.Timer   // Closes cancel when it fires.
+	cancel chan struct{} // nil until needed.
+	armed  bool          // Scheduled; cleared by set once it has synchronized with the timer.
 	mu     sync.Mutex
 }
 
@@ -288,38 +287,56 @@ func (d *pipeDeadline) set(t time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if d.timer != nil && !d.timer.Stop() {
-		<-d.cancel // The timer fired; wait for it to close cancel.
+	if d.armed {
+		d.armed = false
+		if !d.timer.Stop() {
+			<-d.cancel // The timer fired; wait for it to close cancel.
+		}
 	}
-	d.timer = nil
-
-	closed := isClosedChan(d.cancel)
+	if d.cancel != nil && isClosedChan(d.cancel) {
+		d.cancel, d.timer = nil, nil // The timer is bound to the closed channel.
+	}
 	if t.IsZero() {
-		if closed {
-			d.cancel = make(chan struct{})
+		return
+	}
+	dur := time.Until(t)
+	if dur <= 0 {
+		if d.cancel == nil {
+			d.cancel = closedChan
+		} else {
+			close(d.cancel)
+			d.timer = nil
 		}
 		return
 	}
-	if dur := time.Until(t); dur > 0 {
-		if closed {
-			d.cancel = make(chan struct{})
-		}
+	if d.cancel == nil {
+		d.cancel = make(chan struct{})
+	}
+	if d.timer == nil {
 		// The timer holds only the channel, so a closed pipe is not kept
 		// alive until the deadline.
 		cancel := d.cancel
 		d.timer = time.AfterFunc(dur, func() { close(cancel) })
-		return
+	} else {
+		d.timer.Reset(dur)
 	}
-	if !closed {
-		close(d.cancel)
-	}
+	d.armed = true
 }
 
 func (d *pipeDeadline) wait() chan struct{} {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.cancel == nil {
+		d.cancel = make(chan struct{})
+	}
 	return d.cancel
 }
+
+var closedChan = func() chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}()
 
 func isClosedChan(c <-chan struct{}) bool {
 	select {

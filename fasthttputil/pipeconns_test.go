@@ -496,3 +496,51 @@ func TestPipeConnsCollectedWithPendingDeadline(t *testing.T) {
 	}
 	t.Fatal("a closed pipe with a pending deadline was not collected")
 }
+
+func TestPipeConnsDeadlineTimerReuse(t *testing.T) {
+	c := NewPipeConns().Conn1()
+	var buf [1]byte
+	// Each step ends with a deadline that fires; 0 clears the deadline.
+	steps := [][]time.Duration{
+		{time.Hour, 0, time.Millisecond},
+		{time.Hour, time.Millisecond},
+		{-time.Second, time.Millisecond},
+		{time.Millisecond, time.Millisecond},
+		{time.Millisecond, 0, time.Millisecond},
+	}
+	for i, step := range steps {
+		for _, d := range step {
+			var deadline time.Time
+			if d != 0 {
+				deadline = time.Now().Add(d)
+			}
+			if err := c.SetReadDeadline(deadline); err != nil {
+				t.Fatalf("step %d: unexpected error: %v", i, err)
+			}
+		}
+		if _, err := c.Read(buf[:]); err != ErrTimeout {
+			t.Fatalf("step %d: unexpected error: %v. Expecting %v", i, err, ErrTimeout)
+		}
+	}
+
+	// Updates reuse the timer while the deadline has not passed.
+	update := func() {
+		if err := c.SetReadDeadline(time.Now().Add(time.Hour)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	update()
+	if n := testing.AllocsPerRun(100, update); n != 0 {
+		t.Fatalf("unexpected allocations per deadline update: %v", n)
+	}
+}
+
+func BenchmarkPipeConnsSetDeadline(b *testing.B) {
+	c := NewPipeConns().Conn1()
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := c.SetDeadline(time.Now().Add(time.Hour)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
