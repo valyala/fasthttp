@@ -31,7 +31,44 @@ func (c *Conn) Write(ctx context.Context, typ MessageType, p []byte) error {
 		return err
 	}
 	defer c.msgMu.release()
+	if c.cfg.deflate.enabled && len(p) >= c.cfg.deflate.threshold {
+		return c.writeCompressed(ctx, byte(typ)|rsv1, true, p, deadline) // #nosec G115
+	}
 	return c.writeData(ctx, byte(typ), true, p, deadline) // #nosec G115
+}
+
+// writeCompressed sends p compressed as one frame. It compresses under
+// frameMu, so that the dictionary only ever holds what the peer received.
+func (c *Conn) writeCompressed(ctx context.Context, op byte, fin bool, p []byte, deadline time.Time) error {
+	if err := c.acquire(c.frameMu, ctx, deadline); err != nil {
+		return err
+	}
+	defer c.frameMu.release()
+	out := getBuf(maxFrameHeader + len(p))
+	out.b = out.b[:maxFrameHeader]
+	c.compress(out, p, fin)
+	err := c.sendBuffered(ctx, op, fin, out.b, deadline)
+	putBuf(out)
+	c.compressed(p, fin, err == nil)
+	return err
+}
+
+// writeBuffered sends one frame from buf, whose payload follows maxFrameHeader
+// bytes of header space.
+func (c *Conn) writeBuffered(ctx context.Context, op byte, fin bool, buf []byte, deadline time.Time) error {
+	if err := c.acquire(c.frameMu, ctx, deadline); err != nil {
+		return err
+	}
+	defer c.frameMu.release()
+	return c.sendBuffered(ctx, op, fin, buf, deadline)
+}
+
+// sendBuffered frames and writes buf; the caller holds frameMu.
+func (c *Conn) sendBuffered(ctx context.Context, op byte, fin bool, buf []byte, deadline time.Time) error {
+	payload := buf[maxFrameHeader:]
+	start := maxFrameHeader - frameHeaderLen(len(payload), c.client)
+	putFrameHeader(buf[start:maxFrameHeader], op, fin, c.client, payload)
+	return c.writeFrame(ctx, buf[start:], nil, deadline, false)
 }
 
 // writeData sends one data frame. The caller holds msgMu.
@@ -74,11 +111,12 @@ const writerBufSize = maxFrameHeader + writeChunkSize
 // msgWriter buffers a message as frame header space followed by payload; buf
 // is nil once it is closed.
 type msgWriter struct {
-	c   *Conn
-	ctx context.Context //nolint:containedctx // Deadline and cancellation for each flush.
-	buf *buffer
-	err error
-	op  byte
+	c       *Conn
+	ctx     context.Context //nolint:containedctx // Deadline and cancellation for each flush.
+	buf     *buffer
+	err     error
+	op      byte
+	deflate bool
 }
 
 // Write buffers p, flushing a full buffer only when more data arrives, so
@@ -96,7 +134,7 @@ func (w *msgWriter) Write(p []byte) (int, error) {
 			}
 		}
 		if len(w.buf.b) == maxFrameHeader && len(p) > writeChunkSize {
-			if err := w.sent(w.c.writeData(w.ctx, w.op, false, p, after(w.c.cfg.writeTimeout))); err != nil {
+			if err := w.emit(p, nil, false); err != nil {
 				w.finish(err)
 				return n - len(p), err
 			}
@@ -120,12 +158,31 @@ func (w *msgWriter) Close() error {
 
 // flush sends the buffered payload as a fragment.
 func (w *msgWriter) flush(fin bool) error {
-	payload := w.buf.b[maxFrameHeader:]
-	start := maxFrameHeader - frameHeaderLen(len(payload), w.c.client)
-	putFrameHeader(w.buf.b[start:maxFrameHeader], w.op, fin, w.c.client, payload)
-	err := w.sent(w.c.writeRaw(w.ctx, w.buf.b[start:], nil, after(w.c.cfg.writeTimeout)))
+	err := w.emit(w.buf.b[maxFrameHeader:], w.buf.b, fin)
 	w.buf.b = w.buf.b[:maxFrameHeader]
 	return err
+}
+
+// emit sends payload as the next fragment; framed is the buffer holding it
+// behind header space, if any. The first fragment decides whether the message
+// is compressed.
+func (w *msgWriter) emit(payload, framed []byte, fin bool) error {
+	c := w.c
+	if w.op != opContinuation && c.cfg.deflate.enabled && len(payload) >= c.cfg.deflate.threshold {
+		w.op |= rsv1
+		w.deflate = true
+	}
+	deadline := after(c.cfg.writeTimeout)
+	var err error
+	switch {
+	case w.deflate:
+		err = c.writeCompressed(w.ctx, w.op, fin, payload, deadline)
+	case framed != nil:
+		err = c.writeBuffered(w.ctx, w.op, fin, framed, deadline)
+	default:
+		err = c.writeData(w.ctx, w.op, fin, payload, deadline)
+	}
+	return w.sent(err)
 }
 
 // sent accounts for a fragment. A failed continuation leaves the peer
@@ -143,6 +200,9 @@ func (w *msgWriter) finish(err error) {
 	w.err = err
 	putBuf(w.buf)
 	w.buf = nil
+	if w.c.def.fw != nil { // Left by a fragment that could not be sent.
+		w.c.compressed(nil, true, false)
+	}
 	w.c.msgMu.release()
 }
 

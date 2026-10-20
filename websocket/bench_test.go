@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -40,6 +41,35 @@ func BenchmarkEcho(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// BenchmarkEchoDeflate echoes compressible messages with permessage-deflate.
+func BenchmarkEchoDeflate(b *testing.B) {
+	for _, mode := range []CompressionMode{CompressionNoContextTakeover, CompressionContextTakeover} {
+		for _, n := range []int{512, 4 << 10, 64 << 10} {
+			b.Run(map[CompressionMode]string{CompressionNoContextTakeover: "nocontext", CompressionContextTakeover: "context"}[mode]+"/"+strconv.Itoa(n), func(b *testing.B) {
+				addr := startServerWith(b, &AcceptOptions{CompressionMode: mode}, echo, func(*fasthttp.Server) {}).addr
+				c, err := Dial(b.Context(), "ws://"+addr+"/", &DialOptions{CompressionMode: mode})
+				if err != nil {
+					b.Fatal(err)
+				}
+				defer func() { _ = c.CloseNow() }()
+				pattern := []byte("{\"event\":\"tick\",\"price\":12345} ")
+				msg := bytes.Repeat(pattern, n/len(pattern)+1)[:n]
+				ctx := context.Background()
+				b.SetBytes(int64(len(msg)))
+				b.ReportAllocs()
+				for b.Loop() {
+					if err := c.Write(ctx, MessageText, msg); err != nil {
+						b.Fatal(err)
+					}
+					if _, _, err := c.Read(ctx); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
 	}
 }
 

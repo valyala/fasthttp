@@ -42,6 +42,15 @@ type AcceptOptions struct {
 	// no bound.
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
+
+	// CompressionMode enables permessage-deflate when the client offers it.
+	// Zero means CompressionDisabled.
+	CompressionMode CompressionMode
+
+	// CompressionThreshold is the size from which a message is compressed; a
+	// Writer message is judged by its first fragment. Zero means 128 bytes
+	// with context takeover and 512 without.
+	CompressionThreshold int
 }
 
 var (
@@ -119,6 +128,8 @@ func Accept(ctx *fasthttp.RequestCtx, opts *AcceptOptions, handler func(*Conn)) 
 	if !validExtensions(f.extensions) {
 		return reject(ctx, fasthttp.StatusBadRequest, "bad Sec-WebSocket-Extensions")
 	}
+	var extBuf [96]byte
+	ext, deflate := negotiateDeflate(opts.CompressionMode, opts.CompressionThreshold, f.extensions, extBuf[:0])
 
 	resp := &ctx.Response
 	resp.ResetBody()
@@ -134,10 +145,14 @@ func Accept(ctx *fasthttp.RequestCtx, opts *AcceptOptions, handler func(*Conn)) 
 	if subprotocol != "" {
 		resp.Header.Set(fasthttp.HeaderSecWebSocketProtocol, subprotocol)
 	}
+	if ext != nil {
+		resp.Header.SetBytesV(fasthttp.HeaderSecWebSocketExtensions, ext)
+	}
 	cfg := connConfig{
 		maxMessageSize: opts.MaxMessageSize,
 		readTimeout:    opts.ReadTimeout,
 		writeTimeout:   opts.WriteTimeout,
+		deflate:        deflate,
 	}
 	ctx.Hijack(func(nc net.Conn) {
 		c := newConn(nc, nc, false, subprotocol, cfg)

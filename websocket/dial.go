@@ -48,10 +48,13 @@ type DialOptions struct {
 	// Zero means 4096.
 	ReadBufferSize int
 
-	// MaxMessageSize, ReadTimeout and WriteTimeout work as in AcceptOptions.
-	MaxMessageSize int
-	ReadTimeout    time.Duration
-	WriteTimeout   time.Duration
+	// MaxMessageSize, ReadTimeout, WriteTimeout, CompressionMode and
+	// CompressionThreshold work as in AcceptOptions.
+	MaxMessageSize       int
+	ReadTimeout          time.Duration
+	WriteTimeout         time.Duration
+	CompressionMode      CompressionMode
+	CompressionThreshold int
 }
 
 var defaultDialOptions DialOptions
@@ -242,6 +245,9 @@ func handshake(ctx context.Context, nc net.Conn, uri *fasthttp.URI, auth string,
 	if len(opts.Subprotocols) > 0 {
 		req.Header.Set(fasthttp.HeaderSecWebSocketProtocol, strings.Join(opts.Subprotocols, ", "))
 	}
+	if ext := deflateOffer(opts.CompressionMode); ext != "" {
+		req.Header.Set(fasthttp.HeaderSecWebSocketExtensions, ext)
+	}
 	if opts.Header != nil {
 		for k, v := range opts.Header.All() {
 			req.Header.AddBytesKV(k, v)
@@ -301,8 +307,12 @@ func handshake(ctx context.Context, nc net.Conn, uri *fasthttp.URI, auth string,
 	if len(f.protocol) > 1 || (len(f.protocol) == 1 && !slices.Contains(opts.Subprotocols, string(subprotocol))) {
 		return nil, errors.New("websocket: server selected a subprotocol that was not offered")
 	}
-	if len(f.extensions) != 0 {
-		return nil, errors.New("websocket: server selected an extension")
+	if !validExtensions(f.extensions) {
+		return nil, errBadExtension
+	}
+	deflate, err := acceptDeflate(opts.CompressionMode, opts.CompressionThreshold, f.extensions)
+	if err != nil {
+		return nil, err
 	}
 	if !stop() {
 		return nil, ctx.Err()
@@ -314,6 +324,7 @@ func handshake(ctx context.Context, nc net.Conn, uri *fasthttp.URI, auth string,
 		maxMessageSize: opts.MaxMessageSize,
 		readTimeout:    opts.ReadTimeout,
 		writeTimeout:   opts.WriteTimeout,
+		deflate:        deflate,
 	}
 	return newConn(nc, br, true, string(subprotocol), cfg), nil
 }
