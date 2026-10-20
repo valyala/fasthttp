@@ -3455,6 +3455,36 @@ func TestServerExpect103EarlyHints(t *testing.T) {
 	}
 }
 
+func TestServerEarlyHintsHTTP10(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Response.Header.Add("Link", "<https://cdn.com>; rel=preload; as=script")
+			if err := ctx.EarlyHints(); err != nil {
+				t.Errorf("unexpected error from EarlyHints: %v", err)
+			}
+			ctx.WriteString("foobar") //nolint:errcheck
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET /foo HTTP/1.0\r\nHost: example.com\r\n\r\n")
+
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("Unexpected error from serveConn: %v", err)
+	}
+
+	// An HTTP/1.0 client doesn't understand 1xx responses, so only the final
+	// response must be sent.
+	if bytes.HasPrefix(rw.w.Bytes(), []byte("HTTP/1.1 103 ")) {
+		t.Fatalf("unexpected 103 Early Hints response to an HTTP/1.0 request: %q", rw.w.Bytes())
+	}
+
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusOK, string(defaultContentType), "foobar")
+}
+
 func TestServerRejectsMissingHostHTTP11(t *testing.T) {
 	t.Parallel()
 
