@@ -1894,6 +1894,12 @@ func TestRequestMayContinue(t *testing.T) {
 	if !r.MayContinue() {
 		t.Fatalf("MayContinue on 'Expect: 100-Continue' header must return true")
 	}
+
+	// The expectation is ignored in HTTP/1.0 requests (RFC 9110, section 10.1.1).
+	r.Header.SetProtocol("HTTP/1.0")
+	if r.MayContinue() {
+		t.Fatalf("MayContinue on an HTTP/1.0 request must return false")
+	}
 }
 
 func TestResponseGzipStream(t *testing.T) {

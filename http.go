@@ -1595,6 +1595,9 @@ func (req *Request) readBodyStream(r *bufio.Reader, maxBodySize int, getOnly, pr
 // MayContinue returns true if the request contains
 // 'Expect: 100-continue' header.
 //
+// It always returns false for HTTP/1.0 requests, since a server must ignore
+// the expectation in them (RFC 9110, section 10.1.1).
+//
 // The caller must do one of the following actions if MayContinue returns true:
 //
 //   - Either send StatusExpectationFailed response if request headers don't
@@ -1603,7 +1606,7 @@ func (req *Request) readBodyStream(r *bufio.Reader, maxBodySize int, getOnly, pr
 //     with ContinueReadBody.
 //   - Or close the connection.
 func (req *Request) MayContinue() bool {
-	return caseInsensitiveCompare(req.Header.peek(strExpect), str100Continue)
+	return req.Header.IsHTTP11() && caseInsensitiveCompare(req.Header.peek(strExpect), str100Continue)
 }
 
 // ContinueReadBody reads request body if request header contains
