@@ -4882,6 +4882,67 @@ func TestRequestCtxHijackKeepHijackedConnsKeepsReaderOutOfPool(t *testing.T) {
 	}
 }
 
+func TestRequestCtxHijackKeepaliveLimits(t *testing.T) {
+	t.Parallel()
+
+	// DisableKeepalive and MaxRequestsPerConn do not skip the hijack: the
+	// response does not announce a close, the handler's data follows it, and
+	// the connection is closed once the handler returns.
+	for _, s := range []*Server{{DisableKeepalive: true}, {MaxRequestsPerConn: 1}} {
+		s.Handler = func(ctx *RequestCtx) {
+			ctx.Hijack(func(c net.Conn) {
+				_, _ = c.Write([]byte("hijacked"))
+			})
+			ctx.SetStatusCode(StatusSwitchingProtocols)
+			ctx.Response.Header.Set(HeaderUpgrade, "test")
+			ctx.Response.Header.Set(HeaderConnection, "Upgrade")
+		}
+		pc := fasthttputil.NewPipeConns()
+		serveErr := make(chan error, 1)
+		go func() { serveErr <- s.ServeConn(pc.Conn1()) }()
+		c := pc.Conn2()
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: x\r\nConnection: Upgrade\r\nUpgrade: test\r\n\r\n")); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		br := bufio.NewReader(c)
+		resp := AcquireResponse()
+		if err := resp.Header.Read(br); err != nil {
+			t.Fatalf("cannot read response: %v", err)
+		}
+		if resp.StatusCode() != StatusSwitchingProtocols || resp.Header.ConnectionClose() || string(resp.Header.Peek(HeaderConnection)) != "Upgrade" {
+			t.Fatalf("unexpected response header:\n%s", resp.Header.String())
+		}
+		ReleaseResponse(resp)
+		if rest, err := io.ReadAll(br); err != nil || string(rest) != "hijacked" {
+			t.Fatalf("unexpected hijacked data %q, %v", rest, err)
+		}
+		if err := <-serveErr; err != nil {
+			t.Fatalf("unexpected error from ServeConn: %v", err)
+		}
+	}
+
+	// An explicit Connection: close still skips the hijack.
+	hijacked := make(chan struct{}, 1)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.Hijack(func(net.Conn) { hijacked <- struct{}{} })
+		},
+	}
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error from ServeConn: %v", err)
+	}
+	select {
+	case <-hijacked:
+		t.Fatal("hijack handler called despite Connection: close")
+	case <-time.After(testTimeout(100 * time.Millisecond)):
+	}
+	if !strings.Contains(rw.w.String(), "Connection: close") {
+		t.Fatalf("response lacks Connection: close:\n%s", rw.w.String())
+	}
+}
+
 func TestRequestCtxHijackNoResponse(t *testing.T) {
 	t.Parallel()
 
