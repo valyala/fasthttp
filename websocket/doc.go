@@ -22,4 +22,8 @@
 // A cancelled or expired context yields its error, a ReadTimeout or
 // WriteTimeout a timeout error, and CloseNow or a write after the Close frame
 // went out net.ErrClosed.
+//
+// Compression with permessage-deflate (RFC 7692) is off unless CompressionMode
+// in the options enables it; MaxMessageSize then bounds messages before and
+// after decompression.
 package websocket

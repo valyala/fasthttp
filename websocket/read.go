@@ -11,15 +11,17 @@ import (
 // frameReader is the state of the frame being read and of the message it
 // belongs to.
 type frameReader struct {
-	deadline time.Time // Of the read call in progress; bounds its control replies.
-	left     uint64
-	msgLen   int
-	utf8     utf8State
-	msgType  MessageType
-	key      [4]byte
-	keyPos   int
-	fin      bool
-	open     bool
+	deadline   time.Time // Of the read call in progress; bounds its control replies.
+	left       uint64
+	msgLen     int
+	inflated   int
+	utf8       utf8State
+	msgType    MessageType
+	key        [4]byte
+	keyPos     int
+	fin        bool
+	open       bool
+	compressed bool
 }
 
 // Read reads one message. The returned bytes are owned by the connection and
@@ -42,17 +44,20 @@ func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 	rd := &c.rd
 	buf := getBuf(min(int(rd.left), readChunkSize)) // #nosec G115
 	c.readBuf = buf
+	if rd.compressed {
+		buf, err = c.readInflated(ctx, buf)
+		if err != nil {
+			return 0, nil, err
+		}
+		return typ, buf.b, c.endMessage(ctx)
+	}
 	for {
 		// Grow with the data, not the announced length; each step quadruples.
 		for rd.left > 0 {
 			n := len(buf.b)
 			step := min(int(rd.left), readChunkSize) // #nosec G115
 			if cap(buf.b)-n < step {
-				grown := getBuf(max(n+step, 4*cap(buf.b)))
-				grown.b = append(grown.b, buf.b...)
-				putBuf(buf)
-				buf = grown
-				c.readBuf = buf
+				buf = c.growReadBuf(buf, n+step)
 			}
 			buf.b = buf.b[:n+step]
 			if err := c.readFrameInto(ctx, buf.b[n:]); err != nil {
@@ -70,6 +75,33 @@ func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 		return 0, nil, err
 	}
 	return typ, buf.b, nil
+}
+
+// growReadBuf replaces buf with one holding at least n bytes, quadrupling so
+// that growth follows the data rather than the announced length.
+func (c *Conn) growReadBuf(buf *buffer, n int) *buffer {
+	grown := getBuf(max(n, 4*cap(buf.b)))
+	grown.b = append(grown.b, buf.b...)
+	putBuf(buf)
+	c.readBuf = grown
+	return grown
+}
+
+// readInflated decompresses the current message into buf.
+func (c *Conn) readInflated(ctx context.Context, buf *buffer) (*buffer, error) {
+	for {
+		if len(buf.b) == cap(buf.b) {
+			buf = c.growReadBuf(buf, cap(buf.b)+1)
+		}
+		n, err := c.inflate(ctx, buf.b[len(buf.b):cap(buf.b)])
+		buf.b = buf.b[:len(buf.b)+n]
+		if err == io.EOF {
+			return buf, nil
+		}
+		if err != nil {
+			return buf, err
+		}
+	}
 }
 
 // Reader returns a reader for the next message. It is valid until the next
@@ -119,6 +151,17 @@ func (r *msgReader) Read(p []byte) (int, error) {
 		return 0, err
 	}
 	defer c.rdWatch.end()
+	if rd.compressed {
+		n, err := c.inflate(r.ctx, p)
+		if err == io.EOF {
+			rd.open = false
+			if err := c.endMessage(r.ctx); err != nil {
+				return n, err
+			}
+			r.eof = true
+		}
+		return n, err
+	}
 	for rd.left == 0 {
 		if rd.fin {
 			rd.open = false
@@ -180,26 +223,49 @@ func (c *Conn) releaseReadBuf() {
 func (c *Conn) beginMessage(ctx context.Context) (MessageType, error) {
 	rd := &c.rd
 	rd.open = false
-	for rd.msgType != 0 {
-		if rd.left > 0 {
-			if err := c.discardFrame(ctx); err != nil {
-				return 0, err
-			}
-		}
-		if rd.fin {
-			if err := c.endMessage(ctx); err != nil {
-				return 0, err
-			}
-			break
-		}
-		if err := c.nextFrame(ctx); err != nil {
+	if rd.msgType != 0 {
+		if err := c.discardMessage(ctx); err != nil {
 			return 0, err
 		}
 	}
 	if err := c.nextFrame(ctx); err != nil {
 		return 0, err
 	}
+	if rd.compressed {
+		c.beginInflate(ctx)
+	}
 	return rd.msgType, nil
+}
+
+// discardMessage reads the rest of the current message with its checks; a
+// compressed one is inflated so that the peer's context stays in step.
+func (c *Conn) discardMessage(ctx context.Context) error {
+	rd := &c.rd
+	if rd.compressed {
+		buf := getBuf(readChunkSize)
+		defer putBuf(buf)
+		for {
+			if _, err := c.inflate(ctx, buf.b[:cap(buf.b)]); err != nil {
+				if err == io.EOF {
+					return c.endMessage(ctx)
+				}
+				return err
+			}
+		}
+	}
+	for {
+		if rd.left > 0 {
+			if err := c.discardFrame(ctx); err != nil {
+				return err
+			}
+		}
+		if rd.fin {
+			return c.endMessage(ctx)
+		}
+		if err := c.nextFrame(ctx); err != nil {
+			return err
+		}
+	}
 }
 
 func (c *Conn) endMessage(ctx context.Context) error {
@@ -221,11 +287,11 @@ func (c *Conn) nextFrame(ctx context.Context) error {
 		if _, err := io.ReadFull(c.r, h[:2]); err != nil {
 			return err
 		}
-		fin := h[0]&0x80 != 0
-		if h[0]&0x70 != 0 {
+		fin, compressed := h[0]&0x80 != 0, h[0]&rsv1 != 0
+		op := h[0] & 0x0f
+		if rsv := h[0] & 0x70; rsv != 0 && (!compressed || rsv != rsv1 || !c.cfg.deflate.enabled || (op != opText && op != opBinary)) {
 			return c.fail(ctx, StatusProtocolError, "reserved bits set")
 		}
-		op := h[0] & 0x0f
 		if masked := h[1]&0x80 != 0; masked == c.client {
 			return c.fail(ctx, StatusProtocolError, "wrong mask bit")
 		}
@@ -263,6 +329,7 @@ func (c *Conn) nextFrame(ctx context.Context) error {
 				rd.msgType = MessageType(op)
 				rd.msgLen = 0
 				rd.utf8 = utf8State{}
+				rd.compressed = compressed
 			}
 			if n > uint64(c.cfg.maxMessageSize-rd.msgLen) { // #nosec G115
 				return c.fail(ctx, StatusMessageTooBig, "message too big")
@@ -330,7 +397,7 @@ func (c *Conn) consumed(ctx context.Context, p []byte) error {
 	}
 	rd.left -= uint64(len(p)) // #nosec G115
 	rd.msgLen += len(p)
-	if rd.msgType == MessageText && !rd.utf8.feed(p) {
+	if rd.msgType == MessageText && !rd.compressed && !rd.utf8.feed(p) {
 		return c.fail(ctx, StatusInvalidFramePayloadData, "invalid UTF-8")
 	}
 	return nil

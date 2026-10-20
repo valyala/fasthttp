@@ -29,7 +29,7 @@ func autobahnCases(t *testing.T) string {
 	if os.Getenv("AUTOBAHN") == "" {
 		t.Skip("set AUTOBAHN=1 to run the Autobahn test suite with docker")
 	}
-	cases := "1.*,2.*,3.*,4.*,5.*,6.*,7.*,9.*,10.*"
+	cases := "1.*,2.*,3.*,4.*,5.*,6.*,7.*,9.*,10.*,12.*,13.*"
 	if v := os.Getenv("AUTOBAHN_CASES"); v != "" {
 		cases = v
 	}
@@ -124,7 +124,7 @@ func TestAutobahnServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	opts := &AcceptOptions{MaxMessageSize: 32 << 20, CheckOrigin: func(*fasthttp.RequestCtx) bool { return true }}
+	opts := &AcceptOptions{MaxMessageSize: 32 << 20, CheckOrigin: func(*fasthttp.RequestCtx) bool { return true }, CompressionMode: CompressionContextTakeover}
 	s := &fasthttp.Server{Handler: func(ctx *fasthttp.RequestCtx) { _ = Accept(ctx, opts, autobahnEcho) }}
 	go func() { _ = s.Serve(ln) }()
 
@@ -184,7 +184,7 @@ func TestAutobahnClient(t *testing.T) {
 	// wstest requires the Host port to be the one it listens on inside the container.
 	var h fasthttp.RequestHeader
 	h.SetHost("127.0.0.1:9001")
-	opts := &DialOptions{Header: &h, MaxMessageSize: 32 << 20}
+	opts := &DialOptions{Header: &h, MaxMessageSize: 32 << 20, CompressionMode: CompressionContextTakeover}
 	ctx := t.Context()
 	var count int
 	readyCtx, cancel := context.WithTimeout(ctx, time.Minute)

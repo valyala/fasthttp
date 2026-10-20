@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/klauspost/compress/flate"
 	"github.com/valyala/fasthttp"
 )
 
@@ -28,6 +29,7 @@ type wireTap struct {
 	mu         sync.Mutex
 	buf        []byte
 	msg        []byte // Payload of the data message being assembled, unmasked.
+	window     []byte // What the receiver's decompressor remembers.
 	pending    uint64 // Payload bytes of the current frame still to consume.
 	frames     int
 	closes     int
@@ -44,6 +46,38 @@ type wireTap struct {
 	masked     bool
 	inMsg      bool // A fragmented data message is in progress.
 	dropMsg    bool // The message is too large to check.
+	deflate    bool // permessage-deflate was negotiated with context takeover.
+	msgRSV     bool // The message being assembled is compressed.
+}
+
+// inflate decompresses a message the way the receiver does: a final block
+// followed by more data starts the decompressor over, and the tail is only
+// read when the data does not end with a final block. The source is a
+// bytes.Reader so that the decompressor does not read ahead.
+func (d *wireTap) inflate(z []byte) ([]byte, error) {
+	const limit = 4 << 20
+	src := bytes.NewReader(append(bytes.Clone(z), inflateTail...))
+	fr := flate.NewReaderDict(src, lastN(d.window, deflateWindow))
+	var out []byte
+	for {
+		part, err := io.ReadAll(io.LimitReader(fr, limit+1-int64(len(out))))
+		out = append(out, part...)
+		if err != nil {
+			return nil, err
+		}
+		if len(out) > limit {
+			return nil, fmt.Errorf("inflates to more than %d bytes", limit)
+		}
+		if src.Len() <= len(inflateTail) {
+			break
+		}
+		history := lastN(slide(bytes.Clone(d.window), out, deflateWindow), deflateWindow)
+		if err := fr.(flate.Resetter).Reset(src, history); err != nil { //nolint:forcetypeassert // flate readers implement Resetter.
+			return nil, err
+		}
+	}
+	d.window = slide(d.window, out, deflateWindow)
+	return out, nil
 }
 
 // stormPayload returns n bytes whose every byte follows from the first.
@@ -92,13 +126,20 @@ func (d *wireTap) endFrame() {
 		d.inMsg = true
 		return
 	}
+	msg := d.msg
+	var inflateErr error
+	if d.msgRSV && !d.dropMsg {
+		msg, inflateErr = d.inflate(msg)
+	}
 	switch {
 	case d.dropMsg:
 		d.violatef("frame %d: message larger than this storm sends", d.frames)
-	case d.msgOp == opText && !utf8.Valid(d.msg):
-		d.violatef("frame %d: text message of %d bytes is not valid UTF-8", d.frames, len(d.msg))
+	case inflateErr != nil:
+		d.violatef("frame %d: compressed message does not inflate: %v", d.frames, inflateErr)
+	case d.msgOp == opText && !utf8.Valid(msg):
+		d.violatef("frame %d: text message of %d bytes is not valid UTF-8", d.frames, len(msg))
 	case d.msgOp == opBinary:
-		if err := stormCheckPattern(d.msg); err != nil {
+		if err := stormCheckPattern(msg); err != nil {
 			d.violatef("frame %d: binary message corrupted: %v", d.frames, err)
 		}
 	}
@@ -171,7 +212,7 @@ func (d *wireTap) parse(buf []byte) []byte {
 			return buf
 		}
 		d.frames++
-		if h0&0x70 != 0 {
+		if rsv := h0 & 0x70; rsv != 0 && (!d.deflate || rsv != rsv1 || (op != opText && op != opBinary)) {
 			d.violatef("frame %d: RSV bits set (%#x)", d.frames, h0)
 		}
 		if masked != d.wantMasked {
@@ -201,7 +242,7 @@ func (d *wireTap) parse(buf []byte) []byte {
 				d.msg, d.dropMsg = d.msg[:0], false
 			}
 			if op != opContinuation {
-				d.msgOp = op
+				d.msgOp, d.msgRSV = op, h0&rsv1 != 0
 			}
 		default:
 			d.violatef("frame %d: reserved opcode %d", d.frames, op)
@@ -228,12 +269,13 @@ func (d *wireTap) parse(buf []byte) []byte {
 }
 
 type tapSet struct {
-	mu   sync.Mutex
-	taps []*wireTap
+	mu      sync.Mutex
+	taps    []*wireTap
+	deflate bool
 }
 
 func (s *tapSet) add(i int, dir string, masked bool) *wireTap {
-	tp := &wireTap{name: fmt.Sprintf("conn %d %s", i, dir), wantMasked: masked}
+	tp := &wireTap{name: fmt.Sprintf("conn %d %s", i, dir), wantMasked: masked, deflate: s.deflate}
 	s.mu.Lock()
 	s.taps = append(s.taps, tp)
 	s.mu.Unlock()
@@ -452,6 +494,8 @@ func stormSide(c *Conn, label string, rep *stormReport, mustClose bool) {
 
 // Random Read/Write/Close traffic on many relayed connections upholds the wire
 // invariants and the closed-connection contract; runs for WS_STORM seconds.
+// WS_STORM_DEFLATE adds permessage-deflate with context takeover on every
+// connection, with every non-empty message compressed.
 func TestStorm(t *testing.T) {
 	s := os.Getenv("WS_STORM")
 	if s == "" {
@@ -475,6 +519,20 @@ func TestStorm(t *testing.T) {
 		{ReadTimeout: 300 * time.Millisecond},
 		{WriteTimeout: 200 * time.Millisecond, ReadBufferSize: 512},
 		{ReadTimeout: 500 * time.Millisecond, WriteTimeout: 500 * time.Millisecond, MaxMessageSize: 20000},
+	}
+	if os.Getenv("WS_STORM_DEFLATE") != "" {
+		for i := range serverOpts {
+			if serverOpts[i] == nil {
+				serverOpts[i] = &AcceptOptions{}
+			}
+			serverOpts[i].CompressionMode, serverOpts[i].CompressionThreshold = CompressionContextTakeover, 1
+		}
+		for i := range clientOpts {
+			if clientOpts[i] == nil {
+				clientOpts[i] = &DialOptions{}
+			}
+			clientOpts[i].CompressionMode, clientOpts[i].CompressionThreshold = CompressionContextTakeover, 1
+		}
 	}
 	var serverSeq atomic.Int64
 	serverDone := make(chan struct{}, 4096)
@@ -507,7 +565,7 @@ func TestStorm(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ln.Close() })
-	var taps tapSet
+	taps := tapSet{deflate: os.Getenv("WS_STORM_DEFLATE") != ""}
 	go func() {
 		for i := 0; ; i++ {
 			cli, err := ln.Accept()
