@@ -88,6 +88,7 @@ type connConfig struct {
 	maxMessageSize int
 	readTimeout    time.Duration
 	writeTimeout   time.Duration
+	deflate        deflateConfig
 }
 
 // Conn is a WebSocket connection.
@@ -115,7 +116,9 @@ type Conn struct {
 	rdWatch ctxWatch
 	wrWatch ctxWatch
 
-	mr msgReader
+	mr  msgReader
+	def deflater
+	inf inflater
 
 	cfg connConfig
 

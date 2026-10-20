@@ -25,9 +25,11 @@ func FuzzFrames(f *testing.F) {
 	f.Add(appendFrame(nil, opClose, true, true, []byte{3, 0xe8}), false)
 	f.Add(appendFrame(nil, opText, true, false, []byte("unmasked for a client")), true)
 	f.Add([]byte{0x80 | opText, 0x80 | 127, 0x80, 0, 0, 0, 0, 0, 0, 0}, false)
+	f.Add(appendFrame(nil, opText|rsv1, true, true, []byte{0xf2, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00}), false)
+	f.Add(appendFrame(appendFrame(nil, opBinary|rsv1, false, true, []byte{0xf2, 0x48}), opContinuation, true, true, []byte{0xcd, 0xc9, 0xc9, 0x07, 0x00}), false)
 	f.Fuzz(func(_ *testing.T, data []byte, client bool) {
 		fc := &fuzzConn{r: bytes.NewReader(data)}
-		c := newConn(fc, fc, client, "", connConfig{maxMessageSize: 1 << 16})
+		c := newConn(fc, fc, client, "", connConfig{maxMessageSize: 1 << 16, deflate: newDeflateConfig(true, true, 0, 0)})
 		for {
 			if _, _, err := c.Read(context.Background()); err != nil {
 				break
