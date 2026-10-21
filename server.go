@@ -694,6 +694,9 @@ type RequestCtx struct {
 //
 // NOTE: Older HTTP/1.1 non-browser clients may face compatibility issues.
 //
+// EarlyHints does nothing for HTTP/1.0 requests, since a server must not send
+// a 1xx response to an HTTP/1.0 client (RFC 9110, section 15.2).
+//
 // See: https://developer.chrome.com/docs/web-platform/early-hints and
 // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Link#syntax
 //
@@ -707,6 +710,9 @@ type RequestCtx struct {
 //	   ctx.SetBody([]byte("<html><head></head><body><h1>Hello from Fasthttp</h1></body></html>"))
 //	}
 func (ctx *RequestCtx) EarlyHints() error {
+	if !ctx.Request.Header.IsHTTP11() {
+		return nil
+	}
 	links := ctx.Response.Header.PeekAll(b2s(strLink))
 	if len(links) > 0 {
 		c := acquireWriter(ctx)
