@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -70,6 +71,9 @@ type Request struct {
 	// Request timeout. Usually set by DoDeadline or DoTimeout
 	// if <= 0, means not set
 	timeout time.Duration
+
+	// Request context. Usually set by DoContext
+	ctx context.Context
 
 	secureErrorLogMessage bool
 
@@ -1091,6 +1095,7 @@ func (req *Request) copyToSkipBody(dst *Request) {
 	dst.UseHostHeader = req.UseHostHeader
 	dst.DisableRedirectPathNormalizing = req.DisableRedirectPathNormalizing
 	dst.logger = req.logger
+	dst.ctx = req.ctx
 
 	// do not copy multipartForm - it will be automatically
 	// re-created on the first call to MultipartForm.
@@ -1451,10 +1456,27 @@ func (req *Request) Reset() {
 	req.Header.Reset()
 	req.resetSkipHeader()
 	req.timeout = 0
+	req.ctx = nil
 	req.logger = nil
 	req.forceResponseBodyBuffering = false
 	req.UseHostHeader = false
 	req.DisableRedirectPathNormalizing = false
+}
+
+// Context returns the context for the request.
+// To change the context, use SetContext.
+//
+// The returned context is always non-nil; it defaults to the background context.
+func (req *Request) Context() context.Context {
+	if req.ctx != nil {
+		return req.ctx
+	}
+	return context.Background()
+}
+
+// SetContext sets the context for the request.
+func (req *Request) SetContext(ctx context.Context) {
+	req.ctx = ctx
 }
 
 func (req *Request) resetSkipHeader() {
