@@ -776,10 +776,18 @@ type HijackHandler func(c net.Conn)
 // to the handler. The connection is automatically closed after
 // returning from the handler.
 //
-// The server skips calling the handler in the following cases:
+// The server skips calling the handler when the response is sent and one
+// of the following holds:
 //
-//   - 'Connection: close' header exists in either request or response.
-//   - Unexpected error during response writing to the connection.
+//   - The request or the response asks to close the connection: a
+//     'Connection: close' header, or an HTTP/1.0 request without keep-alive.
+//   - The server is shutting down and CloseOnShutdown is set.
+//   - A streamed request body failed before the response was written.
+//   - Writing the response failed.
+//
+// With HijackSetNoResponse(true) none of these apply. DisableKeepalive and
+// MaxRequestsPerConn do not prevent the hijack, since the connection serves
+// no further requests either way.
 //
 // The server stops processing requests from hijacked connections.
 //
@@ -2765,7 +2773,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// store req.ConnectionClose so even if it was changed inside of handler.
 		// Preserve connectionClose if already set (e.g., by ExpectHandler).
-		connectionClose = connectionClose || s.DisableKeepalive || ctx.Request.Header.ConnectionClose()
+		connectionClose = connectionClose || ctx.Request.Header.ConnectionClose()
 
 		// Remember the request version before ctx may be replaced with a
 		// fresh one below, whose request defaults to HTTP/1.1.
@@ -2865,10 +2873,15 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		}
 
 		connectionClose = connectionClose ||
-			(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) || // #nosec G115
 			ctx.Response.Header.ConnectionClose() ||
 			(reqStream != nil && reqStream.failed) ||
 			(s.CloseOnShutdown && s.stop.Load() == 1)
+		// DisableKeepalive and MaxRequestsPerConn end the connection's use for
+		// requests, which a hijack does as well, so they do not skip it.
+		if hijackHandler == nil {
+			connectionClose = connectionClose || s.DisableKeepalive ||
+				(s.MaxRequestsPerConn > 0 && connRequestNum >= uint64(s.MaxRequestsPerConn)) // #nosec G115
+		}
 
 		// If no response stream can consume the request body, a known-length
 		// body over the drain limit means the connection must close. Decide
