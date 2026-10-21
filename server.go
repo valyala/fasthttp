@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -3063,6 +3064,12 @@ func (s *Server) setState(nc net.Conn, state ConnState) {
 }
 
 func hijackConnHandler(ctx *RequestCtx, r io.Reader, c net.Conn, s *Server, h HijackHandler) {
+	if br, ok := r.(*bufio.Reader); ok && s.KeepHijackedConns && s.ReduceMemoryUsage {
+		// With ReduceMemoryUsage the reader reads through ctx.fbr, which is
+		// reset with ctx below and reused for other connections. Have it read
+		// the connection itself; a request stream sharing it keeps working.
+		detachReader(br, c)
+	}
 	hjc := s.acquireHijackConn(r, c)
 	h(hjc)
 
@@ -3076,6 +3083,19 @@ func hijackConnHandler(ctx *RequestCtx, r io.Reader, c net.Conn, s *Server, h Hi
 		s.releaseHijackConn(hjc)
 	}
 	s.releaseCtx(ctx)
+}
+
+// detachReader makes br read c directly, keeping its buffered bytes. An error
+// br holds besides them, which only an unusual connection reports together
+// with data, is dropped.
+func detachReader(br *bufio.Reader, c net.Conn) {
+	n := br.Buffered()
+	if n == 0 {
+		br.Reset(c)
+		return
+	}
+	b, _ := br.Peek(n)
+	br.Reset(io.MultiReader(bytes.NewReader(bytes.Clone(b)), c))
 }
 
 func (s *Server) acquireHijackConn(r io.Reader, c net.Conn) *hijackConn {

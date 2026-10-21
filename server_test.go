@@ -18,6 +18,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/valyala/fasthttp/fasthttputil"
@@ -4970,6 +4971,73 @@ func TestRequestCtxHijackKeepaliveLimits(t *testing.T) {
 	}
 	if !strings.Contains(rw.w.String(), "Connection: close") {
 		t.Fatalf("response lacks Connection: close:\n%s", rw.w.String())
+	}
+}
+
+func TestRequestCtxHijackKeepHijackedConnsReduceMemoryUsage(t *testing.T) {
+	// With ReduceMemoryUsage the request reader reads through the context,
+	// which is reset, and may be reused, once the hijack handler returns; a
+	// kept connection must not depend on it. A streamed request body shares
+	// the reader and must still be readable from the hijack handler.
+	serverDateOnce.Do(updateServerDate) // Its refresh goroutine must not start inside the bubble.
+	for _, stream := range []bool{false, true} {
+		synctest.Test(t, func(t *testing.T) {
+			s := &Server{KeepHijackedConns: true, ReduceMemoryUsage: true, StreamRequestBody: stream}
+			kept := make(chan net.Conn, 2)
+			bodies := make(chan string, 2)
+			s.Handler = func(ctx *RequestCtx) {
+				body := ctx.Request.BodyStream()
+				if body == nil {
+					body = bytes.NewReader(bytes.Clone(ctx.Request.Body()))
+				}
+				ctx.Hijack(func(c net.Conn) {
+					b, err := io.ReadAll(body)
+					if err != nil {
+						t.Errorf("unexpected error reading the body: %v", err)
+					}
+					bodies <- string(b)
+					kept <- c
+				})
+			}
+			request := "POST / HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n"
+			pc := fasthttputil.NewPipeConns()
+			go func() { _ = s.ServeConn(pc.Conn1()) }()
+			client := pc.Conn2()
+			// The first bytes for the hijack handler arrive with the request,
+			// so the request reader buffers them.
+			if _, err := client.Write([]byte(request + "buffered")); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			c := <-kept
+			synctest.Wait() // The hijack handler has returned and released its context.
+
+			// A second connection may reuse the context.
+			pc2 := fasthttputil.NewPipeConns()
+			go func() { _ = s.ServeConn(pc2.Conn1()) }()
+			if _, err := pc2.Conn2().Write([]byte(request + "other")); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			c2 := <-kept
+			synctest.Wait()
+
+			if _, err := client.Write([]byte(" and more")); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			buf := make([]byte, len("buffered and more"))
+			if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "buffered and more" {
+				t.Fatalf("stream=%v: read %q, %v from the kept connection", stream, buf, err)
+			}
+			for range 2 {
+				if body := <-bodies; body != "abc" {
+					t.Fatalf("stream=%v: body %q", stream, body)
+				}
+			}
+			for _, conn := range []net.Conn{c, c2} {
+				if err := conn.Close(); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			}
+		})
 	}
 }
 
