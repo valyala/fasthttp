@@ -2834,6 +2834,10 @@ type pipelineWork struct {
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// When KeepBodyBuffer is enabled on req or resp, body data may be copied
+// to preserve caller buffer ownership across timeouts, so enabling
+// KeepBodyBuffer is not necessarily faster for this method.
 func (c *PipelineClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return c.DoDeadline(req, resp, time.Now().Add(timeout))
 }
@@ -2853,6 +2857,10 @@ func (c *PipelineClient) DoTimeout(req *Request, resp *Response, timeout time.Du
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// When KeepBodyBuffer is enabled on req or resp, body data may be copied
+// to preserve caller buffer ownership across timeouts, so enabling
+// KeepBodyBuffer is not necessarily faster for this method.
 func (c *PipelineClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	return c.getConnClient().DoDeadline(req, resp, deadline)
 }

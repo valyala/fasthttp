@@ -79,11 +79,23 @@ type Request struct {
 	uriParseErr    error
 
 	// KeepBodyBuffer controls whether the request body buffer is kept
-	// across Reset() calls and reuse instead of returning it to requestBodyPool.
+	// across Reset() and ResetBody() calls instead of returning it to requestBodyPool.
 	//
 	// It is false by default. Set it to true if you want to reuse the same
-	// Request instance across multiple requests without reallocating
-	// or returning the body buffer to the pool.
+	// Request instance across multiple requests, reusing the existing body
+	// buffer when its capacity is sufficient (growing the body beyond capacity
+	// can still allocate).
+	//
+	// KeepBodyBuffer adheres to the following contract:
+	//   - Reset and ResetBody clear the contents but preserve the buffer and the flag.
+	//   - KeepBodyBuffer bypasses SetBodySizePoolLimit, so a large buffer can stay attached
+	//     until explicitly released (e.g. via ReleaseBody or ReleaseRequest).
+	//   - CopyTo leaves the destination's KeepBodyBuffer setting unchanged.
+	//   - ReleaseRequest clears the setting and releases the buffer to the pool.
+	//   - Server contexts clear the public setting between requests.
+	//   - PipelineClient.DoTimeout and DoDeadline may copy body data to preserve
+	//     caller ownership across timeouts, so enabling this isn't necessarily
+	//     faster for those methods.
 	KeepBodyBuffer bool
 	keepBodyBuffer bool
 
@@ -156,11 +168,23 @@ type Response struct {
 	SkipBody bool
 
 	// KeepBodyBuffer controls whether the response body buffer is kept
-	// across Reset() calls and reuse instead of returning it to responseBodyPool.
+	// across Reset() and ResetBody() calls instead of returning it to responseBodyPool.
 	//
 	// It is false by default. Set it to true if you want to reuse the same
-	// Response instance across multiple requests without reallocating
-	// or returning the body buffer to the pool.
+	// Response instance across multiple requests, reusing the existing body
+	// buffer when its capacity is sufficient (growing the body beyond capacity
+	// can still allocate).
+	//
+	// KeepBodyBuffer adheres to the following contract:
+	//   - Reset and ResetBody clear the contents but preserve the buffer and the flag.
+	//   - KeepBodyBuffer bypasses SetBodySizePoolLimit, so a large buffer can stay attached
+	//     until explicitly released (e.g. via ReleaseBody or ReleaseResponse).
+	//   - CopyTo leaves the destination's KeepBodyBuffer setting unchanged.
+	//   - ReleaseResponse clears the setting and releases the buffer to the pool.
+	//   - Server contexts clear the public setting between requests.
+	//   - PipelineClient.DoTimeout and DoDeadline may copy body data to preserve
+	//     caller ownership across timeouts, so enabling this isn't necessarily
+	//     faster for those methods.
 	KeepBodyBuffer bool
 	keepBodyBuffer bool
 
