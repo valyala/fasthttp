@@ -785,14 +785,38 @@ func TestCookieParseNegativeMaxAge(t *testing.T) {
 			}
 		})
 	}
+}
 
-	for _, input := range []string{
-		"foo=bar; max-age=-",
-		"foo=bar; max-age=--1",
-		"foo=bar; max-age=-1s",
+func TestCookieParseInvalidMaxAge(t *testing.T) {
+	t.Parallel()
+
+	var c Cookie
+	for _, tc := range []struct {
+		name   string
+		input  string
+		maxAge int
+		output string
+	}{
+		{"later attributes", "foo=bar; max-age=never; path=/; Secure; HttpOnly", 0, "foo=bar; path=/; HttpOnly; secure"},
+		{"empty", "foo=bar; max-age=; domain=example.com", 0, "foo=bar; domain=example.com"},
+		{"fraction", "foo=bar; max-age=1.5; samesite=strict", 0, "foo=bar; SameSite=Strict"},
+		{"overflow", "foo=bar; max-age=99999999999999999999; secure", 0, "foo=bar; secure"},
+		{"sign only", "foo=bar; max-age=-", 0, "foo=bar"},
+		{"double sign", "foo=bar; max-age=--1", 0, "foo=bar"},
+		{"negative garbage", "foo=bar; max-age=-1s", 0, "foo=bar"},
+		{"valid kept", "foo=bar; max-age=100; max-age=bogus", 100, "foo=bar; max-age=100"},
+		{"expires kept", "foo=bar; expires=Tue, 10 Nov 2009 23:00:00 GMT; max-age=bogus", 0, "foo=bar; expires=Tue, 10 Nov 2009 23:00:00 GMT"},
 	} {
-		if err := c.Parse(input); err == nil {
-			t.Errorf("expected an error parsing %q, got max age %d", input, c.MaxAge())
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			if err := c.Parse(tc.input); err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if got := c.MaxAge(); got != tc.maxAge {
+				t.Errorf("unexpected max age: got %d, want %d", got, tc.maxAge)
+			}
+			if got := c.String(); got != tc.output {
+				t.Errorf("unexpected cookie: got %q, want %q", got, tc.output)
+			}
+		})
 	}
 }
