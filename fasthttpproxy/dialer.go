@@ -290,8 +290,13 @@ func addrAndAuth(pu *url.URL, authCache *sync.Map) (proxyAddr, auth string) {
 			return info.addr, info.auth
 		}
 	}
+	// Send the decoded credentials; User.String() would percent-encode them.
+	credentials := pu.User.Username()
+	if password, ok := pu.User.Password(); ok {
+		credentials += ":" + password
+	}
 	info := &proxyInfo{
-		auth: base64.StdEncoding.EncodeToString([]byte(pu.User.String())),
+		auth: base64.StdEncoding.EncodeToString([]byte(credentials)),
 		addr: pu.Host + pu.Path,
 	}
 	if authCache != nil {
