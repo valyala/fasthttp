@@ -1285,7 +1285,7 @@ func responseBodyDrainSize(maxBodySize int) int {
 func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
 	resp := AcquireResponse()
 	bodyBuf := resp.bodyBuffer()
-	resp.keepBodyBuffer = true
+	resp.KeepBodyBuffer = true
 	resp.preserveBodyBuffer = true
 	oldBody := bodyBuf.B
 	bodyBuf.B = dst
@@ -1298,7 +1298,7 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	body = bodyBuf.B
 	bodyBuf.B = oldBody
 	resp.preserveBodyBuffer = false
-	resp.keepBodyBuffer = false
+	resp.KeepBodyBuffer = false
 	ReleaseResponse(resp)
 
 	return statusCode, body, err
@@ -1511,6 +1511,8 @@ func AcquireRequest() *Request {
 // It is forbidden accessing req and/or its' members after returning
 // it to request pool.
 func ReleaseRequest(req *Request) {
+	req.KeepBodyBuffer = false
+	req.keepBodyBuffer = false
 	req.Reset()
 	requestPool.Put(req)
 }
@@ -1533,6 +1535,8 @@ func AcquireResponse() *Response {
 // It is forbidden accessing resp and/or its' members after returning
 // it to response pool.
 func ReleaseResponse(resp *Response) {
+	resp.KeepBodyBuffer = false
+	resp.keepBodyBuffer = false
 	resp.Reset()
 	responsePool.Put(resp)
 }
@@ -2830,6 +2834,10 @@ type pipelineWork struct {
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// When KeepBodyBuffer is enabled on req or resp, body data may be copied
+// to preserve caller buffer ownership across timeouts, so enabling
+// KeepBodyBuffer is not necessarily faster for this method.
 func (c *PipelineClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	return c.DoDeadline(req, resp, time.Now().Add(timeout))
 }
@@ -2849,6 +2857,10 @@ func (c *PipelineClient) DoTimeout(req *Request, resp *Response, timeout time.Du
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
+//
+// When KeepBodyBuffer is enabled on req or resp, body data may be copied
+// to preserve caller buffer ownership across timeouts, so enabling
+// KeepBodyBuffer is not necessarily faster for this method.
 func (c *PipelineClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	return c.getConnClient().DoDeadline(req, resp, deadline)
 }
@@ -2889,7 +2901,20 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 
 	// Make a copy of the request in order to avoid data races on timeouts
 	req.copyToSkipBody(&w.reqCopy)
-	swapRequestBody(req, &w.reqCopy)
+	if req.KeepBodyBuffer && req.body != nil {
+		if req.bodyStream != nil {
+			w.reqCopy.bodyStream = req.bodyStream
+			req.bodyStream = nil
+			if rs, ok := w.reqCopy.bodyStream.(*requestStream); ok {
+				rs.header = &w.reqCopy.Header
+				rs.clonePrefetchedBytes()
+			}
+		} else {
+			w.reqCopy.SetBody(req.bodyBytes())
+		}
+	} else {
+		swapRequestBody(req, &w.reqCopy)
+	}
 
 	// Put the request to outgoing queue
 	select {
@@ -2910,8 +2935,16 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	select {
 	case <-w.done:
 		if resp != nil {
-			w.respCopy.copyToSkipBody(resp)
-			swapResponseBody(resp, &w.respCopy)
+			if resp.KeepBodyBuffer && resp.body != nil {
+				w.respCopy.copyToSkipBody(resp)
+				resp.SetBody(w.respCopy.bodyBytes())
+				if streamBody && !resp.mustSkipBody() {
+					resp.bodyStream = bytes.NewReader(resp.bodyBytes())
+				}
+			} else {
+				w.respCopy.copyToSkipBody(resp)
+				swapResponseBody(resp, &w.respCopy)
+			}
 			resp.StreamBody = streamBody
 		}
 		err = w.err
@@ -2932,6 +2965,8 @@ func (c *pipelineConnClient) acquirePipelineWork(timeout time.Duration) (w *pipe
 			done: make(chan struct{}, 1),
 		}
 	}
+	w.reqCopy.KeepBodyBuffer = false
+	w.respCopy.KeepBodyBuffer = false
 	if timeout > 0 {
 		if w.t == nil {
 			w.t = time.NewTimer(timeout)
@@ -2949,6 +2984,8 @@ func (c *pipelineConnClient) releasePipelineWork(w *pipelineWork) {
 	if w.t != nil {
 		w.t.Stop()
 	}
+	w.reqCopy.KeepBodyBuffer = false
+	w.respCopy.KeepBodyBuffer = false
 	w.reqCopy.Reset()
 	w.respCopy.Reset()
 	w.req = nil
