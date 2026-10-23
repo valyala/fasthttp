@@ -442,16 +442,28 @@ func (c *Cookie) ParseBytes(src []byte) error {
 					c.domain = initHeaderValueBytes(c.domain, v)
 				}
 
-			case 'p': // "path"
+			// RFC 6265, sections 5.2.5 and 5.2.6: Secure and HttpOnly are
+			// matched by name alone, so a value after them is ignored.
+			// Partitioned works the same way.
+			case 'h': // "httponly"
+				if caseInsensitiveCompare(strCookieHTTPOnly, k) {
+					c.httpOnly = true
+				}
+
+			case 'p': // "path" or "partitioned"
 				if caseInsensitiveCompare(strCookiePath, k) {
 					if !validCookiePathValue(v) {
 						return ErrInvalidCookieValue
 					}
 					c.path = initHeaderValueBytes(c.path, v)
+				} else if caseInsensitiveCompare(strCookiePartitioned, k) {
+					c.partitioned = true
 				}
 
-			case 's': // "samesite"
-				if caseInsensitiveCompare(strCookieSameSite, k) {
+			case 's': // "samesite" or "secure"
+				if caseInsensitiveCompare(strCookieSecure, k) {
+					c.secure = true
+				} else if caseInsensitiveCompare(strCookieSameSite, k) {
 					if len(v) > 0 {
 						// Case insensitive switch on first char
 						switch v[0] | 0x20 {
