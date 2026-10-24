@@ -853,3 +853,33 @@ func TestCookieParseFlagsWithValue(t *testing.T) {
 		})
 	}
 }
+
+func TestCookieParseTrimsTabs(t *testing.T) {
+	t.Parallel()
+
+	var c Cookie
+	if err := c.Parse("sid\t=\tabc\t;\tPath=/;\tSecure;\tHttpOnly\t"); err != nil {
+		t.Fatalf("unexpected parse error: %v", err)
+	}
+	if string(c.Key()) != "sid" {
+		t.Errorf("unexpected key: %q", c.Key())
+	}
+	if string(c.Value()) != "abc" {
+		t.Errorf("unexpected value: %q", c.Value())
+	}
+	if string(c.Path()) != "/" {
+		t.Errorf("unexpected path: %q", c.Path())
+	}
+	if !c.Secure() {
+		t.Error("Secure must be set")
+	}
+	if !c.HTTPOnly() {
+		t.Error("HttpOnly must be set")
+	}
+
+	var h RequestHeader
+	h.Set(HeaderCookie, "a=b;\tc=d")
+	if v := h.Cookie("c"); string(v) != "d" {
+		t.Errorf("unexpected request cookie value: %q", v)
+	}
+}
