@@ -820,3 +820,36 @@ func TestCookieParseInvalidMaxAge(t *testing.T) {
 		})
 	}
 }
+
+func TestCookieParseFlagsWithValue(t *testing.T) {
+	t.Parallel()
+
+	var c Cookie
+	for _, tc := range []struct {
+		name   string
+		input  string
+		output string
+	}{
+		{"empty values", "foo=bar; Secure=; HttpOnly=; Partitioned=", "foo=bar; HttpOnly; secure; Partitioned"},
+		{"values", "foo=bar; secure=true; httponly=1; partitioned=yes", "foo=bar; HttpOnly; secure; Partitioned"},
+		{"later attributes", "foo=bar; Secure=1; HttpOnly=1; Partitioned=1; path=/", "foo=bar; path=/; HttpOnly; secure; Partitioned"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := c.Parse(tc.input); err != nil {
+				t.Fatalf("unexpected parse error: %v", err)
+			}
+			if !c.Secure() {
+				t.Error("Secure must be set")
+			}
+			if !c.HTTPOnly() {
+				t.Error("HttpOnly must be set")
+			}
+			if !c.Partitioned() {
+				t.Error("Partitioned must be set")
+			}
+			if got := c.String(); got != tc.output {
+				t.Errorf("unexpected cookie: got %q, want %q", got, tc.output)
+			}
+		})
+	}
+}
