@@ -2,6 +2,7 @@ package fasthttpproxy
 
 import (
 	"bufio"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net"
@@ -353,6 +354,59 @@ func TestHTTPProxyDialRejectsTargetAddrContainingNewlines(t *testing.T) {
 	}
 	if dialed.Load() {
 		t.Fatal("proxy dialer must not be invoked for invalid target addresses")
+	}
+}
+
+func TestFasthttpHTTPDialerSendsDecodedCredentials(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	authCh := make(chan string, 1)
+	go func() {
+		req := fasthttp.AcquireRequest()
+		defer fasthttp.ReleaseRequest(req)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			if err := req.Read(bufio.NewReader(conn)); err != nil {
+				t.Error(err)
+			}
+			authCh <- string(req.Header.Peek("Proxy-Authorization"))
+			req.Reset()
+			if _, err := conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
+				t.Error(err)
+			}
+			conn.Close()
+		}
+	}()
+
+	tests := []struct {
+		userinfo    string
+		credentials string
+	}{
+		{"user:pass", "user:pass"},
+		{"user", "user"},
+		{"admin:adminpass@123", "admin:adminpass@123"},
+		{"user:Passw0rd!", "user:Passw0rd!"},
+		{"user:p%40ss%3A%23", "user:p@ss:#"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.userinfo, func(t *testing.T) {
+			conn, err := FasthttpHTTPDialer(tt.userinfo + "@" + ln.Addr().String())("example.com:443")
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn.Close()
+			want := "Basic " + base64.StdEncoding.EncodeToString([]byte(tt.credentials))
+			if got := <-authCh; got != want {
+				t.Fatalf("unexpected Proxy-Authorization %q. Expecting %q", got, want)
+			}
+		})
 	}
 }
 
