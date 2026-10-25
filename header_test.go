@@ -2896,6 +2896,44 @@ func TestResponseHeaderCookieIssue4(t *testing.T) {
 	}
 }
 
+func TestResponseHeaderCookieWithoutEquals(t *testing.T) {
+	t.Parallel()
+
+	var parsed ResponseHeader
+	r := bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\nSet-Cookie: sid; Path=/\r\n\r\n"))
+	if err := parsed.Read(r); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var set ResponseHeader
+	set.Set(HeaderSetCookie, "sid; Path=/")
+
+	for _, tc := range []struct {
+		h    *ResponseHeader
+		name string
+	}{{&parsed, "parsed"}, {&set, "set"}} {
+		name, h := tc.name, tc.h
+		// The cookie must be stored under the same key Cookie.ParseBytes
+		// gives it, so it can be looked up again.
+		for key, value := range h.Cookies() {
+			var c Cookie
+			if err := c.ParseBytes(value); err != nil {
+				t.Fatalf("%s: unexpected error: %v", name, err)
+			}
+			if !bytes.Equal(key, c.Key()) {
+				t.Errorf("%s: cookie stored under %q, but its key is %q", name, key, c.Key())
+			}
+		}
+
+		var c Cookie
+		if !h.Cookie(&c) {
+			t.Errorf("%s: cookie without a name not found", name)
+		} else if string(c.Value()) != "sid" || string(c.Path()) != "/" {
+			t.Errorf("%s: unexpected cookie %q", name, c.Cookie())
+		}
+	}
+}
+
 func TestRequestHeaderCookieIssue313(t *testing.T) {
 	t.Parallel()
 
