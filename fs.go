@@ -1574,6 +1574,8 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 				_ = r.(io.Closer).Close() //nolint:forcetypeassert
 				ctx.Logger().Printf("cannot parse byte range %q for path=%q: %v", byteRange, path, err)
 				ctx.Error("Range Not Satisfiable", StatusRequestedRangeNotSatisfiable)
+				// Tell the client the current length, as RFC 9110 section 15.5.17 asks.
+				hdr.Set(HeaderContentRange, "bytes */"+strconv.Itoa(contentLength))
 				return
 			}
 
