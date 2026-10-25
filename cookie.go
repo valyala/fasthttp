@@ -662,17 +662,13 @@ func (s *cookieScanner) next(key, val *[]byte) bool {
 
 func decodeCookieArg(dst, src []byte, skipQuotes bool) []byte {
 	// Fast path: already trimmed and not quoted.
-	if n := len(src); n > 0 && src[0] != ' ' && src[n-1] != ' ' &&
+	if n := len(src); n > 0 && src[0] != ' ' && src[0] != '\t' &&
+		src[n-1] != ' ' && src[n-1] != '\t' &&
 		(!skipQuotes || n < 2 || src[0] != '"' || src[n-1] != '"') {
 		return append(dst[:0], src...)
 	}
 
-	for len(src) > 0 && src[0] == ' ' {
-		src = src[1:]
-	}
-	for len(src) > 0 && src[len(src)-1] == ' ' {
-		src = src[:len(src)-1]
-	}
+	src = trim(src)
 	if skipQuotes {
 		if len(src) > 1 && src[0] == '"' && src[len(src)-1] == '"' {
 			src = src[1 : len(src)-1]
@@ -711,12 +707,7 @@ func validCookiePathValue(value []byte) bool {
 }
 
 func trimCookieArgNoCopy(src []byte, skipQuotes bool) []byte {
-	for len(src) > 0 && src[0] == ' ' {
-		src = src[1:]
-	}
-	for len(src) > 0 && src[len(src)-1] == ' ' {
-		src = src[:len(src)-1]
-	}
+	src = trim(src)
 	if skipQuotes && len(src) > 1 && src[0] == '"' && src[len(src)-1] == '"' {
 		src = src[1 : len(src)-1]
 	}
