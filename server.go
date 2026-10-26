@@ -1560,12 +1560,20 @@ func (ctx *RequestCtx) SuccessString(contentType, body string) {
 //
 // The redirect uri may be either absolute or relative to the current
 // request uri. Fasthttp will always send an absolute uri back to the client.
+// A uri with a scheme but no authority, such as mailto:user@example.com
+// or com.example.app:/callback, is sent as is.
 // To send a relative uri you can use the following code:
 //
 //	strLocation = []byte("Location") // Put this with your top level var () declarations.
 //	ctx.Response.Header.SetCanonical(strLocation, "/relative?uri")
 //	ctx.Response.SetStatusCode(fasthttp.StatusMovedPermanently)
 func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
+	if hasSchemeWithoutAuthority(uri) {
+		// URI can only hold scheme://host/path, so resolving this
+		// against the request uri would turn it into a relative path.
+		ctx.redirect(s2b(uri), statusCode)
+		return
+	}
 	u := AcquireURI()
 	ctx.URI().CopyTo(u)
 	u.Update(uri)
@@ -1596,6 +1604,16 @@ func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
 func (ctx *RequestCtx) RedirectBytes(uri []byte, statusCode int) {
 	s := b2s(uri)
 	ctx.Redirect(s, statusCode)
+}
+
+// hasSchemeWithoutAuthority reports whether uri starts with a valid scheme
+// that isn't followed by "//", e.g. mailto:user@example.com.
+func hasSchemeWithoutAuthority(uri string) bool {
+	n := strings.IndexByte(uri, ':')
+	if n <= 0 || !isValidScheme(s2b(uri[:n])) {
+		return false
+	}
+	return !strings.HasPrefix(uri[n+1:], "//")
 }
 
 func (ctx *RequestCtx) redirect(uri []byte, statusCode int) {

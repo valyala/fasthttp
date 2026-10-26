@@ -589,6 +589,21 @@ func TestRequestCtxRedirect(t *testing.T) {
 	}
 }
 
+func TestRequestCtxRedirectSchemeWithoutAuthority(t *testing.T) {
+	t.Parallel()
+
+	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "mailto:info@example.com", "mailto:info@example.com")
+	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "tel:+15551234567", "tel:+15551234567")
+	testRequestCtxRedirect(t, "https://qqq/foo/bar", "com.example.app:/oauth2redirect?code=abc&state=xyz", "com.example.app:/oauth2redirect?code=abc&state=xyz")
+	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "urn:isbn:0451450523", "urn:isbn:0451450523")
+	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "mailto:x@example.com\r\nInjected: yes", "mailto:x@example.com  Injected: yes")
+
+	// A colon that doesn't follow a valid scheme keeps the reference relative.
+	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "./a:b", "http://qqq/foo/a:b")
+	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "x.html?a=b:c", "http://qqq/foo/x.html?a=b:c")
+	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "1a:b", "http://qqq/foo/1a:b")
+}
+
 func testRequestCtxRedirect(t *testing.T, origURL, redirectURL, expectedURL string) {
 	var ctx RequestCtx
 	var req Request
