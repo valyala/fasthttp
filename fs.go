@@ -379,13 +379,14 @@ type FS struct {
 	//
 	// Symbolic links under Root are only followed while they stay inside
 	// it, see AllowSymlinksOutsideRoot.
+	// If Root is a file, its compressed copies are confined to its parent directory.
 	Root string
 
 	// Path to the compressed root directory to serve files from. If this value
 	// is empty, Root is used.
 	//
-	// Compressed copies are confined to CompressRoot unless it is a whole
-	// volume or AllowSymlinksOutsideRoot is set.
+	// Compressed copies are confined to CompressRoot (or its parent directory
+	// if it is a file) unless it is a whole volume or AllowSymlinksOutsideRoot is set.
 	CompressRoot string
 
 	// Suffix to add to the name of cached compressed file.
@@ -2435,9 +2436,7 @@ var _ fs.StatFS = (*osFS)(nil)
 
 // errOutsideRoot is reported for a path outside the root directory it is
 // resolved in. Such a path names nothing FS may serve, so it counts as not
-// existing. FS asks for one when a request for Root itself may be
-// compressed: it looks for Root plus the compressed file suffix, which is
-// next to Root, not inside it.
+// existing.
 var errOutsideRoot = fmt.Errorf("path is outside the FS root directory: %w", fs.ErrNotExist)
 
 // osFS is the filesystem FS uses when FS.FS is nil. Its methods take the OS
@@ -2482,7 +2481,8 @@ func (o *osFS) Stat(name string) (fs.FileInfo, error) {
 //
 // If dir is empty, paths are used as they are.
 type osRoot struct {
-	dir string
+	dir  string
+	file string // A single-file root, which may itself be a symbolic link.
 }
 
 func newOSRoot(dir string, allowSymlinksOutsideRoot bool) osRoot {
@@ -2491,6 +2491,19 @@ func newOSRoot(dir string, allowSymlinksOutsideRoot bool) osRoot {
 	// so there is no directory to confine paths to.
 	if allowSymlinksOutsideRoot || isWholeFilesystemRoot(dir) {
 		return osRoot{}
+	}
+	if fi, err := os.Stat(dir); err == nil && !fi.IsDir() {
+		// Compressed copies and temporary files are siblings of a file root.
+		// Preserve the path spelling: filepath.Dir would clean components
+		// such as "./", preventing rel from matching the paths FS builds.
+		parent := strings.TrimSuffix(dir, filepath.Base(dir))
+		for parent != "" && os.IsPathSeparator(parent[len(parent)-1]) {
+			parent = parent[:len(parent)-1]
+		}
+		if isWholeFilesystemRoot(parent) {
+			parent = ""
+		}
+		return osRoot{dir: parent, file: dir}
 	}
 	return osRoot{dir: dir}
 }
@@ -2531,7 +2544,7 @@ func (o osRoot) openRoot(name string) (*os.Root, string, error) {
 // open opens the file name. It returns an *os.File, which keeps sendfile
 // and the other fast paths for big files.
 func (o osRoot) open(name string) (*os.File, error) {
-	if o.dir == "" {
+	if o.dir == "" || name == o.file {
 		return os.Open(name)
 	}
 	rel, err := o.rel(name)
@@ -2546,7 +2559,7 @@ func (o osRoot) open(name string) (*os.File, error) {
 }
 
 func (o osRoot) stat(name string) (fs.FileInfo, error) {
-	if o.dir == "" {
+	if o.dir == "" || name == o.file {
 		return os.Stat(name)
 	}
 	r, rel, err := o.openRoot(name)
