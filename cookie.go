@@ -529,12 +529,18 @@ func appendCookiePart(dst, key, value []byte) []byte {
 	return append(dst, value...)
 }
 
+// getCookieKey returns the key of a Set-Cookie value the same way
+// Cookie.ParseBytes does: a cookie without '=' in its name-value pair,
+// such as "sid; Path=/", has an empty key.
 func getCookieKey(dst, src []byte) []byte {
-	n := bytes.IndexByte(src, '=')
-	if n >= 0 {
+	if n := bytes.IndexByte(src, ';'); n >= 0 {
 		src = src[:n]
 	}
-	return decodeCookieArg(dst, src, false)
+	n := bytes.IndexByte(src, '=')
+	if n < 0 {
+		return dst[:0]
+	}
+	return decodeCookieArg(dst, src[:n], false)
 }
 
 func appendRequestCookieBytes(dst []byte, cookies []argsKV) []byte {
