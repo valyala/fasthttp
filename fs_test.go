@@ -968,6 +968,39 @@ func TestFSByteRangeZeroLengthSuffixRange(t *testing.T) {
 	}
 }
 
+func TestFSByteRangeUnsatisfiableContentRange(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("0123456789"), 0o600); err != nil {
+		t.Fatalf("cannot create test file: %v", err)
+	}
+
+	stop := make(chan struct{})
+	defer close(stop)
+
+	fs := &FS{
+		Root:            dir,
+		AcceptByteRange: true,
+		CleanStop:       stop,
+	}
+	h := fs.NewRequestHandler()
+
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, nil)
+	ctx.Request.SetRequestURI("/a.txt")
+	ctx.Request.Header.Set(HeaderRange, "bytes=10-")
+	h(&ctx)
+
+	resp := readResponseFromCtx(t, &ctx, false)
+	if resp.StatusCode() != StatusRequestedRangeNotSatisfiable {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusRequestedRangeNotSatisfiable)
+	}
+	if cr := string(resp.Header.Peek(HeaderContentRange)); cr != "bytes */10" {
+		t.Fatalf("unexpected Content-Range: %q. Expecting %q", cr, "bytes */10")
+	}
+}
+
 func TestFSByteRangeIfRange(t *testing.T) {
 	t.Parallel()
 
