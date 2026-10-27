@@ -1486,6 +1486,11 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	// quoted boundary
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foobar\"\r\n\r\n", "foobar")
 
+	// media type and parameter name are case-insensitive, the boundary value is not
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: Multipart/Form-Data; boundary=foobar\r\n\r\n", "foobar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; Boundary=FooBar\r\n\r\n", "FooBar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: MULTIPART/FORM-DATA; foo=bar; BOUNDARY=foobar\r\n\r\n", "foobar")
+
 	var h RequestHeader
 	h.SetMultipartFormBoundary("foobarbaz")
 	b := h.MultipartFormBoundary()

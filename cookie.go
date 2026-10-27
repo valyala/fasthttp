@@ -750,3 +750,9 @@ func caseInsensitiveCompare(a, b []byte) bool {
 	}
 	return true
 }
+
+// caseInsensitiveHasPrefix reports whether b begins with prefix,
+// ignoring ASCII case.
+func caseInsensitiveHasPrefix(b, prefix []byte) bool {
+	return len(b) >= len(prefix) && caseInsensitiveCompare(b[:len(prefix)], prefix)
+}

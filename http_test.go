@@ -2196,6 +2196,46 @@ func TestRequestMultipartForm(t *testing.T) {
 	testRequestMultipartForm(t, "foobar", req.Body(), 3)
 }
 
+func TestRequestMultipartFormMediaTypeCase(t *testing.T) {
+	t.Parallel()
+
+	body := "--foobar\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--foobar--\r\n"
+
+	for _, contentType := range []string{
+		"Multipart/Form-Data; boundary=foobar",
+		"multipart/form-data; Boundary=foobar",
+		"MULTIPART/FORM-DATA; BOUNDARY=foobar",
+	} {
+		t.Run(contentType, func(t *testing.T) {
+			s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+				contentType, len(body), body)
+
+			for _, preParse := range []bool{true, false} {
+				var req Request
+				br := bufio.NewReader(strings.NewReader(s))
+				if err := req.Header.Read(br); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if err := req.ContinueReadBody(br, 0, preParse); err != nil {
+					t.Fatalf("preParse=%v: unexpected error: %v", preParse, err)
+				}
+				f, err := req.MultipartForm()
+				if err != nil {
+					t.Fatalf("preParse=%v: unexpected error: %v", preParse, err)
+				}
+				if vv := f.Value["key"]; len(vv) != 1 || vv[0] != "value" {
+					t.Fatalf("preParse=%v: unexpected values %q", preParse, vv)
+				}
+				req.RemoveMultipartFormFiles()
+			}
+
+			if !isMultipartFormData([]byte(contentType)) {
+				t.Fatalf("isMultipartFormData(%q) = false; want true", contentType)
+			}
+		})
+	}
+}
+
 func TestRequestMultipartFormEpilogue(t *testing.T) {
 	t.Parallel()
 
@@ -3452,6 +3492,9 @@ func TestRequestPostArgsSuccess(t *testing.T) {
 	testRequestPostArgsSuccess(t, &req, "POST / HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 0\r\n\r\n", 0, "foo=", "=")
 
 	testRequestPostArgsSuccess(t, &req, "POST / HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 18\r\n\r\nfoo&b%20r=b+z=&qwe", 3, "foo=", "b r=b z=", "qwe=")
+
+	// media type is case-insensitive
+	testRequestPostArgsSuccess(t, &req, "POST / HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: Application/X-WWW-Form-Urlencoded\r\nContent-Length: 7\r\n\r\nfoo=bar", 1, "foo=bar")
 }
 
 func TestRequestPostArgsError(t *testing.T) {

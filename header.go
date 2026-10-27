@@ -1055,7 +1055,7 @@ func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
 // from 'multipart/form-data; boundary=...' Content-Type.
 func (h *RequestHeader) MultipartFormBoundary() []byte {
 	b := h.ContentType()
-	if !bytes.HasPrefix(b, strMultipartFormData) {
+	if !caseInsensitiveHasPrefix(b, strMultipartFormData) {
 		return nil
 	}
 	b = b[len(strMultipartFormData):]
@@ -1070,7 +1070,7 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 			n++
 		}
 		b = b[n:]
-		if !bytes.HasPrefix(b, strBoundary) {
+		if !caseInsensitiveHasPrefix(b, strBoundary) {
 			if n = bytes.IndexByte(b, ';'); n < 0 {
 				return nil
 			}
