@@ -1059,6 +1059,9 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 		return nil
 	}
 	b = b[len(strMultipartFormData):]
+	for len(b) > 0 && (b[0] == ' ' || b[0] == '\t') {
+		b = b[1:]
+	}
 	if len(b) == 0 || b[0] != ';' {
 		return nil
 	}
@@ -1066,7 +1069,7 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 	var n int
 	for len(b) > 0 {
 		n++
-		for len(b) > n && b[n] == ' ' {
+		for len(b) > n && (b[n] == ' ' || b[n] == '\t') {
 			n++
 		}
 		b = b[n:]
@@ -1085,6 +1088,7 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 		if n = bytes.IndexByte(b, ';'); n >= 0 {
 			b = b[:n]
 		}
+		b = trimTrailingSpace(b)
 		if len(b) > 1 && b[0] == '"' && b[len(b)-1] == '"' {
 			b = b[1 : len(b)-1]
 		}
