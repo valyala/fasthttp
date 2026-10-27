@@ -3961,6 +3961,55 @@ func TestClientRedirect303DropsBodyFramingHeaders(t *testing.T) {
 	}
 }
 
+func TestClientRedirectNonHTTPScheme(t *testing.T) {
+	t.Parallel()
+
+	for _, location := range []string{
+		"mailto:info@example.com",
+		"tel:+1-201-555-0123",
+		"urn:isbn:0451450523",
+		"com.example.app:/oauth2redirect?code=abc",
+	} {
+		t.Run(location, func(t *testing.T) {
+			t.Parallel()
+
+			var requested []string
+			client := HostClient{
+				Addr: "example.com:80",
+				Transport: &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+					requested = append(requested, string(req.URI().RequestURI()))
+					if len(requested) == 1 {
+						resp.Header.SetStatusCode(StatusFound)
+						resp.Header.Set(HeaderLocation, location)
+					} else {
+						resp.Header.SetStatusCode(StatusNotFound)
+					}
+					return false, nil
+				}},
+			}
+
+			req := AcquireRequest()
+			resp := AcquireResponse()
+			defer ReleaseRequest(req)
+			defer ReleaseResponse(resp)
+
+			req.SetRequestURI("http://example.com/foo/bar")
+			if err := client.DoRedirects(req, resp, 16); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(requested) != 1 {
+				t.Fatalf("unexpected requests %q. Expecting only %q", requested, "/foo/bar")
+			}
+			if got := resp.StatusCode(); got != StatusFound {
+				t.Fatalf("unexpected status code: %d", got)
+			}
+			if got := string(resp.Header.Peek(HeaderLocation)); got != location {
+				t.Fatalf("unexpected location %q. Expecting %q", got, location)
+			}
+		})
+	}
+}
+
 func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
 	t.Parallel()
 

@@ -1342,6 +1342,12 @@ func doRequestFollowRedirects(
 			err = ErrMissingLocation
 			break
 		}
+		if isNonHTTPRedirect(location) {
+			// There is nothing to fetch for mailto:, tel: or an app callback
+			// such as com.example.app:/cb, so return the redirect response
+			// as is and leave the location to the caller.
+			break
+		}
 		redirectURI := AcquireURI()
 		url = getRedirectURL(url, location, req.DisableRedirectPathNormalizing, redirectURI)
 		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
@@ -1390,6 +1396,17 @@ func doRequestFollowRedirects(
 	}
 
 	return statusCode, body, err
+}
+
+// isNonHTTPRedirect reports whether location has a scheme other than http
+// or https and no authority, e.g. mailto:user@example.com.
+// URI can't hold such a location and would resolve it as a relative path.
+func isNonHTTPRedirect(location []byte) bool {
+	if !hasSchemeWithoutAuthority(b2s(location)) {
+		return false
+	}
+	scheme := location[:bytes.IndexByte(location, ':')]
+	return !bytes.EqualFold(scheme, strHTTP) && !bytes.EqualFold(scheme, strHTTPS)
 }
 
 func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool, dst *URI) string {
