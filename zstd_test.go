@@ -401,3 +401,19 @@ func testZstdCompressSingleCase(s string) error {
 	releaseZstdReader(zr)
 	return nil
 }
+
+func TestZstdOutOfRangeLevels(t *testing.T) {
+	t.Parallel()
+
+	src := bytes.Repeat([]byte("foobar"), 100)
+	for _, level := range []int{CompressZstdSpeedNotSet, -1, CompressZstdBestCompression + 1, CompressDefaultCompression} {
+		compressed := AppendZstdBytesLevel(nil, src, level)
+		decompressed, err := AppendUnzstdBytes(nil, compressed)
+		if err != nil {
+			t.Fatalf("level %d: unexpected error: %v", level, err)
+		}
+		if !bytes.Equal(decompressed, src) {
+			t.Fatalf("level %d: unexpected decompressed body", level)
+		}
+	}
+}
