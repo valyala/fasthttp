@@ -1529,6 +1529,34 @@ func (f *errReadFile) Stat() (iofs.FileInfo, error) { return f.fi, nil }
 func (f *errReadFile) Read([]byte) (int, error)     { return 0, errors.New("forced read error") }
 func (f *errReadFile) Close() error                 { return nil }
 
+func TestFSCompressFileRoot(t *testing.T) {
+	t.Parallel()
+
+	root := filepath.Join(t.TempDir(), "index.html")
+	body := strings.Repeat("<p>hello</p>", 200)
+	if err := os.WriteFile(root, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := (&FS{Root: root, Compress: true, SkipCache: true}).NewRequestHandler()
+	for _, encoding := range []string{"", "gzip", "gzip"} {
+		resp := fsRootTestGet(t, h, "/", encoding, "")
+		if resp.status != StatusOK || resp.contentEncoding != encoding {
+			t.Fatalf("encoding %q: status=%d content-encoding=%q", encoding, resp.status, resp.contentEncoding)
+		}
+		got := []byte(resp.body)
+		if encoding == "gzip" {
+			var err error
+			got, err = AppendGunzipBytes(nil, got)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if string(got) != body {
+			t.Fatal("response body differs from the root file")
+		}
+	}
+}
+
 func TestFSCompressTmpFileRemovedOnError(t *testing.T) {
 	t.Parallel()
 
