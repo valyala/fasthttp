@@ -839,6 +839,47 @@ func TestResponseBodyUncompressed(t *testing.T) {
 	}
 }
 
+func TestBodyUncompressedContentEncodingCase(t *testing.T) {
+	t.Parallel()
+
+	body := []byte("body")
+	testCases := []struct {
+		encoding string
+		encoded  []byte
+	}{
+		{encoding: "GZIP", encoded: AppendGzipBytes(nil, body)},
+		{encoding: "Deflate", encoded: AppendDeflateBytes(nil, body)},
+		{encoding: "BR", encoded: AppendBrotliBytes(nil, body)},
+		{encoding: "Zstd", encoded: AppendZstdBytes(nil, body)},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.encoding, func(t *testing.T) {
+			var req Request
+			req.Header.SetContentEncoding(tc.encoding)
+			req.SetBodyRaw(tc.encoded)
+			b, err := req.BodyUncompressed()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !bytes.Equal(b, body) {
+				t.Fatalf("unexpected body: %q. Expecting %q", b, body)
+			}
+
+			var resp Response
+			resp.Header.SetContentEncoding(tc.encoding)
+			resp.SetBodyRaw(tc.encoded)
+			b, err = resp.BodyUncompressed()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !bytes.Equal(b, body) {
+				t.Fatalf("unexpected body: %q. Expecting %q", b, body)
+			}
+		})
+	}
+}
+
 func TestBodyDecodeWithLimitTooLarge(t *testing.T) {
 	t.Parallel()
 
@@ -960,6 +1001,40 @@ func TestRequestMultipartFormWithLimitGzip(t *testing.T) {
 		}
 		if vv[0] != strings.Repeat("a", 8*1024) {
 			t.Fatalf("unexpected value length: %d", len(vv[0]))
+		}
+	})
+
+	t.Run("uppercase content-encoding", func(t *testing.T) {
+		var req Request
+		req.Header.SetMultipartFormBoundary(boundary)
+		req.Header.SetContentEncoding("GZIP")
+		req.SetBodyRaw(gzippedBody)
+
+		f, err := req.MultipartFormWithLimit(len(formBody))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer req.RemoveMultipartFormFiles()
+
+		if vv := f.Value["foo"]; len(vv) != 1 || vv[0] != strings.Repeat("a", 8*1024) {
+			t.Fatalf("unexpected values: %d", len(vv))
+		}
+	})
+
+	t.Run("streamed uppercase content-encoding", func(t *testing.T) {
+		var req Request
+		req.Header.SetMultipartFormBoundary(boundary)
+		req.Header.SetContentEncoding("GZIP")
+		req.SetBodyStream(bytes.NewReader(gzippedBody), len(gzippedBody))
+
+		f, err := req.MultipartFormWithLimit(len(formBody))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer req.RemoveMultipartFormFiles()
+
+		if vv := f.Value["foo"]; len(vv) != 1 || vv[0] != strings.Repeat("a", 8*1024) {
+			t.Fatalf("unexpected values: %d", len(vv))
 		}
 	})
 }
