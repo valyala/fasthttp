@@ -4010,6 +4010,38 @@ func TestClientRedirectNonHTTPScheme(t *testing.T) {
 	}
 }
 
+func TestClientRedirectSameSchemeRelative(t *testing.T) {
+	t.Parallel()
+
+	var requested []string
+	client := HostClient{
+		Addr: "example.com:80",
+		Transport: &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+			requested = append(requested, string(req.URI().RequestURI()))
+			if len(requested) == 1 {
+				resp.Header.SetStatusCode(StatusFound)
+				resp.Header.Set(HeaderLocation, "http:baz")
+			} else {
+				resp.Header.SetStatusCode(StatusOK)
+			}
+			return false, nil
+		}},
+	}
+
+	req := AcquireRequest()
+	resp := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(resp)
+
+	req.SetRequestURI("http://example.com/foo/bar")
+	if err := client.DoRedirects(req, resp, 16); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(requested) != 2 || requested[1] != "/foo/baz" {
+		t.Fatalf("unexpected requests %q. Expecting a redirect to %q", requested, "/foo/baz")
+	}
+}
+
 func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
 	t.Parallel()
 
