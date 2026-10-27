@@ -814,6 +814,35 @@ func TestNewFastHTTPHandlerPresetStatusCodeOverriddenByHandler(t *testing.T) {
 	}
 }
 
+func TestNewFastHTTPHandlerInterimStatusIsNotFinal(t *testing.T) {
+	t.Parallel()
+
+	nethttpH := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Link", "</style.css>; rel=preload")
+		w.WriteHeader(http.StatusEarlyHints)
+		w.Header().Set("X-Final", "1")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	fasthttpH := NewFastHTTPHandler(nethttpH)
+
+	var ctx fasthttp.RequestCtx
+	ctx.Request.SetRequestURI("/test")
+
+	fasthttpH(&ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", ctx.Response.StatusCode(), fasthttp.StatusOK)
+	}
+	if string(ctx.Response.Body()) != "ok" {
+		t.Fatalf("unexpected body: %q. Expecting %q", ctx.Response.Body(), "ok")
+	}
+	if string(ctx.Response.Header.Peek("X-Final")) != "1" {
+		t.Fatalf("header set after the interim status is missing")
+	}
+}
+
 // A client vanishing mid-stream must not race the request's teardown.
 func TestHandlerStreamClientDisconnect(t *testing.T) {
 	t.Parallel()
