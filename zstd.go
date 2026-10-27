@@ -282,10 +282,10 @@ func AppendUnzstdBytes(dst, src []byte) ([]byte, error) {
 	return w.b, err
 }
 
-// normalizes compression level into [0..7], so it could be used as an index
-// in *PoolMap.
+// normalizes compression level into [1..4], so it could be used as an index
+// in *PoolMap. zstd.WithEncoderLevel rejects CompressZstdSpeedNotSet.
 func normalizeZstdCompressLevel(level int) int {
-	if level < CompressZstdSpeedNotSet || level > CompressZstdBestCompression {
+	if level < CompressZstdBestSpeed || level > CompressZstdBestCompression {
 		level = CompressZstdDefault
 	}
 	return level
