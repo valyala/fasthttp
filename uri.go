@@ -904,6 +904,17 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 		return buf
 	}
 
+	// A reference with the same scheme as the base and no "//", e.g. "http:g",
+	// is relative. That's the non-strict mode of RFC 3986, section 5.2.2,
+	// which browsers follow too.
+	if scheme := u.Scheme(); len(newURI) > len(scheme) && newURI[len(scheme)] == ':' &&
+		bytes.EqualFold(newURI[:len(scheme)], scheme) {
+		newURI = newURI[len(scheme)+1:]
+		if len(newURI) == 0 {
+			return buf
+		}
+	}
+
 	if newURI[0] == '/' {
 		// uri without host
 		buf = u.appendSchemeHost(buf[:0])

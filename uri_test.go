@@ -208,6 +208,14 @@ func TestURIUpdate(t *testing.T) {
 	testURIUpdate(t, "http://example.net/dir/path1.html", "a//b", "http://example.net/dir/a/b")
 	testURIUpdate(t, "http://example.net/dir/path1.html", "/a//b", "http://example.net/a/b")
 	testURIUpdate(t, "http://example.net/dir/path1.html?p=1", "?q=//example.com", "http://example.net/dir/path1.html?q=//example.com")
+
+	// same scheme as the base without "//" is a relative reference
+	testURIUpdate(t, "http://example.com/a/b/c?p=1", "http:g", "http://example.com/a/b/g")
+	testURIUpdate(t, "http://example.com/a/b/c?p=1", "HTTP:g?q=2#h", "http://example.com/a/b/g?q=2#h")
+	testURIUpdate(t, "https://example.com/a/b/c?p=1", "https:/g", "https://example.com/g")
+	testURIUpdate(t, "http://example.com/a/b/c?p=1", "http:?q=2", "http://example.com/a/b/c?q=2")
+	testURIUpdate(t, "http://example.com/a/b/c?p=1", "http:#h", "http://example.com/a/b/c?p=1#h")
+	testURIUpdate(t, "http://example.com/a/b/c?p=1", "http:", "http://example.com/a/b/c?p=1")
 }
 
 func TestURIRejectsMixedBracketHost(t *testing.T) {
