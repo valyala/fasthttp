@@ -3050,6 +3050,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		idleConnTime.Store(reqSecond)
 		s.setState(c, StateIdle)
+		ctx.Request.KeepBodyBuffer = false
+		ctx.Response.KeepBodyBuffer = false
 		ctx.Request.Reset()
 		ctx.Response.Reset()
 		if ctx.s != nil {
@@ -3057,8 +3059,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.Request.keepBodyBuffer = keepBodyBuffer
 			ctx.Response.keepBodyBuffer = keepBodyBuffer
 		}
-		ctx.Request.KeepBodyBuffer = false
-		ctx.Response.KeepBodyBuffer = false
 
 		if s.stop.Load() == 1 {
 			err = nil

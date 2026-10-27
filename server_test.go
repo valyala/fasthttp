@@ -8673,6 +8673,49 @@ func TestServerKeepBodyBufferWithPoolSizeLimit(t *testing.T) {
 	})
 }
 
+func TestServerKeepBodyBufferClearedBetweenRequests(t *testing.T) {
+	oldRequestLimit := atomic.LoadInt64(&requestBodyPoolSizeLimit)
+	oldResponseLimit := atomic.LoadInt64(&responseBodyPoolSizeLimit)
+	SetBodySizePoolLimit(1024, 1024)
+	t.Cleanup(func() {
+		SetBodySizePoolLimit(int(oldRequestLimit), int(oldResponseLimit))
+	})
+
+	payload := strings.Repeat("x", 2048)
+	requestNum := 0
+	var reqBodyRetained, respBodyRetained bool
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			requestNum++
+			if requestNum == 1 {
+				ctx.Request.KeepBodyBuffer = true
+				ctx.Response.KeepBodyBuffer = true
+				ctx.SetBodyString(payload)
+				return
+			}
+			reqBodyRetained = ctx.Request.body != nil && cap(ctx.Request.body.B) > 1024
+			respBodyRetained = ctx.Response.body != nil && cap(ctx.Response.body.B) > 1024
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("POST / HTTP/1.1\r\nHost: example.com\r\nContent-Length: 2048\r\n\r\n" + payload)
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if requestNum != 2 {
+		t.Fatalf("expected 2 requests, got %d", requestNum)
+	}
+	if reqBodyRetained {
+		t.Fatalf("expected the request body buffer over the pool size limit to be released before the next request")
+	}
+	if respBodyRetained {
+		t.Fatalf("expected the response body buffer over the pool size limit to be released before the next request")
+	}
+}
+
 func TestServerReduceMemoryUsageKeepBodyBufferCleanup(t *testing.T) {
 	s := &Server{
 		ReduceMemoryUsage: true,
