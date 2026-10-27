@@ -321,3 +321,24 @@ func TestRequestStreamStaysAtEOF(t *testing.T) {
 		t.Fatal("Read after EOF blocked waiting for another chunk header")
 	}
 }
+
+func TestRequestStreamChunkedTruncatedAtChunkBoundary(t *testing.T) {
+	t.Parallel()
+
+	// The peer sends a complete chunk, then closes before the last chunk.
+	var h ResponseHeader
+	h.SetContentLength(-1)
+
+	bb := bytebufferpool.Get()
+	defer bytebufferpool.Put(bb)
+	rs := acquireRequestStream(bb, bufio.NewReader(strings.NewReader("5\r\nhello\r\n")), &h)
+	defer releaseRequestStream(rs)
+
+	got, err := io.ReadAll(rs)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, io.ErrUnexpectedEOF)
+	}
+	if string(got) != "hello" {
+		t.Fatalf("unexpected body %q. Expecting %q", got, "hello")
+	}
+}
