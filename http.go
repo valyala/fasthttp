@@ -791,16 +791,18 @@ func (req *Request) BodyUncompressed() ([]byte, error) {
 //
 // If maxBodySize <= 0, then no limit is applied.
 func (req *Request) BodyUncompressedWithLimit(maxBodySize int) ([]byte, error) {
-	switch string(req.Header.ContentEncoding()) {
-	case "":
+	// Content codings are case-insensitive, see RFC 9110, section 8.4.1.
+	ce := req.Header.ContentEncoding()
+	switch {
+	case len(ce) == 0:
 		return req.Body(), nil
-	case "deflate":
+	case caseInsensitiveCompare(ce, strDeflate):
 		return req.BodyInflateWithLimit(maxBodySize)
-	case "gzip":
+	case caseInsensitiveCompare(ce, strGzip):
 		return req.BodyGunzipWithLimit(maxBodySize)
-	case "br":
+	case caseInsensitiveCompare(ce, strBr):
 		return req.BodyUnbrotliWithLimit(maxBodySize)
-	case "zstd":
+	case caseInsensitiveCompare(ce, strZstd):
 		return req.BodyUnzstdWithLimit(maxBodySize)
 	default:
 		return nil, ErrContentEncodingUnsupported
@@ -827,16 +829,18 @@ func (resp *Response) BodyUncompressed() ([]byte, error) {
 //
 // If maxBodySize <= 0, then no limit is applied.
 func (resp *Response) BodyUncompressedWithLimit(maxBodySize int) ([]byte, error) {
-	switch string(resp.Header.ContentEncoding()) {
-	case "":
+	// Content codings are case-insensitive, see RFC 9110, section 8.4.1.
+	ce := resp.Header.ContentEncoding()
+	switch {
+	case len(ce) == 0:
 		return resp.Body(), nil
-	case "deflate":
+	case caseInsensitiveCompare(ce, strDeflate):
 		return resp.BodyInflateWithLimit(maxBodySize)
-	case "gzip":
+	case caseInsensitiveCompare(ce, strGzip):
 		return resp.BodyGunzipWithLimit(maxBodySize)
-	case "br":
+	case caseInsensitiveCompare(ce, strBr):
 		return resp.BodyUnbrotliWithLimit(maxBodySize)
-	case "zstd":
+	case caseInsensitiveCompare(ce, strZstd):
 		return resp.BodyUnzstdWithLimit(maxBodySize)
 	default:
 		return nil, ErrContentEncodingUnsupported
@@ -1308,7 +1312,7 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	if req.bodyStream != nil {
 		bodyStream := req.bodyStream
 		var lr *io.LimitedReader
-		if bytes.Equal(ce, strGzip) {
+		if caseInsensitiveCompare(ce, strGzip) {
 			if bodyStream, err = gzip.NewReader(bodyStream); err != nil {
 				return nil, fmt.Errorf("cannot gunzip request body: %w", err)
 			}
@@ -1361,7 +1365,7 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 		}
 	} else {
 		body := req.bodyBytes()
-		if bytes.Equal(ce, strGzip) {
+		if caseInsensitiveCompare(ce, strGzip) {
 			if body, err = gunzipData(body, maxBodySize); err != nil {
 				return nil, fmt.Errorf("cannot gunzip request body: %w", err)
 			}
