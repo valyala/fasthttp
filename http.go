@@ -1228,7 +1228,7 @@ func (req *Request) parsePostArgs() {
 	}
 	req.parsedPostArgs = true
 
-	if !bytes.HasPrefix(req.Header.ContentType(), strPostArgsContentType) {
+	if !caseInsensitiveHasPrefix(req.Header.ContentType(), strPostArgsContentType) {
 		return
 	}
 	req.postArgs.ParseBytes(req.bodyBytes())
@@ -1390,7 +1390,7 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 // match would also take media types such as multipart/form-data-alt, whose
 // body the multipart parser never reads.
 func isMultipartFormData(contentType []byte) bool {
-	if !bytes.HasPrefix(contentType, strMultipartFormData) {
+	if !caseInsensitiveHasPrefix(contentType, strMultipartFormData) {
 		return false
 	}
 	rest := contentType[len(strMultipartFormData):]
