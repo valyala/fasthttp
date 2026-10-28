@@ -6214,6 +6214,32 @@ func (t *TransportMock) RoundTrip(hc *HostClient, req *Request, resp *Response) 
 	return t.wrapperFunc(hc, req, resp)
 }
 
+func TestHostClientLastUseTime(t *testing.T) {
+	t.Parallel()
+
+	c := &HostClient{
+		Addr: "example.com",
+		Transport: &TransportMock{wrapperFunc: func(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+			resp.SetStatusCode(StatusOK)
+			return false, nil
+		}},
+	}
+	// A time far from now must be replaced by the time of the next request,
+	// and that time kept by the requests after it.
+	atomic.StoreUint32(&c.lastUseTime, ^uint32(0))
+	for range 3 {
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/")
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatal(err)
+		}
+		if d := time.Since(c.LastUseTime()); d < 0 || d > time.Minute {
+			t.Fatalf("LastUseTime is %v, %v from now", c.LastUseTime(), d)
+		}
+	}
+}
+
 func TestClientRetryIfErrUpstream(t *testing.T) {
 	t.Parallel()
 	upstreamErr := errors.New("upstream error")
