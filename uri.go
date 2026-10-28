@@ -748,11 +748,23 @@ func normalizePath(dst, src []byte) []byte {
 	// remove duplicate slashes
 	b := removeSegments(dst, strSlashSlash)
 
-	// No '.' means no "/./", "/../" or "/.." to remove.
-	if bytes.IndexByte(b, '.') < 0 {
+	// Every dot segment starts with a separator followed by a dot, so a path
+	// without one has none to remove. A dot elsewhere, as in "/file.txt",
+	// doesn't need the scans for segments that cannot be there.
+	i := bytes.IndexByte(b, '.')
+	if i < 0 {
 		return b
 	}
+	if rest := b[max(i-1, 0):]; !bytes.Contains(rest, strSlashDot) &&
+		(filepath.Separator != '\\' || !bytes.Contains(rest, strBackSlashDot)) {
+		return b
+	}
+	return removeDotSegments(b)
+}
 
+// removeDotSegments removes the "." and ".." segments from path b and returns
+// the result written over b.
+func removeDotSegments(b []byte) []byte {
 	// remove /./ parts
 	b = removeSegments(b, strSlashDotSlash)
 
@@ -764,7 +776,7 @@ func normalizePath(dst, src []byte) []byte {
 	if n >= 0 && n+len(strSlashDotDot) == len(b) {
 		nn := bytes.LastIndexByte(b[:n], '/')
 		if nn < 0 {
-			return append(dst[:0], strSlash...)
+			return append(b[:0], strSlash...)
 		}
 		b = b[:nn+1]
 	}
@@ -790,7 +802,7 @@ func normalizePath(dst, src []byte) []byte {
 		if n >= 0 && n+len(strSlashDotDot) == len(b) {
 			nn := bytes.LastIndexByte(b[:n], '/')
 			if nn < 0 {
-				return append(dst[:0], strSlash...)
+				return append(b[:0], strSlash...)
 			}
 			b = b[:nn+1]
 		}
