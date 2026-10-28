@@ -366,6 +366,45 @@ func TestURIPathNormalize(t *testing.T) {
 	// a segment of more than one dot is an ordinary segment
 	testURIPathNormalize(t, &u, "/aaa/...", "/aaa/...")
 	testURIPathNormalize(t, &u, "/aaa/.b", "/aaa/.b")
+
+	// dots that don't start a segment leave the path as it is
+	testURIPathNormalize(t, &u, "/file.txt", "/file.txt")
+	testURIPathNormalize(t, &u, "/static/js/app.min.js", "/static/js/app.min.js")
+	testURIPathNormalize(t, &u, "/v1.2/a..b/c.", "/v1.2/a..b/c.")
+	testURIPathNormalize(t, &u, "/a%2E%2Eb/c%2Ed", "/a..b/c.d")
+	testURIPathNormalize(t, &u, "/.well-known/x.json", "/.well-known/x.json")
+
+	// dot segments that only decoding or slash removal brings out
+	testURIPathNormalize(t, &u, "/a%2F%2E%2E/b.c", "/b.c")
+	testURIPathNormalize(t, &u, "/a//.//b.c", "/a/b.c")
+}
+
+// normalizePath skips removeDotSegments for a path without a separator
+// followed by a dot; running it anyway must not change any result.
+func TestNormalizePathDotSegmentShortcut(t *testing.T) {
+	t.Parallel()
+
+	allSteps := func(src []byte) []byte {
+		dst := addLeadingSlash(nil, src)
+		dst = decodeArgAppendNoPlus(dst, src)
+		return removeDotSegments(removeSegments(dst, strSlashSlash))
+	}
+	var src []byte
+	var walk func(n int)
+	walk = func(n int) {
+		if got, want := normalizePath(nil, src), allSteps(src); !bytes.Equal(got, want) {
+			t.Fatalf("normalizePath(%q) = %q, want %q", src, got, want)
+		}
+		if n == 0 {
+			return
+		}
+		for _, c := range []byte(`/\.a%2EF`) {
+			src = append(src, c)
+			walk(n - 1)
+			src = src[:len(src)-1]
+		}
+	}
+	walk(6)
 }
 
 func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string) {
