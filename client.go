@@ -1349,7 +1349,13 @@ func doRequestFollowRedirects(
 			break
 		}
 		redirectURI := AcquireURI()
-		url = getRedirectURL(url, location, req.DisableRedirectPathNormalizing, redirectURI)
+		url, err = getRedirectURL(url, location, req.DisableRedirectPathNormalizing, redirectURI)
+		if err != nil {
+			// A location that can't be parsed leaves an empty uri behind, and
+			// following that would send the next request without a host.
+			ReleaseURI(redirectURI)
+			break
+		}
 		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
 		ReleaseURI(redirectURI)
 
@@ -1409,11 +1415,13 @@ func isNonHTTPRedirect(location []byte) bool {
 	return !bytes.EqualFold(scheme, strHTTP) && !bytes.EqualFold(scheme, strHTTPS)
 }
 
-func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool, dst *URI) string {
+func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool, dst *URI) (string, error) {
 	dst.Update(baseURL)
-	dst.UpdateBytes(location)
+	if err := dst.UpdateBytesErr(location); err != nil {
+		return "", err
+	}
 	dst.DisablePathNormalizing = disablePathNormalizing
-	return dst.String()
+	return dst.String(), nil
 }
 
 // Redirect handling reuses the original Request, so sensitive request
