@@ -189,8 +189,20 @@ func writeUnbrotli(w io.Writer, p []byte, maxBodySize int) (int, error) {
 
 // AppendUnbrotliBytes appends unbrotlied src to dst and returns the resulting dst.
 func AppendUnbrotliBytes(dst, src []byte) ([]byte, error) {
+	return AppendUnbrotliBytesWithLimit(dst, src, 0)
+}
+
+// AppendUnbrotliBytesWithLimit is like AppendUnbrotliBytes, but it stops with
+// ErrBodyTooLarge when src unbrotlies to more than maxBodySize bytes. The data
+// already in dst doesn't count towards the limit.
+//
+// The returned dst holds the data that was unbrotlied before an error, which is
+// at most maxBodySize+1 bytes if the error is ErrBodyTooLarge.
+//
+// If maxBodySize <= 0, then no limit is applied.
+func AppendUnbrotliBytesWithLimit(dst, src []byte, maxBodySize int) ([]byte, error) {
 	w := &byteSliceWriter{b: dst}
-	_, err := WriteUnbrotli(w, src)
+	_, err := writeUnbrotli(w, src, maxBodySize)
 	return w.b, err
 }
 
