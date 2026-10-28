@@ -4038,10 +4038,7 @@ func TestDefaultMaxRedirectsCount(t *testing.T) {
 					hc := &HostClient{Addr: "example.com:80", Transport: transport}
 					get = hc.Get
 				} else {
-					c := &Client{ConfigureClient: func(hc *HostClient) error {
-						hc.Transport = transport
-						return nil
-					}}
+					c := &Client{Transport: transport}
 					get = c.Get
 				}
 
@@ -4230,10 +4227,7 @@ func TestClientRedirectInvalidLocation(t *testing.T) {
 					hc := &HostClient{Addr: "example.com:80", Transport: transport}
 					do = hc.DoRedirects
 				} else {
-					c := &Client{ConfigureClient: func(hc *HostClient) error {
-						hc.Transport = transport
-						return nil
-					}}
+					c := &Client{Transport: transport}
 					do = c.DoRedirects
 				}
 

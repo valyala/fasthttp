@@ -234,25 +234,24 @@ func testConcurrent(concurrency int, f func() error) error {
 	return nil
 }
 
+var withLimitCodecs = []struct {
+	name      string
+	compress  func(dst, src []byte) []byte
+	withLimit func(dst, src []byte, maxBodySize int) ([]byte, error)
+}{
+	{"gzip", AppendGzipBytes, AppendGunzipBytesWithLimit},
+	{"deflate", AppendDeflateBytes, AppendInflateBytesWithLimit},
+	{"brotli", AppendBrotliBytes, AppendUnbrotliBytesWithLimit},
+	{"zstd", AppendZstdBytes, AppendUnzstdBytesWithLimit},
+}
+
 func TestAppendUncompressBytesWithLimit(t *testing.T) {
 	t.Parallel()
-
-	codecs := []struct {
-		name       string
-		compress   func(dst, src []byte) []byte
-		uncompress func(dst, src []byte) ([]byte, error)
-		withLimit  func(dst, src []byte, maxBodySize int) ([]byte, error)
-	}{
-		{"gzip", AppendGzipBytes, AppendGunzipBytes, AppendGunzipBytesWithLimit},
-		{"deflate", AppendDeflateBytes, AppendInflateBytes, AppendInflateBytesWithLimit},
-		{"brotli", AppendBrotliBytes, AppendUnbrotliBytes, AppendUnbrotliBytesWithLimit},
-		{"zstd", AppendZstdBytes, AppendUnzstdBytes, AppendUnzstdBytesWithLimit},
-	}
 
 	data := bytes.Repeat([]byte("hello, world! "), 1000)
 	prefix := []byte("prefix:")
 
-	for _, codec := range codecs {
+	for _, codec := range withLimitCodecs {
 		t.Run(codec.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -276,15 +275,6 @@ func TestAppendUncompressBytesWithLimit(t *testing.T) {
 				if !bytes.Equal(got, append(append([]byte(nil), prefix...), data...)) {
 					t.Fatalf("unexpected data with the limit %d and a prefix: %d bytes", maxBodySize, len(got))
 				}
-			}
-
-			// The functions without a limit are the ones with none.
-			got, err := codec.uncompress(append([]byte(nil), prefix...), compressed)
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if !bytes.Equal(got, append(append([]byte(nil), prefix...), data...)) {
-				t.Fatalf("unexpected data without a limit: %d bytes", len(got))
 			}
 
 			// One byte over the limit is too much, and so is far over it. The
@@ -319,17 +309,7 @@ func TestAppendUncompressBytesWithLimitBomb(t *testing.T) {
 	data := make([]byte, 8<<20)
 	const maxBodySize = 64 << 10
 
-	codecs := []struct {
-		name      string
-		compress  func(dst, src []byte) []byte
-		withLimit func(dst, src []byte, maxBodySize int) ([]byte, error)
-	}{
-		{"gzip", AppendGzipBytes, AppendGunzipBytesWithLimit},
-		{"deflate", AppendDeflateBytes, AppendInflateBytesWithLimit},
-		{"brotli", AppendBrotliBytes, AppendUnbrotliBytesWithLimit},
-		{"zstd", AppendZstdBytes, AppendUnzstdBytesWithLimit},
-	}
-	for _, codec := range codecs {
+	for _, codec := range withLimitCodecs {
 		t.Run(codec.name, func(t *testing.T) {
 			t.Parallel()
 

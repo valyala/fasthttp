@@ -805,6 +805,10 @@ func (e *classifiedError) Error() string { return e.msg }
 
 func (e *classifiedError) Unwrap() error { return e.err }
 
+func classifiedErrorf(err error, format string, args ...any) error {
+	return &classifiedError{err: err, msg: fmt.Sprintf(format, args...)}
+}
+
 // AddTrailerBytes add Trailer header value for chunked response
 // to indicate which headers will be sent after the body.
 //
@@ -1013,10 +1017,7 @@ func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
 		if idxSemi >= len(b) {
 			return
 		}
-		b = b[idxSemi+1:]
-		for len(b) > 0 && (b[0] == ' ' || b[0] == '\t') {
-			b = b[1:]
-		}
+		b = skipSpaceTab(b[idxSemi+1:])
 		if len(b) > 0 && b[0] == ';' {
 			// Empty parameters are allowed by RFC 9110.
 			continue
@@ -1117,7 +1118,7 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 		if len(b) > 0 && b[0] == '"' {
 			end := 1
 			for end < len(b) && b[end] != '"' {
-				if b[end] == '\\' && end+1 < len(b) {
+				if b[end] == '\\' {
 					end++
 				}
 				end++
@@ -3619,10 +3620,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 			if h.secureErrorLogMessage {
 				return 0, ErrUnsupportedRequestMethod
 			}
-			return 0, &classifiedError{
-				err: ErrUnsupportedRequestMethod,
-				msg: fmt.Sprintf("unsupported http request method %q in %q", b[:n], buf),
-			}
+			return 0, classifiedErrorf(ErrUnsupportedRequestMethod, "unsupported http request method %q in %q", b[:n], buf)
 		}
 	}
 	h.method = append(h.method[:0], b[:n]...)
@@ -3796,10 +3794,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 					if h.secureErrorLogMessage {
 						return 0, ErrUnknownTransferCoding
 					}
-					return 0, &classifiedError{
-						err: ErrUnknownTransferCoding,
-						msg: fmt.Sprintf("unsupported transfer-encoding: %q", s.value),
-					}
+					return 0, classifiedErrorf(ErrUnknownTransferCoding, "unsupported transfer-encoding: %q", s.value)
 				}
 				h.contentLength = -1
 				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
@@ -3970,10 +3965,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 					if h.secureErrorLogMessage {
 						return 0, 0, ErrUnknownTransferCoding
 					}
-					return 0, 0, &classifiedError{
-						err: ErrUnknownTransferCoding,
-						msg: fmt.Sprintf("unsupported transfer-encoding: %q", s.value),
-					}
+					return 0, 0, classifiedErrorf(ErrUnknownTransferCoding, "unsupported transfer-encoding: %q", s.value)
 				}
 
 				if isChunked {

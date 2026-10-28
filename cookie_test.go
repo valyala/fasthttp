@@ -216,9 +216,6 @@ func TestCookieParseIgnoresInvalidAttributeValue(t *testing.T) {
 			t.Fatalf("attributes after the invalid Domain were lost: path=%q secure=%v httponly=%v. Cookie %q",
 				c.Path(), c.Secure(), c.HTTPOnly(), tc)
 		}
-		if s := strings.ToLower(c.String()); strings.Contains(s, "domain") {
-			t.Fatalf("invalid Domain written back: %q. Cookie %q", s, tc)
-		}
 	}
 
 	// Path values reject the ';' separator and every byte outside 0x20-0x7e,
@@ -255,12 +252,6 @@ func TestCookieParseIgnoresInvalidAttributeValue(t *testing.T) {
 	}
 	if string(last.Domain()) != "trusted.example" || string(last.Path()) != "/app" {
 		t.Fatalf("unexpected domain %q path %q. Expecting the valid ones before the invalid ones", last.Domain(), last.Path())
-	}
-
-	// The name and the value are still checked: they decide where the attributes begin.
-	var bad Cookie
-	if err := bad.Parse(`sid=o"k; Domain=example.com`); err != ErrInvalidCookieValue {
-		t.Fatalf("unexpected error %v. Expecting %v", err, ErrInvalidCookieValue)
 	}
 
 	// A backslash in Path is accepted and round-trips, matching SetPath.

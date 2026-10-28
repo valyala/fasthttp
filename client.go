@@ -1355,15 +1355,13 @@ func doRequestFollowRedirects(
 			break
 		}
 		redirectURI := AcquireURI()
-		redirectURL, redirectErr := getRedirectURL(url, location, req.DisableRedirectPathNormalizing, redirectURI)
-		if redirectErr != nil {
-			// A location that can't be resolved leaves an empty uri behind, and
+		url, err = getRedirectURL(url, location, req.DisableRedirectPathNormalizing, redirectURI)
+		if err != nil {
+			// A location that can't be parsed leaves an empty uri behind, and
 			// following that would send the next request without a host.
 			ReleaseURI(redirectURI)
-			err = redirectErr
 			break
 		}
-		url = redirectURL
 		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
 		ReleaseURI(redirectURI)
 

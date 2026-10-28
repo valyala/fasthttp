@@ -1120,7 +1120,6 @@ func (req *Request) CopyTo(dst *Request) {
 		}
 	case req.onlyMultipartForm():
 		buf := dst.bodyBuffer()
-		buf.Reset()
 		if err := WriteMultipartForm(buf, req.multipartForm, req.multipartFormBoundary); err != nil {
 			buf.Reset()
 		}

@@ -257,8 +257,6 @@ func TestRequestCopyToMultipartFormUnreadableFile(t *testing.T) {
 	t.Parallel()
 
 	var req Request
-	req.Header.SetMethod(MethodPost)
-	req.Header.SetContentType("multipart/form-data; boundary=foobar")
 	req.multipartFormBoundary = "foobar"
 	req.multipartForm = &multipart.Form{
 		Value: map[string][]string{"field": {"value"}},
@@ -287,7 +285,6 @@ func TestRequestCopyToMultipartFormFromBody(t *testing.T) {
 	const body = "--foobar\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nvalue\r\n--foobar--\r\n"
 
 	var req Request
-	req.Header.SetMethod(MethodPost)
 	req.Header.SetContentType("multipart/form-data; boundary=foobar")
 	req.SetBodyString(body)
 	if _, err := req.MultipartForm(); err != nil {

@@ -1529,7 +1529,9 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 		{"unquoted value with equals sign", `multipart/form-data; boundary=----=_Part_0_123.456`, "----=_Part_0_123.456"},
 		{"unquoted value with slash and quote", `multipart/form-data; boundary=ab/c"d`, `ab/c"d`},
 	} {
-		testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: "+tc.contentType+"\r\n\r\n", tc.boundary)
+		t.Run(tc.name, func(t *testing.T) {
+			testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: "+tc.contentType+"\r\n\r\n", tc.boundary)
+		})
 	}
 
 	var h RequestHeader
@@ -6350,12 +6352,10 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 		// and secure the error it is replaced by with it.
 		message string
 		secure  error
-		// is lists what errors.Is has to match in both modes, isSecure what it
-		// has to match with Server.SecureErrorLogMessage only, and isNot what it
-		// must not match in either.
-		is       []error
-		isSecure []error
-		isNot    []error
+		// is lists what errors.Is has to match, isNot what it must not match.
+		// With Server.SecureErrorLogMessage the error also has to match secure.
+		is    []error
+		isNot []error
 	}{
 		{
 			name:    "request with a method that is not valid",
@@ -6366,12 +6366,11 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			isNot:   []error{ErrMissingRequestMethod, ErrUnknownTransferCoding},
 		},
 		{
-			name:     "request without a method",
-			raw:      noMethod,
-			message:  fmt.Sprintf("cannot find http request method in %q", noMethod),
-			secure:   ErrMissingRequestMethod,
-			isSecure: []error{ErrMissingRequestMethod},
-			isNot:    []error{ErrUnsupportedRequestMethod},
+			name:    "request without a method",
+			raw:     noMethod,
+			message: fmt.Sprintf("cannot find http request method in %q", noMethod),
+			secure:  ErrMissingRequestMethod,
+			isNot:   []error{ErrUnsupportedRequestMethod},
 		},
 		{
 			name:    "request with an unknown transfer coding",
@@ -6382,12 +6381,11 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			isNot:   []error{ErrUnsupportedRequestMethod},
 		},
 		{
-			name:     "request with a repeated Transfer-Encoding",
-			raw:      "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
-			message:  "too many transfer-encoding headers",
-			secure:   ErrUnsupportedTransferEncoding,
-			isSecure: []error{ErrUnsupportedTransferEncoding},
-			isNot:    []error{ErrUnknownTransferCoding},
+			name:    "request with a repeated Transfer-Encoding",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			message: "too many transfer-encoding headers",
+			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
 		},
 		{
 			name:    "HTTP/1.0 request with Transfer-Encoding",
@@ -6419,7 +6417,6 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			response: true,
 			message:  "too many transfer-encoding headers",
 			secure:   ErrUnsupportedTransferEncoding,
-			isSecure: []error{ErrUnsupportedTransferEncoding},
 			isNot:    []error{ErrUnknownTransferCoding},
 		},
 	}
@@ -6456,7 +6453,7 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 				}
 				wantIs := tt.is
 				if secure {
-					wantIs = slices.Concat(tt.is, tt.isSecure)
+					wantIs = slices.Concat(tt.is, []error{tt.secure})
 				}
 				for _, err := range []error{parseErr, readErr} {
 					for _, want := range wantIs {
