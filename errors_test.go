@@ -96,6 +96,11 @@ func TestExportedErrorStrings(t *testing.T) {
 			want: "fasthttp: unsupported transfer-encoding",
 		},
 		{
+			name: "ErrUnknownTransferCoding",
+			err:  ErrUnknownTransferCoding,
+			want: "fasthttp: unsupported transfer-encoding: unknown transfer coding",
+		},
+		{
 			name: "ErrNonNumericChars",
 			err:  ErrNonNumericChars,
 			want: "fasthttp: non-numeric chars found",

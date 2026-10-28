@@ -4671,6 +4671,255 @@ func TestServerErrorHandler(t *testing.T) {
 	}
 }
 
+// An ErrorHandler has to be able to tell the requests that RFC 9110 and RFC 9112
+// have answered with 501 (Not Implemented) from the ones that are plain bad
+// requests, with or without SecureErrorLogMessage.
+func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		raw        string
+		statusCode int
+	}{
+		{
+			name:       "unsupported method",
+			raw:        "BAD(METHOD / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding without chunked",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "chunked that is not the final transfer coding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked, identity\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "chunked applied twice",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "repeated transfer-encoding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding with parameters",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: x-custom;level=1, chunked\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding with a quoted parameter",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: x-custom;note=\"a,b\", chunked\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding followed by other fields",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nX-Foo: bar\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "parameters on chunked",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked;x=1\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and a repeated transfer-encoding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nTransfer-Encoding: identity\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and chunked repeated in a second transfer-encoding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nTransfer-Encoding: chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding without Host",
+			raw:        "POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding with the Host after it",
+			raw:        "POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\nHost: example.com\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding and a Host that is not valid",
+			raw:        "POST / HTTP/1.1\r\nHost: bad host\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and a Host with a port that is not valid",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com:abc\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and a Host with an IPv6 address that is not closed",
+			raw:        "POST / HTTP/1.1\r\nHost: [::1\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and userinfo in the Host",
+			raw:        "POST / HTTP/1.1\r\nHost: user@example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and userinfo in an absolute-form target",
+			raw:        "POST http://user@example.com/ HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and an absolute-form target without an authority",
+			raw:        "POST http:///path HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and an IPv6 Host with a port",
+			raw:        "POST / HTTP/1.1\r\nHost: [::1]:8080\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding and a repeated content-length",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "missing method",
+			raw:        "FOO\r\nHost: example.com\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+	}
+	for _, tt := range tests {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", tt.name, secure), func(t *testing.T) {
+				t.Parallel()
+
+				s := &Server{
+					Handler:               func(ctx *RequestCtx) {},
+					SecureErrorLogMessage: secure,
+					ErrorHandler: func(ctx *RequestCtx, err error) {
+						// What a framework does with the error.
+						if errors.Is(err, ErrUnsupportedRequestMethod) || errors.Is(err, ErrUnknownTransferCoding) {
+							ctx.SetStatusCode(StatusNotImplemented)
+							return
+						}
+						ctx.SetStatusCode(StatusBadRequest)
+					},
+				}
+
+				rw := &readWriter{}
+				rw.r.WriteString(tt.raw)
+				if err := s.ServeConn(rw); err == nil {
+					t.Fatal("expecting an error from ServeConn")
+				}
+
+				var resp Response
+				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got := resp.StatusCode(); got != tt.statusCode {
+					t.Fatalf("unexpected status code %d. Expecting %d", got, tt.statusCode)
+				}
+			})
+		}
+	}
+}
+
+// An unknown transfer coding is answered with 501 only when the request is
+// otherwise found acceptable before its body is read: whatever Server rejects
+// first, in the Host and in the request target, gets the same answer with or
+// without the coding. A request that has chunked in its place says what that
+// is.
+func TestServerUnknownTransferCodingComesAfterTargetFaults(t *testing.T) {
+	t.Parallel()
+
+	hosts := []string{
+		"example.com", "example.com:80", "[::1]", "[::1]:80", "1.2.3.4", "[1.2.3.4]", "bad host", "a b", "exa mple.com:80",
+		"user@example.com", "user:pw@example.com", "[::1", "::1]", "ex%zzample.com", "example.com:abc", "a/b", "a?b", "a#b",
+		"a\\b", "exa\tmple.com", "[fe80::1%25eth0]", "[fe80::1%eth0]", "[v1.x]",
+	}
+	lines := []string{
+		"POST http://example.com/ HTTP/1.1", "POST http://user@example.com/ HTTP/1.1", "POST http:///path HTTP/1.1",
+		"POST http://bad host/ HTTP/1.1", "POST http://example.com:99999/ HTTP/1.1", "POST //example.com/x HTTP/1.1",
+		"POST * HTTP/1.1", "POST example.com:80 HTTP/1.1", "POST /a%zzb HTTP/1.1", "POST /a?b=c%zz HTTP/1.1",
+	}
+
+	// Every Host with an origin-form target, and every other target with a Host
+	// that is valid and one that is not.
+	type request struct{ line, host string }
+	requests := make([]request, 0, len(hosts)+2*len(lines))
+	for _, host := range hosts {
+		requests = append(requests, request{"POST / HTTP/1.1", host})
+	}
+	for _, line := range lines {
+		for _, host := range []string{"example.com", "bad host"} {
+			requests = append(requests, request{line, host})
+		}
+	}
+
+	status := func(t *testing.T, raw string, secure bool) int {
+		t.Helper()
+
+		s := &Server{
+			Handler:               func(ctx *RequestCtx) { ctx.SetStatusCode(StatusOK) },
+			SecureErrorLogMessage: secure,
+			ErrorHandler: func(ctx *RequestCtx, err error) {
+				if errors.Is(err, ErrUnsupportedRequestMethod) || errors.Is(err, ErrUnknownTransferCoding) {
+					ctx.SetStatusCode(StatusNotImplemented)
+					return
+				}
+				ctx.SetStatusCode(StatusBadRequest)
+			},
+		}
+		rw := &readWriter{}
+		rw.r.WriteString(raw)
+		_ = s.ServeConn(rw)
+
+		var resp Response
+		if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+			t.Fatalf("unexpected error: %v. Request: %q", err, raw)
+		}
+		return resp.StatusCode()
+	}
+
+	for _, secure := range []bool{false, true} {
+		t.Run(fmt.Sprintf("secure=%v", secure), func(t *testing.T) {
+			t.Parallel()
+
+			accepted, rejected := 0, 0
+			for _, r := range requests {
+				chunked := fmt.Sprintf("%s\r\nHost: %s\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n", r.line, r.host)
+				unknown := fmt.Sprintf("%s\r\nHost: %s\r\nTransfer-Encoding: gzip, chunked\r\n\r\n0\r\n\r\n", r.line, r.host)
+
+				want := status(t, chunked, secure)
+				if want == StatusOK {
+					want = StatusNotImplemented
+					accepted++
+				} else {
+					rejected++
+				}
+				if got := status(t, unknown, secure); got != want {
+					t.Errorf("%q with Host %q: status %d with an unknown transfer coding. Expecting %d, as without it", r.line, r.host, got, want)
+				}
+			}
+
+			// Both outcomes have to happen, or nothing was checked.
+			if accepted < 5 || rejected < 20 {
+				t.Fatalf("unexpected counts: %d requests accepted and %d rejected", accepted, rejected)
+			}
+		})
+	}
+}
+
 func TestServeConnHijackResetUserValues(t *testing.T) {
 	t.Parallel()
 
