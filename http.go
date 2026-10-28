@@ -1104,6 +1104,12 @@ func (req *Request) ResetBody() {
 }
 
 // CopyTo copies req contents to dst except of body stream.
+//
+// A multipart/form-data body that was parsed as it was read, as the server
+// does by default, is held as a form and has no bytes of its own. dst gets
+// it as the form marshaled again, which is what Body returns, and parses its
+// own form on the first call to MultipartForm. dst has no body if the form
+// can't be marshaled, e.g. when the temporary file of one of its parts is gone.
 func (req *Request) CopyTo(dst *Request) {
 	req.copyToSkipBody(dst)
 	switch {
@@ -1111,6 +1117,11 @@ func (req *Request) CopyTo(dst *Request) {
 		dst.bodyRaw = append(dst.bodyRaw[:0], req.bodyRaw...)
 		if dst.body != nil {
 			dst.body.Reset()
+		}
+	case req.onlyMultipartForm():
+		buf := dst.bodyBuffer()
+		if err := WriteMultipartForm(buf, req.multipartForm, req.multipartFormBoundary); err != nil {
+			buf.Reset()
 		}
 	case req.body != nil:
 		dst.bodyBuffer().Set(req.body.B)
