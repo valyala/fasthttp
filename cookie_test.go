@@ -188,7 +188,10 @@ func TestCookieParseRejectsInvalidQuotedValue(t *testing.T) {
 	}
 }
 
-func TestCookieParseRejectsInvalidAttributeValue(t *testing.T) {
+// A Domain or Path that can't be used is ignored, like an Expires or Max-Age
+// that isn't valid (RFC 6265, section 5.2): the cookie is kept, it gets no
+// such attribute, and the attributes after it are still parsed.
+func TestCookieParseIgnoresInvalidAttributeValue(t *testing.T) {
 	t.Parallel()
 
 	// Domain values reject the quoted-string bytes (" ; \), the same set as the
@@ -200,11 +203,18 @@ func TestCookieParseRejectsInvalidAttributeValue(t *testing.T) {
 	}
 	for _, tc := range domainCases {
 		var c Cookie
-		if err := c.Parse(tc); err != ErrInvalidCookieValue {
-			t.Fatalf("unexpected error %v. Expecting %v. Cookie %q", err, ErrInvalidCookieValue, tc)
+		if err := c.Parse(tc + "; Path=/after; Secure; HttpOnly"); err != nil {
+			t.Fatalf("unexpected error %v. Cookie %q", err, tc)
 		}
 		if len(c.Domain()) != 0 {
-			t.Fatalf("unexpected domain %q parsed from invalid cookie %q", c.Domain(), tc)
+			t.Fatalf("unexpected domain %q parsed from invalid attribute %q", c.Domain(), tc)
+		}
+		if string(c.Key()) != "sid" || string(c.Value()) != "ok" {
+			t.Fatalf("unexpected cookie %q=%q parsed from %q", c.Key(), c.Value(), tc)
+		}
+		if string(c.Path()) != "/after" || !c.Secure() || !c.HTTPOnly() {
+			t.Fatalf("attributes after the invalid Domain were lost: path=%q secure=%v httponly=%v. Cookie %q",
+				c.Path(), c.Secure(), c.HTTPOnly(), tc)
 		}
 	}
 
@@ -219,12 +229,29 @@ func TestCookieParseRejectsInvalidAttributeValue(t *testing.T) {
 	}
 	for _, tc := range pathCases {
 		var c Cookie
-		if err := c.Parse(tc); err != ErrInvalidCookieValue {
-			t.Fatalf("unexpected error %v. Expecting %v. Cookie %q", err, ErrInvalidCookieValue, tc)
+		if err := c.Parse(tc + "; Domain=example.com; Secure; HttpOnly"); err != nil {
+			t.Fatalf("unexpected error %v. Cookie %q", err, tc)
 		}
 		if len(c.Path()) != 0 {
-			t.Fatalf("unexpected path %q parsed from invalid cookie %q", c.Path(), tc)
+			t.Fatalf("unexpected path %q parsed from invalid attribute %q", c.Path(), tc)
 		}
+		if string(c.Key()) != "sid" || string(c.Value()) != "ok" {
+			t.Fatalf("unexpected cookie %q=%q parsed from %q", c.Key(), c.Value(), tc)
+		}
+		if string(c.Domain()) != "example.com" || !c.Secure() || !c.HTTPOnly() {
+			t.Fatalf("attributes after the invalid Path were lost: domain=%q secure=%v httponly=%v. Cookie %q",
+				c.Domain(), c.Secure(), c.HTTPOnly(), tc)
+		}
+	}
+
+	// A later attribute that can't be used does not undo an earlier one that can,
+	// the same as for an invalid Max-Age.
+	var last Cookie
+	if err := last.Parse(`sid=ok; Domain=trusted.example; Path=/app; Domain=e"vil.example; Path=/a` + "\x01"); err != nil {
+		t.Fatalf("unexpected error %v", err)
+	}
+	if string(last.Domain()) != "trusted.example" || string(last.Path()) != "/app" {
+		t.Fatalf("unexpected domain %q path %q. Expecting the valid ones before the invalid ones", last.Domain(), last.Path())
 	}
 
 	// A backslash in Path is accepted and round-trips, matching SetPath.
