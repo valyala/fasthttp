@@ -1053,6 +1053,18 @@ func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
 
 // MultipartFormBoundary returns boundary part
 // from 'multipart/form-data; boundary=...' Content-Type.
+//
+// The media type and the parameter name are matched case-insensitively, the
+// boundary value is returned as is.
+//
+// A quoted parameter value may contain ';' and quoted-pairs (RFC 9110,
+// section 5.6.4), so it is skipped as a whole: a 'boundary=' spelled inside
+// another parameter's value is not mistaken for the boundary. A quoted
+// boundary is returned without its quotes and with quoted-pairs left as
+// written. An unquoted boundary runs up to the next ';'.
+//
+// nil is returned when there is no boundary parameter, or when a quoted value
+// is not terminated or is followed by anything but a ';'.
 func (h *RequestHeader) MultipartFormBoundary() []byte {
 	b := h.ContentType()
 	if !caseInsensitiveHasPrefix(b, strMultipartFormData) {
@@ -1063,34 +1075,61 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 		return nil
 	}
 
-	var n int
+	// b starts with the ';' that precedes each parameter.
 	for len(b) > 0 {
-		n++
-		for len(b) > n && b[n] == ' ' {
+		b = skipSpaceTab(b[1:])
+
+		n := 0
+		for n < len(b) && b[n] != '=' && b[n] != ';' {
 			n++
 		}
+		name := b[:n]
 		b = b[n:]
-		if !caseInsensitiveHasPrefix(b, strBoundary) {
-			if n = bytes.IndexByte(b, ';'); n < 0 {
-				return nil
-			}
+		if len(b) == 0 || b[0] == ';' {
+			// A parameter without a value or an empty parameter.
 			continue
 		}
+		b = b[1:] // '='
 
-		b = b[len(strBoundary):]
-		if len(b) == 0 || b[0] != '=' {
-			return nil
+		var value []byte
+		if len(b) > 0 && b[0] == '"' {
+			end := 1
+			for end < len(b) && b[end] != '"' {
+				if b[end] == '\\' && end+1 < len(b) {
+					end++
+				}
+				end++
+			}
+			if end >= len(b) {
+				return nil
+			}
+			value = b[1:end]
+			b = skipSpaceTab(b[end+1:])
+			if len(b) > 0 && b[0] != ';' {
+				return nil
+			}
+		} else {
+			n = bytes.IndexByte(b, ';')
+			if n < 0 {
+				n = len(b)
+			}
+			value = b[:n]
+			b = b[n:]
 		}
-		b = b[1:]
-		if n = bytes.IndexByte(b, ';'); n >= 0 {
-			b = b[:n]
+
+		if caseInsensitiveCompare(name, strBoundary) {
+			return value
 		}
-		if len(b) > 1 && b[0] == '"' && b[len(b)-1] == '"' {
-			b = b[1 : len(b)-1]
-		}
-		return b
 	}
 	return nil
+}
+
+// skipSpaceTab returns b without its leading spaces and tabs.
+func skipSpaceTab(b []byte) []byte {
+	for len(b) > 0 && (b[0] == ' ' || b[0] == '\t') {
+		b = b[1:]
+	}
+	return b
 }
 
 // Host returns Host header value.

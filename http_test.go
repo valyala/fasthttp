@@ -2236,6 +2236,53 @@ func TestRequestMultipartFormMediaTypeCase(t *testing.T) {
 	}
 }
 
+// A boundary spelled inside another parameter's quoted value must not be
+// taken for the boundary the body is delimited with.
+func TestRequestMultipartFormBoundaryInQuotedParameter(t *testing.T) {
+	t.Parallel()
+
+	body := "--Real\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--Real--\r\n"
+
+	for _, contentType := range []string{
+		`multipart/form-data; x="\"; boundary=bogus"; boundary=Real`,
+		`multipart/form-data; x="\"; BOUNDARY=bogus"; boundary=Real`,
+		`Multipart/Form-Data; x=";boundary=bogus"; Boundary=Real`,
+		`multipart/form-data; boundary="Real"`,
+	} {
+		t.Run(contentType, func(t *testing.T) {
+			s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+				contentType, len(body), body)
+
+			for _, preParse := range []bool{true, false} {
+				var req Request
+				br := bufio.NewReader(strings.NewReader(s))
+				if err := req.Header.Read(br); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if err := req.ContinueReadBody(br, 0, preParse); err != nil {
+					t.Fatalf("preParse=%v: unexpected error: %v", preParse, err)
+				}
+				f, err := req.MultipartForm()
+				if err != nil {
+					t.Fatalf("preParse=%v: unexpected error: %v", preParse, err)
+				}
+				if vv := f.Value["key"]; len(vv) != 1 || vv[0] != "value" {
+					t.Fatalf("preParse=%v: unexpected values %q", preParse, vv)
+				}
+				req.RemoveMultipartFormFiles()
+			}
+		})
+	}
+
+	// With no real boundary the decoy must not be used either.
+	var req Request
+	req.Header.SetContentType(`multipart/form-data; x="\"; boundary=Real"`)
+	req.SetBodyString(body)
+	if _, err := req.MultipartForm(); !errors.Is(err, ErrNoMultipartForm) {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, ErrNoMultipartForm)
+	}
+}
+
 func TestRequestMultipartFormEpilogue(t *testing.T) {
 	t.Parallel()
 

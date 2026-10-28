@@ -1491,6 +1491,46 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; Boundary=FooBar\r\n\r\n", "FooBar")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: MULTIPART/FORM-DATA; foo=bar; BOUNDARY=foobar\r\n\r\n", "foobar")
 
+	for _, tc := range []struct {
+		name        string
+		contentType string
+		boundary    string
+	}{
+		// A quoted value is skipped as a whole, so a boundary spelled inside
+		// another parameter does not count, whatever its case and whatever
+		// quoted-pair hides the closing quote.
+		{"quoted value with semicolon", `multipart/form-data; boundary="foo;bar"`, "foo;bar"},
+		{"decoy after escaped quote", `multipart/form-data; x="\"; boundary=bogus"; boundary=Real`, "Real"},
+		{"decoy in upper case", `multipart/form-data; x="\"; BOUNDARY=bogus"; boundary=Real`, "Real"},
+		{"decoy after semicolon", `multipart/form-data; x=";boundary=bogus"; boundary=Real`, "Real"},
+		{"decoy without a real boundary", `multipart/form-data; x="\"; boundary=bogus"`, ""},
+		{"other parameter with equals and semicolon", `multipart/form-data; x="a=b;c"; boundary=abc`, "abc"},
+		{"quoted-pair is left as written", `multipart/form-data; boundary="a\"b"`, `a\"b`},
+		{"space before the next parameter", `multipart/form-data; boundary="abc" ; foo=1`, "abc"},
+		{"unterminated quote", `multipart/form-data; boundary="abc`, ""},
+		{"unterminated quote after backslash", `multipart/form-data; boundary="abc\`, ""},
+		{"junk after the closing quote", `multipart/form-data; boundary="abc"x`, ""},
+		{"junk after another quoted value", `multipart/form-data; x="a"b; boundary=abc`, ""},
+
+		// Only the parameter named boundary is the boundary.
+		{"longer parameter name before it", `multipart/form-data; boundary2=1; boundary=abc`, "abc"},
+		{"longer parameter name only", `multipart/form-data; boundaryx=abc`, ""},
+		{"first boundary wins", `multipart/form-data; boundary=a; boundary=b`, "a"},
+		{"media type with a suffix", `multipart/form-data-alt; boundary=abc`, ""},
+
+		// Parameter syntax that is not a name=value pair.
+		{"tab after semicolon", "multipart/form-data;\tboundary=abc", "abc"},
+		{"no space after semicolon", `multipart/form-data;boundary=abc`, "abc"},
+		{"parameters without a value", `multipart/form-data; foo; ;; boundary=abc`, "abc"},
+
+		// An unquoted value stays as lenient as it always was: it runs to
+		// the next semicolon even with characters a token may not hold.
+		{"unquoted value with equals sign", `multipart/form-data; boundary=----=_Part_0_123.456`, "----=_Part_0_123.456"},
+		{"unquoted value with slash and quote", `multipart/form-data; boundary=ab/c"d`, `ab/c"d`},
+	} {
+		testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: "+tc.contentType+"\r\n\r\n", tc.boundary)
+	}
+
 	var h RequestHeader
 	h.SetMultipartFormBoundary("foobarbaz")
 	b := h.MultipartFormBoundary()
