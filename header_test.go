@@ -6238,3 +6238,95 @@ func TestResponseHeaderTransferEncodingOnWire(t *testing.T) {
 		})
 	}
 }
+
+func TestHeaderNormalizingDisabled(t *testing.T) {
+	t.Parallel()
+
+	type normalizer interface {
+		NormalizingDisabled() bool
+		DisableNormalizing() bool
+		EnableNormalizing() bool
+	}
+
+	check := func(t *testing.T, h normalizer) {
+		t.Helper()
+
+		if h.NormalizingDisabled() {
+			t.Fatal("header names must be normalized by default")
+		}
+		if prev := h.DisableNormalizing(); prev {
+			t.Fatal("DisableNormalizing must report the previous setting: enabled")
+		}
+		if !h.NormalizingDisabled() {
+			t.Fatal("normalizing must be disabled after DisableNormalizing")
+		}
+		if prev := h.DisableNormalizing(); !prev {
+			t.Fatal("DisableNormalizing must report the previous setting: disabled")
+		}
+		if !h.NormalizingDisabled() {
+			t.Fatal("normalizing must stay disabled")
+		}
+		if prev := h.EnableNormalizing(); !prev {
+			t.Fatal("EnableNormalizing must report the previous setting: disabled")
+		}
+		if h.NormalizingDisabled() {
+			t.Fatal("normalizing must be enabled after EnableNormalizing")
+		}
+		if prev := h.EnableNormalizing(); prev {
+			t.Fatal("EnableNormalizing must report the previous setting: enabled")
+		}
+	}
+
+	t.Run("request", func(t *testing.T) {
+		t.Parallel()
+		var h RequestHeader
+		check(t, &h)
+	})
+	t.Run("response", func(t *testing.T) {
+		t.Parallel()
+		var h ResponseHeader
+		check(t, &h)
+	})
+
+	// The getter has to say how names are stored, not just what was last set.
+	t.Run("matches the stored names", func(t *testing.T) {
+		t.Parallel()
+
+		var enabled, disabled RequestHeader
+		disabled.DisableNormalizing()
+		enabled.Set("x-foo-BAR", "1")
+		disabled.Set("x-foo-BAR", "1")
+		if enabled.NormalizingDisabled() || !strings.Contains(enabled.String(), "\r\nX-Foo-Bar: 1\r\n") {
+			t.Fatalf("names must be normalized when NormalizingDisabled is false: %q", enabled.String())
+		}
+		if !disabled.NormalizingDisabled() || !strings.Contains(disabled.String(), "\r\nx-foo-BAR: 1\r\n") {
+			t.Fatalf("names must be stored as given when NormalizingDisabled is true: %q", disabled.String())
+		}
+	})
+
+	t.Run("Reset and CopyTo", func(t *testing.T) {
+		t.Parallel()
+
+		var req, reqCopy RequestHeader
+		req.DisableNormalizing()
+		req.CopyTo(&reqCopy)
+		if !reqCopy.NormalizingDisabled() {
+			t.Fatal("RequestHeader.CopyTo must copy the setting")
+		}
+		req.Reset()
+		if req.NormalizingDisabled() {
+			t.Fatal("RequestHeader.Reset must enable normalizing again")
+		}
+
+		var resp, respCopy ResponseHeader
+		resp.DisableNormalizing()
+		resp.CopyTo(&respCopy)
+		if !respCopy.NormalizingDisabled() {
+			t.Fatal("ResponseHeader.CopyTo must copy the setting")
+		}
+		resp.Reset()
+		if resp.NormalizingDisabled() {
+			t.Fatal("ResponseHeader.Reset must enable normalizing again")
+		}
+	})
+}

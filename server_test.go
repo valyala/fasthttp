@@ -8778,3 +8778,27 @@ func TestServerReduceMemoryUsageKeepBodyBufferConnectionLifecycle(t *testing.T) 
 		t.Fatalf("expected handledCtx.Response.body to be nil after connection closed")
 	}
 }
+
+func TestServerHeaderNamesNormalizingDisabled(t *testing.T) {
+	t.Parallel()
+
+	for _, disable := range []bool{false, true} {
+		var req, resp bool
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				req = ctx.Request.Header.NormalizingDisabled()
+				resp = ctx.Response.Header.NormalizingDisabled()
+			},
+			DisableHeaderNamesNormalizing: disable,
+		}
+
+		rw := &readWriter{}
+		fmt.Fprintf(&rw.r, "GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatalf("disable=%v: unexpected error from ServeConn: %v", disable, err)
+		}
+		if req != disable || resp != disable {
+			t.Fatalf("disable=%v: NormalizingDisabled is %v for the request and %v for the response headers", disable, req, resp)
+		}
+	}
+}
