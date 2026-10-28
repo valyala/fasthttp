@@ -783,6 +783,28 @@ var (
 	ErrSmallReadBuffer               = errors.New("fasthttp: small read buffer. increase readbuffersize")
 )
 
+// ErrUnknownTransferCoding is returned when Transfer-Encoding names a transfer
+// coding other than the ones fasthttp reads: chunked, and identity in a
+// request. RFC 9112, section 6.1 has a server answer such a request with 501
+// (Not Implemented), while a repeated field, or one in an HTTP/1.0 request, is
+// a fault in the framing of the message.
+//
+// It matches ErrUnsupportedTransferEncoding too, which is what this fault was
+// reported as with Server.SecureErrorLogMessage, together with the other two.
+var ErrUnknownTransferCoding = fmt.Errorf("%w: unknown transfer coding", ErrUnsupportedTransferEncoding)
+
+// classifiedError is a header error with a detailed message that errors.Is
+// matches to the sentinel err, so that callers don't have to match the text.
+// The message is the one the error had before it was classified.
+type classifiedError struct {
+	err error
+	msg string
+}
+
+func (e *classifiedError) Error() string { return e.msg }
+
+func (e *classifiedError) Unwrap() error { return e.err }
+
 // AddTrailerBytes add Trailer header value for chunked response
 // to indicate which headers will be sent after the body.
 //
@@ -3597,7 +3619,10 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 			if h.secureErrorLogMessage {
 				return 0, ErrUnsupportedRequestMethod
 			}
-			return 0, fmt.Errorf("unsupported http request method %q in %q", b[:n], buf)
+			return 0, &classifiedError{
+				err: ErrUnsupportedRequestMethod,
+				msg: fmt.Sprintf("unsupported http request method %q in %q", b[:n], buf),
+			}
 		}
 	}
 	h.method = append(h.method[:0], b[:n]...)
@@ -3769,9 +3794,12 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				if !caseInsensitiveCompare(s.value, strChunked) {
 					h.connectionClose = true
 					if h.secureErrorLogMessage {
-						return 0, ErrUnsupportedTransferEncoding
+						return 0, ErrUnknownTransferCoding
 					}
-					return 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
+					return 0, &classifiedError{
+						err: ErrUnknownTransferCoding,
+						msg: fmt.Sprintf("unsupported transfer-encoding: %q", s.value),
+					}
 				}
 				h.contentLength = -1
 				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
@@ -3940,9 +3968,12 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 				if !isIdentity && !isChunked {
 					h.connectionClose = true
 					if h.secureErrorLogMessage {
-						return 0, 0, ErrUnsupportedTransferEncoding
+						return 0, 0, ErrUnknownTransferCoding
 					}
-					return 0, 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
+					return 0, 0, &classifiedError{
+						err: ErrUnknownTransferCoding,
+						msg: fmt.Sprintf("unsupported transfer-encoding: %q", s.value),
+					}
 				}
 
 				if isChunked {
