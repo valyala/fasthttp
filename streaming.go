@@ -72,6 +72,10 @@ func (rs *requestStream) read(p []byte) (int, error) {
 		if rs.chunkLeft == 0 {
 			chunkSize, err := parseChunkSize(rs.reader)
 			if err != nil {
+				// The peer closed before the last chunk, so the body is truncated.
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
 				return 0, err
 			}
 			if chunkSize == 0 {
