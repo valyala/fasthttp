@@ -3100,6 +3100,9 @@ func TestClientDoTimeoutDisableHeaderNamesNormalizing(t *testing.T) {
 		if len(hv) > 0 {
 			t.Fatalf("unexpected non-empty header value %q", hv)
 		}
+		if !resp.Header.NormalizingDisabled() {
+			t.Fatal("the response header must report that normalizing is disabled")
+		}
 	}
 
 	if err := ln.Close(); err != nil {

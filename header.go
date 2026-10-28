@@ -1431,6 +1431,18 @@ func (h *header) EnableNormalizing() bool {
 	return orig
 }
 
+// NormalizingDisabled reports whether header names' normalization is
+// disabled, whether by DisableNormalizing, by Server.DisableHeaderNamesNormalizing
+// for the headers of a request being served, or by the
+// DisableHeaderNamesNormalizing option of a client for the response headers
+// it reads.
+//
+// The setting says how names are stored and looked up from now on. Names that
+// are already stored keep the spelling they were stored with.
+func (h *header) NormalizingDisabled() bool {
+	return h.disableNormalizing
+}
+
 // SetNoDefaultContentType allows you to control if a default Content-Type header will be set (false) or not (true).
 func (h *header) SetNoDefaultContentType(noDefaultContentType bool) {
 	h.noDefaultContentType = noDefaultContentType
