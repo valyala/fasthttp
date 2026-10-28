@@ -564,21 +564,34 @@ func (s *argsScanner) next(kv *argsKV) bool {
 
 	isKey := true
 	k := 0
+	// esc is where the first '%' or '+' of the key or value being scanned
+	// sits, relative to its start, so decoding needn't search for it again.
+	esc := -1
 	for i, c := range s.b {
-		switch c {
+		t := argsScanTable[c]
+		if t == 0 {
+			// Neither a separator nor an escape, as most bytes are.
+			continue
+		}
+		switch t {
+		case '%': // '%' or '+'
+			if esc < 0 {
+				esc = i - k
+			}
 		case '=':
 			if isKey {
 				isKey = false
-				kv.key = decodeArgAppend(kv.key[:0], s.b[:i])
+				kv.key = decodeArgAppendAt(kv.key[:0], s.b[:i], esc)
 				k = i + 1
+				esc = -1
 			}
-		case '&':
+		default: // '&'
 			if isKey {
-				kv.key = decodeArgAppend(kv.key[:0], s.b[:i])
+				kv.key = decodeArgAppendAt(kv.key[:0], s.b[:i], esc)
 				kv.value = kv.value[:0]
 				kv.noValue = argsNoValue
 			} else {
-				kv.value = decodeArgAppend(kv.value[:0], s.b[k:i])
+				kv.value = decodeArgAppendAt(kv.value[:0], s.b[k:i], esc)
 			}
 			s.b = s.b[i+1:]
 			return true
@@ -586,11 +599,11 @@ func (s *argsScanner) next(kv *argsKV) bool {
 	}
 
 	if isKey {
-		kv.key = decodeArgAppend(kv.key[:0], s.b)
+		kv.key = decodeArgAppendAt(kv.key[:0], s.b, esc)
 		kv.value = kv.value[:0]
 		kv.noValue = argsNoValue
 	} else {
-		kv.value = decodeArgAppend(kv.value[:0], s.b[k:])
+		kv.value = decodeArgAppendAt(kv.value[:0], s.b[k:], esc)
 	}
 	s.b = s.b[len(s.b):]
 	return true
@@ -599,10 +612,6 @@ func (s *argsScanner) next(kv *argsKV) bool {
 func decodeArgAppend(dst, src []byte) []byte {
 	idxPercent := bytes.IndexByte(src, '%')
 	idxPlus := bytes.IndexByte(src, '+')
-	if idxPercent == -1 && idxPlus == -1 {
-		// fast path: src doesn't contain encoded chars
-		return append(dst, src...)
-	}
 
 	var idx int
 	switch {
@@ -614,6 +623,16 @@ func decodeArgAppend(dst, src []byte) []byte {
 		idx = idxPlus
 	default:
 		idx = idxPercent
+	}
+	return decodeArgAppendAt(dst, src, idx)
+}
+
+// decodeArgAppendAt is decodeArgAppend for a src whose first '%' or '+' is
+// known to be at idx, or which has none if idx is negative.
+func decodeArgAppendAt(dst, src []byte, idx int) []byte {
+	if idx < 0 {
+		// fast path: src doesn't contain encoded chars
+		return append(dst, src...)
 	}
 
 	dst = append(dst, src[:idx]...)

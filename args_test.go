@@ -569,8 +569,54 @@ func TestArgsParse(t *testing.T) {
 	// invalid percent encoding
 	testArgsParse(t, &a, "f%=x&qw%z=d%0k%20p&%%20=%%%20x", 3, "f%=x", "qw%z=d%0k p", "% =%% x")
 
+	// escapes in only the key or only the value, next to the separators
+	testArgsParse(t, &a, "a+b=c&d=e%2Bf&+=%26&g%2=h+", 4, "a b=c", "d=e+f", " =&", "g%2=h ")
+	testArgsParse(t, &a, "x%41&y+", 2, "xA=", "y =")
+
 	// special chars
 	testArgsParse(t, &a, "a.b,c:d/e=f.g,h:i/q", 1, "a.b,c:d/e=f.g,h:i/q")
+}
+
+// The scanner notes the first escape of each key and value while splitting
+// them; splitting first and decoding each part on its own must agree.
+func TestArgsParseMatchesSplitDecode(t *testing.T) {
+	t.Parallel()
+
+	var a Args
+	var src []byte
+	var walk func(n int)
+	walk = func(n int) {
+		a.ParseBytes(src)
+		i := 0
+		for kv := range bytes.SplitSeq(src, []byte{'&'}) {
+			k, v, hasValue := bytes.Cut(kv, []byte{'='})
+			key, value := decodeArgAppend(nil, k), decodeArgAppend(nil, v)
+			if len(key) == 0 && len(value) == 0 {
+				continue
+			}
+			if i == len(a.args) {
+				t.Fatalf("ParseBytes(%q): missing arg %q=%q", src, key, value)
+			}
+			got := &a.args[i]
+			if !bytes.Equal(got.key, key) || !bytes.Equal(got.value, value) || got.noValue == hasValue {
+				t.Fatalf("ParseBytes(%q): arg %d is %q=%q (noValue %v), want %q=%q (noValue %v)",
+					src, i, got.key, got.value, got.noValue, key, value, !hasValue)
+			}
+			i++
+		}
+		if i != len(a.args) {
+			t.Fatalf("ParseBytes(%q): got %d args, want %d", src, len(a.args), i)
+		}
+		if n == 0 {
+			return
+		}
+		for _, c := range []byte("a=&%+2F") {
+			src = append(src, c)
+			walk(n - 1)
+			src = src[:len(src)-1]
+		}
+	}
+	walk(6)
 }
 
 func TestArgsHas(t *testing.T) {
