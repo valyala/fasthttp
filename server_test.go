@@ -4464,6 +4464,74 @@ func TestServerErrorHandler(t *testing.T) {
 	}
 }
 
+// An ErrorHandler has to be able to tell the requests that RFC 9110 and RFC 9112
+// have answered with 501 (Not Implemented) from the ones that are plain bad
+// requests, with or without SecureErrorLogMessage.
+func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		raw        string
+		statusCode int
+	}{
+		{
+			name:       "unsupported method",
+			raw:        "BAD(METHOD / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "repeated transfer-encoding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "missing method",
+			raw:        "FOO\r\nHost: example.com\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+	}
+	for _, tt := range tests {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", tt.name, secure), func(t *testing.T) {
+				t.Parallel()
+
+				s := &Server{
+					Handler:               func(ctx *RequestCtx) {},
+					SecureErrorLogMessage: secure,
+					ErrorHandler: func(ctx *RequestCtx, err error) {
+						// What a framework does with the error.
+						if errors.Is(err, ErrUnsupportedRequestMethod) || errors.Is(err, ErrUnknownTransferCoding) {
+							ctx.SetStatusCode(StatusNotImplemented)
+							return
+						}
+						ctx.SetStatusCode(StatusBadRequest)
+					},
+				}
+
+				rw := &readWriter{}
+				rw.r.WriteString(tt.raw)
+				if err := s.ServeConn(rw); err == nil {
+					t.Fatal("expecting an error from ServeConn")
+				}
+
+				var resp Response
+				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got := resp.StatusCode(); got != tt.statusCode {
+					t.Fatalf("unexpected status code %d. Expecting %d", got, tt.statusCode)
+				}
+			})
+		}
+	}
+}
+
 func TestServeConnHijackResetUserValues(t *testing.T) {
 	t.Parallel()
 
