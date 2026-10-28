@@ -4013,6 +4013,88 @@ func TestClientRedirectNonHTTPScheme(t *testing.T) {
 	}
 }
 
+func TestDefaultMaxRedirectsCount(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []string{"HostClient", "Client"} {
+		for _, redirects := range []int{DefaultMaxRedirectsCount, DefaultMaxRedirectsCount + 1} {
+			t.Run(fmt.Sprintf("%s/%d redirects", kind, redirects), func(t *testing.T) {
+				t.Parallel()
+
+				hops := 0
+				transport := &TransportMock{wrapperFunc: func(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+					hops++
+					if hops <= redirects {
+						resp.Header.SetStatusCode(StatusFound)
+						resp.Header.Set(HeaderLocation, "/next")
+					} else {
+						resp.Header.SetStatusCode(StatusOK)
+					}
+					return false, nil
+				}}
+
+				var get func(dst []byte, url string) (int, []byte, error)
+				if kind == "HostClient" {
+					hc := &HostClient{Addr: "example.com:80", Transport: transport}
+					get = hc.Get
+				} else {
+					c := &Client{ConfigureClient: func(hc *HostClient) error {
+						hc.Transport = transport
+						return nil
+					}}
+					get = c.Get
+				}
+
+				statusCode, _, err := get(nil, "http://example.com/start")
+				if redirects > DefaultMaxRedirectsCount {
+					if !errors.Is(err, ErrTooManyRedirects) {
+						t.Fatalf("unexpected error %v. Expecting %v after %d redirects", err, ErrTooManyRedirects, redirects)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if statusCode != StatusOK {
+					t.Fatalf("unexpected status code %d. Expecting %d", statusCode, StatusOK)
+				}
+			})
+		}
+	}
+}
+
+// DoRedirects has no default: it follows the number of redirects it is given.
+func TestClientDoRedirectsNonPositiveCount(t *testing.T) {
+	t.Parallel()
+
+	for _, maxRedirectsCount := range []int{0, -1} {
+		t.Run(strconv.Itoa(maxRedirectsCount), func(t *testing.T) {
+			t.Parallel()
+
+			requests := 0
+			hc := &HostClient{Addr: "example.com:80", Transport: &TransportMock{wrapperFunc: func(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+				requests++
+				resp.Header.SetStatusCode(StatusFound)
+				resp.Header.Set(HeaderLocation, "/next")
+				return false, nil
+			}}}
+
+			req := AcquireRequest()
+			resp := AcquireResponse()
+			defer ReleaseRequest(req)
+			defer ReleaseResponse(resp)
+
+			req.SetRequestURI("http://example.com/start")
+			if err := hc.DoRedirects(req, resp, maxRedirectsCount); !errors.Is(err, ErrTooManyRedirects) {
+				t.Fatalf("unexpected error %v. Expecting %v", err, ErrTooManyRedirects)
+			}
+			if requests != 1 {
+				t.Fatalf("unexpected number of requests %d. Expecting 1", requests)
+			}
+		})
+	}
+}
+
 func TestIsNonHTTPRedirect(t *testing.T) {
 	t.Parallel()
 

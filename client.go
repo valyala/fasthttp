@@ -1256,7 +1256,13 @@ var (
 		" please use client instead")
 )
 
-const defaultMaxRedirectsCount = 16
+// DefaultMaxRedirectsCount is the number of redirects that Get, GetTimeout,
+// GetDeadline and Post follow, on a Client, a HostClient and as package
+// functions, before they return ErrTooManyRedirects.
+//
+// DoRedirects follows as many redirects as its caller asks for, and none
+// when that is zero or less.
+const DefaultMaxRedirectsCount = 16
 
 // Only drain response streams that are known to be small. Reading an unknown
 // length stream can block forever (for example, on an event stream), while
@@ -1292,7 +1298,7 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	forceResponseBodyBuffering := req.forceResponseBodyBuffering
 	req.forceResponseBodyBuffering = true
 
-	statusCode, _, err = doRequestFollowRedirects(req, resp, url, defaultMaxRedirectsCount, c)
+	statusCode, _, err = doRequestFollowRedirects(req, resp, url, DefaultMaxRedirectsCount, c)
 	req.forceResponseBodyBuffering = forceResponseBodyBuffering
 
 	body = bodyBuf.B
