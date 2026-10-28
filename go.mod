@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/klauspost/compress v1.20.3
-	github.com/molecule-man/go-brrr v1.3.0
+	github.com/molecule-man/go-brrr v1.3.1
 	github.com/valyala/bytebufferpool v1.0.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.61.0
