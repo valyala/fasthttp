@@ -1491,6 +1491,17 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; Boundary=FooBar\r\n\r\n", "FooBar")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: MULTIPART/FORM-DATA; foo=bar; BOUNDARY=foobar\r\n\r\n", "foobar")
 
+	// optional whitespace around ';'
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data ; boundary=foobar\r\n\r\n", "foobar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data\t;\tboundary=foobar\r\n\r\n", "foobar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=bar ;\tboundary=foobar\r\n\r\n", "foobar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar ; foo=bar\r\n\r\n", "foobar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foobar\"\t; foo=bar\r\n\r\n", "foobar")
+
+	// no whitespace allowed around '='
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary =foobar\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-dataX; boundary=foobar\r\n\r\n", "")
+
 	var h RequestHeader
 	h.SetMultipartFormBoundary("foobarbaz")
 	b := h.MultipartFormBoundary()

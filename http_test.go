@@ -2236,6 +2236,42 @@ func TestRequestMultipartFormMediaTypeCase(t *testing.T) {
 	}
 }
 
+func TestRequestMultipartFormOptionalWhitespace(t *testing.T) {
+	t.Parallel()
+
+	body := "--foobar\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--foobar--\r\n"
+
+	for _, contentType := range []string{
+		"multipart/form-data ; boundary=foobar",
+		"multipart/form-data;\tboundary=foobar",
+		"multipart/form-data; boundary=foobar ; charset=utf-8",
+	} {
+		t.Run(contentType, func(t *testing.T) {
+			for _, stream := range []bool{false, true} {
+				var req Request
+				req.Header.SetContentType(contentType)
+				if stream {
+					req.SetBodyStream(strings.NewReader(body), len(body))
+				} else {
+					req.SetBodyString(body)
+				}
+				f, err := req.MultipartForm()
+				if err != nil {
+					t.Fatalf("stream=%v: unexpected error: %v", stream, err)
+				}
+				if vv := f.Value["key"]; len(vv) != 1 || vv[0] != "value" {
+					t.Fatalf("stream=%v: unexpected values %q", stream, vv)
+				}
+				req.RemoveMultipartFormFiles()
+			}
+
+			if !isMultipartFormData([]byte(contentType)) {
+				t.Fatalf("isMultipartFormData(%q) = false; want true", contentType)
+			}
+		})
+	}
+}
+
 func TestRequestMultipartFormEpilogue(t *testing.T) {
 	t.Parallel()
 
