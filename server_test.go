@@ -4464,6 +4464,74 @@ func TestServerErrorHandler(t *testing.T) {
 	}
 }
 
+// An ErrorHandler has to be able to tell the requests that RFC 9110 and RFC 9112
+// have answered with 501 (Not Implemented) from the ones that are plain bad
+// requests, with or without SecureErrorLogMessage.
+func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		raw        string
+		statusCode int
+	}{
+		{
+			name:       "unsupported method",
+			raw:        "BAD(METHOD / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "repeated transfer-encoding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "missing method",
+			raw:        "FOO\r\nHost: example.com\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+	}
+	for _, tt := range tests {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", tt.name, secure), func(t *testing.T) {
+				t.Parallel()
+
+				s := &Server{
+					Handler:               func(ctx *RequestCtx) {},
+					SecureErrorLogMessage: secure,
+					ErrorHandler: func(ctx *RequestCtx, err error) {
+						// What a framework does with the error.
+						if errors.Is(err, ErrUnsupportedRequestMethod) || errors.Is(err, ErrUnknownTransferCoding) {
+							ctx.SetStatusCode(StatusNotImplemented)
+							return
+						}
+						ctx.SetStatusCode(StatusBadRequest)
+					},
+				}
+
+				rw := &readWriter{}
+				rw.r.WriteString(tt.raw)
+				if err := s.ServeConn(rw); err == nil {
+					t.Fatal("expecting an error from ServeConn")
+				}
+
+				var resp Response
+				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got := resp.StatusCode(); got != tt.statusCode {
+					t.Fatalf("unexpected status code %d. Expecting %d", got, tt.statusCode)
+				}
+			})
+		}
+	}
+}
+
 func TestServeConnHijackResetUserValues(t *testing.T) {
 	t.Parallel()
 
@@ -8776,5 +8844,29 @@ func TestServerReduceMemoryUsageKeepBodyBufferConnectionLifecycle(t *testing.T) 
 	}
 	if handledCtx.Response.body != nil {
 		t.Fatalf("expected handledCtx.Response.body to be nil after connection closed")
+	}
+}
+
+func TestServerHeaderNamesNormalizingDisabled(t *testing.T) {
+	t.Parallel()
+
+	for _, disable := range []bool{false, true} {
+		var req, resp bool
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				req = ctx.Request.Header.NormalizingDisabled()
+				resp = ctx.Response.Header.NormalizingDisabled()
+			},
+			DisableHeaderNamesNormalizing: disable,
+		}
+
+		rw := &readWriter{}
+		rw.r.WriteString("GET / HTTP/1.1\r\nHost: google.com\r\n\r\n")
+		if err := s.ServeConn(rw); err != nil {
+			t.Fatalf("disable=%v: unexpected error from ServeConn: %v", disable, err)
+		}
+		if req != disable || resp != disable {
+			t.Fatalf("disable=%v: NormalizingDisabled is %v for the request and %v for the response headers", disable, req, resp)
+		}
 	}
 }

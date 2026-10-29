@@ -1256,7 +1256,13 @@ var (
 		" please use client instead")
 )
 
-const defaultMaxRedirectsCount = 16
+// DefaultMaxRedirectsCount is the number of redirects that Get, GetTimeout,
+// GetDeadline and Post follow, on a Client, a HostClient and as package
+// functions, before they return ErrTooManyRedirects.
+//
+// DoRedirects follows as many redirects as its caller asks for, and none
+// when that is zero or less.
+const DefaultMaxRedirectsCount = 16
 
 // Only drain response streams that are known to be small. Reading an unknown
 // length stream can block forever (for example, on an event stream), while
@@ -1292,7 +1298,7 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	forceResponseBodyBuffering := req.forceResponseBodyBuffering
 	req.forceResponseBodyBuffering = true
 
-	statusCode, _, err = doRequestFollowRedirects(req, resp, url, defaultMaxRedirectsCount, c)
+	statusCode, _, err = doRequestFollowRedirects(req, resp, url, DefaultMaxRedirectsCount, c)
 	req.forceResponseBodyBuffering = forceResponseBodyBuffering
 
 	body = bodyBuf.B
@@ -1342,7 +1348,7 @@ func doRequestFollowRedirects(
 			err = ErrMissingLocation
 			break
 		}
-		if isNonHTTPRedirect(location) {
+		if IsNonHTTPRedirect(location) {
 			// There is nothing to fetch for mailto:, tel: or an app callback
 			// such as com.example.app:/cb, so return the redirect response
 			// as is and leave the location to the caller.
@@ -1398,10 +1404,19 @@ func doRequestFollowRedirects(
 	return statusCode, body, err
 }
 
-// isNonHTTPRedirect reports whether location has a scheme other than http
-// or https and no authority, e.g. mailto:user@example.com.
-// URI can't hold such a location and would resolve it as a relative path.
-func isNonHTTPRedirect(location []byte) bool {
+// IsNonHTTPRedirect reports whether location, the value of a Location header,
+// has a scheme other than http or https and no authority, e.g.
+// mailto:user@example.com or com.example.app:/callback.
+//
+// There is nothing to fetch at such a location, and URI can't hold it: Update
+// and UpdateBytes would resolve it as a relative path. Client and HostClient
+// return the redirect response as it is instead of following it, and so
+// should code that follows redirects itself, before it resolves location
+// against the uri it requested.
+//
+// A location with an authority, such as ftp://example.com/, is not one: URI
+// can hold it.
+func IsNonHTTPRedirect(location []byte) bool {
 	if !hasSchemeWithoutAuthority(b2s(location)) {
 		return false
 	}

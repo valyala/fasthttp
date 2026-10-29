@@ -232,8 +232,20 @@ func writeGunzip(w io.Writer, p []byte, maxBodySize int) (int, error) {
 
 // AppendGunzipBytes appends gunzipped src to dst and returns the resulting dst.
 func AppendGunzipBytes(dst, src []byte) ([]byte, error) {
+	return AppendGunzipBytesWithLimit(dst, src, 0)
+}
+
+// AppendGunzipBytesWithLimit is like AppendGunzipBytes, but it stops with
+// ErrBodyTooLarge when src gunzips to more than maxBodySize bytes. The data
+// already in dst doesn't count towards the limit.
+//
+// The returned dst holds the data that was gunzipped before an error, which is
+// at most maxBodySize+1 bytes if the error is ErrBodyTooLarge.
+//
+// If maxBodySize <= 0, then no limit is applied.
+func AppendGunzipBytesWithLimit(dst, src []byte, maxBodySize int) ([]byte, error) {
 	w := &byteSliceWriter{b: dst}
-	_, err := WriteGunzip(w, src)
+	_, err := writeGunzip(w, src, maxBodySize)
 	return w.b, err
 }
 
@@ -345,8 +357,20 @@ func writeInflate(w io.Writer, p []byte, maxBodySize int) (int, error) {
 
 // AppendInflateBytes appends inflated src to dst and returns the resulting dst.
 func AppendInflateBytes(dst, src []byte) ([]byte, error) {
+	return AppendInflateBytesWithLimit(dst, src, 0)
+}
+
+// AppendInflateBytesWithLimit is like AppendInflateBytes, but it stops with
+// ErrBodyTooLarge when src inflates to more than maxBodySize bytes. The data
+// already in dst doesn't count towards the limit.
+//
+// The returned dst holds the data that was inflated before an error, which is
+// at most maxBodySize+1 bytes if the error is ErrBodyTooLarge.
+//
+// If maxBodySize <= 0, then no limit is applied.
+func AppendInflateBytesWithLimit(dst, src []byte, maxBodySize int) ([]byte, error) {
 	w := &byteSliceWriter{b: dst}
-	_, err := WriteInflate(w, src)
+	_, err := writeInflate(w, src, maxBodySize)
 	return w.b, err
 }
 

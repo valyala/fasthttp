@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -6213,5 +6214,235 @@ func TestResponseHeaderTransferEncodingOnWire(t *testing.T) {
 				t.Fatalf("Transfer-Encoding on wire = %t, want %t:\n%s", got, want, wire)
 			}
 		})
+	}
+}
+
+func TestHeaderNormalizingDisabled(t *testing.T) {
+	t.Parallel()
+
+	type normalizer interface {
+		NormalizingDisabled() bool
+		DisableNormalizing() bool
+		EnableNormalizing() bool
+	}
+
+	check := func(t *testing.T, h normalizer) {
+		t.Helper()
+
+		if h.NormalizingDisabled() {
+			t.Fatal("header names must be normalized by default")
+		}
+		if prev := h.DisableNormalizing(); prev {
+			t.Fatal("DisableNormalizing must report the previous setting: enabled")
+		}
+		if !h.NormalizingDisabled() {
+			t.Fatal("normalizing must be disabled after DisableNormalizing")
+		}
+		if prev := h.DisableNormalizing(); !prev {
+			t.Fatal("DisableNormalizing must report the previous setting: disabled")
+		}
+		if !h.NormalizingDisabled() {
+			t.Fatal("normalizing must stay disabled")
+		}
+		if prev := h.EnableNormalizing(); !prev {
+			t.Fatal("EnableNormalizing must report the previous setting: disabled")
+		}
+		if h.NormalizingDisabled() {
+			t.Fatal("normalizing must be enabled after EnableNormalizing")
+		}
+		if prev := h.EnableNormalizing(); prev {
+			t.Fatal("EnableNormalizing must report the previous setting: enabled")
+		}
+	}
+
+	t.Run("request", func(t *testing.T) {
+		t.Parallel()
+		var h RequestHeader
+		check(t, &h)
+	})
+	t.Run("response", func(t *testing.T) {
+		t.Parallel()
+		var h ResponseHeader
+		check(t, &h)
+	})
+
+	// The getter has to say how names are stored, not just what was last set.
+	t.Run("matches the stored names", func(t *testing.T) {
+		t.Parallel()
+
+		var enabled, disabled RequestHeader
+		disabled.DisableNormalizing()
+		enabled.Set("x-foo-BAR", "1")
+		disabled.Set("x-foo-BAR", "1")
+		if enabled.NormalizingDisabled() || !strings.Contains(enabled.String(), "\r\nX-Foo-Bar: 1\r\n") {
+			t.Fatalf("names must be normalized when NormalizingDisabled is false: %q", enabled.String())
+		}
+		if !disabled.NormalizingDisabled() || !strings.Contains(disabled.String(), "\r\nx-foo-BAR: 1\r\n") {
+			t.Fatalf("names must be stored as given when NormalizingDisabled is true: %q", disabled.String())
+		}
+	})
+
+	t.Run("Reset and CopyTo", func(t *testing.T) {
+		t.Parallel()
+
+		var req, reqCopy RequestHeader
+		req.DisableNormalizing()
+		req.CopyTo(&reqCopy)
+		if !reqCopy.NormalizingDisabled() {
+			t.Fatal("RequestHeader.CopyTo must copy the setting")
+		}
+		req.Reset()
+		if req.NormalizingDisabled() {
+			t.Fatal("RequestHeader.Reset must enable normalizing again")
+		}
+
+		var resp, respCopy ResponseHeader
+		resp.DisableNormalizing()
+		resp.CopyTo(&respCopy)
+		if !respCopy.NormalizingDisabled() {
+			t.Fatal("ResponseHeader.CopyTo must copy the setting")
+		}
+		resp.Reset()
+		if resp.NormalizingDisabled() {
+			t.Fatal("ResponseHeader.Reset must enable normalizing again")
+		}
+	})
+}
+
+func TestHeaderReadErrorKinds(t *testing.T) {
+	t.Parallel()
+
+	const (
+		badMethod = "BAD(METHOD / HTTP/1.1\r\nHost: a\r\n\r\n"
+		noMethod  = "FOO\r\nHost: a\r\n\r\n"
+	)
+
+	tests := []struct {
+		name string
+		// raw is what the header is read from. A request starts with a
+		// request line, a response with a status line.
+		raw      string
+		response bool
+		// message is the text of the error without Server.SecureErrorLogMessage,
+		// and secure the error it is replaced by with it.
+		message string
+		secure  error
+		// is lists what errors.Is has to match, isNot what it must not match.
+		// With Server.SecureErrorLogMessage the error also has to match secure.
+		is    []error
+		isNot []error
+	}{
+		{
+			name:    "request with a method that is not valid",
+			raw:     badMethod,
+			message: fmt.Sprintf("unsupported http request method %q in %q", "BAD(METHOD", badMethod),
+			secure:  ErrUnsupportedRequestMethod,
+			is:      []error{ErrUnsupportedRequestMethod},
+			isNot:   []error{ErrMissingRequestMethod, ErrUnknownTransferCoding},
+		},
+		{
+			name:    "request without a method",
+			raw:     noMethod,
+			message: fmt.Sprintf("cannot find http request method in %q", noMethod),
+			secure:  ErrMissingRequestMethod,
+			isNot:   []error{ErrUnsupportedRequestMethod},
+		},
+		{
+			name:    "request with an unknown transfer coding",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip\r\n\r\n",
+			message: `unsupported transfer-encoding: "gzip"`,
+			secure:  ErrUnknownTransferCoding,
+			is:      []error{ErrUnknownTransferCoding, ErrUnsupportedTransferEncoding},
+			isNot:   []error{ErrUnsupportedRequestMethod},
+		},
+		{
+			name:    "request with a repeated Transfer-Encoding",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			message: "too many transfer-encoding headers",
+			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:    "HTTP/1.0 request with Transfer-Encoding",
+			raw:     "POST / HTTP/1.0\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n",
+			message: ErrUnsupportedTransferEncoding.Error(),
+			secure:  ErrUnsupportedTransferEncoding,
+			is:      []error{ErrUnsupportedTransferEncoding},
+			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:     "response with an unknown transfer coding",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: deflate\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "deflate"`,
+			secure:   ErrUnknownTransferCoding,
+			is:       []error{ErrUnknownTransferCoding, ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:     "response with identity as its transfer coding",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: identity\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "identity"`,
+			secure:   ErrUnknownTransferCoding,
+			is:       []error{ErrUnknownTransferCoding, ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:     "response with a repeated Transfer-Encoding",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nTransfer-Encoding: chunked\r\n\r\n",
+			response: true,
+			message:  "too many transfer-encoding headers",
+			secure:   ErrUnsupportedTransferEncoding,
+			isNot:    []error{ErrUnknownTransferCoding},
+		},
+	}
+	for _, tt := range tests {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", tt.name, secure), func(t *testing.T) {
+				t.Parallel()
+
+				// parse is the error before Read wraps it with the header block.
+				var parseErr, readErr error
+				br := bufio.NewReader(strings.NewReader(tt.raw))
+				if tt.response {
+					var h ResponseHeader
+					h.secureErrorLogMessage = secure
+					_, parseErr = h.parse([]byte(tt.raw))
+					readErr = h.Read(br)
+				} else {
+					var h RequestHeader
+					h.secureErrorLogMessage = secure
+					_, parseErr = h.parse([]byte(tt.raw))
+					readErr = h.Read(br)
+				}
+
+				if parseErr == nil || readErr == nil {
+					t.Fatalf("expecting errors. parse: %v, Read: %v", parseErr, readErr)
+				}
+				if secure {
+					if parseErr != tt.secure { //nolint:errorlint // the very error is the point
+						t.Fatalf("unexpected error %q. Expecting %q", parseErr, tt.secure)
+					}
+				} else if parseErr.Error() != tt.message {
+					// The text has to stay what it was, people match on it.
+					t.Fatalf("unexpected error text %q. Expecting %q", parseErr, tt.message)
+				}
+				wantIs := tt.is
+				if secure {
+					wantIs = slices.Concat(tt.is, []error{tt.secure})
+				}
+				for _, err := range []error{parseErr, readErr} {
+					for _, want := range wantIs {
+						if !errors.Is(err, want) {
+							t.Fatalf("error %q is not %q", err, want)
+						}
+					}
+					for _, notWant := range tt.isNot {
+						if errors.Is(err, notWant) {
+							t.Fatalf("error %q is %q", err, notWant)
+						}
+					}
+				}
+			})
+		}
 	}
 }
