@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/valyala/bytebufferpool"
@@ -259,6 +260,8 @@ func BenchmarkRemoveNewLines(b *testing.B) {
 		{value: "MaliciousValue\r\n", expectedValue: "MaliciousValue  "},
 		{value: "Malicious\nValue", expectedValue: "Malicious Value"},
 		{value: "Malicious\rValue", expectedValue: "Malicious Value"},
+		{value: strings.Repeat("LongValue", 12), expectedValue: strings.Repeat("LongValue", 12)},
+		{value: strings.Repeat("LongValue", 12) + "\r\n", expectedValue: strings.Repeat("LongValue", 12) + "  "},
 	}
 
 	for i, tcase := range testcases {
