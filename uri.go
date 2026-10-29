@@ -115,6 +115,8 @@ func (u *URI) SetHashBytes(hash []byte) {
 
 // Username returns URI username
 //
+// Parse decodes percent-encoded characters in it.
+//
 // The returned bytes are valid until the next URI method call.
 func (u *URI) Username() []byte {
 	return u.username
@@ -131,6 +133,8 @@ func (u *URI) SetUsernameBytes(username []byte) {
 }
 
 // Password returns URI password.
+//
+// Parse decodes percent-encoded characters in it.
 //
 // The returned bytes are valid until the next URI method call.
 func (u *URI) Password() []byte {
@@ -336,12 +340,13 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		}
 		host = host[n+1:]
 
-		if before, after, ok := bytes.Cut(auth, []byte{':'}); ok {
-			u.username = append(u.username[:0], before...)
-			u.password = append(u.password[:0], after...)
+		username, password, _ := bytes.Cut(auth, strColon)
+		if bytes.IndexByte(auth, '%') < 0 {
+			u.username = append(u.username[:0], username...)
+			u.password = append(u.password[:0], password...)
 		} else {
-			u.username = append(u.username[:0], auth...)
-			u.password = u.password[:0]
+			u.username = decodeArgAppendNoPlus(u.username[:0], username)
+			u.password = decodeArgAppendNoPlus(u.password[:0], password)
 		}
 	}
 
