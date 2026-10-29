@@ -1053,6 +1053,10 @@ func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
 
 // MultipartFormBoundary returns boundary part
 // from 'multipart/form-data; boundary=...' Content-Type.
+//
+// A quoted boundary may contain ';' and ends at its closing quote. It is
+// returned without the quotes and with backslash escapes left as written, and
+// nil is returned if the closing quote is missing.
 func (h *RequestHeader) MultipartFormBoundary() []byte {
 	b := h.ContentType()
 	if !caseInsensitiveHasPrefix(b, strMultipartFormData) {
@@ -1073,7 +1077,9 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 			n++
 		}
 		b = b[n:]
-		if !caseInsensitiveHasPrefix(b, strBoundary) {
+		// Only a parameter named boundary is the boundary: boundary2=1 is
+		// skipped like any other parameter.
+		if !caseInsensitiveHasPrefix(b, strBoundary) || len(b) == len(strBoundary) || b[len(strBoundary)] != '=' {
 			// Skip to the ';' ending this parameter, stepping over quoted
 			// strings, since a ';' inside one doesn't end the parameter.
 			n = 0
@@ -1093,19 +1099,24 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 			continue
 		}
 
-		b = b[len(strBoundary):]
-		if len(b) == 0 || b[0] != '=' {
-			return nil
+		b = b[len(strBoundary)+1:]
+		if len(b) > 0 && b[0] == '"' {
+			n = 1
+			for n < len(b) && b[n] != '"' {
+				if b[n] == '\\' {
+					n++
+				}
+				n++
+			}
+			if n >= len(b) {
+				return nil
+			}
+			return b[1:n]
 		}
-		b = b[1:]
 		if n = bytes.IndexByte(b, ';'); n >= 0 {
 			b = b[:n]
 		}
-		b = trimTrailingSpace(b)
-		if len(b) > 1 && b[0] == '"' && b[len(b)-1] == '"' {
-			b = b[1 : len(b)-1]
-		}
-		return b
+		return trimTrailingSpace(b)
 	}
 	return nil
 }
