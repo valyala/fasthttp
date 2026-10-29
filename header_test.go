@@ -1502,6 +1502,12 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary =foobar\r\n\r\n", "")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-dataX; boundary=foobar\r\n\r\n", "")
 
+	// ';' inside a quoted parameter value doesn't end the parameter
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a;boundary=bar\"; boundary=foobar\r\n\r\n", "foobar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a\\\";boundary=bar\"; boundary=foobar\r\n\r\n", "foobar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a\\\\\"; boundary=foobar\r\n\r\n", "foobar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a;boundary=bar\r\n\r\n", "")
+
 	var h RequestHeader
 	h.SetMultipartFormBoundary("foobarbaz")
 	b := h.MultipartFormBoundary()

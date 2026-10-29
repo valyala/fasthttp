@@ -1074,7 +1074,20 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 		}
 		b = b[n:]
 		if !caseInsensitiveHasPrefix(b, strBoundary) {
-			if n = bytes.IndexByte(b, ';'); n < 0 {
+			// Skip to the ';' ending this parameter, stepping over quoted
+			// strings, since a ';' inside one doesn't end the parameter.
+			n = 0
+			for n < len(b) && b[n] != ';' {
+				if b[n] == '"' {
+					for n++; n < len(b) && b[n] != '"'; n++ {
+						if b[n] == '\\' {
+							n++
+						}
+					}
+				}
+				n++
+			}
+			if n >= len(b) {
 				return nil
 			}
 			continue
