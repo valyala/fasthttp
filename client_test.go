@@ -4042,6 +4042,81 @@ func TestClientRedirectSameSchemeRelative(t *testing.T) {
 	}
 }
 
+func TestClientRedirectInvalidLocation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		location string
+		// invalidURI is set for the locations that are ErrorInvalidURI itself.
+		invalidURI bool
+	}{
+		{location: "/foo\tbar", invalidURI: true},
+		{location: "foo\tbar", invalidURI: true},
+		{location: "?foo\tbar", invalidURI: true},
+		{location: "#foo\tbar", invalidURI: true},
+		{location: "http://example.org/foo\tbar", invalidURI: true},
+		{location: "//example.org/foo\tbar", invalidURI: true},
+		{location: "http://us er@example.org/", invalidURI: true},
+		{location: "http://example.org:abc/"},
+	}
+	for _, tt := range tests {
+		for _, kind := range []string{"HostClient", "Client"} {
+			t.Run(kind+"/"+strconv.Quote(tt.location), func(t *testing.T) {
+				t.Parallel()
+
+				var requested []string
+				transport := &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+					requested = append(requested, string(req.URI().FullURI()))
+					if len(requested) == 1 {
+						resp.Header.SetStatusCode(StatusFound)
+						resp.Header.Set(HeaderLocation, tt.location)
+					} else {
+						resp.Header.SetStatusCode(StatusOK)
+					}
+					return false, nil
+				}}
+
+				var do func(req *Request, resp *Response, maxRedirectsCount int) error
+				if kind == "HostClient" {
+					hc := &HostClient{Addr: "example.com:80", Transport: transport}
+					do = hc.DoRedirects
+				} else {
+					c := &Client{Transport: transport}
+					do = c.DoRedirects
+				}
+
+				req := AcquireRequest()
+				resp := AcquireResponse()
+				defer ReleaseRequest(req)
+				defer ReleaseResponse(resp)
+
+				req.SetRequestURI("http://example.com/foo/bar")
+				err := do(req, resp, 16)
+				if err == nil {
+					t.Fatalf("expecting an error for the location %q", tt.location)
+				}
+				if tt.invalidURI && !errors.Is(err, ErrorInvalidURI) {
+					t.Fatalf("unexpected error %q. Expecting %q", err, ErrorInvalidURI)
+				}
+				// There is no address in the location, so no second request
+				// can go anywhere, not even to the empty host the location
+				// used to be turned into.
+				if len(requested) != 1 {
+					t.Fatalf("unexpected requests %q. Expecting only %q", requested, "http://example.com/foo/bar")
+				}
+				// The redirect is handed back like the other ones that can't
+				// be followed.
+				if got := resp.StatusCode(); got != StatusFound {
+					t.Fatalf("unexpected status code: %d. Expecting %d", got, StatusFound)
+				}
+				if got := string(resp.Header.Peek(HeaderLocation)); got != tt.location {
+					t.Fatalf("unexpected location %q. Expecting %q", got, tt.location)
+				}
+			})
+		}
+	}
+}
+
 func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
 	t.Parallel()
 
@@ -5815,8 +5890,11 @@ func TestGetRedirectURL(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			redirectURI := AcquireURI()
-			got := getRedirectURL(tt.args.baseURL, tt.args.location, tt.args.disablePathNormalizing, redirectURI)
+			got, err := getRedirectURL(tt.args.baseURL, tt.args.location, tt.args.disablePathNormalizing, redirectURI)
 			ReleaseURI(redirectURI)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if got != tt.expected {
 				t.Errorf("getRedirectURL() = %v, expected %v", got, tt.expected)
 			}

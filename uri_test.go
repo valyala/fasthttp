@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -252,6 +253,81 @@ func testURIUpdate(t *testing.T, base, update, result string) {
 	s := u.String()
 	if s != result {
 		t.Fatalf("unexpected result %q. Expecting %q. base=%q, update=%q", s, result, base, update)
+	}
+
+	// UpdateBytesErr resolves the same way and has no error to report for an
+	// update that Update could apply.
+	var e URI
+	e.Parse(nil, []byte(base)) //nolint:errcheck
+	if err := e.UpdateBytesErr([]byte(update)); err != nil {
+		t.Fatalf("unexpected error: %v. base=%q, update=%q", err, base, update)
+	}
+	if s := e.String(); s != result {
+		t.Fatalf("unexpected result %q from UpdateBytesErr. Expecting %q. base=%q, update=%q", s, result, base, update)
+	}
+}
+
+func TestURIUpdateBytesErr(t *testing.T) {
+	t.Parallel()
+
+	const base = "http://example.com/dir/path1.html?param1=val1#fragment1"
+
+	tests := []struct {
+		name   string
+		update string
+		// absolute is set when update goes through Parse as is, so the error
+		// has to be the one Parse returns for it.
+		absolute bool
+		// invalidURI is set for the errors that are ErrorInvalidURI itself.
+		invalidURI bool
+	}{
+		{name: "control character in a full uri", update: "http://example.net/a\tb", absolute: true, invalidURI: true},
+		{name: "control character in a uri without scheme", update: "//example.net/a\tb", absolute: true, invalidURI: true},
+		{name: "control character in the scheme", update: "ht\ttp://example.net/", absolute: true, invalidURI: true},
+		{name: "control character in a request uri", update: "/a\tb", invalidURI: true},
+		{name: "control character in a relative path", update: "a\tb", invalidURI: true},
+		{name: "control character in a query string only update", update: "?a\tb", invalidURI: true},
+		{name: "control character in a hash only update", update: "#a\tb", invalidURI: true},
+		{name: "NUL", update: "/a\x00b", invalidURI: true},
+		{name: "CR", update: "/a\rb", invalidURI: true},
+		{name: "LF", update: "/a\nb", invalidURI: true},
+		{name: "DEL", update: "/a\x7fb", invalidURI: true},
+		{name: "space in the userinfo", update: "http://us er@example.net/", absolute: true, invalidURI: true},
+		{name: "invalid port", update: "http://example.net:abc/", absolute: true},
+		{name: "invalid port without scheme", update: "//example.net:abc/", absolute: true},
+		{name: "unclosed bracket in the host", update: "http://[::1/", absolute: true},
+		{name: "space in the host", update: "http://exa mple.net/", absolute: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var u URI
+			if err := u.Parse(nil, []byte(base)); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			err := u.UpdateBytesErr([]byte(tt.update))
+			if err == nil {
+				t.Fatalf("expecting an error for %q. Got the uri %q", tt.update, u.String())
+			}
+			if tt.invalidURI && !errors.Is(err, ErrorInvalidURI) {
+				t.Fatalf("unexpected error %q for %q. Expecting %q", err, tt.update, ErrorInvalidURI)
+			}
+			if tt.absolute {
+				var p URI
+				perr := p.Parse(nil, []byte(tt.update))
+				if perr == nil || perr.Error() != err.Error() {
+					t.Fatalf("unexpected error %q for %q. Expecting the one of Parse: %v", err, tt.update, perr)
+				}
+			}
+
+			// The uri is usable again once it is reset.
+			u.Reset()
+			u.Update(base)
+			if got := u.String(); got != base {
+				t.Fatalf("unexpected uri %q after reusing the uri. Expecting %q", got, base)
+			}
+		})
 	}
 }
 

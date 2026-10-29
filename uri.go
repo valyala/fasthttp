@@ -878,13 +878,34 @@ func (u *URI) Update(newURI string) {
 //     of the original uri is replaced.
 //   - Relative path, i.e.  xx?yy=abc . In this case the original RequestURI
 //     is updated according to the new relative path.
+//
+// A newURI that can't be parsed is not reported and leaves u in an
+// unspecified state. Use UpdateBytesErr to get the error.
 func (u *URI) UpdateBytes(newURI []byte) {
-	u.requestURI = u.updateBytes(newURI, u.requestURI)
+	u.requestURI, _ = u.updateBytes(newURI, u.requestURI)
 }
 
-func (u *URI) updateBytes(newURI, buf []byte) []byte {
+// UpdateBytesErr is like UpdateBytes, but returns the error that makes newURI
+// unusable instead of dropping it.
+//
+// The error is the one Parse returns for the uri newURI resolves to. A newURI
+// holding a control character is rejected with ErrorInvalidURI whichever of
+// the forms listed on UpdateBytes it has, including the ones that only change
+// the query string or the hash.
+//
+// As with Parse, u holds no usable uri after an error.
+func (u *URI) UpdateBytesErr(newURI []byte) error {
+	if stringContainsCTLByte(newURI) {
+		return ErrorInvalidURI
+	}
+	var err error
+	u.requestURI, err = u.updateBytes(newURI, u.requestURI)
+	return err
+}
+
+func (u *URI) updateBytes(newURI, buf []byte) ([]byte, error) {
 	if len(newURI) == 0 {
-		return buf
+		return buf, nil
 	}
 
 	n := bytes.Index(newURI, strSlashSlash)
@@ -896,12 +917,12 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 			schemeOriginal = append([]byte(nil), u.scheme...)
 		}
 		if err := u.Parse(nil, newURI); err != nil {
-			return nil
+			return nil, err
 		}
 		if len(schemeOriginal) > 0 && len(u.scheme) == 0 {
 			u.scheme = append(u.scheme[:0], schemeOriginal...)
 		}
-		return buf
+		return buf, nil
 	}
 
 	// A reference with the same scheme as the base and no "//", e.g. "http:g",
@@ -911,7 +932,7 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 		bytes.EqualFold(newURI[:len(scheme)], scheme) {
 		newURI = newURI[len(scheme)+1:]
 		if len(newURI) == 0 {
-			return buf
+			return buf, nil
 		}
 	}
 
@@ -920,9 +941,9 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 		buf = u.appendSchemeHost(buf[:0])
 		buf = append(buf, newURI...)
 		if err := u.Parse(nil, buf); err != nil {
-			return nil
+			return nil, err
 		}
-		return buf
+		return buf, nil
 	}
 
 	// relative path
@@ -930,11 +951,11 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 	case '?':
 		// query string only update
 		u.SetQueryStringBytes(newURI[1:])
-		return append(buf[:0], u.FullURI()...)
+		return append(buf[:0], u.FullURI()...), nil
 	case '#':
 		// update only hash
 		u.SetHashBytes(newURI[1:])
-		return append(buf[:0], u.FullURI()...)
+		return append(buf[:0], u.FullURI()...), nil
 	default:
 		// update the last path part after the slash
 		path := u.Path()
@@ -946,9 +967,9 @@ func (u *URI) updateBytes(newURI, buf []byte) []byte {
 		buf = appendQuotedPath(buf, path[:n+1])
 		buf = append(buf, newURI...)
 		if err := u.Parse(nil, buf); err != nil {
-			return nil
+			return nil, err
 		}
-		return buf
+		return buf, nil
 	}
 }
 
