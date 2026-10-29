@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"net/http"
 	"sync"
 	"time"
 )
@@ -730,7 +729,7 @@ func parseCookieExpires(src []byte) (time.Time, error) {
 	s := b2s(src)
 
 	// UTC-anchored RFC1123 parsing behavior for non-GMT.
-	t, err := time.ParseInLocation(http.TimeFormat, s, time.UTC)
+	t, err := time.ParseInLocation(time.RFC1123, s, time.UTC)
 	if err == nil {
 		return t, nil
 	}
