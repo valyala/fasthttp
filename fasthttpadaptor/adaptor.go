@@ -382,6 +382,11 @@ func (w *writer) WriteHeader(code int) {
 	if code < 100 || code > 999 {
 		panic(fmt.Sprintf("invalid WriteHeader code %v", code))
 	}
+	// As in net/http, a 1xx other than 101 is interim and doesn't set the
+	// final status. It isn't sent, which RFC 9110 section 15.2 allows.
+	if code < 200 && code != http.StatusSwitchingProtocols {
+		return
+	}
 	if w.statusCode.CompareAndSwap(0, int64(code)) {
 		w.commit()
 	}

@@ -1405,6 +1405,9 @@ func isMultipartFormData(contentType []byte) bool {
 		return false
 	}
 	rest := contentType[len(strMultipartFormData):]
+	for len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
+		rest = rest[1:]
+	}
 	return len(rest) == 0 || rest[0] == ';'
 }
 

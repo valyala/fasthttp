@@ -1078,13 +1078,15 @@ func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
 // from 'multipart/form-data; boundary=...' Content-Type.
 //
 // The media type and the parameter name are matched case-insensitively, the
-// boundary value is returned as is.
+// boundary value is returned as is. Spaces and tabs are allowed around the ';'
+// that separates the parameters, but not around the '='.
 //
 // A quoted parameter value may contain ';' and quoted-pairs (RFC 9110,
 // section 5.6.4), so it is skipped as a whole: a 'boundary=' spelled inside
 // another parameter's value is not mistaken for the boundary. A quoted
 // boundary is returned without its quotes and with quoted-pairs left as
-// written. An unquoted boundary runs up to the next ';'.
+// written. An unquoted boundary runs up to the next ';', without the
+// whitespace before it.
 //
 // nil is returned when there is no boundary parameter, or when a quoted value
 // is not terminated or is followed by anything but a ';'.
@@ -1093,7 +1095,7 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 	if !caseInsensitiveHasPrefix(b, strMultipartFormData) {
 		return nil
 	}
-	b = b[len(strMultipartFormData):]
+	b = skipSpaceTab(b[len(strMultipartFormData):])
 	if len(b) == 0 || b[0] != ';' {
 		return nil
 	}
@@ -1136,7 +1138,7 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 			if n < 0 {
 				n = len(b)
 			}
-			value = b[:n]
+			value = trimTrailingSpace(b[:n])
 			b = b[n:]
 		}
 
