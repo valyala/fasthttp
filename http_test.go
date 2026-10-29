@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -151,6 +152,162 @@ func TestRequestCopyTo(t *testing.T) {
 	}
 	req.DisableRedirectPathNormalizing = true
 	testRequestCopyTo(t, &req)
+}
+
+func TestRequestCopyToMultipartForm(t *testing.T) {
+	t.Parallel()
+
+	const body = "--foobar\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nvalue\r\n" +
+		"--foobar\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nfile content\r\n" +
+		"--foobar--\r\n"
+	raw := fmt.Sprintf("POST /upload HTTP/1.1\r\nHost: test.com\r\nContent-Type: multipart/form-data; boundary=foobar\r\nContent-Length: %d\r\n\r\n%s",
+		len(body), body)
+
+	tests := []struct {
+		// read puts the request in the state where its body is only a parsed
+		// multipart form, which is what the server leaves it in.
+		read func(t *testing.T, req *Request)
+		name string
+	}{
+		{
+			name: "parsed while reading",
+			read: func(t *testing.T, req *Request) {
+				if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			},
+		},
+		{
+			// What a server with StreamRequestBody does: a form of known size is
+			// parsed ahead of the handler there too.
+			name: "parsed while reading with a body stream",
+			read: func(t *testing.T, req *Request) {
+				br := bufio.NewReader(strings.NewReader(raw))
+				if err := req.Header.Read(br); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if err := req.ContinueReadBodyStream(br, 1<<20); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var req Request
+			tt.read(t, &req)
+			defer req.RemoveMultipartFormFiles()
+			if !req.onlyMultipartForm() {
+				t.Fatal("expecting a request with nothing of its body left but the parsed form")
+			}
+
+			var dst Request
+			req.CopyTo(&dst)
+			defer dst.RemoveMultipartFormFiles()
+
+			if got, want := dst.Body(), req.Body(); len(got) == 0 || !bytes.Equal(got, want) {
+				t.Fatalf("unexpected body of the copy %q. Expecting %q", got, want)
+			}
+			if got, want := dst.String(), req.String(); got != want {
+				t.Fatalf("unexpected copy:\n%q\nExpecting:\n%q", got, want)
+			}
+
+			// The copy holds the body, not the form: it parses its own.
+			if dst.multipartForm != nil {
+				t.Fatal("the copy shares the multipart form of the original")
+			}
+			f, err := dst.MultipartForm()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := f.Value["field"]; len(got) != 1 || got[0] != "value" {
+				t.Fatalf("unexpected field %q. Expecting %q", got, "value")
+			}
+			files := f.File["file"]
+			if len(files) != 1 || files[0].Filename != "a.txt" {
+				t.Fatalf("unexpected files %v", files)
+			}
+			fh, err := files[0].Open()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			defer fh.Close()
+			content, err := io.ReadAll(fh)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if string(content) != "file content" {
+				t.Fatalf("unexpected file content %q. Expecting %q", content, "file content")
+			}
+
+			// Dropping the form of the copy leaves the original alone.
+			dst.RemoveMultipartFormFiles()
+			if req.multipartForm == nil || len(req.Body()) == 0 {
+				t.Fatal("removing the form of the copy changed the original")
+			}
+		})
+	}
+}
+
+// A form whose parts can't be read back has no body to copy. The copy must
+// end up without one, not with whatever the failed attempt wrote.
+func TestRequestCopyToMultipartFormUnreadableFile(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.multipartFormBoundary = "foobar"
+	req.multipartForm = &multipart.Form{
+		Value: map[string][]string{"field": {"value"}},
+		File: map[string][]*multipart.FileHeader{
+			// There is no content behind it, so opening it fails.
+			"file": {{Filename: "gone.txt", Header: textproto.MIMEHeader{"Content-Disposition": {`form-data; name="file"; filename="gone.txt"`}}}},
+		},
+	}
+	if !req.onlyMultipartForm() {
+		t.Fatal("expecting a request with nothing of its body left but the parsed form")
+	}
+
+	var dst Request
+	dst.SetBodyString("previous body")
+	req.CopyTo(&dst)
+	if got := dst.Body(); len(got) != 0 {
+		t.Fatalf("unexpected body of the copy %q. Expecting none", got)
+	}
+}
+
+// A body that was kept next to its form is copied as it is, the form is
+// parsed again by the copy when it is asked for.
+func TestRequestCopyToMultipartFormFromBody(t *testing.T) {
+	t.Parallel()
+
+	const body = "--foobar\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nvalue\r\n--foobar--\r\n"
+
+	var req Request
+	req.Header.SetContentType("multipart/form-data; boundary=foobar")
+	req.SetBodyString(body)
+	if _, err := req.MultipartForm(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer req.RemoveMultipartFormFiles()
+	if req.onlyMultipartForm() {
+		t.Fatal("expecting the body to be kept")
+	}
+
+	var dst Request
+	req.CopyTo(&dst)
+	defer dst.RemoveMultipartFormFiles()
+	if got := string(dst.Body()); got != body {
+		t.Fatalf("unexpected body of the copy %q. Expecting %q", got, body)
+	}
+	f, err := dst.MultipartForm()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := f.Value["field"]; len(got) != 1 || got[0] != "value" {
+		t.Fatalf("unexpected field %q. Expecting %q", got, "value")
+	}
 }
 
 func TestResponseCopyTo(t *testing.T) {
