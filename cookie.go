@@ -386,6 +386,12 @@ func (c *Cookie) Parse(src string) error {
 }
 
 // ParseBytes parses Set-Cookie header.
+//
+// An error is returned only when the name or the value can't be used. As
+// RFC 6265, section 5.2 asks, an attribute that can't be used is ignored and
+// the ones after it are parsed as usual. That goes for an Expires or Max-Age
+// that isn't valid, and for a Domain or Path that holds bytes a cookie can't
+// carry.
 func (c *Cookie) ParseBytes(src []byte) error {
 	c.Reset()
 
@@ -435,10 +441,12 @@ func (c *Cookie) ParseBytes(src []byte) error {
 
 			case 'd': // "domain"
 				if caseInsensitiveCompare(strCookieDomain, k) {
-					if !validCookieValue(v) {
-						return ErrInvalidCookieValue
+					// RFC 6265, section 5.2: a Domain that can't be used is
+					// ignored, not the whole cookie. The cookie then stays
+					// host-only.
+					if validCookieValue(v) {
+						c.domain = initHeaderValueBytes(c.domain, v)
 					}
-					c.domain = initHeaderValueBytes(c.domain, v)
 				}
 
 			// RFC 6265, sections 5.2.5 and 5.2.6: Secure and HttpOnly are
@@ -451,10 +459,11 @@ func (c *Cookie) ParseBytes(src []byte) error {
 
 			case 'p': // "path" or "partitioned"
 				if caseInsensitiveCompare(strCookiePath, k) {
-					if !validCookiePathValue(v) {
-						return ErrInvalidCookieValue
+					// A Path that can't be used is ignored like a Domain,
+					// and the cookie gets the default path.
+					if validCookiePathValue(v) {
+						c.path = initHeaderValueBytes(c.path, v)
 					}
-					c.path = initHeaderValueBytes(c.path, v)
 				} else if caseInsensitiveCompare(strCookiePartitioned, k) {
 					c.partitioned = true
 				}
