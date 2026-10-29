@@ -31,6 +31,14 @@ func BenchmarkURIParseHostname(b *testing.B) {
 	benchmarkURIParse(b, "google.com", "http://foobar.com/foo/bar?query=string&other=value#hashstring")
 }
 
+func BenchmarkURIParseUserinfo(b *testing.B) {
+	benchmarkURIParse(b, "", "http://user:pass@foobar.com/foo/bar")
+}
+
+func BenchmarkURIParseUserinfoEncoded(b *testing.B) {
+	benchmarkURIParse(b, "", "http://user:p%40ss%21@foobar.com/foo/bar")
+}
+
 func BenchmarkURIFullURI(b *testing.B) {
 	host := []byte("foobar.com")
 	requestURI := []byte("/foobar/baz?aaa=bbb&ccc=ddd")

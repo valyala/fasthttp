@@ -293,6 +293,35 @@ func TestURIAllowAtInUserinfo(t *testing.T) {
 	}
 }
 
+func TestURIUserinfoPercentDecode(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		uri, username, password string
+	}{
+		{"http://user:p%40ss@example.com/", "user", "p@ss"},
+		{"http://us%3Aer:p%2F%3F%23ss@example.com/", "us:er", "p/?#ss"},
+		{"http://user:Passw0rd%21@example.com/", "user", "Passw0rd!"},
+		{"http://us%20er@example.com/", "us er", ""},
+		{"http://user:a+b@example.com/", "user", "a+b"},
+		{"http://user:%zz%4@example.com/", "user", "%zz%4"},
+	} {
+		var u URI
+		if err := u.Parse(nil, []byte(tc.uri)); err != nil {
+			t.Fatalf("unexpected error parsing %q: %v", tc.uri, err)
+		}
+		if got := string(u.Host()); got != "example.com" {
+			t.Fatalf("unexpected host %q for %q", got, tc.uri)
+		}
+		if got := string(u.Username()); got != tc.username {
+			t.Fatalf("unexpected username %q for %q. Expecting %q", got, tc.uri, tc.username)
+		}
+		if got := string(u.Password()); got != tc.password {
+			t.Fatalf("unexpected password %q for %q. Expecting %q", got, tc.uri, tc.password)
+		}
+	}
+}
+
 func TestURIPathNormalize(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.SkipNow()

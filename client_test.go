@@ -1977,11 +1977,13 @@ func TestClientURLAuth(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		"user:pass@": "Basic dXNlcjpwYXNz",
-		"foo:@":      "Basic Zm9vOg==",
-		":@":         "",
-		"@":          "",
-		"":           "",
+		"user:pass@":    "Basic dXNlcjpwYXNz",
+		"user:p%40ss@":  "Basic dXNlcjpwQHNz",
+		"us%20er:pass@": "Basic dXMgZXI6cGFzcw==",
+		"foo:@":         "Basic Zm9vOg==",
+		":@":            "",
+		"@":             "",
+		"":              "",
 	}
 
 	ch := make(chan string, 1)
