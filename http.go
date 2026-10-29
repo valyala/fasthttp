@@ -3247,7 +3247,10 @@ func copyZeroAllocWithLimit(w io.Writer, r io.Reader, maxBodySize int) (int64, e
 }
 
 func readBody(r *bufio.Reader, contentLength, maxBodySize int, dst []byte) ([]byte, error) {
-	if maxBodySize > 0 && contentLength > maxBodySize {
+	if maxBodySize <= 0 {
+		return appendBodyUnlimited(r, dst, contentLength)
+	}
+	if contentLength > maxBodySize {
 		return dst, ErrBodyTooLarge
 	}
 	return appendBodyFixedSize(r, dst, contentLength)
@@ -3349,6 +3352,29 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	}
 }
 
+// unlimitedBodyStep is the smallest step appendBodyUnlimited reads at once.
+// A declared length that never arrives pins at most twice this.
+const unlimitedBodyStep = 4 * 1024 * 1024
+
+// appendBodyUnlimited is appendBodyFixedSize for maxBodySize <= 0. It reads n in
+// steps of about len(dst), so memory follows the bytes received rather than n.
+func appendBodyUnlimited(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
+	for n > 0 {
+		step := max(unlimitedBodyStep, len(dst))
+		// Take a short rest, such as a chunk's CRLF, now instead of growing dst for it.
+		if n-step < unlimitedBodyStep {
+			step = n
+		}
+		var err error
+		dst, err = appendBodyFixedSize(r, dst, step)
+		if err != nil {
+			return dst, err
+		}
+		n -= step
+	}
+	return dst, nil
+}
+
 // ErrBrokenChunk is returned when server receives a broken chunked body (Transfer-Encoding: chunked).
 type ErrBrokenChunk struct {
 	error
@@ -3373,7 +3399,11 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 		if maxBodySize > 0 && len(dst)+chunkSize > maxBodySize {
 			return dst, ErrBodyTooLarge
 		}
-		dst, err = appendBodyFixedSize(r, dst, chunkSize+strCRLFLen)
+		if maxBodySize > 0 {
+			dst, err = appendBodyFixedSize(r, dst, chunkSize+strCRLFLen)
+		} else {
+			dst, err = appendBodyUnlimited(r, dst, chunkSize+strCRLFLen)
+		}
 		if err != nil {
 			return dst, err
 		}

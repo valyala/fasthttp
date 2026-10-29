@@ -1,7 +1,9 @@
 package fasthttp
 
 import (
+	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -276,6 +278,48 @@ func BenchmarkCopyZeroAllocNetConnToOSFile(b *testing.B) {
 		}
 		b.StopTimer()
 		conn, err = net.Dial("tcp", addr)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkReadBodyUnlimited(b *testing.B) {
+	for _, size := range []int{64 << 10, 1 << 20, 4 << 20, 16 << 20, 64 << 20, 256 << 20} {
+		for _, chunked := range []bool{false, true} {
+			for _, reuse := range []bool{false, true} {
+				name := fmt.Sprintf("size=%dKiB/chunked=%t/reuse=%t", size>>10, chunked, reuse)
+				b.Run(name, func(b *testing.B) {
+					benchmarkReadBodyUnlimited(b, size, chunked, reuse)
+				})
+			}
+		}
+	}
+}
+
+func benchmarkReadBodyUnlimited(b *testing.B, size int, chunked, reuse bool) {
+	in := createFixedBody(size)
+	if chunked {
+		in = fmt.Appendf(nil, "%x\r\n%s\r\n0\r\n\r\n", size, in)
+	}
+	var dst []byte
+	if reuse {
+		dst = make([]byte, 0, size+len(strCRLF))
+	}
+	var r bytes.Reader
+	br := bufio.NewReader(&r)
+
+	b.SetBytes(int64(size))
+	b.ReportAllocs()
+	for b.Loop() {
+		r.Reset(in)
+		br.Reset(&r)
+		var err error
+		if chunked {
+			_, err = readBodyChunked(br, 0, dst)
+		} else {
+			_, err = readBody(br, size, 0, dst)
+		}
 		if err != nil {
 			b.Fatal(err)
 		}

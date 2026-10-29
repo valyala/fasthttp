@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -3462,6 +3463,83 @@ func TestReadBodyChunked(t *testing.T) {
 
 	// smaller body after big one
 	testReadBodyChunked(t, 12343)
+}
+
+func TestReadBodyUnlimitedGrowth(t *testing.T) {
+	t.Parallel()
+
+	for _, size := range []int{unlimitedBodyStep - 1, unlimitedBodyStep, 2*unlimitedBodyStep - 1, 2 * unlimitedBodyStep, 6*unlimitedBodyStep + 5} {
+		body := createFixedBody(size)
+
+		b, err := readBody(bufio.NewReader(bytes.NewReader(body)), size, 0, nil)
+		if err != nil || !bytes.Equal(b, body) {
+			t.Fatalf("unexpected body for size %d: len %d, err %v", size, len(b), err)
+		}
+
+		// The small first chunk makes the large one append to a non-empty dst.
+		chunked := fmt.Appendf(nil, "1\r\n%s\r\n%x\r\n%s\r\n0\r\n\r\n", body[:1], size-1, body[1:])
+		b, err = readBodyChunked(bufio.NewReader(bytes.NewReader(chunked)), 0, nil)
+		if err != nil || !bytes.Equal(b, body) {
+			t.Fatalf("unexpected chunked body for size %d: len %d, err %v", size, len(b), err)
+		}
+	}
+}
+
+func TestReadBodyUnlimitedTruncated(t *testing.T) {
+	t.Parallel()
+
+	const declared = 3 * unlimitedBodyStep
+	sent := createFixedBody(unlimitedBodyStep + 10)
+	chunked := fmt.Appendf(nil, "%x\r\n%s", declared, sent)
+
+	// A positive limit takes the unchanged path, so both must fail the same way.
+	for _, limit := range []int{0, declared} {
+		b, err := readBody(bufio.NewReader(bytes.NewReader(sent)), declared, limit, nil)
+		if err != io.ErrUnexpectedEOF || !bytes.Equal(b, sent) {
+			t.Fatalf("unexpected result for limit %d: len %d, err %v", limit, len(b), err)
+		}
+		b, err = readBodyChunked(bufio.NewReader(bytes.NewReader(chunked)), limit, nil)
+		if err != io.ErrUnexpectedEOF || !bytes.Equal(b, sent) {
+			t.Fatalf("unexpected chunked result for limit %d: len %d, err %v", limit, len(b), err)
+		}
+	}
+}
+
+func TestReadBodyUnlimitedHugeContentLength(t *testing.T) {
+	t.Parallel()
+
+	b, err := readBody(bufio.NewReader(strings.NewReader("ok")), math.MaxInt, 0, nil)
+	if err != io.ErrUnexpectedEOF || string(b) != "ok" || cap(b) > unlimitedBodyStep {
+		t.Fatalf("unexpected result %q, cap %d, err %v", b, cap(b), err)
+	}
+
+	// math.MaxInt>>4 has maxHexIntChars digits, the longest chunk size accepted.
+	chunked := fmt.Sprintf("%x\r\nok", math.MaxInt>>4)
+	b, err = readBodyChunked(bufio.NewReader(strings.NewReader(chunked)), 0, nil)
+	if err != io.ErrUnexpectedEOF || string(b) != "ok" || cap(b) > unlimitedBodyStep {
+		t.Fatalf("unexpected chunked result %q, cap %d, err %v", b, cap(b), err)
+	}
+
+	var resp Response
+	s := "HTTP/1.1 200 OK\r\nContent-Length: " + strconv.Itoa(math.MaxInt) + "\r\n\r\nok"
+	if err := resp.Read(bufio.NewReader(strings.NewReader(s))); err != io.ErrUnexpectedEOF {
+		t.Fatalf("unexpected error %v, want %v", err, io.ErrUnexpectedEOF)
+	}
+}
+
+func TestAppendBodyUnlimitedNearMaxInt(t *testing.T) {
+	t.Parallel()
+
+	for _, dstLen := range []int{0, 3, unlimitedBodyStep + 1} {
+		dst := createFixedBody(dstLen)
+		b, err := appendBodyUnlimited(bufio.NewReader(strings.NewReader("ok")), dst, math.MaxInt-dstLen)
+		if err != io.ErrUnexpectedEOF || !bytes.Equal(b[:dstLen], dst) || string(b[dstLen:]) != "ok" {
+			t.Fatalf("unexpected result for dst len %d: len %d, err %v", dstLen, len(b), err)
+		}
+		if cap(b) > 2*(dstLen+unlimitedBodyStep) {
+			t.Fatalf("unexpected cap %d for dst len %d", cap(b), dstLen)
+		}
+	}
 }
 
 func TestRequestURITLS(t *testing.T) {
