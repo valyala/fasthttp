@@ -724,6 +724,26 @@ func TestCookieParseInvalidExpires(t *testing.T) {
 	}
 }
 
+func TestCookieParseExpiresTimeZone(t *testing.T) {
+	t.Parallel()
+
+	expire := time.Date(2009, time.November, 10, 23, 0, 0, 0, time.UTC)
+	var c Cookie
+	for _, input := range []string{
+		"foo=bar; expires=Tue, 10 Nov 2009 23:00:00 GMT",
+		"foo=bar; expires=Tue, 10 Nov 2009 23:00:00 UTC",
+		"foo=bar; expires=Tue, 10-Nov-2009 23:00:00 GMT",
+		"foo=bar; expires=Tue, 10-Nov-2009 23:00:00 UTC",
+	} {
+		if err := c.Parse(input); err != nil {
+			t.Fatalf("unexpected parse error for %q: %v", input, err)
+		}
+		if got := c.Expire(); !got.Equal(expire) {
+			t.Errorf("unexpected expire for %q: got %v, want %v", input, got, expire)
+		}
+	}
+}
+
 func TestCookieParseZeroMaxAge(t *testing.T) {
 	t.Parallel()
 
