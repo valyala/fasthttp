@@ -282,9 +282,25 @@ func (d *TCPDialer) DialContext(ctx context.Context, addr string) (net.Conn, err
 	return d.dialContext(ctx, addr, false, DefaultDialTimeout)
 }
 
+// DialContextTimeout dials the given TCP addr using tcp4 with the given context and timeout.
+func (d *TCPDialer) DialContextTimeout(ctx context.Context, addr string, timeout time.Duration) (net.Conn, error) {
+	if timeout <= 0 {
+		timeout = DefaultDialTimeout
+	}
+	return d.dialContext(ctx, addr, false, timeout)
+}
+
 // DialDualStackContext dials the given TCP addr using both tcp4 and tcp6 with the given context.
 func (d *TCPDialer) DialDualStackContext(ctx context.Context, addr string) (net.Conn, error) {
 	return d.dialContext(ctx, addr, true, DefaultDialTimeout)
+}
+
+// DialDualStackContextTimeout dials the given TCP addr using both tcp4 and tcp6 with the given context and timeout.
+func (d *TCPDialer) DialDualStackContextTimeout(ctx context.Context, addr string, timeout time.Duration) (net.Conn, error) {
+	if timeout <= 0 {
+		timeout = DefaultDialTimeout
+	}
+	return d.dialContext(ctx, addr, true, timeout)
 }
 
 // DialContext dials the given TCP addr using tcp4 with the given context.
@@ -292,9 +308,19 @@ func DialContext(ctx context.Context, addr string) (net.Conn, error) {
 	return defaultDialer.DialContext(ctx, addr)
 }
 
+// DialContextTimeout dials the given TCP addr using tcp4 with the given context and timeout.
+func DialContextTimeout(ctx context.Context, addr string, timeout time.Duration) (net.Conn, error) {
+	return defaultDialer.DialContextTimeout(ctx, addr, timeout)
+}
+
 // DialDualStackContext dials the given TCP addr using both tcp4 and tcp6 with the given context.
 func DialDualStackContext(ctx context.Context, addr string) (net.Conn, error) {
 	return defaultDialer.DialDualStackContext(ctx, addr)
+}
+
+// DialDualStackContextTimeout dials the given TCP addr using both tcp4 and tcp6 with the given context and timeout.
+func DialDualStackContextTimeout(ctx context.Context, addr string, timeout time.Duration) (net.Conn, error) {
+	return defaultDialer.DialDualStackContextTimeout(ctx, addr, timeout)
 }
 
 // FlushDNSCache clears all cached DNS entries, forcing fresh DNS lookups on subsequent dials.
@@ -366,12 +392,6 @@ func (d *TCPDialer) dialContext(ctx context.Context, addr string, dualStack bool
 		idx++
 	}
 	return nil, err
-}
-
-func (d *TCPDialer) tryDial(
-	network string, addr string, deadline time.Time, concurrencyCh chan struct{},
-) (net.Conn, error) {
-	return d.tryDialContext(context.Background(), network, addr, deadline, concurrencyCh)
 }
 
 func (d *TCPDialer) tryDialContext(
@@ -554,7 +574,9 @@ func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool, deadline time.Time)
 	return d.getTCPAddrsContext(context.Background(), addr, dualStack, deadline)
 }
 
-func (d *TCPDialer) getTCPAddrsContext(ctx context.Context, addr string, dualStack bool, deadline time.Time) ([]net.TCPAddr, uint32, error) {
+func (d *TCPDialer) getTCPAddrsContext(
+	ctx context.Context, addr string, dualStack bool, deadline time.Time,
+) ([]net.TCPAddr, uint32, error) {
 	key := tcpAddrsKey{addr: addr, dualStack: dualStack}
 	item, exist := d.tcpAddrsMap.Load(key)
 	e, ok := item.(*tcpAddrEntry)
@@ -588,11 +610,9 @@ func (d *TCPDialer) getTCPAddrsContext(ctx context.Context, addr string, dualSta
 	return e.addrs, idx, nil
 }
 
-func resolveTCPAddrs(addr string, dualStack bool, resolver Resolver, deadline time.Time) ([]net.TCPAddr, error) {
-	return resolveTCPAddrsContext(context.Background(), addr, dualStack, resolver, deadline)
-}
-
-func resolveTCPAddrsContext(ctx context.Context, addr string, dualStack bool, resolver Resolver, deadline time.Time) ([]net.TCPAddr, error) {
+func resolveTCPAddrsContext(
+	ctx context.Context, addr string, dualStack bool, resolver Resolver, deadline time.Time,
+) ([]net.TCPAddr, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
