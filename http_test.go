@@ -2309,6 +2309,78 @@ func TestRequestMultipartFormQuotedBoundary(t *testing.T) {
 	}
 }
 
+// A form that was parsed as it was read is marshaled again when the request is
+// written, with the boundary in the Content-Type. The boundary has to be quoted
+// when it holds a character a token can't, such as ':', or a receiver that
+// follows RFC 9110, like net/http, doesn't find it.
+func TestRequestMultipartFormBoundaryWrittenBack(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		contentType string
+		boundary    string
+	}{
+		{`multipart/form-data; boundary=foobar`, "foobar"},
+		{`multipart/form-data; boundary=----WebKitFormBoundaryAbC`, "----WebKitFormBoundaryAbC"},
+		{`multipart/form-data; boundary="foo:bar"`, "foo:bar"},
+		{`multipart/form-data; boundary2=1; boundary="foo:bar"`, "foo:bar"},
+		{`multipart/form-data; boundary="----=_Part_0_123.456"`, "----=_Part_0_123.456"},
+	} {
+		t.Run(tc.contentType, func(t *testing.T) {
+			t.Parallel()
+
+			body := "--" + tc.boundary + "\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--" + tc.boundary + "--\r\n"
+			s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+				tc.contentType, len(body), body)
+
+			var req Request
+			if err := req.Read(bufio.NewReader(strings.NewReader(s))); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			defer req.RemoveMultipartFormFiles()
+			if !req.onlyMultipartForm() {
+				t.Fatal("expecting the form to be parsed as the request is read")
+			}
+
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+			if err := req.Write(bw); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if err := bw.Flush(); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			written := buf.Bytes()
+
+			// net/http finds the boundary and the field.
+			r, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(written)))
+			if err != nil {
+				t.Fatalf("unexpected error: %v. Request: %q", err, written)
+			}
+			if err := r.ParseMultipartForm(1 << 20); err != nil {
+				t.Fatalf("net/http can't parse the request: %v. Request: %q", err, written)
+			}
+			if vv := r.MultipartForm.Value["key"]; len(vv) != 1 || vv[0] != "value" {
+				t.Fatalf("net/http reads the values %q", vv)
+			}
+
+			// So does fasthttp.
+			var back Request
+			if err := back.Read(bufio.NewReader(bytes.NewReader(written))); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			defer back.RemoveMultipartFormFiles()
+			f, err := back.MultipartForm()
+			if err != nil {
+				t.Fatalf("fasthttp can't parse the request: %v. Request: %q", err, written)
+			}
+			if vv := f.Value["key"]; len(vv) != 1 || vv[0] != "value" {
+				t.Fatalf("fasthttp reads the values %q", vv)
+			}
+		})
+	}
+}
+
 func TestRequestMultipartFormEpilogue(t *testing.T) {
 	t.Parallel()
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -14,6 +15,68 @@ import (
 	"testing"
 	"time"
 )
+
+// A boundary is a token or it is quoted, since the characters that a boundary
+// may hold and a token can't, such as ':' and '=', end the parameter for a
+// receiver that follows RFC 9110, like net/http.
+func TestRequestHeaderSetMultipartFormBoundaryQuoted(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		boundary string
+		// written is the value of the boundary parameter.
+		written string
+	}{
+		// A token goes in as it is.
+		{"foobar", "foobar"},
+		{"----WebKitFormBoundary7MA4YWxkTrZu0gW", "----WebKitFormBoundary7MA4YWxkTrZu0gW"},
+		{"a'b+c_d-e.f", "a'b+c_d-e.f"},
+
+		// Any other byte makes it a quoted string.
+		{"foo:bar", `"foo:bar"`},
+		{"foo/bar", `"foo/bar"`},
+		{"a=b", `"a=b"`},
+		{"----=_Part_0_123.456", `"----=_Part_0_123.456"`},
+		{"a,b", `"a,b"`},
+		{"(a)", `"(a)"`},
+		{"a?b", `"a?b"`},
+		{"foo bar", `"foo bar"`},
+
+		// A quote and a backslash are escaped inside it.
+		{`a"b`, `"a\"b"`},
+		{`a\b`, `"a\\b"`},
+	}
+	for _, tt := range tests {
+		for _, fromBytes := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%q/bytes=%v", tt.boundary, fromBytes), func(t *testing.T) {
+				t.Parallel()
+
+				var h RequestHeader
+				if fromBytes {
+					h.SetMultipartFormBoundaryBytes([]byte(tt.boundary))
+				} else {
+					h.SetMultipartFormBoundary(tt.boundary)
+				}
+				if want := "multipart/form-data; boundary=" + tt.written; string(h.ContentType()) != want {
+					t.Fatalf("unexpected Content-Type %q. Expecting %q", h.ContentType(), want)
+				}
+
+				// The boundary that was set is the one that is read back, by net/http
+				// and by fasthttp.
+				_, params, err := mime.ParseMediaType(string(h.ContentType()))
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if params["boundary"] != tt.boundary {
+					t.Fatalf("net/http reads the boundary %q. Expecting %q", params["boundary"], tt.boundary)
+				}
+				if !strings.ContainsAny(tt.boundary, `"\\`) && string(h.MultipartFormBoundary()) != tt.boundary {
+					t.Fatalf("fasthttp reads the boundary %q. Expecting %q", h.MultipartFormBoundary(), tt.boundary)
+				}
+			})
+		}
+	}
+}
 
 func TestResponseHeaderAddContentType(t *testing.T) {
 	t.Parallel()

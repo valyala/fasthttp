@@ -523,32 +523,51 @@ func (h *RequestHeader) SetContentEncodingBytes(contentEncoding []byte) {
 
 // SetMultipartFormBoundary sets the following Content-Type:
 // 'multipart/form-data; boundary=...'
-// where ... is substituted by the given boundary.
+// where ... is substituted by the given boundary, in quotes if it holds
+// a character that a token can't, such as ':' or '='.
 func (h *RequestHeader) SetMultipartFormBoundary(boundary string) {
-	b := h.bufV[:0]
-	b = append(b, strMultipartFormData...)
-	b = append(b, ';', ' ')
-	b = append(b, strBoundary...)
-	b = append(b, '=')
-	b = append(b, boundary...)
-	h.bufV = b
-
-	h.SetContentTypeBytes(h.bufV)
+	h.SetMultipartFormBoundaryBytes(s2b(boundary))
 }
 
 // SetMultipartFormBoundaryBytes sets the following Content-Type:
 // 'multipart/form-data; boundary=...'
-// where ... is substituted by the given boundary.
+// where ... is substituted by the given boundary, in quotes if it holds
+// a character that a token can't, such as ':' or '='.
 func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
 	b := h.bufV[:0]
 	b = append(b, strMultipartFormData...)
 	b = append(b, ';', ' ')
 	b = append(b, strBoundary...)
 	b = append(b, '=')
-	b = append(b, boundary...)
+	b = appendTokenOrQuotedString(b, boundary)
 	h.bufV = b
 
 	h.SetContentTypeBytes(h.bufV)
+}
+
+// appendTokenOrQuotedString appends v to dst as it is if it is a token, and as
+// a quoted-string if it holds a byte a token can't (RFC 9110, sections 5.6.2
+// and 5.6.4).
+func appendTokenOrQuotedString(dst, v []byte) []byte {
+	quote := false
+	for _, c := range v {
+		if !validHeaderFieldByte(c) {
+			quote = true
+			break
+		}
+	}
+	if !quote {
+		return append(dst, v...)
+	}
+
+	dst = append(dst, '"')
+	for _, c := range v {
+		if c == '"' || c == '\\' {
+			dst = append(dst, '\\')
+		}
+		dst = append(dst, c)
+	}
+	return append(dst, '"')
 }
 
 // SetTrailer sets header Trailer value for chunked response
