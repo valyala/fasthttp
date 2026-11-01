@@ -479,6 +479,42 @@ func TestDeflateThreshold(t *testing.T) {
 	}
 }
 
+// Incompressible messages come out larger than they went in; at the size of
+// a pooled buffer that must not cost allocations.
+func TestDeflateIncompressibleAllocs(t *testing.T) {
+	if raceEnabled {
+		t.Skip("sync.Pool drops entries at random under the race detector")
+	}
+	for _, mode := range []CompressionMode{CompressionNoContextTakeover, CompressionContextTakeover} {
+		ts := startServer(t, &AcceptOptions{CompressionMode: mode}, echo)
+		c := ts.dial(t, &DialOptions{CompressionMode: mode})
+		ctx := c.Context()
+		for _, n := range []int{1<<12 - maxFrameHeader, 1<<16 - maxFrameHeader} {
+			msgs := make([][]byte, 4) // Distinct, so that context takeover finds nothing to refer to.
+			for i := range msgs {
+				msgs[i] = make([]byte, n)
+				_, _ = rand.Read(msgs[i])
+			}
+			i := 0
+			roundTrip := func() {
+				i++
+				if err := c.Write(ctx, MessageBinary, msgs[i%len(msgs)]); err != nil {
+					t.Fatal(err)
+				}
+				if _, p, err := c.Read(ctx); err != nil || len(p) != n {
+					t.Fatalf("read: %d, %v", len(p), err)
+				}
+			}
+			for range 10 {
+				roundTrip()
+			}
+			if a := testing.AllocsPerRun(100, roundTrip); a > 0 {
+				t.Fatalf("mode %d, %d bytes: %v allocations per round trip", mode, n, a)
+			}
+		}
+	}
+}
+
 func TestSlide(t *testing.T) {
 	var w []byte
 	for i, tc := range []struct {
