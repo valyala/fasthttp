@@ -6511,6 +6511,21 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			isNot:   []error{ErrUnknownTransferCoding},
 		},
 		{
+			name:    "request with an unknown transfer coding and no Host",
+			raw:     "POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			message: errRequestHostRequired.Error(),
+			secure:  errRequestHostRequired,
+			is:      []error{errRequestHostRequired},
+			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:    "request with an unknown transfer coding and the Host after it",
+			raw:     "POST / HTTP/1.1\r\nTransfer-Encoding: gzip, chunked\r\nHost: a\r\n\r\n",
+			message: `unsupported transfer-encoding: "gzip, chunked"`,
+			secure:  ErrUnknownTransferCoding,
+			is:      []error{ErrUnknownTransferCoding, ErrUnsupportedTransferEncoding},
+		},
+		{
 			name:    "request with an unknown transfer coding and a repeated Content-Length",
 			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
 			message: ErrDuplicateContentLength.Error(),

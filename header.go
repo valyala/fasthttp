@@ -3984,8 +3984,9 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	transferEncodingSeen := false
 	hostSeen := false
 	// deferredErr is an unknown transfer coding, reported once the other
-	// fields have been read, so that a fault in the framing is answered with
-	// 400 as RFC 9112, section 6.3 asks, rather than with 501.
+	// fields have been read and the required ones found, so that a fault in
+	// the message is answered with 400 as RFC 9112, sections 3.2 and 6.3 ask,
+	// rather than with 501.
 	var deferredErr error
 
 	var s headerScanner
@@ -4137,6 +4138,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 		return 0, 0, s.err
 	}
 	if deferredErr != nil {
+		// A required field that is missing is a fault in the message too
+		// (RFC 9112, section 3.2), reported before the unknown coding.
+		if err := h.validate(); err != nil {
+			return 0, 0, err
+		}
 		return 0, 0, deferredErr
 	}
 
