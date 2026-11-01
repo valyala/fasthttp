@@ -6309,6 +6309,100 @@ func TestHeaderNormalizingDisabled(t *testing.T) {
 	})
 }
 
+// A Transfer-Encoding that fasthttp can't read is an unknown transfer coding, a
+// 501, only if it is a well formed list with a correct framing. Otherwise it is
+// a fault in the framing of the message, a 400 (RFC 9112, sections 6.1 and 6.3).
+// A request needs chunked as the final coding, a response without it ends with
+// the connection.
+func TestHeaderReadTransferEncodingKinds(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		value string
+		// unknownRequest and unknownResponse say whether the value is an unknown
+		// transfer coding, and not a fault in the framing, for a request and for a
+		// response.
+		unknownRequest, unknownResponse bool
+	}{
+		// An unknown coding in front of chunked.
+		{"gzip, chunked", true, true},
+		{"GZIP,Chunked", true, true},
+		{"gzip \t,\t chunked", true, true},
+		{"identity, chunked", true, true},
+		{"x-custom, gzip, chunked", true, true},
+
+		// Without chunked only a response is framed, by the end of the connection.
+		{"gzip", false, true},
+		{"deflate", false, true},
+		{"gzip, deflate", false, true},
+
+		// Chunked applied twice, or not as the final coding.
+		{"chunked, chunked", false, false},
+		{"chunked, identity", false, false},
+		{"chunked, gzip", false, false},
+		{"gzip, chunked, chunked", false, false},
+		{"gzip, chunked, gzip", false, false},
+
+		// Lists that are not well formed.
+		{"chunked,", false, false},
+		{",chunked", false, false},
+		{"gzip,,chunked", false, false},
+		{"g z, chunked", false, false},
+		{"gzip(, chunked", false, false},
+
+		// Parameters and quoted strings are not looked into.
+		{"gzip;q=1, chunked", false, false},
+		{`"gzip", chunked`, false, false},
+		{"chunked;x=1", false, false},
+	}
+	for _, tt := range tests {
+		for _, request := range []bool{true, false} {
+			for _, secure := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%q/request=%v/secure=%v", tt.value, request, secure), func(t *testing.T) {
+					t.Parallel()
+
+					var err error
+					unknown := tt.unknownResponse
+					if request {
+						unknown = tt.unknownRequest
+						var h RequestHeader
+						h.secureErrorLogMessage = secure
+						_, err = h.parse([]byte("POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: " + tt.value + "\r\n\r\n"))
+					} else {
+						var h ResponseHeader
+						h.secureErrorLogMessage = secure
+						_, err = h.parse([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: " + tt.value + "\r\n\r\n"))
+					}
+					if err == nil {
+						t.Fatal("expecting an error")
+					}
+
+					if got := errors.Is(err, ErrUnknownTransferCoding); got != unknown {
+						t.Fatalf("errors.Is(%q, ErrUnknownTransferCoding) = %v. Expecting %v", err, got, unknown)
+					}
+					if unknown && !errors.Is(err, ErrUnsupportedTransferEncoding) {
+						t.Fatalf("an unknown coding, %q, is not an ErrUnsupportedTransferEncoding", err)
+					}
+
+					// What each error is called hasn't changed, only which one is
+					// returned.
+					want := ErrUnsupportedTransferEncoding
+					if unknown {
+						want = ErrUnknownTransferCoding
+					}
+					if secure {
+						if err != want { //nolint:errorlint // the very error is the point
+							t.Fatalf("unexpected error %q. Expecting %q", err, want)
+						}
+					} else if wantText := fmt.Sprintf("unsupported transfer-encoding: %q", tt.value); err.Error() != wantText {
+						t.Fatalf("unexpected error text %q. Expecting %q", err, wantText)
+					}
+				})
+			}
+		}
+	}
+}
+
 func TestHeaderReadErrorKinds(t *testing.T) {
 	t.Parallel()
 
@@ -6349,11 +6443,18 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 		},
 		{
 			name:    "request with an unknown transfer coding",
-			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip\r\n\r\n",
-			message: `unsupported transfer-encoding: "gzip"`,
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
+			message: `unsupported transfer-encoding: "gzip, chunked"`,
 			secure:  ErrUnknownTransferCoding,
 			is:      []error{ErrUnknownTransferCoding, ErrUnsupportedTransferEncoding},
 			isNot:   []error{ErrUnsupportedRequestMethod},
+		},
+		{
+			name:    "request with chunked that is not the final transfer coding",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked, identity\r\n\r\n",
+			message: `unsupported transfer-encoding: "chunked, identity"`,
+			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
 		},
 		{
 			name:    "request with a repeated Transfer-Encoding",

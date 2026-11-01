@@ -4482,8 +4482,23 @@ func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 		},
 		{
 			name:       "unknown transfer coding",
-			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip\r\n\r\n",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
 			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding without chunked",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "chunked that is not the final transfer coding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked, identity\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "chunked applied twice",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked, chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
 		},
 		{
 			name:       "repeated transfer-encoding",
