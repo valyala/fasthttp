@@ -78,6 +78,30 @@ func TestRequestHeaderSetMultipartFormBoundaryQuoted(t *testing.T) {
 	}
 }
 
+// A boundary can't break the header block: a CR or LF in it is written as a
+// space, as in any other header value, and the quotes keep the rest one
+// parameter value.
+func TestRequestHeaderSetMultipartFormBoundaryNewLines(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.SetMultipartFormBoundary("foo\r\nX-Injected: 1\r\n\r\nbar")
+	ct := h.ContentType()
+	if bytes.ContainsAny(ct, "\r\n") {
+		t.Fatalf("Content-Type %q holds a CR or LF", ct)
+	}
+	if want := `multipart/form-data; boundary="foo  X-Injected: 1    bar"`; string(ct) != want {
+		t.Fatalf("unexpected Content-Type %q. Expecting %q", ct, want)
+	}
+	_, params, err := mime.ParseMediaType(string(ct))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(params) != 1 || params["boundary"] != "foo  X-Injected: 1    bar" {
+		t.Fatalf("unexpected parameters %q", params)
+	}
+}
+
 func TestResponseHeaderAddContentType(t *testing.T) {
 	t.Parallel()
 
@@ -1584,8 +1608,9 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo\\:bar\"; charset=utf-8\r\n\r\n", "foo:bar")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\"b\"\r\n\r\n", `a"b`)
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\\b\"\r\n\r\n", `a\b`)
-	// a backslash before a byte that isn't a tspecial is literal, as in mime.ParseMediaType
-	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\b\"\r\n\r\n", `a\b`)
+	// any byte can be escaped, one that needs no escaping included (RFC 9110, section 5.6.4)
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\b\"\r\n\r\n", "ab")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"\\a\\b\\c\"\r\n\r\n", "abc")
 
 	// only a parameter named boundary is the boundary
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary2=1; boundary=abc\r\n\r\n", "abc")

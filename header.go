@@ -547,11 +547,12 @@ func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
 
 // parseQuotedString returns the content of a quoted-string, b being its bytes
 // after the opening quote, or nil if the closing quote is missing. A
-// quoted-pair is replaced by the byte it escapes (RFC 9110, section 5.6.4),
-// except that a backslash before a byte that isn't a tspecial is kept as it
-// is, like mime.ParseMediaType does, so that fasthttp and net/http read the
-// same boundary from a Content-Type. The result is a slice of b unless a
-// quoted-pair was decoded.
+// quoted-pair is replaced by the byte it escapes, whatever that byte is, as
+// RFC 9110, section 5.6.4 requires of a recipient. (mime.ParseMediaType keeps
+// a backslash that isn't before a tspecial, for MSIE, but a sender must not
+// generate such a quoted-pair and a boundary can't hold a backslash anyway,
+// RFC 2046, section 5.1.1.) The result is a slice of b unless a quoted-pair
+// was decoded.
 func parseQuotedString(b []byte) []byte {
 	var dst []byte
 	for i := 0; i < len(b); i++ {
@@ -562,7 +563,7 @@ func parseQuotedString(b []byte) []byte {
 			}
 			return dst
 		}
-		if c == '\\' && i+1 < len(b) && isTSpecial(b[i+1]) {
+		if c == '\\' && i+1 < len(b) {
 			if dst == nil {
 				dst = append(make([]byte, 0, len(b)), b[:i]...)
 			}
@@ -574,16 +575,6 @@ func parseQuotedString(b []byte) []byte {
 		}
 	}
 	return nil
-}
-
-// isTSpecial reports whether c is a tspecial (RFC 2045, section 5.1), a byte
-// that a parameter value has to be quoted to hold.
-func isTSpecial(c byte) bool {
-	switch c {
-	case '(', ')', '<', '>', '@', ',', ';', ':', '\\', '"', '/', '[', ']', '?', '=':
-		return true
-	}
-	return false
 }
 
 // appendTokenOrQuotedString appends v to dst as it is if it is a token, and as
