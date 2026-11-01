@@ -1616,7 +1616,23 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary2=1; boundary=abc\r\n\r\n", "abc")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary2=\"x;boundary=y\"; boundary=abc\r\n\r\n", "abc")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundaryx=abc\r\n\r\n", "")
-	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=a; boundary=b\r\n\r\n", "a")
+
+	// two boundary parameters are the boundary when they agree, and net/http
+	// rejects the header when they don't
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=a; boundary=a\r\n\r\n", "a")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\"; boundary=a\r\n\r\n", "a")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\:b\"; boundary=\"a:b\"\r\n\r\n", "a:b")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=a; boundary=b\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=a; foo=bar; boundary=b\r\n\r\n", "")
+
+	// an extended parameter or a continuation (RFC 2231) is left to the
+	// receiver: net/http decodes it and takes it over boundary=, so no boundary
+	// is read and the body is kept as it is
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary*=utf-8''abc; boundary=fallback\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=fallback; boundary*=utf-8''abc\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary*0=ab; boundary*1=c\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; BOUNDARY*0=\"ab\"; boundary*1=c\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary*=abc\r\n\r\n", "")
 
 	// an unquoted boundary runs to the next ';', whatever characters it holds
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=----=_Part_0_123.456\r\n\r\n", "----=_Part_0_123.456")
