@@ -545,6 +545,47 @@ func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
 	h.SetContentTypeBytes(h.bufV)
 }
 
+// parseQuotedString returns the content of a quoted-string, b being its bytes
+// after the opening quote, or nil if the closing quote is missing. A
+// quoted-pair is replaced by the byte it escapes (RFC 9110, section 5.6.4),
+// except that a backslash before a byte that isn't a tspecial is kept as it
+// is, like mime.ParseMediaType does, so that fasthttp and net/http read the
+// same boundary from a Content-Type. The result is a slice of b unless a
+// quoted-pair was decoded.
+func parseQuotedString(b []byte) []byte {
+	var dst []byte
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c == '"' {
+			if dst == nil {
+				return b[:i]
+			}
+			return dst
+		}
+		if c == '\\' && i+1 < len(b) && isTSpecial(b[i+1]) {
+			if dst == nil {
+				dst = append(make([]byte, 0, len(b)), b[:i]...)
+			}
+			i++
+			c = b[i]
+		}
+		if dst != nil {
+			dst = append(dst, c)
+		}
+	}
+	return nil
+}
+
+// isTSpecial reports whether c is a tspecial (RFC 2045, section 5.1), a byte
+// that a parameter value has to be quoted to hold.
+func isTSpecial(c byte) bool {
+	switch c {
+	case '(', ')', '<', '>', '@', ',', ';', ':', '\\', '"', '/', '[', ']', '?', '=':
+		return true
+	}
+	return false
+}
+
 // appendTokenOrQuotedString appends v to dst as it is if it is a token, and as
 // a quoted-string if it holds a byte a token can't (RFC 9110, sections 5.6.2
 // and 5.6.4).
@@ -1074,8 +1115,9 @@ func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
 // from 'multipart/form-data; boundary=...' Content-Type.
 //
 // A quoted boundary may contain ';' and ends at its closing quote. It is
-// returned without the quotes and with backslash escapes left as written, and
-// nil is returned if the closing quote is missing.
+// returned without the quotes and with its quoted-pairs decoded, so that
+// boundary="foo\:bar" gives foo:bar, and nil is returned if the closing quote
+// is missing.
 func (h *RequestHeader) MultipartFormBoundary() []byte {
 	b := h.ContentType()
 	if !caseInsensitiveHasPrefix(b, strMultipartFormData) {
@@ -1120,17 +1162,7 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 
 		b = b[len(strBoundary)+1:]
 		if len(b) > 0 && b[0] == '"' {
-			n = 1
-			for n < len(b) && b[n] != '"' {
-				if b[n] == '\\' {
-					n++
-				}
-				n++
-			}
-			if n >= len(b) {
-				return nil
-			}
-			return b[1:n]
+			return parseQuotedString(b[1:])
 		}
 		if n = bytes.IndexByte(b, ';'); n >= 0 {
 			b = b[:n]

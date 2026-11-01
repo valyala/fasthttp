@@ -2280,6 +2280,7 @@ func TestRequestMultipartFormQuotedBoundary(t *testing.T) {
 		boundary    string
 	}{
 		{`multipart/form-data; boundary="foo;bar"`, "foo;bar"},
+		{`multipart/form-data; boundary="foo\:bar"`, "foo:bar"},
 		{`multipart/form-data; boundary2=1; boundary=foobar`, "foobar"},
 	} {
 		t.Run(tc.contentType, func(t *testing.T) {
@@ -2310,9 +2311,10 @@ func TestRequestMultipartFormQuotedBoundary(t *testing.T) {
 }
 
 // A form that was parsed as it was read is marshaled again when the request is
-// written, with the boundary in the Content-Type. The boundary has to be quoted
-// when it holds a character a token can't, such as ':', or a receiver that
-// follows RFC 9110, like net/http, doesn't find it.
+// written, with the boundary in the Content-Type. The boundary has to be read
+// as net/http reads it, with its quoted-pairs decoded, and quoted when it is
+// written if it holds a character a token can't, such as ':', or a receiver
+// that follows RFC 9110, like net/http, doesn't find the parts.
 func TestRequestMultipartFormBoundaryWrittenBack(t *testing.T) {
 	t.Parallel()
 
@@ -2325,6 +2327,10 @@ func TestRequestMultipartFormBoundaryWrittenBack(t *testing.T) {
 		{`multipart/form-data; boundary="foo:bar"`, "foo:bar"},
 		{`multipart/form-data; boundary2=1; boundary="foo:bar"`, "foo:bar"},
 		{`multipart/form-data; boundary="----=_Part_0_123.456"`, "----=_Part_0_123.456"},
+
+		// A quoted-pair stands for the byte it escapes.
+		{`multipart/form-data; boundary="foo\:bar"`, "foo:bar"},
+		{`multipart/form-data; boundary="\(foo\)\=bar\?"`, "(foo)=bar?"},
 	} {
 		t.Run(tc.contentType, func(t *testing.T) {
 			t.Parallel()
@@ -2332,6 +2338,10 @@ func TestRequestMultipartFormBoundaryWrittenBack(t *testing.T) {
 			body := "--" + tc.boundary + "\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--" + tc.boundary + "--\r\n"
 			s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
 				tc.contentType, len(body), body)
+
+			// net/http reads the field from the request as it was sent, so
+			// fasthttp has to read the same boundary to forward it.
+			testNetHTTPReadsMultipartFormValue(t, []byte(s))
 
 			var req Request
 			if err := req.Read(bufio.NewReader(strings.NewReader(s))); err != nil {
@@ -2352,17 +2362,8 @@ func TestRequestMultipartFormBoundaryWrittenBack(t *testing.T) {
 			}
 			written := buf.Bytes()
 
-			// net/http finds the boundary and the field.
-			r, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(written)))
-			if err != nil {
-				t.Fatalf("unexpected error: %v. Request: %q", err, written)
-			}
-			if err := r.ParseMultipartForm(1 << 20); err != nil {
-				t.Fatalf("net/http can't parse the request: %v. Request: %q", err, written)
-			}
-			if vv := r.MultipartForm.Value["key"]; len(vv) != 1 || vv[0] != "value" {
-				t.Fatalf("net/http reads the values %q", vv)
-			}
+			// net/http finds the boundary and the field in the request written back.
+			testNetHTTPReadsMultipartFormValue(t, written)
 
 			// So does fasthttp.
 			var back Request
@@ -2378,6 +2379,23 @@ func TestRequestMultipartFormBoundaryWrittenBack(t *testing.T) {
 				t.Fatalf("fasthttp reads the values %q", vv)
 			}
 		})
+	}
+}
+
+// testNetHTTPReadsMultipartFormValue checks that net/http reads the field
+// key=value from the raw multipart/form-data request.
+func testNetHTTPReadsMultipartFormValue(t *testing.T, raw []byte) {
+	t.Helper()
+
+	r, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(raw)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v. Request: %q", err, raw)
+	}
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		t.Fatalf("net/http can't parse the request: %v. Request: %q", err, raw)
+	}
+	if vv := r.MultipartForm.Value["key"]; len(vv) != 1 || vv[0] != "value" {
+		t.Fatalf("net/http reads the values %q. Request: %q", vv, raw)
 	}
 }
 

@@ -70,7 +70,7 @@ func TestRequestHeaderSetMultipartFormBoundaryQuoted(t *testing.T) {
 				if params["boundary"] != tt.boundary {
 					t.Fatalf("net/http reads the boundary %q. Expecting %q", params["boundary"], tt.boundary)
 				}
-				if !strings.ContainsAny(tt.boundary, `"\\`) && string(h.MultipartFormBoundary()) != tt.boundary {
+				if string(h.MultipartFormBoundary()) != tt.boundary {
 					t.Fatalf("fasthttp reads the boundary %q. Expecting %q", h.MultipartFormBoundary(), tt.boundary)
 				}
 			})
@@ -1574,9 +1574,18 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	// a quoted boundary ends at its closing quote, whatever is inside it
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo;bar\"\r\n\r\n", "foo;bar")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo;bar\"; charset=utf-8\r\n\r\n", "foo;bar")
-	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\"b;c\"\r\n\r\n", `a\"b;c`)
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\"b;c\"\r\n\r\n", `a"b;c`)
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"abc\r\n\r\n", "")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"abc\\\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"abc\\\"\r\n\r\n", "")
+
+	// a quoted-pair stands for the byte it escapes
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo\\:bar\"\r\n\r\n", "foo:bar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo\\:bar\"; charset=utf-8\r\n\r\n", "foo:bar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\"b\"\r\n\r\n", `a"b`)
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\\b\"\r\n\r\n", `a\b`)
+	// a backslash before a byte that isn't a tspecial is literal, as in mime.ParseMediaType
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\b\"\r\n\r\n", `a\b`)
 
 	// only a parameter named boundary is the boundary
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary2=1; boundary=abc\r\n\r\n", "abc")
