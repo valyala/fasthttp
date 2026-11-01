@@ -231,6 +231,13 @@ type deflater struct {
 }
 
 func (d *deflater) Write(p []byte) (int, error) {
+	if n := len(d.dst.b) + len(p); n > cap(d.dst.b) && bufClass(n) < bufClasses {
+		// Incompressible data comes out larger than its input.
+		g := getBuf(n)
+		g.b = append(g.b, d.dst.b...)
+		d.dst.b, g.b = g.b, d.dst.b
+		putBuf(g)
+	}
 	d.dst.b = append(d.dst.b, p...)
 	return len(p), nil
 }
