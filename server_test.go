@@ -4506,6 +4506,41 @@ func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 			statusCode: StatusBadRequest,
 		},
 		{
+			name:       "unknown transfer coding with parameters",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: x-custom;level=1, chunked\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding with a quoted parameter",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: x-custom;note=\"a,b\", chunked\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "unknown transfer coding followed by other fields",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nX-Foo: bar\r\n\r\n",
+			statusCode: StatusNotImplemented,
+		},
+		{
+			name:       "parameters on chunked",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked;x=1\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and a repeated transfer-encoding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nTransfer-Encoding: identity\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and chunked repeated in a second transfer-encoding",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nTransfer-Encoding: chunked\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
+			name:       "unknown transfer coding and a repeated content-length",
+			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
+			statusCode: StatusBadRequest,
+		},
+		{
 			name:       "missing method",
 			raw:        "FOO\r\nHost: example.com\r\n\r\n",
 			statusCode: StatusBadRequest,

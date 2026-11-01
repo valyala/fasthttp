@@ -6336,12 +6336,16 @@ func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 		{"deflate", false, true},
 		{"gzip, deflate", false, true},
 
-		// Chunked applied twice, or not as the final coding.
+		// Chunked applied twice.
 		{"chunked, chunked", false, false},
-		{"chunked, identity", false, false},
-		{"chunked, gzip", false, false},
 		{"gzip, chunked, chunked", false, false},
-		{"gzip, chunked, gzip", false, false},
+
+		// Chunked not as the final coding: a request can't be framed, while a
+		// response runs to the end of the connection, with a coding fasthttp
+		// doesn't read.
+		{"chunked, identity", false, true},
+		{"chunked, gzip", false, true},
+		{"gzip, chunked, gzip", false, true},
 
 		// Lists that are not well formed.
 		{"chunked,", false, false},
@@ -6349,11 +6353,32 @@ func TestHeaderReadTransferEncodingKinds(t *testing.T) {
 		{"gzip,,chunked", false, false},
 		{"g z, chunked", false, false},
 		{"gzip(, chunked", false, false},
-
-		// Parameters and quoted strings are not looked into.
-		{"gzip;q=1, chunked", false, false},
 		{`"gzip", chunked`, false, false},
+
+		// Parameters on a coding other than chunked (RFC 9110, section 10.1.4),
+		// with whitespace wherever OWS and BWS allow it.
+		{"x-custom;level=1, chunked", true, true},
+		{"x-custom ; level = 1 , chunked", true, true},
+		{"x-custom;level=1;mode=fast, chunked", true, true},
+		{`x-custom;note="a,b;c=d", chunked`, true, true},
+		{`x-custom;note="a\"b\\", chunked`, true, true},
+		{"gzip;q=1, chunked", true, true},
+		{"gzip, x-custom;level=1", false, true},
+
+		// Parameters that are not well formed.
+		{"x-custom;, chunked", false, false},
+		{"x-custom;=1, chunked", false, false},
+		{"x-custom;level, chunked", false, false},
+		{"x-custom;level=, chunked", false, false},
+		{"x-custom;level=a b, chunked", false, false},
+		{`x-custom;level="1, chunked`, false, false},
+		{`x-custom;level="1"x, chunked`, false, false},
+		{"x-custom;;level=1, chunked", false, false},
+		{"x-custom;level=1;, chunked", false, false},
+
+		// Chunked defines no parameters (RFC 9112, section 7.1).
 		{"chunked;x=1", false, false},
+		{"gzip, chunked;x=1", false, false},
 	}
 	for _, tt := range tests {
 		for _, request := range []bool{true, false} {
@@ -6450,10 +6475,47 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			isNot:   []error{ErrUnsupportedRequestMethod},
 		},
 		{
+			name:    "request with an unknown transfer coding that has parameters",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: x-custom;level=1, chunked\r\n\r\n",
+			message: `unsupported transfer-encoding: "x-custom;level=1, chunked"`,
+			secure:  ErrUnknownTransferCoding,
+			is:      []error{ErrUnknownTransferCoding, ErrUnsupportedTransferEncoding},
+		},
+		{
+			name:    "request with an unknown transfer coding followed by other fields",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\nX-Foo: bar\r\nContent-Length: 3\r\n\r\n",
+			message: `unsupported transfer-encoding: "gzip, chunked"`,
+			secure:  ErrUnknownTransferCoding,
+			is:      []error{ErrUnknownTransferCoding, ErrUnsupportedTransferEncoding},
+		},
+		{
 			name:    "request with chunked that is not the final transfer coding",
 			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked, identity\r\n\r\n",
 			message: `unsupported transfer-encoding: "chunked, identity"`,
 			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:    "request with parameters on chunked",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked;x=1\r\n\r\n",
+			message: `unsupported transfer-encoding: "chunked;x=1"`,
+			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
+			// The fault in the framing comes first, whatever the order of the fields.
+			name:    "request with an unknown transfer coding and a repeated Transfer-Encoding",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\nTransfer-Encoding: identity\r\n\r\n",
+			message: "too many transfer-encoding headers",
+			secure:  ErrUnsupportedTransferEncoding,
+			isNot:   []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:    "request with an unknown transfer coding and a repeated Content-Length",
+			raw:     "POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: gzip, chunked\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n",
+			message: ErrDuplicateContentLength.Error(),
+			secure:  ErrDuplicateContentLength,
+			is:      []error{ErrDuplicateContentLength},
 			isNot:   []error{ErrUnknownTransferCoding},
 		},
 		{
@@ -6494,6 +6556,22 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 			message:  "too many transfer-encoding headers",
 			secure:   ErrUnsupportedTransferEncoding,
 			isNot:    []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:     "response with an unknown transfer coding and a repeated Transfer-Encoding",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\nTransfer-Encoding: chunked\r\n\r\n",
+			response: true,
+			message:  "too many transfer-encoding headers",
+			secure:   ErrUnsupportedTransferEncoding,
+			isNot:    []error{ErrUnknownTransferCoding},
+		},
+		{
+			name:     "response with chunked that is not the final transfer coding",
+			raw:      "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked, gzip\r\n\r\n",
+			response: true,
+			message:  `unsupported transfer-encoding: "chunked, gzip"`,
+			secure:   ErrUnknownTransferCoding,
+			is:       []error{ErrUnknownTransferCoding, ErrUnsupportedTransferEncoding},
 		},
 	}
 	for _, tt := range tests {
