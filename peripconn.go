@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"crypto/tls"
+	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -86,6 +87,16 @@ func (c *perIPConn) Close() error {
 	c.perIPConnCounter.Unregister(c.ip)
 	return err
 }
+
+// CloseWrite half-closes the connection if the wrapped one can.
+func (c *perIPConn) CloseWrite() error {
+	if cw, ok := c.Conn.(interface{ CloseWrite() error }); ok {
+		return cw.CloseWrite()
+	}
+	return errCloseWriteUnsupported
+}
+
+var errCloseWriteUnsupported = errors.New("fasthttp: connection doesn't support CloseWrite")
 
 func (c *perIPTLSConn) Close() error {
 	if c.closed.Swap(true) {

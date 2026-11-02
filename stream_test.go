@@ -104,3 +104,31 @@ func TestStreamReaderClose(t *testing.T) {
 		t.Fatalf("timeout when reading tail data")
 	}
 }
+
+func TestNewStreamReaderStartsOnFirstRead(t *testing.T) {
+	started := make(chan struct{})
+	r := NewStreamReader(func(w *bufio.Writer) {
+		close(started)
+		_, _ = w.WriteString("data")
+	})
+	select {
+	case <-started:
+		t.Fatal("the writer ran before the first Read")
+	case <-time.After(20 * time.Millisecond):
+	}
+	buf := make([]byte, 16)
+	n, err := r.Read(buf)
+	if err != nil || string(buf[:n]) != "data" {
+		t.Fatalf("Read() = %q, %v", buf[:n], err)
+	}
+	<-started
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	never := NewStreamReader(func(*bufio.Writer) { t.Error("an unread stream's writer ran") })
+	if err := never.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+}

@@ -1,8 +1,11 @@
 package fasthttp
 
 import (
+	"errors"
+	"io"
 	"net"
 	"testing"
+	"time"
 )
 
 var _ tlsConn = &perIPTLSConn{}
@@ -97,5 +100,93 @@ func TestPerIPConnCounterIPv6(t *testing.T) {
 	}
 	if c := wrapPerIPConn(s, perIPTestDial(t, "[::ffff:1.2.3.4]:2222")); c != nil {
 		t.Fatal("::ffff:1.2.3.4 counted apart from 1.2.3.4")
+	}
+}
+
+type closeRecorder struct {
+	net.Conn
+
+	closed *bool
+}
+
+func (c closeRecorder) Close() error { *c.closed = true; return nil }
+
+// A stale Close, which the shutdown path performs routinely, must not reach
+// another connection or release its per-IP slot.
+func TestPerIPConnStaleCloseIsNoop(t *testing.T) {
+	counter := &perIPConnCounter{}
+	var firstClosed, secondClosed bool
+	firstIP, secondIP := perIPKey{1}, perIPKey{2}
+	first := newPerIPConn(closeRecorder{closed: &firstClosed}, firstIP, counter)
+	counter.Register(firstIP)
+
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !firstClosed {
+		t.Fatal("first Close didn't close the connection")
+	}
+
+	// Shutdown closes an idle conn, then the worker closes it again after
+	// another connection from a different IP was accepted.
+	counter.Register(secondIP)
+	second := newPerIPConn(closeRecorder{closed: &secondClosed}, secondIP, counter)
+
+	_ = first.Close() // stale reference
+
+	if secondClosed {
+		t.Fatal("a stale Close closed an unrelated connection")
+	}
+	if got := counter.m[secondIP]; got != 1 {
+		t.Fatalf("per-IP count for the live connection = %d, want 1", got)
+	}
+	_ = second
+}
+
+func TestPerIPConnCloseWrite(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	client, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	accepted, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	counter := &perIPConnCounter{}
+	key, _ := getPerIPKey(accepted)
+	counter.Register(key)
+	conn := newPerIPConn(accepted, key, counter)
+	defer conn.Close()
+	halfCloser, ok := conn.(interface{ CloseWrite() error })
+	if !ok {
+		t.Fatal("perIPConn doesn't offer CloseWrite")
+	}
+	if err := halfCloser.CloseWrite(); err != nil {
+		t.Fatalf("CloseWrite() error: %v", err)
+	}
+	if err := client.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
+		t.Fatalf("peer read after CloseWrite = %v, want EOF", err)
+	}
+
+	pipeConn, pipePeer := net.Pipe()
+	defer pipePeer.Close()
+	counter.Register(key)
+	piped := newPerIPConn(pipeConn, key, counter)
+	defer piped.Close()
+	pipedHalfCloser, ok := piped.(interface{ CloseWrite() error })
+	if !ok {
+		t.Fatal("perIPConn doesn't offer CloseWrite")
+	}
+	if err := pipedHalfCloser.CloseWrite(); !errors.Is(err, errCloseWriteUnsupported) {
+		t.Fatalf("CloseWrite() on a connection without half-close = %v", err)
 	}
 }

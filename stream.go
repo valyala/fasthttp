@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"io"
+	"net"
 	"sync"
 
 	"github.com/valyala/fasthttp/fasthttputil"
@@ -22,6 +23,10 @@ type StreamWriter func(w *bufio.Writer)
 //
 // The returned reader may be passed to Response.SetBodyStream.
 //
+// sw runs in its own goroutine, started by the first Read: it doesn't run
+// for a body that is never read, and what it touches besides its writer is
+// not read concurrently before then.
+//
 // Close must be called on the returned reader after all the required data
 // has been read. Otherwise goroutine leak may occur.
 //
@@ -30,25 +35,44 @@ func NewStreamReader(sw StreamWriter) io.ReadCloser {
 	pc := fasthttputil.NewPipeConns()
 	pw := pc.Conn1()
 	pr := pc.Conn2()
+	return &streamReader{Conn: pr, run: func() {
+		var bw *bufio.Writer
+		v := streamWriterBufPool.Get()
+		if v == nil {
+			bw = bufio.NewWriter(pw)
+		} else {
+			bw = v.(*bufio.Writer) //nolint:forcetypeassert
+			bw.Reset(pw)
+		}
+		go func() {
+			sw(bw)
+			bw.Flush()
+			pw.Close()
 
-	var bw *bufio.Writer
-	v := streamWriterBufPool.Get()
-	if v == nil {
-		bw = bufio.NewWriter(pw)
-	} else {
-		bw = v.(*bufio.Writer) //nolint:forcetypeassert
-		bw.Reset(pw)
-	}
+			streamWriterBufPool.Put(bw)
+		}()
+	}}
+}
 
-	go func() {
-		sw(bw)
-		bw.Flush()
-		pw.Close()
+// streamReader is the read end of a StreamWriter's pipe. It stays a net.Conn,
+// so a Read blocked on the writer can be ended by a Close from another
+// goroutine.
+type streamReader struct {
+	net.Conn
 
-		streamWriterBufPool.Put(bw)
-	}()
+	start sync.Once
+	run   func()
+}
 
-	return pr
+func (r *streamReader) Read(p []byte) (int, error) {
+	r.start.Do(r.run)
+	return r.Conn.Read(p)
+}
+
+// Close ends the stream; a writer that never started doesn't run.
+func (r *streamReader) Close() error {
+	r.start.Do(func() {})
+	return r.Conn.Close()
 }
 
 var streamWriterBufPool sync.Pool

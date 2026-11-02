@@ -21,6 +21,8 @@ var (
 	strCRLFCRLF                 = []byte("\r\n\r\n")
 	strHTTP                     = []byte("http")
 	strHTTPS                    = []byte("https")
+	strHTTP2                    = []byte("HTTP/2")
+	strHTTP3                    = []byte("HTTP/3")
 	strHTTP11                   = []byte("HTTP/1.1")
 	strColon                    = []byte(":")
 	strColonSlashSlash          = []byte("://")
