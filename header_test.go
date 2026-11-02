@@ -555,6 +555,24 @@ func TestRequestRawHeaders(t *testing.T) {
 	})
 }
 
+func TestRequestHeaderAllRawSpecialHeadersOnce(t *testing.T) {
+	var h RequestHeader
+	h.DisableSpecialHeader()
+	h.Set(HeaderHost, "example.com")
+	h.Set(HeaderContentType, "text/plain")
+	h.Set(HeaderContentLength, "5")
+	h.Set("X-Custom", "1")
+	seen := map[string]int{}
+	for key := range h.All() {
+		seen[strings.ToLower(string(key))]++
+	}
+	for _, name := range []string{"host", "content-type", "content-length", "x-custom"} {
+		if seen[name] != 1 {
+			t.Fatalf("All() yielded %s %d times with special headers disabled: %v", name, seen[name], seen)
+		}
+	}
+}
+
 func TestRequestDisableSpecialHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -6213,5 +6231,84 @@ func TestResponseHeaderTransferEncodingOnWire(t *testing.T) {
 				t.Fatalf("Transfer-Encoding on wire = %t, want %t:\n%s", got, want, wire)
 			}
 		})
+	}
+}
+
+func TestResponseHeaderSetDateIsKept(t *testing.T) {
+	var h ResponseHeader
+	h.Set(HeaderDate, "Sun, 01 Nov 2026 10:00:00 GMT")
+	if got := string(h.Peek(HeaderDate)); got != "Sun, 01 Nov 2026 10:00:00 GMT" {
+		t.Fatalf("Peek(Date) = %q", got)
+	}
+	// On the wire the default Date still replaces it.
+	if s := h.String(); strings.Count(s, "Date:") != 1 || strings.Contains(s, "10:00:00") {
+		t.Fatalf("header with a set Date = %q", s)
+	}
+	h.noDefaultDate = true
+	if s := h.String(); !strings.Contains(s, "Date: Sun, 01 Nov 2026 10:00:00 GMT") {
+		t.Fatalf("header with NoDefaultDate = %q", s)
+	}
+}
+
+func TestResponseHeaderDateKeyUnderDisableNormalizing(t *testing.T) {
+	const date = "Sun, 01 Nov 2026 10:00:00 GMT"
+	var h ResponseHeader
+	h.DisableNormalizing()
+	h.Set("date", date)
+	if got := string(h.Peek("date")); got != date {
+		t.Fatalf("Peek(date) = %q", got)
+	}
+	if s := h.String(); strings.Count(s, "ate:") != 1 || strings.Contains(s, date) {
+		t.Fatalf("header with a set date = %q, want one default Date", s)
+	}
+	h.noDefaultDate = true
+	if s := h.String(); !strings.Contains(s, "date: "+date) || strings.Count(s, "ate:") != 1 {
+		t.Fatalf("header with NoDefaultDate = %q", s)
+	}
+	h.Add("date", date)
+	if s := h.String(); strings.Count(s, "ate:") != 1 {
+		t.Fatalf("header after Add(date) = %q", s)
+	}
+}
+
+// A message a protocol populated serializes over HTTP/1 as HTTP/1.1; HTTP/1.0
+// stays what it is.
+func TestHeaderProtocolSerializesAsHTTP1(t *testing.T) {
+	var req RequestHeader
+	req.SetMethod(MethodGet)
+	req.SetRequestURI("/x")
+	req.SetHost("example.com")
+	req.SetProtocol("HTTP/2")
+	if got := string(req.Protocol()); got != "HTTP/2" {
+		t.Fatalf("Protocol() = %q", got)
+	}
+	if s := req.String(); !strings.HasPrefix(s, "GET /x HTTP/1.1\r\n") {
+		t.Fatalf("request line = %q", s)
+	}
+	req.SetProtocol("HTTP/1.0")
+	if s := req.String(); !strings.HasPrefix(s, "GET /x HTTP/1.0\r\n") {
+		t.Fatalf("HTTP/1.0 request line = %q", s)
+	}
+	req.SetProtocol("HTTP/3")
+	if s := req.String(); !strings.HasPrefix(s, "GET /x HTTP/1.1\r\n") {
+		t.Fatalf("HTTP/3 request line = %q", s)
+	}
+	// Any other value is written as set.
+	req.SetProtocol("HTTP/3.3")
+	if s := req.String(); !strings.HasPrefix(s, "GET /x HTTP/3.3\r\n") {
+		t.Fatalf("HTTP/3.3 request line = %q", s)
+	}
+	var resp ResponseHeader
+	resp.SetProtocol([]byte("HTTP/2"))
+	resp.SetStatusCode(StatusOK)
+	if got := string(resp.Protocol()); got != "HTTP/2" {
+		t.Fatalf("Protocol() = %q", got)
+	}
+	if s := resp.String(); !strings.HasPrefix(s, "HTTP/1.1 200 OK\r\n") {
+		t.Fatalf("status line = %q", s)
+	}
+	resp.SetProtocol([]byte("HTTP/1.0"))
+	if s := resp.String(); !strings.HasPrefix(s, "HTTP/1.0 200 OK\r\n") {
+		t.Fatalf("HTTP/1.0 status line = %q", s)
 	}
 }
