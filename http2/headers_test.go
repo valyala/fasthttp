@@ -178,6 +178,39 @@ func TestRequestTrailersKeepRepeatedFields(t *testing.T) {
 	}
 }
 
+func TestResponseTrailersKeepRepeatedFields(t *testing.T) {
+	var resp fasthttp.Response
+	fields := []hpack.HeaderField{
+		{Name: "x-checksum", Value: "one"},
+		{Name: "x-checksum", Value: "two"},
+	}
+	if err := populateResponseTrailers(&fasthttp.ProtocolClientConn{}, &resp, fields); err != nil {
+		t.Fatalf("populateResponseTrailers() error: %v", err)
+	}
+	values := resp.Header.PeekAll("X-Checksum")
+	if len(values) != 2 || string(values[0]) != "one" || string(values[1]) != "two" {
+		t.Fatalf("trailer values = %q, want [one two]", values)
+	}
+	if keys := resp.Header.PeekTrailerKeys(); len(keys) != 1 {
+		t.Fatalf("trailer keys = %q, want one entry", keys)
+	}
+}
+
+func TestResponseHeadersRejectTE(t *testing.T) {
+	var response fasthttp.Response
+	if _, _, err := populateResponse(&fasthttp.ProtocolClientConn{}, &response, []hpack.HeaderField{
+		{Name: ":status", Value: "200"},
+		{Name: "te", Value: "trailers"},
+	}, false); err == nil {
+		t.Fatal("response TE header was accepted")
+	}
+	if err := populateResponseTrailers(&fasthttp.ProtocolClientConn{}, &response, []hpack.HeaderField{
+		{Name: "te", Value: "trailers"},
+	}); err == nil {
+		t.Fatal("response trailer TE field was accepted")
+	}
+}
+
 // A TE response field is dropped with the other connection-specific fields
 // (RFC 9113 §8.2.2), in final and informational responses alike.
 func TestOutboundResponseHeadersDropTE(t *testing.T) {
