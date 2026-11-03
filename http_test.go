@@ -6398,3 +6398,279 @@ func TestRequestBodyStreamWarning(t *testing.T) {
 		t.Fatalf("unexpected log message: got %q, want %q", out, expectedWarning)
 	}
 }
+
+// Trailers of a message a protocol populated are framed chunked over HTTP/1.
+func TestProtocolPopulatedMessageWritesTrailersChunked(t *testing.T) {
+	var req Request
+	req.SetRequestURI("http://example.com/x")
+	req.Header.SetMethod(MethodPost)
+	req.Header.SetProtocol("HTTP/2")
+	_ = req.Header.AddTrailer("X-T")
+	req.Header.Set("X-T", "v")
+	req.SetBodyString("abc")
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := req.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	_ = bw.Flush()
+	wire := buf.String()
+	if !strings.Contains(wire, "Transfer-Encoding: chunked") || !strings.Contains(wire, "\r\nX-T: v\r\n\r\n") || !strings.HasPrefix(wire, "POST /x HTTP/1.1\r\n") {
+		t.Fatalf("request on the wire = %q", wire)
+	}
+	var resp Response
+	resp.Header.SetProtocol([]byte("HTTP/2"))
+	_ = resp.Header.AddTrailer("X-T")
+	resp.Header.Set("X-T", "v")
+	resp.SetBodyString("abc")
+	buf.Reset()
+	bw = bufio.NewWriter(&buf)
+	if err := resp.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	_ = bw.Flush()
+	wire = buf.String()
+	if !strings.Contains(wire, "Transfer-Encoding: chunked") || !strings.Contains(wire, "\r\nX-T: v\r\n\r\n") || !strings.HasPrefix(wire, "HTTP/1.1 200 OK\r\n") {
+		t.Fatalf("response on the wire = %q", wire)
+	}
+}
+
+// A streamed response with a declared length and trailers is framed chunked
+// over HTTP/1 so the trailers reach the peer.
+func TestResponseWriteStreamedBodyWithTrailersIsChunked(t *testing.T) {
+	for _, protocol := range []string{"HTTP/2", ""} {
+		var resp Response
+		if protocol != "" {
+			resp.Header.SetProtocol([]byte(protocol))
+		}
+		_ = resp.Header.AddTrailer("X-T")
+		resp.Header.Set("X-T", "v")
+		resp.SetBodyStream(strings.NewReader("hello"), 5)
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := resp.Write(bw); err != nil {
+			t.Fatal(err)
+		}
+		_ = bw.Flush()
+		wire := buf.String()
+		if strings.Contains(wire, "Content-Length:") || !strings.Contains(wire, "Transfer-Encoding: chunked") ||
+			!strings.Contains(wire, "\r\n5\r\nhello\r\n0\r\nX-T: v\r\n\r\n") {
+			t.Fatalf("protocol %q: response on the wire = %q", protocol, wire)
+		}
+	}
+}
+
+// A streamed request with a declared length and trailers is framed chunked
+// over HTTP/1 so the trailers reach the peer.
+func TestRequestWriteStreamedBodyWithTrailersIsChunked(t *testing.T) {
+	var req Request
+	req.SetRequestURI("http://example.com/x")
+	req.Header.SetMethod(MethodPost)
+	_ = req.Header.AddTrailer("X-T")
+	req.Header.Set("X-T", "v")
+	req.SetBodyStream(strings.NewReader("hello"), 5)
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := req.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	_ = bw.Flush()
+	wire := buf.String()
+	if strings.Contains(wire, "Content-Length:") || !strings.Contains(wire, "Transfer-Encoding: chunked") ||
+		!strings.Contains(wire, "\r\n5\r\nhello\r\n0\r\nX-T: v\r\n\r\n") {
+		t.Fatalf("request on the wire = %q", wire)
+	}
+}
+
+// In raw mode a sized stream with declared trailers follows the buffered
+// raw path: chunked when the caller declared no framing, an error when the
+// caller declared a Content-Length.
+func TestRequestWriteRawStreamedBodyWithTrailers(t *testing.T) {
+	var req Request
+	req.Header.DisableSpecialHeader()
+	req.SetRequestURI("/x")
+	req.Header.SetMethod(MethodPost)
+	req.Header.Set(HeaderHost, "example.com")
+	_ = req.Header.AddTrailer("X-T")
+	req.Header.Set("X-T", "v")
+	req.SetBodyStream(strings.NewReader("hello"), 5)
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := req.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	_ = bw.Flush()
+	wire := buf.String()
+	if strings.Contains(wire, "Content-Length:") || !strings.Contains(wire, "Transfer-Encoding: chunked") ||
+		!strings.Contains(wire, "\r\n5\r\nhello\r\n0\r\nX-T: v\r\n\r\n") {
+		t.Fatalf("raw request on the wire = %q", wire)
+	}
+	// The peer parses exactly one request.
+	var parsed Request
+	if err := parsed.Read(bufio.NewReader(&buf)); err != nil {
+		t.Fatalf("parsing the written request: %v", err)
+	}
+	if string(parsed.Body()) != "hello" || string(parsed.Header.Peek("X-T")) != "v" {
+		t.Fatalf("parsed body %q trailer %q", parsed.Body(), parsed.Header.Peek("X-T"))
+	}
+
+	var declared Request
+	declared.Header.DisableSpecialHeader()
+	declared.SetRequestURI("/x")
+	declared.Header.SetMethod(MethodPost)
+	declared.Header.Set(HeaderHost, "example.com")
+	declared.Header.Set(HeaderContentLength, "5")
+	_ = declared.Header.AddTrailer("X-T")
+	declared.SetBodyStream(strings.NewReader("hello"), 5)
+	if err := declared.Write(bufio.NewWriter(&buf)); !errors.Is(err, errConflictingRequestFraming) {
+		t.Fatalf("declared Content-Length with trailers: err = %v, want errConflictingRequestFraming", err)
+	}
+}
+
+// Chunked framing chosen for trailers still enforces the declared size.
+func TestSizedStreamWithTrailersKeepsSizeChecks(t *testing.T) {
+	write := func(body string, size int, response bool) error {
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		var err error
+		if response {
+			var resp Response
+			_ = resp.Header.AddTrailer("X-T")
+			resp.Header.Set("X-T", "v")
+			resp.SetBodyStream(strings.NewReader(body), size)
+			err = resp.Write(bw)
+		} else {
+			var req Request
+			req.SetRequestURI("http://example.com/x")
+			req.Header.SetMethod(MethodPost)
+			_ = req.Header.AddTrailer("X-T")
+			req.Header.Set("X-T", "v")
+			req.SetBodyStream(strings.NewReader(body), size)
+			err = req.Write(bw)
+		}
+		if err == nil {
+			_ = bw.Flush()
+			if !strings.Contains(buf.String(), "\r\n0\r\nX-T: v\r\n\r\n") {
+				t.Fatalf("response=%v: trailer missing from %q", response, buf.String())
+			}
+		}
+		return err
+	}
+	for _, response := range []bool{false, true} {
+		if err := write("abc", 3, response); err != nil {
+			t.Fatalf("response=%v exact: %v", response, err)
+		}
+		if err := write("xy", 3, response); err == nil || !strings.Contains(err.Error(), "instead of 3 bytes") {
+			t.Fatalf("response=%v short: err = %v", response, err)
+		}
+		if err := write("abcdef", 3, response); !errors.Is(err, errBodyStreamTooLong) {
+			t.Fatalf("response=%v long: err = %v", response, err)
+		}
+	}
+}
+
+// Chunked framing for trailers keeps the default Content-Type a sized
+// stream carries; zero-sized and unsized streams never had one.
+func TestSizedStreamWithTrailersDefaultContentType(t *testing.T) {
+	write := func(size int, configure func(*Request)) string {
+		var req Request
+		req.SetRequestURI("http://example.com/x")
+		req.Header.SetMethod(MethodPost)
+		_ = req.Header.AddTrailer("X-T")
+		req.Header.Set("X-T", "v")
+		req.SetBodyStream(strings.NewReader("abc"[:max(size, 0)]), size)
+		if configure != nil {
+			configure(&req)
+		}
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		if err := req.Write(bw); err != nil {
+			t.Fatalf("size %d: %v", size, err)
+		}
+		_ = bw.Flush()
+		return buf.String()
+	}
+	const contentType = "Content-Type: application/octet-stream\r\n"
+	if got := write(3, nil); !strings.Contains(got, contentType) || !strings.Contains(got, "Transfer-Encoding: chunked") {
+		t.Fatalf("sized stream lost the default Content-Type:\n%q", got)
+	}
+	if got := write(0, nil); strings.Contains(got, "Content-Type:") {
+		t.Fatalf("zero-sized stream got a Content-Type:\n%q", got)
+	}
+	if got := write(-1, nil); strings.Contains(got, "Content-Type:") {
+		t.Fatalf("unsized stream got a Content-Type:\n%q", got)
+	}
+	if got := write(-1, func(req *Request) { req.SetBodyStream(strings.NewReader("abc"), -1) }); strings.Contains(got, "Content-Type:") || !strings.Contains(got, "3\r\nabc\r\n") {
+		t.Fatalf("unsized stream with content got a Content-Type or lost its body:\n%q", got)
+	}
+	if got := write(3, func(req *Request) { req.Header.SetNoDefaultContentType(true) }); strings.Contains(got, "Content-Type:") {
+		t.Fatalf("NoDefaultContentType ignored:\n%q", got)
+	}
+	if got := write(3, func(req *Request) { req.Header.SetContentType("text/plain") }); !strings.Contains(got, "Content-Type: text/plain\r\n") {
+		t.Fatalf("explicit Content-Type lost:\n%q", got)
+	}
+	if got := write(3, func(req *Request) { req.Header.DisableSpecialHeader() }); strings.Contains(got, "Content-Type:") {
+		t.Fatalf("raw mode got a default Content-Type:\n%q", got)
+	}
+}
+
+type lastBytesErrReader struct {
+	data []byte
+	err  error
+}
+
+func (r *lastBytesErrReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	if len(r.data) == 0 {
+		return n, r.err
+	}
+	return n, nil
+}
+
+type emptyReads struct{}
+
+func (emptyReads) Read([]byte) (int, error) { return 0, nil }
+
+func TestSizedBodyReaderFollowsFixedSizeRules(t *testing.T) {
+	chunked := func(r io.Reader, size int) (string, error) {
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		err := writeBodyChunkedSized(bw, r, int64(size))
+		_ = bw.Flush()
+		return buf.String(), err
+	}
+	readErr := errors.New("reader failed")
+	if _, err := chunked(&lastBytesErrReader{data: []byte("abc"), err: readErr}, 3); !errors.Is(err, readErr) {
+		t.Fatalf("error returned with the last bytes: got %v", err)
+	}
+	// An error returned with intermediate bytes, then more bytes and EOF.
+	if _, err := chunked(io.MultiReader(&lastBytesErrReader{data: []byte("a"), err: readErr}, strings.NewReader("bc")), 3); !errors.Is(err, readErr) {
+		t.Fatalf("error returned with intermediate bytes: got %v", err)
+	}
+	// EOF returned together with the last bytes of a short stream.
+	if _, err := chunked(&lastBytesErrReader{data: []byte("ab"), err: io.EOF}, 3); err == nil || !strings.Contains(err.Error(), "instead of 3 bytes") {
+		t.Fatalf("short EOF with bytes: got %v", err)
+	}
+	if _, err := chunked(emptyReads{}, 3); !errors.Is(err, io.ErrNoProgress) {
+		t.Fatalf("endless empty reads: got %v", err)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString("abcdef"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	wire, err := chunked(f, 3)
+	if err != nil || wire != "3\r\nabc\r\n0\r\n" {
+		t.Fatalf("grown file: wire %q err %v", wire, err)
+	}
+}

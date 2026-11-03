@@ -210,7 +210,8 @@ type Server struct {
 	// the server to respond with any final status code. The handler should return
 	// StatusContinue (100) to accept the request and proceed to read the body,
 	// or any other status code to reject it and close the connection since the
-	// client may have already started sending the request body.
+	// client may have already started sending the request body. A multiplexed
+	// protocol resets the request's stream instead of closing the connection.
 	//
 	// The ctx provides access to request headers and connection metadata (e.g.
 	// RemoteAddr for IP-based filtering). The response must not be modified.
@@ -231,11 +232,11 @@ type Server struct {
 	// by ServeTLS, ServeTLSEmbed, ListenAndServeTLS, ListenAndServeTLSEmbed,
 	// AppendCert, AppendCertEmbed and NextProto.
 	//
-	// Note that this value is cloned by ServeTLS, ServeTLSEmbed, ListenAndServeTLS
-	// and ListenAndServeTLSEmbed, so it's not possible to modify the configuration
-	// with methods like tls.Config.SetSessionTicketKeys.
-	// To use SetSessionTicketKeys, use Server.Serve with a TLS Listener
-	// instead.
+	// ServeTLS, ServeTLSEmbed, ListenAndServeTLS and ListenAndServeTLSEmbed
+	// clone this value for their listener. AppendCert, AppendCertEmbed,
+	// NextProto and RegisterProtocol mutate it in place so a caller that builds
+	// its own tls.Listener from the same config observes certificates and ALPN
+	// registrations, as it did before protocol registration was added.
 	TLSConfig *tls.Config
 
 	// FormValueFunc customizes the behavior of RequestCtx.FormValue.
@@ -248,12 +249,27 @@ type Server struct {
 	// consistent with net/http.
 	FormValueFunc FormValueFunc
 
+	// MaxProtocolRequestCtxCacheBytes caps the body capacity a multiplexed
+	// protocol connection keeps for reuse. The memory is freed when the
+	// connection closes, not by the GC.
+	//
+	// Zero means 128MB per connection. Negative disables the cache.
+	MaxProtocolRequestCtxCacheBytes int
+
 	nextProtos map[string]ServeHandler
+	protocols  []*registeredProtocol
 
 	concurrencyCh     chan struct{}
 	concurrencyChOnce sync.Once
 
-	idleConns map[net.Conn]*atomic.Int64
+	idleConns     map[net.Conn]*atomic.Int64
+	protocolConns map[net.Conn]struct{}
+
+	// The registered protocols' TLS requirements and the user's
+	// GetConfigForClient, which RegisterProtocol wraps.
+	protocolTLS            protocolTLSTable
+	protocolTLSCallback    func(*tls.ClientHelloInfo) (*tls.Config, error)
+	protocolTLSCallbackSet bool
 
 	// done is written under mu, but RequestCtx.Done() reads it without mu,
 	// possibly after the handler has returned, so it must be atomic.
@@ -262,6 +278,13 @@ type Server struct {
 	// Whether done was already closed. A ShutdownWithContext that gives up on
 	// its context leaves it closed but in place, and it must not be closed twice.
 	doneClosed bool
+
+	// protocolDone is the shutdown signal protocol connections watch. Unlike
+	// done, it is never reused: a protocol acts on it at once, so one left
+	// closed by a timed-out shutdown would drain every later connection.
+	protocolMu       sync.Mutex
+	protocolDone     chan struct{}
+	protocolStopping bool
 
 	// Server name for sending in response headers.
 	//
@@ -277,6 +300,11 @@ type Server struct {
 	//
 	// Concurrency only works if you either call Serve once, or only ServeConn multiple times.
 	// It works with ListenAndServe as well.
+	//
+	// This bounds connections, not requests. A multiplexed protocol runs many
+	// concurrent handlers per connection, so it bounds them by its own limit
+	// on concurrent streams instead. TimeoutHandler still caps the handlers it
+	// runs at Concurrency.
 	Concurrency int
 
 	// Per-connection buffer size for requests' reading.
@@ -325,6 +353,8 @@ type Server struct {
 	// 'Connection: close' header is added to the last response.
 	//
 	// By default unlimited number of requests may be served per connection.
+	//
+	// HTTP/1 only: a registered protocol enforces its own limit, if any.
 	MaxRequestsPerConn int
 
 	// MaxKeepaliveDuration is a no-op and only left here for backwards compatibility.
@@ -370,7 +400,10 @@ type Server struct {
 	// Whether to disable keep-alive connections.
 	//
 	// The server will close all the incoming connections after sending
-	// the first response to client if this option is set to true.
+	// the first response to client if this option is set to true. A
+	// multiplexed protocol connection (HTTP/2) is drained instead: after the
+	// response it announces the close with GOAWAY, lets its streams finish
+	// and closes.
 	//
 	// By default keep-alive connections are enabled.
 	DisableKeepalive bool
@@ -454,6 +487,10 @@ type Server struct {
 	//     * HOST -> Host
 	//     * content-type -> Content-Type
 	//     * cONTENT-lenGTH -> Content-Length
+	//
+	// Over a protocol with lowercase wire names (HTTP/2) the names reach the
+	// handler lowercase when normalizing is disabled; Peek with canonical
+	// names misses them.
 	DisableHeaderNamesNormalizing bool
 
 	// NoDefaultServerHeader, when set to true, causes the default Server header
@@ -551,7 +588,18 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 	}
 }
 
-// RequestConfig configure the per request deadline and body limits.
+// RequestConfig configures the per-request timeouts and body limit that
+// HeaderReceived returns.
+//
+// Over HTTP/1 the timeouts become deadlines on the connection. For a
+// protocol stream (HTTP/2) ReadTimeout bounds the request body from the end
+// of the header block: the header block itself is bounded by
+// Server.ReadTimeout, which a HeaderReceived override can't govern, and
+// waiting for the next frame header on an active connection is bounded by
+// neither; an extended CONNECT request carries no body timer. WriteTimeout
+// bounds queuing the whole response to the connection after the handler
+// returns, not its delivery; a stream a registered StreamHandler took over
+// has no response timer.
 type RequestConfig struct {
 	// ReadTimeout is the maximum duration for reading the entire
 	// request body.
@@ -680,11 +728,14 @@ type RequestCtx struct {
 	connID                  uint64
 	connRequestNum          uint64
 	hijackNoResponse        bool
+	hijackRejected          bool
 	deadlineMu              sync.Mutex
 	deadlineUpdatesDisabled atomic.Bool
 	handlerDeadlineSet      atomic.Bool
 	handlerReadDeadlineSet  bool
 	handlerWriteDeadlineSet atomic.Bool
+	protocolStream          ProtocolStream
+	protocolOwner           *ProtocolServerContext
 }
 
 // EarlyHints allows the server to hint to the browser what resources a page would need
@@ -711,52 +762,92 @@ type RequestCtx struct {
 //	   ctx.SetBody([]byte("<html><head></head><body><h1>Hello from Fasthttp</h1></body></html>"))
 //	}
 func (ctx *RequestCtx) EarlyHints() error {
+	links := ctx.Response.Header.PeekAll(b2s(strLink))
+	if len(links) == 0 {
+		return nil
+	}
+	if ctx.protocolStream != nil {
+		writer, ok := ctx.protocolStream.(InformationalResponseWriter)
+		if !ok {
+			return ErrProtocolNotSupported
+		}
+		// HTTP/1 writes only the links; the final response header would leak
+		// unrelated fields, Set-Cookie included, into the 103.
+		var hints ResponseHeader
+		hints.SetNoDefaultContentType(true)
+		for _, link := range links {
+			if len(link) != 0 {
+				hints.AddBytesV(HeaderLink, link)
+			}
+		}
+		return writer.WriteInformational(StatusEarlyHints, &hints)
+	}
 	if !ctx.Request.Header.IsHTTP11() {
 		return nil
 	}
-	links := ctx.Response.Header.PeekAll(b2s(strLink))
-	if len(links) > 0 {
-		c := acquireWriter(ctx)
-		defer releaseWriter(ctx.s, c)
-		_, err := c.Write(strEarlyHints)
+	c := acquireWriter(ctx)
+	defer releaseWriter(ctx.s, c)
+	_, err := c.Write(strEarlyHints)
+	if err != nil {
+		return err
+	}
+	for _, l := range links {
+		if len(l) == 0 {
+			continue
+		}
+		_, err = c.Write(strLink)
 		if err != nil {
 			return err
 		}
-		for _, l := range links {
-			if len(l) == 0 {
-				continue
-			}
-			_, err = c.Write(strLink)
-			if err != nil {
-				return err
-			}
-			_, err = c.Write(strColon)
-			if err != nil {
-				return err
-			}
-			_, err = c.Write(strSpace)
-			if err != nil {
-				return err
-			}
-			_, err = c.Write(l)
-			if err != nil {
-				return err
-			}
-			_, err = c.Write(strCRLF)
-			if err != nil {
-				return err
-			}
+		_, err = c.Write(strColon)
+		if err != nil {
+			return err
+		}
+		_, err = c.Write(strSpace)
+		if err != nil {
+			return err
+		}
+		_, err = c.Write(l)
+		if err != nil {
+			return err
 		}
 		_, err = c.Write(strCRLF)
 		if err != nil {
 			return err
 		}
-		err = c.Flush()
-		if err != nil {
-			return err
-		}
+	}
+	_, err = c.Write(strCRLF)
+	if err != nil {
+		return err
+	}
+	err = c.Flush()
+	if err != nil {
+		return err
 	}
 	return nil
+}
+
+// Push starts a server push request associated with ctx.
+func (ctx *RequestCtx) Push(target string, opts *PushOptions) error {
+	pusher, ok := ctx.protocolStream.(Pusher)
+	if !ok {
+		return ErrProtocolNotSupported
+	}
+	return pusher.Push(target, opts)
+}
+
+// AcceptStream accepts a bidirectional request stream. The request handler
+// returns before handler runs; the stream is closed when handler returns. It
+// does not change the connection-oriented semantics of Hijack.
+func (ctx *RequestCtx) AcceptStream(handler StreamHandler) error {
+	if handler == nil {
+		return errors.New("fasthttp: stream handler is nil")
+	}
+	accepter, ok := ctx.protocolStream.(StreamAccepter)
+	if !ok {
+		return ErrProtocolNotSupported
+	}
+	return accepter.AcceptStream(handler)
 }
 
 // HijackHandler must process the hijacked connection c.
@@ -803,7 +894,23 @@ type HijackHandler func(c net.Conn)
 //   - WebSocket ( https://en.wikipedia.org/wiki/WebSocket )
 //   - HTTP/2.0 ( https://en.wikipedia.org/wiki/HTTP/2 )
 func (ctx *RequestCtx) Hijack(handler HijackHandler) {
+	if ctx.TryHijack(handler) != nil {
+		if rejecter, ok := ctx.protocolStream.(HijackRejectionNotifier); ok {
+			ctx.hijackRejected = true
+			rejecter.HijackRejected(ctx.hijackNoResponse)
+		}
+	}
+}
+
+// TryHijack registers handler for connection hijacking when the current
+// request owns the physical connection. Multiplexed protocols return
+// ErrHijackNotSupported without changing the response.
+func (ctx *RequestCtx) TryHijack(handler HijackHandler) error {
+	if ctx.protocolStream != nil {
+		return ErrHijackNotSupported
+	}
 	ctx.hijackHandler = handler
+	return nil
 }
 
 // HijackSetNoResponse changes the behavior of hijacking a request.
@@ -813,6 +920,12 @@ func (ctx *RequestCtx) Hijack(handler HijackHandler) {
 // HijackHandler supplied in the Hijack function.
 func (ctx *RequestCtx) HijackSetNoResponse(noResponse bool) {
 	ctx.hijackNoResponse = noResponse
+	// The stream holds the final setting when the handler returns.
+	if ctx.hijackRejected {
+		if rejecter, ok := ctx.protocolStream.(HijackRejectionNotifier); ok {
+			rejecter.HijackRejected(noResponse)
+		}
+	}
 }
 
 // Hijacked returns true after Hijack is called.
@@ -947,7 +1060,13 @@ func (ctx *RequestCtx) Conn() net.Conn {
 }
 
 // SetReadDeadline sets the read deadline on the underlying connection.
+//
+// It returns ErrProtocolNotSupported for a request served by a multiplexed
+// protocol, whose connection other requests share.
 func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
+	if ctx.protocolStream != nil {
+		return ErrProtocolNotSupported
+	}
 	ctx.deadlineMu.Lock()
 	defer ctx.deadlineMu.Unlock()
 	if ctx.c == nil {
@@ -965,7 +1084,13 @@ func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
 }
 
 // SetWriteDeadline sets the write deadline on the underlying connection.
+//
+// It returns ErrProtocolNotSupported for a request served by a multiplexed
+// protocol, whose connection other requests share.
 func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
+	if ctx.protocolStream != nil {
+		return ErrProtocolNotSupported
+	}
 	ctx.deadlineMu.Lock()
 	defer ctx.deadlineMu.Unlock()
 	if ctx.c == nil {
@@ -1027,6 +1152,13 @@ func (ctx *RequestCtx) reset() {
 
 	ctx.hijackHandler = nil
 	ctx.hijackNoResponse = false
+	ctx.hijackRejected = false
+	// Only a protocol stream sets these. HTTP/1 skips the store: Done and
+	// Err may still read them after the handler returned.
+	if ctx.protocolStream != nil {
+		ctx.protocolStream = nil
+		ctx.protocolOwner = nil
+	}
 }
 
 type firstByteReader struct {
@@ -1857,8 +1989,13 @@ func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 // NextProto adds nph to be processed when key is negotiated when TLS
 // connection is established.
 //
-// This function can only be called before the server is started.
+// This function can only be called before the server is started. A key that
+// was already registered through RegisterProtocol must not be reused here:
+// both share one dispatch table and the later registration would replace the
+// protocol's entry.
 func (s *Server) NextProto(key string, nph ServeHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.nextProtos == nil {
 		s.nextProtos = make(map[string]ServeHandler)
 	}
@@ -2206,19 +2343,33 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.stop.Store(1)
-	defer s.stop.Store(0)
+	// Without a listener only protocol connections are stopped: HTTP/1
+	// connections served directly keep running, as they always have.
+	hasListener := s.ln != nil
+	var lnerr error
+	if hasListener {
+		s.stop.Store(1)
+		defer s.stop.Store(0)
 
-	if s.ln == nil {
-		return nil
+		lnerr = s.closeListenersLocked()
+
+		if done := s.done.Load(); done != nil && !s.doneClosed {
+			close(*done)
+			s.doneClosed = true
+		}
 	}
-
-	lnerr := s.closeListenersLocked()
-
-	if done := s.done.Load(); done != nil && !s.doneClosed {
-		close(*done)
-		s.doneClosed = true
+	s.protocolMu.Lock()
+	s.protocolStopping = true
+	if s.protocolDone != nil {
+		close(s.protocolDone)
+		s.protocolDone = nil
 	}
+	s.protocolMu.Unlock()
+	defer func() {
+		s.protocolMu.Lock()
+		s.protocolStopping = false
+		s.protocolMu.Unlock()
+	}()
 
 	// Closing the listener will make Serve() call Stop on the worker pool.
 	// Setting .stop to 1 will make serveConn() break out of its loop.
@@ -2227,19 +2378,24 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	defer ticker.Stop()
 
 	for {
-		s.closeIdleConns()
+		if hasListener {
+			s.closeIdleConns()
 
-		if open := s.open.Load(); open == 0 {
-			// There may be a pending request to call ctx.Done(). Therefore, we only set it to nil when open == 0.
-			s.done.Store(nil)
-			s.doneClosed = false
-			return lnerr
+			if open := s.open.Load(); open == 0 {
+				// There may be a pending request to call ctx.Done(). Therefore, we only set it to nil when open == 0.
+				s.done.Store(nil)
+				s.doneClosed = false
+				return lnerr
+			}
+		} else if s.protocolConnCount() == 0 {
+			return nil
 		}
 		// This is not an optimal solution but using a sync.WaitGroup
 		// here causes data races as it's hard to prevent Add() to be called
 		// while Wait() is waiting.
 		select {
 		case <-ctx.Done():
+			s.closeProtocolConns()
 			return ctx.Err()
 		case <-ticker.C:
 			continue
@@ -2372,12 +2528,13 @@ func (s *Server) ServeConn(c net.Conn) error {
 
 	s.open.Add(1)
 
-	err := s.serveConnCounted(c, false)
+	protocolServed, err := s.serveConnCounted(c, false)
 
 	if err != errHijacked {
 		errc := c.Close()
 		s.setState(c, StateClosed)
-		if err == nil {
+		// A protocol closes its connection itself.
+		if err == nil && (!protocolServed || !errors.Is(errc, net.ErrClosed)) {
 			err = errc
 		}
 	} else {
@@ -2482,56 +2639,80 @@ func (s *Server) serveConnCleanup(countConcurrency bool) {
 }
 
 func (s *Server) serveConn(c net.Conn) error {
-	return s.serveConnCounted(c, true)
+	_, err := s.serveConnCounted(c, true)
+	return err
 }
 
-func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
+// serveConnCounted reports whether a registered protocol served c, which then
+// closed it itself.
+func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) (protocolServed bool, err error) {
 	defer s.serveConnCleanup(countConcurrency)
 	if countConcurrency {
 		s.concurrency.Add(1)
 	}
 
 	proto, err := s.getNextProto(c)
+	var cleartextPrefix []byte
+	drainReplay := false
+	var cleartextReadDeadline time.Time
 	if err != nil {
-		return err
+		return false, err
 	}
 	if handler, ok := s.nextProtos[proto]; ok {
 		// Remove read or write deadlines that might have previously been set.
 		// The next handler is responsible for setting its own deadlines.
 		if s.ReadTimeout > 0 || s.WriteTimeout > 0 {
 			if err := c.SetDeadline(zeroTime); err != nil {
-				return err
+				return false, err
 			}
 		}
 
-		return handler(c)
+		return s.protocolForALPN(proto) != nil, handler(c)
+	}
+	connTime := time.Now()
+	var idleConnTime *atomic.Int64
+	firstByteReported := false
+	if len(s.protocols) != 0 && proto == "" {
+		// Registered first, so Shutdown closes a connection that never sends
+		// a byte, as it does without protocols.
+		idleConnTime = s.registerIdleConn(c, connTime.Add(5*time.Second))
+		detection, detectErr := s.detectCleartextProtocol(c, idleConnTime)
+		if detection.deadlineFailed {
+			s.unregisterIdleConn(c, idleConnTime)
+			return false, detectErr
+		}
+		// A failed read is left to the HTTP/1 loop, which handles it as it
+		// would without protocols.
+		if detectErr == nil && detection.protocol != nil {
+			if s.ReadTimeout > 0 {
+				if err := c.SetReadDeadline(zeroTime); err != nil {
+					s.unregisterIdleConn(c, idleConnTime)
+					return false, err
+				}
+			}
+			return true, s.serveProtocolConn(c, detection.protocol, protocolConnStart{
+				connTime:     connTime,
+				idleConnTime: idleConnTime,
+				prefaceRead:  true,
+				active:       detection.active,
+			})
+		}
+		cleartextPrefix = detection.prefix
+		cleartextReadDeadline = detection.deadline
+		firstByteReported = detection.active
 	}
 
-	connTime := time.Now()
 	if s.LazyRequestTime {
 		// The refresher keeps the coarse second the idle bookkeeping runs on.
 		serverDateOnce.Do(updateServerDate)
 	}
 
-	s.idleConnsMu.Lock()
-	if s.idleConns == nil {
-		s.idleConns = make(map[net.Conn]*atomic.Int64)
-	}
-	idleConnTime, ok := s.idleConns[c]
-	if !ok {
-		v := idleConnTimePool.Get()
-		if v == nil {
-			v = &atomic.Int64{}
-		}
-		idleConnTime = v.(*atomic.Int64) //nolint:forcetypeassert
-		s.idleConns[c] = idleConnTime
-	}
-
 	// Count the connection as Idle after 5 seconds.
 	// Same as net/http.Server:
 	// https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
-	idleConnTime.Store(connTime.Add(time.Second * 5).Unix())
-	s.idleConnsMu.Unlock()
+	if idleConnTime == nil {
+		idleConnTime = s.registerIdleConn(c, connTime.Add(5*time.Second))
+	}
 
 	serverName := s.getServerName()
 	serverNameLine := s.getServerNameLine(serverName)
@@ -2564,12 +2745,16 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		continueReadingRequest = true
 	)
+	if len(cleartextPrefix) != 0 {
+		br = acquireReader(ctx)
+		br.Reset(&protocolPrefaceReader{conn: c, prefix: cleartextPrefix})
+	}
 	for {
 		connRequestNum++
 
 		if connRequestNum == 1 {
 			// Apply ReadTimeout to the first request byte.
-			if s.ReadTimeout > 0 {
+			if s.ReadTimeout > 0 && cleartextReadDeadline.IsZero() {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					break
 				}
@@ -2617,14 +2802,18 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Request.secureErrorLogMessage = s.SecureErrorLogMessage
 		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
+		var reqConf RequestConfig
 		if err == nil {
-			idleConnTime.Store(0)
-			s.setState(c, StateActive)
+			// Cleartext detection may have reported the first byte already.
+			if connRequestNum > 1 || !firstByteReported {
+				idleConnTime.Store(0)
+				s.setState(c, StateActive)
+			}
 
 			// ReadTimeout restarts at the first byte after an idle wait or a
 			// byte-reader read; a new connection's peek keeps the deadline
-			// armed when it opened.
-			if s.ReadTimeout > 0 && (connRequestNum > 1 || s.ReduceMemoryUsage) {
+			// armed when it opened, as does cleartext protocol detection.
+			if s.ReadTimeout > 0 && (connRequestNum > 1 || (s.ReduceMemoryUsage && cleartextReadDeadline.IsZero())) {
 				if err = c.SetReadDeadline(time.Now().Add(s.ReadTimeout)); err != nil {
 					break
 				}
@@ -2662,7 +2851,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 			if err == nil {
 				if onHdrRecv := s.HeaderReceived; onHdrRecv != nil {
-					reqConf := onHdrRecv(&ctx.Request.Header)
+					reqConf = onHdrRecv(&ctx.Request.Header)
 					if reqConf.ReadTimeout > 0 {
 						deadline := time.Now().Add(reqConf.ReadTimeout)
 						if err = c.SetReadDeadline(deadline); err != nil {
@@ -2731,6 +2920,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 			if err != nil {
 				bw = s.writeErrorResponse(bw, ctx, serverName, err)
+				// The parser stopped inside the replayed cleartext prefix:
+				// the rest of what the peer sent is still unread.
+				var netErr net.Error
+				timedOut := errors.As(err, &netErr) && netErr.Timeout()
+				drainReplay = len(cleartextPrefix) != 0 && connRequestNum == 1 && !timedOut
 			}
 			break
 		}
@@ -2838,6 +3032,20 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
+			if len(s.protocols) != 0 {
+				if protocol := s.matchProtocolUpgrade(ctx, br, bw); protocol != nil {
+					// The protocol sets its own deadlines; the HTTP/1 request
+					// deadline would kill an otherwise active connection.
+					if err = c.SetDeadline(zeroTime); err != nil {
+						break
+					}
+					if handled, upgradeErr := s.serveUpgradedProtocolConn(c, protocol, ctx, idleConnTime, reqConf); handled {
+						protocolServed = true
+						err = upgradeErr
+						break
+					}
+				}
+			}
 			s.Handler(ctx)
 		}
 
@@ -2880,6 +3088,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.hijackHandler = nil
 		hijackNoResponse = ctx.hijackNoResponse && hijackHandler != nil
 		ctx.hijackNoResponse = false
+		ctx.hijackRejected = false
 
 		if writeTimeout > 0 || previousWriteTimeout > 0 {
 			ctx.deadlineMu.Lock()
@@ -3066,6 +3275,9 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		}
 	}
 
+	if drainReplay {
+		drainReplayedInput(c)
+	}
 	if br != nil {
 		releaseReader(s, br)
 	}
@@ -3082,15 +3294,51 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		releaseRequestStream(reqStream)
 	}
 
-	s.idleConnsMu.Lock()
-	ic, ok := s.idleConns[c]
-	if ok {
-		idleConnTimePool.Put(ic)
-		delete(s.idleConns, c)
-	}
-	s.idleConnsMu.Unlock()
+	s.unregisterIdleConn(c, idleConnTime)
 
-	return err
+	return protocolServed, err
+}
+
+const (
+	replayDrainTimeout = 100 * time.Millisecond
+	replayDrainLimit   = 64 << 10
+)
+
+// drainReplayedInput reads, bounded, what followed a replayed cleartext
+// prefix whose request didn't parse, so the close doesn't discard unread
+// input (a reset instead of a clean close). Without a registered protocol
+// the reader buffers the whole segment before parsing.
+func drainReplayedInput(c net.Conn) {
+	if closer, ok := c.(interface{ CloseWrite() error }); ok {
+		_ = closer.CloseWrite()
+	}
+	if err := c.SetReadDeadline(time.Now().Add(replayDrainTimeout)); err != nil {
+		return
+	}
+	_, _ = io.CopyN(io.Discard, c, replayDrainLimit)
+}
+
+func (s *Server) matchProtocolUpgrade(ctx *RequestCtx, br *bufio.Reader, bw *bufio.Writer) *registeredProtocol {
+	// RFC 9110 7.8: an Upgrade field in an HTTP/1.0 request must be ignored.
+	if !ctx.Request.Header.IsHTTP11() {
+		return nil
+	}
+	if ctx.IsTLS() || ctx.Request.IsBodyStream() {
+		return nil
+	}
+	// Buffered bytes would be invisible to the protocol, which reads the
+	// connection directly.
+	if (br != nil && br.Buffered() != 0) || (bw != nil && bw.Buffered() != 0) {
+		return nil
+	}
+	if !ctx.Request.Header.ConnectionUpgrade() {
+		return nil
+	}
+	token := ctx.Request.Header.Peek(HeaderUpgrade)
+	if len(token) == 0 {
+		return nil
+	}
+	return s.protocolForUpgradeToken(token)
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {
@@ -3303,6 +3551,8 @@ func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
 func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage bool) {
 	ctx.c = conn
 	ctx.remoteAddr = nil
+	ctx.protocolStream = nil
+	ctx.protocolOwner = nil
 	ctx.logger.logger = logger
 	ctx.Request.logger = logger
 	ctx.connID = nextConnID()
@@ -3530,10 +3780,35 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 
 var idleConnTimePool sync.Pool
 
+var closedProtocolDone = func() chan struct{} {
+	done := make(chan struct{})
+	close(done)
+	return done
+}()
+
+// protocolDoneChan returns the shutdown signal for a protocol connection
+// starting now: closed already while a shutdown is in progress, otherwise the
+// one the next shutdown closes.
+// protocolDoneLocked returns the shutdown signal for a protocol connection;
+// protocolMu is held.
+func (s *Server) protocolDoneLocked() <-chan struct{} {
+	if s.protocolStopping {
+		return closedProtocolDone
+	}
+	if s.protocolDone == nil {
+		s.protocolDone = make(chan struct{})
+	}
+	return s.protocolDone
+}
+
 func (s *Server) closeIdleConns() {
 	s.idleConnsMu.Lock()
 	now := time.Now().Unix()
 	for c, ict := range s.idleConns {
+		// A protocol connection winds itself down once Done closes.
+		if _, ok := s.protocolConns[c]; ok {
+			continue
+		}
 		t := ict.Load()
 		if t != 0 && now-t >= 0 {
 			_ = c.Close()
@@ -3543,6 +3818,18 @@ func (s *Server) closeIdleConns() {
 		}
 	}
 	s.idleConnsMu.Unlock()
+}
+
+func (s *Server) closeProtocolConns() {
+	s.idleConnsMu.Lock()
+	conns := make([]net.Conn, 0, len(s.protocolConns))
+	for conn := range s.protocolConns {
+		conns = append(conns, conn)
+	}
+	s.idleConnsMu.Unlock()
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
 }
 
 func (s *Server) closeListenersLocked() error {

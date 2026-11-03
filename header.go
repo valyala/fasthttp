@@ -105,10 +105,11 @@ type RequestHeader struct {
 
 	noCopy noCopy
 
-	method     []byte
-	requestURI []byte
-	host       []byte
-	userAgent  []byte
+	method          []byte
+	requestURI      []byte
+	host            []byte
+	userAgent       []byte
+	connectProtocol []byte
 
 	// stores an immutable copy of headers as they were received from the
 	// wire.
@@ -182,6 +183,9 @@ func (h *ResponseHeader) SetStatusMessage(statusMessage []byte) {
 }
 
 // SetProtocol sets response protocol bytes.
+//
+// Protocol reports the value as set. HTTP/2 and HTTP/3, which have no HTTP/1
+// wire form, serialize as HTTP/1.1.
 func (h *ResponseHeader) SetProtocol(protocol []byte) {
 	h.protocol = initHeaderValueBytes(h.protocol, protocol)
 }
@@ -1199,6 +1203,9 @@ func (h *header) Protocol() []byte {
 }
 
 // SetProtocol sets HTTP request protocol.
+//
+// Protocol reports the value as set. HTTP/2 and HTTP/3, which have no HTTP/1
+// wire form, serialize as HTTP/1.1.
 func (h *RequestHeader) SetProtocol(protocol string) {
 	h.protocol = initHeaderValueString(h.protocol, protocol)
 	h.noHTTP11 = !bytes.Equal(h.protocol, strHTTP11)
@@ -1208,6 +1215,17 @@ func (h *RequestHeader) SetProtocol(protocol string) {
 func (h *RequestHeader) SetProtocolBytes(protocol []byte) {
 	h.protocol = initHeaderValueBytes(h.protocol, protocol)
 	h.noHTTP11 = !bytes.Equal(h.protocol, strHTTP11)
+}
+
+// ConnectProtocol returns the extended CONNECT protocol. It is empty for a
+// regular request.
+func (h *RequestHeader) ConnectProtocol() []byte {
+	return h.connectProtocol
+}
+
+// SetConnectProtocol sets the extended CONNECT protocol.
+func (h *RequestHeader) SetConnectProtocol(protocol string) {
+	h.connectProtocol = initHeaderValueString(h.connectProtocol, protocol)
 }
 
 // RequestURI returns RequestURI from the first HTTP request line.
@@ -1292,6 +1310,28 @@ func (h *RequestHeader) IsQuery() bool {
 // IsHTTP11 returns true if the header is HTTP/1.1.
 func (h *header) IsHTTP11() bool {
 	return !h.noHTTP11
+}
+
+// isMultiplexedProtocol reports whether p names a protocol with no HTTP/1
+// wire form: what the http2 package stores, and HTTP/3.
+func isMultiplexedProtocol(p []byte) bool {
+	return bytes.Equal(p, strHTTP2) || bytes.Equal(p, strHTTP3)
+}
+
+// wireProtocol is the version an HTTP/1 serialization writes: a message a
+// multiplexed protocol filled in serializes as HTTP/1.1; any other stored
+// value is written as set.
+func (h *header) wireProtocol() []byte {
+	if len(h.protocol) == 0 || isMultiplexedProtocol(h.protocol) {
+		return strHTTP11
+	}
+	return h.protocol
+}
+
+// wireIsHTTP11 reports whether an HTTP/1 serialization may use HTTP/1.1
+// framing; a multiplexed protocol's message may, a stored HTTP/1.0 may not.
+func (h *header) wireIsHTTP11() bool {
+	return !h.noHTTP11 || isMultiplexedProtocol(h.protocol)
 }
 
 // HasAcceptEncoding returns true if the header contains
@@ -1490,6 +1530,7 @@ func (h *RequestHeader) resetSkipNormalize() {
 	h.contentType = h.contentType[:0]
 	h.userAgent = h.userAgent[:0]
 	h.userAgentSet = false
+	h.connectProtocol = h.connectProtocol[:0]
 	h.trailer = h.trailer[:0]
 	h.mulHeader = h.mulHeader[:0]
 
@@ -1544,6 +1585,7 @@ func (h *RequestHeader) CopyTo(dst *RequestHeader) {
 	dst.host = append(dst.host, h.host...)
 	dst.userAgent = append(dst.userAgent, h.userAgent...)
 	dst.userAgentSet = h.userAgentSet
+	dst.connectProtocol = append(dst.connectProtocol, h.connectProtocol...)
 	dst.cookiesCollected = h.cookiesCollected
 	dst.rawHeaders = append(dst.rawHeaders, h.rawHeaders...)
 }
@@ -1714,14 +1756,16 @@ func (h *RequestHeader) VisitAllCookie(f func(key, value []byte)) {
 // behavior and can cause panics.
 func (h *RequestHeader) All() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
-		if host := h.Host(); len(host) > 0 && !yield(strHost, host) {
+		// With special headers disabled these live in h.h, as AppendBytes
+		// writes them.
+		if host := h.Host(); !h.disableSpecialHeader && len(host) > 0 && !yield(strHost, host) {
 			return
 		}
-		if len(h.contentLengthBytes) > 0 && !yield(strContentLength, h.contentLengthBytes) {
+		if !h.disableSpecialHeader && len(h.contentLengthBytes) > 0 && !yield(strContentLength, h.contentLengthBytes) {
 			return
 		}
 
-		if contentType := h.ContentType(); len(contentType) > 0 && !yield(strContentType, contentType) {
+		if contentType := h.ContentType(); !h.disableSpecialHeader && len(contentType) > 0 && !yield(strContentType, contentType) {
 			return
 		}
 
@@ -1958,7 +2002,9 @@ func (h *ResponseHeader) setSpecialHeader(key, value []byte, add bool) bool {
 		}
 	case 'd':
 		if caseInsensitiveCompare(strDate, key) {
-			// Date is managed automatically.
+			// Kept as a field, as a parsed response holds it; on the wire the
+			// default Date replaces it unless NoDefaultDate.
+			h.h = setArgBytes(h.h, key, value, argsHasValue)
 			return true
 		}
 	}
@@ -3113,7 +3159,7 @@ func (h *ResponseHeader) appendStatusLine(dst []byte) []byte {
 			return append(dst, line...)
 		}
 	}
-	return formatStatusLine(dst, h.Protocol(), statusCode, h.StatusMessage())
+	return formatStatusLine(dst, h.wireProtocol(), statusCode, h.StatusMessage())
 }
 
 // AppendBytes appends response header representation to dst and returns
@@ -3182,7 +3228,7 @@ func (h *ResponseHeader) AppendBytes(dst []byte) []byte {
 		if h.mustSkipContentLengthOnWire() && caseInsensitiveCompare(kv.key, strTransferEncoding) {
 			continue
 		}
-		if h.noDefaultDate || !bytes.Equal(kv.key, strDate) {
+		if h.noDefaultDate || !caseInsensitiveCompare(kv.key, strDate) {
 			dst = appendHeaderLine(dst, kv.key, kv.value)
 		}
 	}
@@ -3272,7 +3318,7 @@ func (h *RequestHeader) AppendBytes(dst []byte) []byte {
 	dst = append(dst, ' ')
 	dst = append(dst, h.RequestURI()...)
 	dst = append(dst, ' ')
-	dst = append(dst, h.Protocol()...)
+	dst = append(dst, h.wireProtocol()...)
 	dst = append(dst, '\r', '\n')
 
 	if len(h.userAgent) > 0 && !h.disableSpecialHeader {
