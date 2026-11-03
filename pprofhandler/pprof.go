@@ -23,6 +23,7 @@ var (
 	profilePath = []byte("/debug/pprof/profile")
 	symbolPath  = []byte("/debug/pprof/symbol")
 	tracePath   = []byte("/debug/pprof/trace")
+	indexPath   = []byte("/debug/pprof/")
 )
 
 // matchPprofPath checks whether path exactly matches a pprof endpoint.
@@ -39,12 +40,13 @@ func matchPprofPath(path, endpoint []byte) bool {
 //
 // Paths ending in a trailing slash (e.g. /debug/pprof/heap/) return 404,
 // matching the behaviour of net/http/pprof's DefaultServeMux which does
-// not register handlers for paths ending in /.
+// not register handlers for paths ending in /. The index at /debug/pprof/
+// is served, as in net/http/pprof.
 func PprofHandler(ctx *fasthttp.RequestCtx) {
 	path := ctx.Path()
 
 	// Reject paths ending in / — net/http/pprof returns 404 for these.
-	if len(path) > 1 && path[len(path)-1] == '/' {
+	if len(path) > 1 && path[len(path)-1] == '/' && !bytes.Equal(path, indexPath) {
 		ctx.SetStatusCode(404)
 		return
 	}

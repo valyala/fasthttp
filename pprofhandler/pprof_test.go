@@ -86,12 +86,28 @@ func TestPprofHandlerAcceptsValidPaths(t *testing.T) {
 	}
 }
 
+func TestPprofHandlerServesIndex(t *testing.T) {
+	// net/http/pprof serves the index at /debug/pprof/ and its links are
+	// relative to that path.
+	var ctx fasthttp.RequestCtx
+	ctx.Request.SetRequestURI("/debug/pprof/")
+	PprofHandler(&ctx)
+
+	if ctx.Response.StatusCode() != fasthttp.StatusOK {
+		t.Fatalf("expected status 200, got %d", ctx.Response.StatusCode())
+	}
+	if body := string(ctx.Response.Body()); !strings.Contains(body, "Types of profiles available") {
+		t.Fatalf("expected the pprof index, got body starting with: %q", body[:min(len(body), 100)])
+	}
+}
+
 func TestPprofHandlerRejectsTrailingSlash(t *testing.T) {
 	// Trailing slash should return 404, matching net/http/pprof behavior
 	// which does not register handlers for paths ending in /.
 	paths := []string{
 		"/debug/pprof/cmdline/",
 		"/debug/pprof/symbol/",
+		"/debug/pprof/heap/",
 	}
 
 	for _, path := range paths {
