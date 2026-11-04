@@ -1454,6 +1454,149 @@ func TestClientSkipBodyKeepsConnectionUsable(t *testing.T) {
 	}
 }
 
+func TestPipelineClientSkipBodyDoesNotBufferBody(t *testing.T) {
+	t.Parallel()
+
+	const bigSize = 8 << 20
+	bigBody := strings.Repeat("x", bigSize)
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/big":
+				ctx.SetBodyString(bigBody)
+			case "/big-chunked":
+				ctx.SetBodyStream(strings.NewReader(bigBody), -1)
+			default:
+				ctx.SetBodyString("body of " + string(ctx.Path()))
+			}
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	var dials atomic.Int32
+	c := &PipelineClient{
+		Addr: "example.com",
+		Dial: func(string) (net.Conn, error) {
+			dials.Add(1)
+			return ln.Dial()
+		},
+	}
+	for _, path := range []string{"/big", "/big-chunked"} {
+		var req Request
+		var resp Response
+		resp.KeepBodyBuffer = true
+		resp.SkipBody = true
+		req.SetRequestURI("http://example.com" + path)
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		if len(resp.Body()) != 0 {
+			t.Errorf("GET %s: SkipBody response has a %d byte body", path, len(resp.Body()))
+		}
+		if resp.body != nil && cap(resp.body.B) >= bigSize {
+			t.Errorf("GET %s: skipping the body grew the response buffer to %d bytes", path, cap(resp.body.B))
+		}
+
+		req.SetRequestURI("http://example.com/next")
+		resp.SkipBody = false
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("GET /next after skipping %s: %v", path, err)
+		}
+		if got, want := string(resp.Body()), "body of /next"; got != want {
+			t.Errorf("GET /next after skipping %s got %q, want %q", path, got, want)
+		}
+	}
+	if n := dials.Load(); n != 1 {
+		t.Errorf("skipped bodies took %d dials, want 1", n)
+	}
+}
+
+func TestPipelineClientSkipBodyHonorsMaxResponseBodySize(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Logger: &testLogger{},
+		Handler: func(ctx *RequestCtx) {
+			if string(ctx.Path()) == "/chunked" {
+				ctx.SetBodyStream(strings.NewReader(strings.Repeat("x", 1024)), -1)
+				return
+			}
+			ctx.SetBodyString(strings.Repeat("x", 1024))
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	for _, path := range []string{"/fixed", "/chunked"} {
+		c := &PipelineClient{
+			Addr:                "example.com",
+			Dial:                func(string) (net.Conn, error) { return ln.Dial() },
+			MaxResponseBodySize: 100,
+		}
+		var req Request
+		var resp Response
+		resp.SkipBody = true
+		req.SetRequestURI("http://example.com" + path)
+		if err := c.Do(&req, &resp); !errors.Is(err, ErrBodyTooLarge) {
+			t.Errorf("GET %s: got error %v, want %v", path, err, ErrBodyTooLarge)
+		}
+	}
+}
+
+func TestClientSkipBodyReusesConnectionForEmptyBody(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	var dials atomic.Int32
+	dial := func(string) (net.Conn, error) {
+		dials.Add(1)
+		return ln.Dial()
+	}
+	clients := map[string]clientDoer{
+		"HostClient":     &HostClient{Addr: "example.com", Dial: dial},
+		"PipelineClient": &PipelineClient{Addr: "example.com", Dial: dial},
+	}
+	for name, c := range clients {
+		dials.Store(0)
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/")
+		resp.SkipBody = true
+		for i := range 10 {
+			if err := c.Do(&req, &resp); err != nil {
+				t.Fatalf("%s: request %d: %v", name, i, err)
+			}
+			if resp.Header.ContentLength() != 0 {
+				t.Fatalf("%s: got Content-Length %d, want 0", name, resp.Header.ContentLength())
+			}
+		}
+		if n := dials.Load(); n != 1 {
+			t.Errorf("%s: 10 empty SkipBody responses took %d dials, want 1", name, n)
+		}
+	}
+}
+
 func TestPipelineClientHeadResponseWithContentLength(t *testing.T) {
 	t.Parallel()
 

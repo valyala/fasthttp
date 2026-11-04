@@ -1926,6 +1926,99 @@ func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
 	return err
 }
 
+// discardBody reads the response body that follows resp.Header from r and
+// drops it without storing it anywhere, so r is left at the start of the next
+// response. It enforces the same framing and maxBodySize rules as ReadBody,
+// and reads the trailer of a chunked body.
+func (resp *Response) discardBody(r *bufio.Reader, maxBodySize int) error {
+	if resp.Header.mustSkipContentLength() {
+		return nil
+	}
+	contentLength := resp.Header.ContentLength()
+	switch {
+	case contentLength >= 0:
+		if maxBodySize > 0 && contentLength > maxBodySize {
+			return ErrBodyTooLarge
+		}
+		return discardFixedSize(r, contentLength)
+	case contentLength == -1:
+		if err := discardBodyChunked(r, maxBodySize); err != nil {
+			return err
+		}
+		err := resp.Header.ReadTrailer(r)
+		if err == io.EOF {
+			return ErrBrokenChunk{error: io.ErrUnexpectedEOF}
+		}
+		return err
+	default:
+		return discardBodyIdentity(r, maxBodySize)
+	}
+}
+
+func discardFixedSize(r *bufio.Reader, n int) error {
+	// bufio.Reader.Discard reuses the reader's own buffer, so this doesn't
+	// allocate no matter how large n is.
+	if _, err := r.Discard(n); err != nil {
+		if errors.Is(err, io.EOF) {
+			return io.ErrUnexpectedEOF
+		}
+		return err
+	}
+	return nil
+}
+
+func discardBodyChunked(r *bufio.Reader, maxBodySize int) error {
+	size := 0
+	for {
+		chunkSize, err := parseChunkSize(r)
+		if err != nil {
+			return err
+		}
+		if chunkSize == 0 {
+			return nil
+		}
+		size += chunkSize
+		if maxBodySize > 0 && size > maxBodySize {
+			return ErrBodyTooLarge
+		}
+		if err = discardFixedSize(r, chunkSize); err != nil {
+			return err
+		}
+		crlf, err := r.Peek(len(strCRLF))
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return io.ErrUnexpectedEOF
+			}
+			return err
+		}
+		if !bytes.Equal(crlf, strCRLF) {
+			return ErrBrokenChunk{
+				error: errors.New("cannot find crlf at the end of chunk"),
+			}
+		}
+		if _, err = r.Discard(len(strCRLF)); err != nil {
+			return err
+		}
+	}
+}
+
+func discardBodyIdentity(r *bufio.Reader, maxBodySize int) error {
+	size := 0
+	for {
+		n, err := r.Discard(r.Size())
+		size += n
+		if maxBodySize > 0 && size > maxBodySize {
+			return ErrBodyTooLarge
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
 func (resp *Response) mustSkipBody() bool {
 	return resp.SkipBody || resp.Header.mustSkipContentLength()
 }

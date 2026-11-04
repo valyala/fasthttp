@@ -3480,11 +3480,12 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 		// here would consume the following pipelined responses as the body,
 		// the same reason transport.RoundTrip skips it.
 		//
-		// A SkipBody set by the caller can't be honored while reading: the
-		// skipped body would stay on the connection and be read as the start of
-		// the next pipelined response. Read the body and drop it instead.
+		// A body skipped by the caller still has to be consumed: left on the
+		// connection, it would be read as the start of the next pipelined
+		// response. Drain it without buffering it.
 		skipBody := w.resp.SkipBody
-		w.resp.SkipBody = w.req.Header.IsHead()
+		isHead := w.req.Header.IsHead()
+		w.resp.SkipBody = skipBody || isHead
 		// PipelineClient must consume each response body before reading the
 		// next response from the shared connection. Preserve StreamBody's
 		// reader API with a buffered stream instead of leaving bytes in br.
@@ -3492,12 +3493,16 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 		w.resp.StreamBody = false
 		err = w.resp.ReadLimitBody(br, c.MaxResponseBodySize)
 		w.resp.StreamBody = streamBody
-		if skipBody {
+		w.resp.SkipBody = skipBody
+		if skipBody && !isHead {
 			w.resp.ResetBody()
-		} else if err == nil && streamBody && !w.resp.mustSkipBody() {
+			if err == nil {
+				err = w.resp.discardBody(br, c.MaxResponseBodySize)
+			}
+		}
+		if err == nil && streamBody && !w.resp.mustSkipBody() {
 			w.resp.bodyStream = bytes.NewReader(w.resp.bodyBytes())
 		}
-		w.resp.SkipBody = skipBody
 		if err != nil {
 			w.err = err
 			w.done <- struct{}{}
@@ -3700,7 +3705,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 
 	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
-	if customSkipBody && !isHead && !resp.Header.mustSkipContentLength() {
+	if customSkipBody && !isHead && !resp.Header.mustSkipContentLength() && resp.Header.ContentLength() != 0 {
 		// The body of this response was left unread on the connection,
 		// so the next response read from it would start inside that body.
 		closeConn = true
