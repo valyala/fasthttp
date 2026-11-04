@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"reflect"
 	"strconv"
@@ -14,6 +15,92 @@ import (
 	"testing"
 	"time"
 )
+
+// A boundary is a token or it is quoted, since the characters that a boundary
+// may hold and a token can't, such as ':' and '=', end the parameter for a
+// receiver that follows RFC 9110, like net/http.
+func TestRequestHeaderSetMultipartFormBoundaryQuoted(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		boundary string
+		// written is the value of the boundary parameter.
+		written string
+	}{
+		// A token goes in as it is.
+		{"foobar", "foobar"},
+		{"----WebKitFormBoundary7MA4YWxkTrZu0gW", "----WebKitFormBoundary7MA4YWxkTrZu0gW"},
+		{"a'b+c_d-e.f", "a'b+c_d-e.f"},
+
+		// Any other byte makes it a quoted string.
+		{"foo:bar", `"foo:bar"`},
+		{"foo/bar", `"foo/bar"`},
+		{"a=b", `"a=b"`},
+		{"----=_Part_0_123.456", `"----=_Part_0_123.456"`},
+		{"a,b", `"a,b"`},
+		{"(a)", `"(a)"`},
+		{"a?b", `"a?b"`},
+		{"foo bar", `"foo bar"`},
+
+		// A quote and a backslash are escaped inside it.
+		{`a"b`, `"a\"b"`},
+		{`a\b`, `"a\\b"`},
+	}
+	for _, tt := range tests {
+		for _, fromBytes := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%q/bytes=%v", tt.boundary, fromBytes), func(t *testing.T) {
+				t.Parallel()
+
+				var h RequestHeader
+				if fromBytes {
+					h.SetMultipartFormBoundaryBytes([]byte(tt.boundary))
+				} else {
+					h.SetMultipartFormBoundary(tt.boundary)
+				}
+				if want := "multipart/form-data; boundary=" + tt.written; string(h.ContentType()) != want {
+					t.Fatalf("unexpected Content-Type %q. Expecting %q", h.ContentType(), want)
+				}
+
+				// The boundary that was set is the one that is read back, by net/http
+				// and by fasthttp.
+				_, params, err := mime.ParseMediaType(string(h.ContentType()))
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if params["boundary"] != tt.boundary {
+					t.Fatalf("net/http reads the boundary %q. Expecting %q", params["boundary"], tt.boundary)
+				}
+				if string(h.MultipartFormBoundary()) != tt.boundary {
+					t.Fatalf("fasthttp reads the boundary %q. Expecting %q", h.MultipartFormBoundary(), tt.boundary)
+				}
+			})
+		}
+	}
+}
+
+// A boundary can't break the header block: a CR or LF in it is written as a
+// space, as in any other header value, and the quotes keep the rest one
+// parameter value.
+func TestRequestHeaderSetMultipartFormBoundaryNewLines(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	h.SetMultipartFormBoundary("foo\r\nX-Injected: 1\r\n\r\nbar")
+	ct := h.ContentType()
+	if bytes.ContainsAny(ct, "\r\n") {
+		t.Fatalf("Content-Type %q holds a CR or LF", ct)
+	}
+	if want := `multipart/form-data; boundary="foo  X-Injected: 1    bar"`; string(ct) != want {
+		t.Fatalf("unexpected Content-Type %q. Expecting %q", ct, want)
+	}
+	_, params, err := mime.ParseMediaType(string(ct))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(params) != 1 || params["boundary"] != "foo  X-Injected: 1    bar" {
+		t.Fatalf("unexpected parameters %q", params)
+	}
+}
 
 func TestResponseHeaderAddContentType(t *testing.T) {
 	t.Parallel()
@@ -1564,6 +1651,49 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a\\\";boundary=bar\"; boundary=foobar\r\n\r\n", "foobar")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a\\\\\"; boundary=foobar\r\n\r\n", "foobar")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a;boundary=bar\r\n\r\n", "")
+
+	// a quoted boundary ends at its closing quote, whatever is inside it
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo;bar\"\r\n\r\n", "foo;bar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo;bar\"; charset=utf-8\r\n\r\n", "foo;bar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\"b;c\"\r\n\r\n", `a"b;c`)
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"abc\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"abc\\\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"abc\\\"\r\n\r\n", "")
+
+	// a quoted-pair stands for the byte it escapes
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo\\:bar\"\r\n\r\n", "foo:bar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo\\:bar\"; charset=utf-8\r\n\r\n", "foo:bar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\"b\"\r\n\r\n", `a"b`)
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\\b\"\r\n\r\n", `a\b`)
+	// any byte can be escaped, one that needs no escaping included (RFC 9110, section 5.6.4)
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\b\"\r\n\r\n", "ab")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"\\a\\b\\c\"\r\n\r\n", "abc")
+
+	// only a parameter named boundary is the boundary
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary2=1; boundary=abc\r\n\r\n", "abc")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary2=\"x;boundary=y\"; boundary=abc\r\n\r\n", "abc")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundaryx=abc\r\n\r\n", "")
+
+	// two boundary parameters are the boundary when they agree, and net/http
+	// rejects the header when they don't
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=a; boundary=a\r\n\r\n", "a")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\"; boundary=a\r\n\r\n", "a")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\:b\"; boundary=\"a:b\"\r\n\r\n", "a:b")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=a; boundary=b\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=a; foo=bar; boundary=b\r\n\r\n", "")
+
+	// an extended parameter or a continuation (RFC 2231) is left to the
+	// receiver: net/http decodes it and takes it over boundary=, so no boundary
+	// is read and the body is kept as it is
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary*=utf-8''abc; boundary=fallback\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=fallback; boundary*=utf-8''abc\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary*0=ab; boundary*1=c\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; BOUNDARY*0=\"ab\"; boundary*1=c\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary*=abc\r\n\r\n", "")
+
+	// an unquoted boundary runs to the next ';', whatever characters it holds
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=----=_Part_0_123.456\r\n\r\n", "----=_Part_0_123.456")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=ab/c\"d\r\n\r\n", `ab/c"d`)
 
 	var h RequestHeader
 	h.SetMultipartFormBoundary("foobarbaz")
