@@ -16,6 +16,7 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2011,6 +2012,76 @@ func TestClientURLAuth(t *testing.T) {
 
 		if val != expected {
 			t.Fatalf("wrong %q header: %q expected %q", HeaderAuthorization, val, expected)
+		}
+	}
+}
+
+func TestClientDoRedirectsURLAuth(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan string, 4)
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ch <- string(ctx.Host()) + string(ctx.Path()) + " " + string(ctx.Request.Header.Peek(HeaderAuthorization))
+			switch string(ctx.Path()) {
+			case "/same-host":
+				ctx.Redirect("/landing", StatusFound)
+			case "/other-host":
+				ctx.Redirect("http://example.org/landing", StatusFound)
+			}
+		},
+	}
+	go s.Serve(ln) //nolint:errcheck
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	tests := []struct {
+		uri      string
+		username string
+		password string
+		expected []string
+	}{
+		{
+			uri:      "http://user:pass@example.com/same-host",
+			expected: []string{"example.com/same-host Basic dXNlcjpwYXNz", "example.com/landing Basic dXNlcjpwYXNz"},
+		},
+		{
+			uri:      "http://example.com/same-host",
+			username: "user",
+			password: "pass",
+			expected: []string{"example.com/same-host Basic dXNlcjpwYXNz", "example.com/landing Basic dXNlcjpwYXNz"},
+		},
+		{
+			// The credentials are only for example.com.
+			uri:      "http://user:pass@example.com/other-host",
+			expected: []string{"example.com/other-host Basic dXNlcjpwYXNz", "example.org/landing "},
+		},
+	}
+	for _, tc := range tests {
+		req := AcquireRequest()
+		resp := AcquireResponse()
+		req.SetRequestURI(tc.uri)
+		if tc.username != "" {
+			req.URI().SetUsername(tc.username)
+			req.URI().SetPassword(tc.password)
+		}
+		if err := c.DoRedirects(req, resp, 16); err != nil {
+			t.Fatal(err)
+		}
+		ReleaseRequest(req)
+		ReleaseResponse(resp)
+
+		// The handler has run for every request by the time DoRedirects returns.
+		var requests []string
+		for len(ch) > 0 {
+			requests = append(requests, <-ch)
+		}
+		if !slices.Equal(requests, tc.expected) {
+			t.Fatalf("unexpected requests for %q: %q. Expecting %q", tc.uri, requests, tc.expected)
 		}
 	}
 }
