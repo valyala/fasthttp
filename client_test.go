@@ -1360,6 +1360,100 @@ func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 	}
 }
 
+func TestClientReuseResponseAfterHead(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.SetBodyString("body of " + string(ctx.Method()))
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	dial := func(string) (net.Conn, error) { return ln.Dial() }
+	clients := map[string]clientDoer{
+		"HostClient":     &HostClient{Addr: "example.com", Dial: dial},
+		"PipelineClient": &PipelineClient{Addr: "example.com", Dial: dial},
+	}
+	for name, c := range clients {
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/")
+		req.Header.SetMethod(MethodHead)
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("%s: HEAD: %v", name, err)
+		}
+		req.Header.SetMethod(MethodGet)
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("%s: GET: %v", name, err)
+		}
+		if got := string(resp.Body()); got != "body of GET" {
+			t.Errorf("%s: GET after HEAD with the same Response got body %q, want %q", name, got, "body of GET")
+		}
+	}
+}
+
+func TestClientSkipBodyKeepsConnectionUsable(t *testing.T) {
+	t.Parallel()
+
+	// The skipped body is larger than the read buffer and ends with something
+	// that looks like a response, so it must not stay on the connection.
+	bigBody := strings.Repeat("x", 64*1024) + "HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nINJECTED"
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		// The server sees the connection closed while it writes the skipped body.
+		Logger: &testLogger{},
+		Handler: func(ctx *RequestCtx) {
+			if string(ctx.Path()) == "/big" {
+				ctx.SetBodyString(bigBody)
+				return
+			}
+			ctx.SetBodyString("body of " + string(ctx.Method()) + " " + string(ctx.Path()))
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	dial := func(string) (net.Conn, error) { return ln.Dial() }
+	clients := map[string]clientDoer{
+		"HostClient":     &HostClient{Addr: "example.com", Dial: dial},
+		"PipelineClient": &PipelineClient{Addr: "example.com", Dial: dial},
+	}
+	for name, c := range clients {
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/big")
+		resp.SkipBody = true
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("%s: GET /big: %v", name, err)
+		}
+		if len(resp.Body()) != 0 {
+			t.Errorf("%s: SkipBody response has a %d byte body", name, len(resp.Body()))
+		}
+
+		var req2 Request
+		var resp2 Response
+		req2.SetRequestURI("http://example.com/next")
+		req2.Header.SetMethod(MethodPost)
+		if err := c.Do(&req2, &resp2); err != nil {
+			t.Fatalf("%s: POST /next after a skipped body: %v", name, err)
+		}
+		if got, want := string(resp2.Body()), "body of POST /next"; got != want {
+			t.Errorf("%s: POST /next after a skipped body got %q, want %q", name, got, want)
+		}
+	}
+}
+
 func TestPipelineClientHeadResponseWithContentLength(t *testing.T) {
 	t.Parallel()
 
