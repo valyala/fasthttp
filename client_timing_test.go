@@ -94,6 +94,27 @@ func acquireFakeServerConn(s []byte) *fakeClientConn {
 
 var fakeClientConnPool sync.Pool
 
+// BenchmarkClientDoDispatch measures what Client.Do costs on top of the
+// transport, for callers sharing one HostClient.
+func BenchmarkClientDoDispatch(b *testing.B) {
+	c := &Client{
+		Transport: &TransportMock{wrapperFunc: func(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+			resp.SetStatusCode(StatusOK)
+			return false, nil
+		}},
+	}
+	b.RunParallel(func(pb *testing.PB) {
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/foo")
+		for pb.Next() {
+			if err := c.Do(&req, &resp); err != nil {
+				b.Fatalf("unexpected error: %v", err)
+			}
+		}
+	})
+}
+
 func BenchmarkClientGetTimeoutFastServer(b *testing.B) {
 	body := []byte("123456789099")
 	s := fmt.Appendf(nil, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n%s", len(body), body)

@@ -180,6 +180,63 @@ func TestRequestHeaderKeySettersSanitizeNewlines(t *testing.T) {
 	}
 }
 
+func TestRemoveNewLines(t *testing.T) {
+	t.Parallel()
+
+	// Lengths on both sides of the switch to bytes.IndexByte, with a CR or
+	// LF, or another control byte the word check stops at, in every
+	// position, and a CR at the end that the check must still reach.
+	for n := range 80 {
+		for pos := range n {
+			for _, c := range []byte{'\r', '\n', '\t', 0, 0x7f} {
+				src := bytes.Repeat([]byte{'a'}, n)
+				src[n-1] = '\r'
+				src[pos] = c
+				want := bytes.Clone(src)
+				for i, c := range want {
+					if c == '\r' || c == '\n' {
+						want[i] = ' '
+					}
+				}
+				if got := removeNewLines(bytes.Clone(src)); !bytes.Equal(got, want) {
+					t.Fatalf("removeNewLines(%q) = %q, want %q", src, got, want)
+				}
+			}
+		}
+	}
+}
+
+func TestNormalizeHeaderKey(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		key        string
+		normalized string
+		raw        string
+	}{
+		{key: "", normalized: "", raw: ""},
+		{key: "content-TYPE", normalized: "Content-Type", raw: "content-TYPE"},
+		{key: "-x--forwarded-", normalized: "-X--Forwarded-", raw: "-x--forwarded-"},
+		// An invalid key is not normalized, but its CR and LF are neutralised.
+		{key: "x foo", normalized: "x foo", raw: "x foo"},
+		{key: "x-foo\r\nInjected: yes", normalized: "x-foo  Injected: yes", raw: "x-foo  Injected: yes"},
+		{key: "x\n", normalized: "x ", raw: "x "},
+	}
+	for _, tc := range testCases {
+		for _, disableNormalizing := range []bool{false, true} {
+			want := tc.normalized
+			if disableNormalizing {
+				want = tc.raw
+			}
+			b := []byte(tc.key)
+			normalizeHeaderKey(b, disableNormalizing)
+			if string(b) != want {
+				t.Fatalf("normalizeHeaderKey(%q, %v) = %q, want %q", tc.key, disableNormalizing, b, want)
+			}
+		}
+	}
+}
+
 func TestResponseHeaderMultiLineValue(t *testing.T) {
 	t.Parallel()
 

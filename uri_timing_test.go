@@ -13,6 +13,10 @@ func BenchmarkURIParsePathQueryString(b *testing.B) {
 	benchmarkURIParse(b, "google.com", "/foo/bar?query=string&other=value")
 }
 
+func BenchmarkURIParsePathFileExtension(b *testing.B) {
+	benchmarkURIParse(b, "google.com", "/static/js/app.min.js")
+}
+
 func BenchmarkURIParsePathQueryStringHash(b *testing.B) {
 	benchmarkURIParse(b, "google.com", "/foo/bar?query=string&other=value#hashstring")
 }
