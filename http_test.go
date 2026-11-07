@@ -2384,11 +2384,13 @@ func TestRequestMultipartFormBoundaryWrittenBack(t *testing.T) {
 	}
 }
 
-// A boundary parameter that net/http reads with RFC 2231, an extended
-// parameter such as boundary* or a continuation such as boundary*0, and two
-// boundary parameters that differ, which net/http rejects, make fasthttp read
-// no boundary and keep the body as it is, so that the request is forwarded
-// for such a receiver to read as it would have read the original.
+// A boundary parameter that net/http reads one way and RFC 9110 another, or
+// not at all, makes fasthttp read no boundary and keep the body as it is, so
+// that the request is forwarded for such a receiver to read as it would have
+// read the original. Those are an extended parameter such as boundary* or a
+// continuation such as boundary*0 (RFC 2231), two boundary parameters that
+// differ, which net/http rejects, whitespace after the '=' or around an
+// unquoted value, and a backslash before a byte that isn't a tspecial.
 func TestRequestMultipartFormBoundaryLeftToReceiver(t *testing.T) {
 	t.Parallel()
 
@@ -2404,6 +2406,24 @@ func TestRequestMultipartFormBoundaryLeftToReceiver(t *testing.T) {
 		{`multipart/form-data; boundary*0*=utf-8''a%62; boundary*1=c`, "abc"},
 		{`multipart/form-data; boundary*=iso-8859-1''abc; boundary=fallback`, "fallback"},
 		{`multipart/form-data; boundary=abc; boundary=fallback`, ""},
+
+		// Whitespace after the '=', with a parameter before it that makes no
+		// difference to net/http and one that used to hide it here.
+		{`multipart/form-data; boundary= "abc"`, "abc"},
+		{`multipart/form-data; boundary= abc`, "abc"},
+		{"multipart/form-data; boundary=\tabc", "abc"},
+		{`multipart/form-data; boundary2=1; boundary= "abc"`, "abc"},
+		{`multipart/form-data; boundary2=1; boundary= abc`, "abc"},
+		{`multipart/form-data; boundary="abc"; boundary= abc`, "abc"},
+
+		// Unicode spaces, which net/http trims as well.
+		{"multipart/form-data; boundary= abc", "abc"},
+		{"multipart/form-data; boundary=abc ; x=y", "abc"},
+		{"multipart/form-data; boundary=abc", "abc"},
+		{"multipart/form-data; boundary*=utf-8''abc; boundary=fallback", "abc"},
+
+		// A backslash before a byte that isn't a tspecial.
+		{`multipart/form-data; boundary="a\b"`, `a\b`},
 	} {
 		for _, stream := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/stream=%v", tc.contentType, stream), func(t *testing.T) {

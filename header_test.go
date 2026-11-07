@@ -102,6 +102,62 @@ func TestRequestHeaderSetMultipartFormBoundaryNewLines(t *testing.T) {
 	}
 }
 
+// net/http reads the boundary of a Content-Type with mime.ParseMediaType. Whatever
+// the way its parameters are written, fasthttp has to read the same boundary or
+// none, never another one: with another one, a body that net/http parses is
+// parsed here with a delimiter that isn't in it.
+func TestRequestMultipartFormBoundaryAgreesWithNetHTTP(t *testing.T) {
+	t.Parallel()
+
+	spaces := []string{"", " ", "\t", " ", " ", "  "}
+	names := []string{"boundary", "BOUNDARY", "boundary*", "boundary*0", "boundary2"}
+	values := []string{
+		"abc", "foo:bar", "héllo", "utf-8''abc", `"abc"`, `"foo;bar"`, `"foo\:bar"`,
+		`"a\b"`, `"a\\b"`, `"a\"b"`, `""`, `"abc`,
+	}
+	tails := []string{
+		"", " ", " ", "; x=y", " ; x=y", "; boundary=abc", "; boundary=def",
+		"; boundary*=utf-8''abc", `; x="a;b"`,
+	}
+
+	equal, none := 0, 0
+	for _, pre := range []string{"; ", ";", "; "} {
+		for _, name := range names {
+			for _, beforeEq := range spaces {
+				for _, afterEq := range spaces {
+					for _, value := range values {
+						for _, tail := range tails {
+							ct := "multipart/form-data" + pre + name + beforeEq + "=" + afterEq + value + tail
+
+							_, params, err := mime.ParseMediaType(ct)
+							want, ok := params["boundary"]
+							if err != nil || !ok {
+								continue
+							}
+							var h RequestHeader
+							h.SetContentType(ct)
+							got := h.MultipartFormBoundary()
+							switch {
+							case got == nil:
+								none++
+							case string(got) == want:
+								equal++
+							default:
+								t.Fatalf("Content-Type %q: net/http reads the boundary %q, fasthttp %q", ct, want, got)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// The same boundary and no boundary both have to happen, or nothing was checked.
+	if equal < 100 || none < 100 {
+		t.Fatalf("unexpected counts: the same boundary %d times, none %d times", equal, none)
+	}
+}
+
 func TestResponseHeaderAddContentType(t *testing.T) {
 	t.Parallel()
 
@@ -1589,6 +1645,24 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary =foobar\r\n\r\n", "")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-dataX; boundary=foobar\r\n\r\n", "")
 
+	// whitespace after '=' isn't allowed either (RFC 9110, section 5.6.6), and
+	// net/http skips it, so no boundary is read and the body is kept as it is
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary= foobar\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\tfoobar\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary= \"foobar\"\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary2=1; boundary= \"foobar\"\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar; boundary= foobar\r\n\r\n", "")
+
+	// net/http trims the Unicode spaces too, which are not ASCII bytes: before
+	// a parameter name and around an unquoted value
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data;\u00a0boundary=foobar\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary= foobar\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar ; foo=bar\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar  ; foo=bar\r\n\r\n", "")
+	// a quoted value ends at its closing quote, and a byte that isn't a space is kept
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foobar\" ; foo=bar\r\n\r\n", "foobar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=héllo\r\n\r\n", "héllo")
+
 	// ';' inside a quoted parameter value doesn't end the parameter
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a;boundary=bar\"; boundary=foobar\r\n\r\n", "foobar")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a\\\";boundary=bar\"; boundary=foobar\r\n\r\n", "foobar")
@@ -1608,9 +1682,12 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo\\:bar\"; charset=utf-8\r\n\r\n", "foo:bar")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\"b\"\r\n\r\n", `a"b`)
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\\\b\"\r\n\r\n", `a\b`)
-	// any byte can be escaped, one that needs no escaping included (RFC 9110, section 5.6.4)
-	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\b\"\r\n\r\n", "ab")
-	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"\\a\\b\\c\"\r\n\r\n", "abc")
+	// RFC 9110, section 5.6.4 reads a backslash before a byte that isn't a
+	// tspecial as that byte, and net/http as the backslash and the byte: no
+	// boundary is read
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\b\"\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"\\a\\b\\c\"\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"a\\:b\\c\"\r\n\r\n", "")
 
 	// only a parameter named boundary is the boundary
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary2=1; boundary=abc\r\n\r\n", "abc")
