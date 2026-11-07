@@ -5725,6 +5725,132 @@ func TestServerShutdownWaitsForPartialKeepAliveRequest(t *testing.T) {
 	}
 }
 
+// Shutdown must not wait forever on a connection that started its first
+// request and then stalled: unlike a keep-alive connection (see
+// TestServerShutdownWaitsForPartialKeepAliveRequest) it keeps the
+// accept-time grace, after which Shutdown closes it, through a per-IP
+// wrapper too. Without a ReadTimeout such a connection used to stay active
+// forever and ShutdownWithContext always hit its context deadline.
+func TestServerShutdownClosesConnectionWithStalledFirstRequest(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		perIP int
+	}{{"plain", 0}, {"perIP", 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			logs := &testLogger{}
+			closed := make(chan struct{})
+			server := &Server{
+				Handler:       func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+				MaxConnsPerIP: tc.perIP,
+				Logger:        logs,
+				ConnState: func(_ net.Conn, st ConnState) {
+					if st == StateClosed {
+						close(closed)
+					}
+				},
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("listening: %v", err)
+			}
+			served := make(chan error, 1)
+			go func() { served <- server.Serve(listener) }()
+
+			conn, err := net.Dial("tcp", listener.Addr().String())
+			if err != nil {
+				t.Fatalf("dialing: %v", err)
+			}
+			defer conn.Close()
+			// The peer starts a request and then says nothing more.
+			if _, err := conn.Write([]byte("G")); err != nil {
+				t.Fatalf("writing: %v", err)
+			}
+			time.Sleep(testTimeout(100 * time.Millisecond))
+
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+			defer cancel()
+			stopped := make(chan error, 1)
+			go func() { stopped <- server.ShutdownWithContext(ctx) }()
+			select {
+			case err := <-stopped:
+				if err != nil {
+					t.Fatalf("ShutdownWithContext() error: %v", err)
+				}
+			case <-time.After(testTimeout(30 * time.Second)):
+				t.Fatal("ShutdownWithContext() did not return for a connection with a stalled first request")
+			}
+			if err := <-served; err != nil {
+				t.Fatalf("Serve() error: %v", err)
+			}
+			// The server logs, if at all, before it reports the connection closed.
+			<-closed
+			if logs.out != "" {
+				t.Fatalf("server log = %q, want nothing", logs.out)
+			}
+		})
+	}
+}
+
+// A first request that completes while Shutdown is in progress is still
+// served: the connection is only closed if it is still being read once the
+// accept-time grace has passed, and the handler protects it while it runs.
+func TestServerShutdownServesFirstRequestCompletedDuringShutdown(t *testing.T) {
+	active := make(chan struct{}, 4)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+		ConnState: func(_ net.Conn, st ConnState) {
+			if st == StateActive {
+				active <- struct{}{}
+			}
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(ln) }()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	br := bufio.NewReader(c)
+
+	// Start the first request but hold back its final CRLF.
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-active:
+	case <-time.After(time.Second):
+		t.Fatal("connection did not go active on the first byte of a partial request")
+	}
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.Shutdown() }()
+	// Give Shutdown a sweep over the idle connections before completing the request.
+	time.Sleep(testTimeout(50 * time.Millisecond))
+	if _, err := c.Write([]byte("\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("response after Shutdown began: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("response status = %d, want 200", resp.StatusCode())
+	}
+	if err := <-stopped; err != nil {
+		t.Fatalf("Shutdown() error: %v", err)
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+}
+
 // The wait for a first request that never arrives ends in a 408 once
 // ReadTimeout expires; a request sent after that is not served.
 func TestServerFirstRequestAfterReadTimeout(t *testing.T) {
