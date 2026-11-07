@@ -255,6 +255,13 @@ type Server struct {
 
 	idleConns map[net.Conn]*atomic.Int64
 
+	// readingFirstRequest maps a connection that is still reading its
+	// first request to the unix second after which Shutdown may close it:
+	// its accept-time grace, as for a connection that sent nothing. An
+	// entry is removed once the first request reaches the handler, and
+	// when the connection's serving loop ends. Guarded by idleConnsMu.
+	readingFirstRequest map[net.Conn]int64
+
 	// done is written under mu, but RequestCtx.Done() reads it without mu,
 	// possibly after the handler has returned, so it must be atomic.
 	done atomic.Pointer[chan struct{}]
@@ -2192,6 +2199,11 @@ func (s *Server) Shutdown() error {
 // ShutdownWithContext works by first closing all open listeners and then waiting for all connections to return to idle
 // or context timeout and then shut down.
 //
+// A connection that is still reading its first request is closed once the
+// accept-time grace for new connections has passed, like a connection that
+// sent nothing, so a client that stalls mid-request cannot block shutdown
+// when no ReadTimeout is set.
+//
 // When ShutdownWithContext is called, Serve, ListenAndServe, and ListenAndServeTLS immediately return nil.
 // Make sure the program doesn't exit and waits instead for ShutdownWithContext to return.
 //
@@ -2531,6 +2543,16 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	// Same as net/http.Server:
 	// https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
 	idleConnTime.Store(connTime.Add(time.Second * 5).Unix())
+
+	// Until the first request reaches the handler the connection stays
+	// closable by Shutdown once that same grace has passed, even if it
+	// has already sent part of the request.
+	if s.readingFirstRequest == nil {
+		s.readingFirstRequest = make(map[net.Conn]int64)
+	}
+	if _, ok := s.readingFirstRequest[c]; !ok {
+		s.readingFirstRequest[c] = connTime.Add(time.Second * 5).Unix()
+	}
 	s.idleConnsMu.Unlock()
 
 	serverName := s.getServerName()
@@ -2838,6 +2860,14 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
+			if connRequestNum == 1 {
+				// The first request has been fully read and is about
+				// to be handled: Shutdown no longer treats the
+				// connection as still reading it.
+				s.idleConnsMu.Lock()
+				delete(s.readingFirstRequest, c)
+				s.idleConnsMu.Unlock()
+			}
 			s.Handler(ctx)
 		}
 
@@ -3088,6 +3118,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		idleConnTimePool.Put(ic)
 		delete(s.idleConns, c)
 	}
+	delete(s.readingFirstRequest, c)
 	s.idleConnsMu.Unlock()
 
 	return err
@@ -3540,6 +3571,18 @@ func (s *Server) closeIdleConns() {
 			// Don't recycle ict: the connection's own goroutine still holds it
 			// and stores into it, so only that goroutine may return it.
 			delete(s.idleConns, c)
+		}
+	}
+	// A connection still reading its first request past its accept-time
+	// grace is closed as well, even though it is active: otherwise a
+	// client that stalls mid-request blocks Shutdown until its context
+	// deadline when no ReadTimeout is set. Connections being handled and
+	// keep-alive connections reading a later request are not in this map
+	// and keep waiting, as before.
+	for c, t := range s.readingFirstRequest {
+		if now-t >= 0 {
+			_ = c.Close()
+			delete(s.readingFirstRequest, c)
 		}
 	}
 	s.idleConnsMu.Unlock()
