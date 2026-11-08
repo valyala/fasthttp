@@ -1,15 +1,13 @@
-package fasthttp_test
+package fasthttp
 
 import (
 	"bufio"
 	"fmt"
 	"strings"
-
-	"github.com/valyala/fasthttp"
 )
 
 func ExampleResponseHeader_PeekTrailer() {
-	var resp fasthttp.Response
+	var resp Response
 	raw := "HTTP/1.1 200 OK\r\nX-Result: upfront\r\n" +
 		"Trailer: X-Result\r\nTransfer-Encoding: chunked\r\n\r\n" +
 		"0\r\nX-Result: first\r\nX-Result: second\r\n\r\n"
