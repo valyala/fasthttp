@@ -1408,6 +1408,24 @@ func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
 	return buf.B, nil
 }
 
+// multipartFormBoundaryWritable reports whether WriteMultipartForm accepts the
+// boundary, which is to say whether mime/multipart does: 1 to 70 bytes of the
+// characters RFC 2046, section 5.1.1 allows, and no space at the end.
+//
+// A form that is parsed as the request is read is marshaled again when the
+// request is written, and the Content-Type of a request can have a boundary
+// that doesn't qualify although net/http reads it, such as "foo;bar" or one
+// with a quote or a backslash in it. Writing such a request would fail, and
+// Body would return the error text as the body, so the body of such a request
+// is kept as it is instead, and written as it came. MultipartForm still parses
+// it from the body when it is asked for.
+func multipartFormBoundaryWritable(boundary string) bool {
+	// SetBoundary only checks the boundary and stores it. A Writer from
+	// NewWriter would also pick a random boundary first, from crypto/rand.
+	var mw multipart.Writer
+	return mw.SetBoundary(boundary) == nil
+}
+
 // WriteMultipartForm writes the given multipart form f with the given
 // boundary to w.
 func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
@@ -1676,8 +1694,9 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 			// Pre-read multipart form data of known length.
 			// This way we limit memory usage for large file uploads, since their contents
 			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
+			// The body is kept as it is when the boundary can't be written again.
 			req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-			if req.multipartFormBoundary != "" && len(req.Header.peek(strContentEncoding)) == 0 {
+			if multipartFormBoundaryWritable(req.multipartFormBoundary) && len(req.Header.peek(strContentEncoding)) == 0 {
 				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
 				if err != nil {
 					req.Reset()
@@ -1758,10 +1777,12 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 			// Pre-read multipart form data of known length.
 			// This way we limit memory usage for large file uploads, since their contents
 			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-			// A copy, since Write replaces the Content-Type the boundary
+			// The body is kept as it is when the boundary can't be written again.
+			//
+			// A copy of the boundary, since Write replaces the Content-Type it
 			// is read from.
 			req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-			if req.multipartFormBoundary != "" && len(req.Header.peek(strContentEncoding)) == 0 {
+			if multipartFormBoundaryWritable(req.multipartFormBoundary) && len(req.Header.peek(strContentEncoding)) == 0 {
 				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
 				if err != nil {
 					req.Reset()

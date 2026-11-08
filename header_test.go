@@ -109,19 +109,19 @@ func TestRequestHeaderSetMultipartFormBoundaryNewLines(t *testing.T) {
 func TestRequestMultipartFormBoundaryAgreesWithNetHTTP(t *testing.T) {
 	t.Parallel()
 
-	spaces := []string{"", " ", "\t", " ", " ", "  "}
+	spaces := []string{"", " ", "\t", "\u00a0", "\u2003", " \u00a0"}
 	names := []string{"boundary", "BOUNDARY", "boundary*", "boundary*0", "boundary2"}
 	values := []string{
-		"abc", "foo:bar", "héllo", "utf-8''abc", `"abc"`, `"foo;bar"`, `"foo\:bar"`,
+		"abc", "foo:bar", "h\u00e9llo", "utf-8''abc", `"abc"`, `"foo;bar"`, `"foo\:bar"`,
 		`"a\b"`, `"a\\b"`, `"a\"b"`, `""`, `"abc`,
 	}
 	tails := []string{
-		"", " ", " ", "; x=y", " ; x=y", "; boundary=abc", "; boundary=def",
+		"", " ", "\u00a0", "; x=y", "\u00a0; x=y", "; boundary=abc", "; boundary=def",
 		"; boundary*=utf-8''abc", `; x="a;b"`,
 	}
 
 	equal, none := 0, 0
-	for _, pre := range []string{"; ", ";", "; "} {
+	for _, pre := range []string{"; ", ";", ";\u00a0"} {
 		for _, name := range names {
 			for _, beforeEq := range spaces {
 				for _, afterEq := range spaces {
@@ -1656,12 +1656,12 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	// net/http trims the Unicode spaces too, which are not ASCII bytes: before
 	// a parameter name and around an unquoted value
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data;\u00a0boundary=foobar\r\n\r\n", "")
-	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary= foobar\r\n\r\n", "")
-	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar ; foo=bar\r\n\r\n", "")
-	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar  ; foo=bar\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\u00a0foobar\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar\u00a0; foo=bar\r\n\r\n", "")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar \u2003; foo=bar\r\n\r\n", "")
 	// a quoted value ends at its closing quote, and a byte that isn't a space is kept
-	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foobar\" ; foo=bar\r\n\r\n", "foobar")
-	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=héllo\r\n\r\n", "héllo")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foobar\"\u00a0; foo=bar\r\n\r\n", "foobar")
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=h\u00e9llo\r\n\r\n", "h\u00e9llo")
 
 	// ';' inside a quoted parameter value doesn't end the parameter
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a;boundary=bar\"; boundary=foobar\r\n\r\n", "foobar")
