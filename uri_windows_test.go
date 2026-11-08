@@ -11,6 +11,7 @@ func TestURIPathNormalizeIssue86(t *testing.T) {
 	testURIPathNormalize(t, &u, `C:\a\b\c\fs.go`, `C:\a\b\c\fs.go`)
 
 	testURIPathNormalize(t, &u, `a`, `/a`)
+	testURIPathNormalize(t, &u, `/a\..\b`, `/b`)
 
 	testURIPathNormalize(t, &u, "/../../../../../foo", "/foo")
 

@@ -800,7 +800,13 @@ func removeDotSegments(b []byte) []byte {
 		b = removeParentSegments(b, strSlashDotDotBackSlash, 0)
 
 		// remove /foo\..\ parts
+		rooted := len(b) > 0 && b[0] == '/'
 		b = removeParentSegments(b, strBackSlashDotDotBackSlash, '\\')
+		if rooted {
+			// Collapsing a segment at the root can replace the URI's leading
+			// slash with a backslash. Keep the slash in the normalized path.
+			b[0] = '/'
+		}
 
 		// remove trailing \foo\..
 		n := bytes.LastIndex(b, strBackSlashDotDot)
