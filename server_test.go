@@ -5725,6 +5725,196 @@ func TestServerShutdownWaitsForPartialKeepAliveRequest(t *testing.T) {
 	}
 }
 
+// Shutdown may close an idle keep-alive connection just as its next request
+// is read. That request must go unhandled, silently, since its response could
+// no longer reach the client.
+func TestServerShutdownDoesNotHandleRequestOnConnectionItClosed(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name              string
+		reduceMemoryUsage bool
+	}{{"plain", false}, {"ReduceMemoryUsage", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			handled := make(chan string, 2)
+			logs := &testLogger{}
+			closed := make(chan struct{})
+			s := &Server{
+				Handler: func(ctx *RequestCtx) {
+					handled <- string(ctx.Path())
+					ctx.SetBodyString("ok")
+				},
+				ReduceMemoryUsage: tc.reduceMemoryUsage,
+				Logger:            logs,
+				ConnState: func(_ net.Conn, st ConnState) {
+					if st == StateClosed {
+						close(closed)
+					}
+				},
+			}
+			conn := newNextRequestOnCloseConn("GET /1 HTTP/1.1\r\nHost: a\r\n\r\n", "GET /2 HTTP/1.1\r\nHost: a\r\n\r\n")
+			served := make(chan error, 1)
+			go func() { served <- s.Serve(newOneConnListener(conn)) }()
+
+			// The first request is served and the connection waits, idle, for the next.
+			<-conn.waitingForNextRequest
+
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout(5*time.Second))
+			defer cancel()
+			if err := s.ShutdownWithContext(ctx); err != nil {
+				t.Fatalf("ShutdownWithContext() error: %v", err)
+			}
+			if err := <-served; err != nil {
+				t.Fatalf("Serve() error: %v", err)
+			}
+			// The server logs, if at all, before it reports the connection closed.
+			<-closed
+			if path := <-handled; path != "/1" {
+				t.Fatalf("handler saw %q first, want /1", path)
+			}
+			select {
+			case path := <-handled:
+				t.Fatalf("handler saw %q, read on a connection Shutdown closed", path)
+			default:
+			}
+			if logs.out != "" {
+				t.Fatalf("server log = %q, want nothing", logs.out)
+			}
+		})
+	}
+}
+
+// nextRequestOnCloseConn hands over its first request at once and holds the
+// next one back until Close: the server reads it just as Shutdown closes the
+// connection.
+type nextRequestOnCloseConn struct {
+	*writeFailsAfterCloseReadWriter
+
+	nextRequest           []byte
+	waitingForNextRequest chan struct{}
+}
+
+func newNextRequestOnCloseConn(firstRequest, nextRequest string) *nextRequestOnCloseConn {
+	c := &nextRequestOnCloseConn{
+		writeFailsAfterCloseReadWriter: newWriteFailsAfterCloseReadWriter(),
+		nextRequest:                    []byte(nextRequest),
+		waitingForNextRequest:          make(chan struct{}),
+	}
+	c.r.WriteString(firstRequest)
+	return c
+}
+
+func (c *nextRequestOnCloseConn) Read(b []byte) (int, error) {
+	if c.r.Len() == 0 && c.nextRequest != nil {
+		close(c.waitingForNextRequest)
+		<-c.closed
+		c.r.Write(c.nextRequest)
+		c.nextRequest = nil
+	}
+	return c.r.Read(b)
+}
+
+// writeFailsAfterCloseReadWriter fails writes with net.ErrClosed once it is
+// closed, as a net.Conn does.
+type writeFailsAfterCloseReadWriter struct {
+	readWriter
+
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newWriteFailsAfterCloseReadWriter() *writeFailsAfterCloseReadWriter {
+	return &writeFailsAfterCloseReadWriter{closed: make(chan struct{})}
+}
+
+func (rw *writeFailsAfterCloseReadWriter) Write(b []byte) (int, error) {
+	select {
+	case <-rw.closed:
+		return 0, net.ErrClosed
+	default:
+		return rw.readWriter.Write(b)
+	}
+}
+
+func (rw *writeFailsAfterCloseReadWriter) Close() error {
+	rw.closeOnce.Do(func() { close(rw.closed) })
+	return nil
+}
+
+// oneConnListener accepts conn once and then waits to be closed.
+type oneConnListener struct {
+	conns     chan net.Conn
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newOneConnListener(conn net.Conn) *oneConnListener {
+	ln := &oneConnListener{
+		conns:  make(chan net.Conn, 1),
+		closed: make(chan struct{}),
+	}
+	ln.conns <- conn
+	return ln
+}
+
+func (ln *oneConnListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-ln.conns:
+		return c, nil
+	case <-ln.closed:
+		return nil, net.ErrClosed
+	}
+}
+
+func (ln *oneConnListener) Close() error {
+	ln.closeOnce.Do(func() { close(ln.closed) })
+	return nil
+}
+
+func (ln *oneConnListener) Addr() net.Addr {
+	return zeroTCPAddr
+}
+
+// A pipelined request's response waits in the writer to go out with the next
+// one's. Shutdown must not lose it: the loop ending on stop must flush it, and
+// the sweep must not close the connection as idle while it waits.
+func TestServerShutdownDeliversPipelinedResponse(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name           string
+		sweepIdleConns bool
+	}{{"flush", false}, {"sweep", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var s *Server
+			s = &Server{
+				Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+				ConnState: func(_ net.Conn, st ConnState) {
+					// Once the first response is written, do what ShutdownWithContext
+					// would: set stop, then sweep the idle connections.
+					if st == StateIdle {
+						s.stop.Store(1)
+						if tc.sweepIdleConns {
+							s.closeIdleConns()
+						}
+					}
+				},
+			}
+			rw := newWriteFailsAfterCloseReadWriter()
+			rw.r.WriteString("GET /1 HTTP/1.1\r\nHost: a\r\n\r\nGET /2 HTTP/1.1\r\nHost: a\r\n\r\n")
+
+			if err := s.ServeConn(rw); err != nil {
+				t.Fatalf("ServeConn() error: %v", err)
+			}
+			verifyResponse(t, bufio.NewReader(&rw.w), StatusOK, string(defaultContentType), "ok")
+		})
+	}
+}
+
 // The wait for a first request that never arrives ends in a 408 once
 // ReadTimeout expires; a request sent after that is not served.
 func TestServerFirstRequestAfterReadTimeout(t *testing.T) {
