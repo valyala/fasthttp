@@ -114,6 +114,11 @@ func TestURIRejectInvalidIPv6(t *testing.T) {
 		"http://[2001:db8::vulndetector.com]/",
 		"http://[vulndetector.com]/",
 		"http://[::ffff:192.0.2.300]/",
+		"http://[abc%25en0]/",
+		"http://[gggg::1%25en0]/",
+		"http://[1.2.3.4%25en0]/",
+		"http://[%25en0]/",
+		"http://[::1%25]/",
 	} {
 		var u URI
 		if err := u.Parse(nil, []byte(raw)); err == nil {
@@ -124,6 +129,9 @@ func TestURIRejectInvalidIPv6(t *testing.T) {
 	for _, raw := range []string{
 		"http://[2001:db8::1]/",
 		"http://[fe80::1%25en0]/",
+		"http://[fe80::1%25en0]:8080/",
+		"http://[fe80::1%25%5Den0]:8080/",
+		"http://[::ffff:192.0.2.1%25en0]/",
 		"http://[::ffff:192.0.2.1]/",
 	} {
 		var u URI

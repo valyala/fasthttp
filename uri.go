@@ -510,7 +510,12 @@ func parseHost(host []byte) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
-			return append(host1, append(host2, host3...)...), nil
+			host1 = append(host1, host2...)
+			host1 = append(host1, host3...)
+			if err = validateIPv6Literal(host1); err != nil {
+				return nil, err
+			}
+			return host1, nil
 		}
 	} else {
 		if bytes.IndexByte(host, '[') >= 0 || bytes.IndexByte(host, ']') >= 0 {
