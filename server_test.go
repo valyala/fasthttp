@@ -6041,6 +6041,195 @@ func TestServerShutdownServesFirstRequestCompletedDuringShutdown(t *testing.T) {
 	}
 }
 
+// The accept-time grace applies to unfinished headers, not to body reads:
+// a first request whose headers are fully read but whose body is still
+// arriving must not be cut off by Shutdown once the grace passes. The
+// upload below keeps making progress past the grace (one byte every
+// 500ms, about 6.5s in total) and completes, like it does on a server
+// that is not shutting down and with net/http.
+func TestServerShutdownWaitsForFirstRequestBodyUpload(t *testing.T) {
+	t.Parallel()
+
+	const body = "0123456789abc" // 13 bytes at one per 500ms: ~6.5s > 5s grace
+	received := make(chan string, 1)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			received <- string(ctx.PostBody())
+			ctx.SetBodyString("done")
+		},
+		ReadTimeout: 30 * time.Second,
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(listener) }()
+
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(testTimeout(20 * time.Second))); err != nil {
+		t.Fatalf("setting read deadline: %v", err)
+	}
+	br := bufio.NewReader(conn)
+
+	// Send the complete headers and the first body byte, then keep the
+	// upload going past the accept-time grace.
+	if _, err := conn.Write([]byte("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 13\r\n\r\n")); err != nil {
+		t.Fatalf("writing headers: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.ShutdownWithContext(ctx) }()
+
+	for i := range len(body) {
+		if _, err := conn.Write([]byte{body[i]}); err != nil {
+			t.Fatalf("writing body byte %d during shutdown: %v", i, err)
+		}
+		if i+1 < len(body) {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("response to the upload: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("response status = %d, want %d", resp.StatusCode(), StatusOK)
+	}
+	if got := string(resp.Body()); got != "done" {
+		t.Fatalf("response body = %q, want %q", got, "done")
+	}
+	select {
+	case got := <-received:
+		if got != body {
+			t.Fatalf("handler received body %q, want %q", got, body)
+		}
+	default:
+		t.Fatal("handler did not receive the uploaded body")
+	}
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("ShutdownWithContext() error: %v", err)
+		}
+	case <-time.After(testTimeout(20 * time.Second)):
+		t.Fatal("ShutdownWithContext() did not return after the upload completed")
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+}
+
+// gatedFirstReadConn holds back the first Read that returns data until
+// release is closed. The data has already been read from the connection
+// at that point, mirroring a request the serving goroutine has buffered
+// but not consumed yet.
+type gatedFirstReadConn struct {
+	net.Conn
+	release <-chan struct{}
+	once    sync.Once
+}
+
+func (c *gatedFirstReadConn) Read(b []byte) (int, error) {
+	n, err := c.Conn.Read(b)
+	if n > 0 {
+		c.once.Do(func() { <-c.release })
+	}
+	return n, err
+}
+
+type gatedFirstReadListener struct {
+	net.Listener
+	release <-chan struct{}
+}
+
+func (l *gatedFirstReadListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return &gatedFirstReadConn{Conn: c, release: l.release}, nil
+}
+
+// If Shutdown claims and closes a connection while its first request is
+// still being read, the serving goroutine must not call the handler for
+// that request afterwards: the client already saw the connection close,
+// so a handler run could only fail writing the response.
+func TestServerShutdownDoesNotCallHandlerForClaimedFirstRequest(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	handled := make(chan struct{}, 1)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			handled <- struct{}{}
+			ctx.SetBodyString("ok")
+		},
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(&gatedFirstReadListener{Listener: listener, release: release}) }()
+
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer conn.Close()
+	// Send the complete first request in one write. The serving
+	// goroutine reads it but is held back by the gate before it can
+	// consume it.
+	if _, err := conn.Write([]byte("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabc")); err != nil {
+		t.Fatalf("writing request: %v", err)
+	}
+	time.Sleep(testTimeout(200 * time.Millisecond))
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.ShutdownWithContext(ctx) }()
+
+	// Shutdown claims and closes the connection once the accept-time
+	// grace passes, even though the request is still gated.
+	if err := conn.SetReadDeadline(time.Now().Add(testTimeout(20 * time.Second))); err != nil {
+		t.Fatalf("setting read deadline: %v", err)
+	}
+	if _, err := conn.Read(make([]byte, 1)); err == nil {
+		t.Fatal("connection was not closed by Shutdown while its first request was gated")
+	} else if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+		t.Fatal("Shutdown did not close the gated first-request connection")
+	}
+
+	// Let the serving goroutine consume the request now: the handler
+	// must not run for it.
+	close(release)
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("ShutdownWithContext() error: %v", err)
+		}
+	case <-time.After(testTimeout(20 * time.Second)):
+		t.Fatal("ShutdownWithContext() did not return")
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+	select {
+	case <-handled:
+		t.Fatal("handler was called for a first request whose connection Shutdown had already closed")
+	default:
+	}
+}
+
 // The wait for a first request that never arrives ends in a 408 once
 // ReadTimeout expires; a request sent after that is not served.
 func TestServerFirstRequestAfterReadTimeout(t *testing.T) {

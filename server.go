@@ -255,13 +255,6 @@ type Server struct {
 
 	idleConns map[net.Conn]*atomic.Int64
 
-	// readingFirstRequest maps a connection that is still reading its
-	// first request to the unix second after which Shutdown may close it:
-	// its accept-time grace, as for a connection that sent nothing. An
-	// entry is removed once the first request reaches the handler, and
-	// when the connection's serving loop ends. Guarded by idleConnsMu.
-	readingFirstRequest map[net.Conn]int64
-
 	// done is written under mu, but RequestCtx.Done() reads it without mu,
 	// possibly after the handler has returned, so it must be atomic.
 	done atomic.Pointer[chan struct{}]
@@ -2199,10 +2192,11 @@ func (s *Server) Shutdown() error {
 // ShutdownWithContext works by first closing all open listeners and then waiting for all connections to return to idle
 // or context timeout and then shut down.
 //
-// A connection that is still reading its first request is closed once the
-// accept-time grace for new connections has passed, like a connection that
-// sent nothing, so a client that stalls mid-request cannot block shutdown
-// when no ReadTimeout is set.
+// A connection that is still reading the headers of its first request is
+// closed once the accept-time grace for new connections has passed, like a
+// connection that sent nothing, so a client that stalls mid-headers cannot
+// block shutdown when no ReadTimeout is set. Once the headers are read the
+// request is waited for, even while its body is still arriving.
 //
 // When ShutdownWithContext is called, Serve, ListenAndServe, and ListenAndServeTLS immediately return nil.
 // Make sure the program doesn't exit and waits instead for ShutdownWithContext to return.
@@ -2542,17 +2536,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	// Count the connection as Idle after 5 seconds.
 	// Same as net/http.Server:
 	// https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
-	idleConnTime.Store(connTime.Add(time.Second * 5).Unix())
-
-	// Until the first request reaches the handler the connection stays
-	// closable by Shutdown once that same grace has passed, even if it
-	// has already sent part of the request.
-	if s.readingFirstRequest == nil {
-		s.readingFirstRequest = make(map[net.Conn]int64)
-	}
-	if _, ok := s.readingFirstRequest[c]; !ok {
-		s.readingFirstRequest[c] = connTime.Add(time.Second * 5).Unix()
-	}
+	firstRequestDeadline := connTime.Add(time.Second * 5).Unix()
+	idleConnTime.Store(firstRequestDeadline)
 	s.idleConnsMu.Unlock()
 
 	serverName := s.getServerName()
@@ -2640,7 +2625,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
 		if err == nil {
-			if idleConnTime.Swap(0) == idleConnClaimedByShutdown {
+			if connRequestNum == 1 {
+				// The connection went active. A CAS is used so that a
+				// connection Shutdown has already claimed while its first
+				// byte was being read is not resurrected; the claim is
+				// detected before the headers are read below.
+				idleConnTime.CompareAndSwap(firstRequestDeadline, 0)
+			} else if idleConnTime.Swap(0) == idleConnClaimedByShutdown {
 				// Shutdown claimed this idle connection and is closing it, so the
 				// request that just arrived can't be answered: drop it silently.
 				break
@@ -2666,24 +2657,55 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				ctx.Response.Header.DisableNormalizing()
 			}
 
-			// Reading Headers.
-			//
-			// If we have pipeline response in the outgoing buffer,
-			// we only want to try and read the next headers once.
-			// If we have to wait for the next request we flush the
-			// outgoing buffer first so it doesn't have to wait.
-			if bw != nil && bw.Buffered() > 0 {
-				err = ctx.Request.Header.readLoop(br, false)
-				if err == ErrNeedMore {
-					err = bw.Flush()
-					if err != nil {
-						break
-					}
+			if connRequestNum == 1 {
+				// While the first request's headers are being read the
+				// connection stays closable by Shutdown once the
+				// accept-time grace has passed, even though it is
+				// active: a client that stalls mid-headers must not
+				// block Shutdown when no ReadTimeout is set. The
+				// negated deadline marks this state in idleConnTime.
+				// Once the headers are read the connection is waited
+				// for like any other, even while its body is still
+				// arriving. If the CAS fails, Shutdown has claimed
+				// the connection already and it must not be read.
+				if !idleConnTime.CompareAndSwap(0, -firstRequestDeadline) {
+					err = net.ErrClosed
+				}
+			}
 
+			if err == nil {
+				// Reading Headers.
+				//
+				// If we have pipeline response in the outgoing buffer,
+				// we only want to try and read the next headers once.
+				// If we have to wait for the next request we flush the
+				// outgoing buffer first so it doesn't have to wait.
+				if bw != nil && bw.Buffered() > 0 {
+					err = ctx.Request.Header.readLoop(br, false)
+					if err == ErrNeedMore {
+						err = bw.Flush()
+						if err != nil {
+							break
+						}
+
+						err = ctx.Request.Header.Read(br)
+					}
+				} else {
 					err = ctx.Request.Header.Read(br)
 				}
-			} else {
-				err = ctx.Request.Header.Read(br)
+			}
+
+			if err == nil && connRequestNum == 1 {
+				// The first request's headers are fully read: from here
+				// on the connection is waited for like any other active
+				// connection, even while its body is still being read.
+				// If Shutdown claimed the connection while the headers
+				// were being read, reading them still succeeded from
+				// the buffer, so the claim is detected here and the
+				// handler is not called for this request.
+				if !idleConnTime.CompareAndSwap(-firstRequestDeadline, 0) {
+					err = net.ErrClosed
+				}
 			}
 
 			if err == nil {
@@ -2864,14 +2886,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
-			if connRequestNum == 1 {
-				// The first request has been fully read and is about
-				// to be handled: Shutdown no longer treats the
-				// connection as still reading it.
-				s.idleConnsMu.Lock()
-				delete(s.readingFirstRequest, c)
-				s.idleConnsMu.Unlock()
-			}
 			s.Handler(ctx)
 		}
 
@@ -3131,7 +3145,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		idleConnTimePool.Put(ic)
 		delete(s.idleConns, c)
 	}
-	delete(s.readingFirstRequest, c)
 	s.idleConnsMu.Unlock()
 
 	return err
@@ -3575,7 +3588,10 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 var idleConnTimePool sync.Pool
 
 // idleConnClaimedByShutdown is the idle timestamp closeIdleConns swaps in
-// for a connection it closes.
+// for a connection it closes. It doubles as the claim marker the serving
+// goroutine checks: idle times are unix seconds (negated while the first
+// request's headers are being read), so no real timestamp can collide
+// with it.
 const idleConnClaimedByShutdown = -1
 
 func (s *Server) closeIdleConns() {
@@ -3583,26 +3599,34 @@ func (s *Server) closeIdleConns() {
 	now := time.Now().Unix()
 	for c, ict := range s.idleConns {
 		t := ict.Load()
-		// Claim the connection before closing it: serveConn claims it by
-		// swapping in 0 when a request arrives, and the first claim wins.
-		if t != 0 && now-t >= 0 && ict.CompareAndSwap(t, idleConnClaimedByShutdown) {
-			_ = c.Close()
-			// Don't recycle ict: the connection's own goroutine still holds it
-			// and stores into it, so only that goroutine may return it.
-			delete(s.idleConns, c)
+		switch {
+		case t == 0 || t == idleConnClaimedByShutdown:
+			// The connection is handled or waited for, or Shutdown
+			// has already claimed it.
+			continue
+		case t < 0:
+			// The connection is still reading its first request's
+			// headers: it becomes closable once the accept-time
+			// grace in the negated timestamp has passed, like a
+			// connection that sent nothing.
+			if now < -t {
+				continue
+			}
+		case now < t:
+			continue
 		}
-	}
-	// A connection still reading its first request past its accept-time
-	// grace is closed as well, even though it is active: otherwise a
-	// client that stalls mid-request blocks Shutdown until its context
-	// deadline when no ReadTimeout is set. Connections being handled and
-	// keep-alive connections reading a later request are not in this map
-	// and keep waiting, as before.
-	for c, t := range s.readingFirstRequest {
-		if now-t >= 0 {
-			_ = c.Close()
-			delete(s.readingFirstRequest, c)
+		// Claim the connection before closing it: if its serving
+		// goroutine concurrently moves it out of the closable state,
+		// the CAS fails and the connection is left alone. In
+		// particular, a first request whose headers were fully read
+		// between the load above and this claim still gets handled.
+		if !ict.CompareAndSwap(t, idleConnClaimedByShutdown) {
+			continue
 		}
+		_ = c.Close()
+		// Don't recycle ict: the connection's own goroutine still holds it
+		// and stores into it, so only that goroutine may return it.
+		delete(s.idleConns, c)
 	}
 	s.idleConnsMu.Unlock()
 }
