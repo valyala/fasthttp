@@ -32,7 +32,8 @@ func TestRequestHeaderSetMultipartFormBoundaryQuoted(t *testing.T) {
 		{"----WebKitFormBoundary7MA4YWxkTrZu0gW", "----WebKitFormBoundary7MA4YWxkTrZu0gW"},
 		{"a'b+c_d-e.f", "a'b+c_d-e.f"},
 
-		// Any other byte makes it a quoted string.
+		// Any other byte makes it a quoted string, and so does none.
+		{"", `""`},
 		{"foo:bar", `"foo:bar"`},
 		{"foo/bar", `"foo/bar"`},
 		{"a=b", `"a=b"`},
@@ -155,6 +156,56 @@ func TestRequestMultipartFormBoundaryAgreesWithNetHTTP(t *testing.T) {
 	// The same boundary and no boundary both have to happen, or nothing was checked.
 	if equal < 100 || none < 100 {
 		t.Fatalf("unexpected counts: the same boundary %d times, none %d times", equal, none)
+	}
+}
+
+// The copy that holds the decoded quoted-pairs is as long as the quoted-string
+// and not as the rest of the header. A header with many quoted-strings that hold
+// a quoted-pair would otherwise make the bytes allocated grow with the square
+// of its length, and the boundary returned would keep the rest of the header
+// alive.
+func TestParseQuotedStringCopyIsBounded(t *testing.T) {
+	t.Parallel()
+
+	rest := strings.Repeat(`; boundary="a\:b"`, 1000)
+	content, n := parseQuotedString([]byte(`a\:b"` + rest))
+	if string(content) != "a:b" || n != 5 {
+		t.Fatalf("unexpected content %q and length %d. Expecting %q and 5", content, n, "a:b")
+	}
+	if cap(content) > 2*len(content) {
+		t.Fatalf("the content of %d bytes holds a buffer of %d bytes", len(content), cap(content))
+	}
+
+	var h RequestHeader
+	h.SetContentType(`multipart/form-data; boundary="a\:b"` + rest)
+	b := h.MultipartFormBoundary()
+	if string(b) != "a:b" {
+		t.Fatalf("unexpected boundary %q. Expecting %q", b, "a:b")
+	}
+	if cap(b) > 2*len(b) {
+		t.Fatalf("the boundary of %d bytes holds a buffer of %d bytes", len(b), cap(b))
+	}
+}
+
+// isTSpecial is the table of the bytes that a backslash escapes in a quoted
+// boundary. mime.ParseMediaType, which net/http uses, decodes a quoted-pair only
+// before a tspecial and keeps the backslash before any other byte, so the two
+// agree when its answer for every byte is the table's.
+func TestIsTSpecialMatchesMime(t *testing.T) {
+	t.Parallel()
+
+	for c := range 256 {
+		if c == '\r' || c == '\n' {
+			continue // mime.ParseMediaType rejects them inside a quoted string
+		}
+		b := string([]byte{byte(c)})
+		_, params, err := mime.ParseMediaType(`multipart/form-data; boundary="\` + b + `"`)
+		if err != nil {
+			t.Fatalf("byte %#02x: unexpected error: %v", c, err)
+		}
+		if got, want := isTSpecial(byte(c)), params["boundary"] == b; got != want {
+			t.Fatalf("isTSpecial(%#02x) = %v, and mime.ParseMediaType reads the boundary %q for %q", c, got, params["boundary"], b)
+		}
 	}
 }
 
@@ -1668,6 +1719,9 @@ func TestRequestMultipartFormBoundary(t *testing.T) {
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a\\\";boundary=bar\"; boundary=foobar\r\n\r\n", "foobar")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a\\\\\"; boundary=foobar\r\n\r\n", "foobar")
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; foo=\"a;boundary=bar\r\n\r\n", "")
+	// a quoted string that is never closed leaves no boundary, even behind one
+	// that was read, since net/http rejects the header
+	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=foobar; foo=\"bar\r\n\r\n", "")
 
 	// a quoted boundary ends at its closing quote, whatever is inside it
 	testRequestMultipartFormBoundary(t, "POST / HTTP/1.1\r\nContent-Type: multipart/form-data; boundary=\"foo;bar\"\r\n\r\n", "foo;bar")

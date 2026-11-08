@@ -558,30 +558,38 @@ func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
 // neither is taken. The content is a slice of b unless a quoted-pair was
 // decoded.
 func parseQuotedString(b []byte) (content []byte, n int) {
-	var dst []byte
-	for i := 0; i < len(b); i++ {
-		c := b[i]
-		if c == '"' {
-			if dst == nil {
-				return b[:i], i + 1
-			}
-			return dst, i + 1
-		}
-		if c == '\\' && i+1 < len(b) {
+	// Find the closing quote first, so that the copy made for the quoted-pairs
+	// is as long as the quoted-string and not as the rest of b: a header with
+	// many such parameters would otherwise make the bytes allocated grow with
+	// the square of its length.
+	end, pairs := -1, 0
+	for i := 0; i < len(b) && end < 0; i++ {
+		switch c := b[i]; {
+		case c == '"':
+			end = i
+		case c == '\\' && i+1 < len(b):
 			if !isTSpecial(b[i+1]) {
 				return nil, 0
 			}
-			if dst == nil {
-				dst = append(make([]byte, 0, len(b)), b[:i]...)
-			}
+			pairs++
 			i++
-			c = b[i]
-		}
-		if dst != nil {
-			dst = append(dst, c)
 		}
 	}
-	return nil, 0
+	switch {
+	case end < 0:
+		return nil, 0
+	case pairs == 0:
+		return b[:end], end + 1
+	}
+
+	dst := make([]byte, 0, end-pairs)
+	for i := 0; i < end; i++ {
+		if b[i] == '\\' {
+			i++
+		}
+		dst = append(dst, b[i])
+	}
+	return dst, end + 1
 }
 
 // isTSpecial reports whether c is a tspecial (RFC 2045, section 5.1), a byte
@@ -641,10 +649,11 @@ func endsWithUnicodeSpace(v []byte) bool {
 }
 
 // appendTokenOrQuotedString appends v to dst as it is if it is a token, and as
-// a quoted-string if it holds a byte a token can't (RFC 9110, sections 5.6.2
-// and 5.6.4).
+// a quoted-string if it is empty or holds a byte a token can't (RFC 9110,
+// sections 5.6.2 and 5.6.4).
 func appendTokenOrQuotedString(dst, v []byte) []byte {
-	quote := false
+	// A token has at least one byte.
+	quote := len(v) == 0
 	for _, c := range v {
 		if !validHeaderFieldByte(c) {
 			quote = true
@@ -1176,11 +1185,12 @@ func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
 // nil is returned too when a receiver that follows net/http could read another
 // boundary, or none: with a parameter such as boundary* or boundary*0, which
 // net/http decodes and takes over boundary=, with two boundary parameters that
-// differ, which it rejects, with whitespace after the '=' or around an unquoted
-// value, which it skips although RFC 9110, section 5.6.6 doesn't allow it, and
-// with a backslash that escapes a byte that is not a tspecial, which it keeps
-// and the RFC doesn't. The body is then kept as it is, for that receiver to
-// read.
+// differ, which it rejects, with whitespace after the '=', or a space that is
+// not an ASCII one, such as the no-break space, before a parameter name or after
+// an unquoted value, which it skips although RFC 9110, section 5.6.6 allows
+// none of it, and with a backslash that escapes a byte that is not a tspecial,
+// which it keeps and the RFC doesn't. The body is then kept as it is, for that
+// receiver to read.
 func (h *RequestHeader) MultipartFormBoundary() []byte {
 	b := h.ContentType()
 	if !caseInsensitiveHasPrefix(b, strMultipartFormData) {

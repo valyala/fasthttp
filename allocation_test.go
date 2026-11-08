@@ -3,6 +3,8 @@
 package fasthttp
 
 import (
+	"bufio"
+	"bytes"
 	"net"
 	"testing"
 )
@@ -34,6 +36,37 @@ func TestAllocationServeConn(t *testing.T) {
 
 	if n != 0 {
 		t.Fatalf("expected 0 allocations, got %f", n)
+	}
+}
+
+// A request with a body that isn't multipart/form-data is read without
+// allocations, whether the form is pre-parsed or not: the boundary that a
+// multipart request is checked for is empty for it.
+func TestAllocationRequestReadBody(t *testing.T) {
+	raw := []byte("POST /foo HTTP/1.1\r\nHost: google.com\r\nContent-Type: application/json\r\nContent-Length: 13\r\n\r\n{\"foo\":\"bar\"}")
+	r := bytes.NewReader(raw)
+	br := bufio.NewReader(r)
+
+	for _, preParse := range []bool{true, false} {
+		var req Request
+		n := testing.AllocsPerRun(100, func() {
+			req.Reset()
+			r.Reset(raw)
+			br.Reset(r)
+			if err := req.Header.Read(br); err != nil {
+				t.Fatal(err)
+			}
+			if err := req.ContinueReadBody(br, 0, preParse); err != nil {
+				t.Fatal(err)
+			}
+		})
+
+		if n != 0 {
+			t.Fatalf("preParse=%v: expected 0 allocations, got %f", preParse, n)
+		}
+		if got := string(req.Body()); got != `{"foo":"bar"}` {
+			t.Fatalf("preParse=%v: unexpected body %q", preParse, got)
+		}
 	}
 }
 
