@@ -524,8 +524,9 @@ func (w *writer) consumePreflush() []byte {
 // bodySkipped reports whether the server will write no body for ctx.
 func bodySkipped(ctx *fasthttp.RequestCtx) bool {
 	status := ctx.Response.StatusCode()
-	return ctx.IsHead() || ctx.Response.SkipBody ||
-		status < 200 || status == http.StatusNoContent || status == http.StatusNotModified
+	// An unset status code is written as 200, which has a body.
+	return ctx.IsHead() || ctx.Response.SkipBody || (status != 0 &&
+		(status < 200 || status == http.StatusNoContent || status == http.StatusNotModified))
 }
 
 // bufferBeforeChunkingSize is net/http's: a body it cannot hold is sent

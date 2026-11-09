@@ -2845,6 +2845,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			s.Handler(ctx)
 		}
 
+		// A response that reaches the client always carries a status code.
+		// StatusCode reports an unset code as zero, so apply the implied default
+		// here, once the handler has had its chance to set one.
+		if ctx.Response.Header.statusCode == 0 {
+			ctx.Response.Header.statusCode = StatusOK
+		}
+
 		timeoutResponse = ctx.timeoutResponse
 		if timeoutResponse != nil {
 			// The timed out handler runs in its own goroutine and may still be

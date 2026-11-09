@@ -159,8 +159,18 @@ func (h *RequestHeader) SetByteRange(startPos, endPos int) {
 }
 
 // StatusCode returns response status code.
+//
+// It returns 0 when no status code has been set, for example on a response
+// whose request failed before a response could be read. Responses served by
+// Server default to StatusOK when their handler does not set one.
 func (h *ResponseHeader) StatusCode() int {
-	if h.statusCode == 0 {
+	return h.statusCode
+}
+
+// statusCodeOnWire returns the status code to serialize into the status line,
+// defaulting to StatusOK when no status code has been set.
+func (h *ResponseHeader) statusCodeOnWire() int {
+	if h.statusCode <= 0 {
 		return StatusOK
 	}
 	return h.statusCode
@@ -329,7 +339,7 @@ func (h *ResponseHeader) mustSkipBody() bool {
 // on a 1xx or 204 response, but allows it on a 304, where the value describes
 // the corresponding 200 response rather than a body of its own.
 func (h *ResponseHeader) mustSkipContentLengthOnWire() bool {
-	statusCode := h.StatusCode()
+	statusCode := h.statusCodeOnWire()
 	return statusCode < 200 || statusCode == StatusNoContent
 }
 
@@ -3104,10 +3114,7 @@ func (h *ResponseHeader) String() string {
 // appendStatusLine appends the response status line to dst and returns
 // the extended dst.
 func (h *ResponseHeader) appendStatusLine(dst []byte) []byte {
-	statusCode := h.StatusCode()
-	if statusCode < 0 {
-		statusCode = StatusOK
-	}
+	statusCode := h.statusCodeOnWire()
 	if len(h.protocol) == 0 && len(h.statusMessage) == 0 && statusCode < len(statusLines) {
 		if line := statusLines[statusCode]; line != "" {
 			return append(dst, line...)

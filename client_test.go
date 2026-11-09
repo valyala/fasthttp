@@ -6931,3 +6931,24 @@ func TestClientDoKeepBodyBuffer(t *testing.T) {
 		t.Fatalf("expected resp.body to be reused across requests")
 	}
 }
+
+func TestClientDoStatusCodeOnDialError(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{
+		Dial: func(string) (net.Conn, error) {
+			return nil, errors.New("dial error")
+		},
+	}
+
+	var req Request
+	req.SetRequestURI("http://example.com/")
+
+	var resp Response
+	if err := c.Do(&req, &resp); err == nil {
+		t.Fatal("expecting error")
+	}
+	if statusCode := resp.StatusCode(); statusCode != 0 {
+		t.Fatalf("unexpected status code after failed request: %d. Expecting 0", statusCode)
+	}
+}
