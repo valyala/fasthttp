@@ -2695,14 +2695,16 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				}
 			}
 
-			if err == nil && connRequestNum == 1 {
-				// The first request's headers are fully read: from here
-				// on the connection is waited for like any other active
-				// connection, even while its body is still being read.
-				// If Shutdown claimed the connection while the headers
-				// were being read, reading them still succeeded from
-				// the buffer, so the claim is detected here and the
-				// handler is not called for this request.
+			if connRequestNum == 1 {
+				// The first header read has returned, successfully or
+				// with a parse error: from here on the connection is
+				// waited for like any other active connection, even
+				// while its body is still being read or while the
+				// error response is being written. If Shutdown claimed
+				// the connection while the headers were being read,
+				// reading them still succeeded from the buffer, so the
+				// claim is detected here and the handler (or the error
+				// response) is not run for this request.
 				if !idleConnTime.CompareAndSwap(-firstRequestDeadline, 0) {
 					err = net.ErrClosed
 				}

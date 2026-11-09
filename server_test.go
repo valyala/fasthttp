@@ -6127,71 +6127,40 @@ func TestServerShutdownWaitsForFirstRequestBodyUpload(t *testing.T) {
 	}
 }
 
-// gatedFirstReadConn holds back the first Read that returns data until
-// release is closed. The data has already been read from the connection
-// at that point, mirroring a request the serving goroutine has buffered
-// but not consumed yet.
-type gatedFirstReadConn struct {
-	net.Conn
-	release <-chan struct{}
-	once    sync.Once
-}
-
-func (c *gatedFirstReadConn) Read(b []byte) (int, error) {
-	n, err := c.Conn.Read(b)
-	if n > 0 {
-		c.once.Do(func() { <-c.release })
-	}
-	return n, err
-}
-
-type gatedFirstReadListener struct {
-	net.Listener
-	release <-chan struct{}
-}
-
-func (l *gatedFirstReadListener) Accept() (net.Conn, error) {
-	c, err := l.Listener.Accept()
-	if err != nil {
-		return nil, err
-	}
-	return &gatedFirstReadConn{Conn: c, release: l.release}, nil
-}
-
 // If Shutdown claims and closes a connection while its first request is
 // still being read, the serving goroutine must not call the handler for
 // that request afterwards: the client already saw the connection close,
 // so a handler run could only fail writing the response.
+//
+// The first header arrives at once, minus its final CRLF, so the serving
+// goroutine is blocked reading the headers when Shutdown closes the
+// connection; the close delivers the CRLF, so the headers then parse
+// successfully. Unlike gating the first Read, this exercises the claim
+// check after a successful header read.
 func TestServerShutdownDoesNotCallHandlerForClaimedFirstRequest(t *testing.T) {
 	t.Parallel()
 
-	release := make(chan struct{})
 	handled := make(chan struct{}, 1)
+	logs := &testLogger{}
+	closed := make(chan struct{})
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			handled <- struct{}{}
 			ctx.SetBodyString("ok")
 		},
+		Logger: logs,
+		ConnState: func(_ net.Conn, st ConnState) {
+			if st == StateClosed {
+				close(closed)
+			}
+		},
 	}
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listening: %v", err)
-	}
+	conn := newNextRequestOnCloseConn("GET / HTTP/1.1\r\nHost: a\r\n", "\r\n")
 	served := make(chan error, 1)
-	go func() { served <- s.Serve(&gatedFirstReadListener{Listener: listener, release: release}) }()
+	go func() { served <- s.Serve(newOneConnListener(conn)) }()
 
-	conn, err := net.Dial("tcp", listener.Addr().String())
-	if err != nil {
-		t.Fatalf("dialing: %v", err)
-	}
-	defer conn.Close()
-	// Send the complete first request in one write. The serving
-	// goroutine reads it but is held back by the gate before it can
-	// consume it.
-	if _, err := conn.Write([]byte("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 3\r\n\r\nabc")); err != nil {
-		t.Fatalf("writing request: %v", err)
-	}
-	time.Sleep(testTimeout(200 * time.Millisecond))
+	// The serving goroutine is now blocked in the first header read.
+	<-conn.waitingForNextRequest
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
 	defer cancel()
@@ -6199,34 +6168,109 @@ func TestServerShutdownDoesNotCallHandlerForClaimedFirstRequest(t *testing.T) {
 	go func() { stopped <- s.ShutdownWithContext(ctx) }()
 
 	// Shutdown claims and closes the connection once the accept-time
-	// grace passes, even though the request is still gated.
+	// grace passes; the close delivers the final CRLF, so the headers
+	// parse successfully, but the handler must not run for them.
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("ShutdownWithContext() error: %v", err)
+		}
+	case <-time.After(testTimeout(30 * time.Second)):
+		t.Fatal("ShutdownWithContext() did not return")
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+	// The server logs, if at all, before it reports the connection closed.
+	<-closed
+	select {
+	case <-handled:
+		t.Fatal("handler was called for a first request whose connection Shutdown had already closed")
+	default:
+	}
+	if logs.out != "" {
+		t.Fatalf("server log = %q, want nothing", logs.out)
+	}
+}
+
+// A header parse error on the first request still gets its error response
+// during Shutdown: once the first header read returns, the connection is
+// no longer closable as still reading its headers, even while the
+// ErrorHandler takes a while to produce the 400. Without that, Shutdown's
+// sweep closes the connection once the accept-time grace passes while the
+// error response is being written, and the client only sees EOF.
+func TestServerShutdownDeliversFirstRequestHeaderErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	entered := make(chan struct{}, 1)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+		ErrorHandler: func(ctx *RequestCtx, err error) {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			// Producing the error response takes longer than the
+			// accept-time grace left: Shutdown must not close the
+			// connection under it.
+			time.Sleep(6 * time.Second)
+			ctx.SetStatusCode(StatusBadRequest)
+			ctx.SetBodyString("bad request")
+		},
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(listener) }()
+
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer conn.Close()
 	if err := conn.SetReadDeadline(time.Now().Add(testTimeout(20 * time.Second))); err != nil {
 		t.Fatalf("setting read deadline: %v", err)
 	}
-	if _, err := conn.Read(make([]byte, 1)); err == nil {
-		t.Fatal("connection was not closed by Shutdown while its first request was gated")
-	} else if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
-		t.Fatal("Shutdown did not close the gated first-request connection")
+	br := bufio.NewReader(conn)
+
+	// A complete HTTP/1.1 request without Host: a header parse error.
+	if _, err := conn.Write([]byte("GET / HTTP/1.1\r\n\r\n")); err != nil {
+		t.Fatalf("writing request: %v", err)
 	}
 
-	// Let the serving goroutine consume the request now: the handler
-	// must not run for it.
-	close(release)
+	// Start Shutdown once the ErrorHandler has been entered.
+	select {
+	case <-entered:
+	case <-time.After(testTimeout(10 * time.Second)):
+		t.Fatal("ErrorHandler was not entered for the request without Host")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.ShutdownWithContext(ctx) }()
+
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("error response during Shutdown: %v", err)
+	}
+	if resp.StatusCode() != StatusBadRequest {
+		t.Fatalf("response status = %d, want %d", resp.StatusCode(), StatusBadRequest)
+	}
+	if got := string(resp.Body()); got != "bad request" {
+		t.Fatalf("response body = %q, want %q", got, "bad request")
+	}
 	select {
 	case err := <-stopped:
 		if err != nil {
 			t.Fatalf("ShutdownWithContext() error: %v", err)
 		}
 	case <-time.After(testTimeout(20 * time.Second)):
-		t.Fatal("ShutdownWithContext() did not return")
+		t.Fatal("ShutdownWithContext() did not return after the error response")
 	}
 	if err := <-served; err != nil {
 		t.Fatalf("Serve() error: %v", err)
-	}
-	select {
-	case <-handled:
-		t.Fatal("handler was called for a first request whose connection Shutdown had already closed")
-	default:
 	}
 }
 
