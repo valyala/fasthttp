@@ -3045,3 +3045,162 @@ func TestOSFSOpenReturnsOSFile(t *testing.T) {
 		}
 	}
 }
+
+// shortWriter accepts at most n bytes and reports no error.
+type shortWriter struct{ n int }
+
+type errorWriter struct {
+	n   int
+	err error
+}
+
+func (w *errorWriter) Write(p []byte) (int, error) {
+	if len(p) > w.n {
+		p = p[:w.n]
+	}
+	return len(p), w.err
+}
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	if len(p) > w.n {
+		p = p[:w.n]
+	}
+	return len(p), nil
+}
+
+func TestFSSmallFileWriteToShortWrite(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	body := []byte("small file body for short write")
+	if err := os.WriteFile(filepath.Join(dir, "small.txt"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		fs   *FS
+	}{
+		{name: "cached", fs: &FS{Root: dir}},
+		{name: "skip cache", fs: &FS{Root: dir, SkipCache: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := tt.fs.NewRequestHandler()
+			var ctx RequestCtx
+			ctx.Init(&Request{}, nil, TestLogger{t})
+			ctx.Request.SetRequestURI("/small.txt")
+			h(&ctx)
+			defer func() {
+				if err := ctx.Response.CloseBodyStream(); err != nil {
+					t.Error(err)
+				}
+			}()
+
+			stream := ctx.Response.BodyStream()
+			r, ok := stream.(*fsSmallFileReader)
+			if !ok {
+				t.Fatalf("unexpected body stream %T. Expecting *fsSmallFileReader", stream)
+			}
+
+			w := &shortWriter{n: 4}
+			n, err := r.WriteTo(w)
+			if n != 4 {
+				t.Errorf("wrote %d bytes, want 4", n)
+			}
+			if err != io.ErrShortWrite {
+				t.Errorf("got %v, want io.ErrShortWrite", err)
+			}
+			if r.startPos != 4 {
+				t.Errorf("startPos = %d, want 4", r.startPos)
+			}
+		})
+	}
+}
+
+func TestFSSmallFileWriteToPreservesWriterError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "small.txt"), []byte("small file body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := (&FS{Root: dir}).NewRequestHandler()
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, TestLogger{t})
+	ctx.Request.SetRequestURI("/small.txt")
+	h(&ctx)
+	defer func() {
+		if err := ctx.Response.CloseBodyStream(); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	r := ctx.Response.BodyStream().(*fsSmallFileReader) //nolint:forcetypeassert
+	want := errors.New("write failed")
+	w := &errorWriter{n: 4, err: want}
+	if _, err := r.WriteTo(w); err != want {
+		t.Errorf("got %v, want %v", err, want)
+	}
+}
+
+// dataAndEOFFile returns data and io.EOF in the same ReadAt call. os.File
+// does this when the file shrinks after its size was cached, so the loop in
+// fsSmallFileReader.WriteTo must still honor the destination writer's error.
+type dataAndEOFFile struct {
+	data []byte
+}
+
+func (f *dataAndEOFFile) ReadAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(f.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.data[off:])
+	return n, io.EOF
+}
+
+func (f *dataAndEOFFile) Read(p []byte) (int, error)   { return 0, io.EOF }
+func (f *dataAndEOFFile) Close() error                 { return nil }
+func (f *dataAndEOFFile) Stat() (iofs.FileInfo, error) { return nil, errors.New("unused") }
+
+func TestFSSmallFileWriteToDataAndEOFShortWrite(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.startPos = 0
+	r.endPos = ff.contentLength
+
+	w := &shortWriter{n: 4}
+	n, err := r.WriteTo(w)
+	if n != 4 {
+		t.Errorf("wrote %d bytes, want 4", n)
+	}
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Errorf("got %v, want io.ErrShortWrite", err)
+	}
+	if r.startPos != 4 {
+		t.Errorf("startPos = %d, want 4", r.startPos)
+	}
+}
+
+func TestFSSmallFileWriteToDataAndEOFPreservesWriterError(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.endPos = ff.contentLength
+
+	want := errors.New("write failed")
+	w := &errorWriter{n: 4, err: want}
+	_, err := r.WriteTo(w)
+	if !errors.Is(err, want) {
+		t.Errorf("got %v, want the original writer error", err)
+	}
+	if errors.Is(err, io.ErrShortWrite) {
+		t.Errorf("original writer error was replaced: %v", err)
+	}
+}

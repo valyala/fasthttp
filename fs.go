@@ -961,8 +961,12 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 	var n int
 	var err error
 	if ff.f == nil {
-		n, err = w.Write(ff.dirIndex[r.startPos:r.endPos])
+		b := ff.dirIndex[r.startPos:r.endPos]
+		n, err = w.Write(b)
 		r.startPos += n
+		if err == nil && n != len(b) {
+			err = io.ErrShortWrite
+		}
 		return int64(n), err
 	}
 
@@ -989,9 +993,9 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 		nw, errw := w.Write(buf[:n])
 		curPos += nw
 		if errw == nil && nw != n {
-			errw = errors.New("bug: write returned (n, nil), where n != len(p)")
+			errw = io.ErrShortWrite
 		}
-		if err == nil {
+		if errw != nil {
 			err = errw
 		}
 	}
