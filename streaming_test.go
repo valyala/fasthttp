@@ -342,3 +342,58 @@ func TestRequestStreamChunkedTruncatedAtChunkBoundary(t *testing.T) {
 		t.Fatalf("unexpected body %q. Expecting %q", got, "hello")
 	}
 }
+
+func TestBodyStreamTruncatedChunkFraming(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, body, want string
+		brokenChunk      bool
+	}{
+		{"missing first chunk", "", "", false},
+		{"missing next chunk", "3\r\nabc\r\n", "abc", false},
+		{"missing trailer terminator", "3\r\nabc\r\n0\r\n", "abc", true},
+		{"unterminated trailer", "3\r\nabc\r\n0\r\nX-Test: value", "abc", true},
+		{"missing blank line after trailer", "3\r\nabc\r\n0\r\nX-Test: value\r\n", "abc", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, response := range []bool{false, true} {
+				t.Run(fmt.Sprintf("response=%v", response), func(t *testing.T) {
+					var req Request
+					var resp Response
+					defer req.Reset()
+					defer resp.Reset()
+					var stream io.Reader
+					const header = "Transfer-Encoding: chunked\r\nTrailer: X-Test\r\n\r\n"
+					if response {
+						resp.StreamBody = true
+						if err := resp.Read(bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\n" + header + tc.body))); err != nil {
+							t.Fatal(err)
+						}
+						stream = resp.BodyStream()
+					} else {
+						br := bufio.NewReader(strings.NewReader("POST / HTTP/1.1\r\nHost: example.com\r\n" + header + tc.body))
+						if err := req.Header.Read(br); err != nil {
+							t.Fatal(err)
+						}
+						if err := req.ContinueReadBodyStream(br, 1, false); err != nil {
+							t.Fatal(err)
+						}
+						stream = req.BodyStream()
+					}
+					got, err := io.ReadAll(stream)
+					if tc.brokenChunk {
+						var broken ErrBrokenChunk
+						if !errors.As(err, &broken) || !errors.Is(broken.error, io.ErrUnexpectedEOF) {
+							t.Fatalf("got %v, want ErrBrokenChunk containing io.ErrUnexpectedEOF", err)
+						}
+					} else if !errors.Is(err, io.ErrUnexpectedEOF) {
+						t.Fatalf("got %v, want io.ErrUnexpectedEOF", err)
+					}
+					if string(got) != tc.want {
+						t.Fatalf("got body %q, want %q", got, tc.want)
+					}
+				})
+			}
+		})
+	}
+}
