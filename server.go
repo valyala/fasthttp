@@ -2842,14 +2842,15 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
+			// A response always carries a status code, and middleware wrapping the
+			// handler expects to read the one the client receives. Set the default
+			// before the handler runs: TimeoutHandler can return while the handler
+			// goroutine still uses ctx.Response, so it must not be read or written
+			// here afterwards.
+			if ctx.Response.Header.statusCode == 0 {
+				ctx.Response.Header.statusCode = StatusOK
+			}
 			s.Handler(ctx)
-		}
-
-		// A response that reaches the client always carries a status code.
-		// StatusCode reports an unset code as zero, so apply the implied default
-		// here, once the handler has had its chance to set one.
-		if ctx.Response.Header.statusCode == 0 {
-			ctx.Response.Header.statusCode = StatusOK
 		}
 
 		timeoutResponse = ctx.timeoutResponse

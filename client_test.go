@@ -6952,3 +6952,38 @@ func TestClientDoStatusCodeOnDialError(t *testing.T) {
 		t.Fatalf("unexpected status code after failed request: %d. Expecting 0", statusCode)
 	}
 }
+
+func TestClientExpiredDeadlineResetsResponse(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.SetRequestURI("http://example.com/")
+
+	for _, tc := range []struct {
+		name string
+		do   func(resp *Response) error
+	}{
+		{"Client.DoDeadline", func(resp *Response) error {
+			return (&Client{}).DoDeadline(&req, resp, time.Now().Add(-time.Second))
+		}},
+		{"Client.DoTimeout", func(resp *Response) error {
+			return (&Client{}).DoTimeout(&req, resp, 0)
+		}},
+		{"HostClient.DoDeadline", func(resp *Response) error {
+			return (&HostClient{}).DoDeadline(&req, resp, time.Now().Add(-time.Second))
+		}},
+		{"HostClient.DoTimeout", func(resp *Response) error {
+			return (&HostClient{}).DoTimeout(&req, resp, 0)
+		}},
+	} {
+		var resp Response
+		resp.Header.SetStatusCode(StatusOK)
+
+		if err := tc.do(&resp); err != ErrTimeout {
+			t.Fatalf("%s: unexpected error: %v. Expecting %v", tc.name, err, ErrTimeout)
+		}
+		if statusCode := resp.StatusCode(); statusCode != 0 {
+			t.Fatalf("%s: unexpected status code after the request timed out: %d. Expecting 0", tc.name, statusCode)
+		}
+	}
+}

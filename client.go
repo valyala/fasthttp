@@ -462,6 +462,9 @@ func (c *Client) Post(dst []byte, url string, postArgs *Args) (statusCode int, b
 func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	req.timeout = timeout
 	if req.timeout <= 0 {
+		if resp != nil {
+			resp.Reset()
+		}
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -494,6 +497,9 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	req.timeout = time.Until(deadline)
 	if req.timeout <= 0 {
+		if resp != nil {
+			resp.Reset()
+		}
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -1598,6 +1604,9 @@ func ReleaseResponse(resp *Response) {
 func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Duration) error {
 	req.timeout = timeout
 	if req.timeout <= 0 {
+		if resp != nil {
+			resp.Reset()
+		}
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
@@ -1625,6 +1634,9 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	req.timeout = time.Until(deadline)
 	if req.timeout <= 0 {
+		if resp != nil {
+			resp.Reset()
+		}
 		return ErrTimeout
 	}
 	return c.Do(req, resp)
