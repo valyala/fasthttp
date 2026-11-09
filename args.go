@@ -186,7 +186,11 @@ func (a *Args) AppendBytes(dst []byte) []byte {
 //
 // WriteTo implements io.WriterTo interface.
 func (a *Args) WriteTo(w io.Writer) (int64, error) {
-	n, err := w.Write(a.QueryString())
+	b := a.QueryString()
+	n, err := w.Write(b)
+	if err == nil && n != len(b) {
+		err = io.ErrShortWrite
+	}
 	return int64(n), err
 }
 

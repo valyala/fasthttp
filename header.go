@@ -3057,7 +3057,11 @@ func (h *ResponseHeader) serialize(w *bufio.Writer) []byte {
 //
 // WriteTo implements io.WriterTo interface.
 func (h *ResponseHeader) WriteTo(w io.Writer) (int64, error) {
-	n, err := w.Write(h.Header())
+	b := h.Header()
+	n, err := w.Write(b)
+	if err == nil && n != len(b) {
+		err = io.ErrShortWrite
+	}
 	return int64(n), err
 }
 
@@ -3224,7 +3228,11 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 //
 // WriteTo implements io.WriterTo interface.
 func (h *RequestHeader) WriteTo(w io.Writer) (int64, error) {
-	n, err := w.Write(h.Header())
+	b := h.Header()
+	n, err := w.Write(b)
+	if err == nil && n != len(b) {
+		err = io.ErrShortWrite
+	}
 	return int64(n), err
 }
 

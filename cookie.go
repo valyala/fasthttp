@@ -370,7 +370,11 @@ func (c *Cookie) String() string {
 //
 // WriteTo implements io.WriterTo interface.
 func (c *Cookie) WriteTo(w io.Writer) (int64, error) {
-	n, err := w.Write(c.Cookie())
+	b := c.Cookie()
+	n, err := w.Write(b)
+	if err == nil && n != len(b) {
+		err = io.ErrShortWrite
+	}
 	return int64(n), err
 }
 
