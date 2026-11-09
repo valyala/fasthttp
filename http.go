@@ -2005,7 +2005,17 @@ func discardBodyChunked(r *bufio.Reader, maxBodySize int) error {
 func discardBodyIdentity(r *bufio.Reader, maxBodySize int) error {
 	size := 0
 	for {
-		n, err := r.Discard(r.Size())
+		// Discard blocks until it has skipped all requested bytes, so never
+		// ask for more than the remaining allowance plus one byte. Otherwise
+		// a body that is already over the limit but shorter than the reader
+		// buffer would wait for more data (or EOF) instead of failing.
+		toDiscard := r.Size()
+		if maxBodySize > 0 {
+			if remaining := maxBodySize - size + 1; remaining < toDiscard {
+				toDiscard = remaining
+			}
+		}
+		n, err := r.Discard(toDiscard)
 		size += n
 		if maxBodySize > 0 && size > maxBodySize {
 			return ErrBodyTooLarge

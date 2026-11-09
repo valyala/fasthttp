@@ -1554,6 +1554,59 @@ func TestPipelineClientSkipBodyHonorsMaxResponseBodySize(t *testing.T) {
 	}
 }
 
+func TestPipelineClientSkipBodyIdentityBodyTooLargeDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+
+	release := make(chan struct{})
+	defer close(release)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		br := bufio.NewReader(conn)
+		var req Request
+		if err := req.Read(br); err != nil {
+			t.Error(err)
+			return
+		}
+		// No Content-Length and no Transfer-Encoding: the body runs until the
+		// connection closes. Send one byte more than the limit, far less than
+		// the client's read buffer, and keep the connection open.
+		resp := "HTTP/1.1 200 OK\r\n\r\n" + strings.Repeat("x", 101)
+		if _, err := conn.Write([]byte(resp)); err != nil {
+			t.Error(err)
+			return
+		}
+		<-release
+	}()
+
+	c := &PipelineClient{
+		Addr:                "example.com",
+		Dial:                func(string) (net.Conn, error) { return ln.Dial() },
+		MaxResponseBodySize: 100,
+	}
+	var req Request
+	var resp Response
+	resp.SkipBody = true
+	req.SetRequestURI("http://example.com/")
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Do(&req, &resp) }()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrBodyTooLarge) {
+			t.Fatalf("got error %v, want %v", err, ErrBodyTooLarge)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Do blocked instead of returning ErrBodyTooLarge")
+	}
+}
+
 func TestClientSkipBodyReusesConnectionForEmptyBody(t *testing.T) {
 	t.Parallel()
 
