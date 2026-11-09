@@ -124,6 +124,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 			for k, vv := range w.Header() {
 				if k == fasthttp.HeaderContentType {
 					haveContentType = true
+					suppressDefaultContentType(ctx, vv)
 				}
 				if isTrailerField(k, announced) {
 					continue
@@ -179,6 +180,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				}
 				if k == fasthttp.HeaderContentType {
 					haveContentType = true
+					suppressDefaultContentType(ctx, vv)
 				}
 				if isTrailerField(k, announced) {
 					continue
@@ -222,6 +224,17 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		case modePanicked:
 			panic("net/http handler panicked")
 		}
+	}
+}
+
+// suppressDefaultContentType keeps fasthttp's default Content-Type off a
+// response whose handler set Content-Type to nil or to an empty value. That is
+// how net/http handlers turn off the Content-Type header (see
+// http.ResponseWriter.Header and http.ServeContent), and net/http then sends
+// none or an empty one rather than "text/plain; charset=utf-8".
+func suppressDefaultContentType(ctx *fasthttp.RequestCtx, vv []string) {
+	if len(vv) == 0 || vv[0] == "" {
+		ctx.Response.Header.SetNoDefaultContentType(true)
 	}
 }
 
