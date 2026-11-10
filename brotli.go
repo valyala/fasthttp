@@ -55,11 +55,12 @@ func acquireStacklessBrotliWriter(w io.Writer, level int) stackless.Writer {
 	return sw
 }
 
-func releaseStacklessBrotliWriter(sw stackless.Writer, level int) {
-	sw.Close()
+func releaseStacklessBrotliWriter(sw stackless.Writer, level int) error {
+	err := sw.Close()
 	nLevel := normalizeBrotliCompressLevel(level)
 	p := stacklessBrotliWriterPoolMap[nLevel]
 	p.Put(sw)
+	return err
 }
 
 func acquireRealBrotliWriter(w io.Writer, level int) *brotli.Writer {
@@ -129,7 +130,9 @@ func WriteBrotliLevel(w io.Writer, p []byte, level int) (int, error) {
 	default:
 		zw := acquireStacklessBrotliWriter(w, level)
 		n, err := zw.Write(p)
-		releaseStacklessBrotliWriter(zw, level)
+		if errc := releaseStacklessBrotliWriter(zw, level); err == nil {
+			err = errc
+		}
 		return n, err
 	}
 }

@@ -2452,7 +2452,7 @@ func compressBrotliBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int)
 		bw: sw,
 	}
 	_, wErr := copyBodyStream(fw, bodyStream)
-	releaseStacklessBrotliWriter(zw, level)
+	_ = releaseStacklessBrotliWriter(zw, level)
 	return wErr
 }
 
@@ -2463,7 +2463,7 @@ func compressGzipBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) e
 		bw: sw,
 	}
 	_, wErr := copyBodyStream(fw, bodyStream)
-	releaseStacklessGzipWriter(zw, level)
+	_ = releaseStacklessGzipWriter(zw, level)
 	return wErr
 }
 
@@ -2474,7 +2474,7 @@ func compressDeflateBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int
 		bw: sw,
 	}
 	_, wErr := copyBodyStream(fw, bodyStream)
-	releaseStacklessDeflateWriter(zw, level)
+	_ = releaseStacklessDeflateWriter(zw, level)
 	return wErr
 }
 
@@ -2485,7 +2485,7 @@ func compressZstdBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) e
 		bw: sw,
 	}
 	_, wErr := copyBodyStream(fw, bodyStream)
-	releaseStacklessZstdWriter(zw, level)
+	_ = releaseStacklessZstdWriter(zw, level)
 	return wErr
 }
 

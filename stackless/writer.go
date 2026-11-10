@@ -98,7 +98,12 @@ func (w *writer) do(op op) error {
 		return err
 	}
 	if w.xw.bb != nil && len(w.xw.bb.B) > 0 {
-		_, err = w.dstW.Write(w.xw.bb.B)
+		b := w.xw.bb.B
+		n, errw := w.dstW.Write(b)
+		err = errw
+		if err == nil && n != len(b) {
+			err = io.ErrShortWrite
+		}
 	}
 	w.xw.Reset()
 

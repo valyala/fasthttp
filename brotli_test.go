@@ -87,7 +87,7 @@ func testBrotliCompressSingleCase(s string) error {
 	if _, err := zw.Write([]byte(s)); err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
 	}
-	releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
+	_ = releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
 
 	zr := acquireBrotliReader(&buf)
 	body, err := io.ReadAll(zr)

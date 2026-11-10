@@ -2029,21 +2029,21 @@ func (h *fsHandler) compressFileNolock(
 		if errf := zw.Flush(); err == nil {
 			err = errf
 		}
-		releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
+		_ = releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
 	case "gzip":
 		zw := acquireStacklessGzipWriter(zf, CompressDefaultCompression)
 		_, err = copyZeroAlloc(zw, f)
 		if errf := zw.Flush(); err == nil {
 			err = errf
 		}
-		releaseStacklessGzipWriter(zw, CompressDefaultCompression)
+		_ = releaseStacklessGzipWriter(zw, CompressDefaultCompression)
 	case "zstd":
 		zw := acquireStacklessZstdWriter(zf, CompressZstdDefault)
 		_, err = copyZeroAlloc(zw, f)
 		if errf := zw.Flush(); err == nil {
 			err = errf
 		}
-		releaseStacklessZstdWriter(zw, CompressZstdDefault)
+		_ = releaseStacklessZstdWriter(zw, CompressZstdDefault)
 	}
 	_ = zf.Close()
 	_ = f.Close()
@@ -2077,21 +2077,21 @@ func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, fi
 		if errf := zw.Flush(); err == nil {
 			err = errf
 		}
-		releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
+		_ = releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
 	case "gzip":
 		zw := acquireStacklessGzipWriter(w, CompressDefaultCompression)
 		_, err = copyZeroAlloc(zw, f)
 		if errf := zw.Flush(); err == nil {
 			err = errf
 		}
-		releaseStacklessGzipWriter(zw, CompressDefaultCompression)
+		_ = releaseStacklessGzipWriter(zw, CompressDefaultCompression)
 	case "zstd":
 		zw := acquireStacklessZstdWriter(w, CompressZstdDefault)
 		_, err = copyZeroAlloc(zw, f)
 		if errf := zw.Flush(); err == nil {
 			err = errf
 		}
-		releaseStacklessZstdWriter(zw, CompressZstdDefault)
+		_ = releaseStacklessZstdWriter(zw, CompressZstdDefault)
 	}
 	defer func() { _ = f.Close() }()
 

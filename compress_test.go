@@ -169,7 +169,7 @@ func testGzipCompressSingleCase(s string) error {
 	if _, err := zw.Write([]byte(s)); err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
 	}
-	releaseStacklessGzipWriter(zw, CompressDefaultCompression)
+	_ = releaseStacklessGzipWriter(zw, CompressDefaultCompression)
 
 	zr, err := acquireGzipReader(&buf)
 	if err != nil {
@@ -192,7 +192,7 @@ func testFlateCompressSingleCase(s string) error {
 	if _, err := zw.Write([]byte(s)); err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
 	}
-	releaseStacklessDeflateWriter(zw, CompressDefaultCompression)
+	_ = releaseStacklessDeflateWriter(zw, CompressDefaultCompression)
 
 	zr, err := acquireFlateReader(&buf)
 	if err != nil {
