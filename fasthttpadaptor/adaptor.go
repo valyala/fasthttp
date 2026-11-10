@@ -458,14 +458,18 @@ func (w *writer) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return nil, nil, http.ErrHijacked
 	}
 
-	// Tell fasthttp not to send any HTTP response before hijacking.
-	w.ctx.HijackSetNoResponse(true)
-
 	conn := &wrappedConn{Conn: w.ctx.Conn()}
 	conn.wg.Add(1)
-	w.ctx.Hijack(func(net.Conn) {
+	if err := w.ctx.TryHijack(func(net.Conn) {
 		conn.wg.Wait()
-	})
+	}); err != nil {
+		// A multiplexed protocol doesn't hand out its connection.
+		w.hijacked.Store(false)
+		return nil, nil, http.ErrNotSupported
+	}
+
+	// Tell fasthttp not to send any HTTP response before hijacking.
+	w.ctx.HijackSetNoResponse(true)
 
 	bufW := bufio.NewWriter(conn)
 
