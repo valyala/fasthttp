@@ -181,6 +181,14 @@ func (h *ResponseHeader) SetStatusCode(statusCode int) {
 	h.statusCode = statusCode
 }
 
+// resetStatus clears the status code and the status message, leaving the rest
+// of the header untouched, so options such as SkipBody and StreamBody set by
+// the caller survive.
+func (h *ResponseHeader) resetStatus() {
+	h.statusCode = 0
+	h.statusMessage = h.statusMessage[:0]
+}
+
 // StatusMessage returns response status message.
 func (h *ResponseHeader) StatusMessage() []byte {
 	return h.statusMessage

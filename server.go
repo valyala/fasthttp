@@ -3337,6 +3337,14 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.Response.keepBodyBuffer = keepBodyBuffer
 	ctx.Request.KeepBodyBuffer = false
 	ctx.Response.KeepBodyBuffer = false
+
+	// A response always carries a status code, and middleware wrapping the
+	// handler expects to read the one the client receives. Set the default here
+	// as well, since custom servers prepare a context with this method instead
+	// of going through the request loop in Server.
+	if ctx.Response.Header.statusCode == 0 {
+		ctx.Response.Header.statusCode = StatusOK
+	}
 }
 
 // Init prepares ctx for passing to RequestHandler.

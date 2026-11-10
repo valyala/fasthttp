@@ -463,7 +463,7 @@ func (c *Client) DoTimeout(req *Request, resp *Response, timeout time.Duration) 
 	req.timeout = timeout
 	if req.timeout <= 0 {
 		if resp != nil {
-			resp.Reset()
+			resp.Header.resetStatus()
 		}
 		return ErrTimeout
 	}
@@ -498,7 +498,7 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 	req.timeout = time.Until(deadline)
 	if req.timeout <= 0 {
 		if resp != nil {
-			resp.Reset()
+			resp.Header.resetStatus()
 		}
 		return ErrTimeout
 	}
@@ -567,6 +567,9 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	if uri.isHTTPS() {
 		isTLS = true
 	} else if !uri.isHTTP() {
+		if resp != nil {
+			resp.Header.resetStatus()
+		}
 		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
 	}
 
@@ -1605,7 +1608,7 @@ func (c *HostClient) DoTimeout(req *Request, resp *Response, timeout time.Durati
 	req.timeout = timeout
 	if req.timeout <= 0 {
 		if resp != nil {
-			resp.Reset()
+			resp.Header.resetStatus()
 		}
 		return ErrTimeout
 	}
@@ -1635,7 +1638,7 @@ func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time
 	req.timeout = time.Until(deadline)
 	if req.timeout <= 0 {
 		if resp != nil {
-			resp.Reset()
+			resp.Header.resetStatus()
 		}
 		return ErrTimeout
 	}
@@ -1716,6 +1719,9 @@ func (c *HostClient) Do(req *Request, resp *Response) error {
 		if timeout > 0 {
 			req.timeout = time.Until(deadline)
 			if req.timeout <= 0 {
+				if resp != nil {
+					resp.Header.resetStatus()
+				}
 				err = ErrTimeout
 				break
 			}
@@ -1813,6 +1819,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
 	if c.IsTLS != req.URI().isHTTPS() {
+		resp.Header.resetStatus()
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 
@@ -2919,6 +2926,9 @@ func (c *PipelineClient) DoDeadline(req *Request, resp *Response, deadline time.
 func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 	timeout := time.Until(deadline)
 	if timeout <= 0 {
+		if resp != nil {
+			resp.Header.resetStatus()
+		}
 		return ErrTimeout
 	}
 	if err := c.ensureTLSConfig(); err != nil {

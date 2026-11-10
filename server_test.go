@@ -5372,6 +5372,22 @@ func TestServerDefaultsStatusCodeBeforeHandler(t *testing.T) {
 	}
 }
 
+func TestRequestCtxInitDefaultsStatusCode(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.Header.SetMethod(MethodGet)
+	req.SetRequestURI("/")
+
+	var ctx RequestCtx
+	ctx.Init(&req, nil, nil)
+	ctx.SuccessString("text/plain", "ok")
+
+	if statusCode := ctx.Response.StatusCode(); statusCode != StatusOK {
+		t.Fatalf("unexpected status code after Init: %d. Expecting %d", statusCode, StatusOK)
+	}
+}
+
 func TestTimeoutHandlerTimeoutReuse(t *testing.T) {
 	t.Parallel()
 
