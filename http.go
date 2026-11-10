@@ -73,7 +73,7 @@ type Request struct {
 	timeout time.Duration
 
 	// Request context. Usually set by DoContext
-	ctx context.Context
+	ctx context.Context //nolint:containedctx
 
 	secureErrorLogMessage bool
 

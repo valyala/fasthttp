@@ -7397,3 +7397,217 @@ func TestHostClientQueuedReplacementConn_PropagatesContext(t *testing.T) {
 		t.Fatalf("expected DialContext to receive non-empty request context")
 	}
 }
+
+func TestClientDoContext_TLSHandshakeTimeoutBounded(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	serverStopCh := make(chan struct{})
+	go func() {
+		defer close(serverStopCh)
+		var conns []net.Conn
+		defer func() {
+			for _, c := range conns {
+				_ = c.Close()
+			}
+		}()
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			conns = append(conns, conn)
+		}
+	}()
+	defer func() {
+		_ = ln.Close()
+		<-serverStopCh
+	}()
+
+	client := &HostClient{
+		Addr:         "inmemory",
+		IsTLS:        true,
+		WriteTimeout: 0,
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	// Case 1: 25ms request timeout with 250ms context deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancel()
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("https://inmemory/test")
+	req.SetTimeout(25 * time.Millisecond)
+
+	start := time.Now()
+	err := client.DoContext(ctx, &req, &resp)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, ErrTLSHandshakeTimeout) && !errors.Is(err, ErrTimeout) && !errors.Is(err, fasthttputil.ErrTimeout) {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+	if elapsed >= 150*time.Millisecond {
+		t.Fatalf("expected TLS handshake to be bounded by request timeout, took %v", elapsed)
+	}
+
+	// Case 2: WriteTimeout == 0 and context without deadline.
+	ctxNoDeadline, cancelNoDeadline := context.WithCancel(context.Background())
+	defer cancelNoDeadline()
+
+	req.Reset()
+	resp.Reset()
+	req.SetRequestURI("https://inmemory/test")
+	req.SetTimeout(25 * time.Millisecond)
+
+	start = time.Now()
+	err = client.DoContext(ctxNoDeadline, &req, &resp)
+	elapsed = time.Since(start)
+
+	if !errors.Is(err, ErrTLSHandshakeTimeout) && !errors.Is(err, ErrTimeout) && !errors.Is(err, fasthttputil.ErrTimeout) {
+		t.Fatalf("expected timeout error, got %v", err)
+	}
+	if elapsed >= 150*time.Millisecond {
+		t.Fatalf("expected TLS handshake to be bounded by request timeout, took %v", elapsed)
+	}
+}
+
+func TestClientDoContext_StreamBodyCancellationDiscardConn(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	serverStopCh := make(chan struct{})
+	go func() {
+		defer close(serverStopCh)
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				if string(ctx.Path()) == "/stream" {
+					ctx.SetStatusCode(StatusOK)
+					ctx.SetBodyString("stream-payload-data")
+					return
+				}
+				ctx.SetStatusCode(StatusOK)
+				ctx.SetBodyString("post-ok")
+			},
+		}
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				_ = s.ServeConn(c)
+			}(conn)
+		}
+	}()
+	defer func() {
+		_ = ln.Close()
+		<-serverStopCh
+	}()
+
+	client := &HostClient{
+		Addr: "inmemory",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://inmemory/stream")
+	resp.StreamBody = true
+
+	if err := client.DoContext(ctx, &req, &resp); err != nil {
+		t.Fatalf("unexpected error on DoContext: %v", err)
+	}
+
+	body, err := io.ReadAll(resp.BodyStream())
+	if err != nil {
+		t.Fatalf("unexpected error reading stream: %v", err)
+	}
+	if string(body) != "stream-payload-data" {
+		t.Fatalf("unexpected body: %q", body)
+	}
+
+	// Cancel context after full read, then close body stream.
+	cancel()
+	time.Sleep(10 * time.Millisecond)
+	if err := resp.CloseBodyStream(); err != nil {
+		t.Fatalf("unexpected error closing body stream: %v", err)
+	}
+
+	// Next request should dial a fresh connection and succeed without closed pipe error.
+	var req2 Request
+	var resp2 Response
+	req2.Header.SetMethod(MethodPost)
+	req2.SetRequestURI("http://inmemory/post")
+	req2.SetBodyString("test-data")
+
+	if err := client.Do(&req2, &resp2); err != nil {
+		t.Fatalf("expected next request to succeed, got %v", err)
+	}
+	if resp2.StatusCode() != StatusOK || string(resp2.Body()) != "post-ok" {
+		t.Fatalf("unexpected response: status=%d body=%q", resp2.StatusCode(), resp2.Body())
+	}
+}
+
+func TestClientDo_RequestTimeoutPreserved(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	serverStopCh := make(chan struct{})
+	go func() {
+		defer close(serverStopCh)
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				ctx.SetStatusCode(StatusOK)
+				ctx.SetBodyString("ok")
+			},
+		}
+		_ = s.Serve(ln)
+	}()
+	defer func() {
+		_ = ln.Close()
+		<-serverStopCh
+	}()
+
+	client := &HostClient{
+		Addr: "inmemory",
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	// Case 1: req with configured timeout used with DoContext
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://inmemory/test")
+	req.SetTimeout(1 * time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	if err := client.DoContext(ctx, &req, &resp); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.timeout != 1*time.Second {
+		t.Fatalf("expected req.timeout to remain 1s, got %v", req.timeout)
+	}
+
+	// Case 2: req with unset timeout used with SetContext and Do
+	var req2 Request
+	var resp2 Response
+	req2.SetRequestURI("http://inmemory/test")
+	req2.SetContext(ctx)
+
+	if err := client.Do(&req2, &resp2); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	req2.SetContext(nil) //nolint:staticcheck
+	if req2.timeout != 0 {
+		t.Fatalf("expected req2.timeout to remain 0, got %v", req2.timeout)
+	}
+}
