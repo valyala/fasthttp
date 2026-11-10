@@ -343,6 +343,7 @@ func (d *TCPDialer) dial(addr string, dualStack bool, timeout time.Duration) (ne
 	return d.dialContext(context.Background(), addr, dualStack, timeout)
 }
 
+//nolint:contextcheck
 func (d *TCPDialer) dialContext(ctx context.Context, addr string, dualStack bool, timeout time.Duration) (net.Conn, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -394,6 +395,7 @@ func (d *TCPDialer) dialContext(ctx context.Context, addr string, dualStack bool
 	return nil, err
 }
 
+//nolint:contextcheck
 func (d *TCPDialer) tryDialContext(
 	ctx context.Context, network string, addr string, deadline time.Time, concurrencyCh chan struct{},
 ) (net.Conn, error) {
@@ -610,6 +612,7 @@ func (d *TCPDialer) getTCPAddrsContext(
 	return e.addrs, idx, nil
 }
 
+//nolint:contextcheck
 func resolveTCPAddrsContext(
 	ctx context.Context, addr string, dualStack bool, resolver Resolver, deadline time.Time,
 ) ([]net.TCPAddr, error) {
