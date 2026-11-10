@@ -6193,6 +6193,79 @@ func TestServerShutdownDoesNotCallHandlerForClaimedFirstRequest(t *testing.T) {
 	}
 }
 
+// Shutdown claims a connection that has not sent its first request yet:
+// the first byte only arrives because Shutdown closes the connection,
+// so the StateActive hook must not fire for a request that is never
+// answered. The first-request CAS catches the claim; without the break
+// on its failure the hook ran once after close.
+func TestServerShutdownDoesNotCallStateActiveForClaimedFirstRequest(t *testing.T) {
+	t.Parallel()
+
+	handled := make(chan struct{}, 1)
+	states := make(chan ConnState, 4)
+	logs := &testLogger{}
+	closed := make(chan struct{})
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			handled <- struct{}{}
+			ctx.SetBodyString("ok")
+		},
+		Logger: logs,
+		ConnState: func(_ net.Conn, st ConnState) {
+			states <- st
+			if st == StateClosed {
+				close(closed)
+			}
+		},
+	}
+	// Nothing arrives until Shutdown closes the connection; the close
+	// then delivers the whole first request at once.
+	conn := newNextRequestOnCloseConn("", "GET / HTTP/1.1\r\nHost: a\r\n\r\n")
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(newOneConnListener(conn)) }()
+
+	// The serving goroutine is now blocked waiting for the first byte.
+	<-conn.waitingForNextRequest
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.ShutdownWithContext(ctx) }()
+
+	// Shutdown claims and closes the connection once the accept-time
+	// grace passes; the close delivers the first request, but it must
+	// not go active or reach the handler.
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("ShutdownWithContext() error: %v", err)
+		}
+	case <-time.After(testTimeout(30 * time.Second)):
+		t.Fatal("ShutdownWithContext() did not return")
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+	// The server logs, if at all, before it reports the connection closed.
+	<-closed
+	// StateClosed is terminal, so no hook call can follow it: the
+	// recorded states are complete once the connection is closed.
+	close(states)
+	for st := range states {
+		if st == StateActive {
+			t.Fatal("StateActive fired for a first request whose connection Shutdown had already closed")
+		}
+	}
+	select {
+	case <-handled:
+		t.Fatal("handler was called for a first request whose connection Shutdown had already closed")
+	default:
+	}
+	if logs.out != "" {
+		t.Fatalf("server log = %q, want nothing", logs.out)
+	}
+}
+
 // A header parse error on the first request still gets its error response
 // during Shutdown: once the first header read returns, the connection is
 // no longer closable as still reading its headers, even while the

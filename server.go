@@ -2628,9 +2628,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			if connRequestNum == 1 {
 				// The connection went active. A CAS is used so that a
 				// connection Shutdown has already claimed while its first
-				// byte was being read is not resurrected; the claim is
-				// detected before the headers are read below.
-				idleConnTime.CompareAndSwap(firstRequestDeadline, 0)
+				// byte was being read is not resurrected: if it fails,
+				// Shutdown has claimed and closed the connection
+				// already, so the StateActive hook must not run for a
+				// request that will never be answered.
+				if !idleConnTime.CompareAndSwap(firstRequestDeadline, 0) {
+					break
+				}
 			} else if idleConnTime.Swap(0) == idleConnClaimedByShutdown {
 				// Shutdown claimed this idle connection and is closing it, so the
 				// request that just arrived can't be answered: drop it silently.
