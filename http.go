@@ -130,6 +130,10 @@ type Response struct {
 	bodyStream       io.Reader
 	bodyStreamWriter *fixedSizeBodyWriter
 
+	// streamWriters are the readers SetBodyStreamWriter made while
+	// lazyStreamWriter, a protocol stream's setting, deferred their writers.
+	streamWriters []*lazyStreamReader
+
 	// Remote TCPAddr from concurrently net.Conn.
 	raddr net.Addr
 	// Local TCPAddr from concurrently net.Conn.
@@ -190,6 +194,7 @@ type Response struct {
 
 	preserveBodyBuffer    bool
 	secureErrorLogMessage bool
+	lazyStreamWriter      bool
 }
 
 // SetHost sets host for the request.
@@ -399,8 +404,27 @@ func (req *Request) SetBodyStreamWriter(sw StreamWriter) {
 //
 // See also SetBodyStream.
 func (resp *Response) SetBodyStreamWriter(sw StreamWriter) {
+	if resp.lazyStreamWriter {
+		sr := newLazyStreamReader(sw)
+		resp.SetBodyStream(sr, -1)
+		resp.streamWriters = append(resp.streamWriters, sr)
+		return
+	}
 	sr := NewStreamReader(sw)
 	resp.SetBodyStream(sr, -1)
+}
+
+// releaseStreamWriters runs the deferred writers whose bodies were never read
+// and reports whether one may still be running.
+func (resp *Response) releaseStreamWriters() bool {
+	busy := false
+	for _, sr := range resp.streamWriters {
+		if sr.release() {
+			busy = true
+		}
+	}
+	resp.streamWriters = nil
+	return busy
 }
 
 // BodyWriter returns writer for populating response body.
@@ -2021,60 +2045,15 @@ func (req *Request) onlyMultipartForm() bool {
 //
 // See also WriteTo.
 func (req *Request) Write(w *bufio.Writer) error {
-	if len(req.Header.Host()) == 0 || req.parsedURI {
-		uri := req.URI()
-		host := uri.Host()
-		if len(req.Header.Host()) == 0 {
-			if len(host) == 0 {
-				return errRequestHostRequired
-			}
-			req.Header.SetHostBytes(host)
-		} else if !req.UseHostHeader {
-			req.Header.SetHostBytes(host)
-		}
-		req.Header.SetRequestURIBytes(req.requestURIFromURI())
-
-		// Like net/http, only fill in Authorization from the userinfo
-		// if it hasn't been set already.
-		if len(uri.username) > 0 && len(req.Header.peek(strAuthorization)) == 0 {
-			// RequestHeader.SetBytesKV only uses RequestHeader.bufKV.key
-			// So we are free to use RequestHeader.bufKV.value as a scratch pad for
-			// the base64 encoding.
-			nl := len(uri.username) + len(uri.password) + 1
-			nb := nl + len(strBasicSpace)
-			tl := nb + base64.StdEncoding.EncodedLen(nl)
-			if tl > cap(req.Header.bufV) {
-				req.Header.bufV = make([]byte, 0, tl)
-			}
-			buf := req.Header.bufV[:0]
-			buf = append(buf, uri.username...)
-			buf = append(buf, strColon...)
-			buf = append(buf, uri.password...)
-			buf = append(buf, strBasicSpace...)
-			base64.StdEncoding.Encode(buf[nb:tl], buf[:nl])
-			req.Header.SetBytesKV(strAuthorization, buf[nl:tl])
-		}
+	body, err := req.prepareForWrite()
+	if err != nil {
+		return err
 	}
-
 	if req.bodyStream != nil {
 		return req.writeBodyStream(w)
 	}
-
-	body := req.bodyBytes()
-	var err error
-	if req.onlyMultipartForm() {
-		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
-		if err != nil {
-			return fmt.Errorf("error when marshaling multipart form: %w", err)
-		}
-		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
-	}
-
-	if len(body) == 0 {
-		body = req.postArgs.QueryString()
-	}
 	hasBody := len(body) != 0 || !req.Header.ignoreBody()
-	chunked := hasBody && len(req.Header.trailer) > 0 && req.Header.IsHTTP11()
+	chunked := hasBody && len(req.Header.trailer) > 0 && req.Header.wireIsHTTP11()
 	contentLength := len(body)
 	if chunked {
 		contentLength = -1
@@ -2559,7 +2538,7 @@ func (resp *Response) write(conn net.Conn, w *bufio.Writer) error {
 	if sendBody || bodyLen > 0 {
 		resp.Header.SetContentLength(bodyLen)
 	}
-	if sendBody && len(resp.Header.trailer) > 0 && resp.Header.IsHTTP11() {
+	if sendBody && len(resp.Header.trailer) > 0 && resp.Header.wireIsHTTP11() {
 		resp.Header.SetContentLength(-1)
 		if err := resp.Header.Write(w); err != nil {
 			return err
@@ -2623,9 +2602,68 @@ func vectorWriter(c net.Conn) io.Writer {
 	return nil
 }
 
-func (req *Request) writeBodyStream(w *bufio.Writer) error {
-	var err error
+// prepareForWrite settles the Host header, request URI and Authorization
+// from the URI and selects the buffered body, as Write sends it. A body stream
+// is left in place and nil is returned for it.
+func (req *Request) prepareForWrite() ([]byte, error) {
+	if len(req.Header.Host()) == 0 || req.parsedURI {
+		uri := req.URI()
+		host := uri.Host()
+		if len(req.Header.Host()) == 0 {
+			if len(host) == 0 {
+				return nil, errRequestHostRequired
+			}
+			req.Header.SetHostBytes(host)
+		} else if !req.UseHostHeader {
+			req.Header.SetHostBytes(host)
+		}
+		req.Header.SetRequestURIBytes(req.requestURIFromURI())
 
+		// Like net/http, only fill in Authorization from the userinfo
+		// if it hasn't been set already.
+		if len(uri.username) > 0 && len(req.Header.peek(strAuthorization)) == 0 {
+			// RequestHeader.SetBytesKV only uses RequestHeader.bufKV.key
+			// So we are free to use RequestHeader.bufKV.value as a scratch pad for
+			// the base64 encoding.
+			nl := len(uri.username) + len(uri.password) + 1
+			nb := nl + len(strBasicSpace)
+			tl := nb + base64.StdEncoding.EncodedLen(nl)
+			if tl > cap(req.Header.bufV) {
+				req.Header.bufV = make([]byte, 0, tl)
+			}
+			buf := req.Header.bufV[:0]
+			buf = append(buf, uri.username...)
+			buf = append(buf, strColon...)
+			buf = append(buf, uri.password...)
+			buf = append(buf, strBasicSpace...)
+			base64.StdEncoding.Encode(buf[nb:tl], buf[:nl])
+			req.Header.SetBytesKV(strAuthorization, buf[nl:tl])
+		}
+	}
+
+	if req.bodyStream != nil {
+		return nil, nil
+	}
+
+	body := req.bodyBytes()
+	if req.onlyMultipartForm() {
+		var err error
+		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
+		if err != nil {
+			return nil, fmt.Errorf("error when marshaling multipart form: %w", err)
+		}
+		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
+	}
+
+	if len(body) == 0 {
+		body = req.postArgs.QueryString()
+	}
+	return body, nil
+}
+
+// bodyStreamLength settles the body stream's framing in the header and
+// returns the length to write, -1 for chunked.
+func (req *Request) bodyStreamLength() (int, error) {
 	contentLength := req.Header.ContentLength()
 	if req.Header.disableSpecialHeader && req.Header.contentLength != -2 {
 		// SetBodyStream's size is authoritative for outgoing raw headers.
@@ -2646,11 +2684,27 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 		}
 	}
 	if req.Header.disableSpecialHeader {
-		if err = req.Header.setRawBodyFraming(contentLength, true); err != nil {
-			_ = req.closeBodyStream()
-			return err
+		if err := req.Header.setRawBodyFraming(contentLength, true); err != nil {
+			return contentLength, err
 		}
-	} else if contentLength < 0 {
+	}
+	return contentLength, nil
+}
+
+// prepareBodyStreamLength applies bodyStreamLength's header changes for a
+// protocol that frames the body itself.
+func (req *Request) prepareBodyStreamLength() error {
+	_, err := req.bodyStreamLength()
+	return err
+}
+
+func (req *Request) writeBodyStream(w *bufio.Writer) error {
+	contentLength, err := req.bodyStreamLength()
+	if err != nil {
+		_ = req.closeBodyStream()
+		return err
+	}
+	if contentLength < 0 && !req.Header.disableSpecialHeader {
 		req.Header.SetContentLength(-1)
 	}
 	req.Header.written = true
@@ -2674,14 +2728,18 @@ type ErrBodyStreamWritePanic struct {
 	error
 }
 
+func newBodyStreamWritePanic(recovered any) *ErrBodyStreamWritePanic {
+	return &ErrBodyStreamWritePanic{
+		error: fmt.Errorf("panic while writing body stream: %+v", recovered),
+	}
+}
+
 func (resp *Response) writeBodyStream(w *bufio.Writer, sendBody bool) (err error) {
 	resp.Header.written = true
 	defer func() {
 		resp.Header.written = false
 		if r := recover(); r != nil {
-			err = &ErrBodyStreamWritePanic{
-				error: fmt.Errorf("panic while writing body stream: %+v", r),
-			}
+			err = newBodyStreamWritePanic(r)
 		}
 	}()
 
@@ -2903,6 +2961,79 @@ func (cw *chunkedBodyWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
+}
+
+// sizedBodyStream bounds r to its declared length with writeBodyFixedSize's
+// rules; without a declared length r is returned as is.
+func sizedBodyStream(r io.Reader, contentLength int) io.Reader {
+	if r == nil || contentLength < 0 {
+		return r
+	}
+	return &sizedBodyReader{r: r, remaining: int64(contentLength), size: int64(contentLength)}
+}
+
+// sizedBodyReader yields exactly size bytes of r with writeBodyFixedSize's
+// rules: a shorter stream fails, bytes left over fail (a bare *os.File may
+// have grown and stops at size), an error returned with the last bytes is
+// reported on the next Read, and empty reads are bounded.
+type sizedBodyReader struct {
+	r          io.Reader
+	remaining  int64
+	size       int64
+	pending    error
+	emptyReads int
+	probe      [1]byte
+}
+
+func (s *sizedBodyReader) Read(p []byte) (int, error) {
+	if s.pending != nil {
+		err := s.pending
+		s.pending = nil
+		return 0, err
+	}
+	if s.remaining == 0 {
+		if _, ok := s.r.(*os.File); ok {
+			return 0, io.EOF
+		}
+		for range 100 {
+			n, err := s.r.Read(s.probe[:])
+			if n > 0 {
+				return 0, errBodyStreamTooLong
+			}
+			if err != nil {
+				return 0, err
+			}
+		}
+		return 0, io.ErrNoProgress
+	}
+	if int64(len(p)) > s.remaining {
+		p = p[:s.remaining]
+	}
+	n, err := s.r.Read(p)
+	s.remaining -= int64(n)
+	if n == 0 && err == nil {
+		s.emptyReads++
+		if s.emptyReads >= 100 {
+			return 0, io.ErrNoProgress
+		}
+		return 0, nil
+	}
+	s.emptyReads = 0
+	switch {
+	case err == io.EOF:
+		if s.remaining > 0 {
+			err = fmt.Errorf("copied %d bytes from body stream instead of %d bytes", s.size-s.remaining, s.size)
+			if n > 0 {
+				s.pending, err = err, nil
+			}
+		} else {
+			err = nil
+		}
+	case err != nil && n > 0:
+		// The chunked writer drops an error returned with data.
+		s.pending, err = err, nil
+	}
+	return n, err
 }
 
 // writeBodyChunked flushes each chunk; the last one stays buffered for the

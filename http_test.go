@@ -6398,3 +6398,100 @@ func TestRequestBodyStreamWarning(t *testing.T) {
 		t.Fatalf("unexpected log message: got %q, want %q", out, expectedWarning)
 	}
 }
+
+// Trailers of a message a protocol populated are framed chunked over HTTP/1.
+func TestProtocolPopulatedMessageWritesTrailersChunked(t *testing.T) {
+	var req Request
+	req.SetRequestURI("http://example.com/x")
+	req.Header.SetMethod(MethodPost)
+	req.Header.SetProtocol("HTTP/2")
+	_ = req.Header.AddTrailer("X-T")
+	req.Header.Set("X-T", "v")
+	req.SetBodyString("abc")
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := req.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	_ = bw.Flush()
+	wire := buf.String()
+	if !strings.Contains(wire, "Transfer-Encoding: chunked") || !strings.Contains(wire, "\r\nX-T: v\r\n\r\n") || !strings.HasPrefix(wire, "POST /x HTTP/1.1\r\n") {
+		t.Fatalf("request on the wire = %q", wire)
+	}
+	var resp Response
+	resp.Header.SetProtocol([]byte("HTTP/2"))
+	_ = resp.Header.AddTrailer("X-T")
+	resp.Header.Set("X-T", "v")
+	resp.SetBodyString("abc")
+	buf.Reset()
+	bw = bufio.NewWriter(&buf)
+	if err := resp.Write(bw); err != nil {
+		t.Fatal(err)
+	}
+	_ = bw.Flush()
+	wire = buf.String()
+	if !strings.Contains(wire, "Transfer-Encoding: chunked") || !strings.Contains(wire, "\r\nX-T: v\r\n\r\n") || !strings.HasPrefix(wire, "HTTP/1.1 200 OK\r\n") {
+		t.Fatalf("response on the wire = %q", wire)
+	}
+}
+
+type lastBytesErrReader struct {
+	data []byte
+	err  error
+}
+
+func (r *lastBytesErrReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	if len(r.data) == 0 {
+		return n, r.err
+	}
+	return n, nil
+}
+
+type emptyReads struct{}
+
+func (emptyReads) Read([]byte) (int, error) { return 0, nil }
+
+func TestSizedBodyReaderFollowsFixedSizeRules(t *testing.T) {
+	chunked := func(r io.Reader, size int) (string, error) {
+		var buf bytes.Buffer
+		bw := bufio.NewWriter(&buf)
+		err := writeBodyChunked(bw, sizedBodyStream(r, size))
+		_ = bw.Flush()
+		return buf.String(), err
+	}
+	readErr := errors.New("reader failed")
+	if _, err := chunked(&lastBytesErrReader{data: []byte("abc"), err: readErr}, 3); !errors.Is(err, readErr) {
+		t.Fatalf("error returned with the last bytes: got %v", err)
+	}
+	// An error returned with intermediate bytes, then more bytes and EOF.
+	if _, err := chunked(io.MultiReader(&lastBytesErrReader{data: []byte("a"), err: readErr}, strings.NewReader("bc")), 3); !errors.Is(err, readErr) {
+		t.Fatalf("error returned with intermediate bytes: got %v", err)
+	}
+	// EOF returned together with the last bytes of a short stream.
+	if _, err := chunked(&lastBytesErrReader{data: []byte("ab"), err: io.EOF}, 3); err == nil || !strings.Contains(err.Error(), "instead of 3 bytes") {
+		t.Fatalf("short EOF with bytes: got %v", err)
+	}
+	if _, err := chunked(emptyReads{}, 3); !errors.Is(err, io.ErrNoProgress) {
+		t.Fatalf("endless empty reads: got %v", err)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString("abcdef"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	wire, err := chunked(f, 3)
+	if err != nil || wire != "3\r\nabc\r\n0\r\n" {
+		t.Fatalf("grown file: wire %q err %v", wire, err)
+	}
+}

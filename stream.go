@@ -3,7 +3,9 @@ package fasthttp
 import (
 	"bufio"
 	"io"
+	"net"
 	"sync"
+	"sync/atomic"
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
@@ -52,3 +54,59 @@ func NewStreamReader(sw StreamWriter) io.ReadCloser {
 }
 
 var streamWriterBufPool sync.Pool
+
+// lazyStreamReader is NewStreamReader for a protocol stream's response body:
+// sw starts on the first Read, or in release when the body is never read, so
+// it runs after the handler and never while the header block is encoded. It
+// stays a net.Conn so Close can end a blocked Read.
+type lazyStreamReader struct {
+	net.Conn
+
+	pw   net.Conn
+	sw   StreamWriter
+	once sync.Once
+	done atomic.Bool
+}
+
+func newLazyStreamReader(sw StreamWriter) *lazyStreamReader {
+	pc := fasthttputil.NewPipeConns()
+	return &lazyStreamReader{Conn: pc.Conn2(), pw: pc.Conn1(), sw: sw}
+}
+
+func (r *lazyStreamReader) Read(p []byte) (int, error) {
+	r.once.Do(r.start)
+	return r.Conn.Read(p)
+}
+
+func (r *lazyStreamReader) start() {
+	go func() {
+		var bw *bufio.Writer
+		v := streamWriterBufPool.Get()
+		if v == nil {
+			bw = bufio.NewWriter(r.pw)
+		} else {
+			bw = v.(*bufio.Writer) //nolint:forcetypeassert
+			bw.Reset(r.pw)
+		}
+
+		r.sw(bw)
+		bw.Flush()
+		// Before the close that ends the reader's stream.
+		r.done.Store(true)
+		r.pw.Close()
+
+		streamWriterBufPool.Put(bw)
+	}()
+}
+
+// release runs a writer whose body was never read, its writes failing, and
+// reports whether sw may still be running.
+func (r *lazyStreamReader) release() bool {
+	started := false
+	r.once.Do(func() {
+		r.Close()
+		r.start()
+		started = true
+	})
+	return started || !r.done.Load()
+}
