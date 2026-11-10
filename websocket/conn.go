@@ -140,7 +140,8 @@ type Conn struct {
 
 	pingPayload [8]byte
 
-	closeSent atomic.Bool // Set under frameMu; no data frame may follow the Close frame.
+	closeStarted atomic.Bool // Set under frameMu as the Close frame starts going out; no data frame follows it.
+	closeSent    atomic.Bool // Set once the Close frame is written.
 
 	client bool
 }

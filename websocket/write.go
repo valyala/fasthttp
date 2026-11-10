@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/binary"
-	"errors"
 	"io"
 	"math/rand/v2"
 	"net"
@@ -186,10 +185,10 @@ func (w *msgWriter) emit(payload, framed []byte, fin bool) error {
 }
 
 // sent accounts for a fragment. A failed continuation leaves the peer
-// mid-message, so it ends the connection; net.ErrClosed means the Close frame
-// went out first.
+// mid-message, so it ends the connection unless the Close frame has started
+// going out.
 func (w *msgWriter) sent(err error) error {
-	if err != nil && w.op == opContinuation && !errors.Is(err, net.ErrClosed) {
+	if err != nil && w.op == opContinuation && !w.c.closeStarted.Load() {
 		w.c.closeWith(err)
 	}
 	w.op = opContinuation
@@ -247,7 +246,7 @@ func (c *Conn) writeRaw(ctx context.Context, frame, payload []byte, deadline tim
 // the frame is a reply.
 func (c *Conn) writeFrame(ctx context.Context, frame, payload []byte, deadline time.Time, reply bool) error {
 	op := frame[0] & 0x0f
-	if c.closeSent.Load() {
+	if c.closeStarted.Load() {
 		if op == opClose {
 			return nil
 		}
@@ -260,6 +259,9 @@ func (c *Conn) writeFrame(ctx context.Context, frame, payload []byte, deadline t
 	}
 	_, err := c.wrWatch.begin(ctx, deadline)
 	if err == nil {
+		if op == opClose {
+			c.closeStarted.Store(true)
+		}
 		if payload == nil {
 			_, err = c.nc.Write(frame)
 		} else {

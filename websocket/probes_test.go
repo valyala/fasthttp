@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 // okHead is a 101 response up to its Sec-WebSocket-Accept field.
@@ -2417,37 +2418,72 @@ func TestProbeCanceledWriteAfterCloseFrame(t *testing.T) {
 	}
 }
 
-// A Writer whose context ends after the Close frame went out is refused with
-// net.ErrClosed, like any other write, and does not end the closing handshake.
+// closeHoldConn holds the write of a Close frame once it reached the peer,
+// keeping frameMu held until release is closed.
+type closeHoldConn struct {
+	net.Conn
+
+	written, release chan struct{}
+}
+
+func (c *closeHoldConn) Write(p []byte) (int, error) {
+	n, err := c.Conn.Write(p)
+	if len(p) > 0 && p[0] == 0x80|opClose {
+		close(c.written)
+		<-c.release
+	}
+	return n, err
+}
+
+// A Writer whose context ends after the Close frame went out does not end the
+// closing handshake. It reports net.ErrClosed, or the context's error when it
+// gave up waiting for the Close frame's write to return.
 func TestProbeCanceledWriterAfterCloseFrame(t *testing.T) {
-	c, peer := newRawServer(t, connConfig{})
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	w, err := c.Writer(ctx, MessageBinary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.Write(make([]byte, writeChunkSize+1)); err != nil {
-		t.Fatal(err)
-	}
-	if h, _ := peer.recv(); h != opBinary {
-		t.Fatalf("first fragment %#x", h)
-	}
-	done := make(chan error, 1)
-	go func() { done <- c.Close(t.Context(), StatusNormalClosure, "") }()
-	peer.expectClose(StatusNormalClosure)
-	cancel()
-	if err := w.Close(); !errors.Is(err, net.ErrClosed) {
-		t.Fatalf("writer close: %v", err)
-	}
-	if c.isClosed() {
-		t.Fatal("the cancelled writer ended the closing handshake")
-	}
-	peer.send(frame(opClose, true, []byte{3, 0xe8}))
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
-	if CloseStatus(context.Cause(c.Context())) != StatusNormalClosure {
-		t.Fatalf("cause: %v", context.Cause(c.Context()))
+	for _, held := range []bool{false, true} {
+		t.Run(fmt.Sprintf("held=%v", held), func(t *testing.T) {
+			pc := fasthttputil.NewPipeConns()
+			nc := &closeHoldConn{Conn: pc.Conn1(), written: make(chan struct{}), release: make(chan struct{})}
+			release := sync.OnceFunc(func() { close(nc.release) })
+			c := newConn(nc, nc, false, "", connConfig{})
+			t.Cleanup(func() { release(); _ = c.CloseNow(); pc.Conn2().Close() })
+			peer := &rawPeer{Conn: pc.Conn2(), t: t}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			w, err := c.Writer(ctx, MessageBinary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := w.Write(make([]byte, writeChunkSize+1)); err != nil {
+				t.Fatal(err)
+			}
+			if h, _ := peer.recv(); h != opBinary {
+				t.Fatalf("first fragment %#x", h)
+			}
+			done := make(chan error, 1)
+			go func() { done <- c.Close(t.Context(), StatusNormalClosure, "") }()
+			peer.expectClose(StatusNormalClosure)
+			<-nc.written
+			want := context.Canceled
+			if !held {
+				release()
+				c.frameMu.wait()
+				want = net.ErrClosed
+			}
+			cancel()
+			if err := w.Close(); !errors.Is(err, want) {
+				t.Fatalf("writer close: %v, want %v", err, want)
+			}
+			if c.isClosed() {
+				t.Fatalf("the cancelled writer ended the closing handshake: %v", c.closedErr())
+			}
+			release()
+			peer.send(frame(opClose, true, []byte{3, 0xe8}))
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			if CloseStatus(context.Cause(c.Context())) != StatusNormalClosure {
+				t.Fatalf("cause: %v", context.Cause(c.Context()))
+			}
+		})
 	}
 }
