@@ -1,6 +1,7 @@
 package http2
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,9 +13,156 @@ import (
 	"time"
 
 	"github.com/valyala/fasthttp"
+	xhttp2 "golang.org/x/net/http2"
 )
 
 var errStreamClosed = errors.New("http2: stream closed")
+
+type responseBody struct {
+	mu           sync.Mutex
+	ready        *sync.Cond
+	buffer       bytes.Buffer
+	err          error
+	eofCommit    func() error
+	isClosed     bool
+	isDone       bool
+	eofCommitted bool
+	conn         *clientConn
+	streamID     uint32
+}
+
+func newResponseBody(conn *clientConn, streamID uint32) *responseBody {
+	body := &responseBody{conn: conn, streamID: streamID}
+	body.ready = sync.NewCond(&body.mu)
+	return body
+}
+
+func (b *responseBody) Read(p []byte) (int, error) {
+	return b.readUntil(p, nil)
+}
+
+// readUntil is Read that gives up with errInterrupted once cut is closed while
+// it waits; buffered data stays for a later read.
+func (b *responseBody) readUntil(p []byte, cut <-chan struct{}) (int, error) {
+	b.mu.Lock()
+	for b.buffer.Len() == 0 {
+		// The cut comes first: a Read ended by Close or a deadline reports
+		// that, not an end the body reached meanwhile.
+		if isClosedChan(cut) {
+			b.mu.Unlock()
+			return 0, errInterrupted
+		}
+		if b.isClosed {
+			break
+		}
+		b.ready.Wait()
+	}
+	if b.buffer.Len() == 0 {
+		err := b.err
+		if err == nil && !b.eofCommitted {
+			b.eofCommitted = true
+			// Under b.mu: a concurrent Close must not return, and let the
+			// caller release the response, before the commit.
+			if b.eofCommit != nil {
+				err = b.eofCommit()
+				b.eofCommit = nil
+			}
+		}
+		done := b.markDoneLocked()
+		b.mu.Unlock()
+		if done {
+			b.conn.responseBodyDone(b.streamID)
+		}
+		if err == nil {
+			err = io.EOF
+		}
+		return 0, err
+	}
+	// Non-empty buffer: Read cannot fail.
+	n, _ := b.buffer.Read(p)
+	b.mu.Unlock()
+	if n > 0 {
+		b.conn.consumeResponseBytes(b.streamID, n)
+	}
+	return n, nil
+}
+
+// failure is the error the body ended with, as its readers report it.
+func (b *responseBody) failure() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.err
+}
+
+func (b *responseBody) wake() {
+	b.mu.Lock()
+	b.ready.Broadcast()
+	b.mu.Unlock()
+}
+
+func (b *responseBody) setEOFCommit(commit func() error) {
+	b.mu.Lock()
+	b.eofCommit = commit
+	b.mu.Unlock()
+}
+
+func (b *responseBody) Close() error {
+	b.mu.Lock()
+	if b.isDone {
+		b.mu.Unlock()
+		return nil
+	}
+	discarded := b.buffer.Len()
+	b.buffer.Reset()
+	b.isClosed = true
+	b.err = net.ErrClosed
+	b.ready.Broadcast()
+	done := b.markDoneLocked()
+	b.mu.Unlock()
+	b.conn.closeResponseBody(b.streamID, discarded)
+	if done {
+		b.conn.responseBodyDone(b.streamID)
+	}
+	return nil
+}
+
+// CloseWithError closes the body; err is the caller's reason and doesn't
+// reach the connection, whose other streams are unaffected.
+func (b *responseBody) CloseWithError(error) error {
+	return b.Close()
+}
+
+func (b *responseBody) write(p []byte) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.isClosed {
+		return errStreamClosed
+	}
+	// bytes.Buffer.Write never fails.
+	b.buffer.Write(p)
+	b.ready.Broadcast()
+	return nil
+}
+
+// complete ends the body cleanly: the peer sent END_STREAM.
+func (b *responseBody) complete() {
+	b.end(nil)
+}
+
+// fail ends the body with cause; a transport EOF is a truncated body.
+func (b *responseBody) fail(cause error) {
+	b.end(truncationCause(cause))
+}
+
+func (b *responseBody) end(err error) {
+	b.mu.Lock()
+	if !b.isClosed {
+		b.isClosed = true
+		b.err = err
+		b.ready.Broadcast()
+	}
+	b.mu.Unlock()
+}
 
 var errBodyTruncated = fmt.Errorf("http2: connection closed before the body completed: %w", io.ErrUnexpectedEOF)
 
@@ -26,6 +174,14 @@ func truncationCause(cause error) error {
 		return errBodyTruncated
 	}
 	return cause
+}
+
+func (b *responseBody) markDoneLocked() bool {
+	if b.isDone {
+		return false
+	}
+	b.isDone = true
+	return true
 }
 
 type requestBody struct {
@@ -1230,11 +1386,139 @@ func (c *streamConn) endStream(cut <-chan struct{}) error {
 	}
 }
 
+type clientStreamConn struct {
+	streamConnState
+
+	stream *clientStream
+	read   *responseBody
+}
+
+func newClientStreamConn(netConn net.Conn, stream *clientStream) *clientStreamConn {
+	conn := &clientStreamConn{stream: stream, read: stream.responseBody}
+	conn.init(netConn)
+	conn.wakeRead = stream.responseBody.wake
+	return conn
+}
+
+func (c *clientStreamConn) Read(p []byte) (int, error) {
+	return c.readUnderDeadline(c.read, p)
+}
+
+func (c *clientStreamConn) Write(p []byte) (int, error) {
+	gen, err := c.beginWrite()
+	if err != nil {
+		return 0, err
+	}
+	n, err := c.writeUnderGate(p, gen)
+	c.endWrite()
+	return n, interruptedBy(err, gen)
+}
+
+func (c *clientStreamConn) writeUnderGate(p []byte, gen *streamCut) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if err := c.enterGate(gen); err != nil {
+		return 0, err
+	}
+	defer c.leaveGate()
+	return c.stream.conn.sendData(c.stream, p, false, time.Time{}, gen.done)
+}
+
+// Close ends both halves. A write in flight can't be followed by END_STREAM,
+// and an END_STREAM can't be sent past the write deadline, so either resets
+// the stream instead. After END_STREAM, data the peer sends resets it.
+func (c *clientStreamConn) Close() error {
+	c.mu.Lock()
+	if c.isClosed {
+		c.mu.Unlock()
+		return nil
+	}
+	writeAt := c.writeDeadline.at
+	readOpen, writeOpen, writeActive := c.closeLocked()
+	c.mu.Unlock()
+	c.wakeRead()
+	c.stream.conn.closeOpenStream(c.stream)
+	if readOpen {
+		// Unread bytes return their credit through the credit sender.
+		_ = c.read.Close()
+	}
+	if writeActive {
+		c.reset()
+		return nil
+	}
+	ended := !writeOpen
+	if writeOpen {
+		cut, stop := deadlineChan(writeAt)
+		_, err := c.stream.conn.sendData(c.stream, nil, true, time.Time{}, cut)
+		stop()
+		if err != nil {
+			c.reset()
+		}
+		ended = err == nil
+	}
+	if ended {
+		c.stream.conn.armCloseGrace(c.stream)
+	}
+	return nil
+}
+
+func (c *clientStreamConn) reset() {
+	c.stream.conn.resetStream(c.stream.id, xhttp2.ErrCodeCancel, net.ErrClosed, failureLocal)
+}
+
+func (c *clientStreamConn) CloseRead() error {
+	c.mu.Lock()
+	if c.readClosed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.readClosed = true
+	c.readDeadline.gen.cut(net.ErrClosed)
+	c.mu.Unlock()
+	c.wakeRead()
+	return c.read.Close()
+}
+
+// CloseWrite sends END_STREAM as a write: the write deadline bounds it, and a
+// CloseWrite cut short leaves the write side open.
+func (c *clientStreamConn) CloseWrite() error {
+	gen, err := c.beginWrite()
+	if errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	err = c.closeWriteUnderGate(gen)
+	c.endWrite()
+	return interruptedBy(err, gen)
+}
+
+func (c *clientStreamConn) closeWriteUnderGate(gen *streamCut) error {
+	if err := c.enterGate(gen); err != nil {
+		if errors.Is(err, net.ErrClosed) {
+			return nil
+		}
+		return err
+	}
+	defer c.leaveGate()
+	if _, err := c.stream.conn.sendData(c.stream, nil, true, time.Time{}, gen.done); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.writeClosed = true
+	c.mu.Unlock()
+	return nil
+}
+
 var (
+	_ fasthttp.ReadCloserWithError         = (*responseBody)(nil)
 	_ fasthttp.ProtocolStream              = (*serverStream)(nil)
 	_ fasthttp.InformationalResponseWriter = (*serverStream)(nil)
 	_ fasthttp.Pusher                      = (*serverStream)(nil)
 	_ fasthttp.StreamAccepter              = (*serverStream)(nil)
 	_ fasthttp.HijackRejectionNotifier     = (*serverStream)(nil)
 	_ fasthttp.StreamConn                  = (*streamConn)(nil)
+	_ fasthttp.StreamConn                  = (*clientStreamConn)(nil)
 )

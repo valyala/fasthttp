@@ -236,3 +236,106 @@ func drainFrames(framer *xhttp2.Framer) {
 		}
 	}
 }
+
+// TestClientSurvivesRepeatingUpstream points the transport at a peer that
+// answers the preface and then repeats frames without pause: what a server can
+// send is bounded by the same rules as what a client can.
+func TestClientSurvivesRepeatingUpstream(t *testing.T) {
+	t.Parallel()
+
+	for name, repeat := range map[string]func(*xhttp2.Framer){
+		"ping": func(framer *xhttp2.Framer) {
+			for range 200_000 {
+				if err := framer.WritePing(false, [8]byte{}); err != nil {
+					return
+				}
+			}
+		},
+		"settings": func(framer *xhttp2.Framer) {
+			for range 200_000 {
+				if err := framer.WriteSettings(); err != nil {
+					return
+				}
+			}
+		},
+		"continuation": func(framer *xhttp2.Framer) {
+			var block bytes.Buffer
+			encoder := hpack.NewEncoder(&block)
+			if err := encoder.WriteField(hpack.HeaderField{Name: ":status", Value: "200"}); err != nil {
+				return
+			}
+			if err := framer.WriteHeaders(xhttp2.HeadersFrameParam{
+				StreamID: 1, BlockFragment: block.Bytes(), EndHeaders: false,
+			}); err != nil {
+				return
+			}
+			block.Reset()
+			if err := encoder.WriteField(hpack.HeaderField{
+				Name: "x-pad", Value: string(bytes.Repeat([]byte("v"), 4096)),
+			}); err != nil {
+				return
+			}
+			for range 200_000 {
+				if err := framer.WriteContinuation(1, false, block.Bytes()); err != nil {
+					return
+				}
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("listening: %v", err)
+			}
+			defer listener.Close()
+			go func() {
+				conn, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				preface := make([]byte, len(xhttp2.ClientPreface))
+				if _, err := io.ReadFull(conn, preface); err != nil {
+					return
+				}
+				framer := xhttp2.NewFramer(conn, conn)
+				if err := framer.WriteSettings(); err != nil {
+					return
+				}
+				go drainFrames(framer)
+				repeat(framer)
+			}()
+
+			hostClient := &fasthttp.HostClient{Addr: listener.Addr().String()}
+			if err := ConfigureHostClient(hostClient, ClientConfig{Mode: PriorKnowledge}); err != nil {
+				t.Fatalf("ConfigureHostClient() error: %v", err)
+			}
+			runtime.GC()
+			var before runtime.MemStats
+			runtime.ReadMemStats(&before)
+
+			request := fasthttp.AcquireRequest()
+			defer fasthttp.ReleaseRequest(request)
+			response := fasthttp.AcquireResponse()
+			defer fasthttp.ReleaseResponse(response)
+			request.SetRequestURI("http://" + listener.Addr().String() + "/")
+
+			done := make(chan error, 1)
+			go func() { done <- hostClient.DoTimeout(request, response, 3*time.Second) }()
+			select {
+			case <-done: // any outcome is fine; hanging or growing is not
+			case <-time.After(10 * time.Second):
+				t.Fatal("the request never returned")
+			}
+
+			runtime.GC()
+			var after runtime.MemStats
+			runtime.ReadMemStats(&after)
+			if grown := int64(after.HeapInuse) - int64(before.HeapInuse); grown > 64<<20 {
+				t.Fatalf("repeated %s frames from the peer grew the client heap by %d MiB", name, grown>>20)
+			}
+		})
+	}
+}
