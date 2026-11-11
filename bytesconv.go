@@ -389,6 +389,18 @@ func ParseUfloat(buf []byte) (float64, error) {
 	// The implementation of parsing a float string is not easy.
 	// We believe that the conservative approach is to call strconv.ParseFloat.
 	// https://github.com/valyala/fasthttp/pull/1865
+	// strconv.ParseFloat also accepts a sign, "inf", "nan", hex floats and
+	// underscores, none of which is an unsigned decimal float.
+	for i, c := range buf {
+		switch {
+		case c >= '0' && c <= '9', c == '.':
+		case i > 0 && (c == 'e' || c == 'E' || c == '+' || c == '-'):
+		case c == '-':
+			return -1, errors.New("negative input is invalid")
+		default:
+			return -1, errUnexpectedFloatChar
+		}
+	}
 	res, err := strconv.ParseFloat(b2s(buf), 64)
 	if res < 0 {
 		return -1, errors.New("negative input is invalid")
@@ -398,6 +410,8 @@ func ParseUfloat(buf []byte) (float64, error) {
 	}
 	return res, err
 }
+
+var errUnexpectedFloatChar = errors.New("unexpected char found: expecting an unsigned decimal float")
 
 var (
 	errEmptyHexNum    = errors.New("empty hex number")
