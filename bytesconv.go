@@ -405,7 +405,30 @@ var (
 )
 
 func readHexInt(r *bufio.Reader) (int, error) {
-	var k, i, n int
+	// Parse the buffered bytes first, so a number that ends inside them
+	// needs no ReadByte call per digit. The result, the error and the
+	// consumed bytes are the same as in the loop below.
+	b, _ := r.Peek(r.Buffered())
+	var n int
+	for i, c := range b {
+		k := int(hex2intTable[c])
+		if k == 16 {
+			if i == 0 {
+				_, _ = r.Discard(1)
+				return -1, errEmptyHexNum
+			}
+			_, _ = r.Discard(i)
+			return n, nil
+		}
+		if i >= maxHexIntChars {
+			_, _ = r.Discard(i + 1)
+			return -1, errTooLargeHexNum
+		}
+		n = (n << 4) | k
+	}
+
+	var k, i int
+	n = 0
 	for {
 		c, err := r.ReadByte()
 		if err != nil {

@@ -3404,6 +3404,10 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 	if err != nil {
 		return -1, err
 	}
+	if b, _ := r.Peek(min(2, r.Buffered())); len(b) == 2 && b[0] == '\r' && b[1] == '\n' {
+		_, _ = r.Discard(2)
+		return n, nil
+	}
 	inExt := false
 	afterSizeOWS := false
 	for {
