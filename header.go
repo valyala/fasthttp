@@ -2688,6 +2688,34 @@ func (h *ResponseHeader) PeekKeys() [][]byte {
 	return h.mulHeader
 }
 
+// PeekTrailer returns the first trailer value for the given key.
+//
+// Unlike Peek, it only searches the trailer section, so an ordinary header
+// with the same name is not returned. Received trailers are available after
+// the chunked body has been read.
+//
+// The returned value is valid until the request or response is reused or
+// released. Do not store references to it. Make copies instead.
+func (h *header) PeekTrailer(key string) []byte {
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	return peekArgBytes(h.trailerH, h.bufK)
+}
+
+// PeekAllTrailer returns all trailer values for the given key.
+//
+// Unlike PeekAll, it only searches the trailer section, so ordinary headers
+// with the same name are not returned. Received trailers are available after
+// the chunked body has been read.
+//
+// The returned values are valid until the request or response is reused or
+// released. Future calls to Peek* may modify the returned slice.
+// Do not store references to it. Make copies instead.
+func (h *header) PeekAllTrailer(key string) [][]byte {
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	h.mulHeader = peekAllArgBytesToDst(h.mulHeader[:0], h.trailerH, h.bufK)
+	return h.mulHeader
+}
+
 // PeekTrailerKeys return all trailer keys.
 //
 // The returned value is valid until the request is released,
