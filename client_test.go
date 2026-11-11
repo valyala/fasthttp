@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1487,29 +1488,49 @@ func TestPipelineClientSkipBodyDoesNotBufferBody(t *testing.T) {
 			return ln.Dial()
 		},
 	}
-	for _, path := range []string{"/big", "/big-chunked"} {
-		var req Request
-		var resp Response
-		resp.KeepBodyBuffer = true
-		resp.SkipBody = true
-		req.SetRequestURI("http://example.com" + path)
-		if err := c.Do(&req, &resp); err != nil {
-			t.Fatalf("GET %s: %v", path, err)
-		}
-		if len(resp.Body()) != 0 {
-			t.Errorf("GET %s: SkipBody response has a %d byte body", path, len(resp.Body()))
-		}
-		if resp.body != nil && cap(resp.body.B) >= bigSize {
-			t.Errorf("GET %s: skipping the body grew the response buffer to %d bytes", path, cap(resp.body.B))
-		}
+	methods := []struct {
+		name string
+		do   func(*Request, *Response) error
+	}{
+		{"Do", c.Do},
+		{"DoTimeout", func(req *Request, resp *Response) error {
+			return c.DoTimeout(req, resp, 10*time.Second)
+		}},
+		{"DoDeadline", func(req *Request, resp *Response) error {
+			return c.DoDeadline(req, resp, time.Now().Add(10*time.Second))
+		}},
+	}
+	for _, m := range methods {
+		for _, keepBodyBuffer := range []bool{false, true} {
+			for _, path := range []string{"/big", "/big-chunked"} {
+				name := fmt.Sprintf("%s KeepBodyBuffer=%v GET %s", m.name, keepBodyBuffer, path)
+				var req Request
+				var resp Response
+				resp.KeepBodyBuffer = keepBodyBuffer
+				resp.SkipBody = true
+				req.SetRequestURI("http://example.com" + path)
+				if err := m.do(&req, &resp); err != nil {
+					t.Fatalf("%s: %v", name, err)
+				}
+				if !resp.SkipBody {
+					t.Errorf("%s: SkipBody was cleared", name)
+				}
+				if len(resp.Body()) != 0 {
+					t.Errorf("%s: SkipBody response has a %d byte body", name, len(resp.Body()))
+				}
+				if resp.body != nil && cap(resp.body.B) >= bigSize {
+					t.Errorf("%s: skipping the body grew the response buffer to %d bytes", name, cap(resp.body.B))
+				}
 
-		req.SetRequestURI("http://example.com/next")
-		resp.SkipBody = false
-		if err := c.Do(&req, &resp); err != nil {
-			t.Fatalf("GET /next after skipping %s: %v", path, err)
-		}
-		if got, want := string(resp.Body()), "body of /next"; got != want {
-			t.Errorf("GET /next after skipping %s got %q, want %q", path, got, want)
+				req.SetRequestURI("http://example.com/next")
+				resp.SkipBody = false
+				if err := m.do(&req, &resp); err != nil {
+					t.Fatalf("%s: GET /next after the skipped body: %v", name, err)
+				}
+				if got, want := string(resp.Body()), "body of /next"; got != want {
+					t.Errorf("%s: GET /next after the skipped body got %q, want %q", name, got, want)
+				}
+			}
 		}
 	}
 	if n := dials.Load(); n != 1 {
@@ -1604,6 +1625,136 @@ func TestPipelineClientSkipBodyIdentityBodyTooLargeDoesNotBlock(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Do blocked instead of returning ErrBodyTooLarge")
+	}
+}
+
+func TestPipelineClientSkipBodyIdentityBodyMaxIntLimit(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var req Request
+		if err := req.Read(bufio.NewReader(conn)); err != nil {
+			t.Error(err)
+			return
+		}
+		// Close-delimited body: no Content-Length, no Transfer-Encoding.
+		if _, err := conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\nBODY")); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	c := &PipelineClient{
+		Addr:                "example.com",
+		Dial:                func(string) (net.Conn, error) { return ln.Dial() },
+		MaxResponseBodySize: math.MaxInt,
+	}
+	var req Request
+	var resp Response
+	resp.SkipBody = true
+	req.SetRequestURI("http://example.com/")
+	if err := c.Do(&req, &resp); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Body()) != 0 {
+		t.Fatalf("SkipBody response has a %d byte body", len(resp.Body()))
+	}
+}
+
+func TestDiscardBodyIdentityMaxIntLimit(t *testing.T) {
+	t.Parallel()
+
+	br := bufio.NewReader(strings.NewReader("BODY"))
+	if err := discardBodyIdentity(br, math.MaxInt); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := br.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatalf("body was not consumed: %v", err)
+	}
+}
+
+func TestPipelineClientStreamBodyHeadHasNoBodyStream(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		keepBodyBuffer bool
+		do             func(*PipelineClient, *Request, *Response) error
+	}{
+		{name: "Do", do: func(c *PipelineClient, req *Request, resp *Response) error {
+			return c.Do(req, resp)
+		}},
+		{name: "DoTimeout", do: func(c *PipelineClient, req *Request, resp *Response) error {
+			return c.DoTimeout(req, resp, 5*time.Second)
+		}},
+		{name: "DoDeadline", do: func(c *PipelineClient, req *Request, resp *Response) error {
+			return c.DoDeadline(req, resp, time.Now().Add(5*time.Second))
+		}},
+		{name: "DoTimeout KeepBodyBuffer", keepBodyBuffer: true, do: func(c *PipelineClient, req *Request, resp *Response) error {
+			return c.DoTimeout(req, resp, 5*time.Second)
+		}},
+		{name: "DoDeadline KeepBodyBuffer", keepBodyBuffer: true, do: func(c *PipelineClient, req *Request, resp *Response) error {
+			return c.DoDeadline(req, resp, time.Now().Add(5*time.Second))
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ln := fasthttputil.NewInmemoryListener()
+			t.Cleanup(func() { _ = ln.Close() })
+
+			go func() {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				br := bufio.NewReader(conn)
+				var req Request
+				if err := req.Read(br); err != nil {
+					t.Error(err)
+					return
+				}
+				// HEAD response announcing a body it doesn't send.
+				if _, err := io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n"); err != nil {
+					t.Error(err)
+					return
+				}
+				// Keep the connection open until the client is done.
+				_, _ = br.ReadByte()
+			}()
+
+			c := &PipelineClient{
+				Addr:   "example.com",
+				Dial:   func(string) (net.Conn, error) { return ln.Dial() },
+				Logger: &testLogger{},
+			}
+			var req Request
+			req.Header.SetMethod(MethodHead)
+			req.SetRequestURI("http://example.com/")
+			var resp Response
+			resp.StreamBody = true
+			if tc.keepBodyBuffer {
+				resp.KeepBodyBuffer = true
+				resp.SetBodyString("stale")
+			}
+			if err := tc.do(c, &req, &resp); err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			if resp.IsBodyStream() {
+				t.Fatalf("HEAD response has a body stream %T", resp.BodyStream())
+			}
+			if len(resp.Body()) != 0 {
+				t.Fatalf("HEAD response has a %d byte body", len(resp.Body()))
+			}
+		})
 	}
 }
 

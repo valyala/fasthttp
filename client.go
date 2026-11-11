@@ -2935,6 +2935,9 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	w.respCopy.Header.disableNormalizing = c.DisableHeaderNamesNormalizing
 	streamBody := resp != nil && resp.StreamBody
 	w.respCopy.StreamBody = streamBody
+	// The reader goroutine only sees respCopy, so it needs the caller's
+	// SkipBody too. copyToSkipBody copies it back to resp afterwards.
+	w.respCopy.SkipBody = resp != nil && resp.SkipBody
 	w.req = &w.reqCopy
 	w.resp = &w.respCopy
 
@@ -2977,7 +2980,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 			if resp.KeepBodyBuffer && resp.body != nil {
 				w.respCopy.copyToSkipBody(resp)
 				resp.SetBody(w.respCopy.bodyBytes())
-				if streamBody && !resp.mustSkipBody() {
+				if streamBody && !resp.mustSkipBody() && !req.Header.IsHead() {
 					resp.bodyStream = bytes.NewReader(resp.bodyBytes())
 				}
 			} else {
@@ -3500,7 +3503,7 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 				err = w.resp.discardBody(br, c.MaxResponseBodySize)
 			}
 		}
-		if err == nil && streamBody && !w.resp.mustSkipBody() {
+		if err == nil && streamBody && !isHead && !w.resp.mustSkipBody() {
 			w.resp.bodyStream = bytes.NewReader(w.resp.bodyBytes())
 		}
 		if err != nil {

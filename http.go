@@ -2011,8 +2011,10 @@ func discardBodyIdentity(r *bufio.Reader, maxBodySize int) error {
 		// buffer would wait for more data (or EOF) instead of failing.
 		toDiscard := r.Size()
 		if maxBodySize > 0 {
-			if remaining := maxBodySize - size + 1; remaining < toDiscard {
-				toDiscard = remaining
+			// Compare before adding one so that a limit of math.MaxInt
+			// doesn't overflow.
+			if remaining := maxBodySize - size; remaining < toDiscard {
+				toDiscard = remaining + 1
 			}
 		}
 		n, err := r.Discard(toDiscard)
