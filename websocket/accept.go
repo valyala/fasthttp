@@ -80,9 +80,7 @@ var (
 //
 // fasthttp skips the upgrade while shutting down with Server.CloseOnShutdown.
 // The Server's timeouts and Shutdown do not apply to the upgraded connection;
-// use the options here instead. fasthttp closes the TCP connection when
-// handler returns, or as soon as the WebSocket connection is closed with
-// Server.KeepHijackedConns.
+// use the options here instead.
 func Accept(ctx *fasthttp.RequestCtx, opts *AcceptOptions, handler func(*Conn)) error {
 	if opts == nil {
 		opts = &defaultAcceptOptions

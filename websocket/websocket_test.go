@@ -447,6 +447,50 @@ func TestContextCancel(t *testing.T) {
 	}
 }
 
+// refusingConn reports its reads and refuses the deadline a cancellation sets.
+type refusingConn struct {
+	net.Conn
+
+	reading chan struct{}
+}
+
+func (c refusingConn) Read(p []byte) (int, error) {
+	signal(c.reading)
+	return c.Conn.Read(p)
+}
+
+func (c refusingConn) SetReadDeadline(d time.Time) error {
+	if d.Equal(aLongTimeAgo) {
+		return errors.New("deadline refused")
+	}
+	return c.Conn.SetReadDeadline(d)
+}
+
+// A cancelled call whose transport refuses the deadline is interrupted by
+// closing the connection, which reports the context's error.
+func TestCancelClosesConnWhenDeadlineRefused(t *testing.T) {
+	srv, _ := tcpPair(t)
+	reading := make(chan struct{}, 1)
+	nc := hijackLike{Conn: refusingConn{Conn: srv, reading: reading}}
+	c := newConn(nc, nc, false, "", connConfig{})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := c.Read(ctx)
+		done <- err
+	}()
+	<-reading
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || !errors.Is(context.Cause(c.Context()), context.Canceled) {
+			t.Fatalf("read: %v, cause: %v", err, context.Cause(c.Context()))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read was not interrupted")
+	}
+}
+
 func TestCloseNowUnblocksRead(t *testing.T) {
 	ts := startServer(t, nil, echo)
 	c := ts.dial(t, nil)
@@ -461,6 +505,22 @@ func TestCloseNowUnblocksRead(t *testing.T) {
 	}
 	if err := <-errCh; !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("read: %v", err)
+	}
+}
+
+// Closing the connection closes the socket at once, although the handler has
+// not returned.
+func TestCloseNowClosesSocketBeforeHandlerReturns(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	ts := startServer(t, nil, func(c *Conn) {
+		_ = c.CloseNow()
+		<-release
+	})
+	c := ts.dial(t, nil)
+	_ = c.nc.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := c.nc.Read(make([]byte, 1)); err == nil || isTimeout(err) {
+		t.Fatalf("the socket is still open: %v", err)
 	}
 }
 

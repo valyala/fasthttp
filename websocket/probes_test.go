@@ -277,7 +277,7 @@ func TestProbeShutdownWaitsForInFlightIO(t *testing.T) {
 	<-nc.writeEntered
 	shutdownDone := make(chan struct{})
 	go func() { c.shutdown(); close(shutdownDone) }()
-	<-nc.readReturned // The shutdown deadline interrupted both pipe operations.
+	<-nc.readReturned // Closing the pipe interrupted both operations.
 	<-nc.writeReturned
 	select {
 	case <-shutdownDone:
@@ -997,7 +997,7 @@ func (c *deadlineConn) deadline() (time.Time, int) {
 // later call, and after stopWatch nothing is armed or aborted any more.
 func TestProbeWatchStaleAbortIgnored(t *testing.T) {
 	nc := &deadlineConn{}
-	w := ctxWatch{nc: nc}
+	w := &newConn(nc, nc, false, "", connConfig{}).rdWatch
 	old, cancelOld := context.WithCancel(t.Context())
 	defer cancelOld()
 	if _, err := w.begin(old, time.Time{}); err != nil {
@@ -1009,18 +1009,18 @@ func TestProbeWatchStaleAbortIgnored(t *testing.T) {
 	if _, err := w.begin(t.Context(), next); err != nil {
 		t.Fatal(err)
 	}
-	w.abort(oldGen) // The old context's callback runs late.
+	w.abort(oldGen, context.Canceled) // The old context's callback runs late.
 	if d, _ := nc.deadline(); !d.Equal(next) {
 		t.Fatalf("a stale abort changed the deadline to %v", d)
 	}
-	w.abort(w.gen)
+	w.abort(w.gen, context.Canceled)
 	if d, _ := nc.deadline(); !d.Equal(aLongTimeAgo) {
 		t.Fatalf("the current abort left the deadline at %v", d)
 	}
 	w.end()
 	w.stopWatch()
 	_, n := nc.deadline()
-	w.abort(w.gen)
+	w.abort(w.gen, context.Canceled)
 	if _, err := w.begin(t.Context(), time.Time{}); !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("begin after stop: %v", err)
 	}
@@ -2150,8 +2150,8 @@ func TestProbeUTF8AtReadChunkBoundary(t *testing.T) {
 	}
 }
 
-// CloseNow while a vectored write is blocked on a peer that does not read:
-// the deadline on the hijacked conn must reach the socket the writev uses.
+// CloseNow while a vectored write is blocked on a peer that does not read
+// closes the socket under the hijacked conn, which the writev uses.
 func TestProbeCloseNowDuringVectoredWrite(t *testing.T) {
 	srv, cli := tcpPair(t)
 	// Small socket buffers keep the write from completing on platforms that

@@ -273,7 +273,7 @@ func TestUTF8State(t *testing.T) {
 func TestCtxWatch(t *testing.T) {
 	c1, c2 := net.Pipe()
 	t.Cleanup(func() { c1.Close(); c2.Close() })
-	w := ctxWatch{nc: c1}
+	w := &newConn(c1, c1, false, "", connConfig{}).rdWatch
 	ctx, cancel := context.WithCancel(t.Context())
 	if _, err := w.begin(ctx, time.Time{}); err != nil {
 		t.Fatal(err)

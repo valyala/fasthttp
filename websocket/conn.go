@@ -163,8 +163,8 @@ func newConn(nc net.Conn, r io.Reader, client bool, subprotocol string, cfg conn
 		c.cfg.maxMessageSize = DefaultMaxMessageSize
 	}
 	c.ctx, c.cancel = context.WithCancelCause(context.Background())
-	c.rdWatch.nc = nc
-	c.wrWatch.nc = nc
+	c.rdWatch.c = c
+	c.wrWatch.c = c
 	c.wrWatch.write = true
 	if !client {
 		c.vw = vectorWriter(nc)
@@ -222,17 +222,17 @@ func (c *Conn) closeWith(err error) {
 	c.closeMu.Unlock()
 	c.rdWatch.stopWatch()
 	c.wrWatch.stopWatch()
-	// A hijacked conn's Close is a no-op until the handler returns; the
-	// deadline unblocks reads and writes meanwhile.
-	_ = c.nc.SetDeadline(aLongTimeAgo)
 	closeTransport(c.nc)
 	c.ncMu.Unlock()
 }
 
-// closeTransport closes the socket under a TLS connection before nc itself, so
-// close_notify cannot stall on a peer that no longer reads.
+// closeTransport closes the connection under fasthttp's hijacked conn, whose
+// own Close is a no-op unless the server keeps hijacked conns. The socket
+// under a TLS connection goes first, so that close_notify cannot stall on a
+// peer that no longer reads.
 func closeTransport(nc net.Conn) {
-	if tc, ok := unwrapHijacked(nc).(interface{ NetConn() net.Conn }); ok {
+	nc = unwrapHijacked(nc)
+	if tc, ok := nc.(interface{ NetConn() net.Conn }); ok {
 		_ = tc.NetConn().Close()
 	}
 	_ = nc.Close()
@@ -412,11 +412,11 @@ func (c *Conn) gotPong(p []byte) {
 	c.pongMu.Unlock()
 }
 
-// ctxWatch applies a call's deadline to one direction of nc and aborts the
-// call when its context is cancelled. The AfterFunc is reused while calls
-// share a Done channel.
+// ctxWatch applies a call's deadline to one direction of the transport and
+// aborts the call when its context is cancelled. The AfterFunc is reused while
+// calls share a Done channel.
 type ctxWatch struct {
-	nc     net.Conn
+	c      *Conn
 	done   <-chan struct{}
 	stop   func() bool
 	last   time.Time // The deadline set last, once set is true.
@@ -435,9 +435,9 @@ func (w *ctxWatch) setDeadline(t time.Time) error {
 	}
 	w.last, w.set = t, true
 	if w.write {
-		return w.nc.SetWriteDeadline(t)
+		return w.c.nc.SetWriteDeadline(t)
 	}
-	return w.nc.SetReadDeadline(t)
+	return w.c.nc.SetReadDeadline(t)
 }
 
 // begin arms the watch for a call bounded by ctx and deadline and returns the
@@ -459,7 +459,7 @@ func (w *ctxWatch) begin(ctx context.Context, deadline time.Time) (time.Time, er
 		w.gen++
 		if done != nil {
 			gen := w.gen
-			w.stop = context.AfterFunc(ctx, func() { w.abort(gen) })
+			w.stop = context.AfterFunc(ctx, func() { w.abort(gen, ctx.Err()) })
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -469,12 +469,15 @@ func (w *ctxWatch) begin(ctx context.Context, deadline time.Time) (time.Time, er
 	return deadline, w.setDeadline(deadline)
 }
 
-func (w *ctxWatch) abort(gen uint64) {
+// abort interrupts the call in progress through its deadline; a transport
+// that refuses it loses the connection, closed with err.
+func (w *ctxWatch) abort(gen uint64, err error) {
 	w.mu.Lock()
-	if w.active && gen == w.gen && w.setDeadline(aLongTimeAgo) != nil {
-		_ = w.nc.Close()
-	}
+	refused := w.active && gen == w.gen && w.setDeadline(aLongTimeAgo) != nil
 	w.mu.Unlock()
+	if refused {
+		w.c.closeWith(err)
+	}
 }
 
 func (w *ctxWatch) end() {
