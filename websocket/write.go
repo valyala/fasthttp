@@ -43,7 +43,7 @@ func (c *Conn) writeCompressed(ctx context.Context, op byte, fin bool, p []byte,
 		return err
 	}
 	defer c.frameMu.release()
-	out := getBuf(maxFrameHeader + len(p))
+	out := getBuf(min(maxFrameHeader+len(p), readChunkSize)) // Grown as the output requires.
 	out.b = out.b[:maxFrameHeader]
 	c.compress(out, p, fin)
 	err := c.sendBuffered(ctx, op, fin, out.b, deadline)

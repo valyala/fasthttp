@@ -49,6 +49,7 @@ type buffer struct{ b []byte }
 const (
 	minBufBits = 12 // 4 KiB
 	bufClasses = 15 // Up to 64 MiB.
+	maxPooled  = 1 << (minBufBits + bufClasses - 1)
 )
 
 // bufPools holds buffers in power-of-two size classes.

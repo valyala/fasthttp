@@ -52,12 +52,11 @@ func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 		return typ, buf.b, c.endMessage(ctx)
 	}
 	for {
-		// Grow with the data, not the announced length; each step quadruples.
 		for rd.left > 0 {
 			n := len(buf.b)
 			step := min(int(rd.left), readChunkSize) // #nosec G115
 			if cap(buf.b)-n < step {
-				buf = c.growReadBuf(buf, n+step)
+				buf = c.growReadBuf(buf, n+step, n+int(rd.left)) // #nosec G115
 			}
 			buf.b = buf.b[:n+step]
 			if err := c.readFrameInto(ctx, buf.b[n:]); err != nil {
@@ -77,30 +76,49 @@ func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 	return typ, buf.b, nil
 }
 
-// growReadBuf replaces buf with one holding at least n bytes, quadrupling so
-// that growth follows the data rather than the announced length.
-func (c *Conn) growReadBuf(buf *buffer, n int) *buffer {
-	grown := getBuf(max(n, 4*cap(buf.b)))
+// growReadBuf replaces buf with one holding at least need bytes, sized for the
+// want bytes the message is expected to reach.
+func (c *Conn) growReadBuf(buf *buffer, need, want int) *buffer {
+	grown := getBuf(readBufSize(cap(buf.b), need, want, c.cfg.maxMessageSize))
 	grown.b = append(grown.b, buf.b...)
 	putBuf(buf)
 	c.readBuf = grown
 	return grown
 }
 
+// readBufSize returns the size to grow a read buffer of have bytes to: want,
+// but no more than four times have, so that growth follows the data received
+// rather than what the peer announces.
+func readBufSize(have, need, want, limit int) int {
+	n := max(need, min(4*have, want))
+	if n > maxPooled {
+		// Past the pool a buffer has no room to spare; growth stays geometric.
+		n = max(n, min(2*have, limit))
+	}
+	return n
+}
+
 // readInflated decompresses the current message into buf.
 func (c *Conn) readInflated(ctx context.Context, buf *buffer) (*buffer, error) {
 	for {
-		if len(buf.b) == cap(buf.b) {
-			buf = c.growReadBuf(buf, cap(buf.b)+1)
+		p := buf.b[len(buf.b):cap(buf.b)]
+		full := len(p) == 0
+		if full {
+			p = c.inf.one[:] // A byte more tells a message that ends here from one that needs room.
 		}
-		n, err := c.inflate(ctx, buf.b[len(buf.b):cap(buf.b)])
-		buf.b = buf.b[:len(buf.b)+n]
+		n, err := c.inflate(ctx, p)
 		if err == io.EOF {
 			return buf, nil
 		}
 		if err != nil {
 			return buf, err
 		}
+		if !full {
+			buf.b = buf.b[:len(buf.b)+n]
+			continue
+		}
+		buf = c.growReadBuf(buf, cap(buf.b)+1, c.inflatedSize(len(buf.b)))
+		buf.b = append(buf.b, p[0])
 	}
 }
 

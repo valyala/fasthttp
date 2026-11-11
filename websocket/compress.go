@@ -228,15 +228,22 @@ type deflater struct {
 	fw   *flate.Writer
 	dst  *buffer
 	dict []byte // Our context, the last deflateDict bytes sent, with room to slide.
+	size int    // The length of the chunk being compressed.
+	fed  int    // How much of it the compressor has been given.
 }
 
 func (d *deflater) Write(p []byte) (int, error) {
-	if n := len(d.dst.b) + len(p); n > cap(d.dst.b) && bufClass(n) < bufClasses {
-		// Incompressible data comes out larger than its input.
-		g := getBuf(n)
-		g.b = append(g.b, d.dst.b...)
-		d.dst.b, g.b = g.b, d.dst.b
-		putBuf(g)
+	if n := len(d.dst.b) + len(p); n > cap(d.dst.b) {
+		if d.fed > 0 {
+			// What the input so far came to extrapolates to the rest of it.
+			n = max(n, min(int(float64(n)*float64(d.size)/float64(d.fed)), maxPooled))
+		}
+		if n <= maxPooled {
+			g := getBuf(n)
+			g.b = append(g.b, d.dst.b...)
+			d.dst.b, g.b = g.b, d.dst.b
+			putBuf(g)
+		}
 	}
 	d.dst.b = append(d.dst.b, p...)
 	return len(p), nil
@@ -255,8 +262,13 @@ func (c *Conn) compress(out *buffer, payload []byte, final bool) {
 		}
 		d.fw.ResetDict(d, dict)
 	}
-	d.dst = out
-	_, _ = d.fw.Write(payload)
+	d.dst, d.size, d.fed = out, len(payload), 0
+	for len(payload) > 0 {
+		n := min(len(payload), readChunkSize) // About a block of the compressor.
+		d.fed += n
+		_, _ = d.fw.Write(payload[:n])
+		payload = payload[n:]
+	}
 	_ = d.fw.Flush()
 	d.dst = nil
 	if final {
@@ -329,6 +341,7 @@ type inflater struct {
 	win  *buffer         // The peer's context: the last deflateWindow bytes inflated, with room to slide.
 	pos  int
 	tail int
+	one  [1]byte // Where readInflated probes for the end of a message.
 }
 
 func (s *inflater) fill() error {
@@ -386,6 +399,18 @@ func (s *inflater) ReadByte() (byte, error) {
 	b := s.buf.b[s.pos]
 	s.pos++
 	return b, nil
+}
+
+// inflatedSize extrapolates what the message comes to from the n bytes its
+// compressed data has yielded so far, as far as the current frame announces.
+func (c *Conn) inflatedSize(n int) int {
+	s, rd := &c.inf, &c.rd
+	used := rd.msgLen - (len(s.buf.b) - s.pos)
+	if used <= 0 {
+		return c.cfg.maxMessageSize
+	}
+	est := float64(n) * (float64(rd.msgLen) + float64(rd.left)) / float64(used)
+	return int(min(est, float64(c.cfg.maxMessageSize)))
 }
 
 // beginInflate sets up the decompressor for the compressed message whose
