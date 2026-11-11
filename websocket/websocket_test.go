@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"iter"
@@ -633,6 +634,39 @@ func TestDialRejected(t *testing.T) {
 		}
 		if tc.status != 0 && resp.StatusCode() != tc.status {
 			t.Fatalf("%s: status %d", tc.url, resp.StatusCode())
+		}
+	}
+}
+
+// User information in the URL is sent decoded as Basic credentials, unless
+// the caller's headers carry an Authorization.
+func TestDialURLCredentials(t *testing.T) {
+	for _, tc := range []struct{ userinfo, header, want string }{
+		{"user:pass@", "", "Basic " + base64.StdEncoding.EncodeToString([]byte("user:pass"))},
+		{"u%40x:p%25%2Fss@", "", "Basic " + base64.StdEncoding.EncodeToString([]byte("u@x:p%/ss"))},
+		{"user@", "", "Basic " + base64.StdEncoding.EncodeToString([]byte("user:"))},
+		{":pass@", "", "Basic " + base64.StdEncoding.EncodeToString([]byte(":pass"))},
+		{"@", "", ""},
+		{"user:pass@", "Bearer token", "Bearer token"},
+		{"", "", ""},
+	} {
+		addr, request := rawServer(t, probeAccept)
+		var h fasthttp.RequestHeader
+		if tc.header != "" {
+			h.Set(fasthttp.HeaderAuthorization, tc.header)
+		}
+		c, err := Dial(t.Context(), "ws://"+tc.userinfo+addr+"/", &DialOptions{Header: &h})
+		if err != nil {
+			t.Fatalf("%q: %v", tc.userinfo, err)
+		}
+		_ = c.CloseNow()
+		head := <-request
+		if tc.want == "" {
+			if strings.Contains(strings.ToLower(head), "authorization:") {
+				t.Fatalf("%q: unexpected credentials:\n%s", tc.userinfo, head)
+			}
+		} else if strings.Count(head, "Authorization: ") != 1 || !strings.Contains(head, "Authorization: "+tc.want+"\r\n") {
+			t.Fatalf("%q: want Authorization %q:\n%s", tc.userinfo, tc.want, head)
 		}
 	}
 }
