@@ -1522,7 +1522,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			}
 			notModified = true
 		}
-	} else if ctx.IsGet() || ctx.IsHead() {
+	} else if (ctx.IsGet() || ctx.IsHead()) && fsModTimeKnown(ff.lastModified) {
 		// If-Modified-Since only applies to GET and HEAD.
 		// See https://www.rfc-editor.org/rfc/rfc9110#section-13.1.3
 		notModified = !ctx.IfModifiedSince(ff.lastModified)
@@ -1593,7 +1593,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	hdr.setNonSpecial(strLastModified, ff.lastModifiedStr)
+	if fsModTimeKnown(ff.lastModified) {
+		hdr.setNonSpecial(strLastModified, ff.lastModifiedStr)
+	}
 	if len(ff.etag) > 0 {
 		hdr.SetBytesV(HeaderETag, ff.etag)
 	}
@@ -1627,7 +1629,15 @@ func fsIfRangeMatch(ifRange []byte, lastModified time.Time) bool {
 		return true
 	}
 	t, err := ParseHTTPDate(ifRange)
-	return err == nil && t.Equal(lastModified.Truncate(time.Second))
+	return err == nil && fsModTimeKnown(lastModified) && t.Equal(lastModified.Truncate(time.Second))
+}
+
+// fsModTimeKnown reports whether t is a modification time to tell clients
+// and to compare their validators against. A filesystem without modification
+// times, such as embed.FS, reports the zero time for every file, so that time
+// stays the same when the file changes. The Unix epoch counts as unknown too.
+func fsModTimeKnown(t time.Time) bool {
+	return t.Unix() > 0
 }
 
 // appendFSETag appends a weak entity tag built from the hex-encoded
@@ -1638,12 +1648,11 @@ func fsIfRangeMatch(ifRange []byte, lastModified time.Time) bool {
 // guarantee byte-for-byte equality. It is not appended if the modification
 // time is unknown.
 func appendFSETag(dst []byte, lastModified time.Time, size int) []byte {
-	mtime := lastModified.Unix()
-	if mtime <= 0 {
+	if !fsModTimeKnown(lastModified) {
 		return dst
 	}
 	dst = append(dst, `W/"`...)
-	dst = strconv.AppendInt(dst, mtime, 16)
+	dst = strconv.AppendInt(dst, lastModified.Unix(), 16)
 	dst = append(dst, '-')
 	dst = strconv.AppendInt(dst, int64(size), 16)
 	return append(dst, '"')
