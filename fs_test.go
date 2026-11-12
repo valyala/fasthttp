@@ -1995,6 +1995,80 @@ func TestServeFileContentType(t *testing.T) {
 	}
 }
 
+func TestFSDirectoryRedirect(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for _, name := range []string{"docs/C# notes", "example.com/docs", "other.example/docs"} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests := []struct {
+		name        string
+		pathRewrite PathRewriteFunc
+		uri         string
+		location    string
+	}{
+		{name: "plain", uri: "/docs", location: "http://example.com/docs/"},
+		{name: "query string", uri: "/docs?a=b&c", location: "http://example.com/docs/?a=b&c"},
+		{name: "fragment", uri: "/docs#top", location: "http://example.com/docs/"},
+		{name: "escaped name", uri: "/docs/C%23%20notes", location: "http://example.com/docs/C%23%20notes/"},
+		{name: "not normalized", uri: "/docs//./C%23%20notes", location: "http://example.com/docs/C%23%20notes/"},
+		// A path, not the host to redirect to.
+		{name: "two leading slashes", uri: "//other.example/docs", location: "http://example.com/other.example/docs/"},
+		{
+			name:        "stripped slashes",
+			pathRewrite: NewPathSlashesStripper(1),
+			uri:         "/static/docs",
+			location:    "http://example.com/static/docs/",
+		},
+		{
+			name:        "stripped prefix",
+			pathRewrite: NewPathPrefixStripper(len("/static")),
+			uri:         "/static/docs/C%23%20notes?a=b",
+			location:    "http://example.com/static/docs/C%23%20notes/?a=b",
+		},
+		{
+			name:        "virtual host",
+			pathRewrite: NewVHostPathRewriter(0),
+			uri:         "/docs",
+			location:    "http://example.com/docs/",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := (&FS{Root: dir, GenerateIndexPages: true, PathRewrite: tt.pathRewrite}).NewRequestHandler()
+
+			var ctx RequestCtx
+			var req Request
+			req.Header.SetHost("example.com")
+			req.SetRequestURI(tt.uri)
+			ctx.Init(&req, nil, TestLogger{t})
+			h(&ctx)
+			if ctx.Response.StatusCode() != StatusFound {
+				t.Fatalf("unexpected status code %d. Expecting %d", ctx.Response.StatusCode(), StatusFound)
+			}
+			location := string(ctx.Response.Header.Peek(HeaderLocation))
+			if location != tt.location {
+				t.Fatalf("unexpected Location %q. Expecting %q", location, tt.location)
+			}
+
+			// The redirect leads to the index page of the directory.
+			ctx.Request.Reset()
+			ctx.Response.Reset()
+			ctx.Request.SetRequestURI(location)
+			h(&ctx)
+			if ctx.Response.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code %d for %q. Expecting %d", ctx.Response.StatusCode(), location, StatusOK)
+			}
+		})
+	}
+}
+
 func TestServeFileDirectoryRedirect(t *testing.T) {
 	t.Parallel()
 

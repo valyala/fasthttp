@@ -1480,7 +1480,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 
 		if errors.Is(err, errDirIndexRequired) {
 			if !hasTrailingSlash {
-				ctx.RedirectBytes(append(path, '/'), StatusFound)
+				redirectToDir(ctx, path)
 				return
 			}
 			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
@@ -1616,6 +1616,34 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.SetContentType(ff.contentType)
 	}
 	ctx.SetStatusCode(statusCode)
+}
+
+// redirectToDir redirects the request for the directory at path to the same
+// directory with a trailing slash.
+func redirectToDir(ctx *RequestCtx, path []byte) {
+	// The slash goes onto the request target the client sent, which keeps
+	// the query string and what PathRewrite took off: path is a path in the
+	// filesystem and may be none the client can request.
+	target := ctx.Request.Header.RequestURI()
+	if n := bytes.IndexByte(target, '#'); n >= 0 {
+		target = target[:n]
+	}
+	n := bytes.IndexByte(target, '?')
+	if n < 0 {
+		n = len(target)
+	}
+	// Only an origin-form target with one leading slash is taken, "//host"
+	// would redirect to another host.
+	if n > 1 && target[0] == '/' && target[1] != '/' && target[n-1] != '/' {
+		b := make([]byte, 0, len(target)+1)
+		b = append(b, target[:n]...)
+		b = append(b, '/')
+		b = append(b, target[n:]...)
+		ctx.RedirectBytes(b, StatusFound)
+		return
+	}
+	// path is decoded: '?', '#' and '%' in a name are no delimiters.
+	ctx.RedirectBytes(append(appendQuotedPath(nil, path), '/'), StatusFound)
 }
 
 // fsIfRangeMatch reports whether the Range header may be served given
