@@ -1855,11 +1855,12 @@ func (h *fsHandler) createDirIndex(ctx *RequestCtx, dirPath string, mustCompress
 	_, _ = fmt.Fprintf(w, "<h1>%s</h1>", basePathEscaped)
 	_, _ = fmt.Fprintf(w, "<ul>")
 
+	// The links are percent-encoded paths. A file name is no URI reference:
+	// '?', '#' and '%' in it start no query, fragment or escape.
 	if len(basePathEscaped) > 1 {
-		var parentURI URI
-		base.CopyTo(&parentURI)
-		parentURI.Update(string(base.Path()) + "/..")
-		parentPathEscaped := html.EscapeString(string(parentURI.Path()))
+		parentPath := bytes.TrimSuffix(base.Path(), strSlash)
+		parentPath = parentPath[:bytes.LastIndexByte(parentPath, '/')+1]
+		parentPathEscaped := html.EscapeString(string(appendQuotedPath(nil, parentPath)))
 		_, _ = fmt.Fprintf(w, `<li><a href="%s" class="dir">..</a></li>`, parentPathEscaped)
 	}
 
@@ -1890,14 +1891,16 @@ nestedContinue:
 		filenames = append(filenames, name)
 	}
 
-	var u URI
-	base.CopyTo(&u)
-	u.Update(string(u.Path()) + "/")
+	dirURI := appendQuotedPath(nil, base.Path())
+	if dirURI[len(dirURI)-1] != '/' {
+		dirURI = append(dirURI, '/')
+	}
 
+	var href []byte
 	sort.Strings(filenames)
 	for _, name := range filenames {
-		u.Update(name)
-		pathEscaped := html.EscapeString(string(u.Path()))
+		href = appendQuotedPath(append(href[:0], dirURI...), s2b(name))
+		pathEscaped := html.EscapeString(string(href))
 		fi := fm[name]
 		auxStr := "dir"
 		className := "dir"

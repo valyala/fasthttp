@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	iofs "io/fs"
 	"math/rand"
@@ -1365,6 +1366,83 @@ func TestFSCompressSingleThreadSkipCache(t *testing.T) {
 		CompressZstd:       true,
 		CleanStop:          stop,
 	})
+}
+
+func TestFSDirIndexLinks(t *testing.T) {
+	t.Parallel()
+
+	// '#', '?' and '%' are ordinary characters in a file name. Left as they
+	// are in a link, they start a fragment, a query or an escape.
+	files := map[string]string{
+		"Track #1.txt":             "track",
+		"100%.txt":                 "percent",
+		"a%41.txt":                 "escape",
+		"C# notes/x.txt":           "nested",
+		"C# notes/50% off/y z.txt": "deeper",
+	}
+	if runtime.GOOS != "windows" {
+		files["what?.txt"] = "query"
+	}
+	dir := t.TempDir()
+	for name, body := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := (&FS{Root: dir, GenerateIndexPages: true}).NewRequestHandler()
+
+	get := func(uri string) string {
+		t.Helper()
+
+		var ctx RequestCtx
+		ctx.Init(&Request{}, nil, TestLogger{t})
+		ctx.Request.SetRequestURI(uri)
+		h(&ctx)
+		resp := readResponseFromCtx(t, &ctx, false)
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code %d for %q. Expecting %d", resp.StatusCode(), uri, StatusOK)
+		}
+		return string(resp.Body())
+	}
+	// link returns where the link with the given text on the index page at uri leads.
+	link := func(uri, text string) string {
+		t.Helper()
+
+		page := get(uri)
+		end := strings.Index(page, `">`+html.EscapeString(text)+"</a>")
+		start := strings.LastIndex(page[:max(end, 0)], `<a href="`)
+		if end < 0 || start < 0 {
+			t.Fatalf("cannot find the link %q on the index page at %q: %q", text, uri, page)
+		}
+		href, _, _ := strings.Cut(page[start+len(`<a href="`):end], `"`)
+		return html.UnescapeString(href)
+	}
+
+	// Every file is reached by following the links from the root.
+	for name, body := range files {
+		uri := "/"
+		for segment := range strings.SplitSeq(name, "/") {
+			uri = link(uri, segment)
+			if !strings.HasSuffix(name, segment) {
+				uri += "/"
+			}
+		}
+		if got := get(uri); got != body {
+			t.Fatalf("unexpected body %q behind the links to %q, which end at %q. Expecting %q", got, name, uri, body)
+		}
+	}
+
+	// The link to the parent leads one directory up.
+	if href := link("/C%23%20notes/50%25%20off/", ".."); href != "/C%23%20notes/" {
+		t.Fatalf("unexpected parent link %q. Expecting %q", href, "/C%23%20notes/")
+	}
+	if href := link("/C%23%20notes/", ".."); href != "/" {
+		t.Fatalf("unexpected parent link %q. Expecting %q", href, "/")
+	}
 }
 
 func TestFSCompressTmpFileSymlink(t *testing.T) {
