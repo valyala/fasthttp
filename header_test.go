@@ -1184,6 +1184,22 @@ func TestRequestHeaderHTTP10ConnectionKeepAlive(t *testing.T) {
 	}
 }
 
+func TestRequestHeaderHTTP10ConnectionKeepAliveInSecondHeader(t *testing.T) {
+	t.Parallel()
+
+	// The keep-alive option may be in any of the Connection headers.
+	s := "GET / HTTP/1.0\r\nHost: foobar\r\nConnection: upgrade\r\nConnection: keep-alive\r\n\r\n"
+	var h RequestHeader
+	br := bufio.NewReader(bytes.NewBufferString(s))
+	if err := h.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if h.ConnectionClose() {
+		t.Fatalf("unexpected 'Connection: close' request header")
+	}
+}
+
 func TestBufferSnippet(t *testing.T) {
 	t.Parallel()
 
