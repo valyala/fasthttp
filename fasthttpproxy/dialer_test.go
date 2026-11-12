@@ -410,6 +410,61 @@ func TestFasthttpHTTPDialerSendsDecodedCredentials(t *testing.T) {
 	}
 }
 
+func TestHTTPProxyURLWithPath(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+
+	go func() {
+		req := fasthttp.AcquireRequest()
+		defer fasthttp.ReleaseRequest(req)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			if err := req.Read(bufio.NewReader(conn)); err != nil {
+				t.Error(err)
+			}
+			req.Reset()
+			if _, err := conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
+				t.Error(err)
+			}
+			conn.Close()
+		}
+	}()
+
+	// Proxy URLs are commonly written with a trailing slash, in HTTP_PROXY too.
+	withSlash := "http://" + ln.Addr().String() + "/"
+	withCredentials := "http://user:pass@" + ln.Addr().String() + "/"
+	tests := []struct {
+		name    string
+		proxy   string
+		noProxy string
+	}{
+		{"trailing slash", withSlash, ""},
+		{"trailing slash and credentials", withCredentials, ""},
+		// With NoProxy set the proxy is picked on every dial.
+		{"trailing slash, proxy picked per dial", withSlash, "example.org"},
+		{"trailing slash and credentials, proxy picked per dial", withCredentials, "example.org"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dialFunc, err := getDialer(tt.proxy, tt.proxy, tt.noProxy).GetDialFunc(false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn, err := dialFunc("example.com:443")
+			if err != nil {
+				t.Fatal(err)
+			}
+			conn.Close()
+		})
+	}
+}
+
 func TestProxyDialerConstructorsReturnErroringDialFunc(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "socket6://127.0.0.1:8080")
 	t.Setenv("HTTPS_PROXY", "socket6://127.0.0.1:8080")
