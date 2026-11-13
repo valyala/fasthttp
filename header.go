@@ -3801,8 +3801,7 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	}
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 response unless 'Connection: keep-alive' is set.
-		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
+		h.connectionClose = !hasConnectionKeepAliveValue(h.h)
 	}
 
 	return s.r, nil
@@ -3974,8 +3973,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	}
 	if h.noHTTP11 && !h.connectionClose {
 		// close connection for non-http/1.1 request unless 'Connection: keep-alive' is set.
-		v := peekArgBytes(h.h, strConnection)
-		h.connectionClose = !hasHeaderValue(v, strKeepAlive)
+		h.connectionClose = !hasConnectionKeepAliveValue(h.h)
 	}
 	return s.r, s.rawSaved, nil
 }
@@ -4068,6 +4066,20 @@ func hasConnectionCloseValue(h []argsKV) bool {
 	for i := range h {
 		if caseInsensitiveCompare(h[i].key, strConnection) {
 			if hasHeaderValue(h[i].value, strClose) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasConnectionKeepAliveValue reports whether any of the Connection headers
+// holds the keep-alive option. A header may be repeated, and the option may
+// be one of several in the list.
+func hasConnectionKeepAliveValue(h []argsKV) bool {
+	for i := range h {
+		if caseInsensitiveCompare(h[i].key, strConnection) {
+			if hasHeaderValue(h[i].value, strKeepAlive) {
 				return true
 			}
 		}
