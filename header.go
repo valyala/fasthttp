@@ -783,6 +783,183 @@ var (
 	ErrSmallReadBuffer               = errors.New("fasthttp: small read buffer. increase readbuffersize")
 )
 
+// ErrUnknownTransferCoding is returned when Transfer-Encoding is a well formed
+// list of transfer codings (RFC 9110, section 10.1.4) that holds a coding
+// fasthttp doesn't read, such as "gzip, chunked" or "x-custom;level=1, chunked".
+// RFC 9112, section 6.1 has a server answer such a request with 501 (Not
+// Implemented). It is reported once the other fields of the header have been
+// read, so that a fault in them is reported instead.
+//
+// It is not returned for a fault in the framing of the message, which RFC 9112,
+// section 6.3 has a server answer with 400 (Bad Request): a list that is not
+// well formed, parameters on chunked, which defines none, chunked applied more
+// than once, a request whose list doesn't end in chunked such as "gzip" or
+// "chunked, identity", a repeated field, or one in an HTTP/1.0 request. Those
+// are reported as before, as an ErrUnsupportedTransferEncoding with
+// Server.SecureErrorLogMessage and as plain text without it. In a response,
+// codings after chunked are not a fault, the body runs to the end of the
+// connection, so "chunked, gzip" is an unknown coding there.
+//
+// It matches ErrUnsupportedTransferEncoding too, which is what an unknown
+// coding was reported as with Server.SecureErrorLogMessage.
+var ErrUnknownTransferCoding = fmt.Errorf("%w: unknown transfer coding", ErrUnsupportedTransferEncoding)
+
+// classifiedError is a header error with a detailed message that errors.Is
+// matches to the sentinel err, so that callers don't have to match the text.
+// The message is the one the error had before it was classified.
+type classifiedError struct {
+	err error
+	msg string
+}
+
+func (e *classifiedError) Error() string { return e.msg }
+
+func (e *classifiedError) Unwrap() error { return e.err }
+
+func classifiedErrorf(err error, format string, args ...any) error {
+	return &classifiedError{err: err, msg: fmt.Sprintf(format, args...)}
+}
+
+// transferEncodingError is the error for a Transfer-Encoding value v that
+// fasthttp can't read, in a request or in a response. unknown reports whether
+// it is an ErrUnknownTransferCoding, a well formed list with a coding fasthttp
+// doesn't read, rather than a fault in the framing, which is reported as before.
+func transferEncodingError(v []byte, request, secureErrorLogMessage bool) (unknown bool, err error) {
+	unknown = isUnknownTransferCoding(v, request)
+	switch {
+	case unknown && secureErrorLogMessage:
+		err = ErrUnknownTransferCoding
+	case unknown:
+		err = classifiedErrorf(ErrUnknownTransferCoding, "unsupported transfer-encoding: %q", v)
+	case secureErrorLogMessage:
+		err = ErrUnsupportedTransferEncoding
+	default:
+		err = fmt.Errorf("unsupported transfer-encoding: %q", v)
+	}
+	return unknown, err
+}
+
+// isUnknownTransferCoding reports whether the Transfer-Encoding value v is a
+// well formed list of transfer codings that fasthttp doesn't read because of a
+// coding other than chunked, as opposed to a fault in the framing of the
+// message (RFC 9112, sections 6.1 and 6.3).
+//
+// Each coding is a token with optional parameters (RFC 9110, section 10.1.4),
+// and chunked takes none (RFC 9112, section 7.1). Chunked can't be applied
+// twice. A request has to end in chunked, or the length of its body can't be
+// told. A response that doesn't, or that has codings after chunked, runs to
+// the end of the connection, which fasthttp doesn't read with another coding
+// applied, so that is an unknown coding too.
+//
+// The list is read strictly: an empty element, as in "gzip,,chunked", is a
+// fault, since a value that isn't exactly chunked is never accepted either.
+func isUnknownTransferCoding(v []byte, request bool) bool {
+	chunked, other := false, false
+	for {
+		coding, params, rest := parseTransferCoding(v)
+		if coding == nil {
+			return false
+		}
+		isChunked := caseInsensitiveCompare(coding, strChunked)
+		switch {
+		case isChunked && (chunked || params):
+			// Chunked applied twice, or with parameters it doesn't define.
+			return false
+		case isChunked:
+			chunked = true
+		case chunked && request:
+			// Chunked is not the final coding: the body can't be delimited.
+			return false
+		default:
+			other = true
+		}
+		v = skipOWS(rest)
+		if len(v) == 0 {
+			return other && (chunked || !request)
+		}
+		if v[0] != ',' {
+			return false
+		}
+		v = v[1:]
+	}
+}
+
+// parseTransferCoding reads a transfer-coding from the start of v, after
+// optional whitespace (RFC 9110, section 10.1.4):
+//
+//	transfer-coding    = token *( OWS ";" OWS transfer-parameter )
+//	transfer-parameter = token BWS "=" BWS ( token / quoted-string )
+//
+// It returns the name of the coding, whether it has parameters and what
+// follows it, or a nil name if v doesn't start with a well formed one.
+func parseTransferCoding(v []byte) (coding []byte, params bool, rest []byte) {
+	v = skipOWS(v)
+	n := tokenLen(v)
+	if n == 0 {
+		return nil, false, nil
+	}
+	coding, v = v[:n], v[n:]
+	for {
+		rest = skipOWS(v)
+		if len(rest) == 0 || rest[0] != ';' {
+			return coding, params, rest
+		}
+		params = true
+		v = skipOWS(rest[1:])
+		if n = tokenLen(v); n == 0 {
+			return nil, false, nil
+		}
+		v = skipOWS(v[n:])
+		if len(v) == 0 || v[0] != '=' {
+			return nil, false, nil
+		}
+		v = skipOWS(v[1:])
+		if len(v) > 0 && v[0] == '"' {
+			n = quotedStringLen(v)
+		} else {
+			n = tokenLen(v)
+		}
+		if n == 0 {
+			return nil, false, nil
+		}
+		v = v[n:]
+	}
+}
+
+// tokenLen returns the length of the token at the start of v (RFC 9110,
+// section 5.6.2), 0 if there is none.
+func tokenLen(v []byte) int {
+	n := 0
+	for n < len(v) && validHeaderFieldByte(v[n]) {
+		n++
+	}
+	return n
+}
+
+// quotedStringLen returns the length of the quoted-string at the start of v,
+// its quotes included (RFC 9110, section 5.6.4), or 0 if the closing quote is
+// missing. v[0] has to be the opening quote.
+func quotedStringLen(v []byte) int {
+	for n := 1; n < len(v); n++ {
+		switch v[n] {
+		case '"':
+			return n + 1
+		case '\\':
+			n++
+		}
+	}
+	return 0
+}
+
+// skipOWS returns v without the optional whitespace at its start (RFC 9110,
+// section 5.6.3).
+func skipOWS(v []byte) []byte {
+	for len(v) > 0 && (v[0] == ' ' || v[0] == '\t') {
+		v = v[1:]
+	}
+	return v
+}
+
 // AddTrailerBytes add Trailer header value for chunked response
 // to indicate which headers will be sent after the body.
 //
@@ -1429,6 +1606,18 @@ func (h *header) EnableNormalizing() bool {
 	orig := h.disableNormalizing
 	h.disableNormalizing = false
 	return orig
+}
+
+// NormalizingDisabled reports whether header names' normalization is
+// disabled, whether by DisableNormalizing, by Server.DisableHeaderNamesNormalizing
+// for the headers of a request being served, or by the
+// DisableHeaderNamesNormalizing option of a client for the response headers
+// it reads.
+//
+// The setting says how names are stored and looked up from now on. Names that
+// are already stored keep the spelling they were stored with.
+func (h *header) NormalizingDisabled() bool {
+	return h.disableNormalizing
 }
 
 // SetNoDefaultContentType allows you to control if a default Content-Type header will be set (false) or not (true).
@@ -3591,7 +3780,7 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 			if h.secureErrorLogMessage {
 				return 0, ErrUnsupportedRequestMethod
 			}
-			return 0, fmt.Errorf("unsupported http request method %q in %q", b[:n], buf)
+			return 0, classifiedErrorf(ErrUnsupportedRequestMethod, "unsupported http request method %q in %q", b[:n], buf)
 		}
 	}
 	h.method = append(h.method[:0], b[:n]...)
@@ -3670,6 +3859,9 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	var trailers trailerSet
 	transferEncodingSeen := false
 	contentLengthSeen := false
+	// deferredErr is an unknown transfer coding, reported once the other
+	// fields have been read: a fault in them comes first.
+	var deferredErr error
 
 	for s.next() {
 		// Trim trailing whitespace before the colon to normalize headers
@@ -3762,10 +3954,12 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 				transferEncodingSeen = true
 				if !caseInsensitiveCompare(s.value, strChunked) {
 					h.connectionClose = true
-					if h.secureErrorLogMessage {
-						return 0, ErrUnsupportedTransferEncoding
+					unknown, teErr := transferEncodingError(s.value, false, h.secureErrorLogMessage)
+					if !unknown {
+						return 0, teErr
 					}
-					return 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
+					deferredErr = teErr
+					continue
 				}
 				h.contentLength = -1
 				h.h = setArgBytes(h.h, strTransferEncoding, strChunked, argsHasValue)
@@ -3786,6 +3980,9 @@ func (h *ResponseHeader) parseHeaders(buf []byte) (int, error) {
 	if s.err != nil {
 		h.connectionClose = true
 		return 0, s.err
+	}
+	if deferredErr != nil {
+		return 0, deferredErr
 	}
 
 	if h.contentLength < 0 {
@@ -3814,6 +4011,11 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	contentLengthSeen := false
 	transferEncodingSeen := false
 	hostSeen := false
+	// deferredErr is an unknown transfer coding, reported once the other
+	// fields have been read and the required ones found, so that a fault in
+	// the message is answered with 400 as RFC 9112, sections 3.2 and 6.3 ask,
+	// rather than with 501.
+	var deferredErr error
 
 	var s headerScanner
 	s.b = buf
@@ -3933,10 +4135,12 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 
 				if !isIdentity && !isChunked {
 					h.connectionClose = true
-					if h.secureErrorLogMessage {
-						return 0, 0, ErrUnsupportedTransferEncoding
+					unknown, teErr := transferEncodingError(s.value, true, h.secureErrorLogMessage)
+					if !unknown {
+						return 0, 0, teErr
 					}
-					return 0, 0, fmt.Errorf("unsupported transfer-encoding: %q", s.value)
+					deferredErr = teErr
+					continue
 				}
 
 				if isChunked {
@@ -3960,6 +4164,14 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	if s.err != nil {
 		h.connectionClose = true
 		return 0, 0, s.err
+	}
+	if deferredErr != nil {
+		// A required field that is missing is a fault in the message too
+		// (RFC 9112, section 3.2), reported before the unknown coding.
+		if err := h.validate(); err != nil {
+			return 0, 0, err
+		}
+		return 0, 0, deferredErr
 	}
 
 	if h.contentLength < 0 {
