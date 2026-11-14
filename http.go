@@ -2546,7 +2546,8 @@ type compressedBodyStream struct {
 	level      int
 	compress   compressBodyStream
 
-	done chan struct{}
+	done        chan struct{}
+	compressErr error
 
 	startOnce     sync.Once
 	closeReadOnce sync.Once
@@ -2561,10 +2562,30 @@ type compressedBodyStream struct {
 // once the server writes the body, after the headers.
 func (s *compressedBodyStream) Read(p []byte) (int, error) {
 	s.startOnce.Do(func() { s.r = NewStreamReader(s.write) })
+	return s.read(p)
+}
+
+func (s *compressedBodyStream) read(p []byte) (int, error) {
 	if s.r == nil {
 		return 0, io.ErrClosedPipe
 	}
-	return s.r.Read(p)
+	n, err := s.r.Read(p)
+	if err == io.EOF {
+		err = s.terminalError(err)
+	}
+	return n, err
+}
+
+// A concurrent Close can end the pipe before compression finishes.
+func (s *compressedBodyStream) terminalError(err error) error {
+	select {
+	case <-s.done:
+		if s.compressErr != nil {
+			return s.compressErr
+		}
+	default:
+	}
+	return err
 }
 
 func (s *compressedBodyStream) Close() error {
@@ -2594,7 +2615,8 @@ func (s *compressedBodyStream) Close() error {
 }
 
 func (s *compressedBodyStream) write(sw *bufio.Writer) {
-	s.closeErr = s.closeOriginal(s.compress(sw, s.bodyStream, s.level))
+	s.compressErr = s.compress(sw, s.bodyStream, s.level)
+	s.closeErr = s.closeOriginal(s.compressErr)
 	close(s.done)
 }
 
