@@ -2503,6 +2503,53 @@ func TestCopyZeroAllocWithLimit(t *testing.T) {
 	}
 }
 
+func TestRequestMultipartFormBoundaryForwarding(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		params   string
+		boundary string // Boundary used by net/http to read the forwarded request.
+		readForm bool
+	}{
+		{"boundary=back; boundary*=utf-8''front", "front", false},
+		{"boundary=back; BOUNDARY*0=fro; boundary*1=nt", "front", false},
+		{"\u00a0boundary*0=front; boundary=back", "front", false},
+		{"boundary= front", "front", false},
+		{`boundary="foo;bar"`, "foo;bar", true},
+		{`boundary="foo\:bar"`, "foo:bar", true},
+		{`boundary="a\"b"`, `a"b`, true},
+	} {
+		t.Run(tc.params, func(t *testing.T) {
+			body := "--" + tc.boundary + "\r\nContent-Disposition: form-data; name=role\r\n\r\nuser\r\n--" + tc.boundary + "--\r\n"
+			raw := fmt.Sprintf("POST / HTTP/1.1\r\nHost: example.org\r\nContent-Type: multipart/form-data; %s\r\nContent-Length: %d\r\n\r\n%s", tc.params, len(body), body)
+			var req Request
+			if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+				t.Fatal(err)
+			}
+			form, err := req.MultipartForm()
+			if tc.readForm {
+				if err != nil || !reflect.DeepEqual(form.Value["role"], []string{"user"}) {
+					t.Fatalf("unexpected form %v, error %v", form, err)
+				}
+			} else if !errors.Is(err, ErrNoMultipartForm) {
+				t.Fatalf("expected ErrNoMultipartForm, got %v", err)
+			}
+			var wire bytes.Buffer
+			if _, err := req.WriteTo(&wire); err != nil {
+				t.Fatal(err)
+			}
+			forwarded, err := http.ReadRequest(bufio.NewReader(&wire))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer forwarded.Body.Close()
+			if got := forwarded.FormValue("role"); got != "user" {
+				t.Fatalf("net/http read role %q, expected user", got)
+			}
+		})
+	}
+}
+
 func TestRequestMultipartFormEpilogue(t *testing.T) {
 	t.Parallel()
 
