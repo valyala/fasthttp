@@ -182,6 +182,10 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // then write a normalized target, like fasthttp.Client always does unless
 // its DisablePathNormalizing option is set.
 //
+// For repeated Content-Type and User-Agent fields, the conversion keeps the
+// first value, matching http.Header.Get. Repeated Connection fields are joined
+// into a comma-separated list unless r.Close overrides the header.
+//
 // When r.Header carries no Content-Type entry, the default Content-Type
 // fasthttp writes for requests (application/octet-stream) is disabled on req
 // via SetNoDefaultContentType, so the conversion does not add a header the
@@ -278,6 +282,15 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 			strings.EqualFold(k, fasthttp.HeaderTransferEncoding) ||
 			strings.EqualFold(k, fasthttp.HeaderTrailer) {
 			continue
+		}
+		if len(values) > 1 {
+			switch {
+			case strings.EqualFold(k, fasthttp.HeaderContentType), strings.EqualFold(k, fasthttp.HeaderUserAgent):
+				values = values[:1]
+			case strings.EqualFold(k, fasthttp.HeaderConnection):
+				req.Header.Set(k, strings.Join(values, ", "))
+				continue
+			}
 		}
 		for _, v := range values {
 			req.Header.Add(k, v)
