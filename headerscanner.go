@@ -203,12 +203,8 @@ func (s *headerScanner) nextFolded() bool {
 		return false
 	}
 
-	k, v := kv[:colon], kv[colon+1:]
-	for len(v) > 0 && (v[0] == ' ' || v[0] == '\t') {
-		v = v[1:]
-	}
-
-	s.key = k
+	s.key = kv[:colon]
+	v := trim(kv[colon+1:])
 	s.value = v
 	s.valueValid = true
 	for _, c := range skipCleanWords(v) {

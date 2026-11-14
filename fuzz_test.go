@@ -164,6 +164,7 @@ func FuzzURIParse(f *testing.F) {
 func FuzzHeaderScanner(f *testing.F) {
 	f.Add([]byte("Host: example.com\r\nUser-Agent: Go-http-client/1.1\r\nAccept-Encoding: gzip, deflate\r\n\r\n"))
 	f.Add([]byte("Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 27\r\n\r\nname=John+Doe&age=30"))
+	f.Add([]byte("X: value\r\n \r\n\r\n"))
 	f.Add([]byte(" 3 :\r\n\r\n"))
 	f.Add([]byte("0  :\r\n\r\n"))
 
@@ -179,6 +180,13 @@ func FuzzHeaderScanner(f *testing.F) {
 
 		tmp, herr := textproto.NewReader(bufio.NewReader(bytes.NewReader(data))).ReadMIMEHeader()
 		h := map[string][]string(tmp)
+
+		// ReadMIMEHeader leaves spaces from trailing empty continuation lines.
+		for _, values := range h {
+			for i, value := range values {
+				values[i] = strings.TrimRight(value, " ")
+			}
+		}
 
 		var s headerScanner
 		s.b = bytes.Clone(data) // The scanner unfolds continuation lines in place.
