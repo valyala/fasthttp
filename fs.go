@@ -280,9 +280,7 @@ func NewVHostPathRewriter(slashesCount int) PathRewriteFunc {
 		if len(path) == 0 {
 			path = strSlash
 		}
-		// On Windows ctx.Path() may keep a '..' segment, e.g. from `/a/..\../`.
-		// Return it unchanged so FS rejects it instead of letting the second
-		// normalization below remove the host segment.
+		// Leave parent segments for FS to reject before prepending the host.
 		if hasDotDotPathSegment(path) {
 			return path
 		}
@@ -1443,11 +1441,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	}
 
 	// Rewritten paths bypass ctx.Path()'s normalization, so they must be
-	// checked for '..' segments here. On Windows every path is checked
-	// regardless: ctx.Path() normalization only treats '/' as a separator,
-	// so backslash traversal such as `\..\` and `\../` survives it and
-	// filepath.FromSlash later turns it into a real parent-directory jump
-	// (https://github.com/valyala/fasthttp/issues/1691).
+	// checked for '..' segments here. On Windows also check normalized paths
+	// before handing them to a filesystem that accepts both separators.
+	// See https://github.com/valyala/fasthttp/issues/1691.
 	if h.pathRewrite != nil || filepath.Separator == '\\' {
 		if hasDotDotPathSegment(path) {
 			ctx.Logger().Printf("cannot serve path with '..' path segment due to security reasons: %q", path)

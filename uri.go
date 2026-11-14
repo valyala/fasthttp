@@ -718,14 +718,12 @@ func removeSegments(b, p []byte) []byte {
 }
 
 // removeParentSegments removes every occurrence of p from b together with the
-// path segment in front of it, and returns the result written over b. sep is
-// the separator left where that segment started; a zero sep keeps the byte
-// that is already there.
+// path segment in front of it, and returns the result written over b.
 //
 // Single pass for the same reason as removeSegments. Each parent lookup walks
 // back over a segment that the removal then drops, so the lookups add up to
 // one more pass over b.
-func removeParentSegments(b, p []byte, sep byte) []byte {
+func removeParentSegments(b, p []byte) []byte {
 	n := bytes.Index(b, p)
 	if n < 0 {
 		return b
@@ -737,9 +735,6 @@ func removeParentSegments(b, p []byte, sep byte) []byte {
 		w++
 		for w >= len(p) && b[w-1] == last && bytes.Equal(b[w-len(p):w], p) {
 			w = max(bytes.LastIndexByte(b[:w-len(p)], '/'), 0)
-			if sep != 0 {
-				b[w] = sep
-			}
 			w++
 		}
 	}
@@ -780,11 +775,15 @@ func normalizePath(dst, src []byte) []byte {
 // removeDotSegments removes the "." and ".." segments from path b and returns
 // the result written over b.
 func removeDotSegments(b []byte) []byte {
+	if filepath.Separator == '\\' && bytes.IndexByte(b, '\\') >= 0 {
+		return removeWindowsDotSegments(b)
+	}
+
 	// remove /./ parts
 	b = removeSegments(b, strSlashDotSlash)
 
 	// remove /foo/../ parts
-	b = removeParentSegments(b, strSlashDotDotSlash, '/')
+	b = removeParentSegments(b, strSlashDotDotSlash)
 
 	// remove trailing /foo/..
 	n := bytes.LastIndex(b, strSlashDotDot)
@@ -802,34 +801,46 @@ func removeDotSegments(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 
-	if filepath.Separator == '\\' {
-		// remove \.\ parts
-		b = removeSegments(b, strBackSlashDotBackSlash)
-
-		// remove /foo/..\ parts
-		b = removeParentSegments(b, strSlashDotDotBackSlash, 0)
-
-		// remove /foo\..\ parts
-		rooted := len(b) > 0 && b[0] == '/'
-		b = removeParentSegments(b, strBackSlashDotDotBackSlash, '\\')
-		if rooted {
-			// Collapsing a segment at the root can replace the URI's leading
-			// slash with a backslash. Keep the slash in the normalized path.
-			b[0] = '/'
-		}
-
-		// remove trailing \foo\..
-		n := bytes.LastIndex(b, strBackSlashDotDot)
-		if n >= 0 && n+len(strSlashDotDot) == len(b) {
-			nn := bytes.LastIndexByte(b[:n], '/')
-			if nn < 0 {
-				return append(b[:0], strSlash...)
-			}
-			b = b[:nn+1]
-		}
-	}
-
 	return b
+}
+
+// removeWindowsDotSegments resolves both kinds of separator in the same pass.
+// Keep the original separators between surviving segments.
+func removeWindowsDotSegments(b []byte) []byte {
+	isSeparator := func(c byte) bool { return c == '/' || c == '\\' }
+
+	// normalizePath provides a leading slash. Keep it even if a parent
+	// segment would otherwise walk above the root.
+	w := 1
+	for r := 1; r < len(b); {
+		end := r
+		for end < len(b) && !isSeparator(b[end]) {
+			end++
+		}
+		switch string(b[r:end]) {
+		case "..":
+			for w > 1 && isSeparator(b[w-1]) {
+				w--
+			}
+			for w > 1 && !isSeparator(b[w-1]) {
+				w--
+			}
+		case ".":
+			// Keep the separator already written before this segment.
+		default:
+			if end < len(b) {
+				end++
+			}
+			w += copy(b[w:], b[r:end])
+			r = end
+			continue
+		}
+		for end < len(b) && isSeparator(b[end]) {
+			end++
+		}
+		r = end
+	}
+	return b[:w]
 }
 
 // RequestURI returns RequestURI - i.e. URI without Scheme and Host.
