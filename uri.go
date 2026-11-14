@@ -847,6 +847,13 @@ func (u *URI) requestURIBytes(disablePathNormalizing bool) []byte {
 	} else {
 		dst = appendQuotedPath(u.requestURI[:0], u.Path())
 	}
+	u.requestURI = u.appendQueryString(dst)
+	return u.requestURI
+}
+
+// appendQueryString appends '?' and the query string to dst, with the changes
+// made through QueryArgs, if there is a query.
+func (u *URI) appendQueryString(dst []byte) []byte {
 	if u.parsedQueryArgs {
 		if u.queryArgs.Len() > 0 {
 			dst = append(dst, '?')
@@ -856,8 +863,7 @@ func (u *URI) requestURIBytes(disablePathNormalizing bool) []byte {
 		dst = append(dst, '?')
 		dst = append(dst, u.queryString...)
 	}
-	u.requestURI = dst
-	return u.requestURI
+	return dst
 }
 
 // LastPathSegment returns the last part of uri path after '/'.
