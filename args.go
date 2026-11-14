@@ -246,7 +246,7 @@ func (a *Args) AddBytesKNoValue(key []byte) {
 	a.args = appendArg(a.args, b2s(key), "", argsNoValue)
 }
 
-// Set sets 'key=value' argument.
+// Set replaces all values for key with the given value.
 func (a *Args) Set(key, value string) {
 	a.args = setArg(a.args, key, value, argsHasValue)
 }
@@ -420,16 +420,19 @@ func copyArgs(dst, src []argsKV) []argsKV {
 }
 
 func delAllArgsStable(args []argsKV, key string) []argsKV {
-	for i, n := 0, len(args); i < n; i++ {
-		kv := &args[i]
-		if key == string(kv.key) {
-			tmp := *kv
-			copy(args[i:], args[i+1:])
-			n--
-			i--
-			args[n] = tmp
-			args = args[:n]
+	for i := range args {
+		if key != string(args[i].key) {
+			continue
 		}
+		write := i
+		for read := i + 1; read < len(args); read++ {
+			if key != string(args[read].key) {
+				// Keep the removed entries' buffers available for reuse.
+				args[write], args[read] = args[read], args[write]
+				write++
+			}
+		}
+		return args[:write]
 	}
 	return args
 }
@@ -461,7 +464,8 @@ func setArg(h []argsKV, key, value string, noValue bool) []argsKV {
 				kv.value = append(kv.value[:0], value...)
 			}
 			kv.noValue = noValue
-			return h
+			tail := delAllArgsStable(h[i+1:], b2s(kv.key))
+			return h[:i+1+len(tail)]
 		}
 	}
 	return appendArg(h, key, value, noValue)
