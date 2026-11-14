@@ -283,13 +283,13 @@ func (d *testInflater) message(t *testing.T, payload []byte) []byte {
 	return got
 }
 
-func deflateServer(t *testing.T, readContext, writeContext bool, threshold int) (*Conn, *rawPeer) {
+func deflateServer(t *testing.T, threshold int) (*Conn, *rawPeer) {
 	t.Helper()
-	return newRawServer(t, connConfig{deflate: newDeflateConfig(readContext, writeContext, 0, threshold)})
+	return newRawServer(t, connConfig{deflate: newDeflateConfig(true, true, 0, threshold)})
 }
 
 func TestDeflateWriteWire(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	ctx := t.Context()
 	inf := &testInflater{}
 	msgs := [][]byte{[]byte(strings.Repeat("hello ", 100)), []byte(strings.Repeat("hello ", 100)), bytes.Repeat([]byte{7}, 70000)}
@@ -350,7 +350,7 @@ func TestDeflateWriteWire(t *testing.T) {
 }
 
 func TestDeflateReadWire(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	ctx := t.Context()
 	def := newTestDeflater()
 	msgs := [][]byte{[]byte(strings.Repeat("hello ", 100)), []byte(strings.Repeat("hello ", 100)), []byte("ünïcödé"), bytes.Repeat([]byte{9}, 100000)}
@@ -467,7 +467,7 @@ func TestDeflateNoContextAndWindow(t *testing.T) {
 }
 
 func TestDeflateThreshold(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 2000)
+	c, peer := deflateServer(t, 2000)
 	ctx := t.Context()
 	for _, n := range []int{1999, 2000} {
 		if err := c.Write(ctx, MessageBinary, make([]byte, n)); err != nil {
@@ -610,7 +610,7 @@ func TestDeflatePooledWriterIsolation(t *testing.T) {
 	// connection must not inherit its dictionary.
 	ctx := t.Context()
 	msg := []byte(strings.Repeat("shared history ", 300))
-	withCtx, peer1 := deflateServer(t, true, true, 0)
+	withCtx, peer1 := deflateServer(t, 0)
 	for range 3 {
 		if err := withCtx.Write(ctx, MessageText, msg); err != nil {
 			t.Fatal(err)
@@ -629,7 +629,7 @@ func TestDeflatePooledWriterIsolation(t *testing.T) {
 
 func TestDeflateUnsentWriteKeepsContext(t *testing.T) {
 	// A compressed fragment that cannot be sent must not enter the dictionary.
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	msg := []byte(strings.Repeat("context ", 1000))
 	wctx, cancel := context.WithCancel(t.Context())
 	w, err := c.Writer(wctx, MessageText)
@@ -668,7 +668,7 @@ func finalBlocks(parts ...string) []byte {
 }
 
 func TestDeflateFinalBlocksInMessage(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	ctx := t.Context()
 	z := finalBlocks("hello ", "world")
 	peer.send(frame(opText|rsv1, true, z))
@@ -708,7 +708,7 @@ func TestDeflateFinalBlocksInMessage(t *testing.T) {
 }
 
 func TestDeflateDiscardUsesCurrentContext(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	def := newTestDeflater()
 	msg := []byte(strings.Repeat("abandoned ", 1000))
 	z := def.message(t, msg)
@@ -733,7 +733,7 @@ func TestDeflateDiscardUsesCurrentContext(t *testing.T) {
 }
 
 func TestDeflateTransportEOF(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	z := newTestDeflater().message(t, bytes.Repeat([]byte("data"), 5000))
 	f := frame(opText|rsv1, true, z)
 	peer.send(f[:len(f)/2])
