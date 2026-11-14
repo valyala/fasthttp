@@ -279,6 +279,9 @@ type PathRewriteFunc func(ctx *RequestCtx) []byte
 func NewVHostPathRewriter(slashesCount int) PathRewriteFunc {
 	return func(ctx *RequestCtx) []byte {
 		path := stripLeadingSlashes(ctx.Path(), slashesCount)
+		if len(path) == 0 {
+			path = strSlash
+		}
 		// Leave parent segments for FS to reject before prepending the host.
 		if hasDotDotPathSegment(path) {
 			return path
@@ -1747,12 +1750,28 @@ func (h *fsHandler) openAndCacheFile(
 		}
 	}
 
-	ff, err := h.openFSFile(filePath, mustCompress, fileEncoding)
-	if mustCompress && err == errNoCreatePermission {
-		ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
-			"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
-		mustCompress = false
+	var ff *fsFile
+	var err error
+	if hasTrailingSlash && len(path) > 1 {
+		// A slash after a name requires a directory, even if a compressed
+		// copy of a regular file exists. FS.Root itself may be a file.
+		var info fs.FileInfo
+		info, err = fs.Stat(h.filesystem, filePath)
+		if err == nil {
+			if info.IsDir() {
+				err = errDirIndexRequired
+			} else {
+				err = fs.ErrNotExist
+			}
+		}
+	} else {
 		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+		if mustCompress && err == errNoCreatePermission {
+			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
+				"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
+			mustCompress = false
+			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+		}
 	}
 
 	if errors.Is(err, errDirIndexRequired) {
