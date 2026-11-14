@@ -124,11 +124,7 @@ func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 // The response body size is not limited. Use a Client or HostClient with a
 // positive MaxResponseBodySize when requesting untrusted servers.
 func DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
-	if defaultClient.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
-	}
-	_, _, err := doRequestFollowRedirects(req, resp, req.URI().String(), maxRedirectsCount, &defaultClient)
-	return err
+	return defaultClient.DoRedirects(req, resp, maxRedirectsCount)
 }
 
 // Get returns the status code and body of url.
@@ -522,11 +518,7 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
-	if c.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
-	}
-	_, _, err := doRequestFollowRedirects(req, resp, req.URI().String(), maxRedirectsCount, c)
-	return err
+	return doRedirects(req, resp, maxRedirectsCount, c, c.DisablePathNormalizing)
 }
 
 // Do performs the given http request and fills the given http response.
@@ -549,10 +541,10 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
-	uri := req.URI()
-	if uri == nil {
-		return ErrorInvalidURI
+	if err := req.parseURI(); err != nil {
+		return err
 	}
+	uri := &req.uri
 
 	host := uri.Host()
 
@@ -1332,6 +1324,17 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	return statusCode, body, err
 }
 
+func doRedirects(req *Request, resp *Response, maxRedirectsCount int, c clientDoer, disablePathNormalizing bool) error {
+	if err := req.parseURI(); err != nil {
+		return err
+	}
+	if disablePathNormalizing {
+		req.uri.DisablePathNormalizing = true
+	}
+	_, _, err := doRequestFollowRedirects(req, resp, req.uri.String(), maxRedirectsCount, c)
+	return err
+}
+
 func doRequestFollowRedirects(
 	req *Request, resp *Response, url string, maxRedirectsCount int, c clientDoer,
 ) (statusCode int, body []byte, err error) {
@@ -1694,11 +1697,7 @@ func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *HostClient) DoRedirects(req *Request, resp *Response, maxRedirectsCount int) error {
-	if c.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
-	}
-	_, _, err := doRequestFollowRedirects(req, resp, req.URI().String(), maxRedirectsCount, c)
-	return err
+	return doRedirects(req, resp, maxRedirectsCount, c, c.DisablePathNormalizing)
 }
 
 // Do performs the given http request and sets the corresponding response.
@@ -1844,7 +1843,10 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	req.secureErrorLogMessage = c.SecureErrorLogMessage
 	req.Header.secureErrorLogMessage = c.SecureErrorLogMessage
 
-	if c.IsTLS != req.URI().isHTTPS() {
+	if err := req.parseURI(); err != nil {
+		return false, err
+	}
+	if c.IsTLS != req.uri.isHTTPS() {
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 
@@ -1866,7 +1868,7 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 	resp.StreamBody = customStreamBody
 	resp.Header.noDefaultContentType = customNoDefaultContentType
 
-	req.URI().DisablePathNormalizing = c.DisablePathNormalizing
+	req.uri.DisablePathNormalizing = c.DisablePathNormalizing
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
@@ -2973,12 +2975,15 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		return err
 	}
 
+	if c.DisablePathNormalizing {
+		if err := req.parseURI(); err != nil {
+			return err
+		}
+		req.uri.DisablePathNormalizing = true
+	}
+
 	chs := c.acquirePipelineConnChannels()
 	defer c.releasePipelineConnChannels(chs)
-
-	if c.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
-	}
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {
@@ -3121,12 +3126,15 @@ func (c *pipelineConnClient) Do(req *Request, resp *Response) error {
 		return err
 	}
 
+	if c.DisablePathNormalizing {
+		if err := req.parseURI(); err != nil {
+			return err
+		}
+		req.uri.DisablePathNormalizing = true
+	}
+
 	chs := c.acquirePipelineConnChannels()
 	defer c.releasePipelineConnChannels(chs)
-
-	if c.DisablePathNormalizing {
-		req.URI().DisablePathNormalizing = true
-	}
 
 	userAgentOld := req.Header.UserAgent()
 	if len(userAgentOld) == 0 {

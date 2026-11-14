@@ -3846,6 +3846,37 @@ func TestClientStreamingRedirectsReuseConnection(t *testing.T) {
 	}
 }
 
+func TestClientsRejectInvalidURI(t *testing.T) {
+	t.Parallel()
+
+	dial := func(string) (net.Conn, error) {
+		return nil, errors.New("unexpected dial")
+	}
+	hc := &HostClient{Addr: "localhost:80", Dial: dial}
+	c := &Client{Dial: dial}
+	pc := &PipelineClient{Addr: "localhost:80", Dial: dial, DisablePathNormalizing: true}
+	for name, do := range map[string]func(*Request, *Response) error{
+		"client":   c.Do,
+		"host":     hc.Do,
+		"pipeline": pc.Do,
+		"pipeline deadline": func(req *Request, resp *Response) error {
+			return pc.DoDeadline(req, resp, time.Now().Add(time.Second))
+		},
+		"redirects": func(req *Request, resp *Response) error {
+			return hc.DoRedirects(req, resp, 1)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var req Request
+			req.Header.SetHost("shop.example:x")
+			req.SetRequestURI("/public/page?id=1")
+			if err := do(&req, nil); err == nil || !strings.Contains(err.Error(), "invalid port") {
+				t.Fatalf("expected invalid port error, got %v", err)
+			}
+		})
+	}
+}
+
 func TestClientDoRedirectsAllowsNilResponse(t *testing.T) {
 	t.Parallel()
 

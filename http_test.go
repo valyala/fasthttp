@@ -2831,6 +2831,28 @@ func TestRequestWriteRequestURINoHost(t *testing.T) {
 	}
 }
 
+func TestRequestWriteAfterInvalidHost(t *testing.T) {
+	t.Parallel()
+
+	const target = "/public/page?id=1"
+	var req Request
+	req.Header.SetHost("shop.example:x")
+	req.SetRequestURI(target)
+	req.URI()
+
+	var buf bytes.Buffer
+	bw := bufio.NewWriter(&buf)
+	if err := req.Write(bw); err == nil {
+		t.Error("expected invalid host error")
+	}
+	if bw.Buffered() != 0 || buf.Len() != 0 {
+		t.Error("wrote part of an invalid request")
+	}
+	if got := string(req.RequestURI()); got != target {
+		t.Fatalf("request target changed to %q", got)
+	}
+}
+
 func TestRequestWriteEmptyPathWithQuery(t *testing.T) {
 	t.Parallel()
 

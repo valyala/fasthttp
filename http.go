@@ -229,7 +229,7 @@ func (req *Request) SetRequestURIBytes(requestURI []byte) {
 // return an empty value. Use req.URI().RequestURI() when the parsed URI and its
 // host must remain available.
 func (req *Request) RequestURI() []byte {
-	if req.parsedURI {
+	if req.parsedURI && req.uriParseErr == nil {
 		requestURI := req.requestURIFromURI()
 		req.SetRequestURIBytes(requestURI)
 	}
@@ -2065,8 +2065,10 @@ func (req *Request) Write(w *bufio.Writer) error {
 // write reports whether it started writing the request to w.
 func (req *Request) write(w *bufio.Writer) (bool, error) {
 	if len(req.Header.Host()) == 0 || req.parsedURI {
-		uri := req.URI()
-		host := uri.Host()
+		if err := req.parseURI(); err != nil {
+			return false, err
+		}
+		host := req.uri.Host()
 		if len(req.Header.Host()) == 0 {
 			if len(host) == 0 {
 				return false, errRequestHostRequired
