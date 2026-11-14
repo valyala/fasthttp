@@ -3204,3 +3204,49 @@ func TestFSSmallFileWriteToDataAndEOFPreservesWriterError(t *testing.T) {
 		t.Errorf("original writer error was replaced: %v", err)
 	}
 }
+
+// dataAndEOFFile can also stand in for an io.PipeReader: ReadAt returns data
+// together with io.EOF, and the destination writer may return io.EOF after a
+// partial write (CloseWithError(io.EOF)). Only the EOF originating from ReadAt
+// may be cleared; an EOF returned by the writer must reach the caller so a
+// partially copied file is not reported as a clean success.
+func TestFSSmallFileWriteToKeepsWriterEOF(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.endPos = ff.contentLength
+
+	w := &errorWriter{n: 4, err: io.EOF}
+	n, err := r.WriteTo(w)
+	if n != 4 {
+		t.Errorf("wrote %d bytes, want 4", n)
+	}
+	if err != io.EOF {
+		t.Errorf("got %v, want io.EOF from the destination writer", err)
+	}
+	if r.startPos != 4 {
+		t.Errorf("startPos = %d, want 4", r.startPos)
+	}
+}
+
+// A clean full copy must still report success: the io.EOF coming from ReadAt
+// is not an error to the caller.
+func TestFSSmallFileWriteToClearsReadAtEOF(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.endPos = ff.contentLength
+
+	var buf bytes.Buffer
+	n, err := r.WriteTo(&buf)
+	if err != nil {
+		t.Errorf("got %v, want nil after a complete copy", err)
+	}
+	if n != 10 || buf.String() != "small file" {
+		t.Errorf("wrote %d bytes %q, want 10 bytes %q", n, buf.String(), "small file")
+	}
+}

@@ -989,21 +989,26 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 		if !ok {
 			return 0, errors.New("must implement readat")
 		}
-		n, err = ra.ReadAt(buf, int64(curPos))
+		n, readErr := ra.ReadAt(buf, int64(curPos))
 		nw, errw := w.Write(buf[:n])
 		curPos += nw
 		if errw == nil && nw != n {
 			errw = io.ErrShortWrite
 		}
+		// ReadAt may return data together with io.EOF; that EOF only marks the
+		// end of the source and must not be reported to the caller. An error
+		// returned by the destination writer takes precedence, including an
+		// io.EOF from a pipe writer after a partial copy.
+		if readErr == io.EOF {
+			readErr = nil
+		}
+		err = readErr
 		if errw != nil {
 			err = errw
 		}
 	}
 	copyBufPool.Put(bufv)
 
-	if err == io.EOF {
-		err = nil
-	}
 	written := curPos - r.startPos
 	r.startPos = curPos
 	return int64(written), err
