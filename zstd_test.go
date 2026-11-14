@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -425,13 +426,13 @@ func TestWriteZstdLevelMultiBlock(t *testing.T) {
 	w := struct{ io.Writer }{&dst}
 	rng := rand.New(rand.NewPCG(1, 2))
 	for level := CompressZstdBestSpeed; level <= CompressZstdBestCompression; level++ {
-		t.Run(fmt.Sprint(level), func(t *testing.T) {
+		t.Run(strconv.Itoa(level), func(t *testing.T) {
 			for _, size := range []int{128<<10 - 1, 128 << 10, 128<<10 + 1, 1<<20 + 1} {
 				body := make([]byte, size)
 				for i := range body {
 					body[i] = byte(rng.Uint32())
 				}
-				for iteration := 0; iteration < 3; iteration++ {
+				for iteration := range 3 {
 					dst.Reset()
 					body[0] = byte(iteration)
 					n, err := WriteZstdLevel(w, body, level)
