@@ -55,9 +55,26 @@ type argsKV struct {
 	noValue bool
 }
 
+const (
+	maxRetainedArgSlots = 256
+	maxRetainedArgBytes = 64 << 10
+)
+
 // Reset clears query args.
 func (a *Args) Reset() {
-	a.args = a.args[:0]
+	if cap(a.args) <= maxRetainedArgSlots {
+		// Deleted and previously used slots still own their buffers.
+		retained := cap(a.buf)
+		for _, kv := range a.args[:cap(a.args)] {
+			retained += cap(kv.key) + cap(kv.value)
+		}
+		if retained <= maxRetainedArgBytes {
+			a.args = a.args[:0]
+			return
+		}
+	}
+	a.args = nil
+	a.buf = nil
 }
 
 // CopyTo copies all args to dst.

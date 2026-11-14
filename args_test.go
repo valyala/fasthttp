@@ -353,6 +353,30 @@ func TestArgsUint(t *testing.T) {
 	}
 }
 
+func TestPostArgsResetBoundsRetainedBuffers(t *testing.T) {
+	t.Parallel()
+
+	const maxRetained = 64 << 10
+	value := strings.Repeat("x", maxRetained/4)
+	var req Request
+	for i := 7; i >= 0; i-- {
+		req.Header.SetContentType("application/x-www-form-urlencoded")
+		req.SetBodyString(strings.Repeat("a&", i) + "comment=" + value)
+		if got := req.PostArgs().Peek("comment"); string(got) != value {
+			t.Fatalf("incorrect field at position %d", i)
+		}
+		req.Reset()
+	}
+	args := &req.postArgs
+	retained := cap(args.buf)
+	for _, kv := range args.args[:cap(args.args)] {
+		retained += cap(kv.key) + cap(kv.value)
+	}
+	if retained > maxRetained {
+		t.Fatalf("retained %d bytes across requests, want at most %d", retained, maxRetained)
+	}
+}
+
 func TestArgsCopyTo(t *testing.T) {
 	t.Parallel()
 
