@@ -391,7 +391,7 @@ func TestIssue1808(t *testing.T) {
 		"WithTabs: \t v1 \t\r\n" + // "v1"
 		"WithTabs-Start: \t \t v1 \r\n" + // "v1"
 		"WithTabs-End: v1 \t \t\t\t\r\n" + // "v1"
-		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n" + // "v1 \t; v2 \t; v3"
+		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n \r\n\t\r\n" + // "v1 \t; v2 \t; v3"
 		"\r\n"
 
 	resHeader := new(ResponseHeader)
@@ -416,7 +416,7 @@ func TestIssue1808(t *testing.T) {
 		"WithTabs: \t v1 \t\r\n" + // "v1"
 		"WithTabs-Start: \t \t v1 \r\n" + // "v1"
 		"WithTabs-End: v1 \t \t\t\t\r\n" + // "v1"
-		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n" + // "v1 \t; v2 \t; v3"
+		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n \r\n\t\r\n" + // "v1 \t; v2 \t; v3"
 		"\r\n"
 
 	reqHeader := new(RequestHeader)
