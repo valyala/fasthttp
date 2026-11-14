@@ -5442,26 +5442,40 @@ func TestRequestHeaderAllInOrderBareLFTerminator(t *testing.T) {
 }
 
 func TestRequestHeaderTrickledParseStaysLinear(t *testing.T) {
+	var h RequestHeader
+	testTrickledParseStaysLinear(t, "GET / HTTP/1.1\r\nHost: x\r\n", h.Read)
+}
+
+func TestTrailerTrickledParseStaysLinear(t *testing.T) {
+	var h RequestHeader
+	testTrickledParseStaysLinear(t, "", func(r *bufio.Reader) error {
+		h.Reset()
+		return h.ReadTrailer(r)
+	})
+}
+
+func testTrickledParseStaysLinear(t *testing.T, prefix string, read func(*bufio.Reader) error) {
+	t.Helper()
+
 	// A peer delivering the block a byte at a time must not make every
 	// retry rescan the whole block for the terminator. Compare the cost of
 	// two sizes rather than absolute time.
 	wire := func(target int) []byte {
 		w := make([]byte, 0, target+64)
-		w = append(w, "GET / HTTP/1.1\r\nHost: x\r\n"...)
+		w = append(w, prefix...)
 		for len(w) < target {
 			w = append(w, "X-Header-Name: some ordinary header value here\r\n"...)
 		}
 		return append(w, "\r\n"...)
 	}
 	parse := func(b []byte, iterations int) time.Duration {
-		var h RequestHeader
 		dr := &dripTestReader{data: b}
 		br := bufio.NewReaderSize(dr, 65536)
 		start := time.Now()
 		for range iterations {
 			dr.pos = 0
 			br.Reset(dr)
-			if err := h.Read(br); err != nil {
+			if err := read(br); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		}
