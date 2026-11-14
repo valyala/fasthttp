@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestAllocationServeConn(t *testing.T) {
@@ -71,6 +72,44 @@ func TestAllocationClient(t *testing.T) {
 
 		ReleaseRequest(req)
 		ReleaseResponse(res)
+	})
+
+	if n != 0 {
+		t.Fatalf("expected 0 allocations, got %f", n)
+	}
+}
+
+func TestAllocationClient_FreshDial(t *testing.T) {
+	rw := &readWriter{}
+	rw.r.Grow(1024)
+	rw.w.Grow(1024)
+
+	c := &HostClient{
+		Addr: "example.com:80",
+		DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
+			rw.r.Reset()
+			rw.w.Reset()
+			rw.r.WriteString("HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 2\r\n\r\nok")
+			return rw, nil
+		},
+	}
+
+	req := AcquireRequest()
+	res := AcquireResponse()
+	defer ReleaseRequest(req)
+	defer ReleaseResponse(res)
+
+	req.SetRequestURI("http://example.com/")
+	req.Header.SetMethod(MethodGet)
+
+	n := testing.AllocsPerRun(100, func() {
+		req.Reset()
+		res.Reset()
+		req.SetRequestURI("http://example.com/")
+		req.Header.SetMethod(MethodGet)
+		if err := c.DoTimeout(req, res, 100*time.Millisecond); err != nil {
+			t.Fatal(err)
+		}
 	})
 
 	if n != 0 {

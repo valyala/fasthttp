@@ -6400,18 +6400,28 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 		conn.Close()
 	}()
 
+	dialDuration := 50 * time.Millisecond
 	client := Client{
+		Dial: func(addr string) (net.Conn, error) {
+			time.Sleep(dialDuration)
+			return net.Dial("tcp", addr)
+		},
 		WriteTimeout: 100 * time.Millisecond,
 		ReadTimeout:  100 * time.Millisecond,
 	}
 
+	start := time.Now()
 	_, _, err = client.Get(nil, "https://"+addr)
+	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatal("tlsClientHandshake completed successfully")
 	}
 
 	if err != ErrTLSHandshakeTimeout {
 		t.Errorf("resulting error not a timeout: %v\nType %T: %#v", err, err, err)
+	}
+	if elapsed >= 140*time.Millisecond {
+		t.Fatalf("expected TLS handshake timeout to include dial time and take ~100ms, took %v", elapsed)
 	}
 }
 
@@ -8530,6 +8540,7 @@ func TestHostClientQueuedReplacementConn_PropagatesContext(t *testing.T) {
 
 	ln := fasthttputil.NewInmemoryListener()
 	serverStopCh := make(chan struct{})
+	req1CanFinish := make(chan struct{})
 	go func() {
 		defer close(serverStopCh)
 		for {
@@ -8541,7 +8552,9 @@ func TestHostClientQueuedReplacementConn_PropagatesContext(t *testing.T) {
 				defer c.Close()
 				s := &Server{
 					Handler: func(ctx *RequestCtx) {
-						time.Sleep(20 * time.Millisecond)
+						if string(ctx.Path()) == "/test1" {
+							<-req1CanFinish
+						}
 						ctx.SetStatusCode(StatusOK)
 						ctx.SetBodyString("ok")
 					},
@@ -8555,44 +8568,135 @@ func TestHostClientQueuedReplacementConn_PropagatesContext(t *testing.T) {
 		<-serverStopCh
 	}()
 
-	dialCtxObserved := atomic.Bool{}
+	var dialCount atomic.Int32
+	replacementDialStarted := make(chan struct{})
+	replacementDialCanceled := make(chan struct{})
+	replacementHadDeadline := atomic.Bool{}
+
 	client := &HostClient{
 		Addr:               "inmemory",
 		MaxConns:           1,
 		MaxConnWaitTimeout: 1 * time.Second,
 		DialContext: func(ctx context.Context, addr string) (net.Conn, error) {
-			if ctx != nil && ctx != context.Background() {
-				dialCtxObserved.Store(true)
+			count := dialCount.Add(1)
+			if count == 1 {
+				return ln.Dial()
+			}
+			if count == 2 {
+				if dl, ok := ctx.Deadline(); ok && !dl.IsZero() {
+					replacementHadDeadline.Store(true)
+				}
+				close(replacementDialStarted)
+				<-ctx.Done()
+				close(replacementDialCanceled)
+				return nil, ctx.Err()
 			}
 			return ln.Dial()
 		},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-
-	var req1, req2 Request
-	var resp1, resp2 Response
+	var req1 Request
+	var resp1 Response
 	req1.SetRequestURI("http://inmemory/test1")
-	req2.SetRequestURI("http://inmemory/test2")
+	req1.SetConnectionClose()
 
-	errCh := make(chan error, 2)
+	errCh1 := make(chan error, 1)
 	go func() {
-		errCh <- client.DoContext(ctx, &req1, &resp1)
-	}()
-	go func() {
-		time.Sleep(5 * time.Millisecond)
-		errCh <- client.DoContext(ctx, &req2, &resp2)
+		errCh1 <- client.Do(&req1, &resp1)
 	}()
 
-	for range 2 {
-		if err := <-errCh; err != nil {
-			t.Fatalf("unexpected error: %v", err)
+	// Wait until req1 starts and holds the only connection slot.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		client.connsLock.Lock()
+		count := client.connsCount
+		client.connsLock.Unlock()
+		if count == 1 {
+			break
 		}
+		if time.Now().After(deadline) {
+			t.Fatal("req1 never acquired connection")
+		}
+		time.Sleep(time.Millisecond)
 	}
 
-	if !dialCtxObserved.Load() {
-		t.Fatalf("expected DialContext to receive non-empty request context")
+	var req2 Request
+	var resp2 Response
+	req2.SetRequestURI("http://inmemory/test2")
+
+	errCh2 := make(chan error, 1)
+	go func() {
+		// Use a 100ms request timeout as reported in the review findings.
+		errCh2 <- client.DoTimeout(&req2, &resp2, 100*time.Millisecond)
+	}()
+
+	// Wait until req2 is queued as a waiter.
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		client.connsLock.Lock()
+		queued := client.connsWait != nil && client.connsWait.len() > 0
+		client.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("waiter for req2 was not queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Release req1 so its connection closes, forcing a replacement dial for the queued waiter.
+	close(req1CanFinish)
+	if err := <-errCh1; err != nil {
+		t.Fatalf("req1 failed: %v", err)
+	}
+
+	// Wait until the replacement dial starts.
+	select {
+	case <-replacementDialStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("replacement dial did not start")
+	}
+
+	if !replacementHadDeadline.Load() {
+		t.Fatal("expected replacement DialContext to receive a context with deadline")
+	}
+
+	// Wait for req2 to time out and give up.
+	select {
+	case err := <-errCh2:
+		if !errors.Is(err, ErrTimeout) && !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected timeout error for req2, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("req2 did not time out")
+	}
+
+	// The replacement dial must be cancelled when the waiter gives up.
+	select {
+	case <-replacementDialCanceled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("replacement dial was not cancelled when waiter gave up")
+	}
+
+	// The freed slot must be released so next requests can use it.
+	deadline = time.Now().Add(3 * time.Second)
+	for client.ConnsCount() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("connsCount was not released: %d", client.ConnsCount())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Next request must be able to use the freed connection slot.
+	var req3 Request
+	var resp3 Response
+	req3.SetRequestURI("http://inmemory/test3")
+	if err := client.Do(&req3, &resp3); err != nil {
+		t.Fatalf("req3 failed to use freed slot: %v", err)
+	}
+	if resp3.StatusCode() != StatusOK {
+		t.Fatalf("expected status 200, got %d", resp3.StatusCode())
 	}
 }
 

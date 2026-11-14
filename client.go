@@ -550,29 +550,7 @@ func (c *Client) DoContext(ctx context.Context, req *Request, resp *Response) er
 		return err
 	}
 
-	uri := req.URI()
-	if uri == nil {
-		return ErrorInvalidURI
-	}
-
-	host := uri.Host()
-
-	if bytes.ContainsRune(host, ',') {
-		return fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
-	}
-
-	isTLS := false
-	if uri.isHTTPS() {
-		isTLS = true
-	} else if !uri.isHTTP() {
-		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
-	}
-
-	c.mOnce.Do(func() {
-		c.m = make(map[string]*HostClient)
-		c.ms = make(map[string]*HostClient)
-	})
-	hc, err := c.hostClient(host, isTLS)
+	hc, err := c.getHostClient(req)
 	if err != nil {
 		return err
 	}
@@ -629,25 +607,7 @@ func (c *Client) DoRedirects(req *Request, resp *Response, maxRedirectsCount int
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
 func (c *Client) Do(req *Request, resp *Response) error {
-	uri := req.URI()
-	if uri == nil {
-		return ErrorInvalidURI
-	}
-
-	host := uri.Host()
-
-	if bytes.ContainsRune(host, ',') {
-		return fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
-	}
-
-	isTLS := false
-	if uri.isHTTPS() {
-		isTLS = true
-	} else if !uri.isHTTP() {
-		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
-	}
-
-	hc, err := c.hostClient(host, isTLS)
+	hc, err := c.getHostClient(req)
 	if err != nil {
 		return err
 	}
@@ -655,6 +615,28 @@ func (c *Client) Do(req *Request, resp *Response) error {
 	atomic.AddInt32(&hc.pendingClientRequests, 1)
 	defer atomic.AddInt32(&hc.pendingClientRequests, -1)
 	return hc.Do(req, resp)
+}
+
+func (c *Client) getHostClient(req *Request) (*HostClient, error) {
+	uri := req.URI()
+	if uri == nil {
+		return nil, ErrorInvalidURI
+	}
+
+	host := uri.Host()
+
+	if bytes.ContainsRune(host, ',') {
+		return nil, fmt.Errorf("invalid host %q: use a host client for multiple hosts", host)
+	}
+
+	isTLS := false
+	if uri.isHTTPS() {
+		isTLS = true
+	} else if !uri.isHTTP() {
+		return nil, fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
+	}
+
+	return c.hostClient(host, isTLS)
 }
 
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
@@ -2201,9 +2183,12 @@ func (c *HostClient) acquireConn(
 		tc := AcquireTimer(timeout)
 		defer ReleaseTimer(tc)
 
+		start := time.Now()
 		w := &wantConn{
-			ready: make(chan struct{}, 1),
-			ctx:   ctx,
+			ready:   make(chan struct{}, 1),
+			ctx:     ctx,
+			start:   start,
+			timeout: reqTimeout,
 		}
 		defer func() {
 			if err != nil {
@@ -2300,7 +2285,37 @@ func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
 }
 
 func (c *HostClient) dialConnFor(w *wantConn) {
-	conn, err := c.dialHostHardContext(w.ctx, 0)
+	w.mu.Lock()
+	if !w.waitingLocked() {
+		w.mu.Unlock()
+		c.decConnsCount()
+		return
+	}
+
+	budget, hasBudget := w.remainingBudget()
+	if hasBudget && budget <= 0 {
+		w.mu.Unlock()
+		w.tryDeliver(nil, ErrTimeout)
+		c.decConnsCount()
+		return
+	}
+
+	ctx := w.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	dialCtx, dialCancel := context.WithCancel(ctx)
+	w.dialCancel = dialCancel
+	w.mu.Unlock()
+
+	defer func() {
+		w.mu.Lock()
+		w.dialCancel = nil
+		w.mu.Unlock()
+		dialCancel()
+	}()
+
+	conn, err := c.dialHostHardContext(dialCtx, budget)
 	if err != nil {
 		w.tryDeliver(nil, err)
 		c.decConnsCount()
@@ -2773,21 +2788,20 @@ func dialAddrContext(
 	if isTLS && !isTLSAlready {
 		var deadline time.Time
 		if writeTimeout > 0 {
-			deadline = time.Now().Add(writeTimeout)
+			deadline = start.Add(writeTimeout)
 		}
 		if dialTimeout > 0 {
-			remaining := dialTimeout - time.Since(start)
-			if remaining <= 0 {
-				_ = conn.Close()
-				if ctxErr := contextErr(ctx); ctxErr != nil {
-					return nil, ctxErr
-				}
-				return nil, ErrTLSHandshakeTimeout
-			}
-			timeoutDeadline := time.Now().Add(remaining)
+			timeoutDeadline := start.Add(dialTimeout)
 			if deadline.IsZero() || timeoutDeadline.Before(deadline) {
 				deadline = timeoutDeadline
 			}
+		}
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			_ = conn.Close()
+			if ctxErr := contextErr(ctx); ctxErr != nil {
+				return nil, ctxErr
+			}
+			return nil, ErrTLSHandshakeTimeout
 		}
 		if writeTimeout == 0 && dialTimeout <= 0 && (ctx == nil || ctx.Done() == nil) {
 			return tls.Client(conn, tlsConfig), nil
@@ -2803,44 +2817,48 @@ func callDialFunc(
 	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialContext DialFuncWithContext,
 	dialDualStack, isTLS bool, timeout time.Duration,
 ) (net.Conn, error) {
-	dialCtx := ctx
-	if dialCtx == nil {
-		dialCtx = context.Background()
-	}
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		if dl, ok := dialCtx.Deadline(); ok {
-			timeoutDeadline := time.Now().Add(timeout)
-			if timeoutDeadline.Before(dl) {
-				dialCtx, cancel = context.WithDeadline(dialCtx, timeoutDeadline)
-				defer cancel()
-			}
-		} else {
-			dialCtx, cancel = context.WithTimeout(dialCtx, timeout)
-			defer cancel()
-		}
-	}
-
-	if dialContext != nil {
-		return dialContext(dialCtx, addr)
-	}
 	if dialWithTimeout != nil {
 		return dialWithTimeout(addr, timeout)
 	}
 	if dial != nil {
 		return dial(addr)
 	}
+
+	if dialContext != nil {
+		dialCtx := ctx
+		if dialCtx == nil {
+			dialCtx = context.Background()
+		}
+		if timeout > 0 {
+			var cancel context.CancelFunc
+			if dl, ok := dialCtx.Deadline(); ok {
+				timeoutDeadline := time.Now().Add(timeout)
+				if timeoutDeadline.Before(dl) {
+					dialCtx, cancel = context.WithDeadline(dialCtx, timeoutDeadline)
+					defer cancel()
+				}
+			} else {
+				dialCtx, cancel = context.WithTimeout(dialCtx, timeout)
+				defer cancel()
+			}
+		}
+		return dialContext(dialCtx, addr)
+	}
+
 	addr = AddMissingPort(addr, isTLS)
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if timeout > 0 {
 		if dialDualStack {
-			return defaultDialer.DialDualStackContextTimeout(dialCtx, addr, timeout)
+			return defaultDialer.DialDualStackContextTimeout(ctx, addr, timeout)
 		}
-		return defaultDialer.DialContextTimeout(dialCtx, addr, timeout)
+		return defaultDialer.DialContextTimeout(ctx, addr, timeout)
 	}
 	if dialDualStack {
-		return defaultDialer.DialDualStackContext(dialCtx, addr)
+		return defaultDialer.DialDualStackContext(ctx, addr)
 	}
-	return defaultDialer.DialContext(dialCtx, addr)
+	return defaultDialer.DialContext(ctx, addr)
 }
 
 // AddMissingPort adds a port to a host if it is missing.
@@ -2881,11 +2899,14 @@ func AddMissingPort(addr string, isTLS bool) string {
 //
 // Inspired by net/http/transport.go.
 type wantConn struct {
-	err   error
-	ready chan struct{}
-	conn  *clientConn
-	ctx   context.Context //nolint:containedctx
-	mu    sync.Mutex      // protects conn, err, close(ready)
+	err        error
+	ready      chan struct{}
+	conn       *clientConn
+	ctx        context.Context //nolint:containedctx
+	dialCancel context.CancelFunc
+	start      time.Time
+	timeout    time.Duration
+	mu         sync.Mutex // protects conn, err, dialCancel, close(ready)
 }
 
 // waiting reports whether w is still waiting for an answer (connection or error).
@@ -2896,6 +2917,34 @@ func (w *wantConn) waiting() bool {
 	default:
 		return true
 	}
+}
+
+func (w *wantConn) waitingLocked() bool {
+	select {
+	case <-w.ready:
+		return false
+	default:
+		return true
+	}
+}
+
+func (w *wantConn) remainingBudget() (time.Duration, bool) {
+	var budget time.Duration
+	hasBudget := false
+	if w.timeout > 0 {
+		budget = w.timeout - time.Since(w.start)
+		hasBudget = true
+	}
+	if w.ctx != nil {
+		if dl, ok := w.ctx.Deadline(); ok {
+			ctxBudget := time.Until(dl)
+			if !hasBudget || ctxBudget < budget {
+				budget = ctxBudget
+			}
+			hasBudget = true
+		}
+	}
+	return budget, hasBudget
 }
 
 // tryDeliver attempts to deliver conn, err to w and reports whether it succeeded.
@@ -2921,6 +2970,10 @@ func (w *wantConn) cancel(c *HostClient, err error) {
 	w.mu.Lock()
 	if w.conn == nil && w.err == nil {
 		close(w.ready) // catch misbehavior in future delivery
+	}
+	if w.dialCancel != nil {
+		w.dialCancel()
+		w.dialCancel = nil
 	}
 
 	conn := w.conn
