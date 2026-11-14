@@ -80,8 +80,10 @@ var (
 //
 // fasthttp skips the upgrade while shutting down with Server.CloseOnShutdown.
 // The Server's timeouts and Shutdown do not apply to the upgraded connection;
-// use the options here instead. fasthttp closes the TCP connection when
-// handler returns, or as soon as the WebSocket connection is closed with
+// use the options here instead. The connection's TCP or Unix socket is closed
+// with the WebSocket connection. A connection that hides its socket, as with
+// Server.MaxConnsPerIP without TLS or a net.Conn of the caller's, is closed by
+// fasthttp when handler returns, or with the WebSocket connection under
 // Server.KeepHijackedConns.
 func Accept(ctx *fasthttp.RequestCtx, opts *AcceptOptions, handler func(*Conn)) error {
 	if opts == nil {

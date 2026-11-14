@@ -997,7 +997,7 @@ func (c *deadlineConn) deadline() (time.Time, int) {
 // later call, and after stopWatch nothing is armed or aborted any more.
 func TestProbeWatchStaleAbortIgnored(t *testing.T) {
 	nc := &deadlineConn{}
-	w := ctxWatch{nc: nc}
+	w := &newConn(nc, nc, false, "", connConfig{}).rdWatch
 	old, cancelOld := context.WithCancel(t.Context())
 	defer cancelOld()
 	if _, err := w.begin(old, time.Time{}); err != nil {
@@ -1009,18 +1009,18 @@ func TestProbeWatchStaleAbortIgnored(t *testing.T) {
 	if _, err := w.begin(t.Context(), next); err != nil {
 		t.Fatal(err)
 	}
-	w.abort(oldGen) // The old context's callback runs late.
+	w.abort(oldGen, context.Canceled) // The old context's callback runs late.
 	if d, _ := nc.deadline(); !d.Equal(next) {
 		t.Fatalf("a stale abort changed the deadline to %v", d)
 	}
-	w.abort(w.gen)
+	w.abort(w.gen, context.Canceled)
 	if d, _ := nc.deadline(); !d.Equal(aLongTimeAgo) {
 		t.Fatalf("the current abort left the deadline at %v", d)
 	}
 	w.end()
 	w.stopWatch()
 	_, n := nc.deadline()
-	w.abort(w.gen)
+	w.abort(w.gen, context.Canceled)
 	if _, err := w.begin(t.Context(), time.Time{}); !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("begin after stop: %v", err)
 	}
@@ -1629,6 +1629,51 @@ func TestProbeVectoredWriteReleasesPayload(t *testing.T) {
 	}
 	if c.iovBuf[1] != nil {
 		t.Fatal("a failed vectored write retained the payload")
+	}
+}
+
+// Read sizes its buffer for the frame once enough of it has arrived, and for
+// all the frames of a fragmented message.
+func TestReadBufferFitsMessage(t *testing.T) {
+	pc := fasthttputil.NewPipeConns()
+	srv, cli := newConn(pc.Conn1(), pc.Conn1(), false, "", connConfig{}), newConn(pc.Conn2(), pc.Conn2(), true, "", connConfig{})
+	t.Cleanup(func() { _, _ = srv.CloseNow(), cli.CloseNow() })
+	for _, tc := range []struct{ frames, want int }{{1, 128 << 10}, {2, 256 << 10}} {
+		done := make(chan error, 1)
+		go func() {
+			w, err := cli.Writer(context.Background(), MessageBinary)
+			for range tc.frames {
+				if err == nil {
+					_, err = w.Write(make([]byte, 70000))
+				}
+			}
+			if err == nil {
+				err = w.Close()
+			}
+			done <- err
+		}()
+		_, p, err := srv.Read(t.Context())
+		if err != nil || len(p) != tc.frames*70000 || <-done != nil {
+			t.Fatalf("%d frames: read %d, %v", tc.frames, len(p), err)
+		}
+		if cap(srv.readBuf.b) != tc.want {
+			t.Fatalf("%d frames of 70000 bytes read into a buffer of %d, want %d", tc.frames, cap(srv.readBuf.b), tc.want)
+		}
+	}
+}
+
+func TestReadBufSize(t *testing.T) {
+	const limit = 1 << 30
+	for _, tc := range []struct{ have, need, want, size int }{
+		{64 << 10, 64<<10 + 1, 70000, 70000},                     // The frame's end is known.
+		{64 << 10, 128 << 10, 4 << 20, 256 << 10},                // No more than four times what arrived.
+		{4096, 4097, 100, 4097},                                  // At least what is needed now.
+		{maxPooled, maxPooled + 1, maxPooled + 1, 2 * maxPooled}, // Geometric past the pool.
+		{limit / 2, limit/2 + 1, limit/2 + 1, limit},             // Up to the limit.
+	} {
+		if got := readBufSize(tc.have, tc.need, tc.want, limit); got != tc.size {
+			t.Fatalf("readBufSize(%d, %d, %d) = %d, want %d", tc.have, tc.need, tc.want, got, tc.size)
+		}
 	}
 }
 

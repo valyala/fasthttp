@@ -4,14 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"iter"
 	"net"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -446,6 +450,50 @@ func TestContextCancel(t *testing.T) {
 	}
 }
 
+// refusingConn reports its reads and refuses the deadline a cancellation sets.
+type refusingConn struct {
+	net.Conn
+
+	reading chan struct{}
+}
+
+func (c refusingConn) Read(p []byte) (int, error) {
+	signal(c.reading)
+	return c.Conn.Read(p)
+}
+
+func (c refusingConn) SetReadDeadline(d time.Time) error {
+	if d.Equal(aLongTimeAgo) {
+		return errors.New("deadline refused")
+	}
+	return c.Conn.SetReadDeadline(d)
+}
+
+// A cancelled call whose transport refuses the deadline is interrupted by
+// closing the connection, which reports the context's error.
+func TestCancelClosesConnWhenDeadlineRefused(t *testing.T) {
+	srv, _ := tcpPair(t)
+	reading := make(chan struct{}, 1)
+	nc := hijackLike{Conn: refusingConn{Conn: srv, reading: reading}}
+	c := newConn(nc, nc, false, "", connConfig{})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := c.Read(ctx)
+		done <- err
+	}()
+	<-reading
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) || !errors.Is(context.Cause(c.Context()), context.Canceled) {
+			t.Fatalf("read: %v, cause: %v", err, context.Cause(c.Context()))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the read was not interrupted")
+	}
+}
+
 func TestCloseNowUnblocksRead(t *testing.T) {
 	ts := startServer(t, nil, echo)
 	c := ts.dial(t, nil)
@@ -460,6 +508,22 @@ func TestCloseNowUnblocksRead(t *testing.T) {
 	}
 	if err := <-errCh; !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("read: %v", err)
+	}
+}
+
+// Closing the connection closes the socket at once, although the handler has
+// not returned.
+func TestCloseNowClosesSocketBeforeHandlerReturns(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	ts := startServer(t, nil, func(c *Conn) {
+		_ = c.CloseNow()
+		<-release
+	})
+	c := ts.dial(t, nil)
+	_ = c.nc.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := c.nc.Read(make([]byte, 1)); err == nil || isTimeout(err) {
+		t.Fatalf("the socket is still open: %v", err)
 	}
 }
 
@@ -633,6 +697,140 @@ func TestDialRejected(t *testing.T) {
 		}
 		if tc.status != 0 && resp.StatusCode() != tc.status {
 			t.Fatalf("%s: status %d", tc.url, resp.StatusCode())
+		}
+	}
+}
+
+// User information in the URL, as URI.Parse finds it, is sent decoded as Basic
+// credentials, empty ones included, unless the caller's headers carry an
+// Authorization.
+func TestDialURLCredentials(t *testing.T) {
+	basic := func(s string) string { return "Basic " + base64.StdEncoding.EncodeToString([]byte(s)) }
+	for _, tc := range []struct{ url, header, want string }{
+		{"ws://user:pass@HOST/", "", basic("user:pass")},
+		{"ws://u%40x:p%25%2Fss@HOST/", "", basic("u@x:p%/ss")},
+		{"ws://user@HOST/", "", basic("user:")},
+		{"ws://:pass@HOST/", "", basic(":pass")},
+		{"ws://@HOST/", "", basic(":")},
+		{"ws://:@HOST/", "", basic(":")},
+		{"//user:pass@HOST/", "", basic("user:pass")},
+		{"ws://user:pass@HOST/", "Bearer token", "Bearer token"},
+		{"ws://HOST/", "", ""},
+		{"ws://HOST/a@b?c=d@e", "", ""},
+		{"//HOST/a://b@c", "", ""},
+	} {
+		addr, request := rawServer(t, probeAccept)
+		var h fasthttp.RequestHeader
+		if tc.header != "" {
+			h.Set(fasthttp.HeaderAuthorization, tc.header)
+		}
+		c, err := Dial(t.Context(), strings.Replace(tc.url, "HOST", addr, 1), &DialOptions{Header: &h})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.url, err)
+		}
+		_ = c.CloseNow()
+		head := <-request
+		if tc.want == "" {
+			if strings.Contains(strings.ToLower(head), "authorization:") {
+				t.Fatalf("%s: unexpected credentials:\n%s", tc.url, head)
+			}
+		} else if strings.Count(head, "Authorization: ") != 1 || !strings.Contains(head, "Authorization: "+tc.want+"\r\n") {
+			t.Fatalf("%s: want Authorization %q:\n%s", tc.url, tc.want, head)
+		}
+	}
+}
+
+// An invalid escape in the URL's user information fails before the dialer runs.
+func TestDialURLCredentialsBadEscape(t *testing.T) {
+	for userinfo, want := range map[string]url.EscapeError{"user:p%zz": "%zz", "u%:pass": "%", "user:pass%2": "%2"} {
+		dial := func(string) (net.Conn, error) {
+			t.Errorf("%q: the dialer was called", userinfo)
+			return nil, net.ErrClosed
+		}
+		if _, err := Dial(t.Context(), "ws://"+userinfo+"@example.com/", &DialOptions{Dial: dial}); !errors.Is(err, want) {
+			t.Fatalf("%q: %v", userinfo, err)
+		}
+	}
+}
+
+// closeCountConn exposes its socket as fasthttp's hijacked conn does and
+// counts its own Close calls.
+type closeCountConn struct {
+	net.Conn
+
+	closed *atomic.Int32
+}
+
+func (c closeCountConn) UnsafeConn() net.Conn { return c.Conn }
+
+func (c closeCountConn) Close() error {
+	c.closed.Add(1)
+	return c.Conn.Close()
+}
+
+// A conn from DialOptions.Dial is closed through its own Close, whatever else
+// it implements, after a failed handshake as well as by CloseNow.
+func TestDialClosesDialedConn(t *testing.T) {
+	ts := startServer(t, nil, echo)
+	var closed atomic.Int32
+	opts := &DialOptions{Dial: func(string) (net.Conn, error) {
+		nc, err := net.Dial("tcp", ts.addr)
+		return closeCountConn{Conn: nc, closed: &closed}, err
+	}}
+	c, err := Dial(t.Context(), "ws://example.com/", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _ = c.CloseNow(); closed.Load() != 1 {
+		t.Fatalf("CloseNow closed the dialed conn %d times", closed.Load())
+	}
+	opts.Header = &fasthttp.RequestHeader{}
+	opts.Header.Set(fasthttp.HeaderOrigin, "https://other.example")
+	if _, err := Dial(t.Context(), "ws://example.com/", opts); err == nil || closed.Load() != 2 {
+		t.Fatalf("refused handshake: %v, the dialed conn was closed %d times", err, closed.Load()-1)
+	}
+}
+
+// The conn given to Server.ServeConn is closed once: by fasthttp after the
+// handler, or with the Conn when the server keeps hijacked conns.
+func TestServeConnClosedOnce(t *testing.T) {
+	var h fasthttp.ResponseHeader
+	_ = h.Header() // fasthttp's date goroutine must not start inside the bubble.
+	for _, keep := range []bool{false, true} {
+		for _, closeNow := range []bool{false, true} {
+			synctest.Test(t, func(t *testing.T) {
+				srv, cli := net.Pipe()
+				defer srv.Close()
+				defer cli.Close()
+				var closed atomic.Int32
+				dialed, inHandler := make(chan struct{}), make(chan int32, 1)
+				s := &fasthttp.Server{KeepHijackedConns: keep, Handler: func(ctx *fasthttp.RequestCtx) {
+					_ = Accept(ctx, nil, func(c *Conn) {
+						<-dialed
+						if closeNow {
+							_ = c.CloseNow()
+						}
+						inHandler <- closed.Load()
+					})
+				}}
+				go func() { _ = s.ServeConn(closeCountConn{Conn: srv, closed: &closed}) }()
+				opts := &DialOptions{Dial: func(string) (net.Conn, error) { return cli, nil }}
+				if _, err := Dial(t.Context(), "ws://example.com/", opts); err != nil {
+					t.Fatal(err)
+				}
+				close(dialed)
+				want := int32(0)
+				if keep && closeNow {
+					want = 1
+				}
+				if n := <-inHandler; n != want {
+					t.Fatalf("keep=%v closeNow=%v: %d Close calls in the handler, want %d", keep, closeNow, n, want)
+				}
+				synctest.Wait() // The handler has returned and fasthttp is done with the conn.
+				if n := closed.Load(); n != 1 {
+					t.Fatalf("keep=%v closeNow=%v: the served conn was closed %d times", keep, closeNow, n)
+				}
+			})
 		}
 	}
 }

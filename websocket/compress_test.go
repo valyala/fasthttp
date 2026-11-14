@@ -11,6 +11,7 @@ import (
 
 	"github.com/klauspost/compress/flate"
 	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 func TestDeflateNegotiate(t *testing.T) {
@@ -489,7 +490,7 @@ func TestDeflateIncompressibleAllocs(t *testing.T) {
 		ts := startServer(t, &AcceptOptions{CompressionMode: mode}, echo)
 		c := ts.dial(t, &DialOptions{CompressionMode: mode})
 		ctx := c.Context()
-		for _, n := range []int{1<<12 - maxFrameHeader, 1<<16 - maxFrameHeader} {
+		for _, n := range []int{1<<12 - maxFrameHeader, 1<<16 - maxFrameHeader, 1 << 20} {
 			msgs := make([][]byte, 4) // Distinct, so that context takeover finds nothing to refer to.
 			for i := range msgs {
 				msgs[i] = make([]byte, n)
@@ -512,6 +513,61 @@ func TestDeflateIncompressibleAllocs(t *testing.T) {
 				t.Fatalf("mode %d, %d bytes: %v allocations per round trip", mode, n, a)
 			}
 		}
+	}
+}
+
+// capConn records the capacity behind each write.
+type capConn struct {
+	nopConn
+
+	caps []int
+}
+
+func (c *capConn) Write(p []byte) (int, error) {
+	c.caps = append(c.caps, cap(p))
+	return len(p), nil
+}
+
+// A compressed frame goes out in a buffer that follows its size: the first
+// block for input that compresses, and what the whole of it needs for input
+// that does not, past the pool as well.
+func TestDeflateOutputBuffer(t *testing.T) {
+	const large = maxPooled + 1<<20
+	text, incompressible := bytes.Repeat([]byte("compressible "), 1<<20/13), make([]byte, large)
+	noise(incompressible)
+	for _, tc := range []struct {
+		p         []byte
+		low, high int
+	}{{text, 0, readChunkSize}, {incompressible[:1<<20], 1 << 20, 2 << 20}, {incompressible, large, large + large/32}} {
+		nc := &capConn{}
+		c := newConn(nc, nc, false, "", connConfig{deflate: newDeflateConfig(true, true, 0, 0)})
+		if err := c.Write(t.Context(), MessageBinary, tc.p); err != nil {
+			t.Fatal(err)
+		}
+		if len(nc.caps) != 1 || nc.caps[0] <= tc.low || nc.caps[0] > tc.high {
+			t.Fatalf("buffers of %v, want one over %d and up to %d", nc.caps, tc.low, tc.high)
+		}
+	}
+}
+
+// A compressed message that ends exactly where its buffer does, or where
+// MaxMessageSize does, is read without a larger buffer.
+func TestDeflateReadBufferFits(t *testing.T) {
+	for _, tc := range []struct{ limit, n int }{{0, 4096}, {1 << 16, 1 << 16}, {0, DefaultMaxMessageSize}} {
+		pc := fasthttputil.NewPipeConns()
+		cfg := connConfig{maxMessageSize: tc.limit, deflate: newDeflateConfig(true, true, 0, 0)}
+		srv, cli := newConn(pc.Conn1(), pc.Conn1(), false, "", cfg), newConn(pc.Conn2(), pc.Conn2(), true, "", cfg)
+		msg := bytes.Repeat([]byte("compressible "), tc.n/13+1)[:tc.n]
+		done := make(chan error, 1)
+		go func() { done <- cli.Write(context.Background(), MessageText, msg) }()
+		_, p, err := srv.Read(t.Context())
+		if err != nil || !bytes.Equal(p, msg) || <-done != nil {
+			t.Fatalf("%d bytes: read %d, %v", tc.n, len(p), err)
+		}
+		if cap(srv.readBuf.b) != tc.n {
+			t.Fatalf("%d bytes read into a buffer of %d", tc.n, cap(srv.readBuf.b))
+		}
+		_, _ = srv.CloseNow(), cli.CloseNow()
 	}
 }
 

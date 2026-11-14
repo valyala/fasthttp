@@ -134,6 +134,45 @@ func BenchmarkWrite(b *testing.B) {
 	}
 }
 
+// BenchmarkWriteDeflate compresses messages for a peer that discards them.
+// Noise does not compress; past the pool its output has no pooled buffer.
+func BenchmarkWriteDeflate(b *testing.B) {
+	for _, kind := range []string{"text", "noise"} {
+		for _, n := range []int{64 << 10, 1 << 20, maxPooled + maxPooled/4} {
+			b.Run(kind+"/"+strconv.Itoa(n), func(b *testing.B) {
+				pattern := []byte("{\"event\":\"tick\",\"price\":12345} ")
+				msg := bytes.Repeat(pattern, n/len(pattern)+1)[:n]
+				if kind == "noise" {
+					noise(msg)
+				}
+				nc := &fuzzConn{}
+				c := newConn(nc, nc, false, "", connConfig{deflate: newDeflateConfig(true, true, 0, 0)})
+				ctx := context.Background()
+				b.SetBytes(int64(n))
+				b.ReportAllocs()
+				for b.Loop() {
+					if err := c.Write(ctx, MessageBinary, msg); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
+
+// noise fills p with bytes that do not compress.
+func noise(p []byte) {
+	x := uint64(88172645463325252)
+	for i := range p {
+		if i%8 == 0 {
+			x ^= x << 13
+			x ^= x >> 7
+			x ^= x << 17
+		}
+		p[i] = byte(x >> (i % 8 * 8))
+	}
+}
+
 // repeatReader serves the same bytes over and over.
 type repeatReader struct {
 	b   []byte

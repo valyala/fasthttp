@@ -49,6 +49,7 @@ type buffer struct{ b []byte }
 const (
 	minBufBits = 12 // 4 KiB
 	bufClasses = 15 // Up to 64 MiB.
+	maxPooled  = 1 << (minBufBits + bufClasses - 1)
 )
 
 // bufPools holds buffers in power-of-two size classes.
@@ -103,7 +104,7 @@ type Conn struct {
 
 	r  io.Reader
 	nc net.Conn
-	vw io.Writer // nc unwrapped to a transport with vectored writes, or nil.
+	vw net.Conn // The TCP or Unix socket under an accepted nc, or nil: written with writev, closed first.
 
 	readBuf *buffer
 	iov     net.Buffers // Over iovBuf; WriteTo consumes it.
@@ -163,8 +164,8 @@ func newConn(nc net.Conn, r io.Reader, client bool, subprotocol string, cfg conn
 		c.cfg.maxMessageSize = DefaultMaxMessageSize
 	}
 	c.ctx, c.cancel = context.WithCancelCause(context.Background())
-	c.rdWatch.nc = nc
-	c.wrWatch.nc = nc
+	c.rdWatch.c = c
+	c.wrWatch.c = c
 	c.wrWatch.write = true
 	if !client {
 		c.vw = vectorWriter(nc)
@@ -182,7 +183,7 @@ func unwrapHijacked(nc net.Conn) net.Conn {
 
 // vectorWriter returns the TCP or Unix socket under nc, whose writev sends a
 // header and payload at once, or nil.
-func vectorWriter(nc net.Conn) io.Writer {
+func vectorWriter(nc net.Conn) net.Conn {
 	switch raw := unwrapHijacked(nc); raw.(type) {
 	case *net.TCPConn, *net.UnixConn:
 		return raw
@@ -222,9 +223,13 @@ func (c *Conn) closeWith(err error) {
 	c.closeMu.Unlock()
 	c.rdWatch.stopWatch()
 	c.wrWatch.stopWatch()
-	// A hijacked conn's Close is a no-op until the handler returns; the
-	// deadline unblocks reads and writes meanwhile.
+	// A hijacked conn's Close is a no-op until the handler returns: the
+	// deadline unblocks reads and writes meanwhile, and a socket in sight is
+	// closed at once.
 	_ = c.nc.SetDeadline(aLongTimeAgo)
+	if c.vw != nil {
+		_ = c.vw.Close()
+	}
 	closeTransport(c.nc)
 	c.ncMu.Unlock()
 }
@@ -412,11 +417,11 @@ func (c *Conn) gotPong(p []byte) {
 	c.pongMu.Unlock()
 }
 
-// ctxWatch applies a call's deadline to one direction of nc and aborts the
-// call when its context is cancelled. The AfterFunc is reused while calls
-// share a Done channel.
+// ctxWatch applies a call's deadline to one direction of the transport and
+// aborts the call when its context is cancelled. The AfterFunc is reused while
+// calls share a Done channel.
 type ctxWatch struct {
-	nc     net.Conn
+	c      *Conn
 	done   <-chan struct{}
 	stop   func() bool
 	last   time.Time // The deadline set last, once set is true.
@@ -435,9 +440,9 @@ func (w *ctxWatch) setDeadline(t time.Time) error {
 	}
 	w.last, w.set = t, true
 	if w.write {
-		return w.nc.SetWriteDeadline(t)
+		return w.c.nc.SetWriteDeadline(t)
 	}
-	return w.nc.SetReadDeadline(t)
+	return w.c.nc.SetReadDeadline(t)
 }
 
 // begin arms the watch for a call bounded by ctx and deadline and returns the
@@ -459,7 +464,7 @@ func (w *ctxWatch) begin(ctx context.Context, deadline time.Time) (time.Time, er
 		w.gen++
 		if done != nil {
 			gen := w.gen
-			w.stop = context.AfterFunc(ctx, func() { w.abort(gen) })
+			w.stop = context.AfterFunc(ctx, func() { w.abort(gen, ctx.Err()) })
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -469,12 +474,15 @@ func (w *ctxWatch) begin(ctx context.Context, deadline time.Time) (time.Time, er
 	return deadline, w.setDeadline(deadline)
 }
 
-func (w *ctxWatch) abort(gen uint64) {
+// abort interrupts the call in progress through its deadline; a transport
+// that refuses it loses the connection, closed with err.
+func (w *ctxWatch) abort(gen uint64, err error) {
 	w.mu.Lock()
-	if w.active && gen == w.gen && w.setDeadline(aLongTimeAgo) != nil {
-		_ = w.nc.Close()
-	}
+	refused := w.active && gen == w.gen && w.setDeadline(aLongTimeAgo) != nil
 	w.mu.Unlock()
+	if refused {
+		w.c.closeWith(err)
+	}
 }
 
 func (w *ctxWatch) end() {

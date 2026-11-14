@@ -190,27 +190,24 @@ func isHex(c byte) bool {
 }
 
 // basicAuth returns the Authorization value for the URL's user information,
-// or "" when the URL has none. Empty user information still counts.
+// or "" when the URL has none. Empty user information still counts. uri holds
+// it decoded; rawURL tells whether it is there and well escaped.
 func basicAuth(rawURL string, uri *fasthttp.URI) (string, error) {
-	authority := rawURL
-	if _, rest, ok := strings.Cut(rawURL, "://"); ok {
-		authority = rest
-	}
+	_, authority, _ := strings.Cut(rawURL, "//")
 	if i := strings.IndexAny(authority, "/?"); i >= 0 {
 		authority = authority[:i]
 	}
-	if !strings.Contains(authority, "@") {
+	i := strings.LastIndexByte(authority, '@')
+	if i < 0 {
 		return "", nil
 	}
-	u, err := url.PathUnescape(string(uri.Username()))
-	if err != nil {
-		return "", err
+	user, pass, _ := strings.Cut(authority[:i], ":")
+	for _, s := range []string{user, pass} {
+		if _, err := url.PathUnescape(s); err != nil {
+			return "", err
+		}
 	}
-	p, err := url.PathUnescape(string(uri.Password()))
-	if err != nil {
-		return "", err
-	}
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte(u+":"+p)), nil
+	return "Basic " + base64.StdEncoding.EncodeToString(slices.Concat(uri.Username(), []byte(":"), uri.Password())), nil
 }
 
 func handshake(ctx context.Context, nc net.Conn, uri *fasthttp.URI, auth string, opts *DialOptions) (*Conn, error) {
