@@ -562,6 +562,16 @@ func TestParseUfloatError(t *testing.T) {
 	// negative number
 	testParseUfloatError(t, "-1")
 	testParseUfloatError(t, "-Inf")
+	testParseUfloatError(t, "-0")
+
+	// values strconv.ParseFloat accepts that are not unsigned decimal floats
+	testParseUfloatError(t, "Inf")
+	testParseUfloatError(t, "+Inf")
+	testParseUfloatError(t, "infinity")
+	testParseUfloatError(t, "NaN")
+	testParseUfloatError(t, "+1.5")
+	testParseUfloatError(t, "0x1p-2")
+	testParseUfloatError(t, "0x_1p4")
 }
 
 func testParseUfloatError(t *testing.T, s string) {
