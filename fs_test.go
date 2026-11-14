@@ -112,12 +112,6 @@ func TestNewVHostPathRewriterEndToEnd(t *testing.T) {
 	}
 	server := &Server{Handler: fs.NewRequestHandler(), Logger: TestLogger{t}}
 
-	// Windows normalization leaves `/../root-private.txt`, which FS must reject.
-	backslashStatus, backslashBody := StatusNotFound, "Cannot open requested path"
-	if runtime.GOOS == "windows" {
-		backslashStatus, backslashBody = StatusInternalServerError, "Internal Server Error"
-	}
-
 	for _, tc := range []struct {
 		name       string
 		host       string
@@ -132,7 +126,7 @@ func TestNewVHostPathRewriterEndToEnd(t *testing.T) {
 		{"encoded dot host", "%252e", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"encoded parent path", "example.com", "/%252e%252e/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"nested encoded parent path", "example.com", "/safe/%252e%252e/%252e%252e/root-private.txt", StatusNotFound, "Cannot open requested path"},
-		{"backslash parent path", "example.com", "/a/..%5c../root-private.txt", backslashStatus, backslashBody},
+		{"backslash parent path", "example.com", "/a/..%5c../root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"literal encoded name", "example.com", "/%252e%252e/literal-name.txt", StatusOK, "LITERAL-NAME-MARKER"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
