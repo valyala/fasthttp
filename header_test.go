@@ -5241,18 +5241,34 @@ func TestRequestHeaderAllInOrderFolded(t *testing.T) {
 
 func TestRequestHeaderTrickledParseStaysLinear(t *testing.T) {
 	var h RequestHeader
-	testTrickledParseStaysLinear(t, "GET / HTTP/1.1\r\nHost: x\r\n", h.Read)
+	testTrickledParseStaysLinear(t, "GET / HTTP/1.1\r\nHost: x\r\n", false, h.Read)
+}
+
+func TestTrickledHeadersWithLeadingEmptyLines(t *testing.T) {
+	var req RequestHeader
+	var resp ResponseHeader
+	for _, tc := range []struct {
+		name, prefix string
+		read         func(*bufio.Reader) error
+	}{
+		{"request", "GET / HTTP/1.1\r\nHost: x\r\n", req.Read},
+		{"response", "HTTP/1.1 200 OK\r\n", resp.Read},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testTrickledParseStaysLinear(t, tc.prefix, true, tc.read)
+		})
+	}
 }
 
 func TestTrailerTrickledParseStaysLinear(t *testing.T) {
 	var h RequestHeader
-	testTrickledParseStaysLinear(t, "", func(r *bufio.Reader) error {
+	testTrickledParseStaysLinear(t, "", false, func(r *bufio.Reader) error {
 		h.Reset()
 		return h.ReadTrailer(r)
 	})
 }
 
-func testTrickledParseStaysLinear(t *testing.T, prefix string, read func(*bufio.Reader) error) {
+func testTrickledParseStaysLinear(t *testing.T, prefix string, leadingEmptyLines bool, read func(*bufio.Reader) error) {
 	t.Helper()
 
 	// A peer delivering the block a byte at a time must not make every
@@ -5260,6 +5276,10 @@ func testTrickledParseStaysLinear(t *testing.T, prefix string, read func(*bufio.
 	// two sizes rather than absolute time.
 	wire := func(target int) []byte {
 		w := make([]byte, 0, target+64)
+		if leadingEmptyLines {
+			w = append(w, strings.Repeat("\n", target/2)...)
+			w = append(w, "\r\n\r\n"...)
+		}
 		w = append(w, prefix...)
 		for len(w) < target {
 			w = append(w, "X-Header-Name: some ordinary header value here\r\n"...)

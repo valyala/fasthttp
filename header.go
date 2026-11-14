@@ -58,6 +58,22 @@ func emptyHeaderBlock(b []byte) bool {
 	return len(b) >= 2 && b[0] == '\r' && b[1] == '\n'
 }
 
+// skipLeadingEmptyLines advances past complete blank lines ahead of the
+// start line. They count against the buffer limit but cannot end the block.
+func skipLeadingEmptyLines(b []byte, offset int) int {
+	for offset < len(b) {
+		switch {
+		case b[offset] == '\n':
+			offset++
+		case emptyHeaderBlock(b[offset:]):
+			offset += 2
+		default:
+			return offset
+		}
+	}
+	return offset
+}
+
 // blockTerminated reports whether b holds the CRLFCRLF ending the header
 // block, searching only what earlier retries have not seen.
 func (h *header) blockTerminated(b []byte) bool {
@@ -2899,10 +2915,11 @@ func (h *ResponseHeader) Cookie(cookie *Cookie) bool {
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *ResponseHeader) Read(r *bufio.Reader) error {
+	var leading int
 	n := 1
 	h.terminatorSearched = 0
 	for {
-		err := h.tryRead(r, n)
+		err := h.tryRead(r, n, &leading)
 		if err == nil {
 			return nil
 		}
@@ -2914,7 +2931,7 @@ func (h *ResponseHeader) Read(r *bufio.Reader) error {
 	}
 }
 
-func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
+func (h *ResponseHeader) tryRead(r *bufio.Reader, n int, leading *int) error {
 	h.resetSkipNormalize()
 	b, err := r.Peek(n)
 	if len(b) == 0 {
@@ -2942,15 +2959,20 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 		return fmt.Errorf("error when reading response headers: %w", err)
 	}
 	b = mustPeekBuffered(r)
-	if n > 1 && !h.blockTerminated(b) {
+	block := b
+	if n > 1 && (b[0] == '\r' || b[0] == '\n') {
+		*leading = skipLeadingEmptyLines(b, *leading)
+		block = b[*leading:]
+	}
+	if n > 1 && !h.blockTerminated(block) {
 		// A retry reparses the whole block, so it waits for the terminator;
 		// the status line is still checked as soon as it is complete, and an
 		// empty block is complete at its CRLF.
-		m, errParse := h.parseFirstLine(b)
+		m, errParse := h.parseFirstLine(block)
 		if errParse != nil {
 			return headerError("response", err, errParse, b, h.secureErrorLogMessage)
 		}
-		if !emptyHeaderBlock(b[m:]) {
+		if !emptyHeaderBlock(block[m:]) {
 			return headerError("response", err, ErrNeedMore, b, h.secureErrorLogMessage)
 		}
 	}
@@ -3067,10 +3089,11 @@ func (h *RequestHeader) Read(r *bufio.Reader) error {
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (h *RequestHeader) readLoop(r *bufio.Reader, waitForMore bool) error {
+	var leading int
 	n := 1
 	h.terminatorSearched = 0
 	for {
-		err := h.tryRead(r, n)
+		err := h.tryRead(r, n, &leading)
 		if err == nil {
 			return nil
 		}
@@ -3082,7 +3105,7 @@ func (h *RequestHeader) readLoop(r *bufio.Reader, waitForMore bool) error {
 	}
 }
 
-func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
+func (h *RequestHeader) tryRead(r *bufio.Reader, n int, leading *int) error {
 	h.resetSkipNormalize()
 	if r.Buffered() >= n {
 		headersLen, errParse := h.parse(mustPeekBuffered(r))
@@ -3121,15 +3144,20 @@ func (h *RequestHeader) tryRead(r *bufio.Reader, n int) error {
 		return fmt.Errorf("error when reading request headers: %w", err)
 	}
 	b = mustPeekBuffered(r)
-	if n > 1 && !h.blockTerminated(b) {
+	block := b
+	if n > 1 && (b[0] == '\r' || b[0] == '\n') {
+		*leading = skipLeadingEmptyLines(b, *leading)
+		block = b[*leading:]
+	}
+	if n > 1 && !h.blockTerminated(block) {
 		// A retry reparses the whole block, so it waits for the terminator;
 		// the request line is still checked as soon as it is complete, and an
 		// empty block is complete at its CRLF.
-		m, errParse := h.parseFirstLine(b)
+		m, errParse := h.parseFirstLine(block)
 		if errParse != nil {
 			return headerError("request", err, errParse, b, h.secureErrorLogMessage)
 		}
-		if !emptyHeaderBlock(b[m:]) {
+		if !emptyHeaderBlock(block[m:]) {
 			return headerError("request", err, ErrNeedMore, b, h.secureErrorLogMessage)
 		}
 	}
