@@ -1518,7 +1518,6 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	mustCompress := false
 	fileCacheKind := defaultCacheKind
 	fileEncoding := ""
 	var byteRange []byte
@@ -1530,15 +1529,12 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	if len(byteRange) == 0 && h.compress {
 		switch {
 		case h.compressBrotli && ctx.Request.Header.HasAcceptEncodingBytes(strBr):
-			mustCompress = true
 			fileCacheKind = brotliCacheKind
 			fileEncoding = "br"
 		case h.compressZstd && ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
-			mustCompress = true
 			fileCacheKind = zstdCacheKind
 			fileEncoding = "zstd"
 		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
-			mustCompress = true
 			fileCacheKind = gzipCacheKind
 			fileEncoding = "gzip"
 		}
@@ -1569,43 +1565,27 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, cacheKey)
 	if !ok {
 		filePath := h.pathToFilePath(path, hasTrailingSlash)
-
+		var status int
 		var err error
-		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
-		if mustCompress && err == errNoCreatePermission {
-			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
-				"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
-			mustCompress = false
-			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
-		}
-
-		if errors.Is(err, errDirIndexRequired) {
-			if !clientSlash {
-				redirectToDir(ctx, uriSchemeHost, uriPath, uriQuery)
-				return
-			}
-			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
-			if err != nil {
-				ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
-				ctx.Error("Directory index is forbidden", StatusForbidden)
-				return
-			}
-		} else if err != nil {
+		ff, status, err = h.openAndCacheFile(ctx, path, cacheKey, filePath, hasTrailingSlash, clientSlash, fileCacheKind, fileEncoding)
+		switch status {
+		case StatusFound:
+			redirectToDir(ctx, uriSchemeHost, uriPath, uriQuery)
+			return
+		case StatusForbidden:
+			ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
+			ctx.Error("Directory index is forbidden", status)
+			return
+		case StatusNotFound:
 			ctx.Logger().Printf("cannot open file %q: %v", filePath, err)
 			if h.pathNotFound == nil {
-				ctx.Error("Cannot open requested path", StatusNotFound)
+				ctx.Error("Cannot open requested path", status)
 			} else {
-				ctx.SetStatusCode(StatusNotFound)
+				ctx.SetStatusCode(status)
 				h.pathNotFound(ctx)
 			}
 			return
 		}
-
-		if h.generateETag {
-			ff.etag = appendFSETag(nil, ff.lastModified, ff.contentLength)
-		}
-
-		ff = h.cacheManager.SetFileToCache(fileCacheKind, cacheKey, ff)
 	}
 
 	var notModified bool
@@ -1746,6 +1726,51 @@ func redirectToDir(ctx *RequestCtx, uriSchemeHost, uriPath, uriQuery []byte) {
 	}
 	ctx.RedirectBytes(b.B, StatusFound)
 	bytebufferpool.Put(b)
+}
+
+func (h *fsHandler) openAndCacheFile(
+	ctx *RequestCtx, path, cacheKey []byte, filePath string, hasTrailingSlash, clientSlash bool, kind CacheKind, fileEncoding string,
+) (*fsFile, int, error) {
+	mustCompress := kind != defaultCacheKind
+	if _, onDisk := h.filesystem.(*osFS); !onDisk && mustCompress && !h.skipCache {
+		// In-memory compression has no on-disk copy for a concurrent opener
+		// to reuse. Keep the entry locked until the result is in the cache.
+		key := fmt.Sprintf("%p:%d:%s", h, kind, cacheKey)
+		lock := acquireFileLock(key)
+		lock.mu.Lock()
+		defer func() {
+			lock.mu.Unlock()
+			releaseFileLock(key, lock)
+		}()
+		if ff, ok := h.cacheManager.GetFileFromCache(kind, cacheKey); ok {
+			return ff, StatusOK, nil
+		}
+	}
+
+	ff, err := h.openFSFile(filePath, mustCompress, fileEncoding)
+	if mustCompress && err == errNoCreatePermission {
+		ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
+			"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
+		mustCompress = false
+		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+	}
+
+	if errors.Is(err, errDirIndexRequired) {
+		if !clientSlash {
+			return nil, StatusFound, err
+		}
+		ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
+		if err != nil {
+			return nil, StatusForbidden, err
+		}
+	} else if err != nil {
+		return nil, StatusNotFound, err
+	}
+
+	if h.generateETag {
+		ff.etag = appendFSETag(nil, ff.lastModified, ff.contentLength)
+	}
+	return h.cacheManager.SetFileToCache(kind, cacheKey, ff), StatusOK, nil
 }
 
 // fsIfRangeMatch reports whether the Range header may be served given
