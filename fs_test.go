@@ -2993,10 +2993,9 @@ func TestFSRootWholeVolumeCompressRoot(t *testing.T) {
 	}
 }
 
-// TestFSRootStaleCompressedFileInRoot checks that a stale precompressed file
-// next to its original in Root is removed from Root when the compressed
-// copies FS writes go to a separate CompressRoot.
-func TestFSRootStaleCompressedFileInRoot(t *testing.T) {
+// A stale precompressed file in Root must be removed, and a stale generated
+// copy in CompressRoot must be replaced with the current contents.
+func TestFSRootStaleCompressedFiles(t *testing.T) {
 	t.Parallel()
 
 	compressible := bytes.Repeat([]byte("compressible-data-"), 1000)
@@ -3009,9 +3008,15 @@ func TestFSRootStaleCompressedFileInRoot(t *testing.T) {
 			"app.js":             compressible,
 			"app.js.fasthttp.gz": AppendGzipBytes(nil, []byte("stale")),
 		})
+		fsRootTestWriteFiles(t, compressRoot, map[string][]byte{
+			"app.js.fasthttp.gz": AppendGzipBytes(nil, []byte("stale cache")),
+		})
+		cached := filepath.Join(compressRoot, "app.js.fasthttp.gz")
 		old := time.Now().Add(-time.Hour)
-		if err := os.Chtimes(stale, old, old); err != nil {
-			t.Fatal(err)
+		for _, path := range []string{stale, cached} {
+			if err := os.Chtimes(path, old, old); err != nil {
+				t.Fatal(err)
+			}
 		}
 
 		h := (&FS{
@@ -3031,7 +3036,7 @@ func TestFSRootStaleCompressedFileInRoot(t *testing.T) {
 			t.Errorf("AllowSymlinksOutsideRoot=%v: stale compressed file in Root wasn't removed (stat error %v)",
 				allowSymlinksOutsideRoot, err)
 		}
-		if _, err := os.Stat(filepath.Join(compressRoot, "app.js.fasthttp.gz")); err != nil {
+		if _, err := os.Stat(cached); err != nil {
 			t.Errorf("AllowSymlinksOutsideRoot=%v: compressed file wasn't written to CompressRoot: %v",
 				allowSymlinksOutsideRoot, err)
 		}
