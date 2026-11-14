@@ -1637,7 +1637,7 @@ func fsIfRangeMatch(ifRange []byte, lastModified time.Time) bool {
 // times, such as embed.FS, reports the zero time for every file, so that time
 // stays the same when the file changes. The Unix epoch counts as unknown too.
 func fsModTimeKnown(t time.Time) bool {
-	return t.Unix() > 0
+	return !t.IsZero() && !t.Equal(time.Unix(0, 0))
 }
 
 // appendFSETag appends a weak entity tag built from the hex-encoded
@@ -1648,11 +1648,12 @@ func fsModTimeKnown(t time.Time) bool {
 // guarantee byte-for-byte equality. It is not appended if the modification
 // time is unknown.
 func appendFSETag(dst []byte, lastModified time.Time, size int) []byte {
-	if !fsModTimeKnown(lastModified) {
+	mtime := lastModified.Unix()
+	if mtime <= 0 {
 		return dst
 	}
 	dst = append(dst, `W/"`...)
-	dst = strconv.AppendInt(dst, lastModified.Unix(), 16)
+	dst = strconv.AppendInt(dst, mtime, 16)
 	dst = append(dst, '-')
 	dst = strconv.AppendInt(dst, int64(size), 16)
 	return append(dst, '"')
