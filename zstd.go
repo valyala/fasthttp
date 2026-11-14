@@ -120,11 +120,12 @@ func acquireStacklessZstdWriter(w io.Writer, compressLevel int) stackless.Writer
 	return sw
 }
 
-func releaseStacklessZstdWriter(zf stackless.Writer, level int) {
-	zf.Close()
+func releaseStacklessZstdWriter(zf stackless.Writer, level int) error {
+	err := zf.Close()
 	nLevel := normalizeZstdCompressLevel(level)
 	p := stacklessZstdWriterPoolMap[nLevel]
 	p.Put(zf)
+	return err
 }
 
 func AppendZstdBytesLevel(dst, src []byte, level int) []byte {
@@ -149,7 +150,9 @@ func WriteZstdLevel(w io.Writer, p []byte, level int) (int, error) {
 	default:
 		zw := acquireStacklessZstdWriter(w, level)
 		n, err := zw.Write(p)
-		releaseStacklessZstdWriter(zw, level)
+		if errc := releaseStacklessZstdWriter(zw, level); err == nil {
+			err = errc
+		}
 		return n, err
 	}
 }

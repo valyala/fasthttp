@@ -387,7 +387,7 @@ func testZstdCompressSingleCase(s string) error {
 	if _, err := zw.Write([]byte(s)); err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
 	}
-	releaseStacklessZstdWriter(zw, CompressZstdDefault)
+	_ = releaseStacklessZstdWriter(zw, CompressZstdDefault)
 
 	zr, err := acquireZstdReader(&buf)
 	if err != nil {
