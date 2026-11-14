@@ -537,8 +537,10 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 
 		ch := timeoutHandlerChPool.Get().(chan struct{}) //nolint:forcetypeassert
 		timer := AcquireTimer(timeout)
+		ctx.timeoutHandlers.Add(1)
 		go func() {
 			h(ctx)
+			ctx.releaseTimeoutHandlerRef()
 			ch <- struct{}{}
 			<-concurrencyCh
 		}()
@@ -696,6 +698,10 @@ type RequestCtx struct {
 	earlyHintsMu     sync.Mutex
 
 	timeoutResponse atomic.Pointer[Response]
+	// Counts running TimeoutHandler goroutines. The server also subtracts one
+	// when it abandons the context, so -1 means both sides are finished.
+	timeoutHandlers atomic.Int32
+	timeoutRetained atomic.Bool
 
 	hijackHandler HijackHandler
 	formValueFunc FormValueFunc
@@ -1873,7 +1879,18 @@ func (ctx *RequestCtx) TimeoutErrorWithCode(msg string, statusCode int) {
 func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 	respCopy := &Response{}
 	resp.CopyTo(respCopy)
+	// The caller may keep using the context after its handler returns.
+	ctx.timeoutRetained.Store(true)
 	ctx.timeoutResponse.Store(respCopy)
+}
+
+func (ctx *RequestCtx) releaseTimeoutHandlerRef() {
+	if ctx.timeoutHandlers.Add(-1) == -1 && !ctx.timeoutRetained.Load() {
+		ctx.Request.ResetUserValues()
+		ctx.Request.RemoveMultipartFormFiles()
+		_ = ctx.Request.CloseBodyStream()
+		_ = ctx.Response.CloseBodyStream()
+	}
 }
 
 // NextProto adds nph to be processed when key is negotiated when TLS
@@ -2957,6 +2974,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				ctx.handlerDeadlineSet.Store(true)
 			}
 			oldCtx.deadlineMu.Unlock()
+			oldCtx.releaseTimeoutHandlerRef()
 		} else {
 			ctx.earlyHintsWriter = nil
 		}

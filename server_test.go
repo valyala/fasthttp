@@ -5574,6 +5574,96 @@ func TestTimeoutHandlerNested(t *testing.T) {
 	}
 }
 
+func TestServerTimeoutHandlerCleanup(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name                   string
+		middlewareLast, retain bool
+	}{
+		{name: "inner handler returns last"},
+		{name: "outer middleware returns last", middlewareLast: true},
+		{name: "explicit timeout retains context", retain: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			release := make(chan struct{})
+			stream := &blockingCloseReader{closed: make(chan struct{})}
+			var closes int
+			const multipartBody = "--x\r\nContent-Disposition: form-data; name=\"f\"; filename=\"f\"\r\n\r\na\r\n--x--\r\n"
+			form, err := multipart.NewReader(strings.NewReader(multipartBody), "x").ReadForm(0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := form.RemoveAll(); err != nil {
+					t.Error(err)
+				}
+			})
+			s := Server{Concurrency: 2}
+			waitHandlers := func() {
+				// Both slots become available after both wrappers finish.
+				ch := s.getConcurrencyCh()
+				ch <- struct{}{}
+				ch <- struct{}{}
+				<-ch
+				<-ch
+			}
+			inner := TimeoutHandler(func(ctx *RequestCtx) {
+				ctx.Request.multipartForm = form
+				ctx.SetUserValue("closer", &closerValue{closeCalls: &closes})
+				ctx.SetBodyStream(stream, -1)
+				<-release
+				if tt.retain {
+					ctx.TimeoutError("retained")
+				}
+			}, time.Millisecond, "timeout")
+			outer := TimeoutHandler(inner, time.Hour, "timeout")
+			s.Handler = func(ctx *RequestCtx) {
+				outer(ctx)
+				if tt.middlewareLast {
+					close(release)
+					waitHandlers()
+					if closes != 0 || !ctx.IsBodyStream() {
+						t.Error("released resources while middleware was still using them")
+					}
+				}
+			}
+			rw := &readWriter{}
+			rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.org\r\nConnection: close\r\n\r\n")
+			if err := s.ServeConn(rw); err != nil {
+				t.Fatal(err)
+			}
+			verifyResponse(t, bufio.NewReader(&rw.w), StatusRequestTimeout, string(defaultContentType), "timeout")
+			if !tt.middlewareLast {
+				if closes != 0 {
+					t.Fatal("released user value while inner handler was running")
+				}
+				close(release)
+				waitHandlers()
+			}
+			select {
+			case <-stream.closed:
+				if tt.retain || closes != 1 {
+					t.Fatalf("stream closed, user value closes = %d", closes)
+				}
+			default:
+				if !tt.retain || closes != 0 {
+					t.Fatalf("stream still open, user value closes = %d", closes)
+				}
+			}
+			file, err := form.File["f"][0].Open()
+			if err == nil {
+				_ = file.Close()
+				if !tt.retain {
+					t.Error("multipart temp file still exists")
+				}
+			} else if tt.retain || !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("opening multipart temp file: %v", err)
+			}
+		})
+	}
+}
+
 func TestTimeoutHandlerSuccess(t *testing.T) {
 	t.Parallel()
 
