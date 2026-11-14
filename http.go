@@ -54,6 +54,7 @@ type Request struct {
 
 	multipartForm         *multipart.Form
 	multipartFormBoundary string
+	preParsedFormSize     int // Original body size when preReadMultipartForm parsed the form.
 
 	postArgs   Args
 	userValues userData
@@ -1295,7 +1296,9 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 // MultipartFormWithLimit returns request's multipart form and limits the
 // read multipart body size to maxBodySize bytes.
 //
-// If maxBodySize <= 0, then no limit is applied.
+// If the server already parsed the form, the limit applies to the original
+// body size. Set Server.DisablePreParseMultipartForm to enforce the limit
+// during parsing. If maxBodySize <= 0, then no limit is applied.
 //
 // Returns ErrNoMultipartForm if request's Content-Type
 // isn't 'multipart/form-data'.
@@ -1304,6 +1307,9 @@ func (req *Request) MultipartForm() (*multipart.Form, error) {
 // is processed.
 func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, error) {
 	if req.multipartForm != nil {
+		if maxBodySize > 0 && req.preParsedFormSize > maxBodySize {
+			return nil, fmt.Errorf("cannot read multipart/form-data body: %w", ErrBodyTooLarge)
+		}
 		return req.multipartForm, nil
 	}
 
@@ -1521,6 +1527,8 @@ func (req *Request) preReadMultipartForm(r *bufio.Reader, contentLength int) (re
 	req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
 	if err != nil {
 		req.Reset()
+	} else {
+		req.preParsedFormSize = contentLength
 	}
 	return true, err
 }
@@ -1648,6 +1656,7 @@ func (req *Request) RemoveMultipartFormFiles() {
 		// to new places by user code.
 		req.multipartForm.RemoveAll() //nolint:errcheck
 		req.multipartForm = nil
+		req.preParsedFormSize = 0
 	}
 	req.multipartFormBoundary = ""
 }
