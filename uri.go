@@ -1025,7 +1025,8 @@ func (u *URI) updateBytes(newURI, buf []byte) ([]byte, error) {
 	}
 }
 
-// FullURI returns full uri in the form {Scheme}://{Host}{RequestURI}#{Hash}.
+// FullURI returns the full URI, inserting a slash after the host if the
+// request target does not start with one.
 //
 // The returned bytes are valid until the next URI method call.
 func (u *URI) FullURI() []byte {
@@ -1036,7 +1037,11 @@ func (u *URI) FullURI() []byte {
 // AppendBytes appends full uri to dst and returns the extended dst.
 func (u *URI) AppendBytes(dst []byte) []byte {
 	dst = u.appendSchemeHost(dst)
-	dst = append(dst, u.RequestURI()...)
+	requestURI := u.RequestURI()
+	if requestURI[0] != '/' {
+		dst = append(dst, '/')
+	}
+	dst = append(dst, requestURI...)
 	if len(u.hash) > 0 {
 		dst = append(dst, '#')
 		dst = append(dst, u.hash...)

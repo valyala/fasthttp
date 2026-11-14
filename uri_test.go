@@ -537,6 +537,15 @@ func TestURINoNormalization(t *testing.T) {
 	if string(u.RequestURI()) != irregularPath {
 		t.Fatalf("Unexpected path %q. Expected %q.", u.Path(), irregularPath)
 	}
+
+	u.SetHost("upstream.internal")
+	u.SetPath(".evil.example/path")
+	if got := string(u.RequestURI()); got != ".evil.example/path" {
+		t.Fatalf("unexpected request target %q", got)
+	}
+	if got := u.String(); got != "http://upstream.internal/.evil.example/path" {
+		t.Fatalf("unexpected full URI %q", got)
+	}
 }
 
 func TestURICopyTo(t *testing.T) {
