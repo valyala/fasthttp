@@ -589,6 +589,20 @@ func TestRequestCtxRedirect(t *testing.T) {
 	}
 }
 
+func TestRequestCtxRedirectConnectAuthority(t *testing.T) {
+	t.Parallel()
+
+	var ctx RequestCtx
+	s := "CONNECT a:80 HTTP/1.1\r\nHost: a:80\r\n\r\n"
+	if err := ctx.Request.Read(bufio.NewReader(strings.NewReader(s))); err != nil {
+		t.Fatal(err)
+	}
+	ctx.Redirect("next", StatusFound)
+	if got := string(ctx.Response.Header.Peek(HeaderLocation)); got != "http://a:80/next" {
+		t.Fatalf("unexpected redirect location %q", got)
+	}
+}
+
 func TestRequestCtxRedirectSchemeWithoutAuthority(t *testing.T) {
 	t.Parallel()
 
@@ -2534,6 +2548,65 @@ func TestServerDoesNotParseStreamedMultipartMalformedChunkAsRequest(t *testing.T
 	}
 }
 
+func TestServerClosesAfterStreamedResponseReadsBrokenChunk(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		ignoreErr bool
+	}{
+		{"echo", false},
+		{"handler hides read error", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var rw readWriter
+			rw.r.WriteString("POST /echo HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n" +
+				"1\r\na!0\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n")
+			var paths []string
+			s := Server{
+				StreamRequestBody: true,
+				Handler: func(ctx *RequestCtx) {
+					paths = append(paths, string(ctx.Path()))
+					if string(ctx.Path()) == "/echo" {
+						stream := ctx.RequestBodyStream()
+						if tc.ignoreErr {
+							r := stream
+							stream = bodyReadFunc(func(p []byte) (int, error) {
+								n, err := r.Read(p)
+								if err != nil && err != io.EOF {
+									// Finish consuming the stream before reporting a clean EOF.
+									_, _ = io.Copy(io.Discard, r)
+									err = io.EOF
+								}
+								return n, err
+							})
+						}
+						ctx.SetBodyStream(stream, -1)
+					}
+				},
+			}
+			err := s.ServeConn(&rw)
+			if len(paths) != 1 || paths[0] != "/echo" {
+				t.Fatalf("handler paths = %q; want only [/echo]", paths)
+			}
+			if tc.ignoreErr {
+				if err != nil {
+					t.Fatal(err)
+				}
+				var resp Response
+				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+					t.Fatal(err)
+				}
+				if body := string(resp.Body()); body != "a" {
+					t.Fatalf("response body = %q, want a", body)
+				}
+			} else if _, ok := errors.AsType[ErrBrokenChunk](err); !ok {
+				t.Fatalf("ServeConn error = %v; want ErrBrokenChunk", err)
+			}
+		})
+	}
+}
+
 func TestServerClosesAfterAnyStreamedMultipartDrainError(t *testing.T) {
 	t.Parallel()
 
@@ -3322,6 +3395,101 @@ func TestServerHeadRequest(t *testing.T) {
 	}
 }
 
+func TestServerHeadRequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{Handler: func(ctx *RequestCtx) {
+		if ctx.IsHead() {
+			ctx.TimeoutErrorWithCode("timeout", StatusRequestTimeout)
+			return
+		}
+		ctx.SetBodyString("ok")
+	}}
+	rw := &readWriter{}
+	rw.r.WriteString("HEAD / HTTP/1.1\r\nHost: example.com\r\n\r\nGET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(&rw.w)
+	var header ResponseHeader
+	if err := header.Read(br); err != nil {
+		t.Fatal(err)
+	}
+	if header.StatusCode() != StatusRequestTimeout || header.ContentLength() != len("timeout") {
+		t.Fatalf("unexpected HEAD response: %s", &header)
+	}
+	statusLine, err := br.ReadString('\n')
+	if err != nil || statusLine != "HTTP/1.1 200 OK\r\n" {
+		t.Fatalf("unexpected start of GET response: %q, %v", statusLine, err)
+	}
+}
+
+func TestServerAbsoluteTargetHost(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ target, host, parsed string }{
+		{"http://public.example:80/path@user?q=user@example.org", "public.example:80", "public.example:80"},
+		{"http://[fe80::1%25eth0]/path", "[fe80::1%25eth0]", "[fe80::1%eth0]"},
+		{"//public.example/path?q=a://b", "internal.example", "internal.example"},
+		{"http://user@/path", "", ""},
+	} {
+		s := &Server{
+			HeaderReceived: func(h *RequestHeader) RequestConfig {
+				if got := string(h.Host()); got != tt.host {
+					t.Errorf("%s: HeaderReceived Host = %q, want %q", tt.target, got, tt.host)
+				}
+				return RequestConfig{}
+			},
+			Handler: func(ctx *RequestCtx) {
+				_ = ctx.Request.RequestURI()
+				ctx.Request.SetRequestURI("/rewritten")
+				if got := string(ctx.Host()); got != tt.parsed {
+					t.Errorf("%s: rewritten Host = %q, want %q", tt.target, got, tt.parsed)
+				}
+			},
+		}
+		rw := &readWriter{}
+		rw.r.WriteString("GET " + tt.target + " HTTP/1.1\r\nHost: internal.example\r\n\r\n")
+		err := s.ServeConn(rw)
+		if tt.host == "" {
+			if !errors.Is(err, ErrorInvalidURI) {
+				t.Errorf("%s: expected invalid URI, got %v", tt.target, err)
+			}
+			verifyResponse(t, bufio.NewReader(&rw.w), StatusBadRequest, string(defaultContentType), "Error when parsing request")
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestServerRejectsRequestUserinfo(t *testing.T) {
+	t.Parallel()
+
+	for _, wire := range []string{
+		"GET / HTTP/1.1\r\nHost: admin:secret@example.org",
+		"GET http://example.org/ HTTP/1.1\r\nHost: @other.org",
+		"GET http://admin:secret@example.org/ HTTP/1.1\r\nHost: example.org",
+		"GET //@example.org/ HTTP/1.0",
+		"CONNECT admin:secret@example.org:443 HTTP/1.1\r\nHost: example.org",
+	} {
+		s := &Server{
+			HeaderReceived: func(*RequestHeader) RequestConfig {
+				t.Errorf("HeaderReceived called for %q", wire)
+				return RequestConfig{}
+			},
+			Handler: func(*RequestCtx) {
+				t.Errorf("handler called for %q", wire)
+			},
+		}
+		rw := &readWriter{}
+		rw.r.WriteString(wire + "\r\n\r\n")
+		if err := s.ServeConn(rw); !errors.Is(err, ErrorInvalidURI) {
+			t.Errorf("ServeConn(%q) = %v, want ErrorInvalidURI", wire, err)
+		}
+		verifyResponse(t, bufio.NewReader(&rw.w), StatusBadRequest, string(defaultContentType), "Error when parsing request")
+	}
+}
+
 func TestServerRejectsBackslashInAbsoluteURI(t *testing.T) {
 	t.Parallel()
 
@@ -3436,39 +3604,82 @@ func TestServerExpect103EarlyHints(t *testing.T) {
 		NoDefaultDate:         true,
 		NoDefaultServerHeader: true,
 		Handler: func(ctx *RequestCtx) {
+			if ctx.IsGet() {
+				ctx.SetBodyString("first")
+				return
+			}
 			ctx.Response.Header.Add("Link", "<https://cdn.com>; rel=preload; as=script")
 			ctx.EarlyHints() //nolint:errcheck
 		},
 	}
 
 	rw := &readWriter{}
-	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
 
 	if err := s.ServeConn(rw); err != nil {
 		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
-	scanner := bufio.NewScanner(&rw.w)
-	expected := []string{
-		"HTTP/1.1 103 Early Hints",
-		"Link: <https://cdn.com>; rel=preload; as=script",
-		"",
-		"HTTP/1.1 200 OK",
-		"Content-Length: 0",
-		"Link: <https://cdn.com>; rel=preload; as=script",
+	want := "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst" +
+		"HTTP/1.1 103 Early Hints\r\nLink: <https://cdn.com>; rel=preload; as=script\r\n\r\n" +
+		"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nLink: <https://cdn.com>; rel=preload; as=script\r\n\r\n"
+	if got := rw.w.String(); got != want {
+		t.Fatalf("unexpected pipelined responses:\n got %q\nwant %q", got, want)
 	}
+}
 
-	i := 0
-	for scanner.Scan() {
-		if i >= len(expected) {
-			break
-		}
-		line := scanner.Text()
-		if line != expected[i] {
-			t.Fatalf("unexpected data: %s. Expecting %s", line, expected[i])
-		}
-		i++
+func TestServerExpectHandlerEarlyHints(t *testing.T) {
+	t.Parallel()
+	s := Server{
+		ExpectHandler: func(ctx *RequestCtx) int {
+			ctx.Response.Header.Set("Link", "</asset>")
+			if err := ctx.EarlyHints(); err != nil {
+				t.Error(err)
+			}
+			return StatusContinue
+		},
+		Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
 	}
+	var rw readWriter
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.org\r\n\r\n")
+	rw.r.WriteString("POST / HTTP/1.1\r\nHost: example.org\r\nExpect: 100-continue\r\nContent-Length: 1\r\n\r\nx")
+	if err := s.ServeConn(&rw); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusOK, string(defaultContentType), "ok")
+	for _, want := range []int{StatusEarlyHints, StatusContinue} {
+		var h ResponseHeader
+		if err := h.Read(br); err != nil {
+			t.Fatal(err)
+		}
+		if h.StatusCode() != want {
+			t.Fatalf("status = %d, want %d", h.StatusCode(), want)
+		}
+	}
+	verifyResponse(t, br, StatusOK, string(defaultContentType), "ok")
+}
+
+func TestServerEarlyHintsAfterTimeout(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{Handler: func(ctx *RequestCtx) {
+		ctx.TimeoutError("timeout")
+		ctx.Response.Header.Add("Link", "</late>")
+		if err := ctx.EarlyHints(); err != nil {
+			t.Errorf("EarlyHints: %v", err)
+		}
+	}}
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(rw.w.String(), "HTTP/1.1 408 ") {
+		t.Fatalf("unexpected timeout response: %q", rw.w.String())
+	}
+	verifyResponse(t, bufio.NewReader(&rw.w), StatusRequestTimeout, string(defaultContentType), "timeout")
 }
 
 func TestServerEarlyHintsHTTP10(t *testing.T) {
@@ -3982,6 +4193,46 @@ func TestServerExpectHandlerRemoteAddr(t *testing.T) {
 	}
 	br := bufio.NewReader(&rw.w)
 	verifyResponse(t, br, StatusForbidden, string(defaultContentType), "")
+}
+
+func TestCompressHandlerTimeout(t *testing.T) {
+	t.Parallel()
+
+	for _, encoding := range []string{"gzip", "br"} {
+		t.Run(encoding, func(t *testing.T) {
+			compress := CompressHandler
+			if encoding == "br" {
+				compress = func(h RequestHandler) RequestHandler {
+					return CompressHandlerBrotliLevel(h, CompressBrotliDefaultCompression, CompressDefaultCompression)
+				}
+			}
+			for _, timeoutFirst := range []bool{false, true} {
+				var ctx RequestCtx
+				ctx.s = &Server{}
+				ctx.Request.Header.Set("Accept-Encoding", encoding)
+				body := strings.Repeat("handler response", 128)
+				ctx.Response.SetBodyString(body)
+				release := make(chan struct{})
+				h := RequestHandler(func(_ *RequestCtx) { <-release })
+				timeout := func(h RequestHandler) RequestHandler {
+					return TimeoutHandler(h, testTimeout(time.Millisecond), "timeout")
+				}
+				if timeoutFirst {
+					timeout(compress(h))(&ctx)
+				} else {
+					compress(timeout(h))(&ctx)
+				}
+				close(release)
+				<-ctx.timeoutCh // The timed-out handler has finished using ctx.
+				if resp := ctx.LastTimeoutErrorResponse(); resp == nil || resp.StatusCode() != StatusRequestTimeout {
+					t.Fatalf("expected timeout response (timeoutFirst=%t)", timeoutFirst)
+				}
+				if !bytes.Equal(ctx.Response.Body(), []byte(body)) {
+					t.Errorf("compression changed the timed-out handler's body (timeoutFirst=%t)", timeoutFirst)
+				}
+			}
+		})
+	}
 }
 
 func TestCompressHandler(t *testing.T) {
@@ -8805,6 +9056,101 @@ func TestServerLetsResponseConsumeStreamedBody(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServerCompressedGatewayWriteFailure(t *testing.T) {
+	t.Parallel()
+	upstream, origin := net.Pipe()
+	defer upstream.Close()
+	defer origin.Close()
+	if err := origin.SetDeadline(time.Now().Add(testTimeout(5 * time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	hc := HostClient{
+		Addr:               "upstream:80",
+		StreamResponseBody: true,
+		Dial:               func(string) (net.Conn, error) { return upstream, nil },
+	}
+	cleaned := make(chan struct{})
+	s := Server{Handler: CompressHandler(func(ctx *RequestCtx) {
+		ctx.SetUserValue("cleanup", &closerWithRequestCtx{closeFunc: func(*RequestCtx) error {
+			close(cleaned)
+			return nil
+		}})
+		if err := hc.Do(&ctx.Request, &ctx.Response); err != nil {
+			t.Error(err)
+		}
+	})}
+	client, done := streamCompatServeConn(t, &s)
+	if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nHost: upstream\r\nAccept-Encoding: gzip\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	var req Request
+	if err := req.Read(bufio.NewReader(origin)); err != nil {
+		t.Fatal(err)
+	}
+	// The compressor can send the first chunk, but cannot finish the upstream
+	// response until the origin sends its trailers.
+	if _, err := io.WriteString(origin, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\nTrailer: X-End\r\n\r\n1\r\nx\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	streamClose(t, client)
+	if err := streamAwait(t, done, "failed response write"); err == nil {
+		t.Fatal("expected response write error")
+	}
+	select {
+	case <-cleaned:
+		t.Error("context released before upstream trailers arrived")
+	default:
+	}
+	if _, err := io.WriteString(origin, "0\r\nX-End: yes\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	streamAwait(t, cleaned, "gateway context cleanup")
+}
+
+func TestServerCompressedEchoWriteFailure(t *testing.T) {
+	reading, resume := make(chan struct{}), make(chan struct{})
+	tail := make(chan string, 1)
+	cleaned := make(chan struct{})
+	s := Server{
+		StreamRequestBody: true,
+		Handler: CompressHandler(func(ctx *RequestCtx) {
+			ctx.SetUserValue("cleanup", &closerWithRequestCtx{closeFunc: func(*RequestCtx) error {
+				close(cleaned)
+				return nil
+			}})
+			r := ctx.RequestBodyStream()
+			first := true
+			ctx.SetBodyStream(bodyReadFunc(func(p []byte) (int, error) {
+				if first {
+					first = false
+					return r.Read(p[:1])
+				}
+				// Hold the compressor between reads until the response write
+				// has failed and the server has closed the connection.
+				close(reading)
+				<-resume
+				n, err := r.Read(p)
+				tail <- string(p[:n])
+				return n, err
+			}), -1)
+		}),
+	}
+	client, serverDone := streamCompatServeConn(t, &s)
+	if _, err := io.WriteString(client, "POST / HTTP/1.1\r\nHost: x\r\nAccept-Encoding: gzip\r\nContent-Length: 2\r\n\r\nab"); err != nil {
+		t.Fatal(err)
+	}
+	streamAwait(t, reading, "second compression read")
+	streamClose(t, client)
+	if err := streamAwait(t, serverDone, "failed response write"); err == nil {
+		t.Fatal("expected response write error")
+	}
+	close(resume)
+	if got := streamAwait(t, tail, "remaining request body"); got != "b" {
+		t.Fatalf("remaining request body = %q, want b", got)
+	}
+	streamAwait(t, cleaned, "request cleanup")
 }
 
 func TestServerKeepsConnWhenResponseConsumesLargeStreamedBody(t *testing.T) {

@@ -366,11 +366,12 @@ func releaseWriter(w *writer) {
 	_ = w.Close()
 	w.mu.Lock()
 	w.ctx = nil
-	w.mu.Unlock()
+	w.responseBody = nil
 	if w.bufPool != nil {
 		bufferPool.Put(w.bufPool)
 		w.bufPool = nil
 	}
+	w.mu.Unlock()
 }
 
 func (w *writer) Header() http.Header {
@@ -402,11 +403,18 @@ func (w *writer) commit() {
 func (w *writer) Write(p []byte) (int, error) {
 	select {
 	case <-w.streamReady:
+		if w.hijacked.Load() {
+			return len(p), nil
+		}
 		return w.pw.Write(p)
 	default:
 	}
 
 	w.mu.Lock()
+	if w.hijacked.Load() {
+		w.mu.Unlock()
+		return len(p), nil
+	}
 	select {
 	case <-w.streamReady:
 		w.mu.Unlock()

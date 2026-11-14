@@ -587,6 +587,10 @@ func CompressHandler(h RequestHandler) RequestHandler {
 func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
+		// A timed-out handler may still be using both the request and response.
+		if ctx.timedOut.Load() {
+			return
+		}
 		switch {
 		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
 			ctx.Response.gzipBody(level)
@@ -619,6 +623,10 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
+		// A timed-out handler may still be using both the request and response.
+		if ctx.timedOut.Load() {
+			return
+		}
 		switch {
 		case ctx.Request.Header.HasAcceptEncodingBytes(strBr):
 			ctx.Response.brotliBody(brotliLevel)
@@ -664,6 +672,10 @@ type RequestCtx struct {
 	c net.Conn
 	s *Server
 
+	// Writer holding earlier pipelined responses while the handler runs.
+	earlyHintsWriter *bufio.Writer
+	earlyHintsMu     sync.Mutex
+
 	timeoutResponse *Response
 	timeoutCh       chan struct{}
 	timeoutTimer    *time.Timer
@@ -681,7 +693,7 @@ type RequestCtx struct {
 	connRequestNum          uint64
 	hijackNoResponse        bool
 	deadlineMu              sync.Mutex
-	deadlineUpdatesDisabled atomic.Bool
+	timedOut                atomic.Bool
 	handlerDeadlineSet      atomic.Bool
 	handlerReadDeadlineSet  bool
 	handlerWriteDeadlineSet atomic.Bool
@@ -697,6 +709,7 @@ type RequestCtx struct {
 //
 // EarlyHints does nothing for HTTP/1.0 requests, since a server must not send
 // a 1xx response to an HTTP/1.0 client (RFC 9110, section 15.2).
+// It also does nothing after the request has timed out.
 //
 // See: https://developer.chrome.com/docs/web-platform/early-hints and
 // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Link#syntax
@@ -716,8 +729,16 @@ func (ctx *RequestCtx) EarlyHints() error {
 	}
 	links := ctx.Response.Header.PeekAll(b2s(strLink))
 	if len(links) > 0 {
-		c := acquireWriter(ctx)
-		defer releaseWriter(ctx.s, c)
+		ctx.earlyHintsMu.Lock()
+		defer ctx.earlyHintsMu.Unlock()
+		if ctx.timedOut.Load() {
+			return nil
+		}
+		c := ctx.earlyHintsWriter
+		if c == nil {
+			c = acquireWriter(ctx)
+			defer releaseWriter(ctx.s, c)
+		}
 		_, err := c.Write(strEarlyHints)
 		if err != nil {
 			return err
@@ -953,7 +974,7 @@ func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
-	if ctx.deadlineUpdatesDisabled.Load() {
+	if ctx.timedOut.Load() {
 		return ErrDeadlineUpdatesDisabled
 	}
 	err := ctx.c.SetReadDeadline(deadline)
@@ -971,7 +992,7 @@ func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
-	if ctx.deadlineUpdatesDisabled.Load() {
+	if ctx.timedOut.Load() {
 		return ErrDeadlineUpdatesDisabled
 	}
 	err := ctx.c.SetWriteDeadline(deadline)
@@ -1001,11 +1022,12 @@ func (ctx *RequestCtx) reset() {
 	ctx.connID = 0
 	ctx.connRequestNum = 0
 	ctx.connTime = zeroTime
+	ctx.earlyHintsWriter = nil
 	ctx.remoteAddr = nil
 	ctx.time = zeroTime
 	ctx.deadlineMu.Lock()
 	ctx.c = nil
-	ctx.deadlineUpdatesDisabled.Store(false)
+	ctx.timedOut.Store(false)
 	ctx.handlerDeadlineSet.Store(false)
 	ctx.handlerReadDeadlineSet = false
 	ctx.handlerWriteDeadlineSet.Store(false)
@@ -1851,7 +1873,7 @@ func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 	respCopy := &Response{}
 	resp.CopyTo(respCopy)
 	ctx.timeoutResponse = respCopy
-	ctx.deadlineUpdatesDisabled.Store(true)
+	ctx.timedOut.Store(true)
 }
 
 // NextProto adds nph to be processed when key is negotiated when TLS
@@ -2715,6 +2737,9 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			}
 
 			if err == nil {
+				err = ctx.Request.Header.prepareRequestHost()
+			}
+			if err == nil {
 				if onHdrRecv := s.HeaderReceived; onHdrRecv != nil {
 					reqConf := onHdrRecv(&ctx.Request.Header)
 					if reqConf.ReadTimeout > 0 {
@@ -2794,7 +2819,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		if ctx.Request.MayContinue() {
 			// Allow the ability to deny reading the incoming request body.
 			if s.ExpectHandler != nil {
-				if expectStatus := s.ExpectHandler(ctx); expectStatus != StatusContinue {
+				ctx.earlyHintsWriter = bw
+				expectStatus := s.ExpectHandler(ctx)
+				ctx.earlyHintsWriter = nil
+				if expectStatus != StatusContinue {
 					continueReadingRequest = false
 					if br != nil {
 						br.Reset(ctx.c)
@@ -2859,9 +2887,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		// Preserve connectionClose if already set (e.g., by ExpectHandler).
 		connectionClose = connectionClose || ctx.Request.Header.ConnectionClose()
 
-		// Remember the request version before ctx may be replaced with a
-		// fresh one below, whose request defaults to HTTP/1.1.
+		// Remember the request version and method before a timeout can
+		// replace ctx with a fresh one.
 		isHTTP11 = ctx.Request.Header.IsHTTP11()
+		isHead := ctx.IsHead()
 
 		if serverNameLine != nil {
 			ctx.Response.Header.setServerDefault(serverNameLine)
@@ -2892,6 +2921,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
+			ctx.earlyHintsWriter = bw
 			s.Handler(ctx)
 		}
 
@@ -2906,6 +2936,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				br = nil
 			}
 			reqStream = nil
+			// Wait for any hints already being written before reusing bw.
+			// Later calls on this context observe timedOut and skip the write.
+			ctx.earlyHintsMu.Lock()
+			ctx.earlyHintsWriter = nil
+			ctx.earlyHintsMu.Unlock()
 			oldCtx := ctx
 			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
 			ctx = s.acquireCtx(c)
@@ -2913,7 +2948,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.time = reqTime
 			timeoutResponse.CopyTo(&ctx.Response)
 
-			oldCtx.deadlineUpdatesDisabled.Store(true)
 			oldCtx.deadlineMu.Lock()
 			if oldCtx.handlerReadDeadlineSet {
 				ctx.handlerReadDeadlineSet = true
@@ -2924,9 +2958,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				ctx.handlerDeadlineSet.Store(true)
 			}
 			oldCtx.deadlineMu.Unlock()
+		} else {
+			ctx.earlyHintsWriter = nil
 		}
 
-		if ctx.IsHead() {
+		if isHead {
 			ctx.Response.SkipBody = true
 		}
 
@@ -3000,8 +3036,21 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			if bw == nil {
 				bw = acquireWriter(ctx)
 			}
+			bodyStream := ctx.Response.bodyStream
 			if err = writeResponse(ctx, bw); err != nil {
+				if cs, ok := bodyStream.(*compressedBodyStream); ok && cs.r != nil {
+					// The compressor may still read the request body or parse
+					// upstream trailers into the response header.
+					// Return so the connection closes and unblocks network reads.
+					go s.releaseAfterCompression(cs.done, br, ctx, reqStream)
+					br, ctx, reqStream = nil, nil, nil
+				}
 				break
+			}
+
+			// A response reader may finish successfully after a request framing error.
+			if reqStream != nil && reqStream.failed && hijackHandler == nil {
+				connectionClose = true
 			}
 
 			// Draining an unread streamed body may block waiting for the client.
@@ -3135,7 +3184,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	if bw != nil {
 		releaseWriter(s, bw)
 	}
-	if hijackHandler == nil {
+	if ctx != nil && hijackHandler == nil {
 		s.releaseCtx(ctx)
 	}
 	// Release the stream of the last request if the loop ended before doing
@@ -3154,6 +3203,17 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	s.idleConnsMu.Unlock()
 
 	return err
+}
+
+func (s *Server) releaseAfterCompression(done <-chan struct{}, br *bufio.Reader, ctx *RequestCtx, reqStream *requestStream) {
+	<-done
+	if br != nil {
+		releaseReader(s, br)
+	}
+	s.releaseCtx(ctx)
+	if reqStream != nil {
+		releaseRequestStream(reqStream)
+	}
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {

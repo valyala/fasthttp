@@ -1958,6 +1958,22 @@ func TestRequestNoContentLength(t *testing.T) {
 		t.Fatalf("unexpected content-length in HEAD request %q", s)
 	}
 
+	for _, method := range []string{MethodGet, MethodHead} {
+		for _, length := range []int{32, -1} {
+			r.Header.SetMethod(method)
+			r.Header.SetContentLength(length)
+			wire := r.String() + "GET /next HTTP/1.1\r\nHost: foobar\r\n\r\n"
+			br := bufio.NewReader(strings.NewReader(wire))
+			var parsed Request
+			if err := parsed.Read(br); err != nil || len(parsed.Body()) != 0 {
+				t.Fatalf("%s with previous length %d: body %q, err %v", method, length, parsed.Body(), err)
+			}
+			if err := parsed.Read(br); err != nil || string(parsed.Header.RequestURI()) != "/next" {
+				t.Fatalf("reading next request: uri %q, err %v", parsed.Header.RequestURI(), err)
+			}
+		}
+	}
+
 	r.Header.SetMethod(MethodPost)
 	fmt.Fprintf(r.BodyWriter(), "foobar body")
 	s = r.String()
@@ -2806,9 +2822,7 @@ func TestRequestWriteURLAuthKeepsAuthorization(t *testing.T) {
 	for auth, expected := range cases {
 		var req Request
 		req.SetRequestURI("http://user:pass@example.com/foo")
-		if auth != "" {
-			req.Header.Set(HeaderAuthorization, auth)
-		}
+		req.Header.Set(HeaderAuthorization, auth)
 		var w bytes.Buffer
 		bw := bufio.NewWriter(&w)
 		if err := req.Write(bw); err != nil {
@@ -2816,6 +2830,10 @@ func TestRequestWriteURLAuthKeepsAuthorization(t *testing.T) {
 		}
 		if err := bw.Flush(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if got := req.Header.PeekAll(HeaderAuthorization); len(got) != 1 || string(got[0]) != auth {
+			t.Fatalf("Write changed Authorization from %q to %q", auth, got)
 		}
 
 		var req1 Request
@@ -3122,6 +3140,32 @@ func TestRequestReadChunked(t *testing.T) {
 	}
 	verifyRequestHeader(t, &req.Header, -1, "/foo", "google.com", "", "aa/bb")
 	verifyTrailer(t, &req.Header, map[string]string{"Trail": "test"})
+}
+
+func TestRequestWriteChunkedKeepsRepeatedHeaderOrder(t *testing.T) {
+	t.Parallel()
+
+	const raw = "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\n" +
+		"X-Tenant: public\r\nX-Tenant: internal\r\n\r\n3\r\nabc\r\n0\r\n\r\n"
+	var req Request
+	if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(req.Header.Peek("X-Tenant")); got != "public" {
+		t.Fatalf("X-Tenant before forwarding = %q", got)
+	}
+	var wire bytes.Buffer
+	if _, err := req.WriteTo(&wire); err != nil {
+		t.Fatal(err)
+	}
+	forwarded, err := http.ReadRequest(bufio.NewReader(&wire))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer forwarded.Body.Close()
+	if got := forwarded.Header.Values("X-Tenant"); !reflect.DeepEqual(got, []string{"public", "internal"}) {
+		t.Fatalf("forwarded X-Tenant = %q", got)
+	}
 }
 
 func TestRequestChunkedEmpty(t *testing.T) {
@@ -5578,6 +5622,59 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 	case <-compressedStream.done:
 	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for compressed stream cleanup")
+	}
+}
+
+func TestResponseCompressedBodyStreamCloseDuringFileRead(t *testing.T) {
+	t.Parallel()
+
+	for _, size := range []int{2, maxSmallFileSize + 1} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "file.txt"), bytes.Repeat([]byte("x"), size), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var ctx RequestCtx
+			ctx.Request.SetRequestURI("/file.txt")
+			(&FS{Root: dir, SkipCache: true}).NewRequestHandler()(&ctx)
+			ctx.Response.gzipBody(CompressDefaultCompression)
+			stream := ctx.Response.BodyStream().(*compressedBodyStream) //nolint:forcetypeassert
+
+			var ff *fsFile
+			switch r := stream.bodyStream.(type) {
+			case *fsSmallFileReader:
+				ff = r.ff
+			case *bigFileReader:
+				ff = r.ff
+			default:
+				t.Fatalf("unexpected file reader %T", r)
+			}
+
+			reading := make(chan struct{})
+			resume := make(chan struct{})
+			var readErr error
+			stream.compress = func(_ *bufio.Writer, r io.Reader, _ int) error {
+				var b [1]byte
+				_, readErr = io.ReadFull(r, b[:])
+				close(reading)
+				<-resume
+				if readErr == nil {
+					_, readErr = io.ReadFull(r, b[:])
+				}
+				return readErr
+			}
+			_, _ = stream.Read(nil)
+			<-reading
+			closeErr := ctx.Response.CloseBodyStream()
+			close(resume)
+			<-stream.done
+			if closeErr != nil || readErr != nil {
+				t.Fatalf("close error = %v, file read error = %v", closeErr, readErr)
+			}
+			if ff.readersCount != 0 {
+				t.Fatalf("file still has %d readers after compression finished", ff.readersCount)
+			}
+		})
 	}
 }
 

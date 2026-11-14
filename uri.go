@@ -173,7 +173,7 @@ func (u *URI) SetQueryStringBytes(queryString []byte) {
 
 // Path returns URI path, i.e. /foo/bar of http://aaa.com/foo/bar?baz=123#qwe .
 //
-// The returned path is always urldecoded and normalized,
+// The returned path starts with a slash and is always urldecoded and normalized,
 // i.e. '//f%20obar/baz/../zzz' becomes '/f obar/zzz'.
 //
 // The returned bytes are valid until the next URI method call.
@@ -291,7 +291,8 @@ var ErrorInvalidURI = errors.New("fasthttp: invalid uri")
 // host may be nil. In this case uri must contain fully qualified uri,
 // i.e. with scheme and host. http is assumed if scheme is omitted.
 //
-// uri may contain e.g. RequestURI without scheme and host if host is non-empty.
+// If host is non-empty, a uri starting with "/" is an origin-form request
+// target and uses the supplied host.
 func (u *URI) Parse(host, uri []byte) error {
 	return u.parse(host, uri, false)
 }
@@ -315,9 +316,7 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		return ErrorInvalidURI
 	}
 
-	// A target with a single leading slash is origin-form whatever it
-	// contains; splitHostURI would hand it back unchanged.
-	originForm := len(uri) > 1 && uri[0] == '/' && uri[1] != '/'
+	originForm := len(uri) > 0 && uri[0] == '/'
 	if len(host) == 0 || (!originForm && bytes.Contains(uri, strColonSlashSlash)) {
 		scheme, newHost, newURI := splitHostURI(host, uri)
 		if len(scheme) > 0 && !isValidScheme(scheme) {
@@ -747,12 +746,18 @@ func removeParentSegments(b, p []byte, sep byte) []byte {
 	return b[:w]
 }
 
+func addLeadingSlash(dst, src []byte) []byte {
+	if len(src) == 0 || src[0] != '/' {
+		dst = append(dst, '/')
+	}
+	return dst
+}
+
 func normalizePath(dst, src []byte) []byte {
 	if len(src) == 1 && src[0] == '/' {
 		return append(dst[:0], '/')
 	}
-	dst = dst[:0]
-	dst = addLeadingSlash(dst, src)
+	dst = addLeadingSlash(dst[:0], src)
 	dst = decodeArgAppendNoPlus(dst, src)
 
 	// remove duplicate slashes

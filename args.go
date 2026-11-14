@@ -196,12 +196,12 @@ func (a *Args) WriteTo(w io.Writer) (int64, error) {
 
 // Del deletes argument with the given key from query args.
 func (a *Args) Del(key string) {
-	a.args = delAllArgsStable(a.args, key)
+	a.args = delAllArgs(a.args, key)
 }
 
 // DelBytes deletes argument with the given key from query args.
 func (a *Args) DelBytes(key []byte) {
-	a.args = delAllArgsStable(a.args, b2s(key))
+	a.args = delAllArgs(a.args, b2s(key))
 }
 
 // Add adds 'key=value' argument.
@@ -246,7 +246,7 @@ func (a *Args) AddBytesKNoValue(key []byte) {
 	a.args = appendArg(a.args, b2s(key), "", argsNoValue)
 }
 
-// Set sets 'key=value' argument.
+// Set replaces all values for key with the given value.
 func (a *Args) Set(key, value string) {
 	a.args = setArg(a.args, key, value, argsHasValue)
 }
@@ -419,31 +419,22 @@ func copyArgs(dst, src []argsKV) []argsKV {
 	return dst
 }
 
-func delAllArgsStable(args []argsKV, key string) []argsKV {
-	for i, n := 0, len(args); i < n; i++ {
-		kv := &args[i]
-		if key == string(kv.key) {
-			tmp := *kv
-			copy(args[i:], args[i+1:])
-			n--
-			i--
-			args[n] = tmp
-			args = args[:n]
+func delAllArgs(args []argsKV, key string) []argsKV {
+	for i := range args {
+		if key != string(args[i].key) {
+			continue
 		}
+		write := i
+		for read := i + 1; read < len(args); read++ {
+			if key != string(args[read].key) {
+				// Keep the removed entries' buffers available for reuse.
+				args[write], args[read] = args[read], args[write]
+				write++
+			}
+		}
+		return args[:write]
 	}
 	return args
-}
-
-func delAllArgs(args []argsKV, key string) []argsKV {
-	n := len(args)
-	for i := 0; i < n; i++ {
-		if key == string(args[i].key) {
-			args[i], args[n-1] = args[n-1], args[i]
-			n--
-			i--
-		}
-	}
-	return args[:n]
 }
 
 func setArgBytes(h []argsKV, key, value []byte, noValue bool) []argsKV {
@@ -461,7 +452,8 @@ func setArg(h []argsKV, key, value string, noValue bool) []argsKV {
 				kv.value = append(kv.value[:0], value...)
 			}
 			kv.noValue = noValue
-			return h
+			tail := delAllArgs(h[i+1:], b2s(kv.key))
+			return h[:i+1+len(tail)]
 		}
 	}
 	return appendArg(h, key, value, noValue)

@@ -3206,6 +3206,29 @@ func testRequestHeaderMethod(t *testing.T, expectedMethod string) {
 	}
 }
 
+func TestRequestHeaderSetReplacesDuplicates(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	const request = "GET / HTTP/1.1\r\nHost: a\r\nX-Forwarded-For: a\r\nX-Forwarded-For: b\r\n" +
+		"X-Order: first\r\nx-forwarded-for: c\r\nX-Order: second\r\n\r\n"
+	if err := h.Read(bufio.NewReader(strings.NewReader(request))); err != nil {
+		t.Fatal(err)
+	}
+	h.Set("X-Forwarded-For", "trusted")
+	h.Add("X-New", "new") // Reuse a slot freed by Set.
+	next, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(h.Header())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := next.Header.Values("X-Forwarded-For"); !reflect.DeepEqual(got, []string{"trusted"}) {
+		t.Fatalf("forwarded X-Forwarded-For = %q", got)
+	}
+	if got := next.Header.Values("X-Order"); !reflect.DeepEqual(got, []string{"first", "second"}) {
+		t.Fatalf("forwarded X-Order = %q", got)
+	}
+}
+
 func TestRequestHeaderSetGet(t *testing.T) {
 	t.Parallel()
 
@@ -6164,8 +6187,8 @@ func TestAnnouncedSpecialHeaderKeepsEveryValue(t *testing.T) {
 		t.Fatalf("Server() = %q, want the first value", got)
 	}
 	resp.Set(HeaderServer, "three")
-	if got := resp.PeekAll(HeaderServer); len(got) != 2 || string(got[0]) != "three" || string(got[1]) != "two" {
-		t.Fatalf("after Set: PeekAll(Server) = %q, want the first value replaced", got)
+	if got := resp.PeekAll(HeaderServer); len(got) != 1 || string(got[0]) != "three" {
+		t.Fatalf("after Set: PeekAll(Server) = %q, want [three]", got)
 	}
 
 	var req RequestHeader

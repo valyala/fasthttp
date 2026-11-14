@@ -1270,6 +1270,60 @@ func TestPipelineClientThrottlesDialFailures(t *testing.T) {
 	}
 }
 
+func TestClientClosesSwitchedProtocolConnection(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"HostClient", "PipelineClient"} {
+		t.Run(name, func(t *testing.T) {
+			clientConn, peer := net.Pipe()
+			defer clientConn.Close()
+			defer peer.Close()
+
+			dial := func(string) (net.Conn, error) { return clientConn, nil }
+			var do func(*Request, *Response) error
+			switch name {
+			case "HostClient":
+				c := &HostClient{Addr: "example.com:80", Dial: dial, MaxIdleConnDuration: time.Hour}
+				do = c.Do
+			case "PipelineClient":
+				c := &PipelineClient{Addr: "example.com:80", Dial: dial, MaxIdleConnDuration: time.Hour}
+				do = c.Do
+			}
+
+			serverDone := make(chan error, 1)
+			go func() {
+				var req Request
+				if err := req.Read(bufio.NewReader(peer)); err != nil {
+					serverDone <- err
+					return
+				}
+				_, err := io.WriteString(peer, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: test\r\n\r\n")
+				serverDone <- err
+			}()
+
+			var req Request
+			req.SetRequestURI("http://example.com/")
+			req.Header.Set(HeaderConnection, "Upgrade")
+			req.Header.Set(HeaderUpgrade, "test")
+			var resp Response
+			if err := do(&req, &resp); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-serverDone; err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode() != StatusSwitchingProtocols {
+				t.Fatalf("unexpected response status %d", resp.StatusCode())
+			}
+			_ = peer.SetReadDeadline(time.Now().Add(testTimeout(time.Second)))
+			var b [1]byte
+			if _, err := peer.Read(b[:]); err != io.EOF {
+				t.Fatalf("expected the client to close the upgraded connection, got %v", err)
+			}
+		})
+	}
+}
+
 func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 	t.Parallel()
 
@@ -1621,6 +1675,32 @@ func TestPipelineClientBuffersStreamBody(t *testing.T) {
 	}
 	if err := <-serverDone; err != nil {
 		t.Fatalf("server failed: %v", err)
+	}
+}
+
+func TestPipelineClientTimeoutMultipartForm(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.FormValue("field"))
+	}))
+	defer server.Close()
+	client := PipelineClient{Addr: server.Listener.Addr().String()}
+
+	const body = "--x\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nvalue\r\n--x--\r\n"
+	raw := fmt.Sprintf("POST / HTTP/1.1\r\nHost: test\r\nContent-Type: multipart/form-data; boundary=x\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+	var req Request
+	if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatal(err)
+	}
+	defer req.RemoveMultipartFormFiles()
+
+	var resp Response
+	if err := client.DoTimeout(&req, &resp, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(resp.Body()); got != "value" {
+		t.Fatalf("forwarded multipart field = %q, want value", got)
 	}
 }
 
@@ -1976,21 +2056,37 @@ func TestClientGetWithBody(t *testing.T) {
 func TestClientURLAuth(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]string{
-		"user:pass@":    "Basic dXNlcjpwYXNz",
-		"user:p%40ss@":  "Basic dXNlcjpwQHNz",
-		"us%20er:pass@": "Basic dXMgZXI6cGFzcw==",
-		"foo:@":         "Basic Zm9vOg==",
-		":@":            "",
-		"@":             "",
-		"":              "",
+	cases := []struct{ userinfo, want string }{
+		{"user:pass@", "Basic dXNlcjpwYXNz"},
+		{"", ""},
+		{"user:p%40ss@", "Basic dXNlcjpwQHNz"},
+		{"us%20er:pass@", "Basic dXMgZXI6cGFzcw=="},
+		{"foo:@", "Basic Zm9vOg=="},
+		{":@", ""},
+		{"@", ""},
 	}
 
-	ch := make(chan string, 1)
 	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			ch <- string(ctx.Request.Header.Peek(HeaderAuthorization))
+			auth := ctx.Request.Header.Peek(HeaderAuthorization)
+			switch string(ctx.Path()) {
+			case "/start":
+				ctx.Redirect("http://sub.example.com/trusted", StatusFound)
+			case "/trusted":
+				if string(auth) != cases[0].want {
+					t.Errorf("trusted redirect: got authorization %q, want %q", auth, cases[0].want)
+				}
+				ctx.Redirect("http://other.example/untrusted", StatusFound)
+			case "/untrusted":
+				if len(auth) != 0 {
+					t.Errorf("untrusted redirect received authorization %q", auth)
+				}
+				ctx.Redirect("http://example.com/end", StatusFound)
+			default:
+				ctx.SetBody(auth)
+			}
 		},
 	}
 	go s.Serve(ln) //nolint:errcheck
@@ -1999,19 +2095,21 @@ func TestClientURLAuth(t *testing.T) {
 			return ln.Dial()
 		},
 	}
-	for up, expected := range cases {
-		req := AcquireRequest()
-		req.Header.SetMethod(MethodGet)
-		req.SetRequestURI("http://" + up + "example.com/foo/bar")
-		if err := c.Do(req, nil); err != nil {
+	var req Request
+	var resp Response
+	for i, tc := range cases {
+		req.SetRequestURI(fmt.Sprintf("http://%shost%d.example/foo/bar", tc.userinfo, i))
+		if err := c.Do(&req, &resp); err != nil {
 			t.Fatal(err)
 		}
-
-		val := <-ch
-
-		if val != expected {
-			t.Fatalf("wrong %q header: %q expected %q", HeaderAuthorization, val, expected)
+		if got := string(resp.Body()); got != tc.want {
+			t.Fatalf("request %d: got authorization %q, want %q", i, got, tc.want)
 		}
+	}
+
+	status, body, err := c.Get(nil, "http://user:pass@example.com/start")
+	if err != nil || status != StatusOK || len(body) != 0 {
+		t.Fatalf("return redirect: got status %d, authorization %q, error %v", status, body, err)
 	}
 }
 
@@ -3775,9 +3873,9 @@ func TestClientRedirectMethodSwitch(t *testing.T) {
 		{MethodPost, "/redirect-303", "GET|"},
 		// 303 must also drop the body of an original GET request.
 		{MethodGet, "/redirect-303", "GET|"},
-		// 301/302 historically switch POST to GET (without forcing a body drop).
-		{MethodPost, "/redirect-301", "GET|hello"},
-		{MethodPost, "/redirect-302", "GET|hello"},
+		// A 301 or 302 converts POST to GET and discards the posted body.
+		{MethodPost, "/redirect-301", "GET|"},
+		{MethodPost, "/redirect-302", "GET|"},
 		// 307 and 308 must preserve both the method and the body.
 		{MethodPost, "/redirect-307", "POST|hello"},
 		{MethodPost, "/redirect-308", "POST|hello"},
@@ -3820,8 +3918,7 @@ func TestClientRedirectBodyStream(t *testing.T) {
 
 	// The hop that receives the redirect has already consumed the body stream,
 	// so a redirect that keeps the body cannot be replayed: 307 and 308 used to
-	// arrive with an empty body, and the POST switch to GET on 301/302 hung
-	// waiting for a body that never came.
+	// arrive with an empty body.
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			switch string(ctx.Path()) {
@@ -3862,9 +3959,10 @@ func TestClientRedirectBodyStream(t *testing.T) {
 		path         string
 		expectedBody string
 	}{
-		// All four body-preserving statuses must report the unusable stream.
-		{ErrRedirectBodyStream, MethodPost, "/redirect-301", ""},
-		{ErrRedirectBodyStream, MethodPost, "/redirect-302", ""},
+		// Switching a POST to GET does not require replaying the stream.
+		{nil, MethodPost, "/redirect-301", "GET|"},
+		{nil, MethodPost, "/redirect-302", "GET|"},
+		// Redirects that preserve the body must report the unusable stream.
 		{ErrRedirectBodyStream, MethodPost, "/redirect-307", ""},
 		{ErrRedirectBodyStream, MethodPost, "/redirect-308", ""},
 		{ErrRedirectBodyStream, MethodQuery, "/redirect-301", ""},
@@ -3906,18 +4004,25 @@ func TestClientRedirectBodyStream(t *testing.T) {
 	}
 }
 
-func TestClientRedirect303DropsBodyFramingHeaders(t *testing.T) {
+func TestClientRedirectDropsBodyFramingHeaders(t *testing.T) {
 	t.Parallel()
 
 	// /landing echoes back the body-framing headers it received so the test
-	// can verify that none of them survived the 303 body drop.
+	// can verify that none of them reached the other host.
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			switch string(ctx.Path()) {
-			case "/redirect":
-				ctx.Redirect("/landing", StatusSeeOther)
+			case "/301":
+				ctx.Redirect("http://other.test/landing", StatusMovedPermanently)
+			case "/302":
+				ctx.Redirect("http://other.test/landing", StatusFound)
+			case "/303":
+				ctx.Redirect("http://other.test/landing", StatusSeeOther)
 			case "/landing":
-				ctx.SetBodyString("te=" + string(ctx.Request.Header.Peek(HeaderTransferEncoding)) +
+				ctx.SetBodyString(string(ctx.Host()) + "|" + string(ctx.Method()) +
+					"|cl=" + string(ctx.Request.Header.Peek(HeaderContentLength)) +
+					"|ct=" + string(ctx.Request.Header.Peek(HeaderContentType)) +
+					"|te=" + string(ctx.Request.Header.Peek(HeaderTransferEncoding)) +
 					"|trailer=" + string(ctx.Request.Header.Peek(HeaderTrailer)) +
 					"|body=" + string(ctx.PostBody()))
 			default:
@@ -3932,34 +4037,37 @@ func TestClientRedirect303DropsBodyFramingHeaders(t *testing.T) {
 		}
 	}()
 
-	c := &HostClient{
-		Addr: "xxx",
+	c := &Client{
 		Dial: func(addr string) (net.Conn, error) { return ln.Dial() },
 	}
 
-	req := AcquireRequest()
-	resp := AcquireResponse()
-	defer ReleaseRequest(req)
-	defer ReleaseResponse(resp)
+	for _, status := range []string{"301", "302", "303"} {
+		t.Run(status, func(t *testing.T) {
+			req := AcquireRequest()
+			resp := AcquireResponse()
+			defer ReleaseRequest(req)
+			defer ReleaseResponse(resp)
 
-	// Original chunked POST carrying a trailer; the 303 must turn it into a
-	// body-less GET with no Transfer-Encoding/Trailer left behind.
-	req.Header.SetMethod(MethodPost)
-	req.SetRequestURI("http://xxx/redirect")
-	req.Header.Set(HeaderTransferEncoding, "chunked")
-	if err := req.Header.SetTrailer("X-Sum"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	req.SetBodyString("hello")
+			// The redirected GET must lose the POST body and its framing.
+			req.Header.SetMethod(MethodPost)
+			req.SetRequestURI("http://original.test/" + status)
+			req.Header.SetContentType("text/plain")
+			req.Header.Set(HeaderTransferEncoding, "chunked")
+			if err := req.Header.SetTrailer("X-Sum"); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			req.SetBodyString("hello")
 
-	if err := c.DoRedirects(req, resp, 16); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := resp.StatusCode(); got != StatusOK {
-		t.Fatalf("unexpected status code: %d", got)
-	}
-	if got, want := string(resp.Body()), "te=|trailer=|body="; got != want {
-		t.Fatalf("unexpected landing echo %q. Expecting %q", got, want)
+			if err := c.DoRedirects(req, resp, 16); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := resp.StatusCode(); got != StatusOK {
+				t.Fatalf("unexpected status code: %d", got)
+			}
+			if got, want := string(resp.Body()), "other.test|GET|cl=|ct=|te=|trailer=|body="; got != want {
+				t.Fatalf("unexpected landing echo %q. Expecting %q", got, want)
+			}
+		})
 	}
 }
 
@@ -4116,6 +4224,45 @@ func TestClientRedirectInvalidLocation(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestClientRedirectStripsMixedCaseCredentials(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://example.com/")
+	req.Header.DisableNormalizing()
+	req.Header.SetCookie("session", "secret")
+	for _, key := range []string{"authorization", "AUTHORIZATION", "cOoKiE2", "proxy-authenticate", "Proxy-AUTHORIZATION", "WWW-authenticate"} {
+		req.Header.Add(key, "secret")
+	}
+	req.Header.Set("x-keep", "public")
+	client := Client{Transport: &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+		switch host := string(req.URI().Host()); host {
+		case "example.com":
+			resp.Header.SetStatusCode(StatusFound)
+			resp.Header.Set(HeaderLocation, "http://sub.example.com/")
+		case "sub.example.com":
+			if got := string(req.Header.Peek("authorization")); got != "secret" {
+				t.Fatalf("trusted redirect authorization = %q", got)
+			}
+			resp.Header.SetStatusCode(StatusFound)
+			resp.Header.Set(HeaderLocation, "http://other.example/")
+		case "other.example":
+			headers := req.Header.Header()
+			if bytes.Contains(headers, []byte("secret")) || !bytes.Contains(headers, []byte("x-keep: public\r\n")) {
+				t.Fatalf("unexpected redirected headers: %s", headers)
+			}
+			resp.Header.SetStatusCode(StatusOK)
+		default:
+			t.Fatalf("unexpected host %q", host)
+		}
+		return false, nil
+	}}}
+	if err := client.DoRedirects(&req, &resp, 2); err != nil || resp.StatusCode() != StatusOK {
+		t.Fatalf("redirects returned status %d, error %v", resp.StatusCode(), err)
 	}
 }
 

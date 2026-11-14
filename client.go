@@ -1327,6 +1327,7 @@ func doRequestFollowRedirects(
 	// Writing the request consumes a body stream, so remember it here: by the
 	// time a redirect arrives req.IsBodyStream() is already false.
 	hasBodyStream := req.IsBodyStream()
+	var username, password []byte
 
 	for {
 		req.SetRequestURI(url)
@@ -1334,6 +1335,10 @@ func doRequestFollowRedirects(
 			return 0, nil, err
 		}
 
+		if len(username) > 0 {
+			req.uri.SetUsernameBytes(username)
+			req.uri.SetPasswordBytes(password)
+		}
 		if err = c.Do(req, resp); err != nil {
 			break
 		}
@@ -1366,26 +1371,20 @@ func doRequestFollowRedirects(
 			ReleaseURI(redirectURI)
 			break
 		}
-		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
+		if shouldStripSensitiveHeadersOnRedirect(initialHost, redirectURI.Host()) {
+			stripSensitiveHeadersOnRedirect(req)
+			username, password = nil, nil
+		} else if redirectsCount == 1 && len(req.uri.username) > 0 {
+			// URI.String omits userinfo. Carry it across trusted redirects.
+			username = bytes.Clone(req.uri.username)
+			password = bytes.Clone(req.uri.password)
+		}
 		ReleaseURI(redirectURI)
 
-		// Every redirect but 303 keeps the body, and a consumed stream cannot
-		// produce it again. Fail instead of following with an empty body, the
-		// same reason the retry path refuses to retry such a request.
-		if hasBodyStream && statusCode != StatusSeeOther {
-			err = ErrRedirectBodyStream
-			break
-		}
-
-		switch {
-		case statusCode == StatusSeeOther:
-			// RFC 9110 section 15.4.4: a 303 (See Other) response redirects
-			// the user agent to retrieve the new URI with a GET (or HEAD)
-			// request, regardless of the original method, and without the
-			// original request body. Drop the body together with every header
-			// that frames it: per RFC 9112 a body is signaled by Content-Length
-			// or Transfer-Encoding, and a Trailer only applies to a chunked
-			// body, so all of them must go once the body is gone.
+		// A 303, or a POST rewritten to GET on 301/302, retrieves the target
+		// without the original body (RFC 9110 section 15.4).
+		if statusCode == StatusSeeOther ||
+			((statusCode == StatusMovedPermanently || statusCode == StatusFound) && req.Header.IsPost()) {
 			if !req.Header.IsGet() && !req.Header.IsHead() {
 				req.Header.SetMethod(MethodGet)
 			}
@@ -1399,11 +1398,10 @@ func doRequestFollowRedirects(
 			// The body is gone for the rest of the chain, so later
 			// body-preserving redirects have nothing left to replay.
 			hasBodyStream = false
-		case req.Header.IsPost() && (statusCode == StatusMovedPermanently || statusCode == StatusFound):
-			// RFC 9110 sections 15.4.2/15.4.3 Note: for historical reasons a
-			// user agent MAY change the request method from POST to GET for a
-			// 301 (Moved Permanently) or 302 (Found) response.
-			req.Header.SetMethod(MethodGet)
+		} else if hasBodyStream {
+			// The previous hop consumed the stream this redirect would replay.
+			err = ErrRedirectBodyStream
+			break
 		}
 
 		if err = closeOrDrainResponseBody(resp, maxResponseBodyDrainSize); err != nil {
@@ -1437,17 +1435,28 @@ func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool
 // Redirect handling reuses the original Request, so sensitive request
 // headers must be cleared before following redirects that net/http treats
 // as untrusted.
-func stripSensitiveHeadersOnRedirect(req *Request, initialHost []byte, redirectURI *URI) {
-	if !shouldStripSensitiveHeadersOnRedirect(initialHost, redirectURI.Host()) {
-		return
-	}
+func stripSensitiveHeadersOnRedirect(req *Request) {
+	h := &req.Header
+	h.cookies = h.cookies[:0]
+	h.h = stripSensitiveFields(h.h)
+	h.trailerH = stripSensitiveFields(h.trailerH)
+}
 
-	req.Header.Del(HeaderAuthorization)
-	req.Header.Del(HeaderCookie)
-	req.Header.Del(HeaderCookie2) // Match net/http behavior.
-	req.Header.Del(HeaderProxyAuthenticate)
-	req.Header.Del(HeaderProxyAuthorization)
-	req.Header.Del(HeaderWWWAuthenticate)
+func stripSensitiveFields(fields []argsKV) []argsKV {
+	n := 0
+	for i := range fields {
+		key := fields[i].key
+		if caseInsensitiveCompare(key, strAuthorization) || caseInsensitiveCompare(key, strCookie) ||
+			caseInsensitiveCompare(key, []byte(HeaderCookie2)) || caseInsensitiveCompare(key, strProxyAuthenticate) ||
+			caseInsensitiveCompare(key, strProxyAuthorization) || caseInsensitiveCompare(key, strWWWAuthenticate) {
+			continue
+		}
+		if i != n {
+			fields[n], fields[i] = fields[i], fields[n]
+		}
+		n++
+	}
+	return fields[:n]
 }
 
 // shouldStripSensitiveHeadersOnRedirect defines the trust boundary for
@@ -2940,7 +2949,15 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 
 	// Make a copy of the request in order to avoid data races on timeouts
 	req.copyToSkipBody(&w.reqCopy)
-	if req.KeepBodyBuffer && req.body != nil {
+	switch {
+	case req.onlyMultipartForm() && req.bodyStream == nil && req.bodyRaw == nil:
+		// The caller owns the form's temporary files and can remove them after a timeout.
+		if err := WriteMultipartForm(w.reqCopy.bodyBuffer(), req.multipartForm, req.multipartFormBoundary); err != nil {
+			c.releasePipelineWork(w)
+			return err
+		}
+		w.reqCopy.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
+	case req.KeepBodyBuffer && req.body != nil:
 		if req.bodyStream != nil {
 			w.reqCopy.bodyStream = req.bodyStream
 			req.bodyStream = nil
@@ -2951,7 +2968,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		} else {
 			w.reqCopy.SetBody(req.bodyBytes())
 		}
-	} else {
+	default:
 		swapRequestBody(req, &w.reqCopy)
 	}
 
@@ -3494,6 +3511,13 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 			w.done <- struct{}{}
 			return err
 		}
+		if w.resp.StatusCode() == StatusSwitchingProtocols {
+			// Stop the writer before handing the response to the caller.
+			// Bytes after the 101 belong to the upgraded protocol.
+			conn.Close()
+			w.done <- struct{}{}
+			return nil
+		}
 		if streamBody && !w.resp.mustSkipBody() {
 			w.resp.bodyStream = bytes.NewReader(w.resp.bodyBytes())
 		}
@@ -3689,7 +3713,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		return needRetry, err
 	}
 
-	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
+	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose() || resp.StatusCode() == StatusSwitchingProtocols
 	if customStreamBody && resp.bodyStream != nil {
 		// releaseConn runs when the caller closes the body stream, so it has to
 		// re-check resp.ConnectionClose(): a caller may only decide that the
