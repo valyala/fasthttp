@@ -237,7 +237,7 @@ func (req *Request) SetRequestURIBytes(requestURI []byte) {
 // return an empty value. Use req.URI().RequestURI() when the parsed URI and its
 // host must remain available.
 func (req *Request) RequestURI() []byte {
-	if req.parsedURI {
+	if req.parsedURI && req.uriParseErr == nil {
 		requestURI := req.requestURIFromURI()
 		req.SetRequestURIBytes(requestURI)
 	}
@@ -2226,8 +2226,10 @@ func (req *Request) Write(w *bufio.Writer) error {
 // write reports whether it started writing the request to w.
 func (req *Request) write(w *bufio.Writer) (bool, error) {
 	if len(req.Header.Host()) == 0 || req.parsedURI {
-		uri := req.URI()
-		host := uri.Host()
+		if err := req.parseURI(); err != nil {
+			return false, err
+		}
+		host := req.uri.Host()
 		if len(req.Header.Host()) == 0 {
 			if len(host) == 0 {
 				return false, errRequestHostRequired
@@ -2240,20 +2242,20 @@ func (req *Request) write(w *bufio.Writer) (bool, error) {
 
 		// Like net/http, only fill in Authorization from the userinfo
 		// if it hasn't been set already.
-		if len(uri.username) > 0 && len(req.Header.peek(strAuthorization)) == 0 {
+		if len(req.uri.username) > 0 && len(req.Header.peek(strAuthorization)) == 0 {
 			// RequestHeader.SetBytesKV only uses RequestHeader.bufKV.key
 			// So we are free to use RequestHeader.bufKV.value as a scratch pad for
 			// the base64 encoding.
-			nl := len(uri.username) + len(uri.password) + 1
+			nl := len(req.uri.username) + len(req.uri.password) + 1
 			nb := nl + len(strBasicSpace)
 			tl := nb + base64.StdEncoding.EncodedLen(nl)
 			if tl > cap(req.Header.bufV) {
 				req.Header.bufV = make([]byte, 0, tl)
 			}
 			buf := req.Header.bufV[:0]
-			buf = append(buf, uri.username...)
+			buf = append(buf, req.uri.username...)
 			buf = append(buf, strColon...)
-			buf = append(buf, uri.password...)
+			buf = append(buf, req.uri.password...)
 			buf = append(buf, strBasicSpace...)
 			base64.StdEncoding.Encode(buf[nb:tl], buf[:nl])
 			req.Header.SetBytesKV(strAuthorization, buf[nl:tl])
