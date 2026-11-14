@@ -277,6 +277,20 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 		req.Header.SetNoDefaultContentType(true)
 	}
 
+	// Announce trailers before copying headers so each announcement does not
+	// have to scan the header block for values to move.
+	hasBody := r.Body != nil && r.Body != http.NoBody
+
+	var trailerKeys []string
+	if hasBody {
+		for k := range r.Trailer {
+			if req.Header.AddTrailer(k) != nil {
+				continue
+			}
+			trailerKeys = append(trailerKeys, k)
+		}
+	}
+
 	for k, values := range r.Header {
 		if strings.EqualFold(k, fasthttp.HeaderHost) ||
 			strings.EqualFold(k, fasthttp.HeaderContentLength) ||
@@ -298,18 +312,9 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 		}
 	}
 
-	hasBody := r.Body != nil && r.Body != http.NoBody
-
-	var trailerKeys []string
-	if hasBody {
-		for k, values := range r.Trailer {
-			if req.Header.AddTrailer(k) != nil {
-				continue
-			}
-			trailerKeys = append(trailerKeys, k)
-			if len(values) > 0 {
-				req.Header.Set(k, strings.Join(values, ", "))
-			}
+	for _, k := range trailerKeys {
+		if values := r.Trailer[k]; len(values) > 0 {
+			req.Header.Set(k, strings.Join(values, ", "))
 		}
 	}
 
