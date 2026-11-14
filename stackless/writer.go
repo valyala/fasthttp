@@ -35,8 +35,9 @@ type NewWriterFunc func(w io.Writer) Writer
 func NewWriter(dstW io.Writer, newWriter NewWriterFunc) Writer {
 	w := &writer{
 		dstW: dstW,
+		xw:   new(xWriter),
 	}
-	w.zw = newWriter(&w.xw)
+	w.zw = newWriter(w.xw)
 	return w
 }
 
@@ -45,7 +46,7 @@ type writer struct {
 	zw   Writer
 
 	err error
-	xw  xWriter
+	xw  *xWriter // A separate allocation avoids a finalizer cycle through zw.
 
 	p []byte
 	n int
@@ -143,7 +144,7 @@ func writerFunc(ctx any) {
 	case opClose:
 		w.err = w.zw.Close()
 	case opReset:
-		w.zw.Reset(&w.xw)
+		w.zw.Reset(w.xw)
 		w.err = nil
 	default:
 		panic(fmt.Sprintf("BUG: unexpected op: %d", w.op))
