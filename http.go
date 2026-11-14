@@ -3549,7 +3549,8 @@ func appendBodyFixedSize(r *bufio.Reader, dst []byte, n int) ([]byte, error) {
 	offset := len(dst)
 	dstLen := offset + n
 	if cap(dst) < dstLen {
-		b := make([]byte, roundUpForSliceCap(dstLen))
+		// Leave room for subsequent chunks even above the rounding threshold.
+		b := make([]byte, max(roundUpForSliceCap(dstLen), offset+offset/4))
 		copy(b, dst)
 		dst = b
 	}

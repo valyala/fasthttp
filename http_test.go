@@ -3761,6 +3761,26 @@ func TestReadBodyChunked(t *testing.T) {
 	testReadBodyChunked(t, 12343)
 }
 
+func TestAppendBodyFixedSizeLargeChunks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires a body larger than 100 MiB")
+	}
+	body := make([]byte, 101<<20)
+	r := bufio.NewReader(strings.NewReader("ab"))
+	body, err := appendBodyFixedSize(r, body, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := &body[0]
+	body, err = appendBodyFixedSize(r, body, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if &body[0] != first {
+		t.Fatal("second one-byte chunk reallocated the body")
+	}
+}
+
 func TestRequestURITLS(t *testing.T) {
 	t.Parallel()
 
