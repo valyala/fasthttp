@@ -3121,3 +3121,235 @@ func TestOSFSOpenReturnsOSFile(t *testing.T) {
 		}
 	}
 }
+
+// shortWriter accepts at most n bytes and reports no error.
+type shortWriter struct{ n int }
+
+type errorWriter struct {
+	n   int
+	err error
+}
+
+func (w *errorWriter) Write(p []byte) (int, error) {
+	if len(p) > w.n {
+		p = p[:w.n]
+	}
+	return len(p), w.err
+}
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	if len(p) > w.n {
+		p = p[:w.n]
+	}
+	return len(p), nil
+}
+
+func TestFSSmallFileWriteToShortWrite(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	body := []byte("small file body for short write")
+	if err := os.WriteFile(filepath.Join(dir, "small.txt"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		fs   *FS
+	}{
+		{name: "cached", fs: &FS{Root: dir}},
+		{name: "skip cache", fs: &FS{Root: dir, SkipCache: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := tt.fs.NewRequestHandler()
+			var ctx RequestCtx
+			ctx.Init(&Request{}, nil, TestLogger{t})
+			ctx.Request.SetRequestURI("/small.txt")
+			h(&ctx)
+			defer func() {
+				if err := ctx.Response.CloseBodyStream(); err != nil {
+					t.Error(err)
+				}
+			}()
+
+			stream := ctx.Response.BodyStream()
+			r, ok := stream.(*fsSmallFileReader)
+			if !ok {
+				t.Fatalf("unexpected body stream %T. Expecting *fsSmallFileReader", stream)
+			}
+
+			w := &shortWriter{n: 4}
+			n, err := r.WriteTo(w)
+			if n != 4 {
+				t.Errorf("wrote %d bytes, want 4", n)
+			}
+			if err != io.ErrShortWrite {
+				t.Errorf("got %v, want io.ErrShortWrite", err)
+			}
+			if r.startPos != 4 {
+				t.Errorf("startPos = %d, want 4", r.startPos)
+			}
+		})
+	}
+}
+
+func TestFSSmallFileWriteToPreservesWriterError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "small.txt"), []byte("small file body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := (&FS{Root: dir}).NewRequestHandler()
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, TestLogger{t})
+	ctx.Request.SetRequestURI("/small.txt")
+	h(&ctx)
+	defer func() {
+		if err := ctx.Response.CloseBodyStream(); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	r := ctx.Response.BodyStream().(*fsSmallFileReader) //nolint:forcetypeassert
+	want := errors.New("write failed")
+	w := &errorWriter{n: 4, err: want}
+	if _, err := r.WriteTo(w); err != want {
+		t.Errorf("got %v, want %v", err, want)
+	}
+}
+
+// dataAndEOFFile returns data and io.EOF in the same ReadAt call. os.File
+// does this when the file shrinks after its size was cached, so the loop in
+// fsSmallFileReader.WriteTo must still honor the destination writer's error.
+type dataAndEOFFile struct {
+	data []byte
+}
+
+func (f *dataAndEOFFile) ReadAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(f.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.data[off:])
+	return n, io.EOF
+}
+
+func (f *dataAndEOFFile) Read(p []byte) (int, error)   { return 0, io.EOF }
+func (f *dataAndEOFFile) Close() error                 { return nil }
+func (f *dataAndEOFFile) Stat() (iofs.FileInfo, error) { return nil, errors.New("unused") }
+
+var errTooManyWrites = errors.New("too many writes")
+
+// plainWriter only implements io.Writer. bytes.Buffer implements io.ReaderFrom,
+// which would bypass the ReadAt loop under test. The write count also bounds
+// that loop so a regression fails instead of spinning on empty writes forever.
+type plainWriter struct {
+	b     bytes.Buffer
+	calls int
+}
+
+func (w *plainWriter) Write(p []byte) (int, error) {
+	w.calls++
+	if w.calls > 3 {
+		return 0, errTooManyWrites
+	}
+	return w.b.Write(p)
+}
+
+func TestFSSmallFileWriteToDataAndEOFShortWrite(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.startPos = 0
+	r.endPos = ff.contentLength
+
+	w := &shortWriter{n: 4}
+	n, err := r.WriteTo(w)
+	if n != 4 {
+		t.Errorf("wrote %d bytes, want 4", n)
+	}
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Errorf("got %v, want io.ErrShortWrite", err)
+	}
+	if r.startPos != 4 {
+		t.Errorf("startPos = %d, want 4", r.startPos)
+	}
+}
+
+func TestFSSmallFileWriteToDataAndEOFPreservesWriterError(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.endPos = ff.contentLength
+
+	want := errors.New("write failed")
+	w := &errorWriter{n: 4, err: want}
+	_, err := r.WriteTo(w)
+	if !errors.Is(err, want) {
+		t.Errorf("got %v, want the original writer error", err)
+	}
+	if errors.Is(err, io.ErrShortWrite) {
+		t.Errorf("original writer error was replaced: %v", err)
+	}
+}
+
+// dataAndEOFFile can also stand in for an io.PipeReader: ReadAt returns data
+// together with io.EOF, and the destination writer may return io.EOF after a
+// partial write (CloseWithError(io.EOF)). Only the EOF originating from ReadAt
+// may be cleared; an EOF returned by the writer must reach the caller so a
+// partially copied file is not reported as a clean success.
+func TestFSSmallFileWriteToKeepsWriterEOF(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.endPos = ff.contentLength
+
+	w := &errorWriter{n: 4, err: io.EOF}
+	n, err := r.WriteTo(w)
+	if n != 4 {
+		t.Errorf("wrote %d bytes, want 4", n)
+	}
+	if err != io.EOF {
+		t.Errorf("got %v, want io.EOF from the destination writer", err)
+	}
+	if r.startPos != 4 {
+		t.Errorf("startPos = %d, want 4", r.startPos)
+	}
+}
+
+// A clean copy must still report success when the cached endPos is past the
+// end of a file that shrank: the io.EOF from ReadAt is not an error to the
+// caller, and the loop must stop instead of issuing empty writes forever.
+// Use a destination that only implements io.Writer: bytes.Buffer implements
+// io.ReaderFrom, which bypasses this loop entirely.
+func TestFSSmallFileWriteToClearsReadAtEOF(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.endPos = 20 // stale cached size; the file now holds only 10 bytes
+
+	w := &plainWriter{}
+	n, err := r.WriteTo(w)
+	if err != nil {
+		t.Errorf("got %v, want nil after a complete copy", err)
+	}
+	if n != 10 || w.b.String() != "small file" {
+		t.Errorf("wrote %d bytes %q, want 10 bytes %q", n, w.b.String(), "small file")
+	}
+	if w.calls != 1 {
+		t.Errorf("destination was written %d times, want 1 (no empty writes after source EOF)", w.calls)
+	}
+	if r.startPos != 10 {
+		t.Errorf("startPos = %d, want 10", r.startPos)
+	}
+}

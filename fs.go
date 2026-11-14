@@ -961,8 +961,12 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 	var n int
 	var err error
 	if ff.f == nil {
-		n, err = w.Write(ff.dirIndex[r.startPos:r.endPos])
+		b := ff.dirIndex[r.startPos:r.endPos]
+		n, err = w.Write(b)
 		r.startPos += n
+		if err == nil && n != len(b) {
+			err = io.ErrShortWrite
+		}
 		return int64(n), err
 	}
 
@@ -985,21 +989,30 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 		if !ok {
 			return 0, errors.New("must implement readat")
 		}
-		n, err = ra.ReadAt(buf, int64(curPos))
+		n, readErr := ra.ReadAt(buf, int64(curPos))
 		nw, errw := w.Write(buf[:n])
 		curPos += nw
 		if errw == nil && nw != n {
-			errw = errors.New("bug: write returned (n, nil), where n != len(p)")
+			errw = io.ErrShortWrite
 		}
-		if err == nil {
+		// The destination writer's error takes precedence, including an
+		// io.EOF from a pipe writer after a partial copy. It must never be
+		// cleared by the source EOF handling below.
+		if errw != nil {
 			err = errw
+			break
 		}
+		// ReadAt may return data together with io.EOF when the file shrank
+		// after its size was cached. That EOF only marks the end of the source:
+		// stop here, otherwise curPos stays below endPos and the loop keeps
+		// issuing empty writes.
+		if readErr == io.EOF {
+			break
+		}
+		err = readErr
 	}
 	copyBufPool.Put(bufv)
 
-	if err == io.EOF {
-		err = nil
-	}
 	written := curPos - r.startPos
 	r.startPos = curPos
 	return int64(written), err
