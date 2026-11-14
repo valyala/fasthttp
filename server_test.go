@@ -8396,6 +8396,101 @@ func TestServerLetsResponseConsumeStreamedBody(t *testing.T) {
 	}
 }
 
+func TestServerCompressedGatewayWriteFailure(t *testing.T) {
+	t.Parallel()
+	upstream, origin := net.Pipe()
+	defer upstream.Close()
+	defer origin.Close()
+	if err := origin.SetDeadline(time.Now().Add(testTimeout(5 * time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	hc := HostClient{
+		Addr:               "upstream:80",
+		StreamResponseBody: true,
+		Dial:               func(string) (net.Conn, error) { return upstream, nil },
+	}
+	cleaned := make(chan struct{})
+	s := Server{Handler: CompressHandler(func(ctx *RequestCtx) {
+		ctx.SetUserValue("cleanup", &closerWithRequestCtx{closeFunc: func(*RequestCtx) error {
+			close(cleaned)
+			return nil
+		}})
+		if err := hc.Do(&ctx.Request, &ctx.Response); err != nil {
+			t.Error(err)
+		}
+	})}
+	client, done := streamCompatServeConn(t, &s)
+	if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nHost: upstream\r\nAccept-Encoding: gzip\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	var req Request
+	if err := req.Read(bufio.NewReader(origin)); err != nil {
+		t.Fatal(err)
+	}
+	// The compressor can send the first chunk, but cannot finish the upstream
+	// response until the origin sends its trailers.
+	if _, err := io.WriteString(origin, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\nTrailer: X-End\r\n\r\n1\r\nx\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	streamClose(t, client)
+	if err := streamAwait(t, done, "failed response write"); err == nil {
+		t.Fatal("expected response write error")
+	}
+	select {
+	case <-cleaned:
+		t.Error("context released before upstream trailers arrived")
+	default:
+	}
+	if _, err := io.WriteString(origin, "0\r\nX-End: yes\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	streamAwait(t, cleaned, "gateway context cleanup")
+}
+
+func TestServerCompressedEchoWriteFailure(t *testing.T) {
+	reading, resume := make(chan struct{}), make(chan struct{})
+	tail := make(chan string, 1)
+	cleaned := make(chan struct{})
+	s := Server{
+		StreamRequestBody: true,
+		Handler: CompressHandler(func(ctx *RequestCtx) {
+			ctx.SetUserValue("cleanup", &closerWithRequestCtx{closeFunc: func(*RequestCtx) error {
+				close(cleaned)
+				return nil
+			}})
+			r := ctx.RequestBodyStream()
+			first := true
+			ctx.SetBodyStream(bodyReadFunc(func(p []byte) (int, error) {
+				if first {
+					first = false
+					return r.Read(p[:1])
+				}
+				// Hold the compressor between reads until the response write
+				// has failed and the server has closed the connection.
+				close(reading)
+				<-resume
+				n, err := r.Read(p)
+				tail <- string(p[:n])
+				return n, err
+			}), -1)
+		}),
+	}
+	client, serverDone := streamCompatServeConn(t, &s)
+	if _, err := io.WriteString(client, "POST / HTTP/1.1\r\nHost: x\r\nAccept-Encoding: gzip\r\nContent-Length: 2\r\n\r\nab"); err != nil {
+		t.Fatal(err)
+	}
+	streamAwait(t, reading, "second compression read")
+	streamClose(t, client)
+	if err := streamAwait(t, serverDone, "failed response write"); err == nil {
+		t.Fatal("expected response write error")
+	}
+	close(resume)
+	if got := streamAwait(t, tail, "remaining request body"); got != "b" {
+		t.Fatalf("remaining request body = %q, want b", got)
+	}
+	streamAwait(t, cleaned, "request cleanup")
+}
+
 func TestServerKeepsConnWhenResponseConsumesLargeStreamedBody(t *testing.T) {
 	t.Parallel()
 

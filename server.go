@@ -2957,7 +2957,15 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			if bw == nil {
 				bw = acquireWriter(ctx)
 			}
+			bodyStream := ctx.Response.bodyStream
 			if err = writeResponse(ctx, bw); err != nil {
+				if cs, ok := bodyStream.(*compressedBodyStream); ok && cs.r != nil {
+					// The compressor may still read the request body or parse
+					// upstream trailers into the response header.
+					// Return so the connection closes and unblocks network reads.
+					go s.releaseAfterCompression(cs.done, br, ctx, reqStream)
+					br, ctx, reqStream = nil, nil, nil
+				}
 				break
 			}
 
@@ -3092,7 +3100,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	if bw != nil {
 		releaseWriter(s, bw)
 	}
-	if hijackHandler == nil {
+	if ctx != nil && hijackHandler == nil {
 		s.releaseCtx(ctx)
 	}
 	// Release the stream of the last request if the loop ended before doing
@@ -3111,6 +3119,17 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	s.idleConnsMu.Unlock()
 
 	return err
+}
+
+func (s *Server) releaseAfterCompression(done <-chan struct{}, br *bufio.Reader, ctx *RequestCtx, reqStream *requestStream) {
+	<-done
+	if br != nil {
+		releaseReader(s, br)
+	}
+	s.releaseCtx(ctx)
+	if reqStream != nil {
+		releaseRequestStream(reqStream)
+	}
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {
