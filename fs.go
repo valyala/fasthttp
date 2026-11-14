@@ -2167,13 +2167,19 @@ func (h *fsHandler) compressAndOpenFSFile(filePath, fileEncoding string) (*fsFil
 func (h *fsHandler) compressFileNolock(
 	cache osRoot, f fs.File, fileInfo fs.FileInfo, filePath, compressedFilePath, fileEncoding string,
 ) (*fsFile, error) {
-	// Attempt to open compressed file created by another concurrent
-	// goroutine.
-	// It is safe opening such a file, since the file creation
-	// is guarded by file mutex - see getFileLock call.
+	// Reuse a fresh copy, including one another goroutine just created.
 	if cached, err := cache.open(compressedFilePath); err == nil {
-		_ = f.Close()
-		return h.newCompressedFSFile(cached, compressedFilePath, fileEncoding)
+		cachedInfo, statErr := cached.Stat()
+		if statErr != nil {
+			_ = cached.Close()
+			_ = f.Close()
+			return nil, fmt.Errorf("cannot stat compressed file %q: %w", compressedFilePath, statErr)
+		}
+		if !compressedFileStale(fileInfo, cachedInfo) {
+			_ = f.Close()
+			return h.newCompressedFSFile(cached, compressedFilePath, fileEncoding)
+		}
+		_ = cached.Close()
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		_ = f.Close()
 		return nil, fmt.Errorf("cannot open compressed file %q: %w", compressedFilePath, err)
@@ -2379,10 +2385,7 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 			return nil, fmt.Errorf("cannot obtain info for original file %q: %w", filePathOriginal, err)
 		}
 
-		// Only re-create the compressed file if there was more than a second between the mod times.
-		// On macOS the gzip seems to truncate the nanoseconds in the mod time causing the original file
-		// to look newer than the gzipped file.
-		if fileInfoOriginal.ModTime().Sub(fileInfo.ModTime()) >= time.Second {
+		if compressedFileStale(fileInfoOriginal, fileInfo) {
 			// The compressed file became stale. Re-create it.
 			_ = f.Close()
 			// Only remove it from the OS filesystem. A custom FS.FS is
@@ -2396,6 +2399,11 @@ func (h *fsHandler) openFSFile(filePath string, mustCompress bool, fileEncoding 
 	}
 
 	return h.newFSFile(f, fileInfo, mustCompress, filePath, fileEncoding)
+}
+
+// Allow for compressed copies whose modification time lost subsecond precision.
+func compressedFileStale(original, compressed fs.FileInfo) bool {
+	return original.ModTime().Sub(compressed.ModTime()) >= time.Second
 }
 
 func (h *fsHandler) newFSFile(f fs.File, fileInfo fs.FileInfo, compressed bool, filePath, fileEncoding string) (*fsFile, error) {
