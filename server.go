@@ -531,24 +531,30 @@ func TimeoutWithCodeHandler(h RequestHandler, timeout time.Duration, msg string,
 			return
 		}
 
-		ch := ctx.timeoutCh
-		if ch == nil {
-			ch = make(chan struct{}, 1)
-			ctx.timeoutCh = ch
-		}
+		ch := timeoutHandlerChPool.Get().(chan struct{}) //nolint:forcetypeassert
+		timer := AcquireTimer(timeout)
 		go func() {
 			h(ctx)
 			ch <- struct{}{}
 			<-concurrencyCh
 		}()
-		ctx.timeoutTimer = initTimer(ctx.timeoutTimer, timeout)
 		select {
 		case <-ch:
-		case <-ctx.timeoutTimer.C:
-			ctx.TimeoutErrorWithCode(msg, statusCode)
+			timeoutHandlerChPool.Put(ch)
+		case <-timer.C:
+			// The handler may still send on ch. Leave it out of the pool.
+			resp := &Response{}
+			resp.SetStatusCode(statusCode)
+			resp.SetBodyString(msg)
+			// A nested timeout that expires later must preserve the first response.
+			ctx.timeoutResponse.CompareAndSwap(nil, resp)
 		}
-		stopTimer(ctx.timeoutTimer)
+		ReleaseTimer(timer)
 	}
+}
+
+var timeoutHandlerChPool = sync.Pool{
+	New: func() any { return make(chan struct{}, 1) },
 }
 
 // RequestConfig configure the per request deadline and body limits.
@@ -588,7 +594,7 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
 		// A timed-out handler may still be using both the request and response.
-		if ctx.timedOut.Load() {
+		if ctx.timeoutResponse.Load() != nil {
 			return
 		}
 		switch {
@@ -624,7 +630,7 @@ func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) R
 	return func(ctx *RequestCtx) {
 		h(ctx)
 		// A timed-out handler may still be using both the request and response.
-		if ctx.timedOut.Load() {
+		if ctx.timeoutResponse.Load() != nil {
 			return
 		}
 		switch {
@@ -676,9 +682,7 @@ type RequestCtx struct {
 	earlyHintsWriter *bufio.Writer
 	earlyHintsMu     sync.Mutex
 
-	timeoutResponse *Response
-	timeoutCh       chan struct{}
-	timeoutTimer    *time.Timer
+	timeoutResponse atomic.Pointer[Response]
 
 	hijackHandler HijackHandler
 	formValueFunc FormValueFunc
@@ -693,7 +697,6 @@ type RequestCtx struct {
 	connRequestNum          uint64
 	hijackNoResponse        bool
 	deadlineMu              sync.Mutex
-	timedOut                atomic.Bool
 	handlerDeadlineSet      atomic.Bool
 	handlerReadDeadlineSet  bool
 	handlerWriteDeadlineSet atomic.Bool
@@ -731,7 +734,7 @@ func (ctx *RequestCtx) EarlyHints() error {
 	if len(links) > 0 {
 		ctx.earlyHintsMu.Lock()
 		defer ctx.earlyHintsMu.Unlock()
-		if ctx.timedOut.Load() {
+		if ctx.timeoutResponse.Load() != nil {
 			return nil
 		}
 		c := ctx.earlyHintsWriter
@@ -974,7 +977,7 @@ func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
-	if ctx.timedOut.Load() {
+	if ctx.timeoutResponse.Load() != nil {
 		return ErrDeadlineUpdatesDisabled
 	}
 	err := ctx.c.SetReadDeadline(deadline)
@@ -992,7 +995,7 @@ func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
-	if ctx.timedOut.Load() {
+	if ctx.timeoutResponse.Load() != nil {
 		return ErrDeadlineUpdatesDisabled
 	}
 	err := ctx.c.SetWriteDeadline(deadline)
@@ -1027,7 +1030,6 @@ func (ctx *RequestCtx) reset() {
 	ctx.time = zeroTime
 	ctx.deadlineMu.Lock()
 	ctx.c = nil
-	ctx.timedOut.Store(false)
 	ctx.handlerDeadlineSet.Store(false)
 	ctx.handlerReadDeadlineSet = false
 	ctx.handlerWriteDeadlineSet.Store(false)
@@ -1038,14 +1040,6 @@ func (ctx *RequestCtx) reset() {
 	// will be assigned the same value again.
 	// ctx might still be in use for context.Done() and context.Err()
 	// which are safe to use as they only use ctx.s and no other value.
-
-	if ctx.timeoutResponse != nil {
-		ctx.timeoutResponse.Reset()
-	}
-
-	if ctx.timeoutTimer != nil {
-		stopTimer(ctx.timeoutTimer)
-	}
 
 	ctx.hijackHandler = nil
 	ctx.hijackNoResponse = false
@@ -1872,8 +1866,7 @@ func (ctx *RequestCtx) TimeoutErrorWithCode(msg string, statusCode int) {
 func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 	respCopy := &Response{}
 	resp.CopyTo(respCopy)
-	ctx.timeoutResponse = respCopy
-	ctx.timedOut.Store(true)
+	ctx.timeoutResponse.Store(respCopy)
 }
 
 // NextProto adds nph to be processed when key is negotiated when TLS
@@ -2925,7 +2918,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			s.Handler(ctx)
 		}
 
-		timeoutResponse = ctx.timeoutResponse
+		timeoutResponse = ctx.timeoutResponse.Load()
 		if timeoutResponse != nil {
 			// The timed out handler runs in its own goroutine and may still be
 			// reading the streamed body from br, so it cannot be drained here.
@@ -2937,7 +2930,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			}
 			reqStream = nil
 			// Wait for any hints already being written before reusing bw.
-			// Later calls on this context observe timedOut and skip the write.
+			// Later calls see the timeout response and skip the write.
 			ctx.earlyHintsMu.Lock()
 			ctx.earlyHintsWriter = nil
 			ctx.earlyHintsMu.Unlock()
@@ -3309,11 +3302,11 @@ func (c *hijackConn) Close() error {
 //
 // This function is intended for custom server implementations.
 func (ctx *RequestCtx) LastTimeoutErrorResponse() *Response {
-	return ctx.timeoutResponse
+	return ctx.timeoutResponse.Load()
 }
 
 func writeResponse(ctx *RequestCtx, w *bufio.Writer) error {
-	if ctx.timeoutResponse != nil {
+	if ctx.timeoutResponse.Load() != nil {
 		return errors.New("cannot write timed out response")
 	}
 	err := ctx.Response.write(ctx.c, w)
@@ -3555,7 +3548,7 @@ func (fa *fakeAddrer) Close() error {
 }
 
 func (s *Server) releaseCtx(ctx *RequestCtx) {
-	if ctx.timeoutResponse != nil {
+	if ctx.timeoutResponse.Load() != nil {
 		// developer sanity-check
 		panic("BUG: cannot release timed out RequestCtx")
 	}

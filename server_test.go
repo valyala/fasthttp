@@ -4211,8 +4211,12 @@ func TestCompressHandlerTimeout(t *testing.T) {
 				ctx.Response.SetBodyString(body)
 				release := make(chan struct{})
 				h := RequestHandler(func(_ *RequestCtx) { <-release })
+				done := make(chan struct{})
 				timeout := func(h RequestHandler) RequestHandler {
-					return TimeoutHandler(h, testTimeout(time.Millisecond), "timeout")
+					return TimeoutHandler(func(ctx *RequestCtx) {
+						defer close(done)
+						h(ctx)
+					}, testTimeout(time.Millisecond), "timeout")
 				}
 				if timeoutFirst {
 					timeout(compress(h))(&ctx)
@@ -4220,7 +4224,7 @@ func TestCompressHandlerTimeout(t *testing.T) {
 					compress(timeout(h))(&ctx)
 				}
 				close(release)
-				<-ctx.timeoutCh // The timed-out handler has finished using ctx.
+				<-done // The timed-out handler has finished using ctx.
 				if resp := ctx.LastTimeoutErrorResponse(); resp == nil || resp.StatusCode() != StatusRequestTimeout {
 					t.Fatalf("expected timeout response (timeoutFirst=%t)", timeoutFirst)
 				}
@@ -5388,6 +5392,41 @@ func TestRequestCtxInit(t *testing.T) {
 	expectedLog := fmt.Sprintf("#%016X - 0.0.0.0:0<->0.0.0.0:0 - GET http:/// - foo bar 10\n", ctx.ID())
 	if logger.out != expectedLog {
 		t.Fatalf("Unexpected log output: %q. Expected %q", logger.out, expectedLog)
+	}
+}
+
+func TestTimeoutHandlerNested(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name         string
+		outer, inner time.Duration
+		want         string
+	}{
+		{"inner first", time.Hour, time.Millisecond, "inner"},
+		{"outer first", time.Millisecond, testTimeout(20 * time.Millisecond), "outer"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var ctx RequestCtx
+			ctx.s = &Server{}
+			release := make(chan struct{})
+			inner := TimeoutHandler(func(*RequestCtx) { <-release }, tt.inner, "inner")
+			innerDone := make(chan struct{})
+			outer := TimeoutHandler(func(ctx *RequestCtx) {
+				inner(ctx)
+				close(innerDone)
+			}, tt.outer, "outer")
+			defer close(release)
+			outer(&ctx)
+			select {
+			case <-innerDone:
+			case <-time.After(time.Second):
+				t.Fatal("inner timeout handler did not return")
+			}
+			if resp := ctx.LastTimeoutErrorResponse(); resp == nil || string(resp.Body()) != tt.want {
+				t.Fatalf("expected %s timeout, got %v", tt.want, resp)
+			}
+		})
 	}
 }
 
