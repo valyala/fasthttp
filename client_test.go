@@ -5546,6 +5546,58 @@ func TestClientTLSHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestClientTLSHandshakeDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name                                      string
+		readTimeout, writeTimeout, requestTimeout time.Duration
+		want                                      error
+		preconnect                                bool
+	}{
+		{name: "request", requestTimeout: 50 * time.Millisecond, want: ErrTimeout},
+		{name: "read", readTimeout: 50 * time.Millisecond, want: ErrTimeout},
+		{name: "longer write", writeTimeout: time.Minute, requestTimeout: 50 * time.Millisecond, want: ErrTLSHandshakeTimeout},
+		{name: "unused pooled connection", preconnect: true, requestTimeout: 50 * time.Millisecond, want: ErrTimeout},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			client, peer := net.Pipe()
+			defer peer.Close()
+			go func() {
+				_, _ = io.Copy(io.Discard, peer) // Consume ClientHello without responding.
+			}()
+			hc := HostClient{
+				Addr:                      "localhost:443",
+				IsTLS:                     true,
+				ReadTimeout:               tc.readTimeout,
+				WriteTimeout:              tc.writeTimeout,
+				MaxIdemponentCallAttempts: 1,
+				Dial:                      func(string) (net.Conn, error) { return client, nil },
+			}
+			if tc.preconnect {
+				cc, err := hc.AcquireConn(0, false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				hc.ReleaseConn(cc)
+			}
+			var req Request
+			req.SetRequestURI("https://localhost/")
+			req.SetTimeout(tc.requestTimeout)
+			done := make(chan error, 1)
+			go func() { done <- hc.Do(&req, nil) }()
+			select {
+			case err := <-done:
+				if err != tc.want {
+					t.Fatalf("got %v, want %v", err, tc.want)
+				}
+			case <-time.After(2 * time.Second):
+				peer.Close()
+				t.Fatalf("TLS handshake exceeded timeout (returned %v after closing peer)", <-done)
+			}
+		})
+	}
+}
+
 func TestClientConfigureClientFailed(t *testing.T) {
 	t.Parallel()
 
