@@ -4279,8 +4279,12 @@ func TestCompressHandlerTimeout(t *testing.T) {
 				ctx.Response.SetBodyString(body)
 				release := make(chan struct{})
 				h := RequestHandler(func(_ *RequestCtx) { <-release })
+				done := make(chan struct{})
 				timeout := func(h RequestHandler) RequestHandler {
-					return TimeoutHandler(h, testTimeout(time.Millisecond), "timeout")
+					return TimeoutHandler(func(ctx *RequestCtx) {
+						defer close(done)
+						h(ctx)
+					}, testTimeout(time.Millisecond), "timeout")
 				}
 				if timeoutFirst {
 					timeout(compress(h))(&ctx)
@@ -4288,7 +4292,7 @@ func TestCompressHandlerTimeout(t *testing.T) {
 					compress(timeout(h))(&ctx)
 				}
 				close(release)
-				<-ctx.timeoutCh // The timed-out handler has finished using ctx.
+				<-done // The timed-out handler has finished using ctx.
 				if resp := ctx.LastTimeoutErrorResponse(); resp == nil || resp.StatusCode() != StatusRequestTimeout {
 					t.Fatalf("expected timeout response (timeoutFirst=%t)", timeoutFirst)
 				}
@@ -5532,6 +5536,41 @@ func TestRequestCtxInit(t *testing.T) {
 	expectedLog := fmt.Sprintf("#%016X - 0.0.0.0:0<->0.0.0.0:0 - GET http:/// - foo bar 10\n", ctx.ID())
 	if logger.out != expectedLog {
 		t.Fatalf("Unexpected log output: %q. Expected %q", logger.out, expectedLog)
+	}
+}
+
+func TestTimeoutHandlerNested(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name         string
+		outer, inner time.Duration
+		want         string
+	}{
+		{"inner first", time.Hour, time.Millisecond, "inner"},
+		{"outer first", time.Millisecond, testTimeout(20 * time.Millisecond), "outer"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var ctx RequestCtx
+			ctx.s = &Server{}
+			release := make(chan struct{})
+			inner := TimeoutHandler(func(*RequestCtx) { <-release }, tt.inner, "inner")
+			innerDone := make(chan struct{})
+			outer := TimeoutHandler(func(ctx *RequestCtx) {
+				inner(ctx)
+				close(innerDone)
+			}, tt.outer, "outer")
+			defer close(release)
+			outer(&ctx)
+			select {
+			case <-innerDone:
+			case <-time.After(time.Second):
+				t.Fatal("inner timeout handler did not return")
+			}
+			if resp := ctx.LastTimeoutErrorResponse(); resp == nil || string(resp.Body()) != tt.want {
+				t.Fatalf("expected %s timeout, got %v", tt.want, resp)
+			}
+		})
 	}
 }
 
@@ -9650,62 +9689,64 @@ func TestRequestCtxDeadlines(t *testing.T) {
 func TestServerTimeoutHandlerKeepAliveDeadlineCleared(t *testing.T) {
 	t.Parallel()
 
-	serverDateOnce.Do(updateServerDate) // Its refresh goroutine must not start inside the bubble.
-	// In a bubble the timeout fires only once the handler is blocked.
-	synctest.Test(t, func(t *testing.T) {
-		defer time.Sleep(time.Second) // A failed test still has to outlast the first handler.
+	// TimeoutHandler pools timers and channels shared with other tests, so
+	// they cannot safely be used with a synctest bubble's clock.
+	releaseFirst := make(chan struct{})
+	releaseHandler := sync.OnceFunc(func() { close(releaseFirst) })
+	defer releaseHandler()
+	timeoutHandler := TimeoutHandler(func(*RequestCtx) {
+		<-releaseFirst
+	}, 10*time.Millisecond, "timeout")
 
-		var reqNum atomic.Int64
-		s := &Server{
-			ReadTimeout:  0,
-			WriteTimeout: 0,
-			Handler: TimeoutHandler(func(ctx *RequestCtx) {
-				n := reqNum.Add(1)
-				if n == 1 {
-					if err := ctx.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
-						t.Errorf("unexpected SetReadDeadline error: %v", err)
-					}
-					time.Sleep(50 * time.Millisecond)
-				} else {
-					ctx.SetBodyString("ok-2")
+	readDeadline := time.Now().Add(testTimeout(100 * time.Millisecond))
+	var reqNum atomic.Int64
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			if reqNum.Add(1) == 1 {
+				// Set the deadline before starting the timeout, so a delayed
+				// handler cannot try to change it after timing out.
+				if err := ctx.SetReadDeadline(readDeadline); err != nil {
+					t.Errorf("unexpected SetReadDeadline error: %v", err)
 				}
-			}, 10*time.Millisecond, "timeout"),
-		}
+				timeoutHandler(ctx)
+			} else {
+				ctx.SetBodyString("ok-2")
+			}
+		},
+	}
 
-		pc := fasthttputil.NewPipeConns()
-		go s.ServeConn(pc.Conn1()) //nolint:errcheck
-		c := pc.Conn2()
-		defer c.Close()
+	server, c := net.Pipe()
+	go s.ServeConn(server) //nolint:errcheck
+	defer c.Close()
+	if err := c.SetDeadline(time.Now().Add(testTimeout(5 * time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(c)
 
-		br := bufio.NewReader(c)
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	var resp1 Response
+	if err := resp1.Read(br); err != nil {
+		t.Fatalf("reading response 1: %v", err)
+	}
+	if resp1.StatusCode() != StatusRequestTimeout {
+		t.Fatalf("unexpected status code: %d", resp1.StatusCode())
+	}
+	releaseHandler()
 
-		// First request: triggers timeout
-		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
-			t.Fatal(err)
-		}
-		var resp1 Response
-		if err := resp1.Read(br); err != nil {
-			t.Fatalf("reading response 1: %v", err)
-		}
-		if resp1.StatusCode() != StatusRequestTimeout {
-			t.Fatalf("unexpected status code: %d", resp1.StatusCode())
-		}
-
-		// Wait for the 100ms deadline to expire
-		time.Sleep(150 * time.Millisecond)
-
-		// Second request on the same keep-alive connection: should succeed
-		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
-			t.Fatal(err)
-		}
-		var resp2 Response
-		if err := resp2.Read(br); err != nil {
-			t.Fatalf("reading response 2: %v", err)
-		}
-		if string(resp2.Body()) != "ok-2" {
-			t.Fatalf("unexpected response 2 body: %q", string(resp2.Body()))
-		}
-	})
+	// The same connection must remain usable after the handler's deadline.
+	time.Sleep(time.Until(readDeadline) + testTimeout(10*time.Millisecond))
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	var resp2 Response
+	if err := resp2.Read(br); err != nil {
+		t.Fatalf("reading response 2: %v", err)
+	}
+	if string(resp2.Body()) != "ok-2" {
+		t.Fatalf("unexpected response 2 body: %q", string(resp2.Body()))
+	}
 }
 
 func TestServerWriteTimeoutAfterHandlerDeadline(t *testing.T) {
