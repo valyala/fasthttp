@@ -85,7 +85,13 @@ func TestCompressionHelpersReportCloseShortWrite(t *testing.T) {
 }
 
 func TestCompressionHelpersPreserveWriteError(t *testing.T) {
-	payload := bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog\n"), 8)
+	// A large payload makes the codecs that buffer internally (zstd at this
+	// size, gzip and deflate at any size) write to the destination both while
+	// consuming p and again on Close. That way the sentinel from the first
+	// Write has to survive a later failing Close, which is the error-precedence
+	// path a small payload cannot reach. Brotli always buffers until Close, so
+	// it exercises the single-write case.
+	payload := bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog\n"), 6000)
 	sentinel := errors.New("write failed")
 
 	for _, h := range compressionHelpers() {
@@ -97,6 +103,9 @@ func TestCompressionHelpersPreserveWriteError(t *testing.T) {
 			}
 			if errors.Is(err, io.ErrShortWrite) {
 				t.Fatalf("helper replaced the original error with io.ErrShortWrite: %v", err)
+			}
+			if w.calls < 2 && h.name != "Brotli" {
+				t.Fatalf("only %d writes reached the destination; want both a Write and a Close write", w.calls)
 			}
 		})
 	}

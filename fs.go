@@ -2029,23 +2029,34 @@ func (h *fsHandler) compressFileNolock(
 		if errf := zw.Flush(); err == nil {
 			err = errf
 		}
-		_ = releaseStacklessBrotliWriter(zw, CompressDefaultCompression)
+		// Flush can succeed while Close still fails writing the trailer. Keep
+		// the first error so the cleanup below never publishes a truncated
+		// compressed file.
+		if errc := releaseStacklessBrotliWriter(zw, CompressDefaultCompression); err == nil {
+			err = errc
+		}
 	case "gzip":
 		zw := acquireStacklessGzipWriter(zf, CompressDefaultCompression)
 		_, err = copyZeroAlloc(zw, f)
 		if errf := zw.Flush(); err == nil {
 			err = errf
 		}
-		_ = releaseStacklessGzipWriter(zw, CompressDefaultCompression)
+		if errc := releaseStacklessGzipWriter(zw, CompressDefaultCompression); err == nil {
+			err = errc
+		}
 	case "zstd":
 		zw := acquireStacklessZstdWriter(zf, CompressZstdDefault)
 		_, err = copyZeroAlloc(zw, f)
 		if errf := zw.Flush(); err == nil {
 			err = errf
 		}
-		_ = releaseStacklessZstdWriter(zw, CompressZstdDefault)
+		if errc := releaseStacklessZstdWriter(zw, CompressZstdDefault); err == nil {
+			err = errc
+		}
 	}
-	_ = zf.Close()
+	if errc := zf.Close(); err == nil {
+		err = errc
+	}
 	_ = f.Close()
 	if err != nil {
 		_ = cache.remove(tmpFilePath)
