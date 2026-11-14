@@ -2008,8 +2008,8 @@ func TestFSDirectoryRedirect(t *testing.T) {
 	tests := []struct {
 		name        string
 		pathRewrite PathRewriteFunc
+		handler     func(ctx *RequestCtx)
 		uri         string
-		setPath     string
 		location    string
 	}{
 		{name: "plain", uri: "/docs", location: "http://example.com/docs/"},
@@ -2033,7 +2033,50 @@ func TestFSDirectoryRedirect(t *testing.T) {
 		},
 		// A handler before FS may change the path. The redirect goes to the
 		// changed path: the original one may lead nowhere with a slash.
-		{name: "path set by a handler", uri: "/latest?a=b", setPath: "/docs", location: "http://example.com/docs/?a=b"},
+		{
+			name: "path set by a handler",
+			handler: func(ctx *RequestCtx) {
+				if string(ctx.Path()) == "/latest" {
+					ctx.URI().SetPath("/docs")
+				}
+			},
+			uri:      "/latest?a=b",
+			location: "http://example.com/docs/?a=b",
+		},
+		// The query goes out as the handlers before FS left it.
+		{
+			name:     "query args changed by a handler",
+			handler:  changeQueryArgs,
+			uri:      "/docs?token=secret&sort=old",
+			location: "http://example.com/docs/?sort=new",
+		},
+		{
+			name:        "query args changed, stripped slashes",
+			handler:     changeQueryArgs,
+			pathRewrite: NewPathSlashesStripper(1),
+			uri:         "/static/docs?token=secret&sort=old",
+			location:    "http://example.com/static/docs/?sort=new",
+		},
+		// What PathRewrite puts into ctx.URI() is not for the client.
+		{
+			name:        "query set by PathRewrite",
+			pathRewrite: setInternalQuery,
+			uri:         "/docs",
+			location:    "http://example.com/docs/",
+		},
+		{
+			name:        "query replaced by PathRewrite",
+			pathRewrite: setInternalQuery,
+			uri:         "/docs?sort=old",
+			location:    "http://example.com/docs/?sort=old",
+		},
+		{
+			name:        "query args changed, query replaced by PathRewrite",
+			handler:     changeQueryArgs,
+			pathRewrite: setInternalQuery,
+			uri:         "/docs?token=secret&sort=old",
+			location:    "http://example.com/docs/?sort=new",
+		},
 		{
 			name:        "stripped prefix",
 			pathRewrite: NewPathPrefixStripper(len("/static")),
@@ -2053,8 +2096,8 @@ func TestFSDirectoryRedirect(t *testing.T) {
 
 			fsHandler := (&FS{Root: dir, GenerateIndexPages: true, PathRewrite: tt.pathRewrite}).NewRequestHandler()
 			h := func(ctx *RequestCtx) {
-				if tt.setPath != "" && string(ctx.Path()) == "/latest" {
-					ctx.URI().SetPath(tt.setPath)
+				if tt.handler != nil {
+					tt.handler(ctx)
 				}
 				fsHandler(ctx)
 			}
@@ -2082,6 +2125,36 @@ func TestFSDirectoryRedirect(t *testing.T) {
 				t.Fatalf("unexpected status code %d for %q. Expecting %d", ctx.Response.StatusCode(), location, StatusOK)
 			}
 		})
+	}
+}
+
+func changeQueryArgs(ctx *RequestCtx) {
+	ctx.QueryArgs().Del("token")
+	ctx.QueryArgs().Set("sort", "new")
+}
+
+func setInternalQuery(ctx *RequestCtx) []byte {
+	ctx.URI().Update(string(ctx.Path()) + "?view=internal")
+	return ctx.Path()
+}
+
+func TestPathRewriteKeepsURI(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		f    PathRewriteFunc
+		want bool
+	}{
+		{name: "nil", f: nil, want: false},
+		{name: "slashes stripper", f: NewPathSlashesStripper(1), want: true},
+		{name: "prefix stripper", f: NewPathPrefixStripper(3), want: true},
+		{name: "virtual host", f: NewVHostPathRewriter(0), want: false},
+		{name: "custom", f: setInternalQuery, want: false},
+	} {
+		if got := pathRewriteKeepsURI(tt.f); got != tt.want {
+			t.Errorf("%s: pathRewriteKeepsURI() = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }
 
