@@ -7010,6 +7010,9 @@ func TestClientFailedRequestClearsStatusCode(t *testing.T) {
 	var httpsReq Request
 	httpsReq.SetRequestURI("https://example.com/")
 
+	var commaHostReq Request
+	commaHostReq.SetRequestURI("http://foo,bar/")
+
 	for _, tc := range []struct {
 		name string
 		do   func(resp *Response) error
@@ -7017,8 +7020,22 @@ func TestClientFailedRequestClearsStatusCode(t *testing.T) {
 		{"PipelineClient.DoTimeout", func(resp *Response) error {
 			return (&PipelineClient{}).DoTimeout(&httpReq, resp, 0)
 		}},
+		{"PipelineClient.Do TLS config error", func(resp *Response) error {
+			return (&PipelineClient{IsTLS: true, Addr: "foo:bar:baz"}).Do(&httpReq, resp)
+		}},
 		{"Client.Do unsupported scheme", func(resp *Response) error {
 			return (&Client{}).Do(&ftpReq, resp)
+		}},
+		{"Client.Do host with comma", func(resp *Response) error {
+			return (&Client{}).Do(&commaHostReq, resp)
+		}},
+		{"Client.Do ConfigureClient error", func(resp *Response) error {
+			c := &Client{
+				ConfigureClient: func(*HostClient) error {
+					return errors.New("failed to configure")
+				},
+			}
+			return c.Do(&httpReq, resp)
 		}},
 		{"HostClient.Do scheme mismatch", func(resp *Response) error {
 			return (&HostClient{}).Do(&httpsReq, resp)
@@ -7026,7 +7043,7 @@ func TestClientFailedRequestClearsStatusCode(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var resp Response
-			resp.Header.SetStatusCode(StatusOK)
+			resp.Header.SetStatusCode(StatusCreated)
 
 			if err := tc.do(&resp); err == nil {
 				t.Fatal("expecting error")
@@ -7068,6 +7085,66 @@ func TestHostClientRetryLoopTimeoutClearsStatusCode(t *testing.T) {
 	if err := c.DoTimeout(&req, &resp, 10*time.Millisecond); err != ErrTimeout {
 		t.Fatalf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 	}
+	if statusCode := resp.StatusCode(); statusCode != 0 {
+		t.Fatalf("unexpected status code after the request timed out: %d. Expecting 0", statusCode)
+	}
+}
+
+func TestPipelineClientDoTimeoutClearsStatusCode(t *testing.T) {
+	t.Parallel()
+
+	// A peer that reads the request but never replies to it.
+	ln := fasthttputil.NewInmemoryListener()
+	requestRead := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		br := bufio.NewReader(conn)
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if line == "\r\n" {
+				break
+			}
+		}
+		close(requestRead)
+		<-release
+	}()
+	t.Cleanup(func() {
+		close(release)
+		_ = ln.Close()
+	})
+
+	c := &PipelineClient{
+		Dial: func(string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		Logger: &testLogger{},
+	}
+
+	var req Request
+	req.SetRequestURI("http://example.com/")
+
+	var resp Response
+	resp.Header.SetStatusCode(StatusCreated)
+
+	if err := c.DoTimeout(&req, &resp, 100*time.Millisecond); !errors.Is(err, ErrTimeout) {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, ErrTimeout)
+	}
+
+	select {
+	case <-requestRead:
+	case <-time.After(testTimeout(5 * time.Second)):
+		t.Fatal("the peer did not read the request")
+	}
+
 	if statusCode := resp.StatusCode(); statusCode != 0 {
 		t.Fatalf("unexpected status code after the request timed out: %d. Expecting 0", statusCode)
 	}
