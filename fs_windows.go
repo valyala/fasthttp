@@ -1,7 +1,5 @@
 package fasthttp
 
-import "bytes"
-
 // ServeFile and ServeFileLiteral pass absolute filenames through a URI.
 // Remove the URI's leading slash before opening a Windows drive path.
 func serveFilePathRewrite(ctx *RequestCtx) []byte {
@@ -12,14 +10,30 @@ func serveFilePathRewrite(ctx *RequestCtx) []byte {
 	return path
 }
 
-// hasWindowsReservedPathColon reports whether path contains a ':' byte
-// that cannot be a legitimate Windows drive letter.
-func hasWindowsReservedPathColon(path []byte, rootIsEmpty bool) bool {
-	rest := path
+// hasWindowsReservedPath rejects alternate data streams and names that
+// Windows can alias by trimming trailing spaces or periods.
+func hasWindowsReservedPath(path []byte, rootIsEmpty bool) bool {
 	if rootIsEmpty && len(path) >= 2 && isASCIILetter(path[0]) && path[1] == ':' {
-		rest = path[2:]
+		path = path[2:]
 	}
-	return bytes.IndexByte(rest, ':') >= 0
+	start := 0
+	for i, c := range path {
+		switch c {
+		case ':':
+			return true
+		case '/', '\\':
+			if hasWindowsTrimmedName(path[start:i]) {
+				return true
+			}
+			start = i + 1
+		}
+	}
+	return hasWindowsTrimmedName(path[start:])
+}
+
+func hasWindowsTrimmedName(name []byte) bool {
+	return len(name) > 0 && (name[len(name)-1] == ' ' ||
+		(name[len(name)-1] == '.' && string(name) != "." && string(name) != ".."))
 }
 
 func isASCIILetter(b byte) bool {

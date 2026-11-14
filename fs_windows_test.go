@@ -70,3 +70,24 @@ func TestFSWindowsRejectsReservedDeviceNames(t *testing.T) {
 		}
 	}
 }
+
+func TestFSWindowsRejectsTrimmedNames(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	fsRootTestWriteFiles(t, root, map[string][]byte{"sub/.public file.txt": []byte("public")})
+	h := (&FS{Root: root, SkipCache: true}).NewRequestHandler()
+	if resp := fsRootTestGet(t, h, "/sub/.public%20file.txt", "", ""); resp.status != StatusOK || resp.body != "public" {
+		t.Fatalf("ordinary name: status=%d body=%q", resp.status, resp.body)
+	}
+	for _, path := range []string{
+		"/sub/.public%20file.txt.",
+		"/sub/.public%20file.txt%20",
+		"/sub./.public%20file.txt",
+		"/sub%20%5C.public%20file.txt",
+	} {
+		if resp := fsRootTestGet(t, h, path, "", ""); resp.status != StatusForbidden {
+			t.Errorf("%q: status=%d, want %d", path, resp.status, StatusForbidden)
+		}
+	}
+}

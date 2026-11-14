@@ -357,7 +357,8 @@ func pathRewriteKeepsURI(f PathRewriteFunc) bool {
 }
 
 // FS represents settings for request handler serving static files
-// from the local filesystem.
+// from the local filesystem. On Windows, the default filesystem rejects names
+// ending in a space or period to prevent access under an alternate spelling.
 //
 // It is prohibited copying FS values. Create new values instead.
 type FS struct {
@@ -1498,10 +1499,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.Error("Are you a hacker?", StatusBadRequest)
 		return
 	}
-	// Prevent request paths from reaching NTFS alternate data streams through
-	// the default osFS. Custom filesystems may define their own colon syntax.
-	if _, ok := h.filesystem.(*osFS); ok && hasWindowsReservedPathColon(path, h.root == "") {
-		ctx.Logger().Printf("cannot serve path with a Windows-reserved ':' character: %q", path)
+	// Custom filesystems define their own path syntax.
+	if _, ok := h.filesystem.(*osFS); ok && hasWindowsReservedPath(path, h.root == "") {
+		ctx.Logger().Printf("cannot serve Windows-reserved path: %q", path)
 		ctx.Error("Forbidden", StatusForbidden)
 		return
 	}
