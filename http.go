@@ -2033,27 +2033,6 @@ func (req *Request) Write(w *bufio.Writer) error {
 			req.Header.SetHostBytes(host)
 		}
 		req.Header.SetRequestURIBytes(req.requestURIFromURI())
-
-		// Like net/http, only fill in Authorization from the userinfo
-		// if it hasn't been set already.
-		if len(uri.username) > 0 && len(req.Header.peek(strAuthorization)) == 0 {
-			// RequestHeader.SetBytesKV only uses RequestHeader.bufKV.key
-			// So we are free to use RequestHeader.bufKV.value as a scratch pad for
-			// the base64 encoding.
-			nl := len(uri.username) + len(uri.password) + 1
-			nb := nl + len(strBasicSpace)
-			tl := nb + base64.StdEncoding.EncodedLen(nl)
-			if tl > cap(req.Header.bufV) {
-				req.Header.bufV = make([]byte, 0, tl)
-			}
-			buf := req.Header.bufV[:0]
-			buf = append(buf, uri.username...)
-			buf = append(buf, strColon...)
-			buf = append(buf, uri.password...)
-			buf = append(buf, strBasicSpace...)
-			base64.StdEncoding.Encode(buf[nb:tl], buf[:nl])
-			req.Header.SetBytesKV(strAuthorization, buf[nl:tl])
-		}
 	}
 
 	if req.bodyStream != nil {
@@ -2090,7 +2069,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 		if len(body) > 0 && !req.Header.noDefaultContentType && len(req.Header.ContentType()) == 0 {
 			req.Header.SetContentTypeBytes(strDefaultContentType)
 		}
-		if err = req.Header.Write(w); err != nil {
+		if err = req.writeHeader(w); err != nil {
 			return err
 		}
 		if err = writeBufferedBodyChunked(w, body); err != nil {
@@ -2098,7 +2077,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 		}
 		return req.Header.writeTrailer(w)
 	}
-	if err = req.Header.Write(w); err != nil {
+	if err = req.writeHeader(w); err != nil {
 		return err
 	}
 	if hasBody {
@@ -2110,6 +2089,45 @@ func (req *Request) Write(w *bufio.Writer) error {
 		return fmt.Errorf("non-zero body for non-post request: body=%q", body)
 	}
 	return err
+}
+
+// writeHeader adds URL credentials only while serializing this request.
+func (req *Request) writeHeader(w *bufio.Writer) error {
+	if req.parsedURI && len(req.uri.username) > 0 {
+		return req.writeHeaderWithBasicAuth(w)
+	}
+	return req.Header.Write(w)
+}
+
+func (req *Request) writeHeaderWithBasicAuth(w *bufio.Writer) error {
+	h := &req.Header
+	var kv *argsKV
+	for i := range h.h {
+		if bytes.Equal(h.h[i].key, strAuthorization) {
+			kv = &h.h[i]
+			break
+		}
+	}
+	if kv == nil {
+		h.h, kv = allocArg(h.h)
+		kv.key = append(kv.key[:0], strAuthorization...)
+		kv.value = kv.value[:0]
+		defer func() { h.h = releaseArg(h.h) }()
+	} else if len(kv.value) != 0 {
+		return h.Write(w)
+	}
+	kv.value = req.basicAuth(kv.value)
+	defer func() { kv.value = kv.value[:0] }()
+	return h.Write(w)
+}
+
+func (req *Request) basicAuth(dst []byte) []byte {
+	h := &req.Header
+	h.bufV = append(h.bufV[:0], req.uri.username...)
+	h.bufV = append(h.bufV, ':')
+	h.bufV = append(h.bufV, req.uri.password...)
+	dst = append(dst, strBasicSpace...)
+	return base64.StdEncoding.AppendEncode(dst, h.bufV)
 }
 
 // WriteGzip writes response with gzipped body to w.
@@ -2661,7 +2679,7 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 		req.Header.SetContentLength(-1)
 	}
 	req.Header.written = true
-	if err = req.Header.Write(w); err == nil {
+	if err = req.writeHeader(w); err == nil {
 		if contentLength >= 0 {
 			err = writeBodyFixedSize(w, req.bodyStream, int64(contentLength), &req.bodyStreamWriter)
 		} else if err = writeBodyChunked(w, req.bodyStream); err == nil {

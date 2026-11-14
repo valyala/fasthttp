@@ -1327,6 +1327,7 @@ func doRequestFollowRedirects(
 	// Writing the request consumes a body stream, so remember it here: by the
 	// time a redirect arrives req.IsBodyStream() is already false.
 	hasBodyStream := req.IsBodyStream()
+	var username, password []byte
 
 	for {
 		req.SetRequestURI(url)
@@ -1334,6 +1335,10 @@ func doRequestFollowRedirects(
 			return 0, nil, err
 		}
 
+		if len(username) > 0 {
+			req.uri.SetUsernameBytes(username)
+			req.uri.SetPasswordBytes(password)
+		}
 		if err = c.Do(req, resp); err != nil {
 			break
 		}
@@ -1366,7 +1371,14 @@ func doRequestFollowRedirects(
 			ReleaseURI(redirectURI)
 			break
 		}
-		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
+		if shouldStripSensitiveHeadersOnRedirect(initialHost, redirectURI.Host()) {
+			stripSensitiveHeadersOnRedirect(req)
+			username, password = nil, nil
+		} else if redirectsCount == 1 && len(req.uri.username) > 0 {
+			// URI.String omits userinfo. Carry it across trusted redirects.
+			username = bytes.Clone(req.uri.username)
+			password = bytes.Clone(req.uri.password)
+		}
 		ReleaseURI(redirectURI)
 
 		// Every redirect but 303 keeps the body, and a consumed stream cannot
@@ -1437,11 +1449,7 @@ func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool
 // Redirect handling reuses the original Request, so sensitive request
 // headers must be cleared before following redirects that net/http treats
 // as untrusted.
-func stripSensitiveHeadersOnRedirect(req *Request, initialHost []byte, redirectURI *URI) {
-	if !shouldStripSensitiveHeadersOnRedirect(initialHost, redirectURI.Host()) {
-		return
-	}
-
+func stripSensitiveHeadersOnRedirect(req *Request) {
 	req.Header.Del(HeaderAuthorization)
 	req.Header.Del(HeaderCookie)
 	req.Header.Del(HeaderCookie2) // Match net/http behavior.

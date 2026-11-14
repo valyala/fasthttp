@@ -2056,21 +2056,37 @@ func TestClientGetWithBody(t *testing.T) {
 func TestClientURLAuth(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]string{
-		"user:pass@":    "Basic dXNlcjpwYXNz",
-		"user:p%40ss@":  "Basic dXNlcjpwQHNz",
-		"us%20er:pass@": "Basic dXMgZXI6cGFzcw==",
-		"foo:@":         "Basic Zm9vOg==",
-		":@":            "",
-		"@":             "",
-		"":              "",
+	cases := []struct{ userinfo, want string }{
+		{"user:pass@", "Basic dXNlcjpwYXNz"},
+		{"", ""},
+		{"user:p%40ss@", "Basic dXNlcjpwQHNz"},
+		{"us%20er:pass@", "Basic dXMgZXI6cGFzcw=="},
+		{"foo:@", "Basic Zm9vOg=="},
+		{":@", ""},
+		{"@", ""},
 	}
 
-	ch := make(chan string, 1)
 	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
-			ch <- string(ctx.Request.Header.Peek(HeaderAuthorization))
+			auth := ctx.Request.Header.Peek(HeaderAuthorization)
+			switch string(ctx.Path()) {
+			case "/start":
+				ctx.Redirect("http://sub.example.com/trusted", StatusFound)
+			case "/trusted":
+				if string(auth) != cases[0].want {
+					t.Errorf("trusted redirect: got authorization %q, want %q", auth, cases[0].want)
+				}
+				ctx.Redirect("http://other.example/untrusted", StatusFound)
+			case "/untrusted":
+				if len(auth) != 0 {
+					t.Errorf("untrusted redirect received authorization %q", auth)
+				}
+				ctx.Redirect("http://example.com/end", StatusFound)
+			default:
+				ctx.SetBody(auth)
+			}
 		},
 	}
 	go s.Serve(ln) //nolint:errcheck
@@ -2079,19 +2095,21 @@ func TestClientURLAuth(t *testing.T) {
 			return ln.Dial()
 		},
 	}
-	for up, expected := range cases {
-		req := AcquireRequest()
-		req.Header.SetMethod(MethodGet)
-		req.SetRequestURI("http://" + up + "example.com/foo/bar")
-		if err := c.Do(req, nil); err != nil {
+	var req Request
+	var resp Response
+	for i, tc := range cases {
+		req.SetRequestURI(fmt.Sprintf("http://%shost%d.example/foo/bar", tc.userinfo, i))
+		if err := c.Do(&req, &resp); err != nil {
 			t.Fatal(err)
 		}
-
-		val := <-ch
-
-		if val != expected {
-			t.Fatalf("wrong %q header: %q expected %q", HeaderAuthorization, val, expected)
+		if got := string(resp.Body()); got != tc.want {
+			t.Fatalf("request %d: got authorization %q, want %q", i, got, tc.want)
 		}
+	}
+
+	status, body, err := c.Get(nil, "http://user:pass@example.com/start")
+	if err != nil || status != StatusOK || len(body) != 0 {
+		t.Fatalf("return redirect: got status %d, authorization %q, error %v", status, body, err)
 	}
 }
 
