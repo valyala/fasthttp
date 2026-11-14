@@ -2417,6 +2417,13 @@ func (s *compressedBodyStream) closeOriginal(wErr error) error {
 }
 
 func (s *compressedBodyStream) closeOriginalForDiscard() error {
+	// FS readers return to their pool on Close. Only the compression
+	// goroutine can release them once it has finished reading.
+	switch s.bodyStream.(type) {
+	case *fsSmallFileReader, *bigFileReader:
+		return nil
+	}
+
 	s.originalLock.Lock()
 	defer s.originalLock.Unlock()
 
