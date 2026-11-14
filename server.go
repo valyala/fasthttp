@@ -1589,6 +1589,8 @@ func (ctx *RequestCtx) SuccessString(contentType, body string) {
 //
 // The redirect uri may be either absolute or relative to the current
 // request uri. Fasthttp will always send an absolute uri back to the client.
+// An HTTP(S) target with an empty authority, such as ///example/path,
+// keeps the request host.
 // A uri with a scheme but no authority, such as mailto:user@example.com
 // or com.example.app:/callback, is sent as is.
 // To send a relative uri you can use the following code:
@@ -1606,6 +1608,11 @@ func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
 	u := AcquireURI()
 	ctx.URI().CopyTo(u)
 	u.Update(uri)
+	if len(u.Host()) == 0 && (u.isHTTP() || u.isHTTPS()) {
+		// Clients may interpret the first path segment as the host of a
+		// Location like http:///example/path.
+		u.SetHostBytes(ctx.URI().Host())
+	}
 	ctx.redirect(u.FullURI(), statusCode)
 	ReleaseURI(u)
 }
@@ -1625,6 +1632,8 @@ func (ctx *RequestCtx) Redirect(uri string, statusCode int) {
 //
 // The redirect uri may be either absolute or relative to the current
 // request uri. Fasthttp will always send an absolute uri back to the client.
+// An HTTP(S) target with an empty authority, such as ///example/path,
+// keeps the request host.
 // To send a relative uri you can use the following code:
 //
 //	strLocation = []byte("Location") // Put this with your top level var () declarations.

@@ -595,6 +595,16 @@ func TestRequestCtxRedirect(t *testing.T) {
 	}
 }
 
+func TestRequestCtxRedirectEmptyAuthority(t *testing.T) {
+	t.Parallel()
+
+	const base = "https://example.org:8443/start"
+	testRequestCtxRedirect(t, base, "///other.test/path?q#f", "https://example.org:8443/other.test/path?q#f")
+	testRequestCtxRedirect(t, base, "http:///other.test/path", "http://example.org:8443/other.test/path")
+	testRequestCtxRedirect(t, base, "https://@/other.test/path", "https://example.org:8443/other.test/path")
+	testRequestCtxRedirect(t, base, "file:///tmp/example", "file:///tmp/example")
+}
+
 func TestRequestCtxRedirectConnectAuthority(t *testing.T) {
 	t.Parallel()
 
