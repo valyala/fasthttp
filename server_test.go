@@ -589,6 +589,20 @@ func TestRequestCtxRedirect(t *testing.T) {
 	}
 }
 
+func TestRequestCtxRedirectConnectAuthority(t *testing.T) {
+	t.Parallel()
+
+	var ctx RequestCtx
+	s := "CONNECT a:80 HTTP/1.1\r\nHost: a:80\r\n\r\n"
+	if err := ctx.Request.Read(bufio.NewReader(strings.NewReader(s))); err != nil {
+		t.Fatal(err)
+	}
+	ctx.Redirect("next", StatusFound)
+	if got := string(ctx.Response.Header.Peek(HeaderLocation)); got != "http://a:80/next" {
+		t.Fatalf("unexpected redirect location %q", got)
+	}
+}
+
 func TestRequestCtxRedirectSchemeWithoutAuthority(t *testing.T) {
 	t.Parallel()
 
