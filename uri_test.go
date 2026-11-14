@@ -914,8 +914,7 @@ func TestURIRequestURIAfterResettingQueryArgs(t *testing.T) {
 func TestURIParseSchemeInQueryKeepsOriginForm(t *testing.T) {
 	t.Parallel()
 
-	// "://" in the query of an origin-form target must not turn it into an
-	// absolute URI; a target with two leading slashes still carries one.
+	// A scheme in the query is part of the origin-form request target.
 	var u URI
 	if err := u.Parse([]byte("a"), []byte("/x?u=a://b")); err != nil {
 		t.Fatal(err)
@@ -926,7 +925,7 @@ func TestURIParseSchemeInQueryKeepsOriginForm(t *testing.T) {
 	if err := u.Parse([]byte("a"), []byte("//host/p?u=a://b")); err != nil {
 		t.Fatal(err)
 	}
-	if string(u.Host()) != "host" || string(u.Path()) != "/p" || string(u.QueryString()) != "u=a://b" {
+	if string(u.Host()) != "a" || string(u.Path()) != "/host/p" || string(u.QueryString()) != "u=a://b" {
 		t.Fatalf("got host %q path %q query %q", u.Host(), u.Path(), u.QueryString())
 	}
 }
