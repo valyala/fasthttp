@@ -475,13 +475,7 @@ func isAuthorityDelimiter(uri []byte, n int) bool {
 	if n == 0 {
 		return true
 	}
-	scheme := uri[:n]
-	if scheme[len(scheme)-1] != ':' {
-		return false
-	}
-	// splitHostURI also accepts the empty scheme in "://host".
-	scheme = scheme[:len(scheme)-1]
-	return len(scheme) == 0 || isValidScheme(scheme)
+	return uri[n-1] == ':' && isValidScheme(uri[:n-1])
 }
 
 // parseHost parses host as an authority without user
