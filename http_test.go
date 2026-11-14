@@ -2822,9 +2822,7 @@ func TestRequestWriteURLAuthKeepsAuthorization(t *testing.T) {
 	for auth, expected := range cases {
 		var req Request
 		req.SetRequestURI("http://user:pass@example.com/foo")
-		if auth != "" {
-			req.Header.Set(HeaderAuthorization, auth)
-		}
+		req.Header.Set(HeaderAuthorization, auth)
 		var w bytes.Buffer
 		bw := bufio.NewWriter(&w)
 		if err := req.Write(bw); err != nil {
@@ -2832,6 +2830,10 @@ func TestRequestWriteURLAuthKeepsAuthorization(t *testing.T) {
 		}
 		if err := bw.Flush(); err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if got := req.Header.PeekAll(HeaderAuthorization); len(got) != 1 || string(got[0]) != auth {
+			t.Fatalf("Write changed Authorization from %q to %q", auth, got)
 		}
 
 		var req1 Request
