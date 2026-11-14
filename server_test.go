@@ -3336,6 +3336,35 @@ func TestServerHeadRequest(t *testing.T) {
 	}
 }
 
+func TestServerHeadRequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{Handler: func(ctx *RequestCtx) {
+		if ctx.IsHead() {
+			ctx.TimeoutErrorWithCode("timeout", StatusRequestTimeout)
+			return
+		}
+		ctx.SetBodyString("ok")
+	}}
+	rw := &readWriter{}
+	rw.r.WriteString("HEAD / HTTP/1.1\r\nHost: example.com\r\n\r\nGET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(&rw.w)
+	var header ResponseHeader
+	if err := header.Read(br); err != nil {
+		t.Fatal(err)
+	}
+	if header.StatusCode() != StatusRequestTimeout || header.ContentLength() != len("timeout") {
+		t.Fatalf("unexpected HEAD response: %s", &header)
+	}
+	statusLine, err := br.ReadString('\n')
+	if err != nil || statusLine != "HTTP/1.1 200 OK\r\n" {
+		t.Fatalf("unexpected start of GET response: %q, %v", statusLine, err)
+	}
+}
+
 func TestServerRejectsBackslashInAbsoluteURI(t *testing.T) {
 	t.Parallel()
 

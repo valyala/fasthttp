@@ -2817,9 +2817,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		// Preserve connectionClose if already set (e.g., by ExpectHandler).
 		connectionClose = connectionClose || ctx.Request.Header.ConnectionClose()
 
-		// Remember the request version before ctx may be replaced with a
-		// fresh one below, whose request defaults to HTTP/1.1.
+		// Remember the request version and method before a timeout can
+		// replace ctx with a fresh one.
 		isHTTP11 = ctx.Request.Header.IsHTTP11()
+		isHead := ctx.IsHead()
 
 		if serverNameLine != nil {
 			ctx.Response.Header.setServerDefault(serverNameLine)
@@ -2883,7 +2884,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			oldCtx.deadlineMu.Unlock()
 		}
 
-		if ctx.IsHead() {
+		if isHead {
 			ctx.Response.SkipBody = true
 		}
 
