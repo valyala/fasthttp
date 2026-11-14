@@ -15,6 +15,8 @@ import (
 )
 
 // ConvertRequest converts a fasthttp.Request to an http.Request.
+// A successful conversion overwrites r, preserving its context.
+// The caller must clean up any previous multipart form files before reusing r.
 // forServer should be set to true when the http.Request is going to be passed to a http.Handler.
 //
 // The http.Request must not be used after the fasthttp handler has returned!
@@ -49,6 +51,10 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 		return err
 	}
 
+	// Reuse the header map and transfer encoding storage, but discard parsed
+	// forms, routing state and other data from the previous request.
+	fresh := http.Request{Header: r.Header, TransferEncoding: r.TransferEncoding[:0]}
+	*r = *fresh.WithContext(r.Context())
 	r.Method = b2s(ctx.Method())
 	// net/http spells the HTTP/2 version "HTTP/2.0", and its minor version is 0.
 	switch r.Proto = b2s(ctx.Request.Header.Protocol()); r.Proto {
@@ -102,8 +108,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 
 	// net/http keeps trailers in Request.Trailer, out of the header map. All()
 	// above is the header section; the trailer section comes from
-	// TrailerHeader(), and a reused request must not keep old trailers.
-	r.Trailer = nil
+	// TrailerHeader().
 	if keys := ctx.Request.Header.PeekTrailerKeys(); len(keys) > 0 {
 		r.Trailer = make(http.Header, len(keys))
 		for _, k := range keys {

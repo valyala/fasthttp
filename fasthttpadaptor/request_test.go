@@ -2306,8 +2306,7 @@ func TestConvertRequestCarriesTrailers(t *testing.T) {
 	}
 }
 
-// A reused destination request must not inherit its predecessor's trailers.
-func TestConvertRequestResetsTrailerOnReuse(t *testing.T) {
+func TestConvertRequestResetsDestinationOnReuse(t *testing.T) {
 	t.Parallel()
 
 	ctx := &fasthttp.RequestCtx{}
@@ -2318,21 +2317,40 @@ func TestConvertRequestResetsTrailerOnReuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx.Request.Header.Set("X-T", "first")
+	ctx.Request.Header.SetContentType("application/x-www-form-urlencoded")
+	ctx.Request.SetBodyString("user=first")
 
-	var r http.Request
-	if err := ConvertRequest(ctx, &r, true); err != nil {
+	r := new(http.Request).WithContext(t.Context())
+	if err := ConvertRequest(ctx, r, true); err != nil {
 		t.Fatal(err)
 	}
 	if got := r.Trailer.Get("X-T"); got != "first" {
 		t.Fatalf("Trailer[X-T] = %q, want first", got)
 	}
 
+	if got := r.PostFormValue("user"); got != "first" {
+		t.Fatalf("PostFormValue(user) = %q, want first", got)
+	}
+	r.SetPathValue("id", "first")
+
 	plain := &fasthttp.RequestCtx{}
 	plain.Request.Header.SetMethod(fasthttp.MethodGet)
-	plain.Request.SetRequestURI("/")
+	plain.Request.SetRequestURI("/?user=second")
 	plain.Request.Header.SetHost("example.com")
-	if err := ConvertRequest(plain, &r, true); err != nil {
+	if err := ConvertRequest(plain, r, false); err != nil {
 		t.Fatal(err)
+	}
+	if got := r.FormValue("user"); got != "second" {
+		t.Errorf("FormValue(user) = %q, want second", got)
+	}
+	if got := r.PostFormValue("user"); got != "" {
+		t.Errorf("PostFormValue(user) = %q, want empty", got)
+	}
+	if r.PathValue("id") != "" || r.RequestURI != "" {
+		t.Errorf("outgoing request retained path value %q or RequestURI %q", r.PathValue("id"), r.RequestURI)
+	}
+	if r.Context() != t.Context() {
+		t.Error("caller context lost on reuse")
 	}
 	if r.Trailer != nil {
 		t.Fatalf("Trailer = %v after a trailer-free request, want nil", r.Trailer)
