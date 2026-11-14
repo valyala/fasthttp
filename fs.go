@@ -1900,8 +1900,12 @@ nestedContinue:
 	sort.Strings(filenames)
 	for _, name := range filenames {
 		href = appendQuotedPath(append(href[:0], dirURI...), s2b(name))
-		pathEscaped := html.EscapeString(string(href))
 		fi := fm[name]
+		if fi.IsDir() {
+			// A link to a directory without the trailing slash gets a redirect.
+			href = append(href, '/')
+		}
+		pathEscaped := html.EscapeString(string(href))
 		auxStr := "dir"
 		className := "dir"
 		if !fi.IsDir() {

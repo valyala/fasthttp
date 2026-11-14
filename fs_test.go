@@ -1422,14 +1422,12 @@ func TestFSDirIndexLinks(t *testing.T) {
 		return html.UnescapeString(href)
 	}
 
-	// Every file is reached by following the links from the root.
+	// Every file is reached by following the links from the root exactly
+	// as they are, without a redirect on the way.
 	for name, body := range files {
 		uri := "/"
 		for segment := range strings.SplitSeq(name, "/") {
 			uri = link(uri, segment)
-			if !strings.HasSuffix(name, segment) {
-				uri += "/"
-			}
 		}
 		if got := get(uri); got != body {
 			t.Fatalf("unexpected body %q behind the links to %q, which end at %q. Expecting %q", got, name, uri, body)
