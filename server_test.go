@@ -7855,6 +7855,57 @@ func TestShutdownCloseIdleConns(t *testing.T) {
 	}
 }
 
+// A TLS read can itself write a record, for example a KeyUpdate response or
+// an alert. A peer that stops reading then holds the write lock needed by Close.
+func TestShutdownWithContextIdleTLSWrite(t *testing.T) {
+	t.Parallel()
+
+	cert, key, err := GenerateTestCertificate("localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, peer := net.Pipe()
+	defer peer.Close()
+	s := &Server{Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") }}
+	ln := newOneConnListener(server)
+	defer ln.Close()
+	go func() { _ = s.ServeTLSEmbed(ln, cert, key) }()
+
+	if err := peer.SetDeadline(time.Now().Add(testTimeout(5 * time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	client := tls.Client(peer, &tls.Config{InsecureSkipVerify: true})
+	if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(client)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Corrupt the next TLS record. Reading only one byte of the alert
+	// ensures the idle connection is blocked writing the rest to the pipe.
+	if _, err := peer.Write([]byte{23, 3, 3, 0, 1, 0}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadFull(peer, make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout(100*time.Millisecond))
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.ShutdownWithContext(ctx) }()
+	select {
+	case err := <-stopped:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("ShutdownWithContext returned %v, want deadline exceeded", err)
+		}
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("idle TLS connection held shutdown past its deadline")
+	}
+}
+
 func TestShutdownWithContext(t *testing.T) {
 	t.Parallel()
 	done := make(chan struct{})
