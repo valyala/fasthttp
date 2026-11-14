@@ -255,8 +255,7 @@ type Server struct {
 
 	idleConns map[net.Conn]*atomic.Int64
 
-	// done is written under mu, but RequestCtx.Done() reads it without mu,
-	// possibly after the handler has returned, so it must be atomic.
+	// Serve and Shutdown write done under mu. acquireCtx reads it without mu.
 	done atomic.Pointer[chan struct{}]
 
 	// Whether done was already closed. A ShutdownWithContext that gives up on
@@ -682,8 +681,9 @@ type RequestCtx struct {
 	logger     ctxLogger
 	remoteAddr net.Addr
 
-	c net.Conn
-	s *Server
+	c    net.Conn
+	s    *Server
+	done *chan struct{}
 
 	// Writer holding earlier pipelined responses while the handler runs.
 	earlyHintsWriter *bufio.Writer
@@ -1046,11 +1046,7 @@ func (ctx *RequestCtx) reset() {
 	ctx.handlerWriteDeadlineSet.Store(false)
 	ctx.deadlineMu.Unlock()
 
-	// Don't reset ctx.s!
-	// We have a pool per server so the next time this ctx is used it
-	// will be assigned the same value again.
-	// ctx might still be in use for context.Done() and context.Err()
-	// which are safe to use as they only use ctx.s and no other value.
+	// Keep ctx.done for callers of Done and Err after the handler returns.
 
 	if ctx.timeoutResponse != nil {
 		ctx.timeoutResponse.Reset()
@@ -2269,7 +2265,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 		s.closeIdleConns()
 
 		if s.open.Load() == 0 && s.idleConnsClosing.Load() == 0 {
-			// There may be a pending request to call ctx.Done(). Therefore, we only set it to nil when open == 0.
+			// The next Serve will create a fresh channel.
 			s.done.Store(nil)
 			s.doneClosed = false
 			return lnerr
@@ -3411,12 +3407,14 @@ func releaseWriter(s *Server, w *bufio.Writer) {
 }
 
 func (s *Server) acquireCtx(c net.Conn) (ctx *RequestCtx) {
-	v := s.ctxPool.Get()
-	if v == nil {
-		ctx = new(RequestCtx)
-		ctx.s = s
-	} else {
+	done := s.done.Load()
+	if v := s.ctxPool.Get(); v != nil {
 		ctx = v.(*RequestCtx) //nolint:forcetypeassert
+	}
+	// A caller can still be waiting on the previous Serve's shutdown.
+	// Only reuse contexts that share the current shutdown channel.
+	if ctx == nil || ctx.done != done {
+		ctx = &RequestCtx{s: s, done: done}
 	}
 	keepBodyBuffer := !s.ReduceMemoryUsage
 	ctx.Request.keepBodyBuffer = keepBodyBuffer
@@ -3444,6 +3442,7 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.Request.logger = logger
 	ctx.connID = nextConnID()
 	ctx.s = fakeServer
+	ctx.done = fakeServer.done.Load()
 	ctx.connRequestNum = 0
 	ctx.connTime = time.Now()
 	ctx.time = ctx.connTime
@@ -3493,8 +3492,8 @@ func (ctx *RequestCtx) Deadline() (deadline time.Time, ok bool) {
 // Note: Because creating a new channel for every request is just too expensive, so
 // RequestCtx.s.done is only closed when the server is shutting down.
 func (ctx *RequestCtx) Done() <-chan struct{} {
-	if done := ctx.s.done.Load(); done != nil {
-		return *done
+	if ctx.done != nil {
+		return *ctx.done
 	}
 	return nil
 }
