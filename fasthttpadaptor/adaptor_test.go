@@ -2186,3 +2186,59 @@ func TestResponseControllerDeadlinesAfterReleaseWriter(t *testing.T) {
 		t.Fatalf("expected ErrNilConnection, got %v", err)
 	}
 }
+
+// A handler turns the Content-Type header off by setting it to nil, as the
+// http.ResponseWriter docs describe and http.ServeContent honors; net/http
+// then sends none. The adaptor must not send fasthttp's default in its place.
+func TestHandlerNilContentTypeSendsNone(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		h    http.HandlerFunc
+	}{
+		{"buffered", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header()["Content-Type"] = nil
+			_, _ = w.Write([]byte("<html>"))
+		}},
+		{"flushed", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header()["Content-Type"] = nil
+			_, _ = w.Write([]byte("<html>"))
+			w.(http.Flusher).Flush() //nolint:forcetypeassert
+		}},
+		{"empty value", func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "")
+			_, _ = w.Write([]byte("<html>"))
+		}},
+		{"ServeContent", func(w http.ResponseWriter, r *http.Request) {
+			w.Header()["Content-Type"] = nil
+			http.ServeContent(w, r, "f.txt", time.Unix(0, 0), strings.NewReader("0123456789"))
+		}},
+	} {
+		s := &fasthttp.Server{Handler: NewFastHTTPHandlerFunc(tc.h)}
+		ln := fasthttputil.NewInmemoryListener()
+		go s.Serve(ln) //nolint:errcheck
+
+		c, err := ln.Dial()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if err != nil || len(body) == 0 {
+			t.Fatalf("%s: body %q, %v", tc.name, body, err)
+		}
+		if ct := resp.Header.Get("Content-Type"); ct != "" {
+			t.Errorf("%s: Content-Type = %q, want none, as net/http sends", tc.name, ct)
+		}
+		_ = c.Close()
+		_ = ln.Close()
+	}
+}
