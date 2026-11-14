@@ -4217,6 +4217,45 @@ func TestClientRedirectInvalidLocation(t *testing.T) {
 	}
 }
 
+func TestClientRedirectStripsMixedCaseCredentials(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://example.com/")
+	req.Header.DisableNormalizing()
+	req.Header.SetCookie("session", "secret")
+	for _, key := range []string{"authorization", "AUTHORIZATION", "cOoKiE2", "proxy-authenticate", "Proxy-AUTHORIZATION", "WWW-authenticate"} {
+		req.Header.Add(key, "secret")
+	}
+	req.Header.Set("x-keep", "public")
+	client := Client{Transport: &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+		switch host := string(req.URI().Host()); host {
+		case "example.com":
+			resp.Header.SetStatusCode(StatusFound)
+			resp.Header.Set(HeaderLocation, "http://sub.example.com/")
+		case "sub.example.com":
+			if got := string(req.Header.Peek("authorization")); got != "secret" {
+				t.Fatalf("trusted redirect authorization = %q", got)
+			}
+			resp.Header.SetStatusCode(StatusFound)
+			resp.Header.Set(HeaderLocation, "http://other.example/")
+		case "other.example":
+			headers := req.Header.Header()
+			if bytes.Contains(headers, []byte("secret")) || !bytes.Contains(headers, []byte("x-keep: public\r\n")) {
+				t.Fatalf("unexpected redirected headers: %s", headers)
+			}
+			resp.Header.SetStatusCode(StatusOK)
+		default:
+			t.Fatalf("unexpected host %q", host)
+		}
+		return false, nil
+	}}}
+	if err := client.DoRedirects(&req, &resp, 2); err != nil || resp.StatusCode() != StatusOK {
+		t.Fatalf("redirects returned status %d, error %v", resp.StatusCode(), err)
+	}
+}
+
 func TestShouldStripSensitiveHeadersOnRedirect(t *testing.T) {
 	t.Parallel()
 

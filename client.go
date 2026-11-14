@@ -1450,12 +1450,27 @@ func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool
 // headers must be cleared before following redirects that net/http treats
 // as untrusted.
 func stripSensitiveHeadersOnRedirect(req *Request) {
-	req.Header.Del(HeaderAuthorization)
-	req.Header.Del(HeaderCookie)
-	req.Header.Del(HeaderCookie2) // Match net/http behavior.
-	req.Header.Del(HeaderProxyAuthenticate)
-	req.Header.Del(HeaderProxyAuthorization)
-	req.Header.Del(HeaderWWWAuthenticate)
+	h := &req.Header
+	h.cookies = h.cookies[:0]
+	h.h = stripSensitiveFields(h.h)
+	h.trailerH = stripSensitiveFields(h.trailerH)
+}
+
+func stripSensitiveFields(fields []argsKV) []argsKV {
+	n := 0
+	for i := range fields {
+		key := fields[i].key
+		if caseInsensitiveCompare(key, strAuthorization) || caseInsensitiveCompare(key, strCookie) ||
+			caseInsensitiveCompare(key, []byte(HeaderCookie2)) || caseInsensitiveCompare(key, strProxyAuthenticate) ||
+			caseInsensitiveCompare(key, strProxyAuthorization) || caseInsensitiveCompare(key, strWWWAuthenticate) {
+			continue
+		}
+		if i != n {
+			fields[n], fields[i] = fields[i], fields[n]
+		}
+		n++
+	}
+	return fields[:n]
 }
 
 // shouldStripSensitiveHeadersOnRedirect defines the trust boundary for
