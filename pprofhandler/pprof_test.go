@@ -92,6 +92,32 @@ func TestPprofHandlerAcceptsValidPaths(t *testing.T) {
 	}
 }
 
+func TestPprofHandlerMethods(t *testing.T) {
+	for _, tt := range []struct {
+		method string
+		path   string
+		status int
+		allow  string
+	}{
+		{"POST", "/debug/pprof/symbol", 405, "GET, HEAD"},
+		{"DELETE", "/debug/pprof/", 405, "GET, HEAD"},
+		{"HEAD", "/debug/pprof/symbol", 200, ""},
+	} {
+		t.Run(tt.method+tt.path, func(t *testing.T) {
+			var ctx fasthttp.RequestCtx
+			ctx.Request.Header.SetMethod(tt.method)
+			ctx.Request.SetRequestURI(tt.path)
+			PprofHandler(&ctx)
+			if got := ctx.Response.StatusCode(); got != tt.status {
+				t.Errorf("status = %d, want %d", got, tt.status)
+			}
+			if got := string(ctx.Response.Header.Peek(fasthttp.HeaderAllow)); got != tt.allow {
+				t.Errorf("Allow = %q, want %q", got, tt.allow)
+			}
+		})
+	}
+}
+
 func TestPprofHandlerServesIndex(t *testing.T) {
 	// net/http/pprof serves the index at /debug/pprof/ and its links are
 	// relative to that path.

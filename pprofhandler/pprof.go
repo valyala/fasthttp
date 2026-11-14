@@ -66,6 +66,7 @@ func matchPprofPath(path, endpoint []byte) bool {
 
 // PprofHandler serves server runtime profiling data in the format expected by the pprof visualization tool.
 //
+// It accepts GET and HEAD requests, like the routes registered by net/http/pprof.
 // See https://pkg.go.dev/net/http/pprof for details.
 //
 // Execution traces are streamed as they are recorded, so the server write
@@ -76,6 +77,12 @@ func matchPprofPath(path, endpoint []byte) bool {
 // not register handlers for paths ending in /. The index at /debug/pprof/
 // is served, as in net/http/pprof.
 func PprofHandler(ctx *fasthttp.RequestCtx) {
+	if !ctx.IsGet() && !ctx.IsHead() {
+		ctx.SetStatusCode(fasthttp.StatusMethodNotAllowed)
+		ctx.Response.Header.Set(fasthttp.HeaderAllow, "GET, HEAD")
+		return
+	}
+
 	path := ctx.Path()
 
 	// Reject paths ending in / — net/http/pprof returns 404 for these.
