@@ -91,6 +91,12 @@ type ResponseHeader struct {
 	noDefaultDate bool
 	// serverSet tells an empty Server value from none.
 	serverSet bool
+
+	// serverResponse reports that this header belongs to a response served by
+	// Server, where a response always carries a status code. Reset restores the
+	// StatusOK default for such responses, so middleware wrapping a handler that
+	// resets the response still reads the status code the client receives.
+	serverResponse bool
 }
 
 // RequestHeader represents HTTP request header.
@@ -179,6 +185,15 @@ func (h *ResponseHeader) statusCodeOnWire() int {
 // SetStatusCode sets response status code.
 func (h *ResponseHeader) SetStatusCode(statusCode int) {
 	h.statusCode = statusCode
+}
+
+// setServerDefaultStatus marks h as belonging to a response served by Server
+// and sets the StatusOK default if no status code has been set.
+func (h *ResponseHeader) setServerDefaultStatus() {
+	h.serverResponse = true
+	if h.statusCode == 0 {
+		h.statusCode = StatusOK
+	}
 }
 
 // resetStatus clears the status code and the status message, leaving the rest
@@ -1460,6 +1475,9 @@ func (h *ResponseHeader) Reset() {
 	h.SetNoDefaultContentType(false)
 	h.noDefaultDate = false
 	h.resetSkipNormalize()
+	if h.serverResponse {
+		h.statusCode = StatusOK
+	}
 }
 
 func (h *ResponseHeader) resetSkipNormalize() {

@@ -5372,6 +5372,43 @@ func TestServerDefaultsStatusCodeBeforeHandler(t *testing.T) {
 	}
 }
 
+func TestServerMiddlewareSeesStatusCodeAfterResponseReset(t *testing.T) {
+	t.Parallel()
+
+	// expvarhandler.ExpvarHandler resets the response before filling it in.
+	wrapped := func(ctx *RequestCtx) {
+		ctx.Response.Reset()
+		ctx.SetBodyString("reset")
+	}
+	var middlewareStatusCode int
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			wrapped(ctx)
+			middlewareStatusCode = ctx.Response.StatusCode()
+		},
+	}
+
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusCode := resp.StatusCode(); statusCode != StatusOK {
+		t.Fatalf("unexpected response status code: %d. Expecting %d", statusCode, StatusOK)
+	}
+	if string(resp.Body()) != "reset" {
+		t.Fatalf("unexpected response body: %q. Expecting %q", resp.Body(), "reset")
+	}
+	if middlewareStatusCode != StatusOK {
+		t.Fatalf("middleware saw status code %d. Expecting %d", middlewareStatusCode, StatusOK)
+	}
+}
+
 func TestRequestCtxInitDefaultsStatusCode(t *testing.T) {
 	t.Parallel()
 
