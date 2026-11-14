@@ -269,6 +269,19 @@ func TestBrotliTruncatedInput(t *testing.T) {
 	}
 }
 
+func TestBrotliLimitRejectsOversizedBlockHeader(t *testing.T) {
+	t.Parallel()
+
+	// This header declares a 16 MiB block. The compressed commands are
+	// missing, so only a decoder that checks the header can report the limit.
+	var req Request
+	req.Header.SetContentEncoding("br")
+	req.SetBody([]byte{0x9f, 0xff, 0xff, 0xff, 0x20})
+	if _, err := req.BodyUncompressedWithLimit(1024); !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("expected ErrBodyTooLarge for oversized block, got %v", err)
+	}
+}
+
 func TestBrotliExcessiveInputBodyTooLarge(t *testing.T) {
 	t.Parallel()
 

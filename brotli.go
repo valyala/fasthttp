@@ -41,6 +41,31 @@ func releaseBrotliReader(zr *brotli.Reader) {
 
 var brotliReaderPool sync.Pool
 
+// A reader preserves MaxDecodedBytes across Reset. Keep limited readers
+// separate so an unlimited decode never inherits a previous caller's limit.
+var limitedBrotliReaderPool sync.Pool
+
+type limitedBrotliReader struct {
+	reader *brotli.Reader
+	limit  uint64
+}
+
+func acquireLimitedBrotliReader(r io.Reader, limit uint64) (*limitedBrotliReader, error) {
+	if v := limitedBrotliReaderPool.Get(); v != nil {
+		lr := v.(*limitedBrotliReader) //nolint:forcetypeassert
+		if lr.limit == limit {
+			lr.reader.Reset(r)
+			return lr, nil
+		}
+		lr.reader.Close()
+	}
+	zr, err := brotli.NewReaderOptions(r, brotli.ReaderOptions{MaxDecodedBytes: limit})
+	if err != nil {
+		return nil, err
+	}
+	return &limitedBrotliReader{reader: zr, limit: limit}, nil
+}
+
 func acquireStacklessBrotliWriter(w io.Writer, level int) stackless.Writer {
 	nLevel := normalizeBrotliCompressLevel(level)
 	p := stacklessBrotliWriterPoolMap[nLevel]
@@ -177,9 +202,22 @@ func WriteUnbrotli(w io.Writer, p []byte) (int, error) {
 
 func writeUnbrotli(w io.Writer, p []byte, maxBodySize int) (int, error) {
 	r := newBrotliSliceReader(p)
-	zr := acquireBrotliReader(r)
-	n, err := copyZeroAllocWithLimit(w, zr, maxBodySize)
-	releaseBrotliReader(zr)
+	var zr *brotli.Reader
+	if maxBodySize > 0 {
+		lr, err := acquireLimitedBrotliReader(r, uint64(maxBodySize))
+		if err != nil {
+			return 0, err
+		}
+		zr = lr.reader
+		defer limitedBrotliReaderPool.Put(lr)
+	} else {
+		zr = acquireBrotliReader(r)
+		defer releaseBrotliReader(zr)
+	}
+	n, err := copyZeroAlloc(w, zr)
+	if errors.Is(err, brotli.ErrDecodedSizeLimit) {
+		err = ErrBodyTooLarge
+	}
 	nn := int(n)
 	if int64(nn) != n {
 		return 0, fmt.Errorf("too much data unbrotlied: %d", n)
