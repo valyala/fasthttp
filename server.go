@@ -684,6 +684,10 @@ type RequestCtx struct {
 	c net.Conn
 	s *Server
 
+	// Writer holding earlier pipelined responses while the handler runs.
+	earlyHintsWriter *bufio.Writer
+	earlyHintsMu     sync.Mutex
+
 	timeoutResponse *Response
 	timeoutCh       chan struct{}
 	timeoutTimer    *time.Timer
@@ -717,6 +721,7 @@ type RequestCtx struct {
 //
 // EarlyHints does nothing for HTTP/1.0 requests, since a server must not send
 // a 1xx response to an HTTP/1.0 client (RFC 9110, section 15.2).
+// It also does nothing after the request has timed out.
 //
 // See: https://developer.chrome.com/docs/web-platform/early-hints and
 // https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Link#syntax
@@ -736,8 +741,16 @@ func (ctx *RequestCtx) EarlyHints() error {
 	}
 	links := ctx.Response.Header.PeekAll(b2s(strLink))
 	if len(links) > 0 {
-		c := acquireWriter(ctx)
-		defer releaseWriter(ctx.s, c)
+		ctx.earlyHintsMu.Lock()
+		defer ctx.earlyHintsMu.Unlock()
+		if ctx.timedOut.Load() {
+			return nil
+		}
+		c := ctx.earlyHintsWriter
+		if c == nil {
+			c = acquireWriter(ctx)
+			defer releaseWriter(ctx.s, c)
+		}
 		_, err := c.Write(strEarlyHints)
 		if err != nil {
 			return err
@@ -1021,6 +1034,7 @@ func (ctx *RequestCtx) reset() {
 	ctx.connID = 0
 	ctx.connRequestNum = 0
 	ctx.connTime = zeroTime
+	ctx.earlyHintsWriter = nil
 	ctx.remoteAddr = nil
 	ctx.time = zeroTime
 	ctx.deadlineMu.Lock()
@@ -2815,7 +2829,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		if ctx.Request.MayContinue() {
 			// Allow the ability to deny reading the incoming request body.
 			if s.ExpectHandler != nil {
-				if expectStatus := s.ExpectHandler(ctx); expectStatus != StatusContinue {
+				ctx.earlyHintsWriter = bw
+				expectStatus := s.ExpectHandler(ctx)
+				ctx.earlyHintsWriter = nil
+				if expectStatus != StatusContinue {
 					continueReadingRequest = false
 					if br != nil {
 						br.Reset(ctx.c)
@@ -2914,6 +2931,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
+			ctx.earlyHintsWriter = bw
 			s.Handler(ctx)
 		}
 
@@ -2928,6 +2946,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				br = nil
 			}
 			reqStream = nil
+			// Wait for any hints already being written before reusing bw.
+			// Later calls on this context observe timedOut and skip the write.
+			ctx.earlyHintsMu.Lock()
+			ctx.earlyHintsWriter = nil
+			ctx.earlyHintsMu.Unlock()
 			oldCtx := ctx
 			// Acquire a new ctx because the old one will still be in use by the timeout out handler.
 			ctx = s.acquireCtx(c)
@@ -2945,6 +2968,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				ctx.handlerDeadlineSet.Store(true)
 			}
 			oldCtx.deadlineMu.Unlock()
+		} else {
+			ctx.earlyHintsWriter = nil
 		}
 
 		if isHead {
