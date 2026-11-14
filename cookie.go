@@ -289,7 +289,8 @@ func (c *Cookie) Reset() {
 // AppendBytes appends cookie representation to dst and returns
 // the extended dst.
 func (c *Cookie) AppendBytes(dst []byte) []byte {
-	if len(c.key) > 0 {
+	// Keep the value of a nameless cookie from being read as a name=value pair.
+	if len(c.key) > 0 || bytes.IndexByte(c.value, '=') >= 0 {
 		dst = append(dst, c.key...)
 		dst = append(dst, '=')
 	}
