@@ -20,9 +20,9 @@ import (
 
 // DialOptions configures Dial. The zero value is valid.
 type DialOptions struct {
-	// Dial establishes the TCP connection. nil means net.Dialer, which honors
-	// ctx; a custom dialer is bounded only by its own timeouts. The dialers of
-	// the fasthttpproxy package can be used directly.
+	// Dial establishes the TCP connection. nil means [net.Dialer], which
+	// honors ctx; a custom dialer is bounded only by its own timeouts. The
+	// dialers of the fasthttpproxy package can be used directly.
 	Dial fasthttp.DialFunc
 
 	// TLSConfig is used for wss URLs. nil means the default configuration.
@@ -49,7 +49,7 @@ type DialOptions struct {
 	ReadBufferSize int
 
 	// MaxMessageSize, ReadTimeout, WriteTimeout, CompressionMode and
-	// CompressionThreshold work as in AcceptOptions.
+	// CompressionThreshold work as in [AcceptOptions].
 	MaxMessageSize       int
 	ReadTimeout          time.Duration
 	WriteTimeout         time.Duration
@@ -65,12 +65,12 @@ const maxInterimResponses = 5
 
 // Dial connects to the WebSocket server at u, a ws or wss URL (http and https
 // are accepted as aliases) without a fragment, and completes the handshake.
-// ctx bounds the whole of it, apart from a custom DialOptions.Dial. The path
+// ctx bounds the whole of it, apart from a custom [DialOptions.Dial]. The path
 // is sent as given; user information in the URL becomes a Basic Authorization
-// header unless DialOptions.Header carries one. Redirects are not followed.
+// header unless [DialOptions.Header] carries one. Redirects are not followed.
 // Interim 1xx responses are skipped; a final response other than 101 is an
 // error, and its status and headers are available through
-// DialOptions.Response.
+// [DialOptions.Response].
 func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, error) {
 	if opts == nil {
 		opts = &defaultDialOptions
@@ -81,7 +81,7 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, error) {
 	if !validSubprotocols(opts.Subprotocols) {
 		return nil, errors.New("websocket: invalid subprotocol name in DialOptions")
 	}
-	if strings.IndexByte(u, '#') >= 0 {
+	if strings.Contains(u, "#") {
 		return nil, errors.New("websocket: URL must not have a fragment")
 	}
 	uri := fasthttp.AcquireURI()
@@ -125,7 +125,7 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, error) {
 	c, err := handshake(ctx, nc, uri, auth, opts)
 	if err != nil {
 		closeTransport(nc)
-		if cerr := ctxCause(ctx); cerr != nil {
+		if cerr := ctxErr(ctx); cerr != nil {
 			err = cerr
 		}
 		return nil, err
@@ -152,14 +152,14 @@ func dialConn(ctx context.Context, addr string, isTLS bool, opts *DialOptions) (
 	if cfg.ServerName == "" {
 		host, _, err := net.SplitHostPort(addr)
 		if err != nil {
-			nc.Close()
+			_ = nc.Close()
 			return nil, err
 		}
 		cfg.ServerName = host
 	}
 	tc := tls.Client(nc, cfg)
 	if err := tc.HandshakeContext(ctx); err != nil {
-		nc.Close()
+		_ = nc.Close()
 		return nil, err
 	}
 	return tc, nil
@@ -218,7 +218,7 @@ func handshake(ctx context.Context, nc net.Conn, uri *fasthttp.URI, auth string,
 	}
 	stop := context.AfterFunc(ctx, func() {
 		if nc.SetDeadline(aLongTimeAgo) != nil {
-			nc.Close()
+			_ = nc.Close()
 		}
 	})
 	defer stop()

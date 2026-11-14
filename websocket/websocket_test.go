@@ -137,9 +137,12 @@ func readErr(t *testing.T, c *Conn) error {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	_, _, err := c.Read(ctx)
+	typ, p, err := c.Read(ctx)
 	if err == nil {
 		t.Fatal("expected read error")
+	}
+	if typ != 0 || p != nil {
+		t.Fatalf("Read returned type %d and %d bytes with %v", typ, len(p), err)
 	}
 	return err
 }

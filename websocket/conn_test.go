@@ -751,7 +751,7 @@ func TestAcquireFailureKeepsToken(t *testing.T) {
 			default:
 				l.release()
 			}
-			if err := c.acquire(l, ctx, deadline); !errors.Is(err, want) {
+			if err := c.acquire(ctx, l, deadline); !errors.Is(err, want) {
 				t.Fatalf("acquire: %v, want %v", err, want)
 			}
 			if len(l) != 1 {

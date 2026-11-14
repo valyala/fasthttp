@@ -43,8 +43,8 @@ const (
 )
 
 var (
-	// deflateTail is the sync marker a message's compressed data ends with on
-	// the wire removed; inflateTail restores it and ends the stream.
+	// deflateTail is the sync marker left off the end of a message's compressed
+	// data on the wire; inflateTail restores it and ends the stream.
 	deflateTail = []byte{0, 0, 0xff, 0xff}
 	inflateTail = []byte{0, 0, 0xff, 0xff, 1, 0, 0, 0xff, 0xff}
 )
@@ -484,14 +484,13 @@ func (c *Conn) inflate(ctx context.Context, p []byte) (int, error) {
 		switch {
 		case err == nil:
 			continue
-		case s.err != nil || c.isClosed():
-			if c.isClosed() {
-				return 0, c.closedErr()
-			}
+		case c.isClosed():
+			return 0, c.closedErr()
+		case s.err != nil:
 			return 0, c.fatal(ctx, s.err)
-		case errors.Is(err, io.EOF) && s.more(): // A final block inside the message.
+		case err == io.EOF && s.more(): // A final block inside the message.
 			s.reset()
-		case errors.Is(err, io.EOF):
+		case err == io.EOF:
 			c.endInflate()
 			return 0, io.EOF
 		default:
