@@ -2117,6 +2117,11 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 	return c.acquireConn(context.Background(), reqTimeout, connectionClose)
 }
 
+// queueForIdle and decConnsCount manage connection pool capacity and decoupled
+// background waiters whose contexts are tracked on individual *wantConn instances,
+// so ctx must not be propagated into them.
+//
+//nolint:contextcheck
 func (c *HostClient) acquireConn(
 	ctx context.Context, reqTimeout time.Duration, connectionClose bool,
 ) (cc *clientConn, err error) {
@@ -2300,20 +2305,26 @@ func (c *HostClient) dialConnFor(w *wantConn) {
 		return
 	}
 
-	ctx := w.ctx
-	if ctx == nil {
-		ctx = context.Background()
+	dialCtx := context.Background()
+	var dialCancel context.CancelFunc
+	if w.ctx != nil || hasBudget {
+		ctx := w.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		dialCtx, dialCancel = context.WithCancel(ctx)
+		w.dialCancel = dialCancel
 	}
-	dialCtx, dialCancel := context.WithCancel(ctx)
-	w.dialCancel = dialCancel
 	w.mu.Unlock()
 
-	defer func() {
-		w.mu.Lock()
-		w.dialCancel = nil
-		w.mu.Unlock()
-		dialCancel()
-	}()
+	if dialCancel != nil {
+		defer func() {
+			w.mu.Lock()
+			w.dialCancel = nil
+			w.mu.Unlock()
+			dialCancel()
+		}()
+	}
 
 	conn, err := c.dialHostHardContext(dialCtx, budget)
 	if err != nil {
