@@ -3147,12 +3147,17 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 						break
 					}
 				}
-				if err = c.SetWriteDeadline(zeroTime); err != nil {
+				// Bound writes before the next handler, such as an error response.
+				deadline := zeroTime
+				if writeTimeout > 0 {
+					deadline = time.Now().Add(writeTimeout)
+				}
+				if err = c.SetWriteDeadline(deadline); err != nil {
 					ctx.deadlineMu.Unlock()
 					break
 				}
 				ctx.handlerWriteDeadlineSet.Store(false)
-				previousWriteTimeout = 0
+				previousWriteTimeout = writeTimeout
 			}
 			ctx.handlerDeadlineSet.Store(false)
 			ctx.deadlineMu.Unlock()

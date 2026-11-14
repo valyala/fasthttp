@@ -9596,6 +9596,46 @@ func TestServerTimeoutHandlerKeepAliveDeadlineCleared(t *testing.T) {
 	})
 }
 
+func TestServerWriteTimeoutAfterHandlerDeadline(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		WriteTimeout: 10 * time.Millisecond,
+		Handler: func(ctx *RequestCtx) {
+			if err := ctx.SetWriteDeadline(time.Time{}); err != nil {
+				t.Error(err)
+			}
+		},
+	}
+	server, client := net.Pipe()
+	defer client.Close()
+	done := make(chan error, 1)
+	go func() { done <- s.ServeConn(server) }()
+
+	if err := client.SetDeadline(time.Now().Add(testTimeout(time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nHost: a\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	var resp Response
+	if err := resp.Read(bufio.NewReader(client)); err != nil {
+		t.Fatal(err)
+	}
+	// Leave the error response unread so the write can only finish by timing out.
+	if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nInvalid Header\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected a malformed request error")
+		}
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("ServeConn blocked writing the error response")
+	}
+}
+
 func TestServerPipelinedWriteDeadline(t *testing.T) {
 	t.Parallel()
 
