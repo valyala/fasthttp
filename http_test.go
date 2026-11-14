@@ -1958,6 +1958,22 @@ func TestRequestNoContentLength(t *testing.T) {
 		t.Fatalf("unexpected content-length in HEAD request %q", s)
 	}
 
+	for _, method := range []string{MethodGet, MethodHead} {
+		for _, length := range []int{32, -1} {
+			r.Header.SetMethod(method)
+			r.Header.SetContentLength(length)
+			wire := r.String() + "GET /next HTTP/1.1\r\nHost: foobar\r\n\r\n"
+			br := bufio.NewReader(strings.NewReader(wire))
+			var parsed Request
+			if err := parsed.Read(br); err != nil || len(parsed.Body()) != 0 {
+				t.Fatalf("%s with previous length %d: body %q, err %v", method, length, parsed.Body(), err)
+			}
+			if err := parsed.Read(br); err != nil || string(parsed.Header.RequestURI()) != "/next" {
+				t.Fatalf("reading next request: uri %q, err %v", parsed.Header.RequestURI(), err)
+			}
+		}
+	}
+
 	r.Header.SetMethod(MethodPost)
 	fmt.Fprintf(r.BodyWriter(), "foobar body")
 	s = r.String()

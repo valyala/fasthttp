@@ -2083,7 +2083,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 		if err = req.Header.setRawBodyFraming(contentLength, hasBody); err != nil {
 			return err
 		}
-	} else if hasBody {
+	} else if hasBody || req.Header.contentLength > 0 || len(peekArgBytes(req.Header.h, strTransferEncoding)) > 0 {
 		req.Header.SetContentLength(contentLength)
 	}
 	if chunked {
