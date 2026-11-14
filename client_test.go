@@ -4716,6 +4716,7 @@ func TestClientStreamingRedirectsReuseConnection(t *testing.T) {
 			dialCount.Add(1)
 			return net.Dial("tcp", addr)
 		},
+		MaxConns:           1,
 		StreamResponseBody: true,
 	}
 	t.Cleanup(client.CloseIdleConnections)
@@ -4738,6 +4739,15 @@ func TestClientStreamingRedirectsReuseConnection(t *testing.T) {
 	}
 	if got := dialCount.Load(); got != 1 {
 		t.Fatalf("redirect responses prevented connection reuse: got %d dials", got)
+	}
+
+	// A caller may discard the response when DoRedirects returns an error.
+	for range 2 {
+		req.SetRequestURI(server.URL + "/first")
+		var failed Response
+		if err := client.DoRedirects(&req, &failed, 0); !errors.Is(err, ErrTooManyRedirects) {
+			t.Fatalf("expected redirect limit error, got %v", err)
+		}
 	}
 }
 

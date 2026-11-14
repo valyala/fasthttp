@@ -102,7 +102,8 @@ func DoDeadline(req *Request, resp *Response, deadline time.Time) error {
 
 // DoRedirects performs the given http request and fills the given http response,
 // following up to maxRedirectsCount redirects. When the redirect count exceeds
-// maxRedirectsCount, ErrTooManyRedirects is returned.
+// maxRedirectsCount, ErrTooManyRedirects is returned. A redirect error closes
+// the body stream of the redirect response.
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
@@ -502,7 +503,8 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 
 // DoRedirects performs the given http request and fills the given http response,
 // following up to maxRedirectsCount redirects. When the redirect count exceeds
-// maxRedirectsCount, ErrTooManyRedirects is returned.
+// maxRedirectsCount, ErrTooManyRedirects is returned. A redirect error closes
+// the body stream of the redirect response.
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
@@ -1362,11 +1364,11 @@ func doRequestFollowRedirects(
 		authFromUserinfo := len(req.uri.username) > 0 && len(req.Header.peek(strAuthorization)) == 0
 
 		if err = c.Do(req, resp); err != nil {
-			break
+			return statusCode, body, err
 		}
 		statusCode = resp.Header.StatusCode()
 		if !StatusCodeIsRedirect(statusCode) {
-			break
+			return statusCode, body, err
 		}
 
 		redirectsCount++
@@ -1383,7 +1385,7 @@ func doRequestFollowRedirects(
 			// There is nothing to fetch for mailto:, tel: or an app callback
 			// such as com.example.app:/cb, so return the redirect response
 			// as is and leave the location to the caller.
-			break
+			return statusCode, body, err
 		}
 		redirectURI := AcquireURI()
 		url, err = getRedirectURL(url, location, req.DisableRedirectPathNormalizing, redirectURI)
@@ -1427,7 +1429,7 @@ func doRequestFollowRedirects(
 
 		if err = closeOrDrainResponseBody(resp, maxResponseBodyDrainSize); err != nil {
 			ReleaseURI(redirectURI)
-			break
+			return statusCode, body, err
 		}
 
 		// Set the URI here and not at the top of the loop: DoRedirects
@@ -1442,6 +1444,8 @@ func doRequestFollowRedirects(
 		ReleaseURI(redirectURI)
 	}
 
+	// Discard the failed redirect without waiting for more body bytes.
+	_ = resp.CloseBodyStream()
 	return statusCode, body, err
 }
 
@@ -1694,7 +1698,8 @@ func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time
 
 // DoRedirects performs the given http request and fills the given http response,
 // following up to maxRedirectsCount redirects. When the redirect count exceeds
-// maxRedirectsCount, ErrTooManyRedirects is returned.
+// maxRedirectsCount, ErrTooManyRedirects is returned. A redirect error closes
+// the body stream of the redirect response.
 //
 // Request must contain at least non-zero RequestURI with full url (including
 // scheme and host) or non-zero Host header + RequestURI.
