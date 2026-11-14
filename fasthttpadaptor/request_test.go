@@ -103,6 +103,27 @@ func (r *closeTrackingReader) Close() error {
 func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 	t.Parallel()
 
+	t.Run("literal hash in request target", func(t *testing.T) {
+		const target = "/p#x?q=a#b&escaped=%23"
+		const want = "/p%23x?q=a%23b&escaped=%23"
+		r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"GET " + target + " HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, raw := range []string{target, ""} {
+			r.RequestURI = raw
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(r, &req)
+			if got := string(req.Header.RequestURI()); got != want {
+				t.Errorf("RequestURI %q: header target %q, want %q", raw, got, want)
+			}
+			if got := string(req.URI().RequestURI()); got != want {
+				t.Errorf("RequestURI %q: parsed target %q, want %q", raw, got, want)
+			}
+		}
+	})
+
 	t.Run("basic conversion", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{

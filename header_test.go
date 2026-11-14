@@ -4138,8 +4138,8 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 		123, "/aa", "aa.com", "", "abd/test")
 
 	// request uri with hostname
-	testRequestHeaderReadSuccess(t, h, "GET http://gooGle.com/foO/%20bar?xxx#aaa HTTP/1.1\r\nHost: aa.cOM\r\n\r\ntrail",
-		-2, "http://gooGle.com/foO/%20bar?xxx#aaa", "aa.cOM", "", "")
+	testRequestHeaderReadSuccess(t, h, "GET http://gooGle.com/foO/%20bar?xxx%23aaa HTTP/1.1\r\nHost: aa.cOM\r\n\r\ntrail",
+		-2, "http://gooGle.com/foO/%20bar?xxx%23aaa", "aa.cOM", "", "")
 
 	// blank lines before the first line
 	testRequestHeaderReadSuccess(t, h, "\r\n\n\r\nGET /aaa HTTP/1.1\r\nHost: aaa.com\r\n\r\nsss",

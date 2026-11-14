@@ -3666,7 +3666,8 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 }
 
 func validateRequestURI(method, requestURI []byte) error {
-	if stringContainsCTLByte(requestURI) {
+	// A request-target cannot contain a fragment (RFC 9112, section 3.2).
+	if stringContainsCTLByte(requestURI) || bytes.IndexByte(requestURI, '#') >= 0 {
 		return ErrorInvalidURI
 	}
 	// Asterisk-form request-target is only valid for server-wide OPTIONS requests (RFC 9112, section 3.2.4).
