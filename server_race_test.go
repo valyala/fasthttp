@@ -7,6 +7,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/valyala/fasthttp/fasthttputil"
 )
@@ -92,4 +93,19 @@ func TestServerDoneAfterHandlerReturnsRace(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	<-errCh
+}
+
+// A timeout may still be looking up its parent in RequestCtx.Value after
+// it closes Done, while the handler or serve loop changes the user values.
+func TestRequestCtxValueTimeoutRace(t *testing.T) {
+	t.Parallel()
+
+	ctx := &RequestCtx{s: fakeServer}
+	for range 10 {
+		child, cancel := context.WithTimeout(ctx, time.Millisecond)
+		<-child.Done()
+		ctx.SetUserValue("finished", true)
+		ctx.Request.Reset()
+		cancel()
+	}
 }

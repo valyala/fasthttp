@@ -3336,8 +3336,8 @@ func TestRequestCtxUserValue(t *testing.T) {
 			t.Fatalf("unexpected value obtained from VisitUserValues for key: %q, expecting: %#v but got: %#v", key, v, value)
 		}
 	})
-	if len(ctx.Request.userValues) != vlen {
-		t.Fatalf("the length of user values returned from VisitUserValues is not equal to the length of the userValues, expecting: %d but got: %d", len(ctx.Request.userValues), vlen)
+	if len(ctx.Request.userValues.entries) != vlen {
+		t.Fatalf("the length of user values returned from VisitUserValues is not equal to the length of the userValues, expecting: %d but got: %d", len(ctx.Request.userValues.entries), vlen)
 	}
 
 	ctx.ResetUserValues()
@@ -4627,6 +4627,9 @@ func TestServeConnKeepRequestAndResponseUntilResetUserValues(t *testing.T) {
 			ctx.SetUserValue("myKey", &closerWithRequestCtx{
 				ctx: ctx,
 				closeFunc: func(closerCtx *RequestCtx) error {
+					if closerCtx.Value("myKey") == nil {
+						t.Error("user value removed before Close")
+					}
 					resultReqStr = closerCtx.Request.String()
 					resultRespStr = closerCtx.Response.String()
 

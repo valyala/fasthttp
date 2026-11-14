@@ -652,8 +652,8 @@ func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) R
 // before return.
 //
 // It is unsafe modifying/reading RequestCtx instance from concurrently
-// running goroutines. The only exception is TimeoutError*, which may be called
-// while other goroutines accessing RequestCtx.
+// running goroutines. The context.Context methods and TimeoutError* may be called
+// concurrently with the handler.
 type RequestCtx struct {
 	noCopy noCopy
 
@@ -3508,9 +3508,13 @@ func (ctx *RequestCtx) Err() error {
 // the same key returns the same result.
 //
 // This method is present to make RequestCtx implement the context interface.
-// This method is the same as calling ctx.UserValue(key).
+// Unlike UserValue, Value may be called concurrently with the handler.
+// Request-scoped values must only be used during the handler.
 func (ctx *RequestCtx) Value(key any) any {
-	return ctx.UserValue(key)
+	d := &ctx.Request.userValues
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.Get(key)
 }
 
 var fakeServer = func() *Server {
