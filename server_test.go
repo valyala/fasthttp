@@ -10336,3 +10336,28 @@ func TestServerExtensionMethodReachesHandler(t *testing.T) {
 		t.Fatalf("unexpected status code %d. Expecting %d, from the Handler", got, StatusNotImplemented)
 	}
 }
+
+func TestServerRejectsFragmentInRequestTarget(t *testing.T) {
+	t.Parallel()
+
+	for _, wire := range []string{
+		"GET /file?name=secret#.png HTTP/1.1\r\nHost: example.org",
+		"GET http://example.org/admin# HTTP/1.1\r\nHost: example.org",
+	} {
+		s := &Server{
+			HeaderReceived: func(*RequestHeader) RequestConfig {
+				t.Errorf("HeaderReceived called for %q", wire)
+				return RequestConfig{}
+			},
+			Handler: func(*RequestCtx) {
+				t.Errorf("handler called for %q", wire)
+			},
+		}
+		rw := &readWriter{}
+		rw.r.WriteString(wire + "\r\n\r\n")
+		if err := s.ServeConn(rw); !errors.Is(err, ErrorInvalidURI) {
+			t.Errorf("ServeConn(%q) = %v, want ErrorInvalidURI", wire, err)
+		}
+		verifyResponse(t, bufio.NewReader(&rw.w), StatusBadRequest, string(defaultContentType), "Error when parsing request")
+	}
+}

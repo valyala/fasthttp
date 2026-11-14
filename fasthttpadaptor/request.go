@@ -287,6 +287,8 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 			}
 		}
 	}
+	// net/http treats a raw # in a request target as path or query data.
+	target = strings.ReplaceAll(target, "#", "%23")
 	restoreTarget := targetIsAbsoluteForm(target) && !targetHasUserinfo(target)
 	if target != "" {
 		req.SetRequestURI(target)
