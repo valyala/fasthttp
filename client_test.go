@@ -4810,6 +4810,36 @@ func TestClientDoRedirectsAllowsNilResponse(t *testing.T) {
 	}
 }
 
+func TestDoRedirectsRequestTimeout(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const timeout = time.Second
+		var budgets []time.Duration
+		c := HostClient{
+			Addr: "example.com",
+			Transport: &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+				budgets = append(budgets, req.timeout)
+				time.Sleep(timeout / 2)
+				resp.SetStatusCode(StatusFound)
+				resp.Header.Set(HeaderLocation, "/next")
+				return false, nil
+			}},
+		}
+		var req Request
+		req.SetRequestURI("http://example.com/")
+		req.SetTimeout(timeout)
+		if err := c.DoRedirects(&req, nil, 3); err != ErrTimeout {
+			t.Fatalf("got %v, want ErrTimeout", err)
+		}
+		if len(budgets) != 2 || budgets[0] != timeout || budgets[1] != timeout/2 {
+			t.Errorf("hop timeouts = %v, want [%v %v]", budgets, timeout, timeout/2)
+		}
+		if req.timeout != timeout {
+			t.Errorf("request timeout after DoRedirects = %v, want %v", req.timeout, timeout)
+		}
+	})
+}
+
 func TestClientRedirectMethodSwitch(t *testing.T) {
 	t.Parallel()
 
