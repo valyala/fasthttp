@@ -1238,7 +1238,7 @@ func (req *Request) parsePostArgs() {
 	}
 	req.parsedPostArgs = true
 
-	if !caseInsensitiveHasPrefix(req.Header.ContentType(), strPostArgsContentType) {
+	if !hasMediaType(req.Header.ContentType(), strPostArgsContentType) {
 		return
 	}
 	req.postArgs.ParseBytes(req.bodyBytes())
@@ -1308,7 +1308,7 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	// mid-body, and the server's stream records that itself, see
 	// requestStream.failed, where Request.Reset can't clear it.
 	var drainBodyStream bool
-	if req.bodyStream != nil && isMultipartFormData(req.Header.ContentType()) {
+	if req.bodyStream != nil && hasMediaType(req.Header.ContentType(), strMultipartFormData) {
 		defer func() {
 			if drainBodyStream {
 				copyBodyStream(io.Discard, req.bodyStream) //nolint:errcheck
@@ -1400,15 +1400,12 @@ func (req *Request) MultipartFormWithLimit(maxBodySize int) (*multipart.Form, er
 	return req.multipartForm, nil
 }
 
-// isMultipartFormData reports whether contentType declares the
-// multipart/form-data media type, with or without parameters. A plain prefix
-// match would also take media types such as multipart/form-data-alt, whose
-// body the multipart parser never reads.
-func isMultipartFormData(contentType []byte) bool {
-	if !caseInsensitiveHasPrefix(contentType, strMultipartFormData) {
+// hasMediaType matches the media type in Content-Type, ignoring parameters.
+func hasMediaType(contentType, mediaType []byte) bool {
+	if !caseInsensitiveHasPrefix(contentType, mediaType) {
 		return false
 	}
-	rest := contentType[len(strMultipartFormData):]
+	rest := contentType[len(mediaType):]
 	for len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
 		rest = rest[1:]
 	}

@@ -2403,8 +2403,8 @@ func TestRequestMultipartFormMediaTypeCase(t *testing.T) {
 				req.RemoveMultipartFormFiles()
 			}
 
-			if !isMultipartFormData([]byte(contentType)) {
-				t.Fatalf("isMultipartFormData(%q) = false; want true", contentType)
+			if !hasMediaType([]byte(contentType), strMultipartFormData) {
+				t.Fatalf("hasMediaType(%q, multipart/form-data) = false; want true", contentType)
 			}
 		})
 	}
@@ -2439,8 +2439,8 @@ func TestRequestMultipartFormOptionalWhitespace(t *testing.T) {
 				req.RemoveMultipartFormFiles()
 			}
 
-			if !isMultipartFormData([]byte(contentType)) {
-				t.Fatalf("isMultipartFormData(%q) = false; want true", contentType)
+			if !hasMediaType([]byte(contentType), strMultipartFormData) {
+				t.Fatalf("hasMediaType(%q, multipart/form-data) = false; want true", contentType)
 			}
 		})
 	}
@@ -3905,8 +3905,8 @@ func TestRequestPostArgsSuccess(t *testing.T) {
 
 	testRequestPostArgsSuccess(t, &req, "POST / HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 18\r\n\r\nfoo&b%20r=b+z=&qwe", 3, "foo=", "b r=b z=", "qwe=")
 
-	// media type is case-insensitive
-	testRequestPostArgsSuccess(t, &req, "POST / HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: Application/X-WWW-Form-Urlencoded\r\nContent-Length: 7\r\n\r\nfoo=bar", 1, "foo=bar")
+	// A mixed-case media type may have parameters.
+	testRequestPostArgsSuccess(t, &req, "POST / HTTP/1.1\r\nHost: aaa.com\r\nContent-Type: Application/X-WWW-Form-Urlencoded \t; charset=utf-8\r\nContent-Length: 7\r\n\r\nfoo=bar", 1, "foo=bar")
 }
 
 func TestRequestPostArgsError(t *testing.T) {
@@ -3919,6 +3919,10 @@ func TestRequestPostArgsError(t *testing.T) {
 
 	// invalid content-type
 	testRequestPostArgsError(t, &req, "POST /aa HTTP/1.1\r\nHost: aaa\r\nContent-Type: text/html\r\nContent-Length: 5\r\n\r\nabcde")
+
+	for _, suffix := range []string{"2", "+json", " charset=utf-8"} {
+		testRequestPostArgsError(t, &req, "POST /aa HTTP/1.1\r\nHost: aaa\r\nContent-Type: application/x-www-form-urlencoded"+suffix+"\r\nContent-Length: 7\r\n\r\nfoo=bar")
+	}
 }
 
 func testRequestPostArgsError(t *testing.T, req *Request, s string) {
