@@ -6186,6 +6186,34 @@ func TestTCPDialerDNSCleanerStopsAndRestarts(t *testing.T) {
 	waitForTCPDialerCleanerState(t, dialer, false)
 }
 
+func TestTCPDialerDNSCacheDualStack(t *testing.T) {
+	t.Parallel()
+
+	dialer := &TCPDialer{
+		DNSCacheDuration: time.Hour,
+		Resolver: &staticResolver{
+			addrs: []net.IPAddr{{IP: net.IPv4(127, 0, 0, 1)}, {IP: net.IPv6loopback}},
+		},
+	}
+	deadline := time.Now().Add(time.Second)
+
+	// Dial keeps the IPv4 addresses only. DialDualStack must not get them
+	// from the cache, or the IPv6 address stays out of its reach.
+	for _, dualStack := range []bool{false, true, false, true} {
+		addrs, _, err := dialer.getTCPAddrs("example.com:80", dualStack, deadline)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := 1
+		if dualStack {
+			expected = 2
+		}
+		if len(addrs) != expected {
+			t.Fatalf("unexpected addresses %v with dualStack=%v. Expecting %d", addrs, dualStack, expected)
+		}
+	}
+}
+
 func TestTCPDialerKeepAlive(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
