@@ -3428,7 +3428,7 @@ func TestServerAbsoluteTargetHost(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range []struct{ target, host, parsed string }{
-		{"http://public.example:80/path", "public.example:80", "public.example:80"},
+		{"http://public.example:80/path@user?q=user@example.org", "public.example:80", "public.example:80"},
 		{"http://[fe80::1%25eth0]/path", "[fe80::1%25eth0]", "[fe80::1%eth0]"},
 		{"//public.example/path?q=a://b", "internal.example", "internal.example"},
 		{"http://user@/path", "", ""},
@@ -3459,6 +3459,34 @@ func TestServerAbsoluteTargetHost(t *testing.T) {
 		} else if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestServerRejectsRequestUserinfo(t *testing.T) {
+	t.Parallel()
+
+	for _, wire := range []string{
+		"GET / HTTP/1.1\r\nHost: admin:secret@example.org",
+		"GET http://example.org/ HTTP/1.1\r\nHost: @other.org",
+		"GET http://admin:secret@example.org/ HTTP/1.1\r\nHost: example.org",
+		"GET //@example.org/ HTTP/1.0",
+		"CONNECT admin:secret@example.org:443 HTTP/1.1\r\nHost: example.org",
+	} {
+		s := &Server{
+			HeaderReceived: func(*RequestHeader) RequestConfig {
+				t.Errorf("HeaderReceived called for %q", wire)
+				return RequestConfig{}
+			},
+			Handler: func(*RequestCtx) {
+				t.Errorf("handler called for %q", wire)
+			},
+		}
+		rw := &readWriter{}
+		rw.r.WriteString(wire + "\r\n\r\n")
+		if err := s.ServeConn(rw); !errors.Is(err, ErrorInvalidURI) {
+			t.Errorf("ServeConn(%q) = %v, want ErrorInvalidURI", wire, err)
+		}
+		verifyResponse(t, bufio.NewReader(&rw.w), StatusBadRequest, string(defaultContentType), "Error when parsing request")
 	}
 }
 
