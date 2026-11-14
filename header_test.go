@@ -2891,6 +2891,38 @@ func equalCookie(c1, c2 *Cookie) bool {
 	return true
 }
 
+func TestRequestHeaderCompactRepeatedFields(t *testing.T) {
+	t.Parallel()
+
+	raw := "GET / HTTP/1.1\r\nHost: h\r\n" +
+		"Cookie: a=1\r\nX-Order: first\r\nConnection:\r\n" +
+		"Cookie:\r\nConnection: close, TE\r\nCookie: b=2\r\n" +
+		"Connection:\r\nX-Order: second\r\nConnection: upgrade\r\n\r\n"
+	var h RequestHeader
+	if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatal(err)
+	}
+	h.ResetConnectionClose()
+	if h.ConnectionClose() {
+		t.Fatal("close option survived reset")
+	}
+	var cookies []string
+	for key, value := range h.Cookies() {
+		cookies = append(cookies, string(key)+"="+string(value))
+	}
+	if got := strings.Join(cookies, "; "); got != "a=1; b=2" {
+		t.Fatalf("Cookie = %q, want a=1; b=2", got)
+	}
+	// Reuse a removed slot before checking the surviving fields.
+	h.Add("X-New", "after")
+	if got := string(bytes.Join(h.PeekAll(HeaderConnection), []byte(","))); got != "TE,upgrade" {
+		t.Fatalf("Connection = %q, want TE,upgrade", got)
+	}
+	if got := string(bytes.Join(h.PeekAll("X-Order"), []byte(","))); got != "first,second" {
+		t.Fatalf("X-Order = %q, want first,second", got)
+	}
+}
+
 func TestRequestHeaderCookie(t *testing.T) {
 	t.Parallel()
 

@@ -205,24 +205,26 @@ func (h *header) SetConnectionClose() {
 
 // ResetConnectionClose clears 'Connection: close' header if it exists.
 func (h *header) ResetConnectionClose() {
-	if h.connectionClose {
-		h.connectionClose = false
-		for i := 0; i < len(h.h); i++ {
-			if caseInsensitiveCompare(h.h[i].key, strConnection) {
-				val := removeHeaderValue(nil, h.h[i].value, strClose)
-				if len(val) == 0 {
-					tmp := h.h[i]
-					copy(h.h[i:], h.h[i+1:])
-					n := len(h.h) - 1
-					h.h[n] = tmp
-					h.h = h.h[:n]
-					i--
-				} else {
-					h.h[i].value = append(h.h[i].value[:0], val...)
-				}
-			}
-		}
+	if !h.connectionClose {
+		return
 	}
+	h.connectionClose = false
+	write := 0
+	for i := range h.h {
+		kv := &h.h[i]
+		if caseInsensitiveCompare(kv.key, strConnection) {
+			val := removeHeaderValue(nil, kv.value, strClose)
+			if len(val) == 0 {
+				continue
+			}
+			kv.value = append(kv.value[:0], val...)
+		}
+		if write != i {
+			h.h[write], h.h[i] = h.h[i], h.h[write]
+		}
+		write++
+	}
+	h.h = h.h[:write]
 }
 
 // ConnectionUpgrade returns true if 'Connection: Upgrade' header is set.
@@ -4131,17 +4133,27 @@ func (h *RequestHeader) collectCookies() {
 		return
 	}
 
-	for i, n := 0, len(h.h); i < n; i++ {
-		kv := &h.h[i]
-		if caseInsensitiveCompare(kv.key, strCookie) {
-			h.cookies = parseRequestCookies(h.cookies, kv.value)
-			tmp := *kv
-			copy(h.h[i:], h.h[i+1:])
-			n--
-			i--
-			h.h[n] = tmp
-			h.h = h.h[:n]
+	for first := range h.h {
+		if !caseInsensitiveCompare(h.h[first].key, strCookie) {
+			continue
 		}
+		h.cookies = parseRequestCookies(h.cookies, h.h[first].value)
+		// Leave the first cookie in place until the end so a single Cookie
+		// header can be removed with one copy instead of repeated swaps.
+		write := first + 1
+		for read := write; read < len(h.h); read++ {
+			kv := &h.h[read]
+			if caseInsensitiveCompare(kv.key, strCookie) {
+				h.cookies = parseRequestCookies(h.cookies, kv.value)
+				continue
+			}
+			if write != read {
+				h.h[write], h.h[read] = h.h[read], h.h[write]
+			}
+			write++
+		}
+		h.h = delArgAt(h.h[:write], first)
+		break
 	}
 	h.cookiesCollected = true
 }
