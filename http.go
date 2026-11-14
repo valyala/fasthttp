@@ -3583,7 +3583,8 @@ func readCrLf(r *bufio.Reader) error {
 	return nil
 }
 
-// SetTimeout sets timeout for the request.
+// SetTimeout sets the timeout for the request. With DoRedirects, the timeout
+// covers the entire redirect chain.
 //
 // If the client has ReadTimeout or WriteTimeout set, the shorter timeout applies.
 //

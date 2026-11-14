@@ -1325,6 +1325,10 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 }
 
 func doRedirects(req *Request, resp *Response, maxRedirectsCount int, c clientDoer, disablePathNormalizing bool) error {
+	if timeout := req.timeout; timeout > 0 {
+		c = &deadlineClient{client: c, deadline: time.Now().Add(timeout)}
+		defer func() { req.timeout = timeout }()
+	}
 	if err := req.parseURI(); err != nil {
 		return err
 	}
