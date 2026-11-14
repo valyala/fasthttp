@@ -1419,6 +1419,52 @@ func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
 	return buf.B, nil
 }
 
+// multipartFormBoundaryWritable reports whether WriteMultipartForm accepts the
+// boundary, which is to say whether mime/multipart does: 1 to 70 bytes of the
+// characters RFC 2046, section 5.1.1 allows, and no space at the end.
+//
+// A form that is parsed as the request is read is marshaled again when the
+// request is written, and the Content-Type of a request can have a boundary
+// that doesn't qualify although net/http reads it, such as "foo;bar" or one
+// with a quote or a backslash in it. Writing such a request would fail, and
+// Body would return the error text as the body, so the body of such a request
+// is kept as it is instead, and written as it came. MultipartForm still parses
+// it from the body when it is asked for.
+func multipartFormBoundaryWritable(boundary string) bool {
+	// SetBoundary only checks the boundary and stores it. A Writer from
+	// NewWriter would also pick a random boundary first, from crypto/rand.
+	var mw multipart.Writer
+	return mw.SetBoundary(boundary) == nil
+}
+
+// preReadMultipartForm reads the body of a multipart/form-data request of known
+// length as a form, and reports whether it did. This way we limit memory usage
+// for large file uploads, since their contents is streamed into temporary files
+// if file size exceeds defaultMaxInMemoryFileSize.
+//
+// The body is left unread, to be kept as it is, when the request has no
+// boundary, has a Content-Encoding, or has a boundary that mime/multipart can't
+// write again, since the form is marshaled again with it when the request is
+// written.
+//
+// The boundary is copied, since Write replaces the Content-Type it is read from.
+func (req *Request) preReadMultipartForm(r *bufio.Reader, contentLength int) (read bool, err error) {
+	req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
+
+	// The cheap conditions come first: asking SetBoundary about the empty
+	// boundary of a body that isn't multipart allocates an error each time.
+	if req.multipartFormBoundary == "" || len(req.Header.peek(strContentEncoding)) != 0 ||
+		!multipartFormBoundaryWritable(req.multipartFormBoundary) {
+		return false, nil
+	}
+
+	req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
+	if err != nil {
+		req.Reset()
+	}
+	return true, err
+}
+
 // WriteMultipartForm writes the given multipart form f with the given
 // boundary to w.
 func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
@@ -1684,16 +1730,8 @@ func (req *Request) ContinueReadBody(r *bufio.Reader, maxBodySize int, preParseM
 		}
 
 		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
-			// Pre-read multipart form data of known length.
-			// This way we limit memory usage for large file uploads, since their contents
-			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-			req.multipartFormBoundary = string(req.Header.MultipartFormBoundary())
-			if req.multipartFormBoundary != "" && len(req.Header.peek(strContentEncoding)) == 0 {
-				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
-				if err != nil {
-					req.Reset()
-				}
-				return err
+			if read, perr := req.preReadMultipartForm(r, contentLength); read {
+				return perr
 			}
 		}
 	}
@@ -1766,16 +1804,8 @@ func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, pre
 	contentLength := req.Header.ContentLength()
 	if contentLength > 0 {
 		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
-			// Pre-read multipart form data of known length.
-			// This way we limit memory usage for large file uploads, since their contents
-			// is streamed into temporary files if file size exceeds defaultMaxInMemoryFileSize.
-			req.multipartFormBoundary = b2s(req.Header.MultipartFormBoundary())
-			if req.multipartFormBoundary != "" && len(req.Header.peek(strContentEncoding)) == 0 {
-				req.multipartForm, err = readMultipartForm(r, req.multipartFormBoundary, contentLength, defaultMaxInMemoryFileSize)
-				if err != nil {
-					req.Reset()
-				}
-				return err
+			if read, perr := req.preReadMultipartForm(r, contentLength); read {
+				return perr
 			}
 		}
 	}

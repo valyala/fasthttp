@@ -2429,6 +2429,496 @@ func TestRequestMultipartFormOptionalWhitespace(t *testing.T) {
 	}
 }
 
+func TestRequestMultipartFormQuotedBoundary(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		contentType string
+		boundary    string
+	}{
+		{`multipart/form-data; boundary="foo;bar"`, "foo;bar"},
+		{`multipart/form-data; boundary="foo\:bar"`, "foo:bar"},
+		{`multipart/form-data; boundary2=1; boundary=foobar`, "foobar"},
+	} {
+		t.Run(tc.contentType, func(t *testing.T) {
+			body := "--" + tc.boundary + "\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--" + tc.boundary + "--\r\n"
+			s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+				tc.contentType, len(body), body)
+
+			for _, preParse := range []bool{true, false} {
+				var req Request
+				br := bufio.NewReader(strings.NewReader(s))
+				if err := req.Header.Read(br); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if err := req.ContinueReadBody(br, 0, preParse); err != nil {
+					t.Fatalf("preParse=%v: unexpected error: %v", preParse, err)
+				}
+				f, err := req.MultipartForm()
+				if err != nil {
+					t.Fatalf("preParse=%v: unexpected error: %v", preParse, err)
+				}
+				if vv := f.Value["key"]; len(vv) != 1 || vv[0] != "value" {
+					t.Fatalf("preParse=%v: unexpected values %q", preParse, vv)
+				}
+				req.RemoveMultipartFormFiles()
+			}
+		})
+	}
+}
+
+// A form that was parsed as it was read is marshaled again when the request is
+// written, with the boundary in the Content-Type. The boundary has to be read
+// as net/http reads it, with its quoted-pairs decoded, and quoted when it is
+// written if it holds a character a token can't, such as ':', or a receiver
+// that follows RFC 9110, like net/http, doesn't find the parts.
+//
+// mime/multipart refuses a boundary that RFC 2046 doesn't allow, such as one
+// with a ';', a quote or a backslash in it, although net/http reads it. The
+// form of such a request is not parsed as it is read: its body is kept as it
+// is and written as it came, and writing it doesn't fail.
+func TestRequestMultipartFormBoundaryWrittenBack(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		contentType string
+		boundary    string
+		// kept says that the boundary can't be written, so that the body is
+		// kept as it is, and not that the form is parsed as it is read.
+		kept bool
+	}{
+		{`multipart/form-data; boundary=foobar`, "foobar", false},
+		{`multipart/form-data; boundary=----WebKitFormBoundaryAbC`, "----WebKitFormBoundaryAbC", false},
+		{`multipart/form-data; boundary="foo:bar"`, "foo:bar", false},
+		{`multipart/form-data; boundary2=1; boundary="foo:bar"`, "foo:bar", false},
+		{`multipart/form-data; boundary="----=_Part_0_123.456"`, "----=_Part_0_123.456", false},
+
+		// A quoted-pair stands for the byte it escapes.
+		{`multipart/form-data; boundary="foo\:bar"`, "foo:bar", false},
+		{`multipart/form-data; boundary="\(foo\)\=bar\?"`, "(foo)=bar?", false},
+
+		// The boundary doesn't sit where the Content-Type written back puts
+		// it, so it must not be read from the Content-Type once that is
+		// replaced.
+		{`multipart/form-data;boundary=foobar`, "foobar", false},
+		{`multipart/form-data;boundary="foo:bar"`, "foo:bar", false},
+		{`multipart/form-data; a=1; boundary="foo:bar"`, "foo:bar", false},
+
+		// The longest boundary mime/multipart writes, and a space inside one.
+		{`multipart/form-data; boundary=` + strings.Repeat("a", 70), strings.Repeat("a", 70), false},
+		{`multipart/form-data; boundary=" foo bar"`, " foo bar", false},
+
+		// What net/http reads and mime/multipart can't write: a ';', a quote
+		// or a backslash that is escaped in the Content-Type, another
+		// character that is not in RFC 2046, a space at the end, and more than
+		// 70 bytes. With and without a parameter before it that used to make
+		// fasthttp read no boundary.
+		{`multipart/form-data; boundary="foo;bar"`, "foo;bar", true},
+		{`multipart/form-data; boundary2=1; boundary="foo;bar"`, "foo;bar", true},
+		{`multipart/form-data; boundary="a\"b"`, `a"b`, true},
+		{`multipart/form-data; boundary2=1; boundary="a\"b"`, `a"b`, true},
+		{`multipart/form-data; boundary="a\\b"`, `a\b`, true},
+		{`multipart/form-data; boundary2=1; boundary="a\\b"`, `a\b`, true},
+		{`multipart/form-data; boundary=foo!bar`, "foo!bar", true},
+		{`multipart/form-data; boundary2=1; boundary=foo!bar`, "foo!bar", true},
+		{`multipart/form-data; boundary="foo@bar"`, "foo@bar", true},
+		{`multipart/form-data; boundary="abc "`, "abc ", true},
+		{`multipart/form-data; boundary=` + strings.Repeat("a", 71), strings.Repeat("a", 71), true},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%v", tc.contentType, stream), func(t *testing.T) {
+				t.Parallel()
+
+				body := "--" + tc.boundary + "\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--" + tc.boundary + "--\r\n"
+				s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+					tc.contentType, len(body), body)
+
+				// net/http reads the field from the request as it was sent, so
+				// fasthttp has to read the same boundary to forward it.
+				testNetHTTPReadsMultipartFormValue(t, []byte(s))
+
+				var req Request
+				testReadRequestMaybeStreaming(t, &req, s, stream)
+				defer req.RemoveMultipartFormFiles()
+				if parsed := req.onlyMultipartForm(); parsed == tc.kept {
+					t.Fatalf("the form is parsed as the request is read: %v. Expecting %v", parsed, !tc.kept)
+				}
+
+				// The request is written twice: the first write replaces the
+				// Content-Type the boundary was read from, and the boundary
+				// has to survive that. A body that is kept as a stream can be
+				// read once, and so is written once.
+				writes := 2
+				if tc.kept && stream {
+					writes = 1
+				}
+				for i := 1; i <= writes; i++ {
+					written := writeRequestForFramingTest(t, &req)
+
+					// A request that is kept goes out as it came.
+					if tc.kept && (!bytes.Contains(written, []byte("\r\nContent-Type: "+tc.contentType+"\r\n")) ||
+						!bytes.HasSuffix(written, []byte("\r\n\r\n"+body))) {
+						t.Fatalf("write %d: the request was changed: %q", i, written)
+					}
+
+					// net/http finds the boundary and the field in the request written back.
+					testNetHTTPReadsMultipartFormValue(t, written)
+
+					// So does fasthttp, with the boundary that was sent, not
+					// another one.
+					testFasthttpReadsMultipartFormValue(t, written, tc.boundary)
+				}
+
+				// The other ways to get at the body of a request that is kept
+				// give the body that was sent, and not the error that writing
+				// the form would have been.
+				if tc.kept {
+					var again Request
+					testReadRequestMaybeStreaming(t, &again, s, stream)
+					if got := string(again.Body()); got != body {
+						t.Fatalf("unexpected Body %q. Expecting %q", got, body)
+					}
+
+					var again2 Request
+					testReadRequestMaybeStreaming(t, &again2, s, stream)
+					var bodyBuf bytes.Buffer
+					if err := again2.BodyWriteTo(&bodyBuf); err != nil {
+						t.Fatalf("unexpected error from BodyWriteTo: %v", err)
+					}
+					if got := bodyBuf.String(); got != body {
+						t.Fatalf("unexpected BodyWriteTo %q. Expecting %q", got, body)
+					}
+				}
+			})
+		}
+	}
+}
+
+// Whatever the boundary is, a request that net/http reads is forwarded as one
+// that net/http reads too: its form is parsed as the request is read when
+// mime/multipart can write the boundary again, and its body is kept as it is
+// when it can't. This tries every printable byte inside a boundary, and the
+// lengths around the limit of 70 bytes, in the places a client puts a
+// boundary, with and without streaming.
+func TestRequestMultipartFormBoundaryForwarded(t *testing.T) {
+	t.Parallel()
+
+	boundaries := []string{"a", strings.Repeat("a", 70), strings.Repeat("a", 71), " ab", "ab ", "foo bar", "a;b;c", `a"b"c`}
+	for c := byte(' '); c <= '~'; c++ {
+		boundaries = append(boundaries, "a"+string(c)+"b")
+	}
+
+	parsed, kept, skipped := 0, 0, 0
+	for _, boundary := range boundaries {
+		// The way a client spells it: as it is if it is a token, and else
+		// as a quoted-string.
+		spelled := boundary
+		for i := 0; i < len(boundary); i++ {
+			if !validHeaderFieldByte(boundary[i]) {
+				spelled = `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(boundary) + `"`
+				break
+			}
+		}
+
+		body := "--" + boundary + "\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--" + boundary + "--\r\n"
+		for _, contentType := range []string{
+			"multipart/form-data; boundary=" + spelled,
+			"multipart/form-data; boundary2=1; boundary=" + spelled,
+			"multipart/form-data; boundary=" + spelled + "; charset=utf-8",
+		} {
+			s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+				contentType, len(body), body)
+
+			// There is nothing to keep working when net/http doesn't read
+			// the request that was sent.
+			if err := netHTTPReadsMultipartFormValue([]byte(s)); err != nil {
+				skipped++
+				continue
+			}
+
+			for _, stream := range []bool{false, true} {
+				var req Request
+				testReadRequestMaybeStreaming(t, &req, s, stream)
+				if req.onlyMultipartForm() {
+					parsed++
+				} else {
+					kept++
+				}
+
+				written := writeRequestForFramingTest(t, &req)
+				req.RemoveMultipartFormFiles()
+
+				if err := netHTTPReadsMultipartFormValue(written); err != nil {
+					t.Fatalf("Content-Type %q, stream=%v: net/http doesn't read the request that was written: %v. Request: %q", contentType, stream, err, written)
+				}
+				testFasthttpReadsMultipartFormValue(t, written, boundary)
+			}
+		}
+	}
+
+	// Both outcomes have to happen, or nothing was checked.
+	if parsed < 100 || kept < 100 {
+		t.Fatalf("unexpected counts: the form was parsed %d times, the body was kept %d times, %d requests were skipped", parsed, kept, skipped)
+	}
+}
+
+func TestMultipartFormBoundaryWritable(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		boundary string
+		want     bool
+	}{
+		{"abc", true},
+		{"a", true},
+		{"----WebKitFormBoundary7MA4YWxkTrZu0gW", true},
+		{"'()+_,-./:=?", true},
+		{"foo:bar", true},
+		{"foo bar", true},
+		{" foo", true},
+		{strings.Repeat("a", 70), true},
+
+		{"", false},
+		{strings.Repeat("a", 71), false},
+		{"foo ", false},
+		{"foo;bar", false},
+		{`foo"bar`, false},
+		{`foo\bar`, false},
+		{"foo!bar", false},
+		{"foo@bar", false},
+		{"foo*bar", false},
+		{"foo\tbar", false},
+		{"foo\x7fbar", false},
+		{"foo\xc3\xa9bar", false},
+	} {
+		if got := multipartFormBoundaryWritable(tc.boundary); got != tc.want {
+			t.Errorf("multipartFormBoundaryWritable(%q) = %v. Expecting %v", tc.boundary, got, tc.want)
+		}
+	}
+
+	// WriteMultipartForm refuses exactly what is not writable.
+	for c := range 256 {
+		for _, boundary := range []string{string([]byte{byte(c)}), "a" + string([]byte{byte(c)}) + "b", "ab" + string([]byte{byte(c)})} {
+			err := WriteMultipartForm(io.Discard, &multipart.Form{}, boundary)
+			if got := multipartFormBoundaryWritable(boundary); got != (err == nil) {
+				t.Fatalf("multipartFormBoundaryWritable(%q) = %v, and WriteMultipartForm returns %v", boundary, got, err)
+			}
+		}
+	}
+}
+
+// MultipartForm parses the body of a request that is kept as it is when it is
+// asked for, and the body is still the one that was sent afterwards: it must not
+// be taken for a form to marshal again, which mime/multipart can't do with these
+// boundaries.
+func TestRequestMultipartFormKeptBodyAfterMultipartForm(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		contentType string
+		boundary    string
+	}{
+		{`multipart/form-data; boundary="foo;bar"`, "foo;bar"},
+		{`multipart/form-data; boundary2=1; boundary="a\"b"`, `a"b`},
+		{`multipart/form-data; boundary=foo!bar`, "foo!bar"},
+		{`multipart/form-data; boundary=` + strings.Repeat("a", 71), strings.Repeat("a", 71)},
+	} {
+		t.Run(tc.contentType, func(t *testing.T) {
+			t.Parallel()
+
+			body := "--" + tc.boundary + "\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--" + tc.boundary + "--\r\n"
+			s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+				tc.contentType, len(body), body)
+
+			var req Request
+			testReadRequestMaybeStreaming(t, &req, s, false)
+			defer req.RemoveMultipartFormFiles()
+			if req.onlyMultipartForm() {
+				t.Fatal("expecting the body to be kept as it is")
+			}
+
+			f, err := req.MultipartForm()
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if vv := f.Value["key"]; len(vv) != 1 || vv[0] != "value" {
+				t.Fatalf("unexpected values %q", vv)
+			}
+
+			if got := string(req.Body()); got != body {
+				t.Fatalf("unexpected Body %q. Expecting %q", got, body)
+			}
+			var bodyBuf bytes.Buffer
+			if err := req.BodyWriteTo(&bodyBuf); err != nil {
+				t.Fatalf("unexpected error from BodyWriteTo: %v", err)
+			}
+			if got := bodyBuf.String(); got != body {
+				t.Fatalf("unexpected BodyWriteTo %q. Expecting %q", got, body)
+			}
+			written := string(writeRequestForFramingTest(t, &req))
+			if !strings.Contains(written, "\r\nContent-Type: "+tc.contentType+"\r\n") || !strings.HasSuffix(written, "\r\n\r\n"+body) {
+				t.Fatalf("the request was changed: %q", written)
+			}
+		})
+	}
+}
+
+// A boundary parameter that net/http reads one way and RFC 9110 another, or
+// not at all, makes fasthttp read no boundary and keep the body as it is, so
+// that the request is forwarded for such a receiver to read as it would have
+// read the original. Those are an extended parameter such as boundary* or a
+// continuation such as boundary*0 (RFC 2231), two boundary parameters that
+// differ, which net/http rejects, whitespace after the '=' or around an
+// unquoted value, and a backslash before a byte that isn't a tspecial.
+func TestRequestMultipartFormBoundaryLeftToReceiver(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		contentType string
+		// boundary is the one net/http reads, "" when it reads none.
+		boundary string
+	}{
+		{`multipart/form-data; boundary*=utf-8''abc; boundary=fallback`, "abc"},
+		{`multipart/form-data; boundary=fallback; boundary*=utf-8''abc`, "abc"},
+		{`multipart/form-data; boundary*0=ab; boundary*1=c`, "abc"},
+		{`multipart/form-data; boundary*1=c; boundary*0=ab`, "abc"},
+		{`multipart/form-data; boundary*0*=utf-8''a%62; boundary*1=c`, "abc"},
+		{`multipart/form-data; boundary*=iso-8859-1''abc; boundary=fallback`, "fallback"},
+		{`multipart/form-data; boundary=abc; boundary=fallback`, ""},
+
+		// Whitespace after the '=', with a parameter before it that makes no
+		// difference to net/http and one that used to hide it here.
+		{`multipart/form-data; boundary= "abc"`, "abc"},
+		{`multipart/form-data; boundary= abc`, "abc"},
+		{"multipart/form-data; boundary=\tabc", "abc"},
+		{`multipart/form-data; boundary2=1; boundary= "abc"`, "abc"},
+		{`multipart/form-data; boundary2=1; boundary= abc`, "abc"},
+		{`multipart/form-data; boundary="abc"; boundary= abc`, "abc"},
+
+		// Unicode spaces, which net/http trims as well.
+		{"multipart/form-data; boundary=\u00a0abc", "abc"},
+		{"multipart/form-data; boundary=abc\u00a0; x=y", "abc"},
+		{"multipart/form-data;\u00a0boundary=abc", "abc"},
+		{"multipart/form-data;\u00a0boundary*=utf-8''abc; boundary=fallback", "abc"},
+
+		// A backslash before a byte that isn't a tspecial.
+		{`multipart/form-data; boundary="a\b"`, `a\b`},
+	} {
+		for _, stream := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/stream=%v", tc.contentType, stream), func(t *testing.T) {
+				t.Parallel()
+
+				boundary := tc.boundary
+				if boundary == "" {
+					boundary = "abc"
+				}
+				body := "--" + boundary + "\r\nContent-Disposition: form-data; name=\"key\"\r\n\r\nvalue\r\n--" + boundary + "--\r\n"
+				s := fmt.Sprintf("POST / HTTP/1.1\r\nHost: aaa\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n%s",
+					tc.contentType, len(body), body)
+
+				var req Request
+				testReadRequestMaybeStreaming(t, &req, s, stream)
+				if b := req.Header.MultipartFormBoundary(); b != nil {
+					t.Fatalf("unexpected boundary %q. Expecting none", b)
+				}
+				if req.onlyMultipartForm() {
+					t.Fatal("expecting the body to be kept as it is")
+				}
+				if _, err := req.MultipartForm(); !errors.Is(err, ErrNoMultipartForm) {
+					t.Fatalf("unexpected error %v. Expecting %v", err, ErrNoMultipartForm)
+				}
+
+				written := string(writeRequestForFramingTest(t, &req))
+
+				// The Content-Type and the body are forwarded as they were sent.
+				if !strings.Contains(written, "\r\nContent-Type: "+tc.contentType+"\r\n") || !strings.HasSuffix(written, "\r\n\r\n"+body) {
+					t.Fatalf("the request was changed: %q", written)
+				}
+				err := netHTTPReadsMultipartFormValue([]byte(written))
+				if tc.boundary == "" {
+					if err == nil {
+						t.Fatal("expecting net/http to reject the request")
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("net/http doesn't read the request: %v. Request: %q", err, written)
+				}
+			})
+		}
+	}
+}
+
+// testReadRequestMaybeStreaming reads the request s into req, the way a server
+// does with or without StreamRequestBody. A server passes its limit on the size
+// of a body, which is what makes it read the start of a streamed body ahead
+// into the request, so the default limit is passed here.
+func testReadRequestMaybeStreaming(t *testing.T, req *Request, s string, stream bool) {
+	t.Helper()
+
+	br := bufio.NewReader(strings.NewReader(s))
+	if !stream {
+		if err := req.Read(br); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return
+	}
+	if err := req.Header.Read(br); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := req.ContinueReadBodyStream(br, DefaultMaxRequestBodySize, true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// testFasthttpReadsMultipartFormValue checks that fasthttp reads the field
+// key=value from the raw multipart/form-data request, delimited by boundary.
+func testFasthttpReadsMultipartFormValue(t *testing.T, raw []byte, boundary string) {
+	t.Helper()
+
+	var req Request
+	if err := req.Read(bufio.NewReader(bytes.NewReader(raw))); err != nil {
+		t.Fatalf("unexpected error: %v. Request: %q", err, raw)
+	}
+	defer req.RemoveMultipartFormFiles()
+	f, err := req.MultipartForm()
+	if err != nil {
+		t.Fatalf("fasthttp can't parse the request: %v. Request: %q", err, raw)
+	}
+	if vv := f.Value["key"]; len(vv) != 1 || vv[0] != "value" {
+		t.Fatalf("fasthttp reads the values %q. Request: %q", vv, raw)
+	}
+	if b := req.Header.MultipartFormBoundary(); string(b) != boundary {
+		t.Fatalf("the request has the boundary %q. Expecting %q. Request: %q", b, boundary, raw)
+	}
+}
+
+// testNetHTTPReadsMultipartFormValue checks that net/http reads the field
+// key=value from the raw multipart/form-data request.
+func testNetHTTPReadsMultipartFormValue(t *testing.T, raw []byte) {
+	t.Helper()
+
+	if err := netHTTPReadsMultipartFormValue(raw); err != nil {
+		t.Fatalf("net/http doesn't read the request: %v. Request: %q", err, raw)
+	}
+}
+
+// netHTTPReadsMultipartFormValue returns an error unless net/http reads the
+// field key=value from the raw multipart/form-data request.
+func netHTTPReadsMultipartFormValue(raw []byte) error {
+	r, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(raw)))
+	if err != nil {
+		return err
+	}
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		return err
+	}
+	if vv := r.MultipartForm.Value["key"]; len(vv) != 1 || vv[0] != "value" {
+		return fmt.Errorf("unexpected values %q", vv)
+	}
+	return nil
+}
+
 func TestRequestMultipartFormEpilogue(t *testing.T) {
 	t.Parallel()
 

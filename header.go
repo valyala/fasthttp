@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -523,32 +525,153 @@ func (h *RequestHeader) SetContentEncodingBytes(contentEncoding []byte) {
 
 // SetMultipartFormBoundary sets the following Content-Type:
 // 'multipart/form-data; boundary=...'
-// where ... is substituted by the given boundary.
+// where ... is substituted by the given boundary, in quotes if it holds
+// a character that a token can't, such as ':' or '='.
 func (h *RequestHeader) SetMultipartFormBoundary(boundary string) {
-	b := h.bufV[:0]
-	b = append(b, strMultipartFormData...)
-	b = append(b, ';', ' ')
-	b = append(b, strBoundary...)
-	b = append(b, '=')
-	b = append(b, boundary...)
-	h.bufV = b
-
-	h.SetContentTypeBytes(h.bufV)
+	h.SetMultipartFormBoundaryBytes(s2b(boundary))
 }
 
 // SetMultipartFormBoundaryBytes sets the following Content-Type:
 // 'multipart/form-data; boundary=...'
-// where ... is substituted by the given boundary.
+// where ... is substituted by the given boundary, in quotes if it holds
+// a character that a token can't, such as ':' or '='.
 func (h *RequestHeader) SetMultipartFormBoundaryBytes(boundary []byte) {
 	b := h.bufV[:0]
 	b = append(b, strMultipartFormData...)
 	b = append(b, ';', ' ')
 	b = append(b, strBoundary...)
 	b = append(b, '=')
-	b = append(b, boundary...)
+	b = appendTokenOrQuotedString(b, boundary)
 	h.bufV = b
 
 	h.SetContentTypeBytes(h.bufV)
+}
+
+// parseQuotedString returns the content of a quoted-string, b being its bytes
+// after the opening quote, and the number of bytes of b it takes up, its
+// closing quote included. It returns nil and 0 if the closing quote is
+// missing, and also if a backslash is followed by a byte that is not a
+// tspecial: RFC 9110, section 5.6.4 has a recipient replace every quoted-pair
+// by the byte it escapes, while mime.ParseMediaType, which net/http uses, keeps
+// the backslash of such a pair for MSIE. The two read different values, and
+// a boundary can't hold a backslash anyway (RFC 2046, section 5.1.1), so
+// neither is taken. The content is a slice of b unless a quoted-pair was
+// decoded.
+func parseQuotedString(b []byte) (content []byte, n int) {
+	// Find the closing quote first, so that the copy made for the quoted-pairs
+	// is as long as the quoted-string and not as the rest of b: a header with
+	// many such parameters would otherwise make the bytes allocated grow with
+	// the square of its length.
+	end, pairs := -1, 0
+	for i := 0; i < len(b) && end < 0; i++ {
+		switch c := b[i]; {
+		case c == '"':
+			end = i
+		case c == '\\' && i+1 < len(b):
+			if !isTSpecial(b[i+1]) {
+				return nil, 0
+			}
+			pairs++
+			i++
+		}
+	}
+	switch {
+	case end < 0:
+		return nil, 0
+	case pairs == 0:
+		return b[:end], end + 1
+	}
+
+	dst := make([]byte, 0, end-pairs)
+	for i := 0; i < end; i++ {
+		if b[i] == '\\' {
+			i++
+		}
+		dst = append(dst, b[i])
+	}
+	return dst, end + 1
+}
+
+// isTSpecial reports whether c is a tspecial (RFC 2045, section 5.1), a byte
+// that a parameter value has to be quoted to hold.
+func isTSpecial(c byte) bool {
+	switch c {
+	case '(', ')', '<', '>', '@', ',', ';', ':', '\\', '"', '/', '[', ']', '?', '=':
+		return true
+	}
+	return false
+}
+
+// multipartFormBoundaryValue reads the value of a boundary parameter from the
+// start of v: a quoted-string, whatever is inside it, or else everything up to
+// the next ';'. It returns the value, nil if there is none to take, and what
+// follows it.
+//
+// Nothing is taken when a receiver that follows net/http could read another
+// value. RFC 9110, section 5.6.6 allows no whitespace around the '=', and
+// mime.ParseMediaType skips any, so a value that starts with whitespace is not
+// read: boundary= "abc" is the boundary abc there. It trims the Unicode spaces
+// around an unquoted value too, which are not ASCII bytes, so an unquoted value
+// that starts or ends with one is not read either.
+func multipartFormBoundaryValue(v []byte) (value, rest []byte) {
+	if len(v) > 0 && (v[0] == ' ' || v[0] == '\t') {
+		return nil, nil
+	}
+	if len(v) > 0 && v[0] == '"' {
+		s, n := parseQuotedString(v[1:])
+		if s == nil {
+			return nil, nil
+		}
+		return s, v[1+n:]
+	}
+	n := len(v)
+	if i := bytes.IndexByte(v, ';'); i >= 0 {
+		n = i
+	}
+	value = trimTrailingSpace(v[:n])
+	if startsWithUnicodeSpace(value) || endsWithUnicodeSpace(value) {
+		return nil, nil
+	}
+	return value, v[n:]
+}
+
+// startsWithUnicodeSpace reports whether v starts with a Unicode space, such
+// as the no-break space.
+func startsWithUnicodeSpace(v []byte) bool {
+	r, _ := utf8.DecodeRune(v)
+	return unicode.IsSpace(r)
+}
+
+// endsWithUnicodeSpace reports whether v ends with a Unicode space.
+func endsWithUnicodeSpace(v []byte) bool {
+	r, _ := utf8.DecodeLastRune(v)
+	return unicode.IsSpace(r)
+}
+
+// appendTokenOrQuotedString appends v to dst as it is if it is a token, and as
+// a quoted-string if it is empty or holds a byte a token can't (RFC 9110,
+// sections 5.6.2 and 5.6.4).
+func appendTokenOrQuotedString(dst, v []byte) []byte {
+	// A token has at least one byte.
+	quote := len(v) == 0
+	for _, c := range v {
+		if !validHeaderFieldByte(c) {
+			quote = true
+			break
+		}
+	}
+	if !quote {
+		return append(dst, v...)
+	}
+
+	dst = append(dst, '"')
+	for _, c := range v {
+		if c == '"' || c == '\\' {
+			dst = append(dst, '\\')
+		}
+		dst = append(dst, c)
+	}
+	return append(dst, '"')
 }
 
 // SetTrailer sets header Trailer value for chunked response
@@ -1053,6 +1176,21 @@ func VisitHeaderParams(b []byte, f func(key, value []byte) bool) {
 
 // MultipartFormBoundary returns boundary part
 // from 'multipart/form-data; boundary=...' Content-Type.
+//
+// A quoted boundary may contain ';' and ends at its closing quote. It is
+// returned without the quotes and with its quoted-pairs decoded, so that
+// boundary="foo\:bar" gives foo:bar, and nil is returned if the closing quote
+// is missing.
+//
+// nil is returned too when a receiver that follows net/http could read another
+// boundary, or none: with a parameter such as boundary* or boundary*0, which
+// net/http decodes and takes over boundary=, with two boundary parameters that
+// differ, which it rejects, with whitespace after the '=', or a space that is
+// not an ASCII one, such as the no-break space, before a parameter name or after
+// an unquoted value, which it skips although RFC 9110, section 5.6.6 allows
+// none of it, and with a backslash that escapes a byte that is not a tspecial,
+// which it keeps and the RFC doesn't. The body is then kept as it is, for that
+// receiver to read.
 func (h *RequestHeader) MultipartFormBoundary() []byte {
 	b := h.ContentType()
 	if !caseInsensitiveHasPrefix(b, strMultipartFormData) {
@@ -1066,48 +1204,69 @@ func (h *RequestHeader) MultipartFormBoundary() []byte {
 		return nil
 	}
 
-	var n int
+	var boundary []byte
 	for len(b) > 0 {
-		n++
-		for len(b) > n && (b[n] == ' ' || b[n] == '\t') {
+		// b starts at the ';' before a parameter.
+		n := 1
+		for n < len(b) && (b[n] == ' ' || b[n] == '\t') {
 			n++
 		}
 		b = b[n:]
-		if !caseInsensitiveHasPrefix(b, strBoundary) {
-			// Skip to the ';' ending this parameter, stepping over quoted
-			// strings, since a ';' inside one doesn't end the parameter.
-			n = 0
-			for n < len(b) && b[n] != ';' {
-				if b[n] == '"' {
-					for n++; n < len(b) && b[n] != '"'; n++ {
-						if b[n] == '\\' {
-							n++
-						}
-					}
-				}
-				n++
-			}
-			if n >= len(b) {
-				return nil
-			}
-			continue
-		}
 
-		b = b[len(strBoundary):]
-		if len(b) == 0 || b[0] != '=' {
+		// net/http trims the Unicode spaces before a parameter name too, and
+		// would read boundary* or boundary behind one, which are not
+		// recognized here.
+		if startsWithUnicodeSpace(b) {
 			return nil
 		}
-		b = b[1:]
-		if n = bytes.IndexByte(b, ';'); n >= 0 {
-			b = b[:n]
+
+		// Only a parameter named boundary is the boundary: boundary2=1 is
+		// skipped like any other parameter. boundary* and boundary*0 are the
+		// extended form and a continuation of RFC 2231, which net/http
+		// decodes and takes over boundary=; fasthttp doesn't read them, so
+		// it returns no boundary rather than one such a receiver wouldn't use.
+		if caseInsensitiveHasPrefix(b, strBoundary) && len(b) > len(strBoundary) {
+			switch b[len(strBoundary)] {
+			case '*':
+				return nil
+			case '=':
+				var value []byte
+				value, b = multipartFormBoundaryValue(b[len(strBoundary)+1:])
+				if value == nil {
+					return nil
+				}
+				// Two boundary parameters are the boundary when they
+				// agree; net/http rejects the header when they don't.
+				if boundary != nil && !bytes.Equal(boundary, value) {
+					return nil
+				}
+				boundary = value
+			}
 		}
-		b = trimTrailingSpace(b)
-		if len(b) > 1 && b[0] == '"' && b[len(b)-1] == '"' {
-			b = b[1 : len(b)-1]
+
+		// Skip to the ';' ending this parameter, stepping over quoted
+		// strings, since a ';' inside one doesn't end the parameter.
+		n = 0
+		for n < len(b) && b[n] != ';' {
+			if b[n] == '"' {
+				for n++; n < len(b) && b[n] != '"'; n++ {
+					if b[n] == '\\' {
+						n++
+					}
+				}
+				if n >= len(b) {
+					// The quoted string is never closed.
+					return nil
+				}
+			}
+			n++
 		}
-		return b
+		if n >= len(b) {
+			break
+		}
+		b = b[n:]
 	}
-	return nil
+	return boundary
 }
 
 // Host returns Host header value.

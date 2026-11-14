@@ -221,6 +221,7 @@ func FuzzHeaderScanner(f *testing.F) {
 
 func FuzzRequestReadLimitBodyAllocations(f *testing.F) {
 	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nTransfer-Encoding: chunked\r\nContent-Type: aa\r\n\r\n6\r\nfoobar\r\n3\r\nbaz\r\n0\r\nfoobar\r\n\r\n"), 1024)
+	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nContent-Type: application/json\r\nContent-Length: 13\r\n\r\n{\"foo\":\"bar\"}"), 1024)
 	f.Add([]byte("POST /a HTTP/1.1\r\nHost: a.com\r\nWithTabs: \t v1 \t\r\nWithTabs-Start: \t \t v1 \r\nWithTabs-End: v1 \t \t\t\t\r\nWithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n\r\n"), 1024)
 	f.Add([]byte("0 * HTTP/1.1\nHost:0\nTrAnsfer-EnCoding:Chunked\n\n36\r\n"+strings.Repeat("0", 54)+"\r\n2\r\n00\r\nC\r\n000000000000\r\n0\r\n\r\n"), 1101)
 
