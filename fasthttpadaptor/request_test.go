@@ -47,6 +47,36 @@ func TestConvertRequestPreservesDuplicateHeaders(t *testing.T) {
 	}
 }
 
+func TestConvertRequestTarget(t *testing.T) {
+	for _, tc := range []struct {
+		method, target, host, path, query string
+	}{
+		{"GET", "/public#/../internal/file", "files.example", "/public", ""},
+		{"GET", "/p?x=1#&admin=1", "files.example", "/p", "x=1"},
+		{"GET", "/p%23x?value=%23", "files.example", "/p#x", "value=%23"},
+		{"GET", "http://files.example/p#frag", "files.example", "/p", ""},
+		{"GET", "//internal/report.txt?x=://", "", "/report.txt", "x=://"},
+		{"CONNECT", "x:/admin/users?id=1", "files.example", "/x:/admin/users", "id=1"},
+	} {
+		t.Run(tc.method+" "+tc.target, func(t *testing.T) {
+			var ctx fasthttp.RequestCtx
+			ctx.Request.Header.SetMethod(tc.method)
+			ctx.Request.Header.SetHost(tc.host)
+			ctx.Request.SetRequestURI(tc.target)
+			var r http.Request
+			if err := ConvertRequest(&ctx, &r, true); err != nil {
+				t.Fatal(err)
+			}
+			if r.URL.Path != tc.path || r.URL.RawQuery != tc.query || r.RequestURI != tc.target {
+				t.Fatalf("path %q, query %q, request URI %q", r.URL.Path, r.URL.RawQuery, r.RequestURI)
+			}
+			if tc.method == "CONNECT" && r.URL.Scheme != "" {
+				t.Errorf("unexpected scheme %q for CONNECT path", r.URL.Scheme)
+			}
+		})
+	}
+}
+
 func BenchmarkConvertRequest(b *testing.B) {
 	var httpReq http.Request
 
