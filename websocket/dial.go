@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -92,7 +93,10 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, error) {
 	if !validRequestTarget(uri.RequestURI()) {
 		return nil, errors.New("websocket: invalid URL path or query")
 	}
-	auth := basicAuth(uri)
+	auth, err := basicAuth(u, uri)
+	if err != nil {
+		return nil, err
+	}
 	if opts.Header != nil {
 		for k := range opts.Header.All() {
 			if reservedHeader(k) {
@@ -185,13 +189,25 @@ func isHex(c byte) bool {
 	return '0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F'
 }
 
-// basicAuth returns the Authorization value for the user information in uri,
-// or "" when it has none.
-func basicAuth(uri *fasthttp.URI) string {
-	if len(uri.Username()) == 0 && len(uri.Password()) == 0 {
-		return ""
+// basicAuth returns the Authorization value for the URL's user information,
+// or "" when the URL has none. Empty user information still counts. uri holds
+// it decoded; rawURL tells whether it is there and well escaped.
+func basicAuth(rawURL string, uri *fasthttp.URI) (string, error) {
+	_, authority, _ := strings.Cut(rawURL, "//")
+	if i := strings.IndexAny(authority, "/?"); i >= 0 {
+		authority = authority[:i]
 	}
-	return "Basic " + base64.StdEncoding.EncodeToString(slices.Concat(uri.Username(), []byte(":"), uri.Password()))
+	i := strings.LastIndexByte(authority, '@')
+	if i < 0 {
+		return "", nil
+	}
+	user, pass, _ := strings.Cut(authority[:i], ":")
+	for _, s := range []string{user, pass} {
+		if _, err := url.PathUnescape(s); err != nil {
+			return "", err
+		}
+	}
+	return "Basic " + base64.StdEncoding.EncodeToString(slices.Concat(uri.Username(), []byte(":"), uri.Password())), nil
 }
 
 func handshake(ctx context.Context, nc net.Conn, uri *fasthttp.URI, auth string, opts *DialOptions) (*Conn, error) {
