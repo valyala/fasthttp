@@ -1452,7 +1452,6 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	mustCompress := false
 	fileCacheKind := defaultCacheKind
 	fileEncoding := ""
 	var byteRange []byte
@@ -1464,15 +1463,12 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	if len(byteRange) == 0 && h.compress {
 		switch {
 		case h.compressBrotli && ctx.Request.Header.HasAcceptEncodingBytes(strBr):
-			mustCompress = true
 			fileCacheKind = brotliCacheKind
 			fileEncoding = "br"
 		case h.compressZstd && ctx.Request.Header.HasAcceptEncodingBytes(strZstd):
-			mustCompress = true
 			fileCacheKind = zstdCacheKind
 			fileEncoding = "zstd"
 		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
-			mustCompress = true
 			fileCacheKind = gzipCacheKind
 			fileEncoding = "gzip"
 		}
@@ -1481,57 +1477,27 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, path)
 	if !ok {
 		filePath := h.pathToFilePath(path, hasTrailingSlash)
-
+		var status int
 		var err error
-		if hasTrailingSlash && len(path) > 1 {
-			// A slash after a name requires a directory, even if a compressed
-			// copy of a regular file exists. FS.Root itself may be a file.
-			var info fs.FileInfo
-			info, err = fs.Stat(h.filesystem, filePath)
-			if err == nil {
-				if info.IsDir() {
-					err = errDirIndexRequired
-				} else {
-					err = fs.ErrNotExist
-				}
-			}
-		} else {
-			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
-			if mustCompress && err == errNoCreatePermission {
-				ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
-					"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
-				mustCompress = false
-				ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
-			}
-		}
-
-		if errors.Is(err, errDirIndexRequired) {
-			if !hasTrailingSlash {
-				ctx.RedirectBytes(append(path, '/'), StatusFound)
-				return
-			}
-			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
-			if err != nil {
-				ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
-				ctx.Error("Directory index is forbidden", StatusForbidden)
-				return
-			}
-		} else if err != nil {
+		ff, status, err = h.openAndCacheFile(ctx, path, filePath, hasTrailingSlash, fileCacheKind, fileEncoding)
+		switch status {
+		case StatusFound:
+			ctx.RedirectBytes(append(path, '/'), status)
+			return
+		case StatusForbidden:
+			ctx.Logger().Printf("cannot open dir index %q: %v", filePath, err)
+			ctx.Error("Directory index is forbidden", status)
+			return
+		case StatusNotFound:
 			ctx.Logger().Printf("cannot open file %q: %v", filePath, err)
 			if h.pathNotFound == nil {
-				ctx.Error("Cannot open requested path", StatusNotFound)
+				ctx.Error("Cannot open requested path", status)
 			} else {
-				ctx.SetStatusCode(StatusNotFound)
+				ctx.SetStatusCode(status)
 				h.pathNotFound(ctx)
 			}
 			return
 		}
-
-		if h.generateETag {
-			ff.etag = appendFSETag(nil, ff.lastModified, ff.contentLength)
-		}
-
-		ff = h.cacheManager.SetFileToCache(fileCacheKind, path, ff)
 	}
 
 	var notModified bool
@@ -1645,6 +1611,67 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.SetContentType(ff.contentType)
 	}
 	ctx.SetStatusCode(statusCode)
+}
+
+func (h *fsHandler) openAndCacheFile(
+	ctx *RequestCtx, path []byte, filePath string, hasTrailingSlash bool, kind CacheKind, fileEncoding string,
+) (*fsFile, int, error) {
+	mustCompress := kind != defaultCacheKind
+	if _, onDisk := h.filesystem.(*osFS); !onDisk && mustCompress && !h.skipCache {
+		// In-memory compression has no on-disk copy for a concurrent opener
+		// to reuse. Keep the entry locked until the result is in the cache.
+		key := fmt.Sprintf("%p:%d:%s", h, kind, path)
+		lock := acquireFileLock(key)
+		lock.mu.Lock()
+		defer func() {
+			lock.mu.Unlock()
+			releaseFileLock(key, lock)
+		}()
+		if ff, ok := h.cacheManager.GetFileFromCache(kind, path); ok {
+			return ff, StatusOK, nil
+		}
+	}
+
+	var ff *fsFile
+	var err error
+	if hasTrailingSlash && len(path) > 1 {
+		// A slash after a name requires a directory, even if a compressed
+		// copy of a regular file exists. FS.Root itself may be a file.
+		var info fs.FileInfo
+		info, err = fs.Stat(h.filesystem, filePath)
+		if err == nil {
+			if info.IsDir() {
+				err = errDirIndexRequired
+			} else {
+				err = fs.ErrNotExist
+			}
+		}
+	} else {
+		ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+		if mustCompress && err == errNoCreatePermission {
+			ctx.Logger().Printf("insufficient permissions for saving compressed file for %q. Serving uncompressed file. "+
+				"Allow write access to the directory with this file in order to improve fasthttp performance", filePath)
+			mustCompress = false
+			ff, err = h.openFSFile(filePath, mustCompress, fileEncoding)
+		}
+	}
+
+	if errors.Is(err, errDirIndexRequired) {
+		if !hasTrailingSlash {
+			return nil, StatusFound, err
+		}
+		ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
+		if err != nil {
+			return nil, StatusForbidden, err
+		}
+	} else if err != nil {
+		return nil, StatusNotFound, err
+	}
+
+	if h.generateETag {
+		ff.etag = appendFSETag(nil, ff.lastModified, ff.contentLength)
+	}
+	return h.cacheManager.SetFileToCache(kind, path, ff), StatusOK, nil
 }
 
 // fsIfRangeMatch reports whether the Range header may be served given
