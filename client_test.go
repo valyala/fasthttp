@@ -4389,6 +4389,63 @@ func TestClientGetTimeoutError(t *testing.T) {
 	testClientGetTimeoutError(t, c, 100)
 }
 
+func TestClientGetDeadlineClosesStalledConnection(t *testing.T) {
+	t.Parallel()
+
+	client, peer := net.Pipe()
+	defer peer.Close()
+	c := &HostClient{
+		Addr: "example.com",
+		Dial: func(string) (net.Conn, error) { return client, nil },
+	}
+	closed := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(io.Discard, peer)
+		closed <- err
+	}()
+
+	dst := []byte("original")
+	code, body, err := c.GetDeadline(dst, "http://example.com", time.Now().Add(testTimeout(100*time.Millisecond)))
+	if code != 0 || string(body) != "original" || err != ErrTimeout {
+		t.Fatalf("GetDeadline returned (%d, %q, %v)", code, body, err)
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("reading stalled connection: %v", err)
+		}
+	case <-time.After(testTimeout(time.Second)):
+		t.Fatal("the client kept the stalled connection open after its deadline")
+	}
+}
+
+func TestClientGetDeadlineSharesBudgetAcrossRedirects(t *testing.T) {
+	t.Parallel()
+
+	var firstTimeout time.Duration
+	c := &HostClient{
+		Addr: "example.com",
+		Transport: &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+			if string(req.URI().Path()) == "/" {
+				firstTimeout = req.timeout
+				time.Sleep(10 * time.Millisecond)
+				resp.SetStatusCode(StatusFound)
+				resp.Header.Set("Location", "/next")
+			} else {
+				if req.timeout <= 0 || req.timeout > firstTimeout-10*time.Millisecond {
+					t.Errorf("redirect timeout %v after first timeout %v", req.timeout, firstTimeout)
+				}
+				resp.SetStatusCode(StatusOK)
+			}
+			return false, nil
+		}},
+	}
+	code, _, err := c.GetTimeout(nil, "http://example.com/", testTimeout(time.Second))
+	if code != StatusOK || err != nil {
+		t.Fatalf("GetTimeout returned status %d and error %v", code, err)
+	}
+}
+
 func TestClientGetURLDeadlineDoesNotMutateDstAfterTimeout(t *testing.T) {
 	t.Parallel()
 
@@ -4399,7 +4456,7 @@ func TestClientGetURLDeadlineDoesNotMutateDstAfterTimeout(t *testing.T) {
 	}
 	dst := []byte("original")
 
-	statusCode, body, err := clientGetURLDeadline(dst, "http://example.com/", time.Now().Add(time.Millisecond), d)
+	statusCode, body, err := clientGetURLDeadline(dst, "http://example.com/", time.Now().Add(testTimeout(100*time.Millisecond)), d)
 	if err != ErrTimeout {
 		t.Fatalf("unexpected error: %v. Expecting %v", err, ErrTimeout)
 	}

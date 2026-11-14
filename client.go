@@ -1160,6 +1160,20 @@ type clientURLResponse struct {
 	statusCode int
 }
 
+// deadlineClient applies the remaining time budget to each redirect.
+type deadlineClient struct {
+	client   clientDoer
+	deadline time.Time
+}
+
+func (c *deadlineClient) Do(req *Request, resp *Response) error {
+	req.timeout = time.Until(c.deadline)
+	if req.timeout <= 0 {
+		return ErrTimeout
+	}
+	return c.client.Do(req, resp)
+}
+
 func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDoer) (statusCode int, body []byte, err error) {
 	timeout := time.Until(deadline)
 	if timeout <= 0 {
@@ -1173,24 +1187,23 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 	}
 	ch = chv.(chan clientURLResponse) //nolint:forcetypeassert
 
-	// Note that the request continues execution on ErrTimeout until
-	// client-specific ReadTimeout exceeds. This helps limiting load
-	// on slow hosts by MaxConns* concurrent requests.
-	//
-	// Without this 'hack' the load on slow host could exceed MaxConns*
-	// concurrent requests, since timed out requests on client side
-	// usually continue execution on the host.
-
+	// A custom dialer or transport may ignore the timeout. Keep the worker
+	// independent of dst once the caller has returned.
 	var mu sync.Mutex
 	var timedout, responded bool
 
 	go func() {
 		req := AcquireRequest()
 
-		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirectsBuffer(req, nil, url, c)
+		dc := deadlineClient{client: c, deadline: deadline}
+		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirectsBuffer(req, nil, url, &dc)
 		mu.Lock()
 		if !timedout {
-			bodyCopy = append(dst[:0], bodyCopy...)
+			if errCopy == ErrTimeout && !time.Now().Before(deadline) {
+				statusCodeCopy, bodyCopy = 0, dst
+			} else {
+				bodyCopy = append(dst[:0], bodyCopy...)
+			}
 			ch <- clientURLResponse{
 				statusCode: statusCodeCopy,
 				body:       bodyCopy,
