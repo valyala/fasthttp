@@ -3142,6 +3142,32 @@ func TestRequestReadChunked(t *testing.T) {
 	verifyTrailer(t, &req.Header, map[string]string{"Trail": "test"})
 }
 
+func TestRequestWriteChunkedKeepsRepeatedHeaderOrder(t *testing.T) {
+	t.Parallel()
+
+	const raw = "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: chunked\r\n" +
+		"X-Tenant: public\r\nX-Tenant: internal\r\n\r\n3\r\nabc\r\n0\r\n\r\n"
+	var req Request
+	if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(req.Header.Peek("X-Tenant")); got != "public" {
+		t.Fatalf("X-Tenant before forwarding = %q", got)
+	}
+	var wire bytes.Buffer
+	if _, err := req.WriteTo(&wire); err != nil {
+		t.Fatal(err)
+	}
+	forwarded, err := http.ReadRequest(bufio.NewReader(&wire))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer forwarded.Body.Close()
+	if got := forwarded.Header.Values("X-Tenant"); !reflect.DeepEqual(got, []string{"public", "internal"}) {
+		t.Fatalf("forwarded X-Tenant = %q", got)
+	}
+}
+
 func TestRequestChunkedEmpty(t *testing.T) {
 	t.Parallel()
 

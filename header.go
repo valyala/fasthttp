@@ -930,7 +930,7 @@ func moveArgs(src, dst []argsKV, key []byte) ([]argsKV, []argsKV) {
 			dst = appendArgBytes(dst, src[i].key, src[i].value, src[i].noValue)
 		}
 	}
-	return delAllArgsStable(src, b2s(key)), dst
+	return delAllArgs(src, b2s(key)), dst
 }
 
 func isValidTrailerKey(key []byte) bool {
@@ -1884,9 +1884,6 @@ func (h *RequestHeader) del(key []byte) {
 		if d := h.dedicatedUserAgent(); d.value != nil {
 			h.restoreTrailer(d)
 		}
-		// Raw-header mode stores the field itself; removing it in place
-		// keeps the values after it, and those returning, in order.
-		h.h = delAllArgsStable(h.h, HeaderTrailer)
 		h.unannounceTrailers()
 	}
 	h.h = delAllArgs(h.h, b2s(key))
