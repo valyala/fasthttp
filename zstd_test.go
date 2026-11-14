@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -415,5 +417,37 @@ func TestZstdOutOfRangeLevels(t *testing.T) {
 		if !bytes.Equal(decompressed, src) {
 			t.Fatalf("level %d: unexpected decompressed body", level)
 		}
+	}
+}
+
+func TestWriteZstdLevelMultiBlock(t *testing.T) {
+	// Hide bytes.Buffer so WriteZstdLevel uses the stackless writer.
+	var dst bytes.Buffer
+	w := struct{ io.Writer }{&dst}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for level := CompressZstdBestSpeed; level <= CompressZstdBestCompression; level++ {
+		t.Run(strconv.Itoa(level), func(t *testing.T) {
+			for _, size := range []int{128<<10 - 1, 128 << 10, 128<<10 + 1, 1<<20 + 1} {
+				body := make([]byte, size)
+				for i := range body {
+					body[i] = byte(rng.Uint32())
+				}
+				for iteration := range 3 {
+					dst.Reset()
+					body[0] = byte(iteration)
+					n, err := WriteZstdLevel(w, body, level)
+					if err != nil || n != len(body) {
+						t.Fatalf("size %d: WriteZstdLevel = %d, %v", size, n, err)
+					}
+					decoded, err := AppendUnzstdBytes(nil, dst.Bytes())
+					if err != nil {
+						t.Fatalf("size %d: decode: %v", size, err)
+					}
+					if !bytes.Equal(decoded, body) {
+						t.Fatalf("size %d: decoded stream differs from input", size)
+					}
+				}
+			}
+		})
 	}
 }
