@@ -280,9 +280,10 @@ type proxyInfo struct {
 }
 
 func addrAndAuth(pu *url.URL, authCache *sync.Map) (proxyAddr, auth string) {
+	// Only the host is dialed: a proxy URL may end in a path, most often the
+	// trailing slash of http://proxy:8080/.
 	if pu.User == nil {
-		proxyAddr = pu.Host + pu.Path
-		return proxyAddr, auth
+		return pu.Host, auth
 	}
 	if authCache != nil {
 		if v, ok := authCache.Load(pu); ok {
@@ -297,7 +298,7 @@ func addrAndAuth(pu *url.URL, authCache *sync.Map) (proxyAddr, auth string) {
 	}
 	info := &proxyInfo{
 		auth: base64.StdEncoding.EncodeToString([]byte(credentials)),
-		addr: pu.Host + pu.Path,
+		addr: pu.Host,
 	}
 	if authCache != nil {
 		authCache.Store(pu, info)
