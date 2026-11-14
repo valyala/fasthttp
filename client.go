@@ -3456,11 +3456,7 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *
 				return err
 			}
 		}
-		if err = w.req.Write(bw); err != nil {
-			w.err = err
-			w.done <- struct{}{}
-			return err
-		}
+		started, writeErr := w.req.write(bw)
 		if flushTimerCh == nil && (len(chW) == 0 || len(chR) == cap(chR)) {
 			if maxBatchDelay > 0 {
 				flushTimer.Reset(maxBatchDelay)
@@ -3468,6 +3464,16 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *
 			} else {
 				flushTimerCh = instantTimerCh
 			}
+		}
+
+		if writeErr != nil {
+			w.err = writeErr
+			w.done <- struct{}{}
+			if started {
+				return writeErr
+			}
+			// The scheduled flush still covers requests buffered before this one.
+			continue
 		}
 
 	againChR:
@@ -3734,14 +3740,14 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		cc.writeDeadlineSet = !writeDeadline.IsZero()
 	}
 
-	resetConnection := false
-	if hc.MaxConnDuration > 0 && time.Since(cc.createdTime) > hc.MaxConnDuration && !req.ConnectionClose() {
+	expired := hc.MaxConnDuration > 0 && time.Since(cc.createdTime) > hc.MaxConnDuration
+	resetConnection := expired && !req.ConnectionClose()
+	if resetConnection {
 		req.SetConnectionClose()
-		resetConnection = true
 	}
 
 	bw := hc.AcquireWriter(conn)
-	err = req.Write(bw)
+	started, err := req.write(bw)
 
 	if resetConnection {
 		req.Header.ResetConnectionClose()
@@ -3758,8 +3764,12 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 
 	if err != nil {
-		hc.CloseConn(cc)
-		return true, err
+		if started || expired {
+			hc.CloseConn(cc)
+		} else {
+			hc.releaseConn(cc)
+		}
+		return started, err
 	}
 
 	readDeadline := clientDeadline(deadline, hc.ReadTimeout)

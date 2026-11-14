@@ -1678,6 +1678,44 @@ func TestPipelineClientBuffersStreamBody(t *testing.T) {
 	}
 }
 
+func TestClientKeepsConnAfterRequestSerializationError(t *testing.T) {
+	t.Parallel()
+
+	for _, pipeline := range []bool{false, true} {
+		t.Run(fmt.Sprintf("pipeline=%v", pipeline), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer server.Close()
+
+			addr := server.Listener.Addr().String()
+			var dials atomic.Int32
+			dial := func(addr string) (net.Conn, error) {
+				dials.Add(1)
+				return net.Dial("tcp", addr)
+			}
+			do := (&HostClient{Addr: addr, Dial: dial}).Do
+			if pipeline {
+				do = (&PipelineClient{Addr: addr, Dial: dial}).Do
+			}
+
+			var req Request
+			var resp Response
+			if err := do(&req, &resp); !errors.Is(err, errRequestHostRequired) {
+				t.Fatalf("unexpected error for request without a host: %v", err)
+			}
+			req.Reset()
+			req.SetRequestURI("http://test/")
+			if err := do(&req, &resp); err != nil || resp.StatusCode() != StatusNoContent {
+				t.Fatalf("subsequent request: status %d, err %v", resp.StatusCode(), err)
+			}
+			if n := dials.Load(); n != 1 {
+				t.Fatalf("dialed %d times, want one connection", n)
+			}
+		})
+	}
+}
+
 func TestPipelineClientTimeoutMultipartForm(t *testing.T) {
 	t.Parallel()
 

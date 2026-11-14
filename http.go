@@ -2049,12 +2049,18 @@ func (req *Request) onlyMultipartForm() bool {
 //
 // See also WriteTo.
 func (req *Request) Write(w *bufio.Writer) error {
+	_, err := req.write(w)
+	return err
+}
+
+// write reports whether it started writing the request to w.
+func (req *Request) write(w *bufio.Writer) (bool, error) {
 	if len(req.Header.Host()) == 0 || req.parsedURI {
 		uri := req.URI()
 		host := uri.Host()
 		if len(req.Header.Host()) == 0 {
 			if len(host) == 0 {
-				return errRequestHostRequired
+				return false, errRequestHostRequired
 			}
 			req.Header.SetHostBytes(host)
 		} else if !req.UseHostHeader {
@@ -2072,7 +2078,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	if req.onlyMultipartForm() {
 		body, err = marshalMultipartForm(req.multipartForm, req.multipartFormBoundary)
 		if err != nil {
-			return fmt.Errorf("error when marshaling multipart form: %w", err)
+			return false, fmt.Errorf("error when marshaling multipart form: %w", err)
 		}
 		req.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
 	}
@@ -2088,7 +2094,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 	}
 	if req.Header.disableSpecialHeader {
 		if err = req.Header.setRawBodyFraming(contentLength, hasBody); err != nil {
-			return err
+			return false, err
 		}
 	} else if hasBody || req.Header.contentLength > 0 || len(peekArgBytes(req.Header.h, strTransferEncoding)) > 0 {
 		req.Header.SetContentLength(contentLength)
@@ -2098,25 +2104,25 @@ func (req *Request) Write(w *bufio.Writer) error {
 			req.Header.SetContentTypeBytes(strDefaultContentType)
 		}
 		if err = req.writeHeader(w); err != nil {
-			return err
+			return true, err
 		}
 		if err = writeBufferedBodyChunked(w, body); err != nil {
-			return err
+			return true, err
 		}
-		return req.Header.writeTrailer(w)
+		return true, req.Header.writeTrailer(w)
 	}
 	if err = req.writeHeader(w); err != nil {
-		return err
+		return true, err
 	}
 	if hasBody {
 		_, err = w.Write(body)
 	} else if len(body) > 0 {
 		if req.secureErrorLogMessage {
-			return errors.New("non-zero body for non-post request")
+			return true, errors.New("non-zero body for non-post request")
 		}
-		return fmt.Errorf("non-zero body for non-post request: body=%q", body)
+		return true, fmt.Errorf("non-zero body for non-post request: body=%q", body)
 	}
-	return err
+	return true, err
 }
 
 // writeHeader adds URL credentials only while serializing this request.
@@ -2676,7 +2682,7 @@ func vectorWriter(c net.Conn) io.Writer {
 	return nil
 }
 
-func (req *Request) writeBodyStream(w *bufio.Writer) error {
+func (req *Request) writeBodyStream(w *bufio.Writer) (bool, error) {
 	var err error
 
 	contentLength := req.Header.ContentLength()
@@ -2701,7 +2707,7 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 	if req.Header.disableSpecialHeader {
 		if err = req.Header.setRawBodyFraming(contentLength, true); err != nil {
 			_ = req.closeBodyStream()
-			return err
+			return false, err
 		}
 	} else if contentLength < 0 {
 		req.Header.SetContentLength(-1)
@@ -2719,7 +2725,7 @@ func (req *Request) writeBodyStream(w *bufio.Writer) error {
 	if err == nil {
 		err = errc
 	}
-	return err
+	return true, err
 }
 
 // ErrBodyStreamWritePanic is returned when panic happens during writing body stream.
