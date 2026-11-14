@@ -1270,6 +1270,60 @@ func TestPipelineClientThrottlesDialFailures(t *testing.T) {
 	}
 }
 
+func TestClientClosesSwitchedProtocolConnection(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"HostClient", "PipelineClient"} {
+		t.Run(name, func(t *testing.T) {
+			clientConn, peer := net.Pipe()
+			defer clientConn.Close()
+			defer peer.Close()
+
+			dial := func(string) (net.Conn, error) { return clientConn, nil }
+			var do func(*Request, *Response) error
+			switch name {
+			case "HostClient":
+				c := &HostClient{Addr: "example.com:80", Dial: dial, MaxIdleConnDuration: time.Hour}
+				do = c.Do
+			case "PipelineClient":
+				c := &PipelineClient{Addr: "example.com:80", Dial: dial, MaxIdleConnDuration: time.Hour}
+				do = c.Do
+			}
+
+			serverDone := make(chan error, 1)
+			go func() {
+				var req Request
+				if err := req.Read(bufio.NewReader(peer)); err != nil {
+					serverDone <- err
+					return
+				}
+				_, err := io.WriteString(peer, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: test\r\n\r\n")
+				serverDone <- err
+			}()
+
+			var req Request
+			req.SetRequestURI("http://example.com/")
+			req.Header.Set(HeaderConnection, "Upgrade")
+			req.Header.Set(HeaderUpgrade, "test")
+			var resp Response
+			if err := do(&req, &resp); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-serverDone; err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode() != StatusSwitchingProtocols {
+				t.Fatalf("unexpected response status %d", resp.StatusCode())
+			}
+			_ = peer.SetReadDeadline(time.Now().Add(testTimeout(time.Second)))
+			var b [1]byte
+			if _, err := peer.Read(b[:]); err != io.EOF {
+				t.Fatalf("expected the client to close the upgraded connection, got %v", err)
+			}
+		})
+	}
+}
+
 func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 	t.Parallel()
 
