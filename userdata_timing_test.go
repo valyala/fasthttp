@@ -8,14 +8,14 @@ func BenchmarkUserDataCustom(b *testing.B) {
 	keys := []string{"foobar", "baz", "aaa", "bsdfs"}
 	b.RunParallel(func(pb *testing.PB) {
 		var u userData
-		var v any = u
+		var v any = &u
 		for pb.Next() {
 			for _, key := range keys {
 				u.Set(key, v)
 			}
 			for _, key := range keys {
 				vv := u.Get(key)
-				if _, ok := vv.(userData); !ok {
+				if _, ok := vv.(*userData); !ok {
 					b.Fatalf("unexpected value %v for key %q", vv, key)
 				}
 			}

@@ -3049,8 +3049,8 @@ func (req *Request) UserValueBytes(key []byte) any {
 // visitor must not retain references to key and value after returning.
 // Make key and/or value copies if you need storing them after returning.
 func (req *Request) VisitUserValues(visitor func([]byte, any)) {
-	for i, n := 0, len(req.userValues); i < n; i++ {
-		kv := &req.userValues[i]
+	for i, n := 0, len(req.userValues.entries); i < n; i++ {
+		kv := &req.userValues.entries[i]
 		if key, ok := kv.key.(string); ok {
 			visitor(s2b(key), kv.value)
 		}
@@ -3062,8 +3062,8 @@ func (req *Request) VisitUserValues(visitor func([]byte, any)) {
 // visitor must not retain references to key and value after returning.
 // Make key and/or value copies if you need storing them after returning.
 func (req *Request) VisitUserValuesAll(visitor func(any, any)) {
-	for i, n := 0, len(req.userValues); i < n; i++ {
-		kv := &req.userValues[i]
+	for i, n := 0, len(req.userValues.entries); i < n; i++ {
+		kv := &req.userValues.entries[i]
 		visitor(kv.key, kv.value)
 	}
 }

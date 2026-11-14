@@ -2,6 +2,7 @@ package fasthttp
 
 import (
 	"io"
+	"sync"
 )
 
 type userDataKV struct {
@@ -9,13 +10,20 @@ type userDataKV struct {
 	value any
 }
 
-type userData []userDataKV
+type userData struct {
+	// mu guards entries against concurrent reads by RequestCtx.Value.
+	// Other readers run on the goroutine that owns the request.
+	mu      sync.Mutex
+	entries []userDataKV
+}
 
 func (d *userData) Set(key, value any) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if b, ok := key.([]byte); ok {
 		key = string(b)
 	}
-	args := *d
+	args := d.entries
 	n := len(args)
 	for i := range n {
 		kv := &args[i]
@@ -35,7 +43,7 @@ func (d *userData) Set(key, value any) {
 		kv := &args[n]
 		kv.key = key
 		kv.value = value
-		*d = args
+		d.entries = args
 		return
 	}
 
@@ -43,7 +51,7 @@ func (d *userData) Set(key, value any) {
 	kv.key = key
 	kv.value = value
 	args = append(args, kv)
-	*d = args
+	d.entries = args
 }
 
 func (d *userData) SetBytes(key []byte, value any) {
@@ -54,7 +62,7 @@ func (d *userData) Get(key any) any {
 	if b, ok := key.([]byte); ok {
 		key = b2s(b)
 	}
-	args := *d
+	args := d.entries
 	n := len(args)
 	for i := range n {
 		kv := &args[i]
@@ -70,24 +78,32 @@ func (d *userData) GetBytes(key []byte) any {
 }
 
 func (d *userData) Reset() {
-	args := *d
-	n := len(args)
-	for i := range n {
-		v := args[i].value
-		if vc, ok := v.(io.Closer); ok {
-			vc.Close()
-		}
-		(*d)[i].value = nil
-		(*d)[i].key = nil
+	if len(d.entries) == 0 {
+		return
 	}
-	*d = (*d)[:0]
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i, kv := range d.entries {
+		if vc, ok := kv.value.(io.Closer); ok {
+			// Close may call back into the request.
+			func() {
+				d.mu.Unlock()
+				defer d.mu.Lock()
+				vc.Close()
+			}()
+		}
+		d.entries[i] = userDataKV{}
+	}
+	d.entries = d.entries[:0]
 }
 
 func (d *userData) Remove(key any) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if b, ok := key.([]byte); ok {
 		key = b2s(b)
 	}
-	args := *d
+	args := d.entries
 	n := len(args)
 	for i := 0; i < n; i++ {
 		kv := &args[i]
@@ -97,7 +113,7 @@ func (d *userData) Remove(key any) {
 			args[n].key = nil
 			args[n].value = nil
 			args = args[:n]
-			*d = args
+			d.entries = args
 			return
 		}
 	}
