@@ -3002,20 +3002,38 @@ func (h *RequestHeader) validate() error {
 	return nil
 }
 
-// useRequestTargetHost replaces the incoming Host for absolute-form requests
-// (RFC 9112 section 3.2.2). Keep the wire escaping so a later path rewrite
-// can parse the host again, including an IPv6 zone identifier.
-func (h *RequestHeader) useRequestTargetHost() error {
-	target := h.requestURI
-	if !bytes.Contains(target, strColonSlashSlash) {
-		return nil
-	}
-	_, authority, _ := splitHostURI(nil, target)
-	host := authority[bytes.LastIndexByte(authority, '@')+1:]
-	if len(host) == 0 {
+// prepareRequestHost rejects userinfo on the wire (RFC 9110 sections 4.2.4
+// and 7.2) and adopts the absolute-form authority (RFC 9112 section 3.2.2).
+func (h *RequestHeader) prepareRequestHost() error {
+	host := h.Host()
+	if bytes.IndexByte(host, '@') >= 0 {
 		return ErrorInvalidURI
 	}
-	h.SetHostBytes(host)
+	target := h.requestURI
+	if len(host) > 0 && target[0] == '/' {
+		return nil
+	}
+	absolute := target[0] != '/' && bytes.Contains(target, strColonSlashSlash)
+	if !absolute {
+		if h.IsConnect() && bytes.IndexByte(target, '@') >= 0 {
+			return ErrorInvalidURI
+		}
+		if len(host) > 0 {
+			return nil
+		}
+	}
+
+	// With no Host (HTTP/1.0), URI.parse also looks for an authority in
+	// the target, including network-path references.
+	_, authority, _ := splitHostURI(nil, target)
+	if bytes.IndexByte(authority, '@') >= 0 || (absolute && len(authority) == 0) {
+		return ErrorInvalidURI
+	}
+	if absolute {
+		// Preserve wire escaping, including IPv6 zone identifiers, so
+		// the host remains parseable after a path rewrite.
+		h.SetHostBytes(authority)
+	}
 	return nil
 }
 
