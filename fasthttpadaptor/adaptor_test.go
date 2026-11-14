@@ -950,6 +950,26 @@ func TestHandlerAbortIsQuiet(t *testing.T) {
 	})(ctx)
 }
 
+// ReverseProxy can relay 099 from an upstream as status code 99.
+func TestHandlerInvalidStatusCode(t *testing.T) {
+	t.Parallel()
+
+	var req fasthttp.Request
+	req.SetRequestURI("http://example.com/")
+	var ctx fasthttp.RequestCtx
+	var logs logRecorder
+	ctx.Init(&req, nil, &logs)
+	NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(99)
+	})(&ctx)
+	if !ctx.Hijacked() {
+		t.Fatal("expected the invalid status code to abort the response")
+	}
+	if !strings.Contains(logs.String(), "invalid WriteHeader code 99") {
+		t.Fatalf("missing invalid status code in log: %s", logs.String())
+	}
+}
+
 // An abort before the first write sends nothing and closes the connection,
 // freeing its per-IP slot with or without KeepHijackedConns.
 func TestHandlerAbortWithPerIPLimit(t *testing.T) {
