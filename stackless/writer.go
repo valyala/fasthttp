@@ -26,7 +26,9 @@ type NewWriterFunc func(w io.Writer) Writer
 // NewWriter creates a stackless writer around a writer returned
 // from newWriter.
 //
-// The returned writer writes data to dstW.
+// The returned writer writes data to dstW. Under high load, Write and Flush
+// may return an error without running the operation. Close and Reset run on
+// the calling goroutine if the worker queue is full.
 //
 // Writers that use a lot of stack space may be wrapped into stackless writer,
 // thus saving stack space for high number of concurrently running goroutines.
@@ -91,7 +93,14 @@ func (w *writer) Reset(dstW io.Writer) {
 func (w *writer) do(op op) error {
 	w.op = op
 	if !stacklessWriterFunc(w) {
-		return errHighLoad
+		switch op {
+		case opWrite, opFlush:
+			w.n = 0
+			return errHighLoad
+		case opClose, opReset:
+			// Finish or discard the old stream before the writer is reused.
+			writerFunc(w)
+		}
 	}
 	err := w.err
 	if err != nil {
