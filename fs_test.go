@@ -63,6 +63,12 @@ func TestNewVHostPathRewriter(t *testing.T) {
 	if string(path) != expectedPath {
 		t.Fatalf("unexpected path %q. Expecting %q", path, expectedPath)
 	}
+
+	ctx.Request.Reset()
+	ctx.Request.SetRequestURI("https://aaa.bbb.cc/one")
+	if path := f(&ctx); string(path) != "/aaa.bbb.cc/" {
+		t.Fatalf("fully stripped path = %q, want /aaa.bbb.cc/", path)
+	}
 }
 
 func TestNewVHostPathRewriterMaliciousHost(t *testing.T) {
@@ -126,6 +132,8 @@ func TestNewVHostPathRewriterEndToEnd(t *testing.T) {
 	}{
 		{"normal vhost file", "example.com", "/public.txt", StatusOK, "PUBLIC-MARKER"},
 		{"root file is isolated", "example.com", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
+		{"host names a root file", "root-private.txt", "/", StatusNotFound, "Cannot open requested path"},
+		{"slash after a public file", "example.com", "/public.txt/", StatusNotFound, "Cannot open requested path"},
 		{"dot host", ".", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"double dot host", "..", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
 		{"encoded dot host", "%252e", "/root-private.txt", StatusNotFound, "Cannot open requested path"},
