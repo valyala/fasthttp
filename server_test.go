@@ -3479,39 +3479,82 @@ func TestServerExpect103EarlyHints(t *testing.T) {
 		NoDefaultDate:         true,
 		NoDefaultServerHeader: true,
 		Handler: func(ctx *RequestCtx) {
+			if ctx.IsGet() {
+				ctx.SetBodyString("first")
+				return
+			}
 			ctx.Response.Header.Add("Link", "<https://cdn.com>; rel=preload; as=script")
 			ctx.EarlyHints() //nolint:errcheck
 		},
 	}
 
 	rw := &readWriter{}
-	rw.r.WriteString("GET /foo HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	rw.r.WriteString("POST /foo HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\nContent-Type: a/b\r\n\r\n12345")
 
 	if err := s.ServeConn(rw); err != nil {
 		t.Fatalf("Unexpected error from serveConn: %v", err)
 	}
 
-	scanner := bufio.NewScanner(&rw.w)
-	expected := []string{
-		"HTTP/1.1 103 Early Hints",
-		"Link: <https://cdn.com>; rel=preload; as=script",
-		"",
-		"HTTP/1.1 200 OK",
-		"Content-Length: 0",
-		"Link: <https://cdn.com>; rel=preload; as=script",
+	want := "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nfirst" +
+		"HTTP/1.1 103 Early Hints\r\nLink: <https://cdn.com>; rel=preload; as=script\r\n\r\n" +
+		"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nLink: <https://cdn.com>; rel=preload; as=script\r\n\r\n"
+	if got := rw.w.String(); got != want {
+		t.Fatalf("unexpected pipelined responses:\n got %q\nwant %q", got, want)
 	}
+}
 
-	i := 0
-	for scanner.Scan() {
-		if i >= len(expected) {
-			break
-		}
-		line := scanner.Text()
-		if line != expected[i] {
-			t.Fatalf("unexpected data: %s. Expecting %s", line, expected[i])
-		}
-		i++
+func TestServerExpectHandlerEarlyHints(t *testing.T) {
+	t.Parallel()
+	s := Server{
+		ExpectHandler: func(ctx *RequestCtx) int {
+			ctx.Response.Header.Set("Link", "</asset>")
+			if err := ctx.EarlyHints(); err != nil {
+				t.Error(err)
+			}
+			return StatusContinue
+		},
+		Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
 	}
+	var rw readWriter
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.org\r\n\r\n")
+	rw.r.WriteString("POST / HTTP/1.1\r\nHost: example.org\r\nExpect: 100-continue\r\nContent-Length: 1\r\n\r\nx")
+	if err := s.ServeConn(&rw); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(&rw.w)
+	verifyResponse(t, br, StatusOK, string(defaultContentType), "ok")
+	for _, want := range []int{StatusEarlyHints, StatusContinue} {
+		var h ResponseHeader
+		if err := h.Read(br); err != nil {
+			t.Fatal(err)
+		}
+		if h.StatusCode() != want {
+			t.Fatalf("status = %d, want %d", h.StatusCode(), want)
+		}
+	}
+	verifyResponse(t, br, StatusOK, string(defaultContentType), "ok")
+}
+
+func TestServerEarlyHintsAfterTimeout(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{Handler: func(ctx *RequestCtx) {
+		ctx.TimeoutError("timeout")
+		ctx.Response.Header.Add("Link", "</late>")
+		if err := ctx.EarlyHints(); err != nil {
+			t.Errorf("EarlyHints: %v", err)
+		}
+	}}
+	rw := &readWriter{}
+	rw.r.WriteString("GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(rw.w.String(), "HTTP/1.1 408 ") {
+		t.Fatalf("unexpected timeout response: %q", rw.w.String())
+	}
+	verifyResponse(t, bufio.NewReader(&rw.w), StatusRequestTimeout, string(defaultContentType), "timeout")
 }
 
 func TestServerEarlyHintsHTTP10(t *testing.T) {
