@@ -252,7 +252,7 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 	if r.RequestURI != "" {
 		target = r.RequestURI
 		if r.Method == http.MethodConnect && target[0] != '/' && !targetIsAbsoluteForm(target) {
-			if at := strings.LastIndexByte(target, '@'); at >= 0 {
+			if at := authorityUserinfoEnd(target); at >= 0 {
 				target = target[at+1:]
 			}
 		}
@@ -409,10 +409,15 @@ func targetHasUserinfo(target string) bool {
 	if !ok {
 		return false
 	}
+	return authorityUserinfoEnd(authority) >= 0
+}
+
+// authorityUserinfoEnd returns the last @ before the path, query or fragment.
+func authorityUserinfoEnd(authority string) int {
 	if j := strings.IndexAny(authority, "/?#"); j >= 0 {
 		authority = authority[:j]
 	}
-	return strings.IndexByte(authority, '@') >= 0
+	return strings.LastIndexByte(authority, '@')
 }
 
 // errBodyTooLong is returned from a body read once the attached body turns

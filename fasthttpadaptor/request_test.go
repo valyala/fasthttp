@@ -299,6 +299,38 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 		}
 	})
 
+	for _, suffix := range []string{"?@internal.example:22", "/@internal.example:22"} {
+		t.Run("CONNECT with @ outside authority "+suffix, func(t *testing.T) {
+			t.Parallel()
+			const host = "allowed.example:443"
+			target := host + suffix
+			for _, userinfo := range []string{"", "user:pass@"} {
+				r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"CONNECT " + userinfo + target + " HTTP/1.1\r\nHost: " + host + "\r\n\r\n")))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if r.URL.Host != host {
+					t.Fatalf("net/http parsed host %q, want %q", r.URL.Host, host)
+				}
+				var req fasthttp.Request
+				ConvertNetHTTPRequestToFastHTTPRequest(r, &req)
+				want := target
+				if userinfo != "" {
+					// Moving credentials to Authorization parses and normalizes the URI.
+					want = "/" + target
+				}
+				if wire := req.String(); !strings.HasPrefix(wire, "CONNECT "+want+" HTTP/1.1\r\n") {
+					t.Errorf("expected target %q, got:\n%s", want, wire)
+				}
+				req.URI()
+				if wire := req.String(); !strings.HasPrefix(wire, "CONNECT /"+target+" HTTP/1.1\r\n") {
+					t.Errorf("expected normalized target %q, got:\n%s", "/"+target, wire)
+				}
+			}
+		})
+	}
+
 	t.Run("explicit Authorization header wins over CONNECT authority-form target credentials", func(t *testing.T) {
 		t.Parallel()
 		httpReq, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
