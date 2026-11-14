@@ -458,6 +458,17 @@ func testArgsString(t *testing.T, a *Args, s string) {
 	}
 }
 
+func TestArgsSetWithKeyFromPeek(t *testing.T) {
+	t.Parallel()
+
+	var a Args
+	a.Parse("role=role&other=1&role=admin")
+	a.SetBytesK(a.Peek("role"), "user")
+	if got := a.String(); got != "role=user&other=1" {
+		t.Fatalf("args after Set = %q", got)
+	}
+}
+
 func TestArgsSetGetDel(t *testing.T) {
 	t.Parallel()
 
