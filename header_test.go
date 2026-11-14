@@ -6676,3 +6676,38 @@ func TestHeaderReadErrorKinds(t *testing.T) {
 		}
 	}
 }
+
+func TestRepeatedAddTrailerAllocations(t *testing.T) {
+	var h ResponseHeader
+	names := make([]string, 2*trailerSetMin)
+	for i := range names {
+		names[i] = fmt.Sprintf("X-T%d", i)
+		if err := h.AddTrailer(names[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	allocs := testing.AllocsPerRun(10, func() {
+		for _, name := range names {
+			if err := h.AddTrailer(name); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("re-announcing existing trailer names made %.0f allocations, want 0", allocs)
+	}
+
+	var dst ResponseHeader
+	h.CopyTo(&dst)
+	if err := h.SetTrailer(strings.Join(names[1:], ",")); err != nil {
+		t.Fatal(err)
+	}
+	h.Set(names[0], "upfront")
+	dst.Set(names[0], "trailing")
+	if got := h.PeekTrailer(names[0]); got != nil {
+		t.Fatalf("removed trailer = %q", got)
+	}
+	if got := dst.PeekTrailer(names[0]); string(got) != "trailing" {
+		t.Fatalf("copied trailer = %q", got)
+	}
+}
