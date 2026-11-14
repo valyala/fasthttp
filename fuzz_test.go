@@ -166,6 +166,7 @@ func FuzzHeaderScanner(f *testing.F) {
 	f.Add([]byte("Content-Type: application/x-www-form-urlencoded\r\nContent-Length: 27\r\n\r\nname=John+Doe&age=30"))
 	f.Add([]byte("X: value\r\n \r\n\r\n"))
 	f.Add([]byte(" 3 :\r\n\r\n"))
+	f.Add([]byte("0  :\r\n\r\n"))
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if !bytes.Contains(data, []byte("\r\n\r\n")) {
@@ -188,12 +189,9 @@ func FuzzHeaderScanner(f *testing.F) {
 		}
 
 		var s headerScanner
-		s.b = data
+		s.b = bytes.Clone(data) // The scanner unfolds continuation lines in place.
 		f := make(map[string][]string)
 		for s.next() {
-			// ReadMIMEHeader normalizes header keys, headerScanner doesn't by default.
-			normalizeHeaderKey(s.key, false)
-
 			// textproto.ReadMIMEHeader will validate the header value, since we compare
 			// errors we should do this as well.
 			for _, c := range s.value {
@@ -206,7 +204,7 @@ func FuzzHeaderScanner(f *testing.F) {
 				break
 			}
 
-			key := string(s.key)
+			key := textproto.CanonicalMIMEHeaderKey(string(s.key))
 			value := string(s.value)
 
 			if _, ok := f[key]; !ok {
