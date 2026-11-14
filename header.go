@@ -3002,6 +3002,23 @@ func (h *RequestHeader) validate() error {
 	return nil
 }
 
+// useRequestTargetHost replaces the incoming Host for absolute-form requests
+// (RFC 9112 section 3.2.2). Keep the wire escaping so a later path rewrite
+// can parse the host again, including an IPv6 zone identifier.
+func (h *RequestHeader) useRequestTargetHost() error {
+	target := h.requestURI
+	if !bytes.Contains(target, strColonSlashSlash) {
+		return nil
+	}
+	_, authority, _ := splitHostURI(nil, target)
+	host := authority[bytes.LastIndexByte(authority, '@')+1:]
+	if len(host) == 0 {
+		return ErrorInvalidURI
+	}
+	h.SetHostBytes(host)
+	return nil
+}
+
 func bufferSnippet(b []byte) string {
 	n := len(b)
 	start := 200
