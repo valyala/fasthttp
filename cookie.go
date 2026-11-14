@@ -288,7 +288,8 @@ func (c *Cookie) Reset() {
 // AppendBytes appends cookie representation to dst and returns
 // the extended dst.
 func (c *Cookie) AppendBytes(dst []byte) []byte {
-	if len(c.key) > 0 {
+	// Keep the value of a nameless cookie from being read as a name=value pair.
+	if len(c.key) > 0 || bytes.IndexByte(c.value, '=') >= 0 {
 		dst = append(dst, c.key...)
 		dst = append(dst, '=')
 	}
@@ -558,7 +559,8 @@ func getCookieKey(dst, src []byte) []byte {
 func appendRequestCookieBytes(dst []byte, cookies []argsKV) []byte {
 	for i, n := 0, len(cookies); i < n; i++ {
 		kv := &cookies[i]
-		if len(kv.key) > 0 {
+		// Keep the value of a nameless cookie from being read as a name=value pair.
+		if len(kv.key) > 0 || bytes.IndexByte(kv.value, '=') >= 0 {
 			dst = append(dst, kv.key...)
 			dst = append(dst, '=')
 		}
