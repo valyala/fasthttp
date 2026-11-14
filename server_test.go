@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -1276,6 +1277,42 @@ func TestServeConnWrappedTLSConcurrencyRejectDoesNotBlock(t *testing.T) {
 	if len(s.perIPConnCounter.m) != 0 {
 		t.Fatal("rejected connection did not release its per-IP slot")
 	}
+}
+
+type acceptErrorListener struct {
+	net.Listener
+
+	err error
+}
+
+func (ln *acceptErrorListener) Accept() (net.Conn, error) {
+	if ln.err != nil {
+		err := ln.err
+		ln.err = nil
+		return nil, err
+	}
+	return ln.Listener.Accept()
+}
+
+func TestAcceptConnRetriesDescriptorExhaustion(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		c, peer := net.Pipe()
+		defer c.Close()
+		defer peer.Close()
+		ln := &acceptErrorListener{
+			Listener: newOneConnListener(c),
+			err: &net.OpError{
+				Op: "accept", Net: "tcp", Err: os.NewSyscallError("accept", syscall.EMFILE),
+			},
+		}
+		var lastPerIPErrorTime time.Time
+		got, err := acceptConn(&Server{Logger: &testLogger{}}, ln, &lastPerIPErrorTime)
+		if err != nil || got != c {
+			t.Fatalf("expected connection after descriptor exhaustion, got %v, %v", got, err)
+		}
+	})
 }
 
 type fakeIPListener struct {
