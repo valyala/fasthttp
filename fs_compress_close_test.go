@@ -11,16 +11,11 @@ import (
 
 var errCloseFailed = errors.New("close failed while writing the trailer")
 
-// failTrailerWriter accepts everything until Close, then fails the final
-// write. It stands in for a cache file whose trailer cannot be written.
+// failTrailerWriter counts writes made after the compressor is reset onto
+// its destination. It is used to assert that a short write reaches the
+// destination from both Flush and Close.
 type failTrailerWriter struct {
-	err   error
 	calls int
-}
-
-func (w *failTrailerWriter) Write(p []byte) (int, error) {
-	w.calls++
-	return len(p), nil
 }
 
 // writerToResetFile is an fs.File and an io.WriterTo. copyZeroAlloc calls its
@@ -70,21 +65,28 @@ func TestFSCompressCloseErrorNeverPublishesTruncatedFile(t *testing.T) {
 	}
 	payload := []byte("compressible payload for the cache, repeated across the whole file\n")
 
-	for _, encoding := range []string{"gzip", "br", "zstd"} {
-		t.Run(encoding, func(t *testing.T) {
+	// gzip and brotli emit on both Flush and Close; zstd buffers everything
+	// until Close. Fail only the final write so Flush succeeds for every codec
+	// and the error can only come from the compressor close.
+	for _, tc := range []struct {
+		encoding string
+		writes   int
+	}{
+		{"gzip", 2},
+		{"br", 2},
+		{"zstd", 1},
+	} {
+		t.Run(tc.encoding, func(t *testing.T) {
 			dir := t.TempDir()
-			compressedFilePath := filepath.Join(dir, "out."+encoding)
+			compressedFilePath := filepath.Join(dir, "out."+tc.encoding)
 
 			fw := &failTrailerWriter{}
-			// The compressor buffers internally, so a single close-time write
-			// is the only write that reaches failTrailerWriter. Make that one
-			// fail by wrapping it in a writer that errors on the last call.
-			lastErr := &failLastWriteWriter{inner: fw, err: errCloseFailed}
+			lastErr := &failLastWriteWriter{inner: fw, err: errCloseFailed, failAt: tc.writes}
 			src := &writerToResetFile{data: append([]byte(nil), payload...), fi: fi, dst: lastErr}
 
 			h := &fsHandler{}
 			_, err := h.compressFileNolock(
-				osRoot{}, src, fi, "fs_test.go", compressedFilePath, encoding)
+				osRoot{}, src, fi, "fs_test.go", compressedFilePath, tc.encoding)
 			if !errors.Is(err, errCloseFailed) {
 				t.Fatalf("got %v, want the Close error to be reported", err)
 			}
@@ -103,16 +105,20 @@ func TestFSCompressCloseErrorNeverPublishesTruncatedFile(t *testing.T) {
 	}
 }
 
-// failLastWriteWriter fails the first write that reaches it. After WriteTo
-// buffers the payload inside the compressor and resets its destination, this
-// is the Flush/Close write that emits the compressed stream (including the
-// trailer), regardless of how many writes the codec buffers internally.
+// failLastWriteWriter lets all writes up to failAt-1 succeed and fails the
+// final one. failAt is the number of writes the codec makes to the destination
+// on Flush+Close, so the failing write is always the compressor close. If the
+// close error is discarded, each subtest fails instead of passing via Flush.
 type failLastWriteWriter struct {
-	inner *failTrailerWriter
-	err   error
+	inner  *failTrailerWriter
+	err    error
+	failAt int
 }
 
 func (w *failLastWriteWriter) Write(p []byte) (int, error) {
 	w.inner.calls++
+	if w.inner.calls < w.failAt {
+		return len(p), nil
+	}
 	return 0, w.err
 }
