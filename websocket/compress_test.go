@@ -530,20 +530,15 @@ func (c *capConn) Write(p []byte) (int, error) {
 
 // A compressed frame goes out in a buffer that follows its size: the first
 // block for input that compresses, and what the whole of it needs for input
-// that does not.
+// that does not, past the pool as well.
 func TestDeflateOutputBuffer(t *testing.T) {
-	text, noise := bytes.Repeat([]byte("compressible "), 1<<20/13), make([]byte, 1<<20)
-	x := uint32(1)
-	for i := range noise {
-		x ^= x << 13
-		x ^= x >> 17
-		x ^= x << 5
-		noise[i] = byte(x)
-	}
+	const large = maxPooled + 1<<20
+	text, incompressible := bytes.Repeat([]byte("compressible "), 1<<20/13), make([]byte, large)
+	noise(incompressible)
 	for _, tc := range []struct {
 		p         []byte
 		low, high int
-	}{{text, 0, readChunkSize}, {noise, 1 << 20, 2 << 20}} {
+	}{{text, 0, readChunkSize}, {incompressible[:1<<20], 1 << 20, 2 << 20}, {incompressible, large, large + large/32}} {
 		nc := &capConn{}
 		c := newConn(nc, nc, false, "", connConfig{deflate: newDeflateConfig(true, true, 0, 0)})
 		if err := c.Write(t.Context(), MessageBinary, tc.p); err != nil {

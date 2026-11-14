@@ -234,16 +234,22 @@ type deflater struct {
 
 func (d *deflater) Write(p []byte) (int, error) {
 	if n := len(d.dst.b) + len(p); n > cap(d.dst.b) {
+		pooled := n <= maxPooled
 		if d.fed > 0 {
 			// What the input so far came to extrapolates to the rest of it.
-			n = max(n, min(int(float64(n)*float64(d.size)/float64(d.fed)), maxPooled))
+			n = max(n, int(float64(n)*float64(d.size)/float64(d.fed)))
 		}
-		if n <= maxPooled {
-			g := getBuf(n)
-			g.b = append(g.b, d.dst.b...)
-			d.dst.b, g.b = g.b, d.dst.b
-			putBuf(g)
+		if pooled {
+			n = min(n, maxPooled)
+		} else {
+			// Past the pool nothing rounds a buffer up: a margin, at least
+			// twice the size, up to what input that does not compress needs.
+			n = max(n, min(max(n+n>>6, 2*cap(d.dst.b)), maxFrameHeader+d.size+d.size>>6))
 		}
+		g := getBuf(n)
+		g.b = append(g.b, d.dst.b...)
+		d.dst.b, g.b = g.b, d.dst.b
+		putBuf(g)
 	}
 	d.dst.b = append(d.dst.b, p...)
 	return len(p), nil
