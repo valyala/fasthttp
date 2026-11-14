@@ -5176,22 +5176,32 @@ func TestRequestHeaderFoldedRawCapacityIsBounded(t *testing.T) {
 	}
 }
 
-func TestRequestHeaderAllInOrderBareLFTerminator(t *testing.T) {
+func TestRequestHeaderAllInOrderFolded(t *testing.T) {
 	t.Parallel()
 
-	// A block ended by a bare LF is accepted when a CRLFCRLF follows in the
-	// buffer; AllInOrder iterates its fields like any other block's.
-	var req Request
-	br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: a\r\nX: y\n\nGET /x HTTP/1.1\r\nHost: b\r\n\r\n"))
-	if err := req.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	var got []string
-	for k, v := range req.Header.AllInOrder() {
-		got = append(got, string(k)+"="+string(v))
-	}
-	if s := strings.Join(got, ","); s != "Host=a,X=y" {
-		t.Fatalf("AllInOrder yielded %q, expecting Host=a,X=y", s)
+	for _, ending := range []string{"\r\n\r\n", "\n\r\n", "\n\n"} {
+		t.Run(fmt.Sprintf("%q", ending), func(t *testing.T) {
+			raw := "Host: a\r\nX: y\r\n continued\r\nX-Internal-User: admin" + ending
+			// The pipelined request supplies a CRLFCRLF after a bare-LF ending.
+			wire := "GET / HTTP/1.1\r\n" + raw + "GET /x HTTP/1.1\r\nHost: b\r\n\r\n"
+			var req Request
+			if err := req.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+				t.Fatal(err)
+			}
+
+			for range 2 {
+				var got []string
+				for k, v := range req.Header.AllInOrder() {
+					got = append(got, string(k)+"="+string(v))
+				}
+				if s := strings.Join(got, ","); s != "Host=a,X=y continued,X-Internal-User=admin" {
+					t.Fatalf("unexpected fields from AllInOrder: %q", s)
+				}
+				if s := string(req.Header.RawHeaders()); s != raw {
+					t.Fatalf("RawHeaders changed: got %q, want %q", s, raw)
+				}
+			}
+		})
 	}
 }
 

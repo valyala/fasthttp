@@ -1784,6 +1784,8 @@ func (h *RequestHeader) AllInOrder() iter.Seq2[[]byte, []byte] {
 	return func(yield func([]byte, []byte) bool) {
 		var s headerScanner
 		s.b = h.rawHeaders
+		s.blockEnd = len(s.b) // Parsing already established the end of this block.
+		s.preserveFolds = true
 		for s.next() {
 			s.key = trimTrailingSpace(s.key)
 			normalizeHeaderKey(s.key, h.disableNormalizing)
