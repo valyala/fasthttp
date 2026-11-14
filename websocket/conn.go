@@ -104,7 +104,7 @@ type Conn struct {
 
 	r  io.Reader
 	nc net.Conn
-	vw io.Writer // nc unwrapped to a transport with vectored writes, or nil.
+	vw net.Conn // The TCP or Unix socket under an accepted nc, or nil: written with writev, closed first.
 
 	readBuf *buffer
 	iov     net.Buffers // Over iovBuf; WriteTo consumes it.
@@ -183,7 +183,7 @@ func unwrapHijacked(nc net.Conn) net.Conn {
 
 // vectorWriter returns the TCP or Unix socket under nc, whose writev sends a
 // header and payload at once, or nil.
-func vectorWriter(nc net.Conn) io.Writer {
+func vectorWriter(nc net.Conn) net.Conn {
 	switch raw := unwrapHijacked(nc); raw.(type) {
 	case *net.TCPConn, *net.UnixConn:
 		return raw
@@ -223,21 +223,22 @@ func (c *Conn) closeWith(err error) {
 	c.closeMu.Unlock()
 	c.rdWatch.stopWatch()
 	c.wrWatch.stopWatch()
-	closeTransport(c.nc, !c.client)
+	// A hijacked conn's Close is a no-op until the handler returns: the
+	// deadline unblocks reads and writes meanwhile, and a socket in sight is
+	// closed at once.
+	_ = c.nc.SetDeadline(aLongTimeAgo)
+	if c.vw != nil {
+		_ = c.vw.Close()
+	}
+	closeTransport(c.nc)
 	c.ncMu.Unlock()
 }
 
-// closeTransport closes nc, or for an accepted connection what is under
-// fasthttp's hijacked conn, whose own Close is a no-op unless the server keeps
-// hijacked conns. The socket under a TLS connection goes first, so that
+// closeTransport closes the socket under a TLS connection before nc itself, so
 // close_notify cannot stall on a peer that no longer reads.
-func closeTransport(nc net.Conn, accepted bool) {
-	raw := unwrapHijacked(nc)
-	if tc, ok := raw.(interface{ NetConn() net.Conn }); ok {
+func closeTransport(nc net.Conn) {
+	if tc, ok := unwrapHijacked(nc).(interface{ NetConn() net.Conn }); ok {
 		_ = tc.NetConn().Close()
-	}
-	if accepted {
-		nc = raw
 	}
 	_ = nc.Close()
 }

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/valyala/fasthttp"
@@ -787,6 +788,50 @@ func TestDialClosesDialedConn(t *testing.T) {
 	opts.Header.Set(fasthttp.HeaderOrigin, "https://other.example")
 	if _, err := Dial(t.Context(), "ws://example.com/", opts); err == nil || closed.Load() != 2 {
 		t.Fatalf("refused handshake: %v, the dialed conn was closed %d times", err, closed.Load()-1)
+	}
+}
+
+// The conn given to Server.ServeConn is closed once: by fasthttp after the
+// handler, or with the Conn when the server keeps hijacked conns.
+func TestServeConnClosedOnce(t *testing.T) {
+	var h fasthttp.ResponseHeader
+	_ = h.Header() // fasthttp's date goroutine must not start inside the bubble.
+	for _, keep := range []bool{false, true} {
+		for _, closeNow := range []bool{false, true} {
+			synctest.Test(t, func(t *testing.T) {
+				srv, cli := net.Pipe()
+				defer srv.Close()
+				defer cli.Close()
+				var closed atomic.Int32
+				dialed, inHandler := make(chan struct{}), make(chan int32, 1)
+				s := &fasthttp.Server{KeepHijackedConns: keep, Handler: func(ctx *fasthttp.RequestCtx) {
+					_ = Accept(ctx, nil, func(c *Conn) {
+						<-dialed
+						if closeNow {
+							_ = c.CloseNow()
+						}
+						inHandler <- closed.Load()
+					})
+				}}
+				go func() { _ = s.ServeConn(closeCountConn{Conn: srv, closed: &closed}) }()
+				opts := &DialOptions{Dial: func(string) (net.Conn, error) { return cli, nil }}
+				if _, err := Dial(t.Context(), "ws://example.com/", opts); err != nil {
+					t.Fatal(err)
+				}
+				close(dialed)
+				want := int32(0)
+				if keep && closeNow {
+					want = 1
+				}
+				if n := <-inHandler; n != want {
+					t.Fatalf("keep=%v closeNow=%v: %d Close calls in the handler, want %d", keep, closeNow, n, want)
+				}
+				synctest.Wait() // The handler has returned and fasthttp is done with the conn.
+				if n := closed.Load(); n != 1 {
+					t.Fatalf("keep=%v closeNow=%v: the served conn was closed %d times", keep, closeNow, n)
+				}
+			})
+		}
 	}
 }
 
