@@ -7,7 +7,8 @@ import (
 )
 
 type headerScanner struct {
-	initialized bool
+	initialized   bool
+	preserveFolds bool // b contains stored headers whose line breaks must survive iteration.
 
 	b []byte
 	r int
@@ -188,6 +189,14 @@ func (s *headerScanner) failLine(r int) bool {
 
 // nextFolded handles a header with continuation lines.
 func (s *headerScanner) nextFolded() bool {
+	if s.preserveFolds {
+		// Joining folds writes into the input. Copy the unvisited fields once,
+		// on the first fold, leaving ordinary ordered iteration allocation-free.
+		s.b = bytes.Clone(s.b[s.r:])
+		s.blockEnd = len(s.b)
+		s.r = 0
+		s.preserveFolds = false
+	}
 	kv, colon, err := s.readContinuedLineSlice()
 	if len(kv) == 0 {
 		s.err = err
