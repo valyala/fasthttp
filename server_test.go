@@ -2548,6 +2548,65 @@ func TestServerDoesNotParseStreamedMultipartMalformedChunkAsRequest(t *testing.T
 	}
 }
 
+func TestServerClosesAfterStreamedResponseReadsBrokenChunk(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		ignoreErr bool
+	}{
+		{"echo", false},
+		{"handler hides read error", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var rw readWriter
+			rw.r.WriteString("POST /echo HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n" +
+				"1\r\na!0\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n")
+			var paths []string
+			s := Server{
+				StreamRequestBody: true,
+				Handler: func(ctx *RequestCtx) {
+					paths = append(paths, string(ctx.Path()))
+					if string(ctx.Path()) == "/echo" {
+						stream := ctx.RequestBodyStream()
+						if tc.ignoreErr {
+							r := stream
+							stream = bodyReadFunc(func(p []byte) (int, error) {
+								n, err := r.Read(p)
+								if err != nil && err != io.EOF {
+									// Finish consuming the stream before reporting a clean EOF.
+									_, _ = io.Copy(io.Discard, r)
+									err = io.EOF
+								}
+								return n, err
+							})
+						}
+						ctx.SetBodyStream(stream, -1)
+					}
+				},
+			}
+			err := s.ServeConn(&rw)
+			if len(paths) != 1 || paths[0] != "/echo" {
+				t.Fatalf("handler paths = %q; want only [/echo]", paths)
+			}
+			if tc.ignoreErr {
+				if err != nil {
+					t.Fatal(err)
+				}
+				var resp Response
+				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+					t.Fatal(err)
+				}
+				if body := string(resp.Body()); body != "a" {
+					t.Fatalf("response body = %q, want a", body)
+				}
+			} else if _, ok := errors.AsType[ErrBrokenChunk](err); !ok {
+				t.Fatalf("ServeConn error = %v; want ErrBrokenChunk", err)
+			}
+		})
+	}
+}
+
 func TestServerClosesAfterAnyStreamedMultipartDrainError(t *testing.T) {
 	t.Parallel()
 

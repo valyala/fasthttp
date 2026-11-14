@@ -2995,6 +2995,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				break
 			}
 
+			// A response reader may finish successfully after a request framing error.
+			if reqStream != nil && reqStream.failed && hijackHandler == nil {
+				connectionClose = true
+			}
+
 			// Draining an unread streamed body may block waiting for the client.
 			// Flush the response first so a handler that answered from the headers
 			// alone does not leave the client waiting for that answer. A fully
