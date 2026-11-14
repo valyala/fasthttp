@@ -163,9 +163,8 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // like net/http does, instead of the origin-form "/" that would name no
 // authority to tunnel to. Such an opaque target is written as it is, so it
 // carries neither the scheme nor the query that r.URL.RequestURI would add.
-// A CONNECT target keeps its form when req.URI() is accessed later, as
-// fasthttp.Client does, since fasthttp rebuilds the target of a CONNECT
-// request without path normalization.
+// A bare CONNECT authority keeps its form when req.URI() is accessed later,
+// as fasthttp.Client does. Targets with paths follow normal path normalization.
 //
 // An absolute-form target is kept as it is too, whatever its scheme, so a
 // request written with req.Write to a proxy keeps naming the authority it

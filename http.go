@@ -237,12 +237,10 @@ func (req *Request) RequestURI() []byte {
 
 // requestURIFromURI returns the request target rebuilt from the parsed URI.
 //
-// The target of a CONNECT request names the authority to tunnel to rather
-// than a path (RFC 9112, Section 3.2.3), so it is rebuilt without path
-// normalization, which would turn the authority-form "example.com:443" into
-// the origin-form "/example.com:443".
+// Preserve a CONNECT authority (RFC 9112, Section 3.2.3), since adding a
+// leading slash would turn it into a path. Normalize path targets as usual.
 func (req *Request) requestURIFromURI() []byte {
-	return req.uri.requestURIBytes(req.uri.DisablePathNormalizing || req.Header.IsConnect())
+	return req.uri.requestURIBytes(req.uri.DisablePathNormalizing || (req.Header.IsConnect() && req.uri.isConnectAuthority()))
 }
 
 // StatusCode returns response status code.

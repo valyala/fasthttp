@@ -2849,23 +2849,29 @@ func TestRequestWriteURLAuthKeepsAuthorization(t *testing.T) {
 func TestRequestWriteConnectTargetAfterURIAccess(t *testing.T) {
 	t.Parallel()
 
-	for _, target := range []string{"example.com:443", "[::1]:443", "//example.com:443", "/tunnel"} {
-		t.Run(target, func(t *testing.T) {
+	for _, tc := range []struct{ target, want string }{
+		{"example.com:443", "example.com:443"},
+		{"[::1]:443", "[::1]:443"},
+		{"[fe80::1%25eth0]:443", "[fe80::1%25eth0]:443"},
+		{"//example.com:443", "//example.com:443"},
+		{"/tunnel", "/tunnel"},
+		{"public/admin/secret", "/public/admin/secret"},
+		{"host:443/public", "/host:443/public"},
+		{"/admin/../public/x", "/public/x"},
+		{"//admin%2F..%2Fpublic%2Fx:443", "/public/x:443"},
+		{"example.com:443?q=1", "/example.com:443?q=1"},
+	} {
+		t.Run(tc.target, func(t *testing.T) {
 			t.Parallel()
 
 			var req Request
-			s := "CONNECT " + target + " HTTP/1.1\r\nHost: example.com:443\r\n\r\n"
+			s := "CONNECT " + tc.target + " HTTP/1.1\r\nHost: example.com:443\r\n\r\n"
 			if err := req.Read(bufio.NewReader(strings.NewReader(s))); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			// Accessing the URI makes Write rebuild the target from the
-			// parsed URI, which must keep the CONNECT target as it is, also
-			// when path normalization is enabled, as HostClient leaves it.
-			req.URI().DisablePathNormalizing = false
-			if got := string(req.RequestURI()); got != target {
-				t.Fatalf("unexpected request uri %q. Expecting %q", got, target)
-			}
+			// HostClient accesses the parsed URI before writing the request.
+			req.URI()
 
 			var w bytes.Buffer
 			bw := bufio.NewWriter(&w)
@@ -2877,7 +2883,10 @@ func TestRequestWriteConnectTargetAfterURIAccess(t *testing.T) {
 			}
 
 			firstLine, _, _ := strings.Cut(w.String(), "\r\n")
-			if want := "CONNECT " + target + " HTTP/1.1"; firstLine != want {
+			if got := string(req.RequestURI()); got != tc.want {
+				t.Errorf("unexpected request uri %q. Expecting %q", got, tc.want)
+			}
+			if want := "CONNECT " + tc.want + " HTTP/1.1"; firstLine != want {
 				t.Fatalf("unexpected request line %q. Expecting %q", firstLine, want)
 			}
 		})

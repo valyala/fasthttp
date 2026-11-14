@@ -837,6 +837,25 @@ func (u *URI) RequestURI() []byte {
 	return u.requestURIBytes(u.DisablePathNormalizing)
 }
 
+func (u *URI) isConnectAuthority() bool {
+	if len(u.queryString) != 0 || (u.parsedQueryArgs && u.queryArgs.Len() != 0) || len(u.hash) != 0 {
+		return false
+	}
+
+	// net/http also writes opaque CONNECT targets in the form "//host:port".
+	target := bytes.TrimPrefix(u.PathOriginal(), strSlashSlash)
+	colon := bytes.LastIndexByte(target, ':')
+	if colon <= 0 || colon == len(target)-1 || !validOptionalPort(target[colon:]) {
+		return false
+	}
+
+	// parseHost checks the port and rejects path separators, including escaped
+	// ones. It unescapes in place, so leave the original target intact.
+	u.requestURI = append(u.requestURI[:0], target...)
+	_, err := parseHost(u.requestURI)
+	return err == nil
+}
+
 // requestURIBytes is like RequestURI, with path normalization disabled
 // whenever disablePathNormalizing is set, whatever u.DisablePathNormalizing
 // holds.
