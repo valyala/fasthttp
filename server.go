@@ -2590,9 +2590,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		br *bufio.Reader
 		bw *bufio.Writer
 
-		timeoutResponse  *Response
-		hijackHandler    HijackHandler
-		hijackNoResponse bool
+		timeoutResponse *Response
 
 		connectionClose bool
 		isHTTP11        bool
@@ -2977,9 +2975,9 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.Response.SkipBody = true
 		}
 
-		hijackHandler = ctx.hijackHandler
+		hijackHandler := ctx.hijackHandler
 		ctx.hijackHandler = nil
-		hijackNoResponse = ctx.hijackNoResponse && hijackHandler != nil
+		hijackNoResponse := ctx.hijackNoResponse && hijackHandler != nil
 		ctx.hijackNoResponse = false
 
 		if writeTimeout > 0 || previousWriteTimeout > 0 {
@@ -3101,14 +3099,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		}
 
 		if hijackHandler != nil {
-			var hjr io.Reader = c
-			if br != nil {
-				hjr = br
-				br = nil
-			}
-			// The hijack handler may still read the request stream, so leave
-			// it to the GC instead of releasing it.
-			reqStream = nil
 			if bw != nil {
 				err = bw.Flush()
 				if err != nil {
@@ -3121,7 +3111,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			if err != nil {
 				break
 			}
+			var hjr io.Reader = c
+			if br != nil {
+				hjr = br
+			}
 			go hijackConnHandler(ctx, hjr, c, s, hijackHandler)
+			// The hijack handler now owns the context and its request stream.
+			br, ctx, reqStream = nil, nil, nil
 			err = errHijacked
 			break
 		}
@@ -3195,7 +3191,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	if bw != nil {
 		releaseWriter(s, bw)
 	}
-	if ctx != nil && hijackHandler == nil {
+	if ctx != nil {
 		s.releaseCtx(ctx)
 	}
 	// Release the stream of the last request if the loop ended before doing
