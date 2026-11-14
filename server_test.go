@@ -5933,11 +5933,18 @@ func TestServerShutdownClosesConnectionWithStalledFirstRequest(t *testing.T) {
 
 			logs := &testLogger{}
 			closed := make(chan struct{})
+			active := make(chan struct{}, 1)
 			server := &Server{
 				Handler:       func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
 				MaxConnsPerIP: tc.perIP,
 				Logger:        logs,
 				ConnState: func(_ net.Conn, st ConnState) {
+					if st == StateActive {
+						select {
+						case active <- struct{}{}:
+						default:
+						}
+					}
 					if st == StateClosed {
 						close(closed)
 					}
@@ -5959,7 +5966,15 @@ func TestServerShutdownClosesConnectionWithStalledFirstRequest(t *testing.T) {
 			if _, err := conn.Write([]byte("G")); err != nil {
 				t.Fatalf("writing: %v", err)
 			}
-			time.Sleep(testTimeout(100 * time.Millisecond))
+			// Wait until the server has accepted the connection and marked it
+			// active. Sleeping here is racy: the client can write before the
+			// server accepts, and shutdown then closes the listener before any
+			// connection can reach StateClosed, hanging the wait below.
+			select {
+			case <-active:
+			case <-time.After(testTimeout(10 * time.Second)):
+				t.Fatal("connection did not go active after writing the first byte of a request")
+			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
 			defer cancel()
