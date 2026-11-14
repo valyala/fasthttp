@@ -1381,23 +1381,10 @@ func doRequestFollowRedirects(
 		}
 		ReleaseURI(redirectURI)
 
-		// Every redirect but 303 keeps the body, and a consumed stream cannot
-		// produce it again. Fail instead of following with an empty body, the
-		// same reason the retry path refuses to retry such a request.
-		if hasBodyStream && statusCode != StatusSeeOther {
-			err = ErrRedirectBodyStream
-			break
-		}
-
-		switch {
-		case statusCode == StatusSeeOther:
-			// RFC 9110 section 15.4.4: a 303 (See Other) response redirects
-			// the user agent to retrieve the new URI with a GET (or HEAD)
-			// request, regardless of the original method, and without the
-			// original request body. Drop the body together with every header
-			// that frames it: per RFC 9112 a body is signaled by Content-Length
-			// or Transfer-Encoding, and a Trailer only applies to a chunked
-			// body, so all of them must go once the body is gone.
+		// A 303, or a POST rewritten to GET on 301/302, retrieves the target
+		// without the original body (RFC 9110 section 15.4).
+		if statusCode == StatusSeeOther ||
+			((statusCode == StatusMovedPermanently || statusCode == StatusFound) && req.Header.IsPost()) {
 			if !req.Header.IsGet() && !req.Header.IsHead() {
 				req.Header.SetMethod(MethodGet)
 			}
@@ -1411,11 +1398,10 @@ func doRequestFollowRedirects(
 			// The body is gone for the rest of the chain, so later
 			// body-preserving redirects have nothing left to replay.
 			hasBodyStream = false
-		case req.Header.IsPost() && (statusCode == StatusMovedPermanently || statusCode == StatusFound):
-			// RFC 9110 sections 15.4.2/15.4.3 Note: for historical reasons a
-			// user agent MAY change the request method from POST to GET for a
-			// 301 (Moved Permanently) or 302 (Found) response.
-			req.Header.SetMethod(MethodGet)
+		} else if hasBodyStream {
+			// The previous hop consumed the stream this redirect would replay.
+			err = ErrRedirectBodyStream
+			break
 		}
 
 		if err = closeOrDrainResponseBody(resp, maxResponseBodyDrainSize); err != nil {

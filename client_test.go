@@ -3873,9 +3873,9 @@ func TestClientRedirectMethodSwitch(t *testing.T) {
 		{MethodPost, "/redirect-303", "GET|"},
 		// 303 must also drop the body of an original GET request.
 		{MethodGet, "/redirect-303", "GET|"},
-		// 301/302 historically switch POST to GET (without forcing a body drop).
-		{MethodPost, "/redirect-301", "GET|hello"},
-		{MethodPost, "/redirect-302", "GET|hello"},
+		// A 301 or 302 converts POST to GET and discards the posted body.
+		{MethodPost, "/redirect-301", "GET|"},
+		{MethodPost, "/redirect-302", "GET|"},
 		// 307 and 308 must preserve both the method and the body.
 		{MethodPost, "/redirect-307", "POST|hello"},
 		{MethodPost, "/redirect-308", "POST|hello"},
@@ -3918,8 +3918,7 @@ func TestClientRedirectBodyStream(t *testing.T) {
 
 	// The hop that receives the redirect has already consumed the body stream,
 	// so a redirect that keeps the body cannot be replayed: 307 and 308 used to
-	// arrive with an empty body, and the POST switch to GET on 301/302 hung
-	// waiting for a body that never came.
+	// arrive with an empty body.
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			switch string(ctx.Path()) {
@@ -3960,9 +3959,10 @@ func TestClientRedirectBodyStream(t *testing.T) {
 		path         string
 		expectedBody string
 	}{
-		// All four body-preserving statuses must report the unusable stream.
-		{ErrRedirectBodyStream, MethodPost, "/redirect-301", ""},
-		{ErrRedirectBodyStream, MethodPost, "/redirect-302", ""},
+		// Switching a POST to GET does not require replaying the stream.
+		{nil, MethodPost, "/redirect-301", "GET|"},
+		{nil, MethodPost, "/redirect-302", "GET|"},
+		// Redirects that preserve the body must report the unusable stream.
 		{ErrRedirectBodyStream, MethodPost, "/redirect-307", ""},
 		{ErrRedirectBodyStream, MethodPost, "/redirect-308", ""},
 		{ErrRedirectBodyStream, MethodQuery, "/redirect-301", ""},
@@ -4004,18 +4004,25 @@ func TestClientRedirectBodyStream(t *testing.T) {
 	}
 }
 
-func TestClientRedirect303DropsBodyFramingHeaders(t *testing.T) {
+func TestClientRedirectDropsBodyFramingHeaders(t *testing.T) {
 	t.Parallel()
 
 	// /landing echoes back the body-framing headers it received so the test
-	// can verify that none of them survived the 303 body drop.
+	// can verify that none of them reached the other host.
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			switch string(ctx.Path()) {
-			case "/redirect":
-				ctx.Redirect("/landing", StatusSeeOther)
+			case "/301":
+				ctx.Redirect("http://other.test/landing", StatusMovedPermanently)
+			case "/302":
+				ctx.Redirect("http://other.test/landing", StatusFound)
+			case "/303":
+				ctx.Redirect("http://other.test/landing", StatusSeeOther)
 			case "/landing":
-				ctx.SetBodyString("te=" + string(ctx.Request.Header.Peek(HeaderTransferEncoding)) +
+				ctx.SetBodyString(string(ctx.Host()) + "|" + string(ctx.Method()) +
+					"|cl=" + string(ctx.Request.Header.Peek(HeaderContentLength)) +
+					"|ct=" + string(ctx.Request.Header.Peek(HeaderContentType)) +
+					"|te=" + string(ctx.Request.Header.Peek(HeaderTransferEncoding)) +
 					"|trailer=" + string(ctx.Request.Header.Peek(HeaderTrailer)) +
 					"|body=" + string(ctx.PostBody()))
 			default:
@@ -4030,34 +4037,37 @@ func TestClientRedirect303DropsBodyFramingHeaders(t *testing.T) {
 		}
 	}()
 
-	c := &HostClient{
-		Addr: "xxx",
+	c := &Client{
 		Dial: func(addr string) (net.Conn, error) { return ln.Dial() },
 	}
 
-	req := AcquireRequest()
-	resp := AcquireResponse()
-	defer ReleaseRequest(req)
-	defer ReleaseResponse(resp)
+	for _, status := range []string{"301", "302", "303"} {
+		t.Run(status, func(t *testing.T) {
+			req := AcquireRequest()
+			resp := AcquireResponse()
+			defer ReleaseRequest(req)
+			defer ReleaseResponse(resp)
 
-	// Original chunked POST carrying a trailer; the 303 must turn it into a
-	// body-less GET with no Transfer-Encoding/Trailer left behind.
-	req.Header.SetMethod(MethodPost)
-	req.SetRequestURI("http://xxx/redirect")
-	req.Header.Set(HeaderTransferEncoding, "chunked")
-	if err := req.Header.SetTrailer("X-Sum"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	req.SetBodyString("hello")
+			// The redirected GET must lose the POST body and its framing.
+			req.Header.SetMethod(MethodPost)
+			req.SetRequestURI("http://original.test/" + status)
+			req.Header.SetContentType("text/plain")
+			req.Header.Set(HeaderTransferEncoding, "chunked")
+			if err := req.Header.SetTrailer("X-Sum"); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			req.SetBodyString("hello")
 
-	if err := c.DoRedirects(req, resp, 16); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := resp.StatusCode(); got != StatusOK {
-		t.Fatalf("unexpected status code: %d", got)
-	}
-	if got, want := string(resp.Body()), "te=|trailer=|body="; got != want {
-		t.Fatalf("unexpected landing echo %q. Expecting %q", got, want)
+			if err := c.DoRedirects(req, resp, 16); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := resp.StatusCode(); got != StatusOK {
+				t.Fatalf("unexpected status code: %d", got)
+			}
+			if got, want := string(resp.Body()), "other.test|GET|cl=|ct=|te=|trailer=|body="; got != want {
+				t.Fatalf("unexpected landing echo %q. Expecting %q", got, want)
+			}
+		})
 	}
 }
 
