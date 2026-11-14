@@ -2009,6 +2009,7 @@ func TestFSDirectoryRedirect(t *testing.T) {
 		name        string
 		pathRewrite PathRewriteFunc
 		uri         string
+		setPath     string
 		location    string
 	}{
 		{name: "plain", uri: "/docs", location: "http://example.com/docs/"},
@@ -2024,6 +2025,15 @@ func TestFSDirectoryRedirect(t *testing.T) {
 			uri:         "/static/docs",
 			location:    "http://example.com/static/docs/",
 		},
+		{
+			name:        "absolute form",
+			pathRewrite: NewPathSlashesStripper(1),
+			uri:         "http://example.com/static/docs?sort=name",
+			location:    "http://example.com/static/docs/?sort=name",
+		},
+		// A handler before FS may change the path. The redirect goes to the
+		// changed path: the original one may lead nowhere with a slash.
+		{name: "path set by a handler", uri: "/latest?a=b", setPath: "/docs", location: "http://example.com/docs/?a=b"},
 		{
 			name:        "stripped prefix",
 			pathRewrite: NewPathPrefixStripper(len("/static")),
@@ -2041,7 +2051,13 @@ func TestFSDirectoryRedirect(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			h := (&FS{Root: dir, GenerateIndexPages: true, PathRewrite: tt.pathRewrite}).NewRequestHandler()
+			fsHandler := (&FS{Root: dir, GenerateIndexPages: true, PathRewrite: tt.pathRewrite}).NewRequestHandler()
+			h := func(ctx *RequestCtx) {
+				if tt.setPath != "" && string(ctx.Path()) == "/latest" {
+					ctx.URI().SetPath(tt.setPath)
+				}
+				fsHandler(ctx)
+			}
 
 			var ctx RequestCtx
 			var req Request

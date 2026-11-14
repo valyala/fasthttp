@@ -1404,11 +1404,17 @@ func (h *fsHandler) filePathToCompressed(filePath string) string {
 }
 
 func (h *fsHandler) handleRequest(ctx *RequestCtx) {
-	var path []byte
+	var path, uriPath []byte
 	if h.pathRewrite != nil {
+		// PathRewrite may change ctx.URI(), keep the path for a redirect.
+		b := bytebufferpool.Get()
+		defer bytebufferpool.Put(b)
+		b.B = append(b.B, ctx.Path()...)
+		uriPath = b.B
 		path = h.pathRewrite(ctx)
 	} else {
 		path = ctx.Path()
+		uriPath = path
 	}
 	hasTrailingSlash := len(path) > 0 && path[len(path)-1] == '/'
 
@@ -1480,7 +1486,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 
 		if errors.Is(err, errDirIndexRequired) {
 			if !hasTrailingSlash {
-				redirectToDir(ctx, path)
+				redirectToDir(ctx, uriPath, path)
 				return
 			}
 			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
@@ -1618,32 +1624,25 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	ctx.SetStatusCode(statusCode)
 }
 
-// redirectToDir redirects the request for the directory at path to the same
-// directory with a trailing slash.
-func redirectToDir(ctx *RequestCtx, path []byte) {
-	// The slash goes onto the request target the client sent, which keeps
-	// the query string and what PathRewrite took off: path is a path in the
-	// filesystem and may be none the client can request.
-	target := ctx.Request.Header.RequestURI()
-	if n := bytes.IndexByte(target, '#'); n >= 0 {
-		target = target[:n]
+// redirectToDir redirects the request for a directory to the same path with
+// a trailing slash. uriPath is the request path FS got, before PathRewrite,
+// and path the path in the filesystem, which the client may be unable to
+// request.
+func redirectToDir(ctx *RequestCtx, uriPath, path []byte) {
+	if len(uriPath) == 0 || uriPath[len(uriPath)-1] == '/' {
+		// PathRewrite took the trailing slash off: one more would loop.
+		uriPath = path
 	}
-	n := bytes.IndexByte(target, '?')
-	if n < 0 {
-		n = len(target)
+	b := bytebufferpool.Get()
+	// The paths are decoded: '?', '#' and '%' in a name are no delimiters.
+	b.B = appendQuotedPath(b.B, uriPath)
+	b.B = append(b.B, '/')
+	if queryString := ctx.URI().QueryString(); len(queryString) > 0 {
+		b.B = append(b.B, '?')
+		b.B = append(b.B, queryString...)
 	}
-	// Only an origin-form target with one leading slash is taken, "//host"
-	// would redirect to another host.
-	if n > 1 && target[0] == '/' && target[1] != '/' && target[n-1] != '/' {
-		b := make([]byte, 0, len(target)+1)
-		b = append(b, target[:n]...)
-		b = append(b, '/')
-		b = append(b, target[n:]...)
-		ctx.RedirectBytes(b, StatusFound)
-		return
-	}
-	// path is decoded: '?', '#' and '%' in a name are no delimiters.
-	ctx.RedirectBytes(append(appendQuotedPath(nil, path), '/'), StatusFound)
+	ctx.RedirectBytes(b.B, StatusFound)
+	bytebufferpool.Put(b)
 }
 
 // fsIfRangeMatch reports whether the Range header may be served given
