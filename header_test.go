@@ -117,10 +117,10 @@ func TestResponseHeaderFirstLineSettersSanitizeNewlines(t *testing.T) {
 	}
 }
 
-func TestResponseHeaderKeySettersSanitizeNewlines(t *testing.T) {
+func TestResponseHeaderKeySettersSanitizeDelimiters(t *testing.T) {
 	t.Parallel()
 
-	const badKey = "X-Foo\r\nInjected: true"
+	const badKey = "Set-Cookie: session=evil\r\nInjected: true"
 
 	testCases := []struct {
 		name string
@@ -141,17 +141,17 @@ func TestResponseHeaderKeySettersSanitizeNewlines(t *testing.T) {
 			h.SetContentLength(0)
 			tc.set(&h)
 
-			if bytes.Contains(h.Header(), []byte("\r\nInjected:")) {
-				t.Fatalf("header key injection reached the wire in %q", h.Header())
+			if wire := h.Header(); bytes.Contains(wire, []byte("\r\nInjected")) || bytes.Contains(wire, []byte("\r\nSet-Cookie:")) {
+				t.Fatalf("header key injection reached the wire in %q", wire)
 			}
 		})
 	}
 }
 
-func TestRequestHeaderKeySettersSanitizeNewlines(t *testing.T) {
+func TestRequestHeaderKeySettersSanitizeDelimiters(t *testing.T) {
 	t.Parallel()
 
-	const badKey = "X-Foo\r\nInjected: true"
+	const badKey = "Set-Cookie: session=evil\r\nInjected: true"
 
 	testCases := []struct {
 		name string
@@ -173,8 +173,8 @@ func TestRequestHeaderKeySettersSanitizeNewlines(t *testing.T) {
 			h.SetHost("example.com")
 			tc.set(&h)
 
-			if bytes.Contains(h.Header(), []byte("\r\nInjected:")) {
-				t.Fatalf("header key injection reached the wire in %q", h.Header())
+			if wire := h.Header(); bytes.Contains(wire, []byte("\r\nInjected")) || bytes.Contains(wire, []byte("\r\nSet-Cookie:")) {
+				t.Fatalf("header key injection reached the wire in %q", wire)
 			}
 		})
 	}
@@ -217,10 +217,12 @@ func TestNormalizeHeaderKey(t *testing.T) {
 		{key: "", normalized: "", raw: ""},
 		{key: "content-TYPE", normalized: "Content-Type", raw: "content-TYPE"},
 		{key: "-x--forwarded-", normalized: "-X--Forwarded-", raw: "-x--forwarded-"},
-		// An invalid key is not normalized, but its CR and LF are neutralised.
+		// Invalid keys preserve case and internal spaces.
+		{key: "Set-Cookie:", normalized: "Set-Cookie_", raw: "Set-Cookie_"},
+		{key: "\t foo \t", normalized: "_ foo _", raw: "_ foo _"},
 		{key: "x foo", normalized: "x foo", raw: "x foo"},
-		{key: "x-foo\r\nInjected: yes", normalized: "x-foo  Injected: yes", raw: "x-foo  Injected: yes"},
-		{key: "x\n", normalized: "x ", raw: "x "},
+		{key: "x-foo\r\nInjected: yes", normalized: "x-foo  Injected_ yes", raw: "x-foo  Injected_ yes"},
+		{key: "x\n", normalized: "x_", raw: "x_"},
 	}
 	for _, tc := range testCases {
 		for _, disableNormalizing := range []bool{false, true} {

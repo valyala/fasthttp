@@ -4319,16 +4319,32 @@ func normalizeHeaderKey(b []byte, disableNormalizing bool) {
 	// If the header isn't valid, we don't normalize it.
 	for _, c := range b {
 		if !validHeaderFieldByte(c) {
-			// Neutralise any CR/LF in the key so a header name can't break
-			// the message framing, mirroring the value handling in
-			// initHeaderValueBytes. A valid key holds neither, so only a key
-			// carrying a space or an otherwise invalid byte needs it.
-			removeNewLines(b)
+			sanitizeInvalidHeaderKey(b)
 			return
 		}
 	}
 
 	normalizeHeaderKeyValidated(b, disableNormalizing)
+}
+
+// sanitizeInvalidHeaderKey keeps delimiters in a name from changing where
+// peers see the header name or line end. Only edge whitespace is structural.
+func sanitizeInvalidHeaderKey(b []byte) {
+	for i, c := range b {
+		switch c {
+		case ':':
+			b[i] = '_'
+		case '\r', '\n':
+			b[i] = ' '
+		}
+	}
+	if b[0] == ' ' || b[0] == '\t' {
+		b[0] = '_'
+	}
+	last := len(b) - 1
+	if b[last] == ' ' || b[last] == '\t' {
+		b[last] = '_'
+	}
 }
 
 func normalizeHeaderKeyValidated(b []byte, disableNormalizing bool) {
