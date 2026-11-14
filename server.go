@@ -1261,7 +1261,9 @@ func (ctx *RequestCtx) MultipartForm() (*multipart.Form, error) {
 // MultipartFormWithLimit returns request's multipart form and limits the read
 // multipart body size to maxBodySize bytes.
 //
-// If maxBodySize <= 0, then no limit is applied.
+// If the server already parsed the form, the limit applies to the original
+// body size. Set Server.DisablePreParseMultipartForm to enforce the limit
+// during parsing. If maxBodySize <= 0, then no limit is applied.
 //
 // Call this method before FormValue/FormFile if you need a limit for
 // multipart parsing.

@@ -2512,6 +2512,15 @@ func TestRequestMultipartFormEpilogue(t *testing.T) {
 	if err := req.Read(br); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	// The pre-parsed size includes the epilogue, even if a handler has
+	// since changed the request headers.
+	req.Header.SetContentLength(1)
+	if f, err := req.MultipartFormWithLimit(len(body) - 1); f != nil || !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("oversized form = %v, %v; want nil, ErrBodyTooLarge", f, err)
+	}
+	if f, err := req.MultipartFormWithLimit(len(body)); err != nil || f == nil {
+		t.Fatalf("form at limit = %v, %v; want a form", f, err)
+	}
 	req.RemoveMultipartFormFiles()
 
 	var req2 Request
