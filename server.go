@@ -359,7 +359,8 @@ type Server struct {
 	// and accept new connections immediately).
 	SleepWhenConcurrencyLimitsExceeded time.Duration
 
-	idleConnsMu sync.Mutex
+	idleConnsMu      sync.Mutex
+	idleConnsClosing atomic.Int32
 
 	serverNameLine atomic.Pointer[serverLine]
 
@@ -2267,7 +2268,7 @@ func (s *Server) ShutdownWithContext(ctx context.Context) (err error) {
 	for {
 		s.closeIdleConns()
 
-		if open := s.open.Load(); open == 0 {
+		if s.open.Load() == 0 && s.idleConnsClosing.Load() == 0 {
 			// There may be a pending request to call ctx.Done(). Therefore, we only set it to nil when open == 0.
 			s.done.Store(nil)
 			s.doneClosed = false
@@ -3702,7 +3703,15 @@ func (s *Server) closeIdleConns() {
 		if !ict.CompareAndSwap(t, idleConnClaimedByShutdown) {
 			continue
 		}
-		_ = c.Close()
+		s.idleConnsClosing.Add(1)
+		go func() {
+			// A TLS Read may be writing a KeyUpdate reply while holding
+			// the write lock Close needs. Interrupt that write first.
+			_ = c.SetWriteDeadline(time.Now())
+			// Close may still block writing the TLS close notification.
+			_ = c.Close()
+			s.idleConnsClosing.Add(-1)
+		}()
 		// Don't recycle ict: the connection's own goroutine still holds it
 		// and stores into it, so only that goroutine may return it.
 		delete(s.idleConns, c)
