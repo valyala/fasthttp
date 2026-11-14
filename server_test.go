@@ -5317,10 +5317,12 @@ func TestRequestCtxHijackKeepaliveLimits(t *testing.T) {
 		}
 	}
 
-	// An explicit Connection: close still skips the hijack.
+	// An explicit Connection: close skips the hijack and releases the context.
+	var closeCalls int
 	hijacked := make(chan struct{}, 1)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			ctx.SetUserValue("closer", &closerValue{closeCalls: &closeCalls})
 			ctx.Hijack(func(net.Conn) { hijacked <- struct{}{} })
 		},
 	}
@@ -5333,6 +5335,9 @@ func TestRequestCtxHijackKeepaliveLimits(t *testing.T) {
 	case <-hijacked:
 		t.Fatal("hijack handler called despite Connection: close")
 	case <-time.After(testTimeout(100 * time.Millisecond)):
+	}
+	if closeCalls != 1 {
+		t.Fatalf("user value closed %d times, want 1", closeCalls)
 	}
 	if !strings.Contains(rw.w.String(), "Connection: close") {
 		t.Fatalf("response lacks Connection: close:\n%s", rw.w.String())
