@@ -3164,6 +3164,24 @@ func (f *dataAndEOFFile) Read(p []byte) (int, error)   { return 0, io.EOF }
 func (f *dataAndEOFFile) Close() error                 { return nil }
 func (f *dataAndEOFFile) Stat() (iofs.FileInfo, error) { return nil, errors.New("unused") }
 
+var errTooManyWrites = errors.New("too many writes")
+
+// plainWriter only implements io.Writer. bytes.Buffer implements io.ReaderFrom,
+// which would bypass the ReadAt loop under test. The write count also bounds
+// that loop so a regression fails instead of spinning on empty writes forever.
+type plainWriter struct {
+	b     bytes.Buffer
+	calls int
+}
+
+func (w *plainWriter) Write(p []byte) (int, error) {
+	w.calls++
+	if w.calls > 3 {
+		return 0, errTooManyWrites
+	}
+	return w.b.Write(p)
+}
+
 func TestFSSmallFileWriteToDataAndEOFShortWrite(t *testing.T) {
 	ff := &fsFile{
 		f:             &dataAndEOFFile{data: []byte("small file")},
@@ -3231,22 +3249,31 @@ func TestFSSmallFileWriteToKeepsWriterEOF(t *testing.T) {
 	}
 }
 
-// A clean full copy must still report success: the io.EOF coming from ReadAt
-// is not an error to the caller.
+// A clean copy must still report success when the cached endPos is past the
+// end of a file that shrank: the io.EOF from ReadAt is not an error to the
+// caller, and the loop must stop instead of issuing empty writes forever.
+// Use a destination that only implements io.Writer: bytes.Buffer implements
+// io.ReaderFrom, which bypasses this loop entirely.
 func TestFSSmallFileWriteToClearsReadAtEOF(t *testing.T) {
 	ff := &fsFile{
 		f:             &dataAndEOFFile{data: []byte("small file")},
 		contentLength: 10,
 	}
 	r := &fsSmallFileReader{ff: ff}
-	r.endPos = ff.contentLength
+	r.endPos = 20 // stale cached size; the file now holds only 10 bytes
 
-	var buf bytes.Buffer
-	n, err := r.WriteTo(&buf)
+	w := &plainWriter{}
+	n, err := r.WriteTo(w)
 	if err != nil {
 		t.Errorf("got %v, want nil after a complete copy", err)
 	}
-	if n != 10 || buf.String() != "small file" {
-		t.Errorf("wrote %d bytes %q, want 10 bytes %q", n, buf.String(), "small file")
+	if n != 10 || w.b.String() != "small file" {
+		t.Errorf("wrote %d bytes %q, want 10 bytes %q", n, w.b.String(), "small file")
+	}
+	if w.calls != 1 {
+		t.Errorf("destination was written %d times, want 1 (no empty writes after source EOF)", w.calls)
+	}
+	if r.startPos != 10 {
+		t.Errorf("startPos = %d, want 10", r.startPos)
 	}
 }

@@ -995,17 +995,21 @@ func (r *fsSmallFileReader) WriteTo(w io.Writer) (int64, error) {
 		if errw == nil && nw != n {
 			errw = io.ErrShortWrite
 		}
-		// ReadAt may return data together with io.EOF; that EOF only marks the
-		// end of the source and must not be reported to the caller. An error
-		// returned by the destination writer takes precedence, including an
-		// io.EOF from a pipe writer after a partial copy.
-		if readErr == io.EOF {
-			readErr = nil
-		}
-		err = readErr
+		// The destination writer's error takes precedence, including an
+		// io.EOF from a pipe writer after a partial copy. It must never be
+		// cleared by the source EOF handling below.
 		if errw != nil {
 			err = errw
+			break
 		}
+		// ReadAt may return data together with io.EOF when the file shrank
+		// after its size was cached. That EOF only marks the end of the source:
+		// stop here, otherwise curPos stays below endPos and the loop keeps
+		// issuing empty writes.
+		if readErr == io.EOF {
+			break
+		}
+		err = readErr
 	}
 	copyBufPool.Put(bufv)
 
