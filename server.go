@@ -2295,8 +2295,9 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 	for {
 		c, err := ln.Accept()
 		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				s.logger().Printf("Timeout error when accepting new connections: %v", netErr)
+			// Temporary includes descriptor exhaustion, which can clear as connections close.
+			if netErr, ok := err.(net.Error); ok && (netErr.Timeout() || netErr.Temporary()) { //nolint:staticcheck
+				s.logger().Printf("Temporary error when accepting new connections: %v", netErr)
 				time.Sleep(time.Second)
 				continue
 			}
