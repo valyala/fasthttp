@@ -120,7 +120,7 @@ func Dial(ctx context.Context, u string, opts *DialOptions) (*Conn, error) {
 	}
 	c, err := handshake(ctx, nc, uri, auth, opts)
 	if err != nil {
-		closeTransport(nc)
+		closeTransport(nc, false)
 		if cerr := ctxCause(ctx); cerr != nil {
 			err = cerr
 		}

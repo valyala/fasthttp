@@ -223,18 +223,21 @@ func (c *Conn) closeWith(err error) {
 	c.closeMu.Unlock()
 	c.rdWatch.stopWatch()
 	c.wrWatch.stopWatch()
-	closeTransport(c.nc)
+	closeTransport(c.nc, !c.client)
 	c.ncMu.Unlock()
 }
 
-// closeTransport closes the connection under fasthttp's hijacked conn, whose
-// own Close is a no-op unless the server keeps hijacked conns. The socket
-// under a TLS connection goes first, so that close_notify cannot stall on a
-// peer that no longer reads.
-func closeTransport(nc net.Conn) {
-	nc = unwrapHijacked(nc)
-	if tc, ok := nc.(interface{ NetConn() net.Conn }); ok {
+// closeTransport closes nc, or for an accepted connection what is under
+// fasthttp's hijacked conn, whose own Close is a no-op unless the server keeps
+// hijacked conns. The socket under a TLS connection goes first, so that
+// close_notify cannot stall on a peer that no longer reads.
+func closeTransport(nc net.Conn, accepted bool) {
+	raw := unwrapHijacked(nc)
+	if tc, ok := raw.(interface{ NetConn() net.Conn }); ok {
 		_ = tc.NetConn().Close()
+	}
+	if accepted {
+		nc = raw
 	}
 	_ = nc.Close()
 }

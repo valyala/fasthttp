@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -728,6 +729,44 @@ func TestDialURLCredentials(t *testing.T) {
 		} else if strings.Count(head, "Authorization: ") != 1 || !strings.Contains(head, "Authorization: "+tc.want+"\r\n") {
 			t.Fatalf("%q: want Authorization %q:\n%s", tc.userinfo, tc.want, head)
 		}
+	}
+}
+
+// closeCountConn exposes its socket as fasthttp's hijacked conn does and
+// counts its own Close calls.
+type closeCountConn struct {
+	net.Conn
+
+	closed *atomic.Int32
+}
+
+func (c closeCountConn) UnsafeConn() net.Conn { return c.Conn }
+
+func (c closeCountConn) Close() error {
+	c.closed.Add(1)
+	return c.Conn.Close()
+}
+
+// A conn from DialOptions.Dial is closed through its own Close, whatever else
+// it implements, after a failed handshake as well as by CloseNow.
+func TestDialClosesDialedConn(t *testing.T) {
+	ts := startServer(t, nil, echo)
+	var closed atomic.Int32
+	opts := &DialOptions{Dial: func(string) (net.Conn, error) {
+		nc, err := net.Dial("tcp", ts.addr)
+		return closeCountConn{Conn: nc, closed: &closed}, err
+	}}
+	c, err := Dial(t.Context(), "ws://example.com/", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _ = c.CloseNow(); closed.Load() != 1 {
+		t.Fatalf("CloseNow closed the dialed conn %d times", closed.Load())
+	}
+	opts.Header = &fasthttp.RequestHeader{}
+	opts.Header.Set(fasthttp.HeaderOrigin, "https://other.example")
+	if _, err := Dial(t.Context(), "ws://example.com/", opts); err == nil || closed.Load() != 2 {
+		t.Fatalf("refused handshake: %v, the dialed conn was closed %d times", err, closed.Load()-1)
 	}
 }
 
