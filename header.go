@@ -335,7 +335,7 @@ func (h *ResponseHeader) mustSkipBody() bool {
 // the corresponding 200 response rather than a body of its own.
 func (h *ResponseHeader) mustSkipContentLengthOnWire() bool {
 	statusCode := h.StatusCode()
-	return statusCode < 200 || statusCode == StatusNoContent
+	return (statusCode >= 100 && statusCode < 200) || statusCode == StatusNoContent
 }
 
 // SetContentLength sets Content-Length header value.
