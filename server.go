@@ -2892,6 +2892,13 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 
 		// If a client denies a request the handler should not be called
 		if continueReadingRequest {
+			// A response always carries a status code, and middleware wrapping the
+			// handler expects to read the one the client receives. Set the default
+			// before the handler runs: TimeoutHandler can return while the handler
+			// goroutine still uses ctx.Response, so it must not be read or written
+			// here afterwards. Response.Reset keeps the default, so a handler that
+			// resets the response does not make middleware read 0.
+			ctx.Response.Header.setServerDefaultStatus()
 			s.Handler(ctx)
 		}
 
@@ -3379,6 +3386,13 @@ func (ctx *RequestCtx) Init2(conn net.Conn, logger Logger, reduceMemoryUsage boo
 	ctx.Response.keepBodyBuffer = keepBodyBuffer
 	ctx.Request.KeepBodyBuffer = false
 	ctx.Response.KeepBodyBuffer = false
+
+	// A response always carries a status code, and middleware wrapping the
+	// handler expects to read the one the client receives. Set the default here
+	// as well, since custom servers prepare a context with this method instead
+	// of going through the request loop in Server. Response.Reset keeps the
+	// default for server responses.
+	ctx.Response.Header.setServerDefaultStatus()
 }
 
 // Init prepares ctx for passing to RequestHandler.

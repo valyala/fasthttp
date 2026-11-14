@@ -6959,3 +6959,221 @@ func TestClientDoKeepBodyBuffer(t *testing.T) {
 		t.Fatalf("expected resp.body to be reused across requests")
 	}
 }
+
+func TestClientDoStatusCodeOnDialError(t *testing.T) {
+	t.Parallel()
+
+	c := &Client{
+		Dial: func(string) (net.Conn, error) {
+			return nil, errors.New("dial error")
+		},
+	}
+
+	var req Request
+	req.SetRequestURI("http://example.com/")
+
+	var resp Response
+	if err := c.Do(&req, &resp); err == nil {
+		t.Fatal("expecting error")
+	}
+	if statusCode := resp.StatusCode(); statusCode != 0 {
+		t.Fatalf("unexpected status code after failed request: %d. Expecting 0", statusCode)
+	}
+}
+
+func TestClientExpiredDeadlineClearsOnlyStatusCode(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	req.SetRequestURI("http://example.com/")
+
+	for _, tc := range []struct {
+		name string
+		do   func(resp *Response) error
+	}{
+		{"Client.DoDeadline", func(resp *Response) error {
+			return (&Client{}).DoDeadline(&req, resp, time.Now().Add(-time.Second))
+		}},
+		{"Client.DoTimeout", func(resp *Response) error {
+			return (&Client{}).DoTimeout(&req, resp, 0)
+		}},
+		{"HostClient.DoDeadline", func(resp *Response) error {
+			return (&HostClient{}).DoDeadline(&req, resp, time.Now().Add(-time.Second))
+		}},
+		{"HostClient.DoTimeout", func(resp *Response) error {
+			return (&HostClient{}).DoTimeout(&req, resp, 0)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var resp Response
+			resp.Header.SetStatusCode(StatusOK)
+			resp.StreamBody = true
+			resp.SkipBody = true
+
+			if err := tc.do(&resp); err != ErrTimeout {
+				t.Fatalf("unexpected error: %v. Expecting %v", err, ErrTimeout)
+			}
+			if statusCode := resp.StatusCode(); statusCode != 0 {
+				t.Fatalf("unexpected status code after the request timed out: %d. Expecting 0", statusCode)
+			}
+			if !resp.StreamBody {
+				t.Fatal("StreamBody cleared after the request timed out")
+			}
+			if !resp.SkipBody {
+				t.Fatal("SkipBody cleared after the request timed out")
+			}
+		})
+	}
+}
+
+func TestClientFailedRequestClearsStatusCode(t *testing.T) {
+	t.Parallel()
+
+	var httpReq Request
+	httpReq.SetRequestURI("http://example.com/")
+
+	var ftpReq Request
+	ftpReq.SetRequestURI("ftp://example.com/")
+
+	var httpsReq Request
+	httpsReq.SetRequestURI("https://example.com/")
+
+	var commaHostReq Request
+	commaHostReq.SetRequestURI("http://foo,bar/")
+
+	for _, tc := range []struct {
+		name string
+		do   func(resp *Response) error
+	}{
+		{"PipelineClient.DoTimeout", func(resp *Response) error {
+			return (&PipelineClient{}).DoTimeout(&httpReq, resp, 0)
+		}},
+		{"PipelineClient.Do TLS config error", func(resp *Response) error {
+			return (&PipelineClient{IsTLS: true, Addr: "foo:bar:baz"}).Do(&httpReq, resp)
+		}},
+		{"Client.Do unsupported scheme", func(resp *Response) error {
+			return (&Client{}).Do(&ftpReq, resp)
+		}},
+		{"Client.Do host with comma", func(resp *Response) error {
+			return (&Client{}).Do(&commaHostReq, resp)
+		}},
+		{"Client.Do ConfigureClient error", func(resp *Response) error {
+			c := &Client{
+				ConfigureClient: func(*HostClient) error {
+					return errors.New("failed to configure")
+				},
+			}
+			return c.Do(&httpReq, resp)
+		}},
+		{"HostClient.Do scheme mismatch", func(resp *Response) error {
+			return (&HostClient{}).Do(&httpsReq, resp)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var resp Response
+			resp.Header.SetStatusCode(StatusCreated)
+
+			if err := tc.do(&resp); err == nil {
+				t.Fatal("expecting error")
+			}
+			if statusCode := resp.StatusCode(); statusCode != 0 {
+				t.Fatalf("unexpected status code after the failed request: %d. Expecting 0", statusCode)
+			}
+		})
+	}
+}
+
+// statusThenRetryTransport simulates a transport that read a response header
+// and then failed with a retryable error.
+type statusThenRetryTransport struct {
+	delay time.Duration
+}
+
+func (t *statusThenRetryTransport) RoundTrip(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+	resp.Header.SetStatusCode(StatusOK)
+	time.Sleep(t.delay)
+	return true, errors.New("connection closed")
+}
+
+func TestHostClientRetryLoopTimeoutClearsStatusCode(t *testing.T) {
+	t.Parallel()
+
+	// The transport takes longer than the timeout, so the timeout expires when
+	// the retry loop checks it before the next attempt.
+	c := &HostClient{
+		Transport: &statusThenRetryTransport{delay: 50 * time.Millisecond},
+	}
+
+	var req Request
+	req.SetRequestURI("http://example.com/")
+
+	var resp Response
+	resp.Header.SetStatusCode(StatusOK)
+
+	if err := c.DoTimeout(&req, &resp, 10*time.Millisecond); err != ErrTimeout {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, ErrTimeout)
+	}
+	if statusCode := resp.StatusCode(); statusCode != 0 {
+		t.Fatalf("unexpected status code after the request timed out: %d. Expecting 0", statusCode)
+	}
+}
+
+func TestPipelineClientDoTimeoutClearsStatusCode(t *testing.T) {
+	t.Parallel()
+
+	// A peer that reads the request but never replies to it.
+	ln := fasthttputil.NewInmemoryListener()
+	requestRead := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		br := bufio.NewReader(conn)
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				return
+			}
+			if line == "\r\n" {
+				break
+			}
+		}
+		close(requestRead)
+		<-release
+	}()
+	t.Cleanup(func() {
+		close(release)
+		_ = ln.Close()
+	})
+
+	c := &PipelineClient{
+		Dial: func(string) (net.Conn, error) {
+			return ln.Dial()
+		},
+		Logger: &testLogger{},
+	}
+
+	var req Request
+	req.SetRequestURI("http://example.com/")
+
+	var resp Response
+	resp.Header.SetStatusCode(StatusCreated)
+
+	if err := c.DoTimeout(&req, &resp, 100*time.Millisecond); !errors.Is(err, ErrTimeout) {
+		t.Fatalf("unexpected error: %v. Expecting %v", err, ErrTimeout)
+	}
+
+	select {
+	case <-requestRead:
+	case <-time.After(testTimeout(5 * time.Second)):
+		t.Fatal("the peer did not read the request")
+	}
+
+	if statusCode := resp.StatusCode(); statusCode != 0 {
+		t.Fatalf("unexpected status code after the request timed out: %d. Expecting 0", statusCode)
+	}
+}
