@@ -72,7 +72,12 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		w := acquireWriter(ctx)
 		// Serve the net/http handler concurrently so we can react to Flush/Hijack.
 		go func() {
+			req := r.WithContext(ctx)
 			defer func() {
+				// Like net/http, remove temporary uploads when ServeHTTP returns.
+				if req.MultipartForm != nil {
+					_ = req.MultipartForm.RemoveAll()
+				}
 				if rec := recover(); rec != nil {
 					// ErrAbortHandler is net/http's quiet give-up.
 					mode := modePanicked
@@ -104,7 +109,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				_ = w.Close()
 			}()
 
-			h.ServeHTTP(w, r.WithContext(ctx))
+			h.ServeHTTP(w, req)
 		}()
 
 		// Decide mode by first event.
