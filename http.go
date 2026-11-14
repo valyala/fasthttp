@@ -1759,12 +1759,12 @@ func (req *Request) ReadBody(r *bufio.Reader, contentLength, maxBodySize int) (e
 //
 // The caller must send StatusContinue response before calling this method.
 //
-// If maxBodySize > 0 and the body size exceeds maxBodySize,
-// then ErrBodyTooLarge is returned.
+// A body larger than a positive maxBodySize is made available through
+// BodyStream, including multipart forms that would otherwise be pre-parsed.
 func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
 	var err error
 	contentLength := req.Header.ContentLength()
-	if contentLength > 0 {
+	if contentLength > 0 && (maxBodySize <= 0 || contentLength <= maxBodySize) {
 		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
 			// Pre-read multipart form data of known length.
 			// This way we limit memory usage for large file uploads, since their contents
