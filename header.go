@@ -2966,6 +2966,7 @@ func (h *ResponseHeader) tryRead(r *bufio.Reader, n int) error {
 //
 // io.EOF is returned if r is closed before reading the first byte.
 func (h *header) ReadTrailer(r *bufio.Reader) error {
+	h.terminatorSearched = 0
 	n := 1
 	for {
 		err := h.tryReadTrailer(r, n)
@@ -3006,6 +3007,10 @@ func (h *header) tryReadTrailer(r *bufio.Reader, n int) error {
 		return fmt.Errorf("error when reading response trailer: %w", err)
 	}
 	b = mustPeekBuffered(r)
+	if n > 1 && err == nil && !emptyHeaderBlock(b) && !h.blockTerminated(b) {
+		// Wait for the complete section before parsing the same fields again.
+		return ErrNeedMore
+	}
 	// The scanner finalizes fields as it goes, so a retry must not keep the
 	// ones an incomplete parse already appended: it reparses from the start.
 	committed, committedKeys := len(h.trailerH), len(h.trailer)
