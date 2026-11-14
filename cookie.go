@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 	"sync"
 	"time"
 )
@@ -556,16 +557,19 @@ func getCookieKey(dst, src []byte) []byte {
 }
 
 func appendRequestCookieBytes(dst []byte, cookies []argsKV) []byte {
-	for i, n := 0, len(cookies); i < n; i++ {
+	for i := range cookies {
+		if i != 0 {
+			dst = append(dst, ';', ' ')
+		}
 		kv := &cookies[i]
 		if len(kv.key) > 0 {
 			dst = append(dst, kv.key...)
 			dst = append(dst, '=')
+		} else if slices.Contains(kv.value, '=') {
+			// Preserve the empty name if the value could be read as a name=value pair.
+			dst = append(dst, '=')
 		}
 		dst = append(dst, kv.value...)
-		if i+1 < n {
-			dst = append(dst, ';', ' ')
-		}
 	}
 	return dst
 }
