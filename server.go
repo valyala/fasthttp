@@ -2686,6 +2686,9 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				err = ctx.Request.Header.Read(br)
 			}
 
+			if err == nil && ctx.Request.Header.requestURI[0] != '/' {
+				err = ctx.Request.Header.useRequestTargetHost()
+			}
 			if err == nil {
 				if onHdrRecv := s.HeaderReceived; onHdrRecv != nil {
 					reqConf := onHdrRecv(&ctx.Request.Header)
