@@ -4074,8 +4074,8 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 	testRequestHeaderReadSuccess(t, h, "GET /asdf HTTP/1.1\r\nHost: aaa.com\r\nReferer: bb.com\r\n\r\naaa",
 		-2, "/asdf", "aaa.com", "bb.com", "")
 
-	// post with duplicate content-type
-	testRequestHeaderReadSuccess(t, h, "POST /a HTTP/1.1\r\nHost: aa\r\nContent-Type: ab\r\nContent-Length: 123\r\nContent-Type: xx\r\n\r\n",
+	// post with identical content-type values
+	testRequestHeaderReadSuccess(t, h, "POST /a HTTP/1.1\r\nHost: aa\r\nContent-Type: xx\r\nContent-Length: 123\r\nContent-Type: xx\r\n\r\n",
 		123, "/a", "aa", "", "xx")
 
 	// non-post with content-type
@@ -4226,6 +4226,10 @@ func TestRequestHeaderReadError(t *testing.T) {
 
 	// forbidden trailer
 	testRequestHeaderReadError(t, h, "POST /a HTTP/1.1\r\nContent-Length: -1\r\nTrailer: Foo, Content-Length\r\n\r\n")
+
+	// Conflicting types can make a proxy and handler parse different forms.
+	testRequestHeaderReadError(t, h, "POST / HTTP/1.1\r\nHost: aa\r\nContent-Type: text/plain\r\ncontent-type: application/x-www-form-urlencoded\r\n\r\n")
+	testRequestHeaderReadError(t, h, "POST / HTTP/1.1\r\nContent-Type:\r\nHost: aa\r\nContent-Type: text/plain\r\n\r\n")
 
 	// post with duplicate content-length
 	testRequestHeaderReadError(t, h, "POST /xx HTTP/1.1\r\nHost: aa\r\nContent-Type: s\r\nContent-Length: 13\r\nContent-Length: 1\r\n\r\n")

@@ -3822,6 +3822,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	contentLengthSeen := false
 	transferEncodingSeen := false
 	hostSeen := false
+	contentTypeSeen := false
 
 	var s headerScanner
 	s.b = buf
@@ -3913,6 +3914,14 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 			}
 		case 'c':
 			if caseInsensitiveCompare(s.key, strContentType) {
+				if contentTypeSeen {
+					if !bytes.Equal(h.contentType, s.value) {
+						h.connectionClose = true
+						return 0, 0, errors.New("conflicting content-type headers")
+					}
+					continue
+				}
+				contentTypeSeen = true
 				h.contentType = append(h.contentType[:0], s.value...)
 				continue
 			}
