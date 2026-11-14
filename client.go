@@ -2940,7 +2940,15 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 
 	// Make a copy of the request in order to avoid data races on timeouts
 	req.copyToSkipBody(&w.reqCopy)
-	if req.KeepBodyBuffer && req.body != nil {
+	switch {
+	case req.onlyMultipartForm() && req.bodyStream == nil && req.bodyRaw == nil:
+		// The caller owns the form's temporary files and can remove them after a timeout.
+		if err := WriteMultipartForm(w.reqCopy.bodyBuffer(), req.multipartForm, req.multipartFormBoundary); err != nil {
+			c.releasePipelineWork(w)
+			return err
+		}
+		w.reqCopy.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
+	case req.KeepBodyBuffer && req.body != nil:
 		if req.bodyStream != nil {
 			w.reqCopy.bodyStream = req.bodyStream
 			req.bodyStream = nil
@@ -2951,7 +2959,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		} else {
 			w.reqCopy.SetBody(req.bodyBytes())
 		}
-	} else {
+	default:
 		swapRequestBody(req, &w.reqCopy)
 	}
 
