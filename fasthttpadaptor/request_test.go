@@ -1978,6 +1978,35 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 		}
 	})
 
+	t.Run("repeated special headers", func(t *testing.T) {
+		in, err := http.ReadRequest(bufio.NewReader(strings.NewReader("GET / HTTP/1.1\r\n" +
+			"Host: example.org\r\nContent-Type: application/json\r\nContent-Type: text/plain\r\n" +
+			"User-Agent: first\r\nUser-Agent: second\r\nConnection: X-One\r\nConnection: X-Two\r\n\r\n")))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(in, &req)
+		var wire bytes.Buffer
+		if _, err := req.WriteTo(&wire); err != nil {
+			t.Fatal(err)
+		}
+		out, err := http.ReadRequest(bufio.NewReader(&wire))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k, want := range map[string]string{
+			"Content-Type": in.Header.Get("Content-Type"),
+			"User-Agent":   in.UserAgent(),
+			"Connection":   "X-One, X-Two",
+		} {
+			if got := out.Header.Values(k); len(got) != 1 || got[0] != want {
+				t.Errorf("%s = %q, want [%q]", k, got, want)
+			}
+		}
+	})
+
 	t.Run("explicit Content-Type is preserved", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{
