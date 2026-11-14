@@ -18,6 +18,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/valyala/bytebufferpool"
@@ -5613,6 +5614,50 @@ func TestResponseBodyStream(t *testing.T) {
 			}
 		})
 	})
+}
+
+func TestResponseCompressedBodyStreamReadError(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	body := io.MultiReader(strings.NewReader("partial body"), iotest.ErrReader(io.ErrUnexpectedEOF))
+	resp.SetBodyStream(body, -1)
+	resp.gzipBody(CompressDefaultCompression)
+
+	var wire bytes.Buffer
+	bw := bufio.NewWriter(&wire)
+	if err := resp.Write(bw); !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("response write error = %v, want unexpected EOF", err)
+	}
+	if err := bw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.HasSuffix(wire.Bytes(), []byte("0\r\n\r\n")) {
+		t.Error("incomplete response ended with the final chunk")
+	}
+}
+
+func TestBoundedCompressedBodyStreamError(t *testing.T) {
+	t.Parallel()
+
+	for _, method := range []string{"Read", "WriteTo"} {
+		t.Run(method, func(t *testing.T) {
+			source := newStreamPipe()
+			stream := newCompressedBodyStream(source, 0, func(*bufio.Writer, io.Reader, int) error {
+				return io.ErrUnexpectedEOF
+			})
+			defer stream.Close()
+			var err error
+			if method == "Read" {
+				_, err = io.ReadAll(stream)
+			} else {
+				_, err = io.Copy(io.Discard, stream)
+			}
+			if !errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Fatalf("%s error = %v, want unexpected EOF", method, err)
+			}
+		})
+	}
 }
 
 func TestResponseCompressedBodyStreamCloseClosesOriginal(t *testing.T) {

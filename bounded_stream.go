@@ -285,10 +285,7 @@ func newBoundedCompressedBodyStream(bodyStream io.Reader, level int, compress co
 
 func (s *boundedCompressedBodyStream) Read(p []byte) (int, error) {
 	s.startOnce.Do(func() { s.r = NewBoundedStreamReader(s.write) })
-	if s.r == nil {
-		return 0, io.ErrClosedPipe
-	}
-	return s.r.Read(p)
+	return s.read(p)
 }
 
 func (s *boundedCompressedBodyStream) WriteTo(w io.Writer) (int64, error) {
@@ -296,7 +293,11 @@ func (s *boundedCompressedBodyStream) WriteTo(w io.Writer) (int64, error) {
 	if s.r == nil {
 		return 0, io.ErrClosedPipe
 	}
-	return io.Copy(w, s.r)
+	n, err := io.Copy(w, s.r)
+	if err == nil {
+		err = s.terminalError(nil)
+	}
+	return n, err
 }
 
 func (*boundedCompressedBodyStream) SupportsBodyWriteTo() bool { return true }
