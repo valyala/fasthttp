@@ -1365,11 +1365,6 @@ func doRequestFollowRedirects(
 			return 0, nil, err
 		}
 
-		// Write builds Authorization from the userinfo when the request
-		// doesn't have one. Like net/http, that header is only for this URI:
-		// it is built again from the userinfo of the next one on a redirect.
-		authFromUserinfo := len(req.uri.username) > 0 && len(req.Header.peek(strAuthorization)) == 0
-
 		if err = c.Do(req, resp); err != nil {
 			return statusCode, body, err
 		}
@@ -1403,9 +1398,6 @@ func doRequestFollowRedirects(
 			break
 		}
 		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
-		if authFromUserinfo {
-			req.Header.del(strAuthorization)
-		}
 		// A relative location keeps the userinfo of the current URI, while
 		// an absolute one only has its own, as with url.URL.ResolveReference.
 		if !hasAuthority(location) {
