@@ -289,7 +289,8 @@ type Client struct {
 
 	// Maximum duration for full response reading (including body).
 	// When response streaming is enabled, the deadline remains active while
-	// the caller reads Response.BodyStream.
+	// the caller reads Response.BodyStream. When WriteTimeout is unset,
+	// ReadTimeout also limits the TLS handshake on a new connection.
 	//
 	// If a request timeout is set, the shorter timeout applies.
 	//
@@ -914,7 +915,8 @@ type HostClient struct {
 
 	// Maximum duration for full response reading (including body).
 	// When response streaming is enabled, the deadline remains active while
-	// the caller reads Response.BodyStream.
+	// the caller reads Response.BodyStream. When WriteTimeout is unset,
+	// ReadTimeout also limits the TLS handshake on a new connection.
 	//
 	// If a request timeout is set, the shorter timeout applies.
 	//
@@ -1063,6 +1065,7 @@ type clientConn struct {
 	// never set.
 	readDeadlineSet  bool
 	writeDeadlineSet bool
+	firstRequest     bool
 }
 
 // Conn returns the underlying net.Conn associated with the client connection.
@@ -2263,6 +2266,7 @@ func acquireClientConn(conn net.Conn) *clientConn {
 	cc := v.(*clientConn) //nolint:forcetypeassert
 	cc.c = conn
 	cc.createdTime = time.Now()
+	cc.firstRequest = true
 	cc.readDeadlineSet = true
 	cc.writeDeadlineSet = true
 	return cc
@@ -2447,7 +2451,12 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 	if timeout <= 0 {
 		timeout = DefaultDialTimeout
 	}
-	deadline := time.Now().Add(timeout)
+	now := time.Now()
+	deadline := now.Add(timeout)
+	var requestDeadline time.Time
+	if dialTimeout > 0 {
+		requestDeadline = now.Add(dialTimeout)
+	}
 	for n > 0 {
 		addr := c.nextAddr()
 		var tlsConfig *tls.Config
@@ -2456,6 +2465,12 @@ func (c *HostClient) dialHostHard(dialTimeout time.Duration) (conn net.Conn, err
 			if err != nil {
 				n--
 				continue
+			}
+		}
+		if !requestDeadline.IsZero() {
+			dialTimeout = time.Until(requestDeadline)
+			if dialTimeout <= 0 {
+				return nil, ErrTimeout
 			}
 		}
 		conn, err = dialAddr(addr, c.Dial, c.DialTimeout, c.DialDualStack, c.IsTLS, tlsConfig, dialTimeout, c.WriteTimeout)
@@ -2522,7 +2537,11 @@ func dialAddr(
 	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialDualStack, isTLS bool,
 	tlsConfig *tls.Config, dialTimeout, writeTimeout time.Duration,
 ) (net.Conn, error) {
-	deadline := time.Now().Add(writeTimeout)
+	handshakeTimeout := writeTimeout
+	if dialTimeout > 0 && dialTimeout < handshakeTimeout {
+		handshakeTimeout = dialTimeout
+	}
+	deadline := time.Now().Add(handshakeTimeout)
 	conn, err := callDialFunc(addr, dial, dialWithTimeout, dialDualStack, isTLS, dialTimeout)
 	if err != nil {
 		return nil, err
@@ -3723,6 +3742,35 @@ func (s *clientStreamBody) CloseWithError(err error) error {
 	return nil
 }
 
+func clientDeadline(requestDeadline time.Time, timeout time.Duration) time.Time {
+	if timeout > 0 {
+		deadline := time.Now().Add(timeout)
+		if requestDeadline.IsZero() || deadline.Before(requestDeadline) {
+			return deadline
+		}
+	}
+	return requestDeadline
+}
+
+// A connection can reach the pool before its TLS handshake. Complete the
+// handshake under the first request's deadline before reading its body.
+func (cc *clientConn) handshake(deadline time.Time) error {
+	conn, ok := cc.c.(interface{ Handshake() error })
+	if !ok {
+		return nil
+	}
+	if err := cc.c.SetDeadline(deadline); err != nil {
+		return err
+	}
+	cc.readDeadlineSet = true
+	cc.writeDeadlineSet = true
+	err := conn.Handshake()
+	if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		return ErrTimeout
+	}
+	return err
+}
+
 func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
 	customSkipBody := resp.SkipBody
 	customStreamBody := resp.StreamBody
@@ -3740,11 +3788,18 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 
 	resp.ParseNetConn(conn)
 
-	writeDeadline := deadline
-	if hc.WriteTimeout > 0 {
-		tmpWriteDeadline := time.Now().Add(hc.WriteTimeout)
-		if writeDeadline.IsZero() || tmpWriteDeadline.Before(writeDeadline) {
-			writeDeadline = tmpWriteDeadline
+	writeDeadline := clientDeadline(deadline, hc.WriteTimeout)
+	if cc.firstRequest {
+		cc.firstRequest = false
+		if hc.IsTLS && (hc.ReadTimeout > 0 || !writeDeadline.IsZero()) {
+			handshakeDeadline := writeDeadline
+			if hc.WriteTimeout == 0 {
+				handshakeDeadline = clientDeadline(deadline, hc.ReadTimeout)
+			}
+			if err = cc.handshake(handshakeDeadline); err != nil {
+				hc.CloseConn(cc)
+				return true, err
+			}
 		}
 	}
 
@@ -3784,14 +3839,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		return true, err
 	}
 
-	readDeadline := deadline
-	if hc.ReadTimeout > 0 {
-		tmpReadDeadline := time.Now().Add(hc.ReadTimeout)
-		if readDeadline.IsZero() || tmpReadDeadline.Before(readDeadline) {
-			readDeadline = tmpReadDeadline
-		}
-	}
-
+	readDeadline := clientDeadline(deadline, hc.ReadTimeout)
 	if !readDeadline.IsZero() || cc.readDeadlineSet {
 		if err = conn.SetReadDeadline(readDeadline); err != nil {
 			hc.CloseConn(cc)
