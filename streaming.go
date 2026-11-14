@@ -25,6 +25,7 @@ type requestStream struct {
 	contentLength  int
 	totalBytesRead int
 	chunkLeft      int
+	chunkOverhead  int
 	strictEOF      bool
 	eof            bool
 	// releaseOnClose is set on a response stream, which is released when the
@@ -70,7 +71,7 @@ func (rs *requestStream) read(p []byte) (int, error) {
 	contentLength := rs.contentLength
 	if contentLength == -1 {
 		if rs.chunkLeft == 0 {
-			chunkSize, err := parseChunkSize(rs.reader)
+			chunkSize, err := parseChunkSize(rs.reader, &rs.chunkOverhead)
 			if err != nil {
 				// The peer closed before the last chunk, so the body is truncated.
 				if err == io.EOF {
@@ -205,6 +206,7 @@ func releaseRequestStream(rs *requestStream) {
 	}
 	rs.totalBytesRead = 0
 	rs.chunkLeft = 0
+	rs.chunkOverhead = 0
 	rs.reader = nil
 	rs.failed = false
 	rs.header = nil

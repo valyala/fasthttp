@@ -3382,8 +3382,9 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 	}
 
 	strCRLFLen := len(strCRLF)
+	var excess int
 	for {
-		chunkSize, err := parseChunkSize(r)
+		chunkSize, err := parseChunkSize(r, &excess)
 		if err != nil {
 			return dst, err
 		}
@@ -3406,17 +3407,24 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 	}
 }
 
-func parseChunkSize(r *bufio.Reader) (int, error) {
+// Limit both a single unterminated chunk extension and the cumulative overhead
+// of many small chunks. As in net/http, allow 16 bytes per chunk plus twice
+// the chunk size before charging the body-wide allowance.
+const maxChunkOverhead = 16 * 1024
+
+func parseChunkSize(r *bufio.Reader, excess *int) (int, error) {
 	n, err := readHexInt(r)
 	if err != nil {
 		return -1, err
 	}
 	if b, _ := r.Peek(min(2, r.Buffered())); len(b) == 2 && b[0] == '\r' && b[1] == '\n' {
 		_, _ = r.Discard(2)
+		*excess = max(0, *excess-16-2*n)
 		return n, nil
 	}
 	inExt := false
 	afterSizeOWS := false
+	extra := 0
 	for {
 		c, err := r.ReadByte()
 		if err != nil {
@@ -3438,6 +3446,10 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 			return -1, ErrBrokenChunk{
 				error: errors.New("invalid character '\\n' after chunk size"),
 			}
+		}
+		extra++
+		if extra > maxChunkOverhead {
+			return -1, ErrBrokenChunk{error: errors.New("chunk size line too long")}
 		}
 		if inExt {
 			continue
@@ -3463,6 +3475,10 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 	err = readCrLf(r)
 	if err != nil {
 		return -1, err
+	}
+	*excess = max(0, *excess+extra-16-2*n)
+	if *excess > maxChunkOverhead {
+		return -1, ErrBrokenChunk{error: errors.New("too much chunk extension overhead")}
 	}
 	return n, nil
 }
