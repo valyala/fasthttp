@@ -3984,6 +3984,46 @@ func TestServerExpectHandlerRemoteAddr(t *testing.T) {
 	verifyResponse(t, br, StatusForbidden, string(defaultContentType), "")
 }
 
+func TestCompressHandlerTimeout(t *testing.T) {
+	t.Parallel()
+
+	for _, encoding := range []string{"gzip", "br"} {
+		t.Run(encoding, func(t *testing.T) {
+			compress := CompressHandler
+			if encoding == "br" {
+				compress = func(h RequestHandler) RequestHandler {
+					return CompressHandlerBrotliLevel(h, CompressBrotliDefaultCompression, CompressDefaultCompression)
+				}
+			}
+			for _, timeoutFirst := range []bool{false, true} {
+				var ctx RequestCtx
+				ctx.s = &Server{}
+				ctx.Request.Header.Set("Accept-Encoding", encoding)
+				body := strings.Repeat("handler response", 128)
+				ctx.Response.SetBodyString(body)
+				release := make(chan struct{})
+				h := RequestHandler(func(_ *RequestCtx) { <-release })
+				timeout := func(h RequestHandler) RequestHandler {
+					return TimeoutHandler(h, testTimeout(time.Millisecond), "timeout")
+				}
+				if timeoutFirst {
+					timeout(compress(h))(&ctx)
+				} else {
+					compress(timeout(h))(&ctx)
+				}
+				close(release)
+				<-ctx.timeoutCh // The timed-out handler has finished using ctx.
+				if resp := ctx.LastTimeoutErrorResponse(); resp == nil || resp.StatusCode() != StatusRequestTimeout {
+					t.Fatalf("expected timeout response (timeoutFirst=%t)", timeoutFirst)
+				}
+				if !bytes.Equal(ctx.Response.Body(), []byte(body)) {
+					t.Errorf("compression changed the timed-out handler's body (timeoutFirst=%t)", timeoutFirst)
+				}
+			}
+		})
+	}
+}
+
 func TestCompressHandler(t *testing.T) {
 	t.Parallel()
 

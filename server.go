@@ -587,6 +587,10 @@ func CompressHandler(h RequestHandler) RequestHandler {
 func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
+		// A timed-out handler may still be using both the request and response.
+		if ctx.timedOut.Load() {
+			return
+		}
 		switch {
 		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
 			ctx.Response.gzipBody(level)
@@ -619,6 +623,10 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
+		// A timed-out handler may still be using both the request and response.
+		if ctx.timedOut.Load() {
+			return
+		}
 		switch {
 		case ctx.Request.Header.HasAcceptEncodingBytes(strBr):
 			ctx.Response.brotliBody(brotliLevel)
@@ -681,7 +689,7 @@ type RequestCtx struct {
 	connRequestNum          uint64
 	hijackNoResponse        bool
 	deadlineMu              sync.Mutex
-	deadlineUpdatesDisabled atomic.Bool
+	timedOut                atomic.Bool
 	handlerDeadlineSet      atomic.Bool
 	handlerReadDeadlineSet  bool
 	handlerWriteDeadlineSet atomic.Bool
@@ -953,7 +961,7 @@ func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
-	if ctx.deadlineUpdatesDisabled.Load() {
+	if ctx.timedOut.Load() {
 		return ErrDeadlineUpdatesDisabled
 	}
 	err := ctx.c.SetReadDeadline(deadline)
@@ -971,7 +979,7 @@ func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
-	if ctx.deadlineUpdatesDisabled.Load() {
+	if ctx.timedOut.Load() {
 		return ErrDeadlineUpdatesDisabled
 	}
 	err := ctx.c.SetWriteDeadline(deadline)
@@ -1005,7 +1013,7 @@ func (ctx *RequestCtx) reset() {
 	ctx.time = zeroTime
 	ctx.deadlineMu.Lock()
 	ctx.c = nil
-	ctx.deadlineUpdatesDisabled.Store(false)
+	ctx.timedOut.Store(false)
 	ctx.handlerDeadlineSet.Store(false)
 	ctx.handlerReadDeadlineSet = false
 	ctx.handlerWriteDeadlineSet.Store(false)
@@ -1851,7 +1859,7 @@ func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 	respCopy := &Response{}
 	resp.CopyTo(respCopy)
 	ctx.timeoutResponse = respCopy
-	ctx.deadlineUpdatesDisabled.Store(true)
+	ctx.timedOut.Store(true)
 }
 
 // NextProto adds nph to be processed when key is negotiated when TLS
@@ -2863,7 +2871,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.time = reqTime
 			timeoutResponse.CopyTo(&ctx.Response)
 
-			oldCtx.deadlineUpdatesDisabled.Store(true)
 			oldCtx.deadlineMu.Lock()
 			if oldCtx.handlerReadDeadlineSet {
 				ctx.handlerReadDeadlineSet = true
