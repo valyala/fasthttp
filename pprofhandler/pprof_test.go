@@ -1,8 +1,14 @@
 package pprofhandler
 
 import (
+	"bufio"
+	"io"
+	"net"
+	"net/http"
+	rttrace "runtime/trace"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/valyala/fasthttp"
 )
@@ -173,5 +179,40 @@ func TestPprofHandlerPrefixMismatchFallsThroughToIndex(t *testing.T) {
 				t.Errorf("path %q: expected index fallback with 'Unknown profile', got body starting with: %q", path, body[:min(len(body), 100)])
 			}
 		})
+	}
+}
+
+func TestTraceStopsOnDisconnect(t *testing.T) {
+	if rttrace.IsEnabled() {
+		t.Skip("execution tracing is already enabled")
+	}
+	server, client := net.Pipe()
+	defer client.Close()
+	s := &fasthttp.Server{Handler: PprofHandler}
+	go func() { _ = s.ServeConn(server) }()
+	if err := client.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(client, "GET /debug/pprof/trace?seconds=30 HTTP/1.1\r\nHost: localhost\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(client), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var prefix [3]byte
+	if _, err := io.ReadFull(resp.Body, prefix[:]); err != nil || string(prefix[:]) != "go " {
+		t.Fatalf("reading trace header: got %q, err %v", prefix, err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for rttrace.IsEnabled() {
+		if time.Now().After(deadline) {
+			t.Fatal("execution trace still running after disconnect")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

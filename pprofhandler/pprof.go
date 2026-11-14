@@ -3,6 +3,8 @@ package pprofhandler
 
 import (
 	"bytes"
+	"context"
+	"net/http"
 	"net/http/pprof"
 	rtp "runtime/pprof"
 
@@ -14,7 +16,7 @@ var (
 	cmdline = fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Cmdline)
 	profile = fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Profile)
 	symbol  = fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Symbol)
-	trace   = fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Trace)
+	trace   = fasthttpadaptor.NewFastHTTPHandlerFunc(streamTrace)
 	index   = fasthttpadaptor.NewFastHTTPHandlerFunc(pprof.Index)
 )
 
@@ -25,6 +27,34 @@ var (
 	tracePath   = []byte("/debug/pprof/trace")
 	indexPath   = []byte("/debug/pprof/")
 )
+
+// The trace writer runs on a runtime goroutine. Flush before writing to
+// switch the adaptor to streaming, and wake pprof.Trace if the pipe closes.
+type traceWriter struct {
+	http.ResponseWriter
+
+	cancel context.CancelFunc
+}
+
+func (w *traceWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *traceWriter) Write(p []byte) (int, error) {
+	if err := http.NewResponseController(w.ResponseWriter).Flush(); err != nil {
+		w.cancel()
+		return 0, err
+	}
+	n, err := w.ResponseWriter.Write(p)
+	if err != nil {
+		w.cancel()
+	}
+	return n, err
+}
+
+func streamTrace(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	pprof.Trace(&traceWriter{w, cancel}, r.WithContext(ctx))
+}
 
 // matchPprofPath checks whether path exactly matches a pprof endpoint.
 // It only accepts the exact path (e.g. /debug/pprof/heap) and rejects
@@ -38,6 +68,9 @@ func matchPprofPath(path, endpoint []byte) bool {
 //
 // It accepts GET and HEAD requests, like the routes registered by net/http/pprof.
 // See https://pkg.go.dev/net/http/pprof for details.
+//
+// Execution traces are streamed as they are recorded, so the server write
+// timeout must allow for the requested trace duration.
 //
 // Paths ending in a trailing slash (e.g. /debug/pprof/heap/) return 404,
 // matching the behaviour of net/http/pprof's DefaultServeMux which does
