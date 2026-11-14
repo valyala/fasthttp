@@ -6052,10 +6052,18 @@ func TestServerShutdownWaitsForFirstRequestBodyUpload(t *testing.T) {
 
 	const body = "0123456789abc" // 13 bytes at one per 500ms: ~6.5s > 5s grace
 	received := make(chan string, 1)
+	headerReceived := make(chan struct{}, 1)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			received <- string(ctx.PostBody())
 			ctx.SetBodyString("done")
+		},
+		HeaderReceived: func(header *RequestHeader) RequestConfig {
+			select {
+			case headerReceived <- struct{}{}:
+			default:
+			}
+			return RequestConfig{}
 		},
 		ReadTimeout: 30 * time.Second,
 	}
@@ -6080,6 +6088,16 @@ func TestServerShutdownWaitsForFirstRequestBodyUpload(t *testing.T) {
 	// upload going past the accept-time grace.
 	if _, err := conn.Write([]byte("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 13\r\n\r\n")); err != nil {
 		t.Fatalf("writing headers: %v", err)
+	}
+
+	// Wait until the server has received the headers: the client can
+	// finish writing them while the connection is still waiting to be
+	// accepted, and starting shutdown first can close the listener
+	// before the server starts reading the upload.
+	select {
+	case <-headerReceived:
+	case <-time.After(testTimeout(20 * time.Second)):
+		t.Fatal("server did not receive the request headers")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))

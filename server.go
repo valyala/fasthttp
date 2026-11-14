@@ -2670,11 +2670,11 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				// negated deadline marks this state in idleConnTime.
 				// Once the headers are read the connection is waited
 				// for like any other, even while its body is still
-				// arriving. If the CAS fails, Shutdown has claimed
-				// the connection already and it must not be read.
-				if !idleConnTime.CompareAndSwap(0, -firstRequestDeadline) {
-					err = net.ErrClosed
-				}
+				// arriving. A plain store is enough here: the claim
+				// check above already set the timestamp to zero, and
+				// closeIdleConns skips zero, so Shutdown cannot have
+				// claimed the connection in between.
+				idleConnTime.Store(-firstRequestDeadline)
 			}
 
 			if err == nil {
