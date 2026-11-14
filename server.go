@@ -1487,10 +1487,8 @@ func (ctx *RequestCtx) RemoteAddr() net.Addr {
 	return addr
 }
 
-// SetRemoteAddr sets remote address to the given value.
-//
-// Set nil value to restore default behaviour for using
-// connection remote address.
+// SetRemoteAddr sets the remote address for the current request.
+// Pass nil to use the connection's remote address again.
 func (ctx *RequestCtx) SetRemoteAddr(remoteAddr net.Addr) {
 	ctx.remoteAddr = remoteAddr
 }
@@ -3136,6 +3134,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Response.KeepBodyBuffer = false
 		ctx.Request.Reset()
 		ctx.Response.Reset()
+		ctx.remoteAddr = nil
 		if ctx.s != nil {
 			keepBodyBuffer := !ctx.s.ReduceMemoryUsage
 			ctx.Request.keepBodyBuffer = keepBodyBuffer

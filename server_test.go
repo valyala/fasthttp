@@ -7006,10 +7006,12 @@ func TestServerCustomRemoteAddr(t *testing.T) {
 
 	customRemoteAddrHandler := func(h RequestHandler) RequestHandler {
 		return func(ctx *RequestCtx) {
-			ctx.SetRemoteAddr(&net.TCPAddr{
-				IP:   []byte{1, 2, 3, 5},
-				Port: 0,
-			})
+			if ctx.ConnRequestNum() == 1 {
+				ctx.SetRemoteAddr(&net.TCPAddr{
+					IP:   []byte{1, 2, 3, 5},
+					Port: 0,
+				})
+			}
 			h(ctx)
 		}
 	}
@@ -7024,6 +7026,7 @@ func TestServerCustomRemoteAddr(t *testing.T) {
 
 	rw := &readWriter{}
 	rw.r.WriteString("GET /foo1 HTTP/1.1\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("GET /foo2 HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	rwx := &readWriterRemoteAddr{
 		rw: rw,
@@ -7039,6 +7042,7 @@ func TestServerCustomRemoteAddr(t *testing.T) {
 
 	br := bufio.NewReader(&rw.w)
 	verifyResponse(t, br, 200, "text/html", "requestURI=/foo1, remoteAddr=1.2.3.5:0, remoteIP=1.2.3.5")
+	verifyResponse(t, br, 200, "text/html", "requestURI=/foo2, remoteAddr=1.2.3.4:8765, remoteIP=1.2.3.4")
 }
 
 type readWriterRemoteAddr struct {
