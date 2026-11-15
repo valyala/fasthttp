@@ -3424,6 +3424,44 @@ func TestServerHeadRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestServerAbsoluteTargetHost(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ target, host, parsed string }{
+		{"http://public.example:80/path", "public.example:80", "public.example:80"},
+		{"http://[fe80::1%25eth0]/path", "[fe80::1%25eth0]", "[fe80::1%eth0]"},
+		{"//public.example/path?q=a://b", "internal.example", "internal.example"},
+		{"http://user@/path", "", ""},
+	} {
+		s := &Server{
+			HeaderReceived: func(h *RequestHeader) RequestConfig {
+				if got := string(h.Host()); got != tt.host {
+					t.Errorf("%s: HeaderReceived Host = %q, want %q", tt.target, got, tt.host)
+				}
+				return RequestConfig{}
+			},
+			Handler: func(ctx *RequestCtx) {
+				_ = ctx.Request.RequestURI()
+				ctx.Request.SetRequestURI("/rewritten")
+				if got := string(ctx.Host()); got != tt.parsed {
+					t.Errorf("%s: rewritten Host = %q, want %q", tt.target, got, tt.parsed)
+				}
+			},
+		}
+		rw := &readWriter{}
+		rw.r.WriteString("GET " + tt.target + " HTTP/1.1\r\nHost: internal.example\r\n\r\n")
+		err := s.ServeConn(rw)
+		if tt.host == "" {
+			if !errors.Is(err, ErrorInvalidURI) {
+				t.Errorf("%s: expected invalid URI, got %v", tt.target, err)
+			}
+			verifyResponse(t, bufio.NewReader(&rw.w), StatusBadRequest, string(defaultContentType), "Error when parsing request")
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestServerRejectsBackslashInAbsoluteURI(t *testing.T) {
 	t.Parallel()
 
