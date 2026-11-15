@@ -463,6 +463,8 @@ func TestArgsSetWithKeyFromPeek(t *testing.T) {
 
 	var a Args
 	a.Parse("role=role&other=1&role=admin")
+	// Peek returns the first value's buffer. SetBytesK overwrites it with
+	// "user" before it searches for the second "role" entry.
 	a.SetBytesK(a.Peek("role"), "user")
 	if got := a.String(); got != "role=user&other=1" {
 		t.Fatalf("args after Set = %q", got)

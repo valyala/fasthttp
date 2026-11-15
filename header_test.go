@@ -2096,6 +2096,30 @@ func TestResponseHeaderSetCookie(t *testing.T) {
 	}
 }
 
+func TestResponseHeaderSetCookiePreservesOtherPath(t *testing.T) {
+	t.Parallel()
+
+	var h ResponseHeader
+	const expireAdmin = "sid=; Path=/admin; Max-Age=0"
+	h.Add(HeaderSetCookie, "sid=old; Path=/")
+	h.Add(HeaderSetCookie, expireAdmin)
+
+	var c Cookie
+	c.SetKey("sid")
+	c.SetValue("new")
+	c.SetPath("/")
+	h.SetCookie(&c)
+
+	resp, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(h.Header())), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if got, want := resp.Header.Values(HeaderSetCookie), []string{c.String(), expireAdmin}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Set-Cookie = %q, want %q", got, want)
+	}
+}
+
 func TestResponseHeaderVisitAll(t *testing.T) {
 	t.Parallel()
 
