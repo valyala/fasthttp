@@ -156,6 +156,7 @@ func ServeFileLiteral(ctx *RequestCtx, path string) {
 var (
 	rootFSOnce sync.Once
 	rootFS     = &FS{
+		PathRewrite:        serveFilePathRewrite,
 		Root:               "",
 		AllowEmptyRoot:     true,
 		GenerateIndexPages: true,

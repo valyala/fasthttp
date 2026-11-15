@@ -173,7 +173,7 @@ func (u *URI) SetQueryStringBytes(queryString []byte) {
 
 // Path returns URI path, i.e. /foo/bar of http://aaa.com/foo/bar?baz=123#qwe .
 //
-// The returned path is always urldecoded and normalized,
+// The returned path starts with a slash and is always urldecoded and normalized,
 // i.e. '//f%20obar/baz/../zzz' becomes '/f obar/zzz'.
 //
 // The returned bytes are valid until the next URI method call.
@@ -747,12 +747,18 @@ func removeParentSegments(b, p []byte, sep byte) []byte {
 	return b[:w]
 }
 
+func addLeadingSlash(dst, src []byte) []byte {
+	if len(src) == 0 || src[0] != '/' {
+		dst = append(dst, '/')
+	}
+	return dst
+}
+
 func normalizePath(dst, src []byte) []byte {
 	if len(src) == 1 && src[0] == '/' {
 		return append(dst[:0], '/')
 	}
-	dst = dst[:0]
-	dst = addLeadingSlash(dst, src)
+	dst = addLeadingSlash(dst[:0], src)
 	dst = decodeArgAppendNoPlus(dst, src)
 
 	// remove duplicate slashes
