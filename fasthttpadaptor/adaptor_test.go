@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -149,6 +151,37 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	}
 	if string(resp.Header.Peek("Content-Type")) != expectedContentType {
 		t.Fatalf("unexpected response content-type %q. Expecting %q", string(resp.Header.Peek("Content-Type")), expectedContentType)
+	}
+}
+
+func TestNewFastHTTPHandlerRemovesMultipartFiles(t *testing.T) {
+	t.Parallel()
+
+	var ctx fasthttp.RequestCtx
+	ctx.Request.SetRequestURI("/")
+	ctx.Request.Header.SetMethod(fasthttp.MethodPost)
+	ctx.Request.Header.SetContentType("multipart/form-data; boundary=test")
+	ctx.Request.SetBodyString("--test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\ndata\r\n--test--\r\n")
+
+	var form *multipart.Form
+	NewFastHTTPHandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(0); err != nil {
+			t.Errorf("parse multipart form: %v", err)
+			return
+		}
+		form = r.MultipartForm
+	})(&ctx)
+	if form == nil {
+		t.Fatal("handler did not parse the upload")
+	}
+	t.Cleanup(func() { _ = form.RemoveAll() })
+	file, err := form.File["file"][0].Open()
+	if err == nil {
+		_ = file.Close()
+		t.Fatal("temporary upload still exists after the handler returned")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("opening removed upload: %v", err)
 	}
 }
 
