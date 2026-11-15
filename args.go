@@ -55,9 +55,26 @@ type argsKV struct {
 	noValue bool
 }
 
+const (
+	maxRetainedArgSlots = 256
+	maxRetainedArgBytes = 64 << 10
+)
+
 // Reset clears query args.
 func (a *Args) Reset() {
-	a.args = a.args[:0]
+	if cap(a.args) <= maxRetainedArgSlots {
+		// Deleted and previously used slots still own their buffers.
+		retained := cap(a.buf)
+		for _, kv := range a.args[:cap(a.args)] {
+			retained += cap(kv.key) + cap(kv.value)
+		}
+		if retained <= maxRetainedArgBytes {
+			a.args = a.args[:0]
+			return
+		}
+	}
+	a.args = nil
+	a.buf = nil
 }
 
 // CopyTo copies all args to dst.
@@ -196,12 +213,12 @@ func (a *Args) WriteTo(w io.Writer) (int64, error) {
 
 // Del deletes argument with the given key from query args.
 func (a *Args) Del(key string) {
-	a.args = delAllArgsStable(a.args, key)
+	a.args = delAllArgs(a.args, key)
 }
 
 // DelBytes deletes argument with the given key from query args.
 func (a *Args) DelBytes(key []byte) {
-	a.args = delAllArgsStable(a.args, b2s(key))
+	a.args = delAllArgs(a.args, b2s(key))
 }
 
 // Add adds 'key=value' argument.
@@ -419,7 +436,7 @@ func copyArgs(dst, src []argsKV) []argsKV {
 	return dst
 }
 
-func delAllArgsStable(args []argsKV, key string) []argsKV {
+func delAllArgs(args []argsKV, key string) []argsKV {
 	for i := range args {
 		if key != string(args[i].key) {
 			continue
@@ -437,18 +454,6 @@ func delAllArgsStable(args []argsKV, key string) []argsKV {
 	return args
 }
 
-func delAllArgs(args []argsKV, key string) []argsKV {
-	n := len(args)
-	for i := 0; i < n; i++ {
-		if key == string(args[i].key) {
-			args[i], args[n-1] = args[n-1], args[i]
-			n--
-			i--
-		}
-	}
-	return args[:n]
-}
-
 func setArgBytes(h []argsKV, key, value []byte, noValue bool) []argsKV {
 	return setArg(h, b2s(key), b2s(value), noValue)
 }
@@ -464,7 +469,7 @@ func setArg(h []argsKV, key, value string, noValue bool) []argsKV {
 				kv.value = append(kv.value[:0], value...)
 			}
 			kv.noValue = noValue
-			tail := delAllArgsStable(h[i+1:], b2s(kv.key))
+			tail := delAllArgs(h[i+1:], b2s(kv.key))
 			return h[:i+1+len(tail)]
 		}
 	}

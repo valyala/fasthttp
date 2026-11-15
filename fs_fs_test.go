@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -54,6 +56,51 @@ func TestFSServeFileHead(t *testing.T) {
 	contentLength := resp.Header.ContentLength()
 	if contentLength != len(expectedBody) {
 		t.Fatalf("unexpected Content-Length: %d. expecting %d", contentLength, len(expectedBody))
+	}
+}
+
+type countingOpenFS struct {
+	fs.FS
+
+	opens atomic.Int32
+}
+
+func (f *countingOpenFS) Open(name string) (fs.File, error) {
+	if name == "asset.txt" {
+		f.opens.Add(1)
+	}
+	return f.FS.Open(name)
+}
+
+func TestFSConcurrentCompressedCacheMiss(t *testing.T) {
+	f := &countingOpenFS{FS: fstest.MapFS{"asset.txt": {Data: bytes.Repeat([]byte("asset"), 100000)}}}
+	const requests = 16
+	var ready, done sync.WaitGroup
+	ready.Add(requests)
+	h := (&FS{
+		FS: f, Compress: true, AllowEmptyRoot: true,
+		PathRewrite: func(ctx *RequestCtx) []byte {
+			ready.Done()
+			ready.Wait()
+			return ctx.Path()
+		},
+	}).NewRequestHandler()
+	for range requests {
+		done.Go(func() {
+			var ctx RequestCtx
+			ctx.Init(&Request{}, nil, TestLogger{t})
+			ctx.Request.SetRequestURI("/asset.txt")
+			ctx.Request.Header.SetMethod(MethodHead)
+			ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip")
+			h(&ctx)
+			if ctx.Response.StatusCode() != StatusOK || string(ctx.Response.Header.ContentEncoding()) != "gzip" {
+				t.Errorf("unexpected response headers: %s", &ctx.Response.Header)
+			}
+		})
+	}
+	done.Wait()
+	if n := f.opens.Load(); n != 1 {
+		t.Errorf("opened asset.txt %d times for compression, want 1", n)
 	}
 }
 
@@ -1260,10 +1307,8 @@ func TestFSPathRewriteRejectsDotDotSegments(t *testing.T) {
 	}
 }
 
-// On Windows a '\' also separates path components. ctx.Path()'s normalization
-// rewrites some backslash '..' sequences (`\..\`, `/..\`), but a `\../` segment
-// survives it, so without the guard filepath.FromSlash later turns it into a
-// real parent-directory jump outside Root.
+// Windows accepts both slashes as separators. Mixed parent segments must
+// stay inside the file server root.
 // See https://github.com/valyala/fasthttp/issues/1691.
 func TestFSServeRejectsBackslashDotDotSegments(t *testing.T) {
 	if filepath.Separator != '\\' {
@@ -1306,8 +1351,8 @@ func TestFSServeRejectsBackslashDotDotSegments(t *testing.T) {
 
 			h(&ctx)
 
-			if ctx.Response.StatusCode() != StatusInternalServerError {
-				t.Fatalf("unexpected status code for %q: %d. Expecting %d", uri, ctx.Response.StatusCode(), StatusInternalServerError)
+			if ctx.Response.StatusCode() != StatusNotFound {
+				t.Fatalf("unexpected status code for %q: %d. Expecting %d", uri, ctx.Response.StatusCode(), StatusNotFound)
 			}
 			if bytes.Contains(ctx.Response.Body(), []byte("TOP_SECRET")) {
 				t.Fatalf("unexpected secret disclosure for %q", uri)

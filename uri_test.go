@@ -213,6 +213,7 @@ func TestURIUpdate(t *testing.T) {
 	testURIUpdate(t, "http://example.net/", "//example.com:8080/", "http://example.com:8080/")
 
 	// "//" that isn't preceded by a scheme stays part of the reference
+	testURIUpdate(t, "http://example.net/dir/path1.html", "://example.com/b", "http://example.net/dir/:/example.com/b")
 	testURIUpdate(t, "http://example.net/dir/path1.html", "https//example.com/x", "http://example.net/dir/https/example.com/x")
 	testURIUpdate(t, "http://example.net/dir/path1.html", "a//b", "http://example.net/dir/a/b")
 	testURIUpdate(t, "http://example.net/dir/path1.html", "/a//b", "http://example.net/a/b")
@@ -536,6 +537,15 @@ func TestURINoNormalization(t *testing.T) {
 	u.DisablePathNormalizing = true
 	if string(u.RequestURI()) != irregularPath {
 		t.Fatalf("Unexpected path %q. Expected %q.", u.Path(), irregularPath)
+	}
+
+	u.SetHost("upstream.internal")
+	u.SetPath(".evil.example/path")
+	if got := string(u.RequestURI()); got != ".evil.example/path" {
+		t.Fatalf("unexpected request target %q", got)
+	}
+	if got := u.String(); got != "http://upstream.internal/.evil.example/path" {
+		t.Fatalf("unexpected full URI %q", got)
 	}
 }
 

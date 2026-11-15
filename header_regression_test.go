@@ -152,6 +152,25 @@ func TestResponseBodyStatusKeepsContentLength(t *testing.T) {
 	}
 }
 
+func TestResponseStatusBelow100KeepsBodyFraming(t *testing.T) {
+	t.Parallel()
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(strings.NewReader("HTTP/1.1 099 X\r\nContent-Length: 5\r\n\r\nhello"))); err != nil {
+		t.Fatal(err)
+	}
+	if s := resp.String(); !strings.Contains(s, "\r\nContent-Length: 5\r\n") || !strings.HasSuffix(s, "\r\n\r\nhello") {
+		t.Errorf("forwarded response lost its body framing: %q", s)
+	}
+
+	resp.Reset()
+	resp.SetStatusCode(-1)
+	resp.SetBodyStream(strings.NewReader("hello"), -1)
+	if s := resp.String(); !strings.Contains(s, "\r\nTransfer-Encoding: chunked\r\n") || !strings.HasSuffix(s, "\r\n\r\n5\r\nhello\r\n0\r\n\r\n") {
+		t.Errorf("streamed response lost its body framing: %q", s)
+	}
+}
+
 func TestIssue6RequestHeaderSetContentType(t *testing.T) {
 	t.Parallel()
 

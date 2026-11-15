@@ -64,45 +64,9 @@ func (rs *requestStream) read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 
-	var (
-		n   int
-		err error
-	)
 	contentLength := rs.contentLength
 	if contentLength == -1 {
-		if rs.chunkLeft == 0 {
-			chunkSize, err := parseChunkSize(rs.reader, &rs.chunkOverhead)
-			if err != nil {
-				// The peer closed before the last chunk, so the body is truncated.
-				if err == io.EOF {
-					err = io.ErrUnexpectedEOF
-				}
-				return 0, err
-			}
-			if chunkSize == 0 {
-				err = rs.header.ReadTrailer(rs.reader)
-				if err != nil {
-					if err == io.EOF {
-						return 0, ErrBrokenChunk{error: io.ErrUnexpectedEOF}
-					}
-					return 0, err
-				}
-				rs.eof = true
-				return 0, io.EOF
-			}
-			rs.chunkLeft = chunkSize
-		}
-		bytesToRead := min(rs.chunkLeft, len(p))
-		n, err = rs.reader.Read(p[:bytesToRead])
-		rs.totalBytesRead += n
-		rs.chunkLeft -= n
-		if err == io.EOF {
-			err = io.ErrUnexpectedEOF
-		}
-		if err == nil && rs.chunkLeft == 0 {
-			err = readCrLf(rs.reader)
-		}
-		return n, err
+		return rs.readChunked(p)
 	}
 	if rs.totalBytesRead == contentLength {
 		rs.eof = true
@@ -126,7 +90,7 @@ func (rs *requestStream) read(p []byte) (int, error) {
 	if left > 0 && len(p) > left {
 		p = p[:left]
 	}
-	n, err = rs.reader.Read(p)
+	n, err := rs.reader.Read(p)
 	rs.totalBytesRead += n
 	if err == io.EOF && rs.strictEOF && contentLength >= 0 && rs.totalBytesRead < contentLength {
 		err = io.ErrUnexpectedEOF
@@ -143,6 +107,65 @@ func (rs *requestStream) read(p []byte) (int, error) {
 		err = io.EOF
 	}
 	return n, err
+}
+
+func (rs *requestStream) readChunked(p []byte) (int, error) {
+	var n int
+	for {
+		if rs.chunkLeft == 0 {
+			chunkSize, err := parseChunkSize(rs.reader, &rs.chunkOverhead)
+			if err != nil {
+				// The peer closed before the last chunk, so the body is truncated.
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
+				return n, err
+			}
+			if chunkSize == 0 {
+				err = rs.header.ReadTrailer(rs.reader)
+				if err != nil {
+					if err == io.EOF {
+						return n, ErrBrokenChunk{error: io.ErrUnexpectedEOF}
+					}
+					return n, err
+				}
+				rs.eof = true
+				return n, io.EOF
+			}
+			rs.chunkLeft = chunkSize
+		}
+		if n > 0 {
+			// Return the data we have before a read of the next payload
+			// or its closing CRLF would have to wait for the peer.
+			buffered := rs.reader.Buffered()
+			if buffered == 0 || (buffered >= rs.chunkLeft && buffered-rs.chunkLeft < 2) {
+				return n, nil
+			}
+		}
+		bytesToRead := min(rs.chunkLeft, len(p)-n)
+		nn, err := rs.reader.Read(p[n : n+bytesToRead])
+		n += nn
+		rs.totalBytesRead += nn
+		rs.chunkLeft -= nn
+		if err == io.EOF {
+			err = io.ErrUnexpectedEOF
+		}
+		if err == nil && rs.chunkLeft == 0 {
+			err = readCrLf(rs.reader)
+		}
+		if err != nil || rs.chunkLeft > 0 || n == len(p) || !rs.bufferedChunkHeader() {
+			return n, err
+		}
+	}
+}
+
+// bufferedChunkHeader reports whether parseChunkSize can read the next size
+// without waiting. Leave the zero chunk for the next Read because its trailers
+// may still be on the way.
+func (rs *requestStream) bufferedChunkHeader() bool {
+	b, _ := rs.reader.Peek(rs.reader.Buffered())
+	b = bytes.TrimLeft(b, "0")
+	return len(b) > 0 && hex2intTable[b[0]] < 16 && bytes.IndexByte(b, '\n') >= 0
 }
 
 // truncated reports whether a fixed-length body ended before Content-Length

@@ -15,6 +15,8 @@ import (
 )
 
 // ConvertRequest converts a fasthttp.Request to an http.Request.
+// A successful conversion overwrites r, preserving its context.
+// The caller must clean up any previous multipart form files before reusing r.
 // forServer should be set to true when the http.Request is going to be passed to a http.Handler.
 //
 // The http.Request must not be used after the fasthttp handler has returned!
@@ -33,6 +35,10 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 		return err
 	}
 
+	// Reuse the header map and transfer encoding storage, but discard parsed
+	// forms, routing state and other data from the previous request.
+	fresh := http.Request{Header: r.Header, TransferEncoding: r.TransferEncoding[:0]}
+	*r = *fresh.WithContext(r.Context())
 	r.Method = b2s(ctx.Method())
 	// net/http spells the HTTP/2 version "HTTP/2.0", and its minor version is 0.
 	switch r.Proto = b2s(ctx.Request.Header.Protocol()); r.Proto {
@@ -86,8 +92,7 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 
 	// net/http keeps trailers in Request.Trailer, out of the header map. All()
 	// above is the header section; the trailer section comes from
-	// TrailerHeader(), and a reused request must not keep old trailers.
-	r.Trailer = nil
+	// TrailerHeader().
 	if keys := ctx.Request.Header.PeekTrailerKeys(); len(keys) > 0 {
 		r.Trailer = make(http.Header, len(keys))
 		for _, k := range keys {
@@ -163,9 +168,8 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // like net/http does, instead of the origin-form "/" that would name no
 // authority to tunnel to. Such an opaque target is written as it is, so it
 // carries neither the scheme nor the query that r.URL.RequestURI would add.
-// A CONNECT target keeps its form when req.URI() is accessed later, as
-// fasthttp.Client does, since fasthttp rebuilds the target of a CONNECT
-// request without path normalization.
+// A bare CONNECT authority keeps its form when req.URI() is accessed later,
+// as fasthttp.Client does. Targets with paths follow normal path normalization.
 //
 // An absolute-form target is kept as it is too, whatever its scheme, so a
 // request written with req.Write to a proxy keeps naming the authority it
@@ -181,6 +185,10 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 // sets a scheme other than http or clears URL credentials, so req.Write may
 // then write a normalized target, like fasthttp.Client always does unless
 // its DisablePathNormalizing option is set.
+//
+// For repeated Content-Type and User-Agent fields, the conversion keeps the
+// first value, matching http.Header.Get. Repeated Connection fields are joined
+// into a comma-separated list unless r.Close overrides the header.
 //
 // When r.Header carries no Content-Type entry, the default Content-Type
 // fasthttp writes for requests (application/octet-stream) is disabled on req
@@ -249,7 +257,7 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 	if r.RequestURI != "" {
 		target = r.RequestURI
 		if r.Method == http.MethodConnect && target[0] != '/' && !targetIsAbsoluteForm(target) {
-			if at := strings.LastIndexByte(target, '@'); at >= 0 {
+			if at := authorityUserinfoEnd(target); at >= 0 {
 				target = target[at+1:]
 			}
 		}
@@ -263,6 +271,8 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 			}
 		}
 	}
+	// net/http treats a raw # in a request target as path or query data.
+	target = strings.ReplaceAll(target, "#", "%23")
 	restoreTarget := targetIsAbsoluteForm(target) && !targetHasUserinfo(target)
 	if target != "" {
 		req.SetRequestURI(target)
@@ -272,6 +282,20 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 		req.Header.SetNoDefaultContentType(true)
 	}
 
+	// Announce trailers before copying headers so each announcement does not
+	// have to scan the header block for values to move.
+	hasBody := r.Body != nil && r.Body != http.NoBody
+
+	var trailerKeys []string
+	if hasBody {
+		for k := range r.Trailer {
+			if req.Header.AddTrailer(k) != nil {
+				continue
+			}
+			trailerKeys = append(trailerKeys, k)
+		}
+	}
+
 	for k, values := range r.Header {
 		if strings.EqualFold(k, fasthttp.HeaderHost) ||
 			strings.EqualFold(k, fasthttp.HeaderContentLength) ||
@@ -279,23 +303,23 @@ func ConvertNetHTTPRequestToFastHTTPRequest(r *http.Request, req *fasthttp.Reque
 			strings.EqualFold(k, fasthttp.HeaderTrailer) {
 			continue
 		}
+		if len(values) > 1 {
+			switch {
+			case strings.EqualFold(k, fasthttp.HeaderContentType), strings.EqualFold(k, fasthttp.HeaderUserAgent):
+				values = values[:1]
+			case strings.EqualFold(k, fasthttp.HeaderConnection):
+				req.Header.Set(k, strings.Join(values, ", "))
+				continue
+			}
+		}
 		for _, v := range values {
 			req.Header.Add(k, v)
 		}
 	}
 
-	hasBody := r.Body != nil && r.Body != http.NoBody
-
-	var trailerKeys []string
-	if hasBody {
-		for k, values := range r.Trailer {
-			if req.Header.AddTrailer(k) != nil {
-				continue
-			}
-			trailerKeys = append(trailerKeys, k)
-			if len(values) > 0 {
-				req.Header.Set(k, strings.Join(values, ", "))
-			}
+	for _, k := range trailerKeys {
+		if values := r.Trailer[k]; len(values) > 0 {
+			req.Header.Set(k, strings.Join(values, ", "))
 		}
 	}
 
@@ -397,10 +421,15 @@ func targetHasUserinfo(target string) bool {
 	if !ok {
 		return false
 	}
+	return authorityUserinfoEnd(authority) >= 0
+}
+
+// authorityUserinfoEnd returns the last @ before the path, query or fragment.
+func authorityUserinfoEnd(authority string) int {
 	if j := strings.IndexAny(authority, "/?#"); j >= 0 {
 		authority = authority[:j]
 	}
-	return strings.IndexByte(authority, '@') >= 0
+	return strings.LastIndexByte(authority, '@')
 }
 
 // errBodyTooLong is returned from a body read once the attached body turns

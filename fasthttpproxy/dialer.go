@@ -80,6 +80,7 @@ type Dialer struct {
 
 // GetDialFunc method returns a fasthttp-style dial function. The useEnv parameter
 // determines whether the proxy address comes from Dialer.Config or from environment variables.
+// An unparseable proxy address in Dialer.Config returns an error.
 //
 // The returned DialFunc cannot observe the request scheme. When HTTPProxy and
 // HTTPSProxy differ, it assumes port 443 is HTTPS and every other port is HTTP.
@@ -92,6 +93,7 @@ func (d *Dialer) GetDialFunc(useEnv bool) (fasthttp.DialFunc, error) {
 // GetDialFuncForTLS returns a fasthttp-style dial function that selects
 // HTTPProxy or HTTPSProxy from isTLS instead of inferring the scheme from the
 // destination port. The isTLS value should match fasthttp.HostClient.IsTLS.
+// An unparseable address for the selected proxy in Dialer.Config returns an error.
 func (d *Dialer) GetDialFuncForTLS(useEnv, isTLS bool) (fasthttp.DialFunc, error) {
 	scheme := httpScheme
 	if isTLS {
@@ -100,10 +102,29 @@ func (d *Dialer) GetDialFuncForTLS(useEnv, isTLS bool) (fasthttp.DialFunc, error
 	return d.getDialFunc(useEnv, scheme)
 }
 
+// httpproxy silently ignores an address if neither URL form parses.
+func validProxyAddress(addr string) bool {
+	if addr == "" {
+		return true
+	}
+	if _, err := url.Parse(addr); err == nil {
+		return true
+	}
+	_, err := url.Parse("http://" + addr)
+	return err == nil
+}
+
 func (d *Dialer) getDialFunc(useEnv bool, scheme string) (fasthttp.DialFunc, error) {
 	config := &d.Config
 	if useEnv {
 		config = httpproxy.FromEnvironment()
+	} else {
+		if scheme != httpsScheme && !validProxyAddress(config.HTTPProxy) {
+			return nil, errors.New("proxy: invalid HTTP proxy address")
+		}
+		if scheme != httpScheme && !validProxyAddress(config.HTTPSProxy) {
+			return nil, errors.New("proxy: invalid HTTPS proxy address")
+		}
 	}
 	proxyURLIsStatic := config.NoProxy == "" &&
 		(scheme != "" || config.HTTPSProxy == config.HTTPProxy)

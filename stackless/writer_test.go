@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -174,5 +175,30 @@ func TestWriterHighLoad(t *testing.T) {
 	got, err := io.ReadAll(r)
 	if err != nil || string(got) != "second stream" {
 		t.Fatalf("decoded %q, %v; want only the second stream", got, err)
+	}
+}
+
+func TestWrappedWriterFinalizer(t *testing.T) {
+	finalized := make(chan struct{})
+	w := NewWriter(io.Discard, func(dst io.Writer) Writer {
+		zw := gzip.NewWriter(dst)
+		runtime.SetFinalizer(zw, func(*gzip.Writer) { close(finalized) })
+		return zw
+	})
+	w.Reset(io.Discard)
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.After(5 * time.Second)
+	for {
+		runtime.GC()
+		select {
+		case <-finalized:
+			return
+		case <-deadline:
+			t.Fatal("wrapped writer finalizer did not run")
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }

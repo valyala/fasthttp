@@ -117,10 +117,10 @@ func TestResponseHeaderFirstLineSettersSanitizeNewlines(t *testing.T) {
 	}
 }
 
-func TestResponseHeaderKeySettersSanitizeNewlines(t *testing.T) {
+func TestResponseHeaderKeySettersSanitizeDelimiters(t *testing.T) {
 	t.Parallel()
 
-	const badKey = "X-Foo\r\nInjected: true"
+	const badKey = "Set-Cookie: session=evil\r\nInjected: true"
 
 	testCases := []struct {
 		name string
@@ -141,17 +141,17 @@ func TestResponseHeaderKeySettersSanitizeNewlines(t *testing.T) {
 			h.SetContentLength(0)
 			tc.set(&h)
 
-			if bytes.Contains(h.Header(), []byte("\r\nInjected:")) {
-				t.Fatalf("header key injection reached the wire in %q", h.Header())
+			if wire := h.Header(); bytes.Contains(wire, []byte("\r\nInjected")) || bytes.Contains(wire, []byte("\r\nSet-Cookie:")) {
+				t.Fatalf("header key injection reached the wire in %q", wire)
 			}
 		})
 	}
 }
 
-func TestRequestHeaderKeySettersSanitizeNewlines(t *testing.T) {
+func TestRequestHeaderKeySettersSanitizeDelimiters(t *testing.T) {
 	t.Parallel()
 
-	const badKey = "X-Foo\r\nInjected: true"
+	const badKey = "Set-Cookie: session=evil\r\nInjected: true"
 
 	testCases := []struct {
 		name string
@@ -173,8 +173,8 @@ func TestRequestHeaderKeySettersSanitizeNewlines(t *testing.T) {
 			h.SetHost("example.com")
 			tc.set(&h)
 
-			if bytes.Contains(h.Header(), []byte("\r\nInjected:")) {
-				t.Fatalf("header key injection reached the wire in %q", h.Header())
+			if wire := h.Header(); bytes.Contains(wire, []byte("\r\nInjected")) || bytes.Contains(wire, []byte("\r\nSet-Cookie:")) {
+				t.Fatalf("header key injection reached the wire in %q", wire)
 			}
 		})
 	}
@@ -217,10 +217,12 @@ func TestNormalizeHeaderKey(t *testing.T) {
 		{key: "", normalized: "", raw: ""},
 		{key: "content-TYPE", normalized: "Content-Type", raw: "content-TYPE"},
 		{key: "-x--forwarded-", normalized: "-X--Forwarded-", raw: "-x--forwarded-"},
-		// An invalid key is not normalized, but its CR and LF are neutralised.
+		// Invalid keys preserve case and internal spaces.
+		{key: "Set-Cookie:", normalized: "Set-Cookie_", raw: "Set-Cookie_"},
+		{key: "\t foo \t", normalized: "_ foo _", raw: "_ foo _"},
 		{key: "x foo", normalized: "x foo", raw: "x foo"},
-		{key: "x-foo\r\nInjected: yes", normalized: "x-foo  Injected: yes", raw: "x-foo  Injected: yes"},
-		{key: "x\n", normalized: "x ", raw: "x "},
+		{key: "x-foo\r\nInjected: yes", normalized: "x-foo  Injected_ yes", raw: "x-foo  Injected_ yes"},
+		{key: "x\n", normalized: "x_", raw: "x_"},
 	}
 	for _, tc := range testCases {
 		for _, disableNormalizing := range []bool{false, true} {
@@ -299,7 +301,7 @@ func TestIssue1808(t *testing.T) {
 		"WithTabs: \t v1 \t\r\n" + // "v1"
 		"WithTabs-Start: \t \t v1 \r\n" + // "v1"
 		"WithTabs-End: v1 \t \t\t\t\r\n" + // "v1"
-		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n" + // "v1 \t; v2 \t; v3"
+		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n \r\n\t\r\n" + // "v1 \t; v2 \t; v3"
 		"\r\n"
 
 	resHeader := new(ResponseHeader)
@@ -324,7 +326,7 @@ func TestIssue1808(t *testing.T) {
 		"WithTabs: \t v1 \t\r\n" + // "v1"
 		"WithTabs-Start: \t \t v1 \r\n" + // "v1"
 		"WithTabs-End: v1 \t \t\t\t\r\n" + // "v1"
-		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n" + // "v1 \t; v2 \t; v3"
+		"WithTabs-Multi-Line: \t v1 \t;\r\n \t v2 \t;\r\n\t v3\r\n \r\n\t\r\n" + // "v1 \t; v2 \t; v3"
 		"\r\n"
 
 	reqHeader := new(RequestHeader)
@@ -2799,6 +2801,38 @@ func equalCookie(c1, c2 *Cookie) bool {
 	return true
 }
 
+func TestRequestHeaderCompactRepeatedFields(t *testing.T) {
+	t.Parallel()
+
+	raw := "GET / HTTP/1.1\r\nHost: h\r\n" +
+		"Cookie: a=1\r\nX-Order: first\r\nConnection:\r\n" +
+		"Cookie:\r\nConnection: close, TE\r\nCookie: b=2\r\n" +
+		"Connection:\r\nX-Order: second\r\nConnection: upgrade\r\n\r\n"
+	var h RequestHeader
+	if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatal(err)
+	}
+	h.ResetConnectionClose()
+	if h.ConnectionClose() {
+		t.Fatal("close option survived reset")
+	}
+	var cookies []string
+	for key, value := range h.Cookies() {
+		cookies = append(cookies, string(key)+"="+string(value))
+	}
+	if got := strings.Join(cookies, "; "); got != "a=1; b=2" {
+		t.Fatalf("Cookie = %q, want a=1; b=2", got)
+	}
+	// Reuse a removed slot before checking the surviving fields.
+	h.Add("X-New", "after")
+	if got := string(bytes.Join(h.PeekAll(HeaderConnection), []byte(","))); got != "TE,upgrade" {
+		t.Fatalf("Connection = %q, want TE,upgrade", got)
+	}
+	if got := string(bytes.Join(h.PeekAll("X-Order"), []byte(","))); got != "first,second" {
+		t.Fatalf("X-Order = %q, want first,second", got)
+	}
+}
+
 func TestRequestHeaderCookie(t *testing.T) {
 	t.Parallel()
 
@@ -4138,8 +4172,8 @@ func TestRequestHeaderReadSuccess(t *testing.T) {
 		123, "/aa", "aa.com", "", "abd/test")
 
 	// request uri with hostname
-	testRequestHeaderReadSuccess(t, h, "GET http://gooGle.com/foO/%20bar?xxx#aaa HTTP/1.1\r\nHost: aa.cOM\r\n\r\ntrail",
-		-2, "http://gooGle.com/foO/%20bar?xxx#aaa", "aa.cOM", "", "")
+	testRequestHeaderReadSuccess(t, h, "GET http://gooGle.com/foO/%20bar?xxx%23aaa HTTP/1.1\r\nHost: aa.cOM\r\n\r\ntrail",
+		-2, "http://gooGle.com/foO/%20bar?xxx%23aaa", "aa.cOM", "", "")
 
 	// blank lines before the first line
 	testRequestHeaderReadSuccess(t, h, "\r\n\n\r\nGET /aaa HTTP/1.1\r\nHost: aaa.com\r\n\r\nsss",
@@ -5176,46 +5210,90 @@ func TestRequestHeaderFoldedRawCapacityIsBounded(t *testing.T) {
 	}
 }
 
-func TestRequestHeaderAllInOrderBareLFTerminator(t *testing.T) {
+func TestRequestHeaderAllInOrderFolded(t *testing.T) {
 	t.Parallel()
 
-	// A block ended by a bare LF is accepted when a CRLFCRLF follows in the
-	// buffer; AllInOrder iterates its fields like any other block's.
-	var req Request
-	br := bufio.NewReader(bytes.NewBufferString("GET / HTTP/1.1\r\nHost: a\r\nX: y\n\nGET /x HTTP/1.1\r\nHost: b\r\n\r\n"))
-	if err := req.Read(br); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	var got []string
-	for k, v := range req.Header.AllInOrder() {
-		got = append(got, string(k)+"="+string(v))
-	}
-	if s := strings.Join(got, ","); s != "Host=a,X=y" {
-		t.Fatalf("AllInOrder yielded %q, expecting Host=a,X=y", s)
+	for _, ending := range []string{"\r\n\r\n", "\n\r\n", "\n\n"} {
+		t.Run(fmt.Sprintf("%q", ending), func(t *testing.T) {
+			raw := "Host: a\r\nX: y\r\n continued\r\nX-Internal-User: admin" + ending
+			// The pipelined request supplies a CRLFCRLF after a bare-LF ending.
+			wire := "GET / HTTP/1.1\r\n" + raw + "GET /x HTTP/1.1\r\nHost: b\r\n\r\n"
+			var req Request
+			if err := req.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+				t.Fatal(err)
+			}
+
+			for range 2 {
+				var got []string
+				for k, v := range req.Header.AllInOrder() {
+					got = append(got, string(k)+"="+string(v))
+				}
+				if s := strings.Join(got, ","); s != "Host=a,X=y continued,X-Internal-User=admin" {
+					t.Fatalf("unexpected fields from AllInOrder: %q", s)
+				}
+				if s := string(req.Header.RawHeaders()); s != raw {
+					t.Fatalf("RawHeaders changed: got %q, want %q", s, raw)
+				}
+			}
+		})
 	}
 }
 
 func TestRequestHeaderTrickledParseStaysLinear(t *testing.T) {
+	var h RequestHeader
+	testTrickledParseStaysLinear(t, "GET / HTTP/1.1\r\nHost: x\r\n", false, h.Read)
+}
+
+func TestTrickledHeadersWithLeadingEmptyLines(t *testing.T) {
+	var req RequestHeader
+	var resp ResponseHeader
+	for _, tc := range []struct {
+		name, prefix string
+		read         func(*bufio.Reader) error
+	}{
+		{"request", "GET / HTTP/1.1\r\nHost: x\r\n", req.Read},
+		{"response", "HTTP/1.1 200 OK\r\n", resp.Read},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testTrickledParseStaysLinear(t, tc.prefix, true, tc.read)
+		})
+	}
+}
+
+func TestTrailerTrickledParseStaysLinear(t *testing.T) {
+	var h RequestHeader
+	testTrickledParseStaysLinear(t, "", false, func(r *bufio.Reader) error {
+		h.Reset()
+		return h.ReadTrailer(r)
+	})
+}
+
+func testTrickledParseStaysLinear(t *testing.T, prefix string, leadingEmptyLines bool, read func(*bufio.Reader) error) {
+	t.Helper()
+
 	// A peer delivering the block a byte at a time must not make every
 	// retry rescan the whole block for the terminator. Compare the cost of
 	// two sizes rather than absolute time.
 	wire := func(target int) []byte {
 		w := make([]byte, 0, target+64)
-		w = append(w, "GET / HTTP/1.1\r\nHost: x\r\n"...)
+		if leadingEmptyLines {
+			w = append(w, strings.Repeat("\n", target/2)...)
+			w = append(w, "\r\n\r\n"...)
+		}
+		w = append(w, prefix...)
 		for len(w) < target {
 			w = append(w, "X-Header-Name: some ordinary header value here\r\n"...)
 		}
 		return append(w, "\r\n"...)
 	}
 	parse := func(b []byte, iterations int) time.Duration {
-		var h RequestHeader
 		dr := &dripTestReader{data: b}
 		br := bufio.NewReaderSize(dr, 65536)
 		start := time.Now()
 		for range iterations {
 			dr.pos = 0
 			br.Reset(dr)
-			if err := h.Read(br); err != nil {
+			if err := read(br); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		}
@@ -6321,5 +6399,40 @@ func TestResponseHeaderTransferEncodingOnWire(t *testing.T) {
 				t.Fatalf("Transfer-Encoding on wire = %t, want %t:\n%s", got, want, wire)
 			}
 		})
+	}
+}
+
+func TestRepeatedAddTrailerAllocations(t *testing.T) {
+	var h ResponseHeader
+	names := make([]string, 2*trailerSetMin)
+	for i := range names {
+		names[i] = fmt.Sprintf("X-T%d", i)
+		if err := h.AddTrailer(names[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	allocs := testing.AllocsPerRun(10, func() {
+		for _, name := range names {
+			if err := h.AddTrailer(name); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("re-announcing existing trailer names made %.0f allocations, want 0", allocs)
+	}
+
+	var dst ResponseHeader
+	h.CopyTo(&dst)
+	if err := h.SetTrailer(strings.Join(names[1:], ",")); err != nil {
+		t.Fatal(err)
+	}
+	h.Set(names[0], "upfront")
+	dst.Set(names[0], "trailing")
+	if got := h.PeekTrailer(names[0]); got != nil {
+		t.Fatalf("removed trailer = %q", got)
+	}
+	if got := dst.PeekTrailer(names[0]); string(got) != "trailing" {
+		t.Fatalf("copied trailer = %q", got)
 	}
 }

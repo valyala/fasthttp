@@ -103,6 +103,27 @@ func (r *closeTrackingReader) Close() error {
 func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 	t.Parallel()
 
+	t.Run("literal hash in request target", func(t *testing.T) {
+		const target = "/p#x?q=a#b&escaped=%23"
+		const want = "/p%23x?q=a%23b&escaped=%23"
+		r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+			"GET " + target + " HTTP/1.1\r\nHost: example.com\r\n\r\n")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, raw := range []string{target, ""} {
+			r.RequestURI = raw
+			var req fasthttp.Request
+			ConvertNetHTTPRequestToFastHTTPRequest(r, &req)
+			if got := string(req.Header.RequestURI()); got != want {
+				t.Errorf("RequestURI %q: header target %q, want %q", raw, got, want)
+			}
+			if got := string(req.URI().RequestURI()); got != want {
+				t.Errorf("RequestURI %q: parsed target %q, want %q", raw, got, want)
+			}
+		}
+	})
+
 	t.Run("basic conversion", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{
@@ -298,6 +319,38 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 			t.Errorf("expected no userinfo in the request target, got:\n%s", wire)
 		}
 	})
+
+	for _, suffix := range []string{"?@internal.example:22", "/@internal.example:22"} {
+		t.Run("CONNECT with @ outside authority "+suffix, func(t *testing.T) {
+			t.Parallel()
+			const host = "allowed.example:443"
+			target := host + suffix
+			for _, userinfo := range []string{"", "user:pass@"} {
+				r, err := http.ReadRequest(bufio.NewReader(strings.NewReader(
+					"CONNECT " + userinfo + target + " HTTP/1.1\r\nHost: " + host + "\r\n\r\n")))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if r.URL.Host != host {
+					t.Fatalf("net/http parsed host %q, want %q", r.URL.Host, host)
+				}
+				var req fasthttp.Request
+				ConvertNetHTTPRequestToFastHTTPRequest(r, &req)
+				want := target
+				if userinfo != "" {
+					// Moving credentials to Authorization parses and normalizes the URI.
+					want = "/" + target
+				}
+				if wire := req.String(); !strings.HasPrefix(wire, "CONNECT "+want+" HTTP/1.1\r\n") {
+					t.Errorf("expected target %q, got:\n%s", want, wire)
+				}
+				req.URI()
+				if wire := req.String(); !strings.HasPrefix(wire, "CONNECT /"+target+" HTTP/1.1\r\n") {
+					t.Errorf("expected normalized target %q, got:\n%s", "/"+target, wire)
+				}
+			}
+		})
+	}
 
 	t.Run("explicit Authorization header wins over CONNECT authority-form target credentials", func(t *testing.T) {
 		t.Parallel()
@@ -1948,6 +2001,35 @@ func TestConvertNetHTTPRequestToFastHTTPRequest(t *testing.T) {
 		}
 	})
 
+	t.Run("repeated special headers", func(t *testing.T) {
+		in, err := http.ReadRequest(bufio.NewReader(strings.NewReader("GET / HTTP/1.1\r\n" +
+			"Host: example.org\r\nContent-Type: application/json\r\nContent-Type: text/plain\r\n" +
+			"User-Agent: first\r\nUser-Agent: second\r\nConnection: X-One\r\nConnection: X-Two\r\n\r\n")))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var req fasthttp.Request
+		ConvertNetHTTPRequestToFastHTTPRequest(in, &req)
+		var wire bytes.Buffer
+		if _, err := req.WriteTo(&wire); err != nil {
+			t.Fatal(err)
+		}
+		out, err := http.ReadRequest(bufio.NewReader(&wire))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for k, want := range map[string]string{
+			"Content-Type": in.Header.Get("Content-Type"),
+			"User-Agent":   in.UserAgent(),
+			"Connection":   "X-One, X-Two",
+		} {
+			if got := out.Header.Values(k); len(got) != 1 || got[0] != want {
+				t.Errorf("%s = %q, want [%q]", k, got, want)
+			}
+		}
+	})
+
 	t.Run("explicit Content-Type is preserved", func(t *testing.T) {
 		t.Parallel()
 		httpReq := &http.Request{
@@ -2215,8 +2297,7 @@ func TestConvertRequestCarriesTrailers(t *testing.T) {
 	}
 }
 
-// A reused destination request must not inherit its predecessor's trailers.
-func TestConvertRequestResetsTrailerOnReuse(t *testing.T) {
+func TestConvertRequestResetsDestinationOnReuse(t *testing.T) {
 	t.Parallel()
 
 	ctx := &fasthttp.RequestCtx{}
@@ -2227,21 +2308,40 @@ func TestConvertRequestResetsTrailerOnReuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx.Request.Header.Set("X-T", "first")
+	ctx.Request.Header.SetContentType("application/x-www-form-urlencoded")
+	ctx.Request.SetBodyString("user=first")
 
-	var r http.Request
-	if err := ConvertRequest(ctx, &r, true); err != nil {
+	r := new(http.Request).WithContext(t.Context())
+	if err := ConvertRequest(ctx, r, true); err != nil {
 		t.Fatal(err)
 	}
 	if got := r.Trailer.Get("X-T"); got != "first" {
 		t.Fatalf("Trailer[X-T] = %q, want first", got)
 	}
 
+	if got := r.PostFormValue("user"); got != "first" {
+		t.Fatalf("PostFormValue(user) = %q, want first", got)
+	}
+	r.SetPathValue("id", "first")
+
 	plain := &fasthttp.RequestCtx{}
 	plain.Request.Header.SetMethod(fasthttp.MethodGet)
-	plain.Request.SetRequestURI("/")
+	plain.Request.SetRequestURI("/?user=second")
 	plain.Request.Header.SetHost("example.com")
-	if err := ConvertRequest(plain, &r, true); err != nil {
+	if err := ConvertRequest(plain, r, false); err != nil {
 		t.Fatal(err)
+	}
+	if got := r.FormValue("user"); got != "second" {
+		t.Errorf("FormValue(user) = %q, want second", got)
+	}
+	if got := r.PostFormValue("user"); got != "" {
+		t.Errorf("PostFormValue(user) = %q, want empty", got)
+	}
+	if r.PathValue("id") != "" || r.RequestURI != "" {
+		t.Errorf("outgoing request retained path value %q or RequestURI %q", r.PathValue("id"), r.RequestURI)
+	}
+	if r.Context() != t.Context() {
+		t.Error("caller context lost on reuse")
 	}
 	if r.Trailer != nil {
 		t.Fatalf("Trailer = %v after a trailer-free request, want nil", r.Trailer)
