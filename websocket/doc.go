@@ -7,10 +7,11 @@
 //
 // [Conn] methods take a context for cancellation and deadlines. A read or
 // write that is cancelled or times out closes the connection, since the frame
-// stream cannot be resumed. Cancelling or timing out while waiting for another
-// call to finish does not, unless it leaves a message from [Conn.Writer] half
-// sent. ReadTimeout and WriteTimeout in the options bound each read and frame
-// write without wrapping each context; see [AcceptOptions].
+// stream cannot be resumed. One that gives up before its operation starts,
+// while waiting for another call, leaves it open; a read with a Pong to send
+// and a [Conn.Writer] with part of its message sent have started. ReadTimeout
+// and WriteTimeout in the options bound each read and frame write without
+// wrapping each context; see [AcceptOptions].
 //
 // Once a connection is closed, reads and writes return the error that closed
 // it. A closing handshake, a protocol violation by the peer or a transport

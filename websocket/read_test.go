@@ -257,6 +257,30 @@ func TestReadDeadlineBoundsPingStream(t *testing.T) {
 	}
 }
 
+// A Read whose pong waits behind a blocked write until ReadTimeout passes
+// returns the timeout and closes the connection.
+func TestReadTimeoutWithPongBehindWrite(t *testing.T) {
+	srv, _, writes := pipePair(t)
+	ping := frame(opPing, true, []byte("p"))
+	c := newConn(srv, bytes.NewReader(ping), false, "", connConfig{readTimeout: 50 * time.Millisecond})
+	t.Cleanup(func() { _ = c.CloseNow() })
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- c.Write(t.Context(), MessageBinary, []byte("held")) }() // The peer never reads it.
+	<-writes
+	if err := readErr(t, c); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("read: %v", err)
+	}
+	if cause := context.Cause(c.Context()); !errors.Is(cause, os.ErrDeadlineExceeded) {
+		t.Fatalf("cause: %v", cause)
+	}
+	if err := <-writeDone; err == nil {
+		t.Fatal("the blocked write succeeded")
+	}
+	if len(writes) != 0 {
+		t.Fatal("the pong reached the transport")
+	}
+}
+
 // Discarding the rest of a half-read message validates UTF-8 and the size limit
 // across empty fragments and pings; a Close frame in it ends with its status.
 func TestDiscardMatrix(t *testing.T) {

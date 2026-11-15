@@ -36,11 +36,11 @@ type AcceptOptions struct {
 
 	// ReadTimeout bounds every [Conn.Read], [Conn.Reader] and reader Read
 	// call, but not [Conn.CloseRead]; WriteTimeout bounds every frame write,
-	// but not the wait of [Conn.Ping] for the pong. A call whose I/O exceeds
-	// its bound closes the connection; one that times out while waiting for
-	// another call to release the connection returns [os.ErrDeadlineExceeded]
-	// and leaves it open, unless a message from [Conn.Writer] is left half
-	// sent. Zero means no bound.
+	// but not the wait of [Conn.Ping] for the pong. A call that exceeds its
+	// bound once its operation has started closes the connection: a read with
+	// a Pong to send and a [Conn.Writer] with part of its message sent have.
+	// One that times out before that, while waiting for another call, returns
+	// [os.ErrDeadlineExceeded] and leaves it open. Zero means no bound.
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 
