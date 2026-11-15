@@ -1376,10 +1376,7 @@ func doRequestFollowRedirects(
 			if !req.Header.IsGet() && !req.Header.IsHead() {
 				req.Header.SetMethod(MethodGet)
 			}
-			req.Header.Del(HeaderContentLength)
-			req.Header.Del(HeaderContentType)
-			req.Header.Del(HeaderTransferEncoding)
-			req.Header.Del(HeaderTrailer)
+			req.Header.dropRedirectBodyHeaders()
 			req.ResetBody()
 			req.postArgs.Reset()
 			req.parsedPostArgs = false

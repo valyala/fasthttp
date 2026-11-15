@@ -668,6 +668,34 @@ func (h *header) setTrailerBytes(trailer []byte, d dedicated) error {
 	return h.addTrailers(trailer, true, d)
 }
 
+// dropRedirectBodyHeaders removes the framing, trailers and metadata of a
+// discarded request body when following a redirect (RFC 9110 section 15.4).
+func (h *RequestHeader) dropRedirectBodyHeaders() {
+	h.contentLength = 0
+	h.contentLengthBytes = h.contentLengthBytes[:0]
+	h.contentType = h.contentType[:0]
+	// Del(HeaderTrailer) would move trailer values into the header section.
+	h.trailer = h.trailer[:0]
+	h.trailerH = h.trailerH[:0]
+
+	n := 0
+fields:
+	for i := range h.h {
+		for _, name := range [...]string{
+			HeaderContentLength, HeaderTransferEncoding, HeaderTrailer, HeaderContentType,
+			HeaderContentEncoding, HeaderContentLanguage, HeaderContentLocation, HeaderContentRange,
+			HeaderLastModified, "Digest", "Content-Digest", "Repr-Digest",
+		} {
+			if caseInsensitiveCompare(h.h[i].key, s2b(name)) {
+				continue fields
+			}
+		}
+		h.h[n], h.h[i] = h.h[i], h.h[n]
+		n++
+	}
+	h.h = h.h[:n]
+}
+
 // unannounceTrailers forgets the announced set. Values already in the trailer
 // section return to the header section, as before they were announced.
 func (h *header) unannounceTrailers() {

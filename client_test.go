@@ -3986,13 +3986,23 @@ func TestClientRedirectBodyStream(t *testing.T) {
 	}
 }
 
-func TestClientRedirectDropsBodyFramingHeaders(t *testing.T) {
+func TestClientRedirectDropsBodyHeaders(t *testing.T) {
 	t.Parallel()
 
-	// /landing echoes back the body-framing headers it received so the test
-	// can verify that none of them reached the other host.
+	metadata := []string{
+		HeaderContentEncoding, HeaderContentLanguage, HeaderContentLocation,
+		HeaderContentRange, HeaderLastModified, "Digest", "Content-Digest", "Repr-Digest",
+	}
+	dropped := append([]string{
+		HeaderContentLength, HeaderContentType, HeaderTransferEncoding, HeaderTrailer, "X-Sum",
+	}, metadata...)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			if string(ctx.Path()) != "/landing" {
+				if got := string(ctx.Request.Header.Peek("X-Sum")); got != "original" {
+					t.Errorf("original trailer = %q", got)
+				}
+			}
 			switch string(ctx.Path()) {
 			case "/301":
 				ctx.Redirect("http://other.test/landing", StatusMovedPermanently)
@@ -4001,12 +4011,12 @@ func TestClientRedirectDropsBodyFramingHeaders(t *testing.T) {
 			case "/303":
 				ctx.Redirect("http://other.test/landing", StatusSeeOther)
 			case "/landing":
-				ctx.SetBodyString(string(ctx.Host()) + "|" + string(ctx.Method()) +
-					"|cl=" + string(ctx.Request.Header.Peek(HeaderContentLength)) +
-					"|ct=" + string(ctx.Request.Header.Peek(HeaderContentType)) +
-					"|te=" + string(ctx.Request.Header.Peek(HeaderTransferEncoding)) +
-					"|trailer=" + string(ctx.Request.Header.Peek(HeaderTrailer)) +
-					"|body=" + string(ctx.PostBody()))
+				for _, key := range dropped {
+					if got := ctx.Request.Header.Peek(key); len(got) > 0 {
+						t.Errorf("redirected GET carried %s = %q", key, got)
+					}
+				}
+				ctx.SetBodyString(string(ctx.Host()) + "|" + string(ctx.Method()) + "|" + string(ctx.PostBody()))
 			default:
 				ctx.Error("not found", StatusNotFound)
 			}
@@ -4034,11 +4044,15 @@ func TestClientRedirectDropsBodyFramingHeaders(t *testing.T) {
 			req.Header.SetMethod(MethodPost)
 			req.SetRequestURI("http://original.test/" + status)
 			req.Header.SetContentType("text/plain")
-			req.Header.Set(HeaderTransferEncoding, "chunked")
+			req.Header.DisableNormalizing()
+			for _, key := range metadata {
+				req.Header.Set(strings.ToLower(key), "original")
+			}
 			if err := req.Header.SetTrailer("X-Sum"); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			req.SetBodyString("hello")
+			req.Header.Set("X-Sum", "original")
+			req.SetBodyStream(strings.NewReader("hello"), -1)
 
 			if err := c.DoRedirects(req, resp, 16); err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -4046,7 +4060,7 @@ func TestClientRedirectDropsBodyFramingHeaders(t *testing.T) {
 			if got := resp.StatusCode(); got != StatusOK {
 				t.Fatalf("unexpected status code: %d", got)
 			}
-			if got, want := string(resp.Body()), "other.test|GET|cl=|ct=|te=|trailer=|body="; got != want {
+			if got, want := string(resp.Body()), "other.test|GET|"; got != want {
 				t.Fatalf("unexpected landing echo %q. Expecting %q", got, want)
 			}
 		})
