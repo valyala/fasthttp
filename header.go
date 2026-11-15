@@ -2199,13 +2199,21 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	h.setNonSpecial(key, h.bufV)
 }
 
-// SetCookie sets the given response cookie.
+// SetCookie replaces the first response cookie with the given name or appends
+// the cookie if none matches. Later cookies with the same name are preserved.
 //
 // It is safe re-using the cookie after the function returns.
 func (h *ResponseHeader) SetCookie(cookie *Cookie) {
 	h.bufK = initHeaderValueBytes(h.bufK, cookie.Key())
 	h.bufV = initHeaderValueBytes(h.bufV, cookie.Cookie())
-	h.cookies = setArgBytes(h.cookies, h.bufK, h.bufV, argsHasValue)
+	for i := range h.cookies {
+		kv := &h.cookies[i]
+		if bytes.Equal(kv.key, h.bufK) {
+			kv.value = append(kv.value[:0], h.bufV...)
+			return
+		}
+	}
+	h.cookies = appendArgBytes(h.cookies, h.bufK, h.bufV, argsHasValue)
 }
 
 // SetCookie sets 'key: value' cookies.
