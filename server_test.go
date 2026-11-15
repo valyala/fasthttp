@@ -2150,9 +2150,8 @@ func TestServerStreamedMultipartFormLeavesOversizedBodyUnread(t *testing.T) {
 		paths    []string
 	)
 	s := Server{
-		StreamRequestBody:            true,
-		DisablePreParseMultipartForm: true,
-		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		StreamRequestBody:  true,
+		MaxRequestBodySize: 1, // A large upload must bypass multipart pre-parsing.
 		Handler: func(ctx *RequestCtx) {
 			paths = append(paths, string(ctx.Path()))
 			if string(ctx.Path()) != "/first" {
