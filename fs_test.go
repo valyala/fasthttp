@@ -2623,7 +2623,7 @@ func TestFSRootServesLikeUnconfined(t *testing.T) {
 		compressRoot := ""
 		if cacheName != "" {
 			compressRoot = filepath.Join(base, cacheName)
-			cacheDir = compressRoot
+			cacheDir = compressedCacheDir(root, compressRoot)
 		}
 
 		newHandler := func(allowSymlinksOutsideRoot bool) RequestHandler {
@@ -2721,8 +2721,10 @@ func TestFSRootRelativeRoots(t *testing.T) {
 					roots.root, roots.compressRoot, req, got.contentEncoding, req.acceptEncoding)
 			}
 		}
+		fs := &FS{}
+		cacheDir := compressedCacheDir(fs.normalizeRoot(roots.root), fs.normalizeRoot(roots.compressRoot))
 		for _, name := range []string{"app.js.fasthttp.gz", filepath.Join("sub", "deep", "app.js.fasthttp.br")} {
-			if _, err := os.Stat(filepath.Join(roots.compressRoot, name)); err != nil {
+			if _, err := os.Stat(filepath.Join(cacheDir, name)); err != nil {
 				t.Errorf("compressed file wasn't written under CompressRoot %q: %v", roots.compressRoot, err)
 			}
 		}
@@ -2831,7 +2833,11 @@ func TestFSRootCompressedFilesStayInRoot(t *testing.T) {
 		if err := os.Symlink(filepath.Join(outside, "linked"), filepath.Join(root, "linked")); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(filepath.Join(outside, "cache"), filepath.Join(compressRoot, "sub")); err != nil {
+		cacheDir := compressedCacheDir(root, compressRoot)
+		if err := os.MkdirAll(cacheDir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(outside, "cache"), filepath.Join(cacheDir, "sub")); err != nil {
 			t.Fatal(err)
 		}
 
@@ -2934,7 +2940,7 @@ func TestFSRootCompressRootInsideRoot(t *testing.T) {
 			t.Errorf("AllowSymlinksOutsideRoot=%v, /app.js: status=%d encoding=%q, want %d gzip",
 				allowSymlinksOutsideRoot, resp.status, resp.contentEncoding, StatusOK)
 		}
-		if _, err := os.Stat(filepath.Join(outside, "app.js.fasthttp.gz")); err != nil {
+		if _, err := os.Stat(filepath.Join(compressedCacheDir(root, outside), "app.js.fasthttp.gz")); err != nil {
 			t.Errorf("AllowSymlinksOutsideRoot=%v: compressed file wasn't written to CompressRoot: %v",
 				allowSymlinksOutsideRoot, err)
 		}
@@ -2991,6 +2997,52 @@ func TestFSRootWholeVolumeCompressRoot(t *testing.T) {
 	}
 }
 
+// Two handlers with the same relative filename and modification time must
+// serve their own source when they share the on-disk compression directory.
+func TestFSSharedCompressRoot(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []string{"directory", "file"} {
+		t.Run(kind, func(t *testing.T) {
+			cache := t.TempDir()
+			path := "/page.txt"
+			if kind == "file" {
+				cache = filepath.Join(cache, "cache")
+				if err := os.WriteFile(cache, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				path = "/"
+			}
+			mtime := time.Unix(1700000000, 0)
+			for _, content := range []string{"private", "public"} {
+				root := t.TempDir()
+				file := filepath.Join(root, "page.txt")
+				body := bytes.Repeat([]byte(content), 1000)
+				if err := os.WriteFile(file, body, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chtimes(file, mtime, mtime); err != nil {
+					t.Fatal(err)
+				}
+				if kind == "file" {
+					root = file
+				}
+				handler := (&FS{
+					Root: root, CompressRoot: cache, Compress: true, SkipCache: true,
+				}).NewRequestHandler()
+				resp := fsRootTestGet(t, handler, path, "gzip", "")
+				if resp.status != StatusOK || resp.contentEncoding != "gzip" {
+					t.Fatalf("status=%d encoding=%q, want 200 gzip", resp.status, resp.contentEncoding)
+				}
+				decoded, err := AppendGunzipBytes(nil, []byte(resp.body))
+				if err != nil || !bytes.Equal(decoded, body) {
+					t.Fatalf("response does not match %s (gunzip error %v)", file, err)
+				}
+			}
+		})
+	}
+}
+
 // TestFSRootStaleCompressedFileInRoot checks that a stale precompressed file
 // next to its original in Root is removed from Root when the compressed
 // copies FS writes go to a separate CompressRoot.
@@ -3029,7 +3081,7 @@ func TestFSRootStaleCompressedFileInRoot(t *testing.T) {
 			t.Errorf("AllowSymlinksOutsideRoot=%v: stale compressed file in Root wasn't removed (stat error %v)",
 				allowSymlinksOutsideRoot, err)
 		}
-		if _, err := os.Stat(filepath.Join(compressRoot, "app.js.fasthttp.gz")); err != nil {
+		if _, err := os.Stat(filepath.Join(compressedCacheDir(root, compressRoot), "app.js.fasthttp.gz")); err != nil {
 			t.Errorf("AllowSymlinksOutsideRoot=%v: compressed file wasn't written to CompressRoot: %v",
 				allowSymlinksOutsideRoot, err)
 		}
