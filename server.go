@@ -344,6 +344,10 @@ type Server struct {
 	// Maximum request body size.
 	//
 	// The server rejects requests with bodies exceeding this limit.
+	// When buffering a request, it can allocate space for the declared
+	// Content-Length header or chunk-size line alone, before receiving any
+	// payload. A limit near MaxInt lets one request crash the process.
+	// Choose a limit that fits the available memory across concurrent requests.
 	//
 	// Request body size is limited by DefaultMaxRequestBodySize by default.
 	// A value less than or equal to zero selects DefaultMaxRequestBodySize; it
