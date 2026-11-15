@@ -5581,6 +5581,59 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 	}
 }
 
+func TestResponseCompressedBodyStreamCloseDuringFileRead(t *testing.T) {
+	t.Parallel()
+
+	for _, size := range []int{2, maxSmallFileSize + 1} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "file.txt"), bytes.Repeat([]byte("x"), size), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var ctx RequestCtx
+			ctx.Request.SetRequestURI("/file.txt")
+			(&FS{Root: dir, SkipCache: true}).NewRequestHandler()(&ctx)
+			ctx.Response.gzipBody(CompressDefaultCompression)
+			stream := ctx.Response.BodyStream().(*compressedBodyStream) //nolint:forcetypeassert
+
+			var ff *fsFile
+			switch r := stream.bodyStream.(type) {
+			case *fsSmallFileReader:
+				ff = r.ff
+			case *bigFileReader:
+				ff = r.ff
+			default:
+				t.Fatalf("unexpected file reader %T", r)
+			}
+
+			reading := make(chan struct{})
+			resume := make(chan struct{})
+			var readErr error
+			stream.compress = func(_ *bufio.Writer, r io.Reader, _ int) error {
+				var b [1]byte
+				_, readErr = io.ReadFull(r, b[:])
+				close(reading)
+				<-resume
+				if readErr == nil {
+					_, readErr = io.ReadFull(r, b[:])
+				}
+				return readErr
+			}
+			_, _ = stream.Read(nil)
+			<-reading
+			closeErr := ctx.Response.CloseBodyStream()
+			close(resume)
+			<-stream.done
+			if closeErr != nil || readErr != nil {
+				t.Fatalf("close error = %v, file read error = %v", closeErr, readErr)
+			}
+			if ff.readersCount != 0 {
+				t.Fatalf("file still has %d readers after compression finished", ff.readersCount)
+			}
+		})
+	}
+}
+
 // A body stream may finish the trailers as it ends: under compression it is
 // still read only while the response is written, after the headers.
 func TestResponseCompressedBodyStreamSetsTrailersAtEOF(t *testing.T) {
