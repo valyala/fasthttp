@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -519,6 +520,9 @@ func TestWriterReader(t *testing.T) {
 func TestReadWriteAllocs(t *testing.T) {
 	if raceEnabled {
 		t.Skip("sync.Pool drops entries at random under the race detector")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("the count covers the process, where another test's log line resolves the time zone")
 	}
 	ts := startServer(t, nil, echo)
 	c := ts.dial(t, nil)
