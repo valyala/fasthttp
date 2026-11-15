@@ -3502,6 +3502,13 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 			w.done <- struct{}{}
 			return err
 		}
+		if w.resp.StatusCode() == StatusSwitchingProtocols {
+			// Stop the writer before handing the response to the caller.
+			// Bytes after the 101 belong to the upgraded protocol.
+			conn.Close()
+			w.done <- struct{}{}
+			return nil
+		}
 		if streamBody && !w.resp.mustSkipBody() {
 			w.resp.bodyStream = bytes.NewReader(w.resp.bodyBytes())
 		}
@@ -3697,7 +3704,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		return needRetry, err
 	}
 
-	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
+	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose() || resp.StatusCode() == StatusSwitchingProtocols
 	if customStreamBody && resp.bodyStream != nil {
 		// releaseConn runs when the caller closes the body stream, so it has to
 		// re-check resp.ConnectionClose(): a caller may only decide that the
