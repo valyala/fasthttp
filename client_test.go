@@ -1624,6 +1624,32 @@ func TestPipelineClientBuffersStreamBody(t *testing.T) {
 	}
 }
 
+func TestPipelineClientTimeoutMultipartForm(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.FormValue("field"))
+	}))
+	defer server.Close()
+	client := PipelineClient{Addr: server.Listener.Addr().String()}
+
+	const body = "--x\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nvalue\r\n--x--\r\n"
+	raw := fmt.Sprintf("POST / HTTP/1.1\r\nHost: test\r\nContent-Type: multipart/form-data; boundary=x\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+	var req Request
+	if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatal(err)
+	}
+	defer req.RemoveMultipartFormFiles()
+
+	var resp Response
+	if err := client.DoTimeout(&req, &resp, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(resp.Body()); got != "value" {
+		t.Fatalf("forwarded multipart field = %q, want value", got)
+	}
+}
+
 func TestPipelineClientDeadlineMethodsPreserveStreamBody(t *testing.T) {
 	t.Parallel()
 
