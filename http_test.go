@@ -3211,7 +3211,7 @@ func TestParseChunkSize(t *testing.T) {
 			t.Parallel()
 
 			rb := bufio.NewReader(bytes.NewBufferString(test.line))
-			size, err := parseChunkSize(rb)
+			size, err := parseChunkSize(rb, new(int))
 			if err != nil {
 				t.Fatalf("unexpected error when reading chunk size %q: %v", test.line, err)
 			}
@@ -3219,6 +3219,40 @@ func TestParseChunkSize(t *testing.T) {
 				t.Fatalf("unexpected chunk size %d. Expected %d", size, test.size)
 			}
 		})
+	}
+}
+
+func TestChunkExtensionLimits(t *testing.T) {
+	t.Parallel()
+
+	ext := strings.Repeat("a", 1024)
+	for _, stream := range []bool{false, true} {
+		for _, tc := range []struct {
+			name    string
+			chunks  string
+			wantErr bool
+		}{
+			{"long whitespace", "1" + strings.Repeat(" ", 32*1024) + "\r\nx\r\n", true},
+			{"many extensions", strings.Repeat("1;"+ext+"\r\nx\r\n", 32), true},
+			{"proportional extensions", strings.Repeat("200;"+ext+"\r\n"+strings.Repeat("x", 512)+"\r\n", 32), false},
+		} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
+				wire := "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" + tc.chunks + "0\r\n\r\n"
+				resp := Response{StreamBody: stream}
+				err := resp.Read(bufio.NewReader(strings.NewReader(wire)))
+				if err == nil && stream {
+					_, err = io.Copy(io.Discard, resp.BodyStream())
+					_ = resp.CloseBodyStream()
+				}
+				if tc.wantErr {
+					if !errors.As(err, new(ErrBrokenChunk)) {
+						t.Fatalf("got %v, want ErrBrokenChunk", err)
+					}
+				} else if err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
 	}
 }
 
@@ -3233,7 +3267,7 @@ func TestParseChunkSizeWhitespaceError(t *testing.T) {
 			t.Parallel()
 
 			rb := bufio.NewReader(bytes.NewBufferString(test))
-			if _, err := parseChunkSize(rb); err == nil {
+			if _, err := parseChunkSize(rb, new(int)); err == nil {
 				t.Fatalf("expecting error when reading chunk size %q", test)
 			}
 		})
