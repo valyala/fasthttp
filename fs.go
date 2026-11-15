@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -373,7 +374,9 @@ type FS struct {
 	// A request for a directory without a trailing slash is redirected to
 	// the scheme, host, path and query FS got, with a slash added to the
 	// path, not to the rewritten path. So a PathRewrite mapping exactly
-	// /latest to /docs gets /latest/ next and must handle it too.
+	// /latest to /docs gets /latest/ next and must handle it too. Whether
+	// to redirect depends on the path FS got: if it ends with a slash, the
+	// directory index is served even if the rewritten path has none.
 	PathRewrite PathRewriteFunc
 
 	// PathNotFound fires when file is not found in filesystem
@@ -1520,8 +1523,19 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 
 		if errors.Is(err, errDirIndexRequired) {
 			if !hasTrailingSlash {
-				redirectToDir(ctx, uriSchemeHost, uriPath, uriQuery, path)
-				return
+				reqPath := uriPath
+				if reqPath == nil {
+					reqPath = ctx.Path()
+				}
+				if len(reqPath) == 0 || reqPath[len(reqPath)-1] != '/' {
+					redirectToDir(ctx, uriSchemeHost, uriPath, uriQuery)
+					return
+				}
+				// PathRewrite took off the slash the client sent: the client
+				// asked for the directory, so it gets the index. It is cached
+				// under the path with the slash, which a request without one
+				// never finds, so that request is still redirected.
+				path = append(slices.Clip(path), '/')
 			}
 			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
 			if err != nil {
@@ -1661,16 +1675,13 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 // redirectToDir redirects the request for a directory to the same path with
 // a trailing slash. uriSchemeHost, uriPath and uriQuery are the parts of
 // the request uri FS got, before PathRewrite, or nil if they are still in
-// ctx.URI(). path is the path in the filesystem, which the client may be
-// unable to request.
-func redirectToDir(ctx *RequestCtx, uriSchemeHost, uriPath, uriQuery, path []byte) {
+// ctx.URI(). The path in the filesystem is never used: the client may be
+// unable to request it. FS calls it only when the path FS got has no
+// trailing slash.
+func redirectToDir(ctx *RequestCtx, uriSchemeHost, uriPath, uriQuery []byte) {
 	uriKept := uriPath == nil
 	if uriKept {
 		uriPath = ctx.Path()
-	}
-	if len(uriPath) == 0 || uriPath[len(uriPath)-1] == '/' {
-		// PathRewrite took the trailing slash off: one more would loop.
-		uriPath = path
 	}
 	b := bytebufferpool.Get()
 	// Absolute, so that the scheme and host PathRewrite may have put into

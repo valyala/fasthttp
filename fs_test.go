@@ -2135,6 +2135,60 @@ func TestFSDirectoryRedirect(t *testing.T) {
 	}
 }
 
+// A PathRewrite may take off the trailing slash the client sent. FS must
+// not redirect then: the path it would redirect to is not the client's.
+func TestFSDirectoryTrimmedSlash(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for _, name := range []string{".attacker.example", "docs"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := (&FS{
+		FS:                 os.DirFS(dir),
+		AllowEmptyRoot:     true,
+		GenerateIndexPages: true,
+		PathRewrite: func(ctx *RequestCtx) []byte {
+			return bytes.Trim(ctx.Path(), "/")
+		},
+	}).NewRequestHandler()
+
+	get := func(uri string) *Response {
+		var ctx RequestCtx
+		var req Request
+		req.SetRequestURI(uri)
+		ctx.Init(&req, nil, TestLogger{t})
+		h(&ctx)
+		var resp Response
+		ctx.Response.CopyTo(&resp)
+		return &resp
+	}
+
+	// Twice: the second answer may come from the cache.
+	for range 2 {
+		for _, uri := range []string{
+			"http://public.example/.attacker.example/?token=secret",
+			"http://public.example/docs/?token=secret",
+		} {
+			resp := get(uri)
+			if resp.StatusCode() != StatusOK {
+				t.Fatalf("%s: unexpected status code %d, Location %q. Expecting %d",
+					uri, resp.StatusCode(), resp.Header.Peek(HeaderLocation), StatusOK)
+			}
+		}
+		// Without the slash the client still gets the redirect.
+		resp := get("http://public.example/docs?token=secret")
+		if resp.StatusCode() != StatusFound {
+			t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusFound)
+		}
+		if location := string(resp.Header.Peek(HeaderLocation)); location != "http://public.example/docs/?token=secret" {
+			t.Fatalf("unexpected Location %q", location)
+		}
+	}
+}
+
 func changeQueryArgs(ctx *RequestCtx) {
 	ctx.QueryArgs().Del("token")
 	ctx.QueryArgs().Set("sort", "new")
