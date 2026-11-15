@@ -31,6 +31,36 @@ func TestZstdBytesConcurrent(t *testing.T) {
 	}
 }
 
+func TestZstdDecoderReuseInvalidBlock(t *testing.T) {
+	t.Parallel()
+
+	header := []byte{0x28, 0xb5, 0x2f, 0xfd, 0, 0}
+	// Fill each decoder block buffer with a previous caller's data.
+	previous := slices.Clone(header)
+	for range 3 {
+		previous = append(previous, 0x1c, 0, 0, 8, 'x', 0) // compressed block with one literal
+	}
+	previous = append(previous, 0x1d, 0, 0, 8, 'x', 0)
+	zr, err := acquireZstdReader(&byteSliceReader{b: previous})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	if n, err := zr.WriteTo(io.Discard); n != 4 || err != nil {
+		t.Fatalf("decoding previous frame: wrote %d bytes, err %v", n, err)
+	}
+
+	// The first sequence refers to a match before the start of this frame.
+	invalid := append(slices.Clone(header), 0x3d, 0, 0, 0, 1, 0x54, 0, 0, 0, 1)
+	if err := zr.Reset(&byteSliceReader{b: invalid}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if _, err := zr.WriteTo(&buf); err == nil || buf.Len() != 0 {
+		t.Fatalf("decoding invalid frame: wrote %q, err %v", buf.Bytes(), err)
+	}
+}
+
 func testZstdBytes() error {
 	for _, s := range compressTestcases {
 		if err := testZstdBytesSingleCase(s); err != nil {

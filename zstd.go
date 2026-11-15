@@ -41,7 +41,8 @@ type limitedZstdReader struct {
 func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 	v := zstdDecoderPool.Get()
 	if v == nil {
-		return zstd.NewReader(r)
+		// The concurrent decoder can write stale block data on a sequence error.
+		return zstd.NewReader(r, zstd.WithDecoderConcurrency(1))
 	}
 	zr := v.(*zstd.Decoder) //nolint:forcetypeassert
 	if err := zr.Reset(r); err != nil {
@@ -51,6 +52,10 @@ func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 }
 
 func releaseZstdReader(zr *zstd.Decoder) {
+	if err := zr.Reset(nil); err != nil {
+		zr.Close()
+		return
+	}
 	zstdDecoderPool.Put(zr)
 }
 
