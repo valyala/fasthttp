@@ -220,6 +220,9 @@ func TestHijack(t *testing.T) {
 			if c, rw, err := f.Hijack(); err != nil {
 				t.Error(err)
 			} else {
+				if n, err := w.Write([]byte("late")); n != 4 || err != nil {
+					t.Errorf("Write after Hijack = (%d, %v), want (4, nil)", n, err)
+				}
 				if _, err := rw.WriteString("bar"); err != nil {
 					t.Error(err)
 				}
@@ -274,6 +277,25 @@ func TestHijack(t *testing.T) {
 	case <-clientCh:
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
+	}
+}
+
+func TestHijackedWriterReleasesEmptyBuffer(t *testing.T) {
+	var ctx fasthttp.RequestCtx
+	w := acquireWriter(&ctx)
+	if _, err := w.Write(nil); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := w.Hijack()
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseWriter(w)
+	if n, err := w.Write([]byte("late")); n != 4 || err != nil {
+		t.Fatalf("Write after Hijack = (%d, %v)", n, err)
+	}
+	if w.responseBody != nil || w.bufPool != nil {
+		t.Fatal("released writer retained a buffer")
 	}
 }
 
