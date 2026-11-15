@@ -2946,19 +2946,16 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	var n int
 	for {
 		n, err = r.Read(buf)
-		if n == 0 {
-			if err == nil {
-				continue
+		if n > 0 {
+			if writeErr := writeChunk(w, buf[:n]); writeErr != nil {
+				err = writeErr
+				break
 			}
-			if err == io.EOF {
-				if err = writeChunkNoFlush(w, nil); err != nil {
-					break
-				}
-				err = nil
-			}
-			break
 		}
-		if err = writeChunk(w, buf[:n]); err != nil {
+		if err != nil {
+			if err == io.EOF {
+				err = writeChunkNoFlush(w, nil)
+			}
 			break
 		}
 	}
