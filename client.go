@@ -2933,6 +2933,9 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	w.respCopy.Header.disableNormalizing = c.DisableHeaderNamesNormalizing
 	streamBody := resp != nil && resp.StreamBody
 	w.respCopy.StreamBody = streamBody
+	// The reader goroutine only sees respCopy, so it needs the caller's
+	// SkipBody too. copyToSkipBody copies it back to resp afterwards.
+	w.respCopy.SkipBody = resp != nil && resp.SkipBody
 	w.req = &w.reqCopy
 	w.resp = &w.respCopy
 
@@ -2983,7 +2986,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 			if resp.KeepBodyBuffer && resp.body != nil {
 				w.respCopy.copyToSkipBody(resp)
 				resp.SetBody(w.respCopy.bodyBytes())
-				if streamBody && !resp.mustSkipBody() {
+				if streamBody && !resp.mustSkipBody() && !req.Header.IsHead() {
 					resp.bodyStream = bytes.NewReader(resp.bodyBytes())
 				}
 			} else {
@@ -3269,16 +3272,18 @@ func (c *pipelineConnClient) worker(chs *pipelineConnChannels) (bool, error) {
 		return false, err
 	}
 
-	// Start reader and writer
+	// Start reader and writer. After sending CONNECT the writer waits on
+	// connectCh until the reader knows the connection is still HTTP.
+	connectCh := make(chan struct{}, 1)
 	stopW := make(chan struct{})
 	doneW := make(chan error)
 	go func() {
-		doneW <- c.writer(conn, stopW, chs)
+		doneW <- c.writer(conn, stopW, chs, connectCh)
 	}()
 	stopR := make(chan struct{})
 	doneR := make(chan error)
 	go func() {
-		doneR <- c.reader(conn, stopR, chs)
+		doneR <- c.reader(conn, stopR, chs, connectCh)
 	}()
 
 	// Wait until reader and writer are stopped
@@ -3328,7 +3333,9 @@ func (c *pipelineConnClient) ensureTLSConfig() error {
 	return err
 }
 
-func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *pipelineConnChannels) error {
+func (c *pipelineConnClient) writer(
+	conn net.Conn, stopCh <-chan struct{}, chs *pipelineConnChannels, connectCh <-chan struct{},
+) error {
 	writeBufferSize := c.WriteBufferSize
 	if writeBufferSize <= 0 {
 		writeBufferSize = defaultWriteBufferSize
@@ -3388,6 +3395,9 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *
 		}
 
 		w.resp.ParseNetConn(conn)
+		// w.req belongs to the caller once w reaches the reader, so check it
+		// now.
+		isConnect := w.req.Header.IsConnect()
 
 		if writeTimeout > 0 {
 			// Set Deadline every time, since golang has fixed the performance issue
@@ -3435,6 +3445,22 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *
 				goto againChR
 			}
 		}
+
+		if isConnect {
+			// A 2xx response turns the connection into a tunnel, so nothing
+			// may follow CONNECT until its response is known. Otherwise
+			// queued requests, credentials included, would reach the tunnel
+			// target.
+			if err = bw.Flush(); err != nil {
+				return err
+			}
+			flushTimerCh = nil
+			select {
+			case <-connectCh:
+			case <-stopCh:
+				return nil
+			}
+		}
 	}
 }
 
@@ -3445,7 +3471,9 @@ func (c *pipelineConnClient) canStopPipelineConn(chs *pipelineConnChannels) bool
 	return canStop && len(chs.chR) == 0 && len(chs.chW) == 0
 }
 
-func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *pipelineConnChannels) error {
+func (c *pipelineConnClient) reader(
+	conn net.Conn, stopCh <-chan struct{}, chs *pipelineConnChannels, connectCh chan<- struct{},
+) error {
 	readBufferSize := c.ReadBufferSize
 	if readBufferSize <= 0 {
 		readBufferSize = defaultReadBufferSize
@@ -3482,19 +3510,27 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 			}
 		}
 		// A response to HEAD carries no body no matter what Content-Length
-		// or Transfer-Encoding announce (RFC 9112 section 6.3). Reading one
-		// here would consume the following pipelined responses as the body,
-		// the same reason transport.RoundTrip skips it.
-		if w.req.Header.IsHead() {
-			w.resp.SkipBody = true
-		}
+		// or Transfer-Encoding announce (RFC 9112 section 6.3), and neither
+		// does a 2xx response to CONNECT. Reading one here would consume the
+		// following pipelined responses as the body, the same reason
+		// transport.RoundTrip skips it.
+		isConnect := w.req.Header.IsConnect()
 		// PipelineClient must consume each response body before reading the
 		// next response from the shared connection. Preserve StreamBody's
 		// reader API with a buffered stream instead of leaving bytes in br.
 		streamBody := w.resp.StreamBody
 		w.resp.StreamBody = false
-		err = w.resp.ReadLimitBody(br, c.MaxResponseBodySize)
+		err = w.resp.readLimitBody(br, c.MaxResponseBodySize, w.req.Header.IsHead(), isConnect)
 		w.resp.StreamBody = streamBody
+		// A body skipped by the caller still has to be consumed: left on the
+		// connection, it would be read as the start of the next pipelined
+		// response. Drain it without buffering it.
+		if err == nil && w.resp.SkipBody {
+			err = w.resp.discardBody(br, c.MaxResponseBodySize)
+		}
+		if err == nil && streamBody && !w.resp.mustSkipBody() {
+			w.resp.bodyStream = bytes.NewReader(w.resp.bodyBytes())
+		}
 		if err != nil {
 			w.err = err
 			w.done <- struct{}{}
@@ -3507,11 +3543,22 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 			w.done <- struct{}{}
 			return nil
 		}
-		if streamBody && !w.resp.mustSkipBody() {
-			w.resp.bodyStream = bytes.NewReader(w.resp.bodyBytes())
-		}
 
+		// After a 2xx response to CONNECT the connection is a tunnel, so no
+		// further pipelined response can be read from it. Check before
+		// signaling done: w may be reused as soon as the caller wakes up.
+		//
+		// The writer waits after sending CONNECT. Let it go on only if the
+		// connection is still HTTP; for a tunnel the worker stops it, and the
+		// queued requests are sent on a new connection.
+		tunnel := w.resp.isConnectTunnel()
+		if isConnect && !tunnel {
+			connectCh <- struct{}{}
+		}
 		w.done <- struct{}{}
+		if tunnel {
+			return nil
+		}
 	}
 }
 
@@ -3685,15 +3732,13 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		cc.readDeadlineSet = !readDeadline.IsZero()
 	}
 
-	if customSkipBody || req.Header.IsHead() {
-		resp.SkipBody = true
-	}
+	isHead := req.Header.IsHead()
 	if hc.DisableHeaderNamesNormalizing {
 		resp.Header.DisableNormalizing()
 	}
 
 	br := hc.AcquireReader(conn)
-	err = resp.ReadLimitBody(br, hc.MaxResponseBodySize)
+	err = resp.readLimitBody(br, hc.MaxResponseBodySize, isHead, req.Header.IsConnect())
 	if err != nil {
 		hc.ReleaseReader(br)
 		hc.CloseConn(cc)
@@ -3702,7 +3747,13 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		return needRetry, err
 	}
 
-	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose() || resp.StatusCode() == StatusSwitchingProtocols
+	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose() ||
+		resp.StatusCode() == StatusSwitchingProtocols || resp.isConnectTunnel()
+	if customSkipBody && !isHead && !resp.Header.mustSkipContentLength() && resp.Header.ContentLength() != 0 {
+		// The body of this response was left unread on the connection,
+		// so the next response read from it would start inside that body.
+		closeConn = true
+	}
 	if customStreamBody && resp.bodyStream != nil {
 		// releaseConn runs when the caller closes the body stream, so it has to
 		// re-check resp.ConnectionClose(): a caller may only decide that the
