@@ -1,6 +1,8 @@
 package fasthttp
 
 import (
+	"bufio"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -656,6 +658,31 @@ func testCookieAppendBytes(t *testing.T, c *Cookie, key, value, expectedS string
 	result := string(c.AppendBytes(nil))
 	if result != expectedS {
 		t.Fatalf("Unexpected cookie %q. Expecting %q", result, expectedS)
+	}
+}
+
+func TestRequestCookieEmptyNameRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	var h RequestHeader
+	raw := "GET / HTTP/1.1\r\nHost: example.com\r\nCookie: =user=root; user=client\r\n\r\n"
+	if err := h.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatal(err)
+	}
+	h.DelCookie("user")
+	h.SetCookie("user", "guest")
+
+	req, err := http.ReadRequest(bufio.NewReader(strings.NewReader(h.String())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer req.Body.Close()
+	c, err := req.Cookie("user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Value != "guest" {
+		t.Fatalf("forwarded user cookie = %q, want guest", c.Value)
 	}
 }
 
