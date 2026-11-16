@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"strconv"
 	"sync"
 	"testing"
@@ -568,9 +569,12 @@ func TestVectoredWriteInterleavesControl(t *testing.T) {
 // CloseNow while a vectored write is blocked on a peer that does not read:
 // the deadline on the hijacked conn must reach the socket the writev uses.
 func TestCloseNowDuringVectoredWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the write can complete with the peer not reading")
+	}
 	srv, cli := tcpPair(t)
 	// Small socket buffers keep the write from completing on platforms that
-	// buffer generously, Windows among them.
+	// buffer generously.
 	for _, conn := range []net.Conn{srv, cli} {
 		if tc, ok := conn.(*net.TCPConn); ok {
 			_ = tc.SetWriteBuffer(4096)
