@@ -16,7 +16,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1520,7 +1519,11 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 		if len(reqPath) > 0 && reqPath[len(reqPath)-1] == '/' {
 			clientSlash = true
-			cacheKey = append(slices.Clip(path), '/')
+			// Pooled: the cache copies the key only when it stores an entry.
+			kb := bytebufferpool.Get()
+			defer bytebufferpool.Put(kb)
+			kb.B = append(append(kb.B[:0], path...), '/')
+			cacheKey = kb.B
 		}
 	}
 
