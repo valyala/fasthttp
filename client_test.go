@@ -7316,6 +7316,116 @@ func TestClientRetryIfErrUpstream(t *testing.T) {
 	})
 }
 
+func TestHostClientFailedDialDoesNotStartConnsCleaner(t *testing.T) {
+	c := &HostClient{
+		Addr:                "example.com:80",
+		MaxIdleConnDuration: time.Hour,
+		Dial: func(string) (net.Conn, error) {
+			return nil, errors.New("dial failed")
+		},
+	}
+
+	if _, err := c.AcquireConn(0, false); err == nil {
+		t.Fatal("expected dial to fail")
+	}
+
+	c.connsLock.Lock()
+	cleanerRun := c.connsCleanerRun
+	connsCount := c.connsCount
+	c.connsLock.Unlock()
+	if cleanerRun {
+		t.Fatal("conns cleaner started despite the failed dial")
+	}
+	if connsCount != 0 {
+		t.Fatalf("unexpected connection count after failed dial: %d", connsCount)
+	}
+}
+
+func TestHostClientConcurrentDialFailureStillStartsConnsCleaner(t *testing.T) {
+	firstDialStarted := make(chan struct{})
+	allowFirstDial := make(chan struct{})
+	var dialCount atomic.Int32
+	c := &HostClient{
+		Addr:                "example.com:80",
+		ConnPoolStrategy:    LIFO,
+		MaxIdleConnDuration: 10 * time.Millisecond,
+		Dial: func(string) (net.Conn, error) {
+			if dialCount.Add(1) == 1 {
+				close(firstDialStarted)
+				<-allowFirstDial
+				return nil, errors.New("first dial failed")
+			}
+
+			conn, peer := net.Pipe()
+			peer.Close()
+			return conn, nil
+		},
+	}
+	t.Cleanup(c.CloseIdleConnections)
+
+	type result struct {
+		conn *clientConn
+		err  error
+	}
+	firstResult := make(chan result, 1)
+	go func() {
+		conn, err := c.AcquireConn(0, false)
+		firstResult <- result{conn: conn, err: err}
+	}()
+	select {
+	case <-firstDialStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first dial did not start")
+	}
+
+	secondResult := make(chan result, 1)
+	go func() {
+		conn, err := c.AcquireConn(0, false)
+		secondResult <- result{conn: conn, err: err}
+	}()
+	var second result
+	select {
+	case second = <-secondResult:
+	case <-time.After(time.Second):
+		t.Fatal("second dial did not complete")
+	}
+	if second.err != nil {
+		t.Fatalf("second dial failed: %v", second.err)
+	}
+
+	close(allowFirstDial)
+	select {
+	case first := <-firstResult:
+		if first.err == nil {
+			t.Fatal("expected first dial to fail")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first dial did not return")
+	}
+
+	c.connsLock.Lock()
+	cleanerRun := c.connsCleanerRun
+	c.connsLock.Unlock()
+	if !cleanerRun {
+		t.Fatal("conns cleaner was not started for the successful concurrent dial")
+	}
+
+	c.ReleaseConn(second.conn)
+	deadline := time.Now().Add(time.Second)
+	for {
+		c.connsLock.Lock()
+		idle, count, cleanerRun := len(c.conns), c.connsCount, c.connsCleanerRun
+		c.connsLock.Unlock()
+		if idle == 0 && count == 0 && !cleanerRun {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("idle=%d count=%d cleanerRun=%t: cleaner did not close the idle connection", idle, count, cleanerRun)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestHostClientQueueForIdleRechecksIdle(t *testing.T) {
 	c := &HostClient{
 		ConnPoolStrategy:   LIFO,

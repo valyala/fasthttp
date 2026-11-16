@@ -1916,7 +1916,6 @@ func (c *HostClient) serveWaiterLocked() bool {
 
 func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool) (cc *clientConn, err error) {
 	createConn := false
-	startCleaner := false
 
 	var n int
 	c.connsLock.Lock()
@@ -1925,10 +1924,6 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 		if c.connsCount < c.maxConnsLocked() {
 			c.connsCount++
 			createConn = true
-			if !c.connsCleanerRun && !connectionClose {
-				startCleaner = true
-				c.connsCleanerRun = true
-			}
 		}
 	} else {
 		switch c.ConnPoolStrategy {
@@ -1997,15 +1992,28 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 		}
 	}
 
-	if startCleaner {
-		go c.connsCleaner()
-	}
-
 	conn, err := c.dialHostHard(reqTimeout)
 	if err != nil {
 		c.decConnsCount()
 		return nil, err
 	}
+
+	// A failed dial must not leave a cleaner sleeping for MaxIdleConnDuration.
+	// Start it only after a connection is established. Claim the run under the
+	// lock so concurrent successful dials still start exactly one cleaner.
+	startCleaner := false
+	if !connectionClose {
+		c.connsLock.Lock()
+		if !c.connsCleanerRun {
+			c.connsCleanerRun = true
+			startCleaner = true
+		}
+		c.connsLock.Unlock()
+	}
+	if startCleaner {
+		go c.connsCleaner()
+	}
+
 	cc = acquireClientConn(conn)
 
 	return cc, nil
