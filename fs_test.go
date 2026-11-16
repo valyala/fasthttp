@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -2146,10 +2147,15 @@ func TestFSDirectoryTrimmedSlash(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "index.html"), []byte("docs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opened := &countingFS{FS: os.DirFS(dir)}
 	h := (&FS{
-		FS:                 os.DirFS(dir),
+		FS:                 opened,
 		AllowEmptyRoot:     true,
 		GenerateIndexPages: true,
+		IndexNames:         []string{"index.html"},
 		PathRewrite: func(ctx *RequestCtx) []byte {
 			return bytes.Trim(ctx.Path(), "/")
 		},
@@ -2187,6 +2193,27 @@ func TestFSDirectoryTrimmedSlash(t *testing.T) {
 			t.Fatalf("unexpected Location %q", location)
 		}
 	}
+
+	// Warmed: the index comes from the cache, the filesystem is not opened again.
+	before := opened.opens.Load()
+	resp := get("http://public.example/docs/?token=secret")
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code %d", resp.StatusCode())
+	}
+	if n := opened.opens.Load() - before; n != 0 {
+		t.Fatalf("a cached directory request opened the filesystem %d times", n)
+	}
+}
+
+// countingFS counts Open calls, to tell a cache hit from a reopened file.
+type countingFS struct {
+	iofs.FS
+	opens atomic.Int64
+}
+
+func (c *countingFS) Open(name string) (iofs.File, error) {
+	c.opens.Add(1)
+	return c.FS.Open(name)
 }
 
 func changeQueryArgs(ctx *RequestCtx) {

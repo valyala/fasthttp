@@ -1508,7 +1508,23 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, path)
+	// PathRewrite may take off the slash the client sent. Such a request asks
+	// for the directory, so it is cached under the path with the slash: a
+	// request without one never finds it and is still redirected.
+	cacheKey := path
+	clientSlash := hasTrailingSlash
+	if !hasTrailingSlash {
+		reqPath := uriPath
+		if reqPath == nil {
+			reqPath = ctx.Path()
+		}
+		if len(reqPath) > 0 && reqPath[len(reqPath)-1] == '/' {
+			clientSlash = true
+			cacheKey = append(slices.Clip(path), '/')
+		}
+	}
+
+	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, cacheKey)
 	if !ok {
 		filePath := h.pathToFilePath(path, hasTrailingSlash)
 
@@ -1522,20 +1538,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 
 		if errors.Is(err, errDirIndexRequired) {
-			if !hasTrailingSlash {
-				reqPath := uriPath
-				if reqPath == nil {
-					reqPath = ctx.Path()
-				}
-				if len(reqPath) == 0 || reqPath[len(reqPath)-1] != '/' {
-					redirectToDir(ctx, uriSchemeHost, uriPath, uriQuery)
-					return
-				}
-				// PathRewrite took off the slash the client sent: the client
-				// asked for the directory, so it gets the index. It is cached
-				// under the path with the slash, which a request without one
-				// never finds, so that request is still redirected.
-				path = append(slices.Clip(path), '/')
+			if !clientSlash {
+				redirectToDir(ctx, uriSchemeHost, uriPath, uriQuery)
+				return
 			}
 			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
 			if err != nil {
@@ -1558,7 +1563,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			ff.etag = appendFSETag(nil, ff.lastModified, ff.contentLength)
 		}
 
-		ff = h.cacheManager.SetFileToCache(fileCacheKind, path, ff)
+		ff = h.cacheManager.SetFileToCache(fileCacheKind, cacheKey, ff)
 	}
 
 	var notModified bool
