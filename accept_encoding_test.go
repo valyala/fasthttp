@@ -41,6 +41,9 @@ func TestRequestHeaderHasAcceptEncodingTokens(t *testing.T) {
 		{"quality_zero_upper_case_name", "gzip;Q=0.0", "gzip", false},
 		{"quality_zero_other_coding", "gzip, br;q=0", "gzip", true},
 		{"quality_zero_this_coding", "gzip;q=0, br", "br", true},
+		{"quality_zero_then_accepted", "gzip;q=0, gzip", "gzip", true},
+		{"quality_zero_then_positive", "gzip;q=0, gzip;q=1", "gzip", true},
+		{"quality_zero_then_upper_case", "gzip;q=0, GZIP;Q=0.5", "gzip", true},
 		{"quality_prefix_only", "gzip-extra;q=1, br", "gzip", false},
 		{"wildcard_unchanged", "*", "gzip", false},
 	} {

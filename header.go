@@ -1350,7 +1350,9 @@ func (h *RequestHeader) HasAcceptEncodingBytes(acceptEncoding []byte) bool {
 		if params[0] != ';' {
 			continue
 		}
-		return !hasZeroQualityValue(params[1:])
+		if !hasZeroQualityValue(params[1:]) {
+			return true
+		}
 	}
 	return false
 }
