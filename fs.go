@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"html"
@@ -386,6 +387,13 @@ type FS struct {
 	// Path to the compressed root directory to serve files from. If this value
 	// is empty, Root is used.
 	//
+	// When a separate directory is used, FS writes compressed copies under
+	// .fasthttp-<SHA-256 of the normalized Root path>, so distinct root paths can
+	// share a cache. Copies in the previous flat layout are regenerated on
+	// demand. Give older handlers a separate CompressRoot for each Root
+	// and remove their flat caches once those handlers stop using them.
+	// Keep a shared cache outside publicly served roots.
+	//
 	// Compressed copies are confined to CompressRoot (or its parent directory
 	// if it is a file) unless it is a whole volume or AllowSymlinksOutsideRoot is set.
 	CompressRoot string
@@ -663,6 +671,14 @@ func (fs *FS) initRequestHandler() {
 
 	if h.filesystem == nil {
 		h.filesystem = newOSFS(root, compressRoot, fs.AllowSymlinksOutsideRoot)
+		if fs.Compress && root != compressRoot {
+			// A single-file CompressRoot keeps its cache in its parent.
+			cacheDir := compressRoot
+			if fi, err := os.Stat(compressRoot); err == nil && !fi.IsDir() {
+				cacheDir = strings.TrimSuffix(compressRoot, filepath.Base(compressRoot))
+			}
+			h.compressRoot = compressedCacheDir(root, cacheDir)
+		}
 	}
 
 	if fs.SkipCache {
@@ -1407,14 +1423,25 @@ func (h *fsHandler) pathToFilePath(path []byte, hasTrailingSlash bool) string {
 	return filepath.FromSlash(string(b.B))
 }
 
+// Retain the configured path spelling for osRoot.rel, including a leading
+// volume separator when the normalized compression root is empty.
+func compressedCacheDir(root, compressRoot string) string {
+	return fmt.Sprintf("%s%c.fasthttp-%x", compressRoot, os.PathSeparator, sha256.Sum256([]byte(root)))
+}
+
 func (h *fsHandler) filePathToCompressed(filePath string) string {
 	if h.root == h.compressRoot {
 		return filePath
 	}
-	if !strings.HasPrefix(filePath, h.root) {
+	relative, ok := strings.CutPrefix(filePath, h.root)
+	if !ok {
 		return filePath
 	}
-	return filepath.FromSlash(h.compressRoot + filePath[len(h.root):])
+	if relative == "" {
+		// The source root itself is a file.
+		relative = "/" + filepath.Base(filePath)
+	}
+	return filepath.FromSlash(h.compressRoot + relative)
 }
 
 func (h *fsHandler) handleRequest(ctx *RequestCtx) {
@@ -2006,12 +2033,6 @@ func (h *fsHandler) compressAndOpenFSFile(filePath, fileEncoding string) (*fsFil
 		return h.newCompressedFSFileCache(f, fileInfo, compressedFilePath, fileEncoding)
 	}
 
-	if compressedFilePath != filePath {
-		if err := o.compressRoot.mkdirParent(compressedFilePath, 0o750); err != nil {
-			_ = f.Close()
-			return nil, err
-		}
-	}
 	compressedFilePath += h.compressedFileSuffixes[fileEncoding]
 
 	absPath, err := filepath.Abs(compressedFilePath)
@@ -2038,9 +2059,19 @@ func (h *fsHandler) compressFileNolock(
 	// goroutine.
 	// It is safe opening such a file, since the file creation
 	// is guarded by file mutex - see getFileLock call.
-	if _, err := cache.stat(compressedFilePath); err == nil {
+	if cached, err := cache.open(compressedFilePath); err == nil {
 		_ = f.Close()
-		return h.newCompressedFSFile(cache, compressedFilePath, fileEncoding)
+		return h.newCompressedFSFile(cached, compressedFilePath, fileEncoding)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		_ = f.Close()
+		return nil, fmt.Errorf("cannot open compressed file %q: %w", compressedFilePath, err)
+	}
+
+	if h.compressRoot != h.root {
+		if err := cache.mkdirParent(compressedFilePath, 0o750); err != nil {
+			_ = f.Close()
+			return nil, err
+		}
 	}
 
 	// Create temporary file, so concurrent goroutines don't use
@@ -2102,7 +2133,11 @@ func (h *fsHandler) compressFileNolock(
 		_ = cache.remove(tmpFilePath)
 		return nil, fmt.Errorf("cannot move compressed file from %q to %q: %w", tmpFilePath, compressedFilePath, err)
 	}
-	return h.newCompressedFSFile(cache, compressedFilePath, fileEncoding)
+	cached, err := cache.open(compressedFilePath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open compressed file %q: %w", compressedFilePath, err)
+	}
+	return h.newCompressedFSFile(cached, compressedFilePath, fileEncoding)
 }
 
 // newCompressedFSFileCache use memory cache compressed files.
@@ -2176,13 +2211,8 @@ func (h *fsHandler) newCompressedFSFileCache(f fs.File, fileInfo fs.FileInfo, fi
 	return ff, nil
 }
 
-// newCompressedFSFile opens the compressed copy filePath that FS wrote to
-// cache, the root of the compressed files.
-func (h *fsHandler) newCompressedFSFile(cache osRoot, filePath, fileEncoding string) (*fsFile, error) {
-	f, err := cache.open(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("cannot open compressed file %q: %w", filePath, err)
-	}
+// newCompressedFSFile uses the compressed copy FS opened from its disk cache.
+func (h *fsHandler) newCompressedFSFile(f fs.File, filePath, fileEncoding string) (*fsFile, error) {
 	fileInfo, err := f.Stat()
 	if err != nil {
 		_ = f.Close()
