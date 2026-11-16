@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -485,6 +486,9 @@ func TestDeflateThreshold(t *testing.T) {
 func TestDeflateIncompressibleAllocs(t *testing.T) {
 	if raceEnabled {
 		t.Skip("sync.Pool drops entries at random under the race detector")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("the count covers the process, where another test's log line resolves the time zone")
 	}
 	for _, mode := range []CompressionMode{CompressionNoContextTakeover, CompressionContextTakeover} {
 		ts := startServer(t, &AcceptOptions{CompressionMode: mode}, echo)
