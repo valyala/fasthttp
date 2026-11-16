@@ -9353,61 +9353,62 @@ func TestRequestCtxDeadlines(t *testing.T) {
 func TestServerTimeoutHandlerKeepAliveDeadlineCleared(t *testing.T) {
 	t.Parallel()
 
-	var reqNum atomic.Int64
-	s := &Server{
-		ReadTimeout:  0,
-		WriteTimeout: 0,
-		Handler: TimeoutHandler(func(ctx *RequestCtx) {
-			n := reqNum.Add(1)
-			if n == 1 {
-				if err := ctx.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
-					t.Errorf("unexpected SetReadDeadline error: %v", err)
+	serverDateOnce.Do(updateServerDate) // Its refresh goroutine must not start inside the bubble.
+	// In a bubble the timeout fires only once the handler is blocked.
+	synctest.Test(t, func(t *testing.T) {
+		defer time.Sleep(time.Second) // A failed test still has to outlast the first handler.
+
+		var reqNum atomic.Int64
+		s := &Server{
+			ReadTimeout:  0,
+			WriteTimeout: 0,
+			Handler: TimeoutHandler(func(ctx *RequestCtx) {
+				n := reqNum.Add(1)
+				if n == 1 {
+					if err := ctx.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+						t.Errorf("unexpected SetReadDeadline error: %v", err)
+					}
+					time.Sleep(50 * time.Millisecond)
+				} else {
+					ctx.SetBodyString("ok-2")
 				}
-				time.Sleep(50 * time.Millisecond)
-			} else {
-				ctx.SetBodyString("ok-2")
-			}
-		}, 10*time.Millisecond, "timeout"),
-	}
+			}, 10*time.Millisecond, "timeout"),
+		}
 
-	ln := fasthttputil.NewInmemoryListener()
-	go s.Serve(ln) //nolint:errcheck
-	defer ln.Close()
+		pc := fasthttputil.NewPipeConns()
+		go s.ServeConn(pc.Conn1()) //nolint:errcheck
+		c := pc.Conn2()
+		defer c.Close()
 
-	c, err := ln.Dial()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
+		br := bufio.NewReader(c)
 
-	br := bufio.NewReader(c)
+		// First request: triggers timeout
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		var resp1 Response
+		if err := resp1.Read(br); err != nil {
+			t.Fatalf("reading response 1: %v", err)
+		}
+		if resp1.StatusCode() != StatusRequestTimeout {
+			t.Fatalf("unexpected status code: %d", resp1.StatusCode())
+		}
 
-	// First request: triggers timeout
-	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
-		t.Fatal(err)
-	}
-	var resp1 Response
-	if err := resp1.Read(br); err != nil {
-		t.Fatalf("reading response 1: %v", err)
-	}
-	if resp1.StatusCode() != StatusRequestTimeout {
-		t.Fatalf("unexpected status code: %d", resp1.StatusCode())
-	}
+		// Wait for the 100ms deadline to expire
+		time.Sleep(150 * time.Millisecond)
 
-	// Wait for the 100ms deadline to expire
-	time.Sleep(150 * time.Millisecond)
-
-	// Second request on the same keep-alive connection: should succeed
-	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
-		t.Fatal(err)
-	}
-	var resp2 Response
-	if err := resp2.Read(br); err != nil {
-		t.Fatalf("reading response 2: %v", err)
-	}
-	if string(resp2.Body()) != "ok-2" {
-		t.Fatalf("unexpected response 2 body: %q", string(resp2.Body()))
-	}
+		// Second request on the same keep-alive connection: should succeed
+		if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n\r\n")); err != nil {
+			t.Fatal(err)
+		}
+		var resp2 Response
+		if err := resp2.Read(br); err != nil {
+			t.Fatalf("reading response 2: %v", err)
+		}
+		if string(resp2.Body()) != "ok-2" {
+			t.Fatalf("unexpected response 2 body: %q", string(resp2.Body()))
+		}
+	})
 }
 
 func TestServerPipelinedWriteDeadline(t *testing.T) {
