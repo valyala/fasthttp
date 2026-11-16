@@ -25,10 +25,10 @@ type frameReader struct {
 }
 
 // Read reads one message. The returned bytes are owned by the connection and
-// stay valid until the next Read or Reader.
+// stay valid until the next Read or [Conn.Reader] call.
 func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 	deadline := after(c.cfg.readTimeout)
-	if err := c.acquire(c.readMu, ctx, deadline); err != nil {
+	if err := c.acquire(ctx, c.readMu, deadline); err != nil {
 		return 0, nil, err
 	}
 	defer c.readMu.release()
@@ -41,16 +41,25 @@ func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 	if err != nil {
 		return 0, nil, c.fatal(ctx, err)
 	}
-	rd := &c.rd
-	buf := getBuf(min(int(rd.left), readChunkSize)) // #nosec G115
+	buf := getBuf(min(int(c.rd.left), readChunkSize)) // #nosec G115
 	c.readBuf = buf
-	if rd.compressed {
+	if c.rd.compressed {
 		buf, err = c.readInflated(ctx, buf)
-		if err != nil {
-			return 0, nil, err
-		}
-		return typ, buf.b, c.endMessage(ctx)
+	} else {
+		buf, err = c.readPlain(ctx, buf)
 	}
+	if err == nil {
+		err = c.endMessage(ctx)
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	return typ, buf.b, nil
+}
+
+// readPlain reads the rest of the current message into buf.
+func (c *Conn) readPlain(ctx context.Context, buf *buffer) (*buffer, error) {
+	rd := &c.rd
 	for {
 		for rd.left > 0 {
 			n := len(buf.b)
@@ -60,20 +69,16 @@ func (c *Conn) Read(ctx context.Context) (MessageType, []byte, error) {
 			}
 			buf.b = buf.b[:n+step]
 			if err := c.readFrameInto(ctx, buf.b[n:]); err != nil {
-				return 0, nil, c.fatal(ctx, err)
+				return buf, c.fatal(ctx, err)
 			}
 		}
 		if rd.fin {
-			break
+			return buf, nil
 		}
 		if err := c.nextFrame(ctx); err != nil {
-			return 0, nil, c.fatal(ctx, err)
+			return buf, c.fatal(ctx, err)
 		}
 	}
-	if err := c.endMessage(ctx); err != nil {
-		return 0, nil, err
-	}
-	return typ, buf.b, nil
 }
 
 // growReadBuf replaces buf with one holding at least need bytes, sized for the
@@ -98,7 +103,7 @@ func readBufSize(have, need, want, limit int) int {
 	return n
 }
 
-// readInflated decompresses the current message into buf.
+// readInflated decompresses the rest of the current message into buf.
 func (c *Conn) readInflated(ctx context.Context, buf *buffer) (*buffer, error) {
 	for {
 		p := buf.b[len(buf.b):cap(buf.b)]
@@ -122,12 +127,12 @@ func (c *Conn) readInflated(ctx context.Context, buf *buffer) (*buffer, error) {
 	}
 }
 
-// Reader returns a reader for the next message. It is valid until the next
-// Read or Reader, which discards whatever is left of the message; it must not
-// be used afterwards.
+// Reader returns a reader for the next message, whose Read calls are bounded
+// by ctx as well. It is valid until the next [Conn.Read] or Reader call, which
+// discards whatever is left of the message; it must not be used afterwards.
 func (c *Conn) Reader(ctx context.Context) (MessageType, io.Reader, error) {
 	deadline := after(c.cfg.readTimeout)
-	if err := c.acquire(c.readMu, ctx, deadline); err != nil {
+	if err := c.acquire(ctx, c.readMu, deadline); err != nil {
 		return 0, nil, err
 	}
 	defer c.readMu.release()
@@ -157,7 +162,7 @@ func (r *msgReader) Read(p []byte) (int, error) {
 		return 0, io.EOF
 	}
 	deadline := after(c.cfg.readTimeout)
-	if err := c.acquire(c.readMu, r.ctx, deadline); err != nil {
+	if err := c.acquire(r.ctx, c.readMu, deadline); err != nil {
 		return 0, err
 	}
 	defer c.readMu.release()
@@ -305,9 +310,9 @@ func (c *Conn) nextFrame(ctx context.Context) error {
 		if _, err := io.ReadFull(c.r, h[:2]); err != nil {
 			return err
 		}
-		fin, compressed := h[0]&0x80 != 0, h[0]&rsv1 != 0
-		op := h[0] & 0x0f
-		if rsv := h[0] & 0x70; rsv != 0 && (!compressed || rsv != rsv1 || !c.cfg.deflate.enabled || (op != opText && op != opBinary)) {
+		fin, op, rsv := h[0]&0x80 != 0, h[0]&0x0f, h[0]&0x70
+		compressed := rsv == rsv1 && c.cfg.deflate.enabled && (op == opText || op == opBinary)
+		if rsv != 0 && !compressed {
 			return c.fail(ctx, StatusProtocolError, "reserved bits set")
 		}
 		if masked := h[1]&0x80 != 0; masked == c.client {
@@ -381,8 +386,7 @@ func (c *Conn) nextFrame(ctx context.Context) error {
 	}
 }
 
-// readFrameInto reads the rest of the current frame, which must be exactly
-// len(p) bytes.
+// readFrameInto reads len(p) bytes of the current frame's payload.
 func (c *Conn) readFrameInto(ctx context.Context, p []byte) error {
 	if _, err := io.ReadFull(c.r, p); err != nil {
 		return err
@@ -408,6 +412,8 @@ func (c *Conn) readPayload(ctx context.Context, p []byte) (int, error) {
 	return n, err
 }
 
+// consumed unmasks and accounts for p, payload just read from the current
+// frame.
 func (c *Conn) consumed(ctx context.Context, p []byte) error {
 	rd := &c.rd
 	if !c.client {
@@ -428,7 +434,7 @@ func (c *Conn) handleClose(ctx context.Context, p []byte) error {
 		return c.fail(ctx, StatusProtocolError, "bad close payload")
 	case len(p) >= 2:
 		ce.Code = StatusCode(binary.BigEndian.Uint16(p))
-		if !validReceivedCode(ce.Code) {
+		if !validCloseCode(ce.Code) {
 			return c.fail(ctx, StatusProtocolError, "bad close code")
 		}
 		if !utf8.Valid(p[2:]) {
