@@ -2,6 +2,7 @@ package fasthttpproxy
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -42,6 +43,7 @@ func TestDialerGetDialFunc(t *testing.T) {
 		expectedCounts     []int64
 		dialAddr           string
 		expectedErrMessage string
+		direct             bool
 	}{
 		{
 			name: "proxy information comes from the configuration. dial https host",
@@ -81,6 +83,7 @@ func TestDialerGetDialFunc(t *testing.T) {
 			},
 			expectedCounts: []int64{0, 0, 0, 0},
 			dialAddr:       "github.com:80",
+			direct:         true,
 		},
 		{
 			name: "proxy information comes from the configuration. dial https host matched with no proxy",
@@ -94,6 +97,7 @@ func TestDialerGetDialFunc(t *testing.T) {
 			},
 			expectedCounts: []int64{0, 0, 0, 0},
 			dialAddr:       "github.com:443",
+			direct:         true,
 		},
 		{
 			name: "proxy information comes from the env. dial http host",
@@ -134,6 +138,7 @@ func TestDialerGetDialFunc(t *testing.T) {
 			},
 			expectedCounts: []int64{0, 0, 0, 0},
 			dialAddr:       "github.com:80",
+			direct:         true,
 		},
 		{
 			name: "proxy information comes from the env. dial https host matched with no proxy",
@@ -147,6 +152,7 @@ func TestDialerGetDialFunc(t *testing.T) {
 			},
 			expectedCounts: []int64{0, 0, 0, 0},
 			dialAddr:       "github.com:443",
+			direct:         true,
 		},
 		{
 			name: "proxy information comes from the configuration and http proxy same with https proxy. dial http host",
@@ -186,6 +192,7 @@ func TestDialerGetDialFunc(t *testing.T) {
 			},
 			expectedCounts: []int64{0, 0, 0, 0},
 			dialAddr:       "github.com:80",
+			direct:         true,
 		},
 		{
 			name: "proxy information comes from the configuration and http proxy same with https proxy. dial https host matched with no proxy",
@@ -199,6 +206,7 @@ func TestDialerGetDialFunc(t *testing.T) {
 			},
 			expectedCounts: []int64{0, 0, 0, 0},
 			dialAddr:       "github.com:443",
+			direct:         true,
 		},
 		{
 			name: "return an error for unsupported proxy protocols.",
@@ -217,6 +225,7 @@ func TestDialerGetDialFunc(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			d := getDialer(tt.fields.httpProxy, tt.fields.httpsProxy, tt.fields.noProxy)
+			d.Resolver = directResolver{}
 			dialFunc, err := d.GetDialFunc(tt.args.useEnv)
 			if (err != nil) != (tt.expectedErrMessage != "") {
 				t.Fatalf("GetDialFunc() error = %v, expectedErr %v", err, tt.expectedErrMessage)
@@ -229,7 +238,11 @@ func TestDialerGetDialFunc(t *testing.T) {
 				return
 			}
 			_, err = dialFunc(tt.dialAddr)
-			if err != nil {
+			if tt.direct {
+				if !errors.Is(err, errDirectDial) {
+					t.Fatalf("expected a direct dial, got %v", err)
+				}
+			} else if err != nil {
 				t.Fatal(err)
 			}
 			if !countsEqual(getCounts(counts), tt.expectedCounts) {
@@ -559,6 +572,19 @@ func startProxyServer(t *testing.T, ports []string, counts []atomic.Int64) (lns 
 		}()
 	}
 	return lns
+}
+
+var errDirectDial = errors.New("direct dial")
+
+// directResolver fails the lookup of a host name with errDirectDial: only a
+// dial that bypasses the proxies resolves one, and it stays off the network.
+type directResolver struct{}
+
+func (directResolver) LookupIPAddr(_ context.Context, host string) ([]net.IPAddr, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return []net.IPAddr{{IP: ip}}, nil
+	}
+	return nil, errDirectDial
 }
 
 func getDialer(httpProxy, httpsProxy, noProxy string) *Dialer {
