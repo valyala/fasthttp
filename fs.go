@@ -1512,7 +1512,9 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 	// request without one never finds it and is still redirected.
 	cacheKey := path
 	clientSlash := hasTrailingSlash
-	if !hasTrailingSlash {
+	// Only a rewriter can drop the client's slash; the built-in strippers do so
+	// only when nothing is left, so other requests skip the second path read.
+	if !hasTrailingSlash && h.pathRewrite != nil && (!h.pathRewriteKeepsURI || len(path) == 0) {
 		reqPath := uriPath
 		if reqPath == nil {
 			reqPath = ctx.Path()

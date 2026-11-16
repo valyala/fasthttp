@@ -3302,3 +3302,30 @@ func TestOSFSOpenReturnsOSFile(t *testing.T) {
 		}
 	}
 }
+
+func TestFSStripperTrimsToEmptyDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := (&FS{
+		FS:             os.DirFS(dir),
+		AllowEmptyRoot: true,
+		IndexNames:     []string{"index.html"},
+		PathRewrite:    NewPathSlashesStripper(2),
+	}).NewRequestHandler()
+
+	// Twice: the second answer comes from the cache.
+	for range 2 {
+		var ctx RequestCtx
+		var req Request
+		req.SetRequestURI("http://example.com/a/b/")
+		ctx.Init(&req, nil, TestLogger{t})
+		h(&ctx)
+		if ctx.Response.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code %d, Location %q", ctx.Response.StatusCode(), ctx.Response.Header.Peek(HeaderLocation))
+		}
+	}
+}
