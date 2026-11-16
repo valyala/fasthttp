@@ -9481,10 +9481,15 @@ func TestServerTimeoutHandlerConcurrentAddressesAndDeadlines(t *testing.T) {
 	t.Parallel()
 
 	timeoutFinished := make(chan struct{})
+	responded := make(chan struct{})
 	s := &Server{
 		Handler: TimeoutHandler(func(ctx *RequestCtx) {
-			// Sleep until timeout has fired and server processed it
-			time.Sleep(30 * time.Millisecond)
+			// Wait until the timeout response has reached the client.
+			select {
+			case <-responded:
+			case <-t.Context().Done():
+				return
+			}
 
 			logger := ctx.Logger()
 			// Concurrently call RemoteAddr, LocalAddr, Logger, and deadlines
@@ -9545,6 +9550,7 @@ func TestServerTimeoutHandlerConcurrentAddressesAndDeadlines(t *testing.T) {
 	if resp.StatusCode() != StatusRequestTimeout {
 		t.Fatalf("unexpected status code: %d", resp.StatusCode())
 	}
+	close(responded)
 
 	select {
 	case <-timeoutFinished:
