@@ -3914,6 +3914,34 @@ Content-Type: application/json
 	}
 }
 
+func TestWriteMultipartFormBoundaryInContent(t *testing.T) {
+	t.Parallel()
+
+	for _, disposition := range []string{`name="comment"`, `name="file"; filename="upload"`} {
+		// Place the delimiter across a copy-buffer boundary in the on-disk file.
+		value := strings.Repeat(strings.Repeat("a", 64)+"=\r\n", 511) + strings.Repeat("a", 60) +
+			"=0D=0A--foo=0D=0AContent-Disposition: form-data; name=3D\"role\"=0D=0A=0D=0Aadmin"
+		body := "--foo\r\nContent-Disposition: form-data; " + disposition +
+			"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" + value + "\r\n--foo--\r\n"
+		form, err := multipart.NewReader(strings.NewReader(body), "foo").ReadForm(0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = WriteMultipartForm(io.Discard, form, "foo")
+		if removeErr := form.RemoveAll(); removeErr != nil {
+			t.Fatal(removeErr)
+		}
+		if err == nil {
+			t.Errorf("accepted decoded boundary in %s", disposition)
+		}
+	}
+
+	form := &multipart.Form{Value: map[string][]string{"comment": {"--foo--"}}}
+	if err := WriteMultipartForm(io.Discard, form, "foo"); err == nil {
+		t.Error("accepted boundary at start of value")
+	}
+}
+
 func TestResponseRawBodySet(t *testing.T) {
 	t.Parallel()
 

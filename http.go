@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1419,8 +1420,43 @@ func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
 	return buf.B, nil
 }
 
+var errMultipartBoundaryInContent = errors.New("multipart boundary in part content")
+
+// multipartFileWriter checks for delimiter lines, including delimiters split
+// across writes. matched is -1 between the start of a line and the next LF
+// once the delimiter can no longer match.
+type multipartFileWriter struct {
+	w         io.Writer
+	delimiter []byte
+	matched   int
+}
+
+func (w *multipartFileWriter) Write(p []byte) (int, error) {
+	for rest := p; len(rest) > 0; {
+		if w.matched >= 0 {
+			n := min(len(rest), len(w.delimiter)-w.matched)
+			if bytes.Equal(rest[:n], w.delimiter[w.matched:w.matched+n]) {
+				w.matched += n
+				if w.matched == len(w.delimiter) {
+					return 0, errMultipartBoundaryInContent
+				}
+				break
+			}
+			w.matched = -1
+		}
+		i := bytes.IndexByte(rest, '\n')
+		if i < 0 {
+			break
+		}
+		w.matched = 0
+		rest = rest[i+1:]
+	}
+	return w.w.Write(p)
+}
+
 // WriteMultipartForm writes the given multipart form f with the given
-// boundary to w.
+// boundary to w. It returns an error if a line in a field or file starts
+// with the boundary delimiter.
 func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	// Do not care about memory allocations here, since multipart
 	// form processing is slow.
@@ -1433,9 +1469,15 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 		return fmt.Errorf("cannot use form boundary %q: %w", boundary, err)
 	}
 
+	delimiter := "--" + boundary
+	lineDelimiter := "\n" + delimiter
+
 	// marshal values
 	for k, vv := range f.Value {
 		for _, v := range vv {
+			if strings.HasPrefix(v, delimiter) || strings.Contains(v, lineDelimiter) {
+				return fmt.Errorf("cannot write form field %q: %w", k, errMultipartBoundaryInContent)
+			}
 			if err := mw.WriteField(k, v); err != nil {
 				return fmt.Errorf("cannot write form field %q value %q: %w", k, v, err)
 			}
@@ -1453,7 +1495,8 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 			if err != nil {
 				return fmt.Errorf("cannot open form file %q (%q): %w", k, fv.Filename, err)
 			}
-			if _, err = copyZeroAlloc(vw, fh); err != nil {
+			fw := multipartFileWriter{w: vw, delimiter: []byte(delimiter)}
+			if _, err = copyZeroAlloc(&fw, fh); err != nil {
 				_ = fh.Close()
 				return fmt.Errorf("error when copying form file %q (%q): %w", k, fv.Filename, err)
 			}
