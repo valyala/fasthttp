@@ -7392,6 +7392,10 @@ func TestHostClientQueueForIdleCanceledConnectionClose(t *testing.T) {
 				conn, peer := net.Pipe()
 				t.Cleanup(func() { conn.Close() })
 				t.Cleanup(func() { peer.Close() })
+				// net.Pipe refuses a deadline once the client has closed its end.
+				if err := peer.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+					t.Fatal(err)
+				}
 				dialStarted := make(chan struct{})
 				allowDial := make(chan struct{})
 				unblockDial := sync.OnceFunc(func() { close(allowDial) })
@@ -7429,9 +7433,6 @@ func TestHostClientQueueForIdleCanceledConnectionClose(t *testing.T) {
 						t.Fatalf("unexpected waiter result: conn=%p err=%v", w.conn, w.err)
 					}
 					w.cancel(c, ErrTimeout)
-				}
-				if err := peer.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
-					t.Fatal(err)
 				}
 				var b [1]byte
 				if _, err := peer.Read(b[:]); err != io.EOF {
