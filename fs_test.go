@@ -2208,6 +2208,7 @@ func TestFSDirectoryTrimmedSlash(t *testing.T) {
 // countingFS counts Open calls, to tell a cache hit from a reopened file.
 type countingFS struct {
 	iofs.FS
+
 	opens atomic.Int64
 }
 
