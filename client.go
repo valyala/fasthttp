@@ -505,6 +505,19 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 	return c.Do(req, resp)
 }
 
+func contextErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if dl, ok := ctx.Deadline(); ok && !time.Now().Before(dl) {
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
 // DoContext performs the given http request and fills the given http response,
 // respecting context cancellation and deadlines.
 //
@@ -524,24 +537,19 @@ func (c *Client) DoDeadline(req *Request, resp *Response, deadline time.Time) er
 // If ctx is cancelled or expires during dial, reading, or writing, the
 // operation is aborted and ctx.Err() is returned.
 //
+// For streamed request bodies (such as those provided via Request.SetBodyStream),
+// context cancellation closes the underlying network connection. However, if the
+// client is blocked waiting for the upload stream's reader to produce bytes (e.g.
+// reading from an unclosed io.Pipe), closing the connection does not unblock the
+// reader. The caller is responsible for unblocking or closing the upload source
+// (for example by closing the pipe writer), after which DoContext returns ctx.Err()
+// and frees the connection slot.
+//
 // ErrNoFreeConns is returned if all Client.MaxConnsPerHost connections
 // to the requested host are busy.
 //
 // It is recommended obtaining req and resp via AcquireRequest
 // and AcquireResponse in performance-critical code.
-func contextErr(ctx context.Context) error {
-	if ctx == nil {
-		return nil
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if dl, ok := ctx.Deadline(); ok && !time.Now().Before(dl) {
-		return context.DeadlineExceeded
-	}
-	return nil
-}
-
 func (c *Client) DoContext(ctx context.Context, req *Request, resp *Response) error {
 	if ctx == nil {
 		return errors.New("fasthttp: nil context")
@@ -1760,6 +1768,14 @@ func (c *HostClient) DoDeadline(req *Request, resp *Response, deadline time.Time
 // If ctx is cancelled or expires during dial, reading, or writing, the
 // operation is aborted and ctx.Err() is returned.
 //
+// For streamed request bodies (such as those provided via Request.SetBodyStream),
+// context cancellation closes the underlying network connection. However, if the
+// client is blocked waiting for the upload stream's reader to produce bytes (e.g.
+// reading from an unclosed io.Pipe), closing the connection does not unblock the
+// reader. The caller is responsible for unblocking or closing the upload source
+// (for example by closing the pipe writer), after which DoContext returns ctx.Err()
+// and frees the connection slot.
+//
 // ErrNoFreeConns is returned if all HostClient.MaxConns connections
 // to the host are busy.
 //
@@ -2305,26 +2321,20 @@ func (c *HostClient) dialConnFor(w *wantConn) {
 		return
 	}
 
-	dialCtx := context.Background()
-	var dialCancel context.CancelFunc
-	if w.ctx != nil || hasBudget {
-		ctx := w.ctx
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		dialCtx, dialCancel = context.WithCancel(ctx)
-		w.dialCancel = dialCancel
+	ctx := w.ctx
+	if ctx == nil {
+		ctx = context.Background()
 	}
+	dialCtx, dialCancel := context.WithCancel(ctx)
+	w.dialCancel = dialCancel
 	w.mu.Unlock()
 
-	if dialCancel != nil {
-		defer func() {
-			w.mu.Lock()
-			w.dialCancel = nil
-			w.mu.Unlock()
-			dialCancel()
-		}()
-	}
+	defer func() {
+		w.mu.Lock()
+		w.dialCancel = nil
+		w.mu.Unlock()
+		dialCancel()
+	}()
 
 	conn, err := c.dialHostHardContext(dialCtx, budget)
 	if err != nil {
@@ -2812,12 +2822,23 @@ func dialAddrContext(
 			if ctxErr := contextErr(ctx); ctxErr != nil {
 				return nil, ctxErr
 			}
+			if writeTimeout == 0 && dialTimeout > 0 {
+				return nil, ErrTimeout
+			}
 			return nil, ErrTLSHandshakeTimeout
 		}
 		if writeTimeout == 0 && dialTimeout <= 0 && (ctx == nil || ctx.Done() == nil) {
 			return tls.Client(conn, tlsConfig), nil
 		}
-		return tlsClientHandshake(ctx, conn, tlsConfig, deadline)
+		conn, err = tlsClientHandshake(ctx, conn, tlsConfig, deadline)
+		if err != nil {
+			if errors.Is(err, ErrTLSHandshakeTimeout) && dialTimeout > 0 &&
+				(writeTimeout == 0 || !start.Add(dialTimeout).After(deadline)) {
+				return nil, ErrTimeout
+			}
+			return nil, err
+		}
+		return conn, nil
 	}
 	return conn, nil
 }
@@ -2828,13 +2849,6 @@ func callDialFunc(
 	addr string, dial DialFunc, dialWithTimeout DialFuncWithTimeout, dialContext DialFuncWithContext,
 	dialDualStack, isTLS bool, timeout time.Duration,
 ) (net.Conn, error) {
-	if dialWithTimeout != nil {
-		return dialWithTimeout(addr, timeout)
-	}
-	if dial != nil {
-		return dial(addr)
-	}
-
 	if dialContext != nil {
 		dialCtx := ctx
 		if dialCtx == nil {
@@ -2854,6 +2868,13 @@ func callDialFunc(
 			}
 		}
 		return dialContext(dialCtx, addr)
+	}
+
+	if dialWithTimeout != nil {
+		return dialWithTimeout(addr, timeout)
+	}
+	if dial != nil {
+		return dial(addr)
 	}
 
 	addr = AddMissingPort(addr, isTLS)
@@ -4203,6 +4224,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	err = resp.readLimitBody(br, hc.MaxResponseBodySize, isHead, req.Header.IsConnect())
 	if err != nil {
 		watcher.stop()
+		_ = resp.closeBodyStream(err)
 		hc.ReleaseReader(br)
 		hc.CloseConn(cc)
 		if ctxErr := contextErr(req.ctx); ctxErr != nil {
@@ -4215,6 +4237,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 
 	if ctxErr := contextErr(req.ctx); ctxErr != nil {
 		watcher.stop()
+		_ = resp.closeBodyStream(ctxErr)
 		hc.ReleaseReader(br)
 		hc.CloseConn(cc)
 		return false, ctxErr

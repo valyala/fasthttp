@@ -340,6 +340,12 @@ func (resp *Response) SendFile(path string) error {
 // bodyStream.Close() is called after finishing reading all body data
 // if it implements io.Closer.
 //
+// When using SetBodyStream with DoContext, context cancellation closes the
+// underlying network socket. If the upload stream is blocked waiting for a
+// producer (e.g. reading from an unclosed io.Pipe), the caller must unblock
+// or close the reader/writer to allow the request to abort and release its
+// connection slot.
+//
 // Note that GET and HEAD requests cannot have body.
 //
 // See also SetBodyStreamWriter.

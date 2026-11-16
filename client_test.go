@@ -8913,3 +8913,544 @@ func TestClientDo_RequestTimeoutPreserved(t *testing.T) {
 		t.Fatalf("expected req2.timeout to remain 0, got %v", req2.timeout)
 	}
 }
+
+func TestClientDoContext_CancelDuringHeaderRead_StreamCleared(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	headerSentCh := make(chan struct{})
+	serverDone := make(chan struct{})
+
+	go func() {
+		defer close(serverDone)
+
+		// First connection: write an incomplete header so the client blocks in ReadLimitBody.
+		conn1, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn1.Close()
+
+		br1 := bufio.NewReader(conn1)
+		var req1 Request
+		if err := req1.Read(br1); err != nil {
+			return
+		}
+
+		// Write partial headers without terminating \r\n\r\n.
+		if _, err := conn1.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n")); err != nil {
+			return
+		}
+		close(headerSentCh)
+
+		// Wait until client cancels and closes the socket.
+		var buf [1]byte
+		_, _ = conn1.Read(buf[:])
+
+		// Second connection: respond normally with "HELLO".
+		conn2, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn2.Close()
+
+		br2 := bufio.NewReader(conn2)
+		var req2 Request
+		if err := req2.Read(br2); err != nil {
+			return
+		}
+		_, _ = conn2.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nHELLO"))
+	}()
+
+	client := &HostClient{
+		Addr:               ln.Addr().String(),
+		StreamResponseBody: true,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var req1 Request
+	var resp1 Response
+	resp1.StreamBody = true
+	req1.SetRequestURI("http://" + ln.Addr().String() + "/first")
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.DoContext(ctx, &req1, &resp1)
+	}()
+
+	<-headerSentCh
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	err1 := <-errCh
+	if !errors.Is(err1, context.Canceled) {
+		t.Fatalf("expected context.Canceled for req1, got %v", err1)
+	}
+
+	// Verify that the body stream was closed and cleared upon cancellation.
+	stream1 := resp1.BodyStream()
+	if stream1 != nil {
+		var buf [16]byte
+		n, rErr := stream1.Read(buf[:])
+		if n > 0 && string(buf[:n]) == "HELLO" {
+			t.Fatalf("canceled response stream unexpectedly read bytes from next response: %q", string(buf[:n]))
+		}
+		if rErr == nil {
+			t.Fatalf("expected read error on canceled response stream, got nil")
+		}
+	}
+
+	// Second request on the same HostClient must succeed.
+	var req2 Request
+	var resp2 Response
+	req2.SetRequestURI("http://" + ln.Addr().String() + "/second")
+	if err := client.Do(&req2, &resp2); err != nil {
+		t.Fatalf("req2 failed on reused client: %v", err)
+	}
+	if string(resp2.Body()) != "HELLO" {
+		t.Fatalf("expected 'HELLO' for req2, got %q", string(resp2.Body()))
+	}
+
+	// Canceled response must still not be able to read the second response's bytes.
+	if stream1 != nil {
+		var buf [16]byte
+		n, _ := stream1.Read(buf[:])
+		if n > 0 && string(buf[:n]) == "HELLO" {
+			t.Fatalf("canceled response stream read second response bytes: %q", string(buf[:n]))
+		}
+	}
+	if string(resp1.Body()) == "HELLO" {
+		t.Fatalf("canceled response body contains second response data")
+	}
+
+	<-serverDone
+}
+
+func TestHostClientQueuedReplacementConn_MaxConnWaitTimeout(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	serverStopCh := make(chan struct{})
+	req1CanFinish := make(chan struct{})
+	go func() {
+		defer close(serverStopCh)
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				s := &Server{
+					Handler: func(ctx *RequestCtx) {
+						if string(ctx.Path()) == "/test1" {
+							<-req1CanFinish
+						}
+						ctx.SetStatusCode(StatusOK)
+						ctx.SetBodyString("ok")
+					},
+				}
+				_ = s.ServeConn(c)
+			}(conn)
+		}
+	}()
+	defer func() {
+		_ = ln.Close()
+		<-serverStopCh
+	}()
+
+	var dialCount atomic.Int32
+	replacementDialStarted := make(chan struct{})
+	replacementDialCanceled := make(chan struct{})
+
+	client := &HostClient{
+		Addr:               "inmemory",
+		MaxConns:           1,
+		MaxConnWaitTimeout: 100 * time.Millisecond,
+		DialContext: func(ctx context.Context, addr string) (net.Conn, error) {
+			count := dialCount.Add(1)
+			if count == 1 {
+				return ln.Dial()
+			}
+			if count == 2 {
+				close(replacementDialStarted)
+				<-ctx.Done()
+				close(replacementDialCanceled)
+				return nil, ctx.Err()
+			}
+			return ln.Dial()
+		},
+	}
+
+	var req1 Request
+	var resp1 Response
+	req1.SetRequestURI("http://inmemory/test1")
+	req1.SetConnectionClose()
+
+	errCh1 := make(chan error, 1)
+	go func() {
+		errCh1 <- client.Do(&req1, &resp1)
+	}()
+
+	// Wait until req1 starts and holds the connection slot.
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		client.connsLock.Lock()
+		count := client.connsCount
+		client.connsLock.Unlock()
+		if count == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("req1 never acquired connection")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// req2 uses ordinary Do with only MaxConnWaitTimeout set (no context, no DoTimeout).
+	var req2 Request
+	var resp2 Response
+	req2.SetRequestURI("http://inmemory/test2")
+
+	errCh2 := make(chan error, 1)
+	go func() {
+		errCh2 <- client.Do(&req2, &resp2)
+	}()
+
+	// Wait until req2 is queued as a waiter.
+	deadline = time.Now().Add(3 * time.Second)
+	for {
+		client.connsLock.Lock()
+		queued := client.connsWait != nil && client.connsWait.len() > 0
+		client.connsLock.Unlock()
+		if queued {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("waiter for req2 was not queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Finish req1 so its connection closes, triggering replacement dial for queued req2.
+	close(req1CanFinish)
+	if err := <-errCh1; err != nil {
+		t.Fatalf("req1 failed: %v", err)
+	}
+
+	// Replacement dial must start.
+	select {
+	case <-replacementDialStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("replacement dial did not start")
+	}
+
+	// req2 must return ErrNoFreeConns when MaxConnWaitTimeout expires.
+	select {
+	case err := <-errCh2:
+		if !errors.Is(err, ErrNoFreeConns) {
+			t.Fatalf("expected ErrNoFreeConns for req2, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("req2 did not time out")
+	}
+
+	// Replacement dial must be canceled when the waiter gives up on MaxConnWaitTimeout.
+	select {
+	case <-replacementDialCanceled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("replacement dial was not canceled when waiter gave up on MaxConnWaitTimeout")
+	}
+
+	// Freed slot must be released.
+	deadline = time.Now().Add(3 * time.Second)
+	for client.ConnsCount() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("connection slot was not released: %d", client.ConnsCount())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Subsequent request must succeed.
+	var req3 Request
+	var resp3 Response
+	req3.SetRequestURI("http://inmemory/test3")
+	if err := client.Do(&req3, &resp3); err != nil {
+		t.Fatalf("req3 failed to use freed slot: %v", err)
+	}
+	if resp3.StatusCode() != StatusOK {
+		t.Fatalf("expected status 200, got %d", resp3.StatusCode())
+	}
+}
+
+func TestClientDoContext_StreamUploadCancellation_BlockedPipe(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	serverStopCh := make(chan struct{})
+	go func() {
+		defer close(serverStopCh)
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				ctx.SetStatusCode(StatusOK)
+				ctx.SetBodyString("ok")
+			},
+		}
+		_ = s.Serve(ln)
+	}()
+	defer func() {
+		_ = ln.Close()
+		<-serverStopCh
+	}()
+
+	client := &HostClient{
+		Addr:     "inmemory",
+		MaxConns: 1,
+		Dial: func(addr string) (net.Conn, error) {
+			return ln.Dial()
+		},
+	}
+
+	pr, pw := io.Pipe()
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://inmemory/upload")
+	req.Header.SetMethod("POST")
+	req.SetBodyStream(pr, -1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- client.DoContext(ctx, &req, &resp)
+	}()
+
+	// Wait until DoContext has acquired the only connection slot.
+	deadline := time.Now().Add(3 * time.Second)
+	for client.ConnsCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("DoContext never acquired connection slot")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Cancel context while pipe read is still blocked.
+	cancel()
+
+	// Verify DoContext remains blocked while the pipe writer is unclosed.
+	select {
+	case err := <-errCh:
+		t.Fatalf("expected DoContext to stay blocked on unclosed pipe reader, but returned: %v", err)
+	case <-time.After(50 * time.Millisecond):
+		// Expected: DoContext is still blocked waiting for the upload producer.
+	}
+
+	// Unblock upload reader by closing pipe writer.
+	_ = pw.CloseWithError(ctx.Err())
+
+	// DoContext must now unblock and return context.Canceled.
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("DoContext did not unblock after pipe writer closed")
+	}
+
+	// Connection slot must be released.
+	deadline = time.Now().Add(3 * time.Second)
+	for client.ConnsCount() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("connection slot was not freed: %d", client.ConnsCount())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Subsequent request on the same HostClient must succeed.
+	var req2 Request
+	var resp2 Response
+	req2.SetRequestURI("http://inmemory/next")
+	if err := client.Do(&req2, &resp2); err != nil {
+		t.Fatalf("subsequent request failed: %v", err)
+	}
+	if resp2.StatusCode() != StatusOK {
+		t.Fatalf("expected status 200, got %d", resp2.StatusCode())
+	}
+}
+
+func TestClientDoContext_DialContextPrecedence(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	serverStopCh := make(chan struct{})
+	go func() {
+		defer close(serverStopCh)
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				ctx.SetStatusCode(StatusOK)
+				ctx.SetBodyString("ok")
+			},
+		}
+		_ = s.Serve(ln)
+	}()
+	defer func() {
+		_ = ln.Close()
+		<-serverStopCh
+	}()
+
+	var dialContextCalled atomic.Bool
+	var dialCalled atomic.Bool
+	var dialTimeoutCalled atomic.Bool
+
+	client := &HostClient{
+		Addr: "inmemory",
+		Dial: func(addr string) (net.Conn, error) {
+			dialCalled.Store(true)
+			return nil, errors.New("legacy Dial called")
+		},
+		DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
+			dialTimeoutCalled.Store(true)
+			return nil, errors.New("legacy DialTimeout called")
+		},
+		DialContext: func(ctx context.Context, addr string) (net.Conn, error) {
+			dialContextCalled.Store(true)
+			return ln.Dial()
+		},
+	}
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://inmemory/precedence")
+	req.SetConnectionClose()
+
+	// 1. Verify DoContext invokes DialContext instead of Dial or DialTimeout.
+	if err := client.DoContext(context.Background(), &req, &resp); err != nil {
+		t.Fatalf("DoContext failed: %v", err)
+	}
+	if !dialContextCalled.Load() {
+		t.Fatal("expected DialContext to be called")
+	}
+	if dialCalled.Load() {
+		t.Fatal("unexpected call to legacy Dial callback")
+	}
+	if dialTimeoutCalled.Load() {
+		t.Fatal("unexpected call to legacy DialTimeout callback")
+	}
+
+	// 2. Verify ordinary Do on HostClient also respects DialContext precedence over Dial and DialTimeout.
+	dialContextCalled.Store(false)
+	var req2 Request
+	var resp2 Response
+	req2.SetRequestURI("http://inmemory/precedence2")
+	req2.SetConnectionClose()
+	if err := client.Do(&req2, &resp2); err != nil {
+		t.Fatalf("Do failed: %v", err)
+	}
+	if !dialContextCalled.Load() {
+		t.Fatal("expected DialContext to be called for ordinary Do")
+	}
+	if dialCalled.Load() {
+		t.Fatal("unexpected call to legacy Dial callback during ordinary Do")
+	}
+	if dialTimeoutCalled.Load() {
+		t.Fatal("unexpected call to legacy DialTimeout callback during ordinary Do")
+	}
+
+	// 3. Verify Client level precedence with both Dial and DialContext configured.
+	dialContextCalled.Store(false)
+	c := &Client{
+		Dial: func(addr string) (net.Conn, error) {
+			dialCalled.Store(true)
+			return nil, errors.New("legacy Client.Dial called")
+		},
+		DialTimeout: func(addr string, timeout time.Duration) (net.Conn, error) {
+			dialTimeoutCalled.Store(true)
+			return nil, errors.New("legacy Client.DialTimeout called")
+		},
+		DialContext: func(ctx context.Context, addr string) (net.Conn, error) {
+			dialContextCalled.Store(true)
+			return ln.Dial()
+		},
+	}
+	var req3 Request
+	var resp3 Response
+	req3.SetRequestURI("http://inmemory/client-precedence")
+	if err := c.DoContext(context.Background(), &req3, &resp3); err != nil {
+		t.Fatalf("Client.DoContext failed: %v", err)
+	}
+	if !dialContextCalled.Load() {
+		t.Fatal("expected Client.DialContext to be called")
+	}
+}
+
+func TestClientDoTimeout_TLSHandshakeTimeout_ReturnsErrTimeout(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	serverStopCh := make(chan struct{})
+	defer close(serverStopCh)
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			// Hold the connection open without reading or writing anything (simulates stalled TLS peer).
+			go func(c net.Conn) {
+				defer c.Close()
+				<-serverStopCh
+			}(conn)
+		}
+	}()
+
+	// HostClient with WriteTimeout unset (0) and IsTLS enabled.
+	hc := &HostClient{
+		Addr:      ln.Addr().String(),
+		IsTLS:     true,
+		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("https://" + ln.Addr().String() + "/tls-timeout")
+
+	start := time.Now()
+	err = hc.DoTimeout(&req, &resp, 20*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected DoTimeout to fail on stalled TLS handshake")
+	}
+	if !errors.Is(err, ErrTimeout) {
+		t.Fatalf("expected ErrTimeout for DoTimeout without context, got %v (%T)", err, err)
+	}
+	if elapsed >= 150*time.Millisecond {
+		t.Fatalf("expected timeout in ~20ms, took %v", elapsed)
+	}
+
+	// Test Client level DoTimeout as well.
+	c := &Client{
+		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	var req2 Request
+	var resp2 Response
+	req2.SetRequestURI("https://" + ln.Addr().String() + "/client-tls-timeout")
+
+	err2 := c.DoTimeout(&req2, &resp2, 20*time.Millisecond)
+	if err2 == nil {
+		t.Fatal("expected Client.DoTimeout to fail on stalled TLS handshake")
+	}
+	if !errors.Is(err2, ErrTimeout) {
+		t.Fatalf("expected ErrTimeout for Client.DoTimeout, got %v (%T)", err2, err2)
+	}
+}
