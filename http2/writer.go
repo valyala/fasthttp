@@ -16,6 +16,13 @@ const (
 	initialBatchCapacity     = 4 << 10
 )
 
+// flushWriter is a client connection's output: the Framer writes frames to it
+// and the connection flushes them. Tests wrap it.
+type flushWriter interface {
+	io.Writer
+	Flush() error
+}
+
 type frameWriteFailure struct {
 	err error
 }

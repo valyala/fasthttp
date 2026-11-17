@@ -21,6 +21,25 @@ func ExampleConfigureServer() {
 	// ListenAndServeTLS(":8443", "cert.pem", "key.pem").
 }
 
+func ExampleConfigureHostClient() {
+	client := &fasthttp.HostClient{
+		Addr:  "example.com:443",
+		IsTLS: true,
+	}
+	if err := http2.ConfigureHostClient(client, http2.ClientConfig{}); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func ExampleConfigureHostClient_priorKnowledge() {
+	client := &fasthttp.HostClient{Addr: "127.0.0.1:8080"}
+	if err := http2.ConfigureHostClient(client, http2.ClientConfig{
+		Mode: http2.PriorKnowledge,
+	}); err != nil {
+		log.Fatal(err)
+	}
+}
+
 func Example_extendedConnectByteEcho() {
 	server := &fasthttp.Server{
 		Handler: func(ctx *fasthttp.RequestCtx) {

@@ -17,6 +17,7 @@ import (
 	"net/http/httptrace"
 	"net/textproto"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -340,6 +341,87 @@ func TestServerRequestResponse(t *testing.T) {
 	}
 }
 
+func TestConcurrentBufferedUploadsShareConnection(t *testing.T) {
+	testCases := []struct {
+		name      string
+		uploads   int
+		bodyBytes int
+	}{
+		{name: "eight 1 MiB bodies", uploads: 8, bodyBytes: 1 << 20},
+		{name: "four 4 MiB bodies", uploads: 4, bodyBytes: 4 << 20},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			started := make(chan struct{}, testCase.uploads)
+			release := make(chan struct{})
+			server := &fasthttp.Server{
+				Handler: func(ctx *fasthttp.RequestCtx) {
+					if string(ctx.Path()) == "/warmup" {
+						return
+					}
+					started <- struct{}{}
+					<-release
+					ctx.SetBodyString("ok")
+				},
+			}
+			testServer := newTestServer(t, server, ServerConfig{})
+			testServer.transport.StrictMaxConcurrentStreams = true
+			// Establish the connection first: from Go 1.27 the x/net Transport
+			// defers to net/http, which dials per request until one exists.
+			resp, err := testServer.client.Get(testServer.URL("/warmup"))
+			if err != nil {
+				t.Fatalf("warm-up request: %v", err)
+			}
+			_ = resp.Body.Close()
+
+			var wg sync.WaitGroup
+			errs := make(chan error, testCase.uploads)
+			body := bytes.Repeat([]byte{'x'}, testCase.bodyBytes)
+			for range testCase.uploads {
+				wg.Go(func() {
+					req, err := stdhttp.NewRequest(stdhttp.MethodPost, testServer.URL("/upload"), bytes.NewReader(body))
+					if err != nil {
+						errs <- err
+						return
+					}
+					resp, err := testServer.client.Do(req)
+					if err == nil {
+						_, err = io.Copy(io.Discard, resp.Body)
+						closeErr := resp.Body.Close()
+						if err == nil {
+							err = closeErr
+						}
+					}
+					errs <- err
+				})
+			}
+
+			deadline := time.NewTimer(5 * time.Second)
+			defer deadline.Stop()
+			for i := range testCase.uploads {
+				select {
+				case <-started:
+				case <-deadline.C:
+					close(release)
+					wg.Wait()
+					t.Fatalf("only %d/%d upload handlers started", i, testCase.uploads)
+				}
+			}
+			close(release)
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				if err != nil {
+					t.Fatalf("concurrent buffered upload failed: %v", err)
+				}
+			}
+			if got := testServer.dials.Load(); got != 1 {
+				t.Fatalf("concurrent uploads used %d TCP connections, want one", got)
+			}
+		})
+	}
+}
+
 func TestServerSendsDefaultDate(t *testing.T) {
 	for _, testCase := range []struct {
 		name          string
@@ -615,6 +697,139 @@ func TestOversizedRequestHeaderAnswers431(t *testing.T) {
 	})
 }
 
+// Closing a streamed request body returns its retained flow credit: the
+// connection's always, the stream's while the upload is still open. The rest
+// of the upload is dropped, a second upload on the connection proceeds and
+// END_STREAM afterwards finishes the stream normally; a body the peer reset
+// first has nothing left to return.
+func TestClosingRequestBodyReturnsFlowCredit(t *testing.T) {
+	const window = 65535
+	for _, tc := range []struct {
+		name       string
+		endStream  bool
+		resetFirst bool
+	}{
+		{name: "upload-open"},
+		{name: "upload-complete", endStream: true},
+		{name: "reset-first", resetFirst: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			closeNow, closed, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			defer close(release)
+			server := &fasthttp.Server{StreamRequestBody: true, Handler: func(ctx *fasthttp.RequestCtx) {
+				if string(ctx.Path()) == "/second" {
+					body, err := io.ReadAll(ctx.RequestBodyStream())
+					if err != nil {
+						t.Errorf("reading the second upload: %v", err)
+					}
+					ctx.SetBodyString(strconv.Itoa(len(body)))
+					return
+				}
+				<-closeNow
+				_ = ctx.Request.CloseBodyStream()
+				close(closed)
+				<-release
+				ctx.SetBodyString("done")
+			}}
+			testServer, conns := newOwnedTestServer(t, server, ServerConfig{
+				MaxUploadBufferPerStream:     window,
+				MaxUploadBufferPerConnection: window,
+			})
+			peer := dialRawPeer(t, testServer.listener.Addr().String())
+			conn := <-conns
+			upload := func(streamID uint32, endStream bool) {
+				t.Helper()
+				peer.writeHeaders(streamID, false, [2]string{":method", fasthttp.MethodPost}, [2]string{":scheme", "http"},
+					[2]string{":authority", "example.com"}, [2]string{":path", map[uint32]string{1: "/first", 3: "/second"}[streamID]})
+				for left := window; left > 0; {
+					n := min(left, defaultMaxFrameSize)
+					left -= n
+					if err := peer.framer.WriteData(streamID, endStream && left == 0, make([]byte, n)); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			// barrier reads the server's frames up to a PING ACK and sums the
+			// WINDOW_UPDATE increments by stream.
+			barrier := func(data byte) map[uint32]uint32 {
+				t.Helper()
+				if err := peer.framer.WritePing(false, [8]byte{data}); err != nil {
+					t.Fatal(err)
+				}
+				updates := map[uint32]uint32{}
+				peer.readHeaders(1, func(frame xhttp2.Frame) bool {
+					if update, ok := frame.(*xhttp2.WindowUpdateFrame); ok {
+						updates[update.StreamID] += update.Increment
+					}
+					return isPingAck(frame)
+				})
+				return updates
+			}
+			upload(1, tc.endStream)
+			if updates := barrier(1); len(updates) != 0 {
+				t.Fatalf("WINDOW_UPDATEs before the body was read or closed: %v", updates)
+			}
+			if tc.resetFirst {
+				if err := peer.framer.WriteRSTStream(1, xhttp2.ErrCodeCancel); err != nil {
+					t.Fatal(err)
+				}
+				barrier(2)
+			}
+			close(closeNow)
+			<-closed
+			var unconsumed, streamWindow, connWindow int64
+			var isReset bool
+			waitUntil(t, "the event loop applied the close", func() bool {
+				var applied bool
+				inspectOwner(t, conn, func(c *serverConn) {
+					c.creditMu.Lock()
+					applied = len(c.creditQueue) == 0
+					c.creditMu.Unlock()
+					connWindow = c.recv.window
+					stream := c.streams[1]
+					unconsumed, streamWindow, isReset = stream.unconsumedFlow, stream.recv.window, stream.isReset
+				})
+				return applied
+			})
+			updates := barrier(3)
+			switch {
+			case tc.resetFirst:
+				// The reset returned the credit; the close has nothing left.
+				if !isReset || unconsumed != 0 || len(updates) != 0 {
+					t.Fatalf("after the close of a reset stream: reset %v, retained flow %d, WINDOW_UPDATEs %v", isReset, unconsumed, updates)
+				}
+			case unconsumed != 0 || connWindow != window:
+				t.Fatalf("after the close: retained flow %d, connection window %d; want 0 and %d", unconsumed, connWindow, window)
+			case updates[0] != window:
+				t.Fatalf("connection WINDOW_UPDATEs = %v, want %d on stream 0", updates, window)
+			case tc.endStream && updates[1] != 0:
+				t.Fatalf("WINDOW_UPDATE %d on a stream the peer has closed", updates[1])
+			case !tc.endStream && (updates[1] != window || streamWindow != window):
+				t.Fatalf("stream WINDOW_UPDATEs = %v, stream window %d; want %d restored", updates, streamWindow, window)
+			}
+			// The connection's credit is back: a second upload goes through.
+			upload(3, true)
+			if statuses := peer.readHeaders(3, isStreamEnd(3)); !slices.Equal(statuses, []string{"200"}) {
+				t.Fatalf("second upload statuses = %q, want [200]", statuses)
+			}
+			if !tc.endStream && !tc.resetFirst {
+				// The dropped upload's end still finishes the stream.
+				if err := peer.framer.WriteData(1, true, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			release <- struct{}{}
+			if tc.resetFirst {
+				barrier(4)
+				return
+			}
+			if statuses := peer.readHeaders(1, isStreamEnd(1)); !slices.Equal(statuses, []string{"200"}) {
+				t.Fatalf("first stream statuses = %q, want [200]", statuses)
+			}
+		})
+	}
+}
+
 // Priority signals are read as RFC 8941 Dictionaries on the wire too: a
 // request's repeated priority lines combine into one, PRIORITY_UPDATE keeps
 // the valid members of a value with an invalid one, and such a value for an
@@ -805,6 +1020,145 @@ func TestMalformedPrioritySignalsAreIgnored(t *testing.T) {
 			}
 			return isPingAck(frame)
 		})
+	})
+}
+
+// A request body's credit record names its stream by ID and body, so one
+// applied once the stream was finalized and its object pooled finds nothing
+// to touch: the lookup misses, another stream's upload is left alone and the
+// connection's credit is restored exactly once, also when the close races
+// the handler's return and the stream's teardown.
+func TestRequestBodyCloseAfterStreamRelease(t *testing.T) {
+	const window = 65535
+	type credit struct{ window, pending int64 }
+	connCredit := func(t *testing.T, conn *serverConn) credit {
+		t.Helper()
+		var got credit
+		inspectOwner(t, conn, func(c *serverConn) { got = credit{c.recv.window, c.recv.pending} })
+		return got
+	}
+	post := func(peer *rawPeer, streamID uint32, path string, size int) {
+		peer.t.Helper()
+		peer.writeHeaders(streamID, false, [2]string{":method", fasthttp.MethodPost}, [2]string{":scheme", "http"},
+			[2]string{":authority", "example.com"}, [2]string{":path", path})
+		if err := peer.framer.WriteData(streamID, false, make([]byte, size)); err != nil {
+			peer.t.Fatal(err)
+		}
+	}
+	barrier := func(peer *rawPeer, data byte) {
+		peer.t.Helper()
+		if err := peer.framer.WritePing(false, [8]byte{data}); err != nil {
+			peer.t.Fatal(err)
+		}
+		peer.readHeaders(0, isPingAck)
+	}
+	t.Run("stale-record", func(t *testing.T) {
+		release := make(chan struct{})
+		defer close(release)
+		server := &fasthttp.Server{StreamRequestBody: true, Handler: func(ctx *fasthttp.RequestCtx) {
+			if string(ctx.Path()) == "/held" {
+				<-release
+			}
+			ctx.SetBodyString("ok")
+		}}
+		testServer, conns := newOwnedTestServer(t, server, ServerConfig{
+			MaxUploadBufferPerStream:     window,
+			MaxUploadBufferPerConnection: window,
+		})
+		peer := dialRawPeer(t, testServer.listener.Addr().String())
+		conn := <-conns
+		// Stream 1 answers with its upload open: reset, finalized, pooled.
+		post(peer, 1, "/", 1000)
+		peer.readHeaders(1, func(frame xhttp2.Frame) bool {
+			rst, ok := frame.(*xhttp2.RSTStreamFrame)
+			return ok && rst.StreamID == 1
+		})
+		waitUntil(t, "stream 1 finalized", func() bool {
+			var open int
+			inspectOwner(t, conn, func(c *serverConn) { open = len(c.streams) })
+			return open == 0
+		})
+		// Stream 3 may hold the pooled object; its upload stays unread.
+		post(peer, 3, "/held", 1000)
+		barrier(peer, 1)
+		before := connCredit(t, conn)
+		var retained int64
+		inspectOwner(t, conn, func(c *serverConn) { retained = c.streams[3].unconsumedFlow })
+		if retained != 1000 {
+			t.Fatalf("stream 3 retains %d bytes before the stale command, want 1000", retained)
+		}
+		// A close record of the released stream, and a record carrying
+		// stream 3's ID through another body: neither reaches stream 3.
+		stale := []*requestBody{newRequestBody(conn, 1), newRequestBody(conn, 3)}
+		for _, record := range stale {
+			record.mu.Lock()
+			record.pendingCredit, record.closeRequested, record.creditQueued = 1000, true, true
+			record.mu.Unlock()
+			conn.queueCredit(record)
+		}
+		conn.wakeCredit()
+		// The owner clears the queued mark when it takes a record.
+		waitUntil(t, "the stale records are taken", func() bool {
+			for _, record := range stale {
+				record.mu.Lock()
+				queued := record.creditQueued
+				record.mu.Unlock()
+				if queued {
+					return false
+				}
+			}
+			return true
+		})
+		after := connCredit(t, conn)
+		inspectOwner(t, conn, func(c *serverConn) { retained = c.streams[3].unconsumedFlow })
+		if after != before || retained != 1000 {
+			t.Fatalf("stale records changed the accounting: credit %+v -> %+v, stream 3 retains %d", before, after, retained)
+		}
+		release <- struct{}{}
+		if statuses := peer.readHeaders(3, isStreamEnd(3)); !slices.Equal(statuses, []string{"200"}) {
+			t.Fatalf("stream 3 statuses = %q, want [200]", statuses)
+		}
+	})
+	t.Run("racing-close", func(t *testing.T) {
+		const uploads = 40
+		closed := make(chan struct{}, uploads)
+		server := &fasthttp.Server{StreamRequestBody: true, Handler: func(ctx *fasthttp.RequestCtx) {
+			ctx.SetBodyString("ok")
+			body, ok := ctx.RequestBodyStream().(io.Closer)
+			if !ok {
+				// The final GET has no body.
+				return
+			}
+			// The close races the handler's return and the stream's teardown.
+			go func() {
+				_ = body.Close()
+				closed <- struct{}{}
+			}()
+		}}
+		testServer, conns := newOwnedTestServer(t, server, ServerConfig{})
+		peer := dialRawPeer(t, testServer.listener.Addr().String())
+		conn := <-conns
+		var initial int64
+		inspectOwner(t, conn, func(c *serverConn) { initial = int64(c.config.connectionWindowSize) })
+		for i := range uploads {
+			post(peer, uint32(2*i+1), fmt.Sprintf("/%d", i), defaultMaxFrameSize)
+			barrier(peer, byte(i))
+		}
+		for range uploads {
+			<-closed
+		}
+		waitUntil(t, "streams finalized", func() bool {
+			var open int
+			inspectOwner(t, conn, func(c *serverConn) { open = len(c.streams) })
+			return open == 0
+		})
+		if got := connCredit(t, conn); got.window+got.pending != initial {
+			t.Fatalf("connection credit %+v after %d closed uploads, want %d in all", got, uploads, initial)
+		}
+		peer.request(uint32(2*uploads+1), "/", true)
+		if statuses := peer.readHeaders(uint32(2*uploads+1), isStreamEnd(uint32(2*uploads+1))); !slices.Equal(statuses, []string{"200"}) {
+			t.Fatalf("statuses after the closed uploads = %q, want [200]", statuses)
+		}
 	})
 }
 
@@ -3108,6 +3462,54 @@ func TestStreamHandlerDoneReleasesClosedStream(t *testing.T) {
 	}
 }
 
+func TestServerTimeoutErrorAbandonsOriginalRequestCtx(t *testing.T) {
+	releaseHeldCtx := make(chan struct{})
+	var releaseHeldCtxOnce sync.Once
+	heldPath := make(chan string, 1)
+	server := &fasthttp.Server{
+		Handler: func(ctx *fasthttp.RequestCtx) {
+			if string(ctx.Path()) != "/timeout" {
+				ctx.SetBodyString("ok")
+				return
+			}
+			go func() {
+				<-releaseHeldCtx
+				heldPath <- string(ctx.Path())
+			}()
+			ctx.TimeoutError("timeout")
+		},
+	}
+	t.Cleanup(func() { releaseHeldCtxOnce.Do(func() { close(releaseHeldCtx) }) })
+	testServer := newTestServer(t, server, ServerConfig{})
+	hc := newPriorKnowledgeHostClient(t, testServer.listener.Addr().String())
+
+	for _, test := range []struct {
+		path   string
+		status int
+		body   string
+	}{
+		{path: "/timeout", status: fasthttp.StatusRequestTimeout, body: "timeout"},
+		{path: "/ok", status: fasthttp.StatusOK, body: "ok"},
+	} {
+		req := fasthttp.AcquireRequest()
+		resp := fasthttp.AcquireResponse()
+		req.SetRequestURI(testServer.URL(test.path))
+		err := hc.Do(req, resp)
+		if err != nil {
+			t.Fatalf("Do(%q) error: %v", test.path, err)
+		}
+		if resp.StatusCode() != test.status || string(resp.Body()) != test.body {
+			t.Fatalf("Do(%q) response = (%d, %q), want (%d, %q)", test.path, resp.StatusCode(), resp.Body(), test.status, test.body)
+		}
+		fasthttp.ReleaseRequest(req)
+		fasthttp.ReleaseResponse(resp)
+	}
+	releaseHeldCtxOnce.Do(func() { close(releaseHeldCtx) })
+	if path := <-heldPath; path != "/timeout" {
+		t.Fatalf("abandoned RequestCtx path = %q, want /timeout", path)
+	}
+}
+
 func requireConnectionWindowUpdate(t testing.TB, wire []byte, expected uint32) {
 	t.Helper()
 	framer := xhttp2.NewFramer(nil, bytes.NewReader(wire))
@@ -4886,6 +5288,297 @@ func writePartialPost(peer *rawPeer, streamID uint32, extra ...[2]string) {
 	}
 }
 
+// A request body that doesn't arrive within ReadTimeout is answered through
+// the error path, as HTTP/1's serve loop answers a timed-out body read: the
+// ErrorHandler sees a timeout *net.OpError, the default answers 408, the
+// open request side is reset NO_ERROR after the response and the connection
+// goes on; a handler that already reads a streamed body sees the error from
+// its reads instead and answers itself.
+func TestRequestBodyReadTimeoutAnswersThroughErrorHandler(t *testing.T) {
+	const readTimeout = 150 * time.Millisecond
+	makeServer := func(errs chan error, configure func(*fasthttp.Server)) *fasthttp.Server {
+		server := &fasthttp.Server{
+			ReadTimeout: readTimeout,
+			IdleTimeout: 5 * time.Second,
+			Handler:     func(ctx *fasthttp.RequestCtx) { ctx.SetBodyString("handled") },
+		}
+		if errs != nil {
+			server.ErrorHandler = func(ctx *fasthttp.RequestCtx, err error) {
+				errs <- err
+				ctx.Error("custom "+err.Error(), fasthttp.StatusRequestTimeout)
+			}
+		}
+		if configure != nil {
+			configure(server)
+		}
+		return server
+	}
+	newServer := func(t *testing.T, errs chan error, maxConcurrentStreams uint32, configure func(*fasthttp.Server)) *testServer {
+		t.Helper()
+		return newTestServer(t, makeServer(errs, configure), ServerConfig{MaxConcurrentStreams: maxConcurrentStreams})
+	}
+	// awaitReadTimeout waits until the owner has recorded the stream's read
+	// timeout against its Expect job.
+	awaitReadTimeout := func(t *testing.T, owner *serverConn, streamID uint32) {
+		t.Helper()
+		waitUntil(t, "the read timeout is recorded", func() bool {
+			recorded := false
+			inspectOwner(t, owner, func(c *serverConn) {
+				stream := c.streams[streamID]
+				recorded = stream != nil && stream.refusedDuringJob
+			})
+			return recorded
+		})
+	}
+	// requireTimeoutError checks the ErrorHandler saw a timeout *net.OpError;
+	// HTTP/2's wraps ErrTimeout, HTTP/1's the connection's deadline error.
+	requireTimeoutError := func(t *testing.T, errs chan error, http2 bool) {
+		t.Helper()
+		select {
+		case err := <-errs:
+			var opErr *net.OpError
+			if !errors.As(err, &opErr) || !opErr.Timeout() || http2 && !errors.Is(err, fasthttp.ErrTimeout) {
+				t.Fatalf("ErrorHandler error = %#v, want a timeout *net.OpError", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("ErrorHandler didn't run")
+		}
+	}
+	// requireErrorResponse reads the 408 and the NO_ERROR reset of the still
+	// open request side, then proves the connection still serves.
+	requireErrorResponse := func(t *testing.T, peer *rawPeer, streamID uint32) {
+		t.Helper()
+		var reset *xhttp2.RSTStreamFrame
+		statuses := peer.readHeaders(streamID, func(frame xhttp2.Frame) bool {
+			rst, ok := frame.(*xhttp2.RSTStreamFrame)
+			if ok && rst.StreamID == streamID {
+				reset = rst
+			}
+			return ok
+		})
+		if !slices.Equal(statuses, []string{"408"}) || reset.ErrCode != xhttp2.ErrCodeNo {
+			t.Fatalf("statuses = %q, reset = %v; want [408] then RST_STREAM(NO_ERROR)", statuses, reset.ErrCode)
+		}
+		peer.request(streamID+2, "/", true)
+		if status, rst := streamOutcome(peer, streamID+2); rst != nil || status != "200" {
+			t.Fatalf("request after the timeout: status %q, reset %v", status, rst)
+		}
+	}
+	t.Run("buffered", func(t *testing.T) {
+		errs := make(chan error, 2)
+		testServer := newServer(t, errs, 0, nil)
+		addr := testServer.listener.Addr().String()
+		http1 := http1Exchange(t, addr, "POST /upload HTTP/1.1\r\nHost: example.com\r\nContent-Length: 10\r\n\r\nabc")
+		if !strings.HasPrefix(http1, "HTTP/1.1 408") {
+			t.Fatalf("HTTP/1 control: %q", http1)
+		}
+		requireTimeoutError(t, errs, false)
+		peer := dialRawPeer(t, addr)
+		writePartialPost(peer, 1)
+		requireErrorResponse(t, peer, 1)
+		requireTimeoutError(t, errs, true)
+	})
+	t.Run("default-handler", func(t *testing.T) {
+		testServer := newServer(t, nil, 0, nil)
+		peer := dialRawPeer(t, testServer.listener.Addr().String())
+		writePartialPost(peer, 1)
+		var body bytes.Buffer
+		statuses := peer.readHeaders(1, func(frame xhttp2.Frame) bool {
+			if data, ok := frame.(*xhttp2.DataFrame); ok && data.StreamID == 1 {
+				body.Write(data.Data())
+				return data.StreamEnded()
+			}
+			return false
+		})
+		if !slices.Equal(statuses, []string{"408"}) || body.String() != "Request timeout" {
+			t.Fatalf("default error response = %q %q, want HTTP/1's 408 \"Request timeout\"", statuses, body.String())
+		}
+	})
+	// blockFirstStream opens stream 1 on a handler that blocks until release
+	// and has the peer reset it: closed on the wire, it keeps the one job
+	// slot, so the next stream's job queues.
+	blockFirstStream := func(t *testing.T, peer *rawPeer, started chan struct{}) {
+		t.Helper()
+		peer.request(1, "/block", true)
+		select {
+		case <-started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("blocking handler didn't start")
+		}
+		if err := peer.framer.WriteRSTStream(1, xhttp2.ErrCodeCancel); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Run("queued-expect", func(t *testing.T) {
+		errs := make(chan error, 1)
+		started := make(chan struct{}, 1)
+		release := make(chan struct{})
+		testServer, conns := newOwnedTestServer(t, makeServer(errs, func(s *fasthttp.Server) {
+			s.Handler = func(ctx *fasthttp.RequestCtx) {
+				if string(ctx.Path()) == "/block" {
+					started <- struct{}{}
+					<-release
+				}
+				ctx.SetBodyString("handled")
+			}
+		}), ServerConfig{MaxConcurrentStreams: 1})
+		peer := dialRawPeer(t, testServer.listener.Addr().String())
+		owner := <-conns
+		blockFirstStream(t, peer, started)
+		writeExpectPost(peer, 3, "/upload")
+		awaitReadTimeout(t, owner, 3)
+		close(release)
+		requireErrorResponse(t, peer, 3)
+		requireTimeoutError(t, errs, true)
+	})
+	t.Run("running-expect", func(t *testing.T) {
+		errs := make(chan error, 1)
+		release := make(chan struct{})
+		testServer, conns := newOwnedTestServer(t, makeServer(errs, func(s *fasthttp.Server) {
+			s.ExpectHandler = func(*fasthttp.RequestCtx) int {
+				<-release
+				return fasthttp.StatusContinue
+			}
+		}), ServerConfig{})
+		peer := dialRawPeer(t, testServer.listener.Addr().String())
+		owner := <-conns
+		writeExpectPost(peer, 1, "/upload")
+		awaitReadTimeout(t, owner, 1)
+		close(release)
+		requireErrorResponse(t, peer, 1)
+		requireTimeoutError(t, errs, true)
+	})
+	t.Run("pumping-error-response", func(t *testing.T) {
+		// A body too large during the Expect job defers the refusal; the
+		// read timer stays armed and fires while the 413's body stream pumps.
+		errs := make(chan error, 1)
+		release := make(chan struct{})
+		bodyReader, bodyWriter := io.Pipe()
+		t.Cleanup(func() { _ = bodyWriter.Close() })
+		testServer := newServer(t, errs, 0, func(s *fasthttp.Server) {
+			s.MaxRequestBodySize = 16
+			s.ExpectHandler = func(*fasthttp.RequestCtx) int {
+				<-release
+				return fasthttp.StatusContinue
+			}
+			s.ErrorHandler = func(ctx *fasthttp.RequestCtx, err error) {
+				errs <- err
+				ctx.SetStatusCode(fasthttp.StatusRequestEntityTooLarge)
+				ctx.SetBodyStream(bodyReader, -1)
+			}
+		})
+		peer := dialRawPeer(t, testServer.listener.Addr().String())
+		writeExpectPost(peer, 1, "/upload")
+		if err := peer.framer.WriteData(1, false, make([]byte, 32)); err != nil {
+			t.Fatal(err)
+		}
+		// The PING's ack follows the DATA frame through the event loop.
+		if err := peer.framer.WritePing(false, [8]byte{1}); err != nil {
+			t.Fatal(err)
+		}
+		peer.readHeaders(1, isPingAck)
+		close(release)
+		statuses := peer.readHeaders(1, func(frame xhttp2.Frame) bool {
+			headers, ok := frame.(*xhttp2.MetaHeadersFrame)
+			return ok && headers.StreamID == 1
+		})
+		if !slices.Equal(statuses, []string{"413"}) {
+			t.Fatalf("statuses = %q, want [413]", statuses)
+		}
+		if err := <-errs; !errors.Is(err, fasthttp.ErrBodyTooLarge) {
+			t.Fatalf("ErrorHandler error = %v, want ErrBodyTooLarge", err)
+		}
+		// The read timer fires now, with the response pumping.
+		time.Sleep(2 * readTimeout)
+		if counts := peer.collect(50 * time.Millisecond); len(counts) != 0 {
+			t.Fatalf("frames while the error response pumped: %v", counts)
+		}
+		if _, err := io.WriteString(bodyWriter, "too large"); err != nil {
+			t.Fatal(err)
+		}
+		_ = bodyWriter.Close()
+		var body bytes.Buffer
+		var reset *xhttp2.RSTStreamFrame
+		peer.readHeaders(1, func(frame xhttp2.Frame) bool {
+			switch frame := frame.(type) {
+			case *xhttp2.DataFrame:
+				body.Write(frame.Data())
+			case *xhttp2.RSTStreamFrame:
+				reset = frame
+				return true
+			}
+			return false
+		})
+		if body.String() != "too large" || reset.ErrCode != xhttp2.ErrCodeNo {
+			t.Fatalf("body %q, reset %v; want the whole error response then RST_STREAM(NO_ERROR)", body.String(), reset.ErrCode)
+		}
+		peer.request(3, "/", true)
+		if status, rst := streamOutcome(peer, 3); rst != nil || status != "200" {
+			t.Fatalf("request after the error response: status %q, reset %v", status, rst)
+		}
+	})
+	t.Run("streaming-handler", func(t *testing.T) {
+		readErrs := make(chan error, 1)
+		testServer := newServer(t, nil, 0, func(s *fasthttp.Server) {
+			s.StreamRequestBody = true
+			s.Handler = func(ctx *fasthttp.RequestCtx) {
+				_, err := io.ReadAll(ctx.RequestBodyStream())
+				readErrs <- err
+				ctx.Error("body: "+err.Error(), fasthttp.StatusBadRequest)
+			}
+		})
+		peer := dialRawPeer(t, testServer.listener.Addr().String())
+		writePartialPost(peer, 1)
+		var reset *xhttp2.RSTStreamFrame
+		statuses := peer.readHeaders(1, func(frame xhttp2.Frame) bool {
+			rst, ok := frame.(*xhttp2.RSTStreamFrame)
+			if ok && rst.StreamID == 1 {
+				reset = rst
+			}
+			return ok
+		})
+		if !slices.Equal(statuses, []string{"400"}) || reset.ErrCode != xhttp2.ErrCodeNo {
+			t.Fatalf("statuses = %q, reset = %v; want the handler's [400] then RST_STREAM(NO_ERROR)", statuses, reset.ErrCode)
+		}
+		if err := <-readErrs; !isTimeout(err) || !errors.Is(err, fasthttp.ErrTimeout) {
+			t.Fatalf("body read error = %v, want a timeout", err)
+		}
+	})
+	t.Run("queued-handler", func(t *testing.T) {
+		readErrs := make(chan error, 1)
+		started := make(chan struct{}, 1)
+		release := make(chan struct{})
+		server := &fasthttp.Server{
+			ReadTimeout:       readTimeout,
+			IdleTimeout:       5 * time.Second,
+			StreamRequestBody: true,
+			Handler: func(ctx *fasthttp.RequestCtx) {
+				if string(ctx.Path()) == "/block" {
+					started <- struct{}{}
+					<-release
+					ctx.SetBodyString("handled")
+					return
+				}
+				_, err := io.ReadAll(ctx.RequestBodyStream())
+				readErrs <- err
+				ctx.Error("body: "+err.Error(), fasthttp.StatusBadRequest)
+			},
+		}
+		testServer := newTestServer(t, server, ServerConfig{MaxConcurrentStreams: 1})
+		peer := dialRawPeer(t, testServer.listener.Addr().String())
+		blockFirstStream(t, peer, started)
+		writePartialPost(peer, 3)
+		time.Sleep(2 * readTimeout)
+		close(release)
+		if status, reset := streamOutcome(peer, 3); status != "400" {
+			t.Fatalf("queued handler's response: status %q, reset %v; want 400", status, reset)
+		}
+		if err := <-readErrs; !isTimeout(err) {
+			t.Fatalf("body read error = %v, want a timeout", err)
+		}
+	})
+}
+
 // A read timeout that fires while an error response is in progress changes
 // nothing: the response stands, whether the error job still runs or its
 // response is already pumping after JobDone.
@@ -6445,6 +7138,37 @@ func TestShutdownEndsConnectionsInEveryPhase(t *testing.T) {
 	}
 }
 
+// A value HTTP/1 would deliver trimmed arrives trimmed; a field no peer may
+// accept fails only its own response.
+func TestServerSendsOnlyValidFields(t *testing.T) {
+	testServer := newTestServer(t, &fasthttp.Server{Handler: func(ctx *fasthttp.RequestCtx) {
+		if string(ctx.Path()) == "/invalid" {
+			ctx.Response.Header.Set("X-Note", "a\x01b")
+			return
+		}
+		ctx.Response.Header.Set("X-Note", " value ")
+	}}, ServerConfig{})
+	hc := newPriorKnowledgeHostClient(t, testServer.listener.Addr().String())
+	for _, path := range []string{"/", "/invalid", "/"} {
+		req := fasthttp.AcquireRequest()
+		resp := fasthttp.AcquireResponse()
+		req.SetRequestURI(testServer.URL(path))
+		err := hc.Do(req, resp)
+		note := string(resp.Header.Peek("X-Note"))
+		fasthttp.ReleaseRequest(req)
+		fasthttp.ReleaseResponse(resp)
+		if path == "/invalid" {
+			if err == nil {
+				t.Fatal("response with an invalid field value was delivered")
+			}
+			continue
+		}
+		if err != nil || note != "value" {
+			t.Fatalf("GET %s = %q, %v; want \"value\"", path, note, err)
+		}
+	}
+}
+
 // A SETTINGS_INITIAL_WINDOW_SIZE decrease may drive an active stream's send
 // window negative (RFC 9113, Section 6.9.2). The server must stop sending
 // immediately, account for the deficit, and resume exactly where it stopped
@@ -6599,6 +7323,47 @@ func TestRepeatedInitialWindowSettingsApplyOneFinalDelta(t *testing.T) {
 			t.Fatalf("stream %d send window = %d, want 32768", id, stream.send.window)
 		}
 	}
+}
+
+// A connection must not leave handler workers parked after it closes.
+func TestStreamWorkersDoNotLeak(t *testing.T) {
+	before := runtime.NumGoroutine()
+	// Subtests so each round's cleanup runs before the next one starts.
+	for round := range 5 {
+		t.Run(fmt.Sprintf("round-%d", round), func(t *testing.T) {
+			server := &fasthttp.Server{
+				Handler: func(ctx *fasthttp.RequestCtx) { ctx.SetBodyString("ok") },
+			}
+			testServer := newTestServer(t, server, ServerConfig{MaxConcurrentStreams: 100})
+			hc := newPriorKnowledgeHostClient(t, testServer.listener.Addr().String())
+			var wait sync.WaitGroup
+			for range 50 {
+				wait.Go(func() {
+					req := fasthttp.AcquireRequest()
+					resp := fasthttp.AcquireResponse()
+					defer fasthttp.ReleaseRequest(req)
+					defer fasthttp.ReleaseResponse(resp)
+					req.SetRequestURI(testServer.URL("/"))
+					if err := hc.Do(req, resp); err != nil {
+						t.Errorf("Do() error: %v", err)
+					}
+				})
+			}
+			wait.Wait()
+			hc.CloseIdleConnections()
+		})
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	var after int
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		after = runtime.NumGoroutine()
+		if after <= before+10 {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("goroutines %d -> %d: stream workers leaked", before, after)
 }
 
 func TestServerTLSRequestReportsHTTPSScheme(t *testing.T) {
@@ -9149,6 +9914,110 @@ func TestForbiddenTrailerDeclarationIsRefused(t *testing.T) {
 	}
 }
 
+// A job that sets a timeout response and retains its RequestCtx keeps the
+// stream out of the pool, as a timed-out handler does: the peer gets the
+// timeout response, and the retained context's stream operations fail
+// instead of reaching a cleared stream. Covers the rejecting and accepting
+// Expect job, the error job, and a refusal that follows the Expect job.
+func TestTimedOutJobKeepsStreamOutOfPool(t *testing.T) {
+	const limit = 4
+	for _, tc := range []struct {
+		name      string
+		expect    int
+		getOnly   bool
+		oversized bool
+	}{
+		{name: "expect-rejects", expect: fasthttp.StatusExpectationFailed},
+		{name: "expect-continues", expect: fasthttp.StatusContinue},
+		{name: "error-job", getOnly: true},
+		{name: "refused-during-expect", expect: fasthttp.StatusContinue, oversized: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Both the Expect job and the error job may time the same
+			// context out.
+			late := make(chan *fasthttp.RequestCtx, 2)
+			release := make(chan struct{})
+			timeOut := func(ctx *fasthttp.RequestCtx) {
+				ctx.TimeoutError("timeout")
+				late <- ctx
+			}
+			server := &fasthttp.Server{
+				GetOnly:            tc.getOnly,
+				MaxRequestBodySize: limit,
+				Handler:            func(ctx *fasthttp.RequestCtx) { ctx.SetBodyString("ok") },
+				ExpectHandler: func(ctx *fasthttp.RequestCtx) int {
+					timeOut(ctx)
+					<-release
+					return tc.expect
+				},
+				ErrorHandler: func(ctx *fasthttp.RequestCtx, err error) {
+					if !errors.Is(err, fasthttp.ErrGetOnly) && !errors.Is(err, fasthttp.ErrBodyTooLarge) {
+						t.Errorf("ErrorHandler error = %v", err)
+					}
+					timeOut(ctx)
+					ctx.Error("refused", fasthttp.StatusBadRequest)
+				},
+			}
+			testServer, conns := newOwnedTestServer(t, server, ServerConfig{EnableExtendedConnect: true})
+			peer := dialRawPeer(t, testServer.listener.Addr().String())
+			conn := <-conns
+			fields := [][2]string{{":method", "POST"}, {":scheme", "http"}, {":authority", "example.com"}, {":path", "/"}}
+			switch {
+			case tc.getOnly:
+				peer.writeHeaders(1, true, fields...)
+			case tc.oversized:
+				peer.writeHeaders(1, false, append(fields, [2]string{"expect", "100-continue"})...)
+				if err := peer.framer.WriteData(1, true, make([]byte, limit+1)); err != nil {
+					t.Fatal(err)
+				}
+				// The refusal is recorded while the Expect job runs.
+				if err := peer.framer.WritePing(false, [8]byte{7}); err != nil {
+					t.Fatal(err)
+				}
+				peer.readHeaders(1, isPingAck)
+				close(release)
+			default:
+				peer.writeHeaders(1, true, append(fields, [2]string{"expect", "100-continue"})...)
+				close(release)
+			}
+			if status, reset := streamOutcome(peer, 1); status != strconv.Itoa(fasthttp.StatusRequestTimeout) || reset != nil {
+				t.Fatalf("status = %q, reset = %v, want the timeout response", status, reset)
+			}
+			waitUntil(t, "stream finalized", func() bool {
+				var open int
+				inspectOwner(t, conn, func(c *serverConn) { open = len(c.streams) })
+				return open == 0
+			})
+			ctx := <-late
+			for name, op := range map[string]func() error{
+				"AcceptStream": func() error { return ctx.AcceptStream(func(fasthttp.StreamConn) {}) },
+				"Push":         func() error { return ctx.Push("/pushed", nil) },
+				"EarlyHints": func() error {
+					ctx.Response.Header.Add("Link", "</style.css>; rel=preload")
+					return ctx.EarlyHints()
+				},
+			} {
+				err := func() (err error) {
+					defer func() {
+						if recovered := recover(); recovered != nil {
+							t.Fatalf("%s on the retained context panicked: %v", name, recovered)
+						}
+					}()
+					return op()
+				}()
+				if err == nil {
+					t.Fatalf("%s on the retained context succeeded", name)
+				}
+			}
+			// The connection still serves requests.
+			peer.request(3, "/", true)
+			if status, reset := streamOutcome(peer, 3); reset != nil || status == "" {
+				t.Fatalf("next request: status = %q, reset = %v", status, reset)
+			}
+		})
+	}
+}
+
 // A plain CONNECT is a tunnel like an extended one: the handler runs at the
 // headers, as HTTP/1 runs it for a CONNECT without a body, seeing the same
 // method, Host and request target; no body timer answers 408; an Expect job
@@ -9353,6 +10222,182 @@ func (c panicCloseConn) Close() error {
 	panic("cancel boom")
 }
 
+// A response body stream fails its stream, RST_STREAM(INTERNAL_ERROR) and no
+// END_STREAM, when its Close returns an error (io.EOF itself included), when
+// a Read returns an error that isn't the bare io.EOF (a wrapped one
+// included), when it overruns or falls short of the declared length, and
+// when Read (a typed-nil *io.LimitedReader's included) or Close panics, in
+// the pump, in a cancel's concurrent Close, or in the event loop's
+// synchronous Close of an unpumped body, which fails the stream before any
+// response: the panic is recovered, logged as HTTP/1's
+// *ErrBodyStreamWritePanic, and the connection goes on. A bare *os.File
+// declared shorter than it is stops at the declared length, as HTTP/1's
+// fixed-size writer does, and a nil Close completes the response.
+func TestResponseBodyStreamFailures(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "body")
+	if err := os.WriteFile(path, []byte("1234567890"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	logger := &recordingLogger{}
+	sizedPipe := make(chan *io.PipeReader, 1)
+	server := &fasthttp.Server{Logger: logger, Handler: func(ctx *fasthttp.RequestCtx) {
+		switch string(ctx.Path()) {
+		case "/close-error":
+			ctx.SetBodyStream(closeErrorReader{strings.NewReader("hello"), io.ErrUnexpectedEOF}, 5)
+		case "/close-eof":
+			ctx.SetBodyStream(closeErrorReader{strings.NewReader("hello"), io.EOF}, 5)
+		case "/wrapped-eof":
+			ctx.SetBodyStream(&wrappedEOFReader{data: []byte("hello")}, -1)
+		case "/nil-close":
+			ctx.SetBodyStream(closeErrorReader{strings.NewReader("hello"), nil}, 5)
+		case "/file":
+			file, err := os.Open(path)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			ctx.SetBodyStream(file, 4)
+		case "/overrun":
+			ctx.SetBodyStream(strings.NewReader("1234567890"), 4)
+		case "/short":
+			ctx.SetBodyStream(strings.NewReader("12"), 4)
+		case "/read-panic":
+			ctx.SetBodyStream(&panicReader{}, -1)
+		case "/nil-limited-reader":
+			var reader *io.LimitedReader
+			ctx.SetBodyStream(reader, -1)
+		case "/close-panic":
+			ctx.SetBodyStream(panicCloser{strings.NewReader("hello")}, 5)
+		case "/head-close-panic":
+			ctx.SetBodyStream(panicCloser{strings.NewReader("hello")}, -1)
+		case "/cancel-close-panic":
+			pipe := fasthttputil.NewPipeConns()
+			go func() { _, _ = pipe.Conn2().Write([]byte("hello")) }()
+			ctx.SetBodyStream(panicCloseConn{pipe.Conn1()}, -1)
+		case "/sized-pipe":
+			reader, writer := io.Pipe()
+			go func() { _, _ = writer.Write([]byte("hello")) }()
+			sizedPipe <- reader
+			ctx.SetBodyStream(reader, 1<<20)
+		default:
+			ctx.SetBodyString("ok")
+		}
+	}}
+	testServer := newTestServer(t, server, ServerConfig{})
+	addr := testServer.listener.Addr().String()
+
+	http1 := http1Client(t)
+	for _, tc := range []struct {
+		path, body string
+		fails      bool
+	}{
+		{path: "/close-error", fails: true},
+		{path: "/file", body: "1234"},
+		{path: "/read-panic", fails: true},
+	} {
+		resp, err := http1.Get("http://" + addr + tc.path)
+		var body []byte
+		if err == nil {
+			body, err = io.ReadAll(resp.Body)
+			resp.Body.Close()
+		}
+		if (err != nil) != tc.fails || !tc.fails && string(body) != tc.body {
+			t.Fatalf("HTTP/1 control %s: body %q, error %v", tc.path, body, err)
+		}
+	}
+	if !strings.Contains(logger.String(), "panic while writing body stream: read boom") {
+		t.Fatalf("HTTP/1 control log: %q", logger.String())
+	}
+
+	peer := dialRawPeer(t, addr)
+	internal := xhttp2.ErrCodeInternal
+	streamID := uint32(1)
+	for _, tc := range []struct {
+		path, method, body string
+		noResponse, ended  bool
+		reset              *xhttp2.ErrCode
+		logged             string
+	}{
+		{path: "/nil-close", body: "hello", ended: true},
+		{path: "/close-error", body: "hello", reset: &internal},
+		{path: "/close-eof", body: "hello", reset: &internal},
+		{path: "/wrapped-eof", body: "hello", reset: &internal},
+		{path: "/file", body: "1234", ended: true},
+		{path: "/overrun", body: "1234", reset: &internal},
+		{path: "/short", body: "12", reset: &internal},
+		{path: "/read-panic", body: "hello", reset: &internal, logged: "panic while writing body stream: read boom"},
+		{path: "/nil-limited-reader", reset: &internal, logged: "panic while writing body stream: runtime error"},
+		{path: "/close-panic", body: "hello", reset: &internal, logged: "panic while writing body stream: close boom"},
+		{path: "/head-close-panic", method: fasthttp.MethodHead, noResponse: true, reset: &internal, logged: "panic while writing body stream: close boom"},
+		{path: "/", body: "ok", ended: true},
+	} {
+		method := tc.method
+		if method == "" {
+			method = fasthttp.MethodGet
+		}
+		before := strings.Count(logger.String(), tc.logged)
+		peer.writeHeaders(streamID, true, [2]string{":method", method}, [2]string{":scheme", "http"},
+			[2]string{":authority", "example.com"}, [2]string{":path", tc.path})
+		status, body, ended, reset := collectStream(peer, streamID)
+		wantStatus := "200"
+		if tc.noResponse {
+			wantStatus = ""
+		}
+		switch {
+		case status != wantStatus || string(body) != tc.body || ended != tc.ended:
+			t.Fatalf("%s: status %q, body %q, ended %v, reset %v; want %q, %q, ended %v", tc.path, status, body, ended, reset, wantStatus, tc.body, tc.ended)
+		case (tc.reset == nil) != (reset == nil) || tc.reset != nil && *tc.reset != *reset:
+			t.Fatalf("%s: reset %v, want %v", tc.path, reset, tc.reset)
+		case tc.logged != "" && strings.Count(logger.String(), tc.logged) != before+1:
+			t.Fatalf("%s: log %q, want one more %q", tc.path, logger.String(), tc.logged)
+		}
+		streamID += 2
+	}
+
+	// A cancel closes a blocked net.Conn body concurrently; its panic is
+	// recovered off the event loop.
+	peer.request(streamID, "/cancel-close-panic", true)
+	if status, body := readFirstData(peer, streamID); status != "200" || string(body) != "hello" {
+		t.Fatalf("cancel-close-panic: status %q, body %q", status, body)
+	}
+	if err := peer.framer.WriteRSTStream(streamID, xhttp2.ErrCodeCancel); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, "the cancel's Close panic is logged", func() bool {
+		return strings.Contains(logger.String(), "panic while writing body stream: cancel boom")
+	})
+	streamID += 2
+
+	// A sized body stream keeps its raw reader for the cancel: the peer's
+	// reset closes the pipe under the pump's blocked Read. Nothing more is
+	// written, so only that Close ends the Read below.
+	peer.request(streamID, "/sized-pipe", true)
+	if status, body := readFirstData(peer, streamID); status != "200" || string(body) != "hello" {
+		t.Fatalf("sized-pipe: status %q, body %q", status, body)
+	}
+	if err := peer.framer.WriteRSTStream(streamID, xhttp2.ErrCodeCancel); err != nil {
+		t.Fatal(err)
+	}
+	pipeClosed := make(chan error, 1)
+	go func() {
+		_, err := (<-sizedPipe).Read(nil)
+		pipeClosed <- err
+	}()
+	select {
+	case err := <-pipeClosed:
+		if !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatalf("pipe reader error = %v, want %v", err, io.ErrClosedPipe)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the reset didn't close the sized body's pipe")
+	}
+	streamID += 2
+	peer.request(streamID, "/", true)
+	if status, _, ended, reset := collectStream(peer, streamID); status != "200" || !ended || reset != nil {
+		t.Fatalf("after the failures: status %q, ended %v, reset %v", status, ended, reset)
+	}
+}
+
 // A credit record is applied once, whichever side moves first: a body closed
 // with consumed bytes still queued returns every byte's credit once, and a
 // record of a stream reset in the meantime returns nothing twice.
@@ -9426,6 +10471,152 @@ func TestQueuedCreditIsAppliedOnce(t *testing.T) {
 		if totals := windowUpdates(t, wire); totals[0] != window || totals[1] != 0 {
 			t.Fatalf("wire credit = %v, want %d on the connection alone", totals, window)
 		}
+	})
+}
+
+// A server StreamConn's Read never waits on the event loop to record the
+// credit of the bytes it copied: with the loop wedged in the writer behind a
+// peer that stopped reading, reads of the buffered upload complete, a Read
+// that runs out of data honors its deadline, and Close releases a Read
+// waiting for data. Once the peer reads again every consumed byte's credit
+// reaches it, coalesced, and the connection window is whole.
+func TestStreamConnReadNeverBlocksOnStalledWriter(t *testing.T) {
+	const upload = 4096
+	ends := make(chan fasthttp.StreamConn, 2)
+	hold := make(chan struct{})
+	defer close(hold)
+	server := &fasthttp.Server{Handler: func(ctx *fasthttp.RequestCtx) {
+		_ = ctx.AcceptStream(func(conn fasthttp.StreamConn) {
+			ends <- conn
+			<-hold
+		})
+	}}
+	transports := make(chan *stallConn, 1)
+	testServer, conns := newTunedTestServer(t, server, ServerConfig{
+		EnableExtendedConnect:    true,
+		WriteByteTimeout:         10 * time.Second,
+		MaxUploadBufferPerStream: upload,
+	}, func(h *ownedServerHandler) {
+		h.wrap = func(c net.Conn) net.Conn {
+			transport := newStallConn(c)
+			transports <- transport
+			return transport
+		}
+	})
+	peer := dialRawPeer(t, testServer.listener.Addr().String())
+	// Ample send credit: the stall is the transport's, not flow control's.
+	if err := peer.framer.WriteSettings(xhttp2.Setting{ID: xhttp2.SettingInitialWindowSize, Val: 1<<31 - 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := peer.framer.WriteWindowUpdate(0, 1<<31-1-65535); err != nil {
+		t.Fatal(err)
+	}
+	openRawTunnel(peer, 1)
+	owner, transport := <-conns, <-transports
+	uploading := <-ends
+	openRawTunnel(peer, 3)
+	idle := <-ends
+	if err := peer.framer.WriteData(1, false, make([]byte, upload)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := uploading.Read(make([]byte, 1)); err != nil {
+		t.Fatalf("first Read() error: %v", err)
+	}
+	// The transport stalls: the writer queue fills and the event loop blocks
+	// in the writer, which leaves the command queue to fill up behind it.
+	transport.stall()
+	written := make(chan error, 1)
+	go func() {
+		_, err := uploading.Write(make([]byte, 8<<20))
+		written <- err
+	}()
+	// A loop that still runs takes commands; a wedged one leaves them all.
+	stayedFull := false
+	waitUntil(t, "the event loop is wedged", func() bool {
+		if stayedFull && len(owner.commands) == cap(owner.commands) {
+			return transport.held.Load() != 0 && len(owner.writer.queue) == cap(owner.writer.queue)
+		}
+		for range cap(owner.commands) {
+			select {
+			case owner.commands <- serverCommand{kind: serverCommandInspect, inspect: func(*serverConn) {}, result: make(chan error, 1)}:
+			default:
+			}
+		}
+		stayedFull = len(owner.commands) == cap(owner.commands)
+		return false
+	})
+
+	if err := uploading.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	reads := make(chan error, 1)
+	go func() {
+		for range upload - 1 {
+			if _, err := uploading.Read(make([]byte, 1)); err != nil {
+				reads <- fmt.Errorf("buffered Read(): %w", err)
+				return
+			}
+		}
+		_, err := uploading.Read(make([]byte, 1))
+		reads <- err
+	}()
+	select {
+	case err := <-reads:
+		if !isTimeout(err) {
+			t.Fatalf("Read() past the upload = %v, want its deadline", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Read() stayed blocked past its deadline while the event loop was wedged")
+	}
+	blocked := make(chan error, 1)
+	go func() {
+		_, err := idle.Read(make([]byte, 1))
+		blocked <- err
+	}()
+	closed := make(chan error, 1)
+	go func() { closed <- idle.Close() }()
+	select {
+	case err := <-blocked:
+		if !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("Read() released by Close() = %v, want %v", err, net.ErrClosed)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close() didn't release the Read() while the event loop was wedged")
+	}
+
+	// The transport flows again; the loop resumes and applies the queued
+	// credit.
+	transport.resume()
+	updates := make(chan map[uint32]uint32, 1)
+	go func() {
+		totals := map[uint32]uint32{}
+		_ = peer.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		for totals[1] < upload {
+			frame, err := peer.framer.ReadFrame()
+			if err != nil {
+				break
+			}
+			if update, ok := frame.(*xhttp2.WindowUpdateFrame); ok {
+				totals[update.StreamID] += update.Increment
+			}
+		}
+		updates <- totals
+	}()
+	if err := <-written; err != nil {
+		t.Fatalf("Write() error after the stall: %v", err)
+	}
+	if err := <-closed; err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+	if totals := <-updates; totals[1] != upload {
+		t.Fatalf("stream WINDOW_UPDATE total = %d, want %d: consumed credit was lost", totals[1], upload)
+	}
+	waitUntil(t, "the connection window is whole", func() bool {
+		var whole bool
+		inspectOwner(t, owner, func(c *serverConn) {
+			whole = c.recv.window+c.recv.pending == int64(c.config.connectionWindowSize)
+		})
+		return whole
 	})
 }
 

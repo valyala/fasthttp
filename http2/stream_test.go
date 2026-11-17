@@ -136,6 +136,39 @@ func TestReadUnderDeadlineSetWhileBlocked(t *testing.T) {
 	}
 }
 
+// A deadline timer that fires before the deadline, as when the wall clock
+// steps back under a deadline without a monotonic reading, is armed again.
+func TestReadUnderDeadlineTimerFiringEarly(t *testing.T) {
+	body := newRequestBody(nil, 0)
+	state := newTestReadState(body)
+	_ = state.SetReadDeadline(time.Now().Add(time.Hour))
+	done := make(chan error, 1)
+	go func() {
+		_, err := state.readUnderDeadline(body, make([]byte, 1))
+		done <- err
+	}()
+	waitUntil(t, "the read is blocked", func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return state.readDeadline.pending != 0
+	})
+	// The timer's callback runs in the timer's place, ahead of the deadline.
+	state.mu.Lock()
+	state.readDeadline.timer.Stop()
+	state.mu.Unlock()
+	state.expire(&state.readDeadline)
+	state.mu.Lock()
+	armed := state.readDeadline.timer.Stop()
+	state.mu.Unlock()
+	if !armed {
+		t.Fatal("expire() ahead of the deadline left the timer stopped")
+	}
+	body.complete()
+	if err := <-done; !errors.Is(err, io.EOF) {
+		t.Fatalf("readUnderDeadline() error = %v, want io.EOF", err)
+	}
+}
+
 func TestReadUnderDeadlinePassedDeadline(t *testing.T) {
 	body := newRequestBody(nil, 0)
 	if err := body.writeOwned([]byte("x"), nil); err != nil {
