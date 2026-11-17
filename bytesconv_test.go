@@ -581,8 +581,7 @@ func TestParseUfloatSyntaxError(t *testing.T) {
 	t.Parallel()
 
 	_, err := ParseUfloat([]byte("abc"))
-	var numErr *strconv.NumError
-	if !errors.As(err, &numErr) {
+	if _, ok := errors.AsType[*strconv.NumError](err); !ok {
 		t.Fatalf("expecting *strconv.NumError, got %T: %v", err, err)
 	}
 	if !errors.Is(err, strconv.ErrSyntax) {
