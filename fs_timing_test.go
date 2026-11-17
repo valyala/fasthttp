@@ -30,6 +30,9 @@ func BenchmarkFSSmallFile(b *testing.B) {
 	b.Run("fs", func(b *testing.B) {
 		benchmarkFSSmallFile(b, &FS{FS: os.DirFS(dir), AllowEmptyRoot: true}, "/file.txt", len(body))
 	})
+	b.Run("dir-pathrewrite", func(b *testing.B) {
+		benchmarkFSSmallFile(b, &FS{Root: dir, PathRewrite: NewPathSlashesStripper(1)}, "/static/file.txt", len(body))
+	})
 	b.Run("dir-nocache", func(b *testing.B) {
 		benchmarkFSSmallFile(b, &FS{Root: dir, SkipCache: true}, "/file.txt", len(body))
 	})

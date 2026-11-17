@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -2071,6 +2072,262 @@ func TestServeFileContentType(t *testing.T) {
 	}
 }
 
+func TestFSDirectoryRedirect(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for _, name := range []string{"docs/C# notes", "example.com/docs", "other.example/docs"} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.FromSlash(name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tests := []struct {
+		name        string
+		pathRewrite PathRewriteFunc
+		handler     func(ctx *RequestCtx)
+		uri         string
+		location    string
+	}{
+		{name: "plain", uri: "/docs", location: "http://example.com/docs/"},
+		{name: "query string", uri: "/docs?a=b&c", location: "http://example.com/docs/?a=b&c"},
+		{name: "fragment", uri: "/docs#top", location: "http://example.com/docs/"},
+		{name: "escaped name", uri: "/docs/C%23%20notes", location: "http://example.com/docs/C%23%20notes/"},
+		{name: "not normalized", uri: "/docs//./C%23%20notes", location: "http://example.com/docs/C%23%20notes/"},
+		// A path, not the host to redirect to.
+		{name: "two leading slashes", uri: "//other.example/docs", location: "http://example.com/other.example/docs/"},
+		{
+			name:        "stripped slashes",
+			pathRewrite: NewPathSlashesStripper(1),
+			uri:         "/static/docs",
+			location:    "http://example.com/static/docs/",
+		},
+		{
+			name:        "absolute form",
+			pathRewrite: NewPathSlashesStripper(1),
+			uri:         "http://example.com/static/docs?sort=name",
+			location:    "http://example.com/static/docs/?sort=name",
+		},
+		// A handler before FS may change the path. The redirect goes to the
+		// changed path: the original one may lead nowhere with a slash.
+		{
+			name: "path set by a handler",
+			handler: func(ctx *RequestCtx) {
+				if string(ctx.Path()) == "/latest" {
+					ctx.URI().SetPath("/docs")
+				}
+			},
+			uri:      "/latest?a=b",
+			location: "http://example.com/docs/?a=b",
+		},
+		// The query goes out as the handlers before FS left it.
+		{
+			name:     "query args changed by a handler",
+			handler:  changeQueryArgs,
+			uri:      "/docs?token=secret&sort=old",
+			location: "http://example.com/docs/?sort=new",
+		},
+		{
+			name:        "query args changed, stripped slashes",
+			handler:     changeQueryArgs,
+			pathRewrite: NewPathSlashesStripper(1),
+			uri:         "/static/docs?token=secret&sort=old",
+			location:    "http://example.com/static/docs/?sort=new",
+		},
+		// What PathRewrite puts into ctx.URI() is not for the client.
+		{
+			name:        "query set by PathRewrite",
+			pathRewrite: setInternalQuery,
+			uri:         "/docs",
+			location:    "http://example.com/docs/",
+		},
+		{
+			name:        "query replaced by PathRewrite",
+			pathRewrite: setInternalQuery,
+			uri:         "/docs?sort=old",
+			location:    "http://example.com/docs/?sort=old",
+		},
+		{
+			name:        "query args changed, query replaced by PathRewrite",
+			handler:     changeQueryArgs,
+			pathRewrite: setInternalQuery,
+			uri:         "/docs?token=secret&sort=old",
+			location:    "http://example.com/docs/?sort=new",
+		},
+		// PathRewrite may point ctx.URI() to another host.
+		{
+			name:        "host set by PathRewrite",
+			pathRewrite: setInternalHost,
+			uri:         "https://public.example/static/docs?token=secret",
+			location:    "https://public.example/static/docs/?token=secret",
+		},
+		{
+			name:        "stripped prefix",
+			pathRewrite: NewPathPrefixStripper(len("/static")),
+			uri:         "/static/docs/C%23%20notes?a=b",
+			location:    "http://example.com/static/docs/C%23%20notes/?a=b",
+		},
+		{
+			name:        "virtual host",
+			pathRewrite: NewVHostPathRewriter(0),
+			uri:         "/docs",
+			location:    "http://example.com/docs/",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			fsHandler := (&FS{Root: dir, GenerateIndexPages: true, PathRewrite: tt.pathRewrite}).NewRequestHandler()
+			h := func(ctx *RequestCtx) {
+				if tt.handler != nil {
+					tt.handler(ctx)
+				}
+				fsHandler(ctx)
+			}
+
+			var ctx RequestCtx
+			var req Request
+			req.Header.SetHost("example.com")
+			req.SetRequestURI(tt.uri)
+			ctx.Init(&req, nil, TestLogger{t})
+			h(&ctx)
+			if ctx.Response.StatusCode() != StatusFound {
+				t.Fatalf("unexpected status code %d. Expecting %d", ctx.Response.StatusCode(), StatusFound)
+			}
+			location := string(ctx.Response.Header.Peek(HeaderLocation))
+			if location != tt.location {
+				t.Fatalf("unexpected Location %q. Expecting %q", location, tt.location)
+			}
+
+			// The redirect leads to the index page of the directory.
+			ctx.Request.Reset()
+			ctx.Response.Reset()
+			ctx.Request.SetRequestURI(location)
+			h(&ctx)
+			if ctx.Response.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code %d for %q. Expecting %d", ctx.Response.StatusCode(), location, StatusOK)
+			}
+		})
+	}
+}
+
+// A PathRewrite may take off the trailing slash the client sent. FS must
+// not redirect then: the path it would redirect to is not the client's.
+func TestFSDirectoryTrimmedSlash(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	for _, name := range []string{".attacker.example", "docs"} {
+		if err := os.MkdirAll(filepath.Join(dir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "docs", "index.html"), []byte("docs"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opened := &countingFS{FS: os.DirFS(dir)}
+	h := (&FS{
+		FS:                 opened,
+		AllowEmptyRoot:     true,
+		GenerateIndexPages: true,
+		IndexNames:         []string{"index.html"},
+		PathRewrite: func(ctx *RequestCtx) []byte {
+			return bytes.Trim(ctx.Path(), "/")
+		},
+	}).NewRequestHandler()
+
+	get := func(uri string) *Response {
+		var ctx RequestCtx
+		var req Request
+		req.SetRequestURI(uri)
+		ctx.Init(&req, nil, TestLogger{t})
+		h(&ctx)
+		var resp Response
+		ctx.Response.CopyTo(&resp)
+		return &resp
+	}
+
+	// Twice: the second answer may come from the cache.
+	for range 2 {
+		for _, uri := range []string{
+			"http://public.example/.attacker.example/?token=secret",
+			"http://public.example/docs/?token=secret",
+		} {
+			resp := get(uri)
+			if resp.StatusCode() != StatusOK {
+				t.Fatalf("%s: unexpected status code %d, Location %q. Expecting %d",
+					uri, resp.StatusCode(), resp.Header.Peek(HeaderLocation), StatusOK)
+			}
+		}
+		// Without the slash the client still gets the redirect.
+		resp := get("http://public.example/docs?token=secret")
+		if resp.StatusCode() != StatusFound {
+			t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusFound)
+		}
+		if location := string(resp.Header.Peek(HeaderLocation)); location != "http://public.example/docs/?token=secret" {
+			t.Fatalf("unexpected Location %q", location)
+		}
+	}
+
+	// Warmed: the index comes from the cache, the filesystem is not opened again.
+	before := opened.opens.Load()
+	resp := get("http://public.example/docs/?token=secret")
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code %d", resp.StatusCode())
+	}
+	if n := opened.opens.Load() - before; n != 0 {
+		t.Fatalf("a cached directory request opened the filesystem %d times", n)
+	}
+}
+
+// countingFS counts Open calls, to tell a cache hit from a reopened file.
+type countingFS struct {
+	iofs.FS
+
+	opens atomic.Int64
+}
+
+func (c *countingFS) Open(name string) (iofs.File, error) {
+	c.opens.Add(1)
+	return c.FS.Open(name)
+}
+
+func changeQueryArgs(ctx *RequestCtx) {
+	ctx.QueryArgs().Del("token")
+	ctx.QueryArgs().Set("sort", "new")
+}
+
+func setInternalHost(ctx *RequestCtx) []byte {
+	ctx.URI().Update("https://storage.example" + strings.TrimPrefix(string(ctx.Path()), "/static"))
+	return ctx.Path()
+}
+
+func setInternalQuery(ctx *RequestCtx) []byte {
+	ctx.URI().Update(string(ctx.Path()) + "?view=internal")
+	return ctx.Path()
+}
+
+func TestPathRewriteKeepsURI(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		f    PathRewriteFunc
+		want bool
+	}{
+		{name: "nil", f: nil, want: false},
+		{name: "slashes stripper", f: NewPathSlashesStripper(1), want: true},
+		{name: "prefix stripper", f: NewPathPrefixStripper(3), want: true},
+		{name: "virtual host", f: NewVHostPathRewriter(0), want: false},
+		{name: "custom", f: setInternalQuery, want: false},
+	} {
+		if got := pathRewriteKeepsURI(tt.f); got != tt.want {
+			t.Errorf("%s: pathRewriteKeepsURI() = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestServeFileDirectoryRedirect(t *testing.T) {
 	t.Parallel()
 
@@ -3170,6 +3427,33 @@ func TestOSFSOpenReturnsOSFile(t *testing.T) {
 		_ = f.Close()
 		if !ok {
 			t.Fatalf("AllowSymlinksOutsideRoot=%v: Open returned %T, want *os.File", allowSymlinksOutsideRoot, f)
+		}
+	}
+}
+
+func TestFSStripperTrimsToEmptyDirectory(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h := (&FS{
+		FS:             os.DirFS(dir),
+		AllowEmptyRoot: true,
+		IndexNames:     []string{"index.html"},
+		PathRewrite:    NewPathSlashesStripper(2),
+	}).NewRequestHandler()
+
+	// Twice: the second answer comes from the cache.
+	for range 2 {
+		var ctx RequestCtx
+		var req Request
+		req.SetRequestURI("http://example.com/a/b/")
+		ctx.Init(&req, nil, TestLogger{t})
+		h(&ctx)
+		if ctx.Response.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code %d, Location %q", ctx.Response.StatusCode(), ctx.Response.Header.Peek(HeaderLocation))
 		}
 	}
 }

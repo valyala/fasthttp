@@ -3,7 +3,10 @@
 package fasthttp
 
 import (
+	"bytes"
 	"net"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -134,5 +137,47 @@ func TestAllocationsHeaderScanner(t *testing.T) {
 
 	if n != 0 {
 		t.Fatalf("expected 0 allocations, got %f", n)
+	}
+}
+
+func TestAllocationFSTrimmedSlash(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"docs/index.html": "docs", "file.txt": "file"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := []byte("file.txt")
+	h := (&FS{
+		FS:             os.DirFS(dir),
+		AllowEmptyRoot: true,
+		IndexNames:     []string{"index.html"},
+		PathRewrite: func(ctx *RequestCtx) []byte {
+			if string(ctx.Path()) == "/asset/" {
+				return file // an alias: the client's slash is not in the rewritten path
+			}
+			return bytes.Trim(ctx.Path(), "/")
+		},
+	}).NewRequestHandler()
+
+	ctx := &RequestCtx{}
+	for _, uri := range []string{"/docs/", "/asset/"} {
+		get := func() {
+			ctx.Request.Reset()
+			ctx.Response.Reset()
+			ctx.Request.SetRequestURI(uri)
+			ctx.Request.Header.Set("Host", "localhost")
+			h(ctx)
+		}
+		get() // warm the cache
+		if ctx.Response.StatusCode() != StatusOK {
+			t.Fatalf("%s: unexpected status code %d", uri, ctx.Response.StatusCode())
+		}
+		if n := testing.AllocsPerRun(100, get); n != 0 {
+			t.Fatalf("%s: expected 0 allocations, got %f", uri, n)
+		}
 	}
 }

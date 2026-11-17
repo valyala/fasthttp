@@ -15,6 +15,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -315,9 +316,13 @@ var strInvalidHost = []byte("invalid-host")
 //
 // The returned path rewriter may be used as FS.PathRewrite .
 func NewPathSlashesStripper(slashesCount int) PathRewriteFunc {
-	return func(ctx *RequestCtx) []byte {
-		return stripLeadingSlashes(ctx.Path(), slashesCount)
-	}
+	return pathSlashesStripper(slashesCount).rewrite
+}
+
+type pathSlashesStripper int
+
+func (n pathSlashesStripper) rewrite(ctx *RequestCtx) []byte {
+	return stripLeadingSlashes(ctx.Path(), int(n))
 }
 
 // NewPathPrefixStripper returns path rewriter, which removes prefixSize bytes
@@ -331,13 +336,26 @@ func NewPathSlashesStripper(slashesCount int) PathRewriteFunc {
 //
 // The returned path rewriter may be used as FS.PathRewrite .
 func NewPathPrefixStripper(prefixSize int) PathRewriteFunc {
-	return func(ctx *RequestCtx) []byte {
-		path := ctx.Path()
-		if len(path) >= prefixSize {
-			path = path[prefixSize:]
-		}
-		return path
+	return pathPrefixStripper(prefixSize).rewrite
+}
+
+type pathPrefixStripper int
+
+func (n pathPrefixStripper) rewrite(ctx *RequestCtx) []byte {
+	path := ctx.Path()
+	if len(path) >= int(n) {
+		path = path[n:]
 	}
+	return path
+}
+
+// pathRewriteKeepsURI reports whether f is returned by NewPathSlashesStripper
+// or NewPathPrefixStripper, which never change ctx.URI(). Method values of a
+// type share one code pointer, also when the constructor is inlined.
+func pathRewriteKeepsURI(f PathRewriteFunc) bool {
+	p := reflect.ValueOf(f).Pointer()
+	return p == reflect.ValueOf(PathRewriteFunc(pathSlashesStripper(0).rewrite)).Pointer() ||
+		p == reflect.ValueOf(PathRewriteFunc(pathPrefixStripper(0).rewrite)).Pointer()
 }
 
 // FS represents settings for request handler serving static files
@@ -353,6 +371,13 @@ type FS struct {
 	// Path rewriting function.
 	//
 	// By default request path is not modified.
+	//
+	// A request for a directory without a trailing slash is redirected to
+	// the scheme, host, path and query FS got, with a slash added to the
+	// path, not to the rewritten path. So a PathRewrite mapping exactly
+	// /latest to /docs gets /latest/ next and must handle it too. Whether
+	// to redirect depends on the path FS got: if it ends with a slash, the
+	// directory index is served even if the rewritten path has none.
 	PathRewrite PathRewriteFunc
 
 	// PathNotFound fires when file is not found in filesystem
@@ -655,6 +680,7 @@ func (fs *FS) initRequestHandler() {
 		root:                   root,
 		indexNames:             fs.IndexNames,
 		pathRewrite:            fs.PathRewrite,
+		pathRewriteKeepsURI:    pathRewriteKeepsURI(fs.PathRewrite),
 		generateIndexPages:     fs.GenerateIndexPages,
 		compress:               fs.Compress,
 		compressBrotli:         fs.CompressBrotli,
@@ -710,6 +736,7 @@ type fsHandler struct {
 	smallFilesInMemory atomic.Int64
 
 	pathRewrite            PathRewriteFunc
+	pathRewriteKeepsURI    bool
 	pathNotFound           RequestHandler
 	compressedFileSuffixes map[string]string
 
@@ -1445,11 +1472,26 @@ func (h *fsHandler) filePathToCompressed(filePath string) string {
 }
 
 func (h *fsHandler) handleRequest(ctx *RequestCtx) {
-	var path []byte
-	if h.pathRewrite != nil {
-		path = h.pathRewrite(ctx)
-	} else {
+	// uriSchemeHost, uriPath and uriQuery are the parts of ctx.URI() as FS
+	// got it, for a redirect. They stay nil while ctx.URI() keeps them.
+	var path, uriSchemeHost, uriPath, uriQuery []byte
+	switch {
+	case h.pathRewrite == nil:
 		path = ctx.Path()
+	case h.pathRewriteKeepsURI:
+		path = h.pathRewrite(ctx)
+	default:
+		// PathRewrite may change ctx.URI().
+		b := bytebufferpool.Get()
+		defer bytebufferpool.Put(b)
+		u := ctx.URI()
+		b.B = u.appendSchemeHost(b.B)
+		n := len(b.B)
+		b.B = append(b.B, u.Path()...)
+		m := len(b.B)
+		b.B = u.appendQueryString(b.B)
+		uriSchemeHost, uriPath, uriQuery = b.B[:n], b.B[n:m], b.B[m:]
+		path = h.pathRewrite(ctx)
 	}
 	hasTrailingSlash := len(path) > 0 && path[len(path)-1] == '/'
 
@@ -1506,7 +1548,29 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 	}
 
-	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, path)
+	// PathRewrite may take off the slash the client sent. Such a request asks
+	// for the directory, so it is cached under the path with the slash: a
+	// request without one never finds it and is still redirected.
+	cacheKey := path
+	clientSlash := hasTrailingSlash
+	// Only a rewriter can drop the client's slash; the built-in strippers do so
+	// only when nothing is left, so other requests skip the second path read.
+	if !hasTrailingSlash && h.pathRewrite != nil && (!h.pathRewriteKeepsURI || len(path) == 0) {
+		reqPath := uriPath
+		if reqPath == nil {
+			reqPath = ctx.Path()
+		}
+		if len(reqPath) > 0 && reqPath[len(reqPath)-1] == '/' {
+			clientSlash = true
+			// Pooled: the cache copies the key only when it stores an entry.
+			kb := bytebufferpool.Get()
+			defer bytebufferpool.Put(kb)
+			kb.B = append(append(kb.B[:0], path...), '/')
+			cacheKey = kb.B
+		}
+	}
+
+	ff, ok := h.cacheManager.GetFileFromCache(fileCacheKind, cacheKey)
 	if !ok {
 		filePath := h.pathToFilePath(path, hasTrailingSlash)
 
@@ -1520,8 +1584,8 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		}
 
 		if errors.Is(err, errDirIndexRequired) {
-			if !hasTrailingSlash {
-				ctx.RedirectBytes(append(path, '/'), StatusFound)
+			if !clientSlash {
+				redirectToDir(ctx, uriSchemeHost, uriPath, uriQuery)
 				return
 			}
 			ff, err = h.openIndexFile(ctx, filePath, mustCompress, fileEncoding)
@@ -1545,7 +1609,7 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 			ff.etag = appendFSETag(nil, ff.lastModified, ff.contentLength)
 		}
 
-		ff = h.cacheManager.SetFileToCache(fileCacheKind, path, ff)
+		ff = h.cacheManager.SetFileToCache(fileCacheKind, cacheKey, ff)
 	}
 
 	var notModified bool
@@ -1659,6 +1723,33 @@ func (h *fsHandler) handleRequest(ctx *RequestCtx) {
 		ctx.SetContentType(ff.contentType)
 	}
 	ctx.SetStatusCode(statusCode)
+}
+
+// redirectToDir redirects the request for a directory to the same path with
+// a trailing slash. uriSchemeHost, uriPath and uriQuery are the parts of
+// the request uri FS got, before PathRewrite, or nil if they are still in
+// ctx.URI(). The path in the filesystem is never used: the client may be
+// unable to request it. FS calls it only when the path FS got has no
+// trailing slash.
+func redirectToDir(ctx *RequestCtx, uriSchemeHost, uriPath, uriQuery []byte) {
+	uriKept := uriPath == nil
+	if uriKept {
+		uriPath = ctx.Path()
+	}
+	b := bytebufferpool.Get()
+	// Absolute, so that the scheme and host PathRewrite may have put into
+	// ctx.URI() are not used.
+	b.B = append(b.B, uriSchemeHost...)
+	// The paths are decoded: '?', '#' and '%' in a name are no delimiters.
+	b.B = appendQuotedPath(b.B, uriPath)
+	b.B = append(b.B, '/')
+	if uriKept {
+		b.B = ctx.URI().appendQueryString(b.B)
+	} else {
+		b.B = append(b.B, uriQuery...)
+	}
+	ctx.RedirectBytes(b.B, StatusFound)
+	bytebufferpool.Put(b)
 }
 
 // fsIfRangeMatch reports whether the Range header may be served given
