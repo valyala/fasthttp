@@ -1998,28 +1998,12 @@ func (c *HostClient) AcquireConn(reqTimeout time.Duration, connectionClose bool)
 		return nil, err
 	}
 
-	// A failed dial must not leave a cleaner sleeping for MaxIdleConnDuration.
-	// Start it only after a connection is established. Claim the run under the
-	// lock so concurrent successful dials still start exactly one cleaner.
-	startCleaner := false
-	if !connectionClose {
-		c.connsLock.Lock()
-		if !c.connsCleanerRun {
-			c.connsCleanerRun = true
-			startCleaner = true
-		}
-		c.connsLock.Unlock()
-	}
-	if startCleaner {
-		go c.connsCleaner()
-	}
-
 	cc = acquireClientConn(conn)
 
 	return cc, nil
 }
 
-func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
+func (c *HostClient) queueForIdle(w *wantConn, _ bool) {
 	c.connsLock.Lock()
 	if n := len(c.conns); n > 0 {
 		var cc *clientConn
@@ -2047,18 +2031,11 @@ func (c *HostClient) queueForIdle(w *wantConn, connectionClose bool) {
 	// the connection count, freeing capacity without adding an idle connection.
 	// Reserve the freed slot and dial a replacement connection for w. The conns
 	// cleaner may have exited after observing connsCount == 0 before the slot
-	// was reserved, so restart it as well.
+	// was reserved. The cleaner will restart if the replacement connection is
+	// later returned to the idle pool.
 	if c.connsCount < c.maxConnsLocked() {
 		c.connsCount++
-		startCleaner := false
-		if !c.connsCleanerRun && !connectionClose {
-			c.connsCleanerRun = true
-			startCleaner = true
-		}
 		c.connsLock.Unlock()
-		if startCleaner {
-			go c.connsCleaner()
-		}
 		go c.dialConnFor(w)
 		return
 	}

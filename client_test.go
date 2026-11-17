@@ -7341,6 +7341,46 @@ func TestHostClientFailedDialDoesNotStartConnsCleaner(t *testing.T) {
 	}
 }
 
+func TestHostClientQueueForIdleFailedDialDoesNotStartConnsCleaner(t *testing.T) {
+	c := &HostClient{
+		Addr:                "example.com:80",
+		MaxConns:            1,
+		MaxConnWaitTimeout:  time.Second,
+		MaxIdleConnDuration: time.Hour,
+		Dial: func(string) (net.Conn, error) {
+			return nil, errors.New("dial failed")
+		},
+	}
+	w := &wantConn{ready: make(chan struct{}, 1)}
+	c.queueForIdle(w, false)
+
+	select {
+	case <-w.ready:
+		if w.err == nil {
+			t.Fatal("expected queued dial to fail")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued dial did not return")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		c.connsLock.Lock()
+		cleanerRun, connsCount := c.connsCleanerRun, c.connsCount
+		c.connsLock.Unlock()
+		if connsCount == 0 {
+			if cleanerRun {
+				t.Fatal("conns cleaner started despite the failed queued dial")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("failed queued dial left connsCount=%d", connsCount)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestHostClientConcurrentDialFailureStillStartsConnsCleaner(t *testing.T) {
 	firstDialStarted := make(chan struct{})
 	allowFirstDial := make(chan struct{})
@@ -7406,11 +7446,17 @@ func TestHostClientConcurrentDialFailureStillStartsConnsCleaner(t *testing.T) {
 	c.connsLock.Lock()
 	cleanerRun := c.connsCleanerRun
 	c.connsLock.Unlock()
-	if !cleanerRun {
-		t.Fatal("conns cleaner was not started for the successful concurrent dial")
+	if cleanerRun {
+		t.Fatal("conns cleaner started before the successful connection became idle")
 	}
 
 	c.ReleaseConn(second.conn)
+	c.connsLock.Lock()
+	cleanerRun = c.connsCleanerRun
+	c.connsLock.Unlock()
+	if !cleanerRun {
+		t.Fatal("conns cleaner was not started when the connection became idle")
+	}
 	deadline := time.Now().Add(time.Second)
 	for {
 		c.connsLock.Lock()
@@ -7577,8 +7623,8 @@ func TestHostClientQueueForIdleRestartsCleaner(t *testing.T) {
 	}
 
 	// The last connection closes after AcquireConn checked the pool and the
-	// connection count. The conns cleaner has already observed connsCount == 0
-	// and exited, so reserving the freed slot must also restart the cleaner.
+	// connection count. The cleaner has exited by the time the replacement slot
+	// is reserved, so the cleaner must restart when that connection becomes idle.
 	c.decConnsCount()
 
 	w := &wantConn{ready: make(chan struct{}, 1)}
@@ -7592,10 +7638,22 @@ func TestHostClientQueueForIdleRestartsCleaner(t *testing.T) {
 	if w.err != nil {
 		t.Fatalf("unexpected waiter error: %v", w.err)
 	}
+	c.connsLock.Lock()
+	cleanerRun := c.connsCleanerRun
+	c.connsLock.Unlock()
+	if cleanerRun {
+		t.Fatal("conns cleaner started before the replacement connection became idle")
+	}
 
-	// Once the replacement connection is returned to the pool, the restarted
-	// cleaner must close it after MaxIdleConnDuration and then exit.
+	// Once the replacement connection is returned to the pool, the cleaner
+	// starts, closes it after MaxIdleConnDuration, and exits.
 	c.ReleaseConn(w.conn)
+	c.connsLock.Lock()
+	cleanerRun = c.connsCleanerRun
+	c.connsLock.Unlock()
+	if !cleanerRun {
+		t.Fatal("conns cleaner was not started when the replacement became idle")
+	}
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
