@@ -988,8 +988,13 @@ func (u *URI) updateBytes(newURI, buf []byte) ([]byte, error) {
 	// relative path
 	switch newURI[0] {
 	case '?':
-		// query string only update
-		u.SetQueryStringBytes(newURI[1:])
+		// query string update, optionally followed by a fragment
+		if n := bytes.IndexByte(newURI, '#'); n >= 0 {
+			u.SetQueryStringBytes(newURI[1:n])
+			u.SetHashBytes(newURI[n+1:])
+		} else {
+			u.SetQueryStringBytes(newURI[1:])
+		}
 		return append(buf[:0], u.FullURI()...), nil
 	case '#':
 		// update only hash
