@@ -17,6 +17,7 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -2826,6 +2827,191 @@ func TestClientURLAuth(t *testing.T) {
 		if val != expected {
 			t.Fatalf("wrong %q header: %q expected %q", HeaderAuthorization, val, expected)
 		}
+	}
+}
+
+// TestClientRedirectAuthMatchesNetHTTP runs the same redirects through
+// net/http and fasthttp and checks that every request gets the same
+// Authorization header from both.
+func TestClientRedirectAuthMatchesNetHTTP(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		uri           string
+		authorization string
+		// The n-th request is redirected to locations[n].
+		locations []string
+	}{
+		{
+			name:      "relative",
+			uri:       "http://user:pass@example.com/start",
+			locations: []string{"/landing"},
+		},
+		{
+			name:      "same host",
+			uri:       "http://user:pass@example.com/start",
+			locations: []string{"http://example.com/landing"},
+		},
+		{
+			name:      "subdomain",
+			uri:       "http://user:pass@example.com/start",
+			locations: []string{"http://sub.example.com/landing"},
+		},
+		{
+			name:      "other host",
+			uri:       "http://user:pass@example.com/start",
+			locations: []string{"http://example.org/landing"},
+		},
+		{
+			name:      "new userinfo",
+			uri:       "http://user:pass@example.com/start",
+			locations: []string{"http://other:secret@example.com/landing"},
+		},
+		{
+			name: "chain",
+			uri:  "http://user:pass@example.com/start",
+			locations: []string{
+				"/a", "b?c=d", "?e=f", "http://sub.example.com/g", "/h",
+				"http://other:secret@example.org/i", "/j", "http://example.com/k",
+			},
+		},
+		{
+			name:          "authorization header",
+			uri:           "http://example.com/start",
+			authorization: "Bearer token",
+			locations: []string{
+				"/a", "http://example.com/b", "http://sub.example.com/c", "http://example.org/d", "http://example.com/e",
+			},
+		},
+		{
+			name:          "authorization header and userinfo",
+			uri:           "http://user:pass@example.com/start",
+			authorization: "Bearer token",
+			locations: []string{
+				"/a", "http://other:secret@example.com/b", "http://sub.example.com/c",
+				"http://other:secret@example.org/d", "/e", "http://example.com/f",
+			},
+		},
+	}
+
+	// serve runs do against a server that answers with the redirects in
+	// locations, and returns the host, request uri and Authorization header
+	// of every request it got.
+	serve := func(t *testing.T, locations []string, do func(dial func() (net.Conn, error)) error) []string {
+		t.Helper()
+
+		var (
+			mu       sync.Mutex
+			requests []string
+		)
+		ln := fasthttputil.NewInmemoryListener()
+		defer ln.Close()
+		s := &Server{
+			Handler: func(ctx *RequestCtx) {
+				mu.Lock()
+				defer mu.Unlock()
+				if n := len(requests); n < len(locations) {
+					ctx.Response.Header.Set(HeaderLocation, locations[n])
+					ctx.SetStatusCode(StatusFound)
+				}
+				requests = append(requests, string(ctx.Host())+string(ctx.RequestURI())+" "+
+					string(ctx.Request.Header.Peek(HeaderAuthorization)))
+			},
+		}
+		go s.Serve(ln) //nolint:errcheck
+
+		if err := do(ln.Dial); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if len(requests) != len(locations)+1 {
+			t.Fatalf("got %d requests, expected %d: %q", len(requests), len(locations)+1, requests)
+		}
+		return requests
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			expected := serve(t, tc.locations, func(dial func() (net.Conn, error)) error {
+				c := &http.Client{
+					Transport: &http.Transport{
+						DialContext: func(context.Context, string, string) (net.Conn, error) {
+							return dial()
+						},
+					},
+				}
+				defer c.CloseIdleConnections()
+				req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, tc.uri, http.NoBody)
+				if err != nil {
+					return err
+				}
+				if tc.authorization != "" {
+					req.Header.Set(HeaderAuthorization, tc.authorization)
+				}
+				resp, err := c.Do(req)
+				if err != nil {
+					return err
+				}
+				return resp.Body.Close()
+			})
+
+			doRedirects := func(setUserinfo bool) func(dial func() (net.Conn, error)) error {
+				return func(dial func() (net.Conn, error)) error {
+					c := &Client{
+						Dial: func(string) (net.Conn, error) {
+							return dial()
+						},
+					}
+					req := AcquireRequest()
+					defer ReleaseRequest(req)
+					if setUserinfo {
+						// The same request, with the userinfo set on the URI.
+						u, err := url.Parse(tc.uri)
+						if err != nil {
+							return err
+						}
+						username := u.User.Username()
+						password, _ := u.User.Password()
+						u.User = nil
+						req.SetRequestURI(u.String())
+						req.URI().SetUsername(username)
+						req.URI().SetPassword(password)
+					} else {
+						req.SetRequestURI(tc.uri)
+					}
+					if tc.authorization != "" {
+						req.Header.Set(HeaderAuthorization, tc.authorization)
+					}
+					return c.DoRedirects(req, nil, 16)
+				}
+			}
+			clients := map[string]func(dial func() (net.Conn, error)) error{
+				"DoRedirects": doRedirects(false),
+			}
+			if strings.Contains(tc.uri, "@") {
+				clients["DoRedirects with URI.SetUsername"] = doRedirects(true)
+			}
+			if tc.authorization == "" {
+				clients["Get"] = func(dial func() (net.Conn, error)) error {
+					c := &Client{
+						Dial: func(string) (net.Conn, error) {
+							return dial()
+						},
+					}
+					_, _, err := c.Get(nil, tc.uri)
+					return err
+				}
+			}
+			for name, do := range clients {
+				if requests := serve(t, tc.locations, do); !slices.Equal(requests, expected) {
+					t.Errorf("%s sent %q\nnet/http sent %q", name, requests, expected)
+				}
+			}
+		})
 	}
 }
 

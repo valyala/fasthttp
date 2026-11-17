@@ -1293,6 +1293,7 @@ func responseBodyDrainSize(maxBodySize int) int {
 }
 
 func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
+	req.SetRequestURI(url)
 	resp := AcquireResponse()
 	bodyBuf := resp.bodyBuffer()
 	resp.KeepBodyBuffer = true
@@ -1329,10 +1330,14 @@ func doRequestFollowRedirects(
 	hasBodyStream := req.IsBodyStream()
 
 	for {
-		req.SetRequestURI(url)
 		if err := req.parseURI(); err != nil {
 			return 0, nil, err
 		}
+
+		// Write builds Authorization from the userinfo when the request
+		// doesn't have one. Like net/http, that header is only for this URI:
+		// it is built again from the userinfo of the next one on a redirect.
+		authFromUserinfo := len(req.uri.username) > 0 && len(req.Header.peek(strAuthorization)) == 0
 
 		if err = c.Do(req, resp); err != nil {
 			break
@@ -1367,7 +1372,15 @@ func doRequestFollowRedirects(
 			break
 		}
 		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
-		ReleaseURI(redirectURI)
+		if authFromUserinfo {
+			req.Header.del(strAuthorization)
+		}
+		// A relative location keeps the userinfo of the current URI, while
+		// an absolute one only has its own, as with url.URL.ResolveReference.
+		if !hasAuthority(location) {
+			redirectURI.SetUsernameBytes(req.uri.username)
+			redirectURI.SetPasswordBytes(req.uri.password)
+		}
 
 		// A 303, or a POST rewritten to GET on 301/302, retrieves the target
 		// without the original body (RFC 9110 section 15.4).
@@ -1385,13 +1398,26 @@ func doRequestFollowRedirects(
 			hasBodyStream = false
 		} else if hasBodyStream {
 			// The previous hop consumed the stream this redirect would replay.
+			ReleaseURI(redirectURI)
 			err = ErrRedirectBodyStream
 			break
 		}
 
 		if err = closeOrDrainResponseBody(resp, maxResponseBodyDrainSize); err != nil {
+			ReleaseURI(redirectURI)
 			break
 		}
+
+		// Set the URI here and not at the top of the loop: DoRedirects
+		// passes req.URI().String() as url, which leaves out the userinfo,
+		// so the first request has to go out with the URI the caller set.
+		req.SetRequestURI(url)
+		if len(redirectURI.username) > 0 {
+			uri := req.URI()
+			uri.SetUsernameBytes(redirectURI.username)
+			uri.SetPasswordBytes(redirectURI.password)
+		}
+		ReleaseURI(redirectURI)
 	}
 
 	return statusCode, body, err
@@ -1406,6 +1432,13 @@ func isNonHTTPRedirect(location []byte) bool {
 	}
 	scheme := location[:bytes.IndexByte(location, ':')]
 	return !bytes.EqualFold(scheme, strHTTP) && !bytes.EqualFold(scheme, strHTTPS)
+}
+
+// hasAuthority reports whether location replaces the authority of the URI
+// it is resolved against, the same way URI.UpdateBytes decides it.
+func hasAuthority(location []byte) bool {
+	n := bytes.Index(location, strSlashSlash)
+	return n >= 0 && isAuthorityDelimiter(location, n)
 }
 
 func getRedirectURL(baseURL string, location []byte, disablePathNormalizing bool, dst *URI) (string, error) {
