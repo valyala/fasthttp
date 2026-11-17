@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	iofs "io/fs"
 	"math/rand"
@@ -1367,6 +1368,81 @@ func TestFSCompressSingleThreadSkipCache(t *testing.T) {
 	})
 }
 
+func TestFSDirIndexLinks(t *testing.T) {
+	t.Parallel()
+
+	// '#', '?' and '%' are ordinary characters in a file name. Left as they
+	// are in a link, they start a fragment, a query or an escape.
+	files := map[string]string{
+		"Track #1.txt":             "track",
+		"100%.txt":                 "percent",
+		"a%41.txt":                 "escape",
+		"C# notes/x.txt":           "nested",
+		"C# notes/50% off/y z.txt": "deeper",
+	}
+	if runtime.GOOS != "windows" {
+		files["what?.txt"] = "query"
+	}
+	dir := t.TempDir()
+	for name, body := range files {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := (&FS{Root: dir, GenerateIndexPages: true}).NewRequestHandler()
+
+	get := func(uri string) string {
+		t.Helper()
+
+		var ctx RequestCtx
+		ctx.Init(&Request{}, nil, TestLogger{t})
+		ctx.Request.SetRequestURI(uri)
+		h(&ctx)
+		resp := readResponseFromCtx(t, &ctx, false)
+		if resp.StatusCode() != StatusOK {
+			t.Fatalf("unexpected status code %d for %q. Expecting %d", resp.StatusCode(), uri, StatusOK)
+		}
+		return string(resp.Body())
+	}
+	// link returns where the link with the given text on the index page at uri leads.
+	link := func(uri, text string) string {
+		t.Helper()
+
+		page := get(uri)
+		end := strings.Index(page, `">`+html.EscapeString(text)+"</a>")
+		start := strings.LastIndex(page[:max(end, 0)], `<a href="`)
+		if end < 0 || start < 0 {
+			t.Fatalf("cannot find the link %q on the index page at %q: %q", text, uri, page)
+		}
+		href, _, _ := strings.Cut(page[start+len(`<a href="`):end], `"`)
+		return html.UnescapeString(href)
+	}
+
+	// Every file is reached by following the links from the root exactly
+	// as they are, without a redirect on the way.
+	for name, body := range files {
+		uri := "/"
+		for segment := range strings.SplitSeq(name, "/") {
+			uri = link(uri, segment)
+		}
+		if got := get(uri); got != body {
+			t.Fatalf("unexpected body %q behind the links to %q, which end at %q. Expecting %q", got, name, uri, body)
+		}
+	}
+
+	// The link to the parent leads one directory up.
+	if href := link("/C%23%20notes/50%25%20off/", ".."); href != "/C%23%20notes/" {
+		t.Fatalf("unexpected parent link %q. Expecting %q", href, "/C%23%20notes/")
+	}
+	if href := link("/C%23%20notes/", ".."); href != "/" {
+		t.Fatalf("unexpected parent link %q. Expecting %q", href, "/")
+	}
+}
+
 func TestFSCompressTmpFileSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks needs extra privileges on Windows")
@@ -2547,7 +2623,7 @@ func TestFSRootServesLikeUnconfined(t *testing.T) {
 		compressRoot := ""
 		if cacheName != "" {
 			compressRoot = filepath.Join(base, cacheName)
-			cacheDir = compressRoot
+			cacheDir = compressedCacheDir(root, compressRoot)
 		}
 
 		newHandler := func(allowSymlinksOutsideRoot bool) RequestHandler {
@@ -2645,8 +2721,10 @@ func TestFSRootRelativeRoots(t *testing.T) {
 					roots.root, roots.compressRoot, req, got.contentEncoding, req.acceptEncoding)
 			}
 		}
+		fs := &FS{}
+		cacheDir := compressedCacheDir(fs.normalizeRoot(roots.root), fs.normalizeRoot(roots.compressRoot))
 		for _, name := range []string{"app.js.fasthttp.gz", filepath.Join("sub", "deep", "app.js.fasthttp.br")} {
-			if _, err := os.Stat(filepath.Join(roots.compressRoot, name)); err != nil {
+			if _, err := os.Stat(filepath.Join(cacheDir, name)); err != nil {
 				t.Errorf("compressed file wasn't written under CompressRoot %q: %v", roots.compressRoot, err)
 			}
 		}
@@ -2755,7 +2833,11 @@ func TestFSRootCompressedFilesStayInRoot(t *testing.T) {
 		if err := os.Symlink(filepath.Join(outside, "linked"), filepath.Join(root, "linked")); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(filepath.Join(outside, "cache"), filepath.Join(compressRoot, "sub")); err != nil {
+		cacheDir := compressedCacheDir(root, compressRoot)
+		if err := os.MkdirAll(cacheDir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(outside, "cache"), filepath.Join(cacheDir, "sub")); err != nil {
 			t.Fatal(err)
 		}
 
@@ -2858,7 +2940,7 @@ func TestFSRootCompressRootInsideRoot(t *testing.T) {
 			t.Errorf("AllowSymlinksOutsideRoot=%v, /app.js: status=%d encoding=%q, want %d gzip",
 				allowSymlinksOutsideRoot, resp.status, resp.contentEncoding, StatusOK)
 		}
-		if _, err := os.Stat(filepath.Join(outside, "app.js.fasthttp.gz")); err != nil {
+		if _, err := os.Stat(filepath.Join(compressedCacheDir(root, outside), "app.js.fasthttp.gz")); err != nil {
 			t.Errorf("AllowSymlinksOutsideRoot=%v: compressed file wasn't written to CompressRoot: %v",
 				allowSymlinksOutsideRoot, err)
 		}
@@ -2915,6 +2997,52 @@ func TestFSRootWholeVolumeCompressRoot(t *testing.T) {
 	}
 }
 
+// Two handlers with the same relative filename and modification time must
+// serve their own source when they share the on-disk compression directory.
+func TestFSSharedCompressRoot(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []string{"directory", "file"} {
+		t.Run(kind, func(t *testing.T) {
+			cache := t.TempDir()
+			path := "/page.txt"
+			if kind == "file" {
+				cache = filepath.Join(cache, "cache")
+				if err := os.WriteFile(cache, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				path = "/"
+			}
+			mtime := time.Unix(1700000000, 0)
+			for _, content := range []string{"private", "public"} {
+				root := t.TempDir()
+				file := filepath.Join(root, "page.txt")
+				body := bytes.Repeat([]byte(content), 1000)
+				if err := os.WriteFile(file, body, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chtimes(file, mtime, mtime); err != nil {
+					t.Fatal(err)
+				}
+				if kind == "file" {
+					root = file
+				}
+				handler := (&FS{
+					Root: root, CompressRoot: cache, Compress: true, SkipCache: true,
+				}).NewRequestHandler()
+				resp := fsRootTestGet(t, handler, path, "gzip", "")
+				if resp.status != StatusOK || resp.contentEncoding != "gzip" {
+					t.Fatalf("status=%d encoding=%q, want 200 gzip", resp.status, resp.contentEncoding)
+				}
+				decoded, err := AppendGunzipBytes(nil, []byte(resp.body))
+				if err != nil || !bytes.Equal(decoded, body) {
+					t.Fatalf("response does not match %s (gunzip error %v)", file, err)
+				}
+			}
+		})
+	}
+}
+
 // TestFSRootStaleCompressedFileInRoot checks that a stale precompressed file
 // next to its original in Root is removed from Root when the compressed
 // copies FS writes go to a separate CompressRoot.
@@ -2953,7 +3081,7 @@ func TestFSRootStaleCompressedFileInRoot(t *testing.T) {
 			t.Errorf("AllowSymlinksOutsideRoot=%v: stale compressed file in Root wasn't removed (stat error %v)",
 				allowSymlinksOutsideRoot, err)
 		}
-		if _, err := os.Stat(filepath.Join(compressRoot, "app.js.fasthttp.gz")); err != nil {
+		if _, err := os.Stat(filepath.Join(compressedCacheDir(root, compressRoot), "app.js.fasthttp.gz")); err != nil {
 			t.Errorf("AllowSymlinksOutsideRoot=%v: compressed file wasn't written to CompressRoot: %v",
 				allowSymlinksOutsideRoot, err)
 		}
@@ -3043,5 +3171,237 @@ func TestOSFSOpenReturnsOSFile(t *testing.T) {
 		if !ok {
 			t.Fatalf("AllowSymlinksOutsideRoot=%v: Open returned %T, want *os.File", allowSymlinksOutsideRoot, f)
 		}
+	}
+}
+
+// shortWriter accepts at most n bytes and reports no error.
+type shortWriter struct{ n int }
+
+type errorWriter struct {
+	n   int
+	err error
+}
+
+func (w *errorWriter) Write(p []byte) (int, error) {
+	if len(p) > w.n {
+		p = p[:w.n]
+	}
+	return len(p), w.err
+}
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	if len(p) > w.n {
+		p = p[:w.n]
+	}
+	return len(p), nil
+}
+
+func TestFSSmallFileWriteToShortWrite(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	body := []byte("small file body for short write")
+	if err := os.WriteFile(filepath.Join(dir, "small.txt"), body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		fs   *FS
+	}{
+		{name: "cached", fs: &FS{Root: dir}},
+		{name: "skip cache", fs: &FS{Root: dir, SkipCache: true}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := tt.fs.NewRequestHandler()
+			var ctx RequestCtx
+			ctx.Init(&Request{}, nil, TestLogger{t})
+			ctx.Request.SetRequestURI("/small.txt")
+			h(&ctx)
+			defer func() {
+				if err := ctx.Response.CloseBodyStream(); err != nil {
+					t.Error(err)
+				}
+			}()
+
+			stream := ctx.Response.BodyStream()
+			r, ok := stream.(*fsSmallFileReader)
+			if !ok {
+				t.Fatalf("unexpected body stream %T. Expecting *fsSmallFileReader", stream)
+			}
+
+			w := &shortWriter{n: 4}
+			n, err := r.WriteTo(w)
+			if n != 4 {
+				t.Errorf("wrote %d bytes, want 4", n)
+			}
+			if err != io.ErrShortWrite {
+				t.Errorf("got %v, want io.ErrShortWrite", err)
+			}
+			if r.startPos != 4 {
+				t.Errorf("startPos = %d, want 4", r.startPos)
+			}
+		})
+	}
+}
+
+func TestFSSmallFileWriteToPreservesWriterError(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "small.txt"), []byte("small file body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := (&FS{Root: dir}).NewRequestHandler()
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, TestLogger{t})
+	ctx.Request.SetRequestURI("/small.txt")
+	h(&ctx)
+	defer func() {
+		if err := ctx.Response.CloseBodyStream(); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	r := ctx.Response.BodyStream().(*fsSmallFileReader) //nolint:forcetypeassert
+	want := errors.New("write failed")
+	w := &errorWriter{n: 4, err: want}
+	if _, err := r.WriteTo(w); err != want {
+		t.Errorf("got %v, want %v", err, want)
+	}
+}
+
+// dataAndEOFFile returns data and io.EOF in the same ReadAt call. os.File
+// does this when the file shrinks after its size was cached, so the loop in
+// fsSmallFileReader.WriteTo must still honor the destination writer's error.
+type dataAndEOFFile struct {
+	data []byte
+}
+
+func (f *dataAndEOFFile) ReadAt(p []byte, off int64) (int, error) {
+	if off >= int64(len(f.data)) {
+		return 0, io.EOF
+	}
+	n := copy(p, f.data[off:])
+	return n, io.EOF
+}
+
+func (f *dataAndEOFFile) Read(p []byte) (int, error)   { return 0, io.EOF }
+func (f *dataAndEOFFile) Close() error                 { return nil }
+func (f *dataAndEOFFile) Stat() (iofs.FileInfo, error) { return nil, errors.New("unused") }
+
+var errTooManyWrites = errors.New("too many writes")
+
+// plainWriter only implements io.Writer. bytes.Buffer implements io.ReaderFrom,
+// which would bypass the ReadAt loop under test. The write count also bounds
+// that loop so a regression fails instead of spinning on empty writes forever.
+type plainWriter struct {
+	b     bytes.Buffer
+	calls int
+}
+
+func (w *plainWriter) Write(p []byte) (int, error) {
+	w.calls++
+	if w.calls > 3 {
+		return 0, errTooManyWrites
+	}
+	return w.b.Write(p)
+}
+
+func TestFSSmallFileWriteToDataAndEOFShortWrite(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.startPos = 0
+	r.endPos = ff.contentLength
+
+	w := &shortWriter{n: 4}
+	n, err := r.WriteTo(w)
+	if n != 4 {
+		t.Errorf("wrote %d bytes, want 4", n)
+	}
+	if !errors.Is(err, io.ErrShortWrite) {
+		t.Errorf("got %v, want io.ErrShortWrite", err)
+	}
+	if r.startPos != 4 {
+		t.Errorf("startPos = %d, want 4", r.startPos)
+	}
+}
+
+func TestFSSmallFileWriteToDataAndEOFPreservesWriterError(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.endPos = ff.contentLength
+
+	want := errors.New("write failed")
+	w := &errorWriter{n: 4, err: want}
+	_, err := r.WriteTo(w)
+	if !errors.Is(err, want) {
+		t.Errorf("got %v, want the original writer error", err)
+	}
+	if errors.Is(err, io.ErrShortWrite) {
+		t.Errorf("original writer error was replaced: %v", err)
+	}
+}
+
+// dataAndEOFFile can also stand in for an io.PipeReader: ReadAt returns data
+// together with io.EOF, and the destination writer may return io.EOF after a
+// partial write (CloseWithError(io.EOF)). Only the EOF originating from ReadAt
+// may be cleared; an EOF returned by the writer must reach the caller so a
+// partially copied file is not reported as a clean success.
+func TestFSSmallFileWriteToKeepsWriterEOF(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.endPos = ff.contentLength
+
+	w := &errorWriter{n: 4, err: io.EOF}
+	n, err := r.WriteTo(w)
+	if n != 4 {
+		t.Errorf("wrote %d bytes, want 4", n)
+	}
+	if err != io.EOF {
+		t.Errorf("got %v, want io.EOF from the destination writer", err)
+	}
+	if r.startPos != 4 {
+		t.Errorf("startPos = %d, want 4", r.startPos)
+	}
+}
+
+// A clean copy must still report success when the cached endPos is past the
+// end of a file that shrank: the io.EOF from ReadAt is not an error to the
+// caller, and the loop must stop instead of issuing empty writes forever.
+// Use a destination that only implements io.Writer: bytes.Buffer implements
+// io.ReaderFrom, which bypasses this loop entirely.
+func TestFSSmallFileWriteToClearsReadAtEOF(t *testing.T) {
+	ff := &fsFile{
+		f:             &dataAndEOFFile{data: []byte("small file")},
+		contentLength: 10,
+	}
+	r := &fsSmallFileReader{ff: ff}
+	r.endPos = 20 // stale cached size; the file now holds only 10 bytes
+
+	w := &plainWriter{}
+	n, err := r.WriteTo(w)
+	if err != nil {
+		t.Errorf("got %v, want nil after a complete copy", err)
+	}
+	if n != 10 || w.b.String() != "small file" {
+		t.Errorf("wrote %d bytes %q, want 10 bytes %q", n, w.b.String(), "small file")
+	}
+	if w.calls != 1 {
+		t.Errorf("destination was written %d times, want 1 (no empty writes after source EOF)", w.calls)
+	}
+	if r.startPos != 10 {
+		t.Errorf("startPos = %d, want 10", r.startPos)
 	}
 }

@@ -330,7 +330,6 @@ type Client struct {
 	ConnPoolStrategy ConnPoolStrategyType
 
 	mLock sync.RWMutex
-	mOnce sync.Once
 
 	// NoDefaultUserAgentHeader when set to true, causes the default
 	// User-Agent header to be excluded from the Request.
@@ -565,10 +564,6 @@ func (c *Client) Do(req *Request, resp *Response) error {
 		return fmt.Errorf("unsupported protocol %q. http and https are supported", uri.Scheme())
 	}
 
-	c.mOnce.Do(func() {
-		c.m = make(map[string]*HostClient)
-		c.ms = make(map[string]*HostClient)
-	})
 	hc, err := c.hostClient(host, isTLS)
 	if err != nil {
 		return err
@@ -580,19 +575,25 @@ func (c *Client) Do(req *Request, resp *Response) error {
 }
 
 func (c *Client) hostClient(host []byte, isTLS bool) (*HostClient, error) {
-	m := c.m
+	mp := &c.m
 	if isTLS {
-		m = c.ms
+		mp = &c.ms
 	}
 
 	c.mLock.RLock()
-	hc, exist := m[string(host)]
+	hc, exist := (*mp)[string(host)]
 	c.mLock.RUnlock()
 	if exist {
 		return hc, nil
 	}
 	c.mLock.Lock()
 	defer c.mLock.Unlock()
+	// The map is made here rather than through a sync.Once, whose state
+	// every request would read from a cache line that mLock keeps changing.
+	if *mp == nil {
+		*mp = make(map[string]*HostClient)
+	}
+	m := *mp
 	hc, exist = m[string(host)]
 	if exist {
 		return hc, nil
@@ -851,8 +852,6 @@ type HostClient struct {
 	// Upstream information is a <host>:<port> format.
 	RetryIfErrUpstream RetryIfErrUpstreamFunc
 
-	connsWait *wantConnQueue
-
 	tlsConfigMap map[string]*tls.Config
 
 	clientReaderPool *sync.Pool
@@ -872,7 +871,6 @@ type HostClient struct {
 	// Client name. Used in User-Agent request header.
 	Name string
 
-	conns []*clientConn
 	addrs []string
 
 	// Maximum number of connections which may be established to all hosts
@@ -956,22 +954,6 @@ type HostClient struct {
 	// Connection pool strategy. Can be either LIFO or FIFO (default).
 	ConnPoolStrategy ConnPoolStrategyType
 
-	connsCount int
-
-	connsLock sync.Mutex
-
-	addrsLock        sync.Mutex
-	tlsConfigMapLock sync.Mutex
-
-	addrIdx     uint32
-	lastUseTime uint32
-
-	pendingRequests int32
-
-	// pendingClientRequests counts the number of requests that a Client is currently running using this HostClient.
-	// It will be incremented earlier than pendingRequests and will be used by Client to see if the HostClient is still in use.
-	pendingClientRequests int32
-
 	// NoDefaultUserAgentHeader when set to true, causes the default
 	// User-Agent header to be excluded from the Request.
 	NoDefaultUserAgentHeader bool
@@ -1039,8 +1021,36 @@ type HostClient struct {
 	// known-length bodies for connection reuse and closes other body streams.
 	StreamResponseBody bool
 
+	// The fields below change while requests run, many of them on every
+	// request. The padding keeps them off the cache lines of the fields above,
+	// which every request reads, so that requests running on other CPUs don't
+	// have to fetch those lines again after each change.
+	_ cacheLinePad
+
+	connsLock       sync.Mutex
+	conns           []*clientConn
+	connsWait       *wantConnQueue
+	connsCount      int
 	connsCleanerRun bool
+
+	addrsLock        sync.Mutex
+	tlsConfigMapLock sync.Mutex
+	addrIdx          uint32
+
+	lastUseTime     uint32
+	pendingRequests int32
+
+	// pendingClientRequests counts the number of requests that a Client is currently running using this HostClient.
+	// It will be incremented earlier than pendingRequests and will be used by Client to see if the HostClient is still in use.
+	pendingClientRequests int32
+
+	_ cacheLinePad
 }
+
+// cacheLinePad keeps the fields on either side of it off each other's cache
+// lines. 128 bytes covers the 64-byte lines of most CPUs, the pairs of them
+// that Intel CPUs prefetch together, and the 128-byte lines of others.
+type cacheLinePad struct{ _ [128]byte }
 
 type clientConn struct {
 	c net.Conn
@@ -1359,41 +1369,24 @@ func doRequestFollowRedirects(
 		stripSensitiveHeadersOnRedirect(req, initialHost, redirectURI)
 		ReleaseURI(redirectURI)
 
-		// Every redirect but 303 keeps the body, and a consumed stream cannot
-		// produce it again. Fail instead of following with an empty body, the
-		// same reason the retry path refuses to retry such a request.
-		if hasBodyStream && statusCode != StatusSeeOther {
-			err = ErrRedirectBodyStream
-			break
-		}
-
-		switch {
-		case statusCode == StatusSeeOther:
-			// RFC 9110 section 15.4.4: a 303 (See Other) response redirects
-			// the user agent to retrieve the new URI with a GET (or HEAD)
-			// request, regardless of the original method, and without the
-			// original request body. Drop the body together with every header
-			// that frames it: per RFC 9112 a body is signaled by Content-Length
-			// or Transfer-Encoding, and a Trailer only applies to a chunked
-			// body, so all of them must go once the body is gone.
+		// A 303, or a POST rewritten to GET on 301/302, retrieves the target
+		// without the original body (RFC 9110 section 15.4).
+		if statusCode == StatusSeeOther ||
+			((statusCode == StatusMovedPermanently || statusCode == StatusFound) && req.Header.IsPost()) {
 			if !req.Header.IsGet() && !req.Header.IsHead() {
 				req.Header.SetMethod(MethodGet)
 			}
-			req.Header.Del(HeaderContentLength)
-			req.Header.Del(HeaderContentType)
-			req.Header.Del(HeaderTransferEncoding)
-			req.Header.Del(HeaderTrailer)
+			req.Header.dropRedirectBodyHeaders()
 			req.ResetBody()
 			req.postArgs.Reset()
 			req.parsedPostArgs = false
 			// The body is gone for the rest of the chain, so later
 			// body-preserving redirects have nothing left to replay.
 			hasBodyStream = false
-		case req.Header.IsPost() && (statusCode == StatusMovedPermanently || statusCode == StatusFound):
-			// RFC 9110 sections 15.4.2/15.4.3 Note: for historical reasons a
-			// user agent MAY change the request method from POST to GET for a
-			// 301 (Moved Permanently) or 302 (Found) response.
-			req.Header.SetMethod(MethodGet)
+		} else if hasBodyStream {
+			// The previous hop consumed the stream this redirect would replay.
+			err = ErrRedirectBodyStream
+			break
 		}
 
 		if err = closeOrDrainResponseBody(resp, maxResponseBodyDrainSize); err != nil {
@@ -1437,12 +1430,27 @@ func stripSensitiveHeadersOnRedirect(req *Request, initialHost []byte, redirectU
 		return
 	}
 
-	req.Header.Del(HeaderAuthorization)
-	req.Header.Del(HeaderCookie)
-	req.Header.Del(HeaderCookie2) // Match net/http behavior.
-	req.Header.Del(HeaderProxyAuthenticate)
-	req.Header.Del(HeaderProxyAuthorization)
-	req.Header.Del(HeaderWWWAuthenticate)
+	h := &req.Header
+	h.cookies = h.cookies[:0]
+	h.h = stripSensitiveFields(h.h)
+	h.trailerH = stripSensitiveFields(h.trailerH)
+}
+
+func stripSensitiveFields(fields []argsKV) []argsKV {
+	n := 0
+	for i := range fields {
+		key := fields[i].key
+		if caseInsensitiveCompare(key, strAuthorization) || caseInsensitiveCompare(key, strCookie) ||
+			caseInsensitiveCompare(key, []byte(HeaderCookie2)) || caseInsensitiveCompare(key, strProxyAuthenticate) ||
+			caseInsensitiveCompare(key, strProxyAuthorization) || caseInsensitiveCompare(key, strWWWAuthenticate) {
+			continue
+		}
+		if i != n {
+			fields[n], fields[i] = fields[i], fields[n]
+		}
+		n++
+	}
+	return fields[:n]
 }
 
 // shouldStripSensitiveHeadersOnRedirect defines the trust boundary for
@@ -1799,7 +1807,11 @@ func (c *HostClient) doNonNilReqResp(req *Request, resp *Response) (bool, error)
 		return false, ErrHostClientRedirectToDifferentScheme
 	}
 
-	atomic.StoreUint32(&c.lastUseTime, uint32(time.Now().Unix()-startTimeUnix)) // #nosec G115
+	// The time only changes once a second, and storing it unchanged would
+	// still make every other CPU running a request fetch its cache line again.
+	if now := uint32(time.Now().Unix() - startTimeUnix); atomic.LoadUint32(&c.lastUseTime) != now { // #nosec G115
+		atomic.StoreUint32(&c.lastUseTime, now)
+	}
 
 	// Free up resources occupied by response before sending the request,
 	// so the GC may reclaim these resources (e.g. response body).
@@ -2926,12 +2938,23 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 	w.respCopy.Header.disableNormalizing = c.DisableHeaderNamesNormalizing
 	streamBody := resp != nil && resp.StreamBody
 	w.respCopy.StreamBody = streamBody
+	// The reader goroutine only sees respCopy, so it needs the caller's
+	// SkipBody too. copyToSkipBody copies it back to resp afterwards.
+	w.respCopy.SkipBody = resp != nil && resp.SkipBody
 	w.req = &w.reqCopy
 	w.resp = &w.respCopy
 
 	// Make a copy of the request in order to avoid data races on timeouts
 	req.copyToSkipBody(&w.reqCopy)
-	if req.KeepBodyBuffer && req.body != nil {
+	switch {
+	case req.onlyMultipartForm() && req.bodyStream == nil && req.bodyRaw == nil:
+		// The caller owns the form's temporary files and can remove them after a timeout.
+		if err := WriteMultipartForm(w.reqCopy.bodyBuffer(), req.multipartForm, req.multipartFormBoundary); err != nil {
+			c.releasePipelineWork(w)
+			return err
+		}
+		w.reqCopy.Header.SetMultipartFormBoundary(req.multipartFormBoundary)
+	case req.KeepBodyBuffer && req.body != nil:
 		if req.bodyStream != nil {
 			w.reqCopy.bodyStream = req.bodyStream
 			req.bodyStream = nil
@@ -2942,7 +2965,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 		} else {
 			w.reqCopy.SetBody(req.bodyBytes())
 		}
-	} else {
+	default:
 		swapRequestBody(req, &w.reqCopy)
 	}
 
@@ -2968,7 +2991,7 @@ func (c *pipelineConnClient) DoDeadline(req *Request, resp *Response, deadline t
 			if resp.KeepBodyBuffer && resp.body != nil {
 				w.respCopy.copyToSkipBody(resp)
 				resp.SetBody(w.respCopy.bodyBytes())
-				if streamBody && !resp.mustSkipBody() {
+				if streamBody && !resp.mustSkipBody() && !req.Header.IsHead() {
 					resp.bodyStream = bytes.NewReader(resp.bodyBytes())
 				}
 			} else {
@@ -3254,16 +3277,18 @@ func (c *pipelineConnClient) worker(chs *pipelineConnChannels) (bool, error) {
 		return false, err
 	}
 
-	// Start reader and writer
+	// Start reader and writer. After sending CONNECT the writer waits on
+	// connectCh until the reader knows the connection is still HTTP.
+	connectCh := make(chan struct{}, 1)
 	stopW := make(chan struct{})
 	doneW := make(chan error)
 	go func() {
-		doneW <- c.writer(conn, stopW, chs)
+		doneW <- c.writer(conn, stopW, chs, connectCh)
 	}()
 	stopR := make(chan struct{})
 	doneR := make(chan error)
 	go func() {
-		doneR <- c.reader(conn, stopR, chs)
+		doneR <- c.reader(conn, stopR, chs, connectCh)
 	}()
 
 	// Wait until reader and writer are stopped
@@ -3313,7 +3338,9 @@ func (c *pipelineConnClient) ensureTLSConfig() error {
 	return err
 }
 
-func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *pipelineConnChannels) error {
+func (c *pipelineConnClient) writer(
+	conn net.Conn, stopCh <-chan struct{}, chs *pipelineConnChannels, connectCh <-chan struct{},
+) error {
 	writeBufferSize := c.WriteBufferSize
 	if writeBufferSize <= 0 {
 		writeBufferSize = defaultWriteBufferSize
@@ -3373,6 +3400,9 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *
 		}
 
 		w.resp.ParseNetConn(conn)
+		// w.req belongs to the caller once w reaches the reader, so check it
+		// now.
+		isConnect := w.req.Header.IsConnect()
 
 		if writeTimeout > 0 {
 			// Set Deadline every time, since golang has fixed the performance issue
@@ -3420,6 +3450,22 @@ func (c *pipelineConnClient) writer(conn net.Conn, stopCh <-chan struct{}, chs *
 				goto againChR
 			}
 		}
+
+		if isConnect {
+			// A 2xx response turns the connection into a tunnel, so nothing
+			// may follow CONNECT until its response is known. Otherwise
+			// queued requests, credentials included, would reach the tunnel
+			// target.
+			if err = bw.Flush(); err != nil {
+				return err
+			}
+			flushTimerCh = nil
+			select {
+			case <-connectCh:
+			case <-stopCh:
+				return nil
+			}
+		}
 	}
 }
 
@@ -3430,7 +3476,9 @@ func (c *pipelineConnClient) canStopPipelineConn(chs *pipelineConnChannels) bool
 	return canStop && len(chs.chR) == 0 && len(chs.chW) == 0
 }
 
-func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *pipelineConnChannels) error {
+func (c *pipelineConnClient) reader(
+	conn net.Conn, stopCh <-chan struct{}, chs *pipelineConnChannels, connectCh chan<- struct{},
+) error {
 	readBufferSize := c.ReadBufferSize
 	if readBufferSize <= 0 {
 		readBufferSize = defaultReadBufferSize
@@ -3467,29 +3515,55 @@ func (c *pipelineConnClient) reader(conn net.Conn, stopCh <-chan struct{}, chs *
 			}
 		}
 		// A response to HEAD carries no body no matter what Content-Length
-		// or Transfer-Encoding announce (RFC 9112 section 6.3). Reading one
-		// here would consume the following pipelined responses as the body,
-		// the same reason transport.RoundTrip skips it.
-		if w.req.Header.IsHead() {
-			w.resp.SkipBody = true
-		}
+		// or Transfer-Encoding announce (RFC 9112 section 6.3), and neither
+		// does a 2xx response to CONNECT. Reading one here would consume the
+		// following pipelined responses as the body, the same reason
+		// transport.RoundTrip skips it.
+		isConnect := w.req.Header.IsConnect()
 		// PipelineClient must consume each response body before reading the
 		// next response from the shared connection. Preserve StreamBody's
 		// reader API with a buffered stream instead of leaving bytes in br.
 		streamBody := w.resp.StreamBody
 		w.resp.StreamBody = false
-		err = w.resp.ReadLimitBody(br, c.MaxResponseBodySize)
+		err = w.resp.readLimitBody(br, c.MaxResponseBodySize, w.req.Header.IsHead(), isConnect)
 		w.resp.StreamBody = streamBody
+		// A body skipped by the caller still has to be consumed: left on the
+		// connection, it would be read as the start of the next pipelined
+		// response. Drain it without buffering it.
+		if err == nil && w.resp.SkipBody {
+			err = w.resp.discardBody(br, c.MaxResponseBodySize)
+		}
+		if err == nil && streamBody && !w.resp.mustSkipBody() {
+			w.resp.bodyStream = bytes.NewReader(w.resp.bodyBytes())
+		}
 		if err != nil {
 			w.err = err
 			w.done <- struct{}{}
 			return err
 		}
-		if streamBody && !w.resp.mustSkipBody() {
-			w.resp.bodyStream = bytes.NewReader(w.resp.bodyBytes())
+		if w.resp.StatusCode() == StatusSwitchingProtocols {
+			// Stop the writer before handing the response to the caller.
+			// Bytes after the 101 belong to the upgraded protocol.
+			conn.Close()
+			w.done <- struct{}{}
+			return nil
 		}
 
+		// After a 2xx response to CONNECT the connection is a tunnel, so no
+		// further pipelined response can be read from it. Check before
+		// signaling done: w may be reused as soon as the caller wakes up.
+		//
+		// The writer waits after sending CONNECT. Let it go on only if the
+		// connection is still HTTP; for a tunnel the worker stops it, and the
+		// queued requests are sent on a new connection.
+		tunnel := w.resp.isConnectTunnel()
+		if isConnect && !tunnel {
+			connectCh <- struct{}{}
+		}
 		w.done <- struct{}{}
+		if tunnel {
+			return nil
+		}
 	}
 }
 
@@ -3663,15 +3737,13 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		cc.readDeadlineSet = !readDeadline.IsZero()
 	}
 
-	if customSkipBody || req.Header.IsHead() {
-		resp.SkipBody = true
-	}
+	isHead := req.Header.IsHead()
 	if hc.DisableHeaderNamesNormalizing {
 		resp.Header.DisableNormalizing()
 	}
 
 	br := hc.AcquireReader(conn)
-	err = resp.ReadLimitBody(br, hc.MaxResponseBodySize)
+	err = resp.readLimitBody(br, hc.MaxResponseBodySize, isHead, req.Header.IsConnect())
 	if err != nil {
 		hc.ReleaseReader(br)
 		hc.CloseConn(cc)
@@ -3680,7 +3752,13 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		return needRetry, err
 	}
 
-	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose()
+	closeConn := resetConnection || req.ConnectionClose() || resp.ConnectionClose() ||
+		resp.StatusCode() == StatusSwitchingProtocols || resp.isConnectTunnel()
+	if customSkipBody && !isHead && !resp.Header.mustSkipContentLength() && resp.Header.ContentLength() != 0 {
+		// The body of this response was left unread on the connection,
+		// so the next response read from it would start inside that body.
+		closeConn = true
+	}
 	if customStreamBody && resp.bodyStream != nil {
 		// releaseConn runs when the caller closes the body stream, so it has to
 		// re-check resp.ConnectionClose(): a caller may only decide that the

@@ -72,11 +72,17 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 		w := acquireWriter(ctx)
 		// Serve the net/http handler concurrently so we can react to Flush/Hijack.
 		go func() {
+			req := r.WithContext(ctx)
 			defer func() {
+				// Like net/http, remove temporary uploads when ServeHTTP returns.
+				if req.MultipartForm != nil {
+					_ = req.MultipartForm.RemoveAll()
+				}
 				if rec := recover(); rec != nil {
-					// ErrAbortHandler is net/http's quiet give-up.
+					// An invalid upstream status can reach WriteHeader via ReverseProxy.
 					mode := modePanicked
-					if rec == http.ErrAbortHandler {
+					_, invalidStatus := rec.(invalidStatusCode)
+					if rec == http.ErrAbortHandler || invalidStatus {
 						mode = modeAborted
 					}
 					if w.pw != nil {
@@ -85,7 +91,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 						// cuts the connection.
 						w.stream.fail(ctx, rec)
 						_ = w.pw.CloseWithError(io.ErrUnexpectedEOF)
-					} else if mode == modePanicked {
+					} else if rec != http.ErrAbortHandler {
 						ctx.Logger().Printf("panic in net/http handler: %v", rec)
 					}
 
@@ -104,7 +110,7 @@ func NewFastHTTPHandler(h http.Handler) fasthttp.RequestHandler {
 				_ = w.Close()
 			}()
 
-			h.ServeHTTP(w, r.WithContext(ctx))
+			h.ServeHTTP(w, req)
 		}()
 
 		// Decide mode by first event.
@@ -366,21 +372,28 @@ func releaseWriter(w *writer) {
 	_ = w.Close()
 	w.mu.Lock()
 	w.ctx = nil
-	w.mu.Unlock()
+	w.responseBody = nil
 	if w.bufPool != nil {
 		bufferPool.Put(w.bufPool)
 		w.bufPool = nil
 	}
+	w.mu.Unlock()
 }
 
 func (w *writer) Header() http.Header {
 	return w.h
 }
 
+type invalidStatusCode int
+
+func (code invalidStatusCode) Error() string {
+	return fmt.Sprintf("invalid WriteHeader code %d", int(code))
+}
+
 func (w *writer) WriteHeader(code int) {
 	// Allow the same codes as net/http.
 	if code < 100 || code > 999 {
-		panic(fmt.Sprintf("invalid WriteHeader code %v", code))
+		panic(invalidStatusCode(code))
 	}
 	// As in net/http, a 1xx other than 101 is interim and doesn't set the
 	// final status. It isn't sent, which RFC 9110 section 15.2 allows.
@@ -402,11 +415,18 @@ func (w *writer) commit() {
 func (w *writer) Write(p []byte) (int, error) {
 	select {
 	case <-w.streamReady:
+		if w.hijacked.Load() {
+			return len(p), nil
+		}
 		return w.pw.Write(p)
 	default:
 	}
 
 	w.mu.Lock()
+	if w.hijacked.Load() {
+		w.mu.Unlock()
+		return len(p), nil
+	}
 	select {
 	case <-w.streamReady:
 		w.mu.Unlock()

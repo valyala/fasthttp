@@ -173,7 +173,7 @@ func (u *URI) SetQueryStringBytes(queryString []byte) {
 
 // Path returns URI path, i.e. /foo/bar of http://aaa.com/foo/bar?baz=123#qwe .
 //
-// The returned path is always urldecoded and normalized,
+// The returned path starts with a slash and is always urldecoded and normalized,
 // i.e. '//f%20obar/baz/../zzz' becomes '/f obar/zzz'.
 //
 // The returned bytes are valid until the next URI method call.
@@ -291,7 +291,8 @@ var ErrorInvalidURI = errors.New("fasthttp: invalid uri")
 // host may be nil. In this case uri must contain fully qualified uri,
 // i.e. with scheme and host. http is assumed if scheme is omitted.
 //
-// uri may contain e.g. RequestURI without scheme and host if host is non-empty.
+// If host is non-empty, a uri starting with "/" is an origin-form request
+// target and uses the supplied host.
 func (u *URI) Parse(host, uri []byte) error {
 	return u.parse(host, uri, false)
 }
@@ -315,9 +316,7 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 		return ErrorInvalidURI
 	}
 
-	// A target with a single leading slash is origin-form whatever it
-	// contains; splitHostURI would hand it back unchanged.
-	originForm := len(uri) > 1 && uri[0] == '/' && uri[1] != '/'
+	originForm := len(uri) > 0 && uri[0] == '/'
 	if len(host) == 0 || (!originForm && bytes.Contains(uri, strColonSlashSlash)) {
 		scheme, newHost, newURI := splitHostURI(host, uri)
 		if len(scheme) > 0 && !isValidScheme(scheme) {
@@ -510,7 +509,12 @@ func parseHost(host []byte) ([]byte, error) {
 			if err != nil {
 				return nil, err
 			}
-			return append(host1, append(host2, host3...)...), nil
+			host1 = append(host1, host2...)
+			host1 = append(host1, host3...)
+			if err = validateIPv6Literal(host1); err != nil {
+				return nil, err
+			}
+			return host1, nil
 		}
 	} else {
 		if bytes.IndexByte(host, '[') >= 0 || bytes.IndexByte(host, ']') >= 0 {
@@ -742,22 +746,40 @@ func removeParentSegments(b, p []byte, sep byte) []byte {
 	return b[:w]
 }
 
+func addLeadingSlash(dst, src []byte) []byte {
+	if len(src) == 0 || src[0] != '/' {
+		dst = append(dst, '/')
+	}
+	return dst
+}
+
 func normalizePath(dst, src []byte) []byte {
 	if len(src) == 1 && src[0] == '/' {
 		return append(dst[:0], '/')
 	}
-	dst = dst[:0]
-	dst = addLeadingSlash(dst, src)
+	dst = addLeadingSlash(dst[:0], src)
 	dst = decodeArgAppendNoPlus(dst, src)
 
 	// remove duplicate slashes
 	b := removeSegments(dst, strSlashSlash)
 
-	// No '.' means no "/./", "/../" or "/.." to remove.
-	if bytes.IndexByte(b, '.') < 0 {
+	// Every dot segment starts with a separator followed by a dot, so a path
+	// without one has none to remove. A dot elsewhere, as in "/file.txt",
+	// doesn't need the scans for segments that cannot be there.
+	i := bytes.IndexByte(b, '.')
+	if i < 0 {
 		return b
 	}
+	if rest := b[max(i-1, 0):]; !bytes.Contains(rest, strSlashDot) &&
+		(filepath.Separator != '\\' || !bytes.Contains(rest, strBackSlashDot)) {
+		return b
+	}
+	return removeDotSegments(b)
+}
 
+// removeDotSegments removes the "." and ".." segments from path b and returns
+// the result written over b.
+func removeDotSegments(b []byte) []byte {
 	// remove /./ parts
 	b = removeSegments(b, strSlashDotSlash)
 
@@ -769,7 +791,7 @@ func normalizePath(dst, src []byte) []byte {
 	if n >= 0 && n+len(strSlashDotDot) == len(b) {
 		nn := bytes.LastIndexByte(b[:n], '/')
 		if nn < 0 {
-			return append(dst[:0], strSlash...)
+			return append(b[:0], strSlash...)
 		}
 		b = b[:nn+1]
 	}
@@ -788,14 +810,20 @@ func normalizePath(dst, src []byte) []byte {
 		b = removeParentSegments(b, strSlashDotDotBackSlash, 0)
 
 		// remove /foo\..\ parts
+		rooted := len(b) > 0 && b[0] == '/'
 		b = removeParentSegments(b, strBackSlashDotDotBackSlash, '\\')
+		if rooted {
+			// Collapsing a segment at the root can replace the URI's leading
+			// slash with a backslash. Keep the slash in the normalized path.
+			b[0] = '/'
+		}
 
 		// remove trailing \foo\..
 		n := bytes.LastIndex(b, strBackSlashDotDot)
 		if n >= 0 && n+len(strSlashDotDot) == len(b) {
 			nn := bytes.LastIndexByte(b[:n], '/')
 			if nn < 0 {
-				return append(dst[:0], strSlash...)
+				return append(b[:0], strSlash...)
 			}
 			b = b[:nn+1]
 		}
@@ -1007,7 +1035,11 @@ func (u *URI) appendSchemeHost(dst []byte) []byte {
 //
 // WriteTo implements io.WriterTo interface.
 func (u *URI) WriteTo(w io.Writer) (int64, error) {
-	n, err := w.Write(u.FullURI())
+	b := u.FullURI()
+	n, err := w.Write(b)
+	if err == nil && n != len(b) {
+		err = io.ErrShortWrite
+	}
 	return int64(n), err
 }
 

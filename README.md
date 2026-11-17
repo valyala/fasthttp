@@ -652,9 +652,10 @@ This is an **unsafe** way, the result string and `[]byte` buffer share the same 
   - Compare [net/http Request.Body reading](https://pkg.go.dev/net/http#Request)
     to [fasthttp request body reading](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.PostBody).
 
-- _Why fasthttp doesn't support HTTP/2.0 and WebSockets?_
+- _Does fasthttp support HTTP/2.0 and WebSockets?_
 
-  [HTTP/2.0 support](https://github.com/fasthttp/http2) is in progress. [WebSockets](https://github.com/fasthttp/websockets) has been done already.
+  [HTTP/2.0 support](https://github.com/fasthttp/http2) is in progress. WebSockets are provided by the
+  [websocket](https://pkg.go.dev/github.com/valyala/fasthttp/websocket) package in this repository.
   Third parties also may use [RequestCtx.Hijack](https://pkg.go.dev/github.com/valyala/fasthttp#RequestCtx.Hijack)
   for implementing these goodies.
 

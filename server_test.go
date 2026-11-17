@@ -589,6 +589,20 @@ func TestRequestCtxRedirect(t *testing.T) {
 	}
 }
 
+func TestRequestCtxRedirectConnectAuthority(t *testing.T) {
+	t.Parallel()
+
+	var ctx RequestCtx
+	s := "CONNECT a:80 HTTP/1.1\r\nHost: a:80\r\n\r\n"
+	if err := ctx.Request.Read(bufio.NewReader(strings.NewReader(s))); err != nil {
+		t.Fatal(err)
+	}
+	ctx.Redirect("next", StatusFound)
+	if got := string(ctx.Response.Header.Peek(HeaderLocation)); got != "http://a:80/next" {
+		t.Fatalf("unexpected redirect location %q", got)
+	}
+}
+
 func TestRequestCtxRedirectSchemeWithoutAuthority(t *testing.T) {
 	t.Parallel()
 
@@ -2136,9 +2150,8 @@ func TestServerStreamedMultipartFormLeavesOversizedBodyUnread(t *testing.T) {
 		paths    []string
 	)
 	s := Server{
-		StreamRequestBody:            true,
-		DisablePreParseMultipartForm: true,
-		MaxRequestBodySize:           1, // Force RequestBodyStream.
+		StreamRequestBody:  true,
+		MaxRequestBodySize: 1, // A large upload must bypass multipart pre-parsing.
 		Handler: func(ctx *RequestCtx) {
 			paths = append(paths, string(ctx.Path()))
 			if string(ctx.Path()) != "/first" {
@@ -2531,6 +2544,65 @@ func TestServerDoesNotParseStreamedMultipartMalformedChunkAsRequest(t *testing.T
 
 	if len(paths) != 1 {
 		t.Fatalf("handler paths = %q; want only [/first]", paths)
+	}
+}
+
+func TestServerClosesAfterStreamedResponseReadsBrokenChunk(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		ignoreErr bool
+	}{
+		{"echo", false},
+		{"handler hides read error", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var rw readWriter
+			rw.r.WriteString("POST /echo HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\n\r\n" +
+				"1\r\na!0\r\n\r\nGET /smuggled HTTP/1.1\r\nHost: x\r\n\r\n")
+			var paths []string
+			s := Server{
+				StreamRequestBody: true,
+				Handler: func(ctx *RequestCtx) {
+					paths = append(paths, string(ctx.Path()))
+					if string(ctx.Path()) == "/echo" {
+						stream := ctx.RequestBodyStream()
+						if tc.ignoreErr {
+							r := stream
+							stream = bodyReadFunc(func(p []byte) (int, error) {
+								n, err := r.Read(p)
+								if err != nil && err != io.EOF {
+									// Finish consuming the stream before reporting a clean EOF.
+									_, _ = io.Copy(io.Discard, r)
+									err = io.EOF
+								}
+								return n, err
+							})
+						}
+						ctx.SetBodyStream(stream, -1)
+					}
+				},
+			}
+			err := s.ServeConn(&rw)
+			if len(paths) != 1 || paths[0] != "/echo" {
+				t.Fatalf("handler paths = %q; want only [/echo]", paths)
+			}
+			if tc.ignoreErr {
+				if err != nil {
+					t.Fatal(err)
+				}
+				var resp Response
+				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+					t.Fatal(err)
+				}
+				if body := string(resp.Body()); body != "a" {
+					t.Fatalf("response body = %q, want a", body)
+				}
+			} else if _, ok := errors.AsType[ErrBrokenChunk](err); !ok {
+				t.Fatalf("ServeConn error = %v; want ErrBrokenChunk", err)
+			}
+		})
 	}
 }
 
@@ -3322,6 +3394,101 @@ func TestServerHeadRequest(t *testing.T) {
 	}
 }
 
+func TestServerHeadRequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{Handler: func(ctx *RequestCtx) {
+		if ctx.IsHead() {
+			ctx.TimeoutErrorWithCode("timeout", StatusRequestTimeout)
+			return
+		}
+		ctx.SetBodyString("ok")
+	}}
+	rw := &readWriter{}
+	rw.r.WriteString("HEAD / HTTP/1.1\r\nHost: example.com\r\n\r\nGET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+	if err := s.ServeConn(rw); err != nil {
+		t.Fatal(err)
+	}
+	br := bufio.NewReader(&rw.w)
+	var header ResponseHeader
+	if err := header.Read(br); err != nil {
+		t.Fatal(err)
+	}
+	if header.StatusCode() != StatusRequestTimeout || header.ContentLength() != len("timeout") {
+		t.Fatalf("unexpected HEAD response: %s", &header)
+	}
+	statusLine, err := br.ReadString('\n')
+	if err != nil || statusLine != "HTTP/1.1 200 OK\r\n" {
+		t.Fatalf("unexpected start of GET response: %q, %v", statusLine, err)
+	}
+}
+
+func TestServerAbsoluteTargetHost(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct{ target, host, parsed string }{
+		{"http://public.example:80/path@user?q=user@example.org", "public.example:80", "public.example:80"},
+		{"http://[fe80::1%25eth0]/path", "[fe80::1%25eth0]", "[fe80::1%eth0]"},
+		{"//public.example/path?q=a://b", "internal.example", "internal.example"},
+		{"http://user@/path", "", ""},
+	} {
+		s := &Server{
+			HeaderReceived: func(h *RequestHeader) RequestConfig {
+				if got := string(h.Host()); got != tt.host {
+					t.Errorf("%s: HeaderReceived Host = %q, want %q", tt.target, got, tt.host)
+				}
+				return RequestConfig{}
+			},
+			Handler: func(ctx *RequestCtx) {
+				_ = ctx.Request.RequestURI()
+				ctx.Request.SetRequestURI("/rewritten")
+				if got := string(ctx.Host()); got != tt.parsed {
+					t.Errorf("%s: rewritten Host = %q, want %q", tt.target, got, tt.parsed)
+				}
+			},
+		}
+		rw := &readWriter{}
+		rw.r.WriteString("GET " + tt.target + " HTTP/1.1\r\nHost: internal.example\r\n\r\n")
+		err := s.ServeConn(rw)
+		if tt.host == "" {
+			if !errors.Is(err, ErrorInvalidURI) {
+				t.Errorf("%s: expected invalid URI, got %v", tt.target, err)
+			}
+			verifyResponse(t, bufio.NewReader(&rw.w), StatusBadRequest, string(defaultContentType), "Error when parsing request")
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestServerRejectsRequestUserinfo(t *testing.T) {
+	t.Parallel()
+
+	for _, wire := range []string{
+		"GET / HTTP/1.1\r\nHost: admin:secret@example.org",
+		"GET http://example.org/ HTTP/1.1\r\nHost: @other.org",
+		"GET http://admin:secret@example.org/ HTTP/1.1\r\nHost: example.org",
+		"GET //@example.org/ HTTP/1.0",
+		"CONNECT admin:secret@example.org:443 HTTP/1.1\r\nHost: example.org",
+	} {
+		s := &Server{
+			HeaderReceived: func(*RequestHeader) RequestConfig {
+				t.Errorf("HeaderReceived called for %q", wire)
+				return RequestConfig{}
+			},
+			Handler: func(*RequestCtx) {
+				t.Errorf("handler called for %q", wire)
+			},
+		}
+		rw := &readWriter{}
+		rw.r.WriteString(wire + "\r\n\r\n")
+		if err := s.ServeConn(rw); !errors.Is(err, ErrorInvalidURI) {
+			t.Errorf("ServeConn(%q) = %v, want ErrorInvalidURI", wire, err)
+		}
+		verifyResponse(t, bufio.NewReader(&rw.w), StatusBadRequest, string(defaultContentType), "Error when parsing request")
+	}
+}
+
 func TestServerRejectsBackslashInAbsoluteURI(t *testing.T) {
 	t.Parallel()
 
@@ -3982,6 +4149,46 @@ func TestServerExpectHandlerRemoteAddr(t *testing.T) {
 	}
 	br := bufio.NewReader(&rw.w)
 	verifyResponse(t, br, StatusForbidden, string(defaultContentType), "")
+}
+
+func TestCompressHandlerTimeout(t *testing.T) {
+	t.Parallel()
+
+	for _, encoding := range []string{"gzip", "br"} {
+		t.Run(encoding, func(t *testing.T) {
+			compress := CompressHandler
+			if encoding == "br" {
+				compress = func(h RequestHandler) RequestHandler {
+					return CompressHandlerBrotliLevel(h, CompressBrotliDefaultCompression, CompressDefaultCompression)
+				}
+			}
+			for _, timeoutFirst := range []bool{false, true} {
+				var ctx RequestCtx
+				ctx.s = &Server{}
+				ctx.Request.Header.Set("Accept-Encoding", encoding)
+				body := strings.Repeat("handler response", 128)
+				ctx.Response.SetBodyString(body)
+				release := make(chan struct{})
+				h := RequestHandler(func(_ *RequestCtx) { <-release })
+				timeout := func(h RequestHandler) RequestHandler {
+					return TimeoutHandler(h, testTimeout(time.Millisecond), "timeout")
+				}
+				if timeoutFirst {
+					timeout(compress(h))(&ctx)
+				} else {
+					compress(timeout(h))(&ctx)
+				}
+				close(release)
+				<-ctx.timeoutCh // The timed-out handler has finished using ctx.
+				if resp := ctx.LastTimeoutErrorResponse(); resp == nil || resp.StatusCode() != StatusRequestTimeout {
+					t.Fatalf("expected timeout response (timeoutFirst=%t)", timeoutFirst)
+				}
+				if !bytes.Equal(ctx.Response.Body(), []byte(body)) {
+					t.Errorf("compression changed the timed-out handler's body (timeoutFirst=%t)", timeoutFirst)
+				}
+			}
+		})
+	}
 }
 
 func TestCompressHandler(t *testing.T) {
@@ -5725,6 +5932,661 @@ func TestServerShutdownWaitsForPartialKeepAliveRequest(t *testing.T) {
 	}
 }
 
+// Shutdown may close an idle keep-alive connection just as its next request
+// is read. That request must go unhandled, silently, since its response could
+// no longer reach the client.
+func TestServerShutdownDoesNotHandleRequestOnConnectionItClosed(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name              string
+		reduceMemoryUsage bool
+	}{{"plain", false}, {"ReduceMemoryUsage", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			handled := make(chan string, 2)
+			logs := &testLogger{}
+			closed := make(chan struct{})
+			s := &Server{
+				Handler: func(ctx *RequestCtx) {
+					handled <- string(ctx.Path())
+					ctx.SetBodyString("ok")
+				},
+				ReduceMemoryUsage: tc.reduceMemoryUsage,
+				Logger:            logs,
+				ConnState: func(_ net.Conn, st ConnState) {
+					if st == StateClosed {
+						close(closed)
+					}
+				},
+			}
+			conn := newNextRequestOnCloseConn("GET /1 HTTP/1.1\r\nHost: a\r\n\r\n", "GET /2 HTTP/1.1\r\nHost: a\r\n\r\n")
+			served := make(chan error, 1)
+			go func() { served <- s.Serve(newOneConnListener(conn)) }()
+
+			// The first request is served and the connection waits, idle, for the next.
+			<-conn.waitingForNextRequest
+
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout(5*time.Second))
+			defer cancel()
+			if err := s.ShutdownWithContext(ctx); err != nil {
+				t.Fatalf("ShutdownWithContext() error: %v", err)
+			}
+			if err := <-served; err != nil {
+				t.Fatalf("Serve() error: %v", err)
+			}
+			// The server logs, if at all, before it reports the connection closed.
+			<-closed
+			if path := <-handled; path != "/1" {
+				t.Fatalf("handler saw %q first, want /1", path)
+			}
+			select {
+			case path := <-handled:
+				t.Fatalf("handler saw %q, read on a connection Shutdown closed", path)
+			default:
+			}
+			if logs.out != "" {
+				t.Fatalf("server log = %q, want nothing", logs.out)
+			}
+		})
+	}
+}
+
+// nextRequestOnCloseConn hands over its first request at once and holds the
+// next one back until Close: the server reads it just as Shutdown closes the
+// connection.
+type nextRequestOnCloseConn struct {
+	*writeFailsAfterCloseReadWriter
+
+	nextRequest           []byte
+	waitingForNextRequest chan struct{}
+}
+
+func newNextRequestOnCloseConn(firstRequest, nextRequest string) *nextRequestOnCloseConn {
+	c := &nextRequestOnCloseConn{
+		writeFailsAfterCloseReadWriter: newWriteFailsAfterCloseReadWriter(),
+		nextRequest:                    []byte(nextRequest),
+		waitingForNextRequest:          make(chan struct{}),
+	}
+	c.r.WriteString(firstRequest)
+	return c
+}
+
+func (c *nextRequestOnCloseConn) Read(b []byte) (int, error) {
+	if c.r.Len() == 0 && c.nextRequest != nil {
+		close(c.waitingForNextRequest)
+		<-c.closed
+		c.r.Write(c.nextRequest)
+		c.nextRequest = nil
+	}
+	return c.r.Read(b)
+}
+
+// writeFailsAfterCloseReadWriter fails writes with net.ErrClosed once it is
+// closed, as a net.Conn does.
+type writeFailsAfterCloseReadWriter struct {
+	readWriter
+
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newWriteFailsAfterCloseReadWriter() *writeFailsAfterCloseReadWriter {
+	return &writeFailsAfterCloseReadWriter{closed: make(chan struct{})}
+}
+
+func (rw *writeFailsAfterCloseReadWriter) Write(b []byte) (int, error) {
+	select {
+	case <-rw.closed:
+		return 0, net.ErrClosed
+	default:
+		return rw.readWriter.Write(b)
+	}
+}
+
+func (rw *writeFailsAfterCloseReadWriter) Close() error {
+	rw.closeOnce.Do(func() { close(rw.closed) })
+	return nil
+}
+
+// oneConnListener accepts conn once and then waits to be closed.
+type oneConnListener struct {
+	conns     chan net.Conn
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newOneConnListener(conn net.Conn) *oneConnListener {
+	ln := &oneConnListener{
+		conns:  make(chan net.Conn, 1),
+		closed: make(chan struct{}),
+	}
+	ln.conns <- conn
+	return ln
+}
+
+func (ln *oneConnListener) Accept() (net.Conn, error) {
+	select {
+	case c := <-ln.conns:
+		return c, nil
+	case <-ln.closed:
+		return nil, net.ErrClosed
+	}
+}
+
+func (ln *oneConnListener) Close() error {
+	ln.closeOnce.Do(func() { close(ln.closed) })
+	return nil
+}
+
+func (ln *oneConnListener) Addr() net.Addr {
+	return zeroTCPAddr
+}
+
+// A pipelined request's response waits in the writer to go out with the next
+// one's. Shutdown must not lose it: the loop ending on stop must flush it, and
+// the sweep must not close the connection as idle while it waits.
+func TestServerShutdownDeliversPipelinedResponse(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name           string
+		sweepIdleConns bool
+	}{{"flush", false}, {"sweep", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var s *Server
+			s = &Server{
+				Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+				ConnState: func(_ net.Conn, st ConnState) {
+					// Once the first response is written, do what ShutdownWithContext
+					// would: set stop, then sweep the idle connections.
+					if st == StateIdle {
+						s.stop.Store(1)
+						if tc.sweepIdleConns {
+							s.closeIdleConns()
+						}
+					}
+				},
+			}
+			rw := newWriteFailsAfterCloseReadWriter()
+			rw.r.WriteString("GET /1 HTTP/1.1\r\nHost: a\r\n\r\nGET /2 HTTP/1.1\r\nHost: a\r\n\r\n")
+
+			if err := s.ServeConn(rw); err != nil {
+				t.Fatalf("ServeConn() error: %v", err)
+			}
+			verifyResponse(t, bufio.NewReader(&rw.w), StatusOK, string(defaultContentType), "ok")
+		})
+	}
+}
+
+// Shutdown must not wait forever on a connection that started its first
+// request and then stalled: unlike a keep-alive connection (see
+// TestServerShutdownWaitsForPartialKeepAliveRequest) it keeps the
+// accept-time grace, after which Shutdown closes it, through a per-IP
+// wrapper too. Without a ReadTimeout such a connection used to stay active
+// forever and ShutdownWithContext always hit its context deadline.
+func TestServerShutdownClosesConnectionWithStalledFirstRequest(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		perIP int
+	}{{"plain", 0}, {"perIP", 1}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			logs := &testLogger{}
+			closed := make(chan struct{})
+			active := make(chan struct{}, 1)
+			server := &Server{
+				Handler:       func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+				MaxConnsPerIP: tc.perIP,
+				Logger:        logs,
+				ConnState: func(_ net.Conn, st ConnState) {
+					if st == StateActive {
+						select {
+						case active <- struct{}{}:
+						default:
+						}
+					}
+					if st == StateClosed {
+						close(closed)
+					}
+				},
+			}
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("listening: %v", err)
+			}
+			served := make(chan error, 1)
+			go func() { served <- server.Serve(listener) }()
+
+			conn, err := net.Dial("tcp", listener.Addr().String())
+			if err != nil {
+				t.Fatalf("dialing: %v", err)
+			}
+			defer conn.Close()
+			// The peer starts a request and then says nothing more.
+			if _, err := conn.Write([]byte("G")); err != nil {
+				t.Fatalf("writing: %v", err)
+			}
+			// Wait until the server has accepted the connection and marked it
+			// active. Sleeping here is racy: the client can write before the
+			// server accepts, and shutdown then closes the listener before any
+			// connection can reach StateClosed, hanging the wait below.
+			select {
+			case <-active:
+			case <-time.After(testTimeout(10 * time.Second)):
+				t.Fatal("connection did not go active after writing the first byte of a request")
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+			defer cancel()
+			stopped := make(chan error, 1)
+			go func() { stopped <- server.ShutdownWithContext(ctx) }()
+			select {
+			case err := <-stopped:
+				if err != nil {
+					t.Fatalf("ShutdownWithContext() error: %v", err)
+				}
+			case <-time.After(testTimeout(30 * time.Second)):
+				t.Fatal("ShutdownWithContext() did not return for a connection with a stalled first request")
+			}
+			if err := <-served; err != nil {
+				t.Fatalf("Serve() error: %v", err)
+			}
+			// The server logs, if at all, before it reports the connection closed.
+			<-closed
+			if logs.out != "" {
+				t.Fatalf("server log = %q, want nothing", logs.out)
+			}
+		})
+	}
+}
+
+// A first request that completes while Shutdown is in progress is still
+// served: the connection is only closed if it is still being read once the
+// accept-time grace has passed, and the handler protects it while it runs.
+func TestServerShutdownServesFirstRequestCompletedDuringShutdown(t *testing.T) {
+	active := make(chan struct{}, 4)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+		ConnState: func(_ net.Conn, st ConnState) {
+			if st == StateActive {
+				active <- struct{}{}
+			}
+		},
+	}
+	ln := fasthttputil.NewInmemoryListener()
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(ln) }()
+
+	c, err := ln.Dial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	br := bufio.NewReader(c)
+
+	// Start the first request but hold back its final CRLF.
+	if _, err := c.Write([]byte("GET / HTTP/1.1\r\nHost: a\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-active:
+	case <-time.After(time.Second):
+		t.Fatal("connection did not go active on the first byte of a partial request")
+	}
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.Shutdown() }()
+	// Give Shutdown a sweep over the idle connections before completing the request.
+	time.Sleep(testTimeout(50 * time.Millisecond))
+	if _, err := c.Write([]byte("\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("response after Shutdown began: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("response status = %d, want 200", resp.StatusCode())
+	}
+	if err := <-stopped; err != nil {
+		t.Fatalf("Shutdown() error: %v", err)
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+}
+
+// The accept-time grace applies to unfinished headers, not to body reads:
+// a first request whose headers are fully read but whose body is still
+// arriving must not be cut off by Shutdown once the grace passes. The
+// upload below keeps making progress past the grace (one byte every
+// 500ms, about 6.5s in total) and completes, like it does on a server
+// that is not shutting down and with net/http.
+func TestServerShutdownWaitsForFirstRequestBodyUpload(t *testing.T) {
+	t.Parallel()
+
+	const body = "0123456789abc" // 13 bytes at one per 500ms: ~6.5s > 5s grace
+	received := make(chan string, 1)
+	headerReceived := make(chan struct{}, 1)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			received <- string(ctx.PostBody())
+			ctx.SetBodyString("done")
+		},
+		HeaderReceived: func(header *RequestHeader) RequestConfig {
+			select {
+			case headerReceived <- struct{}{}:
+			default:
+			}
+			return RequestConfig{}
+		},
+		ReadTimeout: 30 * time.Second,
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(listener) }()
+
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(testTimeout(20 * time.Second))); err != nil {
+		t.Fatalf("setting read deadline: %v", err)
+	}
+	br := bufio.NewReader(conn)
+
+	// Send the complete headers and the first body byte, then keep the
+	// upload going past the accept-time grace.
+	if _, err := conn.Write([]byte("POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 13\r\n\r\n")); err != nil {
+		t.Fatalf("writing headers: %v", err)
+	}
+
+	// Wait until the server has received the headers: the client can
+	// finish writing them while the connection is still waiting to be
+	// accepted, and starting shutdown first can close the listener
+	// before the server starts reading the upload.
+	select {
+	case <-headerReceived:
+	case <-time.After(testTimeout(20 * time.Second)):
+		t.Fatal("server did not receive the request headers")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.ShutdownWithContext(ctx) }()
+
+	for i := range len(body) {
+		if _, err := conn.Write([]byte{body[i]}); err != nil {
+			t.Fatalf("writing body byte %d during shutdown: %v", i, err)
+		}
+		if i+1 < len(body) {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("response to the upload: %v", err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("response status = %d, want %d", resp.StatusCode(), StatusOK)
+	}
+	if got := string(resp.Body()); got != "done" {
+		t.Fatalf("response body = %q, want %q", got, "done")
+	}
+	select {
+	case got := <-received:
+		if got != body {
+			t.Fatalf("handler received body %q, want %q", got, body)
+		}
+	default:
+		t.Fatal("handler did not receive the uploaded body")
+	}
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("ShutdownWithContext() error: %v", err)
+		}
+	case <-time.After(testTimeout(20 * time.Second)):
+		t.Fatal("ShutdownWithContext() did not return after the upload completed")
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+}
+
+// If Shutdown claims and closes a connection while its first request is
+// still being read, the serving goroutine must not call the handler for
+// that request afterwards: the client already saw the connection close,
+// so a handler run could only fail writing the response.
+//
+// The first header arrives at once, minus its final CRLF, so the serving
+// goroutine is blocked reading the headers when Shutdown closes the
+// connection; the close delivers the CRLF, so the headers then parse
+// successfully. Unlike gating the first Read, this exercises the claim
+// check after a successful header read.
+func TestServerShutdownDoesNotCallHandlerForClaimedFirstRequest(t *testing.T) {
+	t.Parallel()
+
+	handled := make(chan struct{}, 1)
+	logs := &testLogger{}
+	closed := make(chan struct{})
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			handled <- struct{}{}
+			ctx.SetBodyString("ok")
+		},
+		Logger: logs,
+		ConnState: func(_ net.Conn, st ConnState) {
+			if st == StateClosed {
+				close(closed)
+			}
+		},
+	}
+	conn := newNextRequestOnCloseConn("GET / HTTP/1.1\r\nHost: a\r\n", "\r\n")
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(newOneConnListener(conn)) }()
+
+	// The serving goroutine is now blocked in the first header read.
+	<-conn.waitingForNextRequest
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.ShutdownWithContext(ctx) }()
+
+	// Shutdown claims and closes the connection once the accept-time
+	// grace passes; the close delivers the final CRLF, so the headers
+	// parse successfully, but the handler must not run for them.
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("ShutdownWithContext() error: %v", err)
+		}
+	case <-time.After(testTimeout(30 * time.Second)):
+		t.Fatal("ShutdownWithContext() did not return")
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+	// The server logs, if at all, before it reports the connection closed.
+	<-closed
+	select {
+	case <-handled:
+		t.Fatal("handler was called for a first request whose connection Shutdown had already closed")
+	default:
+	}
+	if logs.out != "" {
+		t.Fatalf("server log = %q, want nothing", logs.out)
+	}
+}
+
+// Shutdown claims a connection that has not sent its first request yet:
+// the first byte only arrives because Shutdown closes the connection,
+// so the StateActive hook must not fire for a request that is never
+// answered. The first-request CAS catches the claim; without the break
+// on its failure the hook ran once after close.
+func TestServerShutdownDoesNotCallStateActiveForClaimedFirstRequest(t *testing.T) {
+	t.Parallel()
+
+	handled := make(chan struct{}, 1)
+	states := make(chan ConnState, 4)
+	logs := &testLogger{}
+	closed := make(chan struct{})
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			handled <- struct{}{}
+			ctx.SetBodyString("ok")
+		},
+		Logger: logs,
+		ConnState: func(_ net.Conn, st ConnState) {
+			states <- st
+			if st == StateClosed {
+				close(closed)
+			}
+		},
+	}
+	// Nothing arrives until Shutdown closes the connection; the close
+	// then delivers the whole first request at once.
+	conn := newNextRequestOnCloseConn("", "GET / HTTP/1.1\r\nHost: a\r\n\r\n")
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(newOneConnListener(conn)) }()
+
+	// The serving goroutine is now blocked waiting for the first byte.
+	<-conn.waitingForNextRequest
+
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.ShutdownWithContext(ctx) }()
+
+	// Shutdown claims and closes the connection once the accept-time
+	// grace passes; the close delivers the first request, but it must
+	// not go active or reach the handler.
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("ShutdownWithContext() error: %v", err)
+		}
+	case <-time.After(testTimeout(30 * time.Second)):
+		t.Fatal("ShutdownWithContext() did not return")
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+	// The server logs, if at all, before it reports the connection closed.
+	<-closed
+	// StateClosed is terminal, so no hook call can follow it: the
+	// recorded states are complete once the connection is closed.
+	close(states)
+	for st := range states {
+		if st == StateActive {
+			t.Fatal("StateActive fired for a first request whose connection Shutdown had already closed")
+		}
+	}
+	select {
+	case <-handled:
+		t.Fatal("handler was called for a first request whose connection Shutdown had already closed")
+	default:
+	}
+	if logs.out != "" {
+		t.Fatalf("server log = %q, want nothing", logs.out)
+	}
+}
+
+// A header parse error on the first request still gets its error response
+// during Shutdown: once the first header read returns, the connection is
+// no longer closable as still reading its headers, even while the
+// ErrorHandler takes a while to produce the 400. Without that, Shutdown's
+// sweep closes the connection once the accept-time grace passes while the
+// error response is being written, and the client only sees EOF.
+func TestServerShutdownDeliversFirstRequestHeaderErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	entered := make(chan struct{}, 1)
+	s := &Server{
+		Handler: func(ctx *RequestCtx) { ctx.SetBodyString("ok") },
+		ErrorHandler: func(ctx *RequestCtx, err error) {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			// Producing the error response takes longer than the
+			// accept-time grace left: Shutdown must not close the
+			// connection under it.
+			time.Sleep(6 * time.Second)
+			ctx.SetStatusCode(StatusBadRequest)
+			ctx.SetBodyString("bad request")
+		},
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listening: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- s.Serve(listener) }()
+
+	conn, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatalf("dialing: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.SetReadDeadline(time.Now().Add(testTimeout(20 * time.Second))); err != nil {
+		t.Fatalf("setting read deadline: %v", err)
+	}
+	br := bufio.NewReader(conn)
+
+	// A complete HTTP/1.1 request without Host: a header parse error.
+	if _, err := conn.Write([]byte("GET / HTTP/1.1\r\n\r\n")); err != nil {
+		t.Fatalf("writing request: %v", err)
+	}
+
+	// Start Shutdown once the ErrorHandler has been entered.
+	select {
+	case <-entered:
+	case <-time.After(testTimeout(10 * time.Second)):
+		t.Fatal("ErrorHandler was not entered for the request without Host")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(30*time.Second))
+	defer cancel()
+	stopped := make(chan error, 1)
+	go func() { stopped <- s.ShutdownWithContext(ctx) }()
+
+	var resp Response
+	if err := resp.Read(br); err != nil {
+		t.Fatalf("error response during Shutdown: %v", err)
+	}
+	if resp.StatusCode() != StatusBadRequest {
+		t.Fatalf("response status = %d, want %d", resp.StatusCode(), StatusBadRequest)
+	}
+	if got := string(resp.Body()); got != "bad request" {
+		t.Fatalf("response body = %q, want %q", got, "bad request")
+	}
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatalf("ShutdownWithContext() error: %v", err)
+		}
+	case <-time.After(testTimeout(20 * time.Second)):
+		t.Fatal("ShutdownWithContext() did not return after the error response")
+	}
+	if err := <-served; err != nil {
+		t.Fatalf("Serve() error: %v", err)
+	}
+}
+
 // The wait for a first request that never arrives ends in a 408 once
 // ReadTimeout expires; a request sent after that is not served.
 func TestServerFirstRequestAfterReadTimeout(t *testing.T) {
@@ -6171,10 +7033,12 @@ func TestServerCustomRemoteAddr(t *testing.T) {
 
 	customRemoteAddrHandler := func(h RequestHandler) RequestHandler {
 		return func(ctx *RequestCtx) {
-			ctx.SetRemoteAddr(&net.TCPAddr{
-				IP:   []byte{1, 2, 3, 5},
-				Port: 0,
-			})
+			if ctx.ConnRequestNum() == 1 {
+				ctx.SetRemoteAddr(&net.TCPAddr{
+					IP:   []byte{1, 2, 3, 5},
+					Port: 0,
+				})
+			}
 			h(ctx)
 		}
 	}
@@ -6189,6 +7053,7 @@ func TestServerCustomRemoteAddr(t *testing.T) {
 
 	rw := &readWriter{}
 	rw.r.WriteString("GET /foo1 HTTP/1.1\r\nHost: google.com\r\n\r\n")
+	rw.r.WriteString("GET /foo2 HTTP/1.1\r\nHost: google.com\r\n\r\n")
 
 	rwx := &readWriterRemoteAddr{
 		rw: rw,
@@ -6204,6 +7069,7 @@ func TestServerCustomRemoteAddr(t *testing.T) {
 
 	br := bufio.NewReader(&rw.w)
 	verifyResponse(t, br, 200, "text/html", "requestURI=/foo1, remoteAddr=1.2.3.5:0, remoteIP=1.2.3.5")
+	verifyResponse(t, br, 200, "text/html", "requestURI=/foo2, remoteAddr=1.2.3.4:8765, remoteIP=1.2.3.4")
 }
 
 type readWriterRemoteAddr struct {
@@ -8150,6 +9016,101 @@ func TestServerLetsResponseConsumeStreamedBody(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestServerCompressedGatewayWriteFailure(t *testing.T) {
+	t.Parallel()
+	upstream, origin := net.Pipe()
+	defer upstream.Close()
+	defer origin.Close()
+	if err := origin.SetDeadline(time.Now().Add(testTimeout(5 * time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	hc := HostClient{
+		Addr:               "upstream:80",
+		StreamResponseBody: true,
+		Dial:               func(string) (net.Conn, error) { return upstream, nil },
+	}
+	cleaned := make(chan struct{})
+	s := Server{Handler: CompressHandler(func(ctx *RequestCtx) {
+		ctx.SetUserValue("cleanup", &closerWithRequestCtx{closeFunc: func(*RequestCtx) error {
+			close(cleaned)
+			return nil
+		}})
+		if err := hc.Do(&ctx.Request, &ctx.Response); err != nil {
+			t.Error(err)
+		}
+	})}
+	client, done := streamCompatServeConn(t, &s)
+	if _, err := io.WriteString(client, "GET / HTTP/1.1\r\nHost: upstream\r\nAccept-Encoding: gzip\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	var req Request
+	if err := req.Read(bufio.NewReader(origin)); err != nil {
+		t.Fatal(err)
+	}
+	// The compressor can send the first chunk, but cannot finish the upstream
+	// response until the origin sends its trailers.
+	if _, err := io.WriteString(origin, "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nTransfer-Encoding: chunked\r\nTrailer: X-End\r\n\r\n1\r\nx\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	streamClose(t, client)
+	if err := streamAwait(t, done, "failed response write"); err == nil {
+		t.Fatal("expected response write error")
+	}
+	select {
+	case <-cleaned:
+		t.Error("context released before upstream trailers arrived")
+	default:
+	}
+	if _, err := io.WriteString(origin, "0\r\nX-End: yes\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	streamAwait(t, cleaned, "gateway context cleanup")
+}
+
+func TestServerCompressedEchoWriteFailure(t *testing.T) {
+	reading, resume := make(chan struct{}), make(chan struct{})
+	tail := make(chan string, 1)
+	cleaned := make(chan struct{})
+	s := Server{
+		StreamRequestBody: true,
+		Handler: CompressHandler(func(ctx *RequestCtx) {
+			ctx.SetUserValue("cleanup", &closerWithRequestCtx{closeFunc: func(*RequestCtx) error {
+				close(cleaned)
+				return nil
+			}})
+			r := ctx.RequestBodyStream()
+			first := true
+			ctx.SetBodyStream(bodyReadFunc(func(p []byte) (int, error) {
+				if first {
+					first = false
+					return r.Read(p[:1])
+				}
+				// Hold the compressor between reads until the response write
+				// has failed and the server has closed the connection.
+				close(reading)
+				<-resume
+				n, err := r.Read(p)
+				tail <- string(p[:n])
+				return n, err
+			}), -1)
+		}),
+	}
+	client, serverDone := streamCompatServeConn(t, &s)
+	if _, err := io.WriteString(client, "POST / HTTP/1.1\r\nHost: x\r\nAccept-Encoding: gzip\r\nContent-Length: 2\r\n\r\nab"); err != nil {
+		t.Fatal(err)
+	}
+	streamAwait(t, reading, "second compression read")
+	streamClose(t, client)
+	if err := streamAwait(t, serverDone, "failed response write"); err == nil {
+		t.Fatal("expected response write error")
+	}
+	close(resume)
+	if got := streamAwait(t, tail, "remaining request body"); got != "b" {
+		t.Fatalf("remaining request body = %q, want b", got)
+	}
+	streamAwait(t, cleaned, "request cleanup")
 }
 
 func TestServerKeepsConnWhenResponseConsumesLargeStreamedBody(t *testing.T) {

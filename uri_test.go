@@ -114,6 +114,11 @@ func TestURIRejectInvalidIPv6(t *testing.T) {
 		"http://[2001:db8::vulndetector.com]/",
 		"http://[vulndetector.com]/",
 		"http://[::ffff:192.0.2.300]/",
+		"http://[abc%25en0]/",
+		"http://[gggg::1%25en0]/",
+		"http://[1.2.3.4%25en0]/",
+		"http://[%25en0]/",
+		"http://[::1%25]/",
 	} {
 		var u URI
 		if err := u.Parse(nil, []byte(raw)); err == nil {
@@ -124,6 +129,9 @@ func TestURIRejectInvalidIPv6(t *testing.T) {
 	for _, raw := range []string{
 		"http://[2001:db8::1]/",
 		"http://[fe80::1%25en0]/",
+		"http://[fe80::1%25en0]:8080/",
+		"http://[fe80::1%25%5Den0]:8080/",
+		"http://[::ffff:192.0.2.1%25en0]/",
 		"http://[::ffff:192.0.2.1]/",
 	} {
 		var u URI
@@ -471,6 +479,45 @@ func TestURIPathNormalize(t *testing.T) {
 	// a segment of more than one dot is an ordinary segment
 	testURIPathNormalize(t, &u, "/aaa/...", "/aaa/...")
 	testURIPathNormalize(t, &u, "/aaa/.b", "/aaa/.b")
+
+	// dots that don't start a segment leave the path as it is
+	testURIPathNormalize(t, &u, "/file.txt", "/file.txt")
+	testURIPathNormalize(t, &u, "/static/js/app.min.js", "/static/js/app.min.js")
+	testURIPathNormalize(t, &u, "/v1.2/a..b/c.", "/v1.2/a..b/c.")
+	testURIPathNormalize(t, &u, "/a%2E%2Eb/c%2Ed", "/a..b/c.d")
+	testURIPathNormalize(t, &u, "/.well-known/x.json", "/.well-known/x.json")
+
+	// dot segments that only decoding or slash removal brings out
+	testURIPathNormalize(t, &u, "/a%2F%2E%2E/b.c", "/b.c")
+	testURIPathNormalize(t, &u, "/a//.//b.c", "/a/b.c")
+}
+
+// normalizePath skips removeDotSegments for a path without a separator
+// followed by a dot; running it anyway must not change any result.
+func TestNormalizePathDotSegmentShortcut(t *testing.T) {
+	t.Parallel()
+
+	allSteps := func(src []byte) []byte {
+		dst := addLeadingSlash(nil, src)
+		dst = decodeArgAppendNoPlus(dst, src)
+		return removeDotSegments(removeSegments(dst, strSlashSlash))
+	}
+	var src []byte
+	var walk func(n int)
+	walk = func(n int) {
+		if got, want := normalizePath(nil, src), allSteps(src); !bytes.Equal(got, want) {
+			t.Fatalf("normalizePath(%q) = %q, want %q", src, got, want)
+		}
+		if n == 0 {
+			return
+		}
+		for _, c := range []byte(`/\.a%2EF`) {
+			src = append(src, c)
+			walk(n - 1)
+			src = src[:len(src)-1]
+		}
+	}
+	walk(6)
 }
 
 func testURIPathNormalize(t *testing.T, u *URI, requestURI, expectedPath string) {
@@ -867,8 +914,7 @@ func TestURIRequestURIAfterResettingQueryArgs(t *testing.T) {
 func TestURIParseSchemeInQueryKeepsOriginForm(t *testing.T) {
 	t.Parallel()
 
-	// "://" in the query of an origin-form target must not turn it into an
-	// absolute URI; a target with two leading slashes still carries one.
+	// A scheme in the query is part of the origin-form request target.
 	var u URI
 	if err := u.Parse([]byte("a"), []byte("/x?u=a://b")); err != nil {
 		t.Fatal(err)
@@ -879,7 +925,7 @@ func TestURIParseSchemeInQueryKeepsOriginForm(t *testing.T) {
 	if err := u.Parse([]byte("a"), []byte("//host/p?u=a://b")); err != nil {
 		t.Fatal(err)
 	}
-	if string(u.Host()) != "host" || string(u.Path()) != "/p" || string(u.QueryString()) != "u=a://b" {
+	if string(u.Host()) != "a" || string(u.Path()) != "/host/p" || string(u.QueryString()) != "u=a://b" {
 		t.Fatalf("got host %q path %q query %q", u.Host(), u.Path(), u.QueryString())
 	}
 }

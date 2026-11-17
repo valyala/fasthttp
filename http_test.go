@@ -1958,6 +1958,22 @@ func TestRequestNoContentLength(t *testing.T) {
 		t.Fatalf("unexpected content-length in HEAD request %q", s)
 	}
 
+	for _, method := range []string{MethodGet, MethodHead} {
+		for _, length := range []int{32, -1} {
+			r.Header.SetMethod(method)
+			r.Header.SetContentLength(length)
+			wire := r.String() + "GET /next HTTP/1.1\r\nHost: foobar\r\n\r\n"
+			br := bufio.NewReader(strings.NewReader(wire))
+			var parsed Request
+			if err := parsed.Read(br); err != nil || len(parsed.Body()) != 0 {
+				t.Fatalf("%s with previous length %d: body %q, err %v", method, length, parsed.Body(), err)
+			}
+			if err := parsed.Read(br); err != nil || string(parsed.Header.RequestURI()) != "/next" {
+				t.Fatalf("reading next request: uri %q, err %v", parsed.Header.RequestURI(), err)
+			}
+		}
+	}
+
 	r.Header.SetMethod(MethodPost)
 	fmt.Fprintf(r.BodyWriter(), "foobar body")
 	s = r.String()
@@ -3195,7 +3211,7 @@ func TestParseChunkSize(t *testing.T) {
 			t.Parallel()
 
 			rb := bufio.NewReader(bytes.NewBufferString(test.line))
-			size, err := parseChunkSize(rb)
+			size, err := parseChunkSize(rb, new(int))
 			if err != nil {
 				t.Fatalf("unexpected error when reading chunk size %q: %v", test.line, err)
 			}
@@ -3203,6 +3219,40 @@ func TestParseChunkSize(t *testing.T) {
 				t.Fatalf("unexpected chunk size %d. Expected %d", size, test.size)
 			}
 		})
+	}
+}
+
+func TestChunkExtensionLimits(t *testing.T) {
+	t.Parallel()
+
+	ext := strings.Repeat("a", 1024)
+	for _, stream := range []bool{false, true} {
+		for _, tc := range []struct {
+			name    string
+			chunks  string
+			wantErr bool
+		}{
+			{"long whitespace", "1" + strings.Repeat(" ", 32*1024) + "\r\nx\r\n", true},
+			{"many extensions", strings.Repeat("1;"+ext+"\r\nx\r\n", 32), true},
+			{"proportional extensions", strings.Repeat("200;"+ext+"\r\n"+strings.Repeat("x", 512)+"\r\n", 32), false},
+		} {
+			t.Run(fmt.Sprintf("%s/stream=%t", tc.name, stream), func(t *testing.T) {
+				wire := "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" + tc.chunks + "0\r\n\r\n"
+				resp := Response{StreamBody: stream}
+				err := resp.Read(bufio.NewReader(strings.NewReader(wire)))
+				if err == nil && stream {
+					_, err = io.Copy(io.Discard, resp.BodyStream())
+					_ = resp.CloseBodyStream()
+				}
+				if tc.wantErr {
+					if !errors.As(err, new(ErrBrokenChunk)) {
+						t.Fatalf("got %v, want ErrBrokenChunk", err)
+					}
+				} else if err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
 	}
 }
 
@@ -3217,7 +3267,7 @@ func TestParseChunkSizeWhitespaceError(t *testing.T) {
 			t.Parallel()
 
 			rb := bufio.NewReader(bytes.NewBufferString(test))
-			if _, err := parseChunkSize(rb); err == nil {
+			if _, err := parseChunkSize(rb, new(int)); err == nil {
 				t.Fatalf("expecting error when reading chunk size %q", test)
 			}
 		})
@@ -3861,6 +3911,34 @@ Content-Type: application/json
 
 	if w.String() != s {
 		t.Fatalf("unexpected output %q", w.Bytes())
+	}
+}
+
+func TestWriteMultipartFormBoundaryInContent(t *testing.T) {
+	t.Parallel()
+
+	for _, disposition := range []string{`name="comment"`, `name="file"; filename="upload"`} {
+		// Place the delimiter across a copy-buffer boundary in the on-disk file.
+		value := strings.Repeat(strings.Repeat("a", 64)+"=\r\n", 511) + strings.Repeat("a", 60) +
+			"=0D=0A--foo=0D=0AContent-Disposition: form-data; name=3D\"role\"=0D=0A=0D=0Aadmin"
+		body := "--foo\r\nContent-Disposition: form-data; " + disposition +
+			"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n" + value + "\r\n--foo--\r\n"
+		form, err := multipart.NewReader(strings.NewReader(body), "foo").ReadForm(0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = WriteMultipartForm(io.Discard, form, "foo")
+		if removeErr := form.RemoveAll(); removeErr != nil {
+			t.Fatal(removeErr)
+		}
+		if err == nil {
+			t.Errorf("accepted decoded boundary in %s", disposition)
+		}
+	}
+
+	form := &multipart.Form{Value: map[string][]string{"comment": {"--foo--"}}}
+	if err := WriteMultipartForm(io.Discard, form, "foo"); err == nil {
+		t.Error("accepted boundary at start of value")
 	}
 }
 
@@ -5578,6 +5656,59 @@ func TestResponseCompressedBodyStreamCloseDoesNotReleaseRequestStreamBeforeReadD
 	case <-compressedStream.done:
 	case <-time.After(testTimeout(time.Second)):
 		t.Fatalf("timeout waiting for compressed stream cleanup")
+	}
+}
+
+func TestResponseCompressedBodyStreamCloseDuringFileRead(t *testing.T) {
+	t.Parallel()
+
+	for _, size := range []int{2, maxSmallFileSize + 1} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "file.txt"), bytes.Repeat([]byte("x"), size), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var ctx RequestCtx
+			ctx.Request.SetRequestURI("/file.txt")
+			(&FS{Root: dir, SkipCache: true}).NewRequestHandler()(&ctx)
+			ctx.Response.gzipBody(CompressDefaultCompression)
+			stream := ctx.Response.BodyStream().(*compressedBodyStream) //nolint:forcetypeassert
+
+			var ff *fsFile
+			switch r := stream.bodyStream.(type) {
+			case *fsSmallFileReader:
+				ff = r.ff
+			case *bigFileReader:
+				ff = r.ff
+			default:
+				t.Fatalf("unexpected file reader %T", r)
+			}
+
+			reading := make(chan struct{})
+			resume := make(chan struct{})
+			var readErr error
+			stream.compress = func(_ *bufio.Writer, r io.Reader, _ int) error {
+				var b [1]byte
+				_, readErr = io.ReadFull(r, b[:])
+				close(reading)
+				<-resume
+				if readErr == nil {
+					_, readErr = io.ReadFull(r, b[:])
+				}
+				return readErr
+			}
+			_, _ = stream.Read(nil)
+			<-reading
+			closeErr := ctx.Response.CloseBodyStream()
+			close(resume)
+			<-stream.done
+			if closeErr != nil || readErr != nil {
+				t.Fatalf("close error = %v, file read error = %v", closeErr, readErr)
+			}
+			if ff.readersCount != 0 {
+				t.Fatalf("file still has %d readers after compression finished", ff.readersCount)
+			}
+		})
 	}
 }
 

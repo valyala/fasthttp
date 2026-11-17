@@ -186,7 +186,11 @@ func (a *Args) AppendBytes(dst []byte) []byte {
 //
 // WriteTo implements io.WriterTo interface.
 func (a *Args) WriteTo(w io.Writer) (int64, error) {
-	n, err := w.Write(a.QueryString())
+	b := a.QueryString()
+	n, err := w.Write(b)
+	if err == nil && n != len(b) {
+		err = io.ErrShortWrite
+	}
 	return int64(n), err
 }
 
@@ -242,7 +246,7 @@ func (a *Args) AddBytesKNoValue(key []byte) {
 	a.args = appendArg(a.args, b2s(key), "", argsNoValue)
 }
 
-// Set sets 'key=value' argument.
+// Set replaces all values for key with the given value.
 func (a *Args) Set(key, value string) {
 	a.args = setArg(a.args, key, value, argsHasValue)
 }
@@ -416,16 +420,19 @@ func copyArgs(dst, src []argsKV) []argsKV {
 }
 
 func delAllArgsStable(args []argsKV, key string) []argsKV {
-	for i, n := 0, len(args); i < n; i++ {
-		kv := &args[i]
-		if key == string(kv.key) {
-			tmp := *kv
-			copy(args[i:], args[i+1:])
-			n--
-			i--
-			args[n] = tmp
-			args = args[:n]
+	for i := range args {
+		if key != string(args[i].key) {
+			continue
 		}
+		write := i
+		for read := i + 1; read < len(args); read++ {
+			if key != string(args[read].key) {
+				// Keep the removed entries' buffers available for reuse.
+				args[write], args[read] = args[read], args[write]
+				write++
+			}
+		}
+		return args[:write]
 	}
 	return args
 }
@@ -457,7 +464,8 @@ func setArg(h []argsKV, key, value string, noValue bool) []argsKV {
 				kv.value = append(kv.value[:0], value...)
 			}
 			kv.noValue = noValue
-			return h
+			tail := delAllArgsStable(h[i+1:], b2s(kv.key))
+			return h[:i+1+len(tail)]
 		}
 	}
 	return appendArg(h, key, value, noValue)
@@ -564,21 +572,34 @@ func (s *argsScanner) next(kv *argsKV) bool {
 
 	isKey := true
 	k := 0
+	// esc is where the first '%' or '+' of the key or value being scanned
+	// sits, relative to its start, so decoding needn't search for it again.
+	esc := -1
 	for i, c := range s.b {
-		switch c {
+		t := argsScanTable[c]
+		if t == 0 {
+			// Neither a separator nor an escape, as most bytes are.
+			continue
+		}
+		switch t {
+		case '%': // '%' or '+'
+			if esc < 0 {
+				esc = i - k
+			}
 		case '=':
 			if isKey {
 				isKey = false
-				kv.key = decodeArgAppend(kv.key[:0], s.b[:i])
+				kv.key = decodeArgAppendAt(kv.key[:0], s.b[:i], esc)
 				k = i + 1
+				esc = -1
 			}
-		case '&':
+		default: // '&'
 			if isKey {
-				kv.key = decodeArgAppend(kv.key[:0], s.b[:i])
+				kv.key = decodeArgAppendAt(kv.key[:0], s.b[:i], esc)
 				kv.value = kv.value[:0]
 				kv.noValue = argsNoValue
 			} else {
-				kv.value = decodeArgAppend(kv.value[:0], s.b[k:i])
+				kv.value = decodeArgAppendAt(kv.value[:0], s.b[k:i], esc)
 			}
 			s.b = s.b[i+1:]
 			return true
@@ -586,11 +607,11 @@ func (s *argsScanner) next(kv *argsKV) bool {
 	}
 
 	if isKey {
-		kv.key = decodeArgAppend(kv.key[:0], s.b)
+		kv.key = decodeArgAppendAt(kv.key[:0], s.b, esc)
 		kv.value = kv.value[:0]
 		kv.noValue = argsNoValue
 	} else {
-		kv.value = decodeArgAppend(kv.value[:0], s.b[k:])
+		kv.value = decodeArgAppendAt(kv.value[:0], s.b[k:], esc)
 	}
 	s.b = s.b[len(s.b):]
 	return true
@@ -599,10 +620,6 @@ func (s *argsScanner) next(kv *argsKV) bool {
 func decodeArgAppend(dst, src []byte) []byte {
 	idxPercent := bytes.IndexByte(src, '%')
 	idxPlus := bytes.IndexByte(src, '+')
-	if idxPercent == -1 && idxPlus == -1 {
-		// fast path: src doesn't contain encoded chars
-		return append(dst, src...)
-	}
 
 	var idx int
 	switch {
@@ -614,6 +631,16 @@ func decodeArgAppend(dst, src []byte) []byte {
 		idx = idxPlus
 	default:
 		idx = idxPercent
+	}
+	return decodeArgAppendAt(dst, src, idx)
+}
+
+// decodeArgAppendAt is decodeArgAppend for a src whose first '%' or '+' is
+// known to be at idx, or which has none if idx is negative.
+func decodeArgAppendAt(dst, src []byte, idx int) []byte {
+	if idx < 0 {
+		// fast path: src doesn't contain encoded chars
+		return append(dst, src...)
 	}
 
 	dst = append(dst, src[:idx]...)

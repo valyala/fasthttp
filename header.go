@@ -668,6 +668,34 @@ func (h *header) setTrailerBytes(trailer []byte, d dedicated) error {
 	return h.addTrailers(trailer, true, d)
 }
 
+// dropRedirectBodyHeaders removes the framing, trailers and metadata of a
+// discarded request body when following a redirect (RFC 9110 section 15.4).
+func (h *RequestHeader) dropRedirectBodyHeaders() {
+	h.contentLength = 0
+	h.contentLengthBytes = h.contentLengthBytes[:0]
+	h.contentType = h.contentType[:0]
+	// Del(HeaderTrailer) would move trailer values into the header section.
+	h.trailer = h.trailer[:0]
+	h.trailerH = h.trailerH[:0]
+
+	n := 0
+fields:
+	for i := range h.h {
+		for _, name := range [...]string{
+			HeaderContentLength, HeaderTransferEncoding, HeaderTrailer, HeaderContentType,
+			HeaderContentEncoding, HeaderContentLanguage, HeaderContentLocation, HeaderContentRange,
+			HeaderLastModified, "Digest", "Content-Digest", "Repr-Digest",
+		} {
+			if caseInsensitiveCompare(h.h[i].key, s2b(name)) {
+				continue fields
+			}
+		}
+		h.h[n], h.h[i] = h.h[i], h.h[n]
+		n++
+	}
+	h.h = h.h[:n]
+}
+
 // unannounceTrailers forgets the announced set. Values already in the trailer
 // section return to the header section, as before they were announced.
 func (h *header) unannounceTrailers() {
@@ -2199,13 +2227,21 @@ func (h *ResponseHeader) SetCanonical(key, value []byte) {
 	h.setNonSpecial(key, h.bufV)
 }
 
-// SetCookie sets the given response cookie.
+// SetCookie replaces the first response cookie with the given name or appends
+// the cookie if none matches. Later cookies with the same name are preserved.
 //
 // It is safe re-using the cookie after the function returns.
 func (h *ResponseHeader) SetCookie(cookie *Cookie) {
 	h.bufK = initHeaderValueBytes(h.bufK, cookie.Key())
 	h.bufV = initHeaderValueBytes(h.bufV, cookie.Cookie())
-	h.cookies = setArgBytes(h.cookies, h.bufK, h.bufV, argsHasValue)
+	for i := range h.cookies {
+		kv := &h.cookies[i]
+		if bytes.Equal(kv.key, h.bufK) {
+			kv.value = append(kv.value[:0], h.bufV...)
+			return
+		}
+	}
+	h.cookies = appendArgBytes(h.cookies, h.bufK, h.bufV, argsHasValue)
 }
 
 // SetCookie sets 'key: value' cookies.
@@ -2688,6 +2724,34 @@ func (h *ResponseHeader) PeekKeys() [][]byte {
 	return h.mulHeader
 }
 
+// PeekTrailer returns the first trailer value for the given key.
+//
+// Unlike Peek, it only searches the trailer section, so an ordinary header
+// with the same name is not returned. Received trailers are available after
+// the chunked body has been read.
+//
+// The returned value is valid until the request or response is reused or
+// released. Do not store references to it. Make copies instead.
+func (h *header) PeekTrailer(key string) []byte {
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	return peekArgBytes(h.trailerH, h.bufK)
+}
+
+// PeekAllTrailer returns all trailer values for the given key.
+//
+// Unlike PeekAll, it only searches the trailer section, so ordinary headers
+// with the same name are not returned. Received trailers are available after
+// the chunked body has been read.
+//
+// The returned values are valid until the request or response is reused or
+// released. Future calls to Peek* may modify the returned slice.
+// Do not store references to it. Make copies instead.
+func (h *header) PeekAllTrailer(key string) [][]byte {
+	h.bufK = getHeaderKeyBytes(h.bufK, key, h.disableNormalizing)
+	h.mulHeader = peekAllArgBytesToDst(h.mulHeader[:0], h.trailerH, h.bufK)
+	return h.mulHeader
+}
+
 // PeekTrailerKeys return all trailer keys.
 //
 // The returned value is valid until the request is released,
@@ -2974,6 +3038,41 @@ func (h *RequestHeader) validate() error {
 	return nil
 }
 
+// prepareRequestHost rejects userinfo on the wire (RFC 9110 sections 4.2.4
+// and 7.2) and adopts the absolute-form authority (RFC 9112 section 3.2.2).
+func (h *RequestHeader) prepareRequestHost() error {
+	host := h.Host()
+	if bytes.IndexByte(host, '@') >= 0 {
+		return ErrorInvalidURI
+	}
+	target := h.requestURI
+	if len(host) > 0 && target[0] == '/' {
+		return nil
+	}
+	absolute := target[0] != '/' && bytes.Contains(target, strColonSlashSlash)
+	if !absolute {
+		if h.IsConnect() && bytes.IndexByte(target, '@') >= 0 {
+			return ErrorInvalidURI
+		}
+		if len(host) > 0 {
+			return nil
+		}
+	}
+
+	// With no Host (HTTP/1.0), URI.parse also looks for an authority in
+	// the target, including network-path references.
+	_, authority, _ := splitHostURI(nil, target)
+	if bytes.IndexByte(authority, '@') >= 0 || (absolute && len(authority) == 0) {
+		return ErrorInvalidURI
+	}
+	if absolute {
+		// Preserve wire escaping, including IPv6 zone identifiers, so
+		// the host remains parseable after a path rewrite.
+		h.SetHostBytes(authority)
+	}
+	return nil
+}
+
 func bufferSnippet(b []byte) string {
 	n := len(b)
 	start := 200
@@ -3057,7 +3156,11 @@ func (h *ResponseHeader) serialize(w *bufio.Writer) []byte {
 //
 // WriteTo implements io.WriterTo interface.
 func (h *ResponseHeader) WriteTo(w io.Writer) (int64, error) {
-	n, err := w.Write(h.Header())
+	b := h.Header()
+	n, err := w.Write(b)
+	if err == nil && n != len(b) {
+		err = io.ErrShortWrite
+	}
 	return int64(n), err
 }
 
@@ -3224,7 +3327,11 @@ func (h *RequestHeader) Write(w *bufio.Writer) error {
 //
 // WriteTo implements io.WriterTo interface.
 func (h *RequestHeader) WriteTo(w io.Writer) (int64, error) {
-	n, err := w.Write(h.Header())
+	b := h.Header()
+	n, err := w.Write(b)
+	if err == nil && n != len(b) {
+		err = io.ErrShortWrite
+	}
 	return int64(n), err
 }
 
@@ -3786,6 +3893,7 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 	contentLengthSeen := false
 	transferEncodingSeen := false
 	hostSeen := false
+	contentTypeSeen := false
 
 	var s headerScanner
 	s.b = buf
@@ -3877,6 +3985,14 @@ func (h *RequestHeader) parseHeaders(buf []byte) (headersLen, rawSaved int, err 
 			}
 		case 'c':
 			if caseInsensitiveCompare(s.key, strContentType) {
+				if contentTypeSeen {
+					if !bytes.Equal(h.contentType, s.value) {
+						h.connectionClose = true
+						return 0, 0, errors.New("conflicting content-type headers")
+					}
+					continue
+				}
+				contentTypeSeen = true
 				h.contentType = append(h.contentType[:0], s.value...)
 				continue
 			}
@@ -4100,29 +4216,19 @@ func getHeaderKeyBytes(bufK []byte, key string, disableNormalizing bool) []byte 
 }
 
 func normalizeHeaderKey(b []byte, disableNormalizing bool) {
-	// Neutralise any CR/LF in the key so a header name can't break the
-	// message framing, mirroring the value handling in initHeaderValueBytes.
-	// This runs before the early returns below because a key carrying a space
-	// or an otherwise invalid byte skips normalization entirely.
-	b = removeNewLines(b)
-
-	if disableNormalizing {
-		return
-	}
-
-	n := len(b)
-	if n == 0 {
-		return
-	}
-
 	// If the header isn't valid, we don't normalize it.
 	for _, c := range b {
 		if !validHeaderFieldByte(c) {
+			// Neutralise any CR/LF in the key so a header name can't break
+			// the message framing, mirroring the value handling in
+			// initHeaderValueBytes. A valid key holds neither, so only a key
+			// carrying a space or an otherwise invalid byte needs it.
+			removeNewLines(b)
 			return
 		}
 	}
 
-	normalizeHeaderKeyValidated(b, false)
+	normalizeHeaderKeyValidated(b, disableNormalizing)
 }
 
 func normalizeHeaderKeyValidated(b []byte, disableNormalizing bool) {
@@ -4149,6 +4255,19 @@ func normalizeHeaderKeyValidated(b []byte, disableNormalizing bool) {
 
 // removeNewLines will replace `\r` and `\n` with an empty space.
 func removeNewLines(raw []byte) []byte {
+	if len(raw) < 64 {
+		// Most values are short, and skipping the words that hold no control
+		// byte checks them faster than the two scans below, which win only
+		// once a value is longer than this.
+		b := skipCleanWords(raw)
+		for i, c := range b {
+			if c == rChar || c == nChar {
+				b[i] = ' '
+			}
+		}
+		return raw
+	}
+
 	// check if a `\r` is present and save the position.
 	// if no `\r` is found, check if a `\n` is present.
 	foundR := bytes.IndexByte(raw, rChar)

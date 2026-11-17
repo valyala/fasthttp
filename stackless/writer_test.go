@@ -127,3 +127,52 @@ func testConcurrent(testFunc func() error, concurrency int) error {
 	}
 	return nil
 }
+
+func TestWriterHighLoad(t *testing.T) {
+	var second bytes.Buffer
+	w := NewWriter(io.Discard, func(dst io.Writer) Writer {
+		zw, err := flate.NewWriter(dst, flate.DefaultCompression)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return zw
+	})
+	if _, err := io.WriteString(w, "first stream"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The initial write initialized the worker pool. Simulate its full-queue
+	// response without depending on the machine's worker count or scheduling.
+	dispatch := stacklessWriterFuncFunc
+	t.Cleanup(func() { stacklessWriterFuncFunc = dispatch })
+	reject := func(any) bool { return false }
+	stacklessWriterFuncFunc = reject
+
+	// Reset must discard even an unfinished stream.
+	w.Reset(&second)
+	stacklessWriterFuncFunc = dispatch
+	if _, err := w.Write([]byte("second stream")); err != nil {
+		t.Fatal(err)
+	}
+
+	stacklessWriterFuncFunc = reject
+	if n, err := io.WriteString(w, "rejected"); n != 0 || err != errHighLoad {
+		t.Errorf("rejected WriteString returned (%d, %v)", n, err)
+	}
+	if n, err := w.Write([]byte("rejected")); n != 0 || err != errHighLoad {
+		t.Errorf("rejected Write returned (%d, %v)", n, err)
+	}
+	if err := w.Flush(); err != errHighLoad {
+		t.Errorf("rejected Flush returned %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Error(err)
+	}
+
+	r := flate.NewReader(&second)
+	defer r.Close()
+	got, err := io.ReadAll(r)
+	if err != nil || string(got) != "second stream" {
+		t.Fatalf("decoded %q, %v; want only the second stream", got, err)
+	}
+}

@@ -8,7 +8,7 @@ import (
 
 // oracleValid replicates the original function's semantics using net.ParseIP:
 // - Input must start with '['
-// - There must be a closing ']' and a non-empty address between
+// - There must be a closing ']' (the last one) and a non-empty address between
 // - Optional %zone allowed but must not be empty
 // - Zone is stripped before checking with net.ParseIP
 // - Must contain a ':' to be IPv6 (prevents raw IPv4-in-brackets).
@@ -18,7 +18,9 @@ func oracleValid(host []byte) bool {
 		return true
 	}
 
-	end := bytes.IndexByte(host, ']')
+	// Like validateIPv6Literal, the last ']' closes the literal: a zone may
+	// contain an escaped ']' (RFC 6874).
+	end := bytes.LastIndexByte(host, ']')
 	if end < 0 {
 		return false
 	}
@@ -68,6 +70,8 @@ func FuzzValidateIPv6Literal(f *testing.F) {
 		[]byte("[::1]:443"),          // trailing port outside ']' is ignored by validator
 		[]byte("[2001:db8:0:0:0:0:2:1]"),
 		[]byte("[2001:db8:0:0:0:0:2:1%en0]"),
+		[]byte("[fe80::1%]en0]:8080"), // zone with a decoded ']'
+		[]byte("[::]]"),
 	}
 	for _, s := range seeds {
 		f.Add(s)

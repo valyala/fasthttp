@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1271,6 +1272,60 @@ func TestPipelineClientThrottlesDialFailures(t *testing.T) {
 	}
 }
 
+func TestClientClosesSwitchedProtocolConnection(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"HostClient", "PipelineClient"} {
+		t.Run(name, func(t *testing.T) {
+			clientConn, peer := net.Pipe()
+			defer clientConn.Close()
+			defer peer.Close()
+
+			dial := func(string) (net.Conn, error) { return clientConn, nil }
+			var do func(*Request, *Response) error
+			switch name {
+			case "HostClient":
+				c := &HostClient{Addr: "example.com:80", Dial: dial, MaxIdleConnDuration: time.Hour}
+				do = c.Do
+			case "PipelineClient":
+				c := &PipelineClient{Addr: "example.com:80", Dial: dial, MaxIdleConnDuration: time.Hour}
+				do = c.Do
+			}
+
+			serverDone := make(chan error, 1)
+			go func() {
+				var req Request
+				if err := req.Read(bufio.NewReader(peer)); err != nil {
+					serverDone <- err
+					return
+				}
+				_, err := io.WriteString(peer, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: test\r\n\r\n")
+				serverDone <- err
+			}()
+
+			var req Request
+			req.SetRequestURI("http://example.com/")
+			req.Header.Set(HeaderConnection, "Upgrade")
+			req.Header.Set(HeaderUpgrade, "test")
+			var resp Response
+			if err := do(&req, &resp); err != nil {
+				t.Fatal(err)
+			}
+			if err := <-serverDone; err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode() != StatusSwitchingProtocols {
+				t.Fatalf("unexpected response status %d", resp.StatusCode())
+			}
+			_ = peer.SetReadDeadline(time.Now().Add(testTimeout(time.Second)))
+			var b [1]byte
+			if _, err := peer.Read(b[:]); err != io.EOF {
+				t.Fatalf("expected the client to close the upgraded connection, got %v", err)
+			}
+		})
+	}
+}
+
 func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 	t.Parallel()
 
@@ -1358,6 +1413,735 @@ func TestPipelineClientSkipsEarlyHints(t *testing.T) {
 	}
 	if err := <-serverDone; err != nil {
 		t.Fatalf("server failed: %v", err)
+	}
+}
+
+func TestClientReuseResponseAfterHead(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.SetBodyString("body of " + string(ctx.Method()))
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	dial := func(string) (net.Conn, error) { return ln.Dial() }
+	clients := map[string]clientDoer{
+		"HostClient":     &HostClient{Addr: "example.com", Dial: dial},
+		"PipelineClient": &PipelineClient{Addr: "example.com", Dial: dial},
+	}
+	for name, c := range clients {
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/")
+		req.Header.SetMethod(MethodHead)
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("%s: HEAD: %v", name, err)
+		}
+		// Writing the HEAD response must keep the advertised length even
+		// though no body was read.
+		var w bytes.Buffer
+		if _, err := resp.WriteTo(&w); err != nil {
+			t.Fatalf("%s: WriteTo: %v", name, err)
+		}
+		head, body, _ := strings.Cut(w.String(), "\r\n\r\n")
+		if !strings.Contains(head+"\r\n", "\r\nContent-Length: 12\r\n") {
+			t.Errorf("%s: HEAD response written as %q, want Content-Length: 12", name, w.String())
+		}
+		if body != "" {
+			t.Errorf("%s: HEAD response written with body %q, want none", name, body)
+		}
+		req.Header.SetMethod(MethodGet)
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("%s: GET: %v", name, err)
+		}
+		if got := string(resp.Body()); got != "body of GET" {
+			t.Errorf("%s: GET after HEAD with the same Response got body %q, want %q", name, got, "body of GET")
+		}
+	}
+}
+
+func TestClientSkipBodyKeepsConnectionUsable(t *testing.T) {
+	t.Parallel()
+
+	// The skipped body is larger than the read buffer and ends with something
+	// that looks like a response, so it must not stay on the connection.
+	bigBody := strings.Repeat("x", 64*1024) + "HTTP/1.1 200 OK\r\nContent-Length: 8\r\n\r\nINJECTED"
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		// The server sees the connection closed while it writes the skipped body.
+		Logger: &testLogger{},
+		Handler: func(ctx *RequestCtx) {
+			if string(ctx.Path()) == "/big" {
+				ctx.SetBodyString(bigBody)
+				return
+			}
+			ctx.SetBodyString("body of " + string(ctx.Method()) + " " + string(ctx.Path()))
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	dial := func(string) (net.Conn, error) { return ln.Dial() }
+	clients := map[string]clientDoer{
+		"HostClient":     &HostClient{Addr: "example.com", Dial: dial},
+		"PipelineClient": &PipelineClient{Addr: "example.com", Dial: dial},
+	}
+	for name, c := range clients {
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/big")
+		resp.SkipBody = true
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("%s: GET /big: %v", name, err)
+		}
+		if len(resp.Body()) != 0 {
+			t.Errorf("%s: SkipBody response has a %d byte body", name, len(resp.Body()))
+		}
+
+		var req2 Request
+		var resp2 Response
+		req2.SetRequestURI("http://example.com/next")
+		req2.Header.SetMethod(MethodPost)
+		if err := c.Do(&req2, &resp2); err != nil {
+			t.Fatalf("%s: POST /next after a skipped body: %v", name, err)
+		}
+		if got, want := string(resp2.Body()), "body of POST /next"; got != want {
+			t.Errorf("%s: POST /next after a skipped body got %q, want %q", name, got, want)
+		}
+	}
+}
+
+func TestPipelineClientSkipBodyDoesNotBufferBody(t *testing.T) {
+	t.Parallel()
+
+	const bigSize = 8 << 20
+	bigBody := strings.Repeat("x", bigSize)
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			switch string(ctx.Path()) {
+			case "/big":
+				ctx.SetBodyString(bigBody)
+			case "/big-chunked":
+				ctx.SetBodyStream(strings.NewReader(bigBody), -1)
+			default:
+				ctx.SetBodyString("body of " + string(ctx.Path()))
+			}
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	var dials atomic.Int32
+	c := &PipelineClient{
+		Addr: "example.com",
+		Dial: func(string) (net.Conn, error) {
+			dials.Add(1)
+			return ln.Dial()
+		},
+	}
+	methods := []struct {
+		name string
+		do   func(*Request, *Response) error
+	}{
+		{"Do", c.Do},
+		{"DoTimeout", func(req *Request, resp *Response) error {
+			return c.DoTimeout(req, resp, 10*time.Second)
+		}},
+		{"DoDeadline", func(req *Request, resp *Response) error {
+			return c.DoDeadline(req, resp, time.Now().Add(10*time.Second))
+		}},
+	}
+	for _, m := range methods {
+		for _, keepBodyBuffer := range []bool{false, true} {
+			for _, path := range []string{"/big", "/big-chunked"} {
+				name := fmt.Sprintf("%s KeepBodyBuffer=%v GET %s", m.name, keepBodyBuffer, path)
+				var req Request
+				var resp Response
+				resp.KeepBodyBuffer = keepBodyBuffer
+				resp.SkipBody = true
+				req.SetRequestURI("http://example.com" + path)
+				if err := m.do(&req, &resp); err != nil {
+					t.Fatalf("%s: %v", name, err)
+				}
+				if !resp.SkipBody {
+					t.Errorf("%s: SkipBody was cleared", name)
+				}
+				if len(resp.Body()) != 0 {
+					t.Errorf("%s: SkipBody response has a %d byte body", name, len(resp.Body()))
+				}
+				if resp.body != nil && cap(resp.body.B) >= bigSize {
+					t.Errorf("%s: skipping the body grew the response buffer to %d bytes", name, cap(resp.body.B))
+				}
+
+				req.SetRequestURI("http://example.com/next")
+				resp.SkipBody = false
+				if err := m.do(&req, &resp); err != nil {
+					t.Fatalf("%s: GET /next after the skipped body: %v", name, err)
+				}
+				if got, want := string(resp.Body()), "body of /next"; got != want {
+					t.Errorf("%s: GET /next after the skipped body got %q, want %q", name, got, want)
+				}
+			}
+		}
+	}
+	if n := dials.Load(); n != 1 {
+		t.Errorf("skipped bodies took %d dials, want 1", n)
+	}
+}
+
+func TestPipelineClientSkipBodyHonorsMaxResponseBodySize(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Logger: &testLogger{},
+		Handler: func(ctx *RequestCtx) {
+			if string(ctx.Path()) == "/chunked" {
+				ctx.SetBodyStream(strings.NewReader(strings.Repeat("x", 1024)), -1)
+				return
+			}
+			ctx.SetBodyString(strings.Repeat("x", 1024))
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	for _, path := range []string{"/fixed", "/chunked"} {
+		c := &PipelineClient{
+			Addr:                "example.com",
+			Dial:                func(string) (net.Conn, error) { return ln.Dial() },
+			MaxResponseBodySize: 100,
+		}
+		var req Request
+		var resp Response
+		resp.SkipBody = true
+		req.SetRequestURI("http://example.com" + path)
+		if err := c.Do(&req, &resp); !errors.Is(err, ErrBodyTooLarge) {
+			t.Errorf("GET %s: got error %v, want %v", path, err, ErrBodyTooLarge)
+		}
+	}
+}
+
+func TestPipelineClientSkipBodyIdentityBodyTooLargeDoesNotBlock(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+
+	release := make(chan struct{})
+	defer close(release)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		br := bufio.NewReader(conn)
+		var req Request
+		if err := req.Read(br); err != nil {
+			t.Error(err)
+			return
+		}
+		// No Content-Length and no Transfer-Encoding: the body runs until the
+		// connection closes. Send one byte more than the limit, far less than
+		// the client's read buffer, and keep the connection open.
+		resp := "HTTP/1.1 200 OK\r\n\r\n" + strings.Repeat("x", 101)
+		if _, err := conn.Write([]byte(resp)); err != nil {
+			t.Error(err)
+			return
+		}
+		<-release
+	}()
+
+	c := &PipelineClient{
+		Addr:                "example.com",
+		Dial:                func(string) (net.Conn, error) { return ln.Dial() },
+		MaxResponseBodySize: 100,
+	}
+	var req Request
+	var resp Response
+	resp.SkipBody = true
+	req.SetRequestURI("http://example.com/")
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- c.Do(&req, &resp) }()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, ErrBodyTooLarge) {
+			t.Fatalf("got error %v, want %v", err, ErrBodyTooLarge)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Do blocked instead of returning ErrBodyTooLarge")
+	}
+}
+
+func TestClientConnectTunnelResponseHasNoBody(t *testing.T) {
+	t.Parallel()
+
+	for _, skipBody := range []bool{false, true} {
+		ln := fasthttputil.NewInmemoryListener()
+		release := make(chan struct{})
+		go func() {
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				go func() {
+					defer conn.Close()
+					var req Request
+					if err := req.Read(bufio.NewReader(conn)); err != nil {
+						return
+					}
+					// The tunnel is established: the response ends at its
+					// header and the connection stays open.
+					if _, err := conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
+						t.Error(err)
+						return
+					}
+					<-release
+				}()
+			}
+		}()
+
+		dial := func(string) (net.Conn, error) { return ln.Dial() }
+		clients := map[string]clientDoer{
+			"HostClient":     &HostClient{Addr: "proxy.example.com", Dial: dial},
+			"PipelineClient": &PipelineClient{Addr: "proxy.example.com", Dial: dial},
+		}
+		for name, c := range clients {
+			var req Request
+			var resp Response
+			resp.SkipBody = skipBody
+			req.Header.SetMethod(MethodConnect)
+			req.SetRequestURI("http://example.com:443/")
+
+			errCh := make(chan error, 1)
+			go func() { errCh <- c.Do(&req, &resp) }()
+			select {
+			case err := <-errCh:
+				if err != nil {
+					t.Fatalf("%s (SkipBody=%v): %v", name, skipBody, err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s (SkipBody=%v): Do blocked on the open tunnel", name, skipBody)
+			}
+			if resp.StatusCode() != StatusOK || len(resp.Body()) != 0 {
+				t.Fatalf("%s (SkipBody=%v): got status %d body %q", name, skipBody, resp.StatusCode(), resp.Body())
+			}
+		}
+		close(release)
+		ln.Close()
+	}
+}
+
+func TestPipelineClientQueuedRequestWaitsForConnectResponse(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+
+	connectReceived := make(chan struct{})
+	respond := make(chan struct{})
+	leaked := make(chan string, 1)
+	release := make(chan struct{})
+	defer close(release)
+	secondReq := make(chan string, 1)
+	go func() {
+		// First connection: the proxy holds the CONNECT response open.
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		br := bufio.NewReader(conn)
+		var req Request
+		if err := req.Read(br); err != nil {
+			t.Error(err)
+			return
+		}
+		close(connectReceived)
+		go func() {
+			// Anything the client sends from here on would go to the
+			// tunnel target.
+			buf := make([]byte, 4096)
+			n, _ := br.Read(buf)
+			if n > 0 {
+				leaked <- string(buf[:n])
+			}
+		}()
+		<-respond
+		if _, err := conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n")); err != nil {
+			t.Error(err)
+			return
+		}
+
+		// Second connection: queued requests must arrive here.
+		conn2, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn2.Close()
+		br2 := bufio.NewReader(conn2)
+		var req2 Request
+		if err := req2.Read(br2); err != nil {
+			t.Error(err)
+			return
+		}
+		secondReq <- string(req2.Header.Method()) + " " + string(req2.Header.Peek(HeaderAuthorization))
+		if _, err := conn2.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")); err != nil {
+			t.Error(err)
+		}
+		<-release
+	}()
+
+	c := &PipelineClient{
+		Addr:     "proxy.example.com",
+		Dial:     func(string) (net.Conn, error) { return ln.Dial() },
+		MaxConns: 1,
+	}
+
+	var connectReq Request
+	var connectResp Response
+	connectReq.Header.SetMethod(MethodConnect)
+	connectReq.SetRequestURI("http://example.com:443/")
+	connectErr := make(chan error, 1)
+	go func() { connectErr <- c.Do(&connectReq, &connectResp) }()
+	<-connectReceived
+
+	var getReq Request
+	var getResp Response
+	getReq.SetRequestURI("http://proxy.example.com/secret")
+	getReq.Header.Set(HeaderAuthorization, "Bearer secret")
+	getErr := make(chan error, 1)
+	go func() { getErr <- c.Do(&getReq, &getResp) }()
+
+	// The reader already took CONNECT off the queue, so the GET is the only
+	// pending request. Then give the writer time to send it if it would.
+	deadline := time.Now().Add(5 * time.Second)
+	for c.PendingRequests() < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("GET was not queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	close(respond)
+
+	select {
+	case err := <-connectErr:
+		if err != nil {
+			t.Fatalf("CONNECT: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("CONNECT blocked")
+	}
+	if connectResp.StatusCode() != StatusOK {
+		t.Fatalf("CONNECT: got status %d", connectResp.StatusCode())
+	}
+	select {
+	case err := <-getErr:
+		if err != nil {
+			t.Fatalf("GET: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GET blocked")
+	}
+	if got := string(getResp.Body()); got != "ok" {
+		t.Fatalf("GET: got body %q, want %q", got, "ok")
+	}
+	select {
+	case got := <-secondReq:
+		if got != "GET Bearer secret" {
+			t.Fatalf("second connection got %q", got)
+		}
+	default:
+		t.Fatal("GET didn't reach the second connection")
+	}
+	select {
+	case b := <-leaked:
+		t.Fatalf("bytes sent on the CONNECT connection after the CONNECT request: %q", b)
+	default:
+	}
+}
+
+func TestClientResponseReadAfterHead(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {
+			ctx.SetBodyString("body")
+		},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	dial := func(string) (net.Conn, error) { return ln.Dial() }
+	clients := map[string]clientDoer{
+		"HostClient":     &HostClient{Addr: "example.com", Dial: dial},
+		"PipelineClient": &PipelineClient{Addr: "example.com", Dial: dial},
+	}
+	for name, c := range clients {
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/")
+		req.Header.SetMethod(MethodHead)
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatalf("%s: HEAD: %v", name, err)
+		}
+
+		// Reading a new response into the same Response must not treat it
+		// as a response to the earlier HEAD.
+		resp.SkipBody = false
+		br := bufio.NewReader(strings.NewReader("HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nbody"))
+		if err := resp.Read(br); err != nil {
+			t.Fatalf("%s: Read: %v", name, err)
+		}
+		if got := string(resp.Body()); got != "body" {
+			t.Errorf("%s: Read after HEAD got body %q, want %q", name, got, "body")
+		}
+		if n := br.Buffered(); n != 0 {
+			t.Errorf("%s: Read after HEAD left %d bytes unread", name, n)
+		}
+	}
+}
+
+func TestPipelineClientSkipBodyChunkExtensionLimit(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+
+	ext := strings.Repeat("a", 1024)
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var req Request
+		if err := req.Read(bufio.NewReader(conn)); err != nil {
+			t.Error(err)
+			return
+		}
+		// 32 one-byte chunks: within a 32-byte body limit, but with 32 KiB
+		// of chunk extensions.
+		wire := "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" +
+			strings.Repeat("1;"+ext+"\r\nx\r\n", 32) + "0\r\n\r\n"
+		_, _ = conn.Write([]byte(wire))
+	}()
+
+	c := &PipelineClient{
+		Addr:                "example.com",
+		Dial:                func(string) (net.Conn, error) { return ln.Dial() },
+		MaxResponseBodySize: 32,
+	}
+	var req Request
+	var resp Response
+	resp.SkipBody = true
+	req.SetRequestURI("http://example.com/")
+	err := c.Do(&req, &resp)
+	if !errors.As(err, new(ErrBrokenChunk)) {
+		t.Fatalf("got %v, want ErrBrokenChunk", err)
+	}
+}
+
+func TestPipelineClientSkipBodyIdentityBodyMaxIntLimit(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	defer ln.Close()
+
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		var req Request
+		if err := req.Read(bufio.NewReader(conn)); err != nil {
+			t.Error(err)
+			return
+		}
+		// Close-delimited body: no Content-Length, no Transfer-Encoding.
+		if _, err := conn.Write([]byte("HTTP/1.1 200 OK\r\n\r\nBODY")); err != nil {
+			t.Error(err)
+		}
+	}()
+
+	c := &PipelineClient{
+		Addr:                "example.com",
+		Dial:                func(string) (net.Conn, error) { return ln.Dial() },
+		MaxResponseBodySize: math.MaxInt,
+	}
+	var req Request
+	var resp Response
+	resp.SkipBody = true
+	req.SetRequestURI("http://example.com/")
+	if err := c.Do(&req, &resp); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Body()) != 0 {
+		t.Fatalf("SkipBody response has a %d byte body", len(resp.Body()))
+	}
+}
+
+func TestDiscardBodyIdentityMaxIntLimit(t *testing.T) {
+	t.Parallel()
+
+	br := bufio.NewReader(strings.NewReader("BODY"))
+	if err := discardBodyIdentity(br, math.MaxInt); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := br.ReadByte(); !errors.Is(err, io.EOF) {
+		t.Fatalf("body was not consumed: %v", err)
+	}
+}
+
+func TestPipelineClientStreamBodyHeadHasNoBodyStream(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		keepBodyBuffer bool
+		do             func(*PipelineClient, *Request, *Response) error
+	}{
+		{name: "Do", do: func(c *PipelineClient, req *Request, resp *Response) error {
+			return c.Do(req, resp)
+		}},
+		{name: "DoTimeout", do: func(c *PipelineClient, req *Request, resp *Response) error {
+			return c.DoTimeout(req, resp, 5*time.Second)
+		}},
+		{name: "DoDeadline", do: func(c *PipelineClient, req *Request, resp *Response) error {
+			return c.DoDeadline(req, resp, time.Now().Add(5*time.Second))
+		}},
+		{name: "DoTimeout KeepBodyBuffer", keepBodyBuffer: true, do: func(c *PipelineClient, req *Request, resp *Response) error {
+			return c.DoTimeout(req, resp, 5*time.Second)
+		}},
+		{name: "DoDeadline KeepBodyBuffer", keepBodyBuffer: true, do: func(c *PipelineClient, req *Request, resp *Response) error {
+			return c.DoDeadline(req, resp, time.Now().Add(5*time.Second))
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ln := fasthttputil.NewInmemoryListener()
+			t.Cleanup(func() { _ = ln.Close() })
+
+			go func() {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				br := bufio.NewReader(conn)
+				var req Request
+				if err := req.Read(br); err != nil {
+					t.Error(err)
+					return
+				}
+				// HEAD response announcing a body it doesn't send.
+				if _, err := io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\n"); err != nil {
+					t.Error(err)
+					return
+				}
+				// Keep the connection open until the client is done.
+				_, _ = br.ReadByte()
+			}()
+
+			c := &PipelineClient{
+				Addr:   "example.com",
+				Dial:   func(string) (net.Conn, error) { return ln.Dial() },
+				Logger: &testLogger{},
+			}
+			var req Request
+			req.Header.SetMethod(MethodHead)
+			req.SetRequestURI("http://example.com/")
+			var resp Response
+			resp.StreamBody = true
+			if tc.keepBodyBuffer {
+				resp.KeepBodyBuffer = true
+				resp.SetBodyString("stale")
+			}
+			if err := tc.do(c, &req, &resp); err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			if resp.IsBodyStream() {
+				t.Fatalf("HEAD response has a body stream %T", resp.BodyStream())
+			}
+			if len(resp.Body()) != 0 {
+				t.Fatalf("HEAD response has a %d byte body", len(resp.Body()))
+			}
+		})
+	}
+}
+
+func TestClientSkipBodyReusesConnectionForEmptyBody(t *testing.T) {
+	t.Parallel()
+
+	ln := fasthttputil.NewInmemoryListener()
+	s := &Server{
+		Handler: func(ctx *RequestCtx) {},
+	}
+	go func() {
+		if err := s.Serve(ln); err != nil {
+			t.Error(err)
+		}
+	}()
+	defer ln.Close()
+
+	var dials atomic.Int32
+	dial := func(string) (net.Conn, error) {
+		dials.Add(1)
+		return ln.Dial()
+	}
+	clients := map[string]clientDoer{
+		"HostClient":     &HostClient{Addr: "example.com", Dial: dial},
+		"PipelineClient": &PipelineClient{Addr: "example.com", Dial: dial},
+	}
+	for name, c := range clients {
+		dials.Store(0)
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/")
+		resp.SkipBody = true
+		for i := range 10 {
+			if err := c.Do(&req, &resp); err != nil {
+				t.Fatalf("%s: request %d: %v", name, i, err)
+			}
+			if resp.Header.ContentLength() != 0 {
+				t.Fatalf("%s: got Content-Length %d, want 0", name, resp.Header.ContentLength())
+			}
+		}
+		if n := dials.Load(); n != 1 {
+			t.Errorf("%s: 10 empty SkipBody responses took %d dials, want 1", name, n)
+		}
 	}
 }
 
@@ -1622,6 +2406,32 @@ func TestPipelineClientBuffersStreamBody(t *testing.T) {
 	}
 	if err := <-serverDone; err != nil {
 		t.Fatalf("server failed: %v", err)
+	}
+}
+
+func TestPipelineClientTimeoutMultipartForm(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.FormValue("field"))
+	}))
+	defer server.Close()
+	client := PipelineClient{Addr: server.Listener.Addr().String()}
+
+	const body = "--x\r\nContent-Disposition: form-data; name=\"field\"\r\n\r\nvalue\r\n--x--\r\n"
+	raw := fmt.Sprintf("POST / HTTP/1.1\r\nHost: test\r\nContent-Type: multipart/form-data; boundary=x\r\nContent-Length: %d\r\n\r\n%s", len(body), body)
+	var req Request
+	if err := req.Read(bufio.NewReader(strings.NewReader(raw))); err != nil {
+		t.Fatal(err)
+	}
+	defer req.RemoveMultipartFormFiles()
+
+	var resp Response
+	if err := client.DoTimeout(&req, &resp, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(resp.Body()); got != "value" {
+		t.Fatalf("forwarded multipart field = %q, want value", got)
 	}
 }
 
@@ -3846,9 +4656,9 @@ func TestClientRedirectMethodSwitch(t *testing.T) {
 		{MethodPost, "/redirect-303", "GET|"},
 		// 303 must also drop the body of an original GET request.
 		{MethodGet, "/redirect-303", "GET|"},
-		// 301/302 historically switch POST to GET (without forcing a body drop).
-		{MethodPost, "/redirect-301", "GET|hello"},
-		{MethodPost, "/redirect-302", "GET|hello"},
+		// A 301 or 302 converts POST to GET and discards the posted body.
+		{MethodPost, "/redirect-301", "GET|"},
+		{MethodPost, "/redirect-302", "GET|"},
 		// 307 and 308 must preserve both the method and the body.
 		{MethodPost, "/redirect-307", "POST|hello"},
 		{MethodPost, "/redirect-308", "POST|hello"},
@@ -3891,8 +4701,7 @@ func TestClientRedirectBodyStream(t *testing.T) {
 
 	// The hop that receives the redirect has already consumed the body stream,
 	// so a redirect that keeps the body cannot be replayed: 307 and 308 used to
-	// arrive with an empty body, and the POST switch to GET on 301/302 hung
-	// waiting for a body that never came.
+	// arrive with an empty body.
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
 			switch string(ctx.Path()) {
@@ -3933,9 +4742,10 @@ func TestClientRedirectBodyStream(t *testing.T) {
 		path         string
 		expectedBody string
 	}{
-		// All four body-preserving statuses must report the unusable stream.
-		{ErrRedirectBodyStream, MethodPost, "/redirect-301", ""},
-		{ErrRedirectBodyStream, MethodPost, "/redirect-302", ""},
+		// Switching a POST to GET does not require replaying the stream.
+		{nil, MethodPost, "/redirect-301", "GET|"},
+		{nil, MethodPost, "/redirect-302", "GET|"},
+		// Redirects that preserve the body must report the unusable stream.
 		{ErrRedirectBodyStream, MethodPost, "/redirect-307", ""},
 		{ErrRedirectBodyStream, MethodPost, "/redirect-308", ""},
 		{ErrRedirectBodyStream, MethodQuery, "/redirect-301", ""},
@@ -3977,20 +4787,37 @@ func TestClientRedirectBodyStream(t *testing.T) {
 	}
 }
 
-func TestClientRedirect303DropsBodyFramingHeaders(t *testing.T) {
+func TestClientRedirectDropsBodyHeaders(t *testing.T) {
 	t.Parallel()
 
-	// /landing echoes back the body-framing headers it received so the test
-	// can verify that none of them survived the 303 body drop.
+	metadata := []string{
+		HeaderContentEncoding, HeaderContentLanguage, HeaderContentLocation,
+		HeaderContentRange, HeaderLastModified, "Digest", "Content-Digest", "Repr-Digest",
+	}
+	dropped := append([]string{
+		HeaderContentLength, HeaderContentType, HeaderTransferEncoding, HeaderTrailer, "X-Sum",
+	}, metadata...)
 	s := &Server{
 		Handler: func(ctx *RequestCtx) {
+			if string(ctx.Path()) != "/landing" {
+				if got := string(ctx.Request.Header.Peek("X-Sum")); got != "original" {
+					t.Errorf("original trailer = %q", got)
+				}
+			}
 			switch string(ctx.Path()) {
-			case "/redirect":
-				ctx.Redirect("/landing", StatusSeeOther)
+			case "/301":
+				ctx.Redirect("http://other.test/landing", StatusMovedPermanently)
+			case "/302":
+				ctx.Redirect("http://other.test/landing", StatusFound)
+			case "/303":
+				ctx.Redirect("http://other.test/landing", StatusSeeOther)
 			case "/landing":
-				ctx.SetBodyString("te=" + string(ctx.Request.Header.Peek(HeaderTransferEncoding)) +
-					"|trailer=" + string(ctx.Request.Header.Peek(HeaderTrailer)) +
-					"|body=" + string(ctx.PostBody()))
+				for _, key := range dropped {
+					if got := ctx.Request.Header.Peek(key); len(got) > 0 {
+						t.Errorf("redirected GET carried %s = %q", key, got)
+					}
+				}
+				ctx.SetBodyString(string(ctx.Host()) + "|" + string(ctx.Method()) + "|" + string(ctx.PostBody()))
 			default:
 				ctx.Error("not found", StatusNotFound)
 			}
@@ -4003,34 +4830,41 @@ func TestClientRedirect303DropsBodyFramingHeaders(t *testing.T) {
 		}
 	}()
 
-	c := &HostClient{
-		Addr: "xxx",
+	c := &Client{
 		Dial: func(addr string) (net.Conn, error) { return ln.Dial() },
 	}
 
-	req := AcquireRequest()
-	resp := AcquireResponse()
-	defer ReleaseRequest(req)
-	defer ReleaseResponse(resp)
+	for _, status := range []string{"301", "302", "303"} {
+		t.Run(status, func(t *testing.T) {
+			req := AcquireRequest()
+			resp := AcquireResponse()
+			defer ReleaseRequest(req)
+			defer ReleaseResponse(resp)
 
-	// Original chunked POST carrying a trailer; the 303 must turn it into a
-	// body-less GET with no Transfer-Encoding/Trailer left behind.
-	req.Header.SetMethod(MethodPost)
-	req.SetRequestURI("http://xxx/redirect")
-	req.Header.Set(HeaderTransferEncoding, "chunked")
-	if err := req.Header.SetTrailer("X-Sum"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	req.SetBodyString("hello")
+			// The redirected GET must lose the POST body and its framing.
+			req.Header.SetMethod(MethodPost)
+			req.SetRequestURI("http://original.test/" + status)
+			req.Header.SetContentType("text/plain")
+			req.Header.DisableNormalizing()
+			for _, key := range metadata {
+				req.Header.Set(strings.ToLower(key), "original")
+			}
+			if err := req.Header.SetTrailer("X-Sum"); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			req.Header.Set("X-Sum", "original")
+			req.SetBodyStream(strings.NewReader("hello"), -1)
 
-	if err := c.DoRedirects(req, resp, 16); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if got := resp.StatusCode(); got != StatusOK {
-		t.Fatalf("unexpected status code: %d", got)
-	}
-	if got, want := string(resp.Body()), "te=|trailer=|body="; got != want {
-		t.Fatalf("unexpected landing echo %q. Expecting %q", got, want)
+			if err := c.DoRedirects(req, resp, 16); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got := resp.StatusCode(); got != StatusOK {
+				t.Fatalf("unexpected status code: %d", got)
+			}
+			if got, want := string(resp.Body()), "other.test|GET|"; got != want {
+				t.Fatalf("unexpected landing echo %q. Expecting %q", got, want)
+			}
+		})
 	}
 }
 
@@ -4187,6 +5021,45 @@ func TestClientRedirectInvalidLocation(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestClientRedirectStripsMixedCaseCredentials(t *testing.T) {
+	t.Parallel()
+
+	var req Request
+	var resp Response
+	req.SetRequestURI("http://example.com/")
+	req.Header.DisableNormalizing()
+	req.Header.SetCookie("session", "secret")
+	for _, key := range []string{"authorization", "AUTHORIZATION", "cOoKiE2", "proxy-authenticate", "Proxy-AUTHORIZATION", "WWW-authenticate"} {
+		req.Header.Add(key, "secret")
+	}
+	req.Header.Set("x-keep", "public")
+	client := Client{Transport: &TransportMock{wrapperFunc: func(_ *HostClient, req *Request, resp *Response) (bool, error) {
+		switch host := string(req.URI().Host()); host {
+		case "example.com":
+			resp.Header.SetStatusCode(StatusFound)
+			resp.Header.Set(HeaderLocation, "http://sub.example.com/")
+		case "sub.example.com":
+			if got := string(req.Header.Peek("authorization")); got != "secret" {
+				t.Fatalf("trusted redirect authorization = %q", got)
+			}
+			resp.Header.SetStatusCode(StatusFound)
+			resp.Header.Set(HeaderLocation, "http://other.example/")
+		case "other.example":
+			headers := req.Header.Header()
+			if bytes.Contains(headers, []byte("secret")) || !bytes.Contains(headers, []byte("x-keep: public\r\n")) {
+				t.Fatalf("unexpected redirected headers: %s", headers)
+			}
+			resp.Header.SetStatusCode(StatusOK)
+		default:
+			t.Fatalf("unexpected host %q", host)
+		}
+		return false, nil
+	}}}
+	if err := client.DoRedirects(&req, &resp, 2); err != nil || resp.StatusCode() != StatusOK {
+		t.Fatalf("redirects returned status %d, error %v", resp.StatusCode(), err)
 	}
 }
 
@@ -6257,6 +7130,34 @@ func TestTCPDialerDNSCleanerStopsAndRestarts(t *testing.T) {
 	waitForTCPDialerCleanerState(t, dialer, false)
 }
 
+func TestTCPDialerDNSCacheDualStack(t *testing.T) {
+	t.Parallel()
+
+	dialer := &TCPDialer{
+		DNSCacheDuration: time.Hour,
+		Resolver: &staticResolver{
+			addrs: []net.IPAddr{{IP: net.IPv4(127, 0, 0, 1)}, {IP: net.IPv6loopback}},
+		},
+	}
+	deadline := time.Now().Add(time.Second)
+
+	// Dial keeps the IPv4 addresses only. DialDualStack must not get them
+	// from the cache, or the IPv6 address stays out of its reach.
+	for _, dualStack := range []bool{false, true, false, true} {
+		addrs, _, err := dialer.getTCPAddrs("example.com:80", dualStack, deadline)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		expected := 1
+		if dualStack {
+			expected = 2
+		}
+		if len(addrs) != expected {
+			t.Fatalf("unexpected addresses %v with dualStack=%v. Expecting %d", addrs, dualStack, expected)
+		}
+	}
+}
+
 func TestTCPDialerKeepAlive(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -6363,6 +7264,32 @@ type TransportMock struct {
 
 func (t *TransportMock) RoundTrip(hc *HostClient, req *Request, resp *Response) (retry bool, err error) {
 	return t.wrapperFunc(hc, req, resp)
+}
+
+func TestHostClientLastUseTime(t *testing.T) {
+	t.Parallel()
+
+	c := &HostClient{
+		Addr: "example.com",
+		Transport: &TransportMock{wrapperFunc: func(_ *HostClient, _ *Request, resp *Response) (bool, error) {
+			resp.SetStatusCode(StatusOK)
+			return false, nil
+		}},
+	}
+	// A time far from now must be replaced by the time of the next request,
+	// and that time kept by the requests after it.
+	atomic.StoreUint32(&c.lastUseTime, ^uint32(0))
+	for range 3 {
+		var req Request
+		var resp Response
+		req.SetRequestURI("http://example.com/")
+		if err := c.Do(&req, &resp); err != nil {
+			t.Fatal(err)
+		}
+		if d := time.Since(c.LastUseTime()); d < 0 || d > time.Minute {
+			t.Fatalf("LastUseTime is %v, %v from now", c.LastUseTime(), d)
+		}
+	}
 }
 
 func TestClientRetryIfErrUpstream(t *testing.T) {
