@@ -30,26 +30,27 @@ type AcceptOptions struct {
 	Subprotocols []string
 
 	// MaxMessageSize limits the size of a message, counting all its fragments.
-	// A larger message closes the connection with StatusMessageTooBig.
-	// Zero means DefaultMaxMessageSize.
+	// A larger message closes the connection with [StatusMessageTooBig].
+	// Zero means [DefaultMaxMessageSize].
 	MaxMessageSize int
 
-	// ReadTimeout bounds every Read, Reader and reader Read call, but not
-	// CloseRead; WriteTimeout bounds every frame write, but not Ping's wait
-	// for the pong. A call whose I/O exceeds its bound closes the connection;
-	// one that times out while waiting for another call to release the
-	// connection returns os.ErrDeadlineExceeded and leaves it open. Zero means
-	// no bound.
+	// ReadTimeout bounds every [Conn.Read], [Conn.Reader] and reader Read
+	// call, but not [Conn.CloseRead]; WriteTimeout bounds every frame write,
+	// but not the wait of [Conn.Ping] for the pong. A call that exceeds its
+	// bound once its operation has started closes the connection: a read with
+	// a Pong to send and a [Conn.Writer] with part of its message sent have.
+	// One that times out before that, while waiting for another call, returns
+	// [os.ErrDeadlineExceeded] and leaves it open. Zero means no bound.
 	ReadTimeout  time.Duration
 	WriteTimeout time.Duration
 
 	// CompressionMode enables permessage-deflate when the client offers it.
-	// Zero means CompressionDisabled.
+	// Zero means [CompressionDisabled].
 	CompressionMode CompressionMode
 
 	// CompressionThreshold is the size from which a message is compressed; a
-	// Writer message is judged by its first fragment. Zero means 128 bytes
-	// with context takeover and 512 without.
+	// [Conn.Writer] message is judged by its first fragment. Zero means 128
+	// bytes with context takeover and 512 without.
 	CompressionThreshold int
 }
 
@@ -78,11 +79,14 @@ var (
 // response and returns the reason; the caller should then return without
 // touching the response.
 //
-// fasthttp skips the upgrade while shutting down with Server.CloseOnShutdown.
-// The Server's timeouts and Shutdown do not apply to the upgraded connection;
-// use the options here instead. fasthttp closes the TCP connection when
-// handler returns, or as soon as the WebSocket connection is closed with
-// Server.KeepHijackedConns.
+// fasthttp skips the upgrade while shutting down with
+// [fasthttp.Server.CloseOnShutdown]. The Server's timeouts and Shutdown do not
+// apply to the upgraded connection; use the options here instead. The
+// connection's TCP or Unix socket is closed with the WebSocket connection. A
+// connection that hides its socket, as with [fasthttp.Server.MaxConnsPerIP]
+// without TLS or a net.Conn of the caller's, is closed by fasthttp when
+// handler returns, or with the WebSocket connection under
+// [fasthttp.Server.KeepHijackedConns].
 func Accept(ctx *fasthttp.RequestCtx, opts *AcceptOptions, handler func(*Conn)) error {
 	if opts == nil {
 		opts = &defaultAcceptOptions
@@ -100,9 +104,9 @@ func Accept(ctx *fasthttp.RequestCtx, opts *AcceptOptions, handler func(*Conn)) 
 		return err
 	case !h.IsHTTP11():
 		return reject(ctx, fasthttp.StatusBadRequest, "HTTP/1.1 is required")
-	case h.ConnectionClose() || !hasToken(f.connection, "upgrade"), !hasToken(f.upgrade, "websocket"):
+	case h.ConnectionClose() || !hasToken(f.connection, "upgrade") || !hasToken(f.upgrade, "websocket"):
 		return reject(ctx, fasthttp.StatusBadRequest, "not a WebSocket upgrade request")
-	case h.ContentLength() > 0 || h.ContentLength() == -1: // Bytes, or a chunked body still unread.
+	case h.ContentLength() > 0 || h.ContentLength() == -1: // -1 is a chunked body.
 		return reject(ctx, fasthttp.StatusBadRequest, "handshake request has a body")
 	case f.versionN != 1 || string(f.version) != "13":
 		err := reject(ctx, fasthttp.StatusUpgradeRequired, "unsupported Sec-WebSocket-Version")
@@ -386,7 +390,7 @@ func equalFoldASCII(a []byte, b string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range len(a) {
+	for i := range a {
 		x, y := a[i], b[i]
 		if 'A' <= x && x <= 'Z' {
 			x += 'a' - 'A'
@@ -411,7 +415,7 @@ func isToken[T ~string | ~[]byte](s T) bool {
 	if len(s) == 0 {
 		return false
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if !isTokenByte(s[i]) {
 			return false
 		}

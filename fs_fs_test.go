@@ -1348,6 +1348,112 @@ func TestFSGenerateETagFS(t *testing.T) {
 	}
 }
 
+func TestFSFSUnknownModTime(t *testing.T) {
+	t.Parallel()
+
+	// A filesystem without modification times reports the zero time for every
+	// file, embed.FS among them. That is no date to send as Last-Modified or
+	// to compare a validator against: it stays the same when the file changes.
+	const body = "body"
+	testFS := fstest.MapFS{
+		"zero.txt":  {Data: []byte(body)},
+		"epoch.txt": {Data: []byte(body), ModTime: time.Unix(0, 0)},
+	}
+	zeroDate := string(AppendHTTPDate(nil, time.Time{}))
+	now := string(AppendHTTPDate(nil, time.Now()))
+
+	tests := []struct {
+		name   string
+		fsys   fs.FS
+		path   string
+		header string
+		value  string
+	}{
+		{name: "no validator", fsys: testFS, path: "/zero.txt"},
+		{name: "If-Modified-Since", fsys: testFS, path: "/zero.txt", header: HeaderIfModifiedSince, value: now},
+		{name: "If-Modified-Since with the zero time", fsys: testFS, path: "/zero.txt", header: HeaderIfModifiedSince, value: zeroDate},
+		{name: "If-Range with the zero time", fsys: testFS, path: "/zero.txt", header: HeaderIfRange, value: zeroDate},
+		{name: "Unix epoch", fsys: testFS, path: "/epoch.txt", header: HeaderIfModifiedSince, value: now},
+		{name: "embed.FS", fsys: fsTestFilesystem, path: "/fs.go", header: HeaderIfModifiedSince, value: now},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := (&FS{FS: tt.fsys, AllowEmptyRoot: true, AcceptByteRange: true}).NewRequestHandler()
+
+			var ctx RequestCtx
+			ctx.Init(&Request{}, nil, TestLogger{t})
+			ctx.Request.SetRequestURI(tt.path)
+			if tt.header != "" {
+				ctx.Request.Header.Set(tt.header, tt.value)
+			}
+			if tt.header == HeaderIfRange {
+				ctx.Request.Header.Set(HeaderRange, "bytes=0-1")
+			}
+			h(&ctx)
+
+			resp := readResponseFromCtx(t, &ctx, false)
+			if resp.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
+			}
+			if len(resp.Body()) == 0 {
+				t.Fatal("unexpected empty body")
+			}
+			if lastModified := resp.Header.Peek(HeaderLastModified); len(lastModified) > 0 {
+				t.Fatalf("unexpected Last-Modified: %q", lastModified)
+			}
+		})
+	}
+}
+
+func TestFSFSOldModTime(t *testing.T) {
+	t.Parallel()
+
+	// Only the zero time and the Unix epoch itself mean an unknown
+	// modification time. Earlier times and times within the first second
+	// after the epoch are valid dates to send and to revalidate against.
+	tests := []struct {
+		modTime time.Time
+		name    string
+	}{
+		{name: "before the Unix epoch", modTime: time.Date(1969, time.July, 20, 20, 17, 40, 0, time.UTC)},
+		{name: "half a second after the Unix epoch", modTime: time.Unix(0, int64(time.Second/2))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			testFS := fstest.MapFS{"file.txt": {Data: []byte("body"), ModTime: tt.modTime}}
+			h := (&FS{FS: testFS, AllowEmptyRoot: true}).NewRequestHandler()
+
+			var ctx RequestCtx
+			ctx.Init(&Request{}, nil, TestLogger{t})
+			ctx.Request.SetRequestURI("/file.txt")
+			h(&ctx)
+
+			resp := readResponseFromCtx(t, &ctx, false)
+			if resp.StatusCode() != StatusOK {
+				t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusOK)
+			}
+			lastModified := string(resp.Header.Peek(HeaderLastModified))
+			if want := string(AppendHTTPDate(nil, tt.modTime)); lastModified != want {
+				t.Fatalf("unexpected Last-Modified %q. Expecting %q", lastModified, want)
+			}
+
+			ctx.Init(&Request{}, nil, TestLogger{t})
+			ctx.Request.SetRequestURI("/file.txt")
+			ctx.Request.Header.Set(HeaderIfModifiedSince, lastModified)
+			h(&ctx)
+
+			resp = readResponseFromCtx(t, &ctx, true)
+			if resp.StatusCode() != StatusNotModified {
+				t.Fatalf("unexpected status code %d. Expecting %d", resp.StatusCode(), StatusNotModified)
+			}
+		})
+	}
+}
+
 func TestFSFSSmallFileServedFromMemory(t *testing.T) {
 	t.Parallel()
 

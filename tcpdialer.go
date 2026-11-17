@@ -483,8 +483,16 @@ func (d *TCPDialer) tcpAddrsClean() {
 	}
 }
 
+// tcpAddrsKey is the key of a DNS cache entry. An entry resolved for Dial
+// holds the IPv4 addresses only, so DialDualStack keeps entries of its own.
+type tcpAddrsKey struct {
+	addr      string
+	dualStack bool
+}
+
 func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool, deadline time.Time) ([]net.TCPAddr, uint32, error) {
-	item, exist := d.tcpAddrsMap.Load(addr)
+	key := tcpAddrsKey{addr: addr, dualStack: dualStack}
+	item, exist := d.tcpAddrsMap.Load(key)
 	e, ok := item.(*tcpAddrEntry)
 	if exist && ok && e != nil && time.Since(e.resolveTime) > d.DNSCacheDuration {
 		// Only let one goroutine re-resolve at a time.
@@ -496,7 +504,7 @@ func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool, deadline time.Time)
 	if e == nil {
 		addrs, err := resolveTCPAddrs(addr, dualStack, d.Resolver, deadline)
 		if err != nil {
-			item, exist := d.tcpAddrsMap.Load(addr)
+			item, exist := d.tcpAddrsMap.Load(key)
 			e, ok = item.(*tcpAddrEntry)
 			if exist && ok && e != nil {
 				// Set pending to 0 so another goroutine can retry.
@@ -509,7 +517,7 @@ func (d *TCPDialer) getTCPAddrs(addr string, dualStack bool, deadline time.Time)
 			addrs:       addrs,
 			resolveTime: time.Now(),
 		}
-		d.tcpAddrsMap.Store(addr, e)
+		d.tcpAddrsMap.Store(key, e)
 	}
 
 	idx := atomic.AddUint32(&e.addrsIdx, 1)

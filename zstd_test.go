@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"slices"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -26,6 +28,36 @@ func TestZstdBytesConcurrent(t *testing.T) {
 
 	if err := testConcurrent(10, testZstdBytes); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestZstdDecoderReuseInvalidBlock(t *testing.T) {
+	t.Parallel()
+
+	header := []byte{0x28, 0xb5, 0x2f, 0xfd, 0, 0}
+	// Fill each decoder block buffer with a previous caller's data.
+	previous := slices.Clone(header)
+	for range 3 {
+		previous = append(previous, 0x1c, 0, 0, 8, 'x', 0) // compressed block with one literal
+	}
+	previous = append(previous, 0x1d, 0, 0, 8, 'x', 0)
+	zr, err := acquireZstdReader(&byteSliceReader{b: previous})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+	if n, err := zr.WriteTo(io.Discard); n != 4 || err != nil {
+		t.Fatalf("decoding previous frame: wrote %d bytes, err %v", n, err)
+	}
+
+	// The first sequence refers to a match before the start of this frame.
+	invalid := append(slices.Clone(header), 0x3d, 0, 0, 0, 1, 0x54, 0, 0, 0, 1)
+	if err := zr.Reset(&byteSliceReader{b: invalid}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if _, err := zr.WriteTo(&buf); err == nil || buf.Len() != 0 {
+		t.Fatalf("decoding invalid frame: wrote %q, err %v", buf.Bytes(), err)
 	}
 }
 
@@ -385,7 +417,7 @@ func testZstdCompressSingleCase(s string) error {
 	if _, err := zw.Write([]byte(s)); err != nil {
 		return fmt.Errorf("unexpected error: %w. s=%q", err, s)
 	}
-	releaseStacklessZstdWriter(zw, CompressZstdDefault)
+	_ = releaseStacklessZstdWriter(zw, CompressZstdDefault)
 
 	zr, err := acquireZstdReader(&buf)
 	if err != nil {
@@ -415,5 +447,37 @@ func TestZstdOutOfRangeLevels(t *testing.T) {
 		if !bytes.Equal(decompressed, src) {
 			t.Fatalf("level %d: unexpected decompressed body", level)
 		}
+	}
+}
+
+func TestWriteZstdLevelMultiBlock(t *testing.T) {
+	// Hide bytes.Buffer so WriteZstdLevel uses the stackless writer.
+	var dst bytes.Buffer
+	w := struct{ io.Writer }{&dst}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for level := CompressZstdBestSpeed; level <= CompressZstdBestCompression; level++ {
+		t.Run(strconv.Itoa(level), func(t *testing.T) {
+			for _, size := range []int{128<<10 - 1, 128 << 10, 128<<10 + 1, 1<<20 + 1} {
+				body := make([]byte, size)
+				for i := range body {
+					body[i] = byte(rng.Uint32())
+				}
+				for iteration := range 3 {
+					dst.Reset()
+					body[0] = byte(iteration)
+					n, err := WriteZstdLevel(w, body, level)
+					if err != nil || n != len(body) {
+						t.Fatalf("size %d: WriteZstdLevel = %d, %v", size, n, err)
+					}
+					decoded, err := AppendUnzstdBytes(nil, dst.Bytes())
+					if err != nil {
+						t.Fatalf("size %d: decode: %v", size, err)
+					}
+					if !bytes.Equal(decoded, body) {
+						t.Fatalf("size %d: decoded stream differs from input", size)
+					}
+				}
+			}
+		})
 	}
 }

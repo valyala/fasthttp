@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -152,6 +154,37 @@ func TestNewFastHTTPHandler(t *testing.T) {
 	}
 }
 
+func TestNewFastHTTPHandlerRemovesMultipartFiles(t *testing.T) {
+	t.Parallel()
+
+	var ctx fasthttp.RequestCtx
+	ctx.Request.SetRequestURI("/")
+	ctx.Request.Header.SetMethod(fasthttp.MethodPost)
+	ctx.Request.Header.SetContentType("multipart/form-data; boundary=test")
+	ctx.Request.SetBodyString("--test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\n\r\ndata\r\n--test--\r\n")
+
+	var form *multipart.Form
+	NewFastHTTPHandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(0); err != nil {
+			t.Errorf("parse multipart form: %v", err)
+			return
+		}
+		form = r.MultipartForm
+	})(&ctx)
+	if form == nil {
+		t.Fatal("handler did not parse the upload")
+	}
+	t.Cleanup(func() { _ = form.RemoveAll() })
+	file, err := form.File["file"][0].Open()
+	if err == nil {
+		_ = file.Close()
+		t.Fatal("temporary upload still exists after the handler returned")
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("opening removed upload: %v", err)
+	}
+}
+
 func TestNewFastHTTPHandlerWithCookies(t *testing.T) {
 	expectedMethod := fasthttp.MethodPost
 	expectedRequestURI := "/foo/bar?baz=123"
@@ -220,6 +253,9 @@ func TestHijack(t *testing.T) {
 			if c, rw, err := f.Hijack(); err != nil {
 				t.Error(err)
 			} else {
+				if n, err := w.Write([]byte("late")); n != 4 || err != nil {
+					t.Errorf("Write after Hijack = (%d, %v), want (4, nil)", n, err)
+				}
 				if _, err := rw.WriteString("bar"); err != nil {
 					t.Error(err)
 				}
@@ -274,6 +310,25 @@ func TestHijack(t *testing.T) {
 	case <-clientCh:
 	case <-time.After(time.Second):
 		t.Fatal("timeout")
+	}
+}
+
+func TestHijackedWriterReleasesEmptyBuffer(t *testing.T) {
+	var ctx fasthttp.RequestCtx
+	w := acquireWriter(&ctx)
+	if _, err := w.Write(nil); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := w.Hijack()
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseWriter(w)
+	if n, err := w.Write([]byte("late")); n != 4 || err != nil {
+		t.Fatalf("Write after Hijack = (%d, %v)", n, err)
+	}
+	if w.responseBody != nil || w.bufPool != nil {
+		t.Fatal("released writer retained a buffer")
 	}
 }
 
@@ -926,6 +981,26 @@ func TestHandlerAbortIsQuiet(t *testing.T) {
 	NewFastHTTPHandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic(http.ErrAbortHandler)
 	})(ctx)
+}
+
+// ReverseProxy can relay 099 from an upstream as status code 99.
+func TestHandlerInvalidStatusCode(t *testing.T) {
+	t.Parallel()
+
+	var req fasthttp.Request
+	req.SetRequestURI("http://example.com/")
+	var ctx fasthttp.RequestCtx
+	var logs logRecorder
+	ctx.Init(&req, nil, &logs)
+	NewFastHTTPHandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(99)
+	})(&ctx)
+	if !ctx.Hijacked() {
+		t.Fatal("expected the invalid status code to abort the response")
+	}
+	if !strings.Contains(logs.String(), "invalid WriteHeader code 99") {
+		t.Fatalf("missing invalid status code in log: %s", logs.String())
+	}
 }
 
 // An abort before the first write sends nothing and closes the connection,

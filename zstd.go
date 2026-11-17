@@ -41,7 +41,8 @@ type limitedZstdReader struct {
 func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 	v := zstdDecoderPool.Get()
 	if v == nil {
-		return zstd.NewReader(r)
+		// The concurrent decoder can write stale block data on a sequence error.
+		return zstd.NewReader(r, zstd.WithDecoderConcurrency(1))
 	}
 	zr := v.(*zstd.Decoder) //nolint:forcetypeassert
 	if err := zr.Reset(r); err != nil {
@@ -51,6 +52,10 @@ func acquireZstdReader(r io.Reader) (*zstd.Decoder, error) {
 }
 
 func releaseZstdReader(zr *zstd.Decoder) {
+	if err := zr.Reset(nil); err != nil {
+		zr.Close()
+		return
+	}
 	zstdDecoderPool.Put(zr)
 }
 
@@ -103,7 +108,16 @@ func acquireStacklessZstdWriter(w io.Writer, compressLevel int) stackless.Writer
 	v := p.Get()
 	if v == nil {
 		return stackless.NewWriter(w, func(w io.Writer) stackless.Writer {
-			return acquireRealZstdWriter(w, compressLevel)
+			// The stackless writer drains and reuses its buffer after each call,
+			// so the encoder must not write to it asynchronously.
+			zw, err := zstd.NewWriter(w,
+				zstd.WithEncoderLevel(zstd.EncoderLevel(nLevel)),
+				zstd.WithEncoderConcurrency(1),
+			)
+			if err != nil {
+				panic(err)
+			}
+			return zw
 		})
 	}
 	sw := v.(stackless.Writer) //nolint:forcetypeassert
@@ -111,34 +125,12 @@ func acquireStacklessZstdWriter(w io.Writer, compressLevel int) stackless.Writer
 	return sw
 }
 
-func releaseStacklessZstdWriter(zf stackless.Writer, level int) {
-	zf.Close()
+func releaseStacklessZstdWriter(zf stackless.Writer, level int) error {
+	err := zf.Close()
 	nLevel := normalizeZstdCompressLevel(level)
 	p := stacklessZstdWriterPoolMap[nLevel]
 	p.Put(zf)
-}
-
-func acquireRealZstdWriter(w io.Writer, level int) *zstd.Encoder {
-	nLevel := normalizeZstdCompressLevel(level)
-	p := realZstdWriterPoolMap[nLevel]
-	v := p.Get()
-	if v == nil {
-		zw, err := zstd.NewWriter(w, zstd.WithEncoderLevel(zstd.EncoderLevel(nLevel)))
-		if err != nil {
-			panic(err)
-		}
-		return zw
-	}
-	zw := v.(*zstd.Encoder) //nolint:forcetypeassert
-	zw.Reset(w)
-	return zw
-}
-
-func releaseRealZstdWriter(zw *zstd.Encoder, level int) {
-	zw.Close()
-	nLevel := normalizeZstdCompressLevel(level)
-	p := realZstdWriterPoolMap[nLevel]
-	p.Put(zw)
+	return err
 }
 
 func AppendZstdBytesLevel(dst, src []byte, level int) []byte {
@@ -163,7 +155,9 @@ func WriteZstdLevel(w io.Writer, p []byte, level int) (int, error) {
 	default:
 		zw := acquireStacklessZstdWriter(w, level)
 		n, err := zw.Write(p)
-		releaseStacklessZstdWriter(zw, level)
+		if errc := releaseStacklessZstdWriter(zw, level); err == nil {
+			err = errc
+		}
 		return n, err
 	}
 }
@@ -182,9 +176,21 @@ func stacklessWriteZstd(ctx any) {
 
 func nonblockingWriteZstd(ctxv any) {
 	ctx := ctxv.(*compressCtx) //nolint:forcetypeassert
-	zw := acquireRealZstdWriter(ctx.w, ctx.level)
+	p := realZstdWriterPoolMap[ctx.level]
+	var zw *zstd.Encoder
+	if v := p.Get(); v != nil {
+		zw = v.(*zstd.Encoder) //nolint:forcetypeassert
+		zw.Reset(ctx.w)
+	} else {
+		var err error
+		zw, err = zstd.NewWriter(ctx.w, zstd.WithEncoderLevel(zstd.EncoderLevel(ctx.level)))
+		if err != nil {
+			panic(err)
+		}
+	}
 	zw.Write(ctx.p) //nolint:errcheck
-	releaseRealZstdWriter(zw, ctx.level)
+	zw.Close()
+	p.Put(zw)
 }
 
 // AppendZstdBytes appends zstd src to dst and returns the resulting dst.

@@ -6,11 +6,13 @@ import (
 	"crypto/rand"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/klauspost/compress/flate"
 	"github.com/valyala/fasthttp"
+	"github.com/valyala/fasthttp/fasthttputil"
 )
 
 func TestDeflateNegotiate(t *testing.T) {
@@ -282,13 +284,13 @@ func (d *testInflater) message(t *testing.T, payload []byte) []byte {
 	return got
 }
 
-func deflateServer(t *testing.T, readContext, writeContext bool, threshold int) (*Conn, *rawPeer) {
+func deflateServer(t *testing.T, threshold int) (*Conn, *rawPeer) {
 	t.Helper()
-	return newRawServer(t, connConfig{deflate: newDeflateConfig(readContext, writeContext, 0, threshold)})
+	return newRawServer(t, connConfig{deflate: newDeflateConfig(true, true, 0, threshold)})
 }
 
 func TestDeflateWriteWire(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	ctx := t.Context()
 	inf := &testInflater{}
 	msgs := [][]byte{[]byte(strings.Repeat("hello ", 100)), []byte(strings.Repeat("hello ", 100)), bytes.Repeat([]byte{7}, 70000)}
@@ -349,7 +351,7 @@ func TestDeflateWriteWire(t *testing.T) {
 }
 
 func TestDeflateReadWire(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	ctx := t.Context()
 	def := newTestDeflater()
 	msgs := [][]byte{[]byte(strings.Repeat("hello ", 100)), []byte(strings.Repeat("hello ", 100)), []byte("ünïcödé"), bytes.Repeat([]byte{9}, 100000)}
@@ -466,7 +468,7 @@ func TestDeflateNoContextAndWindow(t *testing.T) {
 }
 
 func TestDeflateThreshold(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 2000)
+	c, peer := deflateServer(t, 2000)
 	ctx := t.Context()
 	for _, n := range []int{1999, 2000} {
 		if err := c.Write(ctx, MessageBinary, make([]byte, n)); err != nil {
@@ -485,11 +487,14 @@ func TestDeflateIncompressibleAllocs(t *testing.T) {
 	if raceEnabled {
 		t.Skip("sync.Pool drops entries at random under the race detector")
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("the count covers the process, where another test's log line resolves the time zone")
+	}
 	for _, mode := range []CompressionMode{CompressionNoContextTakeover, CompressionContextTakeover} {
 		ts := startServer(t, &AcceptOptions{CompressionMode: mode}, echo)
 		c := ts.dial(t, &DialOptions{CompressionMode: mode})
 		ctx := c.Context()
-		for _, n := range []int{1<<12 - maxFrameHeader, 1<<16 - maxFrameHeader} {
+		for _, n := range []int{1<<12 - maxFrameHeader, 1<<16 - maxFrameHeader, 1 << 20} {
 			msgs := make([][]byte, 4) // Distinct, so that context takeover finds nothing to refer to.
 			for i := range msgs {
 				msgs[i] = make([]byte, n)
@@ -512,6 +517,61 @@ func TestDeflateIncompressibleAllocs(t *testing.T) {
 				t.Fatalf("mode %d, %d bytes: %v allocations per round trip", mode, n, a)
 			}
 		}
+	}
+}
+
+// capConn records the capacity behind each write.
+type capConn struct {
+	nopConn
+
+	caps []int
+}
+
+func (c *capConn) Write(p []byte) (int, error) {
+	c.caps = append(c.caps, cap(p))
+	return len(p), nil
+}
+
+// A compressed frame goes out in a buffer that follows its size: the first
+// block for input that compresses, and what the whole of it needs for input
+// that does not, past the pool as well.
+func TestDeflateOutputBuffer(t *testing.T) {
+	const large = maxPooled + 1<<20
+	text, incompressible := bytes.Repeat([]byte("compressible "), 1<<20/13), make([]byte, large)
+	noise(incompressible)
+	for _, tc := range []struct {
+		p         []byte
+		low, high int
+	}{{text, 0, readChunkSize}, {incompressible[:1<<20], 1 << 20, 2 << 20}, {incompressible, large, large + large/32}} {
+		nc := &capConn{}
+		c := newConn(nc, nc, false, "", connConfig{deflate: newDeflateConfig(true, true, 0, 0)})
+		if err := c.Write(t.Context(), MessageBinary, tc.p); err != nil {
+			t.Fatal(err)
+		}
+		if len(nc.caps) != 1 || nc.caps[0] <= tc.low || nc.caps[0] > tc.high {
+			t.Fatalf("buffers of %v, want one over %d and up to %d", nc.caps, tc.low, tc.high)
+		}
+	}
+}
+
+// A compressed message that ends exactly where its buffer does, or where
+// MaxMessageSize does, is read without a larger buffer.
+func TestDeflateReadBufferFits(t *testing.T) {
+	for _, tc := range []struct{ limit, n int }{{0, 4096}, {1 << 16, 1 << 16}, {0, DefaultMaxMessageSize}} {
+		pc := fasthttputil.NewPipeConns()
+		cfg := connConfig{maxMessageSize: tc.limit, deflate: newDeflateConfig(true, true, 0, 0)}
+		srv, cli := newConn(pc.Conn1(), pc.Conn1(), false, "", cfg), newConn(pc.Conn2(), pc.Conn2(), true, "", cfg)
+		msg := bytes.Repeat([]byte("compressible "), tc.n/13+1)[:tc.n]
+		done := make(chan error, 1)
+		go func() { done <- cli.Write(context.Background(), MessageText, msg) }()
+		_, p, err := srv.Read(t.Context())
+		if err != nil || !bytes.Equal(p, msg) || <-done != nil {
+			t.Fatalf("%d bytes: read %d, %v", tc.n, len(p), err)
+		}
+		if cap(srv.readBuf.b) != tc.n {
+			t.Fatalf("%d bytes read into a buffer of %d", tc.n, cap(srv.readBuf.b))
+		}
+		_, _ = srv.CloseNow(), cli.CloseNow()
 	}
 }
 
@@ -554,7 +614,7 @@ func TestDeflatePooledWriterIsolation(t *testing.T) {
 	// connection must not inherit its dictionary.
 	ctx := t.Context()
 	msg := []byte(strings.Repeat("shared history ", 300))
-	withCtx, peer1 := deflateServer(t, true, true, 0)
+	withCtx, peer1 := deflateServer(t, 0)
 	for range 3 {
 		if err := withCtx.Write(ctx, MessageText, msg); err != nil {
 			t.Fatal(err)
@@ -573,7 +633,7 @@ func TestDeflatePooledWriterIsolation(t *testing.T) {
 
 func TestDeflateUnsentWriteKeepsContext(t *testing.T) {
 	// A compressed fragment that cannot be sent must not enter the dictionary.
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	msg := []byte(strings.Repeat("context ", 1000))
 	wctx, cancel := context.WithCancel(t.Context())
 	w, err := c.Writer(wctx, MessageText)
@@ -612,7 +672,7 @@ func finalBlocks(parts ...string) []byte {
 }
 
 func TestDeflateFinalBlocksInMessage(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	ctx := t.Context()
 	z := finalBlocks("hello ", "world")
 	peer.send(frame(opText|rsv1, true, z))
@@ -652,7 +712,7 @@ func TestDeflateFinalBlocksInMessage(t *testing.T) {
 }
 
 func TestDeflateDiscardUsesCurrentContext(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	def := newTestDeflater()
 	msg := []byte(strings.Repeat("abandoned ", 1000))
 	z := def.message(t, msg)
@@ -677,7 +737,7 @@ func TestDeflateDiscardUsesCurrentContext(t *testing.T) {
 }
 
 func TestDeflateTransportEOF(t *testing.T) {
-	c, peer := deflateServer(t, true, true, 0)
+	c, peer := deflateServer(t, 0)
 	z := newTestDeflater().message(t, bytes.Repeat([]byte("data"), 5000))
 	f := frame(opText|rsv1, true, z)
 	peer.send(f[:len(f)/2])

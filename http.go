@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -190,6 +191,13 @@ type Response struct {
 
 	preserveBodyBuffer    bool
 	secureErrorLogMessage bool
+
+	// headResponse and connectResponse are set by the clients when the
+	// response answers a HEAD or CONNECT request. Unlike SkipBody they are
+	// cleared by Reset, Read and ReadLimitBody, so they don't leak into the
+	// next response read into the same Response.
+	headResponse    bool
+	connectResponse bool
 }
 
 // SetHost sets host for the request.
@@ -1171,6 +1179,8 @@ func (resp *Response) copyToSkipBody(dst *Response) {
 	dst.Reset()
 	resp.Header.CopyTo(&dst.Header)
 	dst.SkipBody = resp.SkipBody
+	dst.headResponse = resp.headResponse
+	dst.connectResponse = resp.connectResponse
 	dst.raddr = resp.raddr
 	dst.laddr = resp.laddr
 }
@@ -1419,8 +1429,43 @@ func marshalMultipartForm(f *multipart.Form, boundary string) ([]byte, error) {
 	return buf.B, nil
 }
 
+var errMultipartBoundaryInContent = errors.New("multipart boundary in part content")
+
+// multipartFileWriter checks for delimiter lines, including delimiters split
+// across writes. matched is -1 between the start of a line and the next LF
+// once the delimiter can no longer match.
+type multipartFileWriter struct {
+	w         io.Writer
+	delimiter []byte
+	matched   int
+}
+
+func (w *multipartFileWriter) Write(p []byte) (int, error) {
+	for rest := p; len(rest) > 0; {
+		if w.matched >= 0 {
+			n := min(len(rest), len(w.delimiter)-w.matched)
+			if bytes.Equal(rest[:n], w.delimiter[w.matched:w.matched+n]) {
+				w.matched += n
+				if w.matched == len(w.delimiter) {
+					return 0, errMultipartBoundaryInContent
+				}
+				break
+			}
+			w.matched = -1
+		}
+		i := bytes.IndexByte(rest, '\n')
+		if i < 0 {
+			break
+		}
+		w.matched = 0
+		rest = rest[i+1:]
+	}
+	return w.w.Write(p)
+}
+
 // WriteMultipartForm writes the given multipart form f with the given
-// boundary to w.
+// boundary to w. It returns an error if a line in a field or file starts
+// with the boundary delimiter.
 func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 	// Do not care about memory allocations here, since multipart
 	// form processing is slow.
@@ -1433,9 +1478,15 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 		return fmt.Errorf("cannot use form boundary %q: %w", boundary, err)
 	}
 
+	delimiter := "--" + boundary
+	lineDelimiter := "\n" + delimiter
+
 	// marshal values
 	for k, vv := range f.Value {
 		for _, v := range vv {
+			if strings.HasPrefix(v, delimiter) || strings.Contains(v, lineDelimiter) {
+				return fmt.Errorf("cannot write form field %q: %w", k, errMultipartBoundaryInContent)
+			}
 			if err := mw.WriteField(k, v); err != nil {
 				return fmt.Errorf("cannot write form field %q value %q: %w", k, v, err)
 			}
@@ -1453,7 +1504,8 @@ func WriteMultipartForm(w io.Writer, f *multipart.Form, boundary string) error {
 			if err != nil {
 				return fmt.Errorf("cannot open form file %q (%q): %w", k, fv.Filename, err)
 			}
-			if _, err = copyZeroAlloc(vw, fh); err != nil {
+			fw := multipartFileWriter{w: vw, delimiter: []byte(delimiter)}
+			if _, err = copyZeroAlloc(&fw, fh); err != nil {
 				_ = fh.Close()
 				return fmt.Errorf("error when copying form file %q (%q): %w", k, fv.Filename, err)
 			}
@@ -1548,6 +1600,8 @@ func (resp *Response) Reset() {
 	resp.resetSkipHeader()
 	resp.Header.Reset()
 	resp.SkipBody = false
+	resp.headResponse = false
+	resp.connectResponse = false
 	resp.raddr = nil
 	resp.laddr = nil
 	resp.ImmediateHeaderFlush = false
@@ -1759,12 +1813,12 @@ func (req *Request) ReadBody(r *bufio.Reader, contentLength, maxBodySize int) (e
 //
 // The caller must send StatusContinue response before calling this method.
 //
-// If maxBodySize > 0 and the body size exceeds maxBodySize,
-// then ErrBodyTooLarge is returned.
+// A body larger than a positive maxBodySize is made available through
+// BodyStream, including multipart forms that would otherwise be pre-parsed.
 func (req *Request) ContinueReadBodyStream(r *bufio.Reader, maxBodySize int, preParseMultipartForm ...bool) error {
 	var err error
 	contentLength := req.Header.ContentLength()
-	if contentLength > 0 {
+	if contentLength > 0 && (maxBodySize <= 0 || contentLength <= maxBodySize) {
 		if len(preParseMultipartForm) == 0 || preParseMultipartForm[0] {
 			// Pre-read multipart form data of known length.
 			// This way we limit memory usage for large file uploads, since their contents
@@ -1855,6 +1909,15 @@ var errTooManyInterimResponses = errors.New("fasthttp: too many 1xx informationa
 //
 // io.EOF is returned if r is closed before reading the first header byte.
 func (resp *Response) ReadLimitBody(r *bufio.Reader, maxBodySize int) error {
+	return resp.readLimitBody(r, maxBodySize, false, false)
+}
+
+// readLimitBody is ReadLimitBody for a response to a known request. head and
+// connect tell whether that request was HEAD or CONNECT; they replace
+// whatever the previous request that used resp left behind.
+func (resp *Response) readLimitBody(r *bufio.Reader, maxBodySize int, head, connect bool) error {
+	resp.headResponse = head
+	resp.connectResponse = connect
 	resp.resetSkipHeader()
 	err := resp.Header.Read(r)
 	if err != nil {
@@ -1926,8 +1989,123 @@ func (resp *Response) ReadBody(r *bufio.Reader, maxBodySize int) (err error) {
 	return err
 }
 
+// discardBody reads the response body that follows resp.Header from r and
+// drops it without storing it anywhere, so r is left at the start of the next
+// response. It enforces the same framing and maxBodySize rules as ReadBody,
+// and reads the trailer of a chunked body.
+func (resp *Response) discardBody(r *bufio.Reader, maxBodySize int) error {
+	if resp.headResponse || resp.isConnectTunnel() || resp.Header.mustSkipContentLength() {
+		return nil
+	}
+	contentLength := resp.Header.ContentLength()
+	switch {
+	case contentLength >= 0:
+		if maxBodySize > 0 && contentLength > maxBodySize {
+			return ErrBodyTooLarge
+		}
+		return discardFixedSize(r, contentLength)
+	case contentLength == -1:
+		if err := discardBodyChunked(r, maxBodySize); err != nil {
+			return err
+		}
+		err := resp.Header.ReadTrailer(r)
+		if err == io.EOF {
+			return ErrBrokenChunk{error: io.ErrUnexpectedEOF}
+		}
+		return err
+	default:
+		return discardBodyIdentity(r, maxBodySize)
+	}
+}
+
+func discardFixedSize(r *bufio.Reader, n int) error {
+	// bufio.Reader.Discard reuses the reader's own buffer, so this doesn't
+	// allocate no matter how large n is.
+	if _, err := r.Discard(n); err != nil {
+		if errors.Is(err, io.EOF) {
+			return io.ErrUnexpectedEOF
+		}
+		return err
+	}
+	return nil
+}
+
+func discardBodyChunked(r *bufio.Reader, maxBodySize int) error {
+	size := 0
+	// One overhead counter for the whole body, as in readBodyChunked, so
+	// many small chunks can't hide unbounded extension bytes.
+	var excess int
+	for {
+		chunkSize, err := parseChunkSize(r, &excess)
+		if err != nil {
+			return err
+		}
+		if chunkSize == 0 {
+			return nil
+		}
+		size += chunkSize
+		if maxBodySize > 0 && size > maxBodySize {
+			return ErrBodyTooLarge
+		}
+		if err = discardFixedSize(r, chunkSize); err != nil {
+			return err
+		}
+		crlf, err := r.Peek(len(strCRLF))
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return io.ErrUnexpectedEOF
+			}
+			return err
+		}
+		if !bytes.Equal(crlf, strCRLF) {
+			return ErrBrokenChunk{
+				error: errors.New("cannot find crlf at the end of chunk"),
+			}
+		}
+		if _, err = r.Discard(len(strCRLF)); err != nil {
+			return err
+		}
+	}
+}
+
+func discardBodyIdentity(r *bufio.Reader, maxBodySize int) error {
+	size := 0
+	for {
+		// Discard blocks until it has skipped all requested bytes, so never
+		// ask for more than the remaining allowance plus one byte. Otherwise
+		// a body that is already over the limit but shorter than the reader
+		// buffer would wait for more data (or EOF) instead of failing.
+		toDiscard := r.Size()
+		if maxBodySize > 0 {
+			// Compare before adding one so that a limit of math.MaxInt
+			// doesn't overflow.
+			if remaining := maxBodySize - size; remaining < toDiscard {
+				toDiscard = remaining + 1
+			}
+		}
+		n, err := r.Discard(toDiscard)
+		size += n
+		if maxBodySize > 0 && size > maxBodySize {
+			return ErrBodyTooLarge
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+	}
+}
+
 func (resp *Response) mustSkipBody() bool {
-	return resp.SkipBody || resp.Header.mustSkipContentLength()
+	return resp.SkipBody || resp.headResponse || resp.isConnectTunnel() || resp.Header.mustSkipContentLength()
+}
+
+// isConnectTunnel reports whether resp is a 2xx response to CONNECT. Such a
+// response ends at its header: the connection becomes a tunnel afterwards
+// (RFC 9110 section 9.3.6).
+func (resp *Response) isConnectTunnel() bool {
+	return resp.connectResponse && resp.Header.StatusCode() >= 200 && resp.Header.StatusCode() < 300
 }
 
 var errRequestHostRequired = errors.New("missing required host header in request")
@@ -2083,7 +2261,7 @@ func (req *Request) Write(w *bufio.Writer) error {
 		if err = req.Header.setRawBodyFraming(contentLength, hasBody); err != nil {
 			return err
 		}
-	} else if hasBody {
+	} else if hasBody || req.Header.contentLength > 0 || len(peekArgBytes(req.Header.h, strTransferEncoding)) > 0 {
 		req.Header.SetContentLength(contentLength)
 	}
 	if chunked {
@@ -2417,6 +2595,13 @@ func (s *compressedBodyStream) closeOriginal(wErr error) error {
 }
 
 func (s *compressedBodyStream) closeOriginalForDiscard() error {
+	// FS readers return to their pool on Close. Only the compression
+	// goroutine can release them once it has finished reading.
+	switch s.bodyStream.(type) {
+	case *fsSmallFileReader, *bigFileReader:
+		return nil
+	}
+
 	s.originalLock.Lock()
 	defer s.originalLock.Unlock()
 
@@ -2452,7 +2637,7 @@ func compressBrotliBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int)
 		bw: sw,
 	}
 	_, wErr := copyBodyStream(fw, bodyStream)
-	releaseStacklessBrotliWriter(zw, level)
+	_ = releaseStacklessBrotliWriter(zw, level)
 	return wErr
 }
 
@@ -2463,7 +2648,7 @@ func compressGzipBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) e
 		bw: sw,
 	}
 	_, wErr := copyBodyStream(fw, bodyStream)
-	releaseStacklessGzipWriter(zw, level)
+	_ = releaseStacklessGzipWriter(zw, level)
 	return wErr
 }
 
@@ -2474,7 +2659,7 @@ func compressDeflateBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int
 		bw: sw,
 	}
 	_, wErr := copyBodyStream(fw, bodyStream)
-	releaseStacklessDeflateWriter(zw, level)
+	_ = releaseStacklessDeflateWriter(zw, level)
 	return wErr
 }
 
@@ -2485,7 +2670,7 @@ func compressZstdBodyStream(sw *bufio.Writer, bodyStream io.Reader, level int) e
 		bw: sw,
 	}
 	_, wErr := copyBodyStream(fw, bodyStream)
-	releaseStacklessZstdWriter(zw, level)
+	_ = releaseStacklessZstdWriter(zw, level)
 	return wErr
 }
 
@@ -2939,19 +3124,16 @@ func writeBodyChunked(w *bufio.Writer, r io.Reader) error {
 	var n int
 	for {
 		n, err = r.Read(buf)
-		if n == 0 {
-			if err == nil {
-				continue
+		if n > 0 {
+			if writeErr := writeChunk(w, buf[:n]); writeErr != nil {
+				err = writeErr
+				break
 			}
-			if err == io.EOF {
-				if err = writeChunkNoFlush(w, nil); err != nil {
-					break
-				}
-				err = nil
-			}
-			break
 		}
-		if err = writeChunk(w, buf[:n]); err != nil {
+		if err != nil {
+			if err == io.EOF {
+				err = writeChunkNoFlush(w, nil)
+			}
 			break
 		}
 	}
@@ -3375,8 +3557,9 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 	}
 
 	strCRLFLen := len(strCRLF)
+	var excess int
 	for {
-		chunkSize, err := parseChunkSize(r)
+		chunkSize, err := parseChunkSize(r, &excess)
 		if err != nil {
 			return dst, err
 		}
@@ -3399,17 +3582,24 @@ func readBodyChunked(r *bufio.Reader, maxBodySize int, dst []byte) ([]byte, erro
 	}
 }
 
-func parseChunkSize(r *bufio.Reader) (int, error) {
+// Limit both a single unterminated chunk extension and the cumulative overhead
+// of many small chunks. As in net/http, allow 16 bytes per chunk plus twice
+// the chunk size before charging the body-wide allowance.
+const maxChunkOverhead = 16 * 1024
+
+func parseChunkSize(r *bufio.Reader, excess *int) (int, error) {
 	n, err := readHexInt(r)
 	if err != nil {
 		return -1, err
 	}
 	if b, _ := r.Peek(min(2, r.Buffered())); len(b) == 2 && b[0] == '\r' && b[1] == '\n' {
 		_, _ = r.Discard(2)
+		*excess = max(0, *excess-16-2*n)
 		return n, nil
 	}
 	inExt := false
 	afterSizeOWS := false
+	extra := 0
 	for {
 		c, err := r.ReadByte()
 		if err != nil {
@@ -3431,6 +3621,10 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 			return -1, ErrBrokenChunk{
 				error: errors.New("invalid character '\\n' after chunk size"),
 			}
+		}
+		extra++
+		if extra > maxChunkOverhead {
+			return -1, ErrBrokenChunk{error: errors.New("chunk size line too long")}
 		}
 		if inExt {
 			continue
@@ -3456,6 +3650,10 @@ func parseChunkSize(r *bufio.Reader) (int, error) {
 	err = readCrLf(r)
 	if err != nil {
 		return -1, err
+	}
+	*excess = max(0, *excess+extra-16-2*n)
+	if *excess > maxChunkOverhead {
+		return -1, ErrBrokenChunk{error: errors.New("too much chunk extension overhead")}
 	}
 	return n, nil
 }

@@ -30,7 +30,8 @@ const (
 	maxControlPayload = 125
 	maxFrameHeader    = 14
 	readChunkSize     = 64 << 10
-	writeChunkSize    = 4096 - maxFrameHeader // A Writer's buffer fills a pool class.
+	writerBufSize     = 1 << minBufBits // A Writer's buffer fills a pool class.
+	writeChunkSize    = writerBufSize - maxFrameHeader
 	closeTimeout      = 5 * time.Second
 )
 
@@ -47,8 +48,9 @@ var (
 type buffer struct{ b []byte }
 
 const (
-	minBufBits = 12 // 4 KiB
+	minBufBits = 12 // 4 KiB.
 	bufClasses = 15 // Up to 64 MiB.
+	maxPooled  = 1 << (minBufBits + bufClasses - 1)
 )
 
 // bufPools holds buffers in power-of-two size classes.
@@ -94,8 +96,8 @@ type connConfig struct {
 // Conn is a WebSocket connection.
 //
 // Read, Reader and CloseRead must not be called concurrently with each other,
-// and the readers and writers they hand out are not safe for concurrent use
-// either; all other methods may be called concurrently. See the package
+// and a reader from Reader or a writer from Writer is not safe for concurrent
+// use; all other methods may be called concurrently. See the package
 // documentation for the errors a closed connection reports.
 type Conn struct {
 	ctx    context.Context //nolint:containedctx // Exposed through Context.
@@ -103,7 +105,7 @@ type Conn struct {
 
 	r  io.Reader
 	nc net.Conn
-	vw io.Writer // nc unwrapped to a transport with vectored writes, or nil.
+	vw net.Conn // The TCP or Unix socket under an accepted nc, or nil: written with writev, closed first.
 
 	readBuf *buffer
 	iov     net.Buffers // Over iovBuf; WriteTo consumes it.
@@ -140,7 +142,7 @@ type Conn struct {
 
 	pingPayload [8]byte
 
-	closeStarted atomic.Bool // Set under frameMu as the Close frame starts going out; no data frame follows it.
+	closeStarted atomic.Bool // Set under frameMu before the Close frame is written; no data frame follows.
 	closeSent    atomic.Bool // Set once the Close frame is written.
 
 	client bool
@@ -163,8 +165,8 @@ func newConn(nc net.Conn, r io.Reader, client bool, subprotocol string, cfg conn
 		c.cfg.maxMessageSize = DefaultMaxMessageSize
 	}
 	c.ctx, c.cancel = context.WithCancelCause(context.Background())
-	c.rdWatch.nc = nc
-	c.wrWatch.nc = nc
+	c.rdWatch.c = c
+	c.wrWatch.c = c
 	c.wrWatch.write = true
 	if !client {
 		c.vw = vectorWriter(nc)
@@ -182,7 +184,7 @@ func unwrapHijacked(nc net.Conn) net.Conn {
 
 // vectorWriter returns the TCP or Unix socket under nc, whose writev sends a
 // header and payload at once, or nil.
-func vectorWriter(nc net.Conn) io.Writer {
+func vectorWriter(nc net.Conn) net.Conn {
 	switch raw := unwrapHijacked(nc); raw.(type) {
 	case *net.TCPConn, *net.UnixConn:
 		return raw
@@ -191,7 +193,7 @@ func vectorWriter(nc net.Conn) io.Writer {
 }
 
 // Context returns a context that is cancelled when the connection is closed.
-// context.Cause reports the error that closed it.
+// [context.Cause] reports the error that closed it.
 func (c *Conn) Context() context.Context {
 	return c.ctx
 }
@@ -222,9 +224,13 @@ func (c *Conn) closeWith(err error) {
 	c.closeMu.Unlock()
 	c.rdWatch.stopWatch()
 	c.wrWatch.stopWatch()
-	// A hijacked conn's Close is a no-op until the handler returns; the
-	// deadline unblocks reads and writes meanwhile.
+	// A hijacked conn's Close is a no-op until the handler returns: the
+	// deadline unblocks reads and writes meanwhile, and a socket in sight is
+	// closed at once.
 	_ = c.nc.SetDeadline(aLongTimeAgo)
+	if c.vw != nil {
+		_ = c.vw.Close()
+	}
 	closeTransport(c.nc)
 	c.ncMu.Unlock()
 }
@@ -251,7 +257,7 @@ func (c *Conn) shutdown() {
 // fatal closes the connection after a failed read or write and returns the
 // error callers see: ctx's error, a timeout, or StatusAbnormalClosure.
 func (c *Conn) fatal(ctx context.Context, err error) error {
-	if cerr := ctxCause(ctx); cerr != nil {
+	if cerr := ctxErr(ctx); cerr != nil {
 		err = cerr
 	} else if !isTimeout(err) {
 		err = CloseError{Code: StatusAbnormalClosure, Reason: err.Error()}
@@ -260,8 +266,8 @@ func (c *Conn) fatal(ctx context.Context, err error) error {
 	return c.closedErr()
 }
 
-// ctxCause returns ctx's error, or DeadlineExceeded once its deadline passed.
-func ctxCause(ctx context.Context) error {
+// ctxErr returns ctx's error, or DeadlineExceeded once its deadline passed.
+func ctxErr(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -313,7 +319,7 @@ func (c *Conn) CloseNow() error {
 // closed, whether or not the peer answered; context.Cause(c.Context()) tells
 // why.
 func (c *Conn) Close(ctx context.Context, code StatusCode, reason string) error {
-	if !validReceivedCode(code) || len(reason) > maxControlPayload-2 || !utf8.ValidString(reason) {
+	if !validCloseCode(code) || len(reason) > maxControlPayload-2 || !utf8.ValidString(reason) {
 		return errBadCloseCode
 	}
 	if !c.closeSent.Load() {
@@ -344,9 +350,10 @@ func (c *Conn) Close(ctx context.Context, code StatusCode, reason string) error 
 
 // CloseRead starts a goroutine that reads and handles control frames, so a
 // connection used only for writing still answers pings and sees the peer's
-// Close frame. ReadTimeout does not apply to it. A data message closes the
-// connection with StatusPolicyViolation. Read and Reader must not be called
-// afterwards; use Context to learn when the connection is closed.
+// Close frame. It runs until the connection is closed, which cancelling ctx
+// does; ReadTimeout does not apply to it. A data message closes the connection
+// with [StatusPolicyViolation]. [Conn.Read] and [Conn.Reader] must not be
+// called afterwards; use [Conn.Context] to learn when the connection is closed.
 func (c *Conn) CloseRead(ctx context.Context) {
 	go c.readUntilClose(ctx, false)
 }
@@ -354,7 +361,7 @@ func (c *Conn) CloseRead(ctx context.Context) {
 // readUntilClose handles control frames until the connection ends, discarding
 // or refusing data messages, and closes the connection with the result.
 func (c *Conn) readUntilClose(ctx context.Context, discard bool) {
-	err := c.acquire(c.readMu, ctx, time.Time{})
+	err := c.acquire(ctx, c.readMu, time.Time{})
 	if err == nil {
 		err = c.startRead(ctx, time.Time{})
 		for err == nil {
@@ -369,10 +376,10 @@ func (c *Conn) readUntilClose(ctx context.Context, discard bool) {
 }
 
 // Ping sends a ping and waits for the matching pong. Pongs are only seen while
-// another goroutine is in Read or Reader, or after CloseRead. Only one Ping
-// is in flight at a time.
+// another goroutine is in [Conn.Read] or [Conn.Reader], or after
+// [Conn.CloseRead]. Only one Ping is in flight at a time.
 func (c *Conn) Ping(ctx context.Context) error {
-	if err := c.acquire(c.pingMu, ctx, time.Time{}); err != nil {
+	if err := c.acquire(ctx, c.pingMu, time.Time{}); err != nil {
 		return err
 	}
 	defer c.pingMu.release()
@@ -390,14 +397,14 @@ func (c *Conn) Ping(ctx context.Context) error {
 	case <-c.pongCh:
 		return nil
 	case <-ctx.Done():
-		return c.ctxErr(ctx)
+		return c.waitErr(ctx)
 	case <-c.ctx.Done():
 		return c.closedErr()
 	}
 }
 
-// ctxErr reports why a wait on ctx ended; a closed connection's reason wins.
-func (c *Conn) ctxErr(ctx context.Context) error {
+// waitErr reports why a wait on ctx ended; a closed connection's reason wins.
+func (c *Conn) waitErr(ctx context.Context) error {
 	return cmp.Or(c.closedErr(), ctx.Err())
 }
 
@@ -412,11 +419,11 @@ func (c *Conn) gotPong(p []byte) {
 	c.pongMu.Unlock()
 }
 
-// ctxWatch applies a call's deadline to one direction of nc and aborts the
-// call when its context is cancelled. The AfterFunc is reused while calls
-// share a Done channel.
+// ctxWatch applies a call's deadline to one direction of the transport and
+// aborts the call when its context is cancelled. The AfterFunc is reused while
+// calls share a Done channel.
 type ctxWatch struct {
-	nc     net.Conn
+	c      *Conn
 	done   <-chan struct{}
 	stop   func() bool
 	last   time.Time // The deadline set last, once set is true.
@@ -435,9 +442,9 @@ func (w *ctxWatch) setDeadline(t time.Time) error {
 	}
 	w.last, w.set = t, true
 	if w.write {
-		return w.nc.SetWriteDeadline(t)
+		return w.c.nc.SetWriteDeadline(t)
 	}
-	return w.nc.SetReadDeadline(t)
+	return w.c.nc.SetReadDeadline(t)
 }
 
 // begin arms the watch for a call bounded by ctx and deadline and returns the
@@ -459,7 +466,7 @@ func (w *ctxWatch) begin(ctx context.Context, deadline time.Time) (time.Time, er
 		w.gen++
 		if done != nil {
 			gen := w.gen
-			w.stop = context.AfterFunc(ctx, func() { w.abort(gen) })
+			w.stop = context.AfterFunc(ctx, func() { w.abort(gen, ctx.Err()) })
 		}
 	}
 	if err := ctx.Err(); err != nil {
@@ -469,12 +476,15 @@ func (w *ctxWatch) begin(ctx context.Context, deadline time.Time) (time.Time, er
 	return deadline, w.setDeadline(deadline)
 }
 
-func (w *ctxWatch) abort(gen uint64) {
+// abort interrupts the call in progress through its deadline; a transport
+// that refuses it loses the connection, closed with err.
+func (w *ctxWatch) abort(gen uint64, err error) {
 	w.mu.Lock()
-	if w.active && gen == w.gen && w.setDeadline(aLongTimeAgo) != nil {
-		_ = w.nc.Close()
-	}
+	refused := w.active && gen == w.gen && w.setDeadline(aLongTimeAgo) != nil
 	w.mu.Unlock()
+	if refused {
+		w.c.closeWith(err)
+	}
 }
 
 func (w *ctxWatch) end() {
@@ -504,7 +514,7 @@ func newLock() lock {
 
 // acquire takes l, giving up when the connection is closed, ctx ends or
 // deadline passes.
-func (c *Conn) acquire(l lock, ctx context.Context, deadline time.Time) error {
+func (c *Conn) acquire(ctx context.Context, l lock, deadline time.Time) error {
 	if err := c.closedErr(); err != nil {
 		return err
 	}
@@ -527,7 +537,7 @@ func (c *Conn) acquire(l lock, ctx context.Context, deadline time.Time) error {
 	case l <- struct{}{}:
 		return nil
 	case <-ctx.Done():
-		return c.ctxErr(ctx)
+		return c.waitErr(ctx)
 	case <-c.ctx.Done():
 		return c.closedErr()
 	case <-expired:

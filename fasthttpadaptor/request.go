@@ -28,7 +28,23 @@ func ConvertRequest(ctx *fasthttp.RequestCtx, r *http.Request, forServer bool) e
 	body := ctx.PostBody()
 	strRequestURI := b2s(ctx.RequestURI())
 
-	rURL, err := url.ParseRequestURI(strRequestURI)
+	// A raw fragment ends the path or query in fasthttp. ParseRequestURI
+	// would treat it as part of the resource passed to the handler.
+	target, _, _ := strings.Cut(strRequestURI, "#")
+	switch {
+	case strings.HasPrefix(target, "//") && len(ctx.Request.Header.Host()) == 0:
+		// Without a Host header fasthttp resolves a network-path reference.
+		target = string(ctx.URI().RequestURI())
+	case target != "" && target[0] != '/' && ctx.IsConnect() && !targetIsAbsoluteForm(target):
+		// A slashless CONNECT target with a path can look like a scheme
+		// to net/url (e.g. "x:/admin"). Keep its first path segment.
+		path, _, _ := strings.Cut(target, "?")
+		if strings.Contains(path, "/") {
+			target = "/" + target
+		}
+	}
+
+	rURL, err := url.ParseRequestURI(target)
 	if err != nil {
 		return err
 	}

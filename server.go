@@ -344,6 +344,10 @@ type Server struct {
 	// Maximum request body size.
 	//
 	// The server rejects requests with bodies exceeding this limit.
+	// When buffering a request, it can allocate space for the declared
+	// Content-Length header or chunk-size line alone, before receiving any
+	// payload. A limit near MaxInt lets one request crash the process.
+	// Choose a limit that fits the available memory across concurrent requests.
 	//
 	// Request body size is limited by DefaultMaxRequestBodySize by default.
 	// A value less than or equal to zero selects DefaultMaxRequestBodySize; it
@@ -587,6 +591,10 @@ func CompressHandler(h RequestHandler) RequestHandler {
 func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
+		// A timed-out handler may still be using both the request and response.
+		if ctx.timedOut.Load() {
+			return
+		}
 		switch {
 		case ctx.Request.Header.HasAcceptEncodingBytes(strGzip):
 			ctx.Response.gzipBody(level)
@@ -619,6 +627,10 @@ func CompressHandlerLevel(h RequestHandler, level int) RequestHandler {
 func CompressHandlerBrotliLevel(h RequestHandler, brotliLevel, otherLevel int) RequestHandler {
 	return func(ctx *RequestCtx) {
 		h(ctx)
+		// A timed-out handler may still be using both the request and response.
+		if ctx.timedOut.Load() {
+			return
+		}
 		switch {
 		case ctx.Request.Header.HasAcceptEncodingBytes(strBr):
 			ctx.Response.brotliBody(brotliLevel)
@@ -681,7 +693,7 @@ type RequestCtx struct {
 	connRequestNum          uint64
 	hijackNoResponse        bool
 	deadlineMu              sync.Mutex
-	deadlineUpdatesDisabled atomic.Bool
+	timedOut                atomic.Bool
 	handlerDeadlineSet      atomic.Bool
 	handlerReadDeadlineSet  bool
 	handlerWriteDeadlineSet atomic.Bool
@@ -953,7 +965,7 @@ func (ctx *RequestCtx) SetReadDeadline(deadline time.Time) error {
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
-	if ctx.deadlineUpdatesDisabled.Load() {
+	if ctx.timedOut.Load() {
 		return ErrDeadlineUpdatesDisabled
 	}
 	err := ctx.c.SetReadDeadline(deadline)
@@ -971,7 +983,7 @@ func (ctx *RequestCtx) SetWriteDeadline(deadline time.Time) error {
 	if ctx.c == nil {
 		return ErrNilConnection
 	}
-	if ctx.deadlineUpdatesDisabled.Load() {
+	if ctx.timedOut.Load() {
 		return ErrDeadlineUpdatesDisabled
 	}
 	err := ctx.c.SetWriteDeadline(deadline)
@@ -1005,7 +1017,7 @@ func (ctx *RequestCtx) reset() {
 	ctx.time = zeroTime
 	ctx.deadlineMu.Lock()
 	ctx.c = nil
-	ctx.deadlineUpdatesDisabled.Store(false)
+	ctx.timedOut.Store(false)
 	ctx.handlerDeadlineSet.Store(false)
 	ctx.handlerReadDeadlineSet = false
 	ctx.handlerWriteDeadlineSet.Store(false)
@@ -1479,10 +1491,8 @@ func (ctx *RequestCtx) RemoteAddr() net.Addr {
 	return addr
 }
 
-// SetRemoteAddr sets remote address to the given value.
-//
-// Set nil value to restore default behaviour for using
-// connection remote address.
+// SetRemoteAddr sets the remote address for the current request.
+// Pass nil to use the connection's remote address again.
 func (ctx *RequestCtx) SetRemoteAddr(remoteAddr net.Addr) {
 	ctx.remoteAddr = remoteAddr
 }
@@ -1851,7 +1861,7 @@ func (ctx *RequestCtx) TimeoutErrorWithResponse(resp *Response) {
 	respCopy := &Response{}
 	resp.CopyTo(respCopy)
 	ctx.timeoutResponse = respCopy
-	ctx.deadlineUpdatesDisabled.Store(true)
+	ctx.timedOut.Store(true)
 }
 
 // NextProto adds nph to be processed when key is negotiated when TLS
@@ -2192,6 +2202,12 @@ func (s *Server) Shutdown() error {
 // ShutdownWithContext works by first closing all open listeners and then waiting for all connections to return to idle
 // or context timeout and then shut down.
 //
+// A connection that is still reading the headers of its first request is
+// closed once the accept-time grace for new connections has passed, like a
+// connection that sent nothing, so a client that stalls mid-headers cannot
+// block shutdown when no ReadTimeout is set. Once the headers are read the
+// request is waited for, even while its body is still arriving.
+//
 // When ShutdownWithContext is called, Serve, ListenAndServe, and ListenAndServeTLS immediately return nil.
 // Make sure the program doesn't exit and waits instead for ShutdownWithContext to return.
 //
@@ -2530,7 +2546,8 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	// Count the connection as Idle after 5 seconds.
 	// Same as net/http.Server:
 	// https://github.com/golang/go/blob/85d7bab91d9a3ed1f76842e4328973ea75efef54/src/net/http/server.go#L2834-L2836
-	idleConnTime.Store(connTime.Add(time.Second * 5).Unix())
+	firstRequestDeadline := connTime.Add(time.Second * 5).Unix()
+	idleConnTime.Store(firstRequestDeadline)
 	s.idleConnsMu.Unlock()
 
 	serverName := s.getServerName()
@@ -2618,7 +2635,17 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Response.secureErrorLogMessage = s.SecureErrorLogMessage
 
 		if err == nil {
-			if idleConnTime.Swap(0) == idleConnClaimedByShutdown {
+			if connRequestNum == 1 {
+				// The connection went active. A CAS is used so that a
+				// connection Shutdown has already claimed while its first
+				// byte was being read is not resurrected: if it fails,
+				// Shutdown has claimed and closed the connection
+				// already, so the StateActive hook must not run for a
+				// request that will never be answered.
+				if !idleConnTime.CompareAndSwap(firstRequestDeadline, 0) {
+					break
+				}
+			} else if idleConnTime.Swap(0) == idleConnClaimedByShutdown {
 				// Shutdown claimed this idle connection and is closing it, so the
 				// request that just arrived can't be answered: drop it silently.
 				break
@@ -2644,26 +2671,62 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 				ctx.Response.Header.DisableNormalizing()
 			}
 
-			// Reading Headers.
-			//
-			// If we have pipeline response in the outgoing buffer,
-			// we only want to try and read the next headers once.
-			// If we have to wait for the next request we flush the
-			// outgoing buffer first so it doesn't have to wait.
-			if bw != nil && bw.Buffered() > 0 {
-				err = ctx.Request.Header.readLoop(br, false)
-				if err == ErrNeedMore {
-					err = bw.Flush()
-					if err != nil {
-						break
-					}
-
-					err = ctx.Request.Header.Read(br)
-				}
-			} else {
-				err = ctx.Request.Header.Read(br)
+			if connRequestNum == 1 {
+				// While the first request's headers are being read the
+				// connection stays closable by Shutdown once the
+				// accept-time grace has passed, even though it is
+				// active: a client that stalls mid-headers must not
+				// block Shutdown when no ReadTimeout is set. The
+				// negated deadline marks this state in idleConnTime.
+				// Once the headers are read the connection is waited
+				// for like any other, even while its body is still
+				// arriving. A plain store is enough here: the claim
+				// check above already set the timestamp to zero, and
+				// closeIdleConns skips zero, so Shutdown cannot have
+				// claimed the connection in between.
+				idleConnTime.Store(-firstRequestDeadline)
 			}
 
+			if err == nil {
+				// Reading Headers.
+				//
+				// If we have pipeline response in the outgoing buffer,
+				// we only want to try and read the next headers once.
+				// If we have to wait for the next request we flush the
+				// outgoing buffer first so it doesn't have to wait.
+				if bw != nil && bw.Buffered() > 0 {
+					err = ctx.Request.Header.readLoop(br, false)
+					if err == ErrNeedMore {
+						err = bw.Flush()
+						if err != nil {
+							break
+						}
+
+						err = ctx.Request.Header.Read(br)
+					}
+				} else {
+					err = ctx.Request.Header.Read(br)
+				}
+			}
+
+			if connRequestNum == 1 {
+				// The first header read has returned, successfully or
+				// with a parse error: from here on the connection is
+				// waited for like any other active connection, even
+				// while its body is still being read or while the
+				// error response is being written. If Shutdown claimed
+				// the connection while the headers were being read,
+				// reading them still succeeded from the buffer, so the
+				// claim is detected here and the handler (or the error
+				// response) is not run for this request.
+				if !idleConnTime.CompareAndSwap(-firstRequestDeadline, 0) {
+					err = net.ErrClosed
+				}
+			}
+
+			if err == nil {
+				err = ctx.Request.Header.prepareRequestHost()
+			}
 			if err == nil {
 				if onHdrRecv := s.HeaderReceived; onHdrRecv != nil {
 					reqConf := onHdrRecv(&ctx.Request.Header)
@@ -2809,9 +2872,10 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		// Preserve connectionClose if already set (e.g., by ExpectHandler).
 		connectionClose = connectionClose || ctx.Request.Header.ConnectionClose()
 
-		// Remember the request version before ctx may be replaced with a
-		// fresh one below, whose request defaults to HTTP/1.1.
+		// Remember the request version and method before a timeout can
+		// replace ctx with a fresh one.
 		isHTTP11 = ctx.Request.Header.IsHTTP11()
+		isHead := ctx.IsHead()
 
 		if serverNameLine != nil {
 			ctx.Response.Header.setServerDefault(serverNameLine)
@@ -2863,7 +2927,6 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			ctx.time = reqTime
 			timeoutResponse.CopyTo(&ctx.Response)
 
-			oldCtx.deadlineUpdatesDisabled.Store(true)
 			oldCtx.deadlineMu.Lock()
 			if oldCtx.handlerReadDeadlineSet {
 				ctx.handlerReadDeadlineSet = true
@@ -2876,7 +2939,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			oldCtx.deadlineMu.Unlock()
 		}
 
-		if ctx.IsHead() {
+		if isHead {
 			ctx.Response.SkipBody = true
 		}
 
@@ -2950,8 +3013,21 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 			if bw == nil {
 				bw = acquireWriter(ctx)
 			}
+			bodyStream := ctx.Response.bodyStream
 			if err = writeResponse(ctx, bw); err != nil {
+				if cs, ok := bodyStream.(*compressedBodyStream); ok && cs.r != nil {
+					// The compressor may still read the request body or parse
+					// upstream trailers into the response header.
+					// Return so the connection closes and unblocks network reads.
+					go s.releaseAfterCompression(cs.done, br, ctx, reqStream)
+					br, ctx, reqStream = nil, nil, nil
+				}
 				break
+			}
+
+			// A response reader may finish successfully after a request framing error.
+			if reqStream != nil && reqStream.failed && hijackHandler == nil {
+				connectionClose = true
 			}
 
 			// Draining an unread streamed body may block waiting for the client.
@@ -3062,6 +3138,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 		ctx.Response.KeepBodyBuffer = false
 		ctx.Request.Reset()
 		ctx.Response.Reset()
+		ctx.remoteAddr = nil
 		if ctx.s != nil {
 			keepBodyBuffer := !ctx.s.ReduceMemoryUsage
 			ctx.Request.keepBodyBuffer = keepBodyBuffer
@@ -3085,7 +3162,7 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	if bw != nil {
 		releaseWriter(s, bw)
 	}
-	if hijackHandler == nil {
+	if ctx != nil && hijackHandler == nil {
 		s.releaseCtx(ctx)
 	}
 	// Release the stream of the last request if the loop ended before doing
@@ -3104,6 +3181,17 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	s.idleConnsMu.Unlock()
 
 	return err
+}
+
+func (s *Server) releaseAfterCompression(done <-chan struct{}, br *bufio.Reader, ctx *RequestCtx, reqStream *requestStream) {
+	<-done
+	if br != nil {
+		releaseReader(s, br)
+	}
+	s.releaseCtx(ctx)
+	if reqStream != nil {
+		releaseRequestStream(reqStream)
+	}
 }
 
 func (s *Server) setState(nc net.Conn, state ConnState) {
@@ -3544,7 +3632,10 @@ func (s *Server) writeErrorResponse(bw *bufio.Writer, ctx *RequestCtx, serverNam
 var idleConnTimePool sync.Pool
 
 // idleConnClaimedByShutdown is the idle timestamp closeIdleConns swaps in
-// for a connection it closes.
+// for a connection it closes. It doubles as the claim marker the serving
+// goroutine checks: idle times are unix seconds (negated while the first
+// request's headers are being read), so no real timestamp can collide
+// with it.
 const idleConnClaimedByShutdown = -1
 
 func (s *Server) closeIdleConns() {
@@ -3552,14 +3643,34 @@ func (s *Server) closeIdleConns() {
 	now := time.Now().Unix()
 	for c, ict := range s.idleConns {
 		t := ict.Load()
-		// Claim the connection before closing it: serveConn claims it by
-		// swapping in 0 when a request arrives, and the first claim wins.
-		if t != 0 && now-t >= 0 && ict.CompareAndSwap(t, idleConnClaimedByShutdown) {
-			_ = c.Close()
-			// Don't recycle ict: the connection's own goroutine still holds it
-			// and stores into it, so only that goroutine may return it.
-			delete(s.idleConns, c)
+		switch {
+		case t == 0 || t == idleConnClaimedByShutdown:
+			// The connection is handled or waited for, or Shutdown
+			// has already claimed it.
+			continue
+		case t < 0:
+			// The connection is still reading its first request's
+			// headers: it becomes closable once the accept-time
+			// grace in the negated timestamp has passed, like a
+			// connection that sent nothing.
+			if now < -t {
+				continue
+			}
+		case now < t:
+			continue
 		}
+		// Claim the connection before closing it: if its serving
+		// goroutine concurrently moves it out of the closable state,
+		// the CAS fails and the connection is left alone. In
+		// particular, a first request whose headers were fully read
+		// between the load above and this claim still gets handled.
+		if !ict.CompareAndSwap(t, idleConnClaimedByShutdown) {
+			continue
+		}
+		_ = c.Close()
+		// Don't recycle ict: the connection's own goroutine still holds it
+		// and stores into it, so only that goroutine may return it.
+		delete(s.idleConns, c)
 	}
 	s.idleConnsMu.Unlock()
 }

@@ -26,7 +26,7 @@ func (c *Conn) Write(ctx context.Context, typ MessageType, p []byte) error {
 		return err
 	}
 	deadline := after(c.cfg.writeTimeout)
-	if err := c.acquire(c.msgMu, ctx, deadline); err != nil {
+	if err := c.acquire(ctx, c.msgMu, deadline); err != nil {
 		return err
 	}
 	defer c.msgMu.release()
@@ -39,11 +39,11 @@ func (c *Conn) Write(ctx context.Context, typ MessageType, p []byte) error {
 // writeCompressed sends p compressed as one frame. It compresses under
 // frameMu, so that the dictionary only ever holds what the peer received.
 func (c *Conn) writeCompressed(ctx context.Context, op byte, fin bool, p []byte, deadline time.Time) error {
-	if err := c.acquire(c.frameMu, ctx, deadline); err != nil {
+	if err := c.acquire(ctx, c.frameMu, deadline); err != nil {
 		return err
 	}
 	defer c.frameMu.release()
-	out := getBuf(maxFrameHeader + len(p))
+	out := getBuf(min(maxFrameHeader+len(p), readChunkSize)) // Grown as the output requires.
 	out.b = out.b[:maxFrameHeader]
 	c.compress(out, p, fin)
 	err := c.sendBuffered(ctx, op, fin, out.b, deadline)
@@ -55,7 +55,7 @@ func (c *Conn) writeCompressed(ctx context.Context, op byte, fin bool, p []byte,
 // writeBuffered sends one frame from buf, whose payload follows maxFrameHeader
 // bytes of header space.
 func (c *Conn) writeBuffered(ctx context.Context, op byte, fin bool, buf []byte, deadline time.Time) error {
-	if err := c.acquire(c.frameMu, ctx, deadline); err != nil {
+	if err := c.acquire(ctx, c.frameMu, deadline); err != nil {
 		return err
 	}
 	defer c.frameMu.release()
@@ -84,16 +84,17 @@ func (c *Conn) writeData(ctx context.Context, op byte, fin bool, p []byte, deadl
 	return err
 }
 
-// Writer returns a writer for one message of type typ. Data is buffered and
-// sent in fragments; a write larger than the buffer goes out as a fragment of
-// its own, and Close sends what is left as the last one. Only one writer is
-// open at a time: Write and further Writer calls block until it is closed,
-// which a failed write also does.
+// Writer returns a writer for one message of type typ; ctx also bounds the
+// frames its Write and Close calls send. Data is buffered and sent in
+// fragments; a write larger than the buffer goes out as a fragment of its own,
+// and Close sends what is left as the last one. Only one writer is open at a
+// time: [Conn.Write] and further Writer calls block until it is closed, which
+// a failed write also does.
 func (c *Conn) Writer(ctx context.Context, typ MessageType) (io.WriteCloser, error) {
 	if typ != MessageText && typ != MessageBinary {
 		return nil, errBadMessageType
 	}
-	if err := c.acquire(c.msgMu, ctx, after(c.cfg.writeTimeout)); err != nil {
+	if err := c.acquire(ctx, c.msgMu, after(c.cfg.writeTimeout)); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -104,8 +105,6 @@ func (c *Conn) Writer(ctx context.Context, typ MessageType) (io.WriteCloser, err
 	buf.b = buf.b[:maxFrameHeader]
 	return &msgWriter{c: c, ctx: ctx, buf: buf, op: byte(typ)}, nil // #nosec G115
 }
-
-const writerBufSize = maxFrameHeader + writeChunkSize
 
 // msgWriter buffers a message as frame header space followed by payload; buf
 // is nil once it is closed.
@@ -195,6 +194,7 @@ func (w *msgWriter) sent(err error) error {
 	return err
 }
 
+// finish closes w with err and releases msgMu.
 func (w *msgWriter) finish(err error) {
 	w.err = err
 	putBuf(w.buf)
@@ -208,7 +208,7 @@ func (w *msgWriter) finish(err error) {
 // writeControl sends a control frame, bounded by WriteTimeout.
 func (c *Conn) writeControl(ctx context.Context, op byte, p []byte) error {
 	deadline := after(c.cfg.writeTimeout)
-	if err := c.acquire(c.frameMu, ctx, deadline); err != nil {
+	if err := c.acquire(ctx, c.frameMu, deadline); err != nil {
 		return err
 	}
 	defer c.frameMu.release()
@@ -224,7 +224,7 @@ func (c *Conn) reply(ctx context.Context, op byte, p []byte) error {
 	if !deadline.After(now) {
 		return os.ErrDeadlineExceeded
 	}
-	if err := c.acquire(c.frameMu, ctx, deadline); err != nil {
+	if err := c.acquire(ctx, c.frameMu, deadline); err != nil {
 		return err
 	}
 	defer c.frameMu.release()
@@ -234,7 +234,7 @@ func (c *Conn) reply(ctx context.Context, op byte, p []byte) error {
 // writeRaw writes one data frame, given whole or as a header and a payload
 // for a vectored write.
 func (c *Conn) writeRaw(ctx context.Context, frame, payload []byte, deadline time.Time) error {
-	if err := c.acquire(c.frameMu, ctx, deadline); err != nil {
+	if err := c.acquire(ctx, c.frameMu, deadline); err != nil {
 		return err
 	}
 	defer c.frameMu.release()

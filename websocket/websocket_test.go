@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
-	"iter"
 	"net"
-	"os"
+	"runtime"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -137,543 +138,15 @@ func readErr(t *testing.T, c *Conn) error {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	_, _, err := c.Read(ctx)
+	typ, p, err := c.Read(ctx)
 	if err == nil {
 		t.Fatal("expected read error")
 	}
+	if typ != 0 || p != nil {
+		t.Fatalf("Read returned type %d and %d bytes with %v", typ, len(p), err)
+	}
 	return err
 }
-
-func TestEcho(t *testing.T) {
-	ts := startServer(t, nil, echo)
-	c := ts.dial(t, nil)
-	ctx := t.Context()
-	for _, typ := range []MessageType{MessageText, MessageBinary} {
-		for _, n := range []int{0, 1, 125, 126, 127, 65535, 65536, 200000} {
-			msg := bytes.Repeat([]byte("x"), n)
-			if err := c.Write(ctx, typ, msg); err != nil {
-				t.Fatalf("write %d: %v", n, err)
-			}
-			gotTyp, got, err := c.Read(ctx)
-			if err != nil {
-				t.Fatalf("read %d: %v", n, err)
-			}
-			if gotTyp != typ || !bytes.Equal(got, msg) {
-				t.Fatalf("size %d: got type %d, %d bytes", n, gotTyp, len(got))
-			}
-		}
-	}
-}
-
-func TestWriterReader(t *testing.T) {
-	ts := startServer(t, nil, func(c *Conn) {
-		ctx := c.Context()
-		for {
-			typ, r, err := c.Reader(ctx)
-			if err != nil {
-				return
-			}
-			w, err := c.Writer(ctx, typ)
-			if err != nil {
-				return
-			}
-			buf := make([]byte, 1000)
-			for {
-				n, err := r.Read(buf)
-				if n > 0 {
-					if _, werr := w.Write(buf[:n]); werr != nil {
-						return
-					}
-				}
-				if err != nil {
-					break
-				}
-			}
-			if err := w.Close(); err != nil {
-				return
-			}
-		}
-	})
-	c := ts.dial(t, nil)
-	ctx := t.Context()
-	msg := bytes.Repeat([]byte("0123456789"), 3000)
-	w, err := c.Writer(ctx, MessageBinary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, chunk := range [][]byte{msg[:10], msg[10:5000], msg[5000:]} {
-		if _, err := w.Write(chunk); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	typ, r, err := c.Reader(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if typ != MessageBinary || !bytes.Equal(got, msg) {
-		t.Fatalf("got type %d, %d bytes", typ, len(got))
-	}
-	if n, err := r.Read(make([]byte, 1)); n != 0 || err != io.EOF {
-		t.Fatalf("read after EOF: %d, %v", n, err)
-	}
-	if _, err := w.Write([]byte("x")); !errors.Is(err, errWriterClosed) {
-		t.Fatalf("write after close: %v", err)
-	}
-}
-
-func TestReaderDiscard(t *testing.T) {
-	ts := startServer(t, nil, func(c *Conn) {
-		ctx := c.Context()
-		_, r, err := c.Reader(ctx)
-		if err != nil {
-			return
-		}
-		if _, err := r.Read(make([]byte, 10)); err != nil {
-			return
-		}
-		_, p, err := c.Read(ctx)
-		if err != nil {
-			return
-		}
-		_ = c.Write(ctx, MessageText, p)
-	})
-	c := ts.dial(t, nil)
-	ctx := t.Context()
-	w, err := c.Writer(ctx, MessageText)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.Write(bytes.Repeat([]byte("a"), 20000)); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Write(ctx, MessageText, []byte("second")); err != nil {
-		t.Fatal(err)
-	}
-	_, got, err := c.Read(ctx)
-	if err != nil || string(got) != "second" {
-		t.Fatalf("got %q, %v", got, err)
-	}
-}
-
-func TestPing(t *testing.T) {
-	ts := startServer(t, nil, echo)
-	c := ts.dial(t, nil)
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	err := c.Ping(ctx)
-	cancel()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("ping without reader: %v", err)
-	}
-	c.CloseRead(t.Context())
-	for range 3 {
-		if err := c.Ping(t.Context()); err != nil {
-			t.Fatalf("ping: %v", err)
-		}
-	}
-}
-
-func TestCloseByClient(t *testing.T) {
-	errCh := make(chan error, 1)
-	ts := startServer(t, nil, func(c *Conn) {
-		_, _, err := c.Read(c.Context())
-		errCh <- err
-	})
-	c := ts.dial(t, nil)
-	if err := c.Close(t.Context(), StatusNormalClosure, "bye"); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	if err := c.Close(t.Context(), StatusNormalClosure, ""); err != nil {
-		t.Fatalf("second close: %v", err)
-	}
-	err := <-errCh
-	if ce, ok := errors.AsType[CloseError](err); !ok || ce.Code != StatusNormalClosure || ce.Reason != "bye" {
-		t.Fatalf("server read: %v", err)
-	}
-	<-c.Context().Done()
-	if CloseStatus(context.Cause(c.Context())) != StatusNormalClosure {
-		t.Fatalf("cause: %v", context.Cause(c.Context()))
-	}
-	if err := c.Write(t.Context(), MessageText, nil); CloseStatus(err) != StatusNormalClosure {
-		t.Fatalf("write after close: %v", err)
-	}
-}
-
-func TestCloseByServer(t *testing.T) {
-	ts := startServer(t, nil, func(c *Conn) {
-		_ = c.Close(c.Context(), StatusGoingAway, "shutting down")
-	})
-	c := ts.dial(t, nil)
-	err := readErr(t, c)
-	if CloseStatus(err) != StatusGoingAway || !strings.Contains(err.Error(), "shutting down") {
-		t.Fatalf("read: %v", err)
-	}
-}
-
-func TestCloseWhileReading(t *testing.T) {
-	ts := startServer(t, nil, echo)
-	c := ts.dial(t, nil)
-	errCh := make(chan error, 1)
-	go func() {
-		_, _, err := c.Read(c.Context())
-		errCh <- err
-	}()
-	ts.awaitRead(t)
-	if err := c.Close(t.Context(), StatusNormalClosure, ""); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	if err := <-errCh; CloseStatus(err) != StatusNormalClosure {
-		t.Fatalf("read: %v", err)
-	}
-}
-
-func TestCloseTimeout(t *testing.T) {
-	took := make(chan time.Duration, 1)
-	ts := startServer(t, &AcceptOptions{ReadTimeout: 50 * time.Millisecond}, func(c *Conn) {
-		start := time.Now()
-		_ = c.Close(c.Context(), StatusNormalClosure, "")
-		took <- time.Since(start)
-	})
-	c := ts.dial(t, nil)
-	// The client does not answer; the server must give up after ReadTimeout.
-	if d := <-took; d > time.Second {
-		t.Fatalf("server close took %v", d)
-	}
-	if err := readErr(t, c); CloseStatus(err) != StatusNormalClosure {
-		t.Fatalf("client read: %v", err)
-	}
-}
-
-func TestCloseRead(t *testing.T) {
-	ts := startServer(t, nil, func(c *Conn) {
-		ctx := c.Context()
-		c.CloseRead(ctx)
-		for i := range 3 {
-			if err := c.Write(ctx, MessageText, []byte{byte('a' + i)}); err != nil {
-				return
-			}
-		}
-		<-ctx.Done()
-	})
-	c := ts.dial(t, nil)
-	ctx := t.Context()
-	for i := range 3 {
-		_, p, err := c.Read(ctx)
-		if err != nil || string(p) != string(rune('a'+i)) {
-			t.Fatalf("read %d: %q, %v", i, p, err)
-		}
-	}
-	if err := c.Write(ctx, MessageText, []byte("unexpected")); err != nil {
-		t.Fatal(err)
-	}
-	if err := readErr(t, c); CloseStatus(err) != StatusPolicyViolation {
-		t.Fatalf("read: %v", err)
-	}
-}
-
-func TestMaxMessageSize(t *testing.T) {
-	ts := startServer(t, &AcceptOptions{MaxMessageSize: 10}, echo)
-	c := ts.dial(t, nil)
-	ctx := t.Context()
-	if err := c.Write(ctx, MessageBinary, make([]byte, 10)); err != nil {
-		t.Fatal(err)
-	}
-	if _, p, err := c.Read(ctx); err != nil || len(p) != 10 {
-		t.Fatalf("read: %d, %v", len(p), err)
-	}
-	w, err := c.Writer(ctx, MessageBinary)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := w.Write(make([]byte, 6)); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := c.Read(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Write(ctx, MessageBinary, make([]byte, 11)); err != nil {
-		t.Fatal(err)
-	}
-	if err := readErr(t, c); CloseStatus(err) != StatusMessageTooBig {
-		t.Fatalf("read: %v", err)
-	}
-}
-
-func TestReadTimeout(t *testing.T) {
-	errCh := make(chan error, 1)
-	ts := startServer(t, &AcceptOptions{ReadTimeout: 50 * time.Millisecond}, func(c *Conn) {
-		_, _, err := c.Read(c.Context())
-		errCh <- err
-	})
-	c := ts.dial(t, nil)
-	if err := <-errCh; !errors.Is(err, os.ErrDeadlineExceeded) {
-		t.Fatalf("server read: %v", err)
-	}
-	if err := readErr(t, c); CloseStatus(err) != StatusAbnormalClosure {
-		t.Fatalf("client read: %v", err)
-	}
-}
-
-func TestContextCancel(t *testing.T) {
-	ts := startServer(t, nil, echo)
-	c := ts.dial(t, nil)
-	ctx, cancel := context.WithCancel(t.Context())
-	errCh := make(chan error, 1)
-	go func() {
-		_, _, err := c.Read(ctx)
-		errCh <- err
-	}()
-	ts.awaitRead(t)
-	cancel()
-	if err := <-errCh; !errors.Is(err, context.Canceled) {
-		t.Fatalf("read: %v", err)
-	}
-	<-c.Context().Done()
-	if _, _, err := c.Read(t.Context()); !errors.Is(err, context.Canceled) {
-		t.Fatalf("read after close: %v", err)
-	}
-}
-
-func TestCloseNowUnblocksRead(t *testing.T) {
-	ts := startServer(t, nil, echo)
-	c := ts.dial(t, nil)
-	errCh := make(chan error, 1)
-	go func() {
-		_, _, err := c.Read(c.Context())
-		errCh <- err
-	}()
-	ts.awaitRead(t)
-	if err := c.CloseNow(); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-errCh; !errors.Is(err, net.ErrClosed) {
-		t.Fatalf("read: %v", err)
-	}
-}
-
-func TestHandlerReturnClosesConn(t *testing.T) {
-	ts := startServer(t, nil, func(*Conn) {})
-	c := ts.dial(t, nil)
-	if err := readErr(t, c); CloseStatus(err) != StatusAbnormalClosure {
-		t.Fatalf("read: %v", err)
-	}
-}
-
-func TestConcurrentWrites(t *testing.T) {
-	ts := startServer(t, nil, echo)
-	c := ts.dial(t, nil)
-	ctx := t.Context()
-	const writers, perWriter = 4, 50
-	var wg sync.WaitGroup
-	for i := range writers {
-		wg.Go(func() {
-			for range perWriter {
-				msg := bytes.Repeat([]byte{byte('a' + i)}, 100+i*1000)
-				if err := c.Write(ctx, MessageBinary, msg); err != nil {
-					t.Errorf("write: %v", err)
-					return
-				}
-			}
-		})
-	}
-	for range writers * perWriter {
-		_, p, err := c.Read(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(p) == 0 || bytes.Count(p, p[:1]) != len(p) {
-			t.Fatalf("corrupted message of %d bytes", len(p))
-		}
-	}
-	wg.Wait()
-}
-
-func TestWriterBlocksWrite(t *testing.T) {
-	ts := startServer(t, nil, echo)
-	c := ts.dial(t, nil)
-	ctx := t.Context()
-	w, err := c.Writer(ctx, MessageText)
-	if err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan struct{})
-	go func() {
-		_ = c.Write(ctx, MessageText, []byte("second"))
-		close(done)
-	}()
-	time.Sleep(20 * time.Millisecond)
-	if _, err := w.Write([]byte("first")); err != nil {
-		t.Fatal(err)
-	}
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	<-done
-	for _, want := range []string{"first", "second"} {
-		_, p, err := c.Read(ctx)
-		if err != nil || string(p) != want {
-			t.Fatalf("got %q, %v; want %q", p, err, want)
-		}
-	}
-}
-
-func TestReadWriteAllocs(t *testing.T) {
-	if raceEnabled {
-		t.Skip("sync.Pool drops entries at random under the race detector")
-	}
-	ts := startServer(t, nil, echo)
-	c := ts.dial(t, nil)
-	ctx := c.Context()
-	msg := bytes.Repeat([]byte("m"), 300)
-	roundTrip := func() {
-		if err := c.Write(ctx, MessageBinary, msg); err != nil {
-			t.Fatal(err)
-		}
-		if _, p, err := c.Read(ctx); err != nil || len(p) != len(msg) {
-			t.Fatalf("read: %d, %v", len(p), err)
-		}
-	}
-	for range 10 {
-		roundTrip()
-	}
-	if n := testing.AllocsPerRun(1000, roundTrip); n > 0 {
-		t.Fatalf("%v allocations per round trip", n)
-	}
-}
-
-func TestSubprotocol(t *testing.T) {
-	got := make(chan string, 1)
-	ts := startServer(t, &AcceptOptions{Subprotocols: []string{"b", "a"}}, func(c *Conn) {
-		got <- c.Subprotocol()
-	})
-	c := ts.dial(t, &DialOptions{Subprotocols: []string{"a", "b"}})
-	if c.Subprotocol() != "b" || <-got != "b" {
-		t.Fatalf("client got %q", c.Subprotocol())
-	}
-	c = ts.dial(t, &DialOptions{Subprotocols: []string{"c"}})
-	if c.Subprotocol() != "" || <-got != "" {
-		t.Fatalf("client got %q", c.Subprotocol())
-	}
-}
-
-func TestDialHeaders(t *testing.T) {
-	seen := make(chan string, 1)
-	ts2 := startServer(t, &AcceptOptions{CheckOrigin: func(ctx *fasthttp.RequestCtx) bool {
-		seen <- string(ctx.Request.Header.Peek("X-Token")) + "|" + string(ctx.Host()) +
-			"|" + string(ctx.Request.Header.Peek(fasthttp.HeaderOrigin))
-		return true
-	}}, echo)
-	var h fasthttp.RequestHeader
-	h.Set("X-Token", "secret")
-	h.Set(fasthttp.HeaderOrigin, "https://other.example")
-	h.SetHost("override.example")
-	var resp fasthttp.Response
-	c := ts2.dial(t, &DialOptions{Header: &h, Response: &resp})
-	if s := <-seen; s != "secret|override.example|https://other.example" {
-		t.Fatalf("server saw %q", s)
-	}
-	if resp.StatusCode() != fasthttp.StatusSwitchingProtocols || !resp.Header.ConnectionUpgrade() {
-		t.Fatalf("response: %d", resp.StatusCode())
-	}
-	_ = c.CloseNow()
-}
-
-func TestDialRejected(t *testing.T) {
-	ln := fasthttputil.NewInmemoryListener()
-	t.Cleanup(func() { ln.Close() })
-	s := &fasthttp.Server{Handler: func(ctx *fasthttp.RequestCtx) {
-		switch string(ctx.Path()) {
-		case "/forbidden":
-			ctx.Error("no", fasthttp.StatusForbidden)
-		case "/badaccept":
-			ctx.SetStatusCode(fasthttp.StatusSwitchingProtocols)
-			ctx.Response.Header.Set(fasthttp.HeaderUpgrade, "websocket")
-			ctx.Response.Header.Set(fasthttp.HeaderConnection, "Upgrade")
-			ctx.Response.Header.Set(fasthttp.HeaderSecWebSocketAccept, "AAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-			ctx.Hijack(func(net.Conn) {})
-		case "/protocol":
-			ctx.SetStatusCode(fasthttp.StatusSwitchingProtocols)
-			ctx.Response.Header.Set(fasthttp.HeaderUpgrade, "websocket")
-			ctx.Response.Header.Set(fasthttp.HeaderConnection, "Upgrade")
-			key := ctx.Request.Header.Peek(fasthttp.HeaderSecWebSocketKey)
-			ctx.Response.Header.SetBytesV(fasthttp.HeaderSecWebSocketAccept, appendAcceptKey(nil, key))
-			ctx.Response.Header.Set(fasthttp.HeaderSecWebSocketProtocol, "nope")
-			ctx.Hijack(func(net.Conn) {})
-		}
-	}}
-	go func() { _ = s.Serve(ln) }()
-	dial := func(string) (net.Conn, error) { return ln.Dial() }
-	var resp fasthttp.Response
-	for _, tc := range []struct {
-		url, want string
-		status    int
-	}{
-		{"ws://h/forbidden", "status 403", fasthttp.StatusForbidden},
-		{"ws://h/badaccept", "Sec-WebSocket-Accept", fasthttp.StatusSwitchingProtocols},
-		{"ws://h/protocol", "subprotocol", fasthttp.StatusSwitchingProtocols},
-		{"ftp://h/", "scheme", 0},
-		{"ws:///nohost", "host", 0},
-	} {
-		resp.Reset()
-		_, err := Dial(t.Context(), tc.url, &DialOptions{Dial: dial, Response: &resp})
-		if err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Fatalf("%s: got %v, want %q", tc.url, err, tc.want)
-		}
-		if tc.status != 0 && resp.StatusCode() != tc.status {
-			t.Fatalf("%s: status %d", tc.url, resp.StatusCode())
-		}
-	}
-}
-
-func TestBadArguments(t *testing.T) {
-	ts := startServer(t, nil, echo)
-	c := ts.dial(t, nil)
-	ctx := t.Context()
-	if err := c.Write(ctx, 3, nil); !errors.Is(err, errBadMessageType) {
-		t.Fatalf("write: %v", err)
-	}
-	if _, err := c.Writer(ctx, 0); !errors.Is(err, errBadMessageType) {
-		t.Fatalf("writer: %v", err)
-	}
-	if err := c.Close(ctx, StatusNoStatusReceived, ""); !errors.Is(err, errBadCloseCode) {
-		t.Fatalf("close 1005: %v", err)
-	}
-	if err := c.Close(ctx, StatusNormalClosure, strings.Repeat("r", 124)); !errors.Is(err, errBadCloseCode) {
-		t.Fatalf("close long reason: %v", err)
-	}
-	if err := c.Close(ctx, 4000, strings.Repeat("r", 123)); err != nil {
-		t.Fatalf("close 4000: %v", err)
-	}
-}
-
-// hijackLike stands in for fasthttp's hijacked conn: UnsafeConn exposes the
-// socket and Close is a no-op unless keep is set, as with KeepHijackedConns.
-type hijackLike struct {
-	net.Conn
-
-	keep bool
-}
-
-func (h hijackLike) Close() error {
-	if h.keep {
-		return h.Conn.Close()
-	}
-	return nil
-}
-
-func (h hijackLike) UnsafeConn() net.Conn { return h.Conn }
 
 func tcpPair(t *testing.T) (srv, cli net.Conn) {
 	t.Helper()
@@ -771,45 +244,323 @@ func rawServer(t *testing.T, respond func(accept string) string) (addr string, r
 	return ln.Addr().String(), req
 }
 
-// rawHandshake sends req to the server and returns the response head.
-func rawHandshake(t *testing.T, addr, req string) string {
-	t.Helper()
-	nc, err := net.Dial("tcp", addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer nc.Close()
-	if _, err := io.WriteString(nc, req); err != nil {
-		t.Fatal(err)
-	}
-	_ = nc.SetReadDeadline(time.Now().Add(5 * time.Second))
-	head, err := readHead(bufio.NewReader(nc))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return head
-}
-
-// slowCloseConn takes a while to close, like a TLS connection sending its
-// close_notify alert to a peer that does not read.
-type slowCloseConn struct {
+// rawPeer is the raw side of a pipe whose other end is a server Conn.
+type rawPeer struct {
 	net.Conn
+
+	t *testing.T
 }
 
-func (c *slowCloseConn) Close() error {
-	time.Sleep(300 * time.Millisecond)
+func newRawServer(t *testing.T, cfg connConfig) (*Conn, *rawPeer) {
+	t.Helper()
+	pc := fasthttputil.NewPipeConns()
+	c := newConn(pc.Conn1(), pc.Conn1(), false, "", cfg)
+	t.Cleanup(func() { _ = c.CloseNow(); pc.Conn2().Close() })
+	return c, &rawPeer{Conn: pc.Conn2(), t: t}
+}
+
+func (p *rawPeer) send(frames ...[]byte) {
+	p.t.Helper()
+	if _, err := p.Write(bytes.Join(frames, nil)); err != nil {
+		p.t.Fatalf("raw write: %v", err)
+	}
+}
+
+// readFrame reads one unmasked frame: its two header bytes and its payload.
+func readFrame(r io.Reader) (hdr [2]byte, payload []byte, err error) {
+	if _, err = io.ReadFull(r, hdr[:]); err != nil {
+		return hdr, nil, err
+	}
+	n := uint64(hdr[1] & 0x7f)
+	switch n {
+	case 126:
+		var ext [2]byte
+		if _, err = io.ReadFull(r, ext[:]); err != nil {
+			return hdr, nil, err
+		}
+		n = uint64(binary.BigEndian.Uint16(ext[:]))
+	case 127:
+		var ext [8]byte
+		if _, err = io.ReadFull(r, ext[:]); err != nil {
+			return hdr, nil, err
+		}
+		n = binary.BigEndian.Uint64(ext[:])
+	}
+	payload = make([]byte, n)
+	_, err = io.ReadFull(r, payload)
+	return hdr, payload, err
+}
+
+// recv reads one unmasked frame and returns its first header byte and payload.
+func (p *rawPeer) recv() (byte, []byte) {
+	p.t.Helper()
+	_ = p.SetReadDeadline(time.Now().Add(5 * time.Second))
+	h, payload, err := readFrame(p)
+	if err != nil {
+		p.t.Fatalf("raw read: %v", err)
+	}
+	return h[0], payload
+}
+
+func (p *rawPeer) expectClose(code StatusCode) {
+	p.t.Helper()
+	h, payload := p.recv()
+	if h != 0x80|opClose || len(payload) < 2 || StatusCode(binary.BigEndian.Uint16(payload)) != code {
+		p.t.Fatalf("got frame %#x %q, want close %d", h, payload, code)
+	}
+}
+
+func frame(op byte, fin bool, payload []byte) []byte {
+	return appendFrame(nil, op, fin, true, payload)
+}
+
+// okHead is a 101 response up to its Sec-WebSocket-Accept field.
+const okHead = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+
+// gatedConn reports when a Read or Write has entered the transport, holds its
+// return until released and counts calls made after the connection was retired.
+type gatedConn struct {
+	net.Conn
+
+	readEntered, writeEntered   chan struct{}
+	readReturned, writeReturned chan struct{}
+	readExit, writeExit         chan struct{}
+	retired                     atomic.Bool
+	late                        atomic.Int64
+}
+
+func newGatedConn(nc net.Conn) *gatedConn {
+	return &gatedConn{
+		Conn: nc, readEntered: make(chan struct{}, 1), writeEntered: make(chan struct{}, 1),
+		readReturned: make(chan struct{}, 1), writeReturned: make(chan struct{}, 1),
+		readExit: make(chan struct{}), writeExit: make(chan struct{}),
+	}
+}
+
+func (c *gatedConn) touch(ch chan struct{}) {
+	if c.retired.Load() {
+		c.late.Add(1)
+	}
+	signal(ch)
+}
+
+func (c *gatedConn) Read(p []byte) (int, error) {
+	c.touch(c.readEntered)
+	n, err := c.Conn.Read(p)
+	c.touch(c.readReturned)
+	<-c.readExit
+	return n, err
+}
+
+func (c *gatedConn) Write(p []byte) (int, error) {
+	c.touch(c.writeEntered)
+	n, err := c.Conn.Write(p)
+	c.touch(c.writeReturned)
+	<-c.writeExit
+	return n, err
+}
+
+func (c *gatedConn) Close() error                  { c.touch(nil); return c.Conn.Close() }
+func (c *gatedConn) SetDeadline(d time.Time) error { c.touch(nil); return c.Conn.SetDeadline(d) }
+func (c *gatedConn) SetReadDeadline(d time.Time) error {
+	c.touch(nil)
+	return c.Conn.SetReadDeadline(d)
+}
+
+func (c *gatedConn) SetWriteDeadline(d time.Time) error {
+	c.touch(nil)
+	return c.Conn.SetWriteDeadline(d)
+}
+
+// closeCountConn exposes its socket as fasthttp's hijacked conn does and
+// counts its own Close calls.
+type closeCountConn struct {
+	net.Conn
+
+	closed *atomic.Int32
+}
+
+func (c closeCountConn) UnsafeConn() net.Conn { return c.Conn }
+
+func (c closeCountConn) Close() error {
+	c.closed.Add(1)
 	return c.Conn.Close()
 }
 
-// fieldCount returns the last value of the header field and how often it
-// occurs, matching the name ASCII case-insensitively.
-func fieldCount(all iter.Seq2[[]byte, []byte], name string) ([]byte, int) {
-	var value []byte
-	n := 0
-	for k, v := range all {
-		if equalFoldASCII(k, name) {
-			value, n = trimHTTPSpace(v), n+1
+// pastDeadlineContext reports a deadline that has passed while its timer has
+// not fired yet.
+type pastDeadlineContext struct {
+	context.Context //nolint:containedctx // Overrides Deadline only.
+}
+
+func (pastDeadlineContext) Deadline() (time.Time, bool) { return aLongTimeAgo, true }
+
+// readPlainFrame reads one frame a server sent, which carries neither RSV
+// bits nor a mask, and returns its opcode, FIN flag and payload.
+func readPlainFrame(r io.Reader) (op byte, fin bool, payload []byte, err error) {
+	h, payload, err := readFrame(r)
+	if err != nil {
+		return 0, false, nil, err
+	}
+	if h[0]&0x70 != 0 {
+		return 0, false, nil, fmt.Errorf("rsv bits set: %#x", h[0])
+	}
+	if h[1]&0x80 != 0 {
+		return 0, false, nil, errors.New("server frame is masked")
+	}
+	return h[0] & 0x0f, h[0]&0x80 != 0, payload, nil
+}
+
+// fillPattern fills p so that every byte follows from the first one.
+func fillPattern(p []byte, tag byte) {
+	for i := range p {
+		p[i] = tag + byte(i)
+	}
+}
+
+func patternPayload(n int) []byte {
+	b := make([]byte, n)
+	fillPattern(b, byte(n))
+	return b
+}
+
+func checkPattern(p []byte) error {
+	for i := range p {
+		if p[i] != p[0]+byte(i) {
+			return fmt.Errorf("byte %d of %d is %#x, want %#x", i, len(p), p[i], p[0]+byte(i))
 		}
 	}
-	return value, n
+	return nil
+}
+
+func TestEcho(t *testing.T) {
+	ts := startServer(t, nil, echo)
+	c := ts.dial(t, nil)
+	ctx := t.Context()
+	for _, typ := range []MessageType{MessageText, MessageBinary} {
+		for _, n := range []int{0, 1, 125, 126, 127, 65535, 65536, 200000} {
+			msg := bytes.Repeat([]byte("x"), n)
+			if err := c.Write(ctx, typ, msg); err != nil {
+				t.Fatalf("write %d: %v", n, err)
+			}
+			gotTyp, got, err := c.Read(ctx)
+			if err != nil {
+				t.Fatalf("read %d: %v", n, err)
+			}
+			if gotTyp != typ || !bytes.Equal(got, msg) {
+				t.Fatalf("size %d: got type %d, %d bytes", n, gotTyp, len(got))
+			}
+		}
+	}
+}
+
+func TestWriterReader(t *testing.T) {
+	ts := startServer(t, nil, func(c *Conn) {
+		ctx := c.Context()
+		for {
+			typ, r, err := c.Reader(ctx)
+			if err != nil {
+				return
+			}
+			w, err := c.Writer(ctx, typ)
+			if err != nil {
+				return
+			}
+			buf := make([]byte, 1000)
+			for {
+				n, err := r.Read(buf)
+				if n > 0 {
+					if _, werr := w.Write(buf[:n]); werr != nil {
+						return
+					}
+				}
+				if err != nil {
+					break
+				}
+			}
+			if err := w.Close(); err != nil {
+				return
+			}
+		}
+	})
+	c := ts.dial(t, nil)
+	ctx := t.Context()
+	msg := bytes.Repeat([]byte("0123456789"), 3000)
+	w, err := c.Writer(ctx, MessageBinary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, chunk := range [][]byte{msg[:10], msg[10:5000], msg[5000:]} {
+		if _, err := w.Write(chunk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	typ, r, err := c.Reader(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if typ != MessageBinary || !bytes.Equal(got, msg) {
+		t.Fatalf("got type %d, %d bytes", typ, len(got))
+	}
+	if n, err := r.Read(make([]byte, 1)); n != 0 || err != io.EOF {
+		t.Fatalf("read after EOF: %d, %v", n, err)
+	}
+	if _, err := w.Write([]byte("x")); !errors.Is(err, errWriterClosed) {
+		t.Fatalf("write after close: %v", err)
+	}
+}
+
+func TestReadWriteAllocs(t *testing.T) {
+	if raceEnabled {
+		t.Skip("sync.Pool drops entries at random under the race detector")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("the count covers the process, where another test's log line resolves the time zone")
+	}
+	ts := startServer(t, nil, echo)
+	c := ts.dial(t, nil)
+	ctx := c.Context()
+	msg := bytes.Repeat([]byte("m"), 300)
+	roundTrip := func() {
+		if err := c.Write(ctx, MessageBinary, msg); err != nil {
+			t.Fatal(err)
+		}
+		if _, p, err := c.Read(ctx); err != nil || len(p) != len(msg) {
+			t.Fatalf("read: %d, %v", len(p), err)
+		}
+	}
+	for range 10 {
+		roundTrip()
+	}
+	if n := testing.AllocsPerRun(1000, roundTrip); n > 0 {
+		t.Fatalf("%v allocations per round trip", n)
+	}
+}
+
+func TestBadArguments(t *testing.T) {
+	ts := startServer(t, nil, echo)
+	c := ts.dial(t, nil)
+	ctx := t.Context()
+	if err := c.Write(ctx, 3, nil); !errors.Is(err, errBadMessageType) {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := c.Writer(ctx, 0); !errors.Is(err, errBadMessageType) {
+		t.Fatalf("writer: %v", err)
+	}
+	if err := c.Close(ctx, StatusNoStatusReceived, ""); !errors.Is(err, errBadCloseCode) {
+		t.Fatalf("close 1005: %v", err)
+	}
+	if err := c.Close(ctx, StatusNormalClosure, strings.Repeat("r", 124)); !errors.Is(err, errBadCloseCode) {
+		t.Fatalf("close long reason: %v", err)
+	}
+	if err := c.Close(ctx, 4000, strings.Repeat("r", 123)); err != nil {
+		t.Fatalf("close 4000: %v", err)
+	}
 }

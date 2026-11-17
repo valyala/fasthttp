@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 	"sync"
 	"time"
 )
@@ -370,7 +371,11 @@ func (c *Cookie) String() string {
 //
 // WriteTo implements io.WriterTo interface.
 func (c *Cookie) WriteTo(w io.Writer) (int64, error) {
-	n, err := w.Write(c.Cookie())
+	b := c.Cookie()
+	n, err := w.Write(b)
+	if err == nil && n != len(b) {
+		err = io.ErrShortWrite
+	}
 	return int64(n), err
 }
 
@@ -552,16 +557,19 @@ func getCookieKey(dst, src []byte) []byte {
 }
 
 func appendRequestCookieBytes(dst []byte, cookies []argsKV) []byte {
-	for i, n := 0, len(cookies); i < n; i++ {
+	for i := range cookies {
+		if i != 0 {
+			dst = append(dst, ';', ' ')
+		}
 		kv := &cookies[i]
 		if len(kv.key) > 0 {
 			dst = append(dst, kv.key...)
 			dst = append(dst, '=')
+		} else if slices.Contains(kv.value, '=') {
+			// Preserve the empty name if the value could be read as a name=value pair.
+			dst = append(dst, '=')
 		}
 		dst = append(dst, kv.value...)
-		if i+1 < n {
-			dst = append(dst, ';', ' ')
-		}
 	}
 	return dst
 }
