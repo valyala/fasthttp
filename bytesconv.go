@@ -390,13 +390,18 @@ func ParseUfloat(buf []byte) (float64, error) {
 	// We believe that the conservative approach is to call strconv.ParseFloat.
 	// https://github.com/valyala/fasthttp/pull/1865
 	res, err := strconv.ParseFloat(b2s(buf), 64)
-	if res < 0 {
+	if math.Signbit(res) {
 		return -1, errors.New("negative input is invalid")
 	}
 	if err != nil {
 		return -1, err
 	}
-	return res, err
+	// strconv.ParseFloat also accepts "nan" and "inf", which are not
+	// unsigned floats a caller can use.
+	if math.IsNaN(res) || math.IsInf(res, 0) {
+		return -1, errors.New("NaN or infinity is invalid")
+	}
+	return res, nil
 }
 
 var (

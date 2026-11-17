@@ -3,6 +3,7 @@ package fasthttp
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"html"
 	"net"
 	"net/http"
@@ -529,6 +530,11 @@ func TestParseUfloatSuccess(t *testing.T) {
 	testParseUfloatSuccess(t, "1.23456789123456789987654321", 1.23456789123456789987654321)
 	testParseUfloatSuccess(t, "340282346638528859811704183484516925440", 340282346638528859811704183484516925440)
 	testParseUfloatSuccess(t, "00000000000000000001", 1)
+
+	// finite values strconv.ParseFloat accepts
+	testParseUfloatSuccess(t, "+1.5", 1.5)
+	testParseUfloatSuccess(t, "1_000", 1000)
+	testParseUfloatSuccess(t, "0x1p-2", 0.25)
 }
 
 func TestParseUfloatError(t *testing.T) {
@@ -562,6 +568,25 @@ func TestParseUfloatError(t *testing.T) {
 	// negative number
 	testParseUfloatError(t, "-1")
 	testParseUfloatError(t, "-Inf")
+	testParseUfloatError(t, "-0")
+
+	// NaN and infinity, which strconv.ParseFloat accepts
+	testParseUfloatError(t, "Inf")
+	testParseUfloatError(t, "+Inf")
+	testParseUfloatError(t, "infinity")
+	testParseUfloatError(t, "NaN")
+}
+
+func TestParseUfloatSyntaxError(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseUfloat([]byte("abc"))
+	if _, ok := errors.AsType[*strconv.NumError](err); !ok {
+		t.Fatalf("expecting *strconv.NumError, got %T: %v", err, err)
+	}
+	if !errors.Is(err, strconv.ErrSyntax) {
+		t.Fatalf("expecting strconv.ErrSyntax, got %v", err)
+	}
 }
 
 func testParseUfloatError(t *testing.T, s string) {
