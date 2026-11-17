@@ -129,6 +129,9 @@ func TestResponseVectoredWriteMatchesBuffered(t *testing.T) {
 }
 
 func TestResponseVectoredWriteOverUnixSocket(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a read on a unix socket can miss the peer's close there")
+	}
 	t.Parallel()
 
 	body := bytes.Repeat([]byte("u"), 40000)
