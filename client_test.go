@@ -9188,6 +9188,19 @@ func TestHostClientQueuedReplacementConn_MaxConnWaitTimeout(t *testing.T) {
 	}
 }
 
+type readSignalReader struct {
+	io.ReadCloser
+	signalOnce sync.Once
+	signaled   chan struct{}
+}
+
+func (r *readSignalReader) Read(p []byte) (int, error) {
+	r.signalOnce.Do(func() {
+		close(r.signaled)
+	})
+	return r.ReadCloser.Read(p)
+}
+
 func TestClientDoContext_StreamUploadCancellation_BlockedPipe(t *testing.T) {
 	t.Parallel()
 
@@ -9217,11 +9230,17 @@ func TestClientDoContext_StreamUploadCancellation_BlockedPipe(t *testing.T) {
 	}
 
 	pr, pw := io.Pipe()
+	readStarted := make(chan struct{})
+	uploadReader := &readSignalReader{
+		ReadCloser: pr,
+		signaled:   readStarted,
+	}
+
 	var req Request
 	var resp Response
 	req.SetRequestURI("http://inmemory/upload")
 	req.Header.SetMethod("POST")
-	req.SetBodyStream(pr, -1)
+	req.SetBodyStream(uploadReader, -1)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	errCh := make(chan error, 1)
@@ -9229,13 +9248,11 @@ func TestClientDoContext_StreamUploadCancellation_BlockedPipe(t *testing.T) {
 		errCh <- client.DoContext(ctx, &req, &resp)
 	}()
 
-	// Wait until DoContext has acquired the only connection slot.
-	deadline := time.Now().Add(3 * time.Second)
-	for client.ConnsCount() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("DoContext never acquired connection slot")
-		}
-		time.Sleep(time.Millisecond)
+	// Wait until DoContext has connected, written headers, and blocked inside upload body Read.
+	select {
+	case <-readStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("DoContext never entered upload body Read")
 	}
 
 	// Cancel context while pipe read is still blocked.
@@ -9263,7 +9280,7 @@ func TestClientDoContext_StreamUploadCancellation_BlockedPipe(t *testing.T) {
 	}
 
 	// Connection slot must be released.
-	deadline = time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(3 * time.Second)
 	for client.ConnsCount() != 0 {
 		if time.Now().After(deadline) {
 			t.Fatalf("connection slot was not freed: %d", client.ConnsCount())
