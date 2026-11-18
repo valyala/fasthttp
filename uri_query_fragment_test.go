@@ -2,6 +2,8 @@ package fasthttp
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -26,6 +28,7 @@ func TestURIUpdateQueryFragment(t *testing.T) {
 				{"?next=2#", "next=2", ""},
 				{"?#", "", ""},
 				{"?next=a%23b#new?x=y", "next=a%23b", "new?x=y"},
+				{"?", "", oldHash},             // Bare empty query intentionally retains its delimiter.
 				{"?next=2", "next=2", oldHash}, // Preserve existing no-fragment behavior.
 			} {
 				t.Run(fmt.Sprintf("%s/%s/%s", update.name, oldHash, tc.ref), func(t *testing.T) {
@@ -125,4 +128,77 @@ func TestURIUpdateEmptyDelimitersLifecycle(t *testing.T) {
 	u.CopyTo(&copied)
 	copied.Reset()
 	check("http:///")
+}
+
+func TestURIParseExplicitEmptyQuery(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ input, want string }{
+		{"http://example.com/path?", "/path?"},
+		{"http://example.com/path?#new", "/path?"},
+		{"/path?", "/path?"},
+		{"/path?#new", "/path?"},
+		{"/path#fragment?", "/path"},
+		{"/path?key=value", "/path?key=value"},
+		{"/path", "/path"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			var u URI
+			u.Update("http://example.com/previous?#old")
+			if err := u.Parse([]byte("example.com"), []byte(tc.input)); err != nil {
+				t.Fatal(err)
+			}
+			if got := string(u.RequestURI()); got != tc.want {
+				t.Fatalf("request target = %q, want %q", got, tc.want)
+			}
+			u.QueryArgs()
+			if got := string(u.RequestURI()); got != tc.want {
+				t.Fatalf("cached request target = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClientRedirectExplicitEmptyQuery(t *testing.T) {
+	t.Parallel()
+	for _, location := range []string{"?", "?#new", "?#"} {
+		t.Run(location, func(t *testing.T) {
+			// A real server observes the serialized request targets, not a copied URI.
+			targets := make(chan string, 3)
+			var hops int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				targets <- r.RequestURI
+				hops++
+				switch hops {
+				case 1:
+					w.Header().Set("Location", location)
+					w.WriteHeader(http.StatusFound)
+				case 2:
+					w.Header().Set("Location", "#last")
+					w.WriteHeader(http.StatusFound)
+				default:
+					w.WriteHeader(http.StatusNoContent)
+				}
+			}))
+			defer server.Close()
+			client := &Client{}
+			defer client.CloseIdleConnections()
+			code, _, err := client.Get(nil, server.URL+"/path?old=1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != StatusNoContent {
+				t.Fatalf("status = %d", code)
+			}
+			for i, want := range []string{"/path?old=1", "/path?", "/path?"} {
+				select {
+				case got := <-targets:
+					if got != want {
+						t.Errorf("hop %d target = %q, want %q", i+1, got, want)
+					}
+				default:
+					t.Fatalf("missing hop %d", i+1)
+				}
+			}
+		})
+	}
 }
