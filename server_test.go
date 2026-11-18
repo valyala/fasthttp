@@ -573,6 +573,7 @@ func TestRequestCtxRedirect(t *testing.T) {
 	testRequestCtxRedirect(t, "http://qqq/path?old=1#before", "?next=2#", "http://qqq/path?next=2#")
 	testRequestCtxRedirect(t, "http://qqq/path?old=1#before", "?#new", "http://qqq/path?#new")
 	testRequestCtxRedirect(t, "http://qqq/path?old=1#before", "?#", "http://qqq/path?#")
+	testRequestCtxRedirect(t, "http://qqq/path?old=1", "?", "http://qqq/path?")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "?\r\nInjected: yes", "http://qqq/foo/bar?  Injected: yes")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "x.html", "http://qqq/foo/x.html")
 	testRequestCtxRedirect(t, "http://qqq/foo/bar?baz=111", "x.html?a=1", "http://qqq/foo/x.html?a=1")
