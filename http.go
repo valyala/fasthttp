@@ -2804,6 +2804,9 @@ func vectorWriter(c net.Conn) io.Writer {
 	case *perIPConn:
 		// It only overrides Close.
 		return vectorWriter(c.Conn)
+	case *proxyConn:
+		// It only overrides Close and the addresses.
+		return vectorWriter(c.Conn)
 	}
 	return nil
 }

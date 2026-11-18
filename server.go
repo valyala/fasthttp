@@ -371,6 +371,8 @@ type Server struct {
 
 	rejectedRequestsCount atomic.Uint32
 
+	proxyPerIPErrorTime atomic.Int64
+
 	// Whether to disable keep-alive connections.
 	//
 	// The server will close all the incoming connections after sending
@@ -385,6 +387,33 @@ type Server struct {
 	//
 	// By default tcp keep-alive connections are disabled.
 	TCPKeepalive bool
+
+	// ProxyProtocol makes the server require a PROXY protocol header,
+	// version 1 or 2, at the start of every connection, ahead of any TLS
+	// handshake. A connection that doesn't send a valid one within 5 seconds,
+	// or within ReadTimeout if that is shorter, is closed.
+	//
+	// The addresses the header carries replace the connection's own:
+	// RequestCtx.RemoteAddr and RequestCtx.LocalAddr return them, and
+	// MaxConnsPerIP counts connections under them. A LOCAL command, an
+	// UNKNOWN line and addresses other than TCP over IPv4 or IPv6 leave the
+	// connection's own addresses in place.
+	//
+	// When Serve reports StateNew to ConnState the header is not read yet:
+	// that callback, and StateClosed when no valid header follows, see the
+	// proxy's address, as the TLSConfig callbacks do. Nothing may have been
+	// read from a connection the listener or ServeConn hands over, and no
+	// TLS handshake begun on it. A TLS connection must have a NetConn
+	// method, as *tls.Conn has, for the header to be read from under it.
+	//
+	// A connection over the Concurrency limit is closed before its header
+	// is read, with no response and whatever its MaxConnsPerIP count.
+	//
+	// Enable it only on listeners that just trusted proxies can reach: a
+	// client connecting directly chooses the address it is seen under.
+	//
+	// See https://www.haproxy.org/download/3.4/doc/proxy-protocol.txt
+	ProxyProtocol bool
 
 	// Aggressively reduces memory usage at the cost of higher CPU usage
 	// if set to true.
@@ -2298,6 +2327,12 @@ func acceptConn(s *Server, ln net.Listener, lastPerIPErrorTime *time.Time) (net.
 			}
 		}
 
+		if s.ProxyProtocol {
+			// MaxConnsPerIP counts under the address in the header, which
+			// the serving goroutine reads.
+			return newProxyConn(c), nil
+		}
+
 		if s.MaxConnsPerIP > 0 {
 			pic := wrapPerIPConn(s, c)
 			if pic == nil {
@@ -2336,7 +2371,8 @@ func (s *Server) rejectConn(c net.Conn, statusCode int, msg string) {
 	// A rejected TLS connection may not have completed its handshake. Writing
 	// an HTTP response would wait for the client's ClientHello, potentially
 	// blocking the accept loop or the ServeConn caller indefinitely.
-	if _, isTLS := conn.(tlsConn); !isTLS {
+	// Nothing may be sent ahead of a PROXY protocol header either.
+	if _, isTLS := conn.(tlsConn); !isTLS && !s.ProxyProtocol {
 		s.writeFastError(c, statusCode, msg)
 	}
 	c.Close()
@@ -2372,7 +2408,9 @@ var (
 //
 // ServeConn closes c before returning.
 func (s *Server) ServeConn(c net.Conn) error {
-	if s.MaxConnsPerIP > 0 {
+	if s.ProxyProtocol {
+		c = newProxyConn(c)
+	} else if s.MaxConnsPerIP > 0 {
 		pic := wrapPerIPConn(s, c)
 		if pic == nil {
 			return ErrPerIPConnLimit
@@ -2505,6 +2543,20 @@ func (s *Server) serveConnCounted(c net.Conn, countConcurrency bool) error {
 	defer s.serveConnCleanup(countConcurrency)
 	if countConcurrency {
 		s.concurrency.Add(1)
+	}
+
+	if s.ProxyProtocol {
+		if err := s.acceptProxyHeader(c); err != nil {
+			switch {
+			case err == io.EOF:
+				return nil
+			case err == ErrPerIPConnLimit && countConcurrency:
+				// Serve has no caller to return the error to.
+				s.logProxyPerIPLimit(c)
+				return nil
+			}
+			return err
+		}
 	}
 
 	proto, err := s.getNextProto(c)
