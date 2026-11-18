@@ -58,7 +58,7 @@ type URI struct {
 	password        []byte
 	parsedQueryArgs bool
 
-	// Preserve explicit empty delimiters in query-only references. An empty
+	// Preserve an explicit empty query through parsing and updates. An empty
 	// fragment in a redirect prevents inheritance of the original fragment.
 	forceQuery bool
 	forceHash  bool
@@ -411,6 +411,7 @@ func (u *URI) parse(host, uri []byte, isTLS bool) error {
 			u.queryString = append(u.queryString, b[queryIndex+1:fragmentIndex]...)
 			u.hash = append(u.hash, b[fragmentIndex+1:]...)
 		}
+		u.forceQuery = len(u.queryString) == 0
 		return nil
 	}
 
