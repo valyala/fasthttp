@@ -58,6 +58,11 @@ type URI struct {
 	password        []byte
 	parsedQueryArgs bool
 
+	// Preserve explicit empty delimiters in query-only references. An empty
+	// fragment in a redirect prevents inheritance of the original fragment.
+	forceQuery bool
+	forceHash  bool
+
 	// parseHost memo: identical authority bytes parse to identical output.
 	// Survives Reset so keep-alive requests skip the host validation. Only
 	// authorities that could be real are kept, so a huge Host is not retained.
@@ -90,6 +95,8 @@ func (u *URI) CopyTo(dst *URI) {
 
 	u.queryArgs.CopyTo(&dst.queryArgs)
 	dst.parsedQueryArgs = u.parsedQueryArgs
+	dst.forceQuery = u.forceQuery
+	dst.forceHash = u.forceHash
 	dst.DisablePathNormalizing = u.DisablePathNormalizing
 
 	// fullURI and requestURI shouldn't be copied, since they are created
@@ -105,11 +112,13 @@ func (u *URI) Hash() []byte {
 
 // SetHash sets URI hash.
 func (u *URI) SetHash(hash string) {
+	u.forceHash = false
 	u.hash = append(u.hash[:0], hash...)
 }
 
 // SetHashBytes sets URI hash.
 func (u *URI) SetHashBytes(hash []byte) {
+	u.forceHash = false
 	u.hash = append(u.hash[:0], hash...)
 }
 
@@ -161,12 +170,14 @@ func (u *URI) QueryString() []byte {
 
 // SetQueryString sets URI query string.
 func (u *URI) SetQueryString(queryString string) {
+	u.forceQuery = false
 	u.queryString = append(u.queryString[:0], queryString...)
 	u.parsedQueryArgs = false
 }
 
 // SetQueryStringBytes sets URI query string.
 func (u *URI) SetQueryStringBytes(queryString []byte) {
+	u.forceQuery = false
 	u.queryString = append(u.queryString[:0], queryString...)
 	u.parsedQueryArgs = false
 }
@@ -250,6 +261,8 @@ func (u *URI) Reset() {
 	u.host = u.host[:0]
 	u.queryArgs.Reset()
 	u.parsedQueryArgs = false
+	u.forceQuery = false
+	u.forceHash = false
 	u.DisablePathNormalizing = false
 
 	// There is no need in u.fullURI = u.fullURI[:0], since full uri
@@ -860,11 +873,11 @@ func (u *URI) requestURIBytes(disablePathNormalizing bool) []byte {
 // made through QueryArgs, if there is a query.
 func (u *URI) appendQueryString(dst []byte) []byte {
 	if u.parsedQueryArgs {
-		if u.queryArgs.Len() > 0 {
+		if u.queryArgs.Len() > 0 || u.forceQuery {
 			dst = append(dst, '?')
 			dst = u.queryArgs.AppendBytes(dst)
 		}
-	} else if len(u.queryString) > 0 {
+	} else if len(u.queryString) > 0 || u.forceQuery {
 		dst = append(dst, '?')
 		dst = append(dst, u.queryString...)
 	}
@@ -992,9 +1005,11 @@ func (u *URI) updateBytes(newURI, buf []byte) ([]byte, error) {
 		if n := bytes.IndexByte(newURI, '#'); n >= 0 {
 			u.SetQueryStringBytes(newURI[1:n])
 			u.SetHashBytes(newURI[n+1:])
+			u.forceHash = n == len(newURI)-1
 		} else {
 			u.SetQueryStringBytes(newURI[1:])
 		}
+		u.forceQuery = len(u.queryString) == 0
 		return append(buf[:0], u.FullURI()...), nil
 	case '#':
 		// update only hash
@@ -1029,7 +1044,7 @@ func (u *URI) FullURI() []byte {
 func (u *URI) AppendBytes(dst []byte) []byte {
 	dst = u.appendSchemeHost(dst)
 	dst = append(dst, u.RequestURI()...)
-	if len(u.hash) > 0 {
+	if len(u.hash) > 0 || u.forceHash {
 		dst = append(dst, '#')
 		dst = append(dst, u.hash...)
 	}
