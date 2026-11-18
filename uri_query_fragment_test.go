@@ -54,7 +54,7 @@ func TestURIUpdateQueryFragment(t *testing.T) {
 					}
 					var req Request
 					req.SetURI(&u)
-					if got := strings.SplitN(req.String(), "\r\n", 2)[0]; got != "GET "+requestURI+" HTTP/1.1" {
+					if got, _, _ := strings.Cut(req.String(), "\r\n"); got != "GET "+requestURI+" HTTP/1.1" {
 						t.Errorf("wire request line = %q, want GET %s HTTP/1.1", got, requestURI)
 					}
 					fullURI := "http://example.com" + requestURI
