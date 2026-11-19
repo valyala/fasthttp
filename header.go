@@ -438,14 +438,38 @@ func (h *ResponseHeader) SetContentEncodingBytes(contentEncoding []byte) {
 
 // addVaryBytes add value to the 'Vary' header if it's not included.
 func (h *ResponseHeader) addVaryBytes(value []byte) {
-	v := h.peek(strVary)
-	if len(v) == 0 {
-		// 'Vary' is not set
-		h.SetBytesV(HeaderVary, value)
-	} else if !bytes.Contains(v, value) {
-		// 'Vary' is set and not contains target value
-		h.SetBytesV(HeaderVary, append(append(v, ','), value...))
-	} // else: 'Vary' is set and contains target value
+	for _, v := range h.peekAll(strVary) {
+		if bytes.Contains(v, value) {
+			// 'Vary' is set and already contains target value
+			return
+		}
+	}
+	// 'Vary' is not set or does not contain target value.
+	// Extend the first 'Vary' line in place instead of going through Set:
+	// Set replaces later duplicates, which would drop every 'Vary' line
+	// after the first one. See https://github.com/valyala/fasthttp/issues/2595
+	for i := range h.h {
+		if bytes.Equal(h.h[i].key, strVary) {
+			if len(h.h[i].value) == 0 {
+				h.h[i].value = append(h.h[i].value[:0], value...)
+			} else {
+				h.h[i].value = append(append(h.h[i].value, ','), value...)
+			}
+			return
+		}
+	}
+	for i := range h.trailerH {
+		if bytes.Equal(h.trailerH[i].key, strVary) {
+			if len(h.trailerH[i].value) == 0 {
+				h.trailerH[i].value = append(h.trailerH[i].value[:0], value...)
+			} else {
+				h.trailerH[i].value = append(append(h.trailerH[i].value, ','), value...)
+			}
+			return
+		}
+	}
+	// 'Vary' is not set
+	h.SetBytesV(HeaderVary, value)
 }
 
 // Server returns Server header value.

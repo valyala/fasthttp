@@ -1,10 +1,12 @@
 package fasthttp
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -232,4 +234,87 @@ func testConcurrent(concurrency int, f func() error) error {
 		}
 	}
 	return nil
+}
+
+// varyTokens returns the set of comma-separated tokens found in every
+// 'Vary' header line.
+func varyTokens(h *ResponseHeader) map[string]bool {
+	tokens := make(map[string]bool)
+	for _, v := range h.PeekAll("Vary") {
+		for _, token := range strings.Split(string(v), ",") {
+			token = strings.TrimSpace(token)
+			if len(token) > 0 {
+				tokens[token] = true
+			}
+		}
+	}
+	return tokens
+}
+
+func TestCompressHandlerKeepsMultipleVaryLines(t *testing.T) {
+	t.Parallel()
+
+	body := strings.Repeat("vary header test ", 100)
+	handler := CompressHandler(func(ctx *RequestCtx) {
+		ctx.Response.Header.Add("Vary", "Origin")
+		ctx.Response.Header.Add("Vary", "Cookie")
+		ctx.SetBodyString(body)
+	})
+
+	var ctx RequestCtx
+	wire := "GET / HTTP/1.1\r\nHost: example.com\r\nAccept-Encoding: gzip\r\n\r\n"
+	if err := ctx.Request.Read(bufio.NewReader(strings.NewReader(wire))); err != nil {
+		t.Fatal(err)
+	}
+	handler(&ctx)
+
+	var response Response
+	if err := response.Read(bufio.NewReader(bytes.NewBufferString(ctx.Response.String()))); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(response.Header.ContentEncoding()); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+	tokens := varyTokens(&response.Header)
+	for _, want := range []string{"Origin", "Cookie", "Accept-Encoding"} {
+		if !tokens[want] {
+			t.Fatalf("Vary tokens = %v, missing %q", tokens, want)
+		}
+	}
+	decoded, err := response.BodyGunzip()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(decoded) != body {
+		t.Fatal("decompressed response differs from the original body")
+	}
+}
+
+func TestFSServeFileCompressedKeepsMultipleVaryLines(t *testing.T) {
+	t.Parallel()
+
+	var ctx RequestCtx
+	ctx.Init(&Request{}, nil, nil)
+	ctx.Request.SetRequestURI("http://foobar.com/baz")
+	ctx.Request.Header.Set(HeaderAcceptEncoding, "gzip")
+	ctx.Response.Header.Add("Vary", "Origin")
+	ctx.Response.Header.Add("Vary", "Cookie")
+	ServeFS(&ctx, fsTestFilesystem, "fs.go")
+
+	var resp Response
+	if err := resp.Read(bufio.NewReader(bytes.NewBufferString(ctx.Response.String()))); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode() != StatusOK {
+		t.Fatalf("unexpected status code: %d. Expecting %d", resp.StatusCode(), StatusOK)
+	}
+	if got := string(resp.Header.ContentEncoding()); got != "gzip" {
+		t.Fatalf("Content-Encoding = %q, want gzip", got)
+	}
+	tokens := varyTokens(&resp.Header)
+	for _, want := range []string{"Origin", "Cookie", "Accept-Encoding"} {
+		if !tokens[want] {
+			t.Fatalf("Vary tokens = %v, missing %q", tokens, want)
+		}
+	}
 }
