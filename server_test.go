@@ -4671,9 +4671,11 @@ func TestServerErrorHandler(t *testing.T) {
 	}
 }
 
-// An ErrorHandler has to be able to tell the requests that RFC 9110 and RFC 9112
-// have answered with 501 (Not Implemented) from the ones that are plain bad
-// requests, with or without SecureErrorLogMessage.
+// An ErrorHandler has to be able to tell the requests that RFC 9112, section 6.1
+// has answered with 501 (Not Implemented), the ones with a transfer coding that
+// is not known, from the ones that are plain bad requests, with or without
+// SecureErrorLogMessage. A method that is not a token is a plain bad request
+// (RFC 9112, section 3) that the error still names.
 func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 	t.Parallel()
 
@@ -4681,16 +4683,22 @@ func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 		name       string
 		raw        string
 		statusCode int
+		// matches is what errors.Is has to match on the error that the
+		// ErrorHandler gets, if not nil.
+		matches error
 	}{
 		{
-			name:       "unsupported method",
+			// The method is a token, and a parenthesis is not a character of one.
+			name:       "method that is not a token",
 			raw:        "BAD(METHOD / HTTP/1.1\r\nHost: example.com\r\n\r\n",
-			statusCode: StatusNotImplemented,
+			statusCode: StatusBadRequest,
+			matches:    ErrUnsupportedRequestMethod,
 		},
 		{
 			name:       "unknown transfer coding",
 			raw:        "POST / HTTP/1.1\r\nHost: example.com\r\nTransfer-Encoding: gzip, chunked\r\n\r\n",
 			statusCode: StatusNotImplemented,
+			matches:    ErrUnknownTransferCoding,
 		},
 		{
 			name:       "unknown transfer coding with an empty list element",
@@ -4823,12 +4831,14 @@ func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/secure=%v", tt.name, secure), func(t *testing.T) {
 				t.Parallel()
 
+				var handlerErr error
 				s := &Server{
 					Handler:               func(ctx *RequestCtx) {},
 					SecureErrorLogMessage: secure,
 					ErrorHandler: func(ctx *RequestCtx, err error) {
+						handlerErr = err
 						// What a framework does with the error.
-						if errors.Is(err, ErrUnsupportedRequestMethod) || errors.Is(err, ErrUnknownTransferCoding) {
+						if errors.Is(err, ErrUnknownTransferCoding) {
 							ctx.SetStatusCode(StatusNotImplemented)
 							return
 						}
@@ -4848,6 +4858,56 @@ func TestServerErrorHandlerHeaderErrorKinds(t *testing.T) {
 				}
 				if got := resp.StatusCode(); got != tt.statusCode {
 					t.Fatalf("unexpected status code %d. Expecting %d", got, tt.statusCode)
+				}
+				if tt.matches != nil && !errors.Is(handlerErr, tt.matches) {
+					t.Fatalf("the ErrorHandler got %q, which doesn't match %q", handlerErr, tt.matches)
+				}
+			})
+		}
+	}
+}
+
+// A method that is a token (RFC 9112, section 3) reaches the Handler, whether
+// the application knows it or not: Server doesn't reject it, and the application
+// decides if it answers 501 (Not Implemented, RFC 9110, section 9.1), with or
+// without SecureErrorLogMessage.
+func TestServerExtensionMethodReachesHandler(t *testing.T) {
+	t.Parallel()
+
+	for _, method := range []string{"BREW", "brew", "M-SEARCH", "PURGE", "X", "A.B~C"} {
+		for _, secure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/secure=%v", method, secure), func(t *testing.T) {
+				t.Parallel()
+
+				var methods []string
+				s := &Server{
+					Handler: func(ctx *RequestCtx) {
+						methods = append(methods, string(ctx.Method()))
+						// The application doesn't implement the method, and says so.
+						ctx.SetStatusCode(StatusNotImplemented)
+					},
+					SecureErrorLogMessage: secure,
+					ErrorHandler: func(ctx *RequestCtx, err error) {
+						t.Errorf("unexpected call of the ErrorHandler with %q", err)
+						ctx.SetStatusCode(StatusBadRequest)
+					},
+				}
+
+				rw := &readWriter{}
+				rw.r.WriteString(method + " / HTTP/1.1\r\nHost: example.com\r\n\r\n")
+				if err := s.ServeConn(rw); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+
+				if len(methods) != 1 || methods[0] != method {
+					t.Fatalf("the Handler got the methods %q. Expecting [%q]", methods, method)
+				}
+				var resp Response
+				if err := resp.Read(bufio.NewReader(&rw.w)); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got := resp.StatusCode(); got != StatusNotImplemented {
+					t.Fatalf("unexpected status code %d. Expecting %d, from the Handler", got, StatusNotImplemented)
 				}
 			})
 		}
@@ -4893,7 +4953,7 @@ func TestServerUnknownTransferCodingComesAfterTargetFaults(t *testing.T) {
 			Handler:               func(ctx *RequestCtx) { ctx.SetStatusCode(StatusOK) },
 			SecureErrorLogMessage: secure,
 			ErrorHandler: func(ctx *RequestCtx, err error) {
-				if errors.Is(err, ErrUnsupportedRequestMethod) || errors.Is(err, ErrUnknownTransferCoding) {
+				if errors.Is(err, ErrUnknownTransferCoding) {
 					ctx.SetStatusCode(StatusNotImplemented)
 					return
 				}

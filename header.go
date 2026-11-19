@@ -3931,6 +3931,10 @@ func (h *RequestHeader) parseFirstLine(buf []byte) (int, error) {
 			return 0, fmt.Errorf("cannot find http request method in %q", buf)
 		}
 		if !isValidMethod(b[:n]) {
+			// The method is not a token (RFC 9112, section 3), which is a 400. A
+			// method that is a token reaches the Handler, whether the application
+			// knows it or not, and the Handler decides whether to answer 501 (Not
+			// Implemented, RFC 9110, section 9.1).
 			if h.secureErrorLogMessage {
 				return 0, ErrUnsupportedRequestMethod
 			}
