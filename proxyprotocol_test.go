@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/iotest"
+	"testing/synctest"
 	"time"
 
 	"github.com/valyala/fasthttp/fasthttputil"
@@ -457,61 +458,201 @@ func TestServerProxyProtocolConcurrencyLimit(t *testing.T) {
 	}
 }
 
-// testProxyDeadlineConn sends a header and records its read deadlines.
-type testProxyDeadlineConn struct {
-	net.Conn
+// A connection over MaxConnsPerIP that doesn't read its response is given 5
+// seconds as well.
+func TestServerProxyProtocolMaxConnsPerIPDeadline(t *testing.T) {
+	t.Parallel()
 
-	r         io.Reader
-	deadlines []time.Time
+	synctest.Test(t, func(t *testing.T) {
+		// Keep the shared Date refresher out of the synctest bubble.
+		s := &Server{ProxyProtocol: true, MaxConnsPerIP: 1, NoDefaultDate: true}
+		accept := func() error {
+			server, client := net.Pipe()
+			go client.Write([]byte(testProxyV1Header)) //nolint:errcheck
+			return s.acceptProxyHeader(newProxyConn(testProxyKeptConn{server}))
+		}
+		if err := accept(); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		start := time.Now()
+		if err := accept(); err != ErrPerIPConnLimit {
+			t.Fatalf("error = %v, want %v", err, ErrPerIPConnLimit)
+		}
+		if d := time.Since(start); d != 5*time.Second {
+			t.Fatalf("the response is given %v, want %v", d, 5*time.Second)
+		}
+	})
 }
 
-func (c *testProxyDeadlineConn) Read(b []byte) (int, error) {
-	return c.r.Read(b)
+// testProxyDeadlineConn turns EOF into a read timeout while a read deadline
+// is set.
+type testProxyDeadlineConn struct {
+	readWriter
+
+	deadline time.Time
+	closed   chan struct{}
 }
 
 func (c *testProxyDeadlineConn) SetReadDeadline(t time.Time) error {
-	c.deadlines = append(c.deadlines, t)
+	c.deadline = t
 	return nil
 }
 
-// The header gets 5 seconds, or ReadTimeout if that is less, and its deadline
-// is gone once it is read.
+func (c *testProxyDeadlineConn) Read(b []byte) (int, error) {
+	n, err := c.readWriter.Read(b)
+	if err == io.EOF && !c.deadline.IsZero() {
+		err = &net.OpError{Op: "read", Err: os.ErrDeadlineExceeded}
+	}
+	return n, err
+}
+
+func (c *testProxyDeadlineConn) Close() error {
+	close(c.closed)
+	return nil
+}
+
+// A read deadline set on the connection ahead of its header holds for the
+// first request, as it does without a header.
+func TestServerProxyProtocolKeepsReadDeadline(t *testing.T) {
+	t.Parallel()
+
+	for _, proxy := range []bool{false, true} {
+		deadline := time.Now().Add(time.Hour)
+		s := &Server{
+			ProxyProtocol: proxy,
+			Logger:        &testLogger{},
+			Handler:       func(ctx *RequestCtx) {},
+			ConnState: func(c net.Conn, state ConnState) {
+				if state == StateNew {
+					c.SetReadDeadline(deadline) //nolint:errcheck
+				}
+			},
+		}
+		c := &testProxyDeadlineConn{closed: make(chan struct{})}
+		if proxy {
+			c.r.WriteString(testProxyV1Header)
+		}
+		testProxyServe(t, s, newOneConnListener(c))
+		select {
+		case <-c.closed:
+		case <-time.After(testTimeout(time.Second)):
+			t.Fatalf("ProxyProtocol %v: timeout", proxy)
+		}
+
+		var resp Response
+		if err := resp.Read(bufio.NewReader(&c.w)); err != nil {
+			t.Fatalf("ProxyProtocol %v: unexpected error: %v", proxy, err)
+		}
+		if resp.StatusCode() != StatusRequestTimeout {
+			t.Fatalf("ProxyProtocol %v: status code = %d, want %d", proxy, resp.StatusCode(), StatusRequestTimeout)
+		}
+		if !c.deadline.Equal(deadline) {
+			t.Fatalf("ProxyProtocol %v: read deadline = %v, want %v", proxy, c.deadline, deadline)
+		}
+	}
+}
+
+// testProxyKeptConn is for someone else to close, as a hijacked connection is.
+type testProxyKeptConn struct {
+	net.Conn
+}
+
+func (testProxyKeptConn) Close() error {
+	return nil
+}
+
+// A header that doesn't come is given 5 seconds, or ReadTimeout if that is
+// less. A read deadline the connection already has ends the wait sooner.
 func TestServerProxyProtocolHeaderDeadline(t *testing.T) {
 	t.Parallel()
 
 	for _, tt := range []struct {
 		readTimeout time.Duration
+		deadline    time.Duration
+		tls         bool
+		kept        bool
 		want        time.Duration
 	}{
 		{readTimeout: 0, want: 5 * time.Second},
 		{readTimeout: time.Minute, want: 5 * time.Second},
 		{readTimeout: time.Second, want: time.Second},
+		{deadline: 2 * time.Second, want: 2 * time.Second},
+		{tls: true, want: 5 * time.Second},
+		{kept: true, want: 5 * time.Second},
 	} {
-		c := &testProxyDeadlineConn{r: strings.NewReader(testProxyV1Header)}
-		s := &Server{ProxyProtocol: true, ReadTimeout: tt.readTimeout}
-		start := time.Now()
-		err := s.acceptProxyHeader(newProxyConn(c))
-		end := time.Now()
-		if err != nil {
-			t.Fatalf("ReadTimeout %v: unexpected error: %v", tt.readTimeout, err)
-		}
-		if len(c.deadlines) != 2 || !c.deadlines[1].IsZero() {
-			t.Fatalf("ReadTimeout %v: read deadlines = %v, want one for the header and none after it",
-				tt.readTimeout, c.deadlines)
-		}
-		if d := c.deadlines[0]; d.Before(start.Add(tt.want)) || d.After(end.Add(tt.want)) {
-			t.Fatalf("ReadTimeout %v: the header is given %v, want %v", tt.readTimeout, d.Sub(start), tt.want)
-		}
+		synctest.Test(t, func(t *testing.T) {
+			server, client := net.Pipe()
+			defer client.Close()
+			defer server.Close()
+			if tt.deadline > 0 {
+				server.SetReadDeadline(time.Now().Add(tt.deadline)) //nolint:errcheck
+			}
+			c := server
+			if tt.tls {
+				c = tls.Server(server, &tls.Config{})
+			}
+			if tt.kept {
+				c = testProxyKeptConn{server}
+			}
+			s := &Server{ProxyProtocol: true, ReadTimeout: tt.readTimeout}
+			start := time.Now()
+			err := s.acceptProxyHeader(newProxyConn(c))
+			if !errors.Is(err, os.ErrDeadlineExceeded) {
+				t.Fatalf("%+v: error = %v, want %v", tt, err, os.ErrDeadlineExceeded)
+			}
+			if d := time.Since(start); d != tt.want {
+				t.Fatalf("%+v: the header is given %v", tt, d)
+			}
+		})
 	}
+}
 
-	// A header that doesn't come ends the connection, which Shutdown waits for.
-	server, client := net.Pipe()
-	defer client.Close()
-	defer server.Close()
-	s := &Server{ProxyProtocol: true, ReadTimeout: time.Millisecond}
-	if err := s.acceptProxyHeader(newProxyConn(server)); !errors.Is(err, os.ErrDeadlineExceeded) {
-		t.Fatalf("error = %v, want %v", err, os.ErrDeadlineExceeded)
-	}
+// testProxyCloseConn reads until it is being closed, which lasts until release
+// is closed. It has no deadlines.
+type testProxyCloseConn struct {
+	net.Conn
+
+	closing chan struct{}
+	release chan struct{}
+}
+
+func (c *testProxyCloseConn) Read([]byte) (int, error) {
+	<-c.closing
+	return 0, net.ErrClosed
+}
+
+func (c *testProxyCloseConn) SetReadDeadline(time.Time) error {
+	return nil
+}
+
+func (c *testProxyCloseConn) Close() error {
+	close(c.closing)
+	<-c.release
+	return nil
+}
+
+// The header timeout is reported after Close returns.
+func TestServerProxyProtocolHeaderDeadlineCloses(t *testing.T) {
+	t.Parallel()
+
+	synctest.Test(t, func(t *testing.T) {
+		c := &testProxyCloseConn{closing: make(chan struct{}), release: make(chan struct{})}
+		s := &Server{ProxyProtocol: true}
+		done := make(chan error, 1)
+		go func() { done <- s.acceptProxyHeader(newProxyConn(c)) }()
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		select {
+		case err := <-done:
+			close(c.release)
+			t.Fatalf("error %v reported before the connection is closed", err)
+		default:
+		}
+		close(c.release)
+		if err := <-done; !errors.Is(err, os.ErrDeadlineExceeded) {
+			t.Fatalf("error = %v, want %v", err, os.ErrDeadlineExceeded)
+		}
+	})
 }
 
 func TestProxyConnPerIP(t *testing.T) {

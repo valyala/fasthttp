@@ -175,16 +175,24 @@ func TestCloseNowUnblocksRead(t *testing.T) {
 // Closing the connection closes the socket at once, although the handler has
 // not returned.
 func TestCloseNowClosesSocketBeforeHandlerReturns(t *testing.T) {
-	release := make(chan struct{})
-	defer close(release)
-	ts := startServer(t, nil, func(c *Conn) {
-		_ = c.CloseNow()
-		<-release
-	})
-	c := ts.dial(t, nil)
-	_ = c.nc.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := c.nc.Read(make([]byte, 1)); err == nil || isTimeout(err) {
-		t.Fatalf("the socket is still open: %v", err)
+	// The server's PROXY protocol wrapper must not hide the socket.
+	for _, proxy := range []bool{false, true} {
+		t.Run("ProxyProtocol="+strconv.FormatBool(proxy), func(t *testing.T) {
+			release := make(chan struct{})
+			defer close(release)
+			ts := startServerWith(t, nil, func(c *Conn) {
+				_ = c.CloseNow()
+				<-release
+			}, func(s *fasthttp.Server) { s.ProxyProtocol = proxy })
+			if proxy {
+				ts.preface = "PROXY TCP4 192.0.2.1 192.0.2.2 1000 80\r\n"
+			}
+			c := ts.dial(t, nil)
+			_ = c.nc.SetReadDeadline(time.Now().Add(5 * time.Second))
+			if _, err := c.nc.Read(make([]byte, 1)); err == nil || isTimeout(err) {
+				t.Fatalf("the socket is still open: %v", err)
+			}
+		})
 	}
 }
 

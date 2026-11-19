@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -217,6 +218,9 @@ type proxyConn struct {
 	counter *perIPConnCounter
 	key     perIPKey
 	closed  bool
+
+	// expiring is held for a closeAfter timer until it is stopped or done.
+	expiring sync.WaitGroup
 }
 
 type netConner interface {
@@ -253,6 +257,12 @@ func (c *proxyTLSConn) NetConn() net.Conn {
 	return c.Conn.(netConner).NetConn() //nolint:forcetypeassert
 }
 
+// ProxyProtocolConn returns the connection under the wrapper, where the
+// websocket package looks for the socket.
+func (c *proxyConn) ProxyProtocolConn() net.Conn {
+	return c.Conn
+}
+
 func (c *proxyConn) RemoteAddr() net.Addr {
 	if a := c.addrs.Load(); a != nil {
 		return a.remote
@@ -282,6 +292,29 @@ func (c *proxyConn) Close() error {
 		counter.Unregister(key)
 	}
 	return err
+}
+
+// closeAfter starts a timer that in d sets the deadline of the read or write
+// it bounds and closes c. expired is to be called for it.
+func (c *proxyConn) closeAfter(d time.Duration, setDeadline func(time.Time) error) *time.Timer {
+	c.expiring.Add(1)
+	return time.AfterFunc(d, func() {
+		// Closing a hijacked connection may leave it blocked.
+		setDeadline(time.Now()) //nolint:errcheck
+		c.Close()
+		c.expiring.Done()
+	})
+}
+
+// expired stops a closeAfter timer and reports whether it fired, once it is
+// done if so.
+func (c *proxyConn) expired(t *time.Timer) bool {
+	if t.Stop() {
+		c.expiring.Done()
+		return false
+	}
+	c.expiring.Wait()
+	return true
 }
 
 // countPerIP counts c under its remote address until it is closed. It
@@ -328,17 +361,16 @@ func (s *Server) acceptProxyHeader(c net.Conn) error {
 	if s.ReadTimeout > 0 && s.ReadTimeout < timeout {
 		timeout = s.ReadTimeout
 	}
-	if err := src.SetReadDeadline(time.Now().Add(timeout)); err != nil {
-		return err
-	}
+	// A read deadline would replace the caller's.
+	timer := pc.closeAfter(timeout, src.SetReadDeadline)
 	remote, local, err := readProxyHeader(src)
+	if pc.expired(timer) {
+		return fmt.Errorf("cannot read PROXY protocol header: %w", os.ErrDeadlineExceeded)
+	}
 	if err != nil {
 		if err != io.EOF && err != errProxyHeader {
 			err = fmt.Errorf("cannot read PROXY protocol header: %w", err)
 		}
-		return err
-	}
-	if err := src.SetReadDeadline(zeroTime); err != nil {
 		return err
 	}
 	if remote != nil {
@@ -351,8 +383,10 @@ func (s *Server) acceptProxyHeader(c net.Conn) error {
 	err = pc.countPerIP(&s.perIPConnCounter, s.MaxConnsPerIP)
 	if err == ErrPerIPConnLimit {
 		// A TLS connection would have to finish its handshake first.
-		if _, isTLS := c.(tlsConn); !isTLS && c.SetWriteDeadline(time.Now().Add(proxyHeaderTimeout)) == nil {
+		if _, isTLS := c.(tlsConn); !isTLS {
+			timer := pc.closeAfter(proxyHeaderTimeout, pc.SetWriteDeadline)
 			s.writeFastError(c, StatusTooManyRequests, "The number of connections from your ip exceeds MaxConnsPerIP")
+			pc.expired(timer)
 		}
 		c.Close()
 	}

@@ -185,7 +185,12 @@ func unwrapHijacked(nc net.Conn) net.Conn {
 // vectorWriter returns the TCP or Unix socket under nc, whose writev sends a
 // header and payload at once, or nil.
 func vectorWriter(nc net.Conn) net.Conn {
-	switch raw := unwrapHijacked(nc); raw.(type) {
+	raw := unwrapHijacked(nc)
+	// With Server.ProxyProtocol the socket is under one wrapper more.
+	if pc, ok := raw.(interface{ ProxyProtocolConn() net.Conn }); ok {
+		raw = pc.ProxyProtocolConn()
+	}
+	switch raw.(type) {
 	case *net.TCPConn, *net.UnixConn:
 		return raw
 	}

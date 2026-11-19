@@ -22,6 +22,9 @@ import (
 type testServer struct {
 	addr  string
 	reads chan struct{}
+
+	// preface is sent on every dialed connection ahead of the handshake.
+	preface string
 }
 
 // startServer serves h on a TCP listener: in-memory pipes cannot interrupt a
@@ -82,6 +85,12 @@ func (ts *testServer) dialOpts(opts *DialOptions) *DialOptions {
 		nc, err := net.Dial("tcp", ts.addr)
 		if err != nil {
 			return nil, err
+		}
+		if ts.preface != "" {
+			if _, err := nc.Write([]byte(ts.preface)); err != nil {
+				nc.Close()
+				return nil, err
+			}
 		}
 		return &signalConn{Conn: nc, reads: ts.reads}, nil
 	}
